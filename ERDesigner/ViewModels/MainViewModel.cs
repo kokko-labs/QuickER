@@ -345,6 +345,48 @@ public partial class MainViewModel : ObservableObject
         }
     }
 
+    // ---------------- AI 生成 ----------------
+
+    /// <summary>ChatGPT/Ollama にスキーマ生成を依頼し、ダイアグラムへ反映します。</summary>
+    [RelayCommand]
+    private void GenerateFromAi()
+    {
+        var dialog = new Views.AiGenerateDialog
+        {
+            Owner = System.Windows.Application.Current?.MainWindow
+        };
+        if (dialog.ShowDialog() != true || dialog.ViewModel.Result is null) return;
+
+        var (entities, relationships) = dialog.ViewModel.Result.ToDomain();
+        if (entities.Count == 0)
+        {
+            System.Windows.MessageBox.Show("AI 応答にテーブルが含まれていませんでした。",
+                "情報", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Information);
+            return;
+        }
+
+        if (Entities.Count > 0)
+        {
+            var currentSig = SqlServerSchemaImporter.ComputeSignature(
+                Entities.Select(e => e.ToModel()),
+                Relationships.Select(r => r.ToModel()));
+            var newSig = SqlServerSchemaImporter.ComputeSignature(entities, relationships);
+            if (currentSig != newSig)
+            {
+                var ans = System.Windows.MessageBox.Show(
+                    "現在のダイアグラムを AI 生成結果で置換します。よろしいですか？",
+                    "確認",
+                    System.Windows.MessageBoxButton.OKCancel,
+                    System.Windows.MessageBoxImage.Question);
+                if (ans != System.Windows.MessageBoxResult.OK) return;
+            }
+        }
+
+        var cmd = new ImportSchemaCommand(this, entities, relationships);
+        UndoRedo.Execute(cmd);
+        AutoLayoutService.LayoutTree(Entities, Relationships);
+    }
+
     // ---------------- Save / Load ----------------
 
     [RelayCommand]

@@ -239,6 +239,12 @@
                         <TextBlock Style="{StaticResource ToolBarCaption}" Text="DB取込"/>
                     </StackPanel>
                 </Button>
+                <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding GenerateFromAiCommand}" ToolTip="ChatGPT/Ollama でスキーマを自動生成">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource ToolBarIcon}" Text="🤖"/>
+                        <TextBlock Style="{StaticResource ToolBarCaption}" Text="AI生成"/>
+                    </StackPanel>
+                </Button>
             </StackPanel>
         </Border>
 
