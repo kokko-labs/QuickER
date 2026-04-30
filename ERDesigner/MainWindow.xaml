@@ -19,7 +19,6 @@
         <KeyBinding Key="S" Modifiers="Control" Command="{Binding SaveCommand}"/>
         <KeyBinding Key="N" Modifiers="Control" Command="{Binding NewDiagramCommand}"/>
         <KeyBinding Key="O" Modifiers="Control" Command="{Binding OpenCommand}"/>
-        <KeyBinding Key="Delete" Command="{Binding RemoveSelectedEntityCommand}"/>
     </Window.InputBindings>
 
     <Window.Resources>
@@ -32,6 +31,7 @@
         <SolidColorBrush x:Key="EntityBorder" Color="#9DB7DD"/>
         <SolidColorBrush x:Key="EntityBorderSelected" Color="#1A73E8"/>
         <SolidColorBrush x:Key="LineBrush" Color="#5F6B7A"/>
+        <SolidColorBrush x:Key="LineSelectedBrush" Color="#1A73E8"/>
 
         <Style x:Key="ToolBarLabelButton" TargetType="Button">
             <Setter Property="Background" Value="Transparent"/>
@@ -94,6 +94,65 @@
                 </Setter.Value>
             </Setter>
         </Style>
+
+        <!-- リレーション線本体のスタイル: 選択時に青く太く -->
+        <Style x:Key="RelationLineStyle" TargetType="Line">
+            <Setter Property="Stroke" Value="{StaticResource LineBrush}"/>
+            <Setter Property="StrokeThickness" Value="1.6"/>
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                    <Setter Property="Stroke" Value="{StaticResource LineSelectedBrush}"/>
+                    <Setter Property="StrokeThickness" Value="2.5"/>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- マーカー共通の色（選択時青に） -->
+        <Style x:Key="MarkerStrokeStyle" TargetType="Shape">
+            <Setter Property="Stroke" Value="{StaticResource LineBrush}"/>
+            <Setter Property="StrokeThickness" Value="1.6"/>
+            <Setter Property="Fill" Value="White"/>
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                    <Setter Property="Stroke" Value="{StaticResource LineSelectedBrush}"/>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- リレーション端点マーカー (One: 縦棒, Many: 鳥の足) のテンプレート -->
+        <DataTemplate x:Key="EndpointMarkerTemplate">
+            <!-- DataContext = MarkerKind enum, RelativeSource で親 RelationshipViewModel を参照 -->
+            <Grid Width="20" Height="20" RenderTransformOrigin="0.5,0.5">
+                <!-- One: |─ (縦棒) -->
+                <Line X1="10" Y1="3" X2="10" Y2="17"
+                      Stroke="{StaticResource LineBrush}" StrokeThickness="1.8">
+                    <Line.Style>
+                        <Style TargetType="Line">
+                            <Setter Property="Visibility" Value="Collapsed"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding}" Value="One">
+                                    <Setter Property="Visibility" Value="Visible"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Line.Style>
+                </Line>
+                <!-- Many: 鳥の足 (>) -->
+                <Path Stroke="{StaticResource LineBrush}" StrokeThickness="1.8"
+                      Data="M 4,10 L 16,3 M 4,10 L 16,10 M 4,10 L 16,17">
+                    <Path.Style>
+                        <Style TargetType="Path">
+                            <Setter Property="Visibility" Value="Collapsed"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding}" Value="Many">
+                                    <Setter Property="Visibility" Value="Visible"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Path.Style>
+                </Path>
+            </Grid>
+        </DataTemplate>
     </Window.Resources>
 
     <DockPanel>
@@ -155,7 +214,7 @@
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="200"/>
                 <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="320"/>
+                <ColumnDefinition Width="340"/>
             </Grid.ColumnDefinitions>
 
             <!-- 左: ツールボックス -->
@@ -175,20 +234,20 @@
                         <Button Style="{StaticResource ToolboxItemButton}" Command="{Binding RemoveSelectedEntityCommand}">
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock Text="🗑" FontSize="14" Margin="0,0,8,0"/>
-                                <TextBlock Text="選択を削除" VerticalAlignment="Center"/>
+                                <TextBlock Text="エンティティ削除" VerticalAlignment="Center"/>
                             </StackPanel>
                         </Button>
 
                         <TextBlock Text="リレーションシップ" Foreground="{StaticResource MutedText}" Margin="0,12,0,2"/>
                         <Button Style="{StaticResource ToolboxItemButton}" Command="{Binding StartAddOneToOneCommand}">
                             <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="○─○" Margin="0,0,8,0"/>
+                                <TextBlock Text="│─│" Margin="0,0,8,0"/>
                                 <TextBlock Text="1対1" VerticalAlignment="Center"/>
                             </StackPanel>
                         </Button>
                         <Button Style="{StaticResource ToolboxItemButton}" Command="{Binding StartAddOneToManyCommand}">
                             <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="○─≪" Margin="0,0,8,0"/>
+                                <TextBlock Text="│─≪" Margin="0,0,8,0"/>
                                 <TextBlock Text="1対多" VerticalAlignment="Center"/>
                             </StackPanel>
                         </Button>
@@ -244,6 +303,7 @@
                             <MouseBinding MouseAction="LeftClick" Command="{Binding CanvasClickCommand}"/>
                         </Grid.InputBindings>
 
+                        <!-- リレーションレイヤ -->
                         <ItemsControl ItemsSource="{Binding Relationships}">
                             <ItemsControl.ItemsPanel>
                                 <ItemsPanelTemplate>
@@ -253,12 +313,58 @@
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate DataType="{x:Type vm:RelationshipViewModel}">
                                     <Canvas>
+                                        <!-- 線本体 (太いヒット領域 + 見た目) -->
                                         <Line X1="{Binding X1}" Y1="{Binding Y1}"
                                               X2="{Binding X2}" Y2="{Binding Y2}"
-                                              Stroke="{StaticResource LineBrush}" StrokeThickness="1.5"/>
+                                              Stroke="Transparent" StrokeThickness="14"
+                                              Cursor="Hand">
+                                            <Line.InputBindings>
+                                                <MouseBinding MouseAction="LeftClick"
+                                                              Command="{Binding DataContext.RelationshipClickCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                              CommandParameter="{Binding}"/>
+                                            </Line.InputBindings>
+                                        </Line>
+                                        <Line X1="{Binding X1}" Y1="{Binding Y1}"
+                                              X2="{Binding X2}" Y2="{Binding Y2}"
+                                              Style="{StaticResource RelationLineStyle}"
+                                              IsHitTestVisible="False"/>
+
+                                        <!-- 起点マーカー -->
+                                        <ContentControl Canvas.Left="{Binding SourceMarkerX}"
+                                                        Canvas.Top="{Binding SourceMarkerY}"
+                                                        Content="{Binding SourceMarker}"
+                                                        ContentTemplate="{StaticResource EndpointMarkerTemplate}"
+                                                        IsHitTestVisible="False">
+                                            <ContentControl.RenderTransform>
+                                                <TransformGroup>
+                                                    <TranslateTransform X="-10" Y="-10"/>
+                                                    <RotateTransform Angle="{Binding SourceMarkerAngle}" CenterX="10" CenterY="10"/>
+                                                </TransformGroup>
+                                            </ContentControl.RenderTransform>
+                                        </ContentControl>
+
+                                        <!-- 終点マーカー -->
+                                        <ContentControl Canvas.Left="{Binding TargetMarkerX}"
+                                                        Canvas.Top="{Binding TargetMarkerY}"
+                                                        Content="{Binding TargetMarker}"
+                                                        ContentTemplate="{StaticResource EndpointMarkerTemplate}"
+                                                        IsHitTestVisible="False">
+                                            <ContentControl.RenderTransform>
+                                                <TransformGroup>
+                                                    <TranslateTransform X="-10" Y="-10"/>
+                                                    <RotateTransform Angle="{Binding TargetMarkerAngle}" CenterX="10" CenterY="10"/>
+                                                </TransformGroup>
+                                            </ContentControl.RenderTransform>
+                                        </ContentControl>
+
+                                        <!-- ラベル -->
                                         <Border CornerRadius="3" Padding="4,1" Background="White"
                                                 BorderBrush="#9AA0A6" BorderThickness="1"
-                                                Canvas.Left="{Binding X1}" Canvas.Top="{Binding Y1}">
+                                                Canvas.Left="{Binding LabelX}" Canvas.Top="{Binding LabelY}"
+                                                Cursor="Hand">
+                                            <Border.RenderTransform>
+                                                <TranslateTransform X="-15" Y="-9"/>
+                                            </Border.RenderTransform>
                                             <Border.InputBindings>
                                                 <MouseBinding MouseAction="LeftClick"
                                                               Command="{Binding DataContext.RelationshipClickCommand, RelativeSource={RelativeSource AncestorType=Window}}"
@@ -271,6 +377,7 @@
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
 
+                        <!-- エンティティレイヤ -->
                         <ItemsControl ItemsSource="{Binding Entities}">
                             <ItemsControl.ItemsPanel>
                                 <ItemsPanelTemplate>
@@ -363,11 +470,11 @@
                         <TextBlock Text="プロパティ" FontWeight="Bold"
                                    Foreground="{StaticResource HeaderText}" Margin="0,0,0,8"/>
 
-                        <StackPanel Visibility="{Binding SelectedEntity, Converter={StaticResource NullToVisibilityConverter}}"
-                                    DataContext="{Binding SelectedEntity}">
+                        <!-- エンティティのプロパティ -->
+                        <StackPanel Visibility="{Binding SelectedEntity, Converter={StaticResource NullToVisibilityConverter}}">
                             <TextBlock Text="エンティティ" FontWeight="SemiBold" Margin="0,4,0,6" Foreground="{StaticResource HeaderText}"/>
 
-                            <Grid Margin="0,2">
+                            <Grid Margin="0,2" DataContext="{Binding SelectedEntity}">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="80"/>
                                     <ColumnDefinition Width="*"/>
@@ -375,7 +482,7 @@
                                 <TextBlock Text="名前" VerticalAlignment="Center"/>
                                 <TextBox Grid.Column="1" Text="{Binding DisplayName, UpdateSourceTrigger=PropertyChanged}"/>
                             </Grid>
-                            <Grid Margin="0,4">
+                            <Grid Margin="0,4" DataContext="{Binding SelectedEntity}">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="80"/>
                                     <ColumnDefinition Width="*"/>
@@ -386,10 +493,18 @@
 
                             <DockPanel Margin="0,12,0,4">
                                 <TextBlock Text="項目" FontWeight="SemiBold" Foreground="{StaticResource HeaderText}"/>
-                                <Button Content="+" Width="22" Height="22" DockPanel.Dock="Right"
-                                        Command="{Binding DataContext.AddColumnCommand, RelativeSource={RelativeSource AncestorType=Window}}"/>
+                                <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" HorizontalAlignment="Right">
+                                    <Button Content="+" Width="22" Height="22" Margin="0,0,4,0"
+                                            ToolTip="カラムを追加"
+                                            Command="{Binding AddColumnCommand}"/>
+                                    <Button Content="🗑" Width="22" Height="22"
+                                            ToolTip="選択中のカラムを削除"
+                                            Command="{Binding RemoveSelectedColumnCommand}"/>
+                                </StackPanel>
                             </DockPanel>
-                            <DataGrid ItemsSource="{Binding Columns}" AutoGenerateColumns="False"
+                            <DataGrid ItemsSource="{Binding SelectedEntity.Columns}"
+                                      SelectedItem="{Binding SelectedColumn, Mode=TwoWay}"
+                                      AutoGenerateColumns="False"
                                       CanUserAddRows="False" HeadersVisibility="Column"
                                       RowHeaderWidth="0" GridLinesVisibility="Horizontal"
                                       HorizontalGridLinesBrush="#EEF1F5"
@@ -399,25 +514,77 @@
                                     <DataGridCheckBoxColumn Header="PK" Binding="{Binding IsPrimaryKey, UpdateSourceTrigger=PropertyChanged}" Width="36"/>
                                     <DataGridCheckBoxColumn Header="FK" Binding="{Binding IsForeignKey, UpdateSourceTrigger=PropertyChanged}" Width="36"/>
                                     <DataGridTextColumn Header="名前" Binding="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Width="*"/>
-                                    <DataGridTextColumn Header="型" Binding="{Binding DataType, UpdateSourceTrigger=PropertyChanged}" Width="90"/>
+                                    <!-- SQL Server 型を ComboBox で選択 (編集可能) -->
+                                    <DataGridTemplateColumn Header="型" Width="120">
+                                        <DataGridTemplateColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Text="{Binding DataType}" VerticalAlignment="Center" Margin="4,0"/>
+                                            </DataTemplate>
+                                        </DataGridTemplateColumn.CellTemplate>
+                                        <DataGridTemplateColumn.CellEditingTemplate>
+                                            <DataTemplate>
+                                                <ComboBox IsEditable="True"
+                                                          ItemsSource="{Binding DataContext.SqlDataTypes, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                          Text="{Binding DataType, UpdateSourceTrigger=LostFocus}"/>
+                                            </DataTemplate>
+                                        </DataGridTemplateColumn.CellEditingTemplate>
+                                    </DataGridTemplateColumn>
+                                    <!-- 各行に削除ボタン -->
+                                    <DataGridTemplateColumn Header="" Width="32">
+                                        <DataGridTemplateColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <Button Content="✕" Width="22" Height="20"
+                                                        ToolTip="このカラムを削除"
+                                                        Command="{Binding DataContext.RemoveColumnCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                        CommandParameter="{Binding}"/>
+                                            </DataTemplate>
+                                        </DataGridTemplateColumn.CellTemplate>
+                                    </DataGridTemplateColumn>
                                 </DataGrid.Columns>
                             </DataGrid>
 
                             <TextBlock Text="メモ" FontWeight="SemiBold" Margin="0,12,0,4" Foreground="{StaticResource HeaderText}"/>
-                            <TextBox Text="{Binding Memo, UpdateSourceTrigger=PropertyChanged}"
+                            <TextBox Text="{Binding SelectedEntity.Memo, UpdateSourceTrigger=PropertyChanged}"
                                      AcceptsReturn="True" TextWrapping="Wrap" Height="70"
                                      VerticalScrollBarVisibility="Auto"/>
                         </StackPanel>
 
-                        <StackPanel Visibility="{Binding SelectedRelationship, Converter={StaticResource NullToVisibilityConverter}}"
-                                    DataContext="{Binding SelectedRelationship}">
+                        <!-- リレーションのプロパティ -->
+                        <StackPanel Visibility="{Binding SelectedRelationship, Converter={StaticResource NullToVisibilityConverter}}">
                             <TextBlock Text="リレーション" FontWeight="SemiBold" Margin="0,4,0,6" Foreground="{StaticResource HeaderText}"/>
-                            <TextBlock Text="種別"/>
-                            <ComboBox SelectedValue="{Binding Type}" SelectedValuePath="Tag" Margin="0,4,0,6">
-                                <ComboBoxItem Content="1対1" Tag="{x:Static models:RelationshipType.OneToOne}"/>
-                                <ComboBoxItem Content="1対多" Tag="{x:Static models:RelationshipType.OneToMany}"/>
-                                <ComboBoxItem Content="多対多" Tag="{x:Static models:RelationshipType.ManyToMany}"/>
-                            </ComboBox>
+
+                            <Grid Margin="0,2" DataContext="{Binding SelectedRelationship}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="80"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="種別" VerticalAlignment="Center"/>
+                                <ComboBox Grid.Column="1" SelectedItem="{Binding Type, Mode=TwoWay}">
+                                    <models:RelationshipType>OneToOne</models:RelationshipType>
+                                    <models:RelationshipType>OneToMany</models:RelationshipType>
+                                    <models:RelationshipType>ManyToMany</models:RelationshipType>
+                                </ComboBox>
+                            </Grid>
+
+                            <Grid Margin="0,8" DataContext="{Binding SelectedRelationship}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="80"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="起点" VerticalAlignment="Center"/>
+                                <TextBlock Grid.Column="1" Text="{Binding Source.DisplayName}" Foreground="{StaticResource MutedText}"/>
+                            </Grid>
+                            <Grid Margin="0,2" DataContext="{Binding SelectedRelationship}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="80"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="終点" VerticalAlignment="Center"/>
+                                <TextBlock Grid.Column="1" Text="{Binding Target.DisplayName}" Foreground="{StaticResource MutedText}"/>
+                            </Grid>
+
+                            <Button Margin="0,12,0,0" Content="リレーションを削除"
+                                    Command="{Binding RemoveSelectedRelationshipCommand}"/>
                         </StackPanel>
                     </StackPanel>
                 </ScrollViewer>

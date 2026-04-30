@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -26,6 +27,12 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private EntityViewModel? _pendingRelationshipSource;
     [ObservableProperty] private RelationshipType _pendingRelationshipType;
     [ObservableProperty] private bool _isRelationshipMode;
+
+    /// <summary>プロパティパネルで選択中のカラム（DataGrid の SelectedItem）。</summary>
+    [ObservableProperty] private ColumnViewModel? _selectedColumn;
+
+    /// <summary>型 ComboBox に表示する SQL Server のデータ型一覧。</summary>
+    public IReadOnlyList<string> SqlDataTypes => SqlServerDataTypes.All;
 
     public MainViewModel()
     {
@@ -109,16 +116,36 @@ public partial class MainViewModel : ObservableObject
     private void AddColumn()
     {
         if (SelectedEntity is null) return;
-        SelectedEntity.Columns.Add(new ColumnViewModel(new Column { Name = "NewColumn", DataType = "int" }));
+        SelectedEntity.Columns.Add(new ColumnViewModel(new Column
+        {
+            Name = "NewColumn",
+            DataType = SqlServerDataTypes.All[3] // "int"
+        }));
     }
     private bool CanAddColumn() => SelectedEntity is not null;
 
+    /// <summary>指定カラムを選択中エンティティから削除します。</summary>
     [RelayCommand]
     private void RemoveColumn(ColumnViewModel? column)
     {
         if (SelectedEntity is null || column is null) return;
         SelectedEntity.Columns.Remove(column);
+        if (SelectedColumn == column) SelectedColumn = null;
     }
+
+    /// <summary>DataGrid で選択中のカラムを削除します（ツールバーボタン用）。</summary>
+    [RelayCommand(CanExecute = nameof(CanRemoveSelectedColumn))]
+    private void RemoveSelectedColumn()
+    {
+        if (SelectedEntity is null || SelectedColumn is null) return;
+        var col = SelectedColumn;
+        SelectedEntity.Columns.Remove(col);
+        SelectedColumn = null;
+    }
+    private bool CanRemoveSelectedColumn() => SelectedEntity is not null && SelectedColumn is not null;
+
+    partial void OnSelectedColumnChanged(ColumnViewModel? value)
+        => RemoveSelectedColumnCommand.NotifyCanExecuteChanged();
 
     // ---------------- Selection / Click handling ----------------
 
