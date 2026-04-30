@@ -345,6 +345,29 @@ public partial class MainViewModel : ObservableObject
         }
     }
 
+    // ---------------- DB 書き込み (スキーマ同期) ----------------
+
+    /// <summary>SQL Server に接続し、現在のダイアグラムとの差分を ALTER 文で書き戻します。</summary>
+    [RelayCommand]
+    private void SyncToSqlServer()
+    {
+        var connDlg = new Views.SqlConnectionDialog
+        {
+            Owner = System.Windows.Application.Current?.MainWindow
+        };
+        if (connDlg.ShowDialog() != true || connDlg.ViewModel.Result is null) return;
+
+        var targetEntities = Entities.Select(e => e.ToModel()).ToList();
+        var targetRelationships = Relationships.Select(r => r.ToModel()).ToList();
+
+        var vm = new SchemaSyncDialogViewModel(connDlg.ViewModel.Result, targetEntities, targetRelationships);
+        var dlg = new Views.SchemaSyncDialog(vm)
+        {
+            Owner = System.Windows.Application.Current?.MainWindow
+        };
+        dlg.ShowDialog();
+    }
+
     // ---------------- AI 生成 ----------------
 
     /// <summary>ChatGPT/Ollama にスキーマ生成を依頼し、ダイアグラムへ反映します。</summary>
