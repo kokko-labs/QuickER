@@ -232,6 +232,13 @@
                         <TextBlock Style="{StaticResource ToolBarCaption}" Text="DDL"/>
                     </StackPanel>
                 </Button>
+                <Separator Margin="6,4"/>
+                <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding ImportFromSqlServerCommand}" ToolTip="SQL Server からスキーマを取り込み">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource ToolBarIcon}" Text="🛢"/>
+                        <TextBlock Style="{StaticResource ToolBarCaption}" Text="DB取込"/>
+                    </StackPanel>
+                </Button>
             </StackPanel>
         </Border>
 

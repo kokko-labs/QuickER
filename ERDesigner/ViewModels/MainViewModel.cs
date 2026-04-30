@@ -298,6 +298,53 @@ public partial class MainViewModel : ObservableObject
             DdlExporter.SaveTo(this, dlg.FileName);
     }
 
+    // ---------------- SQL Server 取込 ----------------
+
+    /// <summary>SQL Server に接続してスキーマを取得し、ダイアグラムに反映します。</summary>
+    [RelayCommand]
+    private async System.Threading.Tasks.Task ImportFromSqlServerAsync()
+    {
+        var dialog = new Views.SqlConnectionDialog
+        {
+            Owner = System.Windows.Application.Current?.MainWindow
+        };
+        if (dialog.ShowDialog() != true || dialog.ViewModel.Result is null) return;
+
+        try
+        {
+            var importer = new SqlServerSchemaImporter();
+            var result = await importer.ImportAsync(dialog.ViewModel.Result).ConfigureAwait(true);
+
+            // 既存と差分があるかチェックして置換確認
+            if (Entities.Count > 0)
+            {
+                var currentSig = SqlServerSchemaImporter.ComputeSignature(
+                    Entities.Select(e => e.ToModel()),
+                    Relationships.Select(r => r.ToModel()));
+                var newSig = SqlServerSchemaImporter.ComputeSignature(result.Entities, result.Relationships);
+                if (currentSig != newSig)
+                {
+                    var ans = System.Windows.MessageBox.Show(
+                        "現在のダイアグラムを取得結果で置換します。よろしいですか？",
+                        "確認",
+                        System.Windows.MessageBoxButton.OKCancel,
+                        System.Windows.MessageBoxImage.Question);
+                    if (ans != System.Windows.MessageBoxResult.OK) return;
+                }
+            }
+
+            // 取り込んだ後に自動レイアウト (Tree)
+            var cmd = new ImportSchemaCommand(this, result.Entities, result.Relationships);
+            UndoRedo.Execute(cmd);
+            AutoLayoutService.LayoutTree(Entities, Relationships);
+        }
+        catch (System.Exception ex)
+        {
+            System.Windows.MessageBox.Show("取り込みに失敗しました: " + ex.Message,
+                "エラー", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Error);
+        }
+    }
+
     // ---------------- Save / Load ----------------
 
     [RelayCommand]
