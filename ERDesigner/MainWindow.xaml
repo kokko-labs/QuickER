@@ -19,6 +19,7 @@
         <KeyBinding Key="S" Modifiers="Control" Command="{Binding SaveCommand}"/>
         <KeyBinding Key="N" Modifiers="Control" Command="{Binding NewDiagramCommand}"/>
         <KeyBinding Key="O" Modifiers="Control" Command="{Binding OpenCommand}"/>
+        <KeyBinding Key="D" Modifiers="Control" Command="{Binding DuplicateSelectedEntityCommand}"/>
     </Window.InputBindings>
 
     <Window.Resources>
@@ -193,6 +194,44 @@
                         <TextBlock Style="{StaticResource ToolBarCaption}" Text="やり直す"/>
                     </StackPanel>
                 </Button>
+                <Separator Margin="6,4"/>
+                <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding DuplicateSelectedEntityCommand}" ToolTip="複製 (Ctrl+D)">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource ToolBarIcon}" Text="❏"/>
+                        <TextBlock Style="{StaticResource ToolBarCaption}" Text="複製"/>
+                    </StackPanel>
+                </Button>
+                <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding AutoLayoutGridCommand}" ToolTip="格子状に自動整列">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource ToolBarIcon}" Text="▦"/>
+                        <TextBlock Style="{StaticResource ToolBarCaption}" Text="整列(格子)"/>
+                    </StackPanel>
+                </Button>
+                <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding AutoLayoutTreeCommand}" ToolTip="ツリー状に自動整列">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource ToolBarIcon}" Text="⌬"/>
+                        <TextBlock Style="{StaticResource ToolBarCaption}" Text="整列(木)"/>
+                    </StackPanel>
+                </Button>
+                <Separator Margin="6,4"/>
+                <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding ExportPngCommand}" CommandParameter="{Binding ElementName=DiagramCanvas}" ToolTip="PNG 画像にエクスポート">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource ToolBarIcon}" Text="🖼"/>
+                        <TextBlock Style="{StaticResource ToolBarCaption}" Text="PNG"/>
+                    </StackPanel>
+                </Button>
+                <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding ExportSvgCommand}" ToolTip="SVG にエクスポート">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource ToolBarIcon}" Text="✒"/>
+                        <TextBlock Style="{StaticResource ToolBarCaption}" Text="SVG"/>
+                    </StackPanel>
+                </Button>
+                <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding ExportDdlCommand}" ToolTip="SQL DDL にエクスポート">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource ToolBarIcon}" Text="🗎"/>
+                        <TextBlock Style="{StaticResource ToolBarCaption}" Text="DDL"/>
+                    </StackPanel>
+                </Button>
             </StackPanel>
         </Border>
 
@@ -298,7 +337,7 @@
                 </Border.Resources>
 
                 <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
-                    <Grid Width="2400" Height="1600" Background="{StaticResource GridBrush}">
+                    <Grid x:Name="DiagramCanvas" Width="2400" Height="1600" Background="{StaticResource GridBrush}">
                         <Grid.InputBindings>
                             <MouseBinding MouseAction="LeftClick" Command="{Binding CanvasClickCommand}"/>
                         </Grid.InputBindings>

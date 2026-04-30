@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
+using System.Windows.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using ERDesigner.Models;
@@ -238,6 +239,64 @@ public partial class MainViewModel : ObservableObject
 
     [RelayCommand]
     private void CanvasClick() => OnCanvasClicked();
+
+    // ---------------- Duplicate (Ctrl+D) ----------------
+
+    /// <summary>選択中エンティティを Undo 可能な形で複製します（Ctrl+D 用）。</summary>
+    [RelayCommand(CanExecute = nameof(CanDuplicateSelectedEntity))]
+    private void DuplicateSelectedEntity()
+    {
+        if (SelectedEntity is null) return;
+        var cmd = new DuplicateEntityCommand(this, SelectedEntity);
+        UndoRedo.Execute(cmd);
+        if (cmd.Duplicated is not null)
+        {
+            foreach (var e in Entities) e.IsSelected = (e == cmd.Duplicated);
+            SelectedEntity = cmd.Duplicated;
+        }
+    }
+    private bool CanDuplicateSelectedEntity() => SelectedEntity is not null;
+
+    // ---------------- Auto layout ----------------
+
+    /// <summary>エンティティを格子状に整列します。</summary>
+    [RelayCommand]
+    private void AutoLayoutGrid() => AutoLayoutService.LayoutGrid(Entities);
+
+    /// <summary>エンティティをツリー状（リレーション階層）で整列します。</summary>
+    [RelayCommand]
+    private void AutoLayoutTree() => AutoLayoutService.LayoutTree(Entities, Relationships);
+
+    // ---------------- Export ----------------
+
+    /// <summary>キャンバス Visual を PNG に書き出します。</summary>
+    /// <param name="visual">XAML から渡されるキャンバスの Visual。</param>
+    [RelayCommand]
+    private void ExportPng(object? visual)
+    {
+        if (visual is not Visual v) return;
+        var dlg = new SaveFileDialog { Filter = "PNG Image (*.png)|*.png", DefaultExt = ".png" };
+        if (dlg.ShowDialog() == true)
+            ImageExportService.ExportPng(v, dlg.FileName);
+    }
+
+    /// <summary>現在のダイアグラムを SVG に書き出します。</summary>
+    [RelayCommand]
+    private void ExportSvg()
+    {
+        var dlg = new SaveFileDialog { Filter = "SVG Image (*.svg)|*.svg", DefaultExt = ".svg" };
+        if (dlg.ShowDialog() == true)
+            ImageExportService.ExportSvg(this, dlg.FileName);
+    }
+
+    /// <summary>現在のダイアグラムから SQL DDL を書き出します。</summary>
+    [RelayCommand]
+    private void ExportDdl()
+    {
+        var dlg = new SaveFileDialog { Filter = "SQL Script (*.sql)|*.sql", DefaultExt = ".sql" };
+        if (dlg.ShowDialog() == true)
+            DdlExporter.SaveTo(this, dlg.FileName);
+    }
 
     // ---------------- Save / Load ----------------
 
