@@ -123,7 +123,7 @@ public partial class AiGenerateDialogViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            StatusMessage = "失敗: " + ex.Message;
+            StatusMessage = AiErrorMessageLocalizer.ToJapanese(ex);
         }
         finally
         {
