@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="ERDesigner.Tests/ERDesigner.Tests.csproj" />
+  <Project Path="ERDesigner/ERDesigner.csproj" />
+</Solution>
