@@ -22,4 +22,9 @@ public class Column
 
     /// <summary>外部キー（Foreign Key）かどうかを示します。</summary>
     public bool IsForeignKey { get; set; }
+
+    /// <summary>
+    /// カラムの説明 (SQL Server の拡張プロパティ <c>MS_Description</c> と同期します)。
+    /// </summary>
+    public string Description { get; set; } = string.Empty;
 }

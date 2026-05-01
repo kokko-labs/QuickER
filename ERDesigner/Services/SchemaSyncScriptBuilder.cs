@@ -15,6 +15,7 @@ namespace ERDesigner.Services;
 ///   5) DropColumn (フェーズ2)
 ///   6) DropTable (フェーズ2)
 ///   7) AddForeignKey
+///   8) SetTableDescription / SetColumnDescription (拡張プロパティ MS_Description)
 /// </summary>
 public static class SchemaSyncScriptBuilder
 {
@@ -31,6 +32,8 @@ public static class SchemaSyncScriptBuilder
         WriteSection(sb, list, SchemaDiffKind.DropColumn, AppendDropColumn);
         WriteSection(sb, list, SchemaDiffKind.DropTable, AppendDropTable);
         WriteSection(sb, list, SchemaDiffKind.AddForeignKey, AppendAddForeignKey);
+        WriteSection(sb, list, SchemaDiffKind.SetTableDescription, AppendSetTableDescription);
+        WriteSection(sb, list, SchemaDiffKind.SetColumnDescription, AppendSetColumnDescription);
 
         return sb.ToString();
     }
@@ -48,25 +51,16 @@ public static class SchemaSyncScriptBuilder
         sb.AppendLine();
     }
 
-    private static string Bracket(string name)
-    {
-        // "schema.table" のように . を含む場合は両方をブラケットで囲む
-        if (name.Contains('.'))
-        {
-            var parts = name.Split('.', 2);
-            return $"[{parts[0]}].[{parts[1]}]";
-        }
-        return $"[{name}]";
-    }
+    // ---------------- 各種 DDL ----------------
 
     private static void AppendCreateTable(StringBuilder sb, SchemaDiffItem item)
     {
         var e = item.Entity!;
-        sb.AppendLine($"CREATE TABLE {Bracket(item.TableName)} (");
+        sb.AppendLine($"CREATE TABLE {SqlIdentifier.Bracket(item.TableName)} (");
         for (int i = 0; i < e.Columns.Count; i++)
         {
             var col = e.Columns[i];
-            var line = $"    [{col.Name}] {col.DataType}";
+            var line = $"    {SqlIdentifier.BracketSimple(col.Name)} {col.DataType}";
             if (col.IsPrimaryKey) line += " NOT NULL";
             if (i < e.Columns.Count - 1) line += ",";
             sb.AppendLine(line);
@@ -74,12 +68,11 @@ public static class SchemaSyncScriptBuilder
         var pks = e.Columns.Where(c => c.IsPrimaryKey).ToList();
         if (pks.Count > 0)
         {
-            // 末尾の改行を除去してカンマ追加
             sb.Length -= System.Environment.NewLine.Length;
             if (!sb.ToString().TrimEnd().EndsWith(",")) sb.AppendLine(",");
             else sb.AppendLine();
-            var pkCols = string.Join(", ", pks.Select(p => $"[{p.Name}]"));
-            sb.AppendLine($"    CONSTRAINT [PK_{SafeName(item.TableName)}] PRIMARY KEY ({pkCols})");
+            var pkCols = string.Join(", ", pks.Select(p => SqlIdentifier.BracketSimple(p.Name)));
+            sb.AppendLine($"    CONSTRAINT [PK_{SqlIdentifier.SafeName(item.TableName)}] PRIMARY KEY ({pkCols})");
         }
         sb.AppendLine(");");
         sb.AppendLine("GO");
@@ -88,27 +81,32 @@ public static class SchemaSyncScriptBuilder
     private static void AppendAddColumn(StringBuilder sb, SchemaDiffItem item)
     {
         var col = item.Column!;
-        // 既存テーブルへの ADD では NOT NULL は安全のため付与しない (既存行の問題回避)
-        sb.AppendLine($"ALTER TABLE {Bracket(item.TableName)} ADD [{col.Name}] {col.DataType} NULL;");
+        sb.AppendLine(
+            $"ALTER TABLE {SqlIdentifier.Bracket(item.TableName)} " +
+            $"ADD {SqlIdentifier.BracketSimple(col.Name)} {col.DataType} NULL;");
         sb.AppendLine("GO");
     }
 
     private static void AppendAlterColumn(StringBuilder sb, SchemaDiffItem item)
     {
         var col = item.Column!;
-        sb.AppendLine($"ALTER TABLE {Bracket(item.TableName)} ALTER COLUMN [{col.Name}] {col.DataType} NULL;");
+        sb.AppendLine(
+            $"ALTER TABLE {SqlIdentifier.Bracket(item.TableName)} " +
+            $"ALTER COLUMN {SqlIdentifier.BracketSimple(col.Name)} {col.DataType} NULL;");
         sb.AppendLine("GO");
     }
 
     private static void AppendDropColumn(StringBuilder sb, SchemaDiffItem item)
     {
-        sb.AppendLine($"ALTER TABLE {Bracket(item.TableName)} DROP COLUMN [{item.ColumnName}];");
+        sb.AppendLine(
+            $"ALTER TABLE {SqlIdentifier.Bracket(item.TableName)} " +
+            $"DROP COLUMN {SqlIdentifier.BracketSimple(item.ColumnName!)};");
         sb.AppendLine("GO");
     }
 
     private static void AppendDropTable(StringBuilder sb, SchemaDiffItem item)
     {
-        sb.AppendLine($"DROP TABLE {Bracket(item.TableName)};");
+        sb.AppendLine($"DROP TABLE {SqlIdentifier.Bracket(item.TableName)};");
         sb.AppendLine("GO");
     }
 
@@ -123,10 +121,11 @@ public static class SchemaSyncScriptBuilder
         }
         var childTbl = SchemaDiffService.NormalizeTable(item.ChildEntity);
         var parentTbl = SchemaDiffService.NormalizeTable(item.ParentEntity);
-        var fkName = $"FK_{SafeName(childTbl)}_{SafeName(parentTbl)}";
+        var fkName = $"FK_{SqlIdentifier.SafeName(childTbl)}_{SqlIdentifier.SafeName(parentTbl)}";
         sb.AppendLine(
-            $"ALTER TABLE {Bracket(childTbl)} ADD CONSTRAINT [{fkName}] " +
-            $"FOREIGN KEY ([{item.ColumnName}]) REFERENCES {Bracket(parentTbl)} ([{pkCol.Name}]);");
+            $"ALTER TABLE {SqlIdentifier.Bracket(childTbl)} ADD CONSTRAINT [{fkName}] " +
+            $"FOREIGN KEY ({SqlIdentifier.BracketSimple(item.ColumnName)}) " +
+            $"REFERENCES {SqlIdentifier.Bracket(parentTbl)} ({SqlIdentifier.BracketSimple(pkCol.Name)});");
         sb.AppendLine("GO");
     }
 
@@ -134,19 +133,67 @@ public static class SchemaSyncScriptBuilder
     {
         if (item.ChildEntity is null || item.ParentEntity is null) return;
         var childTbl = SchemaDiffService.NormalizeTable(item.ChildEntity);
-        // FK 名が分からない場合は sys カタログから探して動的に DROP する
+        var parentTbl = SchemaDiffService.NormalizeTable(item.ParentEntity);
         sb.AppendLine($"DECLARE @fk sysname;");
         sb.AppendLine($"SELECT @fk = fk.name FROM sys.foreign_keys fk");
         sb.AppendLine($"  JOIN sys.tables tp ON fk.parent_object_id = tp.object_id");
         sb.AppendLine($"  JOIN sys.tables tr ON fk.referenced_object_id = tr.object_id");
-        sb.AppendLine($"WHERE tp.name = N'{TableNameOnly(childTbl)}'");
-        sb.AppendLine($"  AND tr.name = N'{TableNameOnly(SchemaDiffService.NormalizeTable(item.ParentEntity))}';");
-        sb.AppendLine($"IF @fk IS NOT NULL EXEC('ALTER TABLE {Bracket(childTbl)} DROP CONSTRAINT [' + @fk + ']');");
+        sb.AppendLine($"WHERE tp.name = N'{SqlIdentifier.EscapeStringLiteral(SqlIdentifier.TableNameOnly(childTbl))}'");
+        sb.AppendLine($"  AND tr.name = N'{SqlIdentifier.EscapeStringLiteral(SqlIdentifier.TableNameOnly(parentTbl))}';");
+        sb.AppendLine($"IF @fk IS NOT NULL EXEC('ALTER TABLE {SqlIdentifier.Bracket(childTbl)} DROP CONSTRAINT [' + @fk + ']');");
         sb.AppendLine("GO");
     }
 
-    private static string SafeName(string name) => name.Replace(".", "_").Replace(" ", "_");
+    // ---------------- MS_Description (拡張プロパティ) ----------------
 
-    private static string TableNameOnly(string fullName)
-        => fullName.Contains('.') ? fullName.Split('.', 2)[1] : fullName;
+    private static void AppendSetTableDescription(StringBuilder sb, SchemaDiffItem item)
+        => AppendDescriptionStatement(sb, item, columnLevel: false);
+
+    private static void AppendSetColumnDescription(StringBuilder sb, SchemaDiffItem item)
+        => AppendDescriptionStatement(sb, item, columnLevel: true);
+
+    /// <summary>
+    /// <c>sp_addextendedproperty</c> / <c>sp_updateextendedproperty</c> /
+    /// <c>sp_dropextendedproperty</c> を発行します。実行時点の存在状態を見て ADD/UPDATE を切り替えます。
+    /// </summary>
+    private static void AppendDescriptionStatement(StringBuilder sb, SchemaDiffItem item, bool columnLevel)
+    {
+        var schema = SqlIdentifier.SchemaOf(item.TableName);
+        var table = SqlIdentifier.TableNameOnly(item.TableName);
+        var newVal = item.NewDescription ?? string.Empty;
+
+        var levelArgs = $"@level0type=N'SCHEMA', @level0name=N'{SqlIdentifier.EscapeStringLiteral(schema)}', " +
+                        $"@level1type=N'TABLE',  @level1name=N'{SqlIdentifier.EscapeStringLiteral(table)}'";
+        if (columnLevel)
+            levelArgs += $", @level2type=N'COLUMN', @level2name=N'{SqlIdentifier.EscapeStringLiteral(item.ColumnName!)}'";
+
+        var objectIdLiteral = $"OBJECT_ID(N'{SqlIdentifier.EscapeStringLiteral(schema)}.{SqlIdentifier.EscapeStringLiteral(table)}')";
+        var minorIdCondition = columnLevel
+            ? $"      AND ep.minor_id = COLUMNPROPERTY({objectIdLiteral}, N'{SqlIdentifier.EscapeStringLiteral(item.ColumnName!)}', 'ColumnId')"
+            : $"      AND ep.minor_id = 0";
+
+        if (string.IsNullOrEmpty(newVal))
+        {
+            // 削除 (存在チェック付き)
+            sb.AppendLine($"IF EXISTS (");
+            sb.AppendLine($"    SELECT 1 FROM sys.extended_properties ep");
+            sb.AppendLine($"    WHERE ep.name = N'MS_Description' AND ep.class = 1");
+            sb.AppendLine($"      AND ep.major_id = {objectIdLiteral}");
+            sb.AppendLine($"{minorIdCondition})");
+            sb.AppendLine($"    EXEC sys.sp_dropextendedproperty @name=N'MS_Description', {levelArgs};");
+        }
+        else
+        {
+            var escaped = SqlIdentifier.EscapeStringLiteral(newVal);
+            sb.AppendLine($"IF EXISTS (");
+            sb.AppendLine($"    SELECT 1 FROM sys.extended_properties ep");
+            sb.AppendLine($"    WHERE ep.name = N'MS_Description' AND ep.class = 1");
+            sb.AppendLine($"      AND ep.major_id = {objectIdLiteral}");
+            sb.AppendLine($"{minorIdCondition})");
+            sb.AppendLine($"    EXEC sys.sp_updateextendedproperty @name=N'MS_Description', @value=N'{escaped}', {levelArgs};");
+            sb.AppendLine($"ELSE");
+            sb.AppendLine($"    EXEC sys.sp_addextendedproperty    @name=N'MS_Description', @value=N'{escaped}', {levelArgs};");
+        }
+        sb.AppendLine("GO");
+    }
 }

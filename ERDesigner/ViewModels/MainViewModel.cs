@@ -32,6 +32,9 @@ public partial class MainViewModel : ObservableObject
     /// <summary>プロパティパネルで選択中のカラム（DataGrid の SelectedItem）。</summary>
     [ObservableProperty] private ColumnViewModel? _selectedColumn;
 
+    /// <summary>ER 図上のカラム行に「説明」を表示するか (ツールバーから ON/OFF 切替)。</summary>
+    [ObservableProperty] private bool _showColumnDescriptionsInDiagram;
+
     /// <summary>型 ComboBox に表示する SQL Server のデータ型一覧。</summary>
     public IReadOnlyList<string> SqlDataTypes => SqlServerDataTypes.All;
 

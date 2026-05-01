@@ -199,4 +199,72 @@ CREATE TABLE [{ChildTable}] (
             $"SELECT max_length FROM sys.columns WHERE object_id = OBJECT_ID(N'{ChildTable}') AND name = 'ToBeAltered'", conn))
             ((short)(await v3.ExecuteScalarAsync())!).Should().Be(200);
     }
+
+    [Fact(DisplayName = "[Integration] テーブル/列の MS_Description が同期され、再 Import で取得できる")]
+    public async Task DescriptionSync_RoundTrip()
+    {
+        if (!_serverAvailable) return;
+
+        // ---------- 1) 期待状態 (説明付き) ----------
+        var parent = new Entity { TableName = ParentTable, DisplayName = ParentTable, Description = "親テーブルの説明" };
+        parent.Columns.Add(new Column { Name = "Id", DataType = "int", IsPrimaryKey = true });
+        parent.Columns.Add(new Column { Name = "Name", DataType = "nvarchar(50)", Description = "名前カラム" });
+
+        // ---------- 2) DB は空なので AddTable + SetTableDescription + SetColumnDescription が出る ----------
+        var importer = new SqlServerSchemaImporter();
+        var live1 = await importer.ImportAsync(Settings);
+        var diff1 = new SchemaDiffService().Compute(
+            live1.Entities, live1.Relationships,
+            new[] { parent }, new List<Relationship>());
+
+        diff1.Items.Should().Contain(i => i.Kind == SchemaDiffKind.AddTable);
+        diff1.Items.Should().Contain(i => i.Kind == SchemaDiffKind.SetTableDescription
+                                       && i.NewDescription == "親テーブルの説明");
+        diff1.Items.Should().Contain(i => i.Kind == SchemaDiffKind.SetColumnDescription
+                                       && i.ColumnName == "Name"
+                                       && i.NewDescription == "名前カラム");
+
+        var script = SchemaSyncScriptBuilder.Build(diff1.Items);
+        var exec = new SchemaSyncExecutor();
+        var result = await exec.ExecuteAsync(Settings, script);
+        result.Committed.Should().BeTrue($"説明同期に失敗: {result.Error}\nSQL:\n{script}");
+
+        // ---------- 3) 再 Import して説明が取得できることを確認 ----------
+        var live2 = await importer.ImportAsync(Settings);
+        var imported = live2.Entities.Should().ContainSingle(e =>
+            e.TableName.EndsWith(ParentTable, StringComparison.OrdinalIgnoreCase)).Which;
+        imported.Description.Should().Be("親テーブルの説明");
+        // テーブル説明があれば DisplayName も同じ値で上書きされる仕様
+        imported.DisplayName.Should().Be("親テーブルの説明");
+        imported.Columns.Should().ContainSingle(c => c.Name == "Name" && c.Description == "名前カラム");
+
+        // ---------- 4) 説明を更新→ sp_updateextendedproperty 経由で反映される ----------
+        // live と target でオブジェクトを分けるため、target は手で組み直す
+        var updatedTarget = new Entity { TableName = imported.TableName, DisplayName = "親テーブル(更新後)", Description = "親テーブル(更新後)" };
+        foreach (var c in imported.Columns)
+            updatedTarget.Columns.Add(new Column
+            {
+                Name = c.Name,
+                DataType = c.DataType,
+                IsPrimaryKey = c.IsPrimaryKey,
+                Description = c.Name == "Name" ? "顧客名(更新後)" : c.Description
+            });
+
+        var diff2 = new SchemaDiffService().Compute(
+            live2.Entities, live2.Relationships,
+            new[] { updatedTarget }, new List<Relationship>());
+        diff2.Items.Should().Contain(i => i.Kind == SchemaDiffKind.SetTableDescription
+                                       && i.NewDescription == "親テーブル(更新後)");
+        diff2.Items.Should().Contain(i => i.Kind == SchemaDiffKind.SetColumnDescription
+                                       && i.NewDescription == "顧客名(更新後)");
+
+        var script2 = SchemaSyncScriptBuilder.Build(diff2.Items);
+        var result2 = await exec.ExecuteAsync(Settings, script2);
+        result2.Committed.Should().BeTrue($"説明更新に失敗: {result2.Error}\nSQL:\n{script2}");
+
+        var live3 = await importer.ImportAsync(Settings);
+        var imported2 = live3.Entities.First(e => e.TableName.EndsWith(ParentTable, StringComparison.OrdinalIgnoreCase));
+        imported2.Description.Should().Be("親テーブル(更新後)");
+        imported2.Columns.First(c => c.Name == "Name").Description.Should().Be("顧客名(更新後)");
+    }
 }

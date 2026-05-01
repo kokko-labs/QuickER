@@ -56,6 +56,7 @@ public class SqlServerSchemaImporter
         var tables = await LoadTablesAsync(conn, ct).ConfigureAwait(false);
         await LoadColumnsAsync(conn, tables, ct).ConfigureAwait(false);
         await LoadPrimaryKeysAsync(conn, tables, ct).ConfigureAwait(false);
+        await LoadDescriptionsAsync(conn, tables, ct).ConfigureAwait(false);
         var rels = await LoadForeignKeysAsync(conn, tables, ct).ConfigureAwait(false);
 
         // 取り込んだ FK のカラムに IsForeignKey フラグを付ける
@@ -123,6 +124,20 @@ JOIN sys.columns c ON ic.object_id = c.object_id AND ic.column_id = c.column_id
 WHERE i.is_unique = 1 AND i.is_primary_key = 0 AND ic.is_included_column = 0
 ORDER BY t.schema_id, t.name, i.name, ic.key_ordinal;";
 
+    // テーブルとカラムの MS_Description を一括取得 (column_id = 0 はテーブルレベル)
+    private const string DescriptionsSql = @"
+SELECT
+    s.name        AS SchemaName,
+    t.name        AS TableName,
+    c.name        AS ColumnName,
+    CAST(ep.value AS nvarchar(MAX)) AS Description
+FROM sys.extended_properties ep
+JOIN sys.tables t  ON ep.major_id = t.object_id
+JOIN sys.schemas s ON t.schema_id = s.schema_id
+LEFT JOIN sys.columns c
+       ON c.object_id = ep.major_id AND c.column_id = ep.minor_id
+WHERE ep.class = 1 AND ep.name = N'MS_Description';";
+
     private static async Task<Dictionary<string, TableEntry>> LoadTablesAsync(SqlConnection conn, CancellationToken ct)
     {
         var dict = new Dictionary<string, TableEntry>(StringComparer.OrdinalIgnoreCase);
@@ -185,6 +200,40 @@ ORDER BY t.schema_id, t.name, i.name, ic.key_ordinal;";
             if (!tables.TryGetValue(key, out var entry)) continue;
             if (entry.ColumnsByName.TryGetValue(reader.GetString(2), out var col))
                 col.IsPrimaryKey = true;
+        }
+    }
+
+    /// <summary>
+    /// テーブルとカラムの拡張プロパティ <c>MS_Description</c> を取得し、
+    /// エンティティの <see cref="Entity.Description"/> / カラムの <see cref="Column.Description"/> に格納します。
+    /// テーブル説明が非空ならエンティティの <see cref="Entity.DisplayName"/> もそれで上書きします。
+    /// </summary>
+    private static async Task LoadDescriptionsAsync(SqlConnection conn, Dictionary<string, TableEntry> tables, CancellationToken ct)
+    {
+        await using var cmd = new SqlCommand(DescriptionsSql, conn);
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            var schema = reader.GetString(0);
+            var table = reader.GetString(1);
+            var key = $"[{schema}].[{table}]";
+            if (!tables.TryGetValue(key, out var entry)) continue;
+
+            var description = reader.IsDBNull(3) ? string.Empty : reader.GetString(3);
+
+            if (reader.IsDBNull(2))
+            {
+                // テーブルレベル
+                entry.Entity.Description = description;
+                if (!string.IsNullOrWhiteSpace(description))
+                    entry.Entity.DisplayName = description;
+            }
+            else
+            {
+                var colName = reader.GetString(2);
+                if (entry.ColumnsByName.TryGetValue(colName, out var col))
+                    col.Description = description;
+            }
         }
     }
 

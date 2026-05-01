@@ -21,6 +21,8 @@ public partial class ColumnViewModel : ObservableObject
     [ObservableProperty] private bool _isPrimaryKey;
     /// <summary>外部キーかどうか。</summary>
     [ObservableProperty] private bool _isForeignKey;
+    /// <summary>カラムの説明 (SQL Server の <c>MS_Description</c> と同期)。</summary>
+    [ObservableProperty] private string _description;
 
     /// <summary>モデルから ViewModel を生成します。</summary>
     /// <param name="model">コピー元の <see cref="Column"/> モデル。</param>
@@ -31,6 +33,7 @@ public partial class ColumnViewModel : ObservableObject
         _dataType = model.DataType;
         _isPrimaryKey = model.IsPrimaryKey;
         _isForeignKey = model.IsForeignKey;
+        _description = model.Description ?? string.Empty;
     }
 
     /// <summary>現在の状態をモデルにコピーして返します（保存時に使用）。</summary>
@@ -40,6 +43,7 @@ public partial class ColumnViewModel : ObservableObject
         Name = Name,
         DataType = DataType,
         IsPrimaryKey = IsPrimaryKey,
-        IsForeignKey = IsForeignKey
+        IsForeignKey = IsForeignKey,
+        Description = Description ?? string.Empty
     };
 }

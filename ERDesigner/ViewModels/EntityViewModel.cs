@@ -26,6 +26,8 @@ public partial class EntityViewModel : ObservableObject
     [ObservableProperty] private double _width;
     /// <summary>メモ。プロパティパネルで編集されます。</summary>
     [ObservableProperty] private string _memo;
+    /// <summary>テーブルの説明 (SQL Server の <c>MS_Description</c> と同期)。</summary>
+    [ObservableProperty] private string _description;
     /// <summary>選択中かどうか。枚線スタイルを切り替えるためのフラグ。</summary>
     [ObservableProperty] private bool _isSelected;
 
@@ -43,6 +45,7 @@ public partial class EntityViewModel : ObservableObject
         _y = model.Y;
         _width = model.Width <= 0 ? 200 : model.Width;
         _memo = model.Memo;
+        _description = model.Description ?? string.Empty;
         Columns = new ObservableCollection<ColumnViewModel>(
             model.Columns.Select(c => new ColumnViewModel(c)));
     }
@@ -57,6 +60,7 @@ public partial class EntityViewModel : ObservableObject
         Y = Y,
         Width = Width,
         Memo = Memo,
+        Description = Description ?? string.Empty,
         Columns = Columns.Select(c => c.ToModel()).ToList()
     };
 }

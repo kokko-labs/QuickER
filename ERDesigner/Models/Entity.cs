@@ -30,6 +30,11 @@ public class Entity
     /// <summary>備考メモ（プロパティパネルから入力可能）。</summary>
     public string Memo { get; set; } = string.Empty;
 
+    /// <summary>
+    /// テーブルの説明 (SQL Server の拡張プロパティ <c>MS_Description</c> と同期します)。
+    /// </summary>
+    public string Description { get; set; } = string.Empty;
+
     /// <summary>このエンティティに含まれるカラム一覧です。</summary>
     public List<Column> Columns { get; set; } = new();
 }

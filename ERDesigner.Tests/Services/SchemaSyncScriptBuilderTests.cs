@@ -135,4 +135,59 @@ public class SchemaSyncScriptBuilderTests
         iAdd.Should().BeGreaterThan(iCreate);
         iFk.Should().BeGreaterThan(iAdd);
     }
+
+    [Fact(DisplayName = "SetTableDescription は sp_addextendedproperty / sp_updateextendedproperty を出力する")]
+    public void SetTableDescription_EmitsExtendedProperty()
+    {
+        var item = new SchemaDiffItem
+        {
+            Kind = SchemaDiffKind.SetTableDescription,
+            TableName = "Customer",
+            NewDescription = "顧客マスタ",
+            OldDescription = null,
+            IsSelected = true
+        };
+        var sql = SchemaSyncScriptBuilder.Build(new[] { item });
+        sql.Should().Contain("sp_addextendedproperty");
+        sql.Should().Contain("sp_updateextendedproperty");
+        sql.Should().Contain("MS_Description");
+        sql.Should().Contain("@level1type=N'TABLE'");
+        sql.Should().Contain("@level1name=N'Customer'");
+        sql.Should().Contain("N'顧客マスタ'");
+        sql.Should().NotContain("@level2type");
+    }
+
+    [Fact(DisplayName = "SetColumnDescription は @level2type=COLUMN を含む")]
+    public void SetColumnDescription_EmitsColumnLevel()
+    {
+        var item = new SchemaDiffItem
+        {
+            Kind = SchemaDiffKind.SetColumnDescription,
+            TableName = "Customer",
+            ColumnName = "Name",
+            NewDescription = "顧客名",
+            OldDescription = "旧",
+            IsSelected = true
+        };
+        var sql = SchemaSyncScriptBuilder.Build(new[] { item });
+        sql.Should().Contain("@level2type=N'COLUMN'");
+        sql.Should().Contain("@level2name=N'Name'");
+        sql.Should().Contain("N'顧客名'");
+    }
+
+    [Fact(DisplayName = "新値が空ならば sp_dropextendedproperty が出力される")]
+    public void EmptyNewDescription_EmitsDrop()
+    {
+        var item = new SchemaDiffItem
+        {
+            Kind = SchemaDiffKind.SetTableDescription,
+            TableName = "Customer",
+            NewDescription = "",
+            OldDescription = "古い",
+            IsSelected = true
+        };
+        var sql = SchemaSyncScriptBuilder.Build(new[] { item });
+        sql.Should().Contain("sp_dropextendedproperty");
+        sql.Should().NotContain("sp_addextendedproperty");
+    }
 }

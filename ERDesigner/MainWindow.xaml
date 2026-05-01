@@ -60,6 +60,35 @@
             </Setter>
         </Style>
 
+        <Style x:Key="ToolBarLabelToggleButton" TargetType="ToggleButton">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="10,6"/>
+            <Setter Property="Margin" Value="2,0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}"
+                                CornerRadius="4" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#EEF2F7"/>
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#DCE7F5"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.4"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <Style x:Key="ToolBarIcon" TargetType="TextBlock">
             <Setter Property="FontSize" Value="20"/>
             <Setter Property="HorizontalAlignment" Value="Center"/>
@@ -245,6 +274,14 @@
                         <TextBlock Style="{StaticResource ToolBarCaption}" Text="DB同期"/>
                     </StackPanel>
                 </Button>
+                <ToggleButton Style="{StaticResource ToolBarLabelToggleButton}"
+                              IsChecked="{Binding ShowColumnDescriptionsInDiagram, Mode=TwoWay}"
+                              ToolTip="ER 図のカラム行に「説明」を表示">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource ToolBarIcon}" Text="💬"/>
+                        <TextBlock Style="{StaticResource ToolBarCaption}" Text="説明表示"/>
+                    </StackPanel>
+                </ToggleButton>
                 <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding GenerateFromAiCommand}" ToolTip="ChatGPT/Ollama でスキーマを自動生成">
                     <StackPanel>
                         <TextBlock Style="{StaticResource ToolBarIcon}" Text="🤖"/>
@@ -481,33 +518,58 @@
                                             <ItemsControl ItemsSource="{Binding Columns}" Margin="6,4,6,6">
                                                 <ItemsControl.ItemTemplate>
                                                     <DataTemplate>
-                                                        <Grid Margin="0,2">
-                                                            <Grid.ColumnDefinitions>
-                                                                <ColumnDefinition Width="34"/>
-                                                                <ColumnDefinition Width="*"/>
-                                                                <ColumnDefinition Width="Auto"/>
-                                                            </Grid.ColumnDefinitions>
-                                                            <TextBlock Grid.Column="0" FontWeight="Bold">
+                                                        <StackPanel Margin="0,2">
+                                                            <Grid>
+                                                                <Grid.ColumnDefinitions>
+                                                                    <ColumnDefinition Width="34"/>
+                                                                    <ColumnDefinition Width="*"/>
+                                                                    <ColumnDefinition Width="Auto"/>
+                                                                </Grid.ColumnDefinitions>
+                                                                <TextBlock Grid.Column="0" FontWeight="Bold">
+                                                                    <TextBlock.Style>
+                                                                        <Style TargetType="TextBlock">
+                                                                            <Setter Property="Text" Value=""/>
+                                                                            <Setter Property="Foreground" Value="#374151"/>
+                                                                            <Style.Triggers>
+                                                                                <DataTrigger Binding="{Binding IsPrimaryKey}" Value="True">
+                                                                                    <Setter Property="Text" Value="PK"/>
+                                                                                    <Setter Property="Foreground" Value="#D93025"/>
+                                                                                </DataTrigger>
+                                                                                <DataTrigger Binding="{Binding IsForeignKey}" Value="True">
+                                                                                    <Setter Property="Text" Value="FK"/>
+                                                                                    <Setter Property="Foreground" Value="#1A73E8"/>
+                                                                                </DataTrigger>
+                                                                            </Style.Triggers>
+                                                                        </Style>
+                                                                    </TextBlock.Style>
+                                                                </TextBlock>
+                                                                <TextBlock Grid.Column="1" Text="{Binding Name}" Foreground="#1F2937"/>
+                                                                <TextBlock Grid.Column="2" Text="{Binding DataType}" Foreground="#6B7280"/>
+                                                            </Grid>
+                                                            <TextBlock Text="{Binding Description}"
+                                                                       Foreground="#6B7280" FontStyle="Italic" FontSize="11"
+                                                                       Margin="34,0,0,0" TextWrapping="Wrap">
                                                                 <TextBlock.Style>
                                                                     <Style TargetType="TextBlock">
-                                                                        <Setter Property="Text" Value=""/>
-                                                                        <Setter Property="Foreground" Value="#374151"/>
+                                                                        <Setter Property="Visibility" Value="Collapsed"/>
                                                                         <Style.Triggers>
-                                                                            <DataTrigger Binding="{Binding IsPrimaryKey}" Value="True">
-                                                                                <Setter Property="Text" Value="PK"/>
-                                                                                <Setter Property="Foreground" Value="#D93025"/>
+                                                                            <MultiDataTrigger>
+                                                                                <MultiDataTrigger.Conditions>
+                                                                                    <Condition Binding="{Binding DataContext.ShowColumnDescriptionsInDiagram, RelativeSource={RelativeSource AncestorType=Window}}" Value="True"/>
+                                                                                </MultiDataTrigger.Conditions>
+                                                                                <Setter Property="Visibility" Value="Visible"/>
+                                                                            </MultiDataTrigger>
+                                                                            <DataTrigger Binding="{Binding Description}" Value="">
+                                                                                <Setter Property="Visibility" Value="Collapsed"/>
                                                                             </DataTrigger>
-                                                                            <DataTrigger Binding="{Binding IsForeignKey}" Value="True">
-                                                                                <Setter Property="Text" Value="FK"/>
-                                                                                <Setter Property="Foreground" Value="#1A73E8"/>
+                                                                            <DataTrigger Binding="{Binding Description}" Value="{x:Null}">
+                                                                                <Setter Property="Visibility" Value="Collapsed"/>
                                                                             </DataTrigger>
                                                                         </Style.Triggers>
                                                                     </Style>
                                                                 </TextBlock.Style>
                                                             </TextBlock>
-                                                            <TextBlock Grid.Column="1" Text="{Binding Name}" Foreground="#1F2937"/>
-                                                            <TextBlock Grid.Column="2" Text="{Binding DataType}" Foreground="#6B7280"/>
-                                                        </Grid>
+                                                        </StackPanel>
                                                     </DataTemplate>
                                                 </ItemsControl.ItemTemplate>
                                             </ItemsControl>
@@ -549,6 +611,19 @@
                                 <TextBox Grid.Column="1" Text="{Binding TableName, UpdateSourceTrigger=PropertyChanged}"/>
                             </Grid>
 
+                            <Grid Margin="0,4" DataContext="{Binding SelectedEntity}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="80"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="説明" VerticalAlignment="Top" Margin="0,4,0,0"/>
+                                <TextBox Grid.Column="1"
+                                         Text="{Binding Description, UpdateSourceTrigger=PropertyChanged}"
+                                         AcceptsReturn="True" TextWrapping="Wrap" MinHeight="40"
+                                         VerticalScrollBarVisibility="Auto"
+                                         ToolTip="SQL Server の MS_Description と同期します"/>
+                            </Grid>
+
                             <DockPanel Margin="0,12,0,4">
                                 <TextBlock Text="項目" FontWeight="SemiBold" Foreground="{StaticResource HeaderText}"/>
                                 <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" HorizontalAlignment="Right">
@@ -587,6 +662,8 @@
                                             </DataTemplate>
                                         </DataGridTemplateColumn.CellEditingTemplate>
                                     </DataGridTemplateColumn>
+                                    <DataGridTextColumn Header="説明" Width="*"
+                                                        Binding="{Binding Description, UpdateSourceTrigger=PropertyChanged}"/>
                                     <!-- 各行に削除ボタン -->
                                     <DataGridTemplateColumn Header="" Width="32">
                                         <DataGridTemplateColumn.CellTemplate>

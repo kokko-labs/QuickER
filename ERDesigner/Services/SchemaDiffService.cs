@@ -42,12 +42,70 @@ public class SchemaDiffService
                     Entity = target,
                     Description = $"テーブル [{name}] を作成 (列 {target.Columns.Count} 件)"
                 });
+
+                // 新規テーブル: テーブル説明
+                var newTblDesc = !string.IsNullOrWhiteSpace(target.Description)
+                    ? target.Description
+                    : (target.DisplayName == NormalizeTable(target) ? string.Empty : target.DisplayName);
+                if (!string.IsNullOrEmpty(newTblDesc))
+                {
+                    diff.Items.Add(new SchemaDiffItem
+                    {
+                        Kind = SchemaDiffKind.SetTableDescription,
+                        TableName = name,
+                        Entity = target,
+                        NewDescription = newTblDesc,
+                        OldDescription = null,
+                        Description = $"テーブル [{name}] の説明を設定: \"{Truncate(newTblDesc)}\""
+                    });
+                }
+
+                // 新規テーブル: 各列の説明
+                foreach (var c in target.Columns)
+                {
+                    if (string.IsNullOrEmpty(c.Description)) continue;
+                    diff.Items.Add(new SchemaDiffItem
+                    {
+                        Kind = SchemaDiffKind.SetColumnDescription,
+                        TableName = name,
+                        ColumnName = c.Name,
+                        Entity = target,
+                        Column = c,
+                        NewDescription = c.Description,
+                        OldDescription = null,
+                        Description = $"列 [{name}].[{c.Name}] の説明を設定: \"{Truncate(c.Description)}\""
+                    });
+                }
+
                 continue;
             }
 
             // 既存テーブル: カラム差分
             var liveCols = live.Columns.ToDictionary(c => c.Name, StringComparer.OrdinalIgnoreCase);
             var targetCols = target.Columns.ToDictionary(c => c.Name, StringComparer.OrdinalIgnoreCase);
+
+            // テーブル説明 (MS_Description) の差分
+            // 取込時に Description が DisplayName に上書きされる仕様を踏まえ、
+            //   - 期待値は target.Description が非空ならそれ、空なら DisplayName を使う
+            //   - 既存値は live.Description (importer が拡張プロパティから取得済み)
+            var targetTableDesc = !string.IsNullOrWhiteSpace(target.Description)
+                ? target.Description
+                : (target.DisplayName == NormalizeTable(target) ? string.Empty : target.DisplayName);
+            var liveTableDesc = live.Description ?? string.Empty;
+            if (!string.Equals(targetTableDesc, liveTableDesc, StringComparison.Ordinal))
+            {
+                diff.Items.Add(new SchemaDiffItem
+                {
+                    Kind = SchemaDiffKind.SetTableDescription,
+                    TableName = name,
+                    Entity = target,
+                    NewDescription = targetTableDesc,
+                    OldDescription = liveTableDesc,
+                    Description = string.IsNullOrEmpty(targetTableDesc)
+                        ? $"テーブル [{name}] の説明を削除"
+                        : $"テーブル [{name}] の説明を更新: \"{Truncate(targetTableDesc)}\""
+                });
+            }
 
             foreach (var (cname, tcol) in targetCols)
             {
@@ -62,20 +120,58 @@ public class SchemaDiffService
                         Column = tcol,
                         Description = $"列 [{name}].[{cname}] {tcol.DataType} を追加"
                     });
-                }
-                else if (!IsSameType(lcol.DataType, tcol.DataType))
-                {
-                    diff.Items.Add(new SchemaDiffItem
+
+                    // 新規列に説明があれば、列追加と一緒に説明を設定する
+                    if (!string.IsNullOrEmpty(tcol.Description))
                     {
-                        Kind = SchemaDiffKind.AlterColumn,
-                        TableName = name,
-                        ColumnName = cname,
-                        Entity = target,
-                        Column = tcol,
-                        OldColumn = lcol,
-                        IsSelected = false, // 破壊的なので既定は未選択
-                        Description = $"列 [{name}].[{cname}] 型を {lcol.DataType} → {tcol.DataType} に変更"
-                    });
+                        diff.Items.Add(new SchemaDiffItem
+                        {
+                            Kind = SchemaDiffKind.SetColumnDescription,
+                            TableName = name,
+                            ColumnName = cname,
+                            Entity = target,
+                            Column = tcol,
+                            NewDescription = tcol.Description,
+                            OldDescription = null,
+                            Description = $"列 [{name}].[{cname}] の説明を設定: \"{Truncate(tcol.Description)}\""
+                        });
+                    }
+                }
+                else
+                {
+                    if (!IsSameType(lcol.DataType, tcol.DataType))
+                    {
+                        diff.Items.Add(new SchemaDiffItem
+                        {
+                            Kind = SchemaDiffKind.AlterColumn,
+                            TableName = name,
+                            ColumnName = cname,
+                            Entity = target,
+                            Column = tcol,
+                            OldColumn = lcol,
+                            IsSelected = false,
+                            Description = $"列 [{name}].[{cname}] 型を {lcol.DataType} → {tcol.DataType} に変更"
+                        });
+                    }
+
+                    var newColDesc = tcol.Description ?? string.Empty;
+                    var oldColDesc = lcol.Description ?? string.Empty;
+                    if (!string.Equals(newColDesc, oldColDesc, StringComparison.Ordinal))
+                    {
+                        diff.Items.Add(new SchemaDiffItem
+                        {
+                            Kind = SchemaDiffKind.SetColumnDescription,
+                            TableName = name,
+                            ColumnName = cname,
+                            Entity = target,
+                            Column = tcol,
+                            NewDescription = newColDesc,
+                            OldDescription = oldColDesc,
+                            Description = string.IsNullOrEmpty(newColDesc)
+                                ? $"列 [{name}].[{cname}] の説明を削除"
+                                : $"列 [{name}].[{cname}] の説明を更新: \"{Truncate(newColDesc)}\""
+                        });
+                    }
                 }
             }
 
@@ -225,4 +321,7 @@ public class SchemaDiffService
 
     private static bool IsSameType(string a, string b)
         => string.Equals((a ?? "").Trim(), (b ?? "").Trim(), StringComparison.OrdinalIgnoreCase);
+
+    private static string Truncate(string s, int max = 30)
+        => s.Length <= max ? s : s.Substring(0, max) + "…";
 }

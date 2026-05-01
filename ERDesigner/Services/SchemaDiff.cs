@@ -24,6 +24,10 @@ public enum SchemaDiffKind
     AddForeignKey,
     /// <summary>既存の外部キーを DROP する (フェーズ2)。</summary>
     DropForeignKey,
+    /// <summary>テーブルの MS_Description を設定 / 更新 / 削除する。</summary>
+    SetTableDescription,
+    /// <summary>カラムの MS_Description を設定 / 更新 / 削除する。</summary>
+    SetColumnDescription,
 }
 
 /// <summary>
@@ -53,6 +57,11 @@ public sealed class SchemaDiffItem : INotifyPropertyChanged
     public Entity? ChildEntity { get; init; }
     /// <summary>削除する FK 制約の名前 (DropForeignKey のみ)。</summary>
     public string? ForeignKeyName { get; init; }
+
+    /// <summary>変更後の説明文 (SetTable/ColumnDescription)。空文字なら削除を意味する。</summary>
+    public string? NewDescription { get; init; }
+    /// <summary>変更前の説明文 (SetTable/ColumnDescription)。null = まだ DB に説明が無い。</summary>
+    public string? OldDescription { get; init; }
 
     private bool _isSelected = true;
     /// <summary>UI で実行対象として選択中か。</summary>
