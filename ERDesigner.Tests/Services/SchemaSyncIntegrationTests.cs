@@ -72,11 +72,11 @@ IF OBJECT_ID(N'{ParentTable}', N'U') IS NOT NULL DROP TABLE [{ParentTable}];";
         }
 
         // ---------- 1) ER 図側の期待状態を構築 ----------
-        var parent = new Entity { TableName = ParentTable, DisplayName = ParentTable };
+        var parent = new Entity { TableName = ParentTable };
         parent.Columns.Add(new Column { Name = "Id", DataType = "int", IsPrimaryKey = true });
         parent.Columns.Add(new Column { Name = "Name", DataType = "nvarchar(50)" });
 
-        var child = new Entity { TableName = ChildTable, DisplayName = ChildTable };
+        var child = new Entity { TableName = ChildTable };
         child.Columns.Add(new Column { Name = "Id", DataType = "int", IsPrimaryKey = true });
         child.Columns.Add(new Column { Name = $"{ParentTable}_Id", DataType = "int" });
 
@@ -157,7 +157,7 @@ CREATE TABLE [{ChildTable}] (
         }
 
         // ---------- 期待状態: 子テーブルのみ残し、ToBeAltered の型を変更、ToBeDropped と FK と親テーブルを削除 ----------
-        var child = new Entity { TableName = ChildTable, DisplayName = ChildTable };
+        var child = new Entity { TableName = ChildTable };
         child.Columns.Add(new Column { Name = "Id", DataType = "int", IsPrimaryKey = true });
         child.Columns.Add(new Column { Name = $"{ParentTable}_Id", DataType = "int" });
         child.Columns.Add(new Column { Name = "ToBeAltered", DataType = "nvarchar(100)" }); // 型を 20→100 に変更
@@ -206,7 +206,7 @@ CREATE TABLE [{ChildTable}] (
         if (!_serverAvailable) return;
 
         // ---------- 1) 期待状態 (説明付き) ----------
-        var parent = new Entity { TableName = ParentTable, DisplayName = ParentTable, Description = "親テーブルの説明" };
+        var parent = new Entity { TableName = ParentTable, Description = "親テーブルの説明" };
         parent.Columns.Add(new Column { Name = "Id", DataType = "int", IsPrimaryKey = true });
         parent.Columns.Add(new Column { Name = "Name", DataType = "nvarchar(50)", Description = "名前カラム" });
 
@@ -234,13 +234,11 @@ CREATE TABLE [{ChildTable}] (
         var imported = live2.Entities.Should().ContainSingle(e =>
             e.TableName.EndsWith(ParentTable, StringComparison.OrdinalIgnoreCase)).Which;
         imported.Description.Should().Be("親テーブルの説明");
-        // テーブル説明があれば DisplayName も同じ値で上書きされる仕様
-        imported.DisplayName.Should().Be("親テーブルの説明");
         imported.Columns.Should().ContainSingle(c => c.Name == "Name" && c.Description == "名前カラム");
 
         // ---------- 4) 説明を更新→ sp_updateextendedproperty 経由で反映される ----------
         // live と target でオブジェクトを分けるため、target は手で組み直す
-        var updatedTarget = new Entity { TableName = imported.TableName, DisplayName = "親テーブル(更新後)", Description = "親テーブル(更新後)" };
+        var updatedTarget = new Entity { TableName = imported.TableName, Description = "親テーブル(更新後)" };
         foreach (var c in imported.Columns)
             updatedTarget.Columns.Add(new Column
             {

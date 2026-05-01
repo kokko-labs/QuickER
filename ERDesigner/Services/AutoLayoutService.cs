@@ -16,30 +16,49 @@ namespace ERDesigner.Services;
 /// </remarks>
 public static class AutoLayoutService
 {
-    /// <summary>1セルの横幅 (px)。</summary>
-    private const double CellWidth = 260;
-    /// <summary>1セルの縦幅 (px)。</summary>
-    private const double CellHeight = 180;
+    /// <summary>横のギャップ (px)。</summary>
+    private const double GapX = 40;
+    /// <summary>縦のギャップ (px)。</summary>
+    private const double GapY = 40;
     /// <summary>左上の余白 (px)。</summary>
     private const double Margin = 40;
+
+    /// <summary>エンティティの推定高さ (ヘッダー + カラム行)。</summary>
+    private static double EstimateHeight(EntityViewModel e)
+        => 40 + Math.Max(1, e.Columns.Count) * 24;
 
     /// <summary>
     /// エンティティを格子状に並べ替えます。
     /// </summary>
-    /// <param name="entities">並べ替え対象のエンティティ一覧。</param>
-    /// <param name="columns">1行に並べる列数。1 未満を指定した場合は自動調整します。</param>
     public static void LayoutGrid(IList<EntityViewModel> entities, int columns = 0)
     {
         if (entities.Count == 0) return;
         if (columns <= 0)
             columns = (int)Math.Ceiling(Math.Sqrt(entities.Count));
 
+        // 各列の幅、各行の高さを事前計算
+        var colWidths = new double[columns];
+        var rowCount = (int)Math.Ceiling((double)entities.Count / columns);
+        var rowHeights = new double[rowCount];
+
         for (int i = 0; i < entities.Count; i++)
         {
-            int row = i / columns;
-            int col = i % columns;
-            entities[i].X = Margin + col * CellWidth;
-            entities[i].Y = Margin + row * CellHeight;
+            int c = i % columns;
+            int r = i / columns;
+            colWidths[c] = Math.Max(colWidths[c], entities[i].Width + GapX);
+            rowHeights[r] = Math.Max(rowHeights[r], EstimateHeight(entities[i]) + GapY);
+        }
+
+        for (int i = 0; i < entities.Count; i++)
+        {
+            int c = i % columns;
+            int r = i / columns;
+            double x = Margin;
+            for (int ci = 0; ci < c; ci++) x += colWidths[ci];
+            double y = Margin;
+            for (int ri = 0; ri < r; ri++) y += rowHeights[ri];
+            entities[i].X = x;
+            entities[i].Y = y;
         }
     }
 
@@ -93,13 +112,26 @@ public static class AutoLayoutService
             }
         }
 
-        // 各階層を縦に配置
+        // 各階層を縦に配置 (各エンティティの幅を考慮して重ならないようにする)
+        // まず各階層の最大高さを計算
+        var depthHeight = new Dictionary<int, double>();
         foreach (var (depth, list) in levels)
         {
+            depthHeight[depth] = list.Max(e => EstimateHeight(e));
+        }
+
+        foreach (var (depth, list) in levels)
+        {
+            double yOffset = Margin;
+            for (int d = 0; d < depth; d++)
+                if (depthHeight.TryGetValue(d, out var h)) yOffset += h + GapY;
+
+            double xOffset = Margin;
             for (int i = 0; i < list.Count; i++)
             {
-                list[i].X = Margin + i * CellWidth;
-                list[i].Y = Margin + depth * CellHeight;
+                list[i].X = xOffset;
+                list[i].Y = yOffset;
+                xOffset += list[i].Width + GapX;
             }
         }
     }

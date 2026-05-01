@@ -29,8 +29,8 @@ public class AiSchemaJson
             if (string.IsNullOrWhiteSpace(e.TableName)) continue;
             var entity = new Entity
             {
-                DisplayName = string.IsNullOrWhiteSpace(e.DisplayName) ? e.TableName : e.DisplayName,
                 TableName = e.TableName,
+                Description = string.IsNullOrWhiteSpace(e.DisplayName) ? string.Empty : e.DisplayName,
                 Memo = e.Memo ?? string.Empty,
                 Columns = e.Columns?.Select(c => new Column
                 {
@@ -72,7 +72,7 @@ public class AiSchemaJson
 /// <summary>AI が返すエンティティ。</summary>
 public class AiEntity
 {
-    /// <summary>論理名。</summary>
+    /// <summary>論理名 (AI 応答の JSON 互換のため残存。インポート時に Description へマップ).</summary>
     [JsonPropertyName("displayName")] public string? DisplayName { get; set; }
     /// <summary>物理テーブル名 (英数字)。</summary>
     [JsonPropertyName("tableName")] public string? TableName { get; set; }

@@ -12,7 +12,7 @@ public class SchemaSyncScriptBuilderTests
     [Fact(DisplayName = "AddTable は CREATE TABLE と PK を含む")]
     public void AddTable_GeneratesCreate()
     {
-        var e = new Entity { TableName = "Customer", DisplayName = "Customer" };
+        var e = new Entity { TableName = "Customer" };
         e.Columns.Add(new Column { Name = "Id", DataType = "int", IsPrimaryKey = true });
         e.Columns.Add(new Column { Name = "Name", DataType = "nvarchar(50)" });
         var item = new SchemaDiffItem
@@ -91,9 +91,9 @@ public class SchemaSyncScriptBuilderTests
     [Fact(DisplayName = "AddForeignKey は ALTER ADD CONSTRAINT FOREIGN KEY を生成する")]
     public void AddFk_GeneratesConstraint()
     {
-        var customer = new Entity { TableName = "Customer", DisplayName = "Customer" };
+        var customer = new Entity { TableName = "Customer" };
         customer.Columns.Add(new Column { Name = "Id", DataType = "int", IsPrimaryKey = true });
-        var order = new Entity { TableName = "Order", DisplayName = "Order" };
+        var order = new Entity { TableName = "Order" };
         order.Columns.Add(new Column { Name = "Id", DataType = "int", IsPrimaryKey = true });
         order.Columns.Add(new Column { Name = "Customer_Id", DataType = "int" });
 
@@ -114,9 +114,9 @@ public class SchemaSyncScriptBuilderTests
     [Fact(DisplayName = "実行順序: AddTable → AddColumn → AddForeignKey")]
     public void Order_AddTable_Then_AddColumn_Then_Fk()
     {
-        var e = new Entity { TableName = "T", DisplayName = "T" };
+        var e = new Entity { TableName = "T" };
         e.Columns.Add(new Column { Name = "Id", DataType = "int", IsPrimaryKey = true });
-        var customer = new Entity { TableName = "Customer", DisplayName = "Customer" };
+        var customer = new Entity { TableName = "Customer" };
         customer.Columns.Add(new Column { Name = "Id", DataType = "int", IsPrimaryKey = true });
 
         var items = new[]

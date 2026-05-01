@@ -9,6 +9,9 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         Closing += MainWindow_Closing;
+
+        if (DataContext is MainViewModel vm)
+            vm.Initialize();
     }
 
     private void MainWindow_Closing(object? sender, System.ComponentModel.CancelEventArgs e)

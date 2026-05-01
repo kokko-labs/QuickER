@@ -12,7 +12,7 @@ public class SchemaDiffServiceTests
 {
     private static Entity Tbl(string name, params (string Name, string Type, bool Pk)[] cols)
     {
-        var e = new Entity { DisplayName = name, TableName = name };
+        var e = new Entity { TableName = name };
         foreach (var c in cols)
             e.Columns.Add(new Column { Name = c.Name, DataType = c.Type, IsPrimaryKey = c.Pk });
         return e;

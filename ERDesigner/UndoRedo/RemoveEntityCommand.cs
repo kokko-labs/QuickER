@@ -24,7 +24,7 @@ public class RemoveEntityCommand : IUndoableCommand
     }
 
     /// <inheritdoc />
-    public string Description => $"エンティティ削除: {_entity.DisplayName}";
+    public string Description => $"エンティティ削除: {_entity.TableName}";
 
     /// <inheritdoc />
     public void Execute()

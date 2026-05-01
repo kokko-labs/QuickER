@@ -398,7 +398,7 @@
                 </Border.Resources>
 
                 <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
-                    <Grid x:Name="DiagramCanvas" Width="2400" Height="1600" Background="{StaticResource GridBrush}">
+                    <Grid x:Name="DiagramCanvas" Width="{Binding CanvasWidth}" Height="{Binding CanvasHeight}" Background="{StaticResource GridBrush}">
                         <Grid.InputBindings>
                             <MouseBinding MouseAction="LeftClick" Command="{Binding CanvasClickCommand}"/>
                         </Grid.InputBindings>
@@ -494,8 +494,7 @@
                                 <DataTemplate DataType="{x:Type vm:EntityViewModel}">
                                     <Border Width="{Binding Width}" Background="White" CornerRadius="6"
                                             beh:DragBehavior.IsEnabled="True"
-                                            beh:DragBehavior.UndoRedoManager="{Binding DataContext.UndoRedo, RelativeSource={RelativeSource AncestorType=Window}}"
-                                            beh:ResizeBehavior.IsEnabled="True">
+                                            beh:DragBehavior.UndoRedoManager="{Binding DataContext.UndoRedo, RelativeSource={RelativeSource AncestorType=Window}}">
                                         <Border.Effect>
                                             <DropShadowEffect Color="#88AABB" BlurRadius="6" ShadowDepth="1" Opacity="0.35"/>
                                         </Border.Effect>
@@ -611,128 +610,123 @@
             <!-- 右: プロパティパネル -->
             <Border Grid.Column="3" Background="{StaticResource SidebarBg}"
                     BorderBrush="{StaticResource DividerBrush}" BorderThickness="1,0,0,0">
-                <ScrollViewer VerticalScrollBarVisibility="Auto">
-                    <StackPanel Margin="12,10">
-                        <TextBlock Text="プロパティ" FontWeight="Bold"
-                                   Foreground="{StaticResource HeaderText}" Margin="0,0,0,8"/>
+                <DockPanel Margin="12,10">
+                    <TextBlock DockPanel.Dock="Top" Text="プロパティ" FontWeight="Bold"
+                               Foreground="{StaticResource HeaderText}" Margin="0,0,0,8"/>
 
-                        <!-- エンティティのプロパティ -->
-                        <StackPanel Visibility="{Binding SelectedEntity, Converter={StaticResource NullToVisibilityConverter}}">
-                            <TextBlock Text="エンティティ" FontWeight="SemiBold" Margin="0,4,0,6" Foreground="{StaticResource HeaderText}"/>
+                    <!-- エンティティのプロパティ -->
+                    <DockPanel Visibility="{Binding SelectedEntity, Converter={StaticResource NullToVisibilityConverter}}">
+                        <TextBlock DockPanel.Dock="Top" Text="エンティティ" FontWeight="SemiBold" Margin="0,4,0,6" Foreground="{StaticResource HeaderText}"/>
 
-                            <Grid Margin="0,2" DataContext="{Binding SelectedEntity}">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="80"/>
-                                    <ColumnDefinition Width="*"/>
-                                </Grid.ColumnDefinitions>
-                                <TextBlock Text="テーブル名" VerticalAlignment="Center"/>
-                                <TextBox Grid.Column="1" Text="{Binding TableName, UpdateSourceTrigger=PropertyChanged}"/>
-                            </Grid>
-                            <Grid Margin="0,4" DataContext="{Binding SelectedEntity}">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="80"/>
-                                    <ColumnDefinition Width="*"/>
-                                </Grid.ColumnDefinitions>
-                                <TextBlock Text="説明" VerticalAlignment="Center"/>
-                                <TextBox Grid.Column="1"
-                                         Text="{Binding Description, UpdateSourceTrigger=PropertyChanged}"
-                                         ToolTip="SQL Server の MS_Description と同期します"/>
-                            </Grid>
+                        <Grid DockPanel.Dock="Top" Margin="0,2">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="80"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="テーブル名" VerticalAlignment="Center"/>
+                            <TextBox Grid.Column="1" Text="{Binding SelectedEntity.TableName, UpdateSourceTrigger=PropertyChanged}"/>
+                        </Grid>
+                        <Grid DockPanel.Dock="Top" Margin="0,4">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="80"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="説明" VerticalAlignment="Center"/>
+                            <TextBox Grid.Column="1"
+                                     Text="{Binding SelectedEntity.Description, UpdateSourceTrigger=PropertyChanged}"
+                                     ToolTip="SQL Server の MS_Description と同期します"/>
+                        </Grid>
 
-                            <DockPanel Margin="0,12,0,4">
-                                <TextBlock Text="項目" FontWeight="SemiBold" Foreground="{StaticResource HeaderText}"/>
-                                <Button Content="+" Width="22" Height="22" DockPanel.Dock="Right" HorizontalAlignment="Right"
-                                        ToolTip="カラムを追加"
-                                        Command="{Binding AddColumnCommand}"/>
-                            </DockPanel>
-                            <DataGrid ItemsSource="{Binding SelectedEntity.Columns}"
-                                      SelectedItem="{Binding SelectedColumn, Mode=TwoWay}"
-                                      AutoGenerateColumns="False"
-                                      CanUserAddRows="False" HeadersVisibility="Column"
-                                      RowHeaderWidth="0" GridLinesVisibility="Horizontal"
-                                      HorizontalGridLinesBrush="#EEF1F5"
-                                      Background="White" BorderBrush="{StaticResource DividerBrush}"
-                                      Height="240">
-                                <DataGrid.Columns>
-                                    <DataGridCheckBoxColumn Header="PK" Binding="{Binding IsPrimaryKey, UpdateSourceTrigger=PropertyChanged}" Width="36"/>
-                                    <DataGridCheckBoxColumn Header="FK" Binding="{Binding IsForeignKey, UpdateSourceTrigger=PropertyChanged}" Width="36"/>
-                                    <DataGridTextColumn Header="カラム名" Binding="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Width="*"/>
-                                    <!-- SQL Server 型を ComboBox で選択 (編集可能) -->
-                                    <DataGridTemplateColumn Header="型" Width="120">
-                                        <DataGridTemplateColumn.CellTemplate>
-                                            <DataTemplate>
-                                                <TextBlock Text="{Binding DataType}" VerticalAlignment="Center" Margin="4,0"/>
-                                            </DataTemplate>
-                                        </DataGridTemplateColumn.CellTemplate>
-                                        <DataGridTemplateColumn.CellEditingTemplate>
-                                            <DataTemplate>
-                                                <ComboBox IsEditable="True"
-                                                          ItemsSource="{Binding DataContext.SqlDataTypes, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                          Text="{Binding DataType, UpdateSourceTrigger=LostFocus}"/>
-                                            </DataTemplate>
-                                        </DataGridTemplateColumn.CellEditingTemplate>
-                                    </DataGridTemplateColumn>
-                                    <DataGridTextColumn Header="説明" Width="*"
-                                                        Binding="{Binding Description, UpdateSourceTrigger=PropertyChanged}"/>
-                                    <!-- 各行に削除ボタン -->
-                                    <DataGridTemplateColumn Header="" Width="32">
-                                        <DataGridTemplateColumn.CellTemplate>
-                                            <DataTemplate>
-                                                <Button Content="✕" Width="22" Height="20"
-                                                        ToolTip="このカラムを削除"
-                                                        Command="{Binding DataContext.RemoveColumnCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                        CommandParameter="{Binding}"/>
-                                            </DataTemplate>
-                                        </DataGridTemplateColumn.CellTemplate>
-                                    </DataGridTemplateColumn>
-                                </DataGrid.Columns>
-                            </DataGrid>
+                        <DockPanel DockPanel.Dock="Top" Margin="0,12,0,4">
+                            <TextBlock Text="項目" FontWeight="SemiBold" Foreground="{StaticResource HeaderText}"/>
+                            <Button Content="+" Width="22" Height="22" DockPanel.Dock="Right" HorizontalAlignment="Right"
+                                    ToolTip="カラムを追加"
+                                    Command="{Binding AddColumnCommand}"/>
+                        </DockPanel>
 
-                            <TextBlock Text="メモ" FontWeight="SemiBold" Margin="0,12,0,4" Foreground="{StaticResource HeaderText}"/>
-                            <TextBox Text="{Binding SelectedEntity.Memo, UpdateSourceTrigger=PropertyChanged}"
-                                     AcceptsReturn="True" TextWrapping="Wrap" Height="70"
-                                     VerticalScrollBarVisibility="Auto"/>
-                        </StackPanel>
+                        <!-- メモ (下部に固定) -->
+                        <TextBlock DockPanel.Dock="Bottom" Text="メモ" FontWeight="SemiBold" Margin="0,8,0,4" Foreground="{StaticResource HeaderText}"/>
+                        <TextBox DockPanel.Dock="Bottom" Text="{Binding SelectedEntity.Memo, UpdateSourceTrigger=PropertyChanged}"
+                                 AcceptsReturn="True" TextWrapping="Wrap" Height="70"
+                                 VerticalScrollBarVisibility="Auto"/>
 
-                        <!-- リレーションのプロパティ -->
-                        <StackPanel Visibility="{Binding SelectedRelationship, Converter={StaticResource NullToVisibilityConverter}}">
-                            <TextBlock Text="リレーション" FontWeight="SemiBold" Margin="0,4,0,6" Foreground="{StaticResource HeaderText}"/>
+                        <!-- DataGrid: 残りスペースを占有 -->
+                        <DataGrid ItemsSource="{Binding SelectedEntity.Columns}"
+                                  SelectedItem="{Binding SelectedColumn, Mode=TwoWay}"
+                                  AutoGenerateColumns="False"
+                                  CanUserAddRows="False" HeadersVisibility="Column"
+                                  RowHeaderWidth="0" GridLinesVisibility="Horizontal"
+                                  HorizontalGridLinesBrush="#EEF1F5"
+                                  Background="White" BorderBrush="{StaticResource DividerBrush}">
+                            <DataGrid.Columns>
+                                <DataGridCheckBoxColumn Header="PK" Binding="{Binding IsPrimaryKey, UpdateSourceTrigger=PropertyChanged}" Width="36"/>
+                                <DataGridCheckBoxColumn Header="FK" Binding="{Binding IsForeignKey, UpdateSourceTrigger=PropertyChanged}" Width="36"/>
+                                <DataGridTextColumn Header="カラム名" Binding="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Width="*"/>
+                                <DataGridTemplateColumn Header="型" Width="120">
+                                    <DataGridTemplateColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding DataType}" VerticalAlignment="Center" Margin="4,0"/>
+                                        </DataTemplate>
+                                    </DataGridTemplateColumn.CellTemplate>
+                                    <DataGridTemplateColumn.CellEditingTemplate>
+                                        <DataTemplate>
+                                            <ComboBox IsEditable="True"
+                                                      ItemsSource="{Binding DataContext.SqlDataTypes, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                      Text="{Binding DataType, UpdateSourceTrigger=LostFocus}"/>
+                                        </DataTemplate>
+                                    </DataGridTemplateColumn.CellEditingTemplate>
+                                </DataGridTemplateColumn>
+                                <DataGridTextColumn Header="説明" Width="*"
+                                                    Binding="{Binding Description, UpdateSourceTrigger=PropertyChanged}"/>
+                                <DataGridTemplateColumn Header="" Width="32">
+                                    <DataGridTemplateColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <Button Content="✕" Width="22" Height="20"
+                                                    ToolTip="このカラムを削除"
+                                                    Command="{Binding DataContext.RemoveColumnCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                    CommandParameter="{Binding}"/>
+                                        </DataTemplate>
+                                    </DataGridTemplateColumn.CellTemplate>
+                                </DataGridTemplateColumn>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </DockPanel>
 
-                            <Grid Margin="0,2" DataContext="{Binding SelectedRelationship}">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="80"/>
-                                    <ColumnDefinition Width="*"/>
-                                </Grid.ColumnDefinitions>
-                                <TextBlock Text="種別" VerticalAlignment="Center"/>
-                                <ComboBox Grid.Column="1" SelectedItem="{Binding Type, Mode=TwoWay}">
-                                    <models:RelationshipType>OneToOne</models:RelationshipType>
-                                    <models:RelationshipType>OneToMany</models:RelationshipType>
-                                    <models:RelationshipType>ManyToMany</models:RelationshipType>
-                                </ComboBox>
-                            </Grid>
-
-                            <Grid Margin="0,8" DataContext="{Binding SelectedRelationship}">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="80"/>
-                                    <ColumnDefinition Width="*"/>
-                                </Grid.ColumnDefinitions>
-                                <TextBlock Text="起点" VerticalAlignment="Center"/>
-                                <TextBlock Grid.Column="1" Text="{Binding Source.DisplayName}" Foreground="{StaticResource MutedText}"/>
-                            </Grid>
-                            <Grid Margin="0,2" DataContext="{Binding SelectedRelationship}">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="80"/>
-                                    <ColumnDefinition Width="*"/>
-                                </Grid.ColumnDefinitions>
-                                <TextBlock Text="終点" VerticalAlignment="Center"/>
-                                <TextBlock Grid.Column="1" Text="{Binding Target.DisplayName}" Foreground="{StaticResource MutedText}"/>
-                            </Grid>
-
-                            <Button Margin="0,12,0,0" Content="リレーションを削除"
-                                    Command="{Binding RemoveSelectedRelationshipCommand}"/>
-                        </StackPanel>
+                    <!-- リレーションのプロパティ -->
+                    <StackPanel Visibility="{Binding SelectedRelationship, Converter={StaticResource NullToVisibilityConverter}}">
+                        <TextBlock Text="リレーション" FontWeight="SemiBold" Margin="0,4,0,6" Foreground="{StaticResource HeaderText}"/>
+                        <Grid Margin="0,2" DataContext="{Binding SelectedRelationship}">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="80"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="種別" VerticalAlignment="Center"/>
+                            <ComboBox Grid.Column="1" SelectedItem="{Binding Type, Mode=TwoWay}">
+                                <models:RelationshipType>OneToOne</models:RelationshipType>
+                                <models:RelationshipType>OneToMany</models:RelationshipType>
+                                <models:RelationshipType>ManyToMany</models:RelationshipType>
+                            </ComboBox>
+                        </Grid>
+                        <Grid Margin="0,8" DataContext="{Binding SelectedRelationship}">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="80"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="起点" VerticalAlignment="Center"/>
+                            <TextBlock Grid.Column="1" Text="{Binding Source.TableName}" Foreground="{StaticResource MutedText}"/>
+                        </Grid>
+                        <Grid Margin="0,2" DataContext="{Binding SelectedRelationship}">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="80"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="終点" VerticalAlignment="Center"/>
+                            <TextBlock Grid.Column="1" Text="{Binding Target.TableName}" Foreground="{StaticResource MutedText}"/>
+                        </Grid>
+                        <Button Margin="0,12,0,0" Content="リレーションを削除"
+                                Command="{Binding RemoveSelectedRelationshipCommand}"/>
                     </StackPanel>
-                </ScrollViewer>
+                </DockPanel>
             </Border>
         </Grid>
     </DockPanel>

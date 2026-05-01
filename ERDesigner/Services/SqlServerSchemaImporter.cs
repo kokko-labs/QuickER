@@ -153,7 +153,6 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
                 Name = name,
                 Entity = new Entity
                 {
-                    DisplayName = name,
                     TableName = schema == "dbo" ? name : $"{schema}.{name}",
                     Columns = new List<Column>()
                 }
@@ -206,7 +205,6 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
     /// <summary>
     /// テーブルとカラムの拡張プロパティ <c>MS_Description</c> を取得し、
     /// エンティティの <see cref="Entity.Description"/> / カラムの <see cref="Column.Description"/> に格納します。
-    /// テーブル説明が非空ならエンティティの <see cref="Entity.DisplayName"/> もそれで上書きします。
     /// </summary>
     private static async Task LoadDescriptionsAsync(SqlConnection conn, Dictionary<string, TableEntry> tables, CancellationToken ct)
     {
@@ -225,8 +223,6 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
             {
                 // テーブルレベル
                 entry.Entity.Description = description;
-                if (!string.IsNullOrWhiteSpace(description))
-                    entry.Entity.DisplayName = description;
             }
             else
             {

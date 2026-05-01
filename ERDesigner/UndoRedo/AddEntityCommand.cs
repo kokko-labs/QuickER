@@ -20,7 +20,7 @@ public class AddEntityCommand : IUndoableCommand
     }
 
     /// <inheritdoc />
-    public string Description => $"エンティティ追加: {_entity.DisplayName}";
+    public string Description => $"エンティティ追加: {_entity.TableName}";
 
     /// <inheritdoc />
     public void Execute() => _main.Entities.Add(_entity);

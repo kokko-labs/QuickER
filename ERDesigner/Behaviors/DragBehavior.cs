@@ -68,8 +68,13 @@ public static class DragBehavior
     private static double _startX;
     private static double _startY;
     private static bool _isDragging;
+    private static bool _isResizing;
+    private static double _startWidth;
     private static FrameworkElement? _draggedElement;
     private static EntityViewModel? _draggedVm;
+
+    /// <summary>右端リサイズグリップの幅 (px)。</summary>
+    private const double GripWidth = 8;
 
     /// <summary>添付プロパティ <see cref="IsEnabledProperty"/> 変更時のハンドラ登録／解除を行います。</summary>
     private static void OnIsEnabledChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
@@ -115,17 +120,39 @@ public static class DragBehavior
         _startMouse = e.GetPosition(canvas);
         _startX = vm.X;
         _startY = vm.Y;
-        _isDragging = true;
+
+        // 右端グリップ判定 → リサイズモード
+        var local = e.GetPosition(fe);
+        if (local.X >= fe.ActualWidth - GripWidth && fe.ActualWidth > 0)
+        {
+            _isResizing = true;
+            _isDragging = false;
+            _startWidth = vm.Width;
+        }
+        else
+        {
+            _isDragging = true;
+            _isResizing = false;
+        }
 
         fe.CaptureMouse();
-        // 親 Grid のクリック (キャンバス空白クリック) と区別するため Handled にする。
         e.Handled = true;
     }
 
     /// <summary>マウス移動: ボタン押下中なら ViewModel の座標を更新します。</summary>
     private static void OnMouseMove(object sender, MouseEventArgs e)
     {
-        if (!_isDragging || _draggedElement is null || _draggedVm is null) return;
+        if (_draggedElement is null || _draggedVm is null) return;
+
+        // カーソル形状更新 (ドラッグ中でなければ)
+        if (!_isDragging && !_isResizing && sender is FrameworkElement cursorFe)
+        {
+            var lp = e.GetPosition(cursorFe);
+            cursorFe.Cursor = (lp.X >= cursorFe.ActualWidth - GripWidth && cursorFe.ActualWidth > 0)
+                ? Cursors.SizeWE : null;
+            return;
+        }
+
         if (e.LeftButton != MouseButtonState.Pressed)
         {
             EndDrag(treatAsClick: false);
@@ -134,16 +161,28 @@ public static class DragBehavior
 
         var canvas = FindCanvas(_draggedElement);
         if (canvas is null) return;
-
         var pos = e.GetPosition(canvas);
-        _draggedVm.X = _startX + (pos.X - _startMouse.X);
-        _draggedVm.Y = _startY + (pos.Y - _startMouse.Y);
+
+        if (_isResizing)
+        {
+            var delta = pos.X - _startMouse.X;
+            var newWidth = Math.Max(120, _startWidth + delta);
+            _draggedVm.Width = newWidth;
+        }
+        else if (_isDragging)
+        {
+            var newX = _startX + (pos.X - _startMouse.X);
+            var newY = _startY + (pos.Y - _startMouse.Y);
+            // 画面外に出ないよう最小 0 制限 (キャンバスは自動拡大するが負座標は不可)
+            _draggedVm.X = Math.Max(0, newX);
+            _draggedVm.Y = Math.Max(0, newY);
+        }
     }
 
     /// <summary>マウス解放: 移動量に応じてクリック扱い／Undo 登録を行います。</summary>
     private static void OnMouseUp(object sender, MouseButtonEventArgs e)
     {
-        if (!_isDragging) return;
+        if (!_isDragging && !_isResizing) return;
 
         var canvas = FindCanvas(_draggedElement);
         var movedPx = double.PositiveInfinity;
@@ -153,13 +192,13 @@ public static class DragBehavior
             movedPx = (pos - _startMouse).Length;
         }
 
-        EndDrag(treatAsClick: movedPx <= ClickThreshold);
+        EndDrag(treatAsClick: !_isResizing && movedPx <= ClickThreshold);
     }
 
     /// <summary>キャプチャを失った場合（外部要因含む）に状態をリセットします。</summary>
     private static void OnLostCapture(object sender, MouseEventArgs e)
     {
-        if (_isDragging)
+        if (_isDragging || _isResizing)
             EndDrag(treatAsClick: false);
     }
 
@@ -171,8 +210,10 @@ public static class DragBehavior
         var vm = _draggedVm;
         var oldX = _startX;
         var oldY = _startY;
+        var wasResizing = _isResizing;
 
         _isDragging = false;
+        _isResizing = false;
         _draggedElement = null;
         _draggedVm = null;
 
@@ -180,6 +221,13 @@ public static class DragBehavior
 
         if (element.IsMouseCaptured)
             element.ReleaseMouseCapture();
+        element.Cursor = null;
+
+        if (wasResizing)
+        {
+            // リサイズ完了 — 特に Undo 登録は省略 (Width 変更は軽微)
+            return;
+        }
 
         if (treatAsClick)
         {
@@ -197,5 +245,9 @@ public static class DragBehavior
             var mgr = GetUndoRedoManager(element);
             mgr?.Push(new MoveEntityCommand(vm, oldX, oldY, vm.X, vm.Y));
         }
+
+        // キャンバスサイズ再計算
+        if (Window.GetWindow(element)?.DataContext is MainViewModel mainVm)
+            mainVm.RefreshCanvasSize();
     }
 }

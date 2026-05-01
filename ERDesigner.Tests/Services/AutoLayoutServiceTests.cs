@@ -11,7 +11,7 @@ namespace ERDesigner.Tests.Services;
 public class AutoLayoutServiceTests
 {
     private static EntityViewModel NewEntity(string name = "E") =>
-        new(new Entity { DisplayName = name, X = -999, Y = -999 });
+        new(new Entity { TableName = name, X = -999, Y = -999 });
 
     [Fact(DisplayName = "LayoutGrid: エンティティが格子状に並ぶ")]
     public void LayoutGrid_ArrangesInGrid()

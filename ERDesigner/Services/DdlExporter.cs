@@ -28,7 +28,7 @@ public static class DdlExporter
         // ----- CREATE TABLE -----
         foreach (var entity in vm.Entities)
         {
-            var table = string.IsNullOrWhiteSpace(entity.TableName) ? entity.DisplayName : entity.TableName;
+            var table = entity.TableName;
             sb.AppendLine($"CREATE TABLE [{table}] (");
 
             for (int i = 0; i < entity.Columns.Count; i++)
@@ -61,7 +61,7 @@ public static class DdlExporter
             // 多対多はジャンクションテーブルが必要なのでコメントだけ出力
             if (rel.Type == Models.RelationshipType.ManyToMany)
             {
-                sb.AppendLine($"-- 多対多 ({rel.Source.DisplayName} ⇄ {rel.Target.DisplayName}): ジャンクションテーブルを別途定義してください。");
+                sb.AppendLine($"-- 多対多 ({rel.Source.TableName} ⇄ {rel.Target.TableName}): ジャンクションテーブルを別途定義してください。");
                 continue;
             }
 
@@ -74,8 +74,8 @@ public static class DdlExporter
             if (pkCol is null) continue;
 
             var fkColName = pkEntity.TableName + "_" + pkCol.Name;
-            var fkTable = string.IsNullOrWhiteSpace(fkEntity.TableName) ? fkEntity.DisplayName : fkEntity.TableName;
-            var pkTable = string.IsNullOrWhiteSpace(pkEntity.TableName) ? pkEntity.DisplayName : pkEntity.TableName;
+            var fkTable = fkEntity.TableName;
+            var pkTable = pkEntity.TableName;
 
             sb.AppendLine(
                 $"ALTER TABLE [{fkTable}] ADD CONSTRAINT [FK_{fkTable}_{pkTable}] " +

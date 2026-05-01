@@ -29,7 +29,7 @@ public class DuplicateEntityCommand : IUndoableCommand
     public EntityViewModel? Duplicated => _duplicate;
 
     /// <inheritdoc />
-    public string Description => $"複製: {_original.DisplayName}";
+    public string Description => $"複製: {_original.TableName}";
 
     /// <inheritdoc />
     public void Execute()
@@ -40,12 +40,12 @@ public class DuplicateEntityCommand : IUndoableCommand
             var srcModel = _original.ToModel();
             var newModel = new Entity
             {
-                DisplayName = srcModel.DisplayName + "_Copy",
                 TableName = srcModel.TableName + "_Copy",
                 X = srcModel.X + 30,
                 Y = srcModel.Y + 30,
                 Width = srcModel.Width,
-                Memo = srcModel.Memo
+                Memo = srcModel.Memo,
+                Description = srcModel.Description
             };
             foreach (var c in srcModel.Columns)
             {

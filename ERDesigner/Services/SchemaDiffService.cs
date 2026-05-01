@@ -44,9 +44,7 @@ public class SchemaDiffService
                 });
 
                 // 新規テーブル: テーブル説明
-                var newTblDesc = !string.IsNullOrWhiteSpace(target.Description)
-                    ? target.Description
-                    : (target.DisplayName == NormalizeTable(target) ? string.Empty : target.DisplayName);
+                var newTblDesc = target.Description ?? string.Empty;
                 if (!string.IsNullOrEmpty(newTblDesc))
                 {
                     diff.Items.Add(new SchemaDiffItem
@@ -85,12 +83,7 @@ public class SchemaDiffService
             var targetCols = target.Columns.ToDictionary(c => c.Name, StringComparer.OrdinalIgnoreCase);
 
             // テーブル説明 (MS_Description) の差分
-            // 取込時に Description が DisplayName に上書きされる仕様を踏まえ、
-            //   - 期待値は target.Description が非空ならそれ、空なら DisplayName を使う
-            //   - 既存値は live.Description (importer が拡張プロパティから取得済み)
-            var targetTableDesc = !string.IsNullOrWhiteSpace(target.Description)
-                ? target.Description
-                : (target.DisplayName == NormalizeTable(target) ? string.Empty : target.DisplayName);
+            var targetTableDesc = target.Description ?? string.Empty;
             var liveTableDesc = live.Description ?? string.Empty;
             if (!string.Equals(targetTableDesc, liveTableDesc, StringComparison.Ordinal))
             {
@@ -286,8 +279,7 @@ public class SchemaDiffService
     /// <summary>テーブル名を「schema.name」または「name」の正規形に揃えます。</summary>
     public static string NormalizeTable(Entity e)
     {
-        var n = string.IsNullOrWhiteSpace(e.TableName) ? e.DisplayName : e.TableName;
-        return n.Trim();
+        return e.TableName.Trim();
     }
 
     /// <summary>(Parent正規名, Child正規名) のタプルを生成。テーブルが見つからない場合 null。</summary>

@@ -20,7 +20,6 @@ public class JsonStorageServiceTests
 
         var a = vm.Entities[0];
         var b = vm.Entities[1];
-        a.DisplayName = "顧客";
         a.TableName = "Customer";
         a.X = 100; a.Y = 50;
 
@@ -39,7 +38,6 @@ public class JsonStorageServiceTests
             loaded.Relationships.Should().HaveCount(1);
 
             var ea = loaded.Entities.First(e => e.Id == a.Id);
-            ea.DisplayName.Should().Be("顧客");
             ea.TableName.Should().Be("Customer");
             ea.X.Should().Be(100);
             ea.Y.Should().Be(50);

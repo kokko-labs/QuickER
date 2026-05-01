@@ -16,8 +16,7 @@ public class DdlExporterTests
         var vm = new MainViewModel();
         var e = new EntityViewModel(new Entity
         {
-            DisplayName = "User",
-            TableName = "Users",
+            TableName = "User",
             Columns =
             {
                 new Column { Name = "Id", DataType = "int", IsPrimaryKey = true },
@@ -28,7 +27,7 @@ public class DdlExporterTests
 
         var sql = DdlExporter.Build(vm);
 
-        sql.Should().Contain("CREATE TABLE [Users]");
+        sql.Should().Contain("CREATE TABLE [User]");
         sql.Should().Contain("[Id] int");
         sql.Should().Contain("PRIMARY KEY ([Id])");
         sql.Should().Contain("[Name] nvarchar(50)");
@@ -40,14 +39,12 @@ public class DdlExporterTests
         var vm = new MainViewModel();
         var parent = new EntityViewModel(new Entity
         {
-            DisplayName = "P",
-            TableName = "Parents",
+            TableName = "P",
             Columns = { new Column { Name = "Id", DataType = "int", IsPrimaryKey = true } }
         });
         var child = new EntityViewModel(new Entity
         {
-            DisplayName = "C",
-            TableName = "Children",
+            TableName = "C",
             Columns = { new Column { Name = "Id", DataType = "int", IsPrimaryKey = true } }
         });
         vm.Entities.Add(parent);
@@ -62,8 +59,8 @@ public class DdlExporterTests
 
         var sql = DdlExporter.Build(vm);
 
-        sql.Should().Contain("ALTER TABLE [Children]");
-        sql.Should().Contain("FOREIGN KEY ([Parents_Id])");
-        sql.Should().Contain("REFERENCES [Parents] ([Id])");
+        sql.Should().Contain("ALTER TABLE [C]");
+        sql.Should().Contain("FOREIGN KEY ([P_Id])");
+        sql.Should().Contain("REFERENCES [P] ([Id])");
     }
 }

@@ -14,8 +14,6 @@ public partial class EntityViewModel : ObservableObject
     /// <summary>モデルと同じ ID。</summary>
     public Guid Id { get; }
 
-    /// <summary>画面表示名。</summary>
-    [ObservableProperty] private string _displayName;
     /// <summary>テーブル名。</summary>
     [ObservableProperty] private string _tableName;
     /// <summary>キャンバス上の X 座標 (px)。ドラッグで更新されます。</summary>
@@ -35,11 +33,9 @@ public partial class EntityViewModel : ObservableObject
     public ObservableCollection<ColumnViewModel> Columns { get; }
 
     /// <summary>モデルから ViewModel を生成します。</summary>
-    /// <param name="model">コピー元の <see cref="Entity"/> モデル。</param>
     public EntityViewModel(Entity model)
     {
         Id = model.Id;
-        _displayName = model.DisplayName;
         _tableName = model.TableName;
         _x = model.X;
         _y = model.Y;
@@ -54,7 +50,6 @@ public partial class EntityViewModel : ObservableObject
     public Entity ToModel() => new()
     {
         Id = Id,
-        DisplayName = DisplayName,
         TableName = TableName,
         X = X,
         Y = Y,

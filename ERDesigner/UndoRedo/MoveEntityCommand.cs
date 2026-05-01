@@ -25,7 +25,7 @@ public class MoveEntityCommand : IUndoableCommand
     }
 
     /// <inheritdoc />
-    public string Description => $"移動: {_entity.DisplayName}";
+    public string Description => $"移動: {_entity.TableName}";
 
     /// <inheritdoc />
     public void Execute()

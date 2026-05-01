@@ -36,13 +36,34 @@ public partial class MainViewModel : ObservableObject
     /// <summary>ER 図上のカラム行に「説明」を表示するか (ツールバーから ON/OFF 切替)。</summary>
     [ObservableProperty] private bool _showColumnDescriptionsInDiagram;
 
+    /// <summary>キャンバスの動的幅 (エンティティの最右端 + 余白)。</summary>
+    public double CanvasWidth => Math.Max(2400, Entities.Count == 0 ? 2400 : Entities.Max(e => e.X + e.Width) + 400);
+    /// <summary>キャンバスの動的高さ (エンティティの最下端 + 余白)。</summary>
+    public double CanvasHeight => Math.Max(1600, Entities.Count == 0 ? 1600 : Entities.Max(e => e.Y + 300) + 400);
+
     /// <summary>型 ComboBox に表示する SQL Server のデータ型一覧。</summary>
     public IReadOnlyList<string> SqlDataTypes => SqlServerDataTypes.All;
 
     public MainViewModel()
     {
-        Entities.CollectionChanged += (_, _) => OnPropertyChanged(nameof(Entities));
+        Entities.CollectionChanged += (_, _) =>
+        {
+            OnPropertyChanged(nameof(Entities));
+            RefreshCanvasSize();
+        };
+    }
+
+    /// <summary>起動時に前回の自動保存ファイルを復元します。アプリ起動時に1回呼んでください。</summary>
+    public void Initialize()
+    {
         RestoreLastDiagram();
+    }
+
+    /// <summary>キャンバスサイズを再計算して通知します。ドラッグ終了や移動後に呼び出してください。</summary>
+    public void RefreshCanvasSize()
+    {
+        OnPropertyChanged(nameof(CanvasWidth));
+        OnPropertyChanged(nameof(CanvasHeight));
     }
 
     // ---------------- Auto-save / restore ----------------
@@ -110,7 +131,6 @@ public partial class MainViewModel : ObservableObject
     {
         var model = new Entity
         {
-            DisplayName = "新規エンティティ",
             TableName = "NewTable",
             X = 60 + Entities.Count * 30,
             Y = 60 + Entities.Count * 30,

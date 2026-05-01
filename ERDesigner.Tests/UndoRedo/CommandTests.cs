@@ -11,7 +11,7 @@ namespace ERDesigner.Tests.UndoRedo;
 public class CommandTests
 {
     private static EntityViewModel NewEntity(double x = 0, double y = 0) =>
-        new(new Entity { X = x, Y = y, DisplayName = "T" });
+        new(new Entity { X = x, Y = y, TableName = "T" });
 
     [Fact(DisplayName = "MoveEntityCommand: Execute / Undo で座標が往復する")]
     public void MoveEntityCommand_ExecuteUndo()
@@ -71,12 +71,12 @@ public class CommandTests
     public void PropertyChangeCommand_Works()
     {
         var e = NewEntity();
-        var cmd = new PropertyChangeCommand(e, nameof(EntityViewModel.DisplayName), "T", "顧客");
+        var cmd = new PropertyChangeCommand(e, nameof(EntityViewModel.TableName), "T", "顧客");
 
         cmd.Execute();
-        e.DisplayName.Should().Be("顧客");
+        e.TableName.Should().Be("顧客");
 
         cmd.Undo();
-        e.DisplayName.Should().Be("T");
+        e.TableName.Should().Be("T");
     }
 }

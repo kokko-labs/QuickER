@@ -12,9 +12,6 @@ public class Entity
     /// <summary>エンティティを一意に識別する ID です。リレーションから参照されます。</summary>
     public Guid Id { get; set; } = Guid.NewGuid();
 
-    /// <summary>画面に表示される論理名（例: <c>顧客</c>）。</summary>
-    public string DisplayName { get; set; } = "新規エンティティ";
-
     /// <summary>物理テーブル名（例: <c>Customer</c>）。</summary>
     public string TableName { get; set; } = "NewTable";
 

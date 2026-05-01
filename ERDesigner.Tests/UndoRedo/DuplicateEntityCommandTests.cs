@@ -16,8 +16,7 @@ public class DuplicateEntityCommandTests
         var main = new MainViewModel();
         var src = new EntityViewModel(new Entity
         {
-            DisplayName = "Original",
-            TableName = "Tbl",
+            TableName = "Original",
             X = 10, Y = 20,
             Columns = { new Column { Name = "Id", DataType = "int", IsPrimaryKey = true } }
         });
@@ -29,7 +28,7 @@ public class DuplicateEntityCommandTests
         cmd.Duplicated.Should().NotBeNull();
         main.Entities.Should().Contain(cmd.Duplicated!);
         cmd.Duplicated!.Id.Should().NotBe(src.Id);
-        cmd.Duplicated.DisplayName.Should().EndWith("_Copy");
+        cmd.Duplicated.TableName.Should().EndWith("_Copy");
         cmd.Duplicated.X.Should().Be(40);
         cmd.Duplicated.Y.Should().Be(50);
         cmd.Duplicated.Columns.Should().HaveCount(1);
@@ -39,7 +38,7 @@ public class DuplicateEntityCommandTests
     public void UndoRedo_RoundTrip()
     {
         var main = new MainViewModel();
-        var src = new EntityViewModel(new Entity { DisplayName = "X" });
+        var src = new EntityViewModel(new Entity { TableName = "X" });
         main.Entities.Add(src);
 
         var cmd = new DuplicateEntityCommand(main, src);

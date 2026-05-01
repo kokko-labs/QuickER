@@ -83,7 +83,7 @@ public static class ImageExportService
             sb.AppendLine($"  <g transform=\"translate({e.X.ToString(ci)},{e.Y.ToString(ci)})\">");
             sb.AppendLine($"    <rect class=\"entity\" width=\"{e.Width.ToString(ci)}\" height=\"{h.ToString(ci)}\" rx=\"6\" ry=\"6\" />");
             sb.AppendLine($"    <rect class=\"header\" width=\"{e.Width.ToString(ci)}\" height=\"{headerHeight.ToString(ci)}\" rx=\"6\" ry=\"6\" />");
-            sb.AppendLine($"    <text class=\"title\" x=\"10\" y=\"18\">{System.Security.SecurityElement.Escape($"{e.DisplayName} ({e.TableName})")}</text>");
+            sb.AppendLine($"    <text class=\"title\" x=\"10\" y=\"18\">{System.Security.SecurityElement.Escape(e.TableName)}</text>");
             for (int i = 0; i < e.Columns.Count; i++)
             {
                 var c = e.Columns[i];
