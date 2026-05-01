@@ -309,8 +309,13 @@
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="200"/>
                 <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="340"/>
+                <ColumnDefinition Width="5"/>
+                <ColumnDefinition Width="380" MinWidth="250"/>
             </Grid.ColumnDefinitions>
+
+            <!-- GridSplitter: ER図とプロパティパネルの境界ドラッグ -->
+            <GridSplitter Grid.Column="2" Width="5" HorizontalAlignment="Stretch"
+                          Background="{StaticResource DividerBrush}" Cursor="SizeWE"/>
 
             <!-- 左: ツールボックス -->
             <Border Grid.Column="0" Background="{StaticResource SidebarBg}"
@@ -489,7 +494,8 @@
                                 <DataTemplate DataType="{x:Type vm:EntityViewModel}">
                                     <Border Width="{Binding Width}" Background="White" CornerRadius="6"
                                             beh:DragBehavior.IsEnabled="True"
-                                            beh:DragBehavior.UndoRedoManager="{Binding DataContext.UndoRedo, RelativeSource={RelativeSource AncestorType=Window}}">
+                                            beh:DragBehavior.UndoRedoManager="{Binding DataContext.UndoRedo, RelativeSource={RelativeSource AncestorType=Window}}"
+                                            beh:ResizeBehavior.IsEnabled="True">
                                         <Border.Effect>
                                             <DropShadowEffect Color="#88AABB" BlurRadius="6" ShadowDepth="1" Opacity="0.35"/>
                                         </Border.Effect>
@@ -508,12 +514,32 @@
                                         <StackPanel>
                                             <Border Background="{StaticResource EntityHeaderBlue}"
                                                     CornerRadius="6,6,0,0" Padding="10,6">
-                                                <TextBlock FontWeight="SemiBold" Foreground="#1F3A66">
-                                                    <Run Text="{Binding DisplayName}"/>
-                                                    <Run Text=" ("/>
-                                                    <Run Text="{Binding TableName}"/>
-                                                    <Run Text=")"/>
-                                                </TextBlock>
+                                                <StackPanel>
+                                                    <TextBlock FontWeight="SemiBold" Foreground="#1F3A66"
+                                                               Text="{Binding TableName}"/>
+                                                    <TextBlock Text="{Binding Description}" Foreground="#6B7280"
+                                                               FontStyle="Italic" FontSize="11" TextWrapping="Wrap">
+                                                        <TextBlock.Style>
+                                                            <Style TargetType="TextBlock">
+                                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                                                <Style.Triggers>
+                                                                    <MultiDataTrigger>
+                                                                        <MultiDataTrigger.Conditions>
+                                                                            <Condition Binding="{Binding DataContext.ShowColumnDescriptionsInDiagram, RelativeSource={RelativeSource AncestorType=Window}}" Value="True"/>
+                                                                        </MultiDataTrigger.Conditions>
+                                                                        <Setter Property="Visibility" Value="Visible"/>
+                                                                    </MultiDataTrigger>
+                                                                    <DataTrigger Binding="{Binding Description}" Value="">
+                                                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                                                    </DataTrigger>
+                                                                    <DataTrigger Binding="{Binding Description}" Value="{x:Null}">
+                                                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </TextBlock.Style>
+                                                    </TextBlock>
+                                                </StackPanel>
                                             </Border>
                                             <ItemsControl ItemsSource="{Binding Columns}" Margin="6,4,6,6">
                                                 <ItemsControl.ItemTemplate>
@@ -583,7 +609,7 @@
             </Border>
 
             <!-- 右: プロパティパネル -->
-            <Border Grid.Column="2" Background="{StaticResource SidebarBg}"
+            <Border Grid.Column="3" Background="{StaticResource SidebarBg}"
                     BorderBrush="{StaticResource DividerBrush}" BorderThickness="1,0,0,0">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <StackPanel Margin="12,10">
@@ -599,41 +625,25 @@
                                     <ColumnDefinition Width="80"/>
                                     <ColumnDefinition Width="*"/>
                                 </Grid.ColumnDefinitions>
-                                <TextBlock Text="名前" VerticalAlignment="Center"/>
-                                <TextBox Grid.Column="1" Text="{Binding DisplayName, UpdateSourceTrigger=PropertyChanged}"/>
-                            </Grid>
-                            <Grid Margin="0,4" DataContext="{Binding SelectedEntity}">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="80"/>
-                                    <ColumnDefinition Width="*"/>
-                                </Grid.ColumnDefinitions>
                                 <TextBlock Text="テーブル名" VerticalAlignment="Center"/>
                                 <TextBox Grid.Column="1" Text="{Binding TableName, UpdateSourceTrigger=PropertyChanged}"/>
                             </Grid>
-
                             <Grid Margin="0,4" DataContext="{Binding SelectedEntity}">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="80"/>
                                     <ColumnDefinition Width="*"/>
                                 </Grid.ColumnDefinitions>
-                                <TextBlock Text="説明" VerticalAlignment="Top" Margin="0,4,0,0"/>
+                                <TextBlock Text="説明" VerticalAlignment="Center"/>
                                 <TextBox Grid.Column="1"
                                          Text="{Binding Description, UpdateSourceTrigger=PropertyChanged}"
-                                         AcceptsReturn="True" TextWrapping="Wrap" MinHeight="40"
-                                         VerticalScrollBarVisibility="Auto"
                                          ToolTip="SQL Server の MS_Description と同期します"/>
                             </Grid>
 
                             <DockPanel Margin="0,12,0,4">
                                 <TextBlock Text="項目" FontWeight="SemiBold" Foreground="{StaticResource HeaderText}"/>
-                                <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" HorizontalAlignment="Right">
-                                    <Button Content="+" Width="22" Height="22" Margin="0,0,4,0"
-                                            ToolTip="カラムを追加"
-                                            Command="{Binding AddColumnCommand}"/>
-                                    <Button Content="🗑" Width="22" Height="22"
-                                            ToolTip="選択中のカラムを削除"
-                                            Command="{Binding RemoveSelectedColumnCommand}"/>
-                                </StackPanel>
+                                <Button Content="+" Width="22" Height="22" DockPanel.Dock="Right" HorizontalAlignment="Right"
+                                        ToolTip="カラムを追加"
+                                        Command="{Binding AddColumnCommand}"/>
                             </DockPanel>
                             <DataGrid ItemsSource="{Binding SelectedEntity.Columns}"
                                       SelectedItem="{Binding SelectedColumn, Mode=TwoWay}"
@@ -646,7 +656,7 @@
                                 <DataGrid.Columns>
                                     <DataGridCheckBoxColumn Header="PK" Binding="{Binding IsPrimaryKey, UpdateSourceTrigger=PropertyChanged}" Width="36"/>
                                     <DataGridCheckBoxColumn Header="FK" Binding="{Binding IsForeignKey, UpdateSourceTrigger=PropertyChanged}" Width="36"/>
-                                    <DataGridTextColumn Header="名前" Binding="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Width="*"/>
+                                    <DataGridTextColumn Header="カラム名" Binding="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Width="*"/>
                                     <!-- SQL Server 型を ComboBox で選択 (編集可能) -->
                                     <DataGridTemplateColumn Header="型" Width="120">
                                         <DataGridTemplateColumn.CellTemplate>

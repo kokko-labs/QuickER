@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.IO;
 using System.Linq;
 using System.Windows.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -41,6 +42,45 @@ public partial class MainViewModel : ObservableObject
     public MainViewModel()
     {
         Entities.CollectionChanged += (_, _) => OnPropertyChanged(nameof(Entities));
+        RestoreLastDiagram();
+    }
+
+    // ---------------- Auto-save / restore ----------------
+
+    private static readonly string AutoSavePath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+        "ERDesigner", "last_diagram.json");
+
+    /// <summary>現在のダイアグラムを自動保存ファイルに書き出します。</summary>
+    public void AutoSave()
+    {
+        try
+        {
+            var dir = Path.GetDirectoryName(AutoSavePath)!;
+            Directory.CreateDirectory(dir);
+            JsonStorageService.Save(AutoSavePath, this);
+        }
+        catch { /* 自動保存の失敗は無視 */ }
+    }
+
+    /// <summary>起動時に前回の自動保存ファイルを復元します。</summary>
+    private void RestoreLastDiagram()
+    {
+        if (!File.Exists(AutoSavePath)) return;
+        try
+        {
+            var diagram = JsonStorageService.Load(AutoSavePath);
+            foreach (var e in diagram.Entities)
+                Entities.Add(new EntityViewModel(e));
+            foreach (var r in diagram.Relationships)
+            {
+                var src = Entities.FirstOrDefault(e => e.Id == r.SourceEntityId);
+                var tgt = Entities.FirstOrDefault(e => e.Id == r.TargetEntityId);
+                if (src is null || tgt is null) continue;
+                Relationships.Add(new RelationshipViewModel(r, src, tgt));
+            }
+        }
+        catch { /* 復元失敗時は空で起動 */ }
     }
 
     // ---------------- Commands ----------------
@@ -48,6 +88,15 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void NewDiagram()
     {
+        if (Entities.Count > 0)
+        {
+            var ans = System.Windows.MessageBox.Show(
+                "現在のダイアグラムをクリアします。よろしいですか？",
+                "確認",
+                System.Windows.MessageBoxButton.OKCancel,
+                System.Windows.MessageBoxImage.Question);
+            if (ans != System.Windows.MessageBoxResult.OK) return;
+        }
         foreach (var r in Relationships) r.Detach();
         Entities.Clear();
         Relationships.Clear();
@@ -213,6 +262,7 @@ public partial class MainViewModel : ObservableObject
     {
         RemoveSelectedEntityCommand.NotifyCanExecuteChanged();
         AddColumnCommand.NotifyCanExecuteChanged();
+        DuplicateSelectedEntityCommand.NotifyCanExecuteChanged();
     }
 
     partial void OnSelectedRelationshipChanged(RelationshipViewModel? value)
@@ -356,7 +406,8 @@ public partial class MainViewModel : ObservableObject
     {
         var connDlg = new Views.SqlConnectionDialog
         {
-            Owner = System.Windows.Application.Current?.MainWindow
+            Owner = System.Windows.Application.Current?.MainWindow,
+            Title = "SQL Server へ同期"
         };
         if (connDlg.ShowDialog() != true || connDlg.ViewModel.Result is null) return;
 
