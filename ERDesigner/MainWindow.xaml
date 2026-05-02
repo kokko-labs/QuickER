@@ -645,10 +645,12 @@
                         </DockPanel>
 
                         <!-- メモ (下部に固定) -->
-                        <TextBlock DockPanel.Dock="Bottom" Text="メモ" FontWeight="SemiBold" Margin="0,8,0,4" Foreground="{StaticResource HeaderText}"/>
-                        <TextBox DockPanel.Dock="Bottom" Text="{Binding SelectedEntity.Memo, UpdateSourceTrigger=PropertyChanged}"
-                                 AcceptsReturn="True" TextWrapping="Wrap" Height="70"
-                                 VerticalScrollBarVisibility="Auto"/>
+                        <StackPanel DockPanel.Dock="Bottom">
+                            <TextBlock Text="メモ" FontWeight="SemiBold" Margin="0,8,0,4" Foreground="{StaticResource HeaderText}"/>
+                            <TextBox Text="{Binding SelectedEntity.Memo, UpdateSourceTrigger=PropertyChanged}"
+                                     AcceptsReturn="True" TextWrapping="Wrap" Height="70"
+                                     VerticalScrollBarVisibility="Auto"/>
+                        </StackPanel>
 
                         <!-- DataGrid: 残りスペースを占有 -->
                         <DataGrid ItemsSource="{Binding SelectedEntity.Columns}"

@@ -18,7 +18,7 @@ public class DuplicateEntityCommandTests
         {
             TableName = "Original",
             X = 10, Y = 20,
-            Columns = { new Column { Name = "Id", DataType = "int", IsPrimaryKey = true } }
+            Columns = { new Column { Name = "Id", DataType = "int", IsPrimaryKey = true, Description = "主キー" } }
         });
         main.Entities.Add(src);
 
@@ -32,6 +32,7 @@ public class DuplicateEntityCommandTests
         cmd.Duplicated.X.Should().Be(40);
         cmd.Duplicated.Y.Should().Be(50);
         cmd.Duplicated.Columns.Should().HaveCount(1);
+        cmd.Duplicated.Columns[0].Description.Should().Be("主キー");
     }
 
     [Fact(DisplayName = "Undo / Redo: 複製の追加・削除が往復する")]

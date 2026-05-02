@@ -13,6 +13,7 @@ namespace ERDesigner.ViewModels;
 public partial class AiGenerateDialogViewModel : ObservableObject
 {
     private readonly IAiSchemaClient _client;
+    private bool _isInitializing;
 
     /// <summary>API キーストアのキー名。</summary>
     private const string OpenAiKeyName = "OpenAiApiKey";
@@ -68,8 +69,31 @@ public partial class AiGenerateDialogViewModel : ObservableObject
     public AiGenerateDialogViewModel(IAiSchemaClient? client = null)
     {
         _client = client ?? new OpenAiSchemaClient();
+        _isInitializing = true;
         // 保存済み API キーがあれば自動入力
         ApiKey = ApiKeyStore.Load(OpenAiKeyName);
+        _isInitializing = false;
+    }
+
+    partial void OnApiKeyChanged(string value)
+    {
+        PersistApiKeyPreference();
+    }
+
+    partial void OnSaveApiKeyChanged(bool value)
+    {
+        PersistApiKeyPreference();
+    }
+
+    private void PersistApiKeyPreference()
+    {
+        if (_isInitializing) return;
+        if (Provider != AiProvider.OpenAi) return;
+
+        if (SaveApiKey)
+            ApiKeyStore.Save(OpenAiKeyName, ApiKey ?? string.Empty);
+        else
+            ApiKeyStore.Save(OpenAiKeyName, string.Empty);
     }
 
     partial void OnProviderChanged(AiProvider value)
@@ -115,8 +139,7 @@ public partial class AiGenerateDialogViewModel : ObservableObject
 
             if (Provider == AiProvider.OpenAi)
             {
-                if (SaveApiKey) ApiKeyStore.Save(OpenAiKeyName, ApiKey);
-                else ApiKeyStore.Save(OpenAiKeyName, string.Empty);
+                PersistApiKeyPreference();
             }
 
             CloseAction?.Invoke(true);

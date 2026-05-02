@@ -54,7 +54,8 @@ public class DuplicateEntityCommand : IUndoableCommand
                     Name = c.Name,
                     DataType = c.DataType,
                     IsPrimaryKey = c.IsPrimaryKey,
-                    IsForeignKey = c.IsForeignKey
+                    IsForeignKey = c.IsForeignKey,
+                    Description = c.Description
                 });
             }
             _duplicate = new EntityViewModel(newModel);
