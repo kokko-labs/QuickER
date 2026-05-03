@@ -76,6 +76,44 @@ public class AiSchemaJsonTests
         rels.Should().BeEmpty();
     }
 
+    [Fact(DisplayName = "tables / columnName / fromTable / toTable 形式の JSON も解析できる")]
+    public void Deserialize_SupportsAlternatePropertyNames()
+    {
+        var json = """
+        {
+          "tables": [
+            {
+              "tableName": "customers",
+              "columns": [
+                { "columnName": "customer_id", "dataType": "int", "isPrimaryKey": true, "isForeignKey": false }
+              ]
+            },
+            {
+              "tableName": "orders",
+              "columns": [
+                { "columnName": "order_id", "dataType": "int", "isPrimaryKey": true, "isForeignKey": false },
+                { "columnName": "customer_id", "dataType": "int", "isPrimaryKey": false, "isForeignKey": true }
+              ]
+            }
+          ],
+          "relationships": [
+            { "fromTable": "customers", "toTable": "orders", "type": "OneToMany" }
+          ]
+        }
+        """;
+
+        var parsed = JsonSerializer.Deserialize<AiSchemaJson>(json,
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true })!;
+        var (entities, rels) = parsed.ToDomain();
+
+        entities.Should().HaveCount(2);
+        entities[0].TableName.Should().Be("customers");
+        entities[0].Columns.Should().ContainSingle();
+        entities[0].Columns[0].Name.Should().Be("customer_id");
+        rels.Should().ContainSingle();
+        rels[0].Type.Should().Be(RelationshipType.OneToMany);
+    }
+
     [Theory(DisplayName = "type 文字列が正しい RelationshipType に変換される")]
     [InlineData("OneToOne", RelationshipType.OneToOne)]
     [InlineData("OneToMany", RelationshipType.OneToMany)]
@@ -96,5 +134,32 @@ public class AiSchemaJsonTests
         };
         var (_, rels) = schema.ToDomain();
         rels.Should().ContainSingle().Which.Type.Should().Be(expected);
+    }
+
+    [Fact(DisplayName = "コードフェンス付き JSON 応答も解析できる")]
+    public void ParseSchemaResponse_SupportsMarkdownCodeFence()
+    {
+        var response = """
+        ```json
+        {
+          "tables": [
+            {
+              "tableName": "products",
+              "columns": [
+                { "columnName": "product_id", "dataType": "int", "isPrimaryKey": true, "isForeignKey": false }
+              ]
+            }
+          ],
+          "relationships": []
+        }
+        ```
+        """;
+
+        var parsed = OpenAiSchemaClient.ParseSchemaResponse(response);
+
+        parsed.Entities.Should().ContainSingle();
+        parsed.Entities[0].TableName.Should().Be("products");
+        parsed.Entities[0].Columns.Should().ContainSingle();
+        parsed.Entities[0].Columns![0].Name.Should().Be("product_id");
     }
 }

@@ -53,7 +53,7 @@ public partial class AiGenerateDialogViewModel : ObservableObject
     /// <summary>Ollama でよく使われるモデル例。</summary>
     public IReadOnlyList<string> OllamaModels { get; } = new[]
     {
-        "llama3.1", "llama3.2", "qwen2.5-coder", "mistral", "phi3"
+        "gpt-oss:20b", "qwen3.6", "gemma4:e4b", "gemma4:31b-cloud"
     };
 
     /// <summary>現在のプロバイダに応じた候補モデル。</summary>

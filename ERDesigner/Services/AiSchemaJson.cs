@@ -14,6 +14,14 @@ public class AiSchemaJson
     [JsonPropertyName("entities")]
     public List<AiEntity> Entities { get; set; } = new();
 
+    /// <summary>Ollama などが返す tables 形式との互換用。</summary>
+    [JsonPropertyName("tables")]
+    public List<AiEntity>? Tables
+    {
+        get => Entities;
+        set => Entities = value ?? new();
+    }
+
     /// <summary>テーブル間のリレーション一覧。</summary>
     [JsonPropertyName("relationships")]
     public List<AiRelationship> Relationships { get; set; } = new();
@@ -87,6 +95,16 @@ public class AiColumn
 {
     /// <summary>カラム名。</summary>
     [JsonPropertyName("name")] public string? Name { get; set; }
+    /// <summary>columnName 形式との互換用。</summary>
+    [JsonPropertyName("columnName")]
+    public string? ColumnName
+    {
+        get => Name;
+        set
+        {
+            if (!string.IsNullOrWhiteSpace(value)) Name = value;
+        }
+    }
     /// <summary>SQL Server のデータ型。</summary>
     [JsonPropertyName("dataType")] public string? DataType { get; set; }
     /// <summary>主キーかどうか。</summary>
@@ -100,8 +118,28 @@ public class AiRelationship
 {
     /// <summary>起点テーブル名。</summary>
     [JsonPropertyName("sourceTable")] public string? SourceTable { get; set; }
+    /// <summary>fromTable 形式との互換用。</summary>
+    [JsonPropertyName("fromTable")]
+    public string? FromTable
+    {
+        get => SourceTable;
+        set
+        {
+            if (!string.IsNullOrWhiteSpace(value)) SourceTable = value;
+        }
+    }
     /// <summary>終点テーブル名。</summary>
     [JsonPropertyName("targetTable")] public string? TargetTable { get; set; }
+    /// <summary>toTable 形式との互換用。</summary>
+    [JsonPropertyName("toTable")]
+    public string? ToTable
+    {
+        get => TargetTable;
+        set
+        {
+            if (!string.IsNullOrWhiteSpace(value)) TargetTable = value;
+        }
+    }
     /// <summary>関連の種類 (OneToOne / OneToMany / ManyToMany)。</summary>
     [JsonPropertyName("type")] public string? Type { get; set; }
 }

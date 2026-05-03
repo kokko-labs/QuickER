@@ -119,11 +119,48 @@ public class OpenAiSchemaClient : IAiSchemaClient
         var completion = await client.CompleteChatAsync(messages, options, ct).ConfigureAwait(false);
         var text = completion.Value.Content[0].Text;
 
-        var json = JsonSerializer.Deserialize<AiSchemaJson>(text, new JsonSerializerOptions
+        return ParseSchemaResponse(text);
+    }
+
+    internal static AiSchemaJson ParseSchemaResponse(string text)
+    {
+        var normalized = ExtractJsonPayload(text);
+        var json = JsonSerializer.Deserialize<AiSchemaJson>(normalized, new JsonSerializerOptions
         {
             PropertyNameCaseInsensitive = true
         });
         if (json is null) throw new InvalidOperationException("AI 応答を JSON として解釈できませんでした。");
         return json;
+    }
+
+    private static string ExtractJsonPayload(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            throw new JsonException("AI 応答が空です。");
+
+        var trimmed = text.Trim();
+
+        if (trimmed.StartsWith("```", StringComparison.Ordinal))
+        {
+            var firstNewLine = trimmed.IndexOf('\n');
+            if (firstNewLine >= 0)
+            {
+                trimmed = trimmed[(firstNewLine + 1)..];
+                var lastFence = trimmed.LastIndexOf("```", StringComparison.Ordinal);
+                if (lastFence >= 0)
+                    trimmed = trimmed[..lastFence];
+                trimmed = trimmed.Trim();
+            }
+        }
+
+        if (!trimmed.StartsWith("{", StringComparison.Ordinal))
+        {
+            var start = trimmed.IndexOf('{');
+            var end = trimmed.LastIndexOf('}');
+            if (start >= 0 && end > start)
+                trimmed = trimmed.Substring(start, end - start + 1);
+        }
+
+        return trimmed;
     }
 }
