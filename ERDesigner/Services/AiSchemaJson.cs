@@ -11,16 +11,8 @@ namespace ERDesigner.Services;
 public class AiSchemaJson
 {
     /// <summary>テーブル一覧。</summary>
-    [JsonPropertyName("entities")]
-    public List<AiEntity> Entities { get; set; } = new();
-
-    /// <summary>Ollama などが返す tables 形式との互換用。</summary>
     [JsonPropertyName("tables")]
-    public List<AiEntity>? Tables
-    {
-        get => Entities;
-        set => Entities = value ?? new();
-    }
+    public List<AiTable> Tables { get; set; } = new();
 
     /// <summary>テーブル間のリレーション一覧。</summary>
     [JsonPropertyName("relationships")]
@@ -32,20 +24,21 @@ public class AiSchemaJson
         var entities = new List<Entity>();
         var byTable = new Dictionary<string, Entity>(System.StringComparer.OrdinalIgnoreCase);
 
-        foreach (var e in Entities)
+        foreach (var table in Tables)
         {
-            if (string.IsNullOrWhiteSpace(e.TableName)) continue;
+            if (string.IsNullOrWhiteSpace(table.Name)) continue;
             var entity = new Entity
             {
-                TableName = e.TableName,
-                Description = string.IsNullOrWhiteSpace(e.DisplayName) ? string.Empty : e.DisplayName,
-                Memo = e.Memo ?? string.Empty,
-                Columns = e.Columns?.Select(c => new Column
+                TableName = table.Name,
+                Description = table.Description ?? string.Empty,
+                Memo = table.Memo ?? string.Empty,
+                Columns = table.Columns?.Select(c => new Column
                 {
                     Name = c.Name ?? "Column",
                     DataType = string.IsNullOrWhiteSpace(c.DataType) ? "int" : c.DataType,
                     IsPrimaryKey = c.IsPrimaryKey,
-                    IsForeignKey = c.IsForeignKey
+                    IsForeignKey = c.IsForeignKey,
+                    Description = c.Description ?? string.Empty
                 }).ToList() ?? new List<Column>()
             };
             entities.Add(entity);
@@ -77,13 +70,23 @@ public class AiSchemaJson
     };
 }
 
-/// <summary>AI が返すエンティティ。</summary>
-public class AiEntity
+/// <summary>AI が返すテーブル。</summary>
+public class AiTable
 {
-    /// <summary>論理名 (AI 応答の JSON 互換のため残存。インポート時に Description へマップ).</summary>
-    [JsonPropertyName("displayName")] public string? DisplayName { get; set; }
-    /// <summary>物理テーブル名 (英数字)。</summary>
-    [JsonPropertyName("tableName")] public string? TableName { get; set; }
+    /// <summary>テーブル名。</summary>
+    [JsonPropertyName("name")] public string? Name { get; set; }
+    /// <summary>テーブルの説明。</summary>
+    [JsonPropertyName("description")] public string? Description { get; set; }
+    /// <summary>tableDescription 形式との互換用。</summary>
+    [JsonPropertyName("tableDescription")]
+    public string? TableDescription
+    {
+        get => Description;
+        set
+        {
+            if (!string.IsNullOrWhiteSpace(value)) Description = value;
+        }
+    }
     /// <summary>備考。</summary>
     [JsonPropertyName("memo")] public string? Memo { get; set; }
     /// <summary>カラム一覧。</summary>
@@ -95,22 +98,24 @@ public class AiColumn
 {
     /// <summary>カラム名。</summary>
     [JsonPropertyName("name")] public string? Name { get; set; }
-    /// <summary>columnName 形式との互換用。</summary>
-    [JsonPropertyName("columnName")]
-    public string? ColumnName
-    {
-        get => Name;
-        set
-        {
-            if (!string.IsNullOrWhiteSpace(value)) Name = value;
-        }
-    }
     /// <summary>SQL Server のデータ型。</summary>
     [JsonPropertyName("dataType")] public string? DataType { get; set; }
     /// <summary>主キーかどうか。</summary>
     [JsonPropertyName("isPrimaryKey")] public bool IsPrimaryKey { get; set; }
     /// <summary>外部キーかどうか。</summary>
     [JsonPropertyName("isForeignKey")] public bool IsForeignKey { get; set; }
+    /// <summary>カラムの説明。</summary>
+    [JsonPropertyName("description")] public string? Description { get; set; }
+    /// <summary>columnDescription 形式との互換用。</summary>
+    [JsonPropertyName("columnDescription")]
+    public string? ColumnDescription
+    {
+        get => Description;
+        set
+        {
+            if (!string.IsNullOrWhiteSpace(value)) Description = value;
+        }
+    }
 }
 
 /// <summary>AI が返すリレーション。</summary>

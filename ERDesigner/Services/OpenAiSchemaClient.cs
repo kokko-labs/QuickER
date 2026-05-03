@@ -22,7 +22,10 @@ public class OpenAiSchemaClient : IAiSchemaClient
 {
     private const string SystemPrompt = @"あなたは熟練のデータベース設計者です。
 ユーザーの要件から第3正規形を意識したテーブル設計を行い、必ず指定された JSON スキーマだけを出力してください。
+- tables 配列を返し、各テーブルは name / description / memo / columns を持つ。
+- 各 columns 要素は name / dataType / isPrimaryKey / isForeignKey / description を持つ。
 - テーブル名・カラム名は英数字とアンダースコアのみ。
+- 各テーブルに description、各カラムに description を必ず付ける。
 - 各テーブルに 1 つ以上の主キー (isPrimaryKey=true) を必ず含める。
 - 外部キーがあれば isForeignKey=true を付け、relationships にも記述する。
 - type は ""OneToOne"" / ""OneToMany"" / ""ManyToMany"" のいずれか。
@@ -33,13 +36,13 @@ public class OpenAiSchemaClient : IAiSchemaClient
         {
           "type": "object",
           "properties": {
-            "entities": {
+            "tables": {
               "type": "array",
               "items": {
                 "type": "object",
                 "properties": {
-                  "displayName": { "type": "string" },
-                  "tableName": { "type": "string" },
+                  "name": { "type": "string" },
+                  "description": { "type": "string" },
                   "memo": { "type": "string" },
                   "columns": {
                     "type": "array",
@@ -49,14 +52,15 @@ public class OpenAiSchemaClient : IAiSchemaClient
                         "name": { "type": "string" },
                         "dataType": { "type": "string" },
                         "isPrimaryKey": { "type": "boolean" },
-                        "isForeignKey": { "type": "boolean" }
+                        "isForeignKey": { "type": "boolean" },
+                        "description": { "type": "string" }
                       },
-                      "required": ["name","dataType","isPrimaryKey","isForeignKey"],
+                      "required": ["name","dataType","isPrimaryKey","isForeignKey","description"],
                       "additionalProperties": false
                     }
                   }
                 },
-                "required": ["displayName","tableName","memo","columns"],
+                "required": ["name","description","memo","columns"],
                 "additionalProperties": false
               }
             },
@@ -74,7 +78,7 @@ public class OpenAiSchemaClient : IAiSchemaClient
               }
             }
           },
-          "required": ["entities","relationships"],
+          "required": ["tables","relationships"],
           "additionalProperties": false
         }
         """u8.ToArray();
