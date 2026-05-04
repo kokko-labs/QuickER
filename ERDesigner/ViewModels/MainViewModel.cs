@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.Specialized;
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.IO;
 using System.Linq;
 using System.Windows.Media;
@@ -39,18 +41,14 @@ public partial class MainViewModel : ObservableObject
     /// <summary>キャンバスの動的幅 (エンティティの最右端 + 余白)。</summary>
     public double CanvasWidth => Math.Max(2400, Entities.Count == 0 ? 2400 : Entities.Max(e => e.X + e.Width) + 400);
     /// <summary>キャンバスの動的高さ (エンティティの最下端 + 余白)。</summary>
-    public double CanvasHeight => Math.Max(1600, Entities.Count == 0 ? 1600 : Entities.Max(e => e.Y + 300) + 400);
+    public double CanvasHeight => Math.Max(1600, Entities.Count == 0 ? 1600 : Entities.Max(e => e.Y + e.DisplayHeight) + 400);
 
     /// <summary>型 ComboBox に表示する SQL Server のデータ型一覧。</summary>
     public IReadOnlyList<string> SqlDataTypes => SqlServerDataTypes.All;
 
     public MainViewModel()
     {
-        Entities.CollectionChanged += (_, _) =>
-        {
-            OnPropertyChanged(nameof(Entities));
-            RefreshCanvasSize();
-        };
+        Entities.CollectionChanged += OnEntitiesCollectionChanged;
     }
 
     /// <summary>起動時に前回の自動保存ファイルを復元します。アプリ起動時に1回呼んでください。</summary>
@@ -64,6 +62,41 @@ public partial class MainViewModel : ObservableObject
     {
         OnPropertyChanged(nameof(CanvasWidth));
         OnPropertyChanged(nameof(CanvasHeight));
+    }
+
+    private void OnEntitiesCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        if (e.OldItems is not null)
+        {
+            foreach (EntityViewModel entity in e.OldItems)
+                entity.PropertyChanged -= OnEntityPropertyChanged;
+        }
+
+        if (e.NewItems is not null)
+        {
+            foreach (EntityViewModel entity in e.NewItems)
+            {
+                entity.ShowDescriptionsInDiagram = ShowColumnDescriptionsInDiagram;
+                entity.PropertyChanged += OnEntityPropertyChanged;
+            }
+        }
+
+        OnPropertyChanged(nameof(Entities));
+        RefreshCanvasSize();
+    }
+
+    private void OnEntityPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is nameof(EntityViewModel.X) or nameof(EntityViewModel.Y) or nameof(EntityViewModel.Width) or nameof(EntityViewModel.DisplayHeight))
+            RefreshCanvasSize();
+    }
+
+    partial void OnShowColumnDescriptionsInDiagramChanged(bool value)
+    {
+        foreach (var entity in Entities)
+            entity.ShowDescriptionsInDiagram = value;
+
+        RefreshCanvasSize();
     }
 
     // ---------------- Auto-save / restore ----------------
@@ -334,11 +367,34 @@ public partial class MainViewModel : ObservableObject
 
     /// <summary>エンティティを格子状に整列します。</summary>
     [RelayCommand]
-    private void AutoLayoutGrid() => AutoLayoutService.LayoutGrid(Entities);
+    private void AutoLayoutGrid()
+    {
+        AutoLayoutService.LayoutGrid(Entities);
+        RefreshCanvasSize();
+    }
 
     /// <summary>エンティティをツリー状（リレーション階層）で整列します。</summary>
     [RelayCommand]
-    private void AutoLayoutTree() => AutoLayoutService.LayoutTree(Entities, Relationships);
+    private void AutoLayoutTree()
+    {
+        AutoLayoutService.LayoutTree(Entities, Relationships);
+        RefreshCanvasSize();
+    }
+
+    /// <summary>全エンティティの表示幅を内容に合わせて自動調整します。</summary>
+    [RelayCommand]
+    private void AutoFitEntityWidths()
+    {
+        AutoFitEntityWidths(Entities);
+        RefreshCanvasSize();
+    }
+
+    /// <summary>指定エンティティ群の表示幅を一括で自動調整します。</summary>
+    private static void AutoFitEntityWidths(IEnumerable<EntityViewModel> entities)
+    {
+        foreach (var entity in entities)
+            entity.AutoFitWidth();
+    }
 
     // ---------------- Export ----------------
 
@@ -409,7 +465,9 @@ public partial class MainViewModel : ObservableObject
             // 取り込んだ後に自動レイアウト (Tree)
             var cmd = new ImportSchemaCommand(this, result.Entities, result.Relationships);
             UndoRedo.Execute(cmd);
+            AutoFitEntityWidths(Entities);
             AutoLayoutService.LayoutTree(Entities, Relationships);
+            RefreshCanvasSize();
         }
         catch (System.Exception ex)
         {
@@ -481,7 +539,9 @@ public partial class MainViewModel : ObservableObject
 
         var cmd = new ImportSchemaCommand(this, entities, relationships);
         UndoRedo.Execute(cmd);
+        AutoFitEntityWidths(Entities);
         AutoLayoutService.LayoutTree(Entities, Relationships);
+        RefreshCanvasSize();
     }
 
     // ---------------- Save / Load ----------------

@@ -23,10 +23,6 @@ public static class AutoLayoutService
     /// <summary>左上の余白 (px)。</summary>
     private const double Margin = 40;
 
-    /// <summary>エンティティの推定高さ (ヘッダー + カラム行)。</summary>
-    private static double EstimateHeight(EntityViewModel e)
-        => 40 + Math.Max(1, e.Columns.Count) * 24;
-
     /// <summary>
     /// エンティティを格子状に並べ替えます。
     /// </summary>
@@ -46,7 +42,7 @@ public static class AutoLayoutService
             int c = i % columns;
             int r = i / columns;
             colWidths[c] = Math.Max(colWidths[c], entities[i].Width + GapX);
-            rowHeights[r] = Math.Max(rowHeights[r], EstimateHeight(entities[i]) + GapY);
+            rowHeights[r] = Math.Max(rowHeights[r], entities[i].DisplayHeight + GapY);
         }
 
         for (int i = 0; i < entities.Count; i++)
@@ -117,7 +113,7 @@ public static class AutoLayoutService
         var depthHeight = new Dictionary<int, double>();
         foreach (var (depth, list) in levels)
         {
-            depthHeight[depth] = list.Max(e => EstimateHeight(e));
+            depthHeight[depth] = list.Max(e => e.DisplayHeight);
         }
 
         foreach (var (depth, list) in levels)

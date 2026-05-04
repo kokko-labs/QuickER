@@ -51,4 +51,34 @@ public class AutoLayoutServiceTests
         b.Y.Should().BeLessThan(a.Y);
         b.Y.Should().BeLessThan(c.Y);
     }
+
+    [Fact(DisplayName = "LayoutGrid: 説明表示時は説明込みの高さで整列される")]
+    public void LayoutGrid_UsesDisplayHeightWhenDescriptionsAreVisible()
+    {
+        var first = new EntityViewModel(new Entity
+        {
+            TableName = "Orders",
+            Width = 220,
+            Description = "テーブル説明が複数行になるように十分長い文字列です。テーブル説明が複数行になるように十分長い文字列です。",
+            Columns =
+            {
+                new Column
+                {
+                    Name = "CustomerName",
+                    DataType = "nvarchar(100)",
+                    Description = "カラム説明も折り返されるように十分長い文字列を設定しています。"
+                }
+            }
+        });
+        first.ShowDescriptionsInDiagram = true;
+
+        var second = NewEntity("Customers");
+        second.ShowDescriptionsInDiagram = true;
+
+        var list = new List<EntityViewModel> { first, second };
+
+        AutoLayoutService.LayoutGrid(list, columns: 1);
+
+        second.Y.Should().BeGreaterThan(first.Y + first.DisplayHeight);
+    }
 }

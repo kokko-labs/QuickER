@@ -16,11 +16,14 @@ namespace ERDesigner.ViewModels;
 /// </remarks>
 public partial class RelationshipViewModel : ObservableObject
 {
-    /// <summary>マーカーが端点から内側に置かれる距離 (px)。</summary>
-    private const double MarkerOffset = 14;
+    /// <summary>端点マーカーの描画サイズ (px)。</summary>
+    private const double MarkerSize = 20;
 
-    /// <summary>端点計算用のエンティティ高さ（近似値）。</summary>
-    private const double EntityHeightApprox = 60;
+    /// <summary>端点マーカーがエンティティ外側へ離れる余白 (px)。</summary>
+    private const double MarkerGap = 4;
+
+    /// <summary>マーカー中心が端点から外側へ置かれる距離 (px)。</summary>
+    private const double MarkerOffset = MarkerSize / 2 + MarkerGap;
 
     /// <summary>モデルと同じ ID。</summary>
     public Guid Id { get; }
@@ -52,7 +55,7 @@ public partial class RelationshipViewModel : ObservableObject
     /// <summary>両端の位置・幅が変わったら端点プロパティを再通知します。</summary>
     private void OnEndpointChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName is nameof(EntityViewModel.X) or nameof(EntityViewModel.Y) or nameof(EntityViewModel.Width))
+        if (e.PropertyName is nameof(EntityViewModel.X) or nameof(EntityViewModel.Y) or nameof(EntityViewModel.Width) or nameof(EntityViewModel.DisplayHeight))
         {
             NotifyGeometryChanged();
         }
@@ -65,8 +68,12 @@ public partial class RelationshipViewModel : ObservableObject
         OnPropertyChanged(nameof(Y1));
         OnPropertyChanged(nameof(X2));
         OnPropertyChanged(nameof(Y2));
+        OnPropertyChanged(nameof(SourceMarkerLeft));
+        OnPropertyChanged(nameof(SourceMarkerTop));
         OnPropertyChanged(nameof(SourceMarkerX));
         OnPropertyChanged(nameof(SourceMarkerY));
+        OnPropertyChanged(nameof(TargetMarkerLeft));
+        OnPropertyChanged(nameof(TargetMarkerTop));
         OnPropertyChanged(nameof(TargetMarkerX));
         OnPropertyChanged(nameof(TargetMarkerY));
         OnPropertyChanged(nameof(SourceMarkerAngle));
@@ -85,16 +92,16 @@ public partial class RelationshipViewModel : ObservableObject
 
     // ===== 端点座標 =====
 
-    /// <summary>起点エンティティの中央 X 座標。</summary>
-    public double X1 => Source.X + Source.Width / 2;
-    /// <summary>起点エンティティのヘッダ中心 Y 座標。</summary>
-    public double Y1 => Source.Y + EntityHeightApprox / 2;
-    /// <summary>終点エンティティの中央 X 座標。</summary>
-    public double X2 => Target.X + Target.Width / 2;
-    /// <summary>終点エンティティのヘッダ中心 Y 座標。</summary>
-    public double Y2 => Target.Y + EntityHeightApprox / 2;
+    /// <summary>起点エンティティ境界上の接続 X 座標。</summary>
+    public double X1 => GetBoundaryPoint(Source, Target).x;
+    /// <summary>起点エンティティ境界上の接続 Y 座標。</summary>
+    public double Y1 => GetBoundaryPoint(Source, Target).y;
+    /// <summary>終点エンティティ境界上の接続 X 座標。</summary>
+    public double X2 => GetBoundaryPoint(Target, Source).x;
+    /// <summary>終点エンティティ境界上の接続 Y 座標。</summary>
+    public double Y2 => GetBoundaryPoint(Target, Source).y;
 
-    // ===== マーカー位置（端点から内側に MarkerOffset 移動した点） =====
+    // ===== マーカー位置（端点からエンティティ外側へ MarkerOffset 移動した点） =====
 
     private (double dx, double dy, double len) Direction()
     {
@@ -105,34 +112,72 @@ public partial class RelationshipViewModel : ObservableObject
         return (dx / len, dy / len, len);
     }
 
+    /// <summary>エンティティ中心から相手方向へ伸ばした線と境界の交点を返します。</summary>
+    private static (double x, double y) GetBoundaryPoint(EntityViewModel source, EntityViewModel target)
+    {
+        var sourceCenterX = source.X + source.Width / 2;
+        var sourceCenterY = source.Y + source.DisplayHeight / 2;
+        var targetCenterX = target.X + target.Width / 2;
+        var targetCenterY = target.Y + target.DisplayHeight / 2;
+
+        var dx = targetCenterX - sourceCenterX;
+        var dy = targetCenterY - sourceCenterY;
+        if (Math.Abs(dx) < 0.0001 && Math.Abs(dy) < 0.0001)
+            return (sourceCenterX, sourceCenterY);
+
+        var scaleX = Math.Abs(dx) < 0.0001 ? double.PositiveInfinity : (source.Width / 2) / Math.Abs(dx);
+        var scaleY = Math.Abs(dy) < 0.0001 ? double.PositiveInfinity : (source.DisplayHeight / 2) / Math.Abs(dy);
+        var scale = Math.Min(scaleX, scaleY);
+
+        return (sourceCenterX + dx * scale, sourceCenterY + dy * scale);
+    }
+
     /// <summary>起点側マーカーの中心 X。</summary>
     public double SourceMarkerX
     {
         get { var (ux, _, _) = Direction(); return X1 + ux * MarkerOffset; }
     }
+
+    /// <summary>起点側マーカー描画領域の左上 X。</summary>
+    public double SourceMarkerLeft => SourceMarkerX - MarkerSize / 2;
+
     /// <summary>起点側マーカーの中心 Y。</summary>
     public double SourceMarkerY
     {
         get { var (_, uy, _) = Direction(); return Y1 + uy * MarkerOffset; }
     }
+
+    /// <summary>起点側マーカー描画領域の左上 Y。</summary>
+    public double SourceMarkerTop => SourceMarkerY - MarkerSize / 2;
+
     /// <summary>終点側マーカーの中心 X。</summary>
     public double TargetMarkerX
     {
         get { var (ux, _, _) = Direction(); return X2 - ux * MarkerOffset; }
     }
+
+    /// <summary>終点側マーカー描画領域の左上 X。</summary>
+    public double TargetMarkerLeft => TargetMarkerX - MarkerSize / 2;
+
     /// <summary>終点側マーカーの中心 Y。</summary>
     public double TargetMarkerY
     {
         get { var (_, uy, _) = Direction(); return Y2 - uy * MarkerOffset; }
     }
 
-    /// <summary>起点マーカーを線方向に合わせて回転させる角度（度）。</summary>
+    /// <summary>終点側マーカー描画領域の左上 Y。</summary>
+    public double TargetMarkerTop => TargetMarkerY - MarkerSize / 2;
+
+    /// <summary>起点マーカーをエンティティ側へ向けて回転させる角度（度）。</summary>
     public double SourceMarkerAngle
+    {
+        get { var (ux, uy, _) = Direction(); return Math.Atan2(uy, ux) * 180.0 / Math.PI + 180; }
+    }
+    /// <summary>終点マーカーをエンティティ側へ向けて回転させる角度（度）。</summary>
+    public double TargetMarkerAngle
     {
         get { var (ux, uy, _) = Direction(); return Math.Atan2(uy, ux) * 180.0 / Math.PI; }
     }
-    /// <summary>終点マーカーを線方向に合わせて回転させる角度（度・反転）。</summary>
-    public double TargetMarkerAngle => SourceMarkerAngle + 180;
 
     /// <summary>線の中点 X（ラベル表示用）。</summary>
     public double LabelX => (X1 + X2) / 2;

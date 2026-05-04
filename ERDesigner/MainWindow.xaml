@@ -243,6 +243,12 @@
                         <TextBlock Style="{StaticResource ToolBarCaption}" Text="整列(木)"/>
                     </StackPanel>
                 </Button>
+                <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding AutoFitEntityWidthsCommand}" ToolTip="カラム名と型が重ならない幅に自動調整">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource ToolBarIcon}" Text="↔"/>
+                        <TextBlock Style="{StaticResource ToolBarCaption}" Text="幅自動"/>
+                    </StackPanel>
+                </Button>
                 <Separator Margin="6,4"/>
                 <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding ExportPngCommand}" CommandParameter="{Binding ElementName=DiagramCanvas}" ToolTip="PNG 画像にエクスポート">
                     <StackPanel>
@@ -431,30 +437,26 @@
                                               IsHitTestVisible="False"/>
 
                                         <!-- 起点マーカー -->
-                                        <ContentControl Canvas.Left="{Binding SourceMarkerX}"
-                                                        Canvas.Top="{Binding SourceMarkerY}"
+                                        <ContentControl Canvas.Left="{Binding SourceMarkerLeft}"
+                                                        Canvas.Top="{Binding SourceMarkerTop}"
+                                                        Width="20" Height="20"
                                                         Content="{Binding SourceMarker}"
                                                         ContentTemplate="{StaticResource EndpointMarkerTemplate}"
                                                         IsHitTestVisible="False">
                                             <ContentControl.RenderTransform>
-                                                <TransformGroup>
-                                                    <TranslateTransform X="-10" Y="-10"/>
-                                                    <RotateTransform Angle="{Binding SourceMarkerAngle}" CenterX="10" CenterY="10"/>
-                                                </TransformGroup>
+                                                <RotateTransform Angle="{Binding SourceMarkerAngle}" CenterX="10" CenterY="10"/>
                                             </ContentControl.RenderTransform>
                                         </ContentControl>
 
                                         <!-- 終点マーカー -->
-                                        <ContentControl Canvas.Left="{Binding TargetMarkerX}"
-                                                        Canvas.Top="{Binding TargetMarkerY}"
+                                        <ContentControl Canvas.Left="{Binding TargetMarkerLeft}"
+                                                        Canvas.Top="{Binding TargetMarkerTop}"
+                                                        Width="20" Height="20"
                                                         Content="{Binding TargetMarker}"
                                                         ContentTemplate="{StaticResource EndpointMarkerTemplate}"
                                                         IsHitTestVisible="False">
                                             <ContentControl.RenderTransform>
-                                                <TransformGroup>
-                                                    <TranslateTransform X="-10" Y="-10"/>
-                                                    <RotateTransform Angle="{Binding TargetMarkerAngle}" CenterX="10" CenterY="10"/>
-                                                </TransformGroup>
+                                                <RotateTransform Angle="{Binding TargetMarkerAngle}" CenterX="10" CenterY="10"/>
                                             </ContentControl.RenderTransform>
                                         </ContentControl>
 
