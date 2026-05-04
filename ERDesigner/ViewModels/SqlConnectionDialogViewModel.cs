@@ -17,7 +17,7 @@ public partial class SqlConnectionDialogViewModel : ObservableObject
 {
     private readonly SqlConnectionProfileStore _store;
 
-    /// <summary>サーバ名。</summary>
+    /// <summary>サーバー名。</summary>
     [ObservableProperty] private string _server = "localhost";
     /// <summary>データベース名。</summary>
     [ObservableProperty] private string _database = string.Empty;
@@ -27,7 +27,7 @@ public partial class SqlConnectionDialogViewModel : ObservableObject
     [ObservableProperty] private string _userId = string.Empty;
     /// <summary>SQL/Azure AD のパスワード。</summary>
     [ObservableProperty] private string _password = string.Empty;
-    /// <summary>サーバ証明書を信頼するか。</summary>
+    /// <summary>サーバー証明書を信頼するか。</summary>
     [ObservableProperty] private bool _trustServerCertificate = true;
     /// <summary>パスワードも DPAPI で暗号化保存するか (SQL/Azure AD 認証のときのみ意味あり)。</summary>
     [ObservableProperty] private bool _savePassword;
@@ -59,7 +59,9 @@ public partial class SqlConnectionDialogViewModel : ObservableObject
     public SqlConnectionDialogViewModel(SqlConnectionProfileStore? store = null)
     {
         _store = store ?? new SqlConnectionProfileStore();
-        ReloadProfiles(selectFirst: true);
+        // 保存済み接続の先頭を自動選択すると、呼び出し元が復元した前回接続情報を上書きしてしまうため、初期選択は行わない。
+        ReloadProfiles(selectFirst: false);
+        RestoreLastConnection();
     }
 
     private void ReloadProfiles(bool selectFirst)
@@ -67,24 +69,61 @@ public partial class SqlConnectionDialogViewModel : ObservableObject
         Profiles.Clear();
         foreach (var p in _store.LoadAll())
             Profiles.Add(p);
+
         if (selectFirst && Profiles.Count > 0)
+        {
             SelectedProfile = Profiles[0];
+            return;
+        }
+
+        SelectedProfile = null;
     }
 
     partial void OnAuthModeChanged(SqlAuthMode value) => OnPropertyChanged(nameof(ShowCredentials));
+
+    /// <summary>前回接続情報があれば入力欄へ復元します。</summary>
+    private void RestoreLastConnection()
+    {
+        var lastUsed = _store.LoadLastUsed();
+        if (lastUsed is null) return;
+
+        ApplyConnection(lastUsed.Value.Profile, lastUsed.Value.Password, updateProfileName: false);
+        StatusMessage = "前回接続情報を復元しました。";
+    }
+
+    /// <summary>プロファイルまたは前回接続情報から入力欄へ接続内容を反映します。</summary>
+    private void ApplyConnection(SqlConnectionProfile profile, string password, bool updateProfileName)
+    {
+        Server = profile.Server;
+        Database = profile.Database;
+        AuthMode = profile.AuthMode;
+        UserId = profile.UserId;
+        TrustServerCertificate = profile.TrustServerCertificate;
+        SavePassword = profile.SavePassword;
+        Password = password;
+
+        if (updateProfileName)
+            ProfileName = profile.Name;
+    }
+
+    /// <summary>現在の入力内容から接続プロファイルを生成します。</summary>
+    private SqlConnectionProfile CreateCurrentProfile(Guid? id = null, string? name = null) => new()
+    {
+        Id = id ?? Guid.NewGuid(),
+        Name = name ?? string.Empty,
+        Server = Server,
+        Database = Database,
+        AuthMode = AuthMode,
+        UserId = UserId,
+        TrustServerCertificate = TrustServerCertificate,
+        SavePassword = SavePassword
+    };
 
     /// <summary>プロファイル選択時、入力欄に値を反映します。</summary>
     partial void OnSelectedProfileChanged(SqlConnectionProfile? value)
     {
         if (value is null) return;
-        Server = value.Server;
-        Database = value.Database;
-        AuthMode = value.AuthMode;
-        UserId = value.UserId;
-        TrustServerCertificate = value.TrustServerCertificate;
-        SavePassword = value.SavePassword;
-        Password = value.SavePassword ? _store.LoadPassword(value.Id) : string.Empty;
-        ProfileName = value.Name;
+        ApplyConnection(value, value.SavePassword ? _store.LoadPassword(value.Id) : string.Empty, updateProfileName: true);
         StatusMessage = $"プロファイル '{value.Name}' を読み込みました。";
     }
 
@@ -136,17 +175,7 @@ public partial class SqlConnectionDialogViewModel : ObservableObject
         var existing = Profiles.FirstOrDefault(p =>
             string.Equals(p.Name, ProfileName, StringComparison.OrdinalIgnoreCase));
 
-        var profile = new SqlConnectionProfile
-        {
-            Id = existing?.Id ?? Guid.NewGuid(),
-            Name = ProfileName.Trim(),
-            Server = Server,
-            Database = Database,
-            AuthMode = AuthMode,
-            UserId = UserId,
-            TrustServerCertificate = TrustServerCertificate,
-            SavePassword = SavePassword
-        };
+        var profile = CreateCurrentProfile(existing?.Id, ProfileName.Trim());
 
         _store.Upsert(profile, Password);
         ReloadProfiles(selectFirst: false);
@@ -183,10 +212,13 @@ public partial class SqlConnectionDialogViewModel : ObservableObject
     {
         if (string.IsNullOrWhiteSpace(Server) || string.IsNullOrWhiteSpace(Database))
         {
-            StatusMessage = "サーバ名とデータベース名を入力してください。";
+            StatusMessage = "サーバー名とデータベース名を入力してください。";
             return;
         }
-        Result = ToSettings();
+
+        var currentProfile = CreateCurrentProfile();
+        _store.SaveLastUsed(currentProfile, Password);
+        Result = currentProfile.ToSettings(Password);
         CloseAction?.Invoke(true);
     }
 

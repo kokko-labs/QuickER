@@ -7,7 +7,7 @@ namespace ERDesigner.Services;
 /// </summary>
 public class SqlConnectionSettings
 {
-    /// <summary>サーバ名 (例: <c>localhost</c>, <c>tcp:server.database.windows.net,1433</c>)。</summary>
+    /// <summary>サーバー名 (例: <c>localhost</c>, <c>tcp:server.database.windows.net,1433</c>)。</summary>
     public string Server { get; set; } = string.Empty;
 
     /// <summary>データベース名。</summary>
@@ -22,7 +22,7 @@ public class SqlConnectionSettings
     /// <summary>SQL 認証または Azure AD Password 認証時のパスワード。</summary>
     public string Password { get; set; } = string.Empty;
 
-    /// <summary>サーバ証明書を信頼するか。</summary>
+    /// <summary>サーバー証明書を信頼するか。</summary>
     public bool TrustServerCertificate { get; set; } = true;
 
     /// <summary>接続タイムアウト (秒)。</summary>

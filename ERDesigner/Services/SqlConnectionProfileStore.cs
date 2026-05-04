@@ -29,6 +29,9 @@ public class SqlConnectionProfileStore
     /// <summary>パスワード暗号ファイルの格納フォルダ。</summary>
     public string SecretsFolder => Path.Combine(_folder, "connection-secrets");
 
+    /// <summary>前回接続情報 JSON のファイルパス。</summary>
+    public string LastConnectionPath => Path.Combine(_folder, "last-connection.json");
+
     /// <summary>既定 (<c>%AppData%\ERDesigner</c>) のストアを生成します。</summary>
     public SqlConnectionProfileStore()
         : this(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ERDesigner"), true)
@@ -60,12 +63,52 @@ public class SqlConnectionProfileStore
         }
     }
 
+    /// <summary>
+    /// 前回使用した接続情報を読み込みます。
+    /// パスワードは <see cref="SqlConnectionProfile.SavePassword"/> が有効な場合のみ復号して返します。
+    /// </summary>
+    public (SqlConnectionProfile Profile, string Password)? LoadLastUsed()
+    {
+        if (!File.Exists(LastConnectionPath)) return null;
+        try
+        {
+            var json = File.ReadAllText(LastConnectionPath);
+            var profile = JsonSerializer.Deserialize<SqlConnectionProfile>(json, JsonOpts);
+            if (profile is null) return null;
+
+            var password = profile.SavePassword
+                ? LoadSecret(LastConnectionSecretPath())
+                : string.Empty;
+            return (profile, password);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     /// <summary>すべてのプロファイルを保存します。</summary>
     public void SaveAll(IEnumerable<SqlConnectionProfile> profiles)
     {
         Directory.CreateDirectory(_folder);
         var json = JsonSerializer.Serialize(profiles.ToList(), JsonOpts);
         File.WriteAllText(ProfilesPath, json);
+    }
+
+    /// <summary>
+    /// 前回使用した接続情報を保存します。
+    /// 保存済み接続とは別に保持し、次回ダイアログ表示時の初期値復元に使います。
+    /// </summary>
+    public void SaveLastUsed(SqlConnectionProfile profile, string password)
+    {
+        Directory.CreateDirectory(_folder);
+        var json = JsonSerializer.Serialize(profile, JsonOpts);
+        File.WriteAllText(LastConnectionPath, json);
+
+        if (profile.SavePassword && !string.IsNullOrEmpty(password))
+            SaveSecret(LastConnectionSecretPath(), password);
+        else
+            DeleteSecret(LastConnectionSecretPath());
     }
 
     /// <summary>1 件のプロファイルを追加または更新し、必要ならパスワードも暗号化保存します。</summary>
@@ -98,6 +141,11 @@ public class SqlConnectionProfileStore
     public string LoadPassword(Guid id)
     {
         var path = SecretPath(id);
+        return LoadSecret(path);
+    }
+
+    private string LoadSecret(string path)
+    {
         if (!File.Exists(path)) return string.Empty;
         try
         {
@@ -116,20 +164,28 @@ public class SqlConnectionProfileStore
     }
 
     private void SaveSecret(Guid id, string password)
+        => SaveSecret(SecretPath(id), password);
+
+    private void SaveSecret(string path, string password)
     {
-        Directory.CreateDirectory(SecretsFolder);
+        var directory = Path.GetDirectoryName(path);
+        if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
         var raw = Encoding.UTF8.GetBytes(password);
         var bytes = _useDpapi
             ? ProtectedData.Protect(raw, optionalEntropy: null, scope: DataProtectionScope.CurrentUser)
             : raw;
-        File.WriteAllBytes(SecretPath(id), bytes);
+        File.WriteAllBytes(path, bytes);
     }
 
     private void DeleteSecret(Guid id)
+        => DeleteSecret(SecretPath(id));
+
+    private void DeleteSecret(string path)
     {
-        var p = SecretPath(id);
-        if (File.Exists(p)) File.Delete(p);
+        if (File.Exists(path)) File.Delete(path);
     }
 
     private string SecretPath(Guid id) => Path.Combine(SecretsFolder, id.ToString("N") + ".dat");
+
+    private string LastConnectionSecretPath() => Path.Combine(SecretsFolder, "last-connection.dat");
 }

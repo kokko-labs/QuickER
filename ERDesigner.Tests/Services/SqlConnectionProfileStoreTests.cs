@@ -92,4 +92,29 @@ public class SqlConnectionProfileStoreTests : IDisposable
 
         store.LoadPassword(p.Id).Should().BeEmpty();
     }
+
+    [Fact(DisplayName = "前回接続情報はデータベース名を含めて保存・復元される")]
+    public void LastUsed_RoundTrip_RestoresDatabase()
+    {
+        var store = CreateStore();
+        var profile = new SqlConnectionProfile
+        {
+            Server = "sql01",
+            Database = "SalesDb",
+            AuthMode = SqlAuthMode.SqlServer,
+            UserId = "sa",
+            TrustServerCertificate = false,
+            SavePassword = true
+        };
+
+        store.SaveLastUsed(profile, "secret");
+        var lastUsed = store.LoadLastUsed();
+
+        lastUsed.Should().NotBeNull();
+        lastUsed!.Value.Profile.Server.Should().Be("sql01");
+        lastUsed.Value.Profile.Database.Should().Be("SalesDb");
+        lastUsed.Value.Profile.UserId.Should().Be("sa");
+        lastUsed.Value.Profile.TrustServerCertificate.Should().BeFalse();
+        lastUsed.Value.Password.Should().Be("secret");
+    }
 }

@@ -14,7 +14,7 @@ public class SqlConnectionProfile
     /// <summary>表示名 (一覧で選ぶラベル)。</summary>
     public string Name { get; set; } = string.Empty;
 
-    /// <summary>サーバ名。</summary>
+    /// <summary>サーバー名。</summary>
     public string Server { get; set; } = string.Empty;
 
     /// <summary>データベース名。</summary>
@@ -26,7 +26,7 @@ public class SqlConnectionProfile
     /// <summary>SQL/Azure AD 認証時のユーザー名。</summary>
     public string UserId { get; set; } = string.Empty;
 
-    /// <summary>サーバ証明書を信頼するか。</summary>
+    /// <summary>サーバー証明書を信頼するか。</summary>
     public bool TrustServerCertificate { get; set; } = true;
 
     /// <summary>パスワードを暗号化保存するか。</summary>

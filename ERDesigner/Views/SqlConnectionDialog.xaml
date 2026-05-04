@@ -63,7 +63,7 @@
 
         <Separator Grid.Row="2" Grid.ColumnSpan="2" Margin="0,8"/>
 
-        <TextBlock Grid.Row="3" Grid.Column="0" Text="サーバ" VerticalAlignment="Center" Margin="0,4"/>
+        <TextBlock Grid.Row="3" Grid.Column="0" Text="サーバー" VerticalAlignment="Center" Margin="0,4"/>
         <TextBox  Grid.Row="3" Grid.Column="1" Margin="0,4"
                   Text="{Binding Server, UpdateSourceTrigger=PropertyChanged}"/>
 
@@ -99,7 +99,7 @@
 
         <CheckBox Grid.Row="8" Grid.Column="1" Margin="0,8"
                   IsChecked="{Binding TrustServerCertificate}"
-                  Content="サーバ証明書を信頼する (TrustServerCertificate)"/>
+                  Content="サーバー証明書を信頼する (TrustServerCertificate)"/>
 
         <TextBlock Grid.Row="9" Grid.ColumnSpan="2" Margin="0,6"
                    TextWrapping="Wrap" Foreground="#374151"
