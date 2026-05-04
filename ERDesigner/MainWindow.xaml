@@ -5,7 +5,7 @@
         xmlns:models="clr-namespace:ERDesigner.Models"
         xmlns:beh="clr-namespace:ERDesigner.Behaviors"
         Title="ER図作成ツール"
-        Height="760" Width="1200"
+        Height="760" Width="1400"
         FontFamily="Segoe UI, Yu Gothic UI, Meiryo"
         FontSize="13"
         Background="#F5F7FA">
@@ -20,6 +20,7 @@
         <KeyBinding Key="N" Modifiers="Control" Command="{Binding NewDiagramCommand}"/>
         <KeyBinding Key="O" Modifiers="Control" Command="{Binding OpenCommand}"/>
         <KeyBinding Key="D" Modifiers="Control" Command="{Binding DuplicateSelectedEntityCommand}"/>
+        <KeyBinding Key="Delete" Command="{Binding RemoveSelectedEntityCommand}"/>
     </Window.InputBindings>
 
     <Window.Resources>
@@ -310,7 +311,7 @@
                 <ColumnDefinition Width="200"/>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="5"/>
-                <ColumnDefinition Width="380" MinWidth="250"/>
+                <ColumnDefinition Width="460" MinWidth="250"/>
             </Grid.ColumnDefinitions>
 
             <!-- GridSplitter: ER図とプロパティパネルの境界ドラッグ -->
@@ -654,17 +655,24 @@
 
                         <!-- DataGrid: 残りスペースを占有 -->
                         <DataGrid ItemsSource="{Binding SelectedEntity.Columns}"
+                                  x:Name="ColumnsDataGrid"
                                   SelectedItem="{Binding SelectedColumn, Mode=TwoWay}"
                                   AutoGenerateColumns="False"
-                                  CanUserAddRows="False" HeadersVisibility="Column"
-                                  RowHeaderWidth="0" GridLinesVisibility="Horizontal"
+                                  CanUserReorderColumns="False"
+                                  CanUserSortColumns="False"
+                                  CanUserResizeRows="False"
+                                  CanUserAddRows="False"
+                                  HeadersVisibility="All"
+                                  RowHeaderWidth="20"
+                                  beh:DataGridRowReorderBehavior.IsEnabled="True"
+                                  GridLinesVisibility="Horizontal"
                                   HorizontalGridLinesBrush="#EEF1F5"
                                   Background="White" BorderBrush="{StaticResource DividerBrush}">
                             <DataGrid.Columns>
                                 <DataGridCheckBoxColumn Header="PK" Binding="{Binding IsPrimaryKey, UpdateSourceTrigger=PropertyChanged}" Width="36"/>
                                 <DataGridCheckBoxColumn Header="FK" Binding="{Binding IsForeignKey, UpdateSourceTrigger=PropertyChanged}" Width="36"/>
                                 <DataGridTextColumn Header="カラム名" Binding="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Width="*"/>
-                                <DataGridTemplateColumn Header="型" Width="120">
+                                <DataGridTemplateColumn Header="型" Width="100">
                                     <DataGridTemplateColumn.CellTemplate>
                                         <DataTemplate>
                                             <TextBlock Text="{Binding DataType}" VerticalAlignment="Center" Margin="4,0"/>

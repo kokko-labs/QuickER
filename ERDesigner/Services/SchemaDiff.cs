@@ -28,6 +28,8 @@ public enum SchemaDiffKind
     SetTableDescription,
     /// <summary>カラムの MS_Description を設定 / 更新 / 削除する。</summary>
     SetColumnDescription,
+    /// <summary>テーブル再作成が必要であることを示す通知（SQL 実行対象外）。</summary>
+    RebuildTable,
 }
 
 /// <summary>
@@ -64,6 +66,13 @@ public sealed class SchemaDiffItem : INotifyPropertyChanged
     public string? OldDescription { get; init; }
 
     private bool _isSelected = true;
+
+    /// <summary>
+    /// UI 上で選択変更できるか。
+    /// 情報表示専用の項目は false にします。
+    /// </summary>
+    public bool IsSelectable { get; init; } = true;
+
     /// <summary>UI で実行対象として選択中か。</summary>
     public bool IsSelected
     {

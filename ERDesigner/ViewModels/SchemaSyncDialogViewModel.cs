@@ -64,6 +64,20 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
                 live.Entities, live.Relationships,
                 _targetEntities, _targetRelationships);
 
+            // 列順差分は DB 同期対象外のため、検知時は案内メッセージのみ表示する。
+            var orderChangedTables = SchemaDiffService.DetectColumnOrderChanges(live.Entities, _targetEntities);
+            foreach (var tableName in orderChangedTables)
+            {
+                diff.Items.Add(new SchemaDiffItem
+                {
+                    Kind = SchemaDiffKind.RebuildTable,
+                    TableName = tableName,
+                    Description = $"列順変更は DB 同期しません: [{tableName}]",
+                    IsSelected = false,
+                    IsSelectable = false
+                });
+            }
+
             DiffItems.Clear();
             foreach (var item in diff.Items)
             {

@@ -40,7 +40,10 @@
                     <ListBox.ItemTemplate>
                         <DataTemplate>
                             <DockPanel Margin="0,2">
-                                <CheckBox DockPanel.Dock="Left" IsChecked="{Binding IsSelected}" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                <CheckBox DockPanel.Dock="Left"
+                                          IsChecked="{Binding IsSelected}"
+                                          IsEnabled="{Binding IsSelectable}"
+                                          VerticalAlignment="Center" Margin="0,0,6,0"/>
                                 <TextBlock Text="{Binding Kind}" Width="110" Foreground="#6B7280" VerticalAlignment="Center"/>
                                 <TextBlock Text="{Binding Description}" TextWrapping="Wrap" VerticalAlignment="Center"/>
                             </DockPanel>

@@ -276,6 +276,28 @@ public class SchemaDiffService
         return diff;
     }
 
+    /// <summary>
+    /// DB 側とダイアグラム側で「同一列集合だが順序のみ異なる」テーブル名一覧を返します。
+    /// 列追加/削除がある場合は、列順差分としては扱いません。
+    /// </summary>
+    public static IReadOnlyList<string> DetectColumnOrderChanges(
+        IReadOnlyList<Entity> liveEntities,
+        IReadOnlyList<Entity> targetEntities)
+    {
+        var changed = new List<string>();
+        var liveByName = liveEntities.ToDictionary(NormalizeTable, StringComparer.OrdinalIgnoreCase);
+
+        foreach (var target in targetEntities)
+        {
+            var name = NormalizeTable(target);
+            if (!liveByName.TryGetValue(name, out var live)) continue;
+            if (HasColumnOrderChanged(live, target))
+                changed.Add(name);
+        }
+
+        return changed;
+    }
+
     /// <summary>テーブル名を「schema.name」または「name」の正規形に揃えます。</summary>
     public static string NormalizeTable(Entity e)
     {
@@ -313,6 +335,28 @@ public class SchemaDiffService
 
     private static bool IsSameType(string a, string b)
         => string.Equals((a ?? "").Trim(), (b ?? "").Trim(), StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// 同一列集合（件数・名前一致）のテーブルで、列順のみ変更されているかを判定します。
+    /// </summary>
+    private static bool HasColumnOrderChanged(Entity live, Entity target)
+    {
+        if (live.Columns.Count != target.Columns.Count) return false;
+
+        var liveNames = live.Columns.Select(c => c.Name).ToList();
+        var targetNames = target.Columns.Select(c => c.Name).ToList();
+
+        var liveSet = new HashSet<string>(liveNames, StringComparer.OrdinalIgnoreCase);
+        var targetSet = new HashSet<string>(targetNames, StringComparer.OrdinalIgnoreCase);
+        if (!liveSet.SetEquals(targetSet)) return false;
+
+        for (int i = 0; i < liveNames.Count; i++)
+        {
+            if (!string.Equals(liveNames[i], targetNames[i], StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        return false;
+    }
 
     private static string Truncate(string s, int max = 30)
         => s.Length <= max ? s : s.Substring(0, max) + "…";
