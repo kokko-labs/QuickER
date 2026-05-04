@@ -114,7 +114,7 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
     [RelayCommand]
     private void SelectAll()
     {
-        foreach (var i in DiffItems) i.IsSelected = true;
+        foreach (var i in DiffItems.Where(i => i.IsSelectable)) i.IsSelected = true;
         UpdatePreview();
     }
 
@@ -122,7 +122,7 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
     [RelayCommand]
     private void DeselectAll()
     {
-        foreach (var i in DiffItems) i.IsSelected = false;
+        foreach (var i in DiffItems.Where(i => i.IsSelectable)) i.IsSelected = false;
         UpdatePreview();
     }
 

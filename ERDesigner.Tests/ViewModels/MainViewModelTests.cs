@@ -81,15 +81,23 @@ public class MainViewModelTests
         var a = vm.Entities[0];
         var b = vm.Entities[1];
 
+        // 幾何条件を安定させるため、同じ Y 軸上に十分離して配置する。
+        a.X = 0;
+        a.Y = 0;
+        b.X = 400;
+        b.Y = 0;
+
         vm.StartAddOneToOneCommand.Execute(null);
         vm.OnEntityClicked(a);
         vm.OnEntityClicked(b);
 
         var rel = vm.Relationships[0];
         var oldX1 = rel.X1;
+        var oldX2 = rel.X2;
 
-        a.X = a.X + 200;
+        a.X = a.X + 100;
 
-        rel.X1.Should().Be(oldX1 + 200);
+        rel.X1.Should().Be(oldX1 + 100);
+        rel.X2.Should().Be(oldX2);
     }
 }

@@ -10,21 +10,21 @@ using ERDesigner.ViewModels;
 namespace ERDesigner.Behaviors;
 
 /// <summary>
-/// <see cref="DataGrid"/> ‚Ìsƒwƒbƒ_[‚©‚çƒhƒ‰ƒbƒO‚µ‚ÄAs‡‚ğ“ü‚ê‘Ö‚¦‚é“Y•tƒrƒwƒCƒrƒA‚Å‚·B
+/// <see cref="DataGrid"/> ã®è¡Œãƒ˜ãƒƒãƒ€ãƒ¼ã‚’ãƒ‰ãƒ©ãƒƒã‚°ã—ã¦ã€è¡Œé †ã‚’å…¥ã‚Œæ›¿ãˆã‚‹æ·»ä»˜ãƒ“ãƒ˜ã‚¤ãƒ“ã‚¢ã§ã™ã€‚
 /// </summary>
 /// <remarks>
 /// <para>
-/// ‘z’è—p“r‚ÍƒGƒ“ƒeƒBƒeƒB‚ÌƒJƒ‰ƒ€ˆê——‚Å‚·B
-/// <see cref="DataGrid.ItemsSource"/> ‚ª <see cref="ObservableCollection{T}"/> ‚Ìê‡‚É
-/// <c>Move</c> ‚Å•À‚Ñ‡‚ğ•ÏX‚µ‚Ü‚·B
+/// æƒ³å®šç”¨é€”ã¯ã‚¨ãƒ³ãƒ†ã‚£ãƒ†ã‚£ã®ã‚«ãƒ©ãƒ ä¸€è¦§ã§ã™ã€‚
+/// <see cref="DataGrid.ItemsSource"/> ãŒ <see cref="ObservableCollection{T}"/> ã®å ´åˆã«
+/// <c>Move</c> ã§ä¸¦ã³é †ã‚’å¤‰æ›´ã—ã¾ã™ã€‚
 /// </para>
 /// <para>
-/// ƒhƒ‰ƒbƒOŠJn‚Ísƒwƒbƒ_[ã‚Å‚Ì‚İ—LŒø‚Å‚·iƒZƒ‹•ÒW‚Æ‚Ì‹£‡‚ğ”ğ‚¯‚é‚½‚ßjB
+/// ãƒ‰ãƒ©ãƒƒã‚°é–‹å§‹ã¯è¡Œãƒ˜ãƒƒãƒ€ãƒ¼ä¸Šã§ã®ã¿æœ‰åŠ¹ã§ã™ï¼ˆã‚»ãƒ«ç·¨é›†ã¨ã®ç«¶åˆã‚’é¿ã‘ã‚‹ãŸã‚ï¼‰ã€‚
 /// </para>
 /// </remarks>
 public static class DataGridRowReorderBehavior
 {
-    /// <summary>ƒrƒwƒCƒrƒA—LŒø/–³Œø‚ğØ‚è‘Ö‚¦‚é“Y•tƒvƒƒpƒeƒB‚Å‚·B</summary>
+    /// <summary>ãƒ“ãƒ˜ã‚¤ãƒ“ã‚¢æœ‰åŠ¹/ç„¡åŠ¹ã‚’åˆ‡ã‚Šæ›¿ãˆã‚‹æ·»ä»˜ãƒ—ãƒ­ãƒ‘ãƒ†ã‚£ã§ã™ã€‚</summary>
     public static readonly DependencyProperty IsEnabledProperty =
         DependencyProperty.RegisterAttached(
             "IsEnabled",
@@ -32,12 +32,12 @@ public static class DataGridRowReorderBehavior
             typeof(DataGridRowReorderBehavior),
             new PropertyMetadata(false, OnIsEnabledChanged));
 
-    /// <summary><see cref="IsEnabledProperty"/> ‚ğİ’è‚µ‚Ü‚·B</summary>
+    /// <summary><see cref="IsEnabledProperty"/> ã‚’è¨­å®šã—ã¾ã™ã€‚</summary>
     public static void SetIsEnabled(DependencyObject d, bool value) => d.SetValue(IsEnabledProperty, value);
-    /// <summary><see cref="IsEnabledProperty"/> ‚ğæ“¾‚µ‚Ü‚·B</summary>
+    /// <summary><see cref="IsEnabledProperty"/> ã‚’å–å¾—ã—ã¾ã™ã€‚</summary>
     public static bool GetIsEnabled(DependencyObject d) => (bool)d.GetValue(IsEnabledProperty);
 
-    /// <summary>ƒhƒ‰ƒbƒOŠJn’n“_iƒ}ƒEƒXÀ•Wj‚ğ DataGrid ‚²‚Æ‚É•Û‚µ‚Ü‚·B</summary>
+    /// <summary>ãƒ‰ãƒ©ãƒƒã‚°é–‹å§‹åœ°ç‚¹ï¼ˆãƒã‚¦ã‚¹åº§æ¨™ï¼‰ã‚’ DataGrid ã”ã¨ã«ä¿æŒã—ã¾ã™ã€‚</summary>
     private static readonly DependencyProperty DragStartPointProperty =
         DependencyProperty.RegisterAttached(
             "DragStartPoint",
@@ -49,7 +49,7 @@ public static class DataGridRowReorderBehavior
     private static Point GetDragStartPoint(DependencyObject d) => (Point)d.GetValue(DragStartPointProperty);
 
     /// <summary>
-    /// <see cref="IsEnabledProperty"/> •ÏX‚ÉƒCƒxƒ“ƒgƒnƒ“ƒhƒ‰‚ğ“o˜^/‰ğœ‚µ‚Ü‚·B
+    /// <see cref="IsEnabledProperty"/> å¤‰æ›´æ™‚ã«ã‚¤ãƒ™ãƒ³ãƒˆãƒãƒ³ãƒ‰ãƒ©ã‚’ç™»éŒ²/è§£é™¤ã—ã¾ã™ã€‚
     /// </summary>
     private static void OnIsEnabledChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
     {
@@ -72,7 +72,7 @@ public static class DataGridRowReorderBehavior
         }
     }
 
-    /// <summary>¶ƒ{ƒ^ƒ“‰Ÿ‰º‚Éƒhƒ‰ƒbƒOŠJnˆÊ’u‚ğ‹L˜^‚µ‚Ü‚·B</summary>
+    /// <summary>å·¦ãƒœã‚¿ãƒ³æŠ¼ä¸‹æ™‚ã«ãƒ‰ãƒ©ãƒƒã‚°é–‹å§‹ä½ç½®ã‚’è¨˜éŒ²ã—ã¾ã™ã€‚</summary>
     private static void OnPreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
         if (sender is not DataGrid dataGrid) return;
@@ -80,7 +80,7 @@ public static class DataGridRowReorderBehavior
     }
 
     /// <summary>
-    /// ƒ}ƒEƒXˆÚ“®‚ÉAè‡’l‚ğ’´‚¦‚©‚Âsƒwƒbƒ_[ã‚Å‚ ‚ê‚Îƒhƒ‰ƒbƒO‚ğŠJn‚µ‚Ü‚·B
+    /// ãƒã‚¦ã‚¹ç§»å‹•æ™‚ã«ã€é–¾å€¤ã‚’è¶…ãˆã‹ã¤è¡Œãƒ˜ãƒƒãƒ€ãƒ¼ä¸Šã§ã‚ã‚Œã°ãƒ‰ãƒ©ãƒƒã‚°ã‚’é–‹å§‹ã—ã¾ã™ã€‚
     /// </summary>
     private static void OnMouseMove(object sender, MouseEventArgs e)
     {
@@ -102,7 +102,7 @@ public static class DataGridRowReorderBehavior
         DragDrop.DoDragDrop(dataGrid, sourceColumn, DragDropEffects.Move);
     }
 
-    /// <summary>ƒhƒ‰ƒbƒO’†‚ÌƒJ[ƒ\ƒ‹Œø‰Ê‚ğİ’è‚µ‚Ü‚·B</summary>
+    /// <summary>ãƒ‰ãƒ©ãƒƒã‚°ä¸­ã®ã‚«ãƒ¼ã‚½ãƒ«åŠ¹æœã‚’è¨­å®šã—ã¾ã™ã€‚</summary>
     private static void OnDragOver(object sender, DragEventArgs e)
     {
         e.Effects = e.Data.GetDataPresent(typeof(ColumnViewModel)) ? DragDropEffects.Move : DragDropEffects.None;
@@ -110,7 +110,7 @@ public static class DataGridRowReorderBehavior
     }
 
     /// <summary>
-    /// ƒhƒƒbƒv‚ÉˆÚ“®Œ³/ˆÚ“®æƒCƒ“ƒfƒbƒNƒX‚ğ‹‚ßAƒRƒŒƒNƒVƒ‡ƒ“‡‚ğXV‚µ‚Ü‚·B
+    /// ãƒ‰ãƒ­ãƒƒãƒ—æ™‚ã«ç§»å‹•å…ƒ/ç§»å‹•å…ˆã‚¤ãƒ³ãƒ‡ãƒƒã‚¯ã‚¹ã‚’æ±‚ã‚ã€ã‚³ãƒ¬ã‚¯ã‚·ãƒ§ãƒ³é †ã‚’æ›´æ–°ã—ã¾ã™ã€‚
     /// </summary>
     private static void OnDrop(object sender, DragEventArgs e)
     {
@@ -137,7 +137,7 @@ public static class DataGridRowReorderBehavior
     }
 
     /// <summary>
-    /// w’è—v‘f‚Ìe•ûŒü‚ğ‚½‚Ç‚èAÅ‰‚ÉŒ©‚Â‚©‚Á‚½ <typeparamref name="T"/> ‚ğ•Ô‚µ‚Ü‚·B
+    /// æŒ‡å®šè¦ç´ ã®è¦ªæ–¹å‘ã‚’ãŸã©ã‚Šã€æœ€åˆã«è¦‹ã¤ã‹ã£ãŸ <typeparamref name="T"/> ã‚’è¿”ã—ã¾ã™ã€‚
     /// </summary>
     private static T? FindVisualParent<T>(DependencyObject? child) where T : DependencyObject
     {
