@@ -10,6 +10,16 @@ public enum AiProvider
     Ollama,
 }
 
+/// <summary>AI が生成する識別子名の命名規則。</summary>
+public enum AiIdentifierNamingStyle
+{
+    /// <summary>パスカルケース (例: <c>CustomerOrder</c>)。</summary>
+    PascalCase,
+
+    /// <summary>スネークケース (例: <c>customer_order</c>)。</summary>
+    SnakeCase,
+}
+
 /// <summary>AI スキーマ生成リクエストの設定値。</summary>
 public class AiGenerationSettings
 {
@@ -27,6 +37,9 @@ public class AiGenerationSettings
 
     /// <summary>ユーザーが入力したスキーマ要件 (自然言語)。</summary>
     public string Prompt { get; set; } = string.Empty;
+
+    /// <summary>AI が生成するテーブル名・カラム名の命名規則。</summary>
+    public AiIdentifierNamingStyle IdentifierNamingStyle { get; set; } = AiIdentifierNamingStyle.PascalCase;
 
     /// <summary>プロバイダ既定のエンドポイント。</summary>
     public string ResolveEndpoint() =>

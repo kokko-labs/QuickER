@@ -1,7 +1,5 @@
 ﻿using System.ClientModel;
 using System.Text.Json;
-using System.Threading;
-using System.Threading.Tasks;
 using OpenAI;
 using OpenAI.Chat;
 
@@ -19,7 +17,7 @@ public interface IAiSchemaClient
 /// </summary>
 public class OpenAiSchemaClient : IAiSchemaClient
 {
-    private const string SystemPrompt =
+    private const string SystemPromptTemplate =
         @"あなたは熟練のデータベース設計者です。
 ユーザーの要件から第3正規形を意識したテーブル設計を行い、必ず指定された JSON スキーマだけを出力してください。
 - tables 配列を返し、各テーブルは name / description / memo / columns を持つ。
@@ -27,6 +25,7 @@ public class OpenAiSchemaClient : IAiSchemaClient
 - テーブル名・カラム名は英数字とアンダースコアのみ。
 - 各テーブルに description、各カラムに description を必ず付ける。
 - 各テーブルに 1 つ以上の主キー (isPrimaryKey=true) を必ず含める。
+- 各カラムの isNullable を必ず設定する。主キーは false、必須項目や通常の外部キーも false、任意入力の項目だけ true にする。
 - 外部キーがあれば isForeignKey=true を付け、relationships にも記述する。
 - type は ""OneToOne"" / ""OneToMany"" / ""ManyToMany"" のいずれか。
 - dataType は SQL Server の型 (例: int, bigint, nvarchar(50), datetime2, decimal(10,2), bit) を使用。";
@@ -54,7 +53,10 @@ public class OpenAiSchemaClient : IAiSchemaClient
                         "dataType": { "type": "string" },
                         "isPrimaryKey": { "type": "boolean" },
                         "isForeignKey": { "type": "boolean" },
-                          "isNullable": { "type": "boolean" },
+                        "isNullable": {
+                          "type": "boolean",
+                          "description": "NULL を許容する場合は true。主キーは false。必須項目や通常の外部キーは false、任意項目のみ true。"
+                        },
                         "description": { "type": "string" }
                       },
 
@@ -118,12 +120,14 @@ public class OpenAiSchemaClient : IAiSchemaClient
             options = new ChatCompletionOptions { ResponseFormat = ChatResponseFormat.CreateJsonObjectFormat() };
         }
 
-        var messages = new ChatMessage[] { new SystemChatMessage(SystemPrompt), new UserChatMessage(settings.Prompt) };
+        var messages = new ChatMessage[] { new SystemChatMessage(BuildSystemPrompt(settings)), new UserChatMessage(settings.Prompt) };
 
         var completion = await client.CompleteChatAsync(messages, options, ct).ConfigureAwait(false);
         var text = completion.Value.Content[0].Text;
+        var schema = ParseSchemaResponse(text);
+        schema.NormalizeIdentifiers(settings.IdentifierNamingStyle);
 
-        return ParseSchemaResponse(text);
+        return schema;
     }
 
     internal static AiSchemaJson ParseSchemaResponse(string text)
@@ -178,5 +182,17 @@ public class OpenAiSchemaClient : IAiSchemaClient
         }
 
         return trimmed;
+    }
+
+    /// <summary>命名規則の指定を含むシステムプロンプトを組み立てます。</summary>
+    private static string BuildSystemPrompt(AiGenerationSettings settings)
+    {
+        var namingInstruction = settings.IdentifierNamingStyle switch
+        {
+            AiIdentifierNamingStyle.SnakeCase => "- テーブル名・カラム名は必ずスネークケース (例: customer_order, customer_id) にする。",
+            _ => "- テーブル名・カラム名は必ずパスカルケース (例: CustomerOrder, CustomerId) にする。",
+        };
+
+        return $"{SystemPromptTemplate}\n{namingInstruction}";
     }
 }

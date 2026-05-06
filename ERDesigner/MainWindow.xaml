@@ -324,7 +324,7 @@
         <ColumnDefinition Width="200" />
         <ColumnDefinition Width="*" />
         <ColumnDefinition Width="5" />
-        <ColumnDefinition Width="460" MinWidth="250" />
+        <ColumnDefinition Width="500" MinWidth="250" />
       </Grid.ColumnDefinitions>
 
       <!-- GridSplitter: ER図とプロパティパネルの境界ドラッグ -->

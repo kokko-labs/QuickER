@@ -7,7 +7,7 @@
   xmlns:sys="clr-namespace:System;assembly=System.Runtime"
   Title="AI でスキーマを生成"
   Width="560"
-  Height="540"
+  Height="620"
   ResizeMode="CanResize"
   WindowStartupLocation="CenterOwner"
   FontFamily="Segoe UI, Yu Gothic UI, Meiryo"
@@ -26,6 +26,7 @@
       <ColumnDefinition Width="*" />
     </Grid.ColumnDefinitions>
     <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
@@ -82,10 +83,20 @@
       Visibility="{Binding ShowEndpoint, Converter={StaticResource BoolToVisibilityConverter}}"
     />
 
-    <TextBlock Grid.Row="4" Grid.ColumnSpan="2" Margin="0,8,0,4" Text="要件 (自然言語)" FontWeight="SemiBold" />
+    <TextBlock Grid.Row="4" Grid.Column="0" Text="命名規則" VerticalAlignment="Center" Margin="0,4" />
+    <ComboBox
+      Grid.Row="4"
+      Grid.Column="1"
+      Margin="0,4"
+      ItemsSource="{Binding IdentifierNamingStyleOptions}"
+      SelectedItem="{Binding SelectedIdentifierNamingStyle}"
+      DisplayMemberPath="DisplayName"
+    />
+
+    <TextBlock Grid.Row="5" Grid.ColumnSpan="2" Margin="0,8,0,4" Text="要件 (自然言語)" FontWeight="SemiBold" />
 
     <TextBox
-      Grid.Row="5"
+      Grid.Row="6"
       Grid.ColumnSpan="2"
       Text="{Binding Prompt, UpdateSourceTrigger=PropertyChanged}"
       AcceptsReturn="True"
@@ -93,9 +104,9 @@
       VerticalScrollBarVisibility="Auto"
     />
 
-    <TextBlock Grid.Row="6" Grid.ColumnSpan="2" Margin="0,6" TextWrapping="Wrap" Foreground="#374151" Text="{Binding StatusMessage}" />
+    <TextBlock Grid.Row="7" Grid.ColumnSpan="2" Margin="0,6" TextWrapping="Wrap" Foreground="#374151" Text="{Binding StatusMessage}" />
 
-    <StackPanel Grid.Row="7" Grid.ColumnSpan="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
+    <StackPanel Grid.Row="8" Grid.ColumnSpan="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
       <Button Content="生成" Width="100" Margin="0,0,8,0" IsDefault="True" Command="{Binding GenerateCommand}" />
       <Button Content="キャンセル" Width="80" IsCancel="True" Command="{Binding CancelCommand}" />
     </StackPanel>

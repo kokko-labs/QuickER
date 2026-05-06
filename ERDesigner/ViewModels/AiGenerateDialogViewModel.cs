@@ -1,6 +1,4 @@
-﻿using System.Collections.Generic;
-using System.Threading.Tasks;
-using CommunityToolkit.Mvvm.ComponentModel;
+﻿using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using ERDesigner.Services;
 
@@ -11,6 +9,9 @@ namespace ERDesigner.ViewModels;
 /// </summary>
 public partial class AiGenerateDialogViewModel : ObservableObject
 {
+    /// <summary>命名規則の選択肢です。</summary>
+    public sealed record IdentifierNamingStyleOption(AiIdentifierNamingStyle Value, string DisplayName);
+
     private readonly IAiSchemaClient _client;
     private bool _isInitializing;
 
@@ -28,6 +29,8 @@ public partial class AiGenerateDialogViewModel : ObservableObject
     /// <summary>モデル名 (ComboBox)。</summary>
     [ObservableProperty]
     private string _model = "gpt-5.4-mini";
+
+    private IdentifierNamingStyleOption? _selectedIdentifierNamingStyle;
 
     /// <summary>Ollama 等のカスタムエンドポイント URL。</summary>
     [ObservableProperty]
@@ -61,8 +64,25 @@ public partial class AiGenerateDialogViewModel : ObservableObject
     /// <summary>Ollama でよく使われるモデル例。</summary>
     public IReadOnlyList<string> OllamaModels { get; } = new[] { "gpt-oss:20b", "qwen3.6", "gemma4:e4b", "gemma4:31b-cloud" };
 
+    /// <summary>テーブル名・カラム名の命名規則候補。</summary>
+    public IReadOnlyList<IdentifierNamingStyleOption> IdentifierNamingStyleOptions { get; } =
+    [
+        new(AiIdentifierNamingStyle.PascalCase, "パスカルケース (CustomerOrder / CustomerId)"),
+        new(AiIdentifierNamingStyle.SnakeCase, "スネークケース (customer_order / customer_id)"),
+    ];
+
     /// <summary>現在のプロバイダに応じた候補モデル。</summary>
     public IReadOnlyList<string> ModelCandidates => Provider == AiProvider.OpenAi ? OpenAiModels : OllamaModels;
+
+    /// <summary>現在選択中の命名規則。</summary>
+    public AiIdentifierNamingStyle IdentifierNamingStyle => SelectedIdentifierNamingStyle?.Value ?? AiIdentifierNamingStyle.PascalCase;
+
+    /// <summary>生成するテーブル名・カラム名の命名規則。</summary>
+    public IdentifierNamingStyleOption? SelectedIdentifierNamingStyle
+    {
+        get => _selectedIdentifierNamingStyle;
+        set => SetProperty(ref _selectedIdentifierNamingStyle, value);
+    }
 
     /// <summary>OpenAI 選択時のみ APIキー欄を表示するためのフラグ。</summary>
     public bool ShowApiKey => Provider == AiProvider.OpenAi;
@@ -77,6 +97,7 @@ public partial class AiGenerateDialogViewModel : ObservableObject
         _isInitializing = true;
         // 保存済み API キーがあれば自動入力
         ApiKey = ApiKeyStore.Load(OpenAiKeyName);
+        SelectedIdentifierNamingStyle = IdentifierNamingStyleOptions[0];
         _isInitializing = false;
     }
 
@@ -152,6 +173,7 @@ public partial class AiGenerateDialogViewModel : ObservableObject
                 Provider = Provider,
                 ApiKey = ApiKey,
                 Model = Model,
+                IdentifierNamingStyle = IdentifierNamingStyle,
                 EndpointOverride = string.IsNullOrWhiteSpace(EndpointOverride) ? null : EndpointOverride,
                 Prompt = Prompt,
             };

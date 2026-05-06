@@ -212,4 +212,107 @@ public class AiSchemaJsonTests
         parsed.Tables[0].Columns![0].Name.Should().Be("product_id");
         parsed.Tables[0].Columns![0].Description.Should().Be("商品ID");
     }
+
+    [Fact(DisplayName = "識別子をパスカルケースへ正規化できる")]
+    public void NormalizeIdentifiers_ConvertsToPascalCase()
+    {
+        var schema = new AiSchemaJson
+        {
+            Tables =
+            [
+                new AiTable
+                {
+                    Name = "customer_order",
+                    Columns = [new AiColumn { Name = "order_id", DataType = "int" }, new AiColumn { Name = "created_at", DataType = "datetime2" }],
+                },
+            ],
+            Relationships =
+            [
+                new AiRelationship
+                {
+                    SourceTable = "customer_order",
+                    TargetTable = "customer_order",
+                    Type = "OneToOne",
+                },
+            ],
+        };
+
+        schema.NormalizeIdentifiers(AiIdentifierNamingStyle.PascalCase);
+
+        schema.Tables[0].Name.Should().Be("CustomerOrder");
+        schema.Tables[0].Columns![0].Name.Should().Be("OrderId");
+        schema.Tables[0].Columns![1].Name.Should().Be("CreatedAt");
+        schema.Relationships[0].SourceTable.Should().Be("CustomerOrder");
+        schema.Relationships[0].TargetTable.Should().Be("CustomerOrder");
+    }
+
+    [Fact(DisplayName = "識別子をスネークケースへ正規化できる")]
+    public void NormalizeIdentifiers_ConvertsToSnakeCase()
+    {
+        var schema = new AiSchemaJson
+        {
+            Tables =
+            [
+                new AiTable
+                {
+                    Name = "CustomerOrder",
+                    Columns = [new AiColumn { Name = "OrderId", DataType = "int" }, new AiColumn { Name = "CreatedAt", DataType = "datetime2" }],
+                },
+            ],
+            Relationships =
+            [
+                new AiRelationship
+                {
+                    SourceTable = "CustomerOrder",
+                    TargetTable = "CustomerOrder",
+                    Type = "OneToOne",
+                },
+            ],
+        };
+
+        schema.NormalizeIdentifiers(AiIdentifierNamingStyle.SnakeCase);
+
+        schema.Tables[0].Name.Should().Be("customer_order");
+        schema.Tables[0].Columns![0].Name.Should().Be("order_id");
+        schema.Tables[0].Columns![1].Name.Should().Be("created_at");
+        schema.Relationships[0].SourceTable.Should().Be("customer_order");
+        schema.Relationships[0].TargetTable.Should().Be("customer_order");
+    }
+
+    [Theory(DisplayName = "NULL 許容の互換プロパティも isNullable に反映される")]
+    [InlineData("nullable", true, true)]
+    [InlineData("nullable", false, false)]
+    [InlineData("allowNull", true, true)]
+    [InlineData("allowNull", false, false)]
+    [InlineData("required", true, false)]
+    [InlineData("required", false, true)]
+    public void Deserialize_NullabilityAliases_AreApplied(string propertyName, bool propertyValue, bool expectedNullable)
+    {
+        var json = $$"""
+            {
+              "tables": [
+                {
+                  "name": "Customer",
+                  "description": "顧客",
+                  "memo": "",
+                  "columns": [
+                    {
+                      "name": "Email",
+                      "dataType": "nvarchar(256)",
+                      "isPrimaryKey": false,
+                      "isForeignKey": false,
+                      "{{propertyName}}": {{propertyValue.ToString().ToLowerInvariant()}},
+                      "description": "メールアドレス"
+                    }
+                  ]
+                }
+              ],
+              "relationships": []
+            }
+            """;
+
+        var parsed = JsonSerializer.Deserialize<AiSchemaJson>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true })!;
+
+        parsed.Tables[0].Columns![0].IsNullable.Should().Be(expectedNullable);
+    }
 }

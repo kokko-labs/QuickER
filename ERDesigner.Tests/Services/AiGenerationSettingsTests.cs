@@ -29,4 +29,12 @@ public class AiGenerationSettingsTests
 
         s.ResolveEndpoint().Should().Be("https://example.com/v1");
     }
+
+    [Fact(DisplayName = "命名規則の既定値はパスカルケース")]
+    public void Default_IdentifierNamingStyle_IsPascalCase()
+    {
+        var s = new AiGenerationSettings();
+
+        s.IdentifierNamingStyle.Should().Be(AiIdentifierNamingStyle.PascalCase);
+    }
 }
