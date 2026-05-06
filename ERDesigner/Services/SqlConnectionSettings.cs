@@ -1,4 +1,4 @@
-using Microsoft.Data.SqlClient;
+﻿using Microsoft.Data.SqlClient;
 
 namespace ERDesigner.Services;
 
@@ -37,7 +37,7 @@ public class SqlConnectionSettings
             InitialCatalog = Database,
             TrustServerCertificate = TrustServerCertificate,
             ConnectTimeout = ConnectTimeoutSeconds,
-            ApplicationName = "ERDesigner"
+            ApplicationName = "ERDesigner",
         };
 
         switch (AuthMode)
@@ -45,21 +45,25 @@ public class SqlConnectionSettings
             case SqlAuthMode.Windows:
                 b.IntegratedSecurity = true;
                 break;
+
             case SqlAuthMode.SqlServer:
                 b.UserID = UserId;
                 b.Password = Password;
                 break;
+
             case SqlAuthMode.AzureAd:
+
                 if (!string.IsNullOrWhiteSpace(UserId))
                 {
-                    b.Authentication = SqlAuthenticationMethod.ActiveDirectoryPassword;
+                    // 非推奨の ActiveDirectoryPassword は使わず、対話式サインインへ誘導します。
+                    b.Authentication = SqlAuthenticationMethod.ActiveDirectoryInteractive;
                     b.UserID = UserId;
-                    b.Password = Password;
                 }
                 else
                 {
                     b.Authentication = SqlAuthenticationMethod.ActiveDirectoryDefault;
                 }
+
                 break;
         }
 

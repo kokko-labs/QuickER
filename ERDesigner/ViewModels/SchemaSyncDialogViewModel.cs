@@ -1,8 +1,8 @@
-using System;
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
 using System.Threading.Tasks;
+using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using ERDesigner.Models;
@@ -23,16 +23,20 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
     public ObservableCollection<SchemaDiffItem> DiffItems { get; } = new();
 
     /// <summary>生成された T-SQL プレビュー。</summary>
-    [ObservableProperty] private string _scriptPreview = string.Empty;
+    [ObservableProperty]
+    private string _scriptPreview = string.Empty;
 
     /// <summary>状態メッセージ。</summary>
-    [ObservableProperty] private string _statusMessage = string.Empty;
+    [ObservableProperty]
+    private string _statusMessage = string.Empty;
 
     /// <summary>差分計算 / 実行中か。</summary>
-    [ObservableProperty] private bool _isBusy;
+    [ObservableProperty]
+    private bool _isBusy;
 
     /// <summary>差分が計算済みか。</summary>
-    [ObservableProperty] private bool _hasDiff;
+    [ObservableProperty]
+    private bool _hasDiff;
 
     /// <summary>ダイアログを閉じるためのアクション (View が注入)。</summary>
     public Action<bool>? CloseAction { get; set; }
@@ -40,10 +44,7 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
     /// <summary>
     /// 新しい ViewModel を生成します。
     /// </summary>
-    public SchemaSyncDialogViewModel(
-        SqlConnectionSettings settings,
-        IReadOnlyList<Entity> targetEntities,
-        IReadOnlyList<Relationship> targetRelationships)
+    public SchemaSyncDialogViewModel(SqlConnectionSettings settings, IReadOnlyList<Entity> targetEntities, IReadOnlyList<Relationship> targetRelationships)
     {
         _settings = settings;
         _targetEntities = targetEntities;
@@ -56,43 +57,48 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
     {
         IsBusy = true;
         StatusMessage = "DB スキーマを取得中...";
+
         try
         {
             var importer = new SqlServerSchemaImporter();
             var live = await importer.ImportAsync(_settings).ConfigureAwait(true);
-            var diff = new SchemaDiffService().Compute(
-                live.Entities, live.Relationships,
-                _targetEntities, _targetRelationships);
+            var diff = new SchemaDiffService().Compute(live.Entities, live.Relationships, _targetEntities, _targetRelationships);
 
             // 列順差分は DB 同期対象外のため、検知時は案内メッセージのみ表示する。
             var orderChangedTables = SchemaDiffService.DetectColumnOrderChanges(live.Entities, _targetEntities);
+
             foreach (var tableName in orderChangedTables)
             {
-                diff.Items.Add(new SchemaDiffItem
-                {
-                    Kind = SchemaDiffKind.RebuildTable,
-                    TableName = tableName,
-                    Description = $"列順変更は DB 同期しません: [{tableName}]",
-                    IsSelected = false,
-                    IsSelectable = false
-                });
+                diff.Items.Add(
+                    new SchemaDiffItem
+                    {
+                        Kind = SchemaDiffKind.RebuildTable,
+                        TableName = tableName,
+                        Description = $"列順変更は DB 同期しません: [{tableName}]",
+                        IsSelected = false,
+                        IsSelectable = false,
+                    }
+                );
             }
 
             DiffItems.Clear();
+
             foreach (var item in diff.Items)
             {
                 item.PropertyChanged += (_, e) =>
                 {
                     if (e.PropertyName == nameof(SchemaDiffItem.IsSelected))
+                    {
                         UpdatePreview();
+                    }
                 };
+
                 DiffItems.Add(item);
             }
+
             HasDiff = DiffItems.Count > 0;
             UpdatePreview();
-            StatusMessage = HasDiff
-                ? $"{DiffItems.Count} 件の差分があります。"
-                : "差分はありません。";
+            StatusMessage = HasDiff ? $"{DiffItems.Count} 件の差分があります。" : "差分はありません。";
         }
         catch (Exception ex)
         {
@@ -114,7 +120,11 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
     [RelayCommand]
     private void SelectAll()
     {
-        foreach (var i in DiffItems.Where(i => i.IsSelectable)) i.IsSelected = true;
+        foreach (var i in DiffItems.Where(i => i.IsSelectable))
+        {
+            i.IsSelected = true;
+        }
+
         UpdatePreview();
     }
 
@@ -122,7 +132,11 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
     [RelayCommand]
     private void DeselectAll()
     {
-        foreach (var i in DiffItems.Where(i => i.IsSelectable)) i.IsSelected = false;
+        foreach (var i in DiffItems.Where(i => i.IsSelectable))
+        {
+            i.IsSelected = false;
+        }
+
         UpdatePreview();
     }
 
@@ -140,29 +154,32 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
         var msg = destructive
             ? $"破壊的な変更 (削除/型変更) を含むスクリプトを {_settings.Database} に実行します。よろしいですか？"
             : $"スクリプトを {_settings.Database} に実行します。よろしいですか？";
-        var ans = System.Windows.MessageBox.Show(msg, "確認",
-            System.Windows.MessageBoxButton.OKCancel, System.Windows.MessageBoxImage.Warning);
-        if (ans != System.Windows.MessageBoxResult.OK) return;
+        var ans = MessageBox.Show(msg, "確認", MessageBoxButton.OKCancel, MessageBoxImage.Warning);
+
+        if (ans != MessageBoxResult.OK)
+        {
+            return;
+        }
 
         IsBusy = true;
         StatusMessage = "実行中...";
+
         try
         {
             var executor = new SchemaSyncExecutor();
             var result = await executor.ExecuteAsync(_settings, ScriptPreview).ConfigureAwait(true);
+
             if (result.Committed)
             {
                 StatusMessage = $"成功: {result.Batches.Count} バッチを実行し COMMIT しました。";
-                System.Windows.MessageBox.Show(StatusMessage, "完了",
-                    System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Information);
+                MessageBox.Show(StatusMessage, "完了", MessageBoxButton.OK, MessageBoxImage.Information);
                 // 自動で再計算
                 await RefreshAsync().ConfigureAwait(true);
             }
             else
             {
                 StatusMessage = "失敗: " + result.Error;
-                System.Windows.MessageBox.Show("実行に失敗したため ROLLBACK されました:\n" + result.Error,
-                    "エラー", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Error);
+                MessageBox.Show("実行に失敗したため ROLLBACK されました:\n" + result.Error, "エラー", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
         catch (Exception ex)

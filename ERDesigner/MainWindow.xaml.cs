@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Windows;
 using ERDesigner.ViewModels;
 
@@ -11,12 +12,16 @@ public partial class MainWindow : Window
         Closing += MainWindow_Closing;
 
         if (DataContext is MainViewModel vm)
+        {
             vm.Initialize();
+        }
     }
 
-    private void MainWindow_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
+    private void MainWindow_Closing(object? sender, CancelEventArgs e)
     {
         if (DataContext is MainViewModel vm)
+        {
             vm.AutoSave();
+        }
     }
 }

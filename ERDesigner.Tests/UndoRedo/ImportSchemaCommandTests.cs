@@ -1,4 +1,4 @@
-using ERDesigner.Models;
+﻿using ERDesigner.Models;
 using ERDesigner.UndoRedo;
 using ERDesigner.ViewModels;
 using FluentAssertions;
@@ -18,9 +18,7 @@ public class ImportSchemaCommandTests
         main.Entities.Add(existing);
 
         var newEntity = new Entity { TableName = "New" };
-        var cmd = new ImportSchemaCommand(main,
-            new[] { newEntity },
-            System.Array.Empty<Relationship>());
+        var cmd = new ImportSchemaCommand(main, new[] { newEntity }, Array.Empty<Relationship>());
 
         cmd.Execute();
         main.Entities.Should().HaveCount(1);
@@ -39,7 +37,12 @@ public class ImportSchemaCommandTests
         var main = new MainViewModel();
         var a = new Entity { TableName = "A" };
         var b = new Entity { TableName = "B" };
-        var rel = new Relationship { SourceEntityId = a.Id, TargetEntityId = b.Id, Type = RelationshipType.OneToMany };
+        var rel = new Relationship
+        {
+            SourceEntityId = a.Id,
+            TargetEntityId = b.Id,
+            Type = RelationshipType.OneToMany,
+        };
 
         var cmd = new ImportSchemaCommand(main, new[] { a, b }, new[] { rel });
         cmd.Execute();

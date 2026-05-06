@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Linq;
 using ERDesigner.Models;
 using ERDesigner.ViewModels;
@@ -42,7 +42,11 @@ public class ImportSchemaCommand : IUndoableCommand
         _previousEntities = _main.Entities.ToList();
         _previousRelationships = _main.Relationships.ToList();
 
-        foreach (var r in _previousRelationships) r.Detach();
+        foreach (var r in _previousRelationships)
+        {
+            r.Detach();
+        }
+
         _main.Relationships.Clear();
         _main.Entities.Clear();
 
@@ -50,34 +54,53 @@ public class ImportSchemaCommand : IUndoableCommand
         if (ImportedEntities.Count == 0)
         {
             var byId = new Dictionary<System.Guid, EntityViewModel>();
+
             foreach (var e in _newEntities)
             {
                 var vm = new EntityViewModel(e);
                 ImportedEntities.Add(vm);
                 byId[e.Id] = vm;
             }
+
             foreach (var r in _newRelationships)
             {
-                if (byId.TryGetValue(r.SourceEntityId, out var s) &&
-                    byId.TryGetValue(r.TargetEntityId, out var t))
+                if (byId.TryGetValue(r.SourceEntityId, out var s) && byId.TryGetValue(r.TargetEntityId, out var t))
                 {
                     ImportedRelationships.Add(new RelationshipViewModel(r, s, t));
                 }
             }
         }
 
-        foreach (var e in ImportedEntities) _main.Entities.Add(e);
-        foreach (var r in ImportedRelationships) _main.Relationships.Add(r);
+        foreach (var e in ImportedEntities)
+        {
+            _main.Entities.Add(e);
+        }
+
+        foreach (var r in ImportedRelationships)
+        {
+            _main.Relationships.Add(r);
+        }
     }
 
     /// <inheritdoc />
     public void Undo()
     {
-        foreach (var r in ImportedRelationships) r.Detach();
+        foreach (var r in ImportedRelationships)
+        {
+            r.Detach();
+        }
+
         _main.Relationships.Clear();
         _main.Entities.Clear();
 
-        foreach (var e in _previousEntities) _main.Entities.Add(e);
-        foreach (var r in _previousRelationships) _main.Relationships.Add(r);
+        foreach (var e in _previousEntities)
+        {
+            _main.Entities.Add(e);
+        }
+
+        foreach (var r in _previousRelationships)
+        {
+            _main.Relationships.Add(r);
+        }
     }
 }

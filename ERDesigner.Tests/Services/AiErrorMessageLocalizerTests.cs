@@ -1,4 +1,5 @@
-using System;
+﻿using System.Net.Http;
+using System.Text.Json;
 using ERDesigner.Services;
 using FluentAssertions;
 
@@ -13,7 +14,7 @@ public class AiErrorMessageLocalizerTests
     [Fact(DisplayName = "JsonException は JSON 解釈失敗メッセージになる")]
     public void Json_ReturnsParseError()
     {
-        var msg = AiErrorMessageLocalizer.ToJapanese(new System.Text.Json.JsonException("bad"));
+        var msg = AiErrorMessageLocalizer.ToJapanese(new JsonException("bad"));
         msg.Should().Contain("JSON として解釈できませんでした");
     }
 
@@ -27,7 +28,7 @@ public class AiErrorMessageLocalizerTests
     [Fact(DisplayName = "HttpRequestException は接続エラーメッセージになる")]
     public void Http_ReturnsConnectionError()
     {
-        var msg = AiErrorMessageLocalizer.ToJapanese(new System.Net.Http.HttpRequestException("conn"));
+        var msg = AiErrorMessageLocalizer.ToJapanese(new HttpRequestException("conn"));
         msg.Should().Contain("接続できませんでした");
     }
 

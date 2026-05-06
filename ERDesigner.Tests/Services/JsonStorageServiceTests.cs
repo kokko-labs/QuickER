@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using ERDesigner.Models;
 using ERDesigner.Services;
 using ERDesigner.ViewModels;
@@ -21,13 +21,15 @@ public class JsonStorageServiceTests
         var a = vm.Entities[0];
         var b = vm.Entities[1];
         a.TableName = "Customer";
-        a.X = 100; a.Y = 50;
+        a.X = 100;
+        a.Y = 50;
 
         vm.StartAddOneToManyCommand.Execute(null);
         vm.OnEntityClicked(a);
         vm.OnEntityClicked(b);
 
-        var path = Path.Combine(Path.GetTempPath(), $"er-{System.Guid.NewGuid()}.json");
+        var path = Path.Combine(Path.GetTempPath(), $"er-{Guid.NewGuid()}.json");
+
         try
         {
             JsonStorageService.Save(path, vm);
@@ -46,7 +48,10 @@ public class JsonStorageServiceTests
         }
         finally
         {
-            if (File.Exists(path)) File.Delete(path);
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
         }
     }
 }

@@ -1,5 +1,4 @@
-using System;
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Data;
 using System.Linq;
 using System.Threading;
@@ -25,6 +24,7 @@ public class SqlServerSchemaImporter
     {
         /// <summary>取得したエンティティ一覧。</summary>
         public List<Entity> Entities { get; init; } = new();
+
         /// <summary>取得したリレーション一覧。</summary>
         public List<Relationship> Relationships { get; init; } = new();
     }
@@ -32,12 +32,13 @@ public class SqlServerSchemaImporter
     /// <summary>取得結果のシグネチャ計算に使う簡易キー (置換確認用)。</summary>
     public static string ComputeSignature(IEnumerable<Entity> entities, IEnumerable<Relationship> relationships)
     {
-        var e = string.Join("|", entities.OrderBy(x => x.TableName)
-            .Select(x => x.TableName + ":" + string.Join(",",
-                x.Columns.Select(c => c.Name + "(" + c.DataType + (c.IsPrimaryKey ? "*PK" : "") + ")"))));
-        var r = string.Join("|", relationships
-            .Select(x => x.SourceEntityId + ">" + x.TargetEntityId + ":" + x.Type)
-            .OrderBy(s => s));
+        var e = string.Join(
+            "|",
+            entities
+                .OrderBy(x => x.TableName)
+                .Select(x => x.TableName + ":" + string.Join(",", x.Columns.Select(c => c.Name + "(" + c.DataType + (c.IsPrimaryKey ? "*PK" : "") + ")")))
+        );
+        var r = string.Join("|", relationships.Select(x => x.SourceEntityId + ">" + x.TargetEntityId + ":" + x.Type).OrderBy(s => s));
         return e + "##" + r;
     }
 
@@ -60,11 +61,7 @@ public class SqlServerSchemaImporter
         var rels = await LoadForeignKeysAsync(conn, tables, ct).ConfigureAwait(false);
 
         // 取り込んだ FK のカラムに IsForeignKey フラグを付ける
-        return new SchemaResult
-        {
-            Entities = tables.Values.Select(t => t.Entity).ToList(),
-            Relationships = rels
-        };
+        return new SchemaResult { Entities = tables.Values.Select(t => t.Entity).ToList(), Relationships = rels };
     }
 
     // ---------------- 内部実装 ----------------
@@ -78,19 +75,22 @@ public class SqlServerSchemaImporter
         public string Key => $"[{Schema}].[{Name}]";
     }
 
-    private const string TablesSql = @"
+    private const string TablesSql =
+        @"
 SELECT TABLE_SCHEMA, TABLE_NAME
 FROM INFORMATION_SCHEMA.TABLES
 WHERE TABLE_TYPE = 'BASE TABLE'
 ORDER BY TABLE_SCHEMA, TABLE_NAME;";
 
-    private const string ColumnsSql = @"
+    private const string ColumnsSql =
+        @"
 SELECT TABLE_SCHEMA, TABLE_NAME, COLUMN_NAME, DATA_TYPE,
        CHARACTER_MAXIMUM_LENGTH, NUMERIC_PRECISION, NUMERIC_SCALE, IS_NULLABLE, ORDINAL_POSITION
 FROM INFORMATION_SCHEMA.COLUMNS
 ORDER BY TABLE_SCHEMA, TABLE_NAME, ORDINAL_POSITION;";
 
-    private const string PrimaryKeysSql = @"
+    private const string PrimaryKeysSql =
+        @"
 SELECT kcu.TABLE_SCHEMA, kcu.TABLE_NAME, kcu.COLUMN_NAME, kcu.ORDINAL_POSITION
 FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc
 JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE kcu
@@ -100,7 +100,8 @@ JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE kcu
 WHERE tc.CONSTRAINT_TYPE = 'PRIMARY KEY'
 ORDER BY kcu.TABLE_SCHEMA, kcu.TABLE_NAME, kcu.ORDINAL_POSITION;";
 
-    private const string ForeignKeysSql = @"
+    private const string ForeignKeysSql =
+        @"
 SELECT
     fk.name AS FkName,
     SCHEMA_NAME(tp.schema_id) AS ParentSchema, tp.name AS ParentTable, cp.name AS ParentColumn,
@@ -114,7 +115,8 @@ JOIN sys.tables  tr ON fkc.referenced_object_id = tr.object_id
 JOIN sys.columns cr ON fkc.referenced_object_id = cr.object_id AND fkc.referenced_column_id = cr.column_id
 ORDER BY fk.name, fkc.constraint_column_id;";
 
-    private const string UniqueIndexSql = @"
+    private const string UniqueIndexSql =
+        @"
 SELECT SCHEMA_NAME(t.schema_id) AS TableSchema, t.name AS TableName, i.name AS IndexName,
        c.name AS ColumnName, ic.key_ordinal AS Ordinal
 FROM sys.indexes i
@@ -125,7 +127,8 @@ WHERE i.is_unique = 1 AND i.is_primary_key = 0 AND ic.is_included_column = 0
 ORDER BY t.schema_id, t.name, i.name, ic.key_ordinal;";
 
     // テーブルとカラムの MS_Description を一括取得 (column_id = 0 はテーブルレベル)
-    private const string DescriptionsSql = @"
+    private const string DescriptionsSql =
+        @"
 SELECT
     s.name        AS SchemaName,
     t.name        AS TableName,
@@ -143,6 +146,7 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
         var dict = new Dictionary<string, TableEntry>(StringComparer.OrdinalIgnoreCase);
         await using var cmd = new SqlCommand(TablesSql, conn);
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
         {
             var schema = reader.GetString(0);
@@ -151,14 +155,12 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
             {
                 Schema = schema,
                 Name = name,
-                Entity = new Entity
-                {
-                    TableName = schema == "dbo" ? name : $"{schema}.{name}",
-                    Columns = new List<Column>()
-                }
+                Entity = new Entity { TableName = schema == "dbo" ? name : $"{schema}.{name}", Columns = new List<Column>() },
             };
+
             dict[entry.Key] = entry;
         }
+
         return dict;
     }
 
@@ -166,12 +168,17 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
     {
         await using var cmd = new SqlCommand(ColumnsSql, conn);
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
         {
             var schema = reader.GetString(0);
             var table = reader.GetString(1);
             var key = $"[{schema}].[{table}]";
-            if (!tables.TryGetValue(key, out var entry)) continue;
+
+            if (!tables.TryGetValue(key, out var entry))
+            {
+                continue;
+            }
 
             var colName = reader.GetString(2);
             var dataType = reader.GetString(3);
@@ -179,11 +186,8 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
             int? numPrec = reader.IsDBNull(5) ? null : Convert.ToInt32(reader.GetValue(5));
             int? numScale = reader.IsDBNull(6) ? null : Convert.ToInt32(reader.GetValue(6));
 
-            var col = new Column
-            {
-                Name = colName,
-                DataType = FormatDataType(dataType, maxLen, numPrec, numScale)
-            };
+            var col = new Column { Name = colName, DataType = FormatDataType(dataType, maxLen, numPrec, numScale) };
+
             entry.Entity.Columns.Add(col);
             entry.ColumnsByName[colName] = col;
         }
@@ -193,12 +197,20 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
     {
         await using var cmd = new SqlCommand(PrimaryKeysSql, conn);
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
         {
             var key = $"[{reader.GetString(0)}].[{reader.GetString(1)}]";
-            if (!tables.TryGetValue(key, out var entry)) continue;
+
+            if (!tables.TryGetValue(key, out var entry))
+            {
+                continue;
+            }
+
             if (entry.ColumnsByName.TryGetValue(reader.GetString(2), out var col))
+            {
                 col.IsPrimaryKey = true;
+            }
         }
     }
 
@@ -210,12 +222,17 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
     {
         await using var cmd = new SqlCommand(DescriptionsSql, conn);
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
         {
             var schema = reader.GetString(0);
             var table = reader.GetString(1);
             var key = $"[{schema}].[{table}]";
-            if (!tables.TryGetValue(key, out var entry)) continue;
+
+            if (!tables.TryGetValue(key, out var entry))
+            {
+                continue;
+            }
 
             var description = reader.IsDBNull(3) ? string.Empty : reader.GetString(3);
 
@@ -227,8 +244,11 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
             else
             {
                 var colName = reader.GetString(2);
+
                 if (entry.ColumnsByName.TryGetValue(colName, out var col))
+                {
                     col.Description = description;
+                }
             }
         }
     }
@@ -243,6 +263,7 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
 
         await using var cmd = new SqlCommand(ForeignKeysSql, conn);
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
         {
             var fkName = reader.GetString(0);
@@ -256,34 +277,47 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
                 g = (parentKey, refKey, new List<string>(), new List<string>());
                 grouped[fkName] = g;
             }
+
             g.ParentCols.Add(parentCol);
             g.RefCols.Add(refCol);
         }
 
         foreach (var (_, g) in grouped)
         {
-            if (!tables.TryGetValue(g.ParentKey, out var parent)) continue;
-            if (!tables.TryGetValue(g.RefKey, out var refer)) continue;
+            if (!tables.TryGetValue(g.ParentKey, out var parent))
+            {
+                continue;
+            }
+
+            if (!tables.TryGetValue(g.RefKey, out var refer))
+            {
+                continue;
+            }
 
             // FK 列に IsForeignKey フラグ
             foreach (var pc in g.ParentCols)
-                if (parent.ColumnsByName.TryGetValue(pc, out var pcol)) pcol.IsForeignKey = true;
+            {
+                if (parent.ColumnsByName.TryGetValue(pc, out var pcol))
+                {
+                    pcol.IsForeignKey = true;
+                }
+            }
 
             // 1対1 判定: 親側 FK 列が PK もしくはユニーク制約に一致する
             var sortedParent = g.ParentCols.OrderBy(s => s, StringComparer.OrdinalIgnoreCase).ToArray();
-            var pkCols = parent.Entity.Columns.Where(c => c.IsPrimaryKey).Select(c => c.Name)
-                .OrderBy(s => s, StringComparer.OrdinalIgnoreCase).ToArray();
+            var pkCols = parent.Entity.Columns.Where(c => c.IsPrimaryKey).Select(c => c.Name).OrderBy(s => s, StringComparer.OrdinalIgnoreCase).ToArray();
             var uniqueOnParent = uniqueSets.TryGetValue(g.ParentKey, out var sets) ? sets : new List<string[]>();
 
-            bool isOneToOne = SameSet(sortedParent, pkCols)
-                || uniqueOnParent.Any(s => SameSet(sortedParent, s));
+            var isOneToOne = SameSet(sortedParent, pkCols) || uniqueOnParent.Any(s => SameSet(sortedParent, s));
 
-            rels.Add(new Relationship
-            {
-                SourceEntityId = refer.Entity.Id,   // 参照先 (PK 側) を起点として表示
-                TargetEntityId = parent.Entity.Id,  // FK 保有テーブル
-                Type = isOneToOne ? RelationshipType.OneToOne : RelationshipType.OneToMany
-            });
+            rels.Add(
+                new Relationship
+                {
+                    SourceEntityId = refer.Entity.Id, // 参照先 (PK 側) を起点として表示
+                    TargetEntityId = parent.Entity.Id, // FK 保有テーブル
+                    Type = isOneToOne ? RelationshipType.OneToOne : RelationshipType.OneToMany,
+                }
+            );
         }
 
         return rels;
@@ -296,43 +330,51 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
 
         await using var cmd = new SqlCommand(UniqueIndexSql, conn);
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
         {
             var key = $"[{reader.GetString(0)}].[{reader.GetString(1)}]";
             var idx = reader.GetString(2);
             var col = reader.GetString(3);
             var compositeKey = key + "::" + idx;
+
             if (!current.TryGetValue(compositeKey, out var list))
             {
                 list = new List<string>();
                 current[compositeKey] = list;
             }
+
             list.Add(col);
 
             if (!result.TryGetValue(key, out _))
+            {
                 result[key] = new List<string[]>();
+            }
         }
 
         foreach (var kv in current)
         {
             var tableKey = kv.Key.Substring(0, kv.Key.IndexOf("::"));
+
             if (!result.TryGetValue(tableKey, out var lists))
             {
                 lists = new List<string[]>();
                 result[tableKey] = lists;
             }
+
             lists.Add(kv.Value.OrderBy(s => s, StringComparer.OrdinalIgnoreCase).ToArray());
         }
+
         return result;
     }
 
-    private static bool SameSet(string[] a, string[] b)
-        => a.Length > 0 && a.Length == b.Length && a.SequenceEqual(b, StringComparer.OrdinalIgnoreCase);
+    private static bool SameSet(string[] a, string[] b) => a.Length > 0 && a.Length == b.Length && a.SequenceEqual(b, StringComparer.OrdinalIgnoreCase);
 
     /// <summary>SQL Server の型情報を <c>nvarchar(50)</c> 等の表示形式に整形します。</summary>
     public static string FormatDataType(string dataType, int? maxLen, int? precision, int? scale)
     {
         var dt = dataType.ToLowerInvariant();
+
         switch (dt)
         {
             case "char":
@@ -341,12 +383,24 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
             case "nvarchar":
             case "binary":
             case "varbinary":
-                if (maxLen is null) return dt;
+
+                if (maxLen is null)
+                {
+                    return dt;
+                }
+
                 return maxLen == -1 ? $"{dt}(max)" : $"{dt}({maxLen})";
+
             case "decimal":
             case "numeric":
-                if (precision is null) return dt;
+
+                if (precision is null)
+                {
+                    return dt;
+                }
+
                 return scale is > 0 ? $"{dt}({precision},{scale})" : $"{dt}({precision})";
+
             default:
                 return dt;
         }

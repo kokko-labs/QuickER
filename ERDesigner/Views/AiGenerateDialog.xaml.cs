@@ -1,4 +1,5 @@
-using System.Windows;
+﻿using System.Windows;
+using System.Windows.Controls;
 using ERDesigner.ViewModels;
 
 namespace ERDesigner.Views;
@@ -21,19 +22,24 @@ public partial class AiGenerateDialog : Window
             {
                 DialogResult = result;
                 Close();
-            }
+            },
         };
+
         DataContext = ViewModel;
 
         // 保存済み API キーがあれば PasswordBox に反映
         if (!string.IsNullOrEmpty(ViewModel.ApiKey))
+        {
             ApiKeyBox.Password = ViewModel.ApiKey;
+        }
     }
 
     /// <summary>PasswordBox の変更を ViewModel に転送します。</summary>
     private void ApiKeyBox_PasswordChanged(object sender, RoutedEventArgs e)
     {
-        if (sender is System.Windows.Controls.PasswordBox pb)
+        if (sender is PasswordBox pb)
+        {
             ViewModel.ApiKey = pb.Password;
+        }
     }
 }

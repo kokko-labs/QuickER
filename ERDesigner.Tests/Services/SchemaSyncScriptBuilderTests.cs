@@ -1,4 +1,4 @@
-using ERDesigner.Models;
+﻿using ERDesigner.Models;
 using ERDesigner.Services;
 using FluentAssertions;
 
@@ -13,15 +13,23 @@ public class SchemaSyncScriptBuilderTests
     public void AddTable_GeneratesCreate()
     {
         var e = new Entity { TableName = "Customer" };
-        e.Columns.Add(new Column { Name = "Id", DataType = "int", IsPrimaryKey = true });
+        e.Columns.Add(
+            new Column
+            {
+                Name = "Id",
+                DataType = "int",
+                IsPrimaryKey = true,
+            }
+        );
         e.Columns.Add(new Column { Name = "Name", DataType = "nvarchar(50)" });
         var item = new SchemaDiffItem
         {
             Kind = SchemaDiffKind.AddTable,
             TableName = "Customer",
             Entity = e,
-            IsSelected = true
+            IsSelected = true,
         };
+
         var sql = SchemaSyncScriptBuilder.Build(new[] { item });
         sql.Should().Contain("CREATE TABLE [Customer]");
         sql.Should().Contain("[Id] int NOT NULL");
@@ -38,8 +46,9 @@ public class SchemaSyncScriptBuilderTests
             TableName = "Customer",
             ColumnName = "Email",
             Column = new Column { Name = "Email", DataType = "nvarchar(200)" },
-            IsSelected = true
+            IsSelected = true,
         };
+
         var sql = SchemaSyncScriptBuilder.Build(new[] { item });
         sql.Should().Contain("ALTER TABLE [Customer] ADD [Email] nvarchar(200) NULL;");
     }
@@ -53,8 +62,9 @@ public class SchemaSyncScriptBuilderTests
             TableName = "Customer",
             ColumnName = "Name",
             Column = new Column { Name = "Name", DataType = "nvarchar(100)" },
-            IsSelected = true
+            IsSelected = true,
         };
+
         var sql = SchemaSyncScriptBuilder.Build(new[] { item });
         sql.Should().Contain("ALTER TABLE [Customer] ALTER COLUMN [Name] nvarchar(100) NULL;");
     }
@@ -67,8 +77,9 @@ public class SchemaSyncScriptBuilderTests
             Kind = SchemaDiffKind.DropColumn,
             TableName = "Customer",
             ColumnName = "Old",
-            IsSelected = true
+            IsSelected = true,
         };
+
         var sql = SchemaSyncScriptBuilder.Build(new[] { item });
         sql.Should().Contain("ALTER TABLE [Customer] DROP COLUMN [Old];");
     }
@@ -82,8 +93,9 @@ public class SchemaSyncScriptBuilderTests
             TableName = "Customer",
             ColumnName = "Email",
             Column = new Column { Name = "Email", DataType = "nvarchar(200)" },
-            IsSelected = false
+            IsSelected = false,
         };
+
         var sql = SchemaSyncScriptBuilder.Build(new[] { item });
         sql.Should().NotContain("Email");
     }
@@ -92,9 +104,23 @@ public class SchemaSyncScriptBuilderTests
     public void AddFk_GeneratesConstraint()
     {
         var customer = new Entity { TableName = "Customer" };
-        customer.Columns.Add(new Column { Name = "Id", DataType = "int", IsPrimaryKey = true });
+        customer.Columns.Add(
+            new Column
+            {
+                Name = "Id",
+                DataType = "int",
+                IsPrimaryKey = true,
+            }
+        );
         var order = new Entity { TableName = "Order" };
-        order.Columns.Add(new Column { Name = "Id", DataType = "int", IsPrimaryKey = true });
+        order.Columns.Add(
+            new Column
+            {
+                Name = "Id",
+                DataType = "int",
+                IsPrimaryKey = true,
+            }
+        );
         order.Columns.Add(new Column { Name = "Customer_Id", DataType = "int" });
 
         var item = new SchemaDiffItem
@@ -104,8 +130,9 @@ public class SchemaSyncScriptBuilderTests
             ColumnName = "Customer_Id",
             ParentEntity = customer,
             ChildEntity = order,
-            IsSelected = true
+            IsSelected = true,
         };
+
         var sql = SchemaSyncScriptBuilder.Build(new[] { item });
         sql.Should().Contain("ALTER TABLE [Order] ADD CONSTRAINT [FK_Order_Customer]");
         sql.Should().Contain("FOREIGN KEY ([Customer_Id]) REFERENCES [Customer] ([Id])");
@@ -115,18 +142,52 @@ public class SchemaSyncScriptBuilderTests
     public void Order_AddTable_Then_AddColumn_Then_Fk()
     {
         var e = new Entity { TableName = "T" };
-        e.Columns.Add(new Column { Name = "Id", DataType = "int", IsPrimaryKey = true });
+        e.Columns.Add(
+            new Column
+            {
+                Name = "Id",
+                DataType = "int",
+                IsPrimaryKey = true,
+            }
+        );
         var customer = new Entity { TableName = "Customer" };
-        customer.Columns.Add(new Column { Name = "Id", DataType = "int", IsPrimaryKey = true });
+        customer.Columns.Add(
+            new Column
+            {
+                Name = "Id",
+                DataType = "int",
+                IsPrimaryKey = true,
+            }
+        );
 
         var items = new[]
         {
-            new SchemaDiffItem { Kind = SchemaDiffKind.AddForeignKey, TableName = "T", ColumnName = "Customer_Id",
-                ParentEntity = customer, ChildEntity = e, IsSelected = true },
-            new SchemaDiffItem { Kind = SchemaDiffKind.AddColumn, TableName = "T", ColumnName = "Customer_Id",
-                Column = new Column { Name = "Customer_Id", DataType = "int" }, IsSelected = true },
-            new SchemaDiffItem { Kind = SchemaDiffKind.AddTable, TableName = "T", Entity = e, IsSelected = true },
+            new SchemaDiffItem
+            {
+                Kind = SchemaDiffKind.AddForeignKey,
+                TableName = "T",
+                ColumnName = "Customer_Id",
+                ParentEntity = customer,
+                ChildEntity = e,
+                IsSelected = true,
+            },
+            new SchemaDiffItem
+            {
+                Kind = SchemaDiffKind.AddColumn,
+                TableName = "T",
+                ColumnName = "Customer_Id",
+                Column = new Column { Name = "Customer_Id", DataType = "int" },
+                IsSelected = true,
+            },
+            new SchemaDiffItem
+            {
+                Kind = SchemaDiffKind.AddTable,
+                TableName = "T",
+                Entity = e,
+                IsSelected = true,
+            },
         };
+
         var sql = SchemaSyncScriptBuilder.Build(items);
         var iCreate = sql.IndexOf("CREATE TABLE");
         var iAdd = sql.IndexOf("ADD [Customer_Id]");
@@ -145,8 +206,9 @@ public class SchemaSyncScriptBuilderTests
             TableName = "Customer",
             NewDescription = "顧客マスタ",
             OldDescription = null,
-            IsSelected = true
+            IsSelected = true,
         };
+
         var sql = SchemaSyncScriptBuilder.Build(new[] { item });
         sql.Should().Contain("sp_addextendedproperty");
         sql.Should().Contain("sp_updateextendedproperty");
@@ -167,8 +229,9 @@ public class SchemaSyncScriptBuilderTests
             ColumnName = "Name",
             NewDescription = "顧客名",
             OldDescription = "旧",
-            IsSelected = true
+            IsSelected = true,
         };
+
         var sql = SchemaSyncScriptBuilder.Build(new[] { item });
         sql.Should().Contain("@level2type=N'COLUMN'");
         sql.Should().Contain("@level2name=N'Name'");
@@ -184,8 +247,9 @@ public class SchemaSyncScriptBuilderTests
             TableName = "Customer",
             NewDescription = "",
             OldDescription = "古い",
-            IsSelected = true
+            IsSelected = true,
         };
+
         var sql = SchemaSyncScriptBuilder.Build(new[] { item });
         sql.Should().Contain("sp_dropextendedproperty");
         sql.Should().NotContain("sp_addextendedproperty");

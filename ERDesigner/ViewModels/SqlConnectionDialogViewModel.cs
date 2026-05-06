@@ -1,7 +1,7 @@
-using System;
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Linq;
 using System.Threading.Tasks;
+using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using ERDesigner.Services;
@@ -18,32 +18,51 @@ public partial class SqlConnectionDialogViewModel : ObservableObject
     private readonly SqlConnectionProfileStore _store;
 
     /// <summary>サーバー名。</summary>
-    [ObservableProperty] private string _server = "localhost";
+    [ObservableProperty]
+    private string _server = "localhost";
+
     /// <summary>データベース名。</summary>
-    [ObservableProperty] private string _database = string.Empty;
+    [ObservableProperty]
+    private string _database = string.Empty;
+
     /// <summary>選択中の認証方式。</summary>
-    [ObservableProperty] private SqlAuthMode _authMode = SqlAuthMode.Windows;
+    [ObservableProperty]
+    private SqlAuthMode _authMode = SqlAuthMode.Windows;
+
     /// <summary>SQL/Azure AD のユーザー名。</summary>
-    [ObservableProperty] private string _userId = string.Empty;
+    [ObservableProperty]
+    private string _userId = string.Empty;
+
     /// <summary>SQL/Azure AD のパスワード。</summary>
-    [ObservableProperty] private string _password = string.Empty;
+    [ObservableProperty]
+    private string _password = string.Empty;
+
     /// <summary>サーバー証明書を信頼するか。</summary>
-    [ObservableProperty] private bool _trustServerCertificate = true;
+    [ObservableProperty]
+    private bool _trustServerCertificate = true;
+
     /// <summary>パスワードも DPAPI で暗号化保存するか (SQL/Azure AD 認証のときのみ意味あり)。</summary>
-    [ObservableProperty] private bool _savePassword;
+    [ObservableProperty]
+    private bool _savePassword;
+
     /// <summary>テスト結果や状態メッセージ。</summary>
-    [ObservableProperty] private string _statusMessage = string.Empty;
+    [ObservableProperty]
+    private string _statusMessage = string.Empty;
+
     /// <summary>接続テスト中かどうか。</summary>
-    [ObservableProperty] private bool _isBusy;
+    [ObservableProperty]
+    private bool _isBusy;
 
     /// <summary>保存済みプロファイル一覧。</summary>
     public ObservableCollection<SqlConnectionProfile> Profiles { get; } = new();
 
     /// <summary>選択中のプロファイル。</summary>
-    [ObservableProperty] private SqlConnectionProfile? _selectedProfile;
+    [ObservableProperty]
+    private SqlConnectionProfile? _selectedProfile;
 
     /// <summary>名前を付けて保存するときの名前 (ComboBox の編集テキストと同期)。</summary>
-    [ObservableProperty] private string _profileName = string.Empty;
+    [ObservableProperty]
+    private string _profileName = string.Empty;
 
     /// <summary>OK ボタン押下時の確定設定。null なら未確定。</summary>
     public SqlConnectionSettings? Result { get; private set; }
@@ -51,8 +70,11 @@ public partial class SqlConnectionDialogViewModel : ObservableObject
     /// <summary>ダイアログを閉じるためのアクション (View が注入)。</summary>
     public Action<bool>? CloseAction { get; set; }
 
-    /// <summary>SQL 認証 / Azure AD のときに UserId/Password 入力欄を表示するか。</summary>
-    public bool ShowCredentials => AuthMode != SqlAuthMode.Windows;
+    /// <summary>SQL 認証 / Azure AD のときにユーザー名入力欄を表示するか。</summary>
+    public bool ShowUserId => AuthMode != SqlAuthMode.Windows;
+
+    /// <summary>SQL 認証のときにパスワード入力欄を表示するか。</summary>
+    public bool ShowPassword => AuthMode == SqlAuthMode.SqlServer;
 
     /// <summary>新しい ViewModel を生成します。</summary>
     /// <param name="store">プロファイル保存ストア (省略時は既定パスを使用)。</param>
@@ -67,25 +89,34 @@ public partial class SqlConnectionDialogViewModel : ObservableObject
     private void ReloadProfiles(bool selectFirst)
     {
         Profiles.Clear();
+
         foreach (var p in _store.LoadAll())
+        {
             Profiles.Add(p);
+        }
 
         if (selectFirst && Profiles.Count > 0)
         {
             SelectedProfile = Profiles[0];
             return;
         }
-
-        SelectedProfile = null;
     }
 
-    partial void OnAuthModeChanged(SqlAuthMode value) => OnPropertyChanged(nameof(ShowCredentials));
+    partial void OnAuthModeChanged(SqlAuthMode value)
+    {
+        OnPropertyChanged(nameof(ShowUserId));
+        OnPropertyChanged(nameof(ShowPassword));
+    }
 
     /// <summary>前回接続情報があれば入力欄へ復元します。</summary>
     private void RestoreLastConnection()
     {
         var lastUsed = _store.LoadLastUsed();
-        if (lastUsed is null) return;
+
+        if (lastUsed is null)
+        {
+            return;
+        }
 
         ApplyConnection(lastUsed.Value.Profile, lastUsed.Value.Password, updateProfileName: false);
         StatusMessage = "前回接続情報を復元しました。";
@@ -103,40 +134,48 @@ public partial class SqlConnectionDialogViewModel : ObservableObject
         Password = password;
 
         if (updateProfileName)
+        {
             ProfileName = profile.Name;
+        }
     }
 
     /// <summary>現在の入力内容から接続プロファイルを生成します。</summary>
-    private SqlConnectionProfile CreateCurrentProfile(Guid? id = null, string? name = null) => new()
-    {
-        Id = id ?? Guid.NewGuid(),
-        Name = name ?? string.Empty,
-        Server = Server,
-        Database = Database,
-        AuthMode = AuthMode,
-        UserId = UserId,
-        TrustServerCertificate = TrustServerCertificate,
-        SavePassword = SavePassword
-    };
+    private SqlConnectionProfile CreateCurrentProfile(Guid? id = null, string? name = null) =>
+        new()
+        {
+            Id = id ?? Guid.NewGuid(),
+            Name = name ?? string.Empty,
+            Server = Server,
+            Database = Database,
+            AuthMode = AuthMode,
+            UserId = UserId,
+            TrustServerCertificate = TrustServerCertificate,
+            SavePassword = SavePassword,
+        };
 
     /// <summary>プロファイル選択時、入力欄に値を反映します。</summary>
     partial void OnSelectedProfileChanged(SqlConnectionProfile? value)
     {
-        if (value is null) return;
+        if (value is null)
+        {
+            return;
+        }
+
         ApplyConnection(value, value.SavePassword ? _store.LoadPassword(value.Id) : string.Empty, updateProfileName: true);
         StatusMessage = $"プロファイル '{value.Name}' を読み込みました。";
     }
 
     /// <summary>現在の入力から <see cref="SqlConnectionSettings"/> を構築します。</summary>
-    public SqlConnectionSettings ToSettings() => new()
-    {
-        Server = Server,
-        Database = Database,
-        AuthMode = AuthMode,
-        UserId = UserId,
-        Password = Password,
-        TrustServerCertificate = TrustServerCertificate
-    };
+    public SqlConnectionSettings ToSettings() =>
+        new()
+        {
+            Server = Server,
+            Database = Database,
+            AuthMode = AuthMode,
+            UserId = UserId,
+            Password = Password,
+            TrustServerCertificate = TrustServerCertificate,
+        };
 
     /// <summary>接続テストを行います。</summary>
     [RelayCommand]
@@ -144,6 +183,7 @@ public partial class SqlConnectionDialogViewModel : ObservableObject
     {
         IsBusy = true;
         StatusMessage = "接続中...";
+
         try
         {
             var s = ToSettings();
@@ -171,9 +211,7 @@ public partial class SqlConnectionDialogViewModel : ObservableObject
             return;
         }
 
-        // 既存名と一致するなら同じ Id を使う (上書き)
-        var existing = Profiles.FirstOrDefault(p =>
-            string.Equals(p.Name, ProfileName, StringComparison.OrdinalIgnoreCase));
+        var existing = Profiles.FirstOrDefault(p => string.Equals(p.Name, ProfileName, StringComparison.OrdinalIgnoreCase));
 
         var profile = CreateCurrentProfile(existing?.Id, ProfileName.Trim());
 
@@ -193,12 +231,12 @@ public partial class SqlConnectionDialogViewModel : ObservableObject
             return;
         }
 
-        var ans = System.Windows.MessageBox.Show(
-            $"プロファイル '{SelectedProfile.Name}' を削除します。よろしいですか？",
-            "確認",
-            System.Windows.MessageBoxButton.OKCancel,
-            System.Windows.MessageBoxImage.Question);
-        if (ans != System.Windows.MessageBoxResult.OK) return;
+        var ans = MessageBox.Show($"プロファイル '{SelectedProfile.Name}' を削除します。よろしいですか？", "確認", MessageBoxButton.OKCancel, MessageBoxImage.Question);
+
+        if (ans != MessageBoxResult.OK)
+        {
+            return;
+        }
 
         var name = SelectedProfile.Name;
         _store.Delete(SelectedProfile.Id);

@@ -1,4 +1,5 @@
-using System.Windows;
+﻿using System.Windows;
+using System.Windows.Controls;
 using ERDesigner.ViewModels;
 
 namespace ERDesigner.Views;
@@ -22,14 +23,14 @@ public partial class SqlConnectionDialog : Window
             {
                 DialogResult = result;
                 Close();
-            }
+            },
         };
+
         DataContext = ViewModel;
         // VM 側 (プロファイル選択時など) で Password が更新されたら PasswordBox にも反映する
         ViewModel.PropertyChanged += (_, e) =>
         {
-            if (e.PropertyName == nameof(SqlConnectionDialogViewModel.Password)
-                && PasswordBoxControl.Password != ViewModel.Password)
+            if (e.PropertyName == nameof(SqlConnectionDialogViewModel.Password) && PasswordBoxControl.Password != ViewModel.Password)
             {
                 PasswordBoxControl.Password = ViewModel.Password;
             }
@@ -39,7 +40,9 @@ public partial class SqlConnectionDialog : Window
     /// <summary>PasswordBox の変更を ViewModel へ反映します。</summary>
     private void PasswordBoxControl_PasswordChanged(object sender, RoutedEventArgs e)
     {
-        if (sender is System.Windows.Controls.PasswordBox pb)
+        if (sender is PasswordBox pb)
+        {
             ViewModel.Password = pb.Password;
+        }
     }
 }

@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using ERDesigner.Models;
 using ERDesigner.Services;
 using FluentAssertions;
@@ -13,8 +13,12 @@ public class SchemaDiffColumnOrderTests
     private static Entity Tbl(string name, params string[] cols)
     {
         var e = new Entity { TableName = name };
+
         foreach (var c in cols)
+        {
             e.Columns.Add(new Column { Name = c, DataType = "int" });
+        }
+
         return e;
     }
 

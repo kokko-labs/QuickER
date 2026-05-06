@@ -1,4 +1,4 @@
-using ERDesigner.Services;
+﻿using ERDesigner.Services;
 using FluentAssertions;
 
 namespace ERDesigner.Tests.Services;
@@ -25,11 +25,8 @@ public class AiGenerationSettingsTests
     [Fact(DisplayName = "EndpointOverride が優先される")]
     public void Override_TakesPrecedence()
     {
-        var s = new AiGenerationSettings
-        {
-            Provider = AiProvider.OpenAi,
-            EndpointOverride = "https://example.com/v1"
-        };
+        var s = new AiGenerationSettings { Provider = AiProvider.OpenAi, EndpointOverride = "https://example.com/v1" };
+
         s.ResolveEndpoint().Should().Be("https://example.com/v1");
     }
 }

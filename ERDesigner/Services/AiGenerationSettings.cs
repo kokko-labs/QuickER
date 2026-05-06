@@ -5,8 +5,9 @@ public enum AiProvider
 {
     /// <summary>OpenAI 公式 API (api.openai.com)。</summary>
     OpenAi,
+
     /// <summary>ローカル Ollama (OpenAI 互換 API)。</summary>
-    Ollama
+    Ollama,
 }
 
 /// <summary>AI スキーマ生成リクエストの設定値。</summary>
@@ -29,10 +30,11 @@ public class AiGenerationSettings
 
     /// <summary>プロバイダ既定のエンドポイント。</summary>
     public string ResolveEndpoint() =>
-        !string.IsNullOrWhiteSpace(EndpointOverride) ? EndpointOverride!
+        !string.IsNullOrWhiteSpace(EndpointOverride)
+            ? EndpointOverride!
             : Provider switch
             {
                 AiProvider.Ollama => "http://localhost:11434/v1",
-                _ => "https://api.openai.com/v1"
+                _ => "https://api.openai.com/v1",
             };
 }

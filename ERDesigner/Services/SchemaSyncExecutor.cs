@@ -1,5 +1,5 @@
-using System;
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
+using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
@@ -21,8 +21,10 @@ public class SchemaSyncExecutor
     {
         /// <summary>各バッチの結果。</summary>
         public List<BatchResult> Batches { get; } = new();
+
         /// <summary>すべて成功して COMMIT したか。</summary>
         public bool Committed { get; set; }
+
         /// <summary>失敗時のエラーメッセージ。</summary>
         public string? Error { get; set; }
     }
@@ -30,11 +32,11 @@ public class SchemaSyncExecutor
     /// <summary>
     /// スクリプトをトランザクション内で実行します。途中で例外が発生したら ROLLBACK します。
     /// </summary>
-    public async Task<ExecutionResult> ExecuteAsync(
-        SqlConnectionSettings settings, string script, CancellationToken ct = default)
+    public async Task<ExecutionResult> ExecuteAsync(SqlConnectionSettings settings, string script, CancellationToken ct = default)
     {
         var result = new ExecutionResult();
         var batches = SplitBatches(script);
+
         if (batches.Count == 0)
         {
             result.Committed = true;
@@ -47,7 +49,7 @@ public class SchemaSyncExecutor
 
         try
         {
-            for (int i = 0; i < batches.Count; i++)
+            for (var i = 0; i < batches.Count; i++)
             {
                 var sql = batches[i];
                 await using var cmd = new SqlCommand(sql, conn, tran);
@@ -55,13 +57,22 @@ public class SchemaSyncExecutor
                 await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
                 result.Batches.Add(new BatchResult(i + 1, sql, true, null));
             }
+
             await tran.CommitAsync(ct).ConfigureAwait(false);
             result.Committed = true;
         }
         catch (Exception ex)
         {
             result.Error = ex.Message;
-            try { await tran.RollbackAsync(ct).ConfigureAwait(false); } catch { /* best effort */ }
+
+            try
+            {
+                await tran.RollbackAsync(ct).ConfigureAwait(false);
+            }
+            catch
+            { /* best effort */
+            }
+
             result.Batches.Add(new BatchResult(result.Batches.Count + 1, "", false, ex.Message));
         }
 
@@ -72,16 +83,27 @@ public class SchemaSyncExecutor
     public static List<string> SplitBatches(string script)
     {
         var list = new List<string>();
-        if (string.IsNullOrWhiteSpace(script)) return list;
+
+        if (string.IsNullOrWhiteSpace(script))
+        {
+            return list;
+        }
+
         var lines = script.Replace("\r\n", "\n").Split('\n');
-        var current = new System.Text.StringBuilder();
+        var current = new StringBuilder();
         var goPattern = new Regex(@"^\s*GO\s*$", RegexOptions.IgnoreCase);
+
         foreach (var line in lines)
         {
             if (goPattern.IsMatch(line))
             {
                 var batch = current.ToString().Trim();
-                if (batch.Length > 0) list.Add(batch);
+
+                if (batch.Length > 0)
+                {
+                    list.Add(batch);
+                }
+
                 current.Clear();
             }
             else
@@ -89,8 +111,14 @@ public class SchemaSyncExecutor
                 current.AppendLine(line);
             }
         }
+
         var last = current.ToString().Trim();
-        if (last.Length > 0) list.Add(last);
+
+        if (last.Length > 0)
+        {
+            list.Add(last);
+        }
+
         return list;
     }
 }

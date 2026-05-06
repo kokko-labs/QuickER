@@ -1,5 +1,4 @@
-using System;
-using System.Reflection;
+﻿using System.Reflection;
 
 namespace ERDesigner.UndoRedo;
 
@@ -24,8 +23,7 @@ public class PropertyChangeCommand : IUndoableCommand
     public PropertyChangeCommand(object target, string propertyName, object? oldValue, object? newValue)
     {
         _target = target;
-        _property = target.GetType().GetProperty(propertyName)
-            ?? throw new ArgumentException($"Property '{propertyName}' not found.");
+        _property = target.GetType().GetProperty(propertyName) ?? throw new ArgumentException($"Property '{propertyName}' not found.");
         _oldValue = oldValue;
         _newValue = newValue;
     }
@@ -35,6 +33,7 @@ public class PropertyChangeCommand : IUndoableCommand
 
     /// <inheritdoc />
     public void Execute() => _property.SetValue(_target, _newValue);
+
     /// <inheritdoc />
     public void Undo() => _property.SetValue(_target, _oldValue);
 }

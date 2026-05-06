@@ -14,12 +14,24 @@ public class DuplicateEntityCommandTests
     public void Execute_AddsDuplicate()
     {
         var main = new MainViewModel();
-        var src = new EntityViewModel(new Entity
-        {
-            TableName = "Original",
-            X = 10, Y = 20,
-            Columns = { new Column { Name = "Id", DataType = "int", IsPrimaryKey = true, Description = "主キー" } }
-        });
+        var src = new EntityViewModel(
+            new Entity
+            {
+                TableName = "Original",
+                X = 10,
+                Y = 20,
+                Columns =
+                {
+                    new Column
+                    {
+                        Name = "Id",
+                        DataType = "int",
+                        IsPrimaryKey = true,
+                        Description = "主キー",
+                    },
+                },
+            }
+        );
         main.Entities.Add(src);
 
         var cmd = new DuplicateEntityCommand(main, src);

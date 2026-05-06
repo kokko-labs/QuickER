@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using ERDesigner.ViewModels;
 
 namespace ERDesigner.Views;
@@ -21,6 +21,7 @@ public partial class SchemaSyncDialog : Window
             DialogResult = result;
             Close();
         };
+
         DataContext = ViewModel;
         Loaded += async (_, _) => await ViewModel.RefreshCommand.ExecuteAsync(null);
     }

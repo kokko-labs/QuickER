@@ -1,6 +1,4 @@
-using System;
-
-namespace ERDesigner.Services;
+﻿namespace ERDesigner.Services;
 
 /// <summary>
 /// 名前を付けて保存可能な SQL Server 接続プロファイル。
@@ -33,13 +31,14 @@ public class SqlConnectionProfile
     public bool SavePassword { get; set; }
 
     /// <summary>このプロファイルから接続設定を構築します (パスワードは別途指定)。</summary>
-    public SqlConnectionSettings ToSettings(string password) => new()
-    {
-        Server = Server,
-        Database = Database,
-        AuthMode = AuthMode,
-        UserId = UserId,
-        Password = password,
-        TrustServerCertificate = TrustServerCertificate
-    };
+    public SqlConnectionSettings ToSettings(string password) =>
+        new()
+        {
+            Server = Server,
+            Database = Database,
+            AuthMode = AuthMode,
+            UserId = UserId,
+            Password = password,
+            TrustServerCertificate = TrustServerCertificate,
+        };
 }

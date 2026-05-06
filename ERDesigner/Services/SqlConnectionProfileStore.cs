@@ -1,5 +1,4 @@
-using System;
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
@@ -14,11 +13,7 @@ namespace ERDesigner.Services;
 /// </summary>
 public class SqlConnectionProfileStore
 {
-    private static readonly JsonSerializerOptions JsonOpts = new()
-    {
-        WriteIndented = true,
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-    };
+    private static readonly JsonSerializerOptions JsonOpts = new() { WriteIndented = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
     private readonly string _folder;
     private readonly bool _useDpapi;
@@ -34,8 +29,7 @@ public class SqlConnectionProfileStore
 
     /// <summary>既定 (<c>%AppData%\ERDesigner</c>) のストアを生成します。</summary>
     public SqlConnectionProfileStore()
-        : this(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ERDesigner"), true)
-    { }
+        : this(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ERDesigner"), true) { }
 
     /// <summary>テスト用にフォルダと DPAPI 利用可否を指定して生成します。</summary>
     /// <param name="folder">保存先ディレクトリ。</param>
@@ -49,12 +43,15 @@ public class SqlConnectionProfileStore
     /// <summary>すべてのプロファイルを名前順で読み込みます。</summary>
     public List<SqlConnectionProfile> LoadAll()
     {
-        if (!File.Exists(ProfilesPath)) return new List<SqlConnectionProfile>();
+        if (!File.Exists(ProfilesPath))
+        {
+            return new List<SqlConnectionProfile>();
+        }
+
         try
         {
             var json = File.ReadAllText(ProfilesPath);
-            var list = JsonSerializer.Deserialize<List<SqlConnectionProfile>>(json, JsonOpts)
-                       ?? new List<SqlConnectionProfile>();
+            var list = JsonSerializer.Deserialize<List<SqlConnectionProfile>>(json, JsonOpts) ?? new List<SqlConnectionProfile>();
             return list.OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase).ToList();
         }
         catch
@@ -69,16 +66,22 @@ public class SqlConnectionProfileStore
     /// </summary>
     public (SqlConnectionProfile Profile, string Password)? LoadLastUsed()
     {
-        if (!File.Exists(LastConnectionPath)) return null;
+        if (!File.Exists(LastConnectionPath))
+        {
+            return null;
+        }
+
         try
         {
             var json = File.ReadAllText(LastConnectionPath);
             var profile = JsonSerializer.Deserialize<SqlConnectionProfile>(json, JsonOpts);
-            if (profile is null) return null;
 
-            var password = profile.SavePassword
-                ? LoadSecret(LastConnectionSecretPath())
-                : string.Empty;
+            if (profile is null)
+            {
+                return null;
+            }
+
+            var password = profile.SavePassword ? LoadSecret(LastConnectionSecretPath()) : string.Empty;
             return (profile, password);
         }
         catch
@@ -106,9 +109,13 @@ public class SqlConnectionProfileStore
         File.WriteAllText(LastConnectionPath, json);
 
         if (profile.SavePassword && !string.IsNullOrEmpty(password))
+        {
             SaveSecret(LastConnectionSecretPath(), password);
+        }
         else
+        {
             DeleteSecret(LastConnectionSecretPath());
+        }
     }
 
     /// <summary>1 件のプロファイルを追加または更新し、必要ならパスワードも暗号化保存します。</summary>
@@ -118,14 +125,26 @@ public class SqlConnectionProfileStore
     {
         var all = LoadAll();
         var idx = all.FindIndex(p => p.Id == profile.Id);
-        if (idx >= 0) all[idx] = profile;
-        else all.Add(profile);
+
+        if (idx >= 0)
+        {
+            all[idx] = profile;
+        }
+        else
+        {
+            all.Add(profile);
+        }
+
         SaveAll(all);
 
         if (profile.SavePassword && !string.IsNullOrEmpty(password))
+        {
             SaveSecret(profile.Id, password);
+        }
         else
+        {
             DeleteSecret(profile.Id);
+        }
     }
 
     /// <summary>指定 ID のプロファイルとパスワードを削除します。</summary>
@@ -146,15 +165,21 @@ public class SqlConnectionProfileStore
 
     private string LoadSecret(string path)
     {
-        if (!File.Exists(path)) return string.Empty;
+        if (!File.Exists(path))
+        {
+            return string.Empty;
+        }
+
         try
         {
             var bytes = File.ReadAllBytes(path);
+
             if (_useDpapi)
             {
                 var data = ProtectedData.Unprotect(bytes, optionalEntropy: null, scope: DataProtectionScope.CurrentUser);
                 return Encoding.UTF8.GetString(data);
             }
+
             return Encoding.UTF8.GetString(bytes);
         }
         catch
@@ -163,26 +188,30 @@ public class SqlConnectionProfileStore
         }
     }
 
-    private void SaveSecret(Guid id, string password)
-        => SaveSecret(SecretPath(id), password);
+    private void SaveSecret(Guid id, string password) => SaveSecret(SecretPath(id), password);
 
     private void SaveSecret(string path, string password)
     {
         var directory = Path.GetDirectoryName(path);
-        if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
+
+        if (!string.IsNullOrEmpty(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
         var raw = Encoding.UTF8.GetBytes(password);
-        var bytes = _useDpapi
-            ? ProtectedData.Protect(raw, optionalEntropy: null, scope: DataProtectionScope.CurrentUser)
-            : raw;
+        var bytes = _useDpapi ? ProtectedData.Protect(raw, optionalEntropy: null, scope: DataProtectionScope.CurrentUser) : raw;
         File.WriteAllBytes(path, bytes);
     }
 
-    private void DeleteSecret(Guid id)
-        => DeleteSecret(SecretPath(id));
+    private void DeleteSecret(Guid id) => DeleteSecret(SecretPath(id));
 
     private void DeleteSecret(string path)
     {
-        if (File.Exists(path)) File.Delete(path);
+        if (File.Exists(path))
+        {
+            File.Delete(path);
+        }
     }
 
     private string SecretPath(Guid id) => Path.Combine(SecretsFolder, id.ToString("N") + ".dat");

@@ -1,3 +1,4 @@
+﻿using System.Collections.Generic;
 using ERDesigner.Models;
 using ERDesigner.ViewModels;
 using FluentAssertions;
@@ -10,15 +11,20 @@ namespace ERDesigner.Tests.ViewModels;
 public class RelationshipViewModelTests
 {
     private static EntityViewModel NewEntity(double x, double y) =>
-        new(new Entity { X = x, Y = y, Width = 200 });
+        new(
+            new Entity
+            {
+                X = x,
+                Y = y,
+                Width = 200,
+            }
+        );
 
     [Theory(DisplayName = "種別ごとに正しいマーカー種別が返る")]
     [InlineData(RelationshipType.OneToOne, RelationshipViewModel.MarkerKind.One, RelationshipViewModel.MarkerKind.One)]
     [InlineData(RelationshipType.OneToMany, RelationshipViewModel.MarkerKind.One, RelationshipViewModel.MarkerKind.Many)]
     [InlineData(RelationshipType.ManyToMany, RelationshipViewModel.MarkerKind.Many, RelationshipViewModel.MarkerKind.Many)]
-    public void Markers_AreCorrect(RelationshipType type,
-        RelationshipViewModel.MarkerKind expectedSource,
-        RelationshipViewModel.MarkerKind expectedTarget)
+    public void Markers_AreCorrect(RelationshipType type, RelationshipViewModel.MarkerKind expectedSource, RelationshipViewModel.MarkerKind expectedTarget)
     {
         var a = NewEntity(0, 0);
         var b = NewEntity(300, 0);
@@ -35,7 +41,7 @@ public class RelationshipViewModelTests
         var b = NewEntity(300, 0);
         var rel = new RelationshipViewModel(new Relationship { Type = RelationshipType.OneToOne }, a, b);
 
-        var changed = new System.Collections.Generic.List<string?>();
+        var changed = new List<string?>();
         rel.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
 
         rel.Type = RelationshipType.OneToMany;
@@ -49,8 +55,22 @@ public class RelationshipViewModelTests
     [Fact(DisplayName = "ラベルはエンティティ間の中央に表示される")]
     public void Label_IsCenteredBetweenEntityBounds()
     {
-        var a = new EntityViewModel(new Entity { X = 0, Y = 0, Width = 100 });
-        var b = new EntityViewModel(new Entity { X = 500, Y = 0, Width = 300 });
+        var a = new EntityViewModel(
+            new Entity
+            {
+                X = 0,
+                Y = 0,
+                Width = 100,
+            }
+        );
+        var b = new EntityViewModel(
+            new Entity
+            {
+                X = 500,
+                Y = 0,
+                Width = 300,
+            }
+        );
         var rel = new RelationshipViewModel(new Relationship { Type = RelationshipType.OneToMany }, a, b);
 
         rel.LabelX.Should().Be(300);
@@ -59,8 +79,22 @@ public class RelationshipViewModelTests
     [Fact(DisplayName = "端点マーカーはエンティティと重ならない位置に表示される")]
     public void Markers_ArePositionedOutsideEntities()
     {
-        var a = new EntityViewModel(new Entity { X = 100, Y = 100, Width = 200 });
-        var b = new EntityViewModel(new Entity { X = 100, Y = 400, Width = 200 });
+        var a = new EntityViewModel(
+            new Entity
+            {
+                X = 100,
+                Y = 100,
+                Width = 200,
+            }
+        );
+        var b = new EntityViewModel(
+            new Entity
+            {
+                X = 100,
+                Y = 400,
+                Width = 200,
+            }
+        );
         var rel = new RelationshipViewModel(new Relationship { Type = RelationshipType.OneToMany }, a, b);
 
         rel.SourceMarkerY.Should().BeGreaterThan(a.Y + a.DisplayHeight + 10);
@@ -70,8 +104,22 @@ public class RelationshipViewModelTests
     [Fact(DisplayName = "横方向でも端点マーカーはエンティティと重ならない位置に表示される")]
     public void Markers_ArePositionedOutsideEntities_Horizontally()
     {
-        var a = new EntityViewModel(new Entity { X = 100, Y = 100, Width = 200 });
-        var b = new EntityViewModel(new Entity { X = 400, Y = 100, Width = 200 });
+        var a = new EntityViewModel(
+            new Entity
+            {
+                X = 100,
+                Y = 100,
+                Width = 200,
+            }
+        );
+        var b = new EntityViewModel(
+            new Entity
+            {
+                X = 400,
+                Y = 100,
+                Width = 200,
+            }
+        );
         var rel = new RelationshipViewModel(new Relationship { Type = RelationshipType.OneToMany }, a, b);
 
         rel.SourceMarkerX.Should().BeGreaterThan(a.X + a.Width + 10);
@@ -81,8 +129,22 @@ public class RelationshipViewModelTests
     [Fact(DisplayName = "端点マーカーの描画領域中央はリレーション線上に一致する")]
     public void MarkerBounds_AreCenteredOnMarkerCoordinates()
     {
-        var a = new EntityViewModel(new Entity { X = 100, Y = 100, Width = 200 });
-        var b = new EntityViewModel(new Entity { X = 400, Y = 260, Width = 200 });
+        var a = new EntityViewModel(
+            new Entity
+            {
+                X = 100,
+                Y = 100,
+                Width = 200,
+            }
+        );
+        var b = new EntityViewModel(
+            new Entity
+            {
+                X = 400,
+                Y = 260,
+                Width = 200,
+            }
+        );
         var rel = new RelationshipViewModel(new Relationship { Type = RelationshipType.OneToMany }, a, b);
 
         (rel.SourceMarkerLeft + 10).Should().BeApproximately(rel.SourceMarkerX, 0.001);
@@ -94,8 +156,22 @@ public class RelationshipViewModelTests
     [Fact(DisplayName = "N側マーカーは対象エンティティ側を向く")]
     public void TargetManyMarker_FacesTargetEntity()
     {
-        var a = new EntityViewModel(new Entity { X = 100, Y = 100, Width = 200 });
-        var b = new EntityViewModel(new Entity { X = 400, Y = 100, Width = 200 });
+        var a = new EntityViewModel(
+            new Entity
+            {
+                X = 100,
+                Y = 100,
+                Width = 200,
+            }
+        );
+        var b = new EntityViewModel(
+            new Entity
+            {
+                X = 400,
+                Y = 100,
+                Width = 200,
+            }
+        );
         var rel = new RelationshipViewModel(new Relationship { Type = RelationshipType.OneToMany }, a, b);
 
         rel.TargetMarkerAngle.Should().BeApproximately(0, 0.001);
@@ -104,8 +180,22 @@ public class RelationshipViewModelTests
     [Fact(DisplayName = "起点がN側のときマーカーは起点エンティティ側を向く")]
     public void SourceManyMarker_FacesSourceEntity()
     {
-        var a = new EntityViewModel(new Entity { X = 100, Y = 100, Width = 200 });
-        var b = new EntityViewModel(new Entity { X = 400, Y = 100, Width = 200 });
+        var a = new EntityViewModel(
+            new Entity
+            {
+                X = 100,
+                Y = 100,
+                Width = 200,
+            }
+        );
+        var b = new EntityViewModel(
+            new Entity
+            {
+                X = 400,
+                Y = 100,
+                Width = 200,
+            }
+        );
         var rel = new RelationshipViewModel(new Relationship { Type = RelationshipType.ManyToMany }, a, b);
 
         rel.SourceMarkerAngle.Should().BeApproximately(180, 0.001);

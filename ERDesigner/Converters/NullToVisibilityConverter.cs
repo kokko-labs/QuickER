@@ -1,5 +1,4 @@
-using System;
-using System.Globalization;
+﻿using System.Globalization;
 using System.Windows;
 using System.Windows.Data;
 
@@ -12,10 +11,8 @@ namespace ERDesigner.Converters;
 public class NullToVisibilityConverter : IValueConverter
 {
     /// <summary>値を <see cref="Visibility"/> に変換します。</summary>
-    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
-        => value is null ? Visibility.Collapsed : Visibility.Visible;
+    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture) => value is null ? Visibility.Collapsed : Visibility.Visible;
 
     /// <summary>逆変換はサポートしません。</summary>
-    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
-        => throw new NotSupportedException();
+    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) => throw new NotSupportedException();
 }

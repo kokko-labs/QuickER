@@ -1,5 +1,4 @@
-using System;
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -35,12 +34,12 @@ public static class DragBehavior
     // ---------- 添付プロパティ ----------
 
     /// <summary>ドラッグ機能を有効にするかどうかを表す添付プロパティです。</summary>
-    public static readonly DependencyProperty IsEnabledProperty =
-        DependencyProperty.RegisterAttached(
-            "IsEnabled",
-            typeof(bool),
-            typeof(DragBehavior),
-            new PropertyMetadata(false, OnIsEnabledChanged));
+    public static readonly DependencyProperty IsEnabledProperty = DependencyProperty.RegisterAttached(
+        "IsEnabled",
+        typeof(bool),
+        typeof(DragBehavior),
+        new PropertyMetadata(false, OnIsEnabledChanged)
+    );
 
     /// <summary><see cref="IsEnabledProperty"/> の値を設定します。</summary>
     public static void SetIsEnabled(DependencyObject d, bool value) => d.SetValue(IsEnabledProperty, value);
@@ -49,12 +48,12 @@ public static class DragBehavior
     public static bool GetIsEnabled(DependencyObject d) => (bool)d.GetValue(IsEnabledProperty);
 
     /// <summary>移動コマンドを登録する <see cref="UndoRedoManager"/> を保持する添付プロパティです。</summary>
-    public static readonly DependencyProperty UndoRedoManagerProperty =
-        DependencyProperty.RegisterAttached(
-            "UndoRedoManager",
-            typeof(UndoRedoManager),
-            typeof(DragBehavior),
-            new PropertyMetadata(null));
+    public static readonly DependencyProperty UndoRedoManagerProperty = DependencyProperty.RegisterAttached(
+        "UndoRedoManager",
+        typeof(UndoRedoManager),
+        typeof(DragBehavior),
+        new PropertyMetadata(null)
+    );
 
     /// <summary><see cref="UndoRedoManagerProperty"/> の値を設定します。</summary>
     public static void SetUndoRedoManager(DependencyObject d, UndoRedoManager value) => d.SetValue(UndoRedoManagerProperty, value);
@@ -79,7 +78,10 @@ public static class DragBehavior
     /// <summary>添付プロパティ <see cref="IsEnabledProperty"/> 変更時のハンドラ登録／解除を行います。</summary>
     private static void OnIsEnabledChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
     {
-        if (d is not FrameworkElement fe) return;
+        if (d is not FrameworkElement fe)
+        {
+            return;
+        }
 
         if ((bool)e.NewValue)
         {
@@ -102,18 +104,32 @@ public static class DragBehavior
     private static Canvas? FindCanvas(DependencyObject? d)
     {
         while (d is not null and not Canvas)
+        {
             d = VisualTreeHelper.GetParent(d);
+        }
+
         return d as Canvas;
     }
 
     /// <summary>マウス押下: ドラッグ開始位置を記録しキャプチャします。</summary>
     private static void OnMouseDown(object sender, MouseButtonEventArgs e)
     {
-        if (sender is not FrameworkElement fe) return;
-        if (fe.DataContext is not EntityViewModel vm) return;
+        if (sender is not FrameworkElement fe)
+        {
+            return;
+        }
+
+        if (fe.DataContext is not EntityViewModel vm)
+        {
+            return;
+        }
 
         var canvas = FindCanvas(fe);
-        if (canvas is null) return;
+
+        if (canvas is null)
+        {
+            return;
+        }
 
         _draggedElement = fe;
         _draggedVm = vm;
@@ -123,6 +139,7 @@ public static class DragBehavior
 
         // 右端グリップ判定 → リサイズモード
         var local = e.GetPosition(fe);
+
         if (local.X >= fe.ActualWidth - GripWidth && fe.ActualWidth > 0)
         {
             _isResizing = true;
@@ -142,14 +159,16 @@ public static class DragBehavior
     /// <summary>マウス移動: ボタン押下中なら ViewModel の座標を更新します。</summary>
     private static void OnMouseMove(object sender, MouseEventArgs e)
     {
-        if (_draggedElement is null || _draggedVm is null) return;
+        if (_draggedElement is null || _draggedVm is null)
+        {
+            return;
+        }
 
         // カーソル形状更新 (ドラッグ中でなければ)
         if (!_isDragging && !_isResizing && sender is FrameworkElement cursorFe)
         {
             var lp = e.GetPosition(cursorFe);
-            cursorFe.Cursor = (lp.X >= cursorFe.ActualWidth - GripWidth && cursorFe.ActualWidth > 0)
-                ? Cursors.SizeWE : null;
+            cursorFe.Cursor = (lp.X >= cursorFe.ActualWidth - GripWidth && cursorFe.ActualWidth > 0) ? Cursors.SizeWE : null;
             return;
         }
 
@@ -160,7 +179,12 @@ public static class DragBehavior
         }
 
         var canvas = FindCanvas(_draggedElement);
-        if (canvas is null) return;
+
+        if (canvas is null)
+        {
+            return;
+        }
+
         var pos = e.GetPosition(canvas);
 
         if (_isResizing)
@@ -182,10 +206,14 @@ public static class DragBehavior
     /// <summary>マウス解放: 移動量に応じてクリック扱い／Undo 登録を行います。</summary>
     private static void OnMouseUp(object sender, MouseButtonEventArgs e)
     {
-        if (!_isDragging && !_isResizing) return;
+        if (!_isDragging && !_isResizing)
+        {
+            return;
+        }
 
         var canvas = FindCanvas(_draggedElement);
         var movedPx = double.PositiveInfinity;
+
         if (canvas is not null)
         {
             var pos = e.GetPosition(canvas);
@@ -199,7 +227,9 @@ public static class DragBehavior
     private static void OnLostCapture(object sender, MouseEventArgs e)
     {
         if (_isDragging || _isResizing)
+        {
             EndDrag(treatAsClick: false);
+        }
     }
 
     /// <summary>ドラッグ状態を終了し、必要に応じて Undo/選択処理を行います。</summary>
@@ -217,10 +247,16 @@ public static class DragBehavior
         _draggedElement = null;
         _draggedVm = null;
 
-        if (element is null || vm is null) return;
+        if (element is null || vm is null)
+        {
+            return;
+        }
 
         if (element.IsMouseCaptured)
+        {
             element.ReleaseMouseCapture();
+        }
+
         element.Cursor = null;
 
         if (wasResizing)
@@ -236,7 +272,10 @@ public static class DragBehavior
             vm.Y = oldY;
 
             if (Window.GetWindow(element)?.DataContext is MainViewModel main)
+            {
                 main.OnEntityClicked(vm);
+            }
+
             return;
         }
 
@@ -248,6 +287,8 @@ public static class DragBehavior
 
         // キャンバスサイズ再計算
         if (Window.GetWindow(element)?.DataContext is MainViewModel mainVm)
+        {
             mainVm.RefreshCanvasSize();
+        }
     }
 }

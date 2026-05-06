@@ -1,5 +1,4 @@
-using System;
-using System.Threading;
+﻿using System.Threading;
 using System.Threading.Tasks;
 using ERDesigner.Services;
 using ERDesigner.ViewModels;
@@ -14,8 +13,7 @@ public class AiGenerateDialogViewModelTests
 {
     private sealed class FakeAiSchemaClient : IAiSchemaClient
     {
-        public Task<AiSchemaJson> GenerateAsync(AiGenerationSettings settings, CancellationToken ct = default)
-            => Task.FromResult(new AiSchemaJson());
+        public Task<AiSchemaJson> GenerateAsync(AiGenerationSettings settings, CancellationToken ct = default) => Task.FromResult(new AiSchemaJson());
     }
 
     [Fact(DisplayName = "SaveApiKey=true のとき Generate で API キーが保存される")]
@@ -27,7 +25,7 @@ public class AiGenerateDialogViewModelTests
             Provider = AiProvider.OpenAi,
             SaveApiKey = true,
             ApiKey = "sk-vm-test-save",
-            Prompt = "test"
+            Prompt = "test",
         };
 
         try
@@ -52,7 +50,7 @@ public class AiGenerateDialogViewModelTests
             Provider = AiProvider.OpenAi,
             SaveApiKey = false,
             ApiKey = "sk-vm-test-nosave",
-            Prompt = "test"
+            Prompt = "test",
         };
 
         try

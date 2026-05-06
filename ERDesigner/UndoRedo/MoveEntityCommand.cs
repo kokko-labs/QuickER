@@ -9,7 +9,10 @@ namespace ERDesigner.UndoRedo;
 public class MoveEntityCommand : IUndoableCommand
 {
     private readonly EntityViewModel _entity;
-    private readonly double _oldX, _oldY, _newX, _newY;
+    private readonly double _oldX,
+        _oldY,
+        _newX,
+        _newY;
 
     /// <summary>新しい <see cref="MoveEntityCommand"/> を生成します。</summary>
     /// <param name="entity">移動対象のエンティティ。</param>
@@ -20,8 +23,10 @@ public class MoveEntityCommand : IUndoableCommand
     public MoveEntityCommand(EntityViewModel entity, double oldX, double oldY, double newX, double newY)
     {
         _entity = entity;
-        _oldX = oldX; _oldY = oldY;
-        _newX = newX; _newY = newY;
+        _oldX = oldX;
+        _oldY = oldY;
+        _newX = newX;
+        _newY = newY;
     }
 
     /// <inheritdoc />

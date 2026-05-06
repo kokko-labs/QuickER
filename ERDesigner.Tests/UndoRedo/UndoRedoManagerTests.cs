@@ -16,7 +16,9 @@ public class UndoRedoManagerTests
         public int ExecuteCount { get; private set; }
         public int UndoCount { get; private set; }
         public string Description => "stub";
+
         public void Execute() => ExecuteCount++;
+
         public void Undo() => UndoCount++;
     }
 

@@ -1,5 +1,4 @@
-using System;
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Linq;
 using ERDesigner.ViewModels;
 
@@ -18,8 +17,10 @@ public static class AutoLayoutService
 {
     /// <summary>横のギャップ (px)。</summary>
     private const double GapX = 40;
+
     /// <summary>縦のギャップ (px)。</summary>
     private const double GapY = 40;
+
     /// <summary>左上の余白 (px)。</summary>
     private const double Margin = 40;
 
@@ -28,31 +29,47 @@ public static class AutoLayoutService
     /// </summary>
     public static void LayoutGrid(IList<EntityViewModel> entities, int columns = 0)
     {
-        if (entities.Count == 0) return;
+        if (entities.Count == 0)
+        {
+            return;
+        }
+
         if (columns <= 0)
+        {
             columns = (int)Math.Ceiling(Math.Sqrt(entities.Count));
+        }
 
         // 各列の幅、各行の高さを事前計算
         var colWidths = new double[columns];
         var rowCount = (int)Math.Ceiling((double)entities.Count / columns);
         var rowHeights = new double[rowCount];
 
-        for (int i = 0; i < entities.Count; i++)
+        for (var i = 0; i < entities.Count; i++)
         {
-            int c = i % columns;
-            int r = i / columns;
+            var c = i % columns;
+            var r = i / columns;
             colWidths[c] = Math.Max(colWidths[c], entities[i].Width + GapX);
             rowHeights[r] = Math.Max(rowHeights[r], entities[i].DisplayHeight + GapY);
         }
 
-        for (int i = 0; i < entities.Count; i++)
+        for (var i = 0; i < entities.Count; i++)
         {
-            int c = i % columns;
-            int r = i / columns;
-            double x = Margin;
-            for (int ci = 0; ci < c; ci++) x += colWidths[ci];
-            double y = Margin;
-            for (int ri = 0; ri < r; ri++) y += rowHeights[ri];
+            var c = i % columns;
+            var r = i / columns;
+            var x = Margin;
+
+            for (var ci = 0; ci < c; ci++)
+            {
+                x += colWidths[ci];
+            }
+
+            var y = Margin;
+
+            for (var ri = 0; ri < r; ri++)
+            {
+                y += rowHeights[ri];
+            }
+
             entities[i].X = x;
             entities[i].Y = y;
         }
@@ -64,14 +81,16 @@ public static class AutoLayoutService
     /// </summary>
     /// <param name="entities">並べ替え対象のエンティティ一覧。</param>
     /// <param name="relationships">リレーション一覧（向きあり）。</param>
-    public static void LayoutTree(
-        IList<EntityViewModel> entities,
-        IList<RelationshipViewModel> relationships)
+    public static void LayoutTree(IList<EntityViewModel> entities, IList<RelationshipViewModel> relationships)
     {
-        if (entities.Count == 0) return;
+        if (entities.Count == 0)
+        {
+            return;
+        }
 
         // 隣接リスト（無向で扱う）
         var adj = entities.ToDictionary(e => e, _ => new List<EntityViewModel>());
+
         foreach (var r in relationships)
         {
             if (adj.ContainsKey(r.Source) && adj.ContainsKey(r.Target))
@@ -87,7 +106,10 @@ public static class AutoLayoutService
 
         foreach (var root in entities.OrderByDescending(e => adj[e].Count))
         {
-            if (visited.Contains(root)) continue;
+            if (visited.Contains(root))
+            {
+                continue;
+            }
 
             var queue = new Queue<(EntityViewModel node, int depth)>();
             queue.Enqueue((root, 0));
@@ -96,14 +118,20 @@ public static class AutoLayoutService
             while (queue.Count > 0)
             {
                 var (node, depth) = queue.Dequeue();
+
                 if (!levels.TryGetValue(depth, out var list))
+                {
                     levels[depth] = list = new List<EntityViewModel>();
+                }
+
                 list.Add(node);
 
                 foreach (var nb in adj[node])
                 {
                     if (visited.Add(nb))
+                    {
                         queue.Enqueue((nb, depth + 1));
+                    }
                 }
             }
         }
@@ -111,6 +139,7 @@ public static class AutoLayoutService
         // 各階層を縦に配置 (各エンティティの幅を考慮して重ならないようにする)
         // まず各階層の最大高さを計算
         var depthHeight = new Dictionary<int, double>();
+
         foreach (var (depth, list) in levels)
         {
             depthHeight[depth] = list.Max(e => e.DisplayHeight);
@@ -118,12 +147,19 @@ public static class AutoLayoutService
 
         foreach (var (depth, list) in levels)
         {
-            double yOffset = Margin;
-            for (int d = 0; d < depth; d++)
-                if (depthHeight.TryGetValue(d, out var h)) yOffset += h + GapY;
+            var yOffset = Margin;
 
-            double xOffset = Margin;
-            for (int i = 0; i < list.Count; i++)
+            for (var d = 0; d < depth; d++)
+            {
+                if (depthHeight.TryGetValue(d, out var h))
+                {
+                    yOffset += h + GapY;
+                }
+            }
+
+            var xOffset = Margin;
+
+            for (var i = 0; i < list.Count; i++)
             {
                 list[i].X = xOffset;
                 list[i].Y = yOffset;

@@ -1,10 +1,11 @@
-using System;
-using System.Collections.Generic;
-using System.Collections.Specialized;
+﻿using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Collections.Specialized;
 using System.ComponentModel;
 using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
+using System.Windows;
 using System.Windows.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -22,24 +23,35 @@ public partial class MainViewModel : ObservableObject
     public ObservableCollection<EntityViewModel> Entities { get; } = new();
     public ObservableCollection<RelationshipViewModel> Relationships { get; } = new();
 
-    [ObservableProperty] private EntityViewModel? _selectedEntity;
-    [ObservableProperty] private RelationshipViewModel? _selectedRelationship;
+    [ObservableProperty]
+    private EntityViewModel? _selectedEntity;
+
+    [ObservableProperty]
+    private RelationshipViewModel? _selectedRelationship;
 
     /// <summary>
     /// Entity awaiting a partner during relationship-creation mode.
     /// </summary>
-    [ObservableProperty] private EntityViewModel? _pendingRelationshipSource;
-    [ObservableProperty] private RelationshipType _pendingRelationshipType;
-    [ObservableProperty] private bool _isRelationshipMode;
+    [ObservableProperty]
+    private EntityViewModel? _pendingRelationshipSource;
+
+    [ObservableProperty]
+    private RelationshipType _pendingRelationshipType;
+
+    [ObservableProperty]
+    private bool _isRelationshipMode;
 
     /// <summary>プロパティパネルで選択中のカラム（DataGrid の SelectedItem）。</summary>
-    [ObservableProperty] private ColumnViewModel? _selectedColumn;
+    [ObservableProperty]
+    private ColumnViewModel? _selectedColumn;
 
     /// <summary>ER 図上のカラム行に「説明」を表示するか (ツールバーから ON/OFF 切替)。</summary>
-    [ObservableProperty] private bool _showColumnDescriptionsInDiagram;
+    [ObservableProperty]
+    private bool _showColumnDescriptionsInDiagram;
 
     /// <summary>キャンバスの動的幅 (エンティティの最右端 + 余白)。</summary>
     public double CanvasWidth => Math.Max(2400, Entities.Count == 0 ? 2400 : Entities.Max(e => e.X + e.Width) + 400);
+
     /// <summary>キャンバスの動的高さ (エンティティの最下端 + 余白)。</summary>
     public double CanvasHeight => Math.Max(1600, Entities.Count == 0 ? 1600 : Entities.Max(e => e.Y + e.DisplayHeight) + 400);
 
@@ -69,7 +81,9 @@ public partial class MainViewModel : ObservableObject
         if (e.OldItems is not null)
         {
             foreach (EntityViewModel entity in e.OldItems)
+            {
                 entity.PropertyChanged -= OnEntityPropertyChanged;
+            }
         }
 
         if (e.NewItems is not null)
@@ -88,7 +102,9 @@ public partial class MainViewModel : ObservableObject
     private void OnEntityPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName is nameof(EntityViewModel.X) or nameof(EntityViewModel.Y) or nameof(EntityViewModel.Width) or nameof(EntityViewModel.DisplayHeight))
+        {
             RefreshCanvasSize();
+        }
     }
 
     partial void OnShowColumnDescriptionsInDiagramChanged(bool value)
@@ -101,9 +117,7 @@ public partial class MainViewModel : ObservableObject
 
     // ---------------- Auto-save / restore ----------------
 
-    private static readonly string AutoSavePath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-        "ERDesigner", "last_diagram.json");
+    private static readonly string AutoSavePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ERDesigner", "last_diagram.json");
 
     /// <summary>現在のダイアグラムを自動保存ファイルに書き出します。</summary>
     public void AutoSave()
@@ -114,27 +128,44 @@ public partial class MainViewModel : ObservableObject
             Directory.CreateDirectory(dir);
             JsonStorageService.Save(AutoSavePath, this);
         }
-        catch { /* 自動保存の失敗は無視 */ }
+        catch
+        { /* 自動保存の失敗は無視 */
+        }
     }
 
     /// <summary>起動時に前回の自動保存ファイルを復元します。</summary>
     private void RestoreLastDiagram()
     {
-        if (!File.Exists(AutoSavePath)) return;
+        if (!File.Exists(AutoSavePath))
+        {
+            return;
+        }
+
         try
         {
             var diagram = JsonStorageService.Load(AutoSavePath);
+
             foreach (var e in diagram.Entities)
+            {
                 Entities.Add(new EntityViewModel(e));
+            }
+
             foreach (var r in diagram.Relationships)
             {
                 var src = Entities.FirstOrDefault(e => e.Id == r.SourceEntityId);
                 var tgt = Entities.FirstOrDefault(e => e.Id == r.TargetEntityId);
-                if (src is null || tgt is null) continue;
+
+                if (src is null || tgt is null)
+                {
+                    continue;
+                }
+
                 Relationships.Add(new RelationshipViewModel(r, src, tgt));
             }
         }
-        catch { /* 復元失敗時は空で起動 */ }
+        catch
+        { /* 復元失敗時は空で起動 */
+        }
     }
 
     // ---------------- Commands ----------------
@@ -144,14 +175,19 @@ public partial class MainViewModel : ObservableObject
     {
         if (Entities.Count > 0)
         {
-            var ans = System.Windows.MessageBox.Show(
-                "現在のダイアグラムをクリアします。よろしいですか？",
-                "確認",
-                System.Windows.MessageBoxButton.OKCancel,
-                System.Windows.MessageBoxImage.Question);
-            if (ans != System.Windows.MessageBoxResult.OK) return;
+            var ans = MessageBox.Show("現在のダイアグラムをクリアします。よろしいですか？", "確認", MessageBoxButton.OKCancel, MessageBoxImage.Question);
+
+            if (ans != MessageBoxResult.OK)
+            {
+                return;
+            }
         }
-        foreach (var r in Relationships) r.Detach();
+
+        foreach (var r in Relationships)
+        {
+            r.Detach();
+        }
+
         Entities.Clear();
         Relationships.Clear();
         UndoRedo.Clear();
@@ -169,9 +205,15 @@ public partial class MainViewModel : ObservableObject
             Y = 60 + Entities.Count * 30,
             Columns =
             {
-                new Column { Name = "ID", DataType = "int", IsPrimaryKey = true }
-            }
+                new Column
+                {
+                    Name = "ID",
+                    DataType = "int",
+                    IsPrimaryKey = true,
+                },
+            },
         };
+
         var vm = new EntityViewModel(model);
         UndoRedo.Execute(new AddEntityCommand(this, vm));
         SelectedEntity = vm;
@@ -180,10 +222,15 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanRemoveEntity))]
     private void RemoveSelectedEntity()
     {
-        if (SelectedEntity is null) return;
+        if (SelectedEntity is null)
+        {
+            return;
+        }
+
         UndoRedo.Execute(new RemoveEntityCommand(this, SelectedEntity));
         SelectedEntity = null;
     }
+
     private bool CanRemoveEntity() => SelectedEntity is not null;
 
     [RelayCommand]
@@ -212,46 +259,72 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanRemoveRelationship))]
     private void RemoveSelectedRelationship()
     {
-        if (SelectedRelationship is null) return;
+        if (SelectedRelationship is null)
+        {
+            return;
+        }
+
         UndoRedo.Execute(new RemoveRelationshipCommand(this, SelectedRelationship));
         SelectedRelationship = null;
     }
+
     private bool CanRemoveRelationship() => SelectedRelationship is not null;
 
     [RelayCommand(CanExecute = nameof(CanAddColumn))]
     private void AddColumn()
     {
-        if (SelectedEntity is null) return;
-        SelectedEntity.Columns.Add(new ColumnViewModel(new Column
+        if (SelectedEntity is null)
         {
-            Name = "NewColumn",
-            DataType = SqlServerDataTypes.All[3] // "int"
-        }));
+            return;
+        }
+
+        SelectedEntity.Columns.Add(
+            new ColumnViewModel(
+                new Column
+                {
+                    Name = "NewColumn",
+                    DataType = SqlServerDataTypes.All[3], // "int"
+                }
+            )
+        );
     }
+
     private bool CanAddColumn() => SelectedEntity is not null;
 
     /// <summary>指定カラムを選択中エンティティから削除します。</summary>
     [RelayCommand]
     private void RemoveColumn(ColumnViewModel? column)
     {
-        if (SelectedEntity is null || column is null) return;
+        if (SelectedEntity is null || column is null)
+        {
+            return;
+        }
+
         SelectedEntity.Columns.Remove(column);
-        if (SelectedColumn == column) SelectedColumn = null;
+
+        if (SelectedColumn == column)
+        {
+            SelectedColumn = null;
+        }
     }
 
     /// <summary>DataGrid で選択中のカラムを削除します（ツールバーボタン用）。</summary>
     [RelayCommand(CanExecute = nameof(CanRemoveSelectedColumn))]
     private void RemoveSelectedColumn()
     {
-        if (SelectedEntity is null || SelectedColumn is null) return;
+        if (SelectedEntity is null || SelectedColumn is null)
+        {
+            return;
+        }
+
         var col = SelectedColumn;
         SelectedEntity.Columns.Remove(col);
         SelectedColumn = null;
     }
+
     private bool CanRemoveSelectedColumn() => SelectedEntity is not null && SelectedColumn is not null;
 
-    partial void OnSelectedColumnChanged(ColumnViewModel? value)
-        => RemoveSelectedColumnCommand.NotifyCanExecuteChanged();
+    partial void OnSelectedColumnChanged(ColumnViewModel? value) => RemoveSelectedColumnCommand.NotifyCanExecuteChanged();
 
     // ---------------- Selection / Click handling ----------------
 
@@ -264,6 +337,7 @@ public partial class MainViewModel : ObservableObject
                 PendingRelationshipSource = entity;
                 return;
             }
+
             if (PendingRelationshipSource == entity)
             {
                 PendingRelationshipSource = null;
@@ -275,10 +349,11 @@ public partial class MainViewModel : ObservableObject
                 {
                     SourceEntityId = PendingRelationshipSource.Id,
                     TargetEntityId = entity.Id,
-                    Type = PendingRelationshipType
+                    Type = PendingRelationshipType,
                 },
                 PendingRelationshipSource,
-                entity);
+                entity
+            );
 
             UndoRedo.Execute(new AddRelationshipCommand(this, rel));
 
@@ -288,7 +363,11 @@ public partial class MainViewModel : ObservableObject
         else
         {
             // single-selection
-            foreach (var e in Entities) e.IsSelected = (e == entity);
+            foreach (var e in Entities)
+            {
+                e.IsSelected = (e == entity);
+            }
+
             SelectedEntity = entity;
             SelectedRelationship = null;
         }
@@ -297,16 +376,32 @@ public partial class MainViewModel : ObservableObject
     /// <summary>リレーションがクリックされたときに呼ばれます。</summary>
     public void OnRelationshipClicked(RelationshipViewModel rel)
     {
-        foreach (var e in Entities) e.IsSelected = false;
-        foreach (var r in Relationships) r.IsSelected = (r == rel);
+        foreach (var e in Entities)
+        {
+            e.IsSelected = false;
+        }
+
+        foreach (var r in Relationships)
+        {
+            r.IsSelected = (r == rel);
+        }
+
         SelectedEntity = null;
         SelectedRelationship = rel;
     }
 
     public void OnCanvasClicked()
     {
-        foreach (var e in Entities) e.IsSelected = false;
-        foreach (var r in Relationships) r.IsSelected = false;
+        foreach (var e in Entities)
+        {
+            e.IsSelected = false;
+        }
+
+        foreach (var r in Relationships)
+        {
+            r.IsSelected = false;
+        }
+
         SelectedEntity = null;
         SelectedRelationship = null;
     }
@@ -334,13 +429,19 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void EntityClick(EntityViewModel? entity)
     {
-        if (entity is not null) OnEntityClicked(entity);
+        if (entity is not null)
+        {
+            OnEntityClicked(entity);
+        }
     }
 
     [RelayCommand]
     private void RelationshipClick(RelationshipViewModel? rel)
     {
-        if (rel is not null) OnRelationshipClicked(rel);
+        if (rel is not null)
+        {
+            OnRelationshipClicked(rel);
+        }
     }
 
     [RelayCommand]
@@ -352,15 +453,25 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanDuplicateSelectedEntity))]
     private void DuplicateSelectedEntity()
     {
-        if (SelectedEntity is null) return;
+        if (SelectedEntity is null)
+        {
+            return;
+        }
+
         var cmd = new DuplicateEntityCommand(this, SelectedEntity);
         UndoRedo.Execute(cmd);
+
         if (cmd.Duplicated is not null)
         {
-            foreach (var e in Entities) e.IsSelected = (e == cmd.Duplicated);
+            foreach (var e in Entities)
+            {
+                e.IsSelected = (e == cmd.Duplicated);
+            }
+
             SelectedEntity = cmd.Duplicated;
         }
     }
+
     private bool CanDuplicateSelectedEntity() => SelectedEntity is not null;
 
     // ---------------- Auto layout ----------------
@@ -393,7 +504,9 @@ public partial class MainViewModel : ObservableObject
     private static void AutoFitEntityWidths(IEnumerable<EntityViewModel> entities)
     {
         foreach (var entity in entities)
+        {
             entity.AutoFitWidth();
+        }
     }
 
     // ---------------- Export ----------------
@@ -403,10 +516,17 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void ExportPng(object? visual)
     {
-        if (visual is not Visual v) return;
+        if (visual is not Visual v)
+        {
+            return;
+        }
+
         var dlg = new SaveFileDialog { Filter = "PNG Image (*.png)|*.png", DefaultExt = ".png" };
+
         if (dlg.ShowDialog() == true)
+        {
             ImageExportService.ExportPng(v, dlg.FileName);
+        }
     }
 
     /// <summary>現在のダイアグラムを SVG に書き出します。</summary>
@@ -414,8 +534,11 @@ public partial class MainViewModel : ObservableObject
     private void ExportSvg()
     {
         var dlg = new SaveFileDialog { Filter = "SVG Image (*.svg)|*.svg", DefaultExt = ".svg" };
+
         if (dlg.ShowDialog() == true)
+        {
             ImageExportService.ExportSvg(this, dlg.FileName);
+        }
     }
 
     /// <summary>現在のダイアグラムから SQL DDL を書き出します。</summary>
@@ -423,21 +546,25 @@ public partial class MainViewModel : ObservableObject
     private void ExportDdl()
     {
         var dlg = new SaveFileDialog { Filter = "SQL Script (*.sql)|*.sql", DefaultExt = ".sql" };
+
         if (dlg.ShowDialog() == true)
+        {
             DdlExporter.SaveTo(this, dlg.FileName);
+        }
     }
 
     // ---------------- SQL Server 取込 ----------------
 
     /// <summary>SQL Server に接続してスキーマを取得し、ダイアグラムに反映します。</summary>
     [RelayCommand]
-    private async System.Threading.Tasks.Task ImportFromSqlServerAsync()
+    private async Task ImportFromSqlServerAsync()
     {
-        var dialog = new Views.SqlConnectionDialog
+        var dialog = new Views.SqlConnectionDialog { Owner = Application.Current?.MainWindow };
+
+        if (dialog.ShowDialog() != true || dialog.ViewModel.Result is null)
         {
-            Owner = System.Windows.Application.Current?.MainWindow
-        };
-        if (dialog.ShowDialog() != true || dialog.ViewModel.Result is null) return;
+            return;
+        }
 
         try
         {
@@ -447,18 +574,17 @@ public partial class MainViewModel : ObservableObject
             // 既存と差分があるかチェックして置換確認
             if (Entities.Count > 0)
             {
-                var currentSig = SqlServerSchemaImporter.ComputeSignature(
-                    Entities.Select(e => e.ToModel()),
-                    Relationships.Select(r => r.ToModel()));
+                var currentSig = SqlServerSchemaImporter.ComputeSignature(Entities.Select(e => e.ToModel()), Relationships.Select(r => r.ToModel()));
                 var newSig = SqlServerSchemaImporter.ComputeSignature(result.Entities, result.Relationships);
+
                 if (currentSig != newSig)
                 {
-                    var ans = System.Windows.MessageBox.Show(
-                        "現在のダイアグラムを取得結果で置換します。よろしいですか？",
-                        "確認",
-                        System.Windows.MessageBoxButton.OKCancel,
-                        System.Windows.MessageBoxImage.Question);
-                    if (ans != System.Windows.MessageBoxResult.OK) return;
+                    var ans = MessageBox.Show("現在のダイアグラムを取得結果で置換します。よろしいですか？", "確認", MessageBoxButton.OKCancel, MessageBoxImage.Question);
+
+                    if (ans != MessageBoxResult.OK)
+                    {
+                        return;
+                    }
                 }
             }
 
@@ -471,8 +597,7 @@ public partial class MainViewModel : ObservableObject
         }
         catch (System.Exception ex)
         {
-            System.Windows.MessageBox.Show("取り込みに失敗しました: " + ex.Message,
-                "エラー", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Error);
+            MessageBox.Show("取り込みに失敗しました: " + ex.Message, "エラー", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
@@ -482,21 +607,19 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void SyncToSqlServer()
     {
-        var connDlg = new Views.SqlConnectionDialog
+        var connDlg = new Views.SqlConnectionDialog { Owner = Application.Current?.MainWindow, Title = "SQL Server へ同期" };
+
+        if (connDlg.ShowDialog() != true || connDlg.ViewModel.Result is null)
         {
-            Owner = System.Windows.Application.Current?.MainWindow,
-            Title = "SQL Server へ同期"
-        };
-        if (connDlg.ShowDialog() != true || connDlg.ViewModel.Result is null) return;
+            return;
+        }
 
         var targetEntities = Entities.Select(e => e.ToModel()).ToList();
         var targetRelationships = Relationships.Select(r => r.ToModel()).ToList();
 
         var vm = new SchemaSyncDialogViewModel(connDlg.ViewModel.Result, targetEntities, targetRelationships);
-        var dlg = new Views.SchemaSyncDialog(vm)
-        {
-            Owner = System.Windows.Application.Current?.MainWindow
-        };
+        var dlg = new Views.SchemaSyncDialog(vm) { Owner = Application.Current?.MainWindow };
+
         dlg.ShowDialog();
     }
 
@@ -506,34 +629,34 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void GenerateFromAi()
     {
-        var dialog = new Views.AiGenerateDialog
+        var dialog = new Views.AiGenerateDialog { Owner = Application.Current?.MainWindow };
+
+        if (dialog.ShowDialog() != true || dialog.ViewModel.Result is null)
         {
-            Owner = System.Windows.Application.Current?.MainWindow
-        };
-        if (dialog.ShowDialog() != true || dialog.ViewModel.Result is null) return;
+            return;
+        }
 
         var (entities, relationships) = dialog.ViewModel.Result.ToDomain();
+
         if (entities.Count == 0)
         {
-            System.Windows.MessageBox.Show("AI 応答にテーブルが含まれていませんでした。",
-                "情報", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Information);
+            MessageBox.Show("AI 応答にテーブルが含まれていませんでした。", "情報", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
         if (Entities.Count > 0)
         {
-            var currentSig = SqlServerSchemaImporter.ComputeSignature(
-                Entities.Select(e => e.ToModel()),
-                Relationships.Select(r => r.ToModel()));
+            var currentSig = SqlServerSchemaImporter.ComputeSignature(Entities.Select(e => e.ToModel()), Relationships.Select(r => r.ToModel()));
             var newSig = SqlServerSchemaImporter.ComputeSignature(entities, relationships);
+
             if (currentSig != newSig)
             {
-                var ans = System.Windows.MessageBox.Show(
-                    "現在のダイアグラムを AI 生成結果で置換します。よろしいですか？",
-                    "確認",
-                    System.Windows.MessageBoxButton.OKCancel,
-                    System.Windows.MessageBoxImage.Question);
-                if (ans != System.Windows.MessageBoxResult.OK) return;
+                var ans = MessageBox.Show("現在のダイアグラムを AI 生成結果で置換します。よろしいですか？", "確認", MessageBoxButton.OKCancel, MessageBoxImage.Question);
+
+                if (ans != MessageBoxResult.OK)
+                {
+                    return;
+                }
             }
         }
 
@@ -550,8 +673,11 @@ public partial class MainViewModel : ObservableObject
     private void Save()
     {
         var dlg = new SaveFileDialog { Filter = "ER Diagram (*.json)|*.json", DefaultExt = ".json" };
+
         if (dlg.ShowDialog() == true)
+        {
             JsonStorageService.Save(dlg.FileName, this);
+        }
     }
 
     /// <summary>JSON ファイルからダイアグラムを読み込みます（ダイアログ表示）。</summary>
@@ -559,24 +685,40 @@ public partial class MainViewModel : ObservableObject
     private void Open()
     {
         var dlg = new OpenFileDialog { Filter = "ER Diagram (*.json)|*.json" };
-        if (dlg.ShowDialog() != true) return;
+
+        if (dlg.ShowDialog() != true)
+        {
+            return;
+        }
 
         var diagram = JsonStorageService.Load(dlg.FileName);
 
-        foreach (var r in Relationships) r.Detach();
+        foreach (var r in Relationships)
+        {
+            r.Detach();
+        }
+
         Entities.Clear();
         Relationships.Clear();
 
         foreach (var e in diagram.Entities)
+        {
             Entities.Add(new EntityViewModel(e));
+        }
 
         foreach (var r in diagram.Relationships)
         {
             var src = Entities.FirstOrDefault(e => e.Id == r.SourceEntityId);
             var tgt = Entities.FirstOrDefault(e => e.Id == r.TargetEntityId);
-            if (src is null || tgt is null) continue;
+
+            if (src is null || tgt is null)
+            {
+                continue;
+            }
+
             Relationships.Add(new RelationshipViewModel(r, src, tgt));
         }
+
         UndoRedo.Clear();
     }
 }

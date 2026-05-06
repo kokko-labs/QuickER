@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Linq;
 using ERDesigner.ViewModels;
 
@@ -29,12 +29,12 @@ public class RemoveEntityCommand : IUndoableCommand
     /// <inheritdoc />
     public void Execute()
     {
-        _removedRelationships = _main.Relationships
-            .Where(r => r.Source == _entity || r.Target == _entity)
-            .ToList();
+        _removedRelationships = _main.Relationships.Where(r => r.Source == _entity || r.Target == _entity).ToList();
 
         foreach (var r in _removedRelationships)
+        {
             _main.Relationships.Remove(r);
+        }
 
         _main.Entities.Remove(_entity);
     }
@@ -43,7 +43,10 @@ public class RemoveEntityCommand : IUndoableCommand
     public void Undo()
     {
         _main.Entities.Add(_entity);
+
         foreach (var r in _removedRelationships)
+        {
             _main.Relationships.Add(r);
+        }
     }
 }

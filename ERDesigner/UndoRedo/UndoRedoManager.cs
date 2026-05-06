@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace ERDesigner.UndoRedo;
@@ -54,7 +54,11 @@ public partial class UndoRedoManager : ObservableObject
     /// <summary>直近の操作を元に戻します。</summary>
     public void Undo()
     {
-        if (!CanUndo) return;
+        if (!CanUndo)
+        {
+            return;
+        }
+
         var c = _undo.Pop();
         c.Undo();
         _redo.Push(c);
@@ -65,7 +69,11 @@ public partial class UndoRedoManager : ObservableObject
     /// <summary>直前に Undo した操作をやり直します。</summary>
     public void Redo()
     {
-        if (!CanRedo) return;
+        if (!CanRedo)
+        {
+            return;
+        }
+
         var c = _redo.Pop();
         c.Execute();
         _undo.Push(c);

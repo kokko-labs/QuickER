@@ -1,6 +1,4 @@
-using System;
-
-namespace ERDesigner.Models;
+﻿namespace ERDesigner.Models;
 
 /// <summary>
 /// テーブル内の 1 列（カラム）を表すモデルクラスです。

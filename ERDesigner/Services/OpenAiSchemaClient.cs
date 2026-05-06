@@ -1,5 +1,4 @@
-using System;
-using System.ClientModel;
+﻿using System.ClientModel;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -20,7 +19,8 @@ public interface IAiSchemaClient
 /// </summary>
 public class OpenAiSchemaClient : IAiSchemaClient
 {
-    private const string SystemPrompt = @"あなたは熟練のデータベース設計者です。
+    private const string SystemPrompt =
+        @"あなたは熟練のデータベース設計者です。
 ユーザーの要件から第3正規形を意識したテーブル設計を行い、必ず指定された JSON スキーマだけを出力してください。
 - tables 配列を返し、各テーブルは name / description / memo / columns を持つ。
 - 各 columns 要素は name / dataType / isPrimaryKey / isForeignKey / description を持つ。
@@ -32,7 +32,8 @@ public class OpenAiSchemaClient : IAiSchemaClient
 - dataType は SQL Server の型 (例: int, bigint, nvarchar(50), datetime2, decimal(10,2), bit) を使用。";
 
     /// <summary>強制 JSON スキーマ (Structured Outputs)。</summary>
-    private static readonly byte[] SchemaBytes = """
+    private static readonly byte[] SchemaBytes =
+        """
         {
           "type": "object",
           "properties": {
@@ -55,15 +56,18 @@ public class OpenAiSchemaClient : IAiSchemaClient
                         "isForeignKey": { "type": "boolean" },
                         "description": { "type": "string" }
                       },
+
                       "required": ["name","dataType","isPrimaryKey","isForeignKey","description"],
                       "additionalProperties": false
                     }
                   }
                 },
+
                 "required": ["name","description","memo","columns"],
                 "additionalProperties": false
               }
             },
+
             "relationships": {
               "type": "array",
               "items": {
@@ -73,14 +77,17 @@ public class OpenAiSchemaClient : IAiSchemaClient
                   "targetTable": { "type": "string" },
                   "type": { "type": "string", "enum": ["OneToOne","OneToMany","ManyToMany"] }
                 },
+
                 "required": ["sourceTable","targetTable","type"],
                 "additionalProperties": false
               }
             }
           },
+
           "required": ["tables","relationships"],
           "additionalProperties": false
         }
+
         """u8.ToArray();
 
     /// <inheritdoc />
@@ -90,23 +97,19 @@ public class OpenAiSchemaClient : IAiSchemaClient
         // Ollama は API キー不要だが OpenAI SDK は非空が必要なのでダミーを渡す
         var key = string.IsNullOrEmpty(settings.ApiKey) ? "ollama" : settings.ApiKey;
 
-        var client = new ChatClient(
-            model: settings.Model,
-            credential: new ApiKeyCredential(key),
-            options: new OpenAIClientOptions { Endpoint = endpoint });
+        var client = new ChatClient(model: settings.Model, credential: new ApiKeyCredential(key), options: new OpenAIClientOptions { Endpoint = endpoint });
 
         ChatCompletionOptions options;
+
         try
         {
             // OpenAI 本家は Structured Outputs (JSON Schema strict) を強制
             options = new ChatCompletionOptions
             {
-                ResponseFormat = settings.Provider == AiProvider.OpenAi
-                    ? ChatResponseFormat.CreateJsonSchemaFormat(
-                        jsonSchemaFormatName: "er_schema",
-                        jsonSchema: BinaryData.FromBytes(SchemaBytes),
-                        jsonSchemaIsStrict: true)
-                    : ChatResponseFormat.CreateJsonObjectFormat()
+                ResponseFormat =
+                    settings.Provider == AiProvider.OpenAi
+                        ? ChatResponseFormat.CreateJsonSchemaFormat(jsonSchemaFormatName: "er_schema", jsonSchema: BinaryData.FromBytes(SchemaBytes), jsonSchemaIsStrict: true)
+                        : ChatResponseFormat.CreateJsonObjectFormat(),
             };
         }
         catch
@@ -114,11 +117,7 @@ public class OpenAiSchemaClient : IAiSchemaClient
             options = new ChatCompletionOptions { ResponseFormat = ChatResponseFormat.CreateJsonObjectFormat() };
         }
 
-        var messages = new ChatMessage[]
-        {
-            new SystemChatMessage(SystemPrompt),
-            new UserChatMessage(settings.Prompt)
-        };
+        var messages = new ChatMessage[] { new SystemChatMessage(SystemPrompt), new UserChatMessage(settings.Prompt) };
 
         var completion = await client.CompleteChatAsync(messages, options, ct).ConfigureAwait(false);
         var text = completion.Value.Content[0].Text;
@@ -129,30 +128,39 @@ public class OpenAiSchemaClient : IAiSchemaClient
     internal static AiSchemaJson ParseSchemaResponse(string text)
     {
         var normalized = ExtractJsonPayload(text);
-        var json = JsonSerializer.Deserialize<AiSchemaJson>(normalized, new JsonSerializerOptions
+        var json = JsonSerializer.Deserialize<AiSchemaJson>(normalized, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+        if (json is null)
         {
-            PropertyNameCaseInsensitive = true
-        });
-        if (json is null) throw new InvalidOperationException("AI 応答を JSON として解釈できませんでした。");
+            throw new InvalidOperationException("AI 応答を JSON として解釈できませんでした。");
+        }
+
         return json;
     }
 
     private static string ExtractJsonPayload(string text)
     {
         if (string.IsNullOrWhiteSpace(text))
+        {
             throw new JsonException("AI 応答が空です。");
+        }
 
         var trimmed = text.Trim();
 
         if (trimmed.StartsWith("```", StringComparison.Ordinal))
         {
             var firstNewLine = trimmed.IndexOf('\n');
+
             if (firstNewLine >= 0)
             {
                 trimmed = trimmed[(firstNewLine + 1)..];
                 var lastFence = trimmed.LastIndexOf("```", StringComparison.Ordinal);
+
                 if (lastFence >= 0)
+                {
                     trimmed = trimmed[..lastFence];
+                }
+
                 trimmed = trimmed.Trim();
             }
         }
@@ -161,8 +169,11 @@ public class OpenAiSchemaClient : IAiSchemaClient
         {
             var start = trimmed.IndexOf('{');
             var end = trimmed.LastIndexOf('}');
+
             if (start >= 0 && end > start)
+            {
                 trimmed = trimmed.Substring(start, end - start + 1);
+            }
         }
 
         return trimmed;

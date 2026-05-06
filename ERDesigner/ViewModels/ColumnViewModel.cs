@@ -1,5 +1,4 @@
-using System;
-using CommunityToolkit.Mvvm.ComponentModel;
+﻿using CommunityToolkit.Mvvm.ComponentModel;
 using ERDesigner.Models;
 
 namespace ERDesigner.ViewModels;
@@ -14,15 +13,24 @@ public partial class ColumnViewModel : ObservableObject
     public Guid Id { get; }
 
     /// <summary>カラム名。</summary>
-    [ObservableProperty] private string _name;
+    [ObservableProperty]
+    private string _name;
+
     /// <summary>データ型 (例: int, varchar(100))。</summary>
-    [ObservableProperty] private string _dataType;
+    [ObservableProperty]
+    private string _dataType;
+
     /// <summary>主キーかどうか。</summary>
-    [ObservableProperty] private bool _isPrimaryKey;
+    [ObservableProperty]
+    private bool _isPrimaryKey;
+
     /// <summary>外部キーかどうか。</summary>
-    [ObservableProperty] private bool _isForeignKey;
+    [ObservableProperty]
+    private bool _isForeignKey;
+
     /// <summary>カラムの説明 (SQL Server の <c>MS_Description</c> と同期)。</summary>
-    [ObservableProperty] private string _description;
+    [ObservableProperty]
+    private string _description;
 
     /// <summary>モデルから ViewModel を生成します。</summary>
     /// <param name="model">コピー元の <see cref="Column"/> モデル。</param>
@@ -37,13 +45,14 @@ public partial class ColumnViewModel : ObservableObject
     }
 
     /// <summary>現在の状態をモデルにコピーして返します（保存時に使用）。</summary>
-    public Column ToModel() => new()
-    {
-        Id = Id,
-        Name = Name,
-        DataType = DataType,
-        IsPrimaryKey = IsPrimaryKey,
-        IsForeignKey = IsForeignKey,
-        Description = Description ?? string.Empty
-    };
+    public Column ToModel() =>
+        new()
+        {
+            Id = Id,
+            Name = Name,
+            DataType = DataType,
+            IsPrimaryKey = IsPrimaryKey,
+            IsForeignKey = IsForeignKey,
+            Description = Description ?? string.Empty,
+        };
 }

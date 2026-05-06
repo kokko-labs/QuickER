@@ -12,22 +12,31 @@ public enum SchemaDiffKind
 {
     /// <summary>新しいテーブルを CREATE する。</summary>
     AddTable,
+
     /// <summary>既存テーブルに列を ADD する。</summary>
     AddColumn,
+
     /// <summary>既存列の型 / NULL 制約を ALTER する (フェーズ2)。</summary>
     AlterColumn,
+
     /// <summary>列を DROP する (フェーズ2)。</summary>
     DropColumn,
+
     /// <summary>テーブルを DROP する (フェーズ2)。</summary>
     DropTable,
+
     /// <summary>新しい外部キーを ADD する。</summary>
     AddForeignKey,
+
     /// <summary>既存の外部キーを DROP する (フェーズ2)。</summary>
     DropForeignKey,
+
     /// <summary>テーブルの MS_Description を設定 / 更新 / 削除する。</summary>
     SetTableDescription,
+
     /// <summary>カラムの MS_Description を設定 / 更新 / 削除する。</summary>
     SetColumnDescription,
+
     /// <summary>テーブル再作成が必要であることを示す通知（SQL 実行対象外）。</summary>
     RebuildTable,
 }
@@ -39,29 +48,40 @@ public sealed class SchemaDiffItem : INotifyPropertyChanged
 {
     /// <summary>差分種別。</summary>
     public SchemaDiffKind Kind { get; init; }
+
     /// <summary>UI 用の説明文 (例: "テーブル Customer を作成")。</summary>
     public string Description { get; init; } = string.Empty;
+
     /// <summary>対象テーブル名 (スキーマ.テーブル形式または単純名)。</summary>
     public string TableName { get; init; } = string.Empty;
+
     /// <summary>対象カラム名 (該当する場合)。</summary>
     public string? ColumnName { get; init; }
+
     /// <summary>差分に対応するエンティティ (新規/変更時)。</summary>
     public Entity? Entity { get; init; }
+
     /// <summary>差分に対応するカラム (新規/変更時)。</summary>
     public Column? Column { get; init; }
+
     /// <summary>変更前の列定義 (AlterColumn のみ)。</summary>
     public Column? OldColumn { get; init; }
+
     /// <summary>差分に対応するリレーション (FK 操作時)。</summary>
     public Relationship? Relationship { get; init; }
+
     /// <summary>FK 操作で参照される親(PK) エンティティ。</summary>
     public Entity? ParentEntity { get; init; }
+
     /// <summary>FK 操作で参照される子(FK 保有) エンティティ。</summary>
     public Entity? ChildEntity { get; init; }
+
     /// <summary>削除する FK 制約の名前 (DropForeignKey のみ)。</summary>
     public string? ForeignKeyName { get; init; }
 
     /// <summary>変更後の説明文 (SetTable/ColumnDescription)。空文字なら削除を意味する。</summary>
     public string? NewDescription { get; init; }
+
     /// <summary>変更前の説明文 (SetTable/ColumnDescription)。null = まだ DB に説明が無い。</summary>
     public string? OldDescription { get; init; }
 
@@ -77,17 +97,23 @@ public sealed class SchemaDiffItem : INotifyPropertyChanged
     public bool IsSelected
     {
         get => _isSelected;
-        set { if (_isSelected != value) { _isSelected = value; OnPropertyChanged(); } }
+        set
+        {
+            if (_isSelected != value)
+            {
+                _isSelected = value;
+                OnPropertyChanged();
+            }
+        }
     }
 
     /// <summary>破壊的操作 (DROP/ALTER) の場合 true。</summary>
-    public bool IsDestructive => Kind is SchemaDiffKind.AlterColumn
-        or SchemaDiffKind.DropColumn or SchemaDiffKind.DropTable or SchemaDiffKind.DropForeignKey;
+    public bool IsDestructive => Kind is SchemaDiffKind.AlterColumn or SchemaDiffKind.DropColumn or SchemaDiffKind.DropTable or SchemaDiffKind.DropForeignKey;
 
     /// <inheritdoc/>
     public event PropertyChangedEventHandler? PropertyChanged;
-    private void OnPropertyChanged([CallerMemberName] string? name = null)
-        => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+
+    private void OnPropertyChanged([CallerMemberName] string? name = null) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
 }
 
 /// <summary>

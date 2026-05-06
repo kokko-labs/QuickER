@@ -1,5 +1,4 @@
-using System;
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -19,24 +18,36 @@ public partial class AiGenerateDialogViewModel : ObservableObject
     private const string OpenAiKeyName = "OpenAiApiKey";
 
     /// <summary>選択中のプロバイダ。</summary>
-    [ObservableProperty] private AiProvider _provider = AiProvider.OpenAi;
+    [ObservableProperty]
+    private AiProvider _provider = AiProvider.OpenAi;
+
     /// <summary>API キー (OpenAI のみ使用)。</summary>
-    [ObservableProperty] private string _apiKey = string.Empty;
+    [ObservableProperty]
+    private string _apiKey = string.Empty;
+
     /// <summary>モデル名 (ComboBox)。</summary>
-    [ObservableProperty] private string _model = "gpt-5.4-mini";
+    [ObservableProperty]
+    private string _model = "gpt-5.4-mini";
+
     /// <summary>Ollama 等のカスタムエンドポイント URL。</summary>
-    [ObservableProperty] private string _endpointOverride = string.Empty;
+    [ObservableProperty]
+    private string _endpointOverride = string.Empty;
+
     /// <summary>API キーを暗号化保存するか。</summary>
-    [ObservableProperty] private bool _saveApiKey = true;
+    [ObservableProperty]
+    private bool _saveApiKey = true;
 
     /// <summary>自然言語の要件入力。</summary>
-    [ObservableProperty] private string _prompt =
-        "ECサイトの顧客・注文・商品・カテゴリを管理するスキーマを設計してください。";
+    [ObservableProperty]
+    private string _prompt = "ECサイトの顧客・注文・商品・カテゴリを管理するスキーマを設計してください。";
 
     /// <summary>処理中フラグ。</summary>
-    [ObservableProperty] private bool _isBusy;
+    [ObservableProperty]
+    private bool _isBusy;
+
     /// <summary>状態/エラー表示。</summary>
-    [ObservableProperty] private string _statusMessage = string.Empty;
+    [ObservableProperty]
+    private string _statusMessage = string.Empty;
 
     /// <summary>生成結果 (キャンセル時は null)。</summary>
     public AiSchemaJson? Result { get; private set; }
@@ -45,16 +56,10 @@ public partial class AiGenerateDialogViewModel : ObservableObject
     public Action<bool>? CloseAction { get; set; }
 
     /// <summary>OpenAI 既定モデル一覧 (ユーザー希望の "gpt-5.4-mini" を既定)。</summary>
-    public IReadOnlyList<string> OpenAiModels { get; } = new[]
-    {
-        "gpt-5.4-mini", "gpt-5.4", "gpt-4o-mini", "gpt-4o", "gpt-4.1", "gpt-4.1-mini"
-    };
+    public IReadOnlyList<string> OpenAiModels { get; } = new[] { "gpt-5.4-mini", "gpt-5.4", "gpt-4o-mini", "gpt-4o", "gpt-4.1", "gpt-4.1-mini" };
 
     /// <summary>Ollama でよく使われるモデル例。</summary>
-    public IReadOnlyList<string> OllamaModels { get; } = new[]
-    {
-        "gpt-oss:20b", "qwen3.6", "gemma4:e4b", "gemma4:31b-cloud"
-    };
+    public IReadOnlyList<string> OllamaModels { get; } = new[] { "gpt-oss:20b", "qwen3.6", "gemma4:e4b", "gemma4:31b-cloud" };
 
     /// <summary>現在のプロバイダに応じた候補モデル。</summary>
     public IReadOnlyList<string> ModelCandidates => Provider == AiProvider.OpenAi ? OpenAiModels : OllamaModels;
@@ -87,13 +92,24 @@ public partial class AiGenerateDialogViewModel : ObservableObject
 
     private void PersistApiKeyPreference()
     {
-        if (_isInitializing) return;
-        if (Provider != AiProvider.OpenAi) return;
+        if (_isInitializing)
+        {
+            return;
+        }
+
+        if (Provider != AiProvider.OpenAi)
+        {
+            return;
+        }
 
         if (SaveApiKey)
+        {
             ApiKeyStore.Save(OpenAiKeyName, ApiKey ?? string.Empty);
+        }
         else
+        {
             ApiKeyStore.Save(OpenAiKeyName, string.Empty);
+        }
     }
 
     partial void OnProviderChanged(AiProvider value)
@@ -103,8 +119,11 @@ public partial class AiGenerateDialogViewModel : ObservableObject
         OnPropertyChanged(nameof(ShowEndpoint));
         // プロバイダ変更時に既定モデルへ
         Model = ModelCandidates[0];
+
         if (value == AiProvider.Ollama && string.IsNullOrWhiteSpace(EndpointOverride))
+        {
             EndpointOverride = "http://localhost:11434/v1";
+        }
     }
 
     /// <summary>生成処理を実行します。</summary>
@@ -116,6 +135,7 @@ public partial class AiGenerateDialogViewModel : ObservableObject
             StatusMessage = "要件を入力してください。";
             return;
         }
+
         if (Provider == AiProvider.OpenAi && string.IsNullOrWhiteSpace(ApiKey))
         {
             StatusMessage = "OpenAI API キーを入力してください。";
@@ -124,6 +144,7 @@ public partial class AiGenerateDialogViewModel : ObservableObject
 
         IsBusy = true;
         StatusMessage = "生成中...";
+
         try
         {
             var settings = new AiGenerationSettings
@@ -132,8 +153,9 @@ public partial class AiGenerateDialogViewModel : ObservableObject
                 ApiKey = ApiKey,
                 Model = Model,
                 EndpointOverride = string.IsNullOrWhiteSpace(EndpointOverride) ? null : EndpointOverride,
-                Prompt = Prompt
+                Prompt = Prompt,
             };
+
             var result = await _client.GenerateAsync(settings).ConfigureAwait(true);
             Result = result;
 

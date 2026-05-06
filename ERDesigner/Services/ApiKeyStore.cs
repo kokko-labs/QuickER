@@ -1,5 +1,4 @@
-using System;
-using System.IO;
+﻿using System.IO;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -10,8 +9,7 @@ namespace ERDesigner.Services;
 /// </summary>
 public static class ApiKeyStore
 {
-    private static readonly string Folder = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ERDesigner");
+    private static readonly string Folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ERDesigner");
 
     private static string PathFor(string name) => Path.Combine(Folder, name + ".dat");
 
@@ -20,11 +18,17 @@ public static class ApiKeyStore
     {
         Directory.CreateDirectory(Folder);
         var p = PathFor(name);
+
         if (string.IsNullOrEmpty(apiKey))
         {
-            if (File.Exists(p)) File.Delete(p);
+            if (File.Exists(p))
+            {
+                File.Delete(p);
+            }
+
             return;
         }
+
         var data = Encoding.UTF8.GetBytes(apiKey);
         var encrypted = ProtectedData.Protect(data, optionalEntropy: null, scope: DataProtectionScope.CurrentUser);
         File.WriteAllBytes(p, encrypted);
@@ -34,7 +38,12 @@ public static class ApiKeyStore
     public static string Load(string name)
     {
         var p = PathFor(name);
-        if (!File.Exists(p)) return string.Empty;
+
+        if (!File.Exists(p))
+        {
+            return string.Empty;
+        }
+
         try
         {
             var encrypted = File.ReadAllBytes(p);

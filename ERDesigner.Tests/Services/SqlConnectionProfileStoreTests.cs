@@ -1,5 +1,4 @@
-using System;
-using System.IO;
+﻿using System.IO;
 using System.Linq;
 using ERDesigner.Services;
 using FluentAssertions;
@@ -22,8 +21,16 @@ public class SqlConnectionProfileStoreTests : IDisposable
 
     public void Dispose()
     {
-        try { if (Directory.Exists(_tempFolder)) Directory.Delete(_tempFolder, recursive: true); }
-        catch { /* テスト後のベストエフォート */ }
+        try
+        {
+            if (Directory.Exists(_tempFolder))
+            {
+                Directory.Delete(_tempFolder, recursive: true);
+            }
+        }
+        catch
+        { /* テスト後のベストエフォート */
+        }
     }
 
     private SqlConnectionProfileStore CreateStore() => new(_tempFolder, useDpapi: false);
@@ -32,9 +39,33 @@ public class SqlConnectionProfileStoreTests : IDisposable
     public void Upsert_AddsAndLoadsSorted()
     {
         var store = CreateStore();
-        store.Upsert(new SqlConnectionProfile { Name = "Zeta", Server = "z", Database = "d" }, password: "");
-        store.Upsert(new SqlConnectionProfile { Name = "alpha", Server = "a", Database = "d" }, password: "");
-        store.Upsert(new SqlConnectionProfile { Name = "Mid", Server = "m", Database = "d" }, password: "");
+        store.Upsert(
+            new SqlConnectionProfile
+            {
+                Name = "Zeta",
+                Server = "z",
+                Database = "d",
+            },
+            password: ""
+        );
+        store.Upsert(
+            new SqlConnectionProfile
+            {
+                Name = "alpha",
+                Server = "a",
+                Database = "d",
+            },
+            password: ""
+        );
+        store.Upsert(
+            new SqlConnectionProfile
+            {
+                Name = "Mid",
+                Server = "m",
+                Database = "d",
+            },
+            password: ""
+        );
 
         var list = store.LoadAll();
 
@@ -45,7 +76,13 @@ public class SqlConnectionProfileStoreTests : IDisposable
     public void Upsert_SameId_Overwrites()
     {
         var store = CreateStore();
-        var p = new SqlConnectionProfile { Name = "P1", Server = "old", Database = "d" };
+        var p = new SqlConnectionProfile
+        {
+            Name = "P1",
+            Server = "old",
+            Database = "d",
+        };
+
         store.Upsert(p, password: "");
         p.Server = "new";
         store.Upsert(p, password: "");
@@ -59,7 +96,14 @@ public class SqlConnectionProfileStoreTests : IDisposable
     public void Delete_RemovesProfileAndSecret()
     {
         var store = CreateStore();
-        var p = new SqlConnectionProfile { Name = "P", Server = "s", Database = "d", SavePassword = true };
+        var p = new SqlConnectionProfile
+        {
+            Name = "P",
+            Server = "s",
+            Database = "d",
+            SavePassword = true,
+        };
+
         store.Upsert(p, password: "secret");
         store.LoadPassword(p.Id).Should().Be("secret");
 
@@ -73,7 +117,14 @@ public class SqlConnectionProfileStoreTests : IDisposable
     public void Password_RoundTrip()
     {
         var store = CreateStore();
-        var p = new SqlConnectionProfile { Name = "P", Server = "s", Database = "d", SavePassword = true };
+        var p = new SqlConnectionProfile
+        {
+            Name = "P",
+            Server = "s",
+            Database = "d",
+            SavePassword = true,
+        };
+
         store.Upsert(p, password: "P@ssw0rd!日本語");
 
         store.LoadPassword(p.Id).Should().Be("P@ssw0rd!日本語");
@@ -83,7 +134,14 @@ public class SqlConnectionProfileStoreTests : IDisposable
     public void Upsert_SavePasswordFalse_DeletesSecret()
     {
         var store = CreateStore();
-        var p = new SqlConnectionProfile { Name = "P", Server = "s", Database = "d", SavePassword = true };
+        var p = new SqlConnectionProfile
+        {
+            Name = "P",
+            Server = "s",
+            Database = "d",
+            SavePassword = true,
+        };
+
         store.Upsert(p, password: "secret");
         store.LoadPassword(p.Id).Should().Be("secret");
 
@@ -104,7 +162,7 @@ public class SqlConnectionProfileStoreTests : IDisposable
             AuthMode = SqlAuthMode.SqlServer,
             UserId = "sa",
             TrustServerCertificate = false,
-            SavePassword = true
+            SavePassword = true,
         };
 
         store.SaveLastUsed(profile, "secret");

@@ -1,4 +1,4 @@
-using ERDesigner.Services;
+﻿using ERDesigner.Services;
 using ERDesigner.ViewModels;
 using FluentAssertions;
 
@@ -13,26 +13,39 @@ public class SchemaSyncDialogViewModelTests
     public void SelectAll_SelectsOnlySelectableItems()
     {
         var vm = new SchemaSyncDialogViewModel(new SqlConnectionSettings(), [], []);
-        vm.DiffItems.Add(new SchemaDiffItem
-        {
-            Kind = SchemaDiffKind.AddTable,
-            TableName = "Customer",
-            Entity = new ERDesigner.Models.Entity
+        vm.DiffItems.Add(
+            new SchemaDiffItem
             {
+                Kind = SchemaDiffKind.AddTable,
                 TableName = "Customer",
-                Columns = { new ERDesigner.Models.Column { Name = "Id", DataType = "int", IsPrimaryKey = true } }
-            },
-            IsSelected = false,
-            IsSelectable = true
-        });
-        vm.DiffItems.Add(new SchemaDiffItem
-        {
-            Kind = SchemaDiffKind.RebuildTable,
-            TableName = "Order",
-            Description = "列順変更は DB 同期しません: [Order]",
-            IsSelected = false,
-            IsSelectable = false
-        });
+                Entity = new ERDesigner.Models.Entity
+                {
+                    TableName = "Customer",
+                    Columns =
+                    {
+                        new ERDesigner.Models.Column
+                        {
+                            Name = "Id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                        },
+                    },
+                },
+
+                IsSelected = false,
+                IsSelectable = true,
+            }
+        );
+        vm.DiffItems.Add(
+            new SchemaDiffItem
+            {
+                Kind = SchemaDiffKind.RebuildTable,
+                TableName = "Order",
+                Description = "列順変更は DB 同期しません: [Order]",
+                IsSelected = false,
+                IsSelectable = false,
+            }
+        );
 
         vm.SelectAllCommand.Execute(null);
 
@@ -44,23 +57,27 @@ public class SchemaSyncDialogViewModelTests
     public void DeselectAll_DoesNotChangeNonSelectableItems()
     {
         var vm = new SchemaSyncDialogViewModel(new SqlConnectionSettings(), [], []);
-        vm.DiffItems.Add(new SchemaDiffItem
-        {
-            Kind = SchemaDiffKind.AddColumn,
-            TableName = "Customer",
-            ColumnName = "Name",
-            Column = new ERDesigner.Models.Column { Name = "Name", DataType = "nvarchar(50)" },
-            IsSelected = true,
-            IsSelectable = true
-        });
-        vm.DiffItems.Add(new SchemaDiffItem
-        {
-            Kind = SchemaDiffKind.RebuildTable,
-            TableName = "Order",
-            Description = "列順変更は DB 同期しません: [Order]",
-            IsSelected = false,
-            IsSelectable = false
-        });
+        vm.DiffItems.Add(
+            new SchemaDiffItem
+            {
+                Kind = SchemaDiffKind.AddColumn,
+                TableName = "Customer",
+                ColumnName = "Name",
+                Column = new ERDesigner.Models.Column { Name = "Name", DataType = "nvarchar(50)" },
+                IsSelected = true,
+                IsSelectable = true,
+            }
+        );
+        vm.DiffItems.Add(
+            new SchemaDiffItem
+            {
+                Kind = SchemaDiffKind.RebuildTable,
+                TableName = "Order",
+                Description = "列順変更は DB 同期しません: [Order]",
+                IsSelected = false,
+                IsSelectable = false,
+            }
+        );
 
         vm.DeselectAllCommand.Execute(null);
 
@@ -72,23 +89,27 @@ public class SchemaSyncDialogViewModelTests
     public void UpdatePreview_IgnoresNonSelectedInformationalItems()
     {
         var vm = new SchemaSyncDialogViewModel(new SqlConnectionSettings(), [], []);
-        vm.DiffItems.Add(new SchemaDiffItem
-        {
-            Kind = SchemaDiffKind.AddColumn,
-            TableName = "Customer",
-            ColumnName = "Name",
-            Column = new ERDesigner.Models.Column { Name = "Name", DataType = "nvarchar(50)" },
-            IsSelected = true,
-            IsSelectable = true
-        });
-        vm.DiffItems.Add(new SchemaDiffItem
-        {
-            Kind = SchemaDiffKind.RebuildTable,
-            TableName = "Order",
-            Description = "列順変更は DB 同期しません: [Order]",
-            IsSelected = false,
-            IsSelectable = false
-        });
+        vm.DiffItems.Add(
+            new SchemaDiffItem
+            {
+                Kind = SchemaDiffKind.AddColumn,
+                TableName = "Customer",
+                ColumnName = "Name",
+                Column = new ERDesigner.Models.Column { Name = "Name", DataType = "nvarchar(50)" },
+                IsSelected = true,
+                IsSelectable = true,
+            }
+        );
+        vm.DiffItems.Add(
+            new SchemaDiffItem
+            {
+                Kind = SchemaDiffKind.RebuildTable,
+                TableName = "Order",
+                Description = "列順変更は DB 同期しません: [Order]",
+                IsSelected = false,
+                IsSelectable = false,
+            }
+        );
 
         vm.UpdatePreview();
 

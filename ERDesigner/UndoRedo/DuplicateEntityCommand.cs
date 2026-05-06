@@ -1,4 +1,4 @@
-using ERDesigner.Models;
+﻿using ERDesigner.Models;
 using ERDesigner.ViewModels;
 
 namespace ERDesigner.UndoRedo;
@@ -45,28 +45,37 @@ public class DuplicateEntityCommand : IUndoableCommand
                 Y = srcModel.Y + 30,
                 Width = srcModel.Width,
                 Memo = srcModel.Memo,
-                Description = srcModel.Description
+                Description = srcModel.Description,
             };
+
             foreach (var c in srcModel.Columns)
             {
-                newModel.Columns.Add(new Column
-                {
-                    Name = c.Name,
-                    DataType = c.DataType,
-                    IsPrimaryKey = c.IsPrimaryKey,
-                    IsForeignKey = c.IsForeignKey,
-                    Description = c.Description
-                });
+                newModel.Columns.Add(
+                    new Column
+                    {
+                        Name = c.Name,
+                        DataType = c.DataType,
+                        IsPrimaryKey = c.IsPrimaryKey,
+                        IsForeignKey = c.IsForeignKey,
+                        Description = c.Description,
+                    }
+                );
             }
+
             _duplicate = new EntityViewModel(newModel);
         }
+
         _main.Entities.Add(_duplicate);
     }
 
     /// <inheritdoc />
     public void Undo()
     {
-        if (_duplicate is null) return;
+        if (_duplicate is null)
+        {
+            return;
+        }
+
         _main.Entities.Remove(_duplicate);
     }
 }

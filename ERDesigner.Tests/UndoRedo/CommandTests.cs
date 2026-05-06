@@ -11,7 +11,14 @@ namespace ERDesigner.Tests.UndoRedo;
 public class CommandTests
 {
     private static EntityViewModel NewEntity(double x = 0, double y = 0) =>
-        new(new Entity { X = x, Y = y, TableName = "T" });
+        new(
+            new Entity
+            {
+                X = x,
+                Y = y,
+                TableName = "T",
+            }
+        );
 
     [Fact(DisplayName = "MoveEntityCommand: Execute / Undo で座標が往復する")]
     public void MoveEntityCommand_ExecuteUndo()
@@ -51,9 +58,7 @@ public class CommandTests
         main.Entities.Add(a);
         main.Entities.Add(b);
 
-        var rel = new RelationshipViewModel(
-            new Relationship { SourceEntityId = a.Id, TargetEntityId = b.Id },
-            a, b);
+        var rel = new RelationshipViewModel(new Relationship { SourceEntityId = a.Id, TargetEntityId = b.Id }, a, b);
         main.Relationships.Add(rel);
 
         var cmd = new RemoveEntityCommand(main, a);

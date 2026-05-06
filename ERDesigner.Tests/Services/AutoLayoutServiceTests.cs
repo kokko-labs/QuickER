@@ -11,7 +11,14 @@ namespace ERDesigner.Tests.Services;
 public class AutoLayoutServiceTests
 {
     private static EntityViewModel NewEntity(string name = "E") =>
-        new(new Entity { TableName = name, X = -999, Y = -999 });
+        new(
+            new Entity
+            {
+                TableName = name,
+                X = -999,
+                Y = -999,
+            }
+        );
 
     [Fact(DisplayName = "LayoutGrid: エンティティが格子状に並ぶ")]
     public void LayoutGrid_ArrangesInGrid()
@@ -55,21 +62,23 @@ public class AutoLayoutServiceTests
     [Fact(DisplayName = "LayoutGrid: 説明表示時は説明込みの高さで整列される")]
     public void LayoutGrid_UsesDisplayHeightWhenDescriptionsAreVisible()
     {
-        var first = new EntityViewModel(new Entity
-        {
-            TableName = "Orders",
-            Width = 220,
-            Description = "テーブル説明が複数行になるように十分長い文字列です。テーブル説明が複数行になるように十分長い文字列です。",
-            Columns =
+        var first = new EntityViewModel(
+            new Entity
             {
-                new Column
+                TableName = "Orders",
+                Width = 220,
+                Description = "テーブル説明が複数行になるように十分長い文字列です。テーブル説明が複数行になるように十分長い文字列です。",
+                Columns =
                 {
-                    Name = "CustomerName",
-                    DataType = "nvarchar(100)",
-                    Description = "カラム説明も折り返されるように十分長い文字列を設定しています。"
-                }
+                    new Column
+                    {
+                        Name = "CustomerName",
+                        DataType = "nvarchar(100)",
+                        Description = "カラム説明も折り返されるように十分長い文字列を設定しています。",
+                    },
+                },
             }
-        });
+        );
         first.ShowDescriptionsInDiagram = true;
 
         var second = NewEntity("Customers");

@@ -1,5 +1,4 @@
-using System;
-using System.IO;
+﻿using System.IO;
 using ERDesigner.Services;
 using ERDesigner.ViewModels;
 using FluentAssertions;
@@ -21,8 +20,16 @@ public class SqlConnectionDialogViewModelTests : IDisposable
 
     public void Dispose()
     {
-        try { if (Directory.Exists(_tempFolder)) Directory.Delete(_tempFolder, recursive: true); }
-        catch { /* テスト後のベストエフォート */ }
+        try
+        {
+            if (Directory.Exists(_tempFolder))
+            {
+                Directory.Delete(_tempFolder, recursive: true);
+            }
+        }
+        catch
+        { /* テスト後のベストエフォート */
+        }
     }
 
     private SqlConnectionProfileStore CreateStore() => new(_tempFolder, useDpapi: false);
@@ -31,12 +38,15 @@ public class SqlConnectionDialogViewModelTests : IDisposable
     public void Constructor_DoesNotAutoSelectSavedProfile()
     {
         var store = CreateStore();
-        store.Upsert(new SqlConnectionProfile
-        {
-            Name = "SampleDB",
-            Server = "saved-server",
-            Database = "saved-db"
-        }, password: "");
+        store.Upsert(
+            new SqlConnectionProfile
+            {
+                Name = "SampleDB",
+                Server = "saved-server",
+                Database = "saved-db",
+            },
+            password: ""
+        );
 
         var vm = new SqlConnectionDialogViewModel(store);
 
@@ -50,22 +60,25 @@ public class SqlConnectionDialogViewModelTests : IDisposable
     public void SelectedProfile_UpdatesEditableFields()
     {
         var store = CreateStore();
-        store.Upsert(new SqlConnectionProfile
-        {
-            Name = "SampleDB",
-            Server = "saved-server",
-            Database = "saved-db",
-            AuthMode = SqlAuthMode.SqlServer,
-            UserId = "sa",
-            TrustServerCertificate = false,
-            SavePassword = true
-        }, password: "secret");
+        store.Upsert(
+            new SqlConnectionProfile
+            {
+                Name = "SampleDB",
+                Server = "saved-server",
+                Database = "saved-db",
+                AuthMode = SqlAuthMode.SqlServer,
+                UserId = "sa",
+                TrustServerCertificate = false,
+                SavePassword = true,
+            },
+            password: "secret"
+        );
 
         var vm = new SqlConnectionDialogViewModel(store)
         {
             Server = "restored-server",
             Database = "restored-db",
-            ProfileName = "復元済み"
+            ProfileName = "復元済み",
         };
 
         vm.SelectedProfile = vm.Profiles[0];
@@ -89,7 +102,7 @@ public class SqlConnectionDialogViewModelTests : IDisposable
             AuthMode = SqlAuthMode.SqlServer,
             UserId = "sa",
             Password = "secret",
-            SavePassword = true
+            SavePassword = true,
         };
 
         vm.OkCommand.Execute(null);

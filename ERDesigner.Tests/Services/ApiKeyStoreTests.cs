@@ -1,5 +1,4 @@
-using System;
-using ERDesigner.Services;
+﻿using ERDesigner.Services;
 using FluentAssertions;
 
 namespace ERDesigner.Tests.Services;

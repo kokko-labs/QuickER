@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using ERDesigner.Models;
@@ -38,16 +38,22 @@ public static class SchemaSyncScriptBuilder
         return sb.ToString();
     }
 
-    private static void WriteSection(
-        StringBuilder sb,
-        List<SchemaDiffItem> all,
-        SchemaDiffKind kind,
-        System.Action<StringBuilder, SchemaDiffItem> writer)
+    private static void WriteSection(StringBuilder sb, List<SchemaDiffItem> all, SchemaDiffKind kind, System.Action<StringBuilder, SchemaDiffItem> writer)
     {
         var subset = all.Where(i => i.Kind == kind).ToList();
-        if (subset.Count == 0) return;
+
+        if (subset.Count == 0)
+        {
+            return;
+        }
+
         sb.AppendLine($"-- ===== {kind} ({subset.Count} 件) =====");
-        foreach (var item in subset) writer(sb, item);
+
+        foreach (var item in subset)
+        {
+            writer(sb, item);
+        }
+
         sb.AppendLine();
     }
 
@@ -57,23 +63,44 @@ public static class SchemaSyncScriptBuilder
     {
         var e = item.Entity!;
         sb.AppendLine($"CREATE TABLE {SqlIdentifier.Bracket(item.TableName)} (");
-        for (int i = 0; i < e.Columns.Count; i++)
+
+        for (var i = 0; i < e.Columns.Count; i++)
         {
             var col = e.Columns[i];
             var line = $"    {SqlIdentifier.BracketSimple(col.Name)} {col.DataType}";
-            if (col.IsPrimaryKey) line += " NOT NULL";
-            if (i < e.Columns.Count - 1) line += ",";
+
+            if (col.IsPrimaryKey)
+            {
+                line += " NOT NULL";
+            }
+
+            if (i < e.Columns.Count - 1)
+            {
+                line += ",";
+            }
+
             sb.AppendLine(line);
         }
+
         var pks = e.Columns.Where(c => c.IsPrimaryKey).ToList();
+
         if (pks.Count > 0)
         {
-            sb.Length -= System.Environment.NewLine.Length;
-            if (!sb.ToString().TrimEnd().EndsWith(",")) sb.AppendLine(",");
-            else sb.AppendLine();
+            sb.Length -= Environment.NewLine.Length;
+
+            if (!sb.ToString().TrimEnd().EndsWith(","))
+            {
+                sb.AppendLine(",");
+            }
+            else
+            {
+                sb.AppendLine();
+            }
+
             var pkCols = string.Join(", ", pks.Select(p => SqlIdentifier.BracketSimple(p.Name)));
             sb.AppendLine($"    CONSTRAINT [PK_{SqlIdentifier.SafeName(item.TableName)}] PRIMARY KEY ({pkCols})");
         }
+
         sb.AppendLine(");");
         sb.AppendLine("GO");
     }
@@ -81,26 +108,20 @@ public static class SchemaSyncScriptBuilder
     private static void AppendAddColumn(StringBuilder sb, SchemaDiffItem item)
     {
         var col = item.Column!;
-        sb.AppendLine(
-            $"ALTER TABLE {SqlIdentifier.Bracket(item.TableName)} " +
-            $"ADD {SqlIdentifier.BracketSimple(col.Name)} {col.DataType} NULL;");
+        sb.AppendLine($"ALTER TABLE {SqlIdentifier.Bracket(item.TableName)} " + $"ADD {SqlIdentifier.BracketSimple(col.Name)} {col.DataType} NULL;");
         sb.AppendLine("GO");
     }
 
     private static void AppendAlterColumn(StringBuilder sb, SchemaDiffItem item)
     {
         var col = item.Column!;
-        sb.AppendLine(
-            $"ALTER TABLE {SqlIdentifier.Bracket(item.TableName)} " +
-            $"ALTER COLUMN {SqlIdentifier.BracketSimple(col.Name)} {col.DataType} NULL;");
+        sb.AppendLine($"ALTER TABLE {SqlIdentifier.Bracket(item.TableName)} " + $"ALTER COLUMN {SqlIdentifier.BracketSimple(col.Name)} {col.DataType} NULL;");
         sb.AppendLine("GO");
     }
 
     private static void AppendDropColumn(StringBuilder sb, SchemaDiffItem item)
     {
-        sb.AppendLine(
-            $"ALTER TABLE {SqlIdentifier.Bracket(item.TableName)} " +
-            $"DROP COLUMN {SqlIdentifier.BracketSimple(item.ColumnName!)};");
+        sb.AppendLine($"ALTER TABLE {SqlIdentifier.Bracket(item.TableName)} " + $"DROP COLUMN {SqlIdentifier.BracketSimple(item.ColumnName!)};");
         sb.AppendLine("GO");
     }
 
@@ -112,26 +133,37 @@ public static class SchemaSyncScriptBuilder
 
     private static void AppendAddForeignKey(StringBuilder sb, SchemaDiffItem item)
     {
-        if (item.ChildEntity is null || item.ParentEntity is null) return;
+        if (item.ChildEntity is null || item.ParentEntity is null)
+        {
+            return;
+        }
+
         var pkCol = item.ParentEntity.Columns.FirstOrDefault(c => c.IsPrimaryKey);
+
         if (pkCol is null || item.ColumnName is null)
         {
             sb.AppendLine($"-- スキップ: 外部キー追加に必要な列が解決できませんでした。 ({item.Description})");
             return;
         }
+
         var childTbl = SchemaDiffService.NormalizeTable(item.ChildEntity);
         var parentTbl = SchemaDiffService.NormalizeTable(item.ParentEntity);
         var fkName = $"FK_{SqlIdentifier.SafeName(childTbl)}_{SqlIdentifier.SafeName(parentTbl)}";
         sb.AppendLine(
-            $"ALTER TABLE {SqlIdentifier.Bracket(childTbl)} ADD CONSTRAINT [{fkName}] " +
-            $"FOREIGN KEY ({SqlIdentifier.BracketSimple(item.ColumnName)}) " +
-            $"REFERENCES {SqlIdentifier.Bracket(parentTbl)} ({SqlIdentifier.BracketSimple(pkCol.Name)});");
+            $"ALTER TABLE {SqlIdentifier.Bracket(childTbl)} ADD CONSTRAINT [{fkName}] "
+                + $"FOREIGN KEY ({SqlIdentifier.BracketSimple(item.ColumnName)}) "
+                + $"REFERENCES {SqlIdentifier.Bracket(parentTbl)} ({SqlIdentifier.BracketSimple(pkCol.Name)});"
+        );
         sb.AppendLine("GO");
     }
 
     private static void AppendDropForeignKey(StringBuilder sb, SchemaDiffItem item)
     {
-        if (item.ChildEntity is null || item.ParentEntity is null) return;
+        if (item.ChildEntity is null || item.ParentEntity is null)
+        {
+            return;
+        }
+
         var childTbl = SchemaDiffService.NormalizeTable(item.ChildEntity);
         var parentTbl = SchemaDiffService.NormalizeTable(item.ParentEntity);
         sb.AppendLine($"DECLARE @fk sysname;");
@@ -146,11 +178,9 @@ public static class SchemaSyncScriptBuilder
 
     // ---------------- MS_Description (拡張プロパティ) ----------------
 
-    private static void AppendSetTableDescription(StringBuilder sb, SchemaDiffItem item)
-        => AppendDescriptionStatement(sb, item, columnLevel: false);
+    private static void AppendSetTableDescription(StringBuilder sb, SchemaDiffItem item) => AppendDescriptionStatement(sb, item, columnLevel: false);
 
-    private static void AppendSetColumnDescription(StringBuilder sb, SchemaDiffItem item)
-        => AppendDescriptionStatement(sb, item, columnLevel: true);
+    private static void AppendSetColumnDescription(StringBuilder sb, SchemaDiffItem item) => AppendDescriptionStatement(sb, item, columnLevel: true);
 
     /// <summary>
     /// <c>sp_addextendedproperty</c> / <c>sp_updateextendedproperty</c> /
@@ -162,10 +192,14 @@ public static class SchemaSyncScriptBuilder
         var table = SqlIdentifier.TableNameOnly(item.TableName);
         var newVal = item.NewDescription ?? string.Empty;
 
-        var levelArgs = $"@level0type=N'SCHEMA', @level0name=N'{SqlIdentifier.EscapeStringLiteral(schema)}', " +
-                        $"@level1type=N'TABLE',  @level1name=N'{SqlIdentifier.EscapeStringLiteral(table)}'";
+        var levelArgs =
+            $"@level0type=N'SCHEMA', @level0name=N'{SqlIdentifier.EscapeStringLiteral(schema)}', "
+            + $"@level1type=N'TABLE',  @level1name=N'{SqlIdentifier.EscapeStringLiteral(table)}'";
+
         if (columnLevel)
+        {
             levelArgs += $", @level2type=N'COLUMN', @level2name=N'{SqlIdentifier.EscapeStringLiteral(item.ColumnName!)}'";
+        }
 
         var objectIdLiteral = $"OBJECT_ID(N'{SqlIdentifier.EscapeStringLiteral(schema)}.{SqlIdentifier.EscapeStringLiteral(table)}')";
         var minorIdCondition = columnLevel
@@ -194,6 +228,7 @@ public static class SchemaSyncScriptBuilder
             sb.AppendLine($"ELSE");
             sb.AppendLine($"    EXEC sys.sp_addextendedproperty    @name=N'MS_Description', @value=N'{escaped}', {levelArgs};");
         }
+
         sb.AppendLine("GO");
     }
 }

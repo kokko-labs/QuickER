@@ -1,5 +1,4 @@
-using System;
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using ERDesigner.Models;
 
@@ -29,10 +28,12 @@ public partial class RelationshipViewModel : ObservableObject
     public Guid Id { get; }
 
     /// <summary>関連の種類。</summary>
-    [ObservableProperty] private RelationshipType _type;
+    [ObservableProperty]
+    private RelationshipType _type;
 
     /// <summary>選択中かどうか。</summary>
-    [ObservableProperty] private bool _isSelected;
+    [ObservableProperty]
+    private bool _isSelected;
 
     /// <summary>関連の起点となるエンティティ。</summary>
     public EntityViewModel Source { get; }
@@ -94,10 +95,13 @@ public partial class RelationshipViewModel : ObservableObject
 
     /// <summary>起点エンティティ境界上の接続 X 座標。</summary>
     public double X1 => GetBoundaryPoint(Source, Target).x;
+
     /// <summary>起点エンティティ境界上の接続 Y 座標。</summary>
     public double Y1 => GetBoundaryPoint(Source, Target).y;
+
     /// <summary>終点エンティティ境界上の接続 X 座標。</summary>
     public double X2 => GetBoundaryPoint(Target, Source).x;
+
     /// <summary>終点エンティティ境界上の接続 Y 座標。</summary>
     public double Y2 => GetBoundaryPoint(Target, Source).y;
 
@@ -108,7 +112,12 @@ public partial class RelationshipViewModel : ObservableObject
         var dx = X2 - X1;
         var dy = Y2 - Y1;
         var len = Math.Sqrt(dx * dx + dy * dy);
-        if (len < 0.0001) len = 1;
+
+        if (len < 0.0001)
+        {
+            len = 1;
+        }
+
         return (dx / len, dy / len, len);
     }
 
@@ -122,8 +131,11 @@ public partial class RelationshipViewModel : ObservableObject
 
         var dx = targetCenterX - sourceCenterX;
         var dy = targetCenterY - sourceCenterY;
+
         if (Math.Abs(dx) < 0.0001 && Math.Abs(dy) < 0.0001)
+        {
             return (sourceCenterX, sourceCenterY);
+        }
 
         var scaleX = Math.Abs(dx) < 0.0001 ? double.PositiveInfinity : (source.Width / 2) / Math.Abs(dx);
         var scaleY = Math.Abs(dy) < 0.0001 ? double.PositiveInfinity : (source.DisplayHeight / 2) / Math.Abs(dy);
@@ -135,7 +147,11 @@ public partial class RelationshipViewModel : ObservableObject
     /// <summary>起点側マーカーの中心 X。</summary>
     public double SourceMarkerX
     {
-        get { var (ux, _, _) = Direction(); return X1 + ux * MarkerOffset; }
+        get
+        {
+            var (ux, _, _) = Direction();
+            return X1 + ux * MarkerOffset;
+        }
     }
 
     /// <summary>起点側マーカー描画領域の左上 X。</summary>
@@ -144,7 +160,11 @@ public partial class RelationshipViewModel : ObservableObject
     /// <summary>起点側マーカーの中心 Y。</summary>
     public double SourceMarkerY
     {
-        get { var (_, uy, _) = Direction(); return Y1 + uy * MarkerOffset; }
+        get
+        {
+            var (_, uy, _) = Direction();
+            return Y1 + uy * MarkerOffset;
+        }
     }
 
     /// <summary>起点側マーカー描画領域の左上 Y。</summary>
@@ -153,7 +173,11 @@ public partial class RelationshipViewModel : ObservableObject
     /// <summary>終点側マーカーの中心 X。</summary>
     public double TargetMarkerX
     {
-        get { var (ux, _, _) = Direction(); return X2 - ux * MarkerOffset; }
+        get
+        {
+            var (ux, _, _) = Direction();
+            return X2 - ux * MarkerOffset;
+        }
     }
 
     /// <summary>終点側マーカー描画領域の左上 X。</summary>
@@ -162,7 +186,11 @@ public partial class RelationshipViewModel : ObservableObject
     /// <summary>終点側マーカーの中心 Y。</summary>
     public double TargetMarkerY
     {
-        get { var (_, uy, _) = Direction(); return Y2 - uy * MarkerOffset; }
+        get
+        {
+            var (_, uy, _) = Direction();
+            return Y2 - uy * MarkerOffset;
+        }
     }
 
     /// <summary>終点側マーカー描画領域の左上 Y。</summary>
@@ -171,16 +199,26 @@ public partial class RelationshipViewModel : ObservableObject
     /// <summary>起点マーカーをエンティティ側へ向けて回転させる角度（度）。</summary>
     public double SourceMarkerAngle
     {
-        get { var (ux, uy, _) = Direction(); return Math.Atan2(uy, ux) * 180.0 / Math.PI + 180; }
+        get
+        {
+            var (ux, uy, _) = Direction();
+            return Math.Atan2(uy, ux) * 180.0 / Math.PI + 180;
+        }
     }
+
     /// <summary>終点マーカーをエンティティ側へ向けて回転させる角度（度）。</summary>
     public double TargetMarkerAngle
     {
-        get { var (ux, uy, _) = Direction(); return Math.Atan2(uy, ux) * 180.0 / Math.PI; }
+        get
+        {
+            var (ux, uy, _) = Direction();
+            return Math.Atan2(uy, ux) * 180.0 / Math.PI;
+        }
     }
 
     /// <summary>線の中点 X（ラベル表示用）。</summary>
     public double LabelX => (X1 + X2) / 2;
+
     /// <summary>線の中点 Y（ラベル表示用）。</summary>
     public double LabelY => (Y1 + Y2) / 2;
 
@@ -193,45 +231,50 @@ public partial class RelationshipViewModel : ObservableObject
     {
         /// <summary>「1」を表す（短い縦棒）。</summary>
         One,
+
         /// <summary>「多」を表す（鳥の足: crow's foot）。</summary>
-        Many
+        Many,
     }
 
     /// <summary>起点側マーカーの種類。</summary>
-    public MarkerKind SourceMarker => Type switch
-    {
-        RelationshipType.OneToOne => MarkerKind.One,
-        RelationshipType.OneToMany => MarkerKind.One,
-        RelationshipType.ManyToMany => MarkerKind.Many,
-        _ => MarkerKind.One
-    };
+    public MarkerKind SourceMarker =>
+        Type switch
+        {
+            RelationshipType.OneToOne => MarkerKind.One,
+            RelationshipType.OneToMany => MarkerKind.One,
+            RelationshipType.ManyToMany => MarkerKind.Many,
+            _ => MarkerKind.One,
+        };
 
     /// <summary>終点側マーカーの種類。</summary>
-    public MarkerKind TargetMarker => Type switch
-    {
-        RelationshipType.OneToOne => MarkerKind.One,
-        RelationshipType.OneToMany => MarkerKind.Many,
-        RelationshipType.ManyToMany => MarkerKind.Many,
-        _ => MarkerKind.One
-    };
+    public MarkerKind TargetMarker =>
+        Type switch
+        {
+            RelationshipType.OneToOne => MarkerKind.One,
+            RelationshipType.OneToMany => MarkerKind.Many,
+            RelationshipType.ManyToMany => MarkerKind.Many,
+            _ => MarkerKind.One,
+        };
 
     /// <summary>線上に表示するラベルテキスト。</summary>
-    public string Label => Type switch
-    {
-        RelationshipType.OneToOne => "1―1",
-        RelationshipType.OneToMany => "1―N",
-        RelationshipType.ManyToMany => "N―N",
-        _ => string.Empty
-    };
+    public string Label =>
+        Type switch
+        {
+            RelationshipType.OneToOne => "1―1",
+            RelationshipType.OneToMany => "1―N",
+            RelationshipType.ManyToMany => "N―N",
+            _ => string.Empty,
+        };
 
     /// <summary>現在の状態をモデルにコピーして返します。</summary>
-    public Relationship ToModel() => new()
-    {
-        Id = Id,
-        SourceEntityId = Source.Id,
-        TargetEntityId = Target.Id,
-        Type = Type
-    };
+    public Relationship ToModel() =>
+        new()
+        {
+            Id = Id,
+            SourceEntityId = Source.Id,
+            TargetEntityId = Target.Id,
+            Type = Type,
+        };
 
     /// <summary>両端の PropertyChanged 購読を解除します（画面リセット時など）。</summary>
     public void Detach()

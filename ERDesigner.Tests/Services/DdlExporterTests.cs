@@ -1,4 +1,4 @@
-using ERDesigner.Models;
+﻿using ERDesigner.Models;
 using ERDesigner.Services;
 using ERDesigner.ViewModels;
 using FluentAssertions;
@@ -14,15 +14,22 @@ public class DdlExporterTests
     public void Build_EmitsCreateTableAndPk()
     {
         var vm = new MainViewModel();
-        var e = new EntityViewModel(new Entity
-        {
-            TableName = "User",
-            Columns =
+        var e = new EntityViewModel(
+            new Entity
             {
-                new Column { Name = "Id", DataType = "int", IsPrimaryKey = true },
-                new Column { Name = "Name", DataType = "nvarchar(50)" }
+                TableName = "User",
+                Columns =
+                {
+                    new Column
+                    {
+                        Name = "Id",
+                        DataType = "int",
+                        IsPrimaryKey = true,
+                    },
+                    new Column { Name = "Name", DataType = "nvarchar(50)" },
+                },
             }
-        });
+        );
         vm.Entities.Add(e);
 
         var sql = DdlExporter.Build(vm);
@@ -37,25 +44,50 @@ public class DdlExporterTests
     public void Build_OneToMany_EmitsForeignKey()
     {
         var vm = new MainViewModel();
-        var parent = new EntityViewModel(new Entity
-        {
-            TableName = "P",
-            Columns = { new Column { Name = "Id", DataType = "int", IsPrimaryKey = true } }
-        });
-        var child = new EntityViewModel(new Entity
-        {
-            TableName = "C",
-            Columns = { new Column { Name = "Id", DataType = "int", IsPrimaryKey = true } }
-        });
+        var parent = new EntityViewModel(
+            new Entity
+            {
+                TableName = "P",
+                Columns =
+                {
+                    new Column
+                    {
+                        Name = "Id",
+                        DataType = "int",
+                        IsPrimaryKey = true,
+                    },
+                },
+            }
+        );
+        var child = new EntityViewModel(
+            new Entity
+            {
+                TableName = "C",
+                Columns =
+                {
+                    new Column
+                    {
+                        Name = "Id",
+                        DataType = "int",
+                        IsPrimaryKey = true,
+                    },
+                },
+            }
+        );
         vm.Entities.Add(parent);
         vm.Entities.Add(child);
-        vm.Relationships.Add(new RelationshipViewModel(
-            new Relationship
-            {
-                SourceEntityId = parent.Id,
-                TargetEntityId = child.Id,
-                Type = RelationshipType.OneToMany
-            }, parent, child));
+        vm.Relationships.Add(
+            new RelationshipViewModel(
+                new Relationship
+                {
+                    SourceEntityId = parent.Id,
+                    TargetEntityId = child.Id,
+                    Type = RelationshipType.OneToMany,
+                },
+                parent,
+                child
+            )
+        );
 
         var sql = DdlExporter.Build(vm);
 

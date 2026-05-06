@@ -1,5 +1,4 @@
-using System;
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Linq;
 using ERDesigner.Models;
 
@@ -22,7 +21,8 @@ public class SchemaDiffService
         IReadOnlyList<Entity> liveEntities,
         IReadOnlyList<Relationship> liveRelationships,
         IReadOnlyList<Entity> targetEntities,
-        IReadOnlyList<Relationship> targetRelationships)
+        IReadOnlyList<Relationship> targetRelationships
+    )
     {
         var diff = new SchemaDiff();
 
@@ -35,44 +35,55 @@ public class SchemaDiffService
             if (!liveByName.TryGetValue(name, out var live))
             {
                 // 新規テーブル
-                diff.Items.Add(new SchemaDiffItem
-                {
-                    Kind = SchemaDiffKind.AddTable,
-                    TableName = name,
-                    Entity = target,
-                    Description = $"テーブル [{name}] を作成 (列 {target.Columns.Count} 件)"
-                });
+                diff.Items.Add(
+                    new SchemaDiffItem
+                    {
+                        Kind = SchemaDiffKind.AddTable,
+                        TableName = name,
+                        Entity = target,
+                        Description = $"テーブル [{name}] を作成 (列 {target.Columns.Count} 件)",
+                    }
+                );
 
                 // 新規テーブル: テーブル説明
                 var newTblDesc = target.Description ?? string.Empty;
+
                 if (!string.IsNullOrEmpty(newTblDesc))
                 {
-                    diff.Items.Add(new SchemaDiffItem
-                    {
-                        Kind = SchemaDiffKind.SetTableDescription,
-                        TableName = name,
-                        Entity = target,
-                        NewDescription = newTblDesc,
-                        OldDescription = null,
-                        Description = $"テーブル [{name}] の説明を設定: \"{Truncate(newTblDesc)}\""
-                    });
+                    diff.Items.Add(
+                        new SchemaDiffItem
+                        {
+                            Kind = SchemaDiffKind.SetTableDescription,
+                            TableName = name,
+                            Entity = target,
+                            NewDescription = newTblDesc,
+                            OldDescription = null,
+                            Description = $"テーブル [{name}] の説明を設定: \"{Truncate(newTblDesc)}\"",
+                        }
+                    );
                 }
 
                 // 新規テーブル: 各列の説明
                 foreach (var c in target.Columns)
                 {
-                    if (string.IsNullOrEmpty(c.Description)) continue;
-                    diff.Items.Add(new SchemaDiffItem
+                    if (string.IsNullOrEmpty(c.Description))
                     {
-                        Kind = SchemaDiffKind.SetColumnDescription,
-                        TableName = name,
-                        ColumnName = c.Name,
-                        Entity = target,
-                        Column = c,
-                        NewDescription = c.Description,
-                        OldDescription = null,
-                        Description = $"列 [{name}].[{c.Name}] の説明を設定: \"{Truncate(c.Description)}\""
-                    });
+                        continue;
+                    }
+
+                    diff.Items.Add(
+                        new SchemaDiffItem
+                        {
+                            Kind = SchemaDiffKind.SetColumnDescription,
+                            TableName = name,
+                            ColumnName = c.Name,
+                            Entity = target,
+                            Column = c,
+                            NewDescription = c.Description,
+                            OldDescription = null,
+                            Description = $"列 [{name}].[{c.Name}] の説明を設定: \"{Truncate(c.Description)}\"",
+                        }
+                    );
                 }
 
                 continue;
@@ -85,85 +96,97 @@ public class SchemaDiffService
             // テーブル説明 (MS_Description) の差分
             var targetTableDesc = target.Description ?? string.Empty;
             var liveTableDesc = live.Description ?? string.Empty;
+
             if (!string.Equals(targetTableDesc, liveTableDesc, StringComparison.Ordinal))
             {
-                diff.Items.Add(new SchemaDiffItem
-                {
-                    Kind = SchemaDiffKind.SetTableDescription,
-                    TableName = name,
-                    Entity = target,
-                    NewDescription = targetTableDesc,
-                    OldDescription = liveTableDesc,
-                    Description = string.IsNullOrEmpty(targetTableDesc)
-                        ? $"テーブル [{name}] の説明を削除"
-                        : $"テーブル [{name}] の説明を更新: \"{Truncate(targetTableDesc)}\""
-                });
+                diff.Items.Add(
+                    new SchemaDiffItem
+                    {
+                        Kind = SchemaDiffKind.SetTableDescription,
+                        TableName = name,
+                        Entity = target,
+                        NewDescription = targetTableDesc,
+                        OldDescription = liveTableDesc,
+                        Description = string.IsNullOrEmpty(targetTableDesc)
+                            ? $"テーブル [{name}] の説明を削除"
+                            : $"テーブル [{name}] の説明を更新: \"{Truncate(targetTableDesc)}\"",
+                    }
+                );
             }
 
             foreach (var (cname, tcol) in targetCols)
             {
                 if (!liveCols.TryGetValue(cname, out var lcol))
                 {
-                    diff.Items.Add(new SchemaDiffItem
-                    {
-                        Kind = SchemaDiffKind.AddColumn,
-                        TableName = name,
-                        ColumnName = cname,
-                        Entity = target,
-                        Column = tcol,
-                        Description = $"列 [{name}].[{cname}] {tcol.DataType} を追加"
-                    });
-
-                    // 新規列に説明があれば、列追加と一緒に説明を設定する
-                    if (!string.IsNullOrEmpty(tcol.Description))
-                    {
-                        diff.Items.Add(new SchemaDiffItem
+                    diff.Items.Add(
+                        new SchemaDiffItem
                         {
-                            Kind = SchemaDiffKind.SetColumnDescription,
+                            Kind = SchemaDiffKind.AddColumn,
                             TableName = name,
                             ColumnName = cname,
                             Entity = target,
                             Column = tcol,
-                            NewDescription = tcol.Description,
-                            OldDescription = null,
-                            Description = $"列 [{name}].[{cname}] の説明を設定: \"{Truncate(tcol.Description)}\""
-                        });
+                            Description = $"列 [{name}].[{cname}] {tcol.DataType} を追加",
+                        }
+                    );
+
+                    // 新規列に説明があれば、列追加と一緒に説明を設定する
+                    if (!string.IsNullOrEmpty(tcol.Description))
+                    {
+                        diff.Items.Add(
+                            new SchemaDiffItem
+                            {
+                                Kind = SchemaDiffKind.SetColumnDescription,
+                                TableName = name,
+                                ColumnName = cname,
+                                Entity = target,
+                                Column = tcol,
+                                NewDescription = tcol.Description,
+                                OldDescription = null,
+                                Description = $"列 [{name}].[{cname}] の説明を設定: \"{Truncate(tcol.Description)}\"",
+                            }
+                        );
                     }
                 }
                 else
                 {
                     if (!IsSameType(lcol.DataType, tcol.DataType))
                     {
-                        diff.Items.Add(new SchemaDiffItem
-                        {
-                            Kind = SchemaDiffKind.AlterColumn,
-                            TableName = name,
-                            ColumnName = cname,
-                            Entity = target,
-                            Column = tcol,
-                            OldColumn = lcol,
-                            IsSelected = false,
-                            Description = $"列 [{name}].[{cname}] 型を {lcol.DataType} → {tcol.DataType} に変更"
-                        });
+                        diff.Items.Add(
+                            new SchemaDiffItem
+                            {
+                                Kind = SchemaDiffKind.AlterColumn,
+                                TableName = name,
+                                ColumnName = cname,
+                                Entity = target,
+                                Column = tcol,
+                                OldColumn = lcol,
+                                IsSelected = false,
+                                Description = $"列 [{name}].[{cname}] 型を {lcol.DataType} → {tcol.DataType} に変更",
+                            }
+                        );
                     }
 
                     var newColDesc = tcol.Description ?? string.Empty;
                     var oldColDesc = lcol.Description ?? string.Empty;
+
                     if (!string.Equals(newColDesc, oldColDesc, StringComparison.Ordinal))
                     {
-                        diff.Items.Add(new SchemaDiffItem
-                        {
-                            Kind = SchemaDiffKind.SetColumnDescription,
-                            TableName = name,
-                            ColumnName = cname,
-                            Entity = target,
-                            Column = tcol,
-                            NewDescription = newColDesc,
-                            OldDescription = oldColDesc,
-                            Description = string.IsNullOrEmpty(newColDesc)
-                                ? $"列 [{name}].[{cname}] の説明を削除"
-                                : $"列 [{name}].[{cname}] の説明を更新: \"{Truncate(newColDesc)}\""
-                        });
+                        diff.Items.Add(
+                            new SchemaDiffItem
+                            {
+                                Kind = SchemaDiffKind.SetColumnDescription,
+                                TableName = name,
+                                ColumnName = cname,
+                                Entity = target,
+                                Column = tcol,
+                                NewDescription = newColDesc,
+                                OldDescription = oldColDesc,
+                                Description = string.IsNullOrEmpty(newColDesc)
+                                    ? $"列 [{name}].[{cname}] の説明を削除"
+                                    : $"列 [{name}].[{cname}] の説明を更新: \"{Truncate(newColDesc)}\"",
+                            }
+                        );
                     }
                 }
             }
@@ -172,16 +195,18 @@ public class SchemaDiffService
             {
                 if (!targetCols.ContainsKey(cname))
                 {
-                    diff.Items.Add(new SchemaDiffItem
-                    {
-                        Kind = SchemaDiffKind.DropColumn,
-                        TableName = name,
-                        ColumnName = cname,
-                        Entity = live,
-                        Column = lcol,
-                        IsSelected = false,
-                        Description = $"列 [{name}].[{cname}] ({lcol.DataType}) を削除"
-                    });
+                    diff.Items.Add(
+                        new SchemaDiffItem
+                        {
+                            Kind = SchemaDiffKind.DropColumn,
+                            TableName = name,
+                            ColumnName = cname,
+                            Entity = live,
+                            Column = lcol,
+                            IsSelected = false,
+                            Description = $"列 [{name}].[{cname}] ({lcol.DataType}) を削除",
+                        }
+                    );
                 }
             }
         }
@@ -190,14 +215,16 @@ public class SchemaDiffService
         {
             if (!targetByName.ContainsKey(name))
             {
-                diff.Items.Add(new SchemaDiffItem
-                {
-                    Kind = SchemaDiffKind.DropTable,
-                    TableName = name,
-                    Entity = live,
-                    IsSelected = false,
-                    Description = $"テーブル [{name}] を削除"
-                });
+                diff.Items.Add(
+                    new SchemaDiffItem
+                    {
+                        Kind = SchemaDiffKind.DropTable,
+                        TableName = name,
+                        Entity = live,
+                        IsSelected = false,
+                        Description = $"テーブル [{name}] を削除",
+                    }
+                );
             }
         }
 
@@ -212,32 +239,55 @@ public class SchemaDiffService
 
         foreach (var rel in targetRelationships)
         {
-            if (rel.Type == RelationshipType.ManyToMany) continue;
+            if (rel.Type == RelationshipType.ManyToMany)
+            {
+                continue;
+            }
+
             var pair = MakePair(rel, targetEntities);
-            if (pair is null) continue;
-            if (liveFkPairs.Contains(pair.Value)) continue;
+
+            if (pair is null)
+            {
+                continue;
+            }
+
+            if (liveFkPairs.Contains(pair.Value))
+            {
+                continue;
+            }
 
             var parent = targetEntities.FirstOrDefault(e => e.Id == rel.SourceEntityId);
             var child = targetEntities.FirstOrDefault(e => e.Id == rel.TargetEntityId);
-            if (parent is null || child is null) continue;
+
+            if (parent is null || child is null)
+            {
+                continue;
+            }
+
             var pkCol = parent.Columns.FirstOrDefault(c => c.IsPrimaryKey);
-            if (pkCol is null) continue;
+
+            if (pkCol is null)
+            {
+                continue;
+            }
 
             // 規約: FK 列名は <ParentTable>_<PkCol>。子テーブルにこの列があるか PK 名と同名の列があれば採用。
             var fkColName = ResolveFkColumnName(child, parent, pkCol);
-            diff.Items.Add(new SchemaDiffItem
-            {
-                Kind = SchemaDiffKind.AddForeignKey,
-                TableName = NormalizeTable(child),
-                ColumnName = fkColName,
-                Entity = child,
-                ParentEntity = parent,
-                ChildEntity = child,
-                Relationship = rel,
-                Description = fkColName is not null
-                    ? $"外部キー [{NormalizeTable(child)}].[{fkColName}] → [{NormalizeTable(parent)}].[{pkCol.Name}] を追加"
-                    : $"外部キー [{NormalizeTable(child)}] → [{NormalizeTable(parent)}] を追加 (※ FK 列が未定義のためスクリプトはスキップされます)"
-            });
+            diff.Items.Add(
+                new SchemaDiffItem
+                {
+                    Kind = SchemaDiffKind.AddForeignKey,
+                    TableName = NormalizeTable(child),
+                    ColumnName = fkColName,
+                    Entity = child,
+                    ParentEntity = parent,
+                    ChildEntity = child,
+                    Relationship = rel,
+                    Description = fkColName is not null
+                        ? $"外部キー [{NormalizeTable(child)}].[{fkColName}] → [{NormalizeTable(parent)}].[{pkCol.Name}] を追加"
+                        : $"外部キー [{NormalizeTable(child)}] → [{NormalizeTable(parent)}] を追加 (※ FK 列が未定義のためスクリプトはスキップされます)",
+                }
+            );
         }
 
         // 既存 DB にあるが ER 図にない FK は削除候補 (フェーズ2)
@@ -251,26 +301,44 @@ public class SchemaDiffService
 
         foreach (var rel in liveRelationships)
         {
-            if (rel.Type == RelationshipType.ManyToMany) continue;
+            if (rel.Type == RelationshipType.ManyToMany)
+            {
+                continue;
+            }
+
             var pair = MakePair(rel, liveEntities);
-            if (pair is null) continue;
-            if (targetFkPairs.Contains(pair.Value)) continue;
+
+            if (pair is null)
+            {
+                continue;
+            }
+
+            if (targetFkPairs.Contains(pair.Value))
+            {
+                continue;
+            }
 
             var parent = liveEntities.FirstOrDefault(e => e.Id == rel.SourceEntityId);
             var child = liveEntities.FirstOrDefault(e => e.Id == rel.TargetEntityId);
-            if (parent is null || child is null) continue;
 
-            diff.Items.Add(new SchemaDiffItem
+            if (parent is null || child is null)
             {
-                Kind = SchemaDiffKind.DropForeignKey,
-                TableName = NormalizeTable(child),
-                Entity = child,
-                ParentEntity = parent,
-                ChildEntity = child,
-                Relationship = rel,
-                IsSelected = false,
-                Description = $"外部キー [{NormalizeTable(child)}] → [{NormalizeTable(parent)}] を削除"
-            });
+                continue;
+            }
+
+            diff.Items.Add(
+                new SchemaDiffItem
+                {
+                    Kind = SchemaDiffKind.DropForeignKey,
+                    TableName = NormalizeTable(child),
+                    Entity = child,
+                    ParentEntity = parent,
+                    ChildEntity = child,
+                    Relationship = rel,
+                    IsSelected = false,
+                    Description = $"外部キー [{NormalizeTable(child)}] → [{NormalizeTable(parent)}] を削除",
+                }
+            );
         }
 
         return diff;
@@ -280,9 +348,7 @@ public class SchemaDiffService
     /// DB 側とダイアグラム側で「同一列集合だが順序のみ異なる」テーブル名一覧を返します。
     /// 列追加/削除がある場合は、列順差分としては扱いません。
     /// </summary>
-    public static IReadOnlyList<string> DetectColumnOrderChanges(
-        IReadOnlyList<Entity> liveEntities,
-        IReadOnlyList<Entity> targetEntities)
+    public static IReadOnlyList<string> DetectColumnOrderChanges(IReadOnlyList<Entity> liveEntities, IReadOnlyList<Entity> targetEntities)
     {
         var changed = new List<string>();
         var liveByName = liveEntities.ToDictionary(NormalizeTable, StringComparer.OrdinalIgnoreCase);
@@ -290,9 +356,16 @@ public class SchemaDiffService
         foreach (var target in targetEntities)
         {
             var name = NormalizeTable(target);
-            if (!liveByName.TryGetValue(name, out var live)) continue;
+
+            if (!liveByName.TryGetValue(name, out var live))
+            {
+                continue;
+            }
+
             if (HasColumnOrderChanged(live, target))
+            {
                 changed.Add(name);
+            }
         }
 
         return changed;
@@ -309,7 +382,12 @@ public class SchemaDiffService
     {
         var parent = entities.FirstOrDefault(e => e.Id == rel.SourceEntityId);
         var child = entities.FirstOrDefault(e => e.Id == rel.TargetEntityId);
-        if (parent is null || child is null) return null;
+
+        if (parent is null || child is null)
+        {
+            return null;
+        }
+
         return (NormalizeTable(parent).ToLowerInvariant(), NormalizeTable(child).ToLowerInvariant());
     }
 
@@ -323,41 +401,56 @@ public class SchemaDiffService
         var parentName = NormalizeTable(parent).Replace(".", "_");
         var conv = parentName + "_" + pkCol.Name;
         var byConv = child.Columns.FirstOrDefault(c => string.Equals(c.Name, conv, StringComparison.OrdinalIgnoreCase));
-        if (byConv is not null) return byConv.Name;
 
-        var byPkName = child.Columns.FirstOrDefault(c =>
-            !c.IsPrimaryKey && string.Equals(c.Name, pkCol.Name, StringComparison.OrdinalIgnoreCase));
-        if (byPkName is not null) return byPkName.Name;
+        if (byConv is not null)
+        {
+            return byConv.Name;
+        }
+
+        var byPkName = child.Columns.FirstOrDefault(c => !c.IsPrimaryKey && string.Equals(c.Name, pkCol.Name, StringComparison.OrdinalIgnoreCase));
+
+        if (byPkName is not null)
+        {
+            return byPkName.Name;
+        }
 
         var byFlag = child.Columns.FirstOrDefault(c => c.IsForeignKey);
         return byFlag?.Name;
     }
 
-    private static bool IsSameType(string a, string b)
-        => string.Equals((a ?? "").Trim(), (b ?? "").Trim(), StringComparison.OrdinalIgnoreCase);
+    private static bool IsSameType(string a, string b) => string.Equals((a ?? "").Trim(), (b ?? "").Trim(), StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// 同一列集合（件数・名前一致）のテーブルで、列順のみ変更されているかを判定します。
     /// </summary>
     private static bool HasColumnOrderChanged(Entity live, Entity target)
     {
-        if (live.Columns.Count != target.Columns.Count) return false;
+        if (live.Columns.Count != target.Columns.Count)
+        {
+            return false;
+        }
 
         var liveNames = live.Columns.Select(c => c.Name).ToList();
         var targetNames = target.Columns.Select(c => c.Name).ToList();
 
         var liveSet = new HashSet<string>(liveNames, StringComparer.OrdinalIgnoreCase);
         var targetSet = new HashSet<string>(targetNames, StringComparer.OrdinalIgnoreCase);
-        if (!liveSet.SetEquals(targetSet)) return false;
 
-        for (int i = 0; i < liveNames.Count; i++)
+        if (!liveSet.SetEquals(targetSet))
+        {
+            return false;
+        }
+
+        for (var i = 0; i < liveNames.Count; i++)
         {
             if (!string.Equals(liveNames[i], targetNames[i], StringComparison.OrdinalIgnoreCase))
+            {
                 return true;
+            }
         }
+
         return false;
     }
 
-    private static string Truncate(string s, int max = 30)
-        => s.Length <= max ? s : s.Substring(0, max) + "…";
+    private static string Truncate(string s, int max = 30) => s.Length <= max ? s : s.Substring(0, max) + "…";
 }

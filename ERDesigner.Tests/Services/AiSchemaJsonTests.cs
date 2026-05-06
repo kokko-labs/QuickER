@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using ERDesigner.Models;
 using ERDesigner.Services;
 using FluentAssertions;
@@ -14,35 +14,36 @@ public class AiSchemaJsonTests
     public void ToDomain_ConvertsCorrectly()
     {
         var json = """
-        {
-          "tables": [
             {
-              "name": "Customer",
-              "description": "顧客マスタを管理するテーブル",
-              "memo": "",
-              "columns": [
-                { "name": "Id", "dataType": "int", "isPrimaryKey": true, "isForeignKey": false, "description": "顧客を一意に識別するID" },
-                { "name": "Name", "dataType": "nvarchar(50)", "isPrimaryKey": false, "isForeignKey": false, "description": "顧客名" }
-              ]
-            },
-            {
-              "name": "Order",
-              "description": "注文データを管理するテーブル",
-              "memo": "",
-              "columns": [
-                { "name": "Id", "dataType": "int", "isPrimaryKey": true, "isForeignKey": false, "description": "注文ID" },
-                { "name": "CustomerId", "dataType": "int", "isPrimaryKey": false, "isForeignKey": true, "description": "注文者の顧客ID" }
+              "tables": [
+                {
+                  "name": "Customer",
+                  "description": "顧客マスタを管理するテーブル",
+                  "memo": "",
+                  "columns": [
+                    { "name": "Id", "dataType": "int", "isPrimaryKey": true, "isForeignKey": false, "description": "顧客を一意に識別するID" },
+                    { "name": "Name", "dataType": "nvarchar(50)", "isPrimaryKey": false, "isForeignKey": false, "description": "顧客名" }
+                  ]
+                },
+
+                {
+                  "name": "Order",
+                  "description": "注文データを管理するテーブル",
+                  "memo": "",
+                  "columns": [
+                    { "name": "Id", "dataType": "int", "isPrimaryKey": true, "isForeignKey": false, "description": "注文ID" },
+                    { "name": "CustomerId", "dataType": "int", "isPrimaryKey": false, "isForeignKey": true, "description": "注文者の顧客ID" }
+                  ]
+                }
+              ],
+              "relationships": [
+                { "sourceTable": "Customer", "targetTable": "Order", "type": "OneToMany" }
               ]
             }
-          ],
-          "relationships": [
-            { "sourceTable": "Customer", "targetTable": "Order", "type": "OneToMany" }
-          ]
-        }
-        """;
 
-        var parsed = JsonSerializer.Deserialize<AiSchemaJson>(json,
-            new JsonSerializerOptions { PropertyNameCaseInsensitive = true })!;
+            """;
+
+        var parsed = JsonSerializer.Deserialize<AiSchemaJson>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true })!;
         var (entities, rels) = parsed.ToDomain();
 
         entities.Should().HaveCount(2);
@@ -66,12 +67,30 @@ public class AiSchemaJsonTests
         {
             Tables =
             {
-                new AiTable { Name = "A", Columns = new() { new AiColumn { Name = "Id", DataType = "int", IsPrimaryKey = true } } }
+                new AiTable
+                {
+                    Name = "A",
+                    Columns = new()
+                    {
+                        new AiColumn
+                        {
+                            Name = "Id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                        },
+                    },
+                },
             },
+
             Relationships =
             {
-                new AiRelationship { SourceTable = "A", TargetTable = "Missing", Type = "OneToMany" }
-            }
+                new AiRelationship
+                {
+                    SourceTable = "A",
+                    TargetTable = "Missing",
+                    Type = "OneToMany",
+                },
+            },
         };
 
         var (_, rels) = schema.ToDomain();
@@ -82,32 +101,33 @@ public class AiSchemaJsonTests
     public void Deserialize_LegacyTableAndColumnNames_AreIgnored()
     {
         var json = """
-        {
-          "tables": [
             {
-              "tableName": "customers",
-              "tableDescription": "顧客情報を保持するテーブル",
-              "columns": [
-                { "columnName": "customer_id", "dataType": "int", "isPrimaryKey": true, "isForeignKey": false, "columnDescription": "顧客ID" }
-              ]
-            },
-            {
-              "tableName": "orders",
-              "tableDescription": "注文情報を保持するテーブル",
-              "columns": [
-                { "columnName": "order_id", "dataType": "int", "isPrimaryKey": true, "isForeignKey": false, "columnDescription": "注文ID" },
-                { "columnName": "customer_id", "dataType": "int", "isPrimaryKey": false, "isForeignKey": true, "columnDescription": "顧客ID" }
+              "tables": [
+                {
+                  "tableName": "customers",
+                  "tableDescription": "顧客情報を保持するテーブル",
+                  "columns": [
+                    { "columnName": "customer_id", "dataType": "int", "isPrimaryKey": true, "isForeignKey": false, "columnDescription": "顧客ID" }
+                  ]
+                },
+
+                {
+                  "tableName": "orders",
+                  "tableDescription": "注文情報を保持するテーブル",
+                  "columns": [
+                    { "columnName": "order_id", "dataType": "int", "isPrimaryKey": true, "isForeignKey": false, "columnDescription": "注文ID" },
+                    { "columnName": "customer_id", "dataType": "int", "isPrimaryKey": false, "isForeignKey": true, "columnDescription": "顧客ID" }
+                  ]
+                }
+              ],
+              "relationships": [
+                { "fromTable": "customers", "toTable": "orders", "type": "OneToMany" }
               ]
             }
-          ],
-          "relationships": [
-            { "fromTable": "customers", "toTable": "orders", "type": "OneToMany" }
-          ]
-        }
-        """;
 
-        var parsed = JsonSerializer.Deserialize<AiSchemaJson>(json,
-            new JsonSerializerOptions { PropertyNameCaseInsensitive = true })!;
+            """;
+
+        var parsed = JsonSerializer.Deserialize<AiSchemaJson>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true })!;
         var (entities, rels) = parsed.ToDomain();
 
         entities.Should().BeEmpty();
@@ -127,11 +147,35 @@ public class AiSchemaJsonTests
         {
             Tables =
             {
-                new AiTable { Name = "A", Columns = new() { new AiColumn { Name = "Id", DataType = "int" } } },
-                new AiTable { Name = "B", Columns = new() { new AiColumn { Name = "Id", DataType = "int" } } }
+                new AiTable
+                {
+                    Name = "A",
+                    Columns = new()
+                    {
+                        new AiColumn { Name = "Id", DataType = "int" },
+                    },
+                },
+                new AiTable
+                {
+                    Name = "B",
+                    Columns = new()
+                    {
+                        new AiColumn { Name = "Id", DataType = "int" },
+                    },
+                },
             },
-            Relationships = { new AiRelationship { SourceTable = "A", TargetTable = "B", Type = typeStr } }
+
+            Relationships =
+            {
+                new AiRelationship
+                {
+                    SourceTable = "A",
+                    TargetTable = "B",
+                    Type = typeStr,
+                },
+            },
         };
+
         var (_, rels) = schema.ToDomain();
         rels.Should().ContainSingle().Which.Type.Should().Be(expected);
     }
@@ -140,21 +184,22 @@ public class AiSchemaJsonTests
     public void ParseSchemaResponse_SupportsMarkdownCodeFence()
     {
         var response = """
-        ```json
-        {
-          "tables": [
+            ```json
             {
-              "name": "products",
-              "description": "商品マスタ",
-              "columns": [
-                { "name": "product_id", "dataType": "int", "isPrimaryKey": true, "isForeignKey": false, "description": "商品ID" }
-              ]
+              "tables": [
+                {
+                  "name": "products",
+                  "description": "商品マスタ",
+                  "columns": [
+                    { "name": "product_id", "dataType": "int", "isPrimaryKey": true, "isForeignKey": false, "description": "商品ID" }
+                  ]
+                }
+              ],
+              "relationships": []
             }
-          ],
-          "relationships": []
-        }
-        ```
-        """;
+
+            ```
+            """;
 
         var parsed = OpenAiSchemaClient.ParseSchemaResponse(response);
 

@@ -20,6 +20,7 @@ public class AddRelationshipCommand : IUndoableCommand
 
     /// <inheritdoc />
     public void Execute() => _main.Relationships.Add(_rel);
+
     /// <inheritdoc />
     public void Undo() => _main.Relationships.Remove(_rel);
 }

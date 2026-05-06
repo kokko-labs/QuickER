@@ -1,6 +1,4 @@
-using System;
-
-namespace ERDesigner.Models;
+﻿namespace ERDesigner.Models;
 
 /// <summary>
 /// 2 つのエンティティを繋ぐリレーション（関連）を表すモデルです。

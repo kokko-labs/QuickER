@@ -1,745 +1,767 @@
-<Window x:Class="ERDesigner.MainWindow"
-        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:vm="clr-namespace:ERDesigner.ViewModels"
-        xmlns:models="clr-namespace:ERDesigner.Models"
-        xmlns:beh="clr-namespace:ERDesigner.Behaviors"
-        Title="ER図作成ツール"
-        Height="760" Width="1400"
-        FontFamily="Segoe UI, Yu Gothic UI, Meiryo"
-        FontSize="13"
-        Background="#F5F7FA">
-    <Window.DataContext>
-        <vm:MainViewModel/>
-    </Window.DataContext>
+<Window
+  x:Class="ERDesigner.MainWindow"
+  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+  xmlns:vm="clr-namespace:ERDesigner.ViewModels"
+  xmlns:models="clr-namespace:ERDesigner.Models"
+  xmlns:beh="clr-namespace:ERDesigner.Behaviors"
+  Title="ER図作成ツール"
+  Height="1000"
+  Width="1800"
+  FontFamily="Segoe UI, Yu Gothic UI, Meiryo"
+  FontSize="13"
+  Background="#F5F7FA"
+>
+  <Window.DataContext>
+    <vm:MainViewModel />
+  </Window.DataContext>
 
-    <Window.InputBindings>
-        <KeyBinding Key="Z" Modifiers="Control" Command="{Binding UndoCommand}"/>
-        <KeyBinding Key="Y" Modifiers="Control" Command="{Binding RedoCommand}"/>
-        <KeyBinding Key="S" Modifiers="Control" Command="{Binding SaveCommand}"/>
-        <KeyBinding Key="N" Modifiers="Control" Command="{Binding NewDiagramCommand}"/>
-        <KeyBinding Key="O" Modifiers="Control" Command="{Binding OpenCommand}"/>
-        <KeyBinding Key="D" Modifiers="Control" Command="{Binding DuplicateSelectedEntityCommand}"/>
-        <KeyBinding Key="Delete" Command="{Binding RemoveSelectedEntityCommand}"/>
-    </Window.InputBindings>
+  <Window.InputBindings>
+    <KeyBinding Key="Z" Modifiers="Control" Command="{Binding UndoCommand}" />
+    <KeyBinding Key="Y" Modifiers="Control" Command="{Binding RedoCommand}" />
+    <KeyBinding Key="S" Modifiers="Control" Command="{Binding SaveCommand}" />
+    <KeyBinding Key="N" Modifiers="Control" Command="{Binding NewDiagramCommand}" />
+    <KeyBinding Key="O" Modifiers="Control" Command="{Binding OpenCommand}" />
+    <KeyBinding Key="D" Modifiers="Control" Command="{Binding DuplicateSelectedEntityCommand}" />
+    <KeyBinding Key="Delete" Command="{Binding RemoveSelectedEntityCommand}" />
+  </Window.InputBindings>
 
-    <Window.Resources>
-        <SolidColorBrush x:Key="PanelBg" Color="#FFFFFF"/>
-        <SolidColorBrush x:Key="SidebarBg" Color="#FAFBFD"/>
-        <SolidColorBrush x:Key="DividerBrush" Color="#E5E7EB"/>
-        <SolidColorBrush x:Key="HeaderText" Color="#374151"/>
-        <SolidColorBrush x:Key="MutedText" Color="#6B7280"/>
-        <SolidColorBrush x:Key="EntityHeaderBlue" Color="#DCEBFF"/>
-        <SolidColorBrush x:Key="EntityBorder" Color="#9DB7DD"/>
-        <SolidColorBrush x:Key="EntityBorderSelected" Color="#1A73E8"/>
-        <SolidColorBrush x:Key="LineBrush" Color="#5F6B7A"/>
-        <SolidColorBrush x:Key="LineSelectedBrush" Color="#1A73E8"/>
+  <Window.Resources>
+    <SolidColorBrush x:Key="PanelBg" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="SidebarBg" Color="#FAFBFD" />
+    <SolidColorBrush x:Key="DividerBrush" Color="#E5E7EB" />
+    <SolidColorBrush x:Key="HeaderText" Color="#374151" />
+    <SolidColorBrush x:Key="MutedText" Color="#6B7280" />
+    <SolidColorBrush x:Key="EntityHeaderBlue" Color="#DCEBFF" />
+    <SolidColorBrush x:Key="EntityBorder" Color="#9DB7DD" />
+    <SolidColorBrush x:Key="EntityBorderSelected" Color="#1A73E8" />
+    <SolidColorBrush x:Key="LineBrush" Color="#5F6B7A" />
+    <SolidColorBrush x:Key="LineSelectedBrush" Color="#1A73E8" />
 
-        <Style x:Key="ToolBarLabelButton" TargetType="Button">
-            <Setter Property="Background" Value="Transparent"/>
-            <Setter Property="BorderThickness" Value="0"/>
-            <Setter Property="Padding" Value="10,6"/>
-            <Setter Property="Margin" Value="2,0"/>
-            <Setter Property="Cursor" Value="Hand"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Border x:Name="Bd" Background="{TemplateBinding Background}"
-                                CornerRadius="4" Padding="{TemplateBinding Padding}">
-                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="#EEF2F7"/>
-                            </Trigger>
-                            <Trigger Property="IsEnabled" Value="False">
-                                <Setter Property="Opacity" Value="0.4"/>
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-
-        <Style x:Key="ToolBarLabelToggleButton" TargetType="ToggleButton">
-            <Setter Property="Background" Value="Transparent"/>
-            <Setter Property="BorderThickness" Value="0"/>
-            <Setter Property="Padding" Value="10,6"/>
-            <Setter Property="Margin" Value="2,0"/>
-            <Setter Property="Cursor" Value="Hand"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="ToggleButton">
-                        <Border x:Name="Bd" Background="{TemplateBinding Background}"
-                                CornerRadius="4" Padding="{TemplateBinding Padding}">
-                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="#EEF2F7"/>
-                            </Trigger>
-                            <Trigger Property="IsChecked" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="#DCE7F5"/>
-                            </Trigger>
-                            <Trigger Property="IsEnabled" Value="False">
-                                <Setter Property="Opacity" Value="0.4"/>
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-
-        <Style x:Key="ToolBarIcon" TargetType="TextBlock">
-            <Setter Property="FontSize" Value="20"/>
-            <Setter Property="HorizontalAlignment" Value="Center"/>
-            <Setter Property="Foreground" Value="#374151"/>
-        </Style>
-        <Style x:Key="ToolBarCaption" TargetType="TextBlock">
-            <Setter Property="FontSize" Value="11"/>
-            <Setter Property="HorizontalAlignment" Value="Center"/>
-            <Setter Property="Foreground" Value="#374151"/>
-            <Setter Property="Margin" Value="0,2,0,0"/>
-        </Style>
-
-        <Style x:Key="ToolboxItemButton" TargetType="Button">
-            <Setter Property="Background" Value="Transparent"/>
-            <Setter Property="BorderThickness" Value="0"/>
-            <Setter Property="HorizontalContentAlignment" Value="Left"/>
-            <Setter Property="Padding" Value="6,5"/>
-            <Setter Property="Margin" Value="0,1"/>
-            <Setter Property="Cursor" Value="Hand"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="4"
-                                Padding="{TemplateBinding Padding}">
-                            <ContentPresenter/>
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="#EEF2F7"/>
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-
-        <!-- リレーション線本体のスタイル: 選択時に青く太く -->
-        <Style x:Key="RelationLineStyle" TargetType="Line">
-            <Setter Property="Stroke" Value="{StaticResource LineBrush}"/>
-            <Setter Property="StrokeThickness" Value="1.6"/>
-            <Style.Triggers>
-                <DataTrigger Binding="{Binding IsSelected}" Value="True">
-                    <Setter Property="Stroke" Value="{StaticResource LineSelectedBrush}"/>
-                    <Setter Property="StrokeThickness" Value="2.5"/>
-                </DataTrigger>
-            </Style.Triggers>
-        </Style>
-
-        <!-- マーカー共通の色（選択時青に） -->
-        <Style x:Key="MarkerStrokeStyle" TargetType="Shape">
-            <Setter Property="Stroke" Value="{StaticResource LineBrush}"/>
-            <Setter Property="StrokeThickness" Value="1.6"/>
-            <Setter Property="Fill" Value="White"/>
-            <Style.Triggers>
-                <DataTrigger Binding="{Binding IsSelected}" Value="True">
-                    <Setter Property="Stroke" Value="{StaticResource LineSelectedBrush}"/>
-                </DataTrigger>
-            </Style.Triggers>
-        </Style>
-
-        <!-- リレーション端点マーカー (One: 縦棒, Many: 鳥の足) のテンプレート -->
-        <DataTemplate x:Key="EndpointMarkerTemplate">
-            <!-- DataContext = MarkerKind enum, RelativeSource で親 RelationshipViewModel を参照 -->
-            <Grid Width="20" Height="20" RenderTransformOrigin="0.5,0.5">
-                <!-- One: |─ (縦棒) -->
-                <Line X1="10" Y1="3" X2="10" Y2="17"
-                      Stroke="{StaticResource LineBrush}" StrokeThickness="1.8">
-                    <Line.Style>
-                        <Style TargetType="Line">
-                            <Setter Property="Visibility" Value="Collapsed"/>
-                            <Style.Triggers>
-                                <DataTrigger Binding="{Binding}" Value="One">
-                                    <Setter Property="Visibility" Value="Visible"/>
-                                </DataTrigger>
-                            </Style.Triggers>
-                        </Style>
-                    </Line.Style>
-                </Line>
-                <!-- Many: 鳥の足 (>) -->
-                <Path Stroke="{StaticResource LineBrush}" StrokeThickness="1.8"
-                      Data="M 4,10 L 16,3 M 4,10 L 16,10 M 4,10 L 16,17">
-                    <Path.Style>
-                        <Style TargetType="Path">
-                            <Setter Property="Visibility" Value="Collapsed"/>
-                            <Style.Triggers>
-                                <DataTrigger Binding="{Binding}" Value="Many">
-                                    <Setter Property="Visibility" Value="Visible"/>
-                                </DataTrigger>
-                            </Style.Triggers>
-                        </Style>
-                    </Path.Style>
-                </Path>
-            </Grid>
-        </DataTemplate>
-    </Window.Resources>
-
-    <DockPanel>
-        <!-- 上部: ツールバー -->
-        <Border DockPanel.Dock="Top" Background="{StaticResource PanelBg}"
-                BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,0,0,1">
-            <StackPanel Orientation="Horizontal" Margin="6,4">
-                <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding NewDiagramCommand}" ToolTip="新規 (Ctrl+N)">
-                    <StackPanel>
-                        <TextBlock Style="{StaticResource ToolBarIcon}" Text="🗒"/>
-                        <TextBlock Style="{StaticResource ToolBarCaption}" Text="新規"/>
-                    </StackPanel>
-                </Button>
-                <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding OpenCommand}" ToolTip="開く (Ctrl+O)">
-                    <StackPanel>
-                        <TextBlock Style="{StaticResource ToolBarIcon}" Text="📂"/>
-                        <TextBlock Style="{StaticResource ToolBarCaption}" Text="開く"/>
-                    </StackPanel>
-                </Button>
-                <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding SaveCommand}" ToolTip="保存 (Ctrl+S)">
-                    <StackPanel>
-                        <TextBlock Style="{StaticResource ToolBarIcon}" Text="💾"/>
-                        <TextBlock Style="{StaticResource ToolBarCaption}" Text="保存"/>
-                    </StackPanel>
-                </Button>
-                <Separator Margin="6,4"/>
-                <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding UndoCommand}"
-                        IsEnabled="{Binding UndoRedo.CanUndo}" ToolTip="元に戻す (Ctrl+Z)">
-                    <StackPanel>
-                        <TextBlock Style="{StaticResource ToolBarIcon}" Text="↶"/>
-                        <TextBlock Style="{StaticResource ToolBarCaption}" Text="元に戻す"/>
-                    </StackPanel>
-                </Button>
-                <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding RedoCommand}"
-                        IsEnabled="{Binding UndoRedo.CanRedo}" ToolTip="やり直す (Ctrl+Y)">
-                    <StackPanel>
-                        <TextBlock Style="{StaticResource ToolBarIcon}" Text="↷"/>
-                        <TextBlock Style="{StaticResource ToolBarCaption}" Text="やり直す"/>
-                    </StackPanel>
-                </Button>
-                <Separator Margin="6,4"/>
-                <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding DuplicateSelectedEntityCommand}" ToolTip="複製 (Ctrl+D)">
-                    <StackPanel>
-                        <TextBlock Style="{StaticResource ToolBarIcon}" Text="❏"/>
-                        <TextBlock Style="{StaticResource ToolBarCaption}" Text="複製"/>
-                    </StackPanel>
-                </Button>
-                <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding AutoLayoutGridCommand}" ToolTip="格子状に自動整列">
-                    <StackPanel>
-                        <TextBlock Style="{StaticResource ToolBarIcon}" Text="▦"/>
-                        <TextBlock Style="{StaticResource ToolBarCaption}" Text="整列(格子)"/>
-                    </StackPanel>
-                </Button>
-                <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding AutoLayoutTreeCommand}" ToolTip="ツリー状に自動整列">
-                    <StackPanel>
-                        <TextBlock Style="{StaticResource ToolBarIcon}" Text="⌬"/>
-                        <TextBlock Style="{StaticResource ToolBarCaption}" Text="整列(木)"/>
-                    </StackPanel>
-                </Button>
-                <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding AutoFitEntityWidthsCommand}" ToolTip="カラム名と型が重ならない幅に自動調整">
-                    <StackPanel>
-                        <TextBlock Style="{StaticResource ToolBarIcon}" Text="↔"/>
-                        <TextBlock Style="{StaticResource ToolBarCaption}" Text="幅自動"/>
-                    </StackPanel>
-                </Button>
-                <Separator Margin="6,4"/>
-                <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding ExportPngCommand}" CommandParameter="{Binding ElementName=DiagramCanvas}" ToolTip="PNG 画像にエクスポート">
-                    <StackPanel>
-                        <TextBlock Style="{StaticResource ToolBarIcon}" Text="🖼"/>
-                        <TextBlock Style="{StaticResource ToolBarCaption}" Text="PNG"/>
-                    </StackPanel>
-                </Button>
-                <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding ExportSvgCommand}" ToolTip="SVG にエクスポート">
-                    <StackPanel>
-                        <TextBlock Style="{StaticResource ToolBarIcon}" Text="✒"/>
-                        <TextBlock Style="{StaticResource ToolBarCaption}" Text="SVG"/>
-                    </StackPanel>
-                </Button>
-                <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding ExportDdlCommand}" ToolTip="SQL DDL にエクスポート">
-                    <StackPanel>
-                        <TextBlock Style="{StaticResource ToolBarIcon}" Text="🗎"/>
-                        <TextBlock Style="{StaticResource ToolBarCaption}" Text="DDL"/>
-                    </StackPanel>
-                </Button>
-                <Separator Margin="6,4"/>
-                <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding ImportFromSqlServerCommand}" ToolTip="SQL Server からスキーマを取り込み">
-                    <StackPanel>
-                        <TextBlock Style="{StaticResource ToolBarIcon}" Text="🛢"/>
-                        <TextBlock Style="{StaticResource ToolBarCaption}" Text="DB取込"/>
-                    </StackPanel>
-                </Button>
-                <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding SyncToSqlServerCommand}" ToolTip="現在のダイアグラムを既存 DB に書き戻し (差分 ALTER 実行)">
-                    <StackPanel>
-                        <TextBlock Style="{StaticResource ToolBarIcon}" Text="⇪"/>
-                        <TextBlock Style="{StaticResource ToolBarCaption}" Text="DB同期"/>
-                    </StackPanel>
-                </Button>
-                <ToggleButton Style="{StaticResource ToolBarLabelToggleButton}"
-                              IsChecked="{Binding ShowColumnDescriptionsInDiagram, Mode=TwoWay}"
-                              ToolTip="ER 図のカラム行に「説明」を表示">
-                    <StackPanel>
-                        <TextBlock Style="{StaticResource ToolBarIcon}" Text="💬"/>
-                        <TextBlock Style="{StaticResource ToolBarCaption}" Text="説明表示"/>
-                    </StackPanel>
-                </ToggleButton>
-                <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding GenerateFromAiCommand}" ToolTip="ChatGPT/Ollama でスキーマを自動生成">
-                    <StackPanel>
-                        <TextBlock Style="{StaticResource ToolBarIcon}" Text="🤖"/>
-                        <TextBlock Style="{StaticResource ToolBarCaption}" Text="AI生成"/>
-                    </StackPanel>
-                </Button>
-            </StackPanel>
-        </Border>
-
-        <!-- 下部: ステータスバー -->
-        <Border DockPanel.Dock="Bottom" Background="{StaticResource PanelBg}"
-                BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,1,0,0" Padding="10,4">
-            <DockPanel>
-                <TextBlock DockPanel.Dock="Left" Text="準備完了" Foreground="{StaticResource MutedText}"/>
-                <TextBlock DockPanel.Dock="Right" HorizontalAlignment="Right" Foreground="{StaticResource MutedText}">
-                    <Run Text="エンティティ:"/>
-                    <Run Text="{Binding Entities.Count, Mode=OneWay}"/>
-                    <Run Text="   リレーション:"/>
-                    <Run Text="{Binding Relationships.Count, Mode=OneWay}"/>
-                </TextBlock>
-            </DockPanel>
-        </Border>
-
-        <Grid>
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="200"/>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="5"/>
-                <ColumnDefinition Width="460" MinWidth="250"/>
-            </Grid.ColumnDefinitions>
-
-            <!-- GridSplitter: ER図とプロパティパネルの境界ドラッグ -->
-            <GridSplitter Grid.Column="2" Width="5" HorizontalAlignment="Stretch"
-                          Background="{StaticResource DividerBrush}" Cursor="SizeWE"/>
-
-            <!-- 左: ツールボックス -->
-            <Border Grid.Column="0" Background="{StaticResource SidebarBg}"
-                    BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,0,1,0">
-                <ScrollViewer VerticalScrollBarVisibility="Auto">
-                    <StackPanel Margin="10,8">
-                        <TextBlock Text="ツールボックス" FontWeight="Bold" Foreground="{StaticResource HeaderText}" Margin="0,0,0,8"/>
-
-                        <TextBlock Text="エンティティ" Foreground="{StaticResource MutedText}" Margin="0,4,0,2"/>
-                        <Button Style="{StaticResource ToolboxItemButton}" Command="{Binding AddEntityCommand}">
-                            <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="▭" FontSize="16" Margin="0,0,8,0"/>
-                                <TextBlock Text="エンティティを追加" VerticalAlignment="Center"/>
-                            </StackPanel>
-                        </Button>
-                        <Button Style="{StaticResource ToolboxItemButton}" Command="{Binding RemoveSelectedEntityCommand}">
-                            <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="🗑" FontSize="14" Margin="0,0,8,0"/>
-                                <TextBlock Text="エンティティ削除" VerticalAlignment="Center"/>
-                            </StackPanel>
-                        </Button>
-
-                        <TextBlock Text="リレーションシップ" Foreground="{StaticResource MutedText}" Margin="0,12,0,2"/>
-                        <Button Style="{StaticResource ToolboxItemButton}" Command="{Binding StartAddOneToOneCommand}">
-                            <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="│─│" Margin="0,0,8,0"/>
-                                <TextBlock Text="1対1" VerticalAlignment="Center"/>
-                            </StackPanel>
-                        </Button>
-                        <Button Style="{StaticResource ToolboxItemButton}" Command="{Binding StartAddOneToManyCommand}">
-                            <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="│─≪" Margin="0,0,8,0"/>
-                                <TextBlock Text="1対多" VerticalAlignment="Center"/>
-                            </StackPanel>
-                        </Button>
-                        <Button Style="{StaticResource ToolboxItemButton}" Command="{Binding StartAddManyToManyCommand}">
-                            <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="≫─≪" Margin="0,0,8,0"/>
-                                <TextBlock Text="多対多" VerticalAlignment="Center"/>
-                            </StackPanel>
-                        </Button>
-                        <Button Style="{StaticResource ToolboxItemButton}" Command="{Binding RemoveSelectedRelationshipCommand}">
-                            <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="🗑" FontSize="14" Margin="0,0,8,0"/>
-                                <TextBlock Text="リレーション削除" VerticalAlignment="Center"/>
-                            </StackPanel>
-                        </Button>
-
-                        <Border Margin="0,12,0,0" Padding="8" CornerRadius="4" Background="#FFF7E0"
-                                Visibility="{Binding IsRelationshipMode, Converter={StaticResource BoolToVisibilityConverter}}">
-                            <StackPanel>
-                                <TextBlock TextWrapping="Wrap" Foreground="#7A5F00" FontSize="11"
-                                           Text="リレーション作成中: 2つのエンティティを順番にクリックしてください。"/>
-                                <Button Margin="0,6,0,0" Content="キャンセル"
-                                        Command="{Binding CancelRelationshipModeCommand}"/>
-                            </StackPanel>
-                        </Border>
-                    </StackPanel>
-                </ScrollViewer>
+    <Style x:Key="ToolBarLabelButton" TargetType="Button">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="Padding" Value="10,6" />
+      <Setter Property="Margin" Value="2,0" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="4" Padding="{TemplateBinding Padding}">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
             </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="#EEF2F7" />
+              </Trigger>
+              <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Opacity" Value="0.4" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
 
-            <!-- 中央: キャンバス -->
-            <Border Grid.Column="1" Background="#F2F4F8">
-                <Border.Resources>
-                    <DrawingBrush x:Key="GridBrush" TileMode="Tile" Viewport="0,0,20,20" ViewportUnits="Absolute">
-                        <DrawingBrush.Drawing>
-                            <GeometryDrawing>
-                                <GeometryDrawing.Pen>
-                                    <Pen Brush="#E2E6EC" Thickness="1"/>
-                                </GeometryDrawing.Pen>
-                                <GeometryDrawing.Geometry>
-                                    <GeometryGroup>
-                                        <LineGeometry StartPoint="0,0" EndPoint="20,0"/>
-                                        <LineGeometry StartPoint="0,0" EndPoint="0,20"/>
-                                    </GeometryGroup>
-                                </GeometryDrawing.Geometry>
-                            </GeometryDrawing>
-                        </DrawingBrush.Drawing>
-                    </DrawingBrush>
-                </Border.Resources>
-
-                <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
-                    <Grid x:Name="DiagramCanvas" Width="{Binding CanvasWidth}" Height="{Binding CanvasHeight}" Background="{StaticResource GridBrush}">
-                        <Grid.InputBindings>
-                            <MouseBinding MouseAction="LeftClick" Command="{Binding CanvasClickCommand}"/>
-                        </Grid.InputBindings>
-
-                        <!-- リレーションレイヤ -->
-                        <ItemsControl ItemsSource="{Binding Relationships}">
-                            <ItemsControl.ItemsPanel>
-                                <ItemsPanelTemplate>
-                                    <Canvas IsItemsHost="True"/>
-                                </ItemsPanelTemplate>
-                            </ItemsControl.ItemsPanel>
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate DataType="{x:Type vm:RelationshipViewModel}">
-                                    <Canvas>
-                                        <!-- 線本体 (太いヒット領域 + 見た目) -->
-                                        <Line X1="{Binding X1}" Y1="{Binding Y1}"
-                                              X2="{Binding X2}" Y2="{Binding Y2}"
-                                              Stroke="Transparent" StrokeThickness="14"
-                                              Cursor="Hand">
-                                            <Line.InputBindings>
-                                                <MouseBinding MouseAction="LeftClick"
-                                                              Command="{Binding DataContext.RelationshipClickCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                              CommandParameter="{Binding}"/>
-                                            </Line.InputBindings>
-                                        </Line>
-                                        <Line X1="{Binding X1}" Y1="{Binding Y1}"
-                                              X2="{Binding X2}" Y2="{Binding Y2}"
-                                              Style="{StaticResource RelationLineStyle}"
-                                              IsHitTestVisible="False"/>
-
-                                        <!-- 起点マーカー -->
-                                        <ContentControl Canvas.Left="{Binding SourceMarkerLeft}"
-                                                        Canvas.Top="{Binding SourceMarkerTop}"
-                                                        Width="20" Height="20"
-                                                        Content="{Binding SourceMarker}"
-                                                        ContentTemplate="{StaticResource EndpointMarkerTemplate}"
-                                                        IsHitTestVisible="False">
-                                            <ContentControl.RenderTransform>
-                                                <RotateTransform Angle="{Binding SourceMarkerAngle}" CenterX="10" CenterY="10"/>
-                                            </ContentControl.RenderTransform>
-                                        </ContentControl>
-
-                                        <!-- 終点マーカー -->
-                                        <ContentControl Canvas.Left="{Binding TargetMarkerLeft}"
-                                                        Canvas.Top="{Binding TargetMarkerTop}"
-                                                        Width="20" Height="20"
-                                                        Content="{Binding TargetMarker}"
-                                                        ContentTemplate="{StaticResource EndpointMarkerTemplate}"
-                                                        IsHitTestVisible="False">
-                                            <ContentControl.RenderTransform>
-                                                <RotateTransform Angle="{Binding TargetMarkerAngle}" CenterX="10" CenterY="10"/>
-                                            </ContentControl.RenderTransform>
-                                        </ContentControl>
-
-                                        <!-- ラベル -->
-                                        <Border CornerRadius="3" Padding="4,1" Background="White"
-                                                BorderBrush="#9AA0A6" BorderThickness="1"
-                                                Canvas.Left="{Binding LabelX}" Canvas.Top="{Binding LabelY}"
-                                                Cursor="Hand">
-                                            <Border.RenderTransform>
-                                                <TranslateTransform X="-15" Y="-9"/>
-                                            </Border.RenderTransform>
-                                            <Border.InputBindings>
-                                                <MouseBinding MouseAction="LeftClick"
-                                                              Command="{Binding DataContext.RelationshipClickCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                              CommandParameter="{Binding}"/>
-                                            </Border.InputBindings>
-                                            <TextBlock Text="{Binding Label}" FontSize="10" Foreground="#374151"/>
-                                        </Border>
-                                    </Canvas>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-
-                        <!-- エンティティレイヤ -->
-                        <ItemsControl ItemsSource="{Binding Entities}">
-                            <ItemsControl.ItemsPanel>
-                                <ItemsPanelTemplate>
-                                    <Canvas IsItemsHost="True"/>
-                                </ItemsPanelTemplate>
-                            </ItemsControl.ItemsPanel>
-                            <ItemsControl.ItemContainerStyle>
-                                <Style TargetType="ContentPresenter">
-                                    <Setter Property="Canvas.Left" Value="{Binding X}"/>
-                                    <Setter Property="Canvas.Top" Value="{Binding Y}"/>
-                                </Style>
-                            </ItemsControl.ItemContainerStyle>
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate DataType="{x:Type vm:EntityViewModel}">
-                                    <Border Width="{Binding Width}" Background="White" CornerRadius="6"
-                                            beh:DragBehavior.IsEnabled="True"
-                                            beh:DragBehavior.UndoRedoManager="{Binding DataContext.UndoRedo, RelativeSource={RelativeSource AncestorType=Window}}">
-                                        <Border.Effect>
-                                            <DropShadowEffect Color="#88AABB" BlurRadius="6" ShadowDepth="1" Opacity="0.35"/>
-                                        </Border.Effect>
-                                        <Border.Style>
-                                            <Style TargetType="Border">
-                                                <Setter Property="BorderBrush" Value="{StaticResource EntityBorder}"/>
-                                                <Setter Property="BorderThickness" Value="1"/>
-                                                <Style.Triggers>
-                                                    <DataTrigger Binding="{Binding IsSelected}" Value="True">
-                                                        <Setter Property="BorderBrush" Value="{StaticResource EntityBorderSelected}"/>
-                                                        <Setter Property="BorderThickness" Value="2"/>
-                                                    </DataTrigger>
-                                                </Style.Triggers>
-                                            </Style>
-                                        </Border.Style>
-                                        <StackPanel>
-                                            <Border Background="{StaticResource EntityHeaderBlue}"
-                                                    CornerRadius="6,6,0,0" Padding="10,6">
-                                                <StackPanel>
-                                                    <TextBlock FontWeight="SemiBold" Foreground="#1F3A66"
-                                                               Text="{Binding TableName}"/>
-                                                    <TextBlock Text="{Binding Description}" Foreground="#6B7280"
-                                                               FontStyle="Italic" FontSize="11" TextWrapping="Wrap">
-                                                        <TextBlock.Style>
-                                                            <Style TargetType="TextBlock">
-                                                                <Setter Property="Visibility" Value="Collapsed"/>
-                                                                <Style.Triggers>
-                                                                    <MultiDataTrigger>
-                                                                        <MultiDataTrigger.Conditions>
-                                                                            <Condition Binding="{Binding DataContext.ShowColumnDescriptionsInDiagram, RelativeSource={RelativeSource AncestorType=Window}}" Value="True"/>
-                                                                        </MultiDataTrigger.Conditions>
-                                                                        <Setter Property="Visibility" Value="Visible"/>
-                                                                    </MultiDataTrigger>
-                                                                    <DataTrigger Binding="{Binding Description}" Value="">
-                                                                        <Setter Property="Visibility" Value="Collapsed"/>
-                                                                    </DataTrigger>
-                                                                    <DataTrigger Binding="{Binding Description}" Value="{x:Null}">
-                                                                        <Setter Property="Visibility" Value="Collapsed"/>
-                                                                    </DataTrigger>
-                                                                </Style.Triggers>
-                                                            </Style>
-                                                        </TextBlock.Style>
-                                                    </TextBlock>
-                                                </StackPanel>
-                                            </Border>
-                                            <ItemsControl ItemsSource="{Binding Columns}" Margin="6,4,6,6">
-                                                <ItemsControl.ItemTemplate>
-                                                    <DataTemplate>
-                                                        <StackPanel Margin="0,2">
-                                                            <Grid>
-                                                                <Grid.ColumnDefinitions>
-                                                                    <ColumnDefinition Width="34"/>
-                                                                    <ColumnDefinition Width="*"/>
-                                                                    <ColumnDefinition Width="Auto"/>
-                                                                </Grid.ColumnDefinitions>
-                                                                <TextBlock Grid.Column="0" FontWeight="Bold">
-                                                                    <TextBlock.Style>
-                                                                        <Style TargetType="TextBlock">
-                                                                            <Setter Property="Text" Value=""/>
-                                                                            <Setter Property="Foreground" Value="#374151"/>
-                                                                            <Style.Triggers>
-                                                                                <DataTrigger Binding="{Binding IsPrimaryKey}" Value="True">
-                                                                                    <Setter Property="Text" Value="PK"/>
-                                                                                    <Setter Property="Foreground" Value="#D93025"/>
-                                                                                </DataTrigger>
-                                                                                <DataTrigger Binding="{Binding IsForeignKey}" Value="True">
-                                                                                    <Setter Property="Text" Value="FK"/>
-                                                                                    <Setter Property="Foreground" Value="#1A73E8"/>
-                                                                                </DataTrigger>
-                                                                            </Style.Triggers>
-                                                                        </Style>
-                                                                    </TextBlock.Style>
-                                                                </TextBlock>
-                                                                <TextBlock Grid.Column="1" Text="{Binding Name}" Foreground="#1F2937"/>
-                                                                <TextBlock Grid.Column="2" Text="{Binding DataType}" Foreground="#6B7280"/>
-                                                            </Grid>
-                                                            <TextBlock Text="{Binding Description}"
-                                                                       Foreground="#6B7280" FontStyle="Italic" FontSize="11"
-                                                                       Margin="34,0,0,0" TextWrapping="Wrap">
-                                                                <TextBlock.Style>
-                                                                    <Style TargetType="TextBlock">
-                                                                        <Setter Property="Visibility" Value="Collapsed"/>
-                                                                        <Style.Triggers>
-                                                                            <MultiDataTrigger>
-                                                                                <MultiDataTrigger.Conditions>
-                                                                                    <Condition Binding="{Binding DataContext.ShowColumnDescriptionsInDiagram, RelativeSource={RelativeSource AncestorType=Window}}" Value="True"/>
-                                                                                </MultiDataTrigger.Conditions>
-                                                                                <Setter Property="Visibility" Value="Visible"/>
-                                                                            </MultiDataTrigger>
-                                                                            <DataTrigger Binding="{Binding Description}" Value="">
-                                                                                <Setter Property="Visibility" Value="Collapsed"/>
-                                                                            </DataTrigger>
-                                                                            <DataTrigger Binding="{Binding Description}" Value="{x:Null}">
-                                                                                <Setter Property="Visibility" Value="Collapsed"/>
-                                                                            </DataTrigger>
-                                                                        </Style.Triggers>
-                                                                    </Style>
-                                                                </TextBlock.Style>
-                                                            </TextBlock>
-                                                        </StackPanel>
-                                                    </DataTemplate>
-                                                </ItemsControl.ItemTemplate>
-                                            </ItemsControl>
-                                        </StackPanel>
-                                    </Border>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                    </Grid>
-                </ScrollViewer>
+    <Style x:Key="ToolBarLabelToggleButton" TargetType="ToggleButton">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="Padding" Value="10,6" />
+      <Setter Property="Margin" Value="2,0" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="ToggleButton">
+            <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="4" Padding="{TemplateBinding Padding}">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
             </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="#EEF2F7" />
+              </Trigger>
+              <Trigger Property="IsChecked" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="#DCE7F5" />
+              </Trigger>
+              <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Opacity" Value="0.4" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
 
-            <!-- 右: プロパティパネル -->
-            <Border Grid.Column="3" Background="{StaticResource SidebarBg}"
-                    BorderBrush="{StaticResource DividerBrush}" BorderThickness="1,0,0,0">
-                <DockPanel Margin="12,10">
-                    <TextBlock DockPanel.Dock="Top" Text="プロパティ" FontWeight="Bold"
-                               Foreground="{StaticResource HeaderText}" Margin="0,0,0,8"/>
+    <Style x:Key="ToolBarIcon" TargetType="TextBlock">
+      <Setter Property="FontSize" Value="20" />
+      <Setter Property="HorizontalAlignment" Value="Center" />
+      <Setter Property="Foreground" Value="#374151" />
+    </Style>
+    <Style x:Key="ToolBarCaption" TargetType="TextBlock">
+      <Setter Property="FontSize" Value="11" />
+      <Setter Property="HorizontalAlignment" Value="Center" />
+      <Setter Property="Foreground" Value="#374151" />
+      <Setter Property="Margin" Value="0,2,0,0" />
+    </Style>
 
-                    <!-- エンティティのプロパティ -->
-                    <DockPanel Visibility="{Binding SelectedEntity, Converter={StaticResource NullToVisibilityConverter}}">
-                        <TextBlock DockPanel.Dock="Top" Text="エンティティ" FontWeight="SemiBold" Margin="0,4,0,6" Foreground="{StaticResource HeaderText}"/>
+    <Style x:Key="ToolboxItemButton" TargetType="Button">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="HorizontalContentAlignment" Value="Left" />
+      <Setter Property="Padding" Value="6,5" />
+      <Setter Property="Margin" Value="0,1" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="4" Padding="{TemplateBinding Padding}">
+              <ContentPresenter />
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="#EEF2F7" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
 
-                        <Grid DockPanel.Dock="Top" Margin="0,2">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="80"/>
-                                <ColumnDefinition Width="*"/>
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Text="テーブル名" VerticalAlignment="Center"/>
-                            <TextBox Grid.Column="1" Text="{Binding SelectedEntity.TableName, UpdateSourceTrigger=PropertyChanged}"/>
-                        </Grid>
-                        <Grid DockPanel.Dock="Top" Margin="0,4">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="80"/>
-                                <ColumnDefinition Width="*"/>
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Text="説明" VerticalAlignment="Center"/>
-                            <TextBox Grid.Column="1"
-                                     Text="{Binding SelectedEntity.Description, UpdateSourceTrigger=PropertyChanged}"
-                                     ToolTip="SQL Server の MS_Description と同期します"/>
-                        </Grid>
+    <!-- リレーション線本体のスタイル: 選択時に青く太く -->
+    <Style x:Key="RelationLineStyle" TargetType="Line">
+      <Setter Property="Stroke" Value="{StaticResource LineBrush}" />
+      <Setter Property="StrokeThickness" Value="1.6" />
+      <Style.Triggers>
+        <DataTrigger Binding="{Binding IsSelected}" Value="True">
+          <Setter Property="Stroke" Value="{StaticResource LineSelectedBrush}" />
+          <Setter Property="StrokeThickness" Value="2.5" />
+        </DataTrigger>
+      </Style.Triggers>
+    </Style>
 
-                        <DockPanel DockPanel.Dock="Top" Margin="0,12,0,4">
-                            <TextBlock Text="項目" FontWeight="SemiBold" Foreground="{StaticResource HeaderText}"/>
-                            <Button Content="+" Width="22" Height="22" DockPanel.Dock="Right" HorizontalAlignment="Right"
-                                    ToolTip="カラムを追加"
-                                    Command="{Binding AddColumnCommand}"/>
-                        </DockPanel>
+    <!-- マーカー共通の色（選択時青に） -->
+    <Style x:Key="MarkerStrokeStyle" TargetType="Shape">
+      <Setter Property="Stroke" Value="{StaticResource LineBrush}" />
+      <Setter Property="StrokeThickness" Value="1.6" />
+      <Setter Property="Fill" Value="White" />
+      <Style.Triggers>
+        <DataTrigger Binding="{Binding IsSelected}" Value="True">
+          <Setter Property="Stroke" Value="{StaticResource LineSelectedBrush}" />
+        </DataTrigger>
+      </Style.Triggers>
+    </Style>
 
-                        <!-- メモ (下部に固定) -->
-                        <StackPanel DockPanel.Dock="Bottom">
-                            <TextBlock Text="メモ" FontWeight="SemiBold" Margin="0,8,0,4" Foreground="{StaticResource HeaderText}"/>
-                            <TextBox Text="{Binding SelectedEntity.Memo, UpdateSourceTrigger=PropertyChanged}"
-                                     AcceptsReturn="True" TextWrapping="Wrap" Height="70"
-                                     VerticalScrollBarVisibility="Auto"/>
+    <!-- リレーション端点マーカー (One: 縦棒, Many: 鳥の足) のテンプレート -->
+    <DataTemplate x:Key="EndpointMarkerTemplate">
+      <!-- DataContext = MarkerKind enum, RelativeSource で親 RelationshipViewModel を参照 -->
+      <Grid Width="20" Height="20" RenderTransformOrigin="0.5,0.5">
+        <!-- One: |─ (縦棒) -->
+        <Line X1="10" Y1="3" X2="10" Y2="17" Stroke="{StaticResource LineBrush}" StrokeThickness="1.8">
+          <Line.Style>
+            <Style TargetType="Line">
+              <Setter Property="Visibility" Value="Collapsed" />
+              <Style.Triggers>
+                <DataTrigger Binding="{Binding}" Value="One">
+                  <Setter Property="Visibility" Value="Visible" />
+                </DataTrigger>
+              </Style.Triggers>
+            </Style>
+          </Line.Style>
+        </Line>
+        <!-- Many: 鳥の足 (>) -->
+        <Path Stroke="{StaticResource LineBrush}" StrokeThickness="1.8" Data="M 4,10 L 16,3 M 4,10 L 16,10 M 4,10 L 16,17">
+          <Path.Style>
+            <Style TargetType="Path">
+              <Setter Property="Visibility" Value="Collapsed" />
+              <Style.Triggers>
+                <DataTrigger Binding="{Binding}" Value="Many">
+                  <Setter Property="Visibility" Value="Visible" />
+                </DataTrigger>
+              </Style.Triggers>
+            </Style>
+          </Path.Style>
+        </Path>
+      </Grid>
+    </DataTemplate>
+  </Window.Resources>
+
+  <DockPanel>
+    <!-- 上部: ツールバー -->
+    <Border DockPanel.Dock="Top" Background="{StaticResource PanelBg}" BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,0,0,1">
+      <StackPanel Orientation="Horizontal" Margin="6,4">
+        <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding NewDiagramCommand}" ToolTip="新規 (Ctrl+N)">
+          <StackPanel>
+            <TextBlock Style="{StaticResource ToolBarIcon}" Text="🗒" />
+            <TextBlock Style="{StaticResource ToolBarCaption}" Text="新規" />
+          </StackPanel>
+        </Button>
+        <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding OpenCommand}" ToolTip="開く (Ctrl+O)">
+          <StackPanel>
+            <TextBlock Style="{StaticResource ToolBarIcon}" Text="📂" />
+            <TextBlock Style="{StaticResource ToolBarCaption}" Text="開く" />
+          </StackPanel>
+        </Button>
+        <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding SaveCommand}" ToolTip="保存 (Ctrl+S)">
+          <StackPanel>
+            <TextBlock Style="{StaticResource ToolBarIcon}" Text="💾" />
+            <TextBlock Style="{StaticResource ToolBarCaption}" Text="保存" />
+          </StackPanel>
+        </Button>
+        <Separator Margin="6,4" />
+        <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding UndoCommand}" IsEnabled="{Binding UndoRedo.CanUndo}" ToolTip="元に戻す (Ctrl+Z)">
+          <StackPanel>
+            <TextBlock Style="{StaticResource ToolBarIcon}" Text="↶" />
+            <TextBlock Style="{StaticResource ToolBarCaption}" Text="元に戻す" />
+          </StackPanel>
+        </Button>
+        <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding RedoCommand}" IsEnabled="{Binding UndoRedo.CanRedo}" ToolTip="やり直す (Ctrl+Y)">
+          <StackPanel>
+            <TextBlock Style="{StaticResource ToolBarIcon}" Text="↷" />
+            <TextBlock Style="{StaticResource ToolBarCaption}" Text="やり直す" />
+          </StackPanel>
+        </Button>
+        <Separator Margin="6,4" />
+        <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding DuplicateSelectedEntityCommand}" ToolTip="複製 (Ctrl+D)">
+          <StackPanel>
+            <TextBlock Style="{StaticResource ToolBarIcon}" Text="❏" />
+            <TextBlock Style="{StaticResource ToolBarCaption}" Text="複製" />
+          </StackPanel>
+        </Button>
+        <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding AutoLayoutGridCommand}" ToolTip="格子状に自動整列">
+          <StackPanel>
+            <TextBlock Style="{StaticResource ToolBarIcon}" Text="▦" />
+            <TextBlock Style="{StaticResource ToolBarCaption}" Text="整列(格子)" />
+          </StackPanel>
+        </Button>
+        <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding AutoLayoutTreeCommand}" ToolTip="ツリー状に自動整列">
+          <StackPanel>
+            <TextBlock Style="{StaticResource ToolBarIcon}" Text="⌬" />
+            <TextBlock Style="{StaticResource ToolBarCaption}" Text="整列(木)" />
+          </StackPanel>
+        </Button>
+        <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding AutoFitEntityWidthsCommand}" ToolTip="カラム名と型が重ならない幅に自動調整">
+          <StackPanel>
+            <TextBlock Style="{StaticResource ToolBarIcon}" Text="↔" />
+            <TextBlock Style="{StaticResource ToolBarCaption}" Text="幅自動" />
+          </StackPanel>
+        </Button>
+        <Separator Margin="6,4" />
+        <Button
+          Style="{StaticResource ToolBarLabelButton}"
+          Command="{Binding ExportPngCommand}"
+          CommandParameter="{Binding ElementName=DiagramCanvas}"
+          ToolTip="PNG 画像にエクスポート"
+        >
+          <StackPanel>
+            <TextBlock Style="{StaticResource ToolBarIcon}" Text="🖼" />
+            <TextBlock Style="{StaticResource ToolBarCaption}" Text="PNG" />
+          </StackPanel>
+        </Button>
+        <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding ExportSvgCommand}" ToolTip="SVG にエクスポート">
+          <StackPanel>
+            <TextBlock Style="{StaticResource ToolBarIcon}" Text="✒" />
+            <TextBlock Style="{StaticResource ToolBarCaption}" Text="SVG" />
+          </StackPanel>
+        </Button>
+        <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding ExportDdlCommand}" ToolTip="SQL DDL にエクスポート">
+          <StackPanel>
+            <TextBlock Style="{StaticResource ToolBarIcon}" Text="🗎" />
+            <TextBlock Style="{StaticResource ToolBarCaption}" Text="DDL" />
+          </StackPanel>
+        </Button>
+        <Separator Margin="6,4" />
+        <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding ImportFromSqlServerCommand}" ToolTip="SQL Server からスキーマを取り込み">
+          <StackPanel>
+            <TextBlock Style="{StaticResource ToolBarIcon}" Text="🛢" />
+            <TextBlock Style="{StaticResource ToolBarCaption}" Text="DB取込" />
+          </StackPanel>
+        </Button>
+        <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding SyncToSqlServerCommand}" ToolTip="現在のダイアグラムを既存 DB に書き戻し (差分 ALTER 実行)">
+          <StackPanel>
+            <TextBlock Style="{StaticResource ToolBarIcon}" Text="⇪" />
+            <TextBlock Style="{StaticResource ToolBarCaption}" Text="DB同期" />
+          </StackPanel>
+        </Button>
+        <ToggleButton
+          Style="{StaticResource ToolBarLabelToggleButton}"
+          IsChecked="{Binding ShowColumnDescriptionsInDiagram, Mode=TwoWay}"
+          ToolTip="ER 図のカラム行に「説明」を表示"
+        >
+          <StackPanel>
+            <TextBlock Style="{StaticResource ToolBarIcon}" Text="💬" />
+            <TextBlock Style="{StaticResource ToolBarCaption}" Text="説明表示" />
+          </StackPanel>
+        </ToggleButton>
+        <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding GenerateFromAiCommand}" ToolTip="ChatGPT/Ollama でスキーマを自動生成">
+          <StackPanel>
+            <TextBlock Style="{StaticResource ToolBarIcon}" Text="🤖" />
+            <TextBlock Style="{StaticResource ToolBarCaption}" Text="AI生成" />
+          </StackPanel>
+        </Button>
+      </StackPanel>
+    </Border>
+
+    <!-- 下部: ステータスバー -->
+    <Border DockPanel.Dock="Bottom" Background="{StaticResource PanelBg}" BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,1,0,0" Padding="10,4">
+      <DockPanel>
+        <TextBlock DockPanel.Dock="Left" Text="準備完了" Foreground="{StaticResource MutedText}" />
+        <TextBlock DockPanel.Dock="Right" HorizontalAlignment="Right" Foreground="{StaticResource MutedText}">
+          <Run Text="エンティティ:" />
+          <Run Text="{Binding Entities.Count, Mode=OneWay}" />
+          <Run Text="   リレーション:" />
+          <Run Text="{Binding Relationships.Count, Mode=OneWay}" />
+        </TextBlock>
+      </DockPanel>
+    </Border>
+
+    <Grid>
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="200" />
+        <ColumnDefinition Width="*" />
+        <ColumnDefinition Width="5" />
+        <ColumnDefinition Width="460" MinWidth="250" />
+      </Grid.ColumnDefinitions>
+
+      <!-- GridSplitter: ER図とプロパティパネルの境界ドラッグ -->
+      <GridSplitter Grid.Column="2" Width="5" HorizontalAlignment="Stretch" Background="{StaticResource DividerBrush}" Cursor="SizeWE" />
+
+      <!-- 左: ツールボックス -->
+      <Border Grid.Column="0" Background="{StaticResource SidebarBg}" BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,0,1,0">
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
+          <StackPanel Margin="10,8">
+            <TextBlock Text="ツールボックス" FontWeight="Bold" Foreground="{StaticResource HeaderText}" Margin="0,0,0,8" />
+
+            <TextBlock Text="エンティティ" Foreground="{StaticResource MutedText}" Margin="0,4,0,2" />
+            <Button Style="{StaticResource ToolboxItemButton}" Command="{Binding AddEntityCommand}">
+              <StackPanel Orientation="Horizontal">
+                <TextBlock Text="▭" FontSize="16" Margin="0,0,8,0" />
+                <TextBlock Text="エンティティを追加" VerticalAlignment="Center" />
+              </StackPanel>
+            </Button>
+            <Button Style="{StaticResource ToolboxItemButton}" Command="{Binding RemoveSelectedEntityCommand}">
+              <StackPanel Orientation="Horizontal">
+                <TextBlock Text="🗑" FontSize="14" Margin="0,0,8,0" />
+                <TextBlock Text="エンティティ削除" VerticalAlignment="Center" />
+              </StackPanel>
+            </Button>
+
+            <TextBlock Text="リレーションシップ" Foreground="{StaticResource MutedText}" Margin="0,12,0,2" />
+            <Button Style="{StaticResource ToolboxItemButton}" Command="{Binding StartAddOneToOneCommand}">
+              <StackPanel Orientation="Horizontal">
+                <TextBlock Text="│─│" Margin="0,0,8,0" />
+                <TextBlock Text="1対1" VerticalAlignment="Center" />
+              </StackPanel>
+            </Button>
+            <Button Style="{StaticResource ToolboxItemButton}" Command="{Binding StartAddOneToManyCommand}">
+              <StackPanel Orientation="Horizontal">
+                <TextBlock Text="│─≪" Margin="0,0,8,0" />
+                <TextBlock Text="1対多" VerticalAlignment="Center" />
+              </StackPanel>
+            </Button>
+            <Button Style="{StaticResource ToolboxItemButton}" Command="{Binding StartAddManyToManyCommand}">
+              <StackPanel Orientation="Horizontal">
+                <TextBlock Text="≫─≪" Margin="0,0,8,0" />
+                <TextBlock Text="多対多" VerticalAlignment="Center" />
+              </StackPanel>
+            </Button>
+            <Button Style="{StaticResource ToolboxItemButton}" Command="{Binding RemoveSelectedRelationshipCommand}">
+              <StackPanel Orientation="Horizontal">
+                <TextBlock Text="🗑" FontSize="14" Margin="0,0,8,0" />
+                <TextBlock Text="リレーション削除" VerticalAlignment="Center" />
+              </StackPanel>
+            </Button>
+
+            <Border
+              Margin="0,12,0,0"
+              Padding="8"
+              CornerRadius="4"
+              Background="#FFF7E0"
+              Visibility="{Binding IsRelationshipMode, Converter={StaticResource BoolToVisibilityConverter}}"
+            >
+              <StackPanel>
+                <TextBlock TextWrapping="Wrap" Foreground="#7A5F00" FontSize="11" Text="リレーション作成中: 2つのエンティティを順番にクリックしてください。" />
+                <Button Margin="0,6,0,0" Content="キャンセル" Command="{Binding CancelRelationshipModeCommand}" />
+              </StackPanel>
+            </Border>
+          </StackPanel>
+        </ScrollViewer>
+      </Border>
+
+      <!-- 中央: キャンバス -->
+      <Border Grid.Column="1" Background="#F2F4F8">
+        <Border.Resources>
+          <DrawingBrush x:Key="GridBrush" TileMode="Tile" Viewport="0,0,20,20" ViewportUnits="Absolute">
+            <DrawingBrush.Drawing>
+              <GeometryDrawing>
+                <GeometryDrawing.Pen>
+                  <Pen Brush="#E2E6EC" Thickness="1" />
+                </GeometryDrawing.Pen>
+                <GeometryDrawing.Geometry>
+                  <GeometryGroup>
+                    <LineGeometry StartPoint="0,0" EndPoint="20,0" />
+                    <LineGeometry StartPoint="0,0" EndPoint="0,20" />
+                  </GeometryGroup>
+                </GeometryDrawing.Geometry>
+              </GeometryDrawing>
+            </DrawingBrush.Drawing>
+          </DrawingBrush>
+        </Border.Resources>
+
+        <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+          <Grid x:Name="DiagramCanvas" Width="{Binding CanvasWidth}" Height="{Binding CanvasHeight}" Background="{StaticResource GridBrush}">
+            <Grid.InputBindings>
+              <MouseBinding MouseAction="LeftClick" Command="{Binding CanvasClickCommand}" />
+            </Grid.InputBindings>
+
+            <!-- リレーションレイヤ -->
+            <ItemsControl ItemsSource="{Binding Relationships}">
+              <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate>
+                  <Canvas IsItemsHost="True" />
+                </ItemsPanelTemplate>
+              </ItemsControl.ItemsPanel>
+              <ItemsControl.ItemTemplate>
+                <DataTemplate DataType="{x:Type vm:RelationshipViewModel}">
+                  <Canvas>
+                    <!-- 線本体 (太いヒット領域 + 見た目) -->
+                    <Line X1="{Binding X1}" Y1="{Binding Y1}" X2="{Binding X2}" Y2="{Binding Y2}" Stroke="Transparent" StrokeThickness="14" Cursor="Hand">
+                      <Line.InputBindings>
+                        <MouseBinding
+                          MouseAction="LeftClick"
+                          Command="{Binding DataContext.RelationshipClickCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                          CommandParameter="{Binding}"
+                        />
+                      </Line.InputBindings>
+                    </Line>
+                    <Line X1="{Binding X1}" Y1="{Binding Y1}" X2="{Binding X2}" Y2="{Binding Y2}" Style="{StaticResource RelationLineStyle}" IsHitTestVisible="False" />
+
+                    <!-- 起点マーカー -->
+                    <ContentControl
+                      Canvas.Left="{Binding SourceMarkerLeft}"
+                      Canvas.Top="{Binding SourceMarkerTop}"
+                      Width="20"
+                      Height="20"
+                      Content="{Binding SourceMarker}"
+                      ContentTemplate="{StaticResource EndpointMarkerTemplate}"
+                      IsHitTestVisible="False"
+                    >
+                      <ContentControl.RenderTransform>
+                        <RotateTransform Angle="{Binding SourceMarkerAngle}" CenterX="10" CenterY="10" />
+                      </ContentControl.RenderTransform>
+                    </ContentControl>
+
+                    <!-- 終点マーカー -->
+                    <ContentControl
+                      Canvas.Left="{Binding TargetMarkerLeft}"
+                      Canvas.Top="{Binding TargetMarkerTop}"
+                      Width="20"
+                      Height="20"
+                      Content="{Binding TargetMarker}"
+                      ContentTemplate="{StaticResource EndpointMarkerTemplate}"
+                      IsHitTestVisible="False"
+                    >
+                      <ContentControl.RenderTransform>
+                        <RotateTransform Angle="{Binding TargetMarkerAngle}" CenterX="10" CenterY="10" />
+                      </ContentControl.RenderTransform>
+                    </ContentControl>
+
+                    <!-- ラベル -->
+                    <Border
+                      CornerRadius="3"
+                      Padding="4,1"
+                      Background="White"
+                      BorderBrush="#9AA0A6"
+                      BorderThickness="1"
+                      Canvas.Left="{Binding LabelX}"
+                      Canvas.Top="{Binding LabelY}"
+                      Cursor="Hand"
+                    >
+                      <Border.RenderTransform>
+                        <TranslateTransform X="-15" Y="-9" />
+                      </Border.RenderTransform>
+                      <Border.InputBindings>
+                        <MouseBinding
+                          MouseAction="LeftClick"
+                          Command="{Binding DataContext.RelationshipClickCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                          CommandParameter="{Binding}"
+                        />
+                      </Border.InputBindings>
+                      <TextBlock Text="{Binding Label}" FontSize="10" Foreground="#374151" />
+                    </Border>
+                  </Canvas>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+            <!-- エンティティレイヤ -->
+            <ItemsControl ItemsSource="{Binding Entities}">
+              <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate>
+                  <Canvas IsItemsHost="True" />
+                </ItemsPanelTemplate>
+              </ItemsControl.ItemsPanel>
+              <ItemsControl.ItemContainerStyle>
+                <Style TargetType="ContentPresenter">
+                  <Setter Property="Canvas.Left" Value="{Binding X}" />
+                  <Setter Property="Canvas.Top" Value="{Binding Y}" />
+                </Style>
+              </ItemsControl.ItemContainerStyle>
+              <ItemsControl.ItemTemplate>
+                <DataTemplate DataType="{x:Type vm:EntityViewModel}">
+                  <Border
+                    Width="{Binding Width}"
+                    Background="White"
+                    CornerRadius="6"
+                    beh:DragBehavior.IsEnabled="True"
+                    beh:DragBehavior.UndoRedoManager="{Binding DataContext.UndoRedo, RelativeSource={RelativeSource AncestorType=Window}}"
+                  >
+                    <Border.Effect>
+                      <DropShadowEffect Color="#88AABB" BlurRadius="6" ShadowDepth="1" Opacity="0.35" />
+                    </Border.Effect>
+                    <Border.Style>
+                      <Style TargetType="Border">
+                        <Setter Property="BorderBrush" Value="{StaticResource EntityBorder}" />
+                        <Setter Property="BorderThickness" Value="1" />
+                        <Style.Triggers>
+                          <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                            <Setter Property="BorderBrush" Value="{StaticResource EntityBorderSelected}" />
+                            <Setter Property="BorderThickness" Value="2" />
+                          </DataTrigger>
+                        </Style.Triggers>
+                      </Style>
+                    </Border.Style>
+                    <StackPanel>
+                      <Border Background="{StaticResource EntityHeaderBlue}" CornerRadius="6,6,0,0" Padding="10,6">
+                        <StackPanel>
+                          <TextBlock FontWeight="SemiBold" Foreground="#1F3A66" Text="{Binding TableName}" />
+                          <TextBlock Text="{Binding Description}" Foreground="#6B7280" FontStyle="Italic" FontSize="11" TextWrapping="Wrap">
+                            <TextBlock.Style>
+                              <Style TargetType="TextBlock">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers>
+                                  <MultiDataTrigger>
+                                    <MultiDataTrigger.Conditions>
+                                      <Condition
+                                        Binding="{Binding DataContext.ShowColumnDescriptionsInDiagram, RelativeSource={RelativeSource AncestorType=Window}}"
+                                        Value="True"
+                                      />
+                                    </MultiDataTrigger.Conditions>
+                                    <Setter Property="Visibility" Value="Visible" />
+                                  </MultiDataTrigger>
+                                  <DataTrigger Binding="{Binding Description}" Value="">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                  </DataTrigger>
+                                  <DataTrigger Binding="{Binding Description}" Value="{x:Null}">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                  </DataTrigger>
+                                </Style.Triggers>
+                              </Style>
+                            </TextBlock.Style>
+                          </TextBlock>
                         </StackPanel>
-
-                        <!-- DataGrid: 残りスペースを占有 -->
-                        <DataGrid ItemsSource="{Binding SelectedEntity.Columns}"
-                                  x:Name="ColumnsDataGrid"
-                                  SelectedItem="{Binding SelectedColumn, Mode=TwoWay}"
-                                  AutoGenerateColumns="False"
-                                  CanUserReorderColumns="False"
-                                  CanUserSortColumns="False"
-                                  CanUserResizeRows="False"
-                                  CanUserAddRows="False"
-                                  HeadersVisibility="All"
-                                  RowHeaderWidth="20"
-                                  beh:DataGridRowReorderBehavior.IsEnabled="True"
-                                  GridLinesVisibility="Horizontal"
-                                  HorizontalGridLinesBrush="#EEF1F5"
-                                  Background="White" BorderBrush="{StaticResource DividerBrush}">
-                            <DataGrid.Columns>
-                                <DataGridCheckBoxColumn Header="PK" Binding="{Binding IsPrimaryKey, UpdateSourceTrigger=PropertyChanged}" Width="36"/>
-                                <DataGridCheckBoxColumn Header="FK" Binding="{Binding IsForeignKey, UpdateSourceTrigger=PropertyChanged}" Width="36"/>
-                                <DataGridTextColumn Header="カラム名" Binding="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Width="*"/>
-                                <DataGridTemplateColumn Header="型" Width="100">
-                                    <DataGridTemplateColumn.CellTemplate>
-                                        <DataTemplate>
-                                            <TextBlock Text="{Binding DataType}" VerticalAlignment="Center" Margin="4,0"/>
-                                        </DataTemplate>
-                                    </DataGridTemplateColumn.CellTemplate>
-                                    <DataGridTemplateColumn.CellEditingTemplate>
-                                        <DataTemplate>
-                                            <ComboBox IsEditable="True"
-                                                      ItemsSource="{Binding DataContext.SqlDataTypes, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                      Text="{Binding DataType, UpdateSourceTrigger=LostFocus}"/>
-                                        </DataTemplate>
-                                    </DataGridTemplateColumn.CellEditingTemplate>
-                                </DataGridTemplateColumn>
-                                <DataGridTextColumn Header="説明" Width="*"
-                                                    Binding="{Binding Description, UpdateSourceTrigger=PropertyChanged}"/>
-                                <DataGridTemplateColumn Header="" Width="32">
-                                    <DataGridTemplateColumn.CellTemplate>
-                                        <DataTemplate>
-                                            <Button Content="✕" Width="22" Height="20"
-                                                    ToolTip="このカラムを削除"
-                                                    Command="{Binding DataContext.RemoveColumnCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                    CommandParameter="{Binding}"/>
-                                        </DataTemplate>
-                                    </DataGridTemplateColumn.CellTemplate>
-                                </DataGridTemplateColumn>
-                            </DataGrid.Columns>
-                        </DataGrid>
-                    </DockPanel>
-
-                    <!-- リレーションのプロパティ -->
-                    <StackPanel Visibility="{Binding SelectedRelationship, Converter={StaticResource NullToVisibilityConverter}}">
-                        <TextBlock Text="リレーション" FontWeight="SemiBold" Margin="0,4,0,6" Foreground="{StaticResource HeaderText}"/>
-                        <Grid Margin="0,2" DataContext="{Binding SelectedRelationship}">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="80"/>
-                                <ColumnDefinition Width="*"/>
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Text="種別" VerticalAlignment="Center"/>
-                            <ComboBox Grid.Column="1" SelectedItem="{Binding Type, Mode=TwoWay}">
-                                <models:RelationshipType>OneToOne</models:RelationshipType>
-                                <models:RelationshipType>OneToMany</models:RelationshipType>
-                                <models:RelationshipType>ManyToMany</models:RelationshipType>
-                            </ComboBox>
-                        </Grid>
-                        <Grid Margin="0,8" DataContext="{Binding SelectedRelationship}">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="80"/>
-                                <ColumnDefinition Width="*"/>
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Text="起点" VerticalAlignment="Center"/>
-                            <TextBlock Grid.Column="1" Text="{Binding Source.TableName}" Foreground="{StaticResource MutedText}"/>
-                        </Grid>
-                        <Grid Margin="0,2" DataContext="{Binding SelectedRelationship}">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="80"/>
-                                <ColumnDefinition Width="*"/>
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Text="終点" VerticalAlignment="Center"/>
-                            <TextBlock Grid.Column="1" Text="{Binding Target.TableName}" Foreground="{StaticResource MutedText}"/>
-                        </Grid>
-                        <Button Margin="0,12,0,0" Content="リレーションを削除"
-                                Command="{Binding RemoveSelectedRelationshipCommand}"/>
+                      </Border>
+                      <ItemsControl ItemsSource="{Binding Columns}" Margin="6,4,6,6">
+                        <ItemsControl.ItemTemplate>
+                          <DataTemplate>
+                            <StackPanel Margin="0,2">
+                              <Grid>
+                                <Grid.ColumnDefinitions>
+                                  <ColumnDefinition Width="34" />
+                                  <ColumnDefinition Width="*" />
+                                  <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" FontWeight="Bold">
+                                  <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                      <Setter Property="Text" Value="" />
+                                      <Setter Property="Foreground" Value="#374151" />
+                                      <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsPrimaryKey}" Value="True">
+                                          <Setter Property="Text" Value="PK" />
+                                          <Setter Property="Foreground" Value="#D93025" />
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding IsForeignKey}" Value="True">
+                                          <Setter Property="Text" Value="FK" />
+                                          <Setter Property="Foreground" Value="#1A73E8" />
+                                        </DataTrigger>
+                                      </Style.Triggers>
+                                    </Style>
+                                  </TextBlock.Style>
+                                </TextBlock>
+                                <TextBlock Grid.Column="1" Text="{Binding Name}" Foreground="#1F2937" />
+                                <TextBlock Grid.Column="2" Text="{Binding DataType}" Foreground="#6B7280" />
+                              </Grid>
+                              <TextBlock Text="{Binding Description}" Foreground="#6B7280" FontStyle="Italic" FontSize="11" Margin="34,0,0,0" TextWrapping="Wrap">
+                                <TextBlock.Style>
+                                  <Style TargetType="TextBlock">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                    <Style.Triggers>
+                                      <MultiDataTrigger>
+                                        <MultiDataTrigger.Conditions>
+                                          <Condition
+                                            Binding="{Binding DataContext.ShowColumnDescriptionsInDiagram, RelativeSource={RelativeSource AncestorType=Window}}"
+                                            Value="True"
+                                          />
+                                        </MultiDataTrigger.Conditions>
+                                        <Setter Property="Visibility" Value="Visible" />
+                                      </MultiDataTrigger>
+                                      <DataTrigger Binding="{Binding Description}" Value="">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                      </DataTrigger>
+                                      <DataTrigger Binding="{Binding Description}" Value="{x:Null}">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                      </DataTrigger>
+                                    </Style.Triggers>
+                                  </Style>
+                                </TextBlock.Style>
+                              </TextBlock>
+                            </StackPanel>
+                          </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                      </ItemsControl>
                     </StackPanel>
-                </DockPanel>
-            </Border>
-        </Grid>
-    </DockPanel>
+                  </Border>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </Grid>
+        </ScrollViewer>
+      </Border>
+
+      <!-- 右: プロパティパネル -->
+      <Border Grid.Column="3" Background="{StaticResource SidebarBg}" BorderBrush="{StaticResource DividerBrush}" BorderThickness="1,0,0,0">
+        <DockPanel Margin="12,10">
+          <TextBlock DockPanel.Dock="Top" Text="プロパティ" FontWeight="Bold" Foreground="{StaticResource HeaderText}" Margin="0,0,0,8" />
+
+          <!-- エンティティのプロパティ -->
+          <DockPanel Visibility="{Binding SelectedEntity, Converter={StaticResource NullToVisibilityConverter}}">
+            <TextBlock DockPanel.Dock="Top" Text="エンティティ" FontWeight="SemiBold" Margin="0,4,0,6" Foreground="{StaticResource HeaderText}" />
+
+            <Grid DockPanel.Dock="Top" Margin="0,2">
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="80" />
+                <ColumnDefinition Width="*" />
+              </Grid.ColumnDefinitions>
+              <TextBlock Text="テーブル名" VerticalAlignment="Center" />
+              <TextBox Grid.Column="1" Text="{Binding SelectedEntity.TableName, UpdateSourceTrigger=PropertyChanged}" />
+            </Grid>
+            <Grid DockPanel.Dock="Top" Margin="0,4">
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="80" />
+                <ColumnDefinition Width="*" />
+              </Grid.ColumnDefinitions>
+              <TextBlock Text="説明" VerticalAlignment="Center" />
+              <TextBox Grid.Column="1" Text="{Binding SelectedEntity.Description, UpdateSourceTrigger=PropertyChanged}" ToolTip="SQL Server の MS_Description と同期します" />
+            </Grid>
+
+            <DockPanel DockPanel.Dock="Top" Margin="0,12,0,4">
+              <TextBlock Text="項目" FontWeight="SemiBold" Foreground="{StaticResource HeaderText}" />
+              <Button Content="+" Width="22" Height="22" DockPanel.Dock="Right" HorizontalAlignment="Right" ToolTip="カラムを追加" Command="{Binding AddColumnCommand}" />
+            </DockPanel>
+
+            <!-- メモ (下部に固定) -->
+            <StackPanel DockPanel.Dock="Bottom">
+              <TextBlock Text="メモ" FontWeight="SemiBold" Margin="0,8,0,4" Foreground="{StaticResource HeaderText}" />
+              <TextBox
+                Text="{Binding SelectedEntity.Memo, UpdateSourceTrigger=PropertyChanged}"
+                AcceptsReturn="True"
+                TextWrapping="Wrap"
+                Height="70"
+                VerticalScrollBarVisibility="Auto"
+              />
+            </StackPanel>
+
+            <!-- DataGrid: 残りスペースを占有 -->
+            <DataGrid
+              ItemsSource="{Binding SelectedEntity.Columns}"
+              x:Name="ColumnsDataGrid"
+              SelectedItem="{Binding SelectedColumn, Mode=TwoWay}"
+              AutoGenerateColumns="False"
+              CanUserReorderColumns="False"
+              CanUserSortColumns="False"
+              CanUserResizeRows="False"
+              CanUserAddRows="False"
+              HeadersVisibility="All"
+              RowHeaderWidth="20"
+              beh:DataGridRowReorderBehavior.IsEnabled="True"
+              GridLinesVisibility="Horizontal"
+              HorizontalGridLinesBrush="#EEF1F5"
+              Background="White"
+              BorderBrush="{StaticResource DividerBrush}"
+            >
+              <DataGrid.Columns>
+                <DataGridCheckBoxColumn Header="PK" Binding="{Binding IsPrimaryKey, UpdateSourceTrigger=PropertyChanged}" Width="36" />
+                <DataGridCheckBoxColumn Header="FK" Binding="{Binding IsForeignKey, UpdateSourceTrigger=PropertyChanged}" Width="36" />
+                <DataGridTextColumn Header="カラム名" Binding="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Width="*" />
+                <DataGridTemplateColumn Header="型" Width="100">
+                  <DataGridTemplateColumn.CellTemplate>
+                    <DataTemplate>
+                      <TextBlock Text="{Binding DataType}" VerticalAlignment="Center" Margin="4,0" />
+                    </DataTemplate>
+                  </DataGridTemplateColumn.CellTemplate>
+                  <DataGridTemplateColumn.CellEditingTemplate>
+                    <DataTemplate>
+                      <ComboBox
+                        IsEditable="True"
+                        ItemsSource="{Binding DataContext.SqlDataTypes, RelativeSource={RelativeSource AncestorType=Window}}"
+                        Text="{Binding DataType, UpdateSourceTrigger=LostFocus}"
+                      />
+                    </DataTemplate>
+                  </DataGridTemplateColumn.CellEditingTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTextColumn Header="説明" Width="*" Binding="{Binding Description, UpdateSourceTrigger=PropertyChanged}" />
+                <DataGridTemplateColumn Header="" Width="32">
+                  <DataGridTemplateColumn.CellTemplate>
+                    <DataTemplate>
+                      <Button
+                        Content="✕"
+                        Width="22"
+                        Height="20"
+                        ToolTip="このカラムを削除"
+                        Command="{Binding DataContext.RemoveColumnCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                        CommandParameter="{Binding}"
+                      />
+                    </DataTemplate>
+                  </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+              </DataGrid.Columns>
+            </DataGrid>
+          </DockPanel>
+
+          <!-- リレーションのプロパティ -->
+          <StackPanel Visibility="{Binding SelectedRelationship, Converter={StaticResource NullToVisibilityConverter}}">
+            <TextBlock Text="リレーション" FontWeight="SemiBold" Margin="0,4,0,6" Foreground="{StaticResource HeaderText}" />
+            <Grid Margin="0,2" DataContext="{Binding SelectedRelationship}">
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="80" />
+                <ColumnDefinition Width="*" />
+              </Grid.ColumnDefinitions>
+              <TextBlock Text="種別" VerticalAlignment="Center" />
+              <ComboBox Grid.Column="1" SelectedItem="{Binding Type, Mode=TwoWay}">
+                <models:RelationshipType>OneToOne</models:RelationshipType>
+                <models:RelationshipType>OneToMany</models:RelationshipType>
+                <models:RelationshipType>ManyToMany</models:RelationshipType>
+              </ComboBox>
+            </Grid>
+            <Grid Margin="0,8" DataContext="{Binding SelectedRelationship}">
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="80" />
+                <ColumnDefinition Width="*" />
+              </Grid.ColumnDefinitions>
+              <TextBlock Text="起点" VerticalAlignment="Center" />
+              <TextBlock Grid.Column="1" Text="{Binding Source.TableName}" Foreground="{StaticResource MutedText}" />
+            </Grid>
+            <Grid Margin="0,2" DataContext="{Binding SelectedRelationship}">
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="80" />
+                <ColumnDefinition Width="*" />
+              </Grid.ColumnDefinitions>
+              <TextBlock Text="終点" VerticalAlignment="Center" />
+              <TextBlock Grid.Column="1" Text="{Binding Target.TableName}" Foreground="{StaticResource MutedText}" />
+            </Grid>
+            <Button Margin="0,12,0,0" Content="リレーションを削除" Command="{Binding RemoveSelectedRelationshipCommand}" />
+          </StackPanel>
+        </DockPanel>
+      </Border>
+    </Grid>
+  </DockPanel>
 </Window>
