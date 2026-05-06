@@ -17,6 +17,41 @@ public class AiSchemaJson
     [JsonPropertyName("relationships")]
     public List<AiRelationship> Relationships { get; set; } = new();
 
+    /// <summary>テーブル名を指定した単複数へ正規化します。</summary>
+    public void NormalizeTableNames(AiTableNameNumberStyle numberStyle)
+    {
+        var tableNameMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var table in Tables)
+        {
+            if (string.IsNullOrWhiteSpace(table.Name))
+            {
+                continue;
+            }
+
+            var normalizedTableName = ConvertTableNameNumber(table.Name, numberStyle);
+            tableNameMap[table.Name] = normalizedTableName;
+            table.Name = normalizedTableName;
+        }
+
+        foreach (var relationship in Relationships)
+        {
+            if (!string.IsNullOrWhiteSpace(relationship.SourceTable))
+            {
+                relationship.SourceTable = tableNameMap.TryGetValue(relationship.SourceTable, out var sourceTableName)
+                    ? sourceTableName
+                    : ConvertTableNameNumber(relationship.SourceTable, numberStyle);
+            }
+
+            if (!string.IsNullOrWhiteSpace(relationship.TargetTable))
+            {
+                relationship.TargetTable = tableNameMap.TryGetValue(relationship.TargetTable, out var targetTableName)
+                    ? targetTableName
+                    : ConvertTableNameNumber(relationship.TargetTable, numberStyle);
+            }
+        }
+    }
+
     /// <summary>テーブル名・カラム名を指定した命名規則へ正規化します。</summary>
     public void NormalizeIdentifiers(AiIdentifierNamingStyle namingStyle)
     {
@@ -161,6 +196,21 @@ public class AiSchemaJson
         };
     }
 
+    /// <summary>テーブル名の末尾単語を単数形または複数形へ変換します。</summary>
+    private static string ConvertTableNameNumber(string value, AiTableNameNumberStyle numberStyle)
+    {
+        var words = SplitIdentifierWords(value);
+
+        if (words.Count == 0)
+        {
+            return value;
+        }
+
+        words[^1] = numberStyle == AiTableNameNumberStyle.Plural ? PluralizeWord(words[^1]) : SingularizeWord(words[^1]);
+
+        return string.Join("_", words);
+    }
+
     /// <summary>スネークケースやパスカルケースを単語列へ分解します。</summary>
     private static List<string> SplitIdentifierWords(string value)
     {
@@ -176,6 +226,100 @@ public class AiSchemaJson
         normalized = Regex.Replace(normalized, @"([0-9])([A-Za-z])", "$1 $2");
 
         return normalized.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Where(static word => word.Length > 0).ToList();
+    }
+
+    /// <summary>末尾単語が複数形らしいかを判定します。</summary>
+    private static bool IsLikelyPlural(string word)
+    {
+        if (word.Length <= 1)
+        {
+            return false;
+        }
+
+        var lower = word.ToLowerInvariant();
+
+        if (
+            lower.EndsWith("ies", StringComparison.Ordinal)
+            || lower.EndsWith("ses", StringComparison.Ordinal)
+            || lower.EndsWith("xes", StringComparison.Ordinal)
+            || lower.EndsWith("zes", StringComparison.Ordinal)
+            || lower.EndsWith("ches", StringComparison.Ordinal)
+            || lower.EndsWith("shes", StringComparison.Ordinal)
+            || lower.EndsWith("oes", StringComparison.Ordinal)
+        )
+        {
+            return true;
+        }
+
+        return lower.EndsWith('s')
+            && !lower.EndsWith("ss", StringComparison.Ordinal)
+            && !lower.EndsWith("us", StringComparison.Ordinal)
+            && !lower.EndsWith("is", StringComparison.Ordinal);
+    }
+
+    /// <summary>単語を単数形へ寄せます。</summary>
+    private static string SingularizeWord(string word)
+    {
+        if (!IsLikelyPlural(word))
+        {
+            return word;
+        }
+
+        var lower = word.ToLowerInvariant();
+
+        if (lower.EndsWith("ies", StringComparison.Ordinal) && word.Length > 3)
+        {
+            return word[..^3] + "y";
+        }
+
+        if (
+            lower.EndsWith("ches", StringComparison.Ordinal)
+            || lower.EndsWith("shes", StringComparison.Ordinal)
+            || lower.EndsWith("xes", StringComparison.Ordinal)
+            || lower.EndsWith("zes", StringComparison.Ordinal)
+            || lower.EndsWith("ses", StringComparison.Ordinal)
+            || lower.EndsWith("oes", StringComparison.Ordinal)
+        )
+        {
+            return word[..^2];
+        }
+
+        return word[..^1];
+    }
+
+    /// <summary>単語を複数形へ寄せます。</summary>
+    private static string PluralizeWord(string word)
+    {
+        if (IsLikelyPlural(word))
+        {
+            return word;
+        }
+
+        var lower = word.ToLowerInvariant();
+
+        if (lower.EndsWith('y') && word.Length > 1)
+        {
+            var beforeLast = char.ToLowerInvariant(word[^2]);
+
+            if (beforeLast is not ('a' or 'e' or 'i' or 'o' or 'u'))
+            {
+                return word[..^1] + "ies";
+            }
+        }
+
+        if (
+            lower.EndsWith('s')
+            || lower.EndsWith('x')
+            || lower.EndsWith('z')
+            || lower.EndsWith("ch", StringComparison.Ordinal)
+            || lower.EndsWith("sh", StringComparison.Ordinal)
+            || lower.EndsWith('o')
+        )
+        {
+            return word + "es";
+        }
+
+        return word + "s";
     }
 
     /// <summary>単語をパスカルケース用の表記へ整えます。</summary>

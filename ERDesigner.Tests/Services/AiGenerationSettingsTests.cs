@@ -37,4 +37,12 @@ public class AiGenerationSettingsTests
 
         s.IdentifierNamingStyle.Should().Be(AiIdentifierNamingStyle.PascalCase);
     }
+
+    [Fact(DisplayName = "テーブル名の既定値は単数形")]
+    public void Default_TableNameNumberStyle_IsSingular()
+    {
+        var s = new AiGenerationSettings();
+
+        s.TableNameNumberStyle.Should().Be(AiTableNameNumberStyle.Singular);
+    }
 }

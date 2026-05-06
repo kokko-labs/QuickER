@@ -125,6 +125,7 @@ public class OpenAiSchemaClient : IAiSchemaClient
         var completion = await client.CompleteChatAsync(messages, options, ct).ConfigureAwait(false);
         var text = completion.Value.Content[0].Text;
         var schema = ParseSchemaResponse(text);
+        schema.NormalizeTableNames(settings.TableNameNumberStyle);
         schema.NormalizeIdentifiers(settings.IdentifierNamingStyle);
 
         return schema;
@@ -193,6 +194,12 @@ public class OpenAiSchemaClient : IAiSchemaClient
             _ => "- テーブル名・カラム名は必ずパスカルケース (例: CustomerOrder, CustomerId) にする。",
         };
 
-        return $"{SystemPromptTemplate}\n{namingInstruction}";
+        var tableNumberInstruction = settings.TableNameNumberStyle switch
+        {
+            AiTableNameNumberStyle.Plural => "- テーブル名は必ず複数形 (例: Customers, Orders) にする。",
+            _ => "- テーブル名は必ず単数形 (例: Customer, Order) にする。",
+        };
+
+        return $"{SystemPromptTemplate}\n{namingInstruction}\n{tableNumberInstruction}";
     }
 }

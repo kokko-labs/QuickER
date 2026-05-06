@@ -89,4 +89,23 @@ public class AiGenerateDialogViewModelTests
         client.LastSettings.Should().NotBeNull();
         client.LastSettings!.IdentifierNamingStyle.Should().Be(AiIdentifierNamingStyle.SnakeCase);
     }
+
+    [Fact(DisplayName = "選択したテーブル名の単複数が生成設定へ渡される")]
+    public async Task Generate_PassesSelectedTableNameNumberStyle()
+    {
+        var client = new FakeAiSchemaClient();
+        var vm = new AiGenerateDialogViewModel(client)
+        {
+            Provider = AiProvider.OpenAi,
+            SaveApiKey = false,
+            ApiKey = "sk-vm-test-table-number",
+            Prompt = "test",
+            SelectedTableNameNumberStyle = new(AiTableNameNumberStyle.Plural, "複数形"),
+        };
+
+        await vm.GenerateCommand.ExecuteAsync(null);
+
+        client.LastSettings.Should().NotBeNull();
+        client.LastSettings!.TableNameNumberStyle.Should().Be(AiTableNameNumberStyle.Plural);
+    }
 }

@@ -20,6 +20,16 @@ public enum AiIdentifierNamingStyle
     SnakeCase,
 }
 
+/// <summary>AI が生成するテーブル名の単複数。</summary>
+public enum AiTableNameNumberStyle
+{
+    /// <summary>単数形 (例: <c>Customer</c>)。</summary>
+    Singular,
+
+    /// <summary>複数形 (例: <c>Customers</c>)。</summary>
+    Plural,
+}
+
 /// <summary>AI スキーマ生成リクエストの設定値。</summary>
 public class AiGenerationSettings
 {
@@ -40,6 +50,9 @@ public class AiGenerationSettings
 
     /// <summary>AI が生成するテーブル名・カラム名の命名規則。</summary>
     public AiIdentifierNamingStyle IdentifierNamingStyle { get; set; } = AiIdentifierNamingStyle.PascalCase;
+
+    /// <summary>AI が生成するテーブル名の単複数。</summary>
+    public AiTableNameNumberStyle TableNameNumberStyle { get; set; } = AiTableNameNumberStyle.Singular;
 
     /// <summary>プロバイダ既定のエンドポイント。</summary>
     public string ResolveEndpoint() =>

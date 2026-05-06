@@ -12,6 +12,9 @@ public partial class AiGenerateDialogViewModel : ObservableObject
     /// <summary>命名規則の選択肢です。</summary>
     public sealed record IdentifierNamingStyleOption(AiIdentifierNamingStyle Value, string DisplayName);
 
+    /// <summary>テーブル名の単複数の選択肢です。</summary>
+    public sealed record TableNameNumberStyleOption(AiTableNameNumberStyle Value, string DisplayName);
+
     private readonly IAiSchemaClient _client;
     private bool _isInitializing;
 
@@ -31,6 +34,7 @@ public partial class AiGenerateDialogViewModel : ObservableObject
     private string _model = "gpt-5.4-mini";
 
     private IdentifierNamingStyleOption? _selectedIdentifierNamingStyle;
+    private TableNameNumberStyleOption? _selectedTableNameNumberStyle;
 
     /// <summary>Ollama 等のカスタムエンドポイント URL。</summary>
     [ObservableProperty]
@@ -71,17 +75,31 @@ public partial class AiGenerateDialogViewModel : ObservableObject
         new(AiIdentifierNamingStyle.SnakeCase, "スネークケース (customer_order / customer_id)"),
     ];
 
+    /// <summary>テーブル名の単複数候補。</summary>
+    public IReadOnlyList<TableNameNumberStyleOption> TableNameNumberStyleOptions { get; } =
+    [new(AiTableNameNumberStyle.Singular, "単数形 (Customer / Order)"), new(AiTableNameNumberStyle.Plural, "複数形 (Customers / Orders)")];
+
     /// <summary>現在のプロバイダに応じた候補モデル。</summary>
     public IReadOnlyList<string> ModelCandidates => Provider == AiProvider.OpenAi ? OpenAiModels : OllamaModels;
 
     /// <summary>現在選択中の命名規則。</summary>
     public AiIdentifierNamingStyle IdentifierNamingStyle => SelectedIdentifierNamingStyle?.Value ?? AiIdentifierNamingStyle.PascalCase;
 
+    /// <summary>現在選択中のテーブル名の単複数。</summary>
+    public AiTableNameNumberStyle TableNameNumberStyle => SelectedTableNameNumberStyle?.Value ?? AiTableNameNumberStyle.Singular;
+
     /// <summary>生成するテーブル名・カラム名の命名規則。</summary>
     public IdentifierNamingStyleOption? SelectedIdentifierNamingStyle
     {
         get => _selectedIdentifierNamingStyle;
         set => SetProperty(ref _selectedIdentifierNamingStyle, value);
+    }
+
+    /// <summary>生成するテーブル名の単複数。</summary>
+    public TableNameNumberStyleOption? SelectedTableNameNumberStyle
+    {
+        get => _selectedTableNameNumberStyle;
+        set => SetProperty(ref _selectedTableNameNumberStyle, value);
     }
 
     /// <summary>OpenAI 選択時のみ APIキー欄を表示するためのフラグ。</summary>
@@ -98,6 +116,7 @@ public partial class AiGenerateDialogViewModel : ObservableObject
         // 保存済み API キーがあれば自動入力
         ApiKey = ApiKeyStore.Load(OpenAiKeyName);
         SelectedIdentifierNamingStyle = IdentifierNamingStyleOptions[0];
+        SelectedTableNameNumberStyle = TableNameNumberStyleOptions[0];
         _isInitializing = false;
     }
 
@@ -174,6 +193,7 @@ public partial class AiGenerateDialogViewModel : ObservableObject
                 ApiKey = ApiKey,
                 Model = Model,
                 IdentifierNamingStyle = IdentifierNamingStyle,
+                TableNameNumberStyle = TableNameNumberStyle,
                 EndpointOverride = string.IsNullOrWhiteSpace(EndpointOverride) ? null : EndpointOverride,
                 Prompt = Prompt,
             };

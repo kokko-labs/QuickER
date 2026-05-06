@@ -279,6 +279,58 @@ public class AiSchemaJsonTests
         schema.Relationships[0].TargetTable.Should().Be("customer_order");
     }
 
+    [Fact(DisplayName = "テーブル名を単数形へ正規化できる")]
+    public void NormalizeTableNames_ConvertsToSingular()
+    {
+        var schema = new AiSchemaJson
+        {
+            Tables = [new AiTable { Name = "customers" }, new AiTable { Name = "order_items" }],
+            Relationships =
+            [
+                new AiRelationship
+                {
+                    SourceTable = "customers",
+                    TargetTable = "order_items",
+                    Type = "OneToMany",
+                },
+            ],
+        };
+
+        schema.NormalizeTableNames(AiTableNameNumberStyle.Singular);
+        schema.NormalizeIdentifiers(AiIdentifierNamingStyle.SnakeCase);
+
+        schema.Tables[0].Name.Should().Be("customer");
+        schema.Tables[1].Name.Should().Be("order_item");
+        schema.Relationships[0].SourceTable.Should().Be("customer");
+        schema.Relationships[0].TargetTable.Should().Be("order_item");
+    }
+
+    [Fact(DisplayName = "テーブル名を複数形へ正規化できる")]
+    public void NormalizeTableNames_ConvertsToPlural()
+    {
+        var schema = new AiSchemaJson
+        {
+            Tables = [new AiTable { Name = "Customer" }, new AiTable { Name = "Category" }],
+            Relationships =
+            [
+                new AiRelationship
+                {
+                    SourceTable = "Customer",
+                    TargetTable = "Category",
+                    Type = "OneToMany",
+                },
+            ],
+        };
+
+        schema.NormalizeTableNames(AiTableNameNumberStyle.Plural);
+        schema.NormalizeIdentifiers(AiIdentifierNamingStyle.PascalCase);
+
+        schema.Tables[0].Name.Should().Be("Customers");
+        schema.Tables[1].Name.Should().Be("Categories");
+        schema.Relationships[0].SourceTable.Should().Be("Customers");
+        schema.Relationships[0].TargetTable.Should().Be("Categories");
+    }
+
     [Theory(DisplayName = "NULL 許容の互換プロパティも isNullable に反映される")]
     [InlineData("nullable", true, true)]
     [InlineData("nullable", false, false)]
