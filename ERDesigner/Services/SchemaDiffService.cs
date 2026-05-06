@@ -232,7 +232,7 @@ public class SchemaDiffService
         // (Parent, Child) ペアでキー化。テーブル名は正規化済みに合わせる。
         var liveFkPairs = liveRelationships
             .Where(r => r.Type != RelationshipType.ManyToMany)
-            .Select(r => MakePair(r, liveEntities))
+            .Select(r => MakeForeignKeySignature(r, liveEntities))
             .Where(p => p is not null)
             .Select(p => p!.Value)
             .ToHashSet();
@@ -244,7 +244,7 @@ public class SchemaDiffService
                 continue;
             }
 
-            var pair = MakePair(rel, targetEntities);
+            var pair = MakeForeignKeySignature(rel, targetEntities);
 
             if (pair is null)
             {
@@ -264,15 +264,15 @@ public class SchemaDiffService
                 continue;
             }
 
-            var pkCol = parent.Columns.FirstOrDefault(c => c.IsPrimaryKey);
+            var pkCol = ResolveReferencedColumn(rel, parent);
 
             if (pkCol is null)
             {
                 continue;
             }
 
-            // 規約: FK 列名は <ParentTable>_<PkCol>。子テーブルにこの列があるか PK 名と同名の列があれば採用。
-            var fkColName = ResolveFkColumnName(child, parent, pkCol);
+            // 明示選択された FK 列を優先し、未設定時のみ既存規約で補完します。
+            var fkColName = ResolveFkColumnName(rel, child, parent, pkCol);
             diff.Items.Add(
                 new SchemaDiffItem
                 {
@@ -294,7 +294,7 @@ public class SchemaDiffService
         // 注意: 取得側 Relationship には FK 名が含まれないため、ここでは「親→子のペアが消えた」ケースだけ示す。
         var targetFkPairs = targetRelationships
             .Where(r => r.Type != RelationshipType.ManyToMany)
-            .Select(r => MakePair(r, targetEntities))
+            .Select(r => MakeForeignKeySignature(r, targetEntities))
             .Where(p => p is not null)
             .Select(p => p!.Value)
             .ToHashSet();
@@ -306,7 +306,7 @@ public class SchemaDiffService
                 continue;
             }
 
-            var pair = MakePair(rel, liveEntities);
+            var pair = MakeForeignKeySignature(rel, liveEntities);
 
             if (pair is null)
             {
@@ -335,6 +335,7 @@ public class SchemaDiffService
                     ParentEntity = parent,
                     ChildEntity = child,
                     Relationship = rel,
+                    ForeignKeyName = rel.ConstraintName,
                     IsSelected = false,
                     Description = $"外部キー [{NormalizeTable(child)}] → [{NormalizeTable(parent)}] を削除",
                 }
@@ -377,8 +378,8 @@ public class SchemaDiffService
         return e.TableName.Trim();
     }
 
-    /// <summary>(Parent正規名, Child正規名) のタプルを生成。テーブルが見つからない場合 null。</summary>
-    private static (string Parent, string Child)? MakePair(Relationship rel, IReadOnlyList<Entity> entities)
+    /// <summary>外部キーの比較に使うシグネチャを生成します。</summary>
+    private static (string Parent, string ParentColumn, string Child, string ChildColumn)? MakeForeignKeySignature(Relationship rel, IReadOnlyList<Entity> entities)
     {
         var parent = entities.FirstOrDefault(e => e.Id == rel.SourceEntityId);
         var child = entities.FirstOrDefault(e => e.Id == rel.TargetEntityId);
@@ -388,7 +389,21 @@ public class SchemaDiffService
             return null;
         }
 
-        return (NormalizeTable(parent).ToLowerInvariant(), NormalizeTable(child).ToLowerInvariant());
+        var parentColumn = ResolveReferencedColumn(rel, parent);
+
+        if (parentColumn is null)
+        {
+            return null;
+        }
+
+        var childColumnName = ResolveFkColumnName(rel, child, parent, parentColumn);
+
+        if (childColumnName is null)
+        {
+            return null;
+        }
+
+        return (NormalizeTable(parent).ToLowerInvariant(), parentColumn.Name.ToLowerInvariant(), NormalizeTable(child).ToLowerInvariant(), childColumnName.ToLowerInvariant());
     }
 
     /// <summary>
@@ -396,8 +411,18 @@ public class SchemaDiffService
     /// 優先順位: 1) <c>&lt;ParentTable&gt;_&lt;PkCol&gt;</c> 命名の列, 2) PK 列と同名の列, 3) <c>IsForeignKey</c> フラグの列。
     /// 該当なしなら null。
     /// </summary>
-    private static string? ResolveFkColumnName(Entity child, Entity parent, Column pkCol)
+    private static string? ResolveFkColumnName(Relationship rel, Entity child, Entity parent, Column pkCol)
     {
+        if (rel.TargetColumnId is not null)
+        {
+            var byId = child.Columns.FirstOrDefault(c => c.Id == rel.TargetColumnId);
+
+            if (byId is not null)
+            {
+                return byId.Name;
+            }
+        }
+
         var parentName = NormalizeTable(parent).Replace(".", "_");
         var conv = parentName + "_" + pkCol.Name;
         var byConv = child.Columns.FirstOrDefault(c => string.Equals(c.Name, conv, StringComparison.OrdinalIgnoreCase));
@@ -416,6 +441,22 @@ public class SchemaDiffService
 
         var byFlag = child.Columns.FirstOrDefault(c => c.IsForeignKey);
         return byFlag?.Name;
+    }
+
+    /// <summary>親テーブル側の参照先列を解決します。未設定時は PK を優先します。</summary>
+    private static Column? ResolveReferencedColumn(Relationship rel, Entity parent)
+    {
+        if (rel.SourceColumnId is not null)
+        {
+            var byId = parent.Columns.FirstOrDefault(c => c.Id == rel.SourceColumnId);
+
+            if (byId is not null)
+            {
+                return byId;
+            }
+        }
+
+        return parent.Columns.FirstOrDefault(c => c.IsPrimaryKey);
     }
 
     private static bool IsSameType(string a, string b) => string.Equals((a ?? "").Trim(), (b ?? "").Trim(), StringComparison.OrdinalIgnoreCase);

@@ -84,4 +84,17 @@ public class CommandTests
         cmd.Undo();
         e.TableName.Should().Be("T");
     }
+
+    [Fact(DisplayName = "PropertyChangeCommand: 適用後フックが Execute/Undo の両方で呼ばれる")]
+    public void PropertyChangeCommand_AfterApply_IsInvoked()
+    {
+        var e = NewEntity();
+        var count = 0;
+        var cmd = new PropertyChangeCommand(e, nameof(EntityViewModel.TableName), "T", "顧客", () => count++);
+
+        cmd.Execute();
+        cmd.Undo();
+
+        count.Should().Be(2);
+    }
 }

@@ -138,7 +138,7 @@ public static class SchemaSyncScriptBuilder
             return;
         }
 
-        var pkCol = item.ParentEntity.Columns.FirstOrDefault(c => c.IsPrimaryKey);
+        var pkCol = ResolveReferencedColumn(item);
 
         if (pkCol is null || item.ColumnName is null)
         {
@@ -166,6 +166,15 @@ public static class SchemaSyncScriptBuilder
 
         var childTbl = SchemaDiffService.NormalizeTable(item.ChildEntity);
         var parentTbl = SchemaDiffService.NormalizeTable(item.ParentEntity);
+
+        if (!string.IsNullOrWhiteSpace(item.ForeignKeyName))
+        {
+            sb.AppendLine($"IF EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name = N'{SqlIdentifier.EscapeStringLiteral(item.ForeignKeyName)}')");
+            sb.AppendLine($"    ALTER TABLE {SqlIdentifier.Bracket(childTbl)} DROP CONSTRAINT [{SqlIdentifier.Escape(item.ForeignKeyName)}];");
+            sb.AppendLine("GO");
+            return;
+        }
+
         sb.AppendLine($"DECLARE @fk sysname;");
         sb.AppendLine($"SELECT @fk = fk.name FROM sys.foreign_keys fk");
         sb.AppendLine($"  JOIN sys.tables tp ON fk.parent_object_id = tp.object_id");
@@ -230,5 +239,21 @@ public static class SchemaSyncScriptBuilder
         }
 
         sb.AppendLine("GO");
+    }
+
+    /// <summary>外部キーの参照先列を差分情報から解決します。</summary>
+    private static Column? ResolveReferencedColumn(SchemaDiffItem item)
+    {
+        if (item.Relationship?.SourceColumnId is not null)
+        {
+            var byId = item.ParentEntity?.Columns.FirstOrDefault(c => c.Id == item.Relationship.SourceColumnId);
+
+            if (byId is not null)
+            {
+                return byId;
+            }
+        }
+
+        return item.ParentEntity?.Columns.FirstOrDefault(c => c.IsPrimaryKey);
     }
 }

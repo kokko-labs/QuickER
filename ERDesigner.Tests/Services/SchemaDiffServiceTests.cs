@@ -104,6 +104,43 @@ public class SchemaDiffServiceTests
         fk.ColumnName.Should().Be("Customer_Id");
     }
 
+    [Fact(DisplayName = "同一テーブル間で FK 列が変わると DropForeignKey と AddForeignKey になる")]
+    public void ForeignKeyColumnChanged_EmitsDropAndAdd()
+    {
+        var customerLive = Tbl("Customer", ("Id", "int", true));
+        var orderLive = Tbl("Order", ("Id", "int", true), ("CustomerId1", "int", false), ("CustomerId2", "int", false));
+        var liveRel = new Relationship
+        {
+            SourceEntityId = customerLive.Id,
+            TargetEntityId = orderLive.Id,
+            Type = RelationshipType.OneToMany,
+            SourceColumnId = customerLive.Columns[0].Id,
+            TargetColumnId = orderLive.Columns[1].Id,
+            ConstraintName = "FK_Order_CustomerId1",
+        };
+
+        var customerTarget = Tbl("Customer", ("Id", "int", true));
+        var orderTarget = Tbl("Order", ("Id", "int", true), ("CustomerId1", "int", false), ("CustomerId2", "int", false));
+        var targetRel = new Relationship
+        {
+            SourceEntityId = customerTarget.Id,
+            TargetEntityId = orderTarget.Id,
+            Type = RelationshipType.OneToMany,
+            SourceColumnId = customerTarget.Columns[0].Id,
+            TargetColumnId = orderTarget.Columns[2].Id,
+        };
+
+        var diff = new SchemaDiffService().Compute(
+            new List<Entity> { customerLive, orderLive },
+            new List<Relationship> { liveRel },
+            new List<Entity> { customerTarget, orderTarget },
+            new List<Relationship> { targetRel }
+        );
+
+        diff.Items.Should().ContainSingle(i => i.Kind == SchemaDiffKind.DropForeignKey && i.ForeignKeyName == "FK_Order_CustomerId1");
+        diff.Items.Should().ContainSingle(i => i.Kind == SchemaDiffKind.AddForeignKey && i.ColumnName == "CustomerId2");
+    }
+
     [Fact(DisplayName = "差分が無ければ Items は空")]
     public void Identical_NoDiff()
     {

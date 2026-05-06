@@ -85,4 +85,60 @@ public class SqlServerSchemaImporterTests
 
         sigA.Should().NotBe(sigB);
     }
+
+    [Fact(DisplayName = "ComputeSignature: 外部キー列が違えば署名が変わる")]
+    public void ComputeSignature_DifferentForeignKeyColumns_DifferentSignature()
+    {
+        var parent = new Entity
+        {
+            TableName = "Parent",
+            Columns =
+            {
+                new Column
+                {
+                    Name = "Id",
+                    DataType = "int",
+                    IsPrimaryKey = true,
+                },
+            },
+        };
+
+        var child = new Entity
+        {
+            TableName = "Child",
+            Columns =
+            {
+                new Column
+                {
+                    Name = "Id",
+                    DataType = "int",
+                    IsPrimaryKey = true,
+                },
+                new Column { Name = "ParentId1", DataType = "int" },
+                new Column { Name = "ParentId2", DataType = "int" },
+            },
+        };
+
+        var relA = new Relationship
+        {
+            SourceEntityId = parent.Id,
+            TargetEntityId = child.Id,
+            Type = RelationshipType.OneToMany,
+            SourceColumnId = parent.Columns[0].Id,
+            TargetColumnId = child.Columns[1].Id,
+        };
+        var relB = new Relationship
+        {
+            SourceEntityId = parent.Id,
+            TargetEntityId = child.Id,
+            Type = RelationshipType.OneToMany,
+            SourceColumnId = parent.Columns[0].Id,
+            TargetColumnId = child.Columns[2].Id,
+        };
+
+        var sigA = SqlServerSchemaImporter.ComputeSignature(new[] { parent, child }, new[] { relA });
+        var sigB = SqlServerSchemaImporter.ComputeSignature(new[] { parent, child }, new[] { relB });
+
+        sigA.Should().NotBe(sigB);
+    }
 }

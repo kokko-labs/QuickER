@@ -23,7 +23,7 @@
     <KeyBinding Key="N" Modifiers="Control" Command="{Binding NewDiagramCommand}" />
     <KeyBinding Key="O" Modifiers="Control" Command="{Binding OpenCommand}" />
     <KeyBinding Key="D" Modifiers="Control" Command="{Binding DuplicateSelectedEntityCommand}" />
-    <KeyBinding Key="Delete" Command="{Binding RemoveSelectedEntityCommand}" />
+    <KeyBinding Key="Delete" Command="{Binding DeleteSelectedCommand}" />
   </Window.InputBindings>
 
   <Window.Resources>
@@ -579,10 +579,14 @@
                                           <Setter Property="Text" Value="PK" />
                                           <Setter Property="Foreground" Value="#D93025" />
                                         </DataTrigger>
-                                        <DataTrigger Binding="{Binding IsForeignKey}" Value="True">
+                                        <MultiDataTrigger>
+                                          <MultiDataTrigger.Conditions>
+                                            <Condition Binding="{Binding IsPrimaryKey}" Value="False" />
+                                            <Condition Binding="{Binding IsForeignKey}" Value="True" />
+                                          </MultiDataTrigger.Conditions>
                                           <Setter Property="Text" Value="FK" />
                                           <Setter Property="Foreground" Value="#1A73E8" />
-                                        </DataTrigger>
+                                        </MultiDataTrigger>
                                       </Style.Triggers>
                                     </Style>
                                   </TextBlock.Style>
@@ -642,7 +646,7 @@
                 <ColumnDefinition Width="*" />
               </Grid.ColumnDefinitions>
               <TextBlock Text="テーブル名" VerticalAlignment="Center" />
-              <TextBox Grid.Column="1" Text="{Binding SelectedEntity.TableName, UpdateSourceTrigger=PropertyChanged}" />
+              <TextBox Grid.Column="1" Text="{Binding SelectedEntity.TableName, UpdateSourceTrigger=LostFocus}" />
             </Grid>
             <Grid DockPanel.Dock="Top" Margin="0,4">
               <Grid.ColumnDefinitions>
@@ -650,7 +654,7 @@
                 <ColumnDefinition Width="*" />
               </Grid.ColumnDefinitions>
               <TextBlock Text="説明" VerticalAlignment="Center" />
-              <TextBox Grid.Column="1" Text="{Binding SelectedEntity.Description, UpdateSourceTrigger=PropertyChanged}" ToolTip="SQL Server の MS_Description と同期します" />
+              <TextBox Grid.Column="1" Text="{Binding SelectedEntity.Description, UpdateSourceTrigger=LostFocus}" ToolTip="SQL Server の MS_Description と同期します" />
             </Grid>
 
             <DockPanel DockPanel.Dock="Top" Margin="0,12,0,4">
@@ -689,9 +693,29 @@
               BorderBrush="{StaticResource DividerBrush}"
             >
               <DataGrid.Columns>
-                <DataGridCheckBoxColumn Header="PK" Binding="{Binding IsPrimaryKey, UpdateSourceTrigger=PropertyChanged}" Width="36" />
-                <DataGridCheckBoxColumn Header="FK" Binding="{Binding IsForeignKey, UpdateSourceTrigger=PropertyChanged}" Width="36" />
-                <DataGridTextColumn Header="カラム名" Binding="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Width="*" />
+                <DataGridTemplateColumn Header="PK" Width="36">
+                  <DataGridTemplateColumn.CellTemplate>
+                    <DataTemplate>
+                      <CheckBox
+                        IsChecked="{Binding IsPrimaryKey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                        IsEnabled="{Binding IsPrimaryKeyEditable}"
+                        HorizontalAlignment="Center"
+                      />
+                    </DataTemplate>
+                  </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTemplateColumn Header="FK" Width="36">
+                  <DataGridTemplateColumn.CellTemplate>
+                    <DataTemplate>
+                      <CheckBox
+                        IsChecked="{Binding IsForeignKey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                        IsEnabled="{Binding IsForeignKeyEditable}"
+                        HorizontalAlignment="Center"
+                      />
+                    </DataTemplate>
+                  </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTextColumn Header="カラム名" Binding="{Binding Name, UpdateSourceTrigger=LostFocus}" Width="*" />
                 <DataGridTemplateColumn Header="型" Width="100">
                   <DataGridTemplateColumn.CellTemplate>
                     <DataTemplate>
@@ -708,7 +732,7 @@
                     </DataTemplate>
                   </DataGridTemplateColumn.CellEditingTemplate>
                 </DataGridTemplateColumn>
-                <DataGridTextColumn Header="説明" Width="*" Binding="{Binding Description, UpdateSourceTrigger=PropertyChanged}" />
+                <DataGridTextColumn Header="説明" Width="*" Binding="{Binding Description, UpdateSourceTrigger=LostFocus}" />
                 <DataGridTemplateColumn Header="" Width="32">
                   <DataGridTemplateColumn.CellTemplate>
                     <DataTemplate>
@@ -755,8 +779,38 @@
                 <ColumnDefinition Width="80" />
                 <ColumnDefinition Width="*" />
               </Grid.ColumnDefinitions>
+              <TextBlock Text="参照先列" VerticalAlignment="Center" />
+              <ComboBox
+                Grid.Column="1"
+                ItemsSource="{Binding AvailableSourceColumns}"
+                DisplayMemberPath="Name"
+                SelectedValuePath="Id"
+                SelectedValue="{Binding SourceColumnId, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                IsEnabled="{Binding CanSelectForeignKeyColumns}"
+              />
+            </Grid>
+            <Grid Margin="0,2" DataContext="{Binding SelectedRelationship}">
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="80" />
+                <ColumnDefinition Width="*" />
+              </Grid.ColumnDefinitions>
               <TextBlock Text="終点" VerticalAlignment="Center" />
               <TextBlock Grid.Column="1" Text="{Binding Target.TableName}" Foreground="{StaticResource MutedText}" />
+            </Grid>
+            <Grid Margin="0,2" DataContext="{Binding SelectedRelationship}">
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="80" />
+                <ColumnDefinition Width="*" />
+              </Grid.ColumnDefinitions>
+              <TextBlock Text="外部キー列" VerticalAlignment="Center" />
+              <ComboBox
+                Grid.Column="1"
+                ItemsSource="{Binding AvailableTargetColumns}"
+                DisplayMemberPath="Name"
+                SelectedValuePath="Id"
+                SelectedValue="{Binding TargetColumnId, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                IsEnabled="{Binding CanSelectForeignKeyColumns}"
+              />
             </Grid>
             <Button Margin="0,12,0,0" Content="リレーションを削除" Command="{Binding RemoveSelectedRelationshipCommand}" />
           </StackPanel>

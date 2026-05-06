@@ -10,7 +10,7 @@ using Microsoft.Data.SqlClient;
 namespace ERDesigner.Tests.Services;
 
 /// <summary>
-/// 実 SQL Server (localhost / SampleDB2 / Windows 認証) に対してスキーマ同期を end-to-end でテストします。
+/// 実 SQL Server (localhost / TestDB / Windows 認証) に対してスキーマ同期を end-to-end でテストします。
 /// 接続できない環境ではスキップされます。テスト用オブジェクトは <c>_erd_sync_test_</c> プレフィクスで作成し、
 /// 必ず最後に DROP します。
 /// </summary>
@@ -22,7 +22,7 @@ public class SchemaSyncIntegrationTests : IAsyncLifetime
     private static readonly SqlConnectionSettings Settings = new()
     {
         Server = "localhost",
-        Database = "SampleDB2",
+        Database = "TestDB",
         AuthMode = SqlAuthMode.Windows,
         TrustServerCertificate = true,
     };
@@ -112,6 +112,8 @@ IF OBJECT_ID(N'{ParentTable}', N'U') IS NOT NULL DROP TABLE [{ParentTable}];";
             SourceEntityId = parent.Id,
             TargetEntityId = child.Id,
             Type = RelationshipType.OneToMany,
+            SourceColumnId = parent.Columns[0].Id,
+            TargetColumnId = child.Columns[1].Id,
         };
 
         // ---------- 2) DB から現状を取得して差分計算 ----------
@@ -135,6 +137,9 @@ IF OBJECT_ID(N'{ParentTable}', N'U') IS NOT NULL DROP TABLE [{ParentTable}];";
         // ID は importer が新しい Guid を振り直すので、リレーションは「FK が DB 側に存在するか」で判定される
         diff2.Items.Where(i => i.Kind == SchemaDiffKind.AddTable).Should().BeEmpty();
         diff2.Items.Where(i => i.Kind == SchemaDiffKind.AddColumn).Should().BeEmpty();
+        live2.Relationships.Should().ContainSingle();
+        live2.Relationships[0].ConstraintName.Should().Be($"FK_{ChildTable}_{ParentTable}");
+        live2.Relationships[0].TargetColumnId.Should().NotBeNull();
 
         // ---------- 5) 列追加の差分テスト ----------
         child.Columns.Add(new Column { Name = "AddedLater", DataType = "nvarchar(20)" });

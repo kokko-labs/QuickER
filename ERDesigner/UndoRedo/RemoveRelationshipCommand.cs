@@ -19,8 +19,16 @@ public class RemoveRelationshipCommand : IUndoableCommand
     public string Description => "リレーション削除";
 
     /// <inheritdoc />
-    public void Execute() => _main.Relationships.Remove(_rel);
+    public void Execute()
+    {
+        _main.Relationships.Remove(_rel);
+        _main.ApplyRelationshipColumnRules();
+    }
 
     /// <inheritdoc />
-    public void Undo() => _main.Relationships.Add(_rel);
+    public void Undo()
+    {
+        _main.Relationships.Add(_rel);
+        _main.ApplyRelationshipColumnRules();
+    }
 }

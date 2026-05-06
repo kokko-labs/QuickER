@@ -1,10 +1,7 @@
-﻿using System.Collections.Generic;
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.ComponentModel;
 using System.IO;
-using System.Linq;
-using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -18,7 +15,29 @@ namespace ERDesigner.ViewModels;
 
 public partial class MainViewModel : ObservableObject
 {
+    private static readonly string[] TrackedEntityPropertyNames = [nameof(EntityViewModel.TableName), nameof(EntityViewModel.Memo), nameof(EntityViewModel.Description)];
+    private static readonly string[] TrackedRelationshipPropertyNames =
+    [
+        nameof(RelationshipViewModel.Type),
+        nameof(RelationshipViewModel.SourceColumnId),
+        nameof(RelationshipViewModel.TargetColumnId),
+    ];
+    private static readonly string[] TrackedColumnPropertyNames =
+    [
+        nameof(ColumnViewModel.Name),
+        nameof(ColumnViewModel.DataType),
+        nameof(ColumnViewModel.IsPrimaryKey),
+        nameof(ColumnViewModel.IsForeignKey),
+        nameof(ColumnViewModel.Description),
+    ];
+
     public UndoRedoManager UndoRedo { get; } = new();
+
+    /// <summary>確認ダイアログを表示するかどうか。テスト時は false にできます。</summary>
+    public bool IsConfirmationEnabled { get; set; } = true;
+
+    private readonly Dictionary<object, Dictionary<string, object?>> _trackedPropertySnapshots = new();
+    private bool _suspendUndoTracking;
 
     public ObservableCollection<EntityViewModel> Entities { get; } = new();
     public ObservableCollection<RelationshipViewModel> Relationships { get; } = new();
@@ -61,6 +80,7 @@ public partial class MainViewModel : ObservableObject
     public MainViewModel()
     {
         Entities.CollectionChanged += OnEntitiesCollectionChanged;
+        Relationships.CollectionChanged += OnRelationshipsCollectionChanged;
     }
 
     /// <summary>起動時に前回の自動保存ファイルを復元します。アプリ起動時に1回呼んでください。</summary>
@@ -83,6 +103,16 @@ public partial class MainViewModel : ObservableObject
             foreach (EntityViewModel entity in e.OldItems)
             {
                 entity.PropertyChanged -= OnEntityPropertyChanged;
+                entity.PropertyChanged -= OnTrackedEntityPropertyChanged;
+                entity.Columns.CollectionChanged -= OnEntityColumnsCollectionChanged;
+
+                foreach (var column in entity.Columns)
+                {
+                    column.PropertyChanged -= OnTrackedColumnPropertyChanged;
+                    _trackedPropertySnapshots.Remove(column);
+                }
+
+                _trackedPropertySnapshots.Remove(entity);
             }
         }
 
@@ -92,6 +122,15 @@ public partial class MainViewModel : ObservableObject
             {
                 entity.ShowDescriptionsInDiagram = ShowColumnDescriptionsInDiagram;
                 entity.PropertyChanged += OnEntityPropertyChanged;
+                entity.PropertyChanged += OnTrackedEntityPropertyChanged;
+                entity.Columns.CollectionChanged += OnEntityColumnsCollectionChanged;
+                CaptureTrackedProperties(entity, TrackedEntityPropertyNames);
+
+                foreach (var column in entity.Columns)
+                {
+                    column.PropertyChanged += OnTrackedColumnPropertyChanged;
+                    CaptureTrackedProperties(column, TrackedColumnPropertyNames);
+                }
             }
         }
 
@@ -107,6 +146,194 @@ public partial class MainViewModel : ObservableObject
         }
     }
 
+    private void OnTrackedEntityPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        TrackPropertyChange(sender, e, TrackedEntityPropertyNames);
+    }
+
+    private void OnEntityColumnsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        if (e.OldItems is not null)
+        {
+            foreach (ColumnViewModel column in e.OldItems)
+            {
+                column.PropertyChanged -= OnTrackedColumnPropertyChanged;
+                _trackedPropertySnapshots.Remove(column);
+            }
+        }
+
+        if (e.NewItems is not null)
+        {
+            foreach (ColumnViewModel column in e.NewItems)
+            {
+                column.PropertyChanged += OnTrackedColumnPropertyChanged;
+                CaptureTrackedProperties(column, TrackedColumnPropertyNames);
+            }
+        }
+    }
+
+    private void OnTrackedColumnPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        TrackPropertyChange(sender, e, TrackedColumnPropertyNames);
+    }
+
+    private void OnRelationshipsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        if (e.OldItems is not null)
+        {
+            foreach (RelationshipViewModel relationship in e.OldItems)
+            {
+                relationship.PropertyChanged -= OnRelationshipPropertyChanged;
+                _trackedPropertySnapshots.Remove(relationship);
+            }
+        }
+
+        if (e.NewItems is not null)
+        {
+            foreach (RelationshipViewModel relationship in e.NewItems)
+            {
+                relationship.PropertyChanged += OnRelationshipPropertyChanged;
+                CaptureTrackedProperties(relationship, TrackedRelationshipPropertyNames);
+            }
+        }
+
+        ApplyRelationshipColumnRules();
+        OnPropertyChanged(nameof(Relationships));
+    }
+
+    private void OnRelationshipPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        TrackPropertyChange(sender, e, TrackedRelationshipPropertyNames);
+
+        if (e.PropertyName is nameof(RelationshipViewModel.SourceColumnId) or nameof(RelationshipViewModel.TargetColumnId) or nameof(RelationshipViewModel.Type))
+        {
+            ApplyRelationshipColumnRules();
+        }
+    }
+
+    private void TrackPropertyChange(object? sender, PropertyChangedEventArgs e, IReadOnlyList<string> trackedProperties)
+    {
+        if (_suspendUndoTracking || sender is null || string.IsNullOrEmpty(e.PropertyName) || !trackedProperties.Contains(e.PropertyName))
+        {
+            return;
+        }
+
+        if (!_trackedPropertySnapshots.TryGetValue(sender, out var snapshots) || !snapshots.TryGetValue(e.PropertyName, out var oldValue))
+        {
+            CaptureTrackedProperties(sender, trackedProperties);
+            return;
+        }
+
+        var newValue = sender.GetType().GetProperty(e.PropertyName)?.GetValue(sender);
+
+        if (Equals(oldValue, newValue))
+        {
+            return;
+        }
+
+        UndoRedo.Push(new PropertyChangeCommand(sender, e.PropertyName, oldValue, newValue, CreateAfterPropertyApplyAction(sender, e.PropertyName)));
+        snapshots[e.PropertyName] = newValue;
+    }
+
+    private void CaptureTrackedProperties(object target, IReadOnlyList<string> trackedProperties)
+    {
+        var snapshots = trackedProperties.ToDictionary(name => name, name => target.GetType().GetProperty(name)?.GetValue(target));
+        _trackedPropertySnapshots[target] = snapshots;
+    }
+
+    private void RefreshTrackedPropertySnapshots()
+    {
+        foreach (var entity in Entities)
+        {
+            CaptureTrackedProperties(entity, TrackedEntityPropertyNames);
+
+            foreach (var column in entity.Columns)
+            {
+                CaptureTrackedProperties(column, TrackedColumnPropertyNames);
+            }
+        }
+
+        foreach (var relationship in Relationships)
+        {
+            CaptureTrackedProperties(relationship, TrackedRelationshipPropertyNames);
+        }
+    }
+
+    private void RunWithoutUndoTracking(Action action)
+    {
+        var old = _suspendUndoTracking;
+        _suspendUndoTracking = true;
+
+        try
+        {
+            action();
+        }
+        finally
+        {
+            _suspendUndoTracking = old;
+            RefreshTrackedPropertySnapshots();
+        }
+    }
+
+    private Action? CreateAfterPropertyApplyAction(object sender, string propertyName)
+    {
+        if (
+            sender is RelationshipViewModel
+            && propertyName is nameof(RelationshipViewModel.Type) or nameof(RelationshipViewModel.SourceColumnId) or nameof(RelationshipViewModel.TargetColumnId)
+        )
+        {
+            return ApplyRelationshipColumnRules;
+        }
+
+        if (sender is ColumnViewModel && propertyName is nameof(ColumnViewModel.IsPrimaryKey) or nameof(ColumnViewModel.IsForeignKey))
+        {
+            return ApplyRelationshipColumnRules;
+        }
+
+        return null;
+    }
+
+    private void ReplaceDiagram(IEnumerable<Entity> entities, IEnumerable<Relationship> relationships, bool clearUndoHistory)
+    {
+        RunWithoutUndoTracking(() =>
+        {
+            foreach (var r in Relationships)
+            {
+                r.Detach();
+            }
+
+            Relationships.Clear();
+            Entities.Clear();
+
+            foreach (var entity in entities)
+            {
+                Entities.Add(new EntityViewModel(entity));
+            }
+
+            foreach (var relationship in relationships)
+            {
+                var src = Entities.FirstOrDefault(e => e.Id == relationship.SourceEntityId);
+                var tgt = Entities.FirstOrDefault(e => e.Id == relationship.TargetEntityId);
+
+                if (src is null || tgt is null)
+                {
+                    continue;
+                }
+
+                Relationships.Add(new RelationshipViewModel(relationship, src, tgt));
+            }
+
+            SelectedEntity = null;
+            SelectedRelationship = null;
+            SelectedColumn = null;
+        });
+
+        if (clearUndoHistory)
+        {
+            UndoRedo.Clear();
+        }
+    }
+
     partial void OnShowColumnDescriptionsInDiagramChanged(bool value)
     {
         foreach (var entity in Entities)
@@ -118,6 +345,7 @@ public partial class MainViewModel : ObservableObject
     // ---------------- Auto-save / restore ----------------
 
     private static readonly string AutoSavePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ERDesigner", "last_diagram.json");
+    private static readonly string UiStatePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ERDesigner", "ui_state.json");
 
     /// <summary>現在のダイアグラムを自動保存ファイルに書き出します。</summary>
     public void AutoSave()
@@ -127,6 +355,7 @@ public partial class MainViewModel : ObservableObject
             var dir = Path.GetDirectoryName(AutoSavePath)!;
             Directory.CreateDirectory(dir);
             JsonStorageService.Save(AutoSavePath, this);
+            File.WriteAllText(UiStatePath, System.Text.Json.JsonSerializer.Serialize(new UiState { ShowColumnDescriptionsInDiagram = ShowColumnDescriptionsInDiagram }));
         }
         catch
         { /* 自動保存の失敗は無視 */
@@ -136,6 +365,20 @@ public partial class MainViewModel : ObservableObject
     /// <summary>起動時に前回の自動保存ファイルを復元します。</summary>
     private void RestoreLastDiagram()
     {
+        try
+        {
+            if (File.Exists(UiStatePath))
+            {
+                var uiState = System.Text.Json.JsonSerializer.Deserialize<UiState>(File.ReadAllText(UiStatePath));
+
+                if (uiState is not null)
+                {
+                    ShowColumnDescriptionsInDiagram = uiState.ShowColumnDescriptionsInDiagram;
+                }
+            }
+        }
+        catch { }
+
         if (!File.Exists(AutoSavePath))
         {
             return;
@@ -145,23 +388,7 @@ public partial class MainViewModel : ObservableObject
         {
             var diagram = JsonStorageService.Load(AutoSavePath);
 
-            foreach (var e in diagram.Entities)
-            {
-                Entities.Add(new EntityViewModel(e));
-            }
-
-            foreach (var r in diagram.Relationships)
-            {
-                var src = Entities.FirstOrDefault(e => e.Id == r.SourceEntityId);
-                var tgt = Entities.FirstOrDefault(e => e.Id == r.TargetEntityId);
-
-                if (src is null || tgt is null)
-                {
-                    continue;
-                }
-
-                Relationships.Add(new RelationshipViewModel(r, src, tgt));
-            }
+            ReplaceDiagram(diagram.Entities, diagram.Relationships, clearUndoHistory: true);
         }
         catch
         { /* 復元失敗時は空で起動 */
@@ -173,7 +400,7 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void NewDiagram()
     {
-        if (Entities.Count > 0)
+        if (IsConfirmationEnabled && Entities.Count > 0)
         {
             var ans = MessageBox.Show("現在のダイアグラムをクリアします。よろしいですか？", "確認", MessageBoxButton.OKCancel, MessageBoxImage.Question);
 
@@ -183,16 +410,7 @@ public partial class MainViewModel : ObservableObject
             }
         }
 
-        foreach (var r in Relationships)
-        {
-            r.Detach();
-        }
-
-        Entities.Clear();
-        Relationships.Clear();
-        UndoRedo.Clear();
-        SelectedEntity = null;
-        SelectedRelationship = null;
+        ReplaceDiagram(Array.Empty<Entity>(), Array.Empty<Relationship>(), clearUndoHistory: true);
     }
 
     [RelayCommand]
@@ -269,6 +487,22 @@ public partial class MainViewModel : ObservableObject
     }
 
     private bool CanRemoveRelationship() => SelectedRelationship is not null;
+
+    /// <summary>選択対象に応じて Delete キーの削除対象を切り替えます。</summary>
+    [RelayCommand]
+    private void DeleteSelected()
+    {
+        if (SelectedRelationship is not null)
+        {
+            RemoveSelectedRelationship();
+            return;
+        }
+
+        if (SelectedEntity is not null)
+        {
+            RemoveSelectedEntity();
+        }
+    }
 
     [RelayCommand(CanExecute = nameof(CanAddColumn))]
     private void AddColumn()
@@ -350,6 +584,8 @@ public partial class MainViewModel : ObservableObject
                     SourceEntityId = PendingRelationshipSource.Id,
                     TargetEntityId = entity.Id,
                     Type = PendingRelationshipType,
+                    SourceColumnId = PendingRelationshipSource.Columns.FirstOrDefault(c => c.IsPrimaryKey)?.Id,
+                    TargetColumnId = ResolveDefaultForeignKeyColumn(PendingRelationshipSource, entity)?.Id,
                 },
                 PendingRelationshipSource,
                 entity
@@ -421,10 +657,10 @@ public partial class MainViewModel : ObservableObject
     // ---------------- Undo/Redo ----------------
 
     [RelayCommand]
-    private void Undo() => UndoRedo.Undo();
+    private void Undo() => RunWithoutUndoTracking(() => UndoRedo.Undo());
 
     [RelayCommand]
-    private void Redo() => UndoRedo.Redo();
+    private void Redo() => RunWithoutUndoTracking(() => UndoRedo.Redo());
 
     [RelayCommand]
     private void EntityClick(EntityViewModel? entity)
@@ -594,6 +830,7 @@ public partial class MainViewModel : ObservableObject
             AutoFitEntityWidths(Entities);
             AutoLayoutService.LayoutTree(Entities, Relationships);
             RefreshCanvasSize();
+            UndoRedo.Clear();
         }
         catch (System.Exception ex)
         {
@@ -665,6 +902,7 @@ public partial class MainViewModel : ObservableObject
         AutoFitEntityWidths(Entities);
         AutoLayoutService.LayoutTree(Entities, Relationships);
         RefreshCanvasSize();
+        UndoRedo.Clear();
     }
 
     // ---------------- Save / Load ----------------
@@ -693,32 +931,79 @@ public partial class MainViewModel : ObservableObject
 
         var diagram = JsonStorageService.Load(dlg.FileName);
 
-        foreach (var r in Relationships)
+        ReplaceDiagram(diagram.Entities, diagram.Relationships, clearUndoHistory: true);
+    }
+
+    /// <summary>リレーションに基づいて各カラムの PK/FK 編集可否と FK 状態を同期します。</summary>
+    public void ApplyRelationshipColumnRules()
+    {
+        RunWithoutUndoTracking(() =>
         {
-            r.Detach();
-        }
-
-        Entities.Clear();
-        Relationships.Clear();
-
-        foreach (var e in diagram.Entities)
-        {
-            Entities.Add(new EntityViewModel(e));
-        }
-
-        foreach (var r in diagram.Relationships)
-        {
-            var src = Entities.FirstOrDefault(e => e.Id == r.SourceEntityId);
-            var tgt = Entities.FirstOrDefault(e => e.Id == r.TargetEntityId);
-
-            if (src is null || tgt is null)
+            foreach (var entity in Entities)
             {
-                continue;
+                foreach (var column in entity.Columns)
+                {
+                    column.IsPrimaryKeyEditable = true;
+                    column.IsForeignKeyEditable = true;
+
+                    if (column.IsForeignKeyManagedByRelationship)
+                    {
+                        column.IsForeignKey = false;
+                        column.IsForeignKeyManagedByRelationship = false;
+                    }
+                }
             }
 
-            Relationships.Add(new RelationshipViewModel(r, src, tgt));
+            foreach (var relationship in Relationships)
+            {
+                LockRelationshipColumns(relationship);
+            }
+        });
+    }
+
+    /// <summary>対象リレーションで使用中の列をロックし、FK フラグを同期します。</summary>
+    private static void LockRelationshipColumns(RelationshipViewModel relationship)
+    {
+        var sourceColumn = relationship.SourceColumnId is null ? null : relationship.Source.Columns.FirstOrDefault(c => c.Id == relationship.SourceColumnId);
+        var targetColumn = relationship.TargetColumnId is null ? null : relationship.Target.Columns.FirstOrDefault(c => c.Id == relationship.TargetColumnId);
+
+        if (sourceColumn is not null)
+        {
+            sourceColumn.IsPrimaryKeyEditable = false;
+            sourceColumn.IsForeignKeyEditable = false;
         }
 
-        UndoRedo.Clear();
+        if (targetColumn is not null)
+        {
+            targetColumn.IsPrimaryKeyEditable = false;
+            targetColumn.IsForeignKeyEditable = false;
+            targetColumn.IsForeignKeyManagedByRelationship = true;
+            targetColumn.IsForeignKey = true;
+        }
+    }
+
+    /// <summary>追加時の既定 FK 列を解決します。PK 同名列を優先し、無ければ従来どおり最初の非 PK 列を採用します。</summary>
+    private static ColumnViewModel? ResolveDefaultForeignKeyColumn(EntityViewModel source, EntityViewModel target)
+    {
+        var sourcePrimaryKey = source.Columns.FirstOrDefault(c => c.IsPrimaryKey);
+
+        if (sourcePrimaryKey is null)
+        {
+            return target.Columns.FirstOrDefault(c => !c.IsPrimaryKey) ?? target.Columns.FirstOrDefault();
+        }
+
+        var sameName = target.Columns.FirstOrDefault(c => string.Equals(c.Name, sourcePrimaryKey.Name, StringComparison.OrdinalIgnoreCase));
+
+        if (sameName is not null)
+        {
+            return sameName;
+        }
+
+        return target.Columns.FirstOrDefault(c => !c.IsPrimaryKey) ?? target.Columns.FirstOrDefault();
+    }
+
+    private sealed class UiState
+    {
+        public bool ShowColumnDescriptionsInDiagram { get; init; }
     }
 }

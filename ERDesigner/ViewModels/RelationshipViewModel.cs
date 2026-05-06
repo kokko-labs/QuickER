@@ -1,4 +1,5 @@
 ﻿using System.ComponentModel;
+using System.Linq;
 using CommunityToolkit.Mvvm.ComponentModel;
 using ERDesigner.Models;
 
@@ -31,6 +32,18 @@ public partial class RelationshipViewModel : ObservableObject
     [ObservableProperty]
     private RelationshipType _type;
 
+    /// <summary>起点エンティティ側の参照先カラム ID。</summary>
+    [ObservableProperty]
+    private Guid? _sourceColumnId;
+
+    /// <summary>終点エンティティ側の外部キーカラム ID。</summary>
+    [ObservableProperty]
+    private Guid? _targetColumnId;
+
+    /// <summary>外部キー制約名。</summary>
+    [ObservableProperty]
+    private string? _constraintName;
+
     /// <summary>選択中かどうか。</summary>
     [ObservableProperty]
     private bool _isSelected;
@@ -41,17 +54,105 @@ public partial class RelationshipViewModel : ObservableObject
     /// <summary>関連の終点となるエンティティ。</summary>
     public EntityViewModel Target { get; }
 
+    /// <summary>参照先列として選択可能な起点側カラム一覧です。</summary>
+    public IReadOnlyList<ColumnViewModel> AvailableSourceColumns => Source.Columns.Where(c => c.IsPrimaryKey).ToList();
+
+    /// <summary>外部キー列として選択可能な終点側カラム一覧です。</summary>
+    public IReadOnlyList<ColumnViewModel> AvailableTargetColumns => Target.Columns.ToList();
+
+    /// <summary>列選択が有効なリレーション種別かどうかです。</summary>
+    public bool CanSelectForeignKeyColumns => Type != RelationshipType.ManyToMany;
+
     /// <summary>モデルと両端のエンティティから ViewModel を生成します。</summary>
     public RelationshipViewModel(Relationship model, EntityViewModel source, EntityViewModel target)
     {
         Id = model.Id;
         _type = model.Type;
+        _sourceColumnId = model.SourceColumnId;
+        _targetColumnId = model.TargetColumnId;
+        _constraintName = model.ConstraintName;
         Source = source;
         Target = target;
 
         Source.PropertyChanged += OnEndpointChanged;
         Target.PropertyChanged += OnEndpointChanged;
+
+        Source.Columns.CollectionChanged += OnColumnsCollectionChanged;
+        Target.Columns.CollectionChanged += OnColumnsCollectionChanged;
+
+        foreach (var column in Source.Columns)
+        {
+            column.PropertyChanged += OnColumnPropertyChanged;
+        }
+
+        foreach (var column in Target.Columns)
+        {
+            column.PropertyChanged += OnColumnPropertyChanged;
+        }
+
+        EnsureColumnSelectionConsistency();
     }
+
+    private void OnColumnsCollectionChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
+    {
+        if (e.OldItems is not null)
+        {
+            foreach (ColumnViewModel column in e.OldItems)
+            {
+                column.PropertyChanged -= OnColumnPropertyChanged;
+            }
+        }
+
+        if (e.NewItems is not null)
+        {
+            foreach (ColumnViewModel column in e.NewItems)
+            {
+                column.PropertyChanged += OnColumnPropertyChanged;
+            }
+        }
+
+        NotifyColumnCandidatesChanged();
+        EnsureColumnSelectionConsistency();
+    }
+
+    private void OnColumnPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is nameof(ColumnViewModel.IsPrimaryKey) or nameof(ColumnViewModel.Name))
+        {
+            NotifyColumnCandidatesChanged();
+            EnsureColumnSelectionConsistency();
+        }
+    }
+
+    private void NotifyColumnCandidatesChanged()
+    {
+        OnPropertyChanged(nameof(AvailableSourceColumns));
+        OnPropertyChanged(nameof(AvailableTargetColumns));
+    }
+
+    private void EnsureColumnSelectionConsistency()
+    {
+        if (!CanSelectForeignKeyColumns)
+        {
+            SourceColumnId = null;
+            TargetColumnId = null;
+            return;
+        }
+
+        if (SourceColumnId is not null && AvailableSourceColumns.All(c => c.Id != SourceColumnId))
+        {
+            SourceColumnId = null;
+        }
+
+        if (TargetColumnId is not null && AvailableTargetColumns.All(c => c.Id != TargetColumnId))
+        {
+            TargetColumnId = null;
+        }
+    }
+
+    partial void OnSourceColumnIdChanged(Guid? value) => OnPropertyChanged(nameof(SourceColumnId));
+
+    partial void OnTargetColumnIdChanged(Guid? value) => OnPropertyChanged(nameof(TargetColumnId));
 
     /// <summary>両端の位置・幅が変わったら端点プロパティを再通知します。</summary>
     private void OnEndpointChanged(object? sender, PropertyChangedEventArgs e)
@@ -89,6 +190,9 @@ public partial class RelationshipViewModel : ObservableObject
         OnPropertyChanged(nameof(Label));
         OnPropertyChanged(nameof(SourceMarker));
         OnPropertyChanged(nameof(TargetMarker));
+        OnPropertyChanged(nameof(CanSelectForeignKeyColumns));
+
+        EnsureColumnSelectionConsistency();
     }
 
     // ===== 端点座標 =====
@@ -274,6 +378,9 @@ public partial class RelationshipViewModel : ObservableObject
             SourceEntityId = Source.Id,
             TargetEntityId = Target.Id,
             Type = Type,
+            SourceColumnId = SourceColumnId,
+            TargetColumnId = TargetColumnId,
+            ConstraintName = ConstraintName,
         };
 
     /// <summary>両端の PropertyChanged 購読を解除します（画面リセット時など）。</summary>
@@ -281,5 +388,17 @@ public partial class RelationshipViewModel : ObservableObject
     {
         Source.PropertyChanged -= OnEndpointChanged;
         Target.PropertyChanged -= OnEndpointChanged;
+        Source.Columns.CollectionChanged -= OnColumnsCollectionChanged;
+        Target.Columns.CollectionChanged -= OnColumnsCollectionChanged;
+
+        foreach (var column in Source.Columns)
+        {
+            column.PropertyChanged -= OnColumnPropertyChanged;
+        }
+
+        foreach (var column in Target.Columns)
+        {
+            column.PropertyChanged -= OnColumnPropertyChanged;
+        }
     }
 }

@@ -41,7 +41,7 @@ public class SqlConnectionDialogViewModelTests : IDisposable
         store.Upsert(
             new SqlConnectionProfile
             {
-                Name = "SampleDB",
+                Name = "TestDB",
                 Server = "saved-server",
                 Database = "saved-db",
             },
@@ -63,7 +63,7 @@ public class SqlConnectionDialogViewModelTests : IDisposable
         store.Upsert(
             new SqlConnectionProfile
             {
-                Name = "SampleDB",
+                Name = "TestDB",
                 Server = "saved-server",
                 Database = "saved-db",
                 AuthMode = SqlAuthMode.SqlServer,
@@ -87,8 +87,8 @@ public class SqlConnectionDialogViewModelTests : IDisposable
         vm.Database.Should().Be("saved-db");
         vm.UserId.Should().Be("sa");
         vm.Password.Should().Be("secret");
-        vm.ProfileName.Should().Be("SampleDB");
-        vm.StatusMessage.Should().Contain("SampleDB");
+        vm.ProfileName.Should().Be("TestDB");
+        vm.StatusMessage.Should().Contain("TestDB");
     }
 
     [Fact(DisplayName = "OK 後に新しいダイアログを開くと前回接続情報のデータベース名も復元される")]

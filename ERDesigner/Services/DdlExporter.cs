@@ -1,4 +1,5 @@
 ﻿using System.IO;
+using System.Linq;
 using System.Text;
 using ERDesigner.ViewModels;
 
@@ -89,14 +90,22 @@ public static class DdlExporter
             var pkEntity = rel.Type == Models.RelationshipType.OneToMany ? rel.Source : rel.Source;
             var fkEntity = rel.Type == Models.RelationshipType.OneToMany ? rel.Target : rel.Target;
 
-            var pkCol = pkEntity.Columns.FirstOrDefault(c => c.IsPrimaryKey);
+            var pkCol = rel.SourceColumnId is not null
+                ? pkEntity.Columns.FirstOrDefault(c => c.Id == rel.SourceColumnId) ?? pkEntity.Columns.FirstOrDefault(c => c.IsPrimaryKey)
+                : pkEntity.Columns.FirstOrDefault(c => c.IsPrimaryKey);
 
             if (pkCol is null)
             {
                 continue;
             }
 
-            var fkColName = pkEntity.TableName + "_" + pkCol.Name;
+            var fkColName = rel.TargetColumnId is not null ? fkEntity.Columns.FirstOrDefault(c => c.Id == rel.TargetColumnId)?.Name : null;
+
+            if (string.IsNullOrWhiteSpace(fkColName))
+            {
+                fkColName = pkEntity.TableName + "_" + pkCol.Name;
+            }
+
             var fkTable = fkEntity.TableName;
             var pkTable = pkEntity.TableName;
 

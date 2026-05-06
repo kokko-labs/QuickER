@@ -38,7 +38,10 @@ public class SqlServerSchemaImporter
                 .OrderBy(x => x.TableName)
                 .Select(x => x.TableName + ":" + string.Join(",", x.Columns.Select(c => c.Name + "(" + c.DataType + (c.IsPrimaryKey ? "*PK" : "") + ")")))
         );
-        var r = string.Join("|", relationships.Select(x => x.SourceEntityId + ">" + x.TargetEntityId + ":" + x.Type).OrderBy(s => s));
+        var r = string.Join(
+            "|",
+            relationships.Select(x => x.SourceEntityId + ">" + x.TargetEntityId + ":" + x.Type + ":" + x.SourceColumnId + ":" + x.TargetColumnId).OrderBy(s => s)
+        );
         return e + "##" + r;
     }
 
@@ -282,7 +285,7 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
             g.RefCols.Add(refCol);
         }
 
-        foreach (var (_, g) in grouped)
+        foreach (var (fkName, g) in grouped)
         {
             if (!tables.TryGetValue(g.ParentKey, out var parent))
             {
@@ -316,6 +319,9 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
                     SourceEntityId = refer.Entity.Id, // 参照先 (PK 側) を起点として表示
                     TargetEntityId = parent.Entity.Id, // FK 保有テーブル
                     Type = isOneToOne ? RelationshipType.OneToOne : RelationshipType.OneToMany,
+                    SourceColumnId = g.RefCols.Count == 1 && refer.ColumnsByName.TryGetValue(g.RefCols[0], out var refColumn) ? refColumn.Id : null,
+                    TargetColumnId = g.ParentCols.Count == 1 && parent.ColumnsByName.TryGetValue(g.ParentCols[0], out var parentColumn) ? parentColumn.Id : null,
+                    ConstraintName = fkName,
                 }
             );
         }

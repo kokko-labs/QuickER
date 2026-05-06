@@ -27,6 +27,10 @@ public class JsonStorageServiceTests
         vm.StartAddOneToManyCommand.Execute(null);
         vm.OnEntityClicked(a);
         vm.OnEntityClicked(b);
+        b.Columns.Add(new ColumnViewModel(new Column { Name = "CustomerId", DataType = "int" }));
+        vm.Relationships[0].SourceColumnId = a.Columns[0].Id;
+        vm.Relationships[0].TargetColumnId = b.Columns[1].Id;
+        vm.Relationships[0].ConstraintName = "FK_Order_Customer";
 
         var path = Path.Combine(Path.GetTempPath(), $"er-{Guid.NewGuid()}.json");
 
@@ -45,6 +49,9 @@ public class JsonStorageServiceTests
             ea.Y.Should().Be(50);
 
             loaded.Relationships[0].Type.Should().Be(RelationshipType.OneToMany);
+            loaded.Relationships[0].SourceColumnId.Should().Be(a.Columns[0].Id);
+            loaded.Relationships[0].TargetColumnId.Should().Be(b.Columns[1].Id);
+            loaded.Relationships[0].ConstraintName.Should().Be("FK_Order_Customer");
         }
         finally
         {

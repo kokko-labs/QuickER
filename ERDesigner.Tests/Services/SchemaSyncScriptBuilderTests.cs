@@ -122,20 +122,50 @@ public class SchemaSyncScriptBuilderTests
             }
         );
         order.Columns.Add(new Column { Name = "Customer_Id", DataType = "int" });
+        order.Columns.Add(new Column { Name = "CustomerRef", DataType = "int" });
+        var rel = new Relationship
+        {
+            SourceEntityId = customer.Id,
+            TargetEntityId = order.Id,
+            Type = RelationshipType.OneToMany,
+            SourceColumnId = customer.Columns[0].Id,
+            TargetColumnId = order.Columns[2].Id,
+        };
 
         var item = new SchemaDiffItem
         {
             Kind = SchemaDiffKind.AddForeignKey,
             TableName = "Order",
-            ColumnName = "Customer_Id",
+            ColumnName = "CustomerRef",
             ParentEntity = customer,
             ChildEntity = order,
+            Relationship = rel,
             IsSelected = true,
         };
 
         var sql = SchemaSyncScriptBuilder.Build(new[] { item });
         sql.Should().Contain("ALTER TABLE [Order] ADD CONSTRAINT [FK_Order_Customer]");
-        sql.Should().Contain("FOREIGN KEY ([Customer_Id]) REFERENCES [Customer] ([Id])");
+        sql.Should().Contain("FOREIGN KEY ([CustomerRef]) REFERENCES [Customer] ([Id])");
+    }
+
+    [Fact(DisplayName = "DropForeignKey は制約名があればその名前で削除する")]
+    public void DropFk_UsesConstraintNameWhenAvailable()
+    {
+        var customer = new Entity { TableName = "Customer" };
+        var order = new Entity { TableName = "Order" };
+        var item = new SchemaDiffItem
+        {
+            Kind = SchemaDiffKind.DropForeignKey,
+            TableName = "Order",
+            ParentEntity = customer,
+            ChildEntity = order,
+            ForeignKeyName = "FK_Order_CustomerRef",
+            IsSelected = true,
+        };
+
+        var sql = SchemaSyncScriptBuilder.Build(new[] { item });
+        sql.Should().Contain("FK_Order_CustomerRef");
+        sql.Should().Contain("DROP CONSTRAINT [FK_Order_CustomerRef]");
     }
 
     [Fact(DisplayName = "実行順序: AddTable → AddColumn → AddForeignKey")]

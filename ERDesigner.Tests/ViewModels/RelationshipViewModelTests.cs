@@ -1,5 +1,4 @@
-﻿using System.Collections.Generic;
-using ERDesigner.Models;
+﻿using ERDesigner.Models;
 using ERDesigner.ViewModels;
 using FluentAssertions;
 
@@ -223,6 +222,79 @@ public class RelationshipViewModelTests
         // Undo で復元されること
         vm.UndoCommand.Execute(null);
         vm.Relationships.Should().Contain(rel);
+    }
+
+    [Fact(DisplayName = "参照先列と外部キー列の候補が取得できる")]
+    public void AvailableColumns_AreResolved()
+    {
+        var source = new EntityViewModel(
+            new Entity
+            {
+                Columns =
+                {
+                    new Column
+                    {
+                        Name = "Id",
+                        DataType = "int",
+                        IsPrimaryKey = true,
+                    },
+                    new Column { Name = "Code", DataType = "nvarchar(20)" },
+                },
+            }
+        );
+        var target = new EntityViewModel(
+            new Entity
+            {
+                Columns =
+                {
+                    new Column
+                    {
+                        Name = "Id",
+                        DataType = "int",
+                        IsPrimaryKey = true,
+                    },
+                    new Column { Name = "ParentId", DataType = "int" },
+                },
+            }
+        );
+        var rel = new RelationshipViewModel(new Relationship { Type = RelationshipType.OneToMany }, source, target);
+
+        rel.AvailableSourceColumns.Should().ContainSingle(c => c.Name == "Id");
+        rel.AvailableTargetColumns.Should().HaveCount(2);
+        rel.CanSelectForeignKeyColumns.Should().BeTrue();
+    }
+
+    [Fact(DisplayName = "多対多では列選択が無効化される")]
+    public void ManyToMany_DisablesColumnSelection()
+    {
+        var a = NewEntity(0, 0);
+        var b = NewEntity(300, 0);
+        a.Columns.Add(new ColumnViewModel(new Column { Name = "ParentId", DataType = "int" }));
+        b.Columns.Add(new ColumnViewModel(new Column { Name = "ChildId", DataType = "int" }));
+        var rel = new RelationshipViewModel(new Relationship { Type = RelationshipType.OneToMany }, a, b) { SourceColumnId = a.Columns[0].Id, TargetColumnId = b.Columns[0].Id };
+
+        rel.Type = RelationshipType.ManyToMany;
+
+        rel.CanSelectForeignKeyColumns.Should().BeFalse();
+        rel.SourceColumnId.Should().BeNull();
+        rel.TargetColumnId.Should().BeNull();
+    }
+
+    [Fact(DisplayName = "同じカラムに PK と FK が両方設定されても状態は保持できる")]
+    public void Column_CanHoldPkAndFkTogether()
+    {
+        var column = new ColumnViewModel(
+            new Column
+            {
+                Name = "Id",
+                DataType = "int",
+                IsPrimaryKey = true,
+                IsForeignKey = true,
+            }
+        );
+
+        column.IsPrimaryKey.Should().BeTrue();
+        column.IsForeignKey.Should().BeTrue();
     }
 
     [Fact(DisplayName = "MainViewModel.RemoveColumn で指定カラムが削除される")]

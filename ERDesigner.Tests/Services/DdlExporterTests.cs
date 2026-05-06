@@ -71,6 +71,7 @@ public class DdlExporterTests
                         DataType = "int",
                         IsPrimaryKey = true,
                     },
+                    new Column { Name = "ParentId", DataType = "int" },
                 },
             }
         );
@@ -83,6 +84,8 @@ public class DdlExporterTests
                     SourceEntityId = parent.Id,
                     TargetEntityId = child.Id,
                     Type = RelationshipType.OneToMany,
+                    SourceColumnId = parent.Columns[0].Id,
+                    TargetColumnId = child.Columns[1].Id,
                 },
                 parent,
                 child
@@ -92,7 +95,7 @@ public class DdlExporterTests
         var sql = DdlExporter.Build(vm);
 
         sql.Should().Contain("ALTER TABLE [C]");
-        sql.Should().Contain("FOREIGN KEY ([P_Id])");
+        sql.Should().Contain("FOREIGN KEY ([ParentId])");
         sql.Should().Contain("REFERENCES [P] ([Id])");
     }
 }

@@ -17,4 +17,13 @@ public class Relationship
 
     /// <summary>関連の種類（1対1 / 1対多 / 多対多）。</summary>
     public RelationshipType Type { get; set; } = RelationshipType.OneToMany;
+
+    /// <summary>起点エンティティ側の参照先カラム ID です。</summary>
+    public Guid? SourceColumnId { get; set; }
+
+    /// <summary>終点エンティティ側の外部キーカラム ID です。</summary>
+    public Guid? TargetColumnId { get; set; }
+
+    /// <summary>DB から取り込んだ外部キー制約名です。</summary>
+    public string? ConstraintName { get; set; }
 }

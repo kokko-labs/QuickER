@@ -28,6 +28,17 @@ public partial class ColumnViewModel : ObservableObject
     [ObservableProperty]
     private bool _isForeignKey;
 
+    /// <summary>主キーチェックを編集できるかどうか。</summary>
+    [ObservableProperty]
+    private bool _isPrimaryKeyEditable = true;
+
+    /// <summary>外部キーチェックを編集できるかどうか。</summary>
+    [ObservableProperty]
+    private bool _isForeignKeyEditable = true;
+
+    /// <summary>外部キーフラグがリレーション設定により自動管理されているかどうか。</summary>
+    public bool IsForeignKeyManagedByRelationship { get; set; }
+
     /// <summary>カラムの説明 (SQL Server の <c>MS_Description</c> と同期)。</summary>
     [ObservableProperty]
     private string _description;
@@ -42,6 +53,22 @@ public partial class ColumnViewModel : ObservableObject
         _isPrimaryKey = model.IsPrimaryKey;
         _isForeignKey = model.IsForeignKey;
         _description = model.Description ?? string.Empty;
+    }
+
+    partial void OnIsPrimaryKeyChanging(bool value)
+    {
+        if (!IsPrimaryKeyEditable)
+        {
+            value = _isPrimaryKey;
+        }
+    }
+
+    partial void OnIsForeignKeyChanging(bool value)
+    {
+        if (!IsForeignKeyEditable)
+        {
+            value = _isForeignKey;
+        }
     }
 
     /// <summary>現在の状態をモデルにコピーして返します（保存時に使用）。</summary>
