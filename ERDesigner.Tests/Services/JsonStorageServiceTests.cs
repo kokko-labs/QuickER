@@ -27,7 +27,16 @@ public class JsonStorageServiceTests
         vm.StartAddOneToManyCommand.Execute(null);
         vm.OnEntityClicked(a);
         vm.OnEntityClicked(b);
-        b.Columns.Add(new ColumnViewModel(new Column { Name = "CustomerId", DataType = "int" }));
+        b.Columns.Add(
+            new ColumnViewModel(
+                new Column
+                {
+                    Name = "CustomerId",
+                    DataType = "int",
+                    IsNullable = false,
+                }
+            )
+        );
         vm.Relationships[0].SourceColumnId = a.Columns[0].Id;
         vm.Relationships[0].TargetColumnId = b.Columns[1].Id;
         vm.Relationships[0].ConstraintName = "FK_Order_Customer";
@@ -52,6 +61,7 @@ public class JsonStorageServiceTests
             loaded.Relationships[0].SourceColumnId.Should().Be(a.Columns[0].Id);
             loaded.Relationships[0].TargetColumnId.Should().Be(b.Columns[1].Id);
             loaded.Relationships[0].ConstraintName.Should().Be("FK_Order_Customer");
+            loaded.Entities.First(e => e.Id == b.Id).Columns[1].IsNullable.Should().BeFalse();
         }
         finally
         {

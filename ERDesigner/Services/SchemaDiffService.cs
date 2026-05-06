@@ -150,8 +150,20 @@ public class SchemaDiffService
                 }
                 else
                 {
-                    if (!IsSameType(lcol.DataType, tcol.DataType))
+                    if (!IsSameType(lcol.DataType, tcol.DataType) || lcol.IsNullable != tcol.IsNullable)
                     {
+                        var changeParts = new List<string>();
+
+                        if (!IsSameType(lcol.DataType, tcol.DataType))
+                        {
+                            changeParts.Add($"型を {lcol.DataType} → {tcol.DataType} に変更");
+                        }
+
+                        if (lcol.IsNullable != tcol.IsNullable)
+                        {
+                            changeParts.Add($"NULL許容を {(lcol.IsNullable ? "許可" : "禁止")} → {(tcol.IsNullable ? "許可" : "禁止")} に変更");
+                        }
+
                         diff.Items.Add(
                             new SchemaDiffItem
                             {
@@ -162,7 +174,7 @@ public class SchemaDiffService
                                 Column = tcol,
                                 OldColumn = lcol,
                                 IsSelected = false,
-                                Description = $"列 [{name}].[{cname}] 型を {lcol.DataType} → {tcol.DataType} に変更",
+                                Description = $"列 [{name}].[{cname}] " + string.Join(" / ", changeParts),
                             }
                         );
                     }

@@ -1,4 +1,5 @@
 using ERDesigner.Models;
+using ERDesigner.UndoRedo;
 using ERDesigner.ViewModels;
 using FluentAssertions;
 
@@ -231,6 +232,145 @@ public class MainViewModelTests
         relationship.Type.Should().Be(RelationshipType.OneToMany);
     }
 
+    [Fact(DisplayName = "多対多への変更で列選択クリアも 1 回の Undo/Redo で往復する")]
+    public void RelationshipTypeChange_WithDependentColumnClear_CanUndoRedoAsSingleStep()
+    {
+        var vm = new MainViewModel();
+        vm.AddEntityCommand.Execute(null);
+        vm.AddEntityCommand.Execute(null);
+        vm.Entities[1].Columns.Add(new ColumnViewModel(new Column { Name = "ParentId", DataType = "int" }));
+        vm.StartAddOneToManyCommand.Execute(null);
+        vm.OnEntityClicked(vm.Entities[0]);
+        vm.OnEntityClicked(vm.Entities[1]);
+        var relationship = vm.Relationships[0];
+        var originalSourceColumnId = relationship.SourceColumnId;
+        var originalTargetColumnId = relationship.TargetColumnId;
+
+        relationship.Type = RelationshipType.ManyToMany;
+
+        relationship.SourceColumnId.Should().BeNull();
+        relationship.TargetColumnId.Should().BeNull();
+
+        vm.UndoCommand.Execute(null);
+        relationship.Type.Should().Be(RelationshipType.OneToMany);
+        relationship.SourceColumnId.Should().Be(originalSourceColumnId);
+        relationship.TargetColumnId.Should().Be(originalTargetColumnId);
+
+        vm.RedoCommand.Execute(null);
+        relationship.Type.Should().Be(RelationshipType.ManyToMany);
+        relationship.SourceColumnId.Should().BeNull();
+        relationship.TargetColumnId.Should().BeNull();
+    }
+
+    [Fact(DisplayName = "カラム追加は Undo/Redo できる")]
+    public void AddColumn_CanUndoRedo()
+    {
+        var vm = new MainViewModel();
+        vm.AddEntityCommand.Execute(null);
+        vm.SelectedEntity = vm.Entities[0];
+        var initialCount = vm.SelectedEntity.Columns.Count;
+
+        vm.AddColumnCommand.Execute(null);
+
+        vm.SelectedEntity.Columns.Should().HaveCount(initialCount + 1);
+        vm.SelectedColumn.Should().Be(vm.SelectedEntity.Columns.Last());
+
+        vm.UndoCommand.Execute(null);
+        vm.SelectedEntity.Columns.Should().HaveCount(initialCount);
+
+        vm.RedoCommand.Execute(null);
+        vm.SelectedEntity.Columns.Should().HaveCount(initialCount + 1);
+    }
+
+    [Fact(DisplayName = "カラム削除は Undo/Redo できる")]
+    public void RemoveColumn_CanUndoRedo()
+    {
+        var vm = new MainViewModel();
+        vm.AddEntityCommand.Execute(null);
+        vm.SelectedEntity = vm.Entities[0];
+        vm.SelectedEntity.Columns.Add(new ColumnViewModel(new Column { Name = "B", DataType = "int" }));
+        var removed = vm.SelectedEntity.Columns[0];
+
+        vm.RemoveColumnCommand.Execute(removed);
+
+        vm.SelectedEntity.Columns.Select(c => c.Name).Should().Equal("B");
+
+        vm.UndoCommand.Execute(null);
+        vm.SelectedEntity.Columns.Select(c => c.Name).Should().Equal("ID", "B");
+
+        vm.RedoCommand.Execute(null);
+        vm.SelectedEntity.Columns.Select(c => c.Name).Should().Equal("B");
+    }
+
+    [Fact(DisplayName = "FK に設定済みのカラムを削除して Undo するとリレーションの FK 設定も復元される")]
+    public void RemoveColumn_UsedAsFk_UndoRestoresRelationshipFk()
+    {
+        var vm = new MainViewModel();
+        vm.AddEntityCommand.Execute(null);
+        vm.AddEntityCommand.Execute(null);
+
+        // Entity[1] に FK 列を追加してリレーションを作成する
+        vm.Entities[1].Columns.Add(new ColumnViewModel(new Column { Name = "ParentId", DataType = "int" }));
+        vm.StartAddOneToManyCommand.Execute(null);
+        vm.OnEntityClicked(vm.Entities[0]);
+        vm.OnEntityClicked(vm.Entities[1]);
+
+        var relationship = vm.Relationships[0];
+
+        // FK 列として設定された TargetColumnId を記憶する
+        var originalTargetColumnId = relationship.TargetColumnId;
+        originalTargetColumnId.Should().NotBeNull();
+
+        // FK カラムを削除する
+        vm.SelectedEntity = vm.Entities[1];
+        var columnToRemove = vm.Entities[1].Columns.First(c => c.Id == originalTargetColumnId);
+        vm.RemoveColumnCommand.Execute(columnToRemove);
+
+        // 削除後: FK 設定がクリアされている
+        relationship.TargetColumnId.Should().BeNull();
+
+        // Undo: カラムが復元され、リレーションの FK 設定も復元される
+        vm.UndoCommand.Execute(null);
+        vm.Entities[1].Columns.Should().Contain(c => c.Id == originalTargetColumnId);
+        relationship.TargetColumnId.Should().Be(originalTargetColumnId);
+
+        // Redo: 再度削除されFK設定もクリアされる
+        vm.RedoCommand.Execute(null);
+        vm.Entities[1].Columns.Should().NotContain(c => c.Id == originalTargetColumnId);
+        relationship.TargetColumnId.Should().BeNull();
+    }
+
+    [Fact(DisplayName = "PK チェック変更に伴う NULL 変更も 1 回の Undo/Redo で往復する")]
+    public void PrimaryKeyChange_WithDependentNullableChange_CanUndoRedoAsSingleStep()
+    {
+        var vm = new MainViewModel();
+        vm.AddEntityCommand.Execute(null);
+        vm.SelectedEntity = vm.Entities[0];
+        vm.SelectedEntity.Columns.Add(
+            new ColumnViewModel(
+                new Column
+                {
+                    Name = "Code",
+                    DataType = "int",
+                    IsNullable = true,
+                }
+            )
+        );
+        var column = vm.SelectedEntity.Columns[1];
+
+        column.IsPrimaryKey = true;
+
+        column.IsNullable.Should().BeFalse();
+
+        vm.UndoCommand.Execute(null);
+        column.IsPrimaryKey.Should().BeFalse();
+        column.IsNullable.Should().BeTrue();
+
+        vm.RedoCommand.Execute(null);
+        column.IsPrimaryKey.Should().BeTrue();
+        column.IsNullable.Should().BeFalse();
+    }
+
     [Fact(DisplayName = "新規で図をクリアした後は Undo/Redo 履歴もリセットされる")]
     public void NewDiagram_ClearsUndoRedoHistory()
     {
@@ -255,5 +395,26 @@ public class MainViewModelTests
         restored.Initialize();
 
         restored.ShowColumnDescriptionsInDiagram.Should().BeTrue();
+    }
+
+    [Fact(DisplayName = "カラム順変更は Undo/Redo できる")]
+    public void ColumnOrderChange_CanUndoRedo()
+    {
+        var vm = new MainViewModel();
+        vm.AddEntityCommand.Execute(null);
+        var entity = vm.Entities[0];
+        entity.Columns[0].Name = "A";
+        entity.Columns.Add(new ColumnViewModel(new Column { Name = "B", DataType = "int" }));
+        entity.Columns.Add(new ColumnViewModel(new Column { Name = "C", DataType = "int" }));
+
+        vm.UndoRedo.Execute(new MoveColumnOrderCommand(entity.Columns, entity.Columns[0], 2));
+
+        entity.Columns.Select(c => c.Name).Should().Equal("B", "C", "A");
+
+        vm.UndoCommand.Execute(null);
+        entity.Columns.Select(c => c.Name).Should().Equal("A", "B", "C");
+
+        vm.RedoCommand.Execute(null);
+        entity.Columns.Select(c => c.Name).Should().Equal("B", "C", "A");
     }
 }

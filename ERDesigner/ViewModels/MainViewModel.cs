@@ -28,6 +28,7 @@ public partial class MainViewModel : ObservableObject
         nameof(ColumnViewModel.DataType),
         nameof(ColumnViewModel.IsPrimaryKey),
         nameof(ColumnViewModel.IsForeignKey),
+        nameof(ColumnViewModel.IsNullable),
         nameof(ColumnViewModel.Description),
     ];
 
@@ -67,6 +68,9 @@ public partial class MainViewModel : ObservableObject
     /// <summary>ER 図上のカラム行に「説明」を表示するか (ツールバーから ON/OFF 切替)。</summary>
     [ObservableProperty]
     private bool _showColumnDescriptionsInDiagram;
+
+    /// <summary>ER 図上のカラム行に NULL 許容を表示するか (ツールバーから ON/OFF 切替)。</summary>
+    private bool _showNullabilityInDiagram = true;
 
     /// <summary>キャンバスの動的幅 (エンティティの最右端 + 余白)。</summary>
     public double CanvasWidth => Math.Max(2400, Entities.Count == 0 ? 2400 : Entities.Max(e => e.X + e.Width) + 400);
@@ -108,6 +112,8 @@ public partial class MainViewModel : ObservableObject
 
                 foreach (var column in entity.Columns)
                 {
+                    column.IsPrimaryKeyChanging -= OnColumnIsPrimaryKeyChanging;
+                    column.IsPrimaryKeyChangeCompleted -= OnColumnIsPrimaryKeyChangeCompleted;
                     column.PropertyChanged -= OnTrackedColumnPropertyChanged;
                     _trackedPropertySnapshots.Remove(column);
                 }
@@ -121,6 +127,7 @@ public partial class MainViewModel : ObservableObject
             foreach (EntityViewModel entity in e.NewItems)
             {
                 entity.ShowDescriptionsInDiagram = ShowColumnDescriptionsInDiagram;
+                entity.ShowNullabilityInDiagram = ShowNullabilityInDiagram;
                 entity.PropertyChanged += OnEntityPropertyChanged;
                 entity.PropertyChanged += OnTrackedEntityPropertyChanged;
                 entity.Columns.CollectionChanged += OnEntityColumnsCollectionChanged;
@@ -128,6 +135,8 @@ public partial class MainViewModel : ObservableObject
 
                 foreach (var column in entity.Columns)
                 {
+                    column.IsPrimaryKeyChanging += OnColumnIsPrimaryKeyChanging;
+                    column.IsPrimaryKeyChangeCompleted += OnColumnIsPrimaryKeyChangeCompleted;
                     column.PropertyChanged += OnTrackedColumnPropertyChanged;
                     CaptureTrackedProperties(column, TrackedColumnPropertyNames);
                 }
@@ -157,6 +166,8 @@ public partial class MainViewModel : ObservableObject
         {
             foreach (ColumnViewModel column in e.OldItems)
             {
+                column.IsPrimaryKeyChanging -= OnColumnIsPrimaryKeyChanging;
+                column.IsPrimaryKeyChangeCompleted -= OnColumnIsPrimaryKeyChangeCompleted;
                 column.PropertyChanged -= OnTrackedColumnPropertyChanged;
                 _trackedPropertySnapshots.Remove(column);
             }
@@ -166,15 +177,56 @@ public partial class MainViewModel : ObservableObject
         {
             foreach (ColumnViewModel column in e.NewItems)
             {
+                column.IsPrimaryKeyChanging += OnColumnIsPrimaryKeyChanging;
+                column.IsPrimaryKeyChangeCompleted += OnColumnIsPrimaryKeyChangeCompleted;
                 column.PropertyChanged += OnTrackedColumnPropertyChanged;
                 CaptureTrackedProperties(column, TrackedColumnPropertyNames);
             }
         }
     }
 
+    /// <summary>IsPrimaryKey 変更直前に呼ばれ、変更前の全プロパティスナップショットをキャプチャします。</summary>
+    private void OnColumnIsPrimaryKeyChanging(object? sender, EventArgs e)
+    {
+        if (sender is ColumnViewModel column && !_suspendUndoTracking)
+        {
+            CaptureTrackedProperties(column, TrackedColumnPropertyNames);
+        }
+    }
+
+    /// <summary>IsPrimaryKey の連動変更を含む全処理完了後に呼ばれ、スナップショット差分を Undo スタックに Push します。</summary>
+    private void OnColumnIsPrimaryKeyChangeCompleted(object? sender, EventArgs e)
+    {
+        if (sender is ColumnViewModel column && !_suspendUndoTracking)
+        {
+            PushGroupedPropertyChanges(column, TrackedColumnPropertyNames, afterPush: () => ApplyRelationshipColumnRules(column));
+        }
+    }
+
     private void OnTrackedColumnPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
+        if (sender is not ColumnViewModel column)
+        {
+            return;
+        }
+
+        if (_suspendUndoTracking)
+        {
+            return;
+        }
+
+        // IsPrimaryKey/IsNullable の変更は IsPrimaryKeyChanging/IsPrimaryKeyChangeCompleted イベントで処理するためスキップする
+        if (e.PropertyName is nameof(ColumnViewModel.IsPrimaryKey) or nameof(ColumnViewModel.IsNullable))
+        {
+            return;
+        }
+
         TrackPropertyChange(sender, e, TrackedColumnPropertyNames);
+
+        if (e.PropertyName == nameof(ColumnViewModel.IsForeignKey))
+        {
+            ApplyRelationshipColumnRules(column);
+        }
     }
 
     private void OnRelationshipsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
@@ -183,6 +235,8 @@ public partial class MainViewModel : ObservableObject
         {
             foreach (RelationshipViewModel relationship in e.OldItems)
             {
+                relationship.TypeChanging -= OnRelationshipTypeChanging;
+                relationship.TypeChangeCompleted -= OnRelationshipTypeChangeCompleted;
                 relationship.PropertyChanged -= OnRelationshipPropertyChanged;
                 _trackedPropertySnapshots.Remove(relationship);
             }
@@ -192,6 +246,8 @@ public partial class MainViewModel : ObservableObject
         {
             foreach (RelationshipViewModel relationship in e.NewItems)
             {
+                relationship.TypeChanging += OnRelationshipTypeChanging;
+                relationship.TypeChangeCompleted += OnRelationshipTypeChangeCompleted;
                 relationship.PropertyChanged += OnRelationshipPropertyChanged;
                 CaptureTrackedProperties(relationship, TrackedRelationshipPropertyNames);
             }
@@ -201,14 +257,43 @@ public partial class MainViewModel : ObservableObject
         OnPropertyChanged(nameof(Relationships));
     }
 
+    /// <summary>Relationship.Type 変更直前に呼ばれ、変更前の全プロパティスナップショットをキャプチャします。</summary>
+    private void OnRelationshipTypeChanging(object? sender, EventArgs e)
+    {
+        if (sender is RelationshipViewModel relationship && !_suspendUndoTracking)
+        {
+            CaptureTrackedProperties(relationship, TrackedRelationshipPropertyNames);
+        }
+    }
+
+    /// <summary>Type の連動変更を含む全処理完了後に呼ばれ、スナップショット差分を Undo スタックに Push します。</summary>
+    private void OnRelationshipTypeChangeCompleted(object? sender, EventArgs e)
+    {
+        if (sender is RelationshipViewModel relationship && !_suspendUndoTracking)
+        {
+            PushGroupedPropertyChanges(relationship, TrackedRelationshipPropertyNames, afterPush: () => ApplyRelationshipColumnRules(relationship));
+        }
+    }
+
     private void OnRelationshipPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        TrackPropertyChange(sender, e, TrackedRelationshipPropertyNames);
-
-        if (e.PropertyName is nameof(RelationshipViewModel.SourceColumnId) or nameof(RelationshipViewModel.TargetColumnId) or nameof(RelationshipViewModel.Type))
+        if (sender is not RelationshipViewModel relationship)
         {
-            ApplyRelationshipColumnRules();
+            return;
         }
+
+        if (_suspendUndoTracking)
+        {
+            return;
+        }
+
+        // Type 変更に関連する変更は TypeChanging/TypeChangeCompleted イベントで処理するためスキップする
+        if (e.PropertyName is nameof(RelationshipViewModel.Type) or nameof(RelationshipViewModel.SourceColumnId) or nameof(RelationshipViewModel.TargetColumnId))
+        {
+            return;
+        }
+
+        TrackPropertyChange(sender, e, TrackedRelationshipPropertyNames);
     }
 
     private void TrackPropertyChange(object? sender, PropertyChangedEventArgs e, IReadOnlyList<string> trackedProperties)
@@ -235,31 +320,117 @@ public partial class MainViewModel : ObservableObject
         snapshots[e.PropertyName] = newValue;
     }
 
+    /// <summary>
+    /// 対象オブジェクトについて、_trackedPropertySnapshots に保存された変更前スナップショット全体と
+    /// 現在値スナップショット全体を <see cref="SnapshotChangeCommand"/> として Undo スタックに Push します。
+    /// 連動変更（IsPrimaryKey↔IsNullable、Type↔SourceColumnId/TargetColumnId）を1回の Undo/Redo で往復させるために使います。
+    /// </summary>
+    private void PushGroupedPropertyChanges(object sender, IReadOnlyList<string> trackedProperties, Action? afterPush = null)
+    {
+        if (!_trackedPropertySnapshots.TryGetValue(sender, out var originalSnapshots))
+        {
+            CaptureTrackedProperties(sender, trackedProperties);
+            afterPush?.Invoke();
+            RefreshTrackedPropertySnapshots(sender);
+            return;
+        }
+
+        // 変更後のスナップショットを取得
+        var currentSnapshots = trackedProperties.ToDictionary(name => name, name => sender.GetType().GetProperty(name)?.GetValue(sender));
+
+        var hasChange = trackedProperties.Any(name => !Equals(originalSnapshots[name], currentSnapshots[name]));
+
+        if (hasChange)
+        {
+            // Undo/Redo 時に RunWithoutUndoTracking 内で全プロパティを一括セットするコマンドを登録する
+            UndoRedo.Push(
+                new SnapshotChangeCommand(
+                    sender,
+                    new Dictionary<string, object?>(originalSnapshots),
+                    currentSnapshots,
+                    applySnapshot: ApplySnapshot,
+                    afterApply: () => ApplyRelationshipColumnRules(sender)
+                )
+            );
+        }
+
+        _trackedPropertySnapshots[sender] = currentSnapshots;
+        afterPush?.Invoke();
+        RefreshTrackedPropertySnapshots(sender);
+    }
+
+    /// <summary>
+    /// スナップショット辞書の値をターゲットオブジェクトに RunWithoutUndoTracking 内で一括セットします。
+    /// RelationshipViewModel の場合は EnsureColumnSelectionConsistency を一時停止してからセットします。
+    /// </summary>
+    private void ApplySnapshot(object target, IReadOnlyDictionary<string, object?> snapshot)
+    {
+        RunWithoutUndoTracking(
+            () =>
+            {
+                // RelationshipViewModel は Type セット時に EnsureColumnSelectionConsistency が走るのを抑制する
+                if (target is RelationshipViewModel rel)
+                {
+                    rel.SuppressColumnSelectionConsistency = true;
+
+                    try
+                    {
+                        foreach (var (name, value) in snapshot)
+                        {
+                            target.GetType().GetProperty(name)?.SetValue(target, value);
+                        }
+                    }
+                    finally
+                    {
+                        rel.SuppressColumnSelectionConsistency = false;
+                    }
+                }
+                else
+                {
+                    foreach (var (name, value) in snapshot)
+                    {
+                        target.GetType().GetProperty(name)?.SetValue(target, value);
+                    }
+                }
+            },
+            excludedSnapshotTarget: target
+        );
+    }
+
     private void CaptureTrackedProperties(object target, IReadOnlyList<string> trackedProperties)
     {
         var snapshots = trackedProperties.ToDictionary(name => name, name => target.GetType().GetProperty(name)?.GetValue(target));
         _trackedPropertySnapshots[target] = snapshots;
     }
 
-    private void RefreshTrackedPropertySnapshots()
+    private void RefreshTrackedPropertySnapshots(object? excludedTarget = null)
     {
         foreach (var entity in Entities)
         {
-            CaptureTrackedProperties(entity, TrackedEntityPropertyNames);
+            if (!ReferenceEquals(entity, excludedTarget))
+            {
+                CaptureTrackedProperties(entity, TrackedEntityPropertyNames);
+            }
 
             foreach (var column in entity.Columns)
             {
-                CaptureTrackedProperties(column, TrackedColumnPropertyNames);
+                if (!ReferenceEquals(column, excludedTarget))
+                {
+                    CaptureTrackedProperties(column, TrackedColumnPropertyNames);
+                }
             }
         }
 
         foreach (var relationship in Relationships)
         {
-            CaptureTrackedProperties(relationship, TrackedRelationshipPropertyNames);
+            if (!ReferenceEquals(relationship, excludedTarget))
+            {
+                CaptureTrackedProperties(relationship, TrackedRelationshipPropertyNames);
+            }
         }
     }
 
-    private void RunWithoutUndoTracking(Action action)
+    private void RunWithoutUndoTracking(Action action, object? excludedSnapshotTarget = null)
     {
         var old = _suspendUndoTracking;
         _suspendUndoTracking = true;
@@ -271,7 +442,7 @@ public partial class MainViewModel : ObservableObject
         finally
         {
             _suspendUndoTracking = old;
-            RefreshTrackedPropertySnapshots();
+            RefreshTrackedPropertySnapshots(excludedSnapshotTarget);
         }
     }
 
@@ -282,12 +453,12 @@ public partial class MainViewModel : ObservableObject
             && propertyName is nameof(RelationshipViewModel.Type) or nameof(RelationshipViewModel.SourceColumnId) or nameof(RelationshipViewModel.TargetColumnId)
         )
         {
-            return ApplyRelationshipColumnRules;
+            return () => ApplyRelationshipColumnRules(sender);
         }
 
         if (sender is ColumnViewModel && propertyName is nameof(ColumnViewModel.IsPrimaryKey) or nameof(ColumnViewModel.IsForeignKey))
         {
-            return ApplyRelationshipColumnRules;
+            return () => ApplyRelationshipColumnRules(sender);
         }
 
         return null;
@@ -334,12 +505,53 @@ public partial class MainViewModel : ObservableObject
         }
     }
 
+    /// <summary>履歴対象外でダイアグラムを置換し、必要なレイアウトもまとめて適用します。</summary>
+    private void ReplaceDiagramWithoutHistory(IEnumerable<Entity> entities, IEnumerable<Relationship> relationships, bool autoLayout)
+    {
+        ReplaceDiagram(entities, relationships, clearUndoHistory: true);
+
+        RunWithoutUndoTracking(() =>
+        {
+            AutoFitEntityWidths(Entities);
+
+            if (autoLayout)
+            {
+                AutoLayoutService.LayoutTree(Entities, Relationships);
+            }
+
+            RefreshCanvasSize();
+        });
+
+        UndoRedo.Clear();
+    }
+
     partial void OnShowColumnDescriptionsInDiagramChanged(bool value)
     {
         foreach (var entity in Entities)
+        {
             entity.ShowDescriptionsInDiagram = value;
+        }
 
         RefreshCanvasSize();
+    }
+
+    public bool ShowNullabilityInDiagram
+    {
+        get => _showNullabilityInDiagram;
+        set
+        {
+            if (!SetProperty(ref _showNullabilityInDiagram, value))
+            {
+                return;
+            }
+
+            foreach (var entity in Entities)
+            {
+                entity.ShowNullabilityInDiagram = value;
+            }
+
+            RefreshCanvasSize();
+        }
     }
 
     // ---------------- Auto-save / restore ----------------
@@ -355,7 +567,12 @@ public partial class MainViewModel : ObservableObject
             var dir = Path.GetDirectoryName(AutoSavePath)!;
             Directory.CreateDirectory(dir);
             JsonStorageService.Save(AutoSavePath, this);
-            File.WriteAllText(UiStatePath, System.Text.Json.JsonSerializer.Serialize(new UiState { ShowColumnDescriptionsInDiagram = ShowColumnDescriptionsInDiagram }));
+            File.WriteAllText(
+                UiStatePath,
+                System.Text.Json.JsonSerializer.Serialize(
+                    new UiState { ShowColumnDescriptionsInDiagram = ShowColumnDescriptionsInDiagram, ShowNullabilityInDiagram = ShowNullabilityInDiagram }
+                )
+            );
         }
         catch
         { /* 自動保存の失敗は無視 */
@@ -374,6 +591,7 @@ public partial class MainViewModel : ObservableObject
                 if (uiState is not null)
                 {
                     ShowColumnDescriptionsInDiagram = uiState.ShowColumnDescriptionsInDiagram;
+                    ShowNullabilityInDiagram = uiState.ShowNullabilityInDiagram;
                 }
             }
         }
@@ -428,6 +646,7 @@ public partial class MainViewModel : ObservableObject
                     Name = "ID",
                     DataType = "int",
                     IsPrimaryKey = true,
+                    IsNullable = false,
                 },
             },
         };
@@ -512,15 +731,16 @@ public partial class MainViewModel : ObservableObject
             return;
         }
 
-        SelectedEntity.Columns.Add(
-            new ColumnViewModel(
-                new Column
-                {
-                    Name = "NewColumn",
-                    DataType = SqlServerDataTypes.All[3], // "int"
-                }
-            )
+        var column = new ColumnViewModel(
+            new Column
+            {
+                Name = "NewColumn",
+                DataType = SqlServerDataTypes.All[3], // "int"
+            }
         );
+
+        UndoRedo.Execute(new AddColumnCommand(SelectedEntity.Columns, column));
+        SelectedColumn = column;
     }
 
     private bool CanAddColumn() => SelectedEntity is not null;
@@ -534,7 +754,8 @@ public partial class MainViewModel : ObservableObject
             return;
         }
 
-        SelectedEntity.Columns.Remove(column);
+        var affected = FindRelationshipsUsingColumn(column);
+        UndoRedo.Execute(new RemoveColumnCommand(SelectedEntity.Columns, column, affected, () => ApplyRelationshipColumnRules()));
 
         if (SelectedColumn == column)
         {
@@ -552,13 +773,18 @@ public partial class MainViewModel : ObservableObject
         }
 
         var col = SelectedColumn;
-        SelectedEntity.Columns.Remove(col);
+        var affected = FindRelationshipsUsingColumn(col);
+        UndoRedo.Execute(new RemoveColumnCommand(SelectedEntity.Columns, col, affected, () => ApplyRelationshipColumnRules()));
         SelectedColumn = null;
     }
 
     private bool CanRemoveSelectedColumn() => SelectedEntity is not null && SelectedColumn is not null;
 
     partial void OnSelectedColumnChanged(ColumnViewModel? value) => RemoveSelectedColumnCommand.NotifyCanExecuteChanged();
+
+    /// <summary>指定カラムを SourceColumnId または TargetColumnId として参照しているリレーション一覧を返します。</summary>
+    private IReadOnlyList<RelationshipViewModel> FindRelationshipsUsingColumn(ColumnViewModel column) =>
+        Relationships.Where(r => r.SourceColumnId == column.Id || r.TargetColumnId == column.Id).ToList();
 
     // ---------------- Selection / Click handling ----------------
 
@@ -824,13 +1050,8 @@ public partial class MainViewModel : ObservableObject
                 }
             }
 
-            // 取り込んだ後に自動レイアウト (Tree)
-            var cmd = new ImportSchemaCommand(this, result.Entities, result.Relationships);
-            UndoRedo.Execute(cmd);
-            AutoFitEntityWidths(Entities);
-            AutoLayoutService.LayoutTree(Entities, Relationships);
-            RefreshCanvasSize();
-            UndoRedo.Clear();
+            // 取込結果の反映は履歴対象外にします。
+            ReplaceDiagramWithoutHistory(result.Entities, result.Relationships, autoLayout: true);
         }
         catch (System.Exception ex)
         {
@@ -897,12 +1118,8 @@ public partial class MainViewModel : ObservableObject
             }
         }
 
-        var cmd = new ImportSchemaCommand(this, entities, relationships);
-        UndoRedo.Execute(cmd);
-        AutoFitEntityWidths(Entities);
-        AutoLayoutService.LayoutTree(Entities, Relationships);
-        RefreshCanvasSize();
-        UndoRedo.Clear();
+        // AI 生成結果の反映は履歴対象外にします。
+        ReplaceDiagramWithoutHistory(entities, relationships, autoLayout: true);
     }
 
     // ---------------- Save / Load ----------------
@@ -935,30 +1152,33 @@ public partial class MainViewModel : ObservableObject
     }
 
     /// <summary>リレーションに基づいて各カラムの PK/FK 編集可否と FK 状態を同期します。</summary>
-    public void ApplyRelationshipColumnRules()
+    public void ApplyRelationshipColumnRules(object? excludedSnapshotTarget = null)
     {
-        RunWithoutUndoTracking(() =>
-        {
-            foreach (var entity in Entities)
+        RunWithoutUndoTracking(
+            () =>
             {
-                foreach (var column in entity.Columns)
+                foreach (var entity in Entities)
                 {
-                    column.IsPrimaryKeyEditable = true;
-                    column.IsForeignKeyEditable = true;
-
-                    if (column.IsForeignKeyManagedByRelationship)
+                    foreach (var column in entity.Columns)
                     {
-                        column.IsForeignKey = false;
-                        column.IsForeignKeyManagedByRelationship = false;
+                        column.IsPrimaryKeyEditable = true;
+                        column.IsForeignKeyEditable = true;
+
+                        if (column.IsForeignKeyManagedByRelationship)
+                        {
+                            column.IsForeignKey = false;
+                            column.IsForeignKeyManagedByRelationship = false;
+                        }
                     }
                 }
-            }
 
-            foreach (var relationship in Relationships)
-            {
-                LockRelationshipColumns(relationship);
-            }
-        });
+                foreach (var relationship in Relationships)
+                {
+                    LockRelationshipColumns(relationship);
+                }
+            },
+            excludedSnapshotTarget
+        );
     }
 
     /// <summary>対象リレーションで使用中の列をロックし、FK フラグを同期します。</summary>
@@ -1005,5 +1225,7 @@ public partial class MainViewModel : ObservableObject
     private sealed class UiState
     {
         public bool ShowColumnDescriptionsInDiagram { get; init; }
+
+        public bool ShowNullabilityInDiagram { get; init; } = true;
     }
 }

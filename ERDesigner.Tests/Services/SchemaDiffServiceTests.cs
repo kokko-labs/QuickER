@@ -22,6 +22,7 @@ public class SchemaDiffServiceTests
                     Name = c.Name,
                     DataType = c.Type,
                     IsPrimaryKey = c.Pk,
+                    IsNullable = !c.Pk,
                 }
             );
         }
@@ -59,6 +60,21 @@ public class SchemaDiffServiceTests
         var diff = new SchemaDiffService().Compute(live, new List<Relationship>(), target, new List<Relationship>());
         var alter = diff.Items.Should().ContainSingle(i => i.Kind == SchemaDiffKind.AlterColumn).Which;
         alter.IsSelected.Should().BeFalse();
+    }
+
+    [Fact(DisplayName = "NULL 許容が変われば AlterColumn になる")]
+    public void NullabilityChange_AlterColumn_NotSelected()
+    {
+        var live = new List<Entity> { Tbl("Customer", ("Id", "int", true), ("Name", "nvarchar(50)", false)) };
+        live[0].Columns[1].IsNullable = true;
+        var target = new List<Entity> { Tbl("Customer", ("Id", "int", true), ("Name", "nvarchar(50)", false)) };
+        target[0].Columns[1].IsNullable = false;
+
+        var diff = new SchemaDiffService().Compute(live, new List<Relationship>(), target, new List<Relationship>());
+        var alter = diff.Items.Should().ContainSingle(i => i.Kind == SchemaDiffKind.AlterColumn).Which;
+        alter.ColumnName.Should().Be("Name");
+        alter.IsSelected.Should().BeFalse();
+        alter.Description.Should().Contain("NULL許容");
     }
 
     [Fact(DisplayName = "ER 図側に無い列は DropColumn になり、既定では未選択")]

@@ -19,6 +19,7 @@ public static class DiagramMetricsService
     private const double BodyVerticalMargin = 10;
     private const double ColumnIndicatorWidth = 34;
     private const double ColumnGap = 12;
+    private const double NullabilityGap = 8;
     private const double ColumnDescriptionIndent = 34;
     private const double ColumnRowMargin = 4;
     private const double TitleFontSize = 13;
@@ -37,7 +38,13 @@ public static class DiagramMetricsService
             entity.Columns.Count == 0
                 ? DefaultEntityWidth
                 : entity.Columns.Max(column =>
-                    BodyHorizontalMargin + ColumnIndicatorWidth + MeasureTextWidth(column.Name, BodyFontSize) + ColumnGap + MeasureTextWidth(column.DataType, BodyFontSize) + 4
+                    BodyHorizontalMargin
+                    + ColumnIndicatorWidth
+                    + MeasureTextWidth(column.Name, BodyFontSize)
+                    + (entity.ShowNullabilityInDiagram ? ColumnGap + MeasureTextWidth(column.IsNullable ? "NULL" : "NOT NULL", BodyFontSize) + NullabilityGap : 0)
+                    + ColumnGap
+                    + MeasureTextWidth(column.DataType, BodyFontSize)
+                    + 4
                 );
 
         return Math.Max(DefaultEntityWidth, Math.Ceiling(Math.Max(headerWidth, bodyWidth)));

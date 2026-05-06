@@ -36,7 +36,11 @@ public class SqlServerSchemaImporter
             "|",
             entities
                 .OrderBy(x => x.TableName)
-                .Select(x => x.TableName + ":" + string.Join(",", x.Columns.Select(c => c.Name + "(" + c.DataType + (c.IsPrimaryKey ? "*PK" : "") + ")")))
+                .Select(x =>
+                    x.TableName
+                    + ":"
+                    + string.Join(",", x.Columns.Select(c => c.Name + "(" + c.DataType + (c.IsPrimaryKey ? "*PK" : "") + (c.IsNullable ? "*NULL" : "*NOTNULL") + ")"))
+                )
         );
         var r = string.Join(
             "|",
@@ -188,8 +192,14 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
             int? maxLen = reader.IsDBNull(4) ? null : Convert.ToInt32(reader.GetValue(4));
             int? numPrec = reader.IsDBNull(5) ? null : Convert.ToInt32(reader.GetValue(5));
             int? numScale = reader.IsDBNull(6) ? null : Convert.ToInt32(reader.GetValue(6));
+            var isNullable = string.Equals(reader.GetString(7), "YES", StringComparison.OrdinalIgnoreCase);
 
-            var col = new Column { Name = colName, DataType = FormatDataType(dataType, maxLen, numPrec, numScale) };
+            var col = new Column
+            {
+                Name = colName,
+                DataType = FormatDataType(dataType, maxLen, numPrec, numScale),
+                IsNullable = isNullable,
+            };
 
             entry.Entity.Columns.Add(col);
             entry.ColumnsByName[colName] = col;
@@ -213,6 +223,7 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
             if (entry.ColumnsByName.TryGetValue(reader.GetString(2), out var col))
             {
                 col.IsPrimaryKey = true;
+                col.IsNullable = false;
             }
         }
     }

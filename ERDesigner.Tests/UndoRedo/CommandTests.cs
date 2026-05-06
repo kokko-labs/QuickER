@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using ERDesigner.Models;
 using ERDesigner.UndoRedo;
 using ERDesigner.ViewModels;
@@ -96,5 +97,51 @@ public class CommandTests
         cmd.Undo();
 
         count.Should().Be(2);
+    }
+
+    [Fact(DisplayName = "MoveColumnOrderCommand: Execute / Undo でカラム順が往復する")]
+    public void MoveColumnOrderCommand_ExecuteUndo()
+    {
+        var first = new ColumnViewModel(new Column { Name = "A", DataType = "int" });
+        var second = new ColumnViewModel(new Column { Name = "B", DataType = "int" });
+        var third = new ColumnViewModel(new Column { Name = "C", DataType = "int" });
+        var columns = new ObservableCollection<ColumnViewModel> { first, second, third };
+        var cmd = new MoveColumnOrderCommand(columns, first, 2);
+
+        cmd.Execute();
+        columns.Select(x => x.Name).Should().Equal("B", "C", "A");
+
+        cmd.Undo();
+        columns.Select(x => x.Name).Should().Equal("A", "B", "C");
+    }
+
+    [Fact(DisplayName = "AddColumnCommand: Undo で取り除かれ、Redo で再追加される")]
+    public void AddColumnCommand_RoundTrip()
+    {
+        var columns = new ObservableCollection<ColumnViewModel>();
+        var column = new ColumnViewModel(new Column { Name = "Code", DataType = "int" });
+        var cmd = new AddColumnCommand(columns, column);
+
+        cmd.Execute();
+        columns.Should().Contain(column);
+
+        cmd.Undo();
+        columns.Should().NotContain(column);
+    }
+
+    [Fact(DisplayName = "RemoveColumnCommand: Undo で元の位置に復元される")]
+    public void RemoveColumnCommand_RoundTrip()
+    {
+        var first = new ColumnViewModel(new Column { Name = "A", DataType = "int" });
+        var second = new ColumnViewModel(new Column { Name = "B", DataType = "int" });
+        var third = new ColumnViewModel(new Column { Name = "C", DataType = "int" });
+        var columns = new ObservableCollection<ColumnViewModel> { first, second, third };
+        var cmd = new RemoveColumnCommand(columns, second, [], () => { });
+
+        cmd.Execute();
+        columns.Select(x => x.Name).Should().Equal("A", "C");
+
+        cmd.Undo();
+        columns.Select(x => x.Name).Should().Equal("A", "B", "C");
     }
 }

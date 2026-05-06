@@ -44,6 +44,7 @@ public class AiSchemaJson
                             DataType = string.IsNullOrWhiteSpace(c.DataType) ? "int" : c.DataType,
                             IsPrimaryKey = c.IsPrimaryKey,
                             IsForeignKey = c.IsForeignKey,
+                            IsNullable = c.IsPrimaryKey ? false : c.IsNullable,
                             Description = c.Description ?? string.Empty,
                         })
                         .ToList()
@@ -147,6 +148,10 @@ public class AiColumn
     /// <summary>外部キーかどうか。</summary>
     [JsonPropertyName("isForeignKey")]
     public bool IsForeignKey { get; set; }
+
+    /// <summary>NULL を許容するかどうか。</summary>
+    [JsonPropertyName("isNullable")]
+    public bool IsNullable { get; set; } = true;
 
     /// <summary>カラムの説明。</summary>
     [JsonPropertyName("description")]

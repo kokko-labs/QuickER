@@ -30,6 +30,15 @@ public class PropertyChangeCommand : IUndoableCommand
         _afterApply = afterApply;
     }
 
+    /// <summary>関連変更を 1 セットで扱うためのグループ ID です。</summary>
+    public object? GroupId { get; init; }
+
+    /// <summary>変更対象オブジェクトです。</summary>
+    public object Target => _target;
+
+    /// <summary>変更対象プロパティ名です。</summary>
+    public string PropertyName => _property.Name;
+
     /// <inheritdoc />
     public string Description => $"変更: {_property.Name}";
 

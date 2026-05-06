@@ -35,6 +35,7 @@ public class SqlServerSchemaImporterTests
                     Name = "Id",
                     DataType = "int",
                     IsPrimaryKey = true,
+                    IsNullable = false,
                 },
             },
         };
@@ -49,6 +50,7 @@ public class SqlServerSchemaImporterTests
                     Name = "Id",
                     DataType = "int",
                     IsPrimaryKey = true,
+                    IsNullable = false,
                 },
             },
         };
@@ -57,6 +59,43 @@ public class SqlServerSchemaImporterTests
         var sigB = SqlServerSchemaImporter.ComputeSignature(new[] { b }, Array.Empty<Relationship>());
 
         sigA.Should().Be(sigB);
+    }
+
+    [Fact(DisplayName = "ComputeSignature: NULL 許容が違えば署名が変わる")]
+    public void ComputeSignature_DifferentNullability_DifferentSignature()
+    {
+        var a = new Entity
+        {
+            TableName = "T",
+            Columns =
+            {
+                new Column
+                {
+                    Name = "Name",
+                    DataType = "nvarchar(50)",
+                    IsNullable = true,
+                },
+            },
+        };
+
+        var b = new Entity
+        {
+            TableName = "T",
+            Columns =
+            {
+                new Column
+                {
+                    Name = "Name",
+                    DataType = "nvarchar(50)",
+                    IsNullable = false,
+                },
+            },
+        };
+
+        var sigA = SqlServerSchemaImporter.ComputeSignature(new[] { a }, Array.Empty<Relationship>());
+        var sigB = SqlServerSchemaImporter.ComputeSignature(new[] { b }, Array.Empty<Relationship>());
+
+        sigA.Should().NotBe(sigB);
     }
 
     [Fact(DisplayName = "ComputeSignature: 列が違えば署名が変わる")]

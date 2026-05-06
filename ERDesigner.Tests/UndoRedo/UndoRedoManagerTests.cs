@@ -1,4 +1,5 @@
 using ERDesigner.UndoRedo;
+using ERDesigner.ViewModels;
 using FluentAssertions;
 
 namespace ERDesigner.Tests.UndoRedo;
@@ -76,5 +77,27 @@ public class UndoRedoManagerTests
 
         mgr.Execute(b);
         mgr.CanRedo.Should().BeFalse();
+    }
+
+    [Fact(DisplayName = "同一グループの PropertyChangeCommand は 1 回の Undo/Redo で処理される")]
+    public void Push_GroupedPropertyChanges_AreHandledAsSingleStep()
+    {
+        var mgr = new UndoRedoManager();
+        var entity = new EntityViewModel(new ERDesigner.Models.Entity { TableName = "A" });
+        var groupId = new object();
+
+        entity.TableName = "B";
+        mgr.Push(new PropertyChangeCommand(entity, nameof(EntityViewModel.TableName), "A", "B") { GroupId = groupId });
+
+        entity.Description = "desc";
+        mgr.Push(new PropertyChangeCommand(entity, nameof(EntityViewModel.Description), string.Empty, "desc") { GroupId = groupId });
+
+        mgr.Undo();
+        entity.TableName.Should().Be("A");
+        entity.Description.Should().BeEmpty();
+
+        mgr.Redo();
+        entity.TableName.Should().Be("B");
+        entity.Description.Should().Be("desc");
     }
 }

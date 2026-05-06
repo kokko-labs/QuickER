@@ -36,12 +36,7 @@ public static class DdlExporter
             for (var i = 0; i < entity.Columns.Count; i++)
             {
                 var col = entity.Columns[i];
-                var line = $"    [{col.Name}] {col.DataType}";
-
-                if (col.IsPrimaryKey)
-                {
-                    line += " NOT NULL";
-                }
+                var line = $"    [{col.Name}] {col.DataType} {(col.IsPrimaryKey || !col.IsNullable ? "NOT NULL" : "NULL")}";
 
                 if (i < entity.Columns.Count - 1)
                 {

@@ -19,9 +19,17 @@ public class SchemaSyncScriptBuilderTests
                 Name = "Id",
                 DataType = "int",
                 IsPrimaryKey = true,
+                IsNullable = false,
             }
         );
-        e.Columns.Add(new Column { Name = "Name", DataType = "nvarchar(50)" });
+        e.Columns.Add(
+            new Column
+            {
+                Name = "Name",
+                DataType = "nvarchar(50)",
+                IsNullable = true,
+            }
+        );
         var item = new SchemaDiffItem
         {
             Kind = SchemaDiffKind.AddTable,
@@ -45,12 +53,17 @@ public class SchemaSyncScriptBuilderTests
             Kind = SchemaDiffKind.AddColumn,
             TableName = "Customer",
             ColumnName = "Email",
-            Column = new Column { Name = "Email", DataType = "nvarchar(200)" },
+            Column = new Column
+            {
+                Name = "Email",
+                DataType = "nvarchar(200)",
+                IsNullable = false,
+            },
             IsSelected = true,
         };
 
         var sql = SchemaSyncScriptBuilder.Build(new[] { item });
-        sql.Should().Contain("ALTER TABLE [Customer] ADD [Email] nvarchar(200) NULL;");
+        sql.Should().Contain("ALTER TABLE [Customer] ADD [Email] nvarchar(200) NOT NULL;");
     }
 
     [Fact(DisplayName = "AlterColumn は ALTER COLUMN を生成する")]
@@ -61,12 +74,17 @@ public class SchemaSyncScriptBuilderTests
             Kind = SchemaDiffKind.AlterColumn,
             TableName = "Customer",
             ColumnName = "Name",
-            Column = new Column { Name = "Name", DataType = "nvarchar(100)" },
+            Column = new Column
+            {
+                Name = "Name",
+                DataType = "nvarchar(100)",
+                IsNullable = false,
+            },
             IsSelected = true,
         };
 
         var sql = SchemaSyncScriptBuilder.Build(new[] { item });
-        sql.Should().Contain("ALTER TABLE [Customer] ALTER COLUMN [Name] nvarchar(100) NULL;");
+        sql.Should().Contain("ALTER TABLE [Customer] ALTER COLUMN [Name] nvarchar(100) NOT NULL;");
     }
 
     [Fact(DisplayName = "DropColumn は DROP COLUMN を生成する")]

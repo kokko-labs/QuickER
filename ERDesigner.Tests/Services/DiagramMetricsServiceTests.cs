@@ -56,4 +56,32 @@ public class DiagramMetricsServiceTests
 
         withDescriptions.Should().BeGreaterThan(withoutDescriptions);
     }
+
+    [Fact(DisplayName = "CalculateAutoWidth: NULL 表示時は幅が増える")]
+    public void CalculateAutoWidth_WithNullability_IsWider()
+    {
+        var entity = new EntityViewModel(
+            new Entity
+            {
+                TableName = "Orders",
+                Width = 120,
+                Columns =
+                {
+                    new Column
+                    {
+                        Name = "Code",
+                        DataType = "nvarchar(128)",
+                        IsNullable = false,
+                    },
+                },
+            }
+        );
+
+        entity.ShowNullabilityInDiagram = false;
+        var withoutNullability = DiagramMetricsService.CalculateAutoWidth(entity);
+        entity.ShowNullabilityInDiagram = true;
+        var withNullability = DiagramMetricsService.CalculateAutoWidth(entity);
+
+        withNullability.Should().BeGreaterThan(withoutNullability);
+    }
 }

@@ -21,6 +21,9 @@ public class Column
     /// <summary>外部キー（Foreign Key）かどうかを示します。</summary>
     public bool IsForeignKey { get; set; }
 
+    /// <summary>NULL を許容するかどうかを示します。</summary>
+    public bool IsNullable { get; set; } = true;
+
     /// <summary>
     /// カラムの説明 (SQL Server の拡張プロパティ <c>MS_Description</c> と同期します)。
     /// </summary>

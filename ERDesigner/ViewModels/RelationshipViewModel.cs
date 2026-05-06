@@ -130,8 +130,16 @@ public partial class RelationshipViewModel : ObservableObject
         OnPropertyChanged(nameof(AvailableTargetColumns));
     }
 
+    /// <summary>スナップショット適用中など、列整合チェックを一時的にスキップするためのフラグです。</summary>
+    internal bool SuppressColumnSelectionConsistency { get; set; }
+
     private void EnsureColumnSelectionConsistency()
     {
+        if (SuppressColumnSelectionConsistency)
+        {
+            return;
+        }
+
         if (!CanSelectForeignKeyColumns)
         {
             SourceColumnId = null;
@@ -184,6 +192,18 @@ public partial class RelationshipViewModel : ObservableObject
         OnPropertyChanged(nameof(LabelY));
     }
 
+    /// <summary>種別変更前の SourceColumnId/TargetColumnId を MainViewModel 側でキャプチャできるよう、変更直前に通知します。</summary>
+    internal event EventHandler? TypeChanging;
+
+    /// <summary>EnsureColumnSelectionConsistency を含む全連動変更完了後に発火します。MainViewModel の記録制御に使います。</summary>
+    internal event EventHandler? TypeChangeCompleted;
+
+    /// <summary>種別が変わったらラベルとマーカー種別を再通知します。</summary>
+    partial void OnTypeChanging(RelationshipType value)
+    {
+        TypeChanging?.Invoke(this, EventArgs.Empty);
+    }
+
     /// <summary>種別が変わったらラベルとマーカー種別を再通知します。</summary>
     partial void OnTypeChanged(RelationshipType value)
     {
@@ -193,6 +213,9 @@ public partial class RelationshipViewModel : ObservableObject
         OnPropertyChanged(nameof(CanSelectForeignKeyColumns));
 
         EnsureColumnSelectionConsistency();
+
+        // 全連動変更完了後に通知する
+        TypeChangeCompleted?.Invoke(this, EventArgs.Empty);
     }
 
     // ===== 端点座標 =====

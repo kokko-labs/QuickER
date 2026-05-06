@@ -4,6 +4,7 @@ using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
+using ERDesigner.UndoRedo;
 using ERDesigner.ViewModels;
 
 namespace ERDesigner.Behaviors;
@@ -31,11 +32,25 @@ public static class DataGridRowReorderBehavior
         new PropertyMetadata(false, OnIsEnabledChanged)
     );
 
+    /// <summary>行並び替え時に利用する Undo/Redo マネージャーです。</summary>
+    public static readonly DependencyProperty UndoRedoManagerProperty = DependencyProperty.RegisterAttached(
+        "UndoRedoManager",
+        typeof(UndoRedoManager),
+        typeof(DataGridRowReorderBehavior),
+        new PropertyMetadata(null)
+    );
+
     /// <summary><see cref="IsEnabledProperty"/> を設定します。</summary>
     public static void SetIsEnabled(DependencyObject d, bool value) => d.SetValue(IsEnabledProperty, value);
 
     /// <summary><see cref="IsEnabledProperty"/> を取得します。</summary>
     public static bool GetIsEnabled(DependencyObject d) => (bool)d.GetValue(IsEnabledProperty);
+
+    /// <summary><see cref="UndoRedoManagerProperty"/> を設定します。</summary>
+    public static void SetUndoRedoManager(DependencyObject d, UndoRedoManager? value) => d.SetValue(UndoRedoManagerProperty, value);
+
+    /// <summary><see cref="UndoRedoManagerProperty"/> を取得します。</summary>
+    public static UndoRedoManager? GetUndoRedoManager(DependencyObject d) => (UndoRedoManager?)d.GetValue(UndoRedoManagerProperty);
 
     /// <summary>ドラッグ開始地点（マウス座標）を DataGrid ごとに保持します。</summary>
     private static readonly DependencyProperty DragStartPointProperty = DependencyProperty.RegisterAttached(
@@ -177,7 +192,17 @@ public static class DataGridRowReorderBehavior
             return;
         }
 
-        columns.Move(sourceIndex, targetIndex);
+        var undoRedo = GetUndoRedoManager(dataGrid);
+
+        if (undoRedo is not null)
+        {
+            undoRedo.Execute(new MoveColumnOrderCommand(columns, sourceColumn, targetIndex));
+        }
+        else
+        {
+            columns.Move(sourceIndex, targetIndex);
+        }
+
         dataGrid.SelectedItem = sourceColumn;
         e.Handled = true;
     }

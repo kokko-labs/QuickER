@@ -67,12 +67,7 @@ public static class SchemaSyncScriptBuilder
         for (var i = 0; i < e.Columns.Count; i++)
         {
             var col = e.Columns[i];
-            var line = $"    {SqlIdentifier.BracketSimple(col.Name)} {col.DataType}";
-
-            if (col.IsPrimaryKey)
-            {
-                line += " NOT NULL";
-            }
+            var line = $"    {SqlIdentifier.BracketSimple(col.Name)} {col.DataType} {GetNullabilityClause(col)}";
 
             if (i < e.Columns.Count - 1)
             {
@@ -108,14 +103,16 @@ public static class SchemaSyncScriptBuilder
     private static void AppendAddColumn(StringBuilder sb, SchemaDiffItem item)
     {
         var col = item.Column!;
-        sb.AppendLine($"ALTER TABLE {SqlIdentifier.Bracket(item.TableName)} " + $"ADD {SqlIdentifier.BracketSimple(col.Name)} {col.DataType} NULL;");
+        sb.AppendLine($"ALTER TABLE {SqlIdentifier.Bracket(item.TableName)} " + $"ADD {SqlIdentifier.BracketSimple(col.Name)} {col.DataType} {GetNullabilityClause(col)};");
         sb.AppendLine("GO");
     }
 
     private static void AppendAlterColumn(StringBuilder sb, SchemaDiffItem item)
     {
         var col = item.Column!;
-        sb.AppendLine($"ALTER TABLE {SqlIdentifier.Bracket(item.TableName)} " + $"ALTER COLUMN {SqlIdentifier.BracketSimple(col.Name)} {col.DataType} NULL;");
+        sb.AppendLine(
+            $"ALTER TABLE {SqlIdentifier.Bracket(item.TableName)} " + $"ALTER COLUMN {SqlIdentifier.BracketSimple(col.Name)} {col.DataType} {GetNullabilityClause(col)};"
+        );
         sb.AppendLine("GO");
     }
 
@@ -256,4 +253,6 @@ public static class SchemaSyncScriptBuilder
 
         return item.ParentEntity?.Columns.FirstOrDefault(c => c.IsPrimaryKey);
     }
+
+    private static string GetNullabilityClause(Column column) => column.IsPrimaryKey || !column.IsNullable ? "NOT NULL" : "NULL";
 }

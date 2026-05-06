@@ -35,6 +35,9 @@ public partial class EntityViewModel : ObservableObject
     /// <summary>ER 図上で説明表示を行うかどうか。</summary>
     private bool _showDescriptionsInDiagram;
 
+    /// <summary>ER 図上で NULL 許容表示を行うかどうか。</summary>
+    private bool _showNullabilityInDiagram;
+
     /// <summary>メモ。プロパティパネルで編集されます。</summary>
     [ObservableProperty]
     private string _memo;
@@ -57,6 +60,19 @@ public partial class EntityViewModel : ObservableObject
         set
         {
             if (SetProperty(ref _showDescriptionsInDiagram, value))
+            {
+                OnPropertyChanged(nameof(DisplayHeight));
+            }
+        }
+    }
+
+    /// <summary>ER 図上で NULL 許容表示を行うかどうか。</summary>
+    public bool ShowNullabilityInDiagram
+    {
+        get => _showNullabilityInDiagram;
+        set
+        {
+            if (SetProperty(ref _showNullabilityInDiagram, value))
             {
                 OnPropertyChanged(nameof(DisplayHeight));
             }

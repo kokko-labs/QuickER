@@ -28,6 +28,9 @@ public partial class ColumnViewModel : ObservableObject
     [ObservableProperty]
     private bool _isForeignKey;
 
+    /// <summary>NULL を許容するかどうか。</summary>
+    private bool _isNullable;
+
     /// <summary>主キーチェックを編集できるかどうか。</summary>
     [ObservableProperty]
     private bool _isPrimaryKeyEditable = true;
@@ -38,6 +41,16 @@ public partial class ColumnViewModel : ObservableObject
 
     /// <summary>外部キーフラグがリレーション設定により自動管理されているかどうか。</summary>
     public bool IsForeignKeyManagedByRelationship { get; set; }
+
+    /// <summary>NULL 許容チェックを編集できるかどうか。</summary>
+    public bool IsNullableEditable => !IsPrimaryKey;
+
+    /// <summary>NULL を許容するかどうか。</summary>
+    public bool IsNullable
+    {
+        get => _isNullable;
+        set => SetProperty(ref _isNullable, IsPrimaryKey ? false : value);
+    }
 
     /// <summary>カラムの説明 (SQL Server の <c>MS_Description</c> と同期)。</summary>
     [ObservableProperty]
@@ -52,23 +65,32 @@ public partial class ColumnViewModel : ObservableObject
         _dataType = model.DataType;
         _isPrimaryKey = model.IsPrimaryKey;
         _isForeignKey = model.IsForeignKey;
+        _isNullable = model.IsPrimaryKey ? false : model.IsNullable;
         _description = model.Description ?? string.Empty;
     }
 
+    /// <summary>IsPrimaryKey 変更前に MainViewModel 側でスナップショットをキャプチャできるよう、変更直前に通知します。</summary>
+    internal event EventHandler? IsPrimaryKeyChanging;
+
+    /// <summary>IsNullable 連動変更を含む全処理完了後に発火します。MainViewModel の記録制御に使います。</summary>
+    internal event EventHandler? IsPrimaryKeyChangeCompleted;
+
     partial void OnIsPrimaryKeyChanging(bool value)
     {
-        if (!IsPrimaryKeyEditable)
-        {
-            value = _isPrimaryKey;
-        }
+        IsPrimaryKeyChanging?.Invoke(this, EventArgs.Empty);
     }
 
-    partial void OnIsForeignKeyChanging(bool value)
+    partial void OnIsPrimaryKeyChanged(bool value)
     {
-        if (!IsForeignKeyEditable)
+        OnPropertyChanged(nameof(IsNullableEditable));
+
+        if (value && IsNullable)
         {
-            value = _isForeignKey;
+            IsNullable = false;
         }
+
+        // 全連動変更完了後に通知する
+        IsPrimaryKeyChangeCompleted?.Invoke(this, EventArgs.Empty);
     }
 
     /// <summary>現在の状態をモデルにコピーして返します（保存時に使用）。</summary>
@@ -80,6 +102,7 @@ public partial class ColumnViewModel : ObservableObject
             DataType = DataType,
             IsPrimaryKey = IsPrimaryKey,
             IsForeignKey = IsForeignKey,
+            IsNullable = IsPrimaryKey ? false : IsNullable,
             Description = Description ?? string.Empty,
         };
 }

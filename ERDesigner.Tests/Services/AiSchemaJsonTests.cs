@@ -21,8 +21,8 @@ public class AiSchemaJsonTests
                   "description": "顧客マスタを管理するテーブル",
                   "memo": "",
                   "columns": [
-                    { "name": "Id", "dataType": "int", "isPrimaryKey": true, "isForeignKey": false, "description": "顧客を一意に識別するID" },
-                    { "name": "Name", "dataType": "nvarchar(50)", "isPrimaryKey": false, "isForeignKey": false, "description": "顧客名" }
+                    { "name": "Id", "dataType": "int", "isPrimaryKey": true, "isForeignKey": false, "isNullable": false, "description": "顧客を一意に識別するID" },
+                    { "name": "Name", "dataType": "nvarchar(50)", "isPrimaryKey": false, "isForeignKey": false, "isNullable": true, "description": "顧客名" }
                   ]
                 },
 
@@ -31,8 +31,8 @@ public class AiSchemaJsonTests
                   "description": "注文データを管理するテーブル",
                   "memo": "",
                   "columns": [
-                    { "name": "Id", "dataType": "int", "isPrimaryKey": true, "isForeignKey": false, "description": "注文ID" },
-                    { "name": "CustomerId", "dataType": "int", "isPrimaryKey": false, "isForeignKey": true, "description": "注文者の顧客ID" }
+                    { "name": "Id", "dataType": "int", "isPrimaryKey": true, "isForeignKey": false, "isNullable": false, "description": "注文ID" },
+                    { "name": "CustomerId", "dataType": "int", "isPrimaryKey": false, "isForeignKey": true, "isNullable": false, "description": "注文者の顧客ID" }
                   ]
                 }
               ],
@@ -51,8 +51,10 @@ public class AiSchemaJsonTests
         entities[0].Description.Should().Be("顧客マスタを管理するテーブル");
         entities[0].Columns.Should().HaveCount(2);
         entities[0].Columns[0].IsPrimaryKey.Should().BeTrue();
+        entities[0].Columns[0].IsNullable.Should().BeFalse();
         entities[0].Columns[0].Description.Should().Be("顧客を一意に識別するID");
         entities[1].Columns[1].IsForeignKey.Should().BeTrue();
+        entities[1].Columns[1].IsNullable.Should().BeFalse();
 
         rels.Should().HaveCount(1);
         rels[0].Type.Should().Be(RelationshipType.OneToMany);

@@ -1,4 +1,5 @@
 ﻿using System.Collections.Generic;
+using System.Linq;
 using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace ERDesigner.UndoRedo;
@@ -45,6 +46,26 @@ public partial class UndoRedoManager : ObservableObject
     /// <param name="command">登録するコマンド。</param>
     public void Push(IUndoableCommand command)
     {
+        if (command is PropertyChangeCommand propertyChange && propertyChange.GroupId is not null)
+        {
+            if (_undo.TryPeek(out var last) && last is CompositeUndoableCommand composite && Equals(composite.GroupId, propertyChange.GroupId))
+            {
+                composite.Upsert(propertyChange);
+                _redo.Clear();
+                OnPropertyChanged(nameof(CanUndo));
+                OnPropertyChanged(nameof(CanRedo));
+                return;
+            }
+
+            var grouped = new CompositeUndoableCommand(propertyChange.GroupId, propertyChange.Description);
+            grouped.Upsert(propertyChange);
+            _undo.Push(grouped);
+            _redo.Clear();
+            OnPropertyChanged(nameof(CanUndo));
+            OnPropertyChanged(nameof(CanRedo));
+            return;
+        }
+
         _undo.Push(command);
         _redo.Clear();
         OnPropertyChanged(nameof(CanUndo));
@@ -88,5 +109,51 @@ public partial class UndoRedoManager : ObservableObject
         _redo.Clear();
         OnPropertyChanged(nameof(CanUndo));
         OnPropertyChanged(nameof(CanRedo));
+    }
+
+    /// <summary>
+    /// 同時に起きた複数のプロパティ変更を 1 履歴として扱うコマンドです。
+    /// </summary>
+    private sealed class CompositeUndoableCommand(object groupId, string description) : IUndoableCommand
+    {
+        private readonly List<PropertyChangeCommand> _commands = new();
+
+        public object GroupId { get; } = groupId;
+
+        public string Description { get; } = description;
+
+        public void Execute()
+        {
+            foreach (var command in _commands)
+            {
+                command.Execute();
+            }
+        }
+
+        public void Undo()
+        {
+            for (var i = _commands.Count - 1; i >= 0; i--)
+            {
+                _commands[i].Undo();
+            }
+        }
+
+        public void Upsert(PropertyChangeCommand command)
+        {
+            var existingIndex = _commands.FindIndex(x => ReferenceEquals(x.Target, command.Target) && x.PropertyName == command.PropertyName);
+
+            if (existingIndex >= 0)
+            {
+                _commands[existingIndex] = command;
+            }
+            else
+            {
+                _commands.Add(command);
+            }
+
+            var ordered = _commands.ToList();
+            _commands.Clear();
+            _commands.AddRange(ordered);
+        }
     }
 }

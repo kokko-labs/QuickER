@@ -25,8 +25,14 @@ public class DdlExporterTests
                         Name = "Id",
                         DataType = "int",
                         IsPrimaryKey = true,
+                        IsNullable = false,
                     },
-                    new Column { Name = "Name", DataType = "nvarchar(50)" },
+                    new Column
+                    {
+                        Name = "Name",
+                        DataType = "nvarchar(50)",
+                        IsNullable = true,
+                    },
                 },
             }
         );
@@ -35,9 +41,35 @@ public class DdlExporterTests
         var sql = DdlExporter.Build(vm);
 
         sql.Should().Contain("CREATE TABLE [User]");
-        sql.Should().Contain("[Id] int");
+        sql.Should().Contain("[Id] int NOT NULL");
         sql.Should().Contain("PRIMARY KEY ([Id])");
-        sql.Should().Contain("[Name] nvarchar(50)");
+        sql.Should().Contain("[Name] nvarchar(50) NULL");
+    }
+
+    [Fact(DisplayName = "Build: NULL 許容 OFF の列は NOT NULL が出力される")]
+    public void Build_NotNullableColumn_EmitsNotNull()
+    {
+        var vm = new MainViewModel();
+        var e = new EntityViewModel(
+            new Entity
+            {
+                TableName = "User",
+                Columns =
+                {
+                    new Column
+                    {
+                        Name = "Code",
+                        DataType = "nvarchar(20)",
+                        IsNullable = false,
+                    },
+                },
+            }
+        );
+        vm.Entities.Add(e);
+
+        var sql = DdlExporter.Build(vm);
+
+        sql.Should().Contain("[Code] nvarchar(20) NOT NULL");
     }
 
     [Fact(DisplayName = "Build: 1対多リレーションが FOREIGN KEY を生成する")]
