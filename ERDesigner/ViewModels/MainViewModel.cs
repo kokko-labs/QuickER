@@ -1015,6 +1015,26 @@ public partial class MainViewModel : ObservableObject
         }
     }
 
+    /// <summary>現在のダイアグラムから Excel 形式のテーブル定義書を書き出します。</summary>
+    [RelayCommand]
+    private void ExportTableDefinitionDocument()
+    {
+        var dlg = new SaveFileDialog { Filter = "Excel Workbook (*.xlsx)|*.xlsx", DefaultExt = ".xlsx" };
+
+        if (dlg.ShowDialog() == true)
+        {
+            try
+            {
+                TableDefinitionDocumentExporter.SaveTo(this, dlg.FileName);
+                MessageBox.Show("テーブル定義書の出力が完了しました。", "完了", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"テーブル定義書を出力できませんでした。{Environment.NewLine}{ex.Message}", "エラー", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+    }
+
     // ---------------- SQL Server 取込 ----------------
 
     /// <summary>SQL Server に接続してスキーマを取得し、ダイアグラムに反映します。</summary>

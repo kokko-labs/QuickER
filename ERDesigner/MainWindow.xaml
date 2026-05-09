@@ -268,6 +268,12 @@
             <TextBlock Style="{StaticResource ToolBarCaption}" Text="DDL" />
           </StackPanel>
         </Button>
+        <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding ExportTableDefinitionDocumentCommand}" ToolTip="テーブル定義書を Excel にエクスポート">
+          <StackPanel>
+            <TextBlock Style="{StaticResource ToolBarIcon}" Text="📘" />
+            <TextBlock Style="{StaticResource ToolBarCaption}" Text="定義書" />
+          </StackPanel>
+        </Button>
         <Separator Margin="6,4" />
         <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding ImportFromSqlServerCommand}" ToolTip="SQL Server からスキーマを取り込み">
           <StackPanel>
