@@ -803,12 +803,16 @@ public partial class MainViewModel : ObservableObject
 
             if (HasSameRelationship(PendingRelationshipSource, entity))
             {
-                MessageBox.Show(
-                    "同じ関係のリレーションはすでに存在します。既存のリレーションを編集してください。",
-                    "重複リレーション",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Information
-                );
+                if (IsConfirmationEnabled)
+                {
+                    MessageBox.Show(
+                        "同じ関係のリレーションはすでに存在します。既存のリレーションを編集してください。",
+                        "重複リレーション",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Information
+                    );
+                }
+
                 IsRelationshipMode = false;
                 PendingRelationshipSource = null;
                 return;
@@ -1049,6 +1053,46 @@ public partial class MainViewModel : ObservableObject
             {
                 MessageBox.Show($"テーブル定義書を出力できませんでした。{Environment.NewLine}{ex.Message}", "エラー", MessageBoxButton.OK, MessageBoxImage.Error);
             }
+        }
+    }
+
+    /// <summary>このアプリが出力した Excel 形式のテーブル定義書を読み込みます。</summary>
+    [RelayCommand]
+    private void ImportTableDefinitionDocument()
+    {
+        var dlg = new OpenFileDialog { Filter = "Excel Workbook (*.xlsx)|*.xlsx" };
+
+        if (dlg.ShowDialog() != true)
+        {
+            return;
+        }
+
+        try
+        {
+            var diagram = TableDefinitionDocumentImporter.Load(dlg.FileName);
+
+            if (Entities.Count > 0)
+            {
+                var currentSig = SqlServerSchemaImporter.ComputeSignature(Entities.Select(e => e.ToModel()), Relationships.Select(r => r.ToModel()));
+                var newSig = SqlServerSchemaImporter.ComputeSignature(diagram.Entities, diagram.Relationships);
+
+                if (currentSig != newSig)
+                {
+                    var ans = MessageBox.Show("現在のダイアグラムを定義書の内容で置換します。よろしいですか？", "確認", MessageBoxButton.OKCancel, MessageBoxImage.Question);
+
+                    if (ans != MessageBoxResult.OK)
+                    {
+                        return;
+                    }
+                }
+            }
+
+            ReplaceDiagramWithoutHistory(diagram.Entities, diagram.Relationships, autoLayout: true);
+            MessageBox.Show("定義書の取り込みが完了しました。", "完了", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"定義書を取り込めませんでした。{Environment.NewLine}{ex.Message}", "エラー", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 

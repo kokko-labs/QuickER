@@ -226,6 +226,22 @@
             <TextBlock Style="{StaticResource ToolBarCaption}" Text="複製" />
           </StackPanel>
         </Button>
+        <ToggleButton
+          Style="{StaticResource ToolBarLabelToggleButton}"
+          IsChecked="{Binding ShowColumnDescriptionsInDiagram, Mode=TwoWay}"
+          ToolTip="ER 図のカラム行に「説明」を表示"
+        >
+          <StackPanel>
+            <TextBlock Style="{StaticResource ToolBarIcon}" Text="💬" />
+            <TextBlock Style="{StaticResource ToolBarCaption}" Text="説明表示" />
+          </StackPanel>
+        </ToggleButton>
+        <ToggleButton Style="{StaticResource ToolBarLabelToggleButton}" IsChecked="{Binding ShowNullabilityInDiagram, Mode=TwoWay}" ToolTip="ER 図のカラム行に NULL 許容を表示">
+          <StackPanel>
+            <TextBlock Style="{StaticResource ToolBarIcon}" Text="∅" />
+            <TextBlock Style="{StaticResource ToolBarCaption}" Text="NULL表示" />
+          </StackPanel>
+        </ToggleButton>
         <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding AutoLayoutGridCommand}" ToolTip="格子状に自動整列">
           <StackPanel>
             <TextBlock Style="{StaticResource ToolBarIcon}" Text="▦" />
@@ -268,13 +284,18 @@
             <TextBlock Style="{StaticResource ToolBarCaption}" Text="DDL" />
           </StackPanel>
         </Button>
-        <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding ExportTableDefinitionDocumentCommand}" ToolTip="テーブル定義書を Excel にエクスポート">
+        <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding ExportTableDefinitionDocumentCommand}" ToolTip="テーブル定義書を Excel に出力">
           <StackPanel>
             <TextBlock Style="{StaticResource ToolBarIcon}" Text="📘" />
-            <TextBlock Style="{StaticResource ToolBarCaption}" Text="定義書" />
+            <TextBlock Style="{StaticResource ToolBarCaption}" Text="定義書出力" />
           </StackPanel>
         </Button>
-        <Separator Margin="6,4" />
+        <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding ImportTableDefinitionDocumentCommand}" ToolTip="このアプリが出力したテーブル定義書を取り込み">
+          <StackPanel>
+            <TextBlock Style="{StaticResource ToolBarIcon}" Text="📗" />
+            <TextBlock Style="{StaticResource ToolBarCaption}" Text="定義書取込" />
+          </StackPanel>
+        </Button>
         <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding ImportFromSqlServerCommand}" ToolTip="SQL Server からスキーマを取り込み">
           <StackPanel>
             <TextBlock Style="{StaticResource ToolBarIcon}" Text="🛢" />
@@ -287,22 +308,6 @@
             <TextBlock Style="{StaticResource ToolBarCaption}" Text="DB同期" />
           </StackPanel>
         </Button>
-        <ToggleButton
-          Style="{StaticResource ToolBarLabelToggleButton}"
-          IsChecked="{Binding ShowColumnDescriptionsInDiagram, Mode=TwoWay}"
-          ToolTip="ER 図のカラム行に「説明」を表示"
-        >
-          <StackPanel>
-            <TextBlock Style="{StaticResource ToolBarIcon}" Text="💬" />
-            <TextBlock Style="{StaticResource ToolBarCaption}" Text="説明表示" />
-          </StackPanel>
-        </ToggleButton>
-        <ToggleButton Style="{StaticResource ToolBarLabelToggleButton}" IsChecked="{Binding ShowNullabilityInDiagram, Mode=TwoWay}" ToolTip="ER 図のカラム行に NULL 許容を表示">
-          <StackPanel>
-            <TextBlock Style="{StaticResource ToolBarIcon}" Text="∅" />
-            <TextBlock Style="{StaticResource ToolBarCaption}" Text="NULL表示" />
-          </StackPanel>
-        </ToggleButton>
         <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding GenerateFromAiCommand}" ToolTip="ChatGPT/Ollama でスキーマを自動生成">
           <StackPanel>
             <TextBlock Style="{StaticResource ToolBarIcon}" Text="🤖" />

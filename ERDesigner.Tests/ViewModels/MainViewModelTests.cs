@@ -172,7 +172,7 @@ public class MainViewModelTests
         relationship.OnDelete.Should().Be(ForeignKeyReferentialAction.NoAction);
 
         vm.UndoCommand.Execute(null);
-        relationship.ConstraintName.Should().BeNull();
+        relationship.ConstraintName.Should().Be("FK_NewTable_NewTable");
 
         vm.RedoCommand.Execute(null);
         vm.RedoCommand.Execute(null);
