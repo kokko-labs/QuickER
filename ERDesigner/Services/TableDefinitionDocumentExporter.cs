@@ -98,7 +98,7 @@ public static class TableDefinitionDocumentExporter
             worksheet.Cell(row, 3).Value = detailSheet.Entity.TableName;
             worksheet.Cell(row, 4).Value = detailSheet.Entity.Description;
             worksheet.Cell(row, 5).Value = detailSheet.Entity.Memo;
-            ApplyHyperlinkStyle(worksheet.Cell(row, 2), detailSheet.Worksheet.Name);
+            ApplyHyperlinkStyle(worksheet.Cell(row, 2), detailSheet.Worksheet.Name, XLAlignmentHorizontalValues.Center);
         }
 
         UpdatePrintArea(worksheet, $"A1:E{Math.Max(headerRow, dataStartRow + detailSheets.Count - 1)}");
@@ -192,7 +192,7 @@ public static class TableDefinitionDocumentExporter
         worksheet.Row(footerRow).Height = DefaultRowHeight;
         worksheet.Cell(footerRow, 1).Value = BackToSummaryText;
         ApplyFooterHyperlinkStyle(worksheet.Cell(footerRow, 1));
-        ApplyHyperlinkStyle(worksheet.Cell(footerRow, 1), SummarySheetName);
+        ApplyHyperlinkStyle(worksheet.Cell(footerRow, 1), SummarySheetName, XLAlignmentHorizontalValues.Left);
         UpdatePrintArea(worksheet, $"A1:G{footerRow}");
     }
 
@@ -201,9 +201,9 @@ public static class TableDefinitionDocumentExporter
     {
         worksheet.Column(1).Width = 5;
         worksheet.Column(2).Width = 6;
-        worksheet.Column(3).Width = 35.7109375;
-        worksheet.Column(4).Width = 35.7109375;
-        worksheet.Column(5).Width = 50.7109375;
+        worksheet.Column(3).Width = 35;
+        worksheet.Column(4).Width = 35;
+        worksheet.Column(5).Width = 50;
         ConfigureWorksheet(worksheet);
     }
 
@@ -211,31 +211,31 @@ public static class TableDefinitionDocumentExporter
     private static void ConfigureRelationshipWorksheet(IXLWorksheet worksheet)
     {
         worksheet.Column(1).Width = 5;
-        worksheet.Column(2).Width = 50.7109375;
+        worksheet.Column(2).Width = 50;
 
         for (var column = 3; column <= 6; column++)
         {
-            worksheet.Column(column).Width = 30.7109375;
+            worksheet.Column(column).Width = 30;
         }
 
-        worksheet.Column(7).Width = 10.7109375;
-        worksheet.Column(8).Width = 14.7109375;
-        worksheet.Column(9).Width = 14.7109375;
-        worksheet.Column(10).Width = 50.7109375;
+        worksheet.Column(7).Width = 10;
+        worksheet.Column(8).Width = 14;
+        worksheet.Column(9).Width = 14;
+        worksheet.Column(10).Width = 50;
         ConfigureWorksheet(worksheet);
     }
 
     /// <summary>詳細シートの固定書式を設定します。</summary>
     private static void ConfigureDetailWorksheet(IXLWorksheet worksheet)
     {
-        worksheet.Column(1).Width = 5.7109375;
-        worksheet.Column(2).Width = 30.7109375;
-        worksheet.Column(3).Width = 30.7109375;
-        worksheet.Column(4).Width = 17.7109375;
-        worksheet.Column(5).Width = 8.7109375;
-        worksheet.Column(6).Width = 8.7109375;
-        worksheet.Column(7).Width = 40.7109375;
-        worksheet.Column(8).Width = 40.7109375;
+        worksheet.Column(1).Width = 5;
+        worksheet.Column(2).Width = 30;
+        worksheet.Column(3).Width = 30;
+        worksheet.Column(4).Width = 17;
+        worksheet.Column(5).Width = 8;
+        worksheet.Column(6).Width = 8;
+        worksheet.Column(7).Width = 40;
+        worksheet.Column(8).Width = 40;
         ConfigureWorksheet(worksheet);
     }
 
@@ -275,14 +275,14 @@ public static class TableDefinitionDocumentExporter
     }
 
     /// <summary>詳細リンクの書式とリンク先を設定します。</summary>
-    private static void ApplyHyperlinkStyle(IXLCell cell, string targetSheetName)
+    private static void ApplyHyperlinkStyle(IXLCell cell, string targetSheetName, XLAlignmentHorizontalValues horizontalAlignment)
     {
         cell.SetHyperlink(new XLHyperlink($"{EscapeSheetName(targetSheetName)}!A1"));
         cell.Style.Font.FontName = DefaultFontName;
         cell.Style.Font.FontSize = DefaultFontSize;
         cell.Style.Font.Underline = XLFontUnderlineValues.Single;
         cell.Style.Font.FontColor = XLColor.Blue;
-        cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+        cell.Style.Alignment.Horizontal = horizontalAlignment;
     }
 
     /// <summary>フッターの戻りリンク書式を適用します。</summary>
