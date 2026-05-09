@@ -164,6 +164,9 @@ public class AiSchemaJson
                     SourceEntityId = s.Id,
                     TargetEntityId = t.Id,
                     Type = ParseType(r.Type),
+                    ConstraintName = r.ConstraintName,
+                    OnDelete = ForeignKeyReferentialActionHelper.Parse(r.OnDelete),
+                    OnUpdate = ForeignKeyReferentialActionHelper.Parse(r.OnUpdate),
                 }
             );
         }
@@ -499,4 +502,16 @@ public class AiRelationship
     /// <summary>関連の種類 (OneToOne / OneToMany / ManyToMany)。</summary>
     [JsonPropertyName("type")]
     public string? Type { get; set; }
+
+    /// <summary>制約名です。</summary>
+    [JsonPropertyName("constraintName")]
+    public string? ConstraintName { get; set; }
+
+    /// <summary>削除時の参照アクションです。</summary>
+    [JsonPropertyName("onDelete")]
+    public string? OnDelete { get; set; }
+
+    /// <summary>更新時の参照アクションです。</summary>
+    [JsonPropertyName("onUpdate")]
+    public string? OnUpdate { get; set; }
 }

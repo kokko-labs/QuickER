@@ -28,6 +28,7 @@ public class OpenAiSchemaClient : IAiSchemaClient
 - 各カラムの isNullable を必ず設定する。主キーは false、必須項目や通常の外部キーも false、任意入力の項目だけ true にする。
 - 外部キーがあれば isForeignKey=true を付け、relationships にも記述する。
 - type は ""OneToOne"" / ""OneToMany"" / ""ManyToMany"" のいずれか。
+- relationships の各要素には constraintName, onDelete, onUpdate も含める。onDelete / onUpdate は ""NO ACTION"" / ""CASCADE"" / ""SET NULL"" / ""SET DEFAULT"" のいずれかを使用する。
 - dataType は SQL Server の型 (例: int, bigint, nvarchar(50), datetime2, decimal(10,2), bit) を使用。";
 
     /// <summary>強制 JSON スキーマ (Structured Outputs)。</summary>
@@ -78,10 +79,13 @@ public class OpenAiSchemaClient : IAiSchemaClient
                 "properties": {
                   "sourceTable": { "type": "string" },
                   "targetTable": { "type": "string" },
-                  "type": { "type": "string", "enum": ["OneToOne","OneToMany","ManyToMany"] }
+                    "type": { "type": "string", "enum": ["OneToOne","OneToMany","ManyToMany"] },
+                    "constraintName": { "type": "string" },
+                    "onDelete": { "type": "string", "enum": ["NO ACTION","CASCADE","SET NULL","SET DEFAULT"] },
+                    "onUpdate": { "type": "string", "enum": ["NO ACTION","CASCADE","SET NULL","SET DEFAULT"] }
                 },
 
-                "required": ["sourceTable","targetTable","type"],
+                "required": ["sourceTable","targetTable","type","constraintName","onDelete","onUpdate"],
                 "additionalProperties": false
               }
             }

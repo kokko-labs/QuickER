@@ -1,6 +1,8 @@
-﻿using System.IO;
+﻿using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Text;
+using ERDesigner.Models;
 using ERDesigner.ViewModels;
 
 namespace ERDesigner.Services;
@@ -103,11 +105,34 @@ public static class DdlExporter
 
             var fkTable = fkEntity.TableName;
             var pkTable = pkEntity.TableName;
+            var constraintName = string.IsNullOrWhiteSpace(rel.ConstraintName) ? $"FK_{fkTable}_{pkTable}" : rel.ConstraintName;
+            var referentialActions = BuildReferentialActionClause(rel);
 
-            sb.AppendLine($"ALTER TABLE [{fkTable}] ADD CONSTRAINT [FK_{fkTable}_{pkTable}] " + $"FOREIGN KEY ([{fkColName}]) REFERENCES [{pkTable}] ([{pkCol.Name}]);");
+            sb.AppendLine(
+                $"ALTER TABLE [{fkTable}] ADD CONSTRAINT [{SqlIdentifier.Escape(constraintName)}] "
+                    + $"FOREIGN KEY ([{fkColName}]) REFERENCES [{pkTable}] ([{pkCol.Name}]){referentialActions};"
+            );
         }
 
         return sb.ToString();
+    }
+
+    /// <summary>参照アクション句を組み立てます。</summary>
+    private static string BuildReferentialActionClause(RelationshipViewModel relationship)
+    {
+        var clauses = new List<string>();
+
+        if (relationship.OnDelete != Models.ForeignKeyReferentialAction.NoAction)
+        {
+            clauses.Add($"ON DELETE {relationship.OnDelete.ToSqlText()}");
+        }
+
+        if (relationship.OnUpdate != Models.ForeignKeyReferentialAction.NoAction)
+        {
+            clauses.Add($"ON UPDATE {relationship.OnUpdate.ToSqlText()}");
+        }
+
+        return clauses.Count == 0 ? string.Empty : " " + string.Join(" ", clauses);
     }
 
     /// <summary>DDL をファイルに書き出します。</summary>

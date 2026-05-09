@@ -44,7 +44,25 @@ public class SqlServerSchemaImporter
         );
         var r = string.Join(
             "|",
-            relationships.Select(x => x.SourceEntityId + ">" + x.TargetEntityId + ":" + x.Type + ":" + x.SourceColumnId + ":" + x.TargetColumnId).OrderBy(s => s)
+            relationships
+                .Select(x =>
+                    x.SourceEntityId
+                    + ">"
+                    + x.TargetEntityId
+                    + ":"
+                    + x.Type
+                    + ":"
+                    + x.SourceColumnId
+                    + ":"
+                    + x.TargetColumnId
+                    + ":"
+                    + x.ConstraintName
+                    + ":"
+                    + x.OnDelete
+                    + ":"
+                    + x.OnUpdate
+                )
+                .OrderBy(s => s)
         );
         return e + "##" + r;
     }
@@ -113,7 +131,9 @@ SELECT
     fk.name AS FkName,
     SCHEMA_NAME(tp.schema_id) AS ParentSchema, tp.name AS ParentTable, cp.name AS ParentColumn,
     SCHEMA_NAME(tr.schema_id) AS RefSchema, tr.name AS RefTable, cr.name AS RefColumn,
-    fkc.constraint_column_id AS Ordinal
+    fkc.constraint_column_id AS Ordinal,
+    fk.delete_referential_action_desc AS DeleteAction,
+    fk.update_referential_action_desc AS UpdateAction
 FROM sys.foreign_keys fk
 JOIN sys.foreign_key_columns fkc ON fk.object_id = fkc.constraint_object_id
 JOIN sys.tables  tp ON fkc.parent_object_id = tp.object_id
@@ -273,7 +293,11 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
         var uniqueSets = await LoadUniqueColumnSetsAsync(conn, ct).ConfigureAwait(false);
 
         var rels = new List<Relationship>();
-        var grouped = new Dictionary<string, (string ParentKey, string RefKey, List<string> ParentCols, List<string> RefCols)>();
+        var grouped =
+            new Dictionary<
+                string,
+                (string ParentKey, string RefKey, List<string> ParentCols, List<string> RefCols, ForeignKeyReferentialAction OnDelete, ForeignKeyReferentialAction OnUpdate)
+            >();
 
         await using var cmd = new SqlCommand(ForeignKeysSql, conn);
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
@@ -285,15 +309,17 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
             var parentCol = reader.GetString(3);
             var refKey = $"[{reader.GetString(4)}].[{reader.GetString(5)}]";
             var refCol = reader.GetString(6);
+            var deleteAction = ForeignKeyReferentialActionHelper.Parse(reader.IsDBNull(8) ? null : reader.GetString(8));
+            var updateAction = ForeignKeyReferentialActionHelper.Parse(reader.IsDBNull(9) ? null : reader.GetString(9));
 
             if (!grouped.TryGetValue(fkName, out var g))
             {
-                g = (parentKey, refKey, new List<string>(), new List<string>());
-                grouped[fkName] = g;
+                g = (parentKey, refKey, new List<string>(), new List<string>(), deleteAction, updateAction);
             }
 
             g.ParentCols.Add(parentCol);
             g.RefCols.Add(refCol);
+            grouped[fkName] = g;
         }
 
         foreach (var (fkName, g) in grouped)
@@ -333,6 +359,8 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
                     SourceColumnId = g.RefCols.Count == 1 && refer.ColumnsByName.TryGetValue(g.RefCols[0], out var refColumn) ? refColumn.Id : null,
                     TargetColumnId = g.ParentCols.Count == 1 && parent.ColumnsByName.TryGetValue(g.ParentCols[0], out var parentColumn) ? parentColumn.Id : null,
                     ConstraintName = fkName,
+                    OnDelete = g.OnDelete,
+                    OnUpdate = g.OnUpdate,
                 }
             );
         }

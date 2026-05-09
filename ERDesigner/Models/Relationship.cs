@@ -26,4 +26,10 @@ public class Relationship
 
     /// <summary>DB から取り込んだ外部キー制約名です。</summary>
     public string? ConstraintName { get; set; }
+
+    /// <summary>親行削除時の参照アクションです。</summary>
+    public ForeignKeyReferentialAction OnDelete { get; set; } = ForeignKeyReferentialAction.NoAction;
+
+    /// <summary>親キー更新時の参照アクションです。</summary>
+    public ForeignKeyReferentialAction OnUpdate { get; set; } = ForeignKeyReferentialAction.NoAction;
 }

@@ -140,6 +140,8 @@ IF OBJECT_ID(N'{ParentTable}', N'U') IS NOT NULL DROP TABLE [{ParentTable}];";
         live2.Relationships.Should().ContainSingle();
         live2.Relationships[0].ConstraintName.Should().Be($"FK_{ChildTable}_{ParentTable}");
         live2.Relationships[0].TargetColumnId.Should().NotBeNull();
+        live2.Relationships[0].OnDelete.Should().Be(ForeignKeyReferentialAction.NoAction);
+        live2.Relationships[0].OnUpdate.Should().Be(ForeignKeyReferentialAction.NoAction);
 
         // ---------- 5) 列追加の差分テスト ----------
         child.Columns.Add(new Column { Name = "AddedLater", DataType = "nvarchar(20)" });

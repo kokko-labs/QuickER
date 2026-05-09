@@ -391,7 +391,15 @@ public class SchemaDiffService
     }
 
     /// <summary>外部キーの比較に使うシグネチャを生成します。</summary>
-    private static (string Parent, string ParentColumn, string Child, string ChildColumn)? MakeForeignKeySignature(Relationship rel, IReadOnlyList<Entity> entities)
+    private static (
+        string Parent,
+        string ParentColumn,
+        string Child,
+        string ChildColumn,
+        string ConstraintName,
+        ForeignKeyReferentialAction OnDelete,
+        ForeignKeyReferentialAction OnUpdate
+    )? MakeForeignKeySignature(Relationship rel, IReadOnlyList<Entity> entities)
     {
         var parent = entities.FirstOrDefault(e => e.Id == rel.SourceEntityId);
         var child = entities.FirstOrDefault(e => e.Id == rel.TargetEntityId);
@@ -415,7 +423,15 @@ public class SchemaDiffService
             return null;
         }
 
-        return (NormalizeTable(parent).ToLowerInvariant(), parentColumn.Name.ToLowerInvariant(), NormalizeTable(child).ToLowerInvariant(), childColumnName.ToLowerInvariant());
+        return (
+            NormalizeTable(parent).ToLowerInvariant(),
+            parentColumn.Name.ToLowerInvariant(),
+            NormalizeTable(child).ToLowerInvariant(),
+            childColumnName.ToLowerInvariant(),
+            rel.ConstraintName?.Trim().ToLowerInvariant() ?? string.Empty,
+            rel.OnDelete,
+            rel.OnUpdate
+        );
     }
 
     /// <summary>

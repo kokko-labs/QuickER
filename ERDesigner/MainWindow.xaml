@@ -390,7 +390,12 @@
               Visibility="{Binding IsRelationshipMode, Converter={StaticResource BoolToVisibilityConverter}}"
             >
               <StackPanel>
-                <TextBlock TextWrapping="Wrap" Foreground="#7A5F00" FontSize="11" Text="リレーション作成中: 2つのエンティティを順番にクリックしてください。" />
+                <TextBlock
+                  TextWrapping="Wrap"
+                  Foreground="#7A5F00"
+                  FontSize="11"
+                  Text="リレーション作成中: 2つのエンティティを順番にクリックしてください。同じエンティティを2回クリックすると自己参照リレーションを作成できます。"
+                />
                 <Button Margin="0,6,0,0" Content="キャンセル" Command="{Binding CancelRelationshipModeCommand}" />
               </StackPanel>
             </Border>
@@ -436,6 +441,16 @@
                   <Canvas>
                     <!-- 線本体 (太いヒット領域 + 見た目) -->
                     <Line X1="{Binding X1}" Y1="{Binding Y1}" X2="{Binding X2}" Y2="{Binding Y2}" Stroke="Transparent" StrokeThickness="14" Cursor="Hand">
+                      <Line.Style>
+                        <Style TargetType="Line">
+                          <Setter Property="Visibility" Value="Visible" />
+                          <Style.Triggers>
+                            <DataTrigger Binding="{Binding ShowSelfLoop}" Value="True">
+                              <Setter Property="Visibility" Value="Collapsed" />
+                            </DataTrigger>
+                          </Style.Triggers>
+                        </Style>
+                      </Line.Style>
                       <Line.InputBindings>
                         <MouseBinding
                           MouseAction="LeftClick"
@@ -444,7 +459,71 @@
                         />
                       </Line.InputBindings>
                     </Line>
-                    <Line X1="{Binding X1}" Y1="{Binding Y1}" X2="{Binding X2}" Y2="{Binding Y2}" Style="{StaticResource RelationLineStyle}" IsHitTestVisible="False" />
+                    <Line X1="{Binding X1}" Y1="{Binding Y1}" X2="{Binding X2}" Y2="{Binding Y2}" IsHitTestVisible="False">
+                      <Line.Style>
+                        <Style TargetType="Line" BasedOn="{StaticResource RelationLineStyle}">
+                          <Setter Property="Visibility" Value="Visible" />
+                          <Style.Triggers>
+                            <DataTrigger Binding="{Binding ShowSelfLoop}" Value="True">
+                              <Setter Property="Visibility" Value="Collapsed" />
+                            </DataTrigger>
+                          </Style.Triggers>
+                        </Style>
+                      </Line.Style>
+                    </Line>
+
+                    <Ellipse
+                      Canvas.Left="{Binding SelfLoopLeft}"
+                      Canvas.Top="{Binding SelfLoopTop}"
+                      Width="{Binding SelfLoopWidth}"
+                      Height="{Binding SelfLoopHeight}"
+                      Stroke="Transparent"
+                      StrokeThickness="14"
+                      Cursor="Hand"
+                    >
+                      <Ellipse.Style>
+                        <Style TargetType="Ellipse">
+                          <Setter Property="Visibility" Value="Collapsed" />
+                          <Style.Triggers>
+                            <DataTrigger Binding="{Binding ShowSelfLoop}" Value="True">
+                              <Setter Property="Visibility" Value="Visible" />
+                            </DataTrigger>
+                          </Style.Triggers>
+                        </Style>
+                      </Ellipse.Style>
+                      <Ellipse.InputBindings>
+                        <MouseBinding
+                          MouseAction="LeftClick"
+                          Command="{Binding DataContext.RelationshipClickCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                          CommandParameter="{Binding}"
+                        />
+                      </Ellipse.InputBindings>
+                    </Ellipse>
+                    <Ellipse
+                      Canvas.Left="{Binding SelfLoopLeft}"
+                      Canvas.Top="{Binding SelfLoopTop}"
+                      Width="{Binding SelfLoopWidth}"
+                      Height="{Binding SelfLoopHeight}"
+                      Fill="Transparent"
+                      IsHitTestVisible="False"
+                    >
+                      <Ellipse.Style>
+                        <Style TargetType="Ellipse">
+                          <Setter Property="Visibility" Value="Collapsed" />
+                          <Setter Property="Stroke" Value="{StaticResource LineBrush}" />
+                          <Setter Property="StrokeThickness" Value="1.6" />
+                          <Style.Triggers>
+                            <DataTrigger Binding="{Binding ShowSelfLoop}" Value="True">
+                              <Setter Property="Visibility" Value="Visible" />
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                              <Setter Property="Stroke" Value="{StaticResource LineSelectedBrush}" />
+                              <Setter Property="StrokeThickness" Value="2.5" />
+                            </DataTrigger>
+                          </Style.Triggers>
+                        </Style>
+                      </Ellipse.Style>
+                    </Ellipse>
 
                     <!-- 起点マーカー -->
                     <ContentControl
@@ -456,6 +535,16 @@
                       ContentTemplate="{StaticResource EndpointMarkerTemplate}"
                       IsHitTestVisible="False"
                     >
+                      <ContentControl.Style>
+                        <Style TargetType="ContentControl">
+                          <Setter Property="Visibility" Value="Visible" />
+                          <Style.Triggers>
+                            <DataTrigger Binding="{Binding ShowEndpointMarkers}" Value="False">
+                              <Setter Property="Visibility" Value="Collapsed" />
+                            </DataTrigger>
+                          </Style.Triggers>
+                        </Style>
+                      </ContentControl.Style>
                       <ContentControl.RenderTransform>
                         <RotateTransform Angle="{Binding SourceMarkerAngle}" CenterX="10" CenterY="10" />
                       </ContentControl.RenderTransform>
@@ -471,6 +560,16 @@
                       ContentTemplate="{StaticResource EndpointMarkerTemplate}"
                       IsHitTestVisible="False"
                     >
+                      <ContentControl.Style>
+                        <Style TargetType="ContentControl">
+                          <Setter Property="Visibility" Value="Visible" />
+                          <Style.Triggers>
+                            <DataTrigger Binding="{Binding ShowEndpointMarkers}" Value="False">
+                              <Setter Property="Visibility" Value="Collapsed" />
+                            </DataTrigger>
+                          </Style.Triggers>
+                        </Style>
+                      </ContentControl.Style>
                       <ContentControl.RenderTransform>
                         <RotateTransform Angle="{Binding TargetMarkerAngle}" CenterX="10" CenterY="10" />
                       </ContentControl.RenderTransform>
@@ -818,6 +917,14 @@
                 <models:RelationshipType>ManyToMany</models:RelationshipType>
               </ComboBox>
             </Grid>
+            <Grid Margin="0,4" DataContext="{Binding SelectedRelationship}">
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="80" />
+                <ColumnDefinition Width="*" />
+              </Grid.ColumnDefinitions>
+              <TextBlock Text="制約名" VerticalAlignment="Center" />
+              <TextBox Grid.Column="1" Text="{Binding ConstraintName, UpdateSourceTrigger=LostFocus}" />
+            </Grid>
             <Grid Margin="0,8" DataContext="{Binding SelectedRelationship}">
               <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="80" />
@@ -863,6 +970,22 @@
                 SelectedValue="{Binding TargetColumnId, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                 IsEnabled="{Binding CanSelectForeignKeyColumns}"
               />
+            </Grid>
+            <Grid Margin="0,2" DataContext="{Binding SelectedRelationship}">
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="80" />
+                <ColumnDefinition Width="*" />
+              </Grid.ColumnDefinitions>
+              <TextBlock Text="ON DELETE" VerticalAlignment="Center" />
+              <ComboBox Grid.Column="1" ItemsSource="{Binding ReferentialActions}" SelectedItem="{Binding OnDelete, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+            </Grid>
+            <Grid Margin="0,2" DataContext="{Binding SelectedRelationship}">
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="80" />
+                <ColumnDefinition Width="*" />
+              </Grid.ColumnDefinitions>
+              <TextBlock Text="ON UPDATE" VerticalAlignment="Center" />
+              <ComboBox Grid.Column="1" ItemsSource="{Binding ReferentialActions}" SelectedItem="{Binding OnUpdate, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
             </Grid>
             <Button Margin="0,12,0,0" Content="リレーションを削除" Command="{Binding RemoveSelectedRelationshipCommand}" />
           </StackPanel>

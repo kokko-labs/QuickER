@@ -133,11 +133,13 @@ public static class TableDefinitionDocumentExporter
             worksheet.Row(row).Height = DefaultRowHeight;
             worksheet.Cell(row, 1).Value = i + 1;
             worksheet.Cell(row, 2).Value = relationship.ConstraintName ?? string.Empty;
-            worksheet.Cell(row, 3).Value = relationship.Source.TableName;
-            worksheet.Cell(row, 4).Value = GetColumnName(relationship.Source, relationship.SourceColumnId);
-            worksheet.Cell(row, 5).Value = relationship.Target.TableName;
-            worksheet.Cell(row, 6).Value = GetColumnName(relationship.Target, relationship.TargetColumnId);
+            worksheet.Cell(row, 3).Value = relationship.Target.TableName;
+            worksheet.Cell(row, 4).Value = GetColumnName(relationship.Target, relationship.TargetColumnId);
+            worksheet.Cell(row, 5).Value = relationship.Source.TableName;
+            worksheet.Cell(row, 6).Value = GetColumnName(relationship.Source, relationship.SourceColumnId);
             worksheet.Cell(row, 7).Value = GetRelationshipTypeLabel(relationship.Type);
+            worksheet.Cell(row, 8).Value = relationship.OnDelete.ToDisplayText();
+            worksheet.Cell(row, 9).Value = relationship.OnUpdate.ToDisplayText();
         }
 
         UpdatePrintArea(worksheet, $"A1:J{Math.Max(headerRow, dataStartRow + orderedRelationships.Count - 1)}");

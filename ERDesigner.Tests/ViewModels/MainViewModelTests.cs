@@ -71,6 +71,7 @@ public class MainViewModelTests
         vm.Relationships[0].Source.Should().Be(a);
         vm.Relationships[0].Target.Should().Be(b);
         vm.Relationships[0].Type.Should().Be(RelationshipType.OneToMany);
+        vm.Relationships[0].ConstraintName.Should().Be("FK_NewTable_NewTable");
     }
 
     [Fact(DisplayName = "リレーション作成時に既定の参照先列と外部キー列が設定される")]
@@ -88,6 +89,97 @@ public class MainViewModelTests
 
         vm.Relationships[0].SourceColumnId.Should().Be(vm.Entities[0].Columns[0].Id);
         vm.Relationships[0].TargetColumnId.Should().Be(vm.Entities[1].Columns[1].Id);
+    }
+
+    [Fact(DisplayName = "リレーション作成モードで同じエンティティを2回クリックすると自己参照リレーションが追加される")]
+    public void RelationshipMode_CreatesSelfRelationship()
+    {
+        var vm = new MainViewModel();
+        vm.AddEntityCommand.Execute(null);
+        vm.Entities[0].Columns.Add(new ColumnViewModel(new Column { Name = "ParentId", DataType = "int" }));
+
+        vm.StartAddOneToManyCommand.Execute(null);
+        vm.OnEntityClicked(vm.Entities[0]);
+        vm.OnEntityClicked(vm.Entities[0]);
+
+        vm.Relationships.Should().ContainSingle();
+        vm.Relationships[0].Source.Should().Be(vm.Entities[0]);
+        vm.Relationships[0].Target.Should().Be(vm.Entities[0]);
+        vm.Relationships[0].TargetColumnId.Should().Be(vm.Entities[0].Columns[1].Id);
+        vm.Relationships[0].ConstraintName.Should().Be("FK_NewTable_NewTable");
+    }
+
+    [Fact(DisplayName = "同じ始点と終点のリレーションは種別が違っても重複追加されない")]
+    public void RelationshipMode_DoesNotCreateDuplicateRelationship()
+    {
+        var vm = new MainViewModel { IsConfirmationEnabled = false };
+        vm.AddEntityCommand.Execute(null);
+        vm.AddEntityCommand.Execute(null);
+
+        vm.StartAddOneToManyCommand.Execute(null);
+        vm.OnEntityClicked(vm.Entities[0]);
+        vm.OnEntityClicked(vm.Entities[1]);
+
+        vm.StartAddOneToOneCommand.Execute(null);
+        vm.OnEntityClicked(vm.Entities[0]);
+        vm.OnEntityClicked(vm.Entities[1]);
+
+        vm.Relationships.Should().ContainSingle();
+        vm.IsRelationshipMode.Should().BeFalse();
+        vm.PendingRelationshipSource.Should().BeNull();
+    }
+
+    [Fact(DisplayName = "自己参照リレーションも重複追加されない")]
+    public void RelationshipMode_DoesNotCreateDuplicateSelfRelationship()
+    {
+        var vm = new MainViewModel { IsConfirmationEnabled = false };
+        vm.AddEntityCommand.Execute(null);
+        vm.Entities[0].Columns.Add(new ColumnViewModel(new Column { Name = "ParentId", DataType = "int" }));
+
+        vm.StartAddOneToManyCommand.Execute(null);
+        vm.OnEntityClicked(vm.Entities[0]);
+        vm.OnEntityClicked(vm.Entities[0]);
+
+        vm.StartAddOneToOneCommand.Execute(null);
+        vm.OnEntityClicked(vm.Entities[0]);
+        vm.OnEntityClicked(vm.Entities[0]);
+
+        vm.Relationships.Should().ContainSingle();
+        vm.Relationships[0].Source.Should().Be(vm.Entities[0]);
+        vm.Relationships[0].Target.Should().Be(vm.Entities[0]);
+    }
+
+    [Fact(DisplayName = "リレーションの制約名と参照アクションは Undo/Redo できる")]
+    public void RelationshipMetadata_CanUndoRedo()
+    {
+        var vm = new MainViewModel();
+        vm.AddEntityCommand.Execute(null);
+        vm.AddEntityCommand.Execute(null);
+        vm.Entities[1].Columns.Add(new ColumnViewModel(new Column { Name = "ParentId", DataType = "int" }));
+        vm.StartAddOneToManyCommand.Execute(null);
+        vm.OnEntityClicked(vm.Entities[0]);
+        vm.OnEntityClicked(vm.Entities[1]);
+        var relationship = vm.Relationships[0];
+
+        relationship.ConstraintName = "FK_Test";
+        relationship.OnDelete = ForeignKeyReferentialAction.Cascade;
+        relationship.OnUpdate = ForeignKeyReferentialAction.SetDefault;
+
+        vm.UndoCommand.Execute(null);
+        relationship.OnUpdate.Should().Be(ForeignKeyReferentialAction.NoAction);
+
+        vm.UndoCommand.Execute(null);
+        relationship.OnDelete.Should().Be(ForeignKeyReferentialAction.NoAction);
+
+        vm.UndoCommand.Execute(null);
+        relationship.ConstraintName.Should().BeNull();
+
+        vm.RedoCommand.Execute(null);
+        vm.RedoCommand.Execute(null);
+        vm.RedoCommand.Execute(null);
+        relationship.ConstraintName.Should().Be("FK_Test");
+        relationship.OnDelete.Should().Be(ForeignKeyReferentialAction.Cascade);
+        relationship.OnUpdate.Should().Be(ForeignKeyReferentialAction.SetDefault);
     }
 
     [Fact(DisplayName = "参照先 PK と同名の列があれば既定 FK に選ばれ、FK チェックも入る")]

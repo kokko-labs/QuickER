@@ -145,11 +145,14 @@ public static class SchemaSyncScriptBuilder
 
         var childTbl = SchemaDiffService.NormalizeTable(item.ChildEntity);
         var parentTbl = SchemaDiffService.NormalizeTable(item.ParentEntity);
-        var fkName = $"FK_{SqlIdentifier.SafeName(childTbl)}_{SqlIdentifier.SafeName(parentTbl)}";
+        var fkName = string.IsNullOrWhiteSpace(item.Relationship?.ConstraintName)
+            ? $"FK_{SqlIdentifier.SafeName(childTbl)}_{SqlIdentifier.SafeName(parentTbl)}"
+            : item.Relationship.ConstraintName!;
+        var referentialActions = BuildReferentialActionClause(item.Relationship);
         sb.AppendLine(
-            $"ALTER TABLE {SqlIdentifier.Bracket(childTbl)} ADD CONSTRAINT [{fkName}] "
+            $"ALTER TABLE {SqlIdentifier.Bracket(childTbl)} ADD CONSTRAINT [{SqlIdentifier.Escape(fkName)}] "
                 + $"FOREIGN KEY ({SqlIdentifier.BracketSimple(item.ColumnName)}) "
-                + $"REFERENCES {SqlIdentifier.Bracket(parentTbl)} ({SqlIdentifier.BracketSimple(pkCol.Name)});"
+                + $"REFERENCES {SqlIdentifier.Bracket(parentTbl)} ({SqlIdentifier.BracketSimple(pkCol.Name)}){referentialActions};"
         );
         sb.AppendLine("GO");
     }
@@ -255,4 +258,27 @@ public static class SchemaSyncScriptBuilder
     }
 
     private static string GetNullabilityClause(Column column) => column.IsPrimaryKey || !column.IsNullable ? "NOT NULL" : "NULL";
+
+    /// <summary>外部キーの参照アクション句を生成します。</summary>
+    private static string BuildReferentialActionClause(Relationship? relationship)
+    {
+        if (relationship is null)
+        {
+            return string.Empty;
+        }
+
+        var clauses = new List<string>();
+
+        if (relationship.OnDelete != ForeignKeyReferentialAction.NoAction)
+        {
+            clauses.Add($"ON DELETE {relationship.OnDelete.ToSqlText()}");
+        }
+
+        if (relationship.OnUpdate != ForeignKeyReferentialAction.NoAction)
+        {
+            clauses.Add($"ON UPDATE {relationship.OnUpdate.ToSqlText()}");
+        }
+
+        return clauses.Count == 0 ? string.Empty : " " + string.Join(" ", clauses);
+    }
 }

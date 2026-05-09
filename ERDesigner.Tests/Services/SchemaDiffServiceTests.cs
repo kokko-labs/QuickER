@@ -157,6 +157,53 @@ public class SchemaDiffServiceTests
         diff.Items.Should().ContainSingle(i => i.Kind == SchemaDiffKind.AddForeignKey && i.ColumnName == "CustomerId2");
     }
 
+    [Fact(DisplayName = "参照アクションが変わると DropForeignKey と AddForeignKey になる")]
+    public void ForeignKeyReferentialActionChanged_EmitsDropAndAdd()
+    {
+        var parentLive = Tbl("Parent", ("Id", "int", true));
+        var childLive = Tbl("Child", ("Id", "int", true), ("ParentId", "int", false));
+        var liveRel = new Relationship
+        {
+            SourceEntityId = parentLive.Id,
+            TargetEntityId = childLive.Id,
+            Type = RelationshipType.OneToMany,
+            SourceColumnId = parentLive.Columns[0].Id,
+            TargetColumnId = childLive.Columns[1].Id,
+            ConstraintName = "FK_Child_Parent",
+            OnDelete = ForeignKeyReferentialAction.NoAction,
+            OnUpdate = ForeignKeyReferentialAction.NoAction,
+        };
+
+        var parentTarget = Tbl("Parent", ("Id", "int", true));
+        var childTarget = Tbl("Child", ("Id", "int", true), ("ParentId", "int", false));
+        var targetRel = new Relationship
+        {
+            SourceEntityId = parentTarget.Id,
+            TargetEntityId = childTarget.Id,
+            Type = RelationshipType.OneToMany,
+            SourceColumnId = parentTarget.Columns[0].Id,
+            TargetColumnId = childTarget.Columns[1].Id,
+            ConstraintName = "FK_Child_Parent",
+            OnDelete = ForeignKeyReferentialAction.Cascade,
+            OnUpdate = ForeignKeyReferentialAction.SetNull,
+        };
+
+        var diff = new SchemaDiffService().Compute(
+            new List<Entity> { parentLive, childLive },
+            new List<Relationship> { liveRel },
+            new List<Entity> { parentTarget, childTarget },
+            new List<Relationship> { targetRel }
+        );
+
+        diff.Items.Should().ContainSingle(i => i.Kind == SchemaDiffKind.DropForeignKey && i.ForeignKeyName == "FK_Child_Parent");
+        diff.Items.Should()
+            .ContainSingle(i =>
+                i.Kind == SchemaDiffKind.AddForeignKey
+                && i.Relationship!.OnDelete == ForeignKeyReferentialAction.Cascade
+                && i.Relationship.OnUpdate == ForeignKeyReferentialAction.SetNull
+            );
+    }
+
     [Fact(DisplayName = "差分が無ければ Items は空")]
     public void Identical_NoDiff()
     {

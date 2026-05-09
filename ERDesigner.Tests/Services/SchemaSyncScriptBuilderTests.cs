@@ -166,6 +166,57 @@ public class SchemaSyncScriptBuilderTests
         sql.Should().Contain("FOREIGN KEY ([CustomerRef]) REFERENCES [Customer] ([Id])");
     }
 
+    [Fact(DisplayName = "AddForeignKey は制約名と参照アクションを生成する")]
+    public void AddFk_GeneratesConstraintNameAndReferentialActions()
+    {
+        var customer = new Entity { TableName = "Customer" };
+        customer.Columns.Add(
+            new Column
+            {
+                Name = "Id",
+                DataType = "int",
+                IsPrimaryKey = true,
+            }
+        );
+        var order = new Entity { TableName = "Order" };
+        order.Columns.Add(
+            new Column
+            {
+                Name = "Id",
+                DataType = "int",
+                IsPrimaryKey = true,
+            }
+        );
+        order.Columns.Add(new Column { Name = "CustomerId", DataType = "int" });
+        var rel = new Relationship
+        {
+            SourceEntityId = customer.Id,
+            TargetEntityId = order.Id,
+            Type = RelationshipType.OneToMany,
+            SourceColumnId = customer.Columns[0].Id,
+            TargetColumnId = order.Columns[1].Id,
+            ConstraintName = "FK_Order_Customer_Custom",
+            OnDelete = ForeignKeyReferentialAction.Cascade,
+            OnUpdate = ForeignKeyReferentialAction.SetDefault,
+        };
+
+        var item = new SchemaDiffItem
+        {
+            Kind = SchemaDiffKind.AddForeignKey,
+            TableName = "Order",
+            ColumnName = "CustomerId",
+            ParentEntity = customer,
+            ChildEntity = order,
+            Relationship = rel,
+            IsSelected = true,
+        };
+
+        var sql = SchemaSyncScriptBuilder.Build(new[] { item });
+        sql.Should().Contain("CONSTRAINT [FK_Order_Customer_Custom]");
+        sql.Should().Contain("ON DELETE CASCADE");
+        sql.Should().Contain("ON UPDATE SET DEFAULT");
+    }
+
     [Fact(DisplayName = "DropForeignKey は制約名があればその名前で削除する")]
     public void DropFk_UsesConstraintNameWhenAvailable()
     {

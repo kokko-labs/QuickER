@@ -21,6 +21,9 @@ public partial class MainViewModel : ObservableObject
         nameof(RelationshipViewModel.Type),
         nameof(RelationshipViewModel.SourceColumnId),
         nameof(RelationshipViewModel.TargetColumnId),
+        nameof(RelationshipViewModel.ConstraintName),
+        nameof(RelationshipViewModel.OnDelete),
+        nameof(RelationshipViewModel.OnUpdate),
     ];
     private static readonly string[] TrackedColumnPropertyNames =
     [
@@ -798,8 +801,15 @@ public partial class MainViewModel : ObservableObject
                 return;
             }
 
-            if (PendingRelationshipSource == entity)
+            if (HasSameRelationship(PendingRelationshipSource, entity))
             {
+                MessageBox.Show(
+                    "同じ関係のリレーションはすでに存在します。既存のリレーションを編集してください。",
+                    "重複リレーション",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information
+                );
+                IsRelationshipMode = false;
                 PendingRelationshipSource = null;
                 return;
             }
@@ -812,6 +822,7 @@ public partial class MainViewModel : ObservableObject
                     Type = PendingRelationshipType,
                     SourceColumnId = PendingRelationshipSource.Columns.FirstOrDefault(c => c.IsPrimaryKey)?.Id,
                     TargetColumnId = ResolveDefaultForeignKeyColumn(PendingRelationshipSource, entity)?.Id,
+                    ConstraintName = $"FK_{SqlIdentifier.SafeName(entity.TableName)}_{SqlIdentifier.SafeName(PendingRelationshipSource.TableName)}",
                 },
                 PendingRelationshipSource,
                 entity
@@ -833,6 +844,12 @@ public partial class MainViewModel : ObservableObject
             SelectedEntity = entity;
             SelectedRelationship = null;
         }
+    }
+
+    /// <summary>同一の始点・終点・種別を持つリレーションが既に存在するかを判定します。</summary>
+    private bool HasSameRelationship(EntityViewModel source, EntityViewModel target)
+    {
+        return Relationships.Any(relationship => relationship.Source == source && relationship.Target == target);
     }
 
     /// <summary>リレーションがクリックされたときに呼ばれます。</summary>
@@ -1225,6 +1242,13 @@ public partial class MainViewModel : ObservableObject
     /// <summary>追加時の既定 FK 列を解決します。PK 同名列を優先し、無ければ従来どおり最初の非 PK 列を採用します。</summary>
     private static ColumnViewModel? ResolveDefaultForeignKeyColumn(EntityViewModel source, EntityViewModel target)
     {
+        if (ReferenceEquals(source, target))
+        {
+            var sourcePrimaryKeyByName = source.Columns.FirstOrDefault(c => c.IsPrimaryKey);
+
+            return source.Columns.FirstOrDefault(c => !c.IsPrimaryKey && !string.Equals(c.Name, sourcePrimaryKeyByName?.Name, StringComparison.OrdinalIgnoreCase));
+        }
+
         var sourcePrimaryKey = source.Columns.FirstOrDefault(c => c.IsPrimaryKey);
 
         if (sourcePrimaryKey is null)

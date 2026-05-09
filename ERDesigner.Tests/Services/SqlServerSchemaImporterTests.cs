@@ -180,4 +180,62 @@ public class SqlServerSchemaImporterTests
 
         sigA.Should().NotBe(sigB);
     }
+
+    [Fact(DisplayName = "ComputeSignature: 参照アクションが違えば署名が変わる")]
+    public void ComputeSignature_DifferentReferentialActions_DifferentSignature()
+    {
+        var parent = new Entity
+        {
+            TableName = "Parent",
+            Columns =
+            {
+                new Column
+                {
+                    Name = "Id",
+                    DataType = "int",
+                    IsPrimaryKey = true,
+                },
+            },
+        };
+        var child = new Entity
+        {
+            TableName = "Child",
+            Columns =
+            {
+                new Column
+                {
+                    Name = "Id",
+                    DataType = "int",
+                    IsPrimaryKey = true,
+                },
+                new Column { Name = "ParentId", DataType = "int" },
+            },
+        };
+
+        var relA = new Relationship
+        {
+            SourceEntityId = parent.Id,
+            TargetEntityId = child.Id,
+            Type = RelationshipType.OneToMany,
+            SourceColumnId = parent.Columns[0].Id,
+            TargetColumnId = child.Columns[1].Id,
+            OnDelete = ForeignKeyReferentialAction.NoAction,
+            OnUpdate = ForeignKeyReferentialAction.NoAction,
+        };
+        var relB = new Relationship
+        {
+            SourceEntityId = parent.Id,
+            TargetEntityId = child.Id,
+            Type = RelationshipType.OneToMany,
+            SourceColumnId = parent.Columns[0].Id,
+            TargetColumnId = child.Columns[1].Id,
+            OnDelete = ForeignKeyReferentialAction.Cascade,
+            OnUpdate = ForeignKeyReferentialAction.SetNull,
+        };
+
+        var sigA = SqlServerSchemaImporter.ComputeSignature(new[] { parent, child }, new[] { relA });
+        var sigB = SqlServerSchemaImporter.ComputeSignature(new[] { parent, child }, new[] { relB });
+
+        sigA.Should().NotBe(sigB);
+    }
 }

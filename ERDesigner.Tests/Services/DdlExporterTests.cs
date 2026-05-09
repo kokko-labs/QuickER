@@ -132,6 +132,68 @@ public class DdlExporterTests
         sql.Should().Contain("REFERENCES [P] ([Id])");
     }
 
+    [Fact(DisplayName = "Build: 制約名と参照アクションが FOREIGN KEY に出力される")]
+    public void Build_EmitsConstraintNameAndReferentialActions()
+    {
+        var vm = new MainViewModel();
+        var parent = new EntityViewModel(
+            new Entity
+            {
+                TableName = "Parent",
+                Columns =
+                {
+                    new Column
+                    {
+                        Name = "Id",
+                        DataType = "int",
+                        IsPrimaryKey = true,
+                    },
+                },
+            }
+        );
+        var child = new EntityViewModel(
+            new Entity
+            {
+                TableName = "Child",
+                Columns =
+                {
+                    new Column
+                    {
+                        Name = "Id",
+                        DataType = "int",
+                        IsPrimaryKey = true,
+                    },
+                    new Column { Name = "ParentId", DataType = "int" },
+                },
+            }
+        );
+        vm.Entities.Add(parent);
+        vm.Entities.Add(child);
+        vm.Relationships.Add(
+            new RelationshipViewModel(
+                new Relationship
+                {
+                    SourceEntityId = parent.Id,
+                    TargetEntityId = child.Id,
+                    Type = RelationshipType.OneToMany,
+                    SourceColumnId = parent.Columns[0].Id,
+                    TargetColumnId = child.Columns[1].Id,
+                    ConstraintName = "FK_Child_Parent_Custom",
+                    OnDelete = ForeignKeyReferentialAction.Cascade,
+                    OnUpdate = ForeignKeyReferentialAction.SetNull,
+                },
+                parent,
+                child
+            )
+        );
+
+        var sql = DdlExporter.Build(vm);
+
+        sql.Should().Contain("CONSTRAINT [FK_Child_Parent_Custom]");
+        sql.Should().Contain("ON DELETE CASCADE");
+        sql.Should().Contain("ON UPDATE SET NULL");
+    }
+
     [Fact(DisplayName = "BuildWorkbook: テーブル定義書のサマリーとテーブル詳細が生成される")]
     public void BuildWorkbook_CreatesSummaryAndEntityWorksheets()
     {
@@ -228,7 +290,7 @@ public class DdlExporterTests
         summarySheet.Cell(2, 2).GetString().Should().Be("詳細");
         summarySheet.Cell(2, 3).GetString().Should().Be("Order");
         summarySheet.Cell(3, 3).GetString().Should().Be("User");
-        summarySheet.Column(3).Width.Should().BeApproximately(35.7109375d, 0.001d);
+        summarySheet.Column(3).Width.Should().BeApproximately(35d, 0.001d);
         summarySheet.Cell(2, 2).Style.Font.FontName.Should().Be("游ゴシック");
         summarySheet.Cell(2, 2).GetHyperlink().InternalAddress.ToString().Should().Be("'Order'!A1");
 
@@ -255,11 +317,13 @@ public class DdlExporterTests
 
         var relationshipSheet = workbook.Worksheet("リレーション一覧");
         relationshipSheet.Cell(2, 2).GetString().Should().Be("FK_Order_User");
-        relationshipSheet.Cell(2, 3).GetString().Should().Be("User");
-        relationshipSheet.Cell(2, 4).GetString().Should().Be("Id");
-        relationshipSheet.Cell(2, 5).GetString().Should().Be("Order");
-        relationshipSheet.Cell(2, 6).GetString().Should().Be("UserId");
+        relationshipSheet.Cell(2, 3).GetString().Should().Be("Order");
+        relationshipSheet.Cell(2, 4).GetString().Should().Be("UserId");
+        relationshipSheet.Cell(2, 5).GetString().Should().Be("User");
+        relationshipSheet.Cell(2, 6).GetString().Should().Be("Id");
         relationshipSheet.Cell(2, 7).GetString().Should().Be("N:1");
+        relationshipSheet.Cell(2, 8).GetString().Should().Be("NO ACTION");
+        relationshipSheet.Cell(2, 9).GetString().Should().Be("NO ACTION");
         relationshipSheet.Cell(3, 2).GetString().Should().Be("FK_Order_User_Audit");
     }
 }

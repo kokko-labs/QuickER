@@ -19,6 +19,12 @@ public partial class RelationshipViewModel : ObservableObject
     /// <summary>端点マーカーの描画サイズ (px)。</summary>
     private const double MarkerSize = 20;
 
+    /// <summary>自己参照ループの描画サイズ (px)。</summary>
+    private const double SelfLoopSize = 56;
+
+    /// <summary>自己参照リレーションのラベルを少し右へ寄せる補正量 (px)。</summary>
+    private const double SelfLoopLabelOffsetX = 10;
+
     /// <summary>端点マーカーがエンティティ外側へ離れる余白 (px)。</summary>
     private const double MarkerGap = 4;
 
@@ -44,6 +50,14 @@ public partial class RelationshipViewModel : ObservableObject
     [ObservableProperty]
     private string? _constraintName;
 
+    /// <summary>親行削除時の参照アクション。</summary>
+    [ObservableProperty]
+    private ForeignKeyReferentialAction _onDelete;
+
+    /// <summary>親キー更新時の参照アクション。</summary>
+    [ObservableProperty]
+    private ForeignKeyReferentialAction _onUpdate;
+
     /// <summary>選択中かどうか。</summary>
     [ObservableProperty]
     private bool _isSelected;
@@ -60,6 +74,10 @@ public partial class RelationshipViewModel : ObservableObject
     /// <summary>外部キー列として選択可能な終点側カラム一覧です。</summary>
     public IReadOnlyList<ColumnViewModel> AvailableTargetColumns => Target.Columns.ToList();
 
+    /// <summary>UI 表示用の参照アクション候補一覧です。</summary>
+    public IReadOnlyList<ForeignKeyReferentialAction> ReferentialActions { get; } =
+    [ForeignKeyReferentialAction.NoAction, ForeignKeyReferentialAction.Cascade, ForeignKeyReferentialAction.SetNull, ForeignKeyReferentialAction.SetDefault];
+
     /// <summary>列選択が有効なリレーション種別かどうかです。</summary>
     public bool CanSelectForeignKeyColumns => Type != RelationshipType.ManyToMany;
 
@@ -71,6 +89,8 @@ public partial class RelationshipViewModel : ObservableObject
         _sourceColumnId = model.SourceColumnId;
         _targetColumnId = model.TargetColumnId;
         _constraintName = model.ConstraintName;
+        _onDelete = model.OnDelete;
+        _onUpdate = model.OnUpdate;
         Source = source;
         Target = target;
 
@@ -190,6 +210,13 @@ public partial class RelationshipViewModel : ObservableObject
         OnPropertyChanged(nameof(TargetMarkerAngle));
         OnPropertyChanged(nameof(LabelX));
         OnPropertyChanged(nameof(LabelY));
+        OnPropertyChanged(nameof(IsSelfRelationship));
+        OnPropertyChanged(nameof(ShowSelfLoop));
+        OnPropertyChanged(nameof(ShowEndpointMarkers));
+        OnPropertyChanged(nameof(SelfLoopLeft));
+        OnPropertyChanged(nameof(SelfLoopTop));
+        OnPropertyChanged(nameof(SelfLoopWidth));
+        OnPropertyChanged(nameof(SelfLoopHeight));
     }
 
     /// <summary>種別変更前の SourceColumnId/TargetColumnId を MainViewModel 側でキャプチャできるよう、変更直前に通知します。</summary>
@@ -236,6 +263,11 @@ public partial class RelationshipViewModel : ObservableObject
 
     private (double dx, double dy, double len) Direction()
     {
+        if (IsSelfRelationship)
+        {
+            return (1, 0, 1);
+        }
+
         var dx = X2 - X1;
         var dy = Y2 - Y1;
         var len = Math.Sqrt(dx * dx + dy * dy);
@@ -251,6 +283,11 @@ public partial class RelationshipViewModel : ObservableObject
     /// <summary>エンティティ中心から相手方向へ伸ばした線と境界の交点を返します。</summary>
     private static (double x, double y) GetBoundaryPoint(EntityViewModel source, EntityViewModel target)
     {
+        if (ReferenceEquals(source, target))
+        {
+            return (source.X + source.Width, source.Y + source.DisplayHeight / 2);
+        }
+
         var sourceCenterX = source.X + source.Width / 2;
         var sourceCenterY = source.Y + source.DisplayHeight / 2;
         var targetCenterX = target.X + target.Width / 2;
@@ -344,10 +381,31 @@ public partial class RelationshipViewModel : ObservableObject
     }
 
     /// <summary>線の中点 X（ラベル表示用）。</summary>
-    public double LabelX => (X1 + X2) / 2;
+    public double LabelX => IsSelfRelationship ? SelfLoopLeft + SelfLoopWidth / 2 + SelfLoopLabelOffsetX : (X1 + X2) / 2;
 
     /// <summary>線の中点 Y（ラベル表示用）。</summary>
-    public double LabelY => (Y1 + Y2) / 2;
+    public double LabelY => IsSelfRelationship ? SelfLoopTop + SelfLoopHeight / 2 : (Y1 + Y2) / 2;
+
+    /// <summary>自己参照リレーションかどうかです。</summary>
+    public bool IsSelfRelationship => Source.Id == Target.Id;
+
+    /// <summary>自己参照リレーション描画用のループを表示するかどうかです。</summary>
+    public bool ShowSelfLoop => IsSelfRelationship;
+
+    /// <summary>端点マーカーを表示するかどうかです。</summary>
+    public bool ShowEndpointMarkers => !IsSelfRelationship;
+
+    /// <summary>自己参照ループの左上 X 座標です。</summary>
+    public double SelfLoopLeft => Source.X + Source.Width - 20;
+
+    /// <summary>自己参照ループの左上 Y 座標です。</summary>
+    public double SelfLoopTop => Source.Y - SelfLoopSize / 2;
+
+    /// <summary>自己参照ループの幅です。</summary>
+    public double SelfLoopWidth => SelfLoopSize;
+
+    /// <summary>自己参照ループの高さです。</summary>
+    public double SelfLoopHeight => SelfLoopSize;
 
     // ===== 種別ごとのマーカー種類 =====
 
@@ -404,6 +462,8 @@ public partial class RelationshipViewModel : ObservableObject
             SourceColumnId = SourceColumnId,
             TargetColumnId = TargetColumnId,
             ConstraintName = ConstraintName,
+            OnDelete = OnDelete,
+            OnUpdate = OnUpdate,
         };
 
     /// <summary>両端の PropertyChanged 購読を解除します（画面リセット時など）。</summary>

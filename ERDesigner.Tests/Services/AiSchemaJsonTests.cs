@@ -37,7 +37,7 @@ public class AiSchemaJsonTests
                 }
               ],
               "relationships": [
-                { "sourceTable": "Customer", "targetTable": "Order", "type": "OneToMany" }
+                { "sourceTable": "Customer", "targetTable": "Order", "type": "OneToMany", "constraintName": "FK_Order_Customer", "onDelete": "CASCADE", "onUpdate": "NO ACTION" }
               ]
             }
 
@@ -60,6 +60,9 @@ public class AiSchemaJsonTests
         rels[0].Type.Should().Be(RelationshipType.OneToMany);
         rels[0].SourceEntityId.Should().Be(entities[0].Id);
         rels[0].TargetEntityId.Should().Be(entities[1].Id);
+        rels[0].ConstraintName.Should().Be("FK_Order_Customer");
+        rels[0].OnDelete.Should().Be(ForeignKeyReferentialAction.Cascade);
+        rels[0].OnUpdate.Should().Be(ForeignKeyReferentialAction.NoAction);
     }
 
     [Fact(DisplayName = "存在しないテーブルを参照するリレーションは無視される")]

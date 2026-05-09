@@ -280,6 +280,21 @@ public class RelationshipViewModelTests
         rel.TargetColumnId.Should().BeNull();
     }
 
+    [Fact(DisplayName = "自己参照リレーションでは自己参照ループ描画情報が有効になる")]
+    public void SelfRelationship_UsesSelfLoopGeometry()
+    {
+        var entity = NewEntity(100, 120);
+        entity.Columns.Add(new ColumnViewModel(new Column { Name = "ParentId", DataType = "int" }));
+        var rel = new RelationshipViewModel(new Relationship { Type = RelationshipType.OneToMany, TargetColumnId = entity.Columns.Last().Id }, entity, entity);
+
+        rel.IsSelfRelationship.Should().BeTrue();
+        rel.ShowSelfLoop.Should().BeTrue();
+        rel.ShowEndpointMarkers.Should().BeFalse();
+        rel.SelfLoopLeft.Should().BeGreaterThan(entity.X);
+        rel.LabelX.Should().BeApproximately(rel.SelfLoopLeft + rel.SelfLoopWidth / 2 + 10, 0.001);
+        rel.LabelY.Should().BeApproximately(rel.SelfLoopTop + rel.SelfLoopHeight / 2, 0.001);
+    }
+
     [Fact(DisplayName = "同じカラムに PK と FK が両方設定されても状態は保持できる")]
     public void Column_CanHoldPkAndFkTogether()
     {
