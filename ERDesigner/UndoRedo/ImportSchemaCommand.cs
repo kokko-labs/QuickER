@@ -14,6 +14,7 @@ public class ImportSchemaCommand : IUndoableCommand
     private readonly MainViewModel _main;
     private readonly IReadOnlyList<Entity> _newEntities;
     private readonly IReadOnlyList<Relationship> _newRelationships;
+    private readonly string _description;
 
     private List<EntityViewModel> _previousEntities = new();
     private List<RelationshipViewModel> _previousRelationships = new();
@@ -25,14 +26,15 @@ public class ImportSchemaCommand : IUndoableCommand
     public List<RelationshipViewModel> ImportedRelationships { get; } = new();
 
     /// <inheritdoc />
-    public string Description => "DB からスキーマ取込";
+    public string Description => _description;
 
     /// <summary>新しいインスタンスを生成します。</summary>
-    public ImportSchemaCommand(MainViewModel main, IReadOnlyList<Entity> entities, IReadOnlyList<Relationship> relationships)
+    public ImportSchemaCommand(MainViewModel main, IReadOnlyList<Entity> entities, IReadOnlyList<Relationship> relationships, string description = "DB からスキーマ取込")
     {
         _main = main;
         _newEntities = entities;
         _newRelationships = relationships;
+        _description = description;
     }
 
     /// <inheritdoc />
@@ -80,6 +82,10 @@ public class ImportSchemaCommand : IUndoableCommand
         {
             _main.Relationships.Add(r);
         }
+
+        _main.SelectedEntity = null;
+        _main.SelectedRelationship = null;
+        _main.SelectedColumn = null;
     }
 
     /// <inheritdoc />
@@ -102,5 +108,9 @@ public class ImportSchemaCommand : IUndoableCommand
         {
             _main.Relationships.Add(r);
         }
+
+        _main.SelectedEntity = null;
+        _main.SelectedRelationship = null;
+        _main.SelectedColumn = null;
     }
 }

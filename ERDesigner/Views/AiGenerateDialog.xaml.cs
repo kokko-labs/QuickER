@@ -13,10 +13,10 @@ public partial class AiGenerateDialog : Window
     public AiGenerateDialogViewModel ViewModel { get; }
 
     /// <summary>新しいダイアログを生成します。</summary>
-    public AiGenerateDialog()
+    public AiGenerateDialog(Models.ErDiagram? existingDiagram = null)
     {
         InitializeComponent();
-        ViewModel = new AiGenerateDialogViewModel
+        ViewModel = new AiGenerateDialogViewModel(existingDiagram: existingDiagram)
         {
             CloseAction = result =>
             {

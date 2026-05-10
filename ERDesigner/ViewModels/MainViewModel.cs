@@ -504,8 +504,42 @@ public partial class MainViewModel : ObservableObject
 
         if (clearUndoHistory)
         {
-            UndoRedo.Clear();
+            ClearUndoRedoHistory();
         }
+    }
+
+    /// <summary>Undo/Redo 履歴をクリアし、ツールバーの有効状態も更新します。</summary>
+    private void ClearUndoRedoHistory()
+    {
+        UndoRedo.Clear();
+        OnPropertyChanged(nameof(UndoRedo));
+    }
+
+    /// <summary>現在のエンティティ位置を履歴用にスナップショットします。</summary>
+    private Dictionary<Guid, (double X, double Y)> CaptureEntityLayoutSnapshot()
+    {
+        return Entities.ToDictionary(entity => entity.Id, entity => (entity.X, entity.Y));
+    }
+
+    /// <summary>整列操作を適用し、Undo/Redo できる履歴として登録します。</summary>
+    private void ApplyLayoutWithUndo(Action layoutAction, string description)
+    {
+        var before = CaptureEntityLayoutSnapshot();
+
+        RunWithoutUndoTracking(() =>
+        {
+            layoutAction();
+            RefreshCanvasSize();
+        });
+
+        var after = CaptureEntityLayoutSnapshot();
+
+        if (before.Count == after.Count && before.All(pair => after.TryGetValue(pair.Key, out var value) && value == pair.Value))
+        {
+            return;
+        }
+
+        UndoRedo.Push(new ArrangeEntitiesCommand(Entities, before, after, RefreshCanvasSize, description));
     }
 
     /// <summary>履歴対象外でダイアグラムを置換し、必要なレイアウトもまとめて適用します。</summary>
@@ -525,7 +559,7 @@ public partial class MainViewModel : ObservableObject
             RefreshCanvasSize();
         });
 
-        UndoRedo.Clear();
+        ClearUndoRedoHistory();
     }
 
     partial void OnShowColumnDescriptionsInDiagramChanged(bool value)
@@ -963,16 +997,14 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void AutoLayoutGrid()
     {
-        AutoLayoutService.LayoutGrid(Entities);
-        RefreshCanvasSize();
+        ApplyLayoutWithUndo(() => AutoLayoutService.LayoutGrid(Entities), "整列(格子)");
     }
 
     /// <summary>エンティティをツリー状（リレーション階層）で整列します。</summary>
     [RelayCommand]
     private void AutoLayoutTree()
     {
-        AutoLayoutService.LayoutTree(Entities, Relationships);
-        RefreshCanvasSize();
+        ApplyLayoutWithUndo(() => AutoLayoutService.LayoutTree(Entities, Relationships), "整列(木)");
     }
 
     /// <summary>全エンティティの表示幅を内容に合わせて自動調整します。</summary>
@@ -1168,10 +1200,21 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void GenerateFromAi()
     {
-        var dialog = new Views.AiGenerateDialog { Owner = Application.Current?.MainWindow };
+        var dialog = new Views.AiGenerateDialog(
+            new ErDiagram { Entities = Entities.Select(entity => entity.ToModel()).ToList(), Relationships = Relationships.Select(relationship => relationship.ToModel()).ToList() }
+        )
+        {
+            Owner = Application.Current?.MainWindow,
+        };
 
         if (dialog.ShowDialog() != true || dialog.ViewModel.Result is null)
         {
+            return;
+        }
+
+        if (dialog.ViewModel.GenerationMode == AiGenerationMode.UpdateExisting)
+        {
+            ApplyAiUpdateResult(dialog.ViewModel.Result);
             return;
         }
 
@@ -1201,6 +1244,37 @@ public partial class MainViewModel : ObservableObject
 
         // AI 生成結果の反映は履歴対象外にします。
         ReplaceDiagramWithoutHistory(entities, relationships, autoLayout: true);
+    }
+
+    /// <summary>AI が返した更新後スキーマを既存 ER 図へ反映します。</summary>
+    private void ApplyAiUpdateResult(AiSchemaJson schema)
+    {
+        var (entities, relationships) = schema.ToDomain();
+
+        if (entities.Count == 0)
+        {
+            MessageBox.Show("AI 応答にテーブルが含まれていませんでした。", "情報", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var currentSig = SqlServerSchemaImporter.ComputeSignature(Entities.Select(entity => entity.ToModel()), Relationships.Select(relationship => relationship.ToModel()));
+        var newSig = SqlServerSchemaImporter.ComputeSignature(entities, relationships);
+
+        if (currentSig == newSig)
+        {
+            MessageBox.Show("AI 更新による変更はありませんでした。", "情報", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var answer = MessageBox.Show("現在のダイアグラムを AI 生成結果で置換します。よろしいですか？", "確認", MessageBoxButton.OKCancel, MessageBoxImage.Question);
+
+        if (answer != MessageBoxResult.OK)
+        {
+            return;
+        }
+
+        ReplaceDiagramWithoutHistory(entities, relationships, autoLayout: true);
+        ApplyRelationshipColumnRules();
     }
 
     // ---------------- Save / Load ----------------

@@ -1,10 +1,12 @@
+using ERDesigner.Models;
+
 namespace ERDesigner.Services;
 
 /// <summary>AI プロバイダ種別。</summary>
 public enum AiProvider
 {
     /// <summary>OpenAI 公式 API (api.openai.com)。</summary>
-    OpenAi,
+    OpenAI,
 
     /// <summary>ローカル Ollama (OpenAI 互換 API)。</summary>
     Ollama,
@@ -30,11 +32,21 @@ public enum AiTableNameNumberStyle
     Plural,
 }
 
+/// <summary>AI 生成の実行モード。</summary>
+public enum AiGenerationMode
+{
+    /// <summary>要件から新規の ER 図を生成します。</summary>
+    CreateNew,
+
+    /// <summary>既存 ER 図に対して追加・変更を加えた完全な結果を生成します。</summary>
+    UpdateExisting,
+}
+
 /// <summary>AI スキーマ生成リクエストの設定値。</summary>
 public class AiGenerationSettings
 {
     /// <summary>AI プロバイダ。</summary>
-    public AiProvider Provider { get; set; } = AiProvider.OpenAi;
+    public AiProvider Provider { get; set; } = AiProvider.OpenAI;
 
     /// <summary>API キー (Ollama では未使用)。</summary>
     public string ApiKey { get; set; } = string.Empty;
@@ -53,6 +65,12 @@ public class AiGenerationSettings
 
     /// <summary>AI が生成するテーブル名の単複数。</summary>
     public AiTableNameNumberStyle TableNameNumberStyle { get; set; } = AiTableNameNumberStyle.Singular;
+
+    /// <summary>新規生成か、既存 ER 図の更新かを表します。</summary>
+    public AiGenerationMode GenerationMode { get; set; } = AiGenerationMode.CreateNew;
+
+    /// <summary>更新モード時に AI へ渡す既存 ER 図です。</summary>
+    public ErDiagram? ExistingDiagram { get; set; }
 
     /// <summary>プロバイダ既定のエンドポイント。</summary>
     public string ResolveEndpoint() =>

@@ -509,4 +509,56 @@ public class MainViewModelTests
         vm.RedoCommand.Execute(null);
         entity.Columns.Select(c => c.Name).Should().Equal("B", "C", "A");
     }
+
+    [Fact(DisplayName = "格子整列は Undo/Redo できる")]
+    public void AutoLayoutGrid_CanUndoRedo()
+    {
+        var vm = new MainViewModel();
+        vm.AddEntityCommand.Execute(null);
+        vm.AddEntityCommand.Execute(null);
+        vm.Entities[0].X = 500;
+        vm.Entities[0].Y = 300;
+        vm.Entities[1].X = 120;
+        vm.Entities[1].Y = 700;
+        var before = vm.Entities.Select(entity => (entity.X, entity.Y)).ToArray();
+
+        vm.AutoLayoutGridCommand.Execute(null);
+
+        var after = vm.Entities.Select(entity => (entity.X, entity.Y)).ToArray();
+        after.Should().NotEqual(before);
+
+        vm.UndoCommand.Execute(null);
+        vm.Entities.Select(entity => (entity.X, entity.Y)).Should().Equal(before);
+
+        vm.RedoCommand.Execute(null);
+        vm.Entities.Select(entity => (entity.X, entity.Y)).Should().Equal(after);
+    }
+
+    [Fact(DisplayName = "木整列は Undo/Redo できる")]
+    public void AutoLayoutTree_CanUndoRedo()
+    {
+        var vm = new MainViewModel();
+        vm.AddEntityCommand.Execute(null);
+        vm.AddEntityCommand.Execute(null);
+        vm.Entities[1].Columns.Add(new ColumnViewModel(new Column { Name = "ParentId", DataType = "int" }));
+        vm.StartAddOneToManyCommand.Execute(null);
+        vm.OnEntityClicked(vm.Entities[0]);
+        vm.OnEntityClicked(vm.Entities[1]);
+        vm.Entities[0].X = 600;
+        vm.Entities[0].Y = 500;
+        vm.Entities[1].X = 100;
+        vm.Entities[1].Y = 150;
+        var before = vm.Entities.Select(entity => (entity.X, entity.Y)).ToArray();
+
+        vm.AutoLayoutTreeCommand.Execute(null);
+
+        var after = vm.Entities.Select(entity => (entity.X, entity.Y)).ToArray();
+        after.Should().NotEqual(before);
+
+        vm.UndoCommand.Execute(null);
+        vm.Entities.Select(entity => (entity.X, entity.Y)).Should().Equal(before);
+
+        vm.RedoCommand.Execute(null);
+        vm.Entities.Select(entity => (entity.X, entity.Y)).Should().Equal(after);
+    }
 }

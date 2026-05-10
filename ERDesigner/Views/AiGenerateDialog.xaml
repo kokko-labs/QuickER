@@ -7,7 +7,7 @@
   xmlns:sys="clr-namespace:System;assembly=System.Runtime"
   Title="AI でスキーマを生成"
   Width="560"
-  Height="660"
+  Height="710"
   ResizeMode="CanResize"
   WindowStartupLocation="CenterOwner"
   FontFamily="Segoe UI, Yu Gothic UI, Meiryo"
@@ -33,26 +33,37 @@
       <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
       <RowDefinition Height="*" />
       <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
     </Grid.RowDefinitions>
 
-    <TextBlock Grid.Row="0" Grid.Column="0" Text="プロバイダ" VerticalAlignment="Center" Margin="0,4" />
-    <ComboBox Grid.Row="0" Grid.Column="1" Margin="0,4" ItemsSource="{Binding Source={StaticResource AiProviders}}" SelectedItem="{Binding Provider}" />
+    <TextBlock Grid.Row="0" Grid.Column="0" Text="生成方法" VerticalAlignment="Center" Margin="0,4" />
+    <ComboBox
+      Grid.Row="0"
+      Grid.Column="1"
+      Margin="0,4"
+      ItemsSource="{Binding GenerationModeOptions}"
+      SelectedItem="{Binding SelectedGenerationMode}"
+      DisplayMemberPath="DisplayName"
+    />
 
-    <TextBlock Grid.Row="1" Grid.Column="0" Text="モデル" VerticalAlignment="Center" Margin="0,4" />
-    <ComboBox Grid.Row="1" Grid.Column="1" Margin="0,4" IsEditable="True" ItemsSource="{Binding ModelCandidates}" Text="{Binding Model, UpdateSourceTrigger=PropertyChanged}" />
+    <TextBlock Grid.Row="1" Grid.Column="0" Text="プロバイダ" VerticalAlignment="Center" Margin="0,4" />
+    <ComboBox Grid.Row="1" Grid.Column="1" Margin="0,4" ItemsSource="{Binding Source={StaticResource AiProviders}}" SelectedItem="{Binding Provider}" />
+
+    <TextBlock Grid.Row="2" Grid.Column="0" Text="モデル" VerticalAlignment="Center" Margin="0,4" />
+    <ComboBox Grid.Row="2" Grid.Column="1" Margin="0,4" IsEditable="True" ItemsSource="{Binding ModelCandidates}" Text="{Binding Model, UpdateSourceTrigger=PropertyChanged}" />
 
     <TextBlock
-      Grid.Row="2"
+      Grid.Row="3"
       Grid.Column="0"
       Text="API キー"
       VerticalAlignment="Center"
       Margin="0,4"
       Visibility="{Binding ShowApiKey, Converter={StaticResource BoolToVisibilityConverter}}"
     />
-    <Grid Grid.Row="2" Grid.Column="1" Margin="0,4" Visibility="{Binding ShowApiKey, Converter={StaticResource BoolToVisibilityConverter}}">
+    <Grid Grid.Row="3" Grid.Column="1" Margin="0,4" Visibility="{Binding ShowApiKey, Converter={StaticResource BoolToVisibilityConverter}}">
       <Grid.ColumnDefinitions>
         <ColumnDefinition Width="*" />
         <ColumnDefinition Width="Auto" />
@@ -69,7 +80,7 @@
     </Grid>
 
     <TextBlock
-      Grid.Row="3"
+      Grid.Row="4"
       Grid.Column="0"
       Text="エンドポイント"
       VerticalAlignment="Center"
@@ -77,47 +88,50 @@
       Visibility="{Binding ShowEndpoint, Converter={StaticResource BoolToVisibilityConverter}}"
     />
     <TextBox
-      Grid.Row="3"
+      Grid.Row="4"
       Grid.Column="1"
       Margin="0,4"
       Text="{Binding EndpointOverride, UpdateSourceTrigger=PropertyChanged}"
       Visibility="{Binding ShowEndpoint, Converter={StaticResource BoolToVisibilityConverter}}"
     />
 
-    <TextBlock Grid.Row="4" Grid.Column="0" Text="命名規則" VerticalAlignment="Center" Margin="0,4" />
+    <TextBlock Grid.Row="5" Grid.Column="0" Text="命名規則" VerticalAlignment="Center" Margin="0,4" />
     <ComboBox
-      Grid.Row="4"
+      Grid.Row="5"
       Grid.Column="1"
       Margin="0,4"
       ItemsSource="{Binding IdentifierNamingStyleOptions}"
       SelectedItem="{Binding SelectedIdentifierNamingStyle}"
       DisplayMemberPath="DisplayName"
+      IsEnabled="{Binding CanCustomizeNamingOptions}"
     />
 
-    <TextBlock Grid.Row="5" Grid.Column="0" Text="テーブル名" VerticalAlignment="Center" Margin="0,4" />
+    <TextBlock Grid.Row="6" Grid.Column="0" Text="テーブル名" VerticalAlignment="Center" Margin="0,4" />
     <ComboBox
-      Grid.Row="5"
+      Grid.Row="6"
       Grid.Column="1"
       Margin="0,4"
       ItemsSource="{Binding TableNameNumberStyleOptions}"
       SelectedItem="{Binding SelectedTableNameNumberStyle}"
       DisplayMemberPath="DisplayName"
+      IsEnabled="{Binding CanCustomizeNamingOptions}"
     />
 
-    <TextBlock Grid.Row="6" Grid.ColumnSpan="2" Margin="0,8,0,4" Text="要件 (自然言語)" FontWeight="SemiBold" />
+    <TextBlock Grid.Row="7" Grid.ColumnSpan="2" Margin="0,8,0,4" Text="要件 (自然言語)" FontWeight="SemiBold" />
 
     <TextBox
-      Grid.Row="7"
+      Grid.Row="8"
       Grid.ColumnSpan="2"
+      Margin="0,0,0,4"
       Text="{Binding Prompt, UpdateSourceTrigger=PropertyChanged}"
       AcceptsReturn="True"
       TextWrapping="Wrap"
       VerticalScrollBarVisibility="Auto"
     />
 
-    <TextBlock Grid.Row="8" Grid.ColumnSpan="2" Margin="0,6" TextWrapping="Wrap" Foreground="#374151" Text="{Binding StatusMessage}" />
+    <TextBlock Grid.Row="9" Grid.ColumnSpan="2" Margin="0,6" TextWrapping="Wrap" Foreground="#374151" Text="{Binding StatusMessage}" />
 
-    <StackPanel Grid.Row="9" Grid.ColumnSpan="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
+    <StackPanel Grid.Row="10" Grid.ColumnSpan="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
       <Button Content="生成" Width="100" Margin="0,0,8,0" IsDefault="True" Command="{Binding GenerateCommand}" />
       <Button Content="キャンセル" Width="80" IsCancel="True" Command="{Binding CancelCommand}" />
     </StackPanel>

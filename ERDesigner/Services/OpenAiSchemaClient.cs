@@ -31,6 +31,13 @@ public class OpenAiSchemaClient : IAiSchemaClient
 - relationships の各要素には constraintName, onDelete, onUpdate も含める。onDelete / onUpdate は ""NO ACTION"" / ""CASCADE"" / ""SET NULL"" / ""SET DEFAULT"" のいずれかを使用する。
 - dataType は SQL Server の型 (例: int, bigint, nvarchar(50), datetime2, decimal(10,2), bit) を使用。";
 
+    private const string UpdateExistingInstruction =
+        @"- 既存 ER 図の情報を踏まえ、ユーザー要件に応じた『更新後の完全なスキーマ』を返す。
+- 既存 ER 図のテーブル名・カラム名の命名規則や単複数の方針は維持する。
+- 明示的に削除指示がない既存テーブル・既存カラム・既存リレーションは極力維持する。
+- 既存要素の名称変更が必要な場合も、要件から妥当な場合に限る。
+- 追加・変更内容が分かるよう、description と memo を適切に更新する。";
+
     /// <summary>強制 JSON スキーマ (Structured Outputs)。</summary>
     private static readonly byte[] SchemaBytes =
         """
@@ -114,7 +121,7 @@ public class OpenAiSchemaClient : IAiSchemaClient
             options = new ChatCompletionOptions
             {
                 ResponseFormat =
-                    settings.Provider == AiProvider.OpenAi
+                    settings.Provider == AiProvider.OpenAI
                         ? ChatResponseFormat.CreateJsonSchemaFormat(jsonSchemaFormatName: "er_schema", jsonSchema: BinaryData.FromBytes(SchemaBytes), jsonSchemaIsStrict: true)
                         : ChatResponseFormat.CreateJsonObjectFormat(),
             };
@@ -129,8 +136,12 @@ public class OpenAiSchemaClient : IAiSchemaClient
         var completion = await client.CompleteChatAsync(messages, options, ct).ConfigureAwait(false);
         var text = completion.Value.Content[0].Text;
         var schema = ParseSchemaResponse(text);
-        schema.NormalizeTableNames(settings.TableNameNumberStyle);
-        schema.NormalizeIdentifiers(settings.IdentifierNamingStyle);
+
+        if (settings.GenerationMode != AiGenerationMode.UpdateExisting)
+        {
+            schema.NormalizeTableNames(settings.TableNameNumberStyle);
+            schema.NormalizeIdentifiers(settings.IdentifierNamingStyle);
+        }
 
         return schema;
     }
@@ -203,6 +214,14 @@ public class OpenAiSchemaClient : IAiSchemaClient
             AiTableNameNumberStyle.Plural => "- テーブル名は必ず複数形 (例: Customers, Orders) にする。",
             _ => "- テーブル名は必ず単数形 (例: Customer, Order) にする。",
         };
+
+        if (settings.GenerationMode == AiGenerationMode.UpdateExisting && settings.ExistingDiagram?.Entities.Count > 0)
+        {
+            // 既存 ER 図は AI が読みやすいよう、出力 JSON と同形の簡潔な構造へ正規化して渡します。
+            var existingSchemaJson = JsonSerializer.Serialize(AiSchemaJson.FromDiagram(settings.ExistingDiagram), new JsonSerializerOptions { WriteIndented = true });
+
+            return $"{SystemPromptTemplate}\n{UpdateExistingInstruction}\n以下は現在の ER 図です。この内容を前提に更新してください。\n{existingSchemaJson}";
+        }
 
         return $"{SystemPromptTemplate}\n{namingInstruction}\n{tableNumberInstruction}";
     }

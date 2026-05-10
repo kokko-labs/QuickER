@@ -17,6 +17,49 @@ public class AiSchemaJson
     [JsonPropertyName("relationships")]
     public List<AiRelationship> Relationships { get; set; } = new();
 
+    /// <summary>既存 ER 図を AI 入力用の簡潔な JSON 表現へ変換します。</summary>
+    public static AiSchemaJson FromDiagram(ErDiagram diagram)
+    {
+        var entities = diagram.Entities ?? [];
+        var relationships = diagram.Relationships ?? [];
+        var entityById = entities.ToDictionary(entity => entity.Id);
+
+        return new AiSchemaJson
+        {
+            Tables = entities
+                .Select(entity => new AiTable
+                {
+                    Name = entity.TableName,
+                    Description = entity.Description,
+                    Memo = entity.Memo,
+                    Columns = entity
+                        .Columns.Select(column => new AiColumn
+                        {
+                            Name = column.Name,
+                            DataType = column.DataType,
+                            IsPrimaryKey = column.IsPrimaryKey,
+                            IsForeignKey = column.IsForeignKey,
+                            IsNullable = column.IsPrimaryKey ? false : column.IsNullable,
+                            Description = column.Description,
+                        })
+                        .ToList(),
+                })
+                .ToList(),
+            Relationships = relationships
+                .Where(relationship => entityById.ContainsKey(relationship.SourceEntityId) && entityById.ContainsKey(relationship.TargetEntityId))
+                .Select(relationship => new AiRelationship
+                {
+                    SourceTable = entityById[relationship.SourceEntityId].TableName,
+                    TargetTable = entityById[relationship.TargetEntityId].TableName,
+                    Type = relationship.Type.ToString(),
+                    ConstraintName = relationship.ConstraintName,
+                    OnDelete = relationship.OnDelete.ToSqlText(),
+                    OnUpdate = relationship.OnUpdate.ToSqlText(),
+                })
+                .ToList(),
+        };
+    }
+
     /// <summary>テーブル名を指定した単複数へ正規化します。</summary>
     public void NormalizeTableNames(AiTableNameNumberStyle numberStyle)
     {
@@ -107,6 +150,7 @@ public class AiSchemaJson
     {
         var entities = new List<Entity>();
         var byTable = new Dictionary<string, Entity>(StringComparer.OrdinalIgnoreCase);
+        var byTableColumns = new Dictionary<string, Dictionary<string, Column>>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var table in Tables)
         {
@@ -115,28 +159,32 @@ public class AiSchemaJson
                 continue;
             }
 
+            var columns =
+                table
+                    .Columns?.Where(static column => !string.IsNullOrWhiteSpace(column.Name))
+                    .Select(static c => new Column
+                    {
+                        Name = c.Name ?? "Column",
+                        DataType = string.IsNullOrWhiteSpace(c.DataType) ? "int" : c.DataType,
+                        IsPrimaryKey = c.IsPrimaryKey,
+                        IsForeignKey = c.IsForeignKey,
+                        IsNullable = c.IsPrimaryKey ? false : c.IsNullable,
+                        Description = c.Description ?? string.Empty,
+                    })
+                    .ToList()
+                ?? new List<Column>();
+
             var entity = new Entity
             {
                 TableName = table.Name,
                 Description = table.Description ?? string.Empty,
                 Memo = table.Memo ?? string.Empty,
-                Columns =
-                    table
-                        .Columns?.Select(c => new Column
-                        {
-                            Name = c.Name ?? "Column",
-                            DataType = string.IsNullOrWhiteSpace(c.DataType) ? "int" : c.DataType,
-                            IsPrimaryKey = c.IsPrimaryKey,
-                            IsForeignKey = c.IsForeignKey,
-                            IsNullable = c.IsPrimaryKey ? false : c.IsNullable,
-                            Description = c.Description ?? string.Empty,
-                        })
-                        .ToList()
-                    ?? new List<Column>(),
+                Columns = columns,
             };
 
             entities.Add(entity);
             byTable[entity.TableName] = entity;
+            byTableColumns[entity.TableName] = columns.ToDictionary(column => column.Name, StringComparer.OrdinalIgnoreCase);
         }
 
         var relationships = new List<Relationship>();
@@ -164,6 +212,8 @@ public class AiSchemaJson
                     SourceEntityId = s.Id,
                     TargetEntityId = t.Id,
                     Type = ParseType(r.Type),
+                    SourceColumnId = ResolveSourceColumnId(s, r),
+                    TargetColumnId = ResolveTargetColumnId(t, r, byTableColumns),
                     ConstraintName = r.ConstraintName,
                     OnDelete = ForeignKeyReferentialActionHelper.Parse(r.OnDelete),
                     OnUpdate = ForeignKeyReferentialActionHelper.Parse(r.OnUpdate),
@@ -172,6 +222,82 @@ public class AiSchemaJson
         }
 
         return (entities, relationships);
+    }
+
+    /// <summary>リレーションの参照先 PK 列を解決します。</summary>
+    private static Guid? ResolveSourceColumnId(Entity sourceEntity, AiRelationship relationship)
+    {
+        var sourceColumnName = ExtractSourceColumnName(relationship.ConstraintName, sourceEntity.TableName);
+
+        if (!string.IsNullOrWhiteSpace(sourceColumnName))
+        {
+            var matchedSourceColumn = sourceEntity.Columns.FirstOrDefault(column => string.Equals(column.Name, sourceColumnName, StringComparison.OrdinalIgnoreCase));
+
+            if (matchedSourceColumn is not null)
+            {
+                return matchedSourceColumn.Id;
+            }
+        }
+
+        return sourceEntity.Columns.FirstOrDefault(column => column.IsPrimaryKey)?.Id;
+    }
+
+    /// <summary>リレーションの終点側 FK 列を解決します。</summary>
+    private static Guid? ResolveTargetColumnId(Entity targetEntity, AiRelationship relationship, IReadOnlyDictionary<string, Dictionary<string, Column>> byTableColumns)
+    {
+        if (!string.IsNullOrWhiteSpace(relationship.SourceTable) && byTableColumns.TryGetValue(targetEntity.TableName, out var targetColumns))
+        {
+            var preferredTargetColumn = ResolveForeignKeyColumnName(relationship.SourceTable, targetColumns.Keys);
+
+            if (!string.IsNullOrWhiteSpace(preferredTargetColumn) && targetColumns.TryGetValue(preferredTargetColumn, out var targetColumn))
+            {
+                return targetColumn.Id;
+            }
+
+            var foreignKeyColumn = targetColumns.Values.FirstOrDefault(column => column.IsForeignKey);
+
+            if (foreignKeyColumn is not null)
+            {
+                return foreignKeyColumn.Id;
+            }
+        }
+
+        return targetEntity.Columns.FirstOrDefault(column => column.IsForeignKey)?.Id ?? targetEntity.Columns.FirstOrDefault(column => !column.IsPrimaryKey)?.Id;
+    }
+
+    /// <summary>制約名から参照先の列名候補を抽出します。</summary>
+    private static string? ExtractSourceColumnName(string? constraintName, string sourceTableName)
+    {
+        if (string.IsNullOrWhiteSpace(constraintName))
+        {
+            return null;
+        }
+
+        var normalizedTableName = Regex.Replace(sourceTableName, "[^A-Za-z0-9]", string.Empty, RegexOptions.CultureInvariant);
+        var normalizedConstraintName = Regex.Replace(constraintName, "[^A-Za-z0-9]", string.Empty, RegexOptions.CultureInvariant);
+
+        return normalizedConstraintName.Contains(normalizedTableName, StringComparison.OrdinalIgnoreCase) ? sourceTableName + "Id" : null;
+    }
+
+    /// <summary>終点テーブルのカラム一覧から、参照元テーブルに対応する FK 列名候補を求めます。</summary>
+    private static string? ResolveForeignKeyColumnName(string sourceTableName, IEnumerable<string> targetColumnNames)
+    {
+        var sourceWords = SplitIdentifierWords(sourceTableName);
+
+        if (sourceWords.Count == 0)
+        {
+            return null;
+        }
+
+        var candidates = new[]
+        {
+            string.Concat(sourceWords.Select(ToPascalWord)) + "Id",
+            string.Join("_", sourceWords.Select(static word => word.ToLowerInvariant())) + "_id",
+            sourceWords[^1] + "Id",
+            ToPascalWord(sourceWords[^1]) + "Id",
+        };
+
+        return candidates.FirstOrDefault(candidate => targetColumnNames.Any(columnName => string.Equals(columnName, candidate, StringComparison.OrdinalIgnoreCase)));
     }
 
     private static RelationshipType ParseType(string? type) =>

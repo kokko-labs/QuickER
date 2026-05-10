@@ -11,7 +11,7 @@ public class AiGenerationSettingsTests
     [Fact(DisplayName = "OpenAI 既定エンドポイントを返す")]
     public void Default_OpenAi()
     {
-        var s = new AiGenerationSettings { Provider = AiProvider.OpenAi };
+        var s = new AiGenerationSettings { Provider = AiProvider.OpenAI };
         s.ResolveEndpoint().Should().Be("https://api.openai.com/v1");
     }
 
@@ -25,7 +25,7 @@ public class AiGenerationSettingsTests
     [Fact(DisplayName = "EndpointOverride が優先される")]
     public void Override_TakesPrecedence()
     {
-        var s = new AiGenerationSettings { Provider = AiProvider.OpenAi, EndpointOverride = "https://example.com/v1" };
+        var s = new AiGenerationSettings { Provider = AiProvider.OpenAI, EndpointOverride = "https://example.com/v1" };
 
         s.ResolveEndpoint().Should().Be("https://example.com/v1");
     }
@@ -44,5 +44,13 @@ public class AiGenerationSettingsTests
         var s = new AiGenerationSettings();
 
         s.TableNameNumberStyle.Should().Be(AiTableNameNumberStyle.Singular);
+    }
+
+    [Fact(DisplayName = "生成モードの既定値は新規生成")]
+    public void Default_GenerationMode_IsCreateNew()
+    {
+        var s = new AiGenerationSettings();
+
+        s.GenerationMode.Should().Be(AiGenerationMode.CreateNew);
     }
 }

@@ -63,6 +63,74 @@ public class AiSchemaJsonTests
         rels[0].ConstraintName.Should().Be("FK_Order_Customer");
         rels[0].OnDelete.Should().Be(ForeignKeyReferentialAction.Cascade);
         rels[0].OnUpdate.Should().Be(ForeignKeyReferentialAction.NoAction);
+        rels[0].SourceColumnId.Should().Be(entities[0].Columns[0].Id);
+        rels[0].TargetColumnId.Should().Be(entities[1].Columns[1].Id);
+    }
+
+    [Fact(DisplayName = "リレーション列名の推定により参照元列と参照先列が設定される")]
+    public void ToDomain_ResolvesRelationshipColumns()
+    {
+        var schema = new AiSchemaJson
+        {
+            Tables =
+            [
+                new AiTable
+                {
+                    Name = "Customer",
+                    Columns =
+                    [
+                        new AiColumn
+                        {
+                            Name = "Id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                    ],
+                },
+                new AiTable
+                {
+                    Name = "Order",
+                    Columns =
+                    [
+                        new AiColumn
+                        {
+                            Name = "Id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                        new AiColumn
+                        {
+                            Name = "CustomerId",
+                            DataType = "int",
+                            IsForeignKey = true,
+                            IsNullable = false,
+                        },
+                    ],
+                },
+            ],
+            Relationships =
+            [
+                new AiRelationship
+                {
+                    SourceTable = "Customer",
+                    TargetTable = "Order",
+                    Type = "OneToMany",
+                    ConstraintName = "FK_Order_Customer",
+                    OnDelete = "CASCADE",
+                    OnUpdate = "NO ACTION",
+                },
+            ],
+        };
+
+        var (entities, relationships) = schema.ToDomain();
+        var customer = entities.Single(entity => entity.TableName == "Customer");
+        var order = entities.Single(entity => entity.TableName == "Order");
+        var relationship = relationships.Single();
+
+        relationship.SourceColumnId.Should().Be(customer.Columns.Single(column => column.IsPrimaryKey).Id);
+        relationship.TargetColumnId.Should().Be(order.Columns.Single(column => column.Name == "CustomerId").Id);
     }
 
     [Fact(DisplayName = "存在しないテーブルを参照するリレーションは無視される")]

@@ -1,5 +1,6 @@
 ﻿using System.Threading;
 using System.Threading.Tasks;
+using ERDesigner.Models;
 using ERDesigner.Services;
 using ERDesigner.ViewModels;
 using FluentAssertions;
@@ -29,7 +30,7 @@ public class AiGenerateDialogViewModelTests
         var keyName = "OpenAiApiKey";
         var vm = new AiGenerateDialogViewModel(new FakeAiSchemaClient())
         {
-            Provider = AiProvider.OpenAi,
+            Provider = AiProvider.OpenAI,
             SaveApiKey = true,
             ApiKey = "sk-vm-test-save",
             Prompt = "test",
@@ -54,7 +55,7 @@ public class AiGenerateDialogViewModelTests
 
         var vm = new AiGenerateDialogViewModel(new FakeAiSchemaClient())
         {
-            Provider = AiProvider.OpenAi,
+            Provider = AiProvider.OpenAI,
             SaveApiKey = false,
             ApiKey = "sk-vm-test-nosave",
             Prompt = "test",
@@ -77,7 +78,7 @@ public class AiGenerateDialogViewModelTests
         var client = new FakeAiSchemaClient();
         var vm = new AiGenerateDialogViewModel(client)
         {
-            Provider = AiProvider.OpenAi,
+            Provider = AiProvider.OpenAI,
             SaveApiKey = false,
             ApiKey = "sk-vm-test-style",
             Prompt = "test",
@@ -96,7 +97,7 @@ public class AiGenerateDialogViewModelTests
         var client = new FakeAiSchemaClient();
         var vm = new AiGenerateDialogViewModel(client)
         {
-            Provider = AiProvider.OpenAi,
+            Provider = AiProvider.OpenAI,
             SaveApiKey = false,
             ApiKey = "sk-vm-test-table-number",
             Prompt = "test",
@@ -107,5 +108,61 @@ public class AiGenerateDialogViewModelTests
 
         client.LastSettings.Should().NotBeNull();
         client.LastSettings!.TableNameNumberStyle.Should().Be(AiTableNameNumberStyle.Plural);
+    }
+
+    [Fact(DisplayName = "更新モード選択時は既存 ER 図付きで生成設定へ渡される")]
+    public async Task Generate_PassesUpdateModeAndExistingDiagram()
+    {
+        var client = new FakeAiSchemaClient();
+        var existingDiagram = new ErDiagram
+        {
+            Entities =
+            [
+                new Entity
+                {
+                    TableName = "Customer",
+                    Columns =
+                    [
+                        new Column
+                        {
+                            Name = "Id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                    ],
+                },
+            ],
+        };
+        var vm = new AiGenerateDialogViewModel(client, existingDiagram)
+        {
+            Provider = AiProvider.OpenAI,
+            SaveApiKey = false,
+            ApiKey = "sk-vm-test-update",
+            Prompt = "既存顧客テーブルに会員ランクを追加",
+            SelectedGenerationMode = new(AiGenerationMode.UpdateExisting, "既存 ER 図に追加・変更"),
+        };
+
+        await vm.GenerateCommand.ExecuteAsync(null);
+
+        client.LastSettings.Should().NotBeNull();
+        client.LastSettings!.GenerationMode.Should().Be(AiGenerationMode.UpdateExisting);
+        client.LastSettings.ExistingDiagram.Should().NotBeNull();
+        client.LastSettings.ExistingDiagram!.Entities.Should().ContainSingle();
+        client.LastSettings.ExistingDiagram.Entities[0].TableName.Should().Be("Customer");
+        client.LastSettings.IdentifierNamingStyle.Should().Be(AiIdentifierNamingStyle.PascalCase);
+        client.LastSettings.TableNameNumberStyle.Should().Be(AiTableNameNumberStyle.Singular);
+    }
+
+    [Fact(DisplayName = "更新モードへ切り替えると要件サンプルが更新される")]
+    public void SelectedGenerationMode_UpdateExisting_ChangesPromptSample()
+    {
+        var existingDiagram = new ErDiagram { Entities = [new Entity { TableName = "Customer" }] };
+        var vm = new AiGenerateDialogViewModel(new FakeAiSchemaClient(), existingDiagram);
+
+        vm.SelectedGenerationMode = new(AiGenerationMode.UpdateExisting, "既存 ER 図に追加・変更");
+
+        vm.Prompt.Should().Be("会員ランク管理と注文ステータス履歴を追加してください。");
+        vm.CanCustomizeNamingOptions.Should().BeFalse();
     }
 }
