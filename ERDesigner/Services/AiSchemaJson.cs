@@ -150,7 +150,6 @@ public class AiSchemaJson
     {
         var entities = new List<Entity>();
         var byTable = new Dictionary<string, Entity>(StringComparer.OrdinalIgnoreCase);
-        var byTableColumns = new Dictionary<string, Dictionary<string, Column>>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var table in Tables)
         {
@@ -184,7 +183,6 @@ public class AiSchemaJson
 
             entities.Add(entity);
             byTable[entity.TableName] = entity;
-            byTableColumns[entity.TableName] = columns.ToDictionary(column => column.Name, StringComparer.OrdinalIgnoreCase);
         }
 
         var relationships = new List<Relationship>();
@@ -212,8 +210,8 @@ public class AiSchemaJson
                     SourceEntityId = s.Id,
                     TargetEntityId = t.Id,
                     Type = ParseType(r.Type),
-                    SourceColumnId = ResolveSourceColumnId(s, r),
-                    TargetColumnId = ResolveTargetColumnId(t, r, byTableColumns),
+                    SourceColumnId = ResolveSourceColumnId(s),
+                    TargetColumnId = ResolveTargetColumnId(s, t),
                     ConstraintName = r.ConstraintName,
                     OnDelete = ForeignKeyReferentialActionHelper.Parse(r.OnDelete),
                     OnUpdate = ForeignKeyReferentialActionHelper.Parse(r.OnUpdate),
@@ -224,80 +222,57 @@ public class AiSchemaJson
         return (entities, relationships);
     }
 
-    /// <summary>リレーションの参照先 PK 列を解決します。</summary>
-    private static Guid? ResolveSourceColumnId(Entity sourceEntity, AiRelationship relationship)
+    /// <summary>リレーションの参照元 PK 列を解決します。</summary>
+    private static Guid? ResolveSourceColumnId(Entity sourceEntity)
     {
-        var sourceColumnName = ExtractSourceColumnName(relationship.ConstraintName, sourceEntity.TableName);
-
-        if (!string.IsNullOrWhiteSpace(sourceColumnName))
-        {
-            var matchedSourceColumn = sourceEntity.Columns.FirstOrDefault(column => string.Equals(column.Name, sourceColumnName, StringComparison.OrdinalIgnoreCase));
-
-            if (matchedSourceColumn is not null)
-            {
-                return matchedSourceColumn.Id;
-            }
-        }
-
         return sourceEntity.Columns.FirstOrDefault(column => column.IsPrimaryKey)?.Id;
     }
 
-    /// <summary>リレーションの終点側 FK 列を解決します。</summary>
-    private static Guid? ResolveTargetColumnId(Entity targetEntity, AiRelationship relationship, IReadOnlyDictionary<string, Dictionary<string, Column>> byTableColumns)
+    /// <summary>リレーションの参照先 FK 列を解決します。</summary>
+    private static Guid? ResolveTargetColumnId(Entity sourceEntity, Entity targetEntity)
     {
-        if (!string.IsNullOrWhiteSpace(relationship.SourceTable) && byTableColumns.TryGetValue(targetEntity.TableName, out var targetColumns))
+        var preferredColumnName = ResolveForeignKeyColumnName(sourceEntity.TableName);
+        var matchingColumn = targetEntity.Columns.FirstOrDefault(column => string.Equals(column.Name, preferredColumnName, StringComparison.OrdinalIgnoreCase));
+
+        if (matchingColumn is not null)
         {
-            var preferredTargetColumn = ResolveForeignKeyColumnName(relationship.SourceTable, targetColumns.Keys);
-
-            if (!string.IsNullOrWhiteSpace(preferredTargetColumn) && targetColumns.TryGetValue(preferredTargetColumn, out var targetColumn))
-            {
-                return targetColumn.Id;
-            }
-
-            var foreignKeyColumn = targetColumns.Values.FirstOrDefault(column => column.IsForeignKey);
-
-            if (foreignKeyColumn is not null)
-            {
-                return foreignKeyColumn.Id;
-            }
+            matchingColumn.IsForeignKey = true;
+            matchingColumn.IsNullable = false;
+            return matchingColumn.Id;
         }
 
-        return targetEntity.Columns.FirstOrDefault(column => column.IsForeignKey)?.Id ?? targetEntity.Columns.FirstOrDefault(column => !column.IsPrimaryKey)?.Id;
-    }
+        var foreignKeyColumn = targetEntity.Columns.FirstOrDefault(column => column.IsForeignKey);
 
-    /// <summary>制約名から参照先の列名候補を抽出します。</summary>
-    private static string? ExtractSourceColumnName(string? constraintName, string sourceTableName)
-    {
-        if (string.IsNullOrWhiteSpace(constraintName))
+        if (foreignKeyColumn is not null)
+        {
+            return foreignKeyColumn.Id;
+        }
+
+        var fallbackColumn = targetEntity.Columns.FirstOrDefault(column => !column.IsPrimaryKey);
+
+        if (fallbackColumn is null)
         {
             return null;
         }
 
-        var normalizedTableName = Regex.Replace(sourceTableName, "[^A-Za-z0-9]", string.Empty, RegexOptions.CultureInvariant);
-        var normalizedConstraintName = Regex.Replace(constraintName, "[^A-Za-z0-9]", string.Empty, RegexOptions.CultureInvariant);
-
-        return normalizedConstraintName.Contains(normalizedTableName, StringComparison.OrdinalIgnoreCase) ? sourceTableName + "Id" : null;
+        fallbackColumn.IsForeignKey = true;
+        fallbackColumn.IsNullable = false;
+        return fallbackColumn.Id;
     }
 
-    /// <summary>終点テーブルのカラム一覧から、参照元テーブルに対応する FK 列名候補を求めます。</summary>
-    private static string? ResolveForeignKeyColumnName(string sourceTableName, IEnumerable<string> targetColumnNames)
+    /// <summary>参照元テーブル名から終点側の FK 列名候補を求めます。</summary>
+    private static string ResolveForeignKeyColumnName(string sourceTableName)
     {
         var sourceWords = SplitIdentifierWords(sourceTableName);
 
         if (sourceWords.Count == 0)
         {
-            return null;
+            return "ParentId";
         }
 
-        var candidates = new[]
-        {
-            string.Concat(sourceWords.Select(ToPascalWord)) + "Id",
-            string.Join("_", sourceWords.Select(static word => word.ToLowerInvariant())) + "_id",
-            sourceWords[^1] + "Id",
-            ToPascalWord(sourceWords[^1]) + "Id",
-        };
-
-        return candidates.FirstOrDefault(candidate => targetColumnNames.Any(columnName => string.Equals(columnName, candidate, StringComparison.OrdinalIgnoreCase)));
+        return sourceTableName.Contains('_', StringComparison.Ordinal)
+            ? string.Join("_", sourceWords.Select(static word => word.ToLowerInvariant())) + "_id"
+            : string.Concat(sourceWords.Select(ToPascalWord)) + "Id";
     }
 
     private static RelationshipType ParseType(string? type) =>
