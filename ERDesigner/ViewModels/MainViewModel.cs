@@ -291,8 +291,19 @@ public partial class MainViewModel : ObservableObject
         }
 
         // Type 変更に関連する変更は TypeChanging/TypeChangeCompleted イベントで処理するためスキップする
-        if (e.PropertyName is nameof(RelationshipViewModel.Type) or nameof(RelationshipViewModel.SourceColumnId) or nameof(RelationshipViewModel.TargetColumnId))
+        if (e.PropertyName == nameof(RelationshipViewModel.Type))
         {
+            return;
+        }
+
+        if (e.PropertyName is nameof(RelationshipViewModel.SourceColumnId) or nameof(RelationshipViewModel.TargetColumnId))
+        {
+            if (!relationship.IsUpdatingType)
+            {
+                TrackPropertyChange(sender, e, TrackedRelationshipPropertyNames);
+            }
+
+            ApplyRelationshipColumnRules(relationship);
             return;
         }
 
@@ -1266,9 +1277,16 @@ public partial class MainViewModel : ObservableObject
             return;
         }
 
-        var answer = MessageBox.Show("現在のダイアグラムを AI 生成結果で置換します。よろしいですか？", "確認", MessageBoxButton.OKCancel, MessageBoxImage.Question);
+        var currentDiagram = new ErDiagram
+        {
+            Entities = Entities.Select(entity => entity.ToModel()).ToList(),
+            Relationships = Relationships.Select(relationship => relationship.ToModel()).ToList(),
+        };
+        var updatedDiagram = new ErDiagram { Entities = entities, Relationships = relationships };
+        var diff = new AiUpdateDiffService().Compute(currentDiagram, updatedDiagram);
+        var previewDialog = new Views.AiUpdatePreviewDialog(new AiUpdatePreviewDialogViewModel(diff)) { Owner = Application.Current?.MainWindow };
 
-        if (answer != MessageBoxResult.OK)
+        if (previewDialog.ShowDialog() != true)
         {
             return;
         }

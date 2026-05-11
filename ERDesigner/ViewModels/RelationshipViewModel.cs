@@ -153,6 +153,9 @@ public partial class RelationshipViewModel : ObservableObject
     /// <summary>スナップショット適用中など、列整合チェックを一時的にスキップするためのフラグです。</summary>
     internal bool SuppressColumnSelectionConsistency { get; set; }
 
+    /// <summary>種別変更に伴う列選択の連動更新中かどうかです。</summary>
+    internal bool IsUpdatingType { get; private set; }
+
     private void EnsureColumnSelectionConsistency()
     {
         if (SuppressColumnSelectionConsistency)
@@ -228,6 +231,7 @@ public partial class RelationshipViewModel : ObservableObject
     /// <summary>種別が変わったらラベルとマーカー種別を再通知します。</summary>
     partial void OnTypeChanging(RelationshipType value)
     {
+        IsUpdatingType = true;
         TypeChanging?.Invoke(this, EventArgs.Empty);
     }
 
@@ -240,6 +244,7 @@ public partial class RelationshipViewModel : ObservableObject
         OnPropertyChanged(nameof(CanSelectForeignKeyColumns));
 
         EnsureColumnSelectionConsistency();
+        IsUpdatingType = false;
 
         // 全連動変更完了後に通知する
         TypeChangeCompleted?.Invoke(this, EventArgs.Empty);

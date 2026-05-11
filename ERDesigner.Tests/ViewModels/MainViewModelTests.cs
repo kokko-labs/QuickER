@@ -354,6 +354,35 @@ public class MainViewModelTests
         relationship.TargetColumnId.Should().BeNull();
     }
 
+    [Fact(DisplayName = "リレーションの FK 列変更でカラム定義側の FK 状態も追従する")]
+    public void RelationshipTargetColumnChange_UpdatesForeignKeyFlags()
+    {
+        var vm = new MainViewModel();
+        vm.AddEntityCommand.Execute(null);
+        vm.AddEntityCommand.Execute(null);
+        vm.Entities[1].Columns.Add(new ColumnViewModel(new Column { Name = "ParentId", DataType = "int" }));
+        vm.Entities[1].Columns.Add(new ColumnViewModel(new Column { Name = "ParentCode", DataType = "int" }));
+        vm.StartAddOneToManyCommand.Execute(null);
+        vm.OnEntityClicked(vm.Entities[0]);
+        vm.OnEntityClicked(vm.Entities[1]);
+        var relationship = vm.Relationships[0];
+        var originalTargetColumn = vm.Entities[1].Columns.First(column => column.Id == relationship.TargetColumnId);
+        var newTargetColumn = vm.Entities[1].Columns.Single(column => column.Name == "ParentCode");
+
+        relationship.TargetColumnId = newTargetColumn.Id;
+
+        originalTargetColumn.IsForeignKey.Should().BeFalse();
+        originalTargetColumn.IsForeignKeyEditable.Should().BeTrue();
+        newTargetColumn.IsForeignKey.Should().BeTrue();
+        newTargetColumn.IsForeignKeyEditable.Should().BeFalse();
+
+        vm.UndoCommand.Execute(null);
+        originalTargetColumn.IsForeignKey.Should().BeTrue();
+        originalTargetColumn.IsForeignKeyEditable.Should().BeFalse();
+        newTargetColumn.IsForeignKey.Should().BeFalse();
+        newTargetColumn.IsForeignKeyEditable.Should().BeTrue();
+    }
+
     [Fact(DisplayName = "カラム追加は Undo/Redo できる")]
     public void AddColumn_CanUndoRedo()
     {
