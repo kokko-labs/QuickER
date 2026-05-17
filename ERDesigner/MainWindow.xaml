@@ -22,6 +22,8 @@
     <KeyBinding Key="S" Modifiers="Control" Command="{Binding SaveCommand}" />
     <KeyBinding Key="N" Modifiers="Control" Command="{Binding NewDiagramCommand}" />
     <KeyBinding Key="O" Modifiers="Control" Command="{Binding OpenCommand}" />
+    <KeyBinding Key="C" Modifiers="Control" Command="{Binding CopySelectedEntityCommand}" />
+    <KeyBinding Key="V" Modifiers="Control" Command="{Binding PasteCopiedEntityCommand}" />
     <KeyBinding Key="D" Modifiers="Control" Command="{Binding DuplicateSelectedEntityCommand}" />
     <KeyBinding Key="Delete" Command="{Binding DeleteSelectedCommand}" />
   </Window.InputBindings>
@@ -113,26 +115,67 @@
     </Style>
 
     <Style x:Key="ToolboxItemButton" TargetType="Button">
-      <Setter Property="Background" Value="Transparent" />
-      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="Background" Value="White" />
+      <Setter Property="BorderBrush" Value="#E5E7EB" />
+      <Setter Property="BorderThickness" Value="1" />
       <Setter Property="HorizontalContentAlignment" Value="Left" />
-      <Setter Property="Padding" Value="6,5" />
-      <Setter Property="Margin" Value="0,1" />
+      <Setter Property="Padding" Value="10,9" />
+      <Setter Property="Margin" Value="0,0,0,8" />
       <Setter Property="Cursor" Value="Hand" />
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="Button">
-            <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="4" Padding="{TemplateBinding Padding}">
+            <Border
+              x:Name="Bd"
+              Background="{TemplateBinding Background}"
+              BorderBrush="{TemplateBinding BorderBrush}"
+              BorderThickness="{TemplateBinding BorderThickness}"
+              CornerRadius="10"
+              Padding="{TemplateBinding Padding}"
+            >
               <ContentPresenter />
             </Border>
             <ControlTemplate.Triggers>
               <Trigger Property="IsMouseOver" Value="True">
-                <Setter TargetName="Bd" Property="Background" Value="#EEF2F7" />
+                <Setter TargetName="Bd" Property="Background" Value="#F8FAFC" />
+                <Setter TargetName="Bd" Property="BorderBrush" Value="#CBD5E1" />
+              </Trigger>
+              <Trigger Property="IsPressed" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="#EEF4FF" />
+                <Setter TargetName="Bd" Property="BorderBrush" Value="#93C5FD" />
               </Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
         </Setter.Value>
       </Setter>
+    </Style>
+
+    <Style x:Key="ToolboxSectionCard" TargetType="Border">
+      <Setter Property="Background" Value="White" />
+      <Setter Property="BorderBrush" Value="{StaticResource DividerBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="10" />
+      <Setter Property="Padding" Value="12" />
+      <Setter Property="Margin" Value="0,0,0,12" />
+    </Style>
+
+    <Style x:Key="ToolboxSectionTitle" TargetType="TextBlock">
+      <Setter Property="FontSize" Value="14" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Foreground" Value="{StaticResource HeaderText}" />
+      <Setter Property="Margin" Value="0,0,0,10" />
+    </Style>
+
+    <Style x:Key="ToolboxItemIcon" TargetType="TextBlock">
+      <Setter Property="FontSize" Value="16" />
+      <Setter Property="Foreground" Value="#374151" />
+      <Setter Property="Margin" Value="0,0,10,0" />
+      <Setter Property="VerticalAlignment" Value="Top" />
+    </Style>
+
+    <Style x:Key="ToolboxItemTitle" TargetType="TextBlock">
+      <Setter Property="Foreground" Value="#111827" />
+      <Setter Property="FontWeight" Value="SemiBold" />
     </Style>
 
     <Style x:Key="PropertyCard" TargetType="Border">
@@ -483,48 +526,56 @@
       <!-- 左: ツールボックス -->
       <Border Grid.Column="0" Background="{StaticResource SidebarBg}" BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,0,1,0">
         <ScrollViewer VerticalScrollBarVisibility="Auto">
-          <StackPanel Margin="10,8">
-            <TextBlock Text="ツールボックス" FontWeight="Bold" Foreground="{StaticResource HeaderText}" Margin="0,0,0,8" />
+          <StackPanel Margin="12,10,12,12">
+            <TextBlock Text="ツールボックス" FontWeight="Bold" Foreground="{StaticResource HeaderText}" Margin="0,0,0,10" />
 
-            <TextBlock Text="エンティティ" Foreground="{StaticResource MutedText}" Margin="0,4,0,2" />
-            <Button Style="{StaticResource ToolboxItemButton}" Command="{Binding AddEntityCommand}">
-              <StackPanel Orientation="Horizontal">
-                <TextBlock Text="▭" FontSize="16" Margin="0,0,8,0" />
-                <TextBlock Text="エンティティを追加" VerticalAlignment="Center" />
+            <Border Style="{StaticResource ToolboxSectionCard}">
+              <StackPanel>
+                <TextBlock Text="エンティティ" Style="{StaticResource ToolboxSectionTitle}" />
+                <Button Style="{StaticResource ToolboxItemButton}" Command="{Binding AddEntityCommand}" ToolTip="新しいテーブルをキャンバスに追加します">
+                  <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="▭" Style="{StaticResource ToolboxItemIcon}" />
+                    <TextBlock Text="エンティティを追加" Style="{StaticResource ToolboxItemTitle}" VerticalAlignment="Center" />
+                  </StackPanel>
+                </Button>
+                <Button Style="{StaticResource ToolboxItemButton}" Command="{Binding RemoveSelectedEntityCommand}" ToolTip="選択中のエンティティをダイアグラムから削除します">
+                  <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="🗑" Style="{StaticResource ToolboxItemIcon}" />
+                    <TextBlock Text="エンティティ削除" Style="{StaticResource ToolboxItemTitle}" VerticalAlignment="Center" />
+                  </StackPanel>
+                </Button>
               </StackPanel>
-            </Button>
-            <Button Style="{StaticResource ToolboxItemButton}" Command="{Binding RemoveSelectedEntityCommand}">
-              <StackPanel Orientation="Horizontal">
-                <TextBlock Text="🗑" FontSize="14" Margin="0,0,8,0" />
-                <TextBlock Text="エンティティ削除" VerticalAlignment="Center" />
-              </StackPanel>
-            </Button>
+            </Border>
 
-            <TextBlock Text="リレーションシップ" Foreground="{StaticResource MutedText}" Margin="0,12,0,2" />
-            <Button Style="{StaticResource ToolboxItemButton}" Command="{Binding StartAddOneToOneCommand}">
-              <StackPanel Orientation="Horizontal">
-                <TextBlock Text="│─│" Margin="0,0,8,0" />
-                <TextBlock Text="1対1" VerticalAlignment="Center" />
+            <Border Style="{StaticResource ToolboxSectionCard}">
+              <StackPanel>
+                <TextBlock Text="リレーションシップ" Style="{StaticResource ToolboxSectionTitle}" />
+                <Button Style="{StaticResource ToolboxItemButton}" Command="{Binding StartAddOneToOneCommand}" ToolTip="1対1 のリレーション作成モードに切り替えます">
+                  <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="│─│" Style="{StaticResource ToolboxItemIcon}" />
+                    <TextBlock Text="1対1" Style="{StaticResource ToolboxItemTitle}" VerticalAlignment="Center" />
+                  </StackPanel>
+                </Button>
+                <Button Style="{StaticResource ToolboxItemButton}" Command="{Binding StartAddOneToManyCommand}" ToolTip="親子関係を表す 1対多 リレーションを作成できます">
+                  <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="│─≪" Style="{StaticResource ToolboxItemIcon}" />
+                    <TextBlock Text="1対多" Style="{StaticResource ToolboxItemTitle}" VerticalAlignment="Center" />
+                  </StackPanel>
+                </Button>
+                <Button Style="{StaticResource ToolboxItemButton}" Command="{Binding StartAddManyToManyCommand}" ToolTip="中間テーブルを想定した多対多リレーションを作成します">
+                  <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="≫─≪" Style="{StaticResource ToolboxItemIcon}" />
+                    <TextBlock Text="多対多" Style="{StaticResource ToolboxItemTitle}" VerticalAlignment="Center" />
+                  </StackPanel>
+                </Button>
+                <Button Style="{StaticResource ToolboxItemButton}" Command="{Binding RemoveSelectedRelationshipCommand}" ToolTip="選択中のリレーションを削除します">
+                  <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="🗑" Style="{StaticResource ToolboxItemIcon}" />
+                    <TextBlock Text="リレーション削除" Style="{StaticResource ToolboxItemTitle}" VerticalAlignment="Center" />
+                  </StackPanel>
+                </Button>
               </StackPanel>
-            </Button>
-            <Button Style="{StaticResource ToolboxItemButton}" Command="{Binding StartAddOneToManyCommand}">
-              <StackPanel Orientation="Horizontal">
-                <TextBlock Text="│─≪" Margin="0,0,8,0" />
-                <TextBlock Text="1対多" VerticalAlignment="Center" />
-              </StackPanel>
-            </Button>
-            <Button Style="{StaticResource ToolboxItemButton}" Command="{Binding StartAddManyToManyCommand}">
-              <StackPanel Orientation="Horizontal">
-                <TextBlock Text="≫─≪" Margin="0,0,8,0" />
-                <TextBlock Text="多対多" VerticalAlignment="Center" />
-              </StackPanel>
-            </Button>
-            <Button Style="{StaticResource ToolboxItemButton}" Command="{Binding RemoveSelectedRelationshipCommand}">
-              <StackPanel Orientation="Horizontal">
-                <TextBlock Text="🗑" FontSize="14" Margin="0,0,8,0" />
-                <TextBlock Text="リレーション削除" VerticalAlignment="Center" />
-              </StackPanel>
-            </Button>
+            </Border>
 
             <Border
               Margin="0,12,0,0"

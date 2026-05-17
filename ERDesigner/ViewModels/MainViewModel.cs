@@ -60,6 +60,10 @@ public partial class MainViewModel : ObservableObject
 
     public UndoRedoManager UndoRedo { get; } = new();
 
+    public IRelayCommand CopySelectedEntityCommand { get; }
+
+    public IRelayCommand PasteCopiedEntityCommand { get; }
+
     /// <summary>確認ダイアログを表示するかどうか。テスト時は false にできます。</summary>
     public bool IsConfirmationEnabled { get; set; } = true;
 
@@ -94,6 +98,12 @@ public partial class MainViewModel : ObservableObject
     /// <summary>DataGrid のコピー元として保持するカラム内容です。</summary>
     private Column? _copiedColumn;
 
+    /// <summary>エンティティコピー用に保持するモデル内容です。</summary>
+    private Entity? _copiedEntity;
+
+    /// <summary>同じコピー元からのペースト回数です。</summary>
+    private int _copiedEntityPasteCount;
+
     /// <summary>ER 図上のカラム行に「説明」を表示するか (ツールバーから ON/OFF 切替)。</summary>
     [ObservableProperty]
     private bool _showColumnDescriptionsInDiagram;
@@ -115,6 +125,8 @@ public partial class MainViewModel : ObservableObject
 
     public MainViewModel()
     {
+        CopySelectedEntityCommand = new RelayCommand(CopySelectedEntity, CanCopySelectedEntity);
+        PasteCopiedEntityCommand = new RelayCommand(PasteCopiedEntity, CanPasteCopiedEntity);
         Entities.CollectionChanged += OnEntitiesCollectionChanged;
         Relationships.CollectionChanged += OnRelationshipsCollectionChanged;
     }
@@ -822,6 +834,37 @@ public partial class MainViewModel : ObservableObject
 
     private bool CanAddColumn() => SelectedEntity is not null;
 
+    /// <summary>選択中エンティティの内容をコピーして内部バッファへ保持します。</summary>
+    private void CopySelectedEntity()
+    {
+        if (SelectedEntity is null)
+        {
+            return;
+        }
+
+        _copiedEntity = CloneEntityModel(SelectedEntity, preserveId: true);
+        _copiedEntityPasteCount = 0;
+        PasteCopiedEntityCommand.NotifyCanExecuteChanged();
+    }
+
+    private bool CanCopySelectedEntity() => SelectedEntity is not null;
+
+    /// <summary>コピー済みエンティティを少しずらした位置へ複製追加します。</summary>
+    private void PasteCopiedEntity()
+    {
+        if (_copiedEntity is null)
+        {
+            return;
+        }
+
+        _copiedEntityPasteCount++;
+        var pastedEntity = CreateEntityCopy(_copiedEntity, _copiedEntityPasteCount);
+        UndoRedo.Execute(new AddEntityCommand(this, pastedEntity));
+        SelectSingleEntity(pastedEntity);
+    }
+
+    private bool CanPasteCopiedEntity() => _copiedEntity is not null;
+
     /// <summary>選択中カラムの内容をコピーして内部バッファへ保持します。</summary>
     [RelayCommand(CanExecute = nameof(CanCopySelectedColumn))]
     private void CopySelectedColumn()
@@ -956,14 +999,7 @@ public partial class MainViewModel : ObservableObject
         }
         else
         {
-            // single-selection
-            foreach (var e in Entities)
-            {
-                e.IsSelected = (e == entity);
-            }
-
-            SelectedEntity = entity;
-            SelectedRelationship = null;
+            SelectSingleEntity(entity);
         }
     }
 
@@ -1010,6 +1046,7 @@ public partial class MainViewModel : ObservableObject
     {
         RemoveSelectedEntityCommand.NotifyCanExecuteChanged();
         AddColumnCommand.NotifyCanExecuteChanged();
+        CopySelectedEntityCommand.NotifyCanExecuteChanged();
         PasteCopiedColumnCommand.NotifyCanExecuteChanged();
         DuplicateSelectedEntityCommand.NotifyCanExecuteChanged();
     }
@@ -1064,12 +1101,7 @@ public partial class MainViewModel : ObservableObject
 
         if (cmd.Duplicated is not null)
         {
-            foreach (var e in Entities)
-            {
-                e.IsSelected = (e == cmd.Duplicated);
-            }
-
-            SelectedEntity = cmd.Duplicated;
+            SelectSingleEntity(cmd.Duplicated);
         }
     }
 
@@ -1572,6 +1604,76 @@ public partial class MainViewModel : ObservableObject
         }
 
         return target.Columns.FirstOrDefault(c => !c.IsPrimaryKey) ?? target.Columns.FirstOrDefault();
+    }
+
+    /// <summary>コピー元エンティティから位置をずらした複製 ViewModel を生成します。</summary>
+    internal EntityViewModel CreateEntityCopy(EntityViewModel source, int offsetMultiplier = 1) => CreateEntityCopy(source.ToModel(), offsetMultiplier);
+
+    /// <summary>コピー元エンティティモデルから位置をずらした複製 ViewModel を生成します。</summary>
+    internal EntityViewModel CreateEntityCopy(Entity source, int offsetMultiplier = 1)
+    {
+        var copy = CloneEntityModel(source, preserveId: false);
+        var normalizedOffsetMultiplier = Math.Max(1, offsetMultiplier);
+        var offset = 30 * normalizedOffsetMultiplier;
+
+        copy.TableName = GenerateCopyTableName(source.TableName);
+        copy.X += offset;
+        copy.Y += offset;
+
+        return new EntityViewModel(copy);
+    }
+
+    /// <summary>エンティティを単一選択状態に切り替えます。</summary>
+    private void SelectSingleEntity(EntityViewModel entity)
+    {
+        foreach (var currentEntity in Entities)
+        {
+            currentEntity.IsSelected = (currentEntity == entity);
+        }
+
+        foreach (var relationship in Relationships)
+        {
+            relationship.IsSelected = false;
+        }
+
+        SelectedEntity = entity;
+        SelectedRelationship = null;
+    }
+
+    /// <summary>複製時に衝突しないテーブル名を決定します。</summary>
+    private string GenerateCopyTableName(string originalTableName)
+    {
+        var normalizedTableName = string.IsNullOrWhiteSpace(originalTableName) ? "NewTable" : originalTableName.Trim();
+        var candidate = $"{normalizedTableName}_Copy";
+        var suffix = 2;
+
+        while (Entities.Any(entity => string.Equals(entity.TableName, candidate, StringComparison.OrdinalIgnoreCase)))
+        {
+            candidate = $"{normalizedTableName}_Copy{suffix}";
+            suffix++;
+        }
+
+        return candidate;
+    }
+
+    /// <summary>エンティティ内容を複製し、必要に応じて新しい ID を割り当てます。</summary>
+    private static Entity CloneEntityModel(EntityViewModel entity, bool preserveId) => CloneEntityModel(entity.ToModel(), preserveId);
+
+    /// <summary>エンティティ内容を複製し、必要に応じて新しい ID を割り当てます。</summary>
+    private static Entity CloneEntityModel(Entity entity, bool preserveId)
+    {
+        return new Entity
+        {
+            Id = preserveId ? entity.Id : Guid.NewGuid(),
+            TableName = entity.TableName,
+            X = entity.X,
+            Y = entity.Y,
+            Width = entity.Width,
+            Memo = entity.Memo,
+            Description = entity.Description,
+            TitleBackgroundColor = entity.TitleBackgroundColor,
+            Columns = entity.Columns.Select(column => CloneColumnModel(column, preserveId)).ToList(),
+        };
     }
 
     /// <summary>カラム内容を複製し、必要に応じて新しい ID を割り当てます。</summary>

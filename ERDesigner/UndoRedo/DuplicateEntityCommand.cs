@@ -36,34 +36,7 @@ public class DuplicateEntityCommand : IUndoableCommand
     {
         if (_duplicate is null)
         {
-            // モデル経由でディープコピー（ID は新しく振り直す）
-            var srcModel = _original.ToModel();
-            var newModel = new Entity
-            {
-                TableName = srcModel.TableName + "_Copy",
-                X = srcModel.X + 30,
-                Y = srcModel.Y + 30,
-                Width = srcModel.Width,
-                Memo = srcModel.Memo,
-                Description = srcModel.Description,
-                TitleBackgroundColor = srcModel.TitleBackgroundColor,
-            };
-
-            foreach (var c in srcModel.Columns)
-            {
-                newModel.Columns.Add(
-                    new Column
-                    {
-                        Name = c.Name,
-                        DataType = c.DataType,
-                        IsPrimaryKey = c.IsPrimaryKey,
-                        IsForeignKey = c.IsForeignKey,
-                        Description = c.Description,
-                    }
-                );
-            }
-
-            _duplicate = new EntityViewModel(newModel);
+            _duplicate = _main.CreateEntityCopy(_original);
         }
 
         _main.Entities.Add(_duplicate);

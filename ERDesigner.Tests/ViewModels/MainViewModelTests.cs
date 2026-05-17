@@ -419,6 +419,84 @@ public class MainViewModelTests
         vm.SelectedEntity.Columns.Should().HaveCount(initialCount + 1);
     }
 
+    [Fact(DisplayName = "選択エンティティはコピーして貼り付けできる")]
+    public void CopyPasteSelectedEntity_AddsShiftedClone()
+    {
+        var vm = new MainViewModel();
+        vm.AddEntityCommand.Execute(null);
+        var original = vm.Entities[0];
+        original.TableName = "Customer";
+        original.X = 120;
+        original.Y = 200;
+        original.Width = 280;
+        original.Description = "顧客";
+        original.Memo = "メモ";
+        original.TitleBackgroundColor = "#E4F1C9";
+        original.Columns.Add(
+            new ColumnViewModel(
+                new Column
+                {
+                    Name = "Code",
+                    DataType = "nvarchar(50)",
+                    IsNullable = true,
+                    Description = "顧客コード",
+                }
+            )
+        );
+        vm.OnEntityClicked(original);
+
+        vm.CopySelectedEntityCommand.Execute(null);
+        vm.PasteCopiedEntityCommand.Execute(null);
+
+        vm.Entities.Should().HaveCount(2);
+        var pasted = vm.Entities[1];
+        pasted.Should().NotBeSameAs(original);
+        pasted.Id.Should().NotBe(original.Id);
+        pasted.TableName.Should().Be("Customer_Copy");
+        pasted.X.Should().Be(150);
+        pasted.Y.Should().Be(230);
+        pasted.Width.Should().Be(280);
+        pasted.Description.Should().Be("顧客");
+        pasted.Memo.Should().Be("メモ");
+        pasted.TitleBackgroundColor.Should().Be("#E4F1C9");
+        pasted.Columns.Should().HaveCount(2);
+        pasted.Columns[0].Id.Should().NotBe(original.Columns[0].Id);
+        pasted.Columns[1].Id.Should().NotBe(original.Columns[1].Id);
+        pasted.Columns[1].Name.Should().Be("Code");
+        pasted.Columns[1].Description.Should().Be("顧客コード");
+        vm.SelectedEntity.Should().Be(pasted);
+        pasted.IsSelected.Should().BeTrue();
+        original.IsSelected.Should().BeFalse();
+    }
+
+    [Fact(DisplayName = "エンティティ貼り付けは連続実行で位置と名前がずれ、Undo/Redo できる")]
+    public void PasteCopiedEntity_CanRepeatAndUndoRedo()
+    {
+        var vm = new MainViewModel();
+        vm.AddEntityCommand.Execute(null);
+        var original = vm.Entities[0];
+        original.TableName = "Order";
+        original.X = 90;
+        original.Y = 140;
+        vm.OnEntityClicked(original);
+
+        vm.CopySelectedEntityCommand.Execute(null);
+        vm.PasteCopiedEntityCommand.Execute(null);
+        vm.PasteCopiedEntityCommand.Execute(null);
+
+        vm.Entities.Select(entity => entity.TableName).Should().Equal("Order", "Order_Copy", "Order_Copy2");
+        vm.Entities[1].X.Should().Be(120);
+        vm.Entities[1].Y.Should().Be(170);
+        vm.Entities[2].X.Should().Be(150);
+        vm.Entities[2].Y.Should().Be(200);
+
+        vm.UndoCommand.Execute(null);
+        vm.Entities.Select(entity => entity.TableName).Should().Equal("Order", "Order_Copy");
+
+        vm.RedoCommand.Execute(null);
+        vm.Entities.Select(entity => entity.TableName).Should().Equal("Order", "Order_Copy", "Order_Copy2");
+    }
+
     [Fact(DisplayName = "選択カラムはコピーして直下へ貼り付けできる")]
     public void CopyPasteSelectedColumn_InsertsCloneBelowSelection()
     {
