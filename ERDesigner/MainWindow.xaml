@@ -41,7 +41,8 @@
     <Style x:Key="ToolBarLabelButton" TargetType="Button">
       <Setter Property="Background" Value="Transparent" />
       <Setter Property="BorderThickness" Value="0" />
-      <Setter Property="Padding" Value="10,6" />
+      <Setter Property="Width" Value="72" />
+      <Setter Property="Padding" Value="4,6" />
       <Setter Property="Margin" Value="2,0" />
       <Setter Property="Cursor" Value="Hand" />
       <Setter Property="Template">
@@ -66,7 +67,8 @@
     <Style x:Key="ToolBarLabelToggleButton" TargetType="ToggleButton">
       <Setter Property="Background" Value="Transparent" />
       <Setter Property="BorderThickness" Value="0" />
-      <Setter Property="Padding" Value="10,6" />
+      <Setter Property="Width" Value="76" />
+      <Setter Property="Padding" Value="4,6" />
       <Setter Property="Margin" Value="2,0" />
       <Setter Property="Cursor" Value="Hand" />
       <Setter Property="Template">
@@ -101,6 +103,13 @@
       <Setter Property="HorizontalAlignment" Value="Center" />
       <Setter Property="Foreground" Value="#374151" />
       <Setter Property="Margin" Value="0,2,0,0" />
+    </Style>
+
+    <!--  ツールバー区切り線  -->
+    <Style x:Key="ToolBarSeparator" TargetType="Rectangle">
+      <Setter Property="Width" Value="1" />
+      <Setter Property="Fill" Value="#D1D5DB" />
+      <Setter Property="Margin" Value="6,6" />
     </Style>
 
     <Style x:Key="ToolboxItemButton" TargetType="Button">
@@ -350,7 +359,7 @@
             <TextBlock Style="{StaticResource ToolBarCaption}" Text="保存" />
           </StackPanel>
         </Button>
-        <Separator Margin="6,4" />
+        <Rectangle Style="{StaticResource ToolBarSeparator}" />
         <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding UndoCommand}" IsEnabled="{Binding UndoRedo.CanUndo}" ToolTip="元に戻す (Ctrl+Z)">
           <StackPanel>
             <TextBlock Style="{StaticResource ToolBarIcon}" Text="↶" />
@@ -363,13 +372,14 @@
             <TextBlock Style="{StaticResource ToolBarCaption}" Text="やり直す" />
           </StackPanel>
         </Button>
-        <Separator Margin="6,4" />
+        <Rectangle Style="{StaticResource ToolBarSeparator}" />
         <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding DuplicateSelectedEntityCommand}" ToolTip="複製 (Ctrl+D)">
           <StackPanel>
             <TextBlock Style="{StaticResource ToolBarIcon}" Text="❏" />
             <TextBlock Style="{StaticResource ToolBarCaption}" Text="複製" />
           </StackPanel>
         </Button>
+        <Rectangle Style="{StaticResource ToolBarSeparator}" />
         <ToggleButton
           Style="{StaticResource ToolBarLabelToggleButton}"
           IsChecked="{Binding ShowColumnDescriptionsInDiagram, Mode=TwoWay}"
@@ -386,6 +396,7 @@
             <TextBlock Style="{StaticResource ToolBarCaption}" Text="NULL表示" />
           </StackPanel>
         </ToggleButton>
+        <Rectangle Style="{StaticResource ToolBarSeparator}" />
         <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding AutoLayoutGridCommand}" ToolTip="格子状に自動整列">
           <StackPanel>
             <TextBlock Style="{StaticResource ToolBarIcon}" Text="▦" />
@@ -404,7 +415,7 @@
             <TextBlock Style="{StaticResource ToolBarCaption}" Text="幅自動" />
           </StackPanel>
         </Button>
-        <Separator Margin="6,4" />
+        <Rectangle Style="{StaticResource ToolBarSeparator}" />
         <Button
           Style="{StaticResource ToolBarLabelButton}"
           Command="{Binding ExportPngCommand}"
@@ -413,21 +424,34 @@
         >
           <StackPanel>
             <TextBlock Style="{StaticResource ToolBarIcon}" Text="🖼" />
-            <TextBlock Style="{StaticResource ToolBarCaption}" Text="PNG" />
+            <TextBlock Style="{StaticResource ToolBarCaption}" Text="PNG出力" />
           </StackPanel>
         </Button>
         <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding ExportSvgCommand}" ToolTip="SVG にエクスポート">
           <StackPanel>
             <TextBlock Style="{StaticResource ToolBarIcon}" Text="✒" />
-            <TextBlock Style="{StaticResource ToolBarCaption}" Text="SVG" />
+            <TextBlock Style="{StaticResource ToolBarCaption}" Text="SVG出力" />
           </StackPanel>
         </Button>
         <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding ExportDdlCommand}" ToolTip="SQL DDL にエクスポート">
           <StackPanel>
             <TextBlock Style="{StaticResource ToolBarIcon}" Text="🗎" />
-            <TextBlock Style="{StaticResource ToolBarCaption}" Text="DDL" />
+            <TextBlock Style="{StaticResource ToolBarCaption}" Text="DDL出力" />
           </StackPanel>
         </Button>
+        <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding ExportMermaidCommand}" ToolTip="Mermaid にエクスポート">
+          <StackPanel>
+            <TextBlock Style="{StaticResource ToolBarIcon}" Text="🧜" />
+            <TextBlock Style="{StaticResource ToolBarCaption}" Text="Mermaid出力" />
+          </StackPanel>
+        </Button>
+        <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding ImportMermaidCommand}" ToolTip="Mermaid の erDiagram を取り込み">
+          <StackPanel>
+            <TextBlock Style="{StaticResource ToolBarIcon}" Text="🧩" />
+            <TextBlock Style="{StaticResource ToolBarCaption}" Text="Mermaid取込" />
+          </StackPanel>
+        </Button>
+        <Rectangle Style="{StaticResource ToolBarSeparator}" />
         <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding ExportTableDefinitionDocumentCommand}" ToolTip="テーブル定義書を Excel に出力">
           <StackPanel>
             <TextBlock Style="{StaticResource ToolBarIcon}" Text="📘" />
@@ -440,6 +464,7 @@
             <TextBlock Style="{StaticResource ToolBarCaption}" Text="定義書取込" />
           </StackPanel>
         </Button>
+        <Rectangle Style="{StaticResource ToolBarSeparator}" />
         <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding ImportFromSqlServerCommand}" ToolTip="SQL Server からスキーマを取り込み">
           <StackPanel>
             <TextBlock Style="{StaticResource ToolBarIcon}" Text="🛢" />
@@ -452,6 +477,7 @@
             <TextBlock Style="{StaticResource ToolBarCaption}" Text="DB同期" />
           </StackPanel>
         </Button>
+        <Rectangle Style="{StaticResource ToolBarSeparator}" />
         <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding GenerateFromAiCommand}" ToolTip="ChatGPT/Ollama でスキーマを自動生成">
           <StackPanel>
             <TextBlock Style="{StaticResource ToolBarIcon}" Text="🤖" />

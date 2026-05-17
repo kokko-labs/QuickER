@@ -1135,6 +1135,18 @@ public partial class MainViewModel : ObservableObject
         }
     }
 
+    /// <summary>現在のダイアグラムを Mermaid に書き出します。</summary>
+    [RelayCommand]
+    private void ExportMermaid()
+    {
+        var dlg = new SaveFileDialog { Filter = "Mermaid Diagram (*.mmd)|*.mmd|Mermaid Diagram (*.mermaid)|*.mermaid", DefaultExt = ".mmd" };
+
+        if (dlg.ShowDialog() == true)
+        {
+            MermaidExporter.SaveTo(this, dlg.FileName);
+        }
+    }
+
     /// <summary>現在のダイアグラムから Excel 形式のテーブル定義書を書き出します。</summary>
     [RelayCommand]
     private void ExportTableDefinitionDocument()
@@ -1152,6 +1164,46 @@ public partial class MainViewModel : ObservableObject
             {
                 MessageBox.Show($"テーブル定義書を出力できませんでした。{Environment.NewLine}{ex.Message}", "エラー", MessageBoxButton.OK, MessageBoxImage.Error);
             }
+        }
+    }
+
+    /// <summary>Mermaid の erDiagram ファイルを読み込みます。</summary>
+    [RelayCommand]
+    private void ImportMermaid()
+    {
+        var dlg = new OpenFileDialog { Filter = "Mermaid Diagram (*.mmd;*.mermaid)|*.mmd;*.mermaid|Text File (*.txt)|*.txt" };
+
+        if (dlg.ShowDialog() != true)
+        {
+            return;
+        }
+
+        try
+        {
+            var diagram = MermaidImporter.Load(dlg.FileName);
+
+            if (Entities.Count > 0)
+            {
+                var currentSig = SqlServerSchemaImporter.ComputeSignature(Entities.Select(e => e.ToModel()), Relationships.Select(r => r.ToModel()));
+                var newSig = SqlServerSchemaImporter.ComputeSignature(diagram.Entities, diagram.Relationships);
+
+                if (currentSig != newSig)
+                {
+                    var ans = MessageBox.Show("現在のダイアグラムを Mermaid の内容で置換します。よろしいですか？", "確認", MessageBoxButton.OKCancel, MessageBoxImage.Question);
+
+                    if (ans != MessageBoxResult.OK)
+                    {
+                        return;
+                    }
+                }
+            }
+
+            ReplaceDiagramWithoutHistory(diagram.Entities, diagram.Relationships, autoLayout: true);
+            MessageBox.Show("Mermaid の取り込みが完了しました。", "完了", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Mermaid を取り込めませんでした。{Environment.NewLine}{ex.Message}", "エラー", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
