@@ -1,0 +1,8 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "/^dotnet build ERDesigner\\\\ERDesigner\\.csproj$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
+    }
+}

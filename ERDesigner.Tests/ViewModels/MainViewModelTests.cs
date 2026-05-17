@@ -304,6 +304,22 @@ public class MainViewModelTests
         entity.TableName.Should().Be("Customer");
     }
 
+    [Fact(DisplayName = "エンティティ見出し色変更は Undo/Redo できる")]
+    public void EntityTitleBackgroundColorChange_CanUndoRedo()
+    {
+        var vm = new MainViewModel();
+        vm.AddEntityCommand.Execute(null);
+        var entity = vm.Entities[0];
+
+        entity.TitleBackgroundColor = "#E4F1C9";
+
+        vm.UndoCommand.Execute(null);
+        entity.TitleBackgroundColor.Should().Be(Entity.DefaultTitleBackgroundColor);
+
+        vm.RedoCommand.Execute(null);
+        entity.TitleBackgroundColor.Should().Be("#E4F1C9");
+    }
+
     [Fact(DisplayName = "リレーション種別変更は Undo/Redo できる")]
     public void RelationshipPropertyChange_CanUndoRedo()
     {

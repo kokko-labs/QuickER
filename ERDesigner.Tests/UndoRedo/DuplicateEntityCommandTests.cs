@@ -18,6 +18,7 @@ public class DuplicateEntityCommandTests
             new Entity
             {
                 TableName = "Original",
+                TitleBackgroundColor = "#E7DDF9",
                 X = 10,
                 Y = 20,
                 Columns =
@@ -43,6 +44,7 @@ public class DuplicateEntityCommandTests
         cmd.Duplicated.TableName.Should().EndWith("_Copy");
         cmd.Duplicated.X.Should().Be(40);
         cmd.Duplicated.Y.Should().Be(50);
+        cmd.Duplicated.TitleBackgroundColor.Should().Be("#E7DDF9");
         cmd.Duplicated.Columns.Should().HaveCount(1);
         cmd.Duplicated.Columns[0].Description.Should().Be("主キー");
     }

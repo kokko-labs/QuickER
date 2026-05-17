@@ -46,6 +46,7 @@ public class DuplicateEntityCommand : IUndoableCommand
                 Width = srcModel.Width,
                 Memo = srcModel.Memo,
                 Description = srcModel.Description,
+                TitleBackgroundColor = srcModel.TitleBackgroundColor,
             };
 
             foreach (var c in srcModel.Columns)

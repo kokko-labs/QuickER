@@ -8,6 +8,8 @@ namespace ERDesigner.Models;
 /// </summary>
 public class Entity
 {
+    public const string DefaultTitleBackgroundColor = "#DCEBFF";
+
     /// <summary>エンティティを一意に識別する ID です。リレーションから参照されます。</summary>
     public Guid Id { get; set; } = Guid.NewGuid();
 
@@ -30,6 +32,9 @@ public class Entity
     /// テーブルの説明 (SQL Server の拡張プロパティ <c>MS_Description</c> と同期します)。
     /// </summary>
     public string Description { get; set; } = string.Empty;
+
+    /// <summary>ダイアグラム上の見出し帯に表示する背景色です。</summary>
+    public string TitleBackgroundColor { get; set; } = DefaultTitleBackgroundColor;
 
     /// <summary>このエンティティに含まれるカラム一覧です。</summary>
     public List<Column> Columns { get; set; } = new();

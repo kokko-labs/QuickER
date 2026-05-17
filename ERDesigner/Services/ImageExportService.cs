@@ -77,7 +77,7 @@ public static class ImageExportService
             $"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{maxX.ToString(ci)}\" height=\"{maxY.ToString(ci)}\" viewBox=\"0 0 {maxX.ToString(ci)} {maxY.ToString(ci)}\">"
         );
         sb.AppendLine(
-            "  <style>.entity{fill:#fff;stroke:#9DB7DD;stroke-width:1}.header{fill:#DCEBFF}.title{font:bold 12px 'Segoe UI',sans-serif;fill:#1F3A66}.col{font:11px 'Segoe UI',sans-serif;fill:#1F2937}.pk{fill:#D93025;font-weight:bold}.fk{fill:#1A73E8;font-weight:bold}.rel{stroke:#5F6B7A;stroke-width:1.6;fill:none}.label{font:10px 'Segoe UI',sans-serif;fill:#374151}</style>"
+            "  <style>.entity{fill:#fff;stroke:#9DB7DD;stroke-width:1}.title{font:bold 12px 'Segoe UI',sans-serif;fill:#1F2937}.col{font:11px 'Segoe UI',sans-serif;fill:#1F2937}.pk{fill:#D93025;font-weight:bold}.fk{fill:#1A73E8;font-weight:bold}.rel{stroke:#5F6B7A;stroke-width:1.6;fill:none}.label{font:10px 'Segoe UI',sans-serif;fill:#374151}</style>"
         );
 
         // リレーション
@@ -91,9 +91,10 @@ public static class ImageExportService
         foreach (var e in vm.Entities)
         {
             var h = Height(e);
+            var headerColor = EntityTitleColorPalette.Normalize(e.TitleBackgroundColor);
             sb.AppendLine($"  <g transform=\"translate({e.X.ToString(ci)},{e.Y.ToString(ci)})\">");
             sb.AppendLine($"    <rect class=\"entity\" width=\"{e.Width.ToString(ci)}\" height=\"{h.ToString(ci)}\" rx=\"6\" ry=\"6\" />");
-            sb.AppendLine($"    <rect class=\"header\" width=\"{e.Width.ToString(ci)}\" height=\"{headerHeight.ToString(ci)}\" rx=\"6\" ry=\"6\" />");
+            sb.AppendLine($"    <rect width=\"{e.Width.ToString(ci)}\" height=\"{headerHeight.ToString(ci)}\" rx=\"6\" ry=\"6\" fill=\"{headerColor}\" />");
             sb.AppendLine($"    <text class=\"title\" x=\"10\" y=\"18\">{SecurityElement.Escape(e.TableName)}</text>");
 
             for (var i = 0; i < e.Columns.Count; i++)

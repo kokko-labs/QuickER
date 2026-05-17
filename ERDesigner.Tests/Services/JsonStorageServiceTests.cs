@@ -23,6 +23,7 @@ public class JsonStorageServiceTests
         a.TableName = "Customer";
         a.X = 100;
         a.Y = 50;
+        a.TitleBackgroundColor = "#FFF0BF";
 
         vm.StartAddOneToManyCommand.Execute(null);
         vm.OnEntityClicked(a);
@@ -56,6 +57,7 @@ public class JsonStorageServiceTests
             ea.TableName.Should().Be("Customer");
             ea.X.Should().Be(100);
             ea.Y.Should().Be(50);
+            ea.TitleBackgroundColor.Should().Be("#FFF0BF");
 
             loaded.Relationships[0].Type.Should().Be(RelationshipType.OneToMany);
             loaded.Relationships[0].SourceColumnId.Should().Be(a.Columns[0].Id);

@@ -46,12 +46,21 @@ public partial class EntityViewModel : ObservableObject
     [ObservableProperty]
     private string _description;
 
+    private string _titleBackgroundColor = Entity.DefaultTitleBackgroundColor;
+
     /// <summary>選択中かどうか。枚線スタイルを切り替えるためのフラグ。</summary>
     [ObservableProperty]
     private bool _isSelected;
 
     /// <summary>このエンティティに含まれるカラム一覧。</summary>
     public ObservableCollection<ColumnViewModel> Columns { get; }
+
+    /// <summary>ダイアグラム上の見出し帯に表示する背景色です。</summary>
+    public string TitleBackgroundColor
+    {
+        get => _titleBackgroundColor;
+        set => SetProperty(ref _titleBackgroundColor, EntityTitleColorPalette.Normalize(value));
+    }
 
     /// <summary>ER 図上で説明表示を行うかどうか。</summary>
     public bool ShowDescriptionsInDiagram
@@ -92,6 +101,7 @@ public partial class EntityViewModel : ObservableObject
         _width = model.Width <= 0 ? 200 : model.Width;
         _memo = model.Memo;
         _description = model.Description ?? string.Empty;
+        _titleBackgroundColor = EntityTitleColorPalette.Normalize(model.TitleBackgroundColor);
         Columns = new ObservableCollection<ColumnViewModel>(model.Columns.Select(c => new ColumnViewModel(c)));
 
         Columns.CollectionChanged += OnColumnsChanged;
@@ -152,6 +162,7 @@ public partial class EntityViewModel : ObservableObject
             Width = Width,
             Memo = Memo,
             Description = Description ?? string.Empty,
+            TitleBackgroundColor = TitleBackgroundColor,
             Columns = Columns.Select(c => c.ToModel()).ToList(),
         };
 }

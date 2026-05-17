@@ -15,7 +15,13 @@ namespace ERDesigner.ViewModels;
 
 public partial class MainViewModel : ObservableObject
 {
-    private static readonly string[] TrackedEntityPropertyNames = [nameof(EntityViewModel.TableName), nameof(EntityViewModel.Memo), nameof(EntityViewModel.Description)];
+    private static readonly string[] TrackedEntityPropertyNames =
+    [
+        nameof(EntityViewModel.TableName),
+        nameof(EntityViewModel.Memo),
+        nameof(EntityViewModel.Description),
+        nameof(EntityViewModel.TitleBackgroundColor),
+    ];
     private static readonly string[] TrackedRelationshipPropertyNames =
     [
         nameof(RelationshipViewModel.Type),
@@ -83,6 +89,9 @@ public partial class MainViewModel : ObservableObject
 
     /// <summary>型 ComboBox に表示する SQL Server のデータ型一覧。</summary>
     public IReadOnlyList<string> SqlDataTypes => SqlServerDataTypes.All;
+
+    /// <summary>エンティティ見出しの背景色プリセット一覧です。</summary>
+    public IReadOnlyList<EntityTitleColorOption> EntityTitleColorOptions => EntityTitleColorPalette.Options;
 
     public MainViewModel()
     {
