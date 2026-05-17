@@ -41,7 +41,7 @@
     <Style x:Key="ToolBarLabelButton" TargetType="Button">
       <Setter Property="Background" Value="Transparent" />
       <Setter Property="BorderThickness" Value="0" />
-      <Setter Property="Width" Value="72" />
+      <Setter Property="Width" Value="54" />
       <Setter Property="Padding" Value="4,6" />
       <Setter Property="Margin" Value="2,0" />
       <Setter Property="Cursor" Value="Hand" />
@@ -418,50 +418,19 @@
         <Rectangle Style="{StaticResource ToolBarSeparator}" />
         <Button
           Style="{StaticResource ToolBarLabelButton}"
-          Command="{Binding ExportPngCommand}"
+          Command="{Binding ExportDiagramCommand}"
           CommandParameter="{Binding ElementName=DiagramCanvas}"
-          ToolTip="PNG 画像にエクスポート"
+          ToolTip="PNG / SVG / DDL / Mermaid / DBML / 定義書を選択して出力"
         >
           <StackPanel>
-            <TextBlock Style="{StaticResource ToolBarIcon}" Text="🖼" />
-            <TextBlock Style="{StaticResource ToolBarCaption}" Text="PNG出力" />
+            <TextBlock Style="{StaticResource ToolBarIcon}" Text="📤" />
+            <TextBlock Style="{StaticResource ToolBarCaption}" Text="出力" />
           </StackPanel>
         </Button>
-        <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding ExportSvgCommand}" ToolTip="SVG にエクスポート">
+        <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding ImportDiagramCommand}" ToolTip="Mermaid / DBML / 定義書を選択して取り込み">
           <StackPanel>
-            <TextBlock Style="{StaticResource ToolBarIcon}" Text="✒" />
-            <TextBlock Style="{StaticResource ToolBarCaption}" Text="SVG出力" />
-          </StackPanel>
-        </Button>
-        <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding ExportDdlCommand}" ToolTip="SQL DDL にエクスポート">
-          <StackPanel>
-            <TextBlock Style="{StaticResource ToolBarIcon}" Text="🗎" />
-            <TextBlock Style="{StaticResource ToolBarCaption}" Text="DDL出力" />
-          </StackPanel>
-        </Button>
-        <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding ExportMermaidCommand}" ToolTip="Mermaid にエクスポート">
-          <StackPanel>
-            <TextBlock Style="{StaticResource ToolBarIcon}" Text="🧜" />
-            <TextBlock Style="{StaticResource ToolBarCaption}" Text="Mermaid出力" />
-          </StackPanel>
-        </Button>
-        <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding ImportMermaidCommand}" ToolTip="Mermaid の erDiagram を取り込み">
-          <StackPanel>
-            <TextBlock Style="{StaticResource ToolBarIcon}" Text="🧩" />
-            <TextBlock Style="{StaticResource ToolBarCaption}" Text="Mermaid取込" />
-          </StackPanel>
-        </Button>
-        <Rectangle Style="{StaticResource ToolBarSeparator}" />
-        <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding ExportTableDefinitionDocumentCommand}" ToolTip="テーブル定義書を Excel に出力">
-          <StackPanel>
-            <TextBlock Style="{StaticResource ToolBarIcon}" Text="📘" />
-            <TextBlock Style="{StaticResource ToolBarCaption}" Text="定義書出力" />
-          </StackPanel>
-        </Button>
-        <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding ImportTableDefinitionDocumentCommand}" ToolTip="このアプリが出力したテーブル定義書を取り込み">
-          <StackPanel>
-            <TextBlock Style="{StaticResource ToolBarIcon}" Text="📗" />
-            <TextBlock Style="{StaticResource ToolBarCaption}" Text="定義書取込" />
+            <TextBlock Style="{StaticResource ToolBarIcon}" Text="📥" />
+            <TextBlock Style="{StaticResource ToolBarCaption}" Text="取込" />
           </StackPanel>
         </Button>
         <Rectangle Style="{StaticResource ToolBarSeparator}" />

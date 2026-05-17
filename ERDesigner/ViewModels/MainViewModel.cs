@@ -13,6 +13,23 @@ using Microsoft.Win32;
 
 namespace ERDesigner.ViewModels;
 
+internal enum DiagramExportFormat
+{
+    Png,
+    Svg,
+    Sql,
+    Mermaid,
+    Dbml,
+    Excel,
+}
+
+internal enum DiagramImportFormat
+{
+    Mermaid,
+    Dbml,
+    Excel,
+}
+
 public partial class MainViewModel : ObservableObject
 {
     private static readonly string[] TrackedEntityPropertyNames =
@@ -1093,158 +1110,205 @@ public partial class MainViewModel : ObservableObject
 
     // ---------------- Export ----------------
 
-    /// <summary>キャンバス Visual を PNG に書き出します。</summary>
-    /// <param name="visual">XAML から渡されるキャンバスの Visual。</param>
+    /// <summary>
+    /// 保存ダイアログで選択した形式に応じて ER 図を書き出します。
+    /// </summary>
+    /// <param name="visual">PNG 出力時に使用するキャンバスの Visual。</param>
     [RelayCommand]
-    private void ExportPng(object? visual)
+    private void ExportDiagram(object? visual)
     {
-        if (visual is not Visual v)
+        var dlg = new SaveFileDialog
         {
-            return;
-        }
-
-        var dlg = new SaveFileDialog { Filter = "PNG Image (*.png)|*.png", DefaultExt = ".png" };
-
-        if (dlg.ShowDialog() == true)
-        {
-            ImageExportService.ExportPng(v, dlg.FileName);
-        }
-    }
-
-    /// <summary>現在のダイアグラムを SVG に書き出します。</summary>
-    [RelayCommand]
-    private void ExportSvg()
-    {
-        var dlg = new SaveFileDialog { Filter = "SVG Image (*.svg)|*.svg", DefaultExt = ".svg" };
-
-        if (dlg.ShowDialog() == true)
-        {
-            ImageExportService.ExportSvg(this, dlg.FileName);
-        }
-    }
-
-    /// <summary>現在のダイアグラムから SQL DDL を書き出します。</summary>
-    [RelayCommand]
-    private void ExportDdl()
-    {
-        var dlg = new SaveFileDialog { Filter = "SQL Script (*.sql)|*.sql", DefaultExt = ".sql" };
-
-        if (dlg.ShowDialog() == true)
-        {
-            DdlExporter.SaveTo(this, dlg.FileName);
-        }
-    }
-
-    /// <summary>現在のダイアグラムを Mermaid に書き出します。</summary>
-    [RelayCommand]
-    private void ExportMermaid()
-    {
-        var dlg = new SaveFileDialog { Filter = "Mermaid Diagram (*.mmd)|*.mmd|Mermaid Diagram (*.mermaid)|*.mermaid", DefaultExt = ".mmd" };
-
-        if (dlg.ShowDialog() == true)
-        {
-            MermaidExporter.SaveTo(this, dlg.FileName);
-        }
-    }
-
-    /// <summary>現在のダイアグラムから Excel 形式のテーブル定義書を書き出します。</summary>
-    [RelayCommand]
-    private void ExportTableDefinitionDocument()
-    {
-        var dlg = new SaveFileDialog { Filter = "Excel Workbook (*.xlsx)|*.xlsx", DefaultExt = ".xlsx" };
-
-        if (dlg.ShowDialog() == true)
-        {
-            try
-            {
-                TableDefinitionDocumentExporter.SaveTo(this, dlg.FileName);
-                MessageBox.Show("テーブル定義書の出力が完了しました。", "完了", MessageBoxButton.OK, MessageBoxImage.Information);
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"テーブル定義書を出力できませんでした。{Environment.NewLine}{ex.Message}", "エラー", MessageBoxButton.OK, MessageBoxImage.Error);
-            }
-        }
-    }
-
-    /// <summary>Mermaid の erDiagram ファイルを読み込みます。</summary>
-    [RelayCommand]
-    private void ImportMermaid()
-    {
-        var dlg = new OpenFileDialog { Filter = "Mermaid Diagram (*.mmd;*.mermaid)|*.mmd;*.mermaid|Text File (*.txt)|*.txt" };
+            Filter =
+                "PNG Image (*.png)|*.png|SVG Image (*.svg)|*.svg|SQL Script (*.sql)|*.sql|Mermaid Diagram (*.mmd)|*.mmd|Mermaid Diagram (*.mermaid)|*.mermaid|DBML Diagram (*.dbml)|*.dbml|Excel Workbook (*.xlsx)|*.xlsx",
+            DefaultExt = ".png",
+        };
 
         if (dlg.ShowDialog() != true)
         {
             return;
         }
 
+        var format = GetExportFormat(dlg.FileName, dlg.FilterIndex);
+
         try
         {
-            var diagram = MermaidImporter.Load(dlg.FileName);
-
-            if (Entities.Count > 0)
-            {
-                var currentSig = SqlServerSchemaImporter.ComputeSignature(Entities.Select(e => e.ToModel()), Relationships.Select(r => r.ToModel()));
-                var newSig = SqlServerSchemaImporter.ComputeSignature(diagram.Entities, diagram.Relationships);
-
-                if (currentSig != newSig)
-                {
-                    var ans = MessageBox.Show("現在のダイアグラムを Mermaid の内容で置換します。よろしいですか？", "確認", MessageBoxButton.OKCancel, MessageBoxImage.Question);
-
-                    if (ans != MessageBoxResult.OK)
-                    {
-                        return;
-                    }
-                }
-            }
-
-            ReplaceDiagramWithoutHistory(diagram.Entities, diagram.Relationships, autoLayout: true);
-            MessageBox.Show("Mermaid の取り込みが完了しました。", "完了", MessageBoxButton.OK, MessageBoxImage.Information);
+            SaveDiagram(format, dlg.FileName, visual);
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"Mermaid を取り込めませんでした。{Environment.NewLine}{ex.Message}", "エラー", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show($"出力できませんでした。{Environment.NewLine}{ex.Message}", "エラー", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
-    /// <summary>このアプリが出力した Excel 形式のテーブル定義書を読み込みます。</summary>
+    /// <summary>
+    /// ファイル選択ダイアログで選択した形式に応じて ER 図を取り込みます。
+    /// </summary>
     [RelayCommand]
-    private void ImportTableDefinitionDocument()
+    private void ImportDiagram()
     {
-        var dlg = new OpenFileDialog { Filter = "Excel Workbook (*.xlsx)|*.xlsx" };
+        var dlg = new OpenFileDialog { Filter = "Mermaid Diagram (*.mmd;*.mermaid)|*.mmd;*.mermaid|DBML Diagram (*.dbml)|*.dbml|Excel Workbook (*.xlsx)|*.xlsx" };
 
         if (dlg.ShowDialog() != true)
         {
             return;
         }
 
+        var format = GetImportFormat(dlg.FileName, dlg.FilterIndex);
+
         try
         {
-            var diagram = TableDefinitionDocumentImporter.Load(dlg.FileName);
-
-            if (Entities.Count > 0)
-            {
-                var currentSig = SqlServerSchemaImporter.ComputeSignature(Entities.Select(e => e.ToModel()), Relationships.Select(r => r.ToModel()));
-                var newSig = SqlServerSchemaImporter.ComputeSignature(diagram.Entities, diagram.Relationships);
-
-                if (currentSig != newSig)
-                {
-                    var ans = MessageBox.Show("現在のダイアグラムを定義書の内容で置換します。よろしいですか？", "確認", MessageBoxButton.OKCancel, MessageBoxImage.Question);
-
-                    if (ans != MessageBoxResult.OK)
-                    {
-                        return;
-                    }
-                }
-            }
-
-            ReplaceDiagramWithoutHistory(diagram.Entities, diagram.Relationships, autoLayout: true);
-            MessageBox.Show("定義書の取り込みが完了しました。", "完了", MessageBoxButton.OK, MessageBoxImage.Information);
+            ImportDiagramFile(format, dlg.FileName);
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"定義書を取り込めませんでした。{Environment.NewLine}{ex.Message}", "エラー", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show($"取り込めませんでした。{Environment.NewLine}{ex.Message}", "エラー", MessageBoxButton.OK, MessageBoxImage.Error);
         }
+    }
+
+    /// <summary>
+    /// 指定形式でダイアグラムを書き出します。
+    /// </summary>
+    private void SaveDiagram(DiagramExportFormat format, string path, object? visual)
+    {
+        var displayName = format switch
+        {
+            DiagramExportFormat.Png => "PNG 画像",
+            DiagramExportFormat.Svg => "SVG 画像",
+            DiagramExportFormat.Sql => "SQL DDL",
+            DiagramExportFormat.Mermaid => "Mermaid",
+            DiagramExportFormat.Dbml => "DBML",
+            DiagramExportFormat.Excel => "定義書",
+            _ => "ファイル",
+        };
+
+        switch (format)
+        {
+            case DiagramExportFormat.Png:
+                if (visual is not Visual pngVisual)
+                {
+                    throw new InvalidOperationException("PNG 出力に必要なキャンバス情報を取得できませんでした。");
+                }
+
+                ImageExportService.ExportPng(pngVisual, path);
+                break;
+
+            case DiagramExportFormat.Svg:
+                ImageExportService.ExportSvg(this, path);
+                break;
+
+            case DiagramExportFormat.Sql:
+                DdlExporter.SaveTo(this, path);
+                break;
+
+            case DiagramExportFormat.Mermaid:
+                MermaidExporter.SaveTo(this, path);
+                break;
+
+            case DiagramExportFormat.Dbml:
+                DbmlExporter.SaveTo(this, path);
+                break;
+
+            case DiagramExportFormat.Excel:
+                TableDefinitionDocumentExporter.SaveTo(this, path);
+                break;
+        }
+
+        MessageBox.Show($"{displayName}の出力が完了しました。", "完了", MessageBoxButton.OK, MessageBoxImage.Information);
+    }
+
+    /// <summary>
+    /// 指定形式のダイアグラムファイルを読み込みます。
+    /// </summary>
+    private void ImportDiagramFile(DiagramImportFormat format, string path)
+    {
+        var diagram = format switch
+        {
+            DiagramImportFormat.Mermaid => MermaidImporter.Load(path),
+            DiagramImportFormat.Dbml => DbmlImporter.Load(path),
+            DiagramImportFormat.Excel => TableDefinitionDocumentImporter.Load(path),
+            _ => throw new InvalidOperationException("未対応の取込形式です。"),
+        };
+
+        var displayName = format switch
+        {
+            DiagramImportFormat.Mermaid => "Mermaid",
+            DiagramImportFormat.Dbml => "DBML",
+            DiagramImportFormat.Excel => "定義書",
+            _ => "ファイル",
+        };
+
+        if (Entities.Count > 0)
+        {
+            var currentSig = SqlServerSchemaImporter.ComputeSignature(Entities.Select(e => e.ToModel()), Relationships.Select(r => r.ToModel()));
+            var newSig = SqlServerSchemaImporter.ComputeSignature(diagram.Entities, diagram.Relationships);
+
+            if (currentSig != newSig)
+            {
+                var ans = MessageBox.Show($"現在のダイアグラムを{displayName}の内容で置換します。よろしいですか？", "確認", MessageBoxButton.OKCancel, MessageBoxImage.Question);
+
+                if (ans != MessageBoxResult.OK)
+                {
+                    return;
+                }
+            }
+        }
+
+        ReplaceDiagramWithoutHistory(diagram.Entities, diagram.Relationships, autoLayout: true);
+        MessageBox.Show($"{displayName}の取り込みが完了しました。", "完了", MessageBoxButton.OK, MessageBoxImage.Information);
+    }
+
+    /// <summary>
+    /// 保存ファイル名またはフィルター選択から出力形式を判定します。
+    /// </summary>
+    private static DiagramExportFormat GetExportFormat(string path, int filterIndex)
+    {
+        var extension = Path.GetExtension(path).ToLowerInvariant();
+
+        return extension switch
+        {
+            ".png" => DiagramExportFormat.Png,
+            ".svg" => DiagramExportFormat.Svg,
+            ".sql" => DiagramExportFormat.Sql,
+            ".mmd" => DiagramExportFormat.Mermaid,
+            ".mermaid" => DiagramExportFormat.Mermaid,
+            ".dbml" => DiagramExportFormat.Dbml,
+            ".xlsx" => DiagramExportFormat.Excel,
+            _ => filterIndex switch
+            {
+                1 => DiagramExportFormat.Png,
+                2 => DiagramExportFormat.Svg,
+                3 => DiagramExportFormat.Sql,
+                4 => DiagramExportFormat.Mermaid,
+                5 => DiagramExportFormat.Mermaid,
+                6 => DiagramExportFormat.Dbml,
+                7 => DiagramExportFormat.Excel,
+                _ => throw new InvalidOperationException("出力形式を判定できませんでした。"),
+            },
+        };
+    }
+
+    /// <summary>
+    /// 読み込みファイル名またはフィルター選択から取込形式を判定します。
+    /// </summary>
+    private static DiagramImportFormat GetImportFormat(string path, int filterIndex)
+    {
+        var extension = Path.GetExtension(path).ToLowerInvariant();
+
+        return extension switch
+        {
+            ".mmd" => DiagramImportFormat.Mermaid,
+            ".mermaid" => DiagramImportFormat.Mermaid,
+            ".dbml" => DiagramImportFormat.Dbml,
+            ".xlsx" => DiagramImportFormat.Excel,
+            _ => filterIndex switch
+            {
+                1 => DiagramImportFormat.Mermaid,
+                2 => DiagramImportFormat.Dbml,
+                3 => DiagramImportFormat.Excel,
+                _ => throw new InvalidOperationException("取込形式を判定できませんでした。"),
+            },
+        };
     }
 
     // ---------------- SQL Server 取込 ----------------
