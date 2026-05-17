@@ -1062,6 +1062,10 @@
                     beh:DataGridRowReorderBehavior.IsEnabled="True"
                     beh:DataGridRowReorderBehavior.UndoRedoManager="{Binding UndoRedo}"
                   >
+                    <DataGrid.InputBindings>
+                      <KeyBinding Key="C" Modifiers="Control" Command="{Binding CopySelectedColumnCommand}" />
+                      <KeyBinding Key="V" Modifiers="Control" Command="{Binding PasteCopiedColumnCommand}" />
+                    </DataGrid.InputBindings>
                     <DataGrid.Columns>
                       <DataGridTemplateColumn Header="PK" Width="36">
                         <DataGridTemplateColumn.CellTemplate>

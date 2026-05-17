@@ -419,6 +419,61 @@ public class MainViewModelTests
         vm.SelectedEntity.Columns.Should().HaveCount(initialCount + 1);
     }
 
+    [Fact(DisplayName = "選択カラムはコピーして直下へ貼り付けできる")]
+    public void CopyPasteSelectedColumn_InsertsCloneBelowSelection()
+    {
+        var vm = new MainViewModel();
+        vm.AddEntityCommand.Execute(null);
+        vm.SelectedEntity = vm.Entities[0];
+        vm.SelectedEntity.Columns[0].Name = "Id";
+        vm.SelectedEntity.Columns.Add(
+            new ColumnViewModel(
+                new Column
+                {
+                    Name = "Code",
+                    DataType = "nvarchar(50)",
+                    IsNullable = true,
+                    Description = "コード",
+                }
+            )
+        );
+        vm.SelectedEntity.Columns.Add(new ColumnViewModel(new Column { Name = "UpdatedAt", DataType = "datetime2" }));
+        vm.SelectedColumn = vm.SelectedEntity.Columns[1];
+        var original = vm.SelectedColumn;
+
+        vm.CopySelectedColumnCommand.Execute(null);
+        vm.PasteCopiedColumnCommand.Execute(null);
+
+        vm.SelectedEntity.Columns.Select(column => column.Name).Should().Equal("Id", "Code", "Code", "UpdatedAt");
+        vm.SelectedColumn.Should().Be(vm.SelectedEntity.Columns[2]);
+        vm.SelectedColumn.Should().NotBeSameAs(original);
+        vm.SelectedColumn!.Id.Should().NotBe(original.Id);
+        vm.SelectedColumn.DataType.Should().Be("nvarchar(50)");
+        vm.SelectedColumn.IsNullable.Should().BeTrue();
+        vm.SelectedColumn.Description.Should().Be("コード");
+    }
+
+    [Fact(DisplayName = "カラム貼り付けは Undo/Redo できる")]
+    public void PasteCopiedColumn_CanUndoRedo()
+    {
+        var vm = new MainViewModel();
+        vm.AddEntityCommand.Execute(null);
+        vm.SelectedEntity = vm.Entities[0];
+        vm.SelectedEntity.Columns.Add(new ColumnViewModel(new Column { Name = "Code", DataType = "int" }));
+        vm.SelectedColumn = vm.SelectedEntity.Columns[1];
+
+        vm.CopySelectedColumnCommand.Execute(null);
+        vm.PasteCopiedColumnCommand.Execute(null);
+
+        vm.SelectedEntity.Columns.Select(column => column.Name).Should().Equal("ID", "Code", "Code");
+
+        vm.UndoCommand.Execute(null);
+        vm.SelectedEntity.Columns.Select(column => column.Name).Should().Equal("ID", "Code");
+
+        vm.RedoCommand.Execute(null);
+        vm.SelectedEntity.Columns.Select(column => column.Name).Should().Equal("ID", "Code", "Code");
+    }
+
     [Fact(DisplayName = "カラム削除は Undo/Redo できる")]
     public void RemoveColumn_CanUndoRedo()
     {

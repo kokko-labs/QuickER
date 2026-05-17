@@ -74,6 +74,9 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty]
     private ColumnViewModel? _selectedColumn;
 
+    /// <summary>DataGrid のコピー元として保持するカラム内容です。</summary>
+    private Column? _copiedColumn;
+
     /// <summary>ER 図上のカラム行に「説明」を表示するか (ツールバーから ON/OFF 切替)。</summary>
     [ObservableProperty]
     private bool _showColumnDescriptionsInDiagram;
@@ -802,6 +805,44 @@ public partial class MainViewModel : ObservableObject
 
     private bool CanAddColumn() => SelectedEntity is not null;
 
+    /// <summary>選択中カラムの内容をコピーして内部バッファへ保持します。</summary>
+    [RelayCommand(CanExecute = nameof(CanCopySelectedColumn))]
+    private void CopySelectedColumn()
+    {
+        if (SelectedColumn is null)
+        {
+            return;
+        }
+
+        _copiedColumn = CloneColumnModel(SelectedColumn, preserveId: false);
+        PasteCopiedColumnCommand.NotifyCanExecuteChanged();
+    }
+
+    private bool CanCopySelectedColumn() => SelectedColumn is not null;
+
+    /// <summary>コピー済みカラムを選択中カラムの直下へ複製追加します。</summary>
+    [RelayCommand(CanExecute = nameof(CanPasteCopiedColumn))]
+    private void PasteCopiedColumn()
+    {
+        if (SelectedEntity is null || SelectedColumn is null || _copiedColumn is null)
+        {
+            return;
+        }
+
+        var insertIndex = SelectedEntity.Columns.IndexOf(SelectedColumn);
+
+        if (insertIndex < 0)
+        {
+            return;
+        }
+
+        var pastedColumn = new ColumnViewModel(CloneColumnModel(_copiedColumn, preserveId: false));
+        UndoRedo.Execute(new AddColumnCommand(SelectedEntity.Columns, pastedColumn, insertIndex + 1));
+        SelectedColumn = pastedColumn;
+    }
+
+    private bool CanPasteCopiedColumn() => SelectedEntity is not null && SelectedColumn is not null && _copiedColumn is not null;
+
     /// <summary>指定カラムを選択中エンティティから削除します。</summary>
     [RelayCommand]
     private void RemoveColumn(ColumnViewModel? column)
@@ -837,7 +878,12 @@ public partial class MainViewModel : ObservableObject
 
     private bool CanRemoveSelectedColumn() => SelectedEntity is not null && SelectedColumn is not null;
 
-    partial void OnSelectedColumnChanged(ColumnViewModel? value) => RemoveSelectedColumnCommand.NotifyCanExecuteChanged();
+    partial void OnSelectedColumnChanged(ColumnViewModel? value)
+    {
+        RemoveSelectedColumnCommand.NotifyCanExecuteChanged();
+        CopySelectedColumnCommand.NotifyCanExecuteChanged();
+        PasteCopiedColumnCommand.NotifyCanExecuteChanged();
+    }
 
     /// <summary>指定カラムを SourceColumnId または TargetColumnId として参照しているリレーション一覧を返します。</summary>
     private IReadOnlyList<RelationshipViewModel> FindRelationshipsUsingColumn(ColumnViewModel column) =>
@@ -947,6 +993,7 @@ public partial class MainViewModel : ObservableObject
     {
         RemoveSelectedEntityCommand.NotifyCanExecuteChanged();
         AddColumnCommand.NotifyCanExecuteChanged();
+        PasteCopiedColumnCommand.NotifyCanExecuteChanged();
         DuplicateSelectedEntityCommand.NotifyCanExecuteChanged();
     }
 
@@ -1409,6 +1456,34 @@ public partial class MainViewModel : ObservableObject
         }
 
         return target.Columns.FirstOrDefault(c => !c.IsPrimaryKey) ?? target.Columns.FirstOrDefault();
+    }
+
+    /// <summary>カラム内容を複製し、必要に応じて新しい ID を割り当てます。</summary>
+    private static Column CloneColumnModel(ColumnViewModel column, bool preserveId)
+    {
+        var clone = column.ToModel();
+
+        if (!preserveId)
+        {
+            clone.Id = Guid.NewGuid();
+        }
+
+        return clone;
+    }
+
+    /// <summary>カラム内容を複製し、必要に応じて新しい ID を割り当てます。</summary>
+    private static Column CloneColumnModel(Column column, bool preserveId)
+    {
+        return new Column
+        {
+            Id = preserveId ? column.Id : Guid.NewGuid(),
+            Name = column.Name,
+            DataType = column.DataType,
+            IsPrimaryKey = column.IsPrimaryKey,
+            IsForeignKey = column.IsForeignKey,
+            IsNullable = column.IsNullable,
+            Description = column.Description,
+        };
     }
 
     private sealed class UiState
