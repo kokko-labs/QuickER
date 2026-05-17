@@ -81,6 +81,9 @@ public partial class RelationshipViewModel : ObservableObject
     /// <summary>列選択が有効なリレーション種別かどうかです。</summary>
     public bool CanSelectForeignKeyColumns => Type != RelationshipType.ManyToMany;
 
+    /// <summary>参照アクションの設定が有効なリレーション種別かどうかです。</summary>
+    public bool CanConfigureReferentialActions => Type != RelationshipType.ManyToMany;
+
     /// <summary>モデルと両端のエンティティから ViewModel を生成します。</summary>
     public RelationshipViewModel(Relationship model, EntityViewModel source, EntityViewModel target)
     {
@@ -111,6 +114,7 @@ public partial class RelationshipViewModel : ObservableObject
         }
 
         EnsureColumnSelectionConsistency();
+        EnsureReferentialActionConsistency();
     }
 
     private void OnColumnsCollectionChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
@@ -133,6 +137,16 @@ public partial class RelationshipViewModel : ObservableObject
 
         NotifyColumnCandidatesChanged();
         EnsureColumnSelectionConsistency();
+    }
+
+    /// <summary>多対多では参照アクションを既定値へ戻して設定不可状態を保ちます。</summary>
+    private void EnsureReferentialActionConsistency()
+    {
+        if (!CanConfigureReferentialActions)
+        {
+            OnDelete = ForeignKeyReferentialAction.NoAction;
+            OnUpdate = ForeignKeyReferentialAction.NoAction;
+        }
     }
 
     private void OnColumnPropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -242,8 +256,10 @@ public partial class RelationshipViewModel : ObservableObject
         OnPropertyChanged(nameof(SourceMarker));
         OnPropertyChanged(nameof(TargetMarker));
         OnPropertyChanged(nameof(CanSelectForeignKeyColumns));
+        OnPropertyChanged(nameof(CanConfigureReferentialActions));
 
         EnsureColumnSelectionConsistency();
+        EnsureReferentialActionConsistency();
         IsUpdatingType = false;
 
         // 全連動変更完了後に通知する

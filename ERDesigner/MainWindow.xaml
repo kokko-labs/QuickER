@@ -1298,6 +1298,7 @@
                       Style="{StaticResource PropertyInputComboBox}"
                       ItemsSource="{Binding ReferentialActions}"
                       SelectedItem="{Binding OnDelete, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                      IsEnabled="{Binding CanConfigureReferentialActions}"
                     />
                   </Grid>
 
@@ -1312,6 +1313,7 @@
                       Style="{StaticResource PropertyInputComboBox}"
                       ItemsSource="{Binding ReferentialActions}"
                       SelectedItem="{Binding OnUpdate, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                      IsEnabled="{Binding CanConfigureReferentialActions}"
                     />
                   </Grid>
 

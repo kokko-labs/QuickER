@@ -280,6 +280,29 @@ public class RelationshipViewModelTests
         rel.TargetColumnId.Should().BeNull();
     }
 
+    [Fact(DisplayName = "多対多では ON DELETE と ON UPDATE が無効化され既定値へ戻る")]
+    public void ManyToMany_DisablesReferentialActions()
+    {
+        var a = NewEntity(0, 0);
+        var b = NewEntity(300, 0);
+        var rel = new RelationshipViewModel(
+            new Relationship
+            {
+                Type = RelationshipType.OneToMany,
+                OnDelete = ForeignKeyReferentialAction.Cascade,
+                OnUpdate = ForeignKeyReferentialAction.SetNull,
+            },
+            a,
+            b
+        );
+
+        rel.Type = RelationshipType.ManyToMany;
+
+        rel.CanConfigureReferentialActions.Should().BeFalse();
+        rel.OnDelete.Should().Be(ForeignKeyReferentialAction.NoAction);
+        rel.OnUpdate.Should().Be(ForeignKeyReferentialAction.NoAction);
+    }
+
     [Fact(DisplayName = "自己参照リレーションでは自己参照ループ描画情報が有効になる")]
     public void SelfRelationship_UsesSelfLoopGeometry()
     {
