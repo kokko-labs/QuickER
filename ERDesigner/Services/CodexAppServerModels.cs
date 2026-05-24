@@ -287,12 +287,16 @@ public enum CodexChatMessageRole
     User,
     Assistant,
     System,
+
+    /// <summary>AI のツール呼び出し作業内容（折り畳み表示用）です。</summary>
+    ToolCall,
 }
 
 /// <summary>Codex 会話のチャット表示用メッセージエントリです。</summary>
 public sealed class CodexChatMessage : INotifyPropertyChanged
 {
     private string _content = string.Empty;
+    private bool _isExpanded;
 
     /// <inheritdoc />
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -309,6 +313,20 @@ public sealed class CodexChatMessage : INotifyPropertyChanged
             if (_content != value)
             {
                 _content = value;
+                OnPropertyChanged();
+            }
+        }
+    }
+
+    /// <summary>ToolCall メッセージの展開状態です（作業中は true、完了後は false）。</summary>
+    public bool IsExpanded
+    {
+        get => _isExpanded;
+        set
+        {
+            if (_isExpanded != value)
+            {
+                _isExpanded = value;
                 OnPropertyChanged();
             }
         }

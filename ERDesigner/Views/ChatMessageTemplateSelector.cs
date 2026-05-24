@@ -16,6 +16,9 @@ public class ChatMessageTemplateSelector : DataTemplateSelector
     /// <summary>システムメッセージ用テンプレートです。</summary>
     public DataTemplate? SystemTemplate { get; set; }
 
+    /// <summary>ツール呼び出し（折り畳み）メッセージ用テンプレートです。</summary>
+    public DataTemplate? ToolCallTemplate { get; set; }
+
     /// <inheritdoc />
     public override DataTemplate? SelectTemplate(object item, DependencyObject container)
     {
@@ -26,6 +29,7 @@ public class ChatMessageTemplateSelector : DataTemplateSelector
                 CodexChatMessageRole.User => UserTemplate,
                 CodexChatMessageRole.Assistant => AssistantTemplate,
                 CodexChatMessageRole.System => SystemTemplate,
+                CodexChatMessageRole.ToolCall => ToolCallTemplate,
                 _ => base.SelectTemplate(item, container),
             };
         }

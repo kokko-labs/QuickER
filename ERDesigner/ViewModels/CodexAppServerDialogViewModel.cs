@@ -39,6 +39,7 @@ public partial class CodexAppServerDialogViewModel : ObservableObject
     private bool _isTurnInProgress;
     private string _userInput = string.Empty;
     private CodexChatMessage? _currentAssistantMessage;
+    private CodexChatMessage? _currentToolCallMessage;
     private CodexConfigToml _configToml = new();
 
     /// <summary>チャットメッセージ一覧です。</summary>
@@ -168,6 +169,8 @@ public partial class CodexAppServerDialogViewModel : ObservableObject
             {
                 OnPropertyChanged(nameof(ShowApiKeyInput));
                 OnPropertyChanged(nameof(CanLogout));
+                OnPropertyChanged(nameof(IsLoggedIn));
+                OnPropertyChanged(nameof(ShowLoginPanel));
             }
         }
     }
@@ -248,6 +251,12 @@ public partial class CodexAppServerDialogViewModel : ObservableObject
 
     /// <summary>ログアウト可能かどうかです。</summary>
     public bool CanLogout => AuthMode != CodexAuthMode.None;
+
+    /// <summary>ログイン済みかどうかです（ログインパネルの表示制御に使用）。</summary>
+    public bool IsLoggedIn => AuthMode != CodexAuthMode.None;
+
+    /// <summary>ログインパネルを表示するかどうかです（未ログイン時のみ表示）。</summary>
+    public bool ShowLoginPanel => !IsLoggedIn;
 
     /// <summary>ChatGPT プランを表示するかどうかです。</summary>
     public bool HasPendingBrowserLink => !string.IsNullOrWhiteSpace(DeviceCodeVerificationUrl);
@@ -330,8 +339,18 @@ public partial class CodexAppServerDialogViewModel : ObservableObject
             var account = await _client.ReadAccountAsync(refreshToken: false);
             IsStarted = true;
             RequiresOpenAiAuth = account.RequiresOpenAiAuth;
-            AuthMode = account.AuthMode;
-            AccountSummary = BuildAccountSummary(account);
+
+            // account/read が account:null を返す場合（サーバーがアカウント情報を持たない）は
+            // account/updated 通知で設定済みの AuthMode を維持し、上書きしない
+            if (account.AuthMode != CodexAuthMode.None)
+            {
+                AuthMode = account.AuthMode;
+                AccountSummary = BuildAccountSummary(account);
+            }
+            else if (AuthMode == CodexAuthMode.None)
+            {
+                AccountSummary = BuildAccountSummary(account);
+            }
         }
         catch (Exception ex)
         {
@@ -361,10 +380,8 @@ public partial class CodexAppServerDialogViewModel : ObservableObject
         {
             await _client.LoginWithApiKeyAsync(ApiKey);
             PersistApiKey();
+            // 状態の反映は account/updated 通知 (OnAccountUpdated) で行うため、ここでは要求送信メッセージのみ設定する
             StatusMessage = "API キーのログイン要求を送信しました。";
-
-            // ログイン完了後に最新のアカウント状態を反映する
-            await RefreshAccountStateAsync();
         }
         catch (Exception ex)
         {
@@ -742,8 +759,8 @@ public partial class CodexAppServerDialogViewModel : ObservableObject
 
     private void ApplyLoginCompleted(CodexLoginCompletedNotification e)
     {
+        // account/updated 通知が AuthMode を更新するため、ここでは状態再取得は行わない
         StatusMessage = e.Success ? "ログインが完了しました。" : $"ログインに失敗しました: {e.Error}";
-        _ = RefreshAccountStateAsync();
     }
 
     private void OnAccountUpdated(object? sender, CodexAccountUpdatedNotification e)
@@ -819,6 +836,17 @@ public partial class CodexAppServerDialogViewModel : ObservableObject
         IsTurnInProgress = false;
         _currentAssistantMessage = null;
 
+        // ターン完了後は全 ToolCall メッセージを折り畳む
+        foreach (var msg in Messages)
+        {
+            if (msg.Role == CodexChatMessageRole.ToolCall)
+            {
+                msg.IsExpanded = false;
+            }
+        }
+
+        _currentToolCallMessage = null;
+
         if (e.Turn.Status == "interrupted")
         {
             StatusMessage = "ターンが中断されました。";
@@ -846,7 +874,27 @@ public partial class CodexAppServerDialogViewModel : ObservableObject
             if (_mainViewModel is not null)
             {
                 (resultText, success) = ErDiagramDynamicTools.Execute(e.Tool, e.Arguments, _mainViewModel);
-                AddSystemMessage($"[ツール: {e.Tool}] {resultText}");
+
+                // ツール呼び出し内容を ToolCall メッセージとして追加または追記する（作業中は展開状態）
+                var toolCallText = $"[{e.Tool}] {resultText}";
+
+                if (_currentToolCallMessage is null)
+                {
+                    _currentToolCallMessage = new CodexChatMessage
+                    {
+                        Role = CodexChatMessageRole.ToolCall,
+                        Content = toolCallText,
+                        IsExpanded = true,
+                    };
+                    Messages.Add(_currentToolCallMessage);
+                }
+                else
+                {
+                    _currentToolCallMessage.Content += "\n" + toolCallText;
+                }
+
+                // ツール呼び出し後の次のアシスタントメッセージは新しい吹き出しで表示する
+                _currentAssistantMessage = null;
                 _mainViewModel.RefreshCanvasSize();
             }
             else
@@ -907,9 +955,11 @@ public partial class CodexAppServerDialogViewModel : ObservableObject
         // params.error.message を取得してシステムメッセージとステータスに表示する
         var message = "不明なエラーが発生しました。";
 
-        if (e.Params is System.Text.Json.JsonElement paramsElement &&
-            paramsElement.TryGetProperty("error", out var errorElement) &&
-            errorElement.TryGetProperty("message", out var msgElement))
+        if (
+            e.Params is System.Text.Json.JsonElement paramsElement
+            && paramsElement.TryGetProperty("error", out var errorElement)
+            && errorElement.TryGetProperty("message", out var msgElement)
+        )
         {
             message = msgElement.GetString() ?? message;
         }

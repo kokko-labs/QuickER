@@ -888,7 +888,8 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
 
     private static CodexAuthMode ParseAuthMode(string? rawMode)
     {
-        return rawMode switch
+        // 大文字小文字を無視して比較する（サーバーが "apiKey" / "apikey" 等を返す場合に対応）
+        return rawMode?.ToLowerInvariant() switch
         {
             "apikey" => CodexAuthMode.ApiKey,
             "chatgpt" => CodexAuthMode.ChatGpt,

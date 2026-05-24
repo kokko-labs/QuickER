@@ -400,13 +400,17 @@ public static class ErDiagramDynamicTools
             _ => RelationshipType.OneToMany,
         };
 
+        var sourcePk = source.Columns.FirstOrDefault(c => c.IsPrimaryKey);
+        var targetColumn = ResolveTargetForeignKeyColumn(source, target);
+
         var rel = new RelationshipViewModel(
             new Relationship
             {
                 SourceEntityId = source.Id,
                 TargetEntityId = target.Id,
                 Type = relType,
-                SourceColumnId = source.Columns.FirstOrDefault(c => c.IsPrimaryKey)?.Id,
+                SourceColumnId = sourcePk?.Id,
+                TargetColumnId = targetColumn?.Id,
                 ConstraintName = $"FK_{target.TableName}_{source.TableName}",
             },
             source,
@@ -442,5 +446,34 @@ public static class ErDiagramDynamicTools
     private static string? GetString(JsonElement element, string propertyName)
     {
         return element.TryGetProperty(propertyName, out var val) && val.ValueKind == JsonValueKind.String ? val.GetString() : null;
+    }
+
+    /// <summary>source の PK 名に対応する target 側の FK 列候補を解決します。</summary>
+    private static ColumnViewModel? ResolveTargetForeignKeyColumn(EntityViewModel source, EntityViewModel target)
+    {
+        var sourcePk = source.Columns.FirstOrDefault(c => c.IsPrimaryKey);
+
+        if (sourcePk is not null)
+        {
+            // ソーステーブル名 + "Id" のパターン（例: CustomerId）で検索する
+            var fkNameBySuffix = source.TableName + "Id";
+            var byName = target.Columns.FirstOrDefault(c => string.Equals(c.Name, fkNameBySuffix, StringComparison.OrdinalIgnoreCase));
+
+            if (byName is not null)
+            {
+                return byName;
+            }
+
+            // PK と同名のカラムを検索する
+            var sameName = target.Columns.FirstOrDefault(c => string.Equals(c.Name, sourcePk.Name, StringComparison.OrdinalIgnoreCase));
+
+            if (sameName is not null)
+            {
+                return sameName;
+            }
+        }
+
+        // 非 PK 列の先頭を使う
+        return target.Columns.FirstOrDefault(c => !c.IsPrimaryKey);
     }
 }

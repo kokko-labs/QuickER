@@ -20,20 +20,65 @@
 
     <!-- チャットメッセージのロール別テンプレート -->
     <DataTemplate x:Key="UserMessageTemplate" DataType="{x:Type services:CodexChatMessage}">
-      <Border Margin="60,4,4,4" Padding="10,6" Background="#DCF8C6" CornerRadius="10" HorizontalAlignment="Right" MaxWidth="600">
-        <TextBlock Text="{Binding Content}" TextWrapping="Wrap" FontFamily="Segoe UI, Yu Gothic UI, Meiryo" FontSize="13" />
+      <Border Margin="60,4,4,4" Padding="10,6" Background="#DCF8C6" CornerRadius="10" HorizontalAlignment="Right">
+        <TextBox
+          Text="{Binding Content, Mode=OneWay}"
+          TextWrapping="Wrap"
+          IsReadOnly="True"
+          BorderThickness="0"
+          Background="Transparent"
+          FontFamily="Segoe UI, Yu Gothic UI, Meiryo"
+          FontSize="13"
+        />
       </Border>
     </DataTemplate>
 
     <DataTemplate x:Key="AssistantMessageTemplate" DataType="{x:Type services:CodexChatMessage}">
-      <Border Margin="4,4,60,4" Padding="10,6" Background="#F0F0F0" CornerRadius="10" HorizontalAlignment="Left" MaxWidth="600">
-        <TextBlock Text="{Binding Content}" TextWrapping="Wrap" FontFamily="Segoe UI, Yu Gothic UI, Meiryo" FontSize="13" />
+      <Border Margin="4,4,60,4" Padding="10,6" Background="#DBEAFE" CornerRadius="10" HorizontalAlignment="Left">
+        <TextBox
+          Text="{Binding Content, Mode=OneWay}"
+          TextWrapping="Wrap"
+          IsReadOnly="True"
+          BorderThickness="0"
+          Background="Transparent"
+          Foreground="#1E3A5F"
+          FontFamily="Segoe UI, Yu Gothic UI, Meiryo"
+          FontSize="13"
+        />
       </Border>
     </DataTemplate>
 
     <DataTemplate x:Key="SystemMessageTemplate" DataType="{x:Type services:CodexChatMessage}">
       <Border Margin="4,2" Padding="8,4" Background="#FFF9C4" CornerRadius="6" HorizontalAlignment="Stretch">
-        <TextBlock Text="{Binding Content}" TextWrapping="Wrap" Foreground="#795548" FontSize="12" FontStyle="Italic" />
+        <TextBox
+          Text="{Binding Content, Mode=OneWay}"
+          TextWrapping="Wrap"
+          IsReadOnly="True"
+          BorderThickness="0"
+          Background="Transparent"
+          Foreground="#795548"
+          FontSize="12"
+          FontStyle="Italic"
+        />
+      </Border>
+    </DataTemplate>
+
+    <!-- ツール呼び出し作業内容（折り畳み可能） -->
+    <DataTemplate x:Key="ToolCallMessageTemplate" DataType="{x:Type services:CodexChatMessage}">
+      <Border Margin="4,2" CornerRadius="6" BorderBrush="#B0BEC5" BorderThickness="1">
+        <Expander IsExpanded="{Binding IsExpanded}" Header="AI 作業内容" Background="#ECEFF1">
+          <TextBox
+            Margin="4,4,4,8"
+            Text="{Binding Content, Mode=OneWay}"
+            TextWrapping="Wrap"
+            IsReadOnly="True"
+            BorderThickness="0"
+            Background="Transparent"
+            Foreground="#37474F"
+            FontSize="12"
+            FontFamily="Consolas, Courier New"
+          />
+        </Expander>
       </Border>
     </DataTemplate>
 
@@ -44,6 +89,7 @@
       UserTemplate="{StaticResource UserMessageTemplate}"
       AssistantTemplate="{StaticResource AssistantMessageTemplate}"
       SystemTemplate="{StaticResource SystemMessageTemplate}"
+      ToolCallTemplate="{StaticResource ToolCallMessageTemplate}"
     />
   </Window.Resources>
 
@@ -110,79 +156,72 @@
           <Border Margin="0,10,0,0" Padding="10,8" Background="#EFF6FF" CornerRadius="4">
             <StackPanel>
               <TextBlock Margin="0,0,0,4" FontWeight="SemiBold" Text="OpenAI アカウント認証" />
-              <TextBlock
-                Margin="0,0,0,8"
-                Foreground="#555"
-                TextWrapping="Wrap"
-                Text="いずれかの方法で OpenAI にログインしてください。ログイン操作時に Codex App Server への接続も自動で行われます。"
-              />
 
-              <!-- 接続状態と状態更新・ログアウト -->
+              <!-- 接続状態とログアウト -->
               <Grid Margin="0,0,0,8">
                 <Grid.ColumnDefinitions>
                   <ColumnDefinition Width="*" />
                   <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <TextBlock VerticalAlignment="Center" Text="{Binding AccountSummary}" TextWrapping="Wrap" />
-                <StackPanel Grid.Column="1" Orientation="Horizontal">
-                  <Button Width="80" Margin="0,0,8,0" Content="状態更新" Command="{Binding RefreshAccountStateCommand}" />
-                  <Button Width="80" Content="ログアウト" Command="{Binding LogoutCommand}" IsEnabled="{Binding CanLogout}" />
-                </StackPanel>
+                <Button Grid.Column="1" Width="80" Content="ログアウト" Command="{Binding LogoutCommand}" IsEnabled="{Binding CanLogout}" />
               </Grid>
 
               <!-- API キーでログイン -->
-              <Grid Margin="0,0,0,8" Visibility="{Binding ShowApiKeyInput, Converter={StaticResource BoolToVisibilityConverter}}">
-                <Grid.ColumnDefinitions>
-                  <ColumnDefinition Width="*" />
-                  <ColumnDefinition Width="Auto" />
-                  <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
-                <PasswordBox x:Name="ApiKeyBox" ToolTip="OpenAI API キー（sk-...）を入力してください" PasswordChanged="ApiKeyBox_PasswordChanged" />
-                <CheckBox Grid.Column="1" Margin="8,0" VerticalAlignment="Center" Content="保存" IsChecked="{Binding SaveApiKey}" />
-                <Button Grid.Column="2" Width="130" Content="API キーでログイン" Command="{Binding LoginWithApiKeyCommand}" />
-              </Grid>
-
-              <!-- ChatGPT ブラウザ / デバイスコードログイン -->
-              <StackPanel Orientation="Horizontal">
-                <Button
-                  Width="160"
-                  Margin="0,0,8,0"
-                  Content="ChatGPT ブラウザでログイン"
-                  Command="{Binding StartChatGptLoginCommand}"
-                  ToolTip="ブラウザで ChatGPT アカウントにログインします"
-                />
-                <Button
-                  Width="180"
-                  Content="ChatGPT デバイスコードでログイン"
-                  Command="{Binding StartDeviceCodeLoginCommand}"
-                  ToolTip="ブラウザが使えない環境向けにデバイスコードで認証します"
-                />
-              </StackPanel>
-
-              <!-- デバイスコード表示 -->
-              <Border
-                Margin="0,8,0,0"
-                Padding="8"
-                BorderBrush="#93C5FD"
-                BorderThickness="1"
-                CornerRadius="4"
-                Visibility="{Binding HasPendingDeviceCode, Converter={StaticResource BoolToVisibilityConverter}}"
-              >
-                <Grid>
-                  <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
-                  </Grid.RowDefinitions>
-                  <TextBlock FontWeight="SemiBold" Text="確認 URL とコード" />
-                  <TextBlock Grid.Row="1" Margin="0,4,0,0" TextWrapping="Wrap" Text="{Binding DeviceCodeVerificationUrl}" />
-                  <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,6,0,0">
-                    <TextBlock VerticalAlignment="Center" FontWeight="SemiBold" Text="コード:" />
-                    <TextBlock Margin="6,0,12,0" VerticalAlignment="Center" Text="{Binding DeviceCodeUserCode}" />
-                    <Button Width="100" Content="URL を開く" Command="{Binding OpenVerificationUrlCommand}" />
-                  </StackPanel>
+              <StackPanel Visibility="{Binding ShowLoginPanel, Converter={StaticResource BoolToVisibilityConverter}}">
+                <Grid Margin="0,0,0,8" Visibility="{Binding ShowApiKeyInput, Converter={StaticResource BoolToVisibilityConverter}}">
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                  </Grid.ColumnDefinitions>
+                  <PasswordBox x:Name="ApiKeyBox" ToolTip="OpenAI API キー（sk-...）を入力してください" PasswordChanged="ApiKeyBox_PasswordChanged" />
+                  <CheckBox Grid.Column="1" Margin="8,0" VerticalAlignment="Center" Content="保存" IsChecked="{Binding SaveApiKey}" />
+                  <Button Grid.Column="2" Width="130" Content="API キーでログイン" Command="{Binding LoginWithApiKeyCommand}" />
                 </Grid>
-              </Border>
+
+                <!-- ChatGPT ブラウザ / デバイスコードログイン -->
+                <StackPanel Orientation="Horizontal">
+                  <Button
+                    Width="160"
+                    Margin="0,0,8,0"
+                    Content="ChatGPT ブラウザでログイン"
+                    Command="{Binding StartChatGptLoginCommand}"
+                    ToolTip="ブラウザで ChatGPT アカウントにログインします"
+                  />
+                  <Button
+                    Width="180"
+                    Content="ChatGPT デバイスコードでログイン"
+                    Command="{Binding StartDeviceCodeLoginCommand}"
+                    ToolTip="ブラウザが使えない環境向けにデバイスコードで認証します"
+                  />
+                </StackPanel>
+
+                <!-- デバイスコード表示 -->
+                <Border
+                  Margin="0,8,0,0"
+                  Padding="8"
+                  BorderBrush="#93C5FD"
+                  BorderThickness="1"
+                  CornerRadius="4"
+                  Visibility="{Binding HasPendingDeviceCode, Converter={StaticResource BoolToVisibilityConverter}}"
+                >
+                  <Grid>
+                    <Grid.RowDefinitions>
+                      <RowDefinition Height="Auto" />
+                      <RowDefinition Height="Auto" />
+                      <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <TextBlock FontWeight="SemiBold" Text="確認 URL とコード" />
+                    <TextBlock Grid.Row="1" Margin="0,4,0,0" TextWrapping="Wrap" Text="{Binding DeviceCodeVerificationUrl}" />
+                    <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,6,0,0">
+                      <TextBlock VerticalAlignment="Center" FontWeight="SemiBold" Text="コード:" />
+                      <TextBlock Margin="6,0,12,0" VerticalAlignment="Center" Text="{Binding DeviceCodeUserCode}" />
+                      <Button Width="100" Content="URL を開く" Command="{Binding OpenVerificationUrlCommand}" />
+                    </StackPanel>
+                  </Grid>
+                </Border>
+              </StackPanel>
             </StackPanel>
           </Border>
         </StackPanel>
@@ -218,7 +257,7 @@
       <!-- メッセージ一覧 -->
       <Border Grid.Row="1" BorderBrush="#D1D5DB" BorderThickness="1" CornerRadius="4">
         <ScrollViewer x:Name="ChatScrollViewer" VerticalScrollBarVisibility="Auto">
-          <ItemsControl ItemsSource="{Binding Messages}" ItemTemplateSelector="{StaticResource ChatMessageTemplateSelector}">
+          <ItemsControl ItemsSource="{Binding Messages}" ItemTemplateSelector="{StaticResource ChatMessageTemplateSelector}" HorizontalContentAlignment="Stretch">
             <ItemsControl.ItemsPanel>
               <ItemsPanelTemplate>
                 <StackPanel />
