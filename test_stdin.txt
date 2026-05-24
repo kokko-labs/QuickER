@@ -1,0 +1,1 @@
+{"jsonrpc":"2.0","method":"initialize","id":1,"params":{"clientInfo":{"name":"test","title":"Test","version":"1.0"},"capabilities":{"experimentalApi":true}}}

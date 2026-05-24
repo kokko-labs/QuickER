@@ -38,7 +38,7 @@ public partial class AiGenerateDialogViewModel : ObservableObject
 
     /// <summary>モデル名 (ComboBox)。</summary>
     [ObservableProperty]
-    private string _model = "gpt-5.4-mini";
+    private string _model = AiModelCatalog.DefaultOpenAiModel;
 
     private IdentifierNamingStyleOption? _selectedIdentifierNamingStyle;
     private TableNameNumberStyleOption? _selectedTableNameNumberStyle;
@@ -70,11 +70,11 @@ public partial class AiGenerateDialogViewModel : ObservableObject
     /// <summary>ダイアログを閉じるためのアクション (View が注入)。</summary>
     public Action<bool>? CloseAction { get; set; }
 
-    /// <summary>OpenAI 既定モデル一覧 (ユーザー希望の "gpt-5.4-mini" を既定)。</summary>
-    public IReadOnlyList<string> OpenAiModels { get; } = new[] { "gpt-5.4-mini", "gpt-5.4", "gpt-4o-mini", "gpt-4o", "gpt-4.1", "gpt-4.1-mini" };
+    /// <summary>OpenAI 既定モデル一覧です。</summary>
+    public IReadOnlyList<string> OpenAiModels { get; } = AiModelCatalog.OpenAiModels;
 
-    /// <summary>Ollama でよく使われるモデル例。</summary>
-    public IReadOnlyList<string> OllamaModels { get; } = new[] { "gpt-oss:20b", "qwen3.6", "gemma4:e4b", "gemma4:31b-cloud" };
+    /// <summary>Ollama でよく使われるモデル例です。</summary>
+    public IReadOnlyList<string> OllamaModels { get; } = AiModelCatalog.OllamaModels;
 
     /// <summary>テーブル名・カラム名の命名規則候補。</summary>
     public IReadOnlyList<GenerationModeOption> GenerationModeOptions { get; }

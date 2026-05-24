@@ -496,6 +496,12 @@
             <TextBlock Style="{StaticResource ToolBarCaption}" Text="AI生成" />
           </StackPanel>
         </Button>
+        <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding OpenCodexAppServerCommand}" ToolTip="Codex App Server の接続設定と認証を開く">
+          <StackPanel>
+            <TextBlock Style="{StaticResource ToolBarIcon}" Text="🧠" />
+            <TextBlock Style="{StaticResource ToolBarCaption}" Text="Codex" />
+          </StackPanel>
+        </Button>
       </StackPanel>
     </Border>
 

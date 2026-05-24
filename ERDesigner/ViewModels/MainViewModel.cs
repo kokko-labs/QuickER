@@ -1461,6 +1461,30 @@ public partial class MainViewModel : ObservableObject
         ReplaceDiagramWithoutHistory(entities, relationships, autoLayout: true);
     }
 
+    /// <summary>Codex App Server 対話ウィンドウのシングルトンインスタンスです。</summary>
+    private Views.CodexAppServerDialog? _codexDialog;
+
+    /// <summary>Codex App Server の接続設定ダイアログを開きます。</summary>
+    [RelayCommand]
+    private void OpenCodexAppServer()
+    {
+        if (_codexDialog is null)
+        {
+            _codexDialog = new Views.CodexAppServerDialog(this);
+        }
+
+        _codexDialog.Owner = null;
+        _codexDialog.Show();
+        _codexDialog.Activate();
+    }
+
+    /// <summary>アプリ終了時に Codex チャット画面を強制終了します。</summary>
+    public void CloseCodexDialog()
+    {
+        _codexDialog?.ForceClose();
+        _codexDialog = null;
+    }
+
     /// <summary>AI が返した更新後スキーマを既存 ER 図へ反映します。</summary>
     private void ApplyAiUpdateResult(AiSchemaJson schema)
     {

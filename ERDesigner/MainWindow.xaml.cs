@@ -22,6 +22,9 @@ public partial class MainWindow : Window
         if (DataContext is MainViewModel vm)
         {
             vm.AutoSave();
+
+            // メイン画面終了時に Codex チャット画面も強制終了する
+            vm.CloseCodexDialog();
         }
     }
 }
