@@ -57,18 +57,6 @@ public class CodexAppServerDialogViewModelTests
             return Task.FromResult(new CodexLoginStartResult { Type = CodexLoginType.ChatGpt, AuthUrl = "https://chatgpt.example/login" });
         }
 
-        public Task<CodexLoginStartResult> StartChatGptDeviceCodeLoginAsync(CancellationToken cancellationToken = default)
-        {
-            return Task.FromResult(
-                new CodexLoginStartResult
-                {
-                    Type = CodexLoginType.ChatGptDeviceCode,
-                    VerificationUrl = "https://auth.example/device",
-                    UserCode = "ABCD-1234",
-                }
-            );
-        }
-
         public Task LogoutAsync(CancellationToken cancellationToken = default)
         {
             LogoutCount++;
@@ -104,6 +92,18 @@ public class CodexAppServerDialogViewModelTests
         public ValueTask DisposeAsync()
         {
             return ValueTask.CompletedTask;
+        }
+    }
+
+    private static async Task InvokePrivateAsync(object instance, string methodName)
+    {
+        var method = instance.GetType().GetMethod(methodName, BindingFlags.Instance | BindingFlags.NonPublic);
+        method.Should().NotBeNull($"{methodName} が存在する必要があります。");
+        var result = method!.Invoke(instance, []);
+
+        if (result is Task task)
+        {
+            await task;
         }
     }
 
@@ -178,23 +178,25 @@ public class CodexAppServerDialogViewModelTests
         }
     }
 
-    [Fact(DisplayName = "StartDeviceCodeLogin は確認 URL とユーザーコードを表示状態にする")]
-    public async Task StartDeviceCodeLoginAsync_SetsVerificationState()
+    [Fact(DisplayName = "StartChatGptLogin は未接続時に自動接続してブラウザを開く")]
+    public async Task StartChatGptLoginAsync_StartsClientAndOpensBrowser()
     {
         var folder = Path.Combine(Path.GetTempPath(), "ERDesignerTests", Guid.NewGuid().ToString("N"));
         var settingsStore = new CodexAppServerSettingsStore(folder);
         var client = new FakeCodexAppServerClient();
         client.NextAccountInfo = new CodexAccountInfo { RequiresOpenAiAuth = true, AuthMode = CodexAuthMode.None };
         var vm = new CodexAppServerDialogViewModel(client, settingsStore, "CodexVmTests_" + Guid.NewGuid().ToString("N"));
+        var openedUrls = new List<string>();
+        vm.OpenBrowser = url => openedUrls.Add(url); // ブラウザ起動をキャプチャする
 
         try
         {
-            await InvokePrivateAsync(vm, "StartDeviceCodeLoginAsync");
+            await InvokePrivateAsync(vm, "StartChatGptLoginAsync");
 
+            // 自動接続が行われること
             client.StartCount.Should().Be(1);
-            vm.DeviceCodeVerificationUrl.Should().Be("https://auth.example/device");
-            vm.DeviceCodeUserCode.Should().Be("ABCD-1234");
-            vm.HasPendingDeviceCode.Should().BeTrue();
+            // ブラウザが authUrl で開かれること
+            openedUrls.Should().ContainSingle().Which.Should().Be("https://chatgpt.example/login");
         }
         finally
         {
@@ -202,18 +204,6 @@ public class CodexAppServerDialogViewModelTests
             {
                 Directory.Delete(folder, recursive: true);
             }
-        }
-    }
-
-    private static async Task InvokePrivateAsync(object instance, string methodName)
-    {
-        var method = instance.GetType().GetMethod(methodName, BindingFlags.Instance | BindingFlags.NonPublic);
-        method.Should().NotBeNull($"{methodName} が存在する必要があります。");
-        var result = method!.Invoke(instance, []);
-
-        if (result is Task task)
-        {
-            await task;
         }
     }
 
@@ -273,38 +263,6 @@ public class CodexAppServerDialogViewModelTests
 
         vm.ModelProvider.Should().Be("openai");
         vm.Model.Should().Be(AiModelCatalog.DefaultOpenAiModel);
-    }
-
-    [Fact(DisplayName = "StartChatGptLogin は未接続時に自動接続してブラウザを開く")]
-    public async Task StartChatGptLoginAsync_StartsClientAndOpensBrowser()
-    {
-        var folder = Path.Combine(Path.GetTempPath(), "ERDesignerTests", Guid.NewGuid().ToString("N"));
-        var settingsStore = new CodexAppServerSettingsStore(folder);
-        var client = new FakeCodexAppServerClient();
-        client.NextAccountInfo = new CodexAccountInfo { RequiresOpenAiAuth = true, AuthMode = CodexAuthMode.None };
-        var vm = new CodexAppServerDialogViewModel(client, settingsStore, "CodexVmTests_" + Guid.NewGuid().ToString("N"));
-        var openedUrls = new List<string>();
-        vm.OpenBrowser = url => openedUrls.Add(url); // ブラウザ起動をキャプチャする
-
-        try
-        {
-            await InvokePrivateAsync(vm, "StartChatGptLoginAsync");
-
-            // 自動接続が行われること
-            client.StartCount.Should().Be(1);
-            // ブラウザが authUrl で開かれること
-            openedUrls.Should().ContainSingle().Which.Should().Be("https://chatgpt.example/login");
-            // デバイスコードパネルは表示しない
-            vm.DeviceCodeVerificationUrl.Should().BeEmpty();
-            vm.HasPendingDeviceCode.Should().BeFalse();
-        }
-        finally
-        {
-            if (Directory.Exists(folder))
-            {
-                Directory.Delete(folder, recursive: true);
-            }
-        }
     }
 
     [Fact(DisplayName = "openai 以外のプロバイダー選択時は IsOpenAiProvider が false になる")]

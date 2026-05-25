@@ -45,9 +45,6 @@ public interface ICodexAppServerClient : IAsyncDisposable
     /// <summary>ChatGPT ブラウザログインを開始します。</summary>
     Task<CodexLoginStartResult> StartChatGptLoginAsync(CancellationToken cancellationToken = default);
 
-    /// <summary>ChatGPT デバイスコードログインを開始します。</summary>
-    Task<CodexLoginStartResult> StartChatGptDeviceCodeLoginAsync(CancellationToken cancellationToken = default);
-
     /// <summary>ログアウトします。</summary>
     Task LogoutAsync(CancellationToken cancellationToken = default);
 
@@ -248,12 +245,6 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
     public Task<CodexLoginStartResult> StartChatGptLoginAsync(CancellationToken cancellationToken = default)
     {
         return StartLoginAsync(new { type = "chatgpt" }, CodexLoginType.ChatGpt, cancellationToken);
-    }
-
-    /// <inheritdoc />
-    public Task<CodexLoginStartResult> StartChatGptDeviceCodeLoginAsync(CancellationToken cancellationToken = default)
-    {
-        return StartLoginAsync(new { type = "chatgptDeviceCode" }, CodexLoginType.ChatGptDeviceCode, cancellationToken);
     }
 
     /// <inheritdoc />
@@ -852,8 +843,6 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
             Type = ParseLoginType(rawType, fallbackType),
             LoginId = element.TryGetProperty("loginId", out var loginIdElement) ? loginIdElement.GetString() : null,
             AuthUrl = element.TryGetProperty("authUrl", out var authUrlElement) ? authUrlElement.GetString() : null,
-            VerificationUrl = element.TryGetProperty("verificationUrl", out var verificationElement) ? verificationElement.GetString() : null,
-            UserCode = element.TryGetProperty("userCode", out var userCodeElement) ? userCodeElement.GetString() : null,
         };
     }
 
@@ -903,7 +892,6 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
         {
             "apiKey" => CodexLoginType.ApiKey,
             "chatgpt" => CodexLoginType.ChatGpt,
-            "chatgptDeviceCode" => CodexLoginType.ChatGptDeviceCode,
             _ => fallbackType,
         };
     }

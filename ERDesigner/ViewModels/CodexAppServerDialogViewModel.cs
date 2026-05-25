@@ -26,9 +26,6 @@ public partial class CodexAppServerDialogViewModel : ObservableObject
     private bool _requiresOpenAiAuth = true;
     private CodexAuthMode _authMode;
     private string _accountSummary = "未接続";
-    private string _deviceCodeVerificationUrl = string.Empty;
-    private string _deviceCodeUserCode = string.Empty;
-    private bool _hasPendingDeviceCode;
 
     /// <summary>ブラウザで URL を開く処理です（テスト時に差し替え可能）。</summary>
     internal Action<string> OpenBrowser { get; set; } = url => Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
@@ -62,7 +59,12 @@ public partial class CodexAppServerDialogViewModel : ObservableObject
                 OnPropertyChanged(nameof(IsOpenAiProvider));
                 OnPropertyChanged(nameof(ShowAuthSection));
                 OnPropertyChanged(nameof(ShowNonOpenAiMessage));
-                // プロバイダー変更時にモデル候補を更新する
+                OnPropertyChanged(nameof(ShowLoginPanel));
+                OnPropertyChanged(nameof(CanStartNewThread));
+                OnPropertyChanged(nameof(CanSendMessage));
+                // プロバイダー変更時にコマンドの有効状態とモデル候補を更新する
+                StartNewThreadCommand.NotifyCanExecuteChanged();
+                SendMessageCommand.NotifyCanExecuteChanged();
                 RefreshModelCandidates();
 
                 if (IsOpenAiProvider)
@@ -171,6 +173,10 @@ public partial class CodexAppServerDialogViewModel : ObservableObject
                 OnPropertyChanged(nameof(CanLogout));
                 OnPropertyChanged(nameof(IsLoggedIn));
                 OnPropertyChanged(nameof(ShowLoginPanel));
+                OnPropertyChanged(nameof(CanStartNewThread));
+                OnPropertyChanged(nameof(CanSendMessage));
+                StartNewThreadCommand.NotifyCanExecuteChanged();
+                SendMessageCommand.NotifyCanExecuteChanged();
             }
         }
     }
@@ -180,33 +186,6 @@ public partial class CodexAppServerDialogViewModel : ObservableObject
     {
         get => _accountSummary;
         set => SetProperty(ref _accountSummary, value);
-    }
-
-    /// <summary>確認用 URL です。</summary>
-    public string DeviceCodeVerificationUrl
-    {
-        get => _deviceCodeVerificationUrl;
-        set
-        {
-            if (SetProperty(ref _deviceCodeVerificationUrl, value))
-            {
-                OnPropertyChanged(nameof(HasPendingBrowserLink));
-            }
-        }
-    }
-
-    /// <summary>デバイスコードのユーザーコードです。</summary>
-    public string DeviceCodeUserCode
-    {
-        get => _deviceCodeUserCode;
-        set => SetProperty(ref _deviceCodeUserCode, value);
-    }
-
-    /// <summary>デバイスコード認証の案内を表示するかどうかです。</summary>
-    public bool HasPendingDeviceCode
-    {
-        get => _hasPendingDeviceCode;
-        set => SetProperty(ref _hasPendingDeviceCode, value);
     }
 
     /// <summary>ターンが実行中かどうかです。</summary>
@@ -240,8 +219,8 @@ public partial class CodexAppServerDialogViewModel : ObservableObject
     /// <summary>スレッドが開始済みかどうかです。</summary>
     public bool HasThread => _currentThreadId is not null;
 
-    /// <summary>メッセージを送信できるかどうかです。</summary>
-    public bool CanSendMessage => IsStarted && HasThread && !IsTurnInProgress && !string.IsNullOrWhiteSpace(UserInput);
+    /// <summary>メッセージを送信できるかどうかです。openai プロバイダーはログイン済みの場合のみ送信できます。</summary>
+    public bool CanSendMessage => IsStarted && HasThread && !IsTurnInProgress && !string.IsNullOrWhiteSpace(UserInput) && (!IsOpenAiProvider || IsLoggedIn);
 
     /// <summary>ダイアログを閉じるためのアクションです。</summary>
     public Action<bool>? CloseAction { get; set; }
@@ -255,11 +234,8 @@ public partial class CodexAppServerDialogViewModel : ObservableObject
     /// <summary>ログイン済みかどうかです（ログインパネルの表示制御に使用）。</summary>
     public bool IsLoggedIn => AuthMode != CodexAuthMode.None;
 
-    /// <summary>ログインパネルを表示するかどうかです（未ログイン時のみ表示）。</summary>
-    public bool ShowLoginPanel => !IsLoggedIn;
-
-    /// <summary>ChatGPT プランを表示するかどうかです。</summary>
-    public bool HasPendingBrowserLink => !string.IsNullOrWhiteSpace(DeviceCodeVerificationUrl);
+    /// <summary>ログインパネルを表示するかどうかです（openai プロバイダーかつ未ログイン時のみ表示）。</summary>
+    public bool ShowLoginPanel => IsOpenAiProvider && !IsLoggedIn;
 
     /// <summary>新しい ViewModel を生成します（MainViewModel なし）。</summary>
     public CodexAppServerDialogViewModel(ICodexAppServerClient? client = null, CodexAppServerSettingsStore? settingsStore = null)
@@ -437,55 +413,6 @@ public partial class CodexAppServerDialogViewModel : ObservableObject
         }
     }
 
-    /// <summary>ChatGPT デバイスコードログインを開始します。</summary>
-    [RelayCommand]
-    private async Task StartDeviceCodeLoginAsync()
-    {
-        if (!await EnsureStartedAsync())
-        {
-            return;
-        }
-
-        IsBusy = true;
-        StatusMessage = "デバイスコードを取得中...";
-
-        try
-        {
-            var result = await _client.StartChatGptDeviceCodeLoginAsync();
-            DeviceCodeVerificationUrl = result.VerificationUrl ?? string.Empty;
-            DeviceCodeUserCode = result.UserCode ?? string.Empty;
-            HasPendingDeviceCode = !string.IsNullOrWhiteSpace(DeviceCodeVerificationUrl) && !string.IsNullOrWhiteSpace(DeviceCodeUserCode);
-            StatusMessage = HasPendingDeviceCode ? "確認 URL とユーザーコードを使ってログインを完了してください。" : "デバイスコードを取得できませんでした。";
-        }
-        catch (Exception ex)
-        {
-            StatusMessage = $"デバイスコードログイン開始に失敗しました: {ex.Message}";
-        }
-        finally
-        {
-            IsBusy = false;
-        }
-    }
-
-    /// <summary>ブラウザ認証 URL を既定ブラウザで開きます。</summary>
-    [RelayCommand]
-    private void OpenVerificationUrl()
-    {
-        if (string.IsNullOrWhiteSpace(DeviceCodeVerificationUrl))
-        {
-            return;
-        }
-
-        try
-        {
-            OpenBrowser(DeviceCodeVerificationUrl);
-        }
-        catch (Exception ex)
-        {
-            StatusMessage = $"ブラウザを開けませんでした: {ex.Message}";
-        }
-    }
-
     /// <summary>ログアウトします。</summary>
     [RelayCommand]
     private async Task LogoutAsync()
@@ -501,9 +428,6 @@ public partial class CodexAppServerDialogViewModel : ObservableObject
         try
         {
             await _client.LogoutAsync();
-            DeviceCodeVerificationUrl = string.Empty;
-            DeviceCodeUserCode = string.Empty;
-            HasPendingDeviceCode = false;
             StatusMessage = "ログアウトしました。";
         }
         catch (Exception ex)
@@ -559,8 +483,8 @@ public partial class CodexAppServerDialogViewModel : ObservableObject
         }
     }
 
-    /// <summary>会話スレッドを開始できるかどうかです。</summary>
-    public bool CanStartNewThread => IsStarted || !IsOpenAiProvider;
+    /// <summary>会話スレッドを開始できるかどうかです。openai プロバイダーはログイン済みの場合のみ開始できます。</summary>
+    public bool CanStartNewThread => !IsOpenAiProvider || IsLoggedIn;
 
     /// <summary>ユーザーの入力をターンとして送信します。</summary>
     [RelayCommand(CanExecute = nameof(CanSendMessage))]
@@ -784,7 +708,8 @@ public partial class CodexAppServerDialogViewModel : ObservableObject
         {
             CodexAuthMode.ApiKey => "API キーでログイン済み",
             CodexAuthMode.ChatGpt => string.IsNullOrWhiteSpace(e.PlanType) ? "ChatGPT でログイン済み" : $"ChatGPT でログイン済み ({e.PlanType})",
-            _ => RequiresOpenAiAuth ? "未ログイン" : "OpenAI 認証不要",
+            // openai プロバイダーは未ログイン、それ以外は認証不要
+            _ => IsOpenAiProvider ? "未ログイン" : "OpenAI 認証不要",
         };
     }
 

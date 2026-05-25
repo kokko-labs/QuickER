@@ -17,7 +17,6 @@ public enum CodexLoginType
 {
     ApiKey,
     ChatGpt,
-    ChatGptDeviceCode,
 }
 
 /// <summary>Codex App Server から取得したアカウント情報です。</summary>
@@ -50,12 +49,6 @@ public sealed class CodexLoginStartResult
 
     /// <summary>ブラウザ認証 URL です。</summary>
     public string? AuthUrl { get; init; }
-
-    /// <summary>デバイスコード認証時の確認 URL です。</summary>
-    public string? VerificationUrl { get; init; }
-
-    /// <summary>デバイスコード認証時のユーザーコードです。</summary>
-    public string? UserCode { get; init; }
 }
 
 /// <summary>Codex App Server のログイン完了通知です。</summary>
