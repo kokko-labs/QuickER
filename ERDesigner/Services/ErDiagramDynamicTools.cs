@@ -33,7 +33,11 @@ public static class ErDiagramDynamicTools
                 InputSchema = new
                 {
                     type = "object",
-                    properties = new { table_name = new { type = "string", description = "テーブル名" } },
+                    properties = new
+                    {
+                        table_name = new { type = "string", description = "テーブル名" },
+                        description = new { type = "string", description = "テーブルの説明（省略可）" },
+                    },
                     required = new[] { "table_name" },
                 },
             },
@@ -101,6 +105,26 @@ public static class ErDiagramDynamicTools
             },
             new CodexDynamicToolDefinition
             {
+                Name = "set_column_property",
+                Description =
+                    "指定したテーブルのカラムのプロパティ（説明、データ型、NULL 許容）を変更します。description / data_type / is_nullable のうち少なくとも 1 つを必ず指定してください。",
+                DeferLoading = false,
+                InputSchema = new
+                {
+                    type = "object",
+                    properties = new
+                    {
+                        table_name = new { type = "string", description = "変更対象のテーブル名" },
+                        column_name = new { type = "string", description = "変更対象のカラム名" },
+                        description = new { type = "string", description = "カラムの説明（変更する場合に指定）" },
+                        data_type = new { type = "string", description = "データ型（変更する場合に指定。例: int, nvarchar(100), datetime2）" },
+                        is_nullable = new { type = "boolean", description = "NULL 許容フラグ（変更する場合に指定）" },
+                    },
+                    required = new[] { "table_name", "column_name" },
+                },
+            },
+            new CodexDynamicToolDefinition
+            {
                 Name = "add_relationship",
                 Description = "2 つのテーブル間にリレーション（外部キー）を追加します。",
                 DeferLoading = false,
@@ -159,6 +183,7 @@ public static class ErDiagramDynamicTools
                 "set_entity_property" => SetEntityProperty(arguments, viewModel),
                 "add_relationship" => AddRelationship(arguments, viewModel),
                 "remove_relationship" => RemoveRelationship(arguments, viewModel),
+                "set_column_property" => SetColumnProperty(arguments, viewModel),
                 _ => ($"未対応のツール: {toolName}", false),
             };
         }
@@ -178,6 +203,11 @@ public static class ErDiagramDynamicTools
         foreach (var entity in vm.Entities)
         {
             sb.AppendLine($"[{entity.TableName}]");
+
+            if (!string.IsNullOrWhiteSpace(entity.Description))
+            {
+                sb.AppendLine($"  説明: {entity.Description}");
+            }
 
             foreach (var col in entity.Columns)
             {
@@ -199,7 +229,8 @@ public static class ErDiagramDynamicTools
                 }
 
                 var flagsText = flags.Count > 0 ? $" ({string.Join(", ", flags)})" : string.Empty;
-                sb.AppendLine($"  - {col.Name}: {col.DataType}{flagsText}");
+                var colDesc = !string.IsNullOrWhiteSpace(col.Description) ? $" // {col.Description}" : string.Empty;
+                sb.AppendLine($"  - {col.Name}: {col.DataType}{flagsText}{colDesc}");
             }
         }
 
@@ -220,9 +251,11 @@ public static class ErDiagramDynamicTools
     private static (string, bool) AddEntity(JsonElement args, MainViewModel vm)
     {
         var tableName = GetString(args, "table_name") ?? "NewTable";
+        var desc = GetString(args, "description") ?? string.Empty;
         var model = new Entity
         {
             TableName = tableName,
+            Description = desc,
             X = 60 + vm.Entities.Count * 30,
             Y = 60 + vm.Entities.Count * 30,
         };
@@ -357,6 +390,58 @@ public static class ErDiagramDynamicTools
         }
 
         return ($"テーブル '{tableName}' の {string.Join("、", changed)} を更新しました。", true);
+    }
+
+    private static (string, bool) SetColumnProperty(JsonElement args, MainViewModel vm)
+    {
+        var tableName = GetString(args, "table_name");
+        var columnName = GetString(args, "column_name");
+
+        if (string.IsNullOrWhiteSpace(tableName) || string.IsNullOrWhiteSpace(columnName))
+        {
+            return ("table_name と column_name は必須です。", false);
+        }
+
+        var entity = vm.Entities.FirstOrDefault(e => string.Equals(e.TableName, tableName, StringComparison.OrdinalIgnoreCase));
+
+        if (entity is null)
+        {
+            return ($"テーブル '{tableName}' が見つかりません。", false);
+        }
+
+        var column = entity.Columns.FirstOrDefault(c => string.Equals(c.Name, columnName, StringComparison.OrdinalIgnoreCase));
+
+        if (column is null)
+        {
+            return ($"カラム '{columnName}' が見つかりません。", false);
+        }
+
+        var changed = new List<string>();
+
+        if (args.TryGetProperty("description", out var descEl) && descEl.ValueKind == JsonValueKind.String)
+        {
+            column.Description = descEl.GetString()!;
+            changed.Add("説明");
+        }
+
+        if (args.TryGetProperty("data_type", out var dataTypeEl) && dataTypeEl.ValueKind == JsonValueKind.String)
+        {
+            column.DataType = dataTypeEl.GetString()!;
+            changed.Add("データ型");
+        }
+
+        if (args.TryGetProperty("is_nullable", out var isNullEl) && isNullEl.ValueKind is JsonValueKind.True or JsonValueKind.False)
+        {
+            column.IsNullable = isNullEl.GetBoolean();
+            changed.Add("NULL 許容");
+        }
+
+        if (changed.Count == 0)
+        {
+            return ("変更するプロパティが指定されていません。description / data_type / is_nullable のいずれか 1 つ以上を指定してください。", false);
+        }
+
+        return ($"テーブル '{tableName}' のカラム '{columnName}' の {string.Join("、", changed)} を更新しました。", true);
     }
 
     private static (string, bool) AddRelationship(JsonElement args, MainViewModel vm)

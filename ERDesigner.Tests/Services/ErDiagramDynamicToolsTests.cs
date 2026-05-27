@@ -105,4 +105,95 @@ public class ErDiagramDynamicToolsTests
         entity.Columns.Where(c => c.IsPrimaryKey).Should().ContainSingle(c => c.Name == "BookId");
         entity.Columns.Should().HaveCount(3);
     }
+
+    [Fact(DisplayName = "set_column_property でカラムの説明を更新できる")]
+    public void SetColumnProperty_UpdatesDescription()
+    {
+        var vm = CreateVm();
+        Exec(vm, "add_entity", new { table_name = "Book" });
+        Exec(
+            vm,
+            "add_column",
+            new
+            {
+                table_name = "Book",
+                column_name = "BookId",
+                data_type = "int",
+                is_primary_key = true,
+                is_nullable = false,
+                description = "",
+            }
+        );
+
+        var (_, success) = Exec(
+            vm,
+            "set_column_property",
+            new
+            {
+                table_name = "Book",
+                column_name = "BookId",
+                description = "書籍を一意に識別するID",
+            }
+        );
+
+        success.Should().BeTrue();
+        var column = vm.Entities.Single(e => e.TableName == "Book").Columns.Single(c => c.Name == "BookId");
+        column.Description.Should().Be("書籍を一意に識別するID");
+    }
+
+    [Fact(DisplayName = "set_column_property でデータ型と NULL 許容を更新できる")]
+    public void SetColumnProperty_UpdatesDataTypeAndNullable()
+    {
+        var vm = CreateVm();
+        Exec(vm, "add_entity", new { table_name = "Book" });
+        Exec(
+            vm,
+            "add_column",
+            new
+            {
+                table_name = "Book",
+                column_name = "Title",
+                data_type = "nvarchar(100)",
+                is_primary_key = false,
+                is_nullable = false,
+            }
+        );
+
+        var (_, success) = Exec(
+            vm,
+            "set_column_property",
+            new
+            {
+                table_name = "Book",
+                column_name = "Title",
+                data_type = "nvarchar(500)",
+                is_nullable = true,
+            }
+        );
+
+        success.Should().BeTrue();
+        var column = vm.Entities.Single(e => e.TableName == "Book").Columns.Single(c => c.Name == "Title");
+        column.DataType.Should().Be("nvarchar(500)");
+        column.IsNullable.Should().BeTrue();
+    }
+
+    [Fact(DisplayName = "set_column_property で存在しないカラムを指定するとエラーになる")]
+    public void SetColumnProperty_UnknownColumn_ReturnsError()
+    {
+        var vm = CreateVm();
+        Exec(vm, "add_entity", new { table_name = "Book" });
+
+        var (_, success) = Exec(
+            vm,
+            "set_column_property",
+            new
+            {
+                table_name = "Book",
+                column_name = "NoSuchColumn",
+                description = "説明",
+            }
+        );
+
+        success.Should().BeFalse();
+    }
 }
