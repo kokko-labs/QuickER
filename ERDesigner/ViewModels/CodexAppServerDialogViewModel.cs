@@ -146,6 +146,7 @@ public partial class CodexAppServerDialogViewModel : ObservableObject
         {
             if (SetProperty(ref _isStarted, value))
             {
+                OnPropertyChanged(nameof(CanLogout));
                 OnPropertyChanged(nameof(CanSendMessage));
                 OnPropertyChanged(nameof(CanStartNewThread));
                 SendMessageCommand.NotifyCanExecuteChanged();
@@ -154,11 +155,22 @@ public partial class CodexAppServerDialogViewModel : ObservableObject
         }
     }
 
-    /// <summary>OpenAI 認証が必要かどうかです。</summary>
+    /// <summary>OpenAI 認証が必要かどうかです（サーバーから返るフラグ。ログインパネル表示やスレッド開始可否の判定に使用）。</summary>
     public bool RequiresOpenAiAuth
     {
         get => _requiresOpenAiAuth;
-        set => SetProperty(ref _requiresOpenAiAuth, value);
+        set
+        {
+            if (SetProperty(ref _requiresOpenAiAuth, value))
+            {
+                OnPropertyChanged(nameof(ShowLoginPanel));
+                OnPropertyChanged(nameof(CanStartNewThread));
+                OnPropertyChanged(nameof(CanSendMessage));
+                OnPropertyChanged(nameof(CanLogout));
+                StartNewThreadCommand.NotifyCanExecuteChanged();
+                SendMessageCommand.NotifyCanExecuteChanged();
+            }
+        }
     }
 
     /// <summary>現在の認証モードです。</summary>
@@ -219,8 +231,8 @@ public partial class CodexAppServerDialogViewModel : ObservableObject
     /// <summary>スレッドが開始済みかどうかです。</summary>
     public bool HasThread => _currentThreadId is not null;
 
-    /// <summary>メッセージを送信できるかどうかです。openai プロバイダーはログイン済みの場合のみ送信できます。</summary>
-    public bool CanSendMessage => IsStarted && HasThread && !IsTurnInProgress && !string.IsNullOrWhiteSpace(UserInput) && (!IsOpenAiProvider || IsLoggedIn);
+    /// <summary>メッセージを送信できるかどうかです。openai かつ認証必要な場合はログイン済みの場合のみ送信できます。</summary>
+    public bool CanSendMessage => IsStarted && HasThread && !IsTurnInProgress && !string.IsNullOrWhiteSpace(UserInput) && (!IsOpenAiProvider || !RequiresOpenAiAuth || IsLoggedIn);
 
     /// <summary>ダイアログを閉じるためのアクションです。</summary>
     public Action<bool>? CloseAction { get; set; }
@@ -228,14 +240,14 @@ public partial class CodexAppServerDialogViewModel : ObservableObject
     /// <summary>API キー入力欄を表示するかどうかです。</summary>
     public bool ShowApiKeyInput => AuthMode != CodexAuthMode.ChatGpt;
 
-    /// <summary>ログアウト可能かどうかです。</summary>
-    public bool CanLogout => AuthMode != CodexAuthMode.None;
+    /// <summary>ログアウト可能かどうかです（接続済みかつ「ログイン済み」または「認証不要」の場合のみ）。</summary>
+    public bool CanLogout => IsStarted && (IsLoggedIn || !RequiresOpenAiAuth);
 
     /// <summary>ログイン済みかどうかです（ログインパネルの表示制御に使用）。</summary>
     public bool IsLoggedIn => AuthMode != CodexAuthMode.None;
 
-    /// <summary>ログインパネルを表示するかどうかです（openai プロバイダーかつ未ログイン時のみ表示）。</summary>
-    public bool ShowLoginPanel => IsOpenAiProvider && !IsLoggedIn;
+    /// <summary>ログインパネルを表示するかどうかです（openai プロバイダーかつサーバーが認証必要と返したかつ未ログイン時のみ表示）。</summary>
+    public bool ShowLoginPanel => IsOpenAiProvider && RequiresOpenAiAuth && !IsLoggedIn;
 
     /// <summary>新しい ViewModel を生成します（MainViewModel なし）。</summary>
     public CodexAppServerDialogViewModel(ICodexAppServerClient? client = null, CodexAppServerSettingsStore? settingsStore = null)
@@ -262,14 +274,17 @@ public partial class CodexAppServerDialogViewModel : ObservableObject
         LoadSettings();
     }
 
-    /// <summary>ダイアログ表示時に設定を読み込み、必要なら接続を試みます。</summary>
+    /// <summary>ダイアログ表示時に設定を読み込み、Codex App Server へ自動接続してアカウント状態を復元します。</summary>
     public async Task InitializeAsync()
     {
         _isInitializing = true;
         LoadSettings();
         ApiKey = ApiKeyStore.Load(_apiKeyStoreName);
         _isInitializing = false;
-        await RefreshAccountStateAsync();
+
+        // 起動時に自動接続し、保存済みトークン（~/.codex/auth.json）を使って自動ログインを試みる
+        // 接続に失敗しても例外をユーザーへ伝搬させず、StatusMessage に表示する
+        await ConnectAsync();
     }
 
     /// <summary>Codex App Server を起動して接続状態を更新します。</summary>
@@ -285,7 +300,10 @@ public partial class CodexAppServerDialogViewModel : ObservableObject
             await _client.StartAsync(BuildSettings(), "erdesigner", "ERDesigner", "1.0.0");
             IsStarted = _client.IsStarted;
             await RefreshAccountStateAsync();
-            StatusMessage = "Codex App Server に接続しました。";
+
+            // 保存済みトークンで自動ログインできた場合はその旨を表示する
+            // openai 以外のプロバイダー、またはサーバーが認証不要と返した場合もログイン不要として正常扱いする
+            StatusMessage = IsLoggedIn || !IsOpenAiProvider || !RequiresOpenAiAuth ? $"接続しました。{AccountSummary}" : "Codex App Server に接続しました。ログインしてください。";
         }
         catch (Exception ex)
         {
@@ -312,7 +330,8 @@ public partial class CodexAppServerDialogViewModel : ObservableObject
                 return;
             }
 
-            var account = await _client.ReadAccountAsync(refreshToken: false);
+            // refreshToken: true を渡すことで、~/.codex に保存済みのトークンを自動再利用・更新する
+            var account = await _client.ReadAccountAsync(refreshToken: true);
             IsStarted = true;
             RequiresOpenAiAuth = account.RequiresOpenAiAuth;
 
@@ -428,6 +447,12 @@ public partial class CodexAppServerDialogViewModel : ObservableObject
         try
         {
             await _client.LogoutAsync();
+
+            // account/updated 通知には RequiresOpenAiAuth フィールドが存在しないため、
+            // サーバー応答に依存せず ViewModel 側で直接確定する。
+            // ログアウト = 次回ログインが必要な状態に戻るため RequiresOpenAiAuth=true にリセットする。
+            RequiresOpenAiAuth = true;
+            AccountSummary = "未ログイン";
             StatusMessage = "ログアウトしました。";
         }
         catch (Exception ex)
@@ -483,8 +508,8 @@ public partial class CodexAppServerDialogViewModel : ObservableObject
         }
     }
 
-    /// <summary>会話スレッドを開始できるかどうかです。openai プロバイダーはログイン済みの場合のみ開始できます。</summary>
-    public bool CanStartNewThread => !IsOpenAiProvider || IsLoggedIn;
+    /// <summary>会話スレッドを開始できるかどうかです。openai かつ認証必要な場合はログイン済みの場合のみ開始できます。</summary>
+    public bool CanStartNewThread => !IsOpenAiProvider || !RequiresOpenAiAuth || IsLoggedIn;
 
     /// <summary>ユーザーの入力をターンとして送信します。</summary>
     [RelayCommand(CanExecute = nameof(CanSendMessage))]
