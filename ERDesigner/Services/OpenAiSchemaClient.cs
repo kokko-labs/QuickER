@@ -24,9 +24,9 @@ public class OpenAiSchemaClient : IAiSchemaClient
         - 各 columns 要素は name / dataType / isPrimaryKey / isForeignKey / isNullable / description を持つ。
 - テーブル名・カラム名は英数字とアンダースコアのみ。
 - 各テーブルに description、各カラムに description を必ず付ける。
-- 各テーブルに 1 つ以上の主キー (isPrimaryKey=true) を必ず含める。
+- 各テーブルに 1 つ以上の主キー (isPrimaryKey=true) を必ず含める。ただし主キーは原則 1 列のみとし、中間テーブル等で業務上の複合主キーが必須の場合のみ複数列を許可する。
 - 各カラムの isNullable を必ず設定する。主キーは false、必須項目や通常の外部キーも false、任意入力の項目だけ true にする。
-- 外部キーがあれば isForeignKey=true を付け、relationships にも記述する。
+- 外部キーがあれば isForeignKey=true を付け、relationships にも記述する。外部キー列を同時に主キー（isPrimaryKey=true）にしてはならない。参照元テーブルのPKを引き継ぐ列は isForeignKey=true / isPrimaryKey=false にする。
 - type は ""OneToOne"" / ""OneToMany"" / ""ManyToMany"" のいずれか。
 - relationships の各要素には constraintName, onDelete, onUpdate も含める。onDelete / onUpdate は ""NO ACTION"" / ""CASCADE"" / ""SET NULL"" / ""SET DEFAULT"" のいずれかを使用する。
 - dataType は SQL Server の型 (例: int, bigint, nvarchar(50), datetime2, decimal(10,2), bit) を使用。";

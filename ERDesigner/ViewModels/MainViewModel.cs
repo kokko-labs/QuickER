@@ -1620,7 +1620,8 @@ public partial class MainViewModel : ObservableObject
             return target.Columns.FirstOrDefault(c => !c.IsPrimaryKey) ?? target.Columns.FirstOrDefault();
         }
 
-        var sameName = target.Columns.FirstOrDefault(c => string.Equals(c.Name, sourcePrimaryKey.Name, StringComparison.OrdinalIgnoreCase));
+        // 参照先の PK と同名の場合は同じ意味の列（同テーブル固有 ID）なので FK 列として選ばない
+        var sameName = target.Columns.FirstOrDefault(c => string.Equals(c.Name, sourcePrimaryKey.Name, StringComparison.OrdinalIgnoreCase) && !c.IsPrimaryKey);
 
         if (sameName is not null)
         {

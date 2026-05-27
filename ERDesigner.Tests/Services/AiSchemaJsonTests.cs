@@ -438,4 +438,144 @@ public class AiSchemaJsonTests
 
         parsed.Tables[0].Columns![0].IsNullable.Should().Be(expectedNullable);
     }
+
+    [Fact(DisplayName = "FK 列が誤って isPrimaryKey=true で返された場合、他に PK があれば PK を降ろして FK に矯正される")]
+    public void ToDomain_PreferredColumnWithWrongPkFlag_IsCorrectedToFk()
+    {
+        // AI が CustomerId を誤って isPrimaryKey=true で返したケース
+        var schema = new AiSchemaJson
+        {
+            Tables =
+            [
+                new AiTable
+                {
+                    Name = "Customer",
+                    Columns =
+                    [
+                        new AiColumn
+                        {
+                            Name = "CustomerId",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                    ],
+                },
+                new AiTable
+                {
+                    Name = "Order",
+                    Columns =
+                    [
+                        new AiColumn
+                        {
+                            Name = "OrderId",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                        new AiColumn
+                        {
+                            // AI が誤って isPrimaryKey=true を付けたが他に PK があるので矯正される
+                            Name = "CustomerId",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsForeignKey = false,
+                            IsNullable = false,
+                        },
+                    ],
+                },
+            ],
+            Relationships =
+            [
+                new AiRelationship
+                {
+                    SourceTable = "Customer",
+                    TargetTable = "Order",
+                    Type = "OneToMany",
+                    ConstraintName = "FK_Order_Customer",
+                    OnDelete = "NO ACTION",
+                    OnUpdate = "NO ACTION",
+                },
+            ],
+        };
+
+        var (entities, relationships) = schema.ToDomain();
+        var order = entities.Single(entity => entity.TableName == "Order");
+        var customerIdColumn = order.Columns.Single(column => column.Name == "CustomerId");
+        var relationship = relationships.Single();
+
+        // CustomerId は PK から降ろされて FK に矯正されているはず
+        customerIdColumn.IsPrimaryKey.Should().BeFalse();
+        customerIdColumn.IsForeignKey.Should().BeTrue();
+        relationship.TargetColumnId.Should().Be(customerIdColumn.Id);
+    }
+
+    [Fact(DisplayName = "テーブル名+Id 形式の非 PK 列は FK 候補として自動認識される")]
+    public void ToDomain_LikelyForeignKeyName_IsRecognizedAsFK()
+    {
+        // isForeignKey=false だが列名が「テーブル名+Id」形式の場合に FK として採用されるケース
+        var schema = new AiSchemaJson
+        {
+            Tables =
+            [
+                new AiTable
+                {
+                    Name = "Category",
+                    Columns =
+                    [
+                        new AiColumn
+                        {
+                            Name = "CategoryId",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                    ],
+                },
+                new AiTable
+                {
+                    Name = "Product",
+                    Columns =
+                    [
+                        new AiColumn
+                        {
+                            Name = "ProductId",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                        new AiColumn
+                        {
+                            // AI が isForeignKey=false のまま返したが名前から FK と判断できる
+                            Name = "CategoryId",
+                            DataType = "int",
+                            IsPrimaryKey = false,
+                            IsForeignKey = false,
+                            IsNullable = false,
+                        },
+                    ],
+                },
+            ],
+            Relationships =
+            [
+                new AiRelationship
+                {
+                    SourceTable = "Category",
+                    TargetTable = "Product",
+                    Type = "OneToMany",
+                    ConstraintName = "FK_Product_Category",
+                    OnDelete = "NO ACTION",
+                    OnUpdate = "NO ACTION",
+                },
+            ],
+        };
+
+        var (entities, relationships) = schema.ToDomain();
+        var product = entities.Single(entity => entity.TableName == "Product");
+        var categoryIdColumn = product.Columns.Single(column => column.Name == "CategoryId");
+        var relationship = relationships.Single();
+
+        categoryIdColumn.IsForeignKey.Should().BeTrue();
+        relationship.TargetColumnId.Should().Be(categoryIdColumn.Id);
+    }
 }

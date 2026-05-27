@@ -166,7 +166,8 @@ public class AiSchemaJson
                         Name = c.Name ?? "Column",
                         DataType = string.IsNullOrWhiteSpace(c.DataType) ? "int" : c.DataType,
                         IsPrimaryKey = c.IsPrimaryKey,
-                        IsForeignKey = c.IsForeignKey,
+                        // isPrimaryKey=true かつ isForeignKey=true は AI の誤出力なので FK を無効化する
+                        IsForeignKey = c.IsForeignKey && !c.IsPrimaryKey,
                         IsNullable = c.IsPrimaryKey ? false : c.IsNullable,
                         Description = c.Description ?? string.Empty,
                     })
@@ -232,22 +233,56 @@ public class AiSchemaJson
     private static Guid? ResolveTargetColumnId(Entity sourceEntity, Entity targetEntity)
     {
         var preferredColumnName = ResolveForeignKeyColumnName(sourceEntity.TableName);
-        var matchingColumn = targetEntity.Columns.FirstOrDefault(column => string.Equals(column.Name, preferredColumnName, StringComparison.OrdinalIgnoreCase));
 
-        if (matchingColumn is not null)
+        // ① preferredColumnName（例: CustomerId）と完全一致する列を優先的に FK として採用する。
+        //    AI が誤って isPrimaryKey=true を付けた場合も、他に PK 列が存在すれば PK フラグを降ろして矯正する。
+        var preferredColumn = targetEntity.Columns.FirstOrDefault(column => string.Equals(column.Name, preferredColumnName, StringComparison.OrdinalIgnoreCase));
+
+        if (preferredColumn is not null)
         {
-            matchingColumn.IsForeignKey = true;
-            matchingColumn.IsNullable = false;
-            return matchingColumn.Id;
+            if (preferredColumn.IsPrimaryKey)
+            {
+                // 他に PK 列があれば「AI の誤付与」とみなして PK を降ろす
+                var hasPkOtherThanPreferred = targetEntity.Columns.Any(column => column.Id != preferredColumn.Id && column.IsPrimaryKey);
+
+                if (hasPkOtherThanPreferred)
+                {
+                    preferredColumn.IsPrimaryKey = false;
+                }
+                else
+                {
+                    // 唯一の PK 列なので FK として扱わない（次の検索へ委ねる）
+                    preferredColumn = null;
+                }
+            }
+
+            if (preferredColumn is not null)
+            {
+                preferredColumn.IsForeignKey = true;
+                preferredColumn.IsNullable = false;
+                return preferredColumn.Id;
+            }
         }
 
-        var foreignKeyColumn = targetEntity.Columns.FirstOrDefault(column => column.IsForeignKey);
+        // ② isForeignKey=true かつ非 PK 列を FK 候補とする（AI が正しく設定した場合）
+        var foreignKeyColumn = targetEntity.Columns.FirstOrDefault(column => column.IsForeignKey && !column.IsPrimaryKey);
 
         if (foreignKeyColumn is not null)
         {
             return foreignKeyColumn.Id;
         }
 
+        // ③ 「他テーブル名+Id」形式の非 PK 列を FK 候補とみなす（AI が isForeignKey を付け忘れたケース）
+        var fkPatternColumn = targetEntity.Columns.FirstOrDefault(column => !column.IsPrimaryKey && IsLikelyForeignKeyName(column.Name));
+
+        if (fkPatternColumn is not null)
+        {
+            fkPatternColumn.IsForeignKey = true;
+            fkPatternColumn.IsNullable = false;
+            return fkPatternColumn.Id;
+        }
+
+        // ④ 最終フォールバック: 最初の非 PK 列を FK に設定する
         var fallbackColumn = targetEntity.Columns.FirstOrDefault(column => !column.IsPrimaryKey);
 
         if (fallbackColumn is null)
@@ -258,6 +293,18 @@ public class AiSchemaJson
         fallbackColumn.IsForeignKey = true;
         fallbackColumn.IsNullable = false;
         return fallbackColumn.Id;
+    }
+
+    /// <summary>列名が「テーブル名+Id」形式の外部キーらしい名前かどうかを判定します。</summary>
+    private static bool IsLikelyForeignKeyName(string? columnName)
+    {
+        if (string.IsNullOrWhiteSpace(columnName))
+        {
+            return false;
+        }
+
+        // パスカルケース: XxxId / スネークケース: xxx_id
+        return Regex.IsMatch(columnName, @"^[A-Z][A-Za-z0-9]*Id$", RegexOptions.None) || Regex.IsMatch(columnName, @"^[a-z][a-z0-9_]*_id$", RegexOptions.None);
     }
 
     /// <summary>参照元テーブル名から終点側の FK 列名候補を求めます。</summary>

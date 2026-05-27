@@ -28,7 +28,7 @@ public static class ErDiagramDynamicTools
             new CodexDynamicToolDefinition
             {
                 Name = "add_entity",
-                Description = "新しいエンティティ（テーブル）を ER 図に追加します。",
+                Description = "新しいエンティティ（テーブル）を ER 図に追加します。列は作成されないので、追加後に add_column で主キー列やその他の列を定義してください。",
                 DeferLoading = false,
                 InputSchema = new
                 {
@@ -225,16 +225,6 @@ public static class ErDiagramDynamicTools
             TableName = tableName,
             X = 60 + vm.Entities.Count * 30,
             Y = 60 + vm.Entities.Count * 30,
-            Columns =
-            {
-                new Column
-                {
-                    Name = "Id",
-                    DataType = "int",
-                    IsPrimaryKey = true,
-                    IsNullable = false,
-                },
-            },
         };
         var vmEntity = new EntityViewModel(model);
         vm.UndoRedo.Execute(new UndoRedo.AddEntityCommand(vm, vmEntity));
