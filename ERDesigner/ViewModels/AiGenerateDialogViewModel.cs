@@ -227,21 +227,8 @@ public partial class AiGenerateDialogViewModel : ObservableObject
     [RelayCommand]
     private async Task GenerateAsync()
     {
-        if (string.IsNullOrWhiteSpace(Prompt))
+        if (!ValidateInput())
         {
-            StatusMessage = "要件を入力してください。";
-            return;
-        }
-
-        if (Provider == AiProvider.OpenAI && string.IsNullOrWhiteSpace(ApiKey))
-        {
-            StatusMessage = "OpenAI API キーを入力してください。";
-            return;
-        }
-
-        if (GenerationMode == AiGenerationMode.UpdateExisting && _existingDiagram is null)
-        {
-            StatusMessage = "更新対象の ER 図がありません。";
             return;
         }
 
@@ -250,20 +237,7 @@ public partial class AiGenerateDialogViewModel : ObservableObject
 
         try
         {
-            var settings = new AiGenerationSettings
-            {
-                Provider = Provider,
-                ApiKey = ApiKey,
-                Model = Model,
-                IdentifierNamingStyle = IdentifierNamingStyle,
-                TableNameNumberStyle = TableNameNumberStyle,
-                GenerationMode = GenerationMode,
-                ExistingDiagram = GenerationMode == AiGenerationMode.UpdateExisting ? _existingDiagram : null,
-                EndpointOverride = string.IsNullOrWhiteSpace(EndpointOverride) ? null : EndpointOverride,
-                Prompt = Prompt,
-            };
-
-            var result = await _client.GenerateAsync(settings).ConfigureAwait(true);
+            var result = await _client.GenerateAsync(BuildGenerationSettings()).ConfigureAwait(true);
             Result = result;
 
             if (Provider == AiProvider.OpenAI)
@@ -282,6 +256,45 @@ public partial class AiGenerateDialogViewModel : ObservableObject
             IsBusy = false;
         }
     }
+
+    private bool ValidateInput()
+    {
+        if (string.IsNullOrWhiteSpace(Prompt))
+        {
+            StatusMessage = "要件を入力してください。";
+            return false;
+        }
+
+        if (Provider == AiProvider.OpenAI && string.IsNullOrWhiteSpace(ApiKey))
+        {
+            StatusMessage = "OpenAI API キーを入力してください。";
+            return false;
+        }
+
+        if (GenerationMode == AiGenerationMode.UpdateExisting && _existingDiagram is null)
+        {
+            StatusMessage = "更新対象の ER 図がありません。";
+            return false;
+        }
+
+        return true;
+    }
+
+    private AiGenerationSettings BuildGenerationSettings() =>
+        new()
+        {
+            Provider = Provider,
+            ApiKey = ApiKey,
+            Model = Model,
+            IdentifierNamingStyle = IdentifierNamingStyle,
+            TableNameNumberStyle = TableNameNumberStyle,
+            GenerationMode = GenerationMode,
+            ExistingDiagram = IsUpdateExistingMode() ? _existingDiagram : null,
+            EndpointOverride = string.IsNullOrWhiteSpace(EndpointOverride) ? null : EndpointOverride,
+            Prompt = Prompt,
+        };
+
+    private bool IsUpdateExistingMode() => GenerationMode == AiGenerationMode.UpdateExisting;
 
     /// <summary>キャンセルボタン。</summary>
     [RelayCommand]

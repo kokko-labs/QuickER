@@ -11,6 +11,12 @@ namespace ERDesigner.ViewModels;
 /// <summary>Codex App Server の接続設定・認証・対話チャットを扱うダイアログ用 ViewModel です。</summary>
 public partial class CodexAppServerDialogViewModel : ObservableObject
 {
+    private const string OpenAiProviderName = "openai";
+    private const string ClientName = "erdesigner";
+    private const string ClientTitle = "ERDesigner";
+    private const string ClientVersion = "1.0.0";
+    private const string ApprovalPolicyNever = "never";
+
     private readonly ICodexAppServerClient _client;
     private readonly CodexAppServerSettingsStore _settingsStore;
     private readonly string _apiKeyStoreName;
@@ -56,34 +62,15 @@ public partial class CodexAppServerDialogViewModel : ObservableObject
         {
             if (SetProperty(ref _modelProvider, value))
             {
-                OnPropertyChanged(nameof(IsOpenAiProvider));
-                OnPropertyChanged(nameof(ShowAuthSection));
-                OnPropertyChanged(nameof(ShowNonOpenAiMessage));
-                OnPropertyChanged(nameof(ShowLoginPanel));
-                OnPropertyChanged(nameof(CanStartNewThread));
-                OnPropertyChanged(nameof(CanSendMessage));
-                // プロバイダー変更時にコマンドの有効状態とモデル候補を更新する
-                StartNewThreadCommand.NotifyCanExecuteChanged();
-                SendMessageCommand.NotifyCanExecuteChanged();
+                NotifyProviderStateChanged();
                 RefreshModelCandidates();
-
-                if (IsOpenAiProvider)
-                {
-                    if (string.IsNullOrWhiteSpace(Model) || !ModelCandidates.Contains(Model))
-                    {
-                        Model = AiModelCatalog.DefaultOpenAiModel;
-                    }
-                }
-                else if (ModelCandidates.Count > 0 && !ModelCandidates.Contains(Model))
-                {
-                    Model = ModelCandidates[0];
-                }
+                EnsureSelectedModelIsCandidate();
             }
         }
     }
 
     /// <summary>現在のプロバイダーが openai かどうかです。openai のみ認証が必要です。</summary>
-    public bool IsOpenAiProvider => string.IsNullOrWhiteSpace(ModelProvider) || ModelProvider.Trim().Equals("openai", StringComparison.OrdinalIgnoreCase);
+    public bool IsOpenAiProvider => string.IsNullOrWhiteSpace(ModelProvider) || ModelProvider.Trim().Equals(OpenAiProviderName, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>認証セクションを表示するかどうかです（openai プロバイダー選択時のみ）。</summary>
     public bool ShowAuthSection => IsOpenAiProvider;
@@ -146,11 +133,7 @@ public partial class CodexAppServerDialogViewModel : ObservableObject
         {
             if (SetProperty(ref _isStarted, value))
             {
-                OnPropertyChanged(nameof(CanLogout));
-                OnPropertyChanged(nameof(CanSendMessage));
-                OnPropertyChanged(nameof(CanStartNewThread));
-                SendMessageCommand.NotifyCanExecuteChanged();
-                StartNewThreadCommand.NotifyCanExecuteChanged();
+                NotifyAuthenticationStateChanged();
             }
         }
     }
@@ -163,12 +146,7 @@ public partial class CodexAppServerDialogViewModel : ObservableObject
         {
             if (SetProperty(ref _requiresOpenAiAuth, value))
             {
-                OnPropertyChanged(nameof(ShowLoginPanel));
-                OnPropertyChanged(nameof(CanStartNewThread));
-                OnPropertyChanged(nameof(CanSendMessage));
-                OnPropertyChanged(nameof(CanLogout));
-                StartNewThreadCommand.NotifyCanExecuteChanged();
-                SendMessageCommand.NotifyCanExecuteChanged();
+                NotifyAuthenticationStateChanged();
             }
         }
     }
@@ -182,13 +160,8 @@ public partial class CodexAppServerDialogViewModel : ObservableObject
             if (SetProperty(ref _authMode, value))
             {
                 OnPropertyChanged(nameof(ShowApiKeyInput));
-                OnPropertyChanged(nameof(CanLogout));
                 OnPropertyChanged(nameof(IsLoggedIn));
-                OnPropertyChanged(nameof(ShowLoginPanel));
-                OnPropertyChanged(nameof(CanStartNewThread));
-                OnPropertyChanged(nameof(CanSendMessage));
-                StartNewThreadCommand.NotifyCanExecuteChanged();
-                SendMessageCommand.NotifyCanExecuteChanged();
+                NotifyAuthenticationStateChanged();
             }
         }
     }
@@ -297,13 +270,13 @@ public partial class CodexAppServerDialogViewModel : ObservableObject
         try
         {
             SaveSettings();
-            await _client.StartAsync(BuildSettings(), "erdesigner", "ERDesigner", "1.0.0");
+            await _client.StartAsync(BuildSettings(), ClientName, ClientTitle, ClientVersion);
             IsStarted = _client.IsStarted;
             await RefreshAccountStateAsync();
 
             // 保存済みトークンで自動ログインできた場合はその旨を表示する
             // openai 以外のプロバイダー、またはサーバーが認証不要と返した場合もログイン不要として正常扱いする
-            StatusMessage = IsLoggedIn || !IsOpenAiProvider || !RequiresOpenAiAuth ? $"接続しました。{AccountSummary}" : "Codex App Server に接続しました。ログインしてください。";
+            StatusMessage = BuildConnectedStatusMessage();
         }
         catch (Exception ex)
         {
@@ -332,20 +305,7 @@ public partial class CodexAppServerDialogViewModel : ObservableObject
 
             // refreshToken: true を渡すことで、~/.codex に保存済みのトークンを自動再利用・更新する
             var account = await _client.ReadAccountAsync(refreshToken: true);
-            IsStarted = true;
-            RequiresOpenAiAuth = account.RequiresOpenAiAuth;
-
-            // account/read が account:null を返す場合（サーバーがアカウント情報を持たない）は
-            // account/updated 通知で設定済みの AuthMode を維持し、上書きしない
-            if (account.AuthMode != CodexAuthMode.None)
-            {
-                AuthMode = account.AuthMode;
-                AccountSummary = BuildAccountSummary(account);
-            }
-            else if (AuthMode == CodexAuthMode.None)
-            {
-                AccountSummary = BuildAccountSummary(account);
-            }
+            ApplyAccountState(account);
         }
         catch (Exception ex)
         {
@@ -480,16 +440,7 @@ public partial class CodexAppServerDialogViewModel : ObservableObject
 
         try
         {
-            var options = new CodexThreadStartOptions
-            {
-                Cwd = Environment.CurrentDirectory,
-                ApprovalPolicy = "never",
-                ModelProvider = string.IsNullOrWhiteSpace(ModelProvider) ? null : ModelProvider.Trim(),
-                Model = string.IsNullOrWhiteSpace(Model) ? null : Model.Trim(),
-                DynamicTools = _mainViewModel is not null ? ErDiagramDynamicTools.GetDefinitions() : null,
-            };
-
-            var thread = await _client.StartThreadAsync(options);
+            var thread = await _client.StartThreadAsync(BuildThreadStartOptions());
             _currentThreadId = thread.Id;
             OnPropertyChanged(nameof(HasThread));
             SendMessageCommand.NotifyCanExecuteChanged();
@@ -587,23 +538,93 @@ public partial class CodexAppServerDialogViewModel : ObservableObject
         LoadModelCandidatesFromConfigToml();
 
         // 既定プロバイダーは openai とする（保存済み設定を優先）
-        ModelProvider = string.IsNullOrEmpty(settings.ModelProvider) ? "openai" : settings.ModelProvider;
-        Model = string.IsNullOrEmpty(settings.Model)
-            ? IsOpenAiProvider
-                ? AiModelCatalog.DefaultOpenAiModel
-                : _configToml.Model
-            : settings.Model;
+        ModelProvider = NormalizeSetting(settings.ModelProvider, OpenAiProviderName);
+        Model = ResolveInitialModel(settings.Model);
+        EnsureSelectedModelIsCandidate();
+    }
 
-        if (IsOpenAiProvider && string.IsNullOrWhiteSpace(Model))
+    private void NotifyProviderStateChanged()
+    {
+        OnPropertyChanged(nameof(IsOpenAiProvider));
+        OnPropertyChanged(nameof(ShowAuthSection));
+        OnPropertyChanged(nameof(ShowNonOpenAiMessage));
+        OnPropertyChanged(nameof(ShowLoginPanel));
+        NotifyAuthenticationStateChanged();
+    }
+
+    private void NotifyAuthenticationStateChanged()
+    {
+        OnPropertyChanged(nameof(CanLogout));
+        OnPropertyChanged(nameof(CanSendMessage));
+        OnPropertyChanged(nameof(CanStartNewThread));
+        OnPropertyChanged(nameof(ShowLoginPanel));
+        StartNewThreadCommand.NotifyCanExecuteChanged();
+        SendMessageCommand.NotifyCanExecuteChanged();
+    }
+
+    private string BuildConnectedStatusMessage()
+    {
+        return CanUseWithoutLogin() ? $"接続しました。{AccountSummary}" : "Codex App Server に接続しました。ログインしてください。";
+    }
+
+    private bool CanUseWithoutLogin() => IsLoggedIn || !IsOpenAiProvider || !RequiresOpenAiAuth;
+
+    private void ApplyAccountState(CodexAccountInfo account)
+    {
+        IsStarted = true;
+        RequiresOpenAiAuth = account.RequiresOpenAiAuth;
+
+        // account/read が account:null を返す場合は、account/updated 通知で反映済みの AuthMode を維持します。
+        if (account.AuthMode != CodexAuthMode.None)
         {
-            Model = AiModelCatalog.DefaultOpenAiModel;
+            AuthMode = account.AuthMode;
+            AccountSummary = BuildAccountSummary(account);
+            return;
         }
 
-        if (ModelCandidates.Count > 0 && !ModelCandidates.Contains(Model))
+        if (AuthMode == CodexAuthMode.None)
+        {
+            AccountSummary = BuildAccountSummary(account);
+        }
+    }
+
+    private CodexThreadStartOptions BuildThreadStartOptions() =>
+        new()
+        {
+            Cwd = Environment.CurrentDirectory,
+            ApprovalPolicy = ApprovalPolicyNever,
+            ModelProvider = NormalizeOptionalText(ModelProvider),
+            Model = NormalizeOptionalText(Model),
+            DynamicTools = _mainViewModel is not null ? ErDiagramDynamicTools.GetDefinitions() : null,
+        };
+
+    private string ResolveInitialModel(string? storedModel)
+    {
+        if (!string.IsNullOrWhiteSpace(storedModel))
+        {
+            return storedModel;
+        }
+
+        return IsOpenAiProvider ? AiModelCatalog.DefaultOpenAiModel : _configToml.Model;
+    }
+
+    private void EnsureSelectedModelIsCandidate()
+    {
+        if (IsOpenAiProvider && (string.IsNullOrWhiteSpace(Model) || !ModelCandidates.Contains(Model)))
+        {
+            Model = AiModelCatalog.DefaultOpenAiModel;
+            return;
+        }
+
+        if (!IsOpenAiProvider && ModelCandidates.Count > 0 && !ModelCandidates.Contains(Model))
         {
             Model = ModelCandidates[0];
         }
     }
+
+    private static string NormalizeSetting(string? value, string fallback) => string.IsNullOrWhiteSpace(value) ? fallback : value;
+
+    private static string? NormalizeOptionalText(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     /// <summary>config.toml を読み込んでプロバイダーおよびモデル候補を更新します。</summary>
     private void LoadModelCandidatesFromConfigToml()
@@ -612,7 +633,7 @@ public partial class CodexAppServerDialogViewModel : ObservableObject
 
         // プロバイダー候補: openai は必ず先頭に配置 + config.toml の model_providers
         ModelProviderCandidates.Clear();
-        ModelProviderCandidates.Add("openai");
+        ModelProviderCandidates.Add(OpenAiProviderName);
 
         foreach (var name in _configToml.ProviderNames)
         {
@@ -692,18 +713,35 @@ public partial class CodexAppServerDialogViewModel : ObservableObject
         }
     }
 
-    private void OnLoginCompleted(object? sender, CodexLoginCompletedNotification e)
+    private static void RunOnUiThread(Action action)
     {
         var dispatcher = Application.Current?.Dispatcher;
 
         if (dispatcher is null || dispatcher.CheckAccess())
         {
-            ApplyLoginCompleted(e);
+            action();
+            return;
         }
-        else
+
+        _ = dispatcher.InvokeAsync(action);
+    }
+
+    private static void RunOnUiThreadAsync(Func<Task> action)
+    {
+        var dispatcher = Application.Current?.Dispatcher;
+
+        if (dispatcher is null || dispatcher.CheckAccess())
         {
-            _ = dispatcher.InvokeAsync(() => ApplyLoginCompleted(e));
+            _ = action();
+            return;
         }
+
+        _ = dispatcher.InvokeAsync(action);
+    }
+
+    private void OnLoginCompleted(object? sender, CodexLoginCompletedNotification e)
+    {
+        RunOnUiThread(() => ApplyLoginCompleted(e));
     }
 
     private void ApplyLoginCompleted(CodexLoginCompletedNotification e)
@@ -714,16 +752,7 @@ public partial class CodexAppServerDialogViewModel : ObservableObject
 
     private void OnAccountUpdated(object? sender, CodexAccountUpdatedNotification e)
     {
-        var dispatcher = Application.Current?.Dispatcher;
-
-        if (dispatcher is null || dispatcher.CheckAccess())
-        {
-            ApplyAccountUpdated(e);
-        }
-        else
-        {
-            _ = dispatcher.InvokeAsync(() => ApplyAccountUpdated(e));
-        }
+        RunOnUiThread(() => ApplyAccountUpdated(e));
     }
 
     private void ApplyAccountUpdated(CodexAccountUpdatedNotification e)
@@ -741,16 +770,7 @@ public partial class CodexAppServerDialogViewModel : ObservableObject
     private void OnAgentMessageDelta(object? sender, CodexAgentMessageDeltaNotification e)
     {
         // InvokeAsync でノンブロッキングにディスパッチする（Invoke の同期ブロックによるデッドロックを防ぐ）
-        var dispatcher = Application.Current?.Dispatcher;
-
-        if (dispatcher is null || dispatcher.CheckAccess())
-        {
-            ApplyDelta(e.Delta);
-        }
-        else
-        {
-            _ = dispatcher.InvokeAsync(() => ApplyDelta(e.Delta));
-        }
+        RunOnUiThread(() => ApplyDelta(e.Delta));
     }
 
     private void ApplyDelta(string delta)
@@ -769,32 +789,14 @@ public partial class CodexAppServerDialogViewModel : ObservableObject
 
     private void OnTurnCompleted(object? sender, CodexTurnCompletedNotification e)
     {
-        var dispatcher = Application.Current?.Dispatcher;
-
-        if (dispatcher is null || dispatcher.CheckAccess())
-        {
-            ApplyTurnCompleted(e);
-        }
-        else
-        {
-            _ = dispatcher.InvokeAsync(() => ApplyTurnCompleted(e));
-        }
+        RunOnUiThread(() => ApplyTurnCompleted(e));
     }
 
     private void ApplyTurnCompleted(CodexTurnCompletedNotification e)
     {
         IsTurnInProgress = false;
         _currentAssistantMessage = null;
-
-        // ターン完了後は全 ToolCall メッセージを折り畳む
-        foreach (var msg in Messages)
-        {
-            if (msg.Role == CodexChatMessageRole.ToolCall)
-            {
-                msg.IsExpanded = false;
-            }
-        }
-
+        CollapseToolCallMessages();
         _currentToolCallMessage = null;
 
         if (e.Turn.Status == "interrupted")
@@ -813,71 +815,90 @@ public partial class CodexAppServerDialogViewModel : ObservableObject
         }
     }
 
+    private void CollapseToolCallMessages()
+    {
+        // ターン完了後は全 ToolCall メッセージを折り畳みます。
+        foreach (var message in Messages)
+        {
+            if (message.Role == CodexChatMessageRole.ToolCall)
+            {
+                message.IsExpanded = false;
+            }
+        }
+    }
+
     private void OnDynamicToolCallReceived(object? sender, CodexDynamicToolCallRequest e)
     {
         // dynamicTool を実行してレスポンスを返す（UI スレッドで実行）
-        Application.Current?.Dispatcher.Invoke(async () =>
+        RunOnUiThreadAsync(async () => await ExecuteDynamicToolCallAsync(e));
+    }
+
+    private async Task ExecuteDynamicToolCallAsync(CodexDynamicToolCallRequest request)
+    {
+        var (resultText, success) = ExecuteDynamicTool(request);
+
+        try
         {
-            string resultText;
-            bool success;
+            await _client.RespondToDynamicToolCallAsync(request.RequestId, resultText, success);
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"ツールレスポンスの送信に失敗しました: {ex.Message}";
+        }
+    }
 
-            if (_mainViewModel is not null)
+    private (string ResultText, bool Success) ExecuteDynamicTool(CodexDynamicToolCallRequest request)
+    {
+        if (_mainViewModel is null)
+        {
+            return ($"MainViewModel が利用できないため '{request.Tool}' を実行できませんでした。", false);
+        }
+
+        var (resultText, success) = ErDiagramDynamicTools.Execute(request.Tool, request.Arguments, _mainViewModel);
+        AddOrAppendToolCallMessage(request.Tool, resultText);
+
+        // ツール呼び出し後の次のアシスタントメッセージは新しい吹き出しで表示する
+        _currentAssistantMessage = null;
+        _mainViewModel.RefreshCanvasSize();
+        return (resultText, success);
+    }
+
+    private void AddOrAppendToolCallMessage(string toolName, string resultText)
+    {
+        // ツール呼び出し内容を ToolCall メッセージとして追加または追記する（作業中は展開状態）
+        var toolCallText = $"[{toolName}] {resultText}";
+
+        if (_currentToolCallMessage is null)
+        {
+            _currentToolCallMessage = new CodexChatMessage
             {
-                (resultText, success) = ErDiagramDynamicTools.Execute(e.Tool, e.Arguments, _mainViewModel);
+                Role = CodexChatMessageRole.ToolCall,
+                Content = toolCallText,
+                IsExpanded = true,
+            };
+            Messages.Add(_currentToolCallMessage);
+            return;
+        }
 
-                // ツール呼び出し内容を ToolCall メッセージとして追加または追記する（作業中は展開状態）
-                var toolCallText = $"[{e.Tool}] {resultText}";
-
-                if (_currentToolCallMessage is null)
-                {
-                    _currentToolCallMessage = new CodexChatMessage
-                    {
-                        Role = CodexChatMessageRole.ToolCall,
-                        Content = toolCallText,
-                        IsExpanded = true,
-                    };
-                    Messages.Add(_currentToolCallMessage);
-                }
-                else
-                {
-                    _currentToolCallMessage.Content += "\n" + toolCallText;
-                }
-
-                // ツール呼び出し後の次のアシスタントメッセージは新しい吹き出しで表示する
-                _currentAssistantMessage = null;
-                _mainViewModel.RefreshCanvasSize();
-            }
-            else
-            {
-                resultText = $"MainViewModel が利用できないため '{e.Tool}' を実行できませんでした。";
-                success = false;
-            }
-
-            try
-            {
-                await _client.RespondToDynamicToolCallAsync(e.RequestId, resultText, success);
-            }
-            catch (Exception ex)
-            {
-                StatusMessage = $"ツールレスポンスの送信に失敗しました: {ex.Message}";
-            }
-        });
+        _currentToolCallMessage.Content += "\n" + toolCallText;
     }
 
     private void OnApprovalRequested(object? sender, CodexApprovalRequest e)
     {
         // approvalPolicy="never" を設定しているが、念のため auto-accept する
-        Application.Current?.Dispatcher.Invoke(async () =>
+        RunOnUiThreadAsync(async () => await RespondToApprovalAsync(e));
+    }
+
+    private async Task RespondToApprovalAsync(CodexApprovalRequest request)
+    {
+        try
         {
-            try
-            {
-                await _client.RespondToApprovalAsync(e.RequestId, "accept");
-            }
-            catch (Exception ex)
-            {
-                StatusMessage = $"承認レスポンスの送信に失敗しました: {ex.Message}";
-            }
-        });
+            await _client.RespondToApprovalAsync(request.RequestId, "accept");
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"承認レスポンスの送信に失敗しました: {ex.Message}";
+        }
     }
 
     private void OnNotificationReceived(object? sender, CodexJsonRpcNotification e)
@@ -888,16 +909,7 @@ public partial class CodexAppServerDialogViewModel : ObservableObject
             return;
         }
 
-        var dispatcher = Application.Current?.Dispatcher;
-
-        if (dispatcher is null || dispatcher.CheckAccess())
-        {
-            ApplyTurnError(e);
-        }
-        else
-        {
-            _ = dispatcher.InvokeAsync(() => ApplyTurnError(e));
-        }
+        RunOnUiThread(() => ApplyTurnError(e));
     }
 
     private void ApplyTurnError(CodexJsonRpcNotification e)
