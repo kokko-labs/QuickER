@@ -497,6 +497,30 @@ public class CodexAppServerDialogViewModelTests
         vm.ShowLoginPanel.Should().BeTrue("openai プロバイダーかつ未ログインのためパネル表示");
     }
 
+    [Fact(DisplayName = "[回帰] 初回自動接続中はログインパネルを表示しない")]
+    public async Task Regression_InitialAutoConnect_HidesLoginPanelUntilCompleted()
+    {
+        var (_, vm, folder) = CreateVm(new CodexAccountInfo { RequiresOpenAiAuth = true, AuthMode = CodexAuthMode.None }, "openai");
+
+        try
+        {
+            vm.BeginInitialAutoConnect();
+
+            vm.ShowLoginPanel.Should().BeFalse("自動接続結果が出るまではログインパネルの点滅を防ぐため非表示にする");
+
+            await vm.InitializeAsync();
+
+            vm.ShowLoginPanel.Should().BeTrue("自動接続後も未ログインならログインパネルを表示する");
+        }
+        finally
+        {
+            if (Directory.Exists(folder))
+            {
+                Directory.Delete(folder, recursive: true);
+            }
+        }
+    }
+
     [Fact(DisplayName = "[回帰] ConnectAsync: ChatGPT ログイン済みなら「接続しました。ChatGPT でログイン済み」を表示する")]
     public async Task ConnectAsync_WhenChatGptLoggedIn_ShowsConnectedWithAccountSummary()
     {
@@ -527,7 +551,7 @@ public class CodexAppServerDialogViewModelTests
         }
     }
 
-    [Fact(DisplayName = "[回帰] ConnectAsync: openai 以外プロバイダーなら「接続しました。OpenAI 認証不要」を表示する")]
+    [Fact(DisplayName = "[回帰] ConnectAsync: openai 以外プロバイダーなら「接続しました。ログイン不要」を表示する")]
     public async Task ConnectAsync_WhenNonOpenAiProvider_ShowsConnectedWithNoAuth()
     {
         var (_, vm, folder) = CreateVm(new CodexAccountInfo { RequiresOpenAiAuth = false, AuthMode = CodexAuthMode.None }, "ollama-launch");
@@ -596,7 +620,7 @@ public class CodexAppServerDialogViewModelTests
     [Fact(DisplayName = "[回帰] openai + RequiresOpenAiAuth=false: 自動ログイン成功として ShowLoginPanel=false / 接続しましたを表示する")]
     public async Task Regression_OpenAi_RequiresOpenAiAuthFalse_HidesLoginPanelAndShowsConnected()
     {
-        // RequiresOpenAiAuth=false はサーバーが「認証不要」と返したケース（自動ログイン成功相当）
+        // RequiresOpenAiAuth=false はサーバーが認証済み状態を返したケース（自動ログイン成功相当）
         var (_, vm, folder) = CreateVm(new CodexAccountInfo { RequiresOpenAiAuth = false, AuthMode = CodexAuthMode.None }, "openai");
 
         try
@@ -608,7 +632,8 @@ public class CodexAppServerDialogViewModelTests
             vm.ShowLoginPanel.Should().BeFalse("RequiresOpenAiAuth=false のためログインパネルを表示しない");
             vm.CanStartNewThread.Should().BeTrue("RequiresOpenAiAuth=false のためスレッド開始可能");
             vm.CanLogout.Should().BeTrue("RequiresOpenAiAuth=false かつ接続中のためログアウトボタンは有効");
-            vm.StatusMessage.Should().StartWith("接続しました。", "認証不要として接続成功扱い");
+            vm.AccountSummary.Should().Be("接続済み");
+            vm.StatusMessage.Should().Be("接続しました。接続済み", "openai プロバイダーの自動接続成功のため接続済みを表示");
         }
         finally
         {

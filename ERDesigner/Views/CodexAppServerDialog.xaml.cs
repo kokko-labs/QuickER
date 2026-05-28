@@ -24,6 +24,7 @@ public partial class CodexAppServerDialog : Window
     {
         InitializeComponent();
         ViewModel = new CodexAppServerDialogViewModel(client: null, settingsStore: null, apiKeyStoreName: "CodexAppServerApiKey", mainViewModel: mainViewModel);
+        ViewModel.BeginInitialAutoConnect();
         DataContext = ViewModel;
 
         // メッセージが追加されたら末尾へスクロールする

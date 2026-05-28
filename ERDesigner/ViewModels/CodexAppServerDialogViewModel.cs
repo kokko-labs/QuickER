@@ -16,7 +16,6 @@ public partial class CodexAppServerDialogViewModel : ObservableObject
     private const string ClientTitle = "ERDesigner";
     private const string ClientVersion = "1.0.0";
     private const string ApprovalPolicyNever = "never";
-
     private readonly ICodexAppServerClient _client;
     private readonly CodexAppServerSettingsStore _settingsStore;
     private readonly string _apiKeyStoreName;
@@ -29,6 +28,7 @@ public partial class CodexAppServerDialogViewModel : ObservableObject
     private bool _isBusy;
     private string _statusMessage = string.Empty;
     private bool _isStarted;
+    private bool _isInitialAutoConnectInProgress;
     private bool _requiresOpenAiAuth = true;
     private CodexAuthMode _authMode;
     private string _accountSummary = "未接続";
@@ -220,7 +220,20 @@ public partial class CodexAppServerDialogViewModel : ObservableObject
     public bool IsLoggedIn => AuthMode != CodexAuthMode.None;
 
     /// <summary>ログインパネルを表示するかどうかです（openai プロバイダーかつサーバーが認証必要と返したかつ未ログイン時のみ表示）。</summary>
-    public bool ShowLoginPanel => IsOpenAiProvider && RequiresOpenAiAuth && !IsLoggedIn;
+    public bool ShowLoginPanel => !IsInitialAutoConnectInProgress && IsOpenAiProvider && RequiresOpenAiAuth && !IsLoggedIn;
+
+    /// <summary>初回自動接続中かどうかです。接続結果が出るまでログインパネルを表示しません。</summary>
+    public bool IsInitialAutoConnectInProgress
+    {
+        get => _isInitialAutoConnectInProgress;
+        private set
+        {
+            if (SetProperty(ref _isInitialAutoConnectInProgress, value))
+            {
+                OnPropertyChanged(nameof(ShowLoginPanel));
+            }
+        }
+    }
 
     /// <summary>新しい ViewModel を生成します（MainViewModel なし）。</summary>
     public CodexAppServerDialogViewModel(ICodexAppServerClient? client = null, CodexAppServerSettingsStore? settingsStore = null)
@@ -250,14 +263,28 @@ public partial class CodexAppServerDialogViewModel : ObservableObject
     /// <summary>ダイアログ表示時に設定を読み込み、Codex App Server へ自動接続してアカウント状態を復元します。</summary>
     public async Task InitializeAsync()
     {
-        _isInitializing = true;
-        LoadSettings();
-        ApiKey = ApiKeyStore.Load(_apiKeyStoreName);
-        _isInitializing = false;
+        try
+        {
+            _isInitializing = true;
+            LoadSettings();
+            ApiKey = ApiKeyStore.Load(_apiKeyStoreName);
+            _isInitializing = false;
 
-        // 起動時に自動接続し、保存済みトークン（~/.codex/auth.json）を使って自動ログインを試みる
-        // 接続に失敗しても例外をユーザーへ伝搬させず、StatusMessage に表示する
-        await ConnectAsync();
+            // 起動時に自動接続し、保存済みトークン（~/.codex/auth.json）を使って自動ログインを試みる
+            // 接続に失敗しても例外をユーザーへ伝搬させず、StatusMessage に表示する
+            await ConnectAsync();
+        }
+        finally
+        {
+            _isInitializing = false;
+            IsInitialAutoConnectInProgress = false;
+        }
+    }
+
+    /// <summary>画面表示直後の自動接続中はログインパネルの一時表示を抑止します。</summary>
+    public void BeginInitialAutoConnect()
+    {
+        IsInitialAutoConnectInProgress = true;
     }
 
     /// <summary>Codex App Server を起動して接続状態を更新します。</summary>
@@ -335,12 +362,12 @@ public partial class CodexAppServerDialogViewModel : ObservableObject
         {
             await _client.LoginWithApiKeyAsync(ApiKey);
             PersistApiKey();
-            // 状態の反映は account/updated 通知 (OnAccountUpdated) で行うため、ここでは要求送信メッセージのみ設定する
-            StatusMessage = "API キーのログイン要求を送信しました。";
+            // 状態の反映は account/updated 通知 (OnAccountUpdated) で行うため、ここでは送信済みメッセージのみ設定する
+            StatusMessage = "ログイン要求を送信しました。";
         }
         catch (Exception ex)
         {
-            StatusMessage = $"API キーログインに失敗しました: {ex.Message}";
+            StatusMessage = $"ログインに失敗しました: {ex.Message}";
         }
         finally
         {
@@ -436,7 +463,7 @@ public partial class CodexAppServerDialogViewModel : ObservableObject
         }
 
         IsBusy = true;
-        StatusMessage = "新しい会話スレッドを開始中...";
+        StatusMessage = "会話を開始中...";
 
         try
         {
@@ -446,12 +473,12 @@ public partial class CodexAppServerDialogViewModel : ObservableObject
             SendMessageCommand.NotifyCanExecuteChanged();
 
             Messages.Clear();
-            AddSystemMessage("新しい会話スレッドを開始しました。ER 図について話しかけてください。");
-            StatusMessage = "スレッドを開始しました。";
+            AddSystemMessage("会話を開始しました。ER 図について話しかけてください。");
+            StatusMessage = "会話を開始しました。";
         }
         catch (Exception ex)
         {
-            StatusMessage = $"スレッド開始に失敗しました: {ex.Message}";
+            StatusMessage = $"会話の開始に失敗しました: {ex.Message}";
         }
         finally
         {
@@ -503,11 +530,11 @@ public partial class CodexAppServerDialogViewModel : ObservableObject
         try
         {
             await _client.InterruptTurnAsync(_currentThreadId, _currentTurnId);
-            StatusMessage = "ターンを中断しました。";
+            StatusMessage = "処理を中断しました。";
         }
         catch (Exception ex)
         {
-            StatusMessage = $"中断に失敗しました: {ex.Message}";
+            StatusMessage = $"処理の中断に失敗しました: {ex.Message}";
         }
     }
 
@@ -564,7 +591,7 @@ public partial class CodexAppServerDialogViewModel : ObservableObject
 
     private string BuildConnectedStatusMessage()
     {
-        return CanUseWithoutLogin() ? $"接続しました。{AccountSummary}" : "Codex App Server に接続しました。ログインしてください。";
+        return CanUseWithoutLogin() ? $"接続しました。{AccountSummary}" : "接続しました。ログインしてください。";
     }
 
     private bool CanUseWithoutLogin() => IsLoggedIn || !IsOpenAiProvider || !RequiresOpenAiAuth;
@@ -747,7 +774,7 @@ public partial class CodexAppServerDialogViewModel : ObservableObject
     private void ApplyLoginCompleted(CodexLoginCompletedNotification e)
     {
         // account/updated 通知が AuthMode を更新するため、ここでは状態再取得は行わない
-        StatusMessage = e.Success ? "ログインが完了しました。" : $"ログインに失敗しました: {e.Error}";
+        StatusMessage = e.Success ? "ログインしました。" : $"ログインに失敗しました: {e.Error}";
     }
 
     private void OnAccountUpdated(object? sender, CodexAccountUpdatedNotification e)
@@ -758,13 +785,9 @@ public partial class CodexAppServerDialogViewModel : ObservableObject
     private void ApplyAccountUpdated(CodexAccountUpdatedNotification e)
     {
         AuthMode = e.AuthMode;
-        AccountSummary = e.AuthMode switch
-        {
-            CodexAuthMode.ApiKey => "API キーでログイン済み",
-            CodexAuthMode.ChatGpt => string.IsNullOrWhiteSpace(e.PlanType) ? "ChatGPT でログイン済み" : $"ChatGPT でログイン済み ({e.PlanType})",
-            // openai プロバイダーは未ログイン、それ以外は認証不要
-            _ => IsOpenAiProvider ? "未ログイン" : "OpenAI 認証不要",
-        };
+        // account/updated 通知には RequiresOpenAiAuth が含まれないため、
+        // AuthMode=None は「認証不要 or 接続済み」として扱い、プロバイダー種別で表示を分ける。
+        AccountSummary = BuildAccountSummary(e.AuthMode, e.PlanType, email: null, showNotLoggedInWhenUnauthenticated: false, isOpenAiProvider: IsOpenAiProvider);
     }
 
     private void OnAgentMessageDelta(object? sender, CodexAgentMessageDeltaNotification e)
@@ -801,7 +824,7 @@ public partial class CodexAppServerDialogViewModel : ObservableObject
 
         if (e.Turn.Status == "interrupted")
         {
-            StatusMessage = "ターンが中断されました。";
+            StatusMessage = "処理が中断されました。";
         }
         else if (e.Turn.Status == "failed" && !string.IsNullOrWhiteSpace(e.Turn.Error))
         {
@@ -811,7 +834,7 @@ public partial class CodexAppServerDialogViewModel : ObservableObject
         }
         else
         {
-            StatusMessage = "完了しました。";
+            StatusMessage = "応答が完了しました。";
         }
     }
 
@@ -934,19 +957,33 @@ public partial class CodexAppServerDialogViewModel : ObservableObject
         StatusMessage = $"エラーが発生しました: {message}";
     }
 
-    private static string BuildAccountSummary(CodexAccountInfo account)
+    private string BuildAccountSummary(CodexAccountInfo account)
     {
-        return account.AuthMode switch
+        return BuildAccountSummary(
+            account.AuthMode,
+            account.PlanType,
+            account.Email,
+            showNotLoggedInWhenUnauthenticated: account.RequiresOpenAiAuth,
+            isOpenAiProvider: IsOpenAiProvider
+        );
+    }
+
+    private static string BuildAccountSummary(CodexAuthMode authMode, string? planType, string? email, bool showNotLoggedInWhenUnauthenticated, bool isOpenAiProvider = false)
+    {
+        return authMode switch
         {
             CodexAuthMode.ApiKey => "API キーでログイン済み",
-            CodexAuthMode.ChatGpt => string.IsNullOrWhiteSpace(account.Email)
-                ? string.IsNullOrWhiteSpace(account.PlanType)
+            CodexAuthMode.ChatGpt => string.IsNullOrWhiteSpace(email)
+                ? string.IsNullOrWhiteSpace(planType)
                     ? "ChatGPT でログイン済み"
-                    : $"ChatGPT でログイン済み ({account.PlanType})"
-                : string.IsNullOrWhiteSpace(account.PlanType)
-                    ? $"{account.Email} でログイン済み"
-                    : $"{account.Email} / {account.PlanType}",
-            _ => account.RequiresOpenAiAuth ? "未ログイン" : "OpenAI 認証不要",
+                    : $"ChatGPT でログイン済み ({planType})"
+                : string.IsNullOrWhiteSpace(planType)
+                    ? $"{email} でログイン済み"
+                    : $"{email} / {planType}",
+            // openai プロバイダーでサーバーが認証不要と返した場合は「接続済み」、非 OpenAI プロバイダーは「ログイン不要」
+            _ => showNotLoggedInWhenUnauthenticated ? "未ログイン"
+            : isOpenAiProvider ? "接続済み"
+            : "ログイン不要",
         };
     }
 }
