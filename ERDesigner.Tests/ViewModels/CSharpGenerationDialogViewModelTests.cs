@@ -40,10 +40,7 @@ public class CSharpGenerationDialogViewModelTests
     [Fact(DisplayName = "参照コマンドで出力先ファイルを更新できる")]
     public void BrowseOutputFile_UpdatesPath()
     {
-        var vm = new CSharpGenerationDialogViewModel("Sample.Domain", "ErDesignerEntities.g.cs")
-        {
-            BrowseOutputFileAction = _ => @"C:\work\Generated\Entities.g.cs",
-        };
+        var vm = new CSharpGenerationDialogViewModel("Sample.Domain", "ErDesignerEntities.g.cs") { BrowseOutputFileAction = _ => @"C:\work\Generated\Entities.g.cs" };
 
         vm.BrowseOutputFileCommand.Execute(null);
 

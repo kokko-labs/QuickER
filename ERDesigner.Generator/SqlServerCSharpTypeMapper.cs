@@ -31,12 +31,7 @@ internal sealed partial class SqlServerCSharpTypeMapper
         };
     }
 
-    private static CSharpTypeInfo Value(string typeName) =>
-        new()
-        {
-            TypeName = typeName,
-            IsReferenceType = false,
-        };
+    private static CSharpTypeInfo Value(string typeName) => new() { TypeName = typeName, IsReferenceType = false };
 
     private static CSharpTypeInfo Reference(string typeName, int? maxLength = null) =>
         new()

@@ -15,35 +15,20 @@ public sealed class CSharpCodeGenerationService
 
         if (diagnostics.Any(diagnostic => diagnostic.Severity == GenerationDiagnosticSeverity.Error))
         {
-            return new CodeGenerationResult
-            {
-                Files = [],
-                Diagnostics = diagnostics,
-            };
+            return new CodeGenerationResult { Files = [], Diagnostics = diagnostics };
         }
 
         var model = _modelBuilder.Build(diagram, options, diagnostics);
         var content = _renderer.Render(model, options);
 
-        return new CodeGenerationResult
-        {
-            Files =
-            [
-                new GeneratedFile
-                {
-                    FileName = SanitizeFileName(options.OutputFileName),
-                    Content = content,
-                },
-            ],
-            Diagnostics = diagnostics,
-        };
+        return new CodeGenerationResult { Files = [new GeneratedFile { FileName = SanitizeFileName(options.OutputFileName), Content = content }], Diagnostics = diagnostics };
     }
 
     private static void Validate(DiagramDefinition diagram, CodeGenerationOptions options, ICollection<GenerationDiagnostic> diagnostics)
     {
-        if (!options.GenerateEntityClasses && !options.GenerateBindingModels)
+        if (!options.GenerateEntityClasses && !options.GenerateEditModels && !options.GenerateMappers)
         {
-            diagnostics.Add(Error("Entity クラスと BindingModel クラスの両方が無効です。少なくとも一方を生成対象にしてください。"));
+            diagnostics.Add(Error("Entity / EditModel / Mapper のいずれも生成対象になっていません。少なくとも一つを有効にしてください。"));
         }
 
         if (diagram.Entities.Count == 0)
@@ -71,17 +56,7 @@ public sealed class CSharpCodeGenerationService
         return value.EndsWith(".g.cs", StringComparison.OrdinalIgnoreCase) ? value : Path.GetFileNameWithoutExtension(value) + ".g.cs";
     }
 
-    private static GenerationDiagnostic Error(string message) =>
-        new()
-        {
-            Severity = GenerationDiagnosticSeverity.Error,
-            Message = message,
-        };
+    private static GenerationDiagnostic Error(string message) => new() { Severity = GenerationDiagnosticSeverity.Error, Message = message };
 
-    private static GenerationDiagnostic Warning(string message) =>
-        new()
-        {
-            Severity = GenerationDiagnosticSeverity.Warning,
-            Message = message,
-        };
+    private static GenerationDiagnostic Warning(string message) => new() { Severity = GenerationDiagnosticSeverity.Warning, Message = message };
 }

@@ -11,7 +11,9 @@ public sealed class CodeGenerationOptions
 
     public bool GenerateEntityClasses { get; init; } = true;
 
-    public bool GenerateBindingModels { get; init; } = true;
+    public bool GenerateEditModels { get; init; } = true;
+
+    public bool GenerateMappers { get; init; } = true;
 
     public bool IncludeDataAnnotations { get; init; } = true;
 

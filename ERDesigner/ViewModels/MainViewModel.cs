@@ -1179,14 +1179,11 @@ public partial class MainViewModel : ObservableObject
         }
     }
 
-    /// <summary>現在の ER 図から C# の Entity / BindingModel コードを生成します。</summary>
+    /// <summary>現在の ER 図から C# の Entity / EditModel / Mapper コードを生成します。</summary>
     [RelayCommand]
     private void GenerateCSharpCode()
     {
-        var dialog = new Views.CSharpGenerationDialog(CSharpGenerationNamespace, "ErDesignerEntities.g.cs")
-        {
-            Owner = Application.Current?.MainWindow,
-        };
+        var dialog = new Views.CSharpGenerationDialog(CSharpGenerationNamespace, "ErDesignerEntities.g.cs") { Owner = Application.Current?.MainWindow };
 
         if (dialog.ShowDialog() != true || dialog.ViewModel.Result is null)
         {
@@ -1201,6 +1198,9 @@ public partial class MainViewModel : ObservableObject
             {
                 NamespaceName = string.IsNullOrWhiteSpace(CSharpGenerationNamespace) ? DefaultCSharpNamespace : CSharpGenerationNamespace.Trim(),
                 OutputFileName = Path.GetFileName(dialog.ViewModel.Result.OutputFilePath),
+                GenerateEntityClasses = dialog.ViewModel.Result.GenerateEntityClasses,
+                GenerateEditModels = dialog.ViewModel.Result.GenerateEditModels,
+                GenerateMappers = dialog.ViewModel.Result.GenerateMappers,
             };
             var result = service.Generate(ToGeneratorDiagram(), options);
 
@@ -1228,35 +1228,41 @@ public partial class MainViewModel : ObservableObject
     private DiagramDefinition ToGeneratorDiagram() =>
         new()
         {
-            Entities = Entities.Select(entity => new EntityDefinition
-            {
-                Id = entity.Id,
-                TableName = entity.TableName,
-                Columns = entity.Columns.Select(column => new ColumnDefinition
+            Entities = Entities
+                .Select(entity => new EntityDefinition
                 {
-                    Id = column.Id,
-                    Name = column.Name,
-                    DataType = column.DataType,
-                    IsPrimaryKey = column.IsPrimaryKey,
-                    IsForeignKey = column.IsForeignKey,
-                    IsNullable = column.IsNullable,
-                }).ToList(),
-            }).ToList(),
-            Relationships = Relationships.Select(relationship => new RelationshipDefinition
-            {
-                Id = relationship.Id,
-                SourceEntityId = relationship.Source.Id,
-                TargetEntityId = relationship.Target.Id,
-                Type = relationship.Type switch
+                    Id = entity.Id,
+                    TableName = entity.TableName,
+                    Columns = entity
+                        .Columns.Select(column => new ColumnDefinition
+                        {
+                            Id = column.Id,
+                            Name = column.Name,
+                            DataType = column.DataType,
+                            IsPrimaryKey = column.IsPrimaryKey,
+                            IsForeignKey = column.IsForeignKey,
+                            IsNullable = column.IsNullable,
+                        })
+                        .ToList(),
+                })
+                .ToList(),
+            Relationships = Relationships
+                .Select(relationship => new RelationshipDefinition
                 {
-                    RelationshipType.OneToOne => RelationshipMultiplicity.OneToOne,
-                    RelationshipType.OneToMany => RelationshipMultiplicity.OneToMany,
-                    RelationshipType.ManyToMany => RelationshipMultiplicity.ManyToMany,
-                    _ => RelationshipMultiplicity.OneToMany,
-                },
-                SourceColumnId = relationship.SourceColumnId,
-                TargetColumnId = relationship.TargetColumnId,
-            }).ToList(),
+                    Id = relationship.Id,
+                    SourceEntityId = relationship.Source.Id,
+                    TargetEntityId = relationship.Target.Id,
+                    Type = relationship.Type switch
+                    {
+                        RelationshipType.OneToOne => RelationshipMultiplicity.OneToOne,
+                        RelationshipType.OneToMany => RelationshipMultiplicity.OneToMany,
+                        RelationshipType.ManyToMany => RelationshipMultiplicity.ManyToMany,
+                        _ => RelationshipMultiplicity.OneToMany,
+                    },
+                    SourceColumnId = relationship.SourceColumnId,
+                    TargetColumnId = relationship.TargetColumnId,
+                })
+                .ToList(),
         };
 
     private static string BuildGenerationDiagnosticsMessage(CodeGenerationResult result) =>

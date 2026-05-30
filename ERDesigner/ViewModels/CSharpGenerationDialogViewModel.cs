@@ -38,6 +38,18 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
         _outputFilePath = outputFilePath;
     }
 
+    /// <summary>Entity クラスを生成するかどうかです。</summary>
+    [ObservableProperty]
+    private bool _generateEntityClasses = true;
+
+    /// <summary>EditModel クラスを生成するかどうかです。</summary>
+    [ObservableProperty]
+    private bool _generateEditModels = true;
+
+    /// <summary>Mapper クラスを生成するかどうかです。</summary>
+    [ObservableProperty]
+    private bool _generateMappers = true;
+
     /// <summary>出力先ファイルを選択します。</summary>
     [RelayCommand]
     private void BrowseOutputFile()
@@ -79,7 +91,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
             return;
         }
 
-        Result = new CSharpGenerationDialogResult(NamespaceName.Trim(), OutputFilePath.Trim());
+        Result = new CSharpGenerationDialogResult(NamespaceName.Trim(), OutputFilePath.Trim(), GenerateEntityClasses, GenerateEditModels, GenerateMappers);
         CloseAction?.Invoke(true);
     }
 
@@ -104,4 +116,4 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
 /// <summary>
 /// C# コード生成ダイアログの確定結果です。
 /// </summary>
-public sealed record CSharpGenerationDialogResult(string NamespaceName, string OutputFilePath);
+public sealed record CSharpGenerationDialogResult(string NamespaceName, string OutputFilePath, bool GenerateEntityClasses, bool GenerateEditModels, bool GenerateMappers);
