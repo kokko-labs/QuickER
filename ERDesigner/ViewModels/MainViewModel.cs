@@ -6,6 +6,7 @@ using System.Windows;
 using System.Windows.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using ERDesigner.Generator;
 using ERDesigner.Models;
 using ERDesigner.Services;
 using ERDesigner.UndoRedo;
@@ -57,6 +58,8 @@ public partial class MainViewModel : ObservableObject
         nameof(ColumnViewModel.IsNullable),
         nameof(ColumnViewModel.Description),
     ];
+
+    private const string DefaultCSharpNamespace = "Generated.Entities";
 
     public UndoRedoManager UndoRedo { get; } = new();
 
@@ -119,6 +122,9 @@ public partial class MainViewModel : ObservableObject
 
     /// <summary>型 ComboBox に表示する SQL Server のデータ型一覧。</summary>
     public IReadOnlyList<string> SqlDataTypes => SqlServerDataTypes.All;
+
+    /// <summary>C# 生成時に使用する既定の namespace です。</summary>
+    public string CSharpGenerationNamespace { get; set; } = DefaultCSharpNamespace;
 
     /// <summary>エンティティ見出しの背景色プリセット一覧です。</summary>
     public IReadOnlyList<EntityTitleColorOption> EntityTitleColorOptions => EntityTitleColorPalette.Options;
@@ -1172,6 +1178,89 @@ public partial class MainViewModel : ObservableObject
             MessageBox.Show($"出力できませんでした。{Environment.NewLine}{ex.Message}", "エラー", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
+
+    /// <summary>現在の ER 図から C# の Entity / BindingModel コードを生成します。</summary>
+    [RelayCommand]
+    private void GenerateCSharpCode()
+    {
+        var dialog = new Views.CSharpGenerationDialog(CSharpGenerationNamespace, "ErDesignerEntities.g.cs")
+        {
+            Owner = Application.Current?.MainWindow,
+        };
+
+        if (dialog.ShowDialog() != true || dialog.ViewModel.Result is null)
+        {
+            return;
+        }
+
+        try
+        {
+            CSharpGenerationNamespace = dialog.ViewModel.Result.NamespaceName;
+            var service = new CSharpCodeGenerationService();
+            var options = new CodeGenerationOptions
+            {
+                NamespaceName = string.IsNullOrWhiteSpace(CSharpGenerationNamespace) ? DefaultCSharpNamespace : CSharpGenerationNamespace.Trim(),
+                OutputFileName = Path.GetFileName(dialog.ViewModel.Result.OutputFilePath),
+            };
+            var result = service.Generate(ToGeneratorDiagram(), options);
+
+            if (result.HasErrors)
+            {
+                MessageBox.Show(BuildGenerationDiagnosticsMessage(result), "C# 生成エラー", MessageBoxButton.OK, MessageBoxImage.Error);
+                return;
+            }
+
+            var writer = new GeneratedFileWriter();
+            writer.WriteFiles(Path.GetDirectoryName(dialog.ViewModel.Result.OutputFilePath) ?? Environment.CurrentDirectory, result);
+
+            var diagnostics = BuildGenerationDiagnosticsMessage(result);
+            var message = string.IsNullOrWhiteSpace(diagnostics)
+                ? "C# コードの生成が完了しました。"
+                : $"C# コードの生成が完了しました。{Environment.NewLine}{Environment.NewLine}{diagnostics}";
+            MessageBox.Show(message, "完了", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"C# コードを生成できませんでした。{Environment.NewLine}{ex.Message}", "エラー", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private DiagramDefinition ToGeneratorDiagram() =>
+        new()
+        {
+            Entities = Entities.Select(entity => new EntityDefinition
+            {
+                Id = entity.Id,
+                TableName = entity.TableName,
+                Columns = entity.Columns.Select(column => new ColumnDefinition
+                {
+                    Id = column.Id,
+                    Name = column.Name,
+                    DataType = column.DataType,
+                    IsPrimaryKey = column.IsPrimaryKey,
+                    IsForeignKey = column.IsForeignKey,
+                    IsNullable = column.IsNullable,
+                }).ToList(),
+            }).ToList(),
+            Relationships = Relationships.Select(relationship => new RelationshipDefinition
+            {
+                Id = relationship.Id,
+                SourceEntityId = relationship.Source.Id,
+                TargetEntityId = relationship.Target.Id,
+                Type = relationship.Type switch
+                {
+                    RelationshipType.OneToOne => RelationshipMultiplicity.OneToOne,
+                    RelationshipType.OneToMany => RelationshipMultiplicity.OneToMany,
+                    RelationshipType.ManyToMany => RelationshipMultiplicity.ManyToMany,
+                    _ => RelationshipMultiplicity.OneToMany,
+                },
+                SourceColumnId = relationship.SourceColumnId,
+                TargetColumnId = relationship.TargetColumnId,
+            }).ToList(),
+        };
+
+    private static string BuildGenerationDiagnosticsMessage(CodeGenerationResult result) =>
+        string.Join(Environment.NewLine, result.Diagnostics.Select(diagnostic => $"[{diagnostic.Severity}] {diagnostic.Message}"));
 
     /// <summary>
     /// ファイル選択ダイアログで選択した形式に応じて ER 図を取り込みます。

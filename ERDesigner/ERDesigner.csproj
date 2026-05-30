@@ -14,4 +14,19 @@
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.7" />
     <PackageReference Include="OpenAI" Version="2.10.0" />
   </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ERDesigner.Generator\ERDesigner.Generator.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Update="ViewModels\CSharpGenerationDialogViewModel.cs" />
+    <Compile Update="Views\CSharpGenerationDialog.xaml.cs">
+      <DependentUpon>CSharpGenerationDialog.xaml</DependentUpon>
+    </Compile>
+    <Page Update="Views\CSharpGenerationDialog.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
+  </ItemGroup>
 </Project>

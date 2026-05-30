@@ -502,6 +502,13 @@
             <TextBlock Style="{StaticResource ToolBarCaption}" Text="Codex" />
           </StackPanel>
         </Button>
+        <Rectangle Style="{StaticResource ToolBarSeparator}" />
+        <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding GenerateCSharpCodeCommand}" ToolTip="現在の ER 図から C# Entity / BindingModel を生成">
+          <StackPanel>
+            <TextBlock Style="{StaticResource ToolBarIcon}" Text="⌘" />
+            <TextBlock Style="{StaticResource ToolBarCaption}" Text="C#生成" />
+          </StackPanel>
+        </Button>
       </StackPanel>
     </Border>
 
