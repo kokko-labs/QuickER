@@ -13,19 +13,29 @@ internal sealed class ScribanCSharpRenderer
         namespace {{ namespace_name }};
 
         {{~ if emit_nav_ref_attr ~}}
-        /// <summary>Entity navigation に参照カラム情報を付加する独自属性です。</summary>
+        /// <summary>Entity navigation に参照テーブル・カラム情報を付加する独自属性です。</summary>
         [AttributeUsage(AttributeTargets.Property, AllowMultiple = false)]
         public sealed class NavigationReferenceAttribute : Attribute
         {
-        	public string PrincipalColumn { get; }
+            public string PrincipalTable { get; }
 
-        	public string DependentColumn { get; }
+            public string PrincipalColumn { get; }
 
-        	public NavigationReferenceAttribute(string principalColumn, string dependentColumn)
-        	{
-        		PrincipalColumn = principalColumn;
-        		DependentColumn = dependentColumn;
-        	}
+            public string DependentTable { get; }
+
+            public string DependentColumn { get; }
+
+            /// <summary>このナビゲーションがコレクション (1対多) かどうかです。</summary>
+            public bool IsCollection { get; }
+
+            public NavigationReferenceAttribute(string principalTable, string principalColumn, string dependentTable, string dependentColumn, bool isCollection)
+            {
+                PrincipalTable = principalTable;
+                PrincipalColumn = principalColumn;
+                DependentTable = dependentTable;
+                DependentColumn = dependentColumn;
+                IsCollection = isCollection;
+            }
         }
         {{ end }}
         {{~ for item in entity_classes ~}}
@@ -39,8 +49,8 @@ internal sealed class ScribanCSharpRenderer
         {{ end }}    public {{ property.type_name }} {{ property.property_name }} { get; set; }{{ property.initializer }}
 
         {{ end }}{{ for navigation in item.navigations }}{{ if include_json_ignore_on_parent_navigation && navigation.is_parent_reference }}    [JsonIgnore]
-        {{ end }}    [NavigationReference("{{ navigation.principal_column_name }}", "{{ navigation.dependent_column_name }}")]
-        	public {{ navigation.display_type_name }} {{ navigation.property_name }} { get; set; }{{ navigation.initializer }}
+        {{ end }}    [NavigationReference("{{ navigation.principal_table_name }}", "{{ navigation.principal_column_name }}", "{{ navigation.dependent_table_name }}", "{{ navigation.dependent_column_name }}", {{ navigation.is_collection }})]
+            public {{ navigation.display_type_name }} {{ navigation.property_name }} { get; set; }{{ navigation.initializer }}
 
         {{ end }}}
         {{~ end ~}}

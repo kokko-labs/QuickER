@@ -125,8 +125,8 @@ public class CSharpCodeGenerationServiceTests
         var result = new CSharpCodeGenerationService().Generate(diagram, new CodeGenerationOptions { NamespaceName = "Sample.Domain" });
 
         result.HasErrors.Should().BeFalse();
-        // Entity の navigation プロパティに独自属性が付く
-        result.Files[0].Content.Should().Contain("[NavigationReference(");
+        // Entity の navigation プロパティに独自属性が付く（テーブル名・カラム名・IsCollection の 5 引数形式）
+        result.Files[0].Content.Should().Contain("[NavigationReference(\"customers\", \"customer_id\", \"orders\", \"customer_id\", true)]");
         result.Files[0].Content.Should().Contain("public ICollection<OrderEntity> Orders { get; set; } = new List<OrderEntity>();");
         result.Files[0].Content.Should().Contain("[JsonIgnore]");
         result.Files[0].Content.Should().Contain("public CustomerEntity Customer { get; set; } = null!;");

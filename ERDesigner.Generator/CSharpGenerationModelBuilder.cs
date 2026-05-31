@@ -186,7 +186,9 @@ internal sealed class CSharpGenerationModelBuilder
                 IsParentReference = nav.IsParentReference,
                 DisplayTypeName = nav.IsCollection ? $"ICollection<{targetEntityTypeName}>" : (nav.IsNullable ? targetEntityTypeName + "?" : targetEntityTypeName),
                 Initializer = nav.IsCollection ? $" = new List<{targetEntityTypeName}>();" : (nav.IsNullable ? string.Empty : " = null!;"),
+                PrincipalTableName = nav.PrincipalTableName,
                 PrincipalColumnName = nav.PrincipalColumnName,
+                DependentTableName = nav.DependentTableName,
                 DependentColumnName = nav.DependentColumnName,
             };
         }
@@ -206,7 +208,9 @@ internal sealed class CSharpGenerationModelBuilder
                 IsParentReference = nav.IsParentReference,
                 DisplayTypeName = nav.IsCollection ? $"ICollection<{targetEditModelTypeName}>" : (nav.IsNullable ? targetEditModelTypeName + "?" : targetEditModelTypeName),
                 Initializer = nav.IsCollection ? $" = new List<{targetEditModelTypeName}>();" : (nav.IsNullable ? string.Empty : " = null!;"),
+                PrincipalTableName = nav.PrincipalTableName,
                 PrincipalColumnName = nav.PrincipalColumnName,
+                DependentTableName = nav.DependentTableName,
                 DependentColumnName = nav.DependentColumnName,
             };
         }
@@ -233,7 +237,9 @@ internal sealed class CSharpGenerationModelBuilder
         bool IsCollection,
         bool IsNullable,
         bool IsParentReference,
+        string PrincipalTableName,
         string PrincipalColumnName,
+        string DependentTableName,
         string DependentColumnName
     );
 
@@ -275,7 +281,9 @@ internal sealed class CSharpGenerationModelBuilder
                     IsCollection: relationship.Type == RelationshipMultiplicity.OneToMany,
                     IsNullable: false,
                     IsParentReference: false,
+                    PrincipalTableName: source.TableName,
                     PrincipalColumnName: principalColumn.Name,
+                    DependentTableName: target.TableName,
                     DependentColumnName: dependentColumn.Name
                 );
             }
@@ -287,7 +295,9 @@ internal sealed class CSharpGenerationModelBuilder
                     IsCollection: false,
                     IsNullable: dependentColumn.IsNullable,
                     IsParentReference: true,
+                    PrincipalTableName: source.TableName,
                     PrincipalColumnName: principalColumn.Name,
+                    DependentTableName: target.TableName,
                     DependentColumnName: dependentColumn.Name
                 );
             }

@@ -61,8 +61,14 @@ internal sealed class CSharpNavigationModel
 
     public required string Initializer { get; init; }
 
+    /// <summary>principal 側 (参照される側) のテーブル名です。</summary>
+    public required string PrincipalTableName { get; init; }
+
     /// <summary>principal 側 (参照される側) のカラム名です。</summary>
     public required string PrincipalColumnName { get; init; }
+
+    /// <summary>dependent 側 (FK 側) のテーブル名です。</summary>
+    public required string DependentTableName { get; init; }
 
     /// <summary>dependent 側 (FK 側) のカラム名です。</summary>
     public required string DependentColumnName { get; init; }
