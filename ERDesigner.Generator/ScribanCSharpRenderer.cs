@@ -57,7 +57,7 @@ internal sealed class ScribanCSharpRenderer
 
         {{~ if edit_model_classes.size > 0 ~}}
         /// <summary>EditModel 共通の通知、エラー管理、補助処理を提供する基底クラスです。</summary>
-        public abstract class EditModelBase : INotifyPropertyChanged, INotifyDataErrorInfo
+        public abstract partial class EditModelBase : INotifyPropertyChanged, INotifyDataErrorInfo
         {
             private readonly Dictionary<string, List<string>> _errors = new();
 
@@ -141,6 +141,25 @@ internal sealed class ScribanCSharpRenderer
                     IsReverting = false;
                 }
             }
+
+            /// <summary>バインディング値の変換エラーメッセージを構築します。派生クラスで override することで全体の方針を差し替えられます。</summary>
+            protected virtual string BuildParseErrorMessage(string propertyName, string inputValue, string typeName) =>
+                $"'{inputValue}' は {typeName} に変換できません。";
+
+            /// <summary>エラーメッセージを解決します。BuildParseErrorMessage の後に CustomizeParseErrorMessage で微調整できます。</summary>
+            protected string ResolveParseErrorMessage(string propertyName, string inputValue, string typeName)
+            {
+                var message = BuildParseErrorMessage(propertyName, inputValue, typeName);
+                CustomizeParseErrorMessage(propertyName, inputValue, typeName, ref message);
+                return message;
+            }
+
+            /// <summary>プロパティ単位のエラーメッセージ微調整用の partial メソッドです。別ファイルの partial 実装で任意のメッセージに差し替えられます。</summary>
+            partial void CustomizeParseErrorMessage(
+                string propertyName,
+                string inputValue,
+                string typeName,
+                ref string message);
         }
         {{ end }}
         {{~ for item in edit_model_classes ~}}
@@ -176,16 +195,16 @@ internal sealed class ScribanCSharpRenderer
                     if (!IsReverting)
         			{
         {{ if p.needs_parse }}                if ({{ p.parse_type_name }}.TryParse(value, out var parsed))
-        				{
-        					{{ p.property_name }} = parsed;
-        					{{ p.error_field_name }} = null;
-        					SetError(nameof({{ p.binding_property_name }}), null);
-        				}
-        				else
-        				{
-        					{{ p.error_field_name }} = $"'{value}' は {{ p.type_name }} に変換できません。";
-        					SetError(nameof({{ p.binding_property_name }}), {{ p.error_field_name }});
-        				}
+                    {
+                        {{ p.property_name }} = parsed;
+                        {{ p.error_field_name }} = null;
+                        SetError(nameof({{ p.binding_property_name }}), null);
+                    }
+                    else
+                    {
+                        {{ p.error_field_name }} = ResolveParseErrorMessage(nameof({{ p.binding_property_name }}), value, "{{ p.parse_type_name }}");
+                        SetError(nameof({{ p.binding_property_name }}), {{ p.error_field_name }});
+                    }
         {{ else if p.is_nullable }}                if (string.IsNullOrEmpty(value))
         				{
         					{{ p.property_name }} = null;

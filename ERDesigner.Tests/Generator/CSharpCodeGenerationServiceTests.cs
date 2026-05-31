@@ -47,7 +47,7 @@ public class CSharpCodeGenerationServiceTests
         result.Files[0].Content.Should().Contain("namespace Sample.Domain;");
         result.Files[0].Content.Should().Contain("public partial class CustomerEntity");
         result.Files[0].Content.Should().Contain("public partial class CustomerEditModel");
-        result.Files[0].Content.Should().Contain("public abstract class EditModelBase");
+        result.Files[0].Content.Should().Contain("public abstract partial class EditModelBase");
         result.Files[0].Content.Should().Contain("[Table(\"customers\")]");
         result.Files[0].Content.Should().Contain("[Key]");
         result.Files[0].Content.Should().Contain("[MaxLength(100)]");
@@ -287,6 +287,12 @@ public class CSharpCodeGenerationServiceTests
         // TryParse 検証
         content.Should().Contain("int.TryParse(value, out var parsed)");
         content.Should().Contain("decimal.TryParse(value, out var parsed)");
+        // エラーメッセージは ResolveParseErrorMessage 経由で生成される
+        content.Should().Contain("ResolveParseErrorMessage(nameof(BindingOrderId), value, \"int\")");
+        content.Should().Contain("ResolveParseErrorMessage(nameof(BindingAmount), value, \"decimal\")");
+        // EditModelBase に BuildParseErrorMessage / CustomizeParseErrorMessage が存在する
+        content.Should().Contain("protected virtual string BuildParseErrorMessage(");
+        content.Should().Contain("partial void CustomizeParseErrorMessage(");
         // RevertInput
         content.Should().Contain("public void RevertInput()");
         content.Should().Contain("ExecuteRevert(() =>");
