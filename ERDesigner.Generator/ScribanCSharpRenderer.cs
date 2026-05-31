@@ -45,51 +45,97 @@ internal sealed class ScribanCSharpRenderer
         {{ end }}}
         {{~ end ~}}
 
-        {{~ for item in edit_model_classes ~}}
-        public partial class {{ item.class_name }} : INotifyPropertyChanged, INotifyDataErrorInfo
+        {{~ if edit_model_classes.size > 0 ~}}
+        /// <summary>EditModel 共通の通知、エラー管理、補助処理を提供する基底クラスです。</summary>
+        public abstract class EditModelBase : INotifyPropertyChanged, INotifyDataErrorInfo
         {
-        	// ---- INotifyPropertyChanged ----
-        	public event PropertyChangedEventHandler? PropertyChanged;
+            private readonly Dictionary<string, List<string>> _errors = new();
 
-        	private void OnPropertyChanged(string propertyName) =>
-        		PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+            /// <summary>入力値の変更通知です。</summary>
+            public event PropertyChangedEventHandler? PropertyChanged;
 
-        	// ---- INotifyDataErrorInfo ----
-        	private readonly Dictionary<string, List<string>> _errors = new();
+            /// <summary>入力エラー変更通知です。</summary>
+            public event EventHandler<DataErrorsChangedEventArgs>? ErrorsChanged;
 
-        	public bool HasErrors => _errors.Count > 0;
+            /// <summary>入力エラーを保持しているかどうかです。</summary>
+            public bool HasErrors => _errors.Count > 0;
 
-        	public event EventHandler<DataErrorsChangedEventArgs>? ErrorsChanged;
+            /// <summary>リバート処理中かどうかです。</summary>
+            protected bool IsReverting { get; private set; }
 
-        	public System.Collections.IEnumerable GetErrors(string? propertyName)
-        	{
-        		if (string.IsNullOrEmpty(propertyName))
-        		{
-        			return _errors.Values.SelectMany(e => e);
-        		}
+            /// <summary>指定プロパティの変更通知を発行します。</summary>
+            protected void OnPropertyChanged(string propertyName) =>
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 
-        		return _errors.TryGetValue(propertyName, out var list) ? list : Enumerable.Empty<string>();
-        	}
+            /// <summary>共通の変更通知付き代入ヘルパーです。</summary>
+            protected bool SetProperty<T>(ref T field, T value, string propertyName)
+            {
+                if (EqualityComparer<T>.Default.Equals(field, value))
+                {
+                    return false;
+                }
 
-        	private void SetError(string propertyName, string? error)
-        	{
-        		if (error is null)
-        		{
-        			if (_errors.Remove(propertyName))
-        			{
-        				ErrorsChanged?.Invoke(this, new DataErrorsChangedEventArgs(propertyName));
-        			}
+                field = value;
+                OnPropertyChanged(propertyName);
+                return true;
+            }
 
-        			return;
-        		}
+            /// <summary>指定プロパティのエラー一覧を取得します。</summary>
+            public System.Collections.IEnumerable GetErrors(string? propertyName)
+            {
+                if (string.IsNullOrEmpty(propertyName))
+                {
+                    return _errors.Values.SelectMany(e => e);
+                }
 
-        		_errors[propertyName] = [error];
-        		ErrorsChanged?.Invoke(this, new DataErrorsChangedEventArgs(propertyName));
-        	}
+                return _errors.TryGetValue(propertyName, out var list) ? list : Enumerable.Empty<string>();
+            }
 
-        	// ---- リバート中フラグ (無限ループ防止) ----
-        	private bool _isReverting;
+            /// <summary>指定プロパティのエラーを設定します。</summary>
+            protected void SetError(string propertyName, string? error)
+            {
+                if (error is null)
+                {
+                    ClearErrors(propertyName);
+                    return;
+                }
 
+                _errors[propertyName] = [error];
+                OnErrorsChanged(propertyName);
+            }
+
+            /// <summary>指定プロパティのエラーをクリアします。</summary>
+            protected void ClearErrors(string propertyName)
+            {
+                if (_errors.Remove(propertyName))
+                {
+                    OnErrorsChanged(propertyName);
+                }
+            }
+
+            /// <summary>入力エラー変更通知を発行します。</summary>
+            protected void OnErrorsChanged(string propertyName) =>
+                ErrorsChanged?.Invoke(this, new DataErrorsChangedEventArgs(propertyName));
+
+            /// <summary>リバート中フラグを制御しながら共通処理を実行します。</summary>
+            protected void ExecuteRevert(Action action)
+            {
+                IsReverting = true;
+
+                try
+                {
+                    action();
+                }
+                finally
+                {
+                    IsReverting = false;
+                }
+            }
+        }
+        {{ end }}
+        {{~ for item in edit_model_classes ~}}
+        public partial class {{ item.class_name }} : EditModelBase
+        {
         	// ---- プロパティ ----
         {{ for p in item.properties }}{{ if p.field_initializer != "" }}    private {{ p.type_name }} {{ p.field_name }} = {{ p.field_initializer }};
         {{ else }}    private {{ p.type_name }} {{ p.field_name }};
@@ -102,11 +148,7 @@ internal sealed class ScribanCSharpRenderer
         		get => {{ p.field_name }};
         		private set
         		{
-        			if (!Equals({{ p.field_name }}, value))
-        			{
-        				{{ p.field_name }} = value;
-        				OnPropertyChanged(nameof({{ p.property_name }}));
-        			}
+                    SetProperty(ref {{ p.field_name }}, value, nameof({{ p.property_name }}));
         		}
         	}
 
@@ -116,15 +158,12 @@ internal sealed class ScribanCSharpRenderer
         		get => {{ p.binding_field_name }};
         		set
         		{
-        			if ({{ p.binding_field_name }} == value)
+                    if (!SetProperty(ref {{ p.binding_field_name }}, value, nameof({{ p.binding_property_name }})))
         			{
         				return;
         			}
 
-        			{{ p.binding_field_name }} = value;
-        			OnPropertyChanged(nameof({{ p.binding_property_name }}));
-
-        			if (!_isReverting)
+                    if (!IsReverting)
         			{
         {{ if p.needs_parse }}                if ({{ p.parse_type_name }}.TryParse(value, out var parsed))
         				{
@@ -163,18 +202,12 @@ internal sealed class ScribanCSharpRenderer
         	/// <summary>確定値をバインディング用プロパティに書き戻し、エラー情報をクリアします。</summary>
         	public void RevertInput()
         	{
-        		_isReverting = true;
-
-        		try
+                    ExecuteRevert(() =>
         		{
         {{ for p in item.properties }}            {{ p.binding_property_name }} = {{ p.property_name }}?.ToString() ?? string.Empty;
         			{{ p.error_field_name }} = null;
         			SetError(nameof({{ p.binding_property_name }}), null);
-        {{ end }}        }
-        		finally
-        		{
-        			_isReverting = false;
-        		}
+        {{ end }}        });
         	}
         }
         {{~ end ~}}

@@ -47,13 +47,13 @@ public class CSharpCodeGenerationServiceTests
         result.Files[0].Content.Should().Contain("namespace Sample.Domain;");
         result.Files[0].Content.Should().Contain("public partial class CustomerEntity");
         result.Files[0].Content.Should().Contain("public partial class CustomerEditModel");
+        result.Files[0].Content.Should().Contain("public abstract class EditModelBase");
         result.Files[0].Content.Should().Contain("[Table(\"customers\")]");
         result.Files[0].Content.Should().Contain("[Key]");
         result.Files[0].Content.Should().Contain("[MaxLength(100)]");
         // EditModel はバインディング用プロパティを持つ
         result.Files[0].Content.Should().Contain("public string BindingName");
-        result.Files[0].Content.Should().Contain("INotifyPropertyChanged");
-        result.Files[0].Content.Should().Contain("INotifyDataErrorInfo");
+        result.Files[0].Content.Should().Contain("public partial class CustomerEditModel : EditModelBase");
     }
 
     [Fact]
@@ -289,7 +289,7 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("decimal.TryParse(value, out var parsed)");
         // RevertInput
         content.Should().Contain("public void RevertInput()");
-        content.Should().Contain("_isReverting = true;");
+        content.Should().Contain("ExecuteRevert(() =>");
     }
 
     [Fact]
