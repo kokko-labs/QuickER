@@ -10,6 +10,11 @@ internal sealed class CSharpGenerationModelBuilder
         var entityClasses = diagram.Entities.Select(entity => BuildEntityClass(entity, diagram, diagnostics)).ToList();
         var editModelClasses = diagram.Entities.Select(entity => BuildEditModelClass(entity, diagram, diagnostics)).ToList();
         var mapperClasses = diagram.Entities.Select(entity => BuildMapperClass(entity, diagram, diagnostics)).ToList();
+        var repositoryClasses = diagram
+            .Entities.Select(entity => BuildRepositoryClass(entity, diagnostics))
+            .Where(model => model is not null)
+            .Cast<CSharpRepositoryModel>()
+            .ToList();
         var usings = BuildUsings(options).ToList();
 
         return new CSharpGenerationModel
@@ -18,6 +23,7 @@ internal sealed class CSharpGenerationModelBuilder
             EntityClasses = options.GenerateEntityClasses ? entityClasses : [],
             EditModelClasses = options.GenerateEditModels ? editModelClasses : [],
             MapperClasses = options.GenerateMappers ? mapperClasses : [],
+            RepositoryClasses = options.GenerateRepositories ? repositoryClasses : [],
             Usings = usings,
         };
     }
@@ -75,6 +81,29 @@ internal sealed class CSharpGenerationModelBuilder
             EditModelClassName = editModelClassName,
             ScalarProperties = scalarProperties,
             NavigationProperties = navigations,
+        };
+    }
+
+    private CSharpRepositoryModel? BuildRepositoryClass(EntityDefinition entity, ICollection<GenerationDiagnostic> diagnostics)
+    {
+        var keyColumn = entity.Columns.Where(column => column.IsPrimaryKey).ToList();
+
+        if (keyColumn.Count != 1)
+        {
+            diagnostics.Add(Warning($"テーブル '{entity.TableName}' の Repository は単一主キーのみ対応のため生成をスキップしました。"));
+            return null;
+        }
+
+        var entityClassName = _nameConverter.ToEntityClassName(entity.TableName);
+        var repositoryName = entityClassName.EndsWith("Entity", StringComparison.Ordinal) ? entityClassName[..^"Entity".Length] : entityClassName;
+        var keyTypeName = BuildProperty(keyColumn[0]).TypeName.TrimEnd('?');
+
+        return new CSharpRepositoryModel
+        {
+            InterfaceName = $"I{repositoryName}Repository",
+            ClassName = $"{repositoryName}Repository",
+            EntityClassName = entityClassName,
+            KeyTypeName = keyTypeName,
         };
     }
 
@@ -308,6 +337,17 @@ internal sealed class CSharpGenerationModelBuilder
     {
         yield return "System.Collections.Generic";
         yield return "System.ComponentModel";
+
+        if (options.GenerateRepositories)
+        {
+            yield return "System.ComponentModel.DataAnnotations";
+            yield return "System.ComponentModel.DataAnnotations.Schema";
+            yield return "System.Reflection";
+            yield return "System.Threading";
+            yield return "System.Threading.Tasks";
+            yield return "Microsoft.Data.SqlClient";
+            yield return "Microsoft.Extensions.DependencyInjection";
+        }
 
         if (options.IncludeDataAnnotations)
         {

@@ -15,6 +15,8 @@ public sealed class CodeGenerationOptions
 
     public bool GenerateMappers { get; init; } = true;
 
+    public bool GenerateRepositories { get; init; } = true;
+
     public bool IncludeDataAnnotations { get; init; } = true;
 
     public bool IncludeJsonIgnoreOnParentNavigation { get; init; } = true;

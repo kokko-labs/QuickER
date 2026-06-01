@@ -263,6 +263,240 @@ internal sealed class ScribanCSharpRenderer
         {{ end }}    }
         }
         {{~ end ~}}
+
+        {{~ if repository_classes.size > 0 ~}}
+        public interface IRepository<TEntity, TKey>
+            where TEntity : class, new()
+        {
+            Task<TEntity?> GetByIdAsync(TKey id, CancellationToken cancellationToken = default);
+
+            Task<IReadOnlyList<TEntity>> GetAllAsync(CancellationToken cancellationToken = default);
+
+            Task InsertAsync(TEntity entity, CancellationToken cancellationToken = default);
+
+            Task<bool> UpdateAsync(TEntity entity, CancellationToken cancellationToken = default);
+
+            Task<bool> DeleteAsync(TKey id, CancellationToken cancellationToken = default);
+        }
+
+        public interface ISqlConnectionFactory
+        {
+            SqlConnection CreateConnection();
+        }
+
+        public sealed class SqlConnectionFactory(string connectionString) : ISqlConnectionFactory
+        {
+            public SqlConnection CreateConnection() => new(connectionString);
+        }
+
+        internal sealed class SqlEntityMetadata<TEntity, TKey>
+            where TEntity : class, new()
+        {
+            public required string TableName { get; init; }
+
+            public required PropertyInfo KeyProperty { get; init; }
+
+            public required string KeyColumnName { get; init; }
+
+            public required IReadOnlyList<PropertyInfo> AllProperties { get; init; }
+
+            public required IReadOnlyList<PropertyInfo> NonKeyProperties { get; init; }
+
+            public required string SelectAllSql { get; init; }
+
+            public required string SelectByIdSql { get; init; }
+
+            public required string InsertSql { get; init; }
+
+            public required string UpdateSql { get; init; }
+
+            public required string DeleteSql { get; init; }
+
+            public static SqlEntityMetadata<TEntity, TKey> Create()
+            {
+                var entityType = typeof(TEntity);
+                var tableAttribute = entityType.GetCustomAttribute<TableAttribute>()
+                    ?? throw new InvalidOperationException($"{entityType.Name} に [Table] 属性が必要です。");
+                var properties = entityType
+                    .GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                    .Where(property => property.CanRead && property.CanWrite)
+                    .ToList();
+                var keyProperty = properties.SingleOrDefault(property => property.GetCustomAttribute<KeyAttribute>() is not null)
+                    ?? throw new InvalidOperationException($"{entityType.Name} に [Key] 属性付きプロパティが必要です。");
+                var nonKeyProperties = properties.Where(property => property != keyProperty).ToList();
+                var allColumns = properties.Select(GetColumnName).ToArray();
+                var insertColumns = properties.Select(GetColumnName).ToArray();
+                var updateAssignments = nonKeyProperties.Select(property => $"[{GetColumnName(property)}] = @{property.Name}").ToArray();
+                var tableName = $"[{tableAttribute.Name}]";
+                var keyColumnName = GetColumnName(keyProperty);
+
+                return new SqlEntityMetadata<TEntity, TKey>
+                {
+                    TableName = tableName,
+                    KeyProperty = keyProperty,
+                    KeyColumnName = keyColumnName,
+                    AllProperties = properties,
+                    NonKeyProperties = nonKeyProperties,
+                    SelectAllSql = $"SELECT {string.Join(", ", allColumns.Select(column => $"[{column}]"))} FROM {tableName};",
+                    SelectByIdSql = $"SELECT {string.Join(", ", allColumns.Select(column => $"[{column}]"))} FROM {tableName} WHERE [{keyColumnName}] = @id;",
+                    InsertSql = $"INSERT INTO {tableName} ({string.Join(", ", insertColumns.Select(column => $"[{column}]"))}) VALUES ({string.Join(", ", properties.Select(property => $"@{property.Name}"))});",
+                    UpdateSql = $"UPDATE {tableName} SET {string.Join(", ", updateAssignments)} WHERE [{keyColumnName}] = @id;",
+                    DeleteSql = $"DELETE FROM {tableName} WHERE [{keyColumnName}] = @id;",
+                };
+            }
+
+            public TEntity MapEntity(SqlDataReader reader)
+            {
+                var entity = new TEntity();
+
+                foreach (var property in AllProperties)
+                {
+                    var columnName = GetColumnName(property);
+                    var value = reader[columnName];
+
+                    if (value is DBNull)
+                    {
+                        property.SetValue(entity, null);
+                    }
+                    else
+                    {
+                        property.SetValue(entity, value);
+                    }
+                }
+
+                return entity;
+            }
+
+            public void BindInsertParameters(SqlCommand command, TEntity entity)
+            {
+                foreach (var property in AllProperties)
+                {
+                    command.Parameters.AddWithValue($"@{property.Name}", property.GetValue(entity) ?? DBNull.Value);
+                }
+            }
+
+            public void BindUpdateParameters(SqlCommand command, TEntity entity)
+            {
+                foreach (var property in NonKeyProperties)
+                {
+                    command.Parameters.AddWithValue($"@{property.Name}", property.GetValue(entity) ?? DBNull.Value);
+                }
+
+                command.Parameters.AddWithValue("@id", KeyProperty.GetValue(entity) ?? DBNull.Value);
+            }
+
+            public void BindKeyParameter(SqlCommand command, TKey id)
+            {
+                command.Parameters.AddWithValue("@id", id ?? throw new InvalidOperationException("id は null にできません。"));
+            }
+
+            private static string GetColumnName(PropertyInfo property) =>
+                property.GetCustomAttribute<ColumnAttribute>()?.Name ?? property.Name;
+        }
+
+        public abstract class SqlServerRepository<TEntity, TKey>(ISqlConnectionFactory connectionFactory)
+            : IRepository<TEntity, TKey>
+            where TEntity : class, new()
+        {
+            private static readonly SqlEntityMetadata<TEntity, TKey> Metadata = SqlEntityMetadata<TEntity, TKey>.Create();
+            private readonly ISqlConnectionFactory _connectionFactory = connectionFactory;
+
+            public async Task<TEntity?> GetByIdAsync(TKey id, CancellationToken cancellationToken = default)
+            {
+                await using var connection = _connectionFactory.CreateConnection();
+                await connection.OpenAsync(cancellationToken);
+
+                await using var command = new SqlCommand(Metadata.SelectByIdSql, connection);
+                Metadata.BindKeyParameter(command, id);
+
+                await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+
+                if (!await reader.ReadAsync(cancellationToken))
+                {
+                    return null;
+                }
+
+                return Metadata.MapEntity(reader);
+            }
+
+            public async Task<IReadOnlyList<TEntity>> GetAllAsync(CancellationToken cancellationToken = default)
+            {
+                var items = new List<TEntity>();
+
+                await using var connection = _connectionFactory.CreateConnection();
+                await connection.OpenAsync(cancellationToken);
+
+                await using var command = new SqlCommand(Metadata.SelectAllSql, connection);
+                await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+
+                while (await reader.ReadAsync(cancellationToken))
+                {
+                    items.Add(Metadata.MapEntity(reader));
+                }
+
+                return items;
+            }
+
+            public async Task InsertAsync(TEntity entity, CancellationToken cancellationToken = default)
+            {
+                ArgumentNullException.ThrowIfNull(entity);
+
+                await using var connection = _connectionFactory.CreateConnection();
+                await connection.OpenAsync(cancellationToken);
+
+                await using var command = new SqlCommand(Metadata.InsertSql, connection);
+                Metadata.BindInsertParameters(command, entity);
+                await command.ExecuteNonQueryAsync(cancellationToken);
+            }
+
+            public async Task<bool> UpdateAsync(TEntity entity, CancellationToken cancellationToken = default)
+            {
+                ArgumentNullException.ThrowIfNull(entity);
+
+                await using var connection = _connectionFactory.CreateConnection();
+                await connection.OpenAsync(cancellationToken);
+
+                await using var command = new SqlCommand(Metadata.UpdateSql, connection);
+                Metadata.BindUpdateParameters(command, entity);
+
+                var affected = await command.ExecuteNonQueryAsync(cancellationToken);
+                return affected > 0;
+            }
+
+            public async Task<bool> DeleteAsync(TKey id, CancellationToken cancellationToken = default)
+            {
+                await using var connection = _connectionFactory.CreateConnection();
+                await connection.OpenAsync(cancellationToken);
+
+                await using var command = new SqlCommand(Metadata.DeleteSql, connection);
+                Metadata.BindKeyParameter(command, id);
+
+                var affected = await command.ExecuteNonQueryAsync(cancellationToken);
+                return affected > 0;
+            }
+        }
+
+        public static class GeneratedRepositoryServiceCollectionExtensions
+        {
+            public static IServiceCollection AddGeneratedRepositories(this IServiceCollection services, string connectionString)
+            {
+                ArgumentNullException.ThrowIfNull(services);
+                ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
+
+                services.AddSingleton<ISqlConnectionFactory>(_ => new SqlConnectionFactory(connectionString));
+        {{ for repository in repository_classes }}        services.AddScoped<{{ repository.interface_name }}, {{ repository.class_name }}>();
+        {{ end }}
+                return services;
+            }
+        }
+
+        {{~ for repository in repository_classes ~}}
+        public interface {{ repository.interface_name }} : IRepository<{{ repository.entity_class_name }}, {{ repository.key_type_name }}>;
+
+        public sealed class {{ repository.class_name }}(ISqlConnectionFactory connectionFactory)
+            : SqlServerRepository<{{ repository.entity_class_name }}, {{ repository.key_type_name }}>(connectionFactory), {{ repository.interface_name }};
+        {{~ end ~}}
+        {{~ end ~}}
         """;
 
     public string Render(CSharpGenerationModel model, CodeGenerationOptions options)
@@ -283,6 +517,7 @@ internal sealed class ScribanCSharpRenderer
             ["entity_classes"] = model.EntityClasses,
             ["edit_model_classes"] = model.EditModelClasses,
             ["mapper_classes"] = model.MapperClasses,
+            ["repository_classes"] = model.RepositoryClasses,
             ["include_data_annotations"] = options.IncludeDataAnnotations,
             ["include_json_ignore_on_parent_navigation"] = options.IncludeJsonIgnoreOnParentNavigation,
             ["emit_nav_ref_attr"] = emitNavRefAttr,

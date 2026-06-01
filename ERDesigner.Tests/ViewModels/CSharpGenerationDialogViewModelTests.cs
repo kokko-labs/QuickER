@@ -20,7 +20,19 @@ public class CSharpGenerationDialogViewModelTests
         vm.Result.Should().NotBeNull();
         vm.Result!.NamespaceName.Should().Be("Sample.Domain");
         vm.Result.OutputFilePath.Should().Be(@"C:\temp\Entities.g.cs");
+        vm.Result.GenerateRepositories.Should().BeTrue();
         closed.Should().BeTrue();
+    }
+
+    [Fact(DisplayName = "Repository 生成オプションを変更すると結果へ反映される")]
+    public void Ok_WithRepositoryOption_StoresSelection()
+    {
+        var vm = new CSharpGenerationDialogViewModel("Sample.Domain", @"C:\temp\Entities.g.cs") { GenerateRepositories = false };
+
+        vm.OkCommand.Execute(null);
+
+        vm.Result.Should().NotBeNull();
+        vm.Result!.GenerateRepositories.Should().BeFalse();
     }
 
     [Fact(DisplayName = "不正な namespace ではエラーメッセージを表示して閉じない")]

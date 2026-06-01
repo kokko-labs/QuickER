@@ -1201,6 +1201,7 @@ public partial class MainViewModel : ObservableObject
                 GenerateEntityClasses = dialog.ViewModel.Result.GenerateEntityClasses,
                 GenerateEditModels = dialog.ViewModel.Result.GenerateEditModels,
                 GenerateMappers = dialog.ViewModel.Result.GenerateMappers,
+                GenerateRepositories = dialog.ViewModel.Result.GenerateRepositories,
             };
             var result = service.Generate(ToGeneratorDiagram(), options);
 

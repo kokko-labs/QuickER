@@ -26,9 +26,9 @@ public sealed class CSharpCodeGenerationService
 
     private static void Validate(DiagramDefinition diagram, CodeGenerationOptions options, ICollection<GenerationDiagnostic> diagnostics)
     {
-        if (!options.GenerateEntityClasses && !options.GenerateEditModels && !options.GenerateMappers)
+        if (!options.GenerateEntityClasses && !options.GenerateEditModels && !options.GenerateMappers && !options.GenerateRepositories)
         {
-            diagnostics.Add(Error("Entity / EditModel / Mapper のいずれも生成対象になっていません。少なくとも一つを有効にしてください。"));
+            diagnostics.Add(Error("Entity / EditModel / Mapper / Repository のいずれも生成対象になっていません。少なくとも一つを有効にしてください。"));
         }
 
         if (diagram.Entities.Count == 0)

@@ -299,6 +299,61 @@ public class CSharpCodeGenerationServiceTests
     }
 
     [Fact]
+    public void Generate_ShouldCreateRepositoryInfrastructure()
+    {
+        var diagram = new DiagramDefinition
+        {
+            Entities =
+            [
+                new EntityDefinition
+                {
+                    Id = Guid.NewGuid(),
+                    TableName = "customers",
+                    Columns =
+                    [
+                        new ColumnDefinition
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "customer_id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                        new ColumnDefinition
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "name",
+                            DataType = "nvarchar(100)",
+                            IsNullable = false,
+                        },
+                    ],
+                },
+            ],
+        };
+
+        var result = new CSharpCodeGenerationService().Generate(diagram, new CodeGenerationOptions { NamespaceName = "Sample.Domain" });
+
+        result.HasErrors.Should().BeFalse();
+        var content = result.Files[0].Content;
+        content.Should().Contain("using Microsoft.Data.SqlClient;");
+        content.Should().Contain("using Microsoft.Extensions.DependencyInjection;");
+        content.Should().Contain("public interface IRepository<TEntity, TKey>");
+        content.Should().Contain("public abstract class SqlServerRepository<TEntity, TKey>");
+        content.Should().Contain("internal sealed class SqlEntityMetadata<TEntity, TKey>");
+        content.Should().Contain("public interface ICustomerRepository : IRepository<CustomerEntity, int>;");
+        content.Should().Contain("public sealed class CustomerRepository(ISqlConnectionFactory connectionFactory)");
+        content.Should().Contain("services.AddScoped<ICustomerRepository, CustomerRepository>();");
+        content.Should().Contain("SelectByIdSql = $\"SELECT {string.Join(\", \", allColumns.Select(column => $\"[{column}]\"))} FROM {tableName} WHERE [{keyColumnName}] = @id;\"");
+        content
+            .Should()
+            .Contain(
+                "InsertSql = $\"INSERT INTO {tableName} ({string.Join(\", \", insertColumns.Select(column => $\"[{column}]\"))}) VALUES ({string.Join(\", \", properties.Select(property => $\"@{property.Name}\"))});\""
+            );
+        content.Should().Contain("UpdateSql = $\"UPDATE {tableName} SET {string.Join(\", \", updateAssignments)} WHERE [{keyColumnName}] = @id;\"");
+        content.Should().Contain("DeleteSql = $\"DELETE FROM {tableName} WHERE [{keyColumnName}] = @id;\"");
+    }
+
+    [Fact]
     public void Generate_EntityOnly_ShouldNotContainUiModelOrMapper()
     {
         var diagram = new DiagramDefinition

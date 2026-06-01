@@ -35,7 +35,8 @@
     <StackPanel Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="0,8,0,4">
       <CheckBox Margin="0,0,16,0" Content="Entity" IsChecked="{Binding GenerateEntityClasses}" />
       <CheckBox Margin="0,0,16,0" Content="EditModel" IsChecked="{Binding GenerateEditModels}" />
-      <CheckBox Content="Mapper" IsChecked="{Binding GenerateMappers}" />
+      <CheckBox Margin="0,0,16,0" Content="Mapper" IsChecked="{Binding GenerateMappers}" />
+      <CheckBox Content="Repository" IsChecked="{Binding GenerateRepositories}" />
     </StackPanel>
 
     <TextBlock

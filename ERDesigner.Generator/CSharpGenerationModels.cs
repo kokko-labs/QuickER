@@ -10,6 +10,8 @@ internal sealed class CSharpGenerationModel
 
     public required IReadOnlyList<CSharpMapperModel> MapperClasses { get; init; }
 
+    public required IReadOnlyList<CSharpRepositoryModel> RepositoryClasses { get; init; }
+
     public required IReadOnlyList<string> Usings { get; init; }
 }
 
@@ -109,6 +111,17 @@ internal sealed class CSharpMapperNavigationModel
     public required string PrincipalColumnName { get; init; }
 
     public required string DependentColumnName { get; init; }
+}
+
+internal sealed class CSharpRepositoryModel
+{
+    public required string InterfaceName { get; init; }
+
+    public required string ClassName { get; init; }
+
+    public required string EntityClassName { get; init; }
+
+    public required string KeyTypeName { get; init; }
 }
 
 // ---- EditModel 専用モデル ----
