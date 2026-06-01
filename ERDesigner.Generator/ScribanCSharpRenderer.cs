@@ -523,8 +523,22 @@ internal sealed class ScribanCSharpRenderer
             ["emit_nav_ref_attr"] = emitNavRefAttr,
         };
 
-        var context = new TemplateContext();
+        var context = new TemplateContext { LoopLimit = CalculateLoopLimit(model) };
+
         context.PushGlobal(scriptObject);
         return template.Render(context).ReplaceLineEndings(Environment.NewLine).TrimEnd() + Environment.NewLine;
+    }
+
+    /// <summary>大量エンティティでも Scriban のループ上限に達しにくいように動的上限を計算します。</summary>
+    private static int CalculateLoopLimit(CSharpGenerationModel model)
+    {
+        var estimatedIterations =
+            model.Usings.Count
+            + model.EntityClasses.Sum(item => 1 + item.Properties.Count + item.Navigations.Count)
+            + model.EditModelClasses.Sum(item => 1 + item.Properties.Count + item.Navigations.Count)
+            + model.MapperClasses.Sum(item => 1 + item.ScalarProperties.Count + item.NavigationProperties.Count)
+            + model.RepositoryClasses.Count * 2;
+
+        return Math.Max(10_000, estimatedIterations * 4);
     }
 }

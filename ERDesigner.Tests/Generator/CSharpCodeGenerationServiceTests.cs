@@ -394,4 +394,43 @@ public class CSharpCodeGenerationServiceTests
         result.Files[0].Content.Should().NotContain("ItemEditModel");
         result.Files[0].Content.Should().NotContain("ItemMapper");
     }
+
+    [Fact]
+    public void Generate_ManyEntities_ShouldNotHitScribanLoopLimit()
+    {
+        var entities = Enumerable
+            .Range(1, 1100)
+            .Select(index => new EntityDefinition
+            {
+                Id = Guid.NewGuid(),
+                TableName = $"items_{index}",
+                Columns =
+                [
+                    new ColumnDefinition
+                    {
+                        Id = Guid.NewGuid(),
+                        Name = "item_id",
+                        DataType = "int",
+                        IsPrimaryKey = true,
+                        IsNullable = false,
+                    },
+                ],
+            })
+            .ToList();
+
+        var diagram = new DiagramDefinition { Entities = entities };
+        var options = new CodeGenerationOptions
+        {
+            NamespaceName = "Sample.Domain",
+            GenerateEditModels = false,
+            GenerateMappers = false,
+            GenerateRepositories = false,
+        };
+
+        var result = new CSharpCodeGenerationService().Generate(diagram, options);
+
+        result.HasErrors.Should().BeFalse();
+        result.Files[0].Content.Should().Contain("public partial class Items1Entity");
+        result.Files[0].Content.Should().Contain("public partial class Items1100Entity");
+    }
 }
