@@ -45,6 +45,8 @@ public class CSharpCodeGenerationServiceTests
         result.Files.Should().ContainSingle();
         result.Files[0].FileName.Should().Be("ErDesignerEntities.g.cs");
         result.Files[0].Content.Should().Contain("namespace Sample.Domain;");
+        result.Files[0].Content.Split("using System.ComponentModel.DataAnnotations;").Length.Should().Be(2);
+        result.Files[0].Content.Split("using System.ComponentModel.DataAnnotations.Schema;").Length.Should().Be(2);
         result.Files[0].Content.Should().Contain("public partial class CustomerEntity");
         result.Files[0].Content.Should().Contain("public partial class CustomerEditModel");
         result.Files[0].Content.Should().Contain("public abstract partial class EditModelBase");
@@ -235,8 +237,9 @@ public class CSharpCodeGenerationServiceTests
         result.Files[0].Content.Should().NotContain(": IProductMapper");
         result.Files[0].Content.Should().Contain("ProductEditModel CommitToEditModel(ProductEntity entity)");
         result.Files[0].Content.Should().Contain("void CommitToEntity(ProductEditModel editModel, ProductEntity entity)");
-        // CommitToEntity では通常プロパティを Entity に代入する
-        result.Files[0].Content.Should().Contain("entity.Name = editModel.Name;");
+        // CommitToEntity では nullable 化された確定値に対して保存前 null チェックを行う
+        result.Files[0].Content.Should().Contain("entity.ProductId = editModel.ProductId ?? throw new InvalidOperationException(\"ProductId が未入力です。\");");
+        result.Files[0].Content.Should().Contain("entity.Name = editModel.Name ?? throw new InvalidOperationException(\"Name が未入力です。\");");
         // LoadFrom ではバインディング用プロパティ経由でロードする
         result.Files[0].Content.Should().Contain("editModel.BindingName =");
     }
@@ -279,8 +282,8 @@ public class CSharpCodeGenerationServiceTests
         result.HasErrors.Should().BeFalse();
         var content = result.Files[0].Content;
         // 通常プロパティ (private set)
-        content.Should().Contain("public int OrderId");
-        content.Should().Contain("public decimal Amount");
+        content.Should().Contain("public int? OrderId");
+        content.Should().Contain("public decimal? Amount");
         // バインディング用プロパティ (string)
         content.Should().Contain("public string BindingOrderId");
         content.Should().Contain("public string BindingAmount");
@@ -351,6 +354,65 @@ public class CSharpCodeGenerationServiceTests
             );
         content.Should().Contain("UpdateSql = $\"UPDATE {tableName} SET {string.Join(\", \", updateAssignments)} WHERE [{keyColumnName}] = @id;\"");
         content.Should().Contain("DeleteSql = $\"DELETE FROM {tableName} WHERE [{keyColumnName}] = @id;\"");
+    }
+
+    [Fact]
+    public void Generate_EditModel_WithBinaryAndValueTypes_ShouldUseSafeBindingConversions()
+    {
+        var diagram = new DiagramDefinition
+        {
+            Entities =
+            [
+                new EntityDefinition
+                {
+                    Id = Guid.NewGuid(),
+                    TableName = "files",
+                    Columns =
+                    [
+                        new ColumnDefinition
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "file_id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                        new ColumnDefinition
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "is_active",
+                            DataType = "bit",
+                            IsNullable = false,
+                        },
+                        new ColumnDefinition
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "filedata",
+                            DataType = "varbinary(max)",
+                            IsNullable = false,
+                        },
+                    ],
+                },
+            ],
+        };
+
+        var result = new CSharpCodeGenerationService().Generate(diagram, new CodeGenerationOptions { NamespaceName = "Sample.Domain" });
+
+        result.HasErrors.Should().BeFalse();
+        var content = result.Files[0].Content;
+        content.Should().Contain("public int? FileId");
+        content.Should().Contain("public bool? IsActive");
+        content.Should().Contain("public byte[] Filedata { get; set; } = Array.Empty<byte>();");
+        content.Should().Contain("Filedata = Convert.FromBase64String(value);");
+        content.Should().Contain("BindingFiledata = Filedata is null ? string.Empty : Convert.ToBase64String(Filedata);");
+        content.Should().Contain("Filedata = Array.Empty<byte>();");
+        content.Should().Contain("BindingFileId = FileId?.ToString() ?? string.Empty;");
+        content.Should().Contain("editModel.BindingIsActive = entity.IsActive.ToString() ?? string.Empty;");
+        content.Should().NotContain("entity.FileId?.ToString()");
+        content.Should().NotContain("entity.IsActive?.ToString()");
+        content.Should().NotContain("private string? _errorFiledata;");
+        content.Should().Contain("private static readonly SqlEntityMetadata<TEntity, TKey> metadata = SqlEntityMetadata<TEntity, TKey>.Create();");
+        content.Should().Contain("private readonly ISqlConnectionFactory connectionFactory = connectionFactory;");
     }
 
     [Fact]

@@ -169,7 +169,8 @@ internal sealed class ScribanCSharpRenderer
         {{ for p in item.properties }}{{ if p.field_initializer != "" }}    private {{ p.type_name }} {{ p.field_name }} = {{ p.field_initializer }};
         {{ else }}    private {{ p.type_name }} {{ p.field_name }};
         {{ end }}    private string {{ p.binding_field_name }} = {{ p.binding_field_initializer }};
-        	private string? {{ p.error_field_name }};
+        {{ if p.needs_parse }}    private string? {{ p.error_field_name }};
+        {{ end }}
 
         	/// <summary>{{ p.property_name }} 確定値プロパティです。</summary>
         	public {{ p.type_name }} {{ p.property_name }}
@@ -205,20 +206,34 @@ internal sealed class ScribanCSharpRenderer
                         {{ p.error_field_name }} = ResolveParseErrorMessage(nameof({{ p.binding_property_name }}), value, "{{ p.parse_type_name }}");
                         SetError(nameof({{ p.binding_property_name }}), {{ p.error_field_name }});
                     }
+        {{ else if p.is_binary }}                if (string.IsNullOrEmpty(value))
+                {
+                    {{ p.property_name }} = Array.Empty<byte>();
+                    SetError(nameof({{ p.binding_property_name }}), null);
+                }
+                else
+                {
+                    try
+                    {
+                        {{ p.property_name }} = Convert.FromBase64String(value);
+                        SetError(nameof({{ p.binding_property_name }}), null);
+                    }
+                    catch (FormatException)
+                    {
+                        SetError(nameof({{ p.binding_property_name }}), ResolveParseErrorMessage(nameof({{ p.binding_property_name }}), value, "byte[]"));
+                    }
+                }
         {{ else if p.is_nullable }}                if (string.IsNullOrEmpty(value))
         				{
         					{{ p.property_name }} = null;
-        					{{ p.error_field_name }} = null;
         					SetError(nameof({{ p.binding_property_name }}), null);
         				}
         				else
         				{
         					{{ p.property_name }} = value;
-        					{{ p.error_field_name }} = null;
         					SetError(nameof({{ p.binding_property_name }}), null);
         				}
         {{ else }}                {{ p.property_name }} = value;
-        				{{ p.error_field_name }} = null;
         				SetError(nameof({{ p.binding_property_name }}), null);
         {{ end }}            }
         		}
@@ -232,9 +247,10 @@ internal sealed class ScribanCSharpRenderer
         	public void RevertInput()
         	{
                     ExecuteRevert(() =>
-        		{
-        {{ for p in item.properties }}            {{ p.binding_property_name }} = {{ p.property_name }}?.ToString() ?? string.Empty;
-        			{{ p.error_field_name }} = null;
+        {
+        {{ for p in item.properties }}            {{ p.binding_property_name }} = {{ p.revert_binding_expression }};
+        {{ if p.needs_parse }}            {{ p.error_field_name }} = null;
+        {{ end }}
         			SetError(nameof({{ p.binding_property_name }}), null);
         {{ end }}        });
         	}
@@ -253,13 +269,14 @@ internal sealed class ScribanCSharpRenderer
 
         public void CommitToEntity({{ mapper.edit_model_class_name }} editModel, {{ mapper.entity_class_name }} entity)
         {
-        {{ for prop in mapper.scalar_properties }}        entity.{{ prop.property_name }} = editModel.{{ prop.property_name }};
-        {{ end }}    }
+        {{ for prop in mapper.scalar_properties }}{{ if prop.edit_model_is_nullable && prop.entity_type_name != prop.edit_model_type_name }}        entity.{{ prop.property_name }} = editModel.{{ prop.property_name }} ?? throw new InvalidOperationException("{{ prop.property_name }} が未入力です。");
+        {{ else }}        entity.{{ prop.property_name }} = editModel.{{ prop.property_name }};
+        {{ end }}{{ end }}    }
 
             private static void LoadFrom({{ mapper.entity_class_name }} entity, {{ mapper.edit_model_class_name }} editModel)
         {
             editModel.RevertInput();
-        {{ for prop in mapper.scalar_properties }}        editModel.{{ prop.binding_property_name }} = entity.{{ prop.property_name }}?.ToString() ?? string.Empty;
+        {{ for prop in mapper.scalar_properties }}        editModel.{{ prop.binding_property_name }} = {{ prop.load_binding_expression }};
         {{ end }}    }
         }
         {{~ end ~}}
@@ -398,7 +415,7 @@ internal sealed class ScribanCSharpRenderer
             : IRepository<TEntity, TKey>
             where TEntity : class, new()
         {
-            private static readonly SqlEntityMetadata<TEntity, TKey> Metadata = SqlEntityMetadata<TEntity, TKey>.Create();
+            private static readonly SqlEntityMetadata<TEntity, TKey> _metadata = SqlEntityMetadata<TEntity, TKey>.Create();
             private readonly ISqlConnectionFactory _connectionFactory = connectionFactory;
 
             public async Task<TEntity?> GetByIdAsync(TKey id, CancellationToken cancellationToken = default)
@@ -406,8 +423,8 @@ internal sealed class ScribanCSharpRenderer
                 await using var connection = _connectionFactory.CreateConnection();
                 await connection.OpenAsync(cancellationToken);
 
-                await using var command = new SqlCommand(Metadata.SelectByIdSql, connection);
-                Metadata.BindKeyParameter(command, id);
+                await using var command = new SqlCommand(_metadata.SelectByIdSql, connection);
+                _metadata.BindKeyParameter(command, id);
 
                 await using var reader = await command.ExecuteReaderAsync(cancellationToken);
 
@@ -416,7 +433,7 @@ internal sealed class ScribanCSharpRenderer
                     return null;
                 }
 
-                return Metadata.MapEntity(reader);
+                return _metadata.MapEntity(reader);
             }
 
             public async Task<IReadOnlyList<TEntity>> GetAllAsync(CancellationToken cancellationToken = default)
@@ -426,12 +443,12 @@ internal sealed class ScribanCSharpRenderer
                 await using var connection = _connectionFactory.CreateConnection();
                 await connection.OpenAsync(cancellationToken);
 
-                await using var command = new SqlCommand(Metadata.SelectAllSql, connection);
+                await using var command = new SqlCommand(_metadata.SelectAllSql, connection);
                 await using var reader = await command.ExecuteReaderAsync(cancellationToken);
 
                 while (await reader.ReadAsync(cancellationToken))
                 {
-                    items.Add(Metadata.MapEntity(reader));
+                    items.Add(_metadata.MapEntity(reader));
                 }
 
                 return items;
@@ -444,8 +461,8 @@ internal sealed class ScribanCSharpRenderer
                 await using var connection = _connectionFactory.CreateConnection();
                 await connection.OpenAsync(cancellationToken);
 
-                await using var command = new SqlCommand(Metadata.InsertSql, connection);
-                Metadata.BindInsertParameters(command, entity);
+                await using var command = new SqlCommand(_metadata.InsertSql, connection);
+                _metadata.BindInsertParameters(command, entity);
                 await command.ExecuteNonQueryAsync(cancellationToken);
             }
 
@@ -456,8 +473,8 @@ internal sealed class ScribanCSharpRenderer
                 await using var connection = _connectionFactory.CreateConnection();
                 await connection.OpenAsync(cancellationToken);
 
-                await using var command = new SqlCommand(Metadata.UpdateSql, connection);
-                Metadata.BindUpdateParameters(command, entity);
+                await using var command = new SqlCommand(_metadata.UpdateSql, connection);
+                _metadata.BindUpdateParameters(command, entity);
 
                 var affected = await command.ExecuteNonQueryAsync(cancellationToken);
                 return affected > 0;
@@ -468,8 +485,8 @@ internal sealed class ScribanCSharpRenderer
                 await using var connection = _connectionFactory.CreateConnection();
                 await connection.OpenAsync(cancellationToken);
 
-                await using var command = new SqlCommand(Metadata.DeleteSql, connection);
-                Metadata.BindKeyParameter(command, id);
+                await using var command = new SqlCommand(_metadata.DeleteSql, connection);
+                _metadata.BindKeyParameter(command, id);
 
                 var affected = await command.ExecuteNonQueryAsync(cancellationToken);
                 return affected > 0;

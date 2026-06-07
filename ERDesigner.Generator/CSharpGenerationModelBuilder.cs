@@ -65,10 +65,20 @@ internal sealed class CSharpGenerationModelBuilder
         var mapperClassName = _nameConverter.ToMapperClassName(entity.TableName);
 
         var scalarProperties = entity
-            .Columns.Select(column => new CSharpMappingPropertyPair
+            .Columns.Select(column =>
             {
-                PropertyName = _nameConverter.ToPropertyName(column.Name),
-                BindingPropertyName = "Binding" + _nameConverter.ToPropertyName(column.Name),
+                var property = BuildProperty(column);
+                var editModelProperty = BuildEditModelProperty(column);
+                return new CSharpMappingPropertyPair
+                {
+                    PropertyName = property.PropertyName,
+                    EntityTypeName = property.TypeName,
+                    EditModelTypeName = editModelProperty.TypeName,
+                    EditModelIsNullable = editModelProperty.IsNullable,
+                    IsBinary = editModelProperty.IsBinary,
+                    LoadBindingExpression = BuildMapperBindingExpression(property.TypeName, editModelProperty.IsBinary, property.PropertyName),
+                    BindingPropertyName = "Binding" + property.PropertyName,
+                };
             })
             .ToList();
 
@@ -131,7 +141,7 @@ internal sealed class CSharpGenerationModelBuilder
             IsPrimaryKey = column.IsPrimaryKey,
             IsForeignKey = column.IsForeignKey,
             MaxLength = typeInfo.MaxLength,
-            Initializer = typeName == "string" && !column.IsNullable ? " = string.Empty;" : string.Empty,
+            Initializer = BuildEntityInitializer(typeName, column.IsNullable),
         };
     }
 
@@ -140,11 +150,14 @@ internal sealed class CSharpGenerationModelBuilder
         var typeInfo = _typeMapper.Map(column.DataType);
         var typeName = typeInfo.TypeName;
 
-        if (column.IsNullable && !typeInfo.IsReferenceType)
+        var isBytes = typeName == "byte[]";
+        var editModelIsNullable = column.IsNullable || !typeInfo.IsReferenceType || typeName == "string" || isBytes;
+
+        if (editModelIsNullable && !typeInfo.IsReferenceType)
         {
             typeName += "?";
         }
-        else if (column.IsNullable && typeInfo.IsReferenceType && typeName != "byte[]")
+        else if (editModelIsNullable && typeInfo.IsReferenceType)
         {
             typeName += "?";
         }
@@ -155,25 +168,17 @@ internal sealed class CSharpGenerationModelBuilder
         var bindingFieldName = ToFieldName(bindingPropertyName);
         var errorFieldName = "_error" + propertyName;
 
-        var isBytes = typeName == "byte[]" || typeName == "byte[]?";
+        isBytes = typeName == "byte[]" || typeName == "byte[]?";
         var needsParse = !typeInfo.IsReferenceType && !isBytes;
         var parseTypeName = needsParse ? typeName.TrimEnd('?') : string.Empty;
 
         string fieldInitializer;
 
-        if (isBytes)
+        if (typeInfo.IsReferenceType)
         {
             fieldInitializer = string.Empty;
         }
-        else if (typeName == "string" && !column.IsNullable)
-        {
-            fieldInitializer = "string.Empty";
-        }
-        else if (typeInfo.IsReferenceType)
-        {
-            fieldInitializer = string.Empty;
-        }
-        else if (column.IsNullable)
+        else if (editModelIsNullable)
         {
             fieldInitializer = string.Empty;
         }
@@ -196,9 +201,51 @@ internal sealed class CSharpGenerationModelBuilder
             ParseTypeName = parseTypeName,
             FieldInitializer = fieldInitializer,
             BindingFieldInitializer = bindingFieldInitializer,
-            IsNullable = column.IsNullable,
+            IsNullable = editModelIsNullable,
             IsReferenceType = typeInfo.IsReferenceType,
+            IsBinary = isBytes,
+            RevertBindingExpression = BuildBindingExpression(propertyName, isBytes),
         };
+    }
+
+    private static string BuildBindingExpression(string propertyName, bool isBinary)
+    {
+        if (isBinary)
+        {
+            return $"{propertyName} is null ? string.Empty : Convert.ToBase64String({propertyName})";
+        }
+
+        return $"{propertyName}?.ToString() ?? string.Empty";
+    }
+
+    private static string BuildEntityInitializer(string typeName, bool isNullable)
+    {
+        if (typeName == "string" && !isNullable)
+        {
+            return " = string.Empty;";
+        }
+
+        if (typeName == "byte[]" && !isNullable)
+        {
+            return " = Array.Empty<byte>();";
+        }
+
+        return string.Empty;
+    }
+
+    private static string BuildMapperBindingExpression(string entityTypeName, bool isBinary, string propertyName)
+    {
+        if (isBinary)
+        {
+            return $"entity.{propertyName} is null ? string.Empty : Convert.ToBase64String(entity.{propertyName})";
+        }
+
+        if (entityTypeName.EndsWith("?", StringComparison.Ordinal))
+        {
+            return $"entity.{propertyName}?.ToString() ?? string.Empty";
+        }
+
+        return $"entity.{propertyName}.ToString() ?? string.Empty";
     }
 
     private IEnumerable<CSharpNavigationModel> BuildEntityNavigations(EntityDefinition entity, DiagramDefinition diagram, ICollection<GenerationDiagnostic> diagnostics)
@@ -335,29 +382,31 @@ internal sealed class CSharpGenerationModelBuilder
 
     private static IEnumerable<string> BuildUsings(CodeGenerationOptions options)
     {
-        yield return "System.Collections.Generic";
-        yield return "System.ComponentModel";
+        var usings = new HashSet<string> { "System.Collections.Generic", "System.ComponentModel" };
 
         if (options.GenerateRepositories)
         {
-            yield return "System.ComponentModel.DataAnnotations";
-            yield return "System.ComponentModel.DataAnnotations.Schema";
-            yield return "System.Reflection";
-            yield return "System.Threading";
-            yield return "System.Threading.Tasks";
-            yield return "Microsoft.Data.SqlClient";
-            yield return "Microsoft.Extensions.DependencyInjection";
+            usings.Add("System.Reflection");
+            usings.Add("System.Threading");
+            usings.Add("System.Threading.Tasks");
+            usings.Add("Microsoft.Data.SqlClient");
+            usings.Add("Microsoft.Extensions.DependencyInjection");
         }
 
         if (options.IncludeDataAnnotations)
         {
-            yield return "System.ComponentModel.DataAnnotations";
-            yield return "System.ComponentModel.DataAnnotations.Schema";
+            usings.Add("System.ComponentModel.DataAnnotations");
+            usings.Add("System.ComponentModel.DataAnnotations.Schema");
         }
 
         if (options.IncludeJsonIgnoreOnParentNavigation)
         {
-            yield return "System.Text.Json.Serialization";
+            usings.Add("System.Text.Json.Serialization");
+        }
+
+        foreach (var usingNamespace in usings)
+        {
+            yield return usingNamespace;
         }
     }
 

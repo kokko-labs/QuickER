@@ -96,6 +96,21 @@ internal sealed class CSharpMappingPropertyPair
 {
     public required string PropertyName { get; init; }
 
+    /// <summary>Entity 側の型名です。</summary>
+    public required string EntityTypeName { get; init; }
+
+    /// <summary>EditModel 側の型名です。</summary>
+    public required string EditModelTypeName { get; init; }
+
+    /// <summary>EditModel 側プロパティが nullable かどうかです。</summary>
+    public required bool EditModelIsNullable { get; init; }
+
+    /// <summary>byte[] 系プロパティかどうかです。</summary>
+    public required bool IsBinary { get; init; }
+
+    /// <summary>Entity から Binding 文字列へ変換する式です。</summary>
+    public required string LoadBindingExpression { get; init; }
+
     /// <summary>バインディング用プロパティ名 (例: BindingCustomerId)。</summary>
     public required string BindingPropertyName { get; init; }
 }
@@ -176,4 +191,10 @@ internal sealed class CSharpEditModelPropertyModel
 
     /// <summary>プロパティが参照型かどうかです。</summary>
     public required bool IsReferenceType { get; init; }
+
+    /// <summary>byte[] 系プロパティかどうかです。</summary>
+    public required bool IsBinary { get; init; }
+
+    /// <summary>確定値から Binding 文字列へ戻す式です。</summary>
+    public required string RevertBindingExpression { get; init; }
 }
