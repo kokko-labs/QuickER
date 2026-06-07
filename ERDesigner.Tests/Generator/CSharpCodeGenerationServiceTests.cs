@@ -135,6 +135,114 @@ public class CSharpCodeGenerationServiceTests
     }
 
     [Fact]
+    public void Generate_ShouldPreservePascalCaseTableNamesInEntityAndNavigationNames()
+    {
+        var category = Guid.NewGuid();
+        var item = Guid.NewGuid();
+        var categoryId = Guid.NewGuid();
+        var itemCategoryId = Guid.NewGuid();
+        var diagram = new DiagramDefinition
+        {
+            Entities =
+            [
+                new EntityDefinition
+                {
+                    Id = category,
+                    TableName = "AirconditionerCategory",
+                    Columns =
+                    [
+                        new ColumnDefinition
+                        {
+                            Id = categoryId,
+                            Name = "AirconditionerCategoryId",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                    ],
+                },
+                new EntityDefinition
+                {
+                    Id = item,
+                    TableName = "Airconditioner",
+                    Columns =
+                    [
+                        new ColumnDefinition
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "AirconditionerId",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                        new ColumnDefinition
+                        {
+                            Id = itemCategoryId,
+                            Name = "AirconditionerCategoryId",
+                            DataType = "int",
+                            IsForeignKey = true,
+                            IsNullable = false,
+                        },
+                    ],
+                },
+            ],
+            Relationships =
+            [
+                new RelationshipDefinition
+                {
+                    Id = Guid.NewGuid(),
+                    SourceEntityId = category,
+                    TargetEntityId = item,
+                    Type = RelationshipMultiplicity.OneToMany,
+                    SourceColumnId = categoryId,
+                    TargetColumnId = itemCategoryId,
+                },
+            ],
+        };
+
+        var result = new CSharpCodeGenerationService().Generate(diagram, new CodeGenerationOptions { NamespaceName = "Sample.Domain" });
+
+        result.HasErrors.Should().BeFalse();
+        result.Files[0].Content.Should().Contain("public partial class AirconditionerCategoryEntity");
+        result.Files[0].Content.Should().Contain("public ICollection<AirconditionerEntity> Airconditioners { get; set; } = new List<AirconditionerEntity>();");
+        result.Files[0].Content.Should().Contain("public AirconditionerCategoryEntity AirconditionerCategory { get; set; } = null!;");
+    }
+
+    [Fact]
+    public void Generate_ShouldConvertSnakeCaseTableNamesToPascalCaseEntityNames()
+    {
+        var diagram = new DiagramDefinition
+        {
+            Entities =
+            [
+                new EntityDefinition
+                {
+                    Id = Guid.NewGuid(),
+                    TableName = "airconditioner_category",
+                    Columns =
+                    [
+                        new ColumnDefinition
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "airconditioner_category_id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                    ],
+                },
+            ],
+        };
+
+        var result = new CSharpCodeGenerationService().Generate(diagram, new CodeGenerationOptions { NamespaceName = "Sample.Domain" });
+
+        result.HasErrors.Should().BeFalse();
+        result.Files[0].Content.Should().Contain("public partial class AirconditionerCategoryEntity");
+        result.Files[0].Content.Should().Contain("public partial class AirconditionerCategoryEditModel");
+        result.Files[0].Content.Should().Contain("public sealed class AirconditionerCategoryMapper");
+    }
+
+    [Fact]
     public void Generate_ShouldWarnAndSkipManyToManyRelationship()
     {
         var left = Guid.NewGuid();
@@ -411,8 +519,8 @@ public class CSharpCodeGenerationServiceTests
         content.Should().NotContain("entity.FileId?.ToString()");
         content.Should().NotContain("entity.IsActive?.ToString()");
         content.Should().NotContain("private string? _errorFiledata;");
-        content.Should().Contain("private static readonly SqlEntityMetadata<TEntity, TKey> metadata = SqlEntityMetadata<TEntity, TKey>.Create();");
-        content.Should().Contain("private readonly ISqlConnectionFactory connectionFactory = connectionFactory;");
+        content.Should().Contain("private static readonly SqlEntityMetadata<TEntity, TKey> _metadata = SqlEntityMetadata<TEntity, TKey>.Create();");
+        content.Should().Contain("private readonly ISqlConnectionFactory _connectionFactory = connectionFactory;");
     }
 
     [Fact]

@@ -107,10 +107,9 @@ internal sealed partial class CSharpNameConverter
 
     private static string ToPascalCase(string value)
     {
-        var parts = WordSplitRegex().Split(value.Trim()).Where(part => !string.IsNullOrWhiteSpace(part));
         var builder = new StringBuilder();
 
-        foreach (var part in parts)
+        foreach (var part in TokenizeWords(value))
         {
             var textInfo = CultureInfo.InvariantCulture.TextInfo;
             var lower = part.ToLowerInvariant();
@@ -144,8 +143,30 @@ internal sealed partial class CSharpNameConverter
         return value.EndsWith("s", StringComparison.OrdinalIgnoreCase) ? value : value + "s";
     }
 
-    private static string ToSimpleToken(string value) => string.Join("_", WordSplitRegex().Split(value.Trim()).Where(part => !string.IsNullOrWhiteSpace(part)));
+    private static string ToSimpleToken(string value) => string.Join("_", TokenizeWords(value));
+
+    private static IEnumerable<string> TokenizeWords(string value)
+    {
+        foreach (var part in WordSplitRegex().Split(value.Trim()).Where(part => !string.IsNullOrWhiteSpace(part)))
+        {
+            var matches = PascalCaseWordRegex().Matches(part);
+
+            if (matches.Count == 0)
+            {
+                yield return part;
+                continue;
+            }
+
+            foreach (Match match in matches)
+            {
+                yield return match.Value;
+            }
+        }
+    }
 
     [GeneratedRegex(@"[^\p{L}\p{Nd}]+", RegexOptions.CultureInvariant)]
     private static partial Regex WordSplitRegex();
+
+    [GeneratedRegex(@"\p{Lu}+(?=\p{Lu}\p{Ll}|\p{Nd}|$)|\p{Lu}?\p{Ll}+|\p{Nd}+", RegexOptions.CultureInvariant)]
+    private static partial Regex PascalCaseWordRegex();
 }
