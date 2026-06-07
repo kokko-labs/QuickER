@@ -465,6 +465,92 @@ public class CSharpCodeGenerationServiceTests
     }
 
     [Fact]
+    public void Generate_RepositorySql_ShouldExcludeNavigationProperties()
+    {
+        var customer = Guid.NewGuid();
+        var order = Guid.NewGuid();
+        var customerId = Guid.NewGuid();
+        var orderCustomerId = Guid.NewGuid();
+        var diagram = new DiagramDefinition
+        {
+            Entities =
+            [
+                new EntityDefinition
+                {
+                    Id = customer,
+                    TableName = "customers",
+                    Columns =
+                    [
+                        new ColumnDefinition
+                        {
+                            Id = customerId,
+                            Name = "customer_id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                        new ColumnDefinition
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "name",
+                            DataType = "nvarchar(100)",
+                            IsNullable = false,
+                        },
+                    ],
+                },
+                new EntityDefinition
+                {
+                    Id = order,
+                    TableName = "orders",
+                    Columns =
+                    [
+                        new ColumnDefinition
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "order_id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                        new ColumnDefinition
+                        {
+                            Id = orderCustomerId,
+                            Name = "customer_id",
+                            DataType = "int",
+                            IsForeignKey = true,
+                            IsNullable = false,
+                        },
+                    ],
+                },
+            ],
+            Relationships =
+            [
+                new RelationshipDefinition
+                {
+                    Id = Guid.NewGuid(),
+                    SourceEntityId = customer,
+                    TargetEntityId = order,
+                    Type = RelationshipMultiplicity.OneToMany,
+                    SourceColumnId = customerId,
+                    TargetColumnId = orderCustomerId,
+                },
+            ],
+        };
+
+        var result = new CSharpCodeGenerationService().Generate(diagram, new CodeGenerationOptions { NamespaceName = "Sample.Domain" });
+
+        result.HasErrors.Should().BeFalse();
+        var content = result.Files[0].Content;
+        content.Should().Contain("property.GetCustomAttribute<NavigationReferenceAttribute>() is null");
+        content.Should().Contain("public ICollection<OrderEntity> Orders { get; set; } = new List<OrderEntity>();");
+        content.Should().Contain("public CustomerEntity Customer { get; set; } = null!;");
+        content.Should().NotContain("@Orders");
+        content.Should().NotContain("@Customer");
+        content.Should().NotContain("[Orders]");
+        content.Should().NotContain("[Customer]");
+    }
+
+    [Fact]
     public void Generate_EditModel_WithBinaryAndValueTypes_ShouldUseSafeBindingConversions()
     {
         var diagram = new DiagramDefinition

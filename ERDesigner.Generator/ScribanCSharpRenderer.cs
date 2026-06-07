@@ -336,7 +336,11 @@ internal sealed class ScribanCSharpRenderer
                     ?? throw new InvalidOperationException($"{entityType.Name} に [Table] 属性が必要です。");
                 var properties = entityType
                     .GetProperties(BindingFlags.Public | BindingFlags.Instance)
-                    .Where(property => property.CanRead && property.CanWrite)
+                    .Where(property =>
+                        property.CanRead
+                        && property.CanWrite
+                        && property.GetCustomAttribute<NavigationReferenceAttribute>() is null
+                    )
                     .ToList();
                 var keyProperty = properties.SingleOrDefault(property => property.GetCustomAttribute<KeyAttribute>() is not null)
                     ?? throw new InvalidOperationException($"{entityType.Name} に [Key] 属性付きプロパティが必要です。");
