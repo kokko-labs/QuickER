@@ -62,6 +62,7 @@ public static class SchemaSyncScriptBuilder
     private static void AppendCreateTable(StringBuilder sb, SchemaDiffItem item)
     {
         var e = item.Entity!;
+        var pks = e.Columns.Where(c => c.IsPrimaryKey).ToList();
         sb.AppendLine($"CREATE TABLE {SqlIdentifier.Bracket(item.TableName)} (");
 
         for (var i = 0; i < e.Columns.Count; i++)
@@ -69,7 +70,8 @@ public static class SchemaSyncScriptBuilder
             var col = e.Columns[i];
             var line = $"    {SqlIdentifier.BracketSimple(col.Name)} {col.DataType} {GetNullabilityClause(col)}";
 
-            if (i < e.Columns.Count - 1)
+            // 後続のカラム行、または PRIMARY KEY 制約行が続く場合は区切りのカンマを付ける
+            if (i < e.Columns.Count - 1 || pks.Count > 0)
             {
                 line += ",";
             }
@@ -77,21 +79,8 @@ public static class SchemaSyncScriptBuilder
             sb.AppendLine(line);
         }
 
-        var pks = e.Columns.Where(c => c.IsPrimaryKey).ToList();
-
         if (pks.Count > 0)
         {
-            sb.Length -= Environment.NewLine.Length;
-
-            if (!sb.ToString().TrimEnd().EndsWith(","))
-            {
-                sb.AppendLine(",");
-            }
-            else
-            {
-                sb.AppendLine();
-            }
-
             var pkCols = string.Join(", ", pks.Select(p => SqlIdentifier.BracketSimple(p.Name)));
             sb.AppendLine($"    CONSTRAINT [PK_{SqlIdentifier.SafeName(item.TableName)}] PRIMARY KEY ({pkCols})");
         }
@@ -260,25 +249,6 @@ public static class SchemaSyncScriptBuilder
     private static string GetNullabilityClause(Column column) => column.IsPrimaryKey || !column.IsNullable ? "NOT NULL" : "NULL";
 
     /// <summary>外部キーの参照アクション句を生成します。</summary>
-    private static string BuildReferentialActionClause(Relationship? relationship)
-    {
-        if (relationship is null)
-        {
-            return string.Empty;
-        }
-
-        var clauses = new List<string>();
-
-        if (relationship.OnDelete != ForeignKeyReferentialAction.NoAction)
-        {
-            clauses.Add($"ON DELETE {relationship.OnDelete.ToSqlText()}");
-        }
-
-        if (relationship.OnUpdate != ForeignKeyReferentialAction.NoAction)
-        {
-            clauses.Add($"ON UPDATE {relationship.OnUpdate.ToSqlText()}");
-        }
-
-        return clauses.Count == 0 ? string.Empty : " " + string.Join(" ", clauses);
-    }
+    private static string BuildReferentialActionClause(Relationship? relationship) =>
+        relationship is null ? string.Empty : ForeignKeyReferentialActionHelper.BuildReferentialActionClause(relationship.OnDelete, relationship.OnUpdate);
 }

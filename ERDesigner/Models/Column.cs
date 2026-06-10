@@ -28,4 +28,18 @@ public class Column
     /// カラムの説明 (SQL Server の拡張プロパティ <c>MS_Description</c> と同期します)。
     /// </summary>
     public string Description { get; set; } = string.Empty;
+
+    /// <summary>カラム内容を複製します。</summary>
+    /// <param name="preserveId">true の場合は同じ ID を維持し、false の場合は新しい ID を割り当てます。</param>
+    public Column Clone(bool preserveId) =>
+        new()
+        {
+            Id = preserveId ? Id : Guid.NewGuid(),
+            Name = Name,
+            DataType = DataType,
+            IsPrimaryKey = IsPrimaryKey,
+            IsForeignKey = IsForeignKey,
+            IsNullable = IsNullable,
+            Description = Description,
+        };
 }

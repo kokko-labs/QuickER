@@ -15,6 +15,7 @@ namespace ERDesigner.Services;
 ///   <item>各エンティティに対して <c>CREATE TABLE</c> を出力。</item>
 ///   <item><see cref="ColumnViewModel.IsPrimaryKey"/> から <c>PRIMARY KEY</c> 制約を生成。</item>
 ///   <item>1対多 / 1対1 のリレーションから <c>FOREIGN KEY</c> 制約を生成。</item>
+///   <item>識別子は <see cref="SqlIdentifier"/> で括弧付け (<c>schema.table</c> は <c>[schema].[table]</c> に分割、<c>]</c> はエスケープ)。</item>
 /// </list>
 /// </remarks>
 public static class DdlExporter
@@ -33,14 +34,16 @@ public static class DdlExporter
         foreach (var entity in vm.Entities)
         {
             var table = entity.TableName;
-            sb.AppendLine($"CREATE TABLE [{table}] (");
+            var pks = entity.Columns.Where(c => c.IsPrimaryKey).ToList();
+            sb.AppendLine($"CREATE TABLE {SqlIdentifier.Bracket(table)} (");
 
             for (var i = 0; i < entity.Columns.Count; i++)
             {
                 var col = entity.Columns[i];
-                var line = $"    [{col.Name}] {col.DataType} {(col.IsPrimaryKey || !col.IsNullable ? "NOT NULL" : "NULL")}";
+                var line = $"    {SqlIdentifier.BracketSimple(col.Name)} {col.DataType} {(col.IsPrimaryKey || !col.IsNullable ? "NOT NULL" : "NULL")}";
 
-                if (i < entity.Columns.Count - 1)
+                // 後続のカラム行、または PRIMARY KEY 制約行が続く場合は区切りのカンマを付ける
+                if (i < entity.Columns.Count - 1 || pks.Count > 0)
                 {
                     line += ",";
                 }
@@ -49,23 +52,10 @@ public static class DdlExporter
             }
 
             // PRIMARY KEY 制約（複数 PK 対応）
-            var pks = entity.Columns.Where(c => c.IsPrimaryKey).ToList();
-
             if (pks.Count > 0)
             {
-                sb.Length -= Environment.NewLine.Length;
-
-                if (!sb.ToString().TrimEnd().EndsWith(","))
-                {
-                    sb.AppendLine(",");
-                }
-                else
-                {
-                    sb.AppendLine();
-                }
-
-                var pkCols = string.Join(", ", pks.Select(p => $"[{p.Name}]"));
-                sb.AppendLine($"    CONSTRAINT [PK_{table}] PRIMARY KEY ({pkCols})");
+                var pkCols = string.Join(", ", pks.Select(p => SqlIdentifier.BracketSimple(p.Name)));
+                sb.AppendLine($"    CONSTRAINT [PK_{SqlIdentifier.SafeName(table)}] PRIMARY KEY ({pkCols})");
             }
 
             sb.AppendLine(");");
@@ -82,10 +72,9 @@ public static class DdlExporter
                 continue;
             }
 
-            // 1対多 → "1" 側のPKを "多" 側に外部キーとして接続
-            // 1対1 → 起点のPKを終点に接続（暫定）
-            var pkEntity = rel.Type == Models.RelationshipType.OneToMany ? rel.Source : rel.Source;
-            var fkEntity = rel.Type == Models.RelationshipType.OneToMany ? rel.Target : rel.Target;
+            // 1対多 / 1対1 とも、起点 (Source) の PK を終点 (Target) に外部キーとして接続する
+            var pkEntity = rel.Source;
+            var fkEntity = rel.Target;
 
             var pkCol = rel.SourceColumnId is not null
                 ? pkEntity.Columns.FirstOrDefault(c => c.Id == rel.SourceColumnId) ?? pkEntity.Columns.FirstOrDefault(c => c.IsPrimaryKey)
@@ -100,17 +89,19 @@ public static class DdlExporter
 
             if (string.IsNullOrWhiteSpace(fkColName))
             {
-                fkColName = pkEntity.TableName + "_" + pkCol.Name;
+                fkColName = SqlIdentifier.SafeName(pkEntity.TableName) + "_" + pkCol.Name;
             }
 
             var fkTable = fkEntity.TableName;
             var pkTable = pkEntity.TableName;
-            var constraintName = string.IsNullOrWhiteSpace(rel.ConstraintName) ? $"FK_{fkTable}_{pkTable}" : rel.ConstraintName;
+            var constraintName = string.IsNullOrWhiteSpace(rel.ConstraintName)
+                ? $"FK_{SqlIdentifier.SafeName(fkTable)}_{SqlIdentifier.SafeName(pkTable)}"
+                : rel.ConstraintName;
             var referentialActions = BuildReferentialActionClause(rel);
 
             sb.AppendLine(
-                $"ALTER TABLE [{fkTable}] ADD CONSTRAINT [{SqlIdentifier.Escape(constraintName)}] "
-                    + $"FOREIGN KEY ([{fkColName}]) REFERENCES [{pkTable}] ([{pkCol.Name}]){referentialActions};"
+                $"ALTER TABLE {SqlIdentifier.Bracket(fkTable)} ADD CONSTRAINT [{SqlIdentifier.Escape(constraintName)}] "
+                    + $"FOREIGN KEY ({SqlIdentifier.BracketSimple(fkColName)}) REFERENCES {SqlIdentifier.Bracket(pkTable)} ({SqlIdentifier.BracketSimple(pkCol.Name)}){referentialActions};"
             );
         }
 
@@ -118,22 +109,8 @@ public static class DdlExporter
     }
 
     /// <summary>参照アクション句を組み立てます。</summary>
-    private static string BuildReferentialActionClause(RelationshipViewModel relationship)
-    {
-        var clauses = new List<string>();
-
-        if (relationship.OnDelete != Models.ForeignKeyReferentialAction.NoAction)
-        {
-            clauses.Add($"ON DELETE {relationship.OnDelete.ToSqlText()}");
-        }
-
-        if (relationship.OnUpdate != Models.ForeignKeyReferentialAction.NoAction)
-        {
-            clauses.Add($"ON UPDATE {relationship.OnUpdate.ToSqlText()}");
-        }
-
-        return clauses.Count == 0 ? string.Empty : " " + string.Join(" ", clauses);
-    }
+    private static string BuildReferentialActionClause(RelationshipViewModel relationship) =>
+        ForeignKeyReferentialActionHelper.BuildReferentialActionClause(relationship.OnDelete, relationship.OnUpdate);
 
     /// <summary>DDL をファイルに書き出します。</summary>
     /// <param name="vm">対象の <see cref="MainViewModel"/>。</param>

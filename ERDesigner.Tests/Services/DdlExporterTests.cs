@@ -194,6 +194,121 @@ public class DdlExporterTests
         sql.Should().Contain("ON UPDATE SET NULL");
     }
 
+    [Fact(DisplayName = "Build: schema.table 形式は [schema].[table] に分割され、PK 制約名は安全な名前になる")]
+    public void Build_SchemaQualifiedTableName_SplitsBracketsAndUsesSafeConstraintName()
+    {
+        var vm = new MainViewModel();
+        var e = new EntityViewModel(
+            new Entity
+            {
+                TableName = "dbo.User",
+                Columns =
+                {
+                    new Column
+                    {
+                        Name = "Id",
+                        DataType = "int",
+                        IsPrimaryKey = true,
+                        IsNullable = false,
+                    },
+                },
+            }
+        );
+        vm.Entities.Add(e);
+
+        var sql = DdlExporter.Build(vm);
+
+        sql.Should().Contain("CREATE TABLE [dbo].[User]");
+        sql.Should().Contain("CONSTRAINT [PK_dbo_User] PRIMARY KEY ([Id])");
+    }
+
+    [Fact(DisplayName = "Build: 識別子に含まれる ] がエスケープされる")]
+    public void Build_IdentifierContainingClosingBracket_IsEscaped()
+    {
+        var vm = new MainViewModel();
+        var e = new EntityViewModel(
+            new Entity
+            {
+                TableName = "Weird]Name",
+                Columns =
+                {
+                    new Column
+                    {
+                        Name = "Col]umn",
+                        DataType = "int",
+                        IsPrimaryKey = true,
+                        IsNullable = false,
+                    },
+                },
+            }
+        );
+        vm.Entities.Add(e);
+
+        var sql = DdlExporter.Build(vm);
+
+        sql.Should().Contain("CREATE TABLE [Weird]]Name]");
+        sql.Should().Contain("[Col]]umn] int NOT NULL");
+        sql.Should().Contain("PRIMARY KEY ([Col]]umn])");
+    }
+
+    [Fact(DisplayName = "Build: schema 修飾された親子の FOREIGN KEY は分割括弧付けと安全な既定制約名で出力される")]
+    public void Build_SchemaQualifiedForeignKey_UsesBracketsAndSafeDefaultConstraintName()
+    {
+        var vm = new MainViewModel();
+        var parent = new EntityViewModel(
+            new Entity
+            {
+                TableName = "dbo.P",
+                Columns =
+                {
+                    new Column
+                    {
+                        Name = "Id",
+                        DataType = "int",
+                        IsPrimaryKey = true,
+                    },
+                },
+            }
+        );
+        var child = new EntityViewModel(
+            new Entity
+            {
+                TableName = "dbo.C",
+                Columns =
+                {
+                    new Column
+                    {
+                        Name = "Id",
+                        DataType = "int",
+                        IsPrimaryKey = true,
+                    },
+                    new Column { Name = "ParentId", DataType = "int" },
+                },
+            }
+        );
+        vm.Entities.Add(parent);
+        vm.Entities.Add(child);
+        vm.Relationships.Add(
+            new RelationshipViewModel(
+                new Relationship
+                {
+                    SourceEntityId = parent.Id,
+                    TargetEntityId = child.Id,
+                    Type = RelationshipType.OneToMany,
+                    SourceColumnId = parent.Columns[0].Id,
+                    TargetColumnId = child.Columns[1].Id,
+                },
+                parent,
+                child
+            )
+        );
+
+        var sql = DdlExporter.Build(vm);
+
+        sql.Should().Contain("ALTER TABLE [dbo].[C] ADD CONSTRAINT [FK_dbo_C_dbo_P]");
+        sql.Should().Contain("FOREIGN KEY ([ParentId]) REFERENCES [dbo].[P] ([Id])");
+    }
+
     [Fact(DisplayName = "BuildWorkbook: テーブル定義書のサマリーとテーブル詳細が生成される")]
     public void BuildWorkbook_CreatesSummaryAndEntityWorksheets()
     {

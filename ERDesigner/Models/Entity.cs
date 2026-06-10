@@ -38,4 +38,20 @@ public class Entity
 
     /// <summary>このエンティティに含まれるカラム一覧です。</summary>
     public List<Column> Columns { get; set; } = new();
+
+    /// <summary>エンティティ内容をカラムも含めて複製します。</summary>
+    /// <param name="preserveId">true の場合は同じ ID を維持し、false の場合は新しい ID を割り当てます。</param>
+    public Entity Clone(bool preserveId) =>
+        new()
+        {
+            Id = preserveId ? Id : Guid.NewGuid(),
+            TableName = TableName,
+            X = X,
+            Y = Y,
+            Width = Width,
+            Memo = Memo,
+            Description = Description,
+            TitleBackgroundColor = TitleBackgroundColor,
+            Columns = Columns.Select(column => column.Clone(preserveId)).ToList(),
+        };
 }

@@ -50,6 +50,28 @@ public static class ForeignKeyReferentialActionHelper
     /// <summary>表示用の表記へ変換します。</summary>
     public static string ToDisplayText(this ForeignKeyReferentialAction action) => action.ToSqlText();
 
+    /// <summary>
+    /// 外部キー制約の <c>ON DELETE</c> / <c>ON UPDATE</c> 句を組み立てます。
+    /// 両方とも <see cref="ForeignKeyReferentialAction.NoAction"/> の場合は空文字、
+    /// それ以外は先頭に半角スペースを含む句 (例: <c>" ON DELETE CASCADE"</c>) を返します。
+    /// </summary>
+    public static string BuildReferentialActionClause(ForeignKeyReferentialAction onDelete, ForeignKeyReferentialAction onUpdate)
+    {
+        var clauses = new List<string>();
+
+        if (onDelete != ForeignKeyReferentialAction.NoAction)
+        {
+            clauses.Add($"ON DELETE {onDelete.ToSqlText()}");
+        }
+
+        if (onUpdate != ForeignKeyReferentialAction.NoAction)
+        {
+            clauses.Add($"ON UPDATE {onUpdate.ToSqlText()}");
+        }
+
+        return clauses.Count == 0 ? string.Empty : " " + string.Join(" ", clauses);
+    }
+
     /// <summary>比較しやすいように表記ゆれを正規化します。</summary>
     private static string Normalize(string? value)
     {
