@@ -9,36 +9,57 @@ using Microsoft.Win32;
 
 namespace ERDesigner.ViewModels;
 
+/// <summary>ER 図のエクスポート形式</summary>
 internal enum DiagramExportFormat
 {
+    /// <summary>PNG 画像</summary>
     Png,
+
+    /// <summary>SVG 画像</summary>
     Svg,
+
+    /// <summary>SQL（DDL）スクリプト</summary>
     Sql,
+
+    /// <summary>Mermaid 記法</summary>
     Mermaid,
+
+    /// <summary>DBML 記法</summary>
     Dbml,
+
+    /// <summary>Excel テーブル定義書</summary>
     Excel,
 }
 
+/// <summary>ER 図のインポート形式</summary>
 internal enum DiagramImportFormat
 {
+    /// <summary>Mermaid 記法</summary>
     Mermaid,
+
+    /// <summary>DBML 記法</summary>
     Dbml,
+
+    /// <summary>Excel テーブル定義書</summary>
     Excel,
 }
 
-/// <summary>
-/// MainViewModel の入出力機能 (partial)。
-/// 自動保存/復元、各種フォーマットのエクスポート・インポート、SQL Server 連携、
-/// AI 生成、C# コード生成のコマンドを担当します。
-/// </summary>
+/// <summary>MainViewModel の入出力機能を担う partial クラス</summary>
+/// <remarks>
+/// 自動保存・復元、各種フォーマットのエクスポート・インポート、SQL Server 連携、
+/// AI 生成、C# コード生成のコマンドを担当する
+/// </remarks>
 public partial class MainViewModel
 {
     // ---------------- Auto-save / restore ----------------
 
+    /// <summary>ダイアグラム自動保存ファイルのパス</summary>
     private static readonly string AutoSavePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ERDesigner", "last_diagram.json");
+
+    /// <summary>UI 表示状態の保存ファイルのパス</summary>
     private static readonly string UiStatePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ERDesigner", "ui_state.json");
 
-    /// <summary>現在のダイアグラムを自動保存ファイルに書き出します。</summary>
+    /// <summary>現在のダイアグラムと UI 表示状態を自動保存ファイルへ書き出す</summary>
     public void AutoSave()
     {
         try
@@ -54,11 +75,12 @@ public partial class MainViewModel
             );
         }
         catch
-        { /* 自動保存の失敗は無視 */
+        {
+            // 自動保存の失敗は操作を妨げないため無視する
         }
     }
 
-    /// <summary>起動時に前回の自動保存ファイルを復元します。</summary>
+    /// <summary>起動時に前回の自動保存ファイルから UI 状態とダイアグラムを復元する</summary>
     private void RestoreLastDiagram()
     {
         try
@@ -74,7 +96,10 @@ public partial class MainViewModel
                 }
             }
         }
-        catch { }
+        catch
+        {
+            // UI 状態の復元失敗は致命的でないため無視する
+        }
 
         if (!File.Exists(AutoSavePath))
         {
@@ -88,16 +113,15 @@ public partial class MainViewModel
             ReplaceDiagram(diagram.Entities, diagram.Relationships, clearUndoHistory: true);
         }
         catch
-        { /* 復元失敗時は空で起動 */
+        {
+            // 復元失敗時は空のダイアグラムで起動する
         }
     }
 
     // ---------------- Export ----------------
 
-    /// <summary>
-    /// 保存ダイアログで選択した形式に応じて ER 図を書き出します。
-    /// </summary>
-    /// <param name="visual">PNG 出力時に使用するキャンバスの Visual。</param>
+    /// <summary>保存ダイアログで選択した形式に応じて ER 図を書き出す</summary>
+    /// <param name="visual">PNG 出力時に使用するキャンバスの Visual</param>
     [RelayCommand]
     private void ExportDiagram(object? visual)
     {
@@ -125,7 +149,7 @@ public partial class MainViewModel
         }
     }
 
-    /// <summary>現在の ER 図から C# の Entity / EditModel / Mapper コードを生成します。</summary>
+    /// <summary>現在の ER 図から C# の Entity / EditModel / Mapper / Repository コードを生成する</summary>
     [RelayCommand]
     private void GenerateCSharpCode()
     {
@@ -172,6 +196,7 @@ public partial class MainViewModel
         }
     }
 
+    /// <summary>表示中の ER 図をコード生成用の <see cref="DiagramDefinition"/> へ変換する</summary>
     private DiagramDefinition ToGeneratorDiagram() =>
         new()
         {
@@ -212,10 +237,11 @@ public partial class MainViewModel
                 .ToList(),
         };
 
+    /// <summary>コード生成の診断（警告・エラー）を 1 つのメッセージ文字列へ整形する</summary>
     private static string BuildGenerationDiagnosticsMessage(CodeGenerationResult result) =>
         string.Join(Environment.NewLine, result.Diagnostics.Select(diagnostic => $"[{diagnostic.Severity}] {diagnostic.Message}"));
 
-    /// <summary>現在の ER 図をシリアライズ可能なモデル (<see cref="ErDiagram"/>) へ変換します。</summary>
+    /// <summary>現在の ER 図をシリアライズ可能なモデル（<see cref="ErDiagram"/>）へ変換する</summary>
     private ErDiagram ToDiagramModel() =>
         new()
         {
@@ -223,7 +249,7 @@ public partial class MainViewModel
             Relationships = Relationships.Select(relationship => relationship.ToModel()).ToList(),
         };
 
-    /// <summary>指定スキーマが現在のダイアグラムと構造的に同一かを判定します。</summary>
+    /// <summary>指定スキーマが現在のダイアグラムと構造的に同一かを署名比較で判定する</summary>
     private bool HasSameStructure(IEnumerable<Entity> entities, IEnumerable<Relationship> relationships)
     {
         var current = ToDiagramModel();
@@ -233,10 +259,9 @@ public partial class MainViewModel
         return currentSignature == newSignature;
     }
 
-    /// <summary>
-    /// 構造変更を伴う置換の場合のみ確認ダイアログを表示します。
-    /// </summary>
-    /// <returns>置換を続行してよい場合 true。</returns>
+    /// <summary>構造変更を伴う置換の場合のみ確認ダイアログを表示する</summary>
+    /// <remarks>空の図、または構造が同一の場合は確認なしで続行する</remarks>
+    /// <returns>置換を続行してよい場合 true</returns>
     private bool ConfirmDiagramReplacement(IReadOnlyList<Entity> entities, IReadOnlyList<Relationship> relationships, string message)
     {
         if (Entities.Count == 0 || HasSameStructure(entities, relationships))
@@ -247,9 +272,7 @@ public partial class MainViewModel
         return _dialogs.Confirm(message, "確認");
     }
 
-    /// <summary>
-    /// ファイル選択ダイアログで選択した形式に応じて ER 図を取り込みます。
-    /// </summary>
+    /// <summary>ファイル選択ダイアログで選択したファイルの形式に応じて ER 図を取り込む</summary>
     [RelayCommand]
     private void ImportDiagram()
     {
@@ -272,9 +295,7 @@ public partial class MainViewModel
         }
     }
 
-    /// <summary>
-    /// 指定形式でダイアグラムを書き出します。
-    /// </summary>
+    /// <summary>指定形式でダイアグラムをファイルへ書き出し、完了を通知する</summary>
     private void SaveDiagram(DiagramExportFormat format, string path, object? visual)
     {
         var displayName = format switch
@@ -323,9 +344,7 @@ public partial class MainViewModel
         _dialogs.ShowInformation($"{displayName}の出力が完了しました。", "完了");
     }
 
-    /// <summary>
-    /// 指定形式のダイアグラムファイルを読み込みます。
-    /// </summary>
+    /// <summary>指定形式のダイアグラムファイルを読み込み、確認のうえ現在の図を置換する</summary>
     private void ImportDiagramFile(DiagramImportFormat format, string path)
     {
         var diagram = format switch
@@ -356,6 +375,7 @@ public partial class MainViewModel
     /// <summary>
     /// 保存ファイル名またはフィルター選択から出力形式を判定します。
     /// </summary>
+    /// <summary>ファイル拡張子を優先し、無ければフィルター選択から出力形式を判定する</summary>
     private static DiagramExportFormat GetExportFormat(string path, int filterIndex)
     {
         var extension = Path.GetExtension(path).ToLowerInvariant();
@@ -383,9 +403,7 @@ public partial class MainViewModel
         };
     }
 
-    /// <summary>
-    /// 読み込みファイル名またはフィルター選択から取込形式を判定します。
-    /// </summary>
+    /// <summary>ファイル拡張子を優先し、無ければフィルター選択から取込形式を判定する</summary>
     private static DiagramImportFormat GetImportFormat(string path, int filterIndex)
     {
         var extension = Path.GetExtension(path).ToLowerInvariant();
@@ -408,7 +426,7 @@ public partial class MainViewModel
 
     // ---------------- SQL Server 取込 ----------------
 
-    /// <summary>SQL Server に接続してスキーマを取得し、ダイアグラムに反映します。</summary>
+    /// <summary>SQL Server へ接続してスキーマを取得し、確認のうえダイアグラムへ反映する</summary>
     [RelayCommand]
     private async Task ImportFromSqlServerAsync()
     {
@@ -424,13 +442,13 @@ public partial class MainViewModel
             var importer = new SqlServerSchemaImporter();
             var result = await importer.ImportAsync(dialog.ViewModel.Result).ConfigureAwait(true);
 
-            // 既存と差分があるかチェックして置換確認
+            // 構造差分がある場合のみ置換確認を行う
             if (!ConfirmDiagramReplacement(result.Entities, result.Relationships, "現在のダイアグラムを取得結果で置換します。よろしいですか？"))
             {
                 return;
             }
 
-            // 取込結果の反映は履歴対象外にします。
+            // DB 取込はインポート扱いとし、Undo 履歴へは積まない
             ReplaceDiagramWithoutHistory(result.Entities, result.Relationships, autoLayout: true);
         }
         catch (System.Exception ex)
@@ -441,7 +459,7 @@ public partial class MainViewModel
 
     // ---------------- DB 書き込み (スキーマ同期) ----------------
 
-    /// <summary>SQL Server に接続し、現在のダイアグラムとの差分を ALTER 文で書き戻します。</summary>
+    /// <summary>SQL Server へ接続し、現在のダイアグラムとの差分同期ダイアログを開く</summary>
     [RelayCommand]
     private void SyncToSqlServer()
     {
@@ -461,7 +479,7 @@ public partial class MainViewModel
 
     // ---------------- AI 生成 ----------------
 
-    /// <summary>ChatGPT/Ollama にスキーマ生成を依頼し、ダイアグラムへ反映します。</summary>
+    /// <summary>ChatGPT / Ollama にスキーマ生成を依頼し、新規生成または既存更新として反映する</summary>
     [RelayCommand]
     private void GenerateFromAi()
     {
@@ -491,14 +509,14 @@ public partial class MainViewModel
             return;
         }
 
-        // AI 生成結果の反映は履歴対象外にします。
+        // AI 新規生成はインポート扱いとし、Undo 履歴へは積まない
         ReplaceDiagramWithoutHistory(entities, relationships, autoLayout: true);
     }
 
-    /// <summary>Codex App Server 対話ウィンドウのシングルトンインスタンスです。</summary>
+    /// <summary>Codex App Server 対話ウィンドウのシングルトンインスタンス</summary>
     private Views.CodexAppServerDialog? _codexDialog;
 
-    /// <summary>Codex App Server の接続設定ダイアログを開きます。</summary>
+    /// <summary>Codex App Server の対話ウィンドウを開く（既存があれば再利用する）</summary>
     [RelayCommand]
     private void OpenCodexAppServer()
     {
@@ -512,14 +530,14 @@ public partial class MainViewModel
         _codexDialog.Activate();
     }
 
-    /// <summary>アプリ終了時に Codex チャット画面を強制終了します。</summary>
+    /// <summary>アプリ終了時に Codex チャット画面を強制終了する</summary>
     public void CloseCodexDialog()
     {
         _codexDialog?.ForceClose();
         _codexDialog = null;
     }
 
-    /// <summary>AI が返した更新後スキーマを既存 ER 図へ反映します。</summary>
+    /// <summary>AI が返した更新後スキーマを差分プレビューで確認のうえ既存 ER 図へ反映する</summary>
     private void ApplyAiUpdateResult(AiSchemaJson schema)
     {
         var (entities, relationships) = schema.ToDomain();
@@ -552,6 +570,7 @@ public partial class MainViewModel
 
     // ---------------- Save / Load ----------------
 
+    /// <summary>保存ダイアログでパスを選び、現在のダイアグラムを JSON 形式で保存する</summary>
     [RelayCommand]
     private void Save()
     {
@@ -563,7 +582,7 @@ public partial class MainViewModel
         }
     }
 
-    /// <summary>JSON ファイルからダイアグラムを読み込みます（ダイアログ表示）。</summary>
+    /// <summary>JSON ファイルからダイアグラムを読み込み、現在の図と置換する（ダイアログ表示）</summary>
     [RelayCommand]
     private void Open()
     {
@@ -579,10 +598,13 @@ public partial class MainViewModel
         ReplaceDiagram(diagram.Entities, diagram.Relationships, clearUndoHistory: true);
     }
 
+    /// <summary>自動保存対象の UI 表示状態（ダイアグラム上の表示トグル）</summary>
     private sealed class UiState
     {
+        /// <summary>ダイアグラム上にカラム説明を表示するかどうか</summary>
         public bool ShowColumnDescriptionsInDiagram { get; init; }
 
+        /// <summary>ダイアグラム上に NULL 許容を表示するかどうか</summary>
         public bool ShowNullabilityInDiagram { get; init; } = true;
     }
 }
