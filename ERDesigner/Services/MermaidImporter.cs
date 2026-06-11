@@ -4,24 +4,20 @@ using ERDesigner.Models;
 
 namespace ERDesigner.Services;
 
-/// <summary>
-/// Mermaid の <c>erDiagram</c> 記法を ER 図へ変換するサービスです。
-/// </summary>
+/// <summary>Mermaid の <c>erDiagram</c> 記法を ER 図へ変換するサービス</summary>
 public static partial class MermaidImporter
 {
+    /// <summary>リレーション行の解析に用いる正規表現</summary>
     private static readonly Regex RelationshipRegex = RelationshipLineRegex();
 
-    /// <summary>
-    /// Mermaid ファイルを読み込みます。
-    /// </summary>
+    /// <summary>Mermaid ファイルを読み込み ER 図へ変換する</summary>
     public static ErDiagram Load(string path)
     {
         return Parse(File.ReadAllText(path));
     }
 
-    /// <summary>
-    /// Mermaid テキストを解析して ER 図を生成します。
-    /// </summary>
+    /// <summary>Mermaid テキストを解析して ER 図を生成する</summary>
+    /// <exception cref="InvalidDataException">ヘッダー欠落・構文不正・定義不足の場合にスローする</exception>
     public static ErDiagram Parse(string text)
     {
         if (string.IsNullOrWhiteSpace(text))
@@ -44,6 +40,7 @@ public static partial class MermaidImporter
                 continue;
             }
 
+            // 最初の有効行は erDiagram ヘッダーでなければならない
             if (!foundHeader)
             {
                 if (!string.Equals(line, "erDiagram", StringComparison.Ordinal))
@@ -55,6 +52,7 @@ public static partial class MermaidImporter
                 continue;
             }
 
+            // エンティティブロック内の行はカラム定義、閉じ括弧でブロックを抜ける
             if (currentEntity is not null)
             {
                 if (line == "}")
@@ -109,9 +107,7 @@ public static partial class MermaidImporter
         return new ErDiagram { Entities = entities.Values.ToList(), Relationships = relationships };
     }
 
-    /// <summary>
-    /// カラム定義を解析します。
-    /// </summary>
+    /// <summary>カラム定義行を解析して <see cref="Column"/> を生成する（PK / FK マーカーを反映する）</summary>
     private static Column ParseColumn(string line, string tableName)
     {
         var content = RemoveTrailingComment(line);
@@ -150,9 +146,7 @@ public static partial class MermaidImporter
         return column;
     }
 
-    /// <summary>
-    /// リレーション定義を解析します。
-    /// </summary>
+    /// <summary>リレーション定義行を解析して <see cref="Relationship"/> を生成する</summary>
     private static Relationship ParseRelationship(string line, IReadOnlyDictionary<string, Entity> entities)
     {
         var match = RelationshipRegex.Match(line);
@@ -187,9 +181,7 @@ public static partial class MermaidImporter
         };
     }
 
-    /// <summary>
-    /// リレーション種別を Mermaid 記号から判定します。
-    /// </summary>
+    /// <summary>Mermaid のカーディナリティ記号からリレーション種別を判定する</summary>
     private static RelationshipType ParseRelationshipType(string symbol)
     {
         return symbol switch
@@ -201,9 +193,7 @@ public static partial class MermaidImporter
         };
     }
 
-    /// <summary>
-    /// すべてのエンティティに最低 1 列があることを保証します。
-    /// </summary>
+    /// <summary>カラムを持たないエンティティに既定の主キー列を補う</summary>
     private static void EnsureEntitiesHaveColumns(IEnumerable<Entity> entities)
     {
         foreach (var entity in entities)
@@ -223,9 +213,8 @@ public static partial class MermaidImporter
         }
     }
 
-    /// <summary>
-    /// リレーションの参照列を既定ルールで補完します。
-    /// </summary>
+    /// <summary>Mermaid に列情報が無いリレーションの参照列を既定ルールで補完する</summary>
+    /// <remarks>多対多は中間テーブルを介する設計のため列補完の対象外とする</remarks>
     private static void ResolveRelationshipColumns(IReadOnlyDictionary<string, Entity> entities, IEnumerable<Relationship> relationships)
     {
         foreach (var relationship in relationships)
@@ -247,9 +236,8 @@ public static partial class MermaidImporter
         }
     }
 
-    /// <summary>
-    /// 参照先 PK に対応する外部キー列を選択します。
-    /// </summary>
+    /// <summary>参照先テーブルから外部キーとする列を選択する</summary>
+    /// <remarks>同名 FK → 同名列 → 既存 FK 列 → 主キー以外の先頭列の順で優先する</remarks>
     private static Column ResolveTargetColumn(Column sourcePrimaryKey, Entity target)
     {
         var sameNameForeignKey = target.Columns.FirstOrDefault(column =>
@@ -278,15 +266,15 @@ public static partial class MermaidImporter
         return target.Columns.FirstOrDefault(column => !column.IsPrimaryKey) ?? target.Columns.First();
     }
 
-    /// <summary>
-    /// Mermaid 出力時に正規化された型名を元の SQL 型名に復元します。
-    /// 数値引数が末尾にアンダースコアで連結されている形式を括弧記法に変換します。
-    /// 例: nvarchar_100 → nvarchar(100)、decimal_10_2 → decimal(10,2)
-    /// 数値以外のアンダースコアはそのまま保持します。
-    /// </summary>
+    /// <summary>Mermaid 出力で正規化された型名を元の SQL 型名へ復元する</summary>
+    /// <remarks>
+    /// 末尾にアンダースコア連結された数値引数を括弧記法へ戻す
+    /// 例: <c>nvarchar_100</c> → <c>nvarchar(100)</c>、<c>decimal_10_2</c> → <c>decimal(10,2)</c>
+    /// 数値以外のアンダースコアはそのまま保持する
+    /// </remarks>
     private static string DenormalizeDataType(string dataType)
     {
-        // パターン: 識別子部分 + (_数値)+ の形式を検出
+        // 「識別子 + (_数値)の繰り返し」に一致する型のみ復元対象とする
         var match = System.Text.RegularExpressions.Regex.Match(dataType, @"^([A-Za-z][A-Za-z0-9]*)(_\d+)+$");
 
         if (!match.Success)
@@ -294,7 +282,7 @@ public static partial class MermaidImporter
             return dataType;
         }
 
-        // 先頭の型名と末尾の数値引数群を分離する
+        // 最初の「_数値」位置で型名部分と引数部分を分割する
         var firstUnderscoreDigit = System.Text.RegularExpressions.Regex.Match(dataType, @"_\d");
         var typeName = dataType[..firstUnderscoreDigit.Index];
         var argsPart = dataType[(firstUnderscoreDigit.Index + 1)..];
@@ -303,15 +291,14 @@ public static partial class MermaidImporter
         return $"{typeName}({args})";
     }
 
-    /// <summary>
-    /// Mermaid 属性行末尾の説明文字列を除去します。
-    /// </summary>
+    /// <summary>Mermaid 属性行末尾の二重引用符で始まる説明文字列を除去する</summary>
     private static string RemoveTrailingComment(string line)
     {
         var commentIndex = line.IndexOf('"');
         return commentIndex >= 0 ? line[..commentIndex].TrimEnd() : line;
     }
 
+    /// <summary>リレーション行（左テーブル・カーディナリティ記号・右テーブル・任意ラベル）にマッチする正規表現</summary>
     [GeneratedRegex(@"^(?<left>\S+)\s+(?<symbol>[|}{o]+--[|}{o]+)\s+(?<right>\S+)(?:\s*:\s*(?<label>.+))?$", RegexOptions.Compiled)]
     private static partial Regex RelationshipLineRegex();
 }

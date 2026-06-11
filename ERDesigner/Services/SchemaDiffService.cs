@@ -4,19 +4,15 @@ using ERDesigner.Models;
 
 namespace ERDesigner.Services;
 
-/// <summary>
-/// 既存 DB のスキーマ (importer 取得結果) と現在のダイアグラム (Entities/Relationships) を比較して
-/// <see cref="SchemaDiff"/> を生成します。リネームは扱わず「同名 = 同一」の前提です。
-/// </summary>
+/// <summary>既存 DB スキーマと現在のダイアグラムを比較して <see cref="SchemaDiff"/> を生成するサービス</summary>
+/// <remarks>リネームは扱わず「同名 = 同一」を前提とする 名称が変われば削除＋追加として検出する</remarks>
 public class SchemaDiffService
 {
-    /// <summary>
-    /// 差分を計算します。
-    /// </summary>
-    /// <param name="liveEntities">DB から取得した現在のエンティティ。</param>
-    /// <param name="liveRelationships">DB から取得した現在のリレーション。</param>
-    /// <param name="targetEntities">ダイアグラム上のエンティティ (= 期待状態)。</param>
-    /// <param name="targetRelationships">ダイアグラム上のリレーション。</param>
+    /// <summary>DB 現状とダイアグラムの目標状態を突き合わせて差分項目を計算する</summary>
+    /// <param name="liveEntities">DB から取得した現在のエンティティ</param>
+    /// <param name="liveRelationships">DB から取得した現在のリレーション</param>
+    /// <param name="targetEntities">ダイアグラム上のエンティティ（期待状態）</param>
+    /// <param name="targetRelationships">ダイアグラム上のリレーション</param>
     public SchemaDiff Compute(
         IReadOnlyList<Entity> liveEntities,
         IReadOnlyList<Relationship> liveRelationships,
@@ -34,7 +30,7 @@ public class SchemaDiffService
         {
             if (!liveByName.TryGetValue(name, out var live))
             {
-                // 新規テーブル
+                // DB に存在しないテーブルは新規作成として扱う
                 diff.Items.Add(
                     new SchemaDiffItem
                     {
@@ -241,7 +237,7 @@ public class SchemaDiffService
         }
 
         // ---------- 外部キーの差分 ----------
-        // (Parent, Child) ペアでキー化。テーブル名は正規化済みに合わせる。
+        // 親・子・列・制約名などのシグネチャでキー化し、同一 FK の有無を集合比較で判定する
         var liveFkPairs = liveRelationships
             .Where(r => r.Type != RelationshipType.ManyToMany)
             .Select(r => MakeForeignKeySignature(r, liveEntities))
@@ -283,7 +279,7 @@ public class SchemaDiffService
                 continue;
             }
 
-            // 明示選択された FK 列を優先し、未設定時のみ既存規約で補完します。
+            // 明示選択された FK 列を優先し、未設定時のみ命名規約で補完する
             var fkColName = ResolveFkColumnName(rel, child, parent, pkCol);
             diff.Items.Add(
                 new SchemaDiffItem
@@ -302,8 +298,8 @@ public class SchemaDiffService
             );
         }
 
-        // 既存 DB にあるが ER 図にない FK は削除候補 (フェーズ2)
-        // 注意: 取得側 Relationship には FK 名が含まれないため、ここでは「親→子のペアが消えた」ケースだけ示す。
+        // DB にあるが ER 図にない FK は削除候補とする
+        // 取得側 Relationship には FK 名が無いため、ここでは「親→子ペアの消失」ケースのみ検出する
         var targetFkPairs = targetRelationships
             .Where(r => r.Type != RelationshipType.ManyToMany)
             .Select(r => MakeForeignKeySignature(r, targetEntities))
@@ -357,10 +353,8 @@ public class SchemaDiffService
         return diff;
     }
 
-    /// <summary>
-    /// DB 側とダイアグラム側で「同一列集合だが順序のみ異なる」テーブル名一覧を返します。
-    /// 列追加/削除がある場合は、列順差分としては扱いません。
-    /// </summary>
+    /// <summary>同一列集合のまま順序のみ異なるテーブル名の一覧を返す</summary>
+    /// <remarks>列の追加・削除を伴う場合は列順差分として扱わない（ALTER で表現できないため別管理とする）</remarks>
     public static IReadOnlyList<string> DetectColumnOrderChanges(IReadOnlyList<Entity> liveEntities, IReadOnlyList<Entity> targetEntities)
     {
         var changed = new List<string>();
@@ -384,13 +378,14 @@ public class SchemaDiffService
         return changed;
     }
 
-    /// <summary>テーブル名を「schema.name」または「name」の正規形に揃えます。</summary>
+    /// <summary>テーブル名を比較用に正規化する（前後空白を除去する）</summary>
     public static string NormalizeTable(Entity e)
     {
         return e.TableName.Trim();
     }
 
-    /// <summary>外部キーの比較に使うシグネチャを生成します。</summary>
+    /// <summary>外部キーの同一性比較に使うシグネチャ（親子・列・制約名・参照アクション）を生成する</summary>
+    /// <returns>親子いずれかの参照先・参照列が解決できない場合は null</returns>
     private static (
         string Parent,
         string ParentColumn,
@@ -434,11 +429,11 @@ public class SchemaDiffService
         );
     }
 
-    /// <summary>
-    /// 子テーブル側の FK 列名を解決します。
-    /// 優先順位: 1) <c>&lt;ParentTable&gt;_&lt;PkCol&gt;</c> 命名の列, 2) PK 列と同名の列, 3) <c>IsForeignKey</c> フラグの列。
-    /// 該当なしなら null。
-    /// </summary>
+    /// <summary>子テーブル側の外部キー列名を解決する</summary>
+    /// <remarks>
+    /// 明示指定列 → <c>&lt;ParentTable&gt;_&lt;PkCol&gt;</c> 命名列 → PK 列と同名の列 →
+    /// <c>IsForeignKey</c> フラグの列、の優先順で探索する 該当なしなら null
+    /// </remarks>
     private static string? ResolveFkColumnName(Relationship rel, Entity child, Entity parent, Column pkCol)
     {
         if (rel.TargetColumnId is not null)
@@ -471,7 +466,7 @@ public class SchemaDiffService
         return byFlag?.Name;
     }
 
-    /// <summary>親テーブル側の参照先列を解決します。未設定時は PK を優先します。</summary>
+    /// <summary>親テーブル側の参照先列を解決する（明示指定が無ければ主キーを採用する）</summary>
     private static Column? ResolveReferencedColumn(Relationship rel, Entity parent)
     {
         if (rel.SourceColumnId is not null)
@@ -487,11 +482,10 @@ public class SchemaDiffService
         return parent.Columns.FirstOrDefault(c => c.IsPrimaryKey);
     }
 
+    /// <summary>データ型を大文字小文字・前後空白を無視して同一とみなせるか判定する</summary>
     private static bool IsSameType(string a, string b) => string.Equals((a ?? "").Trim(), (b ?? "").Trim(), StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>
-    /// 同一列集合（件数・名前一致）のテーブルで、列順のみ変更されているかを判定します。
-    /// </summary>
+    /// <summary>列集合が一致するテーブルで列順のみが変更されているかを判定する</summary>
     private static bool HasColumnOrderChanged(Entity live, Entity target)
     {
         if (live.Columns.Count != target.Columns.Count)
@@ -521,5 +515,6 @@ public class SchemaDiffService
         return false;
     }
 
+    /// <summary>説明文を指定長で切り詰め、超過時は末尾に省略記号を付ける</summary>
     private static string Truncate(string s, int max = 30) => s.Length <= max ? s : s.Substring(0, max) + "…";
 }

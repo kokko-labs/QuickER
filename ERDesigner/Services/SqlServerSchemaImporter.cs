@@ -8,28 +8,24 @@ using Microsoft.Data.SqlClient;
 
 namespace ERDesigner.Services;
 
-/// <summary>
-/// SQL Server からテーブル定義 (テーブル/カラム/PK/FK) を取得し、
-/// <see cref="Entity"/> / <see cref="Relationship"/> のコレクションへ変換します。
-/// </summary>
+/// <summary>SQL Server のテーブル定義を取得し <see cref="Entity"/> / <see cref="Relationship"/> へ変換するインポーター</summary>
 /// <remarks>
-/// クエリは <c>INFORMATION_SCHEMA</c> 系と <c>sys.foreign_keys</c> を使い、
-/// BASE TABLE のみ対象とします。複合 PK は順序を保持します。
-/// 多対多テーブルは中間テーブルとしてそのまま 1対多 × 2 の形で表現します。
+/// <c>INFORMATION_SCHEMA</c> 系と <c>sys.foreign_keys</c> を用い、BASE TABLE のみ対象とする
+/// 複合主キーは順序を保持する 多対多は中間テーブルとして 1 対多 × 2 の形で表現する
 /// </remarks>
 public class SqlServerSchemaImporter
 {
-    /// <summary>取得したスキーマを格納する DTO。</summary>
+    /// <summary>取得したスキーマを格納する結果 DTO</summary>
     public sealed class SchemaResult
     {
-        /// <summary>取得したエンティティ一覧。</summary>
+        /// <summary>取得したエンティティ一覧</summary>
         public List<Entity> Entities { get; init; } = new();
 
-        /// <summary>取得したリレーション一覧。</summary>
+        /// <summary>取得したリレーション一覧</summary>
         public List<Relationship> Relationships { get; init; } = new();
     }
 
-    /// <summary>取得結果のシグネチャ計算に使う簡易キー (置換確認用)。</summary>
+    /// <summary>スキーマ内容の一致比較に使う署名文字列を生成する（取込前後の置換要否判定に用いる）</summary>
     public static string ComputeSignature(IEnumerable<Entity> entities, IEnumerable<Relationship> relationships)
     {
         var e = string.Join(
@@ -67,7 +63,7 @@ public class SqlServerSchemaImporter
         return e + "##" + r;
     }
 
-    /// <summary>指定の接続設定でスキーマを取得します。</summary>
+    /// <summary>指定の接続設定で接続を開きスキーマを取得する</summary>
     public async Task<SchemaResult> ImportAsync(SqlConnectionSettings settings, CancellationToken ct = default)
     {
         var connStr = settings.Build();
@@ -76,7 +72,8 @@ public class SqlServerSchemaImporter
         return await ImportAsync(conn, ct).ConfigureAwait(false);
     }
 
-    /// <summary>既に開かれている接続でスキーマを取得します（テストや再利用向け）。</summary>
+    /// <summary>既に開かれた接続でスキーマを取得する（テストや接続再利用向け）</summary>
+    /// <remarks>テーブル→カラム→主キー→説明→外部キーの順に段階的に補完していく</remarks>
     public async Task<SchemaResult> ImportAsync(SqlConnection conn, CancellationToken ct = default)
     {
         var tables = await LoadTablesAsync(conn, ct).ConfigureAwait(false);
@@ -85,21 +82,31 @@ public class SqlServerSchemaImporter
         await LoadDescriptionsAsync(conn, tables, ct).ConfigureAwait(false);
         var rels = await LoadForeignKeysAsync(conn, tables, ct).ConfigureAwait(false);
 
-        // 取り込んだ FK のカラムに IsForeignKey フラグを付ける
         return new SchemaResult { Entities = tables.Values.Select(t => t.Entity).ToList(), Relationships = rels };
     }
 
     // ---------------- 内部実装 ----------------
 
+    /// <summary>取込処理中にテーブルとその列を索引付きで保持する作業用エントリ</summary>
     private sealed class TableEntry
     {
+        /// <summary>スキーマ名</summary>
         public string Schema { get; init; } = "";
+
+        /// <summary>テーブル名</summary>
         public string Name { get; init; } = "";
+
+        /// <summary>構築中のエンティティ</summary>
         public Entity Entity { get; init; } = new();
+
+        /// <summary>列名からカラムを引くための索引（後続の PK / 説明 / FK 反映に用いる）</summary>
         public Dictionary<string, Column> ColumnsByName { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>テーブルを一意に識別する <c>[schema].[name]</c> 形式のキー</summary>
         public string Key => $"[{Schema}].[{Name}]";
     }
 
+    /// <summary>BASE TABLE 一覧を取得するクエリ</summary>
     private const string TablesSql =
         @"
 SELECT TABLE_SCHEMA, TABLE_NAME
@@ -107,6 +114,7 @@ FROM INFORMATION_SCHEMA.TABLES
 WHERE TABLE_TYPE = 'BASE TABLE'
 ORDER BY TABLE_SCHEMA, TABLE_NAME;";
 
+    /// <summary>全テーブルのカラム定義を序数順に取得するクエリ</summary>
     private const string ColumnsSql =
         @"
 SELECT TABLE_SCHEMA, TABLE_NAME, COLUMN_NAME, DATA_TYPE,
@@ -114,6 +122,7 @@ SELECT TABLE_SCHEMA, TABLE_NAME, COLUMN_NAME, DATA_TYPE,
 FROM INFORMATION_SCHEMA.COLUMNS
 ORDER BY TABLE_SCHEMA, TABLE_NAME, ORDINAL_POSITION;";
 
+    /// <summary>主キー制約の構成列を序数順に取得するクエリ</summary>
     private const string PrimaryKeysSql =
         @"
 SELECT kcu.TABLE_SCHEMA, kcu.TABLE_NAME, kcu.COLUMN_NAME, kcu.ORDINAL_POSITION
@@ -125,6 +134,7 @@ JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE kcu
 WHERE tc.CONSTRAINT_TYPE = 'PRIMARY KEY'
 ORDER BY kcu.TABLE_SCHEMA, kcu.TABLE_NAME, kcu.ORDINAL_POSITION;";
 
+    /// <summary>外部キーの親子テーブル・列・参照アクションを取得するクエリ</summary>
     private const string ForeignKeysSql =
         @"
 SELECT
@@ -142,6 +152,7 @@ JOIN sys.tables  tr ON fkc.referenced_object_id = tr.object_id
 JOIN sys.columns cr ON fkc.referenced_object_id = cr.object_id AND fkc.referenced_column_id = cr.column_id
 ORDER BY fk.name, fkc.constraint_column_id;";
 
+    /// <summary>主キー以外の一意インデックス構成列を取得するクエリ（1 対 1 判定に用いる）</summary>
     private const string UniqueIndexSql =
         @"
 SELECT SCHEMA_NAME(t.schema_id) AS TableSchema, t.name AS TableName, i.name AS IndexName,
@@ -153,7 +164,7 @@ JOIN sys.columns c ON ic.object_id = c.object_id AND ic.column_id = c.column_id
 WHERE i.is_unique = 1 AND i.is_primary_key = 0 AND ic.is_included_column = 0
 ORDER BY t.schema_id, t.name, i.name, ic.key_ordinal;";
 
-    // テーブルとカラムの MS_Description を一括取得 (column_id = 0 はテーブルレベル)
+    /// <summary>テーブル・カラムの拡張プロパティ MS_Description を一括取得するクエリ（minor_id=0 がテーブルレベル）</summary>
     private const string DescriptionsSql =
         @"
 SELECT
@@ -168,6 +179,7 @@ LEFT JOIN sys.columns c
        ON c.object_id = ep.major_id AND c.column_id = ep.minor_id
 WHERE ep.class = 1 AND ep.name = N'MS_Description';";
 
+    /// <summary>テーブル一覧を読み込み、テーブルキーをキーとするエントリ辞書を構築する</summary>
     private static async Task<Dictionary<string, TableEntry>> LoadTablesAsync(SqlConnection conn, CancellationToken ct)
     {
         var dict = new Dictionary<string, TableEntry>(StringComparer.OrdinalIgnoreCase);
@@ -191,6 +203,7 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
         return dict;
     }
 
+    /// <summary>各テーブルへカラム定義を読み込み、型表記を整形して追加する</summary>
     private static async Task LoadColumnsAsync(SqlConnection conn, Dictionary<string, TableEntry> tables, CancellationToken ct)
     {
         await using var cmd = new SqlCommand(ColumnsSql, conn);
@@ -226,6 +239,7 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
         }
     }
 
+    /// <summary>主キー構成列に IsPrimaryKey を立て、NULL 不可へ補正する</summary>
     private static async Task LoadPrimaryKeysAsync(SqlConnection conn, Dictionary<string, TableEntry> tables, CancellationToken ct)
     {
         await using var cmd = new SqlCommand(PrimaryKeysSql, conn);
@@ -249,8 +263,7 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
     }
 
     /// <summary>
-    /// テーブルとカラムの拡張プロパティ <c>MS_Description</c> を取得し、
-    /// エンティティの <see cref="Entity.Description"/> / カラムの <see cref="Column.Description"/> に格納します。
+    /// 拡張プロパティ <c>MS_Description</c> を取得し、エンティティ・カラムの説明へ反映する
     /// </summary>
     private static async Task LoadDescriptionsAsync(SqlConnection conn, Dictionary<string, TableEntry> tables, CancellationToken ct)
     {
@@ -272,7 +285,7 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
 
             if (reader.IsDBNull(2))
             {
-                // テーブルレベル
+                // 列名が NULL の行はテーブルレベルの説明
                 entry.Entity.Description = description;
             }
             else
@@ -287,9 +300,11 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
         }
     }
 
+    /// <summary>外部キーを読み込み、複合列を集約してリレーションへ変換する</summary>
+    /// <remarks>参照先列の集合が主キーまたは一意制約と一致する場合は 1 対 1、それ以外は 1 対多と判定する</remarks>
     private static async Task<List<Relationship>> LoadForeignKeysAsync(SqlConnection conn, Dictionary<string, TableEntry> tables, CancellationToken ct)
     {
-        // 親テーブルでユニーク制約がある列集合を集めて 1対1 判定に使う
+        // 親テーブルの一意制約列集合を取得し、1 対 1 判定に用いる
         var uniqueSets = await LoadUniqueColumnSetsAsync(conn, ct).ConfigureAwait(false);
 
         var rels = new List<Relationship>();
@@ -334,7 +349,7 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
                 continue;
             }
 
-            // FK 列に IsForeignKey フラグ
+            // FK を構成する子側の列に IsForeignKey フラグを立てる
             foreach (var pc in g.ParentCols)
             {
                 if (parent.ColumnsByName.TryGetValue(pc, out var pcol))
@@ -343,7 +358,7 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
                 }
             }
 
-            // 1対1 判定: 親側 FK 列が PK もしくはユニーク制約に一致する
+            // FK 列集合が主キーまたは一意制約と一致すれば 1 対 1 とみなす
             var sortedParent = g.ParentCols.OrderBy(s => s, StringComparer.OrdinalIgnoreCase).ToArray();
             var pkCols = parent.Entity.Columns.Where(c => c.IsPrimaryKey).Select(c => c.Name).OrderBy(s => s, StringComparer.OrdinalIgnoreCase).ToArray();
             var uniqueOnParent = uniqueSets.TryGetValue(g.ParentKey, out var sets) ? sets : new List<string[]>();
@@ -368,6 +383,8 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
         return rels;
     }
 
+    /// <summary>テーブルごとの一意インデックス列集合を取得する</summary>
+    /// <returns>テーブルキー → 各一意インデックスの列名配列リスト</returns>
     private static async Task<Dictionary<string, List<string[]>>> LoadUniqueColumnSetsAsync(SqlConnection conn, CancellationToken ct)
     {
         var result = new Dictionary<string, List<string[]>>(StringComparer.OrdinalIgnoreCase);
@@ -413,9 +430,11 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
         return result;
     }
 
+    /// <summary>2 つのソート済み列名集合が大文字小文字無視で完全一致するか判定する（空集合は不一致）</summary>
     private static bool SameSet(string[] a, string[] b) => a.Length > 0 && a.Length == b.Length && a.SequenceEqual(b, StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>SQL Server の型情報を <c>nvarchar(50)</c> 等の表示形式に整形します。</summary>
+    /// <summary>SQL Server の型情報を <c>nvarchar(50)</c> や <c>decimal(10,2)</c> 等の表示形式へ整形する</summary>
+    /// <remarks>可変長型の最大長 -1 は <c>(max)</c> として表現する</remarks>
     public static string FormatDataType(string dataType, int? maxLen, int? precision, int? scale)
     {
         var dt = dataType.ToLowerInvariant();
