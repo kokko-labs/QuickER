@@ -6,19 +6,20 @@ using FluentAssertions;
 
 namespace ERDesigner.Tests.ViewModels;
 
-/// <summary>
-/// <see cref="SqlConnectionDialogViewModel"/> の初期表示と保存済み接続選択の挙動を検証するテスト。
-/// </summary>
+/// <summary><see cref="SqlConnectionDialogViewModel"/> の初期表示・プロファイル選択・保存・削除を検証するテストクラス</summary>
 public class SqlConnectionDialogViewModelTests : IDisposable
 {
+    /// <summary>テスト用の一時保存先フォルダ</summary>
     private readonly string _tempFolder;
 
+    /// <summary>一時保存先フォルダを作成する</summary>
     public SqlConnectionDialogViewModelTests()
     {
         _tempFolder = Path.Combine(Path.GetTempPath(), "ERDesignerTests_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_tempFolder);
     }
 
+    /// <summary>一時保存先フォルダを削除する</summary>
     public void Dispose()
     {
         try
@@ -29,12 +30,15 @@ public class SqlConnectionDialogViewModelTests : IDisposable
             }
         }
         catch
-        { /* テスト後のベストエフォート */
+        {
+            // テスト後の後始末はベストエフォートとする
         }
     }
 
+    /// <summary>DPAPI を使わず一時フォルダへ保存するテスト用ストアを生成する</summary>
     private SqlConnectionProfileStore CreateStore() => new(_tempFolder, useDpapi: false);
 
+    /// <summary>初期表示で保存済みプロファイルを自動選択せず、入力欄が既定のままであることを検証する</summary>
     [Fact(DisplayName = "初期表示では保存済み接続を自動選択しない")]
     public void Constructor_DoesNotAutoSelectSavedProfile()
     {
@@ -57,6 +61,7 @@ public class SqlConnectionDialogViewModelTests : IDisposable
         vm.ProfileName.Should().BeEmpty();
     }
 
+    /// <summary>プロファイル選択時に各入力欄と復号パスワードが反映されることを検証する</summary>
     [Fact(DisplayName = "保存済み接続を選択したときだけ入力欄へ反映する")]
     public void SelectedProfile_UpdatesEditableFields()
     {
@@ -92,6 +97,7 @@ public class SqlConnectionDialogViewModelTests : IDisposable
         vm.StatusMessage.Should().Contain("TestDB");
     }
 
+    /// <summary>OK 確定で前回接続が保存され、次回ダイアログで DB 名やパスワードまで復元されることを検証する</summary>
     [Fact(DisplayName = "OK 後に新しいダイアログを開くと前回接続情報のデータベース名も復元される")]
     public void Ok_SavesLastConnection_AndNextDialogRestoresDatabase()
     {
@@ -117,6 +123,7 @@ public class SqlConnectionDialogViewModelTests : IDisposable
         reopened.StatusMessage.Should().Be("前回接続情報を復元しました。");
     }
 
+    /// <summary>削除確認でキャンセルするとプロファイルが残ることを検証する</summary>
     [Fact(DisplayName = "DeleteProfile: 確認でキャンセルするとプロファイルは削除されない")]
     public void DeleteProfile_ConfirmDeclined_KeepsProfile()
     {
@@ -140,6 +147,7 @@ public class SqlConnectionDialogViewModelTests : IDisposable
         dialogs.ConfirmMessages.Should().ContainSingle().Which.Should().Contain("TestDB");
     }
 
+    /// <summary>削除確認で OK するとプロファイルが削除され、状態メッセージに反映されることを検証する</summary>
     [Fact(DisplayName = "DeleteProfile: 確認で OK するとプロファイルが削除される")]
     public void DeleteProfile_ConfirmAccepted_DeletesProfile()
     {

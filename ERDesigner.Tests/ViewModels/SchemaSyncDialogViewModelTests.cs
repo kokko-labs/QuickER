@@ -5,11 +5,10 @@ using FluentAssertions;
 
 namespace ERDesigner.Tests.ViewModels;
 
-/// <summary>
-/// <see cref="SchemaSyncDialogViewModel"/> の差分一覧操作に関するテスト。
-/// </summary>
+/// <summary><see cref="SchemaSyncDialogViewModel"/> の差分選択・プレビュー生成・実行確認を検証するテストクラス</summary>
 public class SchemaSyncDialogViewModelTests
 {
+    /// <summary>全選択が選択可能な差分のみを対象とし、案内項目を選択しないことを検証する</summary>
     [Fact(DisplayName = "全選択は選択可能な差分のみを対象にする")]
     public void SelectAll_SelectsOnlySelectableItems()
     {
@@ -54,6 +53,7 @@ public class SchemaSyncDialogViewModelTests
         vm.DiffItems[1].IsSelected.Should().BeFalse();
     }
 
+    /// <summary>全解除が選択不可の案内項目の状態を変更しないことを検証する</summary>
     [Fact(DisplayName = "全解除は選択不可の案内項目の状態を変更しない")]
     public void DeselectAll_DoesNotChangeNonSelectableItems()
     {
@@ -86,6 +86,7 @@ public class SchemaSyncDialogViewModelTests
         vm.DiffItems[1].IsSelected.Should().BeFalse();
     }
 
+    /// <summary>プレビュー生成が選択済みの通常差分のみを対象とし、案内項目を出力しないことを検証する</summary>
     [Fact(DisplayName = "スクリプト生成時は案内項目を選択していなくても通常差分のみが対象になる")]
     public void UpdatePreview_IgnoresNonSelectedInformationalItems()
     {
@@ -119,6 +120,7 @@ public class SchemaSyncDialogViewModelTests
         vm.ScriptPreview.Should().NotContain("列順変更は DB 同期しません");
     }
 
+    /// <summary>実行時の警告確認でキャンセルすると、スクリプトを実行しないことを検証する</summary>
     [Fact(DisplayName = "Execute: 警告確認でキャンセルするとスクリプトは実行されない")]
     public async Task Execute_ConfirmDeclined_DoesNotRunScript()
     {
