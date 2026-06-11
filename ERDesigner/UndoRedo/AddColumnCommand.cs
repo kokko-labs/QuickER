@@ -3,16 +3,20 @@ using ERDesigner.ViewModels;
 
 namespace ERDesigner.UndoRedo;
 
-/// <summary>
-/// カラムを 1 つ追加するコマンドです。Undo で同じカラムを削除します。
-/// </summary>
+/// <summary>カラムを 1 件追加するコマンド（Undo で同じカラムを削除する）</summary>
 public class AddColumnCommand : IUndoableCommand
 {
+    /// <summary>追加先のカラムコレクション</summary>
     private readonly ObservableCollection<ColumnViewModel> _columns;
+
+    /// <summary>追加対象のカラム</summary>
     private readonly ColumnViewModel _column;
+
+    /// <summary>挿入位置（未指定時は末尾）</summary>
     private readonly int _index;
 
-    /// <summary>新しい <see cref="AddColumnCommand"/> を生成します。</summary>
+    /// <summary><see cref="AddColumnCommand"/> を生成する</summary>
+    /// <param name="index">挿入位置 null 指定で末尾に追加する</param>
     public AddColumnCommand(ObservableCollection<ColumnViewModel> columns, ColumnViewModel column, int? index = null)
     {
         _columns = columns;
@@ -26,11 +30,13 @@ public class AddColumnCommand : IUndoableCommand
     /// <inheritdoc />
     public void Execute()
     {
+        // Redo 連打などで二重追加にならないよう既存チェックを行う
         if (_columns.Contains(_column))
         {
             return;
         }
 
+        // コレクション件数が Undo 時から変動している場合に備えて範囲内へ丸める
         var insertIndex = Math.Clamp(_index, 0, _columns.Count);
         _columns.Insert(insertIndex, _column);
     }

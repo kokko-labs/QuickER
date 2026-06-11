@@ -3,11 +3,10 @@ using FluentAssertions;
 
 namespace ERDesigner.Tests.Services;
 
-/// <summary>
-/// <see cref="CodexConfigTomlReader"/> のパース動作を検証します。
-/// </summary>
+/// <summary><see cref="CodexConfigTomlReader"/> による config.toml の簡易パースをテストするクラス</summary>
 public class CodexConfigTomlReaderTests
 {
+    /// <summary>入力行が無い場合に全プロパティが空で返ることを検証する</summary>
     [Fact(DisplayName = "空文字や空行のみは無視")]
     public void Parse_EmptyLines_ReturnsEmpty()
     {
@@ -18,6 +17,7 @@ public class CodexConfigTomlReaderTests
         result.ProviderNames.Should().BeEmpty();
     }
 
+    /// <summary>トップレベルの model / model_provider キーから値が引用符なしで取得できることを検証する</summary>
     [Fact(DisplayName = "トップレベルの model と model_provider が取得できる")]
     public void Parse_TopLevelModelAndProvider()
     {
@@ -29,6 +29,7 @@ public class CodexConfigTomlReaderTests
         result.ModelProvider.Should().Be("ollama-launch");
     }
 
+    /// <summary>[model_providers.xxx] セクションヘッダーからプロバイダー名が収集されることを検証する</summary>
     [Fact(DisplayName = "[model_providers.xxx] セクションからプロバイダー名を収集できる")]
     public void Parse_ModelProvidersSection_CollectsProviderNames()
     {
@@ -47,6 +48,7 @@ public class CodexConfigTomlReaderTests
         result.ProviderNames.Should().Contain("ollama-launch");
     }
 
+    /// <summary>デフォルトモデルが対応プロバイダーの ProviderModels 候補に登録されることを検証する</summary>
     [Fact(DisplayName = "プロバイダー別モデル候補辞書に config.toml のデフォルトモデルが登録される")]
     public void Parse_ProviderModels_ContainsDefaultModel()
     {
@@ -58,6 +60,7 @@ public class CodexConfigTomlReaderTests
         result.ProviderModels["ollama-launch"].Should().Contain("gemma4:31b-cloud");
     }
 
+    /// <summary>行頭 # のコメント行が無視され、値後方のインラインコメントが除去されることを検証する</summary>
     [Fact(DisplayName = "コメント行と # 付き値が正しく無視・除去される")]
     public void Parse_CommentsAreIgnored()
     {

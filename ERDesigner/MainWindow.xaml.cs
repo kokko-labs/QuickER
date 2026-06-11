@@ -4,8 +4,10 @@ using ERDesigner.ViewModels;
 
 namespace ERDesigner;
 
+/// <summary>アプリケーションのメインウィンドウ（MainWindow.xaml のコードビハインド）</summary>
 public partial class MainWindow : Window
 {
+    /// <summary>ウィンドウを初期化し、DataContext の ViewModel を起動する</summary>
     public MainWindow()
     {
         InitializeComponent();
@@ -17,6 +19,7 @@ public partial class MainWindow : Window
         }
     }
 
+    /// <summary>ウィンドウ終了時に自動保存と Codex チャット画面の終了を行う</summary>
     private void MainWindow_Closing(object? sender, CancelEventArgs e)
     {
         if (DataContext is MainViewModel vm)

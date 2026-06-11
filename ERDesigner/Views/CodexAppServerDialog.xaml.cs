@@ -6,20 +6,20 @@ using ERDesigner.ViewModels;
 
 namespace ERDesigner.Views;
 
-/// <summary>Codex App Server の接続設定・認証・対話を行うウィンドウです。</summary>
+/// <summary>Codex App Server の接続設定・認証・対話を行うウィンドウのコードビハインド</summary>
 public partial class CodexAppServerDialog : Window
 {
-    /// <summary>このウィンドウの ViewModel です。</summary>
+    /// <summary>このウィンドウの ViewModel</summary>
     public CodexAppServerDialogViewModel ViewModel { get; }
 
-    /// <summary>アプリ終了など強制クローズ中かどうかです。</summary>
+    /// <summary>アプリ終了などで強制クローズ中かどうか（×ボタンの非表示化を抑止する）</summary>
     private bool _isForceClosing;
 
-    /// <summary>新しいウィンドウを生成します（MainViewModel なし）。</summary>
+    /// <summary>MainViewModel を伴わずにウィンドウを生成する</summary>
     public CodexAppServerDialog()
         : this(null) { }
 
-    /// <summary>MainViewModel を受け取って新しいウィンドウを生成します。</summary>
+    /// <summary>MainViewModel を受け取ってウィンドウを生成し、初回自動接続を開始する</summary>
     public CodexAppServerDialog(MainViewModel? mainViewModel)
     {
         InitializeComponent();
@@ -35,6 +35,7 @@ public partial class CodexAppServerDialog : Window
         Closing += OnWindowClosing;
     }
 
+    /// <summary>初回表示時に ViewModel を初期化し、保存済み API キーを PasswordBox へ反映する</summary>
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
         Loaded -= OnLoaded;
@@ -46,7 +47,7 @@ public partial class CodexAppServerDialog : Window
         }
     }
 
-    /// <summary>ウィンドウを閉じる代わりに非表示にして状態を維持します。</summary>
+    /// <summary>×ボタンでは閉じず、設定を保存して非表示にし状態を維持する（シングルトン動作）</summary>
     private void OnWindowClosing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
         if (_isForceClosing)
@@ -59,7 +60,7 @@ public partial class CodexAppServerDialog : Window
         Hide();
     }
 
-    /// <summary>アプリ終了時などに強制的にウィンドウを閉じます。</summary>
+    /// <summary>アプリ終了時などにウィンドウを実際に閉じる（非表示化の抑止フラグを立ててから閉じる）</summary>
     public void ForceClose()
     {
         _isForceClosing = true;
@@ -67,7 +68,7 @@ public partial class CodexAppServerDialog : Window
         Close();
     }
 
-    /// <summary>PasswordBox の変更を ViewModel に転送します。</summary>
+    /// <summary>PasswordBox の変更内容を ViewModel へ転送する</summary>
     private void ApiKeyBox_PasswordChanged(object sender, RoutedEventArgs e)
     {
         if (sender is PasswordBox passwordBox)
@@ -76,7 +77,7 @@ public partial class CodexAppServerDialog : Window
         }
     }
 
-    /// <summary>Ctrl+Enter でメッセージを送信します。</summary>
+    /// <summary>Ctrl+Enter でメッセージを送信する</summary>
     private void UserInputBox_KeyDown(object sender, KeyEventArgs e)
     {
         if (e.Key == Key.Enter && (Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control)
@@ -89,8 +90,10 @@ public partial class CodexAppServerDialog : Window
         }
     }
 
+    /// <summary>チャット表示を最下部へスクロールする（メッセージ追加時の追従用）</summary>
     private void ScrollToBottom()
     {
+        // レイアウト反映後にスクロールするよう低優先度でディスパッチする
         Dispatcher.InvokeAsync(
             () =>
             {

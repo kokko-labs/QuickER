@@ -2,13 +2,16 @@ using ERDesigner.ViewModels;
 
 namespace ERDesigner.UndoRedo;
 
-/// <summary>リレーションを追加するコマンドです。</summary>
+/// <summary>リレーションを追加するコマンド</summary>
 public class AddRelationshipCommand : IUndoableCommand
 {
+    /// <summary>追加先のメイン ViewModel</summary>
     private readonly MainViewModel _main;
+
+    /// <summary>追加対象のリレーション</summary>
     private readonly RelationshipViewModel _rel;
 
-    /// <summary>新しい <see cref="AddRelationshipCommand"/> を生成します。</summary>
+    /// <summary><see cref="AddRelationshipCommand"/> を生成する</summary>
     public AddRelationshipCommand(MainViewModel main, RelationshipViewModel rel)
     {
         _main = main;
@@ -22,6 +25,7 @@ public class AddRelationshipCommand : IUndoableCommand
     public void Execute()
     {
         _main.Relationships.Add(_rel);
+        // リレーション追加に伴う外部キー列の付与・更新を再評価する
         _main.ApplyRelationshipColumnRules();
     }
 
@@ -29,6 +33,7 @@ public class AddRelationshipCommand : IUndoableCommand
     public void Undo()
     {
         _main.Relationships.Remove(_rel);
+        // 削除後の状態に合わせて外部キー列のルールを再適用する
         _main.ApplyRelationshipColumnRules();
     }
 }

@@ -1,26 +1,31 @@
 namespace ERDesigner.UndoRedo;
 
-/// <summary>
-/// 複数プロパティの変更前後スナップショットを保持し、Undo/Redo 時に一括適用する汎用コマンドです。
-/// IsPrimaryKey ↔ IsNullable のような連動変更や、
-/// RelationshipType ↔ SourceColumnId/TargetColumnId のような連動変更に使います。
-/// </summary>
+/// <summary>複数プロパティの変更前後スナップショットを Undo / Redo 時に一括適用する汎用コマンド</summary>
+/// <remarks>
+/// IsPrimaryKey ↔ IsNullable や RelationshipType ↔ SourceColumnId / TargetColumnId のような
+/// 連動するプロパティ変更を 1 履歴として扱う用途を想定する
+/// </remarks>
 public sealed class SnapshotChangeCommand : IUndoableCommand
 {
+    /// <summary>スナップショットを適用する対象オブジェクト</summary>
     private readonly object _target;
+
+    /// <summary>変更前のプロパティ値スナップショット（プロパティ名 → 値）</summary>
     private readonly IReadOnlyDictionary<string, object?> _before;
+
+    /// <summary>変更後のプロパティ値スナップショット（プロパティ名 → 値）</summary>
     private readonly IReadOnlyDictionary<string, object?> _after;
 
-    /// <summary>プロパティを一括適用するコールバック（DiagramChangeTracker.RunWithoutTracking 内で呼ぶことを想定）。</summary>
+    /// <summary>スナップショットを一括適用するコールバック（変更追跡を抑止した文脈で呼ぶ想定）</summary>
     private readonly Action<object, IReadOnlyDictionary<string, object?>> _applySnapshot;
 
-    /// <summary>プロパティ適用後に呼ぶ後処理（FK ルール再適用など）。</summary>
+    /// <summary>スナップショット適用後に呼ぶ後処理（FK ルール再適用など）</summary>
     private readonly Action? _afterApply;
 
     /// <inheritdoc />
     public string Description { get; }
 
-    /// <summary>新しい <see cref="SnapshotChangeCommand"/> を生成します。</summary>
+    /// <summary><see cref="SnapshotChangeCommand"/> を生成する</summary>
     public SnapshotChangeCommand(
         object target,
         IReadOnlyDictionary<string, object?> before,

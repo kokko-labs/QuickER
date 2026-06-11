@@ -1,4 +1,4 @@
-﻿using System.Collections.ObjectModel;
+using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.ComponentModel;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -9,81 +9,107 @@ using ERDesigner.UndoRedo;
 
 namespace ERDesigner.ViewModels;
 
+/// <summary>
+/// アプリケーション全体の状態を統括する中心 ViewModel（ダイアグラム編集責務を担う主 partial）
+/// エンティティ・リレーションの編集、選択管理、Undo/Redo 統合、キャンバスサイズ管理を担当する
+/// </summary>
+/// <remarks>
+/// Undo/Redo は 2 系統で履歴を構成する
+/// <list type="bullet">
+/// <item>追加・削除・整列などの明示操作は <see cref="UndoRedoManager.Execute"/> にコマンドとして登録する</item>
+/// <item>個々のプロパティ変更は <see cref="DiagramChangeTracker"/> が PropertyChanged を監視して自動記録する</item>
+/// </list>
+/// Undo/Redo の再生やダイアグラム一括置換などプログラム起点の変更は
+/// <see cref="DiagramChangeTracker.RunWithoutTracking"/> で追跡を抑止し、履歴の二重登録を防ぐ
+/// 入出力（保存・取込・各種生成）の責務は <c>MainViewModel.ImportExport.cs</c> 側の partial に分離する
+/// </remarks>
 public partial class MainViewModel : ObservableObject
 {
+    /// <summary>C# コード生成で使用する既定の名前空間</summary>
     private const string DefaultCSharpNamespace = "Generated.Entities";
 
+    /// <summary>Undo/Redo 履歴を管理するスタック</summary>
     public UndoRedoManager UndoRedo { get; } = new();
 
+    /// <summary>選択中エンティティを内部バッファへコピーするコマンド</summary>
+    /// <remarks>ペースト側の実行可否が非バインド対象の内部バッファに依存するため、生成属性を使わず手動で構築する</remarks>
     public IRelayCommand CopySelectedEntityCommand { get; }
 
+    /// <summary>内部バッファのエンティティを複製して追加するコマンド</summary>
     public IRelayCommand PasteCopiedEntityCommand { get; }
 
+    /// <summary>ダイアグラム上の全エンティティ</summary>
     public ObservableCollection<EntityViewModel> Entities { get; } = new();
+
+    /// <summary>ダイアグラム上の全リレーション</summary>
     public ObservableCollection<RelationshipViewModel> Relationships { get; } = new();
 
+    /// <summary>選択中のエンティティ（未選択時は null）</summary>
     [ObservableProperty]
     private EntityViewModel? _selectedEntity;
 
+    /// <summary>選択中のリレーション（未選択時は null）</summary>
     [ObservableProperty]
     private RelationshipViewModel? _selectedRelationship;
 
-    /// <summary>
-    /// Entity awaiting a partner during relationship-creation mode.
-    /// </summary>
+    /// <summary>リレーション作成モードで 1 つ目にクリックされ、接続相手を待っているエンティティ</summary>
     [ObservableProperty]
     private EntityViewModel? _pendingRelationshipSource;
 
+    /// <summary>リレーション作成モードで追加するリレーションの種別</summary>
     [ObservableProperty]
     private RelationshipType _pendingRelationshipType;
 
+    /// <summary>リレーション作成モード中かどうかを示す</summary>
     [ObservableProperty]
     private bool _isRelationshipMode;
 
-    /// <summary>プロパティパネルで選択中のカラム（DataGrid の SelectedItem）。</summary>
+    /// <summary>プロパティパネルで選択中のカラム（DataGrid の SelectedItem）</summary>
     [ObservableProperty]
     private ColumnViewModel? _selectedColumn;
 
-    /// <summary>DataGrid のコピー元として保持するカラム内容です。</summary>
+    /// <summary>カラムコピーの内部バッファ（クリップボードは使用しない）</summary>
     private Column? _copiedColumn;
 
-    /// <summary>エンティティコピー用に保持するモデル内容です。</summary>
+    /// <summary>エンティティコピーの内部バッファ（クリップボードは使用しない）</summary>
     private Entity? _copiedEntity;
 
-    /// <summary>同じコピー元からのペースト回数です。</summary>
+    /// <summary>同一コピー元からのペースト回数（貼り付け位置を段階的にずらすために使用）</summary>
     private int _copiedEntityPasteCount;
 
-    /// <summary>ER 図上のカラム行に「説明」を表示するか (ツールバーから ON/OFF 切替)。</summary>
+    /// <summary>ER 図上のカラム行に「説明」を表示するかどうか（ツールバーから切替）</summary>
     [ObservableProperty]
     private bool _showColumnDescriptionsInDiagram;
 
-    /// <summary>ER 図上のカラム行に NULL 許容を表示するか (ツールバーから ON/OFF 切替)。</summary>
+    /// <summary><see cref="ShowNullabilityInDiagram"/> のバッキングフィールド（既定は表示）</summary>
     private bool _showNullabilityInDiagram = true;
 
-    /// <summary>キャンバスの動的幅 (エンティティの最右端 + 余白)。</summary>
+    /// <summary>キャンバスの動的幅（最小 2400、エンティティ最右端 + 余白 400）</summary>
     public double CanvasWidth => Math.Max(2400, Entities.Count == 0 ? 2400 : Entities.Max(e => e.X + e.Width) + 400);
 
-    /// <summary>キャンバスの動的高さ (エンティティの最下端 + 余白)。</summary>
+    /// <summary>キャンバスの動的高さ（最小 1600、エンティティ最下端 + 余白 400）</summary>
     public double CanvasHeight => Math.Max(1600, Entities.Count == 0 ? 1600 : Entities.Max(e => e.Y + e.DisplayHeight) + 400);
 
-    /// <summary>型 ComboBox に表示する SQL Server のデータ型一覧。</summary>
+    /// <summary>型 ComboBox に表示する SQL Server のデータ型一覧</summary>
     public IReadOnlyList<string> SqlDataTypes => SqlServerDataTypes.All;
 
-    /// <summary>C# 生成時に使用する既定の namespace です。</summary>
+    /// <summary>C# コード生成ダイアログの初期値として使用する名前空間（生成実行のたびに最新入力で更新される）</summary>
     public string CSharpGenerationNamespace { get; set; } = DefaultCSharpNamespace;
 
-    /// <summary>エンティティ見出しの背景色プリセット一覧です。</summary>
+    /// <summary>エンティティ見出しの背景色プリセット一覧</summary>
     public IReadOnlyList<EntityTitleColorOption> EntityTitleColorOptions => EntityTitleColorPalette.Options;
 
-    /// <summary>確認・通知ダイアログの表示先です。テストではスタブに差し替えられます。</summary>
+    /// <summary>確認・通知ダイアログの表示先（テストではスタブに差し替える）</summary>
     private readonly IDialogService _dialogs;
 
+    /// <summary>プロパティ変更を監視して Undo/Redo 履歴へ自動登録する追跡器</summary>
     private readonly DiagramChangeTracker _changeTracker;
 
+    /// <summary>既定のダイアログサービス（MessageBox）で初期化する</summary>
     public MainViewModel()
         : this(new MessageBoxDialogService()) { }
 
-    /// <summary>ダイアログ表示を差し替えたい場合 (単体テスト等) に使用します。</summary>
+    /// <summary>ダイアログ表示を差し替える場合（単体テスト等）に使用するコンストラクター</summary>
     public MainViewModel(IDialogService dialogService)
     {
         _dialogs = dialogService;
@@ -94,19 +120,22 @@ public partial class MainViewModel : ObservableObject
         Relationships.CollectionChanged += OnRelationshipsCollectionChanged;
     }
 
-    /// <summary>起動時に前回の自動保存ファイルを復元します。アプリ起動時に1回呼んでください。</summary>
+    /// <summary>前回の自動保存ファイルを復元する。アプリ起動時に 1 回だけ呼び出すこと</summary>
     public void Initialize()
     {
         RestoreLastDiagram();
     }
 
-    /// <summary>キャンバスサイズを再計算して通知します。ドラッグ終了や移動後に呼び出してください。</summary>
+    /// <summary>キャンバスサイズを再計算して変更通知を発行する。エンティティの移動・サイズ変更後に呼び出す</summary>
     public void RefreshCanvasSize()
     {
         OnPropertyChanged(nameof(CanvasWidth));
         OnPropertyChanged(nameof(CanvasHeight));
     }
 
+    /// <summary>ダイアグラム全体を指定モデルの内容で置き換える</summary>
+    /// <param name="clearUndoHistory"><c>true</c> の場合は置換後に Undo/Redo 履歴を破棄する</param>
+    /// <remarks>既存リレーションは <see cref="RelationshipViewModel.Detach"/> で購読解除してから破棄し、イベントリークを防ぐ</remarks>
     private void ReplaceDiagram(IEnumerable<Entity> entities, IEnumerable<Relationship> relationships, bool clearUndoHistory)
     {
         _changeTracker.RunWithoutTracking(() =>
@@ -129,6 +158,7 @@ public partial class MainViewModel : ObservableObject
                 var src = Entities.FirstOrDefault(e => e.Id == relationship.SourceEntityId);
                 var tgt = Entities.FirstOrDefault(e => e.Id == relationship.TargetEntityId);
 
+                // 両端のエンティティを解決できないリレーションは不正データとして読み飛ばす
                 if (src is null || tgt is null)
                 {
                     continue;
@@ -148,24 +178,28 @@ public partial class MainViewModel : ObservableObject
         }
     }
 
-    /// <summary>Undo/Redo 履歴をクリアし、ツールバーの有効状態も更新します。</summary>
+    /// <summary>Undo/Redo 履歴を破棄し、ツールバーの有効状態を更新する</summary>
     private void ClearUndoRedoHistory()
     {
         UndoRedo.Clear();
         OnPropertyChanged(nameof(UndoRedo));
     }
 
-    /// <summary>現在のエンティティ位置を履歴用にスナップショットします。</summary>
+    /// <summary>全エンティティの現在位置を履歴登録用にスナップショットする</summary>
+    /// <returns>エンティティ ID をキーとする座標のディクショナリ</returns>
     private Dictionary<Guid, (double X, double Y)> CaptureEntityLayoutSnapshot()
     {
         return Entities.ToDictionary(entity => entity.Id, entity => (entity.X, entity.Y));
     }
 
-    /// <summary>整列操作を適用し、Undo/Redo できる履歴として登録します。</summary>
+    /// <summary>整列操作を適用し、移動前後の位置差分を Undo/Redo 履歴として登録する</summary>
+    /// <param name="layoutAction">エンティティ位置を変更する整列処理</param>
+    /// <param name="description">履歴に表示する操作名</param>
     private void ApplyLayoutWithUndo(Action layoutAction, string description)
     {
         var before = CaptureEntityLayoutSnapshot();
 
+        // 整列による位置変更が個別のプロパティ変更履歴として二重登録されないよう追跡を抑止する
         _changeTracker.RunWithoutTracking(() =>
         {
             layoutAction();
@@ -174,6 +208,7 @@ public partial class MainViewModel : ObservableObject
 
         var after = CaptureEntityLayoutSnapshot();
 
+        // 位置が 1 つも変わらなかった場合は空の履歴を積まない
         if (before.Count == after.Count && before.All(pair => after.TryGetValue(pair.Key, out var value) && value == pair.Value))
         {
             return;
@@ -182,7 +217,8 @@ public partial class MainViewModel : ObservableObject
         UndoRedo.Push(new ArrangeEntitiesCommand(Entities, before, after, RefreshCanvasSize, description));
     }
 
-    /// <summary>履歴対象外でダイアグラムを置換し、必要なレイアウトもまとめて適用します。</summary>
+    /// <summary>履歴対象外でダイアグラムを置換し、幅自動調整と必要に応じた自動レイアウトをまとめて適用する</summary>
+    /// <param name="autoLayout"><c>true</c> の場合はリレーション階層に基づくツリー整列を適用する</param>
     private void ReplaceDiagramWithoutHistory(IEnumerable<Entity> entities, IEnumerable<Relationship> relationships, bool autoLayout)
     {
         ReplaceDiagram(entities, relationships, clearUndoHistory: true);
@@ -202,6 +238,7 @@ public partial class MainViewModel : ObservableObject
         ClearUndoRedoHistory();
     }
 
+    /// <summary>「説明」表示の切替を全エンティティへ伝播し、キャンバスサイズを更新する</summary>
     partial void OnShowColumnDescriptionsInDiagramChanged(bool value)
     {
         foreach (var entity in Entities)
@@ -212,6 +249,8 @@ public partial class MainViewModel : ObservableObject
         RefreshCanvasSize();
     }
 
+    /// <summary>ER 図上のカラム行に NULL 許容を表示するかどうか（ツールバーから切替）</summary>
+    /// <remarks>変更時に全エンティティへ設定を伝播する必要があるため、生成属性を使わず手動実装とする</remarks>
     public bool ShowNullabilityInDiagram
     {
         get => _showNullabilityInDiagram;
@@ -233,6 +272,7 @@ public partial class MainViewModel : ObservableObject
 
     // ---------------- Commands ----------------
 
+    /// <summary>確認のうえダイアグラムを空にする</summary>
     [RelayCommand]
     private void NewDiagram()
     {
@@ -244,9 +284,11 @@ public partial class MainViewModel : ObservableObject
         ReplaceDiagram(Array.Empty<Entity>(), Array.Empty<Relationship>(), clearUndoHistory: true);
     }
 
+    /// <summary>PK カラム付きの新規エンティティを追加して選択する（Undo 可能）</summary>
     [RelayCommand]
     private void AddEntity()
     {
+        // 既存数に応じて配置を斜めにずらし、新規エンティティ同士の重なりを避ける
         var model = new Entity
         {
             TableName = "NewTable",
@@ -269,6 +311,7 @@ public partial class MainViewModel : ObservableObject
         SelectedEntity = vm;
     }
 
+    /// <summary>選択中のエンティティを削除する（Undo 可能）</summary>
     [RelayCommand(CanExecute = nameof(CanRemoveEntity))]
     private void RemoveSelectedEntity()
     {
@@ -281,17 +324,22 @@ public partial class MainViewModel : ObservableObject
         SelectedEntity = null;
     }
 
+    /// <summary>エンティティ削除コマンドの実行可否</summary>
     private bool CanRemoveEntity() => SelectedEntity is not null;
 
+    /// <summary>1 対 1 リレーションの作成モードを開始する</summary>
     [RelayCommand]
     private void StartAddOneToOne() => StartRelationshipMode(RelationshipType.OneToOne);
 
+    /// <summary>1 対多リレーションの作成モードを開始する</summary>
     [RelayCommand]
     private void StartAddOneToMany() => StartRelationshipMode(RelationshipType.OneToMany);
 
+    /// <summary>多対多リレーションの作成モードを開始する</summary>
     [RelayCommand]
     private void StartAddManyToMany() => StartRelationshipMode(RelationshipType.ManyToMany);
 
+    /// <summary>リレーション作成モードを中断する</summary>
     [RelayCommand]
     private void CancelRelationshipMode()
     {
@@ -299,6 +347,7 @@ public partial class MainViewModel : ObservableObject
         PendingRelationshipSource = null;
     }
 
+    /// <summary>指定種別でリレーション作成モードへ移行する。以降のエンティティクリック 2 回で接続を確定する</summary>
     private void StartRelationshipMode(RelationshipType type)
     {
         PendingRelationshipType = type;
@@ -306,6 +355,7 @@ public partial class MainViewModel : ObservableObject
         IsRelationshipMode = true;
     }
 
+    /// <summary>選択中のリレーションを削除する（Undo 可能）</summary>
     [RelayCommand(CanExecute = nameof(CanRemoveRelationship))]
     private void RemoveSelectedRelationship()
     {
@@ -318,9 +368,10 @@ public partial class MainViewModel : ObservableObject
         SelectedRelationship = null;
     }
 
+    /// <summary>リレーション削除コマンドの実行可否</summary>
     private bool CanRemoveRelationship() => SelectedRelationship is not null;
 
-    /// <summary>選択対象に応じて Delete キーの削除対象を切り替えます。</summary>
+    /// <summary>Delete キーの削除対象を選択状態に応じて振り分ける（リレーション優先）</summary>
     [RelayCommand]
     private void DeleteSelected()
     {
@@ -336,6 +387,7 @@ public partial class MainViewModel : ObservableObject
         }
     }
 
+    /// <summary>選択中エンティティへ新規カラムを追加して選択する（Undo 可能）</summary>
     [RelayCommand(CanExecute = nameof(CanAddColumn))]
     private void AddColumn()
     {
@@ -356,9 +408,10 @@ public partial class MainViewModel : ObservableObject
         SelectedColumn = column;
     }
 
+    /// <summary>カラム追加コマンドの実行可否</summary>
     private bool CanAddColumn() => SelectedEntity is not null;
 
-    /// <summary>選択中エンティティの内容をコピーして内部バッファへ保持します。</summary>
+    /// <summary>選択中エンティティの内容を内部バッファへコピーする</summary>
     private void CopySelectedEntity()
     {
         if (SelectedEntity is null)
@@ -371,9 +424,10 @@ public partial class MainViewModel : ObservableObject
         PasteCopiedEntityCommand.NotifyCanExecuteChanged();
     }
 
+    /// <summary>エンティティコピーコマンドの実行可否</summary>
     private bool CanCopySelectedEntity() => SelectedEntity is not null;
 
-    /// <summary>コピー済みエンティティを少しずらした位置へ複製追加します。</summary>
+    /// <summary>内部バッファのエンティティを位置をずらして複製追加し、選択する（Undo 可能）</summary>
     private void PasteCopiedEntity()
     {
         if (_copiedEntity is null)
@@ -381,15 +435,17 @@ public partial class MainViewModel : ObservableObject
             return;
         }
 
+        // 連続ペーストのたびにオフセットを増やし、複製同士の重なりを避ける
         _copiedEntityPasteCount++;
         var pastedEntity = CreateEntityCopy(_copiedEntity, _copiedEntityPasteCount);
         UndoRedo.Execute(new AddEntityCommand(this, pastedEntity));
         SelectSingleEntity(pastedEntity);
     }
 
+    /// <summary>エンティティペーストコマンドの実行可否</summary>
     private bool CanPasteCopiedEntity() => _copiedEntity is not null;
 
-    /// <summary>選択中カラムの内容をコピーして内部バッファへ保持します。</summary>
+    /// <summary>選択中カラムの内容を内部バッファへコピーする</summary>
     [RelayCommand(CanExecute = nameof(CanCopySelectedColumn))]
     private void CopySelectedColumn()
     {
@@ -398,13 +454,15 @@ public partial class MainViewModel : ObservableObject
             return;
         }
 
+        // ID を引き継ぐとリレーションの参照が複製先と衝突するため、新規 ID で複製する
         _copiedColumn = SelectedColumn.ToModel().Clone(preserveId: false);
         PasteCopiedColumnCommand.NotifyCanExecuteChanged();
     }
 
+    /// <summary>カラムコピーコマンドの実行可否</summary>
     private bool CanCopySelectedColumn() => SelectedColumn is not null;
 
-    /// <summary>コピー済みカラムを選択中カラムの直下へ複製追加します。</summary>
+    /// <summary>内部バッファのカラムを選択中カラムの直下へ複製追加し、選択する（Undo 可能）</summary>
     [RelayCommand(CanExecute = nameof(CanPasteCopiedColumn))]
     private void PasteCopiedColumn()
     {
@@ -425,9 +483,11 @@ public partial class MainViewModel : ObservableObject
         SelectedColumn = pastedColumn;
     }
 
+    /// <summary>カラムペーストコマンドの実行可否</summary>
     private bool CanPasteCopiedColumn() => SelectedEntity is not null && SelectedColumn is not null && _copiedColumn is not null;
 
-    /// <summary>指定カラムを選択中エンティティから削除します。</summary>
+    /// <summary>指定カラムを選択中エンティティから削除する（行内の削除ボタン用、Undo 可能）</summary>
+    /// <remarks>削除カラムを参照するリレーションを履歴コマンドへ渡し、Undo 時に参照を復元できるようにする</remarks>
     [RelayCommand]
     private void RemoveColumn(ColumnViewModel? column)
     {
@@ -445,7 +505,7 @@ public partial class MainViewModel : ObservableObject
         }
     }
 
-    /// <summary>DataGrid で選択中のカラムを削除します（ツールバーボタン用）。</summary>
+    /// <summary>DataGrid で選択中のカラムを削除する（ツールバーボタン用、Undo 可能）</summary>
     [RelayCommand(CanExecute = nameof(CanRemoveSelectedColumn))]
     private void RemoveSelectedColumn()
     {
@@ -460,8 +520,10 @@ public partial class MainViewModel : ObservableObject
         SelectedColumn = null;
     }
 
+    /// <summary>カラム削除コマンド（ツールバー）の実行可否</summary>
     private bool CanRemoveSelectedColumn() => SelectedEntity is not null && SelectedColumn is not null;
 
+    /// <summary>カラム選択の変化に応じてカラム操作系コマンドの実行可否を更新する</summary>
     partial void OnSelectedColumnChanged(ColumnViewModel? value)
     {
         RemoveSelectedColumnCommand.NotifyCanExecuteChanged();
@@ -469,16 +531,18 @@ public partial class MainViewModel : ObservableObject
         PasteCopiedColumnCommand.NotifyCanExecuteChanged();
     }
 
-    /// <summary>指定カラムを SourceColumnId または TargetColumnId として参照しているリレーション一覧を返します。</summary>
+    /// <summary>指定カラムを参照元または参照先として使用しているリレーション一覧を返す</summary>
     private IReadOnlyList<RelationshipViewModel> FindRelationshipsUsingColumn(ColumnViewModel column) =>
         Relationships.Where(r => r.SourceColumnId == column.Id || r.TargetColumnId == column.Id).ToList();
 
     // ---------------- Selection / Click handling ----------------
 
+    /// <summary>エンティティクリック時の処理。リレーション作成モード中は接続確定、通常時は単一選択を行う</summary>
     public void OnEntityClicked(EntityViewModel entity)
     {
         if (IsRelationshipMode)
         {
+            // 1 回目のクリックは始点の確定のみ
             if (PendingRelationshipSource is null)
             {
                 PendingRelationshipSource = entity;
@@ -494,6 +558,7 @@ public partial class MainViewModel : ObservableObject
                 return;
             }
 
+            // 参照元は始点の PK、参照先は既定 FK 解決ルール、制約名は FK_<参照側>_<被参照側> を初期値とする
             var rel = new RelationshipViewModel(
                 new Relationship
                 {
@@ -519,13 +584,13 @@ public partial class MainViewModel : ObservableObject
         }
     }
 
-    /// <summary>同一の始点・終点・種別を持つリレーションが既に存在するかを判定します。</summary>
+    /// <summary>同一の始点・終点を持つリレーションが既に存在するかを判定する（種別は問わない）</summary>
     private bool HasSameRelationship(EntityViewModel source, EntityViewModel target)
     {
         return Relationships.Any(relationship => relationship.Source == source && relationship.Target == target);
     }
 
-    /// <summary>リレーションがクリックされたときに呼ばれます。</summary>
+    /// <summary>リレーションクリック時の処理。対象を単一選択し、エンティティ選択を解除する</summary>
     public void OnRelationshipClicked(RelationshipViewModel rel)
     {
         foreach (var e in Entities)
@@ -542,6 +607,7 @@ public partial class MainViewModel : ObservableObject
         SelectedRelationship = rel;
     }
 
+    /// <summary>キャンバス空白部クリック時の処理。すべての選択を解除する</summary>
     public void OnCanvasClicked()
     {
         foreach (var e in Entities)
@@ -558,6 +624,7 @@ public partial class MainViewModel : ObservableObject
         SelectedRelationship = null;
     }
 
+    /// <summary>エンティティ選択の変化に応じてエンティティ操作系コマンドの実行可否を更新する</summary>
     partial void OnSelectedEntityChanged(EntityViewModel? value)
     {
         RemoveSelectedEntityCommand.NotifyCanExecuteChanged();
@@ -567,6 +634,7 @@ public partial class MainViewModel : ObservableObject
         DuplicateSelectedEntityCommand.NotifyCanExecuteChanged();
     }
 
+    /// <summary>リレーション選択の変化に応じて削除コマンドの実行可否を更新する</summary>
     partial void OnSelectedRelationshipChanged(RelationshipViewModel? value)
     {
         RemoveSelectedRelationshipCommand.NotifyCanExecuteChanged();
@@ -574,12 +642,16 @@ public partial class MainViewModel : ObservableObject
 
     // ---------------- Undo/Redo ----------------
 
+    /// <summary>直前の操作を取り消す</summary>
+    /// <remarks>履歴の再生による変更が新たな履歴として記録されないよう追跡を抑止する</remarks>
     [RelayCommand]
     private void Undo() => _changeTracker.RunWithoutTracking(() => UndoRedo.Undo());
 
+    /// <summary>取り消した操作をやり直す</summary>
     [RelayCommand]
     private void Redo() => _changeTracker.RunWithoutTracking(() => UndoRedo.Redo());
 
+    /// <summary>エンティティクリックを処理するコマンド（View のイベントバインド用）</summary>
     [RelayCommand]
     private void EntityClick(EntityViewModel? entity)
     {
@@ -589,6 +661,7 @@ public partial class MainViewModel : ObservableObject
         }
     }
 
+    /// <summary>リレーションクリックを処理するコマンド（View のイベントバインド用）</summary>
     [RelayCommand]
     private void RelationshipClick(RelationshipViewModel? rel)
     {
@@ -598,12 +671,13 @@ public partial class MainViewModel : ObservableObject
         }
     }
 
+    /// <summary>キャンバスクリックを処理するコマンド（View のイベントバインド用）</summary>
     [RelayCommand]
     private void CanvasClick() => OnCanvasClicked();
 
     // ---------------- Duplicate (Ctrl+D) ----------------
 
-    /// <summary>選択中エンティティを Undo 可能な形で複製します（Ctrl+D 用）。</summary>
+    /// <summary>選択中エンティティを複製して選択する（Ctrl+D 用、Undo 可能）</summary>
     [RelayCommand(CanExecute = nameof(CanDuplicateSelectedEntity))]
     private void DuplicateSelectedEntity()
     {
@@ -621,25 +695,26 @@ public partial class MainViewModel : ObservableObject
         }
     }
 
+    /// <summary>エンティティ複製コマンドの実行可否</summary>
     private bool CanDuplicateSelectedEntity() => SelectedEntity is not null;
 
     // ---------------- Auto layout ----------------
 
-    /// <summary>エンティティを格子状に整列します。</summary>
+    /// <summary>エンティティを格子状に整列する（Undo 可能）</summary>
     [RelayCommand]
     private void AutoLayoutGrid()
     {
         ApplyLayoutWithUndo(() => AutoLayoutService.LayoutGrid(Entities), "整列(格子)");
     }
 
-    /// <summary>エンティティをツリー状（リレーション階層）で整列します。</summary>
+    /// <summary>エンティティをリレーション階層に基づくツリー状に整列する（Undo 可能）</summary>
     [RelayCommand]
     private void AutoLayoutTree()
     {
         ApplyLayoutWithUndo(() => AutoLayoutService.LayoutTree(Entities, Relationships), "整列(木)");
     }
 
-    /// <summary>全エンティティの表示幅を内容に合わせて自動調整します。</summary>
+    /// <summary>全エンティティの表示幅を内容に合わせて自動調整する</summary>
     [RelayCommand]
     private void AutoFitEntityWidths()
     {
@@ -647,7 +722,7 @@ public partial class MainViewModel : ObservableObject
         RefreshCanvasSize();
     }
 
-    /// <summary>指定エンティティ群の表示幅を一括で自動調整します。</summary>
+    /// <summary>指定エンティティ群の表示幅を一括で自動調整する</summary>
     private static void AutoFitEntityWidths(IEnumerable<EntityViewModel> entities)
     {
         foreach (var entity in entities)
@@ -656,7 +731,12 @@ public partial class MainViewModel : ObservableObject
         }
     }
 
-    /// <summary>リレーションに基づいて各カラムの PK/FK 編集可否と FK 状態を同期します。</summary>
+    /// <summary>リレーション構成に基づいて全カラムの PK/FK 編集可否と FK フラグを同期する</summary>
+    /// <param name="excludedSnapshotTarget">スナップショット再取得から除外する対象（変更途中の値を確定値として誤記録しないために指定）</param>
+    /// <remarks>
+    /// いったん全カラムを編集可能へリセットし、リレーション管理下の FK フラグも解除したうえで、
+    /// 現存するリレーションのみを根拠にロックと FK フラグを付け直す。リレーション削除時の解除漏れを防ぐ方式
+    /// </remarks>
     public void ApplyRelationshipColumnRules(object? excludedSnapshotTarget = null)
     {
         _changeTracker.RunWithoutTracking(
@@ -669,6 +749,7 @@ public partial class MainViewModel : ObservableObject
                         column.IsPrimaryKeyEditable = true;
                         column.IsForeignKeyEditable = true;
 
+                        // ユーザーが手動設定した FK は維持し、リレーション由来の FK のみ解除する
                         if (column.IsForeignKeyManagedByRelationship)
                         {
                             column.IsForeignKey = false;
@@ -686,7 +767,7 @@ public partial class MainViewModel : ObservableObject
         );
     }
 
-    /// <summary>対象リレーションで使用中の列をロックし、FK フラグを同期します。</summary>
+    /// <summary>指定リレーションが使用する両端カラムの編集をロックし、参照先カラムへ FK フラグを設定する</summary>
     private static void LockRelationshipColumns(RelationshipViewModel relationship)
     {
         var sourceColumn = relationship.SourceColumnId is null ? null : relationship.Source.Columns.FirstOrDefault(c => c.Id == relationship.SourceColumnId);
@@ -707,7 +788,9 @@ public partial class MainViewModel : ObservableObject
         }
     }
 
-    /// <summary>追加時の既定 FK 列を解決します。PK 同名列を優先し、無ければ従来どおり最初の非 PK 列を採用します。</summary>
+    /// <summary>リレーション追加時の既定 FK カラムを解決する</summary>
+    /// <returns>参照元 PK と同名の非 PK カラムを優先し、無ければ最初の非 PK カラム、それも無ければ先頭カラム</returns>
+    /// <remarks>自己参照の場合は、自身の PK と同名のカラムを除いた最初の非 PK カラムを採用する</remarks>
     private static ColumnViewModel? ResolveDefaultForeignKeyColumn(EntityViewModel source, EntityViewModel target)
     {
         if (ReferenceEquals(source, target))
@@ -724,7 +807,7 @@ public partial class MainViewModel : ObservableObject
             return target.Columns.FirstOrDefault(c => !c.IsPrimaryKey) ?? target.Columns.FirstOrDefault();
         }
 
-        // 参照先の PK と同名の場合は同じ意味の列（同テーブル固有 ID）なので FK 列として選ばない
+        // 参照元 PK と同名の非 PK カラムは FK として作られた可能性が高いため最優先で採用する
         var sameName = target.Columns.FirstOrDefault(c => string.Equals(c.Name, sourcePrimaryKey.Name, StringComparison.OrdinalIgnoreCase) && !c.IsPrimaryKey);
 
         if (sameName is not null)
@@ -735,10 +818,12 @@ public partial class MainViewModel : ObservableObject
         return target.Columns.FirstOrDefault(c => !c.IsPrimaryKey) ?? target.Columns.FirstOrDefault();
     }
 
-    /// <summary>コピー元エンティティから位置をずらした複製 ViewModel を生成します。</summary>
+    /// <summary>コピー元 ViewModel から位置をずらした複製 ViewModel を生成する</summary>
+    /// <param name="offsetMultiplier">位置オフセット（30px）の倍率。連続ペースト時に増やして重なりを避ける</param>
     internal EntityViewModel CreateEntityCopy(EntityViewModel source, int offsetMultiplier = 1) => CreateEntityCopy(source.ToModel(), offsetMultiplier);
 
-    /// <summary>コピー元エンティティモデルから位置をずらした複製 ViewModel を生成します。</summary>
+    /// <summary>コピー元モデルから位置をずらした複製 ViewModel を生成する。テーブル名は重複しない名前へ変更する</summary>
+    /// <param name="offsetMultiplier">位置オフセット（30px）の倍率。1 未満は 1 に丸める</param>
     internal EntityViewModel CreateEntityCopy(Entity source, int offsetMultiplier = 1)
     {
         var copy = source.Clone(preserveId: false);
@@ -752,7 +837,7 @@ public partial class MainViewModel : ObservableObject
         return new EntityViewModel(copy);
     }
 
-    /// <summary>エンティティを単一選択状態に切り替えます。</summary>
+    /// <summary>指定エンティティのみを選択状態にし、他の選択をすべて解除する</summary>
     private void SelectSingleEntity(EntityViewModel entity)
     {
         foreach (var currentEntity in Entities)
@@ -769,7 +854,8 @@ public partial class MainViewModel : ObservableObject
         SelectedRelationship = null;
     }
 
-    /// <summary>複製時に衝突しないテーブル名を決定します。</summary>
+    /// <summary>複製時に既存テーブル名と衝突しない名前を決定する</summary>
+    /// <returns>「元名_Copy」を基本とし、衝突する場合は「元名_Copy2」以降の連番を採用する</returns>
     private string GenerateCopyTableName(string originalTableName)
     {
         var normalizedTableName = string.IsNullOrWhiteSpace(originalTableName) ? "NewTable" : originalTableName.Trim();
@@ -787,6 +873,7 @@ public partial class MainViewModel : ObservableObject
 
     // ---------------- Collection changed handlers ----------------
 
+    /// <summary>エンティティの増減に応じてイベント購読・変更追跡・表示設定の伝播を行う</summary>
     private void OnEntitiesCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
         if (e.OldItems is not null)
@@ -802,6 +889,7 @@ public partial class MainViewModel : ObservableObject
         {
             foreach (EntityViewModel entity in e.NewItems)
             {
+                // 追加されたエンティティへ現在のツールバー表示設定を引き継ぐ
                 entity.ShowDescriptionsInDiagram = ShowColumnDescriptionsInDiagram;
                 entity.ShowNullabilityInDiagram = ShowNullabilityInDiagram;
                 entity.PropertyChanged += OnEntityPropertyChanged;
@@ -813,6 +901,7 @@ public partial class MainViewModel : ObservableObject
         RefreshCanvasSize();
     }
 
+    /// <summary>エンティティの位置・サイズ変更に追従してキャンバスサイズを更新する</summary>
     private void OnEntityPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName is nameof(EntityViewModel.X) or nameof(EntityViewModel.Y) or nameof(EntityViewModel.Width) or nameof(EntityViewModel.DisplayHeight))
@@ -821,6 +910,7 @@ public partial class MainViewModel : ObservableObject
         }
     }
 
+    /// <summary>リレーションの増減に応じて変更追跡を切り替え、カラムの PK/FK ルールを再適用する</summary>
     private void OnRelationshipsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
         if (e.OldItems is not null)

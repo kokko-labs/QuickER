@@ -6,38 +6,38 @@ using ERDesigner.Models;
 namespace ERDesigner.Services;
 
 /// <summary>
-/// スキーマ同期の差分種別。
+/// スキーマ同期で検出される差分の種別
 /// </summary>
 public enum SchemaDiffKind
 {
-    /// <summary>新しいテーブルを CREATE する。</summary>
+    /// <summary>テーブルを新規に CREATE する</summary>
     AddTable,
 
-    /// <summary>既存テーブルに列を ADD する。</summary>
+    /// <summary>既存テーブルに列を ADD する</summary>
     AddColumn,
 
-    /// <summary>既存列の型 / NULL 制約を ALTER する (フェーズ2)。</summary>
+    /// <summary>既存列の型 / NULL 制約を ALTER する（破壊的変更のため既定では非選択）</summary>
     AlterColumn,
 
-    /// <summary>列を DROP する (フェーズ2)。</summary>
+    /// <summary>列を DROP する（破壊的変更のため既定では非選択）</summary>
     DropColumn,
 
-    /// <summary>テーブルを DROP する (フェーズ2)。</summary>
+    /// <summary>テーブルを DROP する（破壊的変更のため既定では非選択）</summary>
     DropTable,
 
-    /// <summary>新しい外部キーを ADD する。</summary>
+    /// <summary>外部キー制約を ADD する</summary>
     AddForeignKey,
 
-    /// <summary>既存の外部キーを DROP する (フェーズ2)。</summary>
+    /// <summary>既存の外部キー制約を DROP する（破壊的変更のため既定では非選択）</summary>
     DropForeignKey,
 
-    /// <summary>テーブルの MS_Description を設定 / 更新 / 削除する。</summary>
+    /// <summary>テーブルの拡張プロパティ MS_Description を設定・更新・削除する</summary>
     SetTableDescription,
 
-    /// <summary>カラムの MS_Description を設定 / 更新 / 削除する。</summary>
+    /// <summary>カラムの拡張プロパティ MS_Description を設定・更新・削除する</summary>
     SetColumnDescription,
 
-    /// <summary>テーブル再作成が必要であることを示す通知（SQL 実行対象外）。</summary>
+    /// <summary>列順変更などテーブル再作成が必要なことを知らせる情報専用項目（SQL 生成対象外）</summary>
     RebuildTable,
 }
 

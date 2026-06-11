@@ -3,8 +3,14 @@ using FluentAssertions;
 
 namespace ERDesigner.Tests.Generator;
 
+/// <summary>
+/// <see cref="CSharpCodeGenerationService"/> がダイアグラム定義から生成する C# コードの内容を検証するテストクラス
+/// </summary>
 public class CSharpCodeGenerationServiceTests
 {
+    /// <summary>
+    /// 単一の生成ファイルに Entity・EditModel・EditModelBase と各種属性が出力され、using ディレクティブが重複しないことを検証する
+    /// </summary>
     [Fact]
     public void Generate_ShouldCreateSingleGeneratedFileWithEntityAndEditModel()
     {
@@ -53,11 +59,14 @@ public class CSharpCodeGenerationServiceTests
         result.Files[0].Content.Should().Contain("[Table(\"customers\")]");
         result.Files[0].Content.Should().Contain("[Key]");
         result.Files[0].Content.Should().Contain("[MaxLength(100)]");
-        // EditModel はバインディング用プロパティを持つ
+        // EditModel は画面バインディング用の文字列プロパティを持つ
         result.Files[0].Content.Should().Contain("public string BindingName");
         result.Files[0].Content.Should().Contain("public partial class CustomerEditModel : EditModelBase");
     }
 
+    /// <summary>
+    /// 1対多リレーションからコレクション型ナビゲーションと NavigationReference 属性が生成され、親参照プロパティに JsonIgnore が付与されることを検証する
+    /// </summary>
     [Fact]
     public void Generate_ShouldCreateNavigationAndJsonIgnoreOnParentReference()
     {
@@ -127,13 +136,16 @@ public class CSharpCodeGenerationServiceTests
         var result = new CSharpCodeGenerationService().Generate(diagram, new CodeGenerationOptions { NamespaceName = "Sample.Domain" });
 
         result.HasErrors.Should().BeFalse();
-        // Entity の navigation プロパティに独自属性が付く（テーブル名・カラム名・IsCollection の 5 引数形式）
+        // NavigationReference 属性は (参照元テーブル, 参照元カラム, 参照先テーブル, 参照先カラム, IsCollection) の 5 引数形式
         result.Files[0].Content.Should().Contain("[NavigationReference(\"customers\", \"customer_id\", \"orders\", \"customer_id\", true)]");
         result.Files[0].Content.Should().Contain("public ICollection<OrderEntity> Orders { get; set; } = new List<OrderEntity>();");
         result.Files[0].Content.Should().Contain("[JsonIgnore]");
         result.Files[0].Content.Should().Contain("public CustomerEntity Customer { get; set; } = null!;");
     }
 
+    /// <summary>
+    /// パスカルケースのテーブル名がそのままエンティティ名・ナビゲーションプロパティ名に反映されることを検証する
+    /// </summary>
     [Fact]
     public void Generate_ShouldPreservePascalCaseTableNamesInEntityAndNavigationNames()
     {

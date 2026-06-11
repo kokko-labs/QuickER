@@ -5,13 +5,13 @@ using System.Text.Json;
 namespace ERDesigner.Services;
 
 /// <summary>
-/// OpenAI / Ollama などから返る例外を、ユーザー向けの日本語メッセージに変換するヘルパー。
+/// AI 呼び出し (OpenAI / Ollama 等) で発生した例外をユーザー向けの日本語メッセージへ変換するヘルパー
 /// </summary>
 public static class AiErrorMessageLocalizer
 {
-    /// <summary>例外を日本語メッセージに変換します。</summary>
-    /// <param name="ex">発生した例外。</param>
-    /// <returns>日本語表示用メッセージ。</returns>
+    /// <summary>例外を日本語の表示用メッセージへ変換する</summary>
+    /// <param name="ex">AI 呼び出しで発生した例外</param>
+    /// <returns>ユーザーへ表示する日本語メッセージ</returns>
     public static string ToJapanese(Exception ex)
     {
         if (ex is ClientResultException cre)
@@ -37,9 +37,10 @@ public static class AiErrorMessageLocalizer
         return "予期しないエラーが発生しました: " + ex.Message;
     }
 
+    /// <summary>HTTP エラー (<see cref="ClientResultException"/>) を OpenAI のエラーコードと HTTP ステータスに基づく日本語メッセージへ変換する</summary>
     private static string TranslateClientResult(ClientResultException ex)
     {
-        // レスポンス本文から OpenAI のエラーコードを抽出
+        // エラーコードが特定できればコード別の対処方法を優先して案内し、不明な場合は HTTP ステータス別の汎用メッセージへフォールバックする
         var (code, message) = ParseOpenAiError(ex);
         var status = ex.Status;
 
@@ -81,6 +82,8 @@ public static class AiErrorMessageLocalizer
         };
     }
 
+    /// <summary>OpenAI エラーレスポンス本文 (JSON) からエラーコードとメッセージを抽出する</summary>
+    /// <returns>エラーコード (特定できない場合は null) と表示用メッセージのタプル</returns>
     private static (string? Code, string Message) ParseOpenAiError(ClientResultException ex)
     {
         try
@@ -103,7 +106,7 @@ public static class AiErrorMessageLocalizer
         }
         catch
         {
-            // JSON でない / 形式が違う場合はそのまま
+            // 本文が JSON でない・想定形式と異なる場合は例外メッセージをそのまま使う
         }
 
         return (null, ex.Message);

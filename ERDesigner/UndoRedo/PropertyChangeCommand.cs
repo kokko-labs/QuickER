@@ -1,25 +1,30 @@
 ﻿namespace ERDesigner.UndoRedo;
 
-/// <summary>
-/// 任意オブジェクトのプロパティをコマンドとして変更する汎用クラスです。
-/// </summary>
-/// <remarks>
-/// 編集前値と現在値、対象プロパティのアクセサを渡して生成・登録する使い方を想定しています。
-/// </remarks>
+/// <summary>任意オブジェクトのプロパティ 1 件の変更を Undo / Redo するコマンド</summary>
+/// <remarks>変更前後の値と対象プロパティのアクセサを渡して生成・登録する</remarks>
 public class PropertyChangeCommand : IUndoableCommand
 {
+    /// <summary>プロパティを保持する対象オブジェクト</summary>
     private readonly object _target;
+
+    /// <summary>変更対象プロパティの型安全アクセサ</summary>
     private readonly ITrackedProperty _property;
+
+    /// <summary>変更前の値（Undo 時に復元する）</summary>
     private readonly object? _oldValue;
+
+    /// <summary>変更後の値（Execute / Redo 時に適用する）</summary>
     private readonly object? _newValue;
+
+    /// <summary>Execute / Undo 後に呼ぶ後処理</summary>
     private readonly Action? _afterApply;
 
-    /// <summary>新しい <see cref="PropertyChangeCommand"/> を生成します。</summary>
-    /// <param name="target">プロパティを保持するオブジェクト。</param>
-    /// <param name="property">変更するプロパティのアクセサ。</param>
-    /// <param name="oldValue">変更前の値。</param>
-    /// <param name="newValue">変更後の値。</param>
-    /// <param name="afterApply">Execute / Undo 後に呼び出すアクション。</param>
+    /// <summary><see cref="PropertyChangeCommand"/> を生成する</summary>
+    /// <param name="target">プロパティを保持する対象オブジェクト</param>
+    /// <param name="property">変更対象プロパティのアクセサ</param>
+    /// <param name="oldValue">変更前の値</param>
+    /// <param name="newValue">変更後の値</param>
+    /// <param name="afterApply">Execute / Undo 後に呼ぶ後処理</param>
     public PropertyChangeCommand(object target, ITrackedProperty property, object? oldValue, object? newValue, Action? afterApply = null)
     {
         _target = target;
@@ -29,13 +34,13 @@ public class PropertyChangeCommand : IUndoableCommand
         _afterApply = afterApply;
     }
 
-    /// <summary>関連変更を 1 セットで扱うためのグループ ID です。</summary>
+    /// <summary>連動する複数変更を 1 履歴へ集約するためのグループ ID</summary>
     public object? GroupId { get; init; }
 
-    /// <summary>変更対象オブジェクトです。</summary>
+    /// <summary>変更対象オブジェクト</summary>
     public object Target => _target;
 
-    /// <summary>変更対象プロパティ名です。</summary>
+    /// <summary>変更対象プロパティ名</summary>
     public string PropertyName => _property.Name;
 
     /// <inheritdoc />

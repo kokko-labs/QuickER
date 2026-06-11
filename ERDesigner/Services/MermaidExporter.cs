@@ -5,14 +5,10 @@ using ERDesigner.ViewModels;
 
 namespace ERDesigner.Services;
 
-/// <summary>
-/// ER 図を Mermaid の <c>erDiagram</c> 記法へ変換するサービスです。
-/// </summary>
+/// <summary>ER 図を Mermaid の <c>erDiagram</c> 記法へ変換するサービス</summary>
 public static class MermaidExporter
 {
-    /// <summary>
-    /// 現在の <see cref="MainViewModel" /> から Mermaid 文字列を生成します。
-    /// </summary>
+    /// <summary>現在の <see cref="MainViewModel" /> から Mermaid 文字列を生成する</summary>
     public static string Build(MainViewModel viewModel)
     {
         var builder = new StringBuilder();
@@ -43,33 +39,30 @@ public static class MermaidExporter
         return builder.ToString();
     }
 
-    /// <summary>
-    /// Mermaid 文字列をファイルへ保存します。
-    /// </summary>
+    /// <summary>Mermaid 文字列をファイルへ保存する</summary>
     public static void SaveTo(MainViewModel viewModel, string path)
     {
         File.WriteAllText(path, Build(viewModel), Encoding.UTF8);
     }
 
-    /// <summary>
-    /// Mermaid の属性型トークン用に DataType を正規化します。
-    /// カッコ・カンマ・スペースをアンダースコアに置換し、英数字とアンダースコアのみの文字列にします。
-    /// 例: decimal(10,2) → decimal_10_2、nvarchar(100) → nvarchar_100
-    /// </summary>
+    /// <summary>Mermaid の属性型トークン用に DataType を正規化する</summary>
+    /// <remarks>
+    /// Mermaid の型トークンは英数字とアンダースコアのみ許容するため、カッコ・カンマ・空白を
+    /// アンダースコアへ置換する 例: <c>decimal(10,2)</c> → <c>decimal_10_2</c>
+    /// </remarks>
     private static string NormalizeDataType(string dataType)
     {
-        // カッコ・カンマ・スペース等の記号をアンダースコアに変換し、連続分は1つにまとめる
+        // 記号・空白の連続をまとめて 1 つのアンダースコアへ置換する
         var result = System.Text.RegularExpressions.Regex.Replace(dataType, @"[\s(),]+", "_");
 
-        // 末尾のアンダースコアを除去
         return result.TrimEnd('_');
     }
 
-    /// <summary>
-    /// Mermaid の属性行を構築します。
-    /// PK と FK が両方設定されている場合は PK を優先し、FK は出力しません
-    /// （Mermaid は同一カラムへの PK と FK の同時指定を構文エラーとして扱うため）。
-    /// </summary>
+    /// <summary>Mermaid の属性行を構築する</summary>
+    /// <remarks>
+    /// Mermaid は同一カラムへの PK と FK の同時指定を構文エラーとして扱うため、
+    /// 両方該当する場合は PK を優先し FK は出力しない
+    /// </remarks>
     private static string BuildColumnLine(ColumnViewModel column)
     {
         var builder = new StringBuilder();
@@ -79,7 +72,6 @@ public static class MermaidExporter
 
         if (column.IsPrimaryKey)
         {
-            // PK が設定されている場合は PK のみ出力
             builder.Append(" PK");
         }
         else if (column.IsForeignKey)
@@ -90,9 +82,7 @@ public static class MermaidExporter
         return builder.ToString();
     }
 
-    /// <summary>
-    /// Mermaid のリレーション行を構築します。
-    /// </summary>
+    /// <summary>Mermaid のリレーション行を構築する</summary>
     private static string BuildRelationshipLine(RelationshipViewModel relationship)
     {
         var symbol = relationship.Type switch

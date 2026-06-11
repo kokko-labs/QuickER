@@ -4,19 +4,21 @@ using ERDesigner.ViewModels;
 
 namespace ERDesigner.UndoRedo;
 
-/// <summary>
-/// エンティティとそれに接続されたすべてのリレーションを削除するコマンドです。
-/// Undo で両方を復元します。
-/// </summary>
+/// <summary>エンティティと接続中の全リレーションを削除するコマンド（Undo で両方を復元する）</summary>
 public class RemoveEntityCommand : IUndoableCommand
 {
+    /// <summary>削除を行うメイン ViewModel</summary>
     private readonly MainViewModel _main;
+
+    /// <summary>削除対象のエンティティ</summary>
     private readonly EntityViewModel _entity;
+
+    /// <summary>巻き添えで削除したリレーション（Undo の復元元）</summary>
     private List<RelationshipViewModel> _removedRelationships = new();
 
-    /// <summary>新しい <see cref="RemoveEntityCommand"/> を生成します。</summary>
-    /// <param name="main">削除を行う <see cref="MainViewModel"/>。</param>
-    /// <param name="entity">削除対象のエンティティ。</param>
+    /// <summary><see cref="RemoveEntityCommand"/> を生成する</summary>
+    /// <param name="main">削除を行うメイン ViewModel</param>
+    /// <param name="entity">削除対象のエンティティ</param>
     public RemoveEntityCommand(MainViewModel main, EntityViewModel entity)
     {
         _main = main;
@@ -29,6 +31,7 @@ public class RemoveEntityCommand : IUndoableCommand
     /// <inheritdoc />
     public void Execute()
     {
+        // 削除エンティティを端点に持つリレーションも併せて除去する（孤立した線を残さない）
         _removedRelationships = _main.Relationships.Where(r => r.Source == _entity || r.Target == _entity).ToList();
 
         foreach (var r in _removedRelationships)

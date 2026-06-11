@@ -6,13 +6,22 @@ using ERDesigner.ViewModels;
 namespace ERDesigner.Services;
 
 /// <summary>
-/// ER 図を DBML 形式へ変換するサービスです。
+/// ER 図を DBML (Database Markup Language) テキストへ変換するエクスポーター
 /// </summary>
+/// <remarks>
+/// 出力は <see cref="DbmlImporter"/> が解釈できる記法の範囲に限定する
+/// <list type="bullet">
+///   <item><c>Table</c> ブロック: カラム設定は <c>pk</c> / <c>ref</c> / <c>null</c> / <c>not null</c> / <c>note</c> のみ出力（Indexes・Enum 等は対象外）</item>
+///   <item><c>Ref:</c> 行: 多重度を <c>-</c>（1対1）/ <c>&lt;</c>（1対多）/ <c>&lt;&gt;</c>（多対多）の記号で表現</item>
+///   <item>note 文字列中のシングルクォートは <c>\'</c> にエスケープ</item>
+/// </list>
+/// </remarks>
 public static class DbmlExporter
 {
     /// <summary>
-    /// 現在の <see cref="MainViewModel" /> から DBML 文字列を生成します。
+    /// 現在の <see cref="MainViewModel" /> から DBML 文字列を生成する
     /// </summary>
+    /// <returns>全 Table ブロックの後に Ref 行をまとめた DBML テキスト（末尾は改行 1 つ）</returns>
     public static string Build(MainViewModel viewModel)
     {
         var builder = new StringBuilder();
@@ -39,7 +48,7 @@ public static class DbmlExporter
     }
 
     /// <summary>
-    /// DBML 文字列をファイルへ保存します。
+    /// DBML 文字列を UTF-8 でファイルへ保存する
     /// </summary>
     public static void SaveTo(MainViewModel viewModel, string path)
     {
@@ -47,8 +56,12 @@ public static class DbmlExporter
     }
 
     /// <summary>
-    /// DBML のカラム定義行を構築します。
+    /// DBML のカラム定義行（<c>名前 型 [設定, ...]</c>）を構築する
     /// </summary>
+    /// <remarks>
+    /// PK 列には <c>pk</c> のみを出力し <c>ref</c> は併記しない。NULL 許可は常に
+    /// <c>null</c> / <c>not null</c> のどちらかを明示し、インポート時の既定値依存を避ける
+    /// </remarks>
     private static string BuildColumnLine(ColumnViewModel column)
     {
         var settings = new List<string>();
@@ -74,8 +87,13 @@ public static class DbmlExporter
     }
 
     /// <summary>
-    /// DBML のリレーション行を構築します。
+    /// DBML のリレーション行（<c>Ref:</c> 行）を構築する
     /// </summary>
+    /// <remarks>
+    /// 制約名は note 設定として出力する。標準 DBML では設定をエンドポイントの後ろへ置くが、
+    /// ここでは <see cref="DbmlImporter"/> との往復を前提に <c>Ref:</c> 直後へ配置する独自形式を採る。
+    /// 参照カラム未指定のリレーションは各エンティティの先頭カラムで代用する
+    /// </remarks>
     private static string BuildRelationshipLine(RelationshipViewModel relationship)
     {
         var sourceColumn = relationship.Source.Columns.FirstOrDefault(column => column.Id == relationship.SourceColumnId) ?? relationship.Source.Columns.First();
@@ -93,7 +111,7 @@ public static class DbmlExporter
     }
 
     /// <summary>
-    /// DBML の note 文字列に含められないクォートをエスケープします。
+    /// DBML の note リテラル内で使えないシングルクォートを <c>\'</c> へエスケープする
     /// </summary>
     private static string EscapeNote(string text)
     {

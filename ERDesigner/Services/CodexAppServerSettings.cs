@@ -3,36 +3,39 @@ using System.Text.Json;
 
 namespace ERDesigner.Services;
 
-/// <summary>Codex App Server の起動設定です。</summary>
+/// <summary>Codex App Server の起動設定</summary>
 public class CodexAppServerSettings
 {
-    /// <summary>使用するモデルプロバイダーです（例: ollama-launch, openai）。空なら codex の既定を使います。</summary>
+    /// <summary>使用するモデルプロバイダー（例: ollama-launch, openai）空の場合は codex の既定を使う</summary>
     public string ModelProvider { get; set; } = string.Empty;
 
-    /// <summary>使用するモデル名です（例: gemma4:31b-cloud）。空なら codex の既定を使います。</summary>
+    /// <summary>使用するモデル名（例: gemma4:31b-cloud）空の場合は codex の既定を使う</summary>
     public string Model { get; set; } = string.Empty;
 }
 
-/// <summary>Codex App Server の設定を JSON ファイルに保存・読込します。</summary>
+/// <summary>Codex App Server の設定を JSON ファイルへ保存・読込するストア</summary>
 public class CodexAppServerSettingsStore
 {
+    /// <summary>JSON シリアライズ設定（インデント付与・プロパティ名は camelCase）</summary>
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+
+    /// <summary>設定ファイルの保存先フォルダ</summary>
     private readonly string _folder;
 
-    /// <summary>既定の設定ストアを生成します。</summary>
+    /// <summary>既定の保存先（%APPDATA%\ERDesigner）で設定ストアを生成する</summary>
     public CodexAppServerSettingsStore()
         : this(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ERDesigner")) { }
 
-    /// <summary>テスト用に保存先フォルダを指定して設定ストアを生成します。</summary>
+    /// <summary>保存先フォルダを指定して設定ストアを生成する（テスト用）</summary>
     public CodexAppServerSettingsStore(string folder)
     {
         _folder = folder;
     }
 
-    /// <summary>設定ファイルの絶対パスです。</summary>
+    /// <summary>設定ファイルの絶対パス</summary>
     public string SettingsPath => Path.Combine(_folder, "codex-app-server.json");
 
-    /// <summary>設定を読み込みます。ファイルがなければ既定値を返します。</summary>
+    /// <summary>設定を読み込む（ファイルが無い・解析失敗時は既定値を返す）</summary>
     public CodexAppServerSettings Load()
     {
         if (!File.Exists(SettingsPath))
@@ -47,11 +50,12 @@ public class CodexAppServerSettingsStore
         }
         catch
         {
+            // 破損ファイル等で起動を妨げないよう既定値へフォールバックする
             return new CodexAppServerSettings();
         }
     }
 
-    /// <summary>設定を保存します。</summary>
+    /// <summary>設定を保存する（保存先フォルダが無ければ作成する）</summary>
     public void Save(CodexAppServerSettings settings)
     {
         Directory.CreateDirectory(_folder);

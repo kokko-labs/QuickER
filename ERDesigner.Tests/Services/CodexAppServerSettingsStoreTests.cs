@@ -4,11 +4,10 @@ using FluentAssertions;
 
 namespace ERDesigner.Tests.Services;
 
-/// <summary>
-/// <see cref="CodexAppServerSettingsStore"/> の保存/読込を検証します。
-/// </summary>
+/// <summary><see cref="CodexAppServerSettingsStore"/> による設定ファイルの保存・読込をテストするクラス</summary>
 public class CodexAppServerSettingsStoreTests
 {
+    /// <summary>Save した設定を Load で読み戻し、モデルプロバイダーとモデル名が往復で保持されることを検証する</summary>
     [Fact(DisplayName = "Save した設定を Load で復元できる")]
     public void SaveThenLoad_RoundTrip()
     {

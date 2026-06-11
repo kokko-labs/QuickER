@@ -2,32 +2,33 @@ using System.IO;
 
 namespace ERDesigner.Services;
 
-/// <summary>Codex の config.toml から読み込んだ設定です。</summary>
+/// <summary>Codex の config.toml から読み込んだ設定</summary>
 public sealed class CodexConfigToml
 {
-    /// <summary>config.toml の model フィールドです（既定モデル名）。</summary>
+    /// <summary>config.toml の model フィールド（既定モデル名）</summary>
     public string Model { get; init; } = string.Empty;
 
-    /// <summary>config.toml の model_provider フィールドです（既定プロバイダー名）。</summary>
+    /// <summary>config.toml の model_provider フィールド（既定プロバイダー名）</summary>
     public string ModelProvider { get; init; } = string.Empty;
 
-    /// <summary>config.toml に定義されているプロバイダー名の一覧です（[model_providers.xxx] セクションから収集）。</summary>
+    /// <summary>config.toml に定義されたプロバイダー名の一覧（[model_providers.xxx] セクションから収集）</summary>
     public IReadOnlyList<string> ProviderNames { get; init; } = [];
 
-    /// <summary>プロバイダー名ごとのモデル候補辞書です。</summary>
+    /// <summary>プロバイダー名ごとのモデル候補辞書</summary>
     public IReadOnlyDictionary<string, IReadOnlyList<string>> ProviderModels { get; init; } = new Dictionary<string, IReadOnlyList<string>>();
 }
 
-/// <summary>Codex の config.toml を読み込むリーダーです。外部ライブラリなしで最低限のパースを行います。</summary>
+/// <summary>Codex の config.toml を読み込むリーダー</summary>
+/// <remarks>外部ライブラリに依存せず、必要なフィールドのみ最低限のパースを行う</remarks>
 public static class CodexConfigTomlReader
 {
-    /// <summary>既定の config.toml パス（~/.codex/config.toml）です。</summary>
+    /// <summary>既定の config.toml パス（~/.codex/config.toml）</summary>
     public static string DefaultConfigPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codex", "config.toml");
 
-    /// <summary>既定パスから config.toml を読み込みます。ファイルが存在しない場合は空の設定を返します。</summary>
+    /// <summary>既定パスから config.toml を読み込む（ファイルが無ければ空の設定を返す）</summary>
     public static CodexConfigToml Read() => Read(DefaultConfigPath);
 
-    /// <summary>指定パスから config.toml を読み込みます。ファイルが存在しない・パース失敗時は空の設定を返します。</summary>
+    /// <summary>指定パスから config.toml を読み込む（ファイルが無い・解析失敗時は空の設定を返す）</summary>
     public static CodexConfigToml Read(string path)
     {
         if (!File.Exists(path))
@@ -42,11 +43,12 @@ public static class CodexConfigTomlReader
         }
         catch
         {
+            // 読み取り・解析失敗時は起動を妨げないよう空の設定へフォールバックする
             return new CodexConfigToml();
         }
     }
 
-    /// <summary>TOML 行配列から最低限の設定値をパースします。</summary>
+    /// <summary>TOML 行配列から model / model_provider / プロバイダー名を抽出する</summary>
     internal static CodexConfigToml Parse(IEnumerable<string> lines)
     {
         var model = string.Empty;
@@ -127,7 +129,7 @@ public static class CodexConfigTomlReader
         };
     }
 
-    /// <summary>TOML の値文字列からクォートや末尾コメントを除去してプレーン文字列を返します。</summary>
+    /// <summary>TOML の値文字列からクォートと末尾コメントを除去しプレーン文字列を返す</summary>
     private static string ParseTomlValue(string raw)
     {
         // 末尾コメントを除去する

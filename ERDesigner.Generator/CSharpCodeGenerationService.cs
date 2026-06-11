@@ -1,10 +1,27 @@
 namespace ERDesigner.Generator;
 
+/// <summary>
+/// ER 図定義から C# コードを生成するライブラリのエントリポイント
+/// </summary>
+/// <remarks>
+/// 処理は「検証 → 生成モデル構築（<see cref="CSharpGenerationModelBuilder"/>）→
+/// テンプレート描画（<see cref="ScribanCSharpRenderer"/>）」の 3 段階で、
+/// 全クラスを単一の .g.cs ファイルにまとめて出力する
+/// </remarks>
 public sealed class CSharpCodeGenerationService
 {
+    /// <summary>ER 図定義をテンプレート入力用の生成モデルへ変換するビルダー</summary>
     private readonly CSharpGenerationModelBuilder _modelBuilder = new();
+
+    /// <summary>生成モデルを C# ソース文字列へ描画する Scriban レンダラー</summary>
     private readonly ScribanCSharpRenderer _renderer = new();
 
+    /// <summary>
+    /// ER 図定義から C# コードを生成する
+    /// </summary>
+    /// <param name="diagram">生成元の ER 図定義</param>
+    /// <param name="options">生成対象や属性付与を制御するオプション</param>
+    /// <returns>生成ファイルと診断情報。検証でエラーがあった場合はファイルを含まず診断のみを返す</returns>
     public CodeGenerationResult Generate(DiagramDefinition diagram, CodeGenerationOptions options)
     {
         ArgumentNullException.ThrowIfNull(diagram);
@@ -13,6 +30,7 @@ public sealed class CSharpCodeGenerationService
         var diagnostics = new List<GenerationDiagnostic>();
         Validate(diagram, options, diagnostics);
 
+        // エラー検出時は生成処理に進まず、診断のみを返して呼び出し側に修正を促す
         if (diagnostics.Any(diagnostic => diagnostic.Severity == GenerationDiagnosticSeverity.Error))
         {
             return new CodeGenerationResult { Files = [], Diagnostics = diagnostics };
@@ -24,6 +42,13 @@ public sealed class CSharpCodeGenerationService
         return new CodeGenerationResult { Files = [new GeneratedFile { FileName = SanitizeFileName(options.OutputFileName), Content = content }], Diagnostics = diagnostics };
     }
 
+    /// <summary>
+    /// 生成前の入力検証を行い、問題を診断リストへ追加する
+    /// </summary>
+    /// <remarks>
+    /// エラー: 生成対象が一つもない、エンティティが存在しない、テーブル名が空。
+    /// 警告: 複合主キー（[Key] 属性の生成が最小限になる）
+    /// </remarks>
     private static void Validate(DiagramDefinition diagram, CodeGenerationOptions options, ICollection<GenerationDiagnostic> diagnostics)
     {
         if (!options.GenerateEntityClasses && !options.GenerateEditModels && !options.GenerateMappers && !options.GenerateRepositories)
@@ -50,13 +75,22 @@ public sealed class CSharpCodeGenerationService
         }
     }
 
+    /// <summary>
+    /// 出力ファイル名を ".g.cs" 拡張子に正規化する
+    /// </summary>
+    /// <remarks>
+    /// <see cref="GeneratedFileWriter"/> が ".g.cs" 以外の上書きを拒否するため、
+    /// 空白なら既定名、それ以外は拡張子を ".g.cs" に置き換えて手書きファイルの誤上書きを防ぐ
+    /// </remarks>
     private static string SanitizeFileName(string fileName)
     {
         var value = string.IsNullOrWhiteSpace(fileName) ? "ErDesignerEntities.g.cs" : fileName.Trim();
         return value.EndsWith(".g.cs", StringComparison.OrdinalIgnoreCase) ? value : Path.GetFileNameWithoutExtension(value) + ".g.cs";
     }
 
+    /// <summary>エラー診断を作成する</summary>
     private static GenerationDiagnostic Error(string message) => new() { Severity = GenerationDiagnosticSeverity.Error, Message = message };
 
+    /// <summary>警告診断を作成する</summary>
     private static GenerationDiagnostic Warning(string message) => new() { Severity = GenerationDiagnosticSeverity.Warning, Message = message };
 }

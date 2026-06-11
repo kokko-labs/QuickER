@@ -8,11 +8,10 @@ using FluentAssertions;
 
 namespace ERDesigner.Tests.Services;
 
-/// <summary>
-/// DBML の入出力に関するテストです。
-/// </summary>
+/// <summary>DbmlExporter / DbmlImporter による DBML 形式の入出力をテストするクラス</summary>
 public class DbmlTests
 {
+    /// <summary>PK・FK 列とリレーションを持つ図から Table ブロックと制約名付き Ref 行が生成されることを検証する</summary>
     [Fact(DisplayName = "DBML 出力で Table と Ref を生成できる")]
     public void Export_BuildsDbmlText()
     {
@@ -88,6 +87,7 @@ public class DbmlTests
         dbml.Should().Contain("Ref: [note: 'FK_Orders_Customer'] Customer.CustomerId < Orders.CustomerId");
     }
 
+    /// <summary>DBML テキストのパースで pk/ref 属性と Ref 行の制約名・1対多種別が復元されることを検証する</summary>
     [Fact(DisplayName = "DBML 読込でエンティティとリレーションを復元できる")]
     public void Import_ParsesEntitiesAndRelationships()
     {
@@ -118,6 +118,7 @@ public class DbmlTests
         diagram.Relationships[0].ConstraintName.Should().Be("FK_Orders_Customer");
     }
 
+    /// <summary>SaveTo で書き出した DBML ファイルを Load で読み戻し、エンティティとリレーションが往復で保持されることを検証する</summary>
     [Fact(DisplayName = "DBML ファイルの SaveTo と Load を往復できる")]
     public void SaveAndLoad_RoundTrip()
     {

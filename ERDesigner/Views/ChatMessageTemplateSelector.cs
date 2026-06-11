@@ -4,19 +4,19 @@ using ERDesigner.Services;
 
 namespace ERDesigner.Views;
 
-/// <summary>Codex チャットメッセージのロール別にデータテンプレートを選択します。</summary>
+/// <summary>Codex チャットメッセージのロール別にデータテンプレートを選択するセレクター</summary>
 public class ChatMessageTemplateSelector : DataTemplateSelector
 {
-    /// <summary>ユーザーメッセージ用テンプレートです。</summary>
+    /// <summary>ユーザーメッセージ用テンプレート</summary>
     public DataTemplate? UserTemplate { get; set; }
 
-    /// <summary>アシスタントメッセージ用テンプレートです。</summary>
+    /// <summary>アシスタントメッセージ用テンプレート</summary>
     public DataTemplate? AssistantTemplate { get; set; }
 
-    /// <summary>システムメッセージ用テンプレートです。</summary>
+    /// <summary>システムメッセージ用テンプレート</summary>
     public DataTemplate? SystemTemplate { get; set; }
 
-    /// <summary>ツール呼び出し（折り畳み）メッセージ用テンプレートです。</summary>
+    /// <summary>ツール呼び出し（折り畳み表示）メッセージ用テンプレート</summary>
     public DataTemplate? ToolCallTemplate { get; set; }
 
     /// <inheritdoc />

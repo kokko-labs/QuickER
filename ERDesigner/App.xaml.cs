@@ -4,8 +4,6 @@ using System.Windows;
 
 namespace ERDesigner
 {
-    /// <summary>
-    /// Interaction logic for App.xaml
-    /// </summary>
+    /// <summary>アプリケーションのエントリポイント（App.xaml のコードビハインド）</summary>
     public partial class App : Application { }
 }

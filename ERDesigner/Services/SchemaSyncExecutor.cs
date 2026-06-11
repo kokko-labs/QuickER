@@ -7,31 +7,28 @@ using Microsoft.Data.SqlClient;
 
 namespace ERDesigner.Services;
 
-/// <summary>
-/// 生成済みの T-SQL スクリプトを SQL Server に対して 1 つのトランザクションで実行します。
-/// <c>GO</c> 区切りでバッチ分割します (sqlcmd の慣習)。
-/// </summary>
+/// <summary>生成済みの T-SQL スクリプトを単一トランザクションで SQL Server に対し実行する</summary>
+/// <remarks>sqlcmd の慣習に従い、行頭の <c>GO</c> でバッチ分割する</remarks>
 public class SchemaSyncExecutor
 {
-    /// <summary>1 件のバッチ実行結果。</summary>
+    /// <summary>1 件のバッチ実行結果</summary>
     public sealed record BatchResult(int Index, string Sql, bool Success, string? Error);
 
-    /// <summary>実行結果サマリ。</summary>
+    /// <summary>スクリプト全体の実行結果サマリ</summary>
     public sealed class ExecutionResult
     {
-        /// <summary>各バッチの結果。</summary>
+        /// <summary>各バッチの実行結果</summary>
         public List<BatchResult> Batches { get; } = new();
 
-        /// <summary>すべて成功して COMMIT したか。</summary>
+        /// <summary>全バッチ成功で COMMIT したかどうか</summary>
         public bool Committed { get; set; }
 
-        /// <summary>失敗時のエラーメッセージ。</summary>
+        /// <summary>失敗時のエラーメッセージ</summary>
         public string? Error { get; set; }
     }
 
-    /// <summary>
-    /// スクリプトをトランザクション内で実行します。途中で例外が発生したら ROLLBACK します。
-    /// </summary>
+    /// <summary>スクリプトを単一トランザクション内で実行する（途中で例外発生時は ROLLBACK する）</summary>
+    /// <remarks>全バッチ成功時のみ COMMIT し、原子性を保証する</remarks>
     public async Task<ExecutionResult> ExecuteAsync(SqlConnectionSettings settings, string script, CancellationToken ct = default)
     {
         var result = new ExecutionResult();
@@ -70,7 +67,8 @@ public class SchemaSyncExecutor
                 await tran.RollbackAsync(ct).ConfigureAwait(false);
             }
             catch
-            { /* best effort */
+            {
+                // ロールバック自体の失敗は最善努力で握りつぶす（元の例外情報を優先する）
             }
 
             result.Batches.Add(new BatchResult(result.Batches.Count + 1, "", false, ex.Message));
@@ -79,7 +77,7 @@ public class SchemaSyncExecutor
         return result;
     }
 
-    /// <summary>スクリプトを行頭の <c>GO</c> で分割します (大文字小文字無視・前後空白許容)。</summary>
+    /// <summary>スクリプトを行頭の <c>GO</c> で分割する（大文字小文字を無視し、前後空白を許容する）</summary>
     public static List<string> SplitBatches(string script)
     {
         var list = new List<string>();

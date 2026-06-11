@@ -5,15 +5,13 @@ using Microsoft.Win32;
 
 namespace ERDesigner.Views;
 
-/// <summary>
-/// C# コード生成ダイアログです。
-/// </summary>
+/// <summary>C# コード生成ダイアログのコードビハインド</summary>
 public partial class CSharpGenerationDialog : Window
 {
-    /// <summary>このダイアログの ViewModel です。</summary>
+    /// <summary>このダイアログの ViewModel</summary>
     public CSharpGenerationDialogViewModel ViewModel { get; }
 
-    /// <summary>初期値を指定してダイアログを生成します。</summary>
+    /// <summary>名前空間と出力先の初期値を指定してダイアログを生成する</summary>
     public CSharpGenerationDialog(string namespaceName, string outputFilePath = "ErDesignerEntities.g.cs")
     {
         InitializeComponent();
@@ -29,7 +27,8 @@ public partial class CSharpGenerationDialog : Window
         DataContext = ViewModel;
     }
 
-    /// <summary>生成先ファイルを選択します。</summary>
+    /// <summary>保存ダイアログで生成先ファイルを選択する</summary>
+    /// <returns>選択したファイルパス キャンセル時は null</returns>
     private static string? BrowseOutputFile(string currentPath)
     {
         var initialDirectory = Path.GetDirectoryName(currentPath);

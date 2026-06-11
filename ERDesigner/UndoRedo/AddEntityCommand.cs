@@ -2,17 +2,18 @@ using ERDesigner.ViewModels;
 
 namespace ERDesigner.UndoRedo;
 
-/// <summary>
-/// エンティティを 1 つ追加するコマンドです。Undo で同じエンティティが削除されます。
-/// </summary>
+/// <summary>エンティティを 1 件追加するコマンド（Undo で同じエンティティを削除する）</summary>
 public class AddEntityCommand : IUndoableCommand
 {
+    /// <summary>追加先のメイン ViewModel</summary>
     private readonly MainViewModel _main;
+
+    /// <summary>追加対象のエンティティ</summary>
     private readonly EntityViewModel _entity;
 
-    /// <summary>新しい <see cref="AddEntityCommand"/> を生成します。</summary>
-    /// <param name="main">追加先の <see cref="MainViewModel"/>。</param>
-    /// <param name="entity">追加するエンティティ。</param>
+    /// <summary><see cref="AddEntityCommand"/> を生成する</summary>
+    /// <param name="main">追加先のメイン ViewModel</param>
+    /// <param name="entity">追加対象のエンティティ</param>
     public AddEntityCommand(MainViewModel main, EntityViewModel entity)
     {
         _main = main;

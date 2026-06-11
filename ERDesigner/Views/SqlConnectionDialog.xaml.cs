@@ -4,16 +4,14 @@ using ERDesigner.ViewModels;
 
 namespace ERDesigner.Views;
 
-/// <summary>
-/// SQL Server 接続情報入力ダイアログのコードビハインド。
-/// PasswordBox は WPF の制約上バインドできないため、変更を VM へ転送します。
-/// </summary>
+/// <summary>SQL Server 接続情報入力ダイアログのコードビハインド</summary>
+/// <remarks>PasswordBox は WPF の制約上バインドできないため、双方向の変更をコードビハインドで同期する</remarks>
 public partial class SqlConnectionDialog : Window
 {
-    /// <summary>このダイアログの ViewModel を取得します。</summary>
+    /// <summary>このダイアログの ViewModel</summary>
     public SqlConnectionDialogViewModel ViewModel { get; }
 
-    /// <summary>新しいダイアログを生成し、ViewModel を関連付けます。</summary>
+    /// <summary>ダイアログを生成し、ViewModel を関連付ける</summary>
     public SqlConnectionDialog()
     {
         InitializeComponent();
@@ -37,7 +35,7 @@ public partial class SqlConnectionDialog : Window
         };
     }
 
-    /// <summary>PasswordBox の変更を ViewModel へ反映します。</summary>
+    /// <summary>PasswordBox の変更内容を ViewModel へ反映する</summary>
     private void PasswordBoxControl_PasswordChanged(object sender, RoutedEventArgs e)
     {
         if (sender is PasswordBox pb)

@@ -9,22 +9,17 @@ using ERDesigner.ViewModels;
 
 namespace ERDesigner.Behaviors;
 
-/// <summary>
-/// <see cref="DataGrid"/> の行ヘッダーをドラッグして、行順を入れ替える添付ビヘイビアです。
-/// </summary>
+/// <summary><see cref="DataGrid"/> の行ヘッダーをドラッグして行順を入れ替える添付ビヘイビア</summary>
 /// <remarks>
 /// <para>
-/// 想定用途はエンティティのカラム一覧です。
-/// <see cref="DataGrid.ItemsSource"/> が <see cref="ObservableCollection{T}"/> の場合に
-/// <c>Move</c> で並び順を変更します。
+/// 想定用途はエンティティのカラム一覧 <see cref="DataGrid.ItemsSource"/> が
+/// <see cref="ObservableCollection{T}"/> の場合に <c>Move</c> で並び順を変更する
 /// </para>
-/// <para>
-/// ドラッグ開始は行ヘッダー上でのみ有効です（セル編集との競合を避けるため）。
-/// </para>
+/// <para>セル編集との競合を避けるため、ドラッグ開始は行ヘッダー上でのみ有効とする</para>
 /// </remarks>
 public static class DataGridRowReorderBehavior
 {
-    /// <summary>ビヘイビア有効/無効を切り替える添付プロパティです。</summary>
+    /// <summary>ビヘイビアの有効・無効を切り替える添付プロパティ</summary>
     public static readonly DependencyProperty IsEnabledProperty = DependencyProperty.RegisterAttached(
         "IsEnabled",
         typeof(bool),
@@ -32,7 +27,7 @@ public static class DataGridRowReorderBehavior
         new PropertyMetadata(false, OnIsEnabledChanged)
     );
 
-    /// <summary>行並び替え時に利用する Undo/Redo マネージャーです。</summary>
+    /// <summary>行並び替えを履歴登録する Undo / Redo マネージャーを保持する添付プロパティ</summary>
     public static readonly DependencyProperty UndoRedoManagerProperty = DependencyProperty.RegisterAttached(
         "UndoRedoManager",
         typeof(UndoRedoManager),
@@ -40,19 +35,19 @@ public static class DataGridRowReorderBehavior
         new PropertyMetadata(null)
     );
 
-    /// <summary><see cref="IsEnabledProperty"/> を設定します。</summary>
+    /// <summary><see cref="IsEnabledProperty"/> を設定する</summary>
     public static void SetIsEnabled(DependencyObject d, bool value) => d.SetValue(IsEnabledProperty, value);
 
-    /// <summary><see cref="IsEnabledProperty"/> を取得します。</summary>
+    /// <summary><see cref="IsEnabledProperty"/> を取得する</summary>
     public static bool GetIsEnabled(DependencyObject d) => (bool)d.GetValue(IsEnabledProperty);
 
-    /// <summary><see cref="UndoRedoManagerProperty"/> を設定します。</summary>
+    /// <summary><see cref="UndoRedoManagerProperty"/> を設定する</summary>
     public static void SetUndoRedoManager(DependencyObject d, UndoRedoManager? value) => d.SetValue(UndoRedoManagerProperty, value);
 
-    /// <summary><see cref="UndoRedoManagerProperty"/> を取得します。</summary>
+    /// <summary><see cref="UndoRedoManagerProperty"/> を取得する</summary>
     public static UndoRedoManager? GetUndoRedoManager(DependencyObject d) => (UndoRedoManager?)d.GetValue(UndoRedoManagerProperty);
 
-    /// <summary>ドラッグ開始地点（マウス座標）を DataGrid ごとに保持します。</summary>
+    /// <summary>ドラッグ開始地点（マウス座標）を DataGrid ごとに保持する添付プロパティ</summary>
     private static readonly DependencyProperty DragStartPointProperty = DependencyProperty.RegisterAttached(
         "DragStartPoint",
         typeof(Point),
@@ -60,13 +55,13 @@ public static class DataGridRowReorderBehavior
         new PropertyMetadata(default(Point))
     );
 
+    /// <summary><see cref="DragStartPointProperty"/> を設定する</summary>
     private static void SetDragStartPoint(DependencyObject d, Point value) => d.SetValue(DragStartPointProperty, value);
 
+    /// <summary><see cref="DragStartPointProperty"/> を取得する</summary>
     private static Point GetDragStartPoint(DependencyObject d) => (Point)d.GetValue(DragStartPointProperty);
 
-    /// <summary>
-    /// <see cref="IsEnabledProperty"/> 変更時にイベントハンドラを登録/解除します。
-    /// </summary>
+    /// <summary><see cref="IsEnabledProperty"/> 変更時にイベントハンドラと <see cref="UIElement.AllowDrop"/> を登録・解除する</summary>
     private static void OnIsEnabledChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
     {
         if (d is not DataGrid dataGrid)
@@ -91,7 +86,7 @@ public static class DataGridRowReorderBehavior
         }
     }
 
-    /// <summary>左ボタン押下時にドラッグ開始位置を記録します。</summary>
+    /// <summary>左ボタン押下時にドラッグ判定の基準となる開始位置を記録する</summary>
     private static void OnPreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
         if (sender is not DataGrid dataGrid)
@@ -102,9 +97,7 @@ public static class DataGridRowReorderBehavior
         SetDragStartPoint(dataGrid, e.GetPosition(null));
     }
 
-    /// <summary>
-    /// マウス移動時に、閾値を超えかつ行ヘッダー上であればドラッグを開始します。
-    /// </summary>
+    /// <summary>移動量がシステム既定の閾値を超え、かつ行ヘッダー上の操作のときにドラッグを開始する</summary>
     private static void OnMouseMove(object sender, MouseEventArgs e)
     {
         if (sender is not DataGrid dataGrid)
@@ -120,11 +113,13 @@ public static class DataGridRowReorderBehavior
         var start = GetDragStartPoint(dataGrid);
         var current = e.GetPosition(null);
 
+        // 微小な手ぶれを誤ってドラッグ開始としないよう、OS 既定のドラッグ開始閾値で判定する
         if (Math.Abs(current.X - start.X) < SystemParameters.MinimumHorizontalDragDistance && Math.Abs(current.Y - start.Y) < SystemParameters.MinimumVerticalDragDistance)
         {
             return;
         }
 
+        // セル編集と競合しないよう、起点が行ヘッダー上の場合のみドラッグを許可する
         var header = FindVisualParent<DataGridRowHeader>(e.OriginalSource as DependencyObject);
 
         if (header is null)
@@ -142,16 +137,14 @@ public static class DataGridRowReorderBehavior
         DragDrop.DoDragDrop(dataGrid, sourceColumn, DragDropEffects.Move);
     }
 
-    /// <summary>ドラッグ中のカーソル効果を設定します。</summary>
+    /// <summary>カラムのドラッグ中のみ移動カーソル効果を表示する</summary>
     private static void OnDragOver(object sender, DragEventArgs e)
     {
         e.Effects = e.Data.GetDataPresent(typeof(ColumnViewModel)) ? DragDropEffects.Move : DragDropEffects.None;
         e.Handled = true;
     }
 
-    /// <summary>
-    /// ドロップ時に移動元/移動先インデックスを求め、コレクション順を更新します。
-    /// </summary>
+    /// <summary>ドロップ時に移動元・移動先インデックスを求め、カラムの並び順を更新する</summary>
     private static void OnDrop(object sender, DragEventArgs e)
     {
         if (sender is not DataGrid dataGrid)
@@ -183,6 +176,7 @@ public static class DataGridRowReorderBehavior
             return;
         }
 
+        // 行以外（空白部分）へのドロップは末尾移動として扱う
         var targetRow = FindVisualParent<DataGridRow>(e.OriginalSource as DependencyObject);
         var targetColumn = targetRow?.Item as ColumnViewModel;
         var targetIndex = targetColumn is null ? columns.Count - 1 : columns.IndexOf(targetColumn);
@@ -192,6 +186,7 @@ public static class DataGridRowReorderBehavior
             return;
         }
 
+        // マネージャーがあれば Undo 可能なコマンド経由、無ければ直接 Move する
         var undoRedo = GetUndoRedoManager(dataGrid);
 
         if (undoRedo is not null)
@@ -207,9 +202,7 @@ public static class DataGridRowReorderBehavior
         e.Handled = true;
     }
 
-    /// <summary>
-    /// 指定要素の親方向をたどり、最初に見つかった <typeparamref name="T"/> を返します。
-    /// </summary>
+    /// <summary>指定要素から視覚ツリーを上方向にたどり、最初に見つかった <typeparamref name="T"/> を返す</summary>
     private static T? FindVisualParent<T>(DependencyObject? child)
         where T : DependencyObject
     {

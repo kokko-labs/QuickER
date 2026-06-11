@@ -2,13 +2,16 @@ using ERDesigner.ViewModels;
 
 namespace ERDesigner.UndoRedo;
 
-/// <summary>リレーションを削除するコマンドです。</summary>
+/// <summary>リレーションを削除するコマンド</summary>
 public class RemoveRelationshipCommand : IUndoableCommand
 {
+    /// <summary>削除を行うメイン ViewModel</summary>
     private readonly MainViewModel _main;
+
+    /// <summary>削除対象のリレーション</summary>
     private readonly RelationshipViewModel _rel;
 
-    /// <summary>新しい <see cref="RemoveRelationshipCommand"/> を生成します。</summary>
+    /// <summary><see cref="RemoveRelationshipCommand"/> を生成する</summary>
     public RemoveRelationshipCommand(MainViewModel main, RelationshipViewModel rel)
     {
         _main = main;
@@ -22,6 +25,7 @@ public class RemoveRelationshipCommand : IUndoableCommand
     public void Execute()
     {
         _main.Relationships.Remove(_rel);
+        // 削除後の状態に合わせて外部キー列のルールを再適用する
         _main.ApplyRelationshipColumnRules();
     }
 
@@ -29,6 +33,7 @@ public class RemoveRelationshipCommand : IUndoableCommand
     public void Undo()
     {
         _main.Relationships.Add(_rel);
+        // 復元したリレーションに対し外部キー列の付与・更新を再評価する
         _main.ApplyRelationshipColumnRules();
     }
 }

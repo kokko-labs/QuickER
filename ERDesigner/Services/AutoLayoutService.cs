@@ -4,29 +4,26 @@ using ERDesigner.ViewModels;
 
 namespace ERDesigner.Services;
 
-/// <summary>
-/// エンティティを自動的に整列するサービスです。
-/// </summary>
+/// <summary>エンティティを自動整列するサービス</summary>
 /// <remarks>
 /// <list type="bullet">
-///   <item><see cref="LayoutGrid"/>: シンプルな格子状レイアウト。</item>
-///   <item><see cref="LayoutTree"/>: リレーションを利用した階層 (BFS) レイアウト。</item>
+///   <item><see cref="LayoutGrid"/>: 格子状レイアウト</item>
+///   <item><see cref="LayoutTree"/>: リレーションを辺と見なした階層（BFS）レイアウト</item>
 /// </list>
 /// </remarks>
 public static class AutoLayoutService
 {
-    /// <summary>横のギャップ (px)。</summary>
+    /// <summary>列間の横ギャップ (px)</summary>
     private const double GapX = 40;
 
-    /// <summary>縦のギャップ (px)。</summary>
+    /// <summary>行間の縦ギャップ (px)</summary>
     private const double GapY = 40;
 
-    /// <summary>左上の余白 (px)。</summary>
+    /// <summary>左上の余白 (px)</summary>
     private const double Margin = 40;
 
-    /// <summary>
-    /// エンティティを格子状に並べ替えます。
-    /// </summary>
+    /// <summary>エンティティを格子状に並べ替える</summary>
+    /// <param name="columns">列数 0 以下なら要素数の平方根から自動決定する</param>
     public static void LayoutGrid(IList<EntityViewModel> entities, int columns = 0)
     {
         if (entities.Count == 0)
@@ -39,7 +36,7 @@ public static class AutoLayoutService
             columns = (int)Math.Ceiling(Math.Sqrt(entities.Count));
         }
 
-        // 各列の幅、各行の高さを事前計算
+        // 列ごとの最大幅・行ごとの最大高さを先に求め、可変サイズでも重ならないようにする
         var colWidths = new double[columns];
         var rowCount = (int)Math.Ceiling((double)entities.Count / columns);
         var rowHeights = new double[rowCount];
@@ -75,12 +72,10 @@ public static class AutoLayoutService
         }
     }
 
-    /// <summary>
-    /// リレーション (起点→終点) を辺と見なして BFS で階層レイアウトを行います。
-    /// 接続のないエンティティは末尾の行にグリッド配置されます。
-    /// </summary>
-    /// <param name="entities">並べ替え対象のエンティティ一覧。</param>
-    /// <param name="relationships">リレーション一覧（向きあり）。</param>
+    /// <summary>リレーションを辺と見なして BFS で階層レイアウトを行う</summary>
+    /// <remarks>連結成分ごとに最も次数の高いノードを起点とし、深さ順に各階層を縦へ配置する</remarks>
+    /// <param name="entities">並べ替え対象のエンティティ一覧</param>
+    /// <param name="relationships">リレーション一覧（レイアウト上は無向として扱う）</param>
     public static void LayoutTree(IList<EntityViewModel> entities, IList<RelationshipViewModel> relationships)
     {
         if (entities.Count == 0)
@@ -88,7 +83,7 @@ public static class AutoLayoutService
             return;
         }
 
-        // 隣接リスト（無向で扱う）
+        // リレーションを無向グラフの隣接リストへ展開する
         var adj = entities.ToDictionary(e => e, _ => new List<EntityViewModel>());
 
         foreach (var r in relationships)
@@ -100,7 +95,7 @@ public static class AutoLayoutService
             }
         }
 
-        // 入次数 0（または最も次数が少ないノード）から BFS
+        // 次数の多いノードを起点に BFS を回し、未訪問成分も順次起点化して全件を配置する
         var visited = new HashSet<EntityViewModel>();
         var levels = new Dictionary<int, List<EntityViewModel>>();
 
@@ -136,8 +131,7 @@ public static class AutoLayoutService
             }
         }
 
-        // 各階層を縦に配置 (各エンティティの幅を考慮して重ならないようにする)
-        // まず各階層の最大高さを計算
+        // 階層ごとの最大高さを求め、深い階層ほど下方へ配置するための縦オフセット基準とする
         var depthHeight = new Dictionary<int, double>();
 
         foreach (var (depth, list) in levels)

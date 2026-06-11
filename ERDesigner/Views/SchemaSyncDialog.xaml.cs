@@ -3,15 +3,13 @@ using ERDesigner.ViewModels;
 
 namespace ERDesigner.Views;
 
-/// <summary>
-/// DB スキーマ同期ダイアログのコードビハインド。
-/// </summary>
+/// <summary>DB スキーマ同期ダイアログのコードビハインド</summary>
 public partial class SchemaSyncDialog : Window
 {
-    /// <summary>このダイアログの ViewModel。</summary>
+    /// <summary>このダイアログの ViewModel</summary>
     public SchemaSyncDialogViewModel ViewModel { get; }
 
-    /// <summary>新しいダイアログを生成します。</summary>
+    /// <summary>ダイアログを生成し、表示時に差分を自動取得する</summary>
     public SchemaSyncDialog(SchemaSyncDialogViewModel vm)
     {
         InitializeComponent();
@@ -23,6 +21,7 @@ public partial class SchemaSyncDialog : Window
         };
 
         DataContext = ViewModel;
+        // 表示完了時点で DB との差分を取得し、初期表示に反映する
         Loaded += async (_, _) => await ViewModel.RefreshCommand.ExecuteAsync(null);
     }
 }

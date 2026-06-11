@@ -8,88 +8,89 @@ using Microsoft.Data.SqlClient;
 
 namespace ERDesigner.ViewModels;
 
-/// <summary>
-/// SQL Server 接続ダイアログ用 ViewModel。
-/// 接続プロファイルの保存・選択・削除に対応します。
-/// </summary>
+/// <summary>SQL Server 接続ダイアログの ViewModel</summary>
+/// <remarks>接続プロファイルの保存・選択・削除に対応する</remarks>
 public partial class SqlConnectionDialogViewModel : ObservableObject
 {
+    /// <summary>接続プロファイルの保存ストア</summary>
     private readonly SqlConnectionProfileStore _store;
 
-    /// <summary>確認ダイアログの表示先です。テストではスタブに差し替えられます。</summary>
+    /// <summary>確認ダイアログの表示先（テストではスタブへ差し替える）</summary>
     private readonly IDialogService _dialogs;
 
-    /// <summary>サーバー名。</summary>
+    /// <summary>サーバー名</summary>
     [ObservableProperty]
     private string _server = "localhost";
 
-    /// <summary>データベース名。</summary>
+    /// <summary>データベース名</summary>
     [ObservableProperty]
     private string _database = string.Empty;
 
-    /// <summary>選択中の認証方式。</summary>
+    /// <summary>選択中の認証方式</summary>
     [ObservableProperty]
     private SqlAuthMode _authMode = SqlAuthMode.Windows;
 
-    /// <summary>SQL/Azure AD のユーザー名。</summary>
+    /// <summary>SQL / Azure AD のユーザー名</summary>
     [ObservableProperty]
     private string _userId = string.Empty;
 
-    /// <summary>SQL/Azure AD のパスワード。</summary>
+    /// <summary>SQL / Azure AD のパスワード</summary>
     [ObservableProperty]
     private string _password = string.Empty;
 
-    /// <summary>サーバー証明書を信頼するか。</summary>
+    /// <summary>サーバー証明書を信頼するかどうか</summary>
     [ObservableProperty]
     private bool _trustServerCertificate = true;
 
-    /// <summary>パスワードも DPAPI で暗号化保存するか (SQL/Azure AD 認証のときのみ意味あり)。</summary>
+    /// <summary>パスワードも DPAPI で暗号化保存するかどうか（SQL / Azure AD 認証時のみ有効）</summary>
     [ObservableProperty]
     private bool _savePassword;
 
-    /// <summary>テスト結果や状態メッセージ。</summary>
+    /// <summary>接続テスト結果や状態メッセージ</summary>
     [ObservableProperty]
     private string _statusMessage = string.Empty;
 
-    /// <summary>接続テスト中かどうか。</summary>
+    /// <summary>接続テスト中かどうか</summary>
     [ObservableProperty]
     private bool _isBusy;
 
-    /// <summary>保存済みプロファイル一覧。</summary>
+    /// <summary>保存済みプロファイル一覧</summary>
     public ObservableCollection<SqlConnectionProfile> Profiles { get; } = new();
 
-    /// <summary>選択中のプロファイル。</summary>
+    /// <summary>選択中のプロファイル</summary>
     [ObservableProperty]
     private SqlConnectionProfile? _selectedProfile;
 
-    /// <summary>名前を付けて保存するときの名前 (ComboBox の編集テキストと同期)。</summary>
+    /// <summary>名前を付けて保存する際の名前（ComboBox の編集テキストと同期する）</summary>
     [ObservableProperty]
     private string _profileName = string.Empty;
 
-    /// <summary>OK ボタン押下時の確定設定。null なら未確定。</summary>
+    /// <summary>OK 押下時の確定設定（null なら未確定）</summary>
     public SqlConnectionSettings? Result { get; private set; }
 
-    /// <summary>ダイアログを閉じるためのアクション (View が注入)。</summary>
+    /// <summary>ダイアログを閉じる際に呼ぶアクション（View が注入する）</summary>
     public Action<bool>? CloseAction { get; set; }
 
-    /// <summary>SQL 認証 / Azure AD のときにユーザー名入力欄を表示するか。</summary>
+    /// <summary>ユーザー名入力欄を表示するかどうか（Windows 認証以外で表示する）</summary>
     public bool ShowUserId => AuthMode != SqlAuthMode.Windows;
 
-    /// <summary>SQL 認証のときにパスワード入力欄を表示するか。</summary>
+    /// <summary>パスワード入力欄を表示するかどうか（SQL 認証時のみ表示する）</summary>
     public bool ShowPassword => AuthMode == SqlAuthMode.SqlServer;
 
-    /// <summary>新しい ViewModel を生成します。</summary>
-    /// <param name="store">プロファイル保存ストア (省略時は既定パスを使用)。</param>
-    /// <param name="dialogService">確認ダイアログの表示先 (省略時は MessageBox。テストではスタブを注入)。</param>
+    /// <summary>ストアとダイアログサービスを指定して ViewModel を生成し、前回接続を復元する</summary>
+    /// <param name="store">プロファイル保存ストア（省略時は既定パスを使用）</param>
+    /// <param name="dialogService">確認ダイアログの表示先（省略時は MessageBox、テストではスタブを注入）</param>
     public SqlConnectionDialogViewModel(SqlConnectionProfileStore? store = null, IDialogService? dialogService = null)
     {
         _store = store ?? new SqlConnectionProfileStore();
         _dialogs = dialogService ?? new MessageBoxDialogService();
-        // 保存済み接続の先頭を自動選択すると、呼び出し元が復元した前回接続情報を上書きしてしまうため、初期選択は行わない。
+        // 先頭プロファイルの自動選択は、直後に復元する前回接続情報を上書きするため初期選択は行わない
         ReloadProfiles(selectFirst: false);
         RestoreLastConnection();
     }
 
+    /// <summary>ストアからプロファイル一覧を再読込する</summary>
+    /// <param name="selectFirst">true の場合は先頭プロファイルを選択する</param>
     private void ReloadProfiles(bool selectFirst)
     {
         Profiles.Clear();
@@ -112,7 +113,7 @@ public partial class SqlConnectionDialogViewModel : ObservableObject
         OnPropertyChanged(nameof(ShowPassword));
     }
 
-    /// <summary>前回接続情報があれば入力欄へ復元します。</summary>
+    /// <summary>前回接続情報があれば入力欄へ復元する</summary>
     private void RestoreLastConnection()
     {
         var lastUsed = _store.LoadLastUsed();
@@ -126,7 +127,8 @@ public partial class SqlConnectionDialogViewModel : ObservableObject
         StatusMessage = "前回接続情報を復元しました。";
     }
 
-    /// <summary>プロファイルまたは前回接続情報から入力欄へ接続内容を反映します。</summary>
+    /// <summary>プロファイルまたは前回接続情報の内容を入力欄へ反映する</summary>
+    /// <param name="updateProfileName">true の場合はプロファイル名入力欄も更新する</param>
     private void ApplyConnection(SqlConnectionProfile profile, string password, bool updateProfileName)
     {
         Server = profile.Server;
@@ -143,7 +145,7 @@ public partial class SqlConnectionDialogViewModel : ObservableObject
         }
     }
 
-    /// <summary>現在の入力内容から接続プロファイルを生成します。</summary>
+    /// <summary>現在の入力内容から接続プロファイルを生成する</summary>
     private SqlConnectionProfile CreateCurrentProfile(Guid? id = null, string? name = null) =>
         new()
         {
@@ -157,7 +159,7 @@ public partial class SqlConnectionDialogViewModel : ObservableObject
             SavePassword = SavePassword,
         };
 
-    /// <summary>プロファイル選択時、入力欄に値を反映します。</summary>
+    /// <summary>プロファイル選択時に、その内容（必要なら復号パスワード）を入力欄へ反映する</summary>
     partial void OnSelectedProfileChanged(SqlConnectionProfile? value)
     {
         if (value is null)
@@ -169,7 +171,7 @@ public partial class SqlConnectionDialogViewModel : ObservableObject
         StatusMessage = $"プロファイル '{value.Name}' を読み込みました。";
     }
 
-    /// <summary>現在の入力から <see cref="SqlConnectionSettings"/> を構築します。</summary>
+    /// <summary>現在の入力から <see cref="SqlConnectionSettings"/> を構築する</summary>
     public SqlConnectionSettings ToSettings() =>
         new()
         {
@@ -181,7 +183,7 @@ public partial class SqlConnectionDialogViewModel : ObservableObject
             TrustServerCertificate = TrustServerCertificate,
         };
 
-    /// <summary>接続テストを行います。</summary>
+    /// <summary>現在の入力で接続テストを行い、結果をステータスへ表示する</summary>
     [RelayCommand]
     private async Task TestConnectionAsync()
     {
@@ -205,7 +207,7 @@ public partial class SqlConnectionDialogViewModel : ObservableObject
         }
     }
 
-    /// <summary>現在の入力内容をプロファイルとして保存します。</summary>
+    /// <summary>現在の入力内容を名前付きプロファイルとして保存する（同名があれば上書きする）</summary>
     [RelayCommand]
     private void SaveProfile()
     {
@@ -225,7 +227,7 @@ public partial class SqlConnectionDialogViewModel : ObservableObject
         StatusMessage = $"プロファイル '{profile.Name}' を保存しました。";
     }
 
-    /// <summary>選択中プロファイルを削除します。</summary>
+    /// <summary>選択中プロファイルを確認のうえ削除する</summary>
     [RelayCommand]
     private void DeleteProfile()
     {
@@ -246,7 +248,7 @@ public partial class SqlConnectionDialogViewModel : ObservableObject
         StatusMessage = $"プロファイル '{name}' を削除しました。";
     }
 
-    /// <summary>OK ボタン: 入力を確定してダイアログを閉じます。</summary>
+    /// <summary>入力を検証して確定し、前回接続として保存したうえでダイアログを閉じる</summary>
     [RelayCommand]
     private void Ok()
     {
@@ -256,13 +258,14 @@ public partial class SqlConnectionDialogViewModel : ObservableObject
             return;
         }
 
+        // 確定内容を前回接続として記録し、次回起動時に復元できるようにする
         var currentProfile = CreateCurrentProfile();
         _store.SaveLastUsed(currentProfile, Password);
         Result = currentProfile.ToSettings(Password);
         CloseAction?.Invoke(true);
     }
 
-    /// <summary>キャンセルボタン。</summary>
+    /// <summary>確定せずダイアログを閉じる</summary>
     [RelayCommand]
     private void Cancel()
     {

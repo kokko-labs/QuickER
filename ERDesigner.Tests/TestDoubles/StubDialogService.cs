@@ -3,26 +3,27 @@ using ERDesigner.Services;
 namespace ERDesigner.Tests.TestDoubles;
 
 /// <summary>
-/// ダイアログ表示を記録し、確認応答を固定値で返すテスト用スタブです。
-/// UI を表示せずに、確認の OK / キャンセル両分岐と通知メッセージを検証できます。
+/// UI を表示せずダイアログ呼び出しを記録する <see cref="IDialogService"/> のテスト用スタブ
+/// 確認系の応答を <see cref="ConfirmResult"/> で切り替えることで OK / キャンセル両分岐を検証できる
 /// </summary>
 public sealed class StubDialogService : IDialogService
 {
-    /// <summary>Confirm / ConfirmWarning が返す応答です (既定: OK)。</summary>
+    /// <summary>Confirm / ConfirmWarning が返す固定応答（既定は true = OK）</summary>
     public bool ConfirmResult { get; set; } = true;
 
-    /// <summary>Confirm に渡されたメッセージの記録です。</summary>
+    /// <summary>Confirm に渡されたメッセージの記録</summary>
     public List<string> ConfirmMessages { get; } = new();
 
-    /// <summary>ConfirmWarning に渡されたメッセージの記録です。</summary>
+    /// <summary>ConfirmWarning に渡されたメッセージの記録</summary>
     public List<string> WarningConfirmMessages { get; } = new();
 
-    /// <summary>ShowInformation に渡されたメッセージの記録です。</summary>
+    /// <summary>ShowInformation に渡されたメッセージの記録</summary>
     public List<string> InformationMessages { get; } = new();
 
-    /// <summary>ShowError に渡されたメッセージの記録です。</summary>
+    /// <summary>ShowError に渡されたメッセージの記録</summary>
     public List<string> ErrorMessages { get; } = new();
 
+    /// <summary>メッセージを記録し <see cref="ConfirmResult"/> を返す</summary>
     public bool Confirm(string message, string title)
     {
         ConfirmMessages.Add(message);

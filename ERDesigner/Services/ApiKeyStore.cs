@@ -5,15 +5,19 @@ using System.Text;
 namespace ERDesigner.Services;
 
 /// <summary>
-/// API キーを Windows DPAPI (CurrentUser スコープ) で暗号化してユーザープロファイルに保存します。
+/// API キーを Windows DPAPI (CurrentUser スコープ) で暗号化してユーザープロファイル配下へ保存するストア
 /// </summary>
 public static class ApiKeyStore
 {
+    /// <summary>暗号化ファイルの保存先フォルダ (%APPDATA%\ERDesigner)</summary>
     private static readonly string Folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ERDesigner");
 
+    /// <summary>キー名に対応する保存ファイルのフルパスを返す</summary>
     private static string PathFor(string name) => Path.Combine(Folder, name + ".dat");
 
-    /// <summary>名前付きで API キーを暗号化保存します。空文字なら削除します。</summary>
+    /// <summary>API キーを名前付きで暗号化保存する。空文字を渡した場合は保存済みファイルを削除する</summary>
+    /// <param name="name">キーの識別名 (保存ファイル名に使用)</param>
+    /// <param name="apiKey">保存する API キー</param>
     public static void Save(string name, string apiKey)
     {
         Directory.CreateDirectory(Folder);
@@ -34,7 +38,9 @@ public static class ApiKeyStore
         File.WriteAllBytes(p, encrypted);
     }
 
-    /// <summary>名前付きで保存された API キーを復号して返します。なければ空文字。</summary>
+    /// <summary>名前付きで保存された API キーを復号して返す</summary>
+    /// <param name="name">キーの識別名</param>
+    /// <returns>復号した API キー。未保存または復号失敗時は空文字</returns>
     public static string Load(string name)
     {
         var p = PathFor(name);
@@ -52,6 +58,7 @@ public static class ApiKeyStore
         }
         catch
         {
+            // 別ユーザー・別マシンで暗号化されたファイルや破損ファイルは復号できないため、キー未設定として扱う
             return string.Empty;
         }
     }

@@ -10,20 +10,19 @@ using ERDesigner.ViewModels;
 
 namespace ERDesigner.Services;
 
-/// <summary>
-/// ER 図のキャンバスを画像 (PNG) または SVG として書き出すサービスです。
-/// </summary>
+/// <summary>ER 図のキャンバスを画像（PNG）または SVG として書き出すサービス</summary>
 public static class ImageExportService
 {
-    /// <summary>WPF の <see cref="Visual"/> を PNG ファイルに書き出します。</summary>
-    /// <param name="visual">レンダリング対象の Visual（通常はキャンバス Grid）。</param>
-    /// <param name="path">出力先パス。</param>
-    /// <param name="width">出力幅 (px)。0 以下なら Visual のサイズを使用。</param>
-    /// <param name="height">出力高 (px)。0 以下なら Visual のサイズを使用。</param>
+    /// <summary>WPF の <see cref="Visual"/> を PNG ファイルへ書き出す</summary>
+    /// <param name="visual">レンダリング対象の Visual（通常はキャンバス Grid）</param>
+    /// <param name="path">出力先パス</param>
+    /// <param name="width">出力幅 (px) 0 以下なら Visual のサイズを使用する</param>
+    /// <param name="height">出力高 (px) 0 以下なら Visual のサイズを使用する</param>
     public static void ExportPng(Visual visual, string path, double width = 0, double height = 0)
     {
         var bounds = VisualTreeHelper.GetDescendantBounds(visual);
 
+        // サイズ未指定時は実測値、実測不能時は既定サイズ（800x600）へフォールバックする
         if (width <= 0)
         {
             width = double.IsFinite(bounds.Width) && bounds.Width > 0 ? bounds.Width : 800;
@@ -44,17 +43,15 @@ public static class ImageExportService
         encoder.Save(fs);
     }
 
-    /// <summary>
-    /// <see cref="MainViewModel"/> の現在の状態から SVG ファイルを書き出します。
-    /// </summary>
-    /// <param name="vm">対象の <see cref="MainViewModel"/>。</param>
-    /// <param name="path">出力先パス。</param>
+    /// <summary><see cref="MainViewModel"/> の現在状態から SVG ファイルを書き出す</summary>
+    /// <param name="vm">対象の <see cref="MainViewModel"/></param>
+    /// <param name="path">出力先パス</param>
     public static void ExportSvg(MainViewModel vm, string path) => File.WriteAllText(path, BuildSvg(vm), Encoding.UTF8);
 
-    /// <summary>SVG 文字列を生成します。テスト用に公開しています。</summary>
+    /// <summary>SVG 文字列を生成する（テスト検証のため公開する）</summary>
     public static string BuildSvg(MainViewModel vm)
     {
-        // 簡易にエンティティ高さを推定
+        // SVG 出力では WPF のレイアウト計測を使わず、行数からエンティティ高さを簡易推定する
         const double rowHeight = 18;
         const double headerHeight = 28;
         const double padding = 30;
@@ -70,6 +67,7 @@ public static class ImageExportService
             maxY = Math.Max(maxY, e.Y + Height(e) + padding);
         }
 
+        // 小数点記号がロケール依存にならないよう不変カルチャで数値整形する
         var ci = CultureInfo.InvariantCulture;
         var sb = new StringBuilder();
         sb.AppendLine("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>");

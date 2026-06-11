@@ -7,33 +7,29 @@ using ERDesigner.ViewModels;
 
 namespace ERDesigner.Behaviors;
 
-/// <summary>
-/// 親 <see cref="Canvas"/> 上の要素をドラッグで移動できるようにする添付ビヘイビアです。
-/// </summary>
+/// <summary>親 <see cref="Canvas"/> 上の要素をドラッグで移動・リサイズ可能にする添付ビヘイビア</summary>
 /// <remarks>
 /// <para>使い方（XAML）:</para>
 /// <code>
 /// &lt;Border beh:DragBehavior.IsEnabled="True"
 ///         beh:DragBehavior.UndoRedoManager="{Binding DataContext.UndoRedo, RelativeSource={RelativeSource AncestorType=Window}}" /&gt;
 /// </code>
-/// <para>
-/// 動作:
+/// <para>動作:</para>
 /// <list type="number">
-///   <item>マウス押下時に現在の位置を保存し、対象要素にマウスをキャプチャします。</item>
-///   <item>マウス移動中は <see cref="EntityViewModel.X"/> / <see cref="EntityViewModel.Y"/> を直接更新します（リレーション線が追従するため）。</item>
-///   <item>マウス解放時、移動量が閾値以上なら <see cref="MoveEntityCommand"/> を Undo スタックへ登録します（再 Execute はしません）。</item>
-///   <item>移動量が閾値未満ならクリックとみなし、<see cref="MainViewModel.OnEntityClicked(EntityViewModel)"/> を呼び出して選択状態に切り替えます。</item>
+///   <item>マウス押下時に現在位置を保存し、対象要素へマウスをキャプチャする</item>
+///   <item>マウス移動中は <see cref="EntityViewModel.X"/> / <see cref="EntityViewModel.Y"/> を直接更新する（リレーション線を追従させるため）</item>
+///   <item>マウス解放時、移動量が閾値以上なら <see cref="MoveEntityCommand"/> を Undo スタックへ登録する（既に位置適用済みのため再 Execute はしない）</item>
+///   <item>移動量が閾値未満ならクリックとみなし、<see cref="MainViewModel.OnEntityClicked(EntityViewModel)"/> で選択状態へ切り替える</item>
 /// </list>
-/// </para>
 /// </remarks>
 public static class DragBehavior
 {
-    /// <summary>クリック判定の許容ピクセル数（この範囲内ならクリック扱い）。</summary>
+    /// <summary>クリック判定の許容ピクセル数（この範囲内の移動はクリック扱い）</summary>
     private const double ClickThreshold = 3.0;
 
     // ---------- 添付プロパティ ----------
 
-    /// <summary>ドラッグ機能を有効にするかどうかを表す添付プロパティです。</summary>
+    /// <summary>ドラッグ機能の有効・無効を表す添付プロパティ</summary>
     public static readonly DependencyProperty IsEnabledProperty = DependencyProperty.RegisterAttached(
         "IsEnabled",
         typeof(bool),
@@ -41,13 +37,13 @@ public static class DragBehavior
         new PropertyMetadata(false, OnIsEnabledChanged)
     );
 
-    /// <summary><see cref="IsEnabledProperty"/> の値を設定します。</summary>
+    /// <summary><see cref="IsEnabledProperty"/> の値を設定する</summary>
     public static void SetIsEnabled(DependencyObject d, bool value) => d.SetValue(IsEnabledProperty, value);
 
-    /// <summary><see cref="IsEnabledProperty"/> の値を取得します。</summary>
+    /// <summary><see cref="IsEnabledProperty"/> の値を取得する</summary>
     public static bool GetIsEnabled(DependencyObject d) => (bool)d.GetValue(IsEnabledProperty);
 
-    /// <summary>移動コマンドを登録する <see cref="UndoRedoManager"/> を保持する添付プロパティです。</summary>
+    /// <summary>移動コマンドの登録先 <see cref="UndoRedoManager"/> を保持する添付プロパティ</summary>
     public static readonly DependencyProperty UndoRedoManagerProperty = DependencyProperty.RegisterAttached(
         "UndoRedoManager",
         typeof(UndoRedoManager),
@@ -55,27 +51,40 @@ public static class DragBehavior
         new PropertyMetadata(null)
     );
 
-    /// <summary><see cref="UndoRedoManagerProperty"/> の値を設定します。</summary>
+    /// <summary><see cref="UndoRedoManagerProperty"/> の値を設定する</summary>
     public static void SetUndoRedoManager(DependencyObject d, UndoRedoManager value) => d.SetValue(UndoRedoManagerProperty, value);
 
-    /// <summary><see cref="UndoRedoManagerProperty"/> の値を取得します。</summary>
+    /// <summary><see cref="UndoRedoManagerProperty"/> の値を取得する</summary>
     public static UndoRedoManager? GetUndoRedoManager(DependencyObject d) => (UndoRedoManager?)d.GetValue(UndoRedoManagerProperty);
 
-    // ---------- 内部状態（ドラッグ中要素は1つだけ） ----------
+    // 内部状態は静的フィールドで保持する 同時にドラッグ可能な要素は 1 つに限られる前提
 
+    /// <summary>ドラッグ開始時のキャンバス座標系マウス位置</summary>
     private static Point _startMouse;
+
+    /// <summary>ドラッグ開始時の対象 X / Y 座標</summary>
     private static double _startX;
     private static double _startY;
+
+    /// <summary>移動ドラッグ中かどうか</summary>
     private static bool _isDragging;
+
+    /// <summary>右端グリップによるリサイズ中かどうか</summary>
     private static bool _isResizing;
+
+    /// <summary>リサイズ開始時の幅</summary>
     private static double _startWidth;
+
+    /// <summary>ドラッグ中の要素</summary>
     private static FrameworkElement? _draggedElement;
+
+    /// <summary>ドラッグ中要素に対応するエンティティ ViewModel</summary>
     private static EntityViewModel? _draggedVm;
 
-    /// <summary>右端リサイズグリップの幅 (px)。</summary>
+    /// <summary>右端リサイズグリップの幅 (px)</summary>
     private const double GripWidth = 8;
 
-    /// <summary>添付プロパティ <see cref="IsEnabledProperty"/> 変更時のハンドラ登録／解除を行います。</summary>
+    /// <summary>添付プロパティ <see cref="IsEnabledProperty"/> 変更時にハンドラの登録・解除を行う</summary>
     private static void OnIsEnabledChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
     {
         if (d is not FrameworkElement fe)
@@ -100,7 +109,7 @@ public static class DragBehavior
         }
     }
 
-    /// <summary>指定要素の祖先方向で最初に見つかった <see cref="Canvas"/> を返します。</summary>
+    /// <summary>指定要素から視覚ツリーを上方向にたどり最初に見つかった <see cref="Canvas"/> を返す</summary>
     private static Canvas? FindCanvas(DependencyObject? d)
     {
         while (d is not null and not Canvas)
@@ -111,7 +120,7 @@ public static class DragBehavior
         return d as Canvas;
     }
 
-    /// <summary>マウス押下: ドラッグ開始位置を記録しキャプチャします。</summary>
+    /// <summary>マウス押下時にドラッグ開始位置を記録し、移動・リサイズの判定とマウスキャプチャを行う</summary>
     private static void OnMouseDown(object sender, MouseButtonEventArgs e)
     {
         if (sender is not FrameworkElement fe)
@@ -137,7 +146,7 @@ public static class DragBehavior
         _startX = vm.X;
         _startY = vm.Y;
 
-        // 右端グリップ判定 → リサイズモード
+        // 右端グリップ範囲の押下はリサイズ、それ以外は移動として扱う
         var local = e.GetPosition(fe);
 
         if (local.X >= fe.ActualWidth - GripWidth && fe.ActualWidth > 0)
@@ -156,7 +165,7 @@ public static class DragBehavior
         e.Handled = true;
     }
 
-    /// <summary>マウス移動: ボタン押下中なら ViewModel の座標を更新します。</summary>
+    /// <summary>マウス移動時にリサイズなら幅を、移動なら座標を ViewModel へ反映する</summary>
     private static void OnMouseMove(object sender, MouseEventArgs e)
     {
         if (_draggedElement is null || _draggedVm is null)
@@ -164,7 +173,7 @@ public static class DragBehavior
             return;
         }
 
-        // カーソル形状更新 (ドラッグ中でなければ)
+        // ドラッグ・リサイズ未開始時は右端グリップ上でカーソル形状のみ切り替える
         if (!_isDragging && !_isResizing && sender is FrameworkElement cursorFe)
         {
             var lp = e.GetPosition(cursorFe);
@@ -197,13 +206,13 @@ public static class DragBehavior
         {
             var newX = _startX + (pos.X - _startMouse.X);
             var newY = _startY + (pos.Y - _startMouse.Y);
-            // 画面外に出ないよう最小 0 制限 (キャンバスは自動拡大するが負座標は不可)
+            // キャンバスは自動拡大するが負座標は許容しないため下限 0 で丸める
             _draggedVm.X = Math.Max(0, newX);
             _draggedVm.Y = Math.Max(0, newY);
         }
     }
 
-    /// <summary>マウス解放: 移動量に応じてクリック扱い／Undo 登録を行います。</summary>
+    /// <summary>マウス解放時に移動量からクリックかドラッグかを判定し、後処理を <see cref="EndDrag"/> へ委譲する</summary>
     private static void OnMouseUp(object sender, MouseButtonEventArgs e)
     {
         if (!_isDragging && !_isResizing)
@@ -223,7 +232,7 @@ public static class DragBehavior
         EndDrag(treatAsClick: !_isResizing && movedPx <= ClickThreshold);
     }
 
-    /// <summary>キャプチャを失った場合（外部要因含む）に状態をリセットします。</summary>
+    /// <summary>外部要因などでマウスキャプチャを失った場合に状態をリセットする</summary>
     private static void OnLostCapture(object sender, MouseEventArgs e)
     {
         if (_isDragging || _isResizing)
@@ -232,8 +241,8 @@ public static class DragBehavior
         }
     }
 
-    /// <summary>ドラッグ状態を終了し、必要に応じて Undo/選択処理を行います。</summary>
-    /// <param name="treatAsClick">true の場合、ViewModel のクリックハンドラを呼びます。</param>
+    /// <summary>ドラッグ状態を終了し、必要に応じて Undo 登録・選択処理を行う</summary>
+    /// <param name="treatAsClick">true の場合は移動を取り消して ViewModel のクリックハンドラを呼ぶ</param>
     private static void EndDrag(bool treatAsClick)
     {
         var element = _draggedElement;
@@ -261,13 +270,13 @@ public static class DragBehavior
 
         if (wasResizing)
         {
-            // リサイズ完了 — 特に Undo 登録は省略 (Width 変更は軽微)
+            // 幅変更は軽微なため Undo 登録は行わない
             return;
         }
 
         if (treatAsClick)
         {
-            // クリック扱い: 位置を元に戻し、選択処理を ViewModel に委譲。
+            // クリック扱い時はドラッグ中の微小な座標変化を取り消し、選択処理を ViewModel へ委譲する
             vm.X = oldX;
             vm.Y = oldY;
 
@@ -279,13 +288,14 @@ public static class DragBehavior
             return;
         }
 
+        // 実際に座標が変わった場合のみ、適用済み移動を履歴へ登録する（再 Execute は不要）
         if (vm.X != oldX || vm.Y != oldY)
         {
             var mgr = GetUndoRedoManager(element);
             mgr?.Push(new MoveEntityCommand(vm, oldX, oldY, vm.X, vm.Y));
         }
 
-        // キャンバスサイズ再計算
+        // 移動後の到達範囲に合わせてキャンバスサイズを再計算する
         if (Window.GetWindow(element)?.DataContext is MainViewModel mainVm)
         {
             mainVm.RefreshCanvasSize();

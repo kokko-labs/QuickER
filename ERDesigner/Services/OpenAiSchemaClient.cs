@@ -5,16 +5,14 @@ using OpenAI.Chat;
 
 namespace ERDesigner.Services;
 
-/// <summary>AI スキーマ生成クライアントの抽象化。テストではモックに差し替えられます。</summary>
+/// <summary>AI スキーマ生成クライアントの抽象化（テストではモックへ差し替える）</summary>
 public interface IAiSchemaClient
 {
-    /// <summary>自然言語の要件から <see cref="AiSchemaJson"/> を生成します。</summary>
+    /// <summary>自然言語の要件から <see cref="AiSchemaJson"/> を生成する</summary>
     Task<AiSchemaJson> GenerateAsync(AiGenerationSettings settings, CancellationToken ct = default);
 }
 
-/// <summary>
-/// OpenAI 公式 SDK (および OpenAI 互換の Ollama) を使ってスキーマ JSON を取得するクライアント。
-/// </summary>
+/// <summary>OpenAI 公式 SDK（および OpenAI 互換の Ollama）でスキーマ JSON を取得するクライアント</summary>
 public class OpenAiSchemaClient : IAiSchemaClient
 {
     private const string SystemPromptTemplate =
@@ -38,7 +36,7 @@ public class OpenAiSchemaClient : IAiSchemaClient
 - 既存要素の名称変更が必要な場合も、要件から妥当な場合に限る。
 - 追加・変更内容が分かるよう、description と memo を適切に更新する。";
 
-    /// <summary>強制 JSON スキーマ (Structured Outputs)。</summary>
+    /// <summary>OpenAI の Structured Outputs に渡す強制 JSON スキーマ定義</summary>
     private static readonly byte[] SchemaBytes =
         """
         {
@@ -108,7 +106,7 @@ public class OpenAiSchemaClient : IAiSchemaClient
     public async Task<AiSchemaJson> GenerateAsync(AiGenerationSettings settings, CancellationToken ct = default)
     {
         var endpoint = new Uri(settings.ResolveEndpoint());
-        // Ollama は API キー不要だが OpenAI SDK は非空が必要なのでダミーを渡す
+        // Ollama は API キー不要だが OpenAI SDK は非空キーを要求するためダミーを渡す
         var key = string.IsNullOrEmpty(settings.ApiKey) ? "ollama" : settings.ApiKey;
 
         var client = new ChatClient(model: settings.Model, credential: new ApiKeyCredential(key), options: new OpenAIClientOptions { Endpoint = endpoint });
@@ -117,7 +115,7 @@ public class OpenAiSchemaClient : IAiSchemaClient
 
         try
         {
-            // OpenAI 本家は Structured Outputs (JSON Schema strict) を強制
+            // OpenAI 本家は厳密な JSON Schema を強制し、互換プロバイダーには JSON オブジェクト形式のみ要求する
             options = new ChatCompletionOptions
             {
                 ResponseFormat =
@@ -128,6 +126,7 @@ public class OpenAiSchemaClient : IAiSchemaClient
         }
         catch
         {
+            // スキーマ形式が SDK 側で非対応の場合は JSON オブジェクト形式へフォールバックする
             options = new ChatCompletionOptions { ResponseFormat = ChatResponseFormat.CreateJsonObjectFormat() };
         }
 
@@ -137,6 +136,7 @@ public class OpenAiSchemaClient : IAiSchemaClient
         var text = completion.Value.Content[0].Text;
         var schema = ParseSchemaResponse(text);
 
+        // 新規生成時のみ命名規則を後処理で強制する（更新モードは既存命名を維持するため正規化しない）
         if (settings.GenerationMode != AiGenerationMode.UpdateExisting)
         {
             schema.NormalizeTableNames(settings.TableNameNumberStyle);
@@ -146,6 +146,7 @@ public class OpenAiSchemaClient : IAiSchemaClient
         return schema;
     }
 
+    /// <summary>AI 応答テキストから JSON 部分を抽出し <see cref="AiSchemaJson"/> へ解釈する</summary>
     internal static AiSchemaJson ParseSchemaResponse(string text)
     {
         var normalized = ExtractJsonPayload(text);
@@ -159,6 +160,7 @@ public class OpenAiSchemaClient : IAiSchemaClient
         return json;
     }
 
+    /// <summary>コードフェンスや前後の説明文を除去し、JSON オブジェクト本体のみを取り出す</summary>
     private static string ExtractJsonPayload(string text)
     {
         if (string.IsNullOrWhiteSpace(text))
@@ -168,6 +170,7 @@ public class OpenAiSchemaClient : IAiSchemaClient
 
         var trimmed = text.Trim();
 
+        // ```json ... ``` のようなコードフェンスで囲まれている場合は中身のみ取り出す
         if (trimmed.StartsWith("```", StringComparison.Ordinal))
         {
             var firstNewLine = trimmed.IndexOf('\n');
@@ -186,6 +189,7 @@ public class OpenAiSchemaClient : IAiSchemaClient
             }
         }
 
+        // 先頭が { でない場合は最初の { から最後の } までを JSON 本体と見なして切り出す
         if (!trimmed.StartsWith("{", StringComparison.Ordinal))
         {
             var start = trimmed.IndexOf('{');
@@ -200,7 +204,7 @@ public class OpenAiSchemaClient : IAiSchemaClient
         return trimmed;
     }
 
-    /// <summary>命名規則の指定を含むシステムプロンプトを組み立てます。</summary>
+    /// <summary>命名規則や既存スキーマの指定を反映したシステムプロンプトを組み立てる</summary>
     private static string BuildSystemPrompt(AiGenerationSettings settings)
     {
         var namingInstruction = settings.IdentifierNamingStyle switch

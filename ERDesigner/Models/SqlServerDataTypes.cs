@@ -3,12 +3,12 @@ using System.Collections.Generic;
 namespace ERDesigner.Models;
 
 /// <summary>
-/// SQL Server で利用される代表的なデータ型の一覧を提供する静的クラスです。
-/// プロパティパネルの型 ComboBox の選択肢として使用します。
+/// SQL Server の代表的なデータ型一覧を提供する静的クラス
+/// プロパティパネルのデータ型 ComboBox の選択肢として使用する
 /// </summary>
 public static class SqlServerDataTypes
 {
-    /// <summary>SQL Server の代表的なデータ型一覧（既定値・パラメーター付きの定型を含む）。</summary>
+    /// <summary>SQL Server の代表的なデータ型一覧（よく使うパラメーター付きの定型表記を含む）</summary>
     public static IReadOnlyList<string> All { get; } =
         new[]
         {

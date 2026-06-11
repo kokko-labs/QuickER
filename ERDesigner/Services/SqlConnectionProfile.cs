@@ -1,36 +1,37 @@
 ﻿namespace ERDesigner.Services;
 
-/// <summary>
-/// 名前を付けて保存可能な SQL Server 接続プロファイル。
-/// パスワード以外を JSON に永続化し、パスワードは <see cref="SqlConnectionProfileStore"/> が DPAPI で別途暗号化保存します。
-/// </summary>
+/// <summary>名前を付けて保存可能な SQL Server 接続プロファイル</summary>
+/// <remarks>
+/// パスワード以外を JSON に永続化する パスワードは <see cref="SqlConnectionProfileStore"/> が
+/// DPAPI で別途暗号化保存する
+/// </remarks>
 public class SqlConnectionProfile
 {
-    /// <summary>プロファイルを一意に識別する ID。</summary>
+    /// <summary>プロファイルの一意識別子</summary>
     public Guid Id { get; set; } = Guid.NewGuid();
 
-    /// <summary>表示名 (一覧で選ぶラベル)。</summary>
+    /// <summary>一覧での選択ラベルとなる表示名</summary>
     public string Name { get; set; } = string.Empty;
 
-    /// <summary>サーバー名。</summary>
+    /// <summary>サーバー名</summary>
     public string Server { get; set; } = string.Empty;
 
-    /// <summary>データベース名。</summary>
+    /// <summary>データベース名</summary>
     public string Database { get; set; } = string.Empty;
 
-    /// <summary>認証方式。</summary>
+    /// <summary>認証方式</summary>
     public SqlAuthMode AuthMode { get; set; } = SqlAuthMode.Windows;
 
-    /// <summary>SQL/Azure AD 認証時のユーザー名。</summary>
+    /// <summary>SQL / Azure AD 認証時のユーザー名</summary>
     public string UserId { get; set; } = string.Empty;
 
-    /// <summary>サーバー証明書を信頼するか。</summary>
+    /// <summary>サーバー証明書を信頼するかどうか</summary>
     public bool TrustServerCertificate { get; set; } = true;
 
-    /// <summary>パスワードを暗号化保存するか。</summary>
+    /// <summary>パスワードを暗号化保存するかどうか</summary>
     public bool SavePassword { get; set; }
 
-    /// <summary>このプロファイルから接続設定を構築します (パスワードは別途指定)。</summary>
+    /// <summary>プロファイルから接続設定を構築する（パスワードは引数で別途指定する）</summary>
     public SqlConnectionSettings ToSettings(string password) =>
         new()
         {

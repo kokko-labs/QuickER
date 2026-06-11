@@ -3,29 +3,32 @@ using ERDesigner.ViewModels;
 
 namespace ERDesigner.UndoRedo;
 
-/// <summary>
-/// 既存エンティティを複製するコマンドです（Undo / Redo 可能）。
-/// </summary>
+/// <summary>既存エンティティを複製する Undo / Redo 対応コマンド</summary>
 /// <remarks>
-/// 名前の末尾に "_Copy" を付け、位置を少し右下にずらした新しい <see cref="EntityViewModel"/>
-/// を <see cref="MainViewModel.Entities"/> に追加します。Undo すると追加された複製が削除されます。
+/// 名前の末尾に "_Copy" を付与し位置を右下にずらした新しい <see cref="EntityViewModel"/> を
+/// <see cref="MainViewModel.Entities"/> に追加する Undo で追加した複製を削除する
 /// </remarks>
 public class DuplicateEntityCommand : IUndoableCommand
 {
+    /// <summary>追加先のメイン ViewModel</summary>
     private readonly MainViewModel _main;
+
+    /// <summary>複製元エンティティ</summary>
     private readonly EntityViewModel _original;
+
+    /// <summary>生成済みの複製エンティティ（Redo で再利用するため保持する）</summary>
     private EntityViewModel? _duplicate;
 
-    /// <summary>新しい <see cref="DuplicateEntityCommand"/> を生成します。</summary>
-    /// <param name="main">追加先の <see cref="MainViewModel"/>。</param>
-    /// <param name="original">複製元のエンティティ。</param>
+    /// <summary><see cref="DuplicateEntityCommand"/> を生成する</summary>
+    /// <param name="main">追加先のメイン ViewModel</param>
+    /// <param name="original">複製元エンティティ</param>
     public DuplicateEntityCommand(MainViewModel main, EntityViewModel original)
     {
         _main = main;
         _original = original;
     }
 
-    /// <summary>複製後にできた新しいエンティティ（Execute 後に有効）。</summary>
+    /// <summary>複製で生成したエンティティ（Execute 後に有効）</summary>
     public EntityViewModel? Duplicated => _duplicate;
 
     /// <inheritdoc />
@@ -34,6 +37,7 @@ public class DuplicateEntityCommand : IUndoableCommand
     /// <inheritdoc />
     public void Execute()
     {
+        // 複製は初回 Execute 時のみ生成し、Redo では同一インスタンスを再利用する
         if (_duplicate is null)
         {
             _duplicate = _main.CreateEntityCopy(_original);

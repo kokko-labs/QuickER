@@ -5,16 +5,31 @@ using ERDesigner.Models;
 namespace ERDesigner.Services;
 
 /// <summary>
-/// DBML 形式を ER 図へ変換するサービスです。
+/// DBML (Database Markup Language) テキストを解析して ER 図モデルへ変換するインポーター
 /// </summary>
+/// <remarks>
+/// 対応する記法は <see cref="DbmlExporter"/> の出力と往復可能な範囲に限定する
+/// <list type="bullet">
+///   <item><c>Table 名前 {</c> 〜 <c>}</c> ブロック（1 行 1 カラム定義）</item>
+///   <item>カラム設定: <c>pk</c> / <c>ref</c> / <c>null</c> / <c>not null</c> / <c>note: '...'</c>（大文字小文字を区別しない）</item>
+///   <item><c>Ref:</c> 行: 多重度記号は <c>-</c>（1対1）/ <c>&lt;</c>（1対多）/ <c>&lt;&gt;</c>（多対多）のみ。<c>&gt;</c>（多対1）は未対応</item>
+///   <item><c>//</c> 行コメント</item>
+/// </list>
+/// Project・Enum・Indexes・TableGroup・複数行 Note ブロック等の DBML 構文は未対応
+/// </remarks>
 public static partial class DbmlImporter
 {
+    /// <summary><c>Table 名前 {</c> 形式のテーブル開始行を検出する正規表現</summary>
     private static readonly Regex TableHeaderRegex = TableHeaderLineRegex();
+
+    /// <summary><c>Ref:</c> 行を解析する正規表現</summary>
     private static readonly Regex RelationshipRegex = RelationshipLineRegex();
+
+    /// <summary>カラム設定の <c>note: '...'</c> を解析する正規表現</summary>
     private static readonly Regex NoteRegex = ColumnNoteRegex();
 
     /// <summary>
-    /// DBML ファイルを読み込みます。
+    /// DBML ファイルを読み込み ER 図へ変換する
     /// </summary>
     public static ErDiagram Load(string path)
     {
@@ -22,8 +37,10 @@ public static partial class DbmlImporter
     }
 
     /// <summary>
-    /// DBML テキストを解析して ER 図を生成します。
+    /// DBML テキストを解析して ER 図を生成する
     /// </summary>
+    /// <returns>復元した <see cref="ErDiagram"/></returns>
+    /// <exception cref="InvalidDataException">構文不正・テーブル名重複・未定義テーブル参照などを検出した場合</exception>
     public static ErDiagram Parse(string text)
     {
         if (string.IsNullOrWhiteSpace(text))
@@ -36,6 +53,7 @@ public static partial class DbmlImporter
         var relationships = new List<Relationship>();
         Entity? currentEntity = null;
 
+        // 行単位の状態機械: currentEntity が非 null の間は Table ブロック内としてカラム行を解釈する
         foreach (var rawLine in lines)
         {
             var line = RemoveComment(rawLine).Trim();
@@ -96,8 +114,14 @@ public static partial class DbmlImporter
     }
 
     /// <summary>
-    /// DBML のカラム定義を解析します。
+    /// DBML のカラム定義行（<c>名前 型 [設定, ...]</c>）を解析する
     /// </summary>
+    /// <remarks>
+    /// 型名は空白を含んでもよい（2 番目以降のトークンをすべて型として連結する）。
+    /// 設定省略時は NULL 許可を既定とし、<c>pk</c> 指定時は NOT NULL を強制する。
+    /// note 内のエスケープ <c>\'</c> はシングルクォートへ復元する
+    /// </remarks>
+    /// <exception cref="InvalidDataException">名前と型の 2 トークンに満たない場合</exception>
     private static Column ParseColumn(string line, string tableName)
     {
         var trimmed = line.Trim();
@@ -158,8 +182,14 @@ public static partial class DbmlImporter
     }
 
     /// <summary>
-    /// DBML のリレーション定義を解析します。
+    /// DBML の <c>Ref:</c> 行を解析してリレーションを生成する
     /// </summary>
+    /// <remarks>
+    /// 左辺テーブルを親（Source）、右辺テーブルを子（Target）として扱う。
+    /// 行中のカラム名は構文上必須だがここでは使用せず、参照カラムは後段の
+    /// <see cref="ResolveRelationshipColumns"/> が既定ルールで決定する
+    /// </remarks>
+    /// <exception cref="InvalidDataException">構文不一致、または参照先テーブルが未定義の場合</exception>
     private static Relationship ParseRelationship(string line, IReadOnlyDictionary<string, Entity> entities)
     {
         var match = RelationshipRegex.Match(line);
@@ -200,9 +230,12 @@ public static partial class DbmlImporter
     }
 
     /// <summary>
-    /// カラム設定文字列をカンマ区切りで分割します。
-    /// note 内のカンマは分割対象から除外します。
+    /// カラム設定文字列をカンマ区切りで分割する
     /// </summary>
+    /// <remarks>
+    /// <c>note: 'a, b'</c> のようにクォート内へ含まれるカンマは区切りとして扱わない。
+    /// クォートの開閉判定では直前の <c>\</c> によるエスケープを考慮する
+    /// </remarks>
     private static IEnumerable<string> SplitOptions(string optionText)
     {
         if (string.IsNullOrWhiteSpace(optionText))
@@ -245,7 +278,7 @@ public static partial class DbmlImporter
     }
 
     /// <summary>
-    /// 行コメントを除去します。
+    /// <c>//</c> 以降の行コメントを除去する
     /// </summary>
     private static string RemoveComment(string line)
     {
@@ -254,7 +287,7 @@ public static partial class DbmlImporter
     }
 
     /// <summary>
-    /// すべてのエンティティに最低 1 列があることを保証します。
+    /// カラムを 1 つも持たないエンティティへ既定の PK 列（<c>ID int</c>）を補う
     /// </summary>
     private static void EnsureEntitiesHaveColumns(IEnumerable<Entity> entities)
     {
@@ -276,8 +309,13 @@ public static partial class DbmlImporter
     }
 
     /// <summary>
-    /// リレーションの参照列を既定ルールで補完します。
+    /// 各リレーションの参照カラムを既定ルールで補完する
     /// </summary>
+    /// <remarks>
+    /// 親（Source）側は最初の PK 列（無ければ先頭列）、子（Target）側は
+    /// <see cref="ResolveTargetColumn"/> の優先順位で選び、選んだ列に FK フラグを立てる。
+    /// 多対多はジャンクションテーブル前提のためカラムを割り当てない
+    /// </remarks>
     private static void ResolveRelationshipColumns(IReadOnlyDictionary<string, Entity> entities, IEnumerable<Relationship> relationships)
     {
         foreach (var relationship in relationships)
@@ -300,8 +338,11 @@ public static partial class DbmlImporter
     }
 
     /// <summary>
-    /// 参照先 PK に対応する外部キー列を選択します。
+    /// 親の PK に対応する子側の外部キー列を選択する
     /// </summary>
+    /// <remarks>
+    /// 優先順位: 同名の FK 列 → 同名の列 → PK でない最初の FK 列 → PK でない先頭列 → 先頭列
+    /// </remarks>
     private static Column ResolveTargetColumn(Column sourcePrimaryKey, Entity target)
     {
         var sameNameForeignKey = target.Columns.FirstOrDefault(column =>
@@ -330,15 +371,21 @@ public static partial class DbmlImporter
         return target.Columns.FirstOrDefault(column => !column.IsPrimaryKey) ?? target.Columns.First();
     }
 
+    /// <summary><c>Table 名前 {</c> 形式のテーブル開始行に一致する正規表現を生成する</summary>
     [GeneratedRegex(@"^Table\s+(?<table>\S+)\s*\{$", RegexOptions.Compiled | RegexOptions.IgnoreCase)]
     private static partial Regex TableHeaderLineRegex();
 
+    /// <summary>
+    /// <c>Ref:</c> 行に一致する正規表現を生成する。note は <see cref="DbmlExporter"/> 独自形式に合わせ
+    /// <c>Ref:</c> 直後の <c>[note: '...']</c> のみ受け付ける
+    /// </summary>
     [GeneratedRegex(
         @"^Ref:(?:\s*\[note:\s*'(?<note>(?:\\'|[^'])*)'\])?\s*(?<leftTable>\w+)\.(?<leftColumn>\w+)\s*(?<symbol><>|<|-)\s*(?<rightTable>\w+)\.(?<rightColumn>\w+)\s*$",
         RegexOptions.Compiled
     )]
     private static partial Regex RelationshipLineRegex();
 
+    /// <summary>カラム設定の <c>note: '...'</c>（<c>\'</c> エスケープ対応）に一致する正規表現を生成する</summary>
     [GeneratedRegex(@"^note:\s*'(?<note>(?:\\'|[^'])*)'$", RegexOptions.Compiled | RegexOptions.IgnoreCase)]
     private static partial Regex ColumnNoteRegex();
 }
