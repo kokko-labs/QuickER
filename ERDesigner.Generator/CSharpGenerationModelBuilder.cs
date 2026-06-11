@@ -1,10 +1,16 @@
 namespace ERDesigner.Generator;
 
+/// <summary>ER 図定義からテンプレート用の C# コード生成モデルを構築するビルダー</summary>
 internal sealed class CSharpGenerationModelBuilder
 {
+    /// <summary>テーブル名・カラム名を C# 識別子へ変換するコンバーター</summary>
     private readonly CSharpNameConverter _nameConverter = new();
+
+    /// <summary>SQL Server 型を C# 型へ対応付けるマッパー</summary>
     private readonly SqlServerCSharpTypeMapper _typeMapper = new();
 
+    /// <summary>ER 図定義とオプションから生成モデル全体を構築する</summary>
+    /// <param name="diagnostics">生成中に検出した警告などを蓄積する出力先</param>
     public CSharpGenerationModel Build(DiagramDefinition diagram, CodeGenerationOptions options, ICollection<GenerationDiagnostic> diagnostics)
     {
         var entityClasses = diagram.Entities.Select(entity => BuildEntityClass(entity, diagram, diagnostics)).ToList();
@@ -28,6 +34,7 @@ internal sealed class CSharpGenerationModelBuilder
         };
     }
 
+    /// <summary>エンティティ定義からエンティティクラスの生成モデルを構築する</summary>
     private CSharpClassModel BuildEntityClass(EntityDefinition entity, DiagramDefinition diagram, ICollection<GenerationDiagnostic> diagnostics)
     {
         var className = _nameConverter.ToEntityClassName(entity.TableName);
@@ -43,6 +50,7 @@ internal sealed class CSharpGenerationModelBuilder
         };
     }
 
+    /// <summary>エンティティ定義から EditModel クラスの生成モデルを構築する</summary>
     private CSharpEditModelClassModel BuildEditModelClass(EntityDefinition entity, DiagramDefinition diagram, ICollection<GenerationDiagnostic> diagnostics)
     {
         var className = _nameConverter.ToEditModelClassName(entity.TableName);
@@ -58,6 +66,7 @@ internal sealed class CSharpGenerationModelBuilder
         };
     }
 
+    /// <summary>エンティティ定義から Entity ↔ EditModel 変換 Mapper の生成モデルを構築する</summary>
     private CSharpMapperModel BuildMapperClass(EntityDefinition entity, DiagramDefinition diagram, ICollection<GenerationDiagnostic> diagnostics)
     {
         var entityClassName = _nameConverter.ToEntityClassName(entity.TableName);
@@ -94,10 +103,13 @@ internal sealed class CSharpGenerationModelBuilder
         };
     }
 
+    /// <summary>エンティティ定義から Repository の生成モデルを構築する</summary>
+    /// <returns>単一主キーを持たないテーブルは対象外として null を返す</returns>
     private CSharpRepositoryModel? BuildRepositoryClass(EntityDefinition entity, ICollection<GenerationDiagnostic> diagnostics)
     {
         var keyColumn = entity.Columns.Where(column => column.IsPrimaryKey).ToList();
 
+        // Repository は単一主キーを前提とするため、複合・主キーなしのテーブルはスキップする
         if (keyColumn.Count != 1)
         {
             diagnostics.Add(Warning($"テーブル '{entity.TableName}' の Repository は単一主キーのみ対応のため生成をスキップしました。"));
@@ -117,11 +129,13 @@ internal sealed class CSharpGenerationModelBuilder
         };
     }
 
+    /// <summary>カラム定義からエンティティのスカラープロパティ生成モデルを構築する</summary>
     private CSharpPropertyModel BuildProperty(ColumnDefinition column)
     {
         var typeInfo = _typeMapper.Map(column.DataType);
         var typeName = typeInfo.TypeName;
 
+        // NULL 許容列は型へ ? を付与する 値型・参照型を区別し、byte[] は配列のため対象外とする
         if (column.IsNullable && !typeInfo.IsReferenceType)
         {
             typeName += "?";
@@ -145,6 +159,11 @@ internal sealed class CSharpGenerationModelBuilder
         };
     }
 
+    /// <summary>カラム定義から EditModel のプロパティ生成モデルを構築する</summary>
+    /// <remarks>
+    /// EditModel は入力途中の不正値も保持するため、値型・文字列・バイナリは原則 NULL 許容とし、
+    /// 確定値プロパティと UI バインディング用文字列プロパティの両方の情報を組み立てる
+    /// </remarks>
     private CSharpEditModelPropertyModel BuildEditModelProperty(ColumnDefinition column)
     {
         var typeInfo = _typeMapper.Map(column.DataType);
@@ -208,6 +227,7 @@ internal sealed class CSharpGenerationModelBuilder
         };
     }
 
+    /// <summary>確定値から UI バインディング文字列へ戻す式を生成する（バイナリは Base64 化する）</summary>
     private static string BuildBindingExpression(string propertyName, bool isBinary)
     {
         if (isBinary)
@@ -218,6 +238,7 @@ internal sealed class CSharpGenerationModelBuilder
         return $"{propertyName}?.ToString() ?? string.Empty";
     }
 
+    /// <summary>非 NULL の string / byte[] プロパティに対する空既定値の初期化子を生成する</summary>
     private static string BuildEntityInitializer(string typeName, bool isNullable)
     {
         if (typeName == "string" && !isNullable)
@@ -233,6 +254,7 @@ internal sealed class CSharpGenerationModelBuilder
         return string.Empty;
     }
 
+    /// <summary>Mapper 内で Entity プロパティを EditModel のバインディング文字列へ変換する式を生成する</summary>
     private static string BuildMapperBindingExpression(string entityTypeName, bool isBinary, string propertyName)
     {
         if (isBinary)
@@ -248,6 +270,7 @@ internal sealed class CSharpGenerationModelBuilder
         return $"entity.{propertyName}.ToString() ?? string.Empty";
     }
 
+    /// <summary>エンティティのナビゲーションプロパティ生成モデルを構築する</summary>
     private IEnumerable<CSharpNavigationModel> BuildEntityNavigations(EntityDefinition entity, DiagramDefinition diagram, ICollection<GenerationDiagnostic> diagnostics)
     {
         foreach (var nav in ResolveNavigations(entity, diagram, diagnostics))
@@ -270,6 +293,7 @@ internal sealed class CSharpGenerationModelBuilder
         }
     }
 
+    /// <summary>EditModel のナビゲーションプロパティ生成モデルを構築する</summary>
     private IEnumerable<CSharpNavigationModel> BuildEditModelNavigations(EntityDefinition entity, DiagramDefinition diagram, ICollection<GenerationDiagnostic> diagnostics)
     {
         foreach (var nav in ResolveNavigations(entity, diagram, diagnostics))
@@ -292,6 +316,7 @@ internal sealed class CSharpGenerationModelBuilder
         }
     }
 
+    /// <summary>Mapper が扱うナビゲーションプロパティ生成モデルを構築する</summary>
     private IEnumerable<CSharpMapperNavigationModel> BuildMapperNavigations(EntityDefinition entity, DiagramDefinition diagram, ICollection<GenerationDiagnostic> diagnostics)
     {
         foreach (var nav in ResolveNavigations(entity, diagram, diagnostics))
@@ -307,6 +332,7 @@ internal sealed class CSharpGenerationModelBuilder
         }
     }
 
+    /// <summary>ナビゲーション解決の中間結果（生成側の表現に依存しない情報）</summary>
     private sealed record NavigationInfo(
         string PropertyName,
         string TargetTableName,
@@ -319,10 +345,13 @@ internal sealed class CSharpGenerationModelBuilder
         string DependentColumnName
     );
 
+    /// <summary>指定エンティティに関わるリレーションから、両端それぞれのナビゲーション情報を解決する</summary>
+    /// <remarks>多対多や参照先・キーが解決できないリレーションは警告を出して生成対象外とする</remarks>
     private IEnumerable<NavigationInfo> ResolveNavigations(EntityDefinition entity, DiagramDefinition diagram, ICollection<GenerationDiagnostic> diagnostics)
     {
         foreach (var relationship in diagram.Relationships)
         {
+            // 多対多は中間テーブルを介する設計のため C# 生成では直接ナビゲーションを作らない
             if (relationship.Type == RelationshipMultiplicity.ManyToMany)
             {
                 diagnostics.Add(Warning($"多対多リレーション '{relationship.Id}' は C# 生成対象外のためスキップしました。"));
@@ -338,6 +367,7 @@ internal sealed class CSharpGenerationModelBuilder
                 continue;
             }
 
+            // 明示指定の列を優先し、無ければ principal は主キー、dependent は外部キー列にフォールバックする
             var sourceColumn = relationship.SourceColumnId is null ? null : source.Columns.FirstOrDefault(column => column.Id == relationship.SourceColumnId.Value);
             var targetColumn = relationship.TargetColumnId is null ? null : target.Columns.FirstOrDefault(column => column.Id == relationship.TargetColumnId.Value);
             var principalColumn = sourceColumn ?? source.Columns.FirstOrDefault(column => column.IsPrimaryKey);
@@ -349,6 +379,7 @@ internal sealed class CSharpGenerationModelBuilder
                 continue;
             }
 
+            // source 側は子へのナビゲーション（1 対多なら collection）を生成する
             if (entity.Id == source.Id)
             {
                 yield return new NavigationInfo(
@@ -363,6 +394,7 @@ internal sealed class CSharpGenerationModelBuilder
                     DependentColumnName: dependentColumn.Name
                 );
             }
+            // target 側は親への単一参照ナビゲーションを生成する
             else if (entity.Id == target.Id)
             {
                 yield return new NavigationInfo(
@@ -380,6 +412,7 @@ internal sealed class CSharpGenerationModelBuilder
         }
     }
 
+    /// <summary>生成オプションに応じて必要な using 名前空間の集合を構築する</summary>
     private static IEnumerable<string> BuildUsings(CodeGenerationOptions options)
     {
         var usings = new HashSet<string> { "System.Collections.Generic", "System.ComponentModel" };
@@ -410,6 +443,7 @@ internal sealed class CSharpGenerationModelBuilder
         }
     }
 
+    /// <summary>プロパティ名から先頭小文字・アンダースコア始まりのフィールド名を導出する</summary>
     private static string ToFieldName(string propertyName)
     {
         if (string.IsNullOrEmpty(propertyName))
@@ -417,9 +451,11 @@ internal sealed class CSharpGenerationModelBuilder
             return "_field";
         }
 
+        // 逐語的識別子の @ を除いた先頭文字を小文字化し _ を前置する
         var stripped = propertyName.TrimStart('@');
         return "_" + char.ToLowerInvariant(stripped[0]) + stripped[1..];
     }
 
+    /// <summary>警告レベルの診断情報を生成する</summary>
     private static GenerationDiagnostic Warning(string message) => new() { Severity = GenerationDiagnosticSeverity.Warning, Message = message };
 }
