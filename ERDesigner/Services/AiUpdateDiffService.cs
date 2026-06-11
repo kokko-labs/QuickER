@@ -2,14 +2,10 @@ using ERDesigner.Models;
 
 namespace ERDesigner.Services;
 
-/// <summary>
-/// 現在の ER 図と AI が返した更新後 ER 図を比較し、差分プレビュー用の情報を作成します。
-/// </summary>
+/// <summary>現在の ER 図と AI が返した更新後 ER 図を比較し、差分プレビュー用の情報を生成するサービス</summary>
 public sealed class AiUpdateDiffService
 {
-    /// <summary>
-    /// 差分を計算します。
-    /// </summary>
+    /// <summary>テーブル・カラム・リレーションのカテゴリ別に差分グループを計算する</summary>
     public AiUpdateDiffResult Compute(ErDiagram currentDiagram, ErDiagram updatedDiagram)
     {
         var result = new AiUpdateDiffResult();
@@ -124,7 +120,7 @@ public sealed class AiUpdateDiffService
         return result;
     }
 
-    /// <summary>同名テーブル内のカラム差分を追加します。</summary>
+    /// <summary>同名テーブル内のカラムの追加・変更・削除差分をグループへ追加する</summary>
     private static void AddColumnDiffs(AiUpdateDiffGroup columnGroup, Entity currentTable, Entity updatedTable)
     {
         var currentColumns = currentTable.Columns.ToDictionary(column => NormalizeName(column.Name), StringComparer.OrdinalIgnoreCase);
@@ -236,7 +232,7 @@ public sealed class AiUpdateDiffService
         }
     }
 
-    /// <summary>リレーション差分を追加します。</summary>
+    /// <summary>リレーションの追加・変更・削除差分をグループへ追加する</summary>
     private static void AddRelationshipDiffs(AiUpdateDiffGroup relationshipGroup, ErDiagram currentDiagram, ErDiagram updatedDiagram)
     {
         var currentRelationships = BuildRelationshipInfo(currentDiagram);
@@ -304,7 +300,7 @@ public sealed class AiUpdateDiffService
         }
     }
 
-    /// <summary>比較用のリレーション情報を組み立てます。</summary>
+    /// <summary>エンティティ・カラムの ID を名称へ解決し、比較用のリレーション情報一覧を組み立てる</summary>
     private static List<RelationshipInfo> BuildRelationshipInfo(ErDiagram diagram)
     {
         var entitiesById = diagram.Entities.ToDictionary(entity => entity.Id);
@@ -348,7 +344,7 @@ public sealed class AiUpdateDiffService
         return infoList;
     }
 
-    /// <summary>詳細行へ差分がある項目だけ追加します。</summary>
+    /// <summary>変更前後で値が異なる場合のみ詳細行を追加する</summary>
     private static void AddDetailIfChanged(List<AiUpdateDiffDetailRow> details, string name, string? before, string? after)
     {
         if (string.Equals(before ?? string.Empty, after ?? string.Empty, StringComparison.Ordinal))
@@ -366,7 +362,7 @@ public sealed class AiUpdateDiffService
         );
     }
 
-    /// <summary>差分項目を作成します。</summary>
+    /// <summary>カテゴリ・変更種別・詳細行から差分項目を生成する</summary>
     private static AiUpdateDiffItem CreateItem(
         AiUpdateDiffCategory category,
         AiUpdateDiffChangeType changeType,
@@ -385,19 +381,19 @@ public sealed class AiUpdateDiffService
         };
     }
 
-    /// <summary>空文字をハイフンへ変換します。</summary>
+    /// <summary>空白値をハイフン表記へ変換する</summary>
     private static string ValueOrHyphen(string? value) => string.IsNullOrWhiteSpace(value) ? "-" : value;
 
-    /// <summary>比較用に名前を正規化します。</summary>
+    /// <summary>比較用に名前を正規化する（前後空白除去、null は空文字）</summary>
     private static string NormalizeName(string? value) => string.IsNullOrWhiteSpace(value) ? string.Empty : value.Trim();
 
-    /// <summary>NULL 許容の表示文字列です。</summary>
+    /// <summary>NULL 許容を表示文字列（許可 / 禁止）へ変換する</summary>
     private static string ToNullableText(bool isNullable) => isNullable ? "許可" : "禁止";
 
-    /// <summary>フラグの表示文字列です。</summary>
+    /// <summary>真偽フラグを表示文字列（あり / なし）へ変換する</summary>
     private static string ToEnabledText(bool enabled) => enabled ? "あり" : "なし";
 
-    /// <summary>比較用のリレーション情報です。</summary>
+    /// <summary>比較・差分表示に用いるリレーション情報</summary>
     private sealed record RelationshipInfo(
         string Key,
         string Title,
@@ -411,7 +407,7 @@ public sealed class AiUpdateDiffService
         string OnUpdate
     )
     {
-        /// <summary>詳細比較用の行を返します。</summary>
+        /// <summary>追加・削除表示用に Before / After をプレースホルダーで埋めた詳細行配列を返す</summary>
         public AiUpdateDiffDetailRow[] ToDetailRows(string placeholder, bool includeBefore = true, bool includeAfter = true)
         {
             return
@@ -467,25 +463,27 @@ public sealed class AiUpdateDiffService
             ];
         }
 
-        /// <summary>変更判定用の構造キーです。</summary>
+        /// <summary>両端のテーブル・列で構成する構造一致判定用キー</summary>
         public string StructuralKey => $"{SourceTable}:{SourceColumn}->{TargetTable}:{TargetColumn}";
 
-        /// <summary>同一テーブル組み合わせ判定用のキーです。</summary>
+        /// <summary>同一テーブル組み合わせ判定用キー</summary>
         public string TablePairKey => $"{SourceTable}->{TargetTable}";
     }
 
-    /// <summary>削除/追加ではなく変更として扱える既存リレーションを探します。</summary>
+    /// <summary>更新後リレーションに対応する既存リレーションを探す（変更として扱える対応を見つける）</summary>
     private static RelationshipInfo? FindRelationshipMatch(List<RelationshipInfo> currentRelationships, RelationshipInfo updatedRelationship)
     {
         var exactStructureMatch = currentRelationships.FirstOrDefault(currentRelationship =>
             string.Equals(currentRelationship.StructuralKey, updatedRelationship.StructuralKey, StringComparison.OrdinalIgnoreCase)
         );
 
+        // 構造（両端テーブル・列）が完全一致するものを最優先で対応付ける
         if (exactStructureMatch is not null)
         {
             return exactStructureMatch;
         }
 
+        // 次に制約名キーが一致するものを対応付ける
         if (!string.IsNullOrWhiteSpace(updatedRelationship.Key))
         {
             var constraintMatch = currentRelationships.FirstOrDefault(currentRelationship =>
@@ -498,6 +496,7 @@ public sealed class AiUpdateDiffService
             }
         }
 
+        // 最後に同一テーブル組のものを候補とし、1 件なら対応、複数なら類似度最大を選ぶ
         var sameTablePairRelationships = currentRelationships
             .Where(currentRelationship => string.Equals(currentRelationship.TablePairKey, updatedRelationship.TablePairKey, StringComparison.OrdinalIgnoreCase))
             .ToList();
@@ -512,7 +511,7 @@ public sealed class AiUpdateDiffService
             .FirstOrDefault(currentRelationship => CalculateRelationshipSimilarity(currentRelationship, updatedRelationship) > 0);
     }
 
-    /// <summary>リレーションの類似度を計算します。</summary>
+    /// <summary>2 つのリレーションの類似度を加点方式で計算する（列一致を最も重視する）</summary>
     private static int CalculateRelationshipSimilarity(RelationshipInfo currentRelationship, RelationshipInfo updatedRelationship)
     {
         var score = 0;
