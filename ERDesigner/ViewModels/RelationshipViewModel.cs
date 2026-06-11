@@ -113,6 +113,7 @@ public partial class RelationshipViewModel : ObservableObject
             column.PropertyChanged += OnColumnPropertyChanged;
         }
 
+        UpdateGeometry();
         EnsureColumnSelectionConsistency();
         EnsureReferentialActionConsistency();
     }
@@ -199,16 +200,21 @@ public partial class RelationshipViewModel : ObservableObject
 
     partial void OnTargetColumnIdChanged(Guid? value) => OnPropertyChanged(nameof(TargetColumnId));
 
-    /// <summary>両端の位置・幅が変わったら端点プロパティを再通知します。</summary>
+    /// <summary>両端の位置・幅が変わったら端点プロパティを再計算して通知します。</summary>
     private void OnEndpointChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName is nameof(EntityViewModel.X) or nameof(EntityViewModel.Y) or nameof(EntityViewModel.Width) or nameof(EntityViewModel.DisplayHeight))
         {
+            UpdateGeometry();
             NotifyGeometryChanged();
         }
     }
 
-    /// <summary>幾何プロパティをまとめて再通知します。</summary>
+    /// <summary>
+    /// 幾何プロパティをまとめて再通知します。
+    /// Source/Target は不変のため、それらにのみ依存するプロパティ
+    /// (IsSelfRelationship / ShowSelfLoop / ShowEndpointMarkers / SelfLoopWidth / SelfLoopHeight) は通知しません。
+    /// </summary>
     private void NotifyGeometryChanged()
     {
         OnPropertyChanged(nameof(X1));
@@ -227,13 +233,8 @@ public partial class RelationshipViewModel : ObservableObject
         OnPropertyChanged(nameof(TargetMarkerAngle));
         OnPropertyChanged(nameof(LabelX));
         OnPropertyChanged(nameof(LabelY));
-        OnPropertyChanged(nameof(IsSelfRelationship));
-        OnPropertyChanged(nameof(ShowSelfLoop));
-        OnPropertyChanged(nameof(ShowEndpointMarkers));
         OnPropertyChanged(nameof(SelfLoopLeft));
         OnPropertyChanged(nameof(SelfLoopTop));
-        OnPropertyChanged(nameof(SelfLoopWidth));
-        OnPropertyChanged(nameof(SelfLoopHeight));
     }
 
     /// <summary>種別変更前の SourceColumnId/TargetColumnId を MainViewModel 側でキャプチャできるよう、変更直前に通知します。</summary>
@@ -267,38 +268,74 @@ public partial class RelationshipViewModel : ObservableObject
     }
 
     // ===== 端点座標 =====
+    // DisplayHeight の取得やバインディング再評価のコストを抑えるため、
+    // 端点変更時に UpdateGeometry() で一括計算した値を保持し、getter はキャッシュを返すだけにする。
+
+    private double _x1;
+    private double _y1;
+    private double _x2;
+    private double _y2;
+    private double _sourceMarkerX;
+    private double _sourceMarkerY;
+    private double _targetMarkerX;
+    private double _targetMarkerY;
+    private double _sourceMarkerAngle;
+    private double _targetMarkerAngle;
+    private double _labelX;
+    private double _labelY;
+    private double _selfLoopLeft;
+    private double _selfLoopTop;
 
     /// <summary>起点エンティティ境界上の接続 X 座標。</summary>
-    public double X1 => GetBoundaryPoint(Source, Target).x;
+    public double X1 => _x1;
 
     /// <summary>起点エンティティ境界上の接続 Y 座標。</summary>
-    public double Y1 => GetBoundaryPoint(Source, Target).y;
+    public double Y1 => _y1;
 
     /// <summary>終点エンティティ境界上の接続 X 座標。</summary>
-    public double X2 => GetBoundaryPoint(Target, Source).x;
+    public double X2 => _x2;
 
     /// <summary>終点エンティティ境界上の接続 Y 座標。</summary>
-    public double Y2 => GetBoundaryPoint(Target, Source).y;
+    public double Y2 => _y2;
 
-    // ===== マーカー位置（端点からエンティティ外側へ MarkerOffset 移動した点） =====
-
-    private (double dx, double dy, double len) Direction()
+    /// <summary>端点座標・マーカー位置・角度・ラベル位置を一括で再計算します。</summary>
+    private void UpdateGeometry()
     {
+        (_x1, _y1) = GetBoundaryPoint(Source, Target);
+        (_x2, _y2) = GetBoundaryPoint(Target, Source);
+
+        // 線方向の単位ベクトル（マーカーを端点から外側へ MarkerOffset 移動させるのに使用）
+        double ux;
+        double uy;
+
         if (IsSelfRelationship)
         {
-            return (1, 0, 1);
+            (ux, uy) = (1, 0);
         }
-
-        var dx = X2 - X1;
-        var dy = Y2 - Y1;
-        var len = Math.Sqrt(dx * dx + dy * dy);
-
-        if (len < 0.0001)
+        else
         {
-            len = 1;
+            var dx = _x2 - _x1;
+            var dy = _y2 - _y1;
+            var len = Math.Sqrt(dx * dx + dy * dy);
+
+            if (len < 0.0001)
+            {
+                len = 1;
+            }
+
+            (ux, uy) = (dx / len, dy / len);
         }
 
-        return (dx / len, dy / len, len);
+        _sourceMarkerX = _x1 + ux * MarkerOffset;
+        _sourceMarkerY = _y1 + uy * MarkerOffset;
+        _targetMarkerX = _x2 - ux * MarkerOffset;
+        _targetMarkerY = _y2 - uy * MarkerOffset;
+        _sourceMarkerAngle = Math.Atan2(uy, ux) * 180.0 / Math.PI + 180;
+        _targetMarkerAngle = Math.Atan2(uy, ux) * 180.0 / Math.PI;
+        _selfLoopLeft = Source.X + Source.Width - 20;
+        _selfLoopTop = Source.Y - SelfLoopSize / 2;
+        _labelX = IsSelfRelationship ? _selfLoopLeft + SelfLoopWidth / 2 + SelfLoopLabelOffsetX : (_x1 + _x2) / 2;
+        _labelY = IsSelfRelationship ? _selfLoopTop + SelfLoopHeight / 2 : (_y1 + _y2) / 2;
     }
 
     /// <summary>エンティティ中心から相手方向へ伸ばした線と境界の交点を返します。</summary>
@@ -330,82 +367,40 @@ public partial class RelationshipViewModel : ObservableObject
     }
 
     /// <summary>起点側マーカーの中心 X。</summary>
-    public double SourceMarkerX
-    {
-        get
-        {
-            var (ux, _, _) = Direction();
-            return X1 + ux * MarkerOffset;
-        }
-    }
+    public double SourceMarkerX => _sourceMarkerX;
 
     /// <summary>起点側マーカー描画領域の左上 X。</summary>
     public double SourceMarkerLeft => SourceMarkerX - MarkerSize / 2;
 
     /// <summary>起点側マーカーの中心 Y。</summary>
-    public double SourceMarkerY
-    {
-        get
-        {
-            var (_, uy, _) = Direction();
-            return Y1 + uy * MarkerOffset;
-        }
-    }
+    public double SourceMarkerY => _sourceMarkerY;
 
     /// <summary>起点側マーカー描画領域の左上 Y。</summary>
     public double SourceMarkerTop => SourceMarkerY - MarkerSize / 2;
 
     /// <summary>終点側マーカーの中心 X。</summary>
-    public double TargetMarkerX
-    {
-        get
-        {
-            var (ux, _, _) = Direction();
-            return X2 - ux * MarkerOffset;
-        }
-    }
+    public double TargetMarkerX => _targetMarkerX;
 
     /// <summary>終点側マーカー描画領域の左上 X。</summary>
     public double TargetMarkerLeft => TargetMarkerX - MarkerSize / 2;
 
     /// <summary>終点側マーカーの中心 Y。</summary>
-    public double TargetMarkerY
-    {
-        get
-        {
-            var (_, uy, _) = Direction();
-            return Y2 - uy * MarkerOffset;
-        }
-    }
+    public double TargetMarkerY => _targetMarkerY;
 
     /// <summary>終点側マーカー描画領域の左上 Y。</summary>
     public double TargetMarkerTop => TargetMarkerY - MarkerSize / 2;
 
     /// <summary>起点マーカーをエンティティ側へ向けて回転させる角度（度）。</summary>
-    public double SourceMarkerAngle
-    {
-        get
-        {
-            var (ux, uy, _) = Direction();
-            return Math.Atan2(uy, ux) * 180.0 / Math.PI + 180;
-        }
-    }
+    public double SourceMarkerAngle => _sourceMarkerAngle;
 
     /// <summary>終点マーカーをエンティティ側へ向けて回転させる角度（度）。</summary>
-    public double TargetMarkerAngle
-    {
-        get
-        {
-            var (ux, uy, _) = Direction();
-            return Math.Atan2(uy, ux) * 180.0 / Math.PI;
-        }
-    }
+    public double TargetMarkerAngle => _targetMarkerAngle;
 
     /// <summary>線の中点 X（ラベル表示用）。</summary>
-    public double LabelX => IsSelfRelationship ? SelfLoopLeft + SelfLoopWidth / 2 + SelfLoopLabelOffsetX : (X1 + X2) / 2;
+    public double LabelX => _labelX;
 
     /// <summary>線の中点 Y（ラベル表示用）。</summary>
-    public double LabelY => IsSelfRelationship ? SelfLoopTop + SelfLoopHeight / 2 : (Y1 + Y2) / 2;
+    public double LabelY => _labelY;
 
     /// <summary>自己参照リレーションかどうかです。</summary>
     public bool IsSelfRelationship => Source.Id == Target.Id;
@@ -417,10 +412,10 @@ public partial class RelationshipViewModel : ObservableObject
     public bool ShowEndpointMarkers => !IsSelfRelationship;
 
     /// <summary>自己参照ループの左上 X 座標です。</summary>
-    public double SelfLoopLeft => Source.X + Source.Width - 20;
+    public double SelfLoopLeft => _selfLoopLeft;
 
     /// <summary>自己参照ループの左上 Y 座標です。</summary>
-    public double SelfLoopTop => Source.Y - SelfLoopSize / 2;
+    public double SelfLoopTop => _selfLoopTop;
 
     /// <summary>自己参照ループの幅です。</summary>
     public double SelfLoopWidth => SelfLoopSize;

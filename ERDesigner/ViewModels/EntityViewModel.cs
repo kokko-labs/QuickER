@@ -70,7 +70,7 @@ public partial class EntityViewModel : ObservableObject
         {
             if (SetProperty(ref _showDescriptionsInDiagram, value))
             {
-                OnPropertyChanged(nameof(DisplayHeight));
+                InvalidateDisplayHeight();
             }
         }
     }
@@ -83,13 +83,38 @@ public partial class EntityViewModel : ObservableObject
         {
             if (SetProperty(ref _showNullabilityInDiagram, value))
             {
-                OnPropertyChanged(nameof(DisplayHeight));
+                InvalidateDisplayHeight();
             }
         }
     }
 
+    /// <summary>テキスト計測を伴う高さ見積もりのキャッシュ。NaN は未計算を表します。</summary>
+    private double _displayHeightCache = double.NaN;
+
     /// <summary>現在の表示状態に応じたエンティティの表示高さです。</summary>
-    public double DisplayHeight => DiagramMetricsService.EstimateEntityHeight(this, ShowDescriptionsInDiagram);
+    /// <remarks>
+    /// 計測 (FormattedText 生成) が高コストのため結果をキャッシュし、
+    /// 高さに影響するプロパティの変更時のみ <see cref="InvalidateDisplayHeight"/> で再計算します。
+    /// </remarks>
+    public double DisplayHeight
+    {
+        get
+        {
+            if (double.IsNaN(_displayHeightCache))
+            {
+                _displayHeightCache = DiagramMetricsService.EstimateEntityHeight(this, ShowDescriptionsInDiagram);
+            }
+
+            return _displayHeightCache;
+        }
+    }
+
+    /// <summary>高さ見積もりキャッシュを破棄し、DisplayHeight の変更を通知します。</summary>
+    private void InvalidateDisplayHeight()
+    {
+        _displayHeightCache = double.NaN;
+        OnPropertyChanged(nameof(DisplayHeight));
+    }
 
     /// <summary>モデルから ViewModel を生成します。</summary>
     public EntityViewModel(Entity model)
@@ -118,9 +143,9 @@ public partial class EntityViewModel : ObservableObject
         Width = DiagramMetricsService.CalculateAutoWidth(this);
     }
 
-    partial void OnWidthChanged(double value) => OnPropertyChanged(nameof(DisplayHeight));
+    partial void OnWidthChanged(double value) => InvalidateDisplayHeight();
 
-    partial void OnDescriptionChanged(string value) => OnPropertyChanged(nameof(DisplayHeight));
+    partial void OnDescriptionChanged(string value) => InvalidateDisplayHeight();
 
     private void OnColumnsChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
@@ -140,14 +165,14 @@ public partial class EntityViewModel : ObservableObject
             }
         }
 
-        OnPropertyChanged(nameof(DisplayHeight));
+        InvalidateDisplayHeight();
     }
 
     private void OnColumnPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName is nameof(ColumnViewModel.Description))
         {
-            OnPropertyChanged(nameof(DisplayHeight));
+            InvalidateDisplayHeight();
         }
     }
 

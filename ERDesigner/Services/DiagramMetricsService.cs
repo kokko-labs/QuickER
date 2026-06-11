@@ -28,6 +28,11 @@ public static class DiagramMetricsService
 
     private static readonly FontFamily DefaultFontFamily = new("Segoe UI");
 
+    // 行高さはフォント設定にのみ依存する定数のため、1回だけ計測してキャッシュする。
+    // (FormattedText の生成は高コストで、ドラッグ中など高頻度に呼ばれるため)
+    private static readonly Lazy<double> TitleLineHeight = new(() => MeasureTextHeight("Ag", TitleFontSize, FontWeights.SemiBold));
+    private static readonly Lazy<double> BodyLineHeight = new(() => MeasureTextHeight("Ag", BodyFontSize));
+
     /// <summary>
     /// カラム名と型が重ならないように、内容からエンティティ幅を自動計算します。
     /// </summary>
@@ -59,8 +64,8 @@ public static class DiagramMetricsService
         var headerTextWidth = Math.Max(1, width - HeaderHorizontalPadding);
         var bodyTextWidth = Math.Max(1, width - BodyHorizontalMargin);
         var columnDescriptionWidth = Math.Max(1, bodyTextWidth - ColumnDescriptionIndent);
-        var titleHeight = MeasureTextHeight("Ag", TitleFontSize, FontWeights.SemiBold);
-        var rowHeight = MeasureTextHeight("Ag", BodyFontSize);
+        var titleHeight = TitleLineHeight.Value;
+        var rowHeight = BodyLineHeight.Value;
 
         var headerHeight = HeaderVerticalPadding + titleHeight;
 
