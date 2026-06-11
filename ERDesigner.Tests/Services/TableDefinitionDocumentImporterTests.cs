@@ -7,11 +7,10 @@ using FluentAssertions;
 
 namespace ERDesigner.Tests.Services;
 
-/// <summary>
-/// <see cref="TableDefinitionDocumentImporter" /> のテストです。
-/// </summary>
+/// <summary><see cref="TableDefinitionDocumentImporter" /> の定義書取込と整合性検証を検証するテストクラス</summary>
 public class TableDefinitionDocumentImporterTests
 {
+    /// <summary>本アプリが出力した定義書を再取込し、エンティティ・列・リレーションが往復保持されることを検証する</summary>
     [Fact(DisplayName = "このアプリが出力した定義書をそのまま再取込できる")]
     public void Load_RoundTripsExportedWorkbook()
     {
@@ -99,6 +98,7 @@ public class TableDefinitionDocumentImporterTests
         diagram.Relationships[0].OnUpdate.Should().Be(ForeignKeyReferentialAction.NoAction);
     }
 
+    /// <summary>一覧に対応する詳細シートが欠落している場合に取込が例外となることを検証する</summary>
     [Fact(DisplayName = "詳細シートが不足していると取り込みをエラーにする")]
     public void Load_ThrowsWhenDetailSheetIsMissing()
     {
@@ -118,6 +118,7 @@ public class TableDefinitionDocumentImporterTests
         act.Should().Throw<InvalidDataException>().WithMessage("*詳細シート*");
     }
 
+    /// <summary>リレーション一覧の参照カラムが実在しない場合に取込が例外となることを検証する</summary>
     [Fact(DisplayName = "リレーション一覧の参照カラムが存在しないと取り込みをエラーにする")]
     public void Load_ThrowsWhenRelationshipColumnDoesNotExist()
     {
