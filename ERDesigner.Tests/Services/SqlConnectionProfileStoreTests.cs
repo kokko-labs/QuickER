@@ -5,20 +5,21 @@ using FluentAssertions;
 
 namespace ERDesigner.Tests.Services;
 
-/// <summary>
-/// <see cref="SqlConnectionProfileStore"/> の保存・読込・削除・パスワード往復を検証するテスト。
-/// DPAPI は単体テスト環境差異を避けるため <c>useDpapi:false</c> で平文保存して検証します。
-/// </summary>
+/// <summary><see cref="SqlConnectionProfileStore"/> の保存・読込・削除・パスワード往復を検証するテストクラス</summary>
+/// <remarks>環境差異を避けるため <c>useDpapi:false</c> で平文保存して検証する</remarks>
 public class SqlConnectionProfileStoreTests : IDisposable
 {
+    /// <summary>テスト用の一時保存先フォルダ</summary>
     private readonly string _tempFolder;
 
+    /// <summary>一時保存先フォルダを作成する</summary>
     public SqlConnectionProfileStoreTests()
     {
         _tempFolder = Path.Combine(Path.GetTempPath(), "ERDesignerTests_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_tempFolder);
     }
 
+    /// <summary>一時保存先フォルダを削除する</summary>
     public void Dispose()
     {
         try
@@ -29,12 +30,15 @@ public class SqlConnectionProfileStoreTests : IDisposable
             }
         }
         catch
-        { /* テスト後のベストエフォート */
+        {
+            // テスト後の後始末はベストエフォートとする
         }
     }
 
+    /// <summary>DPAPI を使わず一時フォルダへ保存するテスト用ストアを生成する</summary>
     private SqlConnectionProfileStore CreateStore() => new(_tempFolder, useDpapi: false);
 
+    /// <summary>Upsert で追加したプロファイルを LoadAll が名前順で返すことを検証する</summary>
     [Fact(DisplayName = "Upsert で追加され LoadAll が名前順で返す")]
     public void Upsert_AddsAndLoadsSorted()
     {
@@ -72,6 +76,7 @@ public class SqlConnectionProfileStoreTests : IDisposable
         list.Select(p => p.Name).Should().ContainInOrder("alpha", "Mid", "Zeta");
     }
 
+    /// <summary>同一 Id の Upsert が既存プロファイルを上書きすることを検証する</summary>
     [Fact(DisplayName = "Upsert で同じ Id は上書きされる")]
     public void Upsert_SameId_Overwrites()
     {
@@ -92,6 +97,7 @@ public class SqlConnectionProfileStoreTests : IDisposable
         list[0].Server.Should().Be("new");
     }
 
+    /// <summary>Delete がプロファイルと暗号化パスワードの両方を削除することを検証する</summary>
     [Fact(DisplayName = "Delete でプロファイルとパスワード両方が消える")]
     public void Delete_RemovesProfileAndSecret()
     {
@@ -113,6 +119,7 @@ public class SqlConnectionProfileStoreTests : IDisposable
         store.LoadPassword(p.Id).Should().BeEmpty();
     }
 
+    /// <summary>SavePassword=true で保存したパスワードが復号で同値復元できることを検証する</summary>
     [Fact(DisplayName = "SavePassword=true なら復号で同じ値を取り出せる")]
     public void Password_RoundTrip()
     {
@@ -130,6 +137,7 @@ public class SqlConnectionProfileStoreTests : IDisposable
         store.LoadPassword(p.Id).Should().Be("P@ssw0rd!日本語");
     }
 
+    /// <summary>SavePassword を false にして Upsert すると既存パスワードが削除されることを検証する</summary>
     [Fact(DisplayName = "SavePassword=false なら以前保存したパスワードは削除される")]
     public void Upsert_SavePasswordFalse_DeletesSecret()
     {
@@ -151,6 +159,7 @@ public class SqlConnectionProfileStoreTests : IDisposable
         store.LoadPassword(p.Id).Should().BeEmpty();
     }
 
+    /// <summary>前回接続情報がデータベース名・認証情報・パスワードを含めて往復保存・復元されることを検証する</summary>
     [Fact(DisplayName = "前回接続情報はデータベース名を含めて保存・復元される")]
     public void LastUsed_RoundTrip_RestoresDatabase()
     {
