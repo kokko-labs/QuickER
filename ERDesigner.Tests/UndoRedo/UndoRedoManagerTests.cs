@@ -1,4 +1,4 @@
-using ERDesigner.UndoRedo;
+﻿using ERDesigner.UndoRedo;
 using ERDesigner.ViewModels;
 using FluentAssertions;
 
@@ -87,10 +87,12 @@ public class UndoRedoManagerTests
         var groupId = new object();
 
         entity.TableName = "B";
-        mgr.Push(new PropertyChangeCommand(entity, nameof(EntityViewModel.TableName), "A", "B") { GroupId = groupId });
+        var tableNameProp = new TrackedProperty<EntityViewModel>(nameof(EntityViewModel.TableName), x => x.TableName, (x, v) => x.TableName = (string)v!);
+        mgr.Push(new PropertyChangeCommand(entity, tableNameProp, "A", "B") { GroupId = groupId });
 
         entity.Description = "desc";
-        mgr.Push(new PropertyChangeCommand(entity, nameof(EntityViewModel.Description), string.Empty, "desc") { GroupId = groupId });
+        var descriptionProp = new TrackedProperty<EntityViewModel>(nameof(EntityViewModel.Description), x => x.Description, (x, v) => x.Description = (string)v!);
+        mgr.Push(new PropertyChangeCommand(entity, descriptionProp, string.Empty, "desc") { GroupId = groupId });
 
         mgr.Undo();
         entity.TableName.Should().Be("A");

@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using ERDesigner.Models;
 using ERDesigner.UndoRedo;
 using ERDesigner.ViewModels;
@@ -77,7 +77,8 @@ public class CommandTests
     public void PropertyChangeCommand_Works()
     {
         var e = NewEntity();
-        var cmd = new PropertyChangeCommand(e, nameof(EntityViewModel.TableName), "T", "顧客");
+        var prop = new TrackedProperty<EntityViewModel>(nameof(EntityViewModel.TableName), x => x.TableName, (x, v) => x.TableName = (string)v!);
+        var cmd = new PropertyChangeCommand(e, prop, "T", "顧客");
 
         cmd.Execute();
         e.TableName.Should().Be("顧客");
@@ -91,7 +92,8 @@ public class CommandTests
     {
         var e = NewEntity();
         var count = 0;
-        var cmd = new PropertyChangeCommand(e, nameof(EntityViewModel.TableName), "T", "顧客", () => count++);
+        var prop = new TrackedProperty<EntityViewModel>(nameof(EntityViewModel.TableName), x => x.TableName, (x, v) => x.TableName = (string)v!);
+        var cmd = new PropertyChangeCommand(e, prop, "T", "顧客", () => count++);
 
         cmd.Execute();
         cmd.Undo();
