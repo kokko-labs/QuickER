@@ -3,11 +3,10 @@ using FluentAssertions;
 
 namespace ERDesigner.Tests.Services;
 
-/// <summary>
-/// <see cref="SqlConnectionSettings.Build"/> が認証方式に応じた接続文字列を構築することを確認するテスト。
-/// </summary>
+/// <summary><see cref="SqlConnectionSettings.Build"/> が認証方式に応じた接続文字列を構築することを検証するテストクラス</summary>
 public class SqlConnectionSettingsTests
 {
+    /// <summary>Windows 認証で IntegratedSecurity が有効になることを検証する</summary>
     [Fact(DisplayName = "Windows 認証で IntegratedSecurity が有効になる")]
     public void Build_Windows_SetsIntegratedSecurity()
     {
@@ -23,6 +22,7 @@ public class SqlConnectionSettingsTests
         cs.Should().Contain("Initial Catalog=Db");
     }
 
+    /// <summary>SQL 認証で接続文字列にユーザー ID とパスワードが含まれることを検証する</summary>
     [Fact(DisplayName = "SQL 認証で User ID/Password が含まれる")]
     public void Build_SqlServer_IncludesCredentials()
     {
@@ -40,6 +40,7 @@ public class SqlConnectionSettingsTests
         cs.Should().Contain("p@ss");
     }
 
+    /// <summary>Azure AD でユーザー ID 未指定なら Default 認証になることを検証する</summary>
     [Fact(DisplayName = "Azure AD (UserId 空) で Default 認証になる")]
     public void Build_AzureAd_Default()
     {
@@ -54,6 +55,7 @@ public class SqlConnectionSettingsTests
         cs.Should().Contain("Authentication=ActiveDirectoryDefault");
     }
 
+    /// <summary>Azure AD でユーザー ID 指定時は Interactive 認証になることを検証する</summary>
     [Fact(DisplayName = "Azure AD (UserId あり) で Interactive 認証になる")]
     public void Build_AzureAd_Interactive()
     {

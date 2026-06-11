@@ -3,11 +3,10 @@ using FluentAssertions;
 
 namespace ERDesigner.Tests.ViewModels;
 
-/// <summary>
-/// <see cref="CSharpGenerationDialogViewModel" /> の入力確定と検証を確認します。
-/// </summary>
+/// <summary><see cref="CSharpGenerationDialogViewModel" /> の入力確定・検証・参照操作を検証するテストクラス</summary>
 public class CSharpGenerationDialogViewModelTests
 {
+    /// <summary>OK 実行で名前空間・出力先・生成オプションが結果へ反映され閉じることを検証する</summary>
     [Fact(DisplayName = "OK 実行で namespace と出力先が結果へ反映される")]
     public void Ok_SetsResult()
     {
@@ -24,6 +23,7 @@ public class CSharpGenerationDialogViewModelTests
         closed.Should().BeTrue();
     }
 
+    /// <summary>Repository 生成オプションの変更が結果へ反映されることを検証する</summary>
     [Fact(DisplayName = "Repository 生成オプションを変更すると結果へ反映される")]
     public void Ok_WithRepositoryOption_StoresSelection()
     {
@@ -35,6 +35,7 @@ public class CSharpGenerationDialogViewModelTests
         vm.Result!.GenerateRepositories.Should().BeFalse();
     }
 
+    /// <summary>不正な名前空間ではエラーメッセージを表示し、確定・クローズしないことを検証する</summary>
     [Fact(DisplayName = "不正な namespace ではエラーメッセージを表示して閉じない")]
     public void Ok_WithInvalidNamespace_ShowsError()
     {
@@ -49,6 +50,7 @@ public class CSharpGenerationDialogViewModelTests
         closed.Should().BeFalse();
     }
 
+    /// <summary>参照コマンドで選択したパスが出力先へ反映されることを検証する</summary>
     [Fact(DisplayName = "参照コマンドで出力先ファイルを更新できる")]
     public void BrowseOutputFile_UpdatesPath()
     {
