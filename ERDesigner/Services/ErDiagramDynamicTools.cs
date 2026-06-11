@@ -351,7 +351,9 @@ public static class ErDiagramDynamicTools
             return ($"カラム '{columnName}' が見つかりません。", false);
         }
 
-        vm.UndoRedo.Execute(new UndoRedo.RemoveColumnCommand(entity.Columns, column, [], () => vm.ApplyRelationshipColumnRules()));
+        // 削除カラムを参照する FK リレーションを収集し、Undo 時に参照を復元できるようコマンドへ渡す
+        var affected = vm.FindRelationshipsUsingColumn(column);
+        vm.UndoRedo.Execute(new UndoRedo.RemoveColumnCommand(entity.Columns, column, affected, () => vm.ApplyRelationshipColumnRules()));
         return ($"テーブル '{tableName}' からカラム '{columnName}' を削除しました。", true);
     }
 

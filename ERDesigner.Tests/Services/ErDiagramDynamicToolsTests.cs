@@ -202,4 +202,68 @@ public class ErDiagramDynamicToolsTests
 
         success.Should().BeFalse();
     }
+
+    /// <summary>AI ツールで FK 列を削除し Undo すると、列と併せてリレーションの FK 参照も復元されることを検証する</summary>
+    [Fact(DisplayName = "remove_column で削除した FK 列は Undo でリレーションの参照も復元される")]
+    public void RemoveColumn_UsedAsFk_UndoRestoresRelationshipReference()
+    {
+        var vm = CreateVm();
+
+        // 親（PK）と子（PK + FK 候補列）を作成し、ツール経由でリレーションを張る
+        Exec(vm, "add_entity", new { table_name = "Customer" });
+        Exec(
+            vm,
+            "add_column",
+            new
+            {
+                table_name = "Customer",
+                column_name = "CustomerId",
+                data_type = "int",
+                is_primary_key = true,
+                is_nullable = false,
+            }
+        );
+        Exec(vm, "add_entity", new { table_name = "Order" });
+        Exec(
+            vm,
+            "add_column",
+            new
+            {
+                table_name = "Order",
+                column_name = "OrderId",
+                data_type = "int",
+                is_primary_key = true,
+                is_nullable = false,
+            }
+        );
+        Exec(
+            vm,
+            "add_column",
+            new
+            {
+                table_name = "Order",
+                column_name = "CustomerId",
+                data_type = "int",
+                is_primary_key = false,
+                is_nullable = false,
+            }
+        );
+        Exec(vm, "add_relationship", new { source_table = "Customer", target_table = "Order" });
+
+        var relationship = vm.Relationships.Single();
+        var originalTargetColumnId = relationship.TargetColumnId;
+        originalTargetColumnId.Should().NotBeNull("add_relationship が FK 列を参照先として解決する");
+
+        var (_, success) = Exec(vm, "remove_column", new { table_name = "Order", column_name = "CustomerId" });
+        success.Should().BeTrue();
+
+        // 削除後はリレーションの FK 参照がクリアされる
+        relationship.TargetColumnId.Should().BeNull();
+
+        // Undo でカラムが復元され、リレーションの FK 参照も復元される
+        vm.UndoCommand.Execute(null);
+        var order = vm.Entities.Single(e => e.TableName == "Order");
+        order.Columns.Should().Contain(c => c.Id == originalTargetColumnId);
+        relationship.TargetColumnId.Should().Be(originalTargetColumnId);
+    }
 }

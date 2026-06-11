@@ -532,7 +532,8 @@ public partial class MainViewModel : ObservableObject
     }
 
     /// <summary>指定カラムを参照元または参照先として使用しているリレーション一覧を返す</summary>
-    private IReadOnlyList<RelationshipViewModel> FindRelationshipsUsingColumn(ColumnViewModel column) =>
+    /// <remarks>カラム削除コマンドへ渡し、Undo 時に外部キー参照を復元するために用いる（UI 経由・AI ツール経由で共用）</remarks>
+    internal IReadOnlyList<RelationshipViewModel> FindRelationshipsUsingColumn(ColumnViewModel column) =>
         Relationships.Where(r => r.SourceColumnId == column.Id || r.TargetColumnId == column.Id).ToList();
 
     // ---------------- Selection / Click handling ----------------
