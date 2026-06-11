@@ -11,16 +11,18 @@ using Xunit;
 
 namespace ERDesigner.Tests.ViewModels;
 
-/// <summary>
-/// <see cref="CodexAppServerDialogViewModel"/> の状態反映・UI制御を検証します。
+/// <summary><see cref="CodexAppServerDialogViewModel"/> の状態反映・認証 UI 制御を検証するテストクラス</summary>
+/// <remarks>
 /// デグレードを防ぐため、ShowLoginPanel / CanStartNewThread / CanSendMessage / CanLogout の
-/// 判定ロジックをすべての主要シナリオで網羅します。
-/// </summary>
+/// 判定ロジックを主要シナリオで網羅する
+/// </remarks>
 public class CodexAppServerDialogViewModelTests
 {
     // ----------------------------------------------------------------
     // テスト用フェイク実装
     // ----------------------------------------------------------------
+
+    /// <summary>通信を伴わず接続・認証・スレッド操作を模擬する <see cref="ICodexAppServerClient"/> のフェイク</summary>
     private sealed class FakeCodexAppServerClient : ICodexAppServerClient
     {
         public event EventHandler<CodexJsonRpcNotification>? NotificationReceived;
@@ -35,12 +37,22 @@ public class CodexAppServerDialogViewModelTests
         public event EventHandler<CodexItemCompletedNotification>? ItemCompleted;
         public event EventHandler<CodexApprovalRequest>? ApprovalRequested;
 
+        /// <summary>起動済みかどうか</summary>
         public bool IsStarted { get; private set; }
+
+        /// <summary>ReadAccountAsync が返すアカウント情報（テストから差し替える）</summary>
         public CodexAccountInfo NextAccountInfo { get; set; } = new();
+
+        /// <summary>最後に LoginWithApiKeyAsync へ渡された API キー</summary>
         public string? LastApiKey { get; private set; }
+
+        /// <summary>StartAsync の呼び出し回数</summary>
         public int StartCount { get; private set; }
+
+        /// <summary>LogoutAsync の呼び出し回数</summary>
         public int LogoutCount { get; private set; }
 
+        /// <inheritdoc />
         public Task StartAsync(CodexAppServerSettings settings, string clientName, string clientTitle, string clientVersion, CancellationToken cancellationToken = default)
         {
             IsStarted = true;
@@ -48,11 +60,13 @@ public class CodexAppServerDialogViewModelTests
             return Task.CompletedTask;
         }
 
+        /// <inheritdoc />
         public Task<CodexAccountInfo> ReadAccountAsync(bool refreshToken, CancellationToken cancellationToken = default)
         {
             return Task.FromResult(NextAccountInfo);
         }
 
+        /// <inheritdoc />
         public Task<CodexLoginStartResult> LoginWithApiKeyAsync(string apiKey, CancellationToken cancellationToken = default)
         {
             LastApiKey = apiKey;
@@ -61,46 +75,54 @@ public class CodexAppServerDialogViewModelTests
             return Task.FromResult(new CodexLoginStartResult { Type = CodexLoginType.ApiKey });
         }
 
+        /// <inheritdoc />
         public Task<CodexLoginStartResult> StartChatGptLoginAsync(CancellationToken cancellationToken = default)
         {
             return Task.FromResult(new CodexLoginStartResult { Type = CodexLoginType.ChatGpt, AuthUrl = "https://chatgpt.example/login" });
         }
 
+        /// <inheritdoc />
         public Task LogoutAsync(CancellationToken cancellationToken = default)
         {
             LogoutCount++;
-            // 実サーバーの挙動を忠実に再現する:
-            // account/updated 通知で AuthMode=None を通知するのみ。
-            // RequiresOpenAiAuth は通知に含まれないため NextAccountInfo は書き換えない。
+            // 実サーバーの挙動を忠実に再現する
+            // account/updated 通知で AuthMode=None のみを通知し、
+            // 通知に含まれない RequiresOpenAiAuth は変更しないため NextAccountInfo は書き換えない
             AccountUpdated?.Invoke(this, new CodexAccountUpdatedNotification { AuthMode = CodexAuthMode.None });
             return Task.CompletedTask;
         }
 
+        /// <inheritdoc />
         public Task<CodexThreadInfo> StartThreadAsync(CodexThreadStartOptions options, CancellationToken cancellationToken = default)
         {
             return Task.FromResult(new CodexThreadInfo { Id = "thr_test", Preview = string.Empty });
         }
 
+        /// <inheritdoc />
         public Task<CodexTurnInfo> StartTurnAsync(string threadId, string prompt, CancellationToken cancellationToken = default)
         {
             return Task.FromResult(new CodexTurnInfo { Id = "turn_test", Status = "inProgress" });
         }
 
+        /// <inheritdoc />
         public Task InterruptTurnAsync(string threadId, string turnId, CancellationToken cancellationToken = default)
         {
             return Task.CompletedTask;
         }
 
+        /// <inheritdoc />
         public Task RespondToDynamicToolCallAsync(int requestId, string resultText, bool success, CancellationToken cancellationToken = default)
         {
             return Task.CompletedTask;
         }
 
+        /// <inheritdoc />
         public Task RespondToApprovalAsync(int requestId, string decision, CancellationToken cancellationToken = default)
         {
             return Task.CompletedTask;
         }
 
+        /// <inheritdoc />
         public ValueTask DisposeAsync()
         {
             return ValueTask.CompletedTask;
@@ -110,6 +132,8 @@ public class CodexAppServerDialogViewModelTests
     // ----------------------------------------------------------------
     // ヘルパー
     // ----------------------------------------------------------------
+
+    /// <summary>リフレクションで private メソッドを呼び出し、戻り値が Task なら待機する</summary>
     private static async Task InvokePrivateAsync(object instance, string methodName)
     {
         var method = instance.GetType().GetMethod(methodName, BindingFlags.Instance | BindingFlags.NonPublic);
@@ -122,6 +146,7 @@ public class CodexAppServerDialogViewModelTests
         }
     }
 
+    /// <summary>指定アカウント情報・プロバイダーでフェイククライアントと ViewModel を生成する</summary>
     private static (FakeCodexAppServerClient client, CodexAppServerDialogViewModel vm, string folder) CreateVm(CodexAccountInfo accountInfo, string modelProvider = "openai")
     {
         var folder = Path.Combine(Path.GetTempPath(), "ERDesignerTests", Guid.NewGuid().ToString("N"));
@@ -136,6 +161,7 @@ public class CodexAppServerDialogViewModelTests
     // InitializeAsync
     // ----------------------------------------------------------------
 
+    /// <summary>InitializeAsync が保存済み設定と取得したアカウント状態を反映することを検証する</summary>
     [Fact(DisplayName = "InitializeAsync は保存済み設定とアカウント状態を反映する")]
     public async Task InitializeAsync_LoadsSettingsAndAccountState()
     {
@@ -181,6 +207,7 @@ public class CodexAppServerDialogViewModelTests
     // ログイン操作
     // ----------------------------------------------------------------
 
+    /// <summary>未接続時の LoginWithApiKey が自動接続のうえログインし、API キーを保存することを検証する</summary>
     [Fact(DisplayName = "LoginWithApiKey は未接続時に接続後ログインし、API キーを保存できる")]
     public async Task LoginWithApiKeyAsync_StartsClientAndPersistsKey()
     {
@@ -211,6 +238,7 @@ public class CodexAppServerDialogViewModelTests
         }
     }
 
+    /// <summary>未接続時の StartChatGptLogin が自動接続し、認証 URL をブラウザで開くことを検証する</summary>
     [Fact(DisplayName = "StartChatGptLogin は未接続時に自動接続してブラウザを開く")]
     public async Task StartChatGptLoginAsync_StartsClientAndOpensBrowser()
     {
@@ -242,6 +270,7 @@ public class CodexAppServerDialogViewModelTests
     // スレッド開始
     // ----------------------------------------------------------------
 
+    /// <summary>StartNewThread でスレッドが開始されると案内システムメッセージが追加されることを検証する</summary>
     [Fact(DisplayName = "StartNewThread でスレッドが開始されるとメッセージが追加される")]
     public async Task StartNewThreadAsync_AddsSystemMessage()
     {
@@ -274,6 +303,7 @@ public class CodexAppServerDialogViewModelTests
     // モデル候補
     // ----------------------------------------------------------------
 
+    /// <summary>openai プロバイダー選択時に固定のモデル候補一覧が表示されることを検証する</summary>
     [Fact(DisplayName = "openai プロバイダー選択時は openai の固定モデル候補が表示される")]
     public void ModelProvider_OpenAi_HasFixedModelCandidates()
     {
@@ -288,6 +318,7 @@ public class CodexAppServerDialogViewModelTests
         vm.ModelCandidates.Should().Contain("gpt-4.1");
     }
 
+    /// <summary>初期 openai モデル既定値が AI 生成機能と共通の既定モデルになることを検証する</summary>
     [Fact(DisplayName = "初期状態の openai モデル既定値は AI生成機能と共通の gpt-5.4-mini になる")]
     public void DefaultOpenAiModel_IsSharedWithAiGenerateFeature()
     {
@@ -297,6 +328,7 @@ public class CodexAppServerDialogViewModelTests
         vm.Model.Should().Be(AiModelCatalog.DefaultOpenAiModel);
     }
 
+    /// <summary>openai 以外のプロバイダー選択時に IsOpenAiProvider が false になることを検証する</summary>
     [Fact(DisplayName = "openai 以外のプロバイダー選択時は IsOpenAiProvider が false になる")]
     public void ModelProvider_NonOpenAi_IsOpenAiProviderFalse()
     {
@@ -314,6 +346,7 @@ public class CodexAppServerDialogViewModelTests
     // IsOpenAiProvider ベースで判定されていることを全シナリオで検証する
     // ----------------------------------------------------------------
 
+    /// <summary>openai 未ログイン時にログインパネルを表示しスレッド開始を抑止することを検証する</summary>
     [Fact(DisplayName = "[回帰] openai + 未ログイン: ShowLoginPanel=true / CanStartNewThread=false")]
     public async Task Regression_OpenAi_NotLoggedIn_ShowsLoginPanelAndBlocksThread()
     {
@@ -339,6 +372,7 @@ public class CodexAppServerDialogViewModelTests
         }
     }
 
+    /// <summary>openai で ChatGPT ログイン済みならパネルを隠しスレッド開始を許可することを検証する</summary>
     [Fact(DisplayName = "[回帰] openai + ChatGPT ログイン済み: ShowLoginPanel=false / CanStartNewThread=true")]
     public async Task Regression_OpenAi_ChatGptLoggedIn_HidesLoginPanelAndAllowsThread()
     {
@@ -373,6 +407,7 @@ public class CodexAppServerDialogViewModelTests
         }
     }
 
+    /// <summary>openai で API キーログイン済みならパネルを隠しスレッド開始を許可することを検証する</summary>
     [Fact(DisplayName = "[回帰] openai + API キーログイン済み: ShowLoginPanel=false / CanStartNewThread=true")]
     public async Task Regression_OpenAi_ApiKeyLoggedIn_HidesLoginPanelAndAllowsThread()
     {
@@ -396,6 +431,7 @@ public class CodexAppServerDialogViewModelTests
         }
     }
 
+    /// <summary>openai 以外（ollama 等）はログイン不要とし、パネルを隠しスレッド開始を許可することを検証する</summary>
     [Fact(DisplayName = "[回帰] openai 以外（ollama）: ShowLoginPanel=false / CanStartNewThread=true（ログイン不要）")]
     public async Task Regression_NonOpenAi_HidesLoginPanelAndAllowsThread()
     {
@@ -421,6 +457,7 @@ public class CodexAppServerDialogViewModelTests
         }
     }
 
+    /// <summary>openai で ChatGPT ログアウト後にパネルを再表示しスレッド開始を抑止することを検証する</summary>
     [Fact(DisplayName = "[回帰] openai + ChatGPT ログアウト後: ShowLoginPanel=true / CanStartNewThread=false")]
     public async Task Regression_OpenAi_AfterLogout_ShowsLoginPanelAndBlocksThread()
     {
@@ -452,6 +489,7 @@ public class CodexAppServerDialogViewModelTests
         }
     }
 
+    /// <summary>認証不要状態でログイン後にログアウトすると、再びログインパネルが表示されることを検証する</summary>
     [Fact(DisplayName = "[回帰] openai + RequiresOpenAiAuth=false でログイン後にログアウトすると ShowLoginPanel=true になる")]
     public async Task Regression_OpenAi_RequiresOpenAiAuthFalse_AfterLogout_ShowsLoginPanel()
     {
@@ -485,6 +523,7 @@ public class CodexAppServerDialogViewModelTests
         }
     }
 
+    /// <summary>未接続状態ではログアウト不可・ログインパネル非表示になることを検証する</summary>
     [Fact(DisplayName = "[回帰] 未接続状態: CanLogout=false / ShowLoginPanel=false（接続前はパネル非表示）")]
     public void Regression_NotConnected_CanLogoutFalse()
     {
@@ -497,6 +536,7 @@ public class CodexAppServerDialogViewModelTests
         vm.ShowLoginPanel.Should().BeTrue("openai プロバイダーかつ未ログインのためパネル表示");
     }
 
+    /// <summary>初回自動接続が完了するまではログインパネルを表示しないことを検証する</summary>
     [Fact(DisplayName = "[回帰] 初回自動接続中はログインパネルを表示しない")]
     public async Task Regression_InitialAutoConnect_HidesLoginPanelUntilCompleted()
     {
@@ -521,6 +561,7 @@ public class CodexAppServerDialogViewModelTests
         }
     }
 
+    /// <summary>ChatGPT ログイン済みでの接続完了時にアカウント概要を含む接続済みメッセージを表示することを検証する</summary>
     [Fact(DisplayName = "[回帰] ConnectAsync: ChatGPT ログイン済みなら「接続しました。ChatGPT でログイン済み」を表示する")]
     public async Task ConnectAsync_WhenChatGptLoggedIn_ShowsConnectedWithAccountSummary()
     {
@@ -551,6 +592,7 @@ public class CodexAppServerDialogViewModelTests
         }
     }
 
+    /// <summary>openai 以外のプロバイダーでの接続完了時に「ログイン不要」を含むメッセージを表示することを検証する</summary>
     [Fact(DisplayName = "[回帰] ConnectAsync: openai 以外プロバイダーなら「接続しました。ログイン不要」を表示する")]
     public async Task ConnectAsync_WhenNonOpenAiProvider_ShowsConnectedWithNoAuth()
     {
@@ -572,6 +614,7 @@ public class CodexAppServerDialogViewModelTests
         }
     }
 
+    /// <summary>openai 未ログインでの接続完了時に「ログインしてください」を表示することを検証する</summary>
     [Fact(DisplayName = "[回帰] ConnectAsync: openai で未ログインなら「ログインしてください」を表示する")]
     public async Task ConnectAsync_WhenOpenAiNotLoggedIn_ShowsLoginRequest()
     {
@@ -593,6 +636,7 @@ public class CodexAppServerDialogViewModelTests
         }
     }
 
+    /// <summary>接続済みかつログイン済みの場合のみ CanLogout が true になることを検証する</summary>
     [Fact(DisplayName = "[回帰] 接続済みかつログイン済みの場合のみ CanLogout=true になる")]
     public async Task CanLogout_WhenStartedAndLoggedIn_IsTrue()
     {
@@ -617,6 +661,7 @@ public class CodexAppServerDialogViewModelTests
         }
     }
 
+    /// <summary>認証不要を返した openai では自動ログイン成功扱いとし、パネルを隠し接続済みを表示することを検証する</summary>
     [Fact(DisplayName = "[回帰] openai + RequiresOpenAiAuth=false: 自動ログイン成功として ShowLoginPanel=false / 接続しましたを表示する")]
     public async Task Regression_OpenAi_RequiresOpenAiAuthFalse_HidesLoginPanelAndShowsConnected()
     {

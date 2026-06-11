@@ -6,12 +6,11 @@ using FluentAssertions;
 
 namespace ERDesigner.Tests.ViewModels;
 
-/// <summary>
-/// <see cref="MainViewModel"/> のクリック・選択・リレーション作成ロジックのテスト。
-/// （WPF UI スレッドに依存しないロジックのみ）
-/// </summary>
+/// <summary><see cref="MainViewModel"/> の選択・リレーション作成・Undo/Redo・コピー貼り付け等のロジックを検証するテストクラス</summary>
+/// <remarks>WPF UI スレッドに依存しないロジックのみを対象とする</remarks>
 public class MainViewModelTests
 {
+    /// <summary>AddEntityCommand 実行でエンティティが 1 件追加されることを検証する</summary>
     [Fact(DisplayName = "AddEntityCommand 実行でエンティティが 1 件増える")]
     public void AddEntity_AddsOne()
     {
@@ -23,6 +22,7 @@ public class MainViewModelTests
         vm.SelectedEntity.Should().Be(vm.Entities[0]);
     }
 
+    /// <summary>追加が Undo で取り消され、Redo で復活することを検証する</summary>
     [Fact(DisplayName = "Undo で追加が取り消され、Redo で復活する")]
     public void Add_Then_Undo_Then_Redo()
     {
@@ -37,6 +37,7 @@ public class MainViewModelTests
         vm.Entities.Should().Contain(added);
     }
 
+    /// <summary>エンティティクリックで単一選択状態になることを検証する</summary>
     [Fact(DisplayName = "OnEntityClicked: 単一選択になる")]
     public void OnEntityClicked_SetsSingleSelection()
     {
@@ -52,6 +53,7 @@ public class MainViewModelTests
         vm.SelectedEntity.Should().Be(first);
     }
 
+    /// <summary>リレーション作成モードで 2 エンティティを順にクリックするとリレーションが追加されることを検証する</summary>
     [Fact(DisplayName = "リレーション作成モードで2つのエンティティを順にクリックすると追加される")]
     public void RelationshipMode_CreatesRelationship()
     {
@@ -75,6 +77,7 @@ public class MainViewModelTests
         vm.Relationships[0].ConstraintName.Should().Be("FK_NewTable_NewTable");
     }
 
+    /// <summary>リレーション作成時に既定の参照先列と外部キー列が設定されることを検証する</summary>
     [Fact(DisplayName = "リレーション作成時に既定の参照先列と外部キー列が設定される")]
     public void RelationshipMode_SetsDefaultColumns()
     {
@@ -92,6 +95,7 @@ public class MainViewModelTests
         vm.Relationships[0].TargetColumnId.Should().Be(vm.Entities[1].Columns[1].Id);
     }
 
+    /// <summary>同じエンティティを 2 回クリックすると自己参照リレーションが追加されることを検証する</summary>
     [Fact(DisplayName = "リレーション作成モードで同じエンティティを2回クリックすると自己参照リレーションが追加される")]
     public void RelationshipMode_CreatesSelfRelationship()
     {
@@ -110,6 +114,7 @@ public class MainViewModelTests
         vm.Relationships[0].ConstraintName.Should().Be("FK_NewTable_NewTable");
     }
 
+    /// <summary>同一始点・終点のリレーションは種別が違っても重複追加されないことを検証する</summary>
     [Fact(DisplayName = "同じ始点と終点のリレーションは種別が違っても重複追加されない")]
     public void RelationshipMode_DoesNotCreateDuplicateRelationship()
     {
@@ -130,6 +135,7 @@ public class MainViewModelTests
         vm.PendingRelationshipSource.Should().BeNull();
     }
 
+    /// <summary>自己参照リレーションも重複追加されないことを検証する</summary>
     [Fact(DisplayName = "自己参照リレーションも重複追加されない")]
     public void RelationshipMode_DoesNotCreateDuplicateSelfRelationship()
     {
@@ -150,6 +156,7 @@ public class MainViewModelTests
         vm.Relationships[0].Target.Should().Be(vm.Entities[0]);
     }
 
+    /// <summary>リレーションの制約名と参照アクションの変更が Undo / Redo できることを検証する</summary>
     [Fact(DisplayName = "リレーションの制約名と参照アクションは Undo/Redo できる")]
     public void RelationshipMetadata_CanUndoRedo()
     {
@@ -183,6 +190,7 @@ public class MainViewModelTests
         relationship.OnUpdate.Should().Be(ForeignKeyReferentialAction.SetDefault);
     }
 
+    /// <summary>参照先 PK と同名の列があれば既定 FK に選ばれ、FK チェックも入ることを検証する</summary>
     [Fact(DisplayName = "参照先 PK と同名の列があれば既定 FK に選ばれ、FK チェックも入る")]
     public void RelationshipMode_PrefersSameNamedColumnAndChecksFk()
     {
@@ -201,6 +209,7 @@ public class MainViewModelTests
         vm.Entities[1].Columns[1].IsForeignKey.Should().BeTrue();
     }
 
+    /// <summary>リレーションにより自動管理される列は PK / FK チェックを編集できないことを検証する</summary>
     [Fact(DisplayName = "リレーション列は PK/FK チェックを編集できない")]
     public void RelationshipColumns_AreLocked()
     {
@@ -220,6 +229,7 @@ public class MainViewModelTests
         fkColumn.IsForeignKeyEditable.Should().BeFalse();
     }
 
+    /// <summary>リレーション削除で自動設定された FK チェックが外れることを検証する</summary>
     [Fact(DisplayName = "リレーション削除で自動設定された FK チェックが外れる")]
     public void RemoveRelationship_UnchecksManagedForeignKey()
     {
@@ -244,6 +254,7 @@ public class MainViewModelTests
         fkColumn.IsForeignKeyEditable.Should().BeTrue();
     }
 
+    /// <summary>リレーション選択中の DeleteSelected がそのリレーションを削除することを検証する</summary>
     [Fact(DisplayName = "DeleteSelected はリレーション選択中ならリレーションを削除する")]
     public void DeleteSelected_RemovesSelectedRelationship()
     {
@@ -260,6 +271,7 @@ public class MainViewModelTests
         vm.Relationships.Should().BeEmpty();
     }
 
+    /// <summary>エンティティ移動に追従してリレーション端点座標が更新されることを検証する</summary>
     [Fact(DisplayName = "エンティティ移動でリレーションの端点が追従する")]
     public void Relationship_FollowsEntityMove()
     {
@@ -289,6 +301,7 @@ public class MainViewModelTests
         rel.X2.Should().Be(oldX2);
     }
 
+    /// <summary>エンティティ名変更が Undo / Redo できることを検証する</summary>
     [Fact(DisplayName = "エンティティ名変更は Undo/Redo できる")]
     public void EntityPropertyChange_CanUndoRedo()
     {
@@ -305,6 +318,7 @@ public class MainViewModelTests
         entity.TableName.Should().Be("Customer");
     }
 
+    /// <summary>エンティティ見出し背景色の変更が Undo / Redo できることを検証する</summary>
     [Fact(DisplayName = "エンティティ見出し色変更は Undo/Redo できる")]
     public void EntityTitleBackgroundColorChange_CanUndoRedo()
     {
@@ -321,6 +335,7 @@ public class MainViewModelTests
         entity.TitleBackgroundColor.Should().Be("#E4F1C9");
     }
 
+    /// <summary>リレーション種別の変更が Undo / Redo できることを検証する</summary>
     [Fact(DisplayName = "リレーション種別変更は Undo/Redo できる")]
     public void RelationshipPropertyChange_CanUndoRedo()
     {
@@ -341,6 +356,7 @@ public class MainViewModelTests
         relationship.Type.Should().Be(RelationshipType.OneToMany);
     }
 
+    /// <summary>多対多への変更に伴う列選択クリアも 1 回の Undo / Redo で往復することを検証する</summary>
     [Fact(DisplayName = "多対多への変更で列選択クリアも 1 回の Undo/Redo で往復する")]
     public void RelationshipTypeChange_WithDependentColumnClear_CanUndoRedoAsSingleStep()
     {
@@ -371,6 +387,7 @@ public class MainViewModelTests
         relationship.TargetColumnId.Should().BeNull();
     }
 
+    /// <summary>リレーションの FK 列変更にカラム定義側の FK 状態が追従することを検証する</summary>
     [Fact(DisplayName = "リレーションの FK 列変更でカラム定義側の FK 状態も追従する")]
     public void RelationshipTargetColumnChange_UpdatesForeignKeyFlags()
     {
@@ -400,6 +417,7 @@ public class MainViewModelTests
         newTargetColumn.IsForeignKeyEditable.Should().BeTrue();
     }
 
+    /// <summary>カラム追加が Undo / Redo できることを検証する</summary>
     [Fact(DisplayName = "カラム追加は Undo/Redo できる")]
     public void AddColumn_CanUndoRedo()
     {
@@ -420,6 +438,7 @@ public class MainViewModelTests
         vm.SelectedEntity.Columns.Should().HaveCount(initialCount + 1);
     }
 
+    /// <summary>選択エンティティをコピーして位置をずらした複製として貼り付けできることを検証する</summary>
     [Fact(DisplayName = "選択エンティティはコピーして貼り付けできる")]
     public void CopyPasteSelectedEntity_AddsShiftedClone()
     {
@@ -470,6 +489,7 @@ public class MainViewModelTests
         original.IsSelected.Should().BeFalse();
     }
 
+    /// <summary>エンティティ貼り付けが連続実行で位置・名前がずれ、Undo / Redo できることを検証する</summary>
     [Fact(DisplayName = "エンティティ貼り付けは連続実行で位置と名前がずれ、Undo/Redo できる")]
     public void PasteCopiedEntity_CanRepeatAndUndoRedo()
     {
@@ -498,6 +518,7 @@ public class MainViewModelTests
         vm.Entities.Select(entity => entity.TableName).Should().Equal("Order", "Order_Copy", "Order_Copy2");
     }
 
+    /// <summary>選択カラムをコピーして選択行の直下へ複製挿入できることを検証する</summary>
     [Fact(DisplayName = "選択カラムはコピーして直下へ貼り付けできる")]
     public void CopyPasteSelectedColumn_InsertsCloneBelowSelection()
     {
@@ -532,6 +553,7 @@ public class MainViewModelTests
         vm.SelectedColumn.Description.Should().Be("コード");
     }
 
+    /// <summary>カラム貼り付けが Undo / Redo できることを検証する</summary>
     [Fact(DisplayName = "カラム貼り付けは Undo/Redo できる")]
     public void PasteCopiedColumn_CanUndoRedo()
     {
@@ -553,6 +575,7 @@ public class MainViewModelTests
         vm.SelectedEntity.Columns.Select(column => column.Name).Should().Equal("ID", "Code", "Code");
     }
 
+    /// <summary>カラム削除が Undo / Redo できることを検証する</summary>
     [Fact(DisplayName = "カラム削除は Undo/Redo できる")]
     public void RemoveColumn_CanUndoRedo()
     {
@@ -573,6 +596,7 @@ public class MainViewModelTests
         vm.SelectedEntity.Columns.Select(c => c.Name).Should().Equal("B");
     }
 
+    /// <summary>FK 設定済みカラムを削除して Undo すると、リレーションの FK 設定も復元されることを検証する</summary>
     [Fact(DisplayName = "FK に設定済みのカラムを削除して Undo するとリレーションの FK 設定も復元される")]
     public void RemoveColumn_UsedAsFk_UndoRestoresRelationshipFk()
     {
@@ -611,6 +635,7 @@ public class MainViewModelTests
         relationship.TargetColumnId.Should().BeNull();
     }
 
+    /// <summary>主キー変更に伴う NULL 許容の連動変更も 1 回の Undo / Redo で往復することを検証する</summary>
     [Fact(DisplayName = "PK チェック変更に伴う NULL 変更も 1 回の Undo/Redo で往復する")]
     public void PrimaryKeyChange_WithDependentNullableChange_CanUndoRedoAsSingleStep()
     {
@@ -642,6 +667,7 @@ public class MainViewModelTests
         column.IsNullable.Should().BeFalse();
     }
 
+    /// <summary>新規作成で図をクリアすると Undo / Redo 履歴もリセットされることを検証する</summary>
     [Fact(DisplayName = "新規で図をクリアした後は Undo/Redo 履歴もリセットされる")]
     public void NewDiagram_ClearsUndoRedoHistory()
     {
@@ -654,6 +680,7 @@ public class MainViewModelTests
         vm.UndoRedo.CanRedo.Should().BeFalse();
     }
 
+    /// <summary>初期化時に説明表示状態が自動保存から復元されることを検証する</summary>
     [Fact(DisplayName = "説明表示状態は自動保存から復元される")]
     public void Initialize_RestoresShowDescriptionsState()
     {
@@ -667,6 +694,7 @@ public class MainViewModelTests
         restored.ShowColumnDescriptionsInDiagram.Should().BeTrue();
     }
 
+    /// <summary>カラム並び順の変更が Undo / Redo できることを検証する</summary>
     [Fact(DisplayName = "カラム順変更は Undo/Redo できる")]
     public void ColumnOrderChange_CanUndoRedo()
     {
@@ -688,6 +716,7 @@ public class MainViewModelTests
         entity.Columns.Select(c => c.Name).Should().Equal("B", "C", "A");
     }
 
+    /// <summary>格子整列が Undo / Redo できることを検証する</summary>
     [Fact(DisplayName = "格子整列は Undo/Redo できる")]
     public void AutoLayoutGrid_CanUndoRedo()
     {
@@ -712,6 +741,7 @@ public class MainViewModelTests
         vm.Entities.Select(entity => (entity.X, entity.Y)).Should().Equal(after);
     }
 
+    /// <summary>木整列が Undo / Redo できることを検証する</summary>
     [Fact(DisplayName = "木整列は Undo/Redo できる")]
     public void AutoLayoutTree_CanUndoRedo()
     {
@@ -742,6 +772,7 @@ public class MainViewModelTests
 
     // ---------------- ダイアログサービス (IDialogService) ----------------
 
+    /// <summary>新規作成の確認でキャンセルすると現在のダイアグラムが保持されることを検証する</summary>
     [Fact(DisplayName = "NewDiagram: 確認でキャンセルするとダイアグラムは保持される")]
     public void NewDiagram_ConfirmDeclined_KeepsDiagram()
     {
@@ -755,6 +786,7 @@ public class MainViewModelTests
         dialogs.ConfirmMessages.Should().ContainSingle().Which.Should().Contain("クリア");
     }
 
+    /// <summary>新規作成の確認で OK するとダイアグラムがクリアされることを検証する</summary>
     [Fact(DisplayName = "NewDiagram: 確認で OK するとダイアグラムがクリアされる")]
     public void NewDiagram_ConfirmAccepted_ClearsDiagram()
     {
@@ -768,6 +800,7 @@ public class MainViewModelTests
         dialogs.ConfirmMessages.Should().HaveCount(1);
     }
 
+    /// <summary>重複リレーション作成時に情報ダイアログが表示され、追加されないことを検証する</summary>
     [Fact(DisplayName = "重複リレーション作成時は情報ダイアログが表示され追加されない")]
     public void RelationshipMode_DuplicateRelationship_ShowsInformation()
     {
