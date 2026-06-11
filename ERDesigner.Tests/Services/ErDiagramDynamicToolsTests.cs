@@ -5,13 +5,13 @@ using FluentAssertions;
 
 namespace ERDesigner.Tests.Services;
 
-/// <summary>
-/// <see cref="ErDiagramDynamicTools"/> のツール実行ロジックのテスト。
-/// </summary>
+/// <summary><see cref="ErDiagramDynamicTools"/> の各ツール実行（エンティティ・カラム操作）を検証するテストクラス</summary>
 public class ErDiagramDynamicToolsTests
 {
+    /// <summary>テスト対象のメイン ViewModel を生成する</summary>
     private static MainViewModel CreateVm() => new MainViewModel();
 
+    /// <summary>引数オブジェクトを JSON 化してツールを実行し、結果と成否を返す</summary>
     private static (string Result, bool Success) Exec(MainViewModel vm, string toolName, object args)
     {
         var json = JsonSerializer.Serialize(args);
@@ -19,6 +19,7 @@ public class ErDiagramDynamicToolsTests
         return ErDiagramDynamicTools.Execute(toolName, element, vm);
     }
 
+    /// <summary>add_entity でテーブルが追加され、列が自動生成されないことを検証する</summary>
     [Fact(DisplayName = "add_entity でテーブルが追加され列は自動生成されない")]
     public void AddEntity_CreatesEntityWithNoColumns()
     {
@@ -28,10 +29,11 @@ public class ErDiagramDynamicToolsTests
 
         success.Should().BeTrue();
         var entity = vm.Entities.Single(e => e.TableName == "Book");
-        // 列は AI が add_column で定義するため、自動生成されないこと
+        // 列は AI が add_column で定義する想定のため、ここでは自動生成されない
         entity.Columns.Should().BeEmpty();
     }
 
+    /// <summary>add_column で is_primary_key=true の列が主キーとして追加されることを検証する</summary>
     [Fact(DisplayName = "add_column で is_primary_key=true の列を追加できる")]
     public void AddColumn_WithIsPrimaryKeyTrue_SetsPrimaryKey()
     {
@@ -56,6 +58,7 @@ public class ErDiagramDynamicToolsTests
         entity.Columns.Single(c => c.Name == "BookId").IsPrimaryKey.Should().BeTrue();
     }
 
+    /// <summary>add_column を複数回呼ぶと指定どおりの列構成（主キーは 1 列）になることを検証する</summary>
     [Fact(DisplayName = "add_column を複数回呼び出すと AI が設計した列構成になる")]
     public void AddColumn_MultipleColumns_ReflectsAiDesign()
     {
@@ -106,6 +109,7 @@ public class ErDiagramDynamicToolsTests
         entity.Columns.Should().HaveCount(3);
     }
 
+    /// <summary>set_column_property でカラム説明を更新できることを検証する</summary>
     [Fact(DisplayName = "set_column_property でカラムの説明を更新できる")]
     public void SetColumnProperty_UpdatesDescription()
     {
@@ -141,6 +145,7 @@ public class ErDiagramDynamicToolsTests
         column.Description.Should().Be("書籍を一意に識別するID");
     }
 
+    /// <summary>set_column_property でデータ型と NULL 許容を同時更新できることを検証する</summary>
     [Fact(DisplayName = "set_column_property でデータ型と NULL 許容を更新できる")]
     public void SetColumnProperty_UpdatesDataTypeAndNullable()
     {
@@ -177,6 +182,7 @@ public class ErDiagramDynamicToolsTests
         column.IsNullable.Should().BeTrue();
     }
 
+    /// <summary>存在しないカラムを set_column_property で指定すると失敗を返すことを検証する</summary>
     [Fact(DisplayName = "set_column_property で存在しないカラムを指定するとエラーになる")]
     public void SetColumnProperty_UnknownColumn_ReturnsError()
     {
