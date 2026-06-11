@@ -4,34 +4,41 @@ using ERDesigner.Models;
 
 namespace ERDesigner.Services;
 
-/// <summary>
-/// このアプリが出力したテーブル定義書 Excel を読み込み、ER 図モデルへ復元するサービスです。
-/// </summary>
+/// <summary>本アプリが出力したテーブル定義書 Excel を読み込み ER 図モデルへ復元するサービス</summary>
+/// <remarks><see cref="TableDefinitionDocumentExporter"/> が出力するシート構成を前提とする</remarks>
 public static class TableDefinitionDocumentImporter
 {
+    /// <summary>テーブル一覧シート名</summary>
     private const string SummarySheetName = "テーブル一覧";
+
+    /// <summary>リレーション一覧シート名</summary>
     private const string RelationshipSheetName = "リレーション一覧";
+
+    /// <summary>テーブル一覧シートのデータ開始行</summary>
     private const int SummaryDataStartRow = 2;
+
+    /// <summary>リレーション一覧シートのデータ開始行</summary>
     private const int RelationshipDataStartRow = 2;
+
+    /// <summary>詳細シートでテーブル基本情報を格納する行</summary>
     private const int DetailTableInfoRow = 2;
+
+    /// <summary>詳細シートでカラム定義が始まる行</summary>
     private const int DetailColumnDataStartRow = 5;
 
-    /// <summary>
-    /// テーブル定義書ファイルを読み込み、<see cref="ErDiagram" /> として返します。
-    /// </summary>
-    /// <param name="path">読み込む Excel ファイルパスです。</param>
-    /// <returns>復元した ER 図です。</returns>
+    /// <summary>テーブル定義書ファイルを読み込み <see cref="ErDiagram" /> として返す</summary>
+    /// <param name="path">読み込む Excel ファイルパス</param>
+    /// <returns>復元した ER 図</returns>
     public static ErDiagram Load(string path)
     {
         using var workbook = new XLWorkbook(path);
         return Load(workbook);
     }
 
-    /// <summary>
-    /// 読み込み済みのブックから ER 図を復元します。
-    /// </summary>
-    /// <param name="workbook">対象ブックです。</param>
-    /// <returns>復元した ER 図です。</returns>
+    /// <summary>読み込み済みのブックから ER 図を復元する</summary>
+    /// <param name="workbook">対象ブック</param>
+    /// <returns>復元した ER 図</returns>
+    /// <exception cref="InvalidDataException">必須シートの欠落や整合性不一致を検出した場合にスローする</exception>
     public static ErDiagram Load(XLWorkbook workbook)
     {
         var summarySheet = FindWorksheet(workbook, SummarySheetName) ?? throw new InvalidDataException($"'{SummarySheetName}' シートが見つかりません。");
@@ -44,9 +51,7 @@ public static class TableDefinitionDocumentImporter
         return new ErDiagram { Entities = entities.Values.ToList(), Relationships = relationships };
     }
 
-    /// <summary>
-    /// テーブル一覧シートからテーブル基本情報を取得します。
-    /// </summary>
+    /// <summary>テーブル一覧シートからテーブル名・説明・備考を取得する</summary>
     private static Dictionary<string, TableSummaryRow> ReadSummarySheet(IXLWorksheet worksheet)
     {
         var summaries = new Dictionary<string, TableSummaryRow>(StringComparer.OrdinalIgnoreCase);
@@ -74,9 +79,7 @@ public static class TableDefinitionDocumentImporter
         return summaries;
     }
 
-    /// <summary>
-    /// 詳細シート群からエンティティを復元します。
-    /// </summary>
+    /// <summary>詳細シート群からエンティティを復元する（一覧との件数・説明の整合性を検証する）</summary>
     private static Dictionary<string, Entity> ReadDetailSheets(XLWorkbook workbook, IReadOnlyDictionary<string, TableSummaryRow> summaries)
     {
         var entities = new Dictionary<string, Entity>(StringComparer.OrdinalIgnoreCase);
@@ -144,9 +147,7 @@ public static class TableDefinitionDocumentImporter
         return entities;
     }
 
-    /// <summary>
-    /// 詳細シートからカラム情報を復元します。
-    /// </summary>
+    /// <summary>詳細シートのカラム行を読み取り、キー表記から PK / FK を復元する</summary>
     private static void ReadColumns(IXLWorksheet worksheet, Entity entity)
     {
         for (var row = DetailColumnDataStartRow; ; row++)
@@ -185,9 +186,8 @@ public static class TableDefinitionDocumentImporter
         }
     }
 
-    /// <summary>
-    /// リレーション一覧シートからリレーションを復元します。
-    /// </summary>
+    /// <summary>リレーション一覧シートからリレーションを復元し、参照列の外部キー化を行う</summary>
+    /// <remarks>参照元（FK 側）は子テーブル、参照先（PK 側）は親テーブルに対応する</remarks>
     private static List<Relationship> ReadRelationshipSheet(IXLWorksheet worksheet, IReadOnlyDictionary<string, Entity> entities)
     {
         var relationships = new List<Relationship>();
@@ -268,9 +268,7 @@ public static class TableDefinitionDocumentImporter
         return relationships;
     }
 
-    /// <summary>
-    /// 定義書の関連種別表記を内部列挙へ変換します。
-    /// </summary>
+    /// <summary>定義書の関係表記（1:1 / N:1 / N:N）を内部の列挙値へ変換する</summary>
     private static RelationshipType ParseRelationshipType(string text, int row)
     {
         return text.Trim() switch
@@ -282,41 +280,34 @@ public static class TableDefinitionDocumentImporter
         };
     }
 
-    /// <summary>
-    /// セル文字列をトリムして取得します。
-    /// </summary>
+    /// <summary>セル文字列を前後トリムして取得する</summary>
     private static string GetCellText(IXLWorksheet worksheet, int row, int column) => worksheet.Cell(row, column).GetString().Trim();
 
-    /// <summary>
-    /// 指定名のシートを検索します。
-    /// </summary>
+    /// <summary>指定名のシートを大文字小文字無視で検索する</summary>
     private static IXLWorksheet? FindWorksheet(XLWorkbook workbook, string name)
     {
         return workbook.Worksheets.FirstOrDefault(sheet => string.Equals(sheet.Name, name, StringComparison.OrdinalIgnoreCase));
     }
 
-    /// <summary>
-    /// 空白文字列を null に正規化します。
-    /// </summary>
+    /// <summary>空白文字列を null へ正規化する</summary>
     private static string? NullIfWhiteSpace(string value) => string.IsNullOrWhiteSpace(value) ? null : value;
 
-    /// <summary>
-    /// テーブル一覧シート 1 行分の情報です。
-    /// </summary>
+    /// <summary>テーブル一覧シート 1 行分の情報</summary>
     private sealed record TableSummaryRow(string TableName, string Description, string Memo);
 
-    /// <summary>
-    /// 大文字小文字を無視してタプル比較する comparer です。
-    /// </summary>
+    /// <summary>親子テーブル名の組を大文字小文字無視で比較する比較器（重複検出に用いる）</summary>
     private sealed class StringComparerOrdinalIgnoreCaseTupleComparer : IEqualityComparer<(string Parent, string Child)>
     {
+        /// <summary>共有インスタンス</summary>
         public static StringComparerOrdinalIgnoreCaseTupleComparer Instance { get; } = new();
 
+        /// <inheritdoc />
         public bool Equals((string Parent, string Child) x, (string Parent, string Child) y)
         {
             return string.Equals(x.Parent, y.Parent, StringComparison.OrdinalIgnoreCase) && string.Equals(x.Child, y.Child, StringComparison.OrdinalIgnoreCase);
         }
 
+        /// <inheritdoc />
         public int GetHashCode((string Parent, string Child) obj)
         {
             return HashCode.Combine(StringComparer.OrdinalIgnoreCase.GetHashCode(obj.Parent), StringComparer.OrdinalIgnoreCase.GetHashCode(obj.Child));

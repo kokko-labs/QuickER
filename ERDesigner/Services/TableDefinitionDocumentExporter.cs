@@ -4,23 +4,37 @@ using ERDesigner.ViewModels;
 
 namespace ERDesigner.Services;
 
-/// <summary>
-/// ER 図のテーブル定義から Excel 形式のテーブル定義書をゼロから生成するサービスです。
-/// </summary>
+/// <summary>ER 図のテーブル定義から Excel 形式のテーブル定義書を新規生成するサービス</summary>
+/// <remarks>テーブル一覧・リレーション一覧・テーブルごとの詳細シートを相互リンク付きで出力する</remarks>
 public static class TableDefinitionDocumentExporter
 {
+    /// <summary>テーブル一覧シート名</summary>
     private const string SummarySheetName = "テーブル一覧";
+
+    /// <summary>リレーション一覧シート名</summary>
     private const string RelationshipSheetName = "リレーション一覧";
+
+    /// <summary>詳細シートへのリンクセルの表示文言</summary>
     private const string DetailLinkText = "詳細";
+
+    /// <summary>一覧へ戻るリンクの表示文言</summary>
     private const string BackToSummaryText = "テーブル一覧に戻る";
+
+    /// <summary>既定のフォント名</summary>
     private const string DefaultFontName = "游ゴシック";
+
+    /// <summary>既定のフォントサイズ</summary>
     private const double DefaultFontSize = 11;
+
+    /// <summary>既定の行高さ</summary>
     private const double DefaultRowHeight = 18.75;
+
+    /// <summary>Excel シート名に使用できない文字</summary>
     private static readonly char[] InvalidWorksheetNameChars = [':', '\\', '/', '?', '*', '[', ']'];
 
-    /// <summary>現在のダイアグラムからテーブル定義書の Excel ブックを生成します。</summary>
-    /// <param name="vm">対象の <see cref="MainViewModel" />。</param>
-    /// <returns>生成済みの Excel ブック。</returns>
+    /// <summary>現在のダイアグラムからテーブル定義書の Excel ブックを生成する</summary>
+    /// <param name="vm">対象の <see cref="MainViewModel" /></param>
+    /// <returns>生成済みの Excel ブック</returns>
     public static XLWorkbook BuildWorkbook(MainViewModel vm)
     {
         var workbook = new XLWorkbook();
@@ -53,16 +67,16 @@ public static class TableDefinitionDocumentExporter
         return workbook;
     }
 
-    /// <summary>テーブル定義書を Excel ファイルとして保存します。</summary>
-    /// <param name="vm">対象の <see cref="MainViewModel" />。</param>
-    /// <param name="path">出力先ファイルパス。</param>
+    /// <summary>テーブル定義書を Excel ファイルとして保存する</summary>
+    /// <param name="vm">対象の <see cref="MainViewModel" /></param>
+    /// <param name="path">出力先ファイルパス</param>
     public static void SaveTo(MainViewModel vm, string path)
     {
         using var workbook = BuildWorkbook(vm);
         workbook.SaveAs(path);
     }
 
-    /// <summary>ブック全体の基本書式を設定します。</summary>
+    /// <summary>ブック全体の基本書式を設定する</summary>
     private static void ApplyWorkbookStyle(XLWorkbook workbook)
     {
         workbook.Style.Font.FontName = DefaultFontName;
@@ -70,7 +84,7 @@ public static class TableDefinitionDocumentExporter
         workbook.Style.Alignment.Vertical = XLAlignmentVerticalValues.Top;
     }
 
-    /// <summary>テーブル一覧シートを生成します。</summary>
+    /// <summary>テーブル一覧シートを生成する（各行に詳細シートへのリンクを付与する）</summary>
     private static void BuildSummaryWorksheet(IXLWorksheet worksheet, IReadOnlyList<DetailSheetContext> detailSheets)
     {
         ConfigureSummaryWorksheet(worksheet);
@@ -104,7 +118,7 @@ public static class TableDefinitionDocumentExporter
         UpdatePrintArea(worksheet, $"A1:E{Math.Max(headerRow, dataStartRow + detailSheets.Count - 1)}");
     }
 
-    /// <summary>リレーション一覧シートを生成します。</summary>
+    /// <summary>リレーション一覧シートを生成する</summary>
     private static void BuildRelationshipWorksheet(IXLWorksheet worksheet, IEnumerable<RelationshipViewModel> relationships)
     {
         ConfigureRelationshipWorksheet(worksheet);
@@ -133,6 +147,7 @@ public static class TableDefinitionDocumentExporter
             worksheet.Row(row).Height = DefaultRowHeight;
             worksheet.Cell(row, 1).Value = i + 1;
             worksheet.Cell(row, 2).Value = relationship.ConstraintName ?? string.Empty;
+            // 参照元（FK 保有側）は Target、参照先（PK 側）は Source に対応する
             worksheet.Cell(row, 3).Value = relationship.Target.TableName;
             worksheet.Cell(row, 4).Value = GetColumnName(relationship.Target, relationship.TargetColumnId);
             worksheet.Cell(row, 5).Value = relationship.Source.TableName;
@@ -145,7 +160,7 @@ public static class TableDefinitionDocumentExporter
         UpdatePrintArea(worksheet, $"A1:J{Math.Max(headerRow, dataStartRow + orderedRelationships.Count - 1)}");
     }
 
-    /// <summary>テーブル単位の定義書シートを生成します。</summary>
+    /// <summary>テーブル単位の定義書シートを生成する（カラム一覧と一覧への戻りリンクを含む）</summary>
     private static void BuildEntityWorksheet(IXLWorksheet worksheet, EntityViewModel entity, int tableNumber, IReadOnlyList<RelationshipViewModel> relationships)
     {
         ConfigureDetailWorksheet(worksheet);
@@ -198,7 +213,7 @@ public static class TableDefinitionDocumentExporter
         UpdatePrintArea(worksheet, $"A1:G{footerRow}");
     }
 
-    /// <summary>テーブル一覧シートの固定書式を設定します。</summary>
+    /// <summary>テーブル一覧シートの列幅など固定書式を設定する</summary>
     private static void ConfigureSummaryWorksheet(IXLWorksheet worksheet)
     {
         worksheet.Column(1).Width = 5;
@@ -209,7 +224,7 @@ public static class TableDefinitionDocumentExporter
         ConfigureWorksheet(worksheet);
     }
 
-    /// <summary>リレーション一覧シートの固定書式を設定します。</summary>
+    /// <summary>リレーション一覧シートの列幅など固定書式を設定する</summary>
     private static void ConfigureRelationshipWorksheet(IXLWorksheet worksheet)
     {
         worksheet.Column(1).Width = 5;
@@ -227,7 +242,7 @@ public static class TableDefinitionDocumentExporter
         ConfigureWorksheet(worksheet);
     }
 
-    /// <summary>詳細シートの固定書式を設定します。</summary>
+    /// <summary>テーブル詳細シートの列幅など固定書式を設定する</summary>
     private static void ConfigureDetailWorksheet(IXLWorksheet worksheet)
     {
         worksheet.Column(1).Width = 5;
@@ -241,7 +256,7 @@ public static class TableDefinitionDocumentExporter
         ConfigureWorksheet(worksheet);
     }
 
-    /// <summary>各シート共通の設定を行います。</summary>
+    /// <summary>各シート共通のフォント・配置・ページ設定を行う</summary>
     private static void ConfigureWorksheet(IXLWorksheet worksheet)
     {
         worksheet.Style.Font.FontName = DefaultFontName;
@@ -251,7 +266,7 @@ public static class TableDefinitionDocumentExporter
         worksheet.PageSetup.PaperSize = XLPaperSize.A4Paper;
     }
 
-    /// <summary>見出し行の書式を適用します。</summary>
+    /// <summary>見出し行の書式（背景色・罫線など）を適用する</summary>
     private static void ApplyHeaderStyle(IXLRange range)
     {
         range.Style.Font.FontName = DefaultFontName;
@@ -264,7 +279,7 @@ public static class TableDefinitionDocumentExporter
         range.Style.Alignment.Vertical = XLAlignmentVerticalValues.Top;
     }
 
-    /// <summary>データ行の書式を適用します。</summary>
+    /// <summary>データ行の書式（罫線など）を適用する</summary>
     private static void ApplyDataRowStyle(IXLRange range)
     {
         range.Style.Font.FontName = DefaultFontName;
@@ -276,7 +291,7 @@ public static class TableDefinitionDocumentExporter
         range.Style.Alignment.Vertical = XLAlignmentVerticalValues.Top;
     }
 
-    /// <summary>詳細リンクの書式とリンク先を設定します。</summary>
+    /// <summary>ハイパーリンクの書式とリンク先シートを設定する</summary>
     private static void ApplyHyperlinkStyle(IXLCell cell, string targetSheetName, XLAlignmentHorizontalValues horizontalAlignment)
     {
         cell.SetHyperlink(new XLHyperlink($"{EscapeSheetName(targetSheetName)}!A1"));
@@ -287,7 +302,7 @@ public static class TableDefinitionDocumentExporter
         cell.Style.Alignment.Horizontal = horizontalAlignment;
     }
 
-    /// <summary>フッターの戻りリンク書式を適用します。</summary>
+    /// <summary>フッターの戻りリンクの文字書式を適用する</summary>
     private static void ApplyFooterHyperlinkStyle(IXLCell cell)
     {
         cell.Style.Font.FontName = DefaultFontName;
@@ -296,14 +311,14 @@ public static class TableDefinitionDocumentExporter
         cell.Style.Font.FontColor = XLColor.Blue;
     }
 
-    /// <summary>印刷範囲を設定します。</summary>
+    /// <summary>印刷範囲を指定アドレスへ設定する</summary>
     private static void UpdatePrintArea(IXLWorksheet worksheet, string address)
     {
         worksheet.PageSetup.PrintAreas.Clear();
         worksheet.PageSetup.PrintAreas.Add(address);
     }
 
-    /// <summary>関連種別を定義書向けの表記に変換します。</summary>
+    /// <summary>リレーション種別を定義書向けの表記（1:1 / N:1 / N:N）へ変換する</summary>
     private static string GetRelationshipTypeLabel(RelationshipType type) =>
         type switch
         {
@@ -313,7 +328,7 @@ public static class TableDefinitionDocumentExporter
             _ => type.ToString(),
         };
 
-    /// <summary>テーブル内の FK に連番を振った表示ラベルを構築します。</summary>
+    /// <summary>テーブル内の外部キーに連番（FK1, FK2…）を振った列 ID ごとの表示ラベルを構築する</summary>
     private static IReadOnlyDictionary<Guid, string> BuildForeignKeyLabels(EntityViewModel entity, IReadOnlyList<RelationshipViewModel> relationships)
     {
         var columnIndexes = entity.Columns.Select((column, index) => new { column.Id, index }).ToDictionary(item => item.Id, item => item.index);
@@ -342,7 +357,7 @@ public static class TableDefinitionDocumentExporter
         return foreignKeyLabels.ToDictionary(pair => pair.Key, pair => string.Join(",", pair.Value));
     }
 
-    /// <summary>キー列の表示ラベルを返します。</summary>
+    /// <summary>キー列の表示ラベルを返す（PK / FK / PK/FK の組み合わせを表現する）</summary>
     private static string GetKeyLabel(ColumnViewModel column, string? foreignKeyLabel)
     {
         if (column.IsPrimaryKey && !string.IsNullOrWhiteSpace(foreignKeyLabel))
@@ -368,7 +383,7 @@ public static class TableDefinitionDocumentExporter
         return string.Empty;
     }
 
-    /// <summary>外部キー列の参照先文字列を返します。</summary>
+    /// <summary>外部キー列の参照先（テーブル.カラム）を重複なく連結した文字列を返す</summary>
     private static string GetReferenceText(EntityViewModel entity, ColumnViewModel column, IReadOnlyList<RelationshipViewModel> relationships)
     {
         var references = relationships
@@ -381,7 +396,7 @@ public static class TableDefinitionDocumentExporter
         return string.Join(", ", references);
     }
 
-    /// <summary>列 ID からカラム名を解決します。</summary>
+    /// <summary>列 ID からカラム名を解決する（未指定・不一致時は空文字）</summary>
     private static string GetColumnName(EntityViewModel entity, Guid? columnId)
     {
         if (columnId is null)
@@ -392,7 +407,7 @@ public static class TableDefinitionDocumentExporter
         return entity.Columns.FirstOrDefault(column => column.Id == columnId)?.Name ?? string.Empty;
     }
 
-    /// <summary>Excel シート名に使えない文字を除去し、31 文字制限も考慮した名前を返します。</summary>
+    /// <summary>Excel シート名に使えない文字を除去し、31 文字制限と重複回避を考慮した一意な名前を生成する</summary>
     private static string CreateUniqueWorksheetName(string tableName, ISet<string> usedWorksheetNames)
     {
         var sanitized = new string(tableName.Where(ch => !InvalidWorksheetNameChars.Contains(ch)).ToArray()).Trim().Trim('\'');
@@ -421,9 +436,9 @@ public static class TableDefinitionDocumentExporter
         return candidate;
     }
 
-    /// <summary>ハイパーリンク用にシート名をエスケープします。</summary>
+    /// <summary>ハイパーリンク参照用にシート名を引用符で囲み内部の引用符をエスケープする</summary>
     private static string EscapeSheetName(string sheetName) => $"'{sheetName.Replace("'", "''")}'";
 
-    /// <summary>詳細シート生成時に必要な情報をまとめます。</summary>
+    /// <summary>詳細シート生成に必要な番号・エンティティ・対応ワークシートを束ねる文脈情報</summary>
     private sealed record DetailSheetContext(int Number, EntityViewModel Entity, IXLWorksheet Worksheet);
 }
