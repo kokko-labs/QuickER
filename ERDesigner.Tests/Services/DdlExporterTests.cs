@@ -6,11 +6,10 @@ using FluentAssertions;
 
 namespace ERDesigner.Tests.Services;
 
-/// <summary>
-/// <see cref="DdlExporter"/> のテスト。
-/// </summary>
+/// <summary><see cref="DdlExporter"/> の DDL 生成（CREATE TABLE・FK・識別子エスケープ）を検証するテストクラス</summary>
 public class DdlExporterTests
 {
+    /// <summary>CREATE TABLE と PRIMARY KEY 制約が出力されることを検証する</summary>
     [Fact(DisplayName = "Build: CREATE TABLE と PRIMARY KEY が出力される")]
     public void Build_EmitsCreateTableAndPk()
     {
@@ -47,6 +46,7 @@ public class DdlExporterTests
         sql.Should().Contain("[Name] nvarchar(50) NULL");
     }
 
+    /// <summary>NULL 許容しない列に NOT NULL が出力されることを検証する</summary>
     [Fact(DisplayName = "Build: NULL 許容 OFF の列は NOT NULL が出力される")]
     public void Build_NotNullableColumn_EmitsNotNull()
     {
@@ -73,6 +73,7 @@ public class DdlExporterTests
         sql.Should().Contain("[Code] nvarchar(20) NOT NULL");
     }
 
+    /// <summary>1 対多リレーションから FOREIGN KEY 制約が生成されることを検証する</summary>
     [Fact(DisplayName = "Build: 1対多リレーションが FOREIGN KEY を生成する")]
     public void Build_OneToMany_EmitsForeignKey()
     {
@@ -132,6 +133,7 @@ public class DdlExporterTests
         sql.Should().Contain("REFERENCES [P] ([Id])");
     }
 
+    /// <summary>指定の制約名と ON DELETE/UPDATE 参照アクションが FOREIGN KEY へ出力されることを検証する</summary>
     [Fact(DisplayName = "Build: 制約名と参照アクションが FOREIGN KEY に出力される")]
     public void Build_EmitsConstraintNameAndReferentialActions()
     {
@@ -194,6 +196,7 @@ public class DdlExporterTests
         sql.Should().Contain("ON UPDATE SET NULL");
     }
 
+    /// <summary>schema.table 名が [schema].[table] へ括弧分割され、PK 制約名が安全化されることを検証する</summary>
     [Fact(DisplayName = "Build: schema.table 形式は [schema].[table] に分割され、PK 制約名は安全な名前になる")]
     public void Build_SchemaQualifiedTableName_SplitsBracketsAndUsesSafeConstraintName()
     {
@@ -222,6 +225,7 @@ public class DdlExporterTests
         sql.Should().Contain("CONSTRAINT [PK_dbo_User] PRIMARY KEY ([Id])");
     }
 
+    /// <summary>識別子に含まれる ] が二重化エスケープされることを検証する</summary>
     [Fact(DisplayName = "Build: 識別子に含まれる ] がエスケープされる")]
     public void Build_IdentifierContainingClosingBracket_IsEscaped()
     {
@@ -251,6 +255,7 @@ public class DdlExporterTests
         sql.Should().Contain("PRIMARY KEY ([Col]]umn])");
     }
 
+    /// <summary>schema 修飾された親子テーブルの FK が括弧分割と安全な既定制約名で出力されることを検証する</summary>
     [Fact(DisplayName = "Build: schema 修飾された親子の FOREIGN KEY は分割括弧付けと安全な既定制約名で出力される")]
     public void Build_SchemaQualifiedForeignKey_UsesBracketsAndSafeDefaultConstraintName()
     {
@@ -309,6 +314,7 @@ public class DdlExporterTests
         sql.Should().Contain("FOREIGN KEY ([ParentId]) REFERENCES [dbo].[P] ([Id])");
     }
 
+    /// <summary>テーブル定義書ブックにサマリーシートとテーブル詳細シートが生成されることを検証する</summary>
     [Fact(DisplayName = "BuildWorkbook: テーブル定義書のサマリーとテーブル詳細が生成される")]
     public void BuildWorkbook_CreatesSummaryAndEntityWorksheets()
     {

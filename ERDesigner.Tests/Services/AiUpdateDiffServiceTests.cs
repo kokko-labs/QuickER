@@ -4,11 +4,10 @@ using FluentAssertions;
 
 namespace ERDesigner.Tests.Services;
 
-/// <summary>
-/// <see cref="AiUpdateDiffService" /> のテストです。
-/// </summary>
+/// <summary><see cref="AiUpdateDiffService" /> の差分抽出とリレーション対応付けを検証するテストクラス</summary>
 public class AiUpdateDiffServiceTests
 {
+    /// <summary>テーブル・カラム・リレーションの差分がカテゴリ別グループへ抽出されることを検証する</summary>
     [Fact(DisplayName = "テーブル・カラム・リレーションの差分をカテゴリ別に抽出できる")]
     public void Compute_CreatesGroupedDiffItems()
     {
@@ -153,6 +152,7 @@ public class AiUpdateDiffServiceTests
         diff.Groups.SelectMany(group => group.Items).Should().Contain(item => item.Summary.Contains("[変更] Customer → Order"));
     }
 
+    /// <summary>制約名のみ変わったリレーションが削除+追加ではなく変更として対応付けられることを検証する</summary>
     [Fact(DisplayName = "リレーションの制約名だけが変わっても削除と追加ではなく変更として扱う")]
     public void Compute_RelationshipConstraintChange_IsHandledAsModify()
     {

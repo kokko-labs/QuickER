@@ -9,16 +9,18 @@ using Microsoft.Data.SqlClient;
 
 namespace ERDesigner.Tests.Services;
 
-/// <summary>
-/// 実 SQL Server (localhost / TestDB / Windows 認証) に対してスキーマ同期を end-to-end でテストします。
-/// 接続できない環境ではスキップされます。テスト用オブジェクトは <c>_erd_sync_test_</c> プレフィクスで作成し、
-/// 必ず最後に DROP します。
-/// </summary>
+/// <summary>実 SQL Server に対しスキーマ同期を end-to-end で検証する統合テストクラス</summary>
+/// <remarks>
+/// localhost / TestDB / Windows 認証へ接続できない環境では各テストをスキップする
+/// テスト用オブジェクトは <c>_erd_sync_test_</c> プレフィクスで作成し、前後で必ず DROP する
+/// </remarks>
 [Trait("Category", "Integration")]
 public class SchemaSyncIntegrationTests : IAsyncLifetime
 {
+    /// <summary>テスト全体で共有するキャンセルトークン</summary>
     private static readonly CancellationToken TestCancellationToken = TestContext.Current.CancellationToken;
 
+    /// <summary>テスト対象 DB への接続設定</summary>
     private static readonly SqlConnectionSettings Settings = new()
     {
         Server = "localhost",
@@ -27,11 +29,16 @@ public class SchemaSyncIntegrationTests : IAsyncLifetime
         TrustServerCertificate = true,
     };
 
+    /// <summary>親テーブル名（FK の参照先）</summary>
     private const string ParentTable = "_erd_sync_test_parent";
+
+    /// <summary>子テーブル名（FK の保有側）</summary>
     private const string ChildTable = "_erd_sync_test_child";
 
+    /// <summary>テスト DB へ接続可能かどうか（不可ならテストをスキップする）</summary>
     private bool _serverAvailable;
 
+    /// <summary>接続可否を判定し、可能ならテスト用オブジェクトを事前に削除する</summary>
     public async ValueTask InitializeAsync()
     {
         try
@@ -52,6 +59,7 @@ public class SchemaSyncIntegrationTests : IAsyncLifetime
         }
     }
 
+    /// <summary>テスト終了時にテスト用オブジェクトを削除する</summary>
     public async ValueTask DisposeAsync()
     {
         if (_serverAvailable)
@@ -60,6 +68,7 @@ public class SchemaSyncIntegrationTests : IAsyncLifetime
         }
     }
 
+    /// <summary>テスト用の親子テーブルを依存順に DROP する</summary>
     private static async Task DropTestObjectsAsync()
     {
         await using var conn = new SqlConnection(Settings.Build());
@@ -75,6 +84,7 @@ IF OBJECT_ID(N'{ParentTable}', N'U') IS NOT NULL DROP TABLE [{ParentTable}];";
         await cmd.ExecuteNonQueryAsync(TestCancellationToken);
     }
 
+    /// <summary>テーブル追加・列追加・外部キー追加が実 DB へ適用されることを検証する</summary>
     [Fact(DisplayName = "[Integration] AddTable / AddColumn / AddForeignKey が実 DB に適用される")]
     public async Task FullSync_AppliesChanges()
     {
@@ -163,6 +173,7 @@ IF OBJECT_ID(N'{ParentTable}', N'U') IS NOT NULL DROP TABLE [{ParentTable}];";
         count.Should().Be(1);
     }
 
+    /// <summary>列変更・列削除・外部キー削除・テーブル削除の破壊的変更が実 DB へ適用されることを検証する</summary>
     [Fact(DisplayName = "[Integration] フェーズ2: AlterColumn / DropColumn / DropForeignKey / DropTable が実 DB に適用される")]
     public async Task DestructiveSync_AppliesChanges()
     {
@@ -246,6 +257,7 @@ CREATE TABLE [{ChildTable}] (
         }
     }
 
+    /// <summary>テーブル・列の MS_Description が同期され、再インポートで取得できることを検証する</summary>
     [Fact(DisplayName = "[Integration] テーブル/列の MS_Description が同期され、再 Import で取得できる")]
     public async Task DescriptionSync_RoundTrip()
     {

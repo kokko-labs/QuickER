@@ -4,11 +4,10 @@ using FluentAssertions;
 
 namespace ERDesigner.Tests.ViewModels;
 
-/// <summary>
-/// <see cref="RelationshipViewModel"/> の幾何計算・マーカー種別のテスト。
-/// </summary>
+/// <summary><see cref="RelationshipViewModel"/> の幾何計算・マーカー種別・列選択整合性を検証するテストクラス</summary>
 public class RelationshipViewModelTests
 {
+    /// <summary>指定座標・既定幅のテスト用エンティティを生成する</summary>
     private static EntityViewModel NewEntity(double x, double y) =>
         new(
             new Entity
@@ -19,6 +18,7 @@ public class RelationshipViewModelTests
             }
         );
 
+    /// <summary>リレーション種別ごとに起点・終点のマーカー種別が正しく返ることを検証する</summary>
     [Theory(DisplayName = "種別ごとに正しいマーカー種別が返る")]
     [InlineData(RelationshipType.OneToOne, RelationshipViewModel.MarkerKind.One, RelationshipViewModel.MarkerKind.One)]
     [InlineData(RelationshipType.OneToMany, RelationshipViewModel.MarkerKind.One, RelationshipViewModel.MarkerKind.Many)]
@@ -33,6 +33,7 @@ public class RelationshipViewModelTests
         rel.TargetMarker.Should().Be(expectedTarget);
     }
 
+    /// <summary>種別変更時に Label・マーカー関連プロパティの変更通知が発生することを検証する</summary>
     [Fact(DisplayName = "種別を変更すると Label・マーカーの変更通知が走る")]
     public void TypeChanged_RaisesNotifications()
     {
@@ -51,6 +52,7 @@ public class RelationshipViewModelTests
         rel.Label.Should().Be("1―N");
     }
 
+    /// <summary>ラベル座標が両エンティティの境界点の中央になることを検証する</summary>
     [Fact(DisplayName = "ラベルはエンティティ間の中央に表示される")]
     public void Label_IsCenteredBetweenEntityBounds()
     {
@@ -75,6 +77,7 @@ public class RelationshipViewModelTests
         rel.LabelX.Should().Be(300);
     }
 
+    /// <summary>縦方向配置で端点マーカーがエンティティ外側にずれて配置されることを検証する</summary>
     [Fact(DisplayName = "端点マーカーはエンティティと重ならない位置に表示される")]
     public void Markers_ArePositionedOutsideEntities()
     {
@@ -100,6 +103,7 @@ public class RelationshipViewModelTests
         rel.TargetMarkerY.Should().BeLessThan(b.Y - 10);
     }
 
+    /// <summary>横方向配置でも端点マーカーがエンティティ外側にずれて配置されることを検証する</summary>
     [Fact(DisplayName = "横方向でも端点マーカーはエンティティと重ならない位置に表示される")]
     public void Markers_ArePositionedOutsideEntities_Horizontally()
     {
@@ -125,6 +129,7 @@ public class RelationshipViewModelTests
         rel.TargetMarkerX.Should().BeLessThan(b.X - 10);
     }
 
+    /// <summary>マーカー描画領域の中央がマーカー座標（線上）と一致することを検証する</summary>
     [Fact(DisplayName = "端点マーカーの描画領域中央はリレーション線上に一致する")]
     public void MarkerBounds_AreCenteredOnMarkerCoordinates()
     {
@@ -152,6 +157,7 @@ public class RelationshipViewModelTests
         (rel.TargetMarkerTop + 10).Should().BeApproximately(rel.TargetMarkerY, 0.001);
     }
 
+    /// <summary>終点側の多マーカーが終点エンティティ方向を向く角度になることを検証する</summary>
     [Fact(DisplayName = "N側マーカーは対象エンティティ側を向く")]
     public void TargetManyMarker_FacesTargetEntity()
     {
@@ -176,6 +182,7 @@ public class RelationshipViewModelTests
         rel.TargetMarkerAngle.Should().BeApproximately(0, 0.001);
     }
 
+    /// <summary>起点側の多マーカーが起点エンティティ方向を向く角度になることを検証する</summary>
     [Fact(DisplayName = "起点がN側のときマーカーは起点エンティティ側を向く")]
     public void SourceManyMarker_FacesSourceEntity()
     {
@@ -200,6 +207,7 @@ public class RelationshipViewModelTests
         rel.SourceMarkerAngle.Should().BeApproximately(180, 0.001);
     }
 
+    /// <summary>選択中リレーションが RemoveSelectedRelationship で削除されることを検証する</summary>
     [Fact(DisplayName = "MainViewModel.RemoveSelectedRelationship でリレーションが削除される")]
     public void RemoveSelectedRelationship_Works()
     {
@@ -224,6 +232,7 @@ public class RelationshipViewModelTests
         vm.Relationships.Should().Contain(rel);
     }
 
+    /// <summary>参照先候補（主キー列）と外部キー候補（終点側全列）が正しく取得できることを検証する</summary>
     [Fact(DisplayName = "参照先列と外部キー列の候補が取得できる")]
     public void AvailableColumns_AreResolved()
     {
@@ -264,6 +273,7 @@ public class RelationshipViewModelTests
         rel.CanSelectForeignKeyColumns.Should().BeTrue();
     }
 
+    /// <summary>多対多では列選択が無効化され、選択がクリアされることを検証する</summary>
     [Fact(DisplayName = "多対多では列選択が無効化される")]
     public void ManyToMany_DisablesColumnSelection()
     {
@@ -280,6 +290,7 @@ public class RelationshipViewModelTests
         rel.TargetColumnId.Should().BeNull();
     }
 
+    /// <summary>多対多では参照アクション設定が無効化され、ON DELETE/UPDATE が既定値へ戻ることを検証する</summary>
     [Fact(DisplayName = "多対多では ON DELETE と ON UPDATE が無効化され既定値へ戻る")]
     public void ManyToMany_DisablesReferentialActions()
     {
@@ -303,6 +314,7 @@ public class RelationshipViewModelTests
         rel.OnUpdate.Should().Be(ForeignKeyReferentialAction.NoAction);
     }
 
+    /// <summary>自己参照リレーションで自己ループ描画情報が有効になることを検証する</summary>
     [Fact(DisplayName = "自己参照リレーションでは自己参照ループ描画情報が有効になる")]
     public void SelfRelationship_UsesSelfLoopGeometry()
     {
@@ -318,6 +330,7 @@ public class RelationshipViewModelTests
         rel.LabelY.Should().BeApproximately(rel.SelfLoopTop + rel.SelfLoopHeight / 2, 0.001);
     }
 
+    /// <summary>同一カラムに主キーと外部キーを同時設定しても両状態が保持されることを検証する</summary>
     [Fact(DisplayName = "同じカラムに PK と FK が両方設定されても状態は保持できる")]
     public void Column_CanHoldPkAndFkTogether()
     {
@@ -335,6 +348,7 @@ public class RelationshipViewModelTests
         column.IsForeignKey.Should().BeTrue();
     }
 
+    /// <summary>RemoveColumn で指定カラムがエンティティから削除されることを検証する</summary>
     [Fact(DisplayName = "MainViewModel.RemoveColumn で指定カラムが削除される")]
     public void RemoveColumn_Works()
     {
@@ -348,6 +362,7 @@ public class RelationshipViewModelTests
         entity.Columns.Should().NotContain(col);
     }
 
+    /// <summary>SQL データ型候補に代表的な SQL Server の型が含まれることを検証する</summary>
     [Fact(DisplayName = "SqlDataTypes に SQL Server の型が含まれる")]
     public void SqlDataTypes_IncludesCommonTypes()
     {

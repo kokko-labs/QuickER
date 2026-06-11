@@ -5,11 +5,10 @@ using FluentAssertions;
 
 namespace ERDesigner.Tests.Services;
 
-/// <summary>
-/// <see cref="AiSchemaJson"/> の JSON 解析と <see cref="AiSchemaJson.ToDomain"/> 変換のテスト。
-/// </summary>
+/// <summary><see cref="AiSchemaJson"/> の JSON 解析・ドメイン変換・命名正規化・FK 推定を検証するテストクラス</summary>
 public class AiSchemaJsonTests
 {
+    /// <summary>JSON が Entity / Relationship へ正しく変換されることを検証する</summary>
     [Fact(DisplayName = "JSON から Entity / Relationship に変換できる")]
     public void ToDomain_ConvertsCorrectly()
     {
@@ -67,6 +66,7 @@ public class AiSchemaJsonTests
         rels[0].TargetColumnId.Should().Be(entities[1].Columns[1].Id);
     }
 
+    /// <summary>列名推定により参照元列・参照先列がリレーションへ設定されることを検証する</summary>
     [Fact(DisplayName = "リレーション列名の推定により参照元列と参照先列が設定される")]
     public void ToDomain_ResolvesRelationshipColumns()
     {
@@ -133,6 +133,7 @@ public class AiSchemaJsonTests
         relationship.TargetColumnId.Should().Be(order.Columns.Single(column => column.Name == "CustomerId").Id);
     }
 
+    /// <summary>存在しないテーブルを参照するリレーションが無視されることを検証する</summary>
     [Fact(DisplayName = "存在しないテーブルを参照するリレーションは無視される")]
     public void ToDomain_IgnoresInvalidRelationships()
     {
@@ -170,6 +171,7 @@ public class AiSchemaJsonTests
         rels.Should().BeEmpty();
     }
 
+    /// <summary>旧形式の tableName / columnName のみでは有効なテーブルへ変換されないことを検証する</summary>
     [Fact(DisplayName = "旧形式の tableName / columnName だけではテーブルに変換されない")]
     public void Deserialize_LegacyTableAndColumnNames_AreIgnored()
     {
@@ -207,6 +209,7 @@ public class AiSchemaJsonTests
         rels.Should().BeEmpty();
     }
 
+    /// <summary>type 文字列が対応する RelationshipType へ変換されることを検証する</summary>
     [Theory(DisplayName = "type 文字列が正しい RelationshipType に変換される")]
     [InlineData("OneToOne", RelationshipType.OneToOne)]
     [InlineData("OneToMany", RelationshipType.OneToMany)]
@@ -253,6 +256,7 @@ public class AiSchemaJsonTests
         rels.Should().ContainSingle().Which.Type.Should().Be(expected);
     }
 
+    /// <summary>コードフェンスで囲まれた JSON 応答も解析できることを検証する</summary>
     [Fact(DisplayName = "コードフェンス付き JSON 応答も解析できる")]
     public void ParseSchemaResponse_SupportsMarkdownCodeFence()
     {
@@ -284,6 +288,7 @@ public class AiSchemaJsonTests
         parsed.Tables[0].Columns![0].Description.Should().Be("商品ID");
     }
 
+    /// <summary>識別子がパスカルケースへ正規化されることを検証する</summary>
     [Fact(DisplayName = "識別子をパスカルケースへ正規化できる")]
     public void NormalizeIdentifiers_ConvertsToPascalCase()
     {
@@ -317,6 +322,7 @@ public class AiSchemaJsonTests
         schema.Relationships[0].TargetTable.Should().Be("CustomerOrder");
     }
 
+    /// <summary>識別子がスネークケースへ正規化されることを検証する</summary>
     [Fact(DisplayName = "識別子をスネークケースへ正規化できる")]
     public void NormalizeIdentifiers_ConvertsToSnakeCase()
     {
@@ -350,6 +356,7 @@ public class AiSchemaJsonTests
         schema.Relationships[0].TargetTable.Should().Be("customer_order");
     }
 
+    /// <summary>テーブル名が単数形へ正規化されることを検証する</summary>
     [Fact(DisplayName = "テーブル名を単数形へ正規化できる")]
     public void NormalizeTableNames_ConvertsToSingular()
     {
@@ -376,6 +383,7 @@ public class AiSchemaJsonTests
         schema.Relationships[0].TargetTable.Should().Be("order_item");
     }
 
+    /// <summary>テーブル名が複数形へ正規化されることを検証する</summary>
     [Fact(DisplayName = "テーブル名を複数形へ正規化できる")]
     public void NormalizeTableNames_ConvertsToPlural()
     {
@@ -402,6 +410,7 @@ public class AiSchemaJsonTests
         schema.Relationships[0].TargetTable.Should().Be("Categories");
     }
 
+    /// <summary>NULL 許容の互換プロパティ名でも isNullable へ反映されることを検証する</summary>
     [Theory(DisplayName = "NULL 許容の互換プロパティも isNullable に反映される")]
     [InlineData("nullable", true, true)]
     [InlineData("nullable", false, false)]
@@ -439,6 +448,7 @@ public class AiSchemaJsonTests
         parsed.Tables[0].Columns![0].IsNullable.Should().Be(expectedNullable);
     }
 
+    /// <summary>FK 列が誤って主キー指定された場合、他に PK があれば主キーを外し FK へ矯正されることを検証する</summary>
     [Fact(DisplayName = "FK 列が誤って isPrimaryKey=true で返された場合、他に PK があれば PK を降ろして FK に矯正される")]
     public void ToDomain_PreferredColumnWithWrongPkFlag_IsCorrectedToFk()
     {
@@ -510,6 +520,7 @@ public class AiSchemaJsonTests
         relationship.TargetColumnId.Should().Be(customerIdColumn.Id);
     }
 
+    /// <summary>「テーブル名+Id」形式の非主キー列が外部キー候補として自動認識されることを検証する</summary>
     [Fact(DisplayName = "テーブル名+Id 形式の非 PK 列は FK 候補として自動認識される")]
     public void ToDomain_LikelyForeignKeyName_IsRecognizedAsFK()
     {
