@@ -5,86 +5,84 @@ using ERDesigner.Models;
 
 namespace ERDesigner.ViewModels;
 
-/// <summary>
-/// 2 つのエンティティを接続するリレーションの ViewModel です。
-/// エンティティの位置変更を購読し、線の端点を自動追従させます。
-/// </summary>
+/// <summary>2 つのエンティティを接続するリレーションの ViewModel</summary>
 /// <remarks>
-/// 線本体（X1,Y1）-(X2,Y2) と、両端のマーカーを描くための補助プロパティ
-/// (<see cref="SourceMarker"/> / <see cref="TargetMarker"/>) を提供します。
-/// マーカーの位置は <see cref="MarkerOffset"/> 分だけ端点から内側にずらした座標です。
+/// 両端エンティティの位置変更を購読して線の端点を自動追従させる
+/// 線本体 (X1,Y1)-(X2,Y2) と両端マーカー描画用の補助プロパティ
+/// (<see cref="SourceMarker"/> / <see cref="TargetMarker"/>) を提供する
+/// マーカー位置は <see cref="MarkerOffset"/> 分だけ端点から外側へずらした座標とする
 /// </remarks>
 public partial class RelationshipViewModel : ObservableObject
 {
-    /// <summary>端点マーカーの描画サイズ (px)。</summary>
+    /// <summary>端点マーカーの描画サイズ (px)</summary>
     private const double MarkerSize = 20;
 
-    /// <summary>自己参照ループの描画サイズ (px)。</summary>
+    /// <summary>自己参照ループの描画サイズ (px)</summary>
     private const double SelfLoopSize = 56;
 
-    /// <summary>自己参照リレーションのラベルを少し右へ寄せる補正量 (px)。</summary>
+    /// <summary>自己参照リレーションのラベルを右へ寄せる補正量 (px)</summary>
     private const double SelfLoopLabelOffsetX = 10;
 
-    /// <summary>端点マーカーがエンティティ外側へ離れる余白 (px)。</summary>
+    /// <summary>端点マーカーがエンティティ外側へ離れる余白 (px)</summary>
     private const double MarkerGap = 4;
 
-    /// <summary>マーカー中心が端点から外側へ置かれる距離 (px)。</summary>
+    /// <summary>マーカー中心を端点から外側へ置く距離 (px)</summary>
     private const double MarkerOffset = MarkerSize / 2 + MarkerGap;
 
-    /// <summary>モデルと同じ ID。</summary>
+    /// <summary>モデルと同一の識別子</summary>
     public Guid Id { get; }
 
-    /// <summary>関連の種類。</summary>
+    /// <summary>リレーション種別</summary>
     [ObservableProperty]
     private RelationshipType _type;
 
-    /// <summary>起点エンティティ側の参照先カラム ID。</summary>
+    /// <summary>起点エンティティ側の参照先カラム ID</summary>
     [ObservableProperty]
     private Guid? _sourceColumnId;
 
-    /// <summary>終点エンティティ側の外部キーカラム ID。</summary>
+    /// <summary>終点エンティティ側の外部キーカラム ID</summary>
     [ObservableProperty]
     private Guid? _targetColumnId;
 
-    /// <summary>外部キー制約名。</summary>
+    /// <summary>外部キー制約名</summary>
     [ObservableProperty]
     private string? _constraintName;
 
-    /// <summary>親行削除時の参照アクション。</summary>
+    /// <summary>親行削除時の参照アクション</summary>
     [ObservableProperty]
     private ForeignKeyReferentialAction _onDelete;
 
-    /// <summary>親キー更新時の参照アクション。</summary>
+    /// <summary>親キー更新時の参照アクション</summary>
     [ObservableProperty]
     private ForeignKeyReferentialAction _onUpdate;
 
-    /// <summary>選択中かどうか。</summary>
+    /// <summary>選択中かどうか</summary>
     [ObservableProperty]
     private bool _isSelected;
 
-    /// <summary>関連の起点となるエンティティ。</summary>
+    /// <summary>リレーションの起点エンティティ（参照される PK 側）</summary>
     public EntityViewModel Source { get; }
 
-    /// <summary>関連の終点となるエンティティ。</summary>
+    /// <summary>リレーションの終点エンティティ（外部キーを持つ側）</summary>
     public EntityViewModel Target { get; }
 
-    /// <summary>参照先列として選択可能な起点側カラム一覧です。</summary>
+    /// <summary>参照先列として選択可能な起点側カラム一覧（主キー列のみ）</summary>
     public IReadOnlyList<ColumnViewModel> AvailableSourceColumns => Source.Columns.Where(c => c.IsPrimaryKey).ToList();
 
-    /// <summary>外部キー列として選択可能な終点側カラム一覧です。</summary>
+    /// <summary>外部キー列として選択可能な終点側カラム一覧</summary>
     public IReadOnlyList<ColumnViewModel> AvailableTargetColumns => Target.Columns.ToList();
 
-    /// <summary>UI 表示用の参照アクション候補一覧です。</summary>
+    /// <summary>UI 表示用の参照アクション候補一覧</summary>
     public IReadOnlyList<ForeignKeyReferentialAction> ReferentialActions { get; } =
     [ForeignKeyReferentialAction.NoAction, ForeignKeyReferentialAction.Cascade, ForeignKeyReferentialAction.SetNull, ForeignKeyReferentialAction.SetDefault];
 
-    /// <summary>列選択が有効なリレーション種別かどうかです。</summary>
+    /// <summary>外部キー列の選択が有効なリレーション種別かどうか（多対多以外で有効）</summary>
     public bool CanSelectForeignKeyColumns => Type != RelationshipType.ManyToMany;
 
-    /// <summary>参照アクションの設定が有効なリレーション種別かどうかです。</summary>
+    /// <summary>参照アクションの設定が有効なリレーション種別かどうか（多対多以外で有効）</summary>
     public bool CanConfigureReferentialActions => Type != RelationshipType.ManyToMany;
 
-    /// <summary>モデルと両端のエンティティから ViewModel を生成します。</summary>
+    /// <summary>モデルと両端エンティティから ViewModel を生成し、端点追従と整合性確保を初期化する</summary>
     public RelationshipViewModel(Relationship model, EntityViewModel source, EntityViewModel target)
     {
         Id = model.Id;
@@ -118,6 +116,7 @@ public partial class RelationshipViewModel : ObservableObject
         EnsureReferentialActionConsistency();
     }
 
+    /// <summary>両端カラムの増減に追従し、購読の着脱と候補・整合性の再評価を行う</summary>
     private void OnColumnsCollectionChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
     {
         if (e.OldItems is not null)
@@ -140,7 +139,7 @@ public partial class RelationshipViewModel : ObservableObject
         EnsureColumnSelectionConsistency();
     }
 
-    /// <summary>多対多では参照アクションを既定値へ戻して設定不可状態を保ちます。</summary>
+    /// <summary>多対多では参照アクションを既定値へ戻し、設定不可状態を保つ</summary>
     private void EnsureReferentialActionConsistency()
     {
         if (!CanConfigureReferentialActions)
@@ -150,6 +149,7 @@ public partial class RelationshipViewModel : ObservableObject
         }
     }
 
+    /// <summary>主キー化やカラム名の変更時に、選択候補と選択整合性を再評価する</summary>
     private void OnColumnPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName is nameof(ColumnViewModel.IsPrimaryKey) or nameof(ColumnViewModel.Name))
@@ -159,18 +159,20 @@ public partial class RelationshipViewModel : ObservableObject
         }
     }
 
+    /// <summary>選択候補プロパティの変更を通知する</summary>
     private void NotifyColumnCandidatesChanged()
     {
         OnPropertyChanged(nameof(AvailableSourceColumns));
         OnPropertyChanged(nameof(AvailableTargetColumns));
     }
 
-    /// <summary>スナップショット適用中など、列整合チェックを一時的にスキップするためのフラグです。</summary>
+    /// <summary>スナップショット適用中など列整合チェックを一時的に抑止するためのフラグ</summary>
     internal bool SuppressColumnSelectionConsistency { get; set; }
 
-    /// <summary>種別変更に伴う列選択の連動更新中かどうかです。</summary>
+    /// <summary>種別変更に伴う列選択の連動更新中かどうか</summary>
     internal bool IsUpdatingType { get; private set; }
 
+    /// <summary>現在の種別・候補に矛盾する列選択を解消する（多対多では選択をクリアする）</summary>
     private void EnsureColumnSelectionConsistency()
     {
         if (SuppressColumnSelectionConsistency)
@@ -196,11 +198,13 @@ public partial class RelationshipViewModel : ObservableObject
         }
     }
 
+    /// <summary>参照先カラム ID 変更時に再通知する（バインディング更新を確実にする）</summary>
     partial void OnSourceColumnIdChanged(Guid? value) => OnPropertyChanged(nameof(SourceColumnId));
 
+    /// <summary>外部キーカラム ID 変更時に再通知する（バインディング更新を確実にする）</summary>
     partial void OnTargetColumnIdChanged(Guid? value) => OnPropertyChanged(nameof(TargetColumnId));
 
-    /// <summary>両端の位置・幅が変わったら端点プロパティを再計算して通知します。</summary>
+    /// <summary>両端の位置・サイズ変更時に幾何情報を再計算して通知する</summary>
     private void OnEndpointChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName is nameof(EntityViewModel.X) or nameof(EntityViewModel.Y) or nameof(EntityViewModel.Width) or nameof(EntityViewModel.DisplayHeight))
@@ -210,11 +214,12 @@ public partial class RelationshipViewModel : ObservableObject
         }
     }
 
-    /// <summary>
-    /// 幾何プロパティをまとめて再通知します。
-    /// Source/Target は不変のため、それらにのみ依存するプロパティ
-    /// (IsSelfRelationship / ShowSelfLoop / ShowEndpointMarkers / SelfLoopWidth / SelfLoopHeight) は通知しません。
-    /// </summary>
+    /// <summary>変化しうる幾何プロパティをまとめて再通知する</summary>
+    /// <remarks>
+    /// Source / Target は readonly で不変のため、それらにのみ依存する不変プロパティ
+    /// (IsSelfRelationship / ShowSelfLoop / ShowEndpointMarkers / SelfLoopWidth / SelfLoopHeight) は
+    /// 通知対象から除外し、無駄なバインディング再評価を避ける
+    /// </remarks>
     private void NotifyGeometryChanged()
     {
         OnPropertyChanged(nameof(X1));
@@ -237,20 +242,20 @@ public partial class RelationshipViewModel : ObservableObject
         OnPropertyChanged(nameof(SelfLoopTop));
     }
 
-    /// <summary>種別変更前の SourceColumnId/TargetColumnId を MainViewModel 側でキャプチャできるよう、変更直前に通知します。</summary>
+    /// <summary>種別変更直前に発火する（変更前の列選択スナップショット取得用フック）</summary>
     internal event EventHandler? TypeChanging;
 
-    /// <summary>EnsureColumnSelectionConsistency を含む全連動変更完了後に発火します。MainViewModel の記録制御に使います。</summary>
+    /// <summary>列整合処理を含む連動変更の完了後に発火する（Undo 記録制御に用いる）</summary>
     internal event EventHandler? TypeChangeCompleted;
 
-    /// <summary>種別が変わったらラベルとマーカー種別を再通知します。</summary>
+    /// <summary>種別変更開始を記録し、変更直前フックを発火する</summary>
     partial void OnTypeChanging(RelationshipType value)
     {
         IsUpdatingType = true;
         TypeChanging?.Invoke(this, EventArgs.Empty);
     }
 
-    /// <summary>種別が変わったらラベルとマーカー種別を再通知します。</summary>
+    /// <summary>種別変更後にラベル・マーカー・選択可否を再通知し、列と参照アクションの整合性を確保する</summary>
     partial void OnTypeChanged(RelationshipType value)
     {
         OnPropertyChanged(nameof(Label));
@@ -268,9 +273,10 @@ public partial class RelationshipViewModel : ObservableObject
     }
 
     // ===== 端点座標 =====
-    // DisplayHeight の取得やバインディング再評価のコストを抑えるため、
-    // 端点変更時に UpdateGeometry() で一括計算した値を保持し、getter はキャッシュを返すだけにする。
+    // 端点ごとに DisplayHeight 取得や三角関数を毎回呼ぶとドラッグ中のコストが大きいため、
+    // 端点変更時に UpdateGeometry() で一括計算した値をフィールドへ保持し、getter はキャッシュを返すだけとする
 
+    /// <summary>計算済みの端点・マーカー・ラベル座標および角度のキャッシュフィールド群</summary>
     private double _x1;
     private double _y1;
     private double _x2;
@@ -286,19 +292,19 @@ public partial class RelationshipViewModel : ObservableObject
     private double _selfLoopLeft;
     private double _selfLoopTop;
 
-    /// <summary>起点エンティティ境界上の接続 X 座標。</summary>
+    /// <summary>起点エンティティ境界上の接続 X 座標</summary>
     public double X1 => _x1;
 
-    /// <summary>起点エンティティ境界上の接続 Y 座標。</summary>
+    /// <summary>起点エンティティ境界上の接続 Y 座標</summary>
     public double Y1 => _y1;
 
-    /// <summary>終点エンティティ境界上の接続 X 座標。</summary>
+    /// <summary>終点エンティティ境界上の接続 X 座標</summary>
     public double X2 => _x2;
 
-    /// <summary>終点エンティティ境界上の接続 Y 座標。</summary>
+    /// <summary>終点エンティティ境界上の接続 Y 座標</summary>
     public double Y2 => _y2;
 
-    /// <summary>端点座標・マーカー位置・角度・ラベル位置を一括で再計算します。</summary>
+    /// <summary>端点座標・マーカー位置・角度・ラベル位置を一括で再計算しキャッシュへ格納する</summary>
     private void UpdateGeometry()
     {
         (_x1, _y1) = GetBoundaryPoint(Source, Target);
@@ -338,7 +344,8 @@ public partial class RelationshipViewModel : ObservableObject
         _labelY = IsSelfRelationship ? _selfLoopTop + SelfLoopHeight / 2 : (_y1 + _y2) / 2;
     }
 
-    /// <summary>エンティティ中心から相手方向へ伸ばした線と境界の交点を返します。</summary>
+    /// <summary>エンティティ中心から相手方向へ伸ばした線と矩形境界の交点を返す</summary>
+    /// <remarks>自己参照時は右辺中央を返す</remarks>
     private static (double x, double y) GetBoundaryPoint(EntityViewModel source, EntityViewModel target)
     {
         if (ReferenceEquals(source, target))
@@ -366,78 +373,76 @@ public partial class RelationshipViewModel : ObservableObject
         return (sourceCenterX + dx * scale, sourceCenterY + dy * scale);
     }
 
-    /// <summary>起点側マーカーの中心 X。</summary>
+    /// <summary>起点側マーカーの中心 X</summary>
     public double SourceMarkerX => _sourceMarkerX;
 
-    /// <summary>起点側マーカー描画領域の左上 X。</summary>
+    /// <summary>起点側マーカー描画領域の左上 X</summary>
     public double SourceMarkerLeft => SourceMarkerX - MarkerSize / 2;
 
-    /// <summary>起点側マーカーの中心 Y。</summary>
+    /// <summary>起点側マーカーの中心 Y</summary>
     public double SourceMarkerY => _sourceMarkerY;
 
-    /// <summary>起点側マーカー描画領域の左上 Y。</summary>
+    /// <summary>起点側マーカー描画領域の左上 Y</summary>
     public double SourceMarkerTop => SourceMarkerY - MarkerSize / 2;
 
-    /// <summary>終点側マーカーの中心 X。</summary>
+    /// <summary>終点側マーカーの中心 X</summary>
     public double TargetMarkerX => _targetMarkerX;
 
-    /// <summary>終点側マーカー描画領域の左上 X。</summary>
+    /// <summary>終点側マーカー描画領域の左上 X</summary>
     public double TargetMarkerLeft => TargetMarkerX - MarkerSize / 2;
 
-    /// <summary>終点側マーカーの中心 Y。</summary>
+    /// <summary>終点側マーカーの中心 Y</summary>
     public double TargetMarkerY => _targetMarkerY;
 
-    /// <summary>終点側マーカー描画領域の左上 Y。</summary>
+    /// <summary>終点側マーカー描画領域の左上 Y</summary>
     public double TargetMarkerTop => TargetMarkerY - MarkerSize / 2;
 
-    /// <summary>起点マーカーをエンティティ側へ向けて回転させる角度（度）。</summary>
+    /// <summary>起点マーカーをエンティティ側へ向けて回転させる角度（度）</summary>
     public double SourceMarkerAngle => _sourceMarkerAngle;
 
-    /// <summary>終点マーカーをエンティティ側へ向けて回転させる角度（度）。</summary>
+    /// <summary>終点マーカーをエンティティ側へ向けて回転させる角度（度）</summary>
     public double TargetMarkerAngle => _targetMarkerAngle;
 
-    /// <summary>線の中点 X（ラベル表示用）。</summary>
+    /// <summary>線の中点 X（ラベル表示用）</summary>
     public double LabelX => _labelX;
 
-    /// <summary>線の中点 Y（ラベル表示用）。</summary>
+    /// <summary>線の中点 Y（ラベル表示用）</summary>
     public double LabelY => _labelY;
 
-    /// <summary>自己参照リレーションかどうかです。</summary>
+    /// <summary>自己参照リレーションかどうか</summary>
     public bool IsSelfRelationship => Source.Id == Target.Id;
 
-    /// <summary>自己参照リレーション描画用のループを表示するかどうかです。</summary>
+    /// <summary>自己参照リレーション描画用のループを表示するかどうか</summary>
     public bool ShowSelfLoop => IsSelfRelationship;
 
-    /// <summary>端点マーカーを表示するかどうかです。</summary>
+    /// <summary>端点マーカーを表示するかどうか</summary>
     public bool ShowEndpointMarkers => !IsSelfRelationship;
 
-    /// <summary>自己参照ループの左上 X 座標です。</summary>
+    /// <summary>自己参照ループの左上 X 座標</summary>
     public double SelfLoopLeft => _selfLoopLeft;
 
-    /// <summary>自己参照ループの左上 Y 座標です。</summary>
+    /// <summary>自己参照ループの左上 Y 座標</summary>
     public double SelfLoopTop => _selfLoopTop;
 
-    /// <summary>自己参照ループの幅です。</summary>
+    /// <summary>自己参照ループの幅</summary>
     public double SelfLoopWidth => SelfLoopSize;
 
-    /// <summary>自己参照ループの高さです。</summary>
+    /// <summary>自己参照ループの高さ</summary>
     public double SelfLoopHeight => SelfLoopSize;
 
     // ===== 種別ごとのマーカー種類 =====
 
-    /// <summary>
-    /// 端点マーカーの種類。
-    /// </summary>
+    /// <summary>端点マーカーの種類</summary>
     public enum MarkerKind
     {
-        /// <summary>「1」を表す（短い縦棒）。</summary>
+        /// <summary>「1」を表す（短い縦棒）</summary>
         One,
 
-        /// <summary>「多」を表す（鳥の足: crow's foot）。</summary>
+        /// <summary>「多」を表す（鳥の足 crow's foot）</summary>
         Many,
     }
 
-    /// <summary>起点側マーカーの種類。</summary>
+    /// <summary>起点側マーカーの種類</summary>
     public MarkerKind SourceMarker =>
         Type switch
         {
@@ -447,7 +452,7 @@ public partial class RelationshipViewModel : ObservableObject
             _ => MarkerKind.One,
         };
 
-    /// <summary>終点側マーカーの種類。</summary>
+    /// <summary>終点側マーカーの種類</summary>
     public MarkerKind TargetMarker =>
         Type switch
         {
@@ -457,7 +462,7 @@ public partial class RelationshipViewModel : ObservableObject
             _ => MarkerKind.One,
         };
 
-    /// <summary>線上に表示するラベルテキスト。</summary>
+    /// <summary>線上に表示するラベルテキスト（種別に応じた多重度表記）</summary>
     public string Label =>
         Type switch
         {
@@ -467,7 +472,7 @@ public partial class RelationshipViewModel : ObservableObject
             _ => string.Empty,
         };
 
-    /// <summary>現在の状態をモデルにコピーして返します。</summary>
+    /// <summary>現在の状態をモデルへコピーして返す</summary>
     public Relationship ToModel() =>
         new()
         {
@@ -482,7 +487,7 @@ public partial class RelationshipViewModel : ObservableObject
             OnUpdate = OnUpdate,
         };
 
-    /// <summary>両端の PropertyChanged 購読を解除します（画面リセット時など）。</summary>
+    /// <summary>両端エンティティ・カラムへの購読をすべて解除する（画面リセットや破棄時のリーク防止）</summary>
     public void Detach()
     {
         Source.PropertyChanged -= OnEndpointChanged;
