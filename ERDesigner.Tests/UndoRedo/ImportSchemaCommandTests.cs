@@ -5,11 +5,10 @@ using FluentAssertions;
 
 namespace ERDesigner.Tests.UndoRedo;
 
-/// <summary>
-/// <see cref="ImportSchemaCommand"/> のテスト。
-/// </summary>
+/// <summary><see cref="ImportSchemaCommand"/> の置換・復元・リレーション取込を検証するテストクラス</summary>
 public class ImportSchemaCommandTests
 {
+    /// <summary>Execute で既存図が取込内容へ置換され、Undo で元へ復元、再 Execute で再置換されることを検証する</summary>
     [Fact(DisplayName = "Execute で既存ダイアグラムが置換され、Undo で復元される")]
     public void ExecuteUndo_Replaces_And_Restores()
     {
@@ -31,6 +30,7 @@ public class ImportSchemaCommandTests
         main.Entities.Should().ContainSingle().Which.TableName.Should().Be("New");
     }
 
+    /// <summary>エンティティに加えリレーションも取り込まれ、種別が保持されることを検証する</summary>
     [Fact(DisplayName = "リレーションも含めて取り込まれる")]
     public void Execute_ImportsRelationships()
     {

@@ -5,11 +5,10 @@ using FluentAssertions;
 
 namespace ERDesigner.Tests.Services;
 
-/// <summary>
-/// <see cref="AutoLayoutService"/> のテスト。
-/// </summary>
+/// <summary><see cref="AutoLayoutService"/> の格子・階層レイアウトを検証するテストクラス</summary>
 public class AutoLayoutServiceTests
 {
+    /// <summary>配置前と判別できるよう負座標で初期化したテスト用エンティティを生成する</summary>
     private static EntityViewModel NewEntity(string name = "E") =>
         new(
             new Entity
@@ -20,6 +19,7 @@ public class AutoLayoutServiceTests
             }
         );
 
+    /// <summary>格子レイアウトで同一行は同じ Y、次列は右、次行は下へ配置されることを検証する</summary>
     [Fact(DisplayName = "LayoutGrid: エンティティが格子状に並ぶ")]
     public void LayoutGrid_ArrangesInGrid()
     {
@@ -31,6 +31,7 @@ public class AutoLayoutServiceTests
         list[2].Y.Should().BeGreaterThan(list[0].Y);
     }
 
+    /// <summary>空コレクションを渡しても例外が発生しないことを検証する</summary>
     [Fact(DisplayName = "LayoutGrid: 空コレクションでも例外にならない")]
     public void LayoutGrid_Empty_DoesNotThrow()
     {
@@ -38,6 +39,7 @@ public class AutoLayoutServiceTests
         act.Should().NotThrow();
     }
 
+    /// <summary>階層レイアウトで最も次数の多いノードを起点に深さ順で縦配置されることを検証する</summary>
     [Fact(DisplayName = "LayoutTree: 接続されたエンティティが階層レイアウトされる")]
     public void LayoutTree_ArrangesByDepth()
     {
@@ -59,6 +61,7 @@ public class AutoLayoutServiceTests
         b.Y.Should().BeLessThan(c.Y);
     }
 
+    /// <summary>説明表示時は説明を含む表示高さを使って行間が確保されることを検証する</summary>
     [Fact(DisplayName = "LayoutGrid: 説明表示時は説明込みの高さで整列される")]
     public void LayoutGrid_UsesDisplayHeightWhenDescriptionsAreVisible()
     {

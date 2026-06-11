@@ -6,11 +6,10 @@ using FluentAssertions;
 
 namespace ERDesigner.Tests.UndoRedo;
 
-/// <summary>
-/// 個々の Undo コマンド (<see cref="MoveEntityCommand"/> など) のテスト。
-/// </summary>
+/// <summary>個々の Undo コマンド（移動・追加・削除・プロパティ変更・列順）の動作を検証するテストクラス</summary>
 public class CommandTests
 {
+    /// <summary>指定座標を持つテスト用エンティティを生成する</summary>
     private static EntityViewModel NewEntity(double x = 0, double y = 0) =>
         new(
             new Entity
@@ -21,6 +20,7 @@ public class CommandTests
             }
         );
 
+    /// <summary>MoveEntityCommand の Execute / Undo で座標が前後に往復することを検証する</summary>
     [Fact(DisplayName = "MoveEntityCommand: Execute / Undo で座標が往復する")]
     public void MoveEntityCommand_ExecuteUndo()
     {
@@ -36,6 +36,7 @@ public class CommandTests
         e.Y.Should().Be(20);
     }
 
+    /// <summary>AddEntityCommand の Execute で追加、Undo で除去されることを検証する</summary>
     [Fact(DisplayName = "AddEntityCommand: Undo で取り除かれ、Redo で再追加される")]
     public void AddEntityCommand_RoundTrip()
     {
@@ -50,6 +51,7 @@ public class CommandTests
         main.Entities.Should().NotContain(e);
     }
 
+    /// <summary>RemoveEntityCommand が接続リレーションも併せて削除・復元することを検証する</summary>
     [Fact(DisplayName = "RemoveEntityCommand: 関連リレーションも削除・復元される")]
     public void RemoveEntityCommand_AlsoRemovesRelationships()
     {
@@ -73,6 +75,7 @@ public class CommandTests
         main.Relationships.Should().Contain(rel);
     }
 
+    /// <summary>PropertyChangeCommand で任意プロパティの値が Execute / Undo で往復することを検証する</summary>
     [Fact(DisplayName = "PropertyChangeCommand: 任意プロパティを Undo/Redo できる")]
     public void PropertyChangeCommand_Works()
     {
@@ -87,6 +90,7 @@ public class CommandTests
         e.TableName.Should().Be("T");
     }
 
+    /// <summary>PropertyChangeCommand の適用後フックが Execute と Undo の両方で呼ばれることを検証する</summary>
     [Fact(DisplayName = "PropertyChangeCommand: 適用後フックが Execute/Undo の両方で呼ばれる")]
     public void PropertyChangeCommand_AfterApply_IsInvoked()
     {
@@ -101,6 +105,7 @@ public class CommandTests
         count.Should().Be(2);
     }
 
+    /// <summary>MoveColumnOrderCommand の Execute / Undo でカラム並び順が往復することを検証する</summary>
     [Fact(DisplayName = "MoveColumnOrderCommand: Execute / Undo でカラム順が往復する")]
     public void MoveColumnOrderCommand_ExecuteUndo()
     {
@@ -117,6 +122,7 @@ public class CommandTests
         columns.Select(x => x.Name).Should().Equal("A", "B", "C");
     }
 
+    /// <summary>AddColumnCommand の Execute で追加、Undo で除去されることを検証する</summary>
     [Fact(DisplayName = "AddColumnCommand: Undo で取り除かれ、Redo で再追加される")]
     public void AddColumnCommand_RoundTrip()
     {
@@ -131,6 +137,7 @@ public class CommandTests
         columns.Should().NotContain(column);
     }
 
+    /// <summary>RemoveColumnCommand の Undo で削除カラムが元の位置へ復元されることを検証する</summary>
     [Fact(DisplayName = "RemoveColumnCommand: Undo で元の位置に復元される")]
     public void RemoveColumnCommand_RoundTrip()
     {

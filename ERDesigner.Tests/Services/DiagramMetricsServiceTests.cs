@@ -5,11 +5,10 @@ using FluentAssertions;
 
 namespace ERDesigner.Tests.Services;
 
-/// <summary>
-/// <see cref="DiagramMetricsService"/> のテスト。
-/// </summary>
+/// <summary><see cref="DiagramMetricsService"/> の幅・高さ見積もりを検証するテストクラス</summary>
 public class DiagramMetricsServiceTests
 {
+    /// <summary>長いカラム名と型が重ならない十分な幅が返ることを検証する</summary>
     [Fact(DisplayName = "CalculateAutoWidth: 長いカラム名と型が重ならない幅を返す")]
     public void CalculateAutoWidth_ReturnsWideEnoughWidth()
     {
@@ -30,6 +29,7 @@ public class DiagramMetricsServiceTests
         width.Should().BeGreaterThan(200);
     }
 
+    /// <summary>説明表示ありの見積もり高さが説明なしより大きくなることを検証する</summary>
     [Fact(DisplayName = "EstimateEntityHeight: 説明表示時は高さが増える")]
     public void EstimateEntityHeight_WithDescriptions_IsHigher()
     {
@@ -57,6 +57,7 @@ public class DiagramMetricsServiceTests
         withDescriptions.Should().BeGreaterThan(withoutDescriptions);
     }
 
+    /// <summary>NULL 許容表示ありの自動幅が表示なしより大きくなることを検証する</summary>
     [Fact(DisplayName = "CalculateAutoWidth: NULL 表示時は幅が増える")]
     public void CalculateAutoWidth_WithNullability_IsWider()
     {

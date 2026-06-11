@@ -4,25 +4,29 @@ using FluentAssertions;
 
 namespace ERDesigner.Tests.UndoRedo;
 
-/// <summary>
-/// <see cref="UndoRedoManager"/> の動作を検証するテストクラスです。
-/// </summary>
+/// <summary><see cref="UndoRedoManager"/> の Execute / Push / Undo / Redo と履歴集約を検証するテストクラス</summary>
 public class UndoRedoManagerTests
 {
-    /// <summary>
-    /// テスト用のシンプルなコマンド。<see cref="Execute"/> と <see cref="Undo"/> の呼び出しを記録します。
-    /// </summary>
+    /// <summary>Execute / Undo の呼び出し回数を記録するテスト用コマンド</summary>
     private sealed class StubCommand : IUndoableCommand
     {
+        /// <summary>Execute が呼ばれた回数</summary>
         public int ExecuteCount { get; private set; }
+
+        /// <summary>Undo が呼ばれた回数</summary>
         public int UndoCount { get; private set; }
+
+        /// <inheritdoc />
         public string Description => "stub";
 
+        /// <inheritdoc />
         public void Execute() => ExecuteCount++;
 
+        /// <inheritdoc />
         public void Undo() => UndoCount++;
     }
 
+    /// <summary>Execute でコマンドが実行され Undo 可能・Redo 不可になることを検証する</summary>
     [Fact(DisplayName = "Execute するとコマンドが実行され Undo 可能になる")]
     public void Execute_RunsCommandAndEnablesUndo()
     {
@@ -36,6 +40,7 @@ public class UndoRedoManagerTests
         mgr.CanRedo.Should().BeFalse();
     }
 
+    /// <summary>Push は Execute を呼ばずに Undo スタックへ登録することを検証する</summary>
     [Fact(DisplayName = "Push は Execute を呼ばずに Undo スタックへ積む")]
     public void Push_DoesNotExecuteButRegisters()
     {
@@ -48,6 +53,7 @@ public class UndoRedoManagerTests
         mgr.CanUndo.Should().BeTrue();
     }
 
+    /// <summary>Undo で Undo が、Redo で再 Execute が呼ばれ、可否フラグが連動することを検証する</summary>
     [Fact(DisplayName = "Undo / Redo が正しく繰り返し動作する")]
     public void UndoRedo_RoundTrip()
     {
@@ -64,6 +70,7 @@ public class UndoRedoManagerTests
         mgr.CanUndo.Should().BeTrue();
     }
 
+    /// <summary>Undo 後に新たな Execute を行うと Redo スタックが破棄されることを検証する</summary>
     [Fact(DisplayName = "Execute 後は Redo スタックがクリアされる")]
     public void Execute_ClearsRedoStack()
     {
@@ -79,6 +86,7 @@ public class UndoRedoManagerTests
         mgr.CanRedo.Should().BeFalse();
     }
 
+    /// <summary>同一 GroupId のプロパティ変更が 1 履歴へ集約され、まとめて Undo / Redo されることを検証する</summary>
     [Fact(DisplayName = "同一グループの PropertyChangeCommand は 1 回の Undo/Redo で処理される")]
     public void Push_GroupedPropertyChanges_AreHandledAsSingleStep()
     {
