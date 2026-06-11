@@ -1,4 +1,5 @@
 ﻿using ERDesigner.Services;
+using ERDesigner.Tests.TestDoubles;
 using ERDesigner.ViewModels;
 using FluentAssertions;
 
@@ -116,5 +117,18 @@ public class SchemaSyncDialogViewModelTests
         vm.ScriptPreview.Should().Contain("ALTER TABLE [Customer] ADD [Name] nvarchar(50) NULL;");
         vm.ScriptPreview.Should().NotContain("RebuildTable");
         vm.ScriptPreview.Should().NotContain("列順変更は DB 同期しません");
+    }
+
+    [Fact(DisplayName = "Execute: 警告確認でキャンセルするとスクリプトは実行されない")]
+    public async Task Execute_ConfirmDeclined_DoesNotRunScript()
+    {
+        var dialogs = new StubDialogService { ConfirmResult = false };
+        var vm = new SchemaSyncDialogViewModel(new SqlConnectionSettings(), [], [], dialogs) { ScriptPreview = "DROP TABLE [X];" };
+
+        await vm.ExecuteCommand.ExecuteAsync(null);
+
+        dialogs.WarningConfirmMessages.Should().ContainSingle();
+        vm.StatusMessage.Should().BeEmpty();
+        vm.IsBusy.Should().BeFalse();
     }
 }

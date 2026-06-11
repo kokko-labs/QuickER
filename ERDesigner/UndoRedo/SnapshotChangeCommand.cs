@@ -11,7 +11,7 @@ public sealed class SnapshotChangeCommand : IUndoableCommand
     private readonly IReadOnlyDictionary<string, object?> _before;
     private readonly IReadOnlyDictionary<string, object?> _after;
 
-    /// <summary>プロパティを一括適用するコールバック（RunWithoutUndoTracking 内で呼ぶことを想定）。</summary>
+    /// <summary>プロパティを一括適用するコールバック（DiagramChangeTracker.RunWithoutTracking 内で呼ぶことを想定）。</summary>
     private readonly Action<object, IReadOnlyDictionary<string, object?>> _applySnapshot;
 
     /// <summary>プロパティ適用後に呼ぶ後処理（FK ルール再適用など）。</summary>

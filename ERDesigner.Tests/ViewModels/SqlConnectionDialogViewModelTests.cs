@@ -1,5 +1,6 @@
 ﻿using System.IO;
 using ERDesigner.Services;
+using ERDesigner.Tests.TestDoubles;
 using ERDesigner.ViewModels;
 using FluentAssertions;
 
@@ -114,5 +115,51 @@ public class SqlConnectionDialogViewModelTests : IDisposable
         reopened.UserId.Should().Be("sa");
         reopened.Password.Should().Be("secret");
         reopened.StatusMessage.Should().Be("前回接続情報を復元しました。");
+    }
+
+    [Fact(DisplayName = "DeleteProfile: 確認でキャンセルするとプロファイルは削除されない")]
+    public void DeleteProfile_ConfirmDeclined_KeepsProfile()
+    {
+        var store = CreateStore();
+        store.Upsert(
+            new SqlConnectionProfile
+            {
+                Name = "TestDB",
+                Server = "s",
+                Database = "d",
+            },
+            password: ""
+        );
+        var dialogs = new StubDialogService { ConfirmResult = false };
+        var vm = new SqlConnectionDialogViewModel(store, dialogs);
+        vm.SelectedProfile = vm.Profiles[0];
+
+        vm.DeleteProfileCommand.Execute(null);
+
+        vm.Profiles.Should().ContainSingle();
+        dialogs.ConfirmMessages.Should().ContainSingle().Which.Should().Contain("TestDB");
+    }
+
+    [Fact(DisplayName = "DeleteProfile: 確認で OK するとプロファイルが削除される")]
+    public void DeleteProfile_ConfirmAccepted_DeletesProfile()
+    {
+        var store = CreateStore();
+        store.Upsert(
+            new SqlConnectionProfile
+            {
+                Name = "TestDB",
+                Server = "s",
+                Database = "d",
+            },
+            password: ""
+        );
+        var dialogs = new StubDialogService { ConfirmResult = true };
+        var vm = new SqlConnectionDialogViewModel(store, dialogs);
+        vm.SelectedProfile = vm.Profiles[0];
+
+        vm.DeleteProfileCommand.Execute(null);
+
+        vm.Profiles.Should().BeEmpty();
+        vm.StatusMessage.Should().Contain("削除しました");
     }
 }

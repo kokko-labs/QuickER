@@ -2,7 +2,6 @@
 using System.Collections.ObjectModel;
 using System.Linq;
 using System.Threading.Tasks;
-using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using ERDesigner.Models;
@@ -18,6 +17,9 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
     private readonly SqlConnectionSettings _settings;
     private readonly IReadOnlyList<Entity> _targetEntities;
     private readonly IReadOnlyList<Relationship> _targetRelationships;
+
+    /// <summary>確認・通知ダイアログの表示先です。テストではスタブに差し替えられます。</summary>
+    private readonly IDialogService _dialogs;
 
     /// <summary>差分項目一覧 (UI のチェックボックスツリー用)。</summary>
     public ObservableCollection<SchemaDiffItem> DiffItems { get; } = new();
@@ -44,11 +46,18 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
     /// <summary>
     /// 新しい ViewModel を生成します。
     /// </summary>
-    public SchemaSyncDialogViewModel(SqlConnectionSettings settings, IReadOnlyList<Entity> targetEntities, IReadOnlyList<Relationship> targetRelationships)
+    /// <param name="dialogService">確認・通知ダイアログの表示先 (省略時は MessageBox。テストではスタブを注入)。</param>
+    public SchemaSyncDialogViewModel(
+        SqlConnectionSettings settings,
+        IReadOnlyList<Entity> targetEntities,
+        IReadOnlyList<Relationship> targetRelationships,
+        IDialogService? dialogService = null
+    )
     {
         _settings = settings;
         _targetEntities = targetEntities;
         _targetRelationships = targetRelationships;
+        _dialogs = dialogService ?? new MessageBoxDialogService();
     }
 
     /// <summary>差分を再計算します。</summary>
@@ -154,9 +163,7 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
         var msg = destructive
             ? $"破壊的な変更 (削除/型変更) を含むスクリプトを {_settings.Database} に実行します。よろしいですか？"
             : $"スクリプトを {_settings.Database} に実行します。よろしいですか？";
-        var ans = MessageBox.Show(msg, "確認", MessageBoxButton.OKCancel, MessageBoxImage.Warning);
-
-        if (ans != MessageBoxResult.OK)
+        if (!_dialogs.ConfirmWarning(msg, "確認"))
         {
             return;
         }
@@ -172,14 +179,14 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
             if (result.Committed)
             {
                 StatusMessage = $"成功: {result.Batches.Count} バッチを実行し COMMIT しました。";
-                MessageBox.Show(StatusMessage, "完了", MessageBoxButton.OK, MessageBoxImage.Information);
+                _dialogs.ShowInformation(StatusMessage, "完了");
                 // 自動で再計算
                 await RefreshAsync().ConfigureAwait(true);
             }
             else
             {
                 StatusMessage = "失敗: " + result.Error;
-                MessageBox.Show("実行に失敗したため ROLLBACK されました:\n" + result.Error, "エラー", MessageBoxButton.OK, MessageBoxImage.Error);
+                _dialogs.ShowError("実行に失敗したため ROLLBACK されました:\n" + result.Error, "エラー");
             }
         }
         catch (Exception ex)

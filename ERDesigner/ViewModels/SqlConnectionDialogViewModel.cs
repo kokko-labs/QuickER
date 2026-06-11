@@ -1,7 +1,6 @@
 ﻿using System.Collections.ObjectModel;
 using System.Linq;
 using System.Threading.Tasks;
-using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using ERDesigner.Services;
@@ -16,6 +15,9 @@ namespace ERDesigner.ViewModels;
 public partial class SqlConnectionDialogViewModel : ObservableObject
 {
     private readonly SqlConnectionProfileStore _store;
+
+    /// <summary>確認ダイアログの表示先です。テストではスタブに差し替えられます。</summary>
+    private readonly IDialogService _dialogs;
 
     /// <summary>サーバー名。</summary>
     [ObservableProperty]
@@ -78,9 +80,11 @@ public partial class SqlConnectionDialogViewModel : ObservableObject
 
     /// <summary>新しい ViewModel を生成します。</summary>
     /// <param name="store">プロファイル保存ストア (省略時は既定パスを使用)。</param>
-    public SqlConnectionDialogViewModel(SqlConnectionProfileStore? store = null)
+    /// <param name="dialogService">確認ダイアログの表示先 (省略時は MessageBox。テストではスタブを注入)。</param>
+    public SqlConnectionDialogViewModel(SqlConnectionProfileStore? store = null, IDialogService? dialogService = null)
     {
         _store = store ?? new SqlConnectionProfileStore();
+        _dialogs = dialogService ?? new MessageBoxDialogService();
         // 保存済み接続の先頭を自動選択すると、呼び出し元が復元した前回接続情報を上書きしてしまうため、初期選択は行わない。
         ReloadProfiles(selectFirst: false);
         RestoreLastConnection();
@@ -231,9 +235,7 @@ public partial class SqlConnectionDialogViewModel : ObservableObject
             return;
         }
 
-        var ans = MessageBox.Show($"プロファイル '{SelectedProfile.Name}' を削除します。よろしいですか？", "確認", MessageBoxButton.OKCancel, MessageBoxImage.Question);
-
-        if (ans != MessageBoxResult.OK)
+        if (!_dialogs.Confirm($"プロファイル '{SelectedProfile.Name}' を削除します。よろしいですか？", "確認"))
         {
             return;
         }

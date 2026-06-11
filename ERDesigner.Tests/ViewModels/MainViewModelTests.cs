@@ -1,4 +1,5 @@
 using ERDesigner.Models;
+using ERDesigner.Tests.TestDoubles;
 using ERDesigner.UndoRedo;
 using ERDesigner.ViewModels;
 using FluentAssertions;
@@ -112,7 +113,7 @@ public class MainViewModelTests
     [Fact(DisplayName = "同じ始点と終点のリレーションは種別が違っても重複追加されない")]
     public void RelationshipMode_DoesNotCreateDuplicateRelationship()
     {
-        var vm = new MainViewModel { IsConfirmationEnabled = false };
+        var vm = new MainViewModel(new StubDialogService());
         vm.AddEntityCommand.Execute(null);
         vm.AddEntityCommand.Execute(null);
 
@@ -132,7 +133,7 @@ public class MainViewModelTests
     [Fact(DisplayName = "自己参照リレーションも重複追加されない")]
     public void RelationshipMode_DoesNotCreateDuplicateSelfRelationship()
     {
-        var vm = new MainViewModel { IsConfirmationEnabled = false };
+        var vm = new MainViewModel(new StubDialogService());
         vm.AddEntityCommand.Execute(null);
         vm.Entities[0].Columns.Add(new ColumnViewModel(new Column { Name = "ParentId", DataType = "int" }));
 
@@ -644,8 +645,7 @@ public class MainViewModelTests
     [Fact(DisplayName = "新規で図をクリアした後は Undo/Redo 履歴もリセットされる")]
     public void NewDiagram_ClearsUndoRedoHistory()
     {
-        var vm = new MainViewModel();
-        vm.IsConfirmationEnabled = false;
+        var vm = new MainViewModel(new StubDialogService());
         vm.AddEntityCommand.Execute(null);
 
         vm.NewDiagramCommand.Execute(null);
@@ -738,5 +738,55 @@ public class MainViewModelTests
 
         vm.RedoCommand.Execute(null);
         vm.Entities.Select(entity => (entity.X, entity.Y)).Should().Equal(after);
+    }
+
+    // ---------------- ダイアログサービス (IDialogService) ----------------
+
+    [Fact(DisplayName = "NewDiagram: 確認でキャンセルするとダイアグラムは保持される")]
+    public void NewDiagram_ConfirmDeclined_KeepsDiagram()
+    {
+        var dialogs = new StubDialogService { ConfirmResult = false };
+        var vm = new MainViewModel(dialogs);
+        vm.AddEntityCommand.Execute(null);
+
+        vm.NewDiagramCommand.Execute(null);
+
+        vm.Entities.Should().HaveCount(1);
+        dialogs.ConfirmMessages.Should().ContainSingle().Which.Should().Contain("クリア");
+    }
+
+    [Fact(DisplayName = "NewDiagram: 確認で OK するとダイアグラムがクリアされる")]
+    public void NewDiagram_ConfirmAccepted_ClearsDiagram()
+    {
+        var dialogs = new StubDialogService { ConfirmResult = true };
+        var vm = new MainViewModel(dialogs);
+        vm.AddEntityCommand.Execute(null);
+
+        vm.NewDiagramCommand.Execute(null);
+
+        vm.Entities.Should().BeEmpty();
+        dialogs.ConfirmMessages.Should().HaveCount(1);
+    }
+
+    [Fact(DisplayName = "重複リレーション作成時は情報ダイアログが表示され追加されない")]
+    public void RelationshipMode_DuplicateRelationship_ShowsInformation()
+    {
+        var dialogs = new StubDialogService();
+        var vm = new MainViewModel(dialogs);
+        vm.AddEntityCommand.Execute(null);
+        vm.AddEntityCommand.Execute(null);
+        var a = vm.Entities[0];
+        var b = vm.Entities[1];
+
+        vm.StartAddOneToManyCommand.Execute(null);
+        vm.OnEntityClicked(a);
+        vm.OnEntityClicked(b);
+
+        vm.StartAddOneToManyCommand.Execute(null);
+        vm.OnEntityClicked(a);
+        vm.OnEntityClicked(b);
+
+        vm.Relationships.Should().HaveCount(1);
+        dialogs.InformationMessages.Should().ContainSingle().Which.Should().Contain("すでに存在します");
     }
 }

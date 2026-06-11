@@ -121,7 +121,7 @@ public partial class MainViewModel
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"出力できませんでした。{Environment.NewLine}{ex.Message}", "エラー", MessageBoxButton.OK, MessageBoxImage.Error);
+            _dialogs.ShowError($"出力できませんでした。{Environment.NewLine}{ex.Message}", "エラー");
         }
     }
 
@@ -153,7 +153,7 @@ public partial class MainViewModel
 
             if (result.HasErrors)
             {
-                MessageBox.Show(BuildGenerationDiagnosticsMessage(result), "C# 生成エラー", MessageBoxButton.OK, MessageBoxImage.Error);
+                _dialogs.ShowError(BuildGenerationDiagnosticsMessage(result), "C# 生成エラー");
                 return;
             }
 
@@ -164,11 +164,11 @@ public partial class MainViewModel
             var message = string.IsNullOrWhiteSpace(diagnostics)
                 ? "C# コードの生成が完了しました。"
                 : $"C# コードの生成が完了しました。{Environment.NewLine}{Environment.NewLine}{diagnostics}";
-            MessageBox.Show(message, "完了", MessageBoxButton.OK, MessageBoxImage.Information);
+            _dialogs.ShowInformation(message, "完了");
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"C# コードを生成できませんでした。{Environment.NewLine}{ex.Message}", "エラー", MessageBoxButton.OK, MessageBoxImage.Error);
+            _dialogs.ShowError($"C# コードを生成できませんでした。{Environment.NewLine}{ex.Message}", "エラー");
         }
     }
 
@@ -244,7 +244,7 @@ public partial class MainViewModel
             return true;
         }
 
-        return MessageBox.Show(message, "確認", MessageBoxButton.OKCancel, MessageBoxImage.Question) == MessageBoxResult.OK;
+        return _dialogs.Confirm(message, "確認");
     }
 
     /// <summary>
@@ -268,7 +268,7 @@ public partial class MainViewModel
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"取り込めませんでした。{Environment.NewLine}{ex.Message}", "エラー", MessageBoxButton.OK, MessageBoxImage.Error);
+            _dialogs.ShowError($"取り込めませんでした。{Environment.NewLine}{ex.Message}", "エラー");
         }
     }
 
@@ -320,7 +320,7 @@ public partial class MainViewModel
                 break;
         }
 
-        MessageBox.Show($"{displayName}の出力が完了しました。", "完了", MessageBoxButton.OK, MessageBoxImage.Information);
+        _dialogs.ShowInformation($"{displayName}の出力が完了しました。", "完了");
     }
 
     /// <summary>
@@ -350,7 +350,7 @@ public partial class MainViewModel
         }
 
         ReplaceDiagramWithoutHistory(diagram.Entities, diagram.Relationships, autoLayout: true);
-        MessageBox.Show($"{displayName}の取り込みが完了しました。", "完了", MessageBoxButton.OK, MessageBoxImage.Information);
+        _dialogs.ShowInformation($"{displayName}の取り込みが完了しました。", "完了");
     }
 
     /// <summary>
@@ -435,7 +435,7 @@ public partial class MainViewModel
         }
         catch (System.Exception ex)
         {
-            MessageBox.Show("取り込みに失敗しました: " + ex.Message, "エラー", MessageBoxButton.OK, MessageBoxImage.Error);
+            _dialogs.ShowError("取り込みに失敗しました: " + ex.Message, "エラー");
         }
     }
 
@@ -482,7 +482,7 @@ public partial class MainViewModel
 
         if (entities.Count == 0)
         {
-            MessageBox.Show("AI 応答にテーブルが含まれていませんでした。", "情報", MessageBoxButton.OK, MessageBoxImage.Information);
+            _dialogs.ShowInformation("AI 応答にテーブルが含まれていませんでした。", "情報");
             return;
         }
 
@@ -526,13 +526,13 @@ public partial class MainViewModel
 
         if (entities.Count == 0)
         {
-            MessageBox.Show("AI 応答にテーブルが含まれていませんでした。", "情報", MessageBoxButton.OK, MessageBoxImage.Information);
+            _dialogs.ShowInformation("AI 応答にテーブルが含まれていませんでした。", "情報");
             return;
         }
 
         if (HasSameStructure(entities, relationships))
         {
-            MessageBox.Show("AI 更新による変更はありませんでした。", "情報", MessageBoxButton.OK, MessageBoxImage.Information);
+            _dialogs.ShowInformation("AI 更新による変更はありませんでした。", "情報");
             return;
         }
 

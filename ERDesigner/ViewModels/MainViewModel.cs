@@ -1,5 +1,6 @@
 ﻿using System.Collections.ObjectModel;
-using System.Windows;
+using System.Collections.Specialized;
+using System.ComponentModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using ERDesigner.Models;
@@ -17,9 +18,6 @@ public partial class MainViewModel : ObservableObject
     public IRelayCommand CopySelectedEntityCommand { get; }
 
     public IRelayCommand PasteCopiedEntityCommand { get; }
-
-    /// <summary>確認ダイアログを表示するかどうか。テスト時は false にできます。</summary>
-    public bool IsConfirmationEnabled { get; set; } = true;
 
     public ObservableCollection<EntityViewModel> Entities { get; } = new();
     public ObservableCollection<RelationshipViewModel> Relationships { get; } = new();
@@ -77,8 +75,19 @@ public partial class MainViewModel : ObservableObject
     /// <summary>エンティティ見出しの背景色プリセット一覧です。</summary>
     public IReadOnlyList<EntityTitleColorOption> EntityTitleColorOptions => EntityTitleColorPalette.Options;
 
+    /// <summary>確認・通知ダイアログの表示先です。テストではスタブに差し替えられます。</summary>
+    private readonly IDialogService _dialogs;
+
+    private readonly DiagramChangeTracker _changeTracker;
+
     public MainViewModel()
+        : this(new MessageBoxDialogService()) { }
+
+    /// <summary>ダイアログ表示を差し替えたい場合 (単体テスト等) に使用します。</summary>
+    public MainViewModel(IDialogService dialogService)
     {
+        _dialogs = dialogService;
+        _changeTracker = new DiagramChangeTracker(UndoRedo, Entities, Relationships, ApplyRelationshipColumnRules);
         CopySelectedEntityCommand = new RelayCommand(CopySelectedEntity, CanCopySelectedEntity);
         PasteCopiedEntityCommand = new RelayCommand(PasteCopiedEntity, CanPasteCopiedEntity);
         Entities.CollectionChanged += OnEntitiesCollectionChanged;
@@ -100,7 +109,7 @@ public partial class MainViewModel : ObservableObject
 
     private void ReplaceDiagram(IEnumerable<Entity> entities, IEnumerable<Relationship> relationships, bool clearUndoHistory)
     {
-        RunWithoutUndoTracking(() =>
+        _changeTracker.RunWithoutTracking(() =>
         {
             foreach (var r in Relationships)
             {
@@ -157,7 +166,7 @@ public partial class MainViewModel : ObservableObject
     {
         var before = CaptureEntityLayoutSnapshot();
 
-        RunWithoutUndoTracking(() =>
+        _changeTracker.RunWithoutTracking(() =>
         {
             layoutAction();
             RefreshCanvasSize();
@@ -178,7 +187,7 @@ public partial class MainViewModel : ObservableObject
     {
         ReplaceDiagram(entities, relationships, clearUndoHistory: true);
 
-        RunWithoutUndoTracking(() =>
+        _changeTracker.RunWithoutTracking(() =>
         {
             AutoFitEntityWidths(Entities);
 
@@ -227,14 +236,9 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void NewDiagram()
     {
-        if (IsConfirmationEnabled && Entities.Count > 0)
+        if (Entities.Count > 0 && !_dialogs.Confirm("現在のダイアグラムをクリアします。よろしいですか？", "確認"))
         {
-            var ans = MessageBox.Show("現在のダイアグラムをクリアします。よろしいですか？", "確認", MessageBoxButton.OKCancel, MessageBoxImage.Question);
-
-            if (ans != MessageBoxResult.OK)
-            {
-                return;
-            }
+            return;
         }
 
         ReplaceDiagram(Array.Empty<Entity>(), Array.Empty<Relationship>(), clearUndoHistory: true);
@@ -483,15 +487,7 @@ public partial class MainViewModel : ObservableObject
 
             if (HasSameRelationship(PendingRelationshipSource, entity))
             {
-                if (IsConfirmationEnabled)
-                {
-                    MessageBox.Show(
-                        "同じ関係のリレーションはすでに存在します。既存のリレーションを編集してください。",
-                        "重複リレーション",
-                        MessageBoxButton.OK,
-                        MessageBoxImage.Information
-                    );
-                }
+                _dialogs.ShowInformation("同じ関係のリレーションはすでに存在します。既存のリレーションを編集してください。", "重複リレーション");
 
                 IsRelationshipMode = false;
                 PendingRelationshipSource = null;
@@ -579,10 +575,10 @@ public partial class MainViewModel : ObservableObject
     // ---------------- Undo/Redo ----------------
 
     [RelayCommand]
-    private void Undo() => RunWithoutUndoTracking(() => UndoRedo.Undo());
+    private void Undo() => _changeTracker.RunWithoutTracking(() => UndoRedo.Undo());
 
     [RelayCommand]
-    private void Redo() => RunWithoutUndoTracking(() => UndoRedo.Redo());
+    private void Redo() => _changeTracker.RunWithoutTracking(() => UndoRedo.Redo());
 
     [RelayCommand]
     private void EntityClick(EntityViewModel? entity)
@@ -663,7 +659,7 @@ public partial class MainViewModel : ObservableObject
     /// <summary>リレーションに基づいて各カラムの PK/FK 編集可否と FK 状態を同期します。</summary>
     public void ApplyRelationshipColumnRules(object? excludedSnapshotTarget = null)
     {
-        RunWithoutUndoTracking(
+        _changeTracker.RunWithoutTracking(
             () =>
             {
                 foreach (var entity in Entities)
@@ -787,5 +783,63 @@ public partial class MainViewModel : ObservableObject
         }
 
         return candidate;
+    }
+
+    // ---------------- Collection changed handlers ----------------
+
+    private void OnEntitiesCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        if (e.OldItems is not null)
+        {
+            foreach (EntityViewModel entity in e.OldItems)
+            {
+                entity.PropertyChanged -= OnEntityPropertyChanged;
+                _changeTracker.DetachEntity(entity);
+            }
+        }
+
+        if (e.NewItems is not null)
+        {
+            foreach (EntityViewModel entity in e.NewItems)
+            {
+                entity.ShowDescriptionsInDiagram = ShowColumnDescriptionsInDiagram;
+                entity.ShowNullabilityInDiagram = ShowNullabilityInDiagram;
+                entity.PropertyChanged += OnEntityPropertyChanged;
+                _changeTracker.AttachEntity(entity);
+            }
+        }
+
+        OnPropertyChanged(nameof(Entities));
+        RefreshCanvasSize();
+    }
+
+    private void OnEntityPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is nameof(EntityViewModel.X) or nameof(EntityViewModel.Y) or nameof(EntityViewModel.Width) or nameof(EntityViewModel.DisplayHeight))
+        {
+            RefreshCanvasSize();
+        }
+    }
+
+    private void OnRelationshipsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        if (e.OldItems is not null)
+        {
+            foreach (RelationshipViewModel relationship in e.OldItems)
+            {
+                _changeTracker.DetachRelationship(relationship);
+            }
+        }
+
+        if (e.NewItems is not null)
+        {
+            foreach (RelationshipViewModel relationship in e.NewItems)
+            {
+                _changeTracker.AttachRelationship(relationship);
+            }
+        }
+
+        ApplyRelationshipColumnRules();
+        OnPropertyChanged(nameof(Relationships));
     }
 }
