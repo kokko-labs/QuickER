@@ -67,6 +67,7 @@ public class CSharpCodeGenerationServiceTests
     /// <summary>
     /// 1対多リレーションからコレクション型ナビゲーションと NavigationReference 属性が生成され、親参照プロパティに JsonIgnore が付与されることを検証する
     /// </summary>
+    /// <summary>ナビゲーションプロパティが生成され、親参照側に JsonIgnore 属性が付くことを検証する</summary>
     [Fact]
     public void Generate_ShouldCreateNavigationAndJsonIgnoreOnParentReference()
     {
@@ -146,6 +147,7 @@ public class CSharpCodeGenerationServiceTests
     /// <summary>
     /// パスカルケースのテーブル名がそのままエンティティ名・ナビゲーションプロパティ名に反映されることを検証する
     /// </summary>
+    /// <summary>パスカルケースのテーブル名がエンティティ名・ナビゲーション名に保持されることを検証する</summary>
     [Fact]
     public void Generate_ShouldPreservePascalCaseTableNamesInEntityAndNavigationNames()
     {
@@ -220,6 +222,7 @@ public class CSharpCodeGenerationServiceTests
         result.Files[0].Content.Should().Contain("public AirconditionerCategoryEntity AirconditionerCategory { get; set; } = null!;");
     }
 
+    /// <summary>スネークケースのテーブル名がパスカルケースのエンティティ名へ変換されることを検証する</summary>
     [Fact]
     public void Generate_ShouldConvertSnakeCaseTableNamesToPascalCaseEntityNames()
     {
@@ -254,6 +257,7 @@ public class CSharpCodeGenerationServiceTests
         result.Files[0].Content.Should().Contain("public sealed class AirconditionerCategoryMapper");
     }
 
+    /// <summary>多対多リレーションが警告付きで生成スキップされることを検証する</summary>
     [Fact]
     public void Generate_ShouldWarnAndSkipManyToManyRelationship()
     {
@@ -315,6 +319,7 @@ public class CSharpCodeGenerationServiceTests
         result.Files[0].Content.Should().NotContain("ICollection<RoleEntity>");
     }
 
+    /// <summary>Entity ↔ EditModel を変換する Mapper クラスが生成されることを検証する</summary>
     [Fact]
     public void Generate_ShouldCreateMapperClass()
     {
@@ -364,6 +369,7 @@ public class CSharpCodeGenerationServiceTests
         result.Files[0].Content.Should().Contain("editModel.BindingName =");
     }
 
+    /// <summary>EditModel にバインディング文字列を確定値へ戻す処理が生成されることを検証する</summary>
     [Fact]
     public void Generate_EditModel_ShouldContainRevertInputMethod()
     {
@@ -421,6 +427,7 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("ExecuteRevert(() =>");
     }
 
+    /// <summary>Repository インターフェース・実装・DI 登録などの基盤コードが生成されることを検証する</summary>
     [Fact]
     public void Generate_ShouldCreateRepositoryInfrastructure()
     {
@@ -476,6 +483,7 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("DeleteSql = $\"DELETE FROM {tableName} WHERE [{keyColumnName}] = @id;\"");
     }
 
+    /// <summary>Repository の SQL 生成でナビゲーションプロパティが列に含まれないことを検証する</summary>
     [Fact]
     public void Generate_RepositorySql_ShouldExcludeNavigationProperties()
     {
@@ -562,6 +570,7 @@ public class CSharpCodeGenerationServiceTests
         content.Should().NotContain("[Customer]");
     }
 
+    /// <summary>バイナリ・値型カラムで安全なバインディング変換（Base64 / TryParse）が生成されることを検証する</summary>
     [Fact]
     public void Generate_EditModel_WithBinaryAndValueTypes_ShouldUseSafeBindingConversions()
     {
@@ -621,6 +630,7 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("private readonly ISqlConnectionFactory _connectionFactory = connectionFactory;");
     }
 
+    /// <summary>Entity のみ生成設定で EditModel や Mapper が出力されないことを検証する</summary>
     [Fact]
     public void Generate_EntityOnly_ShouldNotContainUiModelOrMapper()
     {
@@ -663,6 +673,7 @@ public class CSharpCodeGenerationServiceTests
         result.Files[0].Content.Should().NotContain("ItemMapper");
     }
 
+    /// <summary>多数のエンティティでも Scriban のループ上限に達せず生成が完了することを検証する</summary>
     [Fact]
     public void Generate_ManyEntities_ShouldNotHitScribanLoopLimit()
     {

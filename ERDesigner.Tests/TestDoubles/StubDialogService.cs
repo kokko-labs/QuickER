@@ -30,13 +30,16 @@ public sealed class StubDialogService : IDialogService
         return ConfirmResult;
     }
 
+    /// <summary>メッセージを記録し <see cref="ConfirmResult"/> を返す</summary>
     public bool ConfirmWarning(string message, string title)
     {
         WarningConfirmMessages.Add(message);
         return ConfirmResult;
     }
 
+    /// <summary>情報メッセージを記録する</summary>
     public void ShowInformation(string message, string title) => InformationMessages.Add(message);
 
+    /// <summary>エラーメッセージを記録する</summary>
     public void ShowError(string message, string title) => ErrorMessages.Add(message);
 }

@@ -5,8 +5,10 @@ using FluentAssertions;
 
 namespace ERDesigner.Tests.Services;
 
+/// <summary><see cref="ImageExportService"/> の SVG 生成を検証するテストクラス</summary>
 public class ImageExportServiceTests
 {
+    /// <summary>生成 SVG にエンティティ見出しの背景色とテーブル名が含まれることを検証する</summary>
     [Fact(DisplayName = "BuildSvg はエンティティ見出しの背景色を出力する")]
     public void BuildSvg_UsesEntityTitleBackgroundColor()
     {

@@ -3,11 +3,10 @@ using FluentAssertions;
 
 namespace ERDesigner.Tests.Services;
 
-/// <summary>
-/// <see cref="SchemaSyncExecutor.SplitBatches"/> の GO 区切り分割テスト。
-/// </summary>
+/// <summary><see cref="SchemaSyncExecutor.SplitBatches"/> の GO 区切り分割を検証するテストクラス</summary>
 public class SchemaSyncExecutorTests
 {
+    /// <summary>GO で区切られた SQL が複数バッチへ分割されることを検証する</summary>
     [Fact(DisplayName = "GO で区切られたバッチが分割される")]
     public void Split_BasicGo()
     {
@@ -18,6 +17,7 @@ public class SchemaSyncExecutorTests
         batches[1].Should().Contain("INSERT INTO A");
     }
 
+    /// <summary>末尾に GO が無くても残りが 1 バッチとして扱われることを検証する</summary>
     [Fact(DisplayName = "末尾に GO がなくてもバッチに含まれる")]
     public void Split_NoTrailingGo()
     {
@@ -25,6 +25,7 @@ public class SchemaSyncExecutorTests
         SchemaSyncExecutor.SplitBatches(sql).Should().HaveCount(1);
     }
 
+    /// <summary>小文字 go も区切りとして認識されることを検証する</summary>
     [Fact(DisplayName = "GO は大文字小文字無視")]
     public void Split_CaseInsensitive()
     {
@@ -32,6 +33,7 @@ public class SchemaSyncExecutorTests
         SchemaSyncExecutor.SplitBatches(sql).Should().HaveCount(2);
     }
 
+    /// <summary>空文字や GO のみの入力では空バッチ集合を返すことを検証する</summary>
     [Fact(DisplayName = "空文字や空行のみは無視")]
     public void Split_EmptyIgnored()
     {
