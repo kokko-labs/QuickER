@@ -5,11 +5,10 @@ using FluentAssertions;
 
 namespace ERDesigner.Tests.Services;
 
-/// <summary>
-/// <see cref="SchemaDiffService"/> の差分計算ロジックのテスト。
-/// </summary>
+/// <summary><see cref="SchemaDiffService"/> のテーブル・列・外部キー・説明の差分計算を検証するテストクラス</summary>
 public class SchemaDiffServiceTests
 {
+    /// <summary>名前と (列名, 型, 主キー) の組からテスト用エンティティを生成する</summary>
     private static Entity Tbl(string name, params (string Name, string Type, bool Pk)[] cols)
     {
         var e = new Entity { TableName = name };
@@ -30,6 +29,7 @@ public class SchemaDiffServiceTests
         return e;
     }
 
+    /// <summary>DB に存在しないテーブルが AddTable として検出されることを検証する</summary>
     [Fact(DisplayName = "DB 側に無いテーブルは AddTable になる")]
     public void NewTable_AddTable()
     {
@@ -40,6 +40,7 @@ public class SchemaDiffServiceTests
         diff.Items.Should().ContainSingle(i => i.Kind == SchemaDiffKind.AddTable && i.TableName == "Customer");
     }
 
+    /// <summary>DB に存在しない列が AddColumn として検出されることを検証する</summary>
     [Fact(DisplayName = "DB 側に無い列は AddColumn になる")]
     public void NewColumn_AddColumn()
     {
@@ -50,6 +51,7 @@ public class SchemaDiffServiceTests
         diff.Items.Should().ContainSingle(i => i.Kind == SchemaDiffKind.AddColumn && i.ColumnName == "Name");
     }
 
+    /// <summary>列の型変更が AlterColumn として検出され、既定では未選択であることを検証する</summary>
     [Fact(DisplayName = "型が変われば AlterColumn になり、既定では未選択")]
     public void TypeChange_AlterColumn_NotSelected()
     {
@@ -62,6 +64,7 @@ public class SchemaDiffServiceTests
         alter.IsSelected.Should().BeFalse();
     }
 
+    /// <summary>NULL 許容の変更が AlterColumn として検出され、説明に NULL 許容と記載されることを検証する</summary>
     [Fact(DisplayName = "NULL 許容が変われば AlterColumn になる")]
     public void NullabilityChange_AlterColumn_NotSelected()
     {
@@ -77,6 +80,7 @@ public class SchemaDiffServiceTests
         alter.Description.Should().Contain("NULL許容");
     }
 
+    /// <summary>ER 図に存在しない列が DropColumn として検出され、既定では未選択であることを検証する</summary>
     [Fact(DisplayName = "ER 図側に無い列は DropColumn になり、既定では未選択")]
     public void RemovedColumn_DropColumn_NotSelected()
     {
@@ -88,6 +92,7 @@ public class SchemaDiffServiceTests
         drop.IsSelected.Should().BeFalse();
     }
 
+    /// <summary>ER 図に存在しないテーブルが DropTable として検出されることを検証する</summary>
     [Fact(DisplayName = "ER 図側に無いテーブルは DropTable になる")]
     public void RemovedTable_DropTable()
     {
@@ -97,6 +102,7 @@ public class SchemaDiffServiceTests
         diff.Items.Should().ContainSingle(i => i.Kind == SchemaDiffKind.DropTable && i.TableName == "Old");
     }
 
+    /// <summary>ER 図のみに存在するリレーションが AddForeignKey として検出され、FK 列が解決されることを検証する</summary>
     [Fact(DisplayName = "新しい外部キーは AddForeignKey になる")]
     public void NewRelationship_AddForeignKey()
     {
@@ -120,6 +126,7 @@ public class SchemaDiffServiceTests
         fk.ColumnName.Should().Be("Customer_Id");
     }
 
+    /// <summary>同一テーブル間で FK 列が変わると DropForeignKey と AddForeignKey が両方出力されることを検証する</summary>
     [Fact(DisplayName = "同一テーブル間で FK 列が変わると DropForeignKey と AddForeignKey になる")]
     public void ForeignKeyColumnChanged_EmitsDropAndAdd()
     {
@@ -157,6 +164,7 @@ public class SchemaDiffServiceTests
         diff.Items.Should().ContainSingle(i => i.Kind == SchemaDiffKind.AddForeignKey && i.ColumnName == "CustomerId2");
     }
 
+    /// <summary>参照アクション（ON DELETE/UPDATE）の変更で再作成（Drop+Add）が出力されることを検証する</summary>
     [Fact(DisplayName = "参照アクションが変わると DropForeignKey と AddForeignKey になる")]
     public void ForeignKeyReferentialActionChanged_EmitsDropAndAdd()
     {
@@ -204,6 +212,7 @@ public class SchemaDiffServiceTests
             );
     }
 
+    /// <summary>DB と ER 図が同一なら差分項目が空になることを検証する</summary>
     [Fact(DisplayName = "差分が無ければ Items は空")]
     public void Identical_NoDiff()
     {
@@ -213,6 +222,7 @@ public class SchemaDiffServiceTests
         diff.Items.Should().BeEmpty();
     }
 
+    /// <summary>テーブル説明の変更が SetTableDescription として検出され、既定で選択されることを検証する</summary>
     [Fact(DisplayName = "テーブル説明が変わると SetTableDescription になる")]
     public void TableDescriptionChanged_SetTableDescription()
     {
@@ -229,6 +239,7 @@ public class SchemaDiffServiceTests
         item.IsSelected.Should().BeTrue();
     }
 
+    /// <summary>列説明の変更が SetColumnDescription として検出されることを検証する</summary>
     [Fact(DisplayName = "列の説明が変わると SetColumnDescription になる")]
     public void ColumnDescriptionChanged_SetColumnDescription()
     {
@@ -247,6 +258,7 @@ public class SchemaDiffServiceTests
         item.OldDescription.Should().Be("旧");
     }
 
+    /// <summary>説明が同一なら差分項目を生成しないことを検証する</summary>
     [Fact(DisplayName = "説明が同じなら差分にならない")]
     public void SameDescription_NoDiff()
     {
@@ -259,6 +271,7 @@ public class SchemaDiffServiceTests
         diff.Items.Should().BeEmpty();
     }
 
+    /// <summary>新規テーブルに説明があれば AddTable と併せて説明設定差分も同時出力されることを検証する</summary>
     [Fact(DisplayName = "新規テーブル + 列の説明があれば SetTable/Column も同時に出力される")]
     public void NewTableWithDescriptions_EmitsAllSetDescriptions()
     {

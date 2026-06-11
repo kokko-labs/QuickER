@@ -4,11 +4,10 @@ using FluentAssertions;
 
 namespace ERDesigner.Tests.Services;
 
-/// <summary>
-/// <see cref="SchemaSyncScriptBuilder"/> の生成 SQL のテスト。
-/// </summary>
+/// <summary><see cref="SchemaSyncScriptBuilder"/> が差分から生成する T-SQL の内容と出力順序を検証するテストクラス</summary>
 public class SchemaSyncScriptBuilderTests
 {
+    /// <summary>AddTable が主キー制約を含む CREATE TABLE 文を生成することを検証する</summary>
     [Fact(DisplayName = "AddTable は CREATE TABLE と PK を含む")]
     public void AddTable_GeneratesCreate()
     {
@@ -45,6 +44,7 @@ public class SchemaSyncScriptBuilderTests
         sql.Should().Contain("GO");
     }
 
+    /// <summary>AddColumn が ALTER TABLE ... ADD 文を生成することを検証する</summary>
     [Fact(DisplayName = "AddColumn は ALTER TABLE ADD を生成する")]
     public void AddColumn_GeneratesAlterAdd()
     {
@@ -66,6 +66,7 @@ public class SchemaSyncScriptBuilderTests
         sql.Should().Contain("ALTER TABLE [Customer] ADD [Email] nvarchar(200) NOT NULL;");
     }
 
+    /// <summary>AlterColumn が ALTER TABLE ... ALTER COLUMN 文を生成することを検証する</summary>
     [Fact(DisplayName = "AlterColumn は ALTER COLUMN を生成する")]
     public void AlterColumn_GeneratesAlterColumn()
     {
@@ -87,6 +88,7 @@ public class SchemaSyncScriptBuilderTests
         sql.Should().Contain("ALTER TABLE [Customer] ALTER COLUMN [Name] nvarchar(100) NOT NULL;");
     }
 
+    /// <summary>DropColumn が ALTER TABLE ... DROP COLUMN 文を生成することを検証する</summary>
     [Fact(DisplayName = "DropColumn は DROP COLUMN を生成する")]
     public void DropColumn_GeneratesDropColumn()
     {
@@ -102,6 +104,7 @@ public class SchemaSyncScriptBuilderTests
         sql.Should().Contain("ALTER TABLE [Customer] DROP COLUMN [Old];");
     }
 
+    /// <summary>未選択の差分項目がスクリプトへ出力されないことを検証する</summary>
     [Fact(DisplayName = "選択されていない項目はスクリプトに含まれない")]
     public void Unselected_Excluded()
     {
@@ -118,6 +121,7 @@ public class SchemaSyncScriptBuilderTests
         sql.Should().NotContain("Email");
     }
 
+    /// <summary>AddForeignKey が FK 制約追加文を生成し、参照列・参照先を解決することを検証する</summary>
     [Fact(DisplayName = "AddForeignKey は ALTER ADD CONSTRAINT FOREIGN KEY を生成する")]
     public void AddFk_GeneratesConstraint()
     {
@@ -166,6 +170,7 @@ public class SchemaSyncScriptBuilderTests
         sql.Should().Contain("FOREIGN KEY ([CustomerRef]) REFERENCES [Customer] ([Id])");
     }
 
+    /// <summary>AddForeignKey が指定の制約名と ON DELETE/UPDATE 参照アクションを反映することを検証する</summary>
     [Fact(DisplayName = "AddForeignKey は制約名と参照アクションを生成する")]
     public void AddFk_GeneratesConstraintNameAndReferentialActions()
     {
@@ -217,6 +222,7 @@ public class SchemaSyncScriptBuilderTests
         sql.Should().Contain("ON UPDATE SET DEFAULT");
     }
 
+    /// <summary>DropForeignKey が制約名判明時に存在チェック付きで直接 DROP することを検証する</summary>
     [Fact(DisplayName = "DropForeignKey は制約名があればその名前で削除する")]
     public void DropFk_UsesConstraintNameWhenAvailable()
     {
@@ -237,6 +243,7 @@ public class SchemaSyncScriptBuilderTests
         sql.Should().Contain("DROP CONSTRAINT [FK_Order_CustomerRef]");
     }
 
+    /// <summary>依存関係を満たすよう CREATE → ADD COLUMN → ADD CONSTRAINT の順で出力されることを検証する</summary>
     [Fact(DisplayName = "実行順序: AddTable → AddColumn → AddForeignKey")]
     public void Order_AddTable_Then_AddColumn_Then_Fk()
     {
@@ -296,6 +303,7 @@ public class SchemaSyncScriptBuilderTests
         iFk.Should().BeGreaterThan(iAdd);
     }
 
+    /// <summary>SetTableDescription がテーブルレベルの MS_Description 設定文（add/update 切替）を出力することを検証する</summary>
     [Fact(DisplayName = "SetTableDescription は sp_addextendedproperty / sp_updateextendedproperty を出力する")]
     public void SetTableDescription_EmitsExtendedProperty()
     {
@@ -318,6 +326,7 @@ public class SchemaSyncScriptBuilderTests
         sql.Should().NotContain("@level2type");
     }
 
+    /// <summary>SetColumnDescription が列レベル（@level2type=COLUMN）の説明設定文を出力することを検証する</summary>
     [Fact(DisplayName = "SetColumnDescription は @level2type=COLUMN を含む")]
     public void SetColumnDescription_EmitsColumnLevel()
     {
@@ -337,6 +346,7 @@ public class SchemaSyncScriptBuilderTests
         sql.Should().Contain("N'顧客名'");
     }
 
+    /// <summary>新しい説明が空の場合に説明削除（sp_dropextendedproperty）が出力されることを検証する</summary>
     [Fact(DisplayName = "新値が空ならば sp_dropextendedproperty が出力される")]
     public void EmptyNewDescription_EmitsDrop()
     {

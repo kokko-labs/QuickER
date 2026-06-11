@@ -4,11 +4,10 @@ using FluentAssertions;
 
 namespace ERDesigner.Tests.Services;
 
-/// <summary>
-/// <see cref="SqlServerSchemaImporter"/> の純ロジック (DB に依存しない部分) のテスト。
-/// </summary>
+/// <summary><see cref="SqlServerSchemaImporter"/> の DB 非依存ロジック（型整形・署名計算）を検証するテストクラス</summary>
 public class SqlServerSchemaImporterTests
 {
+    /// <summary>FormatDataType が長さ・精度・スケールを反映した型表記を返すことを検証する</summary>
     [Theory(DisplayName = "FormatDataType: 文字列/数値型を正しく整形する")]
     [InlineData("nvarchar", 50, null, null, "nvarchar(50)")]
     [InlineData("nvarchar", -1, null, null, "nvarchar(max)")]
@@ -22,6 +21,7 @@ public class SqlServerSchemaImporterTests
         SqlServerSchemaImporter.FormatDataType(type, maxLen, prec, scale).Should().Be(expected);
     }
 
+    /// <summary>構造が同一なら同じ署名が返ることを検証する</summary>
     [Fact(DisplayName = "ComputeSignature: 同一構造なら同じ署名を返す")]
     public void ComputeSignature_SameStructure_SameSignature()
     {
@@ -61,6 +61,7 @@ public class SqlServerSchemaImporterTests
         sigA.Should().Be(sigB);
     }
 
+    /// <summary>NULL 許容の違いが署名へ反映されることを検証する</summary>
     [Fact(DisplayName = "ComputeSignature: NULL 許容が違えば署名が変わる")]
     public void ComputeSignature_DifferentNullability_DifferentSignature()
     {
@@ -98,6 +99,7 @@ public class SqlServerSchemaImporterTests
         sigA.Should().NotBe(sigB);
     }
 
+    /// <summary>列の型の違いが署名へ反映されることを検証する</summary>
     [Fact(DisplayName = "ComputeSignature: 列が違えば署名が変わる")]
     public void ComputeSignature_DifferentColumns_DifferentSignature()
     {
@@ -125,6 +127,7 @@ public class SqlServerSchemaImporterTests
         sigA.Should().NotBe(sigB);
     }
 
+    /// <summary>外部キーの参照列の違いが署名へ反映されることを検証する</summary>
     [Fact(DisplayName = "ComputeSignature: 外部キー列が違えば署名が変わる")]
     public void ComputeSignature_DifferentForeignKeyColumns_DifferentSignature()
     {
@@ -181,6 +184,7 @@ public class SqlServerSchemaImporterTests
         sigA.Should().NotBe(sigB);
     }
 
+    /// <summary>参照アクション（ON DELETE/UPDATE）の違いが署名へ反映されることを検証する</summary>
     [Fact(DisplayName = "ComputeSignature: 参照アクションが違えば署名が変わる")]
     public void ComputeSignature_DifferentReferentialActions_DifferentSignature()
     {

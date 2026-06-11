@@ -8,11 +8,10 @@ using FluentAssertions;
 
 namespace ERDesigner.Tests.Services;
 
-/// <summary>
-/// Mermaid の入出力に関するテストです。
-/// </summary>
+/// <summary>MermaidExporter / MermaidImporter による Mermaid 形式の入出力を検証するテストクラス</summary>
 public class MermaidTests
 {
+    /// <summary>PK・FK 列とリレーションを持つ図から erDiagram 記法が生成されることを検証する</summary>
     [Fact(DisplayName = "Mermaid 出力で erDiagram 記法を生成できる")]
     public void Export_BuildsErDiagramText()
     {
@@ -89,6 +88,7 @@ public class MermaidTests
         mermaid.Should().Contain("Customer ||--o{ Orders : FK_Orders_Customer");
     }
 
+    /// <summary>Mermaid テキストの解析でエンティティ・列・リレーションの端点が復元されることを検証する</summary>
     [Fact(DisplayName = "Mermaid 読込でエンティティとリレーションを復元できる")]
     public void Import_ParsesEntitiesAndRelationships()
     {
@@ -125,6 +125,7 @@ public class MermaidTests
         target.Columns.Should().ContainSingle(column => column.Id == diagram.Relationships[0].TargetColumnId);
     }
 
+    /// <summary>SaveTo で書き出した Mermaid ファイルを Load で読み戻し、内容が往復保持されることを検証する</summary>
     [Fact(DisplayName = "Mermaid ファイルの SaveTo と Load を往復できる")]
     public void SaveAndLoad_RoundTrip()
     {
@@ -175,10 +176,10 @@ public class MermaidTests
         }
     }
 
+    /// <summary>括弧付き型が出力時に正規化され、読込時に元の SQL 型名へ復元されることを検証する</summary>
     [Fact(DisplayName = "decimal(10,2) や nvarchar(100) は出力→読込のラウンドトリップで元の型名に復元できる")]
     public void Export_Import_NormalizesAndDenormalizesDataTypes()
     {
-        // Arrange: decimal(10,2) と nvarchar(100) を持つエンティティを用意する
         var vm = new MainViewModel();
         var entity = new EntityViewModel(
             new Entity
