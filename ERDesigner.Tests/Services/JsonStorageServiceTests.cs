@@ -6,11 +6,10 @@ using FluentAssertions;
 
 namespace ERDesigner.Tests.Services;
 
-/// <summary>
-/// JSON 保存/読込の往復が正しく動くかを検証します。
-/// </summary>
+/// <summary><see cref="JsonStorageService"/> の JSON 保存・読込往復を検証するテストクラス</summary>
 public class JsonStorageServiceTests
 {
+    /// <summary>保存後に読み込み、エンティティ座標・色・リレーションの各属性が往復で保持されることを検証する</summary>
     [Fact(DisplayName = "Save → Load でエンティティとリレーションが復元される")]
     public void SaveAndLoad_RoundTrip()
     {

@@ -3,11 +3,10 @@ using FluentAssertions;
 
 namespace ERDesigner.Tests.Services;
 
-/// <summary>
-/// <see cref="ApiKeyStore"/> の保存/復元動作を検証します。
-/// </summary>
+/// <summary><see cref="ApiKeyStore"/> の保存・復元動作を検証するテストクラス</summary>
 public class ApiKeyStoreTests
 {
+    /// <summary>Save した API キーを Load で同値復元できることを検証する</summary>
     [Fact(DisplayName = "Save した API キーを Load で復元できる")]
     public void SaveThenLoad_RoundTrip()
     {
@@ -26,6 +25,7 @@ public class ApiKeyStoreTests
         }
     }
 
+    /// <summary>空文字を保存すると鍵が削除され、Load が空文字を返すことを検証する</summary>
     [Fact(DisplayName = "空文字を Save すると削除され、Load は空文字を返す")]
     public void SaveEmpty_Deletes()
     {
