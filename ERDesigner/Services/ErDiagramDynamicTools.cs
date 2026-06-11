@@ -5,10 +5,11 @@ using ERDesigner.ViewModels;
 
 namespace ERDesigner.Services;
 
-/// <summary>Codex dynamicTools として公開する ER 図操作ツールの定義と実行を担います。</summary>
+/// <summary>Codex dynamicTools として公開する ER 図操作ツールの定義と実行を担うクラス</summary>
+/// <remarks>各ツールの操作は Undo / Redo マネージャー経由で実行し、取り消し可能とする</remarks>
 public static class ErDiagramDynamicTools
 {
-    /// <summary>すべての dynamicTool 定義を返します。</summary>
+    /// <summary>全 dynamicTool の定義一覧を返す</summary>
     public static IReadOnlyList<CodexDynamicToolDefinition> GetDefinitions()
     {
         return
@@ -164,11 +165,11 @@ public static class ErDiagramDynamicTools
         ];
     }
 
-    /// <summary>dynamicTool 呼び出しを受け取り、ER 図を操作してその結果を返します。</summary>
+    /// <summary>dynamicTool 呼び出しを受け取り、ツール名でディスパッチして ER 図を操作する</summary>
     /// <param name="toolName">ツール名</param>
     /// <param name="arguments">引数 JSON</param>
     /// <param name="viewModel">操作対象の MainViewModel</param>
-    /// <returns>ツール実行結果テキストと成否のタプル</returns>
+    /// <returns>実行結果テキストと成否のタプル</returns>
     public static (string Result, bool Success) Execute(string toolName, JsonElement arguments, MainViewModel viewModel)
     {
         try
@@ -189,10 +190,12 @@ public static class ErDiagramDynamicTools
         }
         catch (Exception ex)
         {
+            // ツール実行中の例外は AI 側へエラーテキストとして返し、アプリを落とさない
             return ($"エラー: {ex.Message}", false);
         }
     }
 
+    /// <summary>現在の ER 図の概要（テーブル・カラム・リレーション）をテキスト化する</summary>
     private static string BuildDiagramSummary(MainViewModel vm)
     {
         var sb = new StringBuilder();
@@ -248,6 +251,7 @@ public static class ErDiagramDynamicTools
         return sb.ToString();
     }
 
+    /// <summary>エンティティを追加する（初期座標は重なり回避のため件数に応じてずらす）</summary>
     private static (string, bool) AddEntity(JsonElement args, MainViewModel vm)
     {
         var tableName = GetString(args, "table_name") ?? "NewTable";
@@ -264,6 +268,7 @@ public static class ErDiagramDynamicTools
         return ($"テーブル '{tableName}' を追加しました。", true);
     }
 
+    /// <summary>指定テーブル名のエンティティを削除する</summary>
     private static (string, bool) RemoveEntity(JsonElement args, MainViewModel vm)
     {
         var tableName = GetString(args, "table_name");
@@ -284,6 +289,7 @@ public static class ErDiagramDynamicTools
         return ($"テーブル '{tableName}' を削除しました。", true);
     }
 
+    /// <summary>指定テーブルへカラムを追加する</summary>
     private static (string, bool) AddColumn(JsonElement args, MainViewModel vm)
     {
         var tableName = GetString(args, "table_name");
@@ -320,6 +326,7 @@ public static class ErDiagramDynamicTools
         return ($"テーブル '{tableName}' にカラム '{columnName}' を追加しました。", true);
     }
 
+    /// <summary>指定テーブルからカラムを削除し、外部キー列ルールを再適用する</summary>
     private static (string, bool) RemoveColumn(JsonElement args, MainViewModel vm)
     {
         var tableName = GetString(args, "table_name");
@@ -348,6 +355,7 @@ public static class ErDiagramDynamicTools
         return ($"テーブル '{tableName}' からカラム '{columnName}' を削除しました。", true);
     }
 
+    /// <summary>エンティティのテーブル名・メモ・説明のうち、指定されたものを更新する</summary>
     private static (string, bool) SetEntityProperty(JsonElement args, MainViewModel vm)
     {
         var tableName = GetString(args, "table_name");
@@ -392,6 +400,7 @@ public static class ErDiagramDynamicTools
         return ($"テーブル '{tableName}' の {string.Join("、", changed)} を更新しました。", true);
     }
 
+    /// <summary>カラムの説明・データ型・NULL 許容のうち、指定されたものを更新する</summary>
     private static (string, bool) SetColumnProperty(JsonElement args, MainViewModel vm)
     {
         var tableName = GetString(args, "table_name");
@@ -444,6 +453,7 @@ public static class ErDiagramDynamicTools
         return ($"テーブル '{tableName}' のカラム '{columnName}' の {string.Join("、", changed)} を更新しました。", true);
     }
 
+    /// <summary>2 テーブル間にリレーションを追加する（参照先 PK と参照元 FK 列を自動解決する）</summary>
     private static (string, bool) AddRelationship(JsonElement args, MainViewModel vm)
     {
         var sourceTable = GetString(args, "source_table");
@@ -495,6 +505,7 @@ public static class ErDiagramDynamicTools
         return ($"'{sourceTable}' → '{targetTable}' のリレーションを追加しました。", true);
     }
 
+    /// <summary>指定した参照元・参照先テーブル間のリレーションを削除する</summary>
     private static (string, bool) RemoveRelationship(JsonElement args, MainViewModel vm)
     {
         var sourceTable = GetString(args, "source_table");
@@ -518,12 +529,13 @@ public static class ErDiagramDynamicTools
         return ($"'{sourceTable}' → '{targetTable}' のリレーションを削除しました。", true);
     }
 
+    /// <summary>JSON 引数から文字列プロパティを取得する（無い・型不一致なら null）</summary>
     private static string? GetString(JsonElement element, string propertyName)
     {
         return element.TryGetProperty(propertyName, out var val) && val.ValueKind == JsonValueKind.String ? val.GetString() : null;
     }
 
-    /// <summary>source の PK 名に対応する target 側の FK 列候補を解決します。</summary>
+    /// <summary>参照元 PK に対応する参照先側の外部キー列候補を解決する</summary>
     private static ColumnViewModel? ResolveTargetForeignKeyColumn(EntityViewModel source, EntityViewModel target)
     {
         var sourcePk = source.Columns.FirstOrDefault(c => c.IsPrimaryKey);
