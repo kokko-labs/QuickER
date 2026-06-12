@@ -38,6 +38,9 @@ public static class AutoLayoutService
     /// <summary>ペア交換ヒルクライミングの最大反復回数（改善が無くなれば早期終了）</summary>
     private const int MaxOptimizePasses = 20;
 
+    /// <summary>バリセンタ法スイープの最大反復回数（並びが変化しなくなれば早期終了）</summary>
+    private const int MaxBarycenterSweeps = 8;
+
     /// <summary>エンティティを並び順のまま格子状に並べ替える</summary>
     /// <param name="columns">列数 0 以下なら要素数の平方根から自動決定する</param>
     public static void LayoutGrid(IList<EntityViewModel> entities, int columns = 0)
@@ -90,7 +93,11 @@ public static class AutoLayoutService
     }
 
     /// <summary>リレーションを辺と見なして BFS で階層レイアウトを行う</summary>
-    /// <remarks>連結成分ごとに最も次数の高いノードを起点とし、深さ順に各階層を縦へ配置する</remarks>
+    /// <remarks>
+    /// 連結成分ごとに最も次数の高いノードを起点とし、深さ順に各階層を縦へ配置する
+    /// 各階層内の並び順はバリセンタ（重心）法で隣接階層の接続先に近づけ、リレーション線の交差を減らす
+    /// 各階層は最も幅広い階層に対して中央寄せし、親子間の線の傾きを抑える
+    /// </remarks>
     /// <param name="entities">並べ替え対象のエンティティ一覧</param>
     /// <param name="relationships">リレーション一覧（レイアウト上は無向として扱う）</param>
     public static void LayoutTree(IList<EntityViewModel> entities, IList<RelationshipViewModel> relationships)
@@ -113,19 +120,19 @@ public static class AutoLayoutService
         }
 
         // 次数の多いノードを起点に BFS を回し、未訪問成分も順次起点化して全件を配置する
-        var visited = new HashSet<EntityViewModel>();
+        var depthOf = new Dictionary<EntityViewModel, int>();
         var levels = new Dictionary<int, List<EntityViewModel>>();
 
         foreach (var root in entities.OrderByDescending(e => adj[e].Count))
         {
-            if (visited.Contains(root))
+            if (depthOf.ContainsKey(root))
             {
                 continue;
             }
 
             var queue = new Queue<(EntityViewModel node, int depth)>();
             queue.Enqueue((root, 0));
-            visited.Add(root);
+            depthOf[root] = 0;
 
             while (queue.Count > 0)
             {
@@ -140,13 +147,16 @@ public static class AutoLayoutService
 
                 foreach (var nb in adj[node])
                 {
-                    if (visited.Add(nb))
+                    if (!depthOf.ContainsKey(nb))
                     {
+                        depthOf[nb] = depth + 1;
                         queue.Enqueue((nb, depth + 1));
                     }
                 }
             }
         }
+
+        OrderLevelsByBarycenter(levels, adj, depthOf);
 
         // 階層ごとの最大高さを求め、深い階層ほど下方へ配置するための縦オフセット基準とする
         var depthHeight = new Dictionary<int, double>();
@@ -155,6 +165,10 @@ public static class AutoLayoutService
         {
             depthHeight[depth] = list.Max(e => e.DisplayHeight);
         }
+
+        // 階層ごとの合計幅を求め、最も幅広い階層に対して中央寄せするための横オフセット基準とする
+        var levelWidth = levels.ToDictionary(kv => kv.Key, kv => kv.Value.Sum(e => e.Width + GapX) - GapX);
+        var maxLevelWidth = levelWidth.Values.Max();
 
         foreach (var (depth, list) in levels)
         {
@@ -168,13 +182,102 @@ public static class AutoLayoutService
                 }
             }
 
-            var xOffset = Margin;
+            var xOffset = Margin + (maxLevelWidth - levelWidth[depth]) / 2;
 
             for (var i = 0; i < list.Count; i++)
             {
                 list[i].X = xOffset;
                 list[i].Y = yOffset;
                 xOffset += list[i].Width + GapX;
+            }
+        }
+    }
+
+    /// <summary>バリセンタ（重心）法で各階層内の並び順を隣接階層の接続先に近づけ、線の交差を減らす</summary>
+    /// <remarks>
+    /// 上→下・下→上のスイープを交互に行い、各ノードを隣接階層の接続先の平均位置で安定ソートする
+    /// 並びが変化しなくなれば早期終了する 乱数を使わないため結果は決定的
+    /// </remarks>
+    private static void OrderLevelsByBarycenter(
+        Dictionary<int, List<EntityViewModel>> levels,
+        Dictionary<EntityViewModel, List<EntityViewModel>> adj,
+        Dictionary<EntityViewModel, int> depthOf
+    )
+    {
+        var maxDepth = levels.Keys.Max();
+
+        if (maxDepth == 0)
+        {
+            return;
+        }
+
+        // 階層内の現在位置の逆引き（ソートキー計算と「接続先なし」時の現状維持に使う）
+        var pos = new Dictionary<EntityViewModel, int>();
+
+        foreach (var list in levels.Values)
+        {
+            for (var i = 0; i < list.Count; i++)
+            {
+                pos[list[i]] = i;
+            }
+        }
+
+        // 隣接階層の接続先の平均位置（接続先が無ければ現在位置を維持する）
+        double Barycenter(EntityViewModel e, int neighborDepth)
+        {
+            var sum = 0.0;
+            var count = 0;
+
+            foreach (var nb in adj[e])
+            {
+                if (depthOf[nb] == neighborDepth)
+                {
+                    sum += pos[nb];
+                    count++;
+                }
+            }
+
+            return count > 0 ? sum / count : pos[e];
+        }
+
+        // 指定階層を隣接階層基準のバリセンタで安定ソートし、並びが変化したかを返す
+        bool SortLevel(int depth, int neighborDepth)
+        {
+            var list = levels[depth];
+            var sorted = list.OrderBy(e => Barycenter(e, neighborDepth)).ToList();
+            var changed = false;
+
+            for (var i = 0; i < sorted.Count; i++)
+            {
+                if (!ReferenceEquals(list[i], sorted[i]))
+                {
+                    changed = true;
+                }
+
+                list[i] = sorted[i];
+                pos[sorted[i]] = i;
+            }
+
+            return changed;
+        }
+
+        for (var sweep = 0; sweep < MaxBarycenterSweeps; sweep++)
+        {
+            var changed = false;
+
+            for (var d = 1; d <= maxDepth; d++)
+            {
+                changed |= SortLevel(d, d - 1);
+            }
+
+            for (var d = maxDepth - 1; d >= 0; d--)
+            {
+                changed |= SortLevel(d, d + 1);
+            }
+
+            if (!changed)
+            {
+                break;
             }
         }
     }

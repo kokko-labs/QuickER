@@ -212,6 +212,54 @@ public class AutoLayoutServiceTests
         b.Y.Should().BeLessThan(c.Y);
     }
 
+    /// <summary>BFS の発見順のままだと交差する多親構成で、バリセンタ法により交差が解消されることを検証する</summary>
+    [Fact(DisplayName = "LayoutTree: 階層内の並べ替えでリレーション線の交差が解消される")]
+    public void LayoutTree_ReordersLevels_RemovesCrossings()
+    {
+        var r = NewEntity("R");
+        var a = NewEntity("A");
+        var b = NewEntity("B");
+        var c = NewEntity("C");
+        var d = NewEntity("D");
+        var x = NewEntity("X");
+        var y = NewEntity("Y");
+        var entities = new List<EntityViewModel> { r, a, b, c, d, x, y };
+
+        // BFS では X, Y の順で発見されるが、その並びだと A-Y と B-X が交差する
+        var rels = new List<RelationshipViewModel>
+        {
+            NewRelationship(r, a),
+            NewRelationship(r, b),
+            NewRelationship(r, c),
+            NewRelationship(r, d),
+            NewRelationship(a, x),
+            NewRelationship(a, y),
+            NewRelationship(b, x),
+        };
+
+        AutoLayoutService.LayoutTree(entities, rels);
+
+        CountCrossings(rels).Should().Be(0);
+    }
+
+    /// <summary>ノード数の少ない階層が幅広の階層に対して中央寄せされることを検証する</summary>
+    [Fact(DisplayName = "LayoutTree: 各階層が中央寄せされる")]
+    public void LayoutTree_CentersEachLevel()
+    {
+        var r = NewEntity("R");
+        var a = NewEntity("A");
+        var b = NewEntity("B");
+        var entities = new List<EntityViewModel> { r, a, b };
+
+        var rels = new List<RelationshipViewModel> { NewRelationship(r, a), NewRelationship(r, b) };
+
+        AutoLayoutService.LayoutTree(entities, rels);
+
+        // ルート単独の階層は 2 ノードの子階層の中央へ寄り、左端の子より右に位置する
+        r.X.Should().BeGreaterThan(a.X);
+        r.X.Should().BeLessThan(b.X);
+    }
+
     /// <summary>説明表示時は説明を含む表示高さを使って行間が確保されることを検証する</summary>
     [Fact(DisplayName = "LayoutGrid: 説明表示時は説明込みの高さで整列される")]
     public void LayoutGrid_UsesDisplayHeightWhenDescriptionsAreVisible()
