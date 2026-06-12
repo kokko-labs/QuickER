@@ -452,6 +452,12 @@
             <TextBlock Style="{StaticResource ToolBarCaption}" Text="整列(木)" />
           </StackPanel>
         </Button>
+        <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding AutoLayoutForceCommand}" ToolTip="リレーションの繋がりに基づいて自由配置で自動整列">
+          <StackPanel>
+            <TextBlock Style="{StaticResource ToolBarIcon}" Text="✺" />
+            <TextBlock Style="{StaticResource ToolBarCaption}" Text="整列(自由)" />
+          </StackPanel>
+        </Button>
         <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding AutoFitEntityWidthsCommand}" ToolTip="カラム名と型が重ならない幅に自動調整">
           <StackPanel>
             <TextBlock Style="{StaticResource ToolBarIcon}" Text="↔" />

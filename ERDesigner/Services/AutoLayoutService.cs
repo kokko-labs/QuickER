@@ -10,6 +10,7 @@ namespace ERDesigner.Services;
 ///   <item><see cref="LayoutGrid(IList{EntityViewModel}, int)"/>: 格子状レイアウト（並び順のまま配置）</item>
 ///   <item><see cref="LayoutGrid(IList{EntityViewModel}, IList{RelationshipViewModel}, int)"/>: リレーション線の交差をできるだけ減らす格子状レイアウト</item>
 ///   <item><see cref="LayoutTree"/>: リレーションを辺と見なした階層（BFS）レイアウト</item>
+///   <item><see cref="LayoutForceDirected"/>: 力学モデル（Fruchterman-Reingold 改）による自由配置レイアウト</item>
 /// </list>
 /// </remarks>
 public static class AutoLayoutService
@@ -40,6 +41,24 @@ public static class AutoLayoutService
 
     /// <summary>バリセンタ法スイープの最大反復回数（並びが変化しなくなれば早期終了）</summary>
     private const int MaxBarycenterSweeps = 8;
+
+    /// <summary>接続エンティティ間の理想間隔へ加える余白 (px)</summary>
+    private const double FreeSpacing = 40.0;
+
+    /// <summary>力学モデルの反復回数</summary>
+    private const int FreeIterations = 300;
+
+    /// <summary>全体重心へ引き戻す重力係数（連結成分の離散を防ぐ）</summary>
+    private const double FreeGravity = 0.1;
+
+    /// <summary>反発が働く距離の上限（理想距離に対する倍率）遠方ペアの反発を打ち切り配置をコンパクトに保つ</summary>
+    private const double FreeRepulsionRange = 2.0;
+
+    /// <summary>終盤の 1 反復あたり最大移動量 (px)</summary>
+    private const double FreeMinTemperature = 2.0;
+
+    /// <summary>重なり解消の最大パス数</summary>
+    private const int MaxOverlapRemovalPasses = 100;
 
     /// <summary>エンティティを並び順のまま格子状に並べ替える</summary>
     /// <param name="columns">列数 0 以下なら要素数の平方根から自動決定する</param>
@@ -190,6 +209,254 @@ public static class AutoLayoutService
                 list[i].Y = yOffset;
                 xOffset += list[i].Width + GapX;
             }
+        }
+    }
+
+    /// <summary>リレーションで繋がったエンティティが引き合い、全エンティティが反発する力学モデルで自由配置する</summary>
+    /// <remarks>
+    /// Fruchterman-Reingold 法を改変し、可変サイズの矩形に合わせて理想距離を調整したうえで重なりを後処理で解消する
+    /// <list type="number">
+    ///   <item>BFS 順で円環状に初期配置し、近い接続が初期解で隣り合いやすくする</item>
+    ///   <item>反発（全ペア）・引力（辺）・重力（重心へ）を線形冷却の温度で制限しながら反復する</item>
+    ///   <item>反復後に矩形同士の重なりを軸方向の小さい侵入量から押し出して解消する</item>
+    /// </list>
+    /// 乱数・列挙順非決定要素を一切使わないため結果は決定的
+    /// </remarks>
+    /// <param name="entities">配置対象のエンティティ一覧</param>
+    /// <param name="relationships">リレーション一覧（レイアウト上は無向として扱う）</param>
+    public static void LayoutForceDirected(
+        IList<EntityViewModel> entities,
+        IList<RelationshipViewModel> relationships
+    )
+    {
+        if (entities.Count == 0)
+        {
+            return;
+        }
+
+        var edges = BuildEdges(entities, relationships);
+
+        // リレーションが無ければ引力が働かず散らばるだけのため従来格子へフォールバックする
+        if (edges.Count == 0)
+        {
+            PlaceInGrid(entities, ResolveColumns(entities.Count, 0));
+            return;
+        }
+
+        var n = entities.Count;
+
+        // 反発・引力の理想距離は矩形の代表サイズ（幅と高さの大きい方）で決める
+        var size = new double[n];
+
+        for (var i = 0; i < n; i++)
+        {
+            size[i] = Math.Max(entities[i].Width, entities[i].DisplayHeight);
+        }
+
+        // 中心座標で力学計算する（最後に左上座標へ戻す）
+        var pos = new (double X, double Y)[n];
+        var order = BuildInitialOrder(n, edges);
+
+        // 円環状の初期配置（BFS 順で等間隔に置き、接続が隣り合いやすくする）
+        var circumference = 0.0;
+
+        for (var i = 0; i < n; i++)
+        {
+            circumference += size[i] + GapX;
+        }
+
+        var radius = Math.Max(circumference / (2 * Math.PI), 1.0);
+
+        for (var k = 0; k < n; k++)
+        {
+            var theta = 2 * Math.PI * k / n;
+            pos[order[k]] = (radius * Math.Cos(theta), radius * Math.Sin(theta));
+        }
+
+        // ペアごとの理想距離 k_ij = (size_i + size_j) / 2 + FreeSpacing
+        double Ideal(int i, int j) => (size[i] + size[j]) / 2 + FreeSpacing;
+
+        var avgSize = 0.0;
+
+        for (var i = 0; i < n; i++)
+        {
+            avgSize += size[i];
+        }
+
+        avgSize /= n;
+
+        // 線形冷却の開始温度（平均サイズに比例させ、序盤の大きな移動を許す）
+        var tStart = 2 * (avgSize + FreeSpacing);
+        var disp = new (double X, double Y)[n];
+
+        for (var iter = 0; iter < FreeIterations; iter++)
+        {
+            for (var i = 0; i < n; i++)
+            {
+                disp[i] = (0, 0);
+            }
+
+            // 反発: 全ペア i<j で k_ij² / d の力を互いに離れる方向へ
+            for (var i = 0; i < n; i++)
+            {
+                for (var j = i + 1; j < n; j++)
+                {
+                    var dx = pos[i].X - pos[j].X;
+                    var dy = pos[i].Y - pos[j].Y;
+                    var d = LayoutGeometry.Distance(pos[i], pos[j]);
+                    var ideal = Ideal(i, j);
+
+                    // 十分離れたペアの反発は打ち切る（遠距離反発の累積による全体の膨張を防ぐ）
+                    if (d > ideal * FreeRepulsionRange)
+                    {
+                        continue;
+                    }
+
+                    if (d < 0.01)
+                    {
+                        d = 0.01;
+                    }
+
+                    // 方向ベクトルが零なら任意方向 (1, 0) で押し離す
+                    if (dx == 0 && dy == 0)
+                    {
+                        dx = 1;
+                        dy = 0;
+                    }
+
+                    var force = ideal * ideal / d;
+                    var ux = dx / d;
+                    var uy = dy / d;
+
+                    disp[i] = (disp[i].X + ux * force, disp[i].Y + uy * force);
+                    disp[j] = (disp[j].X - ux * force, disp[j].Y - uy * force);
+                }
+            }
+
+            // 引力: 辺ごとに d² / k_ij の力を互いに近づく方向へ
+            foreach (var (a, b) in edges)
+            {
+                var dx = pos[a].X - pos[b].X;
+                var dy = pos[a].Y - pos[b].Y;
+                var d = LayoutGeometry.Distance(pos[a], pos[b]);
+
+                if (d < 0.01)
+                {
+                    d = 0.01;
+                }
+
+                if (dx == 0 && dy == 0)
+                {
+                    dx = 1;
+                    dy = 0;
+                }
+
+                var force = d * d / Ideal(a, b);
+                var ux = dx / d;
+                var uy = dy / d;
+
+                disp[a] = (disp[a].X - ux * force, disp[a].Y - uy * force);
+                disp[b] = (disp[b].X + ux * force, disp[b].Y + uy * force);
+            }
+
+            // 重力: 重心 C へ向けて (C - pos) × FreeGravity を加算し連結成分の離散を防ぐ
+            var cx = 0.0;
+            var cy = 0.0;
+
+            for (var i = 0; i < n; i++)
+            {
+                cx += pos[i].X;
+                cy += pos[i].Y;
+            }
+
+            cx /= n;
+            cy /= n;
+
+            for (var i = 0; i < n; i++)
+            {
+                disp[i] = (disp[i].X + (cx - pos[i].X) * FreeGravity, disp[i].Y + (cy - pos[i].Y) * FreeGravity);
+            }
+
+            // 線形冷却の温度（1 反復あたり最大移動量）で変位を制限してから一括適用する
+            var t = tStart + (FreeMinTemperature - tStart) * iter / (FreeIterations - 1);
+
+            for (var i = 0; i < n; i++)
+            {
+                var len = LayoutGeometry.Distance((0, 0), disp[i]);
+
+                if (len > t)
+                {
+                    disp[i] = (disp[i].X / len * t, disp[i].Y / len * t);
+                }
+
+                pos[i] = (pos[i].X + disp[i].X, pos[i].Y + disp[i].Y);
+            }
+        }
+
+        // 矩形重なり解消（ギャップ込みの矩形が重なる軸の小さい侵入量から押し出す）
+        for (var pass = 0; pass < MaxOverlapRemovalPasses; pass++)
+        {
+            var anyOverlap = false;
+
+            for (var i = 0; i < n; i++)
+            {
+                for (var j = i + 1; j < n; j++)
+                {
+                    var minX = (entities[i].Width + entities[j].Width) / 2 + GapX;
+                    var minY = (entities[i].DisplayHeight + entities[j].DisplayHeight) / 2 + GapY;
+                    var dx = pos[i].X - pos[j].X;
+                    var dy = pos[i].Y - pos[j].Y;
+                    var overlapX = minX - Math.Abs(dx);
+                    var overlapY = minY - Math.Abs(dy);
+
+                    if (overlapX <= 0 || overlapY <= 0)
+                    {
+                        continue;
+                    }
+
+                    anyOverlap = true;
+
+                    // 侵入量の小さい軸へ半分ずつ互いを逆向きに押し出す
+                    if (overlapX < overlapY)
+                    {
+                        var dir = dx > 0 ? 1 : dx < 0 ? -1 : (i < j ? -1 : 1);
+                        var push = overlapX / 2 * dir;
+                        pos[i] = (pos[i].X + push, pos[i].Y);
+                        pos[j] = (pos[j].X - push, pos[j].Y);
+                    }
+                    else
+                    {
+                        var dir = dy > 0 ? 1 : dy < 0 ? -1 : (i < j ? -1 : 1);
+                        var push = overlapY / 2 * dir;
+                        pos[i] = (pos[i].X, pos[i].Y + push);
+                        pos[j] = (pos[j].X, pos[j].Y - push);
+                    }
+                }
+            }
+
+            if (!anyOverlap)
+            {
+                break;
+            }
+        }
+
+        // 正規化: 左上座標の最小 X / Y が Margin になるよう全体を平行移動する
+        var minLeft = double.MaxValue;
+        var minTop = double.MaxValue;
+
+        for (var i = 0; i < n; i++)
+        {
+            minLeft = Math.Min(minLeft, pos[i].X - entities[i].Width / 2);
+            minTop = Math.Min(minTop, pos[i].Y - entities[i].DisplayHeight / 2);
+        }
+
+        var shiftX = Margin - minLeft;
+        var shiftY = Margin - minTop;
+
+        for (var i = 0; i < n; i++)
+        {
+            entities[i].X = pos[i].X + shiftX - entities[i].Width / 2;
+            entities[i].Y = pos[i].Y + shiftY - entities[i].DisplayHeight / 2;
         }
     }
 
@@ -546,7 +813,7 @@ public static class AutoLayoutService
             var pa = CellPoint(slotOf[a], columns);
             var pb = CellPoint(slotOf[b], columns);
 
-            cost += LengthWeight * Distance(pa, pb);
+            cost += LengthWeight * LayoutGeometry.Distance(pa, pb);
 
             // 端点以外のエンティティのセル上を線が通過していないか調べる
             for (var w = 0; w < count; w++)
@@ -556,7 +823,7 @@ public static class AutoLayoutService
                     continue;
                 }
 
-                if (DistancePointToSegment(CellPoint(slotOf[w], columns), pa, pb) < NodeClearance)
+                if (LayoutGeometry.DistancePointToSegment(CellPoint(slotOf[w], columns), pa, pb) < NodeClearance)
                 {
                     cost += ThroughWeight;
                 }
@@ -577,7 +844,7 @@ public static class AutoLayoutService
                     continue;
                 }
 
-                if (SegmentsCross(pa, pb, CellPoint(slotOf[c], columns), CellPoint(slotOf[d], columns)))
+                if (LayoutGeometry.SegmentsCross(pa, pb, CellPoint(slotOf[c], columns), CellPoint(slotOf[d], columns)))
                 {
                     cost += CrossingWeight;
                 }
@@ -590,52 +857,4 @@ public static class AutoLayoutService
     /// <summary>マス目番号をセル間隔 = 1 の正規化座標へ変換する</summary>
     private static (double X, double Y) CellPoint(int slot, int columns) => (slot % columns, slot / columns);
 
-    /// <summary>2 点間のユークリッド距離</summary>
-    private static double Distance((double X, double Y) p, (double X, double Y) q)
-    {
-        var dx = p.X - q.X;
-        var dy = p.Y - q.Y;
-        return Math.Sqrt(dx * dx + dy * dy);
-    }
-
-    /// <summary>点と線分の最短距離</summary>
-    private static double DistancePointToSegment(
-        (double X, double Y) p,
-        (double X, double Y) a,
-        (double X, double Y) b
-    )
-    {
-        var abx = b.X - a.X;
-        var aby = b.Y - a.Y;
-        var lenSq = abx * abx + aby * aby;
-
-        if (lenSq <= 0)
-        {
-            return Distance(p, a);
-        }
-
-        // 点 p を線分 ab へ射影し、線分の範囲内へクランプする
-        var t = Math.Clamp(((p.X - a.X) * abx + (p.Y - a.Y) * aby) / lenSq, 0, 1);
-        return Distance(p, (a.X + t * abx, a.Y + t * aby));
-    }
-
-    /// <summary>2 線分が内部で交差するか判定する（端点での接触・共線の重なりは含めない）</summary>
-    private static bool SegmentsCross(
-        (double X, double Y) p1,
-        (double X, double Y) p2,
-        (double X, double Y) p3,
-        (double X, double Y) p4
-    )
-    {
-        var d1 = Orientation(p3, p4, p1);
-        var d2 = Orientation(p3, p4, p2);
-        var d3 = Orientation(p1, p2, p3);
-        var d4 = Orientation(p1, p2, p4);
-
-        return ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0));
-    }
-
-    /// <summary>3 点の回転方向（正: 反時計回り 負: 時計回り 0: 一直線）</summary>
-    private static double Orientation((double X, double Y) a, (double X, double Y) b, (double X, double Y) c) =>
-        (b.X - a.X) * (c.Y - a.Y) - (b.Y - a.Y) * (c.X - a.X);
 }

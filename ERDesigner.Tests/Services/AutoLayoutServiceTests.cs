@@ -43,39 +43,6 @@ public class AutoLayoutServiceTests
     private static RelationshipViewModel NewRelationship(EntityViewModel source, EntityViewModel target) =>
         new(new Relationship { SourceEntityId = source.Id, TargetEntityId = target.Id }, source, target);
 
-    /// <summary>エンティティ中心を結ぶ 2 線分が内部で交差するリレーションのペア数を数える</summary>
-    private static int CountCrossings(IList<RelationshipViewModel> rels)
-    {
-        static (double X, double Y) Center(EntityViewModel e) =>
-            (e.X + e.Width / 2, e.Y + e.DisplayHeight / 2);
-
-        static double Orient((double X, double Y) a, (double X, double Y) b, (double X, double Y) c) =>
-            (b.X - a.X) * (c.Y - a.Y) - (b.Y - a.Y) * (c.X - a.X);
-
-        var crossings = 0;
-
-        for (var i = 0; i < rels.Count; i++)
-        {
-            for (var j = i + 1; j < rels.Count; j++)
-            {
-                var (a, b) = (Center(rels[i].Source), Center(rels[i].Target));
-                var (c, d) = (Center(rels[j].Source), Center(rels[j].Target));
-
-                var d1 = Orient(c, d, a);
-                var d2 = Orient(c, d, b);
-                var d3 = Orient(a, b, c);
-                var d4 = Orient(a, b, d);
-
-                if (((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0)))
-                {
-                    crossings++;
-                }
-            }
-        }
-
-        return crossings;
-    }
-
     /// <summary>並び順のままだと対角線同士が交差する構成で、交差が解消されることを検証する</summary>
     [Fact(DisplayName = "LayoutGrid(リレーション考慮): 交差するリレーションが解消される")]
     public void LayoutGrid_WithRelationships_RemovesCrossings()
@@ -91,7 +58,7 @@ public class AutoLayoutServiceTests
 
         AutoLayoutService.LayoutGrid(entities, rels, columns: 2);
 
-        CountCrossings(rels).Should().Be(0);
+        LayoutGeometry.CountCrossings(rels).Should().Be(0);
     }
 
     /// <summary>リレーション考慮版でも全エンティティが重複なく格子上へ配置されることを検証する</summary>
@@ -170,7 +137,7 @@ public class AutoLayoutServiceTests
         AutoLayoutService.LayoutGrid(legacy, columns: 4);
         AutoLayoutService.LayoutGrid(optimized, optimizedRels, columns: 4);
 
-        CountCrossings(optimizedRels).Should().BeLessThan(CountCrossings(legacyRels));
+        LayoutGeometry.CountCrossings(optimizedRels).Should().BeLessThan(LayoutGeometry.CountCrossings(legacyRels));
     }
 
     /// <summary>リレーションが無い場合は従来の並び順どおり配置されることを検証する</summary>
@@ -239,7 +206,7 @@ public class AutoLayoutServiceTests
 
         AutoLayoutService.LayoutTree(entities, rels);
 
-        CountCrossings(rels).Should().Be(0);
+        LayoutGeometry.CountCrossings(rels).Should().Be(0);
     }
 
     /// <summary>ノード数の少ない階層が幅広の階層に対して中央寄せされることを検証する</summary>
@@ -258,6 +225,184 @@ public class AutoLayoutServiceTests
         // ルート単独の階層は 2 ノードの子階層の中央へ寄り、左端の子より右に位置する
         r.X.Should().BeGreaterThan(a.X);
         r.X.Should().BeLessThan(b.X);
+    }
+
+    /// <summary>力学モデル配置で空コレクションを渡しても例外が発生しないことを検証する</summary>
+    [Fact(DisplayName = "LayoutForceDirected: 空コレクションでも例外にならない")]
+    public void LayoutForceDirected_Empty_DoesNotThrow()
+    {
+        var act = () =>
+            AutoLayoutService.LayoutForceDirected(new List<EntityViewModel>(), new List<RelationshipViewModel>());
+        act.Should().NotThrow();
+    }
+
+    /// <summary>リレーションが無い場合は従来格子（LayoutGrid）と全座標一致することを検証する</summary>
+    [Fact(DisplayName = "LayoutForceDirected: リレーションなしなら従来格子と一致する")]
+    public void LayoutForceDirected_WithoutRelationships_MatchesGrid()
+    {
+        var force = Enumerable.Range(0, 5).Select(i => NewEntity($"E{i}")).ToList();
+        var grid = Enumerable.Range(0, 5).Select(i => NewEntity($"E{i}")).ToList();
+
+        AutoLayoutService.LayoutForceDirected(force, new List<RelationshipViewModel>());
+        AutoLayoutService.LayoutGrid(grid);
+
+        for (var i = 0; i < force.Count; i++)
+        {
+            force[i].X.Should().Be(grid[i].X);
+            force[i].Y.Should().Be(grid[i].Y);
+        }
+    }
+
+    /// <summary>リング状に接続した構成で配置後に全エンティティの矩形が重ならないことを検証する</summary>
+    [Fact(DisplayName = "LayoutForceDirected: 配置後に矩形が重ならない")]
+    public void LayoutForceDirected_NoOverlap()
+    {
+        var entities = Enumerable.Range(0, 8).Select(i => NewEntity($"E{i}")).ToList();
+        var rels = new List<RelationshipViewModel>();
+
+        for (var i = 0; i < 8; i++)
+        {
+            rels.Add(NewRelationship(entities[i], entities[(i + 1) % 8]));
+        }
+
+        AutoLayoutService.LayoutForceDirected(entities, rels);
+
+        for (var i = 0; i < entities.Count; i++)
+        {
+            for (var j = i + 1; j < entities.Count; j++)
+            {
+                var a = entities[i];
+                var b = entities[j];
+
+                // 矩形（Width × DisplayHeight、ギャップ加算なし）が重なっていないこと
+                var overlap =
+                    a.X < b.X + b.Width
+                    && b.X < a.X + a.Width
+                    && a.Y < b.Y + b.DisplayHeight
+                    && b.Y < a.Y + a.DisplayHeight;
+
+                overlap.Should().BeFalse($"E{i} と E{j} が重なってはいけない");
+            }
+        }
+    }
+
+    /// <summary>接続されたペアが非接続ペアより近くに配置されることを検証する</summary>
+    [Fact(DisplayName = "LayoutForceDirected: 接続ペアが近くに配置される")]
+    public void LayoutForceDirected_ConnectedPairsAreCloser()
+    {
+        var a = NewEntity("A");
+        var b = NewEntity("B");
+        var c = NewEntity("C");
+        var d = NewEntity("D");
+        var entities = new List<EntityViewModel> { a, b, c, d };
+
+        var rels = new List<RelationshipViewModel> { NewRelationship(a, b), NewRelationship(c, d) };
+
+        AutoLayoutService.LayoutForceDirected(entities, rels);
+
+        static (double X, double Y) Center(EntityViewModel e) => (e.X + e.Width / 2, e.Y + e.DisplayHeight / 2);
+
+        var distAB = LayoutGeometry.Distance(Center(a), Center(b));
+        var distAC = LayoutGeometry.Distance(Center(a), Center(c));
+        var distAD = LayoutGeometry.Distance(Center(a), Center(d));
+
+        distAB.Should().BeLessThan(distAC);
+        distAB.Should().BeLessThan(distAD);
+    }
+
+    /// <summary>同じ入力に対して常に同じ配置となる（乱数を使わない）ことを検証する</summary>
+    [Fact(DisplayName = "LayoutForceDirected: 結果が決定的である")]
+    public void LayoutForceDirected_IsDeterministic()
+    {
+        static (List<EntityViewModel> Entities, List<RelationshipViewModel> Rels) Build()
+        {
+            var entities = Enumerable.Range(0, 8).Select(i => NewEntity($"E{i}")).ToList();
+            var rels = new List<RelationshipViewModel>();
+
+            for (var i = 0; i < 8; i++)
+            {
+                rels.Add(NewRelationship(entities[i], entities[(i + 1) % 8]));
+            }
+
+            return (entities, rels);
+        }
+
+        var (first, firstRels) = Build();
+        var (second, secondRels) = Build();
+
+        AutoLayoutService.LayoutForceDirected(first, firstRels);
+        AutoLayoutService.LayoutForceDirected(second, secondRels);
+
+        for (var i = 0; i < first.Count; i++)
+        {
+            second[i].X.Should().Be(first[i].X);
+            second[i].Y.Should().Be(first[i].Y);
+        }
+    }
+
+    /// <summary>リング構成で従来の列指定格子配置より交差が厳密に少なくなることを検証する</summary>
+    [Fact(DisplayName = "LayoutForceDirected: 従来格子配置より交差が減る")]
+    public void LayoutForceDirected_ReducesCrossingsComparedToGrid()
+    {
+        static (List<EntityViewModel> Entities, List<RelationshipViewModel> Rels) Build()
+        {
+            var entities = Enumerable.Range(0, 12).Select(i => NewEntity($"E{i}")).ToList();
+            var rels = new List<RelationshipViewModel>();
+
+            for (var i = 0; i < 12; i++)
+            {
+                rels.Add(NewRelationship(entities[i], entities[(i + 5) % 12]));
+            }
+
+            return (entities, rels);
+        }
+
+        var (grid, gridRels) = Build();
+        var (force, forceRels) = Build();
+
+        AutoLayoutService.LayoutGrid(grid, columns: 4);
+        AutoLayoutService.LayoutForceDirected(force, forceRels);
+
+        LayoutGeometry.CountCrossings(forceRels).Should().BeLessThan(LayoutGeometry.CountCrossings(gridRels));
+    }
+
+    /// <summary>配置全体が広がりすぎずコンパクトに収まることを検証する（遠距離反発の打ち切りの退行防止）</summary>
+    [Fact(DisplayName = "LayoutForceDirected: 配置がコンパクトに収まる")]
+    public void LayoutForceDirected_ProducesCompactLayout()
+    {
+        var entities = Enumerable.Range(0, 8).Select(i => NewEntity($"E{i}")).ToList();
+        var rels = new List<RelationshipViewModel>();
+
+        for (var i = 0; i < 8; i++)
+        {
+            rels.Add(NewRelationship(entities[i], entities[(i + 1) % 8]));
+        }
+
+        AutoLayoutService.LayoutForceDirected(entities, rels);
+
+        var width = entities.Max(e => e.X + e.Width) - entities.Min(e => e.X);
+        var height = entities.Max(e => e.Y + e.DisplayHeight) - entities.Min(e => e.Y);
+
+        // 8 ノードリングの実測は約 853x726 調整前の挙動（1250x1133 超）へ戻らないことを保証する
+        (width * height).Should().BeLessThan(1_000_000);
+    }
+
+    /// <summary>配置後に全エンティティの左上座標が Margin 以上へ正規化されることを検証する</summary>
+    [Fact(DisplayName = "LayoutForceDirected: 座標が Margin 以上へ正規化される")]
+    public void LayoutForceDirected_NormalizesToMargin()
+    {
+        var entities = Enumerable.Range(0, 8).Select(i => NewEntity($"E{i}")).ToList();
+        var rels = new List<RelationshipViewModel>();
+
+        for (var i = 0; i < 8; i++)
+        {
+            rels.Add(NewRelationship(entities[i], entities[(i + 1) % 8]));
+        }
+
+        AutoLayoutService.LayoutForceDirected(entities, rels);
+
+        const double margin = 40;
+        entities.Should().OnlyContain(e => e.X >= margin - 1e-6 && e.Y >= margin - 1e-6);
     }
 
     /// <summary>説明表示時は説明を含む表示高さを使って行間が確保されることを検証する</summary>

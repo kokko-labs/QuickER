@@ -715,6 +715,13 @@ public partial class MainViewModel : ObservableObject
         ApplyLayoutWithUndo(() => AutoLayoutService.LayoutTree(Entities, Relationships), "整列(木)");
     }
 
+    /// <summary>エンティティを力学モデルによる自由配置で整列する（Undo 可能）</summary>
+    [RelayCommand]
+    private void AutoLayoutForce()
+    {
+        ApplyLayoutWithUndo(() => AutoLayoutService.LayoutForceDirected(Entities, Relationships), "整列(自由)");
+    }
+
     /// <summary>全エンティティの表示幅を内容に合わせて自動調整する</summary>
     [RelayCommand]
     private void AutoFitEntityWidths()
