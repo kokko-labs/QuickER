@@ -10,7 +10,7 @@ namespace ERDesigner.Services;
 ///   <item><see cref="LayoutGrid(IList{EntityViewModel}, int)"/>: 格子状レイアウト（並び順のまま配置）</item>
 ///   <item><see cref="LayoutGrid(IList{EntityViewModel}, IList{RelationshipViewModel}, int)"/>: リレーション線の交差をできるだけ減らす格子状レイアウト</item>
 ///   <item><see cref="LayoutTree"/>: リレーションを辺と見なした階層（BFS）レイアウト</item>
-///   <item><see cref="LayoutForceDirected"/>: 力学モデル（Fruchterman-Reingold 改）による自由配置レイアウト</item>
+///   <item><see cref="LayoutForceDirected"/>: 力学モデルで決めた配置を格子へスナップする自由整列レイアウト</item>
 /// </list>
 /// </remarks>
 public static class AutoLayoutService
@@ -212,21 +212,24 @@ public static class AutoLayoutService
         }
     }
 
-    /// <summary>リレーションで繋がったエンティティが引き合い、全エンティティが反発する力学モデルで自由配置する</summary>
+    /// <summary>リレーションで繋がったエンティティが引き合う力学モデルで大まかな配置を決め、格子セルへスナップして整列する</summary>
     /// <remarks>
-    /// Fruchterman-Reingold 法を改変し、可変サイズの矩形に合わせて理想距離を調整したうえで重なりを後処理で解消する
+    /// 自由配置のグループ構造（繋がりの強いエンティティが近くに集まる）を保ったまま、
+    /// 格子整列の揃った見た目を得るハイブリッド方式
     /// <list type="number">
-    ///   <item>BFS 順で円環状に初期配置し、近い接続が初期解で隣り合いやすくする</item>
-    ///   <item>反発（全ペア）・引力（辺）・重力（重心へ）を線形冷却の温度で制限しながら反復する</item>
-    ///   <item>反復後に矩形同士の重なりを軸方向の小さい侵入量から押し出して解消する</item>
+    ///   <item>力学モデル（Fruchterman-Reingold 改）のシミュレーションで全エンティティの中心座標を求める</item>
+    ///   <item>中心 Y の昇順で列数ぶんずつ行へ分割し、行内を中心 X の昇順に並べる</item>
+    ///   <item>確定した順序で既存の格子配置を適用する</item>
     /// </list>
     /// 乱数・列挙順非決定要素を一切使わないため結果は決定的
     /// </remarks>
     /// <param name="entities">配置対象のエンティティ一覧</param>
     /// <param name="relationships">リレーション一覧（レイアウト上は無向として扱う）</param>
+    /// <param name="columns">列数 0 以下なら要素数の平方根から自動決定する</param>
     public static void LayoutForceDirected(
         IList<EntityViewModel> entities,
-        IList<RelationshipViewModel> relationships
+        IList<RelationshipViewModel> relationships,
+        int columns = 0
     )
     {
         if (entities.Count == 0)
@@ -235,14 +238,51 @@ public static class AutoLayoutService
         }
 
         var edges = BuildEdges(entities, relationships);
+        var cols = ResolveColumns(entities.Count, columns);
 
-        // リレーションが無ければ引力が働かず散らばるだけのため従来格子へフォールバックする
+        // リレーションが無ければ引力が働かず順序が決まらないため従来格子へフォールバックする
         if (edges.Count == 0)
         {
-            PlaceInGrid(entities, ResolveColumns(entities.Count, 0));
+            PlaceInGrid(entities, cols);
             return;
         }
 
+        var centers = ComputeForceDirectedCenters(entities, edges);
+
+        // 中心 Y 昇順（同値は X 昇順 → 番号昇順）で安定ソートし、先頭から列数ぶんずつ行チャンクへ分割する
+        var byRow = Enumerable
+            .Range(0, entities.Count)
+            .OrderBy(i => centers[i].Y)
+            .ThenBy(i => centers[i].X)
+            .ToList();
+
+        var order = new List<EntityViewModel>(entities.Count);
+
+        for (var start = 0; start < byRow.Count; start += cols)
+        {
+            // 各行チャンク内を中心 X 昇順（同値は番号昇順）で並べ替える
+            var chunk = byRow
+                .Skip(start)
+                .Take(cols)
+                .OrderBy(i => centers[i].X)
+                .Select(i => entities[i]);
+
+            order.AddRange(chunk);
+        }
+
+        PlaceInGrid(order, cols);
+    }
+
+    /// <summary>力学モデルのシミュレーションを実行し全エンティティの中心座標を返す</summary>
+    /// <remarks>
+    /// サイズ計算 → 円環状の初期配置 → 反発・引力・重力の力学反復 → 矩形重なり解消までを担い、
+    /// 正規化（左上座標への変換）は呼び出し側に委ねる 乱数を使わないため結果は決定的
+    /// </remarks>
+    private static (double X, double Y)[] ComputeForceDirectedCenters(
+        IList<EntityViewModel> entities,
+        List<(int A, int B)> edges
+    )
+    {
         var n = entities.Count;
 
         // 反発・引力の理想距離は矩形の代表サイズ（幅と高さの大きい方）で決める
@@ -440,24 +480,7 @@ public static class AutoLayoutService
             }
         }
 
-        // 正規化: 左上座標の最小 X / Y が Margin になるよう全体を平行移動する
-        var minLeft = double.MaxValue;
-        var minTop = double.MaxValue;
-
-        for (var i = 0; i < n; i++)
-        {
-            minLeft = Math.Min(minLeft, pos[i].X - entities[i].Width / 2);
-            minTop = Math.Min(minTop, pos[i].Y - entities[i].DisplayHeight / 2);
-        }
-
-        var shiftX = Margin - minLeft;
-        var shiftY = Margin - minTop;
-
-        for (var i = 0; i < n; i++)
-        {
-            entities[i].X = pos[i].X + shiftX - entities[i].Width / 2;
-            entities[i].Y = pos[i].Y + shiftY - entities[i].DisplayHeight / 2;
-        }
+        return pos;
     }
 
     /// <summary>バリセンタ（重心）法で各階層内の並び順を隣接階層の接続先に近づけ、線の交差を減らす</summary>

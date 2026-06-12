@@ -286,28 +286,34 @@ public class AutoLayoutServiceTests
         }
     }
 
-    /// <summary>接続されたペアが非接続ペアより近くに配置されることを検証する</summary>
-    [Fact(DisplayName = "LayoutForceDirected: 接続ペアが近くに配置される")]
-    public void LayoutForceDirected_ConnectedPairsAreCloser()
+    /// <summary>接続されたペアが格子上の隣接セル（斜め含む）へ配置されることを検証する</summary>
+    [Fact(DisplayName = "LayoutForceDirected: 接続ペアが隣接セルに配置される")]
+    public void LayoutForceDirected_PlacesConnectedPairsInAdjacentCells()
     {
-        var a = NewEntity("A");
-        var b = NewEntity("B");
-        var c = NewEntity("C");
-        var d = NewEntity("D");
-        var entities = new List<EntityViewModel> { a, b, c, d };
+        var entities = Enumerable.Range(0, 8).Select(i => NewEntity($"E{i}")).ToList();
 
-        var rels = new List<RelationshipViewModel> { NewRelationship(a, b), NewRelationship(c, d) };
+        // 4 つの独立したペア（3x3 格子で隣接が自明に成立しない構成）
+        var rels = new List<RelationshipViewModel>();
+
+        for (var i = 0; i < 8; i += 2)
+        {
+            rels.Add(NewRelationship(entities[i], entities[i + 1]));
+        }
 
         AutoLayoutService.LayoutForceDirected(entities, rels);
 
-        static (double X, double Y) Center(EntityViewModel e) => (e.X + e.Width / 2, e.Y + e.DisplayHeight / 2);
+        // 座標値の昇順インデックスを列・行番号と見なす
+        var xs = entities.Select(e => e.X).Distinct().OrderBy(x => x).ToList();
+        var ys = entities.Select(e => e.Y).Distinct().OrderBy(y => y).ToList();
 
-        var distAB = LayoutGeometry.Distance(Center(a), Center(b));
-        var distAC = LayoutGeometry.Distance(Center(a), Center(c));
-        var distAD = LayoutGeometry.Distance(Center(a), Center(d));
+        foreach (var rel in rels)
+        {
+            var dCol = Math.Abs(xs.IndexOf(rel.Source.X) - xs.IndexOf(rel.Target.X));
+            var dRow = Math.Abs(ys.IndexOf(rel.Source.Y) - ys.IndexOf(rel.Target.Y));
 
-        distAB.Should().BeLessThan(distAC);
-        distAB.Should().BeLessThan(distAD);
+            // 接続ペアは隣接セル（斜め含む チェビシェフ距離 1 以内）に収まること
+            Math.Max(dCol, dRow).Should().BeLessThanOrEqualTo(1);
+        }
     }
 
     /// <summary>同じ入力に対して常に同じ配置となる（乱数を使わない）ことを検証する</summary>
@@ -403,6 +409,25 @@ public class AutoLayoutServiceTests
 
         const double margin = 40;
         entities.Should().OnlyContain(e => e.X >= margin - 1e-6 && e.Y >= margin - 1e-6);
+    }
+
+    /// <summary>格子へスナップした結果が行数ぶんの Y 値・列数以下の X 値に収まることを検証する</summary>
+    [Fact(DisplayName = "LayoutForceDirected: 格子整列の不変条件を満たす")]
+    public void LayoutForceDirected_SatisfiesGridInvariants()
+    {
+        var entities = Enumerable.Range(0, 12).Select(i => NewEntity($"E{i}")).ToList();
+        var rels = new List<RelationshipViewModel>();
+
+        for (var i = 0; i < 12; i++)
+        {
+            rels.Add(NewRelationship(entities[i], entities[(i + 5) % 12]));
+        }
+
+        AutoLayoutService.LayoutForceDirected(entities, rels, columns: 4);
+
+        // 12 件 / 4 列 = 3 行ぶんの異なる Y 値、列数以下の異なる X 値に収まること
+        entities.Select(e => e.Y).Distinct().Should().HaveCount(3);
+        entities.Select(e => e.X).Distinct().Count().Should().BeLessThanOrEqualTo(4);
     }
 
     /// <summary>説明表示時は説明を含む表示高さを使って行間が確保されることを検証する</summary>

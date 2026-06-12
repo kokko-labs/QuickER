@@ -452,7 +452,7 @@
             <TextBlock Style="{StaticResource ToolBarCaption}" Text="整列(木)" />
           </StackPanel>
         </Button>
-        <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding AutoLayoutForceCommand}" ToolTip="リレーションの繋がりに基づいて自由配置で自動整列">
+        <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding AutoLayoutForceCommand}" ToolTip="リレーションの繋がりで大まかな配置を決めてから格子に揃えて整列">
           <StackPanel>
             <TextBlock Style="{StaticResource ToolBarIcon}" Text="✺" />
             <TextBlock Style="{StaticResource ToolBarCaption}" Text="整列(自由)" />
