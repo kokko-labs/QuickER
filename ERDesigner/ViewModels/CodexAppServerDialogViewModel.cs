@@ -39,6 +39,9 @@ public partial class CodexAppServerDialogViewModel : ObservableObject
     /// <summary>ツール実行対象のメイン ViewModel（null の場合は ER 図操作ツールを無効化する）</summary>
     private readonly MainViewModel? _mainViewModel;
 
+    /// <summary>ターン開始時点で ER 図が空（エンティティ 0 件）だったか。新規作成ターンの完了時に自動整列するための判定に使う</summary>
+    private bool _diagramWasEmptyAtTurnStart;
+
     /// <summary>初期化処理中かどうか（設定変更の副作用を抑止するためのガード）</summary>
     private bool _isInitializing;
     private string _modelProvider = "openai";
@@ -524,6 +527,10 @@ public partial class CodexAppServerDialogViewModel : ObservableObject
         Messages.Add(new CodexChatMessage { Role = CodexChatMessageRole.User, Content = prompt });
         IsTurnInProgress = true;
         _currentAssistantMessage = null;
+
+        // 新規作成ターンのみ完了時に自動整列するため、開始時点で ER 図が空だったかを記録する
+        _diagramWasEmptyAtTurnStart = _mainViewModel is not null && _mainViewModel.Entities.Count == 0;
+
         StatusMessage = "Codex が処理中です...";
 
         try
@@ -880,7 +887,18 @@ public partial class CodexAppServerDialogViewModel : ObservableObject
         }
         else
         {
+            ArrangeNewDiagramIfCreated();
             StatusMessage = "応答が完了しました。";
+        }
+    }
+
+    /// <summary>空の ER 図から始まったターンでエンティティが生成された場合のみ、自動整列を一度だけ適用する</summary>
+    /// <remarks>既存 ER 図への追加・変更ターン（開始時にエンティティが存在）では整列しない</remarks>
+    private void ArrangeNewDiagramIfCreated()
+    {
+        if (_diagramWasEmptyAtTurnStart && _mainViewModel is not null && _mainViewModel.Entities.Count > 0)
+        {
+            _mainViewModel.AutoArrangeNewDiagram();
         }
     }
 

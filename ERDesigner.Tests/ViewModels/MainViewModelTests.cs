@@ -37,6 +37,39 @@ public class MainViewModelTests
         vm.Entities.Should().Contain(added);
     }
 
+    /// <summary>AutoArrangeNewDiagram がエンティティを整列しつつ Undo 履歴に積まないことを検証する</summary>
+    [Fact(DisplayName = "AutoArrangeNewDiagram: 整列するが履歴に積まれない")]
+    public void AutoArrangeNewDiagram_ArrangesWithoutHistory()
+    {
+        var vm = new MainViewModel();
+        vm.AddEntityCommand.Execute(null);
+        vm.AddEntityCommand.Execute(null);
+
+        vm.AutoArrangeNewDiagram();
+
+        // 先頭エンティティが格子レイアウトの左上余白へ移動している（初期の階段状座標 60,60 から変化）
+        vm.Entities[0].X.Should().Be(40);
+        vm.Entities[0].Y.Should().Be(40);
+
+        // 整列は履歴に積まれないため、2 件の追加分を取り消すと完全に空になり Undo 不能へ戻る
+        vm.UndoCommand.Execute(null);
+        vm.UndoCommand.Execute(null);
+        vm.Entities.Should().BeEmpty();
+        vm.UndoRedo.CanUndo.Should().BeFalse();
+    }
+
+    /// <summary>エンティティが無い状態で AutoArrangeNewDiagram を呼んでも何も起きないことを検証する</summary>
+    [Fact(DisplayName = "AutoArrangeNewDiagram: 空の図では何もしない")]
+    public void AutoArrangeNewDiagram_EmptyDiagram_DoesNothing()
+    {
+        var vm = new MainViewModel();
+
+        vm.AutoArrangeNewDiagram();
+
+        vm.Entities.Should().BeEmpty();
+        vm.UndoRedo.CanUndo.Should().BeFalse();
+    }
+
     /// <summary>エンティティクリックで単一選択状態になることを検証する</summary>
     [Fact(DisplayName = "OnEntityClicked: 単一選択になる")]
     public void OnEntityClicked_SetsSingleSelection()

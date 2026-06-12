@@ -722,6 +722,26 @@ public partial class MainViewModel : ObservableObject
         ApplyLayoutWithUndo(() => AutoLayoutService.LayoutForceDirected(Entities, Relationships), "整列(自由)");
     }
 
+    /// <summary>AI によるER図の新規生成直後に、表示幅調整と格子整列をまとめて適用する（履歴には積まない）</summary>
+    /// <remarks>
+    /// Codex チャットが空のキャンバスからエンティティを生成した直後の呼び出しを想定する。
+    /// 個々の生成操作（add_entity 等）と一体の初期配置として扱うため、Undo 履歴へは登録しない。
+    /// </remarks>
+    public void AutoArrangeNewDiagram()
+    {
+        if (Entities.Count == 0)
+        {
+            return;
+        }
+
+        _changeTracker.RunWithoutTracking(() =>
+        {
+            AutoFitEntityWidths(Entities);
+            AutoLayoutService.LayoutGrid(Entities, Relationships);
+            RefreshCanvasSize();
+        });
+    }
+
     /// <summary>全エンティティの表示幅を内容に合わせて自動調整する</summary>
     [RelayCommand]
     private void AutoFitEntityWidths()
