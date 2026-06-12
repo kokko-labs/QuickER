@@ -203,6 +203,131 @@ public class ErDiagramDynamicToolsTests
         success.Should().BeFalse();
     }
 
+    /// <summary>テスト用に親テーブル（PK 付き）と子テーブル（PK + 任意列）を作成する</summary>
+    private static void SetupParentAndChild(MainViewModel vm, string childExtraColumn)
+    {
+        Exec(vm, "add_entity", new { table_name = "Customer" });
+        Exec(
+            vm,
+            "add_column",
+            new
+            {
+                table_name = "Customer",
+                column_name = "CustomerId",
+                data_type = "int",
+                is_primary_key = true,
+                is_nullable = false,
+            }
+        );
+        Exec(vm, "add_entity", new { table_name = "Order" });
+        Exec(
+            vm,
+            "add_column",
+            new
+            {
+                table_name = "Order",
+                column_name = "OrderId",
+                data_type = "int",
+                is_primary_key = true,
+                is_nullable = false,
+            }
+        );
+        Exec(
+            vm,
+            "add_column",
+            new
+            {
+                table_name = "Order",
+                column_name = childExtraColumn,
+                data_type = "int",
+                is_primary_key = false,
+                is_nullable = true,
+            }
+        );
+    }
+
+    /// <summary>add_relationship で明示指定した source_column / target_column が使用されることを検証する</summary>
+    [Fact(DisplayName = "add_relationship で明示指定したカラムがそのまま使用される")]
+    public void AddRelationship_WithExplicitColumns_UsesSpecifiedColumns()
+    {
+        var vm = CreateVm();
+
+        // FK 列名が命名規則（CustomerId）と異なる OwnerId のケース
+        SetupParentAndChild(vm, childExtraColumn: "OwnerId");
+
+        var (_, success) = Exec(
+            vm,
+            "add_relationship",
+            new
+            {
+                source_table = "Customer",
+                source_column = "CustomerId",
+                target_table = "Order",
+                target_column = "OwnerId",
+                relationship_type = "OneToMany",
+            }
+        );
+
+        success.Should().BeTrue();
+        var relationship = vm.Relationships.Single();
+        var order = vm.Entities.Single(e => e.TableName == "Order");
+        relationship.SourceColumnId.Should().Be(vm.Entities.Single(e => e.TableName == "Customer").Columns.Single(c => c.Name == "CustomerId").Id);
+        relationship.TargetColumnId.Should().Be(order.Columns.Single(c => c.Name == "OwnerId").Id);
+    }
+
+    /// <summary>add_relationship で存在しないカラムを指定するとエラーになることを検証する</summary>
+    [Fact(DisplayName = "add_relationship で存在しない target_column を指定するとエラーになる")]
+    public void AddRelationship_UnknownTargetColumn_ReturnsError()
+    {
+        var vm = CreateVm();
+        SetupParentAndChild(vm, childExtraColumn: "OwnerId");
+
+        var (result, success) = Exec(
+            vm,
+            "add_relationship",
+            new
+            {
+                source_table = "Customer",
+                target_table = "Order",
+                target_column = "NoSuchColumn",
+                relationship_type = "OneToMany",
+            }
+        );
+
+        success.Should().BeFalse();
+        result.Should().Contain("NoSuchColumn");
+        vm.Relationships.Should().BeEmpty();
+    }
+
+    /// <summary>カラム省略時に名前から FK を推測できない場合、無関係な列が FK 化されず未割当となることを検証する</summary>
+    [Fact(DisplayName = "add_relationship でカラム省略かつ推測不能な場合は参照先列が未割当となる")]
+    public void AddRelationship_NoLikelyColumn_LeavesTargetUnassigned()
+    {
+        var vm = CreateVm();
+
+        // FK らしい名前の列が無い（従来は先頭の非 PK 列 Quantity がフォールバックで FK 化されていた）
+        SetupParentAndChild(vm, childExtraColumn: "Quantity");
+
+        var (_, success) = Exec(
+            vm,
+            "add_relationship",
+            new
+            {
+                source_table = "Customer",
+                target_table = "Order",
+                relationship_type = "OneToMany",
+            }
+        );
+
+        success.Should().BeTrue();
+        var relationship = vm.Relationships.Single();
+        relationship.TargetColumnId.Should().BeNull();
+
+        var quantityColumn = vm.Entities.Single(e => e.TableName == "Order").Columns.Single(c => c.Name == "Quantity");
+        quantityColumn.IsForeignKey.Should().BeFalse();
+        quantityColumn.IsNullable.Should().BeTrue();
+    }
+
     /// <summary>AI ツールで FK 列を削除し Undo すると、列と併せてリレーションの FK 参照も復元されることを検証する</summary>
     [Fact(DisplayName = "remove_column で削除した FK 列は Undo でリレーションの参照も復元される")]
     public void RemoveColumn_UsedAsFk_UndoRestoresRelationshipReference()

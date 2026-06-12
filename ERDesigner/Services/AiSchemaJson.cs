@@ -51,7 +51,9 @@ public class AiSchemaJson
                 .Select(relationship => new AiRelationship
                 {
                     SourceTable = entityById[relationship.SourceEntityId].TableName,
+                    SourceColumn = FindColumnNameById(entityById[relationship.SourceEntityId], relationship.SourceColumnId),
                     TargetTable = entityById[relationship.TargetEntityId].TableName,
+                    TargetColumn = FindColumnNameById(entityById[relationship.TargetEntityId], relationship.TargetColumnId),
                     Type = relationship.Type.ToString(),
                     ConstraintName = relationship.ConstraintName,
                     OnDelete = relationship.OnDelete.ToSqlText(),
@@ -145,6 +147,17 @@ public class AiSchemaJson
                     ? targetTableName
                     : ConvertIdentifier(relationship.TargetTable, namingStyle);
             }
+
+            // カラム名も命名規則変換に追従させ、AI が明示した列参照が解決できなくなるのを防ぐ
+            if (!string.IsNullOrWhiteSpace(relationship.SourceColumn))
+            {
+                relationship.SourceColumn = ConvertIdentifier(relationship.SourceColumn, namingStyle);
+            }
+
+            if (!string.IsNullOrWhiteSpace(relationship.TargetColumn))
+            {
+                relationship.TargetColumn = ConvertIdentifier(relationship.TargetColumn, namingStyle);
+            }
         }
     }
 
@@ -215,8 +228,8 @@ public class AiSchemaJson
                     SourceEntityId = s.Id,
                     TargetEntityId = t.Id,
                     Type = ParseType(r.Type),
-                    SourceColumnId = ResolveSourceColumnId(s),
-                    TargetColumnId = ResolveTargetColumnId(s, t),
+                    SourceColumnId = ResolveSourceColumnId(s, r.SourceColumn),
+                    TargetColumnId = ResolveTargetColumnId(s, t, r.TargetColumn),
                     ConstraintName = r.ConstraintName,
                     OnDelete = ForeignKeyReferentialActionHelper.Parse(r.OnDelete),
                     OnUpdate = ForeignKeyReferentialActionHelper.Parse(r.OnUpdate),
@@ -227,16 +240,31 @@ public class AiSchemaJson
         return (entities, relationships);
     }
 
-    /// <summary>リレーションの参照元 (親) テーブルの PK 列を解決する</summary>
-    private static Guid? ResolveSourceColumnId(Entity sourceEntity)
+    /// <summary>リレーションの参照元 (親) テーブルの参照列を解決する</summary>
+    /// <remarks>AI が sourceColumn で明示した列を最優先し、無ければ PK 列へフォールバックする</remarks>
+    private static Guid? ResolveSourceColumnId(Entity sourceEntity, string? specifiedColumnName)
     {
-        return sourceEntity.Columns.FirstOrDefault(column => column.IsPrimaryKey)?.Id;
+        var specified = FindColumnByName(sourceEntity, specifiedColumnName);
+
+        return (specified ?? sourceEntity.Columns.FirstOrDefault(column => column.IsPrimaryKey))?.Id;
     }
 
     /// <summary>リレーションの参照先 (子) テーブルの FK 列を解決する</summary>
-    /// <remarks>①命名規則一致 → ②isForeignKey 指定 → ③FK らしい名前 → ④先頭の非 PK 列、の優先順で探索し、採用した列には FK フラグと NOT NULL を設定する</remarks>
-    private static Guid? ResolveTargetColumnId(Entity sourceEntity, Entity targetEntity)
+    /// <remarks>
+    /// AI が targetColumn で明示した列は設定を書き換えずそのまま採用する。
+    /// 明示が無い場合は ①命名規則一致 → ②isForeignKey 指定 → ③FK らしい名前、の優先順で探索し、採用した列には FK フラグと NOT NULL を設定する。
+    /// いずれにも該当しなければ列未割当（null）とし、無関係な列を FK へ書き換えない
+    /// </remarks>
+    private static Guid? ResolveTargetColumnId(Entity sourceEntity, Entity targetEntity, string? specifiedColumnName)
     {
+        // AI が明示した列は AI の出力（FK フラグ・NULL 許容）をそのまま生かす
+        var specified = FindColumnByName(targetEntity, specifiedColumnName);
+
+        if (specified is not null)
+        {
+            return specified.Id;
+        }
+
         var preferredColumnName = ResolveForeignKeyColumnName(sourceEntity.TableName);
 
         // ① preferredColumnName（例: CustomerId）と完全一致する列を優先的に FK として採用する
@@ -287,17 +315,20 @@ public class AiSchemaJson
             return fkPatternColumn.Id;
         }
 
-        // ④ 最終フォールバック: 最初の非 PK 列を FK に設定する
-        var fallbackColumn = targetEntity.Columns.FirstOrDefault(column => !column.IsPrimaryKey);
+        // FK らしい列が見つからない場合は列未割当とする（無関係な列を FK 化して AI の設計を壊さない）
+        return null;
+    }
 
-        if (fallbackColumn is null)
-        {
-            return null;
-        }
+    /// <summary>エンティティから指定名のカラムを大文字小文字を無視して検索する（未指定・未存在なら null）</summary>
+    private static Column? FindColumnByName(Entity entity, string? columnName)
+    {
+        return string.IsNullOrWhiteSpace(columnName) ? null : entity.Columns.FirstOrDefault(column => string.Equals(column.Name, columnName, StringComparison.OrdinalIgnoreCase));
+    }
 
-        fallbackColumn.IsForeignKey = true;
-        fallbackColumn.IsNullable = false;
-        return fallbackColumn.Id;
+    /// <summary>カラム ID からカラム名を逆引きする（未割当・未存在なら null）</summary>
+    private static string? FindColumnNameById(Entity entity, Guid? columnId)
+    {
+        return columnId is null ? null : entity.Columns.FirstOrDefault(column => column.Id == columnId)?.Name;
     }
 
     /// <summary>列名が「テーブル名+Id」形式の外部キーらしい名前かどうかを判定する</summary>
@@ -637,6 +668,10 @@ public class AiRelationship
         }
     }
 
+    /// <summary>起点（親）テーブルの参照列名。通常は主キー列。</summary>
+    [JsonPropertyName("sourceColumn")]
+    public string? SourceColumn { get; set; }
+
     /// <summary>終点テーブル名。</summary>
     [JsonPropertyName("targetTable")]
     public string? TargetTable { get; set; }
@@ -654,6 +689,10 @@ public class AiRelationship
             }
         }
     }
+
+    /// <summary>終点（子）テーブルの外部キー列名。</summary>
+    [JsonPropertyName("targetColumn")]
+    public string? TargetColumn { get; set; }
 
     /// <summary>関連の種類 (OneToOne / OneToMany / ManyToMany)。</summary>
     [JsonPropertyName("type")]

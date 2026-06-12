@@ -26,6 +26,7 @@ public class OpenAiSchemaClient : IAiSchemaClient
 - 各カラムの isNullable を必ず設定する。主キーは false、必須項目や通常の外部キーも false、任意入力の項目だけ true にする。
 - 外部キーがあれば isForeignKey=true を付け、relationships にも記述する。外部キー列を同時に主キー（isPrimaryKey=true）にしてはならない。参照元テーブルのPKを引き継ぐ列は isForeignKey=true / isPrimaryKey=false にする。
 - type は ""OneToOne"" / ""OneToMany"" / ""ManyToMany"" のいずれか。
+- relationships の各要素には sourceColumn（参照元テーブルの参照列名。通常は主キー列）と targetColumn（参照先テーブルの外部キー列名）を必ず含める。どちらも columns に定義した実在の列名を指定する。
 - relationships の各要素には constraintName, onDelete, onUpdate も含める。onDelete / onUpdate は ""NO ACTION"" / ""CASCADE"" / ""SET NULL"" / ""SET DEFAULT"" のいずれかを使用する。
 - dataType は SQL Server の型 (例: int, bigint, nvarchar(50), datetime2, decimal(10,2), bit) を使用。";
 
@@ -83,14 +84,16 @@ public class OpenAiSchemaClient : IAiSchemaClient
                 "type": "object",
                 "properties": {
                   "sourceTable": { "type": "string" },
+                  "sourceColumn": { "type": "string", "description": "参照元テーブルの参照列名（通常は主キー列）" },
                   "targetTable": { "type": "string" },
+                  "targetColumn": { "type": "string", "description": "参照先テーブルの外部キー列名" },
                     "type": { "type": "string", "enum": ["OneToOne","OneToMany","ManyToMany"] },
                     "constraintName": { "type": "string" },
                     "onDelete": { "type": "string", "enum": ["NO ACTION","CASCADE","SET NULL","SET DEFAULT"] },
                     "onUpdate": { "type": "string", "enum": ["NO ACTION","CASCADE","SET NULL","SET DEFAULT"] }
                 },
 
-                "required": ["sourceTable","targetTable","type","constraintName","onDelete","onUpdate"],
+                "required": ["sourceTable","sourceColumn","targetTable","targetColumn","type","constraintName","onDelete","onUpdate"],
                 "additionalProperties": false
               }
             }

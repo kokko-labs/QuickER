@@ -133,6 +133,143 @@ public class AiSchemaJsonTests
         relationship.TargetColumnId.Should().Be(order.Columns.Single(column => column.Name == "CustomerId").Id);
     }
 
+    /// <summary>AI が明示した sourceColumn / targetColumn が列名推定より優先され、列設定が書き換えられないことを検証する</summary>
+    [Fact(DisplayName = "AI が明示したリレーション列はフラグを書き換えずそのまま採用される")]
+    public void ToDomain_ExplicitRelationshipColumns_AreUsedWithoutRewriting()
+    {
+        // FK 列名が命名規則（CustomerId）と異なる OwnerId で、任意参照のため NULL 許容
+        var schema = new AiSchemaJson
+        {
+            Tables =
+            [
+                new AiTable
+                {
+                    Name = "Customer",
+                    Columns =
+                    [
+                        new AiColumn
+                        {
+                            Name = "Id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                    ],
+                },
+                new AiTable
+                {
+                    Name = "Order",
+                    Columns =
+                    [
+                        new AiColumn
+                        {
+                            Name = "Id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                        new AiColumn
+                        {
+                            Name = "OwnerId",
+                            DataType = "int",
+                            IsForeignKey = true,
+                            IsNullable = true,
+                        },
+                    ],
+                },
+            ],
+            Relationships =
+            [
+                new AiRelationship
+                {
+                    SourceTable = "Customer",
+                    SourceColumn = "Id",
+                    TargetTable = "Order",
+                    TargetColumn = "OwnerId",
+                    Type = "OneToMany",
+                },
+            ],
+        };
+
+        var (entities, relationships) = schema.ToDomain();
+        var customer = entities.Single(entity => entity.TableName == "Customer");
+        var order = entities.Single(entity => entity.TableName == "Order");
+        var ownerColumn = order.Columns.Single(column => column.Name == "OwnerId");
+        var relationship = relationships.Single();
+
+        relationship.SourceColumnId.Should().Be(customer.Columns[0].Id);
+        relationship.TargetColumnId.Should().Be(ownerColumn.Id);
+
+        // AI の出力した NULL 許容設定が NOT NULL へ書き換えられない
+        ownerColumn.IsNullable.Should().BeTrue();
+        ownerColumn.IsForeignKey.Should().BeTrue();
+    }
+
+    /// <summary>FK らしい列が見つからない場合に、無関係な列が FK 化されず列未割当となることを検証する</summary>
+    [Fact(DisplayName = "FK らしい列が無い場合は参照先列が未割当となり無関係な列は書き換えられない")]
+    public void ToDomain_NoLikelyForeignKeyColumn_LeavesTargetUnassigned()
+    {
+        var schema = new AiSchemaJson
+        {
+            Tables =
+            [
+                new AiTable
+                {
+                    Name = "Customer",
+                    Columns =
+                    [
+                        new AiColumn
+                        {
+                            Name = "Id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                    ],
+                },
+                new AiTable
+                {
+                    Name = "Order",
+                    Columns =
+                    [
+                        new AiColumn
+                        {
+                            Name = "Id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                        new AiColumn
+                        {
+                            // FK とは無関係の列（従来はこの列がフォールバックで FK 化されていた）
+                            Name = "Quantity",
+                            DataType = "int",
+                            IsNullable = true,
+                        },
+                    ],
+                },
+            ],
+            Relationships =
+            [
+                new AiRelationship
+                {
+                    SourceTable = "Customer",
+                    TargetTable = "Order",
+                    Type = "OneToMany",
+                },
+            ],
+        };
+
+        var (entities, relationships) = schema.ToDomain();
+        var order = entities.Single(entity => entity.TableName == "Order");
+        var quantityColumn = order.Columns.Single(column => column.Name == "Quantity");
+        var relationship = relationships.Single();
+
+        relationship.TargetColumnId.Should().BeNull();
+        quantityColumn.IsForeignKey.Should().BeFalse();
+        quantityColumn.IsNullable.Should().BeTrue();
+    }
+
     /// <summary>存在しないテーブルを参照するリレーションが無視されることを検証する</summary>
     [Fact(DisplayName = "存在しないテーブルを参照するリレーションは無視される")]
     public void ToDomain_IgnoresInvalidRelationships()
@@ -307,7 +444,9 @@ public class AiSchemaJsonTests
                 new AiRelationship
                 {
                     SourceTable = "customer_order",
+                    SourceColumn = "order_id",
                     TargetTable = "customer_order",
+                    TargetColumn = "parent_order_id",
                     Type = "OneToOne",
                 },
             ],
@@ -320,6 +459,10 @@ public class AiSchemaJsonTests
         schema.Tables[0].Columns![1].Name.Should().Be("CreatedAt");
         schema.Relationships[0].SourceTable.Should().Be("CustomerOrder");
         schema.Relationships[0].TargetTable.Should().Be("CustomerOrder");
+
+        // リレーションの列参照もカラム名の変換に追従する
+        schema.Relationships[0].SourceColumn.Should().Be("OrderId");
+        schema.Relationships[0].TargetColumn.Should().Be("ParentOrderId");
     }
 
     /// <summary>識別子がスネークケースへ正規化されることを検証する</summary>

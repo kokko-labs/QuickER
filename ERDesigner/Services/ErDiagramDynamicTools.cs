@@ -127,7 +127,8 @@ public static class ErDiagramDynamicTools
             new CodexDynamicToolDefinition
             {
                 Name = "add_relationship",
-                Description = "2 つのテーブル間にリレーション（外部キー）を追加します。",
+                Description =
+                    "2 つのテーブル間にリレーション（外部キー）を追加します。参照列を確実に指定するため、source_column（参照元の主キー列名）と target_column（参照先の外部キー列名）も指定してください。",
                 DeferLoading = false,
                 InputSchema = new
                 {
@@ -135,7 +136,9 @@ public static class ErDiagramDynamicTools
                     properties = new
                     {
                         source_table = new { type = "string", description = "参照元（親）テーブル名" },
+                        source_column = new { type = "string", description = "参照元（親）テーブルの参照カラム名。通常は主キー列（省略時は主キー列を使用）" },
                         target_table = new { type = "string", description = "参照先（子）テーブル名" },
+                        target_column = new { type = "string", description = "参照先（子）テーブルの外部キーカラム名（省略時はカラム名から推測し、推測できなければ未割当）" },
                         relationship_type = new
                         {
                             type = "string",
@@ -455,7 +458,8 @@ public static class ErDiagramDynamicTools
         return ($"テーブル '{tableName}' のカラム '{columnName}' の {string.Join("、", changed)} を更新しました。", true);
     }
 
-    /// <summary>2 テーブル間にリレーションを追加する（参照先 PK と参照元 FK 列を自動解決する）</summary>
+    /// <summary>2 テーブル間にリレーションを追加する</summary>
+    /// <remarks>AI が source_column / target_column で明示した列をそのまま使用し、省略時のみ名前ベースで自動解決する</remarks>
     private static (string, bool) AddRelationship(JsonElement args, MainViewModel vm)
     {
         var sourceTable = GetString(args, "source_table");
@@ -487,8 +491,40 @@ public static class ErDiagramDynamicTools
             _ => RelationshipType.OneToMany,
         };
 
-        var sourcePk = source.Columns.FirstOrDefault(c => c.IsPrimaryKey);
-        var targetColumn = ResolveTargetForeignKeyColumn(source, target);
+        // AI が明示した列を最優先で使用する（存在しない列名はエラーとして返し、AI に修正を促す）
+        var sourceColumnName = GetString(args, "source_column");
+        ColumnViewModel? sourcePk;
+
+        if (!string.IsNullOrWhiteSpace(sourceColumnName))
+        {
+            sourcePk = source.Columns.FirstOrDefault(c => string.Equals(c.Name, sourceColumnName, StringComparison.OrdinalIgnoreCase));
+
+            if (sourcePk is null)
+            {
+                return ($"テーブル '{sourceTable}' にカラム '{sourceColumnName}' が見つかりません。", false);
+            }
+        }
+        else
+        {
+            sourcePk = source.Columns.FirstOrDefault(c => c.IsPrimaryKey);
+        }
+
+        var targetColumnName = GetString(args, "target_column");
+        ColumnViewModel? targetColumn;
+
+        if (!string.IsNullOrWhiteSpace(targetColumnName))
+        {
+            targetColumn = target.Columns.FirstOrDefault(c => string.Equals(c.Name, targetColumnName, StringComparison.OrdinalIgnoreCase));
+
+            if (targetColumn is null)
+            {
+                return ($"テーブル '{targetTable}' にカラム '{targetColumnName}' が見つかりません。", false);
+            }
+        }
+        else
+        {
+            targetColumn = ResolveTargetForeignKeyColumn(source, target);
+        }
 
         var rel = new RelationshipViewModel(
             new Relationship
@@ -537,32 +573,27 @@ public static class ErDiagramDynamicTools
         return element.TryGetProperty(propertyName, out var val) && val.ValueKind == JsonValueKind.String ? val.GetString() : null;
     }
 
-    /// <summary>参照元 PK に対応する参照先側の外部キー列候補を解決する</summary>
+    /// <summary>参照元 PK に対応する参照先側の外部キー列候補を名前ベースで解決する</summary>
+    /// <remarks>名前から判断できない場合は null（列未割当）とし、無関係な列を FK 扱いにしない</remarks>
     private static ColumnViewModel? ResolveTargetForeignKeyColumn(EntityViewModel source, EntityViewModel target)
     {
         var sourcePk = source.Columns.FirstOrDefault(c => c.IsPrimaryKey);
 
-        if (sourcePk is not null)
+        if (sourcePk is null)
         {
-            // ソーステーブル名 + "Id" のパターン（例: CustomerId）で検索する
-            var fkNameBySuffix = source.TableName + "Id";
-            var byName = target.Columns.FirstOrDefault(c => string.Equals(c.Name, fkNameBySuffix, StringComparison.OrdinalIgnoreCase));
-
-            if (byName is not null)
-            {
-                return byName;
-            }
-
-            // PK と同名のカラムを検索する
-            var sameName = target.Columns.FirstOrDefault(c => string.Equals(c.Name, sourcePk.Name, StringComparison.OrdinalIgnoreCase));
-
-            if (sameName is not null)
-            {
-                return sameName;
-            }
+            return null;
         }
 
-        // 非 PK 列の先頭を使う
-        return target.Columns.FirstOrDefault(c => !c.IsPrimaryKey);
+        // ソーステーブル名 + "Id" のパターン（例: CustomerId）で検索する
+        var fkNameBySuffix = source.TableName + "Id";
+        var byName = target.Columns.FirstOrDefault(c => string.Equals(c.Name, fkNameBySuffix, StringComparison.OrdinalIgnoreCase));
+
+        if (byName is not null)
+        {
+            return byName;
+        }
+
+        // PK と同名のカラムを検索する
+        return target.Columns.FirstOrDefault(c => string.Equals(c.Name, sourcePk.Name, StringComparison.OrdinalIgnoreCase));
     }
 }
