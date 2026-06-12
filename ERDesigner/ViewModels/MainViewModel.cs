@@ -701,11 +701,11 @@ public partial class MainViewModel : ObservableObject
 
     // ---------------- Auto layout ----------------
 
-    /// <summary>エンティティを格子状に整列する（Undo 可能）</summary>
+    /// <summary>エンティティを格子状に整列する（リレーション線の交差をできるだけ減らす配置 Undo 可能）</summary>
     [RelayCommand]
     private void AutoLayoutGrid()
     {
-        ApplyLayoutWithUndo(() => AutoLayoutService.LayoutGrid(Entities), "整列(格子)");
+        ApplyLayoutWithUndo(() => AutoLayoutService.LayoutGrid(Entities, Relationships), "整列(格子)");
     }
 
     /// <summary>エンティティをリレーション階層に基づくツリー状に整列する（Undo 可能）</summary>
