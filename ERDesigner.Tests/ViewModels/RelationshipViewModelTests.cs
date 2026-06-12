@@ -151,10 +151,40 @@ public class RelationshipViewModelTests
         );
         var rel = new RelationshipViewModel(new Relationship { Type = RelationshipType.OneToMany }, a, b);
 
-        (rel.SourceMarkerLeft + 10).Should().BeApproximately(rel.SourceMarkerX, 0.001);
-        (rel.SourceMarkerTop + 10).Should().BeApproximately(rel.SourceMarkerY, 0.001);
-        (rel.TargetMarkerLeft + 10).Should().BeApproximately(rel.TargetMarkerX, 0.001);
-        (rel.TargetMarkerTop + 10).Should().BeApproximately(rel.TargetMarkerY, 0.001);
+        // マーカー描画領域は 24x24（左上 + 半径 12 が中心と一致する）
+        (rel.SourceMarkerLeft + 12).Should().BeApproximately(rel.SourceMarkerX, 0.001);
+        (rel.SourceMarkerTop + 12).Should().BeApproximately(rel.SourceMarkerY, 0.001);
+        (rel.TargetMarkerLeft + 12).Should().BeApproximately(rel.TargetMarkerX, 0.001);
+        (rel.TargetMarkerTop + 12).Should().BeApproximately(rel.TargetMarkerY, 0.001);
+    }
+
+    /// <summary>マーカー描画領域の外端（エンティティ側）が接続点＝エンティティ境界に接することを検証する</summary>
+    /// <remarks>鳥の足の先端（ローカル X = 24）が枠に接地する IE 記法準拠の配置の前提条件</remarks>
+    [Fact(DisplayName = "マーカー描画領域の外端はエンティティ境界に接する")]
+    public void MarkerBounds_OuterEdgeTouchesEntityBoundary()
+    {
+        // 水平に並べ、境界接続点が左右の辺中央になる構成にする
+        var a = new EntityViewModel(
+            new Entity
+            {
+                X = 100,
+                Y = 100,
+                Width = 200,
+            }
+        );
+        var b = new EntityViewModel(
+            new Entity
+            {
+                X = 500,
+                Y = 100,
+                Width = 200,
+            }
+        );
+        var rel = new RelationshipViewModel(new Relationship { Type = RelationshipType.OneToMany }, a, b);
+
+        // マーカー中心は境界から半径（12px）だけ線の内側にあり、外端が境界 X1 / X2 に一致する
+        (rel.SourceMarkerX - 12).Should().BeApproximately(rel.X1, 0.001);
+        (rel.TargetMarkerX + 12).Should().BeApproximately(rel.X2, 0.001);
     }
 
     /// <summary>終点側の多マーカーが終点エンティティ方向を向く角度になることを検証する</summary>

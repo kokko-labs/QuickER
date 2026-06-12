@@ -10,12 +10,13 @@ namespace ERDesigner.ViewModels;
 /// 両端エンティティの位置変更を購読して線の端点を自動追従させる
 /// 線本体 (X1,Y1)-(X2,Y2) と両端マーカー描画用の補助プロパティ
 /// (<see cref="SourceMarker"/> / <see cref="TargetMarker"/>) を提供する
-/// マーカー位置は <see cref="MarkerOffset"/> 分だけ端点から外側へずらした座標とする
+/// マーカー描画領域は端点（エンティティ境界）から内側へ <see cref="MarkerSize"/> 分の範囲とし、
+/// 領域の外端（ローカル X = MarkerSize）が境界に一致する 鳥の足の先端をエンティティ枠へ接地させる IE 記法準拠の配置
 /// </remarks>
 public partial class RelationshipViewModel : ObservableObject
 {
     /// <summary>端点マーカーの描画サイズ (px)</summary>
-    private const double MarkerSize = 20;
+    private const double MarkerSize = 24;
 
     /// <summary>自己参照ループの描画サイズ (px)</summary>
     private const double SelfLoopSize = 56;
@@ -23,11 +24,8 @@ public partial class RelationshipViewModel : ObservableObject
     /// <summary>自己参照リレーションのラベルを右へ寄せる補正量 (px)</summary>
     private const double SelfLoopLabelOffsetX = 10;
 
-    /// <summary>端点マーカーがエンティティ外側へ離れる余白 (px)</summary>
-    private const double MarkerGap = 4;
-
-    /// <summary>マーカー中心を端点から外側へ置く距離 (px)</summary>
-    private const double MarkerOffset = MarkerSize / 2 + MarkerGap;
+    /// <summary>マーカー中心を端点から内側へ置く距離 (px) 描画領域の外端が境界に接する</summary>
+    private const double MarkerOffset = MarkerSize / 2;
 
     /// <summary>モデルと同一の識別子</summary>
     public Guid Id { get; }
@@ -310,7 +308,7 @@ public partial class RelationshipViewModel : ObservableObject
         (_x1, _y1) = GetBoundaryPoint(Source, Target);
         (_x2, _y2) = GetBoundaryPoint(Target, Source);
 
-        // 線方向の単位ベクトル（マーカーを端点から外側へ MarkerOffset 移動させるのに使用）
+        // 線方向の単位ベクトル（マーカー中心を端点から線の内側へ MarkerOffset 移動させるのに使用）
         double ux;
         double uy;
 

@@ -334,27 +334,27 @@
       </Style.Triggers>
     </Style>
 
-    <!-- マーカー共通の色（選択時青に） -->
+    <!-- マーカー共通スタイル（選択時は線と同様に青へ DataContext は MarkerKind enum のため親 ContentControl 経由で参照） -->
     <Style x:Key="MarkerStrokeStyle" TargetType="Shape">
       <Setter Property="Stroke" Value="{StaticResource LineBrush}" />
-      <Setter Property="StrokeThickness" Value="1.6" />
-      <Setter Property="Fill" Value="White" />
+      <Setter Property="StrokeThickness" Value="2.2" />
+      <Setter Property="Visibility" Value="Collapsed" />
       <Style.Triggers>
-        <DataTrigger Binding="{Binding IsSelected}" Value="True">
+        <DataTrigger Binding="{Binding DataContext.IsSelected, RelativeSource={RelativeSource AncestorType=ContentControl}}" Value="True">
           <Setter Property="Stroke" Value="{StaticResource LineSelectedBrush}" />
         </DataTrigger>
       </Style.Triggers>
     </Style>
 
     <!-- リレーション端点マーカー (One: 縦棒, Many: 鳥の足) のテンプレート -->
+    <!-- ローカル X = 24 がエンティティ境界に一致するよう配置・回転され、鳥の足の先端が枠に接地する -->
     <DataTemplate x:Key="EndpointMarkerTemplate">
-      <!-- DataContext = MarkerKind enum, RelativeSource で親 RelationshipViewModel を参照 -->
-      <Grid Width="20" Height="20" RenderTransformOrigin="0.5,0.5">
+      <!-- DataContext = MarkerKind enum -->
+      <Grid Width="24" Height="24" RenderTransformOrigin="0.5,0.5">
         <!-- One: |─ (縦棒) -->
-        <Line X1="10" Y1="3" X2="10" Y2="17" Stroke="{StaticResource LineBrush}" StrokeThickness="1.8">
+        <Line X1="12" Y1="3" X2="12" Y2="21">
           <Line.Style>
-            <Style TargetType="Line">
-              <Setter Property="Visibility" Value="Collapsed" />
+            <Style TargetType="Line" BasedOn="{StaticResource MarkerStrokeStyle}">
               <Style.Triggers>
                 <DataTrigger Binding="{Binding}" Value="One">
                   <Setter Property="Visibility" Value="Visible" />
@@ -363,11 +363,10 @@
             </Style>
           </Line.Style>
         </Line>
-        <!-- Many: 鳥の足 (>) -->
-        <Path Stroke="{StaticResource LineBrush}" StrokeThickness="1.8" Data="M 4,10 L 16,3 M 4,10 L 16,10 M 4,10 L 16,17">
+        <!-- Many: 鳥の足 (先端 X=24 がエンティティ枠に接地) -->
+        <Path Data="M 6,12 L 24,3 M 6,12 L 24,12 M 6,12 L 24,21">
           <Path.Style>
-            <Style TargetType="Path">
-              <Setter Property="Visibility" Value="Collapsed" />
+            <Style TargetType="Path" BasedOn="{StaticResource MarkerStrokeStyle}">
               <Style.Triggers>
                 <DataTrigger Binding="{Binding}" Value="Many">
                   <Setter Property="Visibility" Value="Visible" />
@@ -743,8 +742,8 @@
                     <ContentControl
                       Canvas.Left="{Binding SourceMarkerLeft}"
                       Canvas.Top="{Binding SourceMarkerTop}"
-                      Width="20"
-                      Height="20"
+                      Width="24"
+                      Height="24"
                       Content="{Binding SourceMarker}"
                       ContentTemplate="{StaticResource EndpointMarkerTemplate}"
                       IsHitTestVisible="False"
@@ -760,7 +759,7 @@
                         </Style>
                       </ContentControl.Style>
                       <ContentControl.RenderTransform>
-                        <RotateTransform Angle="{Binding SourceMarkerAngle}" CenterX="10" CenterY="10" />
+                        <RotateTransform Angle="{Binding SourceMarkerAngle}" CenterX="12" CenterY="12" />
                       </ContentControl.RenderTransform>
                     </ContentControl>
 
@@ -768,8 +767,8 @@
                     <ContentControl
                       Canvas.Left="{Binding TargetMarkerLeft}"
                       Canvas.Top="{Binding TargetMarkerTop}"
-                      Width="20"
-                      Height="20"
+                      Width="24"
+                      Height="24"
                       Content="{Binding TargetMarker}"
                       ContentTemplate="{StaticResource EndpointMarkerTemplate}"
                       IsHitTestVisible="False"
@@ -785,7 +784,7 @@
                         </Style>
                       </ContentControl.Style>
                       <ContentControl.RenderTransform>
-                        <RotateTransform Angle="{Binding TargetMarkerAngle}" CenterX="10" CenterY="10" />
+                        <RotateTransform Angle="{Binding TargetMarkerAngle}" CenterX="12" CenterY="12" />
                       </ContentControl.RenderTransform>
                     </ContentControl>
 
