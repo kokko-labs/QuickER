@@ -1,5 +1,4 @@
 ﻿using System.Text.Json.Serialization;
-using System.Text.RegularExpressions;
 using ERDesigner.Models;
 
 namespace ERDesigner.Services;
@@ -204,6 +203,7 @@ public class AiSchemaJson
         }
 
         var relationships = new List<Relationship>();
+        var usedTargetColumnIds = new HashSet<Guid>();
 
         foreach (var r in Relationships)
         {
@@ -222,14 +222,26 @@ public class AiSchemaJson
                 continue;
             }
 
+            // 参照元は AI が sourceColumn で明示した列を最優先し、無ければ PK 列とする
+            var sourceColumn = FindColumnByName(s, r.SourceColumn) ?? s.Columns.FirstOrDefault(column => column.IsPrimaryKey);
+
+            // 参照先は AI が targetColumn で明示した列を設定を書き換えずそのまま採用し、無ければ共通リゾルバで解決する
+            var targetColumnId = FindColumnByName(t, r.TargetColumn)?.Id ?? ResolveTargetColumnByHeuristic(s, t, sourceColumn, usedTargetColumnIds);
+
+            // 後続リレーションの解決で同じ列を重複割当しないよう記録する
+            if (targetColumnId is not null)
+            {
+                usedTargetColumnIds.Add(targetColumnId.Value);
+            }
+
             relationships.Add(
                 new Relationship
                 {
                     SourceEntityId = s.Id,
                     TargetEntityId = t.Id,
                     Type = ParseType(r.Type),
-                    SourceColumnId = ResolveSourceColumnId(s, r.SourceColumn),
-                    TargetColumnId = ResolveTargetColumnId(s, t, r.TargetColumn),
+                    SourceColumnId = sourceColumn?.Id,
+                    TargetColumnId = targetColumnId,
                     ConstraintName = r.ConstraintName,
                     OnDelete = ForeignKeyReferentialActionHelper.Parse(r.OnDelete),
                     OnUpdate = ForeignKeyReferentialActionHelper.Parse(r.OnUpdate),
@@ -240,83 +252,54 @@ public class AiSchemaJson
         return (entities, relationships);
     }
 
-    /// <summary>リレーションの参照元 (親) テーブルの参照列を解決する</summary>
-    /// <remarks>AI が sourceColumn で明示した列を最優先し、無ければ PK 列へフォールバックする</remarks>
-    private static Guid? ResolveSourceColumnId(Entity sourceEntity, string? specifiedColumnName)
+    /// <summary>リレーションの参照先 (子) テーブルの FK 列を共通リゾルバで解決し、採用した列に FK フラグを設定する</summary>
+    /// <remarks>
+    /// AI の誤出力（FK 名の列への isPrimaryKey 付与）を矯正してから <see cref="ForeignKeyColumnResolver"/> へ委譲する。
+    /// 該当列が無ければ列未割当（null）とし、無関係な列を FK へ書き換えない
+    /// </remarks>
+    private static Guid? ResolveTargetColumnByHeuristic(Entity sourceEntity, Entity targetEntity, Column? sourceKeyColumn, HashSet<Guid> usedTargetColumnIds)
     {
-        var specified = FindColumnByName(sourceEntity, specifiedColumnName);
+        DemoteMisflaggedPrimaryKey(sourceEntity, targetEntity);
 
-        return (specified ?? sourceEntity.Columns.FirstOrDefault(column => column.IsPrimaryKey))?.Id;
+        var candidates = targetEntity
+            .Columns.Select(column => new ForeignKeyColumnResolver.CandidateColumn(
+                column.Name,
+                column.IsPrimaryKey,
+                column.IsForeignKey,
+                column.DataType,
+                usedTargetColumnIds.Contains(column.Id)
+            ))
+            .ToList();
+
+        var index = ForeignKeyColumnResolver.ResolveTargetColumnIndex(
+            sourceEntity.TableName,
+            sourceKeyColumn?.Name,
+            sourceKeyColumn?.DataType,
+            candidates,
+            ReferenceEquals(sourceEntity, targetEntity)
+        );
+
+        if (index is null)
+        {
+            return null;
+        }
+
+        var column = targetEntity.Columns[index.Value];
+        column.IsForeignKey = true;
+        return column.Id;
     }
 
-    /// <summary>リレーションの参照先 (子) テーブルの FK 列を解決する</summary>
-    /// <remarks>
-    /// AI が targetColumn で明示した列は設定を書き換えずそのまま採用する。
-    /// 明示が無い場合は ①命名規則一致 → ②isForeignKey 指定 → ③FK らしい名前、の優先順で探索し、採用した列には FK フラグと NOT NULL を設定する。
-    /// いずれにも該当しなければ列未割当（null）とし、無関係な列を FK へ書き換えない
-    /// </remarks>
-    private static Guid? ResolveTargetColumnId(Entity sourceEntity, Entity targetEntity, string? specifiedColumnName)
+    /// <summary>FK 名の列へ AI が誤って付けた isPrimaryKey を矯正する</summary>
+    /// <remarks>他に PK 列が存在する場合のみ「AI の誤付与」とみなして PK を降ろす（唯一の PK は維持する）</remarks>
+    private static void DemoteMisflaggedPrimaryKey(Entity sourceEntity, Entity targetEntity)
     {
-        // AI が明示した列は AI の出力（FK フラグ・NULL 許容）をそのまま生かす
-        var specified = FindColumnByName(targetEntity, specifiedColumnName);
+        var expectedNames = ForeignKeyColumnResolver.BuildExpectedForeignKeyNames(sourceEntity.TableName);
+        var misflagged = targetEntity.Columns.FirstOrDefault(column => column.IsPrimaryKey && expectedNames.Contains(column.Name, StringComparer.OrdinalIgnoreCase));
 
-        if (specified is not null)
+        if (misflagged is not null && targetEntity.Columns.Any(column => column.Id != misflagged.Id && column.IsPrimaryKey))
         {
-            return specified.Id;
+            misflagged.IsPrimaryKey = false;
         }
-
-        var preferredColumnName = ResolveForeignKeyColumnName(sourceEntity.TableName);
-
-        // ① preferredColumnName（例: CustomerId）と完全一致する列を優先的に FK として採用する
-        //    AI が誤って isPrimaryKey=true を付けた場合も、他に PK 列が存在すれば PK フラグを降ろして矯正する
-        var preferredColumn = targetEntity.Columns.FirstOrDefault(column => string.Equals(column.Name, preferredColumnName, StringComparison.OrdinalIgnoreCase));
-
-        if (preferredColumn is not null)
-        {
-            if (preferredColumn.IsPrimaryKey)
-            {
-                // 他に PK 列があれば「AI の誤付与」とみなして PK を降ろす
-                var hasPkOtherThanPreferred = targetEntity.Columns.Any(column => column.Id != preferredColumn.Id && column.IsPrimaryKey);
-
-                if (hasPkOtherThanPreferred)
-                {
-                    preferredColumn.IsPrimaryKey = false;
-                }
-                else
-                {
-                    // 唯一の PK 列なので FK として扱わない（次の検索へ委ねる）
-                    preferredColumn = null;
-                }
-            }
-
-            if (preferredColumn is not null)
-            {
-                preferredColumn.IsForeignKey = true;
-                preferredColumn.IsNullable = false;
-                return preferredColumn.Id;
-            }
-        }
-
-        // ② isForeignKey=true かつ非 PK 列を FK 候補とする（AI が正しく設定した場合）
-        var foreignKeyColumn = targetEntity.Columns.FirstOrDefault(column => column.IsForeignKey && !column.IsPrimaryKey);
-
-        if (foreignKeyColumn is not null)
-        {
-            return foreignKeyColumn.Id;
-        }
-
-        // ③ 「他テーブル名+Id」形式の非 PK 列を FK 候補とみなす（AI が isForeignKey を付け忘れたケース）
-        var fkPatternColumn = targetEntity.Columns.FirstOrDefault(column => !column.IsPrimaryKey && IsLikelyForeignKeyName(column.Name));
-
-        if (fkPatternColumn is not null)
-        {
-            fkPatternColumn.IsForeignKey = true;
-            fkPatternColumn.IsNullable = false;
-            return fkPatternColumn.Id;
-        }
-
-        // FK らしい列が見つからない場合は列未割当とする（無関係な列を FK 化して AI の設計を壊さない）
-        return null;
     }
 
     /// <summary>エンティティから指定名のカラムを大文字小文字を無視して検索する（未指定・未存在なら null）</summary>
@@ -331,34 +314,6 @@ public class AiSchemaJson
         return columnId is null ? null : entity.Columns.FirstOrDefault(column => column.Id == columnId)?.Name;
     }
 
-    /// <summary>列名が「テーブル名+Id」形式の外部キーらしい名前かどうかを判定する</summary>
-    private static bool IsLikelyForeignKeyName(string? columnName)
-    {
-        if (string.IsNullOrWhiteSpace(columnName))
-        {
-            return false;
-        }
-
-        // パスカルケース: XxxId / スネークケース: xxx_id
-        return Regex.IsMatch(columnName, @"^[A-Z][A-Za-z0-9]*Id$", RegexOptions.None) || Regex.IsMatch(columnName, @"^[a-z][a-z0-9_]*_id$", RegexOptions.None);
-    }
-
-    /// <summary>参照元テーブル名から参照先テーブルに期待する FK 列名 (例: <c>CustomerId</c> / <c>customer_id</c>) を求める</summary>
-    /// <remarks>参照元テーブル名にアンダースコアが含まれる場合はスネークケース、それ以外はパスカルケースで組み立てる</remarks>
-    private static string ResolveForeignKeyColumnName(string sourceTableName)
-    {
-        var sourceWords = SplitIdentifierWords(sourceTableName);
-
-        if (sourceWords.Count == 0)
-        {
-            return "ParentId";
-        }
-
-        return sourceTableName.Contains('_', StringComparison.Ordinal)
-            ? string.Join("_", sourceWords.Select(static word => word.ToLowerInvariant())) + "_id"
-            : string.Concat(sourceWords.Select(ToPascalWord)) + "Id";
-    }
-
     /// <summary>AI が返すリレーション種別文字列を <see cref="RelationshipType"/> へ変換する (表記揺れを許容し、不明値は OneToMany 扱い)</summary>
     private static RelationshipType ParseType(string? type) =>
         type switch
@@ -371,7 +326,7 @@ public class AiSchemaJson
     /// <summary>任意の識別子文字列を指定の命名規則へ変換する</summary>
     private static string ConvertIdentifier(string value, AiIdentifierNamingStyle namingStyle)
     {
-        var words = SplitIdentifierWords(value);
+        var words = IdentifierNameHelper.SplitIdentifierWords(value);
 
         if (words.Count == 0)
         {
@@ -381,7 +336,7 @@ public class AiSchemaJson
         return namingStyle switch
         {
             AiIdentifierNamingStyle.SnakeCase => string.Join("_", words.Select(static word => word.ToLowerInvariant())),
-            _ => string.Concat(words.Select(ToPascalWord)),
+            _ => string.Concat(words.Select(IdentifierNameHelper.ToPascalWord)),
         };
     }
 
@@ -389,143 +344,16 @@ public class AiSchemaJson
     /// <remarks>単語の区切り直しによりアンダースコア結合へ正規化されるため、命名規則の変換 (<see cref="ConvertIdentifier"/>) と併用する前提</remarks>
     private static string ConvertTableNameNumber(string value, AiTableNameNumberStyle numberStyle)
     {
-        var words = SplitIdentifierWords(value);
+        var words = IdentifierNameHelper.SplitIdentifierWords(value);
 
         if (words.Count == 0)
         {
             return value;
         }
 
-        words[^1] = numberStyle == AiTableNameNumberStyle.Plural ? PluralizeWord(words[^1]) : SingularizeWord(words[^1]);
+        words[^1] = numberStyle == AiTableNameNumberStyle.Plural ? IdentifierNameHelper.PluralizeWord(words[^1]) : IdentifierNameHelper.SingularizeWord(words[^1]);
 
         return string.Join("_", words);
-    }
-
-    /// <summary>スネークケース・パスカルケース等の識別子を単語のリストへ分解する</summary>
-    private static List<string> SplitIdentifierWords(string value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return [];
-        }
-
-        var normalized = Regex.Replace(value.Trim(), @"[^A-Za-z0-9]+", " ");
-        normalized = Regex.Replace(normalized, @"([A-Z]+)([A-Z][a-z])", "$1 $2");
-        normalized = Regex.Replace(normalized, @"([a-z0-9])([A-Z])", "$1 $2");
-        normalized = Regex.Replace(normalized, @"([A-Za-z])([0-9])", "$1 $2");
-        normalized = Regex.Replace(normalized, @"([0-9])([A-Za-z])", "$1 $2");
-
-        return normalized.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Where(static word => word.Length > 0).ToList();
-    }
-
-    /// <summary>単語が英語の複数形らしいかどうかを語尾の簡易ルールで判定する</summary>
-    private static bool IsLikelyPlural(string word)
-    {
-        if (word.Length <= 1)
-        {
-            return false;
-        }
-
-        var lower = word.ToLowerInvariant();
-
-        if (
-            lower.EndsWith("ies", StringComparison.Ordinal)
-            || lower.EndsWith("ses", StringComparison.Ordinal)
-            || lower.EndsWith("xes", StringComparison.Ordinal)
-            || lower.EndsWith("zes", StringComparison.Ordinal)
-            || lower.EndsWith("ches", StringComparison.Ordinal)
-            || lower.EndsWith("shes", StringComparison.Ordinal)
-            || lower.EndsWith("oes", StringComparison.Ordinal)
-        )
-        {
-            return true;
-        }
-
-        return lower.EndsWith('s')
-            && !lower.EndsWith("ss", StringComparison.Ordinal)
-            && !lower.EndsWith("us", StringComparison.Ordinal)
-            && !lower.EndsWith("is", StringComparison.Ordinal);
-    }
-
-    /// <summary>単語を語尾の簡易ルールで単数形へ変換する (不規則変化は非対応)</summary>
-    private static string SingularizeWord(string word)
-    {
-        if (!IsLikelyPlural(word))
-        {
-            return word;
-        }
-
-        var lower = word.ToLowerInvariant();
-
-        if (lower.EndsWith("ies", StringComparison.Ordinal) && word.Length > 3)
-        {
-            return word[..^3] + "y";
-        }
-
-        if (
-            lower.EndsWith("ches", StringComparison.Ordinal)
-            || lower.EndsWith("shes", StringComparison.Ordinal)
-            || lower.EndsWith("xes", StringComparison.Ordinal)
-            || lower.EndsWith("zes", StringComparison.Ordinal)
-            || lower.EndsWith("ses", StringComparison.Ordinal)
-            || lower.EndsWith("oes", StringComparison.Ordinal)
-        )
-        {
-            return word[..^2];
-        }
-
-        return word[..^1];
-    }
-
-    /// <summary>単語を語尾の簡易ルールで複数形へ変換する (不規則変化は非対応)</summary>
-    private static string PluralizeWord(string word)
-    {
-        if (IsLikelyPlural(word))
-        {
-            return word;
-        }
-
-        var lower = word.ToLowerInvariant();
-
-        if (lower.EndsWith('y') && word.Length > 1)
-        {
-            var beforeLast = char.ToLowerInvariant(word[^2]);
-
-            if (beforeLast is not ('a' or 'e' or 'i' or 'o' or 'u'))
-            {
-                return word[..^1] + "ies";
-            }
-        }
-
-        if (
-            lower.EndsWith('s')
-            || lower.EndsWith('x')
-            || lower.EndsWith('z')
-            || lower.EndsWith("ch", StringComparison.Ordinal)
-            || lower.EndsWith("sh", StringComparison.Ordinal)
-            || lower.EndsWith('o')
-        )
-        {
-            return word + "es";
-        }
-
-        return word + "s";
-    }
-
-    /// <summary>単語を先頭大文字・以降小文字のパスカルケース表記へ整える</summary>
-    private static string ToPascalWord(string word)
-    {
-        if (word.Length == 0)
-        {
-            return string.Empty;
-        }
-
-        if (word.Length == 1)
-        {
-            return word.ToUpperInvariant();
-        }
-
-        return char.ToUpperInvariant(word[0]) + word[1..].ToLowerInvariant();
     }
 }
 

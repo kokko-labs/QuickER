@@ -111,6 +111,7 @@ public class MainViewModelTests
     }
 
     /// <summary>リレーション作成時に既定の参照先列と外部キー列が設定されることを検証する</summary>
+    /// <remarks>参照先列は「親テーブル名+Id」の命名規則（NewTable → NewTableId）で解決される</remarks>
     [Fact(DisplayName = "リレーション作成時に既定の参照先列と外部キー列が設定される")]
     public void RelationshipMode_SetsDefaultColumns()
     {
@@ -118,7 +119,7 @@ public class MainViewModelTests
         vm.AddEntityCommand.Execute(null);
         vm.AddEntityCommand.Execute(null);
         vm.Entities[0].Columns[0].Name = "ParentKey";
-        vm.Entities[1].Columns.Add(new ColumnViewModel(new Column { Name = "ParentId", DataType = "int" }));
+        vm.Entities[1].Columns.Add(new ColumnViewModel(new Column { Name = "NewTableId", DataType = "int" }));
 
         vm.StartAddOneToManyCommand.Execute(null);
         vm.OnEntityClicked(vm.Entities[0]);
@@ -126,6 +127,45 @@ public class MainViewModelTests
 
         vm.Relationships[0].SourceColumnId.Should().Be(vm.Entities[0].Columns[0].Id);
         vm.Relationships[0].TargetColumnId.Should().Be(vm.Entities[1].Columns[1].Id);
+    }
+
+    /// <summary>親 PK が Id でも「親テーブル名+Id」の列が参照先として解決されることを検証する</summary>
+    [Fact(DisplayName = "親 PK が Id でも 親テーブル名+Id の列が参照先に解決される")]
+    public void RelationshipMode_ResolvesTableNameIdConvention()
+    {
+        var vm = new MainViewModel();
+        vm.AddEntityCommand.Execute(null);
+        vm.AddEntityCommand.Execute(null);
+        vm.Entities[0].TableName = "Customer";
+        vm.Entities[1].TableName = "Order";
+        vm.Entities[1].Columns.Add(new ColumnViewModel(new Column { Name = "OrderDate", DataType = "datetime2" }));
+        vm.Entities[1].Columns.Add(new ColumnViewModel(new Column { Name = "CustomerId", DataType = "int" }));
+
+        vm.StartAddOneToManyCommand.Execute(null);
+        vm.OnEntityClicked(vm.Entities[0]);
+        vm.OnEntityClicked(vm.Entities[1]);
+
+        var customerIdColumn = vm.Entities[1].Columns.Single(c => c.Name == "CustomerId");
+        vm.Relationships[0].TargetColumnId.Should().Be(customerIdColumn.Id);
+        customerIdColumn.IsForeignKey.Should().BeTrue();
+    }
+
+    /// <summary>FK らしい列が無い場合に参照先列が未割当となり、無関係な列が FK 化されないことを検証する</summary>
+    [Fact(DisplayName = "FK らしい列が無ければ参照先列は未割当となる")]
+    public void RelationshipMode_NoLikelyColumn_LeavesTargetUnassigned()
+    {
+        var vm = new MainViewModel();
+        vm.AddEntityCommand.Execute(null);
+        vm.AddEntityCommand.Execute(null);
+        vm.Entities[1].Columns.Add(new ColumnViewModel(new Column { Name = "Quantity", DataType = "int" }));
+
+        vm.StartAddOneToManyCommand.Execute(null);
+        vm.OnEntityClicked(vm.Entities[0]);
+        vm.OnEntityClicked(vm.Entities[1]);
+
+        vm.Relationships.Should().ContainSingle();
+        vm.Relationships[0].TargetColumnId.Should().BeNull();
+        vm.Entities[1].Columns.Single(c => c.Name == "Quantity").IsForeignKey.Should().BeFalse();
     }
 
     /// <summary>同じエンティティを 2 回クリックすると自己参照リレーションが追加されることを検証する</summary>
@@ -250,7 +290,7 @@ public class MainViewModelTests
         vm.AddEntityCommand.Execute(null);
         vm.AddEntityCommand.Execute(null);
         vm.Entities[0].Columns[0].Name = "ParentKey";
-        vm.Entities[1].Columns.Add(new ColumnViewModel(new Column { Name = "ID", DataType = "int" }));
+        vm.Entities[1].Columns.Add(new ColumnViewModel(new Column { Name = "NewTableId", DataType = "int" }));
 
         vm.StartAddOneToManyCommand.Execute(null);
         vm.OnEntityClicked(vm.Entities[0]);
@@ -270,7 +310,7 @@ public class MainViewModelTests
         vm.AddEntityCommand.Execute(null);
         vm.AddEntityCommand.Execute(null);
         vm.Entities[0].Columns[0].Name = "ParentKey";
-        vm.Entities[1].Columns.Add(new ColumnViewModel(new Column { Name = "ID", DataType = "int" }));
+        vm.Entities[1].Columns.Add(new ColumnViewModel(new Column { Name = "NewTableId", DataType = "int" }));
 
         vm.StartAddOneToManyCommand.Execute(null);
         vm.OnEntityClicked(vm.Entities[0]);
@@ -396,13 +436,14 @@ public class MainViewModelTests
         var vm = new MainViewModel();
         vm.AddEntityCommand.Execute(null);
         vm.AddEntityCommand.Execute(null);
-        vm.Entities[1].Columns.Add(new ColumnViewModel(new Column { Name = "ParentId", DataType = "int" }));
+        vm.Entities[1].Columns.Add(new ColumnViewModel(new Column { Name = "NewTableId", DataType = "int" }));
         vm.StartAddOneToManyCommand.Execute(null);
         vm.OnEntityClicked(vm.Entities[0]);
         vm.OnEntityClicked(vm.Entities[1]);
         var relationship = vm.Relationships[0];
         var originalSourceColumnId = relationship.SourceColumnId;
         var originalTargetColumnId = relationship.TargetColumnId;
+        originalTargetColumnId.Should().NotBeNull();
 
         relationship.Type = RelationshipType.ManyToMany;
 
@@ -427,7 +468,7 @@ public class MainViewModelTests
         var vm = new MainViewModel();
         vm.AddEntityCommand.Execute(null);
         vm.AddEntityCommand.Execute(null);
-        vm.Entities[1].Columns.Add(new ColumnViewModel(new Column { Name = "ParentId", DataType = "int" }));
+        vm.Entities[1].Columns.Add(new ColumnViewModel(new Column { Name = "NewTableId", DataType = "int" }));
         vm.Entities[1].Columns.Add(new ColumnViewModel(new Column { Name = "ParentCode", DataType = "int" }));
         vm.StartAddOneToManyCommand.Execute(null);
         vm.OnEntityClicked(vm.Entities[0]);
@@ -637,8 +678,8 @@ public class MainViewModelTests
         vm.AddEntityCommand.Execute(null);
         vm.AddEntityCommand.Execute(null);
 
-        // Entity[1] に FK 列を追加してリレーションを作成する
-        vm.Entities[1].Columns.Add(new ColumnViewModel(new Column { Name = "ParentId", DataType = "int" }));
+        // Entity[1] に FK 列（親テーブル名+Id の命名規則）を追加してリレーションを作成する
+        vm.Entities[1].Columns.Add(new ColumnViewModel(new Column { Name = "NewTableId", DataType = "int" }));
         vm.StartAddOneToManyCommand.Execute(null);
         vm.OnEntityClicked(vm.Entities[0]);
         vm.OnEntityClicked(vm.Entities[1]);

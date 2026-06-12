@@ -559,7 +559,7 @@ public partial class MainViewModel : ObservableObject
                 return;
             }
 
-            // 参照元は始点の PK、参照先は既定 FK 解決ルール、制約名は FK_<参照側>_<被参照側> を初期値とする
+            // 参照元は始点の PK、参照先は共通リゾルバの既定 FK 解決、制約名は FK_<参照側>_<被参照側> を初期値とする
             var rel = new RelationshipViewModel(
                 new Relationship
                 {
@@ -567,7 +567,7 @@ public partial class MainViewModel : ObservableObject
                     TargetEntityId = entity.Id,
                     Type = PendingRelationshipType,
                     SourceColumnId = PendingRelationshipSource.Columns.FirstOrDefault(c => c.IsPrimaryKey)?.Id,
-                    TargetColumnId = ResolveDefaultForeignKeyColumn(PendingRelationshipSource, entity)?.Id,
+                    TargetColumnId = ForeignKeyColumnResolver.ResolveTargetColumn(PendingRelationshipSource, entity, Relationships)?.Id,
                     ConstraintName = $"FK_{SqlIdentifier.SafeName(entity.TableName)}_{SqlIdentifier.SafeName(PendingRelationshipSource.TableName)}",
                 },
                 PendingRelationshipSource,
@@ -814,36 +814,6 @@ public partial class MainViewModel : ObservableObject
             targetColumn.IsForeignKeyManagedByRelationship = true;
             targetColumn.IsForeignKey = true;
         }
-    }
-
-    /// <summary>リレーション追加時の既定 FK カラムを解決する</summary>
-    /// <returns>参照元 PK と同名の非 PK カラムを優先し、無ければ最初の非 PK カラム、それも無ければ先頭カラム</returns>
-    /// <remarks>自己参照の場合は、自身の PK と同名のカラムを除いた最初の非 PK カラムを採用する</remarks>
-    private static ColumnViewModel? ResolveDefaultForeignKeyColumn(EntityViewModel source, EntityViewModel target)
-    {
-        if (ReferenceEquals(source, target))
-        {
-            var sourcePrimaryKeyByName = source.Columns.FirstOrDefault(c => c.IsPrimaryKey);
-
-            return source.Columns.FirstOrDefault(c => !c.IsPrimaryKey && !string.Equals(c.Name, sourcePrimaryKeyByName?.Name, StringComparison.OrdinalIgnoreCase));
-        }
-
-        var sourcePrimaryKey = source.Columns.FirstOrDefault(c => c.IsPrimaryKey);
-
-        if (sourcePrimaryKey is null)
-        {
-            return target.Columns.FirstOrDefault(c => !c.IsPrimaryKey) ?? target.Columns.FirstOrDefault();
-        }
-
-        // 参照元 PK と同名の非 PK カラムは FK として作られた可能性が高いため最優先で採用する
-        var sameName = target.Columns.FirstOrDefault(c => string.Equals(c.Name, sourcePrimaryKey.Name, StringComparison.OrdinalIgnoreCase) && !c.IsPrimaryKey);
-
-        if (sameName is not null)
-        {
-            return sameName;
-        }
-
-        return target.Columns.FirstOrDefault(c => !c.IsPrimaryKey) ?? target.Columns.FirstOrDefault();
     }
 
     /// <summary>コピー元 ViewModel から位置をずらした複製 ViewModel を生成する</summary>

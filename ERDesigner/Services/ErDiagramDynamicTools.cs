@@ -523,7 +523,7 @@ public static class ErDiagramDynamicTools
         }
         else
         {
-            targetColumn = ResolveTargetForeignKeyColumn(source, target);
+            targetColumn = ForeignKeyColumnResolver.ResolveTargetColumn(source, target, sourcePk, vm.Relationships);
         }
 
         var rel = new RelationshipViewModel(
@@ -573,27 +573,4 @@ public static class ErDiagramDynamicTools
         return element.TryGetProperty(propertyName, out var val) && val.ValueKind == JsonValueKind.String ? val.GetString() : null;
     }
 
-    /// <summary>参照元 PK に対応する参照先側の外部キー列候補を名前ベースで解決する</summary>
-    /// <remarks>名前から判断できない場合は null（列未割当）とし、無関係な列を FK 扱いにしない</remarks>
-    private static ColumnViewModel? ResolveTargetForeignKeyColumn(EntityViewModel source, EntityViewModel target)
-    {
-        var sourcePk = source.Columns.FirstOrDefault(c => c.IsPrimaryKey);
-
-        if (sourcePk is null)
-        {
-            return null;
-        }
-
-        // ソーステーブル名 + "Id" のパターン（例: CustomerId）で検索する
-        var fkNameBySuffix = source.TableName + "Id";
-        var byName = target.Columns.FirstOrDefault(c => string.Equals(c.Name, fkNameBySuffix, StringComparison.OrdinalIgnoreCase));
-
-        if (byName is not null)
-        {
-            return byName;
-        }
-
-        // PK と同名のカラムを検索する
-        return target.Columns.FirstOrDefault(c => string.Equals(c.Name, sourcePk.Name, StringComparison.OrdinalIgnoreCase));
-    }
 }
