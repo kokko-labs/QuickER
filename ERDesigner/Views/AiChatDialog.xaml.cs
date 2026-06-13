@@ -1,37 +1,33 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
-using ERDesigner.Services;
+using ERDesigner.Services.Chat;
 using ERDesigner.ViewModels;
 
 namespace ERDesigner.Views;
 
-/// <summary>Codex App Server の接続設定・認証・対話を行うウィンドウのコードビハインド</summary>
-public partial class CodexAppServerDialog : Window
+/// <summary>AI チャット（API キー接続 / Codex 接続）の統合ウィンドウのコードビハインド</summary>
+public partial class AiChatDialog : Window
 {
     /// <summary>このウィンドウの ViewModel</summary>
-    public CodexAppServerDialogViewModel ViewModel { get; }
+    public AiChatDialogViewModel ViewModel { get; }
 
     /// <summary>アプリ終了などで強制クローズ中かどうか（×ボタンの非表示化を抑止する）</summary>
     private bool _isForceClosing;
 
     /// <summary>MainViewModel を伴わずにウィンドウを生成する</summary>
-    public CodexAppServerDialog()
+    public AiChatDialog()
         : this(null) { }
 
-    /// <summary>MainViewModel を受け取ってウィンドウを生成し、初回自動接続を開始する</summary>
-    public CodexAppServerDialog(MainViewModel? mainViewModel)
+    /// <summary>MainViewModel を受け取ってウィンドウを生成する</summary>
+    public AiChatDialog(MainViewModel? mainViewModel)
     {
         InitializeComponent();
-        ViewModel = new CodexAppServerDialogViewModel(client: null, settingsStore: null, apiKeyStoreName: "CodexAppServerApiKey", mainViewModel: mainViewModel);
-        ViewModel.BeginInitialAutoConnect();
+        ViewModel = new AiChatDialogViewModel(mainViewModel);
         DataContext = ViewModel;
 
-        // メッセージが追加されたら末尾へスクロールする
         ViewModel.Messages.CollectionChanged += (_, _) => ScrollToBottom();
         Loaded += OnLoaded;
-
-        // ×ボタンで閉じる代わりに非表示にする（状態を維持するシングルトン動作）
         Closing += OnWindowClosing;
     }
 
@@ -45,6 +41,11 @@ public partial class CodexAppServerDialog : Window
         {
             ApiKeyBox.Password = ViewModel.ApiKey;
         }
+
+        if (!string.IsNullOrEmpty(ViewModel.CodexApiKey))
+        {
+            CodexApiKeyBox.Password = ViewModel.CodexApiKey;
+        }
     }
 
     /// <summary>×ボタンでは閉じず、設定を保存して非表示にし状態を維持する（シングルトン動作）</summary>
@@ -56,24 +57,44 @@ public partial class CodexAppServerDialog : Window
         }
 
         e.Cancel = true;
-        ViewModel.SaveSettingsPublic();
+        ViewModel.SaveSettings();
         Hide();
     }
 
-    /// <summary>アプリ終了時などにウィンドウを実際に閉じる（非表示化の抑止フラグを立ててから閉じる）</summary>
+    /// <summary>アプリ終了時などにウィンドウを実際に閉じる</summary>
     public void ForceClose()
     {
         _isForceClosing = true;
-        ViewModel.SaveSettingsPublic();
+        ViewModel.SaveSettings();
         Close();
     }
 
-    /// <summary>PasswordBox の変更内容を ViewModel へ転送する</summary>
+    /// <summary>タブ選択に応じて接続方式を切り替える</summary>
+    private void BackendTabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!ReferenceEquals(e.OriginalSource, BackendTabs))
+        {
+            return;
+        }
+
+        ViewModel.SelectedBackend = BackendTabs.SelectedIndex == 1 ? ErChatBackendKind.Codex : ErChatBackendKind.ApiKey;
+    }
+
+    /// <summary>API キー接続の PasswordBox 変更を ViewModel へ転送する</summary>
     private void ApiKeyBox_PasswordChanged(object sender, RoutedEventArgs e)
     {
         if (sender is PasswordBox passwordBox)
         {
             ViewModel.ApiKey = passwordBox.Password;
+        }
+    }
+
+    /// <summary>Codex 接続の PasswordBox 変更を ViewModel へ転送する</summary>
+    private void CodexApiKeyBox_PasswordChanged(object sender, RoutedEventArgs e)
+    {
+        if (sender is PasswordBox passwordBox)
+        {
+            ViewModel.CodexApiKey = passwordBox.Password;
         }
     }
 
@@ -90,17 +111,13 @@ public partial class CodexAppServerDialog : Window
         }
     }
 
-    /// <summary>チャット表示を最下部へスクロールする（メッセージ追加時の追従用）</summary>
+    /// <summary>チャット表示を最下部へスクロールする</summary>
     private void ScrollToBottom()
     {
-        // レイアウト反映後にスクロールするよう低優先度でディスパッチする
         Dispatcher.InvokeAsync(
             () =>
             {
-                if (ChatScrollViewer is not null)
-                {
-                    ChatScrollViewer.ScrollToEnd();
-                }
+                ChatScrollViewer?.ScrollToEnd();
             },
             System.Windows.Threading.DispatcherPriority.Background
         );

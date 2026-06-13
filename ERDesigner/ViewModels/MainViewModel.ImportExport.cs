@@ -477,95 +477,30 @@ public partial class MainViewModel
         dlg.ShowDialog();
     }
 
-    // ---------------- AI 生成 ----------------
+    // ---------------- AI チャット ----------------
 
-    /// <summary>ChatGPT / Ollama にスキーマ生成を依頼し、新規生成または既存更新として反映する</summary>
+    /// <summary>AI チャット対話ウィンドウのシングルトンインスタンス</summary>
+    private Views.AiChatDialog? _aiChatDialog;
+
+    /// <summary>AI チャットウィンドウを開く（既存があれば再利用する）</summary>
     [RelayCommand]
-    private void GenerateFromAi()
+    private void OpenAiChat()
     {
-        var dialog = new Views.AiGenerateDialog(ToDiagramModel()) { Owner = Application.Current?.MainWindow };
-
-        if (dialog.ShowDialog() != true || dialog.ViewModel.Result is null)
+        if (_aiChatDialog is null)
         {
-            return;
+            _aiChatDialog = new Views.AiChatDialog(this);
         }
 
-        if (dialog.ViewModel.GenerationMode == AiGenerationMode.UpdateExisting)
-        {
-            ApplyAiUpdateResult(dialog.ViewModel.Result);
-            return;
-        }
-
-        var (entities, relationships) = dialog.ViewModel.Result.ToDomain();
-
-        if (entities.Count == 0)
-        {
-            _dialogs.ShowInformation("AI 応答にテーブルが含まれていませんでした。", "情報");
-            return;
-        }
-
-        if (!ConfirmDiagramReplacement(entities, relationships, "現在のダイアグラムを AI 生成結果で置換します。よろしいですか？"))
-        {
-            return;
-        }
-
-        // AI 新規生成はインポート扱いとし、Undo 履歴へは積まない
-        ReplaceDiagramWithoutHistory(entities, relationships, autoLayout: true);
+        _aiChatDialog.Owner = null;
+        _aiChatDialog.Show();
+        _aiChatDialog.Activate();
     }
 
-    /// <summary>Codex App Server 対話ウィンドウのシングルトンインスタンス</summary>
-    private Views.CodexAppServerDialog? _codexDialog;
-
-    /// <summary>Codex App Server の対話ウィンドウを開く（既存があれば再利用する）</summary>
-    [RelayCommand]
-    private void OpenCodexAppServer()
+    /// <summary>アプリ終了時に AI チャット画面を強制終了する</summary>
+    public void CloseAiChatDialog()
     {
-        if (_codexDialog is null)
-        {
-            _codexDialog = new Views.CodexAppServerDialog(this);
-        }
-
-        _codexDialog.Owner = null;
-        _codexDialog.Show();
-        _codexDialog.Activate();
-    }
-
-    /// <summary>アプリ終了時に Codex チャット画面を強制終了する</summary>
-    public void CloseCodexDialog()
-    {
-        _codexDialog?.ForceClose();
-        _codexDialog = null;
-    }
-
-    /// <summary>AI が返した更新後スキーマを差分プレビューで確認のうえ既存 ER 図へ反映する</summary>
-    private void ApplyAiUpdateResult(AiSchemaJson schema)
-    {
-        var (entities, relationships) = schema.ToDomain();
-
-        if (entities.Count == 0)
-        {
-            _dialogs.ShowInformation("AI 応答にテーブルが含まれていませんでした。", "情報");
-            return;
-        }
-
-        if (HasSameStructure(entities, relationships))
-        {
-            _dialogs.ShowInformation("AI 更新による変更はありませんでした。", "情報");
-            return;
-        }
-
-        var currentDiagram = ToDiagramModel();
-        var updatedDiagram = new ErDiagram { Entities = entities, Relationships = relationships };
-        var diff = new AiUpdateDiffService().Compute(currentDiagram, updatedDiagram);
-        var previewDialog = new Views.AiUpdatePreviewDialog(new AiUpdatePreviewDialogViewModel(diff)) { Owner = Application.Current?.MainWindow };
-
-        if (previewDialog.ShowDialog() != true)
-        {
-            return;
-        }
-
-        ReplaceDiagramWithoutHistory(entities, relationships, autoLayout: true);
-        ApplyRelationshipColumnRules();
+        _aiChatDialog?.ForceClose();
+        _aiChatDialog = null;
     }
 
     // ---------------- Save / Load ----------------

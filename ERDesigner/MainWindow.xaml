@@ -495,16 +495,10 @@
           </StackPanel>
         </Button>
         <Rectangle Style="{StaticResource ToolBarSeparator}" />
-        <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding GenerateFromAiCommand}" ToolTip="ChatGPT/Ollama でスキーマを自動生成">
+        <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding OpenAiChatCommand}" ToolTip="AI チャットで ER 図を作成・編集（API キー / Codex 接続）">
           <StackPanel>
             <TextBlock Style="{StaticResource ToolBarIcon}" Text="🤖" />
-            <TextBlock Style="{StaticResource ToolBarCaption}" Text="AI生成" />
-          </StackPanel>
-        </Button>
-        <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding OpenCodexAppServerCommand}" ToolTip="Codex App Server の接続設定と認証を開く">
-          <StackPanel>
-            <TextBlock Style="{StaticResource ToolBarIcon}" Text="🧠" />
-            <TextBlock Style="{StaticResource ToolBarCaption}" Text="Codex" />
+            <TextBlock Style="{StaticResource ToolBarCaption}" Text="AIチャット" />
           </StackPanel>
         </Button>
         <Rectangle Style="{StaticResource ToolBarSeparator}" />

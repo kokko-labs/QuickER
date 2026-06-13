@@ -42,9 +42,16 @@ public static class ErDesignRules
         };
 
     /// <summary>Codex スレッド開始時に渡す developerInstructions（共通設計原則＋ツール運用手順）を組み立てる</summary>
-    internal static string BuildCodexDeveloperInstructions() =>
+    internal static string BuildCodexDeveloperInstructions() => BuildChatToolInstructions("dynamicTools");
+
+    /// <summary>OpenAI Function Calling 用のチャット system プロンプト（共通設計原則＋ツール運用手順）を組み立てる</summary>
+    internal static string BuildOpenAiChatSystemPrompt() => BuildChatToolInstructions("関数ツール");
+
+    /// <summary>ツール駆動チャット（Codex / OpenAI 共通）の指示文を組み立てる</summary>
+    /// <param name="toolMechanismLabel">ツール呼び出し機構の呼称（プロンプト内での表現を切り替える）</param>
+    private static string BuildChatToolInstructions(string toolMechanismLabel) =>
         $@"あなたは ER 図デザイナーアプリに組み込まれた DB 設計アシスタントです。
-ER 図の作成・変更は必ず提供されたツール（dynamicTools）で行ってください。ファイルやシェルは使用しません。
+ER 図の作成・変更は必ず提供されたツール（{toolMechanismLabel}）で行ってください。ファイルやシェルは使用しません。
 
 # 設計原則
 {CommonDesignPrinciples}

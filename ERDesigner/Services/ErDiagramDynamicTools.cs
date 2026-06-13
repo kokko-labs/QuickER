@@ -2,13 +2,29 @@ using System.Text;
 using System.Text.Json;
 using ERDesigner.Models;
 using ERDesigner.ViewModels;
+using OpenAI.Chat;
 
 namespace ERDesigner.Services;
 
-/// <summary>Codex dynamicTools として公開する ER 図操作ツールの定義と実行を担うクラス</summary>
+/// <summary>ER 図操作ツールの定義と実行を担うクラス（Codex dynamicTools と OpenAI Function Calling の両方へ公開する）</summary>
 /// <remarks>各ツールの操作は Undo / Redo マネージャー経由で実行し、取り消し可能とする</remarks>
 public static class ErDiagramDynamicTools
 {
+    /// <summary>全ツール定義を OpenAI SDK の <see cref="ChatTool"/> 一覧へ変換する（Function Calling 用）</summary>
+    /// <remarks>定義・説明文は <see cref="GetDefinitions"/> と共有し、二重管理を避ける</remarks>
+    public static IReadOnlyList<ChatTool> ToOpenAiTools()
+    {
+        return GetDefinitions()
+            .Select(definition =>
+                ChatTool.CreateFunctionTool(
+                    functionName: definition.Name,
+                    functionDescription: definition.Description,
+                    functionParameters: BinaryData.FromString(JsonSerializer.Serialize(definition.InputSchema))
+                )
+            )
+            .ToList();
+    }
+
     /// <summary>全 dynamicTool の定義一覧を返す</summary>
     public static IReadOnlyList<CodexDynamicToolDefinition> GetDefinitions()
     {

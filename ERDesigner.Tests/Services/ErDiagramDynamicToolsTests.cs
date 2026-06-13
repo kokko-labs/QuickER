@@ -402,4 +402,15 @@ public class ErDiagramDynamicToolsTests
         definitions.Single(d => d.Name == "add_relationship").Description.Should().Contain(ErDesignRules.SingleColumnForeignKeyRule);
         definitions.Single(d => d.Name == "add_entity").Description.Should().Contain("主キー列を 1 列だけ");
     }
+
+    /// <summary>OpenAI Function Calling 用の ChatTool 変換が、全ツールを名前付きで生成することを検証する</summary>
+    [Fact(DisplayName = "ToOpenAiTools は全ツール定義を ChatTool へ変換する")]
+    public void ToOpenAiTools_ConvertsAllDefinitions()
+    {
+        var definitions = ErDiagramDynamicTools.GetDefinitions();
+        var tools = ErDiagramDynamicTools.ToOpenAiTools();
+
+        tools.Should().HaveCount(definitions.Count);
+        tools.Select(t => t.FunctionName).Should().BeEquivalentTo(definitions.Select(d => d.Name));
+    }
 }

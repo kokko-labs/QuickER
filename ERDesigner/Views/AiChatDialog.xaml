@@ -1,0 +1,226 @@
+<Window
+  x:Class="ERDesigner.Views.AiChatDialog"
+  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+  xmlns:conv="clr-namespace:ERDesigner.Converters"
+  xmlns:chat="clr-namespace:ERDesigner.Services.Chat"
+  xmlns:local="clr-namespace:ERDesigner.Views"
+  Title="AI チャット"
+  Width="820"
+  Height="700"
+  MinWidth="620"
+  MinHeight="500"
+  ResizeMode="CanResize"
+  WindowStartupLocation="CenterOwner"
+  FontFamily="Segoe UI, Yu Gothic UI, Meiryo"
+  FontSize="13"
+>
+  <Window.Resources>
+    <conv:BoolToVisibilityConverter x:Key="BoolToVisibilityConverter" />
+
+    <DataTemplate x:Key="UserMessageTemplate" DataType="{x:Type chat:ErChatMessage}">
+      <Border Margin="60,4,4,4" Padding="10,6" Background="#DCF8C6" CornerRadius="10" HorizontalAlignment="Right">
+        <TextBox Text="{Binding Content, Mode=OneWay}" TextWrapping="Wrap" IsReadOnly="True" BorderThickness="0" Background="Transparent" FontSize="13" />
+      </Border>
+    </DataTemplate>
+
+    <DataTemplate x:Key="AssistantMessageTemplate" DataType="{x:Type chat:ErChatMessage}">
+      <Border Margin="4,4,60,4" Padding="10,6" Background="#DBEAFE" CornerRadius="10" HorizontalAlignment="Left">
+        <TextBox Text="{Binding Content, Mode=OneWay}" TextWrapping="Wrap" IsReadOnly="True" BorderThickness="0" Background="Transparent" Foreground="#1E3A5F" FontSize="13" />
+      </Border>
+    </DataTemplate>
+
+    <DataTemplate x:Key="SystemMessageTemplate" DataType="{x:Type chat:ErChatMessage}">
+      <Border Margin="4,2" Padding="8,4" Background="#FFF9C4" CornerRadius="6" HorizontalAlignment="Stretch">
+        <TextBox Text="{Binding Content, Mode=OneWay}" TextWrapping="Wrap" IsReadOnly="True" BorderThickness="0" Background="Transparent" Foreground="#795548" FontSize="12" FontStyle="Italic" />
+      </Border>
+    </DataTemplate>
+
+    <DataTemplate x:Key="ToolCallMessageTemplate" DataType="{x:Type chat:ErChatMessage}">
+      <Border Margin="4,2" CornerRadius="6" BorderBrush="#B0BEC5" BorderThickness="1">
+        <Expander IsExpanded="{Binding IsExpanded}" Header="AI 作業内容" Background="#ECEFF1">
+          <TextBox
+            Margin="4,4,4,8"
+            Text="{Binding Content, Mode=OneWay}"
+            TextWrapping="Wrap"
+            IsReadOnly="True"
+            BorderThickness="0"
+            Background="Transparent"
+            Foreground="#37474F"
+            FontSize="12"
+            FontFamily="Consolas, Courier New"
+          />
+        </Expander>
+      </Border>
+    </DataTemplate>
+
+    <local:ChatMessageTemplateSelector
+      x:Key="ChatMessageTemplateSelector"
+      UserTemplate="{StaticResource UserMessageTemplate}"
+      AssistantTemplate="{StaticResource AssistantMessageTemplate}"
+      SystemTemplate="{StaticResource SystemMessageTemplate}"
+      ToolCallTemplate="{StaticResource ToolCallMessageTemplate}"
+    />
+  </Window.Resources>
+
+  <Grid Margin="8">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="*" />
+      <RowDefinition Height="Auto" />
+    </Grid.RowDefinitions>
+
+    <!-- ── 上部: 接続方式タブ ── -->
+    <TabControl x:Name="BackendTabs" Grid.Row="0" SelectionChanged="BackendTabs_SelectionChanged">
+      <!-- API キー接続タブ -->
+      <TabItem Header="API キー接続">
+        <StackPanel Margin="10,8">
+          <Grid>
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="*" />
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <TextBlock Grid.Column="0" Margin="0,0,6,0" VerticalAlignment="Center" Text="プロバイダ" />
+            <ComboBox Grid.Column="1" Margin="0,0,16,0" ItemsSource="{Binding ApiProviders}" SelectedItem="{Binding ApiProvider}" />
+            <TextBlock Grid.Column="2" Margin="0,0,6,0" VerticalAlignment="Center" Text="モデル名" />
+            <ComboBox Grid.Column="3" IsEditable="True" Text="{Binding ApiModel, UpdateSourceTrigger=PropertyChanged}" ItemsSource="{Binding ApiModelCandidates}" />
+          </Grid>
+
+          <Grid Margin="0,8,0,0" Visibility="{Binding ShowApiKey, Converter={StaticResource BoolToVisibilityConverter}}">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="*" />
+              <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBlock Grid.Column="0" Margin="0,0,6,0" VerticalAlignment="Center" Text="API キー" />
+            <PasswordBox x:Name="ApiKeyBox" Grid.Column="1" Margin="0,0,8,0" ToolTip="OpenAI API キー（sk-...）" PasswordChanged="ApiKeyBox_PasswordChanged" />
+            <CheckBox Grid.Column="2" VerticalAlignment="Center" Content="保存" IsChecked="{Binding SaveApiKey}" />
+          </Grid>
+
+          <Grid Margin="0,8,0,0" Visibility="{Binding ShowEndpoint, Converter={StaticResource BoolToVisibilityConverter}}">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <TextBlock Grid.Column="0" Margin="0,0,6,0" VerticalAlignment="Center" Text="エンドポイント" />
+            <TextBox Grid.Column="1" Text="{Binding EndpointOverride, UpdateSourceTrigger=PropertyChanged}" ToolTip="OpenAI 互換エンドポイント（Ollama 等）" />
+          </Grid>
+        </StackPanel>
+      </TabItem>
+
+      <!-- Codex 接続タブ -->
+      <TabItem Header="Codex 接続">
+        <StackPanel Margin="10,8">
+          <Grid>
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="*" />
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <TextBlock Grid.Column="0" Margin="0,0,6,0" VerticalAlignment="Center" Text="モデルプロバイダー" />
+            <ComboBox Grid.Column="1" Margin="0,0,16,0" IsEditable="True" Text="{Binding CodexModelProvider, UpdateSourceTrigger=PropertyChanged}" ItemsSource="{Binding CodexModelProviderCandidates}" />
+            <TextBlock Grid.Column="2" Margin="0,0,6,0" VerticalAlignment="Center" Text="モデル名" />
+            <ComboBox Grid.Column="3" IsEditable="True" Text="{Binding CodexModel, UpdateSourceTrigger=PropertyChanged}" ItemsSource="{Binding CodexModelCandidates}" />
+          </Grid>
+
+          <Border
+            Margin="0,8,0,0"
+            Padding="10,8"
+            Background="#F0F4FF"
+            CornerRadius="6"
+            BorderBrush="#C7D2FE"
+            BorderThickness="1"
+            Visibility="{Binding ShowCodexAuthSection, Converter={StaticResource BoolToVisibilityConverter}}"
+          >
+            <StackPanel>
+              <Grid>
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="*" />
+                  <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock VerticalAlignment="Center" FontWeight="SemiBold" Text="{Binding CodexAccountSummary}" TextWrapping="Wrap" />
+                <Button Grid.Column="1" Width="80" Content="ログアウト" Command="{Binding CodexLogoutCommand}" IsEnabled="{Binding CanCodexLogout}" />
+              </Grid>
+
+              <StackPanel Margin="0,8,0,0" Visibility="{Binding ShowCodexLoginPanel, Converter={StaticResource BoolToVisibilityConverter}}">
+                <Grid Visibility="{Binding ShowCodexApiKeyInput, Converter={StaticResource BoolToVisibilityConverter}}">
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="80" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                  </Grid.ColumnDefinitions>
+                  <TextBlock Grid.Column="0" VerticalAlignment="Center" Text="API キー" />
+                  <PasswordBox x:Name="CodexApiKeyBox" Grid.Column="1" Margin="0,0,8,0" ToolTip="OpenAI API キー（sk-...）" PasswordChanged="CodexApiKeyBox_PasswordChanged" />
+                  <CheckBox Grid.Column="2" Margin="0,0,8,0" VerticalAlignment="Center" Content="保存" IsChecked="{Binding CodexSaveApiKey}" />
+                  <Button Grid.Column="3" Width="120" Content="API キーでログイン" Command="{Binding CodexLoginWithApiKeyCommand}" />
+                </Grid>
+                <Button Margin="0,6,0,0" HorizontalAlignment="Left" Width="200" Content="ChatGPT ブラウザでログイン" Command="{Binding CodexStartChatGptLoginCommand}" />
+              </StackPanel>
+            </StackPanel>
+          </Border>
+        </StackPanel>
+      </TabItem>
+    </TabControl>
+
+    <!-- ── 中部: チャットエリア ── -->
+    <Grid Grid.Row="1" Margin="0,8,0,8">
+      <Grid.RowDefinitions>
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="*" />
+      </Grid.RowDefinitions>
+
+      <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,4">
+        <Button Width="160" Margin="0,0,8,0" Content="新しい会話を開始" Command="{Binding StartConversationCommand}" />
+        <Button Width="120" Content="中断" Command="{Binding InterruptCommand}" Visibility="{Binding IsTurnInProgress, Converter={StaticResource BoolToVisibilityConverter}}" />
+        <TextBlock Margin="12,0,0,0" VerticalAlignment="Center" Text="処理中..." Foreground="#1565C0" FontStyle="Italic" Visibility="{Binding IsTurnInProgress, Converter={StaticResource BoolToVisibilityConverter}}" />
+      </StackPanel>
+
+      <Border Grid.Row="1" BorderBrush="#D1D5DB" BorderThickness="1" CornerRadius="4">
+        <ScrollViewer x:Name="ChatScrollViewer" VerticalScrollBarVisibility="Auto">
+          <ItemsControl ItemsSource="{Binding Messages}" ItemTemplateSelector="{StaticResource ChatMessageTemplateSelector}" HorizontalContentAlignment="Stretch">
+            <ItemsControl.ItemsPanel>
+              <ItemsPanelTemplate>
+                <StackPanel />
+              </ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+          </ItemsControl>
+        </ScrollViewer>
+      </Border>
+    </Grid>
+
+    <!-- ── 下部: 入力エリア ── -->
+    <Grid Grid.Row="2">
+      <Grid.RowDefinitions>
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="Auto" />
+      </Grid.RowDefinitions>
+
+      <Grid Grid.Row="0">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+        <TextBox
+          x:Name="UserInputBox"
+          Grid.Column="0"
+          Margin="0,0,8,0"
+          MinHeight="60"
+          MaxHeight="120"
+          TextWrapping="Wrap"
+          AcceptsReturn="True"
+          VerticalScrollBarVisibility="Auto"
+          Text="{Binding UserInput, UpdateSourceTrigger=PropertyChanged}"
+          KeyDown="UserInputBox_KeyDown"
+          ToolTip="Ctrl+Enter で送信"
+        />
+        <Button Grid.Column="1" Width="80" VerticalAlignment="Bottom" Content="送信" Command="{Binding SendMessageCommand}" />
+      </Grid>
+
+      <TextBlock Grid.Row="1" Margin="0,4,0,0" Foreground="#555" TextWrapping="Wrap" Text="{Binding StatusMessage}" />
+    </Grid>
+  </Grid>
+</Window>

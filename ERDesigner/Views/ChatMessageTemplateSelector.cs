@@ -1,10 +1,10 @@
 using System.Windows;
 using System.Windows.Controls;
-using ERDesigner.Services;
+using ERDesigner.Services.Chat;
 
 namespace ERDesigner.Views;
 
-/// <summary>Codex チャットメッセージのロール別にデータテンプレートを選択するセレクター</summary>
+/// <summary>チャットメッセージのロール別にデータテンプレートを選択するセレクター</summary>
 public class ChatMessageTemplateSelector : DataTemplateSelector
 {
     /// <summary>ユーザーメッセージ用テンプレート</summary>
@@ -22,14 +22,14 @@ public class ChatMessageTemplateSelector : DataTemplateSelector
     /// <inheritdoc />
     public override DataTemplate? SelectTemplate(object item, DependencyObject container)
     {
-        if (item is CodexChatMessage message)
+        if (item is ErChatMessage message)
         {
             return message.Role switch
             {
-                CodexChatMessageRole.User => UserTemplate,
-                CodexChatMessageRole.Assistant => AssistantTemplate,
-                CodexChatMessageRole.System => SystemTemplate,
-                CodexChatMessageRole.ToolCall => ToolCallTemplate,
+                ErChatMessageRole.User => UserTemplate,
+                ErChatMessageRole.Assistant => AssistantTemplate,
+                ErChatMessageRole.System => SystemTemplate,
+                ErChatMessageRole.ToolCall => ToolCallTemplate,
                 _ => base.SelectTemplate(item, container),
             };
         }

@@ -19,15 +19,15 @@ public partial class MainWindow : Window
         }
     }
 
-    /// <summary>ウィンドウ終了時に自動保存と Codex チャット画面の終了を行う</summary>
+    /// <summary>ウィンドウ終了時に自動保存と AI チャット画面の終了を行う</summary>
     private void MainWindow_Closing(object? sender, CancelEventArgs e)
     {
         if (DataContext is MainViewModel vm)
         {
             vm.AutoSave();
 
-            // メイン画面終了時に Codex チャット画面も強制終了する
-            vm.CloseCodexDialog();
+            // メイン画面終了時に AI チャット画面も強制終了する
+            vm.CloseAiChatDialog();
         }
     }
 }
