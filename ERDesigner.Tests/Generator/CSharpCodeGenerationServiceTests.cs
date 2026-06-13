@@ -488,7 +488,9 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("public interface ICustomerRepository : IRepository<CustomerEntity, int>;");
         content.Should().Contain("public sealed class CustomerRepository(ISqlConnectionFactory connectionFactory)");
         content.Should().Contain("services.AddScoped<ICustomerRepository, CustomerRepository>();");
-        content.Should().Contain("SelectByIdSql = $\"SELECT {string.Join(\", \", allColumns.Select(column => $\"[{column}]\"))} FROM {tableName} WHERE [{keyColumnName}] = @id;\"");
+        // カラム一覧は columnList へ抽出して SELECT 系で共用する
+        content.Should().Contain("var columnList = string.Join(\", \", allColumns.Select(column => $\"[{column}]\"));");
+        content.Should().Contain("SelectByIdSql = $\"SELECT {columnList} FROM {tableName} WHERE [{keyColumnName}] = @id;\"");
         content
             .Should()
             .Contain(
@@ -496,6 +498,36 @@ public class CSharpCodeGenerationServiceTests
             );
         content.Should().Contain("UpdateSql = $\"UPDATE {tableName} SET {string.Join(\", \", updateAssignments)} WHERE [{keyColumnName}] = @id;\"");
         content.Should().Contain("DeleteSql = $\"DELETE FROM {tableName} WHERE [{keyColumnName}] = @id;\"");
+    }
+
+    /// <summary>Repository にラムダ式ベースのクエリビルダー（Query / Where / OrderBy / 終端メソッド）が生成されることを検証する</summary>
+    [Fact]
+    public void Generate_ShouldCreateLambdaQueryBuilder()
+    {
+        var result = new CSharpCodeGenerationService().Generate(SingleEntityDiagram(), new CodeGenerationOptions { NamespaceName = "Sample.Domain" });
+
+        result.HasErrors.Should().BeFalse();
+        var content = result.Files[0].Content;
+        // 式木変換に必要な using とクエリ基盤クラス
+        content.Should().Contain("using System.Linq.Expressions;");
+        content.Should().Contain("public sealed class SqlQuery<TEntity>");
+        content.Should().Contain("internal static class SqlExpressionTranslator");
+        // リポジトリ起点のクエリ開始メソッド
+        content.Should().Contain("public SqlQuery<TEntity> Query() =>");
+        // ラムダ式で条件・並び順を指定するチェーンメソッド
+        content.Should().Contain("public SqlQuery<TEntity> Where(Expression<Func<TEntity, bool>> predicate)");
+        content.Should().Contain("public SqlQuery<TEntity> OrderBy(Expression<Func<TEntity, object?>> keySelector)");
+        content.Should().Contain("public SqlQuery<TEntity> OrderByDescending(Expression<Func<TEntity, object?>> keySelector)");
+        content.Should().Contain("public SqlQuery<TEntity> Take(int count)");
+        content.Should().Contain("public SqlQuery<TEntity> Skip(int count)");
+        // 終端メソッド一式
+        content.Should().Contain("public async Task<IReadOnlyList<TEntity>> ToListAsync(CancellationToken cancellationToken = default)");
+        content.Should().Contain("public async Task<TEntity?> FirstOrDefaultAsync(CancellationToken cancellationToken = default)");
+        content.Should().Contain("public async Task<int> CountAsync(CancellationToken cancellationToken = default)");
+        content.Should().Contain("public async Task<bool> AnyAsync(CancellationToken cancellationToken = default)");
+        // 値はパラメータ化、OFFSET/FETCH でページング
+        content.Should().Contain("AddWithValue(parameter.Key, parameter.Value ?? DBNull.Value)");
+        content.Should().Contain("FETCH NEXT {take.Value} ROWS ONLY");
     }
 
     /// <summary>Repository の SQL 生成でナビゲーションプロパティが列に含まれないことを検証する</summary>

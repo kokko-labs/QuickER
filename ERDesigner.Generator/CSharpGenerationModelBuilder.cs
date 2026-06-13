@@ -415,10 +415,20 @@ internal sealed class CSharpGenerationModelBuilder
     /// <summary>生成オプションに応じて必要な using 名前空間の集合を構築する</summary>
     private static IEnumerable<string> BuildUsings(CodeGenerationOptions options)
     {
-        var usings = new HashSet<string> { "System.Collections.Generic", "System.ComponentModel" };
+        // 明示的な using を網羅し、ImplicitUsings 無効のプロジェクトでもそのままコンパイルできるようにする。
+        // System / System.Collections.Generic / System.Linq は共有フレームワークに常時含まれ、生成コードの
+        // ほぼ全構成で使用するため無条件で付与する（未使用でも auto-generated ファイルでは警告抑止される）。
+        var usings = new HashSet<string> { "System", "System.Collections.Generic", "System.Linq" };
+
+        // INotifyPropertyChanged / INotifyDataErrorInfo（EditModelBase）
+        if (options.GenerateEditModels)
+        {
+            usings.Add("System.ComponentModel");
+        }
 
         if (options.GenerateRepositories)
         {
+            usings.Add("System.Linq.Expressions");
             usings.Add("System.Reflection");
             usings.Add("System.Threading");
             usings.Add("System.Threading.Tasks");
@@ -437,10 +447,11 @@ internal sealed class CSharpGenerationModelBuilder
             usings.Add("System.Text.Json.Serialization");
         }
 
-        foreach (var usingNamespace in usings)
-        {
-            yield return usingNamespace;
-        }
+        // System を先頭、続いて System.* を序数順、最後にそれ以外（Microsoft.* 等）を序数順で安定的に並べる
+        return usings
+            .OrderByDescending(ns => ns == "System")
+            .ThenByDescending(ns => ns.StartsWith("System", StringComparison.Ordinal))
+            .ThenBy(ns => ns, StringComparer.Ordinal);
     }
 
     /// <summary>プロパティ名から先頭小文字・アンダースコア始まりのフィールド名を導出する</summary>

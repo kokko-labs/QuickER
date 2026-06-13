@@ -375,6 +375,9 @@ internal sealed class ScribanCSharpRenderer
 
             /// <summary>主キーによるエンティティ削除（削除対象ありで true）</summary>
             Task<bool> DeleteAsync(TKey id, CancellationToken cancellationToken = default);
+
+            /// <summary>検索条件・並び順をチェーン指定して取得するクエリを開始する</summary>
+            SqlQuery<TEntity> Query();
         }
 
         /// <summary>SQL Server 接続を生成するファクトリ</summary>
@@ -426,6 +429,9 @@ internal sealed class ScribanCSharpRenderer
             /// <summary>DELETE 文</summary>
             public required string DeleteSql { get; init; }
 
+            /// <summary>SELECT 用の角括弧付きカラム一覧（例: [id], [name]）</summary>
+            public required string ColumnList { get; init; }
+
             /// <summary>エンティティ型の属性を解析しメタデータを構築する</summary>
             public static SqlEntityMetadata<TEntity, TKey> Create()
             {
@@ -448,6 +454,7 @@ internal sealed class ScribanCSharpRenderer
                 var updateAssignments = nonKeyProperties.Select(property => $"[{GetColumnName(property)}] = @{property.Name}").ToArray();
                 var tableName = $"[{tableAttribute.Name}]";
                 var keyColumnName = GetColumnName(keyProperty);
+                var columnList = string.Join(", ", allColumns.Select(column => $"[{column}]"));
 
                 return new SqlEntityMetadata<TEntity, TKey>
                 {
@@ -456,8 +463,9 @@ internal sealed class ScribanCSharpRenderer
                     KeyColumnName = keyColumnName,
                     AllProperties = properties,
                     NonKeyProperties = nonKeyProperties,
-                    SelectAllSql = $"SELECT {string.Join(", ", allColumns.Select(column => $"[{column}]"))} FROM {tableName};",
-                    SelectByIdSql = $"SELECT {string.Join(", ", allColumns.Select(column => $"[{column}]"))} FROM {tableName} WHERE [{keyColumnName}] = @id;",
+                    ColumnList = columnList,
+                    SelectAllSql = $"SELECT {columnList} FROM {tableName};",
+                    SelectByIdSql = $"SELECT {columnList} FROM {tableName} WHERE [{keyColumnName}] = @id;",
                     InsertSql = $"INSERT INTO {tableName} ({string.Join(", ", insertColumns.Select(column => $"[{column}]"))}) VALUES ({string.Join(", ", properties.Select(property => $"@{property.Name}"))});",
                     UpdateSql = $"UPDATE {tableName} SET {string.Join(", ", updateAssignments)} WHERE [{keyColumnName}] = @id;",
                     DeleteSql = $"DELETE FROM {tableName} WHERE [{keyColumnName}] = @id;",
@@ -607,6 +615,340 @@ internal sealed class ScribanCSharpRenderer
                 var affected = await command.ExecuteNonQueryAsync(cancellationToken);
                 return affected > 0;
             }
+
+            /// <summary>検索条件・並び順をチェーン指定して取得するクエリを開始する</summary>
+            public SqlQuery<TEntity> Query() =>
+                new(_connectionFactory, _metadata.TableName, _metadata.ColumnList, _metadata.MapEntity);
+        }
+
+        /// <summary>検索条件・並び順をチェーンで構築し、終端メソッド（ToListAsync 等）で実行するクエリ</summary>
+        /// <remarks>条件・並び順はラムダ式で指定する。値はパラメータ化、列名はメタデータ由来でインジェクション対策済み</remarks>
+        public sealed class SqlQuery<TEntity>
+            where TEntity : class
+        {
+            private readonly ISqlConnectionFactory _connectionFactory;
+            private readonly string _tableName;
+            private readonly string _columnList;
+            private readonly Func<SqlDataReader, TEntity> _map;
+            private readonly List<string> _conditions = new();
+            private readonly List<string> _orderings = new();
+            private readonly List<KeyValuePair<string, object?>> _parameters = new();
+            private int? _take;
+            private int? _skip;
+
+            internal SqlQuery(ISqlConnectionFactory connectionFactory, string tableName, string columnList, Func<SqlDataReader, TEntity> map)
+            {
+                _connectionFactory = connectionFactory;
+                _tableName = tableName;
+                _columnList = columnList;
+                _map = map;
+            }
+
+            /// <summary>検索条件を追加する（複数指定は AND 結合）</summary>
+            public SqlQuery<TEntity> Where(Expression<Func<TEntity, bool>> predicate)
+            {
+                ArgumentNullException.ThrowIfNull(predicate);
+                _conditions.Add(SqlExpressionTranslator.ToCondition(predicate.Body, _parameters));
+                return this;
+            }
+
+            /// <summary>昇順の並び順を追加する</summary>
+            public SqlQuery<TEntity> OrderBy(Expression<Func<TEntity, object?>> keySelector)
+            {
+                _orderings.Add(SqlExpressionTranslator.ToColumn(keySelector) + " ASC");
+                return this;
+            }
+
+            /// <summary>降順の並び順を追加する</summary>
+            public SqlQuery<TEntity> OrderByDescending(Expression<Func<TEntity, object?>> keySelector)
+            {
+                _orderings.Add(SqlExpressionTranslator.ToColumn(keySelector) + " DESC");
+                return this;
+            }
+
+            /// <summary>取得件数の上限を指定する</summary>
+            public SqlQuery<TEntity> Take(int count)
+            {
+                _take = count;
+                return this;
+            }
+
+            /// <summary>先頭から読み飛ばす件数を指定する</summary>
+            public SqlQuery<TEntity> Skip(int count)
+            {
+                _skip = count;
+                return this;
+            }
+
+            /// <summary>条件に一致するエンティティを一覧取得する</summary>
+            public async Task<IReadOnlyList<TEntity>> ToListAsync(CancellationToken cancellationToken = default)
+            {
+                var items = new List<TEntity>();
+
+                await using var connection = _connectionFactory.CreateConnection();
+                await connection.OpenAsync(cancellationToken);
+
+                await using var command = CreateCommand(connection, BuildSelectSql(_take, _skip));
+                await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+
+                while (await reader.ReadAsync(cancellationToken))
+                {
+                    items.Add(_map(reader));
+                }
+
+                return items;
+            }
+
+            /// <summary>条件に一致する先頭の 1 件を取得する（該当なしは null）</summary>
+            public async Task<TEntity?> FirstOrDefaultAsync(CancellationToken cancellationToken = default)
+            {
+                await using var connection = _connectionFactory.CreateConnection();
+                await connection.OpenAsync(cancellationToken);
+
+                await using var command = CreateCommand(connection, BuildSelectSql(1, _skip));
+                await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+
+                return await reader.ReadAsync(cancellationToken) ? _map(reader) : null;
+            }
+
+            /// <summary>条件に一致する件数を取得する</summary>
+            public async Task<int> CountAsync(CancellationToken cancellationToken = default)
+            {
+                await using var connection = _connectionFactory.CreateConnection();
+                await connection.OpenAsync(cancellationToken);
+
+                await using var command = CreateCommand(connection, $"SELECT COUNT(*) FROM {_tableName}{BuildWhereClause()};");
+                var result = await command.ExecuteScalarAsync(cancellationToken);
+                return Convert.ToInt32(result);
+            }
+
+            /// <summary>条件に一致するレコードが存在するかを取得する</summary>
+            public async Task<bool> AnyAsync(CancellationToken cancellationToken = default)
+            {
+                await using var connection = _connectionFactory.CreateConnection();
+                await connection.OpenAsync(cancellationToken);
+
+                await using var command = CreateCommand(connection, $"SELECT CASE WHEN EXISTS (SELECT 1 FROM {_tableName}{BuildWhereClause()}) THEN 1 ELSE 0 END;");
+                var result = await command.ExecuteScalarAsync(cancellationToken);
+                return Convert.ToInt32(result) != 0;
+            }
+
+            /// <summary>蓄積したパラメータを設定したコマンドを生成する</summary>
+            private SqlCommand CreateCommand(SqlConnection connection, string sql)
+            {
+                var command = new SqlCommand(sql, connection);
+
+                foreach (var parameter in _parameters)
+                {
+                    command.Parameters.AddWithValue(parameter.Key, parameter.Value ?? DBNull.Value);
+                }
+
+                return command;
+            }
+
+            /// <summary>WHERE 句を組み立てる（条件なしは空文字）</summary>
+            private string BuildWhereClause() =>
+                _conditions.Count == 0 ? string.Empty : " WHERE " + string.Join(" AND ", _conditions);
+
+            /// <summary>SELECT 文を組み立てる。take/skip 指定時は OFFSET/FETCH を付与する</summary>
+            private string BuildSelectSql(int? take, int? skip)
+            {
+                var sql = $"SELECT {_columnList} FROM {_tableName}{BuildWhereClause()}";
+
+                if (take.HasValue || skip.HasValue)
+                {
+                    // OFFSET/FETCH は ORDER BY 必須のため、未指定時は安定なダミー順序を付与する
+                    sql += _orderings.Count == 0 ? " ORDER BY (SELECT NULL)" : " ORDER BY " + string.Join(", ", _orderings);
+                    sql += $" OFFSET {skip ?? 0} ROWS";
+
+                    if (take.HasValue)
+                    {
+                        sql += $" FETCH NEXT {take.Value} ROWS ONLY";
+                    }
+                }
+                else if (_orderings.Count > 0)
+                {
+                    sql += " ORDER BY " + string.Join(", ", _orderings);
+                }
+
+                return sql + ";";
+            }
+        }
+
+        /// <summary>ラムダ式（式木）を SQL の条件・列参照へ変換する</summary>
+        /// <remarks>対応構文は比較（== != &lt; &lt;= &gt; &gt;=）・論理結合（&amp;&amp; ||）・否定・null 判定・bool 列・文字列の Contains/StartsWith/EndsWith に限定し、範囲外は例外とする</remarks>
+        internal static class SqlExpressionTranslator
+        {
+            /// <summary>述語ラムダの本体を SQL 条件へ変換し、値はパラメータ化して parameters へ追加する</summary>
+            public static string ToCondition(Expression expression, List<KeyValuePair<string, object?>> parameters) =>
+                Visit(expression, parameters);
+
+            /// <summary>キー選択ラムダから角括弧付きの列名を取り出す</summary>
+            public static string ToColumn(LambdaExpression keySelector)
+            {
+                var member = Unwrap(keySelector.Body) as MemberExpression;
+
+                if (member is null || !IsColumn(member))
+                {
+                    throw new NotSupportedException($"並び順にはエンティティのプロパティのみ指定できます: {keySelector}");
+                }
+
+                return ColumnName(member.Member);
+            }
+
+            private static string Visit(Expression expression, List<KeyValuePair<string, object?>> parameters)
+            {
+                switch (expression)
+                {
+                    case BinaryExpression { NodeType: ExpressionType.AndAlso } binary:
+                        return $"({Visit(binary.Left, parameters)} AND {Visit(binary.Right, parameters)})";
+
+                    case BinaryExpression { NodeType: ExpressionType.OrElse } binary:
+                        return $"({Visit(binary.Left, parameters)} OR {Visit(binary.Right, parameters)})";
+
+                    case BinaryExpression binary:
+                        return VisitComparison(binary, parameters);
+
+                    case UnaryExpression { NodeType: ExpressionType.Not } unary:
+                        return Unwrap(unary.Operand) is MemberExpression boolMember && IsColumn(boolMember)
+                            ? $"{ColumnName(boolMember.Member)} = 0"
+                            : $"NOT ({Visit(unary.Operand, parameters)})";
+
+                    case MethodCallExpression call when TryGetLike(call, out var likeColumn, out var likeKind):
+                        var raw = Evaluate(call.Arguments[0]) as string ?? string.Empty;
+                        var pattern = likeKind switch
+                        {
+                            LikeKind.Contains => "%" + EscapeLike(raw) + "%",
+                            LikeKind.StartsWith => EscapeLike(raw) + "%",
+                            _ => "%" + EscapeLike(raw),
+                        };
+                        return $"{likeColumn} LIKE {AddParameter(pattern, parameters)} ESCAPE '\\'";
+
+                    case MemberExpression member when member.Type == typeof(bool) && IsColumn(member):
+                        return $"{ColumnName(member.Member)} = 1";
+
+                    default:
+                        throw new NotSupportedException($"この式は SQL へ変換できません: {expression}");
+                }
+            }
+
+            private static string VisitComparison(BinaryExpression binary, List<KeyValuePair<string, object?>> parameters)
+            {
+                var left = Unwrap(binary.Left);
+                var right = Unwrap(binary.Right);
+
+                if (binary.NodeType is ExpressionType.Equal or ExpressionType.NotEqual)
+                {
+                    var suffix = binary.NodeType == ExpressionType.NotEqual ? "NOT " : string.Empty;
+
+                    if (IsNull(right) && left is MemberExpression leftColumn && IsColumn(leftColumn))
+                    {
+                        return $"{ColumnName(leftColumn.Member)} IS {suffix}NULL";
+                    }
+
+                    if (IsNull(left) && right is MemberExpression rightColumn && IsColumn(rightColumn))
+                    {
+                        return $"{ColumnName(rightColumn.Member)} IS {suffix}NULL";
+                    }
+                }
+
+                var op = binary.NodeType switch
+                {
+                    ExpressionType.Equal => "=",
+                    ExpressionType.NotEqual => "<>",
+                    ExpressionType.GreaterThan => ">",
+                    ExpressionType.GreaterThanOrEqual => ">=",
+                    ExpressionType.LessThan => "<",
+                    ExpressionType.LessThanOrEqual => "<=",
+                    _ => throw new NotSupportedException($"未対応の演算子です: {binary.NodeType}"),
+                };
+
+                return $"{Operand(left, parameters)} {op} {Operand(right, parameters)}";
+            }
+
+            private static string Operand(Expression expression, List<KeyValuePair<string, object?>> parameters) =>
+                expression is MemberExpression member && IsColumn(member)
+                    ? ColumnName(member.Member)
+                    : AddParameter(Evaluate(expression), parameters);
+
+            private enum LikeKind
+            {
+                Contains,
+                StartsWith,
+                EndsWith,
+            }
+
+            private static bool TryGetLike(MethodCallExpression call, out string column, out LikeKind kind)
+            {
+                column = string.Empty;
+                kind = LikeKind.Contains;
+
+                if (call.Object is null || call.Method.DeclaringType != typeof(string) || call.Arguments.Count != 1)
+                {
+                    return false;
+                }
+
+                if (Unwrap(call.Object) is not MemberExpression member || !IsColumn(member))
+                {
+                    return false;
+                }
+
+                switch (call.Method.Name)
+                {
+                    case "Contains":
+                        kind = LikeKind.Contains;
+                        break;
+                    case "StartsWith":
+                        kind = LikeKind.StartsWith;
+                        break;
+                    case "EndsWith":
+                        kind = LikeKind.EndsWith;
+                        break;
+                    default:
+                        return false;
+                }
+
+                column = ColumnName(member.Member);
+                return true;
+            }
+
+            /// <summary>object へのボックス化などの Convert を取り除く</summary>
+            private static Expression Unwrap(Expression expression)
+            {
+                while (expression is UnaryExpression { NodeType: ExpressionType.Convert or ExpressionType.ConvertChecked } unary)
+                {
+                    expression = unary.Operand;
+                }
+
+                return expression;
+            }
+
+            /// <summary>ラムダ引数のプロパティ参照（= 列）かどうか</summary>
+            private static bool IsColumn(MemberExpression member) =>
+                member is { Expression: ParameterExpression, Member: PropertyInfo };
+
+            private static bool IsNull(Expression expression) =>
+                expression is ConstantExpression { Value: null };
+
+            private static string ColumnName(MemberInfo member) =>
+                $"[{member.GetCustomAttribute<ColumnAttribute>()?.Name ?? member.Name}]";
+
+            /// <summary>定数・クロージャ変数などを評価して実値を得る</summary>
+            private static object? Evaluate(Expression expression) =>
+                expression is ConstantExpression constant
+                    ? constant.Value
+                    : Expression.Lambda(expression).Compile().DynamicInvoke();
+
+            private static string AddParameter(object? value, List<KeyValuePair<string, object?>> parameters)
+            {
+                var name = "@p" + parameters.Count;
+                parameters.Add(new KeyValuePair<string, object?>(name, value));
+                return name;
+            }
+
+            /// <summary>LIKE のワイルドカード（% _ [ \）をエスケープする</summary>
+            private static string EscapeLike(string value) =>
+                value.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_").Replace("[", "\\[");
         }
 
         /// <summary>生成されたリポジトリ群を DI コンテナへ登録する拡張</summary>
