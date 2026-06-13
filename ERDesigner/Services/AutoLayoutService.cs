@@ -10,7 +10,7 @@ namespace ERDesigner.Services;
 ///   <item><see cref="LayoutGrid(IList{EntityViewModel}, int)"/>: 格子状レイアウト（並び順のまま配置）</item>
 ///   <item><see cref="LayoutGrid(IList{EntityViewModel}, IList{RelationshipViewModel}, int)"/>: リレーション線の交差をできるだけ減らす格子状レイアウト</item>
 ///   <item><see cref="LayoutTree"/>: リレーションを辺と見なした階層（BFS）レイアウト</item>
-///   <item><see cref="LayoutForceDirected"/>: 力学モデルで決めた配置を格子へスナップする自由整列レイアウト</item>
+///   <item><see cref="LayoutForceDirected"/>: 力学モデル＋辺の軸整列で、リレーション線が水平/垂直に近づく自由レイアウト</item>
 /// </list>
 /// </remarks>
 public static class AutoLayoutService
@@ -61,6 +61,19 @@ public static class AutoLayoutService
 
     /// <summary>終盤の 1 反復あたり最大移動量 (px)</summary>
     private const double FreeMinTemperature = 2.0;
+
+    /// <summary>辺の軸整列フェーズで、1 パスごとに辺の短い成分を縮める割合（0〜1）</summary>
+    private const double FreeAlignStrength = 0.5;
+
+    /// <summary>辺の軸整列フェーズの反復パス数（整列と重なり解消を交互に適用する）</summary>
+    private const int FreeAlignPasses = 60;
+
+    /// <summary>コンパクションフェーズで全ノードを全体重心へ寄せる係数（1 パスあたり重心方向へ詰める割合）</summary>
+    /// <remarks>空白を詰め、孤立ノード（リレーションなし）も中央へ引き寄せる 重なり解消が最小ギャップで支えるため潰れない</remarks>
+    private const double FreeCompactStrength = 0.1;
+
+    /// <summary>コンパクションフェーズの反復パス数（重心寄せと重なり解消を交互に適用する）</summary>
+    private const int FreeCompactPasses = 60;
 
     /// <summary>重なり解消の最大パス数</summary>
     private const int MaxOverlapRemovalPasses = 100;
@@ -217,20 +230,20 @@ public static class AutoLayoutService
         }
     }
 
-    /// <summary>リレーションで繋がったエンティティが引き合う力学モデルで大まかな配置を決め、格子セルへスナップして整列する</summary>
+    /// <summary>リレーションで繋がったエンティティが引き合う力学モデルで配置を決め、リレーション線が水平/垂直に近づくよう整列する</summary>
     /// <remarks>
     /// 自由配置のグループ構造（繋がりの強いエンティティが近くに集まる）を保ったまま、
-    /// 格子整列の揃った見た目を得るハイブリッド方式
+    /// 各リレーション辺を最も近い軸（水平 or 垂直）へ寄せて線を読みやすくする
     /// <list type="number">
-    ///   <item>力学モデル（Fruchterman-Reingold 改）のシミュレーションで全エンティティの中心座標を求める</item>
-    ///   <item>中心 Y の昇順で列数ぶんずつ行へ分割し、行内を中心 X の昇順に並べる</item>
-    ///   <item>確定した順序で既存の格子配置を適用する</item>
+    ///   <item>力学モデル（Fruchterman-Reingold 改）のシミュレーションで全エンティティの中心座標を求める（重心寄せのコンパクションと辺の軸整列を含む）</item>
+    ///   <item>格子へスナップせず、中心座標を左上座標へ変換して <see cref="Margin"/> 正規化する</item>
     /// </list>
+    /// 次数の高いノードに接続する全辺を同時に軸へ揃えることは原理的に不可能なため、結果は「なるべく水平/垂直」のベストエフォート
     /// 乱数・列挙順非決定要素を一切使わないため結果は決定的
     /// </remarks>
     /// <param name="entities">配置対象のエンティティ一覧</param>
     /// <param name="relationships">リレーション一覧（レイアウト上は無向として扱う）</param>
-    /// <param name="columns">列数 0 以下なら要素数の平方根から自動決定する</param>
+    /// <param name="columns">リレーションが無い場合のフォールバック格子の列数 0 以下なら要素数の平方根から自動決定する</param>
     public static void LayoutForceDirected(
         IList<EntityViewModel> entities,
         IList<RelationshipViewModel> relationships,
@@ -243,44 +256,21 @@ public static class AutoLayoutService
         }
 
         var edges = BuildEdges(entities, relationships);
-        var cols = ResolveColumns(entities.Count, columns);
 
-        // リレーションが無ければ引力が働かず順序が決まらないため従来格子へフォールバックする
+        // リレーションが無ければ引力・整列力が働かず配置が決まらないため従来格子へフォールバックする
         if (edges.Count == 0)
         {
-            PlaceInGrid(entities, cols);
+            PlaceInGrid(entities, ResolveColumns(entities.Count, columns));
             return;
         }
 
         var centers = ComputeForceDirectedCenters(entities, edges);
-
-        // 中心 Y 昇順（同値は X 昇順 → 番号昇順）で安定ソートし、先頭から列数ぶんずつ行チャンクへ分割する
-        var byRow = Enumerable
-            .Range(0, entities.Count)
-            .OrderBy(i => centers[i].Y)
-            .ThenBy(i => centers[i].X)
-            .ToList();
-
-        var order = new List<EntityViewModel>(entities.Count);
-
-        for (var start = 0; start < byRow.Count; start += cols)
-        {
-            // 各行チャンク内を中心 X 昇順（同値は番号昇順）で並べ替える
-            var chunk = byRow
-                .Skip(start)
-                .Take(cols)
-                .OrderBy(i => centers[i].X)
-                .Select(i => entities[i]);
-
-            order.AddRange(chunk);
-        }
-
-        PlaceInGrid(order, cols);
+        PlaceAtCenters(entities, centers);
     }
 
     /// <summary>力学モデルのシミュレーションを実行し全エンティティの中心座標を返す</summary>
     /// <remarks>
-    /// サイズ計算 → 円環状の初期配置 → 反発・引力・重力の力学反復 → 矩形重なり解消までを担い、
+    /// サイズ計算 → 円環状の初期配置 → 反発・引力・重力の力学反復 → 重心寄せコンパクション → 辺の軸整列 → 矩形重なり解消までを担い、
     /// 正規化（左上座標への変換）は呼び出し側に委ねる 乱数を使わないため結果は決定的
     /// </remarks>
     private static (double X, double Y)[] ComputeForceDirectedCenters(
@@ -438,8 +428,8 @@ public static class AutoLayoutService
             }
         }
 
-        // 矩形重なり解消（ギャップ込みの矩形が重なる軸の小さい侵入量から押し出す）
-        for (var pass = 0; pass < MaxOverlapRemovalPasses; pass++)
+        // 矩形重なり解消の 1 パス（ギャップ込みの矩形が重なる軸の小さい侵入量から押し出す）重なりが残れば true
+        bool ResolveOverlapsOnce()
         {
             var anyOverlap = false;
 
@@ -479,7 +469,97 @@ public static class AutoLayoutService
                 }
             }
 
-            if (!anyOverlap)
+            return anyOverlap;
+        }
+
+        // コンパクションフェーズ: 全ノード（孤立ノード含む）を全体重心へ寄せて空白を詰める
+        // 重なり解消が最小ギャップで支えるため潰れず、外周へ離れたノード・リレーションなしノードが中央へ集まる
+        for (var pass = 0; pass < FreeCompactPasses; pass++)
+        {
+            var ccx = 0.0;
+            var ccy = 0.0;
+
+            for (var i = 0; i < n; i++)
+            {
+                ccx += pos[i].X;
+                ccy += pos[i].Y;
+            }
+
+            ccx /= n;
+            ccy /= n;
+
+            for (var i = 0; i < n; i++)
+            {
+                pos[i] = (
+                    pos[i].X + (ccx - pos[i].X) * FreeCompactStrength,
+                    pos[i].Y + (ccy - pos[i].Y) * FreeCompactStrength
+                );
+            }
+
+            ResolveOverlapsOnce();
+        }
+
+        // 辺の軸整列フェーズ: 各辺を最寄りの軸（縦寄り→X を、横寄り→Y を）へ寄せ、間に重なり解消を挟んで配置を保つ
+        // 冷却温度に縛られない専用パスで行うことで、FR 反復終盤の低温による整列不足を回避する 直交性を確定させる最後の支配的処理
+        var degree = new int[n];
+
+        foreach (var (a, b) in edges)
+        {
+            degree[a]++;
+            degree[b]++;
+        }
+
+        for (var pass = 0; pass < FreeAlignPasses; pass++)
+        {
+            for (var i = 0; i < n; i++)
+            {
+                disp[i] = (0, 0);
+            }
+
+            // 各辺の整列変位を端点へ累積する（高次数ノードは後で次数で割り、過剰移動を防ぐ）
+            foreach (var (a, b) in edges)
+            {
+                var dx = pos[a].X - pos[b].X;
+                var dy = pos[a].Y - pos[b].Y;
+
+                // 寄せる軸は、重なり回避に必要な最小間隔で正規化した比で決める
+                // （生の dx,dy 比較だと、横長でも横方向に詰まったペアを横整列しようとして重なり解消と競合し収束しない）
+                var minX = (entities[a].Width + entities[b].Width) / 2 + GapX;
+                var minY = (entities[a].DisplayHeight + entities[b].DisplayHeight) / 2 + GapY;
+
+                if (Math.Abs(dx) / minX <= Math.Abs(dy) / minY)
+                {
+                    // 縦寄り: X を揃えて垂直線にする
+                    var shift = dx / 2 * FreeAlignStrength;
+                    disp[a].X -= shift;
+                    disp[b].X += shift;
+                }
+                else
+                {
+                    // 横寄り: Y を揃えて水平線にする
+                    var shift = dy / 2 * FreeAlignStrength;
+                    disp[a].Y -= shift;
+                    disp[b].Y += shift;
+                }
+            }
+
+            for (var i = 0; i < n; i++)
+            {
+                if (degree[i] == 0)
+                {
+                    continue;
+                }
+
+                pos[i] = (pos[i].X + disp[i].X / degree[i], pos[i].Y + disp[i].Y / degree[i]);
+            }
+
+            ResolveOverlapsOnce();
+        }
+
+        // 最終的な重なり解消（収束または上限まで）
+        for (var pass = 0; pass < MaxOverlapRemovalPasses; pass++)
+        {
+            if (!ResolveOverlapsOnce())
             {
                 break;
             }
@@ -617,6 +697,34 @@ public static class AutoLayoutService
 
             entities[i].X = x;
             entities[i].Y = y;
+        }
+    }
+
+    /// <summary>中心座標を各エンティティの左上座標へ変換し、最小 X・Y が <see cref="Margin"/> になるよう平行移動して正規化する</summary>
+    private static void PlaceAtCenters(IList<EntityViewModel> entities, (double X, double Y)[] centers)
+    {
+        var minX = double.PositiveInfinity;
+        var minY = double.PositiveInfinity;
+
+        // いったん中心 → 左上へ直し、全体の最小座標を求める
+        for (var i = 0; i < entities.Count; i++)
+        {
+            var left = centers[i].X - entities[i].Width / 2;
+            var top = centers[i].Y - entities[i].DisplayHeight / 2;
+            entities[i].X = left;
+            entities[i].Y = top;
+            minX = Math.Min(minX, left);
+            minY = Math.Min(minY, top);
+        }
+
+        // 最小座標が Margin に揃うよう全体を平行移動する（辺の相対位置＝軸整列は保たれる）
+        var offsetX = Margin - minX;
+        var offsetY = Margin - minY;
+
+        for (var i = 0; i < entities.Count; i++)
+        {
+            entities[i].X += offsetX;
+            entities[i].Y += offsetY;
         }
     }
 

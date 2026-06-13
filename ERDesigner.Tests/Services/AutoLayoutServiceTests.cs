@@ -286,13 +286,13 @@ public class AutoLayoutServiceTests
         }
     }
 
-    /// <summary>接続されたペアが格子上の隣接セル（斜め含む）へ配置されることを検証する</summary>
-    [Fact(DisplayName = "LayoutForceDirected: 接続ペアが隣接セルに配置される")]
-    public void LayoutForceDirected_PlacesConnectedPairsInAdjacentCells()
+    /// <summary>次数 1 の独立ペアは各リレーション線がほぼ水平または垂直（軸整列）になることを検証する</summary>
+    [Fact(DisplayName = "LayoutForceDirected: 独立ペアのリレーション線が軸へ整列する")]
+    public void LayoutForceDirected_AlignsIndependentPairsToAxes()
     {
         var entities = Enumerable.Range(0, 8).Select(i => NewEntity($"E{i}")).ToList();
 
-        // 4 つの独立したペア（3x3 格子で隣接が自明に成立しない構成）
+        // 4 つの独立したペア（各ノードは次数 1 なので各辺を完全に軸整列できる構成）
         var rels = new List<RelationshipViewModel>();
 
         for (var i = 0; i < 8; i += 2)
@@ -302,19 +302,45 @@ public class AutoLayoutServiceTests
 
         AutoLayoutService.LayoutForceDirected(entities, rels);
 
-        // 座標値の昇順インデックスを列・行番号と見なす
-        var xs = entities.Select(e => e.X).Distinct().OrderBy(x => x).ToList();
-        var ys = entities.Select(e => e.Y).Distinct().OrderBy(y => y).ToList();
-
         foreach (var rel in rels)
         {
-            var dCol = Math.Abs(xs.IndexOf(rel.Source.X) - xs.IndexOf(rel.Target.X));
-            var dRow = Math.Abs(ys.IndexOf(rel.Source.Y) - ys.IndexOf(rel.Target.Y));
+            var dx = Math.Abs(CenterX(rel.Source) - CenterX(rel.Target));
+            var dy = Math.Abs(CenterY(rel.Source) - CenterY(rel.Target));
 
-            // 接続ペアは隣接セル（斜め含む チェビシェフ距離 1 以内）に収まること
-            Math.Max(dCol, dRow).Should().BeLessThanOrEqualTo(1);
+            // 軸方向のずれ（短い方の成分）が長い方に対して十分小さい＝ほぼ水平/垂直であること
+            Math.Min(dx, dy).Should().BeLessThan(Math.Max(dx, dy) * 0.1);
         }
     }
+
+    /// <summary>リング構成でもリレーション線の過半数がほぼ水平/垂直に整列することを検証する</summary>
+    [Fact(DisplayName = "LayoutForceDirected: リング構成でも線の過半数が軸へ整列する")]
+    public void LayoutForceDirected_AlignsMajorityOfRingEdgesToAxes()
+    {
+        var entities = Enumerable.Range(0, 8).Select(i => NewEntity($"E{i}")).ToList();
+        var rels = new List<RelationshipViewModel>();
+
+        for (var i = 0; i < 8; i++)
+        {
+            rels.Add(NewRelationship(entities[i], entities[(i + 1) % 8]));
+        }
+
+        AutoLayoutService.LayoutForceDirected(entities, rels);
+
+        var aligned = rels.Count(rel =>
+        {
+            var dx = Math.Abs(CenterX(rel.Source) - CenterX(rel.Target));
+            var dy = Math.Abs(CenterY(rel.Source) - CenterY(rel.Target));
+            return Math.Min(dx, dy) < Math.Max(dx, dy) * 0.25;
+        });
+
+        aligned.Should().BeGreaterThan(rels.Count / 2);
+    }
+
+    /// <summary>エンティティの中心 X 座標を返す</summary>
+    private static double CenterX(EntityViewModel e) => e.X + e.Width / 2;
+
+    /// <summary>エンティティの中心 Y 座標を返す</summary>
+    private static double CenterY(EntityViewModel e) => e.Y + e.DisplayHeight / 2;
 
     /// <summary>同じ入力に対して常に同じ配置となる（乱数を使わない）ことを検証する</summary>
     [Fact(DisplayName = "LayoutForceDirected: 結果が決定的である")]
@@ -389,8 +415,36 @@ public class AutoLayoutServiceTests
         var width = entities.Max(e => e.X + e.Width) - entities.Min(e => e.X);
         var height = entities.Max(e => e.Y + e.DisplayHeight) - entities.Min(e => e.Y);
 
-        // 8 ノードリングの実測は約 853x726 調整前の挙動（1250x1133 超）へ戻らないことを保証する
-        (width * height).Should().BeLessThan(1_000_000);
+        // コンパクション導入後の 8 ノードリング実測は約 501x461(≈231k) 導入前(≈619k)へ戻らないことを保証する
+        (width * height).Should().BeLessThan(400_000);
+    }
+
+    /// <summary>リレーションのない孤立エンティティも他ノードの近くへコンパクトに配置されることを検証する</summary>
+    [Fact(DisplayName = "LayoutForceDirected: 孤立エンティティもコンパクトに配置される")]
+    public void LayoutForceDirected_PacksIsolatedEntitiesCompactly()
+    {
+        // 連結クラスタ（5 ノードのスター）＋ リレーションを持たない孤立ノード 3 件
+        var entities = Enumerable.Range(0, 8).Select(i => NewEntity($"E{i}")).ToList();
+        var rels = new List<RelationshipViewModel>();
+
+        for (var i = 1; i < 5; i++)
+        {
+            rels.Add(NewRelationship(entities[0], entities[i]));
+        }
+
+        AutoLayoutService.LayoutForceDirected(entities, rels);
+
+        // 各孤立ノード（E5,E6,E7）は最も近い他ノードと最小ギャップ程度の距離に収まること（外周へ取り残されない）
+        // 横方向の最小中心間隔 = (200+200)/2 + GapX(100) = 300 に余裕を加えた値を上限とする
+        for (var i = 5; i < 8; i++)
+        {
+            var nearest = entities
+                .Where((_, j) => j != i)
+                .Min(o => Math.Sqrt(
+                    Math.Pow(CenterX(entities[i]) - CenterX(o), 2) + Math.Pow(CenterY(entities[i]) - CenterY(o), 2)));
+
+            nearest.Should().BeLessThan(360, $"E{i} は他ノードの近くへ配置されるべき");
+        }
     }
 
     /// <summary>配置後に全エンティティの左上座標が Margin 以上へ正規化されることを検証する</summary>
@@ -411,24 +465,6 @@ public class AutoLayoutServiceTests
         entities.Should().OnlyContain(e => e.X >= margin - 1e-6 && e.Y >= margin - 1e-6);
     }
 
-    /// <summary>格子へスナップした結果が行数ぶんの Y 値・列数以下の X 値に収まることを検証する</summary>
-    [Fact(DisplayName = "LayoutForceDirected: 格子整列の不変条件を満たす")]
-    public void LayoutForceDirected_SatisfiesGridInvariants()
-    {
-        var entities = Enumerable.Range(0, 12).Select(i => NewEntity($"E{i}")).ToList();
-        var rels = new List<RelationshipViewModel>();
-
-        for (var i = 0; i < 12; i++)
-        {
-            rels.Add(NewRelationship(entities[i], entities[(i + 5) % 12]));
-        }
-
-        AutoLayoutService.LayoutForceDirected(entities, rels, columns: 4);
-
-        // 12 件 / 4 列 = 3 行ぶんの異なる Y 値、列数以下の異なる X 値に収まること
-        entities.Select(e => e.Y).Distinct().Should().HaveCount(3);
-        entities.Select(e => e.X).Distinct().Count().Should().BeLessThanOrEqualTo(4);
-    }
 
     /// <summary>説明表示時は説明を含む表示高さを使って行間が確保されることを検証する</summary>
     [Fact(DisplayName = "LayoutGrid: 説明表示時は説明込みの高さで整列される")]

@@ -715,7 +715,7 @@ public partial class MainViewModel : ObservableObject
         ApplyLayoutWithUndo(() => AutoLayoutService.LayoutTree(Entities, Relationships), "整列(木)");
     }
 
-    /// <summary>エンティティを力学モデルで決めた配置の格子スナップで整列する（Undo 可能）</summary>
+    /// <summary>エンティティを力学モデルで配置し、リレーション線が水平/垂直に近づくよう整列する（Undo 可能）</summary>
     [RelayCommand]
     private void AutoLayoutForce()
     {
