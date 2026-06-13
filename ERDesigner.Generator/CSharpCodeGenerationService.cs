@@ -46,7 +46,8 @@ public sealed class CSharpCodeGenerationService
     /// 生成前の入力検証を行い、問題を診断リストへ追加する
     /// </summary>
     /// <remarks>
-    /// エラー: 生成対象が一つもない、エンティティが存在しない、テーブル名が空。
+    /// エラー: 生成対象が一つもない、エンティティが存在しない、テーブル名が空、
+    /// 生成対象間の依存違反（Mapper は Entity+EditModel、Repository は Entity と DataAnnotations が必要）。
     /// 警告: 複合主キー（[Key] 属性の生成が最小限になる）
     /// </remarks>
     private static void Validate(DiagramDefinition diagram, CodeGenerationOptions options, ICollection<GenerationDiagnostic> diagnostics)
@@ -54,6 +55,25 @@ public sealed class CSharpCodeGenerationService
         if (!options.GenerateEntityClasses && !options.GenerateEditModels && !options.GenerateMappers && !options.GenerateRepositories)
         {
             diagnostics.Add(Error("Entity / EditModel / Mapper / Repository のいずれも生成対象になっていません。少なくとも一つを有効にしてください。"));
+        }
+
+        // Mapper は Entity クラスと EditModel クラスの両方を参照するため、単独生成するとコンパイル不能になる
+        if (options.GenerateMappers && (!options.GenerateEntityClasses || !options.GenerateEditModels))
+        {
+            diagnostics.Add(Error("Mapper の生成には Entity クラスと EditModel クラスの両方が必要です。両方を生成対象に含めてください。"));
+        }
+
+        // Repository は Entity クラスを参照するため、Entity 生成が必須
+        if (options.GenerateRepositories && !options.GenerateEntityClasses)
+        {
+            diagnostics.Add(Error("Repository の生成には Entity クラスが必要です。Entity を生成対象に含めてください。"));
+        }
+
+        // Repository の SQL 組み立ては [Table] / [Key] / [Column] 属性をリフレクションで参照するため、
+        // DataAnnotations を無効にすると実行時に初期化例外となる。生成前にエラーとして検出する
+        if (options.GenerateRepositories && !options.IncludeDataAnnotations)
+        {
+            diagnostics.Add(Error("Repository は [Table] / [Key] / [Column] 属性を利用するため、データアノテーションの付与が必要です。データアノテーションを有効にしてください。"));
         }
 
         if (diagram.Entities.Count == 0)

@@ -712,4 +712,145 @@ public class CSharpCodeGenerationServiceTests
         result.Files[0].Content.Should().Contain("public partial class Items1Entity");
         result.Files[0].Content.Should().Contain("public partial class Items1100Entity");
     }
+
+    /// <summary>Repository をデータアノテーション無効で生成しようとするとエラーになることを検証する</summary>
+    [Fact]
+    public void Generate_RepositoryWithoutDataAnnotations_ShouldFailWithError()
+    {
+        var diagram = SingleEntityDiagram();
+        var options = new CodeGenerationOptions
+        {
+            NamespaceName = "Sample.Domain",
+            GenerateRepositories = true,
+            IncludeDataAnnotations = false,
+        };
+
+        var result = new CSharpCodeGenerationService().Generate(diagram, options);
+
+        result.HasErrors.Should().BeTrue();
+        result.Files.Should().BeEmpty();
+        result.Diagnostics.Should().Contain(diagnostic => diagnostic.Severity == GenerationDiagnosticSeverity.Error && diagnostic.Message.Contains("データアノテーション"));
+    }
+
+    /// <summary>Mapper を EditModel なしで生成しようとするとエラーになることを検証する</summary>
+    [Fact]
+    public void Generate_MapperWithoutEditModel_ShouldFailWithError()
+    {
+        var diagram = SingleEntityDiagram();
+        var options = new CodeGenerationOptions
+        {
+            NamespaceName = "Sample.Domain",
+            GenerateEntityClasses = true,
+            GenerateEditModels = false,
+            GenerateMappers = true,
+            GenerateRepositories = false,
+        };
+
+        var result = new CSharpCodeGenerationService().Generate(diagram, options);
+
+        result.HasErrors.Should().BeTrue();
+        result.Diagnostics.Should().Contain(diagnostic => diagnostic.Severity == GenerationDiagnosticSeverity.Error && diagnostic.Message.Contains("Mapper"));
+    }
+
+    /// <summary>Repository を Entity なしで生成しようとするとエラーになることを検証する</summary>
+    [Fact]
+    public void Generate_RepositoryWithoutEntity_ShouldFailWithError()
+    {
+        var diagram = SingleEntityDiagram();
+        var options = new CodeGenerationOptions
+        {
+            NamespaceName = "Sample.Domain",
+            GenerateEntityClasses = false,
+            GenerateEditModels = true,
+            GenerateMappers = false,
+            GenerateRepositories = true,
+        };
+
+        var result = new CSharpCodeGenerationService().Generate(diagram, options);
+
+        result.HasErrors.Should().BeTrue();
+        result.Diagnostics.Should().Contain(diagnostic => diagnostic.Severity == GenerationDiagnosticSeverity.Error && diagnostic.Message.Contains("Repository"));
+    }
+
+    /// <summary>多対多リレーションの警告がエンティティ数に関係なく 1 回だけ追加されることを検証する（重複解消）</summary>
+    [Fact]
+    public void Generate_ManyToManyWarning_ShouldNotBeDuplicated()
+    {
+        var left = Guid.NewGuid();
+        var right = Guid.NewGuid();
+        var diagram = new DiagramDefinition
+        {
+            Entities =
+            [
+                new EntityDefinition
+                {
+                    Id = left,
+                    TableName = "users",
+                    Columns = [new ColumnDefinition { Id = Guid.NewGuid(), Name = "user_id", DataType = "int", IsPrimaryKey = true, IsNullable = false }],
+                },
+                new EntityDefinition
+                {
+                    Id = right,
+                    TableName = "roles",
+                    Columns = [new ColumnDefinition { Id = Guid.NewGuid(), Name = "role_id", DataType = "int", IsPrimaryKey = true, IsNullable = false }],
+                },
+            ],
+            Relationships =
+            [
+                new RelationshipDefinition { Id = Guid.NewGuid(), SourceEntityId = left, TargetEntityId = right, Type = RelationshipMultiplicity.ManyToMany },
+            ],
+        };
+
+        var result = new CSharpCodeGenerationService().Generate(diagram, new CodeGenerationOptions { NamespaceName = "Sample.Domain" });
+
+        result.HasErrors.Should().BeFalse();
+        result.Diagnostics.Count(diagnostic => diagnostic.Message.Contains("多対多")).Should().Be(1);
+    }
+
+    /// <summary>NULL 許容のバイナリ列が byte[]? として生成されることを検証する</summary>
+    [Fact]
+    public void Generate_NullableBinaryColumn_ShouldUseNullableByteArray()
+    {
+        var diagram = new DiagramDefinition
+        {
+            Entities =
+            [
+                new EntityDefinition
+                {
+                    Id = Guid.NewGuid(),
+                    TableName = "files",
+                    Columns =
+                    [
+                        new ColumnDefinition { Id = Guid.NewGuid(), Name = "file_id", DataType = "int", IsPrimaryKey = true, IsNullable = false },
+                        new ColumnDefinition { Id = Guid.NewGuid(), Name = "photo", DataType = "varbinary(max)", IsNullable = true },
+                    ],
+                },
+            ],
+        };
+
+        var result = new CSharpCodeGenerationService().Generate(diagram, new CodeGenerationOptions { NamespaceName = "Sample.Domain" });
+
+        result.HasErrors.Should().BeFalse();
+        var content = result.Files[0].Content;
+        // NULL 許容バイナリは byte[]? となり、初期化子は付かない（CS8618 回避は ? 注釈による）
+        content.Should().Contain("public byte[]? Photo { get; set; }");
+        content.Should().NotContain("public byte[] Photo { get; set; } = Array.Empty<byte>();");
+        // EditModel 側でも byte[]? を確定値型とし、Base64 変換で書き戻す
+        content.Should().Contain("entity.Photo = editModel.Photo;");
+    }
+
+    /// <summary>主キー 1 列のみを持つ単純なエンティティ 1 件のダイアグラムを生成する</summary>
+    private static DiagramDefinition SingleEntityDiagram() =>
+        new()
+        {
+            Entities =
+            [
+                new EntityDefinition
+                {
+                    Id = Guid.NewGuid(),
+                    TableName = "items",
+                    Columns = [new ColumnDefinition { Id = Guid.NewGuid(), Name = "item_id", DataType = "int", IsPrimaryKey = true, IsNullable = false }],
+                },
+            ],
+        };
 }

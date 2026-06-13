@@ -11,63 +11,71 @@ internal sealed class CSharpGenerationModelBuilder
 
     /// <summary>ER 図定義とオプションから生成モデル全体を構築する</summary>
     /// <param name="diagnostics">生成中に検出した警告などを蓄積する出力先</param>
+    /// <remarks>
+    /// ナビゲーションは全エンティティ分を一度だけ解決する。以前は Entity / EditModel / Mapper の
+    /// 各構築で個別に <see cref="ResolveNavigations"/> を呼んでいたため、同一リレーションの警告が
+    /// （エンティティ数 × パス数）回重複していた。解決結果を共有して重複と再計算を防ぐ。
+    /// また生成対象として無効なクラス群は構築自体を行わない。
+    /// </remarks>
     public CSharpGenerationModel Build(DiagramDefinition diagram, CodeGenerationOptions options, ICollection<GenerationDiagnostic> diagnostics)
     {
-        var entityClasses = diagram.Entities.Select(entity => BuildEntityClass(entity, diagram, diagnostics)).ToList();
-        var editModelClasses = diagram.Entities.Select(entity => BuildEditModelClass(entity, diagram, diagnostics)).ToList();
-        var mapperClasses = diagram.Entities.Select(entity => BuildMapperClass(entity, diagram, diagnostics)).ToList();
-        var repositoryClasses = diagram
-            .Entities.Select(entity => BuildRepositoryClass(entity, diagnostics))
-            .Where(model => model is not null)
-            .Cast<CSharpRepositoryModel>()
-            .ToList();
-        var usings = BuildUsings(options).ToList();
+        var navigationsByEntity = ResolveAllNavigations(diagram, diagnostics);
 
         return new CSharpGenerationModel
         {
             NamespaceName = string.IsNullOrWhiteSpace(options.NamespaceName) ? "Generated" : options.NamespaceName.Trim(),
-            EntityClasses = options.GenerateEntityClasses ? entityClasses : [],
-            EditModelClasses = options.GenerateEditModels ? editModelClasses : [],
-            MapperClasses = options.GenerateMappers ? mapperClasses : [],
-            RepositoryClasses = options.GenerateRepositories ? repositoryClasses : [],
-            Usings = usings,
+            EntityClasses = options.GenerateEntityClasses
+                ? diagram.Entities.Select(entity => BuildEntityClass(entity, navigationsByEntity[entity.Id])).ToList()
+                : [],
+            EditModelClasses = options.GenerateEditModels
+                ? diagram.Entities.Select(entity => BuildEditModelClass(entity, navigationsByEntity[entity.Id])).ToList()
+                : [],
+            MapperClasses = options.GenerateMappers
+                ? diagram.Entities.Select(entity => BuildMapperClass(entity, navigationsByEntity[entity.Id])).ToList()
+                : [],
+            RepositoryClasses = options.GenerateRepositories
+                ? diagram
+                    .Entities.Select(entity => BuildRepositoryClass(entity, diagnostics))
+                    .Where(model => model is not null)
+                    .Cast<CSharpRepositoryModel>()
+                    .ToList()
+                : [],
+            Usings = BuildUsings(options).ToList(),
         };
     }
 
-    /// <summary>エンティティ定義からエンティティクラスの生成モデルを構築する</summary>
-    private CSharpClassModel BuildEntityClass(EntityDefinition entity, DiagramDefinition diagram, ICollection<GenerationDiagnostic> diagnostics)
+    /// <summary>エンティティ定義と解決済みナビゲーションからエンティティクラスの生成モデルを構築する</summary>
+    private CSharpClassModel BuildEntityClass(EntityDefinition entity, IReadOnlyList<NavigationInfo> navigations)
     {
         var className = _nameConverter.ToEntityClassName(entity.TableName);
         var properties = entity.Columns.Select(BuildProperty).ToList();
-        var navigations = BuildEntityNavigations(entity, diagram, diagnostics).ToList();
 
         return new CSharpClassModel
         {
             ClassName = className,
             TableName = entity.TableName,
             Properties = properties,
-            Navigations = navigations,
+            Navigations = navigations.Select(BuildEntityNavigation).ToList(),
         };
     }
 
-    /// <summary>エンティティ定義から EditModel クラスの生成モデルを構築する</summary>
-    private CSharpEditModelClassModel BuildEditModelClass(EntityDefinition entity, DiagramDefinition diagram, ICollection<GenerationDiagnostic> diagnostics)
+    /// <summary>エンティティ定義と解決済みナビゲーションから EditModel クラスの生成モデルを構築する</summary>
+    private CSharpEditModelClassModel BuildEditModelClass(EntityDefinition entity, IReadOnlyList<NavigationInfo> navigations)
     {
         var className = _nameConverter.ToEditModelClassName(entity.TableName);
         var properties = entity.Columns.Select(BuildEditModelProperty).ToList();
-        var navigations = BuildEditModelNavigations(entity, diagram, diagnostics).ToList();
 
         return new CSharpEditModelClassModel
         {
             ClassName = className,
             TableName = entity.TableName,
             Properties = properties,
-            Navigations = navigations,
+            Navigations = navigations.Select(BuildEditModelNavigation).ToList(),
         };
     }
 
-    /// <summary>エンティティ定義から Entity ↔ EditModel 変換 Mapper の生成モデルを構築する</summary>
-    private CSharpMapperModel BuildMapperClass(EntityDefinition entity, DiagramDefinition diagram, ICollection<GenerationDiagnostic> diagnostics)
+    /// <summary>エンティティ定義と解決済みナビゲーションから Entity ↔ EditModel 変換 Mapper の生成モデルを構築する</summary>
+    private CSharpMapperModel BuildMapperClass(EntityDefinition entity, IReadOnlyList<NavigationInfo> navigations)
     {
         var entityClassName = _nameConverter.ToEntityClassName(entity.TableName);
         var editModelClassName = _nameConverter.ToEditModelClassName(entity.TableName);
@@ -91,15 +99,13 @@ internal sealed class CSharpGenerationModelBuilder
             })
             .ToList();
 
-        var navigations = BuildMapperNavigations(entity, diagram, diagnostics).ToList();
-
         return new CSharpMapperModel
         {
             ClassName = mapperClassName,
             EntityClassName = entityClassName,
             EditModelClassName = editModelClassName,
             ScalarProperties = scalarProperties,
-            NavigationProperties = navigations,
+            NavigationProperties = navigations.Select(BuildMapperNavigation).ToList(),
         };
     }
 
@@ -135,12 +141,9 @@ internal sealed class CSharpGenerationModelBuilder
         var typeInfo = _typeMapper.Map(column.DataType);
         var typeName = typeInfo.TypeName;
 
-        // NULL 許容列は型へ ? を付与する 値型・参照型を区別し、byte[] は配列のため対象外とする
-        if (column.IsNullable && !typeInfo.IsReferenceType)
-        {
-            typeName += "?";
-        }
-        else if (column.IsNullable && typeInfo.IsReferenceType && typeName != "byte[]")
+        // NULL 許容列は型へ ? を付与する。値型は Nullable<T>、参照型（string / byte[]）は nullable 注釈となる。
+        // 非 NULL の string / byte[] は ? を付けず、後段の初期化子で空既定値を与えて CS8618 を回避する
+        if (column.IsNullable)
         {
             typeName += "?";
         }
@@ -270,67 +273,56 @@ internal sealed class CSharpGenerationModelBuilder
         return $"entity.{propertyName}.ToString() ?? string.Empty";
     }
 
-    /// <summary>エンティティのナビゲーションプロパティ生成モデルを構築する</summary>
-    private IEnumerable<CSharpNavigationModel> BuildEntityNavigations(EntityDefinition entity, DiagramDefinition diagram, ICollection<GenerationDiagnostic> diagnostics)
+    /// <summary>解決済みナビゲーション情報からエンティティのナビゲーションプロパティ生成モデルを構築する</summary>
+    private CSharpNavigationModel BuildEntityNavigation(NavigationInfo nav)
     {
-        foreach (var nav in ResolveNavigations(entity, diagram, diagnostics))
+        var targetEntityTypeName = _nameConverter.ToEntityClassName(nav.TargetTableName);
+        return new CSharpNavigationModel
         {
-            var targetEntityTypeName = _nameConverter.ToEntityClassName(nav.TargetTableName);
-            yield return new CSharpNavigationModel
-            {
-                PropertyName = nav.PropertyName,
-                TypeName = targetEntityTypeName,
-                IsCollection = nav.IsCollection,
-                IsNullable = nav.IsNullable,
-                IsParentReference = nav.IsParentReference,
-                DisplayTypeName = nav.IsCollection ? $"ICollection<{targetEntityTypeName}>" : (nav.IsNullable ? targetEntityTypeName + "?" : targetEntityTypeName),
-                Initializer = nav.IsCollection ? $" = new List<{targetEntityTypeName}>();" : (nav.IsNullable ? string.Empty : " = null!;"),
-                PrincipalTableName = nav.PrincipalTableName,
-                PrincipalColumnName = nav.PrincipalColumnName,
-                DependentTableName = nav.DependentTableName,
-                DependentColumnName = nav.DependentColumnName,
-            };
-        }
+            PropertyName = nav.PropertyName,
+            TypeName = targetEntityTypeName,
+            IsCollection = nav.IsCollection,
+            IsNullable = nav.IsNullable,
+            IsParentReference = nav.IsParentReference,
+            DisplayTypeName = nav.IsCollection ? $"ICollection<{targetEntityTypeName}>" : (nav.IsNullable ? targetEntityTypeName + "?" : targetEntityTypeName),
+            Initializer = nav.IsCollection ? $" = new List<{targetEntityTypeName}>();" : (nav.IsNullable ? string.Empty : " = null!;"),
+            PrincipalTableName = nav.PrincipalTableName,
+            PrincipalColumnName = nav.PrincipalColumnName,
+            DependentTableName = nav.DependentTableName,
+            DependentColumnName = nav.DependentColumnName,
+        };
     }
 
-    /// <summary>EditModel のナビゲーションプロパティ生成モデルを構築する</summary>
-    private IEnumerable<CSharpNavigationModel> BuildEditModelNavigations(EntityDefinition entity, DiagramDefinition diagram, ICollection<GenerationDiagnostic> diagnostics)
+    /// <summary>解決済みナビゲーション情報から EditModel のナビゲーションプロパティ生成モデルを構築する</summary>
+    private CSharpNavigationModel BuildEditModelNavigation(NavigationInfo nav)
     {
-        foreach (var nav in ResolveNavigations(entity, diagram, diagnostics))
+        var targetEditModelTypeName = _nameConverter.ToEditModelClassName(nav.TargetTableName);
+        return new CSharpNavigationModel
         {
-            var targetEditModelTypeName = _nameConverter.ToEditModelClassName(nav.TargetTableName);
-            yield return new CSharpNavigationModel
-            {
-                PropertyName = nav.PropertyName,
-                TypeName = targetEditModelTypeName,
-                IsCollection = nav.IsCollection,
-                IsNullable = nav.IsNullable,
-                IsParentReference = nav.IsParentReference,
-                DisplayTypeName = nav.IsCollection ? $"ICollection<{targetEditModelTypeName}>" : (nav.IsNullable ? targetEditModelTypeName + "?" : targetEditModelTypeName),
-                Initializer = nav.IsCollection ? $" = new List<{targetEditModelTypeName}>();" : (nav.IsNullable ? string.Empty : " = null!;"),
-                PrincipalTableName = nav.PrincipalTableName,
-                PrincipalColumnName = nav.PrincipalColumnName,
-                DependentTableName = nav.DependentTableName,
-                DependentColumnName = nav.DependentColumnName,
-            };
-        }
+            PropertyName = nav.PropertyName,
+            TypeName = targetEditModelTypeName,
+            IsCollection = nav.IsCollection,
+            IsNullable = nav.IsNullable,
+            IsParentReference = nav.IsParentReference,
+            DisplayTypeName = nav.IsCollection ? $"ICollection<{targetEditModelTypeName}>" : (nav.IsNullable ? targetEditModelTypeName + "?" : targetEditModelTypeName),
+            Initializer = nav.IsCollection ? $" = new List<{targetEditModelTypeName}>();" : (nav.IsNullable ? string.Empty : " = null!;"),
+            PrincipalTableName = nav.PrincipalTableName,
+            PrincipalColumnName = nav.PrincipalColumnName,
+            DependentTableName = nav.DependentTableName,
+            DependentColumnName = nav.DependentColumnName,
+        };
     }
 
-    /// <summary>Mapper が扱うナビゲーションプロパティ生成モデルを構築する</summary>
-    private IEnumerable<CSharpMapperNavigationModel> BuildMapperNavigations(EntityDefinition entity, DiagramDefinition diagram, ICollection<GenerationDiagnostic> diagnostics)
-    {
-        foreach (var nav in ResolveNavigations(entity, diagram, diagnostics))
+    /// <summary>解決済みナビゲーション情報から Mapper が扱うナビゲーションプロパティ生成モデルを構築する</summary>
+    private CSharpMapperNavigationModel BuildMapperNavigation(NavigationInfo nav) =>
+        new()
         {
-            yield return new CSharpMapperNavigationModel
-            {
-                PropertyName = nav.PropertyName,
-                EditModelTypeName = _nameConverter.ToEditModelClassName(nav.TargetTableName),
-                IsCollection = nav.IsCollection,
-                PrincipalColumnName = nav.PrincipalColumnName,
-                DependentColumnName = nav.DependentColumnName,
-            };
-        }
-    }
+            PropertyName = nav.PropertyName,
+            EditModelTypeName = _nameConverter.ToEditModelClassName(nav.TargetTableName),
+            IsCollection = nav.IsCollection,
+            PrincipalColumnName = nav.PrincipalColumnName,
+            DependentColumnName = nav.DependentColumnName,
+        };
 
     /// <summary>ナビゲーション解決の中間結果（生成側の表現に依存しない情報）</summary>
     private sealed record NavigationInfo(
@@ -345,10 +337,15 @@ internal sealed class CSharpGenerationModelBuilder
         string DependentColumnName
     );
 
-    /// <summary>指定エンティティに関わるリレーションから、両端それぞれのナビゲーション情報を解決する</summary>
-    /// <remarks>多対多や参照先・キーが解決できないリレーションは警告を出して生成対象外とする</remarks>
-    private IEnumerable<NavigationInfo> ResolveNavigations(EntityDefinition entity, DiagramDefinition diagram, ICollection<GenerationDiagnostic> diagnostics)
+    /// <summary>全リレーションを一度だけ走査し、エンティティ ID ごとのナビゲーション情報を解決する</summary>
+    /// <remarks>
+    /// 多対多や参照先・キーが解決できないリレーションは警告を出して生成対象外とする。
+    /// 警告はリレーション単位で 1 回だけ追加されるため、従来のような重複は発生しない。
+    /// </remarks>
+    private Dictionary<Guid, List<NavigationInfo>> ResolveAllNavigations(DiagramDefinition diagram, ICollection<GenerationDiagnostic> diagnostics)
     {
+        var navigationsByEntity = diagram.Entities.ToDictionary(entity => entity.Id, _ => new List<NavigationInfo>());
+
         foreach (var relationship in diagram.Relationships)
         {
             // 多対多は中間テーブルを介する設計のため C# 生成では直接ナビゲーションを作らない
@@ -379,25 +376,26 @@ internal sealed class CSharpGenerationModelBuilder
                 continue;
             }
 
-            // source 側は子へのナビゲーション（1 対多なら collection）を生成する
-            if (entity.Id == source.Id)
+            var isCollection = relationship.Type == RelationshipMultiplicity.OneToMany;
+
+            // source 側（親）は子へのナビゲーション（1 対多なら collection）を持つ
+            navigationsByEntity[source.Id].Add(new NavigationInfo(
+                PropertyName: _nameConverter.ToNavigationName(target.TableName, collection: isCollection),
+                TargetTableName: target.TableName,
+                IsCollection: isCollection,
+                IsNullable: false,
+                IsParentReference: false,
+                PrincipalTableName: source.TableName,
+                PrincipalColumnName: principalColumn.Name,
+                DependentTableName: target.TableName,
+                DependentColumnName: dependentColumn.Name
+            ));
+
+            // target 側（子）は親への単一参照ナビゲーションを持つ。
+            // 自己参照（source == target）の場合は従来どおり子側ナビゲーションのみとし、重複を避ける
+            if (target.Id != source.Id)
             {
-                yield return new NavigationInfo(
-                    PropertyName: _nameConverter.ToNavigationName(target.TableName, collection: relationship.Type == RelationshipMultiplicity.OneToMany),
-                    TargetTableName: target.TableName,
-                    IsCollection: relationship.Type == RelationshipMultiplicity.OneToMany,
-                    IsNullable: false,
-                    IsParentReference: false,
-                    PrincipalTableName: source.TableName,
-                    PrincipalColumnName: principalColumn.Name,
-                    DependentTableName: target.TableName,
-                    DependentColumnName: dependentColumn.Name
-                );
-            }
-            // target 側は親への単一参照ナビゲーションを生成する
-            else if (entity.Id == target.Id)
-            {
-                yield return new NavigationInfo(
+                navigationsByEntity[target.Id].Add(new NavigationInfo(
                     PropertyName: _nameConverter.ToNavigationName(source.TableName, collection: false),
                     TargetTableName: source.TableName,
                     IsCollection: false,
@@ -407,9 +405,11 @@ internal sealed class CSharpGenerationModelBuilder
                     PrincipalColumnName: principalColumn.Name,
                     DependentTableName: target.TableName,
                     DependentColumnName: dependentColumn.Name
-                );
+                ));
             }
         }
+
+        return navigationsByEntity;
     }
 
     /// <summary>生成オプションに応じて必要な using 名前空間の集合を構築する</summary>
