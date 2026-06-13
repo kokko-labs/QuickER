@@ -614,22 +614,14 @@ internal sealed class ScribanCSharpRenderer
             ["emit_nav_ref_attr"] = emitNavRefAttr,
         };
 
-        var context = new TemplateContext { LoopLimit = CalculateLoopLimit(model) };
+        // テンプレートは本ライブラリ内に固定で持つ信頼済みのものであり、ループ回数・出力量は ER 図の規模に
+        // 応じて正当に増減する。Scriban 既定の上限のままだと大規模スキーマで出力が無言で打ち切られるため、
+        // 関連する上限をすべて無効化（0 = 無制限）して全件を確実に出力する。
+        //   - LoopLimit: ループ反復回数の上限（既定 1000）
+        //   - LimitToString: レンダリング出力長の上限（既定 1MB = 1048576 文字。超過分は "..." で切り捨て）
+        var context = new TemplateContext { LoopLimit = 0, LimitToString = 0 };
 
         context.PushGlobal(scriptObject);
         return template.Render(context).ReplaceLineEndings(Environment.NewLine).TrimEnd() + Environment.NewLine;
-    }
-
-    /// <summary>大量エンティティでも Scriban のループ上限に達しないよう、規模に応じた動的上限を計算する</summary>
-    private static int CalculateLoopLimit(CSharpGenerationModel model)
-    {
-        var estimatedIterations =
-            model.Usings.Count
-            + model.EntityClasses.Sum(item => 1 + item.Properties.Count + item.Navigations.Count)
-            + model.EditModelClasses.Sum(item => 1 + item.Properties.Count + item.Navigations.Count)
-            + model.MapperClasses.Sum(item => 1 + item.ScalarProperties.Count + item.NavigationProperties.Count)
-            + model.RepositoryClasses.Count * 2;
-
-        return Math.Max(10_000, estimatedIterations * 4);
     }
 }

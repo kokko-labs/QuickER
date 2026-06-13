@@ -839,6 +839,39 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("entity.Photo = editModel.Photo;");
     }
 
+    /// <summary>出力が 1MB（Scriban 既定の LimitToString）を超える大規模スキーマでも末尾まで生成され、切り捨てられないことを検証する</summary>
+    [Fact]
+    public void Generate_LargeSchemaExceeding1MB_ShouldNotTruncateOutput()
+    {
+        // 全生成対象を有効にした 200 エンティティで出力は 1MB を大きく超える（Scriban 既定上限超過の回帰確認）
+        var entities = Enumerable
+            .Range(1, 200)
+            .Select(index => new EntityDefinition
+            {
+                Id = Guid.NewGuid(),
+                TableName = $"table_{index}",
+                Columns =
+                [
+                    new ColumnDefinition { Id = Guid.NewGuid(), Name = "id", DataType = "int", IsPrimaryKey = true, IsNullable = false },
+                    new ColumnDefinition { Id = Guid.NewGuid(), Name = "name", DataType = "nvarchar(100)", IsNullable = false },
+                    new ColumnDefinition { Id = Guid.NewGuid(), Name = "amount", DataType = "decimal", IsNullable = true },
+                    new ColumnDefinition { Id = Guid.NewGuid(), Name = "created_at", DataType = "datetime2", IsNullable = false },
+                ],
+            })
+            .ToList();
+
+        var result = new CSharpCodeGenerationService().Generate(new DiagramDefinition { Entities = entities }, new CodeGenerationOptions { NamespaceName = "Sample.Domain" });
+
+        result.HasErrors.Should().BeFalse();
+        var content = result.Files[0].Content;
+        content.Length.Should().BeGreaterThan(1_048_576);
+        // 切り捨て時に付与される省略記号で終わっていないこと
+        content.TrimEnd().Should().NotEndWith("...");
+        // 最後のエンティティ・リポジトリまで出力されていること
+        content.Should().Contain("public partial class Table200Entity");
+        content.Should().Contain("public sealed class Table200Repository(ISqlConnectionFactory connectionFactory)");
+    }
+
     /// <summary>主キー 1 列のみを持つ単純なエンティティ 1 件のダイアグラムを生成する</summary>
     private static DiagramDefinition SingleEntityDiagram() =>
         new()
