@@ -131,11 +131,14 @@ public partial class AiChatDialogViewModel : ObservableObject
 
     private CodexAuthState _codexAuth = new(false, true, CodexAuthMode.None, "未接続");
 
+    /// <summary>Codex 接続・認証状態の解決中か（解決までログインパネルのちらつきを抑止する）</summary>
+    private bool _codexConnecting;
+
     /// <summary>Codex 認証セクションを表示するか（openai プロバイダー時のみ）</summary>
     public bool ShowCodexAuthSection => _codexEngine?.IsOpenAiProvider ?? false;
 
-    /// <summary>Codex ログインパネルを表示するか（openai・認証必要・未ログイン時）</summary>
-    public bool ShowCodexLoginPanel => (_codexEngine?.IsOpenAiProvider ?? false) && _codexAuth.RequiresOpenAiAuth && _codexAuth.AuthMode == CodexAuthMode.None;
+    /// <summary>Codex ログインパネルを表示するか（openai・認証必要・未ログイン、かつ接続解決済みのときのみ）</summary>
+    public bool ShowCodexLoginPanel => !_codexConnecting && (_codexEngine?.IsOpenAiProvider ?? false) && _codexAuth.RequiresOpenAiAuth && _codexAuth.AuthMode == CodexAuthMode.None;
 
     /// <summary>Codex ログアウト可能か</summary>
     public bool CanCodexLogout => _codexAuth.IsStarted && (_codexAuth.AuthMode != CodexAuthMode.None || !_codexAuth.RequiresOpenAiAuth);
@@ -338,7 +341,7 @@ public partial class AiChatDialogViewModel : ObservableObject
         }
     }
 
-    /// <summary>Codex 接続が未確立なら接続を試みる</summary>
+    /// <summary>Codex 接続が未確立なら接続を試みる（解決中はログインパネルのちらつきを抑止する）</summary>
     private async Task EnsureCodexConnectedAsync()
     {
         if (_codexEngine is null)
@@ -348,7 +351,23 @@ public partial class AiChatDialogViewModel : ObservableObject
 
         _codexEngine.ModelProvider = CodexModelProvider;
         _codexEngine.Model = CodexModel;
-        await _codexEngine.InitializeAsync().ConfigureAwait(true);
+        SetCodexConnecting(true);
+
+        try
+        {
+            await _codexEngine.InitializeAsync().ConfigureAwait(true);
+        }
+        finally
+        {
+            SetCodexConnecting(false);
+        }
+    }
+
+    /// <summary>Codex 接続解決中フラグを更新し、ログインパネル表示を再評価する</summary>
+    private void SetCodexConnecting(bool value)
+    {
+        _codexConnecting = value;
+        OnPropertyChanged(nameof(ShowCodexLoginPanel));
     }
 
     // ── 設定変更フック ──
