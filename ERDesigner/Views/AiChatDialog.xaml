@@ -6,47 +6,192 @@
   xmlns:chat="clr-namespace:ERDesigner.Services.Chat"
   xmlns:local="clr-namespace:ERDesigner.Views"
   Title="AI チャット"
-  Width="820"
-  Height="700"
-  MinWidth="620"
-  MinHeight="500"
+  Width="860"
+  Height="720"
+  MinWidth="640"
+  MinHeight="520"
   ResizeMode="CanResize"
   WindowStartupLocation="CenterOwner"
   FontFamily="Segoe UI, Yu Gothic UI, Meiryo"
   FontSize="13"
+  Background="#F5F7FA"
 >
   <Window.Resources>
     <conv:BoolToVisibilityConverter x:Key="BoolToVisibilityConverter" />
 
+    <!-- ── 配色 ── -->
+    <SolidColorBrush x:Key="Accent" Color="#1A73E8" />
+    <SolidColorBrush x:Key="AccentHover" Color="#1769D6" />
+    <SolidColorBrush x:Key="CardBg" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="Divider" Color="#E5E7EB" />
+    <SolidColorBrush x:Key="HeaderText" Color="#374151" />
+    <SolidColorBrush x:Key="MutedText" Color="#6B7280" />
+    <SolidColorBrush x:Key="FieldBorder" Color="#D1D5DB" />
+
+    <!-- ── 主要ボタン（アクセント） ── -->
+    <Style x:Key="PrimaryButton" TargetType="Button">
+      <Setter Property="Foreground" Value="White" />
+      <Setter Property="Background" Value="{StaticResource Accent}" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="Padding" Value="16,8" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="8" Padding="{TemplateBinding Padding}">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="{StaticResource AccentHover}" />
+              </Trigger>
+              <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Opacity" Value="0.4" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <!-- ── 副ボタン（白・枠線） ── -->
+    <Style x:Key="SecondaryButton" TargetType="Button">
+      <Setter Property="Foreground" Value="{StaticResource HeaderText}" />
+      <Setter Property="Background" Value="White" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="Padding" Value="12,6" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="Bd" Background="{TemplateBinding Background}" BorderBrush="{StaticResource FieldBorder}" BorderThickness="1" CornerRadius="8" Padding="{TemplateBinding Padding}">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="#EEF2F7" />
+              </Trigger>
+              <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Opacity" Value="0.4" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <!-- ── 入力欄（角丸・フォーカスでアクセント） ── -->
+    <Style x:Key="ChatInputBox" TargetType="TextBox">
+      <Setter Property="Background" Value="White" />
+      <Setter Property="BorderBrush" Value="{StaticResource FieldBorder}" />
+      <Setter Property="Foreground" Value="#1F2937" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="TextBox">
+            <Border x:Name="Bd" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="12" Padding="12,9">
+              <ScrollViewer x:Name="PART_ContentHost" VerticalScrollBarVisibility="Auto" />
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource Accent}" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <!-- ── セグメント風タブ ── -->
+    <Style TargetType="TabItem">
+      <Setter Property="Foreground" Value="{StaticResource MutedText}" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="TabItem">
+            <Border x:Name="Bd" Background="Transparent" CornerRadius="8" Padding="16,8" Margin="0,0,6,0">
+              <ContentPresenter ContentSource="Header" HorizontalAlignment="Center" VerticalAlignment="Center" />
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsSelected" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="#E8F0FE" />
+                <Setter Property="Foreground" Value="{StaticResource Accent}" />
+                <Setter Property="FontWeight" Value="SemiBold" />
+              </Trigger>
+              <MultiTrigger>
+                <MultiTrigger.Conditions>
+                  <Condition Property="IsSelected" Value="False" />
+                  <Condition Property="IsMouseOver" Value="True" />
+                </MultiTrigger.Conditions>
+                <Setter TargetName="Bd" Property="Background" Value="#EEF2F7" />
+              </MultiTrigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <Style x:Key="SettingsTabs" TargetType="TabControl">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="TabControl">
+            <Grid>
+              <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+              </Grid.RowDefinitions>
+              <TabPanel Grid.Row="0" IsItemsHost="True" Margin="0,0,0,8" HorizontalAlignment="Left" />
+              <Border Grid.Row="1" Background="{StaticResource CardBg}" BorderBrush="{StaticResource Divider}" BorderThickness="1" CornerRadius="10">
+                <ContentPresenter ContentSource="SelectedContent" />
+              </Border>
+            </Grid>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <Style x:Key="FieldLabel" TargetType="TextBlock">
+      <Setter Property="Foreground" Value="{StaticResource MutedText}" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="Margin" Value="0,0,8,0" />
+    </Style>
+
+    <!-- ── チャット吹き出しテンプレート ── -->
     <DataTemplate x:Key="UserMessageTemplate" DataType="{x:Type chat:ErChatMessage}">
-      <Border Margin="60,4,4,4" Padding="10,6" Background="#DCF8C6" CornerRadius="10" HorizontalAlignment="Right">
-        <TextBox Text="{Binding Content, Mode=OneWay}" TextWrapping="Wrap" IsReadOnly="True" BorderThickness="0" Background="Transparent" FontSize="13" />
+      <Border Margin="80,5,2,5" Padding="13,9" Background="{StaticResource Accent}" CornerRadius="16,16,4,16" HorizontalAlignment="Right" MaxWidth="600">
+        <TextBox Text="{Binding Content, Mode=OneWay}" TextWrapping="Wrap" IsReadOnly="True" BorderThickness="0" Background="Transparent" Foreground="White" FontSize="13" />
       </Border>
     </DataTemplate>
 
     <DataTemplate x:Key="AssistantMessageTemplate" DataType="{x:Type chat:ErChatMessage}">
-      <Border Margin="4,4,60,4" Padding="10,6" Background="#DBEAFE" CornerRadius="10" HorizontalAlignment="Left">
-        <TextBox Text="{Binding Content, Mode=OneWay}" TextWrapping="Wrap" IsReadOnly="True" BorderThickness="0" Background="Transparent" Foreground="#1E3A5F" FontSize="13" />
+      <Border Margin="2,5,80,5" Padding="13,9" Background="{StaticResource CardBg}" BorderBrush="{StaticResource Divider}" BorderThickness="1" CornerRadius="16,16,16,4" HorizontalAlignment="Left" MaxWidth="600">
+        <TextBox Text="{Binding Content, Mode=OneWay}" TextWrapping="Wrap" IsReadOnly="True" BorderThickness="0" Background="Transparent" Foreground="#1F2937" FontSize="13" />
       </Border>
     </DataTemplate>
 
     <DataTemplate x:Key="SystemMessageTemplate" DataType="{x:Type chat:ErChatMessage}">
-      <Border Margin="4,2" Padding="8,4" Background="#FFF9C4" CornerRadius="6" HorizontalAlignment="Stretch">
-        <TextBox Text="{Binding Content, Mode=OneWay}" TextWrapping="Wrap" IsReadOnly="True" BorderThickness="0" Background="Transparent" Foreground="#795548" FontSize="12" FontStyle="Italic" />
+      <Border Margin="40,6" Padding="12,5" Background="#EEF2F7" CornerRadius="12" HorizontalAlignment="Center" MaxWidth="640">
+        <TextBox Text="{Binding Content, Mode=OneWay}" TextWrapping="Wrap" IsReadOnly="True" BorderThickness="0" Background="Transparent" Foreground="{StaticResource MutedText}" FontSize="12" TextAlignment="Center" />
       </Border>
     </DataTemplate>
 
     <DataTemplate x:Key="ToolCallMessageTemplate" DataType="{x:Type chat:ErChatMessage}">
-      <Border Margin="4,2" CornerRadius="6" BorderBrush="#B0BEC5" BorderThickness="1">
-        <Expander IsExpanded="{Binding IsExpanded}" Header="AI 作業内容" Background="#ECEFF1">
+      <Border Margin="2,5,80,5" CornerRadius="10" Background="#F8FAFC" BorderBrush="{StaticResource Divider}" BorderThickness="1" HorizontalAlignment="Left" MaxWidth="600">
+        <Expander IsExpanded="{Binding IsExpanded}" Padding="10,4" Foreground="{StaticResource MutedText}">
+          <Expander.Header>
+            <StackPanel Orientation="Horizontal">
+              <TextBlock Text="🛠" FontSize="13" Margin="0,0,6,0" />
+              <TextBlock Text="AI 作業内容" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center" />
+            </StackPanel>
+          </Expander.Header>
           <TextBox
-            Margin="4,4,4,8"
+            Margin="2,4,2,8"
             Text="{Binding Content, Mode=OneWay}"
             TextWrapping="Wrap"
             IsReadOnly="True"
             BorderThickness="0"
             Background="Transparent"
-            Foreground="#37474F"
+            Foreground="#475569"
             FontSize="12"
             FontFamily="Consolas, Courier New"
           />
@@ -63,18 +208,17 @@
     />
   </Window.Resources>
 
-  <Grid Margin="8">
+  <Grid Margin="16">
     <Grid.RowDefinitions>
       <RowDefinition Height="Auto" />
       <RowDefinition Height="*" />
       <RowDefinition Height="Auto" />
     </Grid.RowDefinitions>
 
-    <!-- ── 上部: 接続方式タブ ── -->
-    <TabControl x:Name="BackendTabs" Grid.Row="0" SelectionChanged="BackendTabs_SelectionChanged">
-      <!-- API キー接続タブ -->
+    <!-- ── 上部: 接続方式タブ + 設定カード ── -->
+    <TabControl x:Name="BackendTabs" Grid.Row="0" Style="{StaticResource SettingsTabs}" SelectionChanged="BackendTabs_SelectionChanged">
       <TabItem Header="API キー接続">
-        <StackPanel Margin="10,8">
+        <StackPanel Margin="16,14">
           <Grid>
             <Grid.ColumnDefinitions>
               <ColumnDefinition Width="Auto" />
@@ -82,37 +226,36 @@
               <ColumnDefinition Width="Auto" />
               <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
-            <TextBlock Grid.Column="0" Margin="0,0,6,0" VerticalAlignment="Center" Text="プロバイダ" />
-            <ComboBox Grid.Column="1" Margin="0,0,16,0" ItemsSource="{Binding ApiProviders}" SelectedItem="{Binding ApiProvider}" />
-            <TextBlock Grid.Column="2" Margin="0,0,6,0" VerticalAlignment="Center" Text="モデル名" />
-            <ComboBox Grid.Column="3" IsEditable="True" Text="{Binding ApiModel, UpdateSourceTrigger=PropertyChanged}" ItemsSource="{Binding ApiModelCandidates}" />
+            <TextBlock Grid.Column="0" Style="{StaticResource FieldLabel}" Text="プロバイダ" />
+            <ComboBox Grid.Column="1" Margin="0,0,16,0" Padding="6,4" ItemsSource="{Binding ApiProviders}" SelectedItem="{Binding ApiProvider}" />
+            <TextBlock Grid.Column="2" Style="{StaticResource FieldLabel}" Text="モデル名" />
+            <ComboBox Grid.Column="3" Padding="6,4" IsEditable="True" Text="{Binding ApiModel, UpdateSourceTrigger=PropertyChanged}" ItemsSource="{Binding ApiModelCandidates}" />
           </Grid>
 
-          <Grid Margin="0,8,0,0" Visibility="{Binding ShowApiKey, Converter={StaticResource BoolToVisibilityConverter}}">
+          <Grid Margin="0,12,0,0" Visibility="{Binding ShowApiKey, Converter={StaticResource BoolToVisibilityConverter}}">
             <Grid.ColumnDefinitions>
               <ColumnDefinition Width="Auto" />
               <ColumnDefinition Width="*" />
               <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
-            <TextBlock Grid.Column="0" Margin="0,0,6,0" VerticalAlignment="Center" Text="API キー" />
-            <PasswordBox x:Name="ApiKeyBox" Grid.Column="1" Margin="0,0,8,0" ToolTip="OpenAI API キー（sk-...）" PasswordChanged="ApiKeyBox_PasswordChanged" />
+            <TextBlock Grid.Column="0" Style="{StaticResource FieldLabel}" Text="API キー" />
+            <PasswordBox x:Name="ApiKeyBox" Grid.Column="1" Padding="4,5" Margin="0,0,8,0" ToolTip="OpenAI API キー（sk-...）" PasswordChanged="ApiKeyBox_PasswordChanged" />
             <CheckBox Grid.Column="2" VerticalAlignment="Center" Content="保存" IsChecked="{Binding SaveApiKey}" />
           </Grid>
 
-          <Grid Margin="0,8,0,0" Visibility="{Binding ShowEndpoint, Converter={StaticResource BoolToVisibilityConverter}}">
+          <Grid Margin="0,12,0,0" Visibility="{Binding ShowEndpoint, Converter={StaticResource BoolToVisibilityConverter}}">
             <Grid.ColumnDefinitions>
               <ColumnDefinition Width="Auto" />
               <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
-            <TextBlock Grid.Column="0" Margin="0,0,6,0" VerticalAlignment="Center" Text="エンドポイント" />
-            <TextBox Grid.Column="1" Text="{Binding EndpointOverride, UpdateSourceTrigger=PropertyChanged}" ToolTip="OpenAI 互換エンドポイント（Ollama 等）" />
+            <TextBlock Grid.Column="0" Style="{StaticResource FieldLabel}" Text="エンドポイント" />
+            <TextBox Grid.Column="1" Padding="6,4" Text="{Binding EndpointOverride, UpdateSourceTrigger=PropertyChanged}" ToolTip="OpenAI 互換エンドポイント（Ollama 等）" />
           </Grid>
         </StackPanel>
       </TabItem>
 
-      <!-- Codex 接続タブ -->
       <TabItem Header="Codex 接続">
-        <StackPanel Margin="10,8">
+        <StackPanel Margin="16,14">
           <Grid>
             <Grid.ColumnDefinitions>
               <ColumnDefinition Width="Auto" />
@@ -120,34 +263,36 @@
               <ColumnDefinition Width="Auto" />
               <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
-            <TextBlock Grid.Column="0" Margin="0,0,6,0" VerticalAlignment="Center" Text="モデルプロバイダー" />
-            <ComboBox Grid.Column="1" Margin="0,0,16,0" IsEditable="True" Text="{Binding CodexModelProvider, UpdateSourceTrigger=PropertyChanged}" ItemsSource="{Binding CodexModelProviderCandidates}" />
-            <TextBlock Grid.Column="2" Margin="0,0,6,0" VerticalAlignment="Center" Text="モデル名" />
-            <ComboBox Grid.Column="3" IsEditable="True" Text="{Binding CodexModel, UpdateSourceTrigger=PropertyChanged}" ItemsSource="{Binding CodexModelCandidates}" />
+            <TextBlock Grid.Column="0" Style="{StaticResource FieldLabel}" Text="モデルプロバイダー" />
+            <ComboBox Grid.Column="1" Margin="0,0,16,0" Padding="6,4" IsEditable="True" Text="{Binding CodexModelProvider, UpdateSourceTrigger=PropertyChanged}" ItemsSource="{Binding CodexModelProviderCandidates}" />
+            <TextBlock Grid.Column="2" Style="{StaticResource FieldLabel}" Text="モデル名" />
+            <ComboBox Grid.Column="3" Padding="6,4" IsEditable="True" Text="{Binding CodexModel, UpdateSourceTrigger=PropertyChanged}" ItemsSource="{Binding CodexModelCandidates}" />
           </Grid>
 
           <Border
-            Margin="0,8,0,0"
-            Padding="10,8"
-            Background="#F0F4FF"
-            CornerRadius="6"
-            BorderBrush="#C7D2FE"
+            Margin="0,12,0,0"
+            Padding="12,10"
+            Background="#F8FAFC"
+            CornerRadius="8"
+            BorderBrush="{StaticResource Divider}"
             BorderThickness="1"
             Visibility="{Binding ShowCodexAuthSection, Converter={StaticResource BoolToVisibilityConverter}}"
           >
             <StackPanel>
               <Grid>
                 <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="Auto" />
                   <ColumnDefinition Width="*" />
                   <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
-                <TextBlock VerticalAlignment="Center" FontWeight="SemiBold" Text="{Binding CodexAccountSummary}" TextWrapping="Wrap" />
-                <Button Grid.Column="1" Width="80" Content="ログアウト" Command="{Binding CodexLogoutCommand}" IsEnabled="{Binding CanCodexLogout}" />
+                <Ellipse Grid.Column="0" Width="8" Height="8" Margin="0,0,8,0" VerticalAlignment="Center" Fill="{StaticResource Accent}" />
+                <TextBlock Grid.Column="1" VerticalAlignment="Center" FontWeight="SemiBold" Foreground="{StaticResource HeaderText}" Text="{Binding CodexAccountSummary}" TextWrapping="Wrap" />
+                <Button Grid.Column="2" Style="{StaticResource SecondaryButton}" Content="ログアウト" Command="{Binding CodexLogoutCommand}" IsEnabled="{Binding CanCodexLogout}" />
               </Grid>
 
-              <StackPanel Margin="0,8,0,0" Visibility="{Binding ShowCodexLoginPanel, Converter={StaticResource BoolToVisibilityConverter}}">
-                <TextBlock Foreground="#555" TextWrapping="Wrap" Text="ChatGPT アカウントでログインしてください。API キーで利用する場合は「API キー接続」タブを使用します。" />
-                <Button Margin="0,6,0,0" HorizontalAlignment="Left" Width="200" Content="ChatGPT ブラウザでログイン" Command="{Binding CodexStartChatGptLoginCommand}" />
+              <StackPanel Margin="16,10,0,0" Visibility="{Binding ShowCodexLoginPanel, Converter={StaticResource BoolToVisibilityConverter}}">
+                <TextBlock Foreground="{StaticResource MutedText}" TextWrapping="Wrap" Text="ChatGPT アカウントでログインしてください。API キーで利用する場合は「API キー接続」タブを使用します。" />
+                <Button Margin="0,8,0,0" HorizontalAlignment="Left" Style="{StaticResource PrimaryButton}" Content="ChatGPT ブラウザでログイン" Command="{Binding CodexStartChatGptLoginCommand}" />
               </StackPanel>
             </StackPanel>
           </Border>
@@ -155,21 +300,36 @@
       </TabItem>
     </TabControl>
 
-    <!-- ── 中部: チャットエリア ── -->
-    <Grid Grid.Row="1" Margin="0,8,0,8">
-      <Grid.RowDefinitions>
-        <RowDefinition Height="Auto" />
-        <RowDefinition Height="*" />
-      </Grid.RowDefinitions>
+    <!-- ── 中部: チャットカード ── -->
+    <Border Grid.Row="1" Margin="0,12,0,0" Background="{StaticResource CardBg}" BorderBrush="{StaticResource Divider}" BorderThickness="1" CornerRadius="10">
+      <Grid>
+        <Grid.RowDefinitions>
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
 
-      <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,4">
-        <Button Width="160" Margin="0,0,8,0" Content="新しい会話を開始" Command="{Binding StartConversationCommand}" />
-        <Button Width="120" Content="中断" Command="{Binding InterruptCommand}" Visibility="{Binding IsTurnInProgress, Converter={StaticResource BoolToVisibilityConverter}}" />
-        <TextBlock Margin="12,0,0,0" VerticalAlignment="Center" Text="処理中..." Foreground="#1565C0" FontStyle="Italic" Visibility="{Binding IsTurnInProgress, Converter={StaticResource BoolToVisibilityConverter}}" />
-      </StackPanel>
+        <!-- ヘッダーバー -->
+        <Border Grid.Row="0" Background="#FBFCFE" BorderBrush="{StaticResource Divider}" BorderThickness="0,0,0,1" CornerRadius="10,10,0,0">
+          <Grid Margin="14,8">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="*" />
+              <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBlock Grid.Column="0" VerticalAlignment="Center" FontWeight="SemiBold" Foreground="{StaticResource HeaderText}" Text="チャット" />
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="12,0,0,0" VerticalAlignment="Center" Visibility="{Binding IsTurnInProgress, Converter={StaticResource BoolToVisibilityConverter}}">
+              <Ellipse Width="7" Height="7" Margin="0,0,6,0" Fill="{StaticResource Accent}" />
+              <TextBlock Text="応答中..." Foreground="{StaticResource Accent}" FontSize="12" VerticalAlignment="Center" />
+            </StackPanel>
+            <StackPanel Grid.Column="2" Orientation="Horizontal">
+              <Button Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" Content="中断" Command="{Binding InterruptCommand}" Visibility="{Binding IsTurnInProgress, Converter={StaticResource BoolToVisibilityConverter}}" />
+              <Button Style="{StaticResource SecondaryButton}" Content="＋ 新しい会話" Command="{Binding StartConversationCommand}" />
+            </StackPanel>
+          </Grid>
+        </Border>
 
-      <Border Grid.Row="1" BorderBrush="#D1D5DB" BorderThickness="1" CornerRadius="4">
-        <ScrollViewer x:Name="ChatScrollViewer" VerticalScrollBarVisibility="Auto">
+        <!-- メッセージ一覧 -->
+        <ScrollViewer x:Name="ChatScrollViewer" Grid.Row="1" Padding="8,6" VerticalScrollBarVisibility="Auto">
           <ItemsControl ItemsSource="{Binding Messages}" ItemTemplateSelector="{StaticResource ChatMessageTemplateSelector}" HorizontalContentAlignment="Stretch">
             <ItemsControl.ItemsPanel>
               <ItemsPanelTemplate>
@@ -178,11 +338,11 @@
             </ItemsControl.ItemsPanel>
           </ItemsControl>
         </ScrollViewer>
-      </Border>
-    </Grid>
+      </Grid>
+    </Border>
 
     <!-- ── 下部: 入力エリア ── -->
-    <Grid Grid.Row="2">
+    <Grid Grid.Row="2" Margin="0,12,0,0">
       <Grid.RowDefinitions>
         <RowDefinition Height="Auto" />
         <RowDefinition Height="Auto" />
@@ -196,20 +356,20 @@
         <TextBox
           x:Name="UserInputBox"
           Grid.Column="0"
+          Style="{StaticResource ChatInputBox}"
           Margin="0,0,8,0"
-          MinHeight="60"
-          MaxHeight="120"
+          MinHeight="52"
+          MaxHeight="140"
           TextWrapping="Wrap"
           AcceptsReturn="True"
-          VerticalScrollBarVisibility="Auto"
           Text="{Binding UserInput, UpdateSourceTrigger=PropertyChanged}"
           KeyDown="UserInputBox_KeyDown"
           ToolTip="Ctrl+Enter で送信"
         />
-        <Button Grid.Column="1" Width="80" VerticalAlignment="Bottom" Content="送信" Command="{Binding SendMessageCommand}" />
+        <Button Grid.Column="1" Style="{StaticResource PrimaryButton}" Width="96" VerticalAlignment="Stretch" Content="送信" Command="{Binding SendMessageCommand}" />
       </Grid>
 
-      <TextBlock Grid.Row="1" Margin="0,4,0,0" Foreground="#555" TextWrapping="Wrap" Text="{Binding StatusMessage}" />
+      <TextBlock Grid.Row="1" Margin="4,6,0,0" Foreground="{StaticResource MutedText}" FontSize="12" TextWrapping="Wrap" Text="{Binding StatusMessage}" />
     </Grid>
   </Grid>
 </Window>
