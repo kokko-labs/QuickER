@@ -99,14 +99,11 @@ public sealed class CodexChatEngine : IErChatEngine
     /// <summary>App Server を起動・接続し、アカウント状態を復元する</summary>
     public async Task ConnectAsync(CancellationToken cancellationToken = default)
     {
-        StatusChanged?.Invoke(this, "Codex App Server に接続中...");
-
         try
         {
             await _client.StartAsync(BuildSettings(), ClientName, ClientTitle, ClientVersion, cancellationToken).ConfigureAwait(false);
             IsStarted = _client.IsStarted;
             await RefreshAccountStateAsync(cancellationToken).ConfigureAwait(false);
-            StatusChanged?.Invoke(this, BuildConnectedStatusMessage());
         }
         catch (Exception ex)
         {
@@ -319,12 +316,6 @@ public sealed class CodexChatEngine : IErChatEngine
 
     /// <summary>現在のプロバイダー・モデルから保存用設定を組み立てる</summary>
     private CodexAppServerSettings BuildSettings() => new() { ModelProvider = ModelProvider?.Trim() ?? string.Empty, Model = Model?.Trim() ?? string.Empty };
-
-    /// <summary>ログイン要否を踏まえた接続完了時のステータス文言を組み立てる</summary>
-    private string BuildConnectedStatusMessage() => CanUseWithoutLogin() ? $"接続しました。{AccountSummary}" : "接続しました。ログインしてください。";
-
-    /// <summary>ログインなしで利用可能か</summary>
-    private bool CanUseWithoutLogin() => IsLoggedIn || !IsOpenAiProvider || !RequiresOpenAiAuth;
 
     /// <summary>取得したアカウント情報を認証状態へ反映する</summary>
     private void ApplyAccountState(CodexAccountInfo account)
