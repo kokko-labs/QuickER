@@ -146,18 +146,7 @@
               </Grid>
 
               <StackPanel Margin="0,8,0,0" Visibility="{Binding ShowCodexLoginPanel, Converter={StaticResource BoolToVisibilityConverter}}">
-                <Grid Visibility="{Binding ShowCodexApiKeyInput, Converter={StaticResource BoolToVisibilityConverter}}">
-                  <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="80" />
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="Auto" />
-                  </Grid.ColumnDefinitions>
-                  <TextBlock Grid.Column="0" VerticalAlignment="Center" Text="API キー" />
-                  <PasswordBox x:Name="CodexApiKeyBox" Grid.Column="1" Margin="0,0,8,0" ToolTip="OpenAI API キー（sk-...）" PasswordChanged="CodexApiKeyBox_PasswordChanged" />
-                  <CheckBox Grid.Column="2" Margin="0,0,8,0" VerticalAlignment="Center" Content="保存" IsChecked="{Binding CodexSaveApiKey}" />
-                  <Button Grid.Column="3" Width="120" Content="API キーでログイン" Command="{Binding CodexLoginWithApiKeyCommand}" />
-                </Grid>
+                <TextBlock Foreground="#555" TextWrapping="Wrap" Text="ChatGPT アカウントでログインしてください。API キーで利用する場合は「API キー接続」タブを使用します。" />
                 <Button Margin="0,6,0,0" HorizontalAlignment="Left" Width="200" Content="ChatGPT ブラウザでログイン" Command="{Binding CodexStartChatGptLoginCommand}" />
               </StackPanel>
             </StackPanel>

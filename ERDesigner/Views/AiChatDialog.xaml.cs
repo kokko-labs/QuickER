@@ -41,11 +41,6 @@ public partial class AiChatDialog : Window
         {
             ApiKeyBox.Password = ViewModel.ApiKey;
         }
-
-        if (!string.IsNullOrEmpty(ViewModel.CodexApiKey))
-        {
-            CodexApiKeyBox.Password = ViewModel.CodexApiKey;
-        }
     }
 
     /// <summary>×ボタンでは閉じず、設定を保存して非表示にし状態を維持する（シングルトン動作）</summary>
@@ -86,15 +81,6 @@ public partial class AiChatDialog : Window
         if (sender is PasswordBox passwordBox)
         {
             ViewModel.ApiKey = passwordBox.Password;
-        }
-    }
-
-    /// <summary>Codex 接続の PasswordBox 変更を ViewModel へ転送する</summary>
-    private void CodexApiKeyBox_PasswordChanged(object sender, RoutedEventArgs e)
-    {
-        if (sender is PasswordBox passwordBox)
-        {
-            ViewModel.CodexApiKey = passwordBox.Password;
         }
     }
 

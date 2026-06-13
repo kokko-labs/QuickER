@@ -15,9 +15,6 @@ public partial class AiChatDialogViewModel : ObservableObject
     /// <summary>API キー接続の API キー保存名（旧 AI 生成機能と共有しユーザーの保存値を引き継ぐ）</summary>
     private const string OpenAiApiKeyStoreName = "OpenAiApiKey";
 
-    /// <summary>Codex 接続の API キー保存名</summary>
-    private const string CodexApiKeyStoreName = "CodexAppServerApiKey";
-
     private const string OpenAiProviderName = "openai";
 
     private readonly MainViewModel? _mainViewModel;
@@ -130,12 +127,6 @@ public partial class AiChatDialogViewModel : ObservableObject
     private string _codexModel = AiModelCatalog.DefaultOpenAiModel;
 
     [ObservableProperty]
-    private string _codexApiKey = string.Empty;
-
-    [ObservableProperty]
-    private bool _codexSaveApiKey = true;
-
-    [ObservableProperty]
     private string _codexAccountSummary = "未接続";
 
     private CodexAuthState _codexAuth = new(false, true, CodexAuthMode.None, "未接続");
@@ -145,9 +136,6 @@ public partial class AiChatDialogViewModel : ObservableObject
 
     /// <summary>Codex ログインパネルを表示するか（openai・認証必要・未ログイン時）</summary>
     public bool ShowCodexLoginPanel => (_codexEngine?.IsOpenAiProvider ?? false) && _codexAuth.RequiresOpenAiAuth && _codexAuth.AuthMode == CodexAuthMode.None;
-
-    /// <summary>Codex API キー入力欄を表示するか（ChatGPT ログイン時は非表示）</summary>
-    public bool ShowCodexApiKeyInput => _codexAuth.AuthMode != CodexAuthMode.ChatGpt;
 
     /// <summary>Codex ログアウト可能か</summary>
     public bool CanCodexLogout => _codexAuth.IsStarted && (_codexAuth.AuthMode != CodexAuthMode.None || !_codexAuth.RequiresOpenAiAuth);
@@ -187,7 +175,6 @@ public partial class AiChatDialogViewModel : ObservableObject
         _isInitializing = true;
         LoadSettings();
         ApiKey = ApiKeyStore.Load(OpenAiApiKeyStoreName);
-        CodexApiKey = ApiKeyStore.Load(CodexApiKeyStoreName);
         _isInitializing = false;
 
         if (IsCodexBackend)
@@ -253,19 +240,6 @@ public partial class AiChatDialogViewModel : ObservableObject
     }
 
     // ── Codex 認証コマンド ──
-
-    /// <summary>Codex に API キーでログインする</summary>
-    [RelayCommand]
-    private async Task CodexLoginWithApiKeyAsync()
-    {
-        if (_codexEngine is null)
-        {
-            return;
-        }
-
-        PersistCodexApiKey();
-        await _codexEngine.LoginWithApiKeyAsync(CodexApiKey).ConfigureAwait(true);
-    }
 
     /// <summary>Codex の ChatGPT ブラウザログインを開始する</summary>
     [RelayCommand]
@@ -419,10 +393,6 @@ public partial class AiChatDialogViewModel : ObservableObject
 
     partial void OnSaveApiKeyChanged(bool value) => PersistOpenAiApiKey();
 
-    partial void OnCodexApiKeyChanged(string value) => PersistCodexApiKey();
-
-    partial void OnCodexSaveApiKeyChanged(bool value) => PersistCodexApiKey();
-
     partial void OnUserInputChanged(string value) => SendMessageCommand.NotifyCanExecuteChanged();
 
     partial void OnCodexModelProviderChanged(string value)
@@ -456,17 +426,6 @@ public partial class AiChatDialogViewModel : ObservableObject
         }
 
         ApiKeyStore.Save(OpenAiApiKeyStoreName, SaveApiKey ? ApiKey : string.Empty);
-    }
-
-    /// <summary>保存設定に従い Codex API キーを永続化する</summary>
-    private void PersistCodexApiKey()
-    {
-        if (_isInitializing)
-        {
-            return;
-        }
-
-        ApiKeyStore.Save(CodexApiKeyStoreName, CodexSaveApiKey ? CodexApiKey : string.Empty);
     }
 
     // ── エンジンイベント ──
@@ -562,7 +521,6 @@ public partial class AiChatDialogViewModel : ObservableObject
         CodexAccountSummary = state.AccountSummary;
         OnPropertyChanged(nameof(ShowCodexAuthSection));
         OnPropertyChanged(nameof(ShowCodexLoginPanel));
-        OnPropertyChanged(nameof(ShowCodexApiKeyInput));
         OnPropertyChanged(nameof(CanCodexLogout));
         NotifyReadinessChanged();
     }

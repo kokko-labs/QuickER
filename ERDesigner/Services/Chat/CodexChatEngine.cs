@@ -139,33 +139,6 @@ public sealed class CodexChatEngine : IErChatEngine
         RaiseAuthStateChanged();
     }
 
-    /// <summary>API キーでログインする（結果は account/updated 通知で反映）</summary>
-    public async Task LoginWithApiKeyAsync(string apiKey, CancellationToken cancellationToken = default)
-    {
-        if (string.IsNullOrWhiteSpace(apiKey))
-        {
-            StatusChanged?.Invoke(this, "API キーを入力してください。");
-            return;
-        }
-
-        if (!await EnsureStartedAsync(cancellationToken).ConfigureAwait(false))
-        {
-            return;
-        }
-
-        StatusChanged?.Invoke(this, "API キーでログイン中...");
-
-        try
-        {
-            await _client.LoginWithApiKeyAsync(apiKey, cancellationToken).ConfigureAwait(false);
-            StatusChanged?.Invoke(this, "ログイン要求を送信しました。");
-        }
-        catch (Exception ex)
-        {
-            StatusChanged?.Invoke(this, $"ログインに失敗しました: {ex.Message}");
-        }
-    }
-
     /// <summary>ChatGPT ブラウザログインを開始し、認証 URL を返す（URL を開く処理は呼び出し側）</summary>
     public async Task<string?> StartChatGptLoginAsync(CancellationToken cancellationToken = default)
     {
