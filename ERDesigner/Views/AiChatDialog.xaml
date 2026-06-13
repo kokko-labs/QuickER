@@ -226,7 +226,7 @@
               <ColumnDefinition Width="Auto" />
               <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
-            <TextBlock Grid.Column="0" Style="{StaticResource FieldLabel}" Text="プロバイダ" />
+            <TextBlock Grid.Column="0" Style="{StaticResource FieldLabel}" Text="モデルプロバイダー" />
             <ComboBox Grid.Column="1" Margin="0,0,16,0" Padding="6,4" ItemsSource="{Binding ApiProviders}" SelectedItem="{Binding ApiProvider}" />
             <TextBlock Grid.Column="2" Style="{StaticResource FieldLabel}" Text="モデル名" />
             <ComboBox Grid.Column="3" Padding="6,4" IsEditable="True" Text="{Binding ApiModel, UpdateSourceTrigger=PropertyChanged}" ItemsSource="{Binding ApiModelCandidates}" />
