@@ -309,7 +309,7 @@ internal sealed class ScribanCSharpRenderer
             public {{ mapper.edit_model_class_name }} CreateEditModel({{ mapper.entity_class_name }} entity)
             {
                 var editModel = new {{ mapper.edit_model_class_name }}();
-                LoadFrom(entity, editModel);
+                ApplyToEditModel(entity, editModel);
                 return editModel;
             }
 
@@ -337,14 +337,22 @@ internal sealed class ScribanCSharpRenderer
             {
         {{ for prop in mapper.scalar_properties }}{{ if prop.edit_model_is_nullable && prop.entity_type_name != prop.edit_model_type_name }}        entity.{{ prop.property_name }} = editModel.{{ prop.property_name }} ?? throw new InvalidOperationException("{{ prop.property_name }} が未入力です。");
         {{ else }}        entity.{{ prop.property_name }} = editModel.{{ prop.property_name }};
-        {{ end }}{{ end }}    }
+        {{ end }}{{ end }}        OnEntityApplied(editModel, entity);
+            }
 
-            /// <summary>{{ mapper.entity_class_name }} の値をバインディング経由で {{ mapper.edit_model_class_name }} へ読み込む</summary>
-            private static void LoadFrom({{ mapper.entity_class_name }} entity, {{ mapper.edit_model_class_name }} editModel)
+            /// <summary>{{ mapper.edit_model_class_name }} の確定値を {{ mapper.entity_class_name }} へ反映した後に呼ばれる（partial 実装で追加プロパティを保存）</summary>
+            partial void OnEntityApplied({{ mapper.edit_model_class_name }} editModel, {{ mapper.entity_class_name }} entity);
+
+            /// <summary>{{ mapper.entity_class_name }} の値を既存の {{ mapper.edit_model_class_name }} へ反映する（バインディング経由）</summary>
+            public void ApplyToEditModel({{ mapper.entity_class_name }} entity, {{ mapper.edit_model_class_name }} editModel)
             {
                 editModel.RevertInput();
         {{ for prop in mapper.scalar_properties }}        editModel.{{ prop.binding_property_name }} = {{ prop.load_binding_expression }};
-        {{ end }}    }
+        {{ end }}        OnEditModelLoaded(entity, editModel);
+            }
+
+            /// <summary>{{ mapper.edit_model_class_name }} への既定ロード後に呼ばれる（partial 実装で追加プロパティをロード）</summary>
+            partial void OnEditModelLoaded({{ mapper.entity_class_name }} entity, {{ mapper.edit_model_class_name }} editModel);
         }
         {{~ end ~}}
 

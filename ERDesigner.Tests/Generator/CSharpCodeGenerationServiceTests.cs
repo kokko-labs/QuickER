@@ -372,8 +372,16 @@ public class CSharpCodeGenerationServiceTests
         // ApplyToEntity では nullable 化された確定値に対して保存前 null チェックを行う
         result.Files[0].Content.Should().Contain("entity.ProductId = editModel.ProductId ?? throw new InvalidOperationException(\"ProductId が未入力です。\");");
         result.Files[0].Content.Should().Contain("entity.Name = editModel.Name ?? throw new InvalidOperationException(\"Name が未入力です。\");");
-        // LoadFrom ではバインディング用プロパティ経由でロードする
+        // Entity → EditModel 反映は public な ApplyToEditModel で行い、バインディング用プロパティ経由でロードする
+        result.Files[0].Content.Should().Contain("public void ApplyToEditModel(ProductEntity entity, ProductEditModel editModel)");
         result.Files[0].Content.Should().Contain("editModel.BindingName =");
+        result.Files[0].Content.Should().NotContain("LoadFrom");
+        // 既定ロード後の後処理フック（partial 実装で追加プロパティをロード）
+        result.Files[0].Content.Should().Contain("OnEditModelLoaded(entity, editModel);");
+        result.Files[0].Content.Should().Contain("partial void OnEditModelLoaded(ProductEntity entity, ProductEditModel editModel);");
+        // 反映後フック（partial 実装で追加プロパティを保存）
+        result.Files[0].Content.Should().Contain("OnEntityApplied(editModel, entity);");
+        result.Files[0].Content.Should().Contain("partial void OnEntityApplied(ProductEditModel editModel, ProductEntity entity);");
     }
 
     /// <summary>EditModel にバインディング文字列を確定値へ戻す処理が生成されることを検証する</summary>
