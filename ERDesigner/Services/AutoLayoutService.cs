@@ -16,10 +16,15 @@ namespace ERDesigner.Services;
 public static class AutoLayoutService
 {
     /// <summary>列間の横ギャップ (px)</summary>
-    private const double GapX = 40;
+    /// <remarks>
+    /// リレーション線の両端マーカー（多重度記号、各 <c>MarkerSize</c> = 24px）と中央のラベルが
+    /// 重ならず読めるよう、隣接（＝接続）エンティティ間の最短距離を確保する間隔
+    /// </remarks>
+    private const double GapX = 100;
 
     /// <summary>行間の縦ギャップ (px)</summary>
-    private const double GapY = 40;
+    /// <remarks><see cref="GapX"/> と同様にリレーションのマーカー・ラベルの可読性を確保する</remarks>
+    private const double GapY = 100;
 
     /// <summary>左上の余白 (px)</summary>
     private const double Margin = 40;
