@@ -303,18 +303,37 @@ internal sealed class ScribanCSharpRenderer
         {{ if !for.first }}
 
         {{ end }}/// <summary>{{ mapper.entity_class_name }} と {{ mapper.edit_model_class_name }} の相互変換</summary>
-        public sealed class {{ mapper.class_name }}
+        public sealed partial class {{ mapper.class_name }}
         {
-            /// <summary>{{ mapper.entity_class_name }} から {{ mapper.edit_model_class_name }} を生成する</summary>
-            public {{ mapper.edit_model_class_name }} CommitToEditModel({{ mapper.entity_class_name }} entity)
+            /// <summary>{{ mapper.entity_class_name }} の値を反映した新しい {{ mapper.edit_model_class_name }} を生成する</summary>
+            public {{ mapper.edit_model_class_name }} CreateEditModel({{ mapper.entity_class_name }} entity)
             {
                 var editModel = new {{ mapper.edit_model_class_name }}();
                 LoadFrom(entity, editModel);
                 return editModel;
             }
 
-            /// <summary>{{ mapper.edit_model_class_name }} の確定値を {{ mapper.entity_class_name }} へ反映する</summary>
-            public void CommitToEntity({{ mapper.edit_model_class_name }} editModel, {{ mapper.entity_class_name }} entity)
+            /// <summary>初期値を設定した新しい {{ mapper.entity_class_name }} を生成する</summary>
+            public {{ mapper.entity_class_name }} CreateEntity()
+            {
+                var entity = new {{ mapper.entity_class_name }}();
+                OnEntityCreated(entity);
+                return entity;
+            }
+
+            /// <summary>初期値を設定した新しい {{ mapper.entity_class_name }} に {{ mapper.edit_model_class_name }} の確定値を反映して生成する</summary>
+            public {{ mapper.entity_class_name }} CreateEntity({{ mapper.edit_model_class_name }} editModel)
+            {
+                var entity = CreateEntity();
+                ApplyToEntity(editModel, entity);
+                return entity;
+            }
+
+            /// <summary>新しい {{ mapper.entity_class_name }} の生成直後に呼ばれる（partial 実装で初期値を設定）</summary>
+            partial void OnEntityCreated({{ mapper.entity_class_name }} entity);
+
+            /// <summary>{{ mapper.edit_model_class_name }} の確定値を既存の {{ mapper.entity_class_name }} へ反映する（破壊的更新）</summary>
+            public void ApplyToEntity({{ mapper.edit_model_class_name }} editModel, {{ mapper.entity_class_name }} entity)
             {
         {{ for prop in mapper.scalar_properties }}{{ if prop.edit_model_is_nullable && prop.entity_type_name != prop.edit_model_type_name }}        entity.{{ prop.property_name }} = editModel.{{ prop.property_name }} ?? throw new InvalidOperationException("{{ prop.property_name }} が未入力です。");
         {{ else }}        entity.{{ prop.property_name }} = editModel.{{ prop.property_name }};

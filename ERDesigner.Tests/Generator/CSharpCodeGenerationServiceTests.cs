@@ -254,7 +254,7 @@ public class CSharpCodeGenerationServiceTests
         result.HasErrors.Should().BeFalse();
         result.Files[0].Content.Should().Contain("public partial class AirconditionerCategoryEntity");
         result.Files[0].Content.Should().Contain("public partial class AirconditionerCategoryEditModel");
-        result.Files[0].Content.Should().Contain("public sealed class AirconditionerCategoryMapper");
+        result.Files[0].Content.Should().Contain("public sealed partial class AirconditionerCategoryMapper");
     }
 
     /// <summary>多対多リレーションが警告付きで生成スキップされることを検証する</summary>
@@ -356,13 +356,20 @@ public class CSharpCodeGenerationServiceTests
         var result = new CSharpCodeGenerationService().Generate(diagram, new CodeGenerationOptions { NamespaceName = "Sample.Domain" });
 
         result.HasErrors.Should().BeFalse();
-        // Mapper は具象クラスのみ（インターフェースなし）
+        // Mapper は具象クラスのみ（インターフェースなし）。フック宣言のため partial
         result.Files[0].Content.Should().NotContain("public interface IProductMapper");
-        result.Files[0].Content.Should().Contain("public sealed class ProductMapper");
+        result.Files[0].Content.Should().Contain("public sealed partial class ProductMapper");
         result.Files[0].Content.Should().NotContain(": IProductMapper");
-        result.Files[0].Content.Should().Contain("ProductEditModel CommitToEditModel(ProductEntity entity)");
-        result.Files[0].Content.Should().Contain("void CommitToEntity(ProductEditModel editModel, ProductEntity entity)");
-        // CommitToEntity では nullable 化された確定値に対して保存前 null チェックを行う
+        result.Files[0].Content.Should().Contain("ProductEditModel CreateEditModel(ProductEntity entity)");
+        result.Files[0].Content.Should().Contain("void ApplyToEntity(ProductEditModel editModel, ProductEntity entity)");
+        // 旧 Commit 系の名前は残っていないこと
+        result.Files[0].Content.Should().NotContain("CommitToEditModel");
+        result.Files[0].Content.Should().NotContain("CommitToEntity");
+        // Entity ファクトリ（空生成・EditModel 反映）と初期値フックを生成する
+        result.Files[0].Content.Should().Contain("public ProductEntity CreateEntity()");
+        result.Files[0].Content.Should().Contain("public ProductEntity CreateEntity(ProductEditModel editModel)");
+        result.Files[0].Content.Should().Contain("partial void OnEntityCreated(ProductEntity entity);");
+        // ApplyToEntity では nullable 化された確定値に対して保存前 null チェックを行う
         result.Files[0].Content.Should().Contain("entity.ProductId = editModel.ProductId ?? throw new InvalidOperationException(\"ProductId が未入力です。\");");
         result.Files[0].Content.Should().Contain("entity.Name = editModel.Name ?? throw new InvalidOperationException(\"Name が未入力です。\");");
         // LoadFrom ではバインディング用プロパティ経由でロードする
