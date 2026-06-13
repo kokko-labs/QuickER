@@ -92,9 +92,13 @@ public class CodexAppServerDialogViewModelTests
             return Task.CompletedTask;
         }
 
+        /// <summary>最後に StartThreadAsync へ渡されたスレッド開始オプション</summary>
+        public CodexThreadStartOptions? LastThreadStartOptions { get; private set; }
+
         /// <inheritdoc />
         public Task<CodexThreadInfo> StartThreadAsync(CodexThreadStartOptions options, CancellationToken cancellationToken = default)
         {
+            LastThreadStartOptions = options;
             return Task.FromResult(new CodexThreadInfo { Id = "thr_test", Preview = string.Empty });
         }
 
@@ -289,6 +293,64 @@ public class CodexAppServerDialogViewModelTests
 
             vm.HasThread.Should().BeTrue();
             vm.Messages.Should().NotBeEmpty();
+        }
+        finally
+        {
+            if (Directory.Exists(folder))
+            {
+                Directory.Delete(folder, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>MainViewModel 付きでスレッドを開始すると ER 図ツールと設計ルール指示が登録されることを検証する</summary>
+    [Fact(DisplayName = "StartNewThread は MainViewModel 付きで設計ルール指示（複合キー禁止）を送る")]
+    public async Task StartNewThreadAsync_WithMainViewModel_SendsDeveloperInstructions()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "ERDesignerTests", Guid.NewGuid().ToString("N"));
+        var settingsStore = new CodexAppServerSettingsStore(folder);
+        var client = new FakeCodexAppServerClient();
+        client.NextAccountInfo = new CodexAccountInfo { RequiresOpenAiAuth = false, AuthMode = CodexAuthMode.ApiKey };
+        var vm = new CodexAppServerDialogViewModel(client, settingsStore, "CodexVmTests_" + Guid.NewGuid().ToString("N"), new MainViewModel());
+
+        try
+        {
+            await InvokePrivateAsync(vm, "ConnectAsync");
+            await InvokePrivateAsync(vm, "StartNewThreadAsync");
+
+            client.LastThreadStartOptions.Should().NotBeNull();
+            client.LastThreadStartOptions!.DynamicTools.Should().NotBeNullOrEmpty();
+            client.LastThreadStartOptions.DeveloperInstructions.Should().NotBeNullOrWhiteSpace();
+            client.LastThreadStartOptions.DeveloperInstructions.Should().Contain("複合主キー（複数列の主キー）は禁止");
+            client.LastThreadStartOptions.DeveloperInstructions.Should().Contain("複合外部キーは禁止");
+        }
+        finally
+        {
+            if (Directory.Exists(folder))
+            {
+                Directory.Delete(folder, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>MainViewModel が無い場合はツールも設計ルール指示も登録されないことを検証する</summary>
+    [Fact(DisplayName = "StartNewThread は MainViewModel が無い場合 developerInstructions を送らない")]
+    public async Task StartNewThreadAsync_WithoutMainViewModel_OmitsDeveloperInstructions()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "ERDesignerTests", Guid.NewGuid().ToString("N"));
+        var settingsStore = new CodexAppServerSettingsStore(folder);
+        var client = new FakeCodexAppServerClient();
+        client.NextAccountInfo = new CodexAccountInfo { RequiresOpenAiAuth = false, AuthMode = CodexAuthMode.ApiKey };
+        var vm = new CodexAppServerDialogViewModel(client, settingsStore, "CodexVmTests_" + Guid.NewGuid().ToString("N"));
+
+        try
+        {
+            await InvokePrivateAsync(vm, "ConnectAsync");
+            await InvokePrivateAsync(vm, "StartNewThreadAsync");
+
+            client.LastThreadStartOptions.Should().NotBeNull();
+            client.LastThreadStartOptions!.DynamicTools.Should().BeNull();
+            client.LastThreadStartOptions.DeveloperInstructions.Should().BeNull();
         }
         finally
         {

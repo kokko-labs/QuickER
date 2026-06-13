@@ -649,7 +649,7 @@ public partial class CodexAppServerDialogViewModel : ObservableObject
         }
     }
 
-    /// <summary>スレッド開始オプションを組み立てる（MainViewModel がある場合のみ ER 図操作ツールを登録する）</summary>
+    /// <summary>スレッド開始オプションを組み立てる（MainViewModel がある場合のみ ER 図操作ツールと設計ルール指示を登録する）</summary>
     private CodexThreadStartOptions BuildThreadStartOptions() =>
         new()
         {
@@ -658,6 +658,7 @@ public partial class CodexAppServerDialogViewModel : ObservableObject
             ModelProvider = NormalizeOptionalText(ModelProvider),
             Model = NormalizeOptionalText(Model),
             DynamicTools = _mainViewModel is not null ? ErDiagramDynamicTools.GetDefinitions() : null,
+            DeveloperInstructions = _mainViewModel is not null ? ErDesignRules.BuildCodexDeveloperInstructions() : null,
         };
 
     /// <summary>保存済みモデルを優先し、無ければプロバイダー既定モデルを初期値として返す</summary>

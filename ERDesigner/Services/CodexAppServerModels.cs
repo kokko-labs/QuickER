@@ -128,6 +128,9 @@ public sealed class CodexThreadStartOptions
 
     /// <summary>動的ツール定義</summary>
     public IReadOnlyList<CodexDynamicToolDefinition>? DynamicTools { get; init; }
+
+    /// <summary>開発者指示（Codex の基本プロンプトへ追加されるアプリ固有の指示。null なら送らない）</summary>
+    public string? DeveloperInstructions { get; init; }
 }
 
 /// <summary>Codex スレッド情報</summary>

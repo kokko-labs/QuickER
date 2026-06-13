@@ -29,7 +29,7 @@ public static class ErDiagramDynamicTools
             new CodexDynamicToolDefinition
             {
                 Name = "add_entity",
-                Description = "新しいエンティティ（テーブル）を ER 図に追加します。列は作成されないので、追加後に add_column で主キー列やその他の列を定義してください。",
+                Description = "新しいエンティティ（テーブル）を ER 図に追加します。列は作成されないので、追加後にまず主キー列を 1 列だけ add_column で定義し、続けてその他の列を定義してください。",
                 DeferLoading = false,
                 InputSchema = new
                 {
@@ -57,7 +57,8 @@ public static class ErDiagramDynamicTools
             new CodexDynamicToolDefinition
             {
                 Name = "add_column",
-                Description = "指定したテーブルにカラムを追加します。",
+                Description =
+                    $"指定したテーブルにカラムを追加します。{ErDesignRules.SinglePrimaryKeyRule}キー相当の列を複数持たせたい場合は 2 列目以降を is_primary_key=false で追加し、参照は add_relationship で定義してください。",
                 DeferLoading = false,
                 InputSchema = new
                 {
@@ -128,7 +129,7 @@ public static class ErDiagramDynamicTools
             {
                 Name = "add_relationship",
                 Description =
-                    "2 つのテーブル間にリレーション（外部キー）を追加します。参照列を確実に指定するため、source_column（参照元の主キー列名）と target_column（参照先の外部キー列名）も指定してください。",
+                    $"2 つのテーブル間にリレーション（外部キー）を追加します。参照列を確実に指定するため、source_column（参照元の主キー列名）と target_column（参照先の外部キー列名）も指定してください。{ErDesignRules.SingleColumnForeignKeyRule}役割が異なる複数の外部キーは別リレーションとして追加してください。",
                 DeferLoading = false,
                 InputSchema = new
                 {

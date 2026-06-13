@@ -391,4 +391,15 @@ public class ErDiagramDynamicToolsTests
         order.Columns.Should().Contain(c => c.Id == originalTargetColumnId);
         relationship.TargetColumnId.Should().Be(originalTargetColumnId);
     }
+
+    /// <summary>ツール説明文に複合キー禁止の設計ルールが含まれることを検証する（AI への指示はツール説明文経由のため）</summary>
+    [Fact(DisplayName = "ツール説明文に複合PK・複合FKの禁止ルールが含まれる")]
+    public void GetDefinitions_DescriptionsContainCompositeKeyProhibition()
+    {
+        var definitions = ErDiagramDynamicTools.GetDefinitions();
+
+        definitions.Single(d => d.Name == "add_column").Description.Should().Contain(ErDesignRules.SinglePrimaryKeyRule);
+        definitions.Single(d => d.Name == "add_relationship").Description.Should().Contain(ErDesignRules.SingleColumnForeignKeyRule);
+        definitions.Single(d => d.Name == "add_entity").Description.Should().Contain("主キー列を 1 列だけ");
+    }
 }

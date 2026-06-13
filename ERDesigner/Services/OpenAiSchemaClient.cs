@@ -15,20 +15,20 @@ public interface IAiSchemaClient
 /// <summary>OpenAI 公式 SDK（および OpenAI 互換の Ollama）でスキーマ JSON を取得するクライアント</summary>
 public class OpenAiSchemaClient : IAiSchemaClient
 {
-    private const string SystemPromptTemplate =
+    /// <summary>役割宣言（設計原則は <see cref="ErDesignRules.CommonDesignPrinciples"/> から合成する）</summary>
+    private const string RoleInstruction =
         @"あなたは熟練のデータベース設計者です。
-ユーザーの要件から第3正規形を意識したテーブル設計を行い、必ず指定された JSON スキーマだけを出力してください。
-- tables 配列を返し、各テーブルは name / description / memo / columns を持つ。
-        - 各 columns 要素は name / dataType / isPrimaryKey / isForeignKey / isNullable / description を持つ。
-- テーブル名・カラム名は英数字とアンダースコアのみ。
-- 各テーブルに description、各カラムに description を必ず付ける。
-- 各テーブルに 1 つ以上の主キー (isPrimaryKey=true) を必ず含める。ただし主キーは原則 1 列のみとし、中間テーブル等で業務上の複合主キーが必須の場合のみ複数列を許可する。
-- 各カラムの isNullable を必ず設定する。主キーは false、必須項目や通常の外部キーも false、任意入力の項目だけ true にする。
-- 外部キーがあれば isForeignKey=true を付け、relationships にも記述する。外部キー列を同時に主キー（isPrimaryKey=true）にしてはならない。参照元テーブルのPKを引き継ぐ列は isForeignKey=true / isPrimaryKey=false にする。
+ユーザーの要件からテーブル設計を行い、必ず指定された JSON スキーマだけを出力してください。";
+
+    /// <summary>JSON 出力形式（tables / relationships の構造）に関する指示</summary>
+    private const string OutputFormatInstruction =
+        @"- tables 配列を返し、各テーブルは name / description / memo / columns を持つ。
+- 各 columns 要素は name / dataType / isPrimaryKey / isForeignKey / isNullable / description を持つ。
+- 主キー列は 1 テーブルにつき 1 列だけ isPrimaryKey=true にする。外部キー列は isForeignKey=true / isPrimaryKey=false にする。
+- 外部キーがあれば relationships にも記述する。
 - type は ""OneToOne"" / ""OneToMany"" / ""ManyToMany"" のいずれか。
-- relationships の各要素には sourceColumn（参照元テーブルの参照列名。通常は主キー列）と targetColumn（参照先テーブルの外部キー列名）を必ず含める。どちらも columns に定義した実在の列名を指定する。
-- relationships の各要素には constraintName, onDelete, onUpdate も含める。onDelete / onUpdate は ""NO ACTION"" / ""CASCADE"" / ""SET NULL"" / ""SET DEFAULT"" のいずれかを使用する。
-- dataType は SQL Server の型 (例: int, bigint, nvarchar(50), datetime2, decimal(10,2), bit) を使用。";
+- relationships の各要素には sourceColumn（参照元テーブルの参照列名。通常は主キー列）と targetColumn（参照先テーブルの外部キー列名）を必ず含める。どちらも columns に定義した実在の列名を指定する。1 つのリレーションが参照できるのは 1 列対 1 列のみ。
+- relationships の各要素には constraintName, onDelete, onUpdate も含める。onDelete / onUpdate は ""NO ACTION"" / ""CASCADE"" / ""SET NULL"" / ""SET DEFAULT"" のいずれかを使用する。";
 
     private const string UpdateExistingInstruction =
         @"- 既存 ER 図の情報を踏まえ、ユーザー要件に応じた『更新後の完全なスキーマ』を返す。
@@ -208,28 +208,18 @@ public class OpenAiSchemaClient : IAiSchemaClient
     }
 
     /// <summary>命名規則や既存スキーマの指定を反映したシステムプロンプトを組み立てる</summary>
-    private static string BuildSystemPrompt(AiGenerationSettings settings)
+    internal static string BuildSystemPrompt(AiGenerationSettings settings)
     {
-        var namingInstruction = settings.IdentifierNamingStyle switch
-        {
-            AiIdentifierNamingStyle.SnakeCase => "- テーブル名・カラム名は必ずスネークケース (例: customer_order, customer_id) にする。",
-            _ => "- テーブル名・カラム名は必ずパスカルケース (例: CustomerOrder, CustomerId) にする。",
-        };
-
-        var tableNumberInstruction = settings.TableNameNumberStyle switch
-        {
-            AiTableNameNumberStyle.Plural => "- テーブル名は必ず複数形 (例: Customers, Orders) にする。",
-            _ => "- テーブル名は必ず単数形 (例: Customer, Order) にする。",
-        };
+        var basePrompt = $"{RoleInstruction}\n{ErDesignRules.CommonDesignPrinciples}\n{OutputFormatInstruction}";
 
         if (settings.GenerationMode == AiGenerationMode.UpdateExisting && settings.ExistingDiagram?.Entities.Count > 0)
         {
             // 既存 ER 図は AI が読みやすいよう、出力 JSON と同形の簡潔な構造へ正規化して渡します。
             var existingSchemaJson = JsonSerializer.Serialize(AiSchemaJson.FromDiagram(settings.ExistingDiagram), new JsonSerializerOptions { WriteIndented = true });
 
-            return $"{SystemPromptTemplate}\n{UpdateExistingInstruction}\n以下は現在の ER 図です。この内容を前提に更新してください。\n{existingSchemaJson}";
+            return $"{basePrompt}\n{UpdateExistingInstruction}\n以下は現在の ER 図です。この内容を前提に更新してください。\n{existingSchemaJson}";
         }
 
-        return $"{SystemPromptTemplate}\n{namingInstruction}\n{tableNumberInstruction}";
+        return $"{basePrompt}\n{ErDesignRules.BuildNamingInstruction(settings.IdentifierNamingStyle)}\n{ErDesignRules.BuildTableNameNumberInstruction(settings.TableNameNumberStyle)}";
     }
 }

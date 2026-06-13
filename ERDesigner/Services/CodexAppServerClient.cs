@@ -320,6 +320,11 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
             parameters["sandbox"] = options.Sandbox;
         }
 
+        if (!string.IsNullOrWhiteSpace(options.DeveloperInstructions))
+        {
+            parameters["developerInstructions"] = options.DeveloperInstructions;
+        }
+
         if (options.DynamicTools is { Count: > 0 })
         {
             parameters["dynamicTools"] = options
