@@ -872,6 +872,60 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("public sealed class Table200Repository(ISqlConnectionFactory connectionFactory)");
     }
 
+    /// <summary>EditModel の確定値プロパティに変更通知パーシャルメソッド（Changing/Changed）が生成され、setter から呼ばれることを検証する</summary>
+    [Fact]
+    public void Generate_EditModel_ShouldGenerateChangeHookPartialMethods()
+    {
+        var diagram = new DiagramDefinition
+        {
+            Entities =
+            [
+                new EntityDefinition
+                {
+                    Id = Guid.NewGuid(),
+                    TableName = "customers",
+                    Columns =
+                    [
+                        new ColumnDefinition { Id = Guid.NewGuid(), Name = "customer_id", DataType = "int", IsPrimaryKey = true, IsNullable = false },
+                        new ColumnDefinition { Id = Guid.NewGuid(), Name = "name", DataType = "nvarchar(100)", IsNullable = false },
+                    ],
+                },
+            ],
+        };
+
+        var result = new CSharpCodeGenerationService().Generate(diagram, new CodeGenerationOptions { NamespaceName = "Sample.Domain" });
+
+        result.HasErrors.Should().BeFalse();
+        var content = result.Files[0].Content;
+        // パーシャルメソッドの宣言（本体はユーザーが partial クラスで実装）。新値のみ／旧値・新値の両オーバーロードを生成する
+        content.Should().Contain("partial void OnCustomerIdChanging(int? value);");
+        content.Should().Contain("partial void OnCustomerIdChanging(int? oldValue, int? newValue);");
+        content.Should().Contain("partial void OnCustomerIdChanged(int? value);");
+        content.Should().Contain("partial void OnCustomerIdChanged(int? oldValue, int? newValue);");
+        content.Should().Contain("partial void OnNameChanged(string? oldValue, string? newValue);");
+        // 確定値 setter から代入前後で、新値版・旧値新値版の両方が呼び出される
+        content.Should().Contain("var oldValue = _customerId;");
+        content.Should().Contain("OnCustomerIdChanging(value);");
+        content.Should().Contain("OnCustomerIdChanging(oldValue, value);");
+        content.Should().Contain("OnCustomerIdChanged(value);");
+        content.Should().Contain("OnCustomerIdChanged(oldValue, value);");
+        // 値が変わらない場合は早期 return
+        content.Should().Contain("if (EqualityComparer<int?>.Default.Equals(_customerId, value))");
+    }
+
+    /// <summary>リレーションが無くても Repository を生成する場合に NavigationReference 属性が定義され、生成コードがコンパイル可能であることを検証する</summary>
+    [Fact]
+    public void Generate_RepositoryWithoutRelationships_ShouldEmitNavigationReferenceAttribute()
+    {
+        var result = new CSharpCodeGenerationService().Generate(SingleEntityDiagram(), new CodeGenerationOptions { NamespaceName = "Sample.Domain" });
+
+        result.HasErrors.Should().BeFalse();
+        var content = result.Files[0].Content;
+        // Repository の SqlEntityMetadata が参照する属性が未定義だと CS0246 になるため、定義の存在を確認
+        content.Should().Contain("public sealed class NavigationReferenceAttribute : Attribute");
+        content.Should().Contain("property.GetCustomAttribute<NavigationReferenceAttribute>() is null");
+    }
+
     /// <summary>主キー 1 列のみを持つ単純なエンティティ 1 件のダイアグラムを生成する</summary>
     private static DiagramDefinition SingleEntityDiagram() =>
         new()

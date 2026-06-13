@@ -198,9 +198,32 @@ internal sealed class ScribanCSharpRenderer
                 get => {{ p.field_name }};
                 private set
                 {
-                    SetProperty(ref {{ p.field_name }}, value, nameof({{ p.property_name }}));
+                    if (EqualityComparer<{{ p.type_name }}>.Default.Equals({{ p.field_name }}, value))
+                    {
+                        return;
+                    }
+
+                    var oldValue = {{ p.field_name }};
+                    On{{ p.property_name }}Changing(value);
+                    On{{ p.property_name }}Changing(oldValue, value);
+                    {{ p.field_name }} = value;
+                    On{{ p.property_name }}Changed(value);
+                    On{{ p.property_name }}Changed(oldValue, value);
+                    OnPropertyChanged(nameof({{ p.property_name }}));
                 }
             }
+
+            /// <summary>{{ p.property_name }} の確定値が変更される直前に呼ばれる（新値のみ。partial 実装で処理を追加）</summary>
+            partial void On{{ p.property_name }}Changing({{ p.type_name }} value);
+
+            /// <summary>{{ p.property_name }} の確定値が変更される直前に呼ばれる（旧値・新値。partial 実装で処理を追加）</summary>
+            partial void On{{ p.property_name }}Changing({{ p.type_name }} oldValue, {{ p.type_name }} newValue);
+
+            /// <summary>{{ p.property_name }} の確定値が変更された直後に呼ばれる（新値のみ。partial 実装で処理を追加）</summary>
+            partial void On{{ p.property_name }}Changed({{ p.type_name }} value);
+
+            /// <summary>{{ p.property_name }} の確定値が変更された直後に呼ばれる（旧値・新値。partial 実装で処理を追加）</summary>
+            partial void On{{ p.property_name }}Changed({{ p.type_name }} oldValue, {{ p.type_name }} newValue);
 
             /// <summary>{{ p.property_name }} の画面入力用バインディング文字列（設定時に確定値へ変換）</summary>
             public string {{ p.binding_property_name }}
@@ -598,8 +621,12 @@ internal sealed class ScribanCSharpRenderer
             throw new InvalidOperationException($"C# 生成テンプレートの解析に失敗しました。{Environment.NewLine}{message}");
         }
 
-        // ナビゲーションを持つエンティティを出力する場合のみ、独自属性の定義を生成する
-        var emitNavRefAttr = options.GenerateEntityClasses && model.EntityClasses.Any(c => c.Navigations.Count > 0);
+        // 独自属性 NavigationReference は (1) Entity のナビゲーションプロパティへの付与、
+        // (2) Repository の SqlEntityMetadata によるナビゲーション除外（リフレクション走査）のいずれかで参照される。
+        // リレーションが無くても Repository を生成する場合は属性定義が必要なため、その条件も含める。
+        var emitNavRefAttr =
+            (options.GenerateEntityClasses && model.EntityClasses.Any(c => c.Navigations.Count > 0))
+            || options.GenerateRepositories;
 
         var scriptObject = new Scriban.Runtime.ScriptObject
         {
