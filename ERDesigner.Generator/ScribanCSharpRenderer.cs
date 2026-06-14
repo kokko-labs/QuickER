@@ -1123,9 +1123,10 @@ internal sealed class ScribanCSharpRenderer
 
                 var childProjection = BuildProjection(childType, childAlias, node.Children, aliasCounter);
 
-                // コレクションは配列、単一参照は WITHOUT_ARRAY_WRAPPER でオブジェクトとして出力する
+                // コレクションは配列、単一参照は WITHOUT_ARRAY_WRAPPER でオブジェクトとして出力する。
+                // ネストした FOR JSON の結果は外側で文字列にエスケープされるため、JSON_QUERY で包んで JSON のまま埋め込む。
                 var arrayMode = attribute.IsCollection ? string.Empty : ", WITHOUT_ARRAY_WRAPPER";
-                return $"(SELECT {childProjection} FROM {childTable} AS {childAlias} WHERE {correlation} FOR JSON PATH{arrayMode}) AS {node.Property.Name}";
+                return $"JSON_QUERY((SELECT {childProjection} FROM {childTable} AS {childAlias} WHERE {correlation} FOR JSON PATH{arrayMode})) AS {node.Property.Name}";
             }
 
             private static string NextAlias(int[] aliasCounter) => "a" + aliasCounter[0]++;

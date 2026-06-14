@@ -589,6 +589,8 @@ public class CSharpCodeGenerationServiceTests
         // 列はプロパティ名へ別名付け、単一参照は WITHOUT_ARRAY_WRAPPER
         content.Should().Contain("[{columnName}] AS {propertyName}");
         content.Should().Contain("WITHOUT_ARRAY_WRAPPER");
+        // ネストした FOR JSON はそのままだと文字列化されるため JSON_QUERY で包む
+        content.Should().Contain("JSON_QUERY((SELECT {childProjection} FROM {childTable} AS {childAlias} WHERE {correlation} FOR JSON PATH{arrayMode})) AS {node.Property.Name}");
         // FOR JSON の複数行結果を連結する
         content.Should().Contain("string.Concat(chunks)");
     }
