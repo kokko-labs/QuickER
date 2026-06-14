@@ -450,6 +450,14 @@ internal sealed class ScribanCSharpRenderer
             /// <param name="insertWhenUpdateMissing">更新対象が存在しない場合に INSERT へ切り替えるか（既定は例外）</param>
             /// <returns>保存したレコード数</returns>
             Task<int> SaveAsync(TEntity entity, bool cascadeSave = true, bool cascadeDelete = true, bool insertWhenUpdateMissing = false, CancellationToken cancellationToken = default);
+
+            /// <summary>複数の集約ルートを 1 トランザクションでまとめて保存する（全件成功か全件ロールバックの原子的処理）</summary>
+            /// <param name="entities">保存対象（集約ルート）の一覧</param>
+            /// <param name="cascadeSave">子オブジェクトを連鎖的に保存するか</param>
+            /// <param name="cascadeDelete">削除時に子オブジェクトを連鎖削除するか</param>
+            /// <param name="insertWhenUpdateMissing">更新対象が存在しない場合に INSERT へ切り替えるか（既定は例外）</param>
+            /// <returns>保存したレコード数</returns>
+            Task<int> SaveAsync(IEnumerable<TEntity> entities, bool cascadeSave = true, bool cascadeDelete = true, bool insertWhenUpdateMissing = false, CancellationToken cancellationToken = default);
         }
 
         /// <summary>SQL Server 接続を生成するファクトリ</summary>
@@ -718,6 +726,49 @@ internal sealed class ScribanCSharpRenderer
 
                     // コミット成功後に状態を確定（Added/Updated → Unchanged）し、再保存での二重処理を防ぐ
                     EntityGraphSaver.AcceptChanges(entity, cascadeSave);
+                    return rows;
+                }
+                catch
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    throw;
+                }
+            }
+
+            /// <summary>複数の集約ルートを 1 トランザクションでまとめて保存する（全件成功か全件ロールバックの原子的処理）</summary>
+            public async Task<int> SaveAsync(IEnumerable<TEntity> entities, bool cascadeSave = true, bool cascadeDelete = true, bool insertWhenUpdateMissing = false, CancellationToken cancellationToken = default)
+            {
+                ArgumentNullException.ThrowIfNull(entities);
+
+                // 変更のあるグラフだけを対象にする（接続・トランザクションを張る前に絞り込む）
+                var targets = entities.Where(entity => entity is not null && EntityGraphSaver.HasChanges(entity, cascadeSave)).ToList();
+                if (targets.Count == 0)
+                {
+                    return 0;
+                }
+
+                await using var connection = _connectionFactory.CreateConnection();
+                await connection.OpenAsync(cancellationToken);
+
+                // 全エンティティのグラフを 1 接続・1 トランザクションで保存（途中失敗時は全体ロールバック）
+                await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(cancellationToken);
+
+                try
+                {
+                    var rows = 0;
+                    foreach (var entity in targets)
+                    {
+                        rows += await EntityGraphSaver.SaveAsync(entity, connection, transaction, cascadeSave, cascadeDelete, insertWhenUpdateMissing, cancellationToken);
+                    }
+
+                    await transaction.CommitAsync(cancellationToken);
+
+                    // コミット成功後に全グラフの状態を確定（Added/Updated → Unchanged）し、再保存での二重処理を防ぐ
+                    foreach (var entity in targets)
+                    {
+                        EntityGraphSaver.AcceptChanges(entity, cascadeSave);
+                    }
+
                     return rows;
                 }
                 catch

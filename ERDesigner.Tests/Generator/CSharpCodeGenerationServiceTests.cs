@@ -554,6 +554,9 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("Task<int> SaveAsync(TEntity entity, bool cascadeSave = true, bool cascadeDelete = true, bool insertWhenUpdateMissing = false, CancellationToken cancellationToken = default)");
         content.Should().Contain("public async Task<int> SaveAsync(TEntity entity");
         content.Should().Contain("await connection.BeginTransactionAsync(cancellationToken)");
+        // 複数集約ルートを 1 トランザクションでまとめて保存するコレクション overload
+        content.Should().Contain("Task<int> SaveAsync(IEnumerable<TEntity> entities, bool cascadeSave = true, bool cascadeDelete = true, bool insertWhenUpdateMissing = false, CancellationToken cancellationToken = default)");
+        content.Should().Contain("public async Task<int> SaveAsync(IEnumerable<TEntity> entities");
         // 保存エンジン・競合例外・メタデータ・連鎖情報
         content.Should().Contain("internal static class EntityGraphSaver");
         content.Should().Contain("internal sealed class EntitySaveMetadata");
