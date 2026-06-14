@@ -139,12 +139,12 @@ public class CSharpCodeGenerationServiceTests
         result.HasErrors.Should().BeFalse();
         // NavigationReference 属性は (参照元テーブル, 参照元カラム, 参照先テーブル, 参照先カラム, IsCollection, Cascade) の 6 引数形式
         // 子方向（コレクション）はカスケード対象 true
-        result.Files[0].Content.Should().Contain("[NavigationReference(\"customers\", \"customer_id\", \"orders\", \"customer_id\", true, true)]");
+        result.Files[0].Content.Should().Contain("[NavigationReference(\"customers\", \"customer_id\", \"orders\", \"customer_id\", true, true, false)]");
         result.Files[0].Content.Should().Contain("public ICollection<OrderEntity> Orders { get; set; } = new List<OrderEntity>();");
         result.Files[0].Content.Should().Contain("[JsonIgnore]");
         result.Files[0].Content.Should().Contain("public CustomerEntity Customer { get; set; } = null!;");
-        // 親参照（多対1の戻り）はカスケード対象外 false
-        result.Files[0].Content.Should().Contain("[NavigationReference(\"customers\", \"customer_id\", \"orders\", \"customer_id\", false, false)]");
+        // 親参照（多対1の戻り）はカスケード対象外 false、IsParentReference true
+        result.Files[0].Content.Should().Contain("[NavigationReference(\"customers\", \"customer_id\", \"orders\", \"customer_id\", false, false, true)]");
         // エンティティは EntityBase を継承し、RowState を持つ
         result.Files[0].Content.Should().Contain("public partial class CustomerEntity : EntityBase");
         result.Files[0].Content.Should().Contain("public abstract class EntityBase");
@@ -547,7 +547,8 @@ public class CSharpCodeGenerationServiceTests
         // 状態管理
         content.Should().Contain("public enum RowState");
         content.Should().Contain("public abstract class EntityBase");
-        content.Should().Contain("public RowState RowState { get; set; } = RowState.Added;");
+        content.Should().Contain("public RowState RowState { get; set; } = RowState.Unchanged;");
+        content.Should().Contain("public void MarkAdded() => RowState = RowState.Added;");
         content.Should().Contain("public void MarkRemoved() => RowState = RowState.Removed;");
         // リポジトリ・インターフェースの Save 入口（既定でカスケード、既定は更新欠落で例外）
         content.Should().Contain("Task<int> SaveAsync(TEntity entity, bool cascadeSave = true, bool cascadeDelete = true, bool insertWhenUpdateMissing = false, CancellationToken cancellationToken = default)");
@@ -567,6 +568,31 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("entity.MarkUpdated();");
     }
 
+    /// <summary>Query の取得が FOR JSON＋STJ に統一され、Include / ThenInclude（多階層）が生成されることを検証する</summary>
+    [Fact]
+    public void Generate_ShouldCreateJsonIncludeQuery()
+    {
+        var result = new CSharpCodeGenerationService().Generate(SingleEntityDiagram(), new CodeGenerationOptions { NamespaceName = "Sample.Domain" });
+
+        result.HasErrors.Should().BeFalse();
+        var content = result.Files[0].Content;
+        // JSON デシリアライズ基盤
+        content.Should().Contain("using System.Text.Json;");
+        content.Should().Contain("JsonSerializer.Deserialize<List<TEntity>>(json, JsonOptions)");
+        content.Should().Contain("FOR JSON PATH;");
+        content.Should().Contain("internal static class JsonQueryPlanner");
+        // Include / ThenInclude（単一・コレクションの両オーバーロード）
+        content.Should().Contain("public IncludableSqlQuery<TEntity, TProperty> Include<TProperty>(Expression<Func<TEntity, TProperty>> navigationSelector)");
+        content.Should().Contain("public IncludableSqlQuery<TEntity, TElement> Include<TElement>(Expression<Func<TEntity, ICollection<TElement>>> navigationSelector)");
+        content.Should().Contain("public IncludableSqlQuery<TEntity, TNext> ThenInclude<TNext>(Expression<Func<TProperty, TNext>> navigationSelector)");
+        content.Should().Contain("public IncludableSqlQuery<TEntity, TNext> ThenInclude<TNext>(Expression<Func<TProperty, ICollection<TNext>>> navigationSelector)");
+        // 列はプロパティ名へ別名付け、単一参照は WITHOUT_ARRAY_WRAPPER
+        content.Should().Contain("[{columnName}] AS {propertyName}");
+        content.Should().Contain("WITHOUT_ARRAY_WRAPPER");
+        // FOR JSON の複数行結果を連結する
+        content.Should().Contain("string.Concat(chunks)");
+    }
+
     /// <summary>条件付き一括削除（ExecuteDeleteAsync）とカスケード削除基盤が生成されることを検証する</summary>
     [Fact]
     public void Generate_ShouldCreateExecuteDeleteOnQuery()
@@ -579,7 +605,7 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("public async Task<int> ExecuteDeleteAsync(bool cascadeDelete = false, CancellationToken cancellationToken = default)");
         content.Should().Contain("Task<bool> DeleteAsync(TKey id, CancellationToken cancellationToken = default);");
         // 非カスケードはセットベースの DELETE
-        content.Should().Contain("$\"DELETE FROM {_tableName}{whereClause};\"");
+        content.Should().Contain("$\"DELETE FROM {TableName}{whereClause};\"");
         // カスケードは FK のネスト IN(SELECT …) で子から削除（DB 非依存の純粋プランナーで SQL 構築）
         content.Should().Contain("internal static class CascadeDeletePlanner");
         content.Should().Contain("public static IReadOnlyList<string> BuildDeleteStatements(Type rootType, string rootTable, string whereClause)");

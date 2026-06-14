@@ -434,6 +434,8 @@ internal sealed class CSharpGenerationModelBuilder
             usings.Add("System.Collections.Concurrent");
             usings.Add("System.Linq.Expressions");
             usings.Add("System.Reflection");
+            usings.Add("System.Text.Json");
+            usings.Add("System.Text.Json.Serialization.Metadata");
             usings.Add("System.Threading");
             usings.Add("System.Threading.Tasks");
             usings.Add("Microsoft.Data.SqlClient");

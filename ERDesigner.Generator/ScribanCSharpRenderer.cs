@@ -38,8 +38,11 @@ internal sealed class ScribanCSharpRenderer
             /// <summary>カスケード保存/削除の対象（子方向のナビゲーション）かどうか</summary>
             public bool Cascade { get; }
 
+            /// <summary>親（参照される側）への参照ナビゲーションかどうか</summary>
+            public bool IsParentReference { get; }
+
             /// <summary>参照テーブル・カラム情報を受け取り初期化する</summary>
-            public NavigationReferenceAttribute(string principalTable, string principalColumn, string dependentTable, string dependentColumn, bool isCollection, bool cascade)
+            public NavigationReferenceAttribute(string principalTable, string principalColumn, string dependentTable, string dependentColumn, bool isCollection, bool cascade, bool isParentReference)
             {
                 PrincipalTable = principalTable;
                 PrincipalColumn = principalColumn;
@@ -47,6 +50,7 @@ internal sealed class ScribanCSharpRenderer
                 DependentColumn = dependentColumn;
                 IsCollection = isCollection;
                 Cascade = cascade;
+                IsParentReference = isParentReference;
             }
         }
         {{ end }}
@@ -70,8 +74,8 @@ internal sealed class ScribanCSharpRenderer
         /// <summary>エンティティの変更状態（RowState）を保持する基底クラス</summary>
         public abstract class EntityBase
         {
-            /// <summary>このエンティティの変更状態（既定は新規追加）</summary>
-            public RowState RowState { get; set; } = RowState.Added;
+            /// <summary>このエンティティの変更状態（既定は変更なし。DB/JSON からの復元はそのまま変更なし扱いになる）</summary>
+            public RowState RowState { get; set; } = RowState.Unchanged;
 
             /// <summary>追加対象かどうか</summary>
             public bool IsAdded => RowState == RowState.Added;
@@ -84,6 +88,9 @@ internal sealed class ScribanCSharpRenderer
 
             /// <summary>変更（追加・更新・削除）があるかどうか</summary>
             public bool HasChanges => RowState != RowState.Unchanged;
+
+            /// <summary>追加対象としてマークする（直接 new したエンティティを保存対象にする場合に使用）</summary>
+            public void MarkAdded() => RowState = RowState.Added;
 
             /// <summary>削除対象としてマークする（コレクションには残したまま Save で削除される）</summary>
             public void MarkRemoved() => RowState = RowState.Removed;
@@ -117,7 +124,7 @@ internal sealed class ScribanCSharpRenderer
 
         {{ end }}{{ for navigation in item.navigations }}    /// <summary>{{ navigation.property_name }} ナビゲーションプロパティ</summary>
         {{ if include_json_ignore_on_parent_navigation && navigation.is_parent_reference }}    [JsonIgnore]
-        {{ end }}    [NavigationReference("{{ navigation.principal_table_name }}", "{{ navigation.principal_column_name }}", "{{ navigation.dependent_table_name }}", "{{ navigation.dependent_column_name }}", {{ navigation.is_collection }}, {{ navigation.cascade }})]
+        {{ end }}    [NavigationReference("{{ navigation.principal_table_name }}", "{{ navigation.principal_column_name }}", "{{ navigation.dependent_table_name }}", "{{ navigation.dependent_column_name }}", {{ navigation.is_collection }}, {{ navigation.cascade }}, {{ navigation.is_parent_reference }})]
             public {{ navigation.display_type_name }} {{ navigation.property_name }} { get; set; }{{ navigation.initializer }}
 
         {{ end }}}
@@ -368,10 +375,11 @@ internal sealed class ScribanCSharpRenderer
                 return editModel;
             }
 
-            /// <summary>初期値を設定した新しい {{ mapper.entity_class_name }} を生成する</summary>
+            /// <summary>初期値を設定した新しい {{ mapper.entity_class_name }} を生成する（保存時に追加対象となる）</summary>
             public {{ mapper.entity_class_name }} CreateEntity()
             {
                 var entity = new {{ mapper.entity_class_name }}();
+                entity.MarkAdded();
                 OnEntityCreated(entity);
                 return entity;
             }
@@ -683,9 +691,8 @@ internal sealed class ScribanCSharpRenderer
                 return affected > 0;
             }
 
-            /// <summary>検索条件・並び順をチェーン指定して取得するクエリを開始する</summary>
-            public SqlQuery<TEntity> Query() =>
-                new(_connectionFactory, _metadata.TableName, _metadata.ColumnList, _metadata.MapEntity);
+            /// <summary>検索条件・並び順・Include をチェーン指定して取得するクエリを開始する</summary>
+            public SqlQuery<TEntity> Query() => new(_connectionFactory);
 
             /// <summary>RowState に従って 1 トランザクションで追加・更新・削除を保存する（既定で子をカスケード）</summary>
             public async Task<int> SaveAsync(TEntity entity, bool cascadeSave = true, bool cascadeDelete = true, bool insertWhenUpdateMissing = false, CancellationToken cancellationToken = default)
@@ -721,28 +728,65 @@ internal sealed class ScribanCSharpRenderer
             }
         }
 
-        /// <summary>検索条件・並び順をチェーンで構築し、終端メソッド（ToListAsync 等）で実行するクエリ</summary>
-        /// <remarks>条件・並び順はラムダ式で指定する。値はパラメータ化、列名はメタデータ由来でインジェクション対策済み</remarks>
+        /// <summary>検索条件・並び順・Include をチェーンで構築し、終端メソッド（ToListAsync 等）で実行するクエリ</summary>
+        /// <remarks>
+        /// 取得は SQL Server の FOR JSON でグラフを入れ子 JSON として 1 クエリ取得し、System.Text.Json で復元する。
+        /// 条件・並び順・Include はラムダ式で指定。値はパラメータ化、列名はメタデータ由来でインジェクション対策済み。
+        /// </remarks>
         public sealed class SqlQuery<TEntity>
             where TEntity : class
         {
+            // ナビゲーションは [JsonIgnore]（親参照の循環対策）が付くことがあるが、Include でのロードでは
+            // それらも復元する必要があるため、解決子修飾でナビゲーションプロパティを読み取り対象に含める。
+            private static readonly JsonSerializerOptions JsonOptions = new()
+            {
+                PropertyNameCaseInsensitive = true,
+                TypeInfoResolver = new DefaultJsonTypeInfoResolver { Modifiers = { IncludeNavigationProperties } },
+            };
+
+            /// <summary>[JsonIgnore] 等で契約から外れたナビゲーションプロパティを、デシリアライズ対象として再登録する</summary>
+            private static void IncludeNavigationProperties(JsonTypeInfo typeInfo)
+            {
+                if (typeInfo.Kind != JsonTypeInfoKind.Object)
+                {
+                    return;
+                }
+
+                foreach (var property in typeInfo.Type.GetProperties(BindingFlags.Public | BindingFlags.Instance))
+                {
+                    if (!property.CanRead || !property.CanWrite || property.GetCustomAttribute<NavigationReferenceAttribute>() is null)
+                    {
+                        continue;
+                    }
+
+                    var existing = typeInfo.Properties.FirstOrDefault(item => string.Equals(item.Name, property.Name, StringComparison.OrdinalIgnoreCase));
+                    if (existing is not null)
+                    {
+                        // [JsonIgnore] で無効化（Get/Set が null）されている場合は復活させ、Include で読み込めるようにする
+                        existing.Get ??= property.GetValue;
+                        existing.Set ??= property.SetValue;
+                    }
+                    else
+                    {
+                        var jsonProperty = typeInfo.CreateJsonPropertyInfo(property.PropertyType, property.Name);
+                        jsonProperty.Get = property.GetValue;
+                        jsonProperty.Set = property.SetValue;
+                        typeInfo.Properties.Add(jsonProperty);
+                    }
+                }
+            }
+
             private readonly ISqlConnectionFactory _connectionFactory;
-            private readonly string _tableName;
-            private readonly string _columnList;
-            private readonly Func<SqlDataReader, TEntity> _map;
             private readonly List<string> _conditions = new();
             private readonly List<string> _orderings = new();
             private readonly List<KeyValuePair<string, object?>> _parameters = new();
+            private readonly List<IncludeNode> _includes = new();
             private int? _take;
             private int? _skip;
 
-            internal SqlQuery(ISqlConnectionFactory connectionFactory, string tableName, string columnList, Func<SqlDataReader, TEntity> map)
-            {
-                _connectionFactory = connectionFactory;
-                _tableName = tableName;
-                _columnList = columnList;
-                _map = map;
-            }
+            internal SqlQuery(ISqlConnectionFactory connectionFactory) => _connectionFactory = connectionFactory;
+
+            private static string TableName => EntitySaveMetadata.For(typeof(TEntity)).TableName;
 
             /// <summary>検索条件を追加する（複数指定は AND 結合）</summary>
             public SqlQuery<TEntity> Where(Expression<Func<TEntity, bool>> predicate)
@@ -780,35 +824,45 @@ internal sealed class ScribanCSharpRenderer
                 return this;
             }
 
-            /// <summary>条件に一致するエンティティを一覧取得する</summary>
-            public async Task<IReadOnlyList<TEntity>> ToListAsync(CancellationToken cancellationToken = default)
+            /// <summary>単一参照ナビゲーションを同時取得する（ThenInclude で多階層指定可）</summary>
+            public IncludableSqlQuery<TEntity, TProperty> Include<TProperty>(Expression<Func<TEntity, TProperty>> navigationSelector)
             {
-                var items = new List<TEntity>();
-
-                await using var connection = _connectionFactory.CreateConnection();
-                await connection.OpenAsync(cancellationToken);
-
-                await using var command = CreateCommand(connection, BuildSelectSql(_take, _skip));
-                await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-
-                while (await reader.ReadAsync(cancellationToken))
-                {
-                    items.Add(_map(reader));
-                }
-
-                return items;
+                var node = new IncludeNode(IncludeNode.GetProperty(navigationSelector));
+                _includes.Add(node);
+                return new IncludableSqlQuery<TEntity, TProperty>(this, node);
             }
 
-            /// <summary>条件に一致する先頭の 1 件を取得する（該当なしは null）</summary>
+            /// <summary>コレクションナビゲーションを同時取得する（ThenInclude で多階層指定可）</summary>
+            public IncludableSqlQuery<TEntity, TElement> Include<TElement>(Expression<Func<TEntity, ICollection<TElement>>> navigationSelector)
+            {
+                var node = new IncludeNode(IncludeNode.GetProperty(navigationSelector));
+                _includes.Add(node);
+                return new IncludableSqlQuery<TEntity, TElement>(this, node);
+            }
+
+            /// <summary>条件に一致するエンティティを（Include 指定分とともに）一覧取得する</summary>
+            public async Task<IReadOnlyList<TEntity>> ToListAsync(CancellationToken cancellationToken = default)
+            {
+                var json = await ReadJsonAsync(BuildJsonSelect(_take, _skip), cancellationToken);
+                if (string.IsNullOrWhiteSpace(json))
+                {
+                    return new List<TEntity>();
+                }
+
+                return JsonSerializer.Deserialize<List<TEntity>>(json, JsonOptions) ?? new List<TEntity>();
+            }
+
+            /// <summary>条件に一致する先頭の 1 件を（Include 指定分とともに）取得する（該当なしは null）</summary>
             public async Task<TEntity?> FirstOrDefaultAsync(CancellationToken cancellationToken = default)
             {
-                await using var connection = _connectionFactory.CreateConnection();
-                await connection.OpenAsync(cancellationToken);
+                var json = await ReadJsonAsync(BuildJsonSelect(1, _skip), cancellationToken);
+                if (string.IsNullOrWhiteSpace(json))
+                {
+                    return null;
+                }
 
-                await using var command = CreateCommand(connection, BuildSelectSql(1, _skip));
-                await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-
-                return await reader.ReadAsync(cancellationToken) ? _map(reader) : null;
+                var list = JsonSerializer.Deserialize<List<TEntity>>(json, JsonOptions);
+                return list is { Count: > 0 } ? list[0] : null;
             }
 
             /// <summary>条件に一致する件数を取得する</summary>
@@ -817,7 +871,7 @@ internal sealed class ScribanCSharpRenderer
                 await using var connection = _connectionFactory.CreateConnection();
                 await connection.OpenAsync(cancellationToken);
 
-                await using var command = CreateCommand(connection, $"SELECT COUNT(*) FROM {_tableName}{BuildWhereClause()};");
+                await using var command = CreateCommand(connection, $"SELECT COUNT(*) FROM {TableName}{BuildWhereClause()};");
                 var result = await command.ExecuteScalarAsync(cancellationToken);
                 return Convert.ToInt32(result);
             }
@@ -828,7 +882,7 @@ internal sealed class ScribanCSharpRenderer
                 await using var connection = _connectionFactory.CreateConnection();
                 await connection.OpenAsync(cancellationToken);
 
-                await using var command = CreateCommand(connection, $"SELECT CASE WHEN EXISTS (SELECT 1 FROM {_tableName}{BuildWhereClause()}) THEN 1 ELSE 0 END;");
+                await using var command = CreateCommand(connection, $"SELECT CASE WHEN EXISTS (SELECT 1 FROM {TableName}{BuildWhereClause()}) THEN 1 ELSE 0 END;");
                 var result = await command.ExecuteScalarAsync(cancellationToken);
                 return Convert.ToInt32(result) != 0;
             }
@@ -843,7 +897,7 @@ internal sealed class ScribanCSharpRenderer
 
                 if (!cascadeDelete)
                 {
-                    await using var command = CreateCommand(connection, $"DELETE FROM {_tableName}{whereClause};");
+                    await using var command = CreateCommand(connection, $"DELETE FROM {TableName}{whereClause};");
                     return await command.ExecuteNonQueryAsync(cancellationToken);
                 }
 
@@ -854,7 +908,7 @@ internal sealed class ScribanCSharpRenderer
                 {
                     var rows = 0;
 
-                    foreach (var sql in CascadeDeletePlanner.BuildDeleteStatements(typeof(TEntity), _tableName, whereClause))
+                    foreach (var sql in CascadeDeletePlanner.BuildDeleteStatements(typeof(TEntity), TableName, whereClause))
                     {
                         await using var command = new SqlCommand(sql, connection, transaction);
                         AddParameters(command);
@@ -869,6 +923,42 @@ internal sealed class ScribanCSharpRenderer
                     await transaction.RollbackAsync(cancellationToken);
                     throw;
                 }
+            }
+
+            /// <summary>FOR JSON の結果（約 2KB ごとに複数行で返る）を全行連結して 1 つの JSON 文字列にする</summary>
+            private async Task<string> ReadJsonAsync(string sql, CancellationToken cancellationToken)
+            {
+                await using var connection = _connectionFactory.CreateConnection();
+                await connection.OpenAsync(cancellationToken);
+
+                await using var command = CreateCommand(connection, sql);
+                await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+
+                var chunks = new List<string>();
+                while (await reader.ReadAsync(cancellationToken))
+                {
+                    chunks.Add(reader.GetString(0));
+                }
+
+                return string.Concat(chunks);
+            }
+
+            /// <summary>ルートの WHERE・並び順・ページングと Include ツリーから FOR JSON の SELECT 文を組み立てる</summary>
+            private string BuildJsonSelect(int? take, int? skip) =>
+                JsonQueryPlanner.BuildSelect(typeof(TEntity), BuildWhereClause(), BuildOrderAndPaging(take, skip), _includes);
+
+            /// <summary>ORDER BY / OFFSET・FETCH 句を組み立てる（take/skip 指定時は ORDER BY 必須のためダミー順序を補う）</summary>
+            private string BuildOrderAndPaging(int? take, int? skip)
+            {
+                if (take.HasValue || skip.HasValue)
+                {
+                    var ordering = _orderings.Count == 0 ? " ORDER BY (SELECT NULL)" : " ORDER BY " + string.Join(", ", _orderings);
+                    return take.HasValue
+                        ? $"{ordering} OFFSET {skip ?? 0} ROWS FETCH NEXT {take.Value} ROWS ONLY"
+                        : $"{ordering} OFFSET {skip ?? 0} ROWS";
+                }
+
+                return _orderings.Count == 0 ? string.Empty : " ORDER BY " + string.Join(", ", _orderings);
             }
 
             /// <summary>蓄積したパラメータを設定したコマンドを生成する</summary>
@@ -891,30 +981,154 @@ internal sealed class ScribanCSharpRenderer
             /// <summary>WHERE 句を組み立てる（条件なしは空文字）</summary>
             private string BuildWhereClause() =>
                 _conditions.Count == 0 ? string.Empty : " WHERE " + string.Join(" AND ", _conditions);
+        }
 
-            /// <summary>SELECT 文を組み立てる。take/skip 指定時は OFFSET/FETCH を付与する</summary>
-            private string BuildSelectSql(int? take, int? skip)
+        /// <summary>Include の対象ナビゲーションと、その配下（ThenInclude）の木構造</summary>
+        internal sealed class IncludeNode
+        {
+            public IncludeNode(PropertyInfo property) => Property = property;
+
+            /// <summary>取得対象のナビゲーションプロパティ</summary>
+            public PropertyInfo Property { get; }
+
+            /// <summary>ThenInclude で指定された配下のナビゲーション</summary>
+            public List<IncludeNode> Children { get; } = new();
+
+            /// <summary>ラムダ式（x => x.Nav）からナビゲーションプロパティを取り出す</summary>
+            public static PropertyInfo GetProperty(LambdaExpression selector)
             {
-                var sql = $"SELECT {_columnList} FROM {_tableName}{BuildWhereClause()}";
-
-                if (take.HasValue || skip.HasValue)
+                var expression = selector.Body;
+                if (expression is UnaryExpression { NodeType: ExpressionType.Convert or ExpressionType.ConvertChecked } unary)
                 {
-                    // OFFSET/FETCH は ORDER BY 必須のため、未指定時は安定なダミー順序を付与する
-                    sql += _orderings.Count == 0 ? " ORDER BY (SELECT NULL)" : " ORDER BY " + string.Join(", ", _orderings);
-                    sql += $" OFFSET {skip ?? 0} ROWS";
-
-                    if (take.HasValue)
-                    {
-                        sql += $" FETCH NEXT {take.Value} ROWS ONLY";
-                    }
-                }
-                else if (_orderings.Count > 0)
-                {
-                    sql += " ORDER BY " + string.Join(", ", _orderings);
+                    expression = unary.Operand;
                 }
 
-                return sql + ";";
+                if (expression is MemberExpression { Member: PropertyInfo property })
+                {
+                    return property;
+                }
+
+                throw new ArgumentException($"Include/ThenInclude にはナビゲーションプロパティを指定してください: {selector}");
             }
+        }
+
+        /// <summary>Include の続きに ThenInclude（配下の取得）を指定できるクエリ</summary>
+        public sealed class IncludableSqlQuery<TEntity, TProperty>
+            where TEntity : class
+        {
+            private readonly SqlQuery<TEntity> _query;
+            private readonly IncludeNode _node;
+
+            internal IncludableSqlQuery(SqlQuery<TEntity> query, IncludeNode node)
+            {
+                _query = query;
+                _node = node;
+            }
+
+            /// <summary>直前に Include した単一参照ナビゲーションの配下をさらに取得する</summary>
+            public IncludableSqlQuery<TEntity, TNext> ThenInclude<TNext>(Expression<Func<TProperty, TNext>> navigationSelector)
+            {
+                var child = new IncludeNode(IncludeNode.GetProperty(navigationSelector));
+                _node.Children.Add(child);
+                return new IncludableSqlQuery<TEntity, TNext>(_query, child);
+            }
+
+            /// <summary>直前に Include したコレクションナビゲーションの配下をさらに取得する</summary>
+            public IncludableSqlQuery<TEntity, TNext> ThenInclude<TNext>(Expression<Func<TProperty, ICollection<TNext>>> navigationSelector)
+            {
+                var child = new IncludeNode(IncludeNode.GetProperty(navigationSelector));
+                _node.Children.Add(child);
+                return new IncludableSqlQuery<TEntity, TNext>(_query, child);
+            }
+
+            /// <summary>別のルートナビゲーションを追加で Include する</summary>
+            public IncludableSqlQuery<TEntity, TNext> Include<TNext>(Expression<Func<TEntity, TNext>> navigationSelector) => _query.Include(navigationSelector);
+
+            /// <summary>別のルートコレクションを追加で Include する</summary>
+            public IncludableSqlQuery<TEntity, TNext> Include<TNext>(Expression<Func<TEntity, ICollection<TNext>>> navigationSelector) => _query.Include(navigationSelector);
+
+            /// <summary>検索条件を追加する</summary>
+            public SqlQuery<TEntity> Where(Expression<Func<TEntity, bool>> predicate) => _query.Where(predicate);
+
+            /// <summary>昇順の並び順を追加する</summary>
+            public SqlQuery<TEntity> OrderBy(Expression<Func<TEntity, object?>> keySelector) => _query.OrderBy(keySelector);
+
+            /// <summary>降順の並び順を追加する</summary>
+            public SqlQuery<TEntity> OrderByDescending(Expression<Func<TEntity, object?>> keySelector) => _query.OrderByDescending(keySelector);
+
+            /// <summary>取得件数の上限を指定する</summary>
+            public SqlQuery<TEntity> Take(int count) => _query.Take(count);
+
+            /// <summary>先頭から読み飛ばす件数を指定する</summary>
+            public SqlQuery<TEntity> Skip(int count) => _query.Skip(count);
+
+            /// <summary>条件に一致するエンティティを一覧取得する</summary>
+            public Task<IReadOnlyList<TEntity>> ToListAsync(CancellationToken cancellationToken = default) => _query.ToListAsync(cancellationToken);
+
+            /// <summary>条件に一致する先頭の 1 件を取得する（該当なしは null）</summary>
+            public Task<TEntity?> FirstOrDefaultAsync(CancellationToken cancellationToken = default) => _query.FirstOrDefaultAsync(cancellationToken);
+
+            /// <summary>条件に一致する件数を取得する</summary>
+            public Task<int> CountAsync(CancellationToken cancellationToken = default) => _query.CountAsync(cancellationToken);
+
+            /// <summary>条件に一致するレコードが存在するかを取得する</summary>
+            public Task<bool> AnyAsync(CancellationToken cancellationToken = default) => _query.AnyAsync(cancellationToken);
+        }
+
+        /// <summary>Include ツリーと FK メタデータから FOR JSON の SELECT 文を組み立てるプランナー（DB 非依存・純粋）</summary>
+        internal static class JsonQueryPlanner
+        {
+            /// <summary>ルート型・WHERE 句・並び順ページング句・Include ツリーから、入れ子 JSON を返す SELECT 文を組み立てる</summary>
+            public static string BuildSelect(Type rootType, string whereClause, string orderAndPaging, IReadOnlyList<IncludeNode> includes)
+            {
+                var aliasCounter = new int[1];
+                var rootAlias = NextAlias(aliasCounter);
+                var projection = BuildProjection(rootType, rootAlias, includes, aliasCounter);
+                var tableName = EntitySaveMetadata.For(rootType).TableName;
+                return $"SELECT {projection} FROM {tableName} AS {rootAlias}{whereClause}{orderAndPaging} FOR JSON PATH;";
+            }
+
+            private static string BuildProjection(Type type, string alias, IReadOnlyList<IncludeNode> includes, int[] aliasCounter)
+            {
+                var metadata = EntitySaveMetadata.For(type);
+                var parts = new List<string>();
+
+                // 列はプロパティ名へ別名付け（[col] AS Prop）して、System.Text.Json でそのまま復元できるようにする
+                foreach (var (propertyName, columnName) in metadata.Columns)
+                {
+                    parts.Add($"{alias}.[{columnName}] AS {propertyName}");
+                }
+
+                // Include した子は相関サブクエリ（FOR JSON）を埋め込む
+                foreach (var node in includes)
+                {
+                    parts.Add(BuildIncludeProjection(node, alias, aliasCounter));
+                }
+
+                return string.Join(", ", parts);
+            }
+
+            private static string BuildIncludeProjection(IncludeNode node, string parentAlias, int[] aliasCounter)
+            {
+                var attribute = node.Property.GetCustomAttribute<NavigationReferenceAttribute>()
+                    ?? throw new InvalidOperationException($"{node.Property.Name} は [NavigationReference] を持つナビゲーションではありません。");
+                var childType = attribute.IsCollection ? node.Property.PropertyType.GetGenericArguments()[0] : node.Property.PropertyType;
+                var childAlias = NextAlias(aliasCounter);
+                var childTable = EntitySaveMetadata.For(childType).TableName;
+
+                // 相関条件: 子方向は 子.[Dependent] = 親.[Principal]、親参照は 親.[Principal] = 自.[Dependent]
+                var correlation = attribute.IsParentReference
+                    ? $"{childAlias}.[{attribute.PrincipalColumn}] = {parentAlias}.[{attribute.DependentColumn}]"
+                    : $"{childAlias}.[{attribute.DependentColumn}] = {parentAlias}.[{attribute.PrincipalColumn}]";
+
+                var childProjection = BuildProjection(childType, childAlias, node.Children, aliasCounter);
+
+                // コレクションは配列、単一参照は WITHOUT_ARRAY_WRAPPER でオブジェクトとして出力する
+                var arrayMode = attribute.IsCollection ? string.Empty : ", WITHOUT_ARRAY_WRAPPER";
+                return $"(SELECT {childProjection} FROM {childTable} AS {childAlias} WHERE {correlation} FOR JSON PATH{arrayMode}) AS {node.Property.Name}";
+            }
+
+            private static string NextAlias(int[] aliasCounter) => "a" + aliasCounter[0]++;
         }
 
         /// <summary>ラムダ式（式木）を SQL の条件・列参照へ変換する</summary>
@@ -1123,6 +1337,9 @@ internal sealed class ScribanCSharpRenderer
             /// <summary>主キーを除くカラムプロパティ</summary>
             public required IReadOnlyList<PropertyInfo> NonKeyProperties { get; init; }
 
+            /// <summary>カラムの (プロパティ名, カラム名) 対応。JSON 射影の別名付け（[col] AS Prop）に使う</summary>
+            public required IReadOnlyList<(string PropertyName, string ColumnName)> Columns { get; init; }
+
             /// <summary>INSERT 文</summary>
             public required string InsertSql { get; init; }
 
@@ -1174,6 +1391,7 @@ internal sealed class ScribanCSharpRenderer
                     KeyProperty = keyProperty,
                     AllProperties = columns,
                     NonKeyProperties = nonKeyProperties,
+                    Columns = columns.Select(property => (property.Name, GetColumnName(property))).ToList(),
                     InsertSql = $"INSERT INTO {tableName} ({string.Join(", ", columns.Select(property => $"[{GetColumnName(property)}]"))}) VALUES ({string.Join(", ", columns.Select(property => $"@{property.Name}"))});",
                     UpdateSql = $"UPDATE {tableName} SET {string.Join(", ", updateAssignments)} WHERE [{keyColumnName}] = @id;",
                     DeleteSql = $"DELETE FROM {tableName} WHERE [{keyColumnName}] = @id;",
