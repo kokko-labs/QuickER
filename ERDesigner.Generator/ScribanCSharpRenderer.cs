@@ -833,17 +833,59 @@ internal sealed class ScribanCSharpRenderer
                 return Convert.ToInt32(result) != 0;
             }
 
+            /// <summary>条件に一致する行を一括削除する。cascadeDelete=true で子孫も FK 連鎖で削除する</summary>
+            public async Task<int> ExecuteDeleteAsync(bool cascadeDelete = false, CancellationToken cancellationToken = default)
+            {
+                var whereClause = BuildWhereClause();
+
+                await using var connection = _connectionFactory.CreateConnection();
+                await connection.OpenAsync(cancellationToken);
+
+                if (!cascadeDelete)
+                {
+                    await using var command = CreateCommand(connection, $"DELETE FROM {_tableName}{whereClause};");
+                    return await command.ExecuteNonQueryAsync(cancellationToken);
+                }
+
+                // カスケード: 子孫→本体の順に並んだ DELETE 文群を 1 トランザクションで実行する
+                await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(cancellationToken);
+
+                try
+                {
+                    var rows = 0;
+
+                    foreach (var sql in CascadeDeletePlanner.BuildDeleteStatements(typeof(TEntity), _tableName, whereClause))
+                    {
+                        await using var command = new SqlCommand(sql, connection, transaction);
+                        AddParameters(command);
+                        rows += await command.ExecuteNonQueryAsync(cancellationToken);
+                    }
+
+                    await transaction.CommitAsync(cancellationToken);
+                    return rows;
+                }
+                catch
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    throw;
+                }
+            }
+
             /// <summary>蓄積したパラメータを設定したコマンドを生成する</summary>
             private SqlCommand CreateCommand(SqlConnection connection, string sql)
             {
                 var command = new SqlCommand(sql, connection);
+                AddParameters(command);
+                return command;
+            }
 
+            /// <summary>蓄積した条件パラメータをコマンドへ設定する</summary>
+            private void AddParameters(SqlCommand command)
+            {
                 foreach (var parameter in _parameters)
                 {
                     command.Parameters.AddWithValue(parameter.Key, parameter.Value ?? DBNull.Value);
                 }
-
-                return command;
             }
 
             /// <summary>WHERE 句を組み立てる（条件なしは空文字）</summary>
@@ -1060,8 +1102,8 @@ internal sealed class ScribanCSharpRenderer
             }
         }
 
-        /// <summary>カスケード対象の子ナビゲーション（プロパティとコレクション種別）</summary>
-        internal sealed record CascadeNavigation(PropertyInfo Property, bool IsCollection);
+        /// <summary>カスケード対象の子ナビゲーション（プロパティ・コレクション種別・子型・FK 情報）</summary>
+        internal sealed record CascadeNavigation(PropertyInfo Property, bool IsCollection, Type ChildType, string PrincipalColumn, string DependentColumn);
 
         /// <summary>保存対象の型ごとに INSERT/UPDATE/DELETE 用 SQL とカスケード子ナビゲーションを構築・保持するメタデータ</summary>
         /// <remarks>型をキーに 1 度だけ構築しキャッシュする（リフレクションコスト削減）</remarks>
@@ -1118,7 +1160,12 @@ internal sealed class ScribanCSharpRenderer
                 var cascades = allProperties
                     .Select(property => (property, attribute: property.GetCustomAttribute<NavigationReferenceAttribute>()))
                     .Where(pair => pair.attribute is { Cascade: true })
-                    .Select(pair => new CascadeNavigation(pair.property, pair.attribute!.IsCollection))
+                    .Select(pair => new CascadeNavigation(
+                        pair.property,
+                        pair.attribute!.IsCollection,
+                        pair.attribute.IsCollection ? pair.property.PropertyType.GetGenericArguments()[0] : pair.property.PropertyType,
+                        pair.attribute.PrincipalColumn,
+                        pair.attribute.DependentColumn))
                     .ToList();
 
                 return new EntitySaveMetadata
@@ -1136,6 +1183,42 @@ internal sealed class ScribanCSharpRenderer
 
             private static string GetColumnName(PropertyInfo property) =>
                 property.GetCustomAttribute<ColumnAttribute>()?.Name ?? property.Name;
+        }
+
+        /// <summary>カスケード削除の DELETE 文群を FK メタデータから組み立てるプランナー（DB 非依存・純粋）</summary>
+        internal static class CascadeDeletePlanner
+        {
+            /// <summary>条件に一致する rootType の行と、その子孫を削除する DELETE 文を「子→親」の実行順で返す</summary>
+            /// <param name="rootTable">角括弧付きのルートテーブル名</param>
+            /// <param name="whereClause">ルートの WHERE 句（" WHERE …" または空文字）</param>
+            public static IReadOnlyList<string> BuildDeleteStatements(Type rootType, string rootTable, string whereClause)
+            {
+                var statements = new List<string>();
+                AppendDescendantDeletes(rootType, rootTable, whereClause, new HashSet<Type> { rootType }, statements);
+                statements.Add($"DELETE FROM {rootTable}{whereClause};");
+                return statements;
+            }
+
+            private static void AppendDescendantDeletes(Type parentType, string parentTable, string parentScopeWhere, HashSet<Type> visited, List<string> statements)
+            {
+                foreach (var navigation in EntitySaveMetadata.For(parentType).CascadeNavigations)
+                {
+                    // 循環するカスケード（自己参照等）は固定ネストでは表現できないため未対応とする
+                    if (!visited.Add(navigation.ChildType))
+                    {
+                        throw new NotSupportedException($"循環するカスケード（{navigation.ChildType.Name}）は ExecuteDeleteAsync では未対応です。グラフをロードして SaveAsync を使うか、DB の ON DELETE CASCADE を利用してください。");
+                    }
+
+                    var childTable = EntitySaveMetadata.For(navigation.ChildType).TableName;
+                    var childScopeWhere = $" WHERE [{navigation.DependentColumn}] IN (SELECT [{navigation.PrincipalColumn}] FROM {parentTable}{parentScopeWhere})";
+
+                    // 先に孫以下を削除してから子を削除する（FK 整合）
+                    AppendDescendantDeletes(navigation.ChildType, childTable, childScopeWhere, visited, statements);
+                    statements.Add($"DELETE FROM {childTable}{childScopeWhere};");
+
+                    visited.Remove(navigation.ChildType);
+                }
+            }
         }
 
         /// <summary>RowState に従ってエンティティのグラフを 1 トランザクションで保存する内部エンジン</summary>

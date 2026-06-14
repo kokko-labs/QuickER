@@ -557,7 +557,7 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("internal static class EntityGraphSaver");
         content.Should().Contain("internal sealed class EntitySaveMetadata");
         content.Should().Contain("public sealed class SaveConflictException : Exception");
-        content.Should().Contain("internal sealed record CascadeNavigation(PropertyInfo Property, bool IsCollection);");
+        content.Should().Contain("internal sealed record CascadeNavigation(PropertyInfo Property, bool IsCollection, Type ChildType, string PrincipalColumn, string DependentColumn);");
         // 更新欠落時の方針（既定は例外、insertWhenUpdateMissing で INSERT へ切替）
         content.Should().Contain("if (insertWhenUpdateMissing)");
         content.Should().Contain("throw new SaveConflictException(");
@@ -565,6 +565,28 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("entity.RowState = RowState.Unchanged;");
         // ApplyToEntity は Updated へ遷移させる
         content.Should().Contain("entity.MarkUpdated();");
+    }
+
+    /// <summary>条件付き一括削除（ExecuteDeleteAsync）とカスケード削除基盤が生成されることを検証する</summary>
+    [Fact]
+    public void Generate_ShouldCreateExecuteDeleteOnQuery()
+    {
+        var result = new CSharpCodeGenerationService().Generate(SingleEntityDiagram(), new CodeGenerationOptions { NamespaceName = "Sample.Domain" });
+
+        result.HasErrors.Should().BeFalse();
+        var content = result.Files[0].Content;
+        // クエリ終端の一括削除（カスケード引数つき）。既存 DeleteAsync(TKey) は維持
+        content.Should().Contain("public async Task<int> ExecuteDeleteAsync(bool cascadeDelete = false, CancellationToken cancellationToken = default)");
+        content.Should().Contain("Task<bool> DeleteAsync(TKey id, CancellationToken cancellationToken = default);");
+        // 非カスケードはセットベースの DELETE
+        content.Should().Contain("$\"DELETE FROM {_tableName}{whereClause};\"");
+        // カスケードは FK のネスト IN(SELECT …) で子から削除（DB 非依存の純粋プランナーで SQL 構築）
+        content.Should().Contain("internal static class CascadeDeletePlanner");
+        content.Should().Contain("public static IReadOnlyList<string> BuildDeleteStatements(Type rootType, string rootTable, string whereClause)");
+        content.Should().Contain("IN (SELECT [{navigation.PrincipalColumn}] FROM {parentTable}{parentScopeWhere})");
+        // 循環カスケードは未対応として明示的に例外
+        content.Should().Contain("循環するカスケード");
+        content.Should().Contain("CascadeNavigations");
     }
 
     /// <summary>Repository の SQL 生成でナビゲーションプロパティが列に含まれないことを検証する</summary>
