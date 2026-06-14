@@ -284,6 +284,8 @@ internal sealed class CSharpGenerationModelBuilder
             IsCollection = nav.IsCollection,
             IsNullable = nav.IsNullable,
             IsParentReference = nav.IsParentReference,
+            // 子方向（親参照でない）ナビゲーションのみカスケード保存/削除の対象とする
+            Cascade = !nav.IsParentReference,
             DisplayTypeName = nav.IsCollection ? $"ICollection<{targetEntityTypeName}>" : (nav.IsNullable ? targetEntityTypeName + "?" : targetEntityTypeName),
             Initializer = nav.IsCollection ? $" = new List<{targetEntityTypeName}>();" : (nav.IsNullable ? string.Empty : " = null!;"),
             PrincipalTableName = nav.PrincipalTableName,
@@ -304,6 +306,7 @@ internal sealed class CSharpGenerationModelBuilder
             IsCollection = nav.IsCollection,
             IsNullable = nav.IsNullable,
             IsParentReference = nav.IsParentReference,
+            Cascade = !nav.IsParentReference,
             DisplayTypeName = nav.IsCollection ? $"ICollection<{targetEditModelTypeName}>" : (nav.IsNullable ? targetEditModelTypeName + "?" : targetEditModelTypeName),
             Initializer = nav.IsCollection ? $" = new List<{targetEditModelTypeName}>();" : (nav.IsNullable ? string.Empty : " = null!;"),
             PrincipalTableName = nav.PrincipalTableName,
@@ -428,6 +431,7 @@ internal sealed class CSharpGenerationModelBuilder
 
         if (options.GenerateRepositories)
         {
+            usings.Add("System.Collections.Concurrent");
             usings.Add("System.Linq.Expressions");
             usings.Add("System.Reflection");
             usings.Add("System.Threading");

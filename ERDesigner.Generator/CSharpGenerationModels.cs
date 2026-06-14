@@ -87,6 +87,9 @@ internal sealed class CSharpNavigationModel
     /// <summary>親（参照される側）への参照かどうか</summary>
     public required bool IsParentReference { get; init; }
 
+    /// <summary>カスケード保存/削除の対象（子方向のナビゲーション）かどうか</summary>
+    public required bool Cascade { get; init; }
+
     /// <summary>表示用の型名（コレクションなら要素型を包んだ表記）</summary>
     public required string DisplayTypeName { get; init; }
 

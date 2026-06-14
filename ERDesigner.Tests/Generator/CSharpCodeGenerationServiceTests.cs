@@ -137,11 +137,17 @@ public class CSharpCodeGenerationServiceTests
         var result = new CSharpCodeGenerationService().Generate(diagram, new CodeGenerationOptions { NamespaceName = "Sample.Domain" });
 
         result.HasErrors.Should().BeFalse();
-        // NavigationReference 属性は (参照元テーブル, 参照元カラム, 参照先テーブル, 参照先カラム, IsCollection) の 5 引数形式
-        result.Files[0].Content.Should().Contain("[NavigationReference(\"customers\", \"customer_id\", \"orders\", \"customer_id\", true)]");
+        // NavigationReference 属性は (参照元テーブル, 参照元カラム, 参照先テーブル, 参照先カラム, IsCollection, Cascade) の 6 引数形式
+        // 子方向（コレクション）はカスケード対象 true
+        result.Files[0].Content.Should().Contain("[NavigationReference(\"customers\", \"customer_id\", \"orders\", \"customer_id\", true, true)]");
         result.Files[0].Content.Should().Contain("public ICollection<OrderEntity> Orders { get; set; } = new List<OrderEntity>();");
         result.Files[0].Content.Should().Contain("[JsonIgnore]");
         result.Files[0].Content.Should().Contain("public CustomerEntity Customer { get; set; } = null!;");
+        // 親参照（多対1の戻り）はカスケード対象外 false
+        result.Files[0].Content.Should().Contain("[NavigationReference(\"customers\", \"customer_id\", \"orders\", \"customer_id\", false, false)]");
+        // エンティティは EntityBase を継承し、RowState を持つ
+        result.Files[0].Content.Should().Contain("public partial class CustomerEntity : EntityBase");
+        result.Files[0].Content.Should().Contain("public abstract class EntityBase");
     }
 
     /// <summary>
@@ -528,6 +534,37 @@ public class CSharpCodeGenerationServiceTests
         // 値はパラメータ化、OFFSET/FETCH でページング
         content.Should().Contain("AddWithValue(parameter.Key, parameter.Value ?? DBNull.Value)");
         content.Should().Contain("FETCH NEXT {take.Value} ROWS ONLY");
+    }
+
+    /// <summary>RowState ベースのカスケード Save 基盤（EntityBase / SaveAsync / 保存エンジン）が生成されることを検証する</summary>
+    [Fact]
+    public void Generate_ShouldCreateCascadeSaveInfrastructure()
+    {
+        var result = new CSharpCodeGenerationService().Generate(SingleEntityDiagram(), new CodeGenerationOptions { NamespaceName = "Sample.Domain" });
+
+        result.HasErrors.Should().BeFalse();
+        var content = result.Files[0].Content;
+        // 状態管理
+        content.Should().Contain("public enum RowState");
+        content.Should().Contain("public abstract class EntityBase");
+        content.Should().Contain("public RowState RowState { get; set; } = RowState.Added;");
+        content.Should().Contain("public void MarkRemoved() => RowState = RowState.Removed;");
+        // リポジトリ・インターフェースの Save 入口（既定でカスケード、既定は更新欠落で例外）
+        content.Should().Contain("Task<int> SaveAsync(TEntity entity, bool cascadeSave = true, bool cascadeDelete = true, bool insertWhenUpdateMissing = false, CancellationToken cancellationToken = default)");
+        content.Should().Contain("public async Task<int> SaveAsync(TEntity entity");
+        content.Should().Contain("await connection.BeginTransactionAsync(cancellationToken)");
+        // 保存エンジン・競合例外・メタデータ・連鎖情報
+        content.Should().Contain("internal static class EntityGraphSaver");
+        content.Should().Contain("internal sealed class EntitySaveMetadata");
+        content.Should().Contain("public sealed class SaveConflictException : Exception");
+        content.Should().Contain("internal sealed record CascadeNavigation(PropertyInfo Property, bool IsCollection);");
+        // 更新欠落時の方針（既定は例外、insertWhenUpdateMissing で INSERT へ切替）
+        content.Should().Contain("if (insertWhenUpdateMissing)");
+        content.Should().Contain("throw new SaveConflictException(");
+        // DB ロード時は Unchanged に確定する
+        content.Should().Contain("entity.RowState = RowState.Unchanged;");
+        // ApplyToEntity は Updated へ遷移させる
+        content.Should().Contain("entity.MarkUpdated();");
     }
 
     /// <summary>Repository の SQL 生成でナビゲーションプロパティが列に含まれないことを検証する</summary>

@@ -35,14 +35,69 @@ internal sealed class ScribanCSharpRenderer
             /// <summary>コレクション（1 対多）ナビゲーションかどうか</summary>
             public bool IsCollection { get; }
 
+            /// <summary>カスケード保存/削除の対象（子方向のナビゲーション）かどうか</summary>
+            public bool Cascade { get; }
+
             /// <summary>参照テーブル・カラム情報を受け取り初期化する</summary>
-            public NavigationReferenceAttribute(string principalTable, string principalColumn, string dependentTable, string dependentColumn, bool isCollection)
+            public NavigationReferenceAttribute(string principalTable, string principalColumn, string dependentTable, string dependentColumn, bool isCollection, bool cascade)
             {
                 PrincipalTable = principalTable;
                 PrincipalColumn = principalColumn;
                 DependentTable = dependentTable;
                 DependentColumn = dependentColumn;
                 IsCollection = isCollection;
+                Cascade = cascade;
+            }
+        }
+        {{ end }}
+        {{~ if entity_classes.size > 0 ~}}
+        /// <summary>エンティティの変更状態</summary>
+        public enum RowState
+        {
+            /// <summary>追加対象（新規）</summary>
+            Added,
+
+            /// <summary>変更なし（保存済み）</summary>
+            Unchanged,
+
+            /// <summary>更新対象</summary>
+            Updated,
+
+            /// <summary>削除対象</summary>
+            Removed,
+        }
+
+        /// <summary>エンティティの変更状態（RowState）を保持する基底クラス</summary>
+        public abstract class EntityBase
+        {
+            /// <summary>このエンティティの変更状態（既定は新規追加）</summary>
+            public RowState RowState { get; set; } = RowState.Added;
+
+            /// <summary>追加対象かどうか</summary>
+            public bool IsAdded => RowState == RowState.Added;
+
+            /// <summary>更新対象かどうか</summary>
+            public bool IsUpdated => RowState == RowState.Updated;
+
+            /// <summary>削除対象かどうか</summary>
+            public bool IsRemoved => RowState == RowState.Removed;
+
+            /// <summary>変更（追加・更新・削除）があるかどうか</summary>
+            public bool HasChanges => RowState != RowState.Unchanged;
+
+            /// <summary>削除対象としてマークする（コレクションには残したまま Save で削除される）</summary>
+            public void MarkRemoved() => RowState = RowState.Removed;
+
+            /// <summary>変更なし（保存済み）状態にする</summary>
+            public void MarkUnchanged() => RowState = RowState.Unchanged;
+
+            /// <summary>変更なしのときのみ更新対象としてマークする</summary>
+            public void MarkUpdated()
+            {
+                if (RowState == RowState.Unchanged)
+                {
+                    RowState = RowState.Updated;
+                }
             }
         }
         {{ end }}
@@ -51,7 +106,7 @@ internal sealed class ScribanCSharpRenderer
 
         {{ end }}/// <summary>{{ item.table_name }} テーブルに対応するエンティティ</summary>
         {{ if include_data_annotations }}[Table("{{ item.table_name }}")]
-        {{ end }}public partial class {{ item.class_name }}
+        {{ end }}public partial class {{ item.class_name }} : EntityBase
         {
         {{ for property in item.properties }}    /// <summary>{{ property.column_name }} 列に対応するプロパティ</summary>
         {{ if include_data_annotations && property.is_primary_key }}    [Key]
@@ -62,7 +117,7 @@ internal sealed class ScribanCSharpRenderer
 
         {{ end }}{{ for navigation in item.navigations }}    /// <summary>{{ navigation.property_name }} ナビゲーションプロパティ</summary>
         {{ if include_json_ignore_on_parent_navigation && navigation.is_parent_reference }}    [JsonIgnore]
-        {{ end }}    [NavigationReference("{{ navigation.principal_table_name }}", "{{ navigation.principal_column_name }}", "{{ navigation.dependent_table_name }}", "{{ navigation.dependent_column_name }}", {{ navigation.is_collection }})]
+        {{ end }}    [NavigationReference("{{ navigation.principal_table_name }}", "{{ navigation.principal_column_name }}", "{{ navigation.dependent_table_name }}", "{{ navigation.dependent_column_name }}", {{ navigation.is_collection }}, {{ navigation.cascade }})]
             public {{ navigation.display_type_name }} {{ navigation.property_name }} { get; set; }{{ navigation.initializer }}
 
         {{ end }}}
@@ -337,7 +392,8 @@ internal sealed class ScribanCSharpRenderer
             {
         {{ for prop in mapper.scalar_properties }}{{ if prop.edit_model_is_nullable && prop.entity_type_name != prop.edit_model_type_name }}        entity.{{ prop.property_name }} = editModel.{{ prop.property_name }} ?? throw new InvalidOperationException("{{ prop.property_name }} が未入力です。");
         {{ else }}        entity.{{ prop.property_name }} = editModel.{{ prop.property_name }};
-        {{ end }}{{ end }}        OnEntityApplied(editModel, entity);
+        {{ end }}{{ end }}        entity.MarkUpdated();
+                OnEntityApplied(editModel, entity);
             }
 
             /// <summary>{{ mapper.edit_model_class_name }} の確定値を {{ mapper.entity_class_name }} へ反映した後に呼ばれる（partial 実装で追加プロパティを保存）</summary>
@@ -359,7 +415,7 @@ internal sealed class ScribanCSharpRenderer
         {{~ if repository_classes.size > 0 ~}}
         /// <summary>エンティティの CRUD 操作を提供するリポジトリ共通インターフェース</summary>
         public interface IRepository<TEntity, TKey>
-            where TEntity : class, new()
+            where TEntity : EntityBase, new()
         {
             /// <summary>主キーによる単一エンティティ取得（該当なしは null）</summary>
             Task<TEntity?> GetByIdAsync(TKey id, CancellationToken cancellationToken = default);
@@ -378,6 +434,14 @@ internal sealed class ScribanCSharpRenderer
 
             /// <summary>検索条件・並び順をチェーン指定して取得するクエリを開始する</summary>
             SqlQuery<TEntity> Query();
+
+            /// <summary>RowState に従って 1 トランザクションで追加・更新・削除を保存する（既定で子をカスケード）</summary>
+            /// <param name="entity">保存対象（集約ルート）</param>
+            /// <param name="cascadeSave">子オブジェクトを連鎖的に保存するか</param>
+            /// <param name="cascadeDelete">削除時に子オブジェクトを連鎖削除するか</param>
+            /// <param name="insertWhenUpdateMissing">更新対象が存在しない場合に INSERT へ切り替えるか（既定は例外）</param>
+            /// <returns>保存したレコード数</returns>
+            Task<int> SaveAsync(TEntity entity, bool cascadeSave = true, bool cascadeDelete = true, bool insertWhenUpdateMissing = false, CancellationToken cancellationToken = default);
         }
 
         /// <summary>SQL Server 接続を生成するファクトリ</summary>
@@ -397,7 +461,7 @@ internal sealed class ScribanCSharpRenderer
         /// <summary>エンティティ型の属性からテーブル・カラム情報と CRUD 用 SQL を構築・保持するメタデータ</summary>
         /// <remarks>型ごとに 1 度だけ構築し静的フィールドで再利用する（リフレクションコスト削減）</remarks>
         internal sealed class SqlEntityMetadata<TEntity, TKey>
-            where TEntity : class, new()
+            where TEntity : EntityBase, new()
         {
             /// <summary>角括弧で囲んだテーブル名</summary>
             public required string TableName { get; init; }
@@ -443,6 +507,7 @@ internal sealed class ScribanCSharpRenderer
                     .Where(property =>
                         property.CanRead
                         && property.CanWrite
+                        && property.DeclaringType != typeof(EntityBase)
                         && property.GetCustomAttribute<NavigationReferenceAttribute>() is null
                     )
                     .ToList();
@@ -492,6 +557,8 @@ internal sealed class ScribanCSharpRenderer
                     }
                 }
 
+                // DB から読み込んだ行は変更なし扱いにする（その後の編集で Updated に遷移）
+                entity.RowState = RowState.Unchanged;
                 return entity;
             }
 
@@ -529,7 +596,7 @@ internal sealed class ScribanCSharpRenderer
         /// <summary>メタデータを用いて CRUD を実装する SQL Server 向けリポジトリ基底クラス</summary>
         public abstract class SqlServerRepository<TEntity, TKey>(ISqlConnectionFactory connectionFactory)
             : IRepository<TEntity, TKey>
-            where TEntity : class, new()
+            where TEntity : EntityBase, new()
         {
             /// <summary>エンティティ型ごとに 1 度だけ構築されるメタデータ（静的キャッシュ）</summary>
             private static readonly SqlEntityMetadata<TEntity, TKey> _metadata = SqlEntityMetadata<TEntity, TKey>.Create();
@@ -619,6 +686,39 @@ internal sealed class ScribanCSharpRenderer
             /// <summary>検索条件・並び順をチェーン指定して取得するクエリを開始する</summary>
             public SqlQuery<TEntity> Query() =>
                 new(_connectionFactory, _metadata.TableName, _metadata.ColumnList, _metadata.MapEntity);
+
+            /// <summary>RowState に従って 1 トランザクションで追加・更新・削除を保存する（既定で子をカスケード）</summary>
+            public async Task<int> SaveAsync(TEntity entity, bool cascadeSave = true, bool cascadeDelete = true, bool insertWhenUpdateMissing = false, CancellationToken cancellationToken = default)
+            {
+                ArgumentNullException.ThrowIfNull(entity);
+
+                // グラフ全体に変更が無ければ接続も張らずに終了する
+                if (!EntityGraphSaver.HasChanges(entity, cascadeSave))
+                {
+                    return 0;
+                }
+
+                await using var connection = _connectionFactory.CreateConnection();
+                await connection.OpenAsync(cancellationToken);
+
+                // カスケードを含むグラフ全体を 1 接続・1 トランザクションで保存（MSDTC 昇格を避ける）
+                await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(cancellationToken);
+
+                try
+                {
+                    var rows = await EntityGraphSaver.SaveAsync(entity, connection, transaction, cascadeSave, cascadeDelete, insertWhenUpdateMissing, cancellationToken);
+                    await transaction.CommitAsync(cancellationToken);
+
+                    // コミット成功後に状態を確定（Added/Updated → Unchanged）し、再保存での二重処理を防ぐ
+                    EntityGraphSaver.AcceptChanges(entity, cascadeSave);
+                    return rows;
+                }
+                catch
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    throw;
+                }
+            }
         }
 
         /// <summary>検索条件・並び順をチェーンで構築し、終端メソッド（ToListAsync 等）で実行するクエリ</summary>
@@ -949,6 +1049,263 @@ internal sealed class ScribanCSharpRenderer
             /// <summary>LIKE のワイルドカード（% _ [ \）をエスケープする</summary>
             private static string EscapeLike(string value) =>
                 value.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_").Replace("[", "\\[");
+        }
+
+        /// <summary>更新対象のレコードが存在しなかった（他者削除等の競合）ことを表す例外</summary>
+        public sealed class SaveConflictException : Exception
+        {
+            /// <summary>メッセージを指定して初期化する</summary>
+            public SaveConflictException(string message) : base(message)
+            {
+            }
+        }
+
+        /// <summary>カスケード対象の子ナビゲーション（プロパティとコレクション種別）</summary>
+        internal sealed record CascadeNavigation(PropertyInfo Property, bool IsCollection);
+
+        /// <summary>保存対象の型ごとに INSERT/UPDATE/DELETE 用 SQL とカスケード子ナビゲーションを構築・保持するメタデータ</summary>
+        /// <remarks>型をキーに 1 度だけ構築しキャッシュする（リフレクションコスト削減）</remarks>
+        internal sealed class EntitySaveMetadata
+        {
+            private static readonly ConcurrentDictionary<Type, EntitySaveMetadata> _cache = new();
+
+            /// <summary>角括弧で囲んだテーブル名</summary>
+            public required string TableName { get; init; }
+
+            /// <summary>主キーに対応するプロパティ</summary>
+            public required PropertyInfo KeyProperty { get; init; }
+
+            /// <summary>マッピング対象の全カラムプロパティ（ナビゲーション・基底プロパティ除く）</summary>
+            public required IReadOnlyList<PropertyInfo> AllProperties { get; init; }
+
+            /// <summary>主キーを除くカラムプロパティ</summary>
+            public required IReadOnlyList<PropertyInfo> NonKeyProperties { get; init; }
+
+            /// <summary>INSERT 文</summary>
+            public required string InsertSql { get; init; }
+
+            /// <summary>UPDATE 文</summary>
+            public required string UpdateSql { get; init; }
+
+            /// <summary>DELETE 文</summary>
+            public required string DeleteSql { get; init; }
+
+            /// <summary>カスケード対象の子ナビゲーション</summary>
+            public required IReadOnlyList<CascadeNavigation> CascadeNavigations { get; init; }
+
+            /// <summary>指定型のメタデータを取得する（型ごとに 1 度だけ構築しキャッシュ）</summary>
+            public static EntitySaveMetadata For(Type entityType) => _cache.GetOrAdd(entityType, Build);
+
+            private static EntitySaveMetadata Build(Type entityType)
+            {
+                var tableAttribute = entityType.GetCustomAttribute<TableAttribute>()
+                    ?? throw new InvalidOperationException($"{entityType.Name} に [Table] 属性が必要です。");
+                var allProperties = entityType.GetProperties(BindingFlags.Public | BindingFlags.Instance).ToList();
+                var columns = allProperties
+                    .Where(property =>
+                        property.CanRead
+                        && property.CanWrite
+                        && property.DeclaringType != typeof(EntityBase)
+                        && property.GetCustomAttribute<NavigationReferenceAttribute>() is null
+                    )
+                    .ToList();
+                var keyProperty = columns.SingleOrDefault(property => property.GetCustomAttribute<KeyAttribute>() is not null)
+                    ?? throw new InvalidOperationException($"{entityType.Name} に [Key] 属性付きプロパティが必要です。");
+                var nonKeyProperties = columns.Where(property => property != keyProperty).ToList();
+                var tableName = $"[{tableAttribute.Name}]";
+                var keyColumnName = GetColumnName(keyProperty);
+                var updateAssignments = nonKeyProperties.Select(property => $"[{GetColumnName(property)}] = @{property.Name}");
+                var cascades = allProperties
+                    .Select(property => (property, attribute: property.GetCustomAttribute<NavigationReferenceAttribute>()))
+                    .Where(pair => pair.attribute is { Cascade: true })
+                    .Select(pair => new CascadeNavigation(pair.property, pair.attribute!.IsCollection))
+                    .ToList();
+
+                return new EntitySaveMetadata
+                {
+                    TableName = tableName,
+                    KeyProperty = keyProperty,
+                    AllProperties = columns,
+                    NonKeyProperties = nonKeyProperties,
+                    InsertSql = $"INSERT INTO {tableName} ({string.Join(", ", columns.Select(property => $"[{GetColumnName(property)}]"))}) VALUES ({string.Join(", ", columns.Select(property => $"@{property.Name}"))});",
+                    UpdateSql = $"UPDATE {tableName} SET {string.Join(", ", updateAssignments)} WHERE [{keyColumnName}] = @id;",
+                    DeleteSql = $"DELETE FROM {tableName} WHERE [{keyColumnName}] = @id;",
+                    CascadeNavigations = cascades,
+                };
+            }
+
+            private static string GetColumnName(PropertyInfo property) =>
+                property.GetCustomAttribute<ColumnAttribute>()?.Name ?? property.Name;
+        }
+
+        /// <summary>RowState に従ってエンティティのグラフを 1 トランザクションで保存する内部エンジン</summary>
+        internal static class EntityGraphSaver
+        {
+            /// <summary>自身、または（cascade 時）子に変更があるか</summary>
+            public static bool HasChanges(EntityBase entity, bool cascade) =>
+                entity.HasChanges || (cascade && EnumerateCascadeChildren(entity).Any(child => HasChanges(child, true)));
+
+            /// <summary>グラフを保存し、保存したレコード数を返す</summary>
+            public static async Task<int> SaveAsync(EntityBase entity, SqlConnection connection, SqlTransaction transaction, bool cascadeSave, bool cascadeDelete, bool insertWhenUpdateMissing, CancellationToken cancellationToken)
+            {
+                if (!HasChanges(entity, cascadeSave))
+                {
+                    return 0;
+                }
+
+                var rows = 0;
+
+                if (entity.IsRemoved)
+                {
+                    // 削除は子（サブツリー）を先に削除してから自身を削除する（FK 整合）
+                    if (cascadeDelete)
+                    {
+                        foreach (var child in EnumerateCascadeChildren(entity))
+                        {
+                            rows += await DeleteGraphAsync(child, connection, transaction, cancellationToken);
+                        }
+                    }
+
+                    rows += await ExecuteAsync(entity, meta => meta.DeleteSql, BindKey, connection, transaction, cancellationToken);
+                    return rows;
+                }
+
+                // 追加・更新は自身を先に保存してから子へ進む（子 FK が親 PK を参照するため）
+                if (entity.IsAdded)
+                {
+                    rows += await ExecuteAsync(entity, meta => meta.InsertSql, BindAll, connection, transaction, cancellationToken);
+                }
+                else if (entity.IsUpdated)
+                {
+                    rows += await UpdateAsync(entity, connection, transaction, insertWhenUpdateMissing, cancellationToken);
+                }
+
+                if (cascadeSave)
+                {
+                    foreach (var child in EnumerateCascadeChildren(entity))
+                    {
+                        rows += await SaveAsync(child, connection, transaction, cascadeSave, cascadeDelete, insertWhenUpdateMissing, cancellationToken);
+                    }
+                }
+
+                return rows;
+            }
+
+            /// <summary>コミット後に保存済みエンティティを Unchanged に確定する</summary>
+            public static void AcceptChanges(EntityBase entity, bool cascade)
+            {
+                if (entity.IsRemoved)
+                {
+                    return;
+                }
+
+                entity.MarkUnchanged();
+
+                if (cascade)
+                {
+                    foreach (var child in EnumerateCascadeChildren(entity))
+                    {
+                        AcceptChanges(child, true);
+                    }
+                }
+            }
+
+            /// <summary>サブツリーを子から順に削除する（状態に関わらず削除）</summary>
+            private static async Task<int> DeleteGraphAsync(EntityBase entity, SqlConnection connection, SqlTransaction transaction, CancellationToken cancellationToken)
+            {
+                var rows = 0;
+
+                foreach (var child in EnumerateCascadeChildren(entity))
+                {
+                    rows += await DeleteGraphAsync(child, connection, transaction, cancellationToken);
+                }
+
+                rows += await ExecuteAsync(entity, meta => meta.DeleteSql, BindKey, connection, transaction, cancellationToken);
+                return rows;
+            }
+
+            private static async Task<int> UpdateAsync(EntityBase entity, SqlConnection connection, SqlTransaction transaction, bool insertWhenUpdateMissing, CancellationToken cancellationToken)
+            {
+                var affected = await ExecuteAsync(entity, meta => meta.UpdateSql, BindUpdate, connection, transaction, cancellationToken);
+
+                if (affected != 0)
+                {
+                    return affected;
+                }
+
+                // 更新対象が存在しない（他ユーザーの削除等）。方針に応じて INSERT へ切替、または競合として通知する
+                if (insertWhenUpdateMissing)
+                {
+                    return await ExecuteAsync(entity, meta => meta.InsertSql, BindAll, connection, transaction, cancellationToken);
+                }
+
+                var metadata = EntitySaveMetadata.For(entity.GetType());
+                throw new SaveConflictException($"更新対象のレコードが見つかりませんでした（{entity.GetType().Name}、キー {metadata.KeyProperty.GetValue(entity)}）。他のユーザーに削除された可能性があります。");
+            }
+
+            private static async Task<int> ExecuteAsync(EntityBase entity, Func<EntitySaveMetadata, string> sqlSelector, Action<SqlCommand, EntityBase, EntitySaveMetadata> bind, SqlConnection connection, SqlTransaction transaction, CancellationToken cancellationToken)
+            {
+                var metadata = EntitySaveMetadata.For(entity.GetType());
+
+                await using var command = new SqlCommand(sqlSelector(metadata), connection, transaction);
+                bind(command, entity, metadata);
+                return await command.ExecuteNonQueryAsync(cancellationToken);
+            }
+
+            private static void BindAll(SqlCommand command, EntityBase entity, EntitySaveMetadata metadata)
+            {
+                foreach (var property in metadata.AllProperties)
+                {
+                    command.Parameters.AddWithValue($"@{property.Name}", property.GetValue(entity) ?? DBNull.Value);
+                }
+            }
+
+            private static void BindUpdate(SqlCommand command, EntityBase entity, EntitySaveMetadata metadata)
+            {
+                foreach (var property in metadata.NonKeyProperties)
+                {
+                    command.Parameters.AddWithValue($"@{property.Name}", property.GetValue(entity) ?? DBNull.Value);
+                }
+
+                command.Parameters.AddWithValue("@id", metadata.KeyProperty.GetValue(entity) ?? DBNull.Value);
+            }
+
+            private static void BindKey(SqlCommand command, EntityBase entity, EntitySaveMetadata metadata)
+            {
+                command.Parameters.AddWithValue("@id", metadata.KeyProperty.GetValue(entity) ?? DBNull.Value);
+            }
+
+            /// <summary>カスケード対象の子エンティティを列挙する（null は除外）</summary>
+            private static IEnumerable<EntityBase> EnumerateCascadeChildren(EntityBase entity)
+            {
+                foreach (var navigation in EntitySaveMetadata.For(entity.GetType()).CascadeNavigations)
+                {
+                    var value = navigation.Property.GetValue(entity);
+
+                    if (value is null)
+                    {
+                        continue;
+                    }
+
+                    if (navigation.IsCollection)
+                    {
+                        if (value is IEnumerable<EntityBase> children)
+                        {
+                            foreach (var child in children)
+                            {
+                                if (child is not null)
+                                {
+                                    yield return child;
+                                }
+                            }
+                        }
+                    }
+                    else if (value is EntityBase child)
+                    {
+                        yield return child;
+                    }
+                }
+            }
         }
 
         /// <summary>生成されたリポジトリ群を DI コンテナへ登録する拡張</summary>
