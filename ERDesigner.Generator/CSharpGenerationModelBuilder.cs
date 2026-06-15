@@ -432,6 +432,7 @@ internal sealed class CSharpGenerationModelBuilder
         if (options.GenerateRepositories)
         {
             usings.Add("System.Collections.Concurrent");
+            usings.Add("System.Data");
             usings.Add("System.Linq.Expressions");
             usings.Add("System.Reflection");
             usings.Add("System.Text.Json");

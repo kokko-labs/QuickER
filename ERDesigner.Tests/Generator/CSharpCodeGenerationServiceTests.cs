@@ -557,6 +557,13 @@ public class CSharpCodeGenerationServiceTests
         // 複数集約ルートを 1 トランザクションでまとめて保存するコレクション overload
         content.Should().Contain("Task<int> SaveAsync(IEnumerable<TEntity> entities, bool cascadeSave = true, bool cascadeDelete = true, bool insertWhenUpdateMissing = false, CancellationToken cancellationToken = default)");
         content.Should().Contain("public async Task<int> SaveAsync(IEnumerable<TEntity> entities");
+        // SqlBulkCopy によるコレクション一括追加（IDataReader でストリーミング）
+        content.Should().Contain("Task<int> BulkInsertAsync(IEnumerable<TEntity> entities, CancellationToken cancellationToken = default)");
+        content.Should().Contain("public async Task<int> BulkInsertAsync(IEnumerable<TEntity> entities");
+        content.Should().Contain("new SqlBulkCopy(connection) { DestinationTableName = _metadata.TableName }");
+        content.Should().Contain("using var reader = _metadata.CreateDataReader(entities);");
+        content.Should().Contain("await bulkCopy.WriteToServerAsync(reader, cancellationToken);");
+        content.Should().Contain("private sealed class EntityDataReader : IDataReader");
         // 保存エンジン・競合例外・メタデータ・連鎖情報
         content.Should().Contain("internal static class EntityGraphSaver");
         content.Should().Contain("internal sealed class EntitySaveMetadata");

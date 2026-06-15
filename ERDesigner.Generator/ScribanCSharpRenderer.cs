@@ -430,6 +430,11 @@ internal sealed class ScribanCSharpRenderer
             /// <summary>エンティティ追加</summary>
             Task InsertAsync(TEntity entity, CancellationToken cancellationToken = default);
 
+            /// <summary>エンティティのコレクションを SqlBulkCopy で一括追加する</summary>
+            /// <param name="entities">追加対象の一覧</param>
+            /// <returns>追加した件数</returns>
+            Task<int> BulkInsertAsync(IEnumerable<TEntity> entities, CancellationToken cancellationToken = default);
+
             /// <summary>エンティティ更新（更新対象ありで true）</summary>
             Task<bool> UpdateAsync(TEntity entity, CancellationToken cancellationToken = default);
 
@@ -583,6 +588,106 @@ internal sealed class ScribanCSharpRenderer
                 }
             }
 
+            /// <summary>エンティティのコレクションを 1 行ずつ読み出す SqlBulkCopy 用の IDataReader を生成する</summary>
+            public IDataReader CreateDataReader(IEnumerable<TEntity> entities) => new EntityDataReader(AllProperties, entities);
+
+            /// <summary>エンティティ列を 1 行ずつ読み出して SqlBulkCopy へ流す IDataReader（DataTable を介さずメモリ効率を高める）</summary>
+            /// <remarks>SqlBulkCopy は Read・GetValue・FieldCount・GetName・GetOrdinal のみ使用するため、それ以外の型付き取得は未対応とする</remarks>
+            private sealed class EntityDataReader : IDataReader
+            {
+                private readonly IReadOnlyList<PropertyInfo> _properties;
+                private readonly string[] _columnNames;
+                private readonly IEnumerator<TEntity> _enumerator;
+
+                public EntityDataReader(IReadOnlyList<PropertyInfo> properties, IEnumerable<TEntity> entities)
+                {
+                    _properties = properties;
+                    _columnNames = properties.Select(GetColumnName).ToArray();
+                    _enumerator = entities.GetEnumerator();
+                }
+
+                public int FieldCount => _properties.Count;
+
+                public bool Read() => _enumerator.MoveNext();
+
+                public object GetValue(int i) => _properties[i].GetValue(_enumerator.Current) ?? DBNull.Value;
+
+                public string GetName(int i) => _columnNames[i];
+
+                public int GetOrdinal(string name)
+                {
+                    var index = Array.IndexOf(_columnNames, name);
+                    return index >= 0 ? index : throw new IndexOutOfRangeException($"列 {name} は存在しません。");
+                }
+
+                // Nullable<T> は基底型を返す（SqlBulkCopy の列型解決と整合させる）
+                public Type GetFieldType(int i) => Nullable.GetUnderlyingType(_properties[i].PropertyType) ?? _properties[i].PropertyType;
+
+                public bool IsDBNull(int i) => GetValue(i) is DBNull;
+
+                public object this[int i] => GetValue(i);
+
+                public object this[string name] => GetValue(GetOrdinal(name));
+
+                public int GetValues(object[] values)
+                {
+                    var count = Math.Min(values.Length, FieldCount);
+                    for (var i = 0; i < count; i++)
+                    {
+                        values[i] = GetValue(i);
+                    }
+
+                    return count;
+                }
+
+                public void Dispose() => _enumerator.Dispose();
+
+                public int Depth => 0;
+
+                public bool IsClosed => false;
+
+                public int RecordsAffected => -1;
+
+                public void Close() { }
+
+                public bool NextResult() => false;
+
+                public DataTable? GetSchemaTable() => null;
+
+                // 以降は SqlBulkCopy では呼ばれないため未対応とする
+                public bool GetBoolean(int i) => throw new NotSupportedException();
+
+                public byte GetByte(int i) => throw new NotSupportedException();
+
+                public long GetBytes(int i, long fieldOffset, byte[]? buffer, int bufferOffset, int length) => throw new NotSupportedException();
+
+                public char GetChar(int i) => throw new NotSupportedException();
+
+                public long GetChars(int i, long fieldOffset, char[]? buffer, int bufferOffset, int length) => throw new NotSupportedException();
+
+                public IDataReader GetData(int i) => throw new NotSupportedException();
+
+                public string GetDataTypeName(int i) => throw new NotSupportedException();
+
+                public DateTime GetDateTime(int i) => throw new NotSupportedException();
+
+                public decimal GetDecimal(int i) => throw new NotSupportedException();
+
+                public double GetDouble(int i) => throw new NotSupportedException();
+
+                public float GetFloat(int i) => throw new NotSupportedException();
+
+                public Guid GetGuid(int i) => throw new NotSupportedException();
+
+                public short GetInt16(int i) => throw new NotSupportedException();
+
+                public int GetInt32(int i) => throw new NotSupportedException();
+
+                public long GetInt64(int i) => throw new NotSupportedException();
+
+                public string GetString(int i) => throw new NotSupportedException();
+            }
+
             /// <summary>UPDATE 用パラメータ（非キー列＋主キー）を設定する</summary>
             public void BindUpdateParameters(SqlCommand command, TEntity entity)
             {
@@ -665,6 +770,34 @@ internal sealed class ScribanCSharpRenderer
                 await using var command = new SqlCommand(_metadata.InsertSql, connection);
                 _metadata.BindInsertParameters(command, entity);
                 await command.ExecuteNonQueryAsync(cancellationToken);
+            }
+
+            /// <summary>エンティティのコレクションを SqlBulkCopy で一括追加する</summary>
+            public async Task<int> BulkInsertAsync(IEnumerable<TEntity> entities, CancellationToken cancellationToken = default)
+            {
+                ArgumentNullException.ThrowIfNull(entities);
+
+                // 件数が確定しているコレクションが空なら接続を張らずに終了する
+                if (entities is ICollection<TEntity> { Count: 0 })
+                {
+                    return 0;
+                }
+
+                await using var connection = _connectionFactory.CreateConnection();
+                await connection.OpenAsync(cancellationToken);
+
+                using var bulkCopy = new SqlBulkCopy(connection) { DestinationTableName = _metadata.TableName };
+                using var reader = _metadata.CreateDataReader(entities);
+
+                // 列名（DB カラム名）で明示マッピングし、列順への依存を避ける
+                for (var i = 0; i < reader.FieldCount; i++)
+                {
+                    var columnName = reader.GetName(i);
+                    bulkCopy.ColumnMappings.Add(columnName, columnName);
+                }
+
+                await bulkCopy.WriteToServerAsync(reader, cancellationToken);
+                return bulkCopy.RowsCopied;
             }
 
             /// <summary>エンティティ更新（更新対象ありで true）</summary>
