@@ -147,7 +147,7 @@ public class CSharpCodeGenerationServiceTests
         result.Files[0].Content.Should().Contain("[NavigationReference(\"customers\", \"customer_id\", \"orders\", \"customer_id\", false, false, true)]");
         // エンティティは EntityBase を継承し、RowState を持つ
         result.Files[0].Content.Should().Contain("public partial class CustomerEntity : EntityBase");
-        result.Files[0].Content.Should().Contain("public abstract class EntityBase");
+        result.Files[0].Content.Should().Contain("public abstract partial class EntityBase");
 
         var content = result.Files[0].Content;
         // EditModel も RowState を保持し、確定値変更時に Updated へ昇格する
@@ -169,7 +169,10 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("entity.RowState = editModel.RowState;");
         content.Should().Contain("entity.Orders.Add(new OrderMapper().CreateEntity(child, includeRemoved));");
         // 削除追跡コレクションと、includeRemoved 指定時の Removed 復元
-        content.Should().Contain("public sealed class EditModelCollection<T> : ObservableCollection<T>");
+        content.Should().Contain("public sealed partial class EditModelCollection<T> : ObservableCollection<T>");
+        // EditModel 列挙を受け取るコンストラクタと、Entity 列挙から生成する Mapper メソッド
+        content.Should().Contain("public EditModelCollection(IEnumerable<T> items)");
+        content.Should().Contain("public EditModelCollection<OrderEditModel> CreateEditModels(IEnumerable<OrderEntity> entities)");
         content.Should().Contain("public EditModelCollection<OrderEditModel> Orders { get; set; } = new EditModelCollection<OrderEditModel>();");
         content.Should().Contain("public void ApplyToEntity(CustomerEditModel editModel, CustomerEntity entity, bool includeRemoved = false)");
         content.Should().Contain("foreach (var removed in editModel.Orders.RemovedItems)");
@@ -574,7 +577,7 @@ public class CSharpCodeGenerationServiceTests
         var content = result.Files[0].Content;
         // 状態管理
         content.Should().Contain("public enum RowState");
-        content.Should().Contain("public abstract class EntityBase");
+        content.Should().Contain("public abstract partial class EntityBase");
         content.Should().Contain("public RowState RowState { get; set; } = RowState.Unchanged;");
         content.Should().Contain("public void MarkAdded() => RowState = RowState.Added;");
         content.Should().Contain("public void MarkRemoved() => RowState = RowState.Removed;");

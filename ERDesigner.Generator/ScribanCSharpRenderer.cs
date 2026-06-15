@@ -313,6 +313,17 @@ internal sealed class ScribanCSharpRenderer
             /// <summary>Remove で外した削除対象（Removed）の退避先</summary>
             private readonly List<T> _removed = new();
 
+            /// <summary>空のコレクションを生成する</summary>
+            public EditModelCollection()
+            {
+            }
+
+            /// <summary>既存の EditModel 群を初期要素として生成する（削除追跡はしない）</summary>
+            public EditModelCollection(IEnumerable<T> items)
+                : base(items)
+            {
+            }
+
             /// <summary>Remove で外した削除対象（Removed）の一覧</summary>
             public IReadOnlyList<T> RemovedItems => _removed;
 
@@ -527,6 +538,19 @@ internal sealed class ScribanCSharpRenderer
                 ApplyToEditModel(entity, editModel);
                 OnEditModelCreated(editModel);
                 return editModel;
+            }
+
+            /// <summary>{{ mapper.entity_class_name }} の列挙を基に {{ mapper.edit_model_class_name }} の EditModelCollection を生成する</summary>
+            public EditModelCollection<{{ mapper.edit_model_class_name }}> CreateEditModels(IEnumerable<{{ mapper.entity_class_name }}> entities)
+            {
+                var collection = new EditModelCollection<{{ mapper.edit_model_class_name }}>();
+
+                foreach (var entity in entities)
+                {
+                    collection.Add(CreateEditModel(entity));
+                }
+
+                return collection;
             }
 
             /// <summary>新しい {{ mapper.edit_model_class_name }} の生成直後（ロード後）に呼ばれる（partial 実装で初期値を設定。新規のみは IsAdded で分岐）</summary>
