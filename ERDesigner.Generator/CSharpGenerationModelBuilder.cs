@@ -307,8 +307,8 @@ internal sealed class CSharpGenerationModelBuilder
             IsNullable = nav.IsNullable,
             IsParentReference = nav.IsParentReference,
             Cascade = !nav.IsParentReference,
-            DisplayTypeName = nav.IsCollection ? $"ICollection<{targetEditModelTypeName}>" : (nav.IsNullable ? targetEditModelTypeName + "?" : targetEditModelTypeName),
-            Initializer = nav.IsCollection ? $" = new List<{targetEditModelTypeName}>();" : (nav.IsNullable ? string.Empty : " = null!;"),
+            DisplayTypeName = nav.IsCollection ? $"EditModelCollection<{targetEditModelTypeName}>" : (nav.IsNullable ? targetEditModelTypeName + "?" : targetEditModelTypeName),
+            Initializer = nav.IsCollection ? $" = new EditModelCollection<{targetEditModelTypeName}>();" : (nav.IsNullable ? string.Empty : " = null!;"),
             PrincipalTableName = nav.PrincipalTableName,
             PrincipalColumnName = nav.PrincipalColumnName,
             DependentTableName = nav.DependentTableName,
@@ -427,10 +427,11 @@ internal sealed class CSharpGenerationModelBuilder
         // ほぼ全構成で使用するため無条件で付与する（未使用でも auto-generated ファイルでは警告抑止される）。
         var usings = new HashSet<string> { "System", "System.Collections.Generic", "System.Linq" };
 
-        // INotifyPropertyChanged / INotifyDataErrorInfo（EditModelBase）
+        // INotifyPropertyChanged / INotifyDataErrorInfo（EditModelBase）、EditModelCollection の ObservableCollection
         if (options.GenerateEditModels)
         {
             usings.Add("System.ComponentModel");
+            usings.Add("System.Collections.ObjectModel");
         }
 
         if (options.GenerateRepositories)

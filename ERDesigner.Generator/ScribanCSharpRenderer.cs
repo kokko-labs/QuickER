@@ -73,7 +73,7 @@ internal sealed class ScribanCSharpRenderer
         {{ end }}
         {{~ if entity_classes.size > 0 ~}}
         /// <summary>エンティティの変更状態（RowState）を保持する基底クラス</summary>
-        public abstract class EntityBase
+        public abstract partial class EntityBase
         {
             /// <summary>このエンティティの変更状態（既定は変更なし。DB/JSON からの復元はそのまま変更なし扱いになる）</summary>
             public RowState RowState { get; set; } = RowState.Unchanged;
@@ -301,6 +301,61 @@ internal sealed class ScribanCSharpRenderer
                 string typeName,
                 ref string message);
         }
+
+        /// <summary>EditModel のコレクション。Remove で外した既存要素を削除対象として追跡する</summary>
+        /// <remarks>
+        /// Remove / RemoveAt で外した既存要素は Removed としてマークし退避する（新規＝Added 要素は DB に無いため退避しない）
+        /// Clear は画面上の全消去とし削除追跡しない（退避もリセットする）。削除を保存したい場合は Remove を使う
+        /// </remarks>
+        public sealed partial class EditModelCollection<T> : ObservableCollection<T>
+            where T : EditModelBase
+        {
+            /// <summary>Remove で外した削除対象（Removed）の退避先</summary>
+            private readonly List<T> _removed = new();
+
+            /// <summary>Remove で外した削除対象（Removed）の一覧</summary>
+            public IReadOnlyList<T> RemovedItems => _removed;
+
+            /// <summary>要素を外す（Remove / RemoveAt）。既存要素は Removed として退避し、新規要素は破棄する</summary>
+            protected override void RemoveItem(int index)
+            {
+                TrackRemoval(this[index]);
+                base.RemoveItem(index);
+            }
+
+            /// <summary>インデクサ代入で要素を置き換える。置換前の既存要素は Removed として退避する</summary>
+            protected override void SetItem(int index, T item)
+            {
+                TrackRemoval(this[index]);
+                base.SetItem(index, item);
+            }
+
+            /// <summary>画面上の全消去。削除追跡はせず、退避していた削除対象もリセットする</summary>
+            protected override void ClearItems()
+            {
+                _removed.Clear();
+                base.ClearItems();
+            }
+
+            /// <summary>保存確定後に削除追跡をクリアする</summary>
+            public void AcceptRemoved() => _removed.Clear();
+
+            /// <summary>外した要素を削除対象として退避する（新規＝未保存の要素は退避しない）</summary>
+            private void TrackRemoval(T item)
+            {
+                if (item.IsAdded)
+                {
+                    return;
+                }
+
+                item.MarkRemoved();
+
+                if (!_removed.Contains(item))
+                {
+                    _removed.Add(item);
+                }
+            }
+        }
         {{ end }}
         {{~ for item in edit_model_classes ~}}
         {{ if !for.first }}
@@ -436,26 +491,6 @@ internal sealed class ScribanCSharpRenderer
         {{ end }}/// <summary>{{ mapper.entity_class_name }} と {{ mapper.edit_model_class_name }} の相互変換</summary>
         public sealed partial class {{ mapper.class_name }}
         {
-            /// <summary>{{ mapper.entity_class_name }} を基に新しい {{ mapper.edit_model_class_name }} を生成する</summary>
-            public {{ mapper.edit_model_class_name }} CreateEditModel({{ mapper.entity_class_name }} entity)
-            {
-                var editModel = new {{ mapper.edit_model_class_name }}();
-                ApplyToEditModel(entity, editModel);
-                OnEditModelCreated(editModel);
-                return editModel;
-            }
-
-            /// <summary>新規入力用の {{ mapper.edit_model_class_name }} を生成する（追加対象の Entity を基に作る）</summary>
-            public {{ mapper.edit_model_class_name }} CreateEditModel()
-            {
-                var entity = CreateEntity();
-                var editModel = CreateEditModel(entity);
-                return editModel;
-            }
-
-            /// <summary>新しい {{ mapper.edit_model_class_name }} の生成直後（ロード後）に呼ばれる（partial 実装で初期値を設定。新規のみは IsAdded で分岐）</summary>
-            partial void OnEditModelCreated({{ mapper.edit_model_class_name }} editModel);
-
             /// <summary>初期値を設定した新しい {{ mapper.entity_class_name }} を生成する（保存時に追加対象となる）</summary>
             public {{ mapper.entity_class_name }} CreateEntity()
             {
@@ -466,18 +501,40 @@ internal sealed class ScribanCSharpRenderer
             }
 
             /// <summary>初期値を設定した新しい {{ mapper.entity_class_name }} に {{ mapper.edit_model_class_name }} の確定値を反映して生成する</summary>
-            public {{ mapper.entity_class_name }} CreateEntity({{ mapper.edit_model_class_name }} editModel)
+            /// <param name="includeRemoved">削除追跡分（Removed）も復元して反映するか（保存用は true、帳票表示用などは false）</param>
+            public {{ mapper.entity_class_name }} CreateEntity({{ mapper.edit_model_class_name }} editModel, bool includeRemoved = false)
             {
                 var entity = CreateEntity();
-                ApplyToEntity(editModel, entity);
+                ApplyToEntity(editModel, entity, includeRemoved);
                 return entity;
             }
 
             /// <summary>新しい {{ mapper.entity_class_name }} の生成直後に呼ばれる（partial 実装で初期値を設定）</summary>
             partial void OnEntityCreated({{ mapper.entity_class_name }} entity);
 
+            /// <summary>新規入力用の {{ mapper.edit_model_class_name }} を生成する（追加対象の Entity を基に作る）</summary>
+            public {{ mapper.edit_model_class_name }} CreateEditModel()
+            {
+                var entity = CreateEntity();
+                var editModel = CreateEditModel(entity);
+                return editModel;
+            }
+
+            /// <summary>{{ mapper.entity_class_name }} を基に新しい {{ mapper.edit_model_class_name }} を生成する</summary>
+            public {{ mapper.edit_model_class_name }} CreateEditModel({{ mapper.entity_class_name }} entity)
+            {
+                var editModel = new {{ mapper.edit_model_class_name }}();
+                ApplyToEditModel(entity, editModel);
+                OnEditModelCreated(editModel);
+                return editModel;
+            }
+
+            /// <summary>新しい {{ mapper.edit_model_class_name }} の生成直後（ロード後）に呼ばれる（partial 実装で初期値を設定。新規のみは IsAdded で分岐）</summary>
+            partial void OnEditModelCreated({{ mapper.edit_model_class_name }} editModel);
+
             /// <summary>{{ mapper.edit_model_class_name }} の確定値を既存の {{ mapper.entity_class_name }} へ反映する（破壊的更新）</summary>
-            public void ApplyToEntity({{ mapper.edit_model_class_name }} editModel, {{ mapper.entity_class_name }} entity)
+            /// <param name="includeRemoved">削除追跡分（Removed）も復元して反映するか（保存用は true、帳票表示用などは false）</param>
+            public void ApplyToEntity({{ mapper.edit_model_class_name }} editModel, {{ mapper.entity_class_name }} entity, bool includeRemoved = false)
             {
         {{ for prop in mapper.scalar_properties }}{{ if prop.edit_model_is_nullable && prop.entity_type_name != prop.edit_model_type_name }}        entity.{{ prop.property_name }} = editModel.{{ prop.property_name }} ?? throw new InvalidOperationException("{{ prop.property_name }} が未入力です。");
         {{ else }}        entity.{{ prop.property_name }} = editModel.{{ prop.property_name }};
@@ -486,12 +543,20 @@ internal sealed class ScribanCSharpRenderer
         {{ for nav in mapper.navigation_properties }}{{ if nav.is_cascade }}{{ if nav.is_collection }}        entity.{{ nav.property_name }}.Clear();
                 foreach (var child in editModel.{{ nav.property_name }})
                 {
-                    entity.{{ nav.property_name }}.Add(new {{ nav.mapper_class_name }}().CreateEntity(child));
+                    entity.{{ nav.property_name }}.Add(new {{ nav.mapper_class_name }}().CreateEntity(child, includeRemoved));
                 }
-        {{ else if nav.is_nullable }}        entity.{{ nav.property_name }} = editModel.{{ nav.property_name }} is null ? null : new {{ nav.mapper_class_name }}().CreateEntity(editModel.{{ nav.property_name }});
+
+                if (includeRemoved)
+                {
+                    foreach (var removed in editModel.{{ nav.property_name }}.RemovedItems)
+                    {
+                        entity.{{ nav.property_name }}.Add(new {{ nav.mapper_class_name }}().CreateEntity(removed, includeRemoved));
+                    }
+                }
+        {{ else if nav.is_nullable }}        entity.{{ nav.property_name }} = editModel.{{ nav.property_name }} is null ? null : new {{ nav.mapper_class_name }}().CreateEntity(editModel.{{ nav.property_name }}, includeRemoved);
         {{ else }}        if (editModel.{{ nav.property_name }} is not null)
                 {
-                    entity.{{ nav.property_name }} = new {{ nav.mapper_class_name }}().CreateEntity(editModel.{{ nav.property_name }});
+                    entity.{{ nav.property_name }} = new {{ nav.mapper_class_name }}().CreateEntity(editModel.{{ nav.property_name }}, includeRemoved);
                 }
         {{ end }}{{ end }}{{ end }}        OnEntityApplied(editModel, entity);
             }

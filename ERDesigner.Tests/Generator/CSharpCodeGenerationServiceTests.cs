@@ -167,7 +167,12 @@ public class CSharpCodeGenerationServiceTests
         // ApplyToEntity は MarkUpdated を撤廃し RowState を転写、子をカスケード生成する
         content.Should().NotContain("entity.MarkUpdated();");
         content.Should().Contain("entity.RowState = editModel.RowState;");
-        content.Should().Contain("entity.Orders.Add(new OrderMapper().CreateEntity(child));");
+        content.Should().Contain("entity.Orders.Add(new OrderMapper().CreateEntity(child, includeRemoved));");
+        // 削除追跡コレクションと、includeRemoved 指定時の Removed 復元
+        content.Should().Contain("public sealed class EditModelCollection<T> : ObservableCollection<T>");
+        content.Should().Contain("public EditModelCollection<OrderEditModel> Orders { get; set; } = new EditModelCollection<OrderEditModel>();");
+        content.Should().Contain("public void ApplyToEntity(CustomerEditModel editModel, CustomerEntity entity, bool includeRemoved = false)");
+        content.Should().Contain("foreach (var removed in editModel.Orders.RemovedItems)");
         // ApplyToEditModel は子 EditModel をカスケード生成し、EditModel の状態は生成元 Entity を基準にする
         content.Should().Contain("editModel.Orders.Add(new OrderMapper().CreateEditModel(child));");
         content.Should().Contain("editModel.RowState = entity.RowState;");
@@ -390,13 +395,13 @@ public class CSharpCodeGenerationServiceTests
         result.Files[0].Content.Should().Contain("public sealed partial class ProductMapper");
         result.Files[0].Content.Should().NotContain(": IProductMapper");
         result.Files[0].Content.Should().Contain("ProductEditModel CreateEditModel(ProductEntity entity)");
-        result.Files[0].Content.Should().Contain("void ApplyToEntity(ProductEditModel editModel, ProductEntity entity)");
+        result.Files[0].Content.Should().Contain("void ApplyToEntity(ProductEditModel editModel, ProductEntity entity, bool includeRemoved = false)");
         // 旧 Commit 系の名前は残っていないこと
         result.Files[0].Content.Should().NotContain("CommitToEditModel");
         result.Files[0].Content.Should().NotContain("CommitToEntity");
         // Entity ファクトリ（空生成・EditModel 反映）と初期値フックを生成する
         result.Files[0].Content.Should().Contain("public ProductEntity CreateEntity()");
-        result.Files[0].Content.Should().Contain("public ProductEntity CreateEntity(ProductEditModel editModel)");
+        result.Files[0].Content.Should().Contain("public ProductEntity CreateEntity(ProductEditModel editModel, bool includeRemoved = false)");
         result.Files[0].Content.Should().Contain("partial void OnEntityCreated(ProductEntity entity);");
         // ApplyToEntity では nullable 化された確定値に対して保存前 null チェックを行う
         result.Files[0].Content.Should().Contain("entity.ProductId = editModel.ProductId ?? throw new InvalidOperationException(\"ProductId が未入力です。\");");
