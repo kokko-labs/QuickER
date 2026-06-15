@@ -110,23 +110,22 @@ internal sealed class ScribanCSharpRenderer
         {{ end }}
         {{~ for item in entity_classes ~}}
         {{ if !for.first }}
-
         {{ end }}/// <summary>{{ item.table_name }} テーブルに対応するエンティティ</summary>
         {{ if include_data_annotations }}[Table("{{ item.table_name }}")]
         {{ end }}public partial class {{ item.class_name }} : EntityBase
         {
-        {{ for property in item.properties }}    /// <summary>{{ property.column_name }} 列に対応するプロパティ</summary>
+        {{ for property in item.properties }}{{ if !for.first }}
+        {{ end }}    /// <summary>{{ property.column_name }} 列に対応するプロパティ</summary>
         {{ if include_data_annotations && property.is_primary_key }}    [Key]
         {{ end }}{{ if include_data_annotations }}    [Column("{{ property.column_name }}")]
         {{ end }}{{ if include_data_annotations && !property.is_nullable && property.is_reference_type }}    [Required]
         {{ end }}{{ if include_data_annotations && property.max_length }}    [MaxLength({{ property.max_length }})]
         {{ end }}    public {{ property.type_name }} {{ property.property_name }} { get; set; }{{ property.initializer }}
-
-        {{ end }}{{ for navigation in item.navigations }}    /// <summary>{{ navigation.property_name }} ナビゲーションプロパティ</summary>
+        {{ end }}{{ for navigation in item.navigations }}
+            /// <summary>{{ navigation.property_name }} ナビゲーションプロパティ</summary>
         {{ if include_json_ignore_on_parent_navigation && navigation.is_parent_reference }}    [JsonIgnore]
         {{ end }}    [NavigationReference("{{ navigation.principal_table_name }}", "{{ navigation.principal_column_name }}", "{{ navigation.dependent_table_name }}", "{{ navigation.dependent_column_name }}", {{ navigation.is_collection }}, {{ navigation.cascade }}, {{ navigation.is_parent_reference }})]
             public {{ navigation.display_type_name }} {{ navigation.property_name }} { get; set; }{{ navigation.initializer }}
-
         {{ end }}}
         {{~ end ~}}
 
@@ -150,8 +149,7 @@ internal sealed class ScribanCSharpRenderer
             protected bool IsReverting { get; private set; }
 
             /// <summary>指定プロパティの変更通知を発行する</summary>
-            protected void OnPropertyChanged(string propertyName) =>
-                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+            protected void OnPropertyChanged(string propertyName) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 
             /// <summary>値が変化した場合のみ代入し変更通知を発行する共通ヘルパー</summary>
             protected bool SetProperty<T>(ref T field, T value, string propertyName)
@@ -200,8 +198,7 @@ internal sealed class ScribanCSharpRenderer
             }
 
             /// <summary>入力エラーの変更通知を発行する</summary>
-            protected void OnErrorsChanged(string propertyName) =>
-                ErrorsChanged?.Invoke(this, new DataErrorsChangedEventArgs(propertyName));
+            protected void OnErrorsChanged(string propertyName) => ErrorsChanged?.Invoke(this, new DataErrorsChangedEventArgs(propertyName));
 
             /// <summary>リバート中フラグを立てたうえで処理を実行する</summary>
             protected void ExecuteRevert(Action action)
@@ -240,7 +237,6 @@ internal sealed class ScribanCSharpRenderer
         {{ end }}
         {{~ for item in edit_model_classes ~}}
         {{ if !for.first }}
-
         {{ end }}/// <summary>{{ item.table_name }} テーブルの画面編集用モデル</summary>
         public partial class {{ item.class_name }} : EditModelBase
         {
@@ -249,7 +245,8 @@ internal sealed class ScribanCSharpRenderer
             private {{ p.type_name }} {{ p.field_name }} = {{ p.field_initializer }};
         {{ else }}    /// <summary>{{ p.property_name }} の確定値</summary>
             private {{ p.type_name }} {{ p.field_name }};
-        {{ end }}    /// <summary>{{ p.property_name }} の画面入力文字列</summary>
+        {{ end }}
+            /// <summary>{{ p.property_name }} の画面入力文字列</summary>
             private string {{ p.binding_field_name }} = {{ p.binding_field_initializer }};
         {{ if p.needs_parse }}    /// <summary>{{ p.property_name }} の変換エラー</summary>
             private string? {{ p.error_field_name }};
@@ -363,7 +360,6 @@ internal sealed class ScribanCSharpRenderer
 
         {{~ for mapper in mapper_classes ~}}
         {{ if !for.first }}
-
         {{ end }}/// <summary>{{ mapper.entity_class_name }} と {{ mapper.edit_model_class_name }} の相互変換</summary>
         public sealed partial class {{ mapper.class_name }}
         {
@@ -1679,13 +1675,11 @@ internal sealed class ScribanCSharpRenderer
 
         {{~ for repository in repository_classes ~}}
         {{ if !for.first }}
-
         {{ end }}/// <summary>{{ repository.entity_class_name }} 用リポジトリインターフェース</summary>
         public interface {{ repository.interface_name }} : IRepository<{{ repository.entity_class_name }}, {{ repository.key_type_name }}>;
 
         /// <summary>{{ repository.entity_class_name }} 用リポジトリ実装</summary>
-        public sealed class {{ repository.class_name }}(ISqlConnectionFactory connectionFactory)
-            : SqlServerRepository<{{ repository.entity_class_name }}, {{ repository.key_type_name }}>(connectionFactory), {{ repository.interface_name }};
+        public sealed class {{ repository.class_name }}(ISqlConnectionFactory connectionFactory) : SqlServerRepository<{{ repository.entity_class_name }}, {{ repository.key_type_name }}>(connectionFactory), {{ repository.interface_name }};
         {{~ end ~}}
         {{~ end ~}}
         """;
@@ -1703,9 +1697,7 @@ internal sealed class ScribanCSharpRenderer
         // 独自属性 NavigationReference は (1) Entity のナビゲーションプロパティへの付与、
         // (2) Repository の SqlEntityMetadata によるナビゲーション除外（リフレクション走査）のいずれかで参照される。
         // リレーションが無くても Repository を生成する場合は属性定義が必要なため、その条件も含める。
-        var emitNavRefAttr =
-            (options.GenerateEntityClasses && model.EntityClasses.Any(c => c.Navigations.Count > 0))
-            || options.GenerateRepositories;
+        var emitNavRefAttr = (options.GenerateEntityClasses && model.EntityClasses.Any(c => c.Navigations.Count > 0)) || options.GenerateRepositories;
 
         var scriptObject = new Scriban.Runtime.ScriptObject
         {
