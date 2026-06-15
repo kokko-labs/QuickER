@@ -148,6 +148,29 @@ public class CSharpCodeGenerationServiceTests
         // エンティティは EntityBase を継承し、RowState を持つ
         result.Files[0].Content.Should().Contain("public partial class CustomerEntity : EntityBase");
         result.Files[0].Content.Should().Contain("public abstract class EntityBase");
+
+        var content = result.Files[0].Content;
+        // EditModel も RowState を保持し、確定値変更時に Updated へ昇格する
+        content.Should().Contain("public abstract partial class EditModelBase : INotifyPropertyChanged, INotifyDataErrorInfo");
+        content.Should().Contain("public RowState RowState");
+        content.Should().Contain("public void MarkAdded() => RowState = RowState.Added;");
+        content.Should().Contain("public void MarkRemoved() => RowState = RowState.Removed;");
+        // 確定値（非バインド）setter は、ロード中以外のみ MarkUpdated で昇格する
+        content.Should().Contain("if (!IsLoading)");
+        content.Should().Contain("MarkUpdated();");
+        content.Should().Contain("public void ExecuteLoad(Action action)");
+        content.Should().Contain("editModel.ExecuteLoad(() =>");
+        // 新規入力用ファクトリは Entity を基に生成し、生成フックを呼ぶ
+        content.Should().Contain("public CustomerEditModel CreateEditModel()");
+        content.Should().Contain("OnEditModelCreated(editModel);");
+        content.Should().Contain("partial void OnEditModelCreated(CustomerEditModel editModel);");
+        // ApplyToEntity は MarkUpdated を撤廃し RowState を転写、子をカスケード生成する
+        content.Should().NotContain("entity.MarkUpdated();");
+        content.Should().Contain("entity.RowState = editModel.RowState;");
+        content.Should().Contain("entity.Orders.Add(new OrderMapper().CreateEntity(child));");
+        // ApplyToEditModel は子 EditModel をカスケード生成し、EditModel の状態は生成元 Entity を基準にする
+        content.Should().Contain("editModel.Orders.Add(new OrderMapper().CreateEditModel(child));");
+        content.Should().Contain("editModel.RowState = entity.RowState;");
     }
 
     /// <summary>
@@ -574,8 +597,9 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("throw new SaveConflictException(");
         // DB ロード時は Unchanged に確定する
         content.Should().Contain("entity.RowState = RowState.Unchanged;");
-        // ApplyToEntity は Updated へ遷移させる
-        content.Should().Contain("entity.MarkUpdated();");
+        // ApplyToEntity は EditModel の RowState を転写する（Updated は EditModel 側の確定値変更で立つ）
+        content.Should().Contain("entity.RowState = editModel.RowState;");
+        content.Should().NotContain("entity.MarkUpdated();");
     }
 
     /// <summary>Query の取得が FOR JSON＋STJ に統一され、Include / ThenInclude（多階層）が生成されることを検証する</summary>

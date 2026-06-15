@@ -162,8 +162,17 @@ internal sealed class CSharpMapperNavigationModel
     /// <summary>EditModel 側の型名</summary>
     public required string EditModelTypeName { get; init; }
 
+    /// <summary>対応する子の Mapper クラス名（カスケード変換で呼び出す）</summary>
+    public required string MapperClassName { get; init; }
+
     /// <summary>コレクションかどうか</summary>
     public required bool IsCollection { get; init; }
+
+    /// <summary>NULL 許容かどうか（単一参照のとき有効）</summary>
+    public required bool IsNullable { get; init; }
+
+    /// <summary>子方向（カスケード変換対象）かどうか。親参照は除外し無限再帰を防ぐ</summary>
+    public required bool IsCascade { get; init; }
 
     /// <summary>principal 側（参照される側）のカラム名</summary>
     public required string PrincipalColumnName { get; init; }

@@ -322,7 +322,11 @@ internal sealed class CSharpGenerationModelBuilder
         {
             PropertyName = nav.PropertyName,
             EditModelTypeName = _nameConverter.ToEditModelClassName(nav.TargetTableName),
+            MapperClassName = _nameConverter.ToMapperClassName(nav.TargetTableName),
             IsCollection = nav.IsCollection,
+            IsNullable = nav.IsNullable,
+            // 子方向（親参照でない）のみカスケード変換の対象とし、親をたどる無限再帰を防ぐ
+            IsCascade = !nav.IsParentReference,
             PrincipalColumnName = nav.PrincipalColumnName,
             DependentColumnName = nav.DependentColumnName,
         };

@@ -54,8 +54,8 @@ internal sealed class ScribanCSharpRenderer
             }
         }
         {{ end }}
-        {{~ if entity_classes.size > 0 ~}}
-        /// <summary>エンティティの変更状態</summary>
+        {{~ if entity_classes.size > 0 || edit_model_classes.size > 0 ~}}
+        /// <summary>エンティティ・EditModel の変更状態</summary>
         public enum RowState
         {
             /// <summary>追加対象（新規）</summary>
@@ -70,7 +70,8 @@ internal sealed class ScribanCSharpRenderer
             /// <summary>削除対象</summary>
             Removed,
         }
-
+        {{ end }}
+        {{~ if entity_classes.size > 0 ~}}
         /// <summary>エンティティの変更状態（RowState）を保持する基底クラス</summary>
         public abstract class EntityBase
         {
@@ -148,6 +149,58 @@ internal sealed class ScribanCSharpRenderer
             /// <summary>リバート処理中かどうか</summary>
             protected bool IsReverting { get; private set; }
 
+            /// <summary>ロード処理中かどうか（ロード中は確定値の変更で Updated へ昇格させない）</summary>
+            protected bool IsLoading { get; private set; }
+
+            /// <summary>この EditModel の変更状態（生成元 Entity を基準とし、確定値の変更で Updated へ昇格する）</summary>
+            public RowState RowState
+            {
+                get => _rowState;
+                set
+                {
+                    if (_rowState == value)
+                    {
+                        return;
+                    }
+
+                    _rowState = value;
+                    OnPropertyChanged(nameof(RowState));
+                }
+            }
+
+            /// <summary>RowState のバッキングフィールド</summary>
+            private RowState _rowState = RowState.Unchanged;
+
+            /// <summary>追加対象かどうか</summary>
+            public bool IsAdded => RowState == RowState.Added;
+
+            /// <summary>更新対象かどうか</summary>
+            public bool IsUpdated => RowState == RowState.Updated;
+
+            /// <summary>削除対象かどうか</summary>
+            public bool IsRemoved => RowState == RowState.Removed;
+
+            /// <summary>変更（追加・更新・削除）があるかどうか</summary>
+            public bool HasChanges => RowState != RowState.Unchanged;
+
+            /// <summary>追加対象としてマークする（新規入力の EditModel を保存対象にする場合に使用）</summary>
+            public void MarkAdded() => RowState = RowState.Added;
+
+            /// <summary>削除対象としてマークする（コレクションには残したまま Save で削除される）</summary>
+            public void MarkRemoved() => RowState = RowState.Removed;
+
+            /// <summary>変更なし（保存済み）状態にする</summary>
+            public void MarkUnchanged() => RowState = RowState.Unchanged;
+
+            /// <summary>変更なしのときのみ更新対象としてマークする（確定値の変更時に呼ばれる）</summary>
+            public void MarkUpdated()
+            {
+                if (RowState == RowState.Unchanged)
+                {
+                    RowState = RowState.Updated;
+                }
+            }
+
             /// <summary>指定プロパティの変更通知を発行する</summary>
             protected void OnPropertyChanged(string propertyName) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 
@@ -215,9 +268,23 @@ internal sealed class ScribanCSharpRenderer
                 }
             }
 
+            /// <summary>ロード中フラグを立てたうえで処理を実行する（Mapper のロードから呼ぶ。ロード中の確定値変更は Updated へ昇格しない）</summary>
+            public void ExecuteLoad(Action action)
+            {
+                IsLoading = true;
+
+                try
+                {
+                    action();
+                }
+                finally
+                {
+                    IsLoading = false;
+                }
+            }
+
             /// <summary>バインディング値の変換エラーメッセージを構築する（派生クラスで override し方針を差し替え可能）</summary>
-            protected virtual string BuildParseErrorMessage(string propertyName, string inputValue, string typeName) =>
-                $"'{inputValue}' は {typeName} に変換できません。";
+            protected virtual string BuildParseErrorMessage(string propertyName, string inputValue, string typeName) => $"'{inputValue}' は {typeName} に変換できません。";
 
             /// <summary>変換エラーメッセージを解決する（BuildParseErrorMessage の後に CustomizeParseErrorMessage で微調整）</summary>
             protected string ResolveParseErrorMessage(string propertyName, string inputValue, string typeName)
@@ -269,6 +336,12 @@ internal sealed class ScribanCSharpRenderer
                     On{{ p.property_name }}Changed(value);
                     On{{ p.property_name }}Changed(oldValue, value);
                     OnPropertyChanged(nameof({{ p.property_name }}));
+
+                    // 確定値が変化したら更新対象へ昇格（ロード中は昇格させず、状態は元 Entity の鏡のままにする）
+                    if (!IsLoading)
+                    {
+                        MarkUpdated();
+                    }
                 }
             }
 
@@ -363,13 +436,25 @@ internal sealed class ScribanCSharpRenderer
         {{ end }}/// <summary>{{ mapper.entity_class_name }} と {{ mapper.edit_model_class_name }} の相互変換</summary>
         public sealed partial class {{ mapper.class_name }}
         {
-            /// <summary>{{ mapper.entity_class_name }} の値を反映した新しい {{ mapper.edit_model_class_name }} を生成する</summary>
+            /// <summary>{{ mapper.entity_class_name }} を基に新しい {{ mapper.edit_model_class_name }} を生成する</summary>
             public {{ mapper.edit_model_class_name }} CreateEditModel({{ mapper.entity_class_name }} entity)
             {
                 var editModel = new {{ mapper.edit_model_class_name }}();
                 ApplyToEditModel(entity, editModel);
+                OnEditModelCreated(editModel);
                 return editModel;
             }
+
+            /// <summary>新規入力用の {{ mapper.edit_model_class_name }} を生成する（追加対象の Entity を基に作る）</summary>
+            public {{ mapper.edit_model_class_name }} CreateEditModel()
+            {
+                var entity = CreateEntity();
+                var editModel = CreateEditModel(entity);
+                return editModel;
+            }
+
+            /// <summary>新しい {{ mapper.edit_model_class_name }} の生成直後（ロード後）に呼ばれる（partial 実装で初期値を設定。新規のみは IsAdded で分岐）</summary>
+            partial void OnEditModelCreated({{ mapper.edit_model_class_name }} editModel);
 
             /// <summary>初期値を設定した新しい {{ mapper.entity_class_name }} を生成する（保存時に追加対象となる）</summary>
             public {{ mapper.entity_class_name }} CreateEntity()
@@ -396,8 +481,19 @@ internal sealed class ScribanCSharpRenderer
             {
         {{ for prop in mapper.scalar_properties }}{{ if prop.edit_model_is_nullable && prop.entity_type_name != prop.edit_model_type_name }}        entity.{{ prop.property_name }} = editModel.{{ prop.property_name }} ?? throw new InvalidOperationException("{{ prop.property_name }} が未入力です。");
         {{ else }}        entity.{{ prop.property_name }} = editModel.{{ prop.property_name }};
-        {{ end }}{{ end }}        entity.MarkUpdated();
-                OnEntityApplied(editModel, entity);
+        {{ end }}{{ end }}        // 確定値の変更で EditModel 側に立った RowState をそのまま転写する（ここでは状態を作らない）
+                entity.RowState = editModel.RowState;
+        {{ for nav in mapper.navigation_properties }}{{ if nav.is_cascade }}{{ if nav.is_collection }}        entity.{{ nav.property_name }}.Clear();
+                foreach (var child in editModel.{{ nav.property_name }})
+                {
+                    entity.{{ nav.property_name }}.Add(new {{ nav.mapper_class_name }}().CreateEntity(child));
+                }
+        {{ else if nav.is_nullable }}        entity.{{ nav.property_name }} = editModel.{{ nav.property_name }} is null ? null : new {{ nav.mapper_class_name }}().CreateEntity(editModel.{{ nav.property_name }});
+        {{ else }}        if (editModel.{{ nav.property_name }} is not null)
+                {
+                    entity.{{ nav.property_name }} = new {{ nav.mapper_class_name }}().CreateEntity(editModel.{{ nav.property_name }});
+                }
+        {{ end }}{{ end }}{{ end }}        OnEntityApplied(editModel, entity);
             }
 
             /// <summary>{{ mapper.edit_model_class_name }} の確定値を {{ mapper.entity_class_name }} へ反映した後に呼ばれる（partial 実装で追加プロパティを保存）</summary>
@@ -406,9 +502,25 @@ internal sealed class ScribanCSharpRenderer
             /// <summary>{{ mapper.entity_class_name }} の値を既存の {{ mapper.edit_model_class_name }} へ反映する（バインディング経由）</summary>
             public void ApplyToEditModel({{ mapper.entity_class_name }} entity, {{ mapper.edit_model_class_name }} editModel)
             {
-                editModel.RevertInput();
-        {{ for prop in mapper.scalar_properties }}        editModel.{{ prop.binding_property_name }} = {{ prop.load_binding_expression }};
-        {{ end }}        OnEditModelLoaded(entity, editModel);
+                editModel.ExecuteLoad(() =>
+                {
+                    editModel.RevertInput();
+        {{ for prop in mapper.scalar_properties }}            editModel.{{ prop.binding_property_name }} = {{ prop.load_binding_expression }};
+        {{ end }}{{ for nav in mapper.navigation_properties }}{{ if nav.is_cascade }}{{ if nav.is_collection }}            editModel.{{ nav.property_name }}.Clear();
+                    foreach (var child in entity.{{ nav.property_name }})
+                    {
+                        editModel.{{ nav.property_name }}.Add(new {{ nav.mapper_class_name }}().CreateEditModel(child));
+                    }
+        {{ else if nav.is_nullable }}            editModel.{{ nav.property_name }} = entity.{{ nav.property_name }} is null ? null : new {{ nav.mapper_class_name }}().CreateEditModel(entity.{{ nav.property_name }});
+        {{ else }}            if (entity.{{ nav.property_name }} is not null)
+                    {
+                        editModel.{{ nav.property_name }} = new {{ nav.mapper_class_name }}().CreateEditModel(entity.{{ nav.property_name }});
+                    }
+        {{ end }}{{ end }}{{ end }}            OnEditModelLoaded(entity, editModel);
+                });
+
+                // EditModel の状態は生成元 Entity を基準にする（ロード=Unchanged、新規=Added）
+                editModel.RowState = entity.RowState;
             }
 
             /// <summary>{{ mapper.edit_model_class_name }} への既定ロード後に呼ばれる（partial 実装で追加プロパティをロード）</summary>
