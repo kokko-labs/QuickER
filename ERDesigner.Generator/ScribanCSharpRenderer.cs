@@ -228,6 +228,21 @@ internal sealed class ScribanCSharpRenderer
                 return _errors.TryGetValue(propertyName, out var list) ? list : Enumerable.Empty<string>();
             }
 
+            /// <summary>この EditModel 自身のエラーを指定パス付きで列挙する（グラフ収集の部品）</summary>
+            protected IEnumerable<EditModelError> CollectOwnErrors(string path)
+            {
+                foreach (var pair in _errors)
+                {
+                    foreach (var message in pair.Value)
+                    {
+                        yield return new EditModelError(path, pair.Key, message);
+                    }
+                }
+            }
+
+            /// <summary>子要素のパスを連結する（ルートは空、以降は "." 区切り）</summary>
+            protected static string CombineErrorPath(string path, string segment) => path.Length == 0 ? segment : path + "." + segment;
+
             /// <summary>指定プロパティのエラーを設定する（null 指定でクリア）</summary>
             protected void SetError(string propertyName, string? error)
             {
@@ -283,6 +298,9 @@ internal sealed class ScribanCSharpRenderer
                 }
             }
 
+            /// <summary>必須項目の未入力エラーメッセージを構築する（派生クラスで override し方針を差し替え可能）</summary>
+            protected virtual string BuildRequiredErrorMessage(string propertyName) => $"{propertyName} は必須です。";
+
             /// <summary>バインディング値の変換エラーメッセージを構築する（派生クラスで override し方針を差し替え可能）</summary>
             protected virtual string BuildParseErrorMessage(string propertyName, string inputValue, string typeName) => $"'{inputValue}' は {typeName} に変換できません。";
 
@@ -301,6 +319,12 @@ internal sealed class ScribanCSharpRenderer
                 string typeName,
                 ref string message);
         }
+
+        /// <summary>EditModel グラフ上の 1 件の検証エラー</summary>
+        /// <param name="Path">ルートからのノード位置（例: 空＝ルート、"SubHeaders[0]"、"SubHeaders[0].Records[2]"）</param>
+        /// <param name="Property">エラーが付いたバインド用プロパティ名（例: BindingTitle）</param>
+        /// <param name="Message">エラーメッセージ</param>
+        public sealed record EditModelError(string Path, string Property, string Message);
 
         /// <summary>EditModel のコレクション。Remove で外した既存要素を削除対象として追跡する</summary>
         /// <remarks>
@@ -373,7 +397,7 @@ internal sealed class ScribanCSharpRenderer
         {{ end }}/// <summary>{{ item.table_name }} テーブルの画面編集用モデル</summary>
         public partial class {{ item.class_name }} : EditModelBase
         {
-            // 各列につき「確定値」「画面入力文字列」「変換エラー」の 3 種を保持する
+            // 各列につき「確定値」「画面入力文字列」の 2 種を保持する（変換エラーはエラーディクショナリが保持する）
         {{ for p in item.properties }}{{ if p.field_initializer != "" }}    /// <summary>{{ p.property_name }} の確定値</summary>
             private {{ p.type_name }} {{ p.field_name }} = {{ p.field_initializer }};
         {{ else }}    /// <summary>{{ p.property_name }} の確定値</summary>
@@ -381,9 +405,7 @@ internal sealed class ScribanCSharpRenderer
         {{ end }}
             /// <summary>{{ p.property_name }} の画面入力文字列</summary>
             private string {{ p.binding_field_name }} = {{ p.binding_field_initializer }};
-        {{ if p.needs_parse }}    /// <summary>{{ p.property_name }} の変換エラー</summary>
-            private string? {{ p.error_field_name }};
-        {{ end }}
+
             /// <summary>{{ p.property_name }} の確定値（外部からは読み取り専用）</summary>
             public {{ p.type_name }} {{ p.property_name }}
             {
@@ -439,13 +461,11 @@ internal sealed class ScribanCSharpRenderer
         {{ if p.needs_parse }}                if ({{ p.parse_type_name }}.TryParse(value, out var parsed))
                         {
                             {{ p.property_name }} = parsed;
-                            {{ p.error_field_name }} = null;
                             SetError(nameof({{ p.binding_property_name }}), null);
                         }
                         else
                         {
-                            {{ p.error_field_name }} = ResolveParseErrorMessage(nameof({{ p.binding_property_name }}), value, "{{ p.parse_type_name }}");
-                            SetError(nameof({{ p.binding_property_name }}), {{ p.error_field_name }});
+                            SetError(nameof({{ p.binding_property_name }}), ResolveParseErrorMessage(nameof({{ p.binding_property_name }}), value, "{{ p.parse_type_name }}"));
                         }
         {{ else if p.is_binary }}                if (string.IsNullOrEmpty(value))
                         {
@@ -490,10 +510,68 @@ internal sealed class ScribanCSharpRenderer
                 ExecuteRevert(() =>
                 {
         {{ for p in item.properties }}            {{ p.binding_property_name }} = {{ p.revert_binding_expression }};
-        {{ if p.needs_parse }}            {{ p.error_field_name }} = null;
-        {{ end }}            SetError(nameof({{ p.binding_property_name }}), null);
+                    SetError(nameof({{ p.binding_property_name }}), null);
         {{ end }}        });
             }
+
+            /// <summary>必須項目の未入力と追加検証を確認しエラーを登録する（子も連鎖検証。エラーが無ければ true）</summary>
+            public bool Validate()
+            {
+        {{ for p in item.properties }}{{ if p.is_required }}        if ({{ p.property_name }} is null)
+                {
+                    SetError(nameof({{ p.binding_property_name }}), BuildRequiredErrorMessage(nameof({{ p.property_name }})));
+                }
+        {{ end }}{{ end }}        OnValidate();
+
+                var valid = !HasErrors;
+        {{ for nav in item.navigations }}{{ if nav.cascade }}{{ if nav.is_collection }}        foreach (var child in {{ nav.property_name }})
+                {
+                    if (!child.Validate())
+                    {
+                        valid = false;
+                    }
+                }
+        {{ else }}        if ({{ nav.property_name }} is not null && !{{ nav.property_name }}.Validate())
+                {
+                    valid = false;
+                }
+        {{ end }}{{ end }}{{ end }}        return valid;
+            }
+
+            /// <summary>追加の検証ルールを実装するフック（partial 実装で SetError によりエラー登録）</summary>
+            partial void OnValidate();
+
+            /// <summary>検証エラーをノードのパス付きで収集する（事前に Validate を呼ぶ）</summary>
+            /// <param name="includeChildren">true で子（カスケード）も再帰収集、false で自身のエラーのみ</param>
+            public IEnumerable<EditModelError> CollectErrors(bool includeChildren = true) => CollectErrors(string.Empty, includeChildren);
+
+            /// <summary>パス付きで検証エラーを収集する内部実装（子の再帰呼び出しで使用）</summary>
+            internal IEnumerable<EditModelError> CollectErrors(string path, bool includeChildren)
+            {
+                foreach (var error in CollectOwnErrors(path))
+                {
+                    yield return error;
+                }
+
+                if (!includeChildren)
+                {
+                    yield break;
+                }
+        {{ for nav in item.navigations }}{{ if nav.cascade }}{{ if nav.is_collection }}        for (var i = 0; i < {{ nav.property_name }}.Count; i++)
+                {
+                    foreach (var error in {{ nav.property_name }}[i].CollectErrors(CombineErrorPath(path, $"{{ nav.property_name }}[{i}]"), includeChildren))
+                    {
+                        yield return error;
+                    }
+                }
+        {{ else }}        if ({{ nav.property_name }} is not null)
+                {
+                    foreach (var error in {{ nav.property_name }}.CollectErrors(CombineErrorPath(path, "{{ nav.property_name }}"), includeChildren))
+                    {
+                        yield return error;
+                    }
+                }
+        {{ end }}{{ end }}{{ end }}    }
         }
         {{~ end ~}}
 
@@ -898,13 +976,11 @@ internal sealed class ScribanCSharpRenderer
             }
 
             /// <summary>[Column] 属性を優先してカラム名を解決する</summary>
-            private static string GetColumnName(PropertyInfo property) =>
-                property.GetCustomAttribute<ColumnAttribute>()?.Name ?? property.Name;
+            private static string GetColumnName(PropertyInfo property) => property.GetCustomAttribute<ColumnAttribute>()?.Name ?? property.Name;
         }
 
         /// <summary>メタデータを用いて CRUD を実装する SQL Server 向けリポジトリ基底クラス</summary>
-        public abstract class SqlServerRepository<TEntity, TKey>(ISqlConnectionFactory connectionFactory)
-            : IRepository<TEntity, TKey>
+        public abstract class SqlServerRepository<TEntity, TKey>(ISqlConnectionFactory connectionFactory) : IRepository<TEntity, TKey>
             where TEntity : EntityBase, new()
         {
             /// <summary>エンティティ型ごとに 1 度だけ構築されるメタデータ（静的キャッシュ）</summary>
@@ -1316,8 +1392,7 @@ internal sealed class ScribanCSharpRenderer
             }
 
             /// <summary>ルートの WHERE・並び順・ページングと Include ツリーから FOR JSON の SELECT 文を組み立てる</summary>
-            private string BuildJsonSelect(int? take, int? skip) =>
-                JsonQueryPlanner.BuildSelect(typeof(TEntity), BuildWhereClause(), BuildOrderAndPaging(take, skip), _includes);
+            private string BuildJsonSelect(int? take, int? skip) => JsonQueryPlanner.BuildSelect(typeof(TEntity), BuildWhereClause(), BuildOrderAndPaging(take, skip), _includes);
 
             /// <summary>ORDER BY / OFFSET・FETCH 句を組み立てる（take/skip 指定時は ORDER BY 必須のためダミー順序を補う）</summary>
             private string BuildOrderAndPaging(int? take, int? skip)
@@ -1351,8 +1426,7 @@ internal sealed class ScribanCSharpRenderer
             }
 
             /// <summary>WHERE 句を組み立てる（条件なしは空文字）</summary>
-            private string BuildWhereClause() =>
-                _conditions.Count == 0 ? string.Empty : " WHERE " + string.Join(" AND ", _conditions);
+            private string BuildWhereClause() => _conditions.Count == 0 ? string.Empty : " WHERE " + string.Join(" AND ", _conditions);
         }
 
         /// <summary>Include の対象ナビゲーションと、その配下（ThenInclude）の木構造</summary>
@@ -1509,8 +1583,7 @@ internal sealed class ScribanCSharpRenderer
         internal static class SqlExpressionTranslator
         {
             /// <summary>述語ラムダの本体を SQL 条件へ変換し、値はパラメータ化して parameters へ追加する</summary>
-            public static string ToCondition(Expression expression, List<KeyValuePair<string, object?>> parameters) =>
-                Visit(expression, parameters);
+            public static string ToCondition(Expression expression, List<KeyValuePair<string, object?>> parameters) => Visit(expression, parameters);
 
             /// <summary>キー選択ラムダから角括弧付きの列名を取り出す</summary>
             public static string ToColumn(LambdaExpression keySelector)
@@ -1653,14 +1726,11 @@ internal sealed class ScribanCSharpRenderer
             }
 
             /// <summary>ラムダ引数のプロパティ参照（= 列）かどうか</summary>
-            private static bool IsColumn(MemberExpression member) =>
-                member is { Expression: ParameterExpression, Member: PropertyInfo };
+            private static bool IsColumn(MemberExpression member) => member is { Expression: ParameterExpression, Member: PropertyInfo };
 
-            private static bool IsNull(Expression expression) =>
-                expression is ConstantExpression { Value: null };
+            private static bool IsNull(Expression expression) => expression is ConstantExpression { Value: null };
 
-            private static string ColumnName(MemberInfo member) =>
-                $"[{member.GetCustomAttribute<ColumnAttribute>()?.Name ?? member.Name}]";
+            private static string ColumnName(MemberInfo member) => $"[{member.GetCustomAttribute<ColumnAttribute>()?.Name ?? member.Name}]";
 
             /// <summary>定数・クロージャ変数などを評価して実値を得る</summary>
             private static object? Evaluate(Expression expression) =>
@@ -1676,8 +1746,7 @@ internal sealed class ScribanCSharpRenderer
             }
 
             /// <summary>LIKE のワイルドカード（% _ [ \）をエスケープする</summary>
-            private static string EscapeLike(string value) =>
-                value.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_").Replace("[", "\\[");
+            private static string EscapeLike(string value) => value.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_").Replace("[", "\\[");
         }
 
         /// <summary>更新対象のレコードが存在しなかった（他者削除等の競合）ことを表す例外</summary>
@@ -1772,8 +1841,7 @@ internal sealed class ScribanCSharpRenderer
                 };
             }
 
-            private static string GetColumnName(PropertyInfo property) =>
-                property.GetCustomAttribute<ColumnAttribute>()?.Name ?? property.Name;
+            private static string GetColumnName(PropertyInfo property) => property.GetCustomAttribute<ColumnAttribute>()?.Name ?? property.Name;
         }
 
         /// <summary>カスケード削除の DELETE 文群を FK メタデータから組み立てるプランナー（DB 非依存・純粋）</summary>
@@ -1816,8 +1884,7 @@ internal sealed class ScribanCSharpRenderer
         internal static class EntityGraphSaver
         {
             /// <summary>自身、または（cascade 時）子に変更があるか</summary>
-            public static bool HasChanges(EntityBase entity, bool cascade) =>
-                entity.HasChanges || (cascade && EnumerateCascadeChildren(entity).Any(child => HasChanges(child, true)));
+            public static bool HasChanges(EntityBase entity, bool cascade) => entity.HasChanges || (cascade && EnumerateCascadeChildren(entity).Any(child => HasChanges(child, true)));
 
             /// <summary>グラフを保存し、保存したレコード数を返す</summary>
             public static async Task<int> SaveAsync(EntityBase entity, SqlConnection connection, SqlTransaction transaction, bool cascadeSave, bool cascadeDelete, bool insertWhenUpdateMissing, CancellationToken cancellationToken)

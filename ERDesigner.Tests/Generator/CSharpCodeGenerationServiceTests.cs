@@ -180,6 +180,19 @@ public class CSharpCodeGenerationServiceTests
         // ApplyToEditModel は子コレクションを CreateEditModels で代入し、状態は生成元 Entity を基準にする
         content.Should().Contain("editModel.Orders = new OrderMapper().CreateEditModels(entity.Orders);");
         content.Should().Contain("editModel.RowState = entity.RowState;");
+        // EditModel.Validate（必須チェック＋ユーザー定義フック＋子への連鎖検証）
+        content.Should().Contain("protected virtual string BuildRequiredErrorMessage(string propertyName)");
+        content.Should().Contain("public bool Validate()");
+        content.Should().Contain("SetError(nameof(BindingCustomerId), BuildRequiredErrorMessage(nameof(CustomerId)));");
+        content.Should().Contain("partial void OnValidate();");
+        content.Should().Contain("if (!child.Validate())");
+        // グラフ全体のエラーをノードのパス付きで収集する
+        content.Should().Contain("public sealed record EditModelError(string Path, string Property, string Message);");
+        content.Should().Contain("public IEnumerable<EditModelError> CollectErrors(bool includeChildren = true) => CollectErrors(string.Empty, includeChildren);");
+        content.Should().Contain("internal IEnumerable<EditModelError> CollectErrors(string path, bool includeChildren)");
+        content.Should().Contain("if (!includeChildren)");
+        content.Should().Contain("foreach (var error in CollectOwnErrors(path))");
+        content.Should().Contain("foreach (var error in Orders[i].CollectErrors(CombineErrorPath(path, $\"Orders[{i}]\"), includeChildren))");
     }
 
     /// <summary>

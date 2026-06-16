@@ -234,9 +234,6 @@ internal sealed class CSharpEditModelPropertyModel
     /// <summary>バインディング用バッキングフィールド名（例: _bindingCustomerId）</summary>
     public required string BindingFieldName { get; init; }
 
-    /// <summary>エラー情報を保持するフィールド名（例: _errorCustomerId）</summary>
-    public required string ErrorFieldName { get; init; }
-
     /// <summary>バインディング setter で変換に TryParse が必要かどうか（string 型は false）</summary>
     public required bool NeedsParse { get; init; }
 
@@ -251,6 +248,9 @@ internal sealed class CSharpEditModelPropertyModel
 
     /// <summary>NULL 許容かどうか</summary>
     public required bool IsNullable { get; init; }
+
+    /// <summary>必須項目（Entity 側が非 NULL）かどうか</summary>
+    public required bool IsRequired { get; init; }
 
     /// <summary>参照型かどうか</summary>
     public required bool IsReferenceType { get; init; }

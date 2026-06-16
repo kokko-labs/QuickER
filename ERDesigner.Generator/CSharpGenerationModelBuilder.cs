@@ -188,7 +188,6 @@ internal sealed class CSharpGenerationModelBuilder
         var fieldName = ToFieldName(propertyName);
         var bindingPropertyName = "Binding" + propertyName;
         var bindingFieldName = ToFieldName(bindingPropertyName);
-        var errorFieldName = "_error" + propertyName;
 
         isBytes = typeName == "byte[]" || typeName == "byte[]?";
         var needsParse = !typeInfo.IsReferenceType && !isBytes;
@@ -218,7 +217,6 @@ internal sealed class CSharpGenerationModelBuilder
             FieldName = fieldName,
             BindingPropertyName = bindingPropertyName,
             BindingFieldName = bindingFieldName,
-            ErrorFieldName = errorFieldName,
             NeedsParse = needsParse,
             ParseTypeName = parseTypeName,
             FieldInitializer = fieldInitializer,
@@ -226,6 +224,8 @@ internal sealed class CSharpGenerationModelBuilder
             IsNullable = editModelIsNullable,
             IsReferenceType = typeInfo.IsReferenceType,
             IsBinary = isBytes,
+            // Entity 側が非 NULL（必須）で EditModel 側は入力途中を許容して NULL 許容にした項目を必須とみなす
+            IsRequired = editModelIsNullable && !column.IsNullable,
             RevertBindingExpression = BuildBindingExpression(propertyName, isBytes),
         };
     }
