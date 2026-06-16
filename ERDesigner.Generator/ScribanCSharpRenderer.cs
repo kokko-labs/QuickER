@@ -520,6 +520,20 @@ internal sealed class ScribanCSharpRenderer
                 return entity;
             }
 
+            /// <summary>{{ mapper.edit_model_class_name }} の EditModelCollection を基に {{ mapper.entity_class_name }} のリストを生成する</summary>
+            /// <param name="includeRemoved">削除追跡分（Removed）も復元して含めるか（保存用は true、帳票表示用などは false）</param>
+            public List<{{ mapper.entity_class_name }}> CreateEntities(EditModelCollection<{{ mapper.edit_model_class_name }}> editModels, bool includeRemoved = false)
+            {
+                var entities = editModels.Select(editModel => CreateEntity(editModel, includeRemoved)).ToList();
+
+                if (includeRemoved)
+                {
+                    entities.AddRange(editModels.RemovedItems.Select(removed => CreateEntity(removed, includeRemoved)));
+                }
+
+                return entities;
+            }
+
             /// <summary>新しい {{ mapper.entity_class_name }} の生成直後に呼ばれる（partial 実装で初期値を設定）</summary>
             partial void OnEntityCreated({{ mapper.entity_class_name }} entity);
 
@@ -543,14 +557,7 @@ internal sealed class ScribanCSharpRenderer
             /// <summary>{{ mapper.entity_class_name }} の列挙を基に {{ mapper.edit_model_class_name }} の EditModelCollection を生成する</summary>
             public EditModelCollection<{{ mapper.edit_model_class_name }}> CreateEditModels(IEnumerable<{{ mapper.entity_class_name }}> entities)
             {
-                var collection = new EditModelCollection<{{ mapper.edit_model_class_name }}>();
-
-                foreach (var entity in entities)
-                {
-                    collection.Add(CreateEditModel(entity));
-                }
-
-                return collection;
+                return new EditModelCollection<{{ mapper.edit_model_class_name }}>(entities.Select(entity => CreateEditModel(entity)));
             }
 
             /// <summary>新しい {{ mapper.edit_model_class_name }} の生成直後（ロード後）に呼ばれる（partial 実装で初期値を設定。新規のみは IsAdded で分岐）</summary>
@@ -564,19 +571,7 @@ internal sealed class ScribanCSharpRenderer
         {{ else }}        entity.{{ prop.property_name }} = editModel.{{ prop.property_name }};
         {{ end }}{{ end }}        // 確定値の変更で EditModel 側に立った RowState をそのまま転写する（ここでは状態を作らない）
                 entity.RowState = editModel.RowState;
-        {{ for nav in mapper.navigation_properties }}{{ if nav.is_cascade }}{{ if nav.is_collection }}        entity.{{ nav.property_name }}.Clear();
-                foreach (var child in editModel.{{ nav.property_name }})
-                {
-                    entity.{{ nav.property_name }}.Add(new {{ nav.mapper_class_name }}().CreateEntity(child, includeRemoved));
-                }
-
-                if (includeRemoved)
-                {
-                    foreach (var removed in editModel.{{ nav.property_name }}.RemovedItems)
-                    {
-                        entity.{{ nav.property_name }}.Add(new {{ nav.mapper_class_name }}().CreateEntity(removed, includeRemoved));
-                    }
-                }
+        {{ for nav in mapper.navigation_properties }}{{ if nav.is_cascade }}{{ if nav.is_collection }}        entity.{{ nav.property_name }} = new {{ nav.mapper_class_name }}().CreateEntities(editModel.{{ nav.property_name }}, includeRemoved);
         {{ else if nav.is_nullable }}        entity.{{ nav.property_name }} = editModel.{{ nav.property_name }} is null ? null : new {{ nav.mapper_class_name }}().CreateEntity(editModel.{{ nav.property_name }}, includeRemoved);
         {{ else }}        if (editModel.{{ nav.property_name }} is not null)
                 {
@@ -595,11 +590,7 @@ internal sealed class ScribanCSharpRenderer
                 {
                     editModel.RevertInput();
         {{ for prop in mapper.scalar_properties }}            editModel.{{ prop.binding_property_name }} = {{ prop.load_binding_expression }};
-        {{ end }}{{ for nav in mapper.navigation_properties }}{{ if nav.is_cascade }}{{ if nav.is_collection }}            editModel.{{ nav.property_name }}.Clear();
-                    foreach (var child in entity.{{ nav.property_name }})
-                    {
-                        editModel.{{ nav.property_name }}.Add(new {{ nav.mapper_class_name }}().CreateEditModel(child));
-                    }
+        {{ end }}{{ for nav in mapper.navigation_properties }}{{ if nav.is_cascade }}{{ if nav.is_collection }}            editModel.{{ nav.property_name }} = new {{ nav.mapper_class_name }}().CreateEditModels(entity.{{ nav.property_name }});
         {{ else if nav.is_nullable }}            editModel.{{ nav.property_name }} = entity.{{ nav.property_name }} is null ? null : new {{ nav.mapper_class_name }}().CreateEditModel(entity.{{ nav.property_name }});
         {{ else }}            if (entity.{{ nav.property_name }} is not null)
                     {

@@ -164,20 +164,21 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("public CustomerEditModel CreateEditModel()");
         content.Should().Contain("OnEditModelCreated(editModel);");
         content.Should().Contain("partial void OnEditModelCreated(CustomerEditModel editModel);");
-        // ApplyToEntity は MarkUpdated を撤廃し RowState を転写、子をカスケード生成する
+        // ApplyToEntity は MarkUpdated を撤廃し RowState を転写、子コレクションは CreateEntities で代入する
         content.Should().NotContain("entity.MarkUpdated();");
         content.Should().Contain("entity.RowState = editModel.RowState;");
-        content.Should().Contain("entity.Orders.Add(new OrderMapper().CreateEntity(child, includeRemoved));");
-        // 削除追跡コレクションと、includeRemoved 指定時の Removed 復元
+        content.Should().Contain("entity.Orders = new OrderMapper().CreateEntities(editModel.Orders, includeRemoved);");
+        // 削除追跡コレクションと、CreateEntities が includeRemoved 指定時に Removed 分も含める
         content.Should().Contain("public sealed partial class EditModelCollection<T> : ObservableCollection<T>");
+        content.Should().Contain("public List<OrderEntity> CreateEntities(EditModelCollection<OrderEditModel> editModels, bool includeRemoved = false)");
+        content.Should().Contain("entities.AddRange(editModels.RemovedItems.Select(removed => CreateEntity(removed, includeRemoved)));");
         // EditModel 列挙を受け取るコンストラクタと、Entity 列挙から生成する Mapper メソッド
         content.Should().Contain("public EditModelCollection(IEnumerable<T> items)");
         content.Should().Contain("public EditModelCollection<OrderEditModel> CreateEditModels(IEnumerable<OrderEntity> entities)");
         content.Should().Contain("public EditModelCollection<OrderEditModel> Orders { get; set; } = new EditModelCollection<OrderEditModel>();");
         content.Should().Contain("public void ApplyToEntity(CustomerEditModel editModel, CustomerEntity entity, bool includeRemoved = false)");
-        content.Should().Contain("foreach (var removed in editModel.Orders.RemovedItems)");
-        // ApplyToEditModel は子 EditModel をカスケード生成し、EditModel の状態は生成元 Entity を基準にする
-        content.Should().Contain("editModel.Orders.Add(new OrderMapper().CreateEditModel(child));");
+        // ApplyToEditModel は子コレクションを CreateEditModels で代入し、状態は生成元 Entity を基準にする
+        content.Should().Contain("editModel.Orders = new OrderMapper().CreateEditModels(entity.Orders);");
         content.Should().Contain("editModel.RowState = entity.RowState;");
     }
 
