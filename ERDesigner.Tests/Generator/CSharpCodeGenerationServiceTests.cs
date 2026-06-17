@@ -182,7 +182,12 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("editModel.RowState = entity.RowState;");
         // EditModel.Validate（必須チェック＋ユーザー定義フック＋子への連鎖検証）
         content.Should().Contain("protected virtual string BuildRequiredErrorMessage(string propertyName)");
+        // 呼び出し口（Validate）は Base 側で定義し、固有処理は具象クラスの override に分離する
         content.Should().Contain("public bool Validate(bool includeChildren = true)");
+        content.Should().Contain("protected virtual void ValidateSelf()");
+        content.Should().Contain("protected virtual bool ValidateChildren(bool includeChildren, bool valid)");
+        content.Should().Contain("protected override void ValidateSelf()");
+        content.Should().Contain("protected override bool ValidateChildren(bool includeChildren, bool valid)");
         content.Should().Contain("SetError(nameof(BindingCustomerId), BuildRequiredErrorMessage(nameof(CustomerId)));");
         content.Should().Contain("partial void OnValidate();");
         content.Should().Contain("if (includeChildren)");
@@ -193,6 +198,8 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("public sealed record EditModelError(string Path, string Property, string Message);");
         content.Should().Contain("public IEnumerable<EditModelError> CollectErrors(bool includeChildren = true)");
         content.Should().Contain("internal void CollectErrors(string path, bool includeChildren, List<EditModelError> errors)");
+        content.Should().Contain("protected virtual void CollectChildErrors(string path, bool includeChildren, List<EditModelError> errors)");
+        content.Should().Contain("protected override void CollectChildErrors(string path, bool includeChildren, List<EditModelError> errors)");
         content.Should().Contain("if (!includeChildren)");
         content.Should().Contain("errors.AddRange(CollectOwnErrors(path));");
         content.Should().Contain("Orders[i].CollectErrors(CombineErrorPath(path, $\"Orders[{i}]\"), includeChildren, errors);");
@@ -493,9 +500,10 @@ public class CSharpCodeGenerationServiceTests
         // EditModelBase に BuildParseErrorMessage / CustomizeParseErrorMessage が存在する
         content.Should().Contain("protected virtual string BuildParseErrorMessage(");
         content.Should().Contain("partial void CustomizeParseErrorMessage(");
-        // RevertInput
-        content.Should().Contain("public void RevertInput()");
-        content.Should().Contain("ExecuteRevert(() =>");
+        // RevertInput は Base 側に集約し、書き戻し本体は具象クラスの RevertCore で override する
+        content.Should().Contain("public void RevertInput() => ExecuteRevert(RevertCore);");
+        content.Should().Contain("protected virtual void RevertCore()");
+        content.Should().Contain("protected override void RevertCore()");
     }
 
     /// <summary>Repository インターフェース・実装・DI 登録などの基盤コードが生成されることを検証する</summary>
@@ -538,11 +546,12 @@ public class CSharpCodeGenerationServiceTests
         var content = result.Files[0].Content;
         content.Should().Contain("using Microsoft.Data.SqlClient;");
         content.Should().Contain("using Microsoft.Extensions.DependencyInjection;");
-        content.Should().Contain("public interface IRepository<TEntity, TKey>");
-        content.Should().Contain("public abstract class SqlServerRepository<TEntity, TKey>");
+        // Repository 関連はユーザー拡張用に partial（インターフェース・基底クラス・各実装）
+        content.Should().Contain("public partial interface IRepository<TEntity, TKey>");
+        content.Should().Contain("public abstract partial class SqlServerRepository<TEntity, TKey>");
         content.Should().Contain("internal sealed class SqlEntityMetadata<TEntity, TKey>");
-        content.Should().Contain("public interface ICustomerRepository : IRepository<CustomerEntity, int>;");
-        content.Should().Contain("public sealed class CustomerRepository(ISqlConnectionFactory connectionFactory)");
+        content.Should().Contain("public partial interface ICustomerRepository : IRepository<CustomerEntity, int>");
+        content.Should().Contain("public sealed partial class CustomerRepository(ISqlConnectionFactory connectionFactory)");
         content.Should().Contain("services.AddScoped<ICustomerRepository, CustomerRepository>();");
         // カラム一覧は columnList へ抽出して SELECT 系で共用する
         content.Should().Contain("var columnList = string.Join(\", \", allColumns.Select(column => $\"[{column}]\"));");
@@ -1064,7 +1073,7 @@ public class CSharpCodeGenerationServiceTests
         content.TrimEnd().Should().NotEndWith("...");
         // 最後のエンティティ・リポジトリまで出力されていること
         content.Should().Contain("public partial class Table200Entity");
-        content.Should().Contain("public sealed class Table200Repository(ISqlConnectionFactory connectionFactory)");
+        content.Should().Contain("public sealed partial class Table200Repository(ISqlConnectionFactory connectionFactory)");
     }
 
     /// <summary>EditModel の確定値プロパティに変更通知パーシャルメソッド（Changing/Changed）が生成され、setter から呼ばれることを検証する</summary>

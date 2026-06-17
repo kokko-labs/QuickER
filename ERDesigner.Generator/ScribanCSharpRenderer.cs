@@ -228,6 +228,55 @@ internal sealed class ScribanCSharpRenderer
                 return _errors.TryGetValue(propertyName, out var list) ? list : Enumerable.Empty<string>();
             }
 
+            /// <summary>子要素のパスを連結する（ルートは空、以降は "." 区切り）</summary>
+            protected static string CombineErrorPath(string path, string segment) => path.Length == 0 ? segment : path + "." + segment;
+
+            /// <summary>必須項目の未入力と追加検証を確認しエラーを登録する（エラーが無ければ true）</summary>
+            /// <param name="includeChildren">true で子（カスケード）も連鎖検証、false で自身のみ検証</param>
+            public bool Validate(bool includeChildren = true)
+            {
+                ValidateSelf();
+
+                var valid = !HasErrors;
+
+                if (includeChildren)
+                {
+                    valid = ValidateChildren(includeChildren, valid);
+                }
+
+                return valid;
+            }
+
+            /// <summary>このノード自身を検証する（具象クラスが必須チェック等を実装）</summary>
+            protected virtual void ValidateSelf()
+            {
+            }
+
+            /// <summary>子（カスケード）を検証し valid を更新して返す（具象クラスが実装）</summary>
+            protected virtual bool ValidateChildren(bool includeChildren, bool valid) => valid;
+
+            /// <summary>検証エラーをノードのパス付きで収集する（事前に Validate を呼ぶ）</summary>
+            /// <param name="includeChildren">true で子（カスケード）も再帰収集、false で自身のエラーのみ</param>
+            public IEnumerable<EditModelError> CollectErrors(bool includeChildren = true)
+            {
+                var errors = new List<EditModelError>();
+                CollectErrors(string.Empty, includeChildren, errors);
+                return errors;
+            }
+
+            /// <summary>パス付きで検証エラーを errors へ収集する内部実装（子の再帰呼び出しで使用）</summary>
+            internal void CollectErrors(string path, bool includeChildren, List<EditModelError> errors)
+            {
+                errors.AddRange(CollectOwnErrors(path));
+
+                if (!includeChildren)
+                {
+                    return;
+                }
+
+                CollectChildErrors(path, includeChildren, errors);
+            }
+
             /// <summary>この EditModel 自身のエラーを指定パス付きで列挙する（グラフ収集の部品）</summary>
             protected IEnumerable<EditModelError> CollectOwnErrors(string path)
             {
@@ -240,8 +289,10 @@ internal sealed class ScribanCSharpRenderer
                 }
             }
 
-            /// <summary>子要素のパスを連結する（ルートは空、以降は "." 区切り）</summary>
-            protected static string CombineErrorPath(string path, string segment) => path.Length == 0 ? segment : path + "." + segment;
+            /// <summary>子（カスケード）のエラーを errors へ収集する（具象クラスが実装）</summary>
+            protected virtual void CollectChildErrors(string path, bool includeChildren, List<EditModelError> errors)
+            {
+            }
 
             /// <summary>指定プロパティのエラーを設定する（null 指定でクリア）</summary>
             protected void SetError(string propertyName, string? error)
@@ -267,6 +318,14 @@ internal sealed class ScribanCSharpRenderer
 
             /// <summary>入力エラーの変更通知を発行する</summary>
             protected void OnErrorsChanged(string propertyName) => ErrorsChanged?.Invoke(this, new DataErrorsChangedEventArgs(propertyName));
+
+            /// <summary>確定値をバインディング用プロパティへ書き戻しエラーをクリアする</summary>
+            public void RevertInput() => ExecuteRevert(RevertCore);
+
+            /// <summary>RevertInput の本体（具象クラスが各プロパティの書き戻しを実装）</summary>
+            protected virtual void RevertCore()
+            {
+            }
 
             /// <summary>リバート中フラグを立てたうえで処理を実行する</summary>
             protected void ExecuteRevert(Action action)
@@ -313,11 +372,7 @@ internal sealed class ScribanCSharpRenderer
             }
 
             /// <summary>プロパティ単位のエラーメッセージ微調整用 partial メソッド（別ファイルの partial 実装で差し替え）</summary>
-            partial void CustomizeParseErrorMessage(
-                string propertyName,
-                string inputValue,
-                string typeName,
-                ref string message);
+            partial void CustomizeParseErrorMessage(string propertyName, string inputValue, string typeName, ref string message);
         }
 
         /// <summary>EditModel グラフ上の 1 件の検証エラー</summary>
@@ -504,72 +559,50 @@ internal sealed class ScribanCSharpRenderer
         {{ for navigation in item.navigations }}    /// <summary>{{ navigation.property_name }} ナビゲーションプロパティ</summary>
             public {{ navigation.display_type_name }} {{ navigation.property_name }} { get; set; }{{ navigation.initializer }}
 
-        {{ end }}    /// <summary>確定値をバインディング用プロパティへ書き戻しエラーをクリアする</summary>
-            public void RevertInput()
+        {{ end }}    /// <summary>確定値をバインディング用プロパティへ書き戻しエラーをクリアする（RevertInput から呼ばれる）</summary>
+            protected override void RevertCore()
             {
-                ExecuteRevert(() =>
-                {
-        {{ for p in item.properties }}            {{ p.binding_property_name }} = {{ p.revert_binding_expression }};
-                    SetError(nameof({{ p.binding_property_name }}), null);
-        {{ end }}        });
-            }
+        {{ for p in item.properties }}        {{ p.binding_property_name }} = {{ p.revert_binding_expression }};
+                SetError(nameof({{ p.binding_property_name }}), null);
+        {{ end }}    }
 
-            /// <summary>必須項目の未入力と追加検証を確認しエラーを登録する（エラーが無ければ true）</summary>
-            /// <param name="includeChildren">true で子（カスケード）も連鎖検証、false で自身のみ検証</param>
-            public bool Validate(bool includeChildren = true)
+            /// <summary>このノード自身の検証（必須項目の未入力チェック＋追加検証フック）。Validate から呼ばれる</summary>
+            protected override void ValidateSelf()
             {
         {{ for p in item.properties }}{{ if p.is_required }}        if ({{ p.property_name }} is null)
                 {
                     SetError(nameof({{ p.binding_property_name }}), BuildRequiredErrorMessage(nameof({{ p.property_name }})));
                 }
         {{ end }}{{ end }}        OnValidate();
-
-                var valid = !HasErrors;
-
-                if (includeChildren)
-                {
-        {{ for nav in item.navigations }}{{ if nav.cascade }}{{ if nav.is_collection }}            foreach (var child in {{ nav.property_name }})
-                    {
-                        if (!child.Validate(includeChildren))
-                        {
-                            valid = false;
-                        }
-                    }
-        {{ else }}            if ({{ nav.property_name }} is not null && !{{ nav.property_name }}.Validate(includeChildren))
-                    {
-                        valid = false;
-                    }
-        {{ end }}{{ end }}{{ end }}            // partial クラスで追加した子要素の検証フック（valid を ref で更新）
-                    OnValidateChildren(includeChildren, ref valid);
-                }
-
-                return valid;
             }
 
             /// <summary>追加の検証ルールを実装するフック（partial 実装で SetError によりエラー登録）</summary>
             partial void OnValidate();
 
+            /// <summary>子（カスケード）の検証。各子を連鎖検証し、partial 追加の子はフックで検証する。Validate から呼ばれる</summary>
+            protected override bool ValidateChildren(bool includeChildren, bool valid)
+            {
+        {{ for nav in item.navigations }}{{ if nav.cascade }}{{ if nav.is_collection }}        foreach (var child in {{ nav.property_name }})
+                {
+                    if (!child.Validate(includeChildren))
+                    {
+                        valid = false;
+                    }
+                }
+        {{ else }}        if ({{ nav.property_name }} is not null && !{{ nav.property_name }}.Validate(includeChildren))
+                {
+                    valid = false;
+                }
+        {{ end }}{{ end }}{{ end }}        OnValidateChildren(includeChildren, ref valid);
+                return valid;
+            }
+
             /// <summary>子（カスケード）検証時のフック。partial クラスで追加した子要素を検証し valid を更新する（includeChildren=true 時のみ呼ばれる）</summary>
             partial void OnValidateChildren(bool includeChildren, ref bool valid);
 
-            /// <summary>検証エラーをノードのパス付きで収集する（事前に Validate を呼ぶ）</summary>
-            /// <param name="includeChildren">true で子（カスケード）も再帰収集、false で自身のエラーのみ</param>
-            public IEnumerable<EditModelError> CollectErrors(bool includeChildren = true)
+            /// <summary>子（カスケード）のエラーをパス付きで errors へ収集する。partial 追加の子はフックで収集する。CollectErrors から呼ばれる</summary>
+            protected override void CollectChildErrors(string path, bool includeChildren, List<EditModelError> errors)
             {
-                var errors = new List<EditModelError>();
-                CollectErrors(string.Empty, includeChildren, errors);
-                return errors;
-            }
-
-            /// <summary>パス付きで検証エラーを errors へ収集する内部実装（子の再帰呼び出しで使用）</summary>
-            internal void CollectErrors(string path, bool includeChildren, List<EditModelError> errors)
-            {
-                errors.AddRange(CollectOwnErrors(path));
-
-                if (!includeChildren)
-                {
-                    return;
-                }
         {{ for nav in item.navigations }}{{ if nav.cascade }}{{ if nav.is_collection }}        for (var i = 0; i < {{ nav.property_name }}.Count; i++)
                 {
                     {{ nav.property_name }}[i].CollectErrors(CombineErrorPath(path, $"{{ nav.property_name }}[{i}]"), includeChildren, errors);
@@ -578,8 +611,7 @@ internal sealed class ScribanCSharpRenderer
                 {
                     {{ nav.property_name }}.CollectErrors(CombineErrorPath(path, "{{ nav.property_name }}"), includeChildren, errors);
                 }
-        {{ end }}{{ end }}{{ end }}        // partial クラスで追加した子要素のエラー収集フック
-                OnCollectChildErrors(path, includeChildren, errors);
+        {{ end }}{{ end }}{{ end }}        OnCollectChildErrors(path, includeChildren, errors);
             }
 
             /// <summary>子（カスケード）エラー収集時のフック。partial クラスで追加した子要素のエラーを errors へ追加する（includeChildren=true 時のみ呼ばれる）</summary>
@@ -700,7 +732,7 @@ internal sealed class ScribanCSharpRenderer
 
         {{~ if repository_classes.size > 0 ~}}
         /// <summary>エンティティの CRUD 操作を提供するリポジトリ共通インターフェース</summary>
-        public interface IRepository<TEntity, TKey>
+        public partial interface IRepository<TEntity, TKey>
             where TEntity : EntityBase, new()
         {
             /// <summary>主キーによる単一エンティティ取得（該当なしは null）</summary>
@@ -992,7 +1024,7 @@ internal sealed class ScribanCSharpRenderer
         }
 
         /// <summary>メタデータを用いて CRUD を実装する SQL Server 向けリポジトリ基底クラス</summary>
-        public abstract class SqlServerRepository<TEntity, TKey>(ISqlConnectionFactory connectionFactory) : IRepository<TEntity, TKey>
+        public abstract partial class SqlServerRepository<TEntity, TKey>(ISqlConnectionFactory connectionFactory) : IRepository<TEntity, TKey>
             where TEntity : EntityBase, new()
         {
             /// <summary>エンティティ型ごとに 1 度だけ構築されるメタデータ（静的キャッシュ）</summary>
@@ -2080,10 +2112,14 @@ internal sealed class ScribanCSharpRenderer
         {{~ for repository in repository_classes ~}}
         {{ if !for.first }}
         {{ end }}/// <summary>{{ repository.entity_class_name }} 用リポジトリインターフェース</summary>
-        public interface {{ repository.interface_name }} : IRepository<{{ repository.entity_class_name }}, {{ repository.key_type_name }}>;
+        public partial interface {{ repository.interface_name }} : IRepository<{{ repository.entity_class_name }}, {{ repository.key_type_name }}>
+        {
+        }
 
         /// <summary>{{ repository.entity_class_name }} 用リポジトリ実装</summary>
-        public sealed class {{ repository.class_name }}(ISqlConnectionFactory connectionFactory) : SqlServerRepository<{{ repository.entity_class_name }}, {{ repository.key_type_name }}>(connectionFactory), {{ repository.interface_name }};
+        public sealed partial class {{ repository.class_name }}(ISqlConnectionFactory connectionFactory) : SqlServerRepository<{{ repository.entity_class_name }}, {{ repository.key_type_name }}>(connectionFactory), {{ repository.interface_name }}
+        {
+        }
         {{~ end ~}}
         {{~ end ~}}
         """;
