@@ -504,6 +504,14 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("public void RevertInput() => ExecuteRevert(RevertCore);");
         content.Should().Contain("protected virtual void RevertCore()");
         content.Should().Contain("protected override void RevertCore()");
+        // 兄弟ナビゲーション：Base が所属コレクション（IList）経由の GetNext/GetPrevious を提供し、コレクションが所有者を設定、具象クラスが型付き版を生成する
+        content.Should().Contain("internal System.Collections.IList? Owner { get; set; }");
+        content.Should().Contain("public EditModelBase? GetNext()");
+        content.Should().Contain("public EditModelBase? GetPrevious()");
+        content.Should().Contain("var index = Owner.IndexOf(this);");
+        content.Should().Contain("item.Owner = this;");
+        content.Should().Contain("public new OrderEditModel? GetNext() => (OrderEditModel?)base.GetNext();");
+        content.Should().Contain("public new OrderEditModel? GetPrevious() => (OrderEditModel?)base.GetPrevious();");
     }
 
     /// <summary>Repository インターフェース・実装・DI 登録などの基盤コードが生成されることを検証する</summary>

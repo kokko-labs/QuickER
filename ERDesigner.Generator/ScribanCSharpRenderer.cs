@@ -201,6 +201,33 @@ internal sealed class ScribanCSharpRenderer
                 }
             }
 
+            /// <summary>この EditModel が所属するコレクション（兄弟ナビゲーション用。EditModelCollection が設定する）</summary>
+            internal System.Collections.IList? Owner { get; set; }
+
+            /// <summary>所属コレクション内で自身の次の要素を取得する（所属していない／末尾なら null）</summary>
+            public EditModelBase? GetNext()
+            {
+                if (Owner is null)
+                {
+                    return null;
+                }
+
+                var index = Owner.IndexOf(this);
+                return index >= 0 && index + 1 < Owner.Count ? (EditModelBase?)Owner[index + 1] : null;
+            }
+
+            /// <summary>所属コレクション内で自身の前の要素を取得する（所属していない／先頭なら null）</summary>
+            public EditModelBase? GetPrevious()
+            {
+                if (Owner is null)
+                {
+                    return null;
+                }
+
+                var index = Owner.IndexOf(this);
+                return index > 0 ? (EditModelBase?)Owner[index - 1] : null;
+            }
+
             /// <summary>指定プロパティの変更通知を発行する</summary>
             protected void OnPropertyChanged(string propertyName) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 
@@ -401,28 +428,50 @@ internal sealed class ScribanCSharpRenderer
             public EditModelCollection(IEnumerable<T> items)
                 : base(items)
             {
+                // base(items) は InsertItem を経由せず内部リストへ直接追加するため、ここで所有者を設定する
+                foreach (var item in this)
+                {
+                    item.Owner = this;
+                }
             }
 
             /// <summary>Remove で外した削除対象（Removed）の一覧</summary>
             public IReadOnlyList<T> RemovedItems => _removed;
 
+            /// <summary>要素を追加する。追加要素に自身を所有者として設定する</summary>
+            protected override void InsertItem(int index, T item)
+            {
+                item.Owner = this;
+                base.InsertItem(index, item);
+            }
+
             /// <summary>要素を外す（Remove / RemoveAt）。既存要素は Removed として退避し、新規要素は破棄する</summary>
             protected override void RemoveItem(int index)
             {
-                TrackRemoval(this[index]);
+                var removed = this[index];
+                TrackRemoval(removed);
+                removed.Owner = null;
                 base.RemoveItem(index);
             }
 
             /// <summary>インデクサ代入で要素を置き換える。置換前の既存要素は Removed として退避する</summary>
             protected override void SetItem(int index, T item)
             {
-                TrackRemoval(this[index]);
+                var replaced = this[index];
+                TrackRemoval(replaced);
+                replaced.Owner = null;
+                item.Owner = this;
                 base.SetItem(index, item);
             }
 
             /// <summary>画面上の全消去。削除追跡はせず、退避していた削除対象もリセットする</summary>
             protected override void ClearItems()
             {
+                foreach (var item in this)
+                {
+                    item.Owner = null;
+                }
+
                 _removed.Clear();
                 base.ClearItems();
             }
@@ -616,6 +665,12 @@ internal sealed class ScribanCSharpRenderer
 
             /// <summary>子（カスケード）エラー収集時のフック。partial クラスで追加した子要素のエラーを errors へ追加する（includeChildren=true 時のみ呼ばれる）</summary>
             partial void OnCollectChildErrors(string path, bool includeChildren, List<EditModelError> errors);
+
+            /// <summary>所属コレクション内で自身の次の要素を取得する（所属していない／末尾なら null）</summary>
+            public new {{ item.class_name }}? GetNext() => ({{ item.class_name }}?)base.GetNext();
+
+            /// <summary>所属コレクション内で自身の前の要素を取得する（所属していない／先頭なら null）</summary>
+            public new {{ item.class_name }}? GetPrevious() => ({{ item.class_name }}?)base.GetPrevious();
         }
         {{~ end ~}}
 
