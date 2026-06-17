@@ -514,8 +514,9 @@ internal sealed class ScribanCSharpRenderer
         {{ end }}        });
             }
 
-            /// <summary>必須項目の未入力と追加検証を確認しエラーを登録する（子も連鎖検証。エラーが無ければ true）</summary>
-            public bool Validate()
+            /// <summary>必須項目の未入力と追加検証を確認しエラーを登録する（エラーが無ければ true）</summary>
+            /// <param name="includeChildren">true で子（カスケード）も連鎖検証、false で自身のみ検証</param>
+            public bool Validate(bool includeChildren = true)
             {
         {{ for p in item.properties }}{{ if p.is_required }}        if ({{ p.property_name }} is null)
                 {
@@ -524,54 +525,65 @@ internal sealed class ScribanCSharpRenderer
         {{ end }}{{ end }}        OnValidate();
 
                 var valid = !HasErrors;
-        {{ for nav in item.navigations }}{{ if nav.cascade }}{{ if nav.is_collection }}        foreach (var child in {{ nav.property_name }})
+
+                if (includeChildren)
                 {
-                    if (!child.Validate())
+        {{ for nav in item.navigations }}{{ if nav.cascade }}{{ if nav.is_collection }}            foreach (var child in {{ nav.property_name }})
+                    {
+                        if (!child.Validate(includeChildren))
+                        {
+                            valid = false;
+                        }
+                    }
+        {{ else }}            if ({{ nav.property_name }} is not null && !{{ nav.property_name }}.Validate(includeChildren))
                     {
                         valid = false;
                     }
+        {{ end }}{{ end }}{{ end }}            // partial クラスで追加した子要素の検証フック（valid を ref で更新）
+                    OnValidateChildren(includeChildren, ref valid);
                 }
-        {{ else }}        if ({{ nav.property_name }} is not null && !{{ nav.property_name }}.Validate())
-                {
-                    valid = false;
-                }
-        {{ end }}{{ end }}{{ end }}        return valid;
+
+                return valid;
             }
 
             /// <summary>追加の検証ルールを実装するフック（partial 実装で SetError によりエラー登録）</summary>
             partial void OnValidate();
 
+            /// <summary>子（カスケード）検証時のフック。partial クラスで追加した子要素を検証し valid を更新する（includeChildren=true 時のみ呼ばれる）</summary>
+            partial void OnValidateChildren(bool includeChildren, ref bool valid);
+
             /// <summary>検証エラーをノードのパス付きで収集する（事前に Validate を呼ぶ）</summary>
             /// <param name="includeChildren">true で子（カスケード）も再帰収集、false で自身のエラーのみ</param>
-            public IEnumerable<EditModelError> CollectErrors(bool includeChildren = true) => CollectErrors(string.Empty, includeChildren);
-
-            /// <summary>パス付きで検証エラーを収集する内部実装（子の再帰呼び出しで使用）</summary>
-            internal IEnumerable<EditModelError> CollectErrors(string path, bool includeChildren)
+            public IEnumerable<EditModelError> CollectErrors(bool includeChildren = true)
             {
-                foreach (var error in CollectOwnErrors(path))
-                {
-                    yield return error;
-                }
+                var errors = new List<EditModelError>();
+                CollectErrors(string.Empty, includeChildren, errors);
+                return errors;
+            }
+
+            /// <summary>パス付きで検証エラーを errors へ収集する内部実装（子の再帰呼び出しで使用）</summary>
+            internal void CollectErrors(string path, bool includeChildren, List<EditModelError> errors)
+            {
+                errors.AddRange(CollectOwnErrors(path));
 
                 if (!includeChildren)
                 {
-                    yield break;
+                    return;
                 }
         {{ for nav in item.navigations }}{{ if nav.cascade }}{{ if nav.is_collection }}        for (var i = 0; i < {{ nav.property_name }}.Count; i++)
                 {
-                    foreach (var error in {{ nav.property_name }}[i].CollectErrors(CombineErrorPath(path, $"{{ nav.property_name }}[{i}]"), includeChildren))
-                    {
-                        yield return error;
-                    }
+                    {{ nav.property_name }}[i].CollectErrors(CombineErrorPath(path, $"{{ nav.property_name }}[{i}]"), includeChildren, errors);
                 }
         {{ else }}        if ({{ nav.property_name }} is not null)
                 {
-                    foreach (var error in {{ nav.property_name }}.CollectErrors(CombineErrorPath(path, "{{ nav.property_name }}"), includeChildren))
-                    {
-                        yield return error;
-                    }
+                    {{ nav.property_name }}.CollectErrors(CombineErrorPath(path, "{{ nav.property_name }}"), includeChildren, errors);
                 }
-        {{ end }}{{ end }}{{ end }}    }
+        {{ end }}{{ end }}{{ end }}        // partial クラスで追加した子要素のエラー収集フック
+                OnCollectChildErrors(path, includeChildren, errors);
+            }
+
+            /// <summary>子（カスケード）エラー収集時のフック。partial クラスで追加した子要素のエラーを errors へ追加する（includeChildren=true 時のみ呼ばれる）</summary>
+            partial void OnCollectChildErrors(string path, bool includeChildren, List<EditModelError> errors);
         }
         {{~ end ~}}
 

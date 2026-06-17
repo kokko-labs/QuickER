@@ -182,17 +182,22 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("editModel.RowState = entity.RowState;");
         // EditModel.Validate（必須チェック＋ユーザー定義フック＋子への連鎖検証）
         content.Should().Contain("protected virtual string BuildRequiredErrorMessage(string propertyName)");
-        content.Should().Contain("public bool Validate()");
+        content.Should().Contain("public bool Validate(bool includeChildren = true)");
         content.Should().Contain("SetError(nameof(BindingCustomerId), BuildRequiredErrorMessage(nameof(CustomerId)));");
         content.Should().Contain("partial void OnValidate();");
-        content.Should().Contain("if (!child.Validate())");
+        content.Should().Contain("if (includeChildren)");
+        content.Should().Contain("if (!child.Validate(includeChildren))");
+        content.Should().Contain("OnValidateChildren(includeChildren, ref valid);");
+        content.Should().Contain("partial void OnValidateChildren(bool includeChildren, ref bool valid);");
         // グラフ全体のエラーをノードのパス付きで収集する
         content.Should().Contain("public sealed record EditModelError(string Path, string Property, string Message);");
-        content.Should().Contain("public IEnumerable<EditModelError> CollectErrors(bool includeChildren = true) => CollectErrors(string.Empty, includeChildren);");
-        content.Should().Contain("internal IEnumerable<EditModelError> CollectErrors(string path, bool includeChildren)");
+        content.Should().Contain("public IEnumerable<EditModelError> CollectErrors(bool includeChildren = true)");
+        content.Should().Contain("internal void CollectErrors(string path, bool includeChildren, List<EditModelError> errors)");
         content.Should().Contain("if (!includeChildren)");
-        content.Should().Contain("foreach (var error in CollectOwnErrors(path))");
-        content.Should().Contain("foreach (var error in Orders[i].CollectErrors(CombineErrorPath(path, $\"Orders[{i}]\"), includeChildren))");
+        content.Should().Contain("errors.AddRange(CollectOwnErrors(path));");
+        content.Should().Contain("Orders[i].CollectErrors(CombineErrorPath(path, $\"Orders[{i}]\"), includeChildren, errors);");
+        content.Should().Contain("OnCollectChildErrors(path, includeChildren, errors);");
+        content.Should().Contain("partial void OnCollectChildErrors(string path, bool includeChildren, List<EditModelError> errors);");
     }
 
     /// <summary>
