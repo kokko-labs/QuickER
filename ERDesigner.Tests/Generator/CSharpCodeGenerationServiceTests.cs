@@ -512,6 +512,18 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("item.Owner = this;");
         content.Should().Contain("public new OrderEditModel? GetNext() => (OrderEditModel?)base.GetNext();");
         content.Should().Contain("public new OrderEditModel? GetPrevious() => (OrderEditModel?)base.GetPrevious();");
+        // 親コレクション基準の位置取得・削除・並び替え。位置系と削除は Base（IList）、Move は型付き Parent と MoveCore の override で実装する
+        content.Should().Contain("public int IndexInParent => Owner?.IndexOf(this) ?? -1;");
+        content.Should().Contain("public bool IsFirstInParent => IndexInParent == 0;");
+        content.Should().Contain("public bool IsLastInParent");
+        content.Should().Contain("public bool RemoveFromParent()");
+        content.Should().Contain("public bool MoveToFirst() => MoveSelfTo(0);");
+        content.Should().Contain("public bool MoveToLast() => Owner is not null && MoveSelfTo(Owner.Count - 1);");
+        content.Should().Contain("public bool MoveToNext()");
+        content.Should().Contain("public bool MoveToPrevious()");
+        content.Should().Contain("protected virtual void MoveCore(int oldIndex, int newIndex)");
+        content.Should().Contain("public EditModelCollection<OrderEditModel>? Parent => Owner as EditModelCollection<OrderEditModel>;");
+        content.Should().Contain("protected override void MoveCore(int oldIndex, int newIndex) => Parent?.Move(oldIndex, newIndex);");
     }
 
     /// <summary>Repository インターフェース・実装・DI 登録などの基盤コードが生成されることを検証する</summary>

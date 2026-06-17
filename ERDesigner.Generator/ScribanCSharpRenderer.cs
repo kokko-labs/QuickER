@@ -228,6 +228,77 @@ internal sealed class ScribanCSharpRenderer
                 return index > 0 ? (EditModelBase?)Owner[index - 1] : null;
             }
 
+            /// <summary>所属コレクション内での自身の位置（所属していなければ -1）</summary>
+            public int IndexInParent => Owner?.IndexOf(this) ?? -1;
+
+            /// <summary>所属コレクション内で自身が先頭要素かどうか（所属していなければ false）</summary>
+            public bool IsFirstInParent => IndexInParent == 0;
+
+            /// <summary>所属コレクション内で自身が末尾要素かどうか（所属していなければ false）</summary>
+            public bool IsLastInParent
+            {
+                get
+                {
+                    var index = IndexInParent;
+                    return index >= 0 && Owner is not null && index == Owner.Count - 1;
+                }
+            }
+
+            /// <summary>自身を所属コレクションから取り除く（既存要素は Removed として削除追跡される）。取り除けたら true</summary>
+            public bool RemoveFromParent()
+            {
+                if (Owner is null || !Owner.Contains(this))
+                {
+                    return false;
+                }
+
+                Owner.Remove(this);
+                return true;
+            }
+
+            /// <summary>自身を所属コレクションの先頭へ移動する（順序のみ変更し削除追跡しない）。移動したら true</summary>
+            public bool MoveToFirst() => MoveSelfTo(0);
+
+            /// <summary>自身を所属コレクションの末尾へ移動する。移動したら true</summary>
+            public bool MoveToLast() => Owner is not null && MoveSelfTo(Owner.Count - 1);
+
+            /// <summary>自身を所属コレクション内で1つ後ろへ移動する。移動したら true</summary>
+            public bool MoveToNext()
+            {
+                var index = IndexInParent;
+                return index >= 0 && Owner is not null && index + 1 < Owner.Count && MoveSelfTo(index + 1);
+            }
+
+            /// <summary>自身を所属コレクション内で1つ前へ移動する。移動したら true</summary>
+            public bool MoveToPrevious()
+            {
+                var index = IndexInParent;
+                return index > 0 && MoveSelfTo(index - 1);
+            }
+
+            /// <summary>自身を所属コレクション内の指定位置へ移動する共通処理（ObservableCollection.Move 経由で削除追跡を起こさない）</summary>
+            private bool MoveSelfTo(int newIndex)
+            {
+                if (Owner is null)
+                {
+                    return false;
+                }
+
+                var oldIndex = Owner.IndexOf(this);
+                if (oldIndex < 0 || oldIndex == newIndex)
+                {
+                    return false;
+                }
+
+                MoveCore(oldIndex, newIndex);
+                return true;
+            }
+
+            /// <summary>所属コレクションの並び替え本体（具象クラスが型付きコレクションの Move を実装する）</summary>
+            protected virtual void MoveCore(int oldIndex, int newIndex)
+            {
+            }
+
             /// <summary>指定プロパティの変更通知を発行する</summary>
             protected void OnPropertyChanged(string propertyName) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 
@@ -671,6 +742,12 @@ internal sealed class ScribanCSharpRenderer
 
             /// <summary>所属コレクション内で自身の前の要素を取得する（所属していない／先頭なら null）</summary>
             public new {{ item.class_name }}? GetPrevious() => ({{ item.class_name }}?)base.GetPrevious();
+
+            /// <summary>自身が所属する親コレクション（所属していなければ null）</summary>
+            public EditModelCollection<{{ item.class_name }}>? Parent => Owner as EditModelCollection<{{ item.class_name }}>;
+
+            /// <summary>所属コレクションの並び替え本体。型付きコレクションの Move を呼ぶ（MoveTo* から使用される）</summary>
+            protected override void MoveCore(int oldIndex, int newIndex) => Parent?.Move(oldIndex, newIndex);
         }
         {{~ end ~}}
 
