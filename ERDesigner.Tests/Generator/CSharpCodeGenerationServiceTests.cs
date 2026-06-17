@@ -524,6 +524,11 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("protected virtual void MoveCore(int oldIndex, int newIndex)");
         content.Should().Contain("public EditModelCollection<OrderEditModel>? Parent => Owner as EditModelCollection<OrderEditModel>;");
         content.Should().Contain("protected override void MoveCore(int oldIndex, int newIndex) => Parent?.Move(oldIndex, newIndex);");
+        // コレクションの増減・並び替えで位置プロパティの変更通知を発行し、バインドでボタン活性を制御できるようにする
+        content.Should().Contain("internal void RaisePositionChanged()");
+        content.Should().Contain("internal void RaiseParentChanged() => OnPropertyChanged(\"Parent\");");
+        content.Should().Contain("private void NotifyPositionsChanged()");
+        content.Should().Contain("protected override void MoveItem(int oldIndex, int newIndex)");
     }
 
     /// <summary>Repository インターフェース・実装・DI 登録などの基盤コードが生成されることを検証する</summary>

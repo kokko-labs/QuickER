@@ -299,6 +299,17 @@ internal sealed class ScribanCSharpRenderer
             {
             }
 
+            /// <summary>位置プロパティ（IndexInParent / IsFirstInParent / IsLastInParent）の変更通知を発行する（コレクションの増減・並び替え時に呼ばれる）</summary>
+            internal void RaisePositionChanged()
+            {
+                OnPropertyChanged(nameof(IndexInParent));
+                OnPropertyChanged(nameof(IsFirstInParent));
+                OnPropertyChanged(nameof(IsLastInParent));
+            }
+
+            /// <summary>親コレクション参照（Parent）の変更通知を発行する（コレクションへの出入り時に呼ばれる。具象クラスの Parent は常にこの名称で生成される）</summary>
+            internal void RaiseParentChanged() => OnPropertyChanged("Parent");
+
             /// <summary>指定プロパティの変更通知を発行する</summary>
             protected void OnPropertyChanged(string propertyName) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 
@@ -509,11 +520,13 @@ internal sealed class ScribanCSharpRenderer
             /// <summary>Remove で外した削除対象（Removed）の一覧</summary>
             public IReadOnlyList<T> RemovedItems => _removed;
 
-            /// <summary>要素を追加する。追加要素に自身を所有者として設定する</summary>
+            /// <summary>要素を追加する。追加要素に自身を所有者として設定し、位置プロパティの変更を通知する</summary>
             protected override void InsertItem(int index, T item)
             {
                 item.Owner = this;
                 base.InsertItem(index, item);
+                item.RaiseParentChanged();
+                NotifyPositionsChanged();
             }
 
             /// <summary>要素を外す（Remove / RemoveAt）。既存要素は Removed として退避し、新規要素は破棄する</summary>
@@ -523,6 +536,9 @@ internal sealed class ScribanCSharpRenderer
                 TrackRemoval(removed);
                 removed.Owner = null;
                 base.RemoveItem(index);
+                removed.RaiseParentChanged();
+                removed.RaisePositionChanged();
+                NotifyPositionsChanged();
             }
 
             /// <summary>インデクサ代入で要素を置き換える。置換前の既存要素は Removed として退避する</summary>
@@ -533,11 +549,25 @@ internal sealed class ScribanCSharpRenderer
                 replaced.Owner = null;
                 item.Owner = this;
                 base.SetItem(index, item);
+                replaced.RaiseParentChanged();
+                replaced.RaisePositionChanged();
+                item.RaiseParentChanged();
+                NotifyPositionsChanged();
+            }
+
+            /// <summary>要素を並び替える（順序のみ変更し削除追跡しない）。移動後に位置プロパティの変更を通知する</summary>
+            protected override void MoveItem(int oldIndex, int newIndex)
+            {
+                // base.MoveItem は Collection&lt;T&gt; の非仮想 Remove/Insert を呼ぶため、当方の削除追跡オーバーライドを経由しない
+                base.MoveItem(oldIndex, newIndex);
+                NotifyPositionsChanged();
             }
 
             /// <summary>画面上の全消去。削除追跡はせず、退避していた削除対象もリセットする</summary>
             protected override void ClearItems()
             {
+                var cleared = new List<T>(this);
+
                 foreach (var item in this)
                 {
                     item.Owner = null;
@@ -545,10 +575,25 @@ internal sealed class ScribanCSharpRenderer
 
                 _removed.Clear();
                 base.ClearItems();
+
+                foreach (var item in cleared)
+                {
+                    item.RaiseParentChanged();
+                    item.RaisePositionChanged();
+                }
             }
 
             /// <summary>保存確定後に削除追跡をクリアする</summary>
             public void AcceptRemoved() => _removed.Clear();
+
+            /// <summary>全要素へ位置プロパティ（IndexInParent / IsFirstInParent / IsLastInParent）の変更を通知する</summary>
+            private void NotifyPositionsChanged()
+            {
+                foreach (var item in this)
+                {
+                    item.RaisePositionChanged();
+                }
+            }
 
             /// <summary>外した要素を削除対象として退避する（新規＝未保存の要素は退避しない）</summary>
             private void TrackRemoval(T item)
