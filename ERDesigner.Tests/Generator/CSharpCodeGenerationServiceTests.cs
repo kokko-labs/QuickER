@@ -196,26 +196,29 @@ public class CSharpCodeGenerationServiceTests
         // 呼び出し口（Validate）は Base 側で定義し、固有処理は具象クラスの override に分離する
         content.Should().Contain("public bool Validate(bool includeChildren = true)");
         content.Should().Contain("protected virtual void ValidateSelf()");
-        content.Should().Contain("protected virtual bool ValidateChildren(bool includeChildren, bool valid)");
         content.Should().Contain("protected override void ValidateSelf()");
-        content.Should().Contain("protected override bool ValidateChildren(bool includeChildren, bool valid)");
         content.Should().Contain("SetError(nameof(BindingCustomerId), BuildRequiredErrorMessage(nameof(CustomerId)));");
         content.Should().Contain("partial void OnValidate();");
         content.Should().Contain("if (includeChildren)");
-        content.Should().Contain("if (!child.Validate(includeChildren))");
-        content.Should().Contain("OnValidateChildren(includeChildren, ref valid);");
-        content.Should().Contain("partial void OnValidateChildren(bool includeChildren, ref bool valid);");
-        // グラフ全体のエラーをノードのパス付きで収集する
+        // カスケードは ChildLink レジストリに一本化。子用の仮想メソッドと空オーバーライドは廃止
+        content.Should().NotContain("ValidateChildren");
+        content.Should().NotContain("CollectChildErrors");
+        content.Should().Contain("protected virtual void RegisterChildren()");
+        content.Should().Contain("protected virtual void RegisterExtraChildren()");
+        content.Should().Contain("protected void AddChild(string name, Func<EditModelBase?> accessor)");
+        content.Should().Contain("protected void AddChildren<T>(string name, EditModelCollection<T> collection) where T : EditModelBase");
+        content.Should().Contain("foreach (var link in ChildLinks)");
+        // 子（カスケードナビ）を持つ EditModel は RegisterChildren を override し AddChildren で登録する
+        content.Should().Contain("protected override void RegisterChildren()");
+        content.Should().Contain("AddChildren(\"Orders\", Orders);");
+        // グラフ全体のエラーをノードのパス付きで収集する（収集は ChildLink レジストリ経由）
         content.Should().Contain("public sealed record EditModelError(string Path, string Property, string Message);");
         content.Should().Contain("public IEnumerable<EditModelError> CollectErrors(bool includeChildren = true)");
         content.Should().Contain("internal void CollectErrors(string path, bool includeChildren, List<EditModelError> errors)");
-        content.Should().Contain("protected virtual void CollectChildErrors(string path, bool includeChildren, List<EditModelError> errors)");
-        content.Should().Contain("protected override void CollectChildErrors(string path, bool includeChildren, List<EditModelError> errors)");
         content.Should().Contain("if (!includeChildren)");
         content.Should().Contain("errors.AddRange(CollectOwnErrors(path));");
-        content.Should().Contain("Orders[i].CollectErrors(CombineErrorPath(path, $\"Orders[{i}]\"), includeChildren, errors);");
-        content.Should().Contain("OnCollectChildErrors(path, includeChildren, errors);");
-        content.Should().Contain("partial void OnCollectChildErrors(string path, bool includeChildren, List<EditModelError> errors);");
+        content.Should().Contain("link.CollectErrors(path, includeChildren, errors);");
+        content.Should().NotContain("OnCollectChildErrors");
     }
 
     /// <summary>
@@ -538,14 +541,18 @@ public class CSharpCodeGenerationServiceTests
         // ② RowState 変更時に派生フラグの変更通知も発行する
         content.Should().Contain("OnPropertyChanged(nameof(IsAdded));");
         content.Should().Contain("OnPropertyChanged(nameof(HasChanges));");
-        // ① AcceptChanges（保存後の状態確定）。Base に公開エントリ、具象クラスに子確定 override＋フック
+        // ① AcceptChanges / ③ HasGraphChanges は Base の公開エントリのみ（カスケードは ChildLink 経由）
         content.Should().Contain("public void AcceptChanges(bool includeChildren = true)");
-        content.Should().Contain("protected override void AcceptChildChanges(bool includeChildren)");
-        content.Should().Contain("partial void OnAcceptChildChanges(bool includeChildren);");
-        // ③ HasGraphChanges（ダーティ判定）。Base に公開エントリ、具象クラスに子判定 override＋フック
         content.Should().Contain("public bool HasGraphChanges(bool includeChildren = true)");
-        content.Should().Contain("protected override bool ChildHasChanges(bool includeChildren)");
-        content.Should().Contain("partial void OnChildHasChanges(bool includeChildren, ref bool hasChanges);");
+        // 子用の仮想メソッド・空オーバーライドは全廃（カスケードなしの EditModel では何も生成されない）
+        content.Should().NotContain("AcceptChildChanges");
+        content.Should().NotContain("ChildHasChanges");
+        content.Should().NotContain("OnAcceptChildChanges");
+        content.Should().NotContain("OnChildHasChanges");
+        // カスケードナビを持たないこの EditModel には RegisterChildren の override は生成されない
+        content.Should().NotContain("protected override void RegisterChildren()");
+        // ② 発見性：拡張ポイント一覧コメントを生成
+        content.Should().Contain("拡張ポイント（partial クラスで必要なものだけ実装");
         // ④ IEditableObject（DataGrid 行編集の取り消し対応）
         content.Should().Contain("INotifyDataErrorInfo, IEditableObject");
         content.Should().Contain("public void BeginEdit()");

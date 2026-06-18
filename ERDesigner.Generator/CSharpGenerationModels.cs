@@ -213,6 +213,9 @@ internal sealed class CSharpEditModelClassModel
 
     /// <summary>ナビゲーションプロパティの生成モデル一覧</summary>
     public required IReadOnlyList<CSharpNavigationModel> Navigations { get; init; }
+
+    /// <summary>カスケード対象（子方向）のナビゲーションを持つかどうか</summary>
+    public required bool HasCascadeNavigations { get; init; }
 }
 
 /// <summary>EditModel の 1 プロパティに対応する生成モデル</summary>

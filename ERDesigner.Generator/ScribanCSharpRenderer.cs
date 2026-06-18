@@ -354,7 +354,10 @@ internal sealed class ScribanCSharpRenderer
 
                 if (includeChildren)
                 {
-                    valid = ValidateChildren(includeChildren, valid);
+                    foreach (var link in ChildLinks)
+                    {
+                        link.Validate(includeChildren, ref valid);
+                    }
                 }
 
                 return valid;
@@ -364,9 +367,6 @@ internal sealed class ScribanCSharpRenderer
             protected virtual void ValidateSelf()
             {
             }
-
-            /// <summary>子（カスケード）を検証し valid を更新して返す（具象クラスが実装）</summary>
-            protected virtual bool ValidateChildren(bool includeChildren, bool valid) => valid;
 
             /// <summary>検証エラーをノードのパス付きで収集する（事前に Validate を呼ぶ）</summary>
             /// <param name="includeChildren">true で子（カスケード）も再帰収集、false で自身のエラーのみ</param>
@@ -387,7 +387,10 @@ internal sealed class ScribanCSharpRenderer
                     return;
                 }
 
-                CollectChildErrors(path, includeChildren, errors);
+                foreach (var link in ChildLinks)
+                {
+                    link.CollectErrors(path, includeChildren, errors);
+                }
             }
 
             /// <summary>この EditModel 自身のエラーを指定パス付きで列挙する（グラフ収集の部品）</summary>
@@ -402,11 +405,6 @@ internal sealed class ScribanCSharpRenderer
                 }
             }
 
-            /// <summary>子（カスケード）のエラーを errors へ収集する（具象クラスが実装）</summary>
-            protected virtual void CollectChildErrors(string path, bool includeChildren, List<EditModelError> errors)
-            {
-            }
-
             /// <summary>保存確定後にグラフを変更なし状態へ戻す（自身を Unchanged にし、子の削除追跡もクリアする）</summary>
             /// <param name="includeChildren">true で子（カスケード）も再帰的に確定する</param>
             public void AcceptChanges(bool includeChildren = true)
@@ -415,13 +413,11 @@ internal sealed class ScribanCSharpRenderer
 
                 if (includeChildren)
                 {
-                    AcceptChildChanges(includeChildren);
+                    foreach (var link in ChildLinks)
+                    {
+                        link.AcceptChanges(includeChildren);
+                    }
                 }
-            }
-
-            /// <summary>子（カスケード）を確定し削除追跡をクリアする（具象クラスが実装）</summary>
-            protected virtual void AcceptChildChanges(bool includeChildren)
-            {
             }
 
             /// <summary>自身または子（カスケード）に変更があるかどうかを返す（保存ボタンの活性判定などに使用）</summary>
@@ -433,11 +429,140 @@ internal sealed class ScribanCSharpRenderer
                     return true;
                 }
 
-                return includeChildren && ChildHasChanges(includeChildren);
+                if (!includeChildren)
+                {
+                    return false;
+                }
+
+                foreach (var link in ChildLinks)
+                {
+                    if (link.HasChanges(includeChildren))
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
             }
 
-            /// <summary>子（カスケード）に変更があるかどうかを返す（具象クラスが実装）</summary>
-            protected virtual bool ChildHasChanges(bool includeChildren) => false;
+            /// <summary>カスケード子（既知ナビ＋partial 追加）のリンク。バッキングフィールド</summary>
+            private List<ChildLink>? _childLinks;
+
+            /// <summary>子の登録を1度だけ実行したかどうか</summary>
+            private bool _childrenRegistered;
+
+            /// <summary>カスケード子のリンク一覧。初回アクセスで RegisterChildren／RegisterExtraChildren を1度だけ呼ぶ</summary>
+            private IReadOnlyList<ChildLink> ChildLinks
+            {
+                get
+                {
+                    if (!_childrenRegistered)
+                    {
+                        _childrenRegistered = true;
+                        RegisterChildren();
+                        RegisterExtraChildren();
+                    }
+
+                    if (_childLinks is null)
+                    {
+                        return Array.Empty<ChildLink>();
+                    }
+
+                    return _childLinks;
+                }
+            }
+
+            /// <summary>既知のカスケード子を登録する（カスケード子を持つ具象クラスのみ生成コードが override。手動実装しない）</summary>
+            protected virtual void RegisterChildren()
+            {
+            }
+
+            /// <summary>partial クラスで追加した子を AddChild / AddChildren で登録する拡張ポイント。override すると検証・収集・確定・ダーティ判定すべてに参加する</summary>
+            protected virtual void RegisterExtraChildren()
+            {
+            }
+
+            /// <summary>子（単一参照）をカスケードに登録する（参照は遅延取得で最新を反映）</summary>
+            protected void AddChild(string name, Func<EditModelBase?> accessor) => (_childLinks ??= new()).Add(ChildLink.ForSingle(name, accessor));
+
+            /// <summary>子コレクションをカスケードに登録する</summary>
+            protected void AddChildren<T>(string name, EditModelCollection<T> collection) where T : EditModelBase => (_childLinks ??= new()).Add(ChildLink.ForCollection(name, collection));
+
+            /// <summary>追加の子（カスケード参加要素）のリンク。単一参照と子コレクションを一様に扱う</summary>
+            private sealed class ChildLink
+            {
+                private readonly string _name;
+                private readonly bool _isCollection;
+                private readonly Func<IEnumerable<EditModelBase>> _items;
+                private readonly Func<bool, bool> _hasChanges;
+                private readonly Action _acceptRemoved;
+
+                private ChildLink(string name, bool isCollection, Func<IEnumerable<EditModelBase>> items, Func<bool, bool> hasChanges, Action acceptRemoved)
+                {
+                    _name = name;
+                    _isCollection = isCollection;
+                    _items = items;
+                    _hasChanges = hasChanges;
+                    _acceptRemoved = acceptRemoved;
+                }
+
+                /// <summary>単一の子参照を登録するリンクを生成する</summary>
+                public static ChildLink ForSingle(string name, Func<EditModelBase?> accessor)
+                    => new(
+                        name,
+                        false,
+                        () => accessor() is { } child ? new[] { child } : Enumerable.Empty<EditModelBase>(),
+                        includeChildren => accessor() is { } child && child.HasGraphChanges(includeChildren),
+                        () => { });
+
+                /// <summary>子コレクションを登録するリンクを生成する</summary>
+                public static ChildLink ForCollection<T>(string name, EditModelCollection<T> collection) where T : EditModelBase
+                    => new(
+                        name,
+                        true,
+                        () => collection,
+                        _ => collection.HasChanges,
+                        collection.AcceptRemoved);
+
+                /// <summary>登録した子を検証し valid を更新する</summary>
+                public void Validate(bool includeChildren, ref bool valid)
+                {
+                    foreach (var item in _items())
+                    {
+                        if (!item.Validate(includeChildren))
+                        {
+                            valid = false;
+                        }
+                    }
+                }
+
+                /// <summary>登録した子のエラーをパス付き（コレクションは name[i]、単一は name）で収集する</summary>
+                public void CollectErrors(string parentPath, bool includeChildren, List<EditModelError> errors)
+                {
+                    var index = 0;
+
+                    foreach (var item in _items())
+                    {
+                        var segment = _isCollection ? $"{_name}[{index}]" : _name;
+                        item.CollectErrors(CombineErrorPath(parentPath, segment), includeChildren, errors);
+                        index++;
+                    }
+                }
+
+                /// <summary>登録した子を確定し、コレクションは削除追跡もクリアする</summary>
+                public void AcceptChanges(bool includeChildren)
+                {
+                    foreach (var item in _items())
+                    {
+                        item.AcceptChanges(includeChildren);
+                    }
+
+                    _acceptRemoved();
+                }
+
+                /// <summary>登録した子に変更があるかどうかを返す</summary>
+                public bool HasChanges(bool includeChildren) => _hasChanges(includeChildren);
+            }
 
             /// <summary>指定プロパティのエラーを設定する（null 指定でクリア）</summary>
             protected void SetError(string propertyName, string? error)
@@ -808,6 +933,14 @@ internal sealed class ScribanCSharpRenderer
         {{ end }}/// <summary>{{ item.table_name }} テーブルの画面編集用モデル</summary>
         public partial class {{ item.class_name }} : EditModelBase
         {
+            // ===== 拡張ポイント（partial クラスで必要なものだけ実装。未実装の partial メソッドは消去され無コスト）=====
+            //   検証追加      : partial void OnValidate();
+            //   子の追加      : protected override void RegisterExtraChildren();  // 内部で AddChild/AddChildren で登録
+            //   変換ﾒｯｾｰｼﾞ調整  : partial void CustomizeParseErrorMessage(string propertyName, string inputValue, string typeName, ref string message);
+            //   行編集        : partial void OnBeginEdit();  partial void OnEndEdit();  partial void OnCancelEdit();
+            //   値変更通知    : partial void On{プロパティ}Changing(値) / Changed(値) / Changing(旧,新) / Changed(旧,新);  // 各プロパティに用意
+            // ====================================================================================================
+
             // 各列につき「確定値」「画面入力文字列」の 2 種を保持する（変換エラーはエラーディクショナリが保持する）
         {{ for p in item.properties }}{{ if p.field_initializer != "" }}    /// <summary>{{ p.property_name }} の確定値</summary>
             private {{ p.type_name }} {{ p.field_name }} = {{ p.field_initializer }};
@@ -935,83 +1068,14 @@ internal sealed class ScribanCSharpRenderer
             /// <summary>追加の検証ルールを実装するフック（partial 実装で SetError によりエラー登録）</summary>
             partial void OnValidate();
 
-            /// <summary>子（カスケード）の検証。各子を連鎖検証し、partial 追加の子はフックで検証する。Validate から呼ばれる</summary>
-            protected override bool ValidateChildren(bool includeChildren, bool valid)
+        {{ if item.has_cascade_navigations }}    /// <summary>既知のカスケード子をレジストリへ登録する（検証・収集・確定・ダーティ判定に参加。partial 追加の子は RegisterExtraChildren で登録）</summary>
+            protected override void RegisterChildren()
             {
-        {{ for nav in item.navigations }}{{ if nav.cascade }}{{ if nav.is_collection }}        foreach (var child in {{ nav.property_name }})
-                {
-                    if (!child.Validate(includeChildren))
-                    {
-                        valid = false;
-                    }
-                }
-        {{ else }}        if ({{ nav.property_name }} is not null && !{{ nav.property_name }}.Validate(includeChildren))
-                {
-                    valid = false;
-                }
-        {{ end }}{{ end }}{{ end }}        OnValidateChildren(includeChildren, ref valid);
-                return valid;
-            }
+        {{ for nav in item.navigations }}{{ if nav.cascade }}{{ if nav.is_collection }}        AddChildren("{{ nav.property_name }}", {{ nav.property_name }});
+        {{ else }}        AddChild("{{ nav.property_name }}", () => {{ nav.property_name }});
+        {{ end }}{{ end }}{{ end }}    }
 
-            /// <summary>子（カスケード）検証時のフック。partial クラスで追加した子要素を検証し valid を更新する（includeChildren=true 時のみ呼ばれる）</summary>
-            partial void OnValidateChildren(bool includeChildren, ref bool valid);
-
-            /// <summary>子（カスケード）のエラーをパス付きで errors へ収集する。partial 追加の子はフックで収集する。CollectErrors から呼ばれる</summary>
-            protected override void CollectChildErrors(string path, bool includeChildren, List<EditModelError> errors)
-            {
-        {{ for nav in item.navigations }}{{ if nav.cascade }}{{ if nav.is_collection }}        for (var i = 0; i < {{ nav.property_name }}.Count; i++)
-                {
-                    {{ nav.property_name }}[i].CollectErrors(CombineErrorPath(path, $"{{ nav.property_name }}[{i}]"), includeChildren, errors);
-                }
-        {{ else }}        if ({{ nav.property_name }} is not null)
-                {
-                    {{ nav.property_name }}.CollectErrors(CombineErrorPath(path, "{{ nav.property_name }}"), includeChildren, errors);
-                }
-        {{ end }}{{ end }}{{ end }}        OnCollectChildErrors(path, includeChildren, errors);
-            }
-
-            /// <summary>子（カスケード）エラー収集時のフック。partial クラスで追加した子要素のエラーを errors へ追加する（includeChildren=true 時のみ呼ばれる）</summary>
-            partial void OnCollectChildErrors(string path, bool includeChildren, List<EditModelError> errors);
-
-            /// <summary>子（カスケード）を確定し削除追跡をクリアする。partial 追加の子はフックで確定する。AcceptChanges から呼ばれる</summary>
-            protected override void AcceptChildChanges(bool includeChildren)
-            {
-        {{ for nav in item.navigations }}{{ if nav.cascade }}{{ if nav.is_collection }}        foreach (var child in {{ nav.property_name }})
-                {
-                    child.AcceptChanges(includeChildren);
-                }
-
-                {{ nav.property_name }}.AcceptRemoved();
-        {{ else }}        if ({{ nav.property_name }} is not null)
-                {
-                    {{ nav.property_name }}.AcceptChanges(includeChildren);
-                }
-        {{ end }}{{ end }}{{ end }}        OnAcceptChildChanges(includeChildren);
-            }
-
-            /// <summary>子（カスケード）確定時のフック。partial クラスで追加した子要素を確定する（includeChildren=true 時のみ呼ばれる）</summary>
-            partial void OnAcceptChildChanges(bool includeChildren);
-
-            /// <summary>子（カスケード）に変更があるか判定する。partial 追加の子はフックで反映する。HasGraphChanges から呼ばれる</summary>
-            protected override bool ChildHasChanges(bool includeChildren)
-            {
-                var hasChanges = false;
-        {{ for nav in item.navigations }}{{ if nav.cascade }}{{ if nav.is_collection }}        if (!hasChanges && {{ nav.property_name }}.HasChanges)
-                {
-                    hasChanges = true;
-                }
-        {{ else }}        if (!hasChanges && {{ nav.property_name }} is not null && {{ nav.property_name }}.HasGraphChanges(includeChildren))
-                {
-                    hasChanges = true;
-                }
-        {{ end }}{{ end }}{{ end }}        OnChildHasChanges(includeChildren, ref hasChanges);
-                return hasChanges;
-            }
-
-            /// <summary>子（カスケード）変更判定時のフック。partial クラスで追加した子要素の変更を hasChanges へ反映する（includeChildren=true 時のみ呼ばれる）</summary>
-            partial void OnChildHasChanges(bool includeChildren, ref bool hasChanges);
-
-            // ---- 行編集（IEditableObject）用スナップショット ----
+        {{ end }}    // ---- 行編集（IEditableObject）用スナップショット ----
         {{ for p in item.properties }}    /// <summary>{{ p.property_name }} の編集前スナップショット</summary>
             private string {{ p.binding_field_name }}Snapshot = {{ p.binding_field_initializer }};
         {{ end }}    /// <summary>編集前の RowState スナップショット</summary>

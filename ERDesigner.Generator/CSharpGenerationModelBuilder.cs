@@ -64,13 +64,15 @@ internal sealed class CSharpGenerationModelBuilder
     {
         var className = _nameConverter.ToEditModelClassName(entity.TableName);
         var properties = entity.Columns.Select(BuildEditModelProperty).ToList();
+        var navigationModels = navigations.Select(BuildEditModelNavigation).ToList();
 
         return new CSharpEditModelClassModel
         {
             ClassName = className,
             TableName = entity.TableName,
             Properties = properties,
-            Navigations = navigations.Select(BuildEditModelNavigation).ToList(),
+            Navigations = navigationModels,
+            HasCascadeNavigations = navigationModels.Any(navigation => navigation.Cascade),
         };
     }
 
