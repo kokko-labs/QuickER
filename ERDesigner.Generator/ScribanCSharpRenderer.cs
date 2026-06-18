@@ -132,7 +132,7 @@ internal sealed class ScribanCSharpRenderer
 
         {{~ if edit_model_classes.size > 0 ~}}
         /// <summary>EditModel 共通の変更通知・エラー管理・補助処理を提供する基底クラス</summary>
-        public abstract partial class EditModelBase : INotifyPropertyChanged, INotifyDataErrorInfo
+        public abstract partial class EditModelBase : INotifyPropertyChanged, INotifyDataErrorInfo, IEditableObject
         {
             /// <summary>プロパティ名ごとのエラーメッセージ一覧</summary>
             private readonly Dictionary<string, List<string>> _errors = new();
@@ -165,6 +165,10 @@ internal sealed class ScribanCSharpRenderer
 
                     _rowState = value;
                     OnPropertyChanged(nameof(RowState));
+                    OnPropertyChanged(nameof(IsAdded));
+                    OnPropertyChanged(nameof(IsUpdated));
+                    OnPropertyChanged(nameof(IsRemoved));
+                    OnPropertyChanged(nameof(HasChanges));
                 }
             }
 
@@ -403,6 +407,38 @@ internal sealed class ScribanCSharpRenderer
             {
             }
 
+            /// <summary>保存確定後にグラフを変更なし状態へ戻す（自身を Unchanged にし、子の削除追跡もクリアする）</summary>
+            /// <param name="includeChildren">true で子（カスケード）も再帰的に確定する</param>
+            public void AcceptChanges(bool includeChildren = true)
+            {
+                MarkUnchanged();
+
+                if (includeChildren)
+                {
+                    AcceptChildChanges(includeChildren);
+                }
+            }
+
+            /// <summary>子（カスケード）を確定し削除追跡をクリアする（具象クラスが実装）</summary>
+            protected virtual void AcceptChildChanges(bool includeChildren)
+            {
+            }
+
+            /// <summary>自身または子（カスケード）に変更があるかどうかを返す（保存ボタンの活性判定などに使用）</summary>
+            /// <param name="includeChildren">true で子（カスケード）の変更も含めて判定する</param>
+            public bool HasGraphChanges(bool includeChildren = true)
+            {
+                if (HasChanges)
+                {
+                    return true;
+                }
+
+                return includeChildren && ChildHasChanges(includeChildren);
+            }
+
+            /// <summary>子（カスケード）に変更があるかどうかを返す（具象クラスが実装）</summary>
+            protected virtual bool ChildHasChanges(bool includeChildren) => false;
+
             /// <summary>指定プロパティのエラーを設定する（null 指定でクリア）</summary>
             protected void SetError(string propertyName, string? error)
             {
@@ -466,6 +502,60 @@ internal sealed class ScribanCSharpRenderer
                 }
             }
 
+            /// <summary>行編集中かどうか（IEditableObject。BeginEdit〜EndEdit/CancelEdit の間 true）</summary>
+            private bool _editing;
+
+            /// <summary>行編集を開始し、現在の入力状態をスナップショットする（DataGrid 行編集の取り消しに対応）</summary>
+            public void BeginEdit()
+            {
+                if (_editing)
+                {
+                    return;
+                }
+
+                _editing = true;
+                BeginEditCore();
+            }
+
+            /// <summary>行編集を確定する。変更は即時反映済みのため編集中フラグの解除のみ行う</summary>
+            public void EndEdit()
+            {
+                if (!_editing)
+                {
+                    return;
+                }
+
+                _editing = false;
+                EndEditCore();
+            }
+
+            /// <summary>行編集を取り消し、BeginEdit 時点の入力状態へ復元する</summary>
+            public void CancelEdit()
+            {
+                if (!_editing)
+                {
+                    return;
+                }
+
+                _editing = false;
+                CancelEditCore();
+            }
+
+            /// <summary>BeginEdit の本体（具象クラスが入力状態のスナップショットを実装）</summary>
+            protected virtual void BeginEditCore()
+            {
+            }
+
+            /// <summary>EndEdit の本体（既定では何もしない。必要なら具象クラスで override）</summary>
+            protected virtual void EndEditCore()
+            {
+            }
+
+            /// <summary>CancelEdit の本体（具象クラスがスナップショットからの復元を実装）</summary>
+            protected virtual void CancelEditCore()
+            {
+            }
+
             /// <summary>必須項目の未入力エラーメッセージを構築する（派生クラスで override し方針を差し替え可能）</summary>
             protected virtual string BuildRequiredErrorMessage(string propertyName) => $"{propertyName} は必須です。";
 
@@ -519,6 +609,9 @@ internal sealed class ScribanCSharpRenderer
 
             /// <summary>Remove で外した削除対象（Removed）の一覧</summary>
             public IReadOnlyList<T> RemovedItems => _removed;
+
+            /// <summary>いずれかの要素（およびそのカスケード子）に変更があるか、または削除追跡分が存在するか</summary>
+            public bool HasChanges => _removed.Count > 0 || this.Any(item => item.HasGraphChanges());
 
             /// <summary>要素を追加する。追加要素に自身を所有者として設定し、位置プロパティの変更を通知する</summary>
             protected override void InsertItem(int index, T item)
@@ -585,6 +678,18 @@ internal sealed class ScribanCSharpRenderer
 
             /// <summary>保存確定後に削除追跡をクリアする</summary>
             public void AcceptRemoved() => _removed.Clear();
+
+            /// <summary>保存確定後に全要素（およびカスケード子）を変更なし状態へ戻し、削除追跡もクリアする</summary>
+            /// <param name="includeChildren">true で各要素の子（カスケード）も再帰的に確定する</param>
+            public void AcceptChanges(bool includeChildren = true)
+            {
+                foreach (var item in this)
+                {
+                    item.AcceptChanges(includeChildren);
+                }
+
+                AcceptRemoved();
+            }
 
             /// <summary>コレクション内の全要素（およびカスケード子）を検証する。全件検証し、すべて妥当なら true</summary>
             /// <param name="includeChildren">true で各要素の子（カスケード）も連鎖検証する</param>
@@ -867,6 +972,82 @@ internal sealed class ScribanCSharpRenderer
 
             /// <summary>子（カスケード）エラー収集時のフック。partial クラスで追加した子要素のエラーを errors へ追加する（includeChildren=true 時のみ呼ばれる）</summary>
             partial void OnCollectChildErrors(string path, bool includeChildren, List<EditModelError> errors);
+
+            /// <summary>子（カスケード）を確定し削除追跡をクリアする。partial 追加の子はフックで確定する。AcceptChanges から呼ばれる</summary>
+            protected override void AcceptChildChanges(bool includeChildren)
+            {
+        {{ for nav in item.navigations }}{{ if nav.cascade }}{{ if nav.is_collection }}        foreach (var child in {{ nav.property_name }})
+                {
+                    child.AcceptChanges(includeChildren);
+                }
+
+                {{ nav.property_name }}.AcceptRemoved();
+        {{ else }}        if ({{ nav.property_name }} is not null)
+                {
+                    {{ nav.property_name }}.AcceptChanges(includeChildren);
+                }
+        {{ end }}{{ end }}{{ end }}        OnAcceptChildChanges(includeChildren);
+            }
+
+            /// <summary>子（カスケード）確定時のフック。partial クラスで追加した子要素を確定する（includeChildren=true 時のみ呼ばれる）</summary>
+            partial void OnAcceptChildChanges(bool includeChildren);
+
+            /// <summary>子（カスケード）に変更があるか判定する。partial 追加の子はフックで反映する。HasGraphChanges から呼ばれる</summary>
+            protected override bool ChildHasChanges(bool includeChildren)
+            {
+                var hasChanges = false;
+        {{ for nav in item.navigations }}{{ if nav.cascade }}{{ if nav.is_collection }}        if (!hasChanges && {{ nav.property_name }}.HasChanges)
+                {
+                    hasChanges = true;
+                }
+        {{ else }}        if (!hasChanges && {{ nav.property_name }} is not null && {{ nav.property_name }}.HasGraphChanges(includeChildren))
+                {
+                    hasChanges = true;
+                }
+        {{ end }}{{ end }}{{ end }}        OnChildHasChanges(includeChildren, ref hasChanges);
+                return hasChanges;
+            }
+
+            /// <summary>子（カスケード）変更判定時のフック。partial クラスで追加した子要素の変更を hasChanges へ反映する（includeChildren=true 時のみ呼ばれる）</summary>
+            partial void OnChildHasChanges(bool includeChildren, ref bool hasChanges);
+
+            // ---- 行編集（IEditableObject）用スナップショット ----
+        {{ for p in item.properties }}    /// <summary>{{ p.property_name }} の編集前スナップショット</summary>
+            private string {{ p.binding_field_name }}Snapshot = {{ p.binding_field_initializer }};
+        {{ end }}    /// <summary>編集前の RowState スナップショット</summary>
+            private RowState _rowStateSnapshot;
+
+            /// <summary>BeginEdit の本体。各バインディング入力と RowState をスナップショットする</summary>
+            protected override void BeginEditCore()
+            {
+        {{ for p in item.properties }}        {{ p.binding_field_name }}Snapshot = {{ p.binding_field_name }};
+        {{ end }}        _rowStateSnapshot = RowState;
+                OnBeginEdit();
+            }
+
+            /// <summary>BeginEdit 時のフック。partial クラスで追加したフィールドの控えを取る</summary>
+            partial void OnBeginEdit();
+
+            /// <summary>EndEdit の本体。確定時のフックを呼ぶ（変更は即時反映済み）</summary>
+            protected override void EndEditCore() => OnEndEdit();
+
+            /// <summary>EndEdit（確定）時のフック</summary>
+            partial void OnEndEdit();
+
+            /// <summary>CancelEdit の本体。スナップショットへ復元する（確定値・エラーは再パースで再現し RowState を戻す）</summary>
+            protected override void CancelEditCore()
+            {
+                ExecuteLoad(() =>
+                {
+        {{ for p in item.properties }}            {{ p.binding_property_name }} = {{ p.binding_field_name }}Snapshot;
+        {{ end }}            OnCancelEdit();
+                });
+
+                RowState = _rowStateSnapshot;
+            }
+
+            /// <summary>CancelEdit 時のフック。partial クラスで追加したフィールドを控えへ戻す（ExecuteLoad 中に呼ばれる）</summary>
+            partial void OnCancelEdit();
 
             /// <summary>所属コレクション内で自身の次の要素を取得する（所属していない／末尾なら null）</summary>
             public new {{ item.class_name }}? GetNext() => ({{ item.class_name }}?)base.GetNext();

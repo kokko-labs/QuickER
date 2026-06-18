@@ -172,6 +172,9 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("public sealed partial class EditModelCollection<T> : ObservableCollection<T>");
         content.Should().Contain("public List<OrderEntity> CreateEntities(EditModelCollection<OrderEditModel> editModels, bool includeRemoved = false)");
         content.Should().Contain("entities.AddRange(editModels.RemovedItems.Select(removed => CreateEntity(removed, includeRemoved)));");
+        // EditModelCollection の変更集約（HasChanges / AcceptChanges）
+        content.Should().Contain("public bool HasChanges => _removed.Count > 0 || this.Any(item => item.HasGraphChanges());");
+        content.Should().Contain("public void AcceptChanges(bool includeChildren = true)");
         // EditModelCollection の一括操作・検証・並び替え API
         content.Should().Contain("public IEnumerable<EditModelError> CollectErrors(bool includeChildren = true)");
         content.Should().Contain("this[i].CollectErrors($\"[{i}]\", includeChildren, errors);");
@@ -532,6 +535,30 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("protected virtual void MoveCore(int oldIndex, int newIndex)");
         content.Should().Contain("public EditModelCollection<OrderEditModel>? Parent => Owner as EditModelCollection<OrderEditModel>;");
         content.Should().Contain("protected override void MoveCore(int oldIndex, int newIndex) => Parent?.Move(oldIndex, newIndex);");
+        // ② RowState 変更時に派生フラグの変更通知も発行する
+        content.Should().Contain("OnPropertyChanged(nameof(IsAdded));");
+        content.Should().Contain("OnPropertyChanged(nameof(HasChanges));");
+        // ① AcceptChanges（保存後の状態確定）。Base に公開エントリ、具象クラスに子確定 override＋フック
+        content.Should().Contain("public void AcceptChanges(bool includeChildren = true)");
+        content.Should().Contain("protected override void AcceptChildChanges(bool includeChildren)");
+        content.Should().Contain("partial void OnAcceptChildChanges(bool includeChildren);");
+        // ③ HasGraphChanges（ダーティ判定）。Base に公開エントリ、具象クラスに子判定 override＋フック
+        content.Should().Contain("public bool HasGraphChanges(bool includeChildren = true)");
+        content.Should().Contain("protected override bool ChildHasChanges(bool includeChildren)");
+        content.Should().Contain("partial void OnChildHasChanges(bool includeChildren, ref bool hasChanges);");
+        // ④ IEditableObject（DataGrid 行編集の取り消し対応）
+        content.Should().Contain("INotifyDataErrorInfo, IEditableObject");
+        content.Should().Contain("public void BeginEdit()");
+        content.Should().Contain("public void CancelEdit()");
+        content.Should().Contain("public void EndEdit()");
+        content.Should().Contain("protected override void BeginEditCore()");
+        content.Should().Contain("protected override void CancelEditCore()");
+        content.Should().Contain("protected override void EndEditCore() => OnEndEdit();");
+        content.Should().Contain("_bindingOrderIdSnapshot = _bindingOrderId;");
+        // 行編集ライフサイクルの partial フック（partial クラスで追加したフィールドの控え/復元・副作用用）
+        content.Should().Contain("partial void OnBeginEdit();");
+        content.Should().Contain("partial void OnEndEdit();");
+        content.Should().Contain("partial void OnCancelEdit();");
         // コレクションの増減・並び替えで位置プロパティの変更通知を発行し、バインドでボタン活性を制御できるようにする
         content.Should().Contain("internal void RaisePositionChanged()");
         content.Should().Contain("internal void RaiseParentChanged() => OnPropertyChanged(\"Parent\");");
