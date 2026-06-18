@@ -429,10 +429,23 @@ internal sealed class CSharpGenerationModelBuilder
         // ほぼ全構成で使用するため無条件で付与する（未使用でも auto-generated ファイルでは警告抑止される）。
         var usings = new HashSet<string> { "System", "System.Collections.Generic", "System.Linq" };
 
-        // INotifyPropertyChanged / INotifyDataErrorInfo（EditModelBase）、EditModelCollection の ObservableCollection
+        // EntityBase の値比較・値ハッシュ・JSON 出力／クローンで使用：
+        // StructuralComparisons（System.Collections）、値プロパティのキャッシュ（System.Collections.Concurrent /
+        // System.Reflection）、ToJson / Clone（System.Text.Json）
+        if (options.GenerateEntityClasses)
+        {
+            usings.Add("System.Collections");
+            usings.Add("System.Collections.Concurrent");
+            usings.Add("System.Reflection");
+            usings.Add("System.Text.Json");
+        }
+
+        // INotifyPropertyChanged / INotifyDataErrorInfo（EditModelBase）、EditModelCollection の ObservableCollection、
+        // Owner（IList）・GetErrors（IEnumerable）の System.Collections
         if (options.GenerateEditModels)
         {
             usings.Add("System.ComponentModel");
+            usings.Add("System.Collections");
             usings.Add("System.Collections.ObjectModel");
         }
 

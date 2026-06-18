@@ -155,6 +155,12 @@ public class CSharpCodeGenerationServiceTests
         result.Files[0].Content.Should().Contain("IgnoreReadOnlyProperties = true,");
         // ToJson を使ったディープコピー（JSON ラウンドトリップ）。戻り値は EntityBase
         result.Files[0].Content.Should().Contain("public EntityBase Clone()");
+        // EntityBase が使う namespace は using に含め、テンプレートでは完全修飾しない
+        result.Files[0].Content.Should().Contain("using System.Text.Json;");
+        result.Files[0].Content.Should().Contain("using System.Collections;");
+        result.Files[0].Content.Should().Contain("using System.Reflection;");
+        result.Files[0].Content.Should().NotContain("System.Text.Json.JsonSerializer");
+        result.Files[0].Content.Should().NotContain("System.Collections.StructuralComparisons");
 
         var content = result.Files[0].Content;
         // EditModel も RowState を保持し、確定値変更時に Updated へ昇格する
@@ -532,7 +538,7 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("protected virtual void RevertCore()");
         content.Should().Contain("protected override void RevertCore()");
         // 兄弟ナビゲーション：Base が所属コレクション（IList）経由の GetNext/GetPrevious を提供し、コレクションが所有者を設定、具象クラスが型付き版を生成する
-        content.Should().Contain("internal System.Collections.IList? Owner { get; set; }");
+        content.Should().Contain("internal IList? Owner { get; set; }");
         content.Should().Contain("public EditModelBase? GetNext()");
         content.Should().Contain("public EditModelBase? GetPrevious()");
         content.Should().Contain("var index = Owner.IndexOf(this);");
