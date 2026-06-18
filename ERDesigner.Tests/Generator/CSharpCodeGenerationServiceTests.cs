@@ -172,6 +172,14 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("public sealed partial class EditModelCollection<T> : ObservableCollection<T>");
         content.Should().Contain("public List<OrderEntity> CreateEntities(EditModelCollection<OrderEditModel> editModels, bool includeRemoved = false)");
         content.Should().Contain("entities.AddRange(editModels.RemovedItems.Select(removed => CreateEntity(removed, includeRemoved)));");
+        // EditModelCollection の一括操作・検証・並び替え API
+        content.Should().Contain("public IEnumerable<EditModelError> CollectErrors(bool includeChildren = true)");
+        content.Should().Contain("this[i].CollectErrors($\"[{i}]\", includeChildren, errors);");
+        content.Should().Contain("public bool MoveTo(T item, int newIndex)");
+        content.Should().Contain("public void AddRange(IEnumerable<T> items)");
+        content.Should().Contain("public void InsertRange(int index, IEnumerable<T> items)");
+        content.Should().Contain("public void RemoveAll()");
+        content.Should().Contain("public void RemoveRange(int index, int count)");
         // EditModel 列挙を受け取るコンストラクタと、Entity 列挙から生成する Mapper メソッド
         content.Should().Contain("public EditModelCollection(IEnumerable<T> items)");
         content.Should().Contain("public EditModelCollection<OrderEditModel> CreateEditModels(IEnumerable<OrderEntity> entities)");

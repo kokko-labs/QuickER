@@ -586,6 +586,92 @@ internal sealed class ScribanCSharpRenderer
             /// <summary>保存確定後に削除追跡をクリアする</summary>
             public void AcceptRemoved() => _removed.Clear();
 
+            /// <summary>コレクション内の全要素（およびカスケード子）を検証する。全件検証し、すべて妥当なら true</summary>
+            /// <param name="includeChildren">true で各要素の子（カスケード）も連鎖検証する</param>
+            public bool Validate(bool includeChildren = true)
+            {
+                var valid = true;
+
+                foreach (var item in this)
+                {
+                    // 全件のエラーを登録するため短絡させない
+                    if (!item.Validate(includeChildren))
+                    {
+                        valid = false;
+                    }
+                }
+
+                return valid;
+            }
+
+            /// <summary>コレクション内の全要素の検証エラーを位置（[i]）付きで収集する（事前に Validate を呼ぶ）</summary>
+            /// <param name="includeChildren">true で各要素の子（カスケード）も再帰収集する</param>
+            public IEnumerable<EditModelError> CollectErrors(bool includeChildren = true)
+            {
+                var errors = new List<EditModelError>();
+
+                for (var i = 0; i < Count; i++)
+                {
+                    this[i].CollectErrors($"[{i}]", includeChildren, errors);
+                }
+
+                return errors;
+            }
+
+            /// <summary>指定要素をコレクション内の指定位置へ移動する（順序のみ変更し削除追跡しない）。移動したら true</summary>
+            public bool MoveTo(T item, int newIndex)
+            {
+                var oldIndex = IndexOf(item);
+                if (oldIndex < 0 || oldIndex == newIndex)
+                {
+                    return false;
+                }
+
+                Move(oldIndex, newIndex);
+                return true;
+            }
+
+            /// <summary>指定要素群を末尾へ追加する</summary>
+            public void AddRange(IEnumerable<T> items)
+            {
+                foreach (var item in items)
+                {
+                    Add(item);
+                }
+            }
+
+            /// <summary>指定要素群を指定位置へ挿入する</summary>
+            public void InsertRange(int index, IEnumerable<T> items)
+            {
+                foreach (var item in items)
+                {
+                    Insert(index++, item);
+                }
+            }
+
+            /// <summary>全要素を取り除く（既存要素は Removed として削除追跡される）。追跡しない画面消去は Clear を使う</summary>
+            public void RemoveAll()
+            {
+                while (Count > 0)
+                {
+                    RemoveAt(Count - 1);
+                }
+            }
+
+            /// <summary>指定範囲の要素を取り除く（既存要素は Removed として削除追跡される）</summary>
+            public void RemoveRange(int index, int count)
+            {
+                if (index < 0 || count < 0 || index + count > Count)
+                {
+                    throw new ArgumentOutOfRangeException(nameof(count), "指定範囲がコレクションの範囲外です。");
+                }
+
+                for (var i = 0; i < count; i++)
+                {
+                    RemoveAt(index);
+                }
+            }
+
             /// <summary>全要素へ位置プロパティ（IndexInParent / IsFirstInParent / IsLastInParent）の変更を通知する</summary>
             private void NotifyPositionsChanged()
             {
