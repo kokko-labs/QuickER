@@ -205,6 +205,15 @@ internal sealed class ScribanCSharpRenderer
                 }
             }
 
+            /// <summary>確定値プロパティが変更された後に呼ばれる横断的フック（ユーザー編集時のみ。ロード中は呼ばれない）。UpdatedAt の打刻などに使う</summary>
+            /// <remarks>このフック内で別の確定値プロパティを更新する場合、無限再帰を避けるため propertyName で対象を判定すること</remarks>
+            protected virtual void OnConfirmedValueChanged(string propertyName)
+            {
+            }
+
+            /// <summary>確定値の変更で RowState を Updated へ昇格させるかどうか（既定 true。メタ情報など特定プロパティを除外したい場合に override）</summary>
+            protected virtual bool ShouldMarkUpdated(string propertyName) => true;
+
             /// <summary>この EditModel が所属するコレクション（兄弟ナビゲーション用。EditModelCollection が設定する）</summary>
             internal System.Collections.IList? Owner { get; set; }
 
@@ -317,8 +326,8 @@ internal sealed class ScribanCSharpRenderer
             /// <summary>指定プロパティの変更通知を発行する</summary>
             protected void OnPropertyChanged(string propertyName) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 
-            /// <summary>値が変化した場合のみ代入し変更通知を発行する共通ヘルパー</summary>
-            protected bool SetProperty<T>(ref T field, T value, string propertyName)
+            /// <summary>値が変化した場合のみ代入し変更通知を発行する共通ヘルパー（具象クラスで override して挙動を拡張できる）</summary>
+            protected virtual bool SetProperty<T>(ref T field, T value, string propertyName)
             {
                 if (EqualityComparer<T>.Default.Equals(field, value))
                 {
@@ -972,7 +981,12 @@ internal sealed class ScribanCSharpRenderer
                     // 確定値が変化したら更新対象へ昇格（ロード中は昇格させず、状態は元 Entity の鏡のままにする）
                     if (!IsLoading)
                     {
-                        MarkUpdated();
+                        OnConfirmedValueChanged(nameof({{ p.property_name }}));
+
+                        if (ShouldMarkUpdated(nameof({{ p.property_name }})))
+                        {
+                            MarkUpdated();
+                        }
                     }
                 }
             }

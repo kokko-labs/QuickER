@@ -155,9 +155,15 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("public RowState RowState");
         content.Should().Contain("public void MarkAdded() => RowState = RowState.Added;");
         content.Should().Contain("public void MarkRemoved() => RowState = RowState.Removed;");
-        // 確定値（非バインド）setter は、ロード中以外のみ MarkUpdated で昇格する
+        // 確定値（非バインド）setter は、ロード中以外のみ横断フック＋昇格条件を経て MarkUpdated で昇格する
         content.Should().Contain("if (!IsLoading)");
+        content.Should().Contain("OnConfirmedValueChanged(nameof(CustomerId));");
+        content.Should().Contain("if (ShouldMarkUpdated(nameof(CustomerId)))");
         content.Should().Contain("MarkUpdated();");
+        // 拡張ポイント：確定値変更の横断フックと昇格条件、SetProperty は override 可能
+        content.Should().Contain("protected virtual void OnConfirmedValueChanged(string propertyName)");
+        content.Should().Contain("protected virtual bool ShouldMarkUpdated(string propertyName) => true;");
+        content.Should().Contain("protected virtual bool SetProperty<T>(ref T field, T value, string propertyName)");
         content.Should().Contain("public void ExecuteLoad(Action action)");
         content.Should().Contain("editModel.ExecuteLoad(() =>");
         // 新規入力用ファクトリは Entity を基に生成し、生成フックを呼ぶ
