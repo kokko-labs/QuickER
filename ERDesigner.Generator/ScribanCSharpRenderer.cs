@@ -107,6 +107,100 @@ internal sealed class ScribanCSharpRenderer
                     RowState = RowState.Updated;
                 }
             }
+
+            // ---- 値の比較・ハッシュ・JSON 出力 ----
+
+            /// <summary>型ごとの「値プロパティ」（列に対応する get/set 可能な public プロパティ。ナビゲーションと RowState など基底プロパティを除く）をキャッシュする</summary>
+            private static readonly System.Collections.Concurrent.ConcurrentDictionary<System.Type, System.Reflection.PropertyInfo[]> _valuePropertyCache = new();
+
+            /// <summary>指定型の値プロパティ一覧を取得する（ナビゲーションと基底プロパティは除外。型ごとに 1 度だけ走査しキャッシュ）</summary>
+            private static System.Reflection.PropertyInfo[] GetValueProperties(System.Type type) =>
+                _valuePropertyCache.GetOrAdd(type, static resolvedType => resolvedType
+                    .GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance)
+                    .Where(property =>
+                        property.CanRead
+                        && property.CanWrite
+                        && property.DeclaringType != typeof(EntityBase)
+                        && !System.Attribute.IsDefined(property, typeof(NavigationReferenceAttribute)))
+                    .ToArray());
+
+            /// <summary>他のエンティティと列の値がすべて一致するかどうかを判定する（RowState・ナビゲーションは比較対象外）</summary>
+            public bool HasSameValues(EntityBase? other)
+            {
+                if (other is null)
+                {
+                    return false;
+                }
+
+                if (ReferenceEquals(this, other))
+                {
+                    return true;
+                }
+
+                var type = GetType();
+                if (other.GetType() != type)
+                {
+                    return false;
+                }
+
+                foreach (var property in GetValueProperties(type))
+                {
+                    // byte[] などの配列は構造的に（要素単位で）比較する
+                    if (!System.Collections.StructuralComparisons.StructuralEqualityComparer.Equals(property.GetValue(this), property.GetValue(other)))
+                    {
+                        return false;
+                    }
+                }
+
+                return true;
+            }
+
+            /// <summary>列の値から算出した値ベースのハッシュコードを取得する（RowState・ナビゲーションは対象外）</summary>
+            /// <remarks>HasSameValues が真となる 2 つのエンティティは必ず同じ値を返す。可変オブジェクトのため辞書キーに使う際は変更しないこと</remarks>
+            public int GetValueHashCode()
+            {
+                var type = GetType();
+                var hash = new System.HashCode();
+                hash.Add(type);
+                foreach (var property in GetValueProperties(type))
+                {
+                    var value = property.GetValue(this);
+                    // byte[] などの配列は構造的なハッシュを使う
+                    hash.Add(value is null ? 0 : System.Collections.StructuralComparisons.StructuralEqualityComparer.GetHashCode(value));
+                }
+
+                return hash.ToHashCode();
+            }
+
+            /// <summary>このエンティティを JSON 文字列へシリアライズする（WebAPI へのデータ受け渡しなどに使用）</summary>
+            /// <remarks>
+            /// get/set 可能な public プロパティのみが対象（get-only の IsAdded などの派生フラグは出力されない。RowState は出力される）。
+            /// 子ナビゲーションは含まれ、親参照ナビゲーションは [JsonIgnore] が付くため循環しない。
+            /// </remarks>
+            public string ToJson(bool writeIndented = false) =>
+                System.Text.Json.JsonSerializer.Serialize(this, GetType(), new System.Text.Json.JsonSerializerOptions
+                {
+                    WriteIndented = writeIndented,
+                    IgnoreReadOnlyProperties = true,
+                });
+
+            /// <summary>クローン（JSON ラウンドトリップ）用のシリアライズ設定。get/set 可能な public プロパティのみを対象にする</summary>
+            private static readonly System.Text.Json.JsonSerializerOptions _cloneJsonOptions = new()
+            {
+                IgnoreReadOnlyProperties = true,
+            };
+
+            /// <summary>このエンティティの深いクローン（ディープコピー）を生成する（JSON ラウンドトリップ）</summary>
+            /// <remarks>
+            /// 値・RowState・子ナビゲーションがコピーされる。親参照ナビゲーションは [JsonIgnore] のため復元されない（クローンは親を指さない）。
+            /// 別レコードとして挿入する場合は、クローン後に主キーの振り直しや MarkAdded() を行うこと。戻り値の実体は元と同じ具象型。
+            /// </remarks>
+            public EntityBase Clone()
+            {
+                var type = GetType();
+                var json = System.Text.Json.JsonSerializer.Serialize(this, type, _cloneJsonOptions);
+                return (EntityBase)System.Text.Json.JsonSerializer.Deserialize(json, type, _cloneJsonOptions)!;
+            }
         }
         {{ end }}
         {{~ for item in entity_classes ~}}

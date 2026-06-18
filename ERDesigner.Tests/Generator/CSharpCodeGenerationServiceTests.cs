@@ -148,6 +148,13 @@ public class CSharpCodeGenerationServiceTests
         // エンティティは EntityBase を継承し、RowState を持つ
         result.Files[0].Content.Should().Contain("public partial class CustomerEntity : EntityBase");
         result.Files[0].Content.Should().Contain("public abstract partial class EntityBase");
+        // EntityBase は値比較・値ハッシュ・JSON 出力を提供する（値系はメタデータではなく自己完結の列プロパティ走査）
+        result.Files[0].Content.Should().Contain("public bool HasSameValues(EntityBase? other)");
+        result.Files[0].Content.Should().Contain("public int GetValueHashCode()");
+        result.Files[0].Content.Should().Contain("public string ToJson(bool writeIndented = false)");
+        result.Files[0].Content.Should().Contain("IgnoreReadOnlyProperties = true,");
+        // ToJson を使ったディープコピー（JSON ラウンドトリップ）。戻り値は EntityBase
+        result.Files[0].Content.Should().Contain("public EntityBase Clone()");
 
         var content = result.Files[0].Content;
         // EditModel も RowState を保持し、確定値変更時に Updated へ昇格する
