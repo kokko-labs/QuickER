@@ -438,6 +438,7 @@ internal sealed class CSharpGenerationModelBuilder
             usings.Add("System.Collections.Concurrent");
             usings.Add("System.Reflection");
             usings.Add("System.Text.Json");
+            usings.Add("System.Text.Json.Serialization");
         }
 
         // INotifyPropertyChanged / INotifyDataErrorInfo（EditModelBase）、EditModelCollection の ObservableCollection、

@@ -172,34 +172,40 @@ internal sealed class ScribanCSharpRenderer
                 return hash.ToHashCode();
             }
 
-            /// <summary>このエンティティを JSON 文字列へシリアライズする（WebAPI へのデータ受け渡しなどに使用）</summary>
-            /// <remarks>
-            /// get/set 可能な public プロパティのみが対象（get-only の IsAdded などの派生フラグは出力されない。RowState は出力される）。
-            /// 子ナビゲーションは含まれ、親参照ナビゲーションは [JsonIgnore] が付くため循環しない。
-            /// </remarks>
-            public string ToJson(bool writeIndented = false) =>
-                JsonSerializer.Serialize(this, GetType(), new JsonSerializerOptions
-                {
-                    WriteIndented = writeIndented,
-                    IgnoreReadOnlyProperties = true,
-                });
-
-            /// <summary>クローン（JSON ラウンドトリップ）用のシリアライズ設定。get/set 可能な public プロパティのみを対象にする</summary>
-            private static readonly JsonSerializerOptions _cloneJsonOptions = new()
+            /// <summary>JSON 出力（ToJson）とクローン（Clone）で共有するシリアライズ設定。型メタデータのキャッシュを効かせるため使い回す</summary>
+            /// <remarks>get/set 可能な public プロパティのみが対象。万一の循環参照は IgnoreCycles で null 化して例外を避ける（[JsonIgnore] 構成では循環自体が無く no-op）</remarks>
+            private static readonly JsonSerializerOptions _jsonOptions = new()
             {
                 IgnoreReadOnlyProperties = true,
+                ReferenceHandler = ReferenceHandler.IgnoreCycles,
             };
+
+            /// <summary>整形出力（writeIndented=true）用の設定。WriteIndented は初回利用後に変更できないため別インスタンスにする</summary>
+            private static readonly JsonSerializerOptions _jsonOptionsIndented = new()
+            {
+                IgnoreReadOnlyProperties = true,
+                ReferenceHandler = ReferenceHandler.IgnoreCycles,
+                WriteIndented = true,
+            };
+
+            /// <summary>このエンティティを JSON 文字列へシリアライズする（WebAPI へのデータ受け渡しなどに使用）</summary>
+            /// <remarks>
+            /// get/set 可能な public プロパティのみが対象（get-only の IsAdded などの派生フラグは出力されない。RowState は出力される）
+            /// 子ナビゲーションは含まれ、親参照ナビゲーションは [JsonIgnore] が付くため循環しない
+            /// </remarks>
+            public string ToJson(bool writeIndented = false) =>
+                JsonSerializer.Serialize(this, GetType(), writeIndented ? _jsonOptionsIndented : _jsonOptions);
 
             /// <summary>このエンティティの深いクローン（ディープコピー）を生成する（JSON ラウンドトリップ）</summary>
             /// <remarks>
-            /// 値・RowState・子ナビゲーションがコピーされる。親参照ナビゲーションは [JsonIgnore] のため復元されない（クローンは親を指さない）。
-            /// 別レコードとして挿入する場合は、クローン後に主キーの振り直しや MarkAdded() を行うこと。戻り値の実体は元と同じ具象型。
+            /// 値・RowState・子ナビゲーションがコピーされる。親参照ナビゲーションは [JsonIgnore] のため復元されない（クローンは親を指さない）
+            /// 別レコードとして挿入する場合は、クローン後に主キーの振り直しや MarkAdded() を行うこと。戻り値の実体は元と同じ具象型
             /// </remarks>
             public EntityBase Clone()
             {
                 var type = GetType();
-                var json = JsonSerializer.Serialize(this, type, _cloneJsonOptions);
-                return (EntityBase)JsonSerializer.Deserialize(json, type, _cloneJsonOptions)!;
+                var json = JsonSerializer.Serialize(this, type, _jsonOptions);
+                return (EntityBase)JsonSerializer.Deserialize(json, type, _jsonOptions)!;
             }
         }
         {{ end }}

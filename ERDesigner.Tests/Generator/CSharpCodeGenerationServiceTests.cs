@@ -157,10 +157,15 @@ public class CSharpCodeGenerationServiceTests
         result.Files[0].Content.Should().Contain("public EntityBase Clone()");
         // EntityBase が使う namespace は using に含め、テンプレートでは完全修飾しない
         result.Files[0].Content.Should().Contain("using System.Text.Json;");
+        result.Files[0].Content.Should().Contain("using System.Text.Json.Serialization;");
         result.Files[0].Content.Should().Contain("using System.Collections;");
         result.Files[0].Content.Should().Contain("using System.Reflection;");
         result.Files[0].Content.Should().NotContain("System.Text.Json.JsonSerializer");
         result.Files[0].Content.Should().NotContain("System.Collections.StructuralComparisons");
+        // ToJson / Clone は共有 static オプションを使い回し（毎回 new しない）、循環は IgnoreCycles で安全化
+        result.Files[0].Content.Should().Contain("ReferenceHandler = ReferenceHandler.IgnoreCycles,");
+        result.Files[0].Content.Should().Contain("writeIndented ? _jsonOptionsIndented : _jsonOptions");
+        result.Files[0].Content.Should().NotContain("_cloneJsonOptions");
 
         var content = result.Files[0].Content;
         // EditModel も RowState を保持し、確定値変更時に Updated へ昇格する
