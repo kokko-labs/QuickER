@@ -199,6 +199,15 @@ internal sealed class ScribanCSharpRenderer
             /// <summary>指定文字列で終わるか</summary>
             public bool EndsWith(string? value) => value is not null && Value.EndsWith(value, StringComparison.Ordinal);
 
+            /// <summary>他の値オブジェクトの値を含むか</summary>
+            public bool Contains(TSelf? value) => value is not null && Contains(value.Value);
+
+            /// <summary>他の値オブジェクトの値で始まるか</summary>
+            public bool StartsWith(TSelf? value) => value is not null && StartsWith(value.Value);
+
+            /// <summary>他の値オブジェクトの値で終わるか</summary>
+            public bool EndsWith(TSelf? value) => value is not null && EndsWith(value.Value);
+
             /// <summary>序数で比較する</summary>
             public int CompareTo(TSelf? other) => other is null ? 1 : string.CompareOrdinal(Value, other.Value);
 
@@ -2660,7 +2669,8 @@ internal sealed class ScribanCSharpRenderer
                             : $"NOT ({Visit(unary.Operand, parameters)})";
 
                     case MethodCallExpression call when TryGetLike(call, out var likeColumn, out var likeKind):
-                        var raw = Evaluate(call.Arguments[0]) as string ?? string.Empty;
+                        // 引数は string でも値オブジェクト（TSelf オーバーロード）でもよい。VO なら素値（string）へ開く
+                        var raw = {{ if generate_value_objects }}SqlParameterValue.Unwrap(Evaluate(call.Arguments[0])){{ else }}Evaluate(call.Arguments[0]){{ end }} as string ?? string.Empty;
                         var pattern = likeKind switch
                         {
                             LikeKind.Contains => "%" + EscapeLike(raw) + "%",

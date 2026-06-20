@@ -1263,6 +1263,10 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("public abstract partial class ValueObjectBase<TSelf, TValue>");
         content.Should().Contain("public abstract partial class ValueObjectOrderedBase<TSelf, TValue>");
         content.Should().Contain("public abstract partial class ValueObjectStringBase<TSelf>");
+        // 文字列 VO は string / TSelf 両対応の部分一致メソッドを持つ
+        content.Should().Contain("public bool Contains(TSelf? value) => value is not null && Contains(value.Value);");
+        content.Should().Contain("public bool StartsWith(TSelf? value) => value is not null && StartsWith(value.Value);");
+        content.Should().Contain("public bool EndsWith(TSelf? value) => value is not null && EndsWith(value.Value);");
         content.Should().Contain("public abstract partial class ValueObjectBinaryBase<TSelf>");
         content.Should().Contain("public interface IValueObject<TSelf, TValue>");
         // 表示用プロパティ（マーカー IF に宣言、基底に virtual 既定実装）
