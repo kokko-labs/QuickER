@@ -1265,6 +1265,9 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("public abstract partial class ValueObjectStringBase<TSelf>");
         content.Should().Contain("public abstract partial class ValueObjectBinaryBase<TSelf>");
         content.Should().Contain("public interface IValueObject<TSelf, TValue>");
+        // 表示用プロパティ（マーカー IF に宣言、基底に virtual 既定実装）
+        content.Should().Contain("string DisplayValue { get; }");
+        content.Should().Contain("public virtual string DisplayValue => ToString();");
         content.Should().Contain("public sealed class ValueObjectJsonConverterFactory : JsonConverterFactory");
         // 具象 VO（型別の基底を継承）
         content.Should().Contain("public sealed partial class CustomerIdValue : ValueObjectOrderedBase<CustomerIdValue, int>, IValueObject<CustomerIdValue, int>");

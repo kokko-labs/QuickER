@@ -60,6 +60,9 @@ internal sealed class ScribanCSharpRenderer
         {
             /// <summary>内包する値を object として取得する（SQL パラメータ束縛などで素の値へ開くのに使う）</summary>
             object? UnderlyingValue { get; }
+
+            /// <summary>画面表示用の文字列（既定は ToString()。具象 VO で override して書式を変えられる）</summary>
+            string DisplayValue { get; }
         }
 
         /// <summary>値オブジェクトの汎用インターフェース。static ファクトリを型パラメータ経由で呼べるようにする</summary>
@@ -106,6 +109,9 @@ internal sealed class ScribanCSharpRenderer
 
             /// <summary>内包値を object として取得する（SQL 束縛などで素の値へ開く）</summary>
             object? IValueObject.UnderlyingValue => Value;
+
+            /// <summary>画面表示用の文字列（既定は ToString()）。具象 VO の partial クラスで override して書式を変えられる</summary>
+            public virtual string DisplayValue => ToString();
 
             /// <summary>値ベースの等価判定（byte[] などの配列は要素単位で比較する）</summary>
             public override bool Equals(object? obj) => obj is ValueObjectBase<TSelf, TValue> other && StructuralComparisons.StructuralEqualityComparer.Equals(Value, other.Value);
