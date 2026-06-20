@@ -1273,6 +1273,8 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("public sealed partial class CustomerIdValue : ValueObjectOrderedBase<CustomerIdValue, int>, IValueObject<CustomerIdValue, int>");
         content.Should().Contain("public sealed partial class NameValue : ValueObjectStringBase<NameValue>, IValueObject<NameValue, string>");
         content.Should().Contain("public sealed partial class PhotoValue : ValueObjectBinaryBase<PhotoValue>, IValueObject<PhotoValue, byte[]>");
+        content.Should().Contain("public sealed partial class IsActiveValue : ValueObjectBooleanBase<IsActiveValue>, IValueObject<IsActiveValue, bool>");
+        content.Should().Contain("public abstract partial class ValueObjectBooleanBase<TSelf> : ValueObjectBase<TSelf, bool>");
         // string MaxLength・decimal precision/scale の自動検証
         content.Should().Contain("if (value.Length > 50)");
         content.Should().Contain("ValidateDecimal(value, 10, 2, errors);");
@@ -1382,6 +1384,7 @@ public class CSharpCodeGenerationServiceTests
                         new ColumnDefinition { Id = Guid.NewGuid(), Name = "name", DataType = "nvarchar(50)", IsNullable = false },
                         new ColumnDefinition { Id = Guid.NewGuid(), Name = "balance", DataType = "decimal(10,2)", IsNullable = true },
                         new ColumnDefinition { Id = Guid.NewGuid(), Name = "photo", DataType = "varbinary(max)", IsNullable = true },
+                        new ColumnDefinition { Id = Guid.NewGuid(), Name = "is_active", DataType = "bit", IsNullable = false },
                     ],
                 },
                 new EntityDefinition

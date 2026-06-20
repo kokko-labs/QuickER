@@ -182,21 +182,6 @@ internal sealed class ScribanCSharpRenderer
                 left is null ? (right is null ? 0 : -1) : right is null ? 1 : left.Value.CompareTo(right.Value);
         }
 
-        /// <summary>DateTime 値オブジェクトの基底。Now/Today ファクトリを提供する</summary>
-        public abstract partial class ValueObjectDateTimeBase<TSelf> : ValueObjectOrderedBase<TSelf, DateTime>
-            where TSelf : ValueObjectDateTimeBase<TSelf>, IValueObject<TSelf, DateTime>
-        {
-            /// <summary>検証済みの値で初期化する</summary>
-            protected ValueObjectDateTimeBase(DateTime value)
-                : base(value) { }
-
-            /// <summary>現在日時で生成する</summary>
-            public static TSelf Now => TSelf.Create(DateTime.Now);
-
-            /// <summary>本日（時刻 0:00）で生成する</summary>
-            public static TSelf Today => TSelf.Create(DateTime.Today);
-        }
-
         /// <summary>string 値オブジェクトの基底。部分一致系メソッドと序数比較を提供する（順序演算子は付けない）</summary>
         public abstract partial class ValueObjectStringBase<TSelf> : ValueObjectBase<TSelf, string>, IComparable<TSelf>, IComparable
             where TSelf : ValueObjectStringBase<TSelf>
@@ -220,6 +205,42 @@ internal sealed class ScribanCSharpRenderer
             /// <summary>非ジェネリック比較（型不一致は例外）</summary>
             int IComparable.CompareTo(object? obj) =>
                 obj is null ? 1 : obj is TSelf other ? CompareTo(other) : throw new ArgumentException($"{obj.GetType().Name} は {typeof(TSelf).Name} と比較できません。", nameof(obj));
+        }
+
+        /// <summary>bool 値オブジェクトの基底。True/False ファクトリと真偽判定を提供する（順序比較は持たない）</summary>
+        public abstract partial class ValueObjectBooleanBase<TSelf> : ValueObjectBase<TSelf, bool>
+            where TSelf : ValueObjectBooleanBase<TSelf>, IValueObject<TSelf, bool>
+        {
+            /// <summary>検証済みの値で初期化する</summary>
+            protected ValueObjectBooleanBase(bool value)
+                : base(value) { }
+
+            /// <summary>true 値で生成する</summary>
+            public static TSelf True => TSelf.Create(true);
+
+            /// <summary>false 値で生成する</summary>
+            public static TSelf False => TSelf.Create(false);
+
+            /// <summary>値が true かどうか</summary>
+            public bool IsTrue => Value;
+
+            /// <summary>値が false かどうか</summary>
+            public bool IsFalse => !Value;
+        }
+
+        /// <summary>DateTime 値オブジェクトの基底。Now/Today ファクトリを提供する</summary>
+        public abstract partial class ValueObjectDateTimeBase<TSelf> : ValueObjectOrderedBase<TSelf, DateTime>
+            where TSelf : ValueObjectDateTimeBase<TSelf>, IValueObject<TSelf, DateTime>
+        {
+            /// <summary>検証済みの値で初期化する</summary>
+            protected ValueObjectDateTimeBase(DateTime value)
+                : base(value) { }
+
+            /// <summary>現在日時で生成する</summary>
+            public static TSelf Now => TSelf.Create(DateTime.Now);
+
+            /// <summary>本日（時刻 0:00）で生成する</summary>
+            public static TSelf Today => TSelf.Create(DateTime.Today);
         }
 
         /// <summary>byte[] 値オブジェクトの基底。ToString は Base64 を返す（等価は基底の構造的比較）</summary>

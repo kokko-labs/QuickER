@@ -17,7 +17,8 @@ internal sealed partial class CSharpGenerationModelBuilder
     private IReadOnlyDictionary<string, CSharpValueObjectModel> BuildValueObjects(
         DiagramDefinition diagram,
         CodeGenerationOptions options,
-        ICollection<GenerationDiagnostic> diagnostics)
+        ICollection<GenerationDiagnostic> diagnostics
+    )
     {
         if (!options.GenerateValueObjects)
         {
@@ -51,22 +52,14 @@ internal sealed partial class CSharpGenerationModelBuilder
     }
 
     /// <summary>1 グループ（同名列の集合）から 1 つの VO 生成モデルを構築する。競合は警告し PK 優先/最大定義で解決する</summary>
-    private CSharpValueObjectModel BuildValueObjectModel(
-        string key,
-        List<ValueObjectMember> members,
-        CodeGenerationOptions options,
-        ICollection<GenerationDiagnostic> diagnostics)
+    private CSharpValueObjectModel BuildValueObjectModel(string key, List<ValueObjectMember> members, CodeGenerationOptions options, ICollection<GenerationDiagnostic> diagnostics)
     {
         // PK があれば PK の定義を正、無ければ「最も広い定義」を正とする
         var primaryKeyMember = members.FirstOrDefault(member => member.Column.IsPrimaryKey);
-        var authoritative = primaryKeyMember.Column is not null
-            ? primaryKeyMember
-            : members.OrderByDescending(WidthScore).First();
+        var authoritative = primaryKeyMember.Column is not null ? primaryKeyMember : members.OrderByDescending(WidthScore).First();
 
         var className = _nameConverter.ToValueObjectClassName(authoritative.Column.Name);
-        var isGuidKey = options.UseGuidKeyForStringPrimaryKey
-            && primaryKeyMember.Column is not null
-            && primaryKeyMember.TypeInfo.TypeName == "string";
+        var isGuidKey = options.UseGuidKeyForStringPrimaryKey && primaryKeyMember.Column is not null && primaryKeyMember.TypeInfo.TypeName == "string";
 
         var valueType = isGuidKey ? "string" : authoritative.TypeInfo.TypeName;
         var maxLength = isGuidKey ? null : authoritative.TypeInfo.MaxLength;
@@ -78,8 +71,11 @@ internal sealed partial class CSharpGenerationModelBuilder
         if (signatures.Count > 1)
         {
             var locations = string.Join("、", members.Select(member => $"{member.Entity.TableName}.{member.Column.Name} ({member.Column.DataType})"));
-            diagnostics.Add(Warning(
-                $"値オブジェクト '{className}' に集約される同名列の定義が一致しません。PK 定義優先（無ければ最大定義）で生成しますが、ER 図の定義統一を推奨します: {locations}"));
+            diagnostics.Add(
+                Warning(
+                    $"値オブジェクト '{className}' に集約される同名列の定義が一致しません。PK 定義優先（無ければ最大定義）で生成しますが、ER 図の定義統一を推奨します: {locations}"
+                )
+            );
         }
 
         return new CSharpValueObjectModel
@@ -97,16 +93,15 @@ internal sealed partial class CSharpGenerationModelBuilder
     }
 
     /// <summary>列名（正規化キー）から対応する値オブジェクトを引く。VO 化対象外なら null</summary>
-    private CSharpValueObjectModel? ResolveValueObject(ColumnDefinition column) =>
-        _valueObjects.TryGetValue(_nameConverter.ToColumnKey(column.Name), out var model) ? model : null;
+    private CSharpValueObjectModel? ResolveValueObject(ColumnDefinition column) => _valueObjects.TryGetValue(_nameConverter.ToColumnKey(column.Name), out var model) ? model : null;
 
     /// <summary>VO 化された列の EditModel プロパティ生成モデルを構築する（確定値は常に VO?、バインド setter は TryCreate で検証）</summary>
     private CSharpEditModelPropertyModel BuildValueObjectEditModelProperty(ColumnDefinition column, CSharpValueObjectModel valueObject)
     {
-        var underlying = valueObject.ValueTypeName;     // TValue（素の型）
+        var underlying = valueObject.ValueTypeName; // TValue（素の型）
         var isBinary = underlying == "byte[]";
         var isString = underlying == "string";
-        var needsParse = !isBinary && !isString;        // 数値・日時・bool・Guid 等は文字列から TryParse
+        var needsParse = !isBinary && !isString; // 数値・日時・bool・Guid 等は文字列から TryParse
 
         var propertyName = _nameConverter.ToPropertyName(column.Name);
         var bindingPropertyName = "Binding" + propertyName;
@@ -114,13 +109,13 @@ internal sealed partial class CSharpGenerationModelBuilder
         return new CSharpEditModelPropertyModel
         {
             PropertyName = propertyName,
-            TypeName = valueObject.ClassName + "?",       // 確定値は常に NULL 許容
+            TypeName = valueObject.ClassName + "?", // 確定値は常に NULL 許容
             FieldName = ToFieldName(propertyName),
             BindingPropertyName = bindingPropertyName,
             BindingFieldName = ToFieldName(bindingPropertyName),
             NeedsParse = needsParse,
             ParseTypeName = needsParse ? underlying : string.Empty,
-            FieldInitializer = string.Empty,             // 参照型・nullable → null 既定
+            FieldInitializer = string.Empty, // 参照型・nullable → null 既定
             BindingFieldInitializer = "string.Empty",
             IsNullable = true,
             IsReferenceType = true,
@@ -155,12 +150,12 @@ internal sealed partial class CSharpGenerationModelBuilder
 
         return valueType switch
         {
-            "byte[]" => $"ValueObjectBinaryBase<{className}>",
+            "byte" or "short" or "int" or "long" or "float" or "double" or "decimal" or "TimeSpan" or "DateTimeOffset" => $"ValueObjectOrderedBase<{className}, {valueType}>",
             "string" => $"ValueObjectStringBase<{className}>",
+            "bool" => $"ValueObjectBooleanBase<{className}>",
             "DateTime" => $"ValueObjectDateTimeBase<{className}>",
-            "byte" or "short" or "int" or "long" or "float" or "double" or "decimal" or "TimeSpan" or "DateTimeOffset"
-                => $"ValueObjectOrderedBase<{className}, {valueType}>",
-            // bool / Guid など順序付けしない型は等価のみの基底
+            "byte[]" => $"ValueObjectBinaryBase<{className}>",
+            // Guid など順序付けしない型は等価のみの基底
             _ => $"ValueObjectBase<{className}, {valueType}>",
         };
     }
