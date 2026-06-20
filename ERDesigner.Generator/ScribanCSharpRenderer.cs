@@ -108,17 +108,13 @@ internal sealed class ScribanCSharpRenderer
             object? IValueObject.UnderlyingValue => Value;
 
             /// <summary>値ベースの等価判定（byte[] などの配列は要素単位で比較する）</summary>
-            public override bool Equals(object? obj) =>
-                obj is ValueObjectBase<TSelf, TValue> other
-                && StructuralComparisons.StructuralEqualityComparer.Equals(Value, other.Value);
+            public override bool Equals(object? obj) => obj is ValueObjectBase<TSelf, TValue> other && StructuralComparisons.StructuralEqualityComparer.Equals(Value, other.Value);
 
             /// <summary>値ベースのハッシュコード（配列は構造的に算出）</summary>
-            public override int GetHashCode() =>
-                Value is null ? 0 : StructuralComparisons.StructuralEqualityComparer.GetHashCode(Value);
+            public override int GetHashCode() => Value is null ? 0 : StructuralComparisons.StructuralEqualityComparer.GetHashCode(Value);
 
             /// <summary>値ベースの等価演算子</summary>
-            public static bool operator ==(ValueObjectBase<TSelf, TValue>? left, ValueObjectBase<TSelf, TValue>? right) =>
-                left is null ? right is null : left.Equals(right);
+            public static bool operator ==(ValueObjectBase<TSelf, TValue>? left, ValueObjectBase<TSelf, TValue>? right) => left is null ? right is null : left.Equals(right);
 
             /// <summary>値ベースの非等価演算子</summary>
             public static bool operator !=(ValueObjectBase<TSelf, TValue>? left, ValueObjectBase<TSelf, TValue>? right) => !(left == right);
@@ -154,7 +150,8 @@ internal sealed class ScribanCSharpRenderer
             where TValue : IComparable<TValue>
         {
             /// <summary>検証済みの値で初期化する</summary>
-            protected ValueObjectOrderedBase(TValue value) : base(value) { }
+            protected ValueObjectOrderedBase(TValue value)
+                : base(value) { }
 
             /// <summary>内包値どうしを比較する</summary>
             public int CompareTo(TSelf? other) => other is null ? 1 : Value.CompareTo(other.Value);
@@ -184,7 +181,8 @@ internal sealed class ScribanCSharpRenderer
             where TSelf : ValueObjectDateTimeBase<TSelf>, IValueObject<TSelf, DateTime>
         {
             /// <summary>検証済みの値で初期化する</summary>
-            protected ValueObjectDateTimeBase(DateTime value) : base(value) { }
+            protected ValueObjectDateTimeBase(DateTime value)
+                : base(value) { }
 
             /// <summary>現在日時で生成する</summary>
             public static TSelf Now => TSelf.Create(DateTime.Now);
@@ -198,7 +196,8 @@ internal sealed class ScribanCSharpRenderer
             where TSelf : ValueObjectStringBase<TSelf>
         {
             /// <summary>検証済みの値で初期化する</summary>
-            protected ValueObjectStringBase(string value) : base(value) { }
+            protected ValueObjectStringBase(string value)
+                : base(value) { }
 
             /// <summary>指定文字列を含むか</summary>
             public bool Contains(string? value) => value is not null && Value.Contains(value, StringComparison.Ordinal);
@@ -222,7 +221,8 @@ internal sealed class ScribanCSharpRenderer
             where TSelf : ValueObjectBinaryBase<TSelf>
         {
             /// <summary>検証済みの値で初期化する</summary>
-            protected ValueObjectBinaryBase(byte[] value) : base(value) { }
+            protected ValueObjectBinaryBase(byte[] value)
+                : base(value) { }
 
             /// <summary>Base64 文字列として返す</summary>
             public override string ToString() => Value is null ? string.Empty : Convert.ToBase64String(Value);
@@ -233,7 +233,8 @@ internal sealed class ScribanCSharpRenderer
             where TSelf : ValueObjectGuidKeyBase<TSelf>, IValueObject<TSelf, string>
         {
             /// <summary>検証済みの値で初期化する</summary>
-            protected ValueObjectGuidKeyBase(string value) : base(value) { }
+            protected ValueObjectGuidKeyBase(string value)
+                : base(value) { }
 
             /// <summary>新しい GUID を採番して生成する</summary>
             public static TSelf Create() => TSelf.Create(Guid.NewGuid().ToString());
@@ -258,8 +259,7 @@ internal sealed class ScribanCSharpRenderer
             }
 
             /// <summary>内包値（素の値）として書き出す</summary>
-            public override void Write(Utf8JsonWriter writer, TVo value, JsonSerializerOptions options) =>
-                JsonSerializer.Serialize(writer, value.Value, options);
+            public override void Write(Utf8JsonWriter writer, TVo value, JsonSerializerOptions options) => JsonSerializer.Serialize(writer, value.Value, options);
         }
 
         /// <summary>IValueObject&lt;,&gt; を実装する型に汎用変換器を適用するファクトリ</summary>
@@ -283,14 +283,18 @@ internal sealed class ScribanCSharpRenderer
         /// <summary>{{ vo.column_name }} 列に対応する値オブジェクト</summary>
         public sealed partial class {{ vo.class_name }} : {{ vo.base_declaration }}, {{ vo.interface_declaration }}
         {
-            private {{ vo.class_name }}({{ vo.value_type_name }} value) : base(value) { }
+            private {{ vo.class_name }}({{ vo.value_type_name }} value)
+                : base(value) { }
 
             /// <summary>検証して生成する（違反時は ValueObjectValidationException）</summary>
             public static {{ vo.class_name }} Create({{ vo.value_type_name }} value)
             {
                 var errors = new List<string>();
                 Validate(value, errors);
-                if (errors.Count > 0) { throw new ValueObjectValidationException(typeof({{ vo.class_name }}), errors); }
+                if (errors.Count > 0)
+                {
+                    throw new ValueObjectValidationException(typeof({{ vo.class_name }}), errors);
+                }
                 return new {{ vo.class_name }}(value);
             }
 
@@ -299,7 +303,12 @@ internal sealed class ScribanCSharpRenderer
             {
                 var list = new List<string>();
                 Validate(value, list);
-                if (list.Count > 0) { result = null; errors = list; return false; }
+                if (list.Count > 0)
+                {
+                    result = null;
+                    errors = list;
+                    return false;
+                }
                 result = new {{ vo.class_name }}(value);
                 errors = Array.Empty<string>();
                 return true;
@@ -325,11 +334,21 @@ internal sealed class ScribanCSharpRenderer
             private static void ValidateDecimal(decimal value, int precision, int scale, ICollection<string> errors)
             {
                 var valueScale = (decimal.GetBits(value)[3] >> 16) & 0xFF;
-                if (valueScale > scale) { errors.Add($"小数点以下は {scale} 桁以内で入力してください。"); }
+                if (valueScale > scale)
+                {
+                    errors.Add($"小数点以下は {scale} 桁以内で入力してください。");
+                }
                 var integral = Math.Truncate(Math.Abs(value));
                 var integralDigits = 0;
-                while (integral >= 1) { integral = Math.Truncate(integral / 10); integralDigits++; }
-                if (integralDigits > precision - scale) { errors.Add($"整数部は {precision - scale} 桁以内で入力してください。"); }
+                while (integral >= 1)
+                {
+                    integral = Math.Truncate(integral / 10);
+                    integralDigits++;
+                }
+                if (integralDigits > precision - scale)
+                {
+                    errors.Add($"整数部は {precision - scale} 桁以内で入力してください。");
+                }
             }
             {{~ end ~}}
         }
@@ -459,9 +478,9 @@ internal sealed class ScribanCSharpRenderer
             {
                 IgnoreReadOnlyProperties = true,
                 ReferenceHandler = ReferenceHandler.IgnoreCycles,
-        {{~ if generate_value_objects ~}}
+                {{~ if generate_value_objects ~}}
                 Converters = { new ValueObjectJsonConverterFactory() },
-        {{~ end ~}}
+                {{~ end ~}}
             };
 
             /// <summary>整形出力（writeIndented=true）用の設定。WriteIndented は初回利用後に変更できないため別インスタンスにする</summary>
@@ -470,9 +489,9 @@ internal sealed class ScribanCSharpRenderer
                 IgnoreReadOnlyProperties = true,
                 ReferenceHandler = ReferenceHandler.IgnoreCycles,
                 WriteIndented = true,
-        {{~ if generate_value_objects ~}}
+                {{~ if generate_value_objects ~}}
                 Converters = { new ValueObjectJsonConverterFactory() },
-        {{~ end ~}}
+                {{~ end ~}}
             };
 
             /// <summary>このエンティティを JSON 文字列へシリアライズする（WebAPI へのデータ受け渡しなどに使用）</summary>
@@ -480,8 +499,7 @@ internal sealed class ScribanCSharpRenderer
             /// get/set 可能な public プロパティのみが対象（get-only の IsAdded などの派生フラグは出力されない。RowState は出力される）
             /// 子ナビゲーションは含まれ、親参照ナビゲーションは [JsonIgnore] が付くため循環しない
             /// </remarks>
-            public string ToJson(bool writeIndented = false) =>
-                JsonSerializer.Serialize(this, GetType(), writeIndented ? _jsonOptionsIndented : _jsonOptions);
+            public string ToJson(bool writeIndented = false) => JsonSerializer.Serialize(this, GetType(), writeIndented ? _jsonOptionsIndented : _jsonOptions);
 
             /// <summary>このエンティティの深いクローン（ディープコピー）を生成する（JSON ラウンドトリップ）</summary>
             /// <remarks>
@@ -594,9 +612,7 @@ internal sealed class ScribanCSharpRenderer
 
             /// <summary>確定値プロパティが変更された後に呼ばれる横断的フック（ユーザー編集時のみ。ロード中は呼ばれない）。UpdatedAt の打刻などに使う</summary>
             /// <remarks>このフック内で別の確定値プロパティを更新する場合、無限再帰を避けるため propertyName で対象を判定すること</remarks>
-            protected virtual void OnConfirmedValueChanged(string propertyName)
-            {
-            }
+            protected virtual void OnConfirmedValueChanged(string propertyName) { }
 
             /// <summary>確定値の変更で RowState を Updated へ昇格させるかどうか（既定 true。メタ情報など特定プロパティを除外したい場合に override）</summary>
             protected virtual bool ShouldMarkUpdated(string propertyName) => true;
@@ -695,9 +711,7 @@ internal sealed class ScribanCSharpRenderer
             }
 
             /// <summary>所属コレクションの並び替え本体（具象クラスが型付きコレクションの Move を実装する）</summary>
-            protected virtual void MoveCore(int oldIndex, int newIndex)
-            {
-            }
+            protected virtual void MoveCore(int oldIndex, int newIndex) { }
 
             /// <summary>位置プロパティ（IndexInParent / IsFirstInParent / IsLastInParent）の変更通知を発行する（コレクションの増減・並び替え時に呼ばれる）</summary>
             internal void RaisePositionChanged()
@@ -760,9 +774,7 @@ internal sealed class ScribanCSharpRenderer
             }
 
             /// <summary>このノード自身を検証する（具象クラスが必須チェック等を実装）</summary>
-            protected virtual void ValidateSelf()
-            {
-            }
+            protected virtual void ValidateSelf() { }
 
             /// <summary>検証エラーをノードのパス付きで収集する（事前に Validate を呼ぶ）</summary>
             /// <param name="includeChildren">true で子（カスケード）も再帰収集、false で自身のエラーのみ</param>
@@ -869,14 +881,10 @@ internal sealed class ScribanCSharpRenderer
             }
 
             /// <summary>既知のカスケード子を登録する（カスケード子を持つ具象クラスのみ生成コードが override。手動実装しない）</summary>
-            protected virtual void RegisterChildren()
-            {
-            }
+            protected virtual void RegisterChildren() { }
 
             /// <summary>partial クラスで追加した子を AddChild / AddChildren で登録する拡張ポイント。override すると検証・収集・確定・ダーティ判定すべてに参加する</summary>
-            protected virtual void RegisterExtraChildren()
-            {
-            }
+            protected virtual void RegisterExtraChildren() { }
 
             /// <summary>子（単一参照）をカスケードに登録する（参照は遅延取得で最新を反映）</summary>
             protected void AddChild(string name, Func<EditModelBase?> accessor) => (_childLinks ??= new()).Add(ChildLink.ForSingle(name, accessor));
@@ -989,9 +997,7 @@ internal sealed class ScribanCSharpRenderer
             public void RevertInput() => ExecuteRevert(RevertCore);
 
             /// <summary>RevertInput の本体（具象クラスが各プロパティの書き戻しを実装）</summary>
-            protected virtual void RevertCore()
-            {
-            }
+            protected virtual void RevertCore() { }
 
             /// <summary>リバート中フラグを立てたうえで処理を実行する</summary>
             protected void ExecuteRevert(Action action)
@@ -1063,19 +1069,13 @@ internal sealed class ScribanCSharpRenderer
             }
 
             /// <summary>BeginEdit の本体（具象クラスが入力状態のスナップショットを実装）</summary>
-            protected virtual void BeginEditCore()
-            {
-            }
+            protected virtual void BeginEditCore() { }
 
             /// <summary>EndEdit の本体（既定では何もしない。必要なら具象クラスで override）</summary>
-            protected virtual void EndEditCore()
-            {
-            }
+            protected virtual void EndEditCore() { }
 
             /// <summary>CancelEdit の本体（具象クラスがスナップショットからの復元を実装）</summary>
-            protected virtual void CancelEditCore()
-            {
-            }
+            protected virtual void CancelEditCore() { }
 
             /// <summary>必須項目の未入力エラーメッセージを構築する（派生クラスで override し方針を差し替え可能）</summary>
             protected virtual string BuildRequiredErrorMessage(string propertyName) => $"{propertyName} は必須です。";
@@ -2201,9 +2201,9 @@ internal sealed class ScribanCSharpRenderer
             {
                 PropertyNameCaseInsensitive = true,
                 TypeInfoResolver = new DefaultJsonTypeInfoResolver { Modifiers = { IncludeNavigationProperties } },
-        {{~ if generate_value_objects ~}}
+                {{~ if generate_value_objects ~}}
                 Converters = { new ValueObjectJsonConverterFactory() },
-        {{~ end ~}}
+                {{~ end ~}}
             };
 
             /// <summary>[JsonIgnore] 等で契約から外れたナビゲーションプロパティを、デシリアライズ対象として再登録する</summary>
@@ -2699,8 +2699,7 @@ internal sealed class ScribanCSharpRenderer
                 column = string.Empty;
                 kind = LikeKind.Contains;
 
-                if (call.Object is null || call.Arguments.Count != 1
-                    || (call.Method.DeclaringType != typeof(string){{ if generate_value_objects }} && !IsValueObjectStringMethod(call.Method){{ end }}))
+                if (call.Object is null || call.Arguments.Count != 1 || (call.Method.DeclaringType != typeof(string){{ if generate_value_objects }} && !IsValueObjectStringMethod(call.Method){{ end }}))
                 {
                     return false;
                 }
@@ -2774,9 +2773,8 @@ internal sealed class ScribanCSharpRenderer
         public sealed class SaveConflictException : Exception
         {
             /// <summary>メッセージを指定して初期化する</summary>
-            public SaveConflictException(string message) : base(message)
-            {
-            }
+            public SaveConflictException(string message)
+                : base(message) { }
         }
 
         /// <summary>カスケード対象の子ナビゲーション（プロパティ・コレクション種別・子型・FK 情報）</summary>
@@ -3089,14 +3087,10 @@ internal sealed class ScribanCSharpRenderer
         {{~ for repository in repository_classes ~}}
         {{ if !for.first }}
         {{ end }}/// <summary>{{ repository.entity_class_name }} 用リポジトリインターフェース</summary>
-        public partial interface {{ repository.interface_name }} : IRepository<{{ repository.entity_class_name }}, {{ repository.key_type_name }}>
-        {
-        }
+        public partial interface {{ repository.interface_name }} : IRepository<{{ repository.entity_class_name }}, {{ repository.key_type_name }}> { }
 
         /// <summary>{{ repository.entity_class_name }} 用リポジトリ実装</summary>
-        public sealed partial class {{ repository.class_name }}(ISqlConnectionFactory connectionFactory) : SqlServerRepository<{{ repository.entity_class_name }}, {{ repository.key_type_name }}>(connectionFactory), {{ repository.interface_name }}
-        {
-        }
+        public sealed partial class {{ repository.class_name }}(ISqlConnectionFactory connectionFactory) : SqlServerRepository<{{ repository.entity_class_name }}, {{ repository.key_type_name }}>(connectionFactory), {{ repository.interface_name }} { }
         {{~ end ~}}
         {{~ end ~}}
         """;
