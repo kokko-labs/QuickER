@@ -93,7 +93,8 @@ internal sealed partial class CSharpGenerationModelBuilder
             {
                 var property = BuildProperty(column);
                 var editModelProperty = BuildEditModelProperty(column);
-                // VO は ToString() が型ごとの表現（binary は Base64）を返すため、Base64 分岐を使わず ToString 経路へ寄せる
+                // VO は ToString() が型ごとの表現（binary は Base64）を返す。さらに非 NULL の VO 列は
+                // = null! 初期化のためロード前は null になり得るので、必須でも null 条件付きで ToString する。
                 var isValueObject = ResolveValueObject(column) is not null;
                 return new CSharpMappingPropertyPair
                 {
@@ -102,7 +103,9 @@ internal sealed partial class CSharpGenerationModelBuilder
                     EditModelTypeName = editModelProperty.TypeName,
                     EditModelIsNullable = editModelProperty.IsNullable,
                     IsBinary = editModelProperty.IsBinary,
-                    LoadBindingExpression = BuildMapperBindingExpression(property.TypeName, editModelProperty.IsBinary && !isValueObject, property.PropertyName),
+                    LoadBindingExpression = isValueObject
+                        ? $"entity.{property.PropertyName}?.ToString() ?? string.Empty"
+                        : BuildMapperBindingExpression(property.TypeName, editModelProperty.IsBinary, property.PropertyName),
                     BindingPropertyName = "Binding" + property.PropertyName,
                 };
             })

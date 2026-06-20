@@ -318,7 +318,10 @@ internal sealed class ScribanCSharpRenderer
             internal static void Validate({{ vo.value_type_name }} value, ICollection<string> errors)
             {
                 {{~ if vo.max_length ~}}
-                if (value.Length > {{ vo.max_length }}) { errors.Add($"{{ vo.max_length }} 文字以内で入力してください。（現在 {value.Length} 文字）"); }
+                if (value.Length > {{ vo.max_length }})
+                {
+                    errors.Add($"{{ vo.max_length }} 文字以内で入力してください。（現在 {value.Length} 文字）");
+                }
                 {{~ end ~}}
                 {{~ if vo.precision ~}}
                 ValidateDecimal(value, {{ vo.precision }}, {{ if vo.scale }}{{ vo.scale }}{{ else }}0{{ end }}, errors);
@@ -1113,9 +1116,7 @@ internal sealed class ScribanCSharpRenderer
             private readonly List<T> _removed = new();
 
             /// <summary>空のコレクションを生成する</summary>
-            public EditModelCollection()
-            {
-            }
+            public EditModelCollection() { }
 
             /// <summary>既存の EditModel 群を初期要素として生成する（削除追跡はしない）</summary>
             public EditModelCollection(IEnumerable<T> items)
@@ -1528,6 +1529,7 @@ internal sealed class ScribanCSharpRenderer
         {{ end }}    // ---- 行編集（IEditableObject）用スナップショット ----
         {{ for p in item.properties }}    /// <summary>{{ p.property_name }} の編集前スナップショット</summary>
             private string {{ p.binding_field_name }}Snapshot = {{ p.binding_field_initializer }};
+
         {{ end }}    /// <summary>編集前の RowState スナップショット</summary>
             private RowState _rowStateSnapshot;
 

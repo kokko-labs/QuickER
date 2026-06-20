@@ -1282,6 +1282,8 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("CustomerIdValue.TryCreate(parsed, out var converted, out var voErrors)");
         // EntityBase / Repository の JSON オプションに VO 変換器が登録される
         content.Should().Contain("Converters = { new ValueObjectJsonConverterFactory() },");
+        // Mapper のロードは必須 VO 列でも null 条件付きで ToString する（= null! のためロード前は null になり得る）
+        content.Should().Contain("editModel.BindingCustomerId = entity.CustomerId?.ToString() ?? string.Empty;");
     }
 
     /// <summary>string PK ＋ GuidKey オプションで PK が GuidKey 基底になり、非 PK の string は通常の string 基底になることを検証する</summary>
