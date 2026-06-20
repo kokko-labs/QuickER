@@ -1,8 +1,11 @@
 namespace ERDesigner.Generator;
 
 /// <summary>ER 図定義からテンプレート用の C# コード生成モデルを構築するビルダー</summary>
-internal sealed class CSharpGenerationModelBuilder
+internal sealed partial class CSharpGenerationModelBuilder
 {
+    /// <summary>列名（正規化キー）→ 値オブジェクト生成モデルの対応。GenerateValueObjects が OFF のときは空で、VO 化しない</summary>
+    private IReadOnlyDictionary<string, CSharpValueObjectModel> _valueObjects = new Dictionary<string, CSharpValueObjectModel>();
+
     /// <summary>テーブル名・カラム名を C# 識別子へ変換するコンバーター</summary>
     private readonly CSharpNameConverter _nameConverter = new();
 
@@ -20,6 +23,7 @@ internal sealed class CSharpGenerationModelBuilder
     public CSharpGenerationModel Build(DiagramDefinition diagram, CodeGenerationOptions options, ICollection<GenerationDiagnostic> diagnostics)
     {
         var navigationsByEntity = ResolveAllNavigations(diagram, diagnostics);
+        _valueObjects = BuildValueObjects(diagram, options, diagnostics);
 
         return new CSharpGenerationModel
         {
@@ -41,6 +45,7 @@ internal sealed class CSharpGenerationModelBuilder
                     .ToList()
                 : [],
             Usings = BuildUsings(options).ToList(),
+            ValueObjectClasses = _valueObjects.Values.OrderBy(vo => vo.ClassName, StringComparer.Ordinal).ToList(),
         };
     }
 
@@ -88,6 +93,8 @@ internal sealed class CSharpGenerationModelBuilder
             {
                 var property = BuildProperty(column);
                 var editModelProperty = BuildEditModelProperty(column);
+                // VO は ToString() が型ごとの表現（binary は Base64）を返すため、Base64 分岐を使わず ToString 経路へ寄せる
+                var isValueObject = ResolveValueObject(column) is not null;
                 return new CSharpMappingPropertyPair
                 {
                     PropertyName = property.PropertyName,
@@ -95,7 +102,7 @@ internal sealed class CSharpGenerationModelBuilder
                     EditModelTypeName = editModelProperty.TypeName,
                     EditModelIsNullable = editModelProperty.IsNullable,
                     IsBinary = editModelProperty.IsBinary,
-                    LoadBindingExpression = BuildMapperBindingExpression(property.TypeName, editModelProperty.IsBinary, property.PropertyName),
+                    LoadBindingExpression = BuildMapperBindingExpression(property.TypeName, editModelProperty.IsBinary && !isValueObject, property.PropertyName),
                     BindingPropertyName = "Binding" + property.PropertyName,
                 };
             })
@@ -141,9 +148,13 @@ internal sealed class CSharpGenerationModelBuilder
     private CSharpPropertyModel BuildProperty(ColumnDefinition column)
     {
         var typeInfo = _typeMapper.Map(column.DataType);
-        var typeName = typeInfo.TypeName;
+        var valueObject = ResolveValueObject(column);
 
-        // NULL 許容列は型へ ? を付与する。値型は Nullable<T>、参照型（string / byte[]）は nullable 注釈となる。
+        // 値オブジェクト生成時は列の C# 型を VO 型へ置き換える（VO は参照型）。
+        var typeName = valueObject?.ClassName ?? typeInfo.TypeName;
+        var isReferenceType = valueObject is not null || typeInfo.IsReferenceType;
+
+        // NULL 許容列は型へ ? を付与する。値型は Nullable<T>、参照型（string / byte[] / VO）は nullable 注釈となる。
         // 非 NULL の string / byte[] は ? を付けず、後段の初期化子で空既定値を与えて CS8618 を回避する
         if (column.IsNullable)
         {
@@ -156,11 +167,15 @@ internal sealed class CSharpGenerationModelBuilder
             ColumnName = column.Name,
             TypeName = typeName,
             IsNullable = column.IsNullable,
-            IsReferenceType = typeInfo.IsReferenceType,
+            IsReferenceType = isReferenceType,
             IsPrimaryKey = column.IsPrimaryKey,
             IsForeignKey = column.IsForeignKey,
-            MaxLength = typeInfo.MaxLength,
-            Initializer = BuildEntityInitializer(typeName, column.IsNullable),
+            // VO は [MaxLength] を出さない（長さ検証は VO 内部で行う。非 string 型に [MaxLength] を付けない安全策にもなる）
+            MaxLength = valueObject is not null ? null : typeInfo.MaxLength,
+            // 非 NULL の VO は妥当な空既定値を作れないため null! でロード前提を表明（NULL 許容 VO は初期化不要）
+            Initializer = valueObject is not null
+                ? (column.IsNullable ? string.Empty : " = null!;")
+                : BuildEntityInitializer(typeName, column.IsNullable),
         };
     }
 
@@ -172,6 +187,12 @@ internal sealed class CSharpGenerationModelBuilder
     private CSharpEditModelPropertyModel BuildEditModelProperty(ColumnDefinition column)
     {
         var typeInfo = _typeMapper.Map(column.DataType);
+        var valueObject = ResolveValueObject(column);
+        if (valueObject is not null)
+        {
+            return BuildValueObjectEditModelProperty(column, valueObject);
+        }
+
         var typeName = typeInfo.TypeName;
 
         var isBytes = typeName == "byte[]";
@@ -472,6 +493,16 @@ internal sealed class CSharpGenerationModelBuilder
 
         if (options.IncludeJsonIgnoreOnParentNavigation)
         {
+            usings.Add("System.Text.Json.Serialization");
+        }
+
+        // 値オブジェクト：等価(StructuralComparisons)・JSON 変換器・TryConvert(CultureInfo)・リフレクション
+        if (options.GenerateValueObjects)
+        {
+            usings.Add("System.Collections");
+            usings.Add("System.Globalization");
+            usings.Add("System.Reflection");
+            usings.Add("System.Text.Json");
             usings.Add("System.Text.Json.Serialization");
         }
 

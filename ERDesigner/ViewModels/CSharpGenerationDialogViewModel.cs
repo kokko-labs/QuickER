@@ -52,6 +52,14 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     [ObservableProperty]
     private bool _generateRepositories = true;
 
+    /// <summary>全カラムを値オブジェクト（Value Object）として生成するかどうか</summary>
+    [ObservableProperty]
+    private bool _generateValueObjects;
+
+    /// <summary>string 型の主キーを GuidKey 値オブジェクト（GUID 自動採番）にするかどうか</summary>
+    [ObservableProperty]
+    private bool _useGuidKeyForStringPrimaryKey;
+
     /// <summary>出力先ファイルを選択し、結果をパスへ反映する</summary>
     [RelayCommand]
     private void BrowseOutputFile()
@@ -93,7 +101,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
             return;
         }
 
-        Result = new CSharpGenerationDialogResult(NamespaceName.Trim(), OutputFilePath.Trim(), GenerateEntityClasses, GenerateEditModels, GenerateMappers, GenerateRepositories);
+        Result = new CSharpGenerationDialogResult(NamespaceName.Trim(), OutputFilePath.Trim(), GenerateEntityClasses, GenerateEditModels, GenerateMappers, GenerateRepositories, GenerateValueObjects, UseGuidKeyForStringPrimaryKey);
         CloseAction?.Invoke(true);
     }
 
@@ -123,5 +131,7 @@ public sealed record CSharpGenerationDialogResult(
     bool GenerateEntityClasses,
     bool GenerateEditModels,
     bool GenerateMappers,
-    bool GenerateRepositories
+    bool GenerateRepositories,
+    bool GenerateValueObjects,
+    bool UseGuidKeyForStringPrimaryKey
 );

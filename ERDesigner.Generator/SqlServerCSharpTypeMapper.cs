@@ -32,6 +32,7 @@ internal sealed partial class SqlServerCSharpTypeMapper
         var normalized = Normalize(dataType);
         var baseType = GetBaseType(normalized);
         var maxLength = TryGetLength(normalized);
+        var (precision, scale) = TryGetPrecisionScale(normalized);
 
         return baseType switch
         {
@@ -43,7 +44,8 @@ internal sealed partial class SqlServerCSharpTypeMapper
             // SQL Server の real は単精度、float は倍精度のため C# 側の対応が直感と逆になる点に注意
             "real" => Value("float"),
             "float" => Value("double"),
-            "decimal" or "numeric" or "money" or "smallmoney" => Value("decimal"),
+            "decimal" or "numeric" => Decimal(precision, scale),
+            "money" or "smallmoney" => Value("decimal"),
             "date" or "datetime" or "datetime2" or "smalldatetime" => Value("DateTime"),
             "time" => Value("TimeSpan"),
             "datetimeoffset" => Value("DateTimeOffset"),
@@ -58,6 +60,16 @@ internal sealed partial class SqlServerCSharpTypeMapper
 
     /// <summary>値型の型情報を作成する</summary>
     private static CSharpTypeInfo Value(string typeName) => new() { TypeName = typeName, IsReferenceType = false };
+
+    /// <summary>decimal 型の型情報を作成する（精度・スケールを保持し、値オブジェクトの桁数検証に使う）</summary>
+    private static CSharpTypeInfo Decimal(int? precision, int? scale) =>
+        new()
+        {
+            TypeName = "decimal",
+            IsReferenceType = false,
+            Precision = precision,
+            Scale = scale,
+        };
 
     /// <summary>参照型の型情報を作成する</summary>
     /// <param name="maxLength">文字列型の最大長。長さ指定なし・max 指定の場合は null</param>
@@ -94,7 +106,28 @@ internal sealed partial class SqlServerCSharpTypeMapper
         return int.TryParse(match.Groups[1].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var length) ? length : null;
     }
 
+    /// <summary>
+    /// decimal/numeric の精度・スケールを抽出する（例: "decimal(18,2)" → (18, 2)、"decimal(10)" → (10, null)）
+    /// </summary>
+    /// <returns>精度・スケール。指定が無い場合はそれぞれ null</returns>
+    private static (int? Precision, int? Scale) TryGetPrecisionScale(string normalizedDataType)
+    {
+        var match = PrecisionScaleRegex().Match(normalizedDataType);
+        if (!match.Success)
+        {
+            return (null, null);
+        }
+
+        int? precision = int.TryParse(match.Groups[1].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var p) ? p : null;
+        int? scale = match.Groups[2].Success && int.TryParse(match.Groups[2].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var s) ? s : null;
+        return (precision, scale);
+    }
+
     /// <summary>長さ指定 "(数値)" または "(max)" を検出する正規表現</summary>
     [GeneratedRegex(@"\((max|\d+)\)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex LengthRegex();
+
+    /// <summary>decimal/numeric の "(精度)" または "(精度,スケール)" を検出する正規表現</summary>
+    [GeneratedRegex(@"\(\s*(\d+)\s*(?:,\s*(\d+)\s*)?\)", RegexOptions.CultureInvariant)]
+    private static partial Regex PrecisionScaleRegex();
 }

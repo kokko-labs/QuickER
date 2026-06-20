@@ -32,4 +32,10 @@ public sealed class CodeGenerationOptions
 
     /// <summary>親参照ナビゲーションへ [JsonIgnore] を付与するかどうか（JSON シリアライズ時の循環参照対策）</summary>
     public bool IncludeJsonIgnoreOnParentNavigation { get; init; } = true;
+
+    /// <summary>全カラムを値オブジェクト（Value Object）として生成するかどうか。ON で Entity/EditModel/Mapper/Repository のプロパティ型が VO になる</summary>
+    public bool GenerateValueObjects { get; init; }
+
+    /// <summary>string 型の主キーを GuidKey 値オブジェクト（GUID を文字列保持・無引数生成で自動採番）にするかどうか。<see cref="GenerateValueObjects"/> が ON かつ PK が string のときのみ適用</summary>
+    public bool UseGuidKeyForStringPrimaryKey { get; init; }
 }

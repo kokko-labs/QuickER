@@ -22,6 +22,7 @@
       <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
     </Grid.RowDefinitions>
 
     <TextBlock Grid.Row="0" Grid.Column="0" Margin="0,4" VerticalAlignment="Center" Text="namespace" />
@@ -39,17 +40,23 @@
       <CheckBox Content="Repository" IsChecked="{Binding GenerateRepositories}" />
     </StackPanel>
 
+    <TextBlock Grid.Row="3" Grid.Column="0" Margin="0,8,0,4" VerticalAlignment="Center" Text="値オブジェクト" />
+    <StackPanel Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="0,8,0,4">
+      <CheckBox Margin="0,0,16,0" Content="全カラムを値オブジェクト化" IsChecked="{Binding GenerateValueObjects}" />
+      <CheckBox Content="string 主キーを GuidKey 化" IsChecked="{Binding UseGuidKeyForStringPrimaryKey}" IsEnabled="{Binding GenerateValueObjects}" />
+    </StackPanel>
+
     <TextBlock
-      Grid.Row="3"
+      Grid.Row="4"
       Grid.Column="0"
       Grid.ColumnSpan="3"
       Margin="0,8,0,4"
       Foreground="#374151"
       TextWrapping="Wrap"
-      Text="単一の .g.cs に選択した種別のクラスを生成します。手書き partial は生成しません。"
+      Text="単一の .g.cs に選択した種別のクラスを生成します。手書き partial は生成しません。値オブジェクト化すると各列が検証付きの型になります（同名列は同一型に集約。定義が食い違う場合は生成時に警告します）。"
     />
 
-    <DockPanel Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="3" Margin="0,8,0,0">
+    <DockPanel Grid.Row="5" Grid.Column="0" Grid.ColumnSpan="3" Margin="0,8,0,0">
       <TextBlock DockPanel.Dock="Left" VerticalAlignment="Center" Foreground="#B91C1C" Text="{Binding StatusMessage}" />
       <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
         <Button Width="100" Margin="0,0,8,0" IsDefault="True" Content="生成" Command="{Binding OkCommand}" />

@@ -54,6 +54,287 @@ internal sealed class ScribanCSharpRenderer
             }
         }
         {{ end }}
+        {{~ if generate_value_objects ~}}
+        /// <summary>値オブジェクト（Value Object）の非ジェネリックマーカー。内包値の取り出し・型判定に使う</summary>
+        public interface IValueObject
+        {
+            /// <summary>内包する値を object として取得する（SQL パラメータ束縛などで素の値へ開くのに使う）</summary>
+            object? UnderlyingValue { get; }
+        }
+
+        /// <summary>値オブジェクトの汎用インターフェース。static ファクトリを型パラメータ経由で呼べるようにする</summary>
+        public interface IValueObject<TSelf, TValue> : IValueObject
+            where TSelf : IValueObject<TSelf, TValue>
+        {
+            /// <summary>検証して生成する（違反時は ValueObjectValidationException）</summary>
+            static abstract TSelf Create(TValue value);
+
+            /// <summary>生成可なら true＋値オブジェクト、不可なら false＋エラー内容を返す</summary>
+            static abstract bool TryCreate(TValue value, out TSelf? result, out IReadOnlyList<string> errors);
+
+            /// <summary>内包する値</summary>
+            TValue Value { get; }
+        }
+
+        /// <summary>値オブジェクトの検証違反を表す例外</summary>
+        public sealed class ValueObjectValidationException : Exception
+        {
+            /// <summary>違反した値オブジェクトの型</summary>
+            public Type ValueObjectType { get; }
+
+            /// <summary>検証エラーの一覧</summary>
+            public IReadOnlyList<string> Errors { get; }
+
+            /// <summary>対象型と検証エラー一覧で初期化する</summary>
+            public ValueObjectValidationException(Type valueObjectType, IReadOnlyList<string> errors)
+                : base($"{valueObjectType.Name} の値が不正です: {string.Join(" / ", errors)}")
+            {
+                ValueObjectType = valueObjectType;
+                Errors = errors;
+            }
+        }
+
+        /// <summary>値オブジェクト共通の基底。値の保持・等価・ToString・素値の取り出しを提供する（順序比較は派生で付与）</summary>
+        public abstract partial class ValueObjectBase<TSelf, TValue> : IValueObject
+            where TSelf : ValueObjectBase<TSelf, TValue>
+        {
+            /// <summary>内包する値（不変）</summary>
+            public TValue Value { get; }
+
+            /// <summary>検証済みの値で初期化する（検証は具象の Create/TryCreate が事前に行う）</summary>
+            protected ValueObjectBase(TValue value) => Value = value;
+
+            /// <summary>内包値を object として取得する（SQL 束縛などで素の値へ開く）</summary>
+            object? IValueObject.UnderlyingValue => Value;
+
+            /// <summary>値ベースの等価判定（byte[] などの配列は要素単位で比較する）</summary>
+            public override bool Equals(object? obj) =>
+                obj is ValueObjectBase<TSelf, TValue> other
+                && StructuralComparisons.StructuralEqualityComparer.Equals(Value, other.Value);
+
+            /// <summary>値ベースのハッシュコード（配列は構造的に算出）</summary>
+            public override int GetHashCode() =>
+                Value is null ? 0 : StructuralComparisons.StructuralEqualityComparer.GetHashCode(Value);
+
+            /// <summary>値ベースの等価演算子</summary>
+            public static bool operator ==(ValueObjectBase<TSelf, TValue>? left, ValueObjectBase<TSelf, TValue>? right) =>
+                left is null ? right is null : left.Equals(right);
+
+            /// <summary>値ベースの非等価演算子</summary>
+            public static bool operator !=(ValueObjectBase<TSelf, TValue>? left, ValueObjectBase<TSelf, TValue>? right) => !(left == right);
+
+            /// <summary>内包値の文字列表現を返す</summary>
+            public override string ToString() => Value?.ToString() ?? string.Empty;
+
+            /// <summary>object 値を TValue へ変換できるか試みる（IConvertible 系のみ。Guid/TimeSpan/byte[] 等は false）</summary>
+            protected static bool TryConvert(object? value, out TValue result)
+            {
+                if (value is TValue typed)
+                {
+                    result = typed;
+                    return true;
+                }
+
+                try
+                {
+                    result = (TValue)Convert.ChangeType(value!, typeof(TValue), CultureInfo.InvariantCulture);
+                    return true;
+                }
+                catch
+                {
+                    result = default!;
+                    return false;
+                }
+            }
+        }
+
+        /// <summary>順序付け可能な値オブジェクトの基底（数値・日時系）。比較演算子と CompareTo を提供する</summary>
+        public abstract partial class ValueObjectOrderedBase<TSelf, TValue> : ValueObjectBase<TSelf, TValue>, IComparable<TSelf>, IComparable
+            where TSelf : ValueObjectOrderedBase<TSelf, TValue>
+            where TValue : IComparable<TValue>
+        {
+            /// <summary>検証済みの値で初期化する</summary>
+            protected ValueObjectOrderedBase(TValue value) : base(value) { }
+
+            /// <summary>内包値どうしを比較する</summary>
+            public int CompareTo(TSelf? other) => other is null ? 1 : Value.CompareTo(other.Value);
+
+            /// <summary>非ジェネリック比較（型不一致は例外）</summary>
+            int IComparable.CompareTo(object? obj) =>
+                obj is null ? 1 : obj is TSelf other ? CompareTo(other) : throw new ArgumentException($"{obj.GetType().Name} は {typeof(TSelf).Name} と比較できません。", nameof(obj));
+
+            /// <summary>未満</summary>
+            public static bool operator <(ValueObjectOrderedBase<TSelf, TValue>? left, ValueObjectOrderedBase<TSelf, TValue>? right) => Compare(left, right) < 0;
+
+            /// <summary>超過</summary>
+            public static bool operator >(ValueObjectOrderedBase<TSelf, TValue>? left, ValueObjectOrderedBase<TSelf, TValue>? right) => Compare(left, right) > 0;
+
+            /// <summary>以下</summary>
+            public static bool operator <=(ValueObjectOrderedBase<TSelf, TValue>? left, ValueObjectOrderedBase<TSelf, TValue>? right) => Compare(left, right) <= 0;
+
+            /// <summary>以上</summary>
+            public static bool operator >=(ValueObjectOrderedBase<TSelf, TValue>? left, ValueObjectOrderedBase<TSelf, TValue>? right) => Compare(left, right) >= 0;
+
+            private static int Compare(ValueObjectOrderedBase<TSelf, TValue>? left, ValueObjectOrderedBase<TSelf, TValue>? right) =>
+                left is null ? (right is null ? 0 : -1) : right is null ? 1 : left.Value.CompareTo(right.Value);
+        }
+
+        /// <summary>DateTime 値オブジェクトの基底。Now/Today ファクトリを提供する</summary>
+        public abstract partial class ValueObjectDateTimeBase<TSelf> : ValueObjectOrderedBase<TSelf, DateTime>
+            where TSelf : ValueObjectDateTimeBase<TSelf>, IValueObject<TSelf, DateTime>
+        {
+            /// <summary>検証済みの値で初期化する</summary>
+            protected ValueObjectDateTimeBase(DateTime value) : base(value) { }
+
+            /// <summary>現在日時で生成する</summary>
+            public static TSelf Now => TSelf.Create(DateTime.Now);
+
+            /// <summary>本日（時刻 0:00）で生成する</summary>
+            public static TSelf Today => TSelf.Create(DateTime.Today);
+        }
+
+        /// <summary>string 値オブジェクトの基底。部分一致系メソッドと序数比較を提供する（順序演算子は付けない）</summary>
+        public abstract partial class ValueObjectStringBase<TSelf> : ValueObjectBase<TSelf, string>, IComparable<TSelf>, IComparable
+            where TSelf : ValueObjectStringBase<TSelf>
+        {
+            /// <summary>検証済みの値で初期化する</summary>
+            protected ValueObjectStringBase(string value) : base(value) { }
+
+            /// <summary>指定文字列を含むか</summary>
+            public bool Contains(string? value) => value is not null && Value.Contains(value, StringComparison.Ordinal);
+
+            /// <summary>指定文字列で始まるか</summary>
+            public bool StartsWith(string? value) => value is not null && Value.StartsWith(value, StringComparison.Ordinal);
+
+            /// <summary>指定文字列で終わるか</summary>
+            public bool EndsWith(string? value) => value is not null && Value.EndsWith(value, StringComparison.Ordinal);
+
+            /// <summary>序数で比較する</summary>
+            public int CompareTo(TSelf? other) => other is null ? 1 : string.CompareOrdinal(Value, other.Value);
+
+            /// <summary>非ジェネリック比較（型不一致は例外）</summary>
+            int IComparable.CompareTo(object? obj) =>
+                obj is null ? 1 : obj is TSelf other ? CompareTo(other) : throw new ArgumentException($"{obj.GetType().Name} は {typeof(TSelf).Name} と比較できません。", nameof(obj));
+        }
+
+        /// <summary>byte[] 値オブジェクトの基底。ToString は Base64 を返す（等価は基底の構造的比較）</summary>
+        public abstract partial class ValueObjectBinaryBase<TSelf> : ValueObjectBase<TSelf, byte[]>
+            where TSelf : ValueObjectBinaryBase<TSelf>
+        {
+            /// <summary>検証済みの値で初期化する</summary>
+            protected ValueObjectBinaryBase(byte[] value) : base(value) { }
+
+            /// <summary>Base64 文字列として返す</summary>
+            public override string ToString() => Value is null ? string.Empty : Convert.ToBase64String(Value);
+        }
+
+        /// <summary>GUID を文字列で保持する主キー値オブジェクトの基底。無引数生成で GUID を自動採番する</summary>
+        public abstract partial class ValueObjectGuidKeyBase<TSelf> : ValueObjectBase<TSelf, string>, IComparable<TSelf>, IComparable
+            where TSelf : ValueObjectGuidKeyBase<TSelf>, IValueObject<TSelf, string>
+        {
+            /// <summary>検証済みの値で初期化する</summary>
+            protected ValueObjectGuidKeyBase(string value) : base(value) { }
+
+            /// <summary>新しい GUID を採番して生成する</summary>
+            public static TSelf Create() => TSelf.Create(Guid.NewGuid().ToString());
+
+            /// <summary>序数で比較する</summary>
+            public int CompareTo(TSelf? other) => other is null ? 1 : string.CompareOrdinal(Value, other.Value);
+
+            /// <summary>非ジェネリック比較（型不一致は例外）</summary>
+            int IComparable.CompareTo(object? obj) =>
+                obj is null ? 1 : obj is TSelf other ? CompareTo(other) : throw new ArgumentException($"{obj.GetType().Name} は {typeof(TSelf).Name} と比較できません。", nameof(obj));
+        }
+
+        /// <summary>値オブジェクトを内包値（素の値）として JSON 入出力する変換器</summary>
+        public sealed class ValueObjectJsonConverter<TVo, TValue> : JsonConverter<TVo>
+            where TVo : class, IValueObject<TVo, TValue>
+        {
+            /// <summary>素の値を読み取り、Create で値オブジェクトを復元する</summary>
+            public override TVo? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+            {
+                var value = JsonSerializer.Deserialize<TValue>(ref reader, options);
+                return value is null ? null : TVo.Create(value);
+            }
+
+            /// <summary>内包値（素の値）として書き出す</summary>
+            public override void Write(Utf8JsonWriter writer, TVo value, JsonSerializerOptions options) =>
+                JsonSerializer.Serialize(writer, value.Value, options);
+        }
+
+        /// <summary>IValueObject&lt;,&gt; を実装する型に汎用変換器を適用するファクトリ</summary>
+        public sealed class ValueObjectJsonConverterFactory : JsonConverterFactory
+        {
+            /// <summary>値オブジェクト型かどうか</summary>
+            public override bool CanConvert(Type typeToConvert) =>
+                Array.Exists(typeToConvert.GetInterfaces(), i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IValueObject<,>));
+
+            /// <summary>対象型の TValue を解決して閉じた変換器を生成する</summary>
+            public override JsonConverter CreateConverter(Type typeToConvert, JsonSerializerOptions options)
+            {
+                var iface = Array.Find(typeToConvert.GetInterfaces(), i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IValueObject<,>))!;
+                var valueType = iface.GetGenericArguments()[1];
+                var converterType = typeof(ValueObjectJsonConverter<,>).MakeGenericType(typeToConvert, valueType);
+                return (JsonConverter)Activator.CreateInstance(converterType)!;
+            }
+        }
+        {{~ for vo in value_object_classes ~}}
+
+        /// <summary>{{ vo.column_name }} 列に対応する値オブジェクト</summary>
+        public sealed partial class {{ vo.class_name }} : {{ vo.base_declaration }}, {{ vo.interface_declaration }}
+        {
+            private {{ vo.class_name }}({{ vo.value_type_name }} value) : base(value) { }
+
+            /// <summary>検証して生成する（違反時は ValueObjectValidationException）</summary>
+            public static {{ vo.class_name }} Create({{ vo.value_type_name }} value)
+            {
+                var errors = new List<string>();
+                Validate(value, errors);
+                if (errors.Count > 0) { throw new ValueObjectValidationException(typeof({{ vo.class_name }}), errors); }
+                return new {{ vo.class_name }}(value);
+            }
+
+            /// <summary>生成可なら true＋値オブジェクト、不可なら false＋エラー内容を返す</summary>
+            public static bool TryCreate({{ vo.value_type_name }} value, out {{ vo.class_name }}? result, out IReadOnlyList<string> errors)
+            {
+                var list = new List<string>();
+                Validate(value, list);
+                if (list.Count > 0) { result = null; errors = list; return false; }
+                result = new {{ vo.class_name }}(value);
+                errors = Array.Empty<string>();
+                return true;
+            }
+
+            /// <summary>自動生成された検証＋ユーザー拡張（OnValidate）。partial・自前コードからも呼べる</summary>
+            internal static void Validate({{ vo.value_type_name }} value, ICollection<string> errors)
+            {
+                {{~ if vo.max_length ~}}
+                if (value.Length > {{ vo.max_length }}) { errors.Add($"{{ vo.max_length }} 文字以内で入力してください。（現在 {value.Length} 文字）"); }
+                {{~ end ~}}
+                {{~ if vo.precision ~}}
+                ValidateDecimal(value, {{ vo.precision }}, {{ if vo.scale }}{{ vo.scale }}{{ else }}0{{ end }}, errors);
+                {{~ end ~}}
+                OnValidate(value, errors);
+            }
+
+            /// <summary>ユーザー定義の追加検証（partial・未実装ならゼロコスト）</summary>
+            static partial void OnValidate({{ vo.value_type_name }} value, ICollection<string> errors);
+            {{~ if vo.precision ~}}
+
+            /// <summary>decimal の桁数検証（丸めない・超過は弾く）。末尾ゼロは scale に数える</summary>
+            private static void ValidateDecimal(decimal value, int precision, int scale, ICollection<string> errors)
+            {
+                var valueScale = (decimal.GetBits(value)[3] >> 16) & 0xFF;
+                if (valueScale > scale) { errors.Add($"小数点以下は {scale} 桁以内で入力してください。"); }
+                var integral = Math.Truncate(Math.Abs(value));
+                var integralDigits = 0;
+                while (integral >= 1) { integral = Math.Truncate(integral / 10); integralDigits++; }
+                if (integralDigits > precision - scale) { errors.Add($"整数部は {precision - scale} 桁以内で入力してください。"); }
+            }
+            {{~ end ~}}
+        }
+        {{~ end ~}}
+        {{ end }}
         {{~ if entity_classes.size > 0 || edit_model_classes.size > 0 ~}}
         /// <summary>エンティティ・EditModel の変更状態</summary>
         public enum RowState
@@ -178,6 +459,9 @@ internal sealed class ScribanCSharpRenderer
             {
                 IgnoreReadOnlyProperties = true,
                 ReferenceHandler = ReferenceHandler.IgnoreCycles,
+        {{~ if generate_value_objects ~}}
+                Converters = { new ValueObjectJsonConverterFactory() },
+        {{~ end ~}}
             };
 
             /// <summary>整形出力（writeIndented=true）用の設定。WriteIndented は初回利用後に変更できないため別インスタンスにする</summary>
@@ -186,6 +470,9 @@ internal sealed class ScribanCSharpRenderer
                 IgnoreReadOnlyProperties = true,
                 ReferenceHandler = ReferenceHandler.IgnoreCycles,
                 WriteIndented = true,
+        {{~ if generate_value_objects ~}}
+                Converters = { new ValueObjectJsonConverterFactory() },
+        {{~ end ~}}
             };
 
             /// <summary>このエンティティを JSON 文字列へシリアライズする（WebAPI へのデータ受け渡しなどに使用）</summary>
@@ -1116,7 +1403,56 @@ internal sealed class ScribanCSharpRenderer
 
                     if (!IsReverting)
                     {
-        {{ if p.needs_parse }}                if ({{ p.parse_type_name }}.TryParse(value, out var parsed))
+        {{ if p.is_value_object }}                if (string.IsNullOrEmpty(value))
+                        {
+                            {{ p.property_name }} = null;
+                            SetError(nameof({{ p.binding_property_name }}), null);
+                        }
+        {{ if p.needs_parse }}                else if ({{ p.parse_type_name }}.TryParse(value, out var parsed))
+                        {
+                            if ({{ p.value_object_class_name }}.TryCreate(parsed, out var converted, out var voErrors))
+                            {
+                                {{ p.property_name }} = converted;
+                                SetError(nameof({{ p.binding_property_name }}), null);
+                            }
+                            else
+                            {
+                                SetError(nameof({{ p.binding_property_name }}), string.Join(" / ", voErrors));
+                            }
+                        }
+                        else
+                        {
+                            SetError(nameof({{ p.binding_property_name }}), ResolveParseErrorMessage(nameof({{ p.binding_property_name }}), value, "{{ p.parse_type_name }}"));
+                        }
+        {{ else if p.is_binary }}                else
+                        {
+                            try
+                            {
+                                if ({{ p.value_object_class_name }}.TryCreate(Convert.FromBase64String(value), out var converted, out var voErrors))
+                                {
+                                    {{ p.property_name }} = converted;
+                                    SetError(nameof({{ p.binding_property_name }}), null);
+                                }
+                                else
+                                {
+                                    SetError(nameof({{ p.binding_property_name }}), string.Join(" / ", voErrors));
+                                }
+                            }
+                            catch (FormatException)
+                            {
+                                SetError(nameof({{ p.binding_property_name }}), ResolveParseErrorMessage(nameof({{ p.binding_property_name }}), value, "byte[]"));
+                            }
+                        }
+        {{ else }}                else if ({{ p.value_object_class_name }}.TryCreate(value, out var converted, out var voErrors))
+                        {
+                            {{ p.property_name }} = converted;
+                            SetError(nameof({{ p.binding_property_name }}), null);
+                        }
+                        else
+                        {
+                            SetError(nameof({{ p.binding_property_name }}), string.Join(" / ", voErrors));
+                        }
+        {{ end }}{{ else if p.needs_parse }}                if ({{ p.parse_type_name }}.TryParse(value, out var parsed))
                         {
                             {{ p.property_name }} = parsed;
                             SetError(nameof({{ p.binding_property_name }}), null);
@@ -1410,6 +1746,15 @@ internal sealed class ScribanCSharpRenderer
             /// <summary>新しい SQL 接続を生成する</summary>
             public SqlConnection CreateConnection() => new(connectionString);
         }
+        {{~ if generate_value_objects ~}}
+
+        /// <summary>SQL パラメータへ渡す値を素の値へ開くヘルパー（値オブジェクトは内包値へ変換し、SqlClient が扱える型にする）</summary>
+        internal static class SqlParameterValue
+        {
+            /// <summary>値オブジェクトなら内包値、それ以外はそのまま返す</summary>
+            public static object? Unwrap(object? value) => value is IValueObject valueObject ? valueObject.UnderlyingValue : value;
+        }
+        {{~ end ~}}
 
         /// <summary>エンティティ型の属性からテーブル・カラム情報と CRUD 用 SQL を構築・保持するメタデータ</summary>
         /// <remarks>型ごとに 1 度だけ構築し静的フィールドで再利用する（リフレクションコスト削減）</remarks>
@@ -1520,7 +1865,7 @@ internal sealed class ScribanCSharpRenderer
             {
                 foreach (var property in AllProperties)
                 {
-                    command.Parameters.AddWithValue($"@{property.Name}", property.GetValue(entity) ?? DBNull.Value);
+                    command.Parameters.AddWithValue($"@{property.Name}", {{ if generate_value_objects }}SqlParameterValue.Unwrap(property.GetValue(entity)){{ else }}property.GetValue(entity){{ end }} ?? DBNull.Value);
                 }
             }
 
@@ -1546,7 +1891,7 @@ internal sealed class ScribanCSharpRenderer
 
                 public bool Read() => _enumerator.MoveNext();
 
-                public object GetValue(int i) => _properties[i].GetValue(_enumerator.Current) ?? DBNull.Value;
+                public object GetValue(int i) => {{ if generate_value_objects }}SqlParameterValue.Unwrap(_properties[i].GetValue(_enumerator.Current)){{ else }}_properties[i].GetValue(_enumerator.Current){{ end }} ?? DBNull.Value;
 
                 public string GetName(int i) => _columnNames[i];
 
@@ -1629,16 +1974,16 @@ internal sealed class ScribanCSharpRenderer
             {
                 foreach (var property in NonKeyProperties)
                 {
-                    command.Parameters.AddWithValue($"@{property.Name}", property.GetValue(entity) ?? DBNull.Value);
+                    command.Parameters.AddWithValue($"@{property.Name}", {{ if generate_value_objects }}SqlParameterValue.Unwrap(property.GetValue(entity)){{ else }}property.GetValue(entity){{ end }} ?? DBNull.Value);
                 }
 
-                command.Parameters.AddWithValue("@id", KeyProperty.GetValue(entity) ?? DBNull.Value);
+                command.Parameters.AddWithValue("@id", {{ if generate_value_objects }}SqlParameterValue.Unwrap(KeyProperty.GetValue(entity)){{ else }}KeyProperty.GetValue(entity){{ end }} ?? DBNull.Value);
             }
 
             /// <summary>主キーパラメータを設定する</summary>
             public void BindKeyParameter(SqlCommand command, TKey id)
             {
-                command.Parameters.AddWithValue("@id", id ?? throw new InvalidOperationException("id は null にできません。"));
+                command.Parameters.AddWithValue("@id", {{ if generate_value_objects }}SqlParameterValue.Unwrap(id){{ else }}id{{ end }} ?? throw new InvalidOperationException("id は null にできません。"));
             }
 
             /// <summary>[Column] 属性を優先してカラム名を解決する</summary>
@@ -1856,6 +2201,9 @@ internal sealed class ScribanCSharpRenderer
             {
                 PropertyNameCaseInsensitive = true,
                 TypeInfoResolver = new DefaultJsonTypeInfoResolver { Modifiers = { IncludeNavigationProperties } },
+        {{~ if generate_value_objects ~}}
+                Converters = { new ValueObjectJsonConverterFactory() },
+        {{~ end ~}}
             };
 
             /// <summary>[JsonIgnore] 等で契約から外れたナビゲーションプロパティを、デシリアライズ対象として再登録する</summary>
@@ -2087,7 +2435,7 @@ internal sealed class ScribanCSharpRenderer
             {
                 foreach (var parameter in _parameters)
                 {
-                    command.Parameters.AddWithValue(parameter.Key, parameter.Value ?? DBNull.Value);
+                    command.Parameters.AddWithValue(parameter.Key, {{ if generate_value_objects }}SqlParameterValue.Unwrap(parameter.Value){{ else }}parameter.Value{{ end }} ?? DBNull.Value);
                 }
             }
 
@@ -2351,7 +2699,8 @@ internal sealed class ScribanCSharpRenderer
                 column = string.Empty;
                 kind = LikeKind.Contains;
 
-                if (call.Object is null || call.Method.DeclaringType != typeof(string) || call.Arguments.Count != 1)
+                if (call.Object is null || call.Arguments.Count != 1
+                    || (call.Method.DeclaringType != typeof(string){{ if generate_value_objects }} && !IsValueObjectStringMethod(call.Method){{ end }}))
                 {
                     return false;
                 }
@@ -2379,6 +2728,12 @@ internal sealed class ScribanCSharpRenderer
                 column = ColumnName(member.Member);
                 return true;
             }
+            {{~ if generate_value_objects ~}}
+
+            /// <summary>文字列値オブジェクト（ValueObjectStringBase 由来）の Contains/StartsWith/EndsWith かどうか</summary>
+            private static bool IsValueObjectStringMethod(MethodInfo method) =>
+                method.DeclaringType is { IsGenericType: true } declaring && declaring.GetGenericTypeDefinition() == typeof(ValueObjectStringBase<>);
+            {{~ end ~}}
 
             /// <summary>object へのボックス化などの Convert を取り除く</summary>
             private static Expression Unwrap(Expression expression)
@@ -2663,7 +3018,7 @@ internal sealed class ScribanCSharpRenderer
             {
                 foreach (var property in metadata.AllProperties)
                 {
-                    command.Parameters.AddWithValue($"@{property.Name}", property.GetValue(entity) ?? DBNull.Value);
+                    command.Parameters.AddWithValue($"@{property.Name}", {{ if generate_value_objects }}SqlParameterValue.Unwrap(property.GetValue(entity)){{ else }}property.GetValue(entity){{ end }} ?? DBNull.Value);
                 }
             }
 
@@ -2671,15 +3026,15 @@ internal sealed class ScribanCSharpRenderer
             {
                 foreach (var property in metadata.NonKeyProperties)
                 {
-                    command.Parameters.AddWithValue($"@{property.Name}", property.GetValue(entity) ?? DBNull.Value);
+                    command.Parameters.AddWithValue($"@{property.Name}", {{ if generate_value_objects }}SqlParameterValue.Unwrap(property.GetValue(entity)){{ else }}property.GetValue(entity){{ end }} ?? DBNull.Value);
                 }
 
-                command.Parameters.AddWithValue("@id", metadata.KeyProperty.GetValue(entity) ?? DBNull.Value);
+                command.Parameters.AddWithValue("@id", {{ if generate_value_objects }}SqlParameterValue.Unwrap(metadata.KeyProperty.GetValue(entity)){{ else }}metadata.KeyProperty.GetValue(entity){{ end }} ?? DBNull.Value);
             }
 
             private static void BindKey(SqlCommand command, EntityBase entity, EntitySaveMetadata metadata)
             {
-                command.Parameters.AddWithValue("@id", metadata.KeyProperty.GetValue(entity) ?? DBNull.Value);
+                command.Parameters.AddWithValue("@id", {{ if generate_value_objects }}SqlParameterValue.Unwrap(metadata.KeyProperty.GetValue(entity)){{ else }}metadata.KeyProperty.GetValue(entity){{ end }} ?? DBNull.Value);
             }
 
             /// <summary>カスケード対象の子エンティティを列挙する（null は除外）</summary>
@@ -2772,6 +3127,8 @@ internal sealed class ScribanCSharpRenderer
             ["include_data_annotations"] = options.IncludeDataAnnotations,
             ["include_json_ignore_on_parent_navigation"] = options.IncludeJsonIgnoreOnParentNavigation,
             ["emit_nav_ref_attr"] = emitNavRefAttr,
+            ["generate_value_objects"] = options.GenerateValueObjects,
+            ["value_object_classes"] = model.ValueObjectClasses,
         };
 
         // テンプレートは本ライブラリ内に固定で持つ信頼済みのものであり、ループ回数・出力量は ER 図の規模に

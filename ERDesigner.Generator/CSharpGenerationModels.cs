@@ -20,6 +20,41 @@ internal sealed class CSharpGenerationModel
 
     /// <summary>生成コード冒頭に出力する using 名前空間一覧</summary>
     public required IReadOnlyList<string> Usings { get; init; }
+
+    /// <summary>値オブジェクト（Value Object）クラスの生成モデル一覧（GenerateValueObjects が OFF のときは空）</summary>
+    public required IReadOnlyList<CSharpValueObjectModel> ValueObjectClasses { get; init; }
+}
+
+/// <summary>値オブジェクト（Value Object）クラスの生成モデル</summary>
+/// <remarks>列名（正規化 Pascal）でグローバルに共有される 1 型に対応する</remarks>
+internal sealed class CSharpValueObjectModel
+{
+    /// <summary>生成する VO クラス名（例: CustomerIdValue）</summary>
+    public required string ClassName { get; init; }
+
+    /// <summary>内包する値の C# 型名（TValue。NULL 注釈なし。例: int, string, byte[]）</summary>
+    public required string ValueTypeName { get; init; }
+
+    /// <summary>継承する基底クラスの宣言（型引数込み。例: ValueObjectOrderedBase&lt;CustomerIdValue, int&gt;）</summary>
+    public required string BaseDeclaration { get; init; }
+
+    /// <summary>実装する汎用インターフェース宣言（例: IValueObject&lt;CustomerIdValue, int&gt;）</summary>
+    public required string InterfaceDeclaration { get; init; }
+
+    /// <summary>GuidKey（string で GUID 保持・無引数生成で自動採番）かどうか</summary>
+    public required bool IsGuidKey { get; init; }
+
+    /// <summary>診断・エラーメッセージ用の代表カラム名</summary>
+    public required string ColumnName { get; init; }
+
+    /// <summary>string の最大長（自動 MaxLength 検証用）。無指定は null</summary>
+    public int? MaxLength { get; init; }
+
+    /// <summary>decimal の精度 p（自動桁数検証用）。非 decimal・無指定は null</summary>
+    public int? Precision { get; init; }
+
+    /// <summary>decimal のスケール s（自動桁数検証用）。非 decimal・無指定は null</summary>
+    public int? Scale { get; init; }
 }
 
 /// <summary>エンティティクラスの生成モデル</summary>
@@ -263,4 +298,10 @@ internal sealed class CSharpEditModelPropertyModel
 
     /// <summary>確定値からバインディング文字列へ戻す式</summary>
     public required string RevertBindingExpression { get; init; }
+
+    /// <summary>確定値が値オブジェクト型かどうか（true なら確定値は VO?、バインド setter は TryCreate で検証して生成する）</summary>
+    public bool IsValueObject { get; init; }
+
+    /// <summary>値オブジェクトのクラス名（IsValueObject=true のときのみ有効）</summary>
+    public string ValueObjectClassName { get; init; } = string.Empty;
 }

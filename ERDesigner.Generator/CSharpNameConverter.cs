@@ -121,6 +121,18 @@ internal sealed partial class CSharpNameConverter
     }
 
     /// <summary>
+    /// カラム名から値オブジェクト（Value Object）のクラス名を生成する（例: "customer_id" → "CustomerIdValue"）
+    /// </summary>
+    /// <remarks>
+    /// 列名（正規化 Pascal）でグローバルに共有する VO のため、名前はカラム名のみから決まる（テーブル名を含めない）。
+    /// 末尾に "Value" を付けるためキーワード衝突は起きない（@ エスケープ不要）。
+    /// </remarks>
+    public string ToValueObjectClassName(string columnName) => ToPascalCase(columnName) + "Value";
+
+    /// <summary>カラム名を VO 共有キー（正規化 Pascal 名）へ変換する。同名判定・グルーピングに使う</summary>
+    public string ToColumnKey(string columnName) => ToPascalCase(columnName);
+
+    /// <summary>
     /// テーブル名からナビゲーションプロパティ名を生成する
     /// </summary>
     /// <param name="tableName">参照先のテーブル名</param>

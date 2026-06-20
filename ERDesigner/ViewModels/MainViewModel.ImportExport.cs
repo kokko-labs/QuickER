@@ -172,6 +172,8 @@ public partial class MainViewModel
                 GenerateEditModels = dialog.ViewModel.Result.GenerateEditModels,
                 GenerateMappers = dialog.ViewModel.Result.GenerateMappers,
                 GenerateRepositories = dialog.ViewModel.Result.GenerateRepositories,
+                GenerateValueObjects = dialog.ViewModel.Result.GenerateValueObjects,
+                UseGuidKeyForStringPrimaryKey = dialog.ViewModel.Result.UseGuidKeyForStringPrimaryKey,
             };
             var result = service.Generate(ToGeneratorDiagram(), options);
 
@@ -179,6 +181,20 @@ public partial class MainViewModel
             {
                 _dialogs.ShowError(BuildGenerationDiagnosticsMessage(result), "C# 生成エラー");
                 return;
+            }
+
+            // 値オブジェクト生成時に警告（定義競合など）がある場合は、内容を提示して続行可否を確認する
+            var warnings = result.Diagnostics.Where(diagnostic => diagnostic.Severity == GenerationDiagnosticSeverity.Warning).ToList();
+            if (options.GenerateValueObjects && warnings.Count > 0)
+            {
+                var warningMessage = string.Join(Environment.NewLine, warnings.Select(diagnostic => $"・{diagnostic.Message}"));
+                var confirmed = _dialogs.Confirm(
+                    $"次の警告があります。{Environment.NewLine}{Environment.NewLine}{warningMessage}{Environment.NewLine}{Environment.NewLine}このまま生成しますか？（中止して ER 図の定義を修正することを推奨します）",
+                    "C# 生成の警告");
+                if (!confirmed)
+                {
+                    return;
+                }
             }
 
             var writer = new GeneratedFileWriter();

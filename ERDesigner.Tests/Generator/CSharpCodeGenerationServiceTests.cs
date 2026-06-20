@@ -1235,4 +1235,165 @@ public class CSharpCodeGenerationServiceTests
                 },
             ],
         };
+
+    /// <summary>VO 生成 OFF（既定）では値オブジェクトの基底・インターフェースが一切出力されないことを検証する</summary>
+    [Fact]
+    public void Generate_ValueObjects_Disabled_ShouldNotEmitValueObjectTypes()
+    {
+        var result = new CSharpCodeGenerationService().Generate(ValueObjectDiagram(), new CodeGenerationOptions { NamespaceName = "Sample.Domain" });
+
+        result.HasErrors.Should().BeFalse();
+        var content = result.Files[0].Content;
+        content.Should().NotContain("ValueObjectBase");
+        content.Should().NotContain("interface IValueObject");
+        content.Should().NotContain("ValueObjectJsonConverterFactory");
+        // 既定どおりプリミティブ型のまま
+        content.Should().Contain("public int CustomerId { get; set; }");
+    }
+
+    /// <summary>VO 生成 ON で基底・インターフェース・具象 VO が出力され、Entity/EditModel の型が VO になることを検証する</summary>
+    [Fact]
+    public void Generate_ValueObjects_Enabled_ShouldEmitAndApplyValueObjects()
+    {
+        var result = new CSharpCodeGenerationService().Generate(ValueObjectDiagram(), new CodeGenerationOptions { NamespaceName = "Sample.Domain", GenerateValueObjects = true });
+
+        result.HasErrors.Should().BeFalse();
+        var content = result.Files[0].Content;
+        // 基底・インターフェース・例外・JSON 変換器
+        content.Should().Contain("public abstract partial class ValueObjectBase<TSelf, TValue>");
+        content.Should().Contain("public abstract partial class ValueObjectOrderedBase<TSelf, TValue>");
+        content.Should().Contain("public abstract partial class ValueObjectStringBase<TSelf>");
+        content.Should().Contain("public abstract partial class ValueObjectBinaryBase<TSelf>");
+        content.Should().Contain("public interface IValueObject<TSelf, TValue>");
+        content.Should().Contain("public sealed class ValueObjectJsonConverterFactory : JsonConverterFactory");
+        // 具象 VO（型別の基底を継承）
+        content.Should().Contain("public sealed partial class CustomerIdValue : ValueObjectOrderedBase<CustomerIdValue, int>, IValueObject<CustomerIdValue, int>");
+        content.Should().Contain("public sealed partial class NameValue : ValueObjectStringBase<NameValue>, IValueObject<NameValue, string>");
+        content.Should().Contain("public sealed partial class PhotoValue : ValueObjectBinaryBase<PhotoValue>, IValueObject<PhotoValue, byte[]>");
+        // string MaxLength・decimal precision/scale の自動検証
+        content.Should().Contain("if (value.Length > 50)");
+        content.Should().Contain("ValidateDecimal(value, 10, 2, errors);");
+        // PK と同名 FK は同一 VO 型を共有（CustomerIdValue は 1 定義のみ）
+        content.Split("public sealed partial class CustomerIdValue").Length.Should().Be(2);
+        // Entity の型が VO（非 NULL PK は null! 初期化）
+        content.Should().Contain("public CustomerIdValue CustomerId { get; set; } = null!;");
+        // EditModel 確定値は常に VO?（バインド setter は TryCreate）
+        content.Should().Contain("public CustomerIdValue? CustomerId");
+        content.Should().Contain("CustomerIdValue.TryCreate(parsed, out var converted, out var voErrors)");
+        // EntityBase / Repository の JSON オプションに VO 変換器が登録される
+        content.Should().Contain("Converters = { new ValueObjectJsonConverterFactory() },");
+    }
+
+    /// <summary>string PK ＋ GuidKey オプションで PK が GuidKey 基底になり、非 PK の string は通常の string 基底になることを検証する</summary>
+    [Fact]
+    public void Generate_ValueObjects_GuidKey_ShouldUseGuidKeyBaseForStringPrimaryKey()
+    {
+        var diagram = new DiagramDefinition
+        {
+            Entities =
+            [
+                new EntityDefinition
+                {
+                    Id = Guid.NewGuid(),
+                    TableName = "documents",
+                    Columns =
+                    [
+                        new ColumnDefinition { Id = Guid.NewGuid(), Name = "document_id", DataType = "nvarchar(36)", IsPrimaryKey = true, IsNullable = false },
+                        new ColumnDefinition { Id = Guid.NewGuid(), Name = "title", DataType = "nvarchar(100)", IsNullable = false },
+                    ],
+                },
+            ],
+        };
+
+        var result = new CSharpCodeGenerationService().Generate(diagram, new CodeGenerationOptions { NamespaceName = "Sample.Domain", GenerateValueObjects = true, UseGuidKeyForStringPrimaryKey = true });
+
+        result.HasErrors.Should().BeFalse();
+        var content = result.Files[0].Content;
+        content.Should().Contain("public sealed partial class DocumentIdValue : ValueObjectGuidKeyBase<DocumentIdValue>, IValueObject<DocumentIdValue, string>");
+        // 非 PK の string は通常の string 基底
+        content.Should().Contain("public sealed partial class TitleValue : ValueObjectStringBase<TitleValue>");
+    }
+
+    /// <summary>同名列の定義が食い違う場合は Warning 診断を出すが、生成自体は成功する（PK 優先/最大定義で解決）ことを検証する</summary>
+    [Fact]
+    public void Generate_ValueObjects_ConflictingSameNameColumns_ShouldWarnButGenerate()
+    {
+        var diagram = new DiagramDefinition
+        {
+            Entities =
+            [
+                new EntityDefinition
+                {
+                    Id = Guid.NewGuid(),
+                    TableName = "customers",
+                    Columns =
+                    [
+                        new ColumnDefinition { Id = Guid.NewGuid(), Name = "customer_id", DataType = "int", IsPrimaryKey = true, IsNullable = false },
+                        new ColumnDefinition { Id = Guid.NewGuid(), Name = "name", DataType = "nvarchar(50)", IsNullable = false },
+                    ],
+                },
+                new EntityDefinition
+                {
+                    Id = Guid.NewGuid(),
+                    TableName = "products",
+                    Columns =
+                    [
+                        new ColumnDefinition { Id = Guid.NewGuid(), Name = "product_id", DataType = "int", IsPrimaryKey = true, IsNullable = false },
+                        new ColumnDefinition { Id = Guid.NewGuid(), Name = "name", DataType = "nvarchar(100)", IsNullable = false },
+                    ],
+                },
+            ],
+        };
+
+        var result = new CSharpCodeGenerationService().Generate(diagram, new CodeGenerationOptions { NamespaceName = "Sample.Domain", GenerateValueObjects = true });
+
+        // 競合は Warning（Error ではない）で、生成は成功する
+        result.HasErrors.Should().BeFalse();
+        result.Files.Should().ContainSingle();
+        result.Diagnostics.Should().Contain(diagnostic =>
+            diagnostic.Severity == GenerationDiagnosticSeverity.Warning && diagnostic.Message.Contains("NameValue"));
+        // NameValue は 1 定義のみ（共有）
+        result.Files[0].Content.Split("public sealed partial class NameValue").Length.Should().Be(2);
+    }
+
+    /// <summary>VO 生成テスト用の代表的なダイアグラム（PK/FK 共有・各種型を含む）</summary>
+    private static DiagramDefinition ValueObjectDiagram()
+    {
+        var customer = Guid.NewGuid();
+        var order = Guid.NewGuid();
+        var custPk = Guid.NewGuid();
+        var orderFk = Guid.NewGuid();
+        return new DiagramDefinition
+        {
+            Entities =
+            [
+                new EntityDefinition
+                {
+                    Id = customer,
+                    TableName = "customers",
+                    Columns =
+                    [
+                        new ColumnDefinition { Id = custPk, Name = "customer_id", DataType = "int", IsPrimaryKey = true, IsNullable = false },
+                        new ColumnDefinition { Id = Guid.NewGuid(), Name = "name", DataType = "nvarchar(50)", IsNullable = false },
+                        new ColumnDefinition { Id = Guid.NewGuid(), Name = "balance", DataType = "decimal(10,2)", IsNullable = true },
+                        new ColumnDefinition { Id = Guid.NewGuid(), Name = "photo", DataType = "varbinary(max)", IsNullable = true },
+                    ],
+                },
+                new EntityDefinition
+                {
+                    Id = order,
+                    TableName = "orders",
+                    Columns =
+                    [
+                        new ColumnDefinition { Id = Guid.NewGuid(), Name = "order_id", DataType = "int", IsPrimaryKey = true, IsNullable = false },
+                        new ColumnDefinition { Id = orderFk, Name = "customer_id", DataType = "int", IsForeignKey = true, IsNullable = false },
+                    ],
+                },
+            ],
+            Relationships =
+            [
+                new RelationshipDefinition { Id = Guid.NewGuid(), SourceEntityId = customer, SourceColumnId = custPk, TargetEntityId = order, TargetColumnId = orderFk, Type = RelationshipMultiplicity.OneToMany },
+            ],
+        };
+    }
 }
