@@ -96,8 +96,14 @@ public static class DbmlExporter
     /// </remarks>
     private static string BuildRelationshipLine(RelationshipViewModel relationship)
     {
-        var sourceColumn = relationship.Source.Columns.FirstOrDefault(column => column.Id == relationship.SourceColumnId) ?? relationship.Source.Columns.First();
-        var targetColumn = relationship.Target.Columns.FirstOrDefault(column => column.Id == relationship.TargetColumnId) ?? relationship.Target.Columns.First();
+        var sourceColumn =
+            relationship.Source.Columns.FirstOrDefault(column =>
+                column.Id == relationship.SourceColumnId
+            ) ?? relationship.Source.Columns.First();
+        var targetColumn =
+            relationship.Target.Columns.FirstOrDefault(column =>
+                column.Id == relationship.TargetColumnId
+            ) ?? relationship.Target.Columns.First();
         var symbol = relationship.Type switch
         {
             RelationshipType.OneToOne => "-",
@@ -105,7 +111,9 @@ public static class DbmlExporter
             RelationshipType.ManyToMany => "<>",
             _ => "<",
         };
-        var note = string.IsNullOrWhiteSpace(relationship.ConstraintName) ? string.Empty : $" [note: '{EscapeNote(relationship.ConstraintName!)}']";
+        var note = string.IsNullOrWhiteSpace(relationship.ConstraintName)
+            ? string.Empty
+            : $" [note: '{EscapeNote(relationship.ConstraintName!)}']";
 
         return $"Ref:{note} {relationship.Source.TableName}.{sourceColumn.Name} {symbol} {relationship.Target.TableName}.{targetColumn.Name}";
     }

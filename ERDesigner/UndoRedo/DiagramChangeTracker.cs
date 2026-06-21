@@ -19,30 +19,96 @@ public sealed class DiagramChangeTracker
     /// <summary>追跡対象とするエンティティのプロパティ群</summary>
     private static readonly ITrackedProperty[] TrackedEntityProperties =
     [
-        new TrackedProperty<EntityViewModel>(nameof(EntityViewModel.TableName), x => x.TableName, (x, v) => x.TableName = (string)v!),
-        new TrackedProperty<EntityViewModel>(nameof(EntityViewModel.Memo), x => x.Memo, (x, v) => x.Memo = (string)v!),
-        new TrackedProperty<EntityViewModel>(nameof(EntityViewModel.Description), x => x.Description, (x, v) => x.Description = (string)v!),
-        new TrackedProperty<EntityViewModel>(nameof(EntityViewModel.TitleBackgroundColor), x => x.TitleBackgroundColor, (x, v) => x.TitleBackgroundColor = (string)v!),
+        new TrackedProperty<EntityViewModel>(
+            nameof(EntityViewModel.TableName),
+            x => x.TableName,
+            (x, v) => x.TableName = (string)v!
+        ),
+        new TrackedProperty<EntityViewModel>(
+            nameof(EntityViewModel.Memo),
+            x => x.Memo,
+            (x, v) => x.Memo = (string)v!
+        ),
+        new TrackedProperty<EntityViewModel>(
+            nameof(EntityViewModel.Description),
+            x => x.Description,
+            (x, v) => x.Description = (string)v!
+        ),
+        new TrackedProperty<EntityViewModel>(
+            nameof(EntityViewModel.TitleBackgroundColor),
+            x => x.TitleBackgroundColor,
+            (x, v) => x.TitleBackgroundColor = (string)v!
+        ),
     ];
+
     /// <summary>追跡対象とするリレーションのプロパティ群</summary>
     private static readonly ITrackedProperty[] TrackedRelationshipProperties =
     [
-        new TrackedProperty<RelationshipViewModel>(nameof(RelationshipViewModel.Type), x => x.Type, (x, v) => x.Type = (RelationshipType)v!),
-        new TrackedProperty<RelationshipViewModel>(nameof(RelationshipViewModel.SourceColumnId), x => x.SourceColumnId, (x, v) => x.SourceColumnId = (Guid?)v),
-        new TrackedProperty<RelationshipViewModel>(nameof(RelationshipViewModel.TargetColumnId), x => x.TargetColumnId, (x, v) => x.TargetColumnId = (Guid?)v),
-        new TrackedProperty<RelationshipViewModel>(nameof(RelationshipViewModel.ConstraintName), x => x.ConstraintName, (x, v) => x.ConstraintName = (string?)v),
-        new TrackedProperty<RelationshipViewModel>(nameof(RelationshipViewModel.OnDelete), x => x.OnDelete, (x, v) => x.OnDelete = (ForeignKeyReferentialAction)v!),
-        new TrackedProperty<RelationshipViewModel>(nameof(RelationshipViewModel.OnUpdate), x => x.OnUpdate, (x, v) => x.OnUpdate = (ForeignKeyReferentialAction)v!),
+        new TrackedProperty<RelationshipViewModel>(
+            nameof(RelationshipViewModel.Type),
+            x => x.Type,
+            (x, v) => x.Type = (RelationshipType)v!
+        ),
+        new TrackedProperty<RelationshipViewModel>(
+            nameof(RelationshipViewModel.SourceColumnId),
+            x => x.SourceColumnId,
+            (x, v) => x.SourceColumnId = (Guid?)v
+        ),
+        new TrackedProperty<RelationshipViewModel>(
+            nameof(RelationshipViewModel.TargetColumnId),
+            x => x.TargetColumnId,
+            (x, v) => x.TargetColumnId = (Guid?)v
+        ),
+        new TrackedProperty<RelationshipViewModel>(
+            nameof(RelationshipViewModel.ConstraintName),
+            x => x.ConstraintName,
+            (x, v) => x.ConstraintName = (string?)v
+        ),
+        new TrackedProperty<RelationshipViewModel>(
+            nameof(RelationshipViewModel.OnDelete),
+            x => x.OnDelete,
+            (x, v) => x.OnDelete = (ForeignKeyReferentialAction)v!
+        ),
+        new TrackedProperty<RelationshipViewModel>(
+            nameof(RelationshipViewModel.OnUpdate),
+            x => x.OnUpdate,
+            (x, v) => x.OnUpdate = (ForeignKeyReferentialAction)v!
+        ),
     ];
+
     /// <summary>追跡対象とするカラムのプロパティ群</summary>
     private static readonly ITrackedProperty[] TrackedColumnProperties =
     [
-        new TrackedProperty<ColumnViewModel>(nameof(ColumnViewModel.Name), x => x.Name, (x, v) => x.Name = (string)v!),
-        new TrackedProperty<ColumnViewModel>(nameof(ColumnViewModel.DataType), x => x.DataType, (x, v) => x.DataType = (string)v!),
-        new TrackedProperty<ColumnViewModel>(nameof(ColumnViewModel.IsPrimaryKey), x => x.IsPrimaryKey, (x, v) => x.IsPrimaryKey = (bool)v!),
-        new TrackedProperty<ColumnViewModel>(nameof(ColumnViewModel.IsForeignKey), x => x.IsForeignKey, (x, v) => x.IsForeignKey = (bool)v!),
-        new TrackedProperty<ColumnViewModel>(nameof(ColumnViewModel.IsNullable), x => x.IsNullable, (x, v) => x.IsNullable = (bool)v!),
-        new TrackedProperty<ColumnViewModel>(nameof(ColumnViewModel.Description), x => x.Description, (x, v) => x.Description = (string)v!),
+        new TrackedProperty<ColumnViewModel>(
+            nameof(ColumnViewModel.Name),
+            x => x.Name,
+            (x, v) => x.Name = (string)v!
+        ),
+        new TrackedProperty<ColumnViewModel>(
+            nameof(ColumnViewModel.DataType),
+            x => x.DataType,
+            (x, v) => x.DataType = (string)v!
+        ),
+        new TrackedProperty<ColumnViewModel>(
+            nameof(ColumnViewModel.IsPrimaryKey),
+            x => x.IsPrimaryKey,
+            (x, v) => x.IsPrimaryKey = (bool)v!
+        ),
+        new TrackedProperty<ColumnViewModel>(
+            nameof(ColumnViewModel.IsForeignKey),
+            x => x.IsForeignKey,
+            (x, v) => x.IsForeignKey = (bool)v!
+        ),
+        new TrackedProperty<ColumnViewModel>(
+            nameof(ColumnViewModel.IsNullable),
+            x => x.IsNullable,
+            (x, v) => x.IsNullable = (bool)v!
+        ),
+        new TrackedProperty<ColumnViewModel>(
+            nameof(ColumnViewModel.Description),
+            x => x.Description,
+            (x, v) => x.Description = (string)v!
+        ),
     ];
 
     /// <summary>差分コマンドを積む Undo / Redo スタック</summary>
@@ -59,7 +125,8 @@ public sealed class DiagramChangeTracker
 
     /// <summary>対象オブジェクトごとの直近スナップショット（プロパティ名 → 値）</summary>
     /// <remarks>変更前後の差分算出に用いる</remarks>
-    private readonly Dictionary<object, Dictionary<string, object?>> _trackedPropertySnapshots = new();
+    private readonly Dictionary<object, Dictionary<string, object?>> _trackedPropertySnapshots =
+        new();
 
     /// <summary>追跡を一時停止中かどうか（Undo / Redo の再適用中に多重記録を防ぐ）</summary>
     private bool _suspendUndoTracking;
@@ -73,7 +140,8 @@ public sealed class DiagramChangeTracker
         UndoRedoManager undoRedo,
         ObservableCollection<EntityViewModel> entities,
         ObservableCollection<RelationshipViewModel> relationships,
-        Action<object?> applyRelationshipColumnRules)
+        Action<object?> applyRelationshipColumnRules
+    )
     {
         _undoRedo = undoRedo;
         _entities = entities;
@@ -164,7 +232,10 @@ public sealed class DiagramChangeTracker
     }
 
     /// <summary>エンティティのカラム増減に追従し、出入りしたカラムの追跡を着脱する</summary>
-    private void OnEntityColumnsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    private void OnEntityColumnsCollectionChanged(
+        object? sender,
+        NotifyCollectionChangedEventArgs e
+    )
     {
         if (e.OldItems is not null)
         {
@@ -197,7 +268,11 @@ public sealed class DiagramChangeTracker
     {
         if (sender is ColumnViewModel column && !_suspendUndoTracking)
         {
-            PushGroupedPropertyChanges(column, TrackedColumnProperties, afterPush: () => _applyRelationshipColumnRules(column));
+            PushGroupedPropertyChanges(
+                column,
+                TrackedColumnProperties,
+                afterPush: () => _applyRelationshipColumnRules(column)
+            );
         }
     }
 
@@ -215,7 +290,11 @@ public sealed class DiagramChangeTracker
         }
 
         // IsPrimaryKey/IsNullable の変更は IsPrimaryKeyChanging/IsPrimaryKeyChangeCompleted イベントで処理するためスキップする
-        if (e.PropertyName is nameof(ColumnViewModel.IsPrimaryKey) or nameof(ColumnViewModel.IsNullable))
+        if (
+            e.PropertyName
+            is nameof(ColumnViewModel.IsPrimaryKey)
+                or nameof(ColumnViewModel.IsNullable)
+        )
         {
             return;
         }
@@ -249,7 +328,11 @@ public sealed class DiagramChangeTracker
     {
         if (sender is RelationshipViewModel relationship && !_suspendUndoTracking)
         {
-            PushGroupedPropertyChanges(relationship, TrackedRelationshipProperties, afterPush: () => _applyRelationshipColumnRules(relationship));
+            PushGroupedPropertyChanges(
+                relationship,
+                TrackedRelationshipProperties,
+                afterPush: () => _applyRelationshipColumnRules(relationship)
+            );
         }
     }
 
@@ -272,7 +355,11 @@ public sealed class DiagramChangeTracker
             return;
         }
 
-        if (e.PropertyName is nameof(RelationshipViewModel.SourceColumnId) or nameof(RelationshipViewModel.TargetColumnId))
+        if (
+            e.PropertyName
+            is nameof(RelationshipViewModel.SourceColumnId)
+                or nameof(RelationshipViewModel.TargetColumnId)
+        )
         {
             // Type 更新に伴う列付け替えは TypeChangeCompleted 側で一括記録するため、ここでは二重記録しない
             if (!relationship.IsUpdatingType)
@@ -288,7 +375,11 @@ public sealed class DiagramChangeTracker
     }
 
     /// <summary>単一プロパティの変更差分を <see cref="PropertyChangeCommand"/> として記録する</summary>
-    private void TrackPropertyChange(object? sender, PropertyChangedEventArgs e, IReadOnlyList<ITrackedProperty> trackedProperties)
+    private void TrackPropertyChange(
+        object? sender,
+        PropertyChangedEventArgs e,
+        IReadOnlyList<ITrackedProperty> trackedProperties
+    )
     {
         var property = trackedProperties.FirstOrDefault(p => p.Name == e.PropertyName);
 
@@ -298,7 +389,10 @@ public sealed class DiagramChangeTracker
         }
 
         // スナップショット未取得時は記録せず現在値を基準として取り込み直す
-        if (!_trackedPropertySnapshots.TryGetValue(sender, out var snapshots) || !snapshots.TryGetValue(property.Name, out var oldValue))
+        if (
+            !_trackedPropertySnapshots.TryGetValue(sender, out var snapshots)
+            || !snapshots.TryGetValue(property.Name, out var oldValue)
+        )
         {
             CaptureTrackedProperties(sender, trackedProperties);
             return;
@@ -312,7 +406,15 @@ public sealed class DiagramChangeTracker
             return;
         }
 
-        _undoRedo.Push(new PropertyChangeCommand(sender, property, oldValue, newValue, CreateAfterPropertyApplyAction(sender, property.Name)));
+        _undoRedo.Push(
+            new PropertyChangeCommand(
+                sender,
+                property,
+                oldValue,
+                newValue,
+                CreateAfterPropertyApplyAction(sender, property.Name)
+            )
+        );
         snapshots[property.Name] = newValue;
     }
 
@@ -323,7 +425,11 @@ public sealed class DiagramChangeTracker
     /// 連動変更（IsPrimaryKey ↔ IsNullable、Type ↔ SourceColumnId / TargetColumnId）を
     /// 1 回の Undo / Redo で往復させるために用いる
     /// </remarks>
-    private void PushGroupedPropertyChanges(object sender, IReadOnlyList<ITrackedProperty> trackedProperties, Action? afterPush = null)
+    private void PushGroupedPropertyChanges(
+        object sender,
+        IReadOnlyList<ITrackedProperty> trackedProperties,
+        Action? afterPush = null
+    )
     {
         // 変更前スナップショット未取得時は記録せず現在値で取り直す
         if (!_trackedPropertySnapshots.TryGetValue(sender, out var originalSnapshots))
@@ -337,7 +443,9 @@ public sealed class DiagramChangeTracker
         // 変更後の現在値スナップショットを取得する
         var currentSnapshots = trackedProperties.ToDictionary(p => p.Name, p => p.GetValue(sender));
 
-        var hasChange = trackedProperties.Any(p => !Equals(originalSnapshots[p.Name], currentSnapshots[p.Name]));
+        var hasChange = trackedProperties.Any(p =>
+            !Equals(originalSnapshots[p.Name], currentSnapshots[p.Name])
+        );
 
         if (hasChange)
         {
@@ -402,7 +510,10 @@ public sealed class DiagramChangeTracker
         };
 
     /// <summary>スナップショット辞書の各値を対象オブジェクトの該当プロパティへ設定する</summary>
-    private static void ApplySnapshotValues(object target, IReadOnlyDictionary<string, object?> snapshot)
+    private static void ApplySnapshotValues(
+        object target,
+        IReadOnlyDictionary<string, object?> snapshot
+    )
     {
         var properties = PropertiesFor(target);
         foreach (var (name, value) in snapshot)
@@ -412,7 +523,10 @@ public sealed class DiagramChangeTracker
     }
 
     /// <summary>対象オブジェクトの現在値を差分算出の基準スナップショットとして保存する</summary>
-    private void CaptureTrackedProperties(object target, IReadOnlyList<ITrackedProperty> trackedProperties)
+    private void CaptureTrackedProperties(
+        object target,
+        IReadOnlyList<ITrackedProperty> trackedProperties
+    )
     {
         var snapshots = trackedProperties.ToDictionary(p => p.Name, p => p.GetValue(target));
         _trackedPropertySnapshots[target] = snapshots;
@@ -453,13 +567,21 @@ public sealed class DiagramChangeTracker
     {
         if (
             sender is RelationshipViewModel
-            && propertyName is nameof(RelationshipViewModel.Type) or nameof(RelationshipViewModel.SourceColumnId) or nameof(RelationshipViewModel.TargetColumnId)
+            && propertyName
+                is nameof(RelationshipViewModel.Type)
+                    or nameof(RelationshipViewModel.SourceColumnId)
+                    or nameof(RelationshipViewModel.TargetColumnId)
         )
         {
             return () => _applyRelationshipColumnRules(sender);
         }
 
-        if (sender is ColumnViewModel && propertyName is nameof(ColumnViewModel.IsPrimaryKey) or nameof(ColumnViewModel.IsForeignKey))
+        if (
+            sender is ColumnViewModel
+            && propertyName
+                is nameof(ColumnViewModel.IsPrimaryKey)
+                    or nameof(ColumnViewModel.IsForeignKey)
+        )
         {
             return () => _applyRelationshipColumnRules(sender);
         }

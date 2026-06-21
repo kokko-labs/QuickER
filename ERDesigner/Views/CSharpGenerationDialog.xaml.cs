@@ -12,7 +12,10 @@ public partial class CSharpGenerationDialog : Window
     public CSharpGenerationDialogViewModel ViewModel { get; }
 
     /// <summary>名前空間と出力先の初期値を指定してダイアログを生成する</summary>
-    public CSharpGenerationDialog(string namespaceName, string outputFilePath = "ErDesignerEntities.g.cs")
+    public CSharpGenerationDialog(
+        string namespaceName,
+        string outputFilePath = "ErDesignerEntities.g.cs"
+    )
     {
         InitializeComponent();
         ViewModel = new CSharpGenerationDialogViewModel(namespaceName, outputFilePath)

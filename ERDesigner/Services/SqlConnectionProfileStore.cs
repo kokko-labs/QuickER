@@ -15,7 +15,11 @@ namespace ERDesigner.Services;
 public class SqlConnectionProfileStore
 {
     /// <summary>JSON シリアライズ設定（インデント付与・プロパティ名は camelCase）</summary>
-    private static readonly JsonSerializerOptions JsonOpts = new() { WriteIndented = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+    private static readonly JsonSerializerOptions JsonOpts = new()
+    {
+        WriteIndented = true,
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+    };
 
     /// <summary>各ファイルの保存先フォルダ</summary>
     private readonly string _folder;
@@ -34,7 +38,13 @@ public class SqlConnectionProfileStore
 
     /// <summary>既定（<c>%AppData%\ERDesigner</c>・DPAPI 有効）のストアを生成する</summary>
     public SqlConnectionProfileStore()
-        : this(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ERDesigner"), true) { }
+        : this(
+            Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "ERDesigner"
+            ),
+            true
+        ) { }
 
     /// <summary>保存先フォルダと DPAPI 利用可否を指定してストアを生成する（テスト用）</summary>
     /// <param name="folder">保存先ディレクトリ</param>
@@ -56,7 +66,9 @@ public class SqlConnectionProfileStore
         try
         {
             var json = File.ReadAllText(ProfilesPath);
-            var list = JsonSerializer.Deserialize<List<SqlConnectionProfile>>(json, JsonOpts) ?? new List<SqlConnectionProfile>();
+            var list =
+                JsonSerializer.Deserialize<List<SqlConnectionProfile>>(json, JsonOpts)
+                ?? new List<SqlConnectionProfile>();
             return list.OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase).ToList();
         }
         catch
@@ -85,7 +97,9 @@ public class SqlConnectionProfileStore
                 return null;
             }
 
-            var password = profile.SavePassword ? LoadSecret(LastConnectionSecretPath()) : string.Empty;
+            var password = profile.SavePassword
+                ? LoadSecret(LastConnectionSecretPath())
+                : string.Empty;
             return (profile, password);
         }
         catch
@@ -181,7 +195,11 @@ public class SqlConnectionProfileStore
 
             if (_useDpapi)
             {
-                var data = ProtectedData.Unprotect(bytes, optionalEntropy: null, scope: DataProtectionScope.CurrentUser);
+                var data = ProtectedData.Unprotect(
+                    bytes,
+                    optionalEntropy: null,
+                    scope: DataProtectionScope.CurrentUser
+                );
                 return Encoding.UTF8.GetString(data);
             }
 
@@ -208,7 +226,13 @@ public class SqlConnectionProfileStore
         }
 
         var raw = Encoding.UTF8.GetBytes(password);
-        var bytes = _useDpapi ? ProtectedData.Protect(raw, optionalEntropy: null, scope: DataProtectionScope.CurrentUser) : raw;
+        var bytes = _useDpapi
+            ? ProtectedData.Protect(
+                raw,
+                optionalEntropy: null,
+                scope: DataProtectionScope.CurrentUser
+            )
+            : raw;
         File.WriteAllBytes(path, bytes);
     }
 

@@ -28,7 +28,10 @@ public partial class SqlConnectionDialog : Window
         // VM 側 (プロファイル選択時など) で Password が更新されたら PasswordBox にも反映する
         ViewModel.PropertyChanged += (_, e) =>
         {
-            if (e.PropertyName == nameof(SqlConnectionDialogViewModel.Password) && PasswordBoxControl.Password != ViewModel.Password)
+            if (
+                e.PropertyName == nameof(SqlConnectionDialogViewModel.Password)
+                && PasswordBoxControl.Password != ViewModel.Password
+            )
             {
                 PasswordBoxControl.Password = ViewModel.Password;
             }

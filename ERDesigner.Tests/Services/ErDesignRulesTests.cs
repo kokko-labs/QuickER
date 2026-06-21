@@ -20,7 +20,9 @@ public class ErDesignRulesTests
     public void CommonDesignPrinciples_AllowsMultipleRoleForeignKeys()
     {
         ErDesignRules.CommonDesignPrinciples.Should().Contain("役割が異なる複数の外部キー");
-        ErDesignRules.CommonDesignPrinciples.Should().Contain("それぞれ別のリレーションとして定義する");
+        ErDesignRules
+            .CommonDesignPrinciples.Should()
+            .Contain("それぞれ別のリレーションとして定義する");
     }
 
     /// <summary>Codex 用 developerInstructions が設計原則とツール運用手順を含むことを検証する</summary>
@@ -52,7 +54,10 @@ public class ErDesignRulesTests
     [Theory(DisplayName = "命名規則の指示行はスタイルごとに切り替わる")]
     [InlineData(AiIdentifierNamingStyle.SnakeCase, "スネークケース")]
     [InlineData(AiIdentifierNamingStyle.PascalCase, "パスカルケース")]
-    public void BuildNamingInstruction_SwitchesByStyle(AiIdentifierNamingStyle style, string expected)
+    public void BuildNamingInstruction_SwitchesByStyle(
+        AiIdentifierNamingStyle style,
+        string expected
+    )
     {
         ErDesignRules.BuildNamingInstruction(style).Should().Contain(expected);
     }
@@ -61,7 +66,10 @@ public class ErDesignRulesTests
     [Theory(DisplayName = "テーブル名の単複数の指示行はスタイルごとに切り替わる")]
     [InlineData(AiTableNameNumberStyle.Plural, "複数形")]
     [InlineData(AiTableNameNumberStyle.Singular, "単数形")]
-    public void BuildTableNameNumberInstruction_SwitchesByStyle(AiTableNameNumberStyle style, string expected)
+    public void BuildTableNameNumberInstruction_SwitchesByStyle(
+        AiTableNameNumberStyle style,
+        string expected
+    )
     {
         ErDesignRules.BuildTableNameNumberInstruction(style).Should().Contain(expected);
     }

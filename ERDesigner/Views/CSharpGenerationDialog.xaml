@@ -25,25 +25,87 @@
       <RowDefinition Height="Auto" />
     </Grid.RowDefinitions>
 
-    <TextBlock Grid.Row="0" Grid.Column="0" Margin="0,4" VerticalAlignment="Center" Text="namespace" />
-    <TextBox Grid.Row="0" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,4" Text="{Binding NamespaceName, UpdateSourceTrigger=PropertyChanged}" />
+    <TextBlock
+      Grid.Row="0"
+      Grid.Column="0"
+      Margin="0,4"
+      VerticalAlignment="Center"
+      Text="namespace"
+    />
+    <TextBox
+      Grid.Row="0"
+      Grid.Column="1"
+      Grid.ColumnSpan="2"
+      Margin="0,4"
+      Text="{Binding NamespaceName, UpdateSourceTrigger=PropertyChanged}"
+    />
 
-    <TextBlock Grid.Row="1" Grid.Column="0" Margin="0,4" VerticalAlignment="Center" Text="出力ファイル" />
-    <TextBox Grid.Row="1" Grid.Column="1" Margin="0,4" Text="{Binding OutputFilePath, UpdateSourceTrigger=PropertyChanged}" />
-    <Button Grid.Row="1" Grid.Column="2" Margin="8,4,0,4" Padding="12,4" Content="参照..." Command="{Binding BrowseOutputFileCommand}" />
+    <TextBlock
+      Grid.Row="1"
+      Grid.Column="0"
+      Margin="0,4"
+      VerticalAlignment="Center"
+      Text="出力ファイル"
+    />
+    <TextBox
+      Grid.Row="1"
+      Grid.Column="1"
+      Margin="0,4"
+      Text="{Binding OutputFilePath, UpdateSourceTrigger=PropertyChanged}"
+    />
+    <Button
+      Grid.Row="1"
+      Grid.Column="2"
+      Margin="8,4,0,4"
+      Padding="12,4"
+      Content="参照..."
+      Command="{Binding BrowseOutputFileCommand}"
+    />
 
-    <TextBlock Grid.Row="2" Grid.Column="0" Margin="0,8,0,4" VerticalAlignment="Center" Text="生成対象" />
-    <StackPanel Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="0,8,0,4">
+    <TextBlock
+      Grid.Row="2"
+      Grid.Column="0"
+      Margin="0,8,0,4"
+      VerticalAlignment="Center"
+      Text="生成対象"
+    />
+    <StackPanel
+      Grid.Row="2"
+      Grid.Column="1"
+      Grid.ColumnSpan="2"
+      Orientation="Horizontal"
+      Margin="0,8,0,4"
+    >
       <CheckBox Margin="0,0,16,0" Content="Entity" IsChecked="{Binding GenerateEntityClasses}" />
       <CheckBox Margin="0,0,16,0" Content="EditModel" IsChecked="{Binding GenerateEditModels}" />
       <CheckBox Margin="0,0,16,0" Content="Mapper" IsChecked="{Binding GenerateMappers}" />
       <CheckBox Content="Repository" IsChecked="{Binding GenerateRepositories}" />
     </StackPanel>
 
-    <TextBlock Grid.Row="3" Grid.Column="0" Margin="0,8,0,4" VerticalAlignment="Center" Text="値オブジェクト" />
-    <StackPanel Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="0,8,0,4">
-      <CheckBox Margin="0,0,16,0" Content="全カラムを値オブジェクト化" IsChecked="{Binding GenerateValueObjects}" />
-      <CheckBox Content="string 主キーを GuidKey 化" IsChecked="{Binding UseGuidKeyForStringPrimaryKey}" IsEnabled="{Binding GenerateValueObjects}" />
+    <TextBlock
+      Grid.Row="3"
+      Grid.Column="0"
+      Margin="0,8,0,4"
+      VerticalAlignment="Center"
+      Text="値オブジェクト"
+    />
+    <StackPanel
+      Grid.Row="3"
+      Grid.Column="1"
+      Grid.ColumnSpan="2"
+      Orientation="Horizontal"
+      Margin="0,8,0,4"
+    >
+      <CheckBox
+        Margin="0,0,16,0"
+        Content="全カラムを値オブジェクト化"
+        IsChecked="{Binding GenerateValueObjects}"
+      />
+      <CheckBox
+        Content="string 主キーを GuidKey 化"
+        IsChecked="{Binding UseGuidKeyForStringPrimaryKey}"
+        IsEnabled="{Binding GenerateValueObjects}"
+      />
     </StackPanel>
 
     <TextBlock
@@ -57,9 +119,20 @@
     />
 
     <DockPanel Grid.Row="5" Grid.Column="0" Grid.ColumnSpan="3" Margin="0,8,0,0">
-      <TextBlock DockPanel.Dock="Left" VerticalAlignment="Center" Foreground="#B91C1C" Text="{Binding StatusMessage}" />
+      <TextBlock
+        DockPanel.Dock="Left"
+        VerticalAlignment="Center"
+        Foreground="#B91C1C"
+        Text="{Binding StatusMessage}"
+      />
       <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
-        <Button Width="100" Margin="0,0,8,0" IsDefault="True" Content="生成" Command="{Binding OkCommand}" />
+        <Button
+          Width="100"
+          Margin="0,0,8,0"
+          IsDefault="True"
+          Content="生成"
+          Command="{Binding OkCommand}"
+        />
         <Button Width="80" IsCancel="True" Content="キャンセル" Command="{Binding CancelCommand}" />
       </StackPanel>
     </DockPanel>

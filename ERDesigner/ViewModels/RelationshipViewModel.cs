@@ -65,14 +65,20 @@ public partial class RelationshipViewModel : ObservableObject
     public EntityViewModel Target { get; }
 
     /// <summary>参照先列として選択可能な起点側カラム一覧（主キー列のみ）</summary>
-    public IReadOnlyList<ColumnViewModel> AvailableSourceColumns => Source.Columns.Where(c => c.IsPrimaryKey).ToList();
+    public IReadOnlyList<ColumnViewModel> AvailableSourceColumns =>
+        Source.Columns.Where(c => c.IsPrimaryKey).ToList();
 
     /// <summary>外部キー列として選択可能な終点側カラム一覧</summary>
     public IReadOnlyList<ColumnViewModel> AvailableTargetColumns => Target.Columns.ToList();
 
     /// <summary>UI 表示用の参照アクション候補一覧</summary>
     public IReadOnlyList<ForeignKeyReferentialAction> ReferentialActions { get; } =
-    [ForeignKeyReferentialAction.NoAction, ForeignKeyReferentialAction.Cascade, ForeignKeyReferentialAction.SetNull, ForeignKeyReferentialAction.SetDefault];
+    [
+        ForeignKeyReferentialAction.NoAction,
+        ForeignKeyReferentialAction.Cascade,
+        ForeignKeyReferentialAction.SetNull,
+        ForeignKeyReferentialAction.SetDefault,
+    ];
 
     /// <summary>外部キー列の選択が有効なリレーション種別かどうか（多対多以外で有効）</summary>
     public bool CanSelectForeignKeyColumns => Type != RelationshipType.ManyToMany;
@@ -115,7 +121,10 @@ public partial class RelationshipViewModel : ObservableObject
     }
 
     /// <summary>両端カラムの増減に追従し、購読の着脱と候補・整合性の再評価を行う</summary>
-    private void OnColumnsCollectionChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
+    private void OnColumnsCollectionChanged(
+        object? sender,
+        System.Collections.Specialized.NotifyCollectionChangedEventArgs e
+    )
     {
         if (e.OldItems is not null)
         {
@@ -205,7 +214,13 @@ public partial class RelationshipViewModel : ObservableObject
     /// <summary>両端の位置・サイズ変更時に幾何情報を再計算して通知する</summary>
     private void OnEndpointChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName is nameof(EntityViewModel.X) or nameof(EntityViewModel.Y) or nameof(EntityViewModel.Width) or nameof(EntityViewModel.DisplayHeight))
+        if (
+            e.PropertyName
+            is nameof(EntityViewModel.X)
+                or nameof(EntityViewModel.Y)
+                or nameof(EntityViewModel.Width)
+                or nameof(EntityViewModel.DisplayHeight)
+        )
         {
             UpdateGeometry();
             NotifyGeometryChanged();
@@ -338,13 +353,18 @@ public partial class RelationshipViewModel : ObservableObject
         _targetMarkerAngle = Math.Atan2(uy, ux) * 180.0 / Math.PI;
         _selfLoopLeft = Source.X + Source.Width - 20;
         _selfLoopTop = Source.Y - SelfLoopSize / 2;
-        _labelX = IsSelfRelationship ? _selfLoopLeft + SelfLoopWidth / 2 + SelfLoopLabelOffsetX : (_x1 + _x2) / 2;
+        _labelX = IsSelfRelationship
+            ? _selfLoopLeft + SelfLoopWidth / 2 + SelfLoopLabelOffsetX
+            : (_x1 + _x2) / 2;
         _labelY = IsSelfRelationship ? _selfLoopTop + SelfLoopHeight / 2 : (_y1 + _y2) / 2;
     }
 
     /// <summary>エンティティ中心から相手方向へ伸ばした線と矩形境界の交点を返す</summary>
     /// <remarks>自己参照時は右辺中央を返す</remarks>
-    private static (double x, double y) GetBoundaryPoint(EntityViewModel source, EntityViewModel target)
+    private static (double x, double y) GetBoundaryPoint(
+        EntityViewModel source,
+        EntityViewModel target
+    )
     {
         if (ReferenceEquals(source, target))
         {
@@ -364,8 +384,12 @@ public partial class RelationshipViewModel : ObservableObject
             return (sourceCenterX, sourceCenterY);
         }
 
-        var scaleX = Math.Abs(dx) < 0.0001 ? double.PositiveInfinity : (source.Width / 2) / Math.Abs(dx);
-        var scaleY = Math.Abs(dy) < 0.0001 ? double.PositiveInfinity : (source.DisplayHeight / 2) / Math.Abs(dy);
+        var scaleX =
+            Math.Abs(dx) < 0.0001 ? double.PositiveInfinity : (source.Width / 2) / Math.Abs(dx);
+        var scaleY =
+            Math.Abs(dy) < 0.0001
+                ? double.PositiveInfinity
+                : (source.DisplayHeight / 2) / Math.Abs(dy);
         var scale = Math.Min(scaleX, scaleY);
 
         return (sourceCenterX + dx * scale, sourceCenterY + dy * scale);

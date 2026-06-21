@@ -23,7 +23,13 @@ public class MoveEntityCommand : IUndoableCommand
     /// <param name="oldY">移動前の Y 座標</param>
     /// <param name="newX">移動後の X 座標</param>
     /// <param name="newY">移動後の Y 座標</param>
-    public MoveEntityCommand(EntityViewModel entity, double oldX, double oldY, double newX, double newY)
+    public MoveEntityCommand(
+        EntityViewModel entity,
+        double oldX,
+        double oldY,
+        double newX,
+        double newY
+    )
     {
         _entity = entity;
         _oldX = oldX;

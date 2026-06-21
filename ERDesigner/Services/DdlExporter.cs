@@ -41,7 +41,8 @@ public static class DdlExporter
             {
                 var col = entity.Columns[i];
                 // PK 列は IsNullable の設定値に関わらず NOT NULL を強制する
-                var line = $"    {SqlIdentifier.BracketSimple(col.Name)} {col.DataType} {(col.IsPrimaryKey || !col.IsNullable ? "NOT NULL" : "NULL")}";
+                var line =
+                    $"    {SqlIdentifier.BracketSimple(col.Name)} {col.DataType} {(col.IsPrimaryKey || !col.IsNullable ? "NOT NULL" : "NULL")}";
 
                 // 後続のカラム行、または PRIMARY KEY 制約行が続く場合は区切りのカンマを付ける
                 if (i < entity.Columns.Count - 1 || pks.Count > 0)
@@ -55,8 +56,13 @@ public static class DdlExporter
             // PRIMARY KEY 制約（複合 PK 対応のため列定義とは分離して出力）
             if (pks.Count > 0)
             {
-                var pkCols = string.Join(", ", pks.Select(p => SqlIdentifier.BracketSimple(p.Name)));
-                sb.AppendLine($"    CONSTRAINT [PK_{SqlIdentifier.SafeName(table)}] PRIMARY KEY ({pkCols})");
+                var pkCols = string.Join(
+                    ", ",
+                    pks.Select(p => SqlIdentifier.BracketSimple(p.Name))
+                );
+                sb.AppendLine(
+                    $"    CONSTRAINT [PK_{SqlIdentifier.SafeName(table)}] PRIMARY KEY ({pkCols})"
+                );
             }
 
             sb.AppendLine(");");
@@ -68,7 +74,9 @@ public static class DdlExporter
             // 多対多はジャンクションテーブルが必要なのでコメントのみ出力する
             if (rel.Type == Models.RelationshipType.ManyToMany)
             {
-                sb.AppendLine($"-- 多対多 ({rel.Source.TableName} ⇄ {rel.Target.TableName}): ジャンクションテーブルを別途定義してください。");
+                sb.AppendLine(
+                    $"-- 多対多 ({rel.Source.TableName} ⇄ {rel.Target.TableName}): ジャンクションテーブルを別途定義してください。"
+                );
                 continue;
             }
 
@@ -78,7 +86,8 @@ public static class DdlExporter
 
             // 参照カラムが明示されていればそれを優先し、未指定なら親の PK 列にフォールバックする
             var pkCol = rel.SourceColumnId is not null
-                ? pkEntity.Columns.FirstOrDefault(c => c.Id == rel.SourceColumnId) ?? pkEntity.Columns.FirstOrDefault(c => c.IsPrimaryKey)
+                ? pkEntity.Columns.FirstOrDefault(c => c.Id == rel.SourceColumnId)
+                    ?? pkEntity.Columns.FirstOrDefault(c => c.IsPrimaryKey)
                 : pkEntity.Columns.FirstOrDefault(c => c.IsPrimaryKey);
 
             // 親側に参照可能な列がなければ FK を生成できないためスキップする
@@ -87,7 +96,9 @@ public static class DdlExporter
                 continue;
             }
 
-            var fkColName = rel.TargetColumnId is not null ? fkEntity.Columns.FirstOrDefault(c => c.Id == rel.TargetColumnId)?.Name : null;
+            var fkColName = rel.TargetColumnId is not null
+                ? fkEntity.Columns.FirstOrDefault(c => c.Id == rel.TargetColumnId)?.Name
+                : null;
 
             // 子側カラム未指定時は「親テーブル名_PK列名」を FK カラム名として採用する
             if (string.IsNullOrWhiteSpace(fkColName))
@@ -114,10 +125,14 @@ public static class DdlExporter
 
     /// <summary><c>ON DELETE</c> / <c>ON UPDATE</c> の参照アクション句を組み立てる</summary>
     private static string BuildReferentialActionClause(RelationshipViewModel relationship) =>
-        ForeignKeyReferentialActionHelper.BuildReferentialActionClause(relationship.OnDelete, relationship.OnUpdate);
+        ForeignKeyReferentialActionHelper.BuildReferentialActionClause(
+            relationship.OnDelete,
+            relationship.OnUpdate
+        );
 
     /// <summary>DDL を UTF-8 でファイルに書き出す</summary>
     /// <param name="vm">対象の <see cref="MainViewModel"/></param>
     /// <param name="path">出力先ファイルパス</param>
-    public static void SaveTo(MainViewModel vm, string path) => File.WriteAllText(path, Build(vm), Encoding.UTF8);
+    public static void SaveTo(MainViewModel vm, string path) =>
+        File.WriteAllText(path, Build(vm), Encoding.UTF8);
 }

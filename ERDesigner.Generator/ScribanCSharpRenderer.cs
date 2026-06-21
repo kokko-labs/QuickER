@@ -3140,14 +3140,21 @@ internal sealed class ScribanCSharpRenderer
         var template = Template.Parse(TemplateText);
         if (template.HasErrors)
         {
-            var message = string.Join(Environment.NewLine, template.Messages.Select(m => m.ToString()));
-            throw new InvalidOperationException($"C# 生成テンプレートの解析に失敗しました。{Environment.NewLine}{message}");
+            var message = string.Join(
+                Environment.NewLine,
+                template.Messages.Select(m => m.ToString())
+            );
+            throw new InvalidOperationException(
+                $"C# 生成テンプレートの解析に失敗しました。{Environment.NewLine}{message}"
+            );
         }
 
         // 独自属性 NavigationReference は (1) Entity のナビゲーションプロパティへの付与、
         // (2) Repository の SqlEntityMetadata によるナビゲーション除外（リフレクション走査）のいずれかで参照される。
         // リレーションが無くても Repository を生成する場合は属性定義が必要なため、その条件も含める。
-        var emitNavRefAttr = (options.GenerateEntityClasses && model.EntityClasses.Any(c => c.Navigations.Count > 0)) || options.GenerateRepositories;
+        var emitNavRefAttr =
+            (options.GenerateEntityClasses && model.EntityClasses.Any(c => c.Navigations.Count > 0))
+            || options.GenerateRepositories;
 
         var scriptObject = new Scriban.Runtime.ScriptObject
         {
@@ -3158,7 +3165,8 @@ internal sealed class ScribanCSharpRenderer
             ["mapper_classes"] = model.MapperClasses,
             ["repository_classes"] = model.RepositoryClasses,
             ["include_data_annotations"] = options.IncludeDataAnnotations,
-            ["include_json_ignore_on_parent_navigation"] = options.IncludeJsonIgnoreOnParentNavigation,
+            ["include_json_ignore_on_parent_navigation"] =
+                options.IncludeJsonIgnoreOnParentNavigation,
             ["emit_nav_ref_attr"] = emitNavRefAttr,
             ["generate_value_objects"] = options.GenerateValueObjects,
             ["value_object_classes"] = model.ValueObjectClasses,
@@ -3172,6 +3180,7 @@ internal sealed class ScribanCSharpRenderer
         var context = new TemplateContext { LoopLimit = 0, LimitToString = 0 };
 
         context.PushGlobal(scriptObject);
-        return template.Render(context).ReplaceLineEndings(Environment.NewLine).TrimEnd() + Environment.NewLine;
+        return template.Render(context).ReplaceLineEndings(Environment.NewLine).TrimEnd()
+            + Environment.NewLine;
     }
 }

@@ -72,10 +72,18 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
         {
             var importer = new SqlServerSchemaImporter();
             var live = await importer.ImportAsync(_settings).ConfigureAwait(true);
-            var diff = new SchemaDiffService().Compute(live.Entities, live.Relationships, _targetEntities, _targetRelationships);
+            var diff = new SchemaDiffService().Compute(
+                live.Entities,
+                live.Relationships,
+                _targetEntities,
+                _targetRelationships
+            );
 
             // 列順差分は DB 同期対象外のため、検知時は選択不可の案内項目のみ追加する
-            var orderChangedTables = SchemaDiffService.DetectColumnOrderChanges(live.Entities, _targetEntities);
+            var orderChangedTables = SchemaDiffService.DetectColumnOrderChanges(
+                live.Entities,
+                _targetEntities
+            );
 
             foreach (var tableName in orderChangedTables)
             {
@@ -108,7 +116,9 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
 
             HasDiff = DiffItems.Count > 0;
             UpdatePreview();
-            StatusMessage = HasDiff ? $"{DiffItems.Count} 件の差分があります。" : "差分はありません。";
+            StatusMessage = HasDiff
+                ? $"{DiffItems.Count} 件の差分があります。"
+                : "差分はありません。";
         }
         catch (Exception ex)
         {
@@ -188,7 +198,10 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
             else
             {
                 StatusMessage = "失敗: " + result.Error;
-                _dialogs.ShowError("実行に失敗したため ROLLBACK されました:\n" + result.Error, "エラー");
+                _dialogs.ShowError(
+                    "実行に失敗したため ROLLBACK されました:\n" + result.Error,
+                    "エラー"
+                );
             }
         }
         catch (Exception ex)

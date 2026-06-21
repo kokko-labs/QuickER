@@ -17,12 +17,17 @@ public class OpenAiChatEngineTests
     {
         private readonly Queue<OpenAiAssistantTurn> _turns;
 
-        public ScriptedTurnDriver(IEnumerable<OpenAiAssistantTurn> turns) => _turns = new Queue<OpenAiAssistantTurn>(turns);
+        public ScriptedTurnDriver(IEnumerable<OpenAiAssistantTurn> turns) =>
+            _turns = new Queue<OpenAiAssistantTurn>(turns);
 
         /// <summary>各ターン実行時点の履歴件数を記録する</summary>
         public List<int> HistoryCountsAtCall { get; } = new();
 
-        public Task<OpenAiAssistantTurn> RunAsync(IReadOnlyList<OpenAiChatHistoryItem> history, Action<string> onTextDelta, CancellationToken cancellationToken)
+        public Task<OpenAiAssistantTurn> RunAsync(
+            IReadOnlyList<OpenAiChatHistoryItem> history,
+            Action<string> onTextDelta,
+            CancellationToken cancellationToken
+        )
         {
             HistoryCountsAtCall.Add(history.Count);
             var turn = _turns.Dequeue();
@@ -48,8 +53,11 @@ public class OpenAiChatEngineTests
         }
     }
 
-    private static OpenAiChatEngine CreateEngine(ScriptedTurnDriver driver, RecordingToolHost host, bool isReady = true) =>
-        new(driver, host, new SyncUiDispatcher(), () => isReady);
+    private static OpenAiChatEngine CreateEngine(
+        ScriptedTurnDriver driver,
+        RecordingToolHost host,
+        bool isReady = true
+    ) => new(driver, host, new SyncUiDispatcher(), () => isReady);
 
     /// <summary>ツール呼び出しの無いターンが、ストリーミングと成功完了で終わることを検証する</summary>
     [Fact(DisplayName = "ツール無しターンは delta を流し成功完了する")]
@@ -77,9 +85,11 @@ public class OpenAiChatEngineTests
     [Fact(DisplayName = "ツール要求ターンはツールを実行し結果を履歴へ積んで継続する")]
     public async Task SendAsync_WithToolCall_ExecutesToolThenCompletes()
     {
-        var driver = new ScriptedTurnDriver(
-        [
-            new OpenAiAssistantTurn(string.Empty, [new OpenAiToolCallRequest("call_1", "add_entity", "{\"table_name\":\"Book\"}")]),
+        var driver = new ScriptedTurnDriver([
+            new OpenAiAssistantTurn(
+                string.Empty,
+                [new OpenAiToolCallRequest("call_1", "add_entity", "{\"table_name\":\"Book\"}")]
+            ),
             new OpenAiAssistantTurn("テーブルを追加しました", []),
         ]);
         var host = new RecordingToolHost();

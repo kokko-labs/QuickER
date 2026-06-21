@@ -19,7 +19,11 @@ public class DiagramMetricsServiceTests
                 Width = 120,
                 Columns =
                 {
-                    new Column { Name = "VeryLongColumnNameForCustomerIdentifier", DataType = "nvarchar(128)" },
+                    new Column
+                    {
+                        Name = "VeryLongColumnNameForCustomerIdentifier",
+                        DataType = "nvarchar(128)",
+                    },
                 },
             }
         );
@@ -38,21 +42,29 @@ public class DiagramMetricsServiceTests
             {
                 TableName = "Orders",
                 Width = 220,
-                Description = "テーブル説明が複数行になるように十分長い文字列です。テーブル説明が複数行になるように十分長い文字列です。",
+                Description =
+                    "テーブル説明が複数行になるように十分長い文字列です。テーブル説明が複数行になるように十分長い文字列です。",
                 Columns =
                 {
                     new Column
                     {
                         Name = "CustomerName",
                         DataType = "nvarchar(100)",
-                        Description = "カラム説明が折り返されることを確認するための十分に長い説明文です。",
+                        Description =
+                            "カラム説明が折り返されることを確認するための十分に長い説明文です。",
                     },
                 },
             }
         );
 
-        var withoutDescriptions = DiagramMetricsService.EstimateEntityHeight(entity, showDescriptions: false);
-        var withDescriptions = DiagramMetricsService.EstimateEntityHeight(entity, showDescriptions: true);
+        var withoutDescriptions = DiagramMetricsService.EstimateEntityHeight(
+            entity,
+            showDescriptions: false
+        );
+        var withDescriptions = DiagramMetricsService.EstimateEntityHeight(
+            entity,
+            showDescriptions: true
+        );
 
         withDescriptions.Should().BeGreaterThan(withoutDescriptions);
     }

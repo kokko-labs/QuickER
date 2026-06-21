@@ -19,7 +19,11 @@ public interface ITrackedProperty
 
 /// <summary>getter / setter デリゲートによる <see cref="ITrackedProperty"/> 実装</summary>
 /// <typeparam name="T">対象オブジェクトの型</typeparam>
-public sealed class TrackedProperty<T>(string name, Func<T, object?> getter, Action<T, object?> setter) : ITrackedProperty
+public sealed class TrackedProperty<T>(
+    string name,
+    Func<T, object?> getter,
+    Action<T, object?> setter
+) : ITrackedProperty
 {
     /// <inheritdoc />
     public string Name { get; } = name;

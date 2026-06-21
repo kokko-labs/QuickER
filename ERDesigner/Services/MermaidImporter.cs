@@ -45,7 +45,9 @@ public static partial class MermaidImporter
             {
                 if (!string.Equals(line, "erDiagram", StringComparison.Ordinal))
                 {
-                    throw new InvalidDataException("Mermaid は先頭に erDiagram ヘッダーが必要です。");
+                    throw new InvalidDataException(
+                        "Mermaid は先頭に erDiagram ヘッダーが必要です。"
+                    );
                 }
 
                 foundHeader = true;
@@ -76,7 +78,9 @@ public static partial class MermaidImporter
 
                 if (!entities.TryAdd(tableName, new Entity { TableName = tableName }))
                 {
-                    throw new InvalidDataException($"エンティティ '{tableName}' が重複しています。");
+                    throw new InvalidDataException(
+                        $"エンティティ '{tableName}' が重複しています。"
+                    );
                 }
 
                 currentEntity = entities[tableName];
@@ -93,7 +97,9 @@ public static partial class MermaidImporter
 
         if (currentEntity is not null)
         {
-            throw new InvalidDataException($"エンティティ '{currentEntity.TableName}' の閉じ括弧 '}}' がありません。");
+            throw new InvalidDataException(
+                $"エンティティ '{currentEntity.TableName}' の閉じ括弧 '}}' がありません。"
+            );
         }
 
         if (entities.Count == 0)
@@ -115,7 +121,9 @@ public static partial class MermaidImporter
 
         if (tokens.Length < 2)
         {
-            throw new InvalidDataException($"テーブル '{tableName}' のカラム定義 '{line}' を解析できません。");
+            throw new InvalidDataException(
+                $"テーブル '{tableName}' のカラム定義 '{line}' を解析できません。"
+            );
         }
 
         var column = new Column
@@ -127,7 +135,12 @@ public static partial class MermaidImporter
 
         foreach (var token in tokens.Skip(2))
         {
-            foreach (var key in token.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            foreach (
+                var key in token.Split(
+                    ',',
+                    StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries
+                )
+            )
             {
                 if (string.Equals(key, "PK", StringComparison.OrdinalIgnoreCase))
                 {
@@ -147,7 +160,10 @@ public static partial class MermaidImporter
     }
 
     /// <summary>リレーション定義行を解析して <see cref="Relationship"/> を生成する</summary>
-    private static Relationship ParseRelationship(string line, IReadOnlyDictionary<string, Entity> entities)
+    private static Relationship ParseRelationship(
+        string line,
+        IReadOnlyDictionary<string, Entity> entities
+    )
     {
         var match = RelationshipRegex.Match(line);
 
@@ -163,12 +179,16 @@ public static partial class MermaidImporter
 
         if (!entities.ContainsKey(leftTable))
         {
-            throw new InvalidDataException($"リレーションの左側テーブル '{leftTable}' が未定義です。");
+            throw new InvalidDataException(
+                $"リレーションの左側テーブル '{leftTable}' が未定義です。"
+            );
         }
 
         if (!entities.ContainsKey(rightTable))
         {
-            throw new InvalidDataException($"リレーションの右側テーブル '{rightTable}' が未定義です。");
+            throw new InvalidDataException(
+                $"リレーションの右側テーブル '{rightTable}' が未定義です。"
+            );
         }
 
         var relationshipType = ParseRelationshipType(symbol);
@@ -215,7 +235,10 @@ public static partial class MermaidImporter
 
     /// <summary>Mermaid に列情報が無いリレーションの参照列を既定ルールで補完する</summary>
     /// <remarks>多対多は中間テーブルを介する設計のため列補完の対象外とする</remarks>
-    private static void ResolveRelationshipColumns(IReadOnlyDictionary<string, Entity> entities, IEnumerable<Relationship> relationships)
+    private static void ResolveRelationshipColumns(
+        IReadOnlyDictionary<string, Entity> entities,
+        IEnumerable<Relationship> relationships
+    )
     {
         foreach (var relationship in relationships)
         {
@@ -227,7 +250,9 @@ public static partial class MermaidImporter
                 continue;
             }
 
-            var sourceColumn = source.Columns.FirstOrDefault(column => column.IsPrimaryKey) ?? source.Columns.First();
+            var sourceColumn =
+                source.Columns.FirstOrDefault(column => column.IsPrimaryKey)
+                ?? source.Columns.First();
             relationship.SourceColumnId = sourceColumn.Id;
 
             var targetColumn = ResolveTargetColumn(sourceColumn, target);
@@ -241,7 +266,8 @@ public static partial class MermaidImporter
     private static Column ResolveTargetColumn(Column sourcePrimaryKey, Entity target)
     {
         var sameNameForeignKey = target.Columns.FirstOrDefault(column =>
-            column.IsForeignKey && string.Equals(column.Name, sourcePrimaryKey.Name, StringComparison.OrdinalIgnoreCase)
+            column.IsForeignKey
+            && string.Equals(column.Name, sourcePrimaryKey.Name, StringComparison.OrdinalIgnoreCase)
         );
 
         if (sameNameForeignKey is not null)
@@ -249,21 +275,26 @@ public static partial class MermaidImporter
             return sameNameForeignKey;
         }
 
-        var sameName = target.Columns.FirstOrDefault(column => string.Equals(column.Name, sourcePrimaryKey.Name, StringComparison.OrdinalIgnoreCase));
+        var sameName = target.Columns.FirstOrDefault(column =>
+            string.Equals(column.Name, sourcePrimaryKey.Name, StringComparison.OrdinalIgnoreCase)
+        );
 
         if (sameName is not null)
         {
             return sameName;
         }
 
-        var firstForeignKey = target.Columns.FirstOrDefault(column => column.IsForeignKey && !column.IsPrimaryKey);
+        var firstForeignKey = target.Columns.FirstOrDefault(column =>
+            column.IsForeignKey && !column.IsPrimaryKey
+        );
 
         if (firstForeignKey is not null)
         {
             return firstForeignKey;
         }
 
-        return target.Columns.FirstOrDefault(column => !column.IsPrimaryKey) ?? target.Columns.First();
+        return target.Columns.FirstOrDefault(column => !column.IsPrimaryKey)
+            ?? target.Columns.First();
     }
 
     /// <summary>Mermaid 出力で正規化された型名を元の SQL 型名へ復元する</summary>
@@ -275,7 +306,10 @@ public static partial class MermaidImporter
     private static string DenormalizeDataType(string dataType)
     {
         // 「識別子 + (_数値)の繰り返し」に一致する型のみ復元対象とする
-        var match = System.Text.RegularExpressions.Regex.Match(dataType, @"^([A-Za-z][A-Za-z0-9]*)(_\d+)+$");
+        var match = System.Text.RegularExpressions.Regex.Match(
+            dataType,
+            @"^([A-Za-z][A-Za-z0-9]*)(_\d+)+$"
+        );
 
         if (!match.Success)
         {
@@ -299,6 +333,9 @@ public static partial class MermaidImporter
     }
 
     /// <summary>リレーション行（左テーブル・カーディナリティ記号・右テーブル・任意ラベル）にマッチする正規表現</summary>
-    [GeneratedRegex(@"^(?<left>\S+)\s+(?<symbol>[|}{o]+--[|}{o]+)\s+(?<right>\S+)(?:\s*:\s*(?<label>.+))?$", RegexOptions.Compiled)]
+    [GeneratedRegex(
+        @"^(?<left>\S+)\s+(?<symbol>[|}{o]+--[|}{o]+)\s+(?<right>\S+)(?:\s*:\s*(?<label>.+))?$",
+        RegexOptions.Compiled
+    )]
     private static partial Regex RelationshipLineRegex();
 }

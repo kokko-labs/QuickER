@@ -33,13 +33,19 @@ public static class DiagramMetricsService
 
     // 行高さはフォント設定のみに依存する定数のため、初回計測値を遅延キャッシュする
     // FormattedText 生成は高コストで、ドラッグ中など高頻度に呼ばれるため再計測を避ける
-    private static readonly Lazy<double> TitleLineHeight = new(() => MeasureTextHeight("Ag", TitleFontSize, FontWeights.SemiBold));
-    private static readonly Lazy<double> BodyLineHeight = new(() => MeasureTextHeight("Ag", BodyFontSize));
+    private static readonly Lazy<double> TitleLineHeight = new(() =>
+        MeasureTextHeight("Ag", TitleFontSize, FontWeights.SemiBold)
+    );
+    private static readonly Lazy<double> BodyLineHeight = new(() =>
+        MeasureTextHeight("Ag", BodyFontSize)
+    );
 
     /// <summary>カラム名と型が重ならないよう、内容からエンティティ幅を自動計算する</summary>
     public static double CalculateAutoWidth(EntityViewModel entity)
     {
-        var headerWidth = HeaderHorizontalPadding + MeasureTextWidth(entity.TableName, TitleFontSize, FontWeights.SemiBold);
+        var headerWidth =
+            HeaderHorizontalPadding
+            + MeasureTextWidth(entity.TableName, TitleFontSize, FontWeights.SemiBold);
         var bodyWidth =
             entity.Columns.Count == 0
                 ? DefaultEntityWidth
@@ -47,7 +53,16 @@ public static class DiagramMetricsService
                     BodyHorizontalMargin
                     + ColumnIndicatorWidth
                     + MeasureTextWidth(column.Name, BodyFontSize)
-                    + (entity.ShowNullabilityInDiagram ? ColumnGap + MeasureTextWidth(column.IsNullable ? "NULL" : "NOT NULL", BodyFontSize) + NullabilityGap : 0)
+                    + (
+                        entity.ShowNullabilityInDiagram
+                            ? ColumnGap
+                                + MeasureTextWidth(
+                                    column.IsNullable ? "NULL" : "NOT NULL",
+                                    BodyFontSize
+                                )
+                                + NullabilityGap
+                            : 0
+                    )
                     + ColumnGap
                     + MeasureTextWidth(column.DataType, BodyFontSize)
                     + 4
@@ -70,7 +85,12 @@ public static class DiagramMetricsService
 
         if (showDescriptions && !string.IsNullOrWhiteSpace(entity.Description))
         {
-            headerHeight += MeasureWrappedTextHeight(entity.Description, DescriptionFontSize, headerTextWidth, fontStyle: FontStyles.Italic);
+            headerHeight += MeasureWrappedTextHeight(
+                entity.Description,
+                DescriptionFontSize,
+                headerTextWidth,
+                fontStyle: FontStyles.Italic
+            );
         }
 
         var bodyHeight = BodyVerticalMargin;
@@ -81,7 +101,12 @@ public static class DiagramMetricsService
 
             if (showDescriptions && !string.IsNullOrWhiteSpace(column.Description))
             {
-                bodyHeight += MeasureWrappedTextHeight(column.Description, DescriptionFontSize, columnDescriptionWidth, fontStyle: FontStyles.Italic);
+                bodyHeight += MeasureWrappedTextHeight(
+                    column.Description,
+                    DescriptionFontSize,
+                    columnDescriptionWidth,
+                    fontStyle: FontStyles.Italic
+                );
             }
         }
 
@@ -89,35 +114,71 @@ public static class DiagramMetricsService
     }
 
     /// <summary>1 行テキストの描画幅を計測する（末尾空白を含む）</summary>
-    private static double MeasureTextWidth(string? text, double fontSize, FontWeight? fontWeight = null, FontStyle? fontStyle = null)
+    private static double MeasureTextWidth(
+        string? text,
+        double fontSize,
+        FontWeight? fontWeight = null,
+        FontStyle? fontStyle = null
+    )
     {
         if (string.IsNullOrEmpty(text))
         {
             return 0;
         }
 
-        return CreateFormattedText(text, fontSize, fontWeight ?? FontWeights.Normal, fontStyle ?? FontStyles.Normal).WidthIncludingTrailingWhitespace;
+        return CreateFormattedText(
+            text,
+            fontSize,
+            fontWeight ?? FontWeights.Normal,
+            fontStyle ?? FontStyles.Normal
+        ).WidthIncludingTrailingWhitespace;
     }
 
     /// <summary>1 行テキストの描画高さを計測する</summary>
-    private static double MeasureTextHeight(string text, double fontSize, FontWeight? fontWeight = null, FontStyle? fontStyle = null) =>
-        CreateFormattedText(text, fontSize, fontWeight ?? FontWeights.Normal, fontStyle ?? FontStyles.Normal).Height;
+    private static double MeasureTextHeight(
+        string text,
+        double fontSize,
+        FontWeight? fontWeight = null,
+        FontStyle? fontStyle = null
+    ) =>
+        CreateFormattedText(
+            text,
+            fontSize,
+            fontWeight ?? FontWeights.Normal,
+            fontStyle ?? FontStyles.Normal
+        ).Height;
 
     /// <summary>指定幅で折り返した場合のテキスト描画高さを計測する</summary>
-    private static double MeasureWrappedTextHeight(string text, double fontSize, double maxWidth, FontWeight? fontWeight = null, FontStyle? fontStyle = null)
+    private static double MeasureWrappedTextHeight(
+        string text,
+        double fontSize,
+        double maxWidth,
+        FontWeight? fontWeight = null,
+        FontStyle? fontStyle = null
+    )
     {
         if (string.IsNullOrWhiteSpace(text))
         {
             return 0;
         }
 
-        var formatted = CreateFormattedText(text, fontSize, fontWeight ?? FontWeights.Normal, fontStyle ?? FontStyles.Normal);
+        var formatted = CreateFormattedText(
+            text,
+            fontSize,
+            fontWeight ?? FontWeights.Normal,
+            fontStyle ?? FontStyles.Normal
+        );
         formatted.MaxTextWidth = Math.Max(1, maxWidth);
         return formatted.Height;
     }
 
     /// <summary>計測用の <see cref="FormattedText"/> を生成する</summary>
-    private static FormattedText CreateFormattedText(string text, double fontSize, FontWeight fontWeight, FontStyle fontStyle) =>
+    private static FormattedText CreateFormattedText(
+        string text,
+        double fontSize,
+        FontWeight fontWeight,
+        FontStyle fontStyle
+    ) =>
         new(
             text,
             CultureInfo.CurrentUICulture,

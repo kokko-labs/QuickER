@@ -50,14 +50,18 @@ public static class ForeignKeyReferentialActionHelper
     }
 
     /// <summary>画面表示用の表記へ変換する（現状は SQL 表記と同一）</summary>
-    public static string ToDisplayText(this ForeignKeyReferentialAction action) => action.ToSqlText();
+    public static string ToDisplayText(this ForeignKeyReferentialAction action) =>
+        action.ToSqlText();
 
     /// <summary>外部キー制約の <c>ON DELETE</c> / <c>ON UPDATE</c> 句を組み立てる</summary>
     /// <returns>
     /// 両方が <see cref="ForeignKeyReferentialAction.NoAction"/> の場合は空文字、
     /// それ以外は先頭に半角スペースを含む句（例: <c>" ON DELETE CASCADE"</c>）
     /// </returns>
-    public static string BuildReferentialActionClause(ForeignKeyReferentialAction onDelete, ForeignKeyReferentialAction onUpdate)
+    public static string BuildReferentialActionClause(
+        ForeignKeyReferentialAction onDelete,
+        ForeignKeyReferentialAction onUpdate
+    )
     {
         var clauses = new List<string>();
 
@@ -79,6 +83,10 @@ public static class ForeignKeyReferentialActionHelper
     {
         return string.IsNullOrWhiteSpace(value)
             ? string.Empty
-            : value.Trim().Replace("_", " ", StringComparison.Ordinal).Replace("-", " ", StringComparison.Ordinal).ToUpperInvariant();
+            : value
+                .Trim()
+                .Replace("_", " ", StringComparison.Ordinal)
+                .Replace("-", " ", StringComparison.Ordinal)
+                .ToUpperInvariant();
     }
 }

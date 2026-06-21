@@ -17,7 +17,11 @@ public class AddColumnCommand : IUndoableCommand
 
     /// <summary><see cref="AddColumnCommand"/> を生成する</summary>
     /// <param name="index">挿入位置 null 指定で末尾に追加する</param>
-    public AddColumnCommand(ObservableCollection<ColumnViewModel> columns, ColumnViewModel column, int? index = null)
+    public AddColumnCommand(
+        ObservableCollection<ColumnViewModel> columns,
+        ColumnViewModel column,
+        int? index = null
+    )
     {
         _columns = columns;
         _column = column;

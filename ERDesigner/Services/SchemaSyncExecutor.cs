@@ -29,7 +29,11 @@ public class SchemaSyncExecutor
 
     /// <summary>スクリプトを単一トランザクション内で実行する（途中で例外発生時は ROLLBACK する）</summary>
     /// <remarks>全バッチ成功時のみ COMMIT し、原子性を保証する</remarks>
-    public async Task<ExecutionResult> ExecuteAsync(SqlConnectionSettings settings, string script, CancellationToken ct = default)
+    public async Task<ExecutionResult> ExecuteAsync(
+        SqlConnectionSettings settings,
+        string script,
+        CancellationToken ct = default
+    )
     {
         var result = new ExecutionResult();
         var batches = SplitBatches(script);
@@ -42,7 +46,8 @@ public class SchemaSyncExecutor
 
         await using var conn = new SqlConnection(settings.Build());
         await conn.OpenAsync(ct).ConfigureAwait(false);
-        await using var tran = (SqlTransaction)await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
+        await using var tran = (SqlTransaction)
+            await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
 
         try
         {

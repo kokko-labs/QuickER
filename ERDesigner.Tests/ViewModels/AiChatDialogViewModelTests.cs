@@ -15,12 +15,25 @@ public class AiChatDialogViewModelTests
         public T Invoke<T>(Func<T> func) => func();
     }
 
-    private static (AiChatDialogViewModel vm, FakeCodexAppServerClient client, string folder) CreateVm()
+    private static (
+        AiChatDialogViewModel vm,
+        FakeCodexAppServerClient client,
+        string folder
+    ) CreateVm()
     {
-        var folder = Path.Combine(Path.GetTempPath(), "ERDesignerTests", Guid.NewGuid().ToString("N"));
+        var folder = Path.Combine(
+            Path.GetTempPath(),
+            "ERDesignerTests",
+            Guid.NewGuid().ToString("N")
+        );
         var settingsStore = new CodexAppServerSettingsStore(folder);
         var client = new FakeCodexAppServerClient();
-        var vm = new AiChatDialogViewModel(mainViewModel: null, dispatcher: new SyncUiDispatcher(), settingsStore: settingsStore, codexClient: client);
+        var vm = new AiChatDialogViewModel(
+            mainViewModel: null,
+            dispatcher: new SyncUiDispatcher(),
+            settingsStore: settingsStore,
+            codexClient: client
+        );
         return (vm, client, folder);
     }
 

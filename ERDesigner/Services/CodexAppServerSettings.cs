@@ -17,14 +17,23 @@ public class CodexAppServerSettings
 public class CodexAppServerSettingsStore
 {
     /// <summary>JSON シリアライズ設定（インデント付与・プロパティ名は camelCase）</summary>
-    private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        WriteIndented = true,
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+    };
 
     /// <summary>設定ファイルの保存先フォルダ</summary>
     private readonly string _folder;
 
     /// <summary>既定の保存先（%APPDATA%\ERDesigner）で設定ストアを生成する</summary>
     public CodexAppServerSettingsStore()
-        : this(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ERDesigner")) { }
+        : this(
+            Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "ERDesigner"
+            )
+        ) { }
 
     /// <summary>保存先フォルダを指定して設定ストアを生成する（テスト用）</summary>
     public CodexAppServerSettingsStore(string folder)
@@ -46,7 +55,8 @@ public class CodexAppServerSettingsStore
         try
         {
             var json = File.ReadAllText(SettingsPath);
-            return JsonSerializer.Deserialize<CodexAppServerSettings>(json, JsonOptions) ?? new CodexAppServerSettings();
+            return JsonSerializer.Deserialize<CodexAppServerSettings>(json, JsonOptions)
+                ?? new CodexAppServerSettings();
         }
         catch
         {

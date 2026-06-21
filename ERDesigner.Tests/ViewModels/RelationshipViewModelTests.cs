@@ -20,10 +20,26 @@ public class RelationshipViewModelTests
 
     /// <summary>リレーション種別ごとに起点・終点のマーカー種別が正しく返ることを検証する</summary>
     [Theory(DisplayName = "種別ごとに正しいマーカー種別が返る")]
-    [InlineData(RelationshipType.OneToOne, RelationshipViewModel.MarkerKind.One, RelationshipViewModel.MarkerKind.One)]
-    [InlineData(RelationshipType.OneToMany, RelationshipViewModel.MarkerKind.One, RelationshipViewModel.MarkerKind.Many)]
-    [InlineData(RelationshipType.ManyToMany, RelationshipViewModel.MarkerKind.Many, RelationshipViewModel.MarkerKind.Many)]
-    public void Markers_AreCorrect(RelationshipType type, RelationshipViewModel.MarkerKind expectedSource, RelationshipViewModel.MarkerKind expectedTarget)
+    [InlineData(
+        RelationshipType.OneToOne,
+        RelationshipViewModel.MarkerKind.One,
+        RelationshipViewModel.MarkerKind.One
+    )]
+    [InlineData(
+        RelationshipType.OneToMany,
+        RelationshipViewModel.MarkerKind.One,
+        RelationshipViewModel.MarkerKind.Many
+    )]
+    [InlineData(
+        RelationshipType.ManyToMany,
+        RelationshipViewModel.MarkerKind.Many,
+        RelationshipViewModel.MarkerKind.Many
+    )]
+    public void Markers_AreCorrect(
+        RelationshipType type,
+        RelationshipViewModel.MarkerKind expectedSource,
+        RelationshipViewModel.MarkerKind expectedTarget
+    )
     {
         var a = NewEntity(0, 0);
         var b = NewEntity(300, 0);
@@ -39,7 +55,11 @@ public class RelationshipViewModelTests
     {
         var a = NewEntity(0, 0);
         var b = NewEntity(300, 0);
-        var rel = new RelationshipViewModel(new Relationship { Type = RelationshipType.OneToOne }, a, b);
+        var rel = new RelationshipViewModel(
+            new Relationship { Type = RelationshipType.OneToOne },
+            a,
+            b
+        );
 
         var changed = new List<string?>();
         rel.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
@@ -72,7 +92,11 @@ public class RelationshipViewModelTests
                 Width = 300,
             }
         );
-        var rel = new RelationshipViewModel(new Relationship { Type = RelationshipType.OneToMany }, a, b);
+        var rel = new RelationshipViewModel(
+            new Relationship { Type = RelationshipType.OneToMany },
+            a,
+            b
+        );
 
         rel.LabelX.Should().Be(300);
     }
@@ -97,7 +121,11 @@ public class RelationshipViewModelTests
                 Width = 200,
             }
         );
-        var rel = new RelationshipViewModel(new Relationship { Type = RelationshipType.OneToMany }, a, b);
+        var rel = new RelationshipViewModel(
+            new Relationship { Type = RelationshipType.OneToMany },
+            a,
+            b
+        );
 
         rel.SourceMarkerY.Should().BeGreaterThan(a.Y + a.DisplayHeight + 10);
         rel.TargetMarkerY.Should().BeLessThan(b.Y - 10);
@@ -123,7 +151,11 @@ public class RelationshipViewModelTests
                 Width = 200,
             }
         );
-        var rel = new RelationshipViewModel(new Relationship { Type = RelationshipType.OneToMany }, a, b);
+        var rel = new RelationshipViewModel(
+            new Relationship { Type = RelationshipType.OneToMany },
+            a,
+            b
+        );
 
         rel.SourceMarkerX.Should().BeGreaterThan(a.X + a.Width + 10);
         rel.TargetMarkerX.Should().BeLessThan(b.X - 10);
@@ -149,10 +181,16 @@ public class RelationshipViewModelTests
                 Width = 200,
             }
         );
-        var rel = new RelationshipViewModel(new Relationship { Type = RelationshipType.OneToMany }, a, b);
+        var rel = new RelationshipViewModel(
+            new Relationship { Type = RelationshipType.OneToMany },
+            a,
+            b
+        );
 
         // マーカー描画領域は 24x24（左上 + 半径 12 が中心と一致する）
-        (rel.SourceMarkerLeft + 12).Should().BeApproximately(rel.SourceMarkerX, 0.001);
+        (rel.SourceMarkerLeft + 12)
+            .Should()
+            .BeApproximately(rel.SourceMarkerX, 0.001);
         (rel.SourceMarkerTop + 12).Should().BeApproximately(rel.SourceMarkerY, 0.001);
         (rel.TargetMarkerLeft + 12).Should().BeApproximately(rel.TargetMarkerX, 0.001);
         (rel.TargetMarkerTop + 12).Should().BeApproximately(rel.TargetMarkerY, 0.001);
@@ -180,10 +218,16 @@ public class RelationshipViewModelTests
                 Width = 200,
             }
         );
-        var rel = new RelationshipViewModel(new Relationship { Type = RelationshipType.OneToMany }, a, b);
+        var rel = new RelationshipViewModel(
+            new Relationship { Type = RelationshipType.OneToMany },
+            a,
+            b
+        );
 
         // マーカー中心は境界から半径（12px）だけ線の内側にあり、外端が境界 X1 / X2 に一致する
-        (rel.SourceMarkerX - 12).Should().BeApproximately(rel.X1, 0.001);
+        (rel.SourceMarkerX - 12)
+            .Should()
+            .BeApproximately(rel.X1, 0.001);
         (rel.TargetMarkerX + 12).Should().BeApproximately(rel.X2, 0.001);
     }
 
@@ -207,7 +251,11 @@ public class RelationshipViewModelTests
                 Width = 200,
             }
         );
-        var rel = new RelationshipViewModel(new Relationship { Type = RelationshipType.OneToMany }, a, b);
+        var rel = new RelationshipViewModel(
+            new Relationship { Type = RelationshipType.OneToMany },
+            a,
+            b
+        );
 
         rel.TargetMarkerAngle.Should().BeApproximately(0, 0.001);
     }
@@ -232,7 +280,11 @@ public class RelationshipViewModelTests
                 Width = 200,
             }
         );
-        var rel = new RelationshipViewModel(new Relationship { Type = RelationshipType.ManyToMany }, a, b);
+        var rel = new RelationshipViewModel(
+            new Relationship { Type = RelationshipType.ManyToMany },
+            a,
+            b
+        );
 
         rel.SourceMarkerAngle.Should().BeApproximately(180, 0.001);
     }
@@ -296,7 +348,11 @@ public class RelationshipViewModelTests
                 },
             }
         );
-        var rel = new RelationshipViewModel(new Relationship { Type = RelationshipType.OneToMany }, source, target);
+        var rel = new RelationshipViewModel(
+            new Relationship { Type = RelationshipType.OneToMany },
+            source,
+            target
+        );
 
         rel.AvailableSourceColumns.Should().ContainSingle(c => c.Name == "Id");
         rel.AvailableTargetColumns.Should().HaveCount(2);
@@ -311,7 +367,15 @@ public class RelationshipViewModelTests
         var b = NewEntity(300, 0);
         a.Columns.Add(new ColumnViewModel(new Column { Name = "ParentId", DataType = "int" }));
         b.Columns.Add(new ColumnViewModel(new Column { Name = "ChildId", DataType = "int" }));
-        var rel = new RelationshipViewModel(new Relationship { Type = RelationshipType.OneToMany }, a, b) { SourceColumnId = a.Columns[0].Id, TargetColumnId = b.Columns[0].Id };
+        var rel = new RelationshipViewModel(
+            new Relationship { Type = RelationshipType.OneToMany },
+            a,
+            b
+        )
+        {
+            SourceColumnId = a.Columns[0].Id,
+            TargetColumnId = b.Columns[0].Id,
+        };
 
         rel.Type = RelationshipType.ManyToMany;
 
@@ -350,7 +414,15 @@ public class RelationshipViewModelTests
     {
         var entity = NewEntity(100, 120);
         entity.Columns.Add(new ColumnViewModel(new Column { Name = "ParentId", DataType = "int" }));
-        var rel = new RelationshipViewModel(new Relationship { Type = RelationshipType.OneToMany, TargetColumnId = entity.Columns.Last().Id }, entity, entity);
+        var rel = new RelationshipViewModel(
+            new Relationship
+            {
+                Type = RelationshipType.OneToMany,
+                TargetColumnId = entity.Columns.Last().Id,
+            },
+            entity,
+            entity
+        );
 
         rel.IsSelfRelationship.Should().BeTrue();
         rel.ShowSelfLoop.Should().BeTrue();

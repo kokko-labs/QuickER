@@ -33,7 +33,13 @@ public static class ImageExportService
             height = double.IsFinite(bounds.Height) && bounds.Height > 0 ? bounds.Height : 600;
         }
 
-        var rtb = new RenderTargetBitmap((int)Math.Ceiling(width), (int)Math.Ceiling(height), 96, 96, PixelFormats.Pbgra32);
+        var rtb = new RenderTargetBitmap(
+            (int)Math.Ceiling(width),
+            (int)Math.Ceiling(height),
+            96,
+            96,
+            PixelFormats.Pbgra32
+        );
         rtb.Render(visual);
 
         var encoder = new PngBitmapEncoder();
@@ -46,7 +52,8 @@ public static class ImageExportService
     /// <summary><see cref="MainViewModel"/> の現在状態から SVG ファイルを書き出す</summary>
     /// <param name="vm">対象の <see cref="MainViewModel"/></param>
     /// <param name="path">出力先パス</param>
-    public static void ExportSvg(MainViewModel vm, string path) => File.WriteAllText(path, BuildSvg(vm), Encoding.UTF8);
+    public static void ExportSvg(MainViewModel vm, string path) =>
+        File.WriteAllText(path, BuildSvg(vm), Encoding.UTF8);
 
     /// <summary>SVG 文字列を生成する（テスト検証のため公開する）</summary>
     public static string BuildSvg(MainViewModel vm)
@@ -56,7 +63,8 @@ public static class ImageExportService
         const double headerHeight = 28;
         const double padding = 30;
 
-        double Height(EntityViewModel e) => headerHeight + Math.Max(1, e.Columns.Count) * rowHeight + 8;
+        double Height(EntityViewModel e) =>
+            headerHeight + Math.Max(1, e.Columns.Count) * rowHeight + 8;
 
         double maxX = 400,
             maxY = 300;
@@ -81,8 +89,12 @@ public static class ImageExportService
         // リレーション
         foreach (var r in vm.Relationships)
         {
-            sb.AppendLine($"  <line class=\"rel\" x1=\"{r.X1.ToString(ci)}\" y1=\"{r.Y1.ToString(ci)}\" x2=\"{r.X2.ToString(ci)}\" y2=\"{r.Y2.ToString(ci)}\" />");
-            sb.AppendLine($"  <text class=\"label\" x=\"{r.LabelX.ToString(ci)}\" y=\"{r.LabelY.ToString(ci)}\" text-anchor=\"middle\">{SecurityElement.Escape(r.Label)}</text>");
+            sb.AppendLine(
+                $"  <line class=\"rel\" x1=\"{r.X1.ToString(ci)}\" y1=\"{r.Y1.ToString(ci)}\" x2=\"{r.X2.ToString(ci)}\" y2=\"{r.Y2.ToString(ci)}\" />"
+            );
+            sb.AppendLine(
+                $"  <text class=\"label\" x=\"{r.LabelX.ToString(ci)}\" y=\"{r.LabelY.ToString(ci)}\" text-anchor=\"middle\">{SecurityElement.Escape(r.Label)}</text>"
+            );
         }
 
         // エンティティ
@@ -91,9 +103,15 @@ public static class ImageExportService
             var h = Height(e);
             var headerColor = EntityTitleColorPalette.Normalize(e.TitleBackgroundColor);
             sb.AppendLine($"  <g transform=\"translate({e.X.ToString(ci)},{e.Y.ToString(ci)})\">");
-            sb.AppendLine($"    <rect class=\"entity\" width=\"{e.Width.ToString(ci)}\" height=\"{h.ToString(ci)}\" rx=\"6\" ry=\"6\" />");
-            sb.AppendLine($"    <rect width=\"{e.Width.ToString(ci)}\" height=\"{headerHeight.ToString(ci)}\" rx=\"6\" ry=\"6\" fill=\"{headerColor}\" />");
-            sb.AppendLine($"    <text class=\"title\" x=\"10\" y=\"18\">{SecurityElement.Escape(e.TableName)}</text>");
+            sb.AppendLine(
+                $"    <rect class=\"entity\" width=\"{e.Width.ToString(ci)}\" height=\"{h.ToString(ci)}\" rx=\"6\" ry=\"6\" />"
+            );
+            sb.AppendLine(
+                $"    <rect width=\"{e.Width.ToString(ci)}\" height=\"{headerHeight.ToString(ci)}\" rx=\"6\" ry=\"6\" fill=\"{headerColor}\" />"
+            );
+            sb.AppendLine(
+                $"    <text class=\"title\" x=\"10\" y=\"18\">{SecurityElement.Escape(e.TableName)}</text>"
+            );
 
             for (var i = 0; i < e.Columns.Count; i++)
             {
@@ -107,9 +125,15 @@ public static class ImageExportService
                     c.IsPrimaryKey ? "pk"
                     : c.IsForeignKey ? "fk"
                     : "col";
-                sb.AppendLine($"    <text class=\"{markerClass}\" x=\"10\" y=\"{y.ToString(ci)}\">{marker}</text>");
-                sb.AppendLine($"    <text class=\"col\" x=\"40\" y=\"{y.ToString(ci)}\">{SecurityElement.Escape(c.Name)}</text>");
-                sb.AppendLine($"    <text class=\"col\" x=\"{(e.Width - 8).ToString(ci)}\" y=\"{y.ToString(ci)}\" text-anchor=\"end\">{SecurityElement.Escape(c.DataType)}</text>");
+                sb.AppendLine(
+                    $"    <text class=\"{markerClass}\" x=\"10\" y=\"{y.ToString(ci)}\">{marker}</text>"
+                );
+                sb.AppendLine(
+                    $"    <text class=\"col\" x=\"40\" y=\"{y.ToString(ci)}\">{SecurityElement.Escape(c.Name)}</text>"
+                );
+                sb.AppendLine(
+                    $"    <text class=\"col\" x=\"{(e.Width - 8).ToString(ci)}\" y=\"{y.ToString(ci)}\" text-anchor=\"end\">{SecurityElement.Escape(c.DataType)}</text>"
+                );
             }
 
             sb.AppendLine("  </g>");

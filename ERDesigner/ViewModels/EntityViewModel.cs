@@ -102,7 +102,10 @@ public partial class EntityViewModel : ObservableObject
         {
             if (double.IsNaN(_displayHeightCache))
             {
-                _displayHeightCache = DiagramMetricsService.EstimateEntityHeight(this, ShowDescriptionsInDiagram);
+                _displayHeightCache = DiagramMetricsService.EstimateEntityHeight(
+                    this,
+                    ShowDescriptionsInDiagram
+                );
             }
 
             return _displayHeightCache;
@@ -127,7 +130,9 @@ public partial class EntityViewModel : ObservableObject
         _memo = model.Memo;
         _description = model.Description ?? string.Empty;
         _titleBackgroundColor = EntityTitleColorPalette.Normalize(model.TitleBackgroundColor);
-        Columns = new ObservableCollection<ColumnViewModel>(model.Columns.Select(c => new ColumnViewModel(c)));
+        Columns = new ObservableCollection<ColumnViewModel>(
+            model.Columns.Select(c => new ColumnViewModel(c))
+        );
 
         Columns.CollectionChanged += OnColumnsChanged;
 

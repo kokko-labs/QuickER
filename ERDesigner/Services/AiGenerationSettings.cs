@@ -61,10 +61,12 @@ public class AiGenerationSettings
     public string Prompt { get; set; } = string.Empty;
 
     /// <summary>AI が生成するテーブル名・カラム名の命名規則</summary>
-    public AiIdentifierNamingStyle IdentifierNamingStyle { get; set; } = AiIdentifierNamingStyle.PascalCase;
+    public AiIdentifierNamingStyle IdentifierNamingStyle { get; set; } =
+        AiIdentifierNamingStyle.PascalCase;
 
     /// <summary>AI が生成するテーブル名の単数形・複数形の方針</summary>
-    public AiTableNameNumberStyle TableNameNumberStyle { get; set; } = AiTableNameNumberStyle.Singular;
+    public AiTableNameNumberStyle TableNameNumberStyle { get; set; } =
+        AiTableNameNumberStyle.Singular;
 
     /// <summary>新規生成か既存 ER 図の更新かを示す実行モード</summary>
     public AiGenerationMode GenerationMode { get; set; } = AiGenerationMode.CreateNew;

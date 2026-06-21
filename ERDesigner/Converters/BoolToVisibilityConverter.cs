@@ -14,7 +14,10 @@ public class BoolToVisibilityConverter : IValueConverter
     {
         var boolValue = value is true;
 
-        if (parameter is string param && param.Equals("Inverse", StringComparison.OrdinalIgnoreCase))
+        if (
+            parameter is string param
+            && param.Equals("Inverse", StringComparison.OrdinalIgnoreCase)
+        )
         {
             boolValue = !boolValue;
         }
@@ -23,5 +26,10 @@ public class BoolToVisibilityConverter : IValueConverter
     }
 
     /// <summary>逆変換は非対応</summary>
-    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) => throw new NotSupportedException();
+    public object ConvertBack(
+        object? value,
+        Type targetType,
+        object? parameter,
+        CultureInfo culture
+    ) => throw new NotSupportedException();
 }

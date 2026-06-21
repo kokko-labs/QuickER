@@ -90,8 +90,19 @@ public class TableDefinitionDocumentImporterTests
 
         diagram.Entities.Should().HaveCount(2);
         diagram.Relationships.Should().ContainSingle();
-        diagram.Entities.Should().ContainSingle(entity => entity.TableName == "Category" && entity.Description == "カテゴリ" && entity.Memo == "分類用");
-        diagram.Entities.Should().ContainSingle(entity => entity.TableName == "Product" && entity.Columns.Any(column => column.Name == "CategoryId" && column.IsForeignKey));
+        diagram
+            .Entities.Should()
+            .ContainSingle(entity =>
+                entity.TableName == "Category"
+                && entity.Description == "カテゴリ"
+                && entity.Memo == "分類用"
+            );
+        diagram
+            .Entities.Should()
+            .ContainSingle(entity =>
+                entity.TableName == "Product"
+                && entity.Columns.Any(column => column.Name == "CategoryId" && column.IsForeignKey)
+            );
         diagram.Relationships[0].ConstraintName.Should().Be("FK_Product_Category");
         diagram.Relationships[0].Type.Should().Be(RelationshipType.OneToMany);
         diagram.Relationships[0].OnDelete.Should().Be(ForeignKeyReferentialAction.Cascade);

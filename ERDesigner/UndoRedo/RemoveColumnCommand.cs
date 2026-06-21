@@ -20,7 +20,11 @@ public class RemoveColumnCommand : IUndoableCommand
     private readonly int _index;
 
     /// <summary>削除前のリレーション FK スナップショット（リレーション VM と参照カラム ID の対）</summary>
-    private readonly IReadOnlyList<(RelationshipViewModel Relationship, Guid? SourceColumnId, Guid? TargetColumnId)> _relationshipSnapshots;
+    private readonly IReadOnlyList<(
+        RelationshipViewModel Relationship,
+        Guid? SourceColumnId,
+        Guid? TargetColumnId
+    )> _relationshipSnapshots;
 
     /// <summary>Undo / Redo 後に FK ルールを再適用する後処理</summary>
     private readonly Action _afterApply;
@@ -30,7 +34,12 @@ public class RemoveColumnCommand : IUndoableCommand
     /// <param name="column">削除対象のカラム</param>
     /// <param name="affectedRelationships">削除カラムを参照しているリレーション一覧</param>
     /// <param name="afterApply">Undo / Redo 後に呼ぶ後処理（FK ルール再適用など）</param>
-    public RemoveColumnCommand(ObservableCollection<ColumnViewModel> columns, ColumnViewModel column, IEnumerable<RelationshipViewModel> affectedRelationships, Action afterApply)
+    public RemoveColumnCommand(
+        ObservableCollection<ColumnViewModel> columns,
+        ColumnViewModel column,
+        IEnumerable<RelationshipViewModel> affectedRelationships,
+        Action afterApply
+    )
     {
         _columns = columns;
         _column = column;
@@ -38,7 +47,9 @@ public class RemoveColumnCommand : IUndoableCommand
         _afterApply = afterApply;
 
         // 削除前の SourceColumnId/TargetColumnId をスナップショット保存する
-        _relationshipSnapshots = affectedRelationships.Select(r => (r, r.SourceColumnId, r.TargetColumnId)).ToList();
+        _relationshipSnapshots = affectedRelationships
+            .Select(r => (r, r.SourceColumnId, r.TargetColumnId))
+            .ToList();
     }
 
     /// <inheritdoc />

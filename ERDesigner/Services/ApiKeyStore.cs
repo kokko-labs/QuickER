@@ -10,7 +10,10 @@ namespace ERDesigner.Services;
 public static class ApiKeyStore
 {
     /// <summary>暗号化ファイルの保存先フォルダ (%APPDATA%\ERDesigner)</summary>
-    private static readonly string Folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ERDesigner");
+    private static readonly string Folder = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+        "ERDesigner"
+    );
 
     /// <summary>キー名に対応する保存ファイルのフルパスを返す</summary>
     private static string PathFor(string name) => Path.Combine(Folder, name + ".dat");
@@ -34,7 +37,11 @@ public static class ApiKeyStore
         }
 
         var data = Encoding.UTF8.GetBytes(apiKey);
-        var encrypted = ProtectedData.Protect(data, optionalEntropy: null, scope: DataProtectionScope.CurrentUser);
+        var encrypted = ProtectedData.Protect(
+            data,
+            optionalEntropy: null,
+            scope: DataProtectionScope.CurrentUser
+        );
         File.WriteAllBytes(p, encrypted);
     }
 
@@ -53,7 +60,11 @@ public static class ApiKeyStore
         try
         {
             var encrypted = File.ReadAllBytes(p);
-            var data = ProtectedData.Unprotect(encrypted, optionalEntropy: null, scope: DataProtectionScope.CurrentUser);
+            var data = ProtectedData.Unprotect(
+                encrypted,
+                optionalEntropy: null,
+                scope: DataProtectionScope.CurrentUser
+            );
             return Encoding.UTF8.GetString(data);
         }
         catch

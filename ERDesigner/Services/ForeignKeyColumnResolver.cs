@@ -24,7 +24,13 @@ public static class ForeignKeyColumnResolver
     /// <param name="IsForeignKey">外部キーとしてマーク済みかどうか</param>
     /// <param name="DataType">データ型（同率時のタイブレークに使用）</param>
     /// <param name="IsUsedByOtherRelationship">既に他リレーションの参照先列かどうか（true なら候補から除外）</param>
-    public readonly record struct CandidateColumn(string Name, bool IsPrimaryKey, bool IsForeignKey, string? DataType, bool IsUsedByOtherRelationship);
+    public readonly record struct CandidateColumn(
+        string Name,
+        bool IsPrimaryKey,
+        bool IsForeignKey,
+        string? DataType,
+        bool IsUsedByOtherRelationship
+    );
 
     /// <summary>参照先テーブルの列一覧から外部キー列の既定候補を解決し、その位置を返す</summary>
     /// <param name="sourceTableName">参照元（親）テーブル名</param>
@@ -54,15 +60,33 @@ public static class ForeignKeyColumnResolver
             }
         }
 
-        var eligible = Enumerable.Range(0, targetColumns.Count).Where(i => !targetColumns[i].IsPrimaryKey && !targetColumns[i].IsUsedByOtherRelationship).ToList();
+        var eligible = Enumerable
+            .Range(0, targetColumns.Count)
+            .Where(i =>
+                !targetColumns[i].IsPrimaryKey && !targetColumns[i].IsUsedByOtherRelationship
+            )
+            .ToList();
 
         // 優先ランク（上から順に評価し、最初に候補が見つかったランクで確定する）
         var ranks = new Func<CandidateColumn, bool>[]
         {
-            column => expectedNames.Any(name => string.Equals(column.Name, name, StringComparison.OrdinalIgnoreCase)),
-            column => sourceKeyColumnName is not null && string.Equals(column.Name, sourceKeyColumnName, StringComparison.OrdinalIgnoreCase),
+            column =>
+                expectedNames.Any(name =>
+                    string.Equals(column.Name, name, StringComparison.OrdinalIgnoreCase)
+                ),
+            column =>
+                sourceKeyColumnName is not null
+                && string.Equals(
+                    column.Name,
+                    sourceKeyColumnName,
+                    StringComparison.OrdinalIgnoreCase
+                ),
             column => column.IsForeignKey,
-            column => expectedNames.Any(name => column.Name.Length > name.Length && column.Name.EndsWith(name, StringComparison.OrdinalIgnoreCase)),
+            column =>
+                expectedNames.Any(name =>
+                    column.Name.Length > name.Length
+                    && column.Name.EndsWith(name, StringComparison.OrdinalIgnoreCase)
+                ),
         };
 
         foreach (var matches in ranks)
@@ -75,16 +99,28 @@ public static class ForeignKeyColumnResolver
             }
 
             // 同率はデータ型一致を優先し、残りは宣言順（OrderByDescending は安定ソート）
-            return hits.OrderByDescending(i => IsSameDataType(targetColumns[i].DataType, sourceKeyDataType)).First();
+            return hits.OrderByDescending(i =>
+                    IsSameDataType(targetColumns[i].DataType, sourceKeyDataType)
+                )
+                .First();
         }
 
         return null;
     }
 
     /// <summary>参照元キー列を既定（PK 列）として参照先の外部キー列を解決する</summary>
-    public static ColumnViewModel? ResolveTargetColumn(EntityViewModel source, EntityViewModel target, IEnumerable<RelationshipViewModel> existingRelationships)
+    public static ColumnViewModel? ResolveTargetColumn(
+        EntityViewModel source,
+        EntityViewModel target,
+        IEnumerable<RelationshipViewModel> existingRelationships
+    )
     {
-        return ResolveTargetColumn(source, target, source.Columns.FirstOrDefault(c => c.IsPrimaryKey), existingRelationships);
+        return ResolveTargetColumn(
+            source,
+            target,
+            source.Columns.FirstOrDefault(c => c.IsPrimaryKey),
+            existingRelationships
+        );
     }
 
     /// <summary>参照元キー列を指定して参照先の外部キー列を解決する</summary>
@@ -103,10 +139,22 @@ public static class ForeignKeyColumnResolver
             .ToHashSet();
 
         var candidates = target
-            .Columns.Select(c => new CandidateColumn(c.Name, c.IsPrimaryKey, c.IsForeignKey, c.DataType, usedColumnIds.Contains(c.Id)))
+            .Columns.Select(c => new CandidateColumn(
+                c.Name,
+                c.IsPrimaryKey,
+                c.IsForeignKey,
+                c.DataType,
+                usedColumnIds.Contains(c.Id)
+            ))
             .ToList();
 
-        var index = ResolveTargetColumnIndex(source.TableName, sourceKeyColumn?.Name, sourceKeyColumn?.DataType, candidates, ReferenceEquals(source, target));
+        var index = ResolveTargetColumnIndex(
+            source.TableName,
+            sourceKeyColumn?.Name,
+            sourceKeyColumn?.DataType,
+            candidates,
+            ReferenceEquals(source, target)
+        );
 
         return index is null ? null : target.Columns[index.Value];
     }
@@ -130,7 +178,9 @@ public static class ForeignKeyColumnResolver
         void AddVariants(List<string> sourceWords)
         {
             names.Add(string.Concat(sourceWords.Select(IdentifierNameHelper.ToPascalWord)) + "Id");
-            names.Add(string.Join("_", sourceWords.Select(static word => word.ToLowerInvariant())) + "_id");
+            names.Add(
+                string.Join("_", sourceWords.Select(static word => word.ToLowerInvariant())) + "_id"
+            );
         }
 
         AddVariants(words);

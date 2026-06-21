@@ -125,7 +125,10 @@ public class SchemaSyncDialogViewModelTests
     public async Task Execute_ConfirmDeclined_DoesNotRunScript()
     {
         var dialogs = new StubDialogService { ConfirmResult = false };
-        var vm = new SchemaSyncDialogViewModel(new SqlConnectionSettings(), [], [], dialogs) { ScriptPreview = "DROP TABLE [X];" };
+        var vm = new SchemaSyncDialogViewModel(new SqlConnectionSettings(), [], [], dialogs)
+        {
+            ScriptPreview = "DROP TABLE [X];",
+        };
 
         await vm.ExecuteCommand.ExecuteAsync(null);
 

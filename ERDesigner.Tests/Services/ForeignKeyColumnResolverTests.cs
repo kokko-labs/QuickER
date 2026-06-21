@@ -7,18 +7,40 @@ namespace ERDesigner.Tests.Services;
 public class ForeignKeyColumnResolverTests
 {
     /// <summary>候補列を簡潔に生成する</summary>
-    private static ForeignKeyColumnResolver.CandidateColumn Col(string name, bool isPk = false, bool isFk = false, string? dataType = "int", bool isUsed = false) =>
-        new(name, isPk, isFk, dataType, isUsed);
+    private static ForeignKeyColumnResolver.CandidateColumn Col(
+        string name,
+        bool isPk = false,
+        bool isFk = false,
+        string? dataType = "int",
+        bool isUsed = false
+    ) => new(name, isPk, isFk, dataType, isUsed);
 
     /// <summary>既定引数（Customer テーブル、PK Id:int、非自己参照）で解決する</summary>
-    private static int? Resolve(IReadOnlyList<ForeignKeyColumnResolver.CandidateColumn> columns, string sourceTable = "Customer", string? pkName = "Id", string? pkType = "int", bool selfRef = false) =>
-        ForeignKeyColumnResolver.ResolveTargetColumnIndex(sourceTable, pkName, pkType, columns, selfRef);
+    private static int? Resolve(
+        IReadOnlyList<ForeignKeyColumnResolver.CandidateColumn> columns,
+        string sourceTable = "Customer",
+        string? pkName = "Id",
+        string? pkType = "int",
+        bool selfRef = false
+    ) =>
+        ForeignKeyColumnResolver.ResolveTargetColumnIndex(
+            sourceTable,
+            pkName,
+            pkType,
+            columns,
+            selfRef
+        );
 
     /// <summary>①: 親テーブル名+Id（パスカルケース）と一致する列が選ばれることを検証する</summary>
     [Fact(DisplayName = "①: 親テーブル名+Id の列が最優先で選ばれる")]
     public void Rank1_TableNameIdConvention_IsPreferred()
     {
-        var columns = new[] { Col("Id", isPk: true), Col("OrderDate", dataType: "datetime2"), Col("CustomerId") };
+        var columns = new[]
+        {
+            Col("Id", isPk: true),
+            Col("OrderDate", dataType: "datetime2"),
+            Col("CustomerId"),
+        };
 
         Resolve(columns).Should().Be(2);
     }
@@ -54,7 +76,12 @@ public class ForeignKeyColumnResolverTests
     [Fact(DisplayName = "③: 外部キーとしてマーク済みの列が選ばれる")]
     public void Rank3_ForeignKeyFlaggedColumn_IsSelected()
     {
-        var columns = new[] { Col("Id", isPk: true), Col("Name", dataType: "nvarchar(50)"), Col("OwnerId", isFk: true) };
+        var columns = new[]
+        {
+            Col("Id", isPk: true),
+            Col("Name", dataType: "nvarchar(50)"),
+            Col("OwnerId", isFk: true),
+        };
 
         Resolve(columns).Should().Be(2);
     }
@@ -63,7 +90,12 @@ public class ForeignKeyColumnResolverTests
     [Fact(DisplayName = "④: ロール付き FK 名が後方一致で選ばれる")]
     public void Rank4_RolePrefixedFkName_MatchesBySuffix()
     {
-        var columns = new[] { Col("Id", isPk: true), Col("OrderDate", dataType: "datetime2"), Col("BillingCustomerId") };
+        var columns = new[]
+        {
+            Col("Id", isPk: true),
+            Col("OrderDate", dataType: "datetime2"),
+            Col("BillingCustomerId"),
+        };
 
         Resolve(columns).Should().Be(2);
     }
@@ -81,7 +113,11 @@ public class ForeignKeyColumnResolverTests
     [Fact(DisplayName = "主キー列は候補から除外される")]
     public void PrimaryKeyColumns_AreExcluded()
     {
-        var columns = new[] { Col("CustomerId", isPk: true), Col("Note", dataType: "nvarchar(100)") };
+        var columns = new[]
+        {
+            Col("CustomerId", isPk: true),
+            Col("Note", dataType: "nvarchar(100)"),
+        };
 
         Resolve(columns).Should().BeNull();
     }
@@ -90,7 +126,12 @@ public class ForeignKeyColumnResolverTests
     [Fact(DisplayName = "使用済みの列は除外され次点の候補が選ばれる")]
     public void UsedColumns_AreExcluded()
     {
-        var columns = new[] { Col("Id", isPk: true), Col("CustomerId", isUsed: true), Col("OwnerCustomerId") };
+        var columns = new[]
+        {
+            Col("Id", isPk: true),
+            Col("CustomerId", isUsed: true),
+            Col("OwnerCustomerId"),
+        };
 
         Resolve(columns).Should().Be(2);
     }
@@ -99,7 +140,12 @@ public class ForeignKeyColumnResolverTests
     [Fact(DisplayName = "該当列が無ければ未割当（null）となる")]
     public void NoMatch_ReturnsNull()
     {
-        var columns = new[] { Col("Id", isPk: true), Col("Quantity"), Col("Note", dataType: "nvarchar(100)") };
+        var columns = new[]
+        {
+            Col("Id", isPk: true),
+            Col("Quantity"),
+            Col("Note", dataType: "nvarchar(100)"),
+        };
 
         Resolve(columns).Should().BeNull();
     }
@@ -109,7 +155,12 @@ public class ForeignKeyColumnResolverTests
     public void Tie_IsBrokenByDataTypeMatch()
     {
         // 両方とも③（FK マーク済み）で同率だが、型一致する 2 番目が優先される
-        var columns = new[] { Col("Id", isPk: true), Col("RegionCode", isFk: true, dataType: "nvarchar(10)"), Col("OwnerId", isFk: true, dataType: "bigint") };
+        var columns = new[]
+        {
+            Col("Id", isPk: true),
+            Col("RegionCode", isFk: true, dataType: "nvarchar(10)"),
+            Col("OwnerId", isFk: true, dataType: "bigint"),
+        };
 
         Resolve(columns, pkType: "bigint").Should().Be(2);
     }
@@ -118,7 +169,12 @@ public class ForeignKeyColumnResolverTests
     [Fact(DisplayName = "同率かつ同型なら宣言順で先の列が選ばれる")]
     public void Tie_FallsBackToDeclarationOrder()
     {
-        var columns = new[] { Col("Id", isPk: true), Col("OwnerId", isFk: true), Col("ManagerId", isFk: true) };
+        var columns = new[]
+        {
+            Col("Id", isPk: true),
+            Col("OwnerId", isFk: true),
+            Col("ManagerId", isFk: true),
+        };
 
         Resolve(columns).Should().Be(1);
     }
@@ -127,7 +183,12 @@ public class ForeignKeyColumnResolverTests
     [Fact(DisplayName = "自己参照では ParentId が選ばれる")]
     public void SelfReference_ParentId_IsSelected()
     {
-        var columns = new[] { Col("Id", isPk: true), Col("Name", dataType: "nvarchar(50)"), Col("ParentId") };
+        var columns = new[]
+        {
+            Col("Id", isPk: true),
+            Col("Name", dataType: "nvarchar(50)"),
+            Col("ParentId"),
+        };
 
         Resolve(columns, sourceTable: "Employee", selfRef: true).Should().Be(2);
     }
@@ -138,7 +199,9 @@ public class ForeignKeyColumnResolverTests
     {
         var columns = new[] { Col("EmployeeId", isPk: true), Col("ParentEmployeeId") };
 
-        Resolve(columns, sourceTable: "Employee", pkName: "EmployeeId", selfRef: true).Should().Be(1);
+        Resolve(columns, sourceTable: "Employee", pkName: "EmployeeId", selfRef: true)
+            .Should()
+            .Be(1);
     }
 
     /// <summary>期待 FK 名の一覧にパスカル・スネーク・単数形化の変体が含まれることを検証する</summary>

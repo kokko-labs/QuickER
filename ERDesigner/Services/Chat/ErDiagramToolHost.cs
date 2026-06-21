@@ -22,7 +22,9 @@ public sealed class ErDiagramToolHost : IErDiagramToolHost
 
         try
         {
-            using var document = JsonDocument.Parse(string.IsNullOrWhiteSpace(argumentsJson) ? "{}" : argumentsJson);
+            using var document = JsonDocument.Parse(
+                string.IsNullOrWhiteSpace(argumentsJson) ? "{}" : argumentsJson
+            );
             arguments = document.RootElement.Clone();
         }
         catch (JsonException)

@@ -40,10 +40,16 @@ public static class TableDefinitionDocumentExporter
         var workbook = new XLWorkbook();
         ApplyWorkbookStyle(workbook);
 
-        var entities = vm.Entities.OrderBy(entity => entity.TableName, StringComparer.OrdinalIgnoreCase).ToList();
+        var entities = vm
+            .Entities.OrderBy(entity => entity.TableName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
         var summaryWorksheet = workbook.Worksheets.Add(SummarySheetName);
         var relationshipWorksheet = workbook.Worksheets.Add(RelationshipSheetName);
-        var usedWorksheetNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { SummarySheetName, RelationshipSheetName };
+        var usedWorksheetNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            SummarySheetName,
+            RelationshipSheetName,
+        };
         var detailSheets = new List<DetailSheetContext>();
 
         for (var i = 0; i < entities.Count; i++)
@@ -59,9 +65,19 @@ public static class TableDefinitionDocumentExporter
 
         foreach (var detailSheet in detailSheets)
         {
-            var relatedRelationships = vm.Relationships.Where(relationship => relationship.Source == detailSheet.Entity || relationship.Target == detailSheet.Entity).ToList();
+            var relatedRelationships = vm
+                .Relationships.Where(relationship =>
+                    relationship.Source == detailSheet.Entity
+                    || relationship.Target == detailSheet.Entity
+                )
+                .ToList();
 
-            BuildEntityWorksheet(detailSheet.Worksheet, detailSheet.Entity, detailSheet.Number, relatedRelationships);
+            BuildEntityWorksheet(
+                detailSheet.Worksheet,
+                detailSheet.Entity,
+                detailSheet.Number,
+                relatedRelationships
+            );
         }
 
         return workbook;
@@ -85,7 +101,10 @@ public static class TableDefinitionDocumentExporter
     }
 
     /// <summary>テーブル一覧シートを生成する（各行に詳細シートへのリンクを付与する）</summary>
-    private static void BuildSummaryWorksheet(IXLWorksheet worksheet, IReadOnlyList<DetailSheetContext> detailSheets)
+    private static void BuildSummaryWorksheet(
+        IXLWorksheet worksheet,
+        IReadOnlyList<DetailSheetContext> detailSheets
+    )
     {
         ConfigureSummaryWorksheet(worksheet);
 
@@ -112,24 +131,49 @@ public static class TableDefinitionDocumentExporter
             worksheet.Cell(row, 3).Value = detailSheet.Entity.TableName;
             worksheet.Cell(row, 4).Value = detailSheet.Entity.Description;
             worksheet.Cell(row, 5).Value = detailSheet.Entity.Memo;
-            ApplyHyperlinkStyle(worksheet.Cell(row, 2), detailSheet.Worksheet.Name, XLAlignmentHorizontalValues.Center);
+            ApplyHyperlinkStyle(
+                worksheet.Cell(row, 2),
+                detailSheet.Worksheet.Name,
+                XLAlignmentHorizontalValues.Center
+            );
         }
 
-        UpdatePrintArea(worksheet, $"A1:E{Math.Max(headerRow, dataStartRow + detailSheets.Count - 1)}");
+        UpdatePrintArea(
+            worksheet,
+            $"A1:E{Math.Max(headerRow, dataStartRow + detailSheets.Count - 1)}"
+        );
     }
 
     /// <summary>リレーション一覧シートを生成する</summary>
-    private static void BuildRelationshipWorksheet(IXLWorksheet worksheet, IEnumerable<RelationshipViewModel> relationships)
+    private static void BuildRelationshipWorksheet(
+        IXLWorksheet worksheet,
+        IEnumerable<RelationshipViewModel> relationships
+    )
     {
         ConfigureRelationshipWorksheet(worksheet);
 
         var orderedRelationships = relationships
-            .OrderBy(relationship => relationship.Source.TableName, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(
+                relationship => relationship.Source.TableName,
+                StringComparer.OrdinalIgnoreCase
+            )
             .ThenBy(relationship => relationship.Target.TableName, StringComparer.OrdinalIgnoreCase)
             .ToList();
         var headerRow = 1;
         var dataStartRow = 2;
-        var headers = new[] { "No.", "制約名", "参照元テーブル", "参照元カラム", "参照先テーブル", "参照先カラム", "関係", "ON DELETE", "ON UPDATE", "備考" };
+        var headers = new[]
+        {
+            "No.",
+            "制約名",
+            "参照元テーブル",
+            "参照元カラム",
+            "参照先テーブル",
+            "参照先カラム",
+            "関係",
+            "ON DELETE",
+            "ON UPDATE",
+            "備考",
+        };
 
         for (var i = 0; i < headers.Length; i++)
         {
@@ -149,19 +193,33 @@ public static class TableDefinitionDocumentExporter
             worksheet.Cell(row, 2).Value = relationship.ConstraintName ?? string.Empty;
             // 参照元（FK 保有側）は Target、参照先（PK 側）は Source に対応する
             worksheet.Cell(row, 3).Value = relationship.Target.TableName;
-            worksheet.Cell(row, 4).Value = GetColumnName(relationship.Target, relationship.TargetColumnId);
+            worksheet.Cell(row, 4).Value = GetColumnName(
+                relationship.Target,
+                relationship.TargetColumnId
+            );
             worksheet.Cell(row, 5).Value = relationship.Source.TableName;
-            worksheet.Cell(row, 6).Value = GetColumnName(relationship.Source, relationship.SourceColumnId);
+            worksheet.Cell(row, 6).Value = GetColumnName(
+                relationship.Source,
+                relationship.SourceColumnId
+            );
             worksheet.Cell(row, 7).Value = GetRelationshipTypeLabel(relationship.Type);
             worksheet.Cell(row, 8).Value = relationship.OnDelete.ToDisplayText();
             worksheet.Cell(row, 9).Value = relationship.OnUpdate.ToDisplayText();
         }
 
-        UpdatePrintArea(worksheet, $"A1:J{Math.Max(headerRow, dataStartRow + orderedRelationships.Count - 1)}");
+        UpdatePrintArea(
+            worksheet,
+            $"A1:J{Math.Max(headerRow, dataStartRow + orderedRelationships.Count - 1)}"
+        );
     }
 
     /// <summary>テーブル単位の定義書シートを生成する（カラム一覧と一覧への戻りリンクを含む）</summary>
-    private static void BuildEntityWorksheet(IXLWorksheet worksheet, EntityViewModel entity, int tableNumber, IReadOnlyList<RelationshipViewModel> relationships)
+    private static void BuildEntityWorksheet(
+        IXLWorksheet worksheet,
+        EntityViewModel entity,
+        int tableNumber,
+        IReadOnlyList<RelationshipViewModel> relationships
+    )
     {
         ConfigureDetailWorksheet(worksheet);
         var foreignKeyLabels = BuildForeignKeyLabels(entity, relationships);
@@ -178,7 +236,17 @@ public static class TableDefinitionDocumentExporter
         worksheet.Cell(2, 3).Value = entity.Description;
 
         var columnHeaderRow = 4;
-        var headers = new[] { "No.", "カラム名", "説明", "データ型", "必須", "キー", "参照先", "備考" };
+        var headers = new[]
+        {
+            "No.",
+            "カラム名",
+            "説明",
+            "データ型",
+            "必須",
+            "キー",
+            "参照先",
+            "備考",
+        };
 
         for (var i = 0; i < headers.Length; i++)
         {
@@ -201,7 +269,12 @@ public static class TableDefinitionDocumentExporter
             worksheet.Cell(row, 3).Value = column.Description;
             worksheet.Cell(row, 4).Value = column.DataType;
             worksheet.Cell(row, 5).Value = column.IsNullable ? string.Empty : "〇";
-            worksheet.Cell(row, 6).Value = GetKeyLabel(column, foreignKeyLabels.TryGetValue(column.Id, out var foreignKeyLabel) ? foreignKeyLabel : null);
+            worksheet.Cell(row, 6).Value = GetKeyLabel(
+                column,
+                foreignKeyLabels.TryGetValue(column.Id, out var foreignKeyLabel)
+                    ? foreignKeyLabel
+                    : null
+            );
             worksheet.Cell(row, 7).Value = GetReferenceText(entity, column, relationships);
         }
 
@@ -209,7 +282,11 @@ public static class TableDefinitionDocumentExporter
         worksheet.Row(footerRow).Height = DefaultRowHeight;
         worksheet.Cell(footerRow, 1).Value = BackToSummaryText;
         ApplyFooterHyperlinkStyle(worksheet.Cell(footerRow, 1));
-        ApplyHyperlinkStyle(worksheet.Cell(footerRow, 1), SummarySheetName, XLAlignmentHorizontalValues.Left);
+        ApplyHyperlinkStyle(
+            worksheet.Cell(footerRow, 1),
+            SummarySheetName,
+            XLAlignmentHorizontalValues.Left
+        );
         UpdatePrintArea(worksheet, $"A1:G{footerRow}");
     }
 
@@ -292,7 +369,11 @@ public static class TableDefinitionDocumentExporter
     }
 
     /// <summary>ハイパーリンクの書式とリンク先シートを設定する</summary>
-    private static void ApplyHyperlinkStyle(IXLCell cell, string targetSheetName, XLAlignmentHorizontalValues horizontalAlignment)
+    private static void ApplyHyperlinkStyle(
+        IXLCell cell,
+        string targetSheetName,
+        XLAlignmentHorizontalValues horizontalAlignment
+    )
     {
         cell.SetHyperlink(new XLHyperlink($"{EscapeSheetName(targetSheetName)}!A1"));
         cell.Style.Font.FontName = DefaultFontName;
@@ -329,15 +410,27 @@ public static class TableDefinitionDocumentExporter
         };
 
     /// <summary>テーブル内の外部キーに連番（FK1, FK2…）を振った列 ID ごとの表示ラベルを構築する</summary>
-    private static IReadOnlyDictionary<Guid, string> BuildForeignKeyLabels(EntityViewModel entity, IReadOnlyList<RelationshipViewModel> relationships)
+    private static IReadOnlyDictionary<Guid, string> BuildForeignKeyLabels(
+        EntityViewModel entity,
+        IReadOnlyList<RelationshipViewModel> relationships
+    )
     {
-        var columnIndexes = entity.Columns.Select((column, index) => new { column.Id, index }).ToDictionary(item => item.Id, item => item.index);
+        var columnIndexes = entity
+            .Columns.Select((column, index) => new { column.Id, index })
+            .ToDictionary(item => item.Id, item => item.index);
         var foreignKeyLabels = new Dictionary<Guid, List<string>>();
         var targetRelationships = relationships
-            .Where(relationship => relationship.Target == entity && relationship.TargetColumnId is not null)
-            .OrderBy(relationship => columnIndexes.GetValueOrDefault(relationship.TargetColumnId!.Value, int.MaxValue))
+            .Where(relationship =>
+                relationship.Target == entity && relationship.TargetColumnId is not null
+            )
+            .OrderBy(relationship =>
+                columnIndexes.GetValueOrDefault(relationship.TargetColumnId!.Value, int.MaxValue)
+            )
             .ThenBy(relationship => relationship.Source.TableName, StringComparer.OrdinalIgnoreCase)
-            .ThenBy(relationship => GetColumnName(relationship.Source, relationship.SourceColumnId), StringComparer.OrdinalIgnoreCase)
+            .ThenBy(
+                relationship => GetColumnName(relationship.Source, relationship.SourceColumnId),
+                StringComparer.OrdinalIgnoreCase
+            )
             .ToList();
 
         for (var i = 0; i < targetRelationships.Count; i++)
@@ -354,7 +447,10 @@ public static class TableDefinitionDocumentExporter
             labels.Add($"FK{i + 1}");
         }
 
-        return foreignKeyLabels.ToDictionary(pair => pair.Key, pair => string.Join(",", pair.Value));
+        return foreignKeyLabels.ToDictionary(
+            pair => pair.Key,
+            pair => string.Join(",", pair.Value)
+        );
     }
 
     /// <summary>キー列の表示ラベルを返す（PK / FK / PK/FK の組み合わせを表現する）</summary>
@@ -384,11 +480,19 @@ public static class TableDefinitionDocumentExporter
     }
 
     /// <summary>外部キー列の参照先（テーブル.カラム）を重複なく連結した文字列を返す</summary>
-    private static string GetReferenceText(EntityViewModel entity, ColumnViewModel column, IReadOnlyList<RelationshipViewModel> relationships)
+    private static string GetReferenceText(
+        EntityViewModel entity,
+        ColumnViewModel column,
+        IReadOnlyList<RelationshipViewModel> relationships
+    )
     {
         var references = relationships
-            .Where(relationship => relationship.Target == entity && relationship.TargetColumnId == column.Id)
-            .Select(relationship => $"{relationship.Source.TableName}.{GetColumnName(relationship.Source, relationship.SourceColumnId)}")
+            .Where(relationship =>
+                relationship.Target == entity && relationship.TargetColumnId == column.Id
+            )
+            .Select(relationship =>
+                $"{relationship.Source.TableName}.{GetColumnName(relationship.Source, relationship.SourceColumnId)}"
+            )
             .Where(reference => !string.IsNullOrWhiteSpace(reference))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -408,9 +512,16 @@ public static class TableDefinitionDocumentExporter
     }
 
     /// <summary>Excel シート名に使えない文字を除去し、31 文字制限と重複回避を考慮した一意な名前を生成する</summary>
-    private static string CreateUniqueWorksheetName(string tableName, ISet<string> usedWorksheetNames)
+    private static string CreateUniqueWorksheetName(
+        string tableName,
+        ISet<string> usedWorksheetNames
+    )
     {
-        var sanitized = new string(tableName.Where(ch => !InvalidWorksheetNameChars.Contains(ch)).ToArray()).Trim().Trim('\'');
+        var sanitized = new string(
+            tableName.Where(ch => !InvalidWorksheetNameChars.Contains(ch)).ToArray()
+        )
+            .Trim()
+            .Trim('\'');
 
         if (string.IsNullOrWhiteSpace(sanitized))
         {
@@ -440,5 +551,9 @@ public static class TableDefinitionDocumentExporter
     private static string EscapeSheetName(string sheetName) => $"'{sheetName.Replace("'", "''")}'";
 
     /// <summary>詳細シート生成に必要な番号・エンティティ・対応ワークシートを束ねる文脈情報</summary>
-    private sealed record DetailSheetContext(int Number, EntityViewModel Entity, IXLWorksheet Worksheet);
+    private sealed record DetailSheetContext(
+        int Number,
+        EntityViewModel Entity,
+        IXLWorksheet Worksheet
+    );
 }

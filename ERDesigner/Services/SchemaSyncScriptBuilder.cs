@@ -41,7 +41,12 @@ public static class SchemaSyncScriptBuilder
     }
 
     /// <summary>指定種別の差分のみを抽出し、見出しコメント付きで 1 セクション分を書き出す</summary>
-    private static void WriteSection(StringBuilder sb, List<SchemaDiffItem> all, SchemaDiffKind kind, System.Action<StringBuilder, SchemaDiffItem> writer)
+    private static void WriteSection(
+        StringBuilder sb,
+        List<SchemaDiffItem> all,
+        SchemaDiffKind kind,
+        System.Action<StringBuilder, SchemaDiffItem> writer
+    )
     {
         var subset = all.Where(i => i.Kind == kind).ToList();
 
@@ -72,7 +77,8 @@ public static class SchemaSyncScriptBuilder
         for (var i = 0; i < e.Columns.Count; i++)
         {
             var col = e.Columns[i];
-            var line = $"    {SqlIdentifier.BracketSimple(col.Name)} {col.DataType} {GetNullabilityClause(col)}";
+            var line =
+                $"    {SqlIdentifier.BracketSimple(col.Name)} {col.DataType} {GetNullabilityClause(col)}";
 
             // 後続のカラム行、または PRIMARY KEY 制約行が続く場合は区切りのカンマを付ける
             if (i < e.Columns.Count - 1 || pks.Count > 0)
@@ -86,7 +92,9 @@ public static class SchemaSyncScriptBuilder
         if (pks.Count > 0)
         {
             var pkCols = string.Join(", ", pks.Select(p => SqlIdentifier.BracketSimple(p.Name)));
-            sb.AppendLine($"    CONSTRAINT [PK_{SqlIdentifier.SafeName(item.TableName)}] PRIMARY KEY ({pkCols})");
+            sb.AppendLine(
+                $"    CONSTRAINT [PK_{SqlIdentifier.SafeName(item.TableName)}] PRIMARY KEY ({pkCols})"
+            );
         }
 
         sb.AppendLine(");");
@@ -97,7 +105,10 @@ public static class SchemaSyncScriptBuilder
     private static void AppendAddColumn(StringBuilder sb, SchemaDiffItem item)
     {
         var col = item.Column!;
-        sb.AppendLine($"ALTER TABLE {SqlIdentifier.Bracket(item.TableName)} " + $"ADD {SqlIdentifier.BracketSimple(col.Name)} {col.DataType} {GetNullabilityClause(col)};");
+        sb.AppendLine(
+            $"ALTER TABLE {SqlIdentifier.Bracket(item.TableName)} "
+                + $"ADD {SqlIdentifier.BracketSimple(col.Name)} {col.DataType} {GetNullabilityClause(col)};"
+        );
         sb.AppendLine("GO");
     }
 
@@ -106,7 +117,8 @@ public static class SchemaSyncScriptBuilder
     {
         var col = item.Column!;
         sb.AppendLine(
-            $"ALTER TABLE {SqlIdentifier.Bracket(item.TableName)} " + $"ALTER COLUMN {SqlIdentifier.BracketSimple(col.Name)} {col.DataType} {GetNullabilityClause(col)};"
+            $"ALTER TABLE {SqlIdentifier.Bracket(item.TableName)} "
+                + $"ALTER COLUMN {SqlIdentifier.BracketSimple(col.Name)} {col.DataType} {GetNullabilityClause(col)};"
         );
         sb.AppendLine("GO");
     }
@@ -114,7 +126,10 @@ public static class SchemaSyncScriptBuilder
     /// <summary>ALTER TABLE ... DROP COLUMN（列削除）文を生成する</summary>
     private static void AppendDropColumn(StringBuilder sb, SchemaDiffItem item)
     {
-        sb.AppendLine($"ALTER TABLE {SqlIdentifier.Bracket(item.TableName)} " + $"DROP COLUMN {SqlIdentifier.BracketSimple(item.ColumnName!)};");
+        sb.AppendLine(
+            $"ALTER TABLE {SqlIdentifier.Bracket(item.TableName)} "
+                + $"DROP COLUMN {SqlIdentifier.BracketSimple(item.ColumnName!)};"
+        );
         sb.AppendLine("GO");
     }
 
@@ -138,7 +153,9 @@ public static class SchemaSyncScriptBuilder
         // 参照先列が特定できない場合は不正な DDL を出さず、コメントでスキップを明示する
         if (pkCol is null || item.ColumnName is null)
         {
-            sb.AppendLine($"-- スキップ: 外部キー追加に必要な列が解決できませんでした。 ({item.Description})");
+            sb.AppendLine(
+                $"-- スキップ: 外部キー追加に必要な列が解決できませんでした。 ({item.Description})"
+            );
             return;
         }
 
@@ -174,8 +191,12 @@ public static class SchemaSyncScriptBuilder
         // 制約名が判明している場合は存在チェックのうえ直接 DROP する
         if (!string.IsNullOrWhiteSpace(item.ForeignKeyName))
         {
-            sb.AppendLine($"IF EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name = N'{SqlIdentifier.EscapeStringLiteral(item.ForeignKeyName)}')");
-            sb.AppendLine($"    ALTER TABLE {SqlIdentifier.Bracket(childTbl)} DROP CONSTRAINT [{SqlIdentifier.Escape(item.ForeignKeyName)}];");
+            sb.AppendLine(
+                $"IF EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name = N'{SqlIdentifier.EscapeStringLiteral(item.ForeignKeyName)}')"
+            );
+            sb.AppendLine(
+                $"    ALTER TABLE {SqlIdentifier.Bracket(childTbl)} DROP CONSTRAINT [{SqlIdentifier.Escape(item.ForeignKeyName)}];"
+            );
             sb.AppendLine("GO");
             return;
         }
@@ -185,26 +206,38 @@ public static class SchemaSyncScriptBuilder
         sb.AppendLine($"SELECT @fk = fk.name FROM sys.foreign_keys fk");
         sb.AppendLine($"  JOIN sys.tables tp ON fk.parent_object_id = tp.object_id");
         sb.AppendLine($"  JOIN sys.tables tr ON fk.referenced_object_id = tr.object_id");
-        sb.AppendLine($"WHERE tp.name = N'{SqlIdentifier.EscapeStringLiteral(SqlIdentifier.TableNameOnly(childTbl))}'");
-        sb.AppendLine($"  AND tr.name = N'{SqlIdentifier.EscapeStringLiteral(SqlIdentifier.TableNameOnly(parentTbl))}';");
-        sb.AppendLine($"IF @fk IS NOT NULL EXEC('ALTER TABLE {SqlIdentifier.Bracket(childTbl)} DROP CONSTRAINT [' + @fk + ']');");
+        sb.AppendLine(
+            $"WHERE tp.name = N'{SqlIdentifier.EscapeStringLiteral(SqlIdentifier.TableNameOnly(childTbl))}'"
+        );
+        sb.AppendLine(
+            $"  AND tr.name = N'{SqlIdentifier.EscapeStringLiteral(SqlIdentifier.TableNameOnly(parentTbl))}';"
+        );
+        sb.AppendLine(
+            $"IF @fk IS NOT NULL EXEC('ALTER TABLE {SqlIdentifier.Bracket(childTbl)} DROP CONSTRAINT [' + @fk + ']');"
+        );
         sb.AppendLine("GO");
     }
 
     // ---------------- MS_Description (拡張プロパティ) ----------------
 
     /// <summary>テーブルの説明（MS_Description）設定文を生成する</summary>
-    private static void AppendSetTableDescription(StringBuilder sb, SchemaDiffItem item) => AppendDescriptionStatement(sb, item, columnLevel: false);
+    private static void AppendSetTableDescription(StringBuilder sb, SchemaDiffItem item) =>
+        AppendDescriptionStatement(sb, item, columnLevel: false);
 
     /// <summary>カラムの説明（MS_Description）設定文を生成する</summary>
-    private static void AppendSetColumnDescription(StringBuilder sb, SchemaDiffItem item) => AppendDescriptionStatement(sb, item, columnLevel: true);
+    private static void AppendSetColumnDescription(StringBuilder sb, SchemaDiffItem item) =>
+        AppendDescriptionStatement(sb, item, columnLevel: true);
 
     /// <summary>拡張プロパティ MS_Description の設定・更新・削除文を生成する</summary>
     /// <remarks>
     /// 実行時点の存在状態を判定し、add / update / drop を切り替える 新値が空なら削除する
     /// </remarks>
     /// <param name="columnLevel">true でカラムレベル、false でテーブルレベルの拡張プロパティを対象とする</param>
-    private static void AppendDescriptionStatement(StringBuilder sb, SchemaDiffItem item, bool columnLevel)
+    private static void AppendDescriptionStatement(
+        StringBuilder sb,
+        SchemaDiffItem item,
+        bool columnLevel
+    )
     {
         var schema = SqlIdentifier.SchemaOf(item.TableName);
         var table = SqlIdentifier.TableNameOnly(item.TableName);
@@ -216,10 +249,12 @@ public static class SchemaSyncScriptBuilder
 
         if (columnLevel)
         {
-            levelArgs += $", @level2type=N'COLUMN', @level2name=N'{SqlIdentifier.EscapeStringLiteral(item.ColumnName!)}'";
+            levelArgs +=
+                $", @level2type=N'COLUMN', @level2name=N'{SqlIdentifier.EscapeStringLiteral(item.ColumnName!)}'";
         }
 
-        var objectIdLiteral = $"OBJECT_ID(N'{SqlIdentifier.EscapeStringLiteral(schema)}.{SqlIdentifier.EscapeStringLiteral(table)}')";
+        var objectIdLiteral =
+            $"OBJECT_ID(N'{SqlIdentifier.EscapeStringLiteral(schema)}.{SqlIdentifier.EscapeStringLiteral(table)}')";
         var minorIdCondition = columnLevel
             ? $"      AND ep.minor_id = COLUMNPROPERTY({objectIdLiteral}, N'{SqlIdentifier.EscapeStringLiteral(item.ColumnName!)}', 'ColumnId')"
             : $"      AND ep.minor_id = 0";
@@ -232,7 +267,9 @@ public static class SchemaSyncScriptBuilder
             sb.AppendLine($"    WHERE ep.name = N'MS_Description' AND ep.class = 1");
             sb.AppendLine($"      AND ep.major_id = {objectIdLiteral}");
             sb.AppendLine($"{minorIdCondition})");
-            sb.AppendLine($"    EXEC sys.sp_dropextendedproperty @name=N'MS_Description', {levelArgs};");
+            sb.AppendLine(
+                $"    EXEC sys.sp_dropextendedproperty @name=N'MS_Description', {levelArgs};"
+            );
         }
         else
         {
@@ -243,9 +280,13 @@ public static class SchemaSyncScriptBuilder
             sb.AppendLine($"    WHERE ep.name = N'MS_Description' AND ep.class = 1");
             sb.AppendLine($"      AND ep.major_id = {objectIdLiteral}");
             sb.AppendLine($"{minorIdCondition})");
-            sb.AppendLine($"    EXEC sys.sp_updateextendedproperty @name=N'MS_Description', @value=N'{escaped}', {levelArgs};");
+            sb.AppendLine(
+                $"    EXEC sys.sp_updateextendedproperty @name=N'MS_Description', @value=N'{escaped}', {levelArgs};"
+            );
             sb.AppendLine($"ELSE");
-            sb.AppendLine($"    EXEC sys.sp_addextendedproperty    @name=N'MS_Description', @value=N'{escaped}', {levelArgs};");
+            sb.AppendLine(
+                $"    EXEC sys.sp_addextendedproperty    @name=N'MS_Description', @value=N'{escaped}', {levelArgs};"
+            );
         }
 
         sb.AppendLine("GO");
@@ -257,7 +298,9 @@ public static class SchemaSyncScriptBuilder
     {
         if (item.Relationship?.SourceColumnId is not null)
         {
-            var byId = item.ParentEntity?.Columns.FirstOrDefault(c => c.Id == item.Relationship.SourceColumnId);
+            var byId = item.ParentEntity?.Columns.FirstOrDefault(c =>
+                c.Id == item.Relationship.SourceColumnId
+            );
 
             if (byId is not null)
             {
@@ -269,9 +312,15 @@ public static class SchemaSyncScriptBuilder
     }
 
     /// <summary>NULL 許容句を返す（主キーまたは非 NULL 許容なら NOT NULL）</summary>
-    private static string GetNullabilityClause(Column column) => column.IsPrimaryKey || !column.IsNullable ? "NOT NULL" : "NULL";
+    private static string GetNullabilityClause(Column column) =>
+        column.IsPrimaryKey || !column.IsNullable ? "NOT NULL" : "NULL";
 
     /// <summary>外部キーの ON DELETE / ON UPDATE 参照アクション句を生成する</summary>
     private static string BuildReferentialActionClause(Relationship? relationship) =>
-        relationship is null ? string.Empty : ForeignKeyReferentialActionHelper.BuildReferentialActionClause(relationship.OnDelete, relationship.OnUpdate);
+        relationship is null
+            ? string.Empty
+            : ForeignKeyReferentialActionHelper.BuildReferentialActionClause(
+                relationship.OnDelete,
+                relationship.OnUpdate
+            );
 }

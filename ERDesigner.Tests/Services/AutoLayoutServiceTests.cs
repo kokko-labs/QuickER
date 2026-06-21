@@ -40,8 +40,15 @@ public class AutoLayoutServiceTests
     }
 
     /// <summary>2 エンティティ間のリレーションを表すテスト用 ViewModel を生成する</summary>
-    private static RelationshipViewModel NewRelationship(EntityViewModel source, EntityViewModel target) =>
-        new(new Relationship { SourceEntityId = source.Id, TargetEntityId = target.Id }, source, target);
+    private static RelationshipViewModel NewRelationship(
+        EntityViewModel source,
+        EntityViewModel target
+    ) =>
+        new(
+            new Relationship { SourceEntityId = source.Id, TargetEntityId = target.Id },
+            source,
+            target
+        );
 
     /// <summary>並び順のままだと対角線同士が交差する構成で、交差が解消されることを検証する</summary>
     [Fact(DisplayName = "LayoutGrid(リレーション考慮): 交差するリレーションが解消される")]
@@ -137,7 +144,10 @@ public class AutoLayoutServiceTests
         AutoLayoutService.LayoutGrid(legacy, columns: 4);
         AutoLayoutService.LayoutGrid(optimized, optimizedRels, columns: 4);
 
-        LayoutGeometry.CountCrossings(optimizedRels).Should().BeLessThan(LayoutGeometry.CountCrossings(legacyRels));
+        LayoutGeometry
+            .CountCrossings(optimizedRels)
+            .Should()
+            .BeLessThan(LayoutGeometry.CountCrossings(legacyRels));
     }
 
     /// <summary>リレーションが無い場合は従来の並び順どおり配置されることを検証する</summary>
@@ -232,7 +242,10 @@ public class AutoLayoutServiceTests
     public void LayoutForceDirected_Empty_DoesNotThrow()
     {
         var act = () =>
-            AutoLayoutService.LayoutForceDirected(new List<EntityViewModel>(), new List<RelationshipViewModel>());
+            AutoLayoutService.LayoutForceDirected(
+                new List<EntityViewModel>(),
+                new List<RelationshipViewModel>()
+            );
         act.Should().NotThrow();
     }
 
@@ -395,7 +408,10 @@ public class AutoLayoutServiceTests
         AutoLayoutService.LayoutGrid(grid, columns: 4);
         AutoLayoutService.LayoutForceDirected(force, forceRels);
 
-        LayoutGeometry.CountCrossings(forceRels).Should().BeLessThan(LayoutGeometry.CountCrossings(gridRels));
+        LayoutGeometry
+            .CountCrossings(forceRels)
+            .Should()
+            .BeLessThan(LayoutGeometry.CountCrossings(gridRels));
     }
 
     /// <summary>配置全体が広がりすぎずコンパクトに収まることを検証する（遠距離反発の打ち切りの退行防止）</summary>
@@ -416,7 +432,9 @@ public class AutoLayoutServiceTests
         var height = entities.Max(e => e.Y + e.DisplayHeight) - entities.Min(e => e.Y);
 
         // コンパクション導入後の 8 ノードリング実測は約 501x461(≈231k) 導入前(≈619k)へ戻らないことを保証する
-        (width * height).Should().BeLessThan(400_000);
+        (width * height)
+            .Should()
+            .BeLessThan(400_000);
     }
 
     /// <summary>リレーションのない孤立エンティティも他ノードの近くへコンパクトに配置されることを検証する</summary>
@@ -440,8 +458,12 @@ public class AutoLayoutServiceTests
         {
             var nearest = entities
                 .Where((_, j) => j != i)
-                .Min(o => Math.Sqrt(
-                    Math.Pow(CenterX(entities[i]) - CenterX(o), 2) + Math.Pow(CenterY(entities[i]) - CenterY(o), 2)));
+                .Min(o =>
+                    Math.Sqrt(
+                        Math.Pow(CenterX(entities[i]) - CenterX(o), 2)
+                            + Math.Pow(CenterY(entities[i]) - CenterY(o), 2)
+                    )
+                );
 
             nearest.Should().BeLessThan(360, $"E{i} は他ノードの近くへ配置されるべき");
         }
@@ -465,7 +487,6 @@ public class AutoLayoutServiceTests
         entities.Should().OnlyContain(e => e.X >= margin - 1e-6 && e.Y >= margin - 1e-6);
     }
 
-
     /// <summary>説明表示時は説明を含む表示高さを使って行間が確保されることを検証する</summary>
     [Fact(DisplayName = "LayoutGrid: 説明表示時は説明込みの高さで整列される")]
     public void LayoutGrid_UsesDisplayHeightWhenDescriptionsAreVisible()
@@ -475,14 +496,16 @@ public class AutoLayoutServiceTests
             {
                 TableName = "Orders",
                 Width = 220,
-                Description = "テーブル説明が複数行になるように十分長い文字列です。テーブル説明が複数行になるように十分長い文字列です。",
+                Description =
+                    "テーブル説明が複数行になるように十分長い文字列です。テーブル説明が複数行になるように十分長い文字列です。",
                 Columns =
                 {
                     new Column
                     {
                         Name = "CustomerName",
                         DataType = "nvarchar(100)",
-                        Description = "カラム説明も折り返されるように十分長い文字列を設定しています。",
+                        Description =
+                            "カラム説明も折り返されるように十分長い文字列を設定しています。",
                     },
                 },
             }

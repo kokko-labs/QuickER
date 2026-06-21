@@ -102,13 +102,16 @@ internal sealed partial class CSharpNameConverter
     ];
 
     /// <summary>テーブル名からエンティティクラス名を生成する（例: "order_items" → "OrderItemEntity"）</summary>
-    public string ToEntityClassName(string tableName) => EnsureSuffix(ToPascalCase(Singularize(tableName)), "Entity");
+    public string ToEntityClassName(string tableName) =>
+        EnsureSuffix(ToPascalCase(Singularize(tableName)), "Entity");
 
     /// <summary>テーブル名から EditModel クラス名を生成する（例: "order_items" → "OrderItemEditModel"）</summary>
-    public string ToEditModelClassName(string tableName) => EnsureSuffix(ToPascalCase(Singularize(tableName)), "EditModel");
+    public string ToEditModelClassName(string tableName) =>
+        EnsureSuffix(ToPascalCase(Singularize(tableName)), "EditModel");
 
     /// <summary>テーブル名から Mapper クラス名を生成する（例: "order_items" → "OrderItemMapper"）</summary>
-    public string ToMapperClassName(string tableName) => EnsureSuffix(ToPascalCase(Singularize(tableName)), "Mapper");
+    public string ToMapperClassName(string tableName) =>
+        EnsureSuffix(ToPascalCase(Singularize(tableName)), "Mapper");
 
     /// <summary>
     /// カラム名からプロパティ名を生成する（例: "customer_id" → "CustomerId"）
@@ -139,7 +142,9 @@ internal sealed partial class CSharpNameConverter
     /// <param name="collection">コレクションナビゲーション（1対多の「多」側）かどうか。true なら複数形、false なら単数形にする</param>
     public string ToNavigationName(string tableName, bool collection)
     {
-        var baseName = collection ? ToPascalCase(Pluralize(Singularize(tableName))) : ToPascalCase(Singularize(tableName));
+        var baseName = collection
+            ? ToPascalCase(Pluralize(Singularize(tableName)))
+            : ToPascalCase(Singularize(tableName));
         return Keywords.Contains(baseName) ? "@" + baseName : baseName;
     }
 
@@ -166,7 +171,8 @@ internal sealed partial class CSharpNameConverter
     }
 
     /// <summary>指定サフィックスで終わらない場合のみサフィックスを付与する</summary>
-    private static string EnsureSuffix(string value, string suffix) => value.EndsWith(suffix, StringComparison.Ordinal) ? value : value + suffix;
+    private static string EnsureSuffix(string value, string suffix) =>
+        value.EndsWith(suffix, StringComparison.Ordinal) ? value : value + suffix;
 
     /// <summary>
     /// テーブル名を簡易規則で単数形化する
@@ -183,7 +189,12 @@ internal sealed partial class CSharpNameConverter
             return pascal[..^3] + "y";
         }
 
-        return pascal.EndsWith("s", StringComparison.OrdinalIgnoreCase) && !pascal.EndsWith("ss", StringComparison.OrdinalIgnoreCase) && pascal.Length > 1 ? pascal[..^1] : pascal;
+        return
+            pascal.EndsWith("s", StringComparison.OrdinalIgnoreCase)
+            && !pascal.EndsWith("ss", StringComparison.OrdinalIgnoreCase)
+            && pascal.Length > 1
+            ? pascal[..^1]
+            : pascal;
     }
 
     /// <summary>
@@ -213,7 +224,11 @@ internal sealed partial class CSharpNameConverter
     /// </remarks>
     private static IEnumerable<string> TokenizeWords(string value)
     {
-        foreach (var part in WordSplitRegex().Split(value.Trim()).Where(part => !string.IsNullOrWhiteSpace(part)))
+        foreach (
+            var part in WordSplitRegex()
+                .Split(value.Trim())
+                .Where(part => !string.IsNullOrWhiteSpace(part))
+        )
         {
             var matches = PascalCaseWordRegex().Matches(part);
 
@@ -235,6 +250,9 @@ internal sealed partial class CSharpNameConverter
     private static partial Regex WordSplitRegex();
 
     /// <summary>PascalCase 文字列内の単語（頭字語・通常単語・数字列）を検出する正規表現</summary>
-    [GeneratedRegex(@"\p{Lu}+(?=\p{Lu}\p{Ll}|\p{Nd}|$)|\p{Lu}?\p{Ll}+|\p{Nd}+", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(
+        @"\p{Lu}+(?=\p{Lu}\p{Ll}|\p{Nd}|$)|\p{Lu}?\p{Ll}+|\p{Nd}+",
+        RegexOptions.CultureInvariant
+    )]
     private static partial Regex PascalCaseWordRegex();
 }

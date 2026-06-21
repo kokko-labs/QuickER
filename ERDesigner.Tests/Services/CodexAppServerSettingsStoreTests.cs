@@ -11,9 +11,17 @@ public class CodexAppServerSettingsStoreTests
     [Fact(DisplayName = "Save した設定を Load で復元できる")]
     public void SaveThenLoad_RoundTrip()
     {
-        var folder = Path.Combine(Path.GetTempPath(), "ERDesignerTests", Guid.NewGuid().ToString("N"));
+        var folder = Path.Combine(
+            Path.GetTempPath(),
+            "ERDesignerTests",
+            Guid.NewGuid().ToString("N")
+        );
         var store = new CodexAppServerSettingsStore(folder);
-        var expected = new CodexAppServerSettings { ModelProvider = "ollama-launch", Model = "gemma4:31b-cloud" };
+        var expected = new CodexAppServerSettings
+        {
+            ModelProvider = "ollama-launch",
+            Model = "gemma4:31b-cloud",
+        };
 
         try
         {

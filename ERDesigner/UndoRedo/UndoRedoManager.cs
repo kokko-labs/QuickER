@@ -45,7 +45,11 @@ public partial class UndoRedoManager : ObservableObject
         if (command is PropertyChangeCommand propertyChange && propertyChange.GroupId is not null)
         {
             // スタック先頭が同一グループの複合コマンドなら、そこへマージして履歴の肥大化を防ぐ
-            if (_undo.TryPeek(out var last) && last is CompositeUndoableCommand composite && Equals(composite.GroupId, propertyChange.GroupId))
+            if (
+                _undo.TryPeek(out var last)
+                && last is CompositeUndoableCommand composite
+                && Equals(composite.GroupId, propertyChange.GroupId)
+            )
             {
                 composite.Upsert(propertyChange);
                 _redo.Clear();
@@ -54,7 +58,10 @@ public partial class UndoRedoManager : ObservableObject
                 return;
             }
 
-            var grouped = new CompositeUndoableCommand(propertyChange.GroupId, propertyChange.Description);
+            var grouped = new CompositeUndoableCommand(
+                propertyChange.GroupId,
+                propertyChange.Description
+            );
             grouped.Upsert(propertyChange);
             _undo.Push(grouped);
             _redo.Clear();
@@ -109,7 +116,8 @@ public partial class UndoRedoManager : ObservableObject
     }
 
     /// <summary>同時に発生した複数のプロパティ変更を 1 履歴として扱う複合コマンド</summary>
-    private sealed class CompositeUndoableCommand(object groupId, string description) : IUndoableCommand
+    private sealed class CompositeUndoableCommand(object groupId, string description)
+        : IUndoableCommand
     {
         /// <summary>集約済みの個別プロパティ変更コマンド</summary>
         private readonly List<PropertyChangeCommand> _commands = new();
@@ -142,7 +150,9 @@ public partial class UndoRedoManager : ObservableObject
         /// <summary>同一対象・同一プロパティの変更は最新値で置換し、それ以外は追加する</summary>
         public void Upsert(PropertyChangeCommand command)
         {
-            var existingIndex = _commands.FindIndex(x => ReferenceEquals(x.Target, command.Target) && x.PropertyName == command.PropertyName);
+            var existingIndex = _commands.FindIndex(x =>
+                ReferenceEquals(x.Target, command.Target) && x.PropertyName == command.PropertyName
+            );
 
             if (existingIndex >= 0)
             {

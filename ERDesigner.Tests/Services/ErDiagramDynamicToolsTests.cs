@@ -12,7 +12,11 @@ public class ErDiagramDynamicToolsTests
     private static MainViewModel CreateVm() => new MainViewModel();
 
     /// <summary>引数オブジェクトを JSON 化してツールを実行し、結果と成否を返す</summary>
-    private static (string Result, bool Success) Exec(MainViewModel vm, string toolName, object args)
+    private static (string Result, bool Success) Exec(
+        MainViewModel vm,
+        string toolName,
+        object args
+    )
     {
         var json = JsonSerializer.Serialize(args);
         var element = JsonSerializer.Deserialize<JsonElement>(json);
@@ -141,7 +145,9 @@ public class ErDiagramDynamicToolsTests
         );
 
         success.Should().BeTrue();
-        var column = vm.Entities.Single(e => e.TableName == "Book").Columns.Single(c => c.Name == "BookId");
+        var column = vm
+            .Entities.Single(e => e.TableName == "Book")
+            .Columns.Single(c => c.Name == "BookId");
         column.Description.Should().Be("書籍を一意に識別するID");
     }
 
@@ -177,7 +183,9 @@ public class ErDiagramDynamicToolsTests
         );
 
         success.Should().BeTrue();
-        var column = vm.Entities.Single(e => e.TableName == "Book").Columns.Single(c => c.Name == "Title");
+        var column = vm
+            .Entities.Single(e => e.TableName == "Book")
+            .Columns.Single(c => c.Name == "Title");
         column.DataType.Should().Be("nvarchar(500)");
         column.IsNullable.Should().BeTrue();
     }
@@ -271,7 +279,13 @@ public class ErDiagramDynamicToolsTests
         success.Should().BeTrue();
         var relationship = vm.Relationships.Single();
         var order = vm.Entities.Single(e => e.TableName == "Order");
-        relationship.SourceColumnId.Should().Be(vm.Entities.Single(e => e.TableName == "Customer").Columns.Single(c => c.Name == "CustomerId").Id);
+        relationship
+            .SourceColumnId.Should()
+            .Be(
+                vm.Entities.Single(e => e.TableName == "Customer")
+                    .Columns.Single(c => c.Name == "CustomerId")
+                    .Id
+            );
         relationship.TargetColumnId.Should().Be(order.Columns.Single(c => c.Name == "OwnerId").Id);
     }
 
@@ -323,7 +337,9 @@ public class ErDiagramDynamicToolsTests
         var relationship = vm.Relationships.Single();
         relationship.TargetColumnId.Should().BeNull();
 
-        var quantityColumn = vm.Entities.Single(e => e.TableName == "Order").Columns.Single(c => c.Name == "Quantity");
+        var quantityColumn = vm
+            .Entities.Single(e => e.TableName == "Order")
+            .Columns.Single(c => c.Name == "Quantity");
         quantityColumn.IsForeignKey.Should().BeFalse();
         quantityColumn.IsNullable.Should().BeTrue();
     }
@@ -377,9 +393,15 @@ public class ErDiagramDynamicToolsTests
 
         var relationship = vm.Relationships.Single();
         var originalTargetColumnId = relationship.TargetColumnId;
-        originalTargetColumnId.Should().NotBeNull("add_relationship が FK 列を参照先として解決する");
+        originalTargetColumnId
+            .Should()
+            .NotBeNull("add_relationship が FK 列を参照先として解決する");
 
-        var (_, success) = Exec(vm, "remove_column", new { table_name = "Order", column_name = "CustomerId" });
+        var (_, success) = Exec(
+            vm,
+            "remove_column",
+            new { table_name = "Order", column_name = "CustomerId" }
+        );
         success.Should().BeTrue();
 
         // 削除後はリレーションの FK 参照がクリアされる
@@ -398,9 +420,18 @@ public class ErDiagramDynamicToolsTests
     {
         var definitions = ErDiagramDynamicTools.GetDefinitions();
 
-        definitions.Single(d => d.Name == "add_column").Description.Should().Contain(ErDesignRules.SinglePrimaryKeyRule);
-        definitions.Single(d => d.Name == "add_relationship").Description.Should().Contain(ErDesignRules.SingleColumnForeignKeyRule);
-        definitions.Single(d => d.Name == "add_entity").Description.Should().Contain("主キー列を 1 列だけ");
+        definitions
+            .Single(d => d.Name == "add_column")
+            .Description.Should()
+            .Contain(ErDesignRules.SinglePrimaryKeyRule);
+        definitions
+            .Single(d => d.Name == "add_relationship")
+            .Description.Should()
+            .Contain(ErDesignRules.SingleColumnForeignKeyRule);
+        definitions
+            .Single(d => d.Name == "add_entity")
+            .Description.Should()
+            .Contain("主キー列を 1 列だけ");
     }
 
     /// <summary>OpenAI Function Calling 用の ChatTool 変換が、全ツールを名前付きで生成することを検証する</summary>

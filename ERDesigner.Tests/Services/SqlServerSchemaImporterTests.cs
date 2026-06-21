@@ -16,7 +16,13 @@ public class SqlServerSchemaImporterTests
     [InlineData("decimal", null, 18, 0, "decimal(18)")]
     [InlineData("int", null, null, null, "int")]
     [InlineData("datetime2", null, null, null, "datetime2")]
-    public void FormatDataType_Cases(string type, int? maxLen, int? prec, int? scale, string expected)
+    public void FormatDataType_Cases(
+        string type,
+        int? maxLen,
+        int? prec,
+        int? scale,
+        string expected
+    )
     {
         SqlServerSchemaImporter.FormatDataType(type, maxLen, prec, scale).Should().Be(expected);
     }
@@ -55,8 +61,14 @@ public class SqlServerSchemaImporterTests
             },
         };
 
-        var sigA = SqlServerSchemaImporter.ComputeSignature(new[] { a }, Array.Empty<Relationship>());
-        var sigB = SqlServerSchemaImporter.ComputeSignature(new[] { b }, Array.Empty<Relationship>());
+        var sigA = SqlServerSchemaImporter.ComputeSignature(
+            new[] { a },
+            Array.Empty<Relationship>()
+        );
+        var sigB = SqlServerSchemaImporter.ComputeSignature(
+            new[] { b },
+            Array.Empty<Relationship>()
+        );
 
         sigA.Should().Be(sigB);
     }
@@ -93,8 +105,14 @@ public class SqlServerSchemaImporterTests
             },
         };
 
-        var sigA = SqlServerSchemaImporter.ComputeSignature(new[] { a }, Array.Empty<Relationship>());
-        var sigB = SqlServerSchemaImporter.ComputeSignature(new[] { b }, Array.Empty<Relationship>());
+        var sigA = SqlServerSchemaImporter.ComputeSignature(
+            new[] { a },
+            Array.Empty<Relationship>()
+        );
+        var sigB = SqlServerSchemaImporter.ComputeSignature(
+            new[] { b },
+            Array.Empty<Relationship>()
+        );
 
         sigA.Should().NotBe(sigB);
     }
@@ -121,8 +139,14 @@ public class SqlServerSchemaImporterTests
             },
         };
 
-        var sigA = SqlServerSchemaImporter.ComputeSignature(new[] { a }, Array.Empty<Relationship>());
-        var sigB = SqlServerSchemaImporter.ComputeSignature(new[] { b }, Array.Empty<Relationship>());
+        var sigA = SqlServerSchemaImporter.ComputeSignature(
+            new[] { a },
+            Array.Empty<Relationship>()
+        );
+        var sigB = SqlServerSchemaImporter.ComputeSignature(
+            new[] { b },
+            Array.Empty<Relationship>()
+        );
 
         sigA.Should().NotBe(sigB);
     }
@@ -178,8 +202,14 @@ public class SqlServerSchemaImporterTests
             TargetColumnId = child.Columns[2].Id,
         };
 
-        var sigA = SqlServerSchemaImporter.ComputeSignature(new[] { parent, child }, new[] { relA });
-        var sigB = SqlServerSchemaImporter.ComputeSignature(new[] { parent, child }, new[] { relB });
+        var sigA = SqlServerSchemaImporter.ComputeSignature(
+            new[] { parent, child },
+            new[] { relA }
+        );
+        var sigB = SqlServerSchemaImporter.ComputeSignature(
+            new[] { parent, child },
+            new[] { relB }
+        );
 
         sigA.Should().NotBe(sigB);
     }
@@ -237,8 +267,14 @@ public class SqlServerSchemaImporterTests
             OnUpdate = ForeignKeyReferentialAction.SetNull,
         };
 
-        var sigA = SqlServerSchemaImporter.ComputeSignature(new[] { parent, child }, new[] { relA });
-        var sigB = SqlServerSchemaImporter.ComputeSignature(new[] { parent, child }, new[] { relB });
+        var sigA = SqlServerSchemaImporter.ComputeSignature(
+            new[] { parent, child },
+            new[] { relA }
+        );
+        var sigB = SqlServerSchemaImporter.ComputeSignature(
+            new[] { parent, child },
+            new[] { relB }
+        );
 
         sigA.Should().NotBe(sigB);
     }

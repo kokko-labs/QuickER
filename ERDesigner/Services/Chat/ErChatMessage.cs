@@ -63,5 +63,6 @@ public sealed class ErChatMessage : INotifyPropertyChanged
     }
 
     /// <summary>指定プロパティの変更を通知する</summary>
-    private void OnPropertyChanged([CallerMemberName] string? propertyName = null) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+    private void OnPropertyChanged([CallerMemberName] string? propertyName = null) =>
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 }

@@ -137,7 +137,10 @@ public static class AutoLayoutService
     /// </remarks>
     /// <param name="entities">並べ替え対象のエンティティ一覧</param>
     /// <param name="relationships">リレーション一覧（レイアウト上は無向として扱う）</param>
-    public static void LayoutTree(IList<EntityViewModel> entities, IList<RelationshipViewModel> relationships)
+    public static void LayoutTree(
+        IList<EntityViewModel> entities,
+        IList<RelationshipViewModel> relationships
+    )
     {
         if (entities.Count == 0)
         {
@@ -204,7 +207,10 @@ public static class AutoLayoutService
         }
 
         // 階層ごとの合計幅を求め、最も幅広い階層に対して中央寄せするための横オフセット基準とする
-        var levelWidth = levels.ToDictionary(kv => kv.Key, kv => kv.Value.Sum(e => e.Width + GapX) - GapX);
+        var levelWidth = levels.ToDictionary(
+            kv => kv.Key,
+            kv => kv.Value.Sum(e => e.Width + GapX) - GapX
+        );
         var maxLevelWidth = levelWidth.Values.Max();
 
         foreach (var (depth, list) in levels)
@@ -409,7 +415,10 @@ public static class AutoLayoutService
 
             for (var i = 0; i < n; i++)
             {
-                disp[i] = (disp[i].X + (cx - pos[i].X) * FreeGravity, disp[i].Y + (cy - pos[i].Y) * FreeGravity);
+                disp[i] = (
+                    disp[i].X + (cx - pos[i].X) * FreeGravity,
+                    disp[i].Y + (cy - pos[i].Y) * FreeGravity
+                );
             }
 
             // 線形冷却の温度（1 反復あたり最大移動量）で変位を制限してから一括適用する
@@ -454,14 +463,20 @@ public static class AutoLayoutService
                     // 侵入量の小さい軸へ半分ずつ互いを逆向きに押し出す
                     if (overlapX < overlapY)
                     {
-                        var dir = dx > 0 ? 1 : dx < 0 ? -1 : (i < j ? -1 : 1);
+                        var dir =
+                            dx > 0 ? 1
+                            : dx < 0 ? -1
+                            : (i < j ? -1 : 1);
                         var push = overlapX / 2 * dir;
                         pos[i] = (pos[i].X + push, pos[i].Y);
                         pos[j] = (pos[j].X - push, pos[j].Y);
                     }
                     else
                     {
-                        var dir = dy > 0 ? 1 : dy < 0 ? -1 : (i < j ? -1 : 1);
+                        var dir =
+                            dy > 0 ? 1
+                            : dy < 0 ? -1
+                            : (i < j ? -1 : 1);
                         var push = overlapY / 2 * dir;
                         pos[i] = (pos[i].X, pos[i].Y + push);
                         pos[j] = (pos[j].X, pos[j].Y - push);
@@ -701,7 +716,10 @@ public static class AutoLayoutService
     }
 
     /// <summary>中心座標を各エンティティの左上座標へ変換し、最小 X・Y が <see cref="Margin"/> になるよう平行移動して正規化する</summary>
-    private static void PlaceAtCenters(IList<EntityViewModel> entities, (double X, double Y)[] centers)
+    private static void PlaceAtCenters(
+        IList<EntityViewModel> entities,
+        (double X, double Y)[] centers
+    )
     {
         var minX = double.PositiveInfinity;
         var minY = double.PositiveInfinity;
@@ -746,7 +764,10 @@ public static class AutoLayoutService
 
         foreach (var r in relationships)
         {
-            if (!indexOf.TryGetValue(r.Source, out var a) || !indexOf.TryGetValue(r.Target, out var b))
+            if (
+                !indexOf.TryGetValue(r.Source, out var a)
+                || !indexOf.TryGetValue(r.Target, out var b)
+            )
             {
                 continue;
             }
@@ -889,7 +910,14 @@ public static class AutoLayoutService
                         continue;
                     }
 
-                    var before = PartialCost(affected, affectedFlags, edges, slotOf, columns, count);
+                    var before = PartialCost(
+                        affected,
+                        affectedFlags,
+                        edges,
+                        slotOf,
+                        columns,
+                        count
+                    );
 
                     // 仮交換してコストを再評価し、改善しなければ元へ戻す
                     SwapSlots(order, slotOf, si, sj);
@@ -959,7 +987,10 @@ public static class AutoLayoutService
                     continue;
                 }
 
-                if (LayoutGeometry.DistancePointToSegment(CellPoint(slotOf[w], columns), pa, pb) < NodeClearance)
+                if (
+                    LayoutGeometry.DistancePointToSegment(CellPoint(slotOf[w], columns), pa, pb)
+                    < NodeClearance
+                )
                 {
                     cost += ThroughWeight;
                 }
@@ -980,7 +1011,14 @@ public static class AutoLayoutService
                     continue;
                 }
 
-                if (LayoutGeometry.SegmentsCross(pa, pb, CellPoint(slotOf[c], columns), CellPoint(slotOf[d], columns)))
+                if (
+                    LayoutGeometry.SegmentsCross(
+                        pa,
+                        pb,
+                        CellPoint(slotOf[c], columns),
+                        CellPoint(slotOf[d], columns)
+                    )
+                )
                 {
                     cost += CrossingWeight;
                 }
@@ -991,6 +1029,6 @@ public static class AutoLayoutService
     }
 
     /// <summary>マス目番号をセル間隔 = 1 の正規化座標へ変換する</summary>
-    private static (double X, double Y) CellPoint(int slot, int columns) => (slot % columns, slot / columns);
-
+    private static (double X, double Y) CellPoint(int slot, int columns) =>
+        (slot % columns, slot / columns);
 }

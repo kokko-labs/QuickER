@@ -83,7 +83,9 @@ public static partial class DbmlImporter
 
                 if (!entities.TryAdd(tableName, new Entity { TableName = tableName }))
                 {
-                    throw new InvalidDataException($"エンティティ '{tableName}' が重複しています。");
+                    throw new InvalidDataException(
+                        $"エンティティ '{tableName}' が重複しています。"
+                    );
                 }
 
                 currentEntity = entities[tableName];
@@ -99,7 +101,9 @@ public static partial class DbmlImporter
 
         if (currentEntity is not null)
         {
-            throw new InvalidDataException($"エンティティ '{currentEntity.TableName}' の閉じ括弧 '}}' がありません。");
+            throw new InvalidDataException(
+                $"エンティティ '{currentEntity.TableName}' の閉じ括弧 '}}' がありません。"
+            );
         }
 
         if (entities.Count == 0)
@@ -128,12 +132,17 @@ public static partial class DbmlImporter
         var bracketStart = trimmed.IndexOf('[');
         var bracketEnd = trimmed.LastIndexOf(']');
         var definition = bracketStart >= 0 ? trimmed[..bracketStart].Trim() : trimmed;
-        var optionText = bracketStart >= 0 && bracketEnd > bracketStart ? trimmed[(bracketStart + 1)..bracketEnd] : string.Empty;
+        var optionText =
+            bracketStart >= 0 && bracketEnd > bracketStart
+                ? trimmed[(bracketStart + 1)..bracketEnd]
+                : string.Empty;
         var tokens = definition.Split(' ', StringSplitOptions.RemoveEmptyEntries);
 
         if (tokens.Length < 2)
         {
-            throw new InvalidDataException($"テーブル '{tableName}' のカラム定義 '{line}' を解析できません。");
+            throw new InvalidDataException(
+                $"テーブル '{tableName}' のカラム定義 '{line}' を解析できません。"
+            );
         }
 
         var column = new Column
@@ -190,7 +199,10 @@ public static partial class DbmlImporter
     /// <see cref="ResolveRelationshipColumns"/> が既定ルールで決定する
     /// </remarks>
     /// <exception cref="InvalidDataException">構文不一致、または参照先テーブルが未定義の場合</exception>
-    private static Relationship ParseRelationship(string line, IReadOnlyDictionary<string, Entity> entities)
+    private static Relationship ParseRelationship(
+        string line,
+        IReadOnlyDictionary<string, Entity> entities
+    )
     {
         var match = RelationshipRegex.Match(line);
 
@@ -202,16 +214,22 @@ public static partial class DbmlImporter
         var leftTable = match.Groups["leftTable"].Value;
         var rightTable = match.Groups["rightTable"].Value;
         var symbol = match.Groups["symbol"].Value;
-        var note = match.Groups["note"].Success ? match.Groups["note"].Value.Replace("\\'", "'") : null;
+        var note = match.Groups["note"].Success
+            ? match.Groups["note"].Value.Replace("\\'", "'")
+            : null;
 
         if (!entities.ContainsKey(leftTable))
         {
-            throw new InvalidDataException($"リレーションの参照元テーブル '{leftTable}' が未定義です。");
+            throw new InvalidDataException(
+                $"リレーションの参照元テーブル '{leftTable}' が未定義です。"
+            );
         }
 
         if (!entities.ContainsKey(rightTable))
         {
-            throw new InvalidDataException($"リレーションの参照先テーブル '{rightTable}' が未定義です。");
+            throw new InvalidDataException(
+                $"リレーションの参照先テーブル '{rightTable}' が未定義です。"
+            );
         }
 
         return new Relationship
@@ -316,7 +334,10 @@ public static partial class DbmlImporter
     /// <see cref="ResolveTargetColumn"/> の優先順位で選び、選んだ列に FK フラグを立てる。
     /// 多対多はジャンクションテーブル前提のためカラムを割り当てない
     /// </remarks>
-    private static void ResolveRelationshipColumns(IReadOnlyDictionary<string, Entity> entities, IEnumerable<Relationship> relationships)
+    private static void ResolveRelationshipColumns(
+        IReadOnlyDictionary<string, Entity> entities,
+        IEnumerable<Relationship> relationships
+    )
     {
         foreach (var relationship in relationships)
         {
@@ -328,7 +349,9 @@ public static partial class DbmlImporter
                 continue;
             }
 
-            var sourceColumn = source.Columns.FirstOrDefault(column => column.IsPrimaryKey) ?? source.Columns.First();
+            var sourceColumn =
+                source.Columns.FirstOrDefault(column => column.IsPrimaryKey)
+                ?? source.Columns.First();
             relationship.SourceColumnId = sourceColumn.Id;
 
             var targetColumn = ResolveTargetColumn(sourceColumn, target);
@@ -346,7 +369,8 @@ public static partial class DbmlImporter
     private static Column ResolveTargetColumn(Column sourcePrimaryKey, Entity target)
     {
         var sameNameForeignKey = target.Columns.FirstOrDefault(column =>
-            column.IsForeignKey && string.Equals(column.Name, sourcePrimaryKey.Name, StringComparison.OrdinalIgnoreCase)
+            column.IsForeignKey
+            && string.Equals(column.Name, sourcePrimaryKey.Name, StringComparison.OrdinalIgnoreCase)
         );
 
         if (sameNameForeignKey is not null)
@@ -354,25 +378,33 @@ public static partial class DbmlImporter
             return sameNameForeignKey;
         }
 
-        var sameName = target.Columns.FirstOrDefault(column => string.Equals(column.Name, sourcePrimaryKey.Name, StringComparison.OrdinalIgnoreCase));
+        var sameName = target.Columns.FirstOrDefault(column =>
+            string.Equals(column.Name, sourcePrimaryKey.Name, StringComparison.OrdinalIgnoreCase)
+        );
 
         if (sameName is not null)
         {
             return sameName;
         }
 
-        var firstForeignKey = target.Columns.FirstOrDefault(column => column.IsForeignKey && !column.IsPrimaryKey);
+        var firstForeignKey = target.Columns.FirstOrDefault(column =>
+            column.IsForeignKey && !column.IsPrimaryKey
+        );
 
         if (firstForeignKey is not null)
         {
             return firstForeignKey;
         }
 
-        return target.Columns.FirstOrDefault(column => !column.IsPrimaryKey) ?? target.Columns.First();
+        return target.Columns.FirstOrDefault(column => !column.IsPrimaryKey)
+            ?? target.Columns.First();
     }
 
     /// <summary><c>Table 名前 {</c> 形式のテーブル開始行に一致する正規表現を生成する</summary>
-    [GeneratedRegex(@"^Table\s+(?<table>\S+)\s*\{$", RegexOptions.Compiled | RegexOptions.IgnoreCase)]
+    [GeneratedRegex(
+        @"^Table\s+(?<table>\S+)\s*\{$",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase
+    )]
     private static partial Regex TableHeaderLineRegex();
 
     /// <summary>
@@ -386,6 +418,9 @@ public static partial class DbmlImporter
     private static partial Regex RelationshipLineRegex();
 
     /// <summary>カラム設定の <c>note: '...'</c>（<c>\'</c> エスケープ対応）に一致する正規表現を生成する</summary>
-    [GeneratedRegex(@"^note:\s*'(?<note>(?:\\'|[^'])*)'$", RegexOptions.Compiled | RegexOptions.IgnoreCase)]
+    [GeneratedRegex(
+        @"^note:\s*'(?<note>(?:\\'|[^'])*)'$",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase
+    )]
     private static partial Regex ColumnNoteRegex();
 }

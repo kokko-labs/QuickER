@@ -22,8 +22,14 @@ public class SchemaDiffService
     {
         var diff = new SchemaDiff();
 
-        var liveByName = liveEntities.ToDictionary(NormalizeTable, StringComparer.OrdinalIgnoreCase);
-        var targetByName = targetEntities.ToDictionary(NormalizeTable, StringComparer.OrdinalIgnoreCase);
+        var liveByName = liveEntities.ToDictionary(
+            NormalizeTable,
+            StringComparer.OrdinalIgnoreCase
+        );
+        var targetByName = targetEntities.ToDictionary(
+            NormalizeTable,
+            StringComparer.OrdinalIgnoreCase
+        );
 
         // ---------- テーブル/カラムの差分 ----------
         foreach (var (name, target) in targetByName)
@@ -54,7 +60,8 @@ public class SchemaDiffService
                             Entity = target,
                             NewDescription = newTblDesc,
                             OldDescription = null,
-                            Description = $"テーブル [{name}] の説明を設定: \"{Truncate(newTblDesc)}\"",
+                            Description =
+                                $"テーブル [{name}] の説明を設定: \"{Truncate(newTblDesc)}\"",
                         }
                     );
                 }
@@ -77,7 +84,8 @@ public class SchemaDiffService
                             Column = c,
                             NewDescription = c.Description,
                             OldDescription = null,
-                            Description = $"列 [{name}].[{c.Name}] の説明を設定: \"{Truncate(c.Description)}\"",
+                            Description =
+                                $"列 [{name}].[{c.Name}] の説明を設定: \"{Truncate(c.Description)}\"",
                         }
                     );
                 }
@@ -87,7 +95,10 @@ public class SchemaDiffService
 
             // 既存テーブル: カラム差分
             var liveCols = live.Columns.ToDictionary(c => c.Name, StringComparer.OrdinalIgnoreCase);
-            var targetCols = target.Columns.ToDictionary(c => c.Name, StringComparer.OrdinalIgnoreCase);
+            var targetCols = target.Columns.ToDictionary(
+                c => c.Name,
+                StringComparer.OrdinalIgnoreCase
+            );
 
             // テーブル説明 (MS_Description) の差分
             var targetTableDesc = target.Description ?? string.Empty;
@@ -139,14 +150,18 @@ public class SchemaDiffService
                                 Column = tcol,
                                 NewDescription = tcol.Description,
                                 OldDescription = null,
-                                Description = $"列 [{name}].[{cname}] の説明を設定: \"{Truncate(tcol.Description)}\"",
+                                Description =
+                                    $"列 [{name}].[{cname}] の説明を設定: \"{Truncate(tcol.Description)}\"",
                             }
                         );
                     }
                 }
                 else
                 {
-                    if (!IsSameType(lcol.DataType, tcol.DataType) || lcol.IsNullable != tcol.IsNullable)
+                    if (
+                        !IsSameType(lcol.DataType, tcol.DataType)
+                        || lcol.IsNullable != tcol.IsNullable
+                    )
                     {
                         var changeParts = new List<string>();
 
@@ -157,7 +172,9 @@ public class SchemaDiffService
 
                         if (lcol.IsNullable != tcol.IsNullable)
                         {
-                            changeParts.Add($"NULL許容を {(lcol.IsNullable ? "許可" : "禁止")} → {(tcol.IsNullable ? "許可" : "禁止")} に変更");
+                            changeParts.Add(
+                                $"NULL許容を {(lcol.IsNullable ? "許可" : "禁止")} → {(tcol.IsNullable ? "許可" : "禁止")} に変更"
+                            );
                         }
 
                         diff.Items.Add(
@@ -170,7 +187,8 @@ public class SchemaDiffService
                                 Column = tcol,
                                 OldColumn = lcol,
                                 IsSelected = false,
-                                Description = $"列 [{name}].[{cname}] " + string.Join(" / ", changeParts),
+                                Description =
+                                    $"列 [{name}].[{cname}] " + string.Join(" / ", changeParts),
                             }
                         );
                     }
@@ -345,7 +363,8 @@ public class SchemaDiffService
                     Relationship = rel,
                     ForeignKeyName = rel.ConstraintName,
                     IsSelected = false,
-                    Description = $"外部キー [{NormalizeTable(child)}] → [{NormalizeTable(parent)}] を削除",
+                    Description =
+                        $"外部キー [{NormalizeTable(child)}] → [{NormalizeTable(parent)}] を削除",
                 }
             );
         }
@@ -355,10 +374,16 @@ public class SchemaDiffService
 
     /// <summary>同一列集合のまま順序のみ異なるテーブル名の一覧を返す</summary>
     /// <remarks>列の追加・削除を伴う場合は列順差分として扱わない（ALTER で表現できないため別管理とする）</remarks>
-    public static IReadOnlyList<string> DetectColumnOrderChanges(IReadOnlyList<Entity> liveEntities, IReadOnlyList<Entity> targetEntities)
+    public static IReadOnlyList<string> DetectColumnOrderChanges(
+        IReadOnlyList<Entity> liveEntities,
+        IReadOnlyList<Entity> targetEntities
+    )
     {
         var changed = new List<string>();
-        var liveByName = liveEntities.ToDictionary(NormalizeTable, StringComparer.OrdinalIgnoreCase);
+        var liveByName = liveEntities.ToDictionary(
+            NormalizeTable,
+            StringComparer.OrdinalIgnoreCase
+        );
 
         foreach (var target in targetEntities)
         {
@@ -434,7 +459,12 @@ public class SchemaDiffService
     /// 明示指定列 → <c>&lt;ParentTable&gt;_&lt;PkCol&gt;</c> 命名列 → PK 列と同名の列 →
     /// <c>IsForeignKey</c> フラグの列、の優先順で探索する 該当なしなら null
     /// </remarks>
-    private static string? ResolveFkColumnName(Relationship rel, Entity child, Entity parent, Column pkCol)
+    private static string? ResolveFkColumnName(
+        Relationship rel,
+        Entity child,
+        Entity parent,
+        Column pkCol
+    )
     {
         if (rel.TargetColumnId is not null)
         {
@@ -448,14 +478,18 @@ public class SchemaDiffService
 
         var parentName = NormalizeTable(parent).Replace(".", "_");
         var conv = parentName + "_" + pkCol.Name;
-        var byConv = child.Columns.FirstOrDefault(c => string.Equals(c.Name, conv, StringComparison.OrdinalIgnoreCase));
+        var byConv = child.Columns.FirstOrDefault(c =>
+            string.Equals(c.Name, conv, StringComparison.OrdinalIgnoreCase)
+        );
 
         if (byConv is not null)
         {
             return byConv.Name;
         }
 
-        var byPkName = child.Columns.FirstOrDefault(c => !c.IsPrimaryKey && string.Equals(c.Name, pkCol.Name, StringComparison.OrdinalIgnoreCase));
+        var byPkName = child.Columns.FirstOrDefault(c =>
+            !c.IsPrimaryKey && string.Equals(c.Name, pkCol.Name, StringComparison.OrdinalIgnoreCase)
+        );
 
         if (byPkName is not null)
         {
@@ -483,7 +517,8 @@ public class SchemaDiffService
     }
 
     /// <summary>データ型を大文字小文字・前後空白を無視して同一とみなせるか判定する</summary>
-    private static bool IsSameType(string a, string b) => string.Equals((a ?? "").Trim(), (b ?? "").Trim(), StringComparison.OrdinalIgnoreCase);
+    private static bool IsSameType(string a, string b) =>
+        string.Equals((a ?? "").Trim(), (b ?? "").Trim(), StringComparison.OrdinalIgnoreCase);
 
     /// <summary>列集合が一致するテーブルで列順のみが変更されているかを判定する</summary>
     private static bool HasColumnOrderChanged(Entity live, Entity target)
@@ -516,5 +551,6 @@ public class SchemaDiffService
     }
 
     /// <summary>説明文を指定長で切り詰め、超過時は末尾に省略記号を付ける</summary>
-    private static string Truncate(string s, int max = 30) => s.Length <= max ? s : s.Substring(0, max) + "…";
+    private static string Truncate(string s, int max = 30) =>
+        s.Length <= max ? s : s.Substring(0, max) + "…";
 }

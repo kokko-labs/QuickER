@@ -11,7 +11,11 @@ namespace ERDesigner.Generator;
 internal sealed partial class CSharpGenerationModelBuilder
 {
     /// <summary>1 つの値オブジェクトへ集約される列のメンバー（所属テーブル・列・解決済み C# 型）</summary>
-    private readonly record struct ValueObjectMember(EntityDefinition Entity, ColumnDefinition Column, CSharpTypeInfo TypeInfo);
+    private readonly record struct ValueObjectMember(
+        EntityDefinition Entity,
+        ColumnDefinition Column,
+        CSharpTypeInfo TypeInfo
+    );
 
     /// <summary>ER 図全体から値オブジェクト定義を構築する（GenerateValueObjects が OFF のときは空）</summary>
     private IReadOnlyDictionary<string, CSharpValueObjectModel> BuildValueObjects(
@@ -52,14 +56,24 @@ internal sealed partial class CSharpGenerationModelBuilder
     }
 
     /// <summary>1 グループ（同名列の集合）から 1 つの VO 生成モデルを構築する。競合は警告し PK 優先/最大定義で解決する</summary>
-    private CSharpValueObjectModel BuildValueObjectModel(string key, List<ValueObjectMember> members, CodeGenerationOptions options, ICollection<GenerationDiagnostic> diagnostics)
+    private CSharpValueObjectModel BuildValueObjectModel(
+        string key,
+        List<ValueObjectMember> members,
+        CodeGenerationOptions options,
+        ICollection<GenerationDiagnostic> diagnostics
+    )
     {
         // PK があれば PK の定義を正、無ければ「最も広い定義」を正とする
         var primaryKeyMember = members.FirstOrDefault(member => member.Column.IsPrimaryKey);
-        var authoritative = primaryKeyMember.Column is not null ? primaryKeyMember : members.OrderByDescending(WidthScore).First();
+        var authoritative = primaryKeyMember.Column is not null
+            ? primaryKeyMember
+            : members.OrderByDescending(WidthScore).First();
 
         var className = _nameConverter.ToValueObjectClassName(authoritative.Column.Name);
-        var isGuidKey = options.UseGuidKeyForStringPrimaryKey && primaryKeyMember.Column is not null && primaryKeyMember.TypeInfo.TypeName == "string";
+        var isGuidKey =
+            options.UseGuidKeyForStringPrimaryKey
+            && primaryKeyMember.Column is not null
+            && primaryKeyMember.TypeInfo.TypeName == "string";
 
         var valueType = isGuidKey ? "string" : authoritative.TypeInfo.TypeName;
         var maxLength = isGuidKey ? null : authoritative.TypeInfo.MaxLength;
@@ -70,7 +84,12 @@ internal sealed partial class CSharpGenerationModelBuilder
         var signatures = members.Select(Signature).Distinct().ToList();
         if (signatures.Count > 1)
         {
-            var locations = string.Join("、", members.Select(member => $"{member.Entity.TableName}.{member.Column.Name} ({member.Column.DataType})"));
+            var locations = string.Join(
+                "、",
+                members.Select(member =>
+                    $"{member.Entity.TableName}.{member.Column.Name} ({member.Column.DataType})"
+                )
+            );
             diagnostics.Add(
                 Warning(
                     $"値オブジェクト '{className}' に集約される同名列の定義が一致しません。PK 定義優先（無ければ最大定義）で生成しますが、ER 図の定義統一を推奨します: {locations}"
@@ -93,10 +112,16 @@ internal sealed partial class CSharpGenerationModelBuilder
     }
 
     /// <summary>列名（正規化キー）から対応する値オブジェクトを引く。VO 化対象外なら null</summary>
-    private CSharpValueObjectModel? ResolveValueObject(ColumnDefinition column) => _valueObjects.TryGetValue(_nameConverter.ToColumnKey(column.Name), out var model) ? model : null;
+    private CSharpValueObjectModel? ResolveValueObject(ColumnDefinition column) =>
+        _valueObjects.TryGetValue(_nameConverter.ToColumnKey(column.Name), out var model)
+            ? model
+            : null;
 
     /// <summary>VO 化された列の EditModel プロパティ生成モデルを構築する（確定値は常に VO?、バインド setter は TryCreate で検証）</summary>
-    private CSharpEditModelPropertyModel BuildValueObjectEditModelProperty(ColumnDefinition column, CSharpValueObjectModel valueObject)
+    private CSharpEditModelPropertyModel BuildValueObjectEditModelProperty(
+        ColumnDefinition column,
+        CSharpValueObjectModel valueObject
+    )
     {
         var underlying = valueObject.ValueTypeName; // TValue（素の型）
         var isBinary = underlying == "byte[]";
@@ -128,8 +153,15 @@ internal sealed partial class CSharpGenerationModelBuilder
     }
 
     /// <summary>競合判定用の定義シグネチャ（型・長さ・精度・スケール。NULL 可否は含めない）</summary>
-    private static (string Type, int? MaxLength, int? Precision, int? Scale) Signature(ValueObjectMember member) =>
-        (member.TypeInfo.TypeName, member.TypeInfo.MaxLength, member.TypeInfo.Precision, member.TypeInfo.Scale);
+    private static (string Type, int? MaxLength, int? Precision, int? Scale) Signature(
+        ValueObjectMember member
+    ) =>
+        (
+            member.TypeInfo.TypeName,
+            member.TypeInfo.MaxLength,
+            member.TypeInfo.Precision,
+            member.TypeInfo.Scale
+        );
 
     /// <summary>「最も広い定義」を選ぶためのスコア（string は最大長、decimal は精度。無指定 = 無制限を最大とみなす）</summary>
     private static long WidthScore(ValueObjectMember member) =>
@@ -141,7 +173,11 @@ internal sealed partial class CSharpGenerationModelBuilder
         };
 
     /// <summary>C# 値型から継承すべき基底クラス宣言（型引数込み）を決める</summary>
-    private static string BuildValueObjectBaseDeclaration(string className, string valueType, bool isGuidKey)
+    private static string BuildValueObjectBaseDeclaration(
+        string className,
+        string valueType,
+        bool isGuidKey
+    )
     {
         if (isGuidKey)
         {
@@ -150,7 +186,15 @@ internal sealed partial class CSharpGenerationModelBuilder
 
         return valueType switch
         {
-            "byte" or "short" or "int" or "long" or "float" or "double" or "decimal" or "TimeSpan" or "DateTimeOffset" => $"ValueObjectOrderedBase<{className}, {valueType}>",
+            "byte"
+            or "short"
+            or "int"
+            or "long"
+            or "float"
+            or "double"
+            or "decimal"
+            or "TimeSpan"
+            or "DateTimeOffset" => $"ValueObjectOrderedBase<{className}, {valueType}>",
             "string" => $"ValueObjectStringBase<{className}>",
             "bool" => $"ValueObjectBooleanBase<{className}>",
             "DateTime" => $"ValueObjectDateTimeBase<{className}>",

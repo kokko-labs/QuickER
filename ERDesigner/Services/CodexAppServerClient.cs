@@ -36,41 +36,75 @@ public interface ICodexAppServerClient : IAsyncDisposable
 
     /// <summary>Codex App Server プロセスを起動し、initialize ハンドシェイクを完了する</summary>
     /// <remarks>既に起動済みの場合は何もしない</remarks>
-    Task StartAsync(CodexAppServerSettings settings, string clientName, string clientTitle, string clientVersion, CancellationToken cancellationToken = default);
+    Task StartAsync(
+        CodexAppServerSettings settings,
+        string clientName,
+        string clientTitle,
+        string clientVersion,
+        CancellationToken cancellationToken = default
+    );
 
     /// <summary>現在のアカウント状態を取得する</summary>
     /// <param name="refreshToken">認証トークンの更新を要求するかどうか</param>
-    Task<CodexAccountInfo> ReadAccountAsync(bool refreshToken, CancellationToken cancellationToken = default);
+    Task<CodexAccountInfo> ReadAccountAsync(
+        bool refreshToken,
+        CancellationToken cancellationToken = default
+    );
 
     /// <summary>API キーによるログインを開始する</summary>
-    Task<CodexLoginStartResult> LoginWithApiKeyAsync(string apiKey, CancellationToken cancellationToken = default);
+    Task<CodexLoginStartResult> LoginWithApiKeyAsync(
+        string apiKey,
+        CancellationToken cancellationToken = default
+    );
 
     /// <summary>ChatGPT のブラウザログインを開始する</summary>
     /// <returns>ブラウザで開く認証 URL を含むログイン開始結果</returns>
-    Task<CodexLoginStartResult> StartChatGptLoginAsync(CancellationToken cancellationToken = default);
+    Task<CodexLoginStartResult> StartChatGptLoginAsync(
+        CancellationToken cancellationToken = default
+    );
 
     /// <summary>現在のアカウントからログアウトする</summary>
     Task LogoutAsync(CancellationToken cancellationToken = default);
 
     /// <summary>新しい会話スレッドを開始する</summary>
-    Task<CodexThreadInfo> StartThreadAsync(CodexThreadStartOptions options, CancellationToken cancellationToken = default);
+    Task<CodexThreadInfo> StartThreadAsync(
+        CodexThreadStartOptions options,
+        CancellationToken cancellationToken = default
+    );
 
     /// <summary>指定スレッドにプロンプトを送信して新しいターンを開始する</summary>
-    Task<CodexTurnInfo> StartTurnAsync(string threadId, string prompt, CancellationToken cancellationToken = default);
+    Task<CodexTurnInfo> StartTurnAsync(
+        string threadId,
+        string prompt,
+        CancellationToken cancellationToken = default
+    );
 
     /// <summary>実行中のターンを中断する</summary>
-    Task InterruptTurnAsync(string threadId, string turnId, CancellationToken cancellationToken = default);
+    Task InterruptTurnAsync(
+        string threadId,
+        string turnId,
+        CancellationToken cancellationToken = default
+    );
 
     /// <summary>dynamicTool 呼び出し（サーバー発リクエスト）に実行結果を応答する</summary>
     /// <param name="requestId">応答先の JSON-RPC リクエスト ID</param>
     /// <param name="resultText">ツールの実行結果テキスト</param>
     /// <param name="success">ツール実行の成否</param>
-    Task RespondToDynamicToolCallAsync(int requestId, string resultText, bool success, CancellationToken cancellationToken = default);
+    Task RespondToDynamicToolCallAsync(
+        int requestId,
+        string resultText,
+        bool success,
+        CancellationToken cancellationToken = default
+    );
 
     /// <summary>承認リクエストに決定を応答する</summary>
     /// <param name="requestId">応答先の JSON-RPC リクエスト ID</param>
     /// <param name="decision">承認決定（accept / decline 等）</param>
-    Task RespondToApprovalAsync(int requestId, string decision, CancellationToken cancellationToken = default);
+    Task RespondToApprovalAsync(
+        int requestId,
+        string decision,
+        CancellationToken cancellationToken = default
+    );
 
     /// <summary>dynamicTool 呼び出しリクエスト（item/tool/call）の受信時に発生する</summary>
     event EventHandler<CodexDynamicToolCallRequest>? DynamicToolCallReceived;
@@ -95,7 +129,10 @@ public interface ICodexAppServerClient : IAsyncDisposable
 public sealed class CodexAppServerClient : ICodexAppServerClient
 {
     /// <summary>JSON-RPC ペイロードのシリアライズ設定（camelCase 変換、null プロパティの出力省略）</summary>
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web) { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull };
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+    };
 
     /// <summary>アカウント状態取得の JSON-RPC メソッド名</summary>
     private const string GetAccountMethod = "account/read";
@@ -110,7 +147,10 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
     private readonly SemaphoreSlim _writeLock = new(1, 1);
 
     /// <summary>送信済みリクエスト ID と応答待ち <see cref="TaskCompletionSource{TResult}"/> の対応表</summary>
-    private readonly ConcurrentDictionary<int, TaskCompletionSource<JsonElement?>> _pendingRequests = new();
+    private readonly ConcurrentDictionary<
+        int,
+        TaskCompletionSource<JsonElement?>
+    > _pendingRequests = new();
 
     /// <summary>起動した Codex App Server の子プロセス</summary>
     private Process? _process;
@@ -167,7 +207,13 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
     public bool IsStarted => _process is { HasExited: false } && _stdin is not null;
 
     /// <inheritdoc />
-    public async Task StartAsync(CodexAppServerSettings settings, string clientName, string clientTitle, string clientVersion, CancellationToken cancellationToken = default)
+    public async Task StartAsync(
+        CodexAppServerSettings settings,
+        string clientName,
+        string clientTitle,
+        string clientVersion,
+        CancellationToken cancellationToken = default
+    )
     {
         if (IsStarted)
         {
@@ -189,9 +235,15 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
             UseShellExecute = false,
             CreateNoWindow = true,
             // BOM なし UTF-8 を使用する（BOM 付きだとサーバー側のJSONパースが失敗するため）
-            StandardInputEncoding = new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
-            StandardOutputEncoding = new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
-            StandardErrorEncoding = new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+            StandardInputEncoding = new System.Text.UTF8Encoding(
+                encoderShouldEmitUTF8Identifier: false
+            ),
+            StandardOutputEncoding = new System.Text.UTF8Encoding(
+                encoderShouldEmitUTF8Identifier: false
+            ),
+            StandardErrorEncoding = new System.Text.UTF8Encoding(
+                encoderShouldEmitUTF8Identifier: false
+            ),
         };
 
         var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
@@ -206,7 +258,10 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
         _stdin.NewLine = "\n";
         _stdin.AutoFlush = true;
         _readerCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        _readerTask = Task.Run(() => ReadLoopAsync(process.StandardOutput, _readerCts.Token), CancellationToken.None);
+        _readerTask = Task.Run(
+            () => ReadLoopAsync(process.StandardOutput, _readerCts.Token),
+            CancellationToken.None
+        );
 
         // stderr を非同期で読み捨てる（バッファフルによるデッドロックを防ぐ）
         _ = Task.Run(
@@ -216,7 +271,9 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
                 {
                     while (!_readerCts.IsCancellationRequested)
                     {
-                        var line = await process.StandardError.ReadLineAsync().ConfigureAwait(false);
+                        var line = await process
+                            .StandardError.ReadLineAsync()
+                            .ConfigureAwait(false);
 
                         if (line is null)
                         {
@@ -266,20 +323,36 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
     }
 
     /// <inheritdoc />
-    public async Task<CodexAccountInfo> ReadAccountAsync(bool refreshToken, CancellationToken cancellationToken = default)
+    public async Task<CodexAccountInfo> ReadAccountAsync(
+        bool refreshToken,
+        CancellationToken cancellationToken = default
+    )
     {
-        var result = await SendRequestAsync(GetAccountMethod, new { refreshToken }, cancellationToken);
+        var result = await SendRequestAsync(
+            GetAccountMethod,
+            new { refreshToken },
+            cancellationToken
+        );
         return ParseAccountInfo(result);
     }
 
     /// <inheritdoc />
-    public Task<CodexLoginStartResult> LoginWithApiKeyAsync(string apiKey, CancellationToken cancellationToken = default)
+    public Task<CodexLoginStartResult> LoginWithApiKeyAsync(
+        string apiKey,
+        CancellationToken cancellationToken = default
+    )
     {
-        return StartLoginAsync(new { type = "apiKey", apiKey }, CodexLoginType.ApiKey, cancellationToken);
+        return StartLoginAsync(
+            new { type = "apiKey", apiKey },
+            CodexLoginType.ApiKey,
+            cancellationToken
+        );
     }
 
     /// <inheritdoc />
-    public Task<CodexLoginStartResult> StartChatGptLoginAsync(CancellationToken cancellationToken = default)
+    public Task<CodexLoginStartResult> StartChatGptLoginAsync(
+        CancellationToken cancellationToken = default
+    )
     {
         return StartLoginAsync(new { type = "chatgpt" }, CodexLoginType.ChatGpt, cancellationToken);
     }
@@ -291,7 +364,10 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
     }
 
     /// <inheritdoc />
-    public async Task<CodexThreadInfo> StartThreadAsync(CodexThreadStartOptions options, CancellationToken cancellationToken = default)
+    public async Task<CodexThreadInfo> StartThreadAsync(
+        CodexThreadStartOptions options,
+        CancellationToken cancellationToken = default
+    )
     {
         var parameters = new Dictionary<string, object?>();
 
@@ -343,36 +419,65 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
     }
 
     /// <inheritdoc />
-    public async Task<CodexTurnInfo> StartTurnAsync(string threadId, string prompt, CancellationToken cancellationToken = default)
+    public async Task<CodexTurnInfo> StartTurnAsync(
+        string threadId,
+        string prompt,
+        CancellationToken cancellationToken = default
+    )
     {
-        var result = await SendRequestAsync("turn/start", new { threadId, input = new object[] { new CodexTextInputItem { Text = prompt } } }, cancellationToken);
+        var result = await SendRequestAsync(
+            "turn/start",
+            new { threadId, input = new object[] { new CodexTextInputItem { Text = prompt } } },
+            cancellationToken
+        );
 
         return ParseTurnStartResult(result);
     }
 
     /// <inheritdoc />
-    public async Task InterruptTurnAsync(string threadId, string turnId, CancellationToken cancellationToken = default)
+    public async Task InterruptTurnAsync(
+        string threadId,
+        string turnId,
+        CancellationToken cancellationToken = default
+    )
     {
         await SendRequestAsync("turn/interrupt", new { threadId, turnId }, cancellationToken);
     }
 
     /// <inheritdoc />
-    public async Task RespondToDynamicToolCallAsync(int requestId, string resultText, bool success, CancellationToken cancellationToken = default)
+    public async Task RespondToDynamicToolCallAsync(
+        int requestId,
+        string resultText,
+        bool success,
+        CancellationToken cancellationToken = default
+    )
     {
         EnsureStarted();
         var response = new Dictionary<string, object?>
         {
             ["id"] = requestId,
-            ["result"] = new { contentItems = new object[] { new { type = "inputText", text = resultText } }, success },
+            ["result"] = new
+            {
+                contentItems = new object[] { new { type = "inputText", text = resultText } },
+                success,
+            },
         };
         await SendMessageAsync(response, cancellationToken);
     }
 
     /// <inheritdoc />
-    public async Task RespondToApprovalAsync(int requestId, string decision, CancellationToken cancellationToken = default)
+    public async Task RespondToApprovalAsync(
+        int requestId,
+        string decision,
+        CancellationToken cancellationToken = default
+    )
     {
         EnsureStarted();
-        var response = new Dictionary<string, object?> { ["id"] = requestId, ["result"] = new { decision } };
+        var response = new Dictionary<string, object?>
+        {
+            ["id"] = requestId,
+            ["result"] = new { decision },
+        };
         await SendMessageAsync(response, cancellationToken);
     }
 
@@ -424,7 +529,11 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
 
     /// <summary>account/login/start リクエストを送信し、ログイン開始結果を解析して返す</summary>
     /// <param name="fallbackType">応答に type が含まれない場合に採用するログイン方式</param>
-    private async Task<CodexLoginStartResult> StartLoginAsync(object parameters, CodexLoginType fallbackType, CancellationToken cancellationToken)
+    private async Task<CodexLoginStartResult> StartLoginAsync(
+        object parameters,
+        CodexLoginType fallbackType,
+        CancellationToken cancellationToken
+    )
     {
         var result = await SendRequestAsync(LoginAccountMethod, parameters, cancellationToken);
         return ParseLoginStartResult(result, fallbackType);
@@ -434,17 +543,26 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
     /// <returns>レスポンスの result 要素、result が無い場合は null</returns>
     /// <exception cref="TimeoutException">30 秒以内にレスポンスが返らなかった場合</exception>
     /// <exception cref="InvalidOperationException">サーバーがエラーレスポンスを返した、または接続が切断された場合</exception>
-    private async Task<JsonElement?> SendRequestAsync(string method, object? parameters, CancellationToken cancellationToken)
+    private async Task<JsonElement?> SendRequestAsync(
+        string method,
+        object? parameters,
+        CancellationToken cancellationToken
+    )
     {
         EnsureStarted();
 
         var requestId = Interlocked.Increment(ref _nextRequestId);
-        var completionSource = new TaskCompletionSource<JsonElement?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var completionSource = new TaskCompletionSource<JsonElement?>(
+            TaskCreationOptions.RunContinuationsAsynchronously
+        );
         _pendingRequests[requestId] = completionSource;
 
         // リクエストタイムアウト（30 秒）+ 呼び出し元キャンセルを合成する
         using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken,
+            timeoutCts.Token
+        );
 
         using var cancellationRegistration = linkedCts.Token.Register(() =>
         {
@@ -453,7 +571,9 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
                 if (timeoutCts.IsCancellationRequested)
                 {
                     pending.TrySetException(
-                        new TimeoutException($"Codex App Server からのレスポンスがタイムアウトしました (method: {method})。{BuildRecentStandardErrorSuffix()}")
+                        new TimeoutException(
+                            $"Codex App Server からのレスポンスがタイムアウトしました (method: {method})。{BuildRecentStandardErrorSuffix()}"
+                        )
                     );
                 }
                 else
@@ -477,7 +597,11 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
     }
 
     /// <summary>JSON-RPC 通知（id なし、応答を待たないメッセージ）を送信する</summary>
-    private async Task SendNotificationAsync(string method, object? parameters, CancellationToken cancellationToken)
+    private async Task SendNotificationAsync(
+        string method,
+        object? parameters,
+        CancellationToken cancellationToken
+    )
     {
         EnsureStarted();
         await SendMessageAsync(
@@ -534,7 +658,10 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
                 using var document = JsonDocument.Parse(line);
                 var root = document.RootElement;
 
-                if (root.TryGetProperty("id", out var idElement) && !root.TryGetProperty("method", out _))
+                if (
+                    root.TryGetProperty("id", out var idElement)
+                    && !root.TryGetProperty("method", out _)
+                )
                 {
                     HandleResponse(root, idElement);
                     continue;
@@ -543,10 +670,15 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
                 if (root.TryGetProperty("method", out var methodElement))
                 {
                     var method = methodElement.GetString() ?? string.Empty;
-                    var parameters = root.TryGetProperty("params", out var paramsElement) ? paramsElement.Clone() : (JsonElement?)null;
+                    var parameters = root.TryGetProperty("params", out var paramsElement)
+                        ? paramsElement.Clone()
+                        : (JsonElement?)null;
 
                     // id を持つ（サーバーからのリクエスト）場合は dynamicTool 呼び出しや承認として扱う
-                    if (root.TryGetProperty("id", out var serverReqIdElement) && TryGetRequestId(serverReqIdElement, out var serverRequestId))
+                    if (
+                        root.TryGetProperty("id", out var serverReqIdElement)
+                        && TryGetRequestId(serverReqIdElement, out var serverRequestId)
+                    )
                     {
                         HandleServerRequest(method, serverRequestId, parameters);
                     }
@@ -567,7 +699,9 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
         {
             if (_pendingRequests.TryRemove(pending.Key, out var request))
             {
-                request.TrySetException(new InvalidOperationException("Codex App Server との接続が切断されました。"));
+                request.TrySetException(
+                    new InvalidOperationException("Codex App Server との接続が切断されました。")
+                );
             }
         }
     }
@@ -591,7 +725,9 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
             return;
         }
 
-        var result = root.TryGetProperty("result", out var resultElement) ? resultElement.Clone() : (JsonElement?)null;
+        var result = root.TryGetProperty("result", out var resultElement)
+            ? resultElement.Clone()
+            : (JsonElement?)null;
         pending.TrySetResult(result);
     }
 
@@ -602,13 +738,19 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
         switch (method)
         {
             case "item/tool/call":
-                DynamicToolCallReceived?.Invoke(this, ParseDynamicToolCallRequest(requestId, parameters));
+                DynamicToolCallReceived?.Invoke(
+                    this,
+                    ParseDynamicToolCallRequest(requestId, parameters)
+                );
                 break;
 
             case "item/commandExecution/requestApproval":
             case "item/fileChange/requestApproval":
             case "item/permissions/requestApproval":
-                ApprovalRequested?.Invoke(this, ParseApprovalRequest(requestId, method, parameters));
+                ApprovalRequested?.Invoke(
+                    this,
+                    ParseApprovalRequest(requestId, method, parameters)
+                );
                 break;
         }
     }
@@ -616,7 +758,10 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
     /// <summary>通知を解析し、汎用イベント <see cref="NotificationReceived"/> と各種別イベントへ振り分ける</summary>
     private void HandleNotification(string method, JsonElement? parameters)
     {
-        NotificationReceived?.Invoke(this, new CodexJsonRpcNotification { Method = method, Params = parameters });
+        NotificationReceived?.Invoke(
+            this,
+            new CodexJsonRpcNotification { Method = method, Params = parameters }
+        );
 
         switch (method)
         {
@@ -637,7 +782,10 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
                 break;
 
             case "item/agentMessage/delta":
-                AgentMessageDeltaReceived?.Invoke(this, ParseAgentMessageDeltaNotification(parameters));
+                AgentMessageDeltaReceived?.Invoke(
+                    this,
+                    ParseAgentMessageDeltaNotification(parameters)
+                );
                 break;
 
             case "item/started":
@@ -658,9 +806,14 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
     /// <exception cref="InvalidOperationException">応答に thread 要素が含まれない場合</exception>
     private static CodexThreadInfo ParseThreadStartResult(JsonElement? result)
     {
-        if (result is not JsonElement element || !element.TryGetProperty("thread", out var threadElement))
+        if (
+            result is not JsonElement element
+            || !element.TryGetProperty("thread", out var threadElement)
+        )
         {
-            throw new InvalidOperationException("thread/start の応答に thread が含まれていません。");
+            throw new InvalidOperationException(
+                "thread/start の応答に thread が含まれていません。"
+            );
         }
 
         return ParseThreadInfo(threadElement);
@@ -670,7 +823,10 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
     /// <exception cref="InvalidOperationException">応答に turn 要素が含まれない場合</exception>
     private static CodexTurnInfo ParseTurnStartResult(JsonElement? result)
     {
-        if (result is not JsonElement element || !element.TryGetProperty("turn", out var turnElement))
+        if (
+            result is not JsonElement element
+            || !element.TryGetProperty("turn", out var turnElement)
+        )
         {
             throw new InvalidOperationException("turn/start の応答に turn が含まれていません。");
         }
@@ -687,30 +843,52 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
             return new CodexAccountInfo();
         }
 
-        var requiresOpenAiAuth = element.TryGetProperty("requiresOpenaiAuth", out var requiresElement) && requiresElement.ValueKind == JsonValueKind.True;
+        var requiresOpenAiAuth =
+            element.TryGetProperty("requiresOpenaiAuth", out var requiresElement)
+            && requiresElement.ValueKind == JsonValueKind.True;
 
-        if (!element.TryGetProperty("account", out var accountElement) || accountElement.ValueKind == JsonValueKind.Null)
+        if (
+            !element.TryGetProperty("account", out var accountElement)
+            || accountElement.ValueKind == JsonValueKind.Null
+        )
         {
-            return new CodexAccountInfo { RequiresOpenAiAuth = requiresOpenAiAuth, AuthMode = CodexAuthMode.None };
+            return new CodexAccountInfo
+            {
+                RequiresOpenAiAuth = requiresOpenAiAuth,
+                AuthMode = CodexAuthMode.None,
+            };
         }
 
-        var accountType = accountElement.TryGetProperty("type", out var typeElement) ? typeElement.GetString() : null;
+        var accountType = accountElement.TryGetProperty("type", out var typeElement)
+            ? typeElement.GetString()
+            : null;
         return new CodexAccountInfo
         {
             RequiresOpenAiAuth = requiresOpenAiAuth,
             AuthMode = ParseAuthMode(accountType),
-            Email = accountElement.TryGetProperty("email", out var emailElement) ? emailElement.GetString() : null,
-            PlanType = accountElement.TryGetProperty("planType", out var planElement) ? planElement.GetString() : null,
+            Email = accountElement.TryGetProperty("email", out var emailElement)
+                ? emailElement.GetString()
+                : null,
+            PlanType = accountElement.TryGetProperty("planType", out var planElement)
+                ? planElement.GetString()
+                : null,
         };
     }
 
     /// <summary>thread/started 通知のパラメータを解析する</summary>
     /// <exception cref="InvalidOperationException">通知に thread 要素が含まれない場合</exception>
-    private static CodexThreadStartedNotification ParseThreadStartedNotification(JsonElement? parameters)
+    private static CodexThreadStartedNotification ParseThreadStartedNotification(
+        JsonElement? parameters
+    )
     {
-        if (parameters is not JsonElement element || !element.TryGetProperty("thread", out var threadElement))
+        if (
+            parameters is not JsonElement element
+            || !element.TryGetProperty("thread", out var threadElement)
+        )
         {
-            throw new InvalidOperationException("thread/started 通知に thread が含まれていません。");
+            throw new InvalidOperationException(
+                "thread/started 通知に thread が含まれていません。"
+            );
         }
 
         return new CodexThreadStartedNotification { Thread = ParseThreadInfo(threadElement) };
@@ -718,7 +896,9 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
 
     /// <summary>turn/started 通知のパラメータを解析する</summary>
     /// <remarks>threadId は camelCase と旧形式（thread_id）の両方に対応し、欠落要素は既定値で補完する</remarks>
-    private static CodexTurnStartedNotification ParseTurnStartedNotification(JsonElement? parameters)
+    private static CodexTurnStartedNotification ParseTurnStartedNotification(
+        JsonElement? parameters
+    )
     {
         if (parameters is not JsonElement element)
         {
@@ -730,8 +910,10 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
         }
 
         var threadId =
-            element.TryGetProperty("threadId", out var threadIdElement) ? threadIdElement.GetString() ?? string.Empty
-            : element.TryGetProperty("thread_id", out var legacyThreadIdElement) ? legacyThreadIdElement.GetString() ?? string.Empty
+            element.TryGetProperty("threadId", out var threadIdElement)
+                ? threadIdElement.GetString() ?? string.Empty
+            : element.TryGetProperty("thread_id", out var legacyThreadIdElement)
+                ? legacyThreadIdElement.GetString() ?? string.Empty
             : string.Empty;
 
         if (!element.TryGetProperty("turn", out var turnElement))
@@ -743,11 +925,17 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
             };
         }
 
-        return new CodexTurnStartedNotification { ThreadId = threadId, Turn = ParseTurnInfo(turnElement) };
+        return new CodexTurnStartedNotification
+        {
+            ThreadId = threadId,
+            Turn = ParseTurnInfo(turnElement),
+        };
     }
 
     /// <summary>item/agentMessage/delta 通知のパラメータを解析する</summary>
-    private static CodexAgentMessageDeltaNotification ParseAgentMessageDeltaNotification(JsonElement? parameters)
+    private static CodexAgentMessageDeltaNotification ParseAgentMessageDeltaNotification(
+        JsonElement? parameters
+    )
     {
         if (parameters is not JsonElement element)
         {
@@ -756,15 +944,23 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
 
         return new CodexAgentMessageDeltaNotification
         {
-            ThreadId = element.TryGetProperty("threadId", out var threadIdElement) ? threadIdElement.GetString() : null,
-            TurnId = element.TryGetProperty("turnId", out var turnIdElement) ? turnIdElement.GetString() : null,
-            Delta = element.TryGetProperty("delta", out var deltaElement) ? deltaElement.GetString() ?? string.Empty : string.Empty,
+            ThreadId = element.TryGetProperty("threadId", out var threadIdElement)
+                ? threadIdElement.GetString()
+                : null,
+            TurnId = element.TryGetProperty("turnId", out var turnIdElement)
+                ? turnIdElement.GetString()
+                : null,
+            Delta = element.TryGetProperty("delta", out var deltaElement)
+                ? deltaElement.GetString() ?? string.Empty
+                : string.Empty,
         };
     }
 
     /// <summary>turn/completed 通知のパラメータを解析する</summary>
     /// <remarks>threadId は camelCase と旧形式（thread_id）の両方に対応し、欠落要素は既定値で補完する</remarks>
-    private static CodexTurnCompletedNotification ParseTurnCompletedNotification(JsonElement? parameters)
+    private static CodexTurnCompletedNotification ParseTurnCompletedNotification(
+        JsonElement? parameters
+    )
     {
         if (parameters is not JsonElement element)
         {
@@ -776,8 +972,10 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
         }
 
         var threadId =
-            element.TryGetProperty("threadId", out var threadIdElement) ? threadIdElement.GetString() ?? string.Empty
-            : element.TryGetProperty("thread_id", out var legacyThreadIdElement) ? legacyThreadIdElement.GetString() ?? string.Empty
+            element.TryGetProperty("threadId", out var threadIdElement)
+                ? threadIdElement.GetString() ?? string.Empty
+            : element.TryGetProperty("thread_id", out var legacyThreadIdElement)
+                ? legacyThreadIdElement.GetString() ?? string.Empty
             : string.Empty;
 
         if (!element.TryGetProperty("turn", out var turnElement))
@@ -789,11 +987,17 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
             };
         }
 
-        return new CodexTurnCompletedNotification { ThreadId = threadId, Turn = ParseTurnInfo(turnElement) };
+        return new CodexTurnCompletedNotification
+        {
+            ThreadId = threadId,
+            Turn = ParseTurnInfo(turnElement),
+        };
     }
 
     /// <summary>item/started 通知のパラメータを解析する</summary>
-    private static CodexItemStartedNotification ParseItemStartedNotification(JsonElement? parameters)
+    private static CodexItemStartedNotification ParseItemStartedNotification(
+        JsonElement? parameters
+    )
     {
         if (parameters is not JsonElement element)
         {
@@ -806,20 +1010,28 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
         if (element.TryGetProperty("item", out var itemElement))
         {
             itemId = itemElement.TryGetProperty("id", out var idEl) ? idEl.GetString() : null;
-            itemType = itemElement.TryGetProperty("type", out var typeEl) ? typeEl.GetString() : null;
+            itemType = itemElement.TryGetProperty("type", out var typeEl)
+                ? typeEl.GetString()
+                : null;
         }
 
         return new CodexItemStartedNotification
         {
-            ThreadId = element.TryGetProperty("threadId", out var threadIdEl) ? threadIdEl.GetString() : null,
-            TurnId = element.TryGetProperty("turnId", out var turnIdEl) ? turnIdEl.GetString() : null,
+            ThreadId = element.TryGetProperty("threadId", out var threadIdEl)
+                ? threadIdEl.GetString()
+                : null,
+            TurnId = element.TryGetProperty("turnId", out var turnIdEl)
+                ? turnIdEl.GetString()
+                : null,
             ItemId = itemId,
             ItemType = itemType,
         };
     }
 
     /// <summary>item/completed 通知のパラメータを解析する</summary>
-    private static CodexItemCompletedNotification ParseItemCompletedNotification(JsonElement? parameters)
+    private static CodexItemCompletedNotification ParseItemCompletedNotification(
+        JsonElement? parameters
+    )
     {
         if (parameters is not JsonElement element)
         {
@@ -832,13 +1044,19 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
         if (element.TryGetProperty("item", out var itemElement))
         {
             itemId = itemElement.TryGetProperty("id", out var idEl) ? idEl.GetString() : null;
-            itemType = itemElement.TryGetProperty("type", out var typeEl) ? typeEl.GetString() : null;
+            itemType = itemElement.TryGetProperty("type", out var typeEl)
+                ? typeEl.GetString()
+                : null;
         }
 
         return new CodexItemCompletedNotification
         {
-            ThreadId = element.TryGetProperty("threadId", out var threadIdEl) ? threadIdEl.GetString() : null,
-            TurnId = element.TryGetProperty("turnId", out var turnIdEl) ? turnIdEl.GetString() : null,
+            ThreadId = element.TryGetProperty("threadId", out var threadIdEl)
+                ? threadIdEl.GetString()
+                : null,
+            TurnId = element.TryGetProperty("turnId", out var turnIdEl)
+                ? turnIdEl.GetString()
+                : null,
             ItemId = itemId,
             ItemType = itemType,
         };
@@ -846,35 +1064,66 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
 
     /// <summary>item/tool/call リクエストのパラメータを解析する</summary>
     /// <exception cref="InvalidOperationException">パラメータが存在しない場合</exception>
-    private static CodexDynamicToolCallRequest ParseDynamicToolCallRequest(int requestId, JsonElement? parameters)
+    private static CodexDynamicToolCallRequest ParseDynamicToolCallRequest(
+        int requestId,
+        JsonElement? parameters
+    )
     {
         if (parameters is not JsonElement element)
         {
-            throw new InvalidOperationException("item/tool/call リクエストを解釈できませんでした。");
+            throw new InvalidOperationException(
+                "item/tool/call リクエストを解釈できませんでした。"
+            );
         }
 
         return new CodexDynamicToolCallRequest
         {
             RequestId = requestId,
-            ThreadId = element.TryGetProperty("threadId", out var threadIdEl) ? threadIdEl.GetString() ?? string.Empty : string.Empty,
-            TurnId = element.TryGetProperty("turnId", out var turnIdEl) ? turnIdEl.GetString() ?? string.Empty : string.Empty,
-            CallId = element.TryGetProperty("callId", out var callIdEl) ? callIdEl.GetString() ?? string.Empty : string.Empty,
-            Tool = element.TryGetProperty("tool", out var toolEl) ? toolEl.GetString() ?? string.Empty : string.Empty,
-            Arguments = element.TryGetProperty("arguments", out var argsEl) ? argsEl.Clone() : default,
+            ThreadId = element.TryGetProperty("threadId", out var threadIdEl)
+                ? threadIdEl.GetString() ?? string.Empty
+                : string.Empty,
+            TurnId = element.TryGetProperty("turnId", out var turnIdEl)
+                ? turnIdEl.GetString() ?? string.Empty
+                : string.Empty,
+            CallId = element.TryGetProperty("callId", out var callIdEl)
+                ? callIdEl.GetString() ?? string.Empty
+                : string.Empty,
+            Tool = element.TryGetProperty("tool", out var toolEl)
+                ? toolEl.GetString() ?? string.Empty
+                : string.Empty,
+            Arguments = element.TryGetProperty("arguments", out var argsEl)
+                ? argsEl.Clone()
+                : default,
         };
     }
 
     /// <summary>承認リクエスト（requestApproval 系メソッド）のパラメータを解析する</summary>
-    private static CodexApprovalRequest ParseApprovalRequest(int requestId, string method, JsonElement? parameters)
+    private static CodexApprovalRequest ParseApprovalRequest(
+        int requestId,
+        string method,
+        JsonElement? parameters
+    )
     {
         var element = parameters is JsonElement el ? el : default;
         return new CodexApprovalRequest
         {
             RequestId = requestId,
             Method = method,
-            ThreadId = element.ValueKind != JsonValueKind.Undefined && element.TryGetProperty("threadId", out var threadIdEl) ? threadIdEl.GetString() : null,
-            TurnId = element.ValueKind != JsonValueKind.Undefined && element.TryGetProperty("turnId", out var turnIdEl) ? turnIdEl.GetString() : null,
-            ItemId = element.ValueKind != JsonValueKind.Undefined && element.TryGetProperty("itemId", out var itemIdEl) ? itemIdEl.GetString() : null,
+            ThreadId =
+                element.ValueKind != JsonValueKind.Undefined
+                && element.TryGetProperty("threadId", out var threadIdEl)
+                    ? threadIdEl.GetString()
+                    : null,
+            TurnId =
+                element.ValueKind != JsonValueKind.Undefined
+                && element.TryGetProperty("turnId", out var turnIdEl)
+                    ? turnIdEl.GetString()
+                    : null,
+            ItemId =
+                element.ValueKind != JsonValueKind.Undefined
+                && element.TryGetProperty("itemId", out var itemIdEl)
+                    ? itemIdEl.GetString()
+                    : null,
         };
     }
 
@@ -883,10 +1132,18 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
     {
         return new CodexThreadInfo
         {
-            Id = threadElement.TryGetProperty("id", out var idElement) ? idElement.GetString() ?? string.Empty : string.Empty,
-            Preview = threadElement.TryGetProperty("preview", out var previewElement) ? previewElement.GetString() ?? string.Empty : string.Empty,
-            ModelProvider = threadElement.TryGetProperty("modelProvider", out var providerElement) ? providerElement.GetString() : null,
-            Ephemeral = threadElement.TryGetProperty("ephemeral", out var ephemeralElement) && ephemeralElement.ValueKind == JsonValueKind.True,
+            Id = threadElement.TryGetProperty("id", out var idElement)
+                ? idElement.GetString() ?? string.Empty
+                : string.Empty,
+            Preview = threadElement.TryGetProperty("preview", out var previewElement)
+                ? previewElement.GetString() ?? string.Empty
+                : string.Empty,
+            ModelProvider = threadElement.TryGetProperty("modelProvider", out var providerElement)
+                ? providerElement.GetString()
+                : null,
+            Ephemeral =
+                threadElement.TryGetProperty("ephemeral", out var ephemeralElement)
+                && ephemeralElement.ValueKind == JsonValueKind.True,
         };
     }
 
@@ -896,54 +1153,88 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
         // ターン失敗時のエラーメッセージは turn.error.message に格納されている
         string? errorMessage = null;
 
-        if (turnElement.TryGetProperty("error", out var errorElement) && errorElement.ValueKind == JsonValueKind.Object)
+        if (
+            turnElement.TryGetProperty("error", out var errorElement)
+            && errorElement.ValueKind == JsonValueKind.Object
+        )
         {
-            errorMessage = errorElement.TryGetProperty("message", out var msgElement) ? msgElement.GetString() : null;
+            errorMessage = errorElement.TryGetProperty("message", out var msgElement)
+                ? msgElement.GetString()
+                : null;
         }
 
         return new CodexTurnInfo
         {
-            Id = turnElement.TryGetProperty("id", out var idElement) ? idElement.GetString() ?? string.Empty : string.Empty,
-            Status = turnElement.TryGetProperty("status", out var statusElement) ? statusElement.GetString() ?? string.Empty : string.Empty,
+            Id = turnElement.TryGetProperty("id", out var idElement)
+                ? idElement.GetString() ?? string.Empty
+                : string.Empty,
+            Status = turnElement.TryGetProperty("status", out var statusElement)
+                ? statusElement.GetString() ?? string.Empty
+                : string.Empty,
             Error = errorMessage,
         };
     }
 
     /// <summary>account/login/start レスポンスをログイン開始結果へ変換する</summary>
-    private static CodexLoginStartResult ParseLoginStartResult(JsonElement? result, CodexLoginType fallbackType)
+    private static CodexLoginStartResult ParseLoginStartResult(
+        JsonElement? result,
+        CodexLoginType fallbackType
+    )
     {
         if (result is not JsonElement element)
         {
             return new CodexLoginStartResult { Type = fallbackType };
         }
 
-        var rawType = element.TryGetProperty("type", out var typeElement) ? typeElement.GetString() : null;
+        var rawType = element.TryGetProperty("type", out var typeElement)
+            ? typeElement.GetString()
+            : null;
         return new CodexLoginStartResult
         {
             Type = ParseLoginType(rawType, fallbackType),
-            LoginId = element.TryGetProperty("loginId", out var loginIdElement) ? loginIdElement.GetString() : null,
-            AuthUrl = element.TryGetProperty("authUrl", out var authUrlElement) ? authUrlElement.GetString() : null,
+            LoginId = element.TryGetProperty("loginId", out var loginIdElement)
+                ? loginIdElement.GetString()
+                : null,
+            AuthUrl = element.TryGetProperty("authUrl", out var authUrlElement)
+                ? authUrlElement.GetString()
+                : null,
         };
     }
 
     /// <summary>account/login/completed 通知のパラメータを解析する</summary>
-    private static CodexLoginCompletedNotification ParseLoginCompletedNotification(JsonElement? parameters)
+    private static CodexLoginCompletedNotification ParseLoginCompletedNotification(
+        JsonElement? parameters
+    )
     {
         if (parameters is not JsonElement element)
         {
-            return new CodexLoginCompletedNotification { Success = false, Error = "ログイン完了通知を解釈できませんでした。" };
+            return new CodexLoginCompletedNotification
+            {
+                Success = false,
+                Error = "ログイン完了通知を解釈できませんでした。",
+            };
         }
 
         return new CodexLoginCompletedNotification
         {
-            LoginId = element.TryGetProperty("loginId", out var loginIdElement) ? loginIdElement.GetString() : null,
-            Success = element.TryGetProperty("success", out var successElement) && successElement.ValueKind == JsonValueKind.True,
-            Error = element.TryGetProperty("error", out var errorElement) && errorElement.ValueKind != JsonValueKind.Null ? errorElement.GetString() : null,
+            LoginId = element.TryGetProperty("loginId", out var loginIdElement)
+                ? loginIdElement.GetString()
+                : null,
+            Success =
+                element.TryGetProperty("success", out var successElement)
+                && successElement.ValueKind == JsonValueKind.True,
+            Error =
+                element.TryGetProperty("error", out var errorElement)
+                && errorElement.ValueKind != JsonValueKind.Null
+                    ? errorElement.GetString()
+                    : null,
         };
     }
 
     /// <summary>account/updated 通知のパラメータを解析する</summary>
-    private static CodexAccountUpdatedNotification ParseAccountUpdatedNotification(JsonElement? parameters)
+    private static CodexAccountUpdatedNotification ParseAccountUpdatedNotification(
+        JsonElement? parameters
+    )
     {
         if (parameters is not JsonElement element)
         {
@@ -952,8 +1243,16 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
 
         return new CodexAccountUpdatedNotification
         {
-            AuthMode = ParseAuthMode(element.TryGetProperty("authMode", out var modeElement) ? modeElement.GetString() : null),
-            PlanType = element.TryGetProperty("planType", out var planElement) && planElement.ValueKind != JsonValueKind.Null ? planElement.GetString() : null,
+            AuthMode = ParseAuthMode(
+                element.TryGetProperty("authMode", out var modeElement)
+                    ? modeElement.GetString()
+                    : null
+            ),
+            PlanType =
+                element.TryGetProperty("planType", out var planElement)
+                && planElement.ValueKind != JsonValueKind.Null
+                    ? planElement.GetString()
+                    : null,
         };
     }
 
@@ -1000,7 +1299,9 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
     /// <summary>codex コマンドに渡す app-server 起動引数（stdio リッスン指定 + 追加引数）を組み立てる</summary>
     private static string BuildArguments(string additionalArguments)
     {
-        var suffix = string.IsNullOrWhiteSpace(additionalArguments) ? string.Empty : $" {additionalArguments.Trim()}";
+        var suffix = string.IsNullOrWhiteSpace(additionalArguments)
+            ? string.Empty
+            : $" {additionalArguments.Trim()}";
         return $"app-server --listen stdio://{suffix}".Trim();
     }
 
@@ -1009,14 +1310,21 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
     /// codex コマンドの実体が .cmd / .bat（npm のシム等）の場合、<c>UseShellExecute = false</c> では直接起動できないため
     /// cmd.exe /c でラップして stdin/stdout のリダイレクトを機能させる
     /// </remarks>
-    private static (string fileName, string arguments) ResolveStartInfo(string executablePath, string appServerArguments)
+    private static (string fileName, string arguments) ResolveStartInfo(
+        string executablePath,
+        string appServerArguments
+    )
     {
         string resolvedPath = executablePath;
 
         if (!Path.IsPathRooted(executablePath))
         {
             // 相対指定の場合は PATH を走査して実体を特定する（拡張子で起動方法を判定するため）
-            foreach (var dir in (Environment.GetEnvironmentVariable("PATH") ?? string.Empty).Split(Path.PathSeparator))
+            foreach (
+                var dir in (Environment.GetEnvironmentVariable("PATH") ?? string.Empty).Split(
+                    Path.PathSeparator
+                )
+            )
             {
                 foreach (var ext in new[] { ".cmd", ".bat", ".exe", string.Empty })
                 {
@@ -1050,8 +1358,12 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
     /// <summary>JSON-RPC エラーレスポンスの error 要素からユーザー向けエラーメッセージを組み立てる</summary>
     private static string BuildErrorMessage(JsonElement errorElement)
     {
-        var codeText = errorElement.TryGetProperty("code", out var codeElement) ? codeElement.ToString() : "unknown";
-        var messageText = errorElement.TryGetProperty("message", out var messageElement) ? messageElement.GetString() : "Codex App Server エラー";
+        var codeText = errorElement.TryGetProperty("code", out var codeElement)
+            ? codeElement.ToString()
+            : "unknown";
+        var messageText = errorElement.TryGetProperty("message", out var messageElement)
+            ? messageElement.GetString()
+            : "Codex App Server エラー";
         return $"{messageText} (code: {codeText})";
     }
 

@@ -84,7 +84,8 @@ public class DbmlTests
         dbml.Should().Contain("Table Customer {");
         dbml.Should().Contain("CustomerId int [pk, not null]");
         dbml.Should().Contain("CustomerId int [ref, not null]");
-        dbml.Should().Contain("Ref: [note: 'FK_Orders_Customer'] Customer.CustomerId < Orders.CustomerId");
+        dbml.Should()
+            .Contain("Ref: [note: 'FK_Orders_Customer'] Customer.CustomerId < Orders.CustomerId");
     }
 
     /// <summary>DBML テキストのパースで pk/ref 属性と Ref 行の制約名・1対多種別が復元されることを検証する</summary>
@@ -112,8 +113,18 @@ public class DbmlTests
 
         diagram.Entities.Should().HaveCount(2);
         diagram.Relationships.Should().ContainSingle();
-        diagram.Entities.Should().ContainSingle(entity => entity.TableName == "Customer" && entity.Columns.Any(column => column.Name == "CustomerId" && column.IsPrimaryKey));
-        diagram.Entities.Should().ContainSingle(entity => entity.TableName == "Orders" && entity.Columns.Any(column => column.Name == "CustomerId" && column.IsForeignKey));
+        diagram
+            .Entities.Should()
+            .ContainSingle(entity =>
+                entity.TableName == "Customer"
+                && entity.Columns.Any(column => column.Name == "CustomerId" && column.IsPrimaryKey)
+            );
+        diagram
+            .Entities.Should()
+            .ContainSingle(entity =>
+                entity.TableName == "Orders"
+                && entity.Columns.Any(column => column.Name == "CustomerId" && column.IsForeignKey)
+            );
         diagram.Relationships[0].Type.Should().Be(RelationshipType.OneToMany);
         diagram.Relationships[0].ConstraintName.Should().Be("FK_Orders_Customer");
     }

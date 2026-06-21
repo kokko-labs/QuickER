@@ -25,7 +25,13 @@ public class PropertyChangeCommand : IUndoableCommand
     /// <param name="oldValue">変更前の値</param>
     /// <param name="newValue">変更後の値</param>
     /// <param name="afterApply">Execute / Undo 後に呼ぶ後処理</param>
-    public PropertyChangeCommand(object target, ITrackedProperty property, object? oldValue, object? newValue, Action? afterApply = null)
+    public PropertyChangeCommand(
+        object target,
+        ITrackedProperty property,
+        object? oldValue,
+        object? newValue,
+        Action? afterApply = null
+    )
     {
         _target = target;
         _property = property;

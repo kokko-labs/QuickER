@@ -37,7 +37,12 @@ public class ImportSchemaCommand : IUndoableCommand
     public string Description => _description;
 
     /// <summary><see cref="ImportSchemaCommand"/> を生成する</summary>
-    public ImportSchemaCommand(MainViewModel main, IReadOnlyList<Entity> entities, IReadOnlyList<Relationship> relationships, string description = "DB からスキーマ取込")
+    public ImportSchemaCommand(
+        MainViewModel main,
+        IReadOnlyList<Entity> entities,
+        IReadOnlyList<Relationship> relationships,
+        string description = "DB からスキーマ取込"
+    )
     {
         _main = main;
         _newEntities = entities;
@@ -77,7 +82,10 @@ public class ImportSchemaCommand : IUndoableCommand
             // 両端のエンティティが揃うリレーションのみ復元する
             foreach (var r in _newRelationships)
             {
-                if (byId.TryGetValue(r.SourceEntityId, out var s) && byId.TryGetValue(r.TargetEntityId, out var t))
+                if (
+                    byId.TryGetValue(r.SourceEntityId, out var s)
+                    && byId.TryGetValue(r.TargetEntityId, out var t)
+                )
                 {
                     ImportedRelationships.Add(new RelationshipViewModel(r, s, t));
                 }

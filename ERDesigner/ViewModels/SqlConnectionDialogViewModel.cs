@@ -80,7 +80,10 @@ public partial class SqlConnectionDialogViewModel : ObservableObject
     /// <summary>ストアとダイアログサービスを指定して ViewModel を生成し、前回接続を復元する</summary>
     /// <param name="store">プロファイル保存ストア（省略時は既定パスを使用）</param>
     /// <param name="dialogService">確認ダイアログの表示先（省略時は MessageBox、テストではスタブを注入）</param>
-    public SqlConnectionDialogViewModel(SqlConnectionProfileStore? store = null, IDialogService? dialogService = null)
+    public SqlConnectionDialogViewModel(
+        SqlConnectionProfileStore? store = null,
+        IDialogService? dialogService = null
+    )
     {
         _store = store ?? new SqlConnectionProfileStore();
         _dialogs = dialogService ?? new MessageBoxDialogService();
@@ -129,7 +132,11 @@ public partial class SqlConnectionDialogViewModel : ObservableObject
 
     /// <summary>プロファイルまたは前回接続情報の内容を入力欄へ反映する</summary>
     /// <param name="updateProfileName">true の場合はプロファイル名入力欄も更新する</param>
-    private void ApplyConnection(SqlConnectionProfile profile, string password, bool updateProfileName)
+    private void ApplyConnection(
+        SqlConnectionProfile profile,
+        string password,
+        bool updateProfileName
+    )
     {
         Server = profile.Server;
         Database = profile.Database;
@@ -167,7 +174,11 @@ public partial class SqlConnectionDialogViewModel : ObservableObject
             return;
         }
 
-        ApplyConnection(value, value.SavePassword ? _store.LoadPassword(value.Id) : string.Empty, updateProfileName: true);
+        ApplyConnection(
+            value,
+            value.SavePassword ? _store.LoadPassword(value.Id) : string.Empty,
+            updateProfileName: true
+        );
         StatusMessage = $"プロファイル '{value.Name}' を読み込みました。";
     }
 
@@ -217,7 +228,9 @@ public partial class SqlConnectionDialogViewModel : ObservableObject
             return;
         }
 
-        var existing = Profiles.FirstOrDefault(p => string.Equals(p.Name, ProfileName, StringComparison.OrdinalIgnoreCase));
+        var existing = Profiles.FirstOrDefault(p =>
+            string.Equals(p.Name, ProfileName, StringComparison.OrdinalIgnoreCase)
+        );
 
         var profile = CreateCurrentProfile(existing?.Id, ProfileName.Trim());
 
@@ -237,7 +250,12 @@ public partial class SqlConnectionDialogViewModel : ObservableObject
             return;
         }
 
-        if (!_dialogs.Confirm($"プロファイル '{SelectedProfile.Name}' を削除します。よろしいですか？", "確認"))
+        if (
+            !_dialogs.Confirm(
+                $"プロファイル '{SelectedProfile.Name}' を削除します。よろしいですか？",
+                "確認"
+            )
+        )
         {
             return;
         }

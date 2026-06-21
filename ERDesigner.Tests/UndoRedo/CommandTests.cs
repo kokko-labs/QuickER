@@ -61,7 +61,11 @@ public class CommandTests
         main.Entities.Add(a);
         main.Entities.Add(b);
 
-        var rel = new RelationshipViewModel(new Relationship { SourceEntityId = a.Id, TargetEntityId = b.Id }, a, b);
+        var rel = new RelationshipViewModel(
+            new Relationship { SourceEntityId = a.Id, TargetEntityId = b.Id },
+            a,
+            b
+        );
         main.Relationships.Add(rel);
 
         var cmd = new RemoveEntityCommand(main, a);
@@ -80,7 +84,11 @@ public class CommandTests
     public void PropertyChangeCommand_Works()
     {
         var e = NewEntity();
-        var prop = new TrackedProperty<EntityViewModel>(nameof(EntityViewModel.TableName), x => x.TableName, (x, v) => x.TableName = (string)v!);
+        var prop = new TrackedProperty<EntityViewModel>(
+            nameof(EntityViewModel.TableName),
+            x => x.TableName,
+            (x, v) => x.TableName = (string)v!
+        );
         var cmd = new PropertyChangeCommand(e, prop, "T", "顧客");
 
         cmd.Execute();
@@ -96,7 +104,11 @@ public class CommandTests
     {
         var e = NewEntity();
         var count = 0;
-        var prop = new TrackedProperty<EntityViewModel>(nameof(EntityViewModel.TableName), x => x.TableName, (x, v) => x.TableName = (string)v!);
+        var prop = new TrackedProperty<EntityViewModel>(
+            nameof(EntityViewModel.TableName),
+            x => x.TableName,
+            (x, v) => x.TableName = (string)v!
+        );
         var cmd = new PropertyChangeCommand(e, prop, "T", "顧客", () => count++);
 
         cmd.Execute();

@@ -30,7 +30,10 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     private string _statusMessage = string.Empty;
 
     /// <summary>名前空間と出力先の初期値を指定して ViewModel を生成する</summary>
-    public CSharpGenerationDialogViewModel(string namespaceName, string outputFilePath = "ErDesignerEntities.g.cs")
+    public CSharpGenerationDialogViewModel(
+        string namespaceName,
+        string outputFilePath = "ErDesignerEntities.g.cs"
+    )
     {
         _namespaceName = namespaceName;
         _outputFilePath = outputFilePath;
@@ -101,7 +104,16 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
             return;
         }
 
-        Result = new CSharpGenerationDialogResult(NamespaceName.Trim(), OutputFilePath.Trim(), GenerateEntityClasses, GenerateEditModels, GenerateMappers, GenerateRepositories, GenerateValueObjects, UseGuidKeyForStringPrimaryKey);
+        Result = new CSharpGenerationDialogResult(
+            NamespaceName.Trim(),
+            OutputFilePath.Trim(),
+            GenerateEntityClasses,
+            GenerateEditModels,
+            GenerateMappers,
+            GenerateRepositories,
+            GenerateValueObjects,
+            UseGuidKeyForStringPrimaryKey
+        );
         CloseAction?.Invoke(true);
     }
 
@@ -115,7 +127,10 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     /// <summary>namespace として妥当な形式かを各セグメントの識別子検証で簡易判定する</summary>
     private static bool IsValidNamespace(string value)
     {
-        var segments = value.Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var segments = value.Split(
+            '.',
+            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries
+        );
         return segments.Length > 0 && segments.All(segment => IdentifierRegex().IsMatch(segment));
     }
 

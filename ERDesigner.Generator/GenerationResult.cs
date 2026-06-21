@@ -12,7 +12,8 @@ public sealed class CodeGenerationResult
     public IReadOnlyList<GenerationDiagnostic> Diagnostics { get; init; } = [];
 
     /// <summary>エラー診断を含むかどうか</summary>
-    public bool HasErrors => Diagnostics.Any(diagnostic => diagnostic.Severity == GenerationDiagnosticSeverity.Error);
+    public bool HasErrors =>
+        Diagnostics.Any(diagnostic => diagnostic.Severity == GenerationDiagnosticSeverity.Error);
 }
 
 /// <summary>

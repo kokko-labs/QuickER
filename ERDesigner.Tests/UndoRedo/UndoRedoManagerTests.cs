@@ -95,12 +95,25 @@ public class UndoRedoManagerTests
         var groupId = new object();
 
         entity.TableName = "B";
-        var tableNameProp = new TrackedProperty<EntityViewModel>(nameof(EntityViewModel.TableName), x => x.TableName, (x, v) => x.TableName = (string)v!);
+        var tableNameProp = new TrackedProperty<EntityViewModel>(
+            nameof(EntityViewModel.TableName),
+            x => x.TableName,
+            (x, v) => x.TableName = (string)v!
+        );
         mgr.Push(new PropertyChangeCommand(entity, tableNameProp, "A", "B") { GroupId = groupId });
 
         entity.Description = "desc";
-        var descriptionProp = new TrackedProperty<EntityViewModel>(nameof(EntityViewModel.Description), x => x.Description, (x, v) => x.Description = (string)v!);
-        mgr.Push(new PropertyChangeCommand(entity, descriptionProp, string.Empty, "desc") { GroupId = groupId });
+        var descriptionProp = new TrackedProperty<EntityViewModel>(
+            nameof(EntityViewModel.Description),
+            x => x.Description,
+            (x, v) => x.Description = (string)v!
+        );
+        mgr.Push(
+            new PropertyChangeCommand(entity, descriptionProp, string.Empty, "desc")
+            {
+                GroupId = groupId,
+            }
+        );
 
         mgr.Undo();
         entity.TableName.Should().Be("A");

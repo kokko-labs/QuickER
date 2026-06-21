@@ -15,7 +15,8 @@ public sealed class CodexConfigToml
     public IReadOnlyList<string> ProviderNames { get; init; } = [];
 
     /// <summary>プロバイダー名ごとのモデル候補辞書</summary>
-    public IReadOnlyDictionary<string, IReadOnlyList<string>> ProviderModels { get; init; } = new Dictionary<string, IReadOnlyList<string>>();
+    public IReadOnlyDictionary<string, IReadOnlyList<string>> ProviderModels { get; init; } =
+        new Dictionary<string, IReadOnlyList<string>>();
 }
 
 /// <summary>Codex の config.toml を読み込むリーダー</summary>
@@ -23,7 +24,12 @@ public sealed class CodexConfigToml
 public static class CodexConfigTomlReader
 {
     /// <summary>既定の config.toml パス（~/.codex/config.toml）</summary>
-    public static string DefaultConfigPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codex", "config.toml");
+    public static string DefaultConfigPath =>
+        Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            ".codex",
+            "config.toml"
+        );
 
     /// <summary>既定パスから config.toml を読み込む（ファイルが無ければ空の設定を返す）</summary>
     public static CodexConfigToml Read() => Read(DefaultConfigPath);
@@ -78,7 +84,10 @@ public static class CodexConfigTomlReader
                 {
                     var providerName = sectionName["model_providers.".Length..].Trim();
 
-                    if (!string.IsNullOrEmpty(providerName) && !providerNames.Contains(providerName, StringComparer.OrdinalIgnoreCase))
+                    if (
+                        !string.IsNullOrEmpty(providerName)
+                        && !providerNames.Contains(providerName, StringComparer.OrdinalIgnoreCase)
+                    )
                     {
                         providerNames.Add(providerName);
                     }
@@ -113,7 +122,9 @@ public static class CodexConfigTomlReader
         }
 
         // トップレベルの model_provider と model をプロバイダー別モデル候補辞書に登録する
-        var providerModels = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
+        var providerModels = new Dictionary<string, IReadOnlyList<string>>(
+            StringComparer.OrdinalIgnoreCase
+        );
 
         if (!string.IsNullOrEmpty(modelProvider) && !string.IsNullOrEmpty(model))
         {
@@ -141,7 +152,10 @@ public static class CodexConfigTomlReader
         }
 
         // 引用符を除去する（" か ' で囲まれた文字列）
-        if (raw.Length >= 2 && ((raw[0] == '"' && raw[^1] == '"') || (raw[0] == '\'' && raw[^1] == '\'')))
+        if (
+            raw.Length >= 2
+            && ((raw[0] == '"' && raw[^1] == '"') || (raw[0] == '\'' && raw[^1] == '\''))
+        )
         {
             return raw[1..^1];
         }

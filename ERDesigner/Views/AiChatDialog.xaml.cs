@@ -72,7 +72,8 @@ public partial class AiChatDialog : Window
             return;
         }
 
-        ViewModel.SelectedBackend = BackendTabs.SelectedIndex == 1 ? ErChatBackendKind.Codex : ErChatBackendKind.ApiKey;
+        ViewModel.SelectedBackend =
+            BackendTabs.SelectedIndex == 1 ? ErChatBackendKind.Codex : ErChatBackendKind.ApiKey;
     }
 
     /// <summary>API キー接続の PasswordBox 変更を ViewModel へ転送する</summary>
@@ -87,7 +88,10 @@ public partial class AiChatDialog : Window
     /// <summary>Ctrl+Enter でメッセージを送信する</summary>
     private void UserInputBox_KeyDown(object sender, KeyEventArgs e)
     {
-        if (e.Key == Key.Enter && (Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control)
+        if (
+            e.Key == Key.Enter
+            && (Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control
+        )
         {
             if (ViewModel.SendMessageCommand.CanExecute(null))
             {

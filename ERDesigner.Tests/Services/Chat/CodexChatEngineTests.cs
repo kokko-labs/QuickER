@@ -95,7 +95,10 @@ public class CodexChatEngineTests
     public async Task IsReady_NonOpenAiProvider_RequiresNoAuth()
     {
         var client = new FakeCodexAppServerClient();
-        var engine = new CodexChatEngine(client, new RecordingToolHost(), new SyncUiDispatcher()) { ModelProvider = "ollama-launch" };
+        var engine = new CodexChatEngine(client, new RecordingToolHost(), new SyncUiDispatcher())
+        {
+            ModelProvider = "ollama-launch",
+        };
 
         await engine.InitializeAsync();
 

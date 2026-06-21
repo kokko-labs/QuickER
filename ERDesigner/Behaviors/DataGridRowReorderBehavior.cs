@@ -20,46 +20,54 @@ namespace ERDesigner.Behaviors;
 public static class DataGridRowReorderBehavior
 {
     /// <summary>ビヘイビアの有効・無効を切り替える添付プロパティ</summary>
-    public static readonly DependencyProperty IsEnabledProperty = DependencyProperty.RegisterAttached(
-        "IsEnabled",
-        typeof(bool),
-        typeof(DataGridRowReorderBehavior),
-        new PropertyMetadata(false, OnIsEnabledChanged)
-    );
+    public static readonly DependencyProperty IsEnabledProperty =
+        DependencyProperty.RegisterAttached(
+            "IsEnabled",
+            typeof(bool),
+            typeof(DataGridRowReorderBehavior),
+            new PropertyMetadata(false, OnIsEnabledChanged)
+        );
 
     /// <summary>行並び替えを履歴登録する Undo / Redo マネージャーを保持する添付プロパティ</summary>
-    public static readonly DependencyProperty UndoRedoManagerProperty = DependencyProperty.RegisterAttached(
-        "UndoRedoManager",
-        typeof(UndoRedoManager),
-        typeof(DataGridRowReorderBehavior),
-        new PropertyMetadata(null)
-    );
+    public static readonly DependencyProperty UndoRedoManagerProperty =
+        DependencyProperty.RegisterAttached(
+            "UndoRedoManager",
+            typeof(UndoRedoManager),
+            typeof(DataGridRowReorderBehavior),
+            new PropertyMetadata(null)
+        );
 
     /// <summary><see cref="IsEnabledProperty"/> を設定する</summary>
-    public static void SetIsEnabled(DependencyObject d, bool value) => d.SetValue(IsEnabledProperty, value);
+    public static void SetIsEnabled(DependencyObject d, bool value) =>
+        d.SetValue(IsEnabledProperty, value);
 
     /// <summary><see cref="IsEnabledProperty"/> を取得する</summary>
     public static bool GetIsEnabled(DependencyObject d) => (bool)d.GetValue(IsEnabledProperty);
 
     /// <summary><see cref="UndoRedoManagerProperty"/> を設定する</summary>
-    public static void SetUndoRedoManager(DependencyObject d, UndoRedoManager? value) => d.SetValue(UndoRedoManagerProperty, value);
+    public static void SetUndoRedoManager(DependencyObject d, UndoRedoManager? value) =>
+        d.SetValue(UndoRedoManagerProperty, value);
 
     /// <summary><see cref="UndoRedoManagerProperty"/> を取得する</summary>
-    public static UndoRedoManager? GetUndoRedoManager(DependencyObject d) => (UndoRedoManager?)d.GetValue(UndoRedoManagerProperty);
+    public static UndoRedoManager? GetUndoRedoManager(DependencyObject d) =>
+        (UndoRedoManager?)d.GetValue(UndoRedoManagerProperty);
 
     /// <summary>ドラッグ開始地点（マウス座標）を DataGrid ごとに保持する添付プロパティ</summary>
-    private static readonly DependencyProperty DragStartPointProperty = DependencyProperty.RegisterAttached(
-        "DragStartPoint",
-        typeof(Point),
-        typeof(DataGridRowReorderBehavior),
-        new PropertyMetadata(default(Point))
-    );
+    private static readonly DependencyProperty DragStartPointProperty =
+        DependencyProperty.RegisterAttached(
+            "DragStartPoint",
+            typeof(Point),
+            typeof(DataGridRowReorderBehavior),
+            new PropertyMetadata(default(Point))
+        );
 
     /// <summary><see cref="DragStartPointProperty"/> を設定する</summary>
-    private static void SetDragStartPoint(DependencyObject d, Point value) => d.SetValue(DragStartPointProperty, value);
+    private static void SetDragStartPoint(DependencyObject d, Point value) =>
+        d.SetValue(DragStartPointProperty, value);
 
     /// <summary><see cref="DragStartPointProperty"/> を取得する</summary>
-    private static Point GetDragStartPoint(DependencyObject d) => (Point)d.GetValue(DragStartPointProperty);
+    private static Point GetDragStartPoint(DependencyObject d) =>
+        (Point)d.GetValue(DragStartPointProperty);
 
     /// <summary><see cref="IsEnabledProperty"/> 変更時にイベントハンドラと <see cref="UIElement.AllowDrop"/> を登録・解除する</summary>
     private static void OnIsEnabledChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
@@ -114,7 +122,10 @@ public static class DataGridRowReorderBehavior
         var current = e.GetPosition(null);
 
         // 微小な手ぶれを誤ってドラッグ開始としないよう、OS 既定のドラッグ開始閾値で判定する
-        if (Math.Abs(current.X - start.X) < SystemParameters.MinimumHorizontalDragDistance && Math.Abs(current.Y - start.Y) < SystemParameters.MinimumVerticalDragDistance)
+        if (
+            Math.Abs(current.X - start.X) < SystemParameters.MinimumHorizontalDragDistance
+            && Math.Abs(current.Y - start.Y) < SystemParameters.MinimumVerticalDragDistance
+        )
         {
             return;
         }
@@ -140,7 +151,9 @@ public static class DataGridRowReorderBehavior
     /// <summary>カラムのドラッグ中のみ移動カーソル効果を表示する</summary>
     private static void OnDragOver(object sender, DragEventArgs e)
     {
-        e.Effects = e.Data.GetDataPresent(typeof(ColumnViewModel)) ? DragDropEffects.Move : DragDropEffects.None;
+        e.Effects = e.Data.GetDataPresent(typeof(ColumnViewModel))
+            ? DragDropEffects.Move
+            : DragDropEffects.None;
         e.Handled = true;
     }
 

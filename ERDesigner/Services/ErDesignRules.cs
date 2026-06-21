@@ -23,26 +23,31 @@ public static class ErDesignRules
     internal const string SinglePrimaryKeyRule = "主キーは各テーブル 1 列のみ（複合主キー禁止）。";
 
     /// <summary>複合外部キー禁止の 1 行ルール（ツール説明文などから単独参照する短文）</summary>
-    internal const string SingleColumnForeignKeyRule = "リレーションは 1 列対 1 列の参照のみ（複合外部キー禁止）。";
+    internal const string SingleColumnForeignKeyRule =
+        "リレーションは 1 列対 1 列の参照のみ（複合外部キー禁止）。";
 
     /// <summary>識別子（テーブル名・カラム名）の命名規則の指示行を返す</summary>
     internal static string BuildNamingInstruction(AiIdentifierNamingStyle style) =>
         style switch
         {
-            AiIdentifierNamingStyle.SnakeCase => "- テーブル名・カラム名は必ずスネークケース (例: customer_order, customer_id) にする。",
-            _ => "- テーブル名・カラム名は必ずパスカルケース (例: CustomerOrder, CustomerId) にする。",
+            AiIdentifierNamingStyle.SnakeCase =>
+                "- テーブル名・カラム名は必ずスネークケース (例: customer_order, customer_id) にする。",
+            _ =>
+                "- テーブル名・カラム名は必ずパスカルケース (例: CustomerOrder, CustomerId) にする。",
         };
 
     /// <summary>テーブル名の単数形・複数形の指示行を返す</summary>
     internal static string BuildTableNameNumberInstruction(AiTableNameNumberStyle style) =>
         style switch
         {
-            AiTableNameNumberStyle.Plural => "- テーブル名は必ず複数形 (例: Customers, Orders) にする。",
+            AiTableNameNumberStyle.Plural =>
+                "- テーブル名は必ず複数形 (例: Customers, Orders) にする。",
             _ => "- テーブル名は必ず単数形 (例: Customer, Order) にする。",
         };
 
     /// <summary>Codex スレッド開始時に渡す developerInstructions（共通設計原則＋ツール運用手順）を組み立てる</summary>
-    internal static string BuildCodexDeveloperInstructions() => BuildChatToolInstructions("dynamicTools");
+    internal static string BuildCodexDeveloperInstructions() =>
+        BuildChatToolInstructions("dynamicTools");
 
     /// <summary>OpenAI Function Calling 用のチャット system プロンプト（共通設計原則＋ツール運用手順）を組み立てる</summary>
     internal static string BuildOpenAiChatSystemPrompt() => BuildChatToolInstructions("関数ツール");

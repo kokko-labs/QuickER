@@ -31,7 +31,9 @@ public sealed class CSharpCodeGenerationService
         Validate(diagram, options, diagnostics);
 
         // エラー検出時は生成処理に進まず、診断のみを返して呼び出し側に修正を促す
-        if (diagnostics.Any(diagnostic => diagnostic.Severity == GenerationDiagnosticSeverity.Error))
+        if (
+            diagnostics.Any(diagnostic => diagnostic.Severity == GenerationDiagnosticSeverity.Error)
+        )
         {
             return new CodeGenerationResult { Files = [], Diagnostics = diagnostics };
         }
@@ -39,7 +41,18 @@ public sealed class CSharpCodeGenerationService
         var model = _modelBuilder.Build(diagram, options, diagnostics);
         var content = _renderer.Render(model, options);
 
-        return new CodeGenerationResult { Files = [new GeneratedFile { FileName = SanitizeFileName(options.OutputFileName), Content = content }], Diagnostics = diagnostics };
+        return new CodeGenerationResult
+        {
+            Files =
+            [
+                new GeneratedFile
+                {
+                    FileName = SanitizeFileName(options.OutputFileName),
+                    Content = content,
+                },
+            ],
+            Diagnostics = diagnostics,
+        };
     }
 
     /// <summary>
@@ -50,30 +63,58 @@ public sealed class CSharpCodeGenerationService
     /// 生成対象間の依存違反（Mapper は Entity+EditModel、Repository は Entity と DataAnnotations が必要）。
     /// 警告: 複合主キー（[Key] 属性の生成が最小限になる）
     /// </remarks>
-    private static void Validate(DiagramDefinition diagram, CodeGenerationOptions options, ICollection<GenerationDiagnostic> diagnostics)
+    private static void Validate(
+        DiagramDefinition diagram,
+        CodeGenerationOptions options,
+        ICollection<GenerationDiagnostic> diagnostics
+    )
     {
-        if (!options.GenerateEntityClasses && !options.GenerateEditModels && !options.GenerateMappers && !options.GenerateRepositories)
+        if (
+            !options.GenerateEntityClasses
+            && !options.GenerateEditModels
+            && !options.GenerateMappers
+            && !options.GenerateRepositories
+        )
         {
-            diagnostics.Add(Error("Entity / EditModel / Mapper / Repository のいずれも生成対象になっていません。少なくとも一つを有効にしてください。"));
+            diagnostics.Add(
+                Error(
+                    "Entity / EditModel / Mapper / Repository のいずれも生成対象になっていません。少なくとも一つを有効にしてください。"
+                )
+            );
         }
 
         // Mapper は Entity クラスと EditModel クラスの両方を参照するため、単独生成するとコンパイル不能になる
-        if (options.GenerateMappers && (!options.GenerateEntityClasses || !options.GenerateEditModels))
+        if (
+            options.GenerateMappers
+            && (!options.GenerateEntityClasses || !options.GenerateEditModels)
+        )
         {
-            diagnostics.Add(Error("Mapper の生成には Entity クラスと EditModel クラスの両方が必要です。両方を生成対象に含めてください。"));
+            diagnostics.Add(
+                Error(
+                    "Mapper の生成には Entity クラスと EditModel クラスの両方が必要です。両方を生成対象に含めてください。"
+                )
+            );
         }
 
         // Repository は Entity クラスを参照するため、Entity 生成が必須
         if (options.GenerateRepositories && !options.GenerateEntityClasses)
         {
-            diagnostics.Add(Error("Repository の生成には Entity クラスが必要です。Entity を生成対象に含めてください。"));
+            diagnostics.Add(
+                Error(
+                    "Repository の生成には Entity クラスが必要です。Entity を生成対象に含めてください。"
+                )
+            );
         }
 
         // Repository の SQL 組み立ては [Table] / [Key] / [Column] 属性をリフレクションで参照するため、
         // DataAnnotations を無効にすると実行時に初期化例外となる。生成前にエラーとして検出する
         if (options.GenerateRepositories && !options.IncludeDataAnnotations)
         {
-            diagnostics.Add(Error("Repository は [Table] / [Key] / [Column] 属性を利用するため、データアノテーションの付与が必要です。データアノテーションを有効にしてください。"));
+            diagnostics.Add(
+                Error(
+                    "Repository は [Table] / [Key] / [Column] 属性を利用するため、データアノテーションの付与が必要です。データアノテーションを有効にしてください。"
+                )
+            );
         }
 
         if (diagram.Entities.Count == 0)
@@ -90,7 +131,11 @@ public sealed class CSharpCodeGenerationService
 
             if (entity.Columns.Count(column => column.IsPrimaryKey) > 1)
             {
-                diagnostics.Add(Warning($"テーブル '{entity.TableName}' は複合主キーのため [Key] 属性生成は最小限になります。MVP では単一主キーを推奨します。"));
+                diagnostics.Add(
+                    Warning(
+                        $"テーブル '{entity.TableName}' は複合主キーのため [Key] 属性生成は最小限になります。MVP では単一主キーを推奨します。"
+                    )
+                );
             }
         }
     }
@@ -104,13 +149,19 @@ public sealed class CSharpCodeGenerationService
     /// </remarks>
     private static string SanitizeFileName(string fileName)
     {
-        var value = string.IsNullOrWhiteSpace(fileName) ? "ErDesignerEntities.g.cs" : fileName.Trim();
-        return value.EndsWith(".g.cs", StringComparison.OrdinalIgnoreCase) ? value : Path.GetFileNameWithoutExtension(value) + ".g.cs";
+        var value = string.IsNullOrWhiteSpace(fileName)
+            ? "ErDesignerEntities.g.cs"
+            : fileName.Trim();
+        return value.EndsWith(".g.cs", StringComparison.OrdinalIgnoreCase)
+            ? value
+            : Path.GetFileNameWithoutExtension(value) + ".g.cs";
     }
 
     /// <summary>エラー診断を作成する</summary>
-    private static GenerationDiagnostic Error(string message) => new() { Severity = GenerationDiagnosticSeverity.Error, Message = message };
+    private static GenerationDiagnostic Error(string message) =>
+        new() { Severity = GenerationDiagnosticSeverity.Error, Message = message };
 
     /// <summary>警告診断を作成する</summary>
-    private static GenerationDiagnostic Warning(string message) => new() { Severity = GenerationDiagnosticSeverity.Warning, Message = message };
+    private static GenerationDiagnostic Warning(string message) =>
+        new() { Severity = GenerationDiagnosticSeverity.Warning, Message = message };
 }

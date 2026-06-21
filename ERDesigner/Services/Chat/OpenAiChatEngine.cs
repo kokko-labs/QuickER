@@ -27,19 +27,31 @@ public sealed record OpenAiToolCallRequest(string Id, string Name, string Argume
 /// <param name="Text">本文（無い場合は空文字）</param>
 /// <param name="ToolCalls">アシスタントが要求したツール呼び出し一覧（任意）</param>
 /// <param name="ToolCallId">Tool 役割時の対応するツール呼び出し ID（任意）</param>
-public sealed record OpenAiChatHistoryItem(OpenAiChatRole Role, string Text, IReadOnlyList<OpenAiToolCallRequest>? ToolCalls = null, string? ToolCallId = null);
+public sealed record OpenAiChatHistoryItem(
+    OpenAiChatRole Role,
+    string Text,
+    IReadOnlyList<OpenAiToolCallRequest>? ToolCalls = null,
+    string? ToolCallId = null
+);
 
 /// <summary>アシスタント 1 ターンの応答（テキストと要求されたツール呼び出し）</summary>
 /// <param name="Text">応答テキスト</param>
 /// <param name="ToolCalls">要求されたツール呼び出し（空なら応答完了）</param>
-public sealed record OpenAiAssistantTurn(string Text, IReadOnlyList<OpenAiToolCallRequest> ToolCalls);
+public sealed record OpenAiAssistantTurn(
+    string Text,
+    IReadOnlyList<OpenAiToolCallRequest> ToolCalls
+);
 
 /// <summary>会話履歴を入力に LLM を 1 回呼び出し、アシスタント応答を返す抽象（LLM 呼び出しの seam）</summary>
 /// <remarks>本番は OpenAI SDK のストリーミングを呼ぶ。テストではスクリプト化した応答を返すフェイクに差し替える</remarks>
 public interface IOpenAiTurnDriver
 {
     /// <summary>会話履歴を入力にアシスタント 1 ターンを実行する。テキスト断片は <paramref name="onTextDelta"/> で逐次通知する</summary>
-    Task<OpenAiAssistantTurn> RunAsync(IReadOnlyList<OpenAiChatHistoryItem> history, Action<string> onTextDelta, CancellationToken cancellationToken);
+    Task<OpenAiAssistantTurn> RunAsync(
+        IReadOnlyList<OpenAiChatHistoryItem> history,
+        Action<string> onTextDelta,
+        CancellationToken cancellationToken
+    );
 }
 
 /// <summary>AI のツール呼び出しを ER 図操作へ橋渡しするホスト（本番は MainViewModel を操作する）</summary>
@@ -80,7 +92,12 @@ public sealed class OpenAiChatEngine : IErChatEngine
     /// <param name="toolHost">ツール実行ホスト</param>
     /// <param name="dispatcher">UI スレッドへのマーシャリング</param>
     /// <param name="isReady">送信可能判定（API キー有無など）</param>
-    public OpenAiChatEngine(IOpenAiTurnDriver driver, IErDiagramToolHost toolHost, IUiDispatcher dispatcher, Func<bool> isReady)
+    public OpenAiChatEngine(
+        IOpenAiTurnDriver driver,
+        IErDiagramToolHost toolHost,
+        IUiDispatcher dispatcher,
+        Func<bool> isReady
+    )
     {
         _driver = driver;
         _toolHost = toolHost;
@@ -92,13 +109,19 @@ public sealed class OpenAiChatEngine : IErChatEngine
     public bool IsReady => _isReady();
 
     /// <inheritdoc />
-    public Task InitializeAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+    public Task InitializeAsync(CancellationToken cancellationToken = default) =>
+        Task.CompletedTask;
 
     /// <inheritdoc />
     public Task StartConversationAsync(CancellationToken cancellationToken = default)
     {
         _history.Clear();
-        _history.Add(new OpenAiChatHistoryItem(OpenAiChatRole.System, ErDesignRules.BuildOpenAiChatSystemPrompt()));
+        _history.Add(
+            new OpenAiChatHistoryItem(
+                OpenAiChatRole.System,
+                ErDesignRules.BuildOpenAiChatSystemPrompt()
+            )
+        );
         return Task.CompletedTask;
     }
 
@@ -143,8 +166,12 @@ public sealed class OpenAiChatEngine : IErChatEngine
         {
             token.ThrowIfCancellationRequested();
 
-            var turn = await _driver.RunAsync(_history, delta => AssistantDeltaReceived?.Invoke(this, delta), token).ConfigureAwait(false);
-            _history.Add(new OpenAiChatHistoryItem(OpenAiChatRole.Assistant, turn.Text, turn.ToolCalls));
+            var turn = await _driver
+                .RunAsync(_history, delta => AssistantDeltaReceived?.Invoke(this, delta), token)
+                .ConfigureAwait(false);
+            _history.Add(
+                new OpenAiChatHistoryItem(OpenAiChatRole.Assistant, turn.Text, turn.ToolCalls)
+            );
 
             if (turn.ToolCalls.Count == 0)
             {
@@ -156,9 +183,16 @@ public sealed class OpenAiChatEngine : IErChatEngine
                 token.ThrowIfCancellationRequested();
 
                 // ER 図操作（ObservableCollection 変更）は UI スレッドで実行する
-                var (result, success) = _dispatcher.Invoke(() => _toolHost.Execute(call.Name, call.ArgumentsJson));
-                ToolActivityReceived?.Invoke(this, new ErChatToolActivity(call.Name, result, success));
-                _history.Add(new OpenAiChatHistoryItem(OpenAiChatRole.Tool, result, ToolCallId: call.Id));
+                var (result, success) = _dispatcher.Invoke(() =>
+                    _toolHost.Execute(call.Name, call.ArgumentsJson)
+                );
+                ToolActivityReceived?.Invoke(
+                    this,
+                    new ErChatToolActivity(call.Name, result, success)
+                );
+                _history.Add(
+                    new OpenAiChatHistoryItem(OpenAiChatRole.Tool, result, ToolCallId: call.Id)
+                );
             }
         }
     }

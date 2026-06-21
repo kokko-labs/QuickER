@@ -33,7 +33,8 @@ public partial class AiChatDialogViewModel : ObservableObject
     private CodexConfigToml _configToml = new();
 
     /// <summary>ブラウザで URL を開く処理（テスト時に差し替え可能）</summary>
-    internal Action<string> OpenBrowser { get; set; } = url => Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+    internal Action<string> OpenBrowser { get; set; } =
+        url => Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
 
     /// <summary>チャットメッセージ一覧</summary>
     public ObservableCollection<ErChatMessage> Messages { get; } = new();
@@ -81,7 +82,11 @@ public partial class AiChatDialogViewModel : ObservableObject
     public bool CanStartConversation => _engine.IsReady;
 
     /// <summary>メッセージを送信できるか</summary>
-    public bool CanSendMessage => _conversationStarted && _engine.IsReady && !IsTurnInProgress && !string.IsNullOrWhiteSpace(UserInput);
+    public bool CanSendMessage =>
+        _conversationStarted
+        && _engine.IsReady
+        && !IsTurnInProgress
+        && !string.IsNullOrWhiteSpace(UserInput);
 
     // ── API キー接続タブ ──
 
@@ -104,7 +109,10 @@ public partial class AiChatDialogViewModel : ObservableObject
     public IReadOnlyList<AiProvider> ApiProviders { get; } = [AiProvider.OpenAI, AiProvider.Ollama];
 
     /// <summary>現在の API プロバイダーに応じたモデル候補</summary>
-    public IReadOnlyList<string> ApiModelCandidates => ApiProvider == AiProvider.Ollama ? AiModelCatalog.OllamaModels : AiModelCatalog.OpenAiModels;
+    public IReadOnlyList<string> ApiModelCandidates =>
+        ApiProvider == AiProvider.Ollama
+            ? AiModelCatalog.OllamaModels
+            : AiModelCatalog.OpenAiModels;
 
     /// <summary>API キー欄を表示するか（OpenAI 選択時のみ）</summary>
     public bool ShowApiKey => ApiProvider == AiProvider.OpenAI;
@@ -138,23 +146,36 @@ public partial class AiChatDialogViewModel : ObservableObject
     public bool ShowCodexAuthSection => _codexEngine?.IsOpenAiProvider ?? false;
 
     /// <summary>Codex ログインパネルを表示するか（openai・認証必要・未ログイン、かつ接続解決済みのときのみ）</summary>
-    public bool ShowCodexLoginPanel => !_codexConnecting && (_codexEngine?.IsOpenAiProvider ?? false) && _codexAuth.RequiresOpenAiAuth && _codexAuth.AuthMode == CodexAuthMode.None;
+    public bool ShowCodexLoginPanel =>
+        !_codexConnecting
+        && (_codexEngine?.IsOpenAiProvider ?? false)
+        && _codexAuth.RequiresOpenAiAuth
+        && _codexAuth.AuthMode == CodexAuthMode.None;
 
     /// <summary>Codex ログアウト可能か</summary>
-    public bool CanCodexLogout => _codexAuth.IsStarted && (_codexAuth.AuthMode != CodexAuthMode.None || !_codexAuth.RequiresOpenAiAuth);
+    public bool CanCodexLogout =>
+        _codexAuth.IsStarted
+        && (_codexAuth.AuthMode != CodexAuthMode.None || !_codexAuth.RequiresOpenAiAuth);
 
     /// <summary>本番構成（実クライアント・WPF ディスパッチャ）で生成する</summary>
     public AiChatDialogViewModel(MainViewModel? mainViewModel)
         : this(mainViewModel, new WpfUiDispatcher(), settingsStore: null, codexClient: null) { }
 
     /// <summary>依存を注入して生成する（テスト用）</summary>
-    public AiChatDialogViewModel(MainViewModel? mainViewModel, IUiDispatcher dispatcher, CodexAppServerSettingsStore? settingsStore, ICodexAppServerClient? codexClient)
+    public AiChatDialogViewModel(
+        MainViewModel? mainViewModel,
+        IUiDispatcher dispatcher,
+        CodexAppServerSettingsStore? settingsStore,
+        ICodexAppServerClient? codexClient
+    )
     {
         _mainViewModel = mainViewModel;
         _dispatcher = dispatcher;
         _codexSettingsStore = settingsStore ?? new CodexAppServerSettingsStore();
 
-        IErDiagramToolHost? toolHost = mainViewModel is not null ? new ErDiagramToolHost(mainViewModel) : null;
+        IErDiagramToolHost? toolHost = mainViewModel is not null
+            ? new ErDiagramToolHost(mainViewModel)
+            : null;
 
         _openAiEngine = new OpenAiChatEngine(
             new OpenAiTurnDriver(BuildOpenAiConnection),
@@ -222,7 +243,8 @@ public partial class AiChatDialogViewModel : ObservableObject
         IsTurnInProgress = true;
         _currentAssistantMessage = null;
         _currentToolCallMessage = null;
-        _diagramWasEmptyAtTurnStart = _mainViewModel is not null && _mainViewModel.Entities.Count == 0;
+        _diagramWasEmptyAtTurnStart =
+            _mainViewModel is not null && _mainViewModel.Entities.Count == 0;
 
         try
         {
@@ -281,20 +303,35 @@ public partial class AiChatDialogViewModel : ObservableObject
     /// <summary>設定を保存する（ウィンドウ非表示化時などに外部から呼ぶ）</summary>
     public void SaveSettings()
     {
-        _codexSettingsStore.Save(new CodexAppServerSettings { ModelProvider = CodexModelProvider?.Trim() ?? string.Empty, Model = CodexModel?.Trim() ?? string.Empty });
+        _codexSettingsStore.Save(
+            new CodexAppServerSettings
+            {
+                ModelProvider = CodexModelProvider?.Trim() ?? string.Empty,
+                Model = CodexModel?.Trim() ?? string.Empty,
+            }
+        );
     }
 
     /// <summary>OpenAI 接続設定を現在の入力から組み立てる</summary>
     private OpenAiChatConnection BuildOpenAiConnection() =>
-        new(ApiProvider, ApiKey, ApiModel, string.IsNullOrWhiteSpace(EndpointOverride) ? null : EndpointOverride);
+        new(
+            ApiProvider,
+            ApiKey,
+            ApiModel,
+            string.IsNullOrWhiteSpace(EndpointOverride) ? null : EndpointOverride
+        );
 
     /// <summary>保存済み設定と config.toml の候補を読み込む</summary>
     private void LoadSettings()
     {
         var settings = _codexSettingsStore.Load();
         LoadCodexModelCandidates();
-        CodexModelProvider = string.IsNullOrWhiteSpace(settings.ModelProvider) ? OpenAiProviderName : settings.ModelProvider;
-        CodexModel = string.IsNullOrWhiteSpace(settings.Model) ? AiModelCatalog.DefaultOpenAiModel : settings.Model;
+        CodexModelProvider = string.IsNullOrWhiteSpace(settings.ModelProvider)
+            ? OpenAiProviderName
+            : settings.ModelProvider;
+        CodexModel = string.IsNullOrWhiteSpace(settings.Model)
+            ? AiModelCatalog.DefaultOpenAiModel
+            : settings.Model;
     }
 
     /// <summary>config.toml から Codex のプロバイダー・モデル候補を読み込む</summary>
@@ -319,7 +356,11 @@ public partial class AiChatDialogViewModel : ObservableObject
     private void RefreshCodexModelCandidates()
     {
         CodexModelCandidates.Clear();
-        var isOpenAi = string.IsNullOrWhiteSpace(CodexModelProvider) || CodexModelProvider.Trim().Equals(OpenAiProviderName, StringComparison.OrdinalIgnoreCase);
+        var isOpenAi =
+            string.IsNullOrWhiteSpace(CodexModelProvider)
+            || CodexModelProvider
+                .Trim()
+                .Equals(OpenAiProviderName, StringComparison.OrdinalIgnoreCase);
 
         if (isOpenAi)
         {
@@ -375,7 +416,10 @@ public partial class AiChatDialogViewModel : ObservableObject
     partial void OnSelectedBackendChanged(ErChatBackendKind value)
     {
         UnsubscribeEngine(_engine);
-        _engine = value == ErChatBackendKind.Codex && _codexEngine is not null ? _codexEngine : _openAiEngine;
+        _engine =
+            value == ErChatBackendKind.Codex && _codexEngine is not null
+                ? _codexEngine
+                : _openAiEngine;
         SubscribeEngine(_engine);
 
         _conversationStarted = false;
@@ -469,20 +513,28 @@ public partial class AiChatDialogViewModel : ObservableObject
 
     private void OnAssistantDelta(object? sender, string delta) => RunOnUi(() => ApplyDelta(delta));
 
-    private void OnToolActivity(object? sender, ErChatToolActivity activity) => RunOnUi(() => ApplyToolActivity(activity));
+    private void OnToolActivity(object? sender, ErChatToolActivity activity) =>
+        RunOnUi(() => ApplyToolActivity(activity));
 
-    private void OnTurnCompleted(object? sender, ErChatTurnResult result) => RunOnUi(() => ApplyTurnCompleted(result));
+    private void OnTurnCompleted(object? sender, ErChatTurnResult result) =>
+        RunOnUi(() => ApplyTurnCompleted(result));
 
-    private void OnEngineStatus(object? sender, string message) => RunOnUi(() => StatusMessage = message);
+    private void OnEngineStatus(object? sender, string message) =>
+        RunOnUi(() => StatusMessage = message);
 
-    private void OnCodexAuthStateChanged(object? sender, CodexAuthState state) => RunOnUi(() => ApplyCodexAuthState(state));
+    private void OnCodexAuthStateChanged(object? sender, CodexAuthState state) =>
+        RunOnUi(() => ApplyCodexAuthState(state));
 
     /// <summary>ストリーミング差分を組み立て中のアシスタント吹き出しへ追記する</summary>
     private void ApplyDelta(string delta)
     {
         if (_currentAssistantMessage is null)
         {
-            _currentAssistantMessage = new ErChatMessage { Role = ErChatMessageRole.Assistant, Content = delta };
+            _currentAssistantMessage = new ErChatMessage
+            {
+                Role = ErChatMessageRole.Assistant,
+                Content = delta,
+            };
             Messages.Add(_currentAssistantMessage);
         }
         else
@@ -498,7 +550,12 @@ public partial class AiChatDialogViewModel : ObservableObject
 
         if (_currentToolCallMessage is null)
         {
-            _currentToolCallMessage = new ErChatMessage { Role = ErChatMessageRole.ToolCall, Content = text, IsExpanded = true };
+            _currentToolCallMessage = new ErChatMessage
+            {
+                Role = ErChatMessageRole.ToolCall,
+                Content = text,
+                IsExpanded = true,
+            };
             Messages.Add(_currentToolCallMessage);
         }
         else
@@ -547,7 +604,11 @@ public partial class AiChatDialogViewModel : ObservableObject
     /// <summary>空の ER 図から始まったターンでエンティティが生成された場合のみ自動整列する</summary>
     private void ArrangeNewDiagramIfCreated()
     {
-        if (_diagramWasEmptyAtTurnStart && _mainViewModel is not null && _mainViewModel.Entities.Count > 0)
+        if (
+            _diagramWasEmptyAtTurnStart
+            && _mainViewModel is not null
+            && _mainViewModel.Entities.Count > 0
+        )
         {
             _mainViewModel.AutoArrangeNewDiagram();
         }
@@ -575,7 +636,8 @@ public partial class AiChatDialogViewModel : ObservableObject
     }
 
     /// <summary>システムメッセージをチャットへ追加する</summary>
-    private void AddSystemMessage(string text) => Messages.Add(new ErChatMessage { Role = ErChatMessageRole.System, Content = text });
+    private void AddSystemMessage(string text) =>
+        Messages.Add(new ErChatMessage { Role = ErChatMessageRole.System, Content = text });
 
     /// <summary>処理を UI スレッドで実行する</summary>
     private void RunOnUi(Action action)
@@ -594,6 +656,7 @@ public partial class AiChatDialogViewModel : ObservableObject
     /// <summary>ツール無効時に使うダミーホスト（MainViewModel 不在時）</summary>
     private sealed class NullToolHost : IErDiagramToolHost
     {
-        public (string Result, bool Success) Execute(string toolName, string argumentsJson) => ("ツールは利用できません。", false);
+        public (string Result, bool Success) Execute(string toolName, string argumentsJson) =>
+            ("ツールは利用できません。", false);
     }
 }

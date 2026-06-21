@@ -15,7 +15,10 @@ public class SqlConnectionDialogViewModelTests : IDisposable
     /// <summary>一時保存先フォルダを作成する</summary>
     public SqlConnectionDialogViewModelTests()
     {
-        _tempFolder = Path.Combine(Path.GetTempPath(), "ERDesignerTests_" + Guid.NewGuid().ToString("N"));
+        _tempFolder = Path.Combine(
+            Path.GetTempPath(),
+            "ERDesignerTests_" + Guid.NewGuid().ToString("N")
+        );
         Directory.CreateDirectory(_tempFolder);
     }
 

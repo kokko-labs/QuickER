@@ -92,7 +92,9 @@ public static class MermaidExporter
             RelationshipType.ManyToMany => "}o--o{",
             _ => "||--o{",
         };
-        var label = string.IsNullOrWhiteSpace(relationship.ConstraintName) ? "relates" : relationship.ConstraintName;
+        var label = string.IsNullOrWhiteSpace(relationship.ConstraintName)
+            ? "relates"
+            : relationship.ConstraintName;
 
         return $"{relationship.Source.TableName} {symbol} {relationship.Target.TableName} : {label}";
     }

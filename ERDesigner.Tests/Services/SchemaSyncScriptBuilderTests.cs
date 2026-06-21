@@ -304,7 +304,9 @@ public class SchemaSyncScriptBuilderTests
     }
 
     /// <summary>SetTableDescription がテーブルレベルの MS_Description 設定文（add/update 切替）を出力することを検証する</summary>
-    [Fact(DisplayName = "SetTableDescription は sp_addextendedproperty / sp_updateextendedproperty を出力する")]
+    [Fact(
+        DisplayName = "SetTableDescription は sp_addextendedproperty / sp_updateextendedproperty を出力する"
+    )]
     public void SetTableDescription_EmitsExtendedProperty()
     {
         var item = new SchemaDiffItem

@@ -119,7 +119,8 @@ public class MainViewModelTests
         vm.AddEntityCommand.Execute(null);
         vm.AddEntityCommand.Execute(null);
         vm.Entities[0].Columns[0].Name = "ParentKey";
-        vm.Entities[1].Columns.Add(new ColumnViewModel(new Column { Name = "NewTableId", DataType = "int" }));
+        vm.Entities[1]
+            .Columns.Add(new ColumnViewModel(new Column { Name = "NewTableId", DataType = "int" }));
 
         vm.StartAddOneToManyCommand.Execute(null);
         vm.OnEntityClicked(vm.Entities[0]);
@@ -138,8 +139,12 @@ public class MainViewModelTests
         vm.AddEntityCommand.Execute(null);
         vm.Entities[0].TableName = "Customer";
         vm.Entities[1].TableName = "Order";
-        vm.Entities[1].Columns.Add(new ColumnViewModel(new Column { Name = "OrderDate", DataType = "datetime2" }));
-        vm.Entities[1].Columns.Add(new ColumnViewModel(new Column { Name = "CustomerId", DataType = "int" }));
+        vm.Entities[1]
+            .Columns.Add(
+                new ColumnViewModel(new Column { Name = "OrderDate", DataType = "datetime2" })
+            );
+        vm.Entities[1]
+            .Columns.Add(new ColumnViewModel(new Column { Name = "CustomerId", DataType = "int" }));
 
         vm.StartAddOneToManyCommand.Execute(null);
         vm.OnEntityClicked(vm.Entities[0]);
@@ -157,7 +162,8 @@ public class MainViewModelTests
         var vm = new MainViewModel();
         vm.AddEntityCommand.Execute(null);
         vm.AddEntityCommand.Execute(null);
-        vm.Entities[1].Columns.Add(new ColumnViewModel(new Column { Name = "Quantity", DataType = "int" }));
+        vm.Entities[1]
+            .Columns.Add(new ColumnViewModel(new Column { Name = "Quantity", DataType = "int" }));
 
         vm.StartAddOneToManyCommand.Execute(null);
         vm.OnEntityClicked(vm.Entities[0]);
@@ -169,12 +175,15 @@ public class MainViewModelTests
     }
 
     /// <summary>同じエンティティを 2 回クリックすると自己参照リレーションが追加されることを検証する</summary>
-    [Fact(DisplayName = "リレーション作成モードで同じエンティティを2回クリックすると自己参照リレーションが追加される")]
+    [Fact(
+        DisplayName = "リレーション作成モードで同じエンティティを2回クリックすると自己参照リレーションが追加される"
+    )]
     public void RelationshipMode_CreatesSelfRelationship()
     {
         var vm = new MainViewModel();
         vm.AddEntityCommand.Execute(null);
-        vm.Entities[0].Columns.Add(new ColumnViewModel(new Column { Name = "ParentId", DataType = "int" }));
+        vm.Entities[0]
+            .Columns.Add(new ColumnViewModel(new Column { Name = "ParentId", DataType = "int" }));
 
         vm.StartAddOneToManyCommand.Execute(null);
         vm.OnEntityClicked(vm.Entities[0]);
@@ -214,7 +223,8 @@ public class MainViewModelTests
     {
         var vm = new MainViewModel(new StubDialogService());
         vm.AddEntityCommand.Execute(null);
-        vm.Entities[0].Columns.Add(new ColumnViewModel(new Column { Name = "ParentId", DataType = "int" }));
+        vm.Entities[0]
+            .Columns.Add(new ColumnViewModel(new Column { Name = "ParentId", DataType = "int" }));
 
         vm.StartAddOneToManyCommand.Execute(null);
         vm.OnEntityClicked(vm.Entities[0]);
@@ -236,7 +246,8 @@ public class MainViewModelTests
         var vm = new MainViewModel();
         vm.AddEntityCommand.Execute(null);
         vm.AddEntityCommand.Execute(null);
-        vm.Entities[1].Columns.Add(new ColumnViewModel(new Column { Name = "ParentId", DataType = "int" }));
+        vm.Entities[1]
+            .Columns.Add(new ColumnViewModel(new Column { Name = "ParentId", DataType = "int" }));
         vm.StartAddOneToManyCommand.Execute(null);
         vm.OnEntityClicked(vm.Entities[0]);
         vm.OnEntityClicked(vm.Entities[1]);
@@ -272,7 +283,8 @@ public class MainViewModelTests
         vm.AddEntityCommand.Execute(null);
         vm.Entities[0].Columns[0].Name = "CustomerId";
         vm.Entities[1].Columns[0].Name = "Id";
-        vm.Entities[1].Columns.Add(new ColumnViewModel(new Column { Name = "CustomerId", DataType = "int" }));
+        vm.Entities[1]
+            .Columns.Add(new ColumnViewModel(new Column { Name = "CustomerId", DataType = "int" }));
 
         vm.StartAddOneToManyCommand.Execute(null);
         vm.OnEntityClicked(vm.Entities[0]);
@@ -290,13 +302,15 @@ public class MainViewModelTests
         vm.AddEntityCommand.Execute(null);
         vm.AddEntityCommand.Execute(null);
         vm.Entities[0].Columns[0].Name = "ParentKey";
-        vm.Entities[1].Columns.Add(new ColumnViewModel(new Column { Name = "NewTableId", DataType = "int" }));
+        vm.Entities[1]
+            .Columns.Add(new ColumnViewModel(new Column { Name = "NewTableId", DataType = "int" }));
 
         vm.StartAddOneToManyCommand.Execute(null);
         vm.OnEntityClicked(vm.Entities[0]);
         vm.OnEntityClicked(vm.Entities[1]);
 
-        var fkColumn = vm.Entities[1].Columns.First(c => c.Id == vm.Relationships[0].TargetColumnId);
+        var fkColumn = vm.Entities[1]
+            .Columns.First(c => c.Id == vm.Relationships[0].TargetColumnId);
 
         vm.Entities[0].Columns[0].IsPrimaryKeyEditable.Should().BeFalse();
         fkColumn.IsForeignKeyEditable.Should().BeFalse();
@@ -310,7 +324,8 @@ public class MainViewModelTests
         vm.AddEntityCommand.Execute(null);
         vm.AddEntityCommand.Execute(null);
         vm.Entities[0].Columns[0].Name = "ParentKey";
-        vm.Entities[1].Columns.Add(new ColumnViewModel(new Column { Name = "NewTableId", DataType = "int" }));
+        vm.Entities[1]
+            .Columns.Add(new ColumnViewModel(new Column { Name = "NewTableId", DataType = "int" }));
 
         vm.StartAddOneToManyCommand.Execute(null);
         vm.OnEntityClicked(vm.Entities[0]);
@@ -436,7 +451,8 @@ public class MainViewModelTests
         var vm = new MainViewModel();
         vm.AddEntityCommand.Execute(null);
         vm.AddEntityCommand.Execute(null);
-        vm.Entities[1].Columns.Add(new ColumnViewModel(new Column { Name = "NewTableId", DataType = "int" }));
+        vm.Entities[1]
+            .Columns.Add(new ColumnViewModel(new Column { Name = "NewTableId", DataType = "int" }));
         vm.StartAddOneToManyCommand.Execute(null);
         vm.OnEntityClicked(vm.Entities[0]);
         vm.OnEntityClicked(vm.Entities[1]);
@@ -468,13 +484,16 @@ public class MainViewModelTests
         var vm = new MainViewModel();
         vm.AddEntityCommand.Execute(null);
         vm.AddEntityCommand.Execute(null);
-        vm.Entities[1].Columns.Add(new ColumnViewModel(new Column { Name = "NewTableId", DataType = "int" }));
-        vm.Entities[1].Columns.Add(new ColumnViewModel(new Column { Name = "ParentCode", DataType = "int" }));
+        vm.Entities[1]
+            .Columns.Add(new ColumnViewModel(new Column { Name = "NewTableId", DataType = "int" }));
+        vm.Entities[1]
+            .Columns.Add(new ColumnViewModel(new Column { Name = "ParentCode", DataType = "int" }));
         vm.StartAddOneToManyCommand.Execute(null);
         vm.OnEntityClicked(vm.Entities[0]);
         vm.OnEntityClicked(vm.Entities[1]);
         var relationship = vm.Relationships[0];
-        var originalTargetColumn = vm.Entities[1].Columns.First(column => column.Id == relationship.TargetColumnId);
+        var originalTargetColumn = vm.Entities[1]
+            .Columns.First(column => column.Id == relationship.TargetColumnId);
         var newTargetColumn = vm.Entities[1].Columns.Single(column => column.Name == "ParentCode");
 
         relationship.TargetColumnId = newTargetColumn.Id;
@@ -579,7 +598,9 @@ public class MainViewModelTests
         vm.PasteCopiedEntityCommand.Execute(null);
         vm.PasteCopiedEntityCommand.Execute(null);
 
-        vm.Entities.Select(entity => entity.TableName).Should().Equal("Order", "Order_Copy", "Order_Copy2");
+        vm.Entities.Select(entity => entity.TableName)
+            .Should()
+            .Equal("Order", "Order_Copy", "Order_Copy2");
         vm.Entities[1].X.Should().Be(120);
         vm.Entities[1].Y.Should().Be(170);
         vm.Entities[2].X.Should().Be(150);
@@ -589,7 +610,9 @@ public class MainViewModelTests
         vm.Entities.Select(entity => entity.TableName).Should().Equal("Order", "Order_Copy");
 
         vm.RedoCommand.Execute(null);
-        vm.Entities.Select(entity => entity.TableName).Should().Equal("Order", "Order_Copy", "Order_Copy2");
+        vm.Entities.Select(entity => entity.TableName)
+            .Should()
+            .Equal("Order", "Order_Copy", "Order_Copy2");
     }
 
     /// <summary>選択カラムをコピーして選択行の直下へ複製挿入できることを検証する</summary>
@@ -611,14 +634,18 @@ public class MainViewModelTests
                 }
             )
         );
-        vm.SelectedEntity.Columns.Add(new ColumnViewModel(new Column { Name = "UpdatedAt", DataType = "datetime2" }));
+        vm.SelectedEntity.Columns.Add(
+            new ColumnViewModel(new Column { Name = "UpdatedAt", DataType = "datetime2" })
+        );
         vm.SelectedColumn = vm.SelectedEntity.Columns[1];
         var original = vm.SelectedColumn;
 
         vm.CopySelectedColumnCommand.Execute(null);
         vm.PasteCopiedColumnCommand.Execute(null);
 
-        vm.SelectedEntity.Columns.Select(column => column.Name).Should().Equal("Id", "Code", "Code", "UpdatedAt");
+        vm.SelectedEntity.Columns.Select(column => column.Name)
+            .Should()
+            .Equal("Id", "Code", "Code", "UpdatedAt");
         vm.SelectedColumn.Should().Be(vm.SelectedEntity.Columns[2]);
         vm.SelectedColumn.Should().NotBeSameAs(original);
         vm.SelectedColumn!.Id.Should().NotBe(original.Id);
@@ -634,19 +661,25 @@ public class MainViewModelTests
         var vm = new MainViewModel();
         vm.AddEntityCommand.Execute(null);
         vm.SelectedEntity = vm.Entities[0];
-        vm.SelectedEntity.Columns.Add(new ColumnViewModel(new Column { Name = "Code", DataType = "int" }));
+        vm.SelectedEntity.Columns.Add(
+            new ColumnViewModel(new Column { Name = "Code", DataType = "int" })
+        );
         vm.SelectedColumn = vm.SelectedEntity.Columns[1];
 
         vm.CopySelectedColumnCommand.Execute(null);
         vm.PasteCopiedColumnCommand.Execute(null);
 
-        vm.SelectedEntity.Columns.Select(column => column.Name).Should().Equal("ID", "Code", "Code");
+        vm.SelectedEntity.Columns.Select(column => column.Name)
+            .Should()
+            .Equal("ID", "Code", "Code");
 
         vm.UndoCommand.Execute(null);
         vm.SelectedEntity.Columns.Select(column => column.Name).Should().Equal("ID", "Code");
 
         vm.RedoCommand.Execute(null);
-        vm.SelectedEntity.Columns.Select(column => column.Name).Should().Equal("ID", "Code", "Code");
+        vm.SelectedEntity.Columns.Select(column => column.Name)
+            .Should()
+            .Equal("ID", "Code", "Code");
     }
 
     /// <summary>カラム削除が Undo / Redo できることを検証する</summary>
@@ -656,7 +689,9 @@ public class MainViewModelTests
         var vm = new MainViewModel();
         vm.AddEntityCommand.Execute(null);
         vm.SelectedEntity = vm.Entities[0];
-        vm.SelectedEntity.Columns.Add(new ColumnViewModel(new Column { Name = "B", DataType = "int" }));
+        vm.SelectedEntity.Columns.Add(
+            new ColumnViewModel(new Column { Name = "B", DataType = "int" })
+        );
         var removed = vm.SelectedEntity.Columns[0];
 
         vm.RemoveColumnCommand.Execute(removed);
@@ -671,7 +706,9 @@ public class MainViewModelTests
     }
 
     /// <summary>FK 設定済みカラムを削除して Undo すると、リレーションの FK 設定も復元されることを検証する</summary>
-    [Fact(DisplayName = "FK に設定済みのカラムを削除して Undo するとリレーションの FK 設定も復元される")]
+    [Fact(
+        DisplayName = "FK に設定済みのカラムを削除して Undo するとリレーションの FK 設定も復元される"
+    )]
     public void RemoveColumn_UsedAsFk_UndoRestoresRelationshipFk()
     {
         var vm = new MainViewModel();
@@ -679,7 +716,8 @@ public class MainViewModelTests
         vm.AddEntityCommand.Execute(null);
 
         // Entity[1] に FK 列（親テーブル名+Id の命名規則）を追加してリレーションを作成する
-        vm.Entities[1].Columns.Add(new ColumnViewModel(new Column { Name = "NewTableId", DataType = "int" }));
+        vm.Entities[1]
+            .Columns.Add(new ColumnViewModel(new Column { Name = "NewTableId", DataType = "int" }));
         vm.StartAddOneToManyCommand.Execute(null);
         vm.OnEntityClicked(vm.Entities[0]);
         vm.OnEntityClicked(vm.Entities[1]);
@@ -822,7 +860,8 @@ public class MainViewModelTests
         var vm = new MainViewModel();
         vm.AddEntityCommand.Execute(null);
         vm.AddEntityCommand.Execute(null);
-        vm.Entities[1].Columns.Add(new ColumnViewModel(new Column { Name = "ParentId", DataType = "int" }));
+        vm.Entities[1]
+            .Columns.Add(new ColumnViewModel(new Column { Name = "ParentId", DataType = "int" }));
         vm.StartAddOneToManyCommand.Execute(null);
         vm.OnEntityClicked(vm.Entities[0]);
         vm.OnEntityClicked(vm.Entities[1]);
@@ -894,6 +933,10 @@ public class MainViewModelTests
         vm.OnEntityClicked(b);
 
         vm.Relationships.Should().HaveCount(1);
-        dialogs.InformationMessages.Should().ContainSingle().Which.Should().Contain("すでに存在します");
+        dialogs
+            .InformationMessages.Should()
+            .ContainSingle()
+            .Which.Should()
+            .Contain("すでに存在します");
     }
 }

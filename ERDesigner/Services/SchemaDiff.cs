@@ -108,12 +108,18 @@ public sealed class SchemaDiffItem : INotifyPropertyChanged
     }
 
     /// <summary>破壊的操作 (DROP/ALTER) の場合 true。</summary>
-    public bool IsDestructive => Kind is SchemaDiffKind.AlterColumn or SchemaDiffKind.DropColumn or SchemaDiffKind.DropTable or SchemaDiffKind.DropForeignKey;
+    public bool IsDestructive =>
+        Kind
+            is SchemaDiffKind.AlterColumn
+                or SchemaDiffKind.DropColumn
+                or SchemaDiffKind.DropTable
+                or SchemaDiffKind.DropForeignKey;
 
     /// <inheritdoc/>
     public event PropertyChangedEventHandler? PropertyChanged;
 
-    private void OnPropertyChanged([CallerMemberName] string? name = null) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+    private void OnPropertyChanged([CallerMemberName] string? name = null) =>
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
 }
 
 /// <summary>

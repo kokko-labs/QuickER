@@ -50,16 +50,22 @@ internal sealed partial class SqlServerCSharpTypeMapper
             "time" => Value("TimeSpan"),
             "datetimeoffset" => Value("DateTimeOffset"),
             "uniqueidentifier" => Value("Guid"),
-            "binary" or "varbinary" or "image" or "rowversion" or "timestamp" => Reference("byte[]"),
+            "binary" or "varbinary" or "image" or "rowversion" or "timestamp" => Reference(
+                "byte[]"
+            ),
             // 文字列系のみ MaxLength を保持し、[MaxLength] 属性の生成に使う
-            "char" or "varchar" or "nchar" or "nvarchar" or "text" or "ntext" or "xml" => Reference("string", maxLength),
+            "char" or "varchar" or "nchar" or "nvarchar" or "text" or "ntext" or "xml" => Reference(
+                "string",
+                maxLength
+            ),
             // 未知の型は string として扱い、生成自体は継続させる
             _ => Reference("string"),
         };
     }
 
     /// <summary>値型の型情報を作成する</summary>
-    private static CSharpTypeInfo Value(string typeName) => new() { TypeName = typeName, IsReferenceType = false };
+    private static CSharpTypeInfo Value(string typeName) =>
+        new() { TypeName = typeName, IsReferenceType = false };
 
     /// <summary>decimal 型の型情報を作成する（精度・スケールを保持し、値オブジェクトの桁数検証に使う）</summary>
     private static CSharpTypeInfo Decimal(int? precision, int? scale) =>
@@ -98,12 +104,22 @@ internal sealed partial class SqlServerCSharpTypeMapper
     private static int? TryGetLength(string normalizedDataType)
     {
         var match = LengthRegex().Match(normalizedDataType);
-        if (!match.Success || match.Groups[1].Value.Equals("max", StringComparison.OrdinalIgnoreCase))
+        if (
+            !match.Success
+            || match.Groups[1].Value.Equals("max", StringComparison.OrdinalIgnoreCase)
+        )
         {
             return null;
         }
 
-        return int.TryParse(match.Groups[1].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var length) ? length : null;
+        return int.TryParse(
+            match.Groups[1].Value,
+            NumberStyles.Integer,
+            CultureInfo.InvariantCulture,
+            out var length
+        )
+            ? length
+            : null;
     }
 
     /// <summary>
@@ -118,8 +134,24 @@ internal sealed partial class SqlServerCSharpTypeMapper
             return (null, null);
         }
 
-        int? precision = int.TryParse(match.Groups[1].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var p) ? p : null;
-        int? scale = match.Groups[2].Success && int.TryParse(match.Groups[2].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var s) ? s : null;
+        int? precision = int.TryParse(
+            match.Groups[1].Value,
+            NumberStyles.Integer,
+            CultureInfo.InvariantCulture,
+            out var p
+        )
+            ? p
+            : null;
+        int? scale =
+            match.Groups[2].Success
+            && int.TryParse(
+                match.Groups[2].Value,
+                NumberStyles.Integer,
+                CultureInfo.InvariantCulture,
+                out var s
+            )
+                ? s
+                : null;
         return (precision, scale);
     }
 

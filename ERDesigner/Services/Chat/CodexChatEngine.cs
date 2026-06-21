@@ -7,7 +7,12 @@ namespace ERDesigner.Services.Chat;
 /// <param name="RequiresOpenAiAuth">OpenAI 認証が必要か</param>
 /// <param name="AuthMode">認証モード</param>
 /// <param name="AccountSummary">アカウント概要文言</param>
-public readonly record struct CodexAuthState(bool IsStarted, bool RequiresOpenAiAuth, CodexAuthMode AuthMode, string AccountSummary);
+public readonly record struct CodexAuthState(
+    bool IsStarted,
+    bool RequiresOpenAiAuth,
+    CodexAuthMode AuthMode,
+    string AccountSummary
+);
 
 /// <summary>
 /// Codex App Server を <see cref="IErChatEngine"/> として扱うエンジン。
@@ -49,7 +54,9 @@ public sealed class CodexChatEngine : IErChatEngine
     public string AccountSummary { get; private set; } = "未接続";
 
     /// <summary>現在のプロバイダーが openai か（openai のみ認証が必要）</summary>
-    public bool IsOpenAiProvider => string.IsNullOrWhiteSpace(ModelProvider) || ModelProvider.Trim().Equals(OpenAiProviderName, StringComparison.OrdinalIgnoreCase);
+    public bool IsOpenAiProvider =>
+        string.IsNullOrWhiteSpace(ModelProvider)
+        || ModelProvider.Trim().Equals(OpenAiProviderName, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>ログイン済みか</summary>
     public bool IsLoggedIn => AuthMode != CodexAuthMode.None;
@@ -73,7 +80,11 @@ public sealed class CodexChatEngine : IErChatEngine
     /// <param name="client">Codex App Server クライアント</param>
     /// <param name="toolHost">ER 図操作ツールの実行ホスト（null ならツール無効）</param>
     /// <param name="dispatcher">UI スレッドへのマーシャリング</param>
-    public CodexChatEngine(ICodexAppServerClient client, IErDiagramToolHost? toolHost, IUiDispatcher dispatcher)
+    public CodexChatEngine(
+        ICodexAppServerClient client,
+        IErDiagramToolHost? toolHost,
+        IUiDispatcher dispatcher
+    )
     {
         _client = client;
         _toolHost = toolHost;
@@ -101,7 +112,15 @@ public sealed class CodexChatEngine : IErChatEngine
     {
         try
         {
-            await _client.StartAsync(BuildSettings(), ClientName, ClientTitle, ClientVersion, cancellationToken).ConfigureAwait(false);
+            await _client
+                .StartAsync(
+                    BuildSettings(),
+                    ClientName,
+                    ClientTitle,
+                    ClientVersion,
+                    cancellationToken
+                )
+                .ConfigureAwait(false);
             IsStarted = _client.IsStarted;
             await RefreshAccountStateAsync(cancellationToken).ConfigureAwait(false);
         }
@@ -128,7 +147,9 @@ public sealed class CodexChatEngine : IErChatEngine
 
         try
         {
-            var account = await _client.ReadAccountAsync(refreshToken: true, cancellationToken).ConfigureAwait(false);
+            var account = await _client
+                .ReadAccountAsync(refreshToken: true, cancellationToken)
+                .ConfigureAwait(false);
             ApplyAccountState(account);
         }
         catch (Exception ex)
@@ -151,7 +172,9 @@ public sealed class CodexChatEngine : IErChatEngine
 
         try
         {
-            var result = await _client.StartChatGptLoginAsync(cancellationToken).ConfigureAwait(false);
+            var result = await _client
+                .StartChatGptLoginAsync(cancellationToken)
+                .ConfigureAwait(false);
 
             if (string.IsNullOrWhiteSpace(result.AuthUrl))
             {
@@ -206,7 +229,9 @@ public sealed class CodexChatEngine : IErChatEngine
 
         try
         {
-            var thread = await _client.StartThreadAsync(BuildThreadStartOptions(), cancellationToken).ConfigureAwait(false);
+            var thread = await _client
+                .StartThreadAsync(BuildThreadStartOptions(), cancellationToken)
+                .ConfigureAwait(false);
             _currentThreadId = thread.Id;
             StatusChanged?.Invoke(this, "会話を開始しました。");
         }
@@ -226,7 +251,10 @@ public sealed class CodexChatEngine : IErChatEngine
 
         if (_currentThreadId is null)
         {
-            TurnCompleted?.Invoke(this, new ErChatTurnResult(false, "会話を開始できませんでした。"));
+            TurnCompleted?.Invoke(
+                this,
+                new ErChatTurnResult(false, "会話を開始できませんでした。")
+            );
             return;
         }
 
@@ -235,7 +263,9 @@ public sealed class CodexChatEngine : IErChatEngine
 
         try
         {
-            var turn = await _client.StartTurnAsync(_currentThreadId, prompt, cancellationToken).ConfigureAwait(false);
+            var turn = await _client
+                .StartTurnAsync(_currentThreadId, prompt, cancellationToken)
+                .ConfigureAwait(false);
             _currentTurnId = turn.Id;
         }
         catch (Exception ex)
@@ -255,7 +285,9 @@ public sealed class CodexChatEngine : IErChatEngine
 
         try
         {
-            await _client.InterruptTurnAsync(_currentThreadId, _currentTurnId, cancellationToken).ConfigureAwait(false);
+            await _client
+                .InterruptTurnAsync(_currentThreadId, _currentTurnId, cancellationToken)
+                .ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -284,11 +316,18 @@ public sealed class CodexChatEngine : IErChatEngine
             ModelProvider = NormalizeOptionalText(ModelProvider),
             Model = NormalizeOptionalText(Model),
             DynamicTools = _toolHost is not null ? ErDiagramDynamicTools.GetDefinitions() : null,
-            DeveloperInstructions = _toolHost is not null ? ErDesignRules.BuildCodexDeveloperInstructions() : null,
+            DeveloperInstructions = _toolHost is not null
+                ? ErDesignRules.BuildCodexDeveloperInstructions()
+                : null,
         };
 
     /// <summary>現在のプロバイダー・モデルから保存用設定を組み立てる</summary>
-    private CodexAppServerSettings BuildSettings() => new() { ModelProvider = ModelProvider?.Trim() ?? string.Empty, Model = Model?.Trim() ?? string.Empty };
+    private CodexAppServerSettings BuildSettings() =>
+        new()
+        {
+            ModelProvider = ModelProvider?.Trim() ?? string.Empty,
+            Model = Model?.Trim() ?? string.Empty,
+        };
 
     /// <summary>取得したアカウント情報を認証状態へ反映する</summary>
     private void ApplyAccountState(CodexAccountInfo account)
@@ -299,18 +338,36 @@ public sealed class CodexChatEngine : IErChatEngine
         if (account.AuthMode != CodexAuthMode.None)
         {
             AuthMode = account.AuthMode;
-            AccountSummary = BuildAccountSummary(account.AuthMode, account.PlanType, account.Email, account.RequiresOpenAiAuth, IsOpenAiProvider);
+            AccountSummary = BuildAccountSummary(
+                account.AuthMode,
+                account.PlanType,
+                account.Email,
+                account.RequiresOpenAiAuth,
+                IsOpenAiProvider
+            );
             return;
         }
 
         if (AuthMode == CodexAuthMode.None)
         {
-            AccountSummary = BuildAccountSummary(account.AuthMode, account.PlanType, account.Email, account.RequiresOpenAiAuth, IsOpenAiProvider);
+            AccountSummary = BuildAccountSummary(
+                account.AuthMode,
+                account.PlanType,
+                account.Email,
+                account.RequiresOpenAiAuth,
+                IsOpenAiProvider
+            );
         }
     }
 
     /// <summary>認証モード・プラン・メール・プロバイダー種別から概要文言を組み立てる</summary>
-    private static string BuildAccountSummary(CodexAuthMode authMode, string? planType, string? email, bool showNotLoggedInWhenUnauthenticated, bool isOpenAiProvider) =>
+    private static string BuildAccountSummary(
+        CodexAuthMode authMode,
+        string? planType,
+        string? email,
+        bool showNotLoggedInWhenUnauthenticated,
+        bool isOpenAiProvider
+    ) =>
         authMode switch
         {
             CodexAuthMode.ApiKey => "API キーでログイン済み",
@@ -327,13 +384,19 @@ public sealed class CodexChatEngine : IErChatEngine
         };
 
     /// <summary>空白を null へ正規化する</summary>
-    private static string? NormalizeOptionalText(string? text) => string.IsNullOrWhiteSpace(text) ? null : text.Trim();
+    private static string? NormalizeOptionalText(string? text) =>
+        string.IsNullOrWhiteSpace(text) ? null : text.Trim();
 
     /// <summary>認証状態スナップショットを通知する</summary>
-    private void RaiseAuthStateChanged() => AuthStateChanged?.Invoke(this, new CodexAuthState(IsStarted, RequiresOpenAiAuth, AuthMode, AccountSummary));
+    private void RaiseAuthStateChanged() =>
+        AuthStateChanged?.Invoke(
+            this,
+            new CodexAuthState(IsStarted, RequiresOpenAiAuth, AuthMode, AccountSummary)
+        );
 
     /// <summary>ストリーミング差分を UI スレッドで共通イベントへ変換する</summary>
-    private void OnAgentMessageDelta(object? sender, CodexAgentMessageDeltaNotification e) => AssistantDeltaReceived?.Invoke(this, e.Delta);
+    private void OnAgentMessageDelta(object? sender, CodexAgentMessageDeltaNotification e) =>
+        AssistantDeltaReceived?.Invoke(this, e.Delta);
 
     /// <summary>ターン完了通知を共通イベントへ変換する</summary>
     private void OnTurnCompleted(object? sender, CodexTurnCompletedNotification e)
@@ -368,20 +431,28 @@ public sealed class CodexChatEngine : IErChatEngine
 
         if (_toolHost is null)
         {
-            resultText = $"ツールホストが利用できないため '{request.Tool}' を実行できませんでした。";
+            resultText =
+                $"ツールホストが利用できないため '{request.Tool}' を実行できませんでした。";
             success = false;
         }
         else
         {
             var argumentsJson = request.Arguments.GetRawText();
-            (resultText, success) = _dispatcher.Invoke(() => _toolHost.Execute(request.Tool, argumentsJson));
+            (resultText, success) = _dispatcher.Invoke(() =>
+                _toolHost.Execute(request.Tool, argumentsJson)
+            );
         }
 
-        ToolActivityReceived?.Invoke(this, new ErChatToolActivity(request.Tool, resultText, success));
+        ToolActivityReceived?.Invoke(
+            this,
+            new ErChatToolActivity(request.Tool, resultText, success)
+        );
 
         try
         {
-            await _client.RespondToDynamicToolCallAsync(request.RequestId, resultText, success).ConfigureAwait(false);
+            await _client
+                .RespondToDynamicToolCallAsync(request.RequestId, resultText, success)
+                .ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -412,14 +483,23 @@ public sealed class CodexChatEngine : IErChatEngine
     private void OnAccountUpdated(object? sender, CodexAccountUpdatedNotification e)
     {
         AuthMode = e.AuthMode;
-        AccountSummary = BuildAccountSummary(e.AuthMode, e.PlanType, email: null, showNotLoggedInWhenUnauthenticated: false, isOpenAiProvider: IsOpenAiProvider);
+        AccountSummary = BuildAccountSummary(
+            e.AuthMode,
+            e.PlanType,
+            email: null,
+            showNotLoggedInWhenUnauthenticated: false,
+            isOpenAiProvider: IsOpenAiProvider
+        );
         RaiseAuthStateChanged();
     }
 
     /// <summary>ログイン完了通知をステータスへ反映する（状態は account/updated に委ねる）</summary>
     private void OnLoginCompleted(object? sender, CodexLoginCompletedNotification e)
     {
-        StatusChanged?.Invoke(this, e.Success ? "ログインしました。" : $"ログインに失敗しました: {e.Error}");
+        StatusChanged?.Invoke(
+            this,
+            e.Success ? "ログインしました。" : $"ログインに失敗しました: {e.Error}"
+        );
     }
 
     /// <summary>error 通知を抽出してステータス・ターン失敗へ反映する</summary>
@@ -432,7 +512,11 @@ public sealed class CodexChatEngine : IErChatEngine
 
         var message = "不明なエラーが発生しました。";
 
-        if (e.Params is JsonElement paramsElement && paramsElement.TryGetProperty("error", out var errorElement) && errorElement.TryGetProperty("message", out var msgElement))
+        if (
+            e.Params is JsonElement paramsElement
+            && paramsElement.TryGetProperty("error", out var errorElement)
+            && errorElement.TryGetProperty("message", out var msgElement)
+        )
         {
             message = msgElement.GetString() ?? message;
         }

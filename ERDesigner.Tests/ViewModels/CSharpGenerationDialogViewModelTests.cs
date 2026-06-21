@@ -27,7 +27,10 @@ public class CSharpGenerationDialogViewModelTests
     [Fact(DisplayName = "Repository 生成オプションを変更すると結果へ反映される")]
     public void Ok_WithRepositoryOption_StoresSelection()
     {
-        var vm = new CSharpGenerationDialogViewModel("Sample.Domain", @"C:\temp\Entities.g.cs") { GenerateRepositories = false };
+        var vm = new CSharpGenerationDialogViewModel("Sample.Domain", @"C:\temp\Entities.g.cs")
+        {
+            GenerateRepositories = false,
+        };
 
         vm.OkCommand.Execute(null);
 
@@ -39,7 +42,10 @@ public class CSharpGenerationDialogViewModelTests
     [Fact(DisplayName = "不正な namespace ではエラーメッセージを表示して閉じない")]
     public void Ok_WithInvalidNamespace_ShowsError()
     {
-        var vm = new CSharpGenerationDialogViewModel("1Invalid.Namespace", @"C:\temp\Entities.g.cs");
+        var vm = new CSharpGenerationDialogViewModel(
+            "1Invalid.Namespace",
+            @"C:\temp\Entities.g.cs"
+        );
         bool closed = false;
         vm.CloseAction = _ => closed = true;
 
@@ -54,7 +60,10 @@ public class CSharpGenerationDialogViewModelTests
     [Fact(DisplayName = "参照コマンドで出力先ファイルを更新できる")]
     public void BrowseOutputFile_UpdatesPath()
     {
-        var vm = new CSharpGenerationDialogViewModel("Sample.Domain", "ErDesignerEntities.g.cs") { BrowseOutputFileAction = _ => @"C:\work\Generated\Entities.g.cs" };
+        var vm = new CSharpGenerationDialogViewModel("Sample.Domain", "ErDesignerEntities.g.cs")
+        {
+            BrowseOutputFileAction = _ => @"C:\work\Generated\Entities.g.cs",
+        };
 
         vm.BrowseOutputFileCommand.Execute(null);
 

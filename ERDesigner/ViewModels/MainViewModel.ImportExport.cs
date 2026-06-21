@@ -54,10 +54,18 @@ public partial class MainViewModel
     // ---------------- Auto-save / restore ----------------
 
     /// <summary>ダイアグラム自動保存ファイルのパス</summary>
-    private static readonly string AutoSavePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ERDesigner", "last_diagram.json");
+    private static readonly string AutoSavePath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+        "ERDesigner",
+        "last_diagram.json"
+    );
 
     /// <summary>UI 表示状態の保存ファイルのパス</summary>
-    private static readonly string UiStatePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ERDesigner", "ui_state.json");
+    private static readonly string UiStatePath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+        "ERDesigner",
+        "ui_state.json"
+    );
 
     /// <summary>現在のダイアグラムと UI 表示状態を自動保存ファイルへ書き出す</summary>
     public void AutoSave()
@@ -70,7 +78,11 @@ public partial class MainViewModel
             File.WriteAllText(
                 UiStatePath,
                 System.Text.Json.JsonSerializer.Serialize(
-                    new UiState { ShowColumnDescriptionsInDiagram = ShowColumnDescriptionsInDiagram, ShowNullabilityInDiagram = ShowNullabilityInDiagram }
+                    new UiState
+                    {
+                        ShowColumnDescriptionsInDiagram = ShowColumnDescriptionsInDiagram,
+                        ShowNullabilityInDiagram = ShowNullabilityInDiagram,
+                    }
                 )
             );
         }
@@ -87,7 +99,9 @@ public partial class MainViewModel
         {
             if (File.Exists(UiStatePath))
             {
-                var uiState = System.Text.Json.JsonSerializer.Deserialize<UiState>(File.ReadAllText(UiStatePath));
+                var uiState = System.Text.Json.JsonSerializer.Deserialize<UiState>(
+                    File.ReadAllText(UiStatePath)
+                );
 
                 if (uiState is not null)
                 {
@@ -145,7 +159,10 @@ public partial class MainViewModel
         }
         catch (Exception ex)
         {
-            _dialogs.ShowError($"出力できませんでした。{Environment.NewLine}{ex.Message}", "エラー");
+            _dialogs.ShowError(
+                $"出力できませんでした。{Environment.NewLine}{ex.Message}",
+                "エラー"
+            );
         }
     }
 
@@ -153,7 +170,13 @@ public partial class MainViewModel
     [RelayCommand]
     private void GenerateCSharpCode()
     {
-        var dialog = new Views.CSharpGenerationDialog(CSharpGenerationNamespace, "ErDesignerEntities.g.cs") { Owner = Application.Current?.MainWindow };
+        var dialog = new Views.CSharpGenerationDialog(
+            CSharpGenerationNamespace,
+            "ErDesignerEntities.g.cs"
+        )
+        {
+            Owner = Application.Current?.MainWindow,
+        };
 
         if (dialog.ShowDialog() != true || dialog.ViewModel.Result is null)
         {
@@ -166,14 +189,19 @@ public partial class MainViewModel
             var service = new CSharpCodeGenerationService();
             var options = new CodeGenerationOptions
             {
-                NamespaceName = string.IsNullOrWhiteSpace(CSharpGenerationNamespace) ? DefaultCSharpNamespace : CSharpGenerationNamespace.Trim(),
+                NamespaceName = string.IsNullOrWhiteSpace(CSharpGenerationNamespace)
+                    ? DefaultCSharpNamespace
+                    : CSharpGenerationNamespace.Trim(),
                 OutputFileName = Path.GetFileName(dialog.ViewModel.Result.OutputFilePath),
                 GenerateEntityClasses = dialog.ViewModel.Result.GenerateEntityClasses,
                 GenerateEditModels = dialog.ViewModel.Result.GenerateEditModels,
                 GenerateMappers = dialog.ViewModel.Result.GenerateMappers,
                 GenerateRepositories = dialog.ViewModel.Result.GenerateRepositories,
                 GenerateValueObjects = dialog.ViewModel.Result.GenerateValueObjects,
-                UseGuidKeyForStringPrimaryKey = dialog.ViewModel.Result.UseGuidKeyForStringPrimaryKey,
+                UseGuidKeyForStringPrimaryKey = dialog
+                    .ViewModel
+                    .Result
+                    .UseGuidKeyForStringPrimaryKey,
             };
             var result = service.Generate(ToGeneratorDiagram(), options);
 
@@ -184,13 +212,21 @@ public partial class MainViewModel
             }
 
             // 値オブジェクト生成時に警告（定義競合など）がある場合は、内容を提示して続行可否を確認する
-            var warnings = result.Diagnostics.Where(diagnostic => diagnostic.Severity == GenerationDiagnosticSeverity.Warning).ToList();
+            var warnings = result
+                .Diagnostics.Where(diagnostic =>
+                    diagnostic.Severity == GenerationDiagnosticSeverity.Warning
+                )
+                .ToList();
             if (options.GenerateValueObjects && warnings.Count > 0)
             {
-                var warningMessage = string.Join(Environment.NewLine, warnings.Select(diagnostic => $"・{diagnostic.Message}"));
+                var warningMessage = string.Join(
+                    Environment.NewLine,
+                    warnings.Select(diagnostic => $"・{diagnostic.Message}")
+                );
                 var confirmed = _dialogs.Confirm(
                     $"次の警告があります。{Environment.NewLine}{Environment.NewLine}{warningMessage}{Environment.NewLine}{Environment.NewLine}このまま生成しますか？（中止して ER 図の定義を修正することを推奨します）",
-                    "C# 生成の警告");
+                    "C# 生成の警告"
+                );
                 if (!confirmed)
                 {
                     return;
@@ -198,7 +234,11 @@ public partial class MainViewModel
             }
 
             var writer = new GeneratedFileWriter();
-            writer.WriteFiles(Path.GetDirectoryName(dialog.ViewModel.Result.OutputFilePath) ?? Environment.CurrentDirectory, result);
+            writer.WriteFiles(
+                Path.GetDirectoryName(dialog.ViewModel.Result.OutputFilePath)
+                    ?? Environment.CurrentDirectory,
+                result
+            );
 
             var diagnostics = BuildGenerationDiagnosticsMessage(result);
             var message = string.IsNullOrWhiteSpace(diagnostics)
@@ -208,7 +248,10 @@ public partial class MainViewModel
         }
         catch (Exception ex)
         {
-            _dialogs.ShowError($"C# コードを生成できませんでした。{Environment.NewLine}{ex.Message}", "エラー");
+            _dialogs.ShowError(
+                $"C# コードを生成できませんでした。{Environment.NewLine}{ex.Message}",
+                "エラー"
+            );
         }
     }
 
@@ -255,7 +298,10 @@ public partial class MainViewModel
 
     /// <summary>コード生成の診断（警告・エラー）を 1 つのメッセージ文字列へ整形する</summary>
     private static string BuildGenerationDiagnosticsMessage(CodeGenerationResult result) =>
-        string.Join(Environment.NewLine, result.Diagnostics.Select(diagnostic => $"[{diagnostic.Severity}] {diagnostic.Message}"));
+        string.Join(
+            Environment.NewLine,
+            result.Diagnostics.Select(diagnostic => $"[{diagnostic.Severity}] {diagnostic.Message}")
+        );
 
     /// <summary>現在の ER 図をシリアライズ可能なモデル（<see cref="ErDiagram"/>）へ変換する</summary>
     private ErDiagram ToDiagramModel() =>
@@ -266,10 +312,16 @@ public partial class MainViewModel
         };
 
     /// <summary>指定スキーマが現在のダイアグラムと構造的に同一かを署名比較で判定する</summary>
-    private bool HasSameStructure(IEnumerable<Entity> entities, IEnumerable<Relationship> relationships)
+    private bool HasSameStructure(
+        IEnumerable<Entity> entities,
+        IEnumerable<Relationship> relationships
+    )
     {
         var current = ToDiagramModel();
-        var currentSignature = SqlServerSchemaImporter.ComputeSignature(current.Entities, current.Relationships);
+        var currentSignature = SqlServerSchemaImporter.ComputeSignature(
+            current.Entities,
+            current.Relationships
+        );
         var newSignature = SqlServerSchemaImporter.ComputeSignature(entities, relationships);
 
         return currentSignature == newSignature;
@@ -278,7 +330,11 @@ public partial class MainViewModel
     /// <summary>構造変更を伴う置換の場合のみ確認ダイアログを表示する</summary>
     /// <remarks>空の図、または構造が同一の場合は確認なしで続行する</remarks>
     /// <returns>置換を続行してよい場合 true</returns>
-    private bool ConfirmDiagramReplacement(IReadOnlyList<Entity> entities, IReadOnlyList<Relationship> relationships, string message)
+    private bool ConfirmDiagramReplacement(
+        IReadOnlyList<Entity> entities,
+        IReadOnlyList<Relationship> relationships,
+        string message
+    )
     {
         if (Entities.Count == 0 || HasSameStructure(entities, relationships))
         {
@@ -292,7 +348,11 @@ public partial class MainViewModel
     [RelayCommand]
     private void ImportDiagram()
     {
-        var dlg = new OpenFileDialog { Filter = "Mermaid Diagram (*.mmd;*.mermaid)|*.mmd;*.mermaid|DBML Diagram (*.dbml)|*.dbml|Excel Workbook (*.xlsx)|*.xlsx" };
+        var dlg = new OpenFileDialog
+        {
+            Filter =
+                "Mermaid Diagram (*.mmd;*.mermaid)|*.mmd;*.mermaid|DBML Diagram (*.dbml)|*.dbml|Excel Workbook (*.xlsx)|*.xlsx",
+        };
 
         if (dlg.ShowDialog() != true)
         {
@@ -307,7 +367,10 @@ public partial class MainViewModel
         }
         catch (Exception ex)
         {
-            _dialogs.ShowError($"取り込めませんでした。{Environment.NewLine}{ex.Message}", "エラー");
+            _dialogs.ShowError(
+                $"取り込めませんでした。{Environment.NewLine}{ex.Message}",
+                "エラー"
+            );
         }
     }
 
@@ -330,7 +393,9 @@ public partial class MainViewModel
             case DiagramExportFormat.Png:
                 if (visual is not Visual pngVisual)
                 {
-                    throw new InvalidOperationException("PNG 出力に必要なキャンバス情報を取得できませんでした。");
+                    throw new InvalidOperationException(
+                        "PNG 出力に必要なキャンバス情報を取得できませんでした。"
+                    );
                 }
 
                 ImageExportService.ExportPng(pngVisual, path);
@@ -379,7 +444,13 @@ public partial class MainViewModel
             _ => "ファイル",
         };
 
-        if (!ConfirmDiagramReplacement(diagram.Entities, diagram.Relationships, $"現在のダイアグラムを{displayName}の内容で置換します。よろしいですか？"))
+        if (
+            !ConfirmDiagramReplacement(
+                diagram.Entities,
+                diagram.Relationships,
+                $"現在のダイアグラムを{displayName}の内容で置換します。よろしいですか？"
+            )
+        )
         {
             return;
         }
@@ -459,7 +530,13 @@ public partial class MainViewModel
             var result = await importer.ImportAsync(dialog.ViewModel.Result).ConfigureAwait(true);
 
             // 構造差分がある場合のみ置換確認を行う
-            if (!ConfirmDiagramReplacement(result.Entities, result.Relationships, "現在のダイアグラムを取得結果で置換します。よろしいですか？"))
+            if (
+                !ConfirmDiagramReplacement(
+                    result.Entities,
+                    result.Relationships,
+                    "現在のダイアグラムを取得結果で置換します。よろしいですか？"
+                )
+            )
             {
                 return;
             }
@@ -479,7 +556,11 @@ public partial class MainViewModel
     [RelayCommand]
     private void SyncToSqlServer()
     {
-        var connDlg = new Views.SqlConnectionDialog { Owner = Application.Current?.MainWindow, Title = "SQL Server へ同期" };
+        var connDlg = new Views.SqlConnectionDialog
+        {
+            Owner = Application.Current?.MainWindow,
+            Title = "SQL Server へ同期",
+        };
 
         if (connDlg.ShowDialog() != true || connDlg.ViewModel.Result is null)
         {
@@ -487,7 +568,11 @@ public partial class MainViewModel
         }
 
         var target = ToDiagramModel();
-        var vm = new SchemaSyncDialogViewModel(connDlg.ViewModel.Result, target.Entities, target.Relationships);
+        var vm = new SchemaSyncDialogViewModel(
+            connDlg.ViewModel.Result,
+            target.Entities,
+            target.Relationships
+        );
         var dlg = new Views.SchemaSyncDialog(vm) { Owner = Application.Current?.MainWindow };
 
         dlg.ShowDialog();
@@ -525,7 +610,11 @@ public partial class MainViewModel
     [RelayCommand]
     private void Save()
     {
-        var dlg = new SaveFileDialog { Filter = "ER Diagram (*.json)|*.json", DefaultExt = ".json" };
+        var dlg = new SaveFileDialog
+        {
+            Filter = "ER Diagram (*.json)|*.json",
+            DefaultExt = ".json",
+        };
 
         if (dlg.ShowDialog() == true)
         {

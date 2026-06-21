@@ -10,7 +10,12 @@ namespace ERDesigner.Services.Chat;
 /// <param name="ApiKey">API キー（Ollama では未使用）</param>
 /// <param name="Model">モデル名</param>
 /// <param name="EndpointOverride">エンドポイント上書き（未指定はプロバイダ既定）</param>
-public sealed record OpenAiChatConnection(AiProvider Provider, string ApiKey, string Model, string? EndpointOverride)
+public sealed record OpenAiChatConnection(
+    AiProvider Provider,
+    string ApiKey,
+    string Model,
+    string? EndpointOverride
+)
 {
     /// <summary>使用するエンドポイント URL を解決する</summary>
     public string ResolveEndpoint() =>
@@ -40,7 +45,11 @@ public sealed class OpenAiTurnDriver : IOpenAiTurnDriver
     }
 
     /// <inheritdoc />
-    public async Task<OpenAiAssistantTurn> RunAsync(IReadOnlyList<OpenAiChatHistoryItem> history, Action<string> onTextDelta, CancellationToken cancellationToken)
+    public async Task<OpenAiAssistantTurn> RunAsync(
+        IReadOnlyList<OpenAiChatHistoryItem> history,
+        Action<string> onTextDelta,
+        CancellationToken cancellationToken
+    )
     {
         var client = CreateClient();
         var messages = history.Select(ToChatMessage).ToList();
@@ -55,7 +64,11 @@ public sealed class OpenAiTurnDriver : IOpenAiTurnDriver
         var textBuilder = new StringBuilder();
         var toolCalls = new SortedDictionary<int, ToolCallAccumulator>();
 
-        await foreach (var update in client.CompleteChatStreamingAsync(messages, options, cancellationToken).ConfigureAwait(false))
+        await foreach (
+            var update in client
+                .CompleteChatStreamingAsync(messages, options, cancellationToken)
+                .ConfigureAwait(false)
+        )
         {
             foreach (var part in update.ContentUpdate)
             {
@@ -105,7 +118,11 @@ public sealed class OpenAiTurnDriver : IOpenAiTurnDriver
         var connection = _connectionProvider();
         var endpoint = new Uri(connection.ResolveEndpoint());
         var key = string.IsNullOrEmpty(connection.ApiKey) ? "ollama" : connection.ApiKey;
-        return new ChatClient(model: connection.Model, credential: new ApiKeyCredential(key), options: new OpenAIClientOptions { Endpoint = endpoint });
+        return new ChatClient(
+            model: connection.Model,
+            credential: new ApiKeyCredential(key),
+            options: new OpenAIClientOptions { Endpoint = endpoint }
+        );
     }
 
     /// <summary>中立な履歴項目を OpenAI SDK の ChatMessage へ変換する</summary>
@@ -127,7 +144,13 @@ public sealed class OpenAiTurnDriver : IOpenAiTurnDriver
         }
 
         var toolCalls = item.ToolCalls.Select(tc =>
-            ChatToolCall.CreateFunctionToolCall(tc.Id, tc.Name, BinaryData.FromString(string.IsNullOrWhiteSpace(tc.ArgumentsJson) ? "{}" : tc.ArgumentsJson))
+            ChatToolCall.CreateFunctionToolCall(
+                tc.Id,
+                tc.Name,
+                BinaryData.FromString(
+                    string.IsNullOrWhiteSpace(tc.ArgumentsJson) ? "{}" : tc.ArgumentsJson
+                )
+            )
         );
 
         var message = new AssistantChatMessage(toolCalls);

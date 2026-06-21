@@ -4,7 +4,8 @@ namespace ERDesigner.Generator;
 internal sealed partial class CSharpGenerationModelBuilder
 {
     /// <summary>列名（正規化キー）→ 値オブジェクト生成モデルの対応。GenerateValueObjects が OFF のときは空で、VO 化しない</summary>
-    private IReadOnlyDictionary<string, CSharpValueObjectModel> _valueObjects = new Dictionary<string, CSharpValueObjectModel>();
+    private IReadOnlyDictionary<string, CSharpValueObjectModel> _valueObjects =
+        new Dictionary<string, CSharpValueObjectModel>();
 
     /// <summary>テーブル名・カラム名を C# 識別子へ変換するコンバーター</summary>
     private readonly CSharpNameConverter _nameConverter = new();
@@ -20,22 +21,40 @@ internal sealed partial class CSharpGenerationModelBuilder
     /// （エンティティ数 × パス数）回重複していた。解決結果を共有して重複と再計算を防ぐ。
     /// また生成対象として無効なクラス群は構築自体を行わない。
     /// </remarks>
-    public CSharpGenerationModel Build(DiagramDefinition diagram, CodeGenerationOptions options, ICollection<GenerationDiagnostic> diagnostics)
+    public CSharpGenerationModel Build(
+        DiagramDefinition diagram,
+        CodeGenerationOptions options,
+        ICollection<GenerationDiagnostic> diagnostics
+    )
     {
         var navigationsByEntity = ResolveAllNavigations(diagram, diagnostics);
         _valueObjects = BuildValueObjects(diagram, options, diagnostics);
 
         return new CSharpGenerationModel
         {
-            NamespaceName = string.IsNullOrWhiteSpace(options.NamespaceName) ? "Generated" : options.NamespaceName.Trim(),
+            NamespaceName = string.IsNullOrWhiteSpace(options.NamespaceName)
+                ? "Generated"
+                : options.NamespaceName.Trim(),
             EntityClasses = options.GenerateEntityClasses
-                ? diagram.Entities.Select(entity => BuildEntityClass(entity, navigationsByEntity[entity.Id])).ToList()
+                ? diagram
+                    .Entities.Select(entity =>
+                        BuildEntityClass(entity, navigationsByEntity[entity.Id])
+                    )
+                    .ToList()
                 : [],
             EditModelClasses = options.GenerateEditModels
-                ? diagram.Entities.Select(entity => BuildEditModelClass(entity, navigationsByEntity[entity.Id])).ToList()
+                ? diagram
+                    .Entities.Select(entity =>
+                        BuildEditModelClass(entity, navigationsByEntity[entity.Id])
+                    )
+                    .ToList()
                 : [],
             MapperClasses = options.GenerateMappers
-                ? diagram.Entities.Select(entity => BuildMapperClass(entity, navigationsByEntity[entity.Id])).ToList()
+                ? diagram
+                    .Entities.Select(entity =>
+                        BuildMapperClass(entity, navigationsByEntity[entity.Id])
+                    )
+                    .ToList()
                 : [],
             RepositoryClasses = options.GenerateRepositories
                 ? diagram
@@ -45,12 +64,17 @@ internal sealed partial class CSharpGenerationModelBuilder
                     .ToList()
                 : [],
             Usings = BuildUsings(options).ToList(),
-            ValueObjectClasses = _valueObjects.Values.OrderBy(vo => vo.ClassName, StringComparer.Ordinal).ToList(),
+            ValueObjectClasses = _valueObjects
+                .Values.OrderBy(vo => vo.ClassName, StringComparer.Ordinal)
+                .ToList(),
         };
     }
 
     /// <summary>エンティティ定義と解決済みナビゲーションからエンティティクラスの生成モデルを構築する</summary>
-    private CSharpClassModel BuildEntityClass(EntityDefinition entity, IReadOnlyList<NavigationInfo> navigations)
+    private CSharpClassModel BuildEntityClass(
+        EntityDefinition entity,
+        IReadOnlyList<NavigationInfo> navigations
+    )
     {
         var className = _nameConverter.ToEntityClassName(entity.TableName);
         var properties = entity.Columns.Select(BuildProperty).ToList();
@@ -65,7 +89,10 @@ internal sealed partial class CSharpGenerationModelBuilder
     }
 
     /// <summary>エンティティ定義と解決済みナビゲーションから EditModel クラスの生成モデルを構築する</summary>
-    private CSharpEditModelClassModel BuildEditModelClass(EntityDefinition entity, IReadOnlyList<NavigationInfo> navigations)
+    private CSharpEditModelClassModel BuildEditModelClass(
+        EntityDefinition entity,
+        IReadOnlyList<NavigationInfo> navigations
+    )
     {
         var className = _nameConverter.ToEditModelClassName(entity.TableName);
         var properties = entity.Columns.Select(BuildEditModelProperty).ToList();
@@ -82,7 +109,10 @@ internal sealed partial class CSharpGenerationModelBuilder
     }
 
     /// <summary>エンティティ定義と解決済みナビゲーションから Entity ↔ EditModel 変換 Mapper の生成モデルを構築する</summary>
-    private CSharpMapperModel BuildMapperClass(EntityDefinition entity, IReadOnlyList<NavigationInfo> navigations)
+    private CSharpMapperModel BuildMapperClass(
+        EntityDefinition entity,
+        IReadOnlyList<NavigationInfo> navigations
+    )
     {
         var entityClassName = _nameConverter.ToEntityClassName(entity.TableName);
         var editModelClassName = _nameConverter.ToEditModelClassName(entity.TableName);
@@ -105,7 +135,11 @@ internal sealed partial class CSharpGenerationModelBuilder
                     IsBinary = editModelProperty.IsBinary,
                     LoadBindingExpression = isValueObject
                         ? $"entity.{property.PropertyName}?.ToString() ?? string.Empty"
-                        : BuildMapperBindingExpression(property.TypeName, editModelProperty.IsBinary, property.PropertyName),
+                        : BuildMapperBindingExpression(
+                            property.TypeName,
+                            editModelProperty.IsBinary,
+                            property.PropertyName
+                        ),
                     BindingPropertyName = "Binding" + property.PropertyName,
                 };
             })
@@ -123,19 +157,28 @@ internal sealed partial class CSharpGenerationModelBuilder
 
     /// <summary>エンティティ定義から Repository の生成モデルを構築する</summary>
     /// <returns>単一主キーを持たないテーブルは対象外として null を返す</returns>
-    private CSharpRepositoryModel? BuildRepositoryClass(EntityDefinition entity, ICollection<GenerationDiagnostic> diagnostics)
+    private CSharpRepositoryModel? BuildRepositoryClass(
+        EntityDefinition entity,
+        ICollection<GenerationDiagnostic> diagnostics
+    )
     {
         var keyColumn = entity.Columns.Where(column => column.IsPrimaryKey).ToList();
 
         // Repository は単一主キーを前提とするため、複合・主キーなしのテーブルはスキップする
         if (keyColumn.Count != 1)
         {
-            diagnostics.Add(Warning($"テーブル '{entity.TableName}' の Repository は単一主キーのみ対応のため生成をスキップしました。"));
+            diagnostics.Add(
+                Warning(
+                    $"テーブル '{entity.TableName}' の Repository は単一主キーのみ対応のため生成をスキップしました。"
+                )
+            );
             return null;
         }
 
         var entityClassName = _nameConverter.ToEntityClassName(entity.TableName);
-        var repositoryName = entityClassName.EndsWith("Entity", StringComparison.Ordinal) ? entityClassName[..^"Entity".Length] : entityClassName;
+        var repositoryName = entityClassName.EndsWith("Entity", StringComparison.Ordinal)
+            ? entityClassName[..^"Entity".Length]
+            : entityClassName;
         var keyTypeName = BuildProperty(keyColumn[0]).TypeName.TrimEnd('?');
 
         return new CSharpRepositoryModel
@@ -199,7 +242,8 @@ internal sealed partial class CSharpGenerationModelBuilder
         var typeName = typeInfo.TypeName;
 
         var isBytes = typeName == "byte[]";
-        var editModelIsNullable = column.IsNullable || !typeInfo.IsReferenceType || typeName == "string" || isBytes;
+        var editModelIsNullable =
+            column.IsNullable || !typeInfo.IsReferenceType || typeName == "string" || isBytes;
 
         if (editModelIsNullable && !typeInfo.IsReferenceType)
         {
@@ -284,7 +328,11 @@ internal sealed partial class CSharpGenerationModelBuilder
     }
 
     /// <summary>Mapper 内で Entity プロパティを EditModel のバインディング文字列へ変換する式を生成する</summary>
-    private static string BuildMapperBindingExpression(string entityTypeName, bool isBinary, string propertyName)
+    private static string BuildMapperBindingExpression(
+        string entityTypeName,
+        bool isBinary,
+        string propertyName
+    )
     {
         if (isBinary)
         {
@@ -312,8 +360,12 @@ internal sealed partial class CSharpGenerationModelBuilder
             IsParentReference = nav.IsParentReference,
             // 子方向（親参照でない）ナビゲーションのみカスケード保存/削除の対象とする
             Cascade = !nav.IsParentReference,
-            DisplayTypeName = nav.IsCollection ? $"ICollection<{targetEntityTypeName}>" : (nav.IsNullable ? targetEntityTypeName + "?" : targetEntityTypeName),
-            Initializer = nav.IsCollection ? $" = new List<{targetEntityTypeName}>();" : (nav.IsNullable ? string.Empty : " = null!;"),
+            DisplayTypeName = nav.IsCollection
+                ? $"ICollection<{targetEntityTypeName}>"
+                : (nav.IsNullable ? targetEntityTypeName + "?" : targetEntityTypeName),
+            Initializer = nav.IsCollection
+                ? $" = new List<{targetEntityTypeName}>();"
+                : (nav.IsNullable ? string.Empty : " = null!;"),
             PrincipalTableName = nav.PrincipalTableName,
             PrincipalColumnName = nav.PrincipalColumnName,
             DependentTableName = nav.DependentTableName,
@@ -333,8 +385,12 @@ internal sealed partial class CSharpGenerationModelBuilder
             IsNullable = nav.IsNullable,
             IsParentReference = nav.IsParentReference,
             Cascade = !nav.IsParentReference,
-            DisplayTypeName = nav.IsCollection ? $"EditModelCollection<{targetEditModelTypeName}>" : (nav.IsNullable ? targetEditModelTypeName + "?" : targetEditModelTypeName),
-            Initializer = nav.IsCollection ? $" = new EditModelCollection<{targetEditModelTypeName}>();" : (nav.IsNullable ? string.Empty : " = null!;"),
+            DisplayTypeName = nav.IsCollection
+                ? $"EditModelCollection<{targetEditModelTypeName}>"
+                : (nav.IsNullable ? targetEditModelTypeName + "?" : targetEditModelTypeName),
+            Initializer = nav.IsCollection
+                ? $" = new EditModelCollection<{targetEditModelTypeName}>();"
+                : (nav.IsNullable ? string.Empty : " = null!;"),
             PrincipalTableName = nav.PrincipalTableName,
             PrincipalColumnName = nav.PrincipalColumnName,
             DependentTableName = nav.DependentTableName,
@@ -375,70 +431,114 @@ internal sealed partial class CSharpGenerationModelBuilder
     /// 多対多や参照先・キーが解決できないリレーションは警告を出して生成対象外とする。
     /// 警告はリレーション単位で 1 回だけ追加されるため、従来のような重複は発生しない。
     /// </remarks>
-    private Dictionary<Guid, List<NavigationInfo>> ResolveAllNavigations(DiagramDefinition diagram, ICollection<GenerationDiagnostic> diagnostics)
+    private Dictionary<Guid, List<NavigationInfo>> ResolveAllNavigations(
+        DiagramDefinition diagram,
+        ICollection<GenerationDiagnostic> diagnostics
+    )
     {
-        var navigationsByEntity = diagram.Entities.ToDictionary(entity => entity.Id, _ => new List<NavigationInfo>());
+        var navigationsByEntity = diagram.Entities.ToDictionary(
+            entity => entity.Id,
+            _ => new List<NavigationInfo>()
+        );
 
         foreach (var relationship in diagram.Relationships)
         {
             // 多対多は中間テーブルを介する設計のため C# 生成では直接ナビゲーションを作らない
             if (relationship.Type == RelationshipMultiplicity.ManyToMany)
             {
-                diagnostics.Add(Warning($"多対多リレーション '{relationship.Id}' は C# 生成対象外のためスキップしました。"));
+                diagnostics.Add(
+                    Warning(
+                        $"多対多リレーション '{relationship.Id}' は C# 生成対象外のためスキップしました。"
+                    )
+                );
                 continue;
             }
 
-            var source = diagram.Entities.FirstOrDefault(item => item.Id == relationship.SourceEntityId);
-            var target = diagram.Entities.FirstOrDefault(item => item.Id == relationship.TargetEntityId);
+            var source = diagram.Entities.FirstOrDefault(item =>
+                item.Id == relationship.SourceEntityId
+            );
+            var target = diagram.Entities.FirstOrDefault(item =>
+                item.Id == relationship.TargetEntityId
+            );
 
             if (source is null || target is null)
             {
-                diagnostics.Add(Warning($"リレーション '{relationship.Id}' は参照先エンティティが見つからないためスキップしました。"));
+                diagnostics.Add(
+                    Warning(
+                        $"リレーション '{relationship.Id}' は参照先エンティティが見つからないためスキップしました。"
+                    )
+                );
                 continue;
             }
 
             // 明示指定の列を優先し、無ければ principal は主キー、dependent は外部キー列にフォールバックする
-            var sourceColumn = relationship.SourceColumnId is null ? null : source.Columns.FirstOrDefault(column => column.Id == relationship.SourceColumnId.Value);
-            var targetColumn = relationship.TargetColumnId is null ? null : target.Columns.FirstOrDefault(column => column.Id == relationship.TargetColumnId.Value);
-            var principalColumn = sourceColumn ?? source.Columns.FirstOrDefault(column => column.IsPrimaryKey);
-            var dependentColumn = targetColumn ?? target.Columns.FirstOrDefault(column => column.IsForeignKey);
+            var sourceColumn = relationship.SourceColumnId is null
+                ? null
+                : source.Columns.FirstOrDefault(column =>
+                    column.Id == relationship.SourceColumnId.Value
+                );
+            var targetColumn = relationship.TargetColumnId is null
+                ? null
+                : target.Columns.FirstOrDefault(column =>
+                    column.Id == relationship.TargetColumnId.Value
+                );
+            var principalColumn =
+                sourceColumn ?? source.Columns.FirstOrDefault(column => column.IsPrimaryKey);
+            var dependentColumn =
+                targetColumn ?? target.Columns.FirstOrDefault(column => column.IsForeignKey);
 
             if (principalColumn is null || dependentColumn is null)
             {
-                diagnostics.Add(Warning($"リレーション '{relationship.Id}' はキーが不明なためナビゲーション生成をスキップしました。"));
+                diagnostics.Add(
+                    Warning(
+                        $"リレーション '{relationship.Id}' はキーが不明なためナビゲーション生成をスキップしました。"
+                    )
+                );
                 continue;
             }
 
             var isCollection = relationship.Type == RelationshipMultiplicity.OneToMany;
 
             // source 側（親）は子へのナビゲーション（1 対多なら collection）を持つ
-            navigationsByEntity[source.Id].Add(new NavigationInfo(
-                PropertyName: _nameConverter.ToNavigationName(target.TableName, collection: isCollection),
-                TargetTableName: target.TableName,
-                IsCollection: isCollection,
-                IsNullable: false,
-                IsParentReference: false,
-                PrincipalTableName: source.TableName,
-                PrincipalColumnName: principalColumn.Name,
-                DependentTableName: target.TableName,
-                DependentColumnName: dependentColumn.Name
-            ));
+            navigationsByEntity[source.Id]
+                .Add(
+                    new NavigationInfo(
+                        PropertyName: _nameConverter.ToNavigationName(
+                            target.TableName,
+                            collection: isCollection
+                        ),
+                        TargetTableName: target.TableName,
+                        IsCollection: isCollection,
+                        IsNullable: false,
+                        IsParentReference: false,
+                        PrincipalTableName: source.TableName,
+                        PrincipalColumnName: principalColumn.Name,
+                        DependentTableName: target.TableName,
+                        DependentColumnName: dependentColumn.Name
+                    )
+                );
 
             // target 側（子）は親への単一参照ナビゲーションを持つ。
             // 自己参照（source == target）の場合は従来どおり子側ナビゲーションのみとし、重複を避ける
             if (target.Id != source.Id)
             {
-                navigationsByEntity[target.Id].Add(new NavigationInfo(
-                    PropertyName: _nameConverter.ToNavigationName(source.TableName, collection: false),
-                    TargetTableName: source.TableName,
-                    IsCollection: false,
-                    IsNullable: dependentColumn.IsNullable,
-                    IsParentReference: true,
-                    PrincipalTableName: source.TableName,
-                    PrincipalColumnName: principalColumn.Name,
-                    DependentTableName: target.TableName,
-                    DependentColumnName: dependentColumn.Name
-                ));
+                navigationsByEntity[target.Id]
+                    .Add(
+                        new NavigationInfo(
+                            PropertyName: _nameConverter.ToNavigationName(
+                                source.TableName,
+                                collection: false
+                            ),
+                            TargetTableName: source.TableName,
+                            IsCollection: false,
+                            IsNullable: dependentColumn.IsNullable,
+                            IsParentReference: true,
+                            PrincipalTableName: source.TableName,
+                            PrincipalColumnName: principalColumn.Name,
+                            DependentTableName: target.TableName,
+                            DependentColumnName: dependentColumn.Name
+                        )
+                    );
             }
         }
 
@@ -530,5 +630,6 @@ internal sealed partial class CSharpGenerationModelBuilder
     }
 
     /// <summary>警告レベルの診断情報を生成する</summary>
-    private static GenerationDiagnostic Warning(string message) => new() { Severity = GenerationDiagnosticSeverity.Warning, Message = message };
+    private static GenerationDiagnostic Warning(string message) =>
+        new() { Severity = GenerationDiagnosticSeverity.Warning, Message = message };
 }

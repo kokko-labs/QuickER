@@ -34,10 +34,19 @@ public class SchemaDiffServiceTests
     public void NewTable_AddTable()
     {
         var live = new List<Entity>();
-        var target = new List<Entity> { Tbl("Customer", ("Id", "int", true), ("Name", "nvarchar(50)", false)) };
+        var target = new List<Entity>
+        {
+            Tbl("Customer", ("Id", "int", true), ("Name", "nvarchar(50)", false)),
+        };
 
-        var diff = new SchemaDiffService().Compute(live, new List<Relationship>(), target, new List<Relationship>());
-        diff.Items.Should().ContainSingle(i => i.Kind == SchemaDiffKind.AddTable && i.TableName == "Customer");
+        var diff = new SchemaDiffService().Compute(
+            live,
+            new List<Relationship>(),
+            target,
+            new List<Relationship>()
+        );
+        diff.Items.Should()
+            .ContainSingle(i => i.Kind == SchemaDiffKind.AddTable && i.TableName == "Customer");
     }
 
     /// <summary>DB に存在しない列が AddColumn として検出されることを検証する</summary>
@@ -45,22 +54,45 @@ public class SchemaDiffServiceTests
     public void NewColumn_AddColumn()
     {
         var live = new List<Entity> { Tbl("Customer", ("Id", "int", true)) };
-        var target = new List<Entity> { Tbl("Customer", ("Id", "int", true), ("Name", "nvarchar(50)", false)) };
+        var target = new List<Entity>
+        {
+            Tbl("Customer", ("Id", "int", true), ("Name", "nvarchar(50)", false)),
+        };
 
-        var diff = new SchemaDiffService().Compute(live, new List<Relationship>(), target, new List<Relationship>());
-        diff.Items.Should().ContainSingle(i => i.Kind == SchemaDiffKind.AddColumn && i.ColumnName == "Name");
+        var diff = new SchemaDiffService().Compute(
+            live,
+            new List<Relationship>(),
+            target,
+            new List<Relationship>()
+        );
+        diff.Items.Should()
+            .ContainSingle(i => i.Kind == SchemaDiffKind.AddColumn && i.ColumnName == "Name");
     }
 
     /// <summary>列の型変更が AlterColumn として検出され、既定では未選択であることを検証する</summary>
     [Fact(DisplayName = "型が変われば AlterColumn になり、既定では未選択")]
     public void TypeChange_AlterColumn_NotSelected()
     {
-        var live = new List<Entity> { Tbl("Customer", ("Id", "int", true), ("Name", "nvarchar(50)", false)) };
+        var live = new List<Entity>
+        {
+            Tbl("Customer", ("Id", "int", true), ("Name", "nvarchar(50)", false)),
+        };
 
-        var target = new List<Entity> { Tbl("Customer", ("Id", "int", true), ("Name", "nvarchar(100)", false)) };
+        var target = new List<Entity>
+        {
+            Tbl("Customer", ("Id", "int", true), ("Name", "nvarchar(100)", false)),
+        };
 
-        var diff = new SchemaDiffService().Compute(live, new List<Relationship>(), target, new List<Relationship>());
-        var alter = diff.Items.Should().ContainSingle(i => i.Kind == SchemaDiffKind.AlterColumn).Which;
+        var diff = new SchemaDiffService().Compute(
+            live,
+            new List<Relationship>(),
+            target,
+            new List<Relationship>()
+        );
+        var alter = diff
+            .Items.Should()
+            .ContainSingle(i => i.Kind == SchemaDiffKind.AlterColumn)
+            .Which;
         alter.IsSelected.Should().BeFalse();
     }
 
@@ -68,13 +100,27 @@ public class SchemaDiffServiceTests
     [Fact(DisplayName = "NULL 許容が変われば AlterColumn になる")]
     public void NullabilityChange_AlterColumn_NotSelected()
     {
-        var live = new List<Entity> { Tbl("Customer", ("Id", "int", true), ("Name", "nvarchar(50)", false)) };
+        var live = new List<Entity>
+        {
+            Tbl("Customer", ("Id", "int", true), ("Name", "nvarchar(50)", false)),
+        };
         live[0].Columns[1].IsNullable = true;
-        var target = new List<Entity> { Tbl("Customer", ("Id", "int", true), ("Name", "nvarchar(50)", false)) };
+        var target = new List<Entity>
+        {
+            Tbl("Customer", ("Id", "int", true), ("Name", "nvarchar(50)", false)),
+        };
         target[0].Columns[1].IsNullable = false;
 
-        var diff = new SchemaDiffService().Compute(live, new List<Relationship>(), target, new List<Relationship>());
-        var alter = diff.Items.Should().ContainSingle(i => i.Kind == SchemaDiffKind.AlterColumn).Which;
+        var diff = new SchemaDiffService().Compute(
+            live,
+            new List<Relationship>(),
+            target,
+            new List<Relationship>()
+        );
+        var alter = diff
+            .Items.Should()
+            .ContainSingle(i => i.Kind == SchemaDiffKind.AlterColumn)
+            .Which;
         alter.ColumnName.Should().Be("Name");
         alter.IsSelected.Should().BeFalse();
         alter.Description.Should().Contain("NULL許容");
@@ -86,8 +132,16 @@ public class SchemaDiffServiceTests
     {
         var live = new List<Entity> { Tbl("Customer", ("Id", "int", true), ("Old", "int", false)) };
         var target = new List<Entity> { Tbl("Customer", ("Id", "int", true)) };
-        var diff = new SchemaDiffService().Compute(live, new List<Relationship>(), target, new List<Relationship>());
-        var drop = diff.Items.Should().ContainSingle(i => i.Kind == SchemaDiffKind.DropColumn).Which;
+        var diff = new SchemaDiffService().Compute(
+            live,
+            new List<Relationship>(),
+            target,
+            new List<Relationship>()
+        );
+        var drop = diff
+            .Items.Should()
+            .ContainSingle(i => i.Kind == SchemaDiffKind.DropColumn)
+            .Which;
         drop.ColumnName.Should().Be("Old");
         drop.IsSelected.Should().BeFalse();
     }
@@ -98,8 +152,14 @@ public class SchemaDiffServiceTests
     {
         var live = new List<Entity> { Tbl("Old", ("Id", "int", true)) };
         var target = new List<Entity>();
-        var diff = new SchemaDiffService().Compute(live, new List<Relationship>(), target, new List<Relationship>());
-        diff.Items.Should().ContainSingle(i => i.Kind == SchemaDiffKind.DropTable && i.TableName == "Old");
+        var diff = new SchemaDiffService().Compute(
+            live,
+            new List<Relationship>(),
+            target,
+            new List<Relationship>()
+        );
+        diff.Items.Should()
+            .ContainSingle(i => i.Kind == SchemaDiffKind.DropTable && i.TableName == "Old");
     }
 
     /// <summary>ER 図のみに存在するリレーションが AddForeignKey として検出され、FK 列が解決されることを検証する</summary>
@@ -120,9 +180,17 @@ public class SchemaDiffServiceTests
         var liveOrder = Tbl("Order", ("Id", "int", true), ("Customer_Id", "int", false));
         var live = new List<Entity> { liveCustomer, liveOrder };
 
-        var diff = new SchemaDiffService().Compute(live, new List<Relationship>(), target, new List<Relationship> { rel });
+        var diff = new SchemaDiffService().Compute(
+            live,
+            new List<Relationship>(),
+            target,
+            new List<Relationship> { rel }
+        );
 
-        var fk = diff.Items.Should().ContainSingle(i => i.Kind == SchemaDiffKind.AddForeignKey).Which;
+        var fk = diff
+            .Items.Should()
+            .ContainSingle(i => i.Kind == SchemaDiffKind.AddForeignKey)
+            .Which;
         fk.ColumnName.Should().Be("Customer_Id");
     }
 
@@ -131,7 +199,12 @@ public class SchemaDiffServiceTests
     public void ForeignKeyColumnChanged_EmitsDropAndAdd()
     {
         var customerLive = Tbl("Customer", ("Id", "int", true));
-        var orderLive = Tbl("Order", ("Id", "int", true), ("CustomerId1", "int", false), ("CustomerId2", "int", false));
+        var orderLive = Tbl(
+            "Order",
+            ("Id", "int", true),
+            ("CustomerId1", "int", false),
+            ("CustomerId2", "int", false)
+        );
         var liveRel = new Relationship
         {
             SourceEntityId = customerLive.Id,
@@ -143,7 +216,12 @@ public class SchemaDiffServiceTests
         };
 
         var customerTarget = Tbl("Customer", ("Id", "int", true));
-        var orderTarget = Tbl("Order", ("Id", "int", true), ("CustomerId1", "int", false), ("CustomerId2", "int", false));
+        var orderTarget = Tbl(
+            "Order",
+            ("Id", "int", true),
+            ("CustomerId1", "int", false),
+            ("CustomerId2", "int", false)
+        );
         var targetRel = new Relationship
         {
             SourceEntityId = customerTarget.Id,
@@ -160,8 +238,15 @@ public class SchemaDiffServiceTests
             new List<Relationship> { targetRel }
         );
 
-        diff.Items.Should().ContainSingle(i => i.Kind == SchemaDiffKind.DropForeignKey && i.ForeignKeyName == "FK_Order_CustomerId1");
-        diff.Items.Should().ContainSingle(i => i.Kind == SchemaDiffKind.AddForeignKey && i.ColumnName == "CustomerId2");
+        diff.Items.Should()
+            .ContainSingle(i =>
+                i.Kind == SchemaDiffKind.DropForeignKey
+                && i.ForeignKeyName == "FK_Order_CustomerId1"
+            );
+        diff.Items.Should()
+            .ContainSingle(i =>
+                i.Kind == SchemaDiffKind.AddForeignKey && i.ColumnName == "CustomerId2"
+            );
     }
 
     /// <summary>参照アクション（ON DELETE/UPDATE）の変更で再作成（Drop+Add）が出力されることを検証する</summary>
@@ -203,7 +288,10 @@ public class SchemaDiffServiceTests
             new List<Relationship> { targetRel }
         );
 
-        diff.Items.Should().ContainSingle(i => i.Kind == SchemaDiffKind.DropForeignKey && i.ForeignKeyName == "FK_Child_Parent");
+        diff.Items.Should()
+            .ContainSingle(i =>
+                i.Kind == SchemaDiffKind.DropForeignKey && i.ForeignKeyName == "FK_Child_Parent"
+            );
         diff.Items.Should()
             .ContainSingle(i =>
                 i.Kind == SchemaDiffKind.AddForeignKey
@@ -218,7 +306,12 @@ public class SchemaDiffServiceTests
     {
         var live = new List<Entity> { Tbl("A", ("Id", "int", true)) };
         var target = new List<Entity> { Tbl("A", ("Id", "int", true)) };
-        var diff = new SchemaDiffService().Compute(live, new List<Relationship>(), target, new List<Relationship>());
+        var diff = new SchemaDiffService().Compute(
+            live,
+            new List<Relationship>(),
+            target,
+            new List<Relationship>()
+        );
         diff.Items.Should().BeEmpty();
     }
 
@@ -231,9 +324,17 @@ public class SchemaDiffServiceTests
         var target = new List<Entity> { Tbl("Customer", ("Id", "int", true)) };
         target[0].Description = "新しい顧客テーブル";
 
-        var diff = new SchemaDiffService().Compute(live, new List<Relationship>(), target, new List<Relationship>());
+        var diff = new SchemaDiffService().Compute(
+            live,
+            new List<Relationship>(),
+            target,
+            new List<Relationship>()
+        );
 
-        var item = diff.Items.Should().ContainSingle(i => i.Kind == SchemaDiffKind.SetTableDescription).Which;
+        var item = diff
+            .Items.Should()
+            .ContainSingle(i => i.Kind == SchemaDiffKind.SetTableDescription)
+            .Which;
         item.NewDescription.Should().Be("新しい顧客テーブル");
         item.OldDescription.Should().Be("古い説明");
         item.IsSelected.Should().BeTrue();
@@ -243,16 +344,30 @@ public class SchemaDiffServiceTests
     [Fact(DisplayName = "列の説明が変わると SetColumnDescription になる")]
     public void ColumnDescriptionChanged_SetColumnDescription()
     {
-        var live = new List<Entity> { Tbl("Customer", ("Id", "int", true), ("Name", "nvarchar(50)", false)) };
+        var live = new List<Entity>
+        {
+            Tbl("Customer", ("Id", "int", true), ("Name", "nvarchar(50)", false)),
+        };
 
         live[0].Columns[1].Description = "旧";
-        var target = new List<Entity> { Tbl("Customer", ("Id", "int", true), ("Name", "nvarchar(50)", false)) };
+        var target = new List<Entity>
+        {
+            Tbl("Customer", ("Id", "int", true), ("Name", "nvarchar(50)", false)),
+        };
 
         target[0].Columns[1].Description = "顧客名";
 
-        var diff = new SchemaDiffService().Compute(live, new List<Relationship>(), target, new List<Relationship>());
+        var diff = new SchemaDiffService().Compute(
+            live,
+            new List<Relationship>(),
+            target,
+            new List<Relationship>()
+        );
 
-        var item = diff.Items.Should().ContainSingle(i => i.Kind == SchemaDiffKind.SetColumnDescription).Which;
+        var item = diff
+            .Items.Should()
+            .ContainSingle(i => i.Kind == SchemaDiffKind.SetColumnDescription)
+            .Which;
         item.ColumnName.Should().Be("Name");
         item.NewDescription.Should().Be("顧客名");
         item.OldDescription.Should().Be("旧");
@@ -267,7 +382,12 @@ public class SchemaDiffServiceTests
         var target = new List<Entity> { Tbl("Customer", ("Id", "int", true)) };
         target[0].Description = "同じ説明";
 
-        var diff = new SchemaDiffService().Compute(live, new List<Relationship>(), target, new List<Relationship>());
+        var diff = new SchemaDiffService().Compute(
+            live,
+            new List<Relationship>(),
+            target,
+            new List<Relationship>()
+        );
         diff.Items.Should().BeEmpty();
     }
 
@@ -276,15 +396,31 @@ public class SchemaDiffServiceTests
     public void NewTableWithDescriptions_EmitsAllSetDescriptions()
     {
         var live = new List<Entity>();
-        var target = new List<Entity> { Tbl("Customer", ("Id", "int", true), ("Name", "nvarchar(50)", false)) };
+        var target = new List<Entity>
+        {
+            Tbl("Customer", ("Id", "int", true), ("Name", "nvarchar(50)", false)),
+        };
 
         target[0].Description = "顧客マスタ";
         target[0].Columns[1].Description = "顧客名";
 
-        var diff = new SchemaDiffService().Compute(live, new List<Relationship>(), target, new List<Relationship>());
+        var diff = new SchemaDiffService().Compute(
+            live,
+            new List<Relationship>(),
+            target,
+            new List<Relationship>()
+        );
 
         diff.Items.Should().ContainSingle(i => i.Kind == SchemaDiffKind.AddTable);
-        diff.Items.Should().ContainSingle(i => i.Kind == SchemaDiffKind.SetTableDescription && i.NewDescription == "顧客マスタ");
-        diff.Items.Should().ContainSingle(i => i.Kind == SchemaDiffKind.SetColumnDescription && i.ColumnName == "Name" && i.NewDescription == "顧客名");
+        diff.Items.Should()
+            .ContainSingle(i =>
+                i.Kind == SchemaDiffKind.SetTableDescription && i.NewDescription == "顧客マスタ"
+            );
+        diff.Items.Should()
+            .ContainSingle(i =>
+                i.Kind == SchemaDiffKind.SetColumnDescription
+                && i.ColumnName == "Name"
+                && i.NewDescription == "顧客名"
+            );
     }
 }

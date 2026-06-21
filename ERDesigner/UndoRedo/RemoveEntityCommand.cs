@@ -32,7 +32,9 @@ public class RemoveEntityCommand : IUndoableCommand
     public void Execute()
     {
         // 削除エンティティを端点に持つリレーションも併せて除去する（孤立した線を残さない）
-        _removedRelationships = _main.Relationships.Where(r => r.Source == _entity || r.Target == _entity).ToList();
+        _removedRelationships = _main
+            .Relationships.Where(r => r.Source == _entity || r.Target == _entity)
+            .ToList();
 
         foreach (var r in _removedRelationships)
         {

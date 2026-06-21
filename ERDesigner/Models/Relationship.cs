@@ -28,8 +28,10 @@ public class Relationship
     public string? ConstraintName { get; set; }
 
     /// <summary>親行削除時の参照アクション</summary>
-    public ForeignKeyReferentialAction OnDelete { get; set; } = ForeignKeyReferentialAction.NoAction;
+    public ForeignKeyReferentialAction OnDelete { get; set; } =
+        ForeignKeyReferentialAction.NoAction;
 
     /// <summary>親キー更新時の参照アクション</summary>
-    public ForeignKeyReferentialAction OnUpdate { get; set; } = ForeignKeyReferentialAction.NoAction;
+    public ForeignKeyReferentialAction OnUpdate { get; set; } =
+        ForeignKeyReferentialAction.NoAction;
 }

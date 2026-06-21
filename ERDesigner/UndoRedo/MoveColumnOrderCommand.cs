@@ -19,7 +19,11 @@ public class MoveColumnOrderCommand : IUndoableCommand
     private readonly int _newIndex;
 
     /// <summary><see cref="MoveColumnOrderCommand"/> を生成する</summary>
-    public MoveColumnOrderCommand(ObservableCollection<ColumnViewModel> columns, ColumnViewModel column, int newIndex)
+    public MoveColumnOrderCommand(
+        ObservableCollection<ColumnViewModel> columns,
+        ColumnViewModel column,
+        int newIndex
+    )
     {
         _columns = columns;
         _column = column;

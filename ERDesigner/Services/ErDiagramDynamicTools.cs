@@ -19,7 +19,9 @@ public static class ErDiagramDynamicTools
                 ChatTool.CreateFunctionTool(
                     functionName: definition.Name,
                     functionDescription: definition.Description,
-                    functionParameters: BinaryData.FromString(JsonSerializer.Serialize(definition.InputSchema))
+                    functionParameters: BinaryData.FromString(
+                        JsonSerializer.Serialize(definition.InputSchema)
+                    )
                 )
             )
             .ToList();
@@ -33,7 +35,8 @@ public static class ErDiagramDynamicTools
             new CodexDynamicToolDefinition
             {
                 Name = "get_diagram_summary",
-                Description = "現在の ER 図のエンティティ（テーブル）とリレーション（外部キー）の一覧をテキストで返します。",
+                Description =
+                    "現在の ER 図のエンティティ（テーブル）とリレーション（外部キー）の一覧をテキストで返します。",
                 DeferLoading = false,
                 InputSchema = new
                 {
@@ -45,7 +48,8 @@ public static class ErDiagramDynamicTools
             new CodexDynamicToolDefinition
             {
                 Name = "add_entity",
-                Description = "新しいエンティティ（テーブル）を ER 図に追加します。列は作成されないので、追加後にまず主キー列を 1 列だけ add_column で定義し、続けてその他の列を定義してください。",
+                Description =
+                    "新しいエンティティ（テーブル）を ER 図に追加します。列は作成されないので、追加後にまず主キー列を 1 列だけ add_column で定義し、続けてその他の列を定義してください。",
                 DeferLoading = false,
                 InputSchema = new
                 {
@@ -53,7 +57,11 @@ public static class ErDiagramDynamicTools
                     properties = new
                     {
                         table_name = new { type = "string", description = "テーブル名" },
-                        description = new { type = "string", description = "テーブルの説明（省略可）" },
+                        description = new
+                        {
+                            type = "string",
+                            description = "テーブルの説明（省略可）",
+                        },
                     },
                     required = new[] { "table_name" },
                 },
@@ -66,7 +74,10 @@ public static class ErDiagramDynamicTools
                 InputSchema = new
                 {
                     type = "object",
-                    properties = new { table_name = new { type = "string", description = "削除するテーブル名" } },
+                    properties = new
+                    {
+                        table_name = new { type = "string", description = "削除するテーブル名" },
+                    },
                     required = new[] { "table_name" },
                 },
             },
@@ -83,10 +94,22 @@ public static class ErDiagramDynamicTools
                     {
                         table_name = new { type = "string", description = "テーブル名" },
                         column_name = new { type = "string", description = "カラム名" },
-                        data_type = new { type = "string", description = "データ型（例: int, nvarchar(100), datetime2）" },
+                        data_type = new
+                        {
+                            type = "string",
+                            description = "データ型（例: int, nvarchar(100), datetime2）",
+                        },
                         is_primary_key = new { type = "boolean", description = "主キーかどうか" },
-                        is_nullable = new { type = "boolean", description = "NULL を許可するかどうか" },
-                        description = new { type = "string", description = "カラムの説明（省略可）" },
+                        is_nullable = new
+                        {
+                            type = "boolean",
+                            description = "NULL を許可するかどうか",
+                        },
+                        description = new
+                        {
+                            type = "string",
+                            description = "カラムの説明（省略可）",
+                        },
                     },
                     required = new[] { "table_name", "column_name", "data_type" },
                 },
@@ -99,7 +122,11 @@ public static class ErDiagramDynamicTools
                 InputSchema = new
                 {
                     type = "object",
-                    properties = new { table_name = new { type = "string", description = "テーブル名" }, column_name = new { type = "string", description = "削除するカラム名" } },
+                    properties = new
+                    {
+                        table_name = new { type = "string", description = "テーブル名" },
+                        column_name = new { type = "string", description = "削除するカラム名" },
+                    },
                     required = new[] { "table_name", "column_name" },
                 },
             },
@@ -114,7 +141,11 @@ public static class ErDiagramDynamicTools
                     properties = new
                     {
                         table_name = new { type = "string", description = "変更対象のテーブル名" },
-                        new_table_name = new { type = "string", description = "新しいテーブル名（変更する場合）" },
+                        new_table_name = new
+                        {
+                            type = "string",
+                            description = "新しいテーブル名（変更する場合）",
+                        },
                         memo = new { type = "string", description = "メモ（変更する場合）" },
                         description = new { type = "string", description = "説明（変更する場合）" },
                     },
@@ -134,9 +165,21 @@ public static class ErDiagramDynamicTools
                     {
                         table_name = new { type = "string", description = "変更対象のテーブル名" },
                         column_name = new { type = "string", description = "変更対象のカラム名" },
-                        description = new { type = "string", description = "カラムの説明（変更する場合に指定）" },
-                        data_type = new { type = "string", description = "データ型（変更する場合に指定。例: int, nvarchar(100), datetime2）" },
-                        is_nullable = new { type = "boolean", description = "NULL 許容フラグ（変更する場合に指定）" },
+                        description = new
+                        {
+                            type = "string",
+                            description = "カラムの説明（変更する場合に指定）",
+                        },
+                        data_type = new
+                        {
+                            type = "string",
+                            description = "データ型（変更する場合に指定。例: int, nvarchar(100), datetime2）",
+                        },
+                        is_nullable = new
+                        {
+                            type = "boolean",
+                            description = "NULL 許容フラグ（変更する場合に指定）",
+                        },
                     },
                     required = new[] { "table_name", "column_name" },
                 },
@@ -152,10 +195,26 @@ public static class ErDiagramDynamicTools
                     type = "object",
                     properties = new
                     {
-                        source_table = new { type = "string", description = "参照元（親）テーブル名" },
-                        source_column = new { type = "string", description = "参照元（親）テーブルの参照カラム名。通常は主キー列（省略時は主キー列を使用）" },
-                        target_table = new { type = "string", description = "参照先（子）テーブル名" },
-                        target_column = new { type = "string", description = "参照先（子）テーブルの外部キーカラム名（省略時はカラム名から推測し、推測できなければ未割当）" },
+                        source_table = new
+                        {
+                            type = "string",
+                            description = "参照元（親）テーブル名",
+                        },
+                        source_column = new
+                        {
+                            type = "string",
+                            description = "参照元（親）テーブルの参照カラム名。通常は主キー列（省略時は主キー列を使用）",
+                        },
+                        target_table = new
+                        {
+                            type = "string",
+                            description = "参照先（子）テーブル名",
+                        },
+                        target_column = new
+                        {
+                            type = "string",
+                            description = "参照先（子）テーブルの外部キーカラム名（省略時はカラム名から推測し、推測できなければ未割当）",
+                        },
                         relationship_type = new
                         {
                             type = "string",
@@ -190,7 +249,11 @@ public static class ErDiagramDynamicTools
     /// <param name="arguments">引数 JSON</param>
     /// <param name="viewModel">操作対象の MainViewModel</param>
     /// <returns>実行結果テキストと成否のタプル</returns>
-    public static (string Result, bool Success) Execute(string toolName, JsonElement arguments, MainViewModel viewModel)
+    public static (string Result, bool Success) Execute(
+        string toolName,
+        JsonElement arguments,
+        MainViewModel viewModel
+    )
     {
         try
         {
@@ -252,7 +315,9 @@ public static class ErDiagramDynamicTools
                 }
 
                 var flagsText = flags.Count > 0 ? $" ({string.Join(", ", flags)})" : string.Empty;
-                var colDesc = !string.IsNullOrWhiteSpace(col.Description) ? $" // {col.Description}" : string.Empty;
+                var colDesc = !string.IsNullOrWhiteSpace(col.Description)
+                    ? $" // {col.Description}"
+                    : string.Empty;
                 sb.AppendLine($"  - {col.Name}: {col.DataType}{flagsText}{colDesc}");
             }
         }
@@ -298,7 +363,9 @@ public static class ErDiagramDynamicTools
             return ("table_name が指定されていません。", false);
         }
 
-        var entity = vm.Entities.FirstOrDefault(e => string.Equals(e.TableName, tableName, StringComparison.OrdinalIgnoreCase));
+        var entity = vm.Entities.FirstOrDefault(e =>
+            string.Equals(e.TableName, tableName, StringComparison.OrdinalIgnoreCase)
+        );
 
         if (entity is null)
         {
@@ -321,15 +388,21 @@ public static class ErDiagramDynamicTools
             return ("table_name と column_name は必須です。", false);
         }
 
-        var entity = vm.Entities.FirstOrDefault(e => string.Equals(e.TableName, tableName, StringComparison.OrdinalIgnoreCase));
+        var entity = vm.Entities.FirstOrDefault(e =>
+            string.Equals(e.TableName, tableName, StringComparison.OrdinalIgnoreCase)
+        );
 
         if (entity is null)
         {
             return ($"テーブル '{tableName}' が見つかりません。", false);
         }
 
-        var isPk = args.TryGetProperty("is_primary_key", out var isPkEl) && isPkEl.ValueKind == JsonValueKind.True;
-        var isNullable = !args.TryGetProperty("is_nullable", out var isNullEl) || isNullEl.ValueKind != JsonValueKind.False;
+        var isPk =
+            args.TryGetProperty("is_primary_key", out var isPkEl)
+            && isPkEl.ValueKind == JsonValueKind.True;
+        var isNullable =
+            !args.TryGetProperty("is_nullable", out var isNullEl)
+            || isNullEl.ValueKind != JsonValueKind.False;
         var desc = GetString(args, "description") ?? string.Empty;
 
         var column = new ColumnViewModel(
@@ -357,14 +430,18 @@ public static class ErDiagramDynamicTools
             return ("table_name と column_name は必須です。", false);
         }
 
-        var entity = vm.Entities.FirstOrDefault(e => string.Equals(e.TableName, tableName, StringComparison.OrdinalIgnoreCase));
+        var entity = vm.Entities.FirstOrDefault(e =>
+            string.Equals(e.TableName, tableName, StringComparison.OrdinalIgnoreCase)
+        );
 
         if (entity is null)
         {
             return ($"テーブル '{tableName}' が見つかりません。", false);
         }
 
-        var column = entity.Columns.FirstOrDefault(c => string.Equals(c.Name, columnName, StringComparison.OrdinalIgnoreCase));
+        var column = entity.Columns.FirstOrDefault(c =>
+            string.Equals(c.Name, columnName, StringComparison.OrdinalIgnoreCase)
+        );
 
         if (column is null)
         {
@@ -373,7 +450,14 @@ public static class ErDiagramDynamicTools
 
         // 削除カラムを参照する FK リレーションを収集し、Undo 時に参照を復元できるようコマンドへ渡す
         var affected = vm.FindRelationshipsUsingColumn(column);
-        vm.UndoRedo.Execute(new UndoRedo.RemoveColumnCommand(entity.Columns, column, affected, () => vm.ApplyRelationshipColumnRules()));
+        vm.UndoRedo.Execute(
+            new UndoRedo.RemoveColumnCommand(
+                entity.Columns,
+                column,
+                affected,
+                () => vm.ApplyRelationshipColumnRules()
+            )
+        );
         return ($"テーブル '{tableName}' からカラム '{columnName}' を削除しました。", true);
     }
 
@@ -387,7 +471,9 @@ public static class ErDiagramDynamicTools
             return ("table_name は必須です。", false);
         }
 
-        var entity = vm.Entities.FirstOrDefault(e => string.Equals(e.TableName, tableName, StringComparison.OrdinalIgnoreCase));
+        var entity = vm.Entities.FirstOrDefault(e =>
+            string.Equals(e.TableName, tableName, StringComparison.OrdinalIgnoreCase)
+        );
 
         if (entity is null)
         {
@@ -396,7 +482,10 @@ public static class ErDiagramDynamicTools
 
         var changed = new List<string>();
 
-        if (args.TryGetProperty("new_table_name", out var newNameEl) && newNameEl.ValueKind == JsonValueKind.String)
+        if (
+            args.TryGetProperty("new_table_name", out var newNameEl)
+            && newNameEl.ValueKind == JsonValueKind.String
+        )
         {
             entity.TableName = newNameEl.GetString()!;
             changed.Add("テーブル名");
@@ -408,7 +497,10 @@ public static class ErDiagramDynamicTools
             changed.Add("メモ");
         }
 
-        if (args.TryGetProperty("description", out var descEl) && descEl.ValueKind == JsonValueKind.String)
+        if (
+            args.TryGetProperty("description", out var descEl)
+            && descEl.ValueKind == JsonValueKind.String
+        )
         {
             entity.Description = descEl.GetString()!;
             changed.Add("説明");
@@ -433,14 +525,18 @@ public static class ErDiagramDynamicTools
             return ("table_name と column_name は必須です。", false);
         }
 
-        var entity = vm.Entities.FirstOrDefault(e => string.Equals(e.TableName, tableName, StringComparison.OrdinalIgnoreCase));
+        var entity = vm.Entities.FirstOrDefault(e =>
+            string.Equals(e.TableName, tableName, StringComparison.OrdinalIgnoreCase)
+        );
 
         if (entity is null)
         {
             return ($"テーブル '{tableName}' が見つかりません。", false);
         }
 
-        var column = entity.Columns.FirstOrDefault(c => string.Equals(c.Name, columnName, StringComparison.OrdinalIgnoreCase));
+        var column = entity.Columns.FirstOrDefault(c =>
+            string.Equals(c.Name, columnName, StringComparison.OrdinalIgnoreCase)
+        );
 
         if (column is null)
         {
@@ -449,19 +545,28 @@ public static class ErDiagramDynamicTools
 
         var changed = new List<string>();
 
-        if (args.TryGetProperty("description", out var descEl) && descEl.ValueKind == JsonValueKind.String)
+        if (
+            args.TryGetProperty("description", out var descEl)
+            && descEl.ValueKind == JsonValueKind.String
+        )
         {
             column.Description = descEl.GetString()!;
             changed.Add("説明");
         }
 
-        if (args.TryGetProperty("data_type", out var dataTypeEl) && dataTypeEl.ValueKind == JsonValueKind.String)
+        if (
+            args.TryGetProperty("data_type", out var dataTypeEl)
+            && dataTypeEl.ValueKind == JsonValueKind.String
+        )
         {
             column.DataType = dataTypeEl.GetString()!;
             changed.Add("データ型");
         }
 
-        if (args.TryGetProperty("is_nullable", out var isNullEl) && isNullEl.ValueKind is JsonValueKind.True or JsonValueKind.False)
+        if (
+            args.TryGetProperty("is_nullable", out var isNullEl)
+            && isNullEl.ValueKind is JsonValueKind.True or JsonValueKind.False
+        )
         {
             column.IsNullable = isNullEl.GetBoolean();
             changed.Add("NULL 許容");
@@ -469,10 +574,16 @@ public static class ErDiagramDynamicTools
 
         if (changed.Count == 0)
         {
-            return ("変更するプロパティが指定されていません。description / data_type / is_nullable のいずれか 1 つ以上を指定してください。", false);
+            return (
+                "変更するプロパティが指定されていません。description / data_type / is_nullable のいずれか 1 つ以上を指定してください。",
+                false
+            );
         }
 
-        return ($"テーブル '{tableName}' のカラム '{columnName}' の {string.Join("、", changed)} を更新しました。", true);
+        return (
+            $"テーブル '{tableName}' のカラム '{columnName}' の {string.Join("、", changed)} を更新しました。",
+            true
+        );
     }
 
     /// <summary>2 テーブル間にリレーションを追加する</summary>
@@ -488,8 +599,12 @@ public static class ErDiagramDynamicTools
             return ("source_table と target_table は必須です。", false);
         }
 
-        var source = vm.Entities.FirstOrDefault(e => string.Equals(e.TableName, sourceTable, StringComparison.OrdinalIgnoreCase));
-        var target = vm.Entities.FirstOrDefault(e => string.Equals(e.TableName, targetTable, StringComparison.OrdinalIgnoreCase));
+        var source = vm.Entities.FirstOrDefault(e =>
+            string.Equals(e.TableName, sourceTable, StringComparison.OrdinalIgnoreCase)
+        );
+        var target = vm.Entities.FirstOrDefault(e =>
+            string.Equals(e.TableName, targetTable, StringComparison.OrdinalIgnoreCase)
+        );
 
         if (source is null)
         {
@@ -514,11 +629,16 @@ public static class ErDiagramDynamicTools
 
         if (!string.IsNullOrWhiteSpace(sourceColumnName))
         {
-            sourcePk = source.Columns.FirstOrDefault(c => string.Equals(c.Name, sourceColumnName, StringComparison.OrdinalIgnoreCase));
+            sourcePk = source.Columns.FirstOrDefault(c =>
+                string.Equals(c.Name, sourceColumnName, StringComparison.OrdinalIgnoreCase)
+            );
 
             if (sourcePk is null)
             {
-                return ($"テーブル '{sourceTable}' にカラム '{sourceColumnName}' が見つかりません。", false);
+                return (
+                    $"テーブル '{sourceTable}' にカラム '{sourceColumnName}' が見つかりません。",
+                    false
+                );
             }
         }
         else
@@ -531,16 +651,26 @@ public static class ErDiagramDynamicTools
 
         if (!string.IsNullOrWhiteSpace(targetColumnName))
         {
-            targetColumn = target.Columns.FirstOrDefault(c => string.Equals(c.Name, targetColumnName, StringComparison.OrdinalIgnoreCase));
+            targetColumn = target.Columns.FirstOrDefault(c =>
+                string.Equals(c.Name, targetColumnName, StringComparison.OrdinalIgnoreCase)
+            );
 
             if (targetColumn is null)
             {
-                return ($"テーブル '{targetTable}' にカラム '{targetColumnName}' が見つかりません。", false);
+                return (
+                    $"テーブル '{targetTable}' にカラム '{targetColumnName}' が見つかりません。",
+                    false
+                );
             }
         }
         else
         {
-            targetColumn = ForeignKeyColumnResolver.ResolveTargetColumn(source, target, sourcePk, vm.Relationships);
+            targetColumn = ForeignKeyColumnResolver.ResolveTargetColumn(
+                source,
+                target,
+                sourcePk,
+                vm.Relationships
+            );
         }
 
         var rel = new RelationshipViewModel(
@@ -572,7 +702,8 @@ public static class ErDiagramDynamicTools
         }
 
         var rel = vm.Relationships.FirstOrDefault(r =>
-            string.Equals(r.Source.TableName, sourceTable, StringComparison.OrdinalIgnoreCase) && string.Equals(r.Target.TableName, targetTable, StringComparison.OrdinalIgnoreCase)
+            string.Equals(r.Source.TableName, sourceTable, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(r.Target.TableName, targetTable, StringComparison.OrdinalIgnoreCase)
         );
 
         if (rel is null)
@@ -587,7 +718,10 @@ public static class ErDiagramDynamicTools
     /// <summary>JSON 引数から文字列プロパティを取得する（無い・型不一致なら null）</summary>
     private static string? GetString(JsonElement element, string propertyName)
     {
-        return element.TryGetProperty(propertyName, out var val) && val.ValueKind == JsonValueKind.String ? val.GetString() : null;
+        return
+            element.TryGetProperty(propertyName, out var val)
+            && val.ValueKind == JsonValueKind.String
+            ? val.GetString()
+            : null;
     }
-
 }

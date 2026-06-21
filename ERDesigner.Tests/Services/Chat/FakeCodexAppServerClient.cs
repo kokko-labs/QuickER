@@ -29,60 +29,123 @@ internal sealed class FakeCodexAppServerClient : ICodexAppServerClient
 
     public string? LastToolResult { get; private set; }
 
-    public Task StartAsync(CodexAppServerSettings settings, string clientName, string clientTitle, string clientVersion, CancellationToken cancellationToken = default)
+    public Task StartAsync(
+        CodexAppServerSettings settings,
+        string clientName,
+        string clientTitle,
+        string clientVersion,
+        CancellationToken cancellationToken = default
+    )
     {
         IsStarted = true;
         return Task.CompletedTask;
     }
 
-    public Task<CodexAccountInfo> ReadAccountAsync(bool refreshToken, CancellationToken cancellationToken = default) => Task.FromResult(NextAccountInfo);
+    public Task<CodexAccountInfo> ReadAccountAsync(
+        bool refreshToken,
+        CancellationToken cancellationToken = default
+    ) => Task.FromResult(NextAccountInfo);
 
-    public Task<CodexLoginStartResult> LoginWithApiKeyAsync(string apiKey, CancellationToken cancellationToken = default)
+    public Task<CodexLoginStartResult> LoginWithApiKeyAsync(
+        string apiKey,
+        CancellationToken cancellationToken = default
+    )
     {
-        AccountUpdated?.Invoke(this, new CodexAccountUpdatedNotification { AuthMode = CodexAuthMode.ApiKey });
+        AccountUpdated?.Invoke(
+            this,
+            new CodexAccountUpdatedNotification { AuthMode = CodexAuthMode.ApiKey }
+        );
         return Task.FromResult(new CodexLoginStartResult { Type = CodexLoginType.ApiKey });
     }
 
-    public Task<CodexLoginStartResult> StartChatGptLoginAsync(CancellationToken cancellationToken = default) =>
-        Task.FromResult(new CodexLoginStartResult { Type = CodexLoginType.ChatGpt, AuthUrl = "https://chatgpt.example/login" });
+    public Task<CodexLoginStartResult> StartChatGptLoginAsync(
+        CancellationToken cancellationToken = default
+    ) =>
+        Task.FromResult(
+            new CodexLoginStartResult
+            {
+                Type = CodexLoginType.ChatGpt,
+                AuthUrl = "https://chatgpt.example/login",
+            }
+        );
 
     public Task LogoutAsync(CancellationToken cancellationToken = default)
     {
-        AccountUpdated?.Invoke(this, new CodexAccountUpdatedNotification { AuthMode = CodexAuthMode.None });
+        AccountUpdated?.Invoke(
+            this,
+            new CodexAccountUpdatedNotification { AuthMode = CodexAuthMode.None }
+        );
         return Task.CompletedTask;
     }
 
-    public Task<CodexThreadInfo> StartThreadAsync(CodexThreadStartOptions options, CancellationToken cancellationToken = default)
+    public Task<CodexThreadInfo> StartThreadAsync(
+        CodexThreadStartOptions options,
+        CancellationToken cancellationToken = default
+    )
     {
         LastThreadStartOptions = options;
         return Task.FromResult(new CodexThreadInfo { Id = "thr_test", Preview = string.Empty });
     }
 
-    public Task<CodexTurnInfo> StartTurnAsync(string threadId, string prompt, CancellationToken cancellationToken = default)
+    public Task<CodexTurnInfo> StartTurnAsync(
+        string threadId,
+        string prompt,
+        CancellationToken cancellationToken = default
+    )
     {
         LastTurnPrompt = prompt;
         return Task.FromResult(new CodexTurnInfo { Id = "turn_test", Status = "inProgress" });
     }
 
-    public Task InterruptTurnAsync(string threadId, string turnId, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    public Task InterruptTurnAsync(
+        string threadId,
+        string turnId,
+        CancellationToken cancellationToken = default
+    ) => Task.CompletedTask;
 
-    public Task RespondToDynamicToolCallAsync(int requestId, string resultText, bool success, CancellationToken cancellationToken = default)
+    public Task RespondToDynamicToolCallAsync(
+        int requestId,
+        string resultText,
+        bool success,
+        CancellationToken cancellationToken = default
+    )
     {
         RespondToolCount++;
         LastToolResult = resultText;
         return Task.CompletedTask;
     }
 
-    public Task RespondToApprovalAsync(int requestId, string decision, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    public Task RespondToApprovalAsync(
+        int requestId,
+        string decision,
+        CancellationToken cancellationToken = default
+    ) => Task.CompletedTask;
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
     // ── テストからイベントを発火させるためのヘルパー ──
 
-    public void RaiseAgentMessageDelta(string delta) => AgentMessageDeltaReceived?.Invoke(this, new CodexAgentMessageDeltaNotification { Delta = delta });
+    public void RaiseAgentMessageDelta(string delta) =>
+        AgentMessageDeltaReceived?.Invoke(
+            this,
+            new CodexAgentMessageDeltaNotification { Delta = delta }
+        );
 
     public void RaiseTurnCompleted(string status, string? error = null) =>
-        TurnCompleted?.Invoke(this, new CodexTurnCompletedNotification { ThreadId = "thr_test", Turn = new CodexTurnInfo { Id = "turn_test", Status = status, Error = error } });
+        TurnCompleted?.Invoke(
+            this,
+            new CodexTurnCompletedNotification
+            {
+                ThreadId = "thr_test",
+                Turn = new CodexTurnInfo
+                {
+                    Id = "turn_test",
+                    Status = status,
+                    Error = error,
+                },
+            }
+        );
 
-    public void RaiseDynamicToolCall(CodexDynamicToolCallRequest request) => DynamicToolCallReceived?.Invoke(this, request);
+    public void RaiseDynamicToolCall(CodexDynamicToolCallRequest request) =>
+        DynamicToolCallReceived?.Invoke(this, request);
 }

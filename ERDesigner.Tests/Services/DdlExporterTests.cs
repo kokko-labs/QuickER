@@ -197,7 +197,9 @@ public class DdlExporterTests
     }
 
     /// <summary>schema.table 名が [schema].[table] へ括弧分割され、PK 制約名が安全化されることを検証する</summary>
-    [Fact(DisplayName = "Build: schema.table 形式は [schema].[table] に分割され、PK 制約名は安全な名前になる")]
+    [Fact(
+        DisplayName = "Build: schema.table 形式は [schema].[table] に分割され、PK 制約名は安全な名前になる"
+    )]
     public void Build_SchemaQualifiedTableName_SplitsBracketsAndUsesSafeConstraintName()
     {
         var vm = new MainViewModel();
@@ -256,7 +258,9 @@ public class DdlExporterTests
     }
 
     /// <summary>schema 修飾された親子テーブルの FK が括弧分割と安全な既定制約名で出力されることを検証する</summary>
-    [Fact(DisplayName = "Build: schema 修飾された親子の FOREIGN KEY は分割括弧付けと安全な既定制約名で出力される")]
+    [Fact(
+        DisplayName = "Build: schema 修飾された親子の FOREIGN KEY は分割括弧付けと安全な既定制約名で出力される"
+    )]
     public void Build_SchemaQualifiedForeignKey_UsesBracketsAndSafeDefaultConstraintName()
     {
         var vm = new MainViewModel();
@@ -424,7 +428,12 @@ public class DdlExporterTests
         userSheet.Cell(5, 6).GetString().Should().Be("PK");
         userSheet.Cell(6, 2).GetString().Should().Be("Name");
         userSheet.Cell(8, 1).GetString().Should().Be("テーブル一覧に戻る");
-        userSheet.Cell(8, 1).GetHyperlink().InternalAddress.ToString().Should().Be("'テーブル一覧'!A1");
+        userSheet
+            .Cell(8, 1)
+            .GetHyperlink()
+            .InternalAddress.ToString()
+            .Should()
+            .Be("'テーブル一覧'!A1");
         userSheet.PageSetup.PrintAreas.Single().RangeAddress.ToString().Should().Be("A1:G8");
 
         var orderSheet = workbook.Worksheet("Order");
@@ -434,7 +443,12 @@ public class DdlExporterTests
         orderSheet.Cell(6, 6).GetString().Should().Be("FK1,FK2");
         orderSheet.Cell(6, 7).GetString().Should().Be("User.Id");
         orderSheet.Cell(8, 1).GetString().Should().Be("テーブル一覧に戻る");
-        orderSheet.Cell(8, 1).GetHyperlink().InternalAddress.ToString().Should().Be("'テーブル一覧'!A1");
+        orderSheet
+            .Cell(8, 1)
+            .GetHyperlink()
+            .InternalAddress.ToString()
+            .Should()
+            .Be("'テーブル一覧'!A1");
 
         var relationshipSheet = workbook.Worksheet("リレーション一覧");
         relationshipSheet.Cell(2, 2).GetString().Should().Be("FK_Order_User");

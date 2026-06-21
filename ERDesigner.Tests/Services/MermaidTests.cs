@@ -112,17 +112,35 @@ public class MermaidTests
 
         diagram.Entities.Should().HaveCount(2);
         diagram.Relationships.Should().ContainSingle();
-        diagram.Entities.Should().ContainSingle(entity => entity.TableName == "Customer" && entity.Columns.Any(column => column.Name == "CustomerId" && column.IsPrimaryKey));
-        diagram.Entities.Should().ContainSingle(entity => entity.TableName == "Orders" && entity.Columns.Any(column => column.Name == "CustomerId" && column.IsForeignKey));
+        diagram
+            .Entities.Should()
+            .ContainSingle(entity =>
+                entity.TableName == "Customer"
+                && entity.Columns.Any(column => column.Name == "CustomerId" && column.IsPrimaryKey)
+            );
+        diagram
+            .Entities.Should()
+            .ContainSingle(entity =>
+                entity.TableName == "Orders"
+                && entity.Columns.Any(column => column.Name == "CustomerId" && column.IsForeignKey)
+            );
         diagram.Relationships[0].Type.Should().Be(RelationshipType.OneToMany);
         diagram.Relationships[0].ConstraintName.Should().Be("FK_Orders_Customer");
 
-        var source = diagram.Entities.Single(entity => entity.Id == diagram.Relationships[0].SourceEntityId);
-        var target = diagram.Entities.Single(entity => entity.Id == diagram.Relationships[0].TargetEntityId);
+        var source = diagram.Entities.Single(entity =>
+            entity.Id == diagram.Relationships[0].SourceEntityId
+        );
+        var target = diagram.Entities.Single(entity =>
+            entity.Id == diagram.Relationships[0].TargetEntityId
+        );
         source.TableName.Should().Be("Customer");
         target.TableName.Should().Be("Orders");
-        source.Columns.Should().ContainSingle(column => column.Id == diagram.Relationships[0].SourceColumnId);
-        target.Columns.Should().ContainSingle(column => column.Id == diagram.Relationships[0].TargetColumnId);
+        source
+            .Columns.Should()
+            .ContainSingle(column => column.Id == diagram.Relationships[0].SourceColumnId);
+        target
+            .Columns.Should()
+            .ContainSingle(column => column.Id == diagram.Relationships[0].TargetColumnId);
     }
 
     /// <summary>SaveTo で書き出した Mermaid ファイルを Load で読み戻し、内容が往復保持されることを検証する</summary>
@@ -177,7 +195,9 @@ public class MermaidTests
     }
 
     /// <summary>括弧付き型が出力時に正規化され、読込時に元の SQL 型名へ復元されることを検証する</summary>
-    [Fact(DisplayName = "decimal(10,2) や nvarchar(100) は出力→読込のラウンドトリップで元の型名に復元できる")]
+    [Fact(
+        DisplayName = "decimal(10,2) や nvarchar(100) は出力→読込のラウンドトリップで元の型名に復元できる"
+    )]
     public void Export_Import_NormalizesAndDenormalizesDataTypes()
     {
         var vm = new MainViewModel();

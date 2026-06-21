@@ -20,7 +20,10 @@ public static class IdentifierNameHelper
         normalized = Regex.Replace(normalized, @"([A-Za-z])([0-9])", "$1 $2");
         normalized = Regex.Replace(normalized, @"([0-9])([A-Za-z])", "$1 $2");
 
-        return normalized.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Where(static word => word.Length > 0).ToList();
+        return normalized
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(static word => word.Length > 0)
+            .ToList();
     }
 
     /// <summary>単語が英語の複数形らしいかどうかを語尾の簡易ルールで判定する</summary>

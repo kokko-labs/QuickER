@@ -29,12 +29,18 @@ public sealed class GeneratedFileWriter
             var fileName = Path.GetFileName(file.FileName);
             if (!fileName.EndsWith(".g.cs", StringComparison.OrdinalIgnoreCase))
             {
-                throw new InvalidOperationException("生成ファイル以外は上書きできません。出力ファイル名は .g.cs で終わる必要があります。");
+                throw new InvalidOperationException(
+                    "生成ファイル以外は上書きできません。出力ファイル名は .g.cs で終わる必要があります。"
+                );
             }
 
             var path = Path.Combine(outputDirectory, fileName);
             // BOM なし UTF-8 で出力する（git 差分やツール間の互換性を考慮）
-            File.WriteAllText(path, file.Content, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            File.WriteAllText(
+                path,
+                file.Content,
+                new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)
+            );
             writtenPaths.Add(path);
         }
 

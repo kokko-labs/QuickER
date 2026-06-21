@@ -30,32 +30,37 @@ public static class DragBehavior
     // ---------- 添付プロパティ ----------
 
     /// <summary>ドラッグ機能の有効・無効を表す添付プロパティ</summary>
-    public static readonly DependencyProperty IsEnabledProperty = DependencyProperty.RegisterAttached(
-        "IsEnabled",
-        typeof(bool),
-        typeof(DragBehavior),
-        new PropertyMetadata(false, OnIsEnabledChanged)
-    );
+    public static readonly DependencyProperty IsEnabledProperty =
+        DependencyProperty.RegisterAttached(
+            "IsEnabled",
+            typeof(bool),
+            typeof(DragBehavior),
+            new PropertyMetadata(false, OnIsEnabledChanged)
+        );
 
     /// <summary><see cref="IsEnabledProperty"/> の値を設定する</summary>
-    public static void SetIsEnabled(DependencyObject d, bool value) => d.SetValue(IsEnabledProperty, value);
+    public static void SetIsEnabled(DependencyObject d, bool value) =>
+        d.SetValue(IsEnabledProperty, value);
 
     /// <summary><see cref="IsEnabledProperty"/> の値を取得する</summary>
     public static bool GetIsEnabled(DependencyObject d) => (bool)d.GetValue(IsEnabledProperty);
 
     /// <summary>移動コマンドの登録先 <see cref="UndoRedoManager"/> を保持する添付プロパティ</summary>
-    public static readonly DependencyProperty UndoRedoManagerProperty = DependencyProperty.RegisterAttached(
-        "UndoRedoManager",
-        typeof(UndoRedoManager),
-        typeof(DragBehavior),
-        new PropertyMetadata(null)
-    );
+    public static readonly DependencyProperty UndoRedoManagerProperty =
+        DependencyProperty.RegisterAttached(
+            "UndoRedoManager",
+            typeof(UndoRedoManager),
+            typeof(DragBehavior),
+            new PropertyMetadata(null)
+        );
 
     /// <summary><see cref="UndoRedoManagerProperty"/> の値を設定する</summary>
-    public static void SetUndoRedoManager(DependencyObject d, UndoRedoManager value) => d.SetValue(UndoRedoManagerProperty, value);
+    public static void SetUndoRedoManager(DependencyObject d, UndoRedoManager value) =>
+        d.SetValue(UndoRedoManagerProperty, value);
 
     /// <summary><see cref="UndoRedoManagerProperty"/> の値を取得する</summary>
-    public static UndoRedoManager? GetUndoRedoManager(DependencyObject d) => (UndoRedoManager?)d.GetValue(UndoRedoManagerProperty);
+    public static UndoRedoManager? GetUndoRedoManager(DependencyObject d) =>
+        (UndoRedoManager?)d.GetValue(UndoRedoManagerProperty);
 
     // 内部状態は静的フィールドで保持する 同時にドラッグ可能な要素は 1 つに限られる前提
 
@@ -95,14 +100,33 @@ public static class DragBehavior
         if ((bool)e.NewValue)
         {
             // MouseBinding が MouseUp を Handled にする場合があるため handledEventsToo:true で登録。
-            fe.AddHandler(UIElement.MouseLeftButtonDownEvent, (MouseButtonEventHandler)OnMouseDown, handledEventsToo: true);
-            fe.AddHandler(UIElement.MouseMoveEvent, (MouseEventHandler)OnMouseMove, handledEventsToo: true);
-            fe.AddHandler(UIElement.MouseLeftButtonUpEvent, (MouseButtonEventHandler)OnMouseUp, handledEventsToo: true);
-            fe.AddHandler(UIElement.LostMouseCaptureEvent, (MouseEventHandler)OnLostCapture, handledEventsToo: true);
+            fe.AddHandler(
+                UIElement.MouseLeftButtonDownEvent,
+                (MouseButtonEventHandler)OnMouseDown,
+                handledEventsToo: true
+            );
+            fe.AddHandler(
+                UIElement.MouseMoveEvent,
+                (MouseEventHandler)OnMouseMove,
+                handledEventsToo: true
+            );
+            fe.AddHandler(
+                UIElement.MouseLeftButtonUpEvent,
+                (MouseButtonEventHandler)OnMouseUp,
+                handledEventsToo: true
+            );
+            fe.AddHandler(
+                UIElement.LostMouseCaptureEvent,
+                (MouseEventHandler)OnLostCapture,
+                handledEventsToo: true
+            );
         }
         else
         {
-            fe.RemoveHandler(UIElement.MouseLeftButtonDownEvent, (MouseButtonEventHandler)OnMouseDown);
+            fe.RemoveHandler(
+                UIElement.MouseLeftButtonDownEvent,
+                (MouseButtonEventHandler)OnMouseDown
+            );
             fe.RemoveHandler(UIElement.MouseMoveEvent, (MouseEventHandler)OnMouseMove);
             fe.RemoveHandler(UIElement.MouseLeftButtonUpEvent, (MouseButtonEventHandler)OnMouseUp);
             fe.RemoveHandler(UIElement.LostMouseCaptureEvent, (MouseEventHandler)OnLostCapture);
@@ -177,7 +201,10 @@ public static class DragBehavior
         if (!_isDragging && !_isResizing && sender is FrameworkElement cursorFe)
         {
             var lp = e.GetPosition(cursorFe);
-            cursorFe.Cursor = (lp.X >= cursorFe.ActualWidth - GripWidth && cursorFe.ActualWidth > 0) ? Cursors.SizeWE : null;
+            cursorFe.Cursor =
+                (lp.X >= cursorFe.ActualWidth - GripWidth && cursorFe.ActualWidth > 0)
+                    ? Cursors.SizeWE
+                    : null;
             return;
         }
 

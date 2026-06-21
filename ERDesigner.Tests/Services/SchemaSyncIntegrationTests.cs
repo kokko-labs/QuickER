@@ -18,7 +18,9 @@ namespace ERDesigner.Tests.Services;
 public class SchemaSyncIntegrationTests : IAsyncLifetime
 {
     /// <summary>テスト全体で共有するキャンセルトークン</summary>
-    private static readonly CancellationToken TestCancellationToken = TestContext.Current.CancellationToken;
+    private static readonly CancellationToken TestCancellationToken = TestContext
+        .Current
+        .CancellationToken;
 
     /// <summary>テスト対象 DB への接続設定</summary>
     private static readonly SqlConnectionSettings Settings = new()
@@ -129,21 +131,37 @@ IF OBJECT_ID(N'{ParentTable}', N'U') IS NOT NULL DROP TABLE [{ParentTable}];";
         // ---------- 2) DB から現状を取得して差分計算 ----------
         var importer = new SqlServerSchemaImporter();
         var live1 = await importer.ImportAsync(Settings, TestCancellationToken);
-        var diff1 = new SchemaDiffService().Compute(live1.Entities, live1.Relationships, new[] { parent, child }, new[] { rel });
+        var diff1 = new SchemaDiffService().Compute(
+            live1.Entities,
+            live1.Relationships,
+            new[] { parent, child },
+            new[] { rel }
+        );
 
-        diff1.Items.Should().Contain(i => i.Kind == SchemaDiffKind.AddTable && i.TableName == ParentTable);
-        diff1.Items.Should().Contain(i => i.Kind == SchemaDiffKind.AddTable && i.TableName == ChildTable);
+        diff1
+            .Items.Should()
+            .Contain(i => i.Kind == SchemaDiffKind.AddTable && i.TableName == ParentTable);
+        diff1
+            .Items.Should()
+            .Contain(i => i.Kind == SchemaDiffKind.AddTable && i.TableName == ChildTable);
         diff1.Items.Should().Contain(i => i.Kind == SchemaDiffKind.AddForeignKey);
 
         // ---------- 3) 実行 ----------
         var script1 = SchemaSyncScriptBuilder.Build(diff1.Items);
         var exec = new SchemaSyncExecutor();
         var result1 = await exec.ExecuteAsync(Settings, script1, TestCancellationToken);
-        result1.Committed.Should().BeTrue($"スクリプト実行に失敗: {result1.Error}\nSQL:\n{script1}");
+        result1
+            .Committed.Should()
+            .BeTrue($"スクリプト実行に失敗: {result1.Error}\nSQL:\n{script1}");
 
         // ---------- 4) もう一度 diff を取って空になることを確認 ----------
         var live2 = await importer.ImportAsync(Settings, TestCancellationToken);
-        var diff2 = new SchemaDiffService().Compute(live2.Entities, live2.Relationships, new[] { parent, child }, new[] { rel });
+        var diff2 = new SchemaDiffService().Compute(
+            live2.Entities,
+            live2.Relationships,
+            new[] { parent, child },
+            new[] { rel }
+        );
         // ID は importer が新しい Guid を振り直すので、リレーションは「FK が DB 側に存在するか」で判定される
         diff2.Items.Where(i => i.Kind == SchemaDiffKind.AddTable).Should().BeEmpty();
         diff2.Items.Where(i => i.Kind == SchemaDiffKind.AddColumn).Should().BeEmpty();
@@ -155,10 +173,19 @@ IF OBJECT_ID(N'{ParentTable}', N'U') IS NOT NULL DROP TABLE [{ParentTable}];";
 
         // ---------- 5) 列追加の差分テスト ----------
         child.Columns.Add(new Column { Name = "AddedLater", DataType = "nvarchar(20)" });
-        var diff3 = new SchemaDiffService().Compute(live2.Entities, live2.Relationships, new[] { parent, child }, new[] { rel });
-        diff3.Items.Should().Contain(i => i.Kind == SchemaDiffKind.AddColumn && i.ColumnName == "AddedLater");
+        var diff3 = new SchemaDiffService().Compute(
+            live2.Entities,
+            live2.Relationships,
+            new[] { parent, child },
+            new[] { rel }
+        );
+        diff3
+            .Items.Should()
+            .Contain(i => i.Kind == SchemaDiffKind.AddColumn && i.ColumnName == "AddedLater");
 
-        var script3 = SchemaSyncScriptBuilder.Build(diff3.Items.Where(i => i.Kind == SchemaDiffKind.AddColumn));
+        var script3 = SchemaSyncScriptBuilder.Build(
+            diff3.Items.Where(i => i.Kind == SchemaDiffKind.AddColumn)
+        );
         var result3 = await exec.ExecuteAsync(Settings, script3, TestCancellationToken);
         result3.Committed.Should().BeTrue($"列追加に失敗: {result3.Error}\nSQL:\n{script3}");
 
@@ -167,14 +194,19 @@ IF OBJECT_ID(N'{ParentTable}', N'U') IS NOT NULL DROP TABLE [{ParentTable}];";
 
         await conn.OpenAsync(TestCancellationToken);
 
-        await using var verify = new SqlCommand($"SELECT COUNT(*) FROM sys.columns WHERE object_id = OBJECT_ID(N'{ChildTable}') AND name = 'AddedLater'", conn);
+        await using var verify = new SqlCommand(
+            $"SELECT COUNT(*) FROM sys.columns WHERE object_id = OBJECT_ID(N'{ChildTable}') AND name = 'AddedLater'",
+            conn
+        );
 
         var count = (int)(await verify.ExecuteScalarAsync(TestCancellationToken))!;
         count.Should().Be(1);
     }
 
     /// <summary>列変更・列削除・外部キー削除・テーブル削除の破壊的変更が実 DB へ適用されることを検証する</summary>
-    [Fact(DisplayName = "[Integration] フェーズ2: AlterColumn / DropColumn / DropForeignKey / DropTable が実 DB に適用される")]
+    [Fact(
+        DisplayName = "[Integration] フェーズ2: AlterColumn / DropColumn / DropForeignKey / DropTable が実 DB に適用される"
+    )]
     public async Task DestructiveSync_AppliesChanges()
     {
         if (!_serverAvailable)
@@ -215,12 +247,20 @@ CREATE TABLE [{ChildTable}] (
 
         var importer = new SqlServerSchemaImporter();
         var live = await importer.ImportAsync(Settings, TestCancellationToken);
-        var diff = new SchemaDiffService().Compute(live.Entities, live.Relationships, new[] { child }, new List<Relationship>());
+        var diff = new SchemaDiffService().Compute(
+            live.Entities,
+            live.Relationships,
+            new[] { child },
+            new List<Relationship>()
+        );
 
-        diff.Items.Should().Contain(i => i.Kind == SchemaDiffKind.AlterColumn && i.ColumnName == "ToBeAltered");
-        diff.Items.Should().Contain(i => i.Kind == SchemaDiffKind.DropColumn && i.ColumnName == "ToBeDropped");
+        diff.Items.Should()
+            .Contain(i => i.Kind == SchemaDiffKind.AlterColumn && i.ColumnName == "ToBeAltered");
+        diff.Items.Should()
+            .Contain(i => i.Kind == SchemaDiffKind.DropColumn && i.ColumnName == "ToBeDropped");
         diff.Items.Should().Contain(i => i.Kind == SchemaDiffKind.DropForeignKey);
-        diff.Items.Should().Contain(i => i.Kind == SchemaDiffKind.DropTable && i.TableName == ParentTable);
+        diff.Items.Should()
+            .Contain(i => i.Kind == SchemaDiffKind.DropTable && i.TableName == ParentTable);
 
         // 既定では破壊的差分は未選択。テストでは全て選択して実行する。
         foreach (var item in diff.Items)
@@ -245,20 +285,32 @@ CREATE TABLE [{ChildTable}] (
         }
 
         // 子の ToBeDropped 列が無い
-        await using (var v2 = new SqlCommand($"SELECT COUNT(*) FROM sys.columns WHERE object_id = OBJECT_ID(N'{ChildTable}') AND name = 'ToBeDropped'", conn))
+        await using (
+            var v2 = new SqlCommand(
+                $"SELECT COUNT(*) FROM sys.columns WHERE object_id = OBJECT_ID(N'{ChildTable}') AND name = 'ToBeDropped'",
+                conn
+            )
+        )
         {
             ((int)(await v2.ExecuteScalarAsync(TestCancellationToken))!).Should().Be(0);
         }
 
         // ToBeAltered の最大長が 100 (=200 bytes for nvarchar) になっている
-        await using (var v3 = new SqlCommand($"SELECT max_length FROM sys.columns WHERE object_id = OBJECT_ID(N'{ChildTable}') AND name = 'ToBeAltered'", conn))
+        await using (
+            var v3 = new SqlCommand(
+                $"SELECT max_length FROM sys.columns WHERE object_id = OBJECT_ID(N'{ChildTable}') AND name = 'ToBeAltered'",
+                conn
+            )
+        )
         {
             ((short)(await v3.ExecuteScalarAsync(TestCancellationToken))!).Should().Be(200);
         }
     }
 
     /// <summary>テーブル・列の MS_Description が同期され、再インポートで取得できることを検証する</summary>
-    [Fact(DisplayName = "[Integration] テーブル/列の MS_Description が同期され、再 Import で取得できる")]
+    [Fact(
+        DisplayName = "[Integration] テーブル/列の MS_Description が同期され、再 Import で取得できる"
+    )]
     public async Task DescriptionSync_RoundTrip()
     {
         if (!_serverAvailable)
@@ -288,11 +340,27 @@ CREATE TABLE [{ChildTable}] (
         // ---------- 2) DB は空なので AddTable + SetTableDescription + SetColumnDescription が出る ----------
         var importer = new SqlServerSchemaImporter();
         var live1 = await importer.ImportAsync(Settings, TestCancellationToken);
-        var diff1 = new SchemaDiffService().Compute(live1.Entities, live1.Relationships, new[] { parent }, new List<Relationship>());
+        var diff1 = new SchemaDiffService().Compute(
+            live1.Entities,
+            live1.Relationships,
+            new[] { parent },
+            new List<Relationship>()
+        );
 
         diff1.Items.Should().Contain(i => i.Kind == SchemaDiffKind.AddTable);
-        diff1.Items.Should().Contain(i => i.Kind == SchemaDiffKind.SetTableDescription && i.NewDescription == "親テーブルの説明");
-        diff1.Items.Should().Contain(i => i.Kind == SchemaDiffKind.SetColumnDescription && i.ColumnName == "Name" && i.NewDescription == "名前カラム");
+        diff1
+            .Items.Should()
+            .Contain(i =>
+                i.Kind == SchemaDiffKind.SetTableDescription
+                && i.NewDescription == "親テーブルの説明"
+            );
+        diff1
+            .Items.Should()
+            .Contain(i =>
+                i.Kind == SchemaDiffKind.SetColumnDescription
+                && i.ColumnName == "Name"
+                && i.NewDescription == "名前カラム"
+            );
 
         var script = SchemaSyncScriptBuilder.Build(diff1.Items);
         var exec = new SchemaSyncExecutor();
@@ -301,13 +369,24 @@ CREATE TABLE [{ChildTable}] (
 
         // ---------- 3) 再 Import して説明が取得できることを確認 ----------
         var live2 = await importer.ImportAsync(Settings, TestCancellationToken);
-        var imported = live2.Entities.Should().ContainSingle(e => e.TableName.EndsWith(ParentTable, StringComparison.OrdinalIgnoreCase)).Which;
+        var imported = live2
+            .Entities.Should()
+            .ContainSingle(e =>
+                e.TableName.EndsWith(ParentTable, StringComparison.OrdinalIgnoreCase)
+            )
+            .Which;
         imported.Description.Should().Be("親テーブルの説明");
-        imported.Columns.Should().ContainSingle(c => c.Name == "Name" && c.Description == "名前カラム");
+        imported
+            .Columns.Should()
+            .ContainSingle(c => c.Name == "Name" && c.Description == "名前カラム");
 
         // ---------- 4) 説明を更新→ sp_updateextendedproperty 経由で反映される ----------
         // live と target でオブジェクトを分けるため、target は手で組み直す
-        var updatedTarget = new Entity { TableName = imported.TableName, Description = "親テーブル(更新後)" };
+        var updatedTarget = new Entity
+        {
+            TableName = imported.TableName,
+            Description = "親テーブル(更新後)",
+        };
 
         foreach (var c in imported.Columns)
         {
@@ -322,16 +401,33 @@ CREATE TABLE [{ChildTable}] (
             );
         }
 
-        var diff2 = new SchemaDiffService().Compute(live2.Entities, live2.Relationships, new[] { updatedTarget }, new List<Relationship>());
-        diff2.Items.Should().Contain(i => i.Kind == SchemaDiffKind.SetTableDescription && i.NewDescription == "親テーブル(更新後)");
-        diff2.Items.Should().Contain(i => i.Kind == SchemaDiffKind.SetColumnDescription && i.NewDescription == "顧客名(更新後)");
+        var diff2 = new SchemaDiffService().Compute(
+            live2.Entities,
+            live2.Relationships,
+            new[] { updatedTarget },
+            new List<Relationship>()
+        );
+        diff2
+            .Items.Should()
+            .Contain(i =>
+                i.Kind == SchemaDiffKind.SetTableDescription
+                && i.NewDescription == "親テーブル(更新後)"
+            );
+        diff2
+            .Items.Should()
+            .Contain(i =>
+                i.Kind == SchemaDiffKind.SetColumnDescription
+                && i.NewDescription == "顧客名(更新後)"
+            );
 
         var script2 = SchemaSyncScriptBuilder.Build(diff2.Items);
         var result2 = await exec.ExecuteAsync(Settings, script2, TestCancellationToken);
         result2.Committed.Should().BeTrue($"説明更新に失敗: {result2.Error}\nSQL:\n{script2}");
 
         var live3 = await importer.ImportAsync(Settings, TestCancellationToken);
-        var imported2 = live3.Entities.First(e => e.TableName.EndsWith(ParentTable, StringComparison.OrdinalIgnoreCase));
+        var imported2 = live3.Entities.First(e =>
+            e.TableName.EndsWith(ParentTable, StringComparison.OrdinalIgnoreCase)
+        );
         imported2.Description.Should().Be("親テーブル(更新後)");
         imported2.Columns.First(c => c.Name == "Name").Description.Should().Be("顧客名(更新後)");
     }

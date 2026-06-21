@@ -50,7 +50,12 @@
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="Button">
-            <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="4" Padding="{TemplateBinding Padding}">
+            <Border
+              x:Name="Bd"
+              Background="{TemplateBinding Background}"
+              CornerRadius="4"
+              Padding="{TemplateBinding Padding}"
+            >
               <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
             </Border>
             <ControlTemplate.Triggers>
@@ -76,7 +81,12 @@
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="ToggleButton">
-            <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="4" Padding="{TemplateBinding Padding}">
+            <Border
+              x:Name="Bd"
+              Background="{TemplateBinding Background}"
+              CornerRadius="4"
+              Padding="{TemplateBinding Padding}"
+            >
               <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
             </Border>
             <ControlTemplate.Triggers>
@@ -302,7 +312,11 @@
       <Setter Property="Margin" Value="4,0" />
     </Style>
 
-    <Style x:Key="PropertyDataGridTextEditor" TargetType="TextBox" BasedOn="{StaticResource PropertyInputTextBox}">
+    <Style
+      x:Key="PropertyDataGridTextEditor"
+      TargetType="TextBox"
+      BasedOn="{StaticResource PropertyInputTextBox}"
+    >
       <Setter Property="MinHeight" Value="0" />
       <Setter Property="Padding" Value="4,0" />
       <Setter Property="Margin" Value="0" />
@@ -340,7 +354,10 @@
       <Setter Property="StrokeThickness" Value="2.2" />
       <Setter Property="Visibility" Value="Collapsed" />
       <Style.Triggers>
-        <DataTrigger Binding="{Binding DataContext.IsSelected, RelativeSource={RelativeSource AncestorType=ContentControl}}" Value="True">
+        <DataTrigger
+          Binding="{Binding DataContext.IsSelected, RelativeSource={RelativeSource AncestorType=ContentControl}}"
+          Value="True"
+        >
           <Setter Property="Stroke" Value="{StaticResource LineSelectedBrush}" />
         </DataTrigger>
       </Style.Triggers>
@@ -381,41 +398,72 @@
 
   <DockPanel>
     <!-- 上部: ツールバー -->
-    <Border DockPanel.Dock="Top" Background="{StaticResource PanelBg}" BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,0,0,1">
+    <Border
+      DockPanel.Dock="Top"
+      Background="{StaticResource PanelBg}"
+      BorderBrush="{StaticResource DividerBrush}"
+      BorderThickness="0,0,0,1"
+    >
       <StackPanel Orientation="Horizontal" Margin="6,4">
-        <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding NewDiagramCommand}" ToolTip="新規 (Ctrl+N)">
+        <Button
+          Style="{StaticResource ToolBarLabelButton}"
+          Command="{Binding NewDiagramCommand}"
+          ToolTip="新規 (Ctrl+N)"
+        >
           <StackPanel>
             <TextBlock Style="{StaticResource ToolBarIcon}" Text="🗒" />
             <TextBlock Style="{StaticResource ToolBarCaption}" Text="新規" />
           </StackPanel>
         </Button>
-        <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding OpenCommand}" ToolTip="開く (Ctrl+O)">
+        <Button
+          Style="{StaticResource ToolBarLabelButton}"
+          Command="{Binding OpenCommand}"
+          ToolTip="開く (Ctrl+O)"
+        >
           <StackPanel>
             <TextBlock Style="{StaticResource ToolBarIcon}" Text="📂" />
             <TextBlock Style="{StaticResource ToolBarCaption}" Text="開く" />
           </StackPanel>
         </Button>
-        <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding SaveCommand}" ToolTip="保存 (Ctrl+S)">
+        <Button
+          Style="{StaticResource ToolBarLabelButton}"
+          Command="{Binding SaveCommand}"
+          ToolTip="保存 (Ctrl+S)"
+        >
           <StackPanel>
             <TextBlock Style="{StaticResource ToolBarIcon}" Text="💾" />
             <TextBlock Style="{StaticResource ToolBarCaption}" Text="保存" />
           </StackPanel>
         </Button>
         <Rectangle Style="{StaticResource ToolBarSeparator}" />
-        <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding UndoCommand}" IsEnabled="{Binding UndoRedo.CanUndo}" ToolTip="元に戻す (Ctrl+Z)">
+        <Button
+          Style="{StaticResource ToolBarLabelButton}"
+          Command="{Binding UndoCommand}"
+          IsEnabled="{Binding UndoRedo.CanUndo}"
+          ToolTip="元に戻す (Ctrl+Z)"
+        >
           <StackPanel>
             <TextBlock Style="{StaticResource ToolBarIcon}" Text="↶" />
             <TextBlock Style="{StaticResource ToolBarCaption}" Text="元に戻す" />
           </StackPanel>
         </Button>
-        <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding RedoCommand}" IsEnabled="{Binding UndoRedo.CanRedo}" ToolTip="やり直す (Ctrl+Y)">
+        <Button
+          Style="{StaticResource ToolBarLabelButton}"
+          Command="{Binding RedoCommand}"
+          IsEnabled="{Binding UndoRedo.CanRedo}"
+          ToolTip="やり直す (Ctrl+Y)"
+        >
           <StackPanel>
             <TextBlock Style="{StaticResource ToolBarIcon}" Text="↷" />
             <TextBlock Style="{StaticResource ToolBarCaption}" Text="やり直す" />
           </StackPanel>
         </Button>
         <Rectangle Style="{StaticResource ToolBarSeparator}" />
-        <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding DuplicateSelectedEntityCommand}" ToolTip="複製 (Ctrl+D)">
+        <Button
+          Style="{StaticResource ToolBarLabelButton}"
+          Command="{Binding DuplicateSelectedEntityCommand}"
+          ToolTip="複製 (Ctrl+D)"
+        >
           <StackPanel>
             <TextBlock Style="{StaticResource ToolBarIcon}" Text="❏" />
             <TextBlock Style="{StaticResource ToolBarCaption}" Text="複製" />
@@ -432,32 +480,52 @@
             <TextBlock Style="{StaticResource ToolBarCaption}" Text="説明表示" />
           </StackPanel>
         </ToggleButton>
-        <ToggleButton Style="{StaticResource ToolBarLabelToggleButton}" IsChecked="{Binding ShowNullabilityInDiagram, Mode=TwoWay}" ToolTip="ER 図のカラム行に NULL 許容を表示">
+        <ToggleButton
+          Style="{StaticResource ToolBarLabelToggleButton}"
+          IsChecked="{Binding ShowNullabilityInDiagram, Mode=TwoWay}"
+          ToolTip="ER 図のカラム行に NULL 許容を表示"
+        >
           <StackPanel>
             <TextBlock Style="{StaticResource ToolBarIcon}" Text="∅" />
             <TextBlock Style="{StaticResource ToolBarCaption}" Text="NULL表示" />
           </StackPanel>
         </ToggleButton>
         <Rectangle Style="{StaticResource ToolBarSeparator}" />
-        <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding AutoLayoutGridCommand}" ToolTip="格子状に自動整列">
+        <Button
+          Style="{StaticResource ToolBarLabelButton}"
+          Command="{Binding AutoLayoutGridCommand}"
+          ToolTip="格子状に自動整列"
+        >
           <StackPanel>
             <TextBlock Style="{StaticResource ToolBarIcon}" Text="▦" />
             <TextBlock Style="{StaticResource ToolBarCaption}" Text="整列(格子)" />
           </StackPanel>
         </Button>
-        <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding AutoLayoutTreeCommand}" ToolTip="ツリー状に自動整列">
+        <Button
+          Style="{StaticResource ToolBarLabelButton}"
+          Command="{Binding AutoLayoutTreeCommand}"
+          ToolTip="ツリー状に自動整列"
+        >
           <StackPanel>
             <TextBlock Style="{StaticResource ToolBarIcon}" Text="⌬" />
             <TextBlock Style="{StaticResource ToolBarCaption}" Text="整列(木)" />
           </StackPanel>
         </Button>
-        <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding AutoLayoutForceCommand}" ToolTip="リレーションの繋がりで大まかな配置を決めてから格子に揃えて整列">
+        <Button
+          Style="{StaticResource ToolBarLabelButton}"
+          Command="{Binding AutoLayoutForceCommand}"
+          ToolTip="リレーションの繋がりで大まかな配置を決めてから格子に揃えて整列"
+        >
           <StackPanel>
             <TextBlock Style="{StaticResource ToolBarIcon}" Text="✺" />
             <TextBlock Style="{StaticResource ToolBarCaption}" Text="整列(自由)" />
           </StackPanel>
         </Button>
-        <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding AutoFitEntityWidthsCommand}" ToolTip="カラム名と型が重ならない幅に自動調整">
+        <Button
+          Style="{StaticResource ToolBarLabelButton}"
+          Command="{Binding AutoFitEntityWidthsCommand}"
+          ToolTip="カラム名と型が重ならない幅に自動調整"
+        >
           <StackPanel>
             <TextBlock Style="{StaticResource ToolBarIcon}" Text="↔" />
             <TextBlock Style="{StaticResource ToolBarCaption}" Text="幅自動" />
@@ -475,34 +543,54 @@
             <TextBlock Style="{StaticResource ToolBarCaption}" Text="出力" />
           </StackPanel>
         </Button>
-        <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding ImportDiagramCommand}" ToolTip="Mermaid / DBML / 定義書を選択して取り込み">
+        <Button
+          Style="{StaticResource ToolBarLabelButton}"
+          Command="{Binding ImportDiagramCommand}"
+          ToolTip="Mermaid / DBML / 定義書を選択して取り込み"
+        >
           <StackPanel>
             <TextBlock Style="{StaticResource ToolBarIcon}" Text="📥" />
             <TextBlock Style="{StaticResource ToolBarCaption}" Text="取込" />
           </StackPanel>
         </Button>
         <Rectangle Style="{StaticResource ToolBarSeparator}" />
-        <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding ImportFromSqlServerCommand}" ToolTip="SQL Server からスキーマを取り込み">
+        <Button
+          Style="{StaticResource ToolBarLabelButton}"
+          Command="{Binding ImportFromSqlServerCommand}"
+          ToolTip="SQL Server からスキーマを取り込み"
+        >
           <StackPanel>
             <TextBlock Style="{StaticResource ToolBarIcon}" Text="🛢" />
             <TextBlock Style="{StaticResource ToolBarCaption}" Text="DB取込" />
           </StackPanel>
         </Button>
-        <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding SyncToSqlServerCommand}" ToolTip="現在のダイアグラムを既存 DB に書き戻し (差分 ALTER 実行)">
+        <Button
+          Style="{StaticResource ToolBarLabelButton}"
+          Command="{Binding SyncToSqlServerCommand}"
+          ToolTip="現在のダイアグラムを既存 DB に書き戻し (差分 ALTER 実行)"
+        >
           <StackPanel>
             <TextBlock Style="{StaticResource ToolBarIcon}" Text="⇪" />
             <TextBlock Style="{StaticResource ToolBarCaption}" Text="DB同期" />
           </StackPanel>
         </Button>
         <Rectangle Style="{StaticResource ToolBarSeparator}" />
-        <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding OpenAiChatCommand}" ToolTip="AI チャットで ER 図を作成・編集（API キー / Codex 接続）">
+        <Button
+          Style="{StaticResource ToolBarLabelButton}"
+          Command="{Binding OpenAiChatCommand}"
+          ToolTip="AI チャットで ER 図を作成・編集（API キー / Codex 接続）"
+        >
           <StackPanel>
             <TextBlock Style="{StaticResource ToolBarIcon}" Text="🤖" />
             <TextBlock Style="{StaticResource ToolBarCaption}" Text="AIチャット" />
           </StackPanel>
         </Button>
         <Rectangle Style="{StaticResource ToolBarSeparator}" />
-        <Button Style="{StaticResource ToolBarLabelButton}" Command="{Binding GenerateCSharpCodeCommand}" ToolTip="現在の ER 図から C# Entity / BindingModel を生成">
+        <Button
+          Style="{StaticResource ToolBarLabelButton}"
+          Command="{Binding GenerateCSharpCodeCommand}"
+          ToolTip="現在の ER 図から C# Entity / BindingModel を生成"
+        >
           <StackPanel>
             <TextBlock Style="{StaticResource ToolBarIcon}" Text="⌘" />
             <TextBlock Style="{StaticResource ToolBarCaption}" Text="C#生成" />
@@ -512,10 +600,20 @@
     </Border>
 
     <!-- 下部: ステータスバー -->
-    <Border DockPanel.Dock="Bottom" Background="{StaticResource PanelBg}" BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,1,0,0" Padding="10,4">
+    <Border
+      DockPanel.Dock="Bottom"
+      Background="{StaticResource PanelBg}"
+      BorderBrush="{StaticResource DividerBrush}"
+      BorderThickness="0,1,0,0"
+      Padding="10,4"
+    >
       <DockPanel>
         <TextBlock DockPanel.Dock="Left" Text="準備完了" Foreground="{StaticResource MutedText}" />
-        <TextBlock DockPanel.Dock="Right" HorizontalAlignment="Right" Foreground="{StaticResource MutedText}">
+        <TextBlock
+          DockPanel.Dock="Right"
+          HorizontalAlignment="Right"
+          Foreground="{StaticResource MutedText}"
+        >
           <Run Text="エンティティ:" />
           <Run Text="{Binding Entities.Count, Mode=OneWay}" />
           <Run Text="   リレーション:" />
@@ -533,27 +631,59 @@
       </Grid.ColumnDefinitions>
 
       <!-- GridSplitter: ER図とプロパティパネルの境界ドラッグ -->
-      <GridSplitter Grid.Column="2" Width="5" HorizontalAlignment="Stretch" Background="{StaticResource DividerBrush}" Cursor="SizeWE" />
+      <GridSplitter
+        Grid.Column="2"
+        Width="5"
+        HorizontalAlignment="Stretch"
+        Background="{StaticResource DividerBrush}"
+        Cursor="SizeWE"
+      />
 
       <!-- 左: ツールボックス -->
-      <Border Grid.Column="0" Background="{StaticResource SidebarBg}" BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,0,1,0">
+      <Border
+        Grid.Column="0"
+        Background="{StaticResource SidebarBg}"
+        BorderBrush="{StaticResource DividerBrush}"
+        BorderThickness="0,0,1,0"
+      >
         <ScrollViewer VerticalScrollBarVisibility="Auto">
           <StackPanel Margin="12,10,12,12">
-            <TextBlock Text="ツールボックス" FontWeight="Bold" Foreground="{StaticResource HeaderText}" Margin="0,0,0,10" />
+            <TextBlock
+              Text="ツールボックス"
+              FontWeight="Bold"
+              Foreground="{StaticResource HeaderText}"
+              Margin="0,0,0,10"
+            />
 
             <Border Style="{StaticResource ToolboxSectionCard}">
               <StackPanel>
                 <TextBlock Text="エンティティ" Style="{StaticResource ToolboxSectionTitle}" />
-                <Button Style="{StaticResource ToolboxItemButton}" Command="{Binding AddEntityCommand}" ToolTip="新しいテーブルをキャンバスに追加します">
+                <Button
+                  Style="{StaticResource ToolboxItemButton}"
+                  Command="{Binding AddEntityCommand}"
+                  ToolTip="新しいテーブルをキャンバスに追加します"
+                >
                   <StackPanel Orientation="Horizontal">
                     <TextBlock Text="▭" Style="{StaticResource ToolboxItemIcon}" />
-                    <TextBlock Text="エンティティを追加" Style="{StaticResource ToolboxItemTitle}" VerticalAlignment="Center" />
+                    <TextBlock
+                      Text="エンティティを追加"
+                      Style="{StaticResource ToolboxItemTitle}"
+                      VerticalAlignment="Center"
+                    />
                   </StackPanel>
                 </Button>
-                <Button Style="{StaticResource ToolboxItemButton}" Command="{Binding RemoveSelectedEntityCommand}" ToolTip="選択中のエンティティをダイアグラムから削除します">
+                <Button
+                  Style="{StaticResource ToolboxItemButton}"
+                  Command="{Binding RemoveSelectedEntityCommand}"
+                  ToolTip="選択中のエンティティをダイアグラムから削除します"
+                >
                   <StackPanel Orientation="Horizontal">
                     <TextBlock Text="🗑" Style="{StaticResource ToolboxItemIcon}" />
-                    <TextBlock Text="エンティティ削除" Style="{StaticResource ToolboxItemTitle}" VerticalAlignment="Center" />
+                    <TextBlock
+                      Text="エンティティ削除"
+                      Style="{StaticResource ToolboxItemTitle}"
+                      VerticalAlignment="Center"
+                    />
                   </StackPanel>
                 </Button>
               </StackPanel>
@@ -562,28 +692,60 @@
             <Border Style="{StaticResource ToolboxSectionCard}">
               <StackPanel>
                 <TextBlock Text="リレーションシップ" Style="{StaticResource ToolboxSectionTitle}" />
-                <Button Style="{StaticResource ToolboxItemButton}" Command="{Binding StartAddOneToOneCommand}" ToolTip="1対1 のリレーション作成モードに切り替えます">
+                <Button
+                  Style="{StaticResource ToolboxItemButton}"
+                  Command="{Binding StartAddOneToOneCommand}"
+                  ToolTip="1対1 のリレーション作成モードに切り替えます"
+                >
                   <StackPanel Orientation="Horizontal">
                     <TextBlock Text="│─│" Style="{StaticResource ToolboxItemIcon}" />
-                    <TextBlock Text="1対1" Style="{StaticResource ToolboxItemTitle}" VerticalAlignment="Center" />
+                    <TextBlock
+                      Text="1対1"
+                      Style="{StaticResource ToolboxItemTitle}"
+                      VerticalAlignment="Center"
+                    />
                   </StackPanel>
                 </Button>
-                <Button Style="{StaticResource ToolboxItemButton}" Command="{Binding StartAddOneToManyCommand}" ToolTip="親子関係を表す 1対多 リレーションを作成できます">
+                <Button
+                  Style="{StaticResource ToolboxItemButton}"
+                  Command="{Binding StartAddOneToManyCommand}"
+                  ToolTip="親子関係を表す 1対多 リレーションを作成できます"
+                >
                   <StackPanel Orientation="Horizontal">
                     <TextBlock Text="│─≪" Style="{StaticResource ToolboxItemIcon}" />
-                    <TextBlock Text="1対多" Style="{StaticResource ToolboxItemTitle}" VerticalAlignment="Center" />
+                    <TextBlock
+                      Text="1対多"
+                      Style="{StaticResource ToolboxItemTitle}"
+                      VerticalAlignment="Center"
+                    />
                   </StackPanel>
                 </Button>
-                <Button Style="{StaticResource ToolboxItemButton}" Command="{Binding StartAddManyToManyCommand}" ToolTip="中間テーブルを想定した多対多リレーションを作成します">
+                <Button
+                  Style="{StaticResource ToolboxItemButton}"
+                  Command="{Binding StartAddManyToManyCommand}"
+                  ToolTip="中間テーブルを想定した多対多リレーションを作成します"
+                >
                   <StackPanel Orientation="Horizontal">
                     <TextBlock Text="≫─≪" Style="{StaticResource ToolboxItemIcon}" />
-                    <TextBlock Text="多対多" Style="{StaticResource ToolboxItemTitle}" VerticalAlignment="Center" />
+                    <TextBlock
+                      Text="多対多"
+                      Style="{StaticResource ToolboxItemTitle}"
+                      VerticalAlignment="Center"
+                    />
                   </StackPanel>
                 </Button>
-                <Button Style="{StaticResource ToolboxItemButton}" Command="{Binding RemoveSelectedRelationshipCommand}" ToolTip="選択中のリレーションを削除します">
+                <Button
+                  Style="{StaticResource ToolboxItemButton}"
+                  Command="{Binding RemoveSelectedRelationshipCommand}"
+                  ToolTip="選択中のリレーションを削除します"
+                >
                   <StackPanel Orientation="Horizontal">
                     <TextBlock Text="🗑" Style="{StaticResource ToolboxItemIcon}" />
-                    <TextBlock Text="リレーション削除" Style="{StaticResource ToolboxItemTitle}" VerticalAlignment="Center" />
+                    <TextBlock
+                      Text="リレーション削除"
+                      Style="{StaticResource ToolboxItemTitle}"
+                      VerticalAlignment="Center"
+                    />
                   </StackPanel>
                 </Button>
               </StackPanel>
@@ -603,7 +765,11 @@
                   FontSize="11"
                   Text="リレーション作成中: 2つのエンティティを順番にクリックしてください。同じエンティティを2回クリックすると自己参照リレーションを作成できます。"
                 />
-                <Button Margin="0,6,0,0" Content="キャンセル" Command="{Binding CancelRelationshipModeCommand}" />
+                <Button
+                  Margin="0,6,0,0"
+                  Content="キャンセル"
+                  Command="{Binding CancelRelationshipModeCommand}"
+                />
               </StackPanel>
             </Border>
           </StackPanel>
@@ -613,7 +779,12 @@
       <!-- 中央: キャンバス -->
       <Border Grid.Column="1" Background="#F2F4F8">
         <Border.Resources>
-          <DrawingBrush x:Key="GridBrush" TileMode="Tile" Viewport="0,0,20,20" ViewportUnits="Absolute">
+          <DrawingBrush
+            x:Key="GridBrush"
+            TileMode="Tile"
+            Viewport="0,0,20,20"
+            ViewportUnits="Absolute"
+          >
             <DrawingBrush.Drawing>
               <GeometryDrawing>
                 <GeometryDrawing.Pen>
@@ -631,7 +802,12 @@
         </Border.Resources>
 
         <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
-          <Grid x:Name="DiagramCanvas" Width="{Binding CanvasWidth}" Height="{Binding CanvasHeight}" Background="{StaticResource GridBrush}">
+          <Grid
+            x:Name="DiagramCanvas"
+            Width="{Binding CanvasWidth}"
+            Height="{Binding CanvasHeight}"
+            Background="{StaticResource GridBrush}"
+          >
             <Grid.InputBindings>
               <MouseBinding MouseAction="LeftClick" Command="{Binding CanvasClickCommand}" />
             </Grid.InputBindings>
@@ -647,7 +823,15 @@
                 <DataTemplate DataType="{x:Type vm:RelationshipViewModel}">
                   <Canvas>
                     <!-- 線本体 (太いヒット領域 + 見た目) -->
-                    <Line X1="{Binding X1}" Y1="{Binding Y1}" X2="{Binding X2}" Y2="{Binding Y2}" Stroke="Transparent" StrokeThickness="14" Cursor="Hand">
+                    <Line
+                      X1="{Binding X1}"
+                      Y1="{Binding Y1}"
+                      X2="{Binding X2}"
+                      Y2="{Binding Y2}"
+                      Stroke="Transparent"
+                      StrokeThickness="14"
+                      Cursor="Hand"
+                    >
                       <Line.Style>
                         <Style TargetType="Line">
                           <Setter Property="Visibility" Value="Visible" />
@@ -666,7 +850,13 @@
                         />
                       </Line.InputBindings>
                     </Line>
-                    <Line X1="{Binding X1}" Y1="{Binding Y1}" X2="{Binding X2}" Y2="{Binding Y2}" IsHitTestVisible="False">
+                    <Line
+                      X1="{Binding X1}"
+                      Y1="{Binding Y1}"
+                      X2="{Binding X2}"
+                      Y2="{Binding Y2}"
+                      IsHitTestVisible="False"
+                    >
                       <Line.Style>
                         <Style TargetType="Line" BasedOn="{StaticResource RelationLineStyle}">
                           <Setter Property="Visibility" Value="Visible" />
@@ -724,7 +914,10 @@
                               <Setter Property="Visibility" Value="Visible" />
                             </DataTrigger>
                             <DataTrigger Binding="{Binding IsSelected}" Value="True">
-                              <Setter Property="Stroke" Value="{StaticResource LineSelectedBrush}" />
+                              <Setter
+                                Property="Stroke"
+                                Value="{StaticResource LineSelectedBrush}"
+                              />
                               <Setter Property="StrokeThickness" Value="2.5" />
                             </DataTrigger>
                           </Style.Triggers>
@@ -753,7 +946,11 @@
                         </Style>
                       </ContentControl.Style>
                       <ContentControl.RenderTransform>
-                        <RotateTransform Angle="{Binding SourceMarkerAngle}" CenterX="12" CenterY="12" />
+                        <RotateTransform
+                          Angle="{Binding SourceMarkerAngle}"
+                          CenterX="12"
+                          CenterY="12"
+                        />
                       </ContentControl.RenderTransform>
                     </ContentControl>
 
@@ -778,7 +975,11 @@
                         </Style>
                       </ContentControl.Style>
                       <ContentControl.RenderTransform>
-                        <RotateTransform Angle="{Binding TargetMarkerAngle}" CenterX="12" CenterY="12" />
+                        <RotateTransform
+                          Angle="{Binding TargetMarkerAngle}"
+                          CenterX="12"
+                          CenterY="12"
+                        />
                       </ContentControl.RenderTransform>
                     </ContentControl>
 
@@ -833,7 +1034,12 @@
                     beh:DragBehavior.UndoRedoManager="{Binding DataContext.UndoRedo, RelativeSource={RelativeSource AncestorType=Window}}"
                   >
                     <Border.Effect>
-                      <DropShadowEffect Color="#88AABB" BlurRadius="6" ShadowDepth="1" Opacity="0.35" />
+                      <DropShadowEffect
+                        Color="#88AABB"
+                        BlurRadius="6"
+                        ShadowDepth="1"
+                        Opacity="0.35"
+                      />
                     </Border.Effect>
                     <Border.Style>
                       <Style TargetType="Border">
@@ -841,17 +1047,34 @@
                         <Setter Property="BorderThickness" Value="1" />
                         <Style.Triggers>
                           <DataTrigger Binding="{Binding IsSelected}" Value="True">
-                            <Setter Property="BorderBrush" Value="{StaticResource EntityBorderSelected}" />
+                            <Setter
+                              Property="BorderBrush"
+                              Value="{StaticResource EntityBorderSelected}"
+                            />
                             <Setter Property="BorderThickness" Value="2" />
                           </DataTrigger>
                         </Style.Triggers>
                       </Style>
                     </Border.Style>
                     <StackPanel>
-                      <Border Background="{Binding TitleBackgroundColor}" CornerRadius="6,6,0,0" Padding="10,6">
+                      <Border
+                        Background="{Binding TitleBackgroundColor}"
+                        CornerRadius="6,6,0,0"
+                        Padding="10,6"
+                      >
                         <StackPanel>
-                          <TextBlock FontWeight="SemiBold" Foreground="#1F2937" Text="{Binding TableName}" />
-                          <TextBlock Text="{Binding Description}" Foreground="#6B7280" FontStyle="Italic" FontSize="11" TextWrapping="Wrap">
+                          <TextBlock
+                            FontWeight="SemiBold"
+                            Foreground="#1F2937"
+                            Text="{Binding TableName}"
+                          />
+                          <TextBlock
+                            Text="{Binding Description}"
+                            Foreground="#6B7280"
+                            FontStyle="Italic"
+                            FontSize="11"
+                            TextWrapping="Wrap"
+                          >
                             <TextBlock.Style>
                               <Style TargetType="TextBlock">
                                 <Setter Property="Visibility" Value="Collapsed" />
@@ -900,8 +1123,14 @@
                                         </DataTrigger>
                                         <MultiDataTrigger>
                                           <MultiDataTrigger.Conditions>
-                                            <Condition Binding="{Binding IsPrimaryKey}" Value="False" />
-                                            <Condition Binding="{Binding IsForeignKey}" Value="True" />
+                                            <Condition
+                                              Binding="{Binding IsPrimaryKey}"
+                                              Value="False"
+                                            />
+                                            <Condition
+                                              Binding="{Binding IsForeignKey}"
+                                              Value="True"
+                                            />
                                           </MultiDataTrigger.Conditions>
                                           <Setter Property="Text" Value="FK" />
                                           <Setter Property="Foreground" Value="#1A73E8" />
@@ -910,27 +1139,46 @@
                                     </Style>
                                   </TextBlock.Style>
                                 </TextBlock>
-                                <TextBlock Grid.Column="1" Text="{Binding Name}" Foreground="#1F2937" />
+                                <TextBlock
+                                  Grid.Column="1"
+                                  Text="{Binding Name}"
+                                  Foreground="#1F2937"
+                                />
                                 <TextBlock Grid.Column="2" Margin="0,0,8,0" Foreground="#6B7280">
                                   <TextBlock.Style>
                                     <Style TargetType="TextBlock">
                                       <Setter Property="Visibility" Value="Collapsed" />
                                       <Setter Property="Text" Value="" />
                                       <Style.Triggers>
-                                        <DataTrigger Binding="{Binding DataContext.ShowNullabilityInDiagram, RelativeSource={RelativeSource AncestorType=Window}}" Value="True">
+                                        <DataTrigger
+                                          Binding="{Binding DataContext.ShowNullabilityInDiagram, RelativeSource={RelativeSource AncestorType=Window}}"
+                                          Value="True"
+                                        >
                                           <Setter Property="Visibility" Value="Visible" />
                                         </DataTrigger>
                                         <MultiDataTrigger>
                                           <MultiDataTrigger.Conditions>
-                                            <Condition Binding="{Binding DataContext.ShowNullabilityInDiagram, RelativeSource={RelativeSource AncestorType=Window}}" Value="True" />
-                                            <Condition Binding="{Binding IsNullable}" Value="True" />
+                                            <Condition
+                                              Binding="{Binding DataContext.ShowNullabilityInDiagram, RelativeSource={RelativeSource AncestorType=Window}}"
+                                              Value="True"
+                                            />
+                                            <Condition
+                                              Binding="{Binding IsNullable}"
+                                              Value="True"
+                                            />
                                           </MultiDataTrigger.Conditions>
                                           <Setter Property="Text" Value="NULL" />
                                         </MultiDataTrigger>
                                         <MultiDataTrigger>
                                           <MultiDataTrigger.Conditions>
-                                            <Condition Binding="{Binding DataContext.ShowNullabilityInDiagram, RelativeSource={RelativeSource AncestorType=Window}}" Value="True" />
-                                            <Condition Binding="{Binding IsNullable}" Value="False" />
+                                            <Condition
+                                              Binding="{Binding DataContext.ShowNullabilityInDiagram, RelativeSource={RelativeSource AncestorType=Window}}"
+                                              Value="True"
+                                            />
+                                            <Condition
+                                              Binding="{Binding IsNullable}"
+                                              Value="False"
+                                            />
                                           </MultiDataTrigger.Conditions>
                                           <Setter Property="Text" Value="NOT NULL" />
                                         </MultiDataTrigger>
@@ -938,9 +1186,20 @@
                                     </Style>
                                   </TextBlock.Style>
                                 </TextBlock>
-                                <TextBlock Grid.Column="3" Text="{Binding DataType}" Foreground="#6B7280" />
+                                <TextBlock
+                                  Grid.Column="3"
+                                  Text="{Binding DataType}"
+                                  Foreground="#6B7280"
+                                />
                               </Grid>
-                              <TextBlock Text="{Binding Description}" Foreground="#6B7280" FontStyle="Italic" FontSize="11" Margin="34,0,0,0" TextWrapping="Wrap">
+                              <TextBlock
+                                Text="{Binding Description}"
+                                Foreground="#6B7280"
+                                FontStyle="Italic"
+                                FontSize="11"
+                                Margin="34,0,0,0"
+                                TextWrapping="Wrap"
+                              >
                                 <TextBlock.Style>
                                   <Style TargetType="TextBlock">
                                     <Setter Property="Visibility" Value="Collapsed" />
@@ -978,10 +1237,20 @@
       </Border>
 
       <!-- 右: プロパティパネル -->
-      <Border Grid.Column="3" Background="{StaticResource SidebarBg}" BorderBrush="{StaticResource DividerBrush}" BorderThickness="1,0,0,0">
+      <Border
+        Grid.Column="3"
+        Background="{StaticResource SidebarBg}"
+        BorderBrush="{StaticResource DividerBrush}"
+        BorderThickness="1,0,0,0"
+      >
         <ScrollViewer VerticalScrollBarVisibility="Auto">
           <StackPanel Margin="12,10,12,12">
-            <TextBlock Text="プロパティ" FontWeight="Bold" Foreground="{StaticResource HeaderText}" Margin="0,0,0,10" />
+            <TextBlock
+              Text="プロパティ"
+              FontWeight="Bold"
+              Foreground="{StaticResource HeaderText}"
+              Margin="0,0,0,10"
+            />
 
             <Border>
               <Border.Style>
@@ -998,7 +1267,10 @@
                   </Style.Triggers>
                 </Style>
               </Border.Style>
-              <TextBlock Style="{StaticResource PropertyHintText}" Text="エンティティまたはリレーションを選択すると、ここで詳細を編集できます。" />
+              <TextBlock
+                Style="{StaticResource PropertyHintText}"
+                Text="エンティティまたはリレーションを選択すると、ここで詳細を編集できます。"
+              />
             </Border>
 
             <StackPanel Visibility="{Binding SelectedEntity, Converter={StaticResource NullToVisibilityConverter}}">
@@ -1023,7 +1295,11 @@
                       <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
 
-                    <TextBlock Grid.Row="0" Style="{StaticResource PropertyFieldLabel}" Text="テーブル名" />
+                    <TextBlock
+                      Grid.Row="0"
+                      Style="{StaticResource PropertyFieldLabel}"
+                      Text="テーブル名"
+                    />
                     <TextBox
                       Grid.Row="0"
                       Grid.Column="1"
@@ -1032,7 +1308,11 @@
                       Text="{Binding SelectedEntity.TableName, UpdateSourceTrigger=LostFocus}"
                     />
 
-                    <TextBlock Grid.Row="2" Style="{StaticResource PropertyFieldLabel}" Text="説明" />
+                    <TextBlock
+                      Grid.Row="2"
+                      Style="{StaticResource PropertyFieldLabel}"
+                      Text="説明"
+                    />
                     <TextBox
                       Grid.Row="2"
                       Grid.Column="1"
@@ -1042,7 +1322,11 @@
                       ToolTip="SQL Server の MS_Description と同期します"
                     />
 
-                    <TextBlock Grid.Row="4" Style="{StaticResource PropertyFieldLabel}" Text="タイトル背景" />
+                    <TextBlock
+                      Grid.Row="4"
+                      Style="{StaticResource PropertyFieldLabel}"
+                      Text="タイトル背景"
+                    />
                     <ComboBox
                       Grid.Row="4"
                       Grid.Column="1"
@@ -1054,7 +1338,15 @@
                       <ComboBox.ItemTemplate>
                         <DataTemplate>
                           <StackPanel Orientation="Horizontal">
-                            <Border Width="34" Height="14" CornerRadius="7" Background="{Binding ColorHex}" BorderBrush="#CBD5E1" BorderThickness="1" Margin="0,0,8,0" />
+                            <Border
+                              Width="34"
+                              Height="14"
+                              CornerRadius="7"
+                              Background="{Binding ColorHex}"
+                              BorderBrush="#CBD5E1"
+                              BorderThickness="1"
+                              Margin="0,0,8,0"
+                            />
                             <TextBlock Text="{Binding Label}" VerticalAlignment="Center" />
                           </StackPanel>
                         </DataTemplate>
@@ -1090,18 +1382,56 @@
                       <ColumnDefinition Width="*" />
                       <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
-                    <TextBlock Grid.Column="0" Style="{StaticResource PropertyCardTitle}" Text="項目" Margin="0" VerticalAlignment="Center" />
-                    <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
-                      <Button Style="{StaticResource PropertyIconButton}" ToolTip="カラムを追加" Command="{Binding AddColumnCommand}">
-                        <TextBlock Text="+" FontSize="16" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center" TextAlignment="Center" />
+                    <TextBlock
+                      Grid.Column="0"
+                      Style="{StaticResource PropertyCardTitle}"
+                      Text="項目"
+                      Margin="0"
+                      VerticalAlignment="Center"
+                    />
+                    <StackPanel
+                      Grid.Column="1"
+                      Orientation="Horizontal"
+                      HorizontalAlignment="Right"
+                    >
+                      <Button
+                        Style="{StaticResource PropertyIconButton}"
+                        ToolTip="カラムを追加"
+                        Command="{Binding AddColumnCommand}"
+                      >
+                        <TextBlock
+                          Text="+"
+                          FontSize="16"
+                          FontWeight="Bold"
+                          HorizontalAlignment="Center"
+                          VerticalAlignment="Center"
+                          TextAlignment="Center"
+                        />
                       </Button>
-                      <Button Style="{StaticResource PropertyIconButton}" ToolTip="選択中のカラムを削除" Command="{Binding RemoveSelectedColumnCommand}">
-                        <TextBlock Text="-" FontSize="18" FontWeight="Bold" Margin="0,-2,0,0" HorizontalAlignment="Center" VerticalAlignment="Center" TextAlignment="Center" />
+                      <Button
+                        Style="{StaticResource PropertyIconButton}"
+                        ToolTip="選択中のカラムを削除"
+                        Command="{Binding RemoveSelectedColumnCommand}"
+                      >
+                        <TextBlock
+                          Text="-"
+                          FontSize="18"
+                          FontWeight="Bold"
+                          Margin="0,-2,0,0"
+                          HorizontalAlignment="Center"
+                          VerticalAlignment="Center"
+                          TextAlignment="Center"
+                        />
                       </Button>
                     </StackPanel>
                   </Grid>
 
-                  <TextBlock Grid.Row="1" Style="{StaticResource PropertyHintText}" Margin="0,0,0,0" Text="行のドラッグで並び順を変更できます。" />
+                  <TextBlock
+                    Grid.Row="1"
+                    Style="{StaticResource PropertyHintText}"
+                    Margin="0,0,0,0"
+                    Text="行のドラッグで並び順を変更できます。"
+                  />
 
                   <DataGrid
                     Grid.Row="3"
@@ -1121,8 +1451,16 @@
                     beh:DataGridRowReorderBehavior.UndoRedoManager="{Binding UndoRedo}"
                   >
                     <DataGrid.InputBindings>
-                      <KeyBinding Key="C" Modifiers="Control" Command="{Binding CopySelectedColumnCommand}" />
-                      <KeyBinding Key="V" Modifiers="Control" Command="{Binding PasteCopiedColumnCommand}" />
+                      <KeyBinding
+                        Key="C"
+                        Modifiers="Control"
+                        Command="{Binding CopySelectedColumnCommand}"
+                      />
+                      <KeyBinding
+                        Key="V"
+                        Modifiers="Control"
+                        Command="{Binding PasteCopiedColumnCommand}"
+                      />
                     </DataGrid.InputBindings>
                     <DataGrid.Columns>
                       <DataGridTemplateColumn Header="PK" Width="36">
@@ -1168,7 +1506,11 @@
                       <DataGridTemplateColumn Header="型" Width="120">
                         <DataGridTemplateColumn.CellTemplate>
                           <DataTemplate>
-                            <TextBlock Text="{Binding DataType}" VerticalAlignment="Center" Margin="4,0" />
+                            <TextBlock
+                              Text="{Binding DataType}"
+                              VerticalAlignment="Center"
+                              Margin="4,0"
+                            />
                           </DataTemplate>
                         </DataGridTemplateColumn.CellTemplate>
                         <DataGridTemplateColumn.CellEditingTemplate>
@@ -1258,7 +1600,11 @@
                       <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
 
-                    <TextBlock Grid.Row="0" Style="{StaticResource PropertyFieldLabel}" Text="種別" />
+                    <TextBlock
+                      Grid.Row="0"
+                      Style="{StaticResource PropertyFieldLabel}"
+                      Text="種別"
+                    />
                     <ComboBox
                       Grid.Row="0"
                       Grid.Column="1"
@@ -1270,13 +1616,36 @@
                       <models:RelationshipType>ManyToMany</models:RelationshipType>
                     </ComboBox>
 
-                    <TextBlock Grid.Row="2" Style="{StaticResource PropertyFieldLabel}" Text="制約名" />
-                    <TextBox Grid.Row="2" Grid.Column="1" Style="{StaticResource PropertyInputTextBox}" Text="{Binding ConstraintName, UpdateSourceTrigger=LostFocus}" />
+                    <TextBlock
+                      Grid.Row="2"
+                      Style="{StaticResource PropertyFieldLabel}"
+                      Text="制約名"
+                    />
+                    <TextBox
+                      Grid.Row="2"
+                      Grid.Column="1"
+                      Style="{StaticResource PropertyInputTextBox}"
+                      Text="{Binding ConstraintName, UpdateSourceTrigger=LostFocus}"
+                    />
 
-                    <TextBlock Grid.Row="4" Style="{StaticResource PropertyFieldLabel}" Text="起点" />
-                    <TextBlock Grid.Row="4" Grid.Column="1" VerticalAlignment="Center" Foreground="{StaticResource MutedText}" Text="{Binding Source.TableName}" />
+                    <TextBlock
+                      Grid.Row="4"
+                      Style="{StaticResource PropertyFieldLabel}"
+                      Text="起点"
+                    />
+                    <TextBlock
+                      Grid.Row="4"
+                      Grid.Column="1"
+                      VerticalAlignment="Center"
+                      Foreground="{StaticResource MutedText}"
+                      Text="{Binding Source.TableName}"
+                    />
 
-                    <TextBlock Grid.Row="6" Style="{StaticResource PropertyFieldLabel}" Text="参照先列" />
+                    <TextBlock
+                      Grid.Row="6"
+                      Style="{StaticResource PropertyFieldLabel}"
+                      Text="参照先列"
+                    />
                     <ComboBox
                       Grid.Row="6"
                       Grid.Column="1"
@@ -1288,10 +1657,24 @@
                       IsEnabled="{Binding CanSelectForeignKeyColumns}"
                     />
 
-                    <TextBlock Grid.Row="8" Style="{StaticResource PropertyFieldLabel}" Text="終点" />
-                    <TextBlock Grid.Row="8" Grid.Column="1" VerticalAlignment="Center" Foreground="{StaticResource MutedText}" Text="{Binding Target.TableName}" />
+                    <TextBlock
+                      Grid.Row="8"
+                      Style="{StaticResource PropertyFieldLabel}"
+                      Text="終点"
+                    />
+                    <TextBlock
+                      Grid.Row="8"
+                      Grid.Column="1"
+                      VerticalAlignment="Center"
+                      Foreground="{StaticResource MutedText}"
+                      Text="{Binding Target.TableName}"
+                    />
 
-                    <TextBlock Grid.Row="10" Style="{StaticResource PropertyFieldLabel}" Text="外部キー列" />
+                    <TextBlock
+                      Grid.Row="10"
+                      Style="{StaticResource PropertyFieldLabel}"
+                      Text="外部キー列"
+                    />
                     <ComboBox
                       Grid.Row="10"
                       Grid.Column="1"
@@ -1303,7 +1686,11 @@
                       IsEnabled="{Binding CanSelectForeignKeyColumns}"
                     />
 
-                    <TextBlock Grid.Row="12" Style="{StaticResource PropertyFieldLabel}" Text="ON DELETE" />
+                    <TextBlock
+                      Grid.Row="12"
+                      Style="{StaticResource PropertyFieldLabel}"
+                      Text="ON DELETE"
+                    />
                     <ComboBox
                       Grid.Row="12"
                       Grid.Column="1"
