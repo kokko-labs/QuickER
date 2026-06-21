@@ -42,7 +42,15 @@ internal sealed class ScribanCSharpRenderer
             public bool IsParentReference { get; }
 
             /// <summary>参照テーブル・カラム情報を受け取り初期化する</summary>
-            public NavigationReferenceAttribute(string principalTable, string principalColumn, string dependentTable, string dependentColumn, bool isCollection, bool cascade, bool isParentReference)
+            public NavigationReferenceAttribute(
+                string principalTable,
+                string principalColumn,
+                string dependentTable,
+                string dependentColumn,
+                bool isCollection,
+                bool cascade,
+                bool isParentReference
+            )
             {
                 PrincipalTable = principalTable;
                 PrincipalColumn = principalColumn;
@@ -73,7 +81,11 @@ internal sealed class ScribanCSharpRenderer
             static abstract TSelf Create(TValue value);
 
             /// <summary>生成可なら true＋値オブジェクト、不可なら false＋エラー内容を返す</summary>
-            static abstract bool TryCreate(TValue value, out TSelf? result, out IReadOnlyList<string> errors);
+            static abstract bool TryCreate(
+                TValue value,
+                out TSelf? result,
+                out IReadOnlyList<string> errors
+            );
 
             /// <summary>内包する値</summary>
             TValue Value { get; }
@@ -114,16 +126,25 @@ internal sealed class ScribanCSharpRenderer
             public virtual string DisplayValue => ToString();
 
             /// <summary>値ベースの等価判定（byte[] などの配列は要素単位で比較する）</summary>
-            public override bool Equals(object? obj) => obj is ValueObjectBase<TSelf, TValue> other && StructuralComparisons.StructuralEqualityComparer.Equals(Value, other.Value);
+            public override bool Equals(object? obj) =>
+                obj is ValueObjectBase<TSelf, TValue> other
+                && StructuralComparisons.StructuralEqualityComparer.Equals(Value, other.Value);
 
             /// <summary>値ベースのハッシュコード（配列は構造的に算出）</summary>
-            public override int GetHashCode() => Value is null ? 0 : StructuralComparisons.StructuralEqualityComparer.GetHashCode(Value);
+            public override int GetHashCode() =>
+                Value is null ? 0 : StructuralComparisons.StructuralEqualityComparer.GetHashCode(Value);
 
             /// <summary>値ベースの等価演算子</summary>
-            public static bool operator ==(ValueObjectBase<TSelf, TValue>? left, ValueObjectBase<TSelf, TValue>? right) => left is null ? right is null : left.Equals(right);
+            public static bool operator ==(
+                ValueObjectBase<TSelf, TValue>? left,
+                ValueObjectBase<TSelf, TValue>? right
+            ) => left is null ? right is null : left.Equals(right);
 
             /// <summary>値ベースの非等価演算子</summary>
-            public static bool operator !=(ValueObjectBase<TSelf, TValue>? left, ValueObjectBase<TSelf, TValue>? right) => !(left == right);
+            public static bool operator !=(
+                ValueObjectBase<TSelf, TValue>? left,
+                ValueObjectBase<TSelf, TValue>? right
+            ) => !(left == right);
 
             /// <summary>内包値の文字列表現を返す</summary>
             public override string ToString() => Value?.ToString() ?? string.Empty;
@@ -139,7 +160,8 @@ internal sealed class ScribanCSharpRenderer
 
                 try
                 {
-                    result = (TValue)Convert.ChangeType(value!, typeof(TValue), CultureInfo.InvariantCulture);
+                    result = (TValue)
+                        Convert.ChangeType(value!, typeof(TValue), CultureInfo.InvariantCulture);
                     return true;
                 }
                 catch
@@ -151,7 +173,10 @@ internal sealed class ScribanCSharpRenderer
         }
 
         /// <summary>順序付け可能な値オブジェクトの基底（数値・日時系）。比較演算子と CompareTo を提供する</summary>
-        public abstract partial class ValueObjectOrderedBase<TSelf, TValue> : ValueObjectBase<TSelf, TValue>, IComparable<TSelf>, IComparable
+        public abstract partial class ValueObjectOrderedBase<TSelf, TValue>
+            : ValueObjectBase<TSelf, TValue>,
+                IComparable<TSelf>,
+                IComparable
             where TSelf : ValueObjectOrderedBase<TSelf, TValue>
             where TValue : IComparable<TValue>
         {
@@ -164,26 +189,51 @@ internal sealed class ScribanCSharpRenderer
 
             /// <summary>非ジェネリック比較（型不一致は例外）</summary>
             int IComparable.CompareTo(object? obj) =>
-                obj is null ? 1 : obj is TSelf other ? CompareTo(other) : throw new ArgumentException($"{obj.GetType().Name} は {typeof(TSelf).Name} と比較できません。", nameof(obj));
+                obj is null ? 1
+                : obj is TSelf other ? CompareTo(other)
+                : throw new ArgumentException(
+                    $"{obj.GetType().Name} は {typeof(TSelf).Name} と比較できません。",
+                    nameof(obj)
+                );
 
             /// <summary>未満</summary>
-            public static bool operator <(ValueObjectOrderedBase<TSelf, TValue>? left, ValueObjectOrderedBase<TSelf, TValue>? right) => Compare(left, right) < 0;
+            public static bool operator <(
+                ValueObjectOrderedBase<TSelf, TValue>? left,
+                ValueObjectOrderedBase<TSelf, TValue>? right
+            ) => Compare(left, right) < 0;
 
             /// <summary>超過</summary>
-            public static bool operator >(ValueObjectOrderedBase<TSelf, TValue>? left, ValueObjectOrderedBase<TSelf, TValue>? right) => Compare(left, right) > 0;
+            public static bool operator >(
+                ValueObjectOrderedBase<TSelf, TValue>? left,
+                ValueObjectOrderedBase<TSelf, TValue>? right
+            ) => Compare(left, right) > 0;
 
             /// <summary>以下</summary>
-            public static bool operator <=(ValueObjectOrderedBase<TSelf, TValue>? left, ValueObjectOrderedBase<TSelf, TValue>? right) => Compare(left, right) <= 0;
+            public static bool operator <=(
+                ValueObjectOrderedBase<TSelf, TValue>? left,
+                ValueObjectOrderedBase<TSelf, TValue>? right
+            ) => Compare(left, right) <= 0;
 
             /// <summary>以上</summary>
-            public static bool operator >=(ValueObjectOrderedBase<TSelf, TValue>? left, ValueObjectOrderedBase<TSelf, TValue>? right) => Compare(left, right) >= 0;
+            public static bool operator >=(
+                ValueObjectOrderedBase<TSelf, TValue>? left,
+                ValueObjectOrderedBase<TSelf, TValue>? right
+            ) => Compare(left, right) >= 0;
 
-            private static int Compare(ValueObjectOrderedBase<TSelf, TValue>? left, ValueObjectOrderedBase<TSelf, TValue>? right) =>
-                left is null ? (right is null ? 0 : -1) : right is null ? 1 : left.Value.CompareTo(right.Value);
+            private static int Compare(
+                ValueObjectOrderedBase<TSelf, TValue>? left,
+                ValueObjectOrderedBase<TSelf, TValue>? right
+            ) =>
+                left is null ? (right is null ? 0 : -1)
+                : right is null ? 1
+                : left.Value.CompareTo(right.Value);
         }
 
         /// <summary>string 値オブジェクトの基底。部分一致系メソッドと序数比較を提供する（順序演算子は付けない）</summary>
-        public abstract partial class ValueObjectStringBase<TSelf> : ValueObjectBase<TSelf, string>, IComparable<TSelf>, IComparable
+        public abstract partial class ValueObjectStringBase<TSelf>
+            : ValueObjectBase<TSelf, string>,
+                IComparable<TSelf>,
+                IComparable
             where TSelf : ValueObjectStringBase<TSelf>
         {
             /// <summary>検証済みの値で初期化する</summary>
@@ -191,13 +241,16 @@ internal sealed class ScribanCSharpRenderer
                 : base(value) { }
 
             /// <summary>指定文字列を含むか</summary>
-            public bool Contains(string? value) => value is not null && Value.Contains(value, StringComparison.Ordinal);
+            public bool Contains(string? value) =>
+                value is not null && Value.Contains(value, StringComparison.Ordinal);
 
             /// <summary>指定文字列で始まるか</summary>
-            public bool StartsWith(string? value) => value is not null && Value.StartsWith(value, StringComparison.Ordinal);
+            public bool StartsWith(string? value) =>
+                value is not null && Value.StartsWith(value, StringComparison.Ordinal);
 
             /// <summary>指定文字列で終わるか</summary>
-            public bool EndsWith(string? value) => value is not null && Value.EndsWith(value, StringComparison.Ordinal);
+            public bool EndsWith(string? value) =>
+                value is not null && Value.EndsWith(value, StringComparison.Ordinal);
 
             /// <summary>他の値オブジェクトの値を含むか</summary>
             public bool Contains(TSelf? value) => value is not null && Contains(value.Value);
@@ -209,11 +262,17 @@ internal sealed class ScribanCSharpRenderer
             public bool EndsWith(TSelf? value) => value is not null && EndsWith(value.Value);
 
             /// <summary>序数で比較する</summary>
-            public int CompareTo(TSelf? other) => other is null ? 1 : string.CompareOrdinal(Value, other.Value);
+            public int CompareTo(TSelf? other) =>
+                other is null ? 1 : string.CompareOrdinal(Value, other.Value);
 
             /// <summary>非ジェネリック比較（型不一致は例外）</summary>
             int IComparable.CompareTo(object? obj) =>
-                obj is null ? 1 : obj is TSelf other ? CompareTo(other) : throw new ArgumentException($"{obj.GetType().Name} は {typeof(TSelf).Name} と比較できません。", nameof(obj));
+                obj is null ? 1
+                : obj is TSelf other ? CompareTo(other)
+                : throw new ArgumentException(
+                    $"{obj.GetType().Name} は {typeof(TSelf).Name} と比較できません。",
+                    nameof(obj)
+                );
         }
 
         /// <summary>bool 値オブジェクトの基底。True/False ファクトリと真偽判定を提供する（順序比較は持たない）</summary>
@@ -238,7 +297,8 @@ internal sealed class ScribanCSharpRenderer
         }
 
         /// <summary>DateTime 値オブジェクトの基底。Now/Today ファクトリを提供する</summary>
-        public abstract partial class ValueObjectDateTimeBase<TSelf> : ValueObjectOrderedBase<TSelf, DateTime>
+        public abstract partial class ValueObjectDateTimeBase<TSelf>
+            : ValueObjectOrderedBase<TSelf, DateTime>
             where TSelf : ValueObjectDateTimeBase<TSelf>, IValueObject<TSelf, DateTime>
         {
             /// <summary>検証済みの値で初期化する</summary>
@@ -261,11 +321,15 @@ internal sealed class ScribanCSharpRenderer
                 : base(value) { }
 
             /// <summary>Base64 文字列として返す</summary>
-            public override string ToString() => Value is null ? string.Empty : Convert.ToBase64String(Value);
+            public override string ToString() =>
+                Value is null ? string.Empty : Convert.ToBase64String(Value);
         }
 
         /// <summary>GUID を文字列で保持する主キー値オブジェクトの基底。無引数生成で GUID を自動採番する</summary>
-        public abstract partial class ValueObjectGuidKeyBase<TSelf> : ValueObjectBase<TSelf, string>, IComparable<TSelf>, IComparable
+        public abstract partial class ValueObjectGuidKeyBase<TSelf>
+            : ValueObjectBase<TSelf, string>,
+                IComparable<TSelf>,
+                IComparable
             where TSelf : ValueObjectGuidKeyBase<TSelf>, IValueObject<TSelf, string>
         {
             /// <summary>検証済みの値で初期化する</summary>
@@ -276,11 +340,17 @@ internal sealed class ScribanCSharpRenderer
             public static TSelf Create() => TSelf.Create(Guid.NewGuid().ToString());
 
             /// <summary>序数で比較する</summary>
-            public int CompareTo(TSelf? other) => other is null ? 1 : string.CompareOrdinal(Value, other.Value);
+            public int CompareTo(TSelf? other) =>
+                other is null ? 1 : string.CompareOrdinal(Value, other.Value);
 
             /// <summary>非ジェネリック比較（型不一致は例外）</summary>
             int IComparable.CompareTo(object? obj) =>
-                obj is null ? 1 : obj is TSelf other ? CompareTo(other) : throw new ArgumentException($"{obj.GetType().Name} は {typeof(TSelf).Name} と比較できません。", nameof(obj));
+                obj is null ? 1
+                : obj is TSelf other ? CompareTo(other)
+                : throw new ArgumentException(
+                    $"{obj.GetType().Name} は {typeof(TSelf).Name} と比較できません。",
+                    nameof(obj)
+                );
         }
 
         /// <summary>値オブジェクトを内包値（素の値）として JSON 入出力する変換器</summary>
@@ -288,14 +358,19 @@ internal sealed class ScribanCSharpRenderer
             where TVo : class, IValueObject<TVo, TValue>
         {
             /// <summary>素の値を読み取り、Create で値オブジェクトを復元する</summary>
-            public override TVo? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+            public override TVo? Read(
+                ref Utf8JsonReader reader,
+                Type typeToConvert,
+                JsonSerializerOptions options
+            )
             {
                 var value = JsonSerializer.Deserialize<TValue>(ref reader, options);
                 return value is null ? null : TVo.Create(value);
             }
 
             /// <summary>内包値（素の値）として書き出す</summary>
-            public override void Write(Utf8JsonWriter writer, TVo value, JsonSerializerOptions options) => JsonSerializer.Serialize(writer, value.Value, options);
+            public override void Write(Utf8JsonWriter writer, TVo value, JsonSerializerOptions options) =>
+                JsonSerializer.Serialize(writer, value.Value, options);
         }
 
         /// <summary>IValueObject&lt;,&gt; を実装する型に汎用変換器を適用するファクトリ</summary>
@@ -303,21 +378,32 @@ internal sealed class ScribanCSharpRenderer
         {
             /// <summary>値オブジェクト型かどうか</summary>
             public override bool CanConvert(Type typeToConvert) =>
-                Array.Exists(typeToConvert.GetInterfaces(), i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IValueObject<,>));
+                Array.Exists(
+                    typeToConvert.GetInterfaces(),
+                    i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IValueObject<,>)
+                );
 
             /// <summary>対象型の TValue を解決して閉じた変換器を生成する</summary>
             public override JsonConverter CreateConverter(Type typeToConvert, JsonSerializerOptions options)
             {
-                var iface = Array.Find(typeToConvert.GetInterfaces(), i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IValueObject<,>))!;
+                var iface = Array.Find(
+                    typeToConvert.GetInterfaces(),
+                    i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IValueObject<,>)
+                )!;
                 var valueType = iface.GetGenericArguments()[1];
-                var converterType = typeof(ValueObjectJsonConverter<,>).MakeGenericType(typeToConvert, valueType);
+                var converterType = typeof(ValueObjectJsonConverter<,>).MakeGenericType(
+                    typeToConvert,
+                    valueType
+                );
                 return (JsonConverter)Activator.CreateInstance(converterType)!;
             }
         }
         {{~ for vo in value_object_classes ~}}
 
         /// <summary>{{ vo.column_name }} 列に対応する値オブジェクト</summary>
-        public sealed partial class {{ vo.class_name }} : {{ vo.base_declaration }}, {{ vo.interface_declaration }}
+        public sealed partial class {{ vo.class_name }}
+            : {{ vo.base_declaration }},
+                {{ vo.interface_declaration }}
         {
             private {{ vo.class_name }}({{ vo.value_type_name }} value)
                 : base(value) { }
@@ -335,7 +421,11 @@ internal sealed class ScribanCSharpRenderer
             }
 
             /// <summary>生成可なら true＋値オブジェクト、不可なら false＋エラー内容を返す</summary>
-            public static bool TryCreate({{ vo.value_type_name }} value, out {{ vo.class_name }}? result, out IReadOnlyList<string> errors)
+            public static bool TryCreate(
+                {{ vo.value_type_name }} value,
+                out {{ vo.class_name }}? result,
+                out IReadOnlyList<string> errors
+            )
             {
                 var list = new List<string>();
                 Validate(value, list);
@@ -370,7 +460,12 @@ internal sealed class ScribanCSharpRenderer
             {{~ if vo.precision ~}}
 
             /// <summary>decimal の桁数検証（丸めない・超過は弾く）。末尾ゼロは scale に数える</summary>
-            private static void ValidateDecimal(decimal value, int precision, int scale, ICollection<string> errors)
+            private static void ValidateDecimal(
+                decimal value,
+                int precision,
+                int scale,
+                ICollection<string> errors
+            )
             {
                 var valueScale = (decimal.GetBits(value)[3] >> 16) & 0xFF;
                 if (valueScale > scale)
@@ -454,14 +549,19 @@ internal sealed class ScribanCSharpRenderer
 
             /// <summary>指定型の値プロパティ一覧を取得する（ナビゲーションと基底プロパティは除外。型ごとに 1 度だけ走査しキャッシュ）</summary>
             private static PropertyInfo[] GetValueProperties(Type type) =>
-                _valuePropertyCache.GetOrAdd(type, static resolvedType => resolvedType
-                    .GetProperties(BindingFlags.Public | BindingFlags.Instance)
-                    .Where(property =>
-                        property.CanRead
-                        && property.CanWrite
-                        && property.DeclaringType != typeof(EntityBase)
-                        && !Attribute.IsDefined(property, typeof(NavigationReferenceAttribute)))
-                    .ToArray());
+                _valuePropertyCache.GetOrAdd(
+                    type,
+                    static resolvedType =>
+                        resolvedType
+                            .GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                            .Where(property =>
+                                property.CanRead
+                                && property.CanWrite
+                                && property.DeclaringType != typeof(EntityBase)
+                                && !Attribute.IsDefined(property, typeof(NavigationReferenceAttribute))
+                            )
+                            .ToArray()
+                );
 
             /// <summary>他のエンティティと列の値がすべて一致するかどうかを判定する（RowState・ナビゲーションは比較対象外）</summary>
             public bool HasSameValues(EntityBase? other)
@@ -485,7 +585,12 @@ internal sealed class ScribanCSharpRenderer
                 foreach (var property in GetValueProperties(type))
                 {
                     // byte[] などの配列は構造的に（要素単位で）比較する
-                    if (!StructuralComparisons.StructuralEqualityComparer.Equals(property.GetValue(this), property.GetValue(other)))
+                    if (
+                        !StructuralComparisons.StructuralEqualityComparer.Equals(
+                            property.GetValue(this),
+                            property.GetValue(other)
+                        )
+                    )
                     {
                         return false;
                     }
@@ -505,7 +610,11 @@ internal sealed class ScribanCSharpRenderer
                 {
                     var value = property.GetValue(this);
                     // byte[] などの配列は構造的なハッシュを使う
-                    hash.Add(value is null ? 0 : StructuralComparisons.StructuralEqualityComparer.GetHashCode(value));
+                    hash.Add(
+                        value is null
+                            ? 0
+                            : StructuralComparisons.StructuralEqualityComparer.GetHashCode(value)
+                    );
                 }
 
                 return hash.ToHashCode();
@@ -538,7 +647,12 @@ internal sealed class ScribanCSharpRenderer
             /// get/set 可能な public プロパティのみが対象（get-only の IsAdded などの派生フラグは出力されない。RowState は出力される）
             /// 子ナビゲーションは含まれ、親参照ナビゲーションは [JsonIgnore] が付くため循環しない
             /// </remarks>
-            public string ToJson(bool writeIndented = false) => JsonSerializer.Serialize(this, GetType(), writeIndented ? _jsonOptionsIndented : _jsonOptions);
+            public string ToJson(bool writeIndented = false) =>
+                JsonSerializer.Serialize(
+                    this,
+                    GetType(),
+                    writeIndented ? _jsonOptionsIndented : _jsonOptions
+                );
 
             /// <summary>このエンティティの深いクローン（ディープコピー）を生成する（JSON ラウンドトリップ）</summary>
             /// <remarks>
@@ -576,7 +690,10 @@ internal sealed class ScribanCSharpRenderer
 
         {{~ if edit_model_classes.size > 0 ~}}
         /// <summary>EditModel 共通の変更通知・エラー管理・補助処理を提供する基底クラス</summary>
-        public abstract partial class EditModelBase : INotifyPropertyChanged, INotifyDataErrorInfo, IEditableObject
+        public abstract partial class EditModelBase
+            : INotifyPropertyChanged,
+                INotifyDataErrorInfo,
+                IEditableObject
         {
             /// <summary>プロパティ名ごとのエラーメッセージ一覧</summary>
             private readonly Dictionary<string, List<string>> _errors = new();
@@ -764,7 +881,8 @@ internal sealed class ScribanCSharpRenderer
             internal void RaiseParentChanged() => OnPropertyChanged("Parent");
 
             /// <summary>指定プロパティの変更通知を発行する</summary>
-            protected void OnPropertyChanged(string propertyName) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+            protected void OnPropertyChanged(string propertyName) =>
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 
             /// <summary>値が変化した場合のみ代入し変更通知を発行する共通ヘルパー（具象クラスで override して挙動を拡張できる）</summary>
             protected virtual bool SetProperty<T>(ref T field, T value, string propertyName)
@@ -791,7 +909,8 @@ internal sealed class ScribanCSharpRenderer
             }
 
             /// <summary>子要素のパスを連結する（ルートは空、以降は "." 区切り）</summary>
-            protected static string CombineErrorPath(string path, string segment) => path.Length == 0 ? segment : path + "." + segment;
+            protected static string CombineErrorPath(string path, string segment) =>
+                path.Length == 0 ? segment : path + "." + segment;
 
             /// <summary>必須項目の未入力と追加検証を確認しエラーを登録する（エラーが無ければ true）</summary>
             /// <param name="includeChildren">true で子（カスケード）も連鎖検証、false で自身のみ検証</param>
@@ -926,10 +1045,13 @@ internal sealed class ScribanCSharpRenderer
             protected virtual void RegisterExtraChildren() { }
 
             /// <summary>子（単一参照）をカスケードに登録する（参照は遅延取得で最新を反映）</summary>
-            protected void AddChild(string name, Func<EditModelBase?> accessor) => (_childLinks ??= new()).Add(ChildLink.ForSingle(name, accessor));
+            protected void AddChild(string name, Func<EditModelBase?> accessor) =>
+                (_childLinks ??= new()).Add(ChildLink.ForSingle(name, accessor));
 
             /// <summary>子コレクションをカスケードに登録する</summary>
-            protected void AddChildren<T>(string name, EditModelCollection<T> collection) where T : EditModelBase => (_childLinks ??= new()).Add(ChildLink.ForCollection(name, collection));
+            protected void AddChildren<T>(string name, EditModelCollection<T> collection)
+                where T : EditModelBase =>
+                (_childLinks ??= new()).Add(ChildLink.ForCollection(name, collection));
 
             /// <summary>追加の子（カスケード参加要素）のリンク。単一参照と子コレクションを一様に扱う</summary>
             private sealed class ChildLink
@@ -940,7 +1062,13 @@ internal sealed class ScribanCSharpRenderer
                 private readonly Func<bool, bool> _hasChanges;
                 private readonly Action _acceptRemoved;
 
-                private ChildLink(string name, bool isCollection, Func<IEnumerable<EditModelBase>> items, Func<bool, bool> hasChanges, Action acceptRemoved)
+                private ChildLink(
+                    string name,
+                    bool isCollection,
+                    Func<IEnumerable<EditModelBase>> items,
+                    Func<bool, bool> hasChanges,
+                    Action acceptRemoved
+                )
                 {
                     _name = name;
                     _isCollection = isCollection;
@@ -950,22 +1078,20 @@ internal sealed class ScribanCSharpRenderer
                 }
 
                 /// <summary>単一の子参照を登録するリンクを生成する</summary>
-                public static ChildLink ForSingle(string name, Func<EditModelBase?> accessor)
-                    => new(
+                public static ChildLink ForSingle(string name, Func<EditModelBase?> accessor) =>
+                    new(
                         name,
                         false,
                         () => accessor() is { } child ? new[] { child } : Enumerable.Empty<EditModelBase>(),
-                        includeChildren => accessor() is { } child && child.HasGraphChanges(includeChildren),
-                        () => { });
+                        includeChildren =>
+                            accessor() is { } child && child.HasGraphChanges(includeChildren),
+                        () => { }
+                    );
 
                 /// <summary>子コレクションを登録するリンクを生成する</summary>
-                public static ChildLink ForCollection<T>(string name, EditModelCollection<T> collection) where T : EditModelBase
-                    => new(
-                        name,
-                        true,
-                        () => collection,
-                        _ => collection.HasChanges,
-                        collection.AcceptRemoved);
+                public static ChildLink ForCollection<T>(string name, EditModelCollection<T> collection)
+                    where T : EditModelBase =>
+                    new(name, true, () => collection, _ => collection.HasChanges, collection.AcceptRemoved);
 
                 /// <summary>登録した子を検証し valid を更新する</summary>
                 public void Validate(bool includeChildren, ref bool valid)
@@ -980,7 +1106,11 @@ internal sealed class ScribanCSharpRenderer
                 }
 
                 /// <summary>登録した子のエラーをパス付き（コレクションは name[i]、単一は name）で収集する</summary>
-                public void CollectErrors(string parentPath, bool includeChildren, List<EditModelError> errors)
+                public void CollectErrors(
+                    string parentPath,
+                    bool includeChildren,
+                    List<EditModelError> errors
+                )
                 {
                     var index = 0;
 
@@ -1030,7 +1160,8 @@ internal sealed class ScribanCSharpRenderer
             }
 
             /// <summary>入力エラーの変更通知を発行する</summary>
-            protected void OnErrorsChanged(string propertyName) => ErrorsChanged?.Invoke(this, new DataErrorsChangedEventArgs(propertyName));
+            protected void OnErrorsChanged(string propertyName) =>
+                ErrorsChanged?.Invoke(this, new DataErrorsChangedEventArgs(propertyName));
 
             /// <summary>確定値をバインディング用プロパティへ書き戻しエラーをクリアする</summary>
             public void RevertInput() => ExecuteRevert(RevertCore);
@@ -1117,13 +1248,22 @@ internal sealed class ScribanCSharpRenderer
             protected virtual void CancelEditCore() { }
 
             /// <summary>必須項目の未入力エラーメッセージを構築する（派生クラスで override し方針を差し替え可能）</summary>
-            protected virtual string BuildRequiredErrorMessage(string propertyName) => $"{propertyName} は必須です。";
+            protected virtual string BuildRequiredErrorMessage(string propertyName) =>
+                $"{propertyName} は必須です。";
 
             /// <summary>バインディング値の変換エラーメッセージを構築する（派生クラスで override し方針を差し替え可能）</summary>
-            protected virtual string BuildParseErrorMessage(string propertyName, string inputValue, string typeName) => $"'{inputValue}' は {typeName} に変換できません。";
+            protected virtual string BuildParseErrorMessage(
+                string propertyName,
+                string inputValue,
+                string typeName
+            ) => $"'{inputValue}' は {typeName} に変換できません。";
 
             /// <summary>変換エラーメッセージを解決する（BuildParseErrorMessage の後に CustomizeParseErrorMessage で微調整）</summary>
-            protected string ResolveParseErrorMessage(string propertyName, string inputValue, string typeName)
+            protected string ResolveParseErrorMessage(
+                string propertyName,
+                string inputValue,
+                string typeName
+            )
             {
                 var message = BuildParseErrorMessage(propertyName, inputValue, typeName);
                 CustomizeParseErrorMessage(propertyName, inputValue, typeName, ref message);
@@ -1131,7 +1271,12 @@ internal sealed class ScribanCSharpRenderer
             }
 
             /// <summary>プロパティ単位のエラーメッセージ微調整用 partial メソッド（別ファイルの partial 実装で差し替え）</summary>
-            partial void CustomizeParseErrorMessage(string propertyName, string inputValue, string typeName, ref string message);
+            partial void CustomizeParseErrorMessage(
+                string propertyName,
+                string inputValue,
+                string typeName,
+                ref string message
+            );
         }
 
         /// <summary>EditModel グラフ上の 1 件の検証エラー</summary>
@@ -1326,7 +1471,10 @@ internal sealed class ScribanCSharpRenderer
             {
                 if (index < 0 || count < 0 || index + count > Count)
                 {
-                    throw new ArgumentOutOfRangeException(nameof(count), "指定範囲がコレクションの範囲外です。");
+                    throw new ArgumentOutOfRangeException(
+                        nameof(count),
+                        "指定範囲がコレクションの範囲外です。"
+                    );
                 }
 
                 for (var i = 0; i < count; i++)
@@ -1459,13 +1607,22 @@ internal sealed class ScribanCSharpRenderer
                         }
                         else
                         {
-                            SetError(nameof({{ p.binding_property_name }}), ResolveParseErrorMessage(nameof({{ p.binding_property_name }}), value, "{{ p.parse_type_name }}"));
+                            SetError(
+                                nameof({{ p.binding_property_name }}),
+                                ResolveParseErrorMessage(nameof({{ p.binding_property_name }}), value, "{{ p.parse_type_name }}")
+                            );
                         }
         {{ else if p.is_binary }}                else
                         {
                             try
                             {
-                                if ({{ p.value_object_class_name }}.TryCreate(Convert.FromBase64String(value), out var converted, out var voErrors))
+                                if (
+                                    {{ p.value_object_class_name }}.TryCreate(
+                                        Convert.FromBase64String(value),
+                                        out var converted,
+                                        out var voErrors
+                                    )
+                                )
                                 {
                                     {{ p.property_name }} = converted;
                                     SetError(nameof({{ p.binding_property_name }}), null);
@@ -1477,7 +1634,10 @@ internal sealed class ScribanCSharpRenderer
                             }
                             catch (FormatException)
                             {
-                                SetError(nameof({{ p.binding_property_name }}), ResolveParseErrorMessage(nameof({{ p.binding_property_name }}), value, "byte[]"));
+                                SetError(
+                                    nameof({{ p.binding_property_name }}),
+                                    ResolveParseErrorMessage(nameof({{ p.binding_property_name }}), value, "byte[]")
+                                );
                             }
                         }
         {{ else }}                else if ({{ p.value_object_class_name }}.TryCreate(value, out var converted, out var voErrors))
@@ -1496,7 +1656,10 @@ internal sealed class ScribanCSharpRenderer
                         }
                         else
                         {
-                            SetError(nameof({{ p.binding_property_name }}), ResolveParseErrorMessage(nameof({{ p.binding_property_name }}), value, "{{ p.parse_type_name }}"));
+                            SetError(
+                                nameof({{ p.binding_property_name }}),
+                                ResolveParseErrorMessage(nameof({{ p.binding_property_name }}), value, "{{ p.parse_type_name }}")
+                            );
                         }
         {{ else if p.is_binary }}                if (string.IsNullOrEmpty(value))
                         {
@@ -1512,7 +1675,10 @@ internal sealed class ScribanCSharpRenderer
                             }
                             catch (FormatException)
                             {
-                                SetError(nameof({{ p.binding_property_name }}), ResolveParseErrorMessage(nameof({{ p.binding_property_name }}), value, "byte[]"));
+                                SetError(
+                                    nameof({{ p.binding_property_name }}),
+                                    ResolveParseErrorMessage(nameof({{ p.binding_property_name }}), value, "byte[]")
+                                );
                             }
                         }
         {{ else if p.is_nullable }}                if (string.IsNullOrEmpty(value))
@@ -1608,10 +1774,12 @@ internal sealed class ScribanCSharpRenderer
             public new {{ item.class_name }}? GetPrevious() => ({{ item.class_name }}?)base.GetPrevious();
 
             /// <summary>自身が所属する親コレクション（所属していなければ null）</summary>
-            public EditModelCollection<{{ item.class_name }}>? Parent => Owner as EditModelCollection<{{ item.class_name }}>;
+            public EditModelCollection<{{ item.class_name }}>? Parent =>
+                Owner as EditModelCollection<{{ item.class_name }}>;
 
             /// <summary>所属コレクションの並び替え本体。型付きコレクションの Move を呼ぶ（MoveTo* から使用される）</summary>
-            protected override void MoveCore(int oldIndex, int newIndex) => Parent?.Move(oldIndex, newIndex);
+            protected override void MoveCore(int oldIndex, int newIndex) =>
+                Parent?.Move(oldIndex, newIndex);
         }
         {{~ end ~}}
 
@@ -1640,13 +1808,20 @@ internal sealed class ScribanCSharpRenderer
 
             /// <summary>{{ mapper.edit_model_class_name }} の EditModelCollection を基に {{ mapper.entity_class_name }} のリストを生成する</summary>
             /// <param name="includeRemoved">削除追跡分（Removed）も復元して含めるか（保存用は true、帳票表示用などは false）</param>
-            public List<{{ mapper.entity_class_name }}> CreateEntities(EditModelCollection<{{ mapper.edit_model_class_name }}> editModels, bool includeRemoved = false)
+            public List<{{ mapper.entity_class_name }}> CreateEntities(
+                EditModelCollection<{{ mapper.edit_model_class_name }}> editModels,
+                bool includeRemoved = false
+            )
             {
-                var entities = editModels.Select(editModel => CreateEntity(editModel, includeRemoved)).ToList();
+                var entities = editModels
+                    .Select(editModel => CreateEntity(editModel, includeRemoved))
+                    .ToList();
 
                 if (includeRemoved)
                 {
-                    entities.AddRange(editModels.RemovedItems.Select(removed => CreateEntity(removed, includeRemoved)));
+                    entities.AddRange(
+                        editModels.RemovedItems.Select(removed => CreateEntity(removed, includeRemoved))
+                    );
                 }
 
                 return entities;
@@ -1673,9 +1848,13 @@ internal sealed class ScribanCSharpRenderer
             }
 
             /// <summary>{{ mapper.entity_class_name }} の列挙を基に {{ mapper.edit_model_class_name }} の EditModelCollection を生成する</summary>
-            public EditModelCollection<{{ mapper.edit_model_class_name }}> CreateEditModels(IEnumerable<{{ mapper.entity_class_name }}> entities)
+            public EditModelCollection<{{ mapper.edit_model_class_name }}> CreateEditModels(
+                IEnumerable<{{ mapper.entity_class_name }}> entities
+            )
             {
-                return new EditModelCollection<{{ mapper.edit_model_class_name }}>(entities.Select(entity => CreateEditModel(entity)));
+                return new EditModelCollection<{{ mapper.edit_model_class_name }}>(
+                    entities.Select(entity => CreateEditModel(entity))
+                );
             }
 
             /// <summary>新しい {{ mapper.edit_model_class_name }} の生成直後（ロード後）に呼ばれる（partial 実装で初期値を設定。新規のみは IsAdded で分岐）</summary>
@@ -1683,9 +1862,14 @@ internal sealed class ScribanCSharpRenderer
 
             /// <summary>{{ mapper.edit_model_class_name }} の確定値を既存の {{ mapper.entity_class_name }} へ反映する（破壊的更新）</summary>
             /// <param name="includeRemoved">削除追跡分（Removed）も復元して反映するか（保存用は true、帳票表示用などは false）</param>
-            public void ApplyToEntity({{ mapper.edit_model_class_name }} editModel, {{ mapper.entity_class_name }} entity, bool includeRemoved = false)
+            public void ApplyToEntity(
+                {{ mapper.edit_model_class_name }} editModel,
+                {{ mapper.entity_class_name }} entity,
+                bool includeRemoved = false
+            )
             {
-        {{ for prop in mapper.scalar_properties }}{{ if prop.edit_model_is_nullable && prop.entity_type_name != prop.edit_model_type_name }}        entity.{{ prop.property_name }} = editModel.{{ prop.property_name }} ?? throw new InvalidOperationException("{{ prop.property_name }} が未入力です。");
+        {{ for prop in mapper.scalar_properties }}{{ if prop.edit_model_is_nullable && prop.entity_type_name != prop.edit_model_type_name }}        entity.{{ prop.property_name }} =
+                    editModel.{{ prop.property_name }} ?? throw new InvalidOperationException("{{ prop.property_name }} が未入力です。");
         {{ else }}        entity.{{ prop.property_name }} = editModel.{{ prop.property_name }};
         {{ end }}{{ end }}        // 確定値の変更で EditModel 側に立った RowState をそのまま転写する（ここでは状態を作らない）
                 entity.RowState = editModel.RowState;
@@ -1743,7 +1927,10 @@ internal sealed class ScribanCSharpRenderer
             /// <summary>エンティティのコレクションを SqlBulkCopy で一括追加する</summary>
             /// <param name="entities">追加対象の一覧</param>
             /// <returns>追加した件数</returns>
-            Task<int> BulkInsertAsync(IEnumerable<TEntity> entities, CancellationToken cancellationToken = default);
+            Task<int> BulkInsertAsync(
+                IEnumerable<TEntity> entities,
+                CancellationToken cancellationToken = default
+            );
 
             /// <summary>エンティティ更新（更新対象ありで true）</summary>
             Task<bool> UpdateAsync(TEntity entity, CancellationToken cancellationToken = default);
@@ -1760,7 +1947,13 @@ internal sealed class ScribanCSharpRenderer
             /// <param name="cascadeDelete">削除時に子オブジェクトを連鎖削除するか</param>
             /// <param name="insertWhenUpdateMissing">更新対象が存在しない場合に INSERT へ切り替えるか（既定は例外）</param>
             /// <returns>保存したレコード数</returns>
-            Task<int> SaveAsync(TEntity entity, bool cascadeSave = true, bool cascadeDelete = true, bool insertWhenUpdateMissing = false, CancellationToken cancellationToken = default);
+            Task<int> SaveAsync(
+                TEntity entity,
+                bool cascadeSave = true,
+                bool cascadeDelete = true,
+                bool insertWhenUpdateMissing = false,
+                CancellationToken cancellationToken = default
+            );
 
             /// <summary>複数の集約ルートを 1 トランザクションでまとめて保存する（全件成功か全件ロールバックの原子的処理）</summary>
             /// <param name="entities">保存対象（集約ルート）の一覧</param>
@@ -1768,7 +1961,13 @@ internal sealed class ScribanCSharpRenderer
             /// <param name="cascadeDelete">削除時に子オブジェクトを連鎖削除するか</param>
             /// <param name="insertWhenUpdateMissing">更新対象が存在しない場合に INSERT へ切り替えるか（既定は例外）</param>
             /// <returns>保存したレコード数</returns>
-            Task<int> SaveAsync(IEnumerable<TEntity> entities, bool cascadeSave = true, bool cascadeDelete = true, bool insertWhenUpdateMissing = false, CancellationToken cancellationToken = default);
+            Task<int> SaveAsync(
+                IEnumerable<TEntity> entities,
+                bool cascadeSave = true,
+                bool cascadeDelete = true,
+                bool insertWhenUpdateMissing = false,
+                CancellationToken cancellationToken = default
+            );
         }
 
         /// <summary>SQL Server 接続を生成するファクトリ</summary>
@@ -1790,7 +1989,8 @@ internal sealed class ScribanCSharpRenderer
         internal static class SqlParameterValue
         {
             /// <summary>値オブジェクトなら内包値、それ以外はそのまま返す</summary>
-            public static object? Unwrap(object? value) => value is IValueObject valueObject ? valueObject.UnderlyingValue : value;
+            public static object? Unwrap(object? value) =>
+                value is IValueObject valueObject ? valueObject.UnderlyingValue : value;
         }
         {{~ end ~}}
 
@@ -1836,8 +2036,11 @@ internal sealed class ScribanCSharpRenderer
             public static SqlEntityMetadata<TEntity, TKey> Create()
             {
                 var entityType = typeof(TEntity);
-                var tableAttribute = entityType.GetCustomAttribute<TableAttribute>()
-                    ?? throw new InvalidOperationException($"{entityType.Name} に [Table] 属性が必要です。");
+                var tableAttribute =
+                    entityType.GetCustomAttribute<TableAttribute>()
+                    ?? throw new InvalidOperationException(
+                        $"{entityType.Name} に [Table] 属性が必要です。"
+                    );
                 var properties = entityType
                     .GetProperties(BindingFlags.Public | BindingFlags.Instance)
                     .Where(property =>
@@ -1847,12 +2050,19 @@ internal sealed class ScribanCSharpRenderer
                         && property.GetCustomAttribute<NavigationReferenceAttribute>() is null
                     )
                     .ToList();
-                var keyProperty = properties.SingleOrDefault(property => property.GetCustomAttribute<KeyAttribute>() is not null)
-                    ?? throw new InvalidOperationException($"{entityType.Name} に [Key] 属性付きプロパティが必要です。");
+                var keyProperty =
+                    properties.SingleOrDefault(property =>
+                        property.GetCustomAttribute<KeyAttribute>() is not null
+                    )
+                    ?? throw new InvalidOperationException(
+                        $"{entityType.Name} に [Key] 属性付きプロパティが必要です。"
+                    );
                 var nonKeyProperties = properties.Where(property => property != keyProperty).ToList();
                 var allColumns = properties.Select(GetColumnName).ToArray();
                 var insertColumns = properties.Select(GetColumnName).ToArray();
-                var updateAssignments = nonKeyProperties.Select(property => $"[{GetColumnName(property)}] = @{property.Name}").ToArray();
+                var updateAssignments = nonKeyProperties
+                    .Select(property => $"[{GetColumnName(property)}] = @{property.Name}")
+                    .ToArray();
                 var tableName = $"[{tableAttribute.Name}]";
                 var keyColumnName = GetColumnName(keyProperty);
                 var columnList = string.Join(", ", allColumns.Select(column => $"[{column}]"));
@@ -1867,8 +2077,10 @@ internal sealed class ScribanCSharpRenderer
                     ColumnList = columnList,
                     SelectAllSql = $"SELECT {columnList} FROM {tableName};",
                     SelectByIdSql = $"SELECT {columnList} FROM {tableName} WHERE [{keyColumnName}] = @id;",
-                    InsertSql = $"INSERT INTO {tableName} ({string.Join(", ", insertColumns.Select(column => $"[{column}]"))}) VALUES ({string.Join(", ", properties.Select(property => $"@{property.Name}"))});",
-                    UpdateSql = $"UPDATE {tableName} SET {string.Join(", ", updateAssignments)} WHERE [{keyColumnName}] = @id;",
+                    InsertSql =
+                        $"INSERT INTO {tableName} ({string.Join(", ", insertColumns.Select(column => $"[{column}]"))}) VALUES ({string.Join(", ", properties.Select(property => $"@{property.Name}"))});",
+                    UpdateSql =
+                        $"UPDATE {tableName} SET {string.Join(", ", updateAssignments)} WHERE [{keyColumnName}] = @id;",
                     DeleteSql = $"DELETE FROM {tableName} WHERE [{keyColumnName}] = @id;",
                 };
             }
@@ -1903,12 +2115,16 @@ internal sealed class ScribanCSharpRenderer
             {
                 foreach (var property in AllProperties)
                 {
-                    command.Parameters.AddWithValue($"@{property.Name}", {{ if generate_value_objects }}SqlParameterValue.Unwrap(property.GetValue(entity)){{ else }}property.GetValue(entity){{ end }} ?? DBNull.Value);
+                    command.Parameters.AddWithValue(
+                        $"@{property.Name}",
+                        {{ if generate_value_objects }}SqlParameterValue.Unwrap(property.GetValue(entity)){{ else }}property.GetValue(entity){{ end }} ?? DBNull.Value
+                    );
                 }
             }
 
             /// <summary>エンティティのコレクションを 1 行ずつ読み出す SqlBulkCopy 用の IDataReader を生成する</summary>
-            public IDataReader CreateDataReader(IEnumerable<TEntity> entities) => new EntityDataReader(AllProperties, entities);
+            public IDataReader CreateDataReader(IEnumerable<TEntity> entities) =>
+                new EntityDataReader(AllProperties, entities);
 
             /// <summary>エンティティ列を 1 行ずつ読み出して SqlBulkCopy へ流す IDataReader（DataTable を介さずメモリ効率を高める）</summary>
             /// <remarks>SqlBulkCopy は Read・GetValue・FieldCount・GetName・GetOrdinal のみ使用するため、それ以外の型付き取得は未対応とする</remarks>
@@ -1918,7 +2134,10 @@ internal sealed class ScribanCSharpRenderer
                 private readonly string[] _columnNames;
                 private readonly IEnumerator<TEntity> _enumerator;
 
-                public EntityDataReader(IReadOnlyList<PropertyInfo> properties, IEnumerable<TEntity> entities)
+                public EntityDataReader(
+                    IReadOnlyList<PropertyInfo> properties,
+                    IEnumerable<TEntity> entities
+                )
                 {
                     _properties = properties;
                     _columnNames = properties.Select(GetColumnName).ToArray();
@@ -1929,18 +2148,22 @@ internal sealed class ScribanCSharpRenderer
 
                 public bool Read() => _enumerator.MoveNext();
 
-                public object GetValue(int i) => {{ if generate_value_objects }}SqlParameterValue.Unwrap(_properties[i].GetValue(_enumerator.Current)){{ else }}_properties[i].GetValue(_enumerator.Current){{ end }} ?? DBNull.Value;
+                public object GetValue(int i) =>
+                    {{ if generate_value_objects }}SqlParameterValue.Unwrap(_properties[i].GetValue(_enumerator.Current)){{ else }}_properties[i].GetValue(_enumerator.Current){{ end }} ?? DBNull.Value;
 
                 public string GetName(int i) => _columnNames[i];
 
                 public int GetOrdinal(string name)
                 {
                     var index = Array.IndexOf(_columnNames, name);
-                    return index >= 0 ? index : throw new IndexOutOfRangeException($"列 {name} は存在しません。");
+                    return index >= 0
+                        ? index
+                        : throw new IndexOutOfRangeException($"列 {name} は存在しません。");
                 }
 
                 // Nullable<T> は基底型を返す（SqlBulkCopy の列型解決と整合させる）
-                public Type GetFieldType(int i) => Nullable.GetUnderlyingType(_properties[i].PropertyType) ?? _properties[i].PropertyType;
+                public Type GetFieldType(int i) =>
+                    Nullable.GetUnderlyingType(_properties[i].PropertyType) ?? _properties[i].PropertyType;
 
                 public bool IsDBNull(int i) => GetValue(i) is DBNull;
 
@@ -1978,11 +2201,23 @@ internal sealed class ScribanCSharpRenderer
 
                 public byte GetByte(int i) => throw new NotSupportedException();
 
-                public long GetBytes(int i, long fieldOffset, byte[]? buffer, int bufferOffset, int length) => throw new NotSupportedException();
+                public long GetBytes(
+                    int i,
+                    long fieldOffset,
+                    byte[]? buffer,
+                    int bufferOffset,
+                    int length
+                ) => throw new NotSupportedException();
 
                 public char GetChar(int i) => throw new NotSupportedException();
 
-                public long GetChars(int i, long fieldOffset, char[]? buffer, int bufferOffset, int length) => throw new NotSupportedException();
+                public long GetChars(
+                    int i,
+                    long fieldOffset,
+                    char[]? buffer,
+                    int bufferOffset,
+                    int length
+                ) => throw new NotSupportedException();
 
                 public IDataReader GetData(int i) => throw new NotSupportedException();
 
@@ -2012,28 +2247,44 @@ internal sealed class ScribanCSharpRenderer
             {
                 foreach (var property in NonKeyProperties)
                 {
-                    command.Parameters.AddWithValue($"@{property.Name}", {{ if generate_value_objects }}SqlParameterValue.Unwrap(property.GetValue(entity)){{ else }}property.GetValue(entity){{ end }} ?? DBNull.Value);
+                    command.Parameters.AddWithValue(
+                        $"@{property.Name}",
+                        {{ if generate_value_objects }}SqlParameterValue.Unwrap(property.GetValue(entity)){{ else }}property.GetValue(entity){{ end }} ?? DBNull.Value
+                    );
                 }
 
-                command.Parameters.AddWithValue("@id", {{ if generate_value_objects }}SqlParameterValue.Unwrap(KeyProperty.GetValue(entity)){{ else }}KeyProperty.GetValue(entity){{ end }} ?? DBNull.Value);
+                command.Parameters.AddWithValue(
+                    "@id",
+                    {{ if generate_value_objects }}SqlParameterValue.Unwrap(KeyProperty.GetValue(entity)){{ else }}KeyProperty.GetValue(entity){{ end }} ?? DBNull.Value
+                );
             }
 
             /// <summary>主キーパラメータを設定する</summary>
             public void BindKeyParameter(SqlCommand command, TKey id)
             {
-                command.Parameters.AddWithValue("@id", {{ if generate_value_objects }}SqlParameterValue.Unwrap(id){{ else }}id{{ end }} ?? throw new InvalidOperationException("id は null にできません。"));
+                command.Parameters.AddWithValue(
+                    "@id",
+                    {{ if generate_value_objects }}SqlParameterValue.Unwrap(id){{ else }}id{{ end }}
+                        ?? throw new InvalidOperationException("id は null にできません。")
+                );
             }
 
             /// <summary>[Column] 属性を優先してカラム名を解決する</summary>
-            private static string GetColumnName(PropertyInfo property) => property.GetCustomAttribute<ColumnAttribute>()?.Name ?? property.Name;
+            private static string GetColumnName(PropertyInfo property) =>
+                property.GetCustomAttribute<ColumnAttribute>()?.Name ?? property.Name;
         }
 
         /// <summary>メタデータを用いて CRUD を実装する SQL Server 向けリポジトリ基底クラス</summary>
-        public abstract partial class SqlServerRepository<TEntity, TKey>(ISqlConnectionFactory connectionFactory) : IRepository<TEntity, TKey>
+        public abstract partial class SqlServerRepository<TEntity, TKey>(
+            ISqlConnectionFactory connectionFactory
+        ) : IRepository<TEntity, TKey>
             where TEntity : EntityBase, new()
         {
             /// <summary>エンティティ型ごとに 1 度だけ構築されるメタデータ（静的キャッシュ）</summary>
-            private static readonly SqlEntityMetadata<TEntity, TKey> _metadata = SqlEntityMetadata<TEntity, TKey>.Create();
+            private static readonly SqlEntityMetadata<TEntity, TKey> _metadata = SqlEntityMetadata<
+                TEntity,
+                TKey
+            >.Create();
 
             /// <summary>SQL 接続の生成元</summary>
             private readonly ISqlConnectionFactory _connectionFactory = connectionFactory;
@@ -2058,7 +2309,9 @@ internal sealed class ScribanCSharpRenderer
             }
 
             /// <summary>全エンティティ取得</summary>
-            public async Task<IReadOnlyList<TEntity>> GetAllAsync(CancellationToken cancellationToken = default)
+            public async Task<IReadOnlyList<TEntity>> GetAllAsync(
+                CancellationToken cancellationToken = default
+            )
             {
                 var items = new List<TEntity>();
 
@@ -2090,7 +2343,10 @@ internal sealed class ScribanCSharpRenderer
             }
 
             /// <summary>エンティティのコレクションを SqlBulkCopy で一括追加する</summary>
-            public async Task<int> BulkInsertAsync(IEnumerable<TEntity> entities, CancellationToken cancellationToken = default)
+            public async Task<int> BulkInsertAsync(
+                IEnumerable<TEntity> entities,
+                CancellationToken cancellationToken = default
+            )
             {
                 ArgumentNullException.ThrowIfNull(entities);
 
@@ -2103,7 +2359,10 @@ internal sealed class ScribanCSharpRenderer
                 await using var connection = _connectionFactory.CreateConnection();
                 await connection.OpenAsync(cancellationToken);
 
-                using var bulkCopy = new SqlBulkCopy(connection) { DestinationTableName = _metadata.TableName };
+                using var bulkCopy = new SqlBulkCopy(connection)
+                {
+                    DestinationTableName = _metadata.TableName,
+                };
                 using var reader = _metadata.CreateDataReader(entities);
 
                 // 列名（DB カラム名）で明示マッピングし、列順への依存を避ける
@@ -2118,7 +2377,10 @@ internal sealed class ScribanCSharpRenderer
             }
 
             /// <summary>エンティティ更新（更新対象ありで true）</summary>
-            public async Task<bool> UpdateAsync(TEntity entity, CancellationToken cancellationToken = default)
+            public async Task<bool> UpdateAsync(
+                TEntity entity,
+                CancellationToken cancellationToken = default
+            )
             {
                 ArgumentNullException.ThrowIfNull(entity);
 
@@ -2149,7 +2411,13 @@ internal sealed class ScribanCSharpRenderer
             public SqlQuery<TEntity> Query() => new(_connectionFactory);
 
             /// <summary>RowState に従って 1 トランザクションで追加・更新・削除を保存する（既定で子をカスケード）</summary>
-            public async Task<int> SaveAsync(TEntity entity, bool cascadeSave = true, bool cascadeDelete = true, bool insertWhenUpdateMissing = false, CancellationToken cancellationToken = default)
+            public async Task<int> SaveAsync(
+                TEntity entity,
+                bool cascadeSave = true,
+                bool cascadeDelete = true,
+                bool insertWhenUpdateMissing = false,
+                CancellationToken cancellationToken = default
+            )
             {
                 ArgumentNullException.ThrowIfNull(entity);
 
@@ -2163,11 +2431,20 @@ internal sealed class ScribanCSharpRenderer
                 await connection.OpenAsync(cancellationToken);
 
                 // カスケードを含むグラフ全体を 1 接続・1 トランザクションで保存（MSDTC 昇格を避ける）
-                await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(cancellationToken);
+                await using var transaction = (SqlTransaction)
+                    await connection.BeginTransactionAsync(cancellationToken);
 
                 try
                 {
-                    var rows = await EntityGraphSaver.SaveAsync(entity, connection, transaction, cascadeSave, cascadeDelete, insertWhenUpdateMissing, cancellationToken);
+                    var rows = await EntityGraphSaver.SaveAsync(
+                        entity,
+                        connection,
+                        transaction,
+                        cascadeSave,
+                        cascadeDelete,
+                        insertWhenUpdateMissing,
+                        cancellationToken
+                    );
                     await transaction.CommitAsync(cancellationToken);
 
                     // コミット成功後に状態を確定（Added/Updated → Unchanged）し、再保存での二重処理を防ぐ
@@ -2182,12 +2459,20 @@ internal sealed class ScribanCSharpRenderer
             }
 
             /// <summary>複数の集約ルートを 1 トランザクションでまとめて保存する（全件成功か全件ロールバックの原子的処理）</summary>
-            public async Task<int> SaveAsync(IEnumerable<TEntity> entities, bool cascadeSave = true, bool cascadeDelete = true, bool insertWhenUpdateMissing = false, CancellationToken cancellationToken = default)
+            public async Task<int> SaveAsync(
+                IEnumerable<TEntity> entities,
+                bool cascadeSave = true,
+                bool cascadeDelete = true,
+                bool insertWhenUpdateMissing = false,
+                CancellationToken cancellationToken = default
+            )
             {
                 ArgumentNullException.ThrowIfNull(entities);
 
                 // 変更のあるグラフだけを対象にする（接続・トランザクションを張る前に絞り込む）
-                var targets = entities.Where(entity => entity is not null && EntityGraphSaver.HasChanges(entity, cascadeSave)).ToList();
+                var targets = entities
+                    .Where(entity => entity is not null && EntityGraphSaver.HasChanges(entity, cascadeSave))
+                    .ToList();
                 if (targets.Count == 0)
                 {
                     return 0;
@@ -2197,14 +2482,23 @@ internal sealed class ScribanCSharpRenderer
                 await connection.OpenAsync(cancellationToken);
 
                 // 全エンティティのグラフを 1 接続・1 トランザクションで保存（途中失敗時は全体ロールバック）
-                await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(cancellationToken);
+                await using var transaction = (SqlTransaction)
+                    await connection.BeginTransactionAsync(cancellationToken);
 
                 try
                 {
                     var rows = 0;
                     foreach (var entity in targets)
                     {
-                        rows += await EntityGraphSaver.SaveAsync(entity, connection, transaction, cascadeSave, cascadeDelete, insertWhenUpdateMissing, cancellationToken);
+                        rows += await EntityGraphSaver.SaveAsync(
+                            entity,
+                            connection,
+                            transaction,
+                            cascadeSave,
+                            cascadeDelete,
+                            insertWhenUpdateMissing,
+                            cancellationToken
+                        );
                     }
 
                     await transaction.CommitAsync(cancellationToken);
@@ -2238,7 +2532,10 @@ internal sealed class ScribanCSharpRenderer
             private static readonly JsonSerializerOptions JsonOptions = new()
             {
                 PropertyNameCaseInsensitive = true,
-                TypeInfoResolver = new DefaultJsonTypeInfoResolver { Modifiers = { IncludeNavigationProperties } },
+                TypeInfoResolver = new DefaultJsonTypeInfoResolver
+                {
+                    Modifiers = { IncludeNavigationProperties },
+                },
                 {{~ if generate_value_objects ~}}
                 Converters = { new ValueObjectJsonConverterFactory() },
                 {{~ end ~}}
@@ -2252,14 +2549,22 @@ internal sealed class ScribanCSharpRenderer
                     return;
                 }
 
-                foreach (var property in typeInfo.Type.GetProperties(BindingFlags.Public | BindingFlags.Instance))
+                foreach (
+                    var property in typeInfo.Type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                )
                 {
-                    if (!property.CanRead || !property.CanWrite || property.GetCustomAttribute<NavigationReferenceAttribute>() is null)
+                    if (
+                        !property.CanRead
+                        || !property.CanWrite
+                        || property.GetCustomAttribute<NavigationReferenceAttribute>() is null
+                    )
                     {
                         continue;
                     }
 
-                    var existing = typeInfo.Properties.FirstOrDefault(item => string.Equals(item.Name, property.Name, StringComparison.OrdinalIgnoreCase));
+                    var existing = typeInfo.Properties.FirstOrDefault(item =>
+                        string.Equals(item.Name, property.Name, StringComparison.OrdinalIgnoreCase)
+                    );
                     if (existing is not null)
                     {
                         // [JsonIgnore] で無効化（Get/Set が null）されている場合は復活させ、Include で読み込めるようにする
@@ -2268,7 +2573,10 @@ internal sealed class ScribanCSharpRenderer
                     }
                     else
                     {
-                        var jsonProperty = typeInfo.CreateJsonPropertyInfo(property.PropertyType, property.Name);
+                        var jsonProperty = typeInfo.CreateJsonPropertyInfo(
+                            property.PropertyType,
+                            property.Name
+                        );
                         jsonProperty.Get = property.GetValue;
                         jsonProperty.Set = property.SetValue;
                         typeInfo.Properties.Add(jsonProperty);
@@ -2284,7 +2592,8 @@ internal sealed class ScribanCSharpRenderer
             private int? _take;
             private int? _skip;
 
-            internal SqlQuery(ISqlConnectionFactory connectionFactory) => _connectionFactory = connectionFactory;
+            internal SqlQuery(ISqlConnectionFactory connectionFactory) =>
+                _connectionFactory = connectionFactory;
 
             private static string TableName => EntitySaveMetadata.For(typeof(TEntity)).TableName;
 
@@ -2325,7 +2634,9 @@ internal sealed class ScribanCSharpRenderer
             }
 
             /// <summary>単一参照ナビゲーションを同時取得する（ThenInclude で多階層指定可）</summary>
-            public IncludableSqlQuery<TEntity, TProperty> Include<TProperty>(Expression<Func<TEntity, TProperty>> navigationSelector)
+            public IncludableSqlQuery<TEntity, TProperty> Include<TProperty>(
+                Expression<Func<TEntity, TProperty>> navigationSelector
+            )
             {
                 var node = new IncludeNode(IncludeNode.GetProperty(navigationSelector));
                 _includes.Add(node);
@@ -2333,7 +2644,9 @@ internal sealed class ScribanCSharpRenderer
             }
 
             /// <summary>コレクションナビゲーションを同時取得する（ThenInclude で多階層指定可）</summary>
-            public IncludableSqlQuery<TEntity, TElement> Include<TElement>(Expression<Func<TEntity, ICollection<TElement>>> navigationSelector)
+            public IncludableSqlQuery<TEntity, TElement> Include<TElement>(
+                Expression<Func<TEntity, ICollection<TElement>>> navigationSelector
+            )
             {
                 var node = new IncludeNode(IncludeNode.GetProperty(navigationSelector));
                 _includes.Add(node);
@@ -2341,7 +2654,9 @@ internal sealed class ScribanCSharpRenderer
             }
 
             /// <summary>条件に一致するエンティティを（Include 指定分とともに）一覧取得する</summary>
-            public async Task<IReadOnlyList<TEntity>> ToListAsync(CancellationToken cancellationToken = default)
+            public async Task<IReadOnlyList<TEntity>> ToListAsync(
+                CancellationToken cancellationToken = default
+            )
             {
                 var json = await ReadJsonAsync(BuildJsonSelect(_take, _skip), cancellationToken);
                 if (string.IsNullOrWhiteSpace(json))
@@ -2371,7 +2686,10 @@ internal sealed class ScribanCSharpRenderer
                 await using var connection = _connectionFactory.CreateConnection();
                 await connection.OpenAsync(cancellationToken);
 
-                await using var command = CreateCommand(connection, $"SELECT COUNT(*) FROM {TableName}{BuildWhereClause()};");
+                await using var command = CreateCommand(
+                    connection,
+                    $"SELECT COUNT(*) FROM {TableName}{BuildWhereClause()};"
+                );
                 var result = await command.ExecuteScalarAsync(cancellationToken);
                 return Convert.ToInt32(result);
             }
@@ -2382,13 +2700,19 @@ internal sealed class ScribanCSharpRenderer
                 await using var connection = _connectionFactory.CreateConnection();
                 await connection.OpenAsync(cancellationToken);
 
-                await using var command = CreateCommand(connection, $"SELECT CASE WHEN EXISTS (SELECT 1 FROM {TableName}{BuildWhereClause()}) THEN 1 ELSE 0 END;");
+                await using var command = CreateCommand(
+                    connection,
+                    $"SELECT CASE WHEN EXISTS (SELECT 1 FROM {TableName}{BuildWhereClause()}) THEN 1 ELSE 0 END;"
+                );
                 var result = await command.ExecuteScalarAsync(cancellationToken);
                 return Convert.ToInt32(result) != 0;
             }
 
             /// <summary>条件に一致する行を一括削除する。cascadeDelete=true で子孫も FK 連鎖で削除する</summary>
-            public async Task<int> ExecuteDeleteAsync(bool cascadeDelete = false, CancellationToken cancellationToken = default)
+            public async Task<int> ExecuteDeleteAsync(
+                bool cascadeDelete = false,
+                CancellationToken cancellationToken = default
+            )
             {
                 var whereClause = BuildWhereClause();
 
@@ -2397,18 +2721,28 @@ internal sealed class ScribanCSharpRenderer
 
                 if (!cascadeDelete)
                 {
-                    await using var command = CreateCommand(connection, $"DELETE FROM {TableName}{whereClause};");
+                    await using var command = CreateCommand(
+                        connection,
+                        $"DELETE FROM {TableName}{whereClause};"
+                    );
                     return await command.ExecuteNonQueryAsync(cancellationToken);
                 }
 
                 // カスケード: 子孫→本体の順に並んだ DELETE 文群を 1 トランザクションで実行する
-                await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(cancellationToken);
+                await using var transaction = (SqlTransaction)
+                    await connection.BeginTransactionAsync(cancellationToken);
 
                 try
                 {
                     var rows = 0;
 
-                    foreach (var sql in CascadeDeletePlanner.BuildDeleteStatements(typeof(TEntity), TableName, whereClause))
+                    foreach (
+                        var sql in CascadeDeletePlanner.BuildDeleteStatements(
+                            typeof(TEntity),
+                            TableName,
+                            whereClause
+                        )
+                    )
                     {
                         await using var command = new SqlCommand(sql, connection, transaction);
                         AddParameters(command);
@@ -2444,14 +2778,23 @@ internal sealed class ScribanCSharpRenderer
             }
 
             /// <summary>ルートの WHERE・並び順・ページングと Include ツリーから FOR JSON の SELECT 文を組み立てる</summary>
-            private string BuildJsonSelect(int? take, int? skip) => JsonQueryPlanner.BuildSelect(typeof(TEntity), BuildWhereClause(), BuildOrderAndPaging(take, skip), _includes);
+            private string BuildJsonSelect(int? take, int? skip) =>
+                JsonQueryPlanner.BuildSelect(
+                    typeof(TEntity),
+                    BuildWhereClause(),
+                    BuildOrderAndPaging(take, skip),
+                    _includes
+                );
 
             /// <summary>ORDER BY / OFFSET・FETCH 句を組み立てる（take/skip 指定時は ORDER BY 必須のためダミー順序を補う）</summary>
             private string BuildOrderAndPaging(int? take, int? skip)
             {
                 if (take.HasValue || skip.HasValue)
                 {
-                    var ordering = _orderings.Count == 0 ? " ORDER BY (SELECT NULL)" : " ORDER BY " + string.Join(", ", _orderings);
+                    var ordering =
+                        _orderings.Count == 0
+                            ? " ORDER BY (SELECT NULL)"
+                            : " ORDER BY " + string.Join(", ", _orderings);
                     return take.HasValue
                         ? $"{ordering} OFFSET {skip ?? 0} ROWS FETCH NEXT {take.Value} ROWS ONLY"
                         : $"{ordering} OFFSET {skip ?? 0} ROWS";
@@ -2473,12 +2816,16 @@ internal sealed class ScribanCSharpRenderer
             {
                 foreach (var parameter in _parameters)
                 {
-                    command.Parameters.AddWithValue(parameter.Key, {{ if generate_value_objects }}SqlParameterValue.Unwrap(parameter.Value){{ else }}parameter.Value{{ end }} ?? DBNull.Value);
+                    command.Parameters.AddWithValue(
+                        parameter.Key,
+                        {{ if generate_value_objects }}SqlParameterValue.Unwrap(parameter.Value){{ else }}parameter.Value{{ end }} ?? DBNull.Value
+                    );
                 }
             }
 
             /// <summary>WHERE 句を組み立てる（条件なしは空文字）</summary>
-            private string BuildWhereClause() => _conditions.Count == 0 ? string.Empty : " WHERE " + string.Join(" AND ", _conditions);
+            private string BuildWhereClause() =>
+                _conditions.Count == 0 ? string.Empty : " WHERE " + string.Join(" AND ", _conditions);
         }
 
         /// <summary>Include の対象ナビゲーションと、その配下（ThenInclude）の木構造</summary>
@@ -2496,7 +2843,12 @@ internal sealed class ScribanCSharpRenderer
             public static PropertyInfo GetProperty(LambdaExpression selector)
             {
                 var expression = selector.Body;
-                if (expression is UnaryExpression { NodeType: ExpressionType.Convert or ExpressionType.ConvertChecked } unary)
+                if (
+                    expression is UnaryExpression
+                    {
+                        NodeType: ExpressionType.Convert or ExpressionType.ConvertChecked
+                    } unary
+                )
                 {
                     expression = unary.Operand;
                 }
@@ -2506,7 +2858,9 @@ internal sealed class ScribanCSharpRenderer
                     return property;
                 }
 
-                throw new ArgumentException($"Include/ThenInclude にはナビゲーションプロパティを指定してください: {selector}");
+                throw new ArgumentException(
+                    $"Include/ThenInclude にはナビゲーションプロパティを指定してください: {selector}"
+                );
             }
         }
 
@@ -2524,7 +2878,9 @@ internal sealed class ScribanCSharpRenderer
             }
 
             /// <summary>直前に Include した単一参照ナビゲーションの配下をさらに取得する</summary>
-            public IncludableSqlQuery<TEntity, TNext> ThenInclude<TNext>(Expression<Func<TProperty, TNext>> navigationSelector)
+            public IncludableSqlQuery<TEntity, TNext> ThenInclude<TNext>(
+                Expression<Func<TProperty, TNext>> navigationSelector
+            )
             {
                 var child = new IncludeNode(IncludeNode.GetProperty(navigationSelector));
                 _node.Children.Add(child);
@@ -2532,7 +2888,9 @@ internal sealed class ScribanCSharpRenderer
             }
 
             /// <summary>直前に Include したコレクションナビゲーションの配下をさらに取得する</summary>
-            public IncludableSqlQuery<TEntity, TNext> ThenInclude<TNext>(Expression<Func<TProperty, ICollection<TNext>>> navigationSelector)
+            public IncludableSqlQuery<TEntity, TNext> ThenInclude<TNext>(
+                Expression<Func<TProperty, ICollection<TNext>>> navigationSelector
+            )
             {
                 var child = new IncludeNode(IncludeNode.GetProperty(navigationSelector));
                 _node.Children.Add(child);
@@ -2540,19 +2898,26 @@ internal sealed class ScribanCSharpRenderer
             }
 
             /// <summary>別のルートナビゲーションを追加で Include する</summary>
-            public IncludableSqlQuery<TEntity, TNext> Include<TNext>(Expression<Func<TEntity, TNext>> navigationSelector) => _query.Include(navigationSelector);
+            public IncludableSqlQuery<TEntity, TNext> Include<TNext>(
+                Expression<Func<TEntity, TNext>> navigationSelector
+            ) => _query.Include(navigationSelector);
 
             /// <summary>別のルートコレクションを追加で Include する</summary>
-            public IncludableSqlQuery<TEntity, TNext> Include<TNext>(Expression<Func<TEntity, ICollection<TNext>>> navigationSelector) => _query.Include(navigationSelector);
+            public IncludableSqlQuery<TEntity, TNext> Include<TNext>(
+                Expression<Func<TEntity, ICollection<TNext>>> navigationSelector
+            ) => _query.Include(navigationSelector);
 
             /// <summary>検索条件を追加する</summary>
-            public SqlQuery<TEntity> Where(Expression<Func<TEntity, bool>> predicate) => _query.Where(predicate);
+            public SqlQuery<TEntity> Where(Expression<Func<TEntity, bool>> predicate) =>
+                _query.Where(predicate);
 
             /// <summary>昇順の並び順を追加する</summary>
-            public SqlQuery<TEntity> OrderBy(Expression<Func<TEntity, object?>> keySelector) => _query.OrderBy(keySelector);
+            public SqlQuery<TEntity> OrderBy(Expression<Func<TEntity, object?>> keySelector) =>
+                _query.OrderBy(keySelector);
 
             /// <summary>降順の並び順を追加する</summary>
-            public SqlQuery<TEntity> OrderByDescending(Expression<Func<TEntity, object?>> keySelector) => _query.OrderByDescending(keySelector);
+            public SqlQuery<TEntity> OrderByDescending(Expression<Func<TEntity, object?>> keySelector) =>
+                _query.OrderByDescending(keySelector);
 
             /// <summary>取得件数の上限を指定する</summary>
             public SqlQuery<TEntity> Take(int count) => _query.Take(count);
@@ -2561,23 +2926,33 @@ internal sealed class ScribanCSharpRenderer
             public SqlQuery<TEntity> Skip(int count) => _query.Skip(count);
 
             /// <summary>条件に一致するエンティティを一覧取得する</summary>
-            public Task<IReadOnlyList<TEntity>> ToListAsync(CancellationToken cancellationToken = default) => _query.ToListAsync(cancellationToken);
+            public Task<IReadOnlyList<TEntity>> ToListAsync(
+                CancellationToken cancellationToken = default
+            ) => _query.ToListAsync(cancellationToken);
 
             /// <summary>条件に一致する先頭の 1 件を取得する（該当なしは null）</summary>
-            public Task<TEntity?> FirstOrDefaultAsync(CancellationToken cancellationToken = default) => _query.FirstOrDefaultAsync(cancellationToken);
+            public Task<TEntity?> FirstOrDefaultAsync(CancellationToken cancellationToken = default) =>
+                _query.FirstOrDefaultAsync(cancellationToken);
 
             /// <summary>条件に一致する件数を取得する</summary>
-            public Task<int> CountAsync(CancellationToken cancellationToken = default) => _query.CountAsync(cancellationToken);
+            public Task<int> CountAsync(CancellationToken cancellationToken = default) =>
+                _query.CountAsync(cancellationToken);
 
             /// <summary>条件に一致するレコードが存在するかを取得する</summary>
-            public Task<bool> AnyAsync(CancellationToken cancellationToken = default) => _query.AnyAsync(cancellationToken);
+            public Task<bool> AnyAsync(CancellationToken cancellationToken = default) =>
+                _query.AnyAsync(cancellationToken);
         }
 
         /// <summary>Include ツリーと FK メタデータから FOR JSON の SELECT 文を組み立てるプランナー（DB 非依存・純粋）</summary>
         internal static class JsonQueryPlanner
         {
             /// <summary>ルート型・WHERE 句・並び順ページング句・Include ツリーから、入れ子 JSON を返す SELECT 文を組み立てる</summary>
-            public static string BuildSelect(Type rootType, string whereClause, string orderAndPaging, IReadOnlyList<IncludeNode> includes)
+            public static string BuildSelect(
+                Type rootType,
+                string whereClause,
+                string orderAndPaging,
+                IReadOnlyList<IncludeNode> includes
+            )
             {
                 var aliasCounter = new int[1];
                 var rootAlias = NextAlias(aliasCounter);
@@ -2586,7 +2961,12 @@ internal sealed class ScribanCSharpRenderer
                 return $"SELECT {projection} FROM {tableName} AS {rootAlias}{whereClause}{orderAndPaging} FOR JSON PATH;";
             }
 
-            private static string BuildProjection(Type type, string alias, IReadOnlyList<IncludeNode> includes, int[] aliasCounter)
+            private static string BuildProjection(
+                Type type,
+                string alias,
+                IReadOnlyList<IncludeNode> includes,
+                int[] aliasCounter
+            )
             {
                 var metadata = EntitySaveMetadata.For(type);
                 var parts = new List<string>();
@@ -2606,11 +2986,20 @@ internal sealed class ScribanCSharpRenderer
                 return string.Join(", ", parts);
             }
 
-            private static string BuildIncludeProjection(IncludeNode node, string parentAlias, int[] aliasCounter)
+            private static string BuildIncludeProjection(
+                IncludeNode node,
+                string parentAlias,
+                int[] aliasCounter
+            )
             {
-                var attribute = node.Property.GetCustomAttribute<NavigationReferenceAttribute>()
-                    ?? throw new InvalidOperationException($"{node.Property.Name} は [NavigationReference] を持つナビゲーションではありません。");
-                var childType = attribute.IsCollection ? node.Property.PropertyType.GetGenericArguments()[0] : node.Property.PropertyType;
+                var attribute =
+                    node.Property.GetCustomAttribute<NavigationReferenceAttribute>()
+                    ?? throw new InvalidOperationException(
+                        $"{node.Property.Name} は [NavigationReference] を持つナビゲーションではありません。"
+                    );
+                var childType = attribute.IsCollection
+                    ? node.Property.PropertyType.GetGenericArguments()[0]
+                    : node.Property.PropertyType;
                 var childAlias = NextAlias(aliasCounter);
                 var childTable = EntitySaveMetadata.For(childType).TableName;
 
@@ -2635,7 +3024,10 @@ internal sealed class ScribanCSharpRenderer
         internal static class SqlExpressionTranslator
         {
             /// <summary>述語ラムダの本体を SQL 条件へ変換し、値はパラメータ化して parameters へ追加する</summary>
-            public static string ToCondition(Expression expression, List<KeyValuePair<string, object?>> parameters) => Visit(expression, parameters);
+            public static string ToCondition(
+                Expression expression,
+                List<KeyValuePair<string, object?>> parameters
+            ) => Visit(expression, parameters);
 
             /// <summary>キー選択ラムダから角括弧付きの列名を取り出す</summary>
             public static string ToColumn(LambdaExpression keySelector)
@@ -2644,13 +3036,18 @@ internal sealed class ScribanCSharpRenderer
 
                 if (member is null || !IsColumn(member))
                 {
-                    throw new NotSupportedException($"並び順にはエンティティのプロパティのみ指定できます: {keySelector}");
+                    throw new NotSupportedException(
+                        $"並び順にはエンティティのプロパティのみ指定できます: {keySelector}"
+                    );
                 }
 
                 return ColumnName(member.Member);
             }
 
-            private static string Visit(Expression expression, List<KeyValuePair<string, object?>> parameters)
+            private static string Visit(
+                Expression expression,
+                List<KeyValuePair<string, object?>> parameters
+            )
             {
                 switch (expression)
                 {
@@ -2668,9 +3065,11 @@ internal sealed class ScribanCSharpRenderer
                             ? $"{ColumnName(boolMember.Member)} = 0"
                             : $"NOT ({Visit(unary.Operand, parameters)})";
 
-                    case MethodCallExpression call when TryGetLike(call, out var likeColumn, out var likeKind):
+                    case MethodCallExpression call
+                        when TryGetLike(call, out var likeColumn, out var likeKind):
                         // 引数は string でも値オブジェクト（TSelf オーバーロード）でもよい。VO なら素値（string）へ開く
-                        var raw = {{ if generate_value_objects }}SqlParameterValue.Unwrap(Evaluate(call.Arguments[0])){{ else }}Evaluate(call.Arguments[0]){{ end }} as string ?? string.Empty;
+                        var raw =
+                            {{ if generate_value_objects }}SqlParameterValue.Unwrap(Evaluate(call.Arguments[0])){{ else }}Evaluate(call.Arguments[0]){{ end }} as string ?? string.Empty;
                         var pattern = likeKind switch
                         {
                             LikeKind.Contains => "%" + EscapeLike(raw) + "%",
@@ -2687,7 +3086,10 @@ internal sealed class ScribanCSharpRenderer
                 }
             }
 
-            private static string VisitComparison(BinaryExpression binary, List<KeyValuePair<string, object?>> parameters)
+            private static string VisitComparison(
+                BinaryExpression binary,
+                List<KeyValuePair<string, object?>> parameters
+            )
             {
                 var left = Unwrap(binary.Left);
                 var right = Unwrap(binary.Right);
@@ -2721,7 +3123,10 @@ internal sealed class ScribanCSharpRenderer
                 return $"{Operand(left, parameters)} {op} {Operand(right, parameters)}";
             }
 
-            private static string Operand(Expression expression, List<KeyValuePair<string, object?>> parameters) =>
+            private static string Operand(
+                Expression expression,
+                List<KeyValuePair<string, object?>> parameters
+            ) =>
                 expression is MemberExpression member && IsColumn(member)
                     ? ColumnName(member.Member)
                     : AddParameter(Evaluate(expression), parameters);
@@ -2738,7 +3143,14 @@ internal sealed class ScribanCSharpRenderer
                 column = string.Empty;
                 kind = LikeKind.Contains;
 
-                if (call.Object is null || call.Arguments.Count != 1 || (call.Method.DeclaringType != typeof(string){{ if generate_value_objects }} && !IsValueObjectStringMethod(call.Method){{ end }}))
+                if (
+                    call.Object is null
+                    || call.Arguments.Count != 1
+                    || (
+                        call.Method.DeclaringType != typeof(string){{ if generate_value_objects }}
+                        && !IsValueObjectStringMethod(call.Method){{ end }}
+                    )
+                )
                 {
                     return false;
                 }
@@ -2770,13 +3182,20 @@ internal sealed class ScribanCSharpRenderer
 
             /// <summary>文字列値オブジェクト（ValueObjectStringBase 由来）の Contains/StartsWith/EndsWith かどうか</summary>
             private static bool IsValueObjectStringMethod(MethodInfo method) =>
-                method.DeclaringType is { IsGenericType: true } declaring && declaring.GetGenericTypeDefinition() == typeof(ValueObjectStringBase<>);
+                method.DeclaringType is { IsGenericType: true } declaring
+                && declaring.GetGenericTypeDefinition() == typeof(ValueObjectStringBase<>);
             {{~ end ~}}
 
             /// <summary>object へのボックス化などの Convert を取り除く</summary>
             private static Expression Unwrap(Expression expression)
             {
-                while (expression is UnaryExpression { NodeType: ExpressionType.Convert or ExpressionType.ConvertChecked } unary)
+                while (
+                    expression
+                        is UnaryExpression
+                        {
+                            NodeType: ExpressionType.Convert or ExpressionType.ConvertChecked
+                        } unary
+                )
                 {
                     expression = unary.Operand;
                 }
@@ -2785,11 +3204,14 @@ internal sealed class ScribanCSharpRenderer
             }
 
             /// <summary>ラムダ引数のプロパティ参照（= 列）かどうか</summary>
-            private static bool IsColumn(MemberExpression member) => member is { Expression: ParameterExpression, Member: PropertyInfo };
+            private static bool IsColumn(MemberExpression member) =>
+                member is { Expression: ParameterExpression, Member: PropertyInfo };
 
-            private static bool IsNull(Expression expression) => expression is ConstantExpression { Value: null };
+            private static bool IsNull(Expression expression) =>
+                expression is ConstantExpression { Value: null };
 
-            private static string ColumnName(MemberInfo member) => $"[{member.GetCustomAttribute<ColumnAttribute>()?.Name ?? member.Name}]";
+            private static string ColumnName(MemberInfo member) =>
+                $"[{member.GetCustomAttribute<ColumnAttribute>()?.Name ?? member.Name}]";
 
             /// <summary>定数・クロージャ変数などを評価して実値を得る</summary>
             private static object? Evaluate(Expression expression) =>
@@ -2797,7 +3219,10 @@ internal sealed class ScribanCSharpRenderer
                     ? constant.Value
                     : Expression.Lambda(expression).Compile().DynamicInvoke();
 
-            private static string AddParameter(object? value, List<KeyValuePair<string, object?>> parameters)
+            private static string AddParameter(
+                object? value,
+                List<KeyValuePair<string, object?>> parameters
+            )
             {
                 var name = "@p" + parameters.Count;
                 parameters.Add(new KeyValuePair<string, object?>(name, value));
@@ -2805,7 +3230,8 @@ internal sealed class ScribanCSharpRenderer
             }
 
             /// <summary>LIKE のワイルドカード（% _ [ \）をエスケープする</summary>
-            private static string EscapeLike(string value) => value.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_").Replace("[", "\\[");
+            private static string EscapeLike(string value) =>
+                value.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_").Replace("[", "\\[");
         }
 
         /// <summary>更新対象のレコードが存在しなかった（他者削除等の競合）ことを表す例外</summary>
@@ -2817,7 +3243,13 @@ internal sealed class ScribanCSharpRenderer
         }
 
         /// <summary>カスケード対象の子ナビゲーション（プロパティ・コレクション種別・子型・FK 情報）</summary>
-        internal sealed record CascadeNavigation(PropertyInfo Property, bool IsCollection, Type ChildType, string PrincipalColumn, string DependentColumn);
+        internal sealed record CascadeNavigation(
+            PropertyInfo Property,
+            bool IsCollection,
+            Type ChildType,
+            string PrincipalColumn,
+            string DependentColumn
+        );
 
         /// <summary>保存対象の型ごとに INSERT/UPDATE/DELETE 用 SQL とカスケード子ナビゲーションを構築・保持するメタデータ</summary>
         /// <remarks>型をキーに 1 度だけ構築しキャッシュする（リフレクションコスト削減）</remarks>
@@ -2857,9 +3289,14 @@ internal sealed class ScribanCSharpRenderer
 
             private static EntitySaveMetadata Build(Type entityType)
             {
-                var tableAttribute = entityType.GetCustomAttribute<TableAttribute>()
-                    ?? throw new InvalidOperationException($"{entityType.Name} に [Table] 属性が必要です。");
-                var allProperties = entityType.GetProperties(BindingFlags.Public | BindingFlags.Instance).ToList();
+                var tableAttribute =
+                    entityType.GetCustomAttribute<TableAttribute>()
+                    ?? throw new InvalidOperationException(
+                        $"{entityType.Name} に [Table] 属性が必要です。"
+                    );
+                var allProperties = entityType
+                    .GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                    .ToList();
                 var columns = allProperties
                     .Where(property =>
                         property.CanRead
@@ -2868,21 +3305,33 @@ internal sealed class ScribanCSharpRenderer
                         && property.GetCustomAttribute<NavigationReferenceAttribute>() is null
                     )
                     .ToList();
-                var keyProperty = columns.SingleOrDefault(property => property.GetCustomAttribute<KeyAttribute>() is not null)
-                    ?? throw new InvalidOperationException($"{entityType.Name} に [Key] 属性付きプロパティが必要です。");
+                var keyProperty =
+                    columns.SingleOrDefault(property =>
+                        property.GetCustomAttribute<KeyAttribute>() is not null
+                    )
+                    ?? throw new InvalidOperationException(
+                        $"{entityType.Name} に [Key] 属性付きプロパティが必要です。"
+                    );
                 var nonKeyProperties = columns.Where(property => property != keyProperty).ToList();
                 var tableName = $"[{tableAttribute.Name}]";
                 var keyColumnName = GetColumnName(keyProperty);
-                var updateAssignments = nonKeyProperties.Select(property => $"[{GetColumnName(property)}] = @{property.Name}");
+                var updateAssignments = nonKeyProperties.Select(property =>
+                    $"[{GetColumnName(property)}] = @{property.Name}"
+                );
                 var cascades = allProperties
-                    .Select(property => (property, attribute: property.GetCustomAttribute<NavigationReferenceAttribute>()))
+                    .Select(property =>
+                        (property, attribute: property.GetCustomAttribute<NavigationReferenceAttribute>())
+                    )
                     .Where(pair => pair.attribute is { Cascade: true })
                     .Select(pair => new CascadeNavigation(
                         pair.property,
                         pair.attribute!.IsCollection,
-                        pair.attribute.IsCollection ? pair.property.PropertyType.GetGenericArguments()[0] : pair.property.PropertyType,
+                        pair.attribute.IsCollection
+                            ? pair.property.PropertyType.GetGenericArguments()[0]
+                            : pair.property.PropertyType,
                         pair.attribute.PrincipalColumn,
-                        pair.attribute.DependentColumn))
+                        pair.attribute.DependentColumn
+                    ))
                     .ToList();
 
                 return new EntitySaveMetadata
@@ -2892,14 +3341,17 @@ internal sealed class ScribanCSharpRenderer
                     AllProperties = columns,
                     NonKeyProperties = nonKeyProperties,
                     Columns = columns.Select(property => (property.Name, GetColumnName(property))).ToList(),
-                    InsertSql = $"INSERT INTO {tableName} ({string.Join(", ", columns.Select(property => $"[{GetColumnName(property)}]"))}) VALUES ({string.Join(", ", columns.Select(property => $"@{property.Name}"))});",
-                    UpdateSql = $"UPDATE {tableName} SET {string.Join(", ", updateAssignments)} WHERE [{keyColumnName}] = @id;",
+                    InsertSql =
+                        $"INSERT INTO {tableName} ({string.Join(", ", columns.Select(property => $"[{GetColumnName(property)}]"))}) VALUES ({string.Join(", ", columns.Select(property => $"@{property.Name}"))});",
+                    UpdateSql =
+                        $"UPDATE {tableName} SET {string.Join(", ", updateAssignments)} WHERE [{keyColumnName}] = @id;",
                     DeleteSql = $"DELETE FROM {tableName} WHERE [{keyColumnName}] = @id;",
                     CascadeNavigations = cascades,
                 };
             }
 
-            private static string GetColumnName(PropertyInfo property) => property.GetCustomAttribute<ColumnAttribute>()?.Name ?? property.Name;
+            private static string GetColumnName(PropertyInfo property) =>
+                property.GetCustomAttribute<ColumnAttribute>()?.Name ?? property.Name;
         }
 
         /// <summary>カスケード削除の DELETE 文群を FK メタデータから組み立てるプランナー（DB 非依存・純粋）</summary>
@@ -2908,29 +3360,54 @@ internal sealed class ScribanCSharpRenderer
             /// <summary>条件に一致する rootType の行と、その子孫を削除する DELETE 文を「子→親」の実行順で返す</summary>
             /// <param name="rootTable">角括弧付きのルートテーブル名</param>
             /// <param name="whereClause">ルートの WHERE 句（" WHERE …" または空文字）</param>
-            public static IReadOnlyList<string> BuildDeleteStatements(Type rootType, string rootTable, string whereClause)
+            public static IReadOnlyList<string> BuildDeleteStatements(
+                Type rootType,
+                string rootTable,
+                string whereClause
+            )
             {
                 var statements = new List<string>();
-                AppendDescendantDeletes(rootType, rootTable, whereClause, new HashSet<Type> { rootType }, statements);
+                AppendDescendantDeletes(
+                    rootType,
+                    rootTable,
+                    whereClause,
+                    new HashSet<Type> { rootType },
+                    statements
+                );
                 statements.Add($"DELETE FROM {rootTable}{whereClause};");
                 return statements;
             }
 
-            private static void AppendDescendantDeletes(Type parentType, string parentTable, string parentScopeWhere, HashSet<Type> visited, List<string> statements)
+            private static void AppendDescendantDeletes(
+                Type parentType,
+                string parentTable,
+                string parentScopeWhere,
+                HashSet<Type> visited,
+                List<string> statements
+            )
             {
                 foreach (var navigation in EntitySaveMetadata.For(parentType).CascadeNavigations)
                 {
                     // 循環するカスケード（自己参照等）は固定ネストでは表現できないため未対応とする
                     if (!visited.Add(navigation.ChildType))
                     {
-                        throw new NotSupportedException($"循環するカスケード（{navigation.ChildType.Name}）は ExecuteDeleteAsync では未対応です。グラフをロードして SaveAsync を使うか、DB の ON DELETE CASCADE を利用してください。");
+                        throw new NotSupportedException(
+                            $"循環するカスケード（{navigation.ChildType.Name}）は ExecuteDeleteAsync では未対応です。グラフをロードして SaveAsync を使うか、DB の ON DELETE CASCADE を利用してください。"
+                        );
                     }
 
                     var childTable = EntitySaveMetadata.For(navigation.ChildType).TableName;
-                    var childScopeWhere = $" WHERE [{navigation.DependentColumn}] IN (SELECT [{navigation.PrincipalColumn}] FROM {parentTable}{parentScopeWhere})";
+                    var childScopeWhere =
+                        $" WHERE [{navigation.DependentColumn}] IN (SELECT [{navigation.PrincipalColumn}] FROM {parentTable}{parentScopeWhere})";
 
                     // 先に孫以下を削除してから子を削除する（FK 整合）
-                    AppendDescendantDeletes(navigation.ChildType, childTable, childScopeWhere, visited, statements);
+                    AppendDescendantDeletes(
+                        navigation.ChildType,
+                        childTable,
+                        childScopeWhere,
+                        visited,
+                        statements
+                    );
                     statements.Add($"DELETE FROM {childTable}{childScopeWhere};");
 
                     visited.Remove(navigation.ChildType);
@@ -2942,10 +3419,20 @@ internal sealed class ScribanCSharpRenderer
         internal static class EntityGraphSaver
         {
             /// <summary>自身、または（cascade 時）子に変更があるか</summary>
-            public static bool HasChanges(EntityBase entity, bool cascade) => entity.HasChanges || (cascade && EnumerateCascadeChildren(entity).Any(child => HasChanges(child, true)));
+            public static bool HasChanges(EntityBase entity, bool cascade) =>
+                entity.HasChanges
+                || (cascade && EnumerateCascadeChildren(entity).Any(child => HasChanges(child, true)));
 
             /// <summary>グラフを保存し、保存したレコード数を返す</summary>
-            public static async Task<int> SaveAsync(EntityBase entity, SqlConnection connection, SqlTransaction transaction, bool cascadeSave, bool cascadeDelete, bool insertWhenUpdateMissing, CancellationToken cancellationToken)
+            public static async Task<int> SaveAsync(
+                EntityBase entity,
+                SqlConnection connection,
+                SqlTransaction transaction,
+                bool cascadeSave,
+                bool cascadeDelete,
+                bool insertWhenUpdateMissing,
+                CancellationToken cancellationToken
+            )
             {
                 if (!HasChanges(entity, cascadeSave))
                 {
@@ -2961,29 +3448,62 @@ internal sealed class ScribanCSharpRenderer
                     {
                         foreach (var child in EnumerateCascadeChildren(entity))
                         {
-                            rows += await DeleteGraphAsync(child, connection, transaction, cancellationToken);
+                            rows += await DeleteGraphAsync(
+                                child,
+                                connection,
+                                transaction,
+                                cancellationToken
+                            );
                         }
                     }
 
-                    rows += await ExecuteAsync(entity, meta => meta.DeleteSql, BindKey, connection, transaction, cancellationToken);
+                    rows += await ExecuteAsync(
+                        entity,
+                        meta => meta.DeleteSql,
+                        BindKey,
+                        connection,
+                        transaction,
+                        cancellationToken
+                    );
                     return rows;
                 }
 
                 // 追加・更新は自身を先に保存してから子へ進む（子 FK が親 PK を参照するため）
                 if (entity.IsAdded)
                 {
-                    rows += await ExecuteAsync(entity, meta => meta.InsertSql, BindAll, connection, transaction, cancellationToken);
+                    rows += await ExecuteAsync(
+                        entity,
+                        meta => meta.InsertSql,
+                        BindAll,
+                        connection,
+                        transaction,
+                        cancellationToken
+                    );
                 }
                 else if (entity.IsUpdated)
                 {
-                    rows += await UpdateAsync(entity, connection, transaction, insertWhenUpdateMissing, cancellationToken);
+                    rows += await UpdateAsync(
+                        entity,
+                        connection,
+                        transaction,
+                        insertWhenUpdateMissing,
+                        cancellationToken
+                    );
                 }
 
                 if (cascadeSave)
                 {
                     foreach (var child in EnumerateCascadeChildren(entity))
                     {
-                        rows += await SaveAsync(child, connection, transaction, cascadeSave, cascadeDelete, insertWhenUpdateMissing, cancellationToken);
+                        rows += await SaveAsync(
+                            child,
+                            connection,
+                            transaction,
+                            cascadeSave,
+                            cascadeDelete,
+                            insertWhenUpdateMissing,
+                            cancellationToken
+                        );
                     }
                 }
 
@@ -3010,7 +3530,12 @@ internal sealed class ScribanCSharpRenderer
             }
 
             /// <summary>サブツリーを子から順に削除する（状態に関わらず削除）</summary>
-            private static async Task<int> DeleteGraphAsync(EntityBase entity, SqlConnection connection, SqlTransaction transaction, CancellationToken cancellationToken)
+            private static async Task<int> DeleteGraphAsync(
+                EntityBase entity,
+                SqlConnection connection,
+                SqlTransaction transaction,
+                CancellationToken cancellationToken
+            )
             {
                 var rows = 0;
 
@@ -3019,13 +3544,33 @@ internal sealed class ScribanCSharpRenderer
                     rows += await DeleteGraphAsync(child, connection, transaction, cancellationToken);
                 }
 
-                rows += await ExecuteAsync(entity, meta => meta.DeleteSql, BindKey, connection, transaction, cancellationToken);
+                rows += await ExecuteAsync(
+                    entity,
+                    meta => meta.DeleteSql,
+                    BindKey,
+                    connection,
+                    transaction,
+                    cancellationToken
+                );
                 return rows;
             }
 
-            private static async Task<int> UpdateAsync(EntityBase entity, SqlConnection connection, SqlTransaction transaction, bool insertWhenUpdateMissing, CancellationToken cancellationToken)
+            private static async Task<int> UpdateAsync(
+                EntityBase entity,
+                SqlConnection connection,
+                SqlTransaction transaction,
+                bool insertWhenUpdateMissing,
+                CancellationToken cancellationToken
+            )
             {
-                var affected = await ExecuteAsync(entity, meta => meta.UpdateSql, BindUpdate, connection, transaction, cancellationToken);
+                var affected = await ExecuteAsync(
+                    entity,
+                    meta => meta.UpdateSql,
+                    BindUpdate,
+                    connection,
+                    transaction,
+                    cancellationToken
+                );
 
                 if (affected != 0)
                 {
@@ -3035,14 +3580,30 @@ internal sealed class ScribanCSharpRenderer
                 // 更新対象が存在しない（他ユーザーの削除等）。方針に応じて INSERT へ切替、または競合として通知する
                 if (insertWhenUpdateMissing)
                 {
-                    return await ExecuteAsync(entity, meta => meta.InsertSql, BindAll, connection, transaction, cancellationToken);
+                    return await ExecuteAsync(
+                        entity,
+                        meta => meta.InsertSql,
+                        BindAll,
+                        connection,
+                        transaction,
+                        cancellationToken
+                    );
                 }
 
                 var metadata = EntitySaveMetadata.For(entity.GetType());
-                throw new SaveConflictException($"更新対象のレコードが見つかりませんでした（{entity.GetType().Name}、キー {metadata.KeyProperty.GetValue(entity)}）。他のユーザーに削除された可能性があります。");
+                throw new SaveConflictException(
+                    $"更新対象のレコードが見つかりませんでした（{entity.GetType().Name}、キー {metadata.KeyProperty.GetValue(entity)}）。他のユーザーに削除された可能性があります。"
+                );
             }
 
-            private static async Task<int> ExecuteAsync(EntityBase entity, Func<EntitySaveMetadata, string> sqlSelector, Action<SqlCommand, EntityBase, EntitySaveMetadata> bind, SqlConnection connection, SqlTransaction transaction, CancellationToken cancellationToken)
+            private static async Task<int> ExecuteAsync(
+                EntityBase entity,
+                Func<EntitySaveMetadata, string> sqlSelector,
+                Action<SqlCommand, EntityBase, EntitySaveMetadata> bind,
+                SqlConnection connection,
+                SqlTransaction transaction,
+                CancellationToken cancellationToken
+            )
             {
                 var metadata = EntitySaveMetadata.For(entity.GetType());
 
@@ -3055,23 +3616,39 @@ internal sealed class ScribanCSharpRenderer
             {
                 foreach (var property in metadata.AllProperties)
                 {
-                    command.Parameters.AddWithValue($"@{property.Name}", {{ if generate_value_objects }}SqlParameterValue.Unwrap(property.GetValue(entity)){{ else }}property.GetValue(entity){{ end }} ?? DBNull.Value);
+                    command.Parameters.AddWithValue(
+                        $"@{property.Name}",
+                        {{ if generate_value_objects }}SqlParameterValue.Unwrap(property.GetValue(entity)){{ else }}property.GetValue(entity){{ end }} ?? DBNull.Value
+                    );
                 }
             }
 
-            private static void BindUpdate(SqlCommand command, EntityBase entity, EntitySaveMetadata metadata)
+            private static void BindUpdate(
+                SqlCommand command,
+                EntityBase entity,
+                EntitySaveMetadata metadata
+            )
             {
                 foreach (var property in metadata.NonKeyProperties)
                 {
-                    command.Parameters.AddWithValue($"@{property.Name}", {{ if generate_value_objects }}SqlParameterValue.Unwrap(property.GetValue(entity)){{ else }}property.GetValue(entity){{ end }} ?? DBNull.Value);
+                    command.Parameters.AddWithValue(
+                        $"@{property.Name}",
+                        {{ if generate_value_objects }}SqlParameterValue.Unwrap(property.GetValue(entity)){{ else }}property.GetValue(entity){{ end }} ?? DBNull.Value
+                    );
                 }
 
-                command.Parameters.AddWithValue("@id", {{ if generate_value_objects }}SqlParameterValue.Unwrap(metadata.KeyProperty.GetValue(entity)){{ else }}metadata.KeyProperty.GetValue(entity){{ end }} ?? DBNull.Value);
+                command.Parameters.AddWithValue(
+                    "@id",
+                    {{ if generate_value_objects }}SqlParameterValue.Unwrap(metadata.KeyProperty.GetValue(entity)){{ else }}metadata.KeyProperty.GetValue(entity){{ end }} ?? DBNull.Value
+                );
             }
 
             private static void BindKey(SqlCommand command, EntityBase entity, EntitySaveMetadata metadata)
             {
-                command.Parameters.AddWithValue("@id", {{ if generate_value_objects }}SqlParameterValue.Unwrap(metadata.KeyProperty.GetValue(entity)){{ else }}metadata.KeyProperty.GetValue(entity){{ end }} ?? DBNull.Value);
+                command.Parameters.AddWithValue(
+                    "@id",
+                    {{ if generate_value_objects }}SqlParameterValue.Unwrap(metadata.KeyProperty.GetValue(entity)){{ else }}metadata.KeyProperty.GetValue(entity){{ end }} ?? DBNull.Value
+                );
             }
 
             /// <summary>カスケード対象の子エンティティを列挙する（null は除外）</summary>
@@ -3111,12 +3688,17 @@ internal sealed class ScribanCSharpRenderer
         public static class GeneratedRepositoryServiceCollectionExtensions
         {
             /// <summary>接続文字列とともに生成された全リポジトリを DI コンテナへ登録する</summary>
-            public static IServiceCollection AddGeneratedRepositories(this IServiceCollection services, string connectionString)
+            public static IServiceCollection AddGeneratedRepositories(
+                this IServiceCollection services,
+                string connectionString
+            )
             {
                 ArgumentNullException.ThrowIfNull(services);
                 ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
 
-                services.AddSingleton<ISqlConnectionFactory>(_ => new SqlConnectionFactory(connectionString));
+                services.AddSingleton<ISqlConnectionFactory>(_ => new SqlConnectionFactory(
+                    connectionString
+                ));
         {{ for repository in repository_classes }}        services.AddScoped<{{ repository.interface_name }}, {{ repository.class_name }}>();
         {{ end }}
                 return services;
@@ -3129,7 +3711,9 @@ internal sealed class ScribanCSharpRenderer
         public partial interface {{ repository.interface_name }} : IRepository<{{ repository.entity_class_name }}, {{ repository.key_type_name }}> { }
 
         /// <summary>{{ repository.entity_class_name }} 用リポジトリ実装</summary>
-        public sealed partial class {{ repository.class_name }}(ISqlConnectionFactory connectionFactory) : SqlServerRepository<{{ repository.entity_class_name }}, {{ repository.key_type_name }}>(connectionFactory), {{ repository.interface_name }} { }
+        public sealed partial class {{ repository.class_name }}(ISqlConnectionFactory connectionFactory)
+            : SqlServerRepository<{{ repository.entity_class_name }}, {{ repository.key_type_name }}>(connectionFactory),
+                {{ repository.interface_name }} { }
         {{~ end ~}}
         {{~ end ~}}
         """;

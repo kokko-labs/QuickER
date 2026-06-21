@@ -216,11 +216,7 @@ public class CSharpCodeGenerationServiceTests
 
         var content = result.Files[0].Content;
         // EditModel も RowState を保持し、確定値変更時に Updated へ昇格する
-        content
-            .Should()
-            .Contain(
-                "public abstract partial class EditModelBase : INotifyPropertyChanged, INotifyDataErrorInfo"
-            );
+        content.Should().Contain("public abstract partial class EditModelBase");
         content.Should().Contain("public RowState RowState");
         content.Should().Contain("public void MarkAdded() => RowState = RowState.Added;");
         content.Should().Contain("public void MarkRemoved() => RowState = RowState.Removed;");
@@ -261,15 +257,11 @@ public class CSharpCodeGenerationServiceTests
             .Contain(
                 "public sealed partial class EditModelCollection<T> : ObservableCollection<T>"
             );
+        content.Should().Contain("public List<OrderEntity> CreateEntities(");
         content
             .Should()
             .Contain(
-                "public List<OrderEntity> CreateEntities(EditModelCollection<OrderEditModel> editModels, bool includeRemoved = false)"
-            );
-        content
-            .Should()
-            .Contain(
-                "entities.AddRange(editModels.RemovedItems.Select(removed => CreateEntity(removed, includeRemoved)));"
+                "editModels.RemovedItems.Select(removed => CreateEntity(removed, includeRemoved))"
             );
         // EditModelCollection の変更集約（HasChanges / AcceptChanges）
         content
@@ -292,21 +284,11 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("public void RemoveRange(int index, int count)");
         // EditModel 列挙を受け取るコンストラクタと、Entity 列挙から生成する Mapper メソッド
         content.Should().Contain("public EditModelCollection(IEnumerable<T> items)");
+        content.Should().Contain("public EditModelCollection<OrderEditModel> CreateEditModels(");
         content
             .Should()
-            .Contain(
-                "public EditModelCollection<OrderEditModel> CreateEditModels(IEnumerable<OrderEntity> entities)"
-            );
-        content
-            .Should()
-            .Contain(
-                "public EditModelCollection<OrderEditModel> Orders { get; set; } = new EditModelCollection<OrderEditModel>();"
-            );
-        content
-            .Should()
-            .Contain(
-                "public void ApplyToEntity(CustomerEditModel editModel, CustomerEntity entity, bool includeRemoved = false)"
-            );
+            .Contain("public EditModelCollection<OrderEditModel> Orders { get; set; } =");
+        content.Should().Contain("public void ApplyToEntity(");
         // ApplyToEditModel は子コレクションを CreateEditModels で代入し、状態は生成元 Entity を基準にする
         content
             .Should()
@@ -338,7 +320,7 @@ public class CSharpCodeGenerationServiceTests
         content
             .Should()
             .Contain(
-                "protected void AddChildren<T>(string name, EditModelCollection<T> collection) where T : EditModelBase"
+                "protected void AddChildren<T>(string name, EditModelCollection<T> collection)"
             );
         content.Should().Contain("foreach (var link in ChildLinks)");
         // 子（カスケードナビ）を持つ EditModel は RegisterChildren を override し AddChildren で登録する
@@ -625,12 +607,7 @@ public class CSharpCodeGenerationServiceTests
             .Files[0]
             .Content.Should()
             .Contain("ProductEditModel CreateEditModel(ProductEntity entity)");
-        result
-            .Files[0]
-            .Content.Should()
-            .Contain(
-                "void ApplyToEntity(ProductEditModel editModel, ProductEntity entity, bool includeRemoved = false)"
-            );
+        result.Files[0].Content.Should().Contain("void ApplyToEntity(");
         // 旧 Commit 系の名前は残っていないこと
         result.Files[0].Content.Should().NotContain("CommitToEditModel");
         result.Files[0].Content.Should().NotContain("CommitToEntity");
@@ -651,13 +628,13 @@ public class CSharpCodeGenerationServiceTests
             .Files[0]
             .Content.Should()
             .Contain(
-                "entity.ProductId = editModel.ProductId ?? throw new InvalidOperationException(\"ProductId が未入力です。\");"
+                "editModel.ProductId ?? throw new InvalidOperationException(\"ProductId が未入力です。\");"
             );
         result
             .Files[0]
             .Content.Should()
             .Contain(
-                "entity.Name = editModel.Name ?? throw new InvalidOperationException(\"Name が未入力です。\");"
+                "editModel.Name ?? throw new InvalidOperationException(\"Name が未入力です。\");"
             );
         // Entity → EditModel 反映は public な ApplyToEditModel で行い、バインディング用プロパティ経由でロードする
         result
@@ -778,16 +755,8 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("public bool MoveToNext()");
         content.Should().Contain("public bool MoveToPrevious()");
         content.Should().Contain("protected virtual void MoveCore(int oldIndex, int newIndex)");
-        content
-            .Should()
-            .Contain(
-                "public EditModelCollection<OrderEditModel>? Parent => Owner as EditModelCollection<OrderEditModel>;"
-            );
-        content
-            .Should()
-            .Contain(
-                "protected override void MoveCore(int oldIndex, int newIndex) => Parent?.Move(oldIndex, newIndex);"
-            );
+        content.Should().Contain("public EditModelCollection<OrderEditModel>? Parent =>");
+        content.Should().Contain("protected override void MoveCore(int oldIndex, int newIndex) =>");
         // ② RowState 変更時に派生フラグの変更通知も発行する
         content.Should().Contain("OnPropertyChanged(nameof(IsAdded));");
         content.Should().Contain("OnPropertyChanged(nameof(HasChanges));");
@@ -804,7 +773,7 @@ public class CSharpCodeGenerationServiceTests
         // ② 発見性：拡張ポイント一覧コメントを生成
         content.Should().Contain("拡張ポイント（partial クラスで必要なものだけ実装");
         // ④ IEditableObject（DataGrid 行編集の取り消し対応）
-        content.Should().Contain("INotifyDataErrorInfo, IEditableObject");
+        content.Should().Contain("IEditableObject");
         content.Should().Contain("public void BeginEdit()");
         content.Should().Contain("public void CancelEdit()");
         content.Should().Contain("public void EndEdit()");
@@ -899,12 +868,12 @@ public class CSharpCodeGenerationServiceTests
         content
             .Should()
             .Contain(
-                "InsertSql = $\"INSERT INTO {tableName} ({string.Join(\", \", insertColumns.Select(column => $\"[{column}]\"))}) VALUES ({string.Join(\", \", properties.Select(property => $\"@{property.Name}\"))});\""
+                "$\"INSERT INTO {tableName} ({string.Join(\", \", insertColumns.Select(column => $\"[{column}]\"))}) VALUES ({string.Join(\", \", properties.Select(property => $\"@{property.Name}\"))});\""
             );
         content
             .Should()
             .Contain(
-                "UpdateSql = $\"UPDATE {tableName} SET {string.Join(\", \", updateAssignments)} WHERE [{keyColumnName}] = @id;\""
+                "$\"UPDATE {tableName} SET {string.Join(\", \", updateAssignments)} WHERE [{keyColumnName}] = @id;\""
             );
         content
             .Should()
@@ -945,28 +914,12 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("public SqlQuery<TEntity> Take(int count)");
         content.Should().Contain("public SqlQuery<TEntity> Skip(int count)");
         // 終端メソッド一式
-        content
-            .Should()
-            .Contain(
-                "public async Task<IReadOnlyList<TEntity>> ToListAsync(CancellationToken cancellationToken = default)"
-            );
-        content
-            .Should()
-            .Contain(
-                "public async Task<TEntity?> FirstOrDefaultAsync(CancellationToken cancellationToken = default)"
-            );
-        content
-            .Should()
-            .Contain(
-                "public async Task<int> CountAsync(CancellationToken cancellationToken = default)"
-            );
-        content
-            .Should()
-            .Contain(
-                "public async Task<bool> AnyAsync(CancellationToken cancellationToken = default)"
-            );
+        content.Should().Contain("public async Task<IReadOnlyList<TEntity>> ToListAsync(");
+        content.Should().Contain("public async Task<TEntity?> FirstOrDefaultAsync(");
+        content.Should().Contain("public async Task<int> CountAsync(");
+        content.Should().Contain("public async Task<bool> AnyAsync(");
         // 値はパラメータ化、OFFSET/FETCH でページング
-        content.Should().Contain("AddWithValue(parameter.Key, parameter.Value ?? DBNull.Value)");
+        content.Should().Contain("parameter.Value ?? DBNull.Value");
         content.Should().Contain("FETCH NEXT {take.Value} ROWS ONLY");
     }
 
@@ -988,32 +941,16 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("public void MarkAdded() => RowState = RowState.Added;");
         content.Should().Contain("public void MarkRemoved() => RowState = RowState.Removed;");
         // リポジトリ・インターフェースの Save 入口（既定でカスケード、既定は更新欠落で例外）
-        content
-            .Should()
-            .Contain(
-                "Task<int> SaveAsync(TEntity entity, bool cascadeSave = true, bool cascadeDelete = true, bool insertWhenUpdateMissing = false, CancellationToken cancellationToken = default)"
-            );
-        content.Should().Contain("public async Task<int> SaveAsync(TEntity entity");
+        content.Should().Contain("bool insertWhenUpdateMissing = false,");
+        content.Should().Contain("public async Task<int> SaveAsync(");
         content.Should().Contain("await connection.BeginTransactionAsync(cancellationToken)");
         // 複数集約ルートを 1 トランザクションでまとめて保存するコレクション overload
-        content
-            .Should()
-            .Contain(
-                "Task<int> SaveAsync(IEnumerable<TEntity> entities, bool cascadeSave = true, bool cascadeDelete = true, bool insertWhenUpdateMissing = false, CancellationToken cancellationToken = default)"
-            );
-        content.Should().Contain("public async Task<int> SaveAsync(IEnumerable<TEntity> entities");
+        content.Should().Contain("IEnumerable<TEntity> entities,");
+        content.Should().Contain("public async Task<int> SaveAsync(");
         // SqlBulkCopy によるコレクション一括追加（IDataReader でストリーミング）
-        content
-            .Should()
-            .Contain(
-                "Task<int> BulkInsertAsync(IEnumerable<TEntity> entities, CancellationToken cancellationToken = default)"
-            );
-        content
-            .Should()
-            .Contain("public async Task<int> BulkInsertAsync(IEnumerable<TEntity> entities");
-        content
-            .Should()
-            .Contain("new SqlBulkCopy(connection) { DestinationTableName = _metadata.TableName }");
+        content.Should().Contain("Task<int> BulkInsertAsync(");
+        content.Should().Contain("public async Task<int> BulkInsertAsync(");
+        content.Should().Contain("DestinationTableName = _metadata.TableName,");
         content.Should().Contain("using var reader = _metadata.CreateDataReader(entities);");
         content.Should().Contain("await bulkCopy.WriteToServerAsync(reader, cancellationToken);");
         content.Should().Contain("private sealed class EntityDataReader : IDataReader");
@@ -1021,11 +958,7 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("internal static class EntityGraphSaver");
         content.Should().Contain("internal sealed class EntitySaveMetadata");
         content.Should().Contain("public sealed class SaveConflictException : Exception");
-        content
-            .Should()
-            .Contain(
-                "internal sealed record CascadeNavigation(PropertyInfo Property, bool IsCollection, Type ChildType, string PrincipalColumn, string DependentColumn);"
-            );
+        content.Should().Contain("internal sealed record CascadeNavigation(");
         // 更新欠落時の方針（既定は例外、insertWhenUpdateMissing で INSERT へ切替）
         content.Should().Contain("if (insertWhenUpdateMissing)");
         content.Should().Contain("throw new SaveConflictException(");
@@ -1053,26 +986,14 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("FOR JSON PATH;");
         content.Should().Contain("internal static class JsonQueryPlanner");
         // Include / ThenInclude（単一・コレクションの両オーバーロード）
+        content.Should().Contain("Expression<Func<TEntity, TProperty>> navigationSelector");
         content
             .Should()
-            .Contain(
-                "public IncludableSqlQuery<TEntity, TProperty> Include<TProperty>(Expression<Func<TEntity, TProperty>> navigationSelector)"
-            );
+            .Contain("Expression<Func<TEntity, ICollection<TElement>>> navigationSelector");
+        content.Should().Contain("Expression<Func<TProperty, TNext>> navigationSelector");
         content
             .Should()
-            .Contain(
-                "public IncludableSqlQuery<TEntity, TElement> Include<TElement>(Expression<Func<TEntity, ICollection<TElement>>> navigationSelector)"
-            );
-        content
-            .Should()
-            .Contain(
-                "public IncludableSqlQuery<TEntity, TNext> ThenInclude<TNext>(Expression<Func<TProperty, TNext>> navigationSelector)"
-            );
-        content
-            .Should()
-            .Contain(
-                "public IncludableSqlQuery<TEntity, TNext> ThenInclude<TNext>(Expression<Func<TProperty, ICollection<TNext>>> navigationSelector)"
-            );
+            .Contain("Expression<Func<TProperty, ICollection<TNext>>> navigationSelector");
         // 列はプロパティ名へ別名付け、単一参照は WITHOUT_ARRAY_WRAPPER
         content.Should().Contain("[{columnName}] AS {propertyName}");
         content.Should().Contain("WITHOUT_ARRAY_WRAPPER");
@@ -1098,11 +1019,7 @@ public class CSharpCodeGenerationServiceTests
         result.HasErrors.Should().BeFalse();
         var content = result.Files[0].Content;
         // クエリ終端の一括削除（カスケード引数つき）。既存 DeleteAsync(TKey) は維持
-        content
-            .Should()
-            .Contain(
-                "public async Task<int> ExecuteDeleteAsync(bool cascadeDelete = false, CancellationToken cancellationToken = default)"
-            );
+        content.Should().Contain("public async Task<int> ExecuteDeleteAsync(");
         content
             .Should()
             .Contain(
@@ -1112,11 +1029,7 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("$\"DELETE FROM {TableName}{whereClause};\"");
         // カスケードは FK のネスト IN(SELECT …) で子から削除（DB 非依存の純粋プランナーで SQL 構築）
         content.Should().Contain("internal static class CascadeDeletePlanner");
-        content
-            .Should()
-            .Contain(
-                "public static IReadOnlyList<string> BuildDeleteStatements(Type rootType, string rootTable, string whereClause)"
-            );
+        content.Should().Contain("public static IReadOnlyList<string> BuildDeleteStatements(");
         content
             .Should()
             .Contain(
@@ -1291,7 +1204,7 @@ public class CSharpCodeGenerationServiceTests
         content
             .Should()
             .Contain(
-                "private static readonly SqlEntityMetadata<TEntity, TKey> _metadata = SqlEntityMetadata<TEntity, TKey>.Create();"
+                "private static readonly SqlEntityMetadata<TEntity, TKey> _metadata = SqlEntityMetadata<"
             );
         content
             .Should()
@@ -1803,26 +1716,10 @@ public class CSharpCodeGenerationServiceTests
             .Should()
             .Contain("public sealed class ValueObjectJsonConverterFactory : JsonConverterFactory");
         // 具象 VO（型別の基底を継承）
-        content
-            .Should()
-            .Contain(
-                "public sealed partial class CustomerIdValue : ValueObjectOrderedBase<CustomerIdValue, int>, IValueObject<CustomerIdValue, int>"
-            );
-        content
-            .Should()
-            .Contain(
-                "public sealed partial class NameValue : ValueObjectStringBase<NameValue>, IValueObject<NameValue, string>"
-            );
-        content
-            .Should()
-            .Contain(
-                "public sealed partial class PhotoValue : ValueObjectBinaryBase<PhotoValue>, IValueObject<PhotoValue, byte[]>"
-            );
-        content
-            .Should()
-            .Contain(
-                "public sealed partial class IsActiveValue : ValueObjectBooleanBase<IsActiveValue>, IValueObject<IsActiveValue, bool>"
-            );
+        content.Should().Contain(": ValueObjectOrderedBase<CustomerIdValue, int>,");
+        content.Should().Contain(": ValueObjectStringBase<NameValue>,");
+        content.Should().Contain(": ValueObjectBinaryBase<PhotoValue>,");
+        content.Should().Contain(": ValueObjectBooleanBase<IsActiveValue>,");
         content
             .Should()
             .Contain(
@@ -1896,15 +1793,9 @@ public class CSharpCodeGenerationServiceTests
 
         result.HasErrors.Should().BeFalse();
         var content = result.Files[0].Content;
-        content
-            .Should()
-            .Contain(
-                "public sealed partial class DocumentIdValue : ValueObjectGuidKeyBase<DocumentIdValue>, IValueObject<DocumentIdValue, string>"
-            );
+        content.Should().Contain(": ValueObjectGuidKeyBase<DocumentIdValue>,");
         // 非 PK の string は通常の string 基底
-        content
-            .Should()
-            .Contain("public sealed partial class TitleValue : ValueObjectStringBase<TitleValue>");
+        content.Should().Contain(": ValueObjectStringBase<TitleValue>,");
     }
 
     /// <summary>同名列の定義が食い違う場合は Warning 診断を出すが、生成自体は成功する（PK 優先/最大定義で解決）ことを検証する</summary>
