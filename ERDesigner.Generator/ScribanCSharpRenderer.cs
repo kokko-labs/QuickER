@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Scriban;
 
 namespace ERDesigner.Generator;
@@ -60,6 +61,24 @@ internal sealed class ScribanCSharpRenderer
                 Cascade = cascade;
                 IsParentReference = isParentReference;
             }
+        }
+        {{ end }}
+        {{~ if emit_column_facets_attr ~}}
+        /// <summary>DB カラムのメタ情報（最大長 / 全体桁数 / 小数桁数）を付与する独自属性。該当なしは -1</summary>
+        [AttributeUsage(AttributeTargets.Property, AllowMultiple = false)]
+        public sealed class ColumnFacetsAttribute : Attribute
+        {
+            /// <summary>文字列カラムの最大長（該当なしは -1）</summary>
+            public int MaxLength { get; set; } = -1;
+
+            /// <summary>decimal カラムの全体桁数 precision（該当なしは -1）</summary>
+            public int Precision { get; set; } = -1;
+
+            /// <summary>decimal カラムの小数桁数 scale（該当なしは -1）</summary>
+            public int Scale { get; set; } = -1;
+
+            /// <summary>decimal カラムの整数部桁数（Precision - Scale）。decimal 以外は -1</summary>
+            public int IntegralDigits => Precision >= 0 && Scale >= 0 ? Precision - Scale : -1;
         }
         {{ end }}
         {{~ if generate_value_objects ~}}
@@ -721,6 +740,8 @@ internal sealed class ScribanCSharpRenderer
         {{ end }}{{ if include_data_annotations }}    [Column("{{ property.column_name }}")]
         {{ end }}{{ if include_data_annotations && !property.is_nullable && property.is_reference_type }}    [Required]
         {{ end }}{{ if include_data_annotations && property.max_length }}    [MaxLength({{ property.max_length }})]
+        {{ end }}{{ if include_data_annotations && property.facet_max_length }}    [ColumnFacets(MaxLength = {{ property.facet_max_length }})]
+        {{ end }}{{ if include_data_annotations && property.facet_precision }}    [ColumnFacets(Precision = {{ property.facet_precision }}, Scale = {{ property.facet_scale }})]
         {{ end }}    public {{ property.type_name }} {{ property.property_name }} { get; set; }{{ property.initializer }}
         {{ end }}{{ for navigation in item.navigations }}
             /// <summary>{{ navigation.property_name }} ナビゲーションプロパティ</summary>
@@ -3782,6 +3803,14 @@ internal sealed class ScribanCSharpRenderer
             (options.GenerateEntityClasses && model.EntityClasses.Any(c => c.Navigations.Count > 0))
             || options.GenerateRepositories;
 
+        // ColumnFacets 属性は Entity プロパティに DB カラムのメタ情報（最大長 / precision / scale）を載せる。
+        // 実際に付与するプロパティが 1 つでもある場合のみ属性定義を出力する。
+        var emitColumnFacetsAttr =
+            options.IncludeDataAnnotations
+            && model.EntityClasses.Any(c =>
+                c.Properties.Any(p => p.FacetMaxLength is not null || p.FacetPrecision is not null)
+            );
+
         var scriptObject = new Scriban.Runtime.ScriptObject
         {
             ["namespace_name"] = model.NamespaceName,
@@ -3794,6 +3823,7 @@ internal sealed class ScribanCSharpRenderer
             ["include_json_ignore_on_parent_navigation"] =
                 options.IncludeJsonIgnoreOnParentNavigation,
             ["emit_nav_ref_attr"] = emitNavRefAttr,
+            ["emit_column_facets_attr"] = emitColumnFacetsAttr,
             ["generate_value_objects"] = options.GenerateValueObjects,
             ["value_object_classes"] = model.ValueObjectClasses,
         };
@@ -3806,7 +3836,16 @@ internal sealed class ScribanCSharpRenderer
         var context = new TemplateContext { LoopLimit = 0, LimitToString = 0 };
 
         context.PushGlobal(scriptObject);
-        return template.Render(context).ReplaceLineEndings(Environment.NewLine).TrimEnd()
+        var rendered =
+            template.Render(context).ReplaceLineEndings(Environment.NewLine).TrimEnd()
             + Environment.NewLine;
+
+        // 条件ブロック（{{ if }}）のスキップ時などに生じる連続空行を 1 行へ正規化する。
+        // C# では 2 行以上連続する空行は不要で、CSharpier も 1 行へ畳むため、それに合わせる。
+        return Regex.Replace(
+            rendered,
+            $"(?:{Regex.Escape(Environment.NewLine)}){{3,}}",
+            Environment.NewLine + Environment.NewLine
+        );
     }
 }

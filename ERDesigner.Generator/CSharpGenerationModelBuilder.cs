@@ -218,6 +218,10 @@ internal sealed partial class CSharpGenerationModelBuilder
             IsForeignKey = column.IsForeignKey,
             // VO は [MaxLength] を出さない（長さ検証は VO 内部で行う。非 string 型に [MaxLength] を付けない安全策にもなる）
             MaxLength = valueObject is not null ? null : typeInfo.MaxLength,
+            // DB カラムのメタ情報（[ColumnFacets]）は VO 抑制なしの生値を載せる。decimal は precision 指定時に scale 既定 0
+            FacetMaxLength = typeInfo.MaxLength,
+            FacetPrecision = typeInfo.Precision,
+            FacetScale = typeInfo.Precision is not null ? typeInfo.Scale ?? 0 : null,
             // 非 NULL の VO は妥当な空既定値を作れないため null! でロード前提を表明（NULL 許容 VO は初期化不要）
             Initializer = valueObject is not null
                 ? (column.IsNullable ? string.Empty : " = null!;")

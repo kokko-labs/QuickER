@@ -1753,6 +1753,10 @@ public class CSharpCodeGenerationServiceTests
             );
         // PK と同名 FK は同一 VO 型を共有（CustomerIdValue は 1 定義のみ）
         content.Split("public sealed partial class CustomerIdValue").Length.Should().Be(2);
+        // Entity プロパティに DB カラムのメタ情報属性が付く（VO 型でも付与）
+        content.Should().Contain("public sealed class ColumnFacetsAttribute : Attribute");
+        content.Should().Contain("[ColumnFacets(MaxLength = 50)]");
+        content.Should().Contain("[ColumnFacets(Precision = 10, Scale = 2)]");
         // Entity の型が VO（非 NULL PK は null! 初期化）
         content.Should().Contain("public CustomerIdValue CustomerId { get; set; } = null!;");
         // EditModel 確定値は常に VO?（バインド setter は TryCreate）
