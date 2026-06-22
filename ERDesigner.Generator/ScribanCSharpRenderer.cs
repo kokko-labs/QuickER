@@ -398,6 +398,23 @@ internal sealed class ScribanCSharpRenderer
                 return (JsonConverter)Activator.CreateInstance(converterType)!;
             }
         }
+
+        /// <summary>値オブジェクトの自動検証メッセージ（全 VO 共通の既定）。アプリ起動時に差し替えると全 VO に反映される</summary>
+        public static class ValueObjectValidationMessages
+        {
+            /// <summary>最大長超過メッセージ（引数: 最大長, 現在の文字数）</summary>
+            public static Func<int, int, string> MaxLengthExceeded { get; set; } =
+                (maxLength, actualLength) =>
+                    $"{maxLength} 文字以内で入力してください。（現在 {actualLength} 文字）";
+
+            /// <summary>小数部桁数超過メッセージ（引数: 許容スケール）</summary>
+            public static Func<int, string> ScaleExceeded { get; set; } =
+                scale => $"小数点以下は {scale} 桁以内で入力してください。";
+
+            /// <summary>整数部桁数超過メッセージ（引数: 許容整数部桁数）</summary>
+            public static Func<int, string> PrecisionExceeded { get; set; } =
+                maxIntegralDigits => $"整数部は {maxIntegralDigits} 桁以内で入力してください。";
+        }
         {{~ for vo in value_object_classes ~}}
 
         /// <summary>{{ vo.column_name }} 列に対応する値オブジェクト</summary>
@@ -446,7 +463,9 @@ internal sealed class ScribanCSharpRenderer
                 {{~ if vo.max_length ~}}
                 if (value.Length > {{ vo.max_length }})
                 {
-                    errors.Add($"{{ vo.max_length }} 文字以内で入力してください。（現在 {value.Length} 文字）");
+                    var message = ValueObjectValidationMessages.MaxLengthExceeded({{ vo.max_length }}, value.Length);
+                    CustomizeMaxLengthErrorMessage(value, {{ vo.max_length }}, ref message);
+                    errors.Add(message);
                 }
                 {{~ end ~}}
                 {{~ if vo.precision ~}}
@@ -457,6 +476,15 @@ internal sealed class ScribanCSharpRenderer
 
             /// <summary>ユーザー定義の追加検証（partial・未実装ならゼロコスト）</summary>
             static partial void OnValidate({{ vo.value_type_name }} value, ICollection<string> errors);
+            {{~ if vo.max_length ~}}
+
+            /// <summary>最大長エラーメッセージの差し替え（partial・未実装なら既定メッセージ）</summary>
+            static partial void CustomizeMaxLengthErrorMessage(
+                string value,
+                int maxLength,
+                ref string message
+            );
+            {{~ end ~}}
             {{~ if vo.precision ~}}
 
             /// <summary>decimal の桁数検証（丸めない・超過は弾く）。末尾ゼロは scale に数える</summary>
@@ -470,7 +498,9 @@ internal sealed class ScribanCSharpRenderer
                 var valueScale = (decimal.GetBits(value)[3] >> 16) & 0xFF;
                 if (valueScale > scale)
                 {
-                    errors.Add($"小数点以下は {scale} 桁以内で入力してください。");
+                    var message = ValueObjectValidationMessages.ScaleExceeded(scale);
+                    CustomizeScaleErrorMessage(value, scale, ref message);
+                    errors.Add(message);
                 }
                 var integral = Math.Truncate(Math.Abs(value));
                 var integralDigits = 0;
@@ -481,9 +511,21 @@ internal sealed class ScribanCSharpRenderer
                 }
                 if (integralDigits > precision - scale)
                 {
-                    errors.Add($"整数部は {precision - scale} 桁以内で入力してください。");
+                    var message = ValueObjectValidationMessages.PrecisionExceeded(precision - scale);
+                    CustomizePrecisionErrorMessage(value, precision - scale, ref message);
+                    errors.Add(message);
                 }
             }
+
+            /// <summary>小数部桁数エラーメッセージの差し替え（partial・未実装なら既定メッセージ）</summary>
+            static partial void CustomizeScaleErrorMessage(decimal value, int scale, ref string message);
+
+            /// <summary>整数部桁数エラーメッセージの差し替え（partial・未実装なら既定メッセージ）</summary>
+            static partial void CustomizePrecisionErrorMessage(
+                decimal value,
+                int maxIntegralDigits,
+                ref string message
+            );
             {{~ end ~}}
         }
         {{~ end ~}}

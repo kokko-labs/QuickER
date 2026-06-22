@@ -1728,6 +1728,29 @@ public class CSharpCodeGenerationServiceTests
         // string MaxLength・decimal precision/scale の自動検証
         content.Should().Contain("if (value.Length > 50)");
         content.Should().Contain("ValidateDecimal(value, 10, 2, errors);");
+        // 既定メッセージは全 VO 共通の静的プロバイダから取得し、1 か所で差し替えできる
+        content.Should().Contain("public static class ValueObjectValidationMessages");
+        content
+            .Should()
+            .Contain(
+                "var message = ValueObjectValidationMessages.MaxLengthExceeded(50, value.Length);"
+            );
+        content.Should().Contain("ValueObjectValidationMessages.ScaleExceeded(scale)");
+        content
+            .Should()
+            .Contain("ValueObjectValidationMessages.PrecisionExceeded(precision - scale)");
+        // 自動ルールのエラーメッセージはさらに VO ごとの partial で個別調整も可能（ref string message フック）
+        content.Should().Contain("CustomizeMaxLengthErrorMessage(value, 50, ref message);");
+        content.Should().Contain("static partial void CustomizeMaxLengthErrorMessage(");
+        content.Should().Contain("CustomizeScaleErrorMessage(value, scale, ref message);");
+        content
+            .Should()
+            .Contain("CustomizePrecisionErrorMessage(value, precision - scale, ref message);");
+        content
+            .Should()
+            .Contain(
+                "static partial void CustomizeScaleErrorMessage(decimal value, int scale, ref string message);"
+            );
         // PK と同名 FK は同一 VO 型を共有（CustomerIdValue は 1 定義のみ）
         content.Split("public sealed partial class CustomerIdValue").Length.Should().Be(2);
         // Entity の型が VO（非 NULL PK は null! 初期化）
