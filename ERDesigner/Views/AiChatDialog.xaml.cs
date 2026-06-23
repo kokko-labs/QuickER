@@ -27,8 +27,24 @@ public partial class AiChatDialog : Window
         DataContext = ViewModel;
 
         ViewModel.Messages.CollectionChanged += (_, _) => ScrollToBottom();
+        ViewModel.PropertyChanged += OnViewModelPropertyChanged;
         Loaded += OnLoaded;
         Closing += OnWindowClosing;
+    }
+
+    /// <summary>ViewModel 側で API キーが変化（プロバイダー切替時の読み直し等）したら PasswordBox へ反映する</summary>
+    private void OnViewModelPropertyChanged(
+        object? sender,
+        System.ComponentModel.PropertyChangedEventArgs e
+    )
+    {
+        if (
+            e.PropertyName == nameof(AiChatDialogViewModel.ApiKey)
+            && ApiKeyBox.Password != ViewModel.ApiKey
+        )
+        {
+            ApiKeyBox.Password = ViewModel.ApiKey;
+        }
     }
 
     /// <summary>初回表示時に ViewModel を初期化し、保存済み API キーを PasswordBox へ反映する</summary>

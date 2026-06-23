@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using Anthropic.Models.Messages;
 using ERDesigner.Models;
 using ERDesigner.ViewModels;
 using OpenAI.Chat;
@@ -25,6 +26,57 @@ public static class ErDiagramDynamicTools
                 )
             )
             .ToList();
+    }
+
+    /// <summary>全ツール定義を Anthropic SDK の <see cref="Tool"/> 一覧へ変換する（Claude の Tool Use 用）</summary>
+    /// <remarks>定義・説明文・入力スキーマは <see cref="GetDefinitions"/> と共有し、二重管理を避ける</remarks>
+    public static IReadOnlyList<Tool> ToAnthropicTools()
+    {
+        return GetDefinitions().Select(ToAnthropicTool).ToList();
+    }
+
+    /// <summary>1 つの dynamicTool 定義を Anthropic の <see cref="Tool"/> へ変換する</summary>
+    private static Tool ToAnthropicTool(CodexDynamicToolDefinition definition)
+    {
+        var schema = JsonSerializer.SerializeToElement(definition.InputSchema);
+
+        var properties = new Dictionary<string, JsonElement>();
+
+        if (
+            schema.TryGetProperty("properties", out var props)
+            && props.ValueKind == JsonValueKind.Object
+        )
+        {
+            foreach (var property in props.EnumerateObject())
+            {
+                properties[property.Name] = property.Value.Clone();
+            }
+        }
+
+        var required = new List<string>();
+
+        if (schema.TryGetProperty("required", out var req) && req.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var element in req.EnumerateArray())
+            {
+                if (element.ValueKind == JsonValueKind.String)
+                {
+                    required.Add(element.GetString()!);
+                }
+            }
+        }
+
+        return new Tool
+        {
+            Name = definition.Name,
+            Description = definition.Description,
+            InputSchema = new InputSchema
+            {
+                Type = JsonSerializer.SerializeToElement("object"),
+                Properties = properties,
+                Required = required,
+            },
+        };
     }
 
     /// <summary>全 dynamicTool の定義一覧を返す</summary>

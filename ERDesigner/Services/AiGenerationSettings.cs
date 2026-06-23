@@ -10,6 +10,9 @@ public enum AiProvider
 
     /// <summary>ローカル Ollama (OpenAI 互換 API)</summary>
     Ollama,
+
+    /// <summary>Anthropic Claude 公式 API (api.anthropic.com)</summary>
+    Claude,
 }
 
 /// <summary>AI が生成する識別子名の命名規則</summary>

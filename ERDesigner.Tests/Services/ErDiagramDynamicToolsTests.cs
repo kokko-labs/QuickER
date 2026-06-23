@@ -444,4 +444,25 @@ public class ErDiagramDynamicToolsTests
         tools.Should().HaveCount(definitions.Count);
         tools.Select(t => t.FunctionName).Should().BeEquivalentTo(definitions.Select(d => d.Name));
     }
+
+    /// <summary>Anthropic (Claude) 用の Tool 変換が、全ツールを名前・説明・スキーマ付きで生成することを検証する</summary>
+    [Fact(DisplayName = "ToAnthropicTools は全ツール定義を Anthropic Tool へ変換する")]
+    public void ToAnthropicTools_ConvertsAllDefinitions()
+    {
+        var definitions = ErDiagramDynamicTools.GetDefinitions();
+        var tools = ErDiagramDynamicTools.ToAnthropicTools();
+
+        tools.Should().HaveCount(definitions.Count);
+        tools.Select(t => t.Name).Should().BeEquivalentTo(definitions.Select(d => d.Name));
+        tools.Should().OnlyContain(t => !string.IsNullOrWhiteSpace(t.Description));
+
+        // input_schema は object 型で、required・properties が元定義どおりに引き継がれること
+        var addRelationship = tools.Single(t => t.Name == "add_relationship");
+        addRelationship.InputSchema.Type.GetString().Should().Be("object");
+        addRelationship
+            .InputSchema.Required.Should()
+            .BeEquivalentTo(["source_table", "target_table", "relationship_type"]);
+        addRelationship.InputSchema.Properties.Should().ContainKey("source_table");
+        addRelationship.InputSchema.Properties.Should().ContainKey("relationship_type");
+    }
 }

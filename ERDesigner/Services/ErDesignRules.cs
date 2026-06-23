@@ -49,8 +49,8 @@ public static class ErDesignRules
     internal static string BuildCodexDeveloperInstructions() =>
         BuildChatToolInstructions("dynamicTools");
 
-    /// <summary>OpenAI Function Calling 用のチャット system プロンプト（共通設計原則＋ツール運用手順）を組み立てる</summary>
-    internal static string BuildOpenAiChatSystemPrompt() => BuildChatToolInstructions("関数ツール");
+    /// <summary>API キー接続チャット（Function/Tool 呼び出し）用の system プロンプト（共通設計原則＋ツール運用手順）を組み立てる</summary>
+    internal static string BuildChatSystemPrompt() => BuildChatToolInstructions("関数ツール");
 
     /// <summary>ツール駆動チャット（Codex / OpenAI 共通）の指示文を組み立てる</summary>
     /// <param name="toolMechanismLabel">ツール呼び出し機構の呼称（プロンプト内での表現を切り替える）</param>

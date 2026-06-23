@@ -16,6 +16,19 @@ public static class AiModelCatalog
         "gpt-5.5",
     ];
 
+    /// <summary>Anthropic (Claude) の既定モデル名</summary>
+    public const string DefaultClaudeModel = "claude-sonnet-4-6";
+
+    /// <summary>Anthropic (Claude) の候補モデル一覧</summary>
+    public static readonly IReadOnlyList<string> ClaudeModels =
+    [
+        DefaultClaudeModel,
+        "claude-opus-4-8",
+        "claude-opus-4-7",
+        "claude-opus-4-6",
+        "claude-haiku-4-5",
+    ];
+
     /// <summary>Ollama でよく使われる候補モデル一覧</summary>
     public static readonly IReadOnlyList<string> OllamaModels =
     [

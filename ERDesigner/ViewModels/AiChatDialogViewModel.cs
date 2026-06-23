@@ -12,8 +12,11 @@ namespace ERDesigner.ViewModels;
 /// <remarks>チャット UI・メッセージ・送信/中断・自動整列を共通化し、エンジン固有部分のみ <see cref="IErChatEngine"/> で差し替える</remarks>
 public partial class AiChatDialogViewModel : ObservableObject
 {
-    /// <summary>API キー接続の API キー保存名（旧 AI 生成機能と共有しユーザーの保存値を引き継ぐ）</summary>
+    /// <summary>OpenAI API キーの保存名（旧 AI 生成機能と共有しユーザーの保存値を引き継ぐ）</summary>
     private const string OpenAiApiKeyStoreName = "OpenAiApiKey";
+
+    /// <summary>Anthropic (Claude) API キーの保存名（OpenAI とは別キーのため別スロットへ保存する）</summary>
+    private const string ClaudeApiKeyStoreName = "ClaudeApiKey";
 
     private const string OpenAiProviderName = "openai";
 
@@ -21,7 +24,7 @@ public partial class AiChatDialogViewModel : ObservableObject
     private readonly IUiDispatcher _dispatcher;
     private readonly CodexAppServerSettingsStore _codexSettingsStore;
 
-    private readonly OpenAiChatEngine _openAiEngine;
+    private readonly ChatTurnEngine _apiKeyEngine;
     private readonly CodexChatEngine? _codexEngine;
     private IErChatEngine _engine;
 
@@ -106,16 +109,20 @@ public partial class AiChatDialogViewModel : ObservableObject
     private string _endpointOverride = string.Empty;
 
     /// <summary>API キー接続で利用可能なプロバイダー一覧</summary>
-    public IReadOnlyList<AiProvider> ApiProviders { get; } = [AiProvider.OpenAI, AiProvider.Ollama];
+    public IReadOnlyList<AiProvider> ApiProviders { get; } =
+    [AiProvider.OpenAI, AiProvider.Claude, AiProvider.Ollama];
 
     /// <summary>現在の API プロバイダーに応じたモデル候補</summary>
     public IReadOnlyList<string> ApiModelCandidates =>
-        ApiProvider == AiProvider.Ollama
-            ? AiModelCatalog.OllamaModels
-            : AiModelCatalog.OpenAiModels;
+        ApiProvider switch
+        {
+            AiProvider.Ollama => AiModelCatalog.OllamaModels,
+            AiProvider.Claude => AiModelCatalog.ClaudeModels,
+            _ => AiModelCatalog.OpenAiModels,
+        };
 
-    /// <summary>API キー欄を表示するか（OpenAI 選択時のみ）</summary>
-    public bool ShowApiKey => ApiProvider == AiProvider.OpenAI;
+    /// <summary>API キー欄を表示するか（API キーが必要な OpenAI / Claude 選択時のみ）</summary>
+    public bool ShowApiKey => ApiProvider is AiProvider.OpenAI or AiProvider.Claude;
 
     /// <summary>エンドポイント欄を表示するか（Ollama 選択時のみ）</summary>
     public bool ShowEndpoint => ApiProvider == AiProvider.Ollama;
@@ -177,8 +184,12 @@ public partial class AiChatDialogViewModel : ObservableObject
             ? new ErDiagramToolHost(mainViewModel)
             : null;
 
-        _openAiEngine = new OpenAiChatEngine(
-            new OpenAiTurnDriver(BuildOpenAiConnection),
+        _apiKeyEngine = new ChatTurnEngine(
+            new ProviderRoutingTurnDriver(
+                () => ApiProvider,
+                new OpenAiTurnDriver(BuildOpenAiConnection),
+                new AnthropicChatTurnDriver(BuildAnthropicConnection)
+            ),
             toolHost ?? new NullToolHost(),
             dispatcher,
             () => ApiProvider == AiProvider.Ollama || !string.IsNullOrWhiteSpace(ApiKey)
@@ -188,7 +199,7 @@ public partial class AiChatDialogViewModel : ObservableObject
         _codexEngine = new CodexChatEngine(client, toolHost, dispatcher);
         _codexEngine.AuthStateChanged += OnCodexAuthStateChanged;
 
-        _engine = _openAiEngine;
+        _engine = _apiKeyEngine;
         SubscribeEngine(_engine);
         LoadSettings();
     }
@@ -198,7 +209,7 @@ public partial class AiChatDialogViewModel : ObservableObject
     {
         _isInitializing = true;
         LoadSettings();
-        ApiKey = ApiKeyStore.Load(OpenAiApiKeyStoreName);
+        ApiKey = CurrentApiKeyStoreName is { } slot ? ApiKeyStore.Load(slot) : string.Empty;
         _isInitializing = false;
 
         if (IsCodexBackend)
@@ -321,6 +332,18 @@ public partial class AiChatDialogViewModel : ObservableObject
             string.IsNullOrWhiteSpace(EndpointOverride) ? null : EndpointOverride
         );
 
+    /// <summary>Anthropic (Claude) 接続設定を現在の入力から組み立てる</summary>
+    private AnthropicChatConnection BuildAnthropicConnection() => new(ApiKey, ApiModel);
+
+    /// <summary>現在のプロバイダーに対応する API キー保存名（API キー不要のプロバイダーは null）</summary>
+    private string? CurrentApiKeyStoreName =>
+        ApiProvider switch
+        {
+            AiProvider.OpenAI => OpenAiApiKeyStoreName,
+            AiProvider.Claude => ClaudeApiKeyStoreName,
+            _ => null,
+        };
+
     /// <summary>保存済み設定と config.toml の候補を読み込む</summary>
     private void LoadSettings()
     {
@@ -419,7 +442,7 @@ public partial class AiChatDialogViewModel : ObservableObject
         _engine =
             value == ErChatBackendKind.Codex && _codexEngine is not null
                 ? _codexEngine
-                : _openAiEngine;
+                : _apiKeyEngine;
         SubscribeEngine(_engine);
 
         _conversationStarted = false;
@@ -445,16 +468,23 @@ public partial class AiChatDialogViewModel : ObservableObject
             EndpointOverride = "http://localhost:11434/v1";
         }
 
+        // プロバイダーごとに別の API キーを保持するため、切替時に保存済みキーを読み直す
+        // （読み込みで OnApiKeyChanged が走っても上書き保存しないよう _isInitializing で抑止する）
+        var wasInitializing = _isInitializing;
+        _isInitializing = true;
+        ApiKey = CurrentApiKeyStoreName is { } slot ? ApiKeyStore.Load(slot) : string.Empty;
+        _isInitializing = wasInitializing;
+
         NotifyReadinessChanged();
     }
 
     partial void OnApiKeyChanged(string value)
     {
-        PersistOpenAiApiKey();
+        PersistApiKey();
         NotifyReadinessChanged();
     }
 
-    partial void OnSaveApiKeyChanged(bool value) => PersistOpenAiApiKey();
+    partial void OnSaveApiKeyChanged(bool value) => PersistApiKey();
 
     partial void OnUserInputChanged(string value) => SendMessageCommand.NotifyCanExecuteChanged();
 
@@ -480,15 +510,18 @@ public partial class AiChatDialogViewModel : ObservableObject
         }
     }
 
-    /// <summary>保存設定に従い OpenAI API キーを永続化する</summary>
-    private void PersistOpenAiApiKey()
+    /// <summary>保存設定に従い、現在のプロバイダーの API キーを永続化する（キー不要のプロバイダーは何もしない）</summary>
+    private void PersistApiKey()
     {
         if (_isInitializing)
         {
             return;
         }
 
-        ApiKeyStore.Save(OpenAiApiKeyStoreName, SaveApiKey ? ApiKey : string.Empty);
+        if (CurrentApiKeyStoreName is { } slot)
+        {
+            ApiKeyStore.Save(slot, SaveApiKey ? ApiKey : string.Empty);
+        }
     }
 
     // ── エンジンイベント ──

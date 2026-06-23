@@ -3,8 +3,8 @@ using FluentAssertions;
 
 namespace ERDesigner.Tests.Services.Chat;
 
-/// <summary><see cref="OpenAiChatEngine"/> のツール呼び出しループ・ストリーミング・完了通知を検証するテストクラス</summary>
-public class OpenAiChatEngineTests
+/// <summary><see cref="ChatTurnEngine"/> のツール呼び出しループ・ストリーミング・完了通知を検証するテストクラス</summary>
+public class ChatTurnEngineTests
 {
     /// <summary>UI スレッドへのマーシャリングを同期実行で代替するテスト用ディスパッチャ</summary>
     private sealed class SyncUiDispatcher : IUiDispatcher
@@ -13,18 +13,18 @@ public class OpenAiChatEngineTests
     }
 
     /// <summary>スクリプト化したアシスタント応答を順に返すフェイクドライバ</summary>
-    private sealed class ScriptedTurnDriver : IOpenAiTurnDriver
+    private sealed class ScriptedTurnDriver : IChatTurnDriver
     {
-        private readonly Queue<OpenAiAssistantTurn> _turns;
+        private readonly Queue<ChatAssistantTurn> _turns;
 
-        public ScriptedTurnDriver(IEnumerable<OpenAiAssistantTurn> turns) =>
-            _turns = new Queue<OpenAiAssistantTurn>(turns);
+        public ScriptedTurnDriver(IEnumerable<ChatAssistantTurn> turns) =>
+            _turns = new Queue<ChatAssistantTurn>(turns);
 
         /// <summary>各ターン実行時点の履歴件数を記録する</summary>
         public List<int> HistoryCountsAtCall { get; } = new();
 
-        public Task<OpenAiAssistantTurn> RunAsync(
-            IReadOnlyList<OpenAiChatHistoryItem> history,
+        public Task<ChatAssistantTurn> RunAsync(
+            IReadOnlyList<ChatHistoryItem> history,
             Action<string> onTextDelta,
             CancellationToken cancellationToken
         )
@@ -53,7 +53,7 @@ public class OpenAiChatEngineTests
         }
     }
 
-    private static OpenAiChatEngine CreateEngine(
+    private static ChatTurnEngine CreateEngine(
         ScriptedTurnDriver driver,
         RecordingToolHost host,
         bool isReady = true
@@ -63,7 +63,7 @@ public class OpenAiChatEngineTests
     [Fact(DisplayName = "ツール無しターンは delta を流し成功完了する")]
     public async Task SendAsync_NoToolCalls_StreamsAndCompletes()
     {
-        var driver = new ScriptedTurnDriver([new OpenAiAssistantTurn("こんにちは", [])]);
+        var driver = new ScriptedTurnDriver([new ChatAssistantTurn("こんにちは", [])]);
         var host = new RecordingToolHost();
         var engine = CreateEngine(driver, host);
 
@@ -86,11 +86,11 @@ public class OpenAiChatEngineTests
     public async Task SendAsync_WithToolCall_ExecutesToolThenCompletes()
     {
         var driver = new ScriptedTurnDriver([
-            new OpenAiAssistantTurn(
+            new ChatAssistantTurn(
                 string.Empty,
-                [new OpenAiToolCallRequest("call_1", "add_entity", "{\"table_name\":\"Book\"}")]
+                [new ChatToolCallRequest("call_1", "add_entity", "{\"table_name\":\"Book\"}")]
             ),
-            new OpenAiAssistantTurn("テーブルを追加しました", []),
+            new ChatAssistantTurn("テーブルを追加しました", []),
         ]);
         var host = new RecordingToolHost();
         var engine = CreateEngine(driver, host);
@@ -120,7 +120,7 @@ public class OpenAiChatEngineTests
     [Fact(DisplayName = "StartConversation はシステムプロンプトで履歴を初期化する")]
     public async Task StartConversation_InitializesHistoryWithSystemPrompt()
     {
-        var driver = new ScriptedTurnDriver([new OpenAiAssistantTurn("ok", [])]);
+        var driver = new ScriptedTurnDriver([new ChatAssistantTurn("ok", [])]);
         var engine = CreateEngine(driver, new RecordingToolHost());
 
         await engine.StartConversationAsync();

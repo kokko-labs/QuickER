@@ -32,7 +32,7 @@ public sealed record OpenAiChatConnection(
 /// OpenAI SDK のストリーミング Function Calling を呼び出す本番ドライバ。
 /// 中立な会話履歴を SDK の <see cref="ChatMessage"/> へ変換し、ツール定義を付けてストリーム実行する。
 /// </summary>
-public sealed class OpenAiTurnDriver : IOpenAiTurnDriver
+public sealed class OpenAiTurnDriver : IChatTurnDriver
 {
     private readonly Func<OpenAiChatConnection> _connectionProvider;
     private readonly IReadOnlyList<ChatTool> _tools;
@@ -45,8 +45,8 @@ public sealed class OpenAiTurnDriver : IOpenAiTurnDriver
     }
 
     /// <inheritdoc />
-    public async Task<OpenAiAssistantTurn> RunAsync(
-        IReadOnlyList<OpenAiChatHistoryItem> history,
+    public async Task<ChatAssistantTurn> RunAsync(
+        IReadOnlyList<ChatHistoryItem> history,
         Action<string> onTextDelta,
         CancellationToken cancellationToken
     )
@@ -106,10 +106,10 @@ public sealed class OpenAiTurnDriver : IOpenAiTurnDriver
 
         var calls = toolCalls
             .Values.Where(acc => !string.IsNullOrEmpty(acc.Id) && !string.IsNullOrEmpty(acc.Name))
-            .Select(acc => new OpenAiToolCallRequest(acc.Id!, acc.Name!, acc.Arguments.ToString()))
+            .Select(acc => new ChatToolCallRequest(acc.Id!, acc.Name!, acc.Arguments.ToString()))
             .ToList();
 
-        return new OpenAiAssistantTurn(textBuilder.ToString(), calls);
+        return new ChatAssistantTurn(textBuilder.ToString(), calls);
     }
 
     /// <summary>接続設定から ChatClient を生成する（Ollama は API キー不要のためダミーを渡す）</summary>
@@ -126,17 +126,17 @@ public sealed class OpenAiTurnDriver : IOpenAiTurnDriver
     }
 
     /// <summary>中立な履歴項目を OpenAI SDK の ChatMessage へ変換する</summary>
-    private static ChatMessage ToChatMessage(OpenAiChatHistoryItem item) =>
+    private static ChatMessage ToChatMessage(ChatHistoryItem item) =>
         item.Role switch
         {
-            OpenAiChatRole.System => new SystemChatMessage(item.Text),
-            OpenAiChatRole.User => new UserChatMessage(item.Text),
-            OpenAiChatRole.Tool => new ToolChatMessage(item.ToolCallId ?? string.Empty, item.Text),
+            ChatHistoryRole.System => new SystemChatMessage(item.Text),
+            ChatHistoryRole.User => new UserChatMessage(item.Text),
+            ChatHistoryRole.Tool => new ToolChatMessage(item.ToolCallId ?? string.Empty, item.Text),
             _ => ToAssistantMessage(item),
         };
 
     /// <summary>アシスタント履歴項目を、ツール呼び出し・テキストを保持した AssistantChatMessage へ変換する</summary>
-    private static AssistantChatMessage ToAssistantMessage(OpenAiChatHistoryItem item)
+    private static AssistantChatMessage ToAssistantMessage(ChatHistoryItem item)
     {
         if (item.ToolCalls is not { Count: > 0 })
         {
