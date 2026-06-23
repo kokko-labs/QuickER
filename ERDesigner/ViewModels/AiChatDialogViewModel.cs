@@ -12,10 +12,10 @@ namespace ERDesigner.ViewModels;
 /// <remarks>チャット UI・メッセージ・送信/中断・自動整列を共通化し、エンジン固有部分のみ <see cref="IErChatEngine"/> で差し替える</remarks>
 public partial class AiChatDialogViewModel : ObservableObject
 {
-    /// <summary>OpenAI API キーの保存名（旧 AI 生成機能と共有しユーザーの保存値を引き継ぐ）</summary>
+    /// <summary>OpenAI API キーの保存名</summary>
     private const string OpenAiApiKeyStoreName = "OpenAiApiKey";
 
-    /// <summary>Anthropic (Claude) API キーの保存名（OpenAI とは別キーのため別スロットへ保存する）</summary>
+    /// <summary>Anthropic (Claude) API キーの保存名</summary>
     private const string ClaudeApiKeyStoreName = "ClaudeApiKey";
 
     private const string OpenAiProviderName = "openai";
