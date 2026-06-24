@@ -118,6 +118,8 @@ public sealed class ClaudeCodeProcessClient : IClaudeCodeClient
         startInfo.ArgumentList.Add("--output-format");
         startInfo.ArgumentList.Add("stream-json");
         startInfo.ArgumentList.Add("--verbose");
+        // トークン単位でテキストを流すため部分メッセージ（content_block_delta）を有効化する
+        startInfo.ArgumentList.Add("--include-partial-messages");
 
         if (!string.IsNullOrWhiteSpace(options.McpConfigPath))
         {
@@ -234,8 +236,8 @@ public sealed class ClaudeCodeProcessClient : IClaudeCodeClient
 
             switch (type)
             {
-                case "assistant":
-                    EmitAssistantText(root, onAssistantText);
+                case "stream_event":
+                    EmitPartialText(root, onAssistantText);
                     break;
                 case "result":
                     (success, error, notLoggedIn) = ParseResult(root);
@@ -246,30 +248,27 @@ public sealed class ClaudeCodeProcessClient : IClaudeCodeClient
         return new ClaudeCodeTurnOutcome(success, error, sessionId, notLoggedIn);
     }
 
-    /// <summary>assistant イベントの message.content からテキストブロックを取り出して通知する</summary>
-    private static void EmitAssistantText(JsonElement root, Action<string> onAssistantText)
+    /// <summary>
+    /// stream_event の content_block_delta（text_delta）から差分テキストを取り出して逐次通知する。
+    /// 集約版の assistant イベントは無視する（二重出力になるため）。thinking_delta も対象外。
+    /// </summary>
+    private static void EmitPartialText(JsonElement root, Action<string> onAssistantText)
     {
         if (
-            !root.TryGetProperty("message", out var message)
-            || !message.TryGetProperty("content", out var content)
-            || content.ValueKind != JsonValueKind.Array
+            !root.TryGetProperty("event", out var streamEvent)
+            || !streamEvent.TryGetProperty("type", out var eventType)
+            || eventType.GetString() != "content_block_delta"
+            || !streamEvent.TryGetProperty("delta", out var delta)
+            || !delta.TryGetProperty("type", out var deltaType)
+            || deltaType.GetString() != "text_delta"
+            || !delta.TryGetProperty("text", out var text)
+            || text.GetString() is not { Length: > 0 } value
         )
         {
             return;
         }
 
-        foreach (var block in content.EnumerateArray())
-        {
-            if (
-                block.TryGetProperty("type", out var blockType)
-                && blockType.GetString() == "text"
-                && block.TryGetProperty("text", out var text)
-                && text.GetString() is { Length: > 0 } value
-            )
-            {
-                onAssistantText(value);
-            }
-        }
+        onAssistantText(value);
     }
 
     /// <summary>result イベントから成否・エラー・未ログインを判定する</summary>
