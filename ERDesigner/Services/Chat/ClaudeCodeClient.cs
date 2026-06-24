@@ -96,6 +96,10 @@ public sealed class ClaudeCodeProcessClient : IClaudeCodeClient
             );
         }
 
+        // stream-json は UTF-8。コンソールを持たない WPF では既定が OS のコードページ（日本語環境では
+        // CP932）になり日本語が文字化けするため、入出力を明示的に BOM なし UTF-8 に固定する。
+        var utf8NoBom = new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+
         var startInfo = new ProcessStartInfo
         {
             FileName = executable,
@@ -105,6 +109,9 @@ public sealed class ClaudeCodeProcessClient : IClaudeCodeClient
             RedirectStandardError = true,
             UseShellExecute = false,
             CreateNoWindow = true,
+            StandardInputEncoding = utf8NoBom,
+            StandardOutputEncoding = utf8NoBom,
+            StandardErrorEncoding = utf8NoBom,
         };
 
         startInfo.ArgumentList.Add("-p");
