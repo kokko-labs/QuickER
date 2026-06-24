@@ -8,7 +8,7 @@ using ERDesigner.Services.Chat;
 
 namespace ERDesigner.ViewModels;
 
-/// <summary>AI チャット（API キー接続 / Codex 接続の 2 エンジン）を扱う統合ダイアログ用 ViewModel</summary>
+/// <summary>AI チャット（API キー接続 / Codex 接続 / Claude Code 接続の 3 エンジン）を扱う統合ダイアログ用 ViewModel</summary>
 /// <remarks>チャット UI・メッセージ・送信/中断・自動整列を共通化し、エンジン固有部分のみ <see cref="IErChatEngine"/> で差し替える</remarks>
 public partial class AiChatDialogViewModel : ObservableObject
 {
@@ -23,9 +23,11 @@ public partial class AiChatDialogViewModel : ObservableObject
     private readonly MainViewModel? _mainViewModel;
     private readonly IUiDispatcher _dispatcher;
     private readonly CodexAppServerSettingsStore _codexSettingsStore;
+    private readonly ClaudeCodeSettingsStore _claudeCodeSettingsStore;
 
     private readonly ChatTurnEngine _apiKeyEngine;
     private readonly CodexChatEngine? _codexEngine;
+    private readonly ClaudeCodeChatEngine _claudeCodeEngine;
     private IErChatEngine _engine;
 
     private bool _isInitializing;
@@ -80,6 +82,9 @@ public partial class AiChatDialogViewModel : ObservableObject
 
     /// <summary>Codex 接続タブが選択されているか</summary>
     public bool IsCodexBackend => SelectedBackend == ErChatBackendKind.Codex;
+
+    /// <summary>Claude Code 接続タブが選択されているか</summary>
+    public bool IsClaudeCodeBackend => SelectedBackend == ErChatBackendKind.ClaudeCode;
 
     /// <summary>新しい会話を開始できるか（接続・認証が整っているか）</summary>
     public bool CanStartConversation => _engine.IsReady;
@@ -164,21 +169,41 @@ public partial class AiChatDialogViewModel : ObservableObject
         _codexAuth.IsStarted
         && (_codexAuth.AuthMode != CodexAuthMode.None || !_codexAuth.RequiresOpenAiAuth);
 
+    // ── Claude Code 接続タブ ──
+
+    [ObservableProperty]
+    private string _claudeCodeModel = AiModelCatalog.DefaultClaudeCodeModel;
+
+    [ObservableProperty]
+    private string _claudeCodeStatusSummary = "未確認";
+
+    /// <summary>Claude Code のモデル候補（エイリアス）</summary>
+    public IReadOnlyList<string> ClaudeCodeModelCandidates { get; } =
+        AiModelCatalog.ClaudeCodeModels;
+
     /// <summary>本番構成（実クライアント・WPF ディスパッチャ）で生成する</summary>
     public AiChatDialogViewModel(MainViewModel? mainViewModel)
-        : this(mainViewModel, new WpfUiDispatcher(), settingsStore: null, codexClient: null) { }
+        : this(
+            mainViewModel,
+            new WpfUiDispatcher(),
+            settingsStore: null,
+            codexClient: null,
+            claudeCodeClient: null
+        ) { }
 
     /// <summary>依存を注入して生成する（テスト用）</summary>
     public AiChatDialogViewModel(
         MainViewModel? mainViewModel,
         IUiDispatcher dispatcher,
         CodexAppServerSettingsStore? settingsStore,
-        ICodexAppServerClient? codexClient
+        ICodexAppServerClient? codexClient,
+        IClaudeCodeClient? claudeCodeClient = null
     )
     {
         _mainViewModel = mainViewModel;
         _dispatcher = dispatcher;
         _codexSettingsStore = settingsStore ?? new CodexAppServerSettingsStore();
+        _claudeCodeSettingsStore = new ClaudeCodeSettingsStore();
 
         IErDiagramToolHost? toolHost = mainViewModel is not null
             ? new ErDiagramToolHost(mainViewModel)
@@ -199,6 +224,13 @@ public partial class AiChatDialogViewModel : ObservableObject
         _codexEngine = new CodexChatEngine(client, toolHost, dispatcher);
         _codexEngine.AuthStateChanged += OnCodexAuthStateChanged;
 
+        _claudeCodeEngine = new ClaudeCodeChatEngine(
+            claudeCodeClient ?? new ClaudeCodeProcessClient(),
+            toolHost,
+            dispatcher
+        );
+        _claudeCodeEngine.StatusSummaryChanged += OnClaudeCodeStatusSummaryChanged;
+
         _engine = _apiKeyEngine;
         SubscribeEngine(_engine);
         LoadSettings();
@@ -215,6 +247,10 @@ public partial class AiChatDialogViewModel : ObservableObject
         if (IsCodexBackend)
         {
             await EnsureCodexConnectedAsync().ConfigureAwait(true);
+        }
+        else if (IsClaudeCodeBackend)
+        {
+            await EnsureClaudeCodeInitializedAsync().ConfigureAwait(true);
         }
     }
 
@@ -321,6 +357,10 @@ public partial class AiChatDialogViewModel : ObservableObject
                 Model = CodexModel?.Trim() ?? string.Empty,
             }
         );
+
+        _claudeCodeSettingsStore.Save(
+            new ClaudeCodeSettings { Model = ClaudeCodeModel?.Trim() ?? string.Empty }
+        );
     }
 
     /// <summary>OpenAI 接続設定を現在の入力から組み立てる</summary>
@@ -355,6 +395,8 @@ public partial class AiChatDialogViewModel : ObservableObject
         CodexModel = string.IsNullOrWhiteSpace(settings.Model)
             ? AiModelCatalog.DefaultOpenAiModel
             : settings.Model;
+
+        ClaudeCodeModel = _claudeCodeSettingsStore.Load().Model;
     }
 
     /// <summary>config.toml から Codex のプロバイダー・モデル候補を読み込む</summary>
@@ -434,25 +476,41 @@ public partial class AiChatDialogViewModel : ObservableObject
         OnPropertyChanged(nameof(ShowCodexLoginPanel));
     }
 
+    /// <summary>Claude Code エンジンを初期化し、状態サマリー・可否を反映する</summary>
+    private async Task EnsureClaudeCodeInitializedAsync()
+    {
+        _claudeCodeEngine.Model = ClaudeCodeModel;
+        await _claudeCodeEngine.InitializeAsync().ConfigureAwait(true);
+        ClaudeCodeStatusSummary = _claudeCodeEngine.StatusSummary;
+        NotifyReadinessChanged();
+    }
+
     // ── 設定変更フック ──
 
     partial void OnSelectedBackendChanged(ErChatBackendKind value)
     {
         UnsubscribeEngine(_engine);
-        _engine =
-            value == ErChatBackendKind.Codex && _codexEngine is not null
-                ? _codexEngine
-                : _apiKeyEngine;
+        _engine = value switch
+        {
+            ErChatBackendKind.Codex when _codexEngine is not null => _codexEngine,
+            ErChatBackendKind.ClaudeCode => _claudeCodeEngine,
+            _ => _apiKeyEngine,
+        };
         SubscribeEngine(_engine);
 
         _conversationStarted = false;
         OnPropertyChanged(nameof(IsApiKeyBackend));
         OnPropertyChanged(nameof(IsCodexBackend));
+        OnPropertyChanged(nameof(IsClaudeCodeBackend));
         NotifyReadinessChanged();
 
         if (value == ErChatBackendKind.Codex)
         {
             _ = EnsureCodexConnectedAsync();
+        }
+        else if (value == ErChatBackendKind.ClaudeCode)
+        {
+            _ = EnsureClaudeCodeInitializedAsync();
         }
     }
 
@@ -510,6 +568,8 @@ public partial class AiChatDialogViewModel : ObservableObject
         }
     }
 
+    partial void OnClaudeCodeModelChanged(string value) => _claudeCodeEngine.Model = value;
+
     /// <summary>保存設定に従い、現在のプロバイダーの API キーを永続化する（キー不要のプロバイダーは何もしない）</summary>
     private void PersistApiKey()
     {
@@ -557,6 +617,13 @@ public partial class AiChatDialogViewModel : ObservableObject
 
     private void OnCodexAuthStateChanged(object? sender, CodexAuthState state) =>
         RunOnUi(() => ApplyCodexAuthState(state));
+
+    private void OnClaudeCodeStatusSummaryChanged(object? sender, EventArgs e) =>
+        RunOnUi(() =>
+        {
+            ClaudeCodeStatusSummary = _claudeCodeEngine.StatusSummary;
+            NotifyReadinessChanged();
+        });
 
     /// <summary>ストリーミング差分を組み立て中のアシスタント吹き出しへ追記する</summary>
     private void ApplyDelta(string delta)

@@ -8,6 +8,9 @@ public enum ErChatBackendKind
 
     /// <summary>Codex 接続（Codex App Server を利用）</summary>
     Codex,
+
+    /// <summary>Claude Code 接続（ローカルの Claude Code CLI をヘッドレス利用）</summary>
+    ClaudeCode,
 }
 
 /// <summary>ツール実行の活動内容（ToolCall 吹き出し表示用）</summary>

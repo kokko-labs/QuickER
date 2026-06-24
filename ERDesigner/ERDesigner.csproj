@@ -7,12 +7,17 @@
     <UseWPF>true</UseWPF>
   </PropertyGroup>
 
+  <!-- Claude Code 接続タブ: プロセス内 MCP サーバー（HTTP/SSE）をホストするため ASP.NET Core を参照する -->
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="Anthropic" Version="12.30.0" />
     <PackageReference Include="ClosedXML" Version="0.105.0" />
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
     <PackageReference Include="Microsoft.Data.SqlClient" Version="7.0.1" />
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.7" />
+    <PackageReference Include="ModelContextProtocol.AspNetCore" Version="1.4.0" />
     <PackageReference Include="OpenAI" Version="2.10.0" />
   </ItemGroup>
 

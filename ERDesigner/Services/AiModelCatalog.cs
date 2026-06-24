@@ -29,6 +29,18 @@ public static class AiModelCatalog
         "claude-haiku-4-5",
     ];
 
+    /// <summary>Claude Code（CLI）の既定モデル（空＝Claude Code の既定に従う）</summary>
+    public const string DefaultClaudeCodeModel = "";
+
+    /// <summary>Claude Code（CLI）の候補モデル（エイリアス。空は「既定」）</summary>
+    public static readonly IReadOnlyList<string> ClaudeCodeModels =
+    [
+        DefaultClaudeCodeModel,
+        "sonnet",
+        "opus",
+        "haiku",
+    ];
+
     /// <summary>Ollama でよく使われる候補モデル一覧</summary>
     public static readonly IReadOnlyList<string> OllamaModels =
     [

@@ -501,6 +501,65 @@
           </Border>
         </StackPanel>
       </TabItem>
+
+      <TabItem Header="Claude 接続">
+        <StackPanel Margin="16,14">
+          <Grid>
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <TextBlock Grid.Column="0" Style="{StaticResource FieldLabel}" Text="モデル" />
+            <ComboBox
+              Grid.Column="1"
+              Padding="6,4"
+              IsEditable="True"
+              Text="{Binding ClaudeCodeModel, UpdateSourceTrigger=PropertyChanged}"
+              ItemsSource="{Binding ClaudeCodeModelCandidates}"
+            />
+          </Grid>
+
+          <Border
+            Margin="0,12,0,0"
+            Padding="12,10"
+            Background="#F8FAFC"
+            CornerRadius="8"
+            BorderBrush="{StaticResource Divider}"
+            BorderThickness="1"
+          >
+            <StackPanel>
+              <Grid>
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="Auto" />
+                  <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Ellipse
+                  Grid.Column="0"
+                  Width="8"
+                  Height="8"
+                  Margin="0,0,8,0"
+                  VerticalAlignment="Center"
+                  Fill="{StaticResource Accent}"
+                />
+                <TextBlock
+                  Grid.Column="1"
+                  VerticalAlignment="Center"
+                  FontWeight="SemiBold"
+                  Foreground="{StaticResource HeaderText}"
+                  Text="{Binding ClaudeCodeStatusSummary}"
+                  TextWrapping="Wrap"
+                />
+              </Grid>
+              <TextBlock
+                Margin="16,8,0,0"
+                Foreground="{StaticResource MutedText}"
+                TextWrapping="Wrap"
+                Text="ローカルの Claude Code をそのまま使用します。未ログインの場合はターミナルで claude を起動し /login で認証してください。モデルは空欄で Claude Code の既定に従います。"
+              />
+            </StackPanel>
+          </Border>
+        </StackPanel>
+      </TabItem>
     </TabControl>
 
     <!-- ── 中部: チャットカード ── -->

@@ -88,8 +88,12 @@ public partial class AiChatDialog : Window
             return;
         }
 
-        ViewModel.SelectedBackend =
-            BackendTabs.SelectedIndex == 1 ? ErChatBackendKind.Codex : ErChatBackendKind.ApiKey;
+        ViewModel.SelectedBackend = BackendTabs.SelectedIndex switch
+        {
+            1 => ErChatBackendKind.Codex,
+            2 => ErChatBackendKind.ClaudeCode,
+            _ => ErChatBackendKind.ApiKey,
+        };
     }
 
     /// <summary>API キー接続の PasswordBox 変更を ViewModel へ転送する</summary>
