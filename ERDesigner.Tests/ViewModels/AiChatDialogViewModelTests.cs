@@ -142,4 +142,57 @@ public class AiChatDialogViewModelTests
             Cleanup(folder);
         }
     }
+
+    /// <summary>ユーザー／アシスタント発言があるときのみ HasConversation が true になることを検証する</summary>
+    [Fact(DisplayName = "HasConversation はユーザー／アシスタント発言で true になる")]
+    public void HasConversation_TrueOnlyWithUserOrAssistantMessage()
+    {
+        var (vm, _, folder) = CreateVm();
+
+        try
+        {
+            vm.HasConversation.Should().BeFalse();
+
+            // システムメッセージだけでは会話とみなさない
+            vm.Messages.Add(
+                new ErChatMessage { Role = ErChatMessageRole.System, Content = "案内" }
+            );
+            vm.HasConversation.Should().BeFalse();
+
+            vm.Messages.Add(
+                new ErChatMessage { Role = ErChatMessageRole.User, Content = "こんにちは" }
+            );
+            vm.HasConversation.Should().BeTrue();
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>ClearConversation がメッセージを空にし会話なし状態へ戻すことを検証する</summary>
+    [Fact(DisplayName = "ClearConversation は会話を空にする")]
+    public void ClearConversation_EmptiesMessages()
+    {
+        var (vm, _, folder) = CreateVm();
+
+        try
+        {
+            vm.Messages.Add(
+                new ErChatMessage { Role = ErChatMessageRole.User, Content = "こんにちは" }
+            );
+            vm.Messages.Add(
+                new ErChatMessage { Role = ErChatMessageRole.Assistant, Content = "どうぞ" }
+            );
+
+            vm.ClearConversation();
+
+            vm.Messages.Should().BeEmpty();
+            vm.HasConversation.Should().BeFalse();
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
 }

@@ -80,7 +80,13 @@ public partial class AiChatDialog : Window
         Close();
     }
 
-    /// <summary>タブ選択に応じて接続方式を切り替える</summary>
+    /// <summary>直前に選択していた接続タブのインデックス（キャンセル時の復帰用）</summary>
+    private int _previousBackendIndex;
+
+    /// <summary>
+    /// タブ選択に応じて接続方式を切り替える。会話中はクリア確認を出し、
+    /// OK の場合は会話をクリアして切り替え、キャンセルの場合は元のタブへ戻す。
+    /// </summary>
     private void BackendTabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (!ReferenceEquals(e.OriginalSource, BackendTabs))
@@ -88,7 +94,35 @@ public partial class AiChatDialog : Window
             return;
         }
 
-        ViewModel.SelectedBackend = BackendTabs.SelectedIndex switch
+        var newIndex = BackendTabs.SelectedIndex;
+
+        // 復帰で SelectedIndex を戻したときの再入はここで素通りする
+        if (newIndex == _previousBackendIndex)
+        {
+            return;
+        }
+
+        if (ViewModel.HasConversation)
+        {
+            var result = MessageBox.Show(
+                this,
+                "現在の会話をクリアして接続方式を切り替えますか？",
+                "会話のクリア",
+                MessageBoxButton.OKCancel,
+                MessageBoxImage.Question
+            );
+
+            if (result != MessageBoxResult.OK)
+            {
+                BackendTabs.SelectedIndex = _previousBackendIndex;
+                return;
+            }
+
+            ViewModel.ClearConversation();
+        }
+
+        _previousBackendIndex = newIndex;
+        ViewModel.SelectedBackend = newIndex switch
         {
             1 => ErChatBackendKind.Codex,
             2 => ErChatBackendKind.ClaudeCode,

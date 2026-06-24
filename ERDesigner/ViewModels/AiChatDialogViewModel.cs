@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Diagnostics;
+using System.Linq;
 using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -95,6 +96,10 @@ public partial class AiChatDialogViewModel : ObservableObject
         && _engine.IsReady
         && !IsTurnInProgress
         && !string.IsNullOrWhiteSpace(UserInput);
+
+    /// <summary>クリア確認が必要な実質的な会話があるか（ユーザー／アシスタントの発言が 1 件以上）</summary>
+    public bool HasConversation =>
+        Messages.Any(m => m.Role is ErChatMessageRole.User or ErChatMessageRole.Assistant);
 
     // ── API キー接続タブ ──
 
@@ -272,6 +277,16 @@ public partial class AiChatDialogViewModel : ObservableObject
         {
             IsBusy = false;
         }
+    }
+
+    /// <summary>現在の会話表示と進行状態をクリアする（タブ切替時の確認後に呼ぶ）</summary>
+    public void ClearConversation()
+    {
+        Messages.Clear();
+        _conversationStarted = false;
+        _currentAssistantMessage = null;
+        _currentToolCallMessage = null;
+        SendMessageCommand.NotifyCanExecuteChanged();
     }
 
     /// <summary>ユーザー入力を 1 ターンとして送信する</summary>
