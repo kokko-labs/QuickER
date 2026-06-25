@@ -80,8 +80,11 @@ public partial class AiChatDialog : Window
         Close();
     }
 
-    /// <summary>直前に選択していた接続タブのインデックス（キャンセル時の復帰用）</summary>
-    private int _previousBackendIndex;
+    /// <summary>確定済み（切り替え済み）の接続タブのインデックス</summary>
+    private int _committedBackendIndex;
+
+    /// <summary>タブ選択の復帰中か（復帰による再入を無視するためのガード）</summary>
+    private bool _revertingBackendTab;
 
     /// <summary>
     /// タブ選択に応じて接続方式を切り替える。会話中はクリア確認を出し、
@@ -89,15 +92,15 @@ public partial class AiChatDialog : Window
     /// </summary>
     private void BackendTabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (!ReferenceEquals(e.OriginalSource, BackendTabs))
+        // 子 Selector（ComboBox 等）のバブリングや、復帰による再入は無視する
+        if (!ReferenceEquals(e.OriginalSource, BackendTabs) || _revertingBackendTab)
         {
             return;
         }
 
         var newIndex = BackendTabs.SelectedIndex;
 
-        // 復帰で SelectedIndex を戻したときの再入はここで素通りする
-        if (newIndex == _previousBackendIndex)
+        if (newIndex == _committedBackendIndex)
         {
             return;
         }
@@ -114,20 +117,43 @@ public partial class AiChatDialog : Window
 
             if (result != MessageBoxResult.OK)
             {
-                BackendTabs.SelectedIndex = _previousBackendIndex;
+                RevertBackendSelection();
                 return;
             }
 
             ViewModel.ClearConversation();
         }
 
-        _previousBackendIndex = newIndex;
+        _committedBackendIndex = newIndex;
         ViewModel.SelectedBackend = newIndex switch
         {
             1 => ErChatBackendKind.Codex,
             2 => ErChatBackendKind.ClaudeCode,
             _ => ErChatBackendKind.ApiKey,
         };
+    }
+
+    /// <summary>
+    /// 確定済みタブへ選択を戻す。<see cref="SelectionChanged"/> 処理中・モーダルループ直後の
+    /// 同期的な選択戻しは TabControl の選択状態を不整合にし、以降のクリックで再発火するため、
+    /// イベント完了後にディスパッチャ経由で戻し、戻し中の再入はガードで無視する。
+    /// </summary>
+    private void RevertBackendSelection()
+    {
+        Dispatcher.BeginInvoke(
+            new Action(() =>
+            {
+                _revertingBackendTab = true;
+                try
+                {
+                    BackendTabs.SelectedIndex = _committedBackendIndex;
+                }
+                finally
+                {
+                    _revertingBackendTab = false;
+                }
+            })
+        );
     }
 
     /// <summary>API キー接続の PasswordBox 変更を ViewModel へ転送する</summary>
