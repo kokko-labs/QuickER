@@ -30,6 +30,19 @@ public sealed record ClaudeCodeTurnOutcome(
     bool NotLoggedIn
 );
 
+/// <summary>軽量ログインプローブの結果</summary>
+public enum ClaudeLoginProbeResult
+{
+    /// <summary>ログイン済み（送信可能）</summary>
+    LoggedIn,
+
+    /// <summary>未ログイン（/login が必要）</summary>
+    NotLoggedIn,
+
+    /// <summary>判定不能（応答解析失敗・想定外エラーなど）</summary>
+    Unavailable,
+}
+
 /// <summary>Claude Code CLI をヘッドレスで駆動するクライアントの抽象（テストでフェイクへ差し替える）</summary>
 public interface IClaudeCodeClient : IAsyncDisposable
 {
@@ -44,6 +57,9 @@ public interface IClaudeCodeClient : IAsyncDisposable
         Action<string> onAssistantText,
         CancellationToken cancellationToken
     );
+
+    /// <summary>最小実行でログイン状態だけを軽量に確認する（明示操作時のみ呼ぶ）</summary>
+    Task<ClaudeLoginProbeResult> ProbeLoginAsync(CancellationToken cancellationToken);
 
     /// <summary>実行中のターンを中断する</summary>
     void Interrupt();
@@ -96,23 +112,7 @@ public sealed class ClaudeCodeProcessClient : IClaudeCodeClient
             );
         }
 
-        // stream-json は UTF-8。コンソールを持たない WPF では既定が OS のコードページ（日本語環境では
-        // CP932）になり日本語が文字化けするため、入出力を明示的に BOM なし UTF-8 に固定する。
-        var utf8NoBom = new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
-
-        var startInfo = new ProcessStartInfo
-        {
-            FileName = executable,
-            WorkingDirectory = options.WorkingDirectory,
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            StandardInputEncoding = utf8NoBom,
-            StandardOutputEncoding = utf8NoBom,
-            StandardErrorEncoding = utf8NoBom,
-        };
+        var startInfo = CreateStartInfo(executable, options.WorkingDirectory);
 
         startInfo.ArgumentList.Add("-p");
         startInfo.ArgumentList.Add("--output-format");
@@ -147,12 +147,6 @@ public sealed class ClaudeCodeProcessClient : IClaudeCodeClient
             startInfo.ArgumentList.Add(resumeSessionId);
         }
 
-        // ユーザーの claude 設定/認証をそのまま使わせるため、注入された Anthropic 系 env を除去する
-        foreach (var name in StrippedEnvironmentVariables)
-        {
-            startInfo.Environment.Remove(name);
-        }
-
         using var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
 
         if (!process.Start())
@@ -182,6 +176,111 @@ public sealed class ClaudeCodeProcessClient : IClaudeCodeClient
         {
             _currentProcess = null;
         }
+    }
+
+    /// <inheritdoc />
+    public async Task<ClaudeLoginProbeResult> ProbeLoginAsync(CancellationToken cancellationToken)
+    {
+        var executable = _executablePath.Value;
+
+        if (executable is null)
+        {
+            return ClaudeLoginProbeResult.Unavailable;
+        }
+
+        // ER ツール・システムプロンプト・継続なしの最小実行でログイン状態だけを確認する
+        var startInfo = CreateStartInfo(executable, Path.GetTempPath());
+        startInfo.ArgumentList.Add("-p");
+        startInfo.ArgumentList.Add("--output-format");
+        startInfo.ArgumentList.Add("json");
+
+        using var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
+
+        if (!process.Start())
+        {
+            return ClaudeLoginProbeResult.Unavailable;
+        }
+
+        try
+        {
+            await process.StandardInput.WriteAsync("ping").ConfigureAwait(false);
+            process.StandardInput.Close();
+
+            var output = await process
+                .StandardOutput.ReadToEndAsync(cancellationToken)
+                .ConfigureAwait(false);
+            await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+
+            return InterpretProbe(output);
+        }
+        catch (OperationCanceledException)
+        {
+            TryKill(process);
+            return ClaudeLoginProbeResult.Unavailable;
+        }
+    }
+
+    /// <summary>プローブ応答（--output-format json の単一オブジェクト）をログイン状態へ解釈する</summary>
+    private static ClaudeLoginProbeResult InterpretProbe(string output)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(output);
+            var root = document.RootElement;
+
+            var isError =
+                root.TryGetProperty("is_error", out var isErrorEl)
+                && isErrorEl.ValueKind == JsonValueKind.True;
+
+            if (!isError)
+            {
+                return ClaudeLoginProbeResult.LoggedIn;
+            }
+
+            var message = root.TryGetProperty("result", out var resultEl)
+                ? resultEl.GetString()
+                : null;
+
+            return message is not null
+                && message.Contains("Not logged in", StringComparison.OrdinalIgnoreCase)
+                ? ClaudeLoginProbeResult.NotLoggedIn
+                : ClaudeLoginProbeResult.Unavailable;
+        }
+        catch (JsonException)
+        {
+            return ClaudeLoginProbeResult.Unavailable;
+        }
+    }
+
+    /// <summary>
+    /// claude プロセス起動用の <see cref="ProcessStartInfo"/> を生成する。
+    /// 入出力を BOM なし UTF-8 に固定（コンソール無し環境での文字化け対策）し、
+    /// ユーザーの claude 設定/認証をそのまま使わせるため注入された Anthropic 系 env を除去する。
+    /// </summary>
+    private static ProcessStartInfo CreateStartInfo(string executable, string workingDirectory)
+    {
+        var utf8NoBom = new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = executable,
+            WorkingDirectory = workingDirectory,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            StandardInputEncoding = utf8NoBom,
+            StandardOutputEncoding = utf8NoBom,
+            StandardErrorEncoding = utf8NoBom,
+        };
+
+        foreach (var name in StrippedEnvironmentVariables)
+        {
+            startInfo.Environment.Remove(name);
+        }
+
+        return startInfo;
     }
 
     /// <summary>stdout の stream-json 行を解析し、テキストを逐次通知しつつ最終結果を組み立てる</summary>

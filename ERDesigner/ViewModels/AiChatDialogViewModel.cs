@@ -174,6 +174,33 @@ public partial class AiChatDialogViewModel : ObservableObject
         _codexAuth.IsStarted
         && (_codexAuth.AuthMode != CodexAuthMode.None || !_codexAuth.RequiresOpenAiAuth);
 
+    /// <summary>Codex の状態ドット健全度（接続中/未開始=灰・未ログイン=赤・他=緑）</summary>
+    public ConnectionHealth CodexStatusLevel
+    {
+        get
+        {
+            if (_codexConnecting || !_codexAuth.IsStarted)
+            {
+                return ConnectionHealth.Pending;
+            }
+
+            if (
+                (_codexEngine?.IsOpenAiProvider ?? false)
+                && _codexAuth.RequiresOpenAiAuth
+                && _codexAuth.AuthMode == CodexAuthMode.None
+            )
+            {
+                return ConnectionHealth.NeedsAction;
+            }
+
+            return ConnectionHealth.Ready;
+        }
+    }
+
+    /// <summary>Codex ログアウトボタンを表示するか（openai かつログイン済みのときのみ）</summary>
+    public bool ShowCodexLogout =>
+        (_codexEngine?.IsOpenAiProvider ?? false) && _codexAuth.AuthMode != CodexAuthMode.None;
+
     // ── Claude Code 接続タブ ──
 
     [ObservableProperty]
@@ -181,6 +208,12 @@ public partial class AiChatDialogViewModel : ObservableObject
 
     [ObservableProperty]
     private string _claudeCodeStatusSummary = "未確認";
+
+    [ObservableProperty]
+    private ConnectionHealth _claudeCodeStatusLevel = ConnectionHealth.Pending;
+
+    [ObservableProperty]
+    private string _claudeCodeGuidance = "「再確認」を押すとログイン状態を確認できます。";
 
     /// <summary>Claude Code のモデル候補（エイリアス）</summary>
     public IReadOnlyList<string> ClaudeCodeModelCandidates { get; } =
@@ -362,6 +395,23 @@ public partial class AiChatDialogViewModel : ObservableObject
         }
     }
 
+    /// <summary>Codex のアカウント状態を取り直す（「再確認」）</summary>
+    [RelayCommand]
+    private async Task CodexRefreshAsync()
+    {
+        if (_codexEngine is not null)
+        {
+            await _codexEngine.RefreshAccountStateAsync().ConfigureAwait(true);
+        }
+    }
+
+    /// <summary>Claude のログイン状態を軽量プローブで取り直す（「再確認」）</summary>
+    [RelayCommand]
+    private async Task ClaudeCodeRefreshAsync()
+    {
+        await _claudeCodeEngine.RefreshAsync().ConfigureAwait(true);
+    }
+
     /// <summary>設定を保存する（ウィンドウ非表示化時などに外部から呼ぶ）</summary>
     public void SaveSettings()
     {
@@ -497,6 +547,8 @@ public partial class AiChatDialogViewModel : ObservableObject
         _claudeCodeEngine.Model = ClaudeCodeModel;
         await _claudeCodeEngine.InitializeAsync().ConfigureAwait(true);
         ClaudeCodeStatusSummary = _claudeCodeEngine.StatusSummary;
+        ClaudeCodeStatusLevel = _claudeCodeEngine.StatusLevel;
+        ClaudeCodeGuidance = _claudeCodeEngine.Guidance;
         NotifyReadinessChanged();
     }
 
@@ -637,6 +689,8 @@ public partial class AiChatDialogViewModel : ObservableObject
         RunOnUi(() =>
         {
             ClaudeCodeStatusSummary = _claudeCodeEngine.StatusSummary;
+            ClaudeCodeStatusLevel = _claudeCodeEngine.StatusLevel;
+            ClaudeCodeGuidance = _claudeCodeEngine.Guidance;
             NotifyReadinessChanged();
         });
 
@@ -713,6 +767,8 @@ public partial class AiChatDialogViewModel : ObservableObject
         OnPropertyChanged(nameof(ShowCodexAuthSection));
         OnPropertyChanged(nameof(ShowCodexLoginPanel));
         OnPropertyChanged(nameof(CanCodexLogout));
+        OnPropertyChanged(nameof(ShowCodexLogout));
+        OnPropertyChanged(nameof(CodexStatusLevel));
         NotifyReadinessChanged();
     }
 

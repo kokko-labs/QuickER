@@ -20,8 +20,16 @@ public class ClaudeCodeChatEngineTests
         public Queue<ClaudeCodeTurnOutcome> Outcomes { get; } = new();
         public List<string?> ResumeSessionIdsAtCall { get; } = new();
         public bool Interrupted { get; private set; }
+        public ClaudeLoginProbeResult ProbeResult { get; set; } = ClaudeLoginProbeResult.LoggedIn;
+        public int ProbeCallCount { get; private set; }
 
         public bool IsAvailable() => Available;
+
+        public Task<ClaudeLoginProbeResult> ProbeLoginAsync(CancellationToken cancellationToken)
+        {
+            ProbeCallCount++;
+            return Task.FromResult(ProbeResult);
+        }
 
         public Task<ClaudeCodeTurnOutcome> RunTurnAsync(
             string prompt,
@@ -144,6 +152,89 @@ public class ClaudeCodeChatEngineTests
         await engine.InterruptAsync();
 
         client.Interrupted.Should().BeTrue();
+
+        await engine.DisposeAsync();
+    }
+
+    /// <summary>検出済み・未プローブの初期状態は Pending（灰・未確認）であることを検証する</summary>
+    [Fact(DisplayName = "初期状態は Pending（未確認）")]
+    public async Task Initialize_WhenAvailable_IsPending()
+    {
+        var client = new FakeClaudeCodeClient();
+        var engine = CreateEngine(client);
+
+        await engine.InitializeAsync();
+
+        engine.StatusLevel.Should().Be(ConnectionHealth.Pending);
+        engine.StatusSummary.Should().Be("未確認");
+
+        await engine.DisposeAsync();
+    }
+
+    /// <summary>再確認でログイン済みなら Ready（緑）になることを検証する</summary>
+    [Fact(DisplayName = "再確認: ログイン済みは Ready")]
+    public async Task Refresh_LoggedIn_BecomesReady()
+    {
+        var client = new FakeClaudeCodeClient { ProbeResult = ClaudeLoginProbeResult.LoggedIn };
+        var engine = CreateEngine(client);
+
+        await engine.InitializeAsync();
+        await engine.RefreshAsync();
+
+        client.ProbeCallCount.Should().Be(1);
+        engine.StatusLevel.Should().Be(ConnectionHealth.Ready);
+
+        await engine.DisposeAsync();
+    }
+
+    /// <summary>再確認で未ログインなら NeedsAction（赤）＋ /login 案内になることを検証する</summary>
+    [Fact(DisplayName = "再確認: 未ログインは NeedsAction＋案内")]
+    public async Task Refresh_NotLoggedIn_BecomesNeedsAction()
+    {
+        var client = new FakeClaudeCodeClient
+        {
+            ProbeResult = ClaudeLoginProbeResult.NotLoggedIn,
+        };
+        var engine = CreateEngine(client);
+
+        await engine.InitializeAsync();
+        await engine.RefreshAsync();
+
+        engine.StatusLevel.Should().Be(ConnectionHealth.NeedsAction);
+        engine.Guidance.Should().Contain("/login");
+
+        await engine.DisposeAsync();
+    }
+
+    /// <summary>claude 未検出時はプローブせず NeedsAction になることを検証する</summary>
+    [Fact(DisplayName = "再確認: 未検出はプローブせず NeedsAction")]
+    public async Task Refresh_WhenUnavailable_NeedsActionWithoutProbe()
+    {
+        var client = new FakeClaudeCodeClient { Available = false };
+        var engine = CreateEngine(client);
+
+        await engine.InitializeAsync();
+        await engine.RefreshAsync();
+
+        client.ProbeCallCount.Should().Be(0);
+        engine.StatusLevel.Should().Be(ConnectionHealth.NeedsAction);
+
+        await engine.DisposeAsync();
+    }
+
+    /// <summary>送信成功でログイン済みと判明し Ready（緑）になることを検証する</summary>
+    [Fact(DisplayName = "送信成功で Ready になる")]
+    public async Task SendAsync_Success_BecomesReady()
+    {
+        var client = new FakeClaudeCodeClient();
+        client.Outcomes.Enqueue(new ClaudeCodeTurnOutcome(true, null, "s1", false));
+        var engine = CreateEngine(client);
+
+        await engine.InitializeAsync();
+        await engine.StartConversationAsync();
+        await engine.SendAsync("やあ");
+
+        engine.StatusLevel.Should().Be(ConnectionHealth.Ready);
 
         await engine.DisposeAsync();
     }

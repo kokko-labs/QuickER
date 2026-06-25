@@ -24,13 +24,27 @@ public sealed class ClaudeCodeChatEngine : IErChatEngine
     private bool _initialized;
     private CancellationTokenSource? _turnCts;
 
+    private const string PendingGuidance = "「再確認」を押すとログイン状態を確認できます。";
+    private const string InstallGuidance =
+        "Claude Code をインストールし、PATH を通してください。";
+    private const string LoggedInGuidance = "ローカルの Claude Code をそのまま使用します。";
+    private const string NotLoggedInGuidance =
+        "ターミナルで claude を起動し /login で認証後、「再確認」を押してください。";
+    private const string InconclusiveGuidance = "しばらくして「再確認」を押してください。";
+
     /// <summary>使用するモデルエイリアス（空なら Claude Code 既定）</summary>
     public string Model { get; set; } = string.Empty;
 
     /// <summary>状態サマリー（UI 表示用）</summary>
     public string StatusSummary { get; private set; } = "未確認";
 
-    /// <summary>状態サマリーが変化したときに発火する</summary>
+    /// <summary>状態ドットの健全度（緑/灰/赤）</summary>
+    public ConnectionHealth StatusLevel { get; private set; } = ConnectionHealth.Pending;
+
+    /// <summary>下段に表示する状態依存の案内文</summary>
+    public string Guidance { get; private set; } = PendingGuidance;
+
+    /// <summary>状態サマリー・健全度・案内のいずれかが変化したときに発火する</summary>
     public event EventHandler? StatusSummaryChanged;
 
     /// <inheritdoc />
@@ -65,7 +79,11 @@ public sealed class ClaudeCodeChatEngine : IErChatEngine
     {
         if (!_client.IsAvailable())
         {
-            UpdateStatus("Claude Code が見つかりません。インストールしてください。");
+            UpdateStatus(
+                "Claude Code が見つかりません",
+                ConnectionHealth.NeedsAction,
+                InstallGuidance
+            );
             _initialized = false;
             return;
         }
@@ -83,7 +101,50 @@ public sealed class ClaudeCodeChatEngine : IErChatEngine
         }
 
         _initialized = true;
-        UpdateStatus("Claude Code: 利用可能");
+
+        // 検出はできたがログインは未確認（プローブは明示操作時のみ）。緑を偽装せず灰にする。
+        UpdateStatus("未確認", ConnectionHealth.Pending, PendingGuidance);
+    }
+
+    /// <summary>
+    /// 軽量ログインプローブで状態を取り直す（「再確認」ボタン）。
+    /// 検出不可なら赤、ログイン済みなら緑、未ログインなら赤＋案内に更新する。
+    /// </summary>
+    public async Task RefreshAsync(CancellationToken cancellationToken = default)
+    {
+        if (!_client.IsAvailable())
+        {
+            UpdateStatus(
+                "Claude Code が見つかりません",
+                ConnectionHealth.NeedsAction,
+                InstallGuidance
+            );
+            return;
+        }
+
+        if (!_initialized)
+        {
+            await InitializeAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        var result = await _client.ProbeLoginAsync(cancellationToken).ConfigureAwait(false);
+
+        switch (result)
+        {
+            case ClaudeLoginProbeResult.LoggedIn:
+                UpdateStatus("ログイン済み", ConnectionHealth.Ready, LoggedInGuidance);
+                break;
+            case ClaudeLoginProbeResult.NotLoggedIn:
+                UpdateStatus("未ログイン", ConnectionHealth.NeedsAction, NotLoggedInGuidance);
+                break;
+            default:
+                UpdateStatus(
+                    "ログイン状態を確認できませんでした",
+                    ConnectionHealth.NeedsAction,
+                    InconclusiveGuidance
+                );
+                break;
+        }
     }
 
     /// <inheritdoc />
@@ -132,9 +193,8 @@ public sealed class ClaudeCodeChatEngine : IErChatEngine
 
             if (outcome.NotLoggedIn)
             {
-                UpdateStatus(
-                    "未ログイン: ターミナルで claude を起動し /login でログインしてください。"
-                );
+                // 実ターンで未ログインが判明 → 赤に反映
+                UpdateStatus("未ログイン", ConnectionHealth.NeedsAction, NotLoggedInGuidance);
                 TurnCompleted?.Invoke(
                     this,
                     new ErChatTurnResult(
@@ -145,6 +205,8 @@ public sealed class ClaudeCodeChatEngine : IErChatEngine
             }
             else if (outcome.Success)
             {
+                // ターンが通った＝ログイン済み → 緑に反映
+                UpdateStatus("ログイン済み", ConnectionHealth.Ready, LoggedInGuidance);
                 TurnCompleted?.Invoke(this, new ErChatTurnResult(true, null));
             }
             else
@@ -219,10 +281,12 @@ public sealed class ClaudeCodeChatEngine : IErChatEngine
         return path;
     }
 
-    /// <summary>状態サマリーを更新し通知する</summary>
-    private void UpdateStatus(string summary)
+    /// <summary>状態サマリー・健全度・案内を更新し通知する</summary>
+    private void UpdateStatus(string summary, ConnectionHealth level, string guidance)
     {
         StatusSummary = summary;
+        StatusLevel = level;
+        Guidance = guidance;
         StatusSummaryChanged?.Invoke(this, EventArgs.Empty);
     }
 
