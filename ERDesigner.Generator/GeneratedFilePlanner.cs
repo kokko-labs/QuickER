@@ -101,27 +101,14 @@ public static class GeneratedFilePlanner
         $"{DefaultSuffix(bucket)}.g.cs";
 
     /// <summary>生成対象として有効なバケットを正準順で返す</summary>
-    /// <remarks>Runtime は何らかのクラスを生成する限り常に必要（共有基盤を保持するため）</remarks>
+    /// <remarks>
+    /// 並び順は UI のカテゴリ別 namespace 欄と一致させる（Entity → EditModel → Mapper → Repository → ValueObject → Runtime）。
+    /// Runtime は何らかのクラスを生成する限り常に必要（共有基盤を保持するため）で、UI と同じく末尾に置く
+    /// </remarks>
     public static IReadOnlyList<GenerationBucket> ActiveBuckets(CodeGenerationOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
         var active = new List<GenerationBucket>();
-
-        var anyClass =
-            options.GenerateEntityClasses
-            || options.GenerateEditModels
-            || options.GenerateMappers
-            || options.GenerateRepositories;
-
-        if (anyClass)
-        {
-            active.Add(GenerationBucket.Runtime);
-        }
-
-        if (options.GenerateValueObjects)
-        {
-            active.Add(GenerationBucket.ValueObject);
-        }
 
         if (options.GenerateEntityClasses)
         {
@@ -141,6 +128,22 @@ public static class GeneratedFilePlanner
         if (options.GenerateRepositories)
         {
             active.Add(GenerationBucket.Repository);
+        }
+
+        if (options.GenerateValueObjects)
+        {
+            active.Add(GenerationBucket.ValueObject);
+        }
+
+        var anyClass =
+            options.GenerateEntityClasses
+            || options.GenerateEditModels
+            || options.GenerateMappers
+            || options.GenerateRepositories;
+
+        if (anyClass)
+        {
+            active.Add(GenerationBucket.Runtime);
         }
 
         return active;

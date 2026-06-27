@@ -80,16 +80,17 @@ public class GeneratedFilePlannerTests
 
         var plan = GeneratedFilePlanner.Plan(options);
 
+        // 並び順は UI のカテゴリ別 namespace 欄と一致させる（Runtime は末尾の共有基盤）
         plan.Select(spec => spec.FileName)
             .Should()
-            .BeEquivalentTo([
-                "Runtime.g.cs",
-                "ValueObjects.g.cs",
+            .Equal(
                 "Entities.g.cs",
                 "EditModels.g.cs",
                 "Mappers.g.cs",
                 "Repositories.g.cs",
-            ]);
+                "ValueObjects.g.cs",
+                "Runtime.g.cs"
+            );
 
         var entity = plan.Single(spec => spec.FileName == "Entities.g.cs");
         entity.NamespaceName.Should().Be("Acme.App.Entities");
