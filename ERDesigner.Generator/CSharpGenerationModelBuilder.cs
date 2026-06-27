@@ -105,7 +105,38 @@ internal sealed partial class CSharpGenerationModelBuilder
             Properties = properties,
             Navigations = navigationModels,
             HasCascadeNavigations = navigationModels.Any(navigation => navigation.Cascade),
+            TypedParentModelTypeName = ResolveTypedParentModelTypeName(className, navigationModels),
         };
+    }
+
+    /// <summary>型付き ParentModel を生成できる場合の親 EditModel 型名を解決する（親候補型がちょうど 1 つのときのみ）</summary>
+    /// <remarks>
+    /// 親候補は (1) 親参照ナビ（IsParentReference）の参照先型、(2) 自己参照（自身をカスケード子に持つ）の場合の自分自身の型。
+    /// 複数 FK などで親候補型が 2 つ以上になる場合は型付き版を生成せず、基底の EditModelBase? のみとする。
+    /// </remarks>
+    private static string? ResolveTypedParentModelTypeName(
+        string className,
+        IReadOnlyList<CSharpNavigationModel> navigationModels
+    )
+    {
+        var parentTypeNames = navigationModels
+            .Where(navigation => navigation.IsParentReference)
+            .Select(navigation => navigation.TypeName)
+            .ToHashSet(StringComparer.Ordinal);
+
+        // 自己参照（自分自身をカスケード子＝コレクション/単一参照で持つ）場合、親候補に自分自身を加える
+        if (
+            navigationModels.Any(navigation =>
+                navigation.Cascade
+                && !navigation.IsParentReference
+                && string.Equals(navigation.TypeName, className, StringComparison.Ordinal)
+            )
+        )
+        {
+            parentTypeNames.Add(className);
+        }
+
+        return parentTypeNames.Count == 1 ? parentTypeNames.First() : null;
     }
 
     /// <summary>エンティティ定義と解決済みナビゲーションから Entity ↔ EditModel 変換 Mapper の生成モデルを構築する</summary>
@@ -392,6 +423,8 @@ internal sealed partial class CSharpGenerationModelBuilder
             DisplayTypeName = nav.IsCollection
                 ? $"EditModelCollection<{targetEditModelTypeName}>"
                 : (nav.IsNullable ? targetEditModelTypeName + "?" : targetEditModelTypeName),
+            // カスケード子（親→子）のみバッキングフィールドで所有者リンクを張るため、フィールド名を用意する
+            FieldName = nav.IsParentReference ? string.Empty : ToFieldName(nav.PropertyName),
             Initializer = nav.IsCollection
                 ? $" = new EditModelCollection<{targetEditModelTypeName}>();"
                 : (nav.IsNullable ? string.Empty : " = null!;"),

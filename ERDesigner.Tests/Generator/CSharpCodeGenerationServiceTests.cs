@@ -270,6 +270,19 @@ public class CSharpCodeGenerationServiceTests
                 "public bool HasChanges => _removed.Count > 0 || this.Any(item => item.HasGraphChanges());"
             );
         content.Should().Contain("public void AcceptChanges(bool includeChildren = true)");
+        // 親モデル取得（ParentModel）: 基底に保持＋通知、コレクションは OwnerModel を全要素へ伝播する
+        content.Should().Contain("public EditModelBase? ParentModel => _parentModel;");
+        // 親が一意（Order の親は Customer のみ）なので OrderEditModel は型付き ParentModel を生成する
+        content.Should().Contain("public new CustomerEditModel? ParentModel =>");
+        content.Should().Contain("base.ParentModel as CustomerEditModel;");
+        content.Should().Contain("internal void SetParentModel(EditModelBase? parentModel)");
+        content
+            .Should()
+            .Contain(
+                "internal void RaiseParentCollectionChanged() => OnPropertyChanged(\"ParentCollection\");"
+            );
+        content.Should().Contain("internal EditModelBase? OwnerModel");
+        content.Should().Contain("item.SetParentModel(value);");
         // EditModelCollection の一括操作・検証・並び替え API
         content
             .Should()
@@ -285,9 +298,15 @@ public class CSharpCodeGenerationServiceTests
         // EditModel 列挙を受け取るコンストラクタと、Entity 列挙から生成する Mapper メソッド
         content.Should().Contain("public EditModelCollection(IEnumerable<T> items)");
         content.Should().Contain("public EditModelCollection<OrderEditModel> CreateEditModels(");
+        // 子コレクションナビはバッキングフィールド＋プロパティで生成され、要素の親モデルリンク（OwnerModel）を張る
         content
             .Should()
-            .Contain("public EditModelCollection<OrderEditModel> Orders { get; set; } =");
+            .Contain(
+                "private EditModelCollection<OrderEditModel> _orders = new EditModelCollection<OrderEditModel>();"
+            );
+        content.Should().Contain("public EditModelCollection<OrderEditModel> Orders");
+        content.Should().Contain("_orders.OwnerModel ??= this;");
+        content.Should().Contain("_orders.OwnerModel = this;");
         content.Should().Contain("public void ApplyToEntity(");
         // ApplyToEditModel は子コレクションを CreateEditModels で代入し、状態は生成元 Entity を基準にする
         content
@@ -755,7 +774,14 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("public bool MoveToNext()");
         content.Should().Contain("public bool MoveToPrevious()");
         content.Should().Contain("protected virtual void MoveCore(int oldIndex, int newIndex)");
-        content.Should().Contain("public EditModelCollection<OrderEditModel>? Parent =>");
+        // 所属コレクション取得は ParentCollection に改名（親モデル取得の ParentModel と区別する）
+        content
+            .Should()
+            .Contain("public EditModelCollection<OrderEditModel>? ParentCollection =>");
+        content.Should().NotContain("EditModelCollection<OrderEditModel>? Parent =>");
+        // 親（親参照ナビ）を持たない単独エンティティでは型付き ParentModel は生成されず、基底の EditModelBase? のみ
+        content.Should().Contain("public EditModelBase? ParentModel => _parentModel;");
+        content.Should().NotContain("base.ParentModel as");
         content.Should().Contain("protected override void MoveCore(int oldIndex, int newIndex) =>");
         // ② RowState 変更時に派生フラグの変更通知も発行する
         content.Should().Contain("OnPropertyChanged(nameof(IsAdded));");
@@ -789,9 +815,180 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("internal void RaisePositionChanged()");
         content
             .Should()
-            .Contain("internal void RaiseParentChanged() => OnPropertyChanged(\"Parent\");");
+            .Contain(
+                "internal void RaiseParentCollectionChanged() => OnPropertyChanged(\"ParentCollection\");"
+            );
         content.Should().Contain("private void NotifyPositionsChanged()");
         content.Should().Contain("protected override void MoveItem(int oldIndex, int newIndex)");
+    }
+
+    /// <summary>
+    /// 親モデル取得（ParentModel）について、1対1の単一子・自己参照・複数親の各パターンで型付き ParentModel の
+    /// 生成有無と単一子の所有者リンク設定が正しく出力されることを検証する
+    /// </summary>
+    [Fact]
+    public void Generate_EditModel_ShouldEmitTypedParentModelForUnambiguousParents()
+    {
+        var owner = Guid.NewGuid();
+        var ownerPk = Guid.NewGuid();
+        var profile = Guid.NewGuid();
+        var profilePk = Guid.NewGuid();
+        var profileFk = Guid.NewGuid();
+        var category = Guid.NewGuid();
+        var categoryPk = Guid.NewGuid();
+        var categoryParentFk = Guid.NewGuid();
+        var salesOrder = Guid.NewGuid();
+        var salesOrderPk = Guid.NewGuid();
+        var product = Guid.NewGuid();
+        var productPk = Guid.NewGuid();
+        var lineItem = Guid.NewGuid();
+        var lineItemPk = Guid.NewGuid();
+        var lineOrderFk = Guid.NewGuid();
+        var lineProductFk = Guid.NewGuid();
+
+        static ColumnDefinition Pk(Guid id, string name) =>
+            new()
+            {
+                Id = id,
+                Name = name,
+                DataType = "int",
+                IsPrimaryKey = true,
+                IsNullable = false,
+            };
+        static ColumnDefinition Fk(Guid id, string name) =>
+            new()
+            {
+                Id = id,
+                Name = name,
+                DataType = "int",
+                IsForeignKey = true,
+                IsNullable = false,
+            };
+
+        var diagram = new DiagramDefinition
+        {
+            Entities =
+            [
+                new()
+                {
+                    Id = owner,
+                    TableName = "profile_owner",
+                    Columns = [Pk(ownerPk, "profile_owner_id")],
+                },
+                new()
+                {
+                    Id = profile,
+                    TableName = "profile",
+                    Columns = [Pk(profilePk, "profile_id"), Fk(profileFk, "profile_owner_id")],
+                },
+                new()
+                {
+                    Id = category,
+                    TableName = "category",
+                    Columns =
+                    [
+                        Pk(categoryPk, "category_id"),
+                        Fk(categoryParentFk, "parent_category_id"),
+                    ],
+                },
+                new()
+                {
+                    Id = salesOrder,
+                    TableName = "sales_order",
+                    Columns = [Pk(salesOrderPk, "sales_order_id")],
+                },
+                new()
+                {
+                    Id = product,
+                    TableName = "product",
+                    Columns = [Pk(productPk, "product_id")],
+                },
+                new()
+                {
+                    Id = lineItem,
+                    TableName = "line_item",
+                    Columns =
+                    [
+                        Pk(lineItemPk, "line_item_id"),
+                        Fk(lineOrderFk, "sales_order_id"),
+                        Fk(lineProductFk, "product_id"),
+                    ],
+                },
+            ],
+            Relationships =
+            [
+                // 1対1: profile_owner -> profile（単一の子）
+                new()
+                {
+                    Id = Guid.NewGuid(),
+                    Type = RelationshipMultiplicity.OneToOne,
+                    SourceEntityId = owner,
+                    TargetEntityId = profile,
+                    SourceColumnId = ownerPk,
+                    TargetColumnId = profileFk,
+                },
+                // 自己参照: category -> category
+                new()
+                {
+                    Id = Guid.NewGuid(),
+                    Type = RelationshipMultiplicity.OneToMany,
+                    SourceEntityId = category,
+                    TargetEntityId = category,
+                    SourceColumnId = categoryPk,
+                    TargetColumnId = categoryParentFk,
+                },
+                // 複数親: line_item は sales_order と product の両方を親に持つ
+                new()
+                {
+                    Id = Guid.NewGuid(),
+                    Type = RelationshipMultiplicity.OneToMany,
+                    SourceEntityId = salesOrder,
+                    TargetEntityId = lineItem,
+                    SourceColumnId = salesOrderPk,
+                    TargetColumnId = lineOrderFk,
+                },
+                new()
+                {
+                    Id = Guid.NewGuid(),
+                    Type = RelationshipMultiplicity.OneToMany,
+                    SourceEntityId = product,
+                    TargetEntityId = lineItem,
+                    SourceColumnId = productPk,
+                    TargetColumnId = lineProductFk,
+                },
+            ],
+        };
+
+        var result = new CSharpCodeGenerationService().Generate(
+            diagram,
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                GenerateEntityClasses = false,
+                GenerateMappers = false,
+                GenerateRepositories = false,
+            }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        var content = result.Files[0].Content;
+
+        // 1対1の単一子: 親 ProfileOwner が Profile を保持し、setter で子の親モデルリンクを張る
+        content.Should().Contain("private ProfileEditModel _profile = null!;");
+        content.Should().Contain("_profile?.SetParentModel(null);");
+        content.Should().Contain("_profile?.SetParentModel(this);");
+        // 子 Profile は親が一意なので型付き ParentModel（ProfileOwnerEditModel）を生成する
+        content.Should().Contain("public new ProfileOwnerEditModel? ParentModel =>");
+        content.Should().Contain("base.ParentModel as ProfileOwnerEditModel;");
+
+        // 自己参照: Category は自分自身の型で型付き ParentModel を生成する
+        content.Should().Contain("public new CategoryEditModel? ParentModel =>");
+        content.Should().Contain("base.ParentModel as CategoryEditModel;");
+
+        // 複数親: LineItem は親が一意に定まらないため型付き ParentModel を生成しない
+        content.Should().NotContain("base.ParentModel as LineItemEditModel;");
+        content.Should().NotContain("base.ParentModel as SalesOrderEditModel;");
+        content.Should().NotContain("base.ParentModel as ProductEditModel;");
     }
 
     /// <summary>Repository インターフェース・実装・DI 登録などの基盤コードが生成されることを検証する</summary>

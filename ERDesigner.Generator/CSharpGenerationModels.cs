@@ -137,6 +137,9 @@ internal sealed class CSharpNavigationModel
     /// <summary>表示用の型名（コレクションなら要素型を包んだ表記）</summary>
     public required string DisplayTypeName { get; init; }
 
+    /// <summary>カスケード子のバッキングフィールド名（例: _children）。EditModel のカスケード子ナビゲーションでのみ設定</summary>
+    public string FieldName { get; init; } = string.Empty;
+
     /// <summary>フィールド初期化子の式</summary>
     public required string Initializer { get; init; }
 
@@ -260,6 +263,9 @@ internal sealed class CSharpEditModelClassModel
 
     /// <summary>カスケード対象（子方向）のナビゲーションを持つかどうか</summary>
     public required bool HasCascadeNavigations { get; init; }
+
+    /// <summary>親モデルの型が一意に定まるときの型付き ParentModel の型名（定まらない場合は null＝基底の EditModelBase? のみ）</summary>
+    public string? TypedParentModelTypeName { get; init; }
 }
 
 /// <summary>EditModel の 1 プロパティに対応する生成モデル</summary>

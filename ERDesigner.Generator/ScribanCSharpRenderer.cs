@@ -940,8 +940,27 @@ internal sealed class ScribanCSharpRenderer
                 OnPropertyChanged(nameof(IsLastInParent));
             }
 
-            /// <summary>親コレクション参照（Parent）の変更通知を発行する（コレクションへの出入り時に呼ばれる。具象クラスの Parent は常にこの名称で生成される）</summary>
-            internal void RaiseParentChanged() => OnPropertyChanged("Parent");
+            /// <summary>所属コレクション参照（ParentCollection）の変更通知を発行する（コレクションへの出入り時に呼ばれる。具象クラスの ParentCollection は常にこの名称で生成される）</summary>
+            internal void RaiseParentCollectionChanged() => OnPropertyChanged("ParentCollection");
+
+            /// <summary>自身を子として保持する親モデル（カスケード親）。所有側のコレクション／単一参照が設定する。未所属・ルートは null</summary>
+            private EditModelBase? _parentModel;
+
+            /// <summary>自身を子として保持する親 EditModel（コレクション経由・単一参照のいずれでも設定される。未所属／ルートは null）</summary>
+            /// <remarks>親型が一意に定まる具象クラスでは、同名の型付き ParentModel が生成され本プロパティを隠す</remarks>
+            public EditModelBase? ParentModel => _parentModel;
+
+            /// <summary>親モデル参照を設定し、変化した場合のみ ParentModel の変更通知を発行する（所有側の setter／コレクションが呼ぶ）</summary>
+            internal void SetParentModel(EditModelBase? parentModel)
+            {
+                if (ReferenceEquals(_parentModel, parentModel))
+                {
+                    return;
+                }
+
+                _parentModel = parentModel;
+                OnPropertyChanged(nameof(ParentModel));
+            }
 
             /// <summary>指定プロパティの変更通知を発行する</summary>
             protected void OnPropertyChanged(string propertyName) =>
@@ -1359,6 +1378,23 @@ internal sealed class ScribanCSharpRenderer
             /// <summary>Remove で外した削除対象（Removed）の退避先</summary>
             private readonly List<T> _removed = new();
 
+            /// <summary>このコレクションを子として保持する親モデルのバッキングフィールド</summary>
+            private EditModelBase? _ownerModel;
+
+            /// <summary>このコレクションを子として保持する親モデル（所有側の EditModel が設定）。設定時に全要素の ParentModel へ伝播する</summary>
+            internal EditModelBase? OwnerModel
+            {
+                get => _ownerModel;
+                set
+                {
+                    _ownerModel = value;
+                    foreach (var item in this)
+                    {
+                        item.SetParentModel(value);
+                    }
+                }
+            }
+
             /// <summary>空のコレクションを生成する</summary>
             public EditModelCollection() { }
 
@@ -1370,6 +1406,7 @@ internal sealed class ScribanCSharpRenderer
                 foreach (var item in this)
                 {
                     item.Owner = this;
+                    item.SetParentModel(_ownerModel);
                 }
             }
 
@@ -1383,8 +1420,9 @@ internal sealed class ScribanCSharpRenderer
             protected override void InsertItem(int index, T item)
             {
                 item.Owner = this;
+                item.SetParentModel(_ownerModel);
                 base.InsertItem(index, item);
-                item.RaiseParentChanged();
+                item.RaiseParentCollectionChanged();
                 NotifyPositionsChanged();
             }
 
@@ -1394,8 +1432,9 @@ internal sealed class ScribanCSharpRenderer
                 var removed = this[index];
                 TrackRemoval(removed);
                 removed.Owner = null;
+                removed.SetParentModel(null);
                 base.RemoveItem(index);
-                removed.RaiseParentChanged();
+                removed.RaiseParentCollectionChanged();
                 removed.RaisePositionChanged();
                 NotifyPositionsChanged();
             }
@@ -1406,11 +1445,13 @@ internal sealed class ScribanCSharpRenderer
                 var replaced = this[index];
                 TrackRemoval(replaced);
                 replaced.Owner = null;
+                replaced.SetParentModel(null);
                 item.Owner = this;
+                item.SetParentModel(_ownerModel);
                 base.SetItem(index, item);
-                replaced.RaiseParentChanged();
+                replaced.RaiseParentCollectionChanged();
                 replaced.RaisePositionChanged();
-                item.RaiseParentChanged();
+                item.RaiseParentCollectionChanged();
                 NotifyPositionsChanged();
             }
 
@@ -1430,6 +1471,7 @@ internal sealed class ScribanCSharpRenderer
                 foreach (var item in this)
                 {
                     item.Owner = null;
+                    item.SetParentModel(null);
                 }
 
                 _removed.Clear();
@@ -1437,7 +1479,7 @@ internal sealed class ScribanCSharpRenderer
 
                 foreach (var item in cleared)
                 {
-                    item.RaiseParentChanged();
+                    item.RaiseParentCollectionChanged();
                     item.RaisePositionChanged();
                 }
             }
@@ -1761,8 +1803,53 @@ internal sealed class ScribanCSharpRenderer
             }
 
         {{ end }}    // ---- navigation ----
-        {{ for navigation in item.navigations }}    /// <summary>{{ navigation.property_name }} ナビゲーションプロパティ</summary>
+        {{ for navigation in item.navigations }}{{ if navigation.cascade && navigation.is_collection }}    /// <summary>{{ navigation.property_name }} の子コレクションのバッキングフィールド</summary>
+            private {{ navigation.display_type_name }} {{ navigation.field_name }}{{ navigation.initializer }}
+
+            /// <summary>{{ navigation.property_name }} ナビゲーションプロパティ（子コレクション。要素の ParentModel に自身が設定される）</summary>
+            public {{ navigation.display_type_name }} {{ navigation.property_name }}
+            {
+                get
+                {
+                    {{ navigation.field_name }}.OwnerModel ??= this;
+                    return {{ navigation.field_name }};
+                }
+                set
+                {
+                    if (ReferenceEquals({{ navigation.field_name }}, value))
+                    {
+                        return;
+                    }
+
+                    {{ navigation.field_name }}.OwnerModel = null;
+                    {{ navigation.field_name }} = value;
+                    {{ navigation.field_name }}.OwnerModel = this;
+                    OnPropertyChanged(nameof({{ navigation.property_name }}));
+                }
+            }
+        {{ else if navigation.cascade }}    /// <summary>{{ navigation.property_name }} の単一の子のバッキングフィールド</summary>
+            private {{ navigation.display_type_name }} {{ navigation.field_name }}{{ navigation.initializer }}
+
+            /// <summary>{{ navigation.property_name }} ナビゲーションプロパティ（単一の子。子の ParentModel に自身が設定される）</summary>
+            public {{ navigation.display_type_name }} {{ navigation.property_name }}
+            {
+                get => {{ navigation.field_name }};
+                set
+                {
+                    if (ReferenceEquals({{ navigation.field_name }}, value))
+                    {
+                        return;
+                    }
+
+                    {{ navigation.field_name }}?.SetParentModel(null);
+                    {{ navigation.field_name }} = value;
+                    {{ navigation.field_name }}?.SetParentModel(this);
+                    OnPropertyChanged(nameof({{ navigation.property_name }}));
+                }
+            }
+        {{ else }}    /// <summary>{{ navigation.property_name }} ナビゲーションプロパティ</summary>
             public {{ navigation.display_type_name }} {{ navigation.property_name }} { get; set; }{{ navigation.initializer }}
+        {{ end }}
 
         {{ end }}    /// <summary>確定値をバインディング用プロパティへ書き戻しエラーをクリアする（RevertInput から呼ばれる）</summary>
             protected override void RevertCore()
@@ -1837,12 +1924,18 @@ internal sealed class ScribanCSharpRenderer
             public new {{ item.class_name }}? GetPrevious() => ({{ item.class_name }}?)base.GetPrevious();
 
             /// <summary>自身が所属する親コレクション（所属していなければ null）</summary>
-            public EditModelCollection<{{ item.class_name }}>? Parent =>
+            public EditModelCollection<{{ item.class_name }}>? ParentCollection =>
                 Owner as EditModelCollection<{{ item.class_name }}>;
+        {{~ if item.typed_parent_model_type_name ~}}
+
+            /// <summary>自身を子として保持する親モデル（カスケード親。未所属／ルートは null）</summary>
+            public new {{ item.typed_parent_model_type_name }}? ParentModel =>
+                base.ParentModel as {{ item.typed_parent_model_type_name }};
+        {{~ end ~}}
 
             /// <summary>所属コレクションの並び替え本体。型付きコレクションの Move を呼ぶ（MoveTo* から使用される）</summary>
             protected override void MoveCore(int oldIndex, int newIndex) =>
-                Parent?.Move(oldIndex, newIndex);
+                ParentCollection?.Move(oldIndex, newIndex);
         }
         {{~ end ~}}
 
