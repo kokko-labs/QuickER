@@ -5,8 +5,8 @@ namespace ERDesigner.Generator;
 /// </summary>
 /// <remarks>
 /// 処理は「検証 → 生成モデル構築（<see cref="CSharpGenerationModelBuilder"/>）→
-/// テンプレート描画（<see cref="ScribanCSharpRenderer"/>）」の 3 段階で、
-/// 全クラスを単一の .g.cs ファイルにまとめて出力する
+/// ファイル構成決定（<see cref="GeneratedFilePlanner"/>）→ テンプレート描画（<see cref="ScribanCSharpRenderer"/>）」の段階で進む。
+/// 非分割時は全クラスを単一の .g.cs ファイルへ、分割時はカテゴリ（＋共有基盤 Runtime）ごとに別ファイル・別名前空間で出力する
 /// </remarks>
 public sealed class CSharpCodeGenerationService
 {
@@ -39,19 +39,51 @@ public sealed class CSharpCodeGenerationService
         }
 
         var model = _modelBuilder.Build(diagram, options, diagnostics);
-        var content = _renderer.Render(model, options);
 
-        return new CodeGenerationResult
+        // 出力ファイルの構成（非分割=1 ファイル、分割=カテゴリごと）を決め、各ファイルを範囲を絞って描画する
+        var files = GeneratedFilePlanner
+            .Plan(options)
+            .Select(spec => new GeneratedFile
+            {
+                FileName = SanitizeFileName(spec.FileName),
+                Content = _renderer.Render(model, options, BuildScope(spec, model.Usings)),
+            })
+            .ToList();
+
+        return new CodeGenerationResult { Files = files, Diagnostics = diagnostics };
+    }
+
+    /// <summary>
+    /// ファイル計画から描画スコープ（名前空間・using・出力バケット）を組み立てる
+    /// </summary>
+    /// <remarks>
+    /// using はモデルの System フレームワーク using に、他ファイルの名前空間（クロス参照）を加える。
+    /// <c>// &lt;auto-generated /&gt;</c> 出力により未使用 using 警告は抑止されるため、過剰な付与は無害
+    /// </remarks>
+    private static RenderScope BuildScope(
+        GeneratedFileSpec spec,
+        IReadOnlyList<string> systemUsings
+    )
+    {
+        var usings = new List<string>(systemUsings);
+        foreach (var crossNamespace in spec.CrossNamespaceUsings)
         {
-            Files =
-            [
-                new GeneratedFile
-                {
-                    FileName = SanitizeFileName(options.OutputFileName),
-                    Content = content,
-                },
-            ],
-            Diagnostics = diagnostics,
+            if (!usings.Contains(crossNamespace))
+            {
+                usings.Add(crossNamespace);
+            }
+        }
+
+        return new RenderScope
+        {
+            NamespaceName = spec.NamespaceName,
+            Usings = usings,
+            Runtime = spec.Buckets.Contains(GenerationBucket.Runtime),
+            ValueObjects = spec.Buckets.Contains(GenerationBucket.ValueObject),
+            Entities = spec.Buckets.Contains(GenerationBucket.Entity),
+            EditModels = spec.Buckets.Contains(GenerationBucket.EditModel),
+            Mappers = spec.Buckets.Contains(GenerationBucket.Mapper),
+            Repositories = spec.Buckets.Contains(GenerationBucket.Repository),
         };
     }
 

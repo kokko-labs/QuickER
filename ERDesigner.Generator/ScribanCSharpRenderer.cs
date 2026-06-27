@@ -3,6 +3,34 @@ using Scriban;
 
 namespace ERDesigner.Generator;
 
+/// <summary>1 ファイル分の描画スコープ。名前空間・using と、出力するバケットの選択を表す</summary>
+internal sealed class RenderScope
+{
+    /// <summary>このファイルの名前空間</summary>
+    public required string NamespaceName { get; init; }
+
+    /// <summary>このファイル冒頭に出力する using 名前空間一覧</summary>
+    public required IReadOnlyList<string> Usings { get; init; }
+
+    /// <summary>共有基盤（属性・基底・VO 基底・RowState）を出力するか</summary>
+    public required bool Runtime { get; init; }
+
+    /// <summary>値オブジェクトの具象クラスを出力するか</summary>
+    public required bool ValueObjects { get; init; }
+
+    /// <summary>Entity クラスを出力するか</summary>
+    public required bool Entities { get; init; }
+
+    /// <summary>EditModel クラスを出力するか</summary>
+    public required bool EditModels { get; init; }
+
+    /// <summary>Mapper クラスを出力するか</summary>
+    public required bool Mappers { get; init; }
+
+    /// <summary>Repository クラス群を出力するか</summary>
+    public required bool Repositories { get; init; }
+}
+
 /// <summary>生成モデルを Scriban テンプレートで C# ソースコードへレンダリングするレンダラー</summary>
 internal sealed class ScribanCSharpRenderer
 {
@@ -16,7 +44,7 @@ internal sealed class ScribanCSharpRenderer
         {{ end }}
         namespace {{ namespace_name }};
 
-        {{~ if emit_nav_ref_attr ~}}
+        {{~ if emit_nav_ref_attr && render_runtime ~}}
         /// <summary>Entity ナビゲーションへ参照テーブル・カラム情報を付加する独自属性</summary>
         [AttributeUsage(AttributeTargets.Property, AllowMultiple = false)]
         public sealed class NavigationReferenceAttribute : Attribute
@@ -63,7 +91,7 @@ internal sealed class ScribanCSharpRenderer
             }
         }
         {{ end }}
-        {{~ if emit_column_facets_attr ~}}
+        {{~ if emit_column_facets_attr && render_runtime ~}}
         /// <summary>DB カラムのメタ情報（最大長 / 全体桁数 / 小数桁数）を付与する独自属性。該当なしは -1</summary>
         [AttributeUsage(AttributeTargets.Property, AllowMultiple = false)]
         public sealed class ColumnFacetsAttribute : Attribute
@@ -81,7 +109,7 @@ internal sealed class ScribanCSharpRenderer
             public int IntegralDigits => Precision >= 0 && Scale >= 0 ? Precision - Scale : -1;
         }
         {{ end }}
-        {{~ if generate_value_objects ~}}
+        {{~ if generate_value_objects && render_runtime ~}}
         /// <summary>値オブジェクト（Value Object）の非ジェネリックマーカー。内包値の取り出し・型判定に使う</summary>
         public interface IValueObject
         {
@@ -434,6 +462,8 @@ internal sealed class ScribanCSharpRenderer
             public static Func<int, string> PrecisionExceeded { get; set; } =
                 maxIntegralDigits => $"整数部は {maxIntegralDigits} 桁以内で入力してください。";
         }
+        {{~ end ~}}
+        {{~ if generate_value_objects && render_value_objects ~}}
         {{~ for vo in value_object_classes ~}}
 
         /// <summary>{{ vo.column_name }} 列に対応する値オブジェクト</summary>
@@ -549,7 +579,7 @@ internal sealed class ScribanCSharpRenderer
         }
         {{~ end ~}}
         {{ end }}
-        {{~ if entity_classes.size > 0 || edit_model_classes.size > 0 ~}}
+        {{~ if (entity_classes.size > 0 || edit_model_classes.size > 0) && render_runtime ~}}
         /// <summary>エンティティ・EditModel の変更状態</summary>
         public enum RowState
         {
@@ -566,7 +596,7 @@ internal sealed class ScribanCSharpRenderer
             Removed,
         }
         {{ end }}
-        {{~ if entity_classes.size > 0 ~}}
+        {{~ if entity_classes.size > 0 && render_runtime ~}}
         /// <summary>エンティティの変更状態（RowState）を保持する基底クラス</summary>
         public abstract partial class EntityBase
         {
@@ -728,6 +758,7 @@ internal sealed class ScribanCSharpRenderer
             }
         }
         {{ end }}
+        {{~ if render_entities ~}}
         {{~ for item in entity_classes ~}}
         {{ if !for.first }}
         {{ end }}/// <summary>{{ item.table_name }} テーブルに対応するエンティティ</summary>
@@ -750,8 +781,9 @@ internal sealed class ScribanCSharpRenderer
             public {{ navigation.display_type_name }} {{ navigation.property_name }} { get; set; }{{ navigation.initializer }}
         {{ end }}}
         {{~ end ~}}
+        {{~ end ~}}
 
-        {{~ if edit_model_classes.size > 0 ~}}
+        {{~ if edit_model_classes.size > 0 && render_runtime ~}}
         /// <summary>EditModel 共通の変更通知・エラー管理・補助処理を提供する基底クラス</summary>
         public abstract partial class EditModelBase
             : INotifyPropertyChanged,
@@ -1614,6 +1646,7 @@ internal sealed class ScribanCSharpRenderer
             }
         }
         {{ end }}
+        {{~ if render_edit_models ~}}
         {{~ for item in edit_model_classes ~}}
         {{ if !for.first }}
         {{ end }}/// <summary>{{ item.table_name }} テーブルの画面編集用モデル</summary>
@@ -1938,7 +1971,9 @@ internal sealed class ScribanCSharpRenderer
                 ParentCollection?.Move(oldIndex, newIndex);
         }
         {{~ end ~}}
+        {{~ end ~}}
 
+        {{~ if render_mappers ~}}
         {{~ for mapper in mapper_classes ~}}
         {{ if !for.first }}
         {{ end }}/// <summary>{{ mapper.entity_class_name }} と {{ mapper.edit_model_class_name }} の相互変換</summary>
@@ -2065,8 +2100,9 @@ internal sealed class ScribanCSharpRenderer
             partial void OnEditModelLoaded({{ mapper.entity_class_name }} entity, {{ mapper.edit_model_class_name }} editModel);
         }
         {{~ end ~}}
+        {{~ end ~}}
 
-        {{~ if repository_classes.size > 0 ~}}
+        {{~ if repository_classes.size > 0 && render_repositories ~}}
         /// <summary>エンティティの CRUD 操作を提供するリポジトリ共通インターフェース</summary>
         public partial interface IRepository<TEntity, TKey>
             where TEntity : EntityBase, new()
@@ -3874,8 +3910,11 @@ internal sealed class ScribanCSharpRenderer
         {{~ end ~}}
         """;
 
-    /// <summary>生成モデルとオプションをテンプレートへ流し込み、C# ソースコード文字列を生成する</summary>
-    public string Render(CSharpGenerationModel model, CodeGenerationOptions options)
+    /// <summary>テンプレートは固定なので一度だけ解析してキャッシュする（分割時は同じテンプレートを範囲を変えて複数回描画する）</summary>
+    private static readonly Template ParsedTemplate = ParseTemplate();
+
+    /// <summary>テンプレートを解析し、解析エラーがあれば例外を投げる</summary>
+    private static Template ParseTemplate()
     {
         var template = Template.Parse(TemplateText);
         if (template.HasErrors)
@@ -3888,6 +3927,21 @@ internal sealed class ScribanCSharpRenderer
                 $"C# 生成テンプレートの解析に失敗しました。{Environment.NewLine}{message}"
             );
         }
+
+        return template;
+    }
+
+    /// <summary>
+    /// 生成モデルとオプションを、指定スコープ（名前空間・using・出力するバケット）でテンプレートへ流し込み、C# ソースコード文字列を生成する
+    /// </summary>
+    /// <remarks>非分割時は全バケットを 1 回で、分割時はファイルごとにバケットを絞って複数回呼び出す</remarks>
+    public string Render(
+        CSharpGenerationModel model,
+        CodeGenerationOptions options,
+        RenderScope scope
+    )
+    {
+        var template = ParsedTemplate;
 
         // 独自属性 NavigationReference は (1) Entity のナビゲーションプロパティへの付与、
         // (2) Repository の SqlEntityMetadata によるナビゲーション除外（リフレクション走査）のいずれかで参照される。
@@ -3906,8 +3960,8 @@ internal sealed class ScribanCSharpRenderer
 
         var scriptObject = new Scriban.Runtime.ScriptObject
         {
-            ["namespace_name"] = model.NamespaceName,
-            ["usings"] = model.Usings,
+            ["namespace_name"] = scope.NamespaceName,
+            ["usings"] = scope.Usings,
             ["entity_classes"] = model.EntityClasses,
             ["edit_model_classes"] = model.EditModelClasses,
             ["mapper_classes"] = model.MapperClasses,
@@ -3919,6 +3973,13 @@ internal sealed class ScribanCSharpRenderer
             ["emit_column_facets_attr"] = emitColumnFacetsAttr,
             ["generate_value_objects"] = options.GenerateValueObjects,
             ["value_object_classes"] = model.ValueObjectClasses,
+            // 出力するバケットの絞り込み（分割時はファイルごとに切り替える。非分割時は全 true）
+            ["render_runtime"] = scope.Runtime,
+            ["render_value_objects"] = scope.ValueObjects,
+            ["render_entities"] = scope.Entities,
+            ["render_edit_models"] = scope.EditModels,
+            ["render_mappers"] = scope.Mappers,
+            ["render_repositories"] = scope.Repositories,
         };
 
         // テンプレートは本ライブラリ内に固定で持つ信頼済みのものであり、ループ回数・出力量は ER 図の規模に

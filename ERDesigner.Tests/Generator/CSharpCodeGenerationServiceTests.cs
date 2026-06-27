@@ -2199,4 +2199,103 @@ public class CSharpCodeGenerationServiceTests
             ],
         };
     }
+
+    /// <summary>生成結果から指定ファイル名の内容を取得する</summary>
+    private static string Content(CodeGenerationResult result, string fileName) =>
+        result.Files.Single(file => file.FileName == fileName).Content;
+
+    /// <summary>分割時に「生成対象カテゴリ＋Runtime」が 1 カテゴリ 1 ファイルで、規約名・規約名前空間で出力されることを検証する</summary>
+    [Fact]
+    public void Generate_Split_ShouldEmitOneFilePerCategoryPlusRuntime()
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            ValueObjectDiagram(),
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                SplitFilesByCategory = true,
+                GenerateValueObjects = true,
+            }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        result
+            .Files.Select(file => file.FileName)
+            .Should()
+            .BeEquivalentTo([
+                "Runtime.g.cs",
+                "ValueObjects.g.cs",
+                "Entities.g.cs",
+                "EditModels.g.cs",
+                "Mappers.g.cs",
+                "Repositories.g.cs",
+            ]);
+
+        Content(result, "Runtime.g.cs").Should().Contain("namespace Sample.Domain.Runtime;");
+        Content(result, "Entities.g.cs").Should().Contain("namespace Sample.Domain.Entities;");
+        Content(result, "ValueObjects.g.cs")
+            .Should()
+            .Contain("namespace Sample.Domain.ValueObjects;");
+
+        // 共有基盤は Runtime ファイルに集約され、Entity ファイルには基底定義が出ない
+        Content(result, "Runtime.g.cs")
+            .Should()
+            .Contain("public abstract partial class EntityBase");
+        Content(result, "Runtime.g.cs")
+            .Should()
+            .Contain("public abstract partial class EditModelBase");
+        Content(result, "Entities.g.cs").Should().Contain("public partial class CustomerEntity");
+        Content(result, "Entities.g.cs")
+            .Should()
+            .NotContain("public abstract partial class EntityBase");
+
+        // クロス参照 using が付与される（Entity→Runtime、Mapper→Entity/EditModel）
+        Content(result, "Entities.g.cs").Should().Contain("using Sample.Domain.Runtime;");
+        Content(result, "Mappers.g.cs").Should().Contain("using Sample.Domain.Entities;");
+        Content(result, "Mappers.g.cs").Should().Contain("using Sample.Domain.EditModels;");
+    }
+
+    /// <summary>分割時に複数カテゴリへ同一名前空間を指定しても、ファイルは分かれ、自分自身の名前空間は using しないことを検証する</summary>
+    [Fact]
+    public void Generate_Split_SameNamespace_ShouldStillEmitSeparateFiles()
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            SingleEntityDiagram(),
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                SplitFilesByCategory = true,
+                GenerateEntityClasses = true,
+                GenerateEditModels = true,
+                GenerateMappers = false,
+                GenerateRepositories = false,
+                EntityNamespace = "Shared.Models",
+                EditModelNamespace = "Shared.Models",
+            }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        result
+            .Files.Select(file => file.FileName)
+            .Should()
+            .Contain("Entities.g.cs")
+            .And.Contain("EditModels.g.cs");
+        Content(result, "Entities.g.cs").Should().Contain("namespace Shared.Models;");
+        Content(result, "EditModels.g.cs").Should().Contain("namespace Shared.Models;");
+        // 同一名前空間どうしは using しない（自分自身の名前空間を除外）
+        Content(result, "Entities.g.cs").Should().NotContain("using Shared.Models;");
+    }
+
+    /// <summary>分割時に Runtime 名前空間を未指定なら {root}.Runtime にフォールバックすることを検証する</summary>
+    [Fact]
+    public void Generate_Split_RuntimeNamespace_ShouldDefaultToRootDotRuntime()
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            SingleEntityDiagram(),
+            new CodeGenerationOptions { NamespaceName = "Acme.App", SplitFilesByCategory = true }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        Content(result, "Runtime.g.cs").Should().Contain("namespace Acme.App.Runtime;");
+    }
 }

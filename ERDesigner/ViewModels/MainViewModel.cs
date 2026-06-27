@@ -25,9 +25,6 @@ namespace ERDesigner.ViewModels;
 /// </remarks>
 public partial class MainViewModel : ObservableObject
 {
-    /// <summary>C# コード生成で使用する既定の名前空間</summary>
-    private const string DefaultCSharpNamespace = "Generated.Entities";
-
     /// <summary>Undo/Redo 履歴を管理するスタック</summary>
     public UndoRedoManager UndoRedo { get; } = new();
 
@@ -94,9 +91,6 @@ public partial class MainViewModel : ObservableObject
 
     /// <summary>型 ComboBox に表示する SQL Server のデータ型一覧</summary>
     public IReadOnlyList<string> SqlDataTypes => SqlServerDataTypes.All;
-
-    /// <summary>C# コード生成ダイアログの初期値として使用する名前空間（生成実行のたびに最新入力で更新される）</summary>
-    public string CSharpGenerationNamespace { get; set; } = DefaultCSharpNamespace;
 
     /// <summary>エンティティ見出しの背景色プリセット一覧</summary>
     public IReadOnlyList<EntityTitleColorOption> EntityTitleColorOptions =>

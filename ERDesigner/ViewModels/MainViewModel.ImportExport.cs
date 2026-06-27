@@ -170,39 +170,19 @@ public partial class MainViewModel
     [RelayCommand]
     private void GenerateCSharpCode()
     {
-        var dialog = new Views.CSharpGenerationDialog(
-            CSharpGenerationNamespace,
-            "ErDesignerEntities.g.cs"
-        )
-        {
-            Owner = Application.Current?.MainWindow,
-        };
+        var dialog = new Views.CSharpGenerationDialog { Owner = Application.Current?.MainWindow };
 
         if (dialog.ShowDialog() != true || dialog.ViewModel.Result is null)
         {
             return;
         }
 
+        var dialogResult = dialog.ViewModel.Result;
+
         try
         {
-            CSharpGenerationNamespace = dialog.ViewModel.Result.NamespaceName;
             var service = new CSharpCodeGenerationService();
-            var options = new CodeGenerationOptions
-            {
-                NamespaceName = string.IsNullOrWhiteSpace(CSharpGenerationNamespace)
-                    ? DefaultCSharpNamespace
-                    : CSharpGenerationNamespace.Trim(),
-                OutputFileName = Path.GetFileName(dialog.ViewModel.Result.OutputFilePath),
-                GenerateEntityClasses = dialog.ViewModel.Result.GenerateEntityClasses,
-                GenerateEditModels = dialog.ViewModel.Result.GenerateEditModels,
-                GenerateMappers = dialog.ViewModel.Result.GenerateMappers,
-                GenerateRepositories = dialog.ViewModel.Result.GenerateRepositories,
-                GenerateValueObjects = dialog.ViewModel.Result.GenerateValueObjects,
-                UseGuidKeyForStringPrimaryKey = dialog
-                    .ViewModel
-                    .Result
-                    .UseGuidKeyForStringPrimaryKey,
-            };
+            var options = dialogResult.Options;
             var result = service.Generate(ToGeneratorDiagram(), options);
 
             if (result.HasErrors)
@@ -235,8 +215,9 @@ public partial class MainViewModel
 
             var writer = new GeneratedFileWriter();
             writer.WriteFiles(
-                Path.GetDirectoryName(dialog.ViewModel.Result.OutputFilePath)
-                    ?? Environment.CurrentDirectory,
+                string.IsNullOrWhiteSpace(dialogResult.OutputDirectory)
+                    ? Environment.CurrentDirectory
+                    : dialogResult.OutputDirectory,
                 result
             );
 

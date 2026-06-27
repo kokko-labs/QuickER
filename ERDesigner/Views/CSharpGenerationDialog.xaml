@@ -3,122 +3,304 @@
   xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
   xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
   Title="C# コード生成"
-  Width="620"
+  Width="700"
   SizeToContent="Height"
   ResizeMode="NoResize"
   WindowStartupLocation="CenterOwner"
   FontFamily="Segoe UI, Yu Gothic UI, Meiryo"
   FontSize="13"
 >
-  <Grid Margin="14">
-    <Grid.ColumnDefinitions>
-      <ColumnDefinition Width="110" />
-      <ColumnDefinition Width="*" />
-      <ColumnDefinition Width="Auto" />
-    </Grid.ColumnDefinitions>
-    <Grid.RowDefinitions>
-      <RowDefinition Height="Auto" />
-      <RowDefinition Height="Auto" />
-      <RowDefinition Height="Auto" />
-      <RowDefinition Height="Auto" />
-      <RowDefinition Height="Auto" />
-      <RowDefinition Height="Auto" />
-    </Grid.RowDefinitions>
+  <StackPanel Margin="14">
 
-    <TextBlock
-      Grid.Row="0"
-      Grid.Column="0"
-      Margin="0,4"
-      VerticalAlignment="Center"
-      Text="namespace"
-    />
-    <TextBox
-      Grid.Row="0"
-      Grid.Column="1"
-      Grid.ColumnSpan="2"
-      Margin="0,4"
-      Text="{Binding NamespaceName, UpdateSourceTrigger=PropertyChanged}"
-    />
-
-    <TextBlock
-      Grid.Row="1"
-      Grid.Column="0"
-      Margin="0,4"
-      VerticalAlignment="Center"
-      Text="出力ファイル"
-    />
-    <TextBox
-      Grid.Row="1"
-      Grid.Column="1"
-      Margin="0,4"
-      Text="{Binding OutputFilePath, UpdateSourceTrigger=PropertyChanged}"
-    />
-    <Button
-      Grid.Row="1"
-      Grid.Column="2"
-      Margin="8,4,0,4"
-      Padding="12,4"
-      Content="参照..."
-      Command="{Binding BrowseOutputFileCommand}"
-    />
-
-    <TextBlock
-      Grid.Row="2"
-      Grid.Column="0"
-      Margin="0,8,0,4"
-      VerticalAlignment="Center"
-      Text="生成対象"
-    />
-    <StackPanel
-      Grid.Row="2"
-      Grid.Column="1"
-      Grid.ColumnSpan="2"
-      Orientation="Horizontal"
-      Margin="0,8,0,4"
-    >
-      <CheckBox Margin="0,0,16,0" Content="Entity" IsChecked="{Binding GenerateEntityClasses}" />
-      <CheckBox Margin="0,0,16,0" Content="EditModel" IsChecked="{Binding GenerateEditModels}" />
-      <CheckBox Margin="0,0,16,0" Content="Mapper" IsChecked="{Binding GenerateMappers}" />
-      <CheckBox Content="Repository" IsChecked="{Binding GenerateRepositories}" />
-    </StackPanel>
-
-    <TextBlock
-      Grid.Row="3"
-      Grid.Column="0"
-      Margin="0,8,0,4"
-      VerticalAlignment="Center"
-      Text="値オブジェクト"
-    />
-    <StackPanel
-      Grid.Row="3"
-      Grid.Column="1"
-      Grid.ColumnSpan="2"
-      Orientation="Horizontal"
-      Margin="0,8,0,4"
-    >
-      <CheckBox
-        Margin="0,0,16,0"
-        Content="全カラムを値オブジェクト化"
-        IsChecked="{Binding GenerateValueObjects}"
+    <!-- 出力モード -->
+    <TextBlock Margin="0,0,0,4" FontWeight="SemiBold" Text="出力モード" />
+    <StackPanel Margin="0,0,0,10" Orientation="Horizontal">
+      <RadioButton
+        Margin="0,0,20,0"
+        Content="1 ファイルにまとめる"
+        GroupName="OutputMode"
+        IsChecked="{Binding MergeIntoSingleFile}"
       />
-      <CheckBox
-        Content="string 主キーを GuidKey 化"
-        IsChecked="{Binding UseGuidKeyForStringPrimaryKey}"
-        IsEnabled="{Binding GenerateValueObjects}"
+      <RadioButton
+        Content="レイヤごとに分割する"
+        GroupName="OutputMode"
+        IsChecked="{Binding SplitFilesByCategory}"
       />
     </StackPanel>
 
+    <!-- ベース namespace -->
+    <Grid Margin="0,0,0,8">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="110" />
+        <ColumnDefinition Width="*" />
+      </Grid.ColumnDefinitions>
+      <TextBlock
+        Grid.Column="0"
+        VerticalAlignment="Center"
+        Text="namespace"
+      />
+      <TextBox
+        Grid.Column="1"
+        Text="{Binding BaseNamespace, UpdateSourceTrigger=PropertyChanged}"
+      />
+    </Grid>
+
+    <!-- 生成対象 -->
+    <Grid Margin="0,0,0,8">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="110" />
+        <ColumnDefinition Width="*" />
+      </Grid.ColumnDefinitions>
+      <TextBlock
+        Grid.Column="0"
+        VerticalAlignment="Center"
+        Text="生成対象"
+      />
+      <StackPanel Grid.Column="1" Orientation="Horizontal">
+        <CheckBox Margin="0,0,16,0" Content="Entity" IsChecked="{Binding GenerateEntityClasses}" />
+        <CheckBox Margin="0,0,16,0" Content="EditModel" IsChecked="{Binding GenerateEditModels}" />
+        <CheckBox Margin="0,0,16,0" Content="Mapper" IsChecked="{Binding GenerateMappers}" />
+        <CheckBox Content="Repository" IsChecked="{Binding GenerateRepositories}" />
+      </StackPanel>
+    </Grid>
+
+    <!-- 値オブジェクト -->
+    <Grid Margin="0,0,0,8">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="110" />
+        <ColumnDefinition Width="*" />
+      </Grid.ColumnDefinitions>
+      <TextBlock
+        Grid.Column="0"
+        VerticalAlignment="Center"
+        Text="値オブジェクト"
+      />
+      <StackPanel Grid.Column="1" Orientation="Horizontal">
+        <CheckBox
+          Margin="0,0,16,0"
+          Content="全カラムを値オブジェクト化"
+          IsChecked="{Binding GenerateValueObjects}"
+        />
+        <CheckBox
+          Content="string 主キーを GuidKey 化"
+          IsChecked="{Binding UseGuidKeyForStringPrimaryKey}"
+          IsEnabled="{Binding GenerateValueObjects}"
+        />
+      </StackPanel>
+    </Grid>
+
+    <!-- モード①: 出力ファイル -->
+    <Grid
+      Margin="0,0,0,8"
+      Visibility="{Binding ShowSingleFileOutput, Converter={StaticResource BoolToVisibilityConverter}}"
+    >
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="110" />
+        <ColumnDefinition Width="*" />
+        <ColumnDefinition Width="Auto" />
+      </Grid.ColumnDefinitions>
+      <TextBlock
+        Grid.Column="0"
+        VerticalAlignment="Center"
+        Text="出力ファイル"
+      />
+      <TextBox
+        Grid.Column="1"
+        Text="{Binding OutputFilePath, UpdateSourceTrigger=PropertyChanged}"
+      />
+      <Button
+        Grid.Column="2"
+        Margin="8,0,0,0"
+        Padding="12,4"
+        Content="参照..."
+        Command="{Binding BrowseOutputFileCommand}"
+      />
+    </Grid>
+
+    <!-- モード②: 分割の詳細 -->
+    <StackPanel
+      Visibility="{Binding ShowSplitOptions, Converter={StaticResource BoolToVisibilityConverter}}"
+    >
+      <!-- 出力フォルダ -->
+      <Grid Margin="0,0,0,8">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="110" />
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+        <TextBlock
+          Grid.Column="0"
+          VerticalAlignment="Center"
+          Text="出力フォルダ"
+        />
+        <TextBox
+          Grid.Column="1"
+          Text="{Binding OutputFolderPath, UpdateSourceTrigger=PropertyChanged}"
+        />
+        <Button
+          Grid.Column="2"
+          Margin="8,0,0,0"
+          Padding="12,4"
+          Content="参照..."
+          Command="{Binding BrowseOutputFolderCommand}"
+        />
+      </Grid>
+
+      <!-- カテゴリ別 namespace -->
+      <TextBlock Margin="0,4,0,4" FontWeight="SemiBold" Text="カテゴリ別 namespace" />
+      <Grid>
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="110" />
+          <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+        <Grid.RowDefinitions>
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <TextBlock
+          Grid.Row="0"
+          Grid.Column="0"
+          Margin="0,3"
+          VerticalAlignment="Center"
+          Text="Entity"
+          Visibility="{Binding ShowEntityNamespace, Converter={StaticResource BoolToVisibilityConverter}}"
+        />
+        <TextBox
+          Grid.Row="0"
+          Grid.Column="1"
+          Margin="0,3"
+          Text="{Binding EntityNamespace, UpdateSourceTrigger=PropertyChanged}"
+          Visibility="{Binding ShowEntityNamespace, Converter={StaticResource BoolToVisibilityConverter}}"
+        />
+
+        <TextBlock
+          Grid.Row="1"
+          Grid.Column="0"
+          Margin="0,3"
+          VerticalAlignment="Center"
+          Text="EditModel"
+          Visibility="{Binding ShowEditModelNamespace, Converter={StaticResource BoolToVisibilityConverter}}"
+        />
+        <TextBox
+          Grid.Row="1"
+          Grid.Column="1"
+          Margin="0,3"
+          Text="{Binding EditModelNamespace, UpdateSourceTrigger=PropertyChanged}"
+          Visibility="{Binding ShowEditModelNamespace, Converter={StaticResource BoolToVisibilityConverter}}"
+        />
+
+        <TextBlock
+          Grid.Row="2"
+          Grid.Column="0"
+          Margin="0,3"
+          VerticalAlignment="Center"
+          Text="Mapper"
+          Visibility="{Binding ShowMapperNamespace, Converter={StaticResource BoolToVisibilityConverter}}"
+        />
+        <TextBox
+          Grid.Row="2"
+          Grid.Column="1"
+          Margin="0,3"
+          Text="{Binding MapperNamespace, UpdateSourceTrigger=PropertyChanged}"
+          Visibility="{Binding ShowMapperNamespace, Converter={StaticResource BoolToVisibilityConverter}}"
+        />
+
+        <TextBlock
+          Grid.Row="3"
+          Grid.Column="0"
+          Margin="0,3"
+          VerticalAlignment="Center"
+          Text="Repository"
+          Visibility="{Binding ShowRepositoryNamespace, Converter={StaticResource BoolToVisibilityConverter}}"
+        />
+        <TextBox
+          Grid.Row="3"
+          Grid.Column="1"
+          Margin="0,3"
+          Text="{Binding RepositoryNamespace, UpdateSourceTrigger=PropertyChanged}"
+          Visibility="{Binding ShowRepositoryNamespace, Converter={StaticResource BoolToVisibilityConverter}}"
+        />
+
+        <TextBlock
+          Grid.Row="4"
+          Grid.Column="0"
+          Margin="0,3"
+          VerticalAlignment="Center"
+          Text="ValueObject"
+          Visibility="{Binding ShowValueObjectNamespace, Converter={StaticResource BoolToVisibilityConverter}}"
+        />
+        <TextBox
+          Grid.Row="4"
+          Grid.Column="1"
+          Margin="0,3"
+          Text="{Binding ValueObjectNamespace, UpdateSourceTrigger=PropertyChanged}"
+          Visibility="{Binding ShowValueObjectNamespace, Converter={StaticResource BoolToVisibilityConverter}}"
+        />
+      </Grid>
+
+      <!-- Runtime（共有基盤） -->
+      <Border
+        Margin="0,8,0,0"
+        Padding="8"
+        Background="#F3F4F6"
+        CornerRadius="4"
+        Visibility="{Binding ShowRuntimeNamespace, Converter={StaticResource BoolToVisibilityConverter}}"
+      >
+        <Grid>
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="102" />
+            <ColumnDefinition Width="*" />
+          </Grid.ColumnDefinitions>
+          <StackPanel Grid.Column="0" VerticalAlignment="Center">
+            <TextBlock FontWeight="SemiBold" Text="Runtime" />
+            <TextBlock
+              FontSize="11"
+              Foreground="#6B7280"
+              Text="共有基盤"
+            />
+          </StackPanel>
+          <TextBox
+            Grid.Column="1"
+            VerticalAlignment="Center"
+            Text="{Binding RuntimeNamespace, UpdateSourceTrigger=PropertyChanged}"
+          />
+        </Grid>
+      </Border>
+
+      <!-- プレビュー -->
+      <TextBlock Margin="0,10,0,4" FontWeight="SemiBold" Text="生成されるファイル" />
+      <Border BorderBrush="#D1D5DB" BorderThickness="1" CornerRadius="4">
+        <ScrollViewer MaxHeight="140" VerticalScrollBarVisibility="Auto">
+          <ItemsControl Margin="8" ItemsSource="{Binding PreviewFiles}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate>
+                <TextBlock
+                  Margin="0,2"
+                  FontFamily="Consolas, Cascadia Mono, monospace"
+                  FontSize="12"
+                  Text="{Binding}"
+                />
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </ScrollViewer>
+      </Border>
+    </StackPanel>
+
+    <!-- 説明 -->
     <TextBlock
-      Grid.Row="4"
-      Grid.Column="0"
-      Grid.ColumnSpan="3"
-      Margin="0,8,0,4"
+      Margin="0,10,0,4"
       Foreground="#374151"
       TextWrapping="Wrap"
-      Text="単一の .g.cs に選択した種別のクラスを生成します。手書き partial は生成しません。値オブジェクト化すると各列が検証付きの型になります（同名列は同一型に集約。定義が食い違う場合は生成時に警告します）。"
+      Text="選択した種別のクラスを生成します。手書き partial は生成しません。値オブジェクト化すると各列が検証付きの型になります（同名列は同一型に集約。定義が食い違う場合は生成時に警告します）。分割時は共有基盤を Runtime ファイルへ出力し、各ファイルに相互参照の using を付与します。"
     />
 
-    <DockPanel Grid.Row="5" Grid.Column="0" Grid.ColumnSpan="3" Margin="0,8,0,0">
+    <!-- フッタ -->
+    <DockPanel Margin="0,8,0,0">
       <TextBlock
         DockPanel.Dock="Left"
         VerticalAlignment="Center"
@@ -126,6 +308,12 @@
         Text="{Binding StatusMessage}"
       />
       <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
+        <Button
+          Width="120"
+          Margin="0,0,8,0"
+          Content="初期設定に戻す"
+          Command="{Binding ClearCommand}"
+        />
         <Button
           Width="100"
           Margin="0,0,8,0"
@@ -136,5 +324,5 @@
         <Button Width="80" IsCancel="True" Content="キャンセル" Command="{Binding CancelCommand}" />
       </StackPanel>
     </DockPanel>
-  </Grid>
+  </StackPanel>
 </Window>

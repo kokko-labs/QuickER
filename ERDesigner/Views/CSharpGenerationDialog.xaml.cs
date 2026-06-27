@@ -11,14 +11,11 @@ public partial class CSharpGenerationDialog : Window
     /// <summary>このダイアログの ViewModel</summary>
     public CSharpGenerationDialogViewModel ViewModel { get; }
 
-    /// <summary>名前空間と出力先の初期値を指定してダイアログを生成する</summary>
-    public CSharpGenerationDialog(
-        string namespaceName,
-        string outputFilePath = "ErDesignerEntities.g.cs"
-    )
+    /// <summary>ダイアログを生成する（設定は永続化ストアから復元される）</summary>
+    public CSharpGenerationDialog()
     {
         InitializeComponent();
-        ViewModel = new CSharpGenerationDialogViewModel(namespaceName, outputFilePath)
+        ViewModel = new CSharpGenerationDialogViewModel
         {
             CloseAction = result =>
             {
@@ -26,6 +23,7 @@ public partial class CSharpGenerationDialog : Window
                 Close();
             },
             BrowseOutputFileAction = BrowseOutputFile,
+            BrowseOutputFolderAction = BrowseOutputFolder,
         };
         DataContext = ViewModel;
     }
@@ -49,5 +47,19 @@ public partial class CSharpGenerationDialog : Window
         }
 
         return dialog.ShowDialog() == true ? dialog.FileName : null;
+    }
+
+    /// <summary>フォルダ選択ダイアログで生成先フォルダを選択する</summary>
+    /// <returns>選択したフォルダパス キャンセル時は null</returns>
+    private static string? BrowseOutputFolder(string currentPath)
+    {
+        var dialog = new OpenFolderDialog { Title = "出力先フォルダを選択" };
+
+        if (!string.IsNullOrWhiteSpace(currentPath) && Directory.Exists(currentPath))
+        {
+            dialog.InitialDirectory = currentPath;
+        }
+
+        return dialog.ShowDialog() == true ? dialog.FolderName : null;
     }
 }
