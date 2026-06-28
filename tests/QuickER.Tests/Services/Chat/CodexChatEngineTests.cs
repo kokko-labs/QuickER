@@ -3,6 +3,8 @@ using QuickER.Services;
 using QuickER.Services.Chat;
 using FluentAssertions;
 
+using QuickER.AI;
+
 namespace QuickER.Tests.Services.Chat;
 
 /// <summary><see cref="CodexChatEngine"/> が Codex 通知を共通イベントへ変換することを検証するテストクラス</summary>

@@ -3,6 +3,8 @@ using QuickER.Services;
 using QuickER.ViewModels;
 using FluentAssertions;
 
+using QuickER.AI;
+
 namespace QuickER.Tests.Services;
 
 /// <summary><see cref="ErDiagramDynamicTools"/> の各ツール実行（エンティティ・カラム操作）を検証するテストクラス</summary>
@@ -418,7 +420,7 @@ public class ErDiagramDynamicToolsTests
     [Fact(DisplayName = "ツール説明文に複合PK・複合FKの禁止ルールが含まれる")]
     public void GetDefinitions_DescriptionsContainCompositeKeyProhibition()
     {
-        var definitions = ErDiagramDynamicTools.GetDefinitions();
+        var definitions = ErDiagramToolDefinitions.GetDefinitions();
 
         definitions
             .Single(d => d.Name == "add_column")
@@ -438,8 +440,8 @@ public class ErDiagramDynamicToolsTests
     [Fact(DisplayName = "ToOpenAiTools は全ツール定義を ChatTool へ変換する")]
     public void ToOpenAiTools_ConvertsAllDefinitions()
     {
-        var definitions = ErDiagramDynamicTools.GetDefinitions();
-        var tools = ErDiagramDynamicTools.ToOpenAiTools();
+        var definitions = ErDiagramToolDefinitions.GetDefinitions();
+        var tools = ErDiagramToolDefinitions.ToOpenAiTools();
 
         tools.Should().HaveCount(definitions.Count);
         tools.Select(t => t.FunctionName).Should().BeEquivalentTo(definitions.Select(d => d.Name));
@@ -449,8 +451,8 @@ public class ErDiagramDynamicToolsTests
     [Fact(DisplayName = "ToAnthropicTools は全ツール定義を Anthropic Tool へ変換する")]
     public void ToAnthropicTools_ConvertsAllDefinitions()
     {
-        var definitions = ErDiagramDynamicTools.GetDefinitions();
-        var tools = ErDiagramDynamicTools.ToAnthropicTools();
+        var definitions = ErDiagramToolDefinitions.GetDefinitions();
+        var tools = ErDiagramToolDefinitions.ToAnthropicTools();
 
         tools.Should().HaveCount(definitions.Count);
         tools.Select(t => t.Name).Should().BeEquivalentTo(definitions.Select(d => d.Name));

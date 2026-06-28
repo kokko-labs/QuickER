@@ -4,7 +4,7 @@ using Anthropic;
 using Anthropic.Helpers;
 using Anthropic.Models.Messages;
 
-namespace QuickER.Services.Chat;
+namespace QuickER.AI;
 
 /// <summary>Anthropic (Claude) チャット接続設定（API キー・モデル）</summary>
 /// <param name="ApiKey">Anthropic API キー</param>
@@ -28,7 +28,7 @@ public sealed class AnthropicChatTurnDriver : IChatTurnDriver
     public AnthropicChatTurnDriver(Func<AnthropicChatConnection> connectionProvider)
     {
         _connectionProvider = connectionProvider;
-        _tools = ErDiagramDynamicTools.ToAnthropicTools().Select(tool => (ToolUnion)tool).ToList();
+        _tools = ErDiagramToolDefinitions.ToAnthropicTools().Select(tool => (ToolUnion)tool).ToList();
     }
 
     /// <inheritdoc />

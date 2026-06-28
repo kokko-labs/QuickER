@@ -2,7 +2,7 @@ using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 
-namespace QuickER.Services;
+namespace QuickER.AI;
 
 /// <summary>Codex App Server の認証モード</summary>
 public enum CodexAuthMode

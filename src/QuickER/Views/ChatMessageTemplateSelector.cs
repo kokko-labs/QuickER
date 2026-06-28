@@ -2,6 +2,8 @@ using System.Windows;
 using System.Windows.Controls;
 using QuickER.Services.Chat;
 
+using QuickER.AI;
+
 namespace QuickER.Views;
 
 /// <summary>チャットメッセージのロール別にデータテンプレートを選択するセレクター</summary>

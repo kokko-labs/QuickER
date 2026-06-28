@@ -1,7 +1,7 @@
 using System.IO;
 using System.Text.Json;
 
-namespace QuickER.Services;
+namespace QuickER.AI;
 
 /// <summary>Claude Code 接続の設定</summary>
 public class ClaudeCodeSettings

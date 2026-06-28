@@ -1,4 +1,4 @@
-namespace QuickER.Services;
+namespace QuickER.AI;
 
 /// <summary>AI スキーマ生成と Codex チャットで共用する ER 設計ルール文を集約するクラス</summary>
 /// <remarks>

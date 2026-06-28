@@ -2,6 +2,8 @@ using System.IO;
 using QuickER.Services;
 using FluentAssertions;
 
+using QuickER.AI;
+
 namespace QuickER.Tests.Services;
 
 /// <summary><see cref="CodexAppServerSettingsStore"/> による設定ファイルの保存・読込をテストするクラス</summary>

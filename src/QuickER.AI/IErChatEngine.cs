@@ -1,4 +1,4 @@
-namespace QuickER.Services.Chat;
+namespace QuickER.AI;
 
 /// <summary>AI チャットのバックエンド種別（接続方式）</summary>
 public enum ErChatBackendKind

@@ -1,6 +1,8 @@
 using QuickER.Services;
 using FluentAssertions;
 
+using QuickER.AI;
+
 namespace QuickER.Tests.Services;
 
 /// <summary><see cref="CodexConfigTomlReader"/> による config.toml の簡易パースをテストするクラス</summary>

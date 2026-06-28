@@ -1,6 +1,6 @@
 using System.Text.Json;
 
-namespace QuickER.Services.Chat;
+namespace QuickER.AI;
 
 /// <summary>Codex のアカウント認証状態のスナップショット（UI 表示用）</summary>
 /// <param name="IsStarted">App Server へ接続済みか</param>
@@ -315,7 +315,7 @@ public sealed class CodexChatEngine : IErChatEngine
             ApprovalPolicy = ApprovalPolicyNever,
             ModelProvider = NormalizeOptionalText(ModelProvider),
             Model = NormalizeOptionalText(Model),
-            DynamicTools = _toolHost is not null ? ErDiagramDynamicTools.GetDefinitions() : null,
+            DynamicTools = _toolHost is not null ? ErDiagramToolDefinitions.GetDefinitions() : null,
             DeveloperInstructions = _toolHost is not null
                 ? ErDesignRules.BuildCodexDeveloperInstructions()
                 : null,

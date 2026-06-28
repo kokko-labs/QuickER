@@ -1,4 +1,5 @@
 using System.Text.Json;
+using QuickER.AI;
 using QuickER.ViewModels;
 
 namespace QuickER.Services.Chat;

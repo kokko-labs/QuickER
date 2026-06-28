@@ -1,4 +1,4 @@
-namespace QuickER.Services.Chat;
+namespace QuickER.AI;
 
 /// <summary>
 /// 「API キー接続」バックエンド内のプロバイダ選択に応じて、毎ターン

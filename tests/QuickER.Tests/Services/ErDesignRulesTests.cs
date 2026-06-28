@@ -1,6 +1,8 @@
 using QuickER.Services;
 using FluentAssertions;
 
+using QuickER.AI;
+
 namespace QuickER.Tests.Services;
 
 /// <summary><see cref="ErDesignRules"/> の設計ルール文の組み立てを検証するテストクラス</summary>

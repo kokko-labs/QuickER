@@ -4,7 +4,7 @@ using System.IO;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace QuickER.Services;
+namespace QuickER.AI;
 
 /// <summary>Codex App Server と JSON-RPC で対話するクライアントの抽象</summary>
 public interface ICodexAppServerClient : IAsyncDisposable

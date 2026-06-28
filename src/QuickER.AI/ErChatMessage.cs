@@ -1,7 +1,7 @@
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 
-namespace QuickER.Services.Chat;
+namespace QuickER.AI;
 
 /// <summary>チャットメッセージの送信者種別</summary>
 public enum ErChatMessageRole

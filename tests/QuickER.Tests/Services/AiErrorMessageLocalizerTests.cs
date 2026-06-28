@@ -3,6 +3,8 @@ using System.Text.Json;
 using QuickER.Services;
 using FluentAssertions;
 
+using QuickER.AI;
+
 namespace QuickER.Tests.Services;
 
 /// <summary><see cref="AiErrorMessageLocalizer"/> の例外種別ごとの日本語化を検証するテストクラス</summary>

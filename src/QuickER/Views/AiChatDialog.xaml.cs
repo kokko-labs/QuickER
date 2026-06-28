@@ -4,6 +4,8 @@ using System.Windows.Input;
 using QuickER.Services.Chat;
 using QuickER.ViewModels;
 
+using QuickER.AI;
+
 namespace QuickER.Views;
 
 /// <summary>AI チャット（API キー接続 / Codex 接続）の統合ウィンドウのコードビハインド</summary>

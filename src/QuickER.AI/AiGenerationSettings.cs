@@ -1,6 +1,6 @@
 using QuickER.Model;
 
-namespace QuickER.Services;
+namespace QuickER.AI;
 
 /// <summary>AI プロバイダの種別</summary>
 public enum AiProvider

@@ -3,6 +3,8 @@ using System.Windows.Data;
 using System.Windows.Media;
 using QuickER.Services.Chat;
 
+using QuickER.AI;
+
 namespace QuickER.Views;
 
 /// <summary>

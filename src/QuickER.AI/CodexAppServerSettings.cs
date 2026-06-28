@@ -1,7 +1,7 @@
 using System.IO;
 using System.Text.Json;
 
-namespace QuickER.Services;
+namespace QuickER.AI;
 
 /// <summary>Codex App Server の起動設定</summary>
 public class CodexAppServerSettings

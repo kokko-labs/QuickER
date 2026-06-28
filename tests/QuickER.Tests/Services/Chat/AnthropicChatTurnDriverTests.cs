@@ -1,6 +1,8 @@
 using QuickER.Services.Chat;
 using FluentAssertions;
 
+using QuickER.AI;
+
 namespace QuickER.Tests.Services.Chat;
 
 /// <summary><see cref="AnthropicChatTurnDriver"/> の中立履歴 → Anthropic メッセージ変換を検証するテストクラス</summary>

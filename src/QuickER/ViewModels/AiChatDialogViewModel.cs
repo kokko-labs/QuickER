@@ -7,6 +7,8 @@ using CommunityToolkit.Mvvm.Input;
 using QuickER.Services;
 using QuickER.Services.Chat;
 
+using QuickER.AI;
+
 namespace QuickER.ViewModels;
 
 /// <summary>AI チャット（API キー接続 / Codex 接続 / Claude Code 接続の 3 エンジン）を扱う統合ダイアログ用 ViewModel</summary>

@@ -1,4 +1,4 @@
-namespace QuickER.Services;
+namespace QuickER.AI;
 
 /// <summary>AI 機能で共通利用するモデル名候補のカタログ</summary>
 public static class AiModelCatalog

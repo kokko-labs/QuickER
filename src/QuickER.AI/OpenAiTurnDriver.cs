@@ -3,7 +3,7 @@ using System.Text;
 using OpenAI;
 using OpenAI.Chat;
 
-namespace QuickER.Services.Chat;
+namespace QuickER.AI;
 
 /// <summary>OpenAI チャット接続設定（プロバイダ・キー・モデル・エンドポイント）</summary>
 /// <param name="Provider">プロバイダ（OpenAI / Ollama）</param>
@@ -41,7 +41,7 @@ public sealed class OpenAiTurnDriver : IChatTurnDriver
     public OpenAiTurnDriver(Func<OpenAiChatConnection> connectionProvider)
     {
         _connectionProvider = connectionProvider;
-        _tools = ErDiagramDynamicTools.ToOpenAiTools();
+        _tools = ErDiagramToolDefinitions.ToOpenAiTools();
     }
 
     /// <inheritdoc />

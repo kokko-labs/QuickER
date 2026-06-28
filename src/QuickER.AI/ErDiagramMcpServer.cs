@@ -9,12 +9,12 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
 
-namespace QuickER.Services.Chat;
+namespace QuickER.AI;
 
 /// <summary>
 /// ER 図操作ツールを Claude Code へ公開する、プロセス内 HTTP/SSE MCP サーバー。
 /// 127.0.0.1 のエフェメラルポートで Kestrel を起動し、bearer トークンで保護する。
-/// ツール定義は <see cref="ErDiagramDynamicTools.GetDefinitions"/> を単一ソースとして生成し、
+/// ツール定義は <see cref="ErDiagramToolDefinitions.GetDefinitions"/> を単一ソースとして生成し、
 /// 呼び出しは注入された実行コールバック（UI スレッドへのマーシャリングは呼び出し側の責務）へ委譲する。
 /// </summary>
 public sealed class ErDiagramMcpServer : IAsyncDisposable
@@ -80,7 +80,7 @@ public sealed class ErDiagramMcpServer : IAsyncDisposable
 
     /// <summary>全ツール定義を MCP ツールへ変換する</summary>
     private IReadOnlyList<McpServerTool> BuildTools() =>
-        ErDiagramDynamicTools.GetDefinitions().Select(CreateTool).ToList();
+        ErDiagramToolDefinitions.GetDefinitions().Select(CreateTool).ToList();
 
     /// <summary>1 つの dynamicTool 定義を、固定スキーマと実行委譲を持つ MCP ツールへ変換する</summary>
     private McpServerTool CreateTool(CodexDynamicToolDefinition definition)

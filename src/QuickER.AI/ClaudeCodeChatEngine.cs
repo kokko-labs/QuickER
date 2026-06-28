@@ -1,7 +1,7 @@
 using System.IO;
 using System.Text.Json;
 
-namespace QuickER.Services.Chat;
+namespace QuickER.AI;
 
 /// <summary>
 /// ローカルの Claude Code CLI をヘッドレスで駆動する <see cref="IErChatEngine"/>。

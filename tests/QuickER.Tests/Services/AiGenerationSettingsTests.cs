@@ -1,6 +1,8 @@
 ﻿using QuickER.Services;
 using FluentAssertions;
 
+using QuickER.AI;
+
 namespace QuickER.Tests.Services;
 
 /// <summary><see cref="AiGenerationSettings"/> のエンドポイント解決と既定値を検証するテストクラス</summary>

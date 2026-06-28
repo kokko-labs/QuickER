@@ -3,6 +3,8 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using QuickER.Services.Chat;
 
+using QuickER.AI;
+
 namespace QuickER.Views;
 
 /// <summary>

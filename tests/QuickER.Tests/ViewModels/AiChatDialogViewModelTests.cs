@@ -5,6 +5,8 @@ using QuickER.Tests.Services.Chat;
 using QuickER.ViewModels;
 using FluentAssertions;
 
+using QuickER.AI;
+
 namespace QuickER.Tests.ViewModels;
 
 /// <summary><see cref="AiChatDialogViewModel"/> のタブ切替・送信可否・接続方式判定を検証するテストクラス</summary>

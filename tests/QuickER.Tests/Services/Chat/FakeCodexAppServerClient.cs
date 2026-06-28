@@ -1,5 +1,7 @@
 using QuickER.Services;
 
+using QuickER.AI;
+
 namespace QuickER.Tests.Services.Chat;
 
 /// <summary>通信を伴わず接続・認証・スレッド操作を模擬する <see cref="ICodexAppServerClient"/> のフェイク</summary>

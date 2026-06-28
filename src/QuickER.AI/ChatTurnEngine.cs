@@ -1,4 +1,4 @@
-namespace QuickER.Services.Chat;
+namespace QuickER.AI;
 
 /// <summary>会話履歴 1 項目の役割</summary>
 public enum ChatHistoryRole

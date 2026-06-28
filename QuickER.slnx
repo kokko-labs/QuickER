@@ -7,6 +7,7 @@
     <File Path="docs/sample/sample-image.png" />
   </Folder>
   <Folder Name="/src/">
+    <Project Path="src/QuickER.AI/QuickER.AI.csproj" />
     <Project Path="src/QuickER.Generator/QuickER.Generator.csproj" />
     <Project Path="src/QuickER.Model/QuickER.Model.csproj" />
     <Project Path="src/QuickER.SqlServer/QuickER.SqlServer.csproj" />

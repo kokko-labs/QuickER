@@ -2,7 +2,7 @@
 using System.Net.Http;
 using System.Text.Json;
 
-namespace QuickER.Services;
+namespace QuickER.AI;
 
 /// <summary>
 /// AI 呼び出し (OpenAI / Ollama 等) で発生した例外をユーザー向けの日本語メッセージへ変換するヘルパー

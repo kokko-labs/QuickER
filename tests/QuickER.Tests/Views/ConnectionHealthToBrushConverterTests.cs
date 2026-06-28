@@ -4,6 +4,8 @@ using QuickER.Services.Chat;
 using QuickER.Views;
 using FluentAssertions;
 
+using QuickER.AI;
+
 namespace QuickER.Tests.Views;
 
 /// <summary><see cref="ConnectionHealthToBrushConverter"/> の色マッピングを検証するテストクラス</summary>

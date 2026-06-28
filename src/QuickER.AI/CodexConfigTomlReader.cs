@@ -1,6 +1,6 @@
 using System.IO;
 
-namespace QuickER.Services;
+namespace QuickER.AI;
 
 /// <summary>Codex の config.toml から読み込んだ設定</summary>
 public sealed class CodexConfigToml

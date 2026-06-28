@@ -2,7 +2,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Text.Json;
 
-namespace QuickER.Services.Chat;
+namespace QuickER.AI;
 
 /// <summary>Claude Code を 1 ターン起動するための設定</summary>
 /// <param name="Model">モデルエイリアス（空なら Claude Code 既定）</param>

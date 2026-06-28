@@ -1,6 +1,8 @@
 using QuickER.Services.Chat;
 using FluentAssertions;
 
+using QuickER.AI;
+
 namespace QuickER.Tests.Services.Chat;
 
 /// <summary><see cref="ClaudeCodeChatEngine"/> のターン流れ（ストリーミング・成功/失敗・継続・可否）を検証するテストクラス</summary>

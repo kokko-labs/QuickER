@@ -1,4 +1,4 @@
-namespace QuickER.Services.Chat;
+namespace QuickER.AI;
 
 /// <summary>
 /// 接続パネルの状態ドットが表す健全度。Codex / Claude 両エンジンで共通に用いる。

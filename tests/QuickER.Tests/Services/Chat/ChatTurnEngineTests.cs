@@ -1,6 +1,8 @@
 using QuickER.Services.Chat;
 using FluentAssertions;
 
+using QuickER.AI;
+
 namespace QuickER.Tests.Services.Chat;
 
 /// <summary><see cref="ChatTurnEngine"/> のツール呼び出しループ・ストリーミング・完了通知を検証するテストクラス</summary>
