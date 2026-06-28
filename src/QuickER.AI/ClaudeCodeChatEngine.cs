@@ -25,8 +25,7 @@ public sealed class ClaudeCodeChatEngine : IErChatEngine
     private CancellationTokenSource? _turnCts;
 
     private const string PendingGuidance = "「再確認」を押すとログイン状態を確認できます。";
-    private const string InstallGuidance =
-        "Claude Code をインストールし、PATH を通してください。";
+    private const string InstallGuidance = "Claude Code をインストールし、PATH を通してください。";
     private const string LoggedInGuidance = "ローカルの Claude Code をそのまま使用します。";
     private const string NotLoggedInGuidance =
         "ターミナルで claude を起動し /login で認証後、「再確認」を押してください。";

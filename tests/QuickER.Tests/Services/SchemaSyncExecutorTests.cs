@@ -1,6 +1,5 @@
-using QuickER.Services;
 using FluentAssertions;
-
+using QuickER.Services;
 using QuickER.SqlServer;
 
 namespace QuickER.Tests.Services;

@@ -1,6 +1,6 @@
-using QuickER.Model;
-using QuickER.Generator;
 using FluentAssertions;
+using QuickER.Generator;
+using QuickER.Model;
 
 namespace QuickER.Tests.Generator;
 

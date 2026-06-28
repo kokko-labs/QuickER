@@ -4,10 +4,9 @@ using System.Linq;
 using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using QuickER.AI;
 using QuickER.Services;
 using QuickER.Services.Chat;
-
-using QuickER.AI;
 
 namespace QuickER.ViewModels;
 

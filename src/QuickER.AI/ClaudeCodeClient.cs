@@ -241,7 +241,8 @@ public sealed class ClaudeCodeProcessClient : IClaudeCodeClient
                 ? resultEl.GetString()
                 : null;
 
-            return message is not null
+            return
+                message is not null
                 && message.Contains("Not logged in", StringComparison.OrdinalIgnoreCase)
                 ? ClaudeLoginProbeResult.NotLoggedIn
                 : ClaudeLoginProbeResult.Unavailable;

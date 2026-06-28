@@ -1,7 +1,7 @@
-﻿using QuickER.Model;
+﻿using FluentAssertions;
+using QuickER.Model;
 using QuickER.UndoRedo;
 using QuickER.ViewModels;
-using FluentAssertions;
 
 namespace QuickER.Tests.UndoRedo;
 

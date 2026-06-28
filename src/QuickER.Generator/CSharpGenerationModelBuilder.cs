@@ -1,4 +1,5 @@
 using QuickER.Model;
+
 namespace QuickER.Generator;
 
 /// <summary>ER 図定義からテンプレート用の C# コード生成モデルを構築するビルダー</summary>

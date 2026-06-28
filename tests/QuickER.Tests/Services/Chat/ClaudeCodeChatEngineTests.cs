@@ -1,7 +1,6 @@
-using QuickER.Services.Chat;
 using FluentAssertions;
-
 using QuickER.AI;
+using QuickER.Services.Chat;
 
 namespace QuickER.Tests.Services.Chat;
 
@@ -193,10 +192,7 @@ public class ClaudeCodeChatEngineTests
     [Fact(DisplayName = "再確認: 未ログインは NeedsAction＋案内")]
     public async Task Refresh_NotLoggedIn_BecomesNeedsAction()
     {
-        var client = new FakeClaudeCodeClient
-        {
-            ProbeResult = ClaudeLoginProbeResult.NotLoggedIn,
-        };
+        var client = new FakeClaudeCodeClient { ProbeResult = ClaudeLoginProbeResult.NotLoggedIn };
         var engine = CreateEngine(client);
 
         await engine.InitializeAsync();

@@ -1,9 +1,8 @@
 ﻿using System.Net.Http;
 using System.Text.Json;
-using QuickER.Services;
 using FluentAssertions;
-
 using QuickER.AI;
+using QuickER.Services;
 
 namespace QuickER.Tests.Services;
 

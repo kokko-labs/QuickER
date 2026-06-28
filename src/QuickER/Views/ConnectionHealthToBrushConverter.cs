@@ -1,9 +1,8 @@
 using System.Globalization;
 using System.Windows.Data;
 using System.Windows.Media;
-using QuickER.Services.Chat;
-
 using QuickER.AI;
+using QuickER.Services.Chat;
 
 namespace QuickER.Views;
 
@@ -18,12 +17,7 @@ public sealed class ConnectionHealthToBrushConverter : IValueConverter
     private static readonly SolidColorBrush NeedsActionBrush = CreateFrozen("#DC2626");
 
     /// <inheritdoc />
-    public object Convert(
-        object value,
-        Type targetType,
-        object parameter,
-        CultureInfo culture
-    ) =>
+    public object Convert(object value, Type targetType, object parameter, CultureInfo culture) =>
         value switch
         {
             ConnectionHealth.Ready => ReadyBrush,

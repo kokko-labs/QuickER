@@ -2,11 +2,10 @@
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using QuickER.Model;
-using QuickER.Services;
 using FluentAssertions;
 using Microsoft.Data.SqlClient;
-
+using QuickER.Model;
+using QuickER.Services;
 using QuickER.SqlServer;
 
 namespace QuickER.Tests.Services;

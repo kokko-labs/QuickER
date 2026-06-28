@@ -1,10 +1,9 @@
 ﻿using System.IO;
+using FluentAssertions;
 using QuickER.Services;
+using QuickER.SqlServer;
 using QuickER.Tests.TestDoubles;
 using QuickER.ViewModels;
-using FluentAssertions;
-
-using QuickER.SqlServer;
 
 namespace QuickER.Tests.ViewModels;
 

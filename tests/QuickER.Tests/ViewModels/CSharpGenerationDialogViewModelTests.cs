@@ -1,8 +1,8 @@
 using System.IO;
 using System.Linq;
+using FluentAssertions;
 using QuickER.Services;
 using QuickER.ViewModels;
-using FluentAssertions;
 
 namespace QuickER.Tests.ViewModels;
 

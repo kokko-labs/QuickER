@@ -1,8 +1,8 @@
 ﻿using ClosedXML.Excel;
+using FluentAssertions;
 using QuickER.Model;
 using QuickER.Services;
 using QuickER.ViewModels;
-using FluentAssertions;
 
 namespace QuickER.Tests.Services;
 

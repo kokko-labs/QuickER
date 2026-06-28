@@ -1,8 +1,7 @@
 using System.IO;
-using QuickER.Services;
 using FluentAssertions;
-
 using QuickER.AI;
+using QuickER.Services;
 
 namespace QuickER.Tests.Services;
 
@@ -13,11 +12,7 @@ public class CodexAppServerSettingsStoreTests
     [Fact(DisplayName = "Save した設定を Load で復元できる")]
     public void SaveThenLoad_RoundTrip()
     {
-        var folder = Path.Combine(
-            Path.GetTempPath(),
-            "QuickERTests",
-            Guid.NewGuid().ToString("N")
-        );
+        var folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
         var store = new CodexAppServerSettingsStore(folder);
         var expected = new CodexAppServerSettings
         {

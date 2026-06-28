@@ -1,11 +1,10 @@
 using System.IO;
+using FluentAssertions;
+using QuickER.AI;
 using QuickER.Services;
 using QuickER.Services.Chat;
 using QuickER.Tests.Services.Chat;
 using QuickER.ViewModels;
-using FluentAssertions;
-
-using QuickER.AI;
 
 namespace QuickER.Tests.ViewModels;
 
@@ -23,11 +22,7 @@ public class AiChatDialogViewModelTests
         string folder
     ) CreateVm()
     {
-        var folder = Path.Combine(
-            Path.GetTempPath(),
-            "QuickERTests",
-            Guid.NewGuid().ToString("N")
-        );
+        var folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
         var settingsStore = new CodexAppServerSettingsStore(folder);
         var client = new FakeCodexAppServerClient();
         var vm = new AiChatDialogViewModel(

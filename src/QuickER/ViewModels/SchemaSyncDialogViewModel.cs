@@ -6,7 +6,6 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using QuickER.Model;
 using QuickER.Services;
-
 using QuickER.SqlServer;
 
 namespace QuickER.ViewModels;

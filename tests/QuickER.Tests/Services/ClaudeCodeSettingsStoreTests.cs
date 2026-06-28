@@ -1,8 +1,7 @@
 using System.IO;
-using QuickER.Services;
 using FluentAssertions;
-
 using QuickER.AI;
+using QuickER.Services;
 
 namespace QuickER.Tests.Services;
 
@@ -13,11 +12,7 @@ public class ClaudeCodeSettingsStoreTests
     [Fact(DisplayName = "保存した Claude Code 設定を読み込める")]
     public void SaveThenLoad_RoundTrips()
     {
-        var folder = Path.Combine(
-            Path.GetTempPath(),
-            "QuickERTests",
-            Guid.NewGuid().ToString("N")
-        );
+        var folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
 
         try
         {
@@ -41,11 +36,7 @@ public class ClaudeCodeSettingsStoreTests
     [Fact(DisplayName = "未保存なら既定値を返す")]
     public void Load_WhenMissing_ReturnsDefault()
     {
-        var folder = Path.Combine(
-            Path.GetTempPath(),
-            "QuickERTests",
-            Guid.NewGuid().ToString("N")
-        );
+        var folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
         var store = new ClaudeCodeSettingsStore(folder);
 
         var loaded = store.Load();

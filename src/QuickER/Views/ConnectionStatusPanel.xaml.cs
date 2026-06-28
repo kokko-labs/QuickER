@@ -1,9 +1,8 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
-using QuickER.Services.Chat;
-
 using QuickER.AI;
+using QuickER.Services.Chat;
 
 namespace QuickER.Views;
 

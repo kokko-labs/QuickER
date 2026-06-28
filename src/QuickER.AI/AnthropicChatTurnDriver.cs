@@ -28,7 +28,10 @@ public sealed class AnthropicChatTurnDriver : IChatTurnDriver
     public AnthropicChatTurnDriver(Func<AnthropicChatConnection> connectionProvider)
     {
         _connectionProvider = connectionProvider;
-        _tools = ErDiagramToolDefinitions.ToAnthropicTools().Select(tool => (ToolUnion)tool).ToList();
+        _tools = ErDiagramToolDefinitions
+            .ToAnthropicTools()
+            .Select(tool => (ToolUnion)tool)
+            .ToList();
     }
 
     /// <inheritdoc />

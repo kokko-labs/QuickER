@@ -93,7 +93,11 @@
             </Border>
             <ControlTemplate.Triggers>
               <Trigger Property="IsMouseOver" Value="True">
-                <Setter TargetName="Bd" Property="Background" Value="{StaticResource AccentHover}" />
+                <Setter
+                  TargetName="Bd"
+                  Property="Background"
+                  Value="{StaticResource AccentHover}"
+                />
               </Trigger>
               <Trigger Property="IsEnabled" Value="False">
                 <Setter Property="Opacity" Value="0.4" />
@@ -147,7 +151,6 @@
   </Window.Resources>
 
   <StackPanel Margin="18">
-
     <!-- 出力モード -->
     <Border Style="{StaticResource Card}">
       <StackPanel>
@@ -199,8 +202,16 @@
             Text="生成対象"
           />
           <StackPanel Grid.Column="1" Orientation="Horizontal">
-            <CheckBox Margin="0,0,18,0" Content="Entity" IsChecked="{Binding GenerateEntityClasses}" />
-            <CheckBox Margin="0,0,18,0" Content="EditModel" IsChecked="{Binding GenerateEditModels}" />
+            <CheckBox
+              Margin="0,0,18,0"
+              Content="Entity"
+              IsChecked="{Binding GenerateEntityClasses}"
+            />
+            <CheckBox
+              Margin="0,0,18,0"
+              Content="EditModel"
+              IsChecked="{Binding GenerateEditModels}"
+            />
             <CheckBox Margin="0,0,18,0" Content="Mapper" IsChecked="{Binding GenerateMappers}" />
             <CheckBox Content="Repository" IsChecked="{Binding GenerateRepositories}" />
           </StackPanel>
@@ -426,7 +437,12 @@
           Foreground="{StaticResource MutedText}"
           Text="生成されるファイル"
         />
-        <Border Background="#F9FAFB" BorderBrush="{StaticResource Divider}" BorderThickness="1" CornerRadius="8">
+        <Border
+          Background="#F9FAFB"
+          BorderBrush="{StaticResource Divider}"
+          BorderThickness="1"
+          CornerRadius="8"
+        >
           <ScrollViewer MaxHeight="150" VerticalScrollBarVisibility="Auto">
             <ItemsControl Margin="12,10" ItemsSource="{Binding PreviewFiles}">
               <ItemsControl.ItemTemplate>

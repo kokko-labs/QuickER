@@ -1,4 +1,5 @@
 using QuickER.Model;
+
 namespace QuickER.Generator;
 
 /// <summary>

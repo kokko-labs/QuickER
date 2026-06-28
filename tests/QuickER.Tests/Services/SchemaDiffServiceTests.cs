@@ -1,8 +1,7 @@
 ﻿using System.Collections.Generic;
+using FluentAssertions;
 using QuickER.Model;
 using QuickER.Services;
-using FluentAssertions;
-
 using QuickER.SqlServer;
 
 namespace QuickER.Tests.Services;

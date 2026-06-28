@@ -511,8 +511,7 @@ public static class TableDefinitionDocumentExporter
     {
         var references = relationships
             .Where(relationship =>
-                relationship.TargetEntityId == entity.Id
-                && relationship.TargetColumnId == column.Id
+                relationship.TargetEntityId == entity.Id && relationship.TargetColumnId == column.Id
             )
             .Select(relationship =>
                 $"{TableNameOf(entitiesById, relationship.SourceEntityId)}.{ColumnNameOf(entitiesById, relationship.SourceEntityId, relationship.SourceColumnId)}"
@@ -542,8 +541,7 @@ public static class TableDefinitionDocumentExporter
             return string.Empty;
         }
 
-        return entity.Columns.FirstOrDefault(column => column.Id == columnId)?.Name
-            ?? string.Empty;
+        return entity.Columns.FirstOrDefault(column => column.Id == columnId)?.Name ?? string.Empty;
     }
 
     /// <summary>Excel シート名に使えない文字を除去し、31 文字制限と重複回避を考慮した一意な名前を生成する</summary>

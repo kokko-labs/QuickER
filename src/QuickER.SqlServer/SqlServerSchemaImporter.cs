@@ -3,8 +3,8 @@ using System.Data;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using QuickER.Model;
 using Microsoft.Data.SqlClient;
+using QuickER.Model;
 
 namespace QuickER.SqlServer;
 

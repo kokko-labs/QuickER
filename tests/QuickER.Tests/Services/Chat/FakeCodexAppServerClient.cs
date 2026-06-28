@@ -1,6 +1,5 @@
-using QuickER.Services;
-
 using QuickER.AI;
+using QuickER.Services;
 
 namespace QuickER.Tests.Services.Chat;
 
