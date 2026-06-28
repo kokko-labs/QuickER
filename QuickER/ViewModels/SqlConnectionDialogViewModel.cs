@@ -6,6 +6,8 @@ using CommunityToolkit.Mvvm.Input;
 using QuickER.Services;
 using Microsoft.Data.SqlClient;
 
+using QuickER.SqlServer;
+
 namespace QuickER.ViewModels;
 
 /// <summary>SQL Server 接続ダイアログの ViewModel</summary>

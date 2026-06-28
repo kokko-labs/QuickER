@@ -3,6 +3,8 @@ using QuickER.Tests.TestDoubles;
 using QuickER.ViewModels;
 using FluentAssertions;
 
+using QuickER.SqlServer;
+
 namespace QuickER.Tests.ViewModels;
 
 /// <summary><see cref="SchemaSyncDialogViewModel"/> の差分選択・プレビュー生成・実行確認を検証するテストクラス</summary>

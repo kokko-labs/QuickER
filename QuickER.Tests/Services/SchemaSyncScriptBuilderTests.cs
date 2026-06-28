@@ -2,6 +2,8 @@
 using QuickER.Services;
 using FluentAssertions;
 
+using QuickER.SqlServer;
+
 namespace QuickER.Tests.Services;
 
 /// <summary><see cref="SchemaSyncScriptBuilder"/> が差分から生成する T-SQL の内容と出力順序を検証するテストクラス</summary>

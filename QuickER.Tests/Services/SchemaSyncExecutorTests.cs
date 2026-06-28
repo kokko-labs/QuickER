@@ -1,6 +1,8 @@
 using QuickER.Services;
 using FluentAssertions;
 
+using QuickER.SqlServer;
+
 namespace QuickER.Tests.Services;
 
 /// <summary><see cref="SchemaSyncExecutor.SplitBatches"/> の GO 区切り分割を検証するテストクラス</summary>

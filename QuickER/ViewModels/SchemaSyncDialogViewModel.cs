@@ -7,6 +7,8 @@ using CommunityToolkit.Mvvm.Input;
 using QuickER.Model;
 using QuickER.Services;
 
+using QuickER.SqlServer;
+
 namespace QuickER.ViewModels;
 
 /// <summary>ダイアグラムを既存 DB と同期（差分 ALTER 実行）するためのダイアログ ViewModel</summary>

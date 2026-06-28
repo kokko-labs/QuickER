@@ -3,6 +3,8 @@ using System.Linq;
 using QuickER.Services;
 using FluentAssertions;
 
+using QuickER.SqlServer;
+
 namespace QuickER.Tests.Services;
 
 /// <summary><see cref="SqlConnectionProfileStore"/> の保存・読込・削除・パスワード往復を検証するテストクラス</summary>

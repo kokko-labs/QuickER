@@ -1,4 +1,6 @@
-﻿namespace QuickER.Services;
+﻿using QuickER.SqlServer;
+
+namespace QuickER.Services;
 
 /// <summary>名前を付けて保存可能な SQL Server 接続プロファイル</summary>
 /// <remarks>

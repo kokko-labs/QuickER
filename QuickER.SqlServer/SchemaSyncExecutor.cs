@@ -5,7 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Data.SqlClient;
 
-namespace QuickER.Services;
+namespace QuickER.SqlServer;
 
 /// <summary>生成済みの T-SQL スクリプトを単一トランザクションで SQL Server に対し実行する</summary>
 /// <remarks>sqlcmd の慣習に従い、行頭の <c>GO</c> でバッチ分割する</remarks>

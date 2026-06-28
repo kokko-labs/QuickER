@@ -5,6 +5,8 @@ using System.Text;
 using QuickER.Model;
 using QuickER.ViewModels;
 
+using QuickER.SqlServer;
+
 namespace QuickER.Services;
 
 /// <summary>

@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 using QuickER.Model;
 using Microsoft.Data.SqlClient;
 
-namespace QuickER.Services;
+namespace QuickER.SqlServer;
 
 /// <summary>SQL Server のテーブル定義を取得し <see cref="Entity"/> / <see cref="Relationship"/> へ変換するインポーター</summary>
 /// <remarks>

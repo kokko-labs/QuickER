@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 
-namespace QuickER.Model;
+namespace QuickER.SqlServer;
 
 /// <summary>
 /// SQL Server の代表的なデータ型一覧を提供する静的クラス

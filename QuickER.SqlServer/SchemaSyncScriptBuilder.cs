@@ -3,7 +3,7 @@ using System.Linq;
 using System.Text;
 using QuickER.Model;
 
-namespace QuickER.Services;
+namespace QuickER.SqlServer;
 
 /// <summary>選択済みの <see cref="SchemaDiffItem"/> から SQL Server 用の T-SQL バッチを生成する</summary>
 /// <remarks>

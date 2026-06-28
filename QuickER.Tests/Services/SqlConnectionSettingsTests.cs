@@ -1,6 +1,8 @@
 ﻿using QuickER.Services;
 using FluentAssertions;
 
+using QuickER.SqlServer;
+
 namespace QuickER.Tests.Services;
 
 /// <summary><see cref="SqlConnectionSettings.Build"/> が認証方式に応じた接続文字列を構築することを検証するテストクラス</summary>

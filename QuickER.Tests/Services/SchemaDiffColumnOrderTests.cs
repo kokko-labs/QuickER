@@ -3,6 +3,8 @@ using QuickER.Model;
 using QuickER.Services;
 using FluentAssertions;
 
+using QuickER.SqlServer;
+
 namespace QuickER.Tests.Services;
 
 /// <summary><see cref="SchemaDiffService.DetectColumnOrderChanges"/> の列順差分検知を検証するテストクラス</summary>

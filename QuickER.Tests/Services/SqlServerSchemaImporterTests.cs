@@ -2,6 +2,8 @@
 using QuickER.Services;
 using FluentAssertions;
 
+using QuickER.SqlServer;
+
 namespace QuickER.Tests.Services;
 
 /// <summary><see cref="SqlServerSchemaImporter"/> の DB 非依存ロジック（型整形・署名計算）を検証するテストクラス</summary>

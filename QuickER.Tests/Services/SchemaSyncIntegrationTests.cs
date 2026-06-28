@@ -7,6 +7,8 @@ using QuickER.Services;
 using FluentAssertions;
 using Microsoft.Data.SqlClient;
 
+using QuickER.SqlServer;
+
 namespace QuickER.Tests.Services;
 
 /// <summary>実 SQL Server に対しスキーマ同期を end-to-end で検証する統合テストクラス</summary>

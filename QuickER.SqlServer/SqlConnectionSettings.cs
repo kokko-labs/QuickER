@@ -1,6 +1,6 @@
 ﻿using Microsoft.Data.SqlClient;
 
-namespace QuickER.Services;
+namespace QuickER.SqlServer;
 
 /// <summary>SQL Server 接続設定を保持し、認証方式に応じた接続文字列を生成するクラス</summary>
 public class SqlConnectionSettings

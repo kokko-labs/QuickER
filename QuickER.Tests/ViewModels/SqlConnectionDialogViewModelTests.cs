@@ -4,6 +4,8 @@ using QuickER.Tests.TestDoubles;
 using QuickER.ViewModels;
 using FluentAssertions;
 
+using QuickER.SqlServer;
+
 namespace QuickER.Tests.ViewModels;
 
 /// <summary><see cref="SqlConnectionDialogViewModel"/> の初期表示・プロファイル選択・保存・削除を検証するテストクラス</summary>

@@ -5,6 +5,8 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 
+using QuickER.SqlServer;
+
 namespace QuickER.Services;
 
 /// <summary>SQL 接続プロファイルを JSON ファイルへ保存・読込するストア</summary>

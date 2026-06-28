@@ -3,7 +3,7 @@ using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using QuickER.Model;
 
-namespace QuickER.Services;
+namespace QuickER.SqlServer;
 
 /// <summary>
 /// スキーマ同期で検出される差分の種別

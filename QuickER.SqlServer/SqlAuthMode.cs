@@ -1,4 +1,4 @@
-namespace QuickER.Services;
+namespace QuickER.SqlServer;
 
 /// <summary>SQL Server への接続認証方式</summary>
 public enum SqlAuthMode

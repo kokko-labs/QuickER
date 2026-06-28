@@ -5,6 +5,7 @@
   </Folder>
   <Project Path="QuickER.Generator/QuickER.Generator.csproj" />
   <Project Path="QuickER.Model/QuickER.Model.csproj" />
+  <Project Path="QuickER.SqlServer/QuickER.SqlServer.csproj" />
   <Project Path="QuickER.Tests/QuickER.Tests.csproj" />
   <Project Path="QuickER/QuickER.csproj" />
 </Solution>

@@ -7,6 +7,8 @@ using QuickER.Model;
 using QuickER.Services;
 using QuickER.UndoRedo;
 
+using QuickER.SqlServer;
+
 namespace QuickER.ViewModels;
 
 /// <summary>

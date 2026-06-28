@@ -3,6 +3,8 @@ using QuickER.Model;
 using QuickER.Services;
 using FluentAssertions;
 
+using QuickER.SqlServer;
+
 namespace QuickER.Tests.Services;
 
 /// <summary><see cref="SchemaDiffService"/> のテーブル・列・外部キー・説明の差分計算を検証するテストクラス</summary>

@@ -7,6 +7,8 @@ using QuickER.Model;
 using QuickER.Services;
 using Microsoft.Win32;
 
+using QuickER.SqlServer;
+
 namespace QuickER.ViewModels;
 
 /// <summary>ER 図のエクスポート形式</summary>

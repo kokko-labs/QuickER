@@ -2,7 +2,7 @@
 using System.Linq;
 using QuickER.Model;
 
-namespace QuickER.Services;
+namespace QuickER.SqlServer;
 
 /// <summary>既存 DB スキーマと現在のダイアグラムを比較して <see cref="SchemaDiff"/> を生成するサービス</summary>
 /// <remarks>リネームは扱わず「同名 = 同一」を前提とする 名称が変われば削除＋追加として検出する</remarks>

@@ -1,8 +1,8 @@
-﻿namespace QuickER.Services;
+﻿namespace QuickER.SqlServer;
 
 /// <summary>SQL Server の識別子整形ユーティリティ</summary>
 /// <remarks>括弧付け・エスケープ・スキーマ分解などを複数の Builder / Importer で共有する</remarks>
-internal static class SqlIdentifier
+public static class SqlIdentifier
 {
     /// <summary>テーブル名を <c>[schema].[name]</c> または <c>[name]</c> 形式へ括弧付けする</summary>
     public static string Bracket(string name)
