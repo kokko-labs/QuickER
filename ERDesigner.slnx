@@ -1,9 +1,0 @@
-<Solution>
-  <Folder Name="/ソリューション項目/">
-    <File Path=".csharpierrc" />
-    <File Path=".editorconfig" />
-  </Folder>
-  <Project Path="ERDesigner.Generator/ERDesigner.Generator.csproj" />
-  <Project Path="ERDesigner.Tests/ERDesigner.Tests.csproj" />
-  <Project Path="ERDesigner/ERDesigner.csproj" />
-</Solution>

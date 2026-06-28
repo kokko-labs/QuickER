@@ -1,0 +1,90 @@
+<UserControl
+  x:Class="QuickER.Views.ConnectionStatusPanel"
+  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+  xmlns:views="clr-namespace:QuickER.Views"
+  x:Name="PanelRoot"
+>
+  <UserControl.Resources>
+    <views:ConnectionHealthToBrushConverter x:Key="HealthToBrush" />
+    <SolidColorBrush x:Key="PanelDivider" Color="#E5E7EB" />
+    <SolidColorBrush x:Key="PanelFieldBorder" Color="#D1D5DB" />
+    <SolidColorBrush x:Key="PanelHeaderText" Color="#374151" />
+
+    <!-- AiChatDialog の SecondaryButton と同等（UserControl は Window リソースを参照できないため自己保持） -->
+    <Style x:Key="PanelRefreshButton" TargetType="Button">
+      <Setter Property="Foreground" Value="{StaticResource PanelHeaderText}" />
+      <Setter Property="Background" Value="White" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="Padding" Value="12,6" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border
+              x:Name="Bd"
+              Background="{TemplateBinding Background}"
+              BorderBrush="{StaticResource PanelFieldBorder}"
+              BorderThickness="1"
+              CornerRadius="8"
+              Padding="{TemplateBinding Padding}"
+            >
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="#EEF2F7" />
+              </Trigger>
+              <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Opacity" Value="0.4" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+  </UserControl.Resources>
+
+  <Border
+    Padding="12,10"
+    Background="#F8FAFC"
+    CornerRadius="8"
+    BorderBrush="{StaticResource PanelDivider}"
+    BorderThickness="1"
+  >
+    <StackPanel>
+      <Grid>
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+        <Ellipse
+          Grid.Column="0"
+          Width="8"
+          Height="8"
+          Margin="0,0,8,0"
+          VerticalAlignment="Center"
+          Fill="{Binding StatusLevel, ElementName=PanelRoot, Converter={StaticResource HealthToBrush}}"
+        />
+        <TextBlock
+          Grid.Column="1"
+          VerticalAlignment="Center"
+          FontWeight="SemiBold"
+          Foreground="{StaticResource PanelHeaderText}"
+          TextWrapping="Wrap"
+          Text="{Binding SummaryText, ElementName=PanelRoot}"
+        />
+        <Button
+          Grid.Column="2"
+          Margin="8,0,0,0"
+          Style="{StaticResource PanelRefreshButton}"
+          Content="再確認"
+          Command="{Binding RefreshCommand, ElementName=PanelRoot}"
+        />
+      </Grid>
+
+      <!-- 状態依存スロット（各タブが固有の操作/案内を差し込む） -->
+      <ContentPresenter Content="{Binding Body, ElementName=PanelRoot}" />
+    </StackPanel>
+  </Border>
+</UserControl>

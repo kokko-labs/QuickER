@@ -1,0 +1,18 @@
+﻿<Application
+  x:Class="QuickER.App"
+  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+  xmlns:local="clr-namespace:QuickER"
+  StartupUri="MainWindow.xaml"
+>
+  <Application.Resources>
+    <ResourceDictionary xmlns:conv="clr-namespace:QuickER.Converters">
+      <SolidColorBrush x:Key="EntityBorderBrush" Color="#8AB4F8" />
+      <SolidColorBrush x:Key="EntityHeaderBrush" Color="#E8F0FE" />
+      <SolidColorBrush x:Key="EntitySelectedBrush" Color="#1A73E8" />
+      <SolidColorBrush x:Key="CanvasBackgroundBrush" Color="#FAFAFA" />
+      <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter" />
+      <conv:NullToVisibilityConverter x:Key="NullToVisibilityConverter" />
+    </ResourceDictionary>
+  </Application.Resources>
+</Application>

@@ -3,7 +3,7 @@
 content = """\
 using Scriban;
 
-namespace ERDesigner.Generator;
+namespace QuickER.Generator;
 
 internal sealed class ScribanCSharpRenderer
 {
@@ -239,7 +239,7 @@ internal sealed class ScribanCSharpRenderer
 """
 
 with open(
-	r"ERDesigner.Generator\ScribanCSharpRenderer.cs", "w", encoding="utf-8"
+	r"QuickER.Generator\ScribanCSharpRenderer.cs", "w", encoding="utf-8"
 ) as f:
 	f.write(content)
 print("done")

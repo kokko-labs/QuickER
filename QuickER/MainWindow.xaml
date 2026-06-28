@@ -1,0 +1,1733 @@
+<Window
+  x:Class="QuickER.MainWindow"
+  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+  xmlns:vm="clr-namespace:QuickER.ViewModels"
+  xmlns:models="clr-namespace:QuickER.Models"
+  xmlns:beh="clr-namespace:QuickER.Behaviors"
+  Title="ER図作成ツール"
+  Height="1000"
+  Width="1800"
+  FontFamily="Segoe UI, Yu Gothic UI, Meiryo"
+  FontSize="13"
+  Background="#F5F7FA"
+>
+  <Window.DataContext>
+    <vm:MainViewModel />
+  </Window.DataContext>
+
+  <Window.InputBindings>
+    <KeyBinding Key="Z" Modifiers="Control" Command="{Binding UndoCommand}" />
+    <KeyBinding Key="Y" Modifiers="Control" Command="{Binding RedoCommand}" />
+    <KeyBinding Key="S" Modifiers="Control" Command="{Binding SaveCommand}" />
+    <KeyBinding Key="N" Modifiers="Control" Command="{Binding NewDiagramCommand}" />
+    <KeyBinding Key="O" Modifiers="Control" Command="{Binding OpenCommand}" />
+    <KeyBinding Key="C" Modifiers="Control" Command="{Binding CopySelectedEntityCommand}" />
+    <KeyBinding Key="V" Modifiers="Control" Command="{Binding PasteCopiedEntityCommand}" />
+    <KeyBinding Key="D" Modifiers="Control" Command="{Binding DuplicateSelectedEntityCommand}" />
+    <KeyBinding Key="Delete" Command="{Binding DeleteSelectedCommand}" />
+  </Window.InputBindings>
+
+  <Window.Resources>
+    <SolidColorBrush x:Key="PanelBg" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="SidebarBg" Color="#FAFBFD" />
+    <SolidColorBrush x:Key="DividerBrush" Color="#E5E7EB" />
+    <SolidColorBrush x:Key="HeaderText" Color="#374151" />
+    <SolidColorBrush x:Key="MutedText" Color="#6B7280" />
+    <SolidColorBrush x:Key="EntityHeaderBlue" Color="#DCEBFF" />
+    <SolidColorBrush x:Key="EntityBorder" Color="#9DB7DD" />
+    <SolidColorBrush x:Key="EntityBorderSelected" Color="#1A73E8" />
+    <SolidColorBrush x:Key="LineBrush" Color="#5F6B7A" />
+    <SolidColorBrush x:Key="LineSelectedBrush" Color="#1A73E8" />
+
+    <Style x:Key="ToolBarLabelButton" TargetType="Button">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="Width" Value="54" />
+      <Setter Property="Padding" Value="4,6" />
+      <Setter Property="Margin" Value="2,0" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border
+              x:Name="Bd"
+              Background="{TemplateBinding Background}"
+              CornerRadius="4"
+              Padding="{TemplateBinding Padding}"
+            >
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="#EEF2F7" />
+              </Trigger>
+              <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Opacity" Value="0.4" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <Style x:Key="ToolBarLabelToggleButton" TargetType="ToggleButton">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="Width" Value="76" />
+      <Setter Property="Padding" Value="4,6" />
+      <Setter Property="Margin" Value="2,0" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="ToggleButton">
+            <Border
+              x:Name="Bd"
+              Background="{TemplateBinding Background}"
+              CornerRadius="4"
+              Padding="{TemplateBinding Padding}"
+            >
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="#EEF2F7" />
+              </Trigger>
+              <Trigger Property="IsChecked" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="#DCE7F5" />
+              </Trigger>
+              <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Opacity" Value="0.4" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <Style x:Key="ToolBarIcon" TargetType="TextBlock">
+      <Setter Property="FontSize" Value="20" />
+      <Setter Property="HorizontalAlignment" Value="Center" />
+      <Setter Property="Foreground" Value="#374151" />
+    </Style>
+    <Style x:Key="ToolBarCaption" TargetType="TextBlock">
+      <Setter Property="FontSize" Value="11" />
+      <Setter Property="HorizontalAlignment" Value="Center" />
+      <Setter Property="Foreground" Value="#374151" />
+      <Setter Property="Margin" Value="0,2,0,0" />
+    </Style>
+
+    <!--  ツールバー区切り線  -->
+    <Style x:Key="ToolBarSeparator" TargetType="Rectangle">
+      <Setter Property="Width" Value="1" />
+      <Setter Property="Fill" Value="#D1D5DB" />
+      <Setter Property="Margin" Value="6,6" />
+    </Style>
+
+    <Style x:Key="ToolboxItemButton" TargetType="Button">
+      <Setter Property="Background" Value="White" />
+      <Setter Property="BorderBrush" Value="#E5E7EB" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="HorizontalContentAlignment" Value="Left" />
+      <Setter Property="Padding" Value="10,9" />
+      <Setter Property="Margin" Value="0,0,0,8" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border
+              x:Name="Bd"
+              Background="{TemplateBinding Background}"
+              BorderBrush="{TemplateBinding BorderBrush}"
+              BorderThickness="{TemplateBinding BorderThickness}"
+              CornerRadius="10"
+              Padding="{TemplateBinding Padding}"
+            >
+              <ContentPresenter />
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="#F8FAFC" />
+                <Setter TargetName="Bd" Property="BorderBrush" Value="#CBD5E1" />
+              </Trigger>
+              <Trigger Property="IsPressed" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="#EEF4FF" />
+                <Setter TargetName="Bd" Property="BorderBrush" Value="#93C5FD" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <Style x:Key="ToolboxSectionCard" TargetType="Border">
+      <Setter Property="Background" Value="White" />
+      <Setter Property="BorderBrush" Value="{StaticResource DividerBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="10" />
+      <Setter Property="Padding" Value="12" />
+      <Setter Property="Margin" Value="0,0,0,12" />
+    </Style>
+
+    <Style x:Key="ToolboxSectionTitle" TargetType="TextBlock">
+      <Setter Property="FontSize" Value="14" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Foreground" Value="{StaticResource HeaderText}" />
+      <Setter Property="Margin" Value="0,0,0,10" />
+    </Style>
+
+    <Style x:Key="ToolboxItemIcon" TargetType="TextBlock">
+      <Setter Property="FontSize" Value="16" />
+      <Setter Property="Foreground" Value="#374151" />
+      <Setter Property="Margin" Value="0,0,10,0" />
+      <Setter Property="VerticalAlignment" Value="Top" />
+    </Style>
+
+    <Style x:Key="ToolboxItemTitle" TargetType="TextBlock">
+      <Setter Property="Foreground" Value="#111827" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+
+    <Style x:Key="PropertyCard" TargetType="Border">
+      <Setter Property="Background" Value="White" />
+      <Setter Property="BorderBrush" Value="{StaticResource DividerBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="10" />
+      <Setter Property="Padding" Value="14" />
+      <Setter Property="Margin" Value="0,0,0,12" />
+    </Style>
+
+    <Style x:Key="PropertyCardTitle" TargetType="TextBlock">
+      <Setter Property="FontSize" Value="14" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Foreground" Value="{StaticResource HeaderText}" />
+      <Setter Property="Margin" Value="0,0,0,12" />
+    </Style>
+
+    <Style x:Key="PropertyFieldLabel" TargetType="TextBlock">
+      <Setter Property="Foreground" Value="{StaticResource MutedText}" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="Margin" Value="0,0,10,0" />
+    </Style>
+
+    <Style x:Key="PropertyHintText" TargetType="TextBlock">
+      <Setter Property="Foreground" Value="{StaticResource MutedText}" />
+      <Setter Property="FontSize" Value="12" />
+      <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+
+    <Style x:Key="PropertyInputTextBox" TargetType="TextBox">
+      <Setter Property="Padding" Value="10,6" />
+      <Setter Property="MinHeight" Value="34" />
+      <Setter Property="Background" Value="White" />
+      <Setter Property="BorderBrush" Value="#CBD5E1" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+    </Style>
+
+    <Style x:Key="PropertyInputComboBox" TargetType="ComboBox">
+      <Setter Property="MinHeight" Value="34" />
+      <Setter Property="Background" Value="White" />
+      <Setter Property="BorderBrush" Value="#CBD5E1" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="Padding" Value="8,4" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+    </Style>
+
+    <Style x:Key="PropertyIconButton" TargetType="Button">
+      <Setter Property="Width" Value="30" />
+      <Setter Property="Height" Value="30" />
+      <Setter Property="Margin" Value="6,0,0,0" />
+      <Setter Property="Background" Value="White" />
+      <Setter Property="BorderBrush" Value="#CBD5E1" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border
+              x:Name="Bd"
+              Background="{TemplateBinding Background}"
+              BorderBrush="{TemplateBinding BorderBrush}"
+              BorderThickness="{TemplateBinding BorderThickness}"
+              CornerRadius="6"
+            >
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="#F8FAFC" />
+              </Trigger>
+              <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Opacity" Value="0.45" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <Style x:Key="PropertyDangerButton" TargetType="Button">
+      <Setter Property="Padding" Value="12,8" />
+      <Setter Property="Background" Value="#FFF1F2" />
+      <Setter Property="BorderBrush" Value="#FBCDD3" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="Foreground" Value="#B42318" />
+      <Setter Property="Cursor" Value="Hand" />
+    </Style>
+
+    <Style x:Key="PropertyDataGridColumnHeader" TargetType="DataGridColumnHeader">
+      <Setter Property="Background" Value="#F8FAFC" />
+      <Setter Property="Foreground" Value="{StaticResource HeaderText}" />
+      <Setter Property="BorderBrush" Value="#E5E7EB" />
+      <Setter Property="BorderThickness" Value="0,0,0,1" />
+      <Setter Property="Padding" Value="8,6" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+
+    <Style x:Key="PropertyDataGridCell" TargetType="DataGridCell">
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="Padding" Value="4" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="Foreground" Value="#111827" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+      <Style.Triggers>
+        <Trigger Property="IsSelected" Value="True">
+          <Setter Property="Background" Value="#EEF4FF" />
+          <Setter Property="Foreground" Value="#111827" />
+        </Trigger>
+      </Style.Triggers>
+    </Style>
+
+    <Style x:Key="PropertyDataGridCheckBox" TargetType="CheckBox">
+      <Setter Property="HorizontalAlignment" Value="Center" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+
+    <Style x:Key="PropertyDataGridTextDisplay" TargetType="TextBlock">
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="Foreground" Value="#111827" />
+      <Setter Property="Margin" Value="4,0" />
+    </Style>
+
+    <Style
+      x:Key="PropertyDataGridTextEditor"
+      TargetType="TextBox"
+      BasedOn="{StaticResource PropertyInputTextBox}"
+    >
+      <Setter Property="MinHeight" Value="0" />
+      <Setter Property="Padding" Value="4,0" />
+      <Setter Property="Margin" Value="0" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+    </Style>
+
+    <Style x:Key="PropertyDataGrid" TargetType="DataGrid">
+      <Setter Property="Background" Value="White" />
+      <Setter Property="BorderBrush" Value="#E5E7EB" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="GridLinesVisibility" Value="Horizontal" />
+      <Setter Property="HorizontalGridLinesBrush" Value="#EEF1F5" />
+      <Setter Property="ColumnHeaderStyle" Value="{StaticResource PropertyDataGridColumnHeader}" />
+      <Setter Property="CellStyle" Value="{StaticResource PropertyDataGridCell}" />
+      <Setter Property="HeadersVisibility" Value="All" />
+      <Setter Property="RowHeaderWidth" Value="22" />
+    </Style>
+
+    <!-- リレーション線本体のスタイル: 選択時に青く太く -->
+    <Style x:Key="RelationLineStyle" TargetType="Line">
+      <Setter Property="Stroke" Value="{StaticResource LineBrush}" />
+      <Setter Property="StrokeThickness" Value="1.6" />
+      <Style.Triggers>
+        <DataTrigger Binding="{Binding IsSelected}" Value="True">
+          <Setter Property="Stroke" Value="{StaticResource LineSelectedBrush}" />
+          <Setter Property="StrokeThickness" Value="2.5" />
+        </DataTrigger>
+      </Style.Triggers>
+    </Style>
+
+    <!-- マーカー共通スタイル（選択時は線と同様に青へ DataContext は MarkerKind enum のため親 ContentControl 経由で参照） -->
+    <Style x:Key="MarkerStrokeStyle" TargetType="Shape">
+      <Setter Property="Stroke" Value="{StaticResource LineBrush}" />
+      <Setter Property="StrokeThickness" Value="2.2" />
+      <Setter Property="Visibility" Value="Collapsed" />
+      <Style.Triggers>
+        <DataTrigger
+          Binding="{Binding DataContext.IsSelected, RelativeSource={RelativeSource AncestorType=ContentControl}}"
+          Value="True"
+        >
+          <Setter Property="Stroke" Value="{StaticResource LineSelectedBrush}" />
+        </DataTrigger>
+      </Style.Triggers>
+    </Style>
+
+    <!-- リレーション端点マーカー (One: 縦棒, Many: 鳥の足) のテンプレート -->
+    <!-- ローカル X = 24 がエンティティ境界に一致するよう配置・回転され、鳥の足の先端が枠に接地する -->
+    <DataTemplate x:Key="EndpointMarkerTemplate">
+      <!-- DataContext = MarkerKind enum -->
+      <Grid Width="24" Height="24" RenderTransformOrigin="0.5,0.5">
+        <!-- One: |─ (縦棒) -->
+        <Line X1="12" Y1="3" X2="12" Y2="21">
+          <Line.Style>
+            <Style TargetType="Line" BasedOn="{StaticResource MarkerStrokeStyle}">
+              <Style.Triggers>
+                <DataTrigger Binding="{Binding}" Value="One">
+                  <Setter Property="Visibility" Value="Visible" />
+                </DataTrigger>
+              </Style.Triggers>
+            </Style>
+          </Line.Style>
+        </Line>
+        <!-- Many: 鳥の足 (先端 X=24 がエンティティ枠に接地) -->
+        <Path Data="M 6,12 L 24,3 M 6,12 L 24,12 M 6,12 L 24,21">
+          <Path.Style>
+            <Style TargetType="Path" BasedOn="{StaticResource MarkerStrokeStyle}">
+              <Style.Triggers>
+                <DataTrigger Binding="{Binding}" Value="Many">
+                  <Setter Property="Visibility" Value="Visible" />
+                </DataTrigger>
+              </Style.Triggers>
+            </Style>
+          </Path.Style>
+        </Path>
+      </Grid>
+    </DataTemplate>
+  </Window.Resources>
+
+  <DockPanel>
+    <!-- 上部: ツールバー -->
+    <Border
+      DockPanel.Dock="Top"
+      Background="{StaticResource PanelBg}"
+      BorderBrush="{StaticResource DividerBrush}"
+      BorderThickness="0,0,0,1"
+    >
+      <StackPanel Orientation="Horizontal" Margin="6,4">
+        <Button
+          Style="{StaticResource ToolBarLabelButton}"
+          Command="{Binding NewDiagramCommand}"
+          ToolTip="新規 (Ctrl+N)"
+        >
+          <StackPanel>
+            <TextBlock Style="{StaticResource ToolBarIcon}" Text="🗒" />
+            <TextBlock Style="{StaticResource ToolBarCaption}" Text="新規" />
+          </StackPanel>
+        </Button>
+        <Button
+          Style="{StaticResource ToolBarLabelButton}"
+          Command="{Binding OpenCommand}"
+          ToolTip="開く (Ctrl+O)"
+        >
+          <StackPanel>
+            <TextBlock Style="{StaticResource ToolBarIcon}" Text="📂" />
+            <TextBlock Style="{StaticResource ToolBarCaption}" Text="開く" />
+          </StackPanel>
+        </Button>
+        <Button
+          Style="{StaticResource ToolBarLabelButton}"
+          Command="{Binding SaveCommand}"
+          ToolTip="保存 (Ctrl+S)"
+        >
+          <StackPanel>
+            <TextBlock Style="{StaticResource ToolBarIcon}" Text="💾" />
+            <TextBlock Style="{StaticResource ToolBarCaption}" Text="保存" />
+          </StackPanel>
+        </Button>
+        <Rectangle Style="{StaticResource ToolBarSeparator}" />
+        <Button
+          Style="{StaticResource ToolBarLabelButton}"
+          Command="{Binding UndoCommand}"
+          IsEnabled="{Binding UndoRedo.CanUndo}"
+          ToolTip="元に戻す (Ctrl+Z)"
+        >
+          <StackPanel>
+            <TextBlock Style="{StaticResource ToolBarIcon}" Text="↶" />
+            <TextBlock Style="{StaticResource ToolBarCaption}" Text="元に戻す" />
+          </StackPanel>
+        </Button>
+        <Button
+          Style="{StaticResource ToolBarLabelButton}"
+          Command="{Binding RedoCommand}"
+          IsEnabled="{Binding UndoRedo.CanRedo}"
+          ToolTip="やり直す (Ctrl+Y)"
+        >
+          <StackPanel>
+            <TextBlock Style="{StaticResource ToolBarIcon}" Text="↷" />
+            <TextBlock Style="{StaticResource ToolBarCaption}" Text="やり直す" />
+          </StackPanel>
+        </Button>
+        <Rectangle Style="{StaticResource ToolBarSeparator}" />
+        <Button
+          Style="{StaticResource ToolBarLabelButton}"
+          Command="{Binding DuplicateSelectedEntityCommand}"
+          ToolTip="複製 (Ctrl+D)"
+        >
+          <StackPanel>
+            <TextBlock Style="{StaticResource ToolBarIcon}" Text="❏" />
+            <TextBlock Style="{StaticResource ToolBarCaption}" Text="複製" />
+          </StackPanel>
+        </Button>
+        <Rectangle Style="{StaticResource ToolBarSeparator}" />
+        <ToggleButton
+          Style="{StaticResource ToolBarLabelToggleButton}"
+          IsChecked="{Binding ShowColumnDescriptionsInDiagram, Mode=TwoWay}"
+          ToolTip="ER 図のカラム行に「説明」を表示"
+        >
+          <StackPanel>
+            <TextBlock Style="{StaticResource ToolBarIcon}" Text="💬" />
+            <TextBlock Style="{StaticResource ToolBarCaption}" Text="説明表示" />
+          </StackPanel>
+        </ToggleButton>
+        <ToggleButton
+          Style="{StaticResource ToolBarLabelToggleButton}"
+          IsChecked="{Binding ShowNullabilityInDiagram, Mode=TwoWay}"
+          ToolTip="ER 図のカラム行に NULL 許容を表示"
+        >
+          <StackPanel>
+            <TextBlock Style="{StaticResource ToolBarIcon}" Text="∅" />
+            <TextBlock Style="{StaticResource ToolBarCaption}" Text="NULL表示" />
+          </StackPanel>
+        </ToggleButton>
+        <Rectangle Style="{StaticResource ToolBarSeparator}" />
+        <Button
+          Style="{StaticResource ToolBarLabelButton}"
+          Command="{Binding AutoLayoutGridCommand}"
+          ToolTip="格子状に自動整列"
+        >
+          <StackPanel>
+            <TextBlock Style="{StaticResource ToolBarIcon}" Text="▦" />
+            <TextBlock Style="{StaticResource ToolBarCaption}" Text="整列(格子)" />
+          </StackPanel>
+        </Button>
+        <Button
+          Style="{StaticResource ToolBarLabelButton}"
+          Command="{Binding AutoLayoutTreeCommand}"
+          ToolTip="ツリー状に自動整列"
+        >
+          <StackPanel>
+            <TextBlock Style="{StaticResource ToolBarIcon}" Text="⌬" />
+            <TextBlock Style="{StaticResource ToolBarCaption}" Text="整列(木)" />
+          </StackPanel>
+        </Button>
+        <Button
+          Style="{StaticResource ToolBarLabelButton}"
+          Command="{Binding AutoLayoutForceCommand}"
+          ToolTip="リレーションの繋がりで大まかな配置を決めてから格子に揃えて整列"
+        >
+          <StackPanel>
+            <TextBlock Style="{StaticResource ToolBarIcon}" Text="✺" />
+            <TextBlock Style="{StaticResource ToolBarCaption}" Text="整列(自由)" />
+          </StackPanel>
+        </Button>
+        <Button
+          Style="{StaticResource ToolBarLabelButton}"
+          Command="{Binding AutoFitEntityWidthsCommand}"
+          ToolTip="カラム名と型が重ならない幅に自動調整"
+        >
+          <StackPanel>
+            <TextBlock Style="{StaticResource ToolBarIcon}" Text="↔" />
+            <TextBlock Style="{StaticResource ToolBarCaption}" Text="幅自動" />
+          </StackPanel>
+        </Button>
+        <Rectangle Style="{StaticResource ToolBarSeparator}" />
+        <Button
+          Style="{StaticResource ToolBarLabelButton}"
+          Command="{Binding ExportDiagramCommand}"
+          CommandParameter="{Binding ElementName=DiagramCanvas}"
+          ToolTip="PNG / SVG / DDL / Mermaid / DBML / 定義書を選択して出力"
+        >
+          <StackPanel>
+            <TextBlock Style="{StaticResource ToolBarIcon}" Text="📤" />
+            <TextBlock Style="{StaticResource ToolBarCaption}" Text="出力" />
+          </StackPanel>
+        </Button>
+        <Button
+          Style="{StaticResource ToolBarLabelButton}"
+          Command="{Binding ImportDiagramCommand}"
+          ToolTip="Mermaid / DBML / 定義書を選択して取り込み"
+        >
+          <StackPanel>
+            <TextBlock Style="{StaticResource ToolBarIcon}" Text="📥" />
+            <TextBlock Style="{StaticResource ToolBarCaption}" Text="取込" />
+          </StackPanel>
+        </Button>
+        <Rectangle Style="{StaticResource ToolBarSeparator}" />
+        <Button
+          Style="{StaticResource ToolBarLabelButton}"
+          Command="{Binding ImportFromSqlServerCommand}"
+          ToolTip="SQL Server からスキーマを取り込み"
+        >
+          <StackPanel>
+            <TextBlock Style="{StaticResource ToolBarIcon}" Text="🛢" />
+            <TextBlock Style="{StaticResource ToolBarCaption}" Text="DB取込" />
+          </StackPanel>
+        </Button>
+        <Button
+          Style="{StaticResource ToolBarLabelButton}"
+          Command="{Binding SyncToSqlServerCommand}"
+          ToolTip="現在のダイアグラムを既存 DB に書き戻し (差分 ALTER 実行)"
+        >
+          <StackPanel>
+            <TextBlock Style="{StaticResource ToolBarIcon}" Text="⇪" />
+            <TextBlock Style="{StaticResource ToolBarCaption}" Text="DB同期" />
+          </StackPanel>
+        </Button>
+        <Rectangle Style="{StaticResource ToolBarSeparator}" />
+        <Button
+          Style="{StaticResource ToolBarLabelButton}"
+          Command="{Binding OpenAiChatCommand}"
+          ToolTip="AI チャットで ER 図を作成・編集（API キー / Codex 接続）"
+        >
+          <StackPanel>
+            <TextBlock Style="{StaticResource ToolBarIcon}" Text="🤖" />
+            <TextBlock Style="{StaticResource ToolBarCaption}" Text="AIチャット" />
+          </StackPanel>
+        </Button>
+        <Rectangle Style="{StaticResource ToolBarSeparator}" />
+        <Button
+          Style="{StaticResource ToolBarLabelButton}"
+          Command="{Binding GenerateCSharpCodeCommand}"
+          ToolTip="現在の ER 図から C# Entity / BindingModel を生成"
+        >
+          <StackPanel>
+            <TextBlock Style="{StaticResource ToolBarIcon}" Text="⌘" />
+            <TextBlock Style="{StaticResource ToolBarCaption}" Text="C#生成" />
+          </StackPanel>
+        </Button>
+      </StackPanel>
+    </Border>
+
+    <!-- 下部: ステータスバー -->
+    <Border
+      DockPanel.Dock="Bottom"
+      Background="{StaticResource PanelBg}"
+      BorderBrush="{StaticResource DividerBrush}"
+      BorderThickness="0,1,0,0"
+      Padding="10,4"
+    >
+      <DockPanel>
+        <TextBlock DockPanel.Dock="Left" Text="準備完了" Foreground="{StaticResource MutedText}" />
+        <TextBlock
+          DockPanel.Dock="Right"
+          HorizontalAlignment="Right"
+          Foreground="{StaticResource MutedText}"
+        >
+          <Run Text="エンティティ:" />
+          <Run Text="{Binding Entities.Count, Mode=OneWay}" />
+          <Run Text="   リレーション:" />
+          <Run Text="{Binding Relationships.Count, Mode=OneWay}" />
+        </TextBlock>
+      </DockPanel>
+    </Border>
+
+    <Grid>
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="200" />
+        <ColumnDefinition Width="*" />
+        <ColumnDefinition Width="5" />
+        <ColumnDefinition Width="560" MinWidth="300" />
+      </Grid.ColumnDefinitions>
+
+      <!-- GridSplitter: ER図とプロパティパネルの境界ドラッグ -->
+      <GridSplitter
+        Grid.Column="2"
+        Width="5"
+        HorizontalAlignment="Stretch"
+        Background="{StaticResource DividerBrush}"
+        Cursor="SizeWE"
+      />
+
+      <!-- 左: ツールボックス -->
+      <Border
+        Grid.Column="0"
+        Background="{StaticResource SidebarBg}"
+        BorderBrush="{StaticResource DividerBrush}"
+        BorderThickness="0,0,1,0"
+      >
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
+          <StackPanel Margin="12,10,12,12">
+            <TextBlock
+              Text="ツールボックス"
+              FontWeight="Bold"
+              Foreground="{StaticResource HeaderText}"
+              Margin="0,0,0,10"
+            />
+
+            <Border Style="{StaticResource ToolboxSectionCard}">
+              <StackPanel>
+                <TextBlock Text="エンティティ" Style="{StaticResource ToolboxSectionTitle}" />
+                <Button
+                  Style="{StaticResource ToolboxItemButton}"
+                  Command="{Binding AddEntityCommand}"
+                  ToolTip="新しいテーブルをキャンバスに追加します"
+                >
+                  <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="▭" Style="{StaticResource ToolboxItemIcon}" />
+                    <TextBlock
+                      Text="エンティティを追加"
+                      Style="{StaticResource ToolboxItemTitle}"
+                      VerticalAlignment="Center"
+                    />
+                  </StackPanel>
+                </Button>
+                <Button
+                  Style="{StaticResource ToolboxItemButton}"
+                  Command="{Binding RemoveSelectedEntityCommand}"
+                  ToolTip="選択中のエンティティをダイアグラムから削除します"
+                >
+                  <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="🗑" Style="{StaticResource ToolboxItemIcon}" />
+                    <TextBlock
+                      Text="エンティティ削除"
+                      Style="{StaticResource ToolboxItemTitle}"
+                      VerticalAlignment="Center"
+                    />
+                  </StackPanel>
+                </Button>
+              </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource ToolboxSectionCard}">
+              <StackPanel>
+                <TextBlock Text="リレーションシップ" Style="{StaticResource ToolboxSectionTitle}" />
+                <Button
+                  Style="{StaticResource ToolboxItemButton}"
+                  Command="{Binding StartAddOneToOneCommand}"
+                  ToolTip="1対1 のリレーション作成モードに切り替えます"
+                >
+                  <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="│─│" Style="{StaticResource ToolboxItemIcon}" />
+                    <TextBlock
+                      Text="1対1"
+                      Style="{StaticResource ToolboxItemTitle}"
+                      VerticalAlignment="Center"
+                    />
+                  </StackPanel>
+                </Button>
+                <Button
+                  Style="{StaticResource ToolboxItemButton}"
+                  Command="{Binding StartAddOneToManyCommand}"
+                  ToolTip="親子関係を表す 1対多 リレーションを作成できます"
+                >
+                  <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="│─≪" Style="{StaticResource ToolboxItemIcon}" />
+                    <TextBlock
+                      Text="1対多"
+                      Style="{StaticResource ToolboxItemTitle}"
+                      VerticalAlignment="Center"
+                    />
+                  </StackPanel>
+                </Button>
+                <Button
+                  Style="{StaticResource ToolboxItemButton}"
+                  Command="{Binding StartAddManyToManyCommand}"
+                  ToolTip="中間テーブルを想定した多対多リレーションを作成します"
+                >
+                  <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="≫─≪" Style="{StaticResource ToolboxItemIcon}" />
+                    <TextBlock
+                      Text="多対多"
+                      Style="{StaticResource ToolboxItemTitle}"
+                      VerticalAlignment="Center"
+                    />
+                  </StackPanel>
+                </Button>
+                <Button
+                  Style="{StaticResource ToolboxItemButton}"
+                  Command="{Binding RemoveSelectedRelationshipCommand}"
+                  ToolTip="選択中のリレーションを削除します"
+                >
+                  <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="🗑" Style="{StaticResource ToolboxItemIcon}" />
+                    <TextBlock
+                      Text="リレーション削除"
+                      Style="{StaticResource ToolboxItemTitle}"
+                      VerticalAlignment="Center"
+                    />
+                  </StackPanel>
+                </Button>
+              </StackPanel>
+            </Border>
+
+            <Border
+              Margin="0,12,0,0"
+              Padding="8"
+              CornerRadius="4"
+              Background="#FFF7E0"
+              Visibility="{Binding IsRelationshipMode, Converter={StaticResource BoolToVisibilityConverter}}"
+            >
+              <StackPanel>
+                <TextBlock
+                  TextWrapping="Wrap"
+                  Foreground="#7A5F00"
+                  FontSize="11"
+                  Text="リレーション作成中: 2つのエンティティを順番にクリックしてください。同じエンティティを2回クリックすると自己参照リレーションを作成できます。"
+                />
+                <Button
+                  Margin="0,6,0,0"
+                  Content="キャンセル"
+                  Command="{Binding CancelRelationshipModeCommand}"
+                />
+              </StackPanel>
+            </Border>
+          </StackPanel>
+        </ScrollViewer>
+      </Border>
+
+      <!-- 中央: キャンバス -->
+      <Border Grid.Column="1" Background="#F2F4F8">
+        <Border.Resources>
+          <DrawingBrush
+            x:Key="GridBrush"
+            TileMode="Tile"
+            Viewport="0,0,20,20"
+            ViewportUnits="Absolute"
+          >
+            <DrawingBrush.Drawing>
+              <GeometryDrawing>
+                <GeometryDrawing.Pen>
+                  <Pen Brush="#E2E6EC" Thickness="1" />
+                </GeometryDrawing.Pen>
+                <GeometryDrawing.Geometry>
+                  <GeometryGroup>
+                    <LineGeometry StartPoint="0,0" EndPoint="20,0" />
+                    <LineGeometry StartPoint="0,0" EndPoint="0,20" />
+                  </GeometryGroup>
+                </GeometryDrawing.Geometry>
+              </GeometryDrawing>
+            </DrawingBrush.Drawing>
+          </DrawingBrush>
+        </Border.Resources>
+
+        <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+          <Grid
+            x:Name="DiagramCanvas"
+            Width="{Binding CanvasWidth}"
+            Height="{Binding CanvasHeight}"
+            Background="{StaticResource GridBrush}"
+          >
+            <Grid.InputBindings>
+              <MouseBinding MouseAction="LeftClick" Command="{Binding CanvasClickCommand}" />
+            </Grid.InputBindings>
+
+            <!-- リレーションレイヤ -->
+            <ItemsControl ItemsSource="{Binding Relationships}">
+              <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate>
+                  <Canvas IsItemsHost="True" />
+                </ItemsPanelTemplate>
+              </ItemsControl.ItemsPanel>
+              <ItemsControl.ItemTemplate>
+                <DataTemplate DataType="{x:Type vm:RelationshipViewModel}">
+                  <Canvas>
+                    <!-- 線本体 (太いヒット領域 + 見た目) -->
+                    <Line
+                      X1="{Binding X1}"
+                      Y1="{Binding Y1}"
+                      X2="{Binding X2}"
+                      Y2="{Binding Y2}"
+                      Stroke="Transparent"
+                      StrokeThickness="14"
+                      Cursor="Hand"
+                    >
+                      <Line.Style>
+                        <Style TargetType="Line">
+                          <Setter Property="Visibility" Value="Visible" />
+                          <Style.Triggers>
+                            <DataTrigger Binding="{Binding ShowSelfLoop}" Value="True">
+                              <Setter Property="Visibility" Value="Collapsed" />
+                            </DataTrigger>
+                          </Style.Triggers>
+                        </Style>
+                      </Line.Style>
+                      <Line.InputBindings>
+                        <MouseBinding
+                          MouseAction="LeftClick"
+                          Command="{Binding DataContext.RelationshipClickCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                          CommandParameter="{Binding}"
+                        />
+                      </Line.InputBindings>
+                    </Line>
+                    <Line
+                      X1="{Binding X1}"
+                      Y1="{Binding Y1}"
+                      X2="{Binding X2}"
+                      Y2="{Binding Y2}"
+                      IsHitTestVisible="False"
+                    >
+                      <Line.Style>
+                        <Style TargetType="Line" BasedOn="{StaticResource RelationLineStyle}">
+                          <Setter Property="Visibility" Value="Visible" />
+                          <Style.Triggers>
+                            <DataTrigger Binding="{Binding ShowSelfLoop}" Value="True">
+                              <Setter Property="Visibility" Value="Collapsed" />
+                            </DataTrigger>
+                          </Style.Triggers>
+                        </Style>
+                      </Line.Style>
+                    </Line>
+
+                    <Ellipse
+                      Canvas.Left="{Binding SelfLoopLeft}"
+                      Canvas.Top="{Binding SelfLoopTop}"
+                      Width="{Binding SelfLoopWidth}"
+                      Height="{Binding SelfLoopHeight}"
+                      Stroke="Transparent"
+                      StrokeThickness="14"
+                      Cursor="Hand"
+                    >
+                      <Ellipse.Style>
+                        <Style TargetType="Ellipse">
+                          <Setter Property="Visibility" Value="Collapsed" />
+                          <Style.Triggers>
+                            <DataTrigger Binding="{Binding ShowSelfLoop}" Value="True">
+                              <Setter Property="Visibility" Value="Visible" />
+                            </DataTrigger>
+                          </Style.Triggers>
+                        </Style>
+                      </Ellipse.Style>
+                      <Ellipse.InputBindings>
+                        <MouseBinding
+                          MouseAction="LeftClick"
+                          Command="{Binding DataContext.RelationshipClickCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                          CommandParameter="{Binding}"
+                        />
+                      </Ellipse.InputBindings>
+                    </Ellipse>
+                    <Ellipse
+                      Canvas.Left="{Binding SelfLoopLeft}"
+                      Canvas.Top="{Binding SelfLoopTop}"
+                      Width="{Binding SelfLoopWidth}"
+                      Height="{Binding SelfLoopHeight}"
+                      Fill="Transparent"
+                      IsHitTestVisible="False"
+                    >
+                      <Ellipse.Style>
+                        <Style TargetType="Ellipse">
+                          <Setter Property="Visibility" Value="Collapsed" />
+                          <Setter Property="Stroke" Value="{StaticResource LineBrush}" />
+                          <Setter Property="StrokeThickness" Value="1.6" />
+                          <Style.Triggers>
+                            <DataTrigger Binding="{Binding ShowSelfLoop}" Value="True">
+                              <Setter Property="Visibility" Value="Visible" />
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                              <Setter
+                                Property="Stroke"
+                                Value="{StaticResource LineSelectedBrush}"
+                              />
+                              <Setter Property="StrokeThickness" Value="2.5" />
+                            </DataTrigger>
+                          </Style.Triggers>
+                        </Style>
+                      </Ellipse.Style>
+                    </Ellipse>
+
+                    <!-- 起点マーカー -->
+                    <ContentControl
+                      Canvas.Left="{Binding SourceMarkerLeft}"
+                      Canvas.Top="{Binding SourceMarkerTop}"
+                      Width="24"
+                      Height="24"
+                      Content="{Binding SourceMarker}"
+                      ContentTemplate="{StaticResource EndpointMarkerTemplate}"
+                      IsHitTestVisible="False"
+                    >
+                      <ContentControl.Style>
+                        <Style TargetType="ContentControl">
+                          <Setter Property="Visibility" Value="Visible" />
+                          <Style.Triggers>
+                            <DataTrigger Binding="{Binding ShowEndpointMarkers}" Value="False">
+                              <Setter Property="Visibility" Value="Collapsed" />
+                            </DataTrigger>
+                          </Style.Triggers>
+                        </Style>
+                      </ContentControl.Style>
+                      <ContentControl.RenderTransform>
+                        <RotateTransform
+                          Angle="{Binding SourceMarkerAngle}"
+                          CenterX="12"
+                          CenterY="12"
+                        />
+                      </ContentControl.RenderTransform>
+                    </ContentControl>
+
+                    <!-- 終点マーカー -->
+                    <ContentControl
+                      Canvas.Left="{Binding TargetMarkerLeft}"
+                      Canvas.Top="{Binding TargetMarkerTop}"
+                      Width="24"
+                      Height="24"
+                      Content="{Binding TargetMarker}"
+                      ContentTemplate="{StaticResource EndpointMarkerTemplate}"
+                      IsHitTestVisible="False"
+                    >
+                      <ContentControl.Style>
+                        <Style TargetType="ContentControl">
+                          <Setter Property="Visibility" Value="Visible" />
+                          <Style.Triggers>
+                            <DataTrigger Binding="{Binding ShowEndpointMarkers}" Value="False">
+                              <Setter Property="Visibility" Value="Collapsed" />
+                            </DataTrigger>
+                          </Style.Triggers>
+                        </Style>
+                      </ContentControl.Style>
+                      <ContentControl.RenderTransform>
+                        <RotateTransform
+                          Angle="{Binding TargetMarkerAngle}"
+                          CenterX="12"
+                          CenterY="12"
+                        />
+                      </ContentControl.RenderTransform>
+                    </ContentControl>
+
+                    <!-- ラベル -->
+                    <Border
+                      CornerRadius="3"
+                      Padding="4,1"
+                      Background="White"
+                      BorderBrush="#9AA0A6"
+                      BorderThickness="1"
+                      Canvas.Left="{Binding LabelX}"
+                      Canvas.Top="{Binding LabelY}"
+                      Cursor="Hand"
+                    >
+                      <Border.RenderTransform>
+                        <TranslateTransform X="-15" Y="-9" />
+                      </Border.RenderTransform>
+                      <Border.InputBindings>
+                        <MouseBinding
+                          MouseAction="LeftClick"
+                          Command="{Binding DataContext.RelationshipClickCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                          CommandParameter="{Binding}"
+                        />
+                      </Border.InputBindings>
+                      <TextBlock Text="{Binding Label}" FontSize="10" Foreground="#374151" />
+                    </Border>
+                  </Canvas>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+            <!-- エンティティレイヤ -->
+            <ItemsControl ItemsSource="{Binding Entities}">
+              <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate>
+                  <Canvas IsItemsHost="True" />
+                </ItemsPanelTemplate>
+              </ItemsControl.ItemsPanel>
+              <ItemsControl.ItemContainerStyle>
+                <Style TargetType="ContentPresenter">
+                  <Setter Property="Canvas.Left" Value="{Binding X}" />
+                  <Setter Property="Canvas.Top" Value="{Binding Y}" />
+                </Style>
+              </ItemsControl.ItemContainerStyle>
+              <ItemsControl.ItemTemplate>
+                <DataTemplate DataType="{x:Type vm:EntityViewModel}">
+                  <Border
+                    Width="{Binding Width}"
+                    Background="White"
+                    CornerRadius="6"
+                    beh:DragBehavior.IsEnabled="True"
+                    beh:DragBehavior.UndoRedoManager="{Binding DataContext.UndoRedo, RelativeSource={RelativeSource AncestorType=Window}}"
+                  >
+                    <Border.Effect>
+                      <DropShadowEffect
+                        Color="#88AABB"
+                        BlurRadius="6"
+                        ShadowDepth="1"
+                        Opacity="0.35"
+                      />
+                    </Border.Effect>
+                    <Border.Style>
+                      <Style TargetType="Border">
+                        <Setter Property="BorderBrush" Value="{StaticResource EntityBorder}" />
+                        <Setter Property="BorderThickness" Value="1" />
+                        <Style.Triggers>
+                          <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                            <Setter
+                              Property="BorderBrush"
+                              Value="{StaticResource EntityBorderSelected}"
+                            />
+                            <Setter Property="BorderThickness" Value="2" />
+                          </DataTrigger>
+                        </Style.Triggers>
+                      </Style>
+                    </Border.Style>
+                    <StackPanel>
+                      <Border
+                        Background="{Binding TitleBackgroundColor}"
+                        CornerRadius="6,6,0,0"
+                        Padding="10,6"
+                      >
+                        <StackPanel>
+                          <TextBlock
+                            FontWeight="SemiBold"
+                            Foreground="#1F2937"
+                            Text="{Binding TableName}"
+                          />
+                          <TextBlock
+                            Text="{Binding Description}"
+                            Foreground="#6B7280"
+                            FontStyle="Italic"
+                            FontSize="11"
+                            TextWrapping="Wrap"
+                          >
+                            <TextBlock.Style>
+                              <Style TargetType="TextBlock">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers>
+                                  <MultiDataTrigger>
+                                    <MultiDataTrigger.Conditions>
+                                      <Condition
+                                        Binding="{Binding DataContext.ShowColumnDescriptionsInDiagram, RelativeSource={RelativeSource AncestorType=Window}}"
+                                        Value="True"
+                                      />
+                                    </MultiDataTrigger.Conditions>
+                                    <Setter Property="Visibility" Value="Visible" />
+                                  </MultiDataTrigger>
+                                  <DataTrigger Binding="{Binding Description}" Value="">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                  </DataTrigger>
+                                  <DataTrigger Binding="{Binding Description}" Value="{x:Null}">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                  </DataTrigger>
+                                </Style.Triggers>
+                              </Style>
+                            </TextBlock.Style>
+                          </TextBlock>
+                        </StackPanel>
+                      </Border>
+                      <ItemsControl ItemsSource="{Binding Columns}" Margin="6,4,6,6">
+                        <ItemsControl.ItemTemplate>
+                          <DataTemplate>
+                            <StackPanel Margin="0,2">
+                              <Grid>
+                                <Grid.ColumnDefinitions>
+                                  <ColumnDefinition Width="34" />
+                                  <ColumnDefinition Width="*" />
+                                  <ColumnDefinition Width="Auto" />
+                                  <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" FontWeight="Bold">
+                                  <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                      <Setter Property="Text" Value="" />
+                                      <Setter Property="Foreground" Value="#374151" />
+                                      <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsPrimaryKey}" Value="True">
+                                          <Setter Property="Text" Value="PK" />
+                                          <Setter Property="Foreground" Value="#D93025" />
+                                        </DataTrigger>
+                                        <MultiDataTrigger>
+                                          <MultiDataTrigger.Conditions>
+                                            <Condition
+                                              Binding="{Binding IsPrimaryKey}"
+                                              Value="False"
+                                            />
+                                            <Condition
+                                              Binding="{Binding IsForeignKey}"
+                                              Value="True"
+                                            />
+                                          </MultiDataTrigger.Conditions>
+                                          <Setter Property="Text" Value="FK" />
+                                          <Setter Property="Foreground" Value="#1A73E8" />
+                                        </MultiDataTrigger>
+                                      </Style.Triggers>
+                                    </Style>
+                                  </TextBlock.Style>
+                                </TextBlock>
+                                <TextBlock
+                                  Grid.Column="1"
+                                  Text="{Binding Name}"
+                                  Foreground="#1F2937"
+                                />
+                                <TextBlock Grid.Column="2" Margin="0,0,8,0" Foreground="#6B7280">
+                                  <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                      <Setter Property="Visibility" Value="Collapsed" />
+                                      <Setter Property="Text" Value="" />
+                                      <Style.Triggers>
+                                        <DataTrigger
+                                          Binding="{Binding DataContext.ShowNullabilityInDiagram, RelativeSource={RelativeSource AncestorType=Window}}"
+                                          Value="True"
+                                        >
+                                          <Setter Property="Visibility" Value="Visible" />
+                                        </DataTrigger>
+                                        <MultiDataTrigger>
+                                          <MultiDataTrigger.Conditions>
+                                            <Condition
+                                              Binding="{Binding DataContext.ShowNullabilityInDiagram, RelativeSource={RelativeSource AncestorType=Window}}"
+                                              Value="True"
+                                            />
+                                            <Condition
+                                              Binding="{Binding IsNullable}"
+                                              Value="True"
+                                            />
+                                          </MultiDataTrigger.Conditions>
+                                          <Setter Property="Text" Value="NULL" />
+                                        </MultiDataTrigger>
+                                        <MultiDataTrigger>
+                                          <MultiDataTrigger.Conditions>
+                                            <Condition
+                                              Binding="{Binding DataContext.ShowNullabilityInDiagram, RelativeSource={RelativeSource AncestorType=Window}}"
+                                              Value="True"
+                                            />
+                                            <Condition
+                                              Binding="{Binding IsNullable}"
+                                              Value="False"
+                                            />
+                                          </MultiDataTrigger.Conditions>
+                                          <Setter Property="Text" Value="NOT NULL" />
+                                        </MultiDataTrigger>
+                                      </Style.Triggers>
+                                    </Style>
+                                  </TextBlock.Style>
+                                </TextBlock>
+                                <TextBlock
+                                  Grid.Column="3"
+                                  Text="{Binding DataType}"
+                                  Foreground="#6B7280"
+                                />
+                              </Grid>
+                              <TextBlock
+                                Text="{Binding Description}"
+                                Foreground="#6B7280"
+                                FontStyle="Italic"
+                                FontSize="11"
+                                Margin="34,0,0,0"
+                                TextWrapping="Wrap"
+                              >
+                                <TextBlock.Style>
+                                  <Style TargetType="TextBlock">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                    <Style.Triggers>
+                                      <MultiDataTrigger>
+                                        <MultiDataTrigger.Conditions>
+                                          <Condition
+                                            Binding="{Binding DataContext.ShowColumnDescriptionsInDiagram, RelativeSource={RelativeSource AncestorType=Window}}"
+                                            Value="True"
+                                          />
+                                        </MultiDataTrigger.Conditions>
+                                        <Setter Property="Visibility" Value="Visible" />
+                                      </MultiDataTrigger>
+                                      <DataTrigger Binding="{Binding Description}" Value="">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                      </DataTrigger>
+                                      <DataTrigger Binding="{Binding Description}" Value="{x:Null}">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                      </DataTrigger>
+                                    </Style.Triggers>
+                                  </Style>
+                                </TextBlock.Style>
+                              </TextBlock>
+                            </StackPanel>
+                          </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                      </ItemsControl>
+                    </StackPanel>
+                  </Border>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </Grid>
+        </ScrollViewer>
+      </Border>
+
+      <!-- 右: プロパティパネル -->
+      <Border
+        Grid.Column="3"
+        Background="{StaticResource SidebarBg}"
+        BorderBrush="{StaticResource DividerBrush}"
+        BorderThickness="1,0,0,0"
+      >
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
+          <StackPanel Margin="12,10,12,12">
+            <TextBlock
+              Text="プロパティ"
+              FontWeight="Bold"
+              Foreground="{StaticResource HeaderText}"
+              Margin="0,0,0,10"
+            />
+
+            <Border>
+              <Border.Style>
+                <Style TargetType="Border" BasedOn="{StaticResource PropertyCard}">
+                  <Setter Property="Visibility" Value="Collapsed" />
+                  <Style.Triggers>
+                    <MultiDataTrigger>
+                      <MultiDataTrigger.Conditions>
+                        <Condition Binding="{Binding SelectedEntity}" Value="{x:Null}" />
+                        <Condition Binding="{Binding SelectedRelationship}" Value="{x:Null}" />
+                      </MultiDataTrigger.Conditions>
+                      <Setter Property="Visibility" Value="Visible" />
+                    </MultiDataTrigger>
+                  </Style.Triggers>
+                </Style>
+              </Border.Style>
+              <TextBlock
+                Style="{StaticResource PropertyHintText}"
+                Text="エンティティまたはリレーションを選択すると、ここで詳細を編集できます。"
+              />
+            </Border>
+
+            <StackPanel Visibility="{Binding SelectedEntity, Converter={StaticResource NullToVisibilityConverter}}">
+              <Border Style="{StaticResource PropertyCard}">
+                <Grid>
+                  <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                  </Grid.RowDefinitions>
+
+                  <Grid Grid.Row="0">
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="90" />
+                      <ColumnDefinition Width="*" />
+                      <ColumnDefinition Width="56" />
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                      <RowDefinition Height="Auto" />
+                      <RowDefinition Height="12" />
+                      <RowDefinition Height="Auto" />
+                      <RowDefinition Height="12" />
+                      <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <TextBlock
+                      Grid.Row="0"
+                      Style="{StaticResource PropertyFieldLabel}"
+                      Text="テーブル名"
+                    />
+                    <TextBox
+                      Grid.Row="0"
+                      Grid.Column="1"
+                      Grid.ColumnSpan="2"
+                      Style="{StaticResource PropertyInputTextBox}"
+                      Text="{Binding SelectedEntity.TableName, UpdateSourceTrigger=LostFocus}"
+                    />
+
+                    <TextBlock
+                      Grid.Row="2"
+                      Style="{StaticResource PropertyFieldLabel}"
+                      Text="説明"
+                    />
+                    <TextBox
+                      Grid.Row="2"
+                      Grid.Column="1"
+                      Grid.ColumnSpan="2"
+                      Style="{StaticResource PropertyInputTextBox}"
+                      Text="{Binding SelectedEntity.Description, UpdateSourceTrigger=LostFocus}"
+                      ToolTip="SQL Server の MS_Description と同期します"
+                    />
+
+                    <TextBlock
+                      Grid.Row="4"
+                      Style="{StaticResource PropertyFieldLabel}"
+                      Text="タイトル背景"
+                    />
+                    <ComboBox
+                      Grid.Row="4"
+                      Grid.Column="1"
+                      Style="{StaticResource PropertyInputComboBox}"
+                      ItemsSource="{Binding EntityTitleColorOptions}"
+                      SelectedValuePath="ColorHex"
+                      SelectedValue="{Binding SelectedEntity.TitleBackgroundColor, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                    >
+                      <ComboBox.ItemTemplate>
+                        <DataTemplate>
+                          <StackPanel Orientation="Horizontal">
+                            <Border
+                              Width="34"
+                              Height="14"
+                              CornerRadius="7"
+                              Background="{Binding ColorHex}"
+                              BorderBrush="#CBD5E1"
+                              BorderThickness="1"
+                              Margin="0,0,8,0"
+                            />
+                            <TextBlock Text="{Binding Label}" VerticalAlignment="Center" />
+                          </StackPanel>
+                        </DataTemplate>
+                      </ComboBox.ItemTemplate>
+                    </ComboBox>
+                    <Border
+                      Grid.Row="4"
+                      Grid.Column="2"
+                      Width="36"
+                      Height="24"
+                      CornerRadius="6"
+                      Background="{Binding SelectedEntity.TitleBackgroundColor}"
+                      BorderBrush="#CBD5E1"
+                      BorderThickness="1"
+                      Margin="10,5,0,5"
+                      VerticalAlignment="Center"
+                    />
+                  </Grid>
+                </Grid>
+              </Border>
+
+              <Border Style="{StaticResource PropertyCard}">
+                <Grid>
+                  <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="12" />
+                    <RowDefinition Height="*" />
+                  </Grid.RowDefinitions>
+
+                  <Grid Grid.Row="0" Margin="0,0,0,10">
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="*" />
+                      <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock
+                      Grid.Column="0"
+                      Style="{StaticResource PropertyCardTitle}"
+                      Text="項目"
+                      Margin="0"
+                      VerticalAlignment="Center"
+                    />
+                    <StackPanel
+                      Grid.Column="1"
+                      Orientation="Horizontal"
+                      HorizontalAlignment="Right"
+                    >
+                      <Button
+                        Style="{StaticResource PropertyIconButton}"
+                        ToolTip="カラムを追加"
+                        Command="{Binding AddColumnCommand}"
+                      >
+                        <TextBlock
+                          Text="+"
+                          FontSize="16"
+                          FontWeight="Bold"
+                          HorizontalAlignment="Center"
+                          VerticalAlignment="Center"
+                          TextAlignment="Center"
+                        />
+                      </Button>
+                      <Button
+                        Style="{StaticResource PropertyIconButton}"
+                        ToolTip="選択中のカラムを削除"
+                        Command="{Binding RemoveSelectedColumnCommand}"
+                      >
+                        <TextBlock
+                          Text="-"
+                          FontSize="18"
+                          FontWeight="Bold"
+                          Margin="0,-2,0,0"
+                          HorizontalAlignment="Center"
+                          VerticalAlignment="Center"
+                          TextAlignment="Center"
+                        />
+                      </Button>
+                    </StackPanel>
+                  </Grid>
+
+                  <TextBlock
+                    Grid.Row="1"
+                    Style="{StaticResource PropertyHintText}"
+                    Margin="0,0,0,0"
+                    Text="行のドラッグで並び順を変更できます。"
+                  />
+
+                  <DataGrid
+                    Grid.Row="3"
+                    x:Name="ColumnsDataGrid"
+                    Style="{StaticResource PropertyDataGrid}"
+                    ItemsSource="{Binding SelectedEntity.Columns}"
+                    SelectedItem="{Binding SelectedColumn, Mode=TwoWay}"
+                    SelectionMode="Single"
+                    SelectionUnit="FullRow"
+                    AutoGenerateColumns="False"
+                    CanUserReorderColumns="False"
+                    CanUserSortColumns="False"
+                    CanUserResizeRows="False"
+                    CanUserAddRows="False"
+                    VerticalAlignment="Stretch"
+                    beh:DataGridRowReorderBehavior.IsEnabled="True"
+                    beh:DataGridRowReorderBehavior.UndoRedoManager="{Binding UndoRedo}"
+                  >
+                    <DataGrid.InputBindings>
+                      <KeyBinding
+                        Key="C"
+                        Modifiers="Control"
+                        Command="{Binding CopySelectedColumnCommand}"
+                      />
+                      <KeyBinding
+                        Key="V"
+                        Modifiers="Control"
+                        Command="{Binding PasteCopiedColumnCommand}"
+                      />
+                    </DataGrid.InputBindings>
+                    <DataGrid.Columns>
+                      <DataGridTemplateColumn Header="PK" Width="36">
+                        <DataGridTemplateColumn.CellTemplate>
+                          <DataTemplate>
+                            <CheckBox
+                              Style="{StaticResource PropertyDataGridCheckBox}"
+                              IsChecked="{Binding IsPrimaryKey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                              IsEnabled="{Binding IsPrimaryKeyEditable}"
+                            />
+                          </DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                      </DataGridTemplateColumn>
+                      <DataGridTemplateColumn Header="FK" Width="36">
+                        <DataGridTemplateColumn.CellTemplate>
+                          <DataTemplate>
+                            <CheckBox
+                              Style="{StaticResource PropertyDataGridCheckBox}"
+                              IsChecked="{Binding IsForeignKey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                              IsEnabled="{Binding IsForeignKeyEditable}"
+                            />
+                          </DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                      </DataGridTemplateColumn>
+                      <DataGridTemplateColumn Header="NULL" Width="52">
+                        <DataGridTemplateColumn.CellTemplate>
+                          <DataTemplate>
+                            <CheckBox
+                              Style="{StaticResource PropertyDataGridCheckBox}"
+                              IsChecked="{Binding IsNullable, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                              IsEnabled="{Binding IsNullableEditable}"
+                            />
+                          </DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                      </DataGridTemplateColumn>
+                      <DataGridTextColumn
+                        Header="カラム名"
+                        Binding="{Binding Name, UpdateSourceTrigger=LostFocus}"
+                        Width="*"
+                        ElementStyle="{StaticResource PropertyDataGridTextDisplay}"
+                        EditingElementStyle="{StaticResource PropertyDataGridTextEditor}"
+                      />
+                      <DataGridTemplateColumn Header="型" Width="120">
+                        <DataGridTemplateColumn.CellTemplate>
+                          <DataTemplate>
+                            <TextBlock
+                              Text="{Binding DataType}"
+                              VerticalAlignment="Center"
+                              Margin="4,0"
+                            />
+                          </DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                        <DataGridTemplateColumn.CellEditingTemplate>
+                          <DataTemplate>
+                            <ComboBox
+                              Style="{StaticResource PropertyInputComboBox}"
+                              IsEditable="True"
+                              ItemsSource="{Binding DataContext.SqlDataTypes, RelativeSource={RelativeSource AncestorType=Window}}"
+                              Text="{Binding DataType, UpdateSourceTrigger=LostFocus}"
+                            />
+                          </DataTemplate>
+                        </DataGridTemplateColumn.CellEditingTemplate>
+                      </DataGridTemplateColumn>
+                      <DataGridTextColumn
+                        Header="説明"
+                        Width="*"
+                        Binding="{Binding Description, UpdateSourceTrigger=LostFocus}"
+                        ElementStyle="{StaticResource PropertyDataGridTextDisplay}"
+                        EditingElementStyle="{StaticResource PropertyDataGridTextEditor}"
+                      />
+                      <DataGridTemplateColumn Header="" Width="36">
+                        <DataGridTemplateColumn.CellTemplate>
+                          <DataTemplate>
+                            <Button
+                              Style="{StaticResource PropertyIconButton}"
+                              ToolTip="このカラムを削除"
+                              Command="{Binding DataContext.RemoveColumnCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                              CommandParameter="{Binding}"
+                            >
+                              <TextBlock
+                                Text="-"
+                                FontSize="18"
+                                FontWeight="Bold"
+                                Margin="0,-2,0,0"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                TextAlignment="Center"
+                              />
+                            </Button>
+                          </DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                      </DataGridTemplateColumn>
+                    </DataGrid.Columns>
+                  </DataGrid>
+                </Grid>
+              </Border>
+
+              <Border Style="{StaticResource PropertyCard}">
+                <StackPanel>
+                  <TextBlock Style="{StaticResource PropertyCardTitle}" Text="メモ" />
+                  <TextBox
+                    Style="{StaticResource PropertyInputTextBox}"
+                    Text="{Binding SelectedEntity.Memo, UpdateSourceTrigger=PropertyChanged}"
+                    AcceptsReturn="True"
+                    TextWrapping="Wrap"
+                    Height="120"
+                    VerticalContentAlignment="Top"
+                    VerticalScrollBarVisibility="Auto"
+                  />
+                </StackPanel>
+              </Border>
+            </StackPanel>
+
+            <StackPanel Visibility="{Binding SelectedRelationship, Converter={StaticResource NullToVisibilityConverter}}">
+              <Border Style="{StaticResource PropertyCard}">
+                <StackPanel DataContext="{Binding SelectedRelationship}">
+                  <TextBlock Style="{StaticResource PropertyCardTitle}" Text="リレーション" />
+
+                  <Grid>
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="90" />
+                      <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                      <RowDefinition Height="Auto" />
+                      <RowDefinition Height="12" />
+                      <RowDefinition Height="Auto" />
+                      <RowDefinition Height="12" />
+                      <RowDefinition Height="Auto" />
+                      <RowDefinition Height="12" />
+                      <RowDefinition Height="Auto" />
+                      <RowDefinition Height="12" />
+                      <RowDefinition Height="Auto" />
+                      <RowDefinition Height="12" />
+                      <RowDefinition Height="Auto" />
+                      <RowDefinition Height="12" />
+                      <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <TextBlock
+                      Grid.Row="0"
+                      Style="{StaticResource PropertyFieldLabel}"
+                      Text="種別"
+                    />
+                    <ComboBox
+                      Grid.Row="0"
+                      Grid.Column="1"
+                      Style="{StaticResource PropertyInputComboBox}"
+                      SelectedItem="{Binding Type, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                    >
+                      <models:RelationshipType>OneToOne</models:RelationshipType>
+                      <models:RelationshipType>OneToMany</models:RelationshipType>
+                      <models:RelationshipType>ManyToMany</models:RelationshipType>
+                    </ComboBox>
+
+                    <TextBlock
+                      Grid.Row="2"
+                      Style="{StaticResource PropertyFieldLabel}"
+                      Text="制約名"
+                    />
+                    <TextBox
+                      Grid.Row="2"
+                      Grid.Column="1"
+                      Style="{StaticResource PropertyInputTextBox}"
+                      Text="{Binding ConstraintName, UpdateSourceTrigger=LostFocus}"
+                    />
+
+                    <TextBlock
+                      Grid.Row="4"
+                      Style="{StaticResource PropertyFieldLabel}"
+                      Text="起点"
+                    />
+                    <TextBlock
+                      Grid.Row="4"
+                      Grid.Column="1"
+                      VerticalAlignment="Center"
+                      Foreground="{StaticResource MutedText}"
+                      Text="{Binding Source.TableName}"
+                    />
+
+                    <TextBlock
+                      Grid.Row="6"
+                      Style="{StaticResource PropertyFieldLabel}"
+                      Text="参照先列"
+                    />
+                    <ComboBox
+                      Grid.Row="6"
+                      Grid.Column="1"
+                      Style="{StaticResource PropertyInputComboBox}"
+                      ItemsSource="{Binding AvailableSourceColumns}"
+                      DisplayMemberPath="Name"
+                      SelectedValuePath="Id"
+                      SelectedValue="{Binding SourceColumnId, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                      IsEnabled="{Binding CanSelectForeignKeyColumns}"
+                    />
+
+                    <TextBlock
+                      Grid.Row="8"
+                      Style="{StaticResource PropertyFieldLabel}"
+                      Text="終点"
+                    />
+                    <TextBlock
+                      Grid.Row="8"
+                      Grid.Column="1"
+                      VerticalAlignment="Center"
+                      Foreground="{StaticResource MutedText}"
+                      Text="{Binding Target.TableName}"
+                    />
+
+                    <TextBlock
+                      Grid.Row="10"
+                      Style="{StaticResource PropertyFieldLabel}"
+                      Text="外部キー列"
+                    />
+                    <ComboBox
+                      Grid.Row="10"
+                      Grid.Column="1"
+                      Style="{StaticResource PropertyInputComboBox}"
+                      ItemsSource="{Binding AvailableTargetColumns}"
+                      DisplayMemberPath="Name"
+                      SelectedValuePath="Id"
+                      SelectedValue="{Binding TargetColumnId, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                      IsEnabled="{Binding CanSelectForeignKeyColumns}"
+                    />
+
+                    <TextBlock
+                      Grid.Row="12"
+                      Style="{StaticResource PropertyFieldLabel}"
+                      Text="ON DELETE"
+                    />
+                    <ComboBox
+                      Grid.Row="12"
+                      Grid.Column="1"
+                      Style="{StaticResource PropertyInputComboBox}"
+                      ItemsSource="{Binding ReferentialActions}"
+                      SelectedItem="{Binding OnDelete, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                      IsEnabled="{Binding CanConfigureReferentialActions}"
+                    />
+                  </Grid>
+
+                  <Grid Margin="0,12,0,0">
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="90" />
+                      <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Style="{StaticResource PropertyFieldLabel}" Text="ON UPDATE" />
+                    <ComboBox
+                      Grid.Column="1"
+                      Style="{StaticResource PropertyInputComboBox}"
+                      ItemsSource="{Binding ReferentialActions}"
+                      SelectedItem="{Binding OnUpdate, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                      IsEnabled="{Binding CanConfigureReferentialActions}"
+                    />
+                  </Grid>
+
+                  <Button
+                    Margin="0,14,0,0"
+                    Style="{StaticResource PropertyDangerButton}"
+                    Content="リレーションを削除"
+                    Command="{Binding DataContext.RemoveSelectedRelationshipCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                  />
+                </StackPanel>
+              </Border>
+            </StackPanel>
+          </StackPanel>
+        </ScrollViewer>
+      </Border>
+    </Grid>
+  </DockPanel>
+</Window>
