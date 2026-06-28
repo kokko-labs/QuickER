@@ -3,6 +3,7 @@ using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Linq;
 using CommunityToolkit.Mvvm.ComponentModel;
+using QuickER.Documents;
 using QuickER.Model;
 using QuickER.Services;
 
@@ -45,7 +46,7 @@ public partial class EntityViewModel : ObservableObject
     private string _description;
 
     /// <summary>タイトル帯背景色の実体フィールド</summary>
-    private string _titleBackgroundColor = Entity.DefaultTitleBackgroundColor;
+    private string _titleBackgroundColor = EntityLayout.DefaultTitleBackgroundColor;
 
     /// <summary>選択中かどうか（枠線スタイルの切り替えに用いる）</summary>
     [ObservableProperty]
@@ -119,17 +120,21 @@ public partial class EntityViewModel : ObservableObject
         OnPropertyChanged(nameof(DisplayHeight));
     }
 
-    /// <summary>モデルから ViewModel を生成し、カラムの変更購読を設定する</summary>
+    /// <summary>意味モデルから ViewModel を生成する（レイアウトは既定値）。新規追加・インポート・AI 操作で使う</summary>
     public EntityViewModel(Entity model)
+        : this(model, new EntityLayout()) { }
+
+    /// <summary>意味モデルとレイアウト（視覚情報）から ViewModel を生成し、カラムの変更購読を設定する。保存文書の読込・複製で使う</summary>
+    public EntityViewModel(Entity model, EntityLayout layout)
     {
         Id = model.Id;
         _tableName = model.TableName;
-        _x = model.X;
-        _y = model.Y;
-        _width = model.Width <= 0 ? 200 : model.Width;
+        _x = layout.X;
+        _y = layout.Y;
+        _width = layout.Width <= 0 ? 200 : layout.Width;
         _memo = model.Memo;
         _description = model.Description ?? string.Empty;
-        _titleBackgroundColor = EntityTitleColorPalette.Normalize(model.TitleBackgroundColor);
+        _titleBackgroundColor = EntityTitleColorPalette.Normalize(layout.TitleBackgroundColor);
         Columns = new ObservableCollection<ColumnViewModel>(
             model.Columns.Select(c => new ColumnViewModel(c))
         );
@@ -185,18 +190,24 @@ public partial class EntityViewModel : ObservableObject
         }
     }
 
-    /// <summary>現在の状態をモデルへコピーして返す</summary>
+    /// <summary>現在の状態を意味モデルへコピーして返す（視覚情報は含まない）</summary>
     public Entity ToModel() =>
         new()
         {
             Id = Id,
             TableName = TableName,
+            Memo = Memo,
+            Description = Description ?? string.Empty,
+            Columns = Columns.Select(c => c.ToModel()).ToList(),
+        };
+
+    /// <summary>現在の視覚情報（座標・幅・色）をレイアウトへコピーして返す</summary>
+    public EntityLayout ToLayout() =>
+        new()
+        {
             X = X,
             Y = Y,
             Width = Width,
-            Memo = Memo,
-            Description = Description ?? string.Empty,
             TitleBackgroundColor = TitleBackgroundColor,
-            Columns = Columns.Select(c => c.ToModel()).ToList(),
         };
 }

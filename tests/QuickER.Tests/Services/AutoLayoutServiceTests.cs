@@ -1,7 +1,8 @@
+using FluentAssertions;
+using QuickER.Documents;
 using QuickER.Model;
 using QuickER.Services;
 using QuickER.ViewModels;
-using FluentAssertions;
 
 namespace QuickER.Tests.Services;
 
@@ -10,14 +11,7 @@ public class AutoLayoutServiceTests
 {
     /// <summary>配置前と判別できるよう負座標で初期化したテスト用エンティティを生成する</summary>
     private static EntityViewModel NewEntity(string name = "E") =>
-        new(
-            new Entity
-            {
-                TableName = name,
-                X = -999,
-                Y = -999,
-            }
-        );
+        new(new Entity { TableName = name }, new EntityLayout { X = -999, Y = -999 });
 
     /// <summary>格子レイアウトで同一行は同じ Y、次列は右、次行は下へ配置されることを検証する</summary>
     [Fact(DisplayName = "LayoutGrid: エンティティが格子状に並ぶ")]
@@ -495,7 +489,6 @@ public class AutoLayoutServiceTests
             new Entity
             {
                 TableName = "Orders",
-                Width = 220,
                 Description =
                     "テーブル説明が複数行になるように十分長い文字列です。テーブル説明が複数行になるように十分長い文字列です。",
                 Columns =
@@ -508,7 +501,8 @@ public class AutoLayoutServiceTests
                             "カラム説明も折り返されるように十分長い文字列を設定しています。",
                     },
                 },
-            }
+            },
+            new EntityLayout { Width = 220 }
         );
         first.ShowDescriptionsInDiagram = true;
 

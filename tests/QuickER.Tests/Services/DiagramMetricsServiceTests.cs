@@ -1,7 +1,8 @@
+using FluentAssertions;
+using QuickER.Documents;
 using QuickER.Model;
 using QuickER.Services;
 using QuickER.ViewModels;
-using FluentAssertions;
 
 namespace QuickER.Tests.Services;
 
@@ -16,7 +17,6 @@ public class DiagramMetricsServiceTests
             new Entity
             {
                 TableName = "Orders",
-                Width = 120,
                 Columns =
                 {
                     new Column
@@ -25,7 +25,8 @@ public class DiagramMetricsServiceTests
                         DataType = "nvarchar(128)",
                     },
                 },
-            }
+            },
+            new EntityLayout { Width = 120 }
         );
 
         var width = DiagramMetricsService.CalculateAutoWidth(entity);
@@ -41,7 +42,6 @@ public class DiagramMetricsServiceTests
             new Entity
             {
                 TableName = "Orders",
-                Width = 220,
                 Description =
                     "テーブル説明が複数行になるように十分長い文字列です。テーブル説明が複数行になるように十分長い文字列です。",
                 Columns =
@@ -54,7 +54,8 @@ public class DiagramMetricsServiceTests
                             "カラム説明が折り返されることを確認するための十分に長い説明文です。",
                     },
                 },
-            }
+            },
+            new EntityLayout { Width = 220 }
         );
 
         var withoutDescriptions = DiagramMetricsService.EstimateEntityHeight(
@@ -77,7 +78,6 @@ public class DiagramMetricsServiceTests
             new Entity
             {
                 TableName = "Orders",
-                Width = 120,
                 Columns =
                 {
                     new Column
@@ -87,7 +87,8 @@ public class DiagramMetricsServiceTests
                         IsNullable = false,
                     },
                 },
-            }
+            },
+            new EntityLayout { Width = 120 }
         );
 
         entity.ShowNullabilityInDiagram = false;

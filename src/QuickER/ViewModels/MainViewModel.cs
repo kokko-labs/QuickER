@@ -3,11 +3,11 @@ using System.Collections.Specialized;
 using System.ComponentModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using QuickER.Documents;
 using QuickER.Model;
 using QuickER.Services;
-using QuickER.UndoRedo;
-
 using QuickER.SqlServer;
+using QuickER.UndoRedo;
 
 namespace QuickER.ViewModels;
 
@@ -72,6 +72,7 @@ public partial class MainViewModel : ObservableObject
 
     /// <summary>エンティティコピーの内部バッファ（クリップボードは使用しない）</summary>
     private Entity? _copiedEntity;
+    private EntityLayout? _copiedEntityLayout;
 
     /// <summary>同一コピー元からのペースト回数（貼り付け位置を段階的にずらすために使用）</summary>
     private int _copiedEntityPasteCount;
@@ -143,7 +144,8 @@ public partial class MainViewModel : ObservableObject
     private void ReplaceDiagram(
         IEnumerable<Entity> entities,
         IEnumerable<Relationship> relationships,
-        bool clearUndoHistory
+        bool clearUndoHistory,
+        IReadOnlyDictionary<Guid, EntityLayout>? layout = null
     )
     {
         _changeTracker.RunWithoutTracking(() =>
@@ -158,7 +160,11 @@ public partial class MainViewModel : ObservableObject
 
             foreach (var entity in entities)
             {
-                Entities.Add(new EntityViewModel(entity));
+                var entityLayout =
+                    layout is not null && layout.TryGetValue(entity.Id, out var found)
+                        ? found
+                        : new EntityLayout();
+                Entities.Add(new EntityViewModel(entity, entityLayout));
             }
 
             foreach (var relationship in relationships)
@@ -308,12 +314,9 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void AddEntity()
     {
-        // 既存数に応じて配置を斜めにずらし、新規エンティティ同士の重なりを避ける
         var model = new Entity
         {
             TableName = "NewTable",
-            X = 60 + Entities.Count * 30,
-            Y = 60 + Entities.Count * 30,
             Columns =
             {
                 new Column
@@ -326,7 +329,14 @@ public partial class MainViewModel : ObservableObject
             },
         };
 
-        var vm = new EntityViewModel(model);
+        // 既存数に応じて配置を斜めにずらし、新規エンティティ同士の重なりを避ける
+        var layout = new EntityLayout
+        {
+            X = 60 + Entities.Count * 30,
+            Y = 60 + Entities.Count * 30,
+        };
+
+        var vm = new EntityViewModel(model, layout);
         UndoRedo.Execute(new AddEntityCommand(this, vm));
         SelectedEntity = vm;
     }
@@ -440,6 +450,7 @@ public partial class MainViewModel : ObservableObject
         }
 
         _copiedEntity = SelectedEntity.ToModel();
+        _copiedEntityLayout = SelectedEntity.ToLayout();
         _copiedEntityPasteCount = 0;
         PasteCopiedEntityCommand.NotifyCanExecuteChanged();
     }
@@ -457,7 +468,11 @@ public partial class MainViewModel : ObservableObject
 
         // 連続ペーストのたびにオフセットを増やし、複製同士の重なりを避ける
         _copiedEntityPasteCount++;
-        var pastedEntity = CreateEntityCopy(_copiedEntity, _copiedEntityPasteCount);
+        var pastedEntity = CreateEntityCopy(
+            _copiedEntity,
+            _copiedEntityLayout ?? new EntityLayout(),
+            _copiedEntityPasteCount
+        );
         UndoRedo.Execute(new AddEntityCommand(this, pastedEntity));
         SelectSingleEntity(pastedEntity);
     }
@@ -884,21 +899,31 @@ public partial class MainViewModel : ObservableObject
     /// <summary>コピー元 ViewModel から位置をずらした複製 ViewModel を生成する</summary>
     /// <param name="offsetMultiplier">位置オフセット（30px）の倍率。連続ペースト時に増やして重なりを避ける</param>
     internal EntityViewModel CreateEntityCopy(EntityViewModel source, int offsetMultiplier = 1) =>
-        CreateEntityCopy(source.ToModel(), offsetMultiplier);
+        CreateEntityCopy(source.ToModel(), source.ToLayout(), offsetMultiplier);
 
-    /// <summary>コピー元モデルから位置をずらした複製 ViewModel を生成する。テーブル名は重複しない名前へ変更する</summary>
+    /// <summary>コピー元の意味モデルとレイアウトから位置をずらした複製 ViewModel を生成する。テーブル名は重複しない名前へ変更する</summary>
     /// <param name="offsetMultiplier">位置オフセット（30px）の倍率。1 未満は 1 に丸める</param>
-    internal EntityViewModel CreateEntityCopy(Entity source, int offsetMultiplier = 1)
+    internal EntityViewModel CreateEntityCopy(
+        Entity source,
+        EntityLayout sourceLayout,
+        int offsetMultiplier = 1
+    )
     {
         var copy = source.Clone(preserveId: false);
         var normalizedOffsetMultiplier = Math.Max(1, offsetMultiplier);
         var offset = 30 * normalizedOffsetMultiplier;
 
         copy.TableName = GenerateCopyTableName(source.TableName);
-        copy.X += offset;
-        copy.Y += offset;
 
-        return new EntityViewModel(copy);
+        var layout = new EntityLayout
+        {
+            X = sourceLayout.X + offset,
+            Y = sourceLayout.Y + offset,
+            Width = sourceLayout.Width,
+            TitleBackgroundColor = sourceLayout.TitleBackgroundColor,
+        };
+
+        return new EntityViewModel(copy, layout);
     }
 
     /// <summary>指定エンティティのみを選択状態にし、他の選択をすべて解除する</summary>

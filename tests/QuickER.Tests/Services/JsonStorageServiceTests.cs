@@ -1,8 +1,9 @@
 ﻿using System.IO;
+using FluentAssertions;
+using QuickER.Documents;
 using QuickER.Model;
 using QuickER.Services;
 using QuickER.ViewModels;
-using FluentAssertions;
 
 namespace QuickER.Tests.Services;
 
@@ -45,24 +46,31 @@ public class JsonStorageServiceTests
 
         try
         {
-            JsonStorageService.Save(path, vm.ToDiagramModel());
+            JsonStorageService.Save(path, vm.ToDocument());
             File.Exists(path).Should().BeTrue();
 
             var loaded = JsonStorageService.Load(path);
-            loaded.Entities.Should().HaveCount(2);
-            loaded.Relationships.Should().HaveCount(1);
+            loaded.Schema.Entities.Should().HaveCount(2);
+            loaded.Schema.Relationships.Should().HaveCount(1);
 
-            var ea = loaded.Entities.First(e => e.Id == a.Id);
+            // 意味情報は schema、視覚情報は layout サイドカーへ分離して往復する
+            var ea = loaded.Schema.Entities.First(e => e.Id == a.Id);
             ea.TableName.Should().Be("Customer");
-            ea.X.Should().Be(100);
-            ea.Y.Should().Be(50);
-            ea.TitleBackgroundColor.Should().Be("#FFF0BF");
 
-            loaded.Relationships[0].Type.Should().Be(RelationshipType.OneToMany);
-            loaded.Relationships[0].SourceColumnId.Should().Be(a.Columns[0].Id);
-            loaded.Relationships[0].TargetColumnId.Should().Be(b.Columns[1].Id);
-            loaded.Relationships[0].ConstraintName.Should().Be("FK_Order_Customer");
-            loaded.Entities.First(e => e.Id == b.Id).Columns[1].IsNullable.Should().BeFalse();
+            var la = loaded.Layout[a.Id];
+            la.X.Should().Be(100);
+            la.Y.Should().Be(50);
+            la.TitleBackgroundColor.Should().Be("#FFF0BF");
+
+            loaded.Schema.Relationships[0].Type.Should().Be(RelationshipType.OneToMany);
+            loaded.Schema.Relationships[0].SourceColumnId.Should().Be(a.Columns[0].Id);
+            loaded.Schema.Relationships[0].TargetColumnId.Should().Be(b.Columns[1].Id);
+            loaded.Schema.Relationships[0].ConstraintName.Should().Be("FK_Order_Customer");
+            loaded
+                .Schema.Entities.First(e => e.Id == b.Id)
+                .Columns[1]
+                .IsNullable.Should()
+                .BeFalse();
         }
         finally
         {

@@ -1,7 +1,8 @@
+using FluentAssertions;
+using QuickER.Documents;
 using QuickER.Model;
 using QuickER.UndoRedo;
 using QuickER.ViewModels;
-using FluentAssertions;
 
 namespace QuickER.Tests.UndoRedo;
 
@@ -17,9 +18,6 @@ public class DuplicateEntityCommandTests
             new Entity
             {
                 TableName = "Original",
-                TitleBackgroundColor = "#E7DDF9",
-                X = 10,
-                Y = 20,
                 Columns =
                 {
                     new Column
@@ -30,6 +28,12 @@ public class DuplicateEntityCommandTests
                         Description = "主キー",
                     },
                 },
+            },
+            new EntityLayout
+            {
+                TitleBackgroundColor = "#E7DDF9",
+                X = 10,
+                Y = 20,
             }
         );
         main.Entities.Add(src);

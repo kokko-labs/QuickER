@@ -1,6 +1,7 @@
-﻿using QuickER.Model;
+﻿using FluentAssertions;
+using QuickER.Documents;
+using QuickER.Model;
 using QuickER.ViewModels;
-using FluentAssertions;
 
 namespace QuickER.Tests.ViewModels;
 
@@ -10,7 +11,8 @@ public class RelationshipViewModelTests
     /// <summary>指定座標・既定幅のテスト用エンティティを生成する</summary>
     private static EntityViewModel NewEntity(double x, double y) =>
         new(
-            new Entity
+            new Entity(),
+            new EntityLayout
             {
                 X = x,
                 Y = y,
@@ -77,7 +79,8 @@ public class RelationshipViewModelTests
     public void Label_IsCenteredBetweenEntityBounds()
     {
         var a = new EntityViewModel(
-            new Entity
+            new Entity(),
+            new EntityLayout
             {
                 X = 0,
                 Y = 0,
@@ -85,7 +88,8 @@ public class RelationshipViewModelTests
             }
         );
         var b = new EntityViewModel(
-            new Entity
+            new Entity(),
+            new EntityLayout
             {
                 X = 500,
                 Y = 0,
@@ -106,7 +110,8 @@ public class RelationshipViewModelTests
     public void Markers_ArePositionedOutsideEntities()
     {
         var a = new EntityViewModel(
-            new Entity
+            new Entity(),
+            new EntityLayout
             {
                 X = 100,
                 Y = 100,
@@ -114,7 +119,8 @@ public class RelationshipViewModelTests
             }
         );
         var b = new EntityViewModel(
-            new Entity
+            new Entity(),
+            new EntityLayout
             {
                 X = 100,
                 Y = 400,
@@ -136,7 +142,8 @@ public class RelationshipViewModelTests
     public void Markers_ArePositionedOutsideEntities_Horizontally()
     {
         var a = new EntityViewModel(
-            new Entity
+            new Entity(),
+            new EntityLayout
             {
                 X = 100,
                 Y = 100,
@@ -144,7 +151,8 @@ public class RelationshipViewModelTests
             }
         );
         var b = new EntityViewModel(
-            new Entity
+            new Entity(),
+            new EntityLayout
             {
                 X = 400,
                 Y = 100,
@@ -166,7 +174,8 @@ public class RelationshipViewModelTests
     public void MarkerBounds_AreCenteredOnMarkerCoordinates()
     {
         var a = new EntityViewModel(
-            new Entity
+            new Entity(),
+            new EntityLayout
             {
                 X = 100,
                 Y = 100,
@@ -174,7 +183,8 @@ public class RelationshipViewModelTests
             }
         );
         var b = new EntityViewModel(
-            new Entity
+            new Entity(),
+            new EntityLayout
             {
                 X = 400,
                 Y = 260,
@@ -203,7 +213,8 @@ public class RelationshipViewModelTests
     {
         // 水平に並べ、境界接続点が左右の辺中央になる構成にする
         var a = new EntityViewModel(
-            new Entity
+            new Entity(),
+            new EntityLayout
             {
                 X = 100,
                 Y = 100,
@@ -211,7 +222,8 @@ public class RelationshipViewModelTests
             }
         );
         var b = new EntityViewModel(
-            new Entity
+            new Entity(),
+            new EntityLayout
             {
                 X = 500,
                 Y = 100,
@@ -236,7 +248,8 @@ public class RelationshipViewModelTests
     public void TargetManyMarker_FacesTargetEntity()
     {
         var a = new EntityViewModel(
-            new Entity
+            new Entity(),
+            new EntityLayout
             {
                 X = 100,
                 Y = 100,
@@ -244,7 +257,8 @@ public class RelationshipViewModelTests
             }
         );
         var b = new EntityViewModel(
-            new Entity
+            new Entity(),
+            new EntityLayout
             {
                 X = 400,
                 Y = 100,
@@ -265,7 +279,8 @@ public class RelationshipViewModelTests
     public void SourceManyMarker_FacesSourceEntity()
     {
         var a = new EntityViewModel(
-            new Entity
+            new Entity(),
+            new EntityLayout
             {
                 X = 100,
                 Y = 100,
@@ -273,7 +288,8 @@ public class RelationshipViewModelTests
             }
         );
         var b = new EntityViewModel(
-            new Entity
+            new Entity(),
+            new EntityLayout
             {
                 X = 400,
                 Y = 100,

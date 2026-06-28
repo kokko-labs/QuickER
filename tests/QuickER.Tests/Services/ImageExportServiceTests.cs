@@ -1,7 +1,8 @@
+using FluentAssertions;
+using QuickER.Documents;
 using QuickER.Model;
 using QuickER.Services;
 using QuickER.ViewModels;
-using FluentAssertions;
 
 namespace QuickER.Tests.Services;
 
@@ -15,7 +16,8 @@ public class ImageExportServiceTests
         var vm = new MainViewModel();
         vm.Entities.Add(
             new EntityViewModel(
-                new Entity { TableName = "Customer", TitleBackgroundColor = "#E4F1C9" }
+                new Entity { TableName = "Customer" },
+                new EntityLayout { TitleBackgroundColor = "#E4F1C9" }
             )
         );
 

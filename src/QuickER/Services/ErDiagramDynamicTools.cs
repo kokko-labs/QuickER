@@ -1,9 +1,8 @@
 using System.Text;
 using System.Text.Json;
+using QuickER.AI;
 using QuickER.Model;
 using QuickER.ViewModels;
-
-using QuickER.AI;
 
 namespace QuickER.Services;
 
@@ -11,7 +10,6 @@ namespace QuickER.Services;
 /// <remarks>各ツールの操作は Undo / Redo マネージャー経由で実行し、取り消し可能とする</remarks>
 public static class ErDiagramDynamicTools
 {
-
     /// <summary>dynamicTool 呼び出しを受け取り、ツール名でディスパッチして ER 図を操作する</summary>
     /// <param name="toolName">ツール名</param>
     /// <param name="arguments">引数 JSON</param>
@@ -109,14 +107,13 @@ public static class ErDiagramDynamicTools
     {
         var tableName = GetString(args, "table_name") ?? "NewTable";
         var desc = GetString(args, "description") ?? string.Empty;
-        var model = new Entity
+        var model = new Entity { TableName = tableName, Description = desc };
+        var layout = new Documents.EntityLayout
         {
-            TableName = tableName,
-            Description = desc,
             X = 60 + vm.Entities.Count * 30,
             Y = 60 + vm.Entities.Count * 30,
         };
-        var vmEntity = new EntityViewModel(model);
+        var vmEntity = new EntityViewModel(model, layout);
         vm.UndoRedo.Execute(new UndoRedo.AddEntityCommand(vm, vmEntity));
         return ($"テーブル '{tableName}' を追加しました。", true);
     }
@@ -493,4 +490,3 @@ public static class ErDiagramDynamicTools
             : null;
     }
 }
-

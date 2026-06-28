@@ -1,8 +1,9 @@
 ﻿using System.Collections.ObjectModel;
+using FluentAssertions;
+using QuickER.Documents;
 using QuickER.Model;
 using QuickER.UndoRedo;
 using QuickER.ViewModels;
-using FluentAssertions;
 
 namespace QuickER.Tests.UndoRedo;
 
@@ -11,14 +12,7 @@ public class CommandTests
 {
     /// <summary>指定座標を持つテスト用エンティティを生成する</summary>
     private static EntityViewModel NewEntity(double x = 0, double y = 0) =>
-        new(
-            new Entity
-            {
-                X = x,
-                Y = y,
-                TableName = "T",
-            }
-        );
+        new(new Entity { TableName = "T" }, new EntityLayout { X = x, Y = y });
 
     /// <summary>MoveEntityCommand の Execute / Undo で座標が前後に往復することを検証する</summary>
     [Fact(DisplayName = "MoveEntityCommand: Execute / Undo で座標が往復する")]

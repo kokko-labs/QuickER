@@ -1,8 +1,9 @@
+using FluentAssertions;
+using QuickER.Documents;
 using QuickER.Model;
 using QuickER.Tests.TestDoubles;
 using QuickER.UndoRedo;
 using QuickER.ViewModels;
-using FluentAssertions;
 
 namespace QuickER.Tests.ViewModels;
 
@@ -417,7 +418,7 @@ public class MainViewModelTests
         entity.TitleBackgroundColor = "#E4F1C9";
 
         vm.UndoCommand.Execute(null);
-        entity.TitleBackgroundColor.Should().Be(Entity.DefaultTitleBackgroundColor);
+        entity.TitleBackgroundColor.Should().Be(EntityLayout.DefaultTitleBackgroundColor);
 
         vm.RedoCommand.Execute(null);
         entity.TitleBackgroundColor.Should().Be("#E4F1C9");

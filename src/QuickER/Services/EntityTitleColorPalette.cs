@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 using System.Windows.Media;
-using QuickER.Model;
+using QuickER.Documents;
 
 namespace QuickER.Services;
 
@@ -27,7 +27,7 @@ public static class EntityTitleColorPalette
     /// <summary>UI で選択可能な色候補の一覧</summary>
     public static IReadOnlyList<EntityTitleColorOption> Options { get; } =
     [
-        new("ブルー", Entity.DefaultTitleBackgroundColor),
+        new("ブルー", EntityLayout.DefaultTitleBackgroundColor),
         new("グリーン", "#E4F1C9"),
         new("イエロー", "#FFF0BF"),
         new("パープル", "#E7DDF9"),
@@ -41,7 +41,7 @@ public static class EntityTitleColorPalette
     {
         if (string.IsNullOrWhiteSpace(colorHex))
         {
-            return Entity.DefaultTitleBackgroundColor;
+            return EntityLayout.DefaultTitleBackgroundColor;
         }
 
         try
@@ -57,6 +57,6 @@ public static class EntityTitleColorPalette
             // 不正な色指定は握りつぶし、既定色へフォールバックする
         }
 
-        return Entity.DefaultTitleBackgroundColor;
+        return EntityLayout.DefaultTitleBackgroundColor;
     }
 }

@@ -2,11 +2,11 @@
 using System.Windows;
 using System.Windows.Media;
 using CommunityToolkit.Mvvm.Input;
+using Microsoft.Win32;
+using QuickER.Documents;
 using QuickER.Generator;
 using QuickER.Model;
 using QuickER.Services;
-using Microsoft.Win32;
-
 using QuickER.SqlServer;
 
 namespace QuickER.ViewModels;
@@ -76,7 +76,7 @@ public partial class MainViewModel
         {
             var dir = Path.GetDirectoryName(AutoSavePath)!;
             Directory.CreateDirectory(dir);
-            JsonStorageService.Save(AutoSavePath, ToDiagramModel());
+            JsonStorageService.Save(AutoSavePath, ToDocument());
             File.WriteAllText(
                 UiStatePath,
                 System.Text.Json.JsonSerializer.Serialize(
@@ -124,9 +124,14 @@ public partial class MainViewModel
 
         try
         {
-            var diagram = JsonStorageService.Load(AutoSavePath);
+            var document = JsonStorageService.Load(AutoSavePath);
 
-            ReplaceDiagram(diagram.Entities, diagram.Relationships, clearUndoHistory: true);
+            ReplaceDiagram(
+                document.Schema.Entities,
+                document.Schema.Relationships,
+                clearUndoHistory: true,
+                document.Layout
+            );
         }
         catch
         {
@@ -248,12 +253,20 @@ public partial class MainViewModel
             result.Diagnostics.Select(diagnostic => $"[{diagnostic.Severity}] {diagnostic.Message}")
         );
 
-    /// <summary>現在の ER 図をシリアライズ可能なモデル（<see cref="ErDiagram"/>）へ変換する</summary>
+    /// <summary>現在の ER 図を意味モデル（<see cref="ErDiagram"/>・視覚情報なし）へ変換する</summary>
     public ErDiagram ToDiagramModel() =>
         new()
         {
             Entities = Entities.Select(entity => entity.ToModel()).ToList(),
             Relationships = Relationships.Select(relationship => relationship.ToModel()).ToList(),
+        };
+
+    /// <summary>現在の ER 図を保存文書（意味モデル＋レイアウトサイドカー）へ変換する</summary>
+    public DiagramDocument ToDocument() =>
+        new()
+        {
+            Schema = ToDiagramModel(),
+            Layout = Entities.ToDictionary(entity => entity.Id, entity => entity.ToLayout()),
         };
 
     /// <summary>指定スキーマが現在のダイアグラムと構造的に同一かを署名比較で判定する</summary>
@@ -563,7 +576,7 @@ public partial class MainViewModel
 
         if (dlg.ShowDialog() == true)
         {
-            JsonStorageService.Save(dlg.FileName, ToDiagramModel());
+            JsonStorageService.Save(dlg.FileName, ToDocument());
         }
     }
 
@@ -578,9 +591,14 @@ public partial class MainViewModel
             return;
         }
 
-        var diagram = JsonStorageService.Load(dlg.FileName);
+        var document = JsonStorageService.Load(dlg.FileName);
 
-        ReplaceDiagram(diagram.Entities, diagram.Relationships, clearUndoHistory: true);
+        ReplaceDiagram(
+            document.Schema.Entities,
+            document.Schema.Relationships,
+            clearUndoHistory: true,
+            document.Layout
+        );
     }
 
     /// <summary>自動保存対象の UI 表示状態（ダイアグラム上の表示トグル）</summary>
