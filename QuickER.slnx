@@ -3,9 +3,13 @@
     <File Path=".csharpierrc" />
     <File Path=".editorconfig" />
   </Folder>
-  <Project Path="QuickER.Generator/QuickER.Generator.csproj" />
-  <Project Path="QuickER.Model/QuickER.Model.csproj" />
-  <Project Path="QuickER.SqlServer/QuickER.SqlServer.csproj" />
-  <Project Path="QuickER.Tests/QuickER.Tests.csproj" />
-  <Project Path="QuickER/QuickER.csproj" />
+  <Folder Name="/src/">
+    <Project Path="src/QuickER.Generator/QuickER.Generator.csproj" />
+    <Project Path="src/QuickER.Model/QuickER.Model.csproj" />
+    <Project Path="src/QuickER.SqlServer/QuickER.SqlServer.csproj" />
+    <Project Path="src/QuickER/QuickER.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/QuickER.Tests/QuickER.Tests.csproj" />
+  </Folder>
 </Solution>

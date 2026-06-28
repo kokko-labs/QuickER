@@ -1,6 +1,6 @@
 {
     "chat.tools.terminal.autoApprove": {
-        "/^dotnet build QuickER\\\\QuickER\\.csproj$/": {
+        "/^dotnet build src\\\\QuickER\\\\QuickER\\.csproj$/": {
             "approve": true,
             "matchCommandLine": true
         }
