@@ -1,7 +1,10 @@
 <Solution>
   <Folder Name="/ソリューション項目/">
-    <File Path=".csharpierrc" />
     <File Path=".editorconfig" />
+  </Folder>
+  <Folder Name="/docs/" />
+  <Folder Name="/docs/sample/">
+    <File Path="docs/sample/sample-image.png" />
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/QuickER.Generator/QuickER.Generator.csproj" />
