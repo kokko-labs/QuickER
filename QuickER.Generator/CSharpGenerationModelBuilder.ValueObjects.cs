@@ -1,3 +1,4 @@
+using QuickER.Model;
 namespace QuickER.Generator;
 
 /// <summary>
@@ -12,14 +13,14 @@ internal sealed partial class CSharpGenerationModelBuilder
 {
     /// <summary>1 つの値オブジェクトへ集約される列のメンバー（所属テーブル・列・解決済み C# 型）</summary>
     private readonly record struct ValueObjectMember(
-        EntityDefinition Entity,
-        ColumnDefinition Column,
+        Entity Entity,
+        Column Column,
         CSharpTypeInfo TypeInfo
     );
 
     /// <summary>ER 図全体から値オブジェクト定義を構築する（GenerateValueObjects が OFF のときは空）</summary>
     private IReadOnlyDictionary<string, CSharpValueObjectModel> BuildValueObjects(
-        DiagramDefinition diagram,
+        ErDiagram diagram,
         CodeGenerationOptions options,
         ICollection<GenerationDiagnostic> diagnostics
     )
@@ -42,7 +43,7 @@ internal sealed partial class CSharpGenerationModelBuilder
                     groups[key] = list;
                 }
 
-                list.Add(new ValueObjectMember(entity, column, _typeMapper.Map(column.DataType)));
+                list.Add(new ValueObjectMember(entity, column, _columnTypes[column.Id]));
             }
         }
 
@@ -112,14 +113,14 @@ internal sealed partial class CSharpGenerationModelBuilder
     }
 
     /// <summary>列名（正規化キー）から対応する値オブジェクトを引く。VO 化対象外なら null</summary>
-    private CSharpValueObjectModel? ResolveValueObject(ColumnDefinition column) =>
+    private CSharpValueObjectModel? ResolveValueObject(Column column) =>
         _valueObjects.TryGetValue(_nameConverter.ToColumnKey(column.Name), out var model)
             ? model
             : null;
 
     /// <summary>VO 化された列の EditModel プロパティ生成モデルを構築する（確定値は常に VO?、バインド setter は TryCreate で検証）</summary>
     private CSharpEditModelPropertyModel BuildValueObjectEditModelProperty(
-        ColumnDefinition column,
+        Column column,
         CSharpValueObjectModel valueObject
     )
     {

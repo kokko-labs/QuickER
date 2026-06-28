@@ -1,3 +1,4 @@
+using QuickER.Model;
 using QuickER.Generator;
 using FluentAssertions;
 
@@ -15,17 +16,17 @@ public class CSharpCodeGenerationServiceTests
     public void Generate_ShouldCreateSingleGeneratedFileWithEntityAndEditModel()
     {
         var customerId = Guid.NewGuid();
-        var diagram = new DiagramDefinition
+        var diagram = new ErDiagram
         {
             Entities =
             [
-                new EntityDefinition
+                new Entity
                 {
                     Id = Guid.NewGuid(),
                     TableName = "customers",
                     Columns =
                     [
-                        new ColumnDefinition
+                        new Column
                         {
                             Id = customerId,
                             Name = "customer_id",
@@ -33,7 +34,7 @@ public class CSharpCodeGenerationServiceTests
                             IsPrimaryKey = true,
                             IsNullable = false,
                         },
-                        new ColumnDefinition
+                        new Column
                         {
                             Id = Guid.NewGuid(),
                             Name = "name",
@@ -89,17 +90,17 @@ public class CSharpCodeGenerationServiceTests
         var order = Guid.NewGuid();
         var customerId = Guid.NewGuid();
         var orderCustomerId = Guid.NewGuid();
-        var diagram = new DiagramDefinition
+        var diagram = new ErDiagram
         {
             Entities =
             [
-                new EntityDefinition
+                new Entity
                 {
                     Id = customer,
                     TableName = "customers",
                     Columns =
                     [
-                        new ColumnDefinition
+                        new Column
                         {
                             Id = customerId,
                             Name = "customer_id",
@@ -109,13 +110,13 @@ public class CSharpCodeGenerationServiceTests
                         },
                     ],
                 },
-                new EntityDefinition
+                new Entity
                 {
                     Id = order,
                     TableName = "orders",
                     Columns =
                     [
-                        new ColumnDefinition
+                        new Column
                         {
                             Id = Guid.NewGuid(),
                             Name = "order_id",
@@ -123,7 +124,7 @@ public class CSharpCodeGenerationServiceTests
                             IsPrimaryKey = true,
                             IsNullable = false,
                         },
-                        new ColumnDefinition
+                        new Column
                         {
                             Id = orderCustomerId,
                             Name = "customer_id",
@@ -136,12 +137,12 @@ public class CSharpCodeGenerationServiceTests
             ],
             Relationships =
             [
-                new RelationshipDefinition
+                new Relationship
                 {
                     Id = Guid.NewGuid(),
                     SourceEntityId = customer,
                     TargetEntityId = order,
-                    Type = RelationshipMultiplicity.OneToMany,
+                    Type = RelationshipType.OneToMany,
                     SourceColumnId = customerId,
                     TargetColumnId = orderCustomerId,
                 },
@@ -378,17 +379,17 @@ public class CSharpCodeGenerationServiceTests
         var item = Guid.NewGuid();
         var categoryId = Guid.NewGuid();
         var itemCategoryId = Guid.NewGuid();
-        var diagram = new DiagramDefinition
+        var diagram = new ErDiagram
         {
             Entities =
             [
-                new EntityDefinition
+                new Entity
                 {
                     Id = category,
                     TableName = "AirconditionerCategory",
                     Columns =
                     [
-                        new ColumnDefinition
+                        new Column
                         {
                             Id = categoryId,
                             Name = "AirconditionerCategoryId",
@@ -398,13 +399,13 @@ public class CSharpCodeGenerationServiceTests
                         },
                     ],
                 },
-                new EntityDefinition
+                new Entity
                 {
                     Id = item,
                     TableName = "Airconditioner",
                     Columns =
                     [
-                        new ColumnDefinition
+                        new Column
                         {
                             Id = Guid.NewGuid(),
                             Name = "AirconditionerId",
@@ -412,7 +413,7 @@ public class CSharpCodeGenerationServiceTests
                             IsPrimaryKey = true,
                             IsNullable = false,
                         },
-                        new ColumnDefinition
+                        new Column
                         {
                             Id = itemCategoryId,
                             Name = "AirconditionerCategoryId",
@@ -425,12 +426,12 @@ public class CSharpCodeGenerationServiceTests
             ],
             Relationships =
             [
-                new RelationshipDefinition
+                new Relationship
                 {
                     Id = Guid.NewGuid(),
                     SourceEntityId = category,
                     TargetEntityId = item,
-                    Type = RelationshipMultiplicity.OneToMany,
+                    Type = RelationshipType.OneToMany,
                     SourceColumnId = categoryId,
                     TargetColumnId = itemCategoryId,
                 },
@@ -465,17 +466,17 @@ public class CSharpCodeGenerationServiceTests
     [Fact]
     public void Generate_ShouldConvertSnakeCaseTableNamesToPascalCaseEntityNames()
     {
-        var diagram = new DiagramDefinition
+        var diagram = new ErDiagram
         {
             Entities =
             [
-                new EntityDefinition
+                new Entity
                 {
                     Id = Guid.NewGuid(),
                     TableName = "airconditioner_category",
                     Columns =
                     [
-                        new ColumnDefinition
+                        new Column
                         {
                             Id = Guid.NewGuid(),
                             Name = "airconditioner_category_id",
@@ -514,17 +515,17 @@ public class CSharpCodeGenerationServiceTests
     {
         var left = Guid.NewGuid();
         var right = Guid.NewGuid();
-        var diagram = new DiagramDefinition
+        var diagram = new ErDiagram
         {
             Entities =
             [
-                new EntityDefinition
+                new Entity
                 {
                     Id = left,
                     TableName = "users",
                     Columns =
                     [
-                        new ColumnDefinition
+                        new Column
                         {
                             Id = Guid.NewGuid(),
                             Name = "user_id",
@@ -534,13 +535,13 @@ public class CSharpCodeGenerationServiceTests
                         },
                     ],
                 },
-                new EntityDefinition
+                new Entity
                 {
                     Id = right,
                     TableName = "roles",
                     Columns =
                     [
-                        new ColumnDefinition
+                        new Column
                         {
                             Id = Guid.NewGuid(),
                             Name = "role_id",
@@ -553,12 +554,12 @@ public class CSharpCodeGenerationServiceTests
             ],
             Relationships =
             [
-                new RelationshipDefinition
+                new Relationship
                 {
                     Id = Guid.NewGuid(),
                     SourceEntityId = left,
                     TargetEntityId = right,
-                    Type = RelationshipMultiplicity.ManyToMany,
+                    Type = RelationshipType.ManyToMany,
                 },
             ],
         };
@@ -582,17 +583,17 @@ public class CSharpCodeGenerationServiceTests
     [Fact]
     public void Generate_ShouldCreateMapperClass()
     {
-        var diagram = new DiagramDefinition
+        var diagram = new ErDiagram
         {
             Entities =
             [
-                new EntityDefinition
+                new Entity
                 {
                     Id = Guid.NewGuid(),
                     TableName = "products",
                     Columns =
                     [
-                        new ColumnDefinition
+                        new Column
                         {
                             Id = Guid.NewGuid(),
                             Name = "product_id",
@@ -600,7 +601,7 @@ public class CSharpCodeGenerationServiceTests
                             IsPrimaryKey = true,
                             IsNullable = false,
                         },
-                        new ColumnDefinition
+                        new Column
                         {
                             Id = Guid.NewGuid(),
                             Name = "name",
@@ -686,17 +687,17 @@ public class CSharpCodeGenerationServiceTests
     [Fact]
     public void Generate_EditModel_ShouldContainRevertInputMethod()
     {
-        var diagram = new DiagramDefinition
+        var diagram = new ErDiagram
         {
             Entities =
             [
-                new EntityDefinition
+                new Entity
                 {
                     Id = Guid.NewGuid(),
                     TableName = "orders",
                     Columns =
                     [
-                        new ColumnDefinition
+                        new Column
                         {
                             Id = Guid.NewGuid(),
                             Name = "order_id",
@@ -704,7 +705,7 @@ public class CSharpCodeGenerationServiceTests
                             IsPrimaryKey = true,
                             IsNullable = false,
                         },
-                        new ColumnDefinition
+                        new Column
                         {
                             Id = Guid.NewGuid(),
                             Name = "amount",
@@ -846,7 +847,7 @@ public class CSharpCodeGenerationServiceTests
         var lineOrderFk = Guid.NewGuid();
         var lineProductFk = Guid.NewGuid();
 
-        static ColumnDefinition Pk(Guid id, string name) =>
+        static Column Pk(Guid id, string name) =>
             new()
             {
                 Id = id,
@@ -855,7 +856,7 @@ public class CSharpCodeGenerationServiceTests
                 IsPrimaryKey = true,
                 IsNullable = false,
             };
-        static ColumnDefinition Fk(Guid id, string name) =>
+        static Column Fk(Guid id, string name) =>
             new()
             {
                 Id = id,
@@ -865,7 +866,7 @@ public class CSharpCodeGenerationServiceTests
                 IsNullable = false,
             };
 
-        var diagram = new DiagramDefinition
+        var diagram = new ErDiagram
         {
             Entities =
             [
@@ -921,7 +922,7 @@ public class CSharpCodeGenerationServiceTests
                 new()
                 {
                     Id = Guid.NewGuid(),
-                    Type = RelationshipMultiplicity.OneToOne,
+                    Type = RelationshipType.OneToOne,
                     SourceEntityId = owner,
                     TargetEntityId = profile,
                     SourceColumnId = ownerPk,
@@ -931,7 +932,7 @@ public class CSharpCodeGenerationServiceTests
                 new()
                 {
                     Id = Guid.NewGuid(),
-                    Type = RelationshipMultiplicity.OneToMany,
+                    Type = RelationshipType.OneToMany,
                     SourceEntityId = category,
                     TargetEntityId = category,
                     SourceColumnId = categoryPk,
@@ -941,7 +942,7 @@ public class CSharpCodeGenerationServiceTests
                 new()
                 {
                     Id = Guid.NewGuid(),
-                    Type = RelationshipMultiplicity.OneToMany,
+                    Type = RelationshipType.OneToMany,
                     SourceEntityId = salesOrder,
                     TargetEntityId = lineItem,
                     SourceColumnId = salesOrderPk,
@@ -950,7 +951,7 @@ public class CSharpCodeGenerationServiceTests
                 new()
                 {
                     Id = Guid.NewGuid(),
-                    Type = RelationshipMultiplicity.OneToMany,
+                    Type = RelationshipType.OneToMany,
                     SourceEntityId = product,
                     TargetEntityId = lineItem,
                     SourceColumnId = productPk,
@@ -995,17 +996,17 @@ public class CSharpCodeGenerationServiceTests
     [Fact]
     public void Generate_ShouldCreateRepositoryInfrastructure()
     {
-        var diagram = new DiagramDefinition
+        var diagram = new ErDiagram
         {
             Entities =
             [
-                new EntityDefinition
+                new Entity
                 {
                     Id = Guid.NewGuid(),
                     TableName = "customers",
                     Columns =
                     [
-                        new ColumnDefinition
+                        new Column
                         {
                             Id = Guid.NewGuid(),
                             Name = "customer_id",
@@ -1013,7 +1014,7 @@ public class CSharpCodeGenerationServiceTests
                             IsPrimaryKey = true,
                             IsNullable = false,
                         },
-                        new ColumnDefinition
+                        new Column
                         {
                             Id = Guid.NewGuid(),
                             Name = "name",
@@ -1245,17 +1246,17 @@ public class CSharpCodeGenerationServiceTests
         var order = Guid.NewGuid();
         var customerId = Guid.NewGuid();
         var orderCustomerId = Guid.NewGuid();
-        var diagram = new DiagramDefinition
+        var diagram = new ErDiagram
         {
             Entities =
             [
-                new EntityDefinition
+                new Entity
                 {
                     Id = customer,
                     TableName = "customers",
                     Columns =
                     [
-                        new ColumnDefinition
+                        new Column
                         {
                             Id = customerId,
                             Name = "customer_id",
@@ -1263,7 +1264,7 @@ public class CSharpCodeGenerationServiceTests
                             IsPrimaryKey = true,
                             IsNullable = false,
                         },
-                        new ColumnDefinition
+                        new Column
                         {
                             Id = Guid.NewGuid(),
                             Name = "name",
@@ -1272,13 +1273,13 @@ public class CSharpCodeGenerationServiceTests
                         },
                     ],
                 },
-                new EntityDefinition
+                new Entity
                 {
                     Id = order,
                     TableName = "orders",
                     Columns =
                     [
-                        new ColumnDefinition
+                        new Column
                         {
                             Id = Guid.NewGuid(),
                             Name = "order_id",
@@ -1286,7 +1287,7 @@ public class CSharpCodeGenerationServiceTests
                             IsPrimaryKey = true,
                             IsNullable = false,
                         },
-                        new ColumnDefinition
+                        new Column
                         {
                             Id = orderCustomerId,
                             Name = "customer_id",
@@ -1299,12 +1300,12 @@ public class CSharpCodeGenerationServiceTests
             ],
             Relationships =
             [
-                new RelationshipDefinition
+                new Relationship
                 {
                     Id = Guid.NewGuid(),
                     SourceEntityId = customer,
                     TargetEntityId = order,
-                    Type = RelationshipMultiplicity.OneToMany,
+                    Type = RelationshipType.OneToMany,
                     SourceColumnId = customerId,
                     TargetColumnId = orderCustomerId,
                 },
@@ -1337,17 +1338,17 @@ public class CSharpCodeGenerationServiceTests
     [Fact]
     public void Generate_EditModel_WithBinaryAndValueTypes_ShouldUseSafeBindingConversions()
     {
-        var diagram = new DiagramDefinition
+        var diagram = new ErDiagram
         {
             Entities =
             [
-                new EntityDefinition
+                new Entity
                 {
                     Id = Guid.NewGuid(),
                     TableName = "files",
                     Columns =
                     [
-                        new ColumnDefinition
+                        new Column
                         {
                             Id = Guid.NewGuid(),
                             Name = "file_id",
@@ -1355,14 +1356,14 @@ public class CSharpCodeGenerationServiceTests
                             IsPrimaryKey = true,
                             IsNullable = false,
                         },
-                        new ColumnDefinition
+                        new Column
                         {
                             Id = Guid.NewGuid(),
                             Name = "is_active",
                             DataType = "bit",
                             IsNullable = false,
                         },
-                        new ColumnDefinition
+                        new Column
                         {
                             Id = Guid.NewGuid(),
                             Name = "filedata",
@@ -1414,17 +1415,17 @@ public class CSharpCodeGenerationServiceTests
     [Fact]
     public void Generate_EntityOnly_ShouldNotContainUiModelOrMapper()
     {
-        var diagram = new DiagramDefinition
+        var diagram = new ErDiagram
         {
             Entities =
             [
-                new EntityDefinition
+                new Entity
                 {
                     Id = Guid.NewGuid(),
                     TableName = "items",
                     Columns =
                     [
-                        new ColumnDefinition
+                        new Column
                         {
                             Id = Guid.NewGuid(),
                             Name = "item_id",
@@ -1459,13 +1460,13 @@ public class CSharpCodeGenerationServiceTests
     {
         var entities = Enumerable
             .Range(1, 1100)
-            .Select(index => new EntityDefinition
+            .Select(index => new Entity
             {
                 Id = Guid.NewGuid(),
                 TableName = $"items_{index}",
                 Columns =
                 [
-                    new ColumnDefinition
+                    new Column
                     {
                         Id = Guid.NewGuid(),
                         Name = "item_id",
@@ -1477,7 +1478,7 @@ public class CSharpCodeGenerationServiceTests
             })
             .ToList();
 
-        var diagram = new DiagramDefinition { Entities = entities };
+        var diagram = new ErDiagram { Entities = entities };
         var options = new CodeGenerationOptions
         {
             NamespaceName = "Sample.Domain",
@@ -1573,17 +1574,17 @@ public class CSharpCodeGenerationServiceTests
     {
         var left = Guid.NewGuid();
         var right = Guid.NewGuid();
-        var diagram = new DiagramDefinition
+        var diagram = new ErDiagram
         {
             Entities =
             [
-                new EntityDefinition
+                new Entity
                 {
                     Id = left,
                     TableName = "users",
                     Columns =
                     [
-                        new ColumnDefinition
+                        new Column
                         {
                             Id = Guid.NewGuid(),
                             Name = "user_id",
@@ -1593,13 +1594,13 @@ public class CSharpCodeGenerationServiceTests
                         },
                     ],
                 },
-                new EntityDefinition
+                new Entity
                 {
                     Id = right,
                     TableName = "roles",
                     Columns =
                     [
-                        new ColumnDefinition
+                        new Column
                         {
                             Id = Guid.NewGuid(),
                             Name = "role_id",
@@ -1612,12 +1613,12 @@ public class CSharpCodeGenerationServiceTests
             ],
             Relationships =
             [
-                new RelationshipDefinition
+                new Relationship
                 {
                     Id = Guid.NewGuid(),
                     SourceEntityId = left,
                     TargetEntityId = right,
-                    Type = RelationshipMultiplicity.ManyToMany,
+                    Type = RelationshipType.ManyToMany,
                 },
             ],
         };
@@ -1638,17 +1639,17 @@ public class CSharpCodeGenerationServiceTests
     [Fact]
     public void Generate_NullableBinaryColumn_ShouldUseNullableByteArray()
     {
-        var diagram = new DiagramDefinition
+        var diagram = new ErDiagram
         {
             Entities =
             [
-                new EntityDefinition
+                new Entity
                 {
                     Id = Guid.NewGuid(),
                     TableName = "files",
                     Columns =
                     [
-                        new ColumnDefinition
+                        new Column
                         {
                             Id = Guid.NewGuid(),
                             Name = "file_id",
@@ -1656,7 +1657,7 @@ public class CSharpCodeGenerationServiceTests
                             IsPrimaryKey = true,
                             IsNullable = false,
                         },
-                        new ColumnDefinition
+                        new Column
                         {
                             Id = Guid.NewGuid(),
                             Name = "photo",
@@ -1689,13 +1690,13 @@ public class CSharpCodeGenerationServiceTests
         // 全生成対象を有効にした 200 エンティティで出力は 1MB を大きく超える（Scriban 既定上限超過の回帰確認）
         var entities = Enumerable
             .Range(1, 200)
-            .Select(index => new EntityDefinition
+            .Select(index => new Entity
             {
                 Id = Guid.NewGuid(),
                 TableName = $"table_{index}",
                 Columns =
                 [
-                    new ColumnDefinition
+                    new Column
                     {
                         Id = Guid.NewGuid(),
                         Name = "id",
@@ -1703,21 +1704,21 @@ public class CSharpCodeGenerationServiceTests
                         IsPrimaryKey = true,
                         IsNullable = false,
                     },
-                    new ColumnDefinition
+                    new Column
                     {
                         Id = Guid.NewGuid(),
                         Name = "name",
                         DataType = "nvarchar(100)",
                         IsNullable = false,
                     },
-                    new ColumnDefinition
+                    new Column
                     {
                         Id = Guid.NewGuid(),
                         Name = "amount",
                         DataType = "decimal",
                         IsNullable = true,
                     },
-                    new ColumnDefinition
+                    new Column
                     {
                         Id = Guid.NewGuid(),
                         Name = "created_at",
@@ -1729,7 +1730,7 @@ public class CSharpCodeGenerationServiceTests
             .ToList();
 
         var result = new CSharpCodeGenerationService().Generate(
-            new DiagramDefinition { Entities = entities },
+            new ErDiagram { Entities = entities },
             new CodeGenerationOptions { NamespaceName = "Sample.Domain" }
         );
 
@@ -1751,17 +1752,17 @@ public class CSharpCodeGenerationServiceTests
     [Fact]
     public void Generate_EditModel_ShouldGenerateChangeHookPartialMethods()
     {
-        var diagram = new DiagramDefinition
+        var diagram = new ErDiagram
         {
             Entities =
             [
-                new EntityDefinition
+                new Entity
                 {
                     Id = Guid.NewGuid(),
                     TableName = "customers",
                     Columns =
                     [
-                        new ColumnDefinition
+                        new Column
                         {
                             Id = Guid.NewGuid(),
                             Name = "customer_id",
@@ -1769,7 +1770,7 @@ public class CSharpCodeGenerationServiceTests
                             IsPrimaryKey = true,
                             IsNullable = false,
                         },
-                        new ColumnDefinition
+                        new Column
                         {
                             Id = Guid.NewGuid(),
                             Name = "name",
@@ -1825,18 +1826,18 @@ public class CSharpCodeGenerationServiceTests
     }
 
     /// <summary>主キー 1 列のみを持つ単純なエンティティ 1 件のダイアグラムを生成する</summary>
-    private static DiagramDefinition SingleEntityDiagram() =>
+    private static ErDiagram SingleEntityDiagram() =>
         new()
         {
             Entities =
             [
-                new EntityDefinition
+                new Entity
                 {
                     Id = Guid.NewGuid(),
                     TableName = "items",
                     Columns =
                     [
-                        new ColumnDefinition
+                        new Column
                         {
                             Id = Guid.NewGuid(),
                             Name = "item_id",
@@ -1975,17 +1976,17 @@ public class CSharpCodeGenerationServiceTests
     [Fact]
     public void Generate_ValueObjects_GuidKey_ShouldUseGuidKeyBaseForStringPrimaryKey()
     {
-        var diagram = new DiagramDefinition
+        var diagram = new ErDiagram
         {
             Entities =
             [
-                new EntityDefinition
+                new Entity
                 {
                     Id = Guid.NewGuid(),
                     TableName = "documents",
                     Columns =
                     [
-                        new ColumnDefinition
+                        new Column
                         {
                             Id = Guid.NewGuid(),
                             Name = "document_id",
@@ -1993,7 +1994,7 @@ public class CSharpCodeGenerationServiceTests
                             IsPrimaryKey = true,
                             IsNullable = false,
                         },
-                        new ColumnDefinition
+                        new Column
                         {
                             Id = Guid.NewGuid(),
                             Name = "title",
@@ -2026,17 +2027,17 @@ public class CSharpCodeGenerationServiceTests
     [Fact]
     public void Generate_ValueObjects_ConflictingSameNameColumns_ShouldWarnButGenerate()
     {
-        var diagram = new DiagramDefinition
+        var diagram = new ErDiagram
         {
             Entities =
             [
-                new EntityDefinition
+                new Entity
                 {
                     Id = Guid.NewGuid(),
                     TableName = "customers",
                     Columns =
                     [
-                        new ColumnDefinition
+                        new Column
                         {
                             Id = Guid.NewGuid(),
                             Name = "customer_id",
@@ -2044,7 +2045,7 @@ public class CSharpCodeGenerationServiceTests
                             IsPrimaryKey = true,
                             IsNullable = false,
                         },
-                        new ColumnDefinition
+                        new Column
                         {
                             Id = Guid.NewGuid(),
                             Name = "name",
@@ -2053,13 +2054,13 @@ public class CSharpCodeGenerationServiceTests
                         },
                     ],
                 },
-                new EntityDefinition
+                new Entity
                 {
                     Id = Guid.NewGuid(),
                     TableName = "products",
                     Columns =
                     [
-                        new ColumnDefinition
+                        new Column
                         {
                             Id = Guid.NewGuid(),
                             Name = "product_id",
@@ -2067,7 +2068,7 @@ public class CSharpCodeGenerationServiceTests
                             IsPrimaryKey = true,
                             IsNullable = false,
                         },
-                        new ColumnDefinition
+                        new Column
                         {
                             Id = Guid.NewGuid(),
                             Name = "name",
@@ -2106,23 +2107,23 @@ public class CSharpCodeGenerationServiceTests
     }
 
     /// <summary>VO 生成テスト用の代表的なダイアグラム（PK/FK 共有・各種型を含む）</summary>
-    private static DiagramDefinition ValueObjectDiagram()
+    private static ErDiagram ValueObjectDiagram()
     {
         var customer = Guid.NewGuid();
         var order = Guid.NewGuid();
         var custPk = Guid.NewGuid();
         var orderFk = Guid.NewGuid();
-        return new DiagramDefinition
+        return new ErDiagram
         {
             Entities =
             [
-                new EntityDefinition
+                new Entity
                 {
                     Id = customer,
                     TableName = "customers",
                     Columns =
                     [
-                        new ColumnDefinition
+                        new Column
                         {
                             Id = custPk,
                             Name = "customer_id",
@@ -2130,28 +2131,28 @@ public class CSharpCodeGenerationServiceTests
                             IsPrimaryKey = true,
                             IsNullable = false,
                         },
-                        new ColumnDefinition
+                        new Column
                         {
                             Id = Guid.NewGuid(),
                             Name = "name",
                             DataType = "nvarchar(50)",
                             IsNullable = false,
                         },
-                        new ColumnDefinition
+                        new Column
                         {
                             Id = Guid.NewGuid(),
                             Name = "balance",
                             DataType = "decimal(10,2)",
                             IsNullable = true,
                         },
-                        new ColumnDefinition
+                        new Column
                         {
                             Id = Guid.NewGuid(),
                             Name = "photo",
                             DataType = "varbinary(max)",
                             IsNullable = true,
                         },
-                        new ColumnDefinition
+                        new Column
                         {
                             Id = Guid.NewGuid(),
                             Name = "is_active",
@@ -2160,13 +2161,13 @@ public class CSharpCodeGenerationServiceTests
                         },
                     ],
                 },
-                new EntityDefinition
+                new Entity
                 {
                     Id = order,
                     TableName = "orders",
                     Columns =
                     [
-                        new ColumnDefinition
+                        new Column
                         {
                             Id = Guid.NewGuid(),
                             Name = "order_id",
@@ -2174,7 +2175,7 @@ public class CSharpCodeGenerationServiceTests
                             IsPrimaryKey = true,
                             IsNullable = false,
                         },
-                        new ColumnDefinition
+                        new Column
                         {
                             Id = orderFk,
                             Name = "customer_id",
@@ -2187,14 +2188,14 @@ public class CSharpCodeGenerationServiceTests
             ],
             Relationships =
             [
-                new RelationshipDefinition
+                new Relationship
                 {
                     Id = Guid.NewGuid(),
                     SourceEntityId = customer,
                     SourceColumnId = custPk,
                     TargetEntityId = order,
                     TargetColumnId = orderFk,
-                    Type = RelationshipMultiplicity.OneToMany,
+                    Type = RelationshipType.OneToMany,
                 },
             ],
         };

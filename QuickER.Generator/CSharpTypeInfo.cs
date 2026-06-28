@@ -4,7 +4,7 @@ namespace QuickER.Generator;
 /// SQL Server 型から解決された C# 型の情報
 /// </summary>
 /// <remarks><see cref="SqlServerCSharpTypeMapper"/> が生成し、Nullable 注釈の付与や [MaxLength] 属性の判定に使う</remarks>
-internal sealed class CSharpTypeInfo
+public sealed class CSharpTypeInfo
 {
     /// <summary>C# の型名（例: int, string, byte[]）。Nullable 注釈 "?" は含まない</summary>
     public required string TypeName { get; init; }

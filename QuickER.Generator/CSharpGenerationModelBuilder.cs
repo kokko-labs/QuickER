@@ -1,3 +1,4 @@
+using QuickER.Model;
 namespace QuickER.Generator;
 
 /// <summary>ER 図定義からテンプレート用の C# コード生成モデルを構築するビルダー</summary>
@@ -10,8 +11,10 @@ internal sealed partial class CSharpGenerationModelBuilder
     /// <summary>テーブル名・カラム名を C# 識別子へ変換するコンバーター</summary>
     private readonly CSharpNameConverter _nameConverter = new();
 
-    /// <summary>SQL Server 型を C# 型へ対応付けるマッパー</summary>
-    private readonly SqlServerCSharpTypeMapper _typeMapper = new();
+    /// <summary>カラム ID → 解決済み C# 型情報。Build 呼び出し時に外部（SQL Server プロバイダ等）から受け取る。
+    /// 生成器自体は DB 非依存で、SQL 型のマッピングは行わない</summary>
+    private IReadOnlyDictionary<Guid, CSharpTypeInfo> _columnTypes =
+        new Dictionary<Guid, CSharpTypeInfo>();
 
     /// <summary>ER 図定義とオプションから生成モデル全体を構築する</summary>
     /// <param name="diagnostics">生成中に検出した警告などを蓄積する出力先</param>
@@ -22,11 +25,13 @@ internal sealed partial class CSharpGenerationModelBuilder
     /// また生成対象として無効なクラス群は構築自体を行わない。
     /// </remarks>
     public CSharpGenerationModel Build(
-        DiagramDefinition diagram,
+        ErDiagram diagram,
+        IReadOnlyDictionary<Guid, CSharpTypeInfo> columnTypes,
         CodeGenerationOptions options,
         ICollection<GenerationDiagnostic> diagnostics
     )
     {
+        _columnTypes = columnTypes;
         var navigationsByEntity = ResolveAllNavigations(diagram, diagnostics);
         _valueObjects = BuildValueObjects(diagram, options, diagnostics);
 
@@ -72,7 +77,7 @@ internal sealed partial class CSharpGenerationModelBuilder
 
     /// <summary>エンティティ定義と解決済みナビゲーションからエンティティクラスの生成モデルを構築する</summary>
     private CSharpClassModel BuildEntityClass(
-        EntityDefinition entity,
+        Entity entity,
         IReadOnlyList<NavigationInfo> navigations
     )
     {
@@ -90,7 +95,7 @@ internal sealed partial class CSharpGenerationModelBuilder
 
     /// <summary>エンティティ定義と解決済みナビゲーションから EditModel クラスの生成モデルを構築する</summary>
     private CSharpEditModelClassModel BuildEditModelClass(
-        EntityDefinition entity,
+        Entity entity,
         IReadOnlyList<NavigationInfo> navigations
     )
     {
@@ -141,7 +146,7 @@ internal sealed partial class CSharpGenerationModelBuilder
 
     /// <summary>エンティティ定義と解決済みナビゲーションから Entity ↔ EditModel 変換 Mapper の生成モデルを構築する</summary>
     private CSharpMapperModel BuildMapperClass(
-        EntityDefinition entity,
+        Entity entity,
         IReadOnlyList<NavigationInfo> navigations
     )
     {
@@ -189,7 +194,7 @@ internal sealed partial class CSharpGenerationModelBuilder
     /// <summary>エンティティ定義から Repository の生成モデルを構築する</summary>
     /// <returns>単一主キーを持たないテーブルは対象外として null を返す</returns>
     private CSharpRepositoryModel? BuildRepositoryClass(
-        EntityDefinition entity,
+        Entity entity,
         ICollection<GenerationDiagnostic> diagnostics
     )
     {
@@ -222,9 +227,9 @@ internal sealed partial class CSharpGenerationModelBuilder
     }
 
     /// <summary>カラム定義からエンティティのスカラープロパティ生成モデルを構築する</summary>
-    private CSharpPropertyModel BuildProperty(ColumnDefinition column)
+    private CSharpPropertyModel BuildProperty(Column column)
     {
-        var typeInfo = _typeMapper.Map(column.DataType);
+        var typeInfo = _columnTypes[column.Id];
         var valueObject = ResolveValueObject(column);
 
         // 値オブジェクト生成時は列の C# 型を VO 型へ置き換える（VO は参照型）。
@@ -265,9 +270,9 @@ internal sealed partial class CSharpGenerationModelBuilder
     /// EditModel は入力途中の不正値も保持するため、値型・文字列・バイナリは原則 NULL 許容とし、
     /// 確定値プロパティと UI バインディング用文字列プロパティの両方の情報を組み立てる
     /// </remarks>
-    private CSharpEditModelPropertyModel BuildEditModelProperty(ColumnDefinition column)
+    private CSharpEditModelPropertyModel BuildEditModelProperty(Column column)
     {
-        var typeInfo = _typeMapper.Map(column.DataType);
+        var typeInfo = _columnTypes[column.Id];
         var valueObject = ResolveValueObject(column);
         if (valueObject is not null)
         {
@@ -469,7 +474,7 @@ internal sealed partial class CSharpGenerationModelBuilder
     /// 警告はリレーション単位で 1 回だけ追加されるため、従来のような重複は発生しない。
     /// </remarks>
     private Dictionary<Guid, List<NavigationInfo>> ResolveAllNavigations(
-        DiagramDefinition diagram,
+        ErDiagram diagram,
         ICollection<GenerationDiagnostic> diagnostics
     )
     {
@@ -481,7 +486,7 @@ internal sealed partial class CSharpGenerationModelBuilder
         foreach (var relationship in diagram.Relationships)
         {
             // 多対多は中間テーブルを介する設計のため C# 生成では直接ナビゲーションを作らない
-            if (relationship.Type == RelationshipMultiplicity.ManyToMany)
+            if (relationship.Type == RelationshipType.ManyToMany)
             {
                 diagnostics.Add(
                     Warning(
@@ -534,7 +539,7 @@ internal sealed partial class CSharpGenerationModelBuilder
                 continue;
             }
 
-            var isCollection = relationship.Type == RelationshipMultiplicity.OneToMany;
+            var isCollection = relationship.Type == RelationshipType.OneToMany;
 
             // source 側（親）は子へのナビゲーション（1 対多なら collection）を持つ
             navigationsByEntity[source.Id]

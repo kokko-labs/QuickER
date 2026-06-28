@@ -1,3 +1,4 @@
+using QuickER.Model;
 namespace QuickER.Generator;
 
 /// <summary>
@@ -20,11 +21,18 @@ public sealed class CSharpCodeGenerationService
     /// ER 図定義から C# コードを生成する
     /// </summary>
     /// <param name="diagram">生成元の ER 図定義</param>
+    /// <param name="columnTypes">カラム ID → 解決済み C# 型情報。生成器は DB 非依存のため、SQL 型の解決は
+    /// 呼び出し側（<c>QuickER.SqlServer</c> 等のプロバイダ）が行って渡す</param>
     /// <param name="options">生成対象や属性付与を制御するオプション</param>
     /// <returns>生成ファイルと診断情報。検証でエラーがあった場合はファイルを含まず診断のみを返す</returns>
-    public CodeGenerationResult Generate(DiagramDefinition diagram, CodeGenerationOptions options)
+    public CodeGenerationResult Generate(
+        ErDiagram diagram,
+        IReadOnlyDictionary<Guid, CSharpTypeInfo> columnTypes,
+        CodeGenerationOptions options
+    )
     {
         ArgumentNullException.ThrowIfNull(diagram);
+        ArgumentNullException.ThrowIfNull(columnTypes);
         ArgumentNullException.ThrowIfNull(options);
 
         var diagnostics = new List<GenerationDiagnostic>();
@@ -38,7 +46,7 @@ public sealed class CSharpCodeGenerationService
             return new CodeGenerationResult { Files = [], Diagnostics = diagnostics };
         }
 
-        var model = _modelBuilder.Build(diagram, options, diagnostics);
+        var model = _modelBuilder.Build(diagram, columnTypes, options, diagnostics);
 
         // 出力ファイルの構成（非分割=1 ファイル、分割=カテゴリごと）を決め、各ファイルを範囲を絞って描画する
         var files = GeneratedFilePlanner
@@ -96,7 +104,7 @@ public sealed class CSharpCodeGenerationService
     /// 警告: 複合主キー（[Key] 属性の生成が最小限になる）
     /// </remarks>
     private static void Validate(
-        DiagramDefinition diagram,
+        ErDiagram diagram,
         CodeGenerationOptions options,
         ICollection<GenerationDiagnostic> diagnostics
     )

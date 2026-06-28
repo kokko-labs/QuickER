@@ -11,5 +11,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\QuickER.Model\QuickER.Model.csproj" />
+    <ProjectReference Include="..\QuickER.Generator\QuickER.Generator.csproj" />
   </ItemGroup>
 </Project>

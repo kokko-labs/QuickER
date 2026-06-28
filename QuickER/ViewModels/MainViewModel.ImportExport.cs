@@ -185,7 +185,10 @@ public partial class MainViewModel
         {
             var service = new CSharpCodeGenerationService();
             var options = dialogResult.Options;
-            var result = service.Generate(ToGeneratorDiagram(), options);
+            // 生成器は DB 非依存。SQL Server 型の解決はプロバイダ（QuickER.SqlServer）で行って渡す
+            var diagram = ToDiagramModel();
+            var columnTypes = SqlServerCSharpTypeMapper.ResolveColumnTypes(diagram);
+            var result = service.Generate(diagram, columnTypes, options);
 
             if (result.HasErrors)
             {
@@ -237,47 +240,6 @@ public partial class MainViewModel
             );
         }
     }
-
-    /// <summary>表示中の ER 図をコード生成用の <see cref="DiagramDefinition"/> へ変換する</summary>
-    private DiagramDefinition ToGeneratorDiagram() =>
-        new()
-        {
-            Entities = Entities
-                .Select(entity => new EntityDefinition
-                {
-                    Id = entity.Id,
-                    TableName = entity.TableName,
-                    Columns = entity
-                        .Columns.Select(column => new ColumnDefinition
-                        {
-                            Id = column.Id,
-                            Name = column.Name,
-                            DataType = column.DataType,
-                            IsPrimaryKey = column.IsPrimaryKey,
-                            IsForeignKey = column.IsForeignKey,
-                            IsNullable = column.IsNullable,
-                        })
-                        .ToList(),
-                })
-                .ToList(),
-            Relationships = Relationships
-                .Select(relationship => new RelationshipDefinition
-                {
-                    Id = relationship.Id,
-                    SourceEntityId = relationship.Source.Id,
-                    TargetEntityId = relationship.Target.Id,
-                    Type = relationship.Type switch
-                    {
-                        RelationshipType.OneToOne => RelationshipMultiplicity.OneToOne,
-                        RelationshipType.OneToMany => RelationshipMultiplicity.OneToMany,
-                        RelationshipType.ManyToMany => RelationshipMultiplicity.ManyToMany,
-                        _ => RelationshipMultiplicity.OneToMany,
-                    },
-                    SourceColumnId = relationship.SourceColumnId,
-                    TargetColumnId = relationship.TargetColumnId,
-                })
-                .ToList(),
-        };
 
     /// <summary>コード生成の診断（警告・エラー）を 1 つのメッセージ文字列へ整形する</summary>
     private static string BuildGenerationDiagnosticsMessage(CodeGenerationResult result) =>

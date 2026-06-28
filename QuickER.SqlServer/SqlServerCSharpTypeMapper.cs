@@ -1,7 +1,9 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
+using QuickER.Generator;
+using QuickER.Model;
 
-namespace QuickER.Generator;
+namespace QuickER.SqlServer;
 
 /// <summary>
 /// SQL Server のデータ型表記を C# 型へ変換するマッパー
@@ -20,8 +22,31 @@ namespace QuickER.Generator;
 /// </list>
 /// 型名は大文字小文字を区別せず、"nvarchar(50)" のような長さ指定付き表記を受け付ける
 /// </remarks>
-internal sealed partial class SqlServerCSharpTypeMapper
+public sealed partial class SqlServerCSharpTypeMapper
 {
+    /// <summary>
+    /// ER 図の全カラムの SQL Server 型を解決し、カラム ID → C# 型情報の対応表を構築する。
+    /// </summary>
+    /// <remarks>
+    /// コード生成器（<see cref="QuickER.Generator.CSharpCodeGenerationService" />）は DB 非依存で、
+    /// 解決済みの型情報を入力として受け取る。型解決という SQL Server 固有の責務はこのライブラリが担う。
+    /// </remarks>
+    public static IReadOnlyDictionary<Guid, CSharpTypeInfo> ResolveColumnTypes(ErDiagram diagram)
+    {
+        ArgumentNullException.ThrowIfNull(diagram);
+        var mapper = new SqlServerCSharpTypeMapper();
+        var result = new Dictionary<Guid, CSharpTypeInfo>();
+        foreach (var entity in diagram.Entities)
+        {
+            foreach (var column in entity.Columns)
+            {
+                result[column.Id] = mapper.Map(column.DataType);
+            }
+        }
+
+        return result;
+    }
+
     /// <summary>
     /// SQL Server のデータ型表記を C# 型情報へ変換する
     /// </summary>
