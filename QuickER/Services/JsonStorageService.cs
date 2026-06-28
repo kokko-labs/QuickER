@@ -2,7 +2,7 @@
 using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using QuickER.Models;
+using QuickER.Model;
 using QuickER.ViewModels;
 
 namespace QuickER.Services;

@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
-using QuickER.Models;
+using QuickER.Model;
 
 namespace QuickER.Services;
 

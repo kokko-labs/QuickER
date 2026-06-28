@@ -1,7 +1,7 @@
 ﻿using System.ComponentModel;
 using System.Linq;
 using CommunityToolkit.Mvvm.ComponentModel;
-using QuickER.Models;
+using QuickER.Model;
 
 namespace QuickER.ViewModels;
 

@@ -4,7 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using QuickER.Models;
+using QuickER.Model;
 using QuickER.Services;
 
 namespace QuickER.ViewModels;

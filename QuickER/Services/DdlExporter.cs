@@ -2,7 +2,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
-using QuickER.Models;
+using QuickER.Model;
 using QuickER.ViewModels;
 
 namespace QuickER.Services;
@@ -72,7 +72,7 @@ public static class DdlExporter
         foreach (var rel in vm.Relationships)
         {
             // 多対多はジャンクションテーブルが必要なのでコメントのみ出力する
-            if (rel.Type == Models.RelationshipType.ManyToMany)
+            if (rel.Type == Model.RelationshipType.ManyToMany)
             {
                 sb.AppendLine(
                     $"-- 多対多 ({rel.Source.TableName} ⇄ {rel.Target.TableName}): ジャンクションテーブルを別途定義してください。"

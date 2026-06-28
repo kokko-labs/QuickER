@@ -1,4 +1,4 @@
-﻿using QuickER.Models;
+﻿using QuickER.Model;
 using QuickER.Services;
 using FluentAssertions;
 

@@ -1,5 +1,5 @@
 ﻿using System.IO;
-using QuickER.Models;
+using QuickER.Model;
 using QuickER.Services;
 using QuickER.ViewModels;
 using FluentAssertions;

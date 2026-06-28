@@ -3,7 +3,7 @@ using System.Windows;
 using System.Windows.Media;
 using CommunityToolkit.Mvvm.Input;
 using QuickER.Generator;
-using QuickER.Models;
+using QuickER.Model;
 using QuickER.Services;
 using Microsoft.Win32;
 

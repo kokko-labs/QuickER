@@ -1,6 +1,6 @@
 ﻿using System.Collections.Generic;
 
-namespace QuickER.Models;
+namespace QuickER.Model;
 
 /// <summary>
 /// ER 図上のテーブル（エンティティ）1 件を表すモデル

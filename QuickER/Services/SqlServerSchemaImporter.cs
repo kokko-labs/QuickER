@@ -3,7 +3,7 @@ using System.Data;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using QuickER.Models;
+using QuickER.Model;
 using Microsoft.Data.SqlClient;
 
 namespace QuickER.Services;

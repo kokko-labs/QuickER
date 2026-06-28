@@ -3,7 +3,7 @@ using System.Collections.Specialized;
 using System.ComponentModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using QuickER.Models;
+using QuickER.Model;
 using QuickER.Services;
 using QuickER.UndoRedo;
 

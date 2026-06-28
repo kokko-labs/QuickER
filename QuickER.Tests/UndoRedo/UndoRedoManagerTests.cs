@@ -91,7 +91,7 @@ public class UndoRedoManagerTests
     public void Push_GroupedPropertyChanges_AreHandledAsSingleStep()
     {
         var mgr = new UndoRedoManager();
-        var entity = new EntityViewModel(new QuickER.Models.Entity { TableName = "A" });
+        var entity = new EntityViewModel(new QuickER.Model.Entity { TableName = "A" });
         var groupId = new object();
 
         entity.TableName = "B";

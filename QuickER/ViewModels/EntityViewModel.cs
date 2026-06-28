@@ -3,7 +3,7 @@ using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Linq;
 using CommunityToolkit.Mvvm.ComponentModel;
-using QuickER.Models;
+using QuickER.Model;
 using QuickER.Services;
 
 namespace QuickER.ViewModels;

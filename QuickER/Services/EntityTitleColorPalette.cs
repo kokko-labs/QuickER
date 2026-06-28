@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 using System.Windows.Media;
-using QuickER.Models;
+using QuickER.Model;
 
 namespace QuickER.Services;
 

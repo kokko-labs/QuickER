@@ -1,7 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using Anthropic.Models.Messages;
-using QuickER.Models;
+using QuickER.Model;
 using QuickER.ViewModels;
 using OpenAI.Chat;
 

@@ -1,6 +1,6 @@
 using System.IO;
 using ClosedXML.Excel;
-using QuickER.Models;
+using QuickER.Model;
 
 namespace QuickER.Services;
 

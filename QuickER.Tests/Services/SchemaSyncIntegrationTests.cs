@@ -2,7 +2,7 @@
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using QuickER.Models;
+using QuickER.Model;
 using QuickER.Services;
 using FluentAssertions;
 using Microsoft.Data.SqlClient;

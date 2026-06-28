@@ -1,6 +1,6 @@
 using System.IO;
 using System.Text;
-using QuickER.Models;
+using QuickER.Model;
 using QuickER.ViewModels;
 
 namespace QuickER.Services;

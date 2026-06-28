@@ -1,4 +1,4 @@
-﻿namespace QuickER.Models;
+﻿namespace QuickER.Model;
 
 /// <summary>
 /// 2 つのエンティティを結ぶリレーション（関連）を表すモデル

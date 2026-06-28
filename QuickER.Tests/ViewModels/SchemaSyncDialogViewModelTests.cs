@@ -18,12 +18,12 @@ public class SchemaSyncDialogViewModelTests
             {
                 Kind = SchemaDiffKind.AddTable,
                 TableName = "Customer",
-                Entity = new QuickER.Models.Entity
+                Entity = new QuickER.Model.Entity
                 {
                     TableName = "Customer",
                     Columns =
                     {
-                        new QuickER.Models.Column
+                        new QuickER.Model.Column
                         {
                             Name = "Id",
                             DataType = "int",
@@ -64,7 +64,7 @@ public class SchemaSyncDialogViewModelTests
                 Kind = SchemaDiffKind.AddColumn,
                 TableName = "Customer",
                 ColumnName = "Name",
-                Column = new QuickER.Models.Column { Name = "Name", DataType = "nvarchar(50)" },
+                Column = new QuickER.Model.Column { Name = "Name", DataType = "nvarchar(50)" },
                 IsSelected = true,
                 IsSelectable = true,
             }
@@ -97,7 +97,7 @@ public class SchemaSyncDialogViewModelTests
                 Kind = SchemaDiffKind.AddColumn,
                 TableName = "Customer",
                 ColumnName = "Name",
-                Column = new QuickER.Models.Column { Name = "Name", DataType = "nvarchar(50)" },
+                Column = new QuickER.Model.Column { Name = "Name", DataType = "nvarchar(50)" },
                 IsSelected = true,
                 IsSelectable = true,
             }

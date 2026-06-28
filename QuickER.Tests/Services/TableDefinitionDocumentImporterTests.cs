@@ -1,6 +1,6 @@
 using System.IO;
 using ClosedXML.Excel;
-using QuickER.Models;
+using QuickER.Model;
 using QuickER.Services;
 using QuickER.ViewModels;
 using FluentAssertions;

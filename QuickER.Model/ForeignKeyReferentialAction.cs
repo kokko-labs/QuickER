@@ -1,4 +1,4 @@
-namespace QuickER.Models;
+namespace QuickER.Model;
 
 /// <summary>
 /// 外部キー制約の参照アクション（<c>ON DELETE</c> / <c>ON UPDATE</c>）を表す列挙型

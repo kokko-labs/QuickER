@@ -23,6 +23,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\QuickER.Generator\QuickER.Generator.csproj" />
+    <ProjectReference Include="..\QuickER.Model\QuickER.Model.csproj" />
   </ItemGroup>
 
   <ItemGroup>

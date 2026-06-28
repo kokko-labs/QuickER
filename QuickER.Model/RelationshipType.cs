@@ -1,4 +1,4 @@
-namespace QuickER.Models;
+namespace QuickER.Model;
 
 /// <summary>
 /// リレーション（関連）の多重度を表す列挙型

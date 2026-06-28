@@ -1,4 +1,4 @@
-﻿namespace QuickER.Models;
+﻿namespace QuickER.Model;
 
 /// <summary>
 /// テーブル内の 1 カラムを表すモデル

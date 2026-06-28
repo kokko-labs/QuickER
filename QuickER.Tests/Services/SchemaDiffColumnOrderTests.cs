@@ -1,5 +1,5 @@
 ﻿using System.Collections.Generic;
-using QuickER.Models;
+using QuickER.Model;
 using QuickER.Services;
 using FluentAssertions;
 

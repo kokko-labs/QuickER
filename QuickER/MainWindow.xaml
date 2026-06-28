@@ -3,7 +3,7 @@
   xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
   xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
   xmlns:vm="clr-namespace:QuickER.ViewModels"
-  xmlns:models="clr-namespace:QuickER.Models"
+  xmlns:models="clr-namespace:QuickER.Model;assembly=QuickER.Model"
   xmlns:beh="clr-namespace:QuickER.Behaviors"
   Title="ER図作成ツール"
   Height="1000"
