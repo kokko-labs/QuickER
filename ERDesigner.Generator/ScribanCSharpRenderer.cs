@@ -2184,6 +2184,60 @@ internal sealed class ScribanCSharpRenderer
             public static object? Unwrap(object? value) =>
                 value is IValueObject valueObject ? valueObject.UnderlyingValue : value;
         }
+
+        /// <summary>DB から読み取った素の値を、対象プロパティが値オブジェクト型なら Create で包み直す逆変換ヘルパー（Unwrap の対）</summary>
+        internal static class SqlValueObjectActivator
+        {
+            /// <summary>プロパティ型ごとに解決した「素の値 → 値オブジェクト」変換子をキャッシュする（VO でない型は null）</summary>
+            private static readonly ConcurrentDictionary<Type, Func<object, object>?> _factoryCache = new();
+
+            /// <summary>対象型が値オブジェクトなら素の値を Create で包み、それ以外はそのまま返す</summary>
+            public static object? Wrap(object? value, Type targetType)
+            {
+                if (value is null)
+                {
+                    return null;
+                }
+
+                var factory = _factoryCache.GetOrAdd(targetType, ResolveFactory);
+                return factory is null ? value : factory(value);
+            }
+
+            /// <summary>対象型の IValueObject&lt;,&gt; から TValue と Create(TValue) を解決し変換子を組み立てる（VO でなければ null）</summary>
+            private static Func<object, object>? ResolveFactory(Type targetType)
+            {
+                var iface = Array.Find(
+                    targetType.GetInterfaces(),
+                    i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IValueObject<,>)
+                );
+                if (iface is null)
+                {
+                    return null;
+                }
+
+                var valueType = iface.GetGenericArguments()[1];
+                var createMethod = targetType.GetMethod(
+                    "Create",
+                    BindingFlags.Public | BindingFlags.Static,
+                    binder: null,
+                    new[] { valueType },
+                    modifiers: null
+                );
+                if (createMethod is null)
+                {
+                    return null;
+                }
+
+                return raw =>
+                {
+                    // DB から返る素の型が TValue と異なる場合のみ変換する（byte[]/Guid 等は IConvertible 非対応のため型一致時はそのまま）
+                    var converted = valueType.IsInstanceOfType(raw)
+                        ? raw
+                        : Convert.ChangeType(raw, valueType, CultureInfo.InvariantCulture);
+                    return createMethod.Invoke(null, new[] { converted })!;
+                };
+            }
+        }
         {{~ end ~}}
 
         /// <summary>エンティティ型の属性からテーブル・カラム情報と CRUD 用 SQL を構築・保持するメタデータ</summary>
@@ -2293,7 +2347,7 @@ internal sealed class ScribanCSharpRenderer
                     }
                     else
                     {
-                        property.SetValue(entity, value);
+                        property.SetValue(entity, {{ if generate_value_objects }}SqlValueObjectActivator.Wrap(value, property.PropertyType){{ else }}value{{ end }});
                     }
                 }
 
