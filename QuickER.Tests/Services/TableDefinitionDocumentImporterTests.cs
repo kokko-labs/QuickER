@@ -85,7 +85,7 @@ public class TableDefinitionDocumentImporterTests
             )
         );
 
-        using var workbook = TableDefinitionDocumentExporter.BuildWorkbook(vm);
+        using var workbook = TableDefinitionDocumentExporter.BuildWorkbook(vm.ToDiagramModel());
         var diagram = TableDefinitionDocumentImporter.Load(workbook);
 
         diagram.Entities.Should().HaveCount(2);
@@ -190,7 +190,7 @@ public class TableDefinitionDocumentImporterTests
             )
         );
 
-        using var workbook = TableDefinitionDocumentExporter.BuildWorkbook(vm);
+        using var workbook = TableDefinitionDocumentExporter.BuildWorkbook(vm.ToDiagramModel());
         workbook.Worksheet("リレーション一覧").Cell(2, 4).Value = "MissingColumn";
 
         var act = () => TableDefinitionDocumentImporter.Load(workbook);

@@ -38,7 +38,7 @@ public class DdlExporterTests
         );
         vm.Entities.Add(e);
 
-        var sql = DdlExporter.Build(vm);
+        var sql = DdlExporter.Build(vm.ToDiagramModel());
 
         sql.Should().Contain("CREATE TABLE [User]");
         sql.Should().Contain("[Id] int NOT NULL");
@@ -68,7 +68,7 @@ public class DdlExporterTests
         );
         vm.Entities.Add(e);
 
-        var sql = DdlExporter.Build(vm);
+        var sql = DdlExporter.Build(vm.ToDiagramModel());
 
         sql.Should().Contain("[Code] nvarchar(20) NOT NULL");
     }
@@ -126,7 +126,7 @@ public class DdlExporterTests
             )
         );
 
-        var sql = DdlExporter.Build(vm);
+        var sql = DdlExporter.Build(vm.ToDiagramModel());
 
         sql.Should().Contain("ALTER TABLE [C]");
         sql.Should().Contain("FOREIGN KEY ([ParentId])");
@@ -189,7 +189,7 @@ public class DdlExporterTests
             )
         );
 
-        var sql = DdlExporter.Build(vm);
+        var sql = DdlExporter.Build(vm.ToDiagramModel());
 
         sql.Should().Contain("CONSTRAINT [FK_Child_Parent_Custom]");
         sql.Should().Contain("ON DELETE CASCADE");
@@ -221,7 +221,7 @@ public class DdlExporterTests
         );
         vm.Entities.Add(e);
 
-        var sql = DdlExporter.Build(vm);
+        var sql = DdlExporter.Build(vm.ToDiagramModel());
 
         sql.Should().Contain("CREATE TABLE [dbo].[User]");
         sql.Should().Contain("CONSTRAINT [PK_dbo_User] PRIMARY KEY ([Id])");
@@ -250,7 +250,7 @@ public class DdlExporterTests
         );
         vm.Entities.Add(e);
 
-        var sql = DdlExporter.Build(vm);
+        var sql = DdlExporter.Build(vm.ToDiagramModel());
 
         sql.Should().Contain("CREATE TABLE [Weird]]Name]");
         sql.Should().Contain("[Col]]umn] int NOT NULL");
@@ -312,7 +312,7 @@ public class DdlExporterTests
             )
         );
 
-        var sql = DdlExporter.Build(vm);
+        var sql = DdlExporter.Build(vm.ToDiagramModel());
 
         sql.Should().Contain("ALTER TABLE [dbo].[C] ADD CONSTRAINT [FK_dbo_C_dbo_P]");
         sql.Should().Contain("FOREIGN KEY ([ParentId]) REFERENCES [dbo].[P] ([Id])");
@@ -405,7 +405,7 @@ public class DdlExporterTests
             )
         );
 
-        using var workbook = TableDefinitionDocumentExporter.BuildWorkbook(vm);
+        using var workbook = TableDefinitionDocumentExporter.BuildWorkbook(vm.ToDiagramModel());
 
         workbook.Worksheets.Should().Contain(sheet => sheet.Name == "テーブル一覧");
         workbook.Worksheets.Should().Contain(sheet => sheet.Name == "リレーション一覧");

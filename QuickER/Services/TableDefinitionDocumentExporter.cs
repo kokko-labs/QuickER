@@ -1,6 +1,5 @@
 using ClosedXML.Excel;
 using QuickER.Model;
-using QuickER.ViewModels;
 
 namespace QuickER.Services;
 
@@ -32,15 +31,16 @@ public static class TableDefinitionDocumentExporter
     /// <summary>Excel シート名に使用できない文字</summary>
     private static readonly char[] InvalidWorksheetNameChars = [':', '\\', '/', '?', '*', '[', ']'];
 
-    /// <summary>現在のダイアグラムからテーブル定義書の Excel ブックを生成する</summary>
-    /// <param name="vm">対象の <see cref="MainViewModel" /></param>
+    /// <summary>ER 図定義からテーブル定義書の Excel ブックを生成する</summary>
+    /// <param name="diagram">対象の ER 図定義</param>
     /// <returns>生成済みの Excel ブック</returns>
-    public static XLWorkbook BuildWorkbook(MainViewModel vm)
+    public static XLWorkbook BuildWorkbook(ErDiagram diagram)
     {
         var workbook = new XLWorkbook();
         ApplyWorkbookStyle(workbook);
 
-        var entities = vm
+        var entitiesById = diagram.Entities.ToDictionary(entity => entity.Id);
+        var entities = diagram
             .Entities.OrderBy(entity => entity.TableName, StringComparer.OrdinalIgnoreCase)
             .ToList();
         var summaryWorksheet = workbook.Worksheets.Add(SummarySheetName);
@@ -61,14 +61,14 @@ public static class TableDefinitionDocumentExporter
         }
 
         BuildSummaryWorksheet(summaryWorksheet, detailSheets);
-        BuildRelationshipWorksheet(relationshipWorksheet, vm.Relationships);
+        BuildRelationshipWorksheet(relationshipWorksheet, diagram.Relationships, entitiesById);
 
         foreach (var detailSheet in detailSheets)
         {
-            var relatedRelationships = vm
+            var relatedRelationships = diagram
                 .Relationships.Where(relationship =>
-                    relationship.Source == detailSheet.Entity
-                    || relationship.Target == detailSheet.Entity
+                    relationship.SourceEntityId == detailSheet.Entity.Id
+                    || relationship.TargetEntityId == detailSheet.Entity.Id
                 )
                 .ToList();
 
@@ -76,7 +76,8 @@ public static class TableDefinitionDocumentExporter
                 detailSheet.Worksheet,
                 detailSheet.Entity,
                 detailSheet.Number,
-                relatedRelationships
+                relatedRelationships,
+                entitiesById
             );
         }
 
@@ -84,11 +85,11 @@ public static class TableDefinitionDocumentExporter
     }
 
     /// <summary>テーブル定義書を Excel ファイルとして保存する</summary>
-    /// <param name="vm">対象の <see cref="MainViewModel" /></param>
+    /// <param name="diagram">対象の ER 図定義</param>
     /// <param name="path">出力先ファイルパス</param>
-    public static void SaveTo(MainViewModel vm, string path)
+    public static void SaveTo(ErDiagram diagram, string path)
     {
-        using var workbook = BuildWorkbook(vm);
+        using var workbook = BuildWorkbook(diagram);
         workbook.SaveAs(path);
     }
 
@@ -147,17 +148,21 @@ public static class TableDefinitionDocumentExporter
     /// <summary>リレーション一覧シートを生成する</summary>
     private static void BuildRelationshipWorksheet(
         IXLWorksheet worksheet,
-        IEnumerable<RelationshipViewModel> relationships
+        IEnumerable<Relationship> relationships,
+        IReadOnlyDictionary<Guid, Entity> entitiesById
     )
     {
         ConfigureRelationshipWorksheet(worksheet);
 
         var orderedRelationships = relationships
             .OrderBy(
-                relationship => relationship.Source.TableName,
+                relationship => TableNameOf(entitiesById, relationship.SourceEntityId),
                 StringComparer.OrdinalIgnoreCase
             )
-            .ThenBy(relationship => relationship.Target.TableName, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(
+                relationship => TableNameOf(entitiesById, relationship.TargetEntityId),
+                StringComparer.OrdinalIgnoreCase
+            )
             .ToList();
         var headerRow = 1;
         var dataStartRow = 2;
@@ -192,14 +197,16 @@ public static class TableDefinitionDocumentExporter
             worksheet.Cell(row, 1).Value = i + 1;
             worksheet.Cell(row, 2).Value = relationship.ConstraintName ?? string.Empty;
             // 参照元（FK 保有側）は Target、参照先（PK 側）は Source に対応する
-            worksheet.Cell(row, 3).Value = relationship.Target.TableName;
-            worksheet.Cell(row, 4).Value = GetColumnName(
-                relationship.Target,
+            worksheet.Cell(row, 3).Value = TableNameOf(entitiesById, relationship.TargetEntityId);
+            worksheet.Cell(row, 4).Value = ColumnNameOf(
+                entitiesById,
+                relationship.TargetEntityId,
                 relationship.TargetColumnId
             );
-            worksheet.Cell(row, 5).Value = relationship.Source.TableName;
-            worksheet.Cell(row, 6).Value = GetColumnName(
-                relationship.Source,
+            worksheet.Cell(row, 5).Value = TableNameOf(entitiesById, relationship.SourceEntityId);
+            worksheet.Cell(row, 6).Value = ColumnNameOf(
+                entitiesById,
+                relationship.SourceEntityId,
                 relationship.SourceColumnId
             );
             worksheet.Cell(row, 7).Value = GetRelationshipTypeLabel(relationship.Type);
@@ -216,13 +223,14 @@ public static class TableDefinitionDocumentExporter
     /// <summary>テーブル単位の定義書シートを生成する（カラム一覧と一覧への戻りリンクを含む）</summary>
     private static void BuildEntityWorksheet(
         IXLWorksheet worksheet,
-        EntityViewModel entity,
+        Entity entity,
         int tableNumber,
-        IReadOnlyList<RelationshipViewModel> relationships
+        IReadOnlyList<Relationship> relationships,
+        IReadOnlyDictionary<Guid, Entity> entitiesById
     )
     {
         ConfigureDetailWorksheet(worksheet);
-        var foreignKeyLabels = BuildForeignKeyLabels(entity, relationships);
+        var foreignKeyLabels = BuildForeignKeyLabels(entity, relationships, entitiesById);
 
         worksheet.Cell(1, 1).Value = "No.";
         worksheet.Cell(1, 2).Value = "テーブル名";
@@ -275,7 +283,12 @@ public static class TableDefinitionDocumentExporter
                     ? foreignKeyLabel
                     : null
             );
-            worksheet.Cell(row, 7).Value = GetReferenceText(entity, column, relationships);
+            worksheet.Cell(row, 7).Value = GetReferenceText(
+                entity,
+                column,
+                relationships,
+                entitiesById
+            );
         }
 
         var footerRow = dataStartRow + entity.Columns.Count + 1;
@@ -411,8 +424,9 @@ public static class TableDefinitionDocumentExporter
 
     /// <summary>テーブル内の外部キーに連番（FK1, FK2…）を振った列 ID ごとの表示ラベルを構築する</summary>
     private static IReadOnlyDictionary<Guid, string> BuildForeignKeyLabels(
-        EntityViewModel entity,
-        IReadOnlyList<RelationshipViewModel> relationships
+        Entity entity,
+        IReadOnlyList<Relationship> relationships,
+        IReadOnlyDictionary<Guid, Entity> entitiesById
     )
     {
         var columnIndexes = entity
@@ -421,14 +435,22 @@ public static class TableDefinitionDocumentExporter
         var foreignKeyLabels = new Dictionary<Guid, List<string>>();
         var targetRelationships = relationships
             .Where(relationship =>
-                relationship.Target == entity && relationship.TargetColumnId is not null
+                relationship.TargetEntityId == entity.Id && relationship.TargetColumnId is not null
             )
             .OrderBy(relationship =>
                 columnIndexes.GetValueOrDefault(relationship.TargetColumnId!.Value, int.MaxValue)
             )
-            .ThenBy(relationship => relationship.Source.TableName, StringComparer.OrdinalIgnoreCase)
             .ThenBy(
-                relationship => GetColumnName(relationship.Source, relationship.SourceColumnId),
+                relationship => TableNameOf(entitiesById, relationship.SourceEntityId),
+                StringComparer.OrdinalIgnoreCase
+            )
+            .ThenBy(
+                relationship =>
+                    ColumnNameOf(
+                        entitiesById,
+                        relationship.SourceEntityId,
+                        relationship.SourceColumnId
+                    ),
                 StringComparer.OrdinalIgnoreCase
             )
             .ToList();
@@ -454,7 +476,7 @@ public static class TableDefinitionDocumentExporter
     }
 
     /// <summary>キー列の表示ラベルを返す（PK / FK / PK/FK の組み合わせを表現する）</summary>
-    private static string GetKeyLabel(ColumnViewModel column, string? foreignKeyLabel)
+    private static string GetKeyLabel(Column column, string? foreignKeyLabel)
     {
         if (column.IsPrimaryKey && !string.IsNullOrWhiteSpace(foreignKeyLabel))
         {
@@ -481,17 +503,19 @@ public static class TableDefinitionDocumentExporter
 
     /// <summary>外部キー列の参照先（テーブル.カラム）を重複なく連結した文字列を返す</summary>
     private static string GetReferenceText(
-        EntityViewModel entity,
-        ColumnViewModel column,
-        IReadOnlyList<RelationshipViewModel> relationships
+        Entity entity,
+        Column column,
+        IReadOnlyList<Relationship> relationships,
+        IReadOnlyDictionary<Guid, Entity> entitiesById
     )
     {
         var references = relationships
             .Where(relationship =>
-                relationship.Target == entity && relationship.TargetColumnId == column.Id
+                relationship.TargetEntityId == entity.Id
+                && relationship.TargetColumnId == column.Id
             )
             .Select(relationship =>
-                $"{relationship.Source.TableName}.{GetColumnName(relationship.Source, relationship.SourceColumnId)}"
+                $"{TableNameOf(entitiesById, relationship.SourceEntityId)}.{ColumnNameOf(entitiesById, relationship.SourceEntityId, relationship.SourceColumnId)}"
             )
             .Where(reference => !string.IsNullOrWhiteSpace(reference))
             .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -500,15 +524,26 @@ public static class TableDefinitionDocumentExporter
         return string.Join(", ", references);
     }
 
-    /// <summary>列 ID からカラム名を解決する（未指定・不一致時は空文字）</summary>
-    private static string GetColumnName(EntityViewModel entity, Guid? columnId)
+    /// <summary>エンティティ ID からテーブル名を解決する（未解決時は空文字）</summary>
+    private static string TableNameOf(
+        IReadOnlyDictionary<Guid, Entity> entitiesById,
+        Guid entityId
+    ) => entitiesById.TryGetValue(entityId, out var entity) ? entity.TableName : string.Empty;
+
+    /// <summary>エンティティ ID・列 ID からカラム名を解決する（未指定・不一致時は空文字）</summary>
+    private static string ColumnNameOf(
+        IReadOnlyDictionary<Guid, Entity> entitiesById,
+        Guid entityId,
+        Guid? columnId
+    )
     {
-        if (columnId is null)
+        if (columnId is null || !entitiesById.TryGetValue(entityId, out var entity))
         {
             return string.Empty;
         }
 
-        return entity.Columns.FirstOrDefault(column => column.Id == columnId)?.Name ?? string.Empty;
+        return entity.Columns.FirstOrDefault(column => column.Id == columnId)?.Name
+            ?? string.Empty;
     }
 
     /// <summary>Excel シート名に使えない文字を除去し、31 文字制限と重複回避を考慮した一意な名前を生成する</summary>
@@ -551,9 +586,5 @@ public static class TableDefinitionDocumentExporter
     private static string EscapeSheetName(string sheetName) => $"'{sheetName.Replace("'", "''")}'";
 
     /// <summary>詳細シート生成に必要な番号・エンティティ・対応ワークシートを束ねる文脈情報</summary>
-    private sealed record DetailSheetContext(
-        int Number,
-        EntityViewModel Entity,
-        IXLWorksheet Worksheet
-    );
+    private sealed record DetailSheetContext(int Number, Entity Entity, IXLWorksheet Worksheet);
 }

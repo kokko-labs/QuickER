@@ -79,7 +79,7 @@ public class DbmlTests
             )
         );
 
-        var dbml = DbmlExporter.Build(vm);
+        var dbml = DbmlExporter.Build(vm.ToDiagramModel());
 
         dbml.Should().Contain("Table Customer {");
         dbml.Should().Contain("CustomerId int [pk, not null]");
@@ -162,7 +162,7 @@ public class DbmlTests
 
         try
         {
-            DbmlExporter.SaveTo(vm, path);
+            DbmlExporter.SaveTo(vm.ToDiagramModel(), path);
             var diagram = DbmlImporter.Load(path);
 
             diagram.Entities.Should().HaveCount(2);

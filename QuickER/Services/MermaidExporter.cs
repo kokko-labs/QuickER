@@ -1,20 +1,19 @@
 using System.IO;
 using System.Text;
 using QuickER.Model;
-using QuickER.ViewModels;
 
 namespace QuickER.Services;
 
 /// <summary>ER 図を Mermaid の <c>erDiagram</c> 記法へ変換するサービス</summary>
 public static class MermaidExporter
 {
-    /// <summary>現在の <see cref="MainViewModel" /> から Mermaid 文字列を生成する</summary>
-    public static string Build(MainViewModel viewModel)
+    /// <summary>ER 図定義から Mermaid 文字列を生成する</summary>
+    public static string Build(ErDiagram diagram)
     {
         var builder = new StringBuilder();
         builder.AppendLine("erDiagram");
 
-        foreach (var entity in viewModel.Entities)
+        foreach (var entity in diagram.Entities)
         {
             builder.AppendLine($"    {entity.TableName} {{");
 
@@ -26,23 +25,28 @@ public static class MermaidExporter
             builder.AppendLine("    }");
         }
 
-        if (viewModel.Entities.Count > 0 && viewModel.Relationships.Count > 0)
+        if (diagram.Entities.Count > 0 && diagram.Relationships.Count > 0)
         {
             builder.AppendLine();
         }
 
-        foreach (var relationship in viewModel.Relationships)
+        var entitiesById = diagram.Entities.ToDictionary(entity => entity.Id);
+        foreach (var relationship in diagram.Relationships)
         {
-            builder.AppendLine($"    {BuildRelationshipLine(relationship)}");
+            var line = BuildRelationshipLine(relationship, entitiesById);
+            if (line is not null)
+            {
+                builder.AppendLine($"    {line}");
+            }
         }
 
         return builder.ToString();
     }
 
     /// <summary>Mermaid 文字列をファイルへ保存する</summary>
-    public static void SaveTo(MainViewModel viewModel, string path)
+    public static void SaveTo(ErDiagram diagram, string path)
     {
-        File.WriteAllText(path, Build(viewModel), Encoding.UTF8);
+        File.WriteAllText(path, Build(diagram), Encoding.UTF8);
     }
 
     /// <summary>Mermaid の属性型トークン用に DataType を正規化する</summary>
@@ -63,7 +67,7 @@ public static class MermaidExporter
     /// Mermaid は同一カラムへの PK と FK の同時指定を構文エラーとして扱うため、
     /// 両方該当する場合は PK を優先し FK は出力しない
     /// </remarks>
-    private static string BuildColumnLine(ColumnViewModel column)
+    private static string BuildColumnLine(Column column)
     {
         var builder = new StringBuilder();
         builder.Append(NormalizeDataType(column.DataType));
@@ -82,9 +86,20 @@ public static class MermaidExporter
         return builder.ToString();
     }
 
-    /// <summary>Mermaid のリレーション行を構築する</summary>
-    private static string BuildRelationshipLine(RelationshipViewModel relationship)
+    /// <summary>Mermaid のリレーション行を構築する。参照先エンティティが解決できない場合は null を返す</summary>
+    private static string? BuildRelationshipLine(
+        Relationship relationship,
+        IReadOnlyDictionary<Guid, Entity> entitiesById
+    )
     {
+        if (
+            !entitiesById.TryGetValue(relationship.SourceEntityId, out var source)
+            || !entitiesById.TryGetValue(relationship.TargetEntityId, out var target)
+        )
+        {
+            return null;
+        }
+
         var symbol = relationship.Type switch
         {
             RelationshipType.OneToOne => "||--||",
@@ -96,6 +111,6 @@ public static class MermaidExporter
             ? "relates"
             : relationship.ConstraintName;
 
-        return $"{relationship.Source.TableName} {symbol} {relationship.Target.TableName} : {label}";
+        return $"{source.TableName} {symbol} {target.TableName} : {label}";
     }
 }

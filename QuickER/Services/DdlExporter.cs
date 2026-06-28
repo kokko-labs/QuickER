@@ -3,8 +3,6 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using QuickER.Model;
-using QuickER.ViewModels;
-
 using QuickER.SqlServer;
 
 namespace QuickER.Services;
@@ -21,10 +19,10 @@ namespace QuickER.Services;
 /// </remarks>
 public static class DdlExporter
 {
-    /// <summary>ER 図の現在の状態から DDL 文字列を生成する</summary>
-    /// <param name="vm">対象の <see cref="MainViewModel"/></param>
+    /// <summary>ER 図定義から DDL 文字列を生成する</summary>
+    /// <param name="diagram">対象の ER 図定義</param>
     /// <returns>SQL Server 用の DDL スクリプト</returns>
-    public static string Build(MainViewModel vm)
+    public static string Build(ErDiagram diagram)
     {
         var sb = new StringBuilder();
         sb.AppendLine("-- ER Designer によって自動生成された DDL");
@@ -33,7 +31,7 @@ public static class DdlExporter
 
         // 先に全テーブルを作成し、FOREIGN KEY は後段で ALTER TABLE 追加する
         // （テーブル定義順に依存せず参照整合性制約を張れるようにするため）
-        foreach (var entity in vm.Entities)
+        foreach (var entity in diagram.Entities)
         {
             var table = entity.TableName;
             var pks = entity.Columns.Where(c => c.IsPrimaryKey).ToList();
@@ -71,20 +69,27 @@ public static class DdlExporter
             sb.AppendLine();
         }
 
-        foreach (var rel in vm.Relationships)
+        var entitiesById = diagram.Entities.ToDictionary(entity => entity.Id);
+        foreach (var rel in diagram.Relationships)
         {
-            // 多対多はジャンクションテーブルが必要なのでコメントのみ出力する
-            if (rel.Type == Model.RelationshipType.ManyToMany)
+            // 1対多 / 1対1 とも、親 (Source) の PK を子 (Target) が外部キーとして参照する。
+            // 参照先エンティティが解決できないリレーションは出力対象外とする
+            if (
+                !entitiesById.TryGetValue(rel.SourceEntityId, out var pkEntity)
+                || !entitiesById.TryGetValue(rel.TargetEntityId, out var fkEntity)
+            )
             {
-                sb.AppendLine(
-                    $"-- 多対多 ({rel.Source.TableName} ⇄ {rel.Target.TableName}): ジャンクションテーブルを別途定義してください。"
-                );
                 continue;
             }
 
-            // 1対多 / 1対1 とも、親 (Source) の PK を子 (Target) が外部キーとして参照する
-            var pkEntity = rel.Source;
-            var fkEntity = rel.Target;
+            // 多対多はジャンクションテーブルが必要なのでコメントのみ出力する
+            if (rel.Type == RelationshipType.ManyToMany)
+            {
+                sb.AppendLine(
+                    $"-- 多対多 ({pkEntity.TableName} ⇄ {fkEntity.TableName}): ジャンクションテーブルを別途定義してください。"
+                );
+                continue;
+            }
 
             // 参照カラムが明示されていればそれを優先し、未指定なら親の PK 列にフォールバックする
             var pkCol = rel.SourceColumnId is not null
@@ -126,15 +131,15 @@ public static class DdlExporter
     }
 
     /// <summary><c>ON DELETE</c> / <c>ON UPDATE</c> の参照アクション句を組み立てる</summary>
-    private static string BuildReferentialActionClause(RelationshipViewModel relationship) =>
+    private static string BuildReferentialActionClause(Relationship relationship) =>
         ForeignKeyReferentialActionHelper.BuildReferentialActionClause(
             relationship.OnDelete,
             relationship.OnUpdate
         );
 
     /// <summary>DDL を UTF-8 でファイルに書き出す</summary>
-    /// <param name="vm">対象の <see cref="MainViewModel"/></param>
+    /// <param name="diagram">対象の ER 図定義</param>
     /// <param name="path">出力先ファイルパス</param>
-    public static void SaveTo(MainViewModel vm, string path) =>
-        File.WriteAllText(path, Build(vm), Encoding.UTF8);
+    public static void SaveTo(ErDiagram diagram, string path) =>
+        File.WriteAllText(path, Build(diagram), Encoding.UTF8);
 }

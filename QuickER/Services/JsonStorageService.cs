@@ -1,9 +1,7 @@
 ﻿using System.IO;
-using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using QuickER.Model;
-using QuickER.ViewModels;
 
 namespace QuickER.Services;
 
@@ -21,18 +19,11 @@ public static class JsonStorageService
         Converters = { new JsonStringEnumConverter() },
     };
 
-    /// <summary>現在の <see cref="MainViewModel"/> の状態をファイルへ保存する</summary>
+    /// <summary>ER 図定義をファイルへ保存する</summary>
     /// <param name="path">保存先のファイルパス</param>
-    /// <param name="vm">保存対象の ViewModel</param>
-    public static void Save(string path, MainViewModel vm)
+    /// <param name="diagram">保存対象の ER 図定義（POCO）</param>
+    public static void Save(string path, ErDiagram diagram)
     {
-        // ViewModel から永続化用の POCO へ変換してからシリアライズする
-        var diagram = new ErDiagram
-        {
-            Entities = vm.Entities.Select(e => e.ToModel()).ToList(),
-            Relationships = vm.Relationships.Select(r => r.ToModel()).ToList(),
-        };
-
         File.WriteAllText(path, JsonSerializer.Serialize(diagram, Options));
     }
 

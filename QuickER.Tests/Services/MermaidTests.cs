@@ -79,7 +79,7 @@ public class MermaidTests
             )
         );
 
-        var mermaid = MermaidExporter.Build(vm);
+        var mermaid = MermaidExporter.Build(vm.ToDiagramModel());
 
         mermaid.Should().Contain("erDiagram");
         mermaid.Should().Contain("Customer {");
@@ -176,7 +176,7 @@ public class MermaidTests
 
         try
         {
-            MermaidExporter.SaveTo(vm, path);
+            MermaidExporter.SaveTo(vm.ToDiagramModel(), path);
             var diagram = MermaidImporter.Load(path);
 
             diagram.Entities.Should().HaveCount(2);
@@ -225,7 +225,7 @@ public class MermaidTests
         vm.Entities.Add(entity);
 
         // Act: 出力して Mermaid テキストを確認し、再度読み込む
-        var mermaidText = MermaidExporter.Build(vm);
+        var mermaidText = MermaidExporter.Build(vm.ToDiagramModel());
         var diagram = MermaidImporter.Parse(mermaidText);
 
         // Assert: Mermaid テキスト上では正規化済み形式になっている

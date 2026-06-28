@@ -1,7 +1,6 @@
 using System.IO;
 using System.Text;
 using QuickER.Model;
-using QuickER.ViewModels;
 
 namespace QuickER.Services;
 
@@ -19,14 +18,14 @@ namespace QuickER.Services;
 public static class DbmlExporter
 {
     /// <summary>
-    /// 現在の <see cref="MainViewModel" /> から DBML 文字列を生成する
+    /// ER 図定義から DBML 文字列を生成する
     /// </summary>
     /// <returns>全 Table ブロックの後に Ref 行をまとめた DBML テキスト（末尾は改行 1 つ）</returns>
-    public static string Build(MainViewModel viewModel)
+    public static string Build(ErDiagram diagram)
     {
         var builder = new StringBuilder();
 
-        foreach (var entity in viewModel.Entities)
+        foreach (var entity in diagram.Entities)
         {
             builder.AppendLine($"Table {entity.TableName} {{");
 
@@ -39,9 +38,14 @@ public static class DbmlExporter
             builder.AppendLine();
         }
 
-        foreach (var relationship in viewModel.Relationships)
+        var entitiesById = diagram.Entities.ToDictionary(entity => entity.Id);
+        foreach (var relationship in diagram.Relationships)
         {
-            builder.AppendLine(BuildRelationshipLine(relationship));
+            var line = BuildRelationshipLine(relationship, entitiesById);
+            if (line is not null)
+            {
+                builder.AppendLine(line);
+            }
         }
 
         return builder.ToString().TrimEnd() + Environment.NewLine;
@@ -50,9 +54,9 @@ public static class DbmlExporter
     /// <summary>
     /// DBML 文字列を UTF-8 でファイルへ保存する
     /// </summary>
-    public static void SaveTo(MainViewModel viewModel, string path)
+    public static void SaveTo(ErDiagram diagram, string path)
     {
-        File.WriteAllText(path, Build(viewModel), Encoding.UTF8);
+        File.WriteAllText(path, Build(diagram), Encoding.UTF8);
     }
 
     /// <summary>
@@ -62,7 +66,7 @@ public static class DbmlExporter
     /// PK 列には <c>pk</c> のみを出力し <c>ref</c> は併記しない。NULL 許可は常に
     /// <c>null</c> / <c>not null</c> のどちらかを明示し、インポート時の既定値依存を避ける
     /// </remarks>
-    private static string BuildColumnLine(ColumnViewModel column)
+    private static string BuildColumnLine(Column column)
     {
         var settings = new List<string>();
 
@@ -94,16 +98,25 @@ public static class DbmlExporter
     /// ここでは <see cref="DbmlImporter"/> との往復を前提に <c>Ref:</c> 直後へ配置する独自形式を採る。
     /// 参照カラム未指定のリレーションは各エンティティの先頭カラムで代用する
     /// </remarks>
-    private static string BuildRelationshipLine(RelationshipViewModel relationship)
+    private static string? BuildRelationshipLine(
+        Relationship relationship,
+        IReadOnlyDictionary<Guid, Entity> entitiesById
+    )
     {
+        if (
+            !entitiesById.TryGetValue(relationship.SourceEntityId, out var source)
+            || !entitiesById.TryGetValue(relationship.TargetEntityId, out var target)
+        )
+        {
+            return null;
+        }
+
         var sourceColumn =
-            relationship.Source.Columns.FirstOrDefault(column =>
-                column.Id == relationship.SourceColumnId
-            ) ?? relationship.Source.Columns.First();
+            source.Columns.FirstOrDefault(column => column.Id == relationship.SourceColumnId)
+            ?? source.Columns.First();
         var targetColumn =
-            relationship.Target.Columns.FirstOrDefault(column =>
-                column.Id == relationship.TargetColumnId
-            ) ?? relationship.Target.Columns.First();
+            target.Columns.FirstOrDefault(column => column.Id == relationship.TargetColumnId)
+            ?? target.Columns.First();
         var symbol = relationship.Type switch
         {
             RelationshipType.OneToOne => "-",
@@ -115,7 +128,7 @@ public static class DbmlExporter
             ? string.Empty
             : $" [note: '{EscapeNote(relationship.ConstraintName!)}']";
 
-        return $"Ref:{note} {relationship.Source.TableName}.{sourceColumn.Name} {symbol} {relationship.Target.TableName}.{targetColumn.Name}";
+        return $"Ref:{note} {source.TableName}.{sourceColumn.Name} {symbol} {target.TableName}.{targetColumn.Name}";
     }
 
     /// <summary>

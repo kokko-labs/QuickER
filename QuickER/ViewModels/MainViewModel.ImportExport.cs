@@ -76,7 +76,7 @@ public partial class MainViewModel
         {
             var dir = Path.GetDirectoryName(AutoSavePath)!;
             Directory.CreateDirectory(dir);
-            JsonStorageService.Save(AutoSavePath, this);
+            JsonStorageService.Save(AutoSavePath, ToDiagramModel());
             File.WriteAllText(
                 UiStatePath,
                 System.Text.Json.JsonSerializer.Serialize(
@@ -249,7 +249,7 @@ public partial class MainViewModel
         );
 
     /// <summary>現在の ER 図をシリアライズ可能なモデル（<see cref="ErDiagram"/>）へ変換する</summary>
-    private ErDiagram ToDiagramModel() =>
+    public ErDiagram ToDiagramModel() =>
         new()
         {
             Entities = Entities.Select(entity => entity.ToModel()).ToList(),
@@ -351,19 +351,19 @@ public partial class MainViewModel
                 break;
 
             case DiagramExportFormat.Sql:
-                DdlExporter.SaveTo(this, path);
+                DdlExporter.SaveTo(ToDiagramModel(), path);
                 break;
 
             case DiagramExportFormat.Mermaid:
-                MermaidExporter.SaveTo(this, path);
+                MermaidExporter.SaveTo(ToDiagramModel(), path);
                 break;
 
             case DiagramExportFormat.Dbml:
-                DbmlExporter.SaveTo(this, path);
+                DbmlExporter.SaveTo(ToDiagramModel(), path);
                 break;
 
             case DiagramExportFormat.Excel:
-                TableDefinitionDocumentExporter.SaveTo(this, path);
+                TableDefinitionDocumentExporter.SaveTo(ToDiagramModel(), path);
                 break;
         }
 
@@ -563,7 +563,7 @@ public partial class MainViewModel
 
         if (dlg.ShowDialog() == true)
         {
-            JsonStorageService.Save(dlg.FileName, this);
+            JsonStorageService.Save(dlg.FileName, ToDiagramModel());
         }
     }
 

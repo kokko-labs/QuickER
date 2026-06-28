@@ -45,7 +45,7 @@ public class JsonStorageServiceTests
 
         try
         {
-            JsonStorageService.Save(path, vm);
+            JsonStorageService.Save(path, vm.ToDiagramModel());
             File.Exists(path).Should().BeTrue();
 
             var loaded = JsonStorageService.Load(path);
