@@ -5,17 +5,17 @@
   xmlns:vm="clr-namespace:QuickER.ViewModels"
   xmlns:models="clr-namespace:QuickER.Model;assembly=QuickER.Model"
   xmlns:beh="clr-namespace:QuickER.Behaviors"
+  xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+  xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+  mc:Ignorable="d"
   Title="ER図作成ツール"
   Height="1000"
   Width="1800"
   FontFamily="Segoe UI, Yu Gothic UI, Meiryo"
   FontSize="13"
   Background="#F5F7FA"
+  d:DataContext="{d:DesignInstance Type=vm:MainViewModel, IsDesignTimeCreatable=False}"
 >
-  <Window.DataContext>
-    <vm:MainViewModel />
-  </Window.DataContext>
-
   <Window.InputBindings>
     <KeyBinding Key="Z" Modifiers="Control" Command="{Binding UndoCommand}" />
     <KeyBinding Key="Y" Modifiers="Control" Command="{Binding RedoCommand}" />

@@ -102,17 +102,43 @@ public partial class MainViewModel : ObservableObject
     /// <summary>確認・通知ダイアログの表示先（テストではスタブに差し替える）</summary>
     private readonly IDialogService _dialogs;
 
+    /// <summary>アプリ固有モーダルダイアログ（C# 生成・SQL 接続・スキーマ同期）の表示先</summary>
+    private readonly IAppDialogService _appDialogs;
+
+    /// <summary>ファイル選択ダイアログの表示先</summary>
+    private readonly IFileDialogService _files;
+
+    /// <summary>AI チャットウィンドウのライフサイクル管理</summary>
+    private readonly IAiChatLauncher _aiChat;
+
     /// <summary>プロパティ変更を監視して Undo/Redo 履歴へ自動登録する追跡器</summary>
     private readonly DiagramChangeTracker _changeTracker;
 
-    /// <summary>既定のダイアログサービス（MessageBox）で初期化する</summary>
+    /// <summary>既定のダイアログサービス（MessageBox・WPF 実装）で初期化する</summary>
     public MainViewModel()
         : this(new MessageBoxDialogService()) { }
 
-    /// <summary>ダイアログ表示を差し替える場合（単体テスト等）に使用するコンストラクター</summary>
+    /// <summary>確認・通知ダイアログのみ差し替える場合（既存テスト互換）に使用するコンストラクター</summary>
     public MainViewModel(IDialogService dialogService)
+        : this(
+            dialogService,
+            new WpfAppDialogService(),
+            new WpfFileDialogService(),
+            new AiChatLauncher()
+        ) { }
+
+    /// <summary>全ダイアログ依存を注入するコンストラクター（DI 合成点・単体テスト用）</summary>
+    public MainViewModel(
+        IDialogService dialogService,
+        IAppDialogService appDialogs,
+        IFileDialogService files,
+        IAiChatLauncher aiChat
+    )
     {
         _dialogs = dialogService;
+        _appDialogs = appDialogs;
+        _files = files;
+        _aiChat = aiChat;
         _changeTracker = new DiagramChangeTracker(
             UndoRedo,
             Entities,

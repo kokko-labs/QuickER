@@ -1,8 +1,6 @@
 ﻿using System.IO;
-using System.Windows;
 using System.Windows.Media;
 using CommunityToolkit.Mvvm.Input;
-using Microsoft.Win32;
 using QuickER.Documents;
 using QuickER.Generator;
 using QuickER.Model;
@@ -146,23 +144,21 @@ public partial class MainViewModel
     [RelayCommand]
     private void ExportDiagram(object? visual)
     {
-        var dlg = new SaveFileDialog
-        {
-            Filter =
-                "PNG Image (*.png)|*.png|SVG Image (*.svg)|*.svg|SQL Script (*.sql)|*.sql|Mermaid Diagram (*.mmd)|*.mmd|Mermaid Diagram (*.mermaid)|*.mermaid|DBML Diagram (*.dbml)|*.dbml|Excel Workbook (*.xlsx)|*.xlsx",
-            DefaultExt = ".png",
-        };
+        var picked = _files.PickSaveFile(
+            "PNG Image (*.png)|*.png|SVG Image (*.svg)|*.svg|SQL Script (*.sql)|*.sql|Mermaid Diagram (*.mmd)|*.mmd|Mermaid Diagram (*.mermaid)|*.mermaid|DBML Diagram (*.dbml)|*.dbml|Excel Workbook (*.xlsx)|*.xlsx",
+            ".png"
+        );
 
-        if (dlg.ShowDialog() != true)
+        if (picked is null)
         {
             return;
         }
 
-        var format = GetExportFormat(dlg.FileName, dlg.FilterIndex);
+        var format = GetExportFormat(picked.Path, picked.FilterIndex);
 
         try
         {
-            SaveDiagram(format, dlg.FileName, visual);
+            SaveDiagram(format, picked.Path, visual);
         }
         catch (Exception ex)
         {
@@ -177,14 +173,12 @@ public partial class MainViewModel
     [RelayCommand]
     private void GenerateCSharpCode()
     {
-        var dialog = new Views.CSharpGenerationDialog { Owner = Application.Current?.MainWindow };
+        var dialogResult = _appDialogs.ShowCSharpGenerationDialog();
 
-        if (dialog.ShowDialog() != true || dialog.ViewModel.Result is null)
+        if (dialogResult is null)
         {
             return;
         }
-
-        var dialogResult = dialog.ViewModel.Result;
 
         try
         {
@@ -306,22 +300,20 @@ public partial class MainViewModel
     [RelayCommand]
     private void ImportDiagram()
     {
-        var dlg = new OpenFileDialog
-        {
-            Filter =
-                "Mermaid Diagram (*.mmd;*.mermaid)|*.mmd;*.mermaid|DBML Diagram (*.dbml)|*.dbml|Excel Workbook (*.xlsx)|*.xlsx",
-        };
+        var picked = _files.PickOpenFile(
+            "Mermaid Diagram (*.mmd;*.mermaid)|*.mmd;*.mermaid|DBML Diagram (*.dbml)|*.dbml|Excel Workbook (*.xlsx)|*.xlsx"
+        );
 
-        if (dlg.ShowDialog() != true)
+        if (picked is null)
         {
             return;
         }
 
-        var format = GetImportFormat(dlg.FileName, dlg.FilterIndex);
+        var format = GetImportFormat(picked.Path, picked.FilterIndex);
 
         try
         {
-            ImportDiagramFile(format, dlg.FileName);
+            ImportDiagramFile(format, picked.Path);
         }
         catch (Exception ex)
         {
@@ -475,9 +467,9 @@ public partial class MainViewModel
     [RelayCommand]
     private async Task ImportFromSqlServerAsync()
     {
-        var dialog = new Views.SqlConnectionDialog { Owner = Application.Current?.MainWindow };
+        var settings = _appDialogs.ShowSqlConnectionDialog();
 
-        if (dialog.ShowDialog() != true || dialog.ViewModel.Result is null)
+        if (settings is null)
         {
             return;
         }
@@ -485,7 +477,7 @@ public partial class MainViewModel
         try
         {
             var importer = new SqlServerSchemaImporter();
-            var result = await importer.ImportAsync(dialog.ViewModel.Result).ConfigureAwait(true);
+            var result = await importer.ImportAsync(settings).ConfigureAwait(true);
 
             // 構造差分がある場合のみ置換確認を行う
             if (
@@ -514,53 +506,25 @@ public partial class MainViewModel
     [RelayCommand]
     private void SyncToSqlServer()
     {
-        var connDlg = new Views.SqlConnectionDialog
-        {
-            Owner = Application.Current?.MainWindow,
-            Title = "SQL Server へ同期",
-        };
+        var settings = _appDialogs.ShowSqlConnectionDialog("SQL Server へ同期");
 
-        if (connDlg.ShowDialog() != true || connDlg.ViewModel.Result is null)
+        if (settings is null)
         {
             return;
         }
 
         var target = ToDiagramModel();
-        var vm = new SchemaSyncDialogViewModel(
-            connDlg.ViewModel.Result,
-            target.Entities,
-            target.Relationships
-        );
-        var dlg = new Views.SchemaSyncDialog(vm) { Owner = Application.Current?.MainWindow };
-
-        dlg.ShowDialog();
+        _appDialogs.ShowSchemaSyncDialog(settings, target.Entities, target.Relationships);
     }
 
     // ---------------- AI チャット ----------------
 
-    /// <summary>AI チャット対話ウィンドウのシングルトンインスタンス</summary>
-    private Views.AiChatDialog? _aiChatDialog;
-
     /// <summary>AI チャットウィンドウを開く（既存があれば再利用する）</summary>
     [RelayCommand]
-    private void OpenAiChat()
-    {
-        if (_aiChatDialog is null)
-        {
-            _aiChatDialog = new Views.AiChatDialog(this);
-        }
-
-        _aiChatDialog.Owner = null;
-        _aiChatDialog.Show();
-        _aiChatDialog.Activate();
-    }
+    private void OpenAiChat() => _aiChat.Open(this);
 
     /// <summary>アプリ終了時に AI チャット画面を強制終了する</summary>
-    public void CloseAiChatDialog()
-    {
-        _aiChatDialog?.ForceClose();
-        _aiChatDialog = null;
-    }
+    public void CloseAiChatDialog() => _aiChat.Close();
 
     // ---------------- Save / Load ----------------
 
@@ -568,15 +532,11 @@ public partial class MainViewModel
     [RelayCommand]
     private void Save()
     {
-        var dlg = new SaveFileDialog
-        {
-            Filter = "ER Diagram (*.json)|*.json",
-            DefaultExt = ".json",
-        };
+        var picked = _files.PickSaveFile("ER Diagram (*.json)|*.json", ".json");
 
-        if (dlg.ShowDialog() == true)
+        if (picked is not null)
         {
-            JsonStorageService.Save(dlg.FileName, ToDocument());
+            JsonStorageService.Save(picked.Path, ToDocument());
         }
     }
 
@@ -584,14 +544,14 @@ public partial class MainViewModel
     [RelayCommand]
     private void Open()
     {
-        var dlg = new OpenFileDialog { Filter = "ER Diagram (*.json)|*.json" };
+        var picked = _files.PickOpenFile("ER Diagram (*.json)|*.json");
 
-        if (dlg.ShowDialog() != true)
+        if (picked is null)
         {
             return;
         }
 
-        var document = JsonStorageService.Load(dlg.FileName);
+        var document = JsonStorageService.Load(picked.Path);
 
         ReplaceDiagram(
             document.Schema.Entities,
