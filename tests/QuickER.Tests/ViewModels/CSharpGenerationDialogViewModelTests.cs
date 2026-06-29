@@ -71,12 +71,38 @@ public class CSharpGenerationDialogViewModelTests
     [Fact(DisplayName = "参照コマンドで出力先ファイルを更新できる")]
     public void BrowseOutputFile_UpdatesPath()
     {
-        var vm = CreateViewModel(out _);
-        vm.BrowseOutputFileAction = _ => @"C:\work\Generated\Entities.g.cs";
+        var folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
+        var files = new StubFileDialogService
+        {
+            SaveResult = new FileDialogResult(@"C:\work\Generated\Entities.g.cs", 1),
+        };
+        var vm = new CSharpGenerationDialogViewModel(
+            new CSharpGenerationSettingsStore(folder),
+            files
+        );
 
         vm.BrowseOutputFileCommand.Execute(null);
 
         vm.OutputFilePath.Should().Be(@"C:\work\Generated\Entities.g.cs");
+    }
+
+    /// <summary>ファイル選択ダイアログを表示せず、設定済みの結果を返すスタブ</summary>
+    private sealed class StubFileDialogService : IFileDialogService
+    {
+        public FileDialogResult? SaveResult { get; init; }
+
+        public string? FolderResult { get; init; }
+
+        public FileDialogResult? PickOpenFile(string filter) => null;
+
+        public FileDialogResult? PickSaveFile(
+            string filter,
+            string defaultExt,
+            string? initialFileName = null,
+            string? initialDirectory = null
+        ) => SaveResult;
+
+        public string? PickFolder(string title, string? initialDirectory = null) => FolderResult;
     }
 
     /// <summary>分割モードでは詳細欄が表示され、プレビューにカテゴリ別ファイルが並ぶことを検証する</summary>

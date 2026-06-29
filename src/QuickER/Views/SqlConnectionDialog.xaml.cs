@@ -11,17 +11,15 @@ public partial class SqlConnectionDialog : Window
     /// <summary>このダイアログの ViewModel</summary>
     public SqlConnectionDialogViewModel ViewModel { get; }
 
-    /// <summary>ダイアログを生成し、ViewModel を関連付ける</summary>
-    public SqlConnectionDialog()
+    /// <summary>注入された ViewModel を結び付けてダイアログを生成する</summary>
+    public SqlConnectionDialog(SqlConnectionDialogViewModel viewModel)
     {
         InitializeComponent();
-        ViewModel = new SqlConnectionDialogViewModel
+        ViewModel = viewModel;
+        ViewModel.CloseAction = result =>
         {
-            CloseAction = result =>
-            {
-                DialogResult = result;
-                Close();
-            },
+            DialogResult = result;
+            Close();
         };
 
         DataContext = ViewModel;

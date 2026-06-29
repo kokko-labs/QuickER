@@ -120,12 +120,11 @@ public partial class MainViewModel : ObservableObject
 
     /// <summary>確認・通知ダイアログのみ差し替える場合（既存テスト互換）に使用するコンストラクター</summary>
     public MainViewModel(IDialogService dialogService)
-        : this(
-            dialogService,
-            new WpfAppDialogService(),
-            new WpfFileDialogService(),
-            new AiChatLauncher()
-        ) { }
+        : this(dialogService, new WpfFileDialogService()) { }
+
+    /// <summary>ファイル選択サービスを共有してアプリ既定の依存一式を組み立てる中継コンストラクター</summary>
+    private MainViewModel(IDialogService dialogService, IFileDialogService files)
+        : this(dialogService, new WpfAppDialogService(files), files, new AiChatLauncher()) { }
 
     /// <summary>全ダイアログ依存を注入するコンストラクター（DI 合成点・単体テスト用）</summary>
     public MainViewModel(

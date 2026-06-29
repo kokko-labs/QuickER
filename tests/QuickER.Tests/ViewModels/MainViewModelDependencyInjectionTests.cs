@@ -129,9 +129,18 @@ public class MainViewModelDependencyInjectionTests
 
         public FileDialogResult? SaveResult { get; init; }
 
+        public string? FolderResult { get; init; }
+
         public FileDialogResult? PickOpenFile(string filter) => OpenResult;
 
-        public FileDialogResult? PickSaveFile(string filter, string defaultExt) => SaveResult;
+        public FileDialogResult? PickSaveFile(
+            string filter,
+            string defaultExt,
+            string? initialFileName = null,
+            string? initialDirectory = null
+        ) => SaveResult;
+
+        public string? PickFolder(string title, string? initialDirectory = null) => FolderResult;
     }
 
     /// <summary>AI チャットウィンドウを生成せず、呼び出しを記録するスタブ</summary>

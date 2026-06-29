@@ -32,10 +32,23 @@ public interface IAppDialogService
 /// <summary>WPF の <c>Views.*</c> ウィンドウを用いた <see cref="IAppDialogService"/> の既定実装</summary>
 public sealed class WpfAppDialogService : IAppDialogService
 {
+    /// <summary>子ダイアログ ViewModel が利用するファイル選択サービス</summary>
+    private readonly IFileDialogService _files;
+
+    /// <summary>ファイル選択サービスを注入して生成する</summary>
+    public WpfAppDialogService(IFileDialogService files)
+    {
+        _files = files;
+    }
+
     /// <inheritdoc />
     public CSharpGenerationDialogResult? ShowCSharpGenerationDialog()
     {
-        var dialog = new Views.CSharpGenerationDialog { Owner = Application.Current?.MainWindow };
+        var viewModel = new CSharpGenerationDialogViewModel(files: _files);
+        var dialog = new Views.CSharpGenerationDialog(viewModel)
+        {
+            Owner = Application.Current?.MainWindow,
+        };
 
         return dialog.ShowDialog() == true ? dialog.ViewModel.Result : null;
     }
@@ -43,7 +56,11 @@ public sealed class WpfAppDialogService : IAppDialogService
     /// <inheritdoc />
     public SqlConnectionSettings? ShowSqlConnectionDialog(string? title = null)
     {
-        var dialog = new Views.SqlConnectionDialog { Owner = Application.Current?.MainWindow };
+        var viewModel = new SqlConnectionDialogViewModel();
+        var dialog = new Views.SqlConnectionDialog(viewModel)
+        {
+            Owner = Application.Current?.MainWindow,
+        };
 
         if (title is not null)
         {

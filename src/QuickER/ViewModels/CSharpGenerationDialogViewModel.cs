@@ -20,6 +20,9 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     /// <summary>設定の永続化ストア</summary>
     private readonly CSharpGenerationSettingsStore _store;
 
+    /// <summary>出力先のファイル / フォルダ選択ダイアログの表示先</summary>
+    private readonly IFileDialogService _files;
+
     /// <summary>ベース名前空間変更時の子名前空間追従更新を一時的に抑止するフラグ（設定適用中に使う）</summary>
     private bool _suppressNamespaceFollow;
 
@@ -29,16 +32,14 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     /// <summary>ダイアログを閉じる際に呼ぶアクション（引数は確定可否）</summary>
     public Action<bool>? CloseAction { get; set; }
 
-    /// <summary>出力ファイル選択ダイアログを開くためのコールバック（現在のパスを受け取り、選択結果を返す）</summary>
-    public Func<string, string?>? BrowseOutputFileAction { get; set; }
-
-    /// <summary>出力フォルダ選択ダイアログを開くためのコールバック（現在のパスを受け取り、選択結果を返す）</summary>
-    public Func<string, string?>? BrowseOutputFolderAction { get; set; }
-
-    /// <summary>設定ストアを指定して ViewModel を生成し、保存済み設定を復元する</summary>
-    public CSharpGenerationDialogViewModel(CSharpGenerationSettingsStore? store = null)
+    /// <summary>設定ストアとファイル選択サービスを指定して ViewModel を生成し、保存済み設定を復元する</summary>
+    public CSharpGenerationDialogViewModel(
+        CSharpGenerationSettingsStore? store = null,
+        IFileDialogService? files = null
+    )
     {
         _store = store ?? new CSharpGenerationSettingsStore();
+        _files = files ?? new WpfFileDialogService();
         ApplySettings(_store.Load());
     }
 
@@ -376,18 +377,20 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     [RelayCommand]
     private void BrowseOutputFile()
     {
-        if (BrowseOutputFileAction is null)
+        var fileName = Path.GetFileName(OutputFilePath);
+        var result = _files.PickSaveFile(
+            "C# Generated Code (*.g.cs)|*.g.cs",
+            ".g.cs",
+            string.IsNullOrWhiteSpace(fileName) ? "QuickEREntities.g.cs" : fileName,
+            Path.GetDirectoryName(OutputFilePath)
+        );
+
+        if (result is null)
         {
             return;
         }
 
-        var selectedPath = BrowseOutputFileAction(OutputFilePath);
-        if (string.IsNullOrWhiteSpace(selectedPath))
-        {
-            return;
-        }
-
-        OutputFilePath = selectedPath;
+        OutputFilePath = result.Path;
         StatusMessage = string.Empty;
     }
 
@@ -395,12 +398,8 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     [RelayCommand]
     private void BrowseOutputFolder()
     {
-        if (BrowseOutputFolderAction is null)
-        {
-            return;
-        }
+        var selectedPath = _files.PickFolder("出力先フォルダを選択", OutputFolderPath);
 
-        var selectedPath = BrowseOutputFolderAction(OutputFolderPath);
         if (string.IsNullOrWhiteSpace(selectedPath))
         {
             return;
