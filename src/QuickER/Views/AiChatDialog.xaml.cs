@@ -16,15 +16,11 @@ public partial class AiChatDialog : Window
     /// <summary>アプリ終了などで強制クローズ中かどうか（×ボタンの非表示化を抑止する）</summary>
     private bool _isForceClosing;
 
-    /// <summary>MainViewModel を伴わずにウィンドウを生成する</summary>
-    public AiChatDialog()
-        : this(null) { }
-
-    /// <summary>MainViewModel を受け取ってウィンドウを生成する</summary>
-    public AiChatDialog(MainViewModel? mainViewModel)
+    /// <summary>注入された ViewModel を結び付けてウィンドウを生成する</summary>
+    public AiChatDialog(AiChatDialogViewModel viewModel)
     {
         InitializeComponent();
-        ViewModel = new AiChatDialogViewModel(mainViewModel);
+        ViewModel = viewModel;
         DataContext = ViewModel;
 
         ViewModel.Messages.CollectionChanged += (_, _) => ScrollToBottom();

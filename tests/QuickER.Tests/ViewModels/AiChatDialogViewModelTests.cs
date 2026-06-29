@@ -26,7 +26,7 @@ public class AiChatDialogViewModelTests
         var settingsStore = new CodexAppServerSettingsStore(folder);
         var client = new FakeCodexAppServerClient();
         var vm = new AiChatDialogViewModel(
-            mainViewModel: null,
+            host: null,
             dispatcher: new SyncUiDispatcher(),
             settingsStore: settingsStore,
             codexClient: client
@@ -39,6 +39,59 @@ public class AiChatDialogViewModelTests
         if (Directory.Exists(folder))
         {
             Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    /// <summary>MainViewModel 具象なしで、IErDiagramChatHost 抽象のみからツール seam を得て構築できることを検証する</summary>
+    [Fact(DisplayName = "MainViewModel 無しでも IErDiagramChatHost 注入で構築できる")]
+    public void Constructs_WithChatHostStub_WithoutMainViewModel()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
+        var host = new RecordingChatHost();
+
+        try
+        {
+            var vm = new AiChatDialogViewModel(
+                host: host,
+                dispatcher: new SyncUiDispatcher(),
+                settingsStore: new CodexAppServerSettingsStore(folder),
+                codexClient: new FakeCodexAppServerClient()
+            );
+
+            // ツール実行 seam は host 抽象から取得され、MainViewModel 具象には依存しない
+            vm.Should().NotBeNull();
+            host.ToolHostAccessed.Should().BeTrue();
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>チャットホストのスタブ（呼び出しを記録し、MainViewModel への依存を排除する）</summary>
+    private sealed class RecordingChatHost : IErDiagramChatHost
+    {
+        public bool ToolHostAccessed { get; private set; }
+
+        public bool IsEmpty { get; set; } = true;
+
+        public int AutoArrangeCount { get; private set; }
+
+        public IErDiagramToolHost ToolHost
+        {
+            get
+            {
+                ToolHostAccessed = true;
+                return new NoOpToolHost();
+            }
+        }
+
+        public void AutoArrangeNewDiagram() => AutoArrangeCount++;
+
+        private sealed class NoOpToolHost : IErDiagramToolHost
+        {
+            public (string Result, bool Success) Execute(string toolName, string argumentsJson) =>
+                (string.Empty, true);
         }
     }
 

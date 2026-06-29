@@ -22,7 +22,7 @@ public partial class AiChatDialogViewModel : ObservableObject
 
     private const string OpenAiProviderName = "openai";
 
-    private readonly MainViewModel? _mainViewModel;
+    private readonly IErDiagramChatHost? _host;
     private readonly IUiDispatcher _dispatcher;
     private readonly CodexAppServerSettingsStore _codexSettingsStore;
     private readonly ClaudeCodeSettingsStore _claudeCodeSettingsStore;
@@ -221,9 +221,9 @@ public partial class AiChatDialogViewModel : ObservableObject
         AiModelCatalog.ClaudeCodeModels;
 
     /// <summary>本番構成（実クライアント・WPF ディスパッチャ）で生成する</summary>
-    public AiChatDialogViewModel(MainViewModel? mainViewModel)
+    public AiChatDialogViewModel(IErDiagramChatHost? host)
         : this(
-            mainViewModel,
+            host,
             new WpfUiDispatcher(),
             settingsStore: null,
             codexClient: null,
@@ -232,21 +232,19 @@ public partial class AiChatDialogViewModel : ObservableObject
 
     /// <summary>依存を注入して生成する（テスト用）</summary>
     public AiChatDialogViewModel(
-        MainViewModel? mainViewModel,
+        IErDiagramChatHost? host,
         IUiDispatcher dispatcher,
         CodexAppServerSettingsStore? settingsStore,
         ICodexAppServerClient? codexClient,
         IClaudeCodeClient? claudeCodeClient = null
     )
     {
-        _mainViewModel = mainViewModel;
+        _host = host;
         _dispatcher = dispatcher;
         _codexSettingsStore = settingsStore ?? new CodexAppServerSettingsStore();
         _claudeCodeSettingsStore = new ClaudeCodeSettingsStore();
 
-        IErDiagramToolHost? toolHost = mainViewModel is not null
-            ? new ErDiagramToolHost(mainViewModel)
-            : null;
+        IErDiagramToolHost? toolHost = host?.ToolHost;
 
         _apiKeyEngine = new ChatTurnEngine(
             new ProviderRoutingTurnDriver(
@@ -339,8 +337,7 @@ public partial class AiChatDialogViewModel : ObservableObject
         IsTurnInProgress = true;
         _currentAssistantMessage = null;
         _currentToolCallMessage = null;
-        _diagramWasEmptyAtTurnStart =
-            _mainViewModel is not null && _mainViewModel.Entities.Count == 0;
+        _diagramWasEmptyAtTurnStart = _host is not null && _host.IsEmpty;
 
         try
         {
@@ -776,13 +773,9 @@ public partial class AiChatDialogViewModel : ObservableObject
     /// <summary>空の ER 図から始まったターンでエンティティが生成された場合のみ自動整列する</summary>
     private void ArrangeNewDiagramIfCreated()
     {
-        if (
-            _diagramWasEmptyAtTurnStart
-            && _mainViewModel is not null
-            && _mainViewModel.Entities.Count > 0
-        )
+        if (_diagramWasEmptyAtTurnStart && _host is not null && !_host.IsEmpty)
         {
-            _mainViewModel.AutoArrangeNewDiagram();
+            _host.AutoArrangeNewDiagram();
         }
     }
 

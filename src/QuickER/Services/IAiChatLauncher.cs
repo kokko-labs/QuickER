@@ -26,7 +26,13 @@ public sealed class AiChatLauncher : IAiChatLauncher
     /// <inheritdoc />
     public void Open(MainViewModel host)
     {
-        _dialog ??= new Views.AiChatDialog(host);
+        if (_dialog is null)
+        {
+            var chatHost = new Chat.MainViewModelChatHost(host);
+            var viewModel = new AiChatDialogViewModel(chatHost);
+            _dialog = new Views.AiChatDialog(viewModel);
+        }
+
         _dialog.Owner = null;
         _dialog.Show();
         _dialog.Activate();
