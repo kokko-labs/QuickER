@@ -3,7 +3,7 @@
   xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
   xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
   xmlns:vm="clr-namespace:QuickER.ViewModels"
-  xmlns:svc="clr-namespace:QuickER.Services"
+  xmlns:sql="clr-namespace:QuickER.SqlServer;assembly=QuickER.SqlServer"
   xmlns:sys="clr-namespace:System;assembly=System.Runtime"
   Title="SQL Server から取り込み"
   Width="500"
@@ -16,7 +16,7 @@
   <Window.Resources>
     <ObjectDataProvider x:Key="AuthModes" MethodName="GetValues" ObjectType="{x:Type sys:Enum}">
       <ObjectDataProvider.MethodParameters>
-        <x:Type TypeName="svc:SqlAuthMode" />
+        <x:Type TypeName="sql:SqlAuthMode" />
       </ObjectDataProvider.MethodParameters>
     </ObjectDataProvider>
   </Window.Resources>
