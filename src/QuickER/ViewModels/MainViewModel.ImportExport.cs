@@ -4,6 +4,7 @@ using CommunityToolkit.Mvvm.Input;
 using QuickER.Documents;
 using QuickER.Generator;
 using QuickER.Model;
+using QuickER.Provider;
 using QuickER.Services;
 using QuickER.SqlServer;
 
@@ -182,12 +183,14 @@ public partial class MainViewModel
 
         try
         {
-            var service = new CSharpCodeGenerationService();
             var options = dialogResult.Options;
-            // 生成器は DB 非依存。SQL Server 型の解決はプロバイダ（QuickER.SqlServer）で行って渡す
+            // 型解決（プロバイダ）→生成（Generator）の結合点は共有ファサードに集約し、CLI とドリフトさせない
             var diagram = ToDiagramModel();
-            var columnTypes = SqlServerCSharpTypeMapper.ResolveColumnTypes(diagram);
-            var result = service.Generate(diagram, columnTypes, options);
+            var result = DiagramCodeGenerator.Generate(
+                new SqlServerProvider().TypeMapper,
+                diagram,
+                options
+            );
 
             if (result.HasErrors)
             {

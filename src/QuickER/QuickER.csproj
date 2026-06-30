@@ -16,8 +16,10 @@
 
   <ItemGroup>
     <ProjectReference Include="..\QuickER.AI\QuickER.AI.csproj" />
+    <ProjectReference Include="..\QuickER.Document\QuickER.Document.csproj" />
     <ProjectReference Include="..\QuickER.Generator\QuickER.Generator.csproj" />
     <ProjectReference Include="..\QuickER.Model\QuickER.Model.csproj" />
+    <ProjectReference Include="..\QuickER.Provider\QuickER.Provider.csproj" />
     <ProjectReference Include="..\QuickER.SqlServer\QuickER.SqlServer.csproj" />
   </ItemGroup>
 

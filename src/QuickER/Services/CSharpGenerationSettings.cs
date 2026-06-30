@@ -58,7 +58,7 @@ public class CSharpGenerationSettings
     public const string DefaultBaseNamespace = "Generated";
 
     /// <summary>非分割時の出力ファイル名の工場出荷既定</summary>
-    public const string DefaultOutputFilePath = "ErDesignerEntities.g.cs";
+    public const string DefaultOutputFilePath = "QuickEREntities.g.cs";
 
     /// <summary>工場出荷既定の設定を生成する（クリア／初回起動で使う）</summary>
     public static CSharpGenerationSettings CreateDefault() => new();

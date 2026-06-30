@@ -8,8 +8,11 @@
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/QuickER.AI/QuickER.AI.csproj" />
+    <Project Path="src/QuickER.Cli/QuickER.Cli.csproj" />
+    <Project Path="src/QuickER.Document/QuickER.Document.csproj" />
     <Project Path="src/QuickER.Generator/QuickER.Generator.csproj" />
     <Project Path="src/QuickER.Model/QuickER.Model.csproj" />
+    <Project Path="src/QuickER.Provider/QuickER.Provider.csproj" />
     <Project Path="src/QuickER.SqlServer/QuickER.SqlServer.csproj" />
     <Project Path="src/QuickER/QuickER.csproj" />
   </Folder>

@@ -8,7 +8,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\src\QuickER.Cli\QuickER.Cli.csproj" />
+    <ProjectReference Include="..\..\src\QuickER.Document\QuickER.Document.csproj" />
     <ProjectReference Include="..\..\src\QuickER.Generator\QuickER.Generator.csproj" />
+    <ProjectReference Include="..\..\src\QuickER.Provider\QuickER.Provider.csproj" />
     <ProjectReference Include="..\..\src\QuickER\QuickER.csproj" />
   </ItemGroup>
 

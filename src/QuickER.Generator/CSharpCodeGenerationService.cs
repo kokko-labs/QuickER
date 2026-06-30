@@ -190,9 +190,7 @@ public sealed class CSharpCodeGenerationService
     /// </remarks>
     private static string SanitizeFileName(string fileName)
     {
-        var value = string.IsNullOrWhiteSpace(fileName)
-            ? "ErDesignerEntities.g.cs"
-            : fileName.Trim();
+        var value = string.IsNullOrWhiteSpace(fileName) ? "QuickEREntities.g.cs" : fileName.Trim();
         return value.EndsWith(".g.cs", StringComparison.OrdinalIgnoreCase)
             ? value
             : Path.GetFileNameWithoutExtension(value) + ".g.cs";

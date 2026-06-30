@@ -6,12 +6,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.Data.SqlClient" Version="7.0.1" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <ProjectReference Include="..\QuickER.Model\QuickER.Model.csproj" />
     <ProjectReference Include="..\QuickER.Generator\QuickER.Generator.csproj" />
-    <ProjectReference Include="..\QuickER.Provider\QuickER.Provider.csproj" />
+    <ProjectReference Include="..\QuickER.Model\QuickER.Model.csproj" />
   </ItemGroup>
 </Project>

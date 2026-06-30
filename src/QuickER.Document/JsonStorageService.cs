@@ -1,9 +1,8 @@
 using System.IO;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using QuickER.Documents;
 
-namespace QuickER.Services;
+namespace QuickER.Documents;
 
 /// <summary>ER 図を JSON ファイルへ保存・読み込みするトップレベルサービス</summary>
 /// <remarks>

@@ -53,7 +53,7 @@ public class CSharpCodeGenerationServiceTests
 
         result.HasErrors.Should().BeFalse();
         result.Files.Should().ContainSingle();
-        result.Files[0].FileName.Should().Be("ErDesignerEntities.g.cs");
+        result.Files[0].FileName.Should().Be("QuickEREntities.g.cs");
         result.Files[0].Content.Should().Contain("namespace Sample.Domain;");
         result
             .Files[0]

@@ -13,7 +13,7 @@ public sealed class CodeGenerationOptions
     public string NamespaceName { get; init; } = "Generated";
 
     /// <summary>出力ファイル名。".g.cs" で終わらない場合はサービス側で補正される</summary>
-    public string OutputFileName { get; init; } = "ErDesignerEntities.g.cs";
+    public string OutputFileName { get; init; } = "QuickEREntities.g.cs";
 
     /// <summary>エンティティクラスを生成するかどうか</summary>
     public bool GenerateEntityClasses { get; init; } = true;

@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Data.SqlClient;
 using QuickER.Model;
+using QuickER.Provider;
 
 namespace QuickER.SqlServer;
 
@@ -13,8 +14,24 @@ namespace QuickER.SqlServer;
 /// <c>INFORMATION_SCHEMA</c> 系と <c>sys.foreign_keys</c> を用い、BASE TABLE のみ対象とする
 /// 複合主キーは順序を保持する 多対多は中間テーブルとして 1 対多 × 2 の形で表現する
 /// </remarks>
-public class SqlServerSchemaImporter
+public class SqlServerSchemaImporter : ISchemaImporter
 {
+    /// <summary>接続文字列で接続を開きスキーマを取得する（<see cref="ISchemaImporter"/> 実装・CLI scaffold 用）</summary>
+    public async Task<SchemaImportResult> ImportAsync(
+        string connectionString,
+        CancellationToken cancellationToken = default
+    )
+    {
+        await using var conn = new SqlConnection(connectionString);
+        await conn.OpenAsync(cancellationToken).ConfigureAwait(false);
+        var result = await ImportAsync(conn, cancellationToken).ConfigureAwait(false);
+        return new SchemaImportResult
+        {
+            Entities = result.Entities,
+            Relationships = result.Relationships,
+        };
+    }
+
     /// <summary>取得したスキーマを格納する結果 DTO</summary>
     public sealed class SchemaResult
     {

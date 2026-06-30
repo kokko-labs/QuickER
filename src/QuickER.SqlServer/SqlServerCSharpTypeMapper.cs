@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text.RegularExpressions;
 using QuickER.Generator;
 using QuickER.Model;
+using QuickER.Provider;
 
 namespace QuickER.SqlServer;
 
@@ -22,8 +23,13 @@ namespace QuickER.SqlServer;
 /// </list>
 /// 型名は大文字小文字を区別せず、"nvarchar(50)" のような長さ指定付き表記を受け付ける
 /// </remarks>
-public sealed partial class SqlServerCSharpTypeMapper
+public sealed partial class SqlServerCSharpTypeMapper : IColumnTypeMapper
 {
+    /// <summary><see cref="IColumnTypeMapper"/> 実装。静的 <see cref="ResolveColumnTypes"/> へ委譲する</summary>
+    IReadOnlyDictionary<Guid, CSharpTypeInfo> IColumnTypeMapper.ResolveColumnTypes(
+        ErDiagram diagram
+    ) => ResolveColumnTypes(diagram);
+
     /// <summary>
     /// ER 図の全カラムの SQL Server 型を解決し、カラム ID → C# 型情報の対応表を構築する。
     /// </summary>
