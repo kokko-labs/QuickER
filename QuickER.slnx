@@ -14,7 +14,7 @@
     <Project Path="src/QuickER.Model/QuickER.Model.csproj" />
     <Project Path="src/QuickER.Provider/QuickER.Provider.csproj" />
     <Project Path="src/QuickER.SqlServer/QuickER.SqlServer.csproj" />
-    <Project Path="src/QuickER/QuickER.csproj" />
+    <Project Path="src/QuickER.Gui/QuickER.Gui.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/QuickER.Tests/QuickER.Tests.csproj" />

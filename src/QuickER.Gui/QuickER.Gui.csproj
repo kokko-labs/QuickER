@@ -5,6 +5,9 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
+    <!-- プロジェクト名は QuickER.Gui（QuickER.Cli と対称）だが、実行ファイル名と namespace は QuickER ブランドを維持する -->
+    <AssemblyName>QuickER</AssemblyName>
+    <RootNamespace>QuickER</RootNamespace>
   </PropertyGroup>
 
   <ItemGroup>
