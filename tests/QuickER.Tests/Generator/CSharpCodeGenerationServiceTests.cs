@@ -1121,6 +1121,33 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("FETCH NEXT {take.Value} ROWS ONLY");
     }
 
+    /// <summary>コレクションの Contains（配列・List など）が SQL の IN 句へ変換されるコードが生成されることを検証する</summary>
+    [Fact]
+    public void Generate_ShouldTranslateCollectionContainsToInClause()
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            SingleEntityDiagram(),
+            new CodeGenerationOptions { NamespaceName = "Sample.Domain" }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        var content = result.Files[0].Content;
+        // Contains を IN 変換の対象として判定するヘルパーと、IN 句を組み立てる本体
+        content.Should().Contain("private static bool TryGetIn(");
+        content.Should().Contain("private static string BuildInClause(");
+        // Visit に IN 変換のケースが組み込まれている
+        content.Should().Contain("when TryGetIn(call, out var inColumn, out var inCollection):");
+        content.Should().Contain("return BuildInClause(inColumn, inCollection, parameters);");
+        // 静的 Enumerable.Contains（配列）とインスタンス Contains（List/HashSet）の双方を判定
+        content.Should().Contain("if (call.Object is null && call.Arguments.Count == 2)");
+        content.Should().Contain("if (call.Object is not null && call.Arguments.Count == 1)");
+        // 要素をパラメータ化して IN (...) を生成、空コレクションは恒偽条件
+        content.Should().Contain("{column} IN ({string.Join(\", \", placeholders)})");
+        content.Should().Contain("? \"1 = 0\"");
+        // 非ジェネリック IEnumerable を使うため System.Collections を using
+        content.Should().Contain("using System.Collections;");
+    }
+
     /// <summary>RowState ベースのカスケード Save 基盤（EntityBase / SaveAsync / 保存エンジン）が生成されることを検証する</summary>
     [Fact]
     public void Generate_ShouldCreateCascadeSaveInfrastructure()

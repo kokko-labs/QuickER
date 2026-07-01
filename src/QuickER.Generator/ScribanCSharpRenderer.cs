@@ -3324,6 +3324,10 @@ internal sealed class ScribanCSharpRenderer
                         };
                         return $"{likeColumn} LIKE {AddParameter(pattern, parameters)} ESCAPE '\\'";
 
+                    case MethodCallExpression call
+                        when TryGetIn(call, out var inColumn, out var inCollection):
+                        return BuildInClause(inColumn, inCollection, parameters);
+
                     case MemberExpression member when member.Type == typeof(bool) && IsColumn(member):
                         return $"{ColumnName(member.Member)} = 1";
 
@@ -3423,6 +3427,101 @@ internal sealed class ScribanCSharpRenderer
 
                 column = ColumnName(member.Member);
                 return true;
+            }
+
+            /// <summary>コレクションの Contains（配列＝静的 Enumerable.Contains / List・HashSet＝インスタンス Contains）を IN 変換の対象として判定する</summary>
+            /// <remarks>列が引数側にあるものだけを対象にする（列が呼び出し対象側の string.Contains は LIKE 側で処理済み）</remarks>
+            private static bool TryGetIn(
+                MethodCallExpression call,
+                out string column,
+                out Expression collection
+            )
+            {
+                column = string.Empty;
+                collection = null!;
+
+                if (call.Method.Name != "Contains")
+                {
+                    return false;
+                }
+
+                // 配列など: 静的 Enumerable.Contains / MemoryExtensions.Contains(collection, item)（引数 2 個、呼び出し対象なし）
+                if (call.Object is null && call.Arguments.Count == 2)
+                {
+                    if (Unwrap(call.Arguments[1]) is MemberExpression staticItem && IsColumn(staticItem))
+                    {
+                        column = ColumnName(staticItem.Member);
+                        collection = UnwrapCollection(call.Arguments[0]);
+                        return true;
+                    }
+
+                    return false;
+                }
+
+                // List<T> / HashSet<T> など: インスタンス Contains(item)（引数 1 個、呼び出し対象がコレクション）
+                // 配列は .NET のスパン版 Contains に解決され、呼び出し対象が op_Implicit(array) になる（UnwrapCollection で素の配列へ戻す）
+                if (call.Object is not null && call.Arguments.Count == 1)
+                {
+                    if (Unwrap(call.Arguments[0]) is MemberExpression instanceItem && IsColumn(instanceItem))
+                    {
+                        column = ColumnName(instanceItem.Member);
+                        collection = UnwrapCollection(call.Object);
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+
+            /// <summary>コレクション式に付いた暗黙変換（配列→ReadOnlySpan などの op_Implicit / Convert）を剥がし、列挙可能な素のコレクション式へ戻す</summary>
+            private static Expression UnwrapCollection(Expression expression)
+            {
+                while (true)
+                {
+                    expression = Unwrap(expression);
+                    if (
+                        expression
+                        is MethodCallExpression
+                        {
+                            Method.Name: "op_Implicit",
+                            Object: null,
+                            Arguments.Count: 1
+                        } conversion
+                    )
+                    {
+                        expression = conversion.Arguments[0];
+                        continue;
+                    }
+
+                    return expression;
+                }
+            }
+
+            /// <summary>コレクションの各要素をパラメータ化して IN 句を組み立てる。空・null コレクションは該当なし（恒偽条件）にする</summary>
+            private static string BuildInClause(
+                string column,
+                Expression collection,
+                List<KeyValuePair<string, object?>> parameters
+            )
+            {
+                // 文字列自体も IEnumerable だが、列挙対象のコレクションとしては扱わない
+                if (Evaluate(collection) is not IEnumerable enumerable || enumerable is string)
+                {
+                    throw new NotSupportedException(
+                        $"IN 検索には列挙可能なコレクション（配列・List など）を指定してください: {collection}"
+                    );
+                }
+
+                var placeholders = new List<string>();
+                foreach (var item in enumerable)
+                {
+                    placeholders.Add(AddParameter(item, parameters));
+                }
+
+                // IN () は不正な SQL のため、空コレクションは「該当なし」を表す恒偽条件にする
+                return placeholders.Count == 0
+                    ? "1 = 0"
+                    : $"{column} IN ({string.Join(", ", placeholders)})";
             }
             {{~ if generate_value_objects ~}}
 

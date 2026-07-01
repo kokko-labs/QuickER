@@ -619,6 +619,7 @@ internal sealed partial class CSharpGenerationModelBuilder
 
         if (options.GenerateRepositories)
         {
+            usings.Add("System.Collections");
             usings.Add("System.Collections.Concurrent");
             usings.Add("System.Data");
             usings.Add("System.Linq.Expressions");
