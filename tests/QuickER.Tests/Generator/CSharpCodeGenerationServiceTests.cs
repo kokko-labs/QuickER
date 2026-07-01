@@ -1148,6 +1148,37 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("using System.Collections;");
     }
 
+    /// <summary>IsNullOrEmpty・日付コンポーネント・Equals（大文字小文字無視含む）と、値オブジェクトの .Value 解決コードが生成されることを検証する</summary>
+    [Fact]
+    public void Generate_ShouldTranslateNullOrEmptyDatePartAndEquals()
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            SingleEntityDiagram(),
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                GenerateValueObjects = true,
+            }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        var content = result.Files[0].Content;
+        // ② IsNullOrEmpty / IsNullOrWhiteSpace
+        content.Should().Contain("private static bool TryGetNullOrEmpty(");
+        content.Should().Contain("({neColumn} IS NULL OR {neColumn} = '')");
+        content.Should().Contain("({neColumn} IS NULL OR LTRIM(RTRIM({neColumn})) = '')");
+        // ④ 日付コンポーネント
+        content.Should().Contain("private static bool TryGetDatePart(");
+        content.Should().Contain("\"Year\" => $\"YEAR({column})\"");
+        content.Should().Contain("\"Date\" => $\"CAST({column} AS date)\"");
+        // ⑤ Equals（大文字小文字無視は LOWER で畳む）
+        content.Should().Contain("private static bool TryGetEquals(");
+        content.Should().Contain("$\"LOWER({eqColumn}) = LOWER({eqParameter})\"");
+        // 値オブジェクトの .Value を列へ解決する共通ヘルパー
+        content.Should().Contain("private static string? TryColumnName(");
+        content.Should().Contain("typeof(IValueObject).IsAssignableFrom(member.Member.DeclaringType)");
+    }
+
     /// <summary>RowState ベースのカスケード Save 基盤（EntityBase / SaveAsync / 保存エンジン）が生成されることを検証する</summary>
     [Fact]
     public void Generate_ShouldCreateCascadeSaveInfrastructure()

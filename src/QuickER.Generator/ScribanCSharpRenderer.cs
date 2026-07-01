@@ -3328,6 +3328,22 @@ internal sealed class ScribanCSharpRenderer
                         when TryGetIn(call, out var inColumn, out var inCollection):
                         return BuildInClause(inColumn, inCollection, parameters);
 
+                    case MethodCallExpression call
+                        when TryGetNullOrEmpty(call, out var neColumn, out var neWhitespace):
+                        // 空文字判定。IsNullOrWhiteSpace は前後空白も空扱いにする
+                        return neWhitespace
+                            ? $"({neColumn} IS NULL OR LTRIM(RTRIM({neColumn})) = '')"
+                            : $"({neColumn} IS NULL OR {neColumn} = '')";
+
+                    case MethodCallExpression call
+                        when TryGetEquals(call, out var eqColumn, out var eqArg, out var eqIgnoreCase):
+                        // 値は AddParameters 側で素値へ開かれる（VO 対応）
+                        var eqParameter = AddParameter(Evaluate(eqArg), parameters);
+                        // 大文字小文字を無視する比較は両辺を LOWER で畳む
+                        return eqIgnoreCase
+                            ? $"LOWER({eqColumn}) = LOWER({eqParameter})"
+                            : $"{eqColumn} = {eqParameter}";
+
                     case MemberExpression member when member.Type == typeof(bool) && IsColumn(member):
                         return $"{ColumnName(member.Member)} = 1";
 
@@ -3377,9 +3393,9 @@ internal sealed class ScribanCSharpRenderer
                 Expression expression,
                 List<KeyValuePair<string, object?>> parameters
             ) =>
-                expression is MemberExpression member && IsColumn(member)
-                    ? ColumnName(member.Member)
-                    : AddParameter(Evaluate(expression), parameters);
+                TryColumnName(expression) is { } column ? column
+                : TryGetDatePart(expression, out var datePart) ? datePart
+                : AddParameter(Evaluate(expression), parameters);
 
             private enum LikeKind
             {
@@ -3523,6 +3539,74 @@ internal sealed class ScribanCSharpRenderer
                     ? "1 = 0"
                     : $"{column} IN ({string.Join(", ", placeholders)})";
             }
+
+            /// <summary>x.Col.Equals(value) を等値比較の対象として判定する。第2引数が *IgnoreCase の StringComparison なら大文字小文字を無視する</summary>
+            /// <remarks>列は素の列でも値オブジェクトでもよい。文字列・数値など列の型を問わず等値へ変換できる</remarks>
+            private static bool TryGetEquals(
+                MethodCallExpression call,
+                out string column,
+                out Expression argument,
+                out bool ignoreCase
+            )
+            {
+                column = string.Empty;
+                argument = null!;
+                ignoreCase = false;
+
+                if (
+                    call.Object is null
+                    || call.Method.Name != "Equals"
+                    || TryColumnName(call.Object) is not { } resolvedColumn
+                )
+                {
+                    return false;
+                }
+
+                // Equals(value) / Equals(value, StringComparison) の 2 形式のみ対応する
+                if (call.Arguments.Count == 1)
+                {
+                    column = resolvedColumn;
+                    argument = call.Arguments[0];
+                    return true;
+                }
+
+                if (call.Arguments.Count == 2 && call.Method.DeclaringType == typeof(string))
+                {
+                    ignoreCase = Evaluate(call.Arguments[1]) is StringComparison.OrdinalIgnoreCase
+                        or StringComparison.InvariantCultureIgnoreCase
+                        or StringComparison.CurrentCultureIgnoreCase;
+                    column = resolvedColumn;
+                    argument = call.Arguments[0];
+                    return true;
+                }
+
+                return false;
+            }
+
+            /// <summary>string.IsNullOrEmpty(x.Col) / IsNullOrWhiteSpace(x.Col) を判定する（列は素の列でも値オブジェクトの .Value でもよい）</summary>
+            private static bool TryGetNullOrEmpty(
+                MethodCallExpression call,
+                out string column,
+                out bool whitespace
+            )
+            {
+                column = string.Empty;
+                whitespace = call.Method.Name == "IsNullOrWhiteSpace";
+
+                if (
+                    call.Object is not null
+                    || call.Method.DeclaringType != typeof(string)
+                    || call.Arguments.Count != 1
+                    || !(call.Method.Name == "IsNullOrEmpty" || whitespace)
+                    || TryColumnName(call.Arguments[0]) is not { } resolvedColumn
+                )
+                {
+                    return false;
+                }
+
+                column = resolvedColumn;
+                return true;
+            }
             {{~ if generate_value_objects ~}}
 
             /// <summary>文字列値オブジェクト（ValueObjectStringBase 由来）の Contains/StartsWith/EndsWith かどうか</summary>
@@ -3557,6 +3641,66 @@ internal sealed class ScribanCSharpRenderer
 
             private static string ColumnName(MemberInfo member) =>
                 $"[{member.GetCustomAttribute<ColumnAttribute>()?.Name ?? member.Name}]";
+
+            /// <summary>列参照（素の列 x.Col、または値オブジェクトの x.Col.Value）から角括弧付き列名を取り出す。列でなければ null</summary>
+            private static string? TryColumnName(Expression expression)
+            {
+                if (Unwrap(expression) is not MemberExpression member)
+                {
+                    return null;
+                }
+
+                if (IsColumn(member))
+                {
+                    return ColumnName(member.Member);
+                }
+                {{~ if generate_value_objects ~}}
+
+                // 値オブジェクトの .Value を剥がし、内側の列（[col]）へ解決する（x.Col.Value → [col]）
+                if (
+                    member.Member.Name == "Value"
+                    && typeof(IValueObject).IsAssignableFrom(member.Member.DeclaringType)
+                    && member.Expression is { } inner
+                    && Unwrap(inner) is MemberExpression valueObjectColumn
+                    && IsColumn(valueObjectColumn)
+                )
+                {
+                    return ColumnName(valueObjectColumn.Member);
+                }
+                {{~ end ~}}
+
+                return null;
+            }
+
+            /// <summary>DateTime 列の日付コンポーネント参照（x.Col.Year / x.Col.Value.Month など）を SQL の日付関数へ変換する</summary>
+            private static bool TryGetDatePart(Expression expression, out string sql)
+            {
+                sql = string.Empty;
+
+                if (
+                    Unwrap(expression) is not MemberExpression member
+                    || member.Expression is not { } source
+                    || TryColumnName(source) is not { } column
+                )
+                {
+                    return false;
+                }
+
+                sql = member.Member.Name switch
+                {
+                    "Year" => $"YEAR({column})",
+                    "Month" => $"MONTH({column})",
+                    "Day" => $"DAY({column})",
+                    "Hour" => $"DATEPART(HOUR, {column})",
+                    "Minute" => $"DATEPART(MINUTE, {column})",
+                    "Second" => $"DATEPART(SECOND, {column})",
+                    "DayOfYear" => $"DATEPART(DAYOFYEAR, {column})",
+                    "Date" => $"CAST({column} AS date)",
+                    _ => string.Empty,
+                };
+
+                return sql.Length != 0;
+            }
 
             /// <summary>定数・クロージャ変数などを評価して実値を得る</summary>
             private static object? Evaluate(Expression expression) =>
