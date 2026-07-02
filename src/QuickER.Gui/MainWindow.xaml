@@ -554,10 +554,30 @@
           </StackPanel>
         </Button>
         <Rectangle Style="{StaticResource ToolBarSeparator}" />
+        <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="4,0">
+          <TextBlock
+            Text="対象DB:"
+            VerticalAlignment="Center"
+            Foreground="#374151"
+            Margin="0,0,4,0"
+          />
+          <ComboBox
+            MinWidth="120"
+            VerticalAlignment="Center"
+            VerticalContentAlignment="Center"
+            Padding="6,3"
+            Background="White"
+            BorderBrush="#D1D5DB"
+            ItemsSource="{Binding AvailableProviders}"
+            SelectedItem="{Binding SelectedProvider}"
+            DisplayMemberPath="DisplayName"
+            ToolTip="この図のターゲット DB を切り替え（既存の型を変換）"
+          />
+        </StackPanel>
         <Button
           Style="{StaticResource ToolBarLabelButton}"
-          Command="{Binding ImportFromSqlServerCommand}"
-          ToolTip="SQL Server からスキーマを取り込み"
+          Command="{Binding ImportFromDatabaseCommand}"
+          ToolTip="データベースからスキーマを取り込み"
         >
           <StackPanel>
             <TextBlock Style="{StaticResource ToolBarIcon}" Text="🛢" />
@@ -566,7 +586,7 @@
         </Button>
         <Button
           Style="{StaticResource ToolBarLabelButton}"
-          Command="{Binding SyncToSqlServerCommand}"
+          Command="{Binding SyncToDatabaseCommand}"
           ToolTip="現在のダイアグラムを既存 DB に書き戻し (差分 ALTER 実行)"
         >
           <StackPanel>
@@ -1518,7 +1538,7 @@
                             <ComboBox
                               Style="{StaticResource PropertyInputComboBox}"
                               IsEditable="True"
-                              ItemsSource="{Binding DataContext.SqlDataTypes, RelativeSource={RelativeSource AncestorType=Window}}"
+                              ItemsSource="{Binding DataContext.AvailableDataTypes, RelativeSource={RelativeSource AncestorType=Window}}"
                               Text="{Binding DataType, UpdateSourceTrigger=LostFocus}"
                             />
                           </DataTemplate>

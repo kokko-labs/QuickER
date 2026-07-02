@@ -2,20 +2,22 @@ using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
 using FluentAssertions;
+using QuickER.Provider;
+using QuickER.SqlServer;
 using QuickER.ViewModels;
 using QuickER.Views;
 
 namespace QuickER.Tests.Views;
 
 /// <summary>
-/// <see cref="SqlConnectionDialog"/> の BAML 読み込み（InitializeComponent）が成功することを検証する。
-/// XAML の <c>ObjectDataProvider</c> が <c>QuickER.SqlServer.SqlAuthMode</c> を正しい名前空間／アセンブリで
-/// 解決できることを保証する（型の移動に伴う XAML 参照漏れの回帰防止）。
+/// <see cref="DbConnectionDialog"/> の BAML 読み込み（InitializeComponent）が成功することを検証する。
+/// XAML の <c>ObjectDataProvider</c> が <c>QuickER.Provider.DbAuthMode</c> を正しい名前空間／アセンブリで
+/// 解決できることを保証する（型の移動・改名に伴う XAML 参照漏れの回帰防止）。
 /// </summary>
-public class SqlConnectionDialogTests
+public class DbConnectionDialogTests
 {
     /// <summary>STA スレッド上でダイアログを構築し、InitializeComponent が例外を投げないことを検証する</summary>
-    [Fact(DisplayName = "SqlConnectionDialog の InitializeComponent が例外を投げない")]
+    [Fact(DisplayName = "DbConnectionDialog の InitializeComponent が例外を投げない")]
     public void InitializeComponent_DoesNotThrow()
     {
         Exception? captured = null;
@@ -39,11 +41,14 @@ public class SqlConnectionDialogTests
                     );
                 }
 
-                var viewModel = new SqlConnectionDialogViewModel();
+                var registry = new DatabaseProviderRegistry(
+                    new IDatabaseProvider[] { new SqlServerProvider() }
+                );
+                var viewModel = new DbConnectionDialogViewModel(registry);
 
-                // InitializeComponent がここで実行される。SqlAuthMode の型解決に失敗すると
+                // InitializeComponent がここで実行される。DbAuthMode の型解決に失敗すると
                 // XamlParseException が送出される。
-                _ = new SqlConnectionDialog(viewModel);
+                _ = new DbConnectionDialog(viewModel);
             }
             catch (Exception ex)
             {

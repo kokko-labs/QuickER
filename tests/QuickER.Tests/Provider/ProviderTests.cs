@@ -52,7 +52,7 @@ public class ProviderTests
         var provider = new SqlServerProvider();
 
         provider.Name.Should().Be("sqlserver");
-        provider.DataTypes.Should().NotBeEmpty();
+        provider.TypeCatalog.DataTypes.Should().NotBeEmpty();
     }
 
     /// <summary>プロバイダの型マッパが interface 経由で全カラムの型を解決することを検証する</summary>

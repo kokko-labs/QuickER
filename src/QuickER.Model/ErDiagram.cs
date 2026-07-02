@@ -11,4 +11,7 @@ public class ErDiagram
 
     /// <summary>ER 図に含まれる全リレーション</summary>
     public List<Relationship> Relationships { get; set; } = new();
+
+    /// <summary>この図のターゲット DBMS（プロバイダ識別名。例: sqlserver）</summary>
+    public string TargetDbms { get; set; } = "sqlserver";
 }

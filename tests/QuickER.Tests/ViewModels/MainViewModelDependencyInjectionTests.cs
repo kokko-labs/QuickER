@@ -1,6 +1,7 @@
 using System.IO;
 using FluentAssertions;
 using QuickER.Model;
+using QuickER.Provider;
 using QuickER.Services;
 using QuickER.SqlServer;
 using QuickER.ViewModels;
@@ -113,10 +114,15 @@ public class MainViewModelDependencyInjectionTests
     {
         public CSharpGenerationDialogResult? ShowCSharpGenerationDialog() => null;
 
-        public SqlConnectionSettings? ShowSqlConnectionDialog(string? title = null) => null;
+        public DbConnectionDialogResult? ShowDbConnectionDialog(
+            DbConnectionDialogMode mode,
+            IDatabaseProvider? fixedProvider = null,
+            string? title = null
+        ) => null;
 
         public void ShowSchemaSyncDialog(
-            SqlConnectionSettings settings,
+            IDatabaseProvider provider,
+            DbConnectionSettings settings,
             IReadOnlyList<Entity> entities,
             IReadOnlyList<Relationship> relationships
         ) { }

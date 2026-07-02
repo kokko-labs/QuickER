@@ -20,6 +20,11 @@ public static class CliApp
         PropertyNameCaseInsensitive = true,
     };
 
+    /// <summary>CLI が対応する DB プロバイダのレジストリ（新 DBMS 対応時はここへ実装を追加する）</summary>
+    private static readonly DatabaseProviderRegistry Providers = new(
+        [new SqlServerProvider()]
+    );
+
     /// <summary>引数を解析してコマンドを実行する</summary>
     public static Task<int> InvokeAsync(string[] args)
     {
@@ -108,7 +113,7 @@ public static class CliApp
         IDatabaseProvider provider;
         try
         {
-            provider = ProviderRegistry.Resolve(providerName);
+            provider = Providers.Get(providerName);
         }
         catch (ArgumentException ex)
         {
@@ -187,7 +192,7 @@ public static class CliApp
         IDatabaseProvider provider;
         try
         {
-            provider = ProviderRegistry.Resolve(providerName);
+            provider = Providers.Get(providerName);
         }
         catch (ArgumentException ex)
         {

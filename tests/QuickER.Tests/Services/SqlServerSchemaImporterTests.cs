@@ -1,5 +1,6 @@
 ﻿using FluentAssertions;
 using QuickER.Model;
+using QuickER.Provider;
 using QuickER.Services;
 using QuickER.SqlServer;
 
@@ -62,14 +63,8 @@ public class SqlServerSchemaImporterTests
             },
         };
 
-        var sigA = SqlServerSchemaImporter.ComputeSignature(
-            new[] { a },
-            Array.Empty<Relationship>()
-        );
-        var sigB = SqlServerSchemaImporter.ComputeSignature(
-            new[] { b },
-            Array.Empty<Relationship>()
-        );
+        var sigA = SchemaSignature.Compute(new[] { a }, Array.Empty<Relationship>());
+        var sigB = SchemaSignature.Compute(new[] { b }, Array.Empty<Relationship>());
 
         sigA.Should().Be(sigB);
     }
@@ -106,14 +101,8 @@ public class SqlServerSchemaImporterTests
             },
         };
 
-        var sigA = SqlServerSchemaImporter.ComputeSignature(
-            new[] { a },
-            Array.Empty<Relationship>()
-        );
-        var sigB = SqlServerSchemaImporter.ComputeSignature(
-            new[] { b },
-            Array.Empty<Relationship>()
-        );
+        var sigA = SchemaSignature.Compute(new[] { a }, Array.Empty<Relationship>());
+        var sigB = SchemaSignature.Compute(new[] { b }, Array.Empty<Relationship>());
 
         sigA.Should().NotBe(sigB);
     }
@@ -140,14 +129,8 @@ public class SqlServerSchemaImporterTests
             },
         };
 
-        var sigA = SqlServerSchemaImporter.ComputeSignature(
-            new[] { a },
-            Array.Empty<Relationship>()
-        );
-        var sigB = SqlServerSchemaImporter.ComputeSignature(
-            new[] { b },
-            Array.Empty<Relationship>()
-        );
+        var sigA = SchemaSignature.Compute(new[] { a }, Array.Empty<Relationship>());
+        var sigB = SchemaSignature.Compute(new[] { b }, Array.Empty<Relationship>());
 
         sigA.Should().NotBe(sigB);
     }
@@ -203,14 +186,8 @@ public class SqlServerSchemaImporterTests
             TargetColumnId = child.Columns[2].Id,
         };
 
-        var sigA = SqlServerSchemaImporter.ComputeSignature(
-            new[] { parent, child },
-            new[] { relA }
-        );
-        var sigB = SqlServerSchemaImporter.ComputeSignature(
-            new[] { parent, child },
-            new[] { relB }
-        );
+        var sigA = SchemaSignature.Compute(new[] { parent, child }, new[] { relA });
+        var sigB = SchemaSignature.Compute(new[] { parent, child }, new[] { relB });
 
         sigA.Should().NotBe(sigB);
     }
@@ -268,14 +245,8 @@ public class SqlServerSchemaImporterTests
             OnUpdate = ForeignKeyReferentialAction.SetNull,
         };
 
-        var sigA = SqlServerSchemaImporter.ComputeSignature(
-            new[] { parent, child },
-            new[] { relA }
-        );
-        var sigB = SqlServerSchemaImporter.ComputeSignature(
-            new[] { parent, child },
-            new[] { relB }
-        );
+        var sigA = SchemaSignature.Compute(new[] { parent, child }, new[] { relA });
+        var sigB = SchemaSignature.Compute(new[] { parent, child }, new[] { relB });
 
         sigA.Should().NotBe(sigB);
     }

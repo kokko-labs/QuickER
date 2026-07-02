@@ -1,14 +1,13 @@
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using System.Text;
 using QuickER.Model;
-using QuickER.SqlServer;
+using QuickER.Provider;
 
-namespace QuickER.Services;
+namespace QuickER.SqlServer;
 
 /// <summary>
-/// ER 図から SQL Server 向けの DDL（<c>CREATE TABLE</c> / <c>ALTER TABLE ... ADD CONSTRAINT</c>）を生成するエクスポーター
+/// ER 図から SQL Server 向けの DDL（<c>CREATE TABLE</c> / <c>ALTER TABLE ... ADD CONSTRAINT</c>）を生成する
 /// </summary>
 /// <remarks>
 /// <list type="bullet">
@@ -17,12 +16,12 @@ namespace QuickER.Services;
 ///   <item>識別子は <see cref="SqlIdentifier"/> で角括弧付けする（<c>schema.table</c> は <c>[schema].[table]</c> に分割、<c>]</c> は <c>]]</c> にエスケープ）</item>
 /// </list>
 /// </remarks>
-public static class DdlExporter
+public sealed class SqlServerDdlGenerator : IDdlGenerator
 {
     /// <summary>ER 図定義から DDL 文字列を生成する</summary>
     /// <param name="diagram">対象の ER 図定義</param>
     /// <returns>SQL Server 用の DDL スクリプト</returns>
-    public static string Build(ErDiagram diagram)
+    public string Build(ErDiagram diagram)
     {
         var sb = new StringBuilder();
         sb.AppendLine("-- ER Designer によって自動生成された DDL");
@@ -136,10 +135,4 @@ public static class DdlExporter
             relationship.OnDelete,
             relationship.OnUpdate
         );
-
-    /// <summary>DDL を UTF-8 でファイルに書き出す</summary>
-    /// <param name="diagram">対象の ER 図定義</param>
-    /// <param name="path">出力先ファイルパス</param>
-    public static void SaveTo(ErDiagram diagram, string path) =>
-        File.WriteAllText(path, Build(diagram), Encoding.UTF8);
 }

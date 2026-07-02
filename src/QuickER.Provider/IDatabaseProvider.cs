@@ -42,12 +42,30 @@ public interface IDatabaseProvider
     /// <summary>プロバイダ識別名（CLI の <c>--provider</c> 値。例: <c>sqlserver</c>）</summary>
     string Name { get; }
 
+    /// <summary>UI 表示名（例: <c>SQL Server</c>）</summary>
+    string DisplayName { get; }
+
+    /// <summary>方言の既定ポート。SQL Server は <c>null</c>（インスタンス名運用のため）</summary>
+    int? DefaultPort { get; }
+
     /// <summary>DB-first スキーマ取込</summary>
     ISchemaImporter SchemaImporter { get; }
 
     /// <summary>DB 型 → C# 型マッピング</summary>
     IColumnTypeMapper TypeMapper { get; }
 
-    /// <summary>この DBMS で選択可能なデータ型の一覧（UI の型候補・検証に使用）</summary>
-    IReadOnlyList<string> DataTypes { get; }
+    /// <summary>この DBMS のネイティブ型カタログ（型候補・正規型との相互変換）</summary>
+    ITypeCatalog TypeCatalog { get; }
+
+    /// <summary>同期スクリプト生成</summary>
+    ISyncScriptBuilder SyncScriptBuilder { get; }
+
+    /// <summary>同期スクリプトの実行</summary>
+    ISchemaSyncExecutor SyncExecutor { get; }
+
+    /// <summary>ER 図からの DDL 生成</summary>
+    IDdlGenerator DdlGenerator { get; }
+
+    /// <summary>共通接続設定から接続文字列を構築する</summary>
+    string BuildConnectionString(DbConnectionSettings settings);
 }

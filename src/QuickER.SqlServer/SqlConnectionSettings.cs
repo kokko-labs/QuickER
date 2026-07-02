@@ -1,4 +1,5 @@
 ﻿using Microsoft.Data.SqlClient;
+using QuickER.Provider;
 
 namespace QuickER.SqlServer;
 
@@ -68,4 +69,25 @@ public class SqlConnectionSettings
 
         return b.ConnectionString;
     }
+
+    /// <summary>この設定を方言中立の <see cref="DbConnectionSettings"/> へ変換する</summary>
+    /// <remarks>認証方式は <see cref="SqlAuthMode.SqlServer"/> を <see cref="DbAuthMode.UsernamePassword"/> へ対応付ける</remarks>
+    public DbConnectionSettings ToDbConnectionSettings() =>
+        new()
+        {
+            Host = Server,
+            Port = null,
+            Database = Database,
+            AuthMode = AuthMode switch
+            {
+                SqlAuthMode.Windows => DbAuthMode.Windows,
+                SqlAuthMode.SqlServer => DbAuthMode.UsernamePassword,
+                SqlAuthMode.AzureAd => DbAuthMode.AzureAd,
+                _ => DbAuthMode.Windows,
+            },
+            UserId = UserId,
+            Password = Password,
+            TrustServerCertificate = TrustServerCertificate,
+            ConnectTimeoutSeconds = ConnectTimeoutSeconds,
+        };
 }

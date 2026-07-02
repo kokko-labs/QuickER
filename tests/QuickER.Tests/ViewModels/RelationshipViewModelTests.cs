@@ -480,14 +480,14 @@ public class RelationshipViewModelTests
         entity.Columns.Should().NotContain(col);
     }
 
-    /// <summary>SQL データ型候補に代表的な SQL Server の型が含まれることを検証する</summary>
-    [Fact(DisplayName = "SqlDataTypes に SQL Server の型が含まれる")]
-    public void SqlDataTypes_IncludesCommonTypes()
+    /// <summary>データ型候補に代表的な SQL Server の型が含まれることを検証する</summary>
+    [Fact(DisplayName = "AvailableDataTypes に SQL Server の型が含まれる")]
+    public void AvailableDataTypes_IncludesCommonTypes()
     {
         var vm = new MainViewModel();
-        vm.SqlDataTypes.Should().Contain("int");
-        vm.SqlDataTypes.Should().Contain("nvarchar(100)");
-        vm.SqlDataTypes.Should().Contain("datetime2");
-        vm.SqlDataTypes.Should().Contain("uniqueidentifier");
+        vm.AvailableDataTypes.Should().Contain("int");
+        vm.AvailableDataTypes.Should().Contain("nvarchar(100)");
+        vm.AvailableDataTypes.Should().Contain("datetime2");
+        vm.AvailableDataTypes.Should().Contain("uniqueidentifier");
     }
 }

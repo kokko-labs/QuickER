@@ -1,8 +1,8 @@
 ﻿using System.IO;
 using System.Linq;
 using FluentAssertions;
+using QuickER.Provider;
 using QuickER.Services;
-using QuickER.SqlServer;
 
 namespace QuickER.Tests.Services;
 
@@ -163,6 +163,49 @@ public class SqlConnectionProfileStoreTests : IDisposable
         store.LoadPassword(p.Id).Should().BeEmpty();
     }
 
+    /// <summary>Dbms フィールドを欠く旧形式 JSON を読み込むと sqlserver とみなされることを検証する</summary>
+    [Fact(DisplayName = "Dbms 欠落の旧形式プロファイルは sqlserver として読み込まれる")]
+    public void LoadAll_LegacyProfileWithoutDbms_DefaultsToSqlServer()
+    {
+        var store = CreateStore();
+        // Dbms / Port / ServiceName を持たない旧形式 JSON を直接書き出す
+        var legacyJson =
+            "[{\"id\":\""
+            + Guid.NewGuid().ToString()
+            + "\",\"name\":\"Legacy\",\"server\":\"srv\",\"database\":\"db\",\"authMode\":0,\"userId\":\"\",\"trustServerCertificate\":true,\"savePassword\":false}]";
+        File.WriteAllText(store.ProfilesPath, legacyJson);
+
+        var list = store.LoadAll();
+
+        list.Should().ContainSingle();
+        list[0].Dbms.Should().Be("sqlserver");
+        list[0].Port.Should().BeNull();
+    }
+
+    /// <summary>Dbms / Port / ServiceName を含めて往復保存・復元されることを検証する</summary>
+    [Fact(DisplayName = "Dbms・Port を含めて保存・復元される")]
+    public void Upsert_PreservesDbmsAndPort()
+    {
+        var store = CreateStore();
+        var profile = new SqlConnectionProfile
+        {
+            Name = "PG",
+            Dbms = "postgresql",
+            Server = "pg-host",
+            Port = 5432,
+            Database = "app",
+            AuthMode = DbAuthMode.UsernamePassword,
+            UserId = "postgres",
+        };
+
+        store.Upsert(profile, password: "");
+        var list = store.LoadAll();
+
+        list.Should().ContainSingle();
+        list[0].Dbms.Should().Be("postgresql");
+        list[0].Port.Should().Be(5432);
+    }
+
     /// <summary>前回接続情報がデータベース名・認証情報・パスワードを含めて往復保存・復元されることを検証する</summary>
     [Fact(DisplayName = "前回接続情報はデータベース名を含めて保存・復元される")]
     public void LastUsed_RoundTrip_RestoresDatabase()
@@ -172,7 +215,7 @@ public class SqlConnectionProfileStoreTests : IDisposable
         {
             Server = "sql01",
             Database = "SalesDb",
-            AuthMode = SqlAuthMode.SqlServer,
+            AuthMode = DbAuthMode.UsernamePassword,
             UserId = "sa",
             TrustServerCertificate = false,
             SavePassword = true,

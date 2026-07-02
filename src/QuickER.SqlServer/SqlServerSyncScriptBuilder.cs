@@ -2,6 +2,7 @@
 using System.Linq;
 using System.Text;
 using QuickER.Model;
+using QuickER.Provider;
 
 namespace QuickER.SqlServer;
 
@@ -19,10 +20,10 @@ namespace QuickER.SqlServer;
 ///   <item>SetTableDescription / SetColumnDescription（拡張プロパティ MS_Description）</item>
 /// </list>
 /// </remarks>
-public static class SchemaSyncScriptBuilder
+public sealed class SqlServerSyncScriptBuilder : ISyncScriptBuilder
 {
     /// <summary>選択された差分項目のみを T-SQL へ変換する</summary>
-    public static string Build(IEnumerable<SchemaDiffItem> items)
+    public string Build(IEnumerable<SchemaDiffItem> items)
     {
         var sb = new StringBuilder();
         var list = items.Where(i => i.IsSelected).ToList();

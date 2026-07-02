@@ -1,6 +1,8 @@
 using System.Windows;
 using Microsoft.Extensions.DependencyInjection;
+using QuickER.Provider;
 using QuickER.Services;
+using QuickER.SqlServer;
 using QuickER.ViewModels;
 
 namespace QuickER
@@ -26,11 +28,20 @@ namespace QuickER
             services.AddSingleton<IAppDialogService, WpfAppDialogService>();
             services.AddSingleton<IFileDialogService, WpfFileDialogService>();
             services.AddSingleton<IAiChatLauncher, AiChatLauncher>();
+
+            // DB プロバイダを登録し、識別名で解決するレジストリをシングルトンで供給する
+            // 新 DBMS 対応時は IDatabaseProvider 実装を追加登録するだけで済む
+            services.AddSingleton<IDatabaseProvider, SqlServerProvider>();
+            services.AddSingleton(serviceProvider => new DatabaseProviderRegistry(
+                serviceProvider.GetServices<IDatabaseProvider>()
+            ));
+
             services.AddSingleton<MainViewModel>(serviceProvider => new MainViewModel(
                 serviceProvider.GetRequiredService<IDialogService>(),
                 serviceProvider.GetRequiredService<IAppDialogService>(),
                 serviceProvider.GetRequiredService<IFileDialogService>(),
-                serviceProvider.GetRequiredService<IAiChatLauncher>()
+                serviceProvider.GetRequiredService<IAiChatLauncher>(),
+                serviceProvider.GetRequiredService<DatabaseProviderRegistry>()
             ));
             services.AddTransient<MainWindow>();
 

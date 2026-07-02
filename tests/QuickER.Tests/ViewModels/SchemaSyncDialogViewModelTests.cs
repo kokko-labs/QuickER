@@ -1,4 +1,5 @@
 ﻿using FluentAssertions;
+using QuickER.Provider;
 using QuickER.Services;
 using QuickER.SqlServer;
 using QuickER.Tests.TestDoubles;
@@ -9,11 +10,18 @@ namespace QuickER.Tests.ViewModels;
 /// <summary><see cref="SchemaSyncDialogViewModel"/> の差分選択・プレビュー生成・実行確認を検証するテストクラス</summary>
 public class SchemaSyncDialogViewModelTests
 {
+    /// <summary>SQL Server プロバイダ（同期スクリプト生成に用いる）</summary>
+    private static readonly IDatabaseProvider Provider = new SqlServerProvider();
+
+    /// <summary>プロバイダと空スキーマで ViewModel を生成する</summary>
+    private static SchemaSyncDialogViewModel CreateVm(IDialogService? dialogs = null) =>
+        new(Provider, new DbConnectionSettings(), [], [], dialogs);
+
     /// <summary>全選択が選択可能な差分のみを対象とし、案内項目を選択しないことを検証する</summary>
     [Fact(DisplayName = "全選択は選択可能な差分のみを対象にする")]
     public void SelectAll_SelectsOnlySelectableItems()
     {
-        var vm = new SchemaSyncDialogViewModel(new SqlConnectionSettings(), [], []);
+        var vm = CreateVm();
         vm.DiffItems.Add(
             new SchemaDiffItem
             {
@@ -58,7 +66,7 @@ public class SchemaSyncDialogViewModelTests
     [Fact(DisplayName = "全解除は選択不可の案内項目の状態を変更しない")]
     public void DeselectAll_DoesNotChangeNonSelectableItems()
     {
-        var vm = new SchemaSyncDialogViewModel(new SqlConnectionSettings(), [], []);
+        var vm = CreateVm();
         vm.DiffItems.Add(
             new SchemaDiffItem
             {
@@ -91,7 +99,7 @@ public class SchemaSyncDialogViewModelTests
     [Fact(DisplayName = "スクリプト生成時は案内項目を選択していなくても通常差分のみが対象になる")]
     public void UpdatePreview_IgnoresNonSelectedInformationalItems()
     {
-        var vm = new SchemaSyncDialogViewModel(new SqlConnectionSettings(), [], []);
+        var vm = CreateVm();
         vm.DiffItems.Add(
             new SchemaDiffItem
             {
@@ -126,10 +134,8 @@ public class SchemaSyncDialogViewModelTests
     public async Task Execute_ConfirmDeclined_DoesNotRunScript()
     {
         var dialogs = new StubDialogService { ConfirmResult = false };
-        var vm = new SchemaSyncDialogViewModel(new SqlConnectionSettings(), [], [], dialogs)
-        {
-            ScriptPreview = "DROP TABLE [X];",
-        };
+        var vm = CreateVm(dialogs);
+        vm.ScriptPreview = "DROP TABLE [X];";
 
         await vm.ExecuteCommand.ExecuteAsync(null);
 

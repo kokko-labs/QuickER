@@ -4,38 +4,23 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Data.SqlClient;
+using QuickER.Provider;
 
 namespace QuickER.SqlServer;
 
 /// <summary>生成済みの T-SQL スクリプトを単一トランザクションで SQL Server に対し実行する</summary>
 /// <remarks>sqlcmd の慣習に従い、行頭の <c>GO</c> でバッチ分割する</remarks>
-public class SchemaSyncExecutor
+public sealed class SqlServerSchemaSyncExecutor : ISchemaSyncExecutor
 {
-    /// <summary>1 件のバッチ実行結果</summary>
-    public sealed record BatchResult(int Index, string Sql, bool Success, string? Error);
-
-    /// <summary>スクリプト全体の実行結果サマリ</summary>
-    public sealed class ExecutionResult
-    {
-        /// <summary>各バッチの実行結果</summary>
-        public List<BatchResult> Batches { get; } = new();
-
-        /// <summary>全バッチ成功で COMMIT したかどうか</summary>
-        public bool Committed { get; set; }
-
-        /// <summary>失敗時のエラーメッセージ</summary>
-        public string? Error { get; set; }
-    }
-
     /// <summary>スクリプトを単一トランザクション内で実行する（途中で例外発生時は ROLLBACK する）</summary>
     /// <remarks>全バッチ成功時のみ COMMIT し、原子性を保証する</remarks>
-    public async Task<ExecutionResult> ExecuteAsync(
-        SqlConnectionSettings settings,
+    public async Task<SchemaSyncResult> ExecuteAsync(
+        DbConnectionSettings settings,
         string script,
         CancellationToken ct = default
     )
     {
-        var result = new ExecutionResult();
+        var result = new SchemaSyncResult();
         var batches = SplitBatches(script);
 
         if (batches.Count == 0)
@@ -44,7 +29,7 @@ public class SchemaSyncExecutor
             return result;
         }
 
-        await using var conn = new SqlConnection(settings.Build());
+        await using var conn = new SqlConnection(SqlServerConnectionStringFactory.Build(settings));
         await conn.OpenAsync(ct).ConfigureAwait(false);
         await using var tran = (SqlTransaction)
             await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
@@ -57,7 +42,7 @@ public class SchemaSyncExecutor
                 await using var cmd = new SqlCommand(sql, conn, tran);
                 cmd.CommandTimeout = 60;
                 await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-                result.Batches.Add(new BatchResult(i + 1, sql, true, null));
+                result.Batches.Add(new SchemaSyncBatchResult(i + 1, sql, true, null));
             }
 
             await tran.CommitAsync(ct).ConfigureAwait(false);
@@ -76,7 +61,9 @@ public class SchemaSyncExecutor
                 // ロールバック自体の失敗は最善努力で握りつぶす（元の例外情報を優先する）
             }
 
-            result.Batches.Add(new BatchResult(result.Batches.Count + 1, "", false, ex.Message));
+            result.Batches.Add(
+                new SchemaSyncBatchResult(result.Batches.Count + 1, "", false, ex.Message)
+            );
         }
 
         return result;

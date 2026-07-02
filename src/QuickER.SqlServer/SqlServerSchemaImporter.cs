@@ -42,57 +42,6 @@ public class SqlServerSchemaImporter : ISchemaImporter
         public List<Relationship> Relationships { get; init; } = new();
     }
 
-    /// <summary>スキーマ内容の一致比較に使う署名文字列を生成する（取込前後の置換要否判定に用いる）</summary>
-    public static string ComputeSignature(
-        IEnumerable<Entity> entities,
-        IEnumerable<Relationship> relationships
-    )
-    {
-        var e = string.Join(
-            "|",
-            entities
-                .OrderBy(x => x.TableName)
-                .Select(x =>
-                    x.TableName
-                    + ":"
-                    + string.Join(
-                        ",",
-                        x.Columns.Select(c =>
-                            c.Name
-                            + "("
-                            + c.DataType
-                            + (c.IsPrimaryKey ? "*PK" : "")
-                            + (c.IsNullable ? "*NULL" : "*NOTNULL")
-                            + ")"
-                        )
-                    )
-                )
-        );
-        var r = string.Join(
-            "|",
-            relationships
-                .Select(x =>
-                    x.SourceEntityId
-                    + ">"
-                    + x.TargetEntityId
-                    + ":"
-                    + x.Type
-                    + ":"
-                    + x.SourceColumnId
-                    + ":"
-                    + x.TargetColumnId
-                    + ":"
-                    + x.ConstraintName
-                    + ":"
-                    + x.OnDelete
-                    + ":"
-                    + x.OnUpdate
-                )
-                .OrderBy(s => s)
-        );
-        return e + "##" + r;
-    }
-
     /// <summary>指定の接続設定で接続を開きスキーマを取得する</summary>
     public async Task<SchemaResult> ImportAsync(
         SqlConnectionSettings settings,

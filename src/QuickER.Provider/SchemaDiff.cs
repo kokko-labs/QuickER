@@ -3,7 +3,7 @@ using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using QuickER.Model;
 
-namespace QuickER.SqlServer;
+namespace QuickER.Provider;
 
 /// <summary>
 /// スキーマ同期で検出される差分の種別
@@ -31,10 +31,10 @@ public enum SchemaDiffKind
     /// <summary>既存の外部キー制約を DROP する（破壊的変更のため既定では非選択）</summary>
     DropForeignKey,
 
-    /// <summary>テーブルの拡張プロパティ MS_Description を設定・更新・削除する</summary>
+    /// <summary>テーブル説明を設定・更新・削除する</summary>
     SetTableDescription,
 
-    /// <summary>カラムの拡張プロパティ MS_Description を設定・更新・削除する</summary>
+    /// <summary>カラム説明を設定・更新・削除する</summary>
     SetColumnDescription,
 
     /// <summary>列順変更などテーブル再作成が必要なことを知らせる情報専用項目（SQL 生成対象外）</summary>

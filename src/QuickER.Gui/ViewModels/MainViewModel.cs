@@ -5,6 +5,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using QuickER.Documents;
 using QuickER.Model;
+using QuickER.Provider;
 using QuickER.Services;
 using QuickER.SqlServer;
 using QuickER.UndoRedo;
@@ -92,8 +93,8 @@ public partial class MainViewModel : ObservableObject
     public double CanvasHeight =>
         Math.Max(1600, Entities.Count == 0 ? 1600 : Entities.Max(e => e.Y + e.DisplayHeight) + 400);
 
-    /// <summary>型 ComboBox に表示する SQL Server のデータ型一覧</summary>
-    public IReadOnlyList<string> SqlDataTypes => SqlServerDataTypes.All;
+    /// <summary>型 ComboBox に表示する、現在方言のデータ型一覧</summary>
+    public IReadOnlyList<string> AvailableDataTypes => CurrentProvider.TypeCatalog.DataTypes;
 
     /// <summary>エンティティ見出しの背景色プリセット一覧</summary>
     public IReadOnlyList<EntityTitleColorOption> EntityTitleColorOptions =>
@@ -111,8 +112,40 @@ public partial class MainViewModel : ObservableObject
     /// <summary>AI チャットウィンドウのライフサイクル管理</summary>
     private readonly IAiChatLauncher _aiChat;
 
+    /// <summary>登録済み DB プロバイダのレジストリ（現在方言の解決に用いる）</summary>
+    private readonly DatabaseProviderRegistry _providers;
+
     /// <summary>プロパティ変更を監視して Undo/Redo 履歴へ自動登録する追跡器</summary>
     private readonly DiagramChangeTracker _changeTracker;
+
+    /// <summary>現在の図のターゲット DBMS（プロバイダ識別名。バッキングフィールド）</summary>
+    private IDatabaseProvider _currentProvider;
+
+    /// <summary>未知の TargetDbms を SQL Server へフォールバックした旨を既に警告したか（多重表示防止）</summary>
+    private bool _fallbackWarningShown;
+
+    /// <summary>現在の図のターゲット DBMS プロバイダ</summary>
+    public IDatabaseProvider CurrentProvider => _currentProvider;
+
+    /// <summary>DBMS 切替 ComboBox の選択肢（登録済み全プロバイダ）</summary>
+    public IReadOnlyList<IDatabaseProvider> AvailableProviders => _providers.All.ToList();
+
+    /// <summary>DBMS 切替 ComboBox の選択項目（現在方言）。設定時に方言切替を実行する</summary>
+    public IDatabaseProvider SelectedProvider
+    {
+        get => _currentProvider;
+        set
+        {
+            if (value is not null)
+            {
+                ChangeTargetDbms(value);
+            }
+        }
+    }
+
+    /// <summary>SQL Server のみを登録した既定のプロバイダレジストリを生成する（テスト・既定合成点用）</summary>
+    private static DatabaseProviderRegistry CreateDefaultRegistry() =>
+        new(new IDatabaseProvider[] { new SqlServerProvider() });
 
     /// <summary>既定のダイアログサービス（MessageBox・WPF 実装）で初期化する</summary>
     public MainViewModel()
@@ -124,20 +157,46 @@ public partial class MainViewModel : ObservableObject
 
     /// <summary>ファイル選択サービスを共有してアプリ既定の依存一式を組み立てる中継コンストラクター</summary>
     private MainViewModel(IDialogService dialogService, IFileDialogService files)
-        : this(dialogService, new WpfAppDialogService(files), files, new AiChatLauncher()) { }
+        : this(dialogService, files, CreateDefaultRegistry()) { }
 
-    /// <summary>全ダイアログ依存を注入するコンストラクター（DI 合成点・単体テスト用）</summary>
+    /// <summary>レジストリを共有してアプリ既定の依存一式を組み立てる中継コンストラクター</summary>
+    private MainViewModel(
+        IDialogService dialogService,
+        IFileDialogService files,
+        DatabaseProviderRegistry providers
+    )
+        : this(
+            dialogService,
+            new WpfAppDialogService(files, providers),
+            files,
+            new AiChatLauncher(),
+            providers
+        ) { }
+
+    /// <summary>プロバイダレジストリを既定にした 4 引数コンストラクター（既存テスト互換）</summary>
     public MainViewModel(
         IDialogService dialogService,
         IAppDialogService appDialogs,
         IFileDialogService files,
         IAiChatLauncher aiChat
     )
+        : this(dialogService, appDialogs, files, aiChat, CreateDefaultRegistry()) { }
+
+    /// <summary>全ダイアログ依存とプロバイダレジストリを注入するコンストラクター（DI 合成点・単体テスト用）</summary>
+    public MainViewModel(
+        IDialogService dialogService,
+        IAppDialogService appDialogs,
+        IFileDialogService files,
+        IAiChatLauncher aiChat,
+        DatabaseProviderRegistry providers
+    )
     {
         _dialogs = dialogService;
         _appDialogs = appDialogs;
         _files = files;
         _aiChat = aiChat;
+        _providers = providers;
+        _currentProvider = ResolveProvider("sqlserver", warnOnFallback: false);
         _changeTracker = new DiagramChangeTracker(
             UndoRedo,
             Entities,
@@ -455,7 +514,7 @@ public partial class MainViewModel : ObservableObject
             new Column
             {
                 Name = "NewColumn",
-                DataType = SqlServerDataTypes.All[3], // "int"
+                DataType = CurrentProvider.TypeCatalog.DefaultDataType,
             }
         );
 
@@ -989,6 +1048,116 @@ public partial class MainViewModel : ObservableObject
         }
 
         return candidate;
+    }
+
+    // ---------------- ターゲット DBMS 切替 ----------------
+
+    /// <summary>プロバイダ名から現在方言を解決する。未知の名前は SQL Server へフォールバックする</summary>
+    /// <param name="dbms">解決するプロバイダ識別名</param>
+    /// <param name="warnOnFallback"><c>true</c> かつ未知の名前だった場合に一度だけ警告を表示する</param>
+    private IDatabaseProvider ResolveProvider(string dbms, bool warnOnFallback)
+    {
+        if (_providers.TryGet(dbms, out var provider))
+        {
+            return provider;
+        }
+
+        // 未知の方言は SQL Server として扱い、初回のみ警告を表示する
+        if (warnOnFallback && !_fallbackWarningShown)
+        {
+            _fallbackWarningShown = true;
+            _dialogs.ShowInformation(
+                $"未対応のデータベース種別 '{dbms}' が指定されたため、SQL Server として扱います。",
+                "データベース種別"
+            );
+        }
+
+        return _providers.Get(SqlServerProvider.ProviderName);
+    }
+
+    /// <summary>読込・取込時に図の TargetDbms を現在方言へ反映する（型変換は行わない）</summary>
+    /// <remarks>ファイル・DB から与えられた方言をそのまま採用し、UI の型候補・既定型を追随させる</remarks>
+    private void SetCurrentProviderFromDbms(string dbms)
+    {
+        _currentProvider = ResolveProvider(dbms, warnOnFallback: true);
+        RaiseProviderChanged();
+    }
+
+    /// <summary>方言変更に伴う派生プロパティの変更通知をまとめて発行する</summary>
+    private void RaiseProviderChanged()
+    {
+        OnPropertyChanged(nameof(CurrentProvider));
+        OnPropertyChanged(nameof(SelectedProvider));
+        OnPropertyChanged(nameof(AvailableDataTypes));
+    }
+
+    /// <summary>
+    /// 現在の図のターゲット DBMS を切り替える。既存カラムの型をピボット変換し、
+    /// 「TargetDbms 変更＋変換対象カラムの型変更」を単一の Undo 単位として適用する。
+    /// </summary>
+    /// <param name="target">切替先のプロバイダ</param>
+    private void ChangeTargetDbms(IDatabaseProvider target)
+    {
+        // 同一方言なら何もしない
+        if (ReferenceEquals(target, _currentProvider))
+        {
+            return;
+        }
+
+        var from = _currentProvider;
+        var plan = DiagramTypeConverter.CreatePlan(
+            ToDiagramModel(),
+            from.TypeCatalog,
+            target.TypeCatalog
+        );
+
+        // 変換対象カラムの ViewModel を ID で引けるよう索引化する
+        var columnsById = Entities
+            .SelectMany(entity => entity.Columns)
+            .ToDictionary(column => column.Id);
+
+        var command = new ChangeTargetDbmsCommand(
+            from,
+            target,
+            plan.Converted,
+            columnsById,
+            applyProvider: SetProviderInternal
+        );
+
+        // 型変更が個別のプロパティ変更履歴として二重登録されないよう追跡を抑止して適用し、
+        // 複合コマンドのみを 1 つの Undo 単位として履歴へ積む
+        _changeTracker.RunWithoutTracking(command.Execute);
+        UndoRedo.Push(command);
+
+        // 変換できなかったカラムがあれば警告を提示する
+        if (plan.Unconverted.Count > 0)
+        {
+            _dialogs.ShowInformation(BuildUnconvertedWarning(plan.Unconverted), "型変換の警告");
+        }
+    }
+
+    /// <summary>Undo コマンドから方言を切り替えるための内部フック（派生通知も発行する）</summary>
+    private void SetProviderInternal(IDatabaseProvider provider)
+    {
+        _currentProvider = provider;
+        RaiseProviderChanged();
+    }
+
+    /// <summary>変換できなかったカラムの一覧を警告メッセージへ整形する（30 件超は省略）</summary>
+    private static string BuildUnconvertedWarning(IReadOnlyList<ColumnTypeConversion> unconverted)
+    {
+        const int limit = 30;
+        var lines = unconverted
+            .Take(limit)
+            .Select(c => $"・{c.TableName}.{c.ColumnName} ({c.OldType})");
+        var body = string.Join(Environment.NewLine, lines);
+
+        if (unconverted.Count > limit)
+        {
+            body += $"{Environment.NewLine}…他 {unconverted.Count - limit} 件";
+        }
+
+        return $"変換できなかった列（元の型を保持します）:{Environment.NewLine}{body}";
     }
 
     // ---------------- Collection changed handlers ----------------

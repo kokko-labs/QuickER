@@ -2,11 +2,12 @@
 using FluentAssertions;
 using QuickER.Model;
 using QuickER.Services;
+using QuickER.SqlServer;
 using QuickER.ViewModels;
 
 namespace QuickER.Tests.Services;
 
-/// <summary><see cref="DdlExporter"/> の DDL 生成（CREATE TABLE・FK・識別子エスケープ）を検証するテストクラス</summary>
+/// <summary><see cref="SqlServerDdlGenerator"/> の DDL 生成（CREATE TABLE・FK・識別子エスケープ）を検証するテストクラス</summary>
 public class DdlExporterTests
 {
     /// <summary>CREATE TABLE と PRIMARY KEY 制約が出力されることを検証する</summary>
@@ -38,7 +39,7 @@ public class DdlExporterTests
         );
         vm.Entities.Add(e);
 
-        var sql = DdlExporter.Build(vm.ToDiagramModel());
+        var sql = new SqlServerDdlGenerator().Build(vm.ToDiagramModel());
 
         sql.Should().Contain("CREATE TABLE [User]");
         sql.Should().Contain("[Id] int NOT NULL");
@@ -68,7 +69,7 @@ public class DdlExporterTests
         );
         vm.Entities.Add(e);
 
-        var sql = DdlExporter.Build(vm.ToDiagramModel());
+        var sql = new SqlServerDdlGenerator().Build(vm.ToDiagramModel());
 
         sql.Should().Contain("[Code] nvarchar(20) NOT NULL");
     }
@@ -126,7 +127,7 @@ public class DdlExporterTests
             )
         );
 
-        var sql = DdlExporter.Build(vm.ToDiagramModel());
+        var sql = new SqlServerDdlGenerator().Build(vm.ToDiagramModel());
 
         sql.Should().Contain("ALTER TABLE [C]");
         sql.Should().Contain("FOREIGN KEY ([ParentId])");
@@ -189,7 +190,7 @@ public class DdlExporterTests
             )
         );
 
-        var sql = DdlExporter.Build(vm.ToDiagramModel());
+        var sql = new SqlServerDdlGenerator().Build(vm.ToDiagramModel());
 
         sql.Should().Contain("CONSTRAINT [FK_Child_Parent_Custom]");
         sql.Should().Contain("ON DELETE CASCADE");
@@ -221,7 +222,7 @@ public class DdlExporterTests
         );
         vm.Entities.Add(e);
 
-        var sql = DdlExporter.Build(vm.ToDiagramModel());
+        var sql = new SqlServerDdlGenerator().Build(vm.ToDiagramModel());
 
         sql.Should().Contain("CREATE TABLE [dbo].[User]");
         sql.Should().Contain("CONSTRAINT [PK_dbo_User] PRIMARY KEY ([Id])");
@@ -250,7 +251,7 @@ public class DdlExporterTests
         );
         vm.Entities.Add(e);
 
-        var sql = DdlExporter.Build(vm.ToDiagramModel());
+        var sql = new SqlServerDdlGenerator().Build(vm.ToDiagramModel());
 
         sql.Should().Contain("CREATE TABLE [Weird]]Name]");
         sql.Should().Contain("[Col]]umn] int NOT NULL");
@@ -312,7 +313,7 @@ public class DdlExporterTests
             )
         );
 
-        var sql = DdlExporter.Build(vm.ToDiagramModel());
+        var sql = new SqlServerDdlGenerator().Build(vm.ToDiagramModel());
 
         sql.Should().Contain("ALTER TABLE [dbo].[C] ADD CONSTRAINT [FK_dbo_C_dbo_P]");
         sql.Should().Contain("FOREIGN KEY ([ParentId]) REFERENCES [dbo].[P] ([Id])");

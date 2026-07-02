@@ -1,11 +1,12 @@
 ﻿using FluentAssertions;
 using QuickER.Model;
+using QuickER.Provider;
 using QuickER.Services;
 using QuickER.SqlServer;
 
 namespace QuickER.Tests.Services;
 
-/// <summary><see cref="SchemaSyncScriptBuilder"/> が差分から生成する T-SQL の内容と出力順序を検証するテストクラス</summary>
+/// <summary><see cref="SqlServerSyncScriptBuilder"/> が差分から生成する T-SQL の内容と出力順序を検証するテストクラス</summary>
 public class SchemaSyncScriptBuilderTests
 {
     /// <summary>AddTable が主キー制約を含む CREATE TABLE 文を生成することを検証する</summary>
@@ -38,7 +39,7 @@ public class SchemaSyncScriptBuilderTests
             IsSelected = true,
         };
 
-        var sql = SchemaSyncScriptBuilder.Build(new[] { item });
+        var sql = new SqlServerSyncScriptBuilder().Build(new[] { item });
         sql.Should().Contain("CREATE TABLE [Customer]");
         sql.Should().Contain("[Id] int NOT NULL");
         sql.Should().Contain("PRIMARY KEY ([Id])");
@@ -63,7 +64,7 @@ public class SchemaSyncScriptBuilderTests
             IsSelected = true,
         };
 
-        var sql = SchemaSyncScriptBuilder.Build(new[] { item });
+        var sql = new SqlServerSyncScriptBuilder().Build(new[] { item });
         sql.Should().Contain("ALTER TABLE [Customer] ADD [Email] nvarchar(200) NOT NULL;");
     }
 
@@ -85,7 +86,7 @@ public class SchemaSyncScriptBuilderTests
             IsSelected = true,
         };
 
-        var sql = SchemaSyncScriptBuilder.Build(new[] { item });
+        var sql = new SqlServerSyncScriptBuilder().Build(new[] { item });
         sql.Should().Contain("ALTER TABLE [Customer] ALTER COLUMN [Name] nvarchar(100) NOT NULL;");
     }
 
@@ -101,7 +102,7 @@ public class SchemaSyncScriptBuilderTests
             IsSelected = true,
         };
 
-        var sql = SchemaSyncScriptBuilder.Build(new[] { item });
+        var sql = new SqlServerSyncScriptBuilder().Build(new[] { item });
         sql.Should().Contain("ALTER TABLE [Customer] DROP COLUMN [Old];");
     }
 
@@ -118,7 +119,7 @@ public class SchemaSyncScriptBuilderTests
             IsSelected = false,
         };
 
-        var sql = SchemaSyncScriptBuilder.Build(new[] { item });
+        var sql = new SqlServerSyncScriptBuilder().Build(new[] { item });
         sql.Should().NotContain("Email");
     }
 
@@ -166,7 +167,7 @@ public class SchemaSyncScriptBuilderTests
             IsSelected = true,
         };
 
-        var sql = SchemaSyncScriptBuilder.Build(new[] { item });
+        var sql = new SqlServerSyncScriptBuilder().Build(new[] { item });
         sql.Should().Contain("ALTER TABLE [Order] ADD CONSTRAINT [FK_Order_Customer]");
         sql.Should().Contain("FOREIGN KEY ([CustomerRef]) REFERENCES [Customer] ([Id])");
     }
@@ -217,7 +218,7 @@ public class SchemaSyncScriptBuilderTests
             IsSelected = true,
         };
 
-        var sql = SchemaSyncScriptBuilder.Build(new[] { item });
+        var sql = new SqlServerSyncScriptBuilder().Build(new[] { item });
         sql.Should().Contain("CONSTRAINT [FK_Order_Customer_Custom]");
         sql.Should().Contain("ON DELETE CASCADE");
         sql.Should().Contain("ON UPDATE SET DEFAULT");
@@ -239,7 +240,7 @@ public class SchemaSyncScriptBuilderTests
             IsSelected = true,
         };
 
-        var sql = SchemaSyncScriptBuilder.Build(new[] { item });
+        var sql = new SqlServerSyncScriptBuilder().Build(new[] { item });
         sql.Should().Contain("FK_Order_CustomerRef");
         sql.Should().Contain("DROP CONSTRAINT [FK_Order_CustomerRef]");
     }
@@ -295,7 +296,7 @@ public class SchemaSyncScriptBuilderTests
             },
         };
 
-        var sql = SchemaSyncScriptBuilder.Build(items);
+        var sql = new SqlServerSyncScriptBuilder().Build(items);
         var iCreate = sql.IndexOf("CREATE TABLE");
         var iAdd = sql.IndexOf("ADD [Customer_Id]");
         var iFk = sql.IndexOf("ADD CONSTRAINT");
@@ -319,7 +320,7 @@ public class SchemaSyncScriptBuilderTests
             IsSelected = true,
         };
 
-        var sql = SchemaSyncScriptBuilder.Build(new[] { item });
+        var sql = new SqlServerSyncScriptBuilder().Build(new[] { item });
         sql.Should().Contain("sp_addextendedproperty");
         sql.Should().Contain("sp_updateextendedproperty");
         sql.Should().Contain("MS_Description");
@@ -343,7 +344,7 @@ public class SchemaSyncScriptBuilderTests
             IsSelected = true,
         };
 
-        var sql = SchemaSyncScriptBuilder.Build(new[] { item });
+        var sql = new SqlServerSyncScriptBuilder().Build(new[] { item });
         sql.Should().Contain("@level2type=N'COLUMN'");
         sql.Should().Contain("@level2name=N'Name'");
         sql.Should().Contain("N'顧客名'");
@@ -362,7 +363,7 @@ public class SchemaSyncScriptBuilderTests
             IsSelected = true,
         };
 
-        var sql = SchemaSyncScriptBuilder.Build(new[] { item });
+        var sql = new SqlServerSyncScriptBuilder().Build(new[] { item });
         sql.Should().Contain("sp_dropextendedproperty");
         sql.Should().NotContain("sp_addextendedproperty");
     }

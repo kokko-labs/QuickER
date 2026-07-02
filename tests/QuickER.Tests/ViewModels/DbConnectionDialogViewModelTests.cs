@@ -1,5 +1,6 @@
-﻿using System.IO;
+using System.IO;
 using FluentAssertions;
+using QuickER.Provider;
 using QuickER.Services;
 using QuickER.SqlServer;
 using QuickER.Tests.TestDoubles;
@@ -7,14 +8,19 @@ using QuickER.ViewModels;
 
 namespace QuickER.Tests.ViewModels;
 
-/// <summary><see cref="SqlConnectionDialogViewModel"/> の初期表示・プロファイル選択・保存・削除を検証するテストクラス</summary>
-public class SqlConnectionDialogViewModelTests : IDisposable
+/// <summary><see cref="DbConnectionDialogViewModel"/> の初期表示・プロファイル選択・保存・削除・方言固定を検証するテストクラス</summary>
+public class DbConnectionDialogViewModelTests : IDisposable
 {
     /// <summary>テスト用の一時保存先フォルダ</summary>
     private readonly string _tempFolder;
 
+    /// <summary>SQL Server のみを登録したレジストリ</summary>
+    private static readonly DatabaseProviderRegistry Registry = new(
+        new IDatabaseProvider[] { new SqlServerProvider() }
+    );
+
     /// <summary>一時保存先フォルダを作成する</summary>
-    public SqlConnectionDialogViewModelTests()
+    public DbConnectionDialogViewModelTests()
     {
         _tempFolder = Path.Combine(
             Path.GetTempPath(),
@@ -42,6 +48,12 @@ public class SqlConnectionDialogViewModelTests : IDisposable
     /// <summary>DPAPI を使わず一時フォルダへ保存するテスト用ストアを生成する</summary>
     private SqlConnectionProfileStore CreateStore() => new(_tempFolder, useDpapi: false);
 
+    /// <summary>取込モードの ViewModel を生成する</summary>
+    private DbConnectionDialogViewModel CreateVm(
+        SqlConnectionProfileStore store,
+        IDialogService? dialogs = null
+    ) => new(Registry, DbConnectionDialogMode.Import, fixedProvider: null, store, dialogs);
+
     /// <summary>初期表示で保存済みプロファイルを自動選択せず、入力欄が既定のままであることを検証する</summary>
     [Fact(DisplayName = "初期表示では保存済み接続を自動選択しない")]
     public void Constructor_DoesNotAutoSelectSavedProfile()
@@ -57,10 +69,10 @@ public class SqlConnectionDialogViewModelTests : IDisposable
             password: ""
         );
 
-        var vm = new SqlConnectionDialogViewModel(store);
+        var vm = CreateVm(store);
 
         vm.SelectedProfile.Should().BeNull();
-        vm.Server.Should().Be("localhost");
+        vm.Host.Should().Be("localhost");
         vm.Database.Should().BeEmpty();
         vm.ProfileName.Should().BeEmpty();
     }
@@ -76,7 +88,7 @@ public class SqlConnectionDialogViewModelTests : IDisposable
                 Name = "TestDB",
                 Server = "saved-server",
                 Database = "saved-db",
-                AuthMode = SqlAuthMode.SqlServer,
+                AuthMode = DbAuthMode.UsernamePassword,
                 UserId = "sa",
                 TrustServerCertificate = false,
                 SavePassword = true,
@@ -84,16 +96,14 @@ public class SqlConnectionDialogViewModelTests : IDisposable
             password: "secret"
         );
 
-        var vm = new SqlConnectionDialogViewModel(store)
-        {
-            Server = "restored-server",
-            Database = "restored-db",
-            ProfileName = "復元済み",
-        };
+        var vm = CreateVm(store);
+        vm.Host = "restored-server";
+        vm.Database = "restored-db";
+        vm.ProfileName = "復元済み";
 
-        vm.SelectedProfile = vm.Profiles[0];
+        vm.SelectedProfileItem = vm.Profiles[0];
 
-        vm.Server.Should().Be("saved-server");
+        vm.Host.Should().Be("saved-server");
         vm.Database.Should().Be("saved-db");
         vm.UserId.Should().Be("sa");
         vm.Password.Should().Be("secret");
@@ -106,25 +116,76 @@ public class SqlConnectionDialogViewModelTests : IDisposable
     public void Ok_SavesLastConnection_AndNextDialogRestoresDatabase()
     {
         var store = CreateStore();
-        var vm = new SqlConnectionDialogViewModel(store)
-        {
-            Server = "restored-server",
-            Database = "restored-db",
-            AuthMode = SqlAuthMode.SqlServer,
-            UserId = "sa",
-            Password = "secret",
-            SavePassword = true,
-        };
+        var vm = CreateVm(store);
+        vm.Host = "restored-server";
+        vm.Database = "restored-db";
+        vm.AuthMode = DbAuthMode.UsernamePassword;
+        vm.UserId = "sa";
+        vm.Password = "secret";
+        vm.SavePassword = true;
 
         vm.OkCommand.Execute(null);
 
-        var reopened = new SqlConnectionDialogViewModel(store);
+        var reopened = CreateVm(store);
 
-        reopened.Server.Should().Be("restored-server");
+        reopened.Host.Should().Be("restored-server");
         reopened.Database.Should().Be("restored-db");
         reopened.UserId.Should().Be("sa");
         reopened.Password.Should().Be("secret");
         reopened.StatusMessage.Should().Be("前回接続情報を復元しました。");
+    }
+
+    /// <summary>OK 確定で選択されていた方言が結果へ反映されることを検証する</summary>
+    [Fact(DisplayName = "OK 確定で選択方言が ResultProvider に反映される")]
+    public void Ok_SetsResultAndProvider()
+    {
+        var store = CreateStore();
+        var vm = CreateVm(store);
+        vm.Host = "srv";
+        vm.Database = "db";
+
+        vm.OkCommand.Execute(null);
+
+        vm.Result.Should().NotBeNull();
+        vm.ResultProvider!.Name.Should().Be("sqlserver");
+    }
+
+    /// <summary>保存プロファイルの表示名に DBMS 表示名が含まれることを検証する</summary>
+    [Fact(DisplayName = "プロファイル表示名に DBMS 名が含まれる")]
+    public void ProfileDisplayName_ContainsDbms()
+    {
+        var store = CreateStore();
+        store.Upsert(
+            new SqlConnectionProfile
+            {
+                Name = "本番DB",
+                Dbms = "sqlserver",
+                Server = "s",
+                Database = "d",
+            },
+            password: ""
+        );
+
+        var vm = CreateVm(store);
+
+        vm.Profiles.Should().ContainSingle();
+        vm.Profiles[0].Display.Should().Be("[SQL Server] 本番DB");
+    }
+
+    /// <summary>同期モードでは DBMS を選択できない（固定）ことを検証する</summary>
+    [Fact(DisplayName = "同期モードでは DBMS 選択が無効になる")]
+    public void SyncMode_DisablesDbmsSelection()
+    {
+        var store = CreateStore();
+        var vm = new DbConnectionDialogViewModel(
+            Registry,
+            DbConnectionDialogMode.Sync,
+            fixedProvider: new SqlServerProvider(),
+            store,
+            null
+        );
+
+        vm.CanSelectDbms.Should().BeFalse();
     }
 
     /// <summary>削除確認でキャンセルするとプロファイルが残ることを検証する</summary>
@@ -142,8 +203,8 @@ public class SqlConnectionDialogViewModelTests : IDisposable
             password: ""
         );
         var dialogs = new StubDialogService { ConfirmResult = false };
-        var vm = new SqlConnectionDialogViewModel(store, dialogs);
-        vm.SelectedProfile = vm.Profiles[0];
+        var vm = CreateVm(store, dialogs);
+        vm.SelectedProfileItem = vm.Profiles[0];
 
         vm.DeleteProfileCommand.Execute(null);
 
@@ -166,8 +227,8 @@ public class SqlConnectionDialogViewModelTests : IDisposable
             password: ""
         );
         var dialogs = new StubDialogService { ConfirmResult = true };
-        var vm = new SqlConnectionDialogViewModel(store, dialogs);
-        vm.SelectedProfile = vm.Profiles[0];
+        var vm = CreateVm(store, dialogs);
+        vm.SelectedProfileItem = vm.Profiles[0];
 
         vm.DeleteProfileCommand.Execute(null);
 

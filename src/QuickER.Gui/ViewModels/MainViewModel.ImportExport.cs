@@ -6,7 +6,6 @@ using QuickER.Generator;
 using QuickER.Model;
 using QuickER.Provider;
 using QuickER.Services;
-using QuickER.SqlServer;
 
 namespace QuickER.ViewModels;
 
@@ -125,6 +124,7 @@ public partial class MainViewModel
         {
             var document = JsonStorageService.Load(AutoSavePath);
 
+            SetCurrentProviderFromDbms(document.Schema.TargetDbms);
             ReplaceDiagram(
                 document.Schema.Entities,
                 document.Schema.Relationships,
@@ -187,7 +187,7 @@ public partial class MainViewModel
             // 型解決（プロバイダ）→生成（Generator）の結合点は共有ファサードに集約し、CLI とドリフトさせない
             var diagram = ToDiagramModel();
             var result = DiagramCodeGenerator.Generate(
-                new SqlServerProvider().TypeMapper,
+                CurrentProvider.TypeMapper,
                 diagram,
                 options
             );
@@ -256,6 +256,7 @@ public partial class MainViewModel
         {
             Entities = Entities.Select(entity => entity.ToModel()).ToList(),
             Relationships = Relationships.Select(relationship => relationship.ToModel()).ToList(),
+            TargetDbms = CurrentProvider.Name,
         };
 
     /// <summary>現在の ER 図を保存文書（意味モデル＋レイアウトサイドカー）へ変換する</summary>
@@ -273,11 +274,8 @@ public partial class MainViewModel
     )
     {
         var current = ToDiagramModel();
-        var currentSignature = SqlServerSchemaImporter.ComputeSignature(
-            current.Entities,
-            current.Relationships
-        );
-        var newSignature = SqlServerSchemaImporter.ComputeSignature(entities, relationships);
+        var currentSignature = SchemaSignature.Compute(current.Entities, current.Relationships);
+        var newSignature = SchemaSignature.Compute(entities, relationships);
 
         return currentSignature == newSignature;
     }
@@ -359,7 +357,11 @@ public partial class MainViewModel
                 break;
 
             case DiagramExportFormat.Sql:
-                DdlExporter.SaveTo(ToDiagramModel(), path);
+                File.WriteAllText(
+                    path,
+                    CurrentProvider.DdlGenerator.Build(ToDiagramModel()),
+                    System.Text.Encoding.UTF8
+                );
                 break;
 
             case DiagramExportFormat.Mermaid:
@@ -464,23 +466,30 @@ public partial class MainViewModel
         };
     }
 
-    // ---------------- SQL Server 取込 ----------------
+    // ---------------- データベースから取込 ----------------
 
-    /// <summary>SQL Server へ接続してスキーマを取得し、確認のうえダイアグラムへ反映する</summary>
+    /// <summary>データベースへ接続してスキーマを取得し、確認のうえダイアグラムへ反映する</summary>
+    /// <remarks>取込ダイアログでは DBMS を選択でき、取込成功時に図の TargetDbms を選択方言へ設定する</remarks>
     [RelayCommand]
-    private async Task ImportFromSqlServerAsync()
+    private async Task ImportFromDatabaseAsync()
     {
-        var settings = _appDialogs.ShowSqlConnectionDialog();
+        var picked = _appDialogs.ShowDbConnectionDialog(
+            DbConnectionDialogMode.Import,
+            fixedProvider: CurrentProvider,
+            title: "データベースから取込"
+        );
 
-        if (settings is null)
+        if (picked is null)
         {
             return;
         }
 
         try
         {
-            var importer = new SqlServerSchemaImporter();
-            var result = await importer.ImportAsync(settings).ConfigureAwait(true);
+            var connectionString = picked.Provider.BuildConnectionString(picked.Settings);
+            var result = await picked
+                .Provider.SchemaImporter.ImportAsync(connectionString)
+                .ConfigureAwait(true);
 
             // 構造差分がある場合のみ置換確認を行う
             if (
@@ -494,6 +503,9 @@ public partial class MainViewModel
                 return;
             }
 
+            // 取込先の方言を図の TargetDbms として採用する
+            SetCurrentProviderFromDbms(picked.Provider.Name);
+
             // DB 取込はインポート扱いとし、Undo 履歴へは積まない
             ReplaceDiagramWithoutHistory(result.Entities, result.Relationships, autoLayout: true);
         }
@@ -505,19 +517,29 @@ public partial class MainViewModel
 
     // ---------------- DB 書き込み (スキーマ同期) ----------------
 
-    /// <summary>SQL Server へ接続し、現在のダイアグラムとの差分同期ダイアログを開く</summary>
+    /// <summary>データベースへ接続し、現在のダイアグラムとの差分同期ダイアログを開く</summary>
+    /// <remarks>同期先の方言は図の TargetDbms に固定する（接続ダイアログでは DBMS を選択できない）</remarks>
     [RelayCommand]
-    private void SyncToSqlServer()
+    private void SyncToDatabase()
     {
-        var settings = _appDialogs.ShowSqlConnectionDialog("SQL Server へ同期");
+        var picked = _appDialogs.ShowDbConnectionDialog(
+            DbConnectionDialogMode.Sync,
+            fixedProvider: CurrentProvider,
+            title: "データベースと同期"
+        );
 
-        if (settings is null)
+        if (picked is null)
         {
             return;
         }
 
         var target = ToDiagramModel();
-        _appDialogs.ShowSchemaSyncDialog(settings, target.Entities, target.Relationships);
+        _appDialogs.ShowSchemaSyncDialog(
+            picked.Provider,
+            picked.Settings,
+            target.Entities,
+            target.Relationships
+        );
     }
 
     // ---------------- AI チャット ----------------
@@ -556,6 +578,7 @@ public partial class MainViewModel
 
         var document = JsonStorageService.Load(picked.Path);
 
+        SetCurrentProviderFromDbms(document.Schema.TargetDbms);
         ReplaceDiagram(
             document.Schema.Entities,
             document.Schema.Relationships,

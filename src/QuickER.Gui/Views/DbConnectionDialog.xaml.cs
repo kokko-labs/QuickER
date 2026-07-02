@@ -1,18 +1,18 @@
-﻿using System.Windows;
+using System.Windows;
 using System.Windows.Controls;
 using QuickER.ViewModels;
 
 namespace QuickER.Views;
 
-/// <summary>SQL Server 接続情報入力ダイアログのコードビハインド</summary>
+/// <summary>DB 接続情報入力ダイアログのコードビハインド（多 DBMS 共通）</summary>
 /// <remarks>PasswordBox は WPF の制約上バインドできないため、双方向の変更をコードビハインドで同期する</remarks>
-public partial class SqlConnectionDialog : Window
+public partial class DbConnectionDialog : Window
 {
     /// <summary>このダイアログの ViewModel</summary>
-    public SqlConnectionDialogViewModel ViewModel { get; }
+    public DbConnectionDialogViewModel ViewModel { get; }
 
     /// <summary>注入された ViewModel を結び付けてダイアログを生成する</summary>
-    public SqlConnectionDialog(SqlConnectionDialogViewModel viewModel)
+    public DbConnectionDialog(DbConnectionDialogViewModel viewModel)
     {
         InitializeComponent();
         ViewModel = viewModel;
@@ -23,11 +23,15 @@ public partial class SqlConnectionDialog : Window
         };
 
         DataContext = ViewModel;
+
+        // 前回接続やプロファイル選択で復元されたパスワードを PasswordBox へ初期反映する
+        PasswordBoxControl.Password = ViewModel.Password;
+
         // VM 側 (プロファイル選択時など) で Password が更新されたら PasswordBox にも反映する
         ViewModel.PropertyChanged += (_, e) =>
         {
             if (
-                e.PropertyName == nameof(SqlConnectionDialogViewModel.Password)
+                e.PropertyName == nameof(DbConnectionDialogViewModel.Password)
                 && PasswordBoxControl.Password != ViewModel.Password
             )
             {

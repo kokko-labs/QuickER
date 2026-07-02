@@ -5,16 +5,19 @@ using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using QuickER.Model;
+using QuickER.Provider;
 using QuickER.Services;
-using QuickER.SqlServer;
 
 namespace QuickER.ViewModels;
 
 /// <summary>ダイアグラムを既存 DB と同期（差分 ALTER 実行）するためのダイアログ ViewModel</summary>
 public partial class SchemaSyncDialogViewModel : ObservableObject
 {
+    /// <summary>同期先の DB プロバイダ（取込・スクリプト生成・実行を担う）</summary>
+    private readonly IDatabaseProvider _provider;
+
     /// <summary>同期先 DB の接続設定</summary>
-    private readonly SqlConnectionSettings _settings;
+    private readonly DbConnectionSettings _settings;
 
     /// <summary>同期の目標とするエンティティ（ダイアグラム側の状態）</summary>
     private readonly IReadOnlyList<Entity> _targetEntities;
@@ -47,15 +50,21 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
     /// <summary>ダイアログを閉じる際に呼ぶアクション（View が注入する）</summary>
     public Action<bool>? CloseAction { get; set; }
 
-    /// <summary>同期先設定と目標スキーマを指定して ViewModel を生成する</summary>
+    /// <summary>同期先プロバイダ・設定と目標スキーマを指定して ViewModel を生成する</summary>
+    /// <param name="provider">同期先の DB プロバイダ</param>
+    /// <param name="settings">同期先 DB の接続設定</param>
+    /// <param name="targetEntities">同期の目標エンティティ</param>
+    /// <param name="targetRelationships">同期の目標リレーション</param>
     /// <param name="dialogService">確認・通知ダイアログの表示先（省略時は MessageBox、テストではスタブを注入）</param>
     public SchemaSyncDialogViewModel(
-        SqlConnectionSettings settings,
+        IDatabaseProvider provider,
+        DbConnectionSettings settings,
         IReadOnlyList<Entity> targetEntities,
         IReadOnlyList<Relationship> targetRelationships,
         IDialogService? dialogService = null
     )
     {
+        _provider = provider;
         _settings = settings;
         _targetEntities = targetEntities;
         _targetRelationships = targetRelationships;
@@ -71,8 +80,10 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
 
         try
         {
-            var importer = new SqlServerSchemaImporter();
-            var live = await importer.ImportAsync(_settings).ConfigureAwait(true);
+            var connectionString = _provider.BuildConnectionString(_settings);
+            var live = await _provider
+                .SchemaImporter.ImportAsync(connectionString)
+                .ConfigureAwait(true);
             var diff = new SchemaDiffService().Compute(
                 live.Entities,
                 live.Relationships,
@@ -134,7 +145,7 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
     /// <summary>選択中の差分から T-SQL プレビューを再生成する（選択変更時に呼ぶ）</summary>
     public void UpdatePreview()
     {
-        ScriptPreview = SchemaSyncScriptBuilder.Build(DiffItems);
+        ScriptPreview = _provider.SyncScriptBuilder.Build(DiffItems);
     }
 
     /// <summary>選択可能なすべての差分を選択する</summary>
@@ -186,8 +197,9 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
 
         try
         {
-            var executor = new SchemaSyncExecutor();
-            var result = await executor.ExecuteAsync(_settings, ScriptPreview).ConfigureAwait(true);
+            var result = await _provider
+                .SyncExecutor.ExecuteAsync(_settings, ScriptPreview)
+                .ConfigureAwait(true);
 
             if (result.Committed)
             {

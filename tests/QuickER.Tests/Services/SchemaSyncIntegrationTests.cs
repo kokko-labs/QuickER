@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.Data.SqlClient;
 using QuickER.Model;
+using QuickER.Provider;
 using QuickER.Services;
 using QuickER.SqlServer;
 
@@ -148,9 +149,13 @@ IF OBJECT_ID(N'{ParentTable}', N'U') IS NOT NULL DROP TABLE [{ParentTable}];";
         diff1.Items.Should().Contain(i => i.Kind == SchemaDiffKind.AddForeignKey);
 
         // ---------- 3) 実行 ----------
-        var script1 = SchemaSyncScriptBuilder.Build(diff1.Items);
-        var exec = new SchemaSyncExecutor();
-        var result1 = await exec.ExecuteAsync(Settings, script1, TestCancellationToken);
+        var script1 = new SqlServerSyncScriptBuilder().Build(diff1.Items);
+        var exec = new SqlServerSchemaSyncExecutor();
+        var result1 = await exec.ExecuteAsync(
+            Settings.ToDbConnectionSettings(),
+            script1,
+            TestCancellationToken
+        );
         result1
             .Committed.Should()
             .BeTrue($"スクリプト実行に失敗: {result1.Error}\nSQL:\n{script1}");
@@ -184,10 +189,14 @@ IF OBJECT_ID(N'{ParentTable}', N'U') IS NOT NULL DROP TABLE [{ParentTable}];";
             .Items.Should()
             .Contain(i => i.Kind == SchemaDiffKind.AddColumn && i.ColumnName == "AddedLater");
 
-        var script3 = SchemaSyncScriptBuilder.Build(
+        var script3 = new SqlServerSyncScriptBuilder().Build(
             diff3.Items.Where(i => i.Kind == SchemaDiffKind.AddColumn)
         );
-        var result3 = await exec.ExecuteAsync(Settings, script3, TestCancellationToken);
+        var result3 = await exec.ExecuteAsync(
+            Settings.ToDbConnectionSettings(),
+            script3,
+            TestCancellationToken
+        );
         result3.Committed.Should().BeTrue($"列追加に失敗: {result3.Error}\nSQL:\n{script3}");
 
         // ---------- 6) 列が実際に追加されたか sys カラムで検証 ----------
@@ -269,9 +278,13 @@ CREATE TABLE [{ChildTable}] (
             item.IsSelected = true;
         }
 
-        var script = SchemaSyncScriptBuilder.Build(diff.Items);
-        var exec = new SchemaSyncExecutor();
-        var result = await exec.ExecuteAsync(Settings, script, TestCancellationToken);
+        var script = new SqlServerSyncScriptBuilder().Build(diff.Items);
+        var exec = new SqlServerSchemaSyncExecutor();
+        var result = await exec.ExecuteAsync(
+            Settings.ToDbConnectionSettings(),
+            script,
+            TestCancellationToken
+        );
         result.Committed.Should().BeTrue($"破壊的同期に失敗: {result.Error}\nSQL:\n{script}");
 
         // ---------- 検証 ----------
@@ -363,9 +376,13 @@ CREATE TABLE [{ChildTable}] (
                 && i.NewDescription == "名前カラム"
             );
 
-        var script = SchemaSyncScriptBuilder.Build(diff1.Items);
-        var exec = new SchemaSyncExecutor();
-        var result = await exec.ExecuteAsync(Settings, script, TestCancellationToken);
+        var script = new SqlServerSyncScriptBuilder().Build(diff1.Items);
+        var exec = new SqlServerSchemaSyncExecutor();
+        var result = await exec.ExecuteAsync(
+            Settings.ToDbConnectionSettings(),
+            script,
+            TestCancellationToken
+        );
         result.Committed.Should().BeTrue($"説明同期に失敗: {result.Error}\nSQL:\n{script}");
 
         // ---------- 3) 再 Import して説明が取得できることを確認 ----------
@@ -421,8 +438,12 @@ CREATE TABLE [{ChildTable}] (
                 && i.NewDescription == "顧客名(更新後)"
             );
 
-        var script2 = SchemaSyncScriptBuilder.Build(diff2.Items);
-        var result2 = await exec.ExecuteAsync(Settings, script2, TestCancellationToken);
+        var script2 = new SqlServerSyncScriptBuilder().Build(diff2.Items);
+        var result2 = await exec.ExecuteAsync(
+            Settings.ToDbConnectionSettings(),
+            script2,
+            TestCancellationToken
+        );
         result2.Committed.Should().BeTrue($"説明更新に失敗: {result2.Error}\nSQL:\n{script2}");
 
         var live3 = await importer.ImportAsync(Settings, TestCancellationToken);

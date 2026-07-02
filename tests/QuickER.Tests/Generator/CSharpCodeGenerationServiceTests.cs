@@ -1176,7 +1176,9 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("$\"LOWER({eqColumn}) = LOWER({eqParameter})\"");
         // 値オブジェクトの .Value を列へ解決する共通ヘルパー
         content.Should().Contain("private static string? TryColumnName(");
-        content.Should().Contain("typeof(IValueObject).IsAssignableFrom(member.Member.DeclaringType)");
+        content
+            .Should()
+            .Contain("typeof(IValueObject).IsAssignableFrom(member.Member.DeclaringType)");
     }
 
     /// <summary>RowState ベースのカスケード Save 基盤（EntityBase / SaveAsync / 保存エンジン）が生成されることを検証する</summary>
