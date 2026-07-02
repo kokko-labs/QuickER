@@ -4,6 +4,7 @@ using System.Text.Json.Nodes;
 using QuickER.Documents;
 using QuickER.Generator;
 using QuickER.Model;
+using QuickER.PostgreSql;
 using QuickER.Provider;
 using QuickER.SqlServer;
 
@@ -22,7 +23,7 @@ public static class CliApp
 
     /// <summary>CLI が対応する DB プロバイダのレジストリ（新 DBMS 対応時はここへ実装を追加する）</summary>
     private static readonly DatabaseProviderRegistry Providers = new(
-        [new SqlServerProvider()]
+        [new SqlServerProvider(), new PostgreSqlProvider()]
     );
 
     /// <summary>引数を解析してコマンドを実行する</summary>

@@ -1,5 +1,6 @@
 using System.Windows;
 using Microsoft.Extensions.DependencyInjection;
+using QuickER.PostgreSql;
 using QuickER.Provider;
 using QuickER.Services;
 using QuickER.SqlServer;
@@ -32,6 +33,7 @@ namespace QuickER
             // DB プロバイダを登録し、識別名で解決するレジストリをシングルトンで供給する
             // 新 DBMS 対応時は IDatabaseProvider 実装を追加登録するだけで済む
             services.AddSingleton<IDatabaseProvider, SqlServerProvider>();
+            services.AddSingleton<IDatabaseProvider, PostgreSqlProvider>();
             services.AddSingleton(serviceProvider => new DatabaseProviderRegistry(
                 serviceProvider.GetServices<IDatabaseProvider>()
             ));
