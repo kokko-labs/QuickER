@@ -12,4 +12,8 @@
   <ItemGroup>
     <ProjectReference Include="..\QuickER.Model\QuickER.Model.csproj" />
   </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Templates\CSharpRuntime.scriban" />
+  </ItemGroup>
 </Project>
