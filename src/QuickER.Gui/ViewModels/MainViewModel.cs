@@ -147,55 +147,31 @@ public partial class MainViewModel : ObservableObject
     private static DatabaseProviderRegistry CreateDefaultRegistry() =>
         new(new IDatabaseProvider[] { new SqlServerProvider() });
 
-    /// <summary>既定のダイアログサービス（MessageBox・WPF 実装）で初期化する</summary>
-    public MainViewModel()
-        : this(new MessageBoxDialogService()) { }
-
-    /// <summary>確認・通知ダイアログのみ差し替える場合（既存テスト互換）に使用するコンストラクター</summary>
-    public MainViewModel(IDialogService dialogService)
-        : this(dialogService, new WpfFileDialogService()) { }
-
-    /// <summary>ファイル選択サービスを共有してアプリ既定の依存一式を組み立てる中継コンストラクター</summary>
-    private MainViewModel(IDialogService dialogService, IFileDialogService files)
-        : this(dialogService, files, CreateDefaultRegistry()) { }
-
-    /// <summary>レジストリを共有してアプリ既定の依存一式を組み立てる中継コンストラクター</summary>
-    private MainViewModel(
-        IDialogService dialogService,
-        IFileDialogService files,
-        DatabaseProviderRegistry providers
-    )
-        : this(
-            dialogService,
-            new WpfAppDialogService(files, providers),
-            files,
-            new AiChatLauncher(),
-            providers
-        ) { }
-
-    /// <summary>プロバイダレジストリを既定にした 4 引数コンストラクター（既存テスト互換）</summary>
+    /// <summary>
+    /// 全ダイアログ依存とプロバイダレジストリを注入するコンストラクター（DI 合成点・単体テスト用）
+    /// </summary>
+    /// <remarks>
+    /// 全パラメーターが省略可能な単一コンストラクターへ集約している
+    /// 省略された引数は既定実装で解決する（テスト・既定合成点用）
+    /// <c>appDialogs</c> の既定実装 <see cref="WpfAppDialogService"/> は
+    /// <c>files</c>・<c>providers</c> に依存するため、両者を先に解決してから生成する
+    /// </remarks>
     public MainViewModel(
-        IDialogService dialogService,
-        IAppDialogService appDialogs,
-        IFileDialogService files,
-        IAiChatLauncher aiChat
-    )
-        : this(dialogService, appDialogs, files, aiChat, CreateDefaultRegistry()) { }
-
-    /// <summary>全ダイアログ依存とプロバイダレジストリを注入するコンストラクター（DI 合成点・単体テスト用）</summary>
-    public MainViewModel(
-        IDialogService dialogService,
-        IAppDialogService appDialogs,
-        IFileDialogService files,
-        IAiChatLauncher aiChat,
-        DatabaseProviderRegistry providers
+        IDialogService? dialogService = null,
+        IAppDialogService? appDialogs = null,
+        IFileDialogService? files = null,
+        IAiChatLauncher? aiChat = null,
+        DatabaseProviderRegistry? providers = null
     )
     {
-        _dialogs = dialogService;
-        _appDialogs = appDialogs;
-        _files = files;
-        _aiChat = aiChat;
-        _providers = providers;
+        var resolvedFiles = files ?? new WpfFileDialogService();
+        var resolvedProviders = providers ?? CreateDefaultRegistry();
+
+        _dialogs = dialogService ?? new MessageBoxDialogService();
+        _appDialogs = appDialogs ?? new WpfAppDialogService(resolvedFiles, resolvedProviders);
+        _files = resolvedFiles;
+        _aiChat = aiChat ?? new AiChatLauncher();
+        _providers = resolvedProviders;
         _currentProvider = ResolveProvider("sqlserver", warnOnFallback: false);
         _changeTracker = new DiagramChangeTracker(
             UndoRedo,
