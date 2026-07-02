@@ -92,7 +92,7 @@ internal sealed class ScribanCSharpRenderer
         var template = ParsedTemplate;
 
         // 独自属性 NavigationReference は (1) Entity のナビゲーションプロパティへの付与、
-        // (2) Repository の SqlEntityMetadata によるナビゲーション除外（リフレクション走査）のいずれかで参照される。
+        // (2) Repository の EntitySaveMetadata によるナビゲーション除外（リフレクション走査）のいずれかで参照される。
         // リレーションが無くても Repository を生成する場合は属性定義が必要なため、その条件も含める。
         var emitNavRefAttr =
             (options.GenerateEntityClasses && model.EntityClasses.Any(c => c.Navigations.Count > 0))

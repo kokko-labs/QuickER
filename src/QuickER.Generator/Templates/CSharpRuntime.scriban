@@ -156,28 +156,6 @@ public abstract partial class ValueObjectBase<TSelf, TValue> : IValueObject
 
     /// <summary>内包値の文字列表現を返す</summary>
     public override string ToString() => Value?.ToString() ?? string.Empty;
-
-    /// <summary>object 値を TValue へ変換できるか試みる（IConvertible 系のみ。Guid/TimeSpan/byte[] 等は false）</summary>
-    protected static bool TryConvert(object? value, out TValue result)
-    {
-        if (value is TValue typed)
-        {
-            result = typed;
-            return true;
-        }
-
-        try
-        {
-            result = (TValue)
-                Convert.ChangeType(value!, typeof(TValue), CultureInfo.InvariantCulture);
-            return true;
-        }
-        catch
-        {
-            result = default!;
-            return false;
-        }
-    }
 }
 
 /// <summary>順序付け可能な値オブジェクトの基底（数値・日時系）。比較演算子と CompareTo を提供する</summary>
@@ -1567,7 +1545,15 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
     /// <summary>指定範囲の要素を取り除く（既存要素は Removed として削除追跡される）</summary>
     public void RemoveRange(int index, int count)
     {
-        if (index < 0 || count < 0 || index + count > Count)
+        if (index < 0 || index > Count)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(index),
+                "開始位置がコレクションの範囲外です。"
+            );
+        }
+
+        if (count < 0 || index + count > Count)
         {
             throw new ArgumentOutOfRangeException(
                 nameof(count),
@@ -2091,7 +2077,7 @@ public partial interface IRepository<TEntity, TKey>
     /// <summary>主キーによるエンティティ削除（削除対象ありで true）</summary>
     Task<bool> DeleteAsync(TKey id, CancellationToken cancellationToken = default);
 
-    /// <summary>検索条件・並び順をチェーン指定して取得するクエリを開始する</summary>
+    /// <summary>検索条件・並び順・Include をチェーン指定して取得するクエリを開始する</summary>
     SqlQuery<TEntity> Query();
 
     /// <summary>RowState に従って 1 トランザクションで追加・更新・削除を保存する（既定で子をカスケード）</summary>
@@ -2201,297 +2187,14 @@ internal static class SqlValueObjectActivator
 }
 {{~ end ~}}
 
-/// <summary>エンティティ型の属性からテーブル・カラム情報と CRUD 用 SQL を構築・保持するメタデータ</summary>
-/// <remarks>型ごとに 1 度だけ構築し静的フィールドで再利用する（リフレクションコスト削減）</remarks>
-internal sealed class SqlEntityMetadata<TEntity, TKey>
-    where TEntity : EntityBase, new()
-{
-    /// <summary>角括弧で囲んだテーブル名</summary>
-    public required string TableName { get; init; }
-
-    /// <summary>主キーに対応するプロパティ</summary>
-    public required PropertyInfo KeyProperty { get; init; }
-
-    /// <summary>主キーのカラム名</summary>
-    public required string KeyColumnName { get; init; }
-
-    /// <summary>マッピング対象の全プロパティ（ナビゲーション除く）</summary>
-    public required IReadOnlyList<PropertyInfo> AllProperties { get; init; }
-
-    /// <summary>主キーを除くプロパティ</summary>
-    public required IReadOnlyList<PropertyInfo> NonKeyProperties { get; init; }
-
-    /// <summary>全件取得 SELECT 文</summary>
-    public required string SelectAllSql { get; init; }
-
-    /// <summary>主キー指定取得 SELECT 文</summary>
-    public required string SelectByIdSql { get; init; }
-
-    /// <summary>INSERT 文</summary>
-    public required string InsertSql { get; init; }
-
-    /// <summary>UPDATE 文</summary>
-    public required string UpdateSql { get; init; }
-
-    /// <summary>DELETE 文</summary>
-    public required string DeleteSql { get; init; }
-
-    /// <summary>SELECT 用の角括弧付きカラム一覧（例: [id], [name]）</summary>
-    public required string ColumnList { get; init; }
-
-    /// <summary>エンティティ型の属性を解析しメタデータを構築する</summary>
-    public static SqlEntityMetadata<TEntity, TKey> Create()
-    {
-        var entityType = typeof(TEntity);
-        var tableAttribute =
-            entityType.GetCustomAttribute<TableAttribute>()
-            ?? throw new InvalidOperationException(
-                $"{entityType.Name} に [Table] 属性が必要です。"
-            );
-        var properties = entityType
-            .GetProperties(BindingFlags.Public | BindingFlags.Instance)
-            .Where(property =>
-                property.CanRead
-                && property.CanWrite
-                && property.DeclaringType != typeof(EntityBase)
-                && property.GetCustomAttribute<NavigationReferenceAttribute>() is null
-            )
-            .ToList();
-        var keyProperty =
-            properties.SingleOrDefault(property =>
-                property.GetCustomAttribute<KeyAttribute>() is not null
-            )
-            ?? throw new InvalidOperationException(
-                $"{entityType.Name} に [Key] 属性付きプロパティが必要です。"
-            );
-        var nonKeyProperties = properties.Where(property => property != keyProperty).ToList();
-        var allColumns = properties.Select(GetColumnName).ToArray();
-        var insertColumns = properties.Select(GetColumnName).ToArray();
-        var updateAssignments = nonKeyProperties
-            .Select(property => $"[{GetColumnName(property)}] = @{property.Name}")
-            .ToArray();
-        var tableName = $"[{tableAttribute.Name}]";
-        var keyColumnName = GetColumnName(keyProperty);
-        var columnList = string.Join(", ", allColumns.Select(column => $"[{column}]"));
-
-        return new SqlEntityMetadata<TEntity, TKey>
-        {
-            TableName = tableName,
-            KeyProperty = keyProperty,
-            KeyColumnName = keyColumnName,
-            AllProperties = properties,
-            NonKeyProperties = nonKeyProperties,
-            ColumnList = columnList,
-            SelectAllSql = $"SELECT {columnList} FROM {tableName};",
-            SelectByIdSql = $"SELECT {columnList} FROM {tableName} WHERE [{keyColumnName}] = @id;",
-            InsertSql =
-                $"INSERT INTO {tableName} ({string.Join(", ", insertColumns.Select(column => $"[{column}]"))}) VALUES ({string.Join(", ", properties.Select(property => $"@{property.Name}"))});",
-            UpdateSql =
-                $"UPDATE {tableName} SET {string.Join(", ", updateAssignments)} WHERE [{keyColumnName}] = @id;",
-            DeleteSql = $"DELETE FROM {tableName} WHERE [{keyColumnName}] = @id;",
-        };
-    }
-
-    /// <summary>データリーダーの 1 行をエンティティへマッピングする</summary>
-    public TEntity MapEntity(SqlDataReader reader)
-    {
-        var entity = new TEntity();
-
-        foreach (var property in AllProperties)
-        {
-            var columnName = GetColumnName(property);
-            var value = reader[columnName];
-
-            if (value is DBNull)
-            {
-                property.SetValue(entity, null);
-            }
-            else
-            {
-                property.SetValue(entity, {{ if generate_value_objects }}SqlValueObjectActivator.Wrap(value, property.PropertyType){{ else }}value{{ end }});
-            }
-        }
-
-        // DB から読み込んだ行は変更なし扱いにする（その後の編集で Updated に遷移）
-        entity.RowState = RowState.Unchanged;
-        return entity;
-    }
-
-    /// <summary>INSERT 用パラメータを設定する</summary>
-    public void BindInsertParameters(SqlCommand command, TEntity entity)
-    {
-        foreach (var property in AllProperties)
-        {
-            command.Parameters.AddWithValue(
-                $"@{property.Name}",
-                {{ if generate_value_objects }}SqlParameterValue.Unwrap(property.GetValue(entity)){{ else }}property.GetValue(entity){{ end }} ?? DBNull.Value
-            );
-        }
-    }
-
-    /// <summary>エンティティのコレクションを 1 行ずつ読み出す SqlBulkCopy 用の IDataReader を生成する</summary>
-    public IDataReader CreateDataReader(IEnumerable<TEntity> entities) =>
-        new EntityDataReader(AllProperties, entities);
-
-    /// <summary>エンティティ列を 1 行ずつ読み出して SqlBulkCopy へ流す IDataReader（DataTable を介さずメモリ効率を高める）</summary>
-    /// <remarks>SqlBulkCopy は Read・GetValue・FieldCount・GetName・GetOrdinal のみ使用するため、それ以外の型付き取得は未対応とする</remarks>
-    private sealed class EntityDataReader : IDataReader
-    {
-        private readonly IReadOnlyList<PropertyInfo> _properties;
-        private readonly string[] _columnNames;
-        private readonly IEnumerator<TEntity> _enumerator;
-
-        public EntityDataReader(
-            IReadOnlyList<PropertyInfo> properties,
-            IEnumerable<TEntity> entities
-        )
-        {
-            _properties = properties;
-            _columnNames = properties.Select(GetColumnName).ToArray();
-            _enumerator = entities.GetEnumerator();
-        }
-
-        public int FieldCount => _properties.Count;
-
-        public bool Read() => _enumerator.MoveNext();
-
-        public object GetValue(int i) =>
-            {{ if generate_value_objects }}SqlParameterValue.Unwrap(_properties[i].GetValue(_enumerator.Current)){{ else }}_properties[i].GetValue(_enumerator.Current){{ end }} ?? DBNull.Value;
-
-        public string GetName(int i) => _columnNames[i];
-
-        public int GetOrdinal(string name)
-        {
-            var index = Array.IndexOf(_columnNames, name);
-            return index >= 0
-                ? index
-                : throw new IndexOutOfRangeException($"列 {name} は存在しません。");
-        }
-
-        // Nullable<T> は基底型を返す（SqlBulkCopy の列型解決と整合させる）
-        public Type GetFieldType(int i) =>
-            Nullable.GetUnderlyingType(_properties[i].PropertyType) ?? _properties[i].PropertyType;
-
-        public bool IsDBNull(int i) => GetValue(i) is DBNull;
-
-        public object this[int i] => GetValue(i);
-
-        public object this[string name] => GetValue(GetOrdinal(name));
-
-        public int GetValues(object[] values)
-        {
-            var count = Math.Min(values.Length, FieldCount);
-            for (var i = 0; i < count; i++)
-            {
-                values[i] = GetValue(i);
-            }
-
-            return count;
-        }
-
-        public void Dispose() => _enumerator.Dispose();
-
-        public int Depth => 0;
-
-        public bool IsClosed => false;
-
-        public int RecordsAffected => -1;
-
-        public void Close() { }
-
-        public bool NextResult() => false;
-
-        public DataTable? GetSchemaTable() => null;
-
-        // 以降は SqlBulkCopy では呼ばれないため未対応とする
-        public bool GetBoolean(int i) => throw new NotSupportedException();
-
-        public byte GetByte(int i) => throw new NotSupportedException();
-
-        public long GetBytes(
-            int i,
-            long fieldOffset,
-            byte[]? buffer,
-            int bufferOffset,
-            int length
-        ) => throw new NotSupportedException();
-
-        public char GetChar(int i) => throw new NotSupportedException();
-
-        public long GetChars(
-            int i,
-            long fieldOffset,
-            char[]? buffer,
-            int bufferOffset,
-            int length
-        ) => throw new NotSupportedException();
-
-        public IDataReader GetData(int i) => throw new NotSupportedException();
-
-        public string GetDataTypeName(int i) => throw new NotSupportedException();
-
-        public DateTime GetDateTime(int i) => throw new NotSupportedException();
-
-        public decimal GetDecimal(int i) => throw new NotSupportedException();
-
-        public double GetDouble(int i) => throw new NotSupportedException();
-
-        public float GetFloat(int i) => throw new NotSupportedException();
-
-        public Guid GetGuid(int i) => throw new NotSupportedException();
-
-        public short GetInt16(int i) => throw new NotSupportedException();
-
-        public int GetInt32(int i) => throw new NotSupportedException();
-
-        public long GetInt64(int i) => throw new NotSupportedException();
-
-        public string GetString(int i) => throw new NotSupportedException();
-    }
-
-    /// <summary>UPDATE 用パラメータ（非キー列＋主キー）を設定する</summary>
-    public void BindUpdateParameters(SqlCommand command, TEntity entity)
-    {
-        foreach (var property in NonKeyProperties)
-        {
-            command.Parameters.AddWithValue(
-                $"@{property.Name}",
-                {{ if generate_value_objects }}SqlParameterValue.Unwrap(property.GetValue(entity)){{ else }}property.GetValue(entity){{ end }} ?? DBNull.Value
-            );
-        }
-
-        command.Parameters.AddWithValue(
-            "@id",
-            {{ if generate_value_objects }}SqlParameterValue.Unwrap(KeyProperty.GetValue(entity)){{ else }}KeyProperty.GetValue(entity){{ end }} ?? DBNull.Value
-        );
-    }
-
-    /// <summary>主キーパラメータを設定する</summary>
-    public void BindKeyParameter(SqlCommand command, TKey id)
-    {
-        command.Parameters.AddWithValue(
-            "@id",
-            {{ if generate_value_objects }}SqlParameterValue.Unwrap(id){{ else }}id{{ end }}
-                ?? throw new InvalidOperationException("id は null にできません。")
-        );
-    }
-
-    /// <summary>[Column] 属性を優先してカラム名を解決する</summary>
-    private static string GetColumnName(PropertyInfo property) =>
-        property.GetCustomAttribute<ColumnAttribute>()?.Name ?? property.Name;
-}
-
 /// <summary>メタデータを用いて CRUD を実装する SQL Server 向けリポジトリ基底クラス</summary>
 public abstract partial class SqlServerRepository<TEntity, TKey>(
     ISqlConnectionFactory connectionFactory
 ) : IRepository<TEntity, TKey>
     where TEntity : EntityBase, new()
 {
-    /// <summary>エンティティ型ごとに 1 度だけ構築されるメタデータ（静的キャッシュ）</summary>
-    private static readonly SqlEntityMetadata<TEntity, TKey> _metadata = SqlEntityMetadata<
-        TEntity,
-        TKey
-    >.Create();
+    /// <summary>エンティティ型ごとに 1 度だけ構築されるメタデータ（静的フィールドで再利用）</summary>
+    private static readonly EntitySaveMetadata _metadata = EntitySaveMetadata.For(typeof(TEntity));
 
     /// <summary>SQL 接続の生成元</summary>
     private readonly ISqlConnectionFactory _connectionFactory = connectionFactory;
@@ -2512,7 +2215,7 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
             return null;
         }
 
-        return _metadata.MapEntity(reader);
+        return _metadata.MapEntity<TEntity>(reader);
     }
 
     /// <summary>全エンティティ取得</summary>
@@ -2530,7 +2233,7 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
 
         while (await reader.ReadAsync(cancellationToken))
         {
-            items.Add(_metadata.MapEntity(reader));
+            items.Add(_metadata.MapEntity<TEntity>(reader));
         }
 
         return items;
@@ -3701,8 +3404,8 @@ internal sealed record CascadeNavigation(
     string DependentColumn
 );
 
-/// <summary>保存対象の型ごとに INSERT/UPDATE/DELETE 用 SQL とカスケード子ナビゲーションを構築・保持するメタデータ</summary>
-/// <remarks>型をキーに 1 度だけ構築しキャッシュする（リフレクションコスト削減）</remarks>
+/// <summary>エンティティ型の属性からテーブル・カラム情報、CRUD 用 SQL、カスケード子ナビゲーションを構築・保持し、行マッピングとパラメータ束縛を提供するメタデータ</summary>
+/// <remarks>型をキーに 1 度だけ構築しキャッシュする（リフレクションコスト削減）。Repository の CRUD・グラフ保存・JSON クエリプランナ・カスケード削除プランナが共用する</remarks>
 internal sealed class EntitySaveMetadata
 {
     private static readonly ConcurrentDictionary<Type, EntitySaveMetadata> _cache = new();
@@ -3713,6 +3416,9 @@ internal sealed class EntitySaveMetadata
     /// <summary>主キーに対応するプロパティ</summary>
     public required PropertyInfo KeyProperty { get; init; }
 
+    /// <summary>主キーのカラム名</summary>
+    public required string KeyColumnName { get; init; }
+
     /// <summary>マッピング対象の全カラムプロパティ（ナビゲーション・基底プロパティ除く）</summary>
     public required IReadOnlyList<PropertyInfo> AllProperties { get; init; }
 
@@ -3721,6 +3427,15 @@ internal sealed class EntitySaveMetadata
 
     /// <summary>カラムの (プロパティ名, カラム名) 対応。JSON 射影の別名付け（[col] AS Prop）に使う</summary>
     public required IReadOnlyList<(string PropertyName, string ColumnName)> Columns { get; init; }
+
+    /// <summary>SELECT 用の角括弧付きカラム一覧（例: [id], [name]）</summary>
+    public required string ColumnList { get; init; }
+
+    /// <summary>全件取得 SELECT 文</summary>
+    public required string SelectAllSql { get; init; }
+
+    /// <summary>主キー指定取得 SELECT 文</summary>
+    public required string SelectByIdSql { get; init; }
 
     /// <summary>INSERT 文</summary>
     public required string InsertSql { get; init; }
@@ -3755,16 +3470,23 @@ internal sealed class EntitySaveMetadata
                 && property.GetCustomAttribute<NavigationReferenceAttribute>() is null
             )
             .ToList();
-        var keyProperty =
-            columns.SingleOrDefault(property =>
-                property.GetCustomAttribute<KeyAttribute>() is not null
-            )
-            ?? throw new InvalidOperationException(
+        var keyProperties = columns
+            .Where(property => property.GetCustomAttribute<KeyAttribute>() is not null)
+            .ToList();
+        var keyProperty = keyProperties.Count switch
+        {
+            0 => throw new InvalidOperationException(
                 $"{entityType.Name} に [Key] 属性付きプロパティが必要です。"
-            );
+            ),
+            1 => keyProperties[0],
+            _ => throw new InvalidOperationException(
+                $"{entityType.Name} の [Key] 属性付きプロパティは 1 つのみ許可されます（複合キーは Repository 非対応。対象: {string.Join(", ", keyProperties.Select(property => property.Name))}）。"
+            ),
+        };
         var nonKeyProperties = columns.Where(property => property != keyProperty).ToList();
         var tableName = $"[{tableAttribute.Name}]";
         var keyColumnName = GetColumnName(keyProperty);
+        var columnList = string.Join(", ", columns.Select(property => $"[{GetColumnName(property)}]"));
         var updateAssignments = nonKeyProperties.Select(property =>
             $"[{GetColumnName(property)}] = @{property.Name}"
         );
@@ -3788,9 +3510,13 @@ internal sealed class EntitySaveMetadata
         {
             TableName = tableName,
             KeyProperty = keyProperty,
+            KeyColumnName = keyColumnName,
             AllProperties = columns,
             NonKeyProperties = nonKeyProperties,
             Columns = columns.Select(property => (property.Name, GetColumnName(property))).ToList(),
+            ColumnList = columnList,
+            SelectAllSql = $"SELECT {columnList} FROM {tableName};",
+            SelectByIdSql = $"SELECT {columnList} FROM {tableName} WHERE [{keyColumnName}] = @id;",
             InsertSql =
                 $"INSERT INTO {tableName} ({string.Join(", ", columns.Select(property => $"[{GetColumnName(property)}]"))}) VALUES ({string.Join(", ", columns.Select(property => $"@{property.Name}"))});",
             UpdateSql =
@@ -3798,6 +3524,200 @@ internal sealed class EntitySaveMetadata
             DeleteSql = $"DELETE FROM {tableName} WHERE [{keyColumnName}] = @id;",
             CascadeNavigations = cascades,
         };
+    }
+
+    /// <summary>データリーダーの 1 行をエンティティへマッピングする</summary>
+    public TEntity MapEntity<TEntity>(SqlDataReader reader)
+        where TEntity : EntityBase, new()
+    {
+        var entity = new TEntity();
+
+        foreach (var property in AllProperties)
+        {
+            var columnName = GetColumnName(property);
+            var value = reader[columnName];
+
+            if (value is DBNull)
+            {
+                property.SetValue(entity, null);
+            }
+            else
+            {
+                property.SetValue(entity, {{ if generate_value_objects }}SqlValueObjectActivator.Wrap(value, property.PropertyType){{ else }}value{{ end }});
+            }
+        }
+
+        // DB から読み込んだ行は変更なし扱いにする（その後の編集で Updated に遷移）
+        entity.RowState = RowState.Unchanged;
+        return entity;
+    }
+
+    /// <summary>INSERT 用パラメータ（全カラム）を設定する（追加・グラフ挿入で共用）</summary>
+    public void BindInsertParameters(SqlCommand command, EntityBase entity)
+    {
+        foreach (var property in AllProperties)
+        {
+            command.Parameters.AddWithValue(
+                $"@{property.Name}",
+                {{ if generate_value_objects }}SqlParameterValue.Unwrap(property.GetValue(entity)){{ else }}property.GetValue(entity){{ end }} ?? DBNull.Value
+            );
+        }
+    }
+
+    /// <summary>UPDATE 用パラメータ（非キー列＋主キー）を設定する（更新・グラフ更新で共用）</summary>
+    public void BindUpdateParameters(SqlCommand command, EntityBase entity)
+    {
+        foreach (var property in NonKeyProperties)
+        {
+            command.Parameters.AddWithValue(
+                $"@{property.Name}",
+                {{ if generate_value_objects }}SqlParameterValue.Unwrap(property.GetValue(entity)){{ else }}property.GetValue(entity){{ end }} ?? DBNull.Value
+            );
+        }
+
+        command.Parameters.AddWithValue(
+            "@id",
+            {{ if generate_value_objects }}SqlParameterValue.Unwrap(KeyProperty.GetValue(entity)){{ else }}KeyProperty.GetValue(entity){{ end }} ?? DBNull.Value
+        );
+    }
+
+    /// <summary>エンティティの主キー値を @id パラメータへ設定する（グラフ削除で使用）</summary>
+    public void BindEntityKeyParameter(SqlCommand command, EntityBase entity)
+    {
+        command.Parameters.AddWithValue(
+            "@id",
+            {{ if generate_value_objects }}SqlParameterValue.Unwrap(KeyProperty.GetValue(entity)){{ else }}KeyProperty.GetValue(entity){{ end }} ?? DBNull.Value
+        );
+    }
+
+    /// <summary>外部から渡された主キー値を @id パラメータへ設定する（GetById/Delete で使用）</summary>
+    public void BindKeyParameter(SqlCommand command, object? id)
+    {
+        command.Parameters.AddWithValue(
+            "@id",
+            {{ if generate_value_objects }}SqlParameterValue.Unwrap(id){{ else }}id{{ end }}
+                ?? throw new InvalidOperationException("id は null にできません。")
+        );
+    }
+
+    /// <summary>エンティティのコレクションを 1 行ずつ読み出す SqlBulkCopy 用の IDataReader を生成する</summary>
+    public IDataReader CreateDataReader(IEnumerable<EntityBase> entities) =>
+        new EntityDataReader(AllProperties, entities);
+
+    /// <summary>エンティティ列を 1 行ずつ読み出して SqlBulkCopy へ流す IDataReader（DataTable を介さずメモリ効率を高める）</summary>
+    /// <remarks>SqlBulkCopy は Read・GetValue・FieldCount・GetName・GetOrdinal のみ使用するため、それ以外の型付き取得は未対応とする</remarks>
+    private sealed class EntityDataReader : IDataReader
+    {
+        private readonly IReadOnlyList<PropertyInfo> _properties;
+        private readonly string[] _columnNames;
+        private readonly IEnumerator<EntityBase> _enumerator;
+
+        public EntityDataReader(
+            IReadOnlyList<PropertyInfo> properties,
+            IEnumerable<EntityBase> entities
+        )
+        {
+            _properties = properties;
+            _columnNames = properties.Select(GetColumnName).ToArray();
+            _enumerator = entities.GetEnumerator();
+        }
+
+        public int FieldCount => _properties.Count;
+
+        public bool Read() => _enumerator.MoveNext();
+
+        public object GetValue(int i) =>
+            {{ if generate_value_objects }}SqlParameterValue.Unwrap(_properties[i].GetValue(_enumerator.Current)){{ else }}_properties[i].GetValue(_enumerator.Current){{ end }} ?? DBNull.Value;
+
+        public string GetName(int i) => _columnNames[i];
+
+        public int GetOrdinal(string name)
+        {
+            var index = Array.IndexOf(_columnNames, name);
+            return index >= 0
+                ? index
+                : throw new IndexOutOfRangeException($"列 {name} は存在しません。");
+        }
+
+        // Nullable<T> は基底型を返す（SqlBulkCopy の列型解決と整合させる）
+        public Type GetFieldType(int i) =>
+            Nullable.GetUnderlyingType(_properties[i].PropertyType) ?? _properties[i].PropertyType;
+
+        public bool IsDBNull(int i) => GetValue(i) is DBNull;
+
+        public object this[int i] => GetValue(i);
+
+        public object this[string name] => GetValue(GetOrdinal(name));
+
+        public int GetValues(object[] values)
+        {
+            var count = Math.Min(values.Length, FieldCount);
+            for (var i = 0; i < count; i++)
+            {
+                values[i] = GetValue(i);
+            }
+
+            return count;
+        }
+
+        public void Dispose() => _enumerator.Dispose();
+
+        public int Depth => 0;
+
+        public bool IsClosed => false;
+
+        public int RecordsAffected => -1;
+
+        public void Close() { }
+
+        public bool NextResult() => false;
+
+        public DataTable? GetSchemaTable() => null;
+
+        // 以降は SqlBulkCopy では呼ばれないため未対応とする
+        public bool GetBoolean(int i) => throw new NotSupportedException();
+
+        public byte GetByte(int i) => throw new NotSupportedException();
+
+        public long GetBytes(
+            int i,
+            long fieldOffset,
+            byte[]? buffer,
+            int bufferOffset,
+            int length
+        ) => throw new NotSupportedException();
+
+        public char GetChar(int i) => throw new NotSupportedException();
+
+        public long GetChars(
+            int i,
+            long fieldOffset,
+            char[]? buffer,
+            int bufferOffset,
+            int length
+        ) => throw new NotSupportedException();
+
+        public IDataReader GetData(int i) => throw new NotSupportedException();
+
+        public string GetDataTypeName(int i) => throw new NotSupportedException();
+
+        public DateTime GetDateTime(int i) => throw new NotSupportedException();
+
+        public decimal GetDecimal(int i) => throw new NotSupportedException();
+
+        public double GetDouble(int i) => throw new NotSupportedException();
+
+        public float GetFloat(int i) => throw new NotSupportedException();
+
+        public Guid GetGuid(int i) => throw new NotSupportedException();
+
+        public short GetInt16(int i) => throw new NotSupportedException();
+
+        public int GetInt32(int i) => throw new NotSupportedException();
+
+        public long GetInt64(int i) => throw new NotSupportedException();
+
+        public string GetString(int i) => throw new NotSupportedException();
     }
 
     private static string GetColumnName(PropertyInfo property) =>
@@ -3910,7 +3830,7 @@ internal static class EntityGraphSaver
             rows += await ExecuteAsync(
                 entity,
                 meta => meta.DeleteSql,
-                BindKey,
+                static (meta, command, e) => meta.BindEntityKeyParameter(command, e),
                 connection,
                 transaction,
                 cancellationToken
@@ -3924,7 +3844,7 @@ internal static class EntityGraphSaver
             rows += await ExecuteAsync(
                 entity,
                 meta => meta.InsertSql,
-                BindAll,
+                static (meta, command, e) => meta.BindInsertParameters(command, e),
                 connection,
                 transaction,
                 cancellationToken
@@ -3997,7 +3917,7 @@ internal static class EntityGraphSaver
         rows += await ExecuteAsync(
             entity,
             meta => meta.DeleteSql,
-            BindKey,
+            static (meta, command, e) => meta.BindEntityKeyParameter(command, e),
             connection,
             transaction,
             cancellationToken
@@ -4016,7 +3936,7 @@ internal static class EntityGraphSaver
         var affected = await ExecuteAsync(
             entity,
             meta => meta.UpdateSql,
-            BindUpdate,
+            static (meta, command, e) => meta.BindUpdateParameters(command, e),
             connection,
             transaction,
             cancellationToken
@@ -4033,7 +3953,7 @@ internal static class EntityGraphSaver
             return await ExecuteAsync(
                 entity,
                 meta => meta.InsertSql,
-                BindAll,
+                static (meta, command, e) => meta.BindInsertParameters(command, e),
                 connection,
                 transaction,
                 cancellationToken
@@ -4049,7 +3969,7 @@ internal static class EntityGraphSaver
     private static async Task<int> ExecuteAsync(
         EntityBase entity,
         Func<EntitySaveMetadata, string> sqlSelector,
-        Action<SqlCommand, EntityBase, EntitySaveMetadata> bind,
+        Action<EntitySaveMetadata, SqlCommand, EntityBase> bind,
         SqlConnection connection,
         SqlTransaction transaction,
         CancellationToken cancellationToken
@@ -4058,47 +3978,8 @@ internal static class EntityGraphSaver
         var metadata = EntitySaveMetadata.For(entity.GetType());
 
         await using var command = new SqlCommand(sqlSelector(metadata), connection, transaction);
-        bind(command, entity, metadata);
+        bind(metadata, command, entity);
         return await command.ExecuteNonQueryAsync(cancellationToken);
-    }
-
-    private static void BindAll(SqlCommand command, EntityBase entity, EntitySaveMetadata metadata)
-    {
-        foreach (var property in metadata.AllProperties)
-        {
-            command.Parameters.AddWithValue(
-                $"@{property.Name}",
-                {{ if generate_value_objects }}SqlParameterValue.Unwrap(property.GetValue(entity)){{ else }}property.GetValue(entity){{ end }} ?? DBNull.Value
-            );
-        }
-    }
-
-    private static void BindUpdate(
-        SqlCommand command,
-        EntityBase entity,
-        EntitySaveMetadata metadata
-    )
-    {
-        foreach (var property in metadata.NonKeyProperties)
-        {
-            command.Parameters.AddWithValue(
-                $"@{property.Name}",
-                {{ if generate_value_objects }}SqlParameterValue.Unwrap(property.GetValue(entity)){{ else }}property.GetValue(entity){{ end }} ?? DBNull.Value
-            );
-        }
-
-        command.Parameters.AddWithValue(
-            "@id",
-            {{ if generate_value_objects }}SqlParameterValue.Unwrap(metadata.KeyProperty.GetValue(entity)){{ else }}metadata.KeyProperty.GetValue(entity){{ end }} ?? DBNull.Value
-        );
-    }
-
-    private static void BindKey(SqlCommand command, EntityBase entity, EntitySaveMetadata metadata)
-    {
-        command.Parameters.AddWithValue(
-            "@id",
-            {{ if generate_value_objects }}SqlParameterValue.Unwrap(metadata.KeyProperty.GetValue(entity)){{ else }}metadata.KeyProperty.GetValue(entity){{ end }} ?? DBNull.Value
-        );
     }
 
     /// <summary>カスケード対象の子エンティティを列挙する（null は除外）</summary>

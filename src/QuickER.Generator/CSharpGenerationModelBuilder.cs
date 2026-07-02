@@ -643,7 +643,7 @@ internal sealed partial class CSharpGenerationModelBuilder
             usings.Add("System.Text.Json.Serialization");
         }
 
-        // 値オブジェクト：等価(StructuralComparisons)・JSON 変換器・TryConvert(CultureInfo)・リフレクション
+        // 値オブジェクト：等価(StructuralComparisons)・JSON 変換器・SqlValueObjectActivator(CultureInfo)・リフレクション
         if (options.GenerateValueObjects)
         {
             usings.Add("System.Collections");

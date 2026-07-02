@@ -1040,7 +1040,7 @@ public class CSharpCodeGenerationServiceTests
         content
             .Should()
             .Contain("public abstract partial class SqlServerRepository<TEntity, TKey>");
-        content.Should().Contain("internal sealed class SqlEntityMetadata<TEntity, TKey>");
+        content.Should().Contain("internal sealed class EntitySaveMetadata");
         content
             .Should()
             .Contain(
@@ -1056,7 +1056,7 @@ public class CSharpCodeGenerationServiceTests
         content
             .Should()
             .Contain(
-                "var columnList = string.Join(\", \", allColumns.Select(column => $\"[{column}]\"));"
+                "var columnList = string.Join(\", \", columns.Select(property => $\"[{GetColumnName(property)}]\"));"
             );
         content
             .Should()
@@ -1066,7 +1066,7 @@ public class CSharpCodeGenerationServiceTests
         content
             .Should()
             .Contain(
-                "$\"INSERT INTO {tableName} ({string.Join(\", \", insertColumns.Select(column => $\"[{column}]\"))}) VALUES ({string.Join(\", \", properties.Select(property => $\"@{property.Name}\"))});\""
+                "$\"INSERT INTO {tableName} ({string.Join(\", \", columns.Select(property => $\"[{GetColumnName(property)}]\"))}) VALUES ({string.Join(\", \", columns.Select(property => $\"@{property.Name}\"))});\""
             );
         content
             .Should()
@@ -1462,7 +1462,7 @@ public class CSharpCodeGenerationServiceTests
         content
             .Should()
             .Contain(
-                "private static readonly SqlEntityMetadata<TEntity, TKey> _metadata = SqlEntityMetadata<"
+                "private static readonly EntitySaveMetadata _metadata = EntitySaveMetadata.For(typeof(TEntity));"
             );
         content
             .Should()
@@ -1878,7 +1878,7 @@ public class CSharpCodeGenerationServiceTests
 
         result.HasErrors.Should().BeFalse();
         var content = result.Files[0].Content;
-        // Repository の SqlEntityMetadata が参照する属性が未定義だと CS0246 になるため、定義の存在を確認
+        // Repository の EntitySaveMetadata が参照する属性が未定義だと CS0246 になるため、定義の存在を確認
         content.Should().Contain("public sealed class NavigationReferenceAttribute : Attribute");
         content
             .Should()
