@@ -85,7 +85,7 @@ public class CliAppTests
                 "--out",
                 outDir,
                 "--provider",
-                "oracle",
+                "no_such_provider",
             ]);
 
             exit.Should().Be(1);
