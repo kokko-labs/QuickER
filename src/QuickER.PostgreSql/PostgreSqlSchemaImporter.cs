@@ -65,6 +65,7 @@ public class PostgreSqlSchemaImporter : ISchemaImporter
     // ---------------- 内部実装 ----------------
 
     /// <summary>public スキーマの通常テーブル一覧を取得するクエリ</summary>
+    /// <remarks>information_schema ではなく pg_catalog を直接引くのは relkind = 'r'（通常テーブル）で絞るため</remarks>
     private const string TablesSql =
         @"
 SELECT c.relname AS table_name
@@ -84,6 +85,7 @@ WHERE table_schema = 'public'
 ORDER BY table_name, ordinal_position;";
 
     /// <summary>主キー制約の構成列を序数順に取得するクエリ</summary>
+    /// <remarks>conkey は列番号の配列のため、unnest ... WITH ORDINALITY で行展開しつつ構成順序 n を保持する</remarks>
     private const string PrimaryKeysSql =
         @"
 SELECT c.relname AS table_name, a.attname AS column_name, k.n AS ordinal
@@ -96,6 +98,7 @@ WHERE con.contype = 'p' AND ns.nspname = 'public'
 ORDER BY c.relname, k.n;";
 
     /// <summary>主キー以外の一意制約の構成列を取得するクエリ（1 対 1 判定に用いる）</summary>
+    /// <remarks>主キーと同様 conkey を unnest ... WITH ORDINALITY で展開する（contype = 'u'）</remarks>
     private const string UniqueConstraintSql =
         @"
 SELECT c.relname AS table_name, con.conname AS constraint_name, a.attname AS column_name, k.n AS ordinal
@@ -134,6 +137,10 @@ WHERE con.contype = 'f' AND ns.nspname = 'public'
 ORDER BY con.conname, cols.n;";
 
     /// <summary>テーブル・カラムのコメント（obj_description / col_description）を一括取得するクエリ</summary>
+    /// <remarks>
+    /// LEFT JOIN pg_attribute はカラムを持たない（削除済み列のみ等の）テーブルでもテーブルコメントの行を残すための結合。
+    /// attnum &gt; 0 でシステム列を、NOT attisdropped で削除済み列を除外する
+    /// </remarks>
     private const string DescriptionsSql =
         @"
 SELECT c.relname AS table_name, a.attname AS column_name,

@@ -67,6 +67,7 @@ public class MySqlSchemaImporter : ISchemaImporter
     // ---------------- 内部実装 ----------------
 
     /// <summary>接続先 DB の通常テーブル一覧・テーブルコメントを取得するクエリ</summary>
+    /// <remarks>MySQL では「スキーマ」="データベース" のため、TABLE_SCHEMA = DATABASE() で接続先 DB のみに絞る</remarks>
     private const string TablesSql =
         @"
 SELECT TABLE_NAME, TABLE_COMMENT
@@ -75,7 +76,11 @@ WHERE TABLE_SCHEMA = DATABASE() AND TABLE_TYPE = 'BASE TABLE'
 ORDER BY TABLE_NAME;";
 
     /// <summary>全テーブルのカラム定義を序数順に取得するクエリ</summary>
-    /// <remarks>型は COLUMN_TYPE（varchar(50) / tinyint(1) / decimal(10,2) 等）をそのまま採用する</remarks>
+    /// <remarks>
+    /// 型は COLUMN_TYPE（varchar(50) / tinyint(1) / decimal(10,2) 等）をそのまま採用する。
+    /// information_schema のテーブル・カラム名は環境の照合順序次第で大文字小文字表記が揺れるため、
+    /// 突き合わせ側の辞書は <see cref="StringComparer.OrdinalIgnoreCase"/> で受ける
+    /// </remarks>
     private const string ColumnsSql =
         @"
 SELECT TABLE_NAME, COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_COMMENT, ORDINAL_POSITION

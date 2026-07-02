@@ -73,6 +73,7 @@ public class OracleSchemaImporter : ISchemaImporter
     // ---------------- 内部実装 ----------------
 
     /// <summary>自スキーマの通常テーブル一覧を取得するクエリ</summary>
+    /// <remarks>USER_ ビューは所有オブジェクトのみを返すため、ALL_ ビューと違い owner での絞り込みが不要</remarks>
     private const string TablesSql = "SELECT table_name FROM user_tables ORDER BY table_name";
 
     /// <summary>自スキーマ全テーブルのカラム定義を序数順に取得するクエリ</summary>
@@ -123,10 +124,12 @@ WHERE c.constraint_type = 'R'
 ORDER BY c.constraint_name, cc.position";
 
     /// <summary>テーブルコメントを取得するクエリ</summary>
+    /// <remarks>COMMENT ON TABLE 未設定のテーブルは comments が NULL になるため、ここで除外する</remarks>
     private const string TableCommentsSql =
         "SELECT table_name, comments FROM user_tab_comments WHERE comments IS NOT NULL";
 
     /// <summary>カラムコメントを取得するクエリ</summary>
+    /// <remarks>COMMENT ON COLUMN 未設定の列は comments が NULL になるため、ここで除外する</remarks>
     private const string ColumnCommentsSql =
         "SELECT table_name, column_name, comments FROM user_col_comments WHERE comments IS NOT NULL";
 
