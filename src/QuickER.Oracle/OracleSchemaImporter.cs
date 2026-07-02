@@ -52,7 +52,10 @@ public class OracleSchemaImporter : ISchemaImporter
 
     /// <summary>既に開かれた接続でスキーマを取得する（テストや接続再利用向け）</summary>
     /// <remarks>テーブル→カラム→主キー→説明→外部キーの順に段階的に補完していく</remarks>
-    public async Task<SchemaResult> ImportAsync(OracleConnection conn, CancellationToken ct = default)
+    public async Task<SchemaResult> ImportAsync(
+        OracleConnection conn,
+        CancellationToken ct = default
+    )
     {
         var tables = await LoadTablesAsync(conn, ct).ConfigureAwait(false);
         await LoadColumnsAsync(conn, tables, ct).ConfigureAwait(false);
@@ -69,26 +72,9 @@ public class OracleSchemaImporter : ISchemaImporter
 
     // ---------------- 内部実装 ----------------
 
-    /// <summary>取込処理中にテーブルとその列を索引付きで保持する作業用エントリ</summary>
-    private sealed class TableEntry
-    {
-        /// <summary>テーブル名（自スキーマの素の名前）</summary>
-        public string Name { get; init; } = "";
-
-        /// <summary>構築中のエンティティ</summary>
-        public Entity Entity { get; init; } = new();
-
-        /// <summary>列名からカラムを引くための索引（後続の PK / 説明 / FK 反映に用いる）</summary>
-        public Dictionary<string, Column> ColumnsByName { get; } =
-            new(StringComparer.OrdinalIgnoreCase);
-
-        /// <summary>テーブルを一意に識別するキー（テーブル名）</summary>
-        public string Key => Name;
-    }
-
     /// <summary>自スキーマの通常テーブル一覧を取得するクエリ</summary>
-    private const string TablesSql =
-        "SELECT table_name FROM user_tables ORDER BY table_name";
+    /// <remarks>USER_ ビューは所有オブジェクトのみを返すため、ALL_ ビューと違い owner での絞り込みが不要</remarks>
+    private const string TablesSql = "SELECT table_name FROM user_tables ORDER BY table_name";
 
     /// <summary>自スキーマ全テーブルのカラム定義を序数順に取得するクエリ</summary>
     /// <remarks>
@@ -138,20 +124,22 @@ WHERE c.constraint_type = 'R'
 ORDER BY c.constraint_name, cc.position";
 
     /// <summary>テーブルコメントを取得するクエリ</summary>
+    /// <remarks>COMMENT ON TABLE 未設定のテーブルは comments が NULL になるため、ここで除外する</remarks>
     private const string TableCommentsSql =
         "SELECT table_name, comments FROM user_tab_comments WHERE comments IS NOT NULL";
 
     /// <summary>カラムコメントを取得するクエリ</summary>
+    /// <remarks>COMMENT ON COLUMN 未設定の列は comments が NULL になるため、ここで除外する</remarks>
     private const string ColumnCommentsSql =
         "SELECT table_name, column_name, comments FROM user_col_comments WHERE comments IS NOT NULL";
 
     /// <summary>テーブル一覧を読み込み、テーブル名をキーとするエントリ辞書を構築する</summary>
-    private static async Task<Dictionary<string, TableEntry>> LoadTablesAsync(
+    private static async Task<Dictionary<string, SchemaTableEntry>> LoadTablesAsync(
         OracleConnection conn,
         CancellationToken ct
     )
     {
-        var dict = new Dictionary<string, TableEntry>(StringComparer.OrdinalIgnoreCase);
+        var dict = new Dictionary<string, SchemaTableEntry>(StringComparer.OrdinalIgnoreCase);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = TablesSql;
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
@@ -159,9 +147,9 @@ ORDER BY c.constraint_name, cc.position";
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
         {
             var name = reader.GetString(0);
-            var entry = new TableEntry
+            var entry = new SchemaTableEntry
             {
-                Name = name,
+                Key = name,
                 Entity = new Entity { TableName = name, Columns = new List<Column>() },
             };
 
@@ -174,7 +162,7 @@ ORDER BY c.constraint_name, cc.position";
     /// <summary>各テーブルへカラム定義を読み込み、型表記を整形して追加する</summary>
     private static async Task LoadColumnsAsync(
         OracleConnection conn,
-        Dictionary<string, TableEntry> tables,
+        Dictionary<string, SchemaTableEntry> tables,
         CancellationToken ct
     )
     {
@@ -207,7 +195,13 @@ ORDER BY c.constraint_name, cc.position";
             var col = new Column
             {
                 Name = colName,
-                DataType = FormatDataType(dataType, dataPrecision, dataScale, charLength, dataLength),
+                DataType = FormatDataType(
+                    dataType,
+                    dataPrecision,
+                    dataScale,
+                    charLength,
+                    dataLength
+                ),
                 IsNullable = isNullable,
             };
 
@@ -219,7 +213,7 @@ ORDER BY c.constraint_name, cc.position";
     /// <summary>主キー構成列に IsPrimaryKey を立て、NULL 不可へ補正する</summary>
     private static async Task LoadPrimaryKeysAsync(
         OracleConnection conn,
-        Dictionary<string, TableEntry> tables,
+        Dictionary<string, SchemaTableEntry> tables,
         CancellationToken ct
     )
     {
@@ -245,7 +239,7 @@ ORDER BY c.constraint_name, cc.position";
     /// <summary>テーブル・カラムのコメントを取得し、エンティティ・カラムの説明へ反映する</summary>
     private static async Task LoadDescriptionsAsync(
         OracleConnection conn,
-        Dictionary<string, TableEntry> tables,
+        Dictionary<string, SchemaTableEntry> tables,
         CancellationToken ct
     )
     {
@@ -292,25 +286,14 @@ ORDER BY c.constraint_name, cc.position";
     /// <remarks>参照先列の集合が主キーまたは一意制約と一致する場合は 1 対 1、それ以外は 1 対多と判定する</remarks>
     private static async Task<List<Relationship>> LoadForeignKeysAsync(
         OracleConnection conn,
-        Dictionary<string, TableEntry> tables,
+        Dictionary<string, SchemaTableEntry> tables,
         CancellationToken ct
     )
     {
         // 親テーブルの一意制約列集合を取得し、1 対 1 判定に用いる
         var uniqueSets = await LoadUniqueColumnSetsAsync(conn, ct).ConfigureAwait(false);
 
-        var rels = new List<Relationship>();
-        var grouped =
-            new Dictionary<
-                string,
-                (
-                    string ParentKey,
-                    string RefKey,
-                    List<string> ParentCols,
-                    List<string> RefCols,
-                    ForeignKeyReferentialAction OnDelete
-                )
-            >();
+        var builder = new ForeignKeyRelationshipBuilder();
 
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = ForeignKeysSql;
@@ -323,80 +306,23 @@ ORDER BY c.constraint_name, cc.position";
             var childCol = reader.GetString(2);
             var refKey = reader.GetString(3); // 参照先テーブル（親・PK 側）
             var refCol = reader.GetString(4);
-            var deleteAction = MapReferentialAction(reader.IsDBNull(6) ? null : reader.GetString(6));
+            var deleteAction = MapReferentialAction(
+                reader.IsDBNull(6) ? null : reader.GetString(6)
+            );
 
-            if (!grouped.TryGetValue(fkName, out var g))
-            {
-                g = (childKey, refKey, new List<string>(), new List<string>(), deleteAction);
-            }
-
-            g.ParentCols.Add(childCol);
-            g.RefCols.Add(refCol);
-            grouped[fkName] = g;
-        }
-
-        foreach (var (fkName, g) in grouped)
-        {
-            if (!tables.TryGetValue(g.ParentKey, out var child))
-            {
-                continue;
-            }
-
-            if (!tables.TryGetValue(g.RefKey, out var refer))
-            {
-                continue;
-            }
-
-            // FK を構成する子側の列に IsForeignKey フラグを立てる
-            foreach (var pc in g.ParentCols)
-            {
-                if (child.ColumnsByName.TryGetValue(pc, out var pcol))
-                {
-                    pcol.IsForeignKey = true;
-                }
-            }
-
-            // FK 列集合が主キーまたは一意制約と一致すれば 1 対 1 とみなす
-            var sortedChild = g
-                .ParentCols.OrderBy(s => s, StringComparer.OrdinalIgnoreCase)
-                .ToArray();
-            var pkCols = child
-                .Entity.Columns.Where(c => c.IsPrimaryKey)
-                .Select(c => c.Name)
-                .OrderBy(s => s, StringComparer.OrdinalIgnoreCase)
-                .ToArray();
-            var uniqueOnChild = uniqueSets.TryGetValue(g.ParentKey, out var sets)
-                ? sets
-                : new List<string[]>();
-
-            var isOneToOne =
-                SameSet(sortedChild, pkCols) || uniqueOnChild.Any(s => SameSet(sortedChild, s));
-
-            rels.Add(
-                new Relationship
-                {
-                    SourceEntityId = refer.Entity.Id, // 参照先 (PK 側) を起点として表示
-                    TargetEntityId = child.Entity.Id, // FK 保有テーブル
-                    Type = isOneToOne ? RelationshipType.OneToOne : RelationshipType.OneToMany,
-                    SourceColumnId =
-                        g.RefCols.Count == 1
-                        && refer.ColumnsByName.TryGetValue(g.RefCols[0], out var refColumn)
-                            ? refColumn.Id
-                            : null,
-                    TargetColumnId =
-                        g.ParentCols.Count == 1
-                        && child.ColumnsByName.TryGetValue(g.ParentCols[0], out var childColumn)
-                            ? childColumn.Id
-                            : null,
-                    ConstraintName = fkName,
-                    OnDelete = g.OnDelete,
-                    // Oracle に ON UPDATE は存在しないため常に NoAction で取り込む
-                    OnUpdate = ForeignKeyReferentialAction.NoAction,
-                }
+            builder.Add(
+                fkName,
+                childKey,
+                childCol,
+                refKey,
+                refCol,
+                deleteAction,
+                // Oracle に ON UPDATE は存在しないため常に NoAction で取り込む
+                ForeignKeyReferentialAction.NoAction
             );
         }
 
-        return rels;
+        return builder.Build(tables, uniqueSets);
     }
 
     /// <summary>テーブルごとの一意制約列集合を取得する</summary>
@@ -406,8 +332,7 @@ ORDER BY c.constraint_name, cc.position";
         CancellationToken ct
     )
     {
-        var result = new Dictionary<string, List<string[]>>(StringComparer.OrdinalIgnoreCase);
-        var current = new Dictionary<string, List<string>>();
+        var builder = new UniqueColumnSetBuilder();
 
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = UniqueConstraintSql;
@@ -418,43 +343,11 @@ ORDER BY c.constraint_name, cc.position";
             var key = reader.GetString(0);
             var con = reader.GetString(1);
             var col = reader.GetString(2);
-            var compositeKey = key + "::" + con;
-
-            if (!current.TryGetValue(compositeKey, out var list))
-            {
-                list = new List<string>();
-                current[compositeKey] = list;
-            }
-
-            list.Add(col);
-
-            if (!result.ContainsKey(key))
-            {
-                result[key] = new List<string[]>();
-            }
+            builder.Add(key, con, col);
         }
 
-        foreach (var kv in current)
-        {
-            var tableKey = kv.Key.Substring(0, kv.Key.IndexOf("::", StringComparison.Ordinal));
-
-            if (!result.TryGetValue(tableKey, out var lists))
-            {
-                lists = new List<string[]>();
-                result[tableKey] = lists;
-            }
-
-            lists.Add(kv.Value.OrderBy(s => s, StringComparer.OrdinalIgnoreCase).ToArray());
-        }
-
-        return result;
+        return builder.Build();
     }
-
-    /// <summary>2 つのソート済み列名集合が大文字小文字無視で完全一致するか判定する（空集合は不一致）</summary>
-    private static bool SameSet(string[] a, string[] b) =>
-        a.Length > 0
-        && a.Length == b.Length
-        && a.SequenceEqual(b, StringComparer.OrdinalIgnoreCase);
 
     /// <summary>user_constraints.delete_rule を参照アクションへ変換する</summary>
     /// <remarks>CASCADE / SET NULL / NO ACTION（既定）。Oracle に更新側のアクションは無い</remarks>

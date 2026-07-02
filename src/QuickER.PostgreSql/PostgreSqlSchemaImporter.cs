@@ -64,24 +64,8 @@ public class PostgreSqlSchemaImporter : ISchemaImporter
 
     // ---------------- 内部実装 ----------------
 
-    /// <summary>取込処理中にテーブルとその列を索引付きで保持する作業用エントリ</summary>
-    private sealed class TableEntry
-    {
-        /// <summary>テーブル名（public スキーマの素の名前）</summary>
-        public string Name { get; init; } = "";
-
-        /// <summary>構築中のエンティティ</summary>
-        public Entity Entity { get; init; } = new();
-
-        /// <summary>列名からカラムを引くための索引（後続の PK / 説明 / FK 反映に用いる）</summary>
-        public Dictionary<string, Column> ColumnsByName { get; } =
-            new(StringComparer.OrdinalIgnoreCase);
-
-        /// <summary>テーブルを一意に識別するキー（public スキーマのテーブル名）</summary>
-        public string Key => Name;
-    }
-
     /// <summary>public スキーマの通常テーブル一覧を取得するクエリ</summary>
+    /// <remarks>information_schema ではなく pg_catalog を直接引くのは relkind = 'r'（通常テーブル）で絞るため</remarks>
     private const string TablesSql =
         @"
 SELECT c.relname AS table_name
@@ -101,6 +85,7 @@ WHERE table_schema = 'public'
 ORDER BY table_name, ordinal_position;";
 
     /// <summary>主キー制約の構成列を序数順に取得するクエリ</summary>
+    /// <remarks>conkey は列番号の配列のため、unnest ... WITH ORDINALITY で行展開しつつ構成順序 n を保持する</remarks>
     private const string PrimaryKeysSql =
         @"
 SELECT c.relname AS table_name, a.attname AS column_name, k.n AS ordinal
@@ -113,6 +98,7 @@ WHERE con.contype = 'p' AND ns.nspname = 'public'
 ORDER BY c.relname, k.n;";
 
     /// <summary>主キー以外の一意制約の構成列を取得するクエリ（1 対 1 判定に用いる）</summary>
+    /// <remarks>主キーと同様 conkey を unnest ... WITH ORDINALITY で展開する（contype = 'u'）</remarks>
     private const string UniqueConstraintSql =
         @"
 SELECT c.relname AS table_name, con.conname AS constraint_name, a.attname AS column_name, k.n AS ordinal
@@ -151,6 +137,10 @@ WHERE con.contype = 'f' AND ns.nspname = 'public'
 ORDER BY con.conname, cols.n;";
 
     /// <summary>テーブル・カラムのコメント（obj_description / col_description）を一括取得するクエリ</summary>
+    /// <remarks>
+    /// LEFT JOIN pg_attribute はカラムを持たない（削除済み列のみ等の）テーブルでもテーブルコメントの行を残すための結合。
+    /// attnum &gt; 0 でシステム列を、NOT attisdropped で削除済み列を除外する
+    /// </remarks>
     private const string DescriptionsSql =
         @"
 SELECT c.relname AS table_name, a.attname AS column_name,
@@ -162,21 +152,21 @@ LEFT JOIN pg_catalog.pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND N
 WHERE n.nspname = 'public' AND c.relkind = 'r';";
 
     /// <summary>テーブル一覧を読み込み、テーブル名をキーとするエントリ辞書を構築する</summary>
-    private static async Task<Dictionary<string, TableEntry>> LoadTablesAsync(
+    private static async Task<Dictionary<string, SchemaTableEntry>> LoadTablesAsync(
         NpgsqlConnection conn,
         CancellationToken ct
     )
     {
-        var dict = new Dictionary<string, TableEntry>(StringComparer.OrdinalIgnoreCase);
+        var dict = new Dictionary<string, SchemaTableEntry>(StringComparer.OrdinalIgnoreCase);
         await using var cmd = new NpgsqlCommand(TablesSql, conn);
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
 
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
         {
             var name = reader.GetString(0);
-            var entry = new TableEntry
+            var entry = new SchemaTableEntry
             {
-                Name = name,
+                Key = name,
                 Entity = new Entity { TableName = name, Columns = new List<Column>() },
             };
 
@@ -189,7 +179,7 @@ WHERE n.nspname = 'public' AND c.relkind = 'r';";
     /// <summary>各テーブルへカラム定義を読み込み、型表記を整形して追加する</summary>
     private static async Task LoadColumnsAsync(
         NpgsqlConnection conn,
-        Dictionary<string, TableEntry> tables,
+        Dictionary<string, SchemaTableEntry> tables,
         CancellationToken ct
     )
     {
@@ -221,14 +211,7 @@ WHERE n.nspname = 'public' AND c.relkind = 'r';";
             var col = new Column
             {
                 Name = colName,
-                DataType = FormatDataType(
-                    dataType,
-                    udtName,
-                    charMaxLen,
-                    numPrec,
-                    numScale,
-                    dtPrec
-                ),
+                DataType = FormatDataType(dataType, udtName, charMaxLen, numPrec, numScale, dtPrec),
                 IsNullable = isNullable,
             };
 
@@ -240,7 +223,7 @@ WHERE n.nspname = 'public' AND c.relkind = 'r';";
     /// <summary>主キー構成列に IsPrimaryKey を立て、NULL 不可へ補正する</summary>
     private static async Task LoadPrimaryKeysAsync(
         NpgsqlConnection conn,
-        Dictionary<string, TableEntry> tables,
+        Dictionary<string, SchemaTableEntry> tables,
         CancellationToken ct
     )
     {
@@ -265,7 +248,7 @@ WHERE n.nspname = 'public' AND c.relkind = 'r';";
     /// <summary>テーブル・カラムのコメントを取得し、エンティティ・カラムの説明へ反映する</summary>
     private static async Task LoadDescriptionsAsync(
         NpgsqlConnection conn,
-        Dictionary<string, TableEntry> tables,
+        Dictionary<string, SchemaTableEntry> tables,
         CancellationToken ct
     )
     {
@@ -302,26 +285,14 @@ WHERE n.nspname = 'public' AND c.relkind = 'r';";
     /// <remarks>参照先列の集合が主キーまたは一意制約と一致する場合は 1 対 1、それ以外は 1 対多と判定する</remarks>
     private static async Task<List<Relationship>> LoadForeignKeysAsync(
         NpgsqlConnection conn,
-        Dictionary<string, TableEntry> tables,
+        Dictionary<string, SchemaTableEntry> tables,
         CancellationToken ct
     )
     {
         // 親テーブルの一意制約列集合を取得し、1 対 1 判定に用いる
         var uniqueSets = await LoadUniqueColumnSetsAsync(conn, ct).ConfigureAwait(false);
 
-        var rels = new List<Relationship>();
-        var grouped =
-            new Dictionary<
-                string,
-                (
-                    string ParentKey,
-                    string RefKey,
-                    List<string> ParentCols,
-                    List<string> RefCols,
-                    ForeignKeyReferentialAction OnDelete,
-                    ForeignKeyReferentialAction OnUpdate
-                )
-            >();
+        var builder = new ForeignKeyRelationshipBuilder();
 
         await using var cmd = new NpgsqlCommand(ForeignKeysSql, conn);
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
@@ -333,87 +304,17 @@ WHERE n.nspname = 'public' AND c.relkind = 'r';";
             var parentCol = reader.GetString(2);
             var refKey = reader.GetString(3); // 参照先テーブル（親・PK 側）
             var refCol = reader.GetString(4);
-            var deleteAction = MapReferentialAction(reader.IsDBNull(6) ? null : reader.GetString(6));
-            var updateAction = MapReferentialAction(reader.IsDBNull(7) ? null : reader.GetString(7));
-
-            if (!grouped.TryGetValue(fkName, out var g))
-            {
-                g = (
-                    parentKey,
-                    refKey,
-                    new List<string>(),
-                    new List<string>(),
-                    deleteAction,
-                    updateAction
-                );
-            }
-
-            g.ParentCols.Add(parentCol);
-            g.RefCols.Add(refCol);
-            grouped[fkName] = g;
-        }
-
-        foreach (var (fkName, g) in grouped)
-        {
-            if (!tables.TryGetValue(g.ParentKey, out var parent))
-            {
-                continue;
-            }
-
-            if (!tables.TryGetValue(g.RefKey, out var refer))
-            {
-                continue;
-            }
-
-            // FK を構成する子側の列に IsForeignKey フラグを立てる
-            foreach (var pc in g.ParentCols)
-            {
-                if (parent.ColumnsByName.TryGetValue(pc, out var pcol))
-                {
-                    pcol.IsForeignKey = true;
-                }
-            }
-
-            // FK 列集合が主キーまたは一意制約と一致すれば 1 対 1 とみなす
-            var sortedParent = g
-                .ParentCols.OrderBy(s => s, StringComparer.OrdinalIgnoreCase)
-                .ToArray();
-            var pkCols = parent
-                .Entity.Columns.Where(c => c.IsPrimaryKey)
-                .Select(c => c.Name)
-                .OrderBy(s => s, StringComparer.OrdinalIgnoreCase)
-                .ToArray();
-            var uniqueOnParent = uniqueSets.TryGetValue(g.ParentKey, out var sets)
-                ? sets
-                : new List<string[]>();
-
-            var isOneToOne =
-                SameSet(sortedParent, pkCols) || uniqueOnParent.Any(s => SameSet(sortedParent, s));
-
-            rels.Add(
-                new Relationship
-                {
-                    SourceEntityId = refer.Entity.Id, // 参照先 (PK 側) を起点として表示
-                    TargetEntityId = parent.Entity.Id, // FK 保有テーブル
-                    Type = isOneToOne ? RelationshipType.OneToOne : RelationshipType.OneToMany,
-                    SourceColumnId =
-                        g.RefCols.Count == 1
-                        && refer.ColumnsByName.TryGetValue(g.RefCols[0], out var refColumn)
-                            ? refColumn.Id
-                            : null,
-                    TargetColumnId =
-                        g.ParentCols.Count == 1
-                        && parent.ColumnsByName.TryGetValue(g.ParentCols[0], out var parentColumn)
-                            ? parentColumn.Id
-                            : null,
-                    ConstraintName = fkName,
-                    OnDelete = g.OnDelete,
-                    OnUpdate = g.OnUpdate,
-                }
+            var deleteAction = MapReferentialAction(
+                reader.IsDBNull(6) ? null : reader.GetString(6)
             );
+            var updateAction = MapReferentialAction(
+                reader.IsDBNull(7) ? null : reader.GetString(7)
+            );
+
+            builder.Add(fkName, parentKey, parentCol, refKey, refCol, deleteAction, updateAction);
         }
 
-        return rels;
+        return builder.Build(tables, uniqueSets);
     }
 
     /// <summary>テーブルごとの一意制約列集合を取得する</summary>
@@ -423,8 +324,7 @@ WHERE n.nspname = 'public' AND c.relkind = 'r';";
         CancellationToken ct
     )
     {
-        var result = new Dictionary<string, List<string[]>>(StringComparer.OrdinalIgnoreCase);
-        var current = new Dictionary<string, List<string>>();
+        var builder = new UniqueColumnSetBuilder();
 
         await using var cmd = new NpgsqlCommand(UniqueConstraintSql, conn);
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
@@ -434,43 +334,11 @@ WHERE n.nspname = 'public' AND c.relkind = 'r';";
             var key = reader.GetString(0);
             var con = reader.GetString(1);
             var col = reader.GetString(2);
-            var compositeKey = key + "::" + con;
-
-            if (!current.TryGetValue(compositeKey, out var list))
-            {
-                list = new List<string>();
-                current[compositeKey] = list;
-            }
-
-            list.Add(col);
-
-            if (!result.ContainsKey(key))
-            {
-                result[key] = new List<string[]>();
-            }
+            builder.Add(key, con, col);
         }
 
-        foreach (var kv in current)
-        {
-            var tableKey = kv.Key.Substring(0, kv.Key.IndexOf("::", StringComparison.Ordinal));
-
-            if (!result.TryGetValue(tableKey, out var lists))
-            {
-                lists = new List<string[]>();
-                result[tableKey] = lists;
-            }
-
-            lists.Add(kv.Value.OrderBy(s => s, StringComparer.OrdinalIgnoreCase).ToArray());
-        }
-
-        return result;
+        return builder.Build();
     }
-
-    /// <summary>2 つのソート済み列名集合が大文字小文字無視で完全一致するか判定する（空集合は不一致）</summary>
-    private static bool SameSet(string[] a, string[] b) =>
-        a.Length > 0
-        && a.Length == b.Length
-        && a.SequenceEqual(b, StringComparer.OrdinalIgnoreCase);
 
     /// <summary>pg_constraint.confdeltype / confupdtype の 1 文字コードを参照アクションへ変換する</summary>
     /// <remarks>c=Cascade / n=SetNull / d=SetDefault / a=NoAction / r=Restrict（NoAction 扱い）</remarks>
