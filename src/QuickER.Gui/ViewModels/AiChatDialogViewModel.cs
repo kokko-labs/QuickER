@@ -24,6 +24,7 @@ public partial class AiChatDialogViewModel : ObservableObject
 
     private readonly IErDiagramChatHost? _host;
     private readonly IUiDispatcher _dispatcher;
+    private readonly IDialogService _dialogs;
     private readonly CodexAppServerSettingsStore _codexSettingsStore;
     private readonly ClaudeCodeSettingsStore _claudeCodeSettingsStore;
 
@@ -221,13 +222,14 @@ public partial class AiChatDialogViewModel : ObservableObject
         AiModelCatalog.ClaudeCodeModels;
 
     /// <summary>本番構成（実クライアント・WPF ディスパッチャ）で生成する</summary>
-    public AiChatDialogViewModel(IErDiagramChatHost? host)
+    public AiChatDialogViewModel(IErDiagramChatHost? host, IDialogService? dialogService = null)
         : this(
             host,
             new WpfUiDispatcher(),
             settingsStore: null,
             codexClient: null,
-            claudeCodeClient: null
+            claudeCodeClient: null,
+            dialogService: dialogService
         ) { }
 
     /// <summary>依存を注入して生成する（テスト用）</summary>
@@ -236,11 +238,13 @@ public partial class AiChatDialogViewModel : ObservableObject
         IUiDispatcher dispatcher,
         CodexAppServerSettingsStore? settingsStore,
         ICodexAppServerClient? codexClient,
-        IClaudeCodeClient? claudeCodeClient = null
+        IClaudeCodeClient? claudeCodeClient = null,
+        IDialogService? dialogService = null
     )
     {
         _host = host;
         _dispatcher = dispatcher;
+        _dialogs = dialogService ?? new MessageBoxDialogService();
         _codexSettingsStore = settingsStore ?? new CodexAppServerSettingsStore();
         _claudeCodeSettingsStore = new ClaudeCodeSettingsStore();
 
@@ -309,6 +313,37 @@ public partial class AiChatDialogViewModel : ObservableObject
         {
             IsBusy = false;
         }
+    }
+
+    /// <summary>
+    /// 接続方式を切り替える。会話中はクリア確認を出し、OK の場合は会話をクリアして切り替える。
+    /// </summary>
+    /// <param name="newBackend">切り替え先の接続方式</param>
+    /// <returns>切り替えた（または既に同じ）場合 true、ユーザーがキャンセルした場合 false</returns>
+    public bool TryChangeBackend(ErChatBackendKind newBackend)
+    {
+        if (newBackend == SelectedBackend)
+        {
+            return true;
+        }
+
+        if (HasConversation)
+        {
+            if (
+                !_dialogs.Confirm(
+                    "現在の会話をクリアして接続方式を切り替えますか？",
+                    "会話のクリア"
+                )
+            )
+            {
+                return false;
+            }
+
+            ClearConversation();
+        }
+
+        SelectedBackend = newBackend;
+        return true;
     }
 
     /// <summary>現在の会話表示と進行状態をクリアする（タブ切替時の確認後に呼ぶ）</summary>

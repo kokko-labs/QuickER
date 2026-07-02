@@ -4,6 +4,7 @@ using QuickER.AI;
 using QuickER.Services;
 using QuickER.Services.Chat;
 using QuickER.Tests.Services.Chat;
+using QuickER.Tests.TestDoubles;
 using QuickER.ViewModels;
 
 namespace QuickER.Tests.ViewModels;
@@ -20,7 +21,7 @@ public class AiChatDialogViewModelTests
         AiChatDialogViewModel vm,
         FakeCodexAppServerClient client,
         string folder
-    ) CreateVm()
+    ) CreateVm(IDialogService? dialogService = null)
     {
         var folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
         var settingsStore = new CodexAppServerSettingsStore(folder);
@@ -29,7 +30,8 @@ public class AiChatDialogViewModelTests
             host: null,
             dispatcher: new SyncUiDispatcher(),
             settingsStore: settingsStore,
-            codexClient: client
+            codexClient: client,
+            dialogService: dialogService
         );
         return (vm, client, folder);
     }
@@ -239,6 +241,79 @@ public class AiChatDialogViewModelTests
 
             vm.Messages.Should().BeEmpty();
             vm.HasConversation.Should().BeFalse();
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>会話が無いときは確認ダイアログを出さずに接続方式を切り替えることを検証する</summary>
+    [Fact(DisplayName = "会話なしなら確認せず接続方式を切り替える")]
+    public void TryChangeBackend_NoConversation_SwitchesWithoutConfirm()
+    {
+        var dialogs = new StubDialogService();
+        var (vm, _, folder) = CreateVm(dialogs);
+
+        try
+        {
+            var result = vm.TryChangeBackend(ErChatBackendKind.Codex);
+
+            result.Should().BeTrue();
+            vm.SelectedBackend.Should().Be(ErChatBackendKind.Codex);
+            dialogs.ConfirmMessages.Should().BeEmpty();
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>会話中に確認 OK なら会話をクリアして接続方式を切り替えることを検証する</summary>
+    [Fact(DisplayName = "会話あり＋確認OKならクリアして切り替える")]
+    public void TryChangeBackend_ConversationConfirmed_ClearsAndSwitches()
+    {
+        var dialogs = new StubDialogService { ConfirmResult = true };
+        var (vm, _, folder) = CreateVm(dialogs);
+
+        try
+        {
+            vm.Messages.Add(
+                new ErChatMessage { Role = ErChatMessageRole.User, Content = "こんにちは" }
+            );
+
+            var result = vm.TryChangeBackend(ErChatBackendKind.Codex);
+
+            result.Should().BeTrue();
+            vm.SelectedBackend.Should().Be(ErChatBackendKind.Codex);
+            vm.HasConversation.Should().BeFalse();
+            dialogs.ConfirmMessages.Should().ContainSingle();
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>会話中に確認キャンセルなら切り替えず会話を維持することを検証する</summary>
+    [Fact(DisplayName = "会話あり＋確認キャンセルなら切り替えず会話を維持する")]
+    public void TryChangeBackend_ConversationCancelled_KeepsBackendAndConversation()
+    {
+        var dialogs = new StubDialogService { ConfirmResult = false };
+        var (vm, _, folder) = CreateVm(dialogs);
+
+        try
+        {
+            vm.Messages.Add(
+                new ErChatMessage { Role = ErChatMessageRole.User, Content = "こんにちは" }
+            );
+
+            var result = vm.TryChangeBackend(ErChatBackendKind.Codex);
+
+            result.Should().BeFalse();
+            vm.SelectedBackend.Should().Be(ErChatBackendKind.ApiKey);
+            vm.HasConversation.Should().BeTrue();
+            dialogs.ConfirmMessages.Should().ContainSingle();
         }
         finally
         {

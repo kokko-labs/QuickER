@@ -3,6 +3,7 @@
   xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
   xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
   xmlns:vm="clr-namespace:QuickER.ViewModels"
+  xmlns:local="clr-namespace:QuickER.Views"
   xmlns:prov="clr-namespace:QuickER.Provider;assembly=QuickER.Provider"
   xmlns:sys="clr-namespace:System;assembly=System.Runtime"
   Title="データベースに接続"
@@ -183,7 +184,7 @@
       </Grid.ColumnDefinitions>
       <PasswordBox
         x:Name="PasswordBoxControl"
-        PasswordChanged="PasswordBoxControl_PasswordChanged"
+        local:PasswordBoxBehavior.BoundPassword="{Binding Password, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
       />
       <CheckBox
         Grid.Column="1"

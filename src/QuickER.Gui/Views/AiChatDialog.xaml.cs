@@ -1,6 +1,5 @@
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Input;
 using QuickER.AI;
 using QuickER.Services.Chat;
 using QuickER.ViewModels;
@@ -24,36 +23,15 @@ public partial class AiChatDialog : Window
         DataContext = ViewModel;
 
         ViewModel.Messages.CollectionChanged += (_, _) => ScrollToBottom();
-        ViewModel.PropertyChanged += OnViewModelPropertyChanged;
         Loaded += OnLoaded;
         Closing += OnWindowClosing;
     }
 
-    /// <summary>ViewModel 側で API キーが変化（プロバイダー切替時の読み直し等）したら PasswordBox へ反映する</summary>
-    private void OnViewModelPropertyChanged(
-        object? sender,
-        System.ComponentModel.PropertyChangedEventArgs e
-    )
-    {
-        if (
-            e.PropertyName == nameof(AiChatDialogViewModel.ApiKey)
-            && ApiKeyBox.Password != ViewModel.ApiKey
-        )
-        {
-            ApiKeyBox.Password = ViewModel.ApiKey;
-        }
-    }
-
-    /// <summary>初回表示時に ViewModel を初期化し、保存済み API キーを PasswordBox へ反映する</summary>
+    /// <summary>初回表示時に ViewModel を初期化する（API キーは添付ビヘイビアが PasswordBox へ同期する）</summary>
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
         Loaded -= OnLoaded;
         await ViewModel.InitializeAsync();
-
-        if (!string.IsNullOrEmpty(ViewModel.ApiKey))
-        {
-            ApiKeyBox.Password = ViewModel.ApiKey;
-        }
     }
 
     /// <summary>×ボタンでは閉じず、設定を保存して非表示にし状態を維持する（シングルトン動作）</summary>
@@ -84,8 +62,8 @@ public partial class AiChatDialog : Window
     private bool _revertingBackendTab;
 
     /// <summary>
-    /// タブ選択に応じて接続方式を切り替える。会話中はクリア確認を出し、
-    /// OK の場合は会話をクリアして切り替え、キャンセルの場合は元のタブへ戻す。
+    /// タブ選択を接続方式へ変換し、切替可否を ViewModel に委ねる。
+    /// 切替できた場合は確定インデックスを更新し、拒否（会話クリアのキャンセル）なら元のタブへ戻す。
     /// </summary>
     private void BackendTabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
@@ -102,32 +80,21 @@ public partial class AiChatDialog : Window
             return;
         }
 
-        if (ViewModel.HasConversation)
-        {
-            var result = MessageBox.Show(
-                this,
-                "現在の会話をクリアして接続方式を切り替えますか？",
-                "会話のクリア",
-                MessageBoxButton.OKCancel,
-                MessageBoxImage.Question
-            );
-
-            if (result != MessageBoxResult.OK)
-            {
-                RevertBackendSelection();
-                return;
-            }
-
-            ViewModel.ClearConversation();
-        }
-
-        _committedBackendIndex = newIndex;
-        ViewModel.SelectedBackend = newIndex switch
+        var newBackend = newIndex switch
         {
             1 => ErChatBackendKind.Codex,
             2 => ErChatBackendKind.ClaudeCode,
             _ => ErChatBackendKind.ApiKey,
         };
+
+        if (ViewModel.TryChangeBackend(newBackend))
+        {
+            _committedBackendIndex = newIndex;
+        }
+        else
+        {
+            RevertBackendSelection();
+        }
     }
 
     /// <summary>
@@ -151,31 +118,6 @@ public partial class AiChatDialog : Window
                 }
             })
         );
-    }
-
-    /// <summary>API キー接続の PasswordBox 変更を ViewModel へ転送する</summary>
-    private void ApiKeyBox_PasswordChanged(object sender, RoutedEventArgs e)
-    {
-        if (sender is PasswordBox passwordBox)
-        {
-            ViewModel.ApiKey = passwordBox.Password;
-        }
-    }
-
-    /// <summary>Ctrl+Enter でメッセージを送信する</summary>
-    private void UserInputBox_KeyDown(object sender, KeyEventArgs e)
-    {
-        if (
-            e.Key == Key.Enter
-            && (Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control
-        )
-        {
-            if (ViewModel.SendMessageCommand.CanExecute(null))
-            {
-                ViewModel.SendMessageCommand.Execute(null);
-                e.Handled = true;
-            }
-        }
     }
 
     /// <summary>チャット表示を最下部へスクロールする</summary>
