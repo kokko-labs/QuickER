@@ -73,25 +73,8 @@ public class SqlServerSchemaImporter : ISchemaImporter
 
     // ---------------- 内部実装 ----------------
 
-    /// <summary>取込処理中にテーブルとその列を索引付きで保持する作業用エントリ</summary>
-    private sealed class TableEntry
-    {
-        /// <summary>スキーマ名</summary>
-        public string Schema { get; init; } = "";
-
-        /// <summary>テーブル名</summary>
-        public string Name { get; init; } = "";
-
-        /// <summary>構築中のエンティティ</summary>
-        public Entity Entity { get; init; } = new();
-
-        /// <summary>列名からカラムを引くための索引（後続の PK / 説明 / FK 反映に用いる）</summary>
-        public Dictionary<string, Column> ColumnsByName { get; } =
-            new(StringComparer.OrdinalIgnoreCase);
-
-        /// <summary>テーブルを一意に識別する <c>[schema].[name]</c> 形式のキー</summary>
-        public string Key => $"[{Schema}].[{Name}]";
-    }
+    /// <summary>スキーマ・テーブル名からテーブルキー（<c>[schema].[name]</c> 形式）を組み立てる</summary>
+    private static string TableKey(string schema, string name) => $"[{schema}].[{name}]";
 
     /// <summary>BASE TABLE 一覧を取得するクエリ</summary>
     private const string TablesSql =
@@ -167,12 +150,12 @@ LEFT JOIN sys.columns c
 WHERE ep.class = 1 AND ep.name = N'MS_Description';";
 
     /// <summary>テーブル一覧を読み込み、テーブルキーをキーとするエントリ辞書を構築する</summary>
-    private static async Task<Dictionary<string, TableEntry>> LoadTablesAsync(
+    private static async Task<Dictionary<string, SchemaTableEntry>> LoadTablesAsync(
         SqlConnection conn,
         CancellationToken ct
     )
     {
-        var dict = new Dictionary<string, TableEntry>(StringComparer.OrdinalIgnoreCase);
+        var dict = new Dictionary<string, SchemaTableEntry>(StringComparer.OrdinalIgnoreCase);
         await using var cmd = new SqlCommand(TablesSql, conn);
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
 
@@ -180,10 +163,9 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
         {
             var schema = reader.GetString(0);
             var name = reader.GetString(1);
-            var entry = new TableEntry
+            var entry = new SchemaTableEntry
             {
-                Schema = schema,
-                Name = name,
+                Key = TableKey(schema, name),
                 Entity = new Entity
                 {
                     TableName = schema == "dbo" ? name : $"{schema}.{name}",
@@ -200,7 +182,7 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
     /// <summary>各テーブルへカラム定義を読み込み、型表記を整形して追加する</summary>
     private static async Task LoadColumnsAsync(
         SqlConnection conn,
-        Dictionary<string, TableEntry> tables,
+        Dictionary<string, SchemaTableEntry> tables,
         CancellationToken ct
     )
     {
@@ -211,7 +193,7 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
         {
             var schema = reader.GetString(0);
             var table = reader.GetString(1);
-            var key = $"[{schema}].[{table}]";
+            var key = TableKey(schema, table);
 
             if (!tables.TryGetValue(key, out var entry))
             {
@@ -244,7 +226,7 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
     /// <summary>主キー構成列に IsPrimaryKey を立て、NULL 不可へ補正する</summary>
     private static async Task LoadPrimaryKeysAsync(
         SqlConnection conn,
-        Dictionary<string, TableEntry> tables,
+        Dictionary<string, SchemaTableEntry> tables,
         CancellationToken ct
     )
     {
@@ -253,7 +235,7 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
 
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
         {
-            var key = $"[{reader.GetString(0)}].[{reader.GetString(1)}]";
+            var key = TableKey(reader.GetString(0), reader.GetString(1));
 
             if (!tables.TryGetValue(key, out var entry))
             {
@@ -273,7 +255,7 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
     /// </summary>
     private static async Task LoadDescriptionsAsync(
         SqlConnection conn,
-        Dictionary<string, TableEntry> tables,
+        Dictionary<string, SchemaTableEntry> tables,
         CancellationToken ct
     )
     {
@@ -284,7 +266,7 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
         {
             var schema = reader.GetString(0);
             var table = reader.GetString(1);
-            var key = $"[{schema}].[{table}]";
+            var key = TableKey(schema, table);
 
             if (!tables.TryGetValue(key, out var entry))
             {
@@ -314,26 +296,14 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
     /// <remarks>参照先列の集合が主キーまたは一意制約と一致する場合は 1 対 1、それ以外は 1 対多と判定する</remarks>
     private static async Task<List<Relationship>> LoadForeignKeysAsync(
         SqlConnection conn,
-        Dictionary<string, TableEntry> tables,
+        Dictionary<string, SchemaTableEntry> tables,
         CancellationToken ct
     )
     {
         // 親テーブルの一意制約列集合を取得し、1 対 1 判定に用いる
         var uniqueSets = await LoadUniqueColumnSetsAsync(conn, ct).ConfigureAwait(false);
 
-        var rels = new List<Relationship>();
-        var grouped =
-            new Dictionary<
-                string,
-                (
-                    string ParentKey,
-                    string RefKey,
-                    List<string> ParentCols,
-                    List<string> RefCols,
-                    ForeignKeyReferentialAction OnDelete,
-                    ForeignKeyReferentialAction OnUpdate
-                )
-            >();
+        var builder = new ForeignKeyRelationshipBuilder();
 
         await using var cmd = new SqlCommand(ForeignKeysSql, conn);
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
@@ -341,9 +311,9 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
         {
             var fkName = reader.GetString(0);
-            var parentKey = $"[{reader.GetString(1)}].[{reader.GetString(2)}]";
+            var parentKey = TableKey(reader.GetString(1), reader.GetString(2));
             var parentCol = reader.GetString(3);
-            var refKey = $"[{reader.GetString(4)}].[{reader.GetString(5)}]";
+            var refKey = TableKey(reader.GetString(4), reader.GetString(5));
             var refCol = reader.GetString(6);
             var deleteAction = ForeignKeyReferentialActionHelper.Parse(
                 reader.IsDBNull(8) ? null : reader.GetString(8)
@@ -352,84 +322,10 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
                 reader.IsDBNull(9) ? null : reader.GetString(9)
             );
 
-            if (!grouped.TryGetValue(fkName, out var g))
-            {
-                g = (
-                    parentKey,
-                    refKey,
-                    new List<string>(),
-                    new List<string>(),
-                    deleteAction,
-                    updateAction
-                );
-            }
-
-            g.ParentCols.Add(parentCol);
-            g.RefCols.Add(refCol);
-            grouped[fkName] = g;
+            builder.Add(fkName, parentKey, parentCol, refKey, refCol, deleteAction, updateAction);
         }
 
-        foreach (var (fkName, g) in grouped)
-        {
-            if (!tables.TryGetValue(g.ParentKey, out var parent))
-            {
-                continue;
-            }
-
-            if (!tables.TryGetValue(g.RefKey, out var refer))
-            {
-                continue;
-            }
-
-            // FK を構成する子側の列に IsForeignKey フラグを立てる
-            foreach (var pc in g.ParentCols)
-            {
-                if (parent.ColumnsByName.TryGetValue(pc, out var pcol))
-                {
-                    pcol.IsForeignKey = true;
-                }
-            }
-
-            // FK 列集合が主キーまたは一意制約と一致すれば 1 対 1 とみなす
-            var sortedParent = g
-                .ParentCols.OrderBy(s => s, StringComparer.OrdinalIgnoreCase)
-                .ToArray();
-            var pkCols = parent
-                .Entity.Columns.Where(c => c.IsPrimaryKey)
-                .Select(c => c.Name)
-                .OrderBy(s => s, StringComparer.OrdinalIgnoreCase)
-                .ToArray();
-            var uniqueOnParent = uniqueSets.TryGetValue(g.ParentKey, out var sets)
-                ? sets
-                : new List<string[]>();
-
-            var isOneToOne =
-                SameSet(sortedParent, pkCols) || uniqueOnParent.Any(s => SameSet(sortedParent, s));
-
-            rels.Add(
-                new Relationship
-                {
-                    SourceEntityId = refer.Entity.Id, // 参照先 (PK 側) を起点として表示
-                    TargetEntityId = parent.Entity.Id, // FK 保有テーブル
-                    Type = isOneToOne ? RelationshipType.OneToOne : RelationshipType.OneToMany,
-                    SourceColumnId =
-                        g.RefCols.Count == 1
-                        && refer.ColumnsByName.TryGetValue(g.RefCols[0], out var refColumn)
-                            ? refColumn.Id
-                            : null,
-                    TargetColumnId =
-                        g.ParentCols.Count == 1
-                        && parent.ColumnsByName.TryGetValue(g.ParentCols[0], out var parentColumn)
-                            ? parentColumn.Id
-                            : null,
-                    ConstraintName = fkName,
-                    OnDelete = g.OnDelete,
-                    OnUpdate = g.OnUpdate,
-                }
-            );
-        }
-
-        return rels;
+        return builder.Build(tables, uniqueSets);
     }
 
     /// <summary>テーブルごとの一意インデックス列集合を取得する</summary>
@@ -439,54 +335,21 @@ WHERE ep.class = 1 AND ep.name = N'MS_Description';";
         CancellationToken ct
     )
     {
-        var result = new Dictionary<string, List<string[]>>(StringComparer.OrdinalIgnoreCase);
-        var current = new Dictionary<string, List<string>>();
+        var builder = new UniqueColumnSetBuilder();
 
         await using var cmd = new SqlCommand(UniqueIndexSql, conn);
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
 
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
         {
-            var key = $"[{reader.GetString(0)}].[{reader.GetString(1)}]";
+            var key = TableKey(reader.GetString(0), reader.GetString(1));
             var idx = reader.GetString(2);
             var col = reader.GetString(3);
-            var compositeKey = key + "::" + idx;
-
-            if (!current.TryGetValue(compositeKey, out var list))
-            {
-                list = new List<string>();
-                current[compositeKey] = list;
-            }
-
-            list.Add(col);
-
-            if (!result.TryGetValue(key, out _))
-            {
-                result[key] = new List<string[]>();
-            }
+            builder.Add(key, idx, col);
         }
 
-        foreach (var kv in current)
-        {
-            var tableKey = kv.Key.Substring(0, kv.Key.IndexOf("::"));
-
-            if (!result.TryGetValue(tableKey, out var lists))
-            {
-                lists = new List<string[]>();
-                result[tableKey] = lists;
-            }
-
-            lists.Add(kv.Value.OrderBy(s => s, StringComparer.OrdinalIgnoreCase).ToArray());
-        }
-
-        return result;
+        return builder.Build();
     }
-
-    /// <summary>2 つのソート済み列名集合が大文字小文字無視で完全一致するか判定する（空集合は不一致）</summary>
-    private static bool SameSet(string[] a, string[] b) =>
-        a.Length > 0
-        && a.Length == b.Length
-        && a.SequenceEqual(b, StringComparer.OrdinalIgnoreCase);
 
     /// <summary>SQL Server の型情報を <c>nvarchar(50)</c> や <c>decimal(10,2)</c> 等の表示形式へ整形する</summary>
     /// <remarks>可変長型の最大長 -1 は <c>(max)</c> として表現する</remarks>

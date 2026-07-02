@@ -47,7 +47,10 @@ public class MySqlSchemaImporter : ISchemaImporter
 
     /// <summary>既に開かれた接続でスキーマを取得する（テストや接続再利用向け）</summary>
     /// <remarks>テーブル→カラム→主キー→説明→外部キーの順に段階的に補完していく</remarks>
-    public async Task<SchemaResult> ImportAsync(MySqlConnection conn, CancellationToken ct = default)
+    public async Task<SchemaResult> ImportAsync(
+        MySqlConnection conn,
+        CancellationToken ct = default
+    )
     {
         var tables = await LoadTablesAsync(conn, ct).ConfigureAwait(false);
         await LoadColumnsAsync(conn, tables, ct).ConfigureAwait(false);
@@ -62,23 +65,6 @@ public class MySqlSchemaImporter : ISchemaImporter
     }
 
     // ---------------- 内部実装 ----------------
-
-    /// <summary>取込処理中にテーブルとその列を索引付きで保持する作業用エントリ</summary>
-    private sealed class TableEntry
-    {
-        /// <summary>テーブル名（接続先 DB の素の名前）</summary>
-        public string Name { get; init; } = "";
-
-        /// <summary>構築中のエンティティ</summary>
-        public Entity Entity { get; init; } = new();
-
-        /// <summary>列名からカラムを引くための索引（後続の PK / FK 反映に用いる）</summary>
-        public Dictionary<string, Column> ColumnsByName { get; } =
-            new(StringComparer.OrdinalIgnoreCase);
-
-        /// <summary>テーブルを一意に識別するキー</summary>
-        public string Key => Name;
-    }
 
     /// <summary>接続先 DB の通常テーブル一覧・テーブルコメントを取得するクエリ</summary>
     private const string TablesSql =
@@ -136,12 +122,12 @@ WHERE kcu.CONSTRAINT_SCHEMA = DATABASE() AND kcu.REFERENCED_TABLE_NAME IS NOT NU
 ORDER BY kcu.CONSTRAINT_NAME, kcu.ORDINAL_POSITION;";
 
     /// <summary>テーブル一覧・テーブルコメントを読み込み、テーブル名をキーとするエントリ辞書を構築する</summary>
-    private static async Task<Dictionary<string, TableEntry>> LoadTablesAsync(
+    private static async Task<Dictionary<string, SchemaTableEntry>> LoadTablesAsync(
         MySqlConnection conn,
         CancellationToken ct
     )
     {
-        var dict = new Dictionary<string, TableEntry>(StringComparer.OrdinalIgnoreCase);
+        var dict = new Dictionary<string, SchemaTableEntry>(StringComparer.OrdinalIgnoreCase);
         await using var cmd = new MySqlCommand(TablesSql, conn);
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
 
@@ -149,9 +135,9 @@ ORDER BY kcu.CONSTRAINT_NAME, kcu.ORDINAL_POSITION;";
         {
             var name = reader.GetString(0);
             var comment = reader.IsDBNull(1) ? string.Empty : reader.GetString(1);
-            var entry = new TableEntry
+            var entry = new SchemaTableEntry
             {
-                Name = name,
+                Key = name,
                 Entity = new Entity
                 {
                     TableName = name,
@@ -169,7 +155,7 @@ ORDER BY kcu.CONSTRAINT_NAME, kcu.ORDINAL_POSITION;";
     /// <summary>各テーブルへカラム定義を読み込み、COLUMN_TYPE をそのまま型表記として追加する</summary>
     private static async Task LoadColumnsAsync(
         MySqlConnection conn,
-        Dictionary<string, TableEntry> tables,
+        Dictionary<string, SchemaTableEntry> tables,
         CancellationToken ct
     )
     {
@@ -210,7 +196,7 @@ ORDER BY kcu.CONSTRAINT_NAME, kcu.ORDINAL_POSITION;";
     /// <summary>主キー構成列に IsPrimaryKey を立て、NULL 不可へ補正する</summary>
     private static async Task LoadPrimaryKeysAsync(
         MySqlConnection conn,
-        Dictionary<string, TableEntry> tables,
+        Dictionary<string, SchemaTableEntry> tables,
         CancellationToken ct
     )
     {
@@ -236,25 +222,14 @@ ORDER BY kcu.CONSTRAINT_NAME, kcu.ORDINAL_POSITION;";
     /// <remarks>参照先列の集合が主キーまたは一意制約と一致する場合は 1 対 1、それ以外は 1 対多と判定する</remarks>
     private static async Task<List<Relationship>> LoadForeignKeysAsync(
         MySqlConnection conn,
-        Dictionary<string, TableEntry> tables,
+        Dictionary<string, SchemaTableEntry> tables,
         CancellationToken ct
     )
     {
         // 親テーブルの一意制約列集合を取得し、1 対 1 判定に用いる
         var uniqueSets = await LoadUniqueColumnSetsAsync(conn, ct).ConfigureAwait(false);
 
-        var grouped =
-            new Dictionary<
-                string,
-                (
-                    string ParentKey,
-                    string RefKey,
-                    List<string> ParentCols,
-                    List<string> RefCols,
-                    ForeignKeyReferentialAction OnDelete,
-                    ForeignKeyReferentialAction OnUpdate
-                )
-            >();
+        var builder = new ForeignKeyRelationshipBuilder();
 
         await using (var cmd = new MySqlCommand(ForeignKeysSql, conn))
         await using (var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false))
@@ -273,87 +248,19 @@ ORDER BY kcu.CONSTRAINT_NAME, kcu.ORDINAL_POSITION;";
                     reader.IsDBNull(7) ? null : reader.GetString(7)
                 );
 
-                if (!grouped.TryGetValue(fkName, out var g))
-                {
-                    g = (
-                        parentKey,
-                        refKey,
-                        new List<string>(),
-                        new List<string>(),
-                        deleteAction,
-                        updateAction
-                    );
-                }
-
-                g.ParentCols.Add(parentCol);
-                g.RefCols.Add(refCol);
-                grouped[fkName] = g;
+                builder.Add(
+                    fkName,
+                    parentKey,
+                    parentCol,
+                    refKey,
+                    refCol,
+                    deleteAction,
+                    updateAction
+                );
             }
         }
 
-        var rels = new List<Relationship>();
-
-        foreach (var (fkName, g) in grouped)
-        {
-            if (!tables.TryGetValue(g.ParentKey, out var parent))
-            {
-                continue;
-            }
-
-            if (!tables.TryGetValue(g.RefKey, out var refer))
-            {
-                continue;
-            }
-
-            // FK を構成する子側の列に IsForeignKey フラグを立てる
-            foreach (var pc in g.ParentCols)
-            {
-                if (parent.ColumnsByName.TryGetValue(pc, out var pcol))
-                {
-                    pcol.IsForeignKey = true;
-                }
-            }
-
-            // FK 列集合が主キーまたは一意制約と一致すれば 1 対 1 とみなす
-            var sortedParent = g
-                .ParentCols.OrderBy(s => s, StringComparer.OrdinalIgnoreCase)
-                .ToArray();
-            var pkCols = parent
-                .Entity.Columns.Where(c => c.IsPrimaryKey)
-                .Select(c => c.Name)
-                .OrderBy(s => s, StringComparer.OrdinalIgnoreCase)
-                .ToArray();
-            var uniqueOnParent = uniqueSets.TryGetValue(g.ParentKey, out var sets)
-                ? sets
-                : new List<string[]>();
-
-            var isOneToOne =
-                SameSet(sortedParent, pkCols) || uniqueOnParent.Any(s => SameSet(sortedParent, s));
-
-            rels.Add(
-                new Relationship
-                {
-                    SourceEntityId = refer.Entity.Id, // 参照先 (PK 側) を起点として表示
-                    TargetEntityId = parent.Entity.Id, // FK 保有テーブル
-                    Type = isOneToOne ? RelationshipType.OneToOne : RelationshipType.OneToMany,
-                    SourceColumnId =
-                        g.RefCols.Count == 1
-                        && refer.ColumnsByName.TryGetValue(g.RefCols[0], out var refColumn)
-                            ? refColumn.Id
-                            : null,
-                    TargetColumnId =
-                        g.ParentCols.Count == 1
-                        && parent.ColumnsByName.TryGetValue(g.ParentCols[0], out var parentColumn)
-                            ? parentColumn.Id
-                            : null,
-                    ConstraintName = fkName,
-                    OnDelete = g.OnDelete,
-                    OnUpdate = g.OnUpdate,
-                }
-            );
-        }
-
-        return rels;
+        return builder.Build(tables, uniqueSets);
     }
 
     /// <summary>テーブルごとの一意制約列集合を取得する</summary>
@@ -363,8 +270,7 @@ ORDER BY kcu.CONSTRAINT_NAME, kcu.ORDINAL_POSITION;";
         CancellationToken ct
     )
     {
-        var result = new Dictionary<string, List<string[]>>(StringComparer.OrdinalIgnoreCase);
-        var current = new Dictionary<string, List<string>>();
+        var builder = new UniqueColumnSetBuilder();
 
         await using var cmd = new MySqlCommand(UniqueConstraintSql, conn);
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
@@ -374,41 +280,9 @@ ORDER BY kcu.CONSTRAINT_NAME, kcu.ORDINAL_POSITION;";
             var key = reader.GetString(0);
             var indexName = reader.GetString(1);
             var col = reader.GetString(2);
-            var compositeKey = key + "::" + indexName;
-
-            if (!current.TryGetValue(compositeKey, out var list))
-            {
-                list = new List<string>();
-                current[compositeKey] = list;
-            }
-
-            list.Add(col);
-
-            if (!result.ContainsKey(key))
-            {
-                result[key] = new List<string[]>();
-            }
+            builder.Add(key, indexName, col);
         }
 
-        foreach (var kv in current)
-        {
-            var tableKey = kv.Key.Substring(0, kv.Key.IndexOf("::", StringComparison.Ordinal));
-
-            if (!result.TryGetValue(tableKey, out var lists))
-            {
-                lists = new List<string[]>();
-                result[tableKey] = lists;
-            }
-
-            lists.Add(kv.Value.OrderBy(s => s, StringComparer.OrdinalIgnoreCase).ToArray());
-        }
-
-        return result;
+        return builder.Build();
     }
-
-    /// <summary>2 つのソート済み列名集合が大文字小文字無視で完全一致するか判定する（空集合は不一致）</summary>
-    private static bool SameSet(string[] a, string[] b) =>
-        a.Length > 0
-        && a.Length == b.Length
-        && a.SequenceEqual(b, StringComparer.OrdinalIgnoreCase);
 }
