@@ -259,6 +259,9 @@ internal sealed partial class CSharpGenerationModelBuilder
             FacetMaxLength = typeInfo.MaxLength,
             FacetPrecision = typeInfo.Precision,
             FacetScale = typeInfo.Precision is not null ? typeInfo.Scale ?? 0 : null,
+            // SQL パラメータ型明示化（[SqlColumnType]）用。VO 有無に関わらず DB 由来の生値を載せる（束縛は素値へ開いてから）
+            SqlDbTypeName = typeInfo.SqlDbTypeName,
+            SqlDeclaredLength = typeInfo.SqlDeclaredLength,
             // 非 NULL の VO は妥当な空既定値を作れないため null! でロード前提を表明（NULL 許容 VO は初期化不要）
             Initializer = valueObject is not null
                 ? (column.IsNullable ? string.Empty : " = null!;")

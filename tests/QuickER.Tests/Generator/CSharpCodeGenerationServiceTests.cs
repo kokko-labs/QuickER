@@ -1078,6 +1078,152 @@ public class CSharpCodeGenerationServiceTests
             .Contain("DeleteSql = $\"DELETE FROM {tableName} WHERE [{keyColumnName}] = @id;\"");
     }
 
+    /// <summary>
+    /// SQL パラメータ型明示化のため、Repository 生成時に Entity プロパティへ [SqlColumnType(...)] が
+    /// DB 型に応じて付与されること（varchar(50)→VarChar+Size50 / nvarchar(max)→NVarChar+Size-1 /
+    /// decimal(10,2)→Precision10/Scale2 / int→Int / 未知型→属性なし）を検証する
+    /// </summary>
+    [Fact]
+    public void Generate_Repository_ShouldEmitSqlColumnTypeAttributes()
+    {
+        var diagram = new ErDiagram
+        {
+            Entities =
+            [
+                new Entity
+                {
+                    Id = Guid.NewGuid(),
+                    TableName = "items",
+                    Columns =
+                    [
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "item_id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "code",
+                            DataType = "varchar(50)",
+                            IsNullable = false,
+                        },
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "note",
+                            DataType = "nvarchar(max)",
+                            IsNullable = true,
+                        },
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "price",
+                            DataType = "decimal(10,2)",
+                            IsNullable = false,
+                        },
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "location",
+                            DataType = "geography",
+                            IsNullable = true,
+                        },
+                    ],
+                },
+            ],
+        };
+
+        var result = new CSharpCodeGenerationService().Generate(
+            diagram,
+            new CodeGenerationOptions { NamespaceName = "Sample.Domain" }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        var content = result.Files[0].Content;
+        // 属性定義（SqlDbType 引数・Size/Precision/Scale の書き換え可能プロパティ）
+        content.Should().Contain("public sealed class SqlColumnTypeAttribute : Attribute");
+        content
+            .Should()
+            .Contain("public SqlColumnTypeAttribute(SqlDbType dbType) => DbType = dbType;");
+        // int → 型だけ（Size/Precision なし）
+        content.Should().Contain("[SqlColumnType(SqlDbType.Int)]");
+        // varchar(50) → VarChar + Size 50
+        content.Should().Contain("[SqlColumnType(SqlDbType.VarChar, Size = 50)]");
+        // nvarchar(max) → NVarChar + Size -1
+        content.Should().Contain("[SqlColumnType(SqlDbType.NVarChar, Size = -1)]");
+        // decimal(10,2) → Decimal + Precision/Scale
+        content.Should().Contain("[SqlColumnType(SqlDbType.Decimal, Precision = 10, Scale = 2)]");
+        // 未知型（geography）は属性を付けない（AddWithValue フォールバック）
+        content.Should().NotContain("SqlColumnType(SqlDbType.Udt");
+        // ランタイムは属性から明示 SqlParameter を組み立て、Size 安全ガードで超過時は値長を使う
+        content.Should().Contain("private static void AddColumnParameter(");
+        content.Should().Contain("var parameter = new SqlParameter(name, attribute.DbType);");
+        content
+            .Should()
+            .Contain(
+                "parameter.Size = valueLength > attribute.Size ? valueLength : attribute.Size;"
+            );
+    }
+
+    /// <summary>
+    /// [SqlColumnType] の出力条件が Repository 生成であることを検証する
+    /// （Repository なしでは属性は一切出力されない）。
+    /// </summary>
+    [Fact]
+    public void Generate_SqlColumnTypeAttribute_IsGatedOnRepositoryGeneration()
+    {
+        var diagram = new ErDiagram
+        {
+            Entities =
+            [
+                new Entity
+                {
+                    Id = Guid.NewGuid(),
+                    TableName = "items",
+                    Columns =
+                    [
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "item_id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                    ],
+                },
+            ],
+        };
+
+        // Repository 生成なし → 属性は一切出力されない
+        var withoutRepo = new CSharpCodeGenerationService().Generate(
+            diagram,
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                GenerateRepositories = false,
+            }
+        );
+        withoutRepo.HasErrors.Should().BeFalse();
+        withoutRepo.Files[0].Content.Should().NotContain("SqlColumnType");
+
+        // Repository 生成あり → 属性が出力される
+        var withRepo = new CSharpCodeGenerationService().Generate(
+            diagram,
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                GenerateRepositories = true,
+            }
+        );
+        withRepo.HasErrors.Should().BeFalse();
+        withRepo.Files[0].Content.Should().Contain("[SqlColumnType(SqlDbType.Int)]");
+    }
+
     /// <summary>Repository にラムダ式ベースのクエリビルダー（Query / Where / OrderBy / 終端メソッド）が生成されることを検証する</summary>
     [Fact]
     public void Generate_ShouldCreateLambdaQueryBuilder()
@@ -1116,8 +1262,12 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("public async Task<TEntity?> FirstOrDefaultAsync(");
         content.Should().Contain("public async Task<int> CountAsync(");
         content.Should().Contain("public async Task<bool> AnyAsync(");
-        // 値はパラメータ化、OFFSET/FETCH でページング
-        content.Should().Contain("parameter.Value ?? DBNull.Value");
+        // 値はパラメータ化し、列名が判明していれば列型で明示 SqlParameter を構築（なければ AddWithValue へフォールバック）
+        content
+            .Should()
+            .Contain(
+                "metadata.AddQueryParameter(command, parameter.Name, parameter.ColumnName, value);"
+            );
         content.Should().Contain("FETCH NEXT {take.Value} ROWS ONLY");
     }
 

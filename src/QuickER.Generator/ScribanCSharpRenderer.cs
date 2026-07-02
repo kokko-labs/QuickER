@@ -106,6 +106,14 @@ internal sealed class ScribanCSharpRenderer
                 c.Properties.Any(p => p.FacetMaxLength is not null || p.FacetPrecision is not null)
             );
 
+        // SqlColumnType 属性は Entity プロパティに DB 列の SqlDbType（＋Size/Precision/Scale）を載せ、
+        // ランタイムの EntitySaveMetadata が明示 SqlParameter を組み立てるのに使う。Repository 生成時のみ、
+        // かつ SqlDbType が判明したプロパティが 1 つでもある場合に属性定義と付与を出力する
+        // （IncludeDataAnnotations には依存させない）。
+        var emitSqlColumnTypeAttr =
+            options.GenerateRepositories
+            && model.EntityClasses.Any(c => c.Properties.Any(p => p.SqlDbTypeName is not null));
+
         var scriptObject = new Scriban.Runtime.ScriptObject
         {
             ["namespace_name"] = scope.NamespaceName,
@@ -119,6 +127,7 @@ internal sealed class ScribanCSharpRenderer
                 options.IncludeJsonIgnoreOnParentNavigation,
             ["emit_nav_ref_attr"] = emitNavRefAttr,
             ["emit_column_facets_attr"] = emitColumnFacetsAttr,
+            ["emit_sql_column_type_attr"] = emitSqlColumnTypeAttr,
             ["generate_value_objects"] = options.GenerateValueObjects,
             ["value_object_classes"] = model.ValueObjectClasses,
             // 出力するバケットの絞り込み（分割時はファイルごとに切り替える。非分割時は全 true）
