@@ -16,6 +16,7 @@
     <Project Path="src/QuickER.Gui/QuickER.Gui.csproj" />
     <Project Path="src/QuickER.Model/QuickER.Model.csproj" />
     <Project Path="src/QuickER.MySql/QuickER.MySql.csproj" />
+    <Project Path="src/QuickER.Oracle/QuickER.Oracle.csproj" />
     <Project Path="src/QuickER.PostgreSql/QuickER.PostgreSql.csproj" />
     <Project Path="src/QuickER.Provider/QuickER.Provider.csproj" />
     <Project Path="src/QuickER.SqlServer/QuickER.SqlServer.csproj" />

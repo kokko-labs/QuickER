@@ -19,6 +19,7 @@
     <ProjectReference Include="..\QuickER.Generator\QuickER.Generator.csproj" />
     <ProjectReference Include="..\QuickER.Model\QuickER.Model.csproj" />
     <ProjectReference Include="..\QuickER.MySql\QuickER.MySql.csproj" />
+    <ProjectReference Include="..\QuickER.Oracle\QuickER.Oracle.csproj" />
     <ProjectReference Include="..\QuickER.PostgreSql\QuickER.PostgreSql.csproj" />
     <ProjectReference Include="..\QuickER.Provider\QuickER.Provider.csproj" />
     <ProjectReference Include="..\QuickER.SqlServer\QuickER.SqlServer.csproj" />
