@@ -255,8 +255,7 @@ internal sealed partial class CSharpGenerationModelBuilder
             IsForeignKey = column.IsForeignKey,
             // VO は [MaxLength] を出さない（長さ検証は VO 内部で行う。非 string 型に [MaxLength] を付けない安全策にもなる）
             MaxLength = valueObject is not null ? null : typeInfo.MaxLength,
-            // DB カラムのメタ情報（[ColumnFacets]）は VO 抑制なしの生値を載せる。decimal は precision 指定時に scale 既定 0
-            FacetMaxLength = typeInfo.MaxLength,
+            // [SqlColumnType] の Precision/Scale に載せる DB カラムのメタ情報。VO 抑制なしの生値。decimal は precision 指定時に scale 既定 0
             FacetPrecision = typeInfo.Precision,
             FacetScale = typeInfo.Precision is not null ? typeInfo.Scale ?? 0 : null,
             // SQL パラメータ型明示化（[SqlColumnType]）用。VO 有無に関わらず DB 由来の生値を載せる（束縛は素値へ開いてから）
@@ -639,6 +638,9 @@ internal sealed partial class CSharpGenerationModelBuilder
         {
             usings.Add("System.ComponentModel.DataAnnotations");
             usings.Add("System.ComponentModel.DataAnnotations.Schema");
+            // [SqlColumnType] は Repository 生成時に加え IncludeDataAnnotations 時にも出力され得るため、
+            // SqlDbType（System.Data、BCL）の using をこちらでも保証する（Repository なし構成向け）。
+            usings.Add("System.Data");
         }
 
         if (options.IncludeJsonIgnoreOnParentNavigation)

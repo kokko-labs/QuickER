@@ -70,24 +70,11 @@ public sealed class NavigationReferenceAttribute : Attribute
     }
 }
 
-/// <summary>DB カラムのメタ情報（最大長 / 全体桁数 / 小数桁数）を付与する独自属性。該当なしは -1</summary>
-[AttributeUsage(AttributeTargets.Property, AllowMultiple = false)]
-public sealed class ColumnFacetsAttribute : Attribute
-{
-    /// <summary>文字列カラムの最大長（該当なしは -1）</summary>
-    public int MaxLength { get; set; } = -1;
-
-    /// <summary>decimal カラムの全体桁数 precision（該当なしは -1）</summary>
-    public int Precision { get; set; } = -1;
-
-    /// <summary>decimal カラムの小数桁数 scale（該当なしは -1）</summary>
-    public int Scale { get; set; } = -1;
-
-    /// <summary>decimal カラムの整数部桁数（Precision - Scale）。decimal 以外は -1</summary>
-    public int IntegralDigits => Precision >= 0 && Scale >= 0 ? Precision - Scale : -1;
-}
-
-/// <summary>Entity プロパティに DB 列の SqlDbType（＋Size/Precision/Scale）を付与する独自属性。SQL パラメータの型明示化に使う</summary>
+/// <summary>
+/// Entity プロパティに DB 列のメタ情報（SqlDbType・Size・Precision・Scale）を付与する独自属性。
+/// ランタイム（EntitySaveMetadata）が明示 <see cref="SqlParameter"/> を組み立てるのに使うほか、
+/// 利用者コードが列のメタ情報（最大長・桁数）を参照する用途にも使える。
+/// </summary>
 [AttributeUsage(AttributeTargets.Property, AllowMultiple = false)]
 public sealed class SqlColumnTypeAttribute : Attribute
 {
@@ -102,6 +89,9 @@ public sealed class SqlColumnTypeAttribute : Attribute
 
     /// <summary>decimal 系の小数桁数 scale</summary>
     public byte Scale { get; set; }
+
+    /// <summary>decimal 系の整数部桁数（Precision - Scale）。decimal 系以外は -1</summary>
+    public int IntegralDigits => Precision > 0 ? Precision - Scale : -1;
 
     /// <summary>SqlDbType を受け取り初期化する</summary>
     public SqlColumnTypeAttribute(SqlDbType dbType) => DbType = dbType;
@@ -1196,13 +1186,11 @@ public partial class CustomerEntity : EntityBase
     /// <summary>name 列に対応するプロパティ</summary>
     [Column("name")]
     [Required]
-    [ColumnFacets(MaxLength = 50)]
     [SqlColumnType(SqlDbType.VarChar, Size = 50)]
     public NameValue Name { get; set; } = null!;
 
     /// <summary>balance 列に対応するプロパティ</summary>
     [Column("balance")]
-    [ColumnFacets(Precision = 10, Scale = 2)]
     [SqlColumnType(SqlDbType.Decimal, Precision = 10, Scale = 2)]
     public BalanceValue? Balance { get; set; }
 
@@ -1240,14 +1228,12 @@ public partial class OrderEntity : EntityBase
 
     /// <summary>memo 列に対応するプロパティ</summary>
     [Column("memo")]
-    [ColumnFacets(MaxLength = 50)]
     [SqlColumnType(SqlDbType.VarChar, Size = 50)]
     public MemoValue? Memo { get; set; }
 
     /// <summary>amount 列に対応するプロパティ</summary>
     [Column("amount")]
     [Required]
-    [ColumnFacets(Precision = 10, Scale = 2)]
     [SqlColumnType(SqlDbType.Decimal, Precision = 10, Scale = 2)]
     public AmountValue Amount { get; set; } = null!;
 
@@ -1276,7 +1262,6 @@ public partial class CustomerProfileEntity : EntityBase
 
     /// <summary>bio 列に対応するプロパティ</summary>
     [Column("bio")]
-    [ColumnFacets(MaxLength = 50)]
     [SqlColumnType(SqlDbType.VarChar, Size = 50)]
     public BioValue? Bio { get; set; }
 

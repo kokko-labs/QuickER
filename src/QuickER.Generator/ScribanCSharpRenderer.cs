@@ -98,20 +98,12 @@ internal sealed class ScribanCSharpRenderer
             (options.GenerateEntityClasses && model.EntityClasses.Any(c => c.Navigations.Count > 0))
             || options.GenerateRepositories;
 
-        // ColumnFacets 属性は Entity プロパティに DB カラムのメタ情報（最大長 / precision / scale）を載せる。
-        // 実際に付与するプロパティが 1 つでもある場合のみ属性定義を出力する。
-        var emitColumnFacetsAttr =
-            options.IncludeDataAnnotations
-            && model.EntityClasses.Any(c =>
-                c.Properties.Any(p => p.FacetMaxLength is not null || p.FacetPrecision is not null)
-            );
-
-        // SqlColumnType 属性は Entity プロパティに DB 列の SqlDbType（＋Size/Precision/Scale）を載せ、
-        // ランタイムの EntitySaveMetadata が明示 SqlParameter を組み立てるのに使う。Repository 生成時のみ、
-        // かつ SqlDbType が判明したプロパティが 1 つでもある場合に属性定義と付与を出力する
-        // （IncludeDataAnnotations には依存させない）。
+        // SqlColumnType 属性は Entity プロパティに DB 列のメタ情報（SqlDbType・Size・Precision・Scale）を載せる。
+        // ランタイムの EntitySaveMetadata が明示 SqlParameter を組み立てるのに使うほか、利用者コードが列メタ情報
+        // （最大長・桁数）を参照する用途も兼ねるため、Repository 生成時 または IncludeDataAnnotations 時のいずれか、
+        // かつ SqlDbType が判明したプロパティが 1 つでもある場合に属性定義と付与を出力する。
         var emitSqlColumnTypeAttr =
-            options.GenerateRepositories
+            (options.GenerateRepositories || options.IncludeDataAnnotations)
             && model.EntityClasses.Any(c => c.Properties.Any(p => p.SqlDbTypeName is not null));
 
         var scriptObject = new Scriban.Runtime.ScriptObject
@@ -126,7 +118,6 @@ internal sealed class ScribanCSharpRenderer
             ["include_json_ignore_on_parent_navigation"] =
                 options.IncludeJsonIgnoreOnParentNavigation,
             ["emit_nav_ref_attr"] = emitNavRefAttr,
-            ["emit_column_facets_attr"] = emitColumnFacetsAttr,
             ["emit_sql_column_type_attr"] = emitSqlColumnTypeAttr,
             ["generate_value_objects"] = options.GenerateValueObjects,
             ["value_object_classes"] = model.ValueObjectClasses,

@@ -1170,11 +1170,12 @@ public class CSharpCodeGenerationServiceTests
     }
 
     /// <summary>
-    /// [SqlColumnType] の出力条件が Repository 生成であることを検証する
-    /// （Repository なしでは属性は一切出力されない）。
+    /// [SqlColumnType] の出力条件が「Repository 生成 または IncludeDataAnnotations」の OR であることを検証する
+    /// （ColumnFacets 廃止・SqlColumnType への統合により、DataAnnotations 単独でも列メタ情報が必要なため）。
+    /// 両方 OFF のときのみ属性が一切出力されない。
     /// </summary>
     [Fact]
-    public void Generate_SqlColumnTypeAttribute_IsGatedOnRepositoryGeneration()
+    public void Generate_SqlColumnTypeAttribute_IsGatedOnRepositoryOrDataAnnotations()
     {
         var diagram = new ErDiagram
         {
@@ -1199,29 +1200,44 @@ public class CSharpCodeGenerationServiceTests
             ],
         };
 
-        // Repository 生成なし → 属性は一切出力されない
-        var withoutRepo = new CSharpCodeGenerationService().Generate(
+        // 両方 OFF → 属性は一切出力されない
+        var neither = new CSharpCodeGenerationService().Generate(
             diagram,
             new CodeGenerationOptions
             {
                 NamespaceName = "Sample.Domain",
                 GenerateRepositories = false,
+                IncludeDataAnnotations = false,
             }
         );
-        withoutRepo.HasErrors.Should().BeFalse();
-        withoutRepo.Files[0].Content.Should().NotContain("SqlColumnType");
+        neither.HasErrors.Should().BeFalse();
+        neither.Files[0].Content.Should().NotContain("SqlColumnType");
 
-        // Repository 生成あり → 属性が出力される
-        var withRepo = new CSharpCodeGenerationService().Generate(
+        // Repository ON（Repository は IncludeDataAnnotations 必須のため両方 ON）→ 属性が出力される
+        var repoOn = new CSharpCodeGenerationService().Generate(
             diagram,
             new CodeGenerationOptions
             {
                 NamespaceName = "Sample.Domain",
                 GenerateRepositories = true,
+                IncludeDataAnnotations = true,
             }
         );
-        withRepo.HasErrors.Should().BeFalse();
-        withRepo.Files[0].Content.Should().Contain("[SqlColumnType(SqlDbType.Int)]");
+        repoOn.HasErrors.Should().BeFalse();
+        repoOn.Files[0].Content.Should().Contain("[SqlColumnType(SqlDbType.Int)]");
+
+        // IncludeDataAnnotations のみ ON（Repository なし）→ 属性が出力される
+        var annotationsOnly = new CSharpCodeGenerationService().Generate(
+            diagram,
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                GenerateRepositories = false,
+                IncludeDataAnnotations = true,
+            }
+        );
+        annotationsOnly.HasErrors.Should().BeFalse();
+        annotationsOnly.Files[0].Content.Should().Contain("[SqlColumnType(SqlDbType.Int)]");
     }
 
     /// <summary>Repository にラムダ式ベースのクエリビルダー（Query / Where / OrderBy / 終端メソッド）が生成されることを検証する</summary>
@@ -2035,6 +2051,72 @@ public class CSharpCodeGenerationServiceTests
             .Contain("property.GetCustomAttribute<NavigationReferenceAttribute>() is null");
     }
 
+    /// <summary>
+    /// IncludeDataAnnotations=true・GenerateRepositories=false でも [SqlColumnType] が出力され、
+    /// SqlDbType（System.Data）の using が含まれることを検証する（ColumnFacets 廃止に伴う OR 条件）
+    /// </summary>
+    [Fact]
+    public void Generate_IncludeDataAnnotationsWithoutRepository_ShouldEmitSqlColumnTypeAttribute()
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            ValueObjectDiagram(),
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                GenerateRepositories = false,
+                IncludeDataAnnotations = true,
+            }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        var content = result.Files[0].Content;
+        content.Should().Contain("public sealed class SqlColumnTypeAttribute : Attribute");
+        content.Should().Contain("[SqlColumnType(SqlDbType.NVarChar, Size = 50)]");
+        content.Should().Contain("[SqlColumnType(SqlDbType.Decimal, Precision = 10, Scale = 2)]");
+        // SqlDbType は System.Data（BCL）所属。Repository なし構成でも using が供給される必要がある
+        content.Should().Contain("using System.Data;");
+        // Repository が無いため EntitySaveMetadata 等のランタイム補助コードは出力されない
+        content.Should().NotContain("_columnTypeCache");
+    }
+
+    /// <summary>
+    /// IncludeDataAnnotations=false・GenerateRepositories=false の両方 OFF では [SqlColumnType] が一切出力されないことを検証する
+    /// </summary>
+    [Fact]
+    public void Generate_NoAnnotationsNoRepository_ShouldNotEmitSqlColumnTypeAttribute()
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            ValueObjectDiagram(),
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                GenerateRepositories = false,
+                IncludeDataAnnotations = false,
+            }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        var content = result.Files[0].Content;
+        content.Should().NotContain("SqlColumnTypeAttribute");
+        content.Should().NotContain("[SqlColumnType(");
+    }
+
+    /// <summary>[SqlColumnType].IntegralDigits が Precision - Scale を返し、decimal 以外（Precision 未指定）は -1 を返すことを検証する</summary>
+    [Fact]
+    public void Generate_SqlColumnType_IntegralDigitsProperty_ShouldComputeFromPrecisionAndScale()
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            ValueObjectDiagram(),
+            new CodeGenerationOptions { NamespaceName = "Sample.Domain" }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        var content = result.Files[0].Content;
+        content
+            .Should()
+            .Contain("public int IntegralDigits => Precision > 0 ? Precision - Scale : -1;");
+    }
+
     /// <summary>主キー 1 列のみを持つ単純なエンティティ 1 件のダイアグラムを生成する</summary>
     private static ErDiagram SingleEntityDiagram() =>
         new()
@@ -2161,10 +2243,10 @@ public class CSharpCodeGenerationServiceTests
             );
         // PK と同名 FK は同一 VO 型を共有（CustomerIdValue は 1 定義のみ）
         content.Split("public sealed partial class CustomerIdValue").Length.Should().Be(2);
-        // Entity プロパティに DB カラムのメタ情報属性が付く（VO 型でも付与）
-        content.Should().Contain("public sealed class ColumnFacetsAttribute : Attribute");
-        content.Should().Contain("[ColumnFacets(MaxLength = 50)]");
-        content.Should().Contain("[ColumnFacets(Precision = 10, Scale = 2)]");
+        // Entity プロパティに DB カラムのメタ情報属性が付く（VO 型でも付与）。ColumnFacets は SqlColumnType へ統合済み
+        content.Should().Contain("public sealed class SqlColumnTypeAttribute : Attribute");
+        content.Should().Contain("[SqlColumnType(SqlDbType.NVarChar, Size = 50)]");
+        content.Should().Contain("[SqlColumnType(SqlDbType.Decimal, Precision = 10, Scale = 2)]");
         // Entity の型が VO（非 NULL PK は null! 初期化）
         content.Should().Contain("public CustomerIdValue CustomerId { get; set; } = null!;");
         // EditModel 確定値は常に VO?（バインド setter は TryCreate）

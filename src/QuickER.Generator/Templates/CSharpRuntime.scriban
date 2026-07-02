@@ -52,26 +52,12 @@ public sealed class NavigationReferenceAttribute : Attribute
     }
 }
 {{ end }}
-{{~ if emit_column_facets_attr && render_runtime ~}}
-/// <summary>DB カラムのメタ情報（最大長 / 全体桁数 / 小数桁数）を付与する独自属性。該当なしは -1</summary>
-[AttributeUsage(AttributeTargets.Property, AllowMultiple = false)]
-public sealed class ColumnFacetsAttribute : Attribute
-{
-    /// <summary>文字列カラムの最大長（該当なしは -1）</summary>
-    public int MaxLength { get; set; } = -1;
-
-    /// <summary>decimal カラムの全体桁数 precision（該当なしは -1）</summary>
-    public int Precision { get; set; } = -1;
-
-    /// <summary>decimal カラムの小数桁数 scale（該当なしは -1）</summary>
-    public int Scale { get; set; } = -1;
-
-    /// <summary>decimal カラムの整数部桁数（Precision - Scale）。decimal 以外は -1</summary>
-    public int IntegralDigits => Precision >= 0 && Scale >= 0 ? Precision - Scale : -1;
-}
-{{ end }}
 {{~ if emit_sql_column_type_attr && render_runtime ~}}
-/// <summary>Entity プロパティに DB 列の SqlDbType（＋Size/Precision/Scale）を付与する独自属性。SQL パラメータの型明示化に使う</summary>
+/// <summary>
+/// Entity プロパティに DB 列のメタ情報（SqlDbType・Size・Precision・Scale）を付与する独自属性。
+/// ランタイム（EntitySaveMetadata）が明示 <see cref="SqlParameter"/> を組み立てるのに使うほか、
+/// 利用者コードが列のメタ情報（最大長・桁数）を参照する用途にも使える。
+/// </summary>
 [AttributeUsage(AttributeTargets.Property, AllowMultiple = false)]
 public sealed class SqlColumnTypeAttribute : Attribute
 {
@@ -86,6 +72,9 @@ public sealed class SqlColumnTypeAttribute : Attribute
 
     /// <summary>decimal 系の小数桁数 scale</summary>
     public byte Scale { get; set; }
+
+    /// <summary>decimal 系の整数部桁数（Precision - Scale）。decimal 系以外は -1</summary>
+    public int IntegralDigits => Precision > 0 ? Precision - Scale : -1;
 
     /// <summary>SqlDbType を受け取り初期化する</summary>
     public SqlColumnTypeAttribute(SqlDbType dbType) => DbType = dbType;
@@ -731,8 +720,6 @@ public abstract partial class EntityBase
 {{ end }}{{ if include_data_annotations }}    [Column("{{ property.column_name }}")]
 {{ end }}{{ if include_data_annotations && !property.is_nullable && property.is_reference_type }}    [Required]
 {{ end }}{{ if include_data_annotations && property.max_length }}    [MaxLength({{ property.max_length }})]
-{{ end }}{{ if include_data_annotations && property.facet_max_length }}    [ColumnFacets(MaxLength = {{ property.facet_max_length }})]
-{{ end }}{{ if include_data_annotations && property.facet_precision }}    [ColumnFacets(Precision = {{ property.facet_precision }}, Scale = {{ property.facet_scale }})]
 {{ end }}{{ if emit_sql_column_type_attr && property.sql_db_type_name }}    [SqlColumnType(SqlDbType.{{ property.sql_db_type_name }}{{ if property.sql_declared_length != 0 }}, Size = {{ property.sql_declared_length }}{{ end }}{{ if property.facet_precision }}, Precision = {{ property.facet_precision }}, Scale = {{ property.facet_scale }}{{ end }})]
 {{ end }}    public {{ property.type_name }} {{ property.property_name }} { get; set; }{{ property.initializer }}
 {{ end }}{{ for navigation in item.navigations }}
