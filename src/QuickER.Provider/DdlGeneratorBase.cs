@@ -22,7 +22,7 @@ public abstract class DdlGeneratorBase : IDdlGenerator
     public string Build(ErDiagram diagram)
     {
         var sb = new StringBuilder();
-        sb.AppendLine("-- ER Designer によって自動生成された DDL");
+        sb.AppendLine("-- QuickER によって自動生成された DDL");
         sb.AppendLine($"-- 生成日時: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
         sb.AppendLine();
 
