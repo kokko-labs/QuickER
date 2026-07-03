@@ -217,7 +217,9 @@ public sealed class MySqlSyncScriptBuilder : ISyncScriptBuilder
 
         // 制約名不明時は information_schema を逆引きしてプリペアド動的 SQL で削除する。
         // 接続文字列に AllowUserVariables=true が付与されている前提（Executor 側で付与）。
-        var childName = MySqlIdentifier.EscapeStringLiteral(MySqlIdentifier.TableNameOnly(childTbl));
+        var childName = MySqlIdentifier.EscapeStringLiteral(
+            MySqlIdentifier.TableNameOnly(childTbl)
+        );
         var parentName = MySqlIdentifier.EscapeStringLiteral(
             MySqlIdentifier.TableNameOnly(parentTbl)
         );
@@ -296,9 +298,7 @@ public sealed class MySqlSyncScriptBuilder : ISyncScriptBuilder
 
         if (!string.IsNullOrEmpty(column.Description))
         {
-            sb.Append(
-                $" COMMENT '{MySqlIdentifier.EscapeStringLiteral(column.Description)}'"
-            );
+            sb.Append($" COMMENT '{MySqlIdentifier.EscapeStringLiteral(column.Description)}'");
         }
 
         return sb.ToString();

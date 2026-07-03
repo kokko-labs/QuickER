@@ -78,7 +78,8 @@ public sealed class MySqlSchemaSyncIntegrationTests(MySqlContainerFixture fixtur
         diff1
             .Items.Should()
             .Contain(i =>
-                i.Kind == SchemaDiffKind.SetTableDescription && i.NewDescription == "親テーブルの説明"
+                i.Kind == SchemaDiffKind.SetTableDescription
+                && i.NewDescription == "親テーブルの説明"
             );
 
         await ApplyAsync(settings, diff1.Items);
@@ -86,7 +87,10 @@ public sealed class MySqlSchemaSyncIntegrationTests(MySqlContainerFixture fixtur
         // 再取込で往復確認
         var live1 = await ImportAsync();
         live1.Entities.Select(e => e.TableName).Should().BeEquivalentTo("parent", "child");
-        live1.Entities.Single(e => e.TableName == "parent").Description.Should().Be("親テーブルの説明");
+        live1
+            .Entities.Single(e => e.TableName == "parent")
+            .Description.Should()
+            .Be("親テーブルの説明");
         live1
             .Entities.Single(e => e.TableName == "parent")
             .Columns.Single(c => c.Name == "name")
@@ -214,7 +218,9 @@ public sealed class MySqlSchemaSyncIntegrationTests(MySqlContainerFixture fixtur
     /// エラー内容が報告されることを検証する。MySQL の DDL は暗黙コミットされ部分適用があり得るため、
     /// スキーマ不変のアサートは行わない。
     /// </summary>
-    [Fact(DisplayName = "[Integration] C: 不正な同期は Committed=false・エラー報告（部分適用の可能性・スキーマ不変は検証しない）")]
+    [Fact(
+        DisplayName = "[Integration] C: 不正な同期は Committed=false・エラー報告（部分適用の可能性・スキーマ不変は検証しない）"
+    )]
     public async Task SchemaSync_InvalidAlter_ReportsFailure()
     {
         Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);

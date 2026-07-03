@@ -315,7 +315,11 @@ public sealed partial class PostgreSqlTypeCatalog : ITypeCatalog
             scale = parsedScale;
         }
 
-        canonical = new CanonicalType(CanonicalTypeKind.Decimal, Precision: precision, Scale: scale);
+        canonical = new CanonicalType(
+            CanonicalTypeKind.Decimal,
+            Precision: precision,
+            Scale: scale
+        );
         return true;
     }
 

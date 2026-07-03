@@ -24,14 +24,12 @@ public static class CliApp
     };
 
     /// <summary>CLI が対応する DB プロバイダのレジストリ（新 DBMS 対応時はここへ実装を追加する）</summary>
-    private static readonly DatabaseProviderRegistry Providers = new(
-        [
-            new SqlServerProvider(),
-            new PostgreSqlProvider(),
-            new MySqlProvider(),
-            new OracleProvider(),
-        ]
-    );
+    private static readonly DatabaseProviderRegistry Providers = new([
+        new SqlServerProvider(),
+        new PostgreSqlProvider(),
+        new MySqlProvider(),
+        new OracleProvider(),
+    ]);
 
     /// <summary>引数を解析してコマンドを実行する</summary>
     public static Task<int> InvokeAsync(string[] args)

@@ -162,7 +162,10 @@ public class OracleDdlGeneratorTests
         var child = new Entity
         {
             TableName = "child",
-            Columns = { new Column { Name = "parent_id", DataType = "NUMBER(10)" } },
+            Columns =
+            {
+                new Column { Name = "parent_id", DataType = "NUMBER(10)" },
+            },
         };
         var diagram = new ErDiagram
         {
@@ -208,7 +211,10 @@ public class OracleDdlGeneratorTests
         var child = new Entity
         {
             TableName = "child",
-            Columns = { new Column { Name = "parent_id", DataType = "NUMBER(10)" } },
+            Columns =
+            {
+                new Column { Name = "parent_id", DataType = "NUMBER(10)" },
+            },
         };
         var diagram = new ErDiagram
         {

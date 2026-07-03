@@ -74,7 +74,8 @@ public sealed class OracleContainerFixture : IAsyncLifetime
         {
             // Docker が無い・デーモンに接続できない等の場合はテストをスキップさせる
             IsAvailable = false;
-            UnavailableReason = $"Oracle コンテナを起動できませんでした（Docker 不在または起動失敗）: {ex.Message}";
+            UnavailableReason =
+                $"Oracle コンテナを起動できませんでした（Docker 不在または起動失敗）: {ex.Message}";
         }
     }
 
@@ -165,7 +166,8 @@ public sealed class OracleContainerFixture : IAsyncLifetime
         var container = _container!;
         var b = new OracleConnectionStringBuilder
         {
-            DataSource = $"{container.Hostname}:{container.GetMappedPublicPort(1521)}/{ServiceName}",
+            DataSource =
+                $"{container.Hostname}:{container.GetMappedPublicPort(1521)}/{ServiceName}",
             UserID = Username,
             Password = Password,
         };
@@ -183,13 +185,9 @@ public sealed class OracleContainerFixture : IAsyncLifetime
         var normalized = script.Replace("\r\n", "\n");
 
         // 「/」のみの行が 1 つでもあれば、Executor と同じ「/」区切り規約に従う
-        var hasSlashSeparator = normalized
-            .Split('\n')
-            .Any(line => line.Trim() == "/");
+        var hasSlashSeparator = normalized.Split('\n').Any(line => line.Trim() == "/");
 
-        return hasSlashSeparator
-            ? SplitBySlash(normalized)
-            : SplitBySemicolon(normalized);
+        return hasSlashSeparator ? SplitBySlash(normalized) : SplitBySemicolon(normalized);
     }
 
     /// <summary>「/」のみの行で分割する（<see cref="OracleSchemaSyncExecutor.SplitStatements"/> と同じロジック）</summary>

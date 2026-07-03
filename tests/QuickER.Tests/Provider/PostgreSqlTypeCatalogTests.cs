@@ -241,7 +241,8 @@ public class PostgreSqlTypeCatalogTests
     [Fact(DisplayName = "TryFormat(TinyInt) は smallint を生成する（PG に tinyint は無い）")]
     public void TryFormat_TinyInt_ProducesSmallint()
     {
-        Catalog.TryFormat(new CanonicalType(CanonicalTypeKind.TinyInt), out var nativeType)
+        Catalog
+            .TryFormat(new CanonicalType(CanonicalTypeKind.TinyInt), out var nativeType)
             .Should()
             .BeTrue();
 
@@ -332,7 +333,8 @@ public class PostgreSqlTypeCatalogTests
     [InlineData(CanonicalTypeKind.FixedBinary, 16)]
     public void TryFormat_Binary_ProducesBytea(CanonicalTypeKind kind, int length)
     {
-        Catalog.TryFormat(new CanonicalType(kind, Length: length), out var nativeType)
+        Catalog
+            .TryFormat(new CanonicalType(kind, Length: length), out var nativeType)
             .Should()
             .BeTrue();
 
@@ -381,7 +383,8 @@ public class PostgreSqlTypeCatalogTests
     [Fact(DisplayName = "TryFormat(Json) は jsonb を生成する")]
     public void TryFormat_Json_ProducesJsonb()
     {
-        Catalog.TryFormat(new CanonicalType(CanonicalTypeKind.Json), out var nativeType)
+        Catalog
+            .TryFormat(new CanonicalType(CanonicalTypeKind.Json), out var nativeType)
             .Should()
             .BeTrue();
 

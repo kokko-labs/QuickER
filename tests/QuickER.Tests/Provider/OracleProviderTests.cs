@@ -45,7 +45,9 @@ public class OracleProviderTests
         };
 
     /// <summary>OracleProvider が識別名・表示名・既定ポート・型カタログを公開することを検証する</summary>
-    [Fact(DisplayName = "OracleProvider は name / DisplayName / DefaultPort / 型カタログを公開する")]
+    [Fact(
+        DisplayName = "OracleProvider は name / DisplayName / DefaultPort / 型カタログを公開する"
+    )]
     public void OracleProvider_ExposesMetadataAndDataTypes()
     {
         var provider = new OracleProvider();
@@ -141,7 +143,9 @@ public class OracleProviderTests
     }
 
     /// <summary>ServiceName が空なら Database をサービス名に用い、ポート未指定なら 1521 を使うことを検証する</summary>
-    [Fact(DisplayName = "BuildConnectionString はサービス名未指定時に Database、ポート未指定時に 1521 を用いる")]
+    [Fact(
+        DisplayName = "BuildConnectionString はサービス名未指定時に Database、ポート未指定時に 1521 を用いる"
+    )]
     public void BuildConnectionString_FallsBackToDatabaseAndDefaultPort()
     {
         var provider = new OracleProvider();
@@ -163,9 +167,11 @@ public class OracleProviderTests
     [Fact(DisplayName = "レジストリに sqlserver / postgresql / oracle の 3 プロバイダが並ぶ")]
     public void Registry_ContainsThreeProviders()
     {
-        var registry = new DatabaseProviderRegistry(
-            [new SqlServerProvider(), new PostgreSqlProvider(), new OracleProvider()]
-        );
+        var registry = new DatabaseProviderRegistry([
+            new SqlServerProvider(),
+            new PostgreSqlProvider(),
+            new OracleProvider(),
+        ]);
 
         registry.All.Should().HaveCount(3);
         registry.Get("sqlserver").Should().BeOfType<SqlServerProvider>();

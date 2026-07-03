@@ -76,10 +76,14 @@ public sealed partial class OracleCSharpTypeMapper : IColumnTypeMapper
             "date" or "timestamp" => Value("DateTime"),
             "raw" or "blob" or "long raw" => Reference("byte[]"),
             // 文字列系のみ MaxLength を保持し、[MaxLength] 属性の生成に使う
-            "nvarchar2" or "varchar2" or "nchar" or "char" or "nclob" or "clob" or "xmltype" or "long" => Reference(
-                "string",
-                maxLength
-            ),
+            "nvarchar2"
+            or "varchar2"
+            or "nchar"
+            or "char"
+            or "nclob"
+            or "clob"
+            or "xmltype"
+            or "long" => Reference("string", maxLength),
             // 未知の型は string として扱い、生成自体は継続させる
             _ => Reference("string"),
         };

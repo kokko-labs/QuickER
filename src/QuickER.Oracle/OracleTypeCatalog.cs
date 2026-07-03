@@ -135,19 +135,11 @@ public sealed partial class OracleTypeCatalog : ITypeCatalog
                 return TryParsePrecisionOnly(arg1, CanonicalTypeKind.DateTime, out canonical);
 
             case "timestamp with time zone":
-                return TryParsePrecisionOnly(
-                    arg1,
-                    CanonicalTypeKind.DateTimeOffset,
-                    out canonical
-                );
+                return TryParsePrecisionOnly(arg1, CanonicalTypeKind.DateTimeOffset, out canonical);
 
             // WITH LOCAL TIME ZONE も DateTimeOffset として解釈する（解釈のみ・TryFormat では扱わない）
             case "timestamp with local time zone":
-                return TryParsePrecisionOnly(
-                    arg1,
-                    CanonicalTypeKind.DateTimeOffset,
-                    out canonical
-                );
+                return TryParsePrecisionOnly(arg1, CanonicalTypeKind.DateTimeOffset, out canonical);
 
             case "xmltype":
                 canonical = new CanonicalType(CanonicalTypeKind.Xml);

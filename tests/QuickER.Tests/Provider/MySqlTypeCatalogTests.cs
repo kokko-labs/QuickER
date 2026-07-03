@@ -263,7 +263,10 @@ public class MySqlTypeCatalogTests
     public void TryFormat_AnsiStringWithLength_ProducesVarchar()
     {
         Catalog
-            .TryFormat(new CanonicalType(CanonicalTypeKind.AnsiString, Length: 50), out var nativeType)
+            .TryFormat(
+                new CanonicalType(CanonicalTypeKind.AnsiString, Length: 50),
+                out var nativeType
+            )
             .Should()
             .BeTrue();
 
@@ -274,7 +277,10 @@ public class MySqlTypeCatalogTests
     public void TryFormat_AnsiStringMax_ProducesLongtext()
     {
         Catalog
-            .TryFormat(new CanonicalType(CanonicalTypeKind.AnsiString, Length: -1), out var nativeType)
+            .TryFormat(
+                new CanonicalType(CanonicalTypeKind.AnsiString, Length: -1),
+                out var nativeType
+            )
             .Should()
             .BeTrue();
 
@@ -285,7 +291,10 @@ public class MySqlTypeCatalogTests
     public void TryFormat_FixedStringWithLength_ProducesChar()
     {
         Catalog
-            .TryFormat(new CanonicalType(CanonicalTypeKind.FixedString, Length: 10), out var nativeType)
+            .TryFormat(
+                new CanonicalType(CanonicalTypeKind.FixedString, Length: 10),
+                out var nativeType
+            )
             .Should()
             .BeTrue();
 
@@ -332,7 +341,10 @@ public class MySqlTypeCatalogTests
     public void TryFormat_FixedBinaryWithLength_ProducesBinary()
     {
         Catalog
-            .TryFormat(new CanonicalType(CanonicalTypeKind.FixedBinary, Length: 16), out var nativeType)
+            .TryFormat(
+                new CanonicalType(CanonicalTypeKind.FixedBinary, Length: 16),
+                out var nativeType
+            )
             .Should()
             .BeTrue();
 
@@ -357,7 +369,10 @@ public class MySqlTypeCatalogTests
     public void TryFormat_DateTimeWithPrecision_ProducesDatetimeWithPrecision()
     {
         Catalog
-            .TryFormat(new CanonicalType(CanonicalTypeKind.DateTime, Precision: 3), out var nativeType)
+            .TryFormat(
+                new CanonicalType(CanonicalTypeKind.DateTime, Precision: 3),
+                out var nativeType
+            )
             .Should()
             .BeTrue();
 
