@@ -3937,6 +3937,67 @@ public partial interface IRepository<TEntity, TKey>
         bool insertWhenUpdateMissing = false,
         CancellationToken cancellationToken = default
     );
+
+    /// <summary>生 SQL の SELECT を実行し、結果行を {TEntity} へマップして返す</summary>
+    /// <remarks>
+    /// <para>
+    /// SELECT には {TEntity} の全列が必要（<c>SELECT *</c> または全列指定）。部分 SELECT（列不足）は不可で、
+    /// 欠けている列があればどの列が無いか分かる例外を投げる。
+    /// </para>
+    /// <para>
+    /// <paramref name="parameters"/> は匿名オブジェクト等の public インスタンスプロパティを列挙し、
+    /// プロパティ名 <c>Foo</c> を SQL パラメータ <c>@Foo</c> として束縛する（null 指定でパラメータなし）。
+    /// 生 SQL には列文脈が無いため型は明示せず <c>AddWithValue</c> で束縛する。
+    /// <b>値は必ずパラメータで渡すこと（SQL への文字列連結はインジェクションの危険がある）。</b>
+    /// </para>
+    /// </remarks>
+    /// <param name="sql">全列を返す SELECT 文</param>
+    /// <param name="parameters">@名 パラメータへ束縛する匿名オブジェクト（null でパラメータなし）</param>
+    Task<IReadOnlyList<TEntity>> QueryBySqlAsync(
+        string sql,
+        object? parameters = null,
+        CancellationToken cancellationToken = default
+    );
+
+    /// <summary>生 SQL（UPDATE/DELETE/任意 DML）を実行し、影響行数を返す</summary>
+    /// <remarks>
+    /// <para>
+    /// <paramref name="parameters"/> の束縛は <see cref="QueryBySqlAsync"/> と同じ（プロパティ名 <c>Foo</c> → <c>@Foo</c>、
+    /// 型明示なしの <c>AddWithValue</c>、null でパラメータなし）。
+    /// <b>値は必ずパラメータで渡すこと（文字列連結はインジェクションの危険がある）。</b>
+    /// </para>
+    /// <para>
+    /// 呼び出しごとに接続を開閉する（トランザクション引数なし）。複数文をアトミックに実行したい場合は、
+    /// 1 回の <see cref="ExecuteSqlAsync"/> 内で <c>BEGIN TRAN ... COMMIT</c> を記述すること。
+    /// </para>
+    /// </remarks>
+    /// <param name="sql">実行する DML 文</param>
+    /// <param name="parameters">@名 パラメータへ束縛する匿名オブジェクト（null でパラメータなし）</param>
+    Task<int> ExecuteSqlAsync(
+        string sql,
+        object? parameters = null,
+        CancellationToken cancellationToken = default
+    );
+
+    /// <summary>生 SQL を実行し、単一のスカラー値を返す（該当なし・DBNull は <c>default</c>）</summary>
+    /// <remarks>
+    /// <para>
+    /// <paramref name="parameters"/> の束縛は <see cref="QueryBySqlAsync"/> と同じ。
+    /// <b>値は必ずパラメータで渡すこと（文字列連結はインジェクションの危険がある）。</b>
+    /// </para>
+    /// <para>
+    /// 結果が <c>null</c> / <see cref="DBNull"/> のときは <c>default(TResult)</c> を返す。型が <typeparamref name="TResult"/> と
+    /// 一致しない場合は <see cref="System.Convert.ChangeType(object, System.Type, System.IFormatProvider)"/>
+    /// （<see cref="System.Globalization.CultureInfo.InvariantCulture"/>）でベストエフォート変換し、変換できない場合は分かる例外を投げる。
+    /// </para>
+    /// </remarks>
+    /// <param name="sql">単一値を返す SELECT 文（例: <c>SELECT COUNT(*) ...</c>）</param>
+    /// <param name="parameters">@名 パラメータへ束縛する匿名オブジェクト（null でパラメータなし）</param>
+    Task<TResult?> ExecuteScalarSqlAsync<TResult>(
+        string sql,
+        object? parameters = null,
+        CancellationToken cancellationToken = default
+    );
 }
 
 /// <summary>SQL Server 接続を生成するファクトリ</summary>
@@ -4253,6 +4314,109 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
         {
             await transaction.RollbackAsync(cancellationToken);
             throw;
+        }
+    }
+
+    /// <summary>生 SQL の SELECT を実行し、結果行を {TEntity} へマップして返す</summary>
+    /// <remarks>
+    /// SELECT には {TEntity} の全列が必要（<c>SELECT *</c> または全列指定）。部分 SELECT（列不足）は不可。
+    /// パラメータは匿名オブジェクトの public プロパティ名を <c>@名</c> として型明示なしで束縛する
+    /// （<b>値は必ずパラメータで渡すこと。文字列連結はインジェクションの危険がある</b>）。
+    /// </remarks>
+    public async Task<IReadOnlyList<TEntity>> QueryBySqlAsync(
+        string sql,
+        object? parameters = null,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(sql);
+
+        var items = new List<TEntity>();
+
+        await using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        await using var command = new SqlCommand(sql, connection);
+        _metadata.BindRawSqlParameters(command, parameters);
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            items.Add(_metadata.MapEntityFromRawSql<TEntity>(reader));
+        }
+
+        return items;
+    }
+
+    /// <summary>生 SQL（UPDATE/DELETE/任意 DML）を実行し、影響行数を返す</summary>
+    /// <remarks>
+    /// 呼び出しごとに接続を開閉する（トランザクション引数なし）。複数文をアトミックに実行したい場合は、
+    /// 1 回の呼び出し内で <c>BEGIN TRAN ... COMMIT</c> を SQL に記述すること。
+    /// パラメータ束縛は <see cref="QueryBySqlAsync"/> と同じ
+    /// （<b>値は必ずパラメータで渡すこと。文字列連結はインジェクションの危険がある</b>）。
+    /// </remarks>
+    public async Task<int> ExecuteSqlAsync(
+        string sql,
+        object? parameters = null,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(sql);
+
+        await using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        await using var command = new SqlCommand(sql, connection);
+        _metadata.BindRawSqlParameters(command, parameters);
+
+        return await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    /// <summary>生 SQL を実行し、単一のスカラー値を返す（該当なし・DBNull は <c>default</c>）</summary>
+    /// <remarks>
+    /// 結果が <c>null</c> / <see cref="DBNull"/> なら <c>default(TResult)</c>。型が合わない場合は
+    /// <see cref="Convert.ChangeType(object, Type, IFormatProvider)"/>（InvariantCulture）でベストエフォート変換し、
+    /// 変換できない場合は分かる例外を投げる。パラメータ束縛は <see cref="QueryBySqlAsync"/> と同じ
+    /// （<b>値は必ずパラメータで渡すこと。文字列連結はインジェクションの危険がある</b>）。
+    /// </remarks>
+    public async Task<TResult?> ExecuteScalarSqlAsync<TResult>(
+        string sql,
+        object? parameters = null,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(sql);
+
+        await using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        await using var command = new SqlCommand(sql, connection);
+        _metadata.BindRawSqlParameters(command, parameters);
+
+        var scalar = await command.ExecuteScalarAsync(cancellationToken);
+        if (scalar is null or DBNull)
+        {
+            return default;
+        }
+
+        if (scalar is TResult typed)
+        {
+            return typed;
+        }
+
+        // TResult が Nullable<T> なら基底型へ変換する（Convert.ChangeType は Nullable を直接扱えない）
+        var targetType = Nullable.GetUnderlyingType(typeof(TResult)) ?? typeof(TResult);
+        try
+        {
+            return (TResult)Convert.ChangeType(scalar, targetType, CultureInfo.InvariantCulture);
+        }
+        catch (Exception ex)
+            when (ex is InvalidCastException or FormatException or OverflowException)
+        {
+            throw new InvalidOperationException(
+                $"生 SQL のスカラー結果（型 {scalar.GetType().Name}）を {typeof(TResult).Name} へ変換できませんでした。",
+                ex
+            );
         }
     }
 }
@@ -5404,6 +5568,59 @@ internal sealed class EntitySaveMetadata
         // DB から読み込んだ行は変更なし扱いにする（その後の編集で Updated に遷移）
         entity.RowState = RowState.Unchanged;
         return entity;
+    }
+
+    /// <summary>
+    /// 生 SQL の結果行を {TEntity} へマップする。<see cref="MapEntity"/> と同じ厳密マッピング（全列必須）だが、
+    /// 列不足（部分 SELECT）で <see cref="IndexOutOfRangeException"/> が出た場合は、必要な全列を含む
+    /// <see cref="InvalidOperationException"/> でラップして分かりやすくする。
+    /// </summary>
+    public TEntity MapEntityFromRawSql<TEntity>(SqlDataReader reader)
+        where TEntity : EntityBase, new()
+    {
+        try
+        {
+            return MapEntity<TEntity>(reader);
+        }
+        catch (IndexOutOfRangeException ex)
+        {
+            throw new InvalidOperationException(
+                $"生 SQL の SELECT には {typeof(TEntity).Name} の全列（{ColumnList}）が必要です（SELECT * または全列指定）。"
+                    + $"結果セットに不足している列があります: {ex.Message}",
+                ex
+            );
+        }
+    }
+
+    /// <summary>生 SQL 用パラメータ（プロパティ名を {parameterPrefix}名 として型明示なしで束縛）を型ごとにキャッシュする</summary>
+    private static readonly ConcurrentDictionary<Type, PropertyInfo[]> _rawSqlParameterCache = new();
+
+    /// <summary>
+    /// 匿名オブジェクト等の public インスタンスプロパティを列挙し、プロパティ名 <c>Foo</c> を SQL パラメータ
+    /// <c>@Foo</c> として <c>AddWithValue</c> で束縛する（生 SQL には列文脈が無いため型は明示しない）。
+    /// </summary>
+    /// <param name="parameters">束縛元の匿名オブジェクト。null のときはパラメータを追加しない</param>
+    public void BindRawSqlParameters(SqlCommand command, object? parameters)
+    {
+        if (parameters is null)
+        {
+            return;
+        }
+
+        var properties = _rawSqlParameterCache.GetOrAdd(
+            parameters.GetType(),
+            static type =>
+                type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                    .Where(property => property.CanRead && property.GetIndexParameters().Length == 0)
+                    .ToArray()
+        );
+
+        foreach (var property in properties)
+        {
+            var value =
+                SqlParameterValue.Unwrap(property.GetValue(parameters));
+            command.Parameters.AddWithValue($"@{property.Name}", value ?? DBNull.Value);
+        }
     }
 
     /// <summary>INSERT 用パラメータ（全カラム）を設定する（追加・グラフ挿入で共用）</summary>

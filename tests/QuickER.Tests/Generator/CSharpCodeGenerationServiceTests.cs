@@ -1079,6 +1079,59 @@ public class CSharpCodeGenerationServiceTests
     }
 
     /// <summary>
+    /// 生 SQL 実行の 3 メソッド（QueryBySqlAsync / ExecuteSqlAsync / ExecuteScalarSqlAsync）が
+    /// IRepository インターフェースと SqlServerRepository 基底の両方に生成され、
+    /// パラメータ束縛・厳密マッピングの補助（BindRawSqlParameters / MapEntityFromRawSql）も出力されることを検証する
+    /// </summary>
+    [Fact]
+    public void Generate_Repository_ShouldEmitRawSqlMethods()
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            SingleEntityDiagram(),
+            new CodeGenerationOptions { NamespaceName = "Sample.Domain" }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        var content = result.Files[0].Content;
+
+        // インターフェース側のシグネチャ（3 メソッド。abstract メソッド宣言なので本文なし）
+        content.Should().Contain("Task<IReadOnlyList<TEntity>> QueryBySqlAsync(");
+        content.Should().Contain("Task<int> ExecuteSqlAsync(");
+        content.Should().Contain("Task<TResult?> ExecuteScalarSqlAsync<TResult>(");
+
+        // 実装側（SqlServerRepository 基底）の public メソッド
+        content.Should().Contain("public async Task<IReadOnlyList<TEntity>> QueryBySqlAsync(");
+        content.Should().Contain("public async Task<int> ExecuteSqlAsync(");
+        content.Should().Contain("public async Task<TResult?> ExecuteScalarSqlAsync<TResult>(");
+        // 実装は BindRawSqlParameters と MapEntityFromRawSql を呼ぶ
+        content.Should().Contain("_metadata.BindRawSqlParameters(command, parameters);");
+        content.Should().Contain("items.Add(_metadata.MapEntityFromRawSql<TEntity>(reader));");
+
+        // パラメータ束縛と厳密マッピングの補助（EntitySaveMetadata）
+        content
+            .Should()
+            .Contain("public void BindRawSqlParameters(SqlCommand command, object? parameters)");
+        content
+            .Should()
+            .Contain(
+                "command.Parameters.AddWithValue($\"@{property.Name}\", value ?? DBNull.Value);"
+            );
+        content
+            .Should()
+            .Contain("public TEntity MapEntityFromRawSql<TEntity>(SqlDataReader reader)");
+        // 列不足は必要な全列を含む例外でラップする
+        content.Should().Contain("catch (IndexOutOfRangeException ex)");
+        content.Should().Contain("の全列（{ColumnList}）が必要です");
+        // スカラーは default / ChangeType(InvariantCulture) / 変換不能で例外
+        content.Should().Contain("if (scalar is null or DBNull)");
+        content
+            .Should()
+            .Contain("Convert.ChangeType(scalar, targetType, CultureInfo.InvariantCulture)");
+        // InvariantCulture 使用のため System.Globalization を using
+        content.Should().Contain("using System.Globalization;");
+    }
+
+    /// <summary>
     /// SQL パラメータ型明示化のため、Repository 生成時に Entity プロパティへ [SqlColumnType(...)] が
     /// DB 型に応じて付与されること（varchar(50)→VarChar+Size50 / nvarchar(max)→NVarChar+Size-1 /
     /// decimal(10,2)→Precision10/Scale2 / int→Int / 未知型→属性なし）を検証する

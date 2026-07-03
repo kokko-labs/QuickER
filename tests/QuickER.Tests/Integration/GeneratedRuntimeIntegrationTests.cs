@@ -221,4 +221,138 @@ public sealed class GeneratedRuntimeIntegrationTests(SqlServerContainerFixture f
         all.Should().HaveCount(count);
         all.Select(c => c.CustomerId.Value).Should().BeEquivalentTo(Enumerable.Range(1, count));
     }
+
+    /// <summary>7. QueryBySqlAsync: WHERE 付き全列 SELECT で対象行のみ取得し、VO 復元・匿名オブジェクトパラメータが機能する</summary>
+    [Fact(
+        DisplayName = "[Integration] 7: QueryBySqlAsync（WHERE 付き全列 SELECT・匿名パラメータ）で対象行のみ VO 復元して取得できる"
+    )]
+    public async Task QueryBySql_ReturnsMappedRows_WithAnonymousParameters()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+        await CreateSchemaAsync();
+
+        var repo = new CustomerRepository(Factory());
+        await repo.InsertAsync(NewCustomer(1, "Alice", balance: 100m, isActive: true), Ct);
+        await repo.InsertAsync(NewCustomer(2, "Bob", balance: 200m, isActive: false), Ct);
+        await repo.InsertAsync(NewCustomer(3, "Carol", balance: 300m, isActive: true), Ct);
+
+        // 全列 SELECT + WHERE。@名 は匿名オブジェクトのプロパティ名で束縛する。
+        var rows = await repo.QueryBySqlAsync(
+            "SELECT * FROM [customers] WHERE [is_active] = @active AND [balance] >= @minBalance ORDER BY [customer_id];",
+            new { active = true, minBalance = 150m },
+            Ct
+        );
+
+        // is_active=true かつ balance>=150 の Carol(3) のみ
+        rows.Select(c => c.CustomerId.Value).Should().BeEquivalentTo([3]);
+        var carol = rows.Single();
+        // VO 復元一致
+        carol.Name.Value.Should().Be("Carol");
+        carol.Balance.Should().NotBeNull();
+        carol.Balance!.Value.Should().Be(300m);
+        carol.IsActive.Value.Should().BeTrue();
+        // DB ロード行は Unchanged
+        carol.RowState.Should().Be(RowState.Unchanged);
+
+        // parameters: null はパラメータなし（全件）
+        var allRows = await repo.QueryBySqlAsync(
+            "SELECT * FROM [customers] ORDER BY [customer_id];",
+            null,
+            Ct
+        );
+        allRows.Select(c => c.CustomerId.Value).Should().BeEquivalentTo([1, 2, 3]);
+    }
+
+    /// <summary>8. QueryBySqlAsync: 部分 SELECT（列不足）で、欠けている列名が分かる例外を投げる</summary>
+    [Fact(
+        DisplayName = "[Integration] 8: QueryBySqlAsync の部分 SELECT（列不足）で列名の分かる例外を投げる"
+    )]
+    public async Task QueryBySql_PartialSelect_ThrowsWithMissingColumnName()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+        await CreateSchemaAsync();
+
+        var repo = new CustomerRepository(Factory());
+        await repo.InsertAsync(NewCustomer(1, "Alice", balance: 100m, isActive: true), Ct);
+
+        // name / balance / is_active を欠く部分 SELECT はマッピングできない
+        var act = async () =>
+            await repo.QueryBySqlAsync("SELECT [customer_id] FROM [customers];", null, Ct);
+
+        var ex = await act.Should().ThrowAsync<InvalidOperationException>();
+        // 全列が必要である旨と、欠けた列名（name 等）がメッセージに含まれる
+        ex.Which.Message.Should().Contain("全列");
+        ex.Which.Message.Should().Contain("name");
+    }
+
+    /// <summary>9. ExecuteSqlAsync: UPDATE で影響行数を返し、パラメータ束縛が機能する</summary>
+    [Fact(
+        DisplayName = "[Integration] 9: ExecuteSqlAsync（UPDATE・パラメータ束縛）で影響行数を返す"
+    )]
+    public async Task ExecuteSql_Update_ReturnsAffectedRows()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+        await CreateSchemaAsync();
+
+        var repo = new CustomerRepository(Factory());
+        await repo.InsertAsync(NewCustomer(1, "Alice", isActive: true), Ct);
+        await repo.InsertAsync(NewCustomer(2, "Bob", isActive: true), Ct);
+        await repo.InsertAsync(NewCustomer(3, "Carol", isActive: false), Ct);
+
+        // is_active=true の 2 行を false に更新（パラメータ束縛）
+        var affected = await repo.ExecuteSqlAsync(
+            "UPDATE [customers] SET [is_active] = @newValue WHERE [is_active] = @oldValue;",
+            new { newValue = false, oldValue = true },
+            Ct
+        );
+        affected.Should().Be(2);
+
+        // 全員 is_active=false になっていること
+        var active = await repo.Query()
+            .Where(c => c.IsActive == IsActiveValue.Create(true))
+            .ToListAsync(Ct);
+        active.Should().BeEmpty();
+    }
+
+    /// <summary>10. ExecuteScalarSqlAsync: COUNT(*) を int で取得し、該当なし集計（SUM が NULL）は default になる</summary>
+    [Fact(
+        DisplayName = "[Integration] 10: ExecuteScalarSqlAsync（COUNT を int 取得・SUM が NULL で default）"
+    )]
+    public async Task ExecuteScalarSql_ReturnsScalar_AndDefaultOnNull()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+        await CreateSchemaAsync();
+
+        var repo = new CustomerRepository(Factory());
+        await repo.InsertAsync(NewCustomer(1, "Alice", balance: 100m, isActive: true), Ct);
+        await repo.InsertAsync(NewCustomer(2, "Bob", balance: 200m, isActive: true), Ct);
+
+        // COUNT(*) を int で取得
+        var count = await repo.ExecuteScalarSqlAsync<int>(
+            "SELECT COUNT(*) FROM [customers];",
+            null,
+            Ct
+        );
+        count.Should().Be(2);
+
+        // WHERE 付き COUNT（パラメータ束縛）
+        var activeCount = await repo.ExecuteScalarSqlAsync<int>(
+            "SELECT COUNT(*) FROM [customers] WHERE [is_active] = @active;",
+            new { active = true },
+            Ct
+        );
+        activeCount.Should().Be(2);
+
+        // 該当なしの SUM は NULL → default（int? では null、decimal? では null）
+        var nullSum = await repo.ExecuteScalarSqlAsync<decimal?>(
+            "SELECT SUM([balance]) FROM [customers] WHERE [customer_id] = @id;",
+            new { id = 999 },
+            Ct
+        );
+        nullSum.Should().BeNull();
+    }
 }
