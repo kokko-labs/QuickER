@@ -225,7 +225,7 @@ public class MainViewModelTargetDbmsTests
     private sealed class NoopAppDialogService : IAppDialogService
     {
         public CSharpGenerationDialogResult? ShowCSharpGenerationDialog(
-            string currentProviderName
+            IDatabaseProvider currentProvider
         ) => null;
 
         public DbConnectionDialogResult? ShowDbConnectionDialog(

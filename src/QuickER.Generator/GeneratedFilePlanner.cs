@@ -107,7 +107,8 @@ public static class GeneratedFilePlanner
 
     /// <summary>生成対象として有効なバケットを正準順で返す</summary>
     /// <remarks>
-    /// 並び順は UI のカテゴリ別 namespace 欄と一致させる（Entity → EditModel → Mapper → Repository → ValueObject → Runtime）。
+    /// 並び順は UI のカテゴリ別 namespace 欄と一致させる（Entity → EditModel → Mapper → ValueObject → Repository → EfCore → Runtime）。
+    /// DB アクセス系（Repository / EfCore）は UI の「DB アクセス」選択が値オブジェクトの下にあるため後段に置く。
     /// Runtime は何らかのクラスを生成する限り常に必要（共有基盤を保持するため）で、UI と同じく末尾に置く
     /// </remarks>
     public static IReadOnlyList<GenerationBucket> ActiveBuckets(CodeGenerationOptions options)
@@ -130,6 +131,11 @@ public static class GeneratedFilePlanner
             active.Add(GenerationBucket.Mapper);
         }
 
+        if (options.GenerateValueObjects)
+        {
+            active.Add(GenerationBucket.ValueObject);
+        }
+
         // Repository バケットは共通契約（インターフェイス・SqlQuery・メタデータ・グラフセーバ・RawSqlMapper 等）＋
         // 自作 SQL Server 実装を保持する。契約は EF Core 側も参照するため、自作実装・EF Core のどちらかが有効なら出力する。
         // EF 単独出力時は Repository バケットに「契約のみ」が入る（自作実装はテンプレート内で出し分ける）
@@ -141,11 +147,6 @@ public static class GeneratedFilePlanner
         if (options.GenerateEfCore)
         {
             active.Add(GenerationBucket.EfCore);
-        }
-
-        if (options.GenerateValueObjects)
-        {
-            active.Add(GenerationBucket.ValueObject);
         }
 
         var anyClass =

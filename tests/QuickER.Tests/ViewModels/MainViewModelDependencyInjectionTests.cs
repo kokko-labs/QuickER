@@ -113,7 +113,7 @@ public class MainViewModelDependencyInjectionTests
     private sealed class StubAppDialogService : IAppDialogService
     {
         public CSharpGenerationDialogResult? ShowCSharpGenerationDialog(
-            string currentProviderName
+            IDatabaseProvider currentProvider
         ) => null;
 
         public DbConnectionDialogResult? ShowDbConnectionDialog(

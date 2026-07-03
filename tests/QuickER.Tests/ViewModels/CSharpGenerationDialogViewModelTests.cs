@@ -12,13 +12,13 @@ public class CSharpGenerationDialogViewModelTests
     /// <summary>一時フォルダのストアで ViewModel を生成する（実 %APPDATA% を汚さない）</summary>
     private static CSharpGenerationDialogViewModel CreateViewModel(
         out string folder,
-        string? currentProviderName = null
+        QuickER.Provider.IDatabaseProvider? currentProvider = null
     )
     {
         folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
         return new CSharpGenerationDialogViewModel(
             new CSharpGenerationSettingsStore(folder),
-            currentProviderName: currentProviderName
+            currentProvider: currentProvider
         );
     }
 
@@ -106,10 +106,12 @@ public class CSharpGenerationDialogViewModelTests
         {
             var vm = new CSharpGenerationDialogViewModel(
                 store,
-                currentProviderName: QuickER.PostgreSql.PostgreSqlProvider.ProviderName
+                currentProvider: new QuickER.PostgreSql.PostgreSqlProvider()
             );
 
             vm.CanSelectSqlServerRepository.Should().BeFalse();
+            vm.CurrentDatabaseDisplayName.Should()
+                .NotBeEmpty("DB アクセス欄に現在の DB を提示する");
             // 保存されていた「自作 Repository」選択は矛盾生成物を防ぐため「なし」へ倒す
             vm.GenerateRepositories.Should().BeFalse();
             vm.DbAccessNone.Should().BeTrue();
@@ -124,12 +126,10 @@ public class CSharpGenerationDialogViewModelTests
     [Fact(DisplayName = "SQL Server プロバイダでは自作 Repository を選択できる")]
     public void SqlServerProvider_AllowsRepositoryOption()
     {
-        var vm = CreateViewModel(
-            out _,
-            currentProviderName: QuickER.SqlServer.SqlServerProvider.ProviderName
-        );
+        var vm = CreateViewModel(out _, currentProvider: new QuickER.SqlServer.SqlServerProvider());
 
         vm.CanSelectSqlServerRepository.Should().BeTrue();
+        vm.CurrentDatabaseDisplayName.Should().Be("SQL Server");
     }
 
     /// <summary>EF Core 選択＋分割モードで EfCore 名前空間欄が現れ、ベース変更へ追従することを検証する</summary>

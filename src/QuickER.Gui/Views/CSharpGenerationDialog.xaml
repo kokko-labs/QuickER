@@ -218,45 +218,7 @@
           </StackPanel>
         </Grid>
 
-        <!-- DB アクセス（排他選択。自作 Repository は SQL Server 専用） -->
         <Grid Margin="0,0,0,10">
-          <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="96" />
-            <ColumnDefinition Width="*" />
-          </Grid.ColumnDefinitions>
-          <TextBlock
-            Grid.Column="0"
-            Style="{StaticResource FieldLabel}"
-            VerticalAlignment="Top"
-            Margin="0,2,0,0"
-            Text="DB アクセス"
-          />
-          <StackPanel Grid.Column="1" Orientation="Horizontal">
-            <RadioButton
-              Margin="0,0,18,0"
-              Content="なし"
-              GroupName="DbAccess"
-              IsChecked="{Binding DbAccessNone}"
-            />
-            <RadioButton
-              Margin="0,0,18,0"
-              Content="EF Core"
-              GroupName="DbAccess"
-              IsChecked="{Binding DbAccessEfCore}"
-              ToolTip="方言非依存の DbContext と EF 版 Repository を生成します（接続先はアプリ側の UseSqlServer / UseNpgsql 等で選択）"
-            />
-            <RadioButton
-              Content="Repository (SQL Server 専用)"
-              GroupName="DbAccess"
-              IsChecked="{Binding DbAccessRepository}"
-              IsEnabled="{Binding CanSelectSqlServerRepository}"
-              ToolTipService.ShowOnDisabled="True"
-              ToolTip="自作 Repository は SQL Server 専用です。SQL Server プロバイダの選択中のみ選べます"
-            />
-          </StackPanel>
-        </Grid>
-
-        <Grid>
           <Grid.ColumnDefinitions>
             <ColumnDefinition Width="96" />
             <ColumnDefinition Width="*" />
@@ -278,6 +240,52 @@
               Content="string 主キーを GuidKey 化"
               IsChecked="{Binding UseGuidKeyForStringPrimaryKey}"
               IsEnabled="{Binding GenerateValueObjects}"
+            />
+          </StackPanel>
+        </Grid>
+
+        <!-- DB アクセス（排他選択。自作 Repository は SQL Server 専用のため現在の DB を隣に提示する） -->
+        <Grid>
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="96" />
+            <ColumnDefinition Width="*" />
+          </Grid.ColumnDefinitions>
+          <TextBlock
+            Grid.Column="0"
+            Style="{StaticResource FieldLabel}"
+            VerticalAlignment="Top"
+            Margin="0,2,0,0"
+            Text="DB アクセス"
+          />
+          <StackPanel Grid.Column="1" Orientation="Horizontal">
+            <TextBlock
+              Margin="0,0,18,0"
+              VerticalAlignment="Center"
+              FontWeight="SemiBold"
+              Foreground="{StaticResource HeaderText}"
+              Text="{Binding CurrentDatabaseDisplayName}"
+              ToolTip="アプリで現在選択している DB（プロバイダ）"
+            />
+            <RadioButton
+              Margin="0,0,18,0"
+              Content="なし"
+              GroupName="DbAccess"
+              IsChecked="{Binding DbAccessNone}"
+            />
+            <RadioButton
+              Margin="0,0,18,0"
+              Content="EF Core"
+              GroupName="DbAccess"
+              IsChecked="{Binding DbAccessEfCore}"
+              ToolTip="方言非依存の DbContext と EF 版 Repository を生成します（接続先はアプリ側の UseSqlServer / UseNpgsql 等で選択）"
+            />
+            <RadioButton
+              Content="Repository (SQL Server 専用)"
+              GroupName="DbAccess"
+              IsChecked="{Binding DbAccessRepository}"
+              IsEnabled="{Binding CanSelectSqlServerRepository}"
+              ToolTipService.ShowOnDisabled="True"
+              ToolTip="Repository は SQL Server 専用です。SQL Server プロバイダの選択中のみ選べます"
             />
           </StackPanel>
         </Grid>
@@ -419,11 +427,29 @@
             Grid.Column="0"
             Margin="0,4"
             Style="{StaticResource FieldLabel}"
+            Text="ValueObject"
+            Visibility="{Binding ShowValueObjectNamespace, Converter={StaticResource BoolToVisibilityConverter}}"
+          />
+          <TextBox
+            Grid.Row="3"
+            Grid.Column="1"
+            Margin="0,4"
+            Style="{StaticResource FormInput}"
+            Text="{Binding ValueObjectNamespace, UpdateSourceTrigger=PropertyChanged}"
+            Visibility="{Binding ShowValueObjectNamespace, Converter={StaticResource BoolToVisibilityConverter}}"
+          />
+
+          <!-- DB アクセス系は「生成内容」の並びに合わせて末尾。Repository と EfCore は排他選択のため同じ行（Row 4）を共有する -->
+          <TextBlock
+            Grid.Row="4"
+            Grid.Column="0"
+            Margin="0,4"
+            Style="{StaticResource FieldLabel}"
             Text="Repository"
             Visibility="{Binding ShowRepositoryNamespace, Converter={StaticResource BoolToVisibilityConverter}}"
           />
           <TextBox
-            Grid.Row="3"
+            Grid.Row="4"
             Grid.Column="1"
             Margin="0,4"
             Style="{StaticResource FormInput}"
@@ -431,9 +457,8 @@
             Visibility="{Binding ShowRepositoryNamespace, Converter={StaticResource BoolToVisibilityConverter}}"
           />
 
-          <!-- EfCore は Repository と排他選択のため、同じ行（Row 3）を共有する -->
           <TextBlock
-            Grid.Row="3"
+            Grid.Row="4"
             Grid.Column="0"
             Margin="0,4"
             Style="{StaticResource FieldLabel}"
@@ -441,29 +466,12 @@
             Visibility="{Binding ShowEfCoreNamespace, Converter={StaticResource BoolToVisibilityConverter}}"
           />
           <TextBox
-            Grid.Row="3"
+            Grid.Row="4"
             Grid.Column="1"
             Margin="0,4"
             Style="{StaticResource FormInput}"
             Text="{Binding EfCoreNamespace, UpdateSourceTrigger=PropertyChanged}"
             Visibility="{Binding ShowEfCoreNamespace, Converter={StaticResource BoolToVisibilityConverter}}"
-          />
-
-          <TextBlock
-            Grid.Row="4"
-            Grid.Column="0"
-            Margin="0,4"
-            Style="{StaticResource FieldLabel}"
-            Text="ValueObject"
-            Visibility="{Binding ShowValueObjectNamespace, Converter={StaticResource BoolToVisibilityConverter}}"
-          />
-          <TextBox
-            Grid.Row="4"
-            Grid.Column="1"
-            Margin="0,4"
-            Style="{StaticResource FormInput}"
-            Text="{Binding ValueObjectNamespace, UpdateSourceTrigger=PropertyChanged}"
-            Visibility="{Binding ShowValueObjectNamespace, Converter={StaticResource BoolToVisibilityConverter}}"
           />
         </Grid>
 
@@ -478,7 +486,7 @@
           </Grid.ColumnDefinitions>
           <StackPanel Grid.Column="0" VerticalAlignment="Center">
             <TextBlock Foreground="{StaticResource HeaderText}" Text="Runtime" />
-            <TextBlock FontSize="11" Foreground="{StaticResource MutedText}" Text="共有基盤" />
+            <TextBlock FontSize="11" Foreground="{StaticResource MutedText}" Text="(共有基盤)" />
           </StackPanel>
           <TextBox
             Grid.Column="1"

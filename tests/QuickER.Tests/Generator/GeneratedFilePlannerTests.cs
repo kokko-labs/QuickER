@@ -80,15 +80,15 @@ public class GeneratedFilePlannerTests
 
         var plan = GeneratedFilePlanner.Plan(options);
 
-        // 並び順は UI のカテゴリ別 namespace 欄と一致させる（Runtime は末尾の共有基盤）
+        // 並び順は UI のカテゴリ別 namespace 欄と一致させる（DB アクセス系は値オブジェクトの後・Runtime は末尾の共有基盤）
         plan.Select(spec => spec.FileName)
             .Should()
             .Equal(
                 "Entities.g.cs",
                 "EditModels.g.cs",
                 "Mappers.g.cs",
-                "Repositories.g.cs",
                 "ValueObjects.g.cs",
+                "Repositories.g.cs",
                 "Runtime.g.cs"
             );
 

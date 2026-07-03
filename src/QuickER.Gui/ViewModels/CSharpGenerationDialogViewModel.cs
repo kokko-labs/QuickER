@@ -6,6 +6,7 @@ using System.Text.RegularExpressions;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using QuickER.Generator;
+using QuickER.Provider;
 using QuickER.Services;
 using QuickER.SqlServer;
 
@@ -34,25 +35,26 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     public Action<bool>? CloseAction { get; set; }
 
     /// <summary>設定ストアとファイル選択サービスを指定して ViewModel を生成し、保存済み設定を復元する</summary>
-    /// <param name="currentProviderName">
-    /// アプリの現在のプロバイダ名。自作 Repository は SQL Server 専用のため、SQL Server 以外では
-    /// 選択肢を無効化する（null は判定不要な文脈＝SQL Server 扱い）
+    /// <param name="currentProvider">
+    /// アプリの現在のプロバイダ。自作 Repository は SQL Server 専用のため、SQL Server 以外では
+    /// 選択肢を無効化し、表示名を「DB アクセス」欄に提示する（null は判定不要な文脈＝SQL Server 扱い）
     /// </param>
     public CSharpGenerationDialogViewModel(
         CSharpGenerationSettingsStore? store = null,
         IFileDialogService? files = null,
-        string? currentProviderName = null
+        IDatabaseProvider? currentProvider = null
     )
     {
         _store = store ?? new CSharpGenerationSettingsStore();
         _files = files ?? new WpfFileDialogService();
         CanSelectSqlServerRepository =
-            currentProviderName is null
+            currentProvider is null
             || string.Equals(
-                currentProviderName,
+                currentProvider.Name,
                 SqlServerProvider.ProviderName,
                 StringComparison.OrdinalIgnoreCase
             );
+        CurrentDatabaseDisplayName = currentProvider?.DisplayName ?? string.Empty;
         ApplySettings(_store.Load());
     }
 
@@ -193,6 +195,9 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
 
     /// <summary>「自作 Repository」を選択できるか（現在のプロバイダが SQL Server のときのみ。理由は View 側ツールチップで提示）</summary>
     public bool CanSelectSqlServerRepository { get; }
+
+    /// <summary>現在のプロバイダの UI 表示名（例: "SQL Server"。「DB アクセス」欄の隣に提示し、Repository 可否の文脈を伝える）</summary>
+    public string CurrentDatabaseDisplayName { get; }
 
     /// <summary>生成されるファイルのプレビュー（「ファイル名 → namespace」の一覧。設定に追従して更新）</summary>
     public ObservableCollection<string> PreviewFiles { get; } = new();
