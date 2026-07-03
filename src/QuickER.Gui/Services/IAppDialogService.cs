@@ -23,7 +23,10 @@ public sealed record DbConnectionDialogResult(
 public interface IAppDialogService
 {
     /// <summary>C# コード生成ダイアログを表示し、生成設定を返す（キャンセル時は null）</summary>
-    CSharpGenerationDialogResult? ShowCSharpGenerationDialog();
+    /// <param name="currentProviderName">
+    /// アプリの現在のプロバイダ名。自作 Repository（SQL Server 専用）の選択可否判定に使う
+    /// </param>
+    CSharpGenerationDialogResult? ShowCSharpGenerationDialog(string currentProviderName);
 
     /// <summary>DB 接続ダイアログを表示し、接続設定と方言を返す（キャンセル時は null）</summary>
     /// <param name="mode">用途（取込は DBMS 選択可・同期は方言固定）</param>
@@ -61,9 +64,12 @@ public sealed class WpfAppDialogService : IAppDialogService
     }
 
     /// <inheritdoc />
-    public CSharpGenerationDialogResult? ShowCSharpGenerationDialog()
+    public CSharpGenerationDialogResult? ShowCSharpGenerationDialog(string currentProviderName)
     {
-        var viewModel = new CSharpGenerationDialogViewModel(files: _files);
+        var viewModel = new CSharpGenerationDialogViewModel(
+            files: _files,
+            currentProviderName: currentProviderName
+        );
         var dialog = new Views.CSharpGenerationDialog(viewModel)
         {
             Owner = Application.Current?.MainWindow,

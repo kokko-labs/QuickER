@@ -30,6 +30,9 @@ public class CSharpGenerationSettings
     /// <summary>分割時の ValueObject 名前空間。空なら {base}.ValueObjects にフォールバック</summary>
     public string ValueObjectNamespace { get; set; } = string.Empty;
 
+    /// <summary>分割時の EfCore 名前空間。空なら {base}.EfCore にフォールバック</summary>
+    public string EfCoreNamespace { get; set; } = string.Empty;
+
     /// <summary>Entity クラスを生成するか</summary>
     public bool GenerateEntityClasses { get; set; } = true;
 
@@ -39,8 +42,11 @@ public class CSharpGenerationSettings
     /// <summary>Mapper クラスを生成するか</summary>
     public bool GenerateMappers { get; set; } = true;
 
-    /// <summary>Repository クラスを生成するか</summary>
-    public bool GenerateRepositories { get; set; } = true;
+    /// <summary>自作 SQL Server Repository を生成するか（DB アクセスの排他選択。既定は「なし」）</summary>
+    public bool GenerateRepositories { get; set; }
+
+    /// <summary>EF Core 用コード（DbContext＋EF 版 Repository）を生成するか（DB アクセスの排他選択）</summary>
+    public bool GenerateEfCore { get; set; }
 
     /// <summary>全カラムを値オブジェクト化するか</summary>
     public bool GenerateValueObjects { get; set; }

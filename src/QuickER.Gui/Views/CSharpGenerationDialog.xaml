@@ -205,15 +205,62 @@
             <CheckBox
               Margin="0,0,18,0"
               Content="Entity"
-              IsChecked="{Binding GenerateEntityClasses}"
+              IsChecked="{Binding GenerateEntityClasses, Mode=OneWay}"
+              IsEnabled="False"
+              ToolTip="Entity は全カテゴリの前提のため常に生成されます"
             />
             <CheckBox
               Margin="0,0,18,0"
               Content="EditModel"
               IsChecked="{Binding GenerateEditModels}"
             />
-            <CheckBox Margin="0,0,18,0" Content="Mapper" IsChecked="{Binding GenerateMappers}" />
-            <CheckBox Content="Repository" IsChecked="{Binding GenerateRepositories}" />
+            <CheckBox Content="Mapper" IsChecked="{Binding GenerateMappers}" />
+          </StackPanel>
+        </Grid>
+
+        <!-- DB アクセス（排他選択。自作 Repository は SQL Server 専用） -->
+        <Grid Margin="0,0,0,10">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="96" />
+            <ColumnDefinition Width="*" />
+          </Grid.ColumnDefinitions>
+          <TextBlock
+            Grid.Column="0"
+            Style="{StaticResource FieldLabel}"
+            VerticalAlignment="Top"
+            Margin="0,2,0,0"
+            Text="DB アクセス"
+          />
+          <StackPanel Grid.Column="1">
+            <StackPanel Orientation="Horizontal">
+              <RadioButton
+                Margin="0,0,18,0"
+                Content="なし"
+                GroupName="DbAccess"
+                IsChecked="{Binding DbAccessNone}"
+              />
+              <RadioButton
+                Margin="0,0,18,0"
+                Content="Repository（SQL Server）"
+                GroupName="DbAccess"
+                IsChecked="{Binding DbAccessRepository}"
+                IsEnabled="{Binding CanSelectSqlServerRepository}"
+              />
+              <RadioButton
+                Content="EF Core"
+                GroupName="DbAccess"
+                IsChecked="{Binding DbAccessEfCore}"
+                ToolTip="方言非依存の DbContext と EF 版 Repository を生成します（接続先はアプリ側の UseSqlServer / UseNpgsql 等で選択）"
+              />
+            </StackPanel>
+            <TextBlock
+              Margin="0,4,0,0"
+              FontSize="11"
+              Foreground="{StaticResource MutedText}"
+              TextWrapping="Wrap"
+              Text="{Binding RepositoryDisabledNote}"
+              Visibility="{Binding ShowRepositoryDisabledNote, Converter={StaticResource BoolToVisibilityConverter}}"
+            />
           </StackPanel>
         </Grid>
 
@@ -322,6 +369,7 @@
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
           </Grid.RowDefinitions>
 
           <TextBlock
@@ -407,6 +455,23 @@
             Style="{StaticResource FormInput}"
             Text="{Binding ValueObjectNamespace, UpdateSourceTrigger=PropertyChanged}"
             Visibility="{Binding ShowValueObjectNamespace, Converter={StaticResource BoolToVisibilityConverter}}"
+          />
+
+          <TextBlock
+            Grid.Row="5"
+            Grid.Column="0"
+            Margin="0,4"
+            Style="{StaticResource FieldLabel}"
+            Text="EfCore"
+            Visibility="{Binding ShowEfCoreNamespace, Converter={StaticResource BoolToVisibilityConverter}}"
+          />
+          <TextBox
+            Grid.Row="5"
+            Grid.Column="1"
+            Margin="0,4"
+            Style="{StaticResource FormInput}"
+            Text="{Binding EfCoreNamespace, UpdateSourceTrigger=PropertyChanged}"
+            Visibility="{Binding ShowEfCoreNamespace, Converter={StaticResource BoolToVisibilityConverter}}"
           />
         </Grid>
 
