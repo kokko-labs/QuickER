@@ -1121,7 +1121,7 @@ public class CSharpCodeGenerationServiceTests
                 "private readonly ISqlExecutor _sqlExecutor = new SqlExecutor(connectionFactory);"
             );
 
-        // パラメータ束縛は SqlExecutor 側に 1 系統で集約（EntitySaveMetadata からは除去済み）
+        // SqlCommand 版パラメータ束縛は SqlExecutor 側に集約（束縛対象プロパティの解決は RawSqlMapper と共有）
         content
             .Should()
             .Contain("internal static void BindParameters(SqlCommand command, object? parameters)");
@@ -2916,9 +2916,9 @@ public class CSharpCodeGenerationServiceTests
         Content(result, "EfCore.g.cs").Should().Contain("namespace Acme.Persistence.EfCore;");
     }
 
-    /// <summary>EF Core 生成には Repository が必要で、Repository なしではエラーになることを検証する</summary>
+    /// <summary>EF 単独出力（GenerateEfCore=true・GenerateRepositories=false）が合法で、エラーなく生成できることを検証する</summary>
     [Fact]
-    public void Generate_EfCore_WithoutRepositories_ShouldFailWithError()
+    public void Generate_EfCoreOnly_ShouldSucceedWithoutError()
     {
         var result = new CSharpCodeGenerationService().Generate(
             ValueObjectDiagram(),
@@ -2930,15 +2930,105 @@ public class CSharpCodeGenerationServiceTests
             }
         );
 
-        result.HasErrors.Should().BeTrue();
-        result.Files.Should().BeEmpty();
-        result
-            .Diagnostics.Should()
-            .Contain(diagnostic =>
-                diagnostic.Severity == GenerationDiagnosticSeverity.Error
-                && diagnostic.Message.Contains("EF Core")
-                && diagnostic.Message.Contains("Repository")
-            );
+        result.HasErrors.Should().BeFalse();
+        result.Files.Should().NotBeEmpty();
+
+        var content = string.Concat(result.Files.Select(file => file.Content));
+        // 共通契約は出力される
+        content.Should().Contain("public partial interface ISqlExecutor");
+        content.Should().Contain("public sealed class SqlQuery<TEntity>");
+        content.Should().Contain("internal static class RawSqlMapper");
+        // EF 一式は出力される
+        content.Should().Contain("public partial class QuickErDbContext : DbContext");
+        content
+            .Should()
+            .Contain("public static IServiceCollection AddGeneratedEfCoreRepositories(");
+        // 自作 SQL Server 実装は出力されない
+        content.Should().NotContain("public sealed partial class SqlExecutor(");
+        content.Should().NotContain("public abstract partial class SqlServerRepository<");
+        content.Should().NotContain("public static IServiceCollection AddGeneratedRepositories(");
+    }
+
+    /// <summary>EF 単独出力（VO 有無 × 分割有無の 4 通り）の生成物全ファイルに Microsoft.Data.SqlClient 依存が一切現れないことを検証する</summary>
+    /// <remarks>
+    /// SqlParameterValue（値オブジェクト unwrap ヘルパー・BCL のみ）は "SqlParameter " のような型参照ではないため、
+    /// 誤検出しないよう "SqlParameter " は末尾スペース付きで（型参照のみ）判定する
+    /// </remarks>
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public void Generate_EfCoreOnly_ShouldNotDependOnSqlClient(bool split, bool vo)
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            ValueObjectDiagram(),
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                SplitFilesByCategory = split,
+                GenerateValueObjects = vo,
+                GenerateEfCore = true,
+                GenerateRepositories = false,
+            }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        result.Files.Should().NotBeEmpty();
+
+        // SqlClient 由来のトークンが 1 つでも現れたら EF 単独出力の前提（プロバイダのみで使える）が崩れる
+        string[] forbidden =
+        [
+            "Microsoft.Data.SqlClient",
+            "SqlCommand",
+            "SqlConnection(",
+            "SqlDataReader",
+            "SqlParameter ", // SqlParameterValue（VO unwrap・BCL のみ）は除外するため末尾スペース付き
+        ];
+
+        foreach (var file in result.Files)
+        {
+            foreach (var token in forbidden)
+            {
+                file.Content.Should()
+                    .NotContain(
+                        token,
+                        $"EF 単独出力のファイル {file.FileName} に SqlClient 依存トークン「{token}」が現れてはならない（Split={split} VO={vo}）"
+                    );
+            }
+        }
+    }
+
+    /// <summary>EF 単独出力の SqlQuery は SQL Server パス（FOR JSON・接続ファクトリ・SqlExpressionTranslator）を出力せず、実行器委譲のみになることを検証する</summary>
+    [Fact]
+    public void Generate_EfCoreOnly_SqlQuery_ShouldOnlyDelegateToExecutor()
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            SingleEntityDiagram(),
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                GenerateEfCore = true,
+                GenerateRepositories = false,
+            }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        var content = string.Concat(result.Files.Select(file => file.Content));
+
+        // 実行器委譲パスは出力される
+        content.Should().Contain("public sealed class SqlQuery<TEntity>");
+        content
+            .Should()
+            .Contain("return await _executor.ToListAsync(BuildPlan(), cancellationToken);");
+        // SQL Server 専用の要素は出力されない（コード本体で判定。FOR JSON 等は契約の doc コメントに残るためコードで確認する）
+        content.Should().NotContain("private readonly ISqlConnectionFactory _connectionFactory");
+        content.Should().NotContain("internal static class SqlExpressionTranslator");
+        content.Should().NotContain("internal static class JsonQueryPlanner");
+        content.Should().NotContain("private async Task<string> ReadJsonAsync(");
+        content.Should().NotContain("BuildJsonSelect(");
+        // 各エンティティ用リポジトリインターフェイス（契約）は出力される
+        content.Should().Contain(" : IRepository<");
     }
 
     // ---- EF Core（EF 版 Repository・SqlExecutor・DI 拡張）----
@@ -3020,12 +3110,12 @@ public class CSharpCodeGenerationServiceTests
             );
         content.Should().Contain("    : ISqlExecutor");
 
-        // DbContext の接続上で ADO を直接実行し、既存版のマッピング・束縛ヘルパーを共有する
+        // DbContext の接続上で ADO を直接実行し、共有ヘルパー RawSqlMapper のマッピング・束縛を使う
         content.Should().Contain("context.Database.GetDbConnection().CreateCommand()");
         content
             .Should()
-            .Contain("SqlExecutor.ReadProjectionRowsAsync<TResult>(reader, cancellationToken)");
-        content.Should().Contain("SqlExecutor.BindParameters(command, parameters);");
+            .Contain("RawSqlMapper.ReadProjectionRowsAsync<TResult>(reader, cancellationToken)");
+        content.Should().Contain("RawSqlMapper.BindParameters(command, parameters);");
         content
             .Should()
             .Contain("internal static void BindParameters(DbCommand command, object? parameters)");

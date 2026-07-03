@@ -62,13 +62,17 @@ internal sealed partial class CSharpGenerationModelBuilder
                     )
                     .ToList()
                 : [],
-            RepositoryClasses = options.GenerateRepositories
-                ? diagram
-                    .Entities.Select(entity => BuildRepositoryClass(entity, diagnostics))
-                    .Where(model => model is not null)
-                    .Cast<CSharpRepositoryModel>()
-                    .ToList()
-                : [],
+            // 共通契約（インターフェイス群・SqlQuery・メタデータ等）と各エンティティ用リポジトリインターフェイスは、
+            // 自作 SQL Server 実装（GenerateRepositories）・EF Core 実装（GenerateEfCore）のどちらかが有効なら必要になる。
+            // EF 単独出力でも EF 版 Repository が I{Entity}Repository を実装するため、モデルを構築しておく
+            RepositoryClasses =
+                options.GenerateRepositories || options.GenerateEfCore
+                    ? diagram
+                        .Entities.Select(entity => BuildRepositoryClass(entity, diagnostics))
+                        .Where(model => model is not null)
+                        .Cast<CSharpRepositoryModel>()
+                        .ToList()
+                    : [],
             Usings = BuildUsings(options).ToList(),
             ValueObjectClasses = _valueObjects
                 .Values.OrderBy(vo => vo.ClassName, StringComparer.Ordinal)
@@ -620,7 +624,9 @@ internal sealed partial class CSharpGenerationModelBuilder
             usings.Add("System.Collections.ObjectModel");
         }
 
-        if (options.GenerateRepositories)
+        // 共通契約（インターフェイス群・SqlQuery・メタデータ・グラフセーバ・RawSqlMapper 等）は自作 SQL Server 実装と
+        // EF Core 実装の共有基盤であり、どちらか一方でも有効なら BCL 系の using が必要になる。
+        if (options.GenerateRepositories || options.GenerateEfCore)
         {
             usings.Add("System.Collections");
             usings.Add("System.Collections.Concurrent");
@@ -632,12 +638,18 @@ internal sealed partial class CSharpGenerationModelBuilder
             usings.Add("System.Text.Json.Serialization.Metadata");
             usings.Add("System.Threading");
             usings.Add("System.Threading.Tasks");
+
+            // 射影マッピングの共有ヘルパー（RawSqlMapper.ReadProjectionRowsAsync）はプロバイダ非依存の
+            // DbDataReader / DbCommand（System.Data.Common）を受け取る（自作・EF 版実行器で実装を共有するため）
+            usings.Add("System.Data.Common");
+        }
+
+        // Microsoft.Data.SqlClient は自作 SQL Server 実装（SqlExecutor / SqlServerRepository / SqlQuery の
+        // SQL Server パス等）専用の依存。EF 単独出力へ漏れないよう GenerateRepositories のときだけ付与する。
+        if (options.GenerateRepositories)
+        {
             usings.Add("Microsoft.Data.SqlClient");
             usings.Add("Microsoft.Extensions.DependencyInjection");
-
-            // 射影マッピングの共有ヘルパー（ReadProjectionRowsAsync）はプロバイダ非依存の
-            // DbDataReader（System.Data.Common）を受け取る（EF 版実行器と実装を共有するため）
-            usings.Add("System.Data.Common");
         }
 
         if (options.IncludeDataAnnotations)

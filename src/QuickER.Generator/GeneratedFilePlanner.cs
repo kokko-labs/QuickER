@@ -130,7 +130,10 @@ public static class GeneratedFilePlanner
             active.Add(GenerationBucket.Mapper);
         }
 
-        if (options.GenerateRepositories)
+        // Repository バケットは共通契約（インターフェイス・SqlQuery・メタデータ・グラフセーバ・RawSqlMapper 等）＋
+        // 自作 SQL Server 実装を保持する。契約は EF Core 側も参照するため、自作実装・EF Core のどちらかが有効なら出力する。
+        // EF 単独出力時は Repository バケットに「契約のみ」が入る（自作実装はテンプレート内で出し分ける）
+        if (options.GenerateRepositories || options.GenerateEfCore)
         {
             active.Add(GenerationBucket.Repository);
         }
@@ -149,7 +152,8 @@ public static class GeneratedFilePlanner
             options.GenerateEntityClasses
             || options.GenerateEditModels
             || options.GenerateMappers
-            || options.GenerateRepositories;
+            || options.GenerateRepositories
+            || options.GenerateEfCore;
 
         if (anyClass)
         {

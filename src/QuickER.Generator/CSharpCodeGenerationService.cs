@@ -55,7 +55,7 @@ public sealed class CSharpCodeGenerationService
             .Select(spec => new GeneratedFile
             {
                 FileName = SanitizeFileName(spec.FileName),
-                Content = _renderer.Render(model, options, BuildScope(spec, model.Usings)),
+                Content = _renderer.Render(model, options, BuildScope(spec, model.Usings, options)),
             })
             .ToList();
 
@@ -71,7 +71,8 @@ public sealed class CSharpCodeGenerationService
     /// </remarks>
     private static RenderScope BuildScope(
         GeneratedFileSpec spec,
-        IReadOnlyList<string> systemUsings
+        IReadOnlyList<string> systemUsings,
+        CodeGenerationOptions options
     )
     {
         var usings = new List<string>(systemUsings);
@@ -94,6 +95,9 @@ public sealed class CSharpCodeGenerationService
             Mappers = spec.Buckets.Contains(GenerationBucket.Mapper),
             Repositories = spec.Buckets.Contains(GenerationBucket.Repository),
             EfCore = spec.Buckets.Contains(GenerationBucket.EfCore),
+            // 自作 SQL Server 実装は Repository バケットを含むファイルにのみ、かつ GenerateRepositories が有効なときだけ出力する
+            SqlServerImpl =
+                options.GenerateRepositories && spec.Buckets.Contains(GenerationBucket.Repository),
         };
     }
 
@@ -102,7 +106,7 @@ public sealed class CSharpCodeGenerationService
     /// </summary>
     /// <remarks>
     /// エラー: 生成対象が一つもない、エンティティが存在しない、テーブル名が空、
-    /// 生成対象間の依存違反（Mapper は Entity+EditModel、Repository は Entity と DataAnnotations が必要）。
+    /// 生成対象間の依存違反（Mapper は Entity+EditModel、Repository / EF Core は Entity と DataAnnotations が必要）。
     /// 警告: 複合主キー（[Key] 属性の生成が最小限になる）
     /// </remarks>
     private static void Validate(
@@ -116,11 +120,12 @@ public sealed class CSharpCodeGenerationService
             && !options.GenerateEditModels
             && !options.GenerateMappers
             && !options.GenerateRepositories
+            && !options.GenerateEfCore
         )
         {
             diagnostics.Add(
                 Error(
-                    "Entity / EditModel / Mapper / Repository のいずれも生成対象になっていません。少なくとも一つを有効にしてください。"
+                    "Entity / EditModel / Mapper / Repository / EF Core のいずれも生成対象になっていません。少なくとも一つを有効にしてください。"
                 )
             );
         }
@@ -138,34 +143,29 @@ public sealed class CSharpCodeGenerationService
             );
         }
 
-        // Repository は Entity クラスを参照するため、Entity 生成が必須
-        if (options.GenerateRepositories && !options.GenerateEntityClasses)
+        // Repository・EF Core はともに Entity クラス（および共通契約）を参照するため、Entity 生成が必須
+        if (
+            (options.GenerateRepositories || options.GenerateEfCore)
+            && !options.GenerateEntityClasses
+        )
         {
             diagnostics.Add(
                 Error(
-                    "Repository の生成には Entity クラスが必要です。Entity を生成対象に含めてください。"
+                    "Repository / EF Core の生成には Entity クラスが必要です。Entity を生成対象に含めてください。"
                 )
             );
         }
 
-        // Repository の SQL 組み立ては [Table] / [Key] / [Column] 属性をリフレクションで参照するため、
-        // DataAnnotations を無効にすると実行時に初期化例外となる。生成前にエラーとして検出する
-        if (options.GenerateRepositories && !options.IncludeDataAnnotations)
+        // Repository の SQL 組み立ておよび EF Core のマッピング（EntitySaveMetadata）は [Table] / [Key] / [Column]
+        // 属性をリフレクションで参照するため、DataAnnotations を無効にすると実行時に初期化例外となる。生成前に検出する
+        if (
+            (options.GenerateRepositories || options.GenerateEfCore)
+            && !options.IncludeDataAnnotations
+        )
         {
             diagnostics.Add(
                 Error(
-                    "Repository は [Table] / [Key] / [Column] 属性を利用するため、データアノテーションの付与が必要です。データアノテーションを有効にしてください。"
-                )
-            );
-        }
-
-        // EF 版はこの後のフェーズで既存 Repository インターフェイスを実装するため、DbContext だけを
-        // 先行生成しても整合しない。EfCore 生成には Repository 生成を必須とする
-        if (options.GenerateEfCore && !options.GenerateRepositories)
-        {
-            diagnostics.Add(
-                Error(
-                    "EF Core（DbContext）の生成には Repository の生成が必要です。Repository を生成対象に含めてください。"
+                    "Repository / EF Core は [Table] / [Key] / [Column] 属性を利用するため、データアノテーションの付与が必要です。データアノテーションを有効にしてください。"
                 )
             );
         }

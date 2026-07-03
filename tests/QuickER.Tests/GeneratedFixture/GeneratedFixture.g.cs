@@ -4165,63 +4165,54 @@ internal static class SqlValueObjectActivator
     }
 }
 
-/// <summary>エンティティに縛られない生 SQL 実行器の既定実装（束縛・スカラー変換・射影マップの単一系統）</summary>
-/// <remarks>ステートレス（接続ファクトリのみ保持）のため DI では Singleton 登録できる。Repository の生 SQL メソッドはこの実装へ委譲する。</remarks>
-public sealed partial class SqlExecutor(ISqlConnectionFactory connectionFactory) : ISqlExecutor
+/// <summary>
+/// 生 SQL の束縛・スカラー変換・射影マッピングを担う共有ヘルパー（自作 SQL Server 版と EF Core 版の実行器で 1 系統を共有）。
+/// </summary>
+/// <remarks>
+/// プロバイダ非依存の <see cref="DbCommand"/> / <see cref="DbDataReader"/> のみを扱い、特定 DB クライアントには依存しない。
+/// EF 単独出力（自作 SQL Server 実装を含まない構成）でも共通契約としてこのクラスを出力し、EF 版実行器が呼び出す。
+/// </remarks>
+internal static class RawSqlMapper
 {
-    /// <summary>SQL 接続の生成元</summary>
-    private readonly ISqlConnectionFactory _connectionFactory = connectionFactory;
+    /// <summary>生 SQL 用パラメータの反射プロパティを型ごとにキャッシュする（束縛の 1 系統）</summary>
+    private static readonly ConcurrentDictionary<Type, PropertyInfo[]> _parameterPropertyCache =
+        new();
 
-    /// <summary>生 SQL の SELECT を実行し、結果行を {TEntity} へ厳密（全列必須）にマップして返す</summary>
-    public async Task<IReadOnlyList<TEntity>> QueryBySqlAsync<TEntity>(
-        string sql,
-        object? parameters = null,
-        CancellationToken cancellationToken = default
-    )
-        where TEntity : EntityBase, new()
+    /// <summary>匿名オブジェクト等の束縛対象プロパティ（public インスタンス・読み取り可・非インデクサ）を解決する（型ごとにキャッシュ）</summary>
+    internal static PropertyInfo[] GetBindableProperties(Type type) =>
+        _parameterPropertyCache.GetOrAdd(
+            type,
+            static t =>
+                t.GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                    .Where(property => property.CanRead && property.GetIndexParameters().Length == 0)
+                    .ToArray()
+        );
+
+    /// <summary>
+    /// プロバイダ非依存の <see cref="DbCommand"/> 版パラメータ束縛。匿名オブジェクトの public プロパティ名 <c>Foo</c> を
+    /// SQL パラメータ <c>@Foo</c> として（生 SQL には列文脈が無いため）型明示なしで束縛する。null のときは何もしない。
+    /// </summary>
+    internal static void BindParameters(DbCommand command, object? parameters)
     {
-        ArgumentNullException.ThrowIfNull(sql);
-
-        var metadata = EntitySaveMetadata.For(typeof(TEntity));
-        var items = new List<TEntity>();
-
-        await using var connection = _connectionFactory.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
-
-        await using var command = new SqlCommand(sql, connection);
-        BindParameters(command, parameters);
-
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        while (await reader.ReadAsync(cancellationToken))
+        if (parameters is null)
         {
-            items.Add(metadata.MapEntityFromRawSql<TEntity>(reader));
+            return;
         }
 
-        return items;
-    }
-
-    /// <summary>生 SQL の SELECT を実行し、結果行を任意の <typeparamref name="TResult"/> へ寛容に射影して返す</summary>
-    public async Task<IReadOnlyList<TResult>> QueryProjectionBySqlAsync<TResult>(
-        string sql,
-        object? parameters = null,
-        CancellationToken cancellationToken = default
-    )
-    {
-        ArgumentNullException.ThrowIfNull(sql);
-
-        await using var connection = _connectionFactory.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
-
-        await using var command = new SqlCommand(sql, connection);
-        BindParameters(command, parameters);
-
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        return await ReadProjectionRowsAsync<TResult>(reader, cancellationToken);
+        foreach (var property in GetBindableProperties(parameters.GetType()))
+        {
+            var value =
+                SqlParameterValue.Unwrap(property.GetValue(parameters));
+            var parameter = command.CreateParameter();
+            parameter.ParameterName = $"@{property.Name}";
+            parameter.Value = value ?? DBNull.Value;
+            command.Parameters.Add(parameter);
+        }
     }
 
     /// <summary>
     /// 結果セットを <typeparamref name="TResult"/> へ寛容に射影して読み切る（単一値モード・DTO モードの 1 系統）。
-    /// プロバイダ非依存の <see cref="DbDataReader"/> を受け取り、EF 版実行器とマッピング実装を共有する。
+    /// プロバイダ非依存の <see cref="DbDataReader"/> を受け取り、自作・EF 版実行器でマッピング実装を共有する。
     /// </summary>
     internal static async Task<IReadOnlyList<TResult>> ReadProjectionRowsAsync<TResult>(
         DbDataReader reader,
@@ -4294,105 +4285,6 @@ public sealed partial class SqlExecutor(ISqlConnectionFactory connectionFactory)
         }
 
         return items;
-    }
-
-    /// <summary>生 SQL（UPDATE/DELETE/任意 DML）を実行し、影響行数を返す</summary>
-    public async Task<int> ExecuteSqlAsync(
-        string sql,
-        object? parameters = null,
-        CancellationToken cancellationToken = default
-    )
-    {
-        ArgumentNullException.ThrowIfNull(sql);
-
-        await using var connection = _connectionFactory.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
-
-        await using var command = new SqlCommand(sql, connection);
-        BindParameters(command, parameters);
-
-        return await command.ExecuteNonQueryAsync(cancellationToken);
-    }
-
-    /// <summary>生 SQL を実行し、単一のスカラー値を返す（該当なし・DBNull は <c>default</c>）</summary>
-    public async Task<TResult?> ExecuteScalarSqlAsync<TResult>(
-        string sql,
-        object? parameters = null,
-        CancellationToken cancellationToken = default
-    )
-    {
-        ArgumentNullException.ThrowIfNull(sql);
-
-        await using var connection = _connectionFactory.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
-
-        await using var command = new SqlCommand(sql, connection);
-        BindParameters(command, parameters);
-
-        var scalar = await command.ExecuteScalarAsync(cancellationToken);
-        return ConvertSingleValue<TResult>(scalar is DBNull ? null : scalar);
-    }
-
-    /// <summary>生 SQL 用パラメータの反射プロパティを型ごとにキャッシュする（束縛の 1 系統）</summary>
-    private static readonly ConcurrentDictionary<Type, PropertyInfo[]> _parameterPropertyCache =
-        new();
-
-    /// <summary>
-    /// 匿名オブジェクト等の public インスタンスプロパティを列挙し、プロパティ名 <c>Foo</c> を SQL パラメータ
-    /// <c>@Foo</c> として <c>AddWithValue</c> で束縛する（生 SQL には列文脈が無いため型は明示しない）。null のときは何もしない。
-    /// </summary>
-    internal static void BindParameters(SqlCommand command, object? parameters)
-    {
-        if (parameters is null)
-        {
-            return;
-        }
-
-        var properties = _parameterPropertyCache.GetOrAdd(
-            parameters.GetType(),
-            static type =>
-                type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
-                    .Where(property => property.CanRead && property.GetIndexParameters().Length == 0)
-                    .ToArray()
-        );
-
-        foreach (var property in properties)
-        {
-            var value =
-                SqlParameterValue.Unwrap(property.GetValue(parameters));
-            command.Parameters.AddWithValue($"@{property.Name}", value ?? DBNull.Value);
-        }
-    }
-
-    /// <summary>
-    /// プロバイダ非依存の <see cref="DbCommand"/> 版パラメータ束縛（EF 版実行器用）。束縛規約は
-    /// <see cref="BindParameters(SqlCommand, object?)"/> と同一（プロパティ名 <c>Foo</c> → <c>@Foo</c>、
-    /// 型明示なし、null は何もしない）で、パラメータは <see cref="DbCommand.CreateParameter"/> で生成する。
-    /// </summary>
-    internal static void BindParameters(DbCommand command, object? parameters)
-    {
-        if (parameters is null)
-        {
-            return;
-        }
-
-        var properties = _parameterPropertyCache.GetOrAdd(
-            parameters.GetType(),
-            static type =>
-                type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
-                    .Where(property => property.CanRead && property.GetIndexParameters().Length == 0)
-                    .ToArray()
-        );
-
-        foreach (var property in properties)
-        {
-            var value =
-                SqlParameterValue.Unwrap(property.GetValue(parameters));
-            var parameter = command.CreateParameter();
-            parameter.ParameterName = $"@{property.Name}";
-            parameter.Value = value ?? DBNull.Value;
-            command.Parameters.Add(parameter);
-        }
     }
 
     /// <summary>スカラー・単一値モード共通の値変換（DBNull/null は default、Nullable 対応の ChangeType でベストエフォート変換）</summary>
@@ -4496,6 +4388,119 @@ public sealed partial class SqlExecutor(ISqlConnectionFactory connectionFactory)
         }
 
         return new ProjectionAccessor(() => constructor.Invoke(null), setters);
+    }
+}
+
+/// <summary>エンティティに縛られない生 SQL 実行器の既定実装（束縛・スカラー変換・射影マップの単一系統）</summary>
+/// <remarks>ステートレス（接続ファクトリのみ保持）のため DI では Singleton 登録できる。Repository の生 SQL メソッドはこの実装へ委譲する。</remarks>
+public sealed partial class SqlExecutor(ISqlConnectionFactory connectionFactory) : ISqlExecutor
+{
+    /// <summary>SQL 接続の生成元</summary>
+    private readonly ISqlConnectionFactory _connectionFactory = connectionFactory;
+
+    /// <summary>生 SQL の SELECT を実行し、結果行を {TEntity} へ厳密（全列必須）にマップして返す</summary>
+    public async Task<IReadOnlyList<TEntity>> QueryBySqlAsync<TEntity>(
+        string sql,
+        object? parameters = null,
+        CancellationToken cancellationToken = default
+    )
+        where TEntity : EntityBase, new()
+    {
+        ArgumentNullException.ThrowIfNull(sql);
+
+        var metadata = EntitySaveMetadata.For(typeof(TEntity));
+        var items = new List<TEntity>();
+
+        await using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        await using var command = new SqlCommand(sql, connection);
+        BindParameters(command, parameters);
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            items.Add(metadata.MapEntityFromRawSql<TEntity>(reader));
+        }
+
+        return items;
+    }
+
+    /// <summary>生 SQL の SELECT を実行し、結果行を任意の <typeparamref name="TResult"/> へ寛容に射影して返す</summary>
+    public async Task<IReadOnlyList<TResult>> QueryProjectionBySqlAsync<TResult>(
+        string sql,
+        object? parameters = null,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(sql);
+
+        await using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        await using var command = new SqlCommand(sql, connection);
+        BindParameters(command, parameters);
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        // 射影マッピング（単一値モード・DTO モード）は共有ヘルパーの 1 系統を使う
+        return await RawSqlMapper.ReadProjectionRowsAsync<TResult>(reader, cancellationToken);
+    }
+
+    /// <summary>生 SQL（UPDATE/DELETE/任意 DML）を実行し、影響行数を返す</summary>
+    public async Task<int> ExecuteSqlAsync(
+        string sql,
+        object? parameters = null,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(sql);
+
+        await using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        await using var command = new SqlCommand(sql, connection);
+        BindParameters(command, parameters);
+
+        return await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    /// <summary>生 SQL を実行し、単一のスカラー値を返す（該当なし・DBNull は <c>default</c>）</summary>
+    public async Task<TResult?> ExecuteScalarSqlAsync<TResult>(
+        string sql,
+        object? parameters = null,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(sql);
+
+        await using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        await using var command = new SqlCommand(sql, connection);
+        BindParameters(command, parameters);
+
+        var scalar = await command.ExecuteScalarAsync(cancellationToken);
+        return RawSqlMapper.ConvertSingleValue<TResult>(scalar is DBNull ? null : scalar);
+    }
+
+    /// <summary>
+    /// 匿名オブジェクト等の public インスタンスプロパティを列挙し、プロパティ名 <c>Foo</c> を SQL パラメータ
+    /// <c>@Foo</c> として <c>AddWithValue</c> で束縛する（生 SQL には列文脈が無いため型は明示しない）。null のときは何もしない。
+    /// 束縛対象プロパティの解決は共有ヘルパー <see cref="RawSqlMapper.GetBindableProperties"/> と 1 系統を共有する。
+    /// </summary>
+    internal static void BindParameters(SqlCommand command, object? parameters)
+    {
+        if (parameters is null)
+        {
+            return;
+        }
+
+        foreach (var property in RawSqlMapper.GetBindableProperties(parameters.GetType()))
+        {
+            var value =
+                SqlParameterValue.Unwrap(property.GetValue(parameters));
+            command.Parameters.AddWithValue($"@{property.Name}", value ?? DBNull.Value);
+        }
     }
 }
 
@@ -4785,11 +4790,6 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
     ) => _sqlExecutor.ExecuteScalarSqlAsync<TResult>(sql, parameters, cancellationToken);
 }
 
-/// <summary>検索条件・並び順・Include をチェーンで構築し、終端メソッド（ToListAsync 等）で実行するクエリ</summary>
-/// <remarks>
-/// 取得は SQL Server の FOR JSON でグラフを入れ子 JSON として 1 クエリ取得し、System.Text.Json で復元する。
-/// 条件・並び順・Include はラムダ式で指定。値はパラメータ化、列名はメタデータ由来でインジェクション対策済み。
-/// </remarks>
 /// <summary>クエリ WHERE 句パラメータ（名前・値・対象カラム名）。カラム名は判明時のみ設定し、型明示化に使う</summary>
 /// <param name="Name">パラメータ名（例: @p0）</param>
 /// <param name="Value">束縛する値（値オブジェクトを含み得る。素値化は束縛側で行う）</param>
@@ -4851,6 +4851,12 @@ internal interface ISqlQueryExecutor<TEntity>
     );
 }
 
+/// <summary>検索条件・並び順・Include をチェーンで構築し、終端メソッド（ToListAsync 等）で実行するクエリ</summary>
+/// <remarks>
+/// SQL Server 版では FOR JSON でグラフを入れ子 JSON として 1 クエリ取得し、System.Text.Json で復元する。
+/// EF 版（別バックエンド実行器を注入）では捕捉した式木を EF が各方言へ翻訳する。
+/// 条件・並び順・Include はラムダ式で指定。値はパラメータ化、列名はメタデータ由来でインジェクション対策済み。
+/// </remarks>
 public sealed class SqlQuery<TEntity>
     where TEntity : class
 {
@@ -7189,8 +7195,8 @@ public sealed partial class EfCoreSqlExecutor(IDbContextFactory<QuickErDbContext
         );
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
 
-        // 射影マッピング（単一値モード・DTO モード）は SQL Server 版と同じ 1 系統を共有する
-        return await SqlExecutor.ReadProjectionRowsAsync<TResult>(reader, cancellationToken);
+        // 射影マッピング（単一値モード・DTO モード）は共有ヘルパーの 1 系統を使う
+        return await RawSqlMapper.ReadProjectionRowsAsync<TResult>(reader, cancellationToken);
     }
 
     /// <summary>生 SQL（UPDATE/DELETE/任意 DML）を実行し、影響行数を返す</summary>
@@ -7235,7 +7241,7 @@ public sealed partial class EfCoreSqlExecutor(IDbContextFactory<QuickErDbContext
         );
 
         var scalar = await command.ExecuteScalarAsync(cancellationToken);
-        return SqlExecutor.ConvertSingleValue<TResult>(scalar is DBNull ? null : scalar);
+        return RawSqlMapper.ConvertSingleValue<TResult>(scalar is DBNull ? null : scalar);
     }
 
     /// <summary>接続を開き、SQL とパラメータを束縛した DbCommand を生成する（束縛規約は SQL Server 版と同一）</summary>
@@ -7251,7 +7257,7 @@ public sealed partial class EfCoreSqlExecutor(IDbContextFactory<QuickErDbContext
 
         var command = context.Database.GetDbConnection().CreateCommand();
         command.CommandText = sql;
-        SqlExecutor.BindParameters(command, parameters);
+        RawSqlMapper.BindParameters(command, parameters);
         return command;
     }
 }
@@ -7640,8 +7646,8 @@ internal sealed class EfCoreSqlQueryExecutor<TEntity>(
 /// <summary>メタデータと EF Core（<see cref="QuickErDbContext"/>）で CRUD を実装するリポジトリ基底クラス</summary>
 /// <remarks>
 /// <para>
-/// 既存の SQL Server 版（<see cref="SqlServerRepository{TEntity, TKey}"/>）と同じ契約を DbContext ベースで
-/// 実装する。DbContext は呼び出し単位で短命に生成し（既存版の「呼び出しごとに接続を開く」単位と同じ）、
+/// 自作 SQL Server 版（<see cref="SqlServerRepository{TEntity, TKey}"/>）と同じ契約を DbContext ベースで
+/// 実装する。DbContext は呼び出し単位で短命に生成し（呼び出しごとに接続を開く単位と同じ）、
 /// 読み取りは AsNoTracking、保存は <c>ChangeTracker.TrackGraph</c> による RowState → EntityState 変換で行う。
 /// </para>
 /// <para>UseSqlServer / UseNpgsql 等の方言選択はアプリ側の DbContextOptions 構成に委ねる（方言非依存）。</para>

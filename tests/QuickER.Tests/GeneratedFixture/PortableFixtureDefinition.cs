@@ -39,8 +39,9 @@ public enum PortableDialect
 /// bool は Oracle が <c>NUMBER(1)</c> 事情を持ち方言差が大きいため<b>意図的に除外</b>する。
 /// </para>
 /// <para>
-/// オプションは「全カテゴリ有効・VO 有効・EF Core 有効・単一ファイル・専用 namespace」。
-/// namespace は既存フィクスチャ（<c>QuickER.Tests.GeneratedFixture</c>）と衝突させない。
+/// オプションは「Entity/EditModel/Mapper・VO 有効・<b>EF 単独出力（自作 SQL Server 実装なし）</b>・単一ファイル・専用 namespace」。
+/// 本フィクスチャの方言ランタイムテストは EF Core しか使わないため、GenerateRepositories=false（EF 単独）に切り替え、
+/// 新モード（EF 単独出力）の実 DB 実証を兼ねる。namespace は既存フィクスチャ（<c>QuickER.Tests.GeneratedFixture</c>）と衝突させない。
 /// </para>
 /// </remarks>
 public static class PortableFixtureDefinition
@@ -51,7 +52,7 @@ public static class PortableFixtureDefinition
     /// <summary>コミット済みフィクスチャファイル名</summary>
     public const string OutputFileName = "PortableFixture.g.cs";
 
-    /// <summary>フィクスチャ生成に用いる決定的なオプション（全カテゴリ・VO 有効・EF Core 有効・単一ファイル）</summary>
+    /// <summary>フィクスチャ生成に用いる決定的なオプション（Entity/EditModel/Mapper・VO 有効・EF 単独出力・単一ファイル）</summary>
     public static CodeGenerationOptions Options { get; } =
         new()
         {
@@ -60,7 +61,7 @@ public static class PortableFixtureDefinition
             GenerateEntityClasses = true,
             GenerateEditModels = true,
             GenerateMappers = true,
-            GenerateRepositories = true,
+            GenerateRepositories = false,
             GenerateValueObjects = true,
             GenerateEfCore = true,
             SplitFilesByCategory = false,
