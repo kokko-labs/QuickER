@@ -26,7 +26,7 @@ public class ErDiagramTargetDbmsTests
         var path = Path.Combine(Path.GetTempPath(), $"er-legacy-{Guid.NewGuid()}.json");
         var legacyJson = """
             {
-              "version": 2,
+              "version": 1,
               "schema": {
                 "entities": [],
                 "relationships": []

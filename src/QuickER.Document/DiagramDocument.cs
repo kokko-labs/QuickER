@@ -11,8 +11,8 @@ namespace QuickER.Documents;
 /// </remarks>
 public sealed class DiagramDocument
 {
-    /// <summary>現在の保存フォーマットバージョン</summary>
-    public const int CurrentVersion = 2;
+    /// <summary>現在の保存フォーマットバージョン（初回リリースを 1 とする）</summary>
+    public const int CurrentVersion = 1;
 
     /// <summary>保存フォーマットのバージョン</summary>
     public int Version { get; set; } = CurrentVersion;
