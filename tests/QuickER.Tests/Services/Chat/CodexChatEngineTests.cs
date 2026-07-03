@@ -101,7 +101,7 @@ public class CodexChatEngineTests
             ModelProvider = "ollama-launch",
         };
 
-        await engine.InitializeAsync();
+        await engine.InitializeAsync(TestContext.Current.CancellationToken);
 
         engine.IsReady.Should().BeTrue();
     }

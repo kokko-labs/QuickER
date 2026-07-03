@@ -73,8 +73,8 @@ public class ChatTurnEngineTests
         engine.AssistantDeltaReceived += (_, d) => deltas.Add(d);
         engine.TurnCompleted += (_, r) => completed = r;
 
-        await engine.StartConversationAsync();
-        await engine.SendAsync("やあ");
+        await engine.StartConversationAsync(TestContext.Current.CancellationToken);
+        await engine.SendAsync("やあ", TestContext.Current.CancellationToken);
 
         deltas.Should().ContainSingle().Which.Should().Be("こんにちは");
         host.Calls.Should().BeEmpty();
@@ -101,8 +101,8 @@ public class ChatTurnEngineTests
         engine.ToolActivityReceived += (_, a) => activities.Add(a);
         engine.TurnCompleted += (_, r) => completed = r;
 
-        await engine.StartConversationAsync();
-        await engine.SendAsync("本のテーブルを作って");
+        await engine.StartConversationAsync(TestContext.Current.CancellationToken);
+        await engine.SendAsync("本のテーブルを作って", TestContext.Current.CancellationToken);
 
         host.Calls.Should().ContainSingle();
         host.Calls[0].Tool.Should().Be("add_entity");
@@ -124,8 +124,8 @@ public class ChatTurnEngineTests
         var driver = new ScriptedTurnDriver([new ChatAssistantTurn("ok", [])]);
         var engine = CreateEngine(driver, new RecordingToolHost());
 
-        await engine.StartConversationAsync();
-        await engine.SendAsync("hi");
+        await engine.StartConversationAsync(TestContext.Current.CancellationToken);
+        await engine.SendAsync("hi", TestContext.Current.CancellationToken);
 
         // 1 回目の呼び出し時点の履歴 = system + user の 2 件
         driver.HistoryCountsAtCall[0].Should().Be(2);
