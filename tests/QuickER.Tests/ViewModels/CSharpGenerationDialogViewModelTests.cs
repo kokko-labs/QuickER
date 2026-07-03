@@ -110,8 +110,6 @@ public class CSharpGenerationDialogViewModelTests
             );
 
             vm.CanSelectSqlServerRepository.Should().BeFalse();
-            vm.ShowRepositoryDisabledNote.Should().BeTrue();
-            vm.RepositoryDisabledNote.Should().NotBeEmpty();
             // 保存されていた「自作 Repository」選択は矛盾生成物を防ぐため「なし」へ倒す
             vm.GenerateRepositories.Should().BeFalse();
             vm.DbAccessNone.Should().BeTrue();
@@ -132,7 +130,6 @@ public class CSharpGenerationDialogViewModelTests
         );
 
         vm.CanSelectSqlServerRepository.Should().BeTrue();
-        vm.ShowRepositoryDisabledNote.Should().BeFalse();
     }
 
     /// <summary>EF Core 選択＋分割モードで EfCore 名前空間欄が現れ、ベース変更へ追従することを検証する</summary>

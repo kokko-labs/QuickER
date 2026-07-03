@@ -53,9 +53,6 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
                 SqlServerProvider.ProviderName,
                 StringComparison.OrdinalIgnoreCase
             );
-        RepositoryDisabledNote = CanSelectSqlServerRepository
-            ? string.Empty
-            : $"Repository（自作・SQL Server 専用）は、現在のプロバイダ（{currentProviderName}）では選択できません。";
         ApplySettings(_store.Load());
     }
 
@@ -194,14 +191,8 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
         }
     }
 
-    /// <summary>「自作 Repository」を選択できるか（現在のプロバイダが SQL Server のときのみ）</summary>
+    /// <summary>「自作 Repository」を選択できるか（現在のプロバイダが SQL Server のときのみ。理由は View 側ツールチップで提示）</summary>
     public bool CanSelectSqlServerRepository { get; }
-
-    /// <summary>自作 Repository が選択不可のときに表示する理由（選択可能なら空文字）</summary>
-    public string RepositoryDisabledNote { get; }
-
-    /// <summary>不整合ガードの注記を表示するか</summary>
-    public bool ShowRepositoryDisabledNote => !CanSelectSqlServerRepository;
 
     /// <summary>生成されるファイルのプレビュー（「ファイル名 → namespace」の一覧。設定に追従して更新）</summary>
     public ObservableCollection<string> PreviewFiles { get; } = new();
