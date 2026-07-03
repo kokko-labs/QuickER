@@ -906,6 +906,7 @@
             VerticalScrollBarVisibility="Auto"
             Focusable="True"
             beh:CanvasViewportBehavior.IsEnabled="True"
+            ScrollChanged="DiagramScrollViewer_ScrollChanged"
           >
             <!--
             ズーム用ラッパー: LayoutTransform(ScaleTransform) をこの外側 Grid に掛ける。

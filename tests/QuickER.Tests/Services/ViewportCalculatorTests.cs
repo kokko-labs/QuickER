@@ -184,6 +184,53 @@ public class ViewportCalculatorTests
         fit.Offset.Should().Be(new Vector(0, 0));
     }
 
+    /// <summary>ビューポート未確定時は従来の左上カスケード配置になることを検証する</summary>
+    [Fact(DisplayName = "NextEntityPosition: ビューポート未確定は従来カスケード")]
+    public void NextEntityPosition_EmptyViewport_FallsBackToLegacyCascade()
+    {
+        var p0 = ViewportCalculator.NextEntityPosition(Rect.Empty, 0, 200);
+        var p2 = ViewportCalculator.NextEntityPosition(Rect.Empty, 2, 200);
+
+        p0.Should().Be(new Point(60, 60));
+        p2.Should().Be(new Point(120, 120));
+    }
+
+    /// <summary>スクロール済みビューポートの内側（左上＋余白）へ配置されることを検証する</summary>
+    [Fact(DisplayName = "NextEntityPosition: スクロール済み表示領域の内側へ配置")]
+    public void NextEntityPosition_ScrolledViewport_PlacesInsideVisibleArea()
+    {
+        var viewport = new Rect(1000, 800, 900, 600);
+        var p = ViewportCalculator.NextEntityPosition(viewport, 0, 200);
+
+        p.Should().Be(new Point(1060, 860));
+        viewport.Contains(new Rect(p.X, p.Y, 200, 100)).Should().BeTrue();
+    }
+
+    /// <summary>連続追加の斜めずらしが 8 個ごとに折り返し、表示領域内へ留まることを検証する</summary>
+    [Fact(DisplayName = "NextEntityPosition: 斜めずらしは 8 個で折り返す")]
+    public void NextEntityPosition_Cascade_WrapsEveryEight()
+    {
+        var viewport = new Rect(1000, 800, 900, 600);
+
+        var p7 = ViewportCalculator.NextEntityPosition(viewport, 7, 200);
+        var p8 = ViewportCalculator.NextEntityPosition(viewport, 8, 200);
+
+        p7.Should().Be(new Point(1060 + 210, 860 + 210));
+        p8.Should().Be(new Point(1060, 860));
+    }
+
+    /// <summary>ビューポートが狭い場合は右端・下端からはみ出さないよう内側へ寄せることを検証する</summary>
+    [Fact(DisplayName = "NextEntityPosition: 狭い表示領域でははみ出さず内側へ寄せる")]
+    public void NextEntityPosition_NarrowViewport_ClampsInside()
+    {
+        // 幅 250 のビューポートに幅 200 のエンティティ → x は Right - 200 - 20 へ寄る
+        var viewport = new Rect(1000, 800, 250, 200);
+        var p = ViewportCalculator.NextEntityPosition(viewport, 0, 200);
+
+        p.X.Should().Be(1000 + 250 - 200 - 20);
+        p.Y.Should().Be(800 + 200 - 160);
+    }
+
     /// <summary>指定点が拡大後にビューポート中央へ来るオフセットを返すことを検証する</summary>
     [Fact(DisplayName = "CenterOnPoint: 点がビューポート中央へ来る")]
     public void CenterOnPoint_PlacesPointAtViewportCenter()

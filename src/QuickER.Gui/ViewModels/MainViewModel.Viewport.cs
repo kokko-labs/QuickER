@@ -1,3 +1,4 @@
+using System.Windows;
 using CommunityToolkit.Mvvm.Input;
 using QuickER.Services;
 
@@ -20,6 +21,13 @@ public partial class MainViewModel
     /// <summary>fit-to-window の実行を View（コードビハインド）へ要求するイベント</summary>
     /// <remarks>スクロールオフセットとビューポート実寸を持つのは View 側のため、計算・適用はそこで行う</remarks>
     public event EventHandler? FitToWindowRequested;
+
+    /// <summary>現在表示中のキャンバス領域（コンテンツ論理座標）。View が ScrollChanged のたびに更新する</summary>
+    /// <remarks>
+    /// 新規エンティティを「いま見えている場所」へ配置するための入力。
+    /// View が無いヘッドレス実行では空矩形のままとなり、追加位置は従来のカスケード配置へフォールバックする
+    /// </remarks>
+    public Rect ViewportContentBounds { get; set; } = Rect.Empty;
 
     /// <summary>キャンバスのズーム倍率（1.0 = 100%）。設定時に範囲へクランプする</summary>
     /// <remarks>ScaleTransform の ScaleX/ScaleY にバインドされる。10%〜200% の範囲を保証する</remarks>

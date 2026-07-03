@@ -107,6 +107,38 @@ public static class ViewportCalculator
     }
 
     /// <summary>
+    /// 新規エンティティの配置位置を、現在表示中のビューポート内に収まるように求める
+    /// </summary>
+    /// <param name="viewportBounds">現在表示中の領域（コンテンツ論理座標）。未確定なら空矩形</param>
+    /// <param name="entityCount">既存エンティティ数（階段状にずらすステップの種）</param>
+    /// <param name="entityWidth">新規エンティティの想定幅（px）</param>
+    /// <returns>配置位置（コンテンツ論理座標）</returns>
+    /// <remarks>
+    /// スクロール／ズーム済みでも「いま見えている場所」へ追加されるようにする。
+    /// ビューポート未確定（ヘッドレステスト等）では従来の左上カスケード配置へフォールバックする。
+    /// 連続追加は 30px の階段状にずらし、8 個ごとに折り返してビューポート内へ留める。
+    /// </remarks>
+    public static Point NextEntityPosition(Rect viewportBounds, int entityCount, double entityWidth)
+    {
+        if (viewportBounds.IsEmpty || viewportBounds.Width <= 0 || viewportBounds.Height <= 0)
+        {
+            return new Point(60 + entityCount * 30, 60 + entityCount * 30);
+        }
+
+        var cascade = (entityCount % 8) * 30;
+
+        // 表示領域の左上から少し内側を基準にし、右端・下端からはみ出す場合は内側へ寄せる
+        // （160 はヘッダ＋数カラム分の概算高さ。負座標はキャンバス仕様上許容しないため 0 で下限を切る）
+        var x = Math.Max(
+            0,
+            Math.Min(viewportBounds.X + 60 + cascade, viewportBounds.Right - entityWidth - 20)
+        );
+        var y = Math.Max(0, Math.Min(viewportBounds.Y + 60 + cascade, viewportBounds.Bottom - 160));
+
+        return new Point(x, y);
+    }
+
+    /// <summary>
     /// 指定したコンテンツ座標の点を、現在の倍率を保ったままビューポート中央へ据えるスクロールオフセットを求める
     /// </summary>
     /// <param name="contentPoint">中央に据える点（拡大前の論理座標）</param>

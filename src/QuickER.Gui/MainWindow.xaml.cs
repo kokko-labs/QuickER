@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Threading;
 using QuickER.Behaviors;
@@ -168,6 +169,20 @@ public partial class MainWindow : Window
                 DiagramScrollViewer.ScrollToHorizontalOffset(newOffset.X);
                 DiagramScrollViewer.ScrollToVerticalOffset(newOffset.Y);
             })
+        );
+    }
+
+    /// <summary>スクロール・ズーム・リサイズのたびに、表示中のコンテンツ領域（論理座標）を VM へ知らせる</summary>
+    /// <remarks>新規エンティティを「いま見えている場所」へ配置するための入力（<see cref="MainViewModel.ViewportContentBounds"/>）</remarks>
+    private void DiagramScrollViewer_ScrollChanged(object sender, ScrollChangedEventArgs e)
+    {
+        // ZoomLevel は 10% 以上が保証されているためゼロ除算は起きない
+        var zoom = _viewModel.ZoomLevel;
+        _viewModel.ViewportContentBounds = new Rect(
+            DiagramScrollViewer.HorizontalOffset / zoom,
+            DiagramScrollViewer.VerticalOffset / zoom,
+            DiagramScrollViewer.ViewportWidth / zoom,
+            DiagramScrollViewer.ViewportHeight / zoom
         );
     }
 

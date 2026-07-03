@@ -392,12 +392,16 @@ public partial class MainViewModel : ObservableObject
             },
         };
 
-        // 既存数に応じて配置を斜めにずらし、新規エンティティ同士の重なりを避ける
-        var layout = new EntityLayout
-        {
-            X = 60 + Entities.Count * 30,
-            Y = 60 + Entities.Count * 30,
-        };
+        // 現在表示中のビューポート内へ、既存数に応じた斜めずらし付きで配置する
+        // （スクロール／ズーム中でも画面外へ追加されない。View 未接続時は従来の左上カスケード）
+        var layout = new EntityLayout();
+        var position = ViewportCalculator.NextEntityPosition(
+            ViewportContentBounds,
+            Entities.Count,
+            layout.Width
+        );
+        layout.X = position.X;
+        layout.Y = position.Y;
 
         var vm = new EntityViewModel(model, layout);
         UndoRedo.Execute(new AddEntityCommand(this, vm));

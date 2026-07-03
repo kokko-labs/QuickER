@@ -14,6 +14,37 @@ namespace QuickER.Tests.ViewModels;
 /// <remarks>WPF UI スレッドに依存しないロジックのみを対象とする（オフセット適用は View 側の責務）</remarks>
 public class MainViewModelViewportTests
 {
+    /// <summary>スクロール済みビューポートが設定されていれば、追加エンティティが表示領域内へ置かれることを検証する</summary>
+    [Fact(DisplayName = "AddEntity: 表示中のビューポート内へ配置される")]
+    public void AddEntity_PlacesInsideViewportContentBounds()
+    {
+        var vm = new MainViewModel
+        {
+            ViewportContentBounds = new System.Windows.Rect(1000, 800, 900, 600),
+        };
+
+        vm.AddEntityCommand.Execute(null);
+
+        var entity = vm.Entities[0];
+        entity.X.Should().Be(1060);
+        entity.Y.Should().Be(860);
+    }
+
+    /// <summary>ビューポート未設定（ヘッドレス）では従来のカスケード配置が維持されることを検証する</summary>
+    [Fact(DisplayName = "AddEntity: ビューポート未設定は従来カスケード配置")]
+    public void AddEntity_WithoutViewport_KeepsLegacyCascade()
+    {
+        var vm = new MainViewModel();
+
+        vm.AddEntityCommand.Execute(null);
+        vm.AddEntityCommand.Execute(null);
+
+        vm.Entities[0].X.Should().Be(60);
+        vm.Entities[0].Y.Should().Be(60);
+        vm.Entities[1].X.Should().Be(90);
+        vm.Entities[1].Y.Should().Be(90);
+    }
+
     /// <summary>既定倍率が 100% であることを検証する</summary>
     [Fact(DisplayName = "ZoomLevel: 既定は 1.0")]
     public void ZoomLevel_DefaultsToOne()
