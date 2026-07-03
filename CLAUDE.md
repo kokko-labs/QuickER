@@ -1,0 +1,69 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## プロジェクト概要
+
+QuickER は WPF 製の ER 図デザイナ。DB スキーマのインポート／DDL 生成（SQL Server / PostgreSQL / MySQL / Oracle の4方言）、Scriban テンプレートによる C# コード生成、AI チャットによる図の操作（MCP サーバ内蔵）を持つ。コメント・コミットメッセージは日本語。
+
+## コマンド
+
+```powershell
+dotnet build QuickER.slnx                                # ビルド
+dotnet test QuickER.slnx --no-build                      # 全テスト
+dotnet test tests/QuickER.Tests/QuickER.Tests.csproj --filter "FullyQualifiedName~DdlGeneratorTests"   # 単一テストクラス
+csharpier format .                                       # 整形（グローバルツール）。コード修正後は必ず実行
+```
+
+- テストは net10.0-windows / WPF 依存のため **Windows でのみ実行可能**（CI も windows-latest）
+- `tests/QuickER.Tests/Integration/` は Testcontainers による実 DB テスト。**Docker 不在時は自動スキップ**される（フィクスチャが検出）。この開発機では Docker 稼働＝全件実行・スキップ 0 が正常値。CI では Linux コンテナが使えないため常にスキップされる
+- 生成コードの Roslyn コンパイル検証（GeneratedCodeCompilationTests）は Docker 不要で常時実行される
+
+## アーキテクチャ
+
+依存方向（上が被依存側。矢印はプロジェクト参照）：
+
+```
+QuickER.Model        意味モデル（依存ゼロ。X/Y/色などの視覚情報を持たない）
+  ▲
+QuickER.Generator    DB非依存のC#コード生成エンジン（Scriban・テンプレートは埋め込みリソース）
+  ▲
+QuickER.Provider     DB抽象化の共通基盤（DdlGeneratorBase、インポータ共有部品）
+  ▲
+QuickER.SqlServer / PostgreSql / MySql / Oracle    方言プロバイダ（4実装で対称構造）
+  ▲
+QuickER.Gui (WPF) / QuickER.Cli                    合成ルート（全プロジェクトを参照）
+
+QuickER.Document → Model    保存単位 DiagramDocument = schema(意味) + layout(視覚) の1ファイル
+QuickER.AI       → Model    AI/MCP/ASP.NET Core（WPF非依存。VM操作は IErDiagramToolHost 経由でアプリ側）
+```
+
+押さえるべき設計判断：
+
+- **意味と視覚の分離**: `Entity`（Model）は座標・色を持たない。視覚状態は `EntityViewModel` と `EntityLayout`（Document）が保持。エクスポータ・生成器は意味モデル `ErDiagram` のみを消費する
+- **Generator の DB 非依存**: 型解決（DB型→C#型）はプロバイダ側の責務。Generator は解決済み `CSharpTypeInfo` の辞書を入力に受け取る
+- **プロバイダの対称性**: 4方言は同じ構造（SchemaImporter / DdlGeneratorBase 派生 / 型マップ / Testcontainers 統合テスト）。方言 SQL の説明コメントは SQL Server 版と同水準に揃える。スキーマインポータの基底クラス化は**意図的に見送り**（方言差分が大きい）。共有部品は ForeignKeyRelationshipBuilder / UniqueColumnSetBuilder / SchemaTableEntry
+- **生成コードの汎用性**: 生成される C# は CommunityToolkit 等の UI フレームワークに依存させない（WPF 以外でも使える設計）。Repository 生成は単一キー・アプリ側採番前提（複合キー・DB自動採番は対象外）
+
+## 不変条件（ビルド・型検査では検出できず、壊すと静かに回帰する）
+
+- `Templates/CSharpRuntime.scriban` は **CRLF 固定**（.gitattributes で強制）。生成コードのバイト一致が前提
+- **テンプレート変更時は** `tests/QuickER.Tests/GeneratedFixture/GeneratedFixture.g.cs` の再生成が必要。GeneratedFixtureDriftTests が「再生成→差分ゼロ」を検証し、失敗メッセージに再生成手順がある
+- DDL 出力の先頭コメントは `-- QuickER によって自動生成された DDL`（DdlGeneratorBase.cs）。このヘッダを検証するテストは存在しないため変更に気づきにくい
+- `PasswordBoxBehavior`（QuickER.Gui/Views）の DP 既定値は **null 必須**。string.Empty にすると空文字バインド時に PasswordChanged が購読されず入力が VM に届かない（PasswordBoxBehaviorTests が守る）。バインド先 VM プロパティは空文字で初期化する
+- 生成ランタイムの SqlParameter は `[SqlColumnType]` 属性由来の明示型。文字列 Size の「宣言長超過なら値長」ガードを固定 Size にするとサイレントなデータ破損を招く
+
+これらのファイルに触るときは、対応するテスト（DdlGeneratorTests / PasswordBoxBehaviorTests / CSharpCodeGenerationServiceTests / GeneratedFixtureDriftTests）を必ず実行する。
+
+## コーディング規約
+
+- 既存コードと同様、ビヘイビアや主要メソッドに分かりやすい日本語コメントを付ける
+- `if` / `for` / `switch` / `try` 等のブロック前後には空行を1行入れる（最終判断は CSharpier の挙動を優先）
+- 文字列リテラルの定数化は一貫性重視：一部の表示文言だけを定数化せず、やるなら同種をまとめて整理する
+- ビルド警告は可能な限り解消する
+
+## ワークフロー
+
+- `git add` / `git commit` は**ユーザーの明示的な指示があるまで実行しない**（変更はワーキングツリーに残してレビューを待つ）。ブランチ作成はタスク開始時に行ってよい
+- 計画・教訓は `tasks/todo.md` / `tasks/lessons.md` に記録する運用。セッション開始時に lessons.md を確認する
+- レイアウト等ビジュアルに直結する機能は、機能テストに加えて見た目の品質指標（占有面積・充填率・交差数・線長）を実測してから完了とする（lessons.md 参照）
