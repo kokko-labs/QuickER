@@ -6794,20 +6794,35 @@ public partial class QuickErDbContext : DbContext
 /// </remarks>
 internal sealed class ValueObjectStringMethodTranslator(
     ISqlExpressionFactory sqlExpressionFactory,
-    RelationalTypeMapping stringTypeMapping
+    RelationalTypeMapping stringTypeMapping,
+    LikeEscapeBehavior escapeBehavior
 ) : IMethodCallTranslator
 {
     private readonly ISqlExpressionFactory _sqlExpressionFactory = sqlExpressionFactory;
     private readonly RelationalTypeMapping _stringTypeMapping = stringTypeMapping;
+    private readonly LikeEscapeBehavior _escapeBehavior = escapeBehavior;
 
-    /// <summary>REPLACE で順にエスケープする（元文字, 置換後）の組。バックスラッシュを最初に処理する</summary>
-    private static readonly (string From, string To)[] _escapePairs =
-    [
-        ("\\", "\\\\"),
-        ("%", "\\%"),
-        ("_", "\\_"),
-        ("[", "\\["),
-    ];
+    /// <summary>
+    /// REPLACE で順にエスケープする（元文字, 置換後）の組。エスケープ文字自身を最初に二重化する。
+    /// <c>[</c> は SQL Server のみ文字クラス開始のためエスケープ対象で、他方言（<c>[</c> はワイルドカードでない）では
+    /// エスケープしない。特に Oracle は非ワイルドカードのエスケープを ORA-01424 で拒否するため <c>[</c> を含めてはならない。
+    /// エスケープ文字は方言依存で、MySQL は文字列リテラルでバックスラッシュがクォート打ち消しとして
+    /// 誤解釈されるため <c>\</c> 以外（<see cref="LikeEscapeBehavior.EscapeChar"/>）を用いる。
+    /// </summary>
+    private IEnumerable<(string From, string To)> EscapePairs()
+    {
+        var e = _escapeBehavior.EscapeChar;
+
+        // エスケープ文字自身 → 二重化（必ず最初に処理する）
+        yield return (e, e + e);
+        yield return ("%", e + "%");
+        yield return ("_", e + "_");
+
+        if (_escapeBehavior.EscapeBracket)
+        {
+            yield return ("[", e + "[");
+        }
+    }
 
     /// <summary>対象メソッドなら LIKE 式を返し、そうでなければ null（他トランスレータに委ねる）</summary>
     public SqlExpression? Translate(
@@ -6851,12 +6866,14 @@ internal sealed class ValueObjectStringMethodTranslator(
         var column = _sqlExpressionFactory.ApplyTypeMapping(instance, _stringTypeMapping);
         var pattern = BuildLikePattern(method.Name, argument);
 
-        // 自作版と同じく ESCAPE '\' を明示する
-        return _sqlExpressionFactory.Like(
-            column,
-            pattern,
-            _sqlExpressionFactory.Constant("\\", _stringTypeMapping)
-        );
+        // ESCAPE の明示は方言依存。既定エスケープ文字が既にバックスラッシュの PostgreSQL では明示しない。
+        // SQL Server / Oracle は既定にエスケープ文字を持たないため明示する。MySQL は文字列リテラルの
+        // バックスラッシュ誤解釈を避けるためエスケープ文字を \ 以外にしたうえで明示する。
+        var escapeChar = _escapeBehavior.EmitEscapeClause
+            ? _sqlExpressionFactory.Constant(_escapeBehavior.EscapeChar, _stringTypeMapping)
+            : null;
+
+        return _sqlExpressionFactory.Like(column, pattern, escapeChar);
     }
 
     /// <summary>メソッド名に応じた LIKE パターン式（'%'＋エスケープ済み引数＋'%' 等）を組み立てる</summary>
@@ -6883,7 +6900,7 @@ internal sealed class ValueObjectStringMethodTranslator(
             _sqlExpressionFactory.Constant(string.Empty, _stringTypeMapping)
         );
 
-        foreach (var (from, to) in _escapePairs)
+        foreach (var (from, to) in EscapePairs())
         {
             escapedArgument = _sqlExpressionFactory.Function(
                 "REPLACE",
@@ -6911,9 +6928,17 @@ internal sealed class ValueObjectStringMethodTranslator(
         };
     }
 
-    /// <summary>LIKE のワイルドカード（\ % _ [）をエスケープする（自作 SQL Server 版と同一規則）</summary>
-    private static string EscapeLikePattern(string value) =>
-        value.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_").Replace("[", "\\[");
+    /// <summary>
+    /// LIKE のワイルドカードをエスケープする（定数パターン用）。エスケープ文字自身・<c>%</c>・<c>_</c> は全方言共通、
+    /// <c>[</c> は SQL Server のみ（<see cref="LikeEscapeBehavior.EscapeBracket"/>）対象にする。
+    /// エスケープ文字は方言依存（<see cref="LikeEscapeBehavior.EscapeChar"/>）。
+    /// </summary>
+    private string EscapeLikePattern(string value)
+    {
+        var e = _escapeBehavior.EscapeChar;
+        var escaped = value.Replace(e, e + e).Replace("%", e + "%").Replace("_", e + "_");
+        return _escapeBehavior.EscapeBracket ? escaped.Replace("[", e + "[") : escaped;
+    }
 }
 
 /// <summary>
@@ -6962,6 +6987,52 @@ internal sealed class ValueObjectValueMemberTranslator(
     }
 }
 
+/// <summary>
+/// LIKE 述語の方言差（エスケープ文字・<c>[</c> エスケープ・明示 ESCAPE 句）を吸収する挙動。
+/// </summary>
+/// <remarks>
+/// <list type="bullet">
+///   <item><see cref="EscapeChar"/>: LIKE のエスケープ文字。既定は <c>\</c>。ただし MySQL は文字列リテラルで
+///   バックスラッシュがクォート打ち消しとして誤解釈されるため <c>!</c> を用いる（リテラル・REPLACE・ESCAPE 句すべてで統一）。</item>
+///   <item><see cref="EscapeBracket"/>: <c>[</c> をエスケープするか。<c>[</c> が文字クラス開始となる SQL Server のみ true。</item>
+///   <item><see cref="EmitEscapeClause"/>: <c>ESCAPE</c> を明示するか。既定エスケープ文字を持たない SQL Server / Oracle と、
+///   非既定文字を使う MySQL は true。既定が <c>\</c> の PostgreSQL は false（明示不要）。</item>
+/// </list>
+/// </remarks>
+internal readonly record struct LikeEscapeBehavior(
+    string EscapeChar,
+    bool EscapeBracket,
+    bool EmitEscapeClause
+)
+{
+    /// <summary>EF プロバイダ名から方言別の LIKE エスケープ挙動を決定する</summary>
+    public static LikeEscapeBehavior FromProviderName(string? providerName)
+    {
+        var name = providerName ?? string.Empty;
+
+        // SQL Server: [ は文字クラス開始のためエスケープ必須。既定にエスケープ文字が無いため ESCAPE を明示。
+        if (name.Contains("SqlServer", StringComparison.Ordinal))
+        {
+            return new LikeEscapeBehavior("\\", EscapeBracket: true, EmitEscapeClause: true);
+        }
+
+        // Oracle: [ はワイルドカードでないためエスケープしない（ORA-01424 回避）。既定にエスケープ文字が無いため ESCAPE は明示。
+        if (name.Contains("Oracle", StringComparison.Ordinal))
+        {
+            return new LikeEscapeBehavior("\\", EscapeBracket: false, EmitEscapeClause: true);
+        }
+
+        // MySQL: 文字列リテラルの \ 誤解釈を避けるためエスケープ文字を ! にし、ESCAPE '!' を明示する。
+        if (name.Contains("MySql", StringComparison.OrdinalIgnoreCase))
+        {
+            return new LikeEscapeBehavior("!", EscapeBracket: false, EmitEscapeClause: true);
+        }
+
+        // PostgreSQL 等: [ はワイルドカードでない。既定エスケープ文字が \ のため ESCAPE は明示しない。
+        return new LikeEscapeBehavior("\\", EscapeBracket: false, EmitEscapeClause: false);
+    }
+}
+
 /// <summary>値オブジェクトの文字列翻訳トランスレータ（メソッド・メンバ）を束ねる EF Core プラグイン</summary>
 internal sealed class ValueObjectTranslatorPlugin
     : IMethodCallTranslatorPlugin,
@@ -6969,16 +7040,22 @@ internal sealed class ValueObjectTranslatorPlugin
 {
     private readonly IReadOnlyList<IMemberTranslator> _memberTranslators;
 
-    /// <summary>SQL 式ファクトリと型マッピング源からトランスレータ群を構築する</summary>
+    /// <summary>SQL 式ファクトリ・型マッピング源・方言プロバイダからトランスレータ群を構築する</summary>
     public ValueObjectTranslatorPlugin(
         ISqlExpressionFactory sqlExpressionFactory,
-        IRelationalTypeMappingSource typeMappingSource
+        IRelationalTypeMappingSource typeMappingSource,
+        IDatabaseProvider databaseProvider
     )
     {
         var stringTypeMapping = typeMappingSource.FindMapping(typeof(string))!;
+        var escapeBehavior = LikeEscapeBehavior.FromProviderName(databaseProvider.Name);
         Translators =
         [
-            new ValueObjectStringMethodTranslator(sqlExpressionFactory, stringTypeMapping),
+            new ValueObjectStringMethodTranslator(
+                sqlExpressionFactory,
+                stringTypeMapping,
+                escapeBehavior
+            ),
         ];
         _memberTranslators =
         [
