@@ -10,6 +10,7 @@ using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using System.Data;
+using System.Data.Common;
 using System.Globalization;
 using System.Linq;
 using System.Linq.Expressions;
@@ -21,6 +22,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.EntityFrameworkCore;
 
 namespace QuickER.Tests.GeneratedFixture;
 
@@ -4201,9 +4203,6 @@ public sealed partial class SqlExecutor(ISqlConnectionFactory connectionFactory)
     {
         ArgumentNullException.ThrowIfNull(sql);
 
-        var resultType = typeof(TResult);
-        var items = new List<TResult>();
-
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
 
@@ -4211,6 +4210,20 @@ public sealed partial class SqlExecutor(ISqlConnectionFactory connectionFactory)
         BindParameters(command, parameters);
 
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        return await ReadProjectionRowsAsync<TResult>(reader, cancellationToken);
+    }
+
+    /// <summary>
+    /// 結果セットを <typeparamref name="TResult"/> へ寛容に射影して読み切る（単一値モード・DTO モードの 1 系統）。
+    /// プロバイダ非依存の <see cref="DbDataReader"/> を受け取り、EF 版実行器とマッピング実装を共有する。
+    /// </summary>
+    internal static async Task<IReadOnlyList<TResult>> ReadProjectionRowsAsync<TResult>(
+        DbDataReader reader,
+        CancellationToken cancellationToken
+    )
+    {
+        var resultType = typeof(TResult);
+        var items = new List<TResult>();
 
         // 単一値モード（primitive/enum/string/decimal/日時/Guid/byte[]/値オブジェクト）は各行の先頭列を変換して返す
         if (IsSingleValueType(resultType))
@@ -4345,8 +4358,39 @@ public sealed partial class SqlExecutor(ISqlConnectionFactory connectionFactory)
         }
     }
 
+    /// <summary>
+    /// プロバイダ非依存の <see cref="DbCommand"/> 版パラメータ束縛（EF 版実行器用）。束縛規約は
+    /// <see cref="BindParameters(SqlCommand, object?)"/> と同一（プロパティ名 <c>Foo</c> → <c>@Foo</c>、
+    /// 型明示なし、null は何もしない）で、パラメータは <see cref="DbCommand.CreateParameter"/> で生成する。
+    /// </summary>
+    internal static void BindParameters(DbCommand command, object? parameters)
+    {
+        if (parameters is null)
+        {
+            return;
+        }
+
+        var properties = _parameterPropertyCache.GetOrAdd(
+            parameters.GetType(),
+            static type =>
+                type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                    .Where(property => property.CanRead && property.GetIndexParameters().Length == 0)
+                    .ToArray()
+        );
+
+        foreach (var property in properties)
+        {
+            var value =
+                SqlParameterValue.Unwrap(property.GetValue(parameters));
+            var parameter = command.CreateParameter();
+            parameter.ParameterName = $"@{property.Name}";
+            parameter.Value = value ?? DBNull.Value;
+            command.Parameters.Add(parameter);
+        }
+    }
+
     /// <summary>スカラー・単一値モード共通の値変換（DBNull/null は default、Nullable 対応の ChangeType でベストエフォート変換）</summary>
-    private static TResult? ConvertSingleValue<TResult>(object? raw)
+    internal static TResult? ConvertSingleValue<TResult>(object? raw)
     {
         if (raw is null)
         {
@@ -4746,6 +4790,61 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
 /// <param name="ColumnName">角括弧なしの対象カラム名。列を特定できない場合は null</param>
 internal readonly record struct SqlQueryParameter(string Name, object? Value, string? ColumnName);
 
+/// <summary>SqlQuery の 1 並び順（キー選択式と降順フラグ）。EF モードで式木のまま捕捉する</summary>
+/// <param name="KeySelector">キー選択のラムダ式（object? への boxing を含み得る。実行器側で剥がす）</param>
+/// <param name="Descending">降順かどうか</param>
+internal readonly record struct SqlQueryOrdering(LambdaExpression KeySelector, bool Descending);
+
+/// <summary>
+/// SqlQuery が蓄積した内容（Where 式・並び順・Include ツリー・ページング）を
+/// 別バックエンドの実行器へ引き渡すためのスナップショット（BCL 型のみで構成）。
+/// </summary>
+/// <param name="Predicates">Where で捕捉した述語式（AND 結合）</param>
+/// <param name="Orderings">OrderBy / OrderByDescending で捕捉した並び順（指定順）</param>
+/// <param name="Includes">Include / ThenInclude のナビゲーションツリー</param>
+/// <param name="Take">取得件数の上限（未指定は null）</param>
+/// <param name="Skip">読み飛ばす件数（未指定は null）</param>
+internal sealed record SqlQueryPlan<TEntity>(
+    IReadOnlyList<LambdaExpression> Predicates,
+    IReadOnlyList<SqlQueryOrdering> Orderings,
+    IReadOnlyList<IncludeNode> Includes,
+    int? Take,
+    int? Skip
+);
+
+/// <summary>
+/// SqlQuery の終端メソッドの実行を差し替える内部抽象。SQL Server 版（FOR JSON）以外の
+/// バックエンド（EF Core 版 Repository）が実装し、SqlQuery へコンストラクタ経由で注入する。
+/// </summary>
+internal interface ISqlQueryExecutor<TEntity>
+    where TEntity : class
+{
+    /// <summary>条件に一致するエンティティを（Include 指定分とともに）一覧取得する</summary>
+    Task<IReadOnlyList<TEntity>> ToListAsync(
+        SqlQueryPlan<TEntity> plan,
+        CancellationToken cancellationToken
+    );
+
+    /// <summary>条件に一致する先頭の 1 件を（Include 指定分とともに）取得する（該当なしは null）</summary>
+    Task<TEntity?> FirstOrDefaultAsync(
+        SqlQueryPlan<TEntity> plan,
+        CancellationToken cancellationToken
+    );
+
+    /// <summary>条件に一致する件数を取得する（並び順・ページング・Include は関与しない）</summary>
+    Task<int> CountAsync(SqlQueryPlan<TEntity> plan, CancellationToken cancellationToken);
+
+    /// <summary>条件に一致するレコードが存在するかを取得する（並び順・ページング・Include は関与しない）</summary>
+    Task<bool> AnyAsync(SqlQueryPlan<TEntity> plan, CancellationToken cancellationToken);
+
+    /// <summary>条件に一致する行を一括削除する。cascadeDelete=true で子孫も FK 連鎖で削除する</summary>
+    Task<int> ExecuteDeleteAsync(
+        SqlQueryPlan<TEntity> plan,
+        bool cascadeDelete,
+        CancellationToken cancellationToken
+    );
+}
+
 public sealed class SqlQuery<TEntity>
     where TEntity : class
 {
@@ -4812,8 +4911,25 @@ public sealed class SqlQuery<TEntity>
     private int? _take;
     private int? _skip;
 
+    /// <summary>別バックエンドの実行器（null なら従来どおり SQL Server の FOR JSON 実行）</summary>
+    private readonly ISqlQueryExecutor<TEntity>? _executor;
+
+    /// <summary>EF モードで捕捉した Where 式（翻訳せず式木のまま保持し、実行時に EF が各方言へ翻訳する）</summary>
+    private readonly List<LambdaExpression> _predicates = new();
+
+    /// <summary>EF モードで捕捉した並び順（キー選択式と降順フラグ）</summary>
+    private readonly List<SqlQueryOrdering> _orderSelectors = new();
+
     internal SqlQuery(ISqlConnectionFactory connectionFactory) =>
         _connectionFactory = connectionFactory;
+
+    /// <summary>別バックエンドの実行器（EF Core 版）でクエリを実行する内部コンストラクタ</summary>
+    internal SqlQuery(ISqlQueryExecutor<TEntity> executor)
+    {
+        _executor = executor;
+        // SQL Server パスは終端メソッドの分岐で到達しないため、接続ファクトリは未使用
+        _connectionFactory = null!;
+    }
 
     private static string TableName => EntitySaveMetadata.For(typeof(TEntity)).TableName;
 
@@ -4821,6 +4937,14 @@ public sealed class SqlQuery<TEntity>
     public SqlQuery<TEntity> Where(Expression<Func<TEntity, bool>> predicate)
     {
         ArgumentNullException.ThrowIfNull(predicate);
+
+        // EF モードでは自作トランスレータを通さず式木のまま捕捉する（表現力を EF の翻訳能力に委ねる）
+        if (_executor is not null)
+        {
+            _predicates.Add(predicate);
+            return this;
+        }
+
         _conditions.Add(SqlExpressionTranslator.ToCondition(predicate.Body, _parameters));
         return this;
     }
@@ -4828,6 +4952,12 @@ public sealed class SqlQuery<TEntity>
     /// <summary>昇順の並び順を追加する</summary>
     public SqlQuery<TEntity> OrderBy(Expression<Func<TEntity, object?>> keySelector)
     {
+        if (_executor is not null)
+        {
+            _orderSelectors.Add(new SqlQueryOrdering(keySelector, Descending: false));
+            return this;
+        }
+
         _orderings.Add(SqlExpressionTranslator.ToColumn(keySelector) + " ASC");
         return this;
     }
@@ -4835,6 +4965,12 @@ public sealed class SqlQuery<TEntity>
     /// <summary>降順の並び順を追加する</summary>
     public SqlQuery<TEntity> OrderByDescending(Expression<Func<TEntity, object?>> keySelector)
     {
+        if (_executor is not null)
+        {
+            _orderSelectors.Add(new SqlQueryOrdering(keySelector, Descending: true));
+            return this;
+        }
+
         _orderings.Add(SqlExpressionTranslator.ToColumn(keySelector) + " DESC");
         return this;
     }
@@ -4878,6 +5014,11 @@ public sealed class SqlQuery<TEntity>
         CancellationToken cancellationToken = default
     )
     {
+        if (_executor is not null)
+        {
+            return await _executor.ToListAsync(BuildPlan(), cancellationToken);
+        }
+
         var json = await ReadJsonAsync(BuildJsonSelect(_take, _skip), cancellationToken);
         if (string.IsNullOrWhiteSpace(json))
         {
@@ -4890,6 +5031,11 @@ public sealed class SqlQuery<TEntity>
     /// <summary>条件に一致する先頭の 1 件を（Include 指定分とともに）取得する（該当なしは null）</summary>
     public async Task<TEntity?> FirstOrDefaultAsync(CancellationToken cancellationToken = default)
     {
+        if (_executor is not null)
+        {
+            return await _executor.FirstOrDefaultAsync(BuildPlan(), cancellationToken);
+        }
+
         var json = await ReadJsonAsync(BuildJsonSelect(1, _skip), cancellationToken);
         if (string.IsNullOrWhiteSpace(json))
         {
@@ -4903,6 +5049,11 @@ public sealed class SqlQuery<TEntity>
     /// <summary>条件に一致する件数を取得する</summary>
     public async Task<int> CountAsync(CancellationToken cancellationToken = default)
     {
+        if (_executor is not null)
+        {
+            return await _executor.CountAsync(BuildPlan(), cancellationToken);
+        }
+
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
 
@@ -4917,6 +5068,11 @@ public sealed class SqlQuery<TEntity>
     /// <summary>条件に一致するレコードが存在するかを取得する</summary>
     public async Task<bool> AnyAsync(CancellationToken cancellationToken = default)
     {
+        if (_executor is not null)
+        {
+            return await _executor.AnyAsync(BuildPlan(), cancellationToken);
+        }
+
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
 
@@ -4934,6 +5090,11 @@ public sealed class SqlQuery<TEntity>
         CancellationToken cancellationToken = default
     )
     {
+        if (_executor is not null)
+        {
+            return await _executor.ExecuteDeleteAsync(BuildPlan(), cascadeDelete, cancellationToken);
+        }
+
         var whereClause = BuildWhereClause();
 
         await using var connection = _connectionFactory.CreateConnection();
@@ -4996,6 +5157,10 @@ public sealed class SqlQuery<TEntity>
 
         return string.Concat(chunks);
     }
+
+    /// <summary>捕捉済みの式・Include ツリー・ページングを、実行器へ渡すスナップショットへ固める</summary>
+    private SqlQueryPlan<TEntity> BuildPlan() =>
+        new(_predicates, _orderSelectors, _includes, _take, _skip);
 
     /// <summary>ルートの WHERE・並び順・ページングと Include ツリーから FOR JSON の SELECT 文を組み立てる</summary>
     private string BuildJsonSelect(int? take, int? skip) =>
@@ -5859,7 +6024,7 @@ internal sealed class EntitySaveMetadata
     }
 
     /// <summary>データリーダーの 1 行をエンティティへマッピングする</summary>
-    public TEntity MapEntity<TEntity>(SqlDataReader reader)
+    public TEntity MapEntity<TEntity>(DbDataReader reader)
         where TEntity : EntityBase, new()
     {
         var entity = new TEntity();
@@ -5889,7 +6054,7 @@ internal sealed class EntitySaveMetadata
     /// 列不足（部分 SELECT）で <see cref="IndexOutOfRangeException"/> が出た場合は、必要な全列を含む
     /// <see cref="InvalidOperationException"/> でラップして分かりやすくする。
     /// </summary>
-    public TEntity MapEntityFromRawSql<TEntity>(SqlDataReader reader)
+    public TEntity MapEntityFromRawSql<TEntity>(DbDataReader reader)
         where TEntity : EntityBase, new()
     {
         try
@@ -6500,4 +6665,988 @@ public partial interface ICustomerProfileRepository : IRepository<CustomerProfil
 /// <summary>CustomerProfileEntity 用リポジトリ実装</summary>
 public sealed partial class CustomerProfileRepository(ISqlConnectionFactory connectionFactory)
     : SqlServerRepository<CustomerProfileEntity, ProfileIdValue>(connectionFactory),
+        ICustomerProfileRepository { }
+
+/// <summary>
+/// 既存スキーマへ接続する EF Core の DbContext。
+/// </summary>
+/// <remarks>
+/// スキーマ作成（Migrations / EnsureCreated）は範囲外で、既存 Entity を既存テーブルへマッピングして
+/// 読み書きするための構成のみを持つ。列の DB 型（HasColumnType）は焼き込まず、DDL 生成に委ねる
+/// </remarks>
+public partial class QuickErDbContext : DbContext
+{
+    /// <summary>オプションを受け取り DbContext を初期化する</summary>
+    public QuickErDbContext(DbContextOptions<QuickErDbContext> options)
+        : base(options) { }
+
+    /// <summary>CustomerEntity の DbSet</summary>
+    public DbSet<CustomerEntity> Customers => Set<CustomerEntity>();
+
+    /// <summary>OrderEntity の DbSet</summary>
+    public DbSet<OrderEntity> Orders => Set<OrderEntity>();
+
+    /// <summary>CustomerProfileEntity の DbSet</summary>
+    public DbSet<CustomerProfileEntity> CustomerProfiles => Set<CustomerProfileEntity>();
+
+    /// <summary>エンティティごとのテーブル・キー・列・リレーションを Fluent API で構成する</summary>
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<CustomerEntity>(entity =>
+        {
+            entity.ToTable("customers");
+            entity.HasKey(e => e.CustomerId);
+            entity.Ignore(e => e.RowState);
+            entity.Ignore(e => e.IsAdded);
+            entity.Ignore(e => e.IsUpdated);
+            entity.Ignore(e => e.IsRemoved);
+            entity.Ignore(e => e.HasChanges);
+            entity.Property(e => e.CustomerId).HasColumnName("customer_id").IsRequired().HasConversion(v => v!.Value, v => CustomerIdValue.Create(v!));
+            entity.Property(e => e.Name).HasColumnName("name").IsRequired().HasConversion(v => v!.Value, v => NameValue.Create(v!));
+            entity.Property(e => e.Balance).HasColumnName("balance").HasConversion(v => v!.Value, v => BalanceValue.Create(v!));
+            entity.Property(e => e.IsActive).HasColumnName("is_active").IsRequired().HasConversion(v => v!.Value, v => IsActiveValue.Create(v!));
+            entity
+                .HasMany(e => e.Orders)
+                .WithOne(e => e.Customer)
+                .HasForeignKey(e => e.CustomerId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity
+                .HasOne(e => e.CustomerProfile)
+                .WithOne(e => e.Customer)
+                .HasForeignKey<CustomerProfileEntity>(e => e.CustomerId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<OrderEntity>(entity =>
+        {
+            entity.ToTable("orders");
+            entity.HasKey(e => e.OrderId);
+            entity.Ignore(e => e.RowState);
+            entity.Ignore(e => e.IsAdded);
+            entity.Ignore(e => e.IsUpdated);
+            entity.Ignore(e => e.IsRemoved);
+            entity.Ignore(e => e.HasChanges);
+            entity.Property(e => e.OrderId).HasColumnName("order_id").IsRequired().HasConversion(v => v!.Value, v => OrderIdValue.Create(v!));
+            entity.Property(e => e.CustomerId).HasColumnName("customer_id").IsRequired().HasConversion(v => v!.Value, v => CustomerIdValue.Create(v!));
+            entity.Property(e => e.Memo).HasColumnName("memo").HasConversion(v => v!.Value, v => MemoValue.Create(v!));
+            entity.Property(e => e.Amount).HasColumnName("amount").IsRequired().HasConversion(v => v!.Value, v => AmountValue.Create(v!));
+        });
+
+        modelBuilder.Entity<CustomerProfileEntity>(entity =>
+        {
+            entity.ToTable("customer_profiles");
+            entity.HasKey(e => e.ProfileId);
+            entity.Ignore(e => e.RowState);
+            entity.Ignore(e => e.IsAdded);
+            entity.Ignore(e => e.IsUpdated);
+            entity.Ignore(e => e.IsRemoved);
+            entity.Ignore(e => e.HasChanges);
+            entity.Property(e => e.ProfileId).HasColumnName("profile_id").IsRequired().HasConversion(v => v!.Value, v => ProfileIdValue.Create(v!));
+            entity.Property(e => e.CustomerId).HasColumnName("customer_id").IsRequired().HasConversion(v => v!.Value, v => CustomerIdValue.Create(v!));
+            entity.Property(e => e.Bio).HasColumnName("bio").HasConversion(v => v!.Value, v => BioValue.Create(v!));
+        });
+
+        OnModelCreatingPartial(modelBuilder);
+    }
+
+    /// <summary>利用者が追加構成を差し込むための拡張ポイント（partial・未実装ならゼロコスト）</summary>
+    partial void OnModelCreatingPartial(ModelBuilder modelBuilder);
+}
+
+/// <summary>エンティティに縛られない生 SQL 実行器の EF Core 版（DbContext の接続上で ADO を直接実行する）</summary>
+/// <remarks>
+/// <para>
+/// EF の FromSqlRaw / SqlQueryRaw はマッピング規則が既存 SQL Server 版（厳密全列必須・寛容射影・単一値モード）と
+/// 一致しないため、<see cref="QuickErDbContext"/> の <see cref="DbConnection"/> 上で <see cref="DbCommand"/> を
+/// 直接実行し、既存版とマッピング・束縛の実装を共有する（意味論は <see cref="ISqlExecutor"/> の定義どおり）。
+/// </para>
+/// <para>ステートレス（コンテキストファクトリのみ保持）のため DI では Singleton 登録できる。</para>
+/// </remarks>
+public sealed partial class EfCoreSqlExecutor(IDbContextFactory<QuickErDbContext> contextFactory)
+    : ISqlExecutor
+{
+    /// <summary>DbContext の生成元</summary>
+    private readonly IDbContextFactory<QuickErDbContext> _contextFactory = contextFactory;
+
+    /// <summary>生 SQL の SELECT を実行し、結果行を {TEntity} へ厳密（全列必須）にマップして返す</summary>
+    public async Task<IReadOnlyList<TEntity>> QueryBySqlAsync<TEntity>(
+        string sql,
+        object? parameters = null,
+        CancellationToken cancellationToken = default
+    )
+        where TEntity : EntityBase, new()
+    {
+        ArgumentNullException.ThrowIfNull(sql);
+
+        var metadata = EntitySaveMetadata.For(typeof(TEntity));
+        var items = new List<TEntity>();
+
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var command = await CreateCommandAsync(
+            context,
+            sql,
+            parameters,
+            cancellationToken
+        );
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            items.Add(metadata.MapEntityFromRawSql<TEntity>(reader));
+        }
+
+        return items;
+    }
+
+    /// <summary>生 SQL の SELECT を実行し、結果行を任意の <typeparamref name="TResult"/> へ寛容に射影して返す</summary>
+    public async Task<IReadOnlyList<TResult>> QueryProjectionBySqlAsync<TResult>(
+        string sql,
+        object? parameters = null,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(sql);
+
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var command = await CreateCommandAsync(
+            context,
+            sql,
+            parameters,
+            cancellationToken
+        );
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+
+        // 射影マッピング（単一値モード・DTO モード）は SQL Server 版と同じ 1 系統を共有する
+        return await SqlExecutor.ReadProjectionRowsAsync<TResult>(reader, cancellationToken);
+    }
+
+    /// <summary>生 SQL（UPDATE/DELETE/任意 DML）を実行し、影響行数を返す</summary>
+    /// <remarks>
+    /// 呼び出しごとに DbContext（接続）を開閉する（トランザクション引数なし）。複数文をアトミックに
+    /// 実行したい場合は、1 回の呼び出し内に方言のトランザクション文（BEGIN ... COMMIT 等）を記述すること。
+    /// </remarks>
+    public async Task<int> ExecuteSqlAsync(
+        string sql,
+        object? parameters = null,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(sql);
+
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var command = await CreateCommandAsync(
+            context,
+            sql,
+            parameters,
+            cancellationToken
+        );
+
+        return await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    /// <summary>生 SQL を実行し、単一のスカラー値を返す（該当なし・DBNull は <c>default</c>）</summary>
+    public async Task<TResult?> ExecuteScalarSqlAsync<TResult>(
+        string sql,
+        object? parameters = null,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(sql);
+
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        await using var command = await CreateCommandAsync(
+            context,
+            sql,
+            parameters,
+            cancellationToken
+        );
+
+        var scalar = await command.ExecuteScalarAsync(cancellationToken);
+        return SqlExecutor.ConvertSingleValue<TResult>(scalar is DBNull ? null : scalar);
+    }
+
+    /// <summary>接続を開き、SQL とパラメータを束縛した DbCommand を生成する（束縛規約は SQL Server 版と同一）</summary>
+    private static async Task<DbCommand> CreateCommandAsync(
+        QuickErDbContext context,
+        string sql,
+        object? parameters,
+        CancellationToken cancellationToken
+    )
+    {
+        // 接続は DbContext が所有しており、DbContext の破棄で閉じられる
+        await context.Database.OpenConnectionAsync(cancellationToken);
+
+        var command = context.Database.GetDbConnection().CreateCommand();
+        command.CommandText = sql;
+        SqlExecutor.BindParameters(command, parameters);
+        return command;
+    }
+}
+
+/// <summary>
+/// <see cref="SqlQuery{TEntity}"/> の EF Core 実行器。捕捉された式木を LINQ クエリへ合成し、
+/// 短命の <see cref="QuickErDbContext"/>（AsNoTracking）で実行する。
+/// </summary>
+/// <remarks>
+/// Where は捕捉済みの述語式をそのまま適用し、各方言への翻訳は EF プロバイダに委ねる。
+/// OrderBy は object? への boxing（Convert）を剥がして実キー型の OrderBy / ThenBy を合成する。
+/// Include は <see cref="IncludeNode"/> ツリーから "Orders.Details" 形式のドットパスを組み立てて適用する。
+/// 取得結果のグラフは既存 SQL Server 版のマッピングと同じく RowState=Unchanged に揃える。
+/// </remarks>
+internal sealed class EfCoreSqlQueryExecutor<TEntity>(
+    IDbContextFactory<QuickErDbContext> contextFactory
+) : ISqlQueryExecutor<TEntity>
+    where TEntity : EntityBase
+{
+    /// <summary>DbContext の生成元</summary>
+    private readonly IDbContextFactory<QuickErDbContext> _contextFactory = contextFactory;
+
+    /// <summary>条件に一致するエンティティを（Include 指定分とともに）一覧取得する</summary>
+    public async Task<IReadOnlyList<TEntity>> ToListAsync(
+        SqlQueryPlan<TEntity> plan,
+        CancellationToken cancellationToken
+    )
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+
+        var query = ApplyOrderings(
+            ApplyIncludes(ApplyPredicates(context.Set<TEntity>().AsNoTracking(), plan), plan),
+            plan
+        );
+        var items = await ApplyPaging(query, plan).ToListAsync(cancellationToken);
+
+        foreach (var item in items)
+        {
+            MarkGraphUnchanged(item, plan.Includes);
+        }
+
+        return items;
+    }
+
+    /// <summary>条件に一致する先頭の 1 件を（Include 指定分とともに）取得する（該当なしは null）</summary>
+    public async Task<TEntity?> FirstOrDefaultAsync(
+        SqlQueryPlan<TEntity> plan,
+        CancellationToken cancellationToken
+    )
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+
+        var query = ApplyOrderings(
+            ApplyIncludes(ApplyPredicates(context.Set<TEntity>().AsNoTracking(), plan), plan),
+            plan
+        );
+
+        // 既存版と同じく Take は 1 に固定し、Skip のみ尊重する
+        if (plan.Skip is int skip)
+        {
+            query = query.Skip(skip);
+        }
+
+        var item = await query.FirstOrDefaultAsync(cancellationToken);
+
+        if (item is not null)
+        {
+            MarkGraphUnchanged(item, plan.Includes);
+        }
+
+        return item;
+    }
+
+    /// <summary>条件に一致する件数を取得する（既存版と同じく並び順・ページング・Include は関与しない）</summary>
+    public async Task<int> CountAsync(
+        SqlQueryPlan<TEntity> plan,
+        CancellationToken cancellationToken
+    )
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+
+        return await ApplyPredicates(context.Set<TEntity>().AsNoTracking(), plan)
+            .CountAsync(cancellationToken);
+    }
+
+    /// <summary>条件に一致するレコードが存在するかを取得する（既存版と同じく並び順・ページング・Include は関与しない）</summary>
+    public async Task<bool> AnyAsync(
+        SqlQueryPlan<TEntity> plan,
+        CancellationToken cancellationToken
+    )
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+
+        return await ApplyPredicates(context.Set<TEntity>().AsNoTracking(), plan)
+            .AnyAsync(cancellationToken);
+    }
+
+    /// <summary>条件に一致する行を一括削除する。cascadeDelete=true で子孫も FK 連鎖で削除する</summary>
+    public async Task<int> ExecuteDeleteAsync(
+        SqlQueryPlan<TEntity> plan,
+        bool cascadeDelete,
+        CancellationToken cancellationToken
+    )
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        var roots = ApplyPredicates(context.Set<TEntity>(), plan);
+
+        if (!cascadeDelete)
+        {
+            return await roots.ExecuteDeleteAsync(cancellationToken);
+        }
+
+        // カスケード: 子孫 → 本体の順の ExecuteDelete を 1 トランザクションで実行する（既存版の DELETE 文順序と同じ）
+        await using var transaction = await context.Database.BeginTransactionAsync(
+            cancellationToken
+        );
+        var rows = await DeleteSubtreeAsync(
+            context,
+            roots,
+            new HashSet<Type> { typeof(TEntity) },
+            cancellationToken
+        );
+        await transaction.CommitAsync(cancellationToken);
+        return rows;
+    }
+
+    /// <summary>DeleteSubtreeAsync を実行時の子型でジェネリック展開するためのメソッド情報</summary>
+    private static readonly MethodInfo _deleteSubtreeMethod = typeof(
+        EfCoreSqlQueryExecutor<TEntity>
+    ).GetMethod(nameof(DeleteSubtreeAsync), BindingFlags.NonPublic | BindingFlags.Static)!;
+
+    /// <summary>クエリに一致する行の子孫を末端（孫）から順に削除し、最後に自身を削除する（削除行数を返す）</summary>
+    private static async Task<int> DeleteSubtreeAsync<TCurrent>(
+        QuickErDbContext context,
+        IQueryable<TCurrent> query,
+        ISet<Type> visited,
+        CancellationToken cancellationToken
+    )
+        where TCurrent : class
+    {
+        var rows = 0;
+
+        foreach (var navigation in EntitySaveMetadata.For(typeof(TCurrent)).CascadeNavigations)
+        {
+            if (!visited.Add(navigation.ChildType))
+            {
+                throw new NotSupportedException(
+                    $"循環するカスケード（{navigation.ChildType.Name}）は ExecuteDeleteAsync では未対応です。グラフをロードして SaveAsync を使うか、DB の ON DELETE CASCADE を利用してください。"
+                );
+            }
+
+            // 子クエリ: child => 親クエリの主キー集合.Contains(child.FK)（EF が IN サブクエリへ翻訳する）
+            var childQuery = BuildChildQuery(context, query, typeof(TCurrent), navigation);
+            var subtreeTask = (Task<int>)
+                _deleteSubtreeMethod
+                    .MakeGenericMethod(navigation.ChildType)
+                    .Invoke(null, new object[] { context, childQuery, visited, cancellationToken })!;
+            rows += await subtreeTask;
+
+            visited.Remove(navigation.ChildType);
+        }
+
+        rows += await query.ExecuteDeleteAsync(cancellationToken);
+        return rows;
+    }
+
+    /// <summary>DbContext.Set&lt;T&gt;() を実行時型で呼び出すためのメソッド情報</summary>
+    private static readonly MethodInfo _setMethod = typeof(DbContext).GetMethod(
+        nameof(DbContext.Set),
+        Type.EmptyTypes
+    )!;
+
+    /// <summary>親クエリの主キー集合を参照する子クエリ（child => parentKeys.Contains(child.FK)）を組み立てる</summary>
+    private static IQueryable BuildChildQuery(
+        QuickErDbContext context,
+        IQueryable parentQuery,
+        Type parentType,
+        CascadeNavigation navigation
+    )
+    {
+        var parentKeyProperty = EntitySaveMetadata
+            .For(parentType)
+            .PropertyByColumn[navigation.PrincipalColumn];
+        var childForeignKeyProperty = EntitySaveMetadata
+            .For(navigation.ChildType)
+            .PropertyByColumn[navigation.DependentColumn];
+
+        // parentKeys = parentQuery.Select(parent => parent.Key)
+        var parentParameter = Expression.Parameter(parentType, "parent");
+        var keySelector = Expression.Lambda(
+            Expression.Property(parentParameter, parentKeyProperty),
+            parentParameter
+        );
+        var parentKeys = parentQuery.Provider.CreateQuery(
+            Expression.Call(
+                typeof(Queryable),
+                nameof(Queryable.Select),
+                new[] { parentType, parentKeyProperty.PropertyType },
+                parentQuery.Expression,
+                Expression.Quote(keySelector)
+            )
+        );
+
+        // childSet.Where(child => parentKeys.Contains(child.FK))。FK が Nullable の場合はキー型へ変換して比較する
+        var childParameter = Expression.Parameter(navigation.ChildType, "child");
+        var foreignKeyAccess = (Expression)
+            Expression.Property(childParameter, childForeignKeyProperty);
+
+        if (foreignKeyAccess.Type != parentKeyProperty.PropertyType)
+        {
+            foreignKeyAccess = Expression.Convert(foreignKeyAccess, parentKeyProperty.PropertyType);
+        }
+
+        var predicate = Expression.Lambda(
+            Expression.Call(
+                typeof(Queryable),
+                nameof(Queryable.Contains),
+                new[] { parentKeyProperty.PropertyType },
+                Expression.Constant(
+                    parentKeys,
+                    typeof(IQueryable<>).MakeGenericType(parentKeyProperty.PropertyType)
+                ),
+                foreignKeyAccess
+            ),
+            childParameter
+        );
+        var childSet = (IQueryable)
+            _setMethod.MakeGenericMethod(navigation.ChildType).Invoke(context, null)!;
+
+        return childSet.Provider.CreateQuery(
+            Expression.Call(
+                typeof(Queryable),
+                nameof(Queryable.Where),
+                new[] { navigation.ChildType },
+                childSet.Expression,
+                Expression.Quote(predicate)
+            )
+        );
+    }
+
+    /// <summary>捕捉済みの Where 式を適用する（AND 結合）</summary>
+    private static IQueryable<TEntity> ApplyPredicates(
+        IQueryable<TEntity> query,
+        SqlQueryPlan<TEntity> plan
+    )
+    {
+        foreach (var predicate in plan.Predicates)
+        {
+            query = query.Where((Expression<Func<TEntity, bool>>)predicate);
+        }
+
+        return query;
+    }
+
+    /// <summary>捕捉済みの並び順を適用する（boxing を剥がし実キー型で OrderBy / ThenBy を合成する）</summary>
+    private static IQueryable<TEntity> ApplyOrderings(
+        IQueryable<TEntity> query,
+        SqlQueryPlan<TEntity> plan
+    )
+    {
+        var first = true;
+
+        foreach (var ordering in plan.Orderings)
+        {
+            var body = ordering.KeySelector.Body;
+
+            while (
+                body is UnaryExpression
+                {
+                    NodeType: ExpressionType.Convert or ExpressionType.ConvertChecked
+                } unary
+            )
+            {
+                body = unary.Operand;
+            }
+
+            var keyLambda = Expression.Lambda(body, ordering.KeySelector.Parameters);
+            var methodName = (first, ordering.Descending) switch
+            {
+                (true, false) => nameof(Queryable.OrderBy),
+                (true, true) => nameof(Queryable.OrderByDescending),
+                (false, false) => nameof(Queryable.ThenBy),
+                (false, true) => nameof(Queryable.ThenByDescending),
+            };
+            query = query.Provider.CreateQuery<TEntity>(
+                Expression.Call(
+                    typeof(Queryable),
+                    methodName,
+                    new[] { typeof(TEntity), body.Type },
+                    query.Expression,
+                    Expression.Quote(keyLambda)
+                )
+            );
+            first = false;
+        }
+
+        return query;
+    }
+
+    /// <summary>Include ツリーからドットパス（例: "Orders.Details"）を組み立てて適用する</summary>
+    private static IQueryable<TEntity> ApplyIncludes(
+        IQueryable<TEntity> query,
+        SqlQueryPlan<TEntity> plan
+    )
+    {
+        foreach (var node in plan.Includes)
+        {
+            foreach (var path in EnumerateIncludePaths(node, node.Property.Name))
+            {
+                query = query.Include(path);
+            }
+        }
+
+        return query;
+    }
+
+    /// <summary>Include ノードからルート→末端のドットパスを列挙する（子が無いノードはそのパス自身）</summary>
+    private static IEnumerable<string> EnumerateIncludePaths(IncludeNode node, string path)
+    {
+        if (node.Children.Count == 0)
+        {
+            yield return path;
+            yield break;
+        }
+
+        foreach (var child in node.Children)
+        {
+            foreach (var childPath in EnumerateIncludePaths(child, $"{path}.{child.Property.Name}"))
+            {
+                yield return childPath;
+            }
+        }
+    }
+
+    /// <summary>Skip / Take を適用する（既存版の OFFSET / FETCH と同じ意味）</summary>
+    private static IQueryable<TEntity> ApplyPaging(
+        IQueryable<TEntity> query,
+        SqlQueryPlan<TEntity> plan
+    )
+    {
+        if (plan.Skip is int skip)
+        {
+            query = query.Skip(skip);
+        }
+
+        if (plan.Take is int take)
+        {
+            query = query.Take(take);
+        }
+
+        return query;
+    }
+
+    /// <summary>取得したグラフ（ルート＋Include で読んだ範囲）を RowState=Unchanged に揃える（既存版のマッピング後状態と同じ）</summary>
+    private static void MarkGraphUnchanged(EntityBase entity, IReadOnlyList<IncludeNode> includes)
+    {
+        entity.MarkUnchanged();
+
+        foreach (var node in includes)
+        {
+            var value = node.Property.GetValue(entity);
+
+            if (value is null)
+            {
+                continue;
+            }
+
+            if (value is IEnumerable<EntityBase> children)
+            {
+                foreach (var child in children)
+                {
+                    if (child is not null)
+                    {
+                        MarkGraphUnchanged(child, node.Children);
+                    }
+                }
+            }
+            else if (value is EntityBase child)
+            {
+                MarkGraphUnchanged(child, node.Children);
+            }
+        }
+    }
+}
+
+/// <summary>メタデータと EF Core（<see cref="QuickErDbContext"/>）で CRUD を実装するリポジトリ基底クラス</summary>
+/// <remarks>
+/// <para>
+/// 既存の SQL Server 版（<see cref="SqlServerRepository{TEntity, TKey}"/>）と同じ契約を DbContext ベースで
+/// 実装する。DbContext は呼び出し単位で短命に生成し（既存版の「呼び出しごとに接続を開く」単位と同じ）、
+/// 読み取りは AsNoTracking、保存は <c>ChangeTracker.TrackGraph</c> による RowState → EntityState 変換で行う。
+/// </para>
+/// <para>UseSqlServer / UseNpgsql 等の方言選択はアプリ側の DbContextOptions 構成に委ねる（方言非依存）。</para>
+/// </remarks>
+public abstract partial class EfCoreRepository<TEntity, TKey>(
+    IDbContextFactory<QuickErDbContext> contextFactory
+) : IRepository<TEntity, TKey>
+    where TEntity : EntityBase, new()
+{
+    /// <summary>エンティティ型ごとに 1 度だけ構築されるメタデータ（静的フィールドで再利用）</summary>
+    private static readonly EntitySaveMetadata _metadata = EntitySaveMetadata.For(typeof(TEntity));
+
+    /// <summary>DbContext の生成元</summary>
+    private readonly IDbContextFactory<QuickErDbContext> _contextFactory = contextFactory;
+
+    /// <summary>生 SQL メソッドの委譲先（束縛・マッピングを 1 系統に集約）</summary>
+    private readonly ISqlExecutor _sqlExecutor = new EfCoreSqlExecutor(contextFactory);
+
+    /// <summary>主キーによる単一エンティティ取得（該当なしは null）</summary>
+    /// <remarks>既存版と同じく単一テーブルのみを読む（ナビゲーションのロードは <see cref="Query"/> の Include で行う）</remarks>
+    public async Task<TEntity?> GetByIdAsync(TKey id, CancellationToken cancellationToken = default)
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+
+        var entity = await context
+            .Set<TEntity>()
+            .AsNoTracking()
+            .FirstOrDefaultAsync(BuildKeyPredicate(id), cancellationToken);
+        // DB から読み込んだ行は変更なし扱いにする（既存版 MapEntity と同じ事後状態）
+        entity?.MarkUnchanged();
+        return entity;
+    }
+
+    /// <summary>全エンティティ取得</summary>
+    public async Task<IReadOnlyList<TEntity>> GetAllAsync(
+        CancellationToken cancellationToken = default
+    )
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+
+        var items = await context.Set<TEntity>().AsNoTracking().ToListAsync(cancellationToken);
+
+        foreach (var item in items)
+        {
+            item.MarkUnchanged();
+        }
+
+        return items;
+    }
+
+    /// <summary>エンティティ追加</summary>
+    public async Task InsertAsync(TEntity entity, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(entity);
+
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+
+        // Add はナビゲーション先まで Added にするため、Entry.State 代入で対象 1 件のみを追加する（既存版の単発 INSERT と同じ範囲）
+        context.Entry(entity).State = EntityState.Added;
+        await context.SaveChangesAsync(cancellationToken);
+    }
+
+    /// <summary>エンティティのコレクションを一括追加する</summary>
+    /// <remarks>
+    /// EF 版は全件を Added で追跡して 1 回の SaveChanges で保存する（バッチ化された INSERT 文）。
+    /// SqlBulkCopy を使う既存 SQL Server 版とは性能特性が異なり、大量件数では遅くなる可能性がある。
+    /// 挿入範囲は既存版と同じく渡されたエンティティのみで、ナビゲーション先はたどらない。
+    /// </remarks>
+    public async Task<int> BulkInsertAsync(
+        IEnumerable<TEntity> entities,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(entities);
+
+        // 件数が確定しているコレクションが空なら DbContext を作らずに終了する
+        if (entities is ICollection<TEntity> { Count: 0 })
+        {
+            return 0;
+        }
+
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+
+        foreach (var entity in entities)
+        {
+            // AddRange はナビゲーション先まで Added にするため、Entry.State 代入で対象のみを追加する
+            context.Entry(entity).State = EntityState.Added;
+        }
+
+        return await context.SaveChangesAsync(cancellationToken);
+    }
+
+    /// <summary>エンティティ更新（更新対象ありで true）</summary>
+    public async Task<bool> UpdateAsync(
+        TEntity entity,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(entity);
+
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        context.Entry(entity).State = EntityState.Modified;
+
+        try
+        {
+            await context.SaveChangesAsync(cancellationToken);
+            return true;
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            // 更新対象が存在しない（既存版の「影響 0 行 → false」と同じ契約）
+            return false;
+        }
+    }
+
+    /// <summary>主キーによるエンティティ削除（削除対象ありで true）</summary>
+    public async Task<bool> DeleteAsync(TKey id, CancellationToken cancellationToken = default)
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+
+        var affected = await context
+            .Set<TEntity>()
+            .Where(BuildKeyPredicate(id))
+            .ExecuteDeleteAsync(cancellationToken);
+        return affected > 0;
+    }
+
+    /// <summary>検索条件・並び順・Include をチェーン指定して取得するクエリを開始する（EF Core で実行）</summary>
+    public SqlQuery<TEntity> Query() => new(new EfCoreSqlQueryExecutor<TEntity>(_contextFactory));
+
+    /// <summary>RowState に従って 1 トランザクションで追加・更新・削除を保存する（既定で子をカスケード）</summary>
+    public async Task<int> SaveAsync(
+        TEntity entity,
+        bool cascadeSave = true,
+        bool cascadeDelete = true,
+        bool insertWhenUpdateMissing = false,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(entity);
+
+        // グラフ全体に変更が無ければ DbContext も作らずに終了する
+        if (!EntityGraphSaver.HasChanges(entity, cascadeSave))
+        {
+            return 0;
+        }
+
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        TrackGraph(context, entity, cascadeSave, cascadeDelete);
+
+        // SaveChanges は内部で 1 トランザクションとして実行される
+        var rows = await SaveTrackedChangesAsync(context, insertWhenUpdateMissing, cancellationToken);
+
+        // 保存成功後に状態を確定（Added/Updated → Unchanged）し、再保存での二重処理を防ぐ
+        EntityGraphSaver.AcceptChanges(entity, cascadeSave);
+        return rows;
+    }
+
+    /// <summary>複数の集約ルートを 1 トランザクションでまとめて保存する（全件成功か全件ロールバックの原子的処理）</summary>
+    public async Task<int> SaveAsync(
+        IEnumerable<TEntity> entities,
+        bool cascadeSave = true,
+        bool cascadeDelete = true,
+        bool insertWhenUpdateMissing = false,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(entities);
+
+        // 変更のあるグラフだけを対象にする（DbContext を作る前に絞り込む）
+        var targets = entities
+            .Where(entity => entity is not null && EntityGraphSaver.HasChanges(entity, cascadeSave))
+            .ToList();
+
+        if (targets.Count == 0)
+        {
+            return 0;
+        }
+
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+
+        foreach (var entity in targets)
+        {
+            TrackGraph(context, entity, cascadeSave, cascadeDelete);
+        }
+
+        // 全グラフを 1 回の SaveChanges（＝1 トランザクション）で保存する（途中失敗時は全体ロールバック）
+        var rows = await SaveTrackedChangesAsync(context, insertWhenUpdateMissing, cancellationToken);
+
+        // 保存成功後に全グラフの状態を確定（Added/Updated → Unchanged）し、再保存での二重処理を防ぐ
+        foreach (var entity in targets)
+        {
+            EntityGraphSaver.AcceptChanges(entity, cascadeSave);
+        }
+
+        return rows;
+    }
+
+    /// <summary>生 SQL の SELECT を実行し、結果行を {TEntity} へマップして返す</summary>
+    /// <remarks>
+    /// マッピング・束縛の意味論は既存 SQL Server 版と同一（全列必須・RowState=Unchanged）。
+    /// 実装は <see cref="ISqlExecutor"/>（EF 版）へ委譲する（束縛・マッピングの 1 系統化）。
+    /// </remarks>
+    public Task<IReadOnlyList<TEntity>> QueryBySqlAsync(
+        string sql,
+        object? parameters = null,
+        CancellationToken cancellationToken = default
+    ) => _sqlExecutor.QueryBySqlAsync<TEntity>(sql, parameters, cancellationToken);
+
+    /// <summary>生 SQL（UPDATE/DELETE/任意 DML）を実行し、影響行数を返す</summary>
+    /// <remarks>
+    /// 呼び出しごとに DbContext（接続）を開閉する。複数文をアトミックに実行したい場合は、
+    /// 1 回の呼び出し内に方言のトランザクション文を記述すること。実装は <see cref="ISqlExecutor"/>（EF 版）へ委譲する。
+    /// </remarks>
+    public Task<int> ExecuteSqlAsync(
+        string sql,
+        object? parameters = null,
+        CancellationToken cancellationToken = default
+    ) => _sqlExecutor.ExecuteSqlAsync(sql, parameters, cancellationToken);
+
+    /// <summary>生 SQL を実行し、単一のスカラー値を返す（該当なし・DBNull は <c>default</c>）</summary>
+    /// <remarks>変換・束縛の意味論は既存 SQL Server 版と同一。実装は <see cref="ISqlExecutor"/>（EF 版）へ委譲する。</remarks>
+    public Task<TResult?> ExecuteScalarSqlAsync<TResult>(
+        string sql,
+        object? parameters = null,
+        CancellationToken cancellationToken = default
+    ) => _sqlExecutor.ExecuteScalarSqlAsync<TResult>(sql, parameters, cancellationToken);
+
+    /// <summary>主キー等値の述語式（e => e.Key == id）をメタデータから組み立てる</summary>
+    private static Expression<Func<TEntity, bool>> BuildKeyPredicate(TKey id)
+    {
+        var parameter = Expression.Parameter(typeof(TEntity), "e");
+        var body = Expression.Equal(
+            Expression.Property(parameter, _metadata.KeyProperty),
+            Expression.Constant(id, _metadata.KeyProperty.PropertyType)
+        );
+        return Expression.Lambda<Func<TEntity, bool>>(body, parameter);
+    }
+
+    /// <summary>RowState → EntityState の変換でグラフを DbContext へ登録する（切断パターンの保存前処理）</summary>
+    private static void TrackGraph(
+        QuickErDbContext context,
+        TEntity entity,
+        bool cascadeSave,
+        bool cascadeDelete
+    )
+    {
+        if (!cascadeSave)
+        {
+            // 子をたどらず、ルート 1 件のみを保存対象にする
+            context.Entry(entity).State = ToEntityState(entity.RowState);
+            return;
+        }
+
+        context.ChangeTracker.TrackGraph(
+            entity,
+            node =>
+            {
+                var current = (EntityBase)node.Entry.Entity;
+
+                // 親が削除対象なら配下の扱いは cascadeDelete に従う（既存版の子孫先行 DELETE と同じ）
+                if (node.SourceEntry is { State: EntityState.Deleted })
+                {
+                    // cascadeDelete=false なら配下は対象外（Detached のままにすると配下の走査も止まる）。
+                    // Added（DB 未挿入）の子は削除対象が存在しないため対象外（既存版の DELETE 影響 0 行と同じ結果）
+                    if (cascadeDelete && !current.IsAdded)
+                    {
+                        node.Entry.State = EntityState.Deleted;
+                    }
+
+                    return;
+                }
+
+                // Unchanged も追跡させ（EntityState.Unchanged）、配下の変更ノードまで走査を継続する
+                node.Entry.State = ToEntityState(current.RowState);
+            }
+        );
+    }
+
+    /// <summary>RowState を EF の EntityState へ変換する</summary>
+    private static EntityState ToEntityState(RowState rowState) =>
+        rowState switch
+        {
+            RowState.Added => EntityState.Added,
+            RowState.Updated => EntityState.Modified,
+            RowState.Removed => EntityState.Deleted,
+            _ => EntityState.Unchanged,
+        };
+
+    /// <summary>
+    /// SaveChanges を実行し、<see cref="DbUpdateConcurrencyException"/> を既存契約へ変換する
+    /// （insertWhenUpdateMissing=true なら更新対象なしの UPDATE を INSERT へ切り替えて再試行、
+    /// それ以外は <see cref="SaveConflictException"/>）。
+    /// </summary>
+    private static async Task<int> SaveTrackedChangesAsync(
+        QuickErDbContext context,
+        bool insertWhenUpdateMissing,
+        CancellationToken cancellationToken
+    )
+    {
+        while (true)
+        {
+            try
+            {
+                return await context.SaveChangesAsync(cancellationToken);
+            }
+            catch (DbUpdateConcurrencyException ex)
+            {
+                // 更新対象が存在しない（他ユーザーの削除等）。方針に応じて INSERT へ切替、または競合として通知する
+                if (
+                    insertWhenUpdateMissing
+                    && ex.Entries.Count > 0
+                    && ex.Entries.All(entry => entry.State == EntityState.Modified)
+                )
+                {
+                    foreach (var entry in ex.Entries)
+                    {
+                        entry.State = EntityState.Added;
+                    }
+
+                    continue;
+                }
+
+                var conflict = ex.Entries.Count > 0 ? ex.Entries[0].Entity : null;
+                var description =
+                    conflict is null
+                        ? "対象不明"
+                        : $"{conflict.GetType().Name}、キー {EntitySaveMetadata.For(conflict.GetType()).KeyProperty.GetValue(conflict)}";
+                throw new SaveConflictException(
+                    $"更新対象のレコードが見つかりませんでした（{description}）。他のユーザーに削除または変更された可能性があります。"
+                );
+            }
+        }
+    }
+}
+
+/// <summary>生成された EF Core 版リポジトリ群を DI コンテナへ登録する拡張</summary>
+public static class GeneratedEfCoreRepositoryServiceCollectionExtensions
+{
+    /// <summary>DbContext 構成とともに、生成された EF Core 版の全リポジトリを DI コンテナへ登録する</summary>
+    /// <remarks>
+    /// 既存の <c>AddGeneratedRepositories</c> と同じインターフェイスへ EF 版実装を登録するため、
+    /// 呼び出しの差し替えだけで自作 SQL Server 実装 ⇔ EF Core（方言はアプリ側の構成で選択）を切り替えられる。
+    /// </remarks>
+    /// <param name="services">登録先のサービスコレクション</param>
+    /// <param name="configureDbContext">方言プロバイダ・接続文字列の構成（例: <c>options => options.UseSqlServer(...)</c>）</param>
+    public static IServiceCollection AddGeneratedEfCoreRepositories(
+        this IServiceCollection services,
+        Action<DbContextOptionsBuilder> configureDbContext
+    )
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(configureDbContext);
+
+        services.AddDbContextFactory<QuickErDbContext>(configureDbContext);
+        services.AddSingleton<ISqlExecutor, EfCoreSqlExecutor>();
+        services.AddScoped<ICustomerRepository, EfCoreCustomerRepository>();
+        services.AddScoped<IOrderRepository, EfCoreOrderRepository>();
+        services.AddScoped<ICustomerProfileRepository, EfCoreCustomerProfileRepository>();
+
+        return services;
+    }
+}
+
+/// <summary>CustomerEntity 用リポジトリの EF Core 版実装</summary>
+public sealed partial class EfCoreCustomerRepository(
+    IDbContextFactory<QuickErDbContext> contextFactory
+) : EfCoreRepository<CustomerEntity, CustomerIdValue>(contextFactory),
+        ICustomerRepository { }
+
+/// <summary>OrderEntity 用リポジトリの EF Core 版実装</summary>
+public sealed partial class EfCoreOrderRepository(
+    IDbContextFactory<QuickErDbContext> contextFactory
+) : EfCoreRepository<OrderEntity, OrderIdValue>(contextFactory),
+        IOrderRepository { }
+
+/// <summary>CustomerProfileEntity 用リポジトリの EF Core 版実装</summary>
+public sealed partial class EfCoreCustomerProfileRepository(
+    IDbContextFactory<QuickErDbContext> contextFactory
+) : EfCoreRepository<CustomerProfileEntity, ProfileIdValue>(contextFactory),
         ICustomerProfileRepository { }

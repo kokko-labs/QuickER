@@ -634,6 +634,10 @@ internal sealed partial class CSharpGenerationModelBuilder
             usings.Add("System.Threading.Tasks");
             usings.Add("Microsoft.Data.SqlClient");
             usings.Add("Microsoft.Extensions.DependencyInjection");
+
+            // 射影マッピングの共有ヘルパー（ReadProjectionRowsAsync）はプロバイダ非依存の
+            // DbDataReader（System.Data.Common）を受け取る（EF 版実行器と実装を共有するため）
+            usings.Add("System.Data.Common");
         }
 
         if (options.IncludeDataAnnotations)
