@@ -1,0 +1,214 @@
+using System.IO;
+using FluentAssertions;
+using QuickER.Documents;
+using QuickER.Model;
+using QuickER.Provider;
+using QuickER.Services;
+using QuickER.ViewModels;
+
+namespace QuickER.Tests.ViewModels;
+
+/// <summary>
+/// <see cref="MainViewModel"/> のズーム倍率・fit-to-window 要求ロジックを検証するテストクラス
+/// </summary>
+/// <remarks>WPF UI スレッドに依存しないロジックのみを対象とする（オフセット適用は View 側の責務）</remarks>
+public class MainViewModelViewportTests
+{
+    /// <summary>既定倍率が 100% であることを検証する</summary>
+    [Fact(DisplayName = "ZoomLevel: 既定は 1.0")]
+    public void ZoomLevel_DefaultsToOne()
+    {
+        var vm = new MainViewModel();
+
+        vm.ZoomLevel.Should().Be(1.0);
+        vm.ZoomPercentText.Should().Be("100%");
+    }
+
+    /// <summary>下限・上限を超える設定がクランプされることを検証する</summary>
+    [Fact(DisplayName = "ZoomLevel: 範囲外はクランプされる")]
+    public void ZoomLevel_ClampsOutOfRange()
+    {
+        var vm = new MainViewModel();
+
+        vm.ZoomLevel = 0.01;
+        vm.ZoomLevel.Should().Be(ViewportCalculator.MinZoom);
+
+        vm.ZoomLevel = 99.0;
+        vm.ZoomLevel.Should().Be(ViewportCalculator.MaxZoom);
+    }
+
+    /// <summary>倍率表示文字列が倍率に追従することを検証する</summary>
+    [Fact(DisplayName = "ZoomPercentText: 倍率に追従する")]
+    public void ZoomPercentText_TracksZoom()
+    {
+        var vm = new MainViewModel { ZoomLevel = 1.5 };
+
+        vm.ZoomPercentText.Should().Be("150%");
+    }
+
+    /// <summary>ZoomIn/ZoomOut が 1 ノッチ（×1.1）ずつ増減することを検証する</summary>
+    [Fact(DisplayName = "ZoomIn/ZoomOut: 1 ノッチ ×1.1 で増減する")]
+    public void ZoomInOut_StepsByFactor()
+    {
+        var vm = new MainViewModel();
+
+        vm.ZoomInCommand.Execute(null);
+        vm.ZoomLevel.Should().BeApproximately(ViewportCalculator.ZoomStep, 1e-9);
+
+        vm.ZoomOutCommand.Execute(null);
+        vm.ZoomLevel.Should().BeApproximately(1.0, 1e-9);
+    }
+
+    /// <summary>ResetZoom が 100% へ戻すことを検証する</summary>
+    [Fact(DisplayName = "ResetZoom: 100% へ戻す")]
+    public void ResetZoom_ReturnsToHundredPercent()
+    {
+        var vm = new MainViewModel { ZoomLevel = 2.5 };
+
+        vm.ResetZoomCommand.Execute(null);
+
+        vm.ZoomLevel.Should().Be(1.0);
+    }
+
+    /// <summary>FitToWindowCommand が FitToWindowRequested を発火することを検証する</summary>
+    [Fact(DisplayName = "FitToWindowCommand: FitToWindowRequested を発火する")]
+    public void FitToWindowCommand_RaisesEvent()
+    {
+        var vm = new MainViewModel();
+        var raised = 0;
+        vm.FitToWindowRequested += (_, _) => raised++;
+
+        vm.FitToWindowCommand.Execute(null);
+
+        raised.Should().Be(1);
+    }
+
+    /// <summary>格子整列コマンドが FitToWindowRequested を発火することを検証する</summary>
+    [Fact(DisplayName = "AutoLayoutGrid: FitToWindowRequested を発火する")]
+    public void AutoLayoutGrid_RaisesFitRequest()
+    {
+        var vm = new MainViewModel();
+        vm.AddEntityCommand.Execute(null);
+        var raised = 0;
+        vm.FitToWindowRequested += (_, _) => raised++;
+
+        vm.AutoLayoutGridCommand.Execute(null);
+
+        raised.Should().Be(1);
+    }
+
+    /// <summary>木整列コマンドが FitToWindowRequested を発火することを検証する</summary>
+    [Fact(DisplayName = "AutoLayoutTree: FitToWindowRequested を発火する")]
+    public void AutoLayoutTree_RaisesFitRequest()
+    {
+        var vm = new MainViewModel();
+        vm.AddEntityCommand.Execute(null);
+        var raised = 0;
+        vm.FitToWindowRequested += (_, _) => raised++;
+
+        vm.AutoLayoutTreeCommand.Execute(null);
+
+        raised.Should().Be(1);
+    }
+
+    /// <summary>自由整列コマンドが FitToWindowRequested を発火することを検証する</summary>
+    [Fact(DisplayName = "AutoLayoutForce: FitToWindowRequested を発火する")]
+    public void AutoLayoutForce_RaisesFitRequest()
+    {
+        var vm = new MainViewModel();
+        vm.AddEntityCommand.Execute(null);
+        var raised = 0;
+        vm.FitToWindowRequested += (_, _) => raised++;
+
+        vm.AutoLayoutForceCommand.Execute(null);
+
+        raised.Should().Be(1);
+    }
+
+    /// <summary>AI 生成直後の整列（AutoArrangeNewDiagram）が FitToWindowRequested を発火することを検証する</summary>
+    [Fact(DisplayName = "AutoArrangeNewDiagram: FitToWindowRequested を発火する")]
+    public void AutoArrangeNewDiagram_RaisesFitRequest()
+    {
+        var vm = new MainViewModel();
+        vm.AddEntityCommand.Execute(null);
+        var raised = 0;
+        vm.FitToWindowRequested += (_, _) => raised++;
+
+        vm.AutoArrangeNewDiagram();
+
+        raised.Should().Be(1);
+    }
+
+    /// <summary>ファイル読込（ReplaceDiagram 経由）が FitToWindowRequested を発火することを検証する</summary>
+    [Fact(DisplayName = "Open（ReplaceDiagram 経由）: FitToWindowRequested を発火する")]
+    public void Open_RaisesFitRequest()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"er-viewport-{Guid.NewGuid()}.json");
+
+        // 読み込み対象のドキュメントを一旦保存しておく
+        var document = new DiagramDocument
+        {
+            Schema = new ErDiagram
+            {
+                TargetDbms = "sqlserver",
+                Entities = { new Entity { TableName = "T1" } },
+            },
+        };
+        JsonStorageService.Save(path, document);
+
+        var files = new StubFileDialogService { OpenResult = new FileDialogResult(path, 1) };
+        var vm = new MainViewModel(new StubDialogService(), files: files);
+        var raised = 0;
+        vm.FitToWindowRequested += (_, _) => raised++;
+
+        try
+        {
+            vm.OpenCommand.Execute(null);
+
+            vm.Entities.Should().ContainSingle();
+            raised.Should().BeGreaterThanOrEqualTo(1);
+        }
+        finally
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+    }
+
+    // ---------------- スタブ実装 ----------------
+
+    /// <summary>メッセージボックスを表示せず既定応答を返すスタブ</summary>
+    private sealed class StubDialogService : IDialogService
+    {
+        public bool Confirm(string message, string title) => true;
+
+        public bool ConfirmWarning(string message, string title) => true;
+
+        public void ShowInformation(string message, string title) { }
+
+        public void ShowError(string message, string title) { }
+    }
+
+    /// <summary>ファイル選択ダイアログを表示せず、設定済みの結果を返すスタブ</summary>
+    private sealed class StubFileDialogService : IFileDialogService
+    {
+        public FileDialogResult? OpenResult { get; init; }
+
+        public FileDialogResult? SaveResult { get; init; }
+
+        public string? FolderResult { get; init; }
+
+        public FileDialogResult? PickOpenFile(string filter) => OpenResult;
+
+        public FileDialogResult? PickSaveFile(
+            string filter,
+            string defaultExt,
+            string? initialFileName = null,
+            string? initialDirectory = null
+        ) => SaveResult;
+
+        public string? PickFolder(string title, string? initialDirectory = null) => FolderResult;
+    }
+}

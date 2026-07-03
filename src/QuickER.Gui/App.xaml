@@ -12,6 +12,7 @@
       <SolidColorBrush x:Key="CanvasBackgroundBrush" Color="#FAFAFA" />
       <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter" />
       <conv:NullToVisibilityConverter x:Key="NullToVisibilityConverter" />
+      <conv:CountToVisibilityConverter x:Key="CountToVisibilityConverter" />
     </ResourceDictionary>
   </Application.Resources>
 </Application>

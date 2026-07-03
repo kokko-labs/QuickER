@@ -147,6 +147,12 @@ public static class DragBehavior
     /// <summary>マウス押下時にドラッグ開始位置を記録し、移動・リサイズの判定とマウスキャプチャを行う</summary>
     private static void OnMouseDown(object sender, MouseButtonEventArgs e)
     {
+        // パン操作中（Space 押下 or 中ボタン等でのパン中）はエンティティ移動を発火させない
+        if (CanvasViewportBehavior.IsPanActive)
+        {
+            return;
+        }
+
         if (sender is not FrameworkElement fe)
         {
             return;

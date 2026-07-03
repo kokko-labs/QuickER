@@ -250,6 +250,9 @@ public partial class MainViewModel : ObservableObject
         {
             ClearUndoRedoHistory();
         }
+
+        // 図全体が置き換わったので、View 側で fit-to-window を要求する（開く・取込・DB取込・復元の共通点）
+        RequestFitToWindow();
     }
 
     /// <summary>Undo/Redo 履歴を破棄し、ツールバーの有効状態を更新する</summary>
@@ -836,6 +839,9 @@ public partial class MainViewModel : ObservableObject
             () => AutoLayoutService.LayoutGrid(Entities, Relationships),
             "整列(格子)"
         );
+
+        // 整列後の全体像が収まるよう fit-to-window を要求する
+        RequestFitToWindow();
     }
 
     /// <summary>エンティティをリレーション階層に基づくツリー状に整列する（Undo 可能）</summary>
@@ -846,6 +852,9 @@ public partial class MainViewModel : ObservableObject
             () => AutoLayoutService.LayoutTree(Entities, Relationships),
             "整列(木)"
         );
+
+        // 整列後の全体像が収まるよう fit-to-window を要求する
+        RequestFitToWindow();
     }
 
     /// <summary>エンティティを力学モデルで配置し、リレーション線が水平/垂直に近づくよう整列する（Undo 可能）</summary>
@@ -856,6 +865,9 @@ public partial class MainViewModel : ObservableObject
             () => AutoLayoutService.LayoutForceDirected(Entities, Relationships),
             "整列(自由)"
         );
+
+        // 整列後の全体像が収まるよう fit-to-window を要求する
+        RequestFitToWindow();
     }
 
     /// <summary>AI によるER図の新規生成直後に、表示幅調整と格子整列をまとめて適用する（履歴には積まない）</summary>
@@ -876,6 +888,9 @@ public partial class MainViewModel : ObservableObject
             AutoLayoutService.LayoutGrid(Entities, Relationships);
             RefreshCanvasSize();
         });
+
+        // AI 生成直後の初期配置が収まるよう fit-to-window を要求する
+        RequestFitToWindow();
     }
 
     /// <summary>全エンティティの表示幅を内容に合わせて自動調整する</summary>
