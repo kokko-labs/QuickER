@@ -355,4 +355,202 @@ public sealed class GeneratedRuntimeIntegrationTests(SqlServerContainerFixture f
         );
         nullSum.Should().BeNull();
     }
+
+    /// <summary>射影 DTO（JOIN + GROUP BY の集計を寛容マップで受ける先）</summary>
+    private sealed class CustomerTotal
+    {
+        public string Name { get; set; } = string.Empty;
+        public decimal Total { get; set; }
+    }
+
+    /// <summary>射影先が引数なしコンストラクタを持たない位置指定 record（分かる例外の検証用）</summary>
+    private sealed record PositionalTotal(string Name, decimal Total);
+
+    /// <summary>11. SqlExecutor 経由の QueryBySqlAsync&lt;TEntity&gt;: 厳密マップ・VO 復元・匿名パラメータが機能する</summary>
+    [Fact(
+        DisplayName = "[Integration] 11: SqlExecutor.QueryBySqlAsync<TEntity>（厳密マップ・VO 復元・匿名パラメータ）"
+    )]
+    public async Task SqlExecutor_QueryBySql_MapsEntity_WithValueObjects()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+        await CreateSchemaAsync();
+
+        var repo = new CustomerRepository(Factory());
+        await repo.InsertAsync(NewCustomer(1, "Alice", balance: 100m, isActive: true), Ct);
+        await repo.InsertAsync(NewCustomer(2, "Bob", balance: 200m, isActive: false), Ct);
+
+        var executor = new SqlExecutor(Factory());
+        var rows = await executor.QueryBySqlAsync<CustomerEntity>(
+            "SELECT * FROM [customers] WHERE [is_active] = @active ORDER BY [customer_id];",
+            new { active = true },
+            Ct
+        );
+
+        var alice = rows.Should().ContainSingle().Subject;
+        alice.CustomerId.Value.Should().Be(1);
+        alice.Name.Value.Should().Be("Alice");
+        alice.Balance!.Value.Should().Be(100m);
+        alice.IsActive.Value.Should().BeTrue();
+        alice.RowState.Should().Be(RowState.Unchanged);
+    }
+
+    /// <summary>12. QueryProjectionBySqlAsync（DTO モード）: JOIN + 集計を寛容マップ（列名⇔プロパティを大文字小文字無視で突き合わせ）</summary>
+    [Fact(
+        DisplayName = "[Integration] 12: QueryProjectionBySqlAsync（JOIN + 集計を DTO へ寛容射影）"
+    )]
+    public async Task SqlExecutor_QueryProjection_JoinAggregate_MapsDto()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+        await CreateSchemaAsync();
+
+        var repo = new CustomerRepository(Factory());
+        var orderRepo = new OrderRepository(Factory());
+        await repo.InsertAsync(NewCustomer(1, "Alice"), Ct);
+        await repo.InsertAsync(NewCustomer(2, "Bob"), Ct);
+        await orderRepo.InsertAsync(NewOrder(10, 1, 100m, "a1"), Ct);
+        await orderRepo.InsertAsync(NewOrder(11, 1, 50m, "a2"), Ct);
+        await orderRepo.InsertAsync(NewOrder(12, 2, 200m, null), Ct);
+
+        var executor = new SqlExecutor(Factory());
+        var totals = await executor.QueryProjectionBySqlAsync<CustomerTotal>(
+            "SELECT c.[name] AS Name, SUM(o.[amount]) AS Total "
+                + "FROM [customers] c JOIN [orders] o ON o.[customer_id] = c.[customer_id] "
+                + "GROUP BY c.[name] ORDER BY c.[name];",
+            null,
+            Ct
+        );
+
+        totals.Should().HaveCount(2);
+        totals[0].Name.Should().Be("Alice");
+        totals[0].Total.Should().Be(150m);
+        totals[1].Name.Should().Be("Bob");
+        totals[1].Total.Should().Be(200m);
+    }
+
+    /// <summary>13. QueryProjectionBySqlAsync（単一値モード）: 1 列 SELECT を List&lt;string&gt; と VO 型へ変換する</summary>
+    [Fact(
+        DisplayName = "[Integration] 13: QueryProjectionBySqlAsync（単一値モード: string と 値オブジェクト）"
+    )]
+    public async Task SqlExecutor_QueryProjection_SingleValueMode()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+        await CreateSchemaAsync();
+
+        var repo = new CustomerRepository(Factory());
+        await repo.InsertAsync(NewCustomer(1, "Alice"), Ct);
+        await repo.InsertAsync(NewCustomer(2, "Bob"), Ct);
+
+        var executor = new SqlExecutor(Factory());
+
+        // 1 列 SELECT を string の列へ（先頭列を変換）
+        var names = await executor.QueryProjectionBySqlAsync<string>(
+            "SELECT [name] FROM [customers] ORDER BY [customer_id];",
+            null,
+            Ct
+        );
+        names.Should().BeEquivalentTo(["Alice", "Bob"], options => options.WithStrictOrdering());
+
+        // 値オブジェクト型（IValueObject 実装）は SqlValueObjectActivator.Wrap で包む
+        var voNames = await executor.QueryProjectionBySqlAsync<NameValue>(
+            "SELECT [name] FROM [customers] ORDER BY [customer_id];",
+            null,
+            Ct
+        );
+        voNames.Select(v => v.Value).Should().BeEquivalentTo(["Alice", "Bob"]);
+    }
+
+    /// <summary>14. QueryProjectionBySqlAsync: 1 列も一致しない DTO は、列名・プロパティ名を含む分かる例外を投げる</summary>
+    [Fact(
+        DisplayName = "[Integration] 14: QueryProjectionBySqlAsync の非一致 DTO で列名・プロパティ名入り例外を投げる"
+    )]
+    public async Task SqlExecutor_QueryProjection_NoColumnMatch_Throws()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+        await CreateSchemaAsync();
+
+        var repo = new CustomerRepository(Factory());
+        await repo.InsertAsync(NewCustomer(1, "Alice"), Ct);
+
+        var executor = new SqlExecutor(Factory());
+        // 別名が DTO のプロパティ（Name/Total）のどれとも一致しない
+        var act = async () =>
+            await executor.QueryProjectionBySqlAsync<CustomerTotal>(
+                "SELECT [name] AS wrong_alias FROM [customers];",
+                null,
+                Ct
+            );
+
+        var ex = await act.Should().ThrowAsync<InvalidOperationException>();
+        ex.Which.Message.Should().Contain("wrong_alias");
+        ex.Which.Message.Should().Contain("Name");
+        ex.Which.Message.Should().Contain("Total");
+    }
+
+    /// <summary>15. QueryProjectionBySqlAsync: 位置指定 record（引数なしコンストラクタ無し）は分かる例外を投げる</summary>
+    [Fact(
+        DisplayName = "[Integration] 15: QueryProjectionBySqlAsync の位置指定 record で分かる例外を投げる"
+    )]
+    public async Task SqlExecutor_QueryProjection_PositionalRecord_Throws()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+        await CreateSchemaAsync();
+
+        var repo = new CustomerRepository(Factory());
+        await repo.InsertAsync(NewCustomer(1, "Alice"), Ct);
+
+        var executor = new SqlExecutor(Factory());
+        var act = async () =>
+            await executor.QueryProjectionBySqlAsync<PositionalTotal>(
+                "SELECT [name] AS Name FROM [customers];",
+                null,
+                Ct
+            );
+
+        var ex = await act.Should().ThrowAsync<InvalidOperationException>();
+        ex.Which.Message.Should().Contain("位置指定 record は非対応");
+    }
+
+    /// <summary>16. 委譲後リグレッション: Repository 経由の既存 3 メソッドが従来どおり動く</summary>
+    [Fact(
+        DisplayName = "[Integration] 16: Repository の生 SQL 3 メソッドが委譲後も従来どおり動く（リグレッション）"
+    )]
+    public async Task Repository_RawSqlMethods_StillWorkAfterDelegation()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+        await CreateSchemaAsync();
+
+        var repo = new CustomerRepository(Factory());
+        await repo.InsertAsync(NewCustomer(1, "Alice", balance: 100m, isActive: true), Ct);
+        await repo.InsertAsync(NewCustomer(2, "Bob", balance: 200m, isActive: true), Ct);
+
+        // QueryBySqlAsync（全列・VO 復元）
+        var rows = await repo.QueryBySqlAsync(
+            "SELECT * FROM [customers] WHERE [balance] >= @min ORDER BY [customer_id];",
+            new { min = 150m },
+            Ct
+        );
+        rows.Select(c => c.Name.Value).Should().BeEquivalentTo(["Bob"]);
+
+        // ExecuteScalarSqlAsync（COUNT を int）
+        var count = await repo.ExecuteScalarSqlAsync<int>(
+            "SELECT COUNT(*) FROM [customers];",
+            null,
+            Ct
+        );
+        count.Should().Be(2);
+
+        // ExecuteSqlAsync（UPDATE 影響行数）
+        var affected = await repo.ExecuteSqlAsync(
+            "UPDATE [customers] SET [is_active] = @v WHERE [balance] >= @min;",
+            new { v = false, min = 150m },
+            Ct
+        );
+        affected.Should().Be(1);
+    }
 }
