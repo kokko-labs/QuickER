@@ -144,7 +144,9 @@ public class OracleTypeCatalogTests
         canonical.Precision.Should().Be(6);
     }
 
-    [Fact(DisplayName = "TIMESTAMP WITH LOCAL TIME ZONE は DateTimeOffset として解析される（解釈のみ）")]
+    [Fact(
+        DisplayName = "TIMESTAMP WITH LOCAL TIME ZONE は DateTimeOffset として解析される（解釈のみ）"
+    )]
     public void TryParse_TimestampWithLocalTimeZone_ResolvesDateTimeOffset()
     {
         Catalog.TryParse("TIMESTAMP(6) WITH LOCAL TIME ZONE", out var canonical).Should().BeTrue();
@@ -220,7 +222,8 @@ public class OracleTypeCatalogTests
     [Fact(DisplayName = "TryFormat(Money) は NUMBER(19,4) を生成する")]
     public void TryFormat_Money_ProducesNumber19_4()
     {
-        Catalog.TryFormat(new CanonicalType(CanonicalTypeKind.Money), out var nativeType)
+        Catalog
+            .TryFormat(new CanonicalType(CanonicalTypeKind.Money), out var nativeType)
             .Should()
             .BeTrue();
         nativeType.Should().Be("NUMBER(19,4)");
@@ -250,7 +253,8 @@ public class OracleTypeCatalogTests
         string expected
     )
     {
-        Catalog.TryFormat(new CanonicalType(kind, Length: length), out var nativeType)
+        Catalog
+            .TryFormat(new CanonicalType(kind, Length: length), out var nativeType)
             .Should()
             .BeTrue();
         nativeType.Should().Be(expected);
@@ -266,7 +270,8 @@ public class OracleTypeCatalogTests
         string expected
     )
     {
-        Catalog.TryFormat(new CanonicalType(kind, Length: length), out var nativeType)
+        Catalog
+            .TryFormat(new CanonicalType(kind, Length: length), out var nativeType)
             .Should()
             .BeTrue();
         nativeType.Should().Be(expected);
@@ -277,7 +282,8 @@ public class OracleTypeCatalogTests
     [Fact(DisplayName = "TryFormat(Date) は DATE を生成する（DATE の非対称変換）")]
     public void TryFormat_Date_ProducesDate()
     {
-        Catalog.TryFormat(new CanonicalType(CanonicalTypeKind.Date), out var nativeType)
+        Catalog
+            .TryFormat(new CanonicalType(CanonicalTypeKind.Date), out var nativeType)
             .Should()
             .BeTrue();
         nativeType.Should().Be("DATE");
@@ -287,13 +293,18 @@ public class OracleTypeCatalogTests
     public void TryFormat_DateTimeWithPrecision_ProducesTimestamp()
     {
         Catalog
-            .TryFormat(new CanonicalType(CanonicalTypeKind.DateTime, Precision: 6), out var nativeType)
+            .TryFormat(
+                new CanonicalType(CanonicalTypeKind.DateTime, Precision: 6),
+                out var nativeType
+            )
             .Should()
             .BeTrue();
         nativeType.Should().Be("TIMESTAMP(6)");
     }
 
-    [Fact(DisplayName = "TryFormat(DateTimeOffset, 精度あり) は TIMESTAMP(p) WITH TIME ZONE を生成する")]
+    [Fact(
+        DisplayName = "TryFormat(DateTimeOffset, 精度あり) は TIMESTAMP(p) WITH TIME ZONE を生成する"
+    )]
     public void TryFormat_DateTimeOffset_ProducesTimestampWithTimeZone()
     {
         Catalog
@@ -317,7 +328,8 @@ public class OracleTypeCatalogTests
     [Fact(DisplayName = "TryFormat(Guid) は RAW(16) を生成する（format-only）")]
     public void TryFormat_Guid_ProducesRaw16()
     {
-        Catalog.TryFormat(new CanonicalType(CanonicalTypeKind.Guid), out var nativeType)
+        Catalog
+            .TryFormat(new CanonicalType(CanonicalTypeKind.Guid), out var nativeType)
             .Should()
             .BeTrue();
         nativeType.Should().Be("RAW(16)");
@@ -326,7 +338,8 @@ public class OracleTypeCatalogTests
     [Fact(DisplayName = "TryFormat(Xml) は XMLTYPE を生成する")]
     public void TryFormat_Xml_ProducesXmlType()
     {
-        Catalog.TryFormat(new CanonicalType(CanonicalTypeKind.Xml), out var nativeType)
+        Catalog
+            .TryFormat(new CanonicalType(CanonicalTypeKind.Xml), out var nativeType)
             .Should()
             .BeTrue();
         nativeType.Should().Be("XMLTYPE");
@@ -335,7 +348,8 @@ public class OracleTypeCatalogTests
     [Fact(DisplayName = "TryFormat(Json) は CLOB を生成する（19c に JSON 型が無い・format-only）")]
     public void TryFormat_Json_ProducesClob()
     {
-        Catalog.TryFormat(new CanonicalType(CanonicalTypeKind.Json), out var nativeType)
+        Catalog
+            .TryFormat(new CanonicalType(CanonicalTypeKind.Json), out var nativeType)
             .Should()
             .BeTrue();
         nativeType.Should().Be("CLOB");

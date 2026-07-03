@@ -51,7 +51,9 @@ public sealed class MySqlSchemaSyncExecutor : ISchemaSyncExecutor
         }
 
         // @fk などのユーザー変数を使うプリペアド動的 SQL のため AllowUserVariables=true を付与する
-        await using var conn = new MySqlConnection(MySqlConnectionStringFactory.Build(settings, true));
+        await using var conn = new MySqlConnection(
+            MySqlConnectionStringFactory.Build(settings, true)
+        );
         await conn.OpenAsync(ct).ConfigureAwait(false);
 
         var index = 0;

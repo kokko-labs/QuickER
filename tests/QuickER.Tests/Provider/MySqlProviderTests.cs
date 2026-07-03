@@ -101,7 +101,9 @@ public class MySqlProviderTests
     }
 
     /// <summary>接続文字列に Server / Port / Database / User / ApplicationName が反映されることを検証する</summary>
-    [Fact(DisplayName = "BuildConnectionString は Server/Port/Database/User/ApplicationName を反映する")]
+    [Fact(
+        DisplayName = "BuildConnectionString は Server/Port/Database/User/ApplicationName を反映する"
+    )]
     public void BuildConnectionString_ReflectsSettings()
     {
         var provider = new MySqlProvider();
@@ -141,9 +143,11 @@ public class MySqlProviderTests
     [Fact(DisplayName = "レジストリに sqlserver / postgresql / mysql の 3 プロバイダが並ぶ")]
     public void Registry_ContainsAllThreeProviders()
     {
-        var registry = new DatabaseProviderRegistry(
-            [new SqlServerProvider(), new PostgreSqlProvider(), new MySqlProvider()]
-        );
+        var registry = new DatabaseProviderRegistry([
+            new SqlServerProvider(),
+            new PostgreSqlProvider(),
+            new MySqlProvider(),
+        ]);
 
         registry.All.Should().HaveCount(3);
         registry.Get("sqlserver").Should().BeOfType<SqlServerProvider>();

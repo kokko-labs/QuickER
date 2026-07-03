@@ -21,7 +21,9 @@ public sealed class MySqlDdlRoundTripIntegrationTests(MySqlContainerFixture fixt
     /// 3 テーブル（複合 PK 1・FK 2 本[Cascade / SetNull]・NULL 混在・日本語名 1 組）の DDL を生成・実行し、
     /// 取込結果がテーブル / 列 / 型 / NULL / PK / FK / 参照アクション / 1対多・1対1 判定まで一致することを検証する。
     /// </summary>
-    [Fact(DisplayName = "[Integration] A: DDL 生成→実行→取込で図が往復一致する（複合PK・FK・日本語・NULL混在）")]
+    [Fact(
+        DisplayName = "[Integration] A: DDL 生成→実行→取込で図が往復一致する（複合PK・FK・日本語・NULL混在）"
+    )]
     public async Task DdlToImport_RoundTrips()
     {
         Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
@@ -46,7 +48,14 @@ public sealed class MySqlDdlRoundTripIntegrationTests(MySqlContainerFixture fixt
                 IsNullable = false,
             }
         );
-        customer.Columns.Add(new Column { Name = "備考", DataType = "text", IsNullable = true });
+        customer.Columns.Add(
+            new Column
+            {
+                Name = "備考",
+                DataType = "text",
+                IsNullable = true,
+            }
+        );
 
         // 子1: orders（顧客への FK・ON DELETE CASCADE、単純 PK）
         var order = new Entity { TableName = "orders" };
@@ -157,10 +166,7 @@ public sealed class MySqlDdlRoundTripIntegrationTests(MySqlContainerFixture fixt
 
         // orders テーブル: decimal(10,2) の再現・FK 列フラグ
         var importedOrder = result.Entities.Single(e => e.TableName == "orders");
-        importedOrder
-            .Columns.Single(c => c.Name == "amount")
-            .DataType.Should()
-            .Be("decimal(10,2)");
+        importedOrder.Columns.Single(c => c.Name == "amount").DataType.Should().Be("decimal(10,2)");
         importedOrder.Columns.Single(c => c.Name == "customer_id").IsForeignKey.Should().BeTrue();
         importedOrder.Columns.Single(c => c.Name == "id").IsPrimaryKey.Should().BeTrue();
 
@@ -189,7 +195,9 @@ public sealed class MySqlDdlRoundTripIntegrationTests(MySqlContainerFixture fixt
     /// 型網羅: パラメータ付きを含む代表型で列を作成→取込し、取り込んだ型文字列が
     /// <see cref="MySqlTypeCatalog.TryParse"/> 可能かつ期待表記であることを検証する。
     /// </summary>
-    [Fact(DisplayName = "[Integration] A: 代表型を作成→取込し、型文字列が期待表記かつ TryParse 可能")]
+    [Fact(
+        DisplayName = "[Integration] A: 代表型を作成→取込し、型文字列が期待表記かつ TryParse 可能"
+    )]
     public async Task TypeCoverage_ImportedTypeStringsAreParseable()
     {
         Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);

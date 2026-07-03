@@ -116,8 +116,7 @@ public class MySqlSyncScriptBuilderTests
             }
         );
 
-        sql.Should()
-            .Contain("MODIFY COLUMN `name` varchar(100) NOT NULL COMMENT '顧客名';");
+        sql.Should().Contain("MODIFY COLUMN `name` varchar(100) NOT NULL COMMENT '顧客名';");
     }
 
     /// <summary>NULL 許容へ変更する AlterColumn が NULL を再指定することを検証する</summary>
@@ -315,7 +314,9 @@ public class MySqlSyncScriptBuilderTests
         );
 
         sql.Should()
-            .Contain("ALTER TABLE `customer` MODIFY COLUMN `name` varchar(50) NOT NULL COMMENT '顧客名';");
+            .Contain(
+                "ALTER TABLE `customer` MODIFY COLUMN `name` varchar(50) NOT NULL COMMENT '顧客名';"
+            );
     }
 
     /// <summary>テーブル説明が空の場合に空文字 COMMENT（削除）が生成されることを検証する</summary>

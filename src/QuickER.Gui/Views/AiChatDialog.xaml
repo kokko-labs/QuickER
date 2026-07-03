@@ -631,11 +631,7 @@
           ToolTip="Ctrl+Enter で送信"
         >
           <TextBox.InputBindings>
-            <KeyBinding
-              Modifiers="Control"
-              Key="Return"
-              Command="{Binding SendMessageCommand}"
-            />
+            <KeyBinding Modifiers="Control" Key="Return" Command="{Binding SendMessageCommand}" />
           </TextBox.InputBindings>
         </TextBox>
         <Button

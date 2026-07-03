@@ -22,7 +22,9 @@ public sealed class OracleDdlRoundTripIntegrationTests(OracleContainerFixture fi
     /// 取込結果がテーブル / 列 / 型 / NULL / PK / FK / 参照アクション / 1対多・1対1 判定まで一致することを検証する。
     /// </summary>
     /// <remarks>Oracle は ON UPDATE をサポートしないため検証対象外とする（OnUpdate は常に NoAction で取り込まれる）</remarks>
-    [Fact(DisplayName = "[Integration] A: DDL 生成→実行→取込で図が往復一致する（複合PK・FK・日本語・NULL混在）")]
+    [Fact(
+        DisplayName = "[Integration] A: DDL 生成→実行→取込で図が往復一致する（複合PK・FK・日本語・NULL混在）"
+    )]
     public async Task DdlToImport_RoundTrips()
     {
         Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
@@ -47,7 +49,14 @@ public sealed class OracleDdlRoundTripIntegrationTests(OracleContainerFixture fi
                 IsNullable = false,
             }
         );
-        customer.Columns.Add(new Column { Name = "備考", DataType = "CLOB", IsNullable = true });
+        customer.Columns.Add(
+            new Column
+            {
+                Name = "備考",
+                DataType = "CLOB",
+                IsNullable = true,
+            }
+        );
 
         // 子1: orders（顧客への FK・ON DELETE CASCADE、単純 PK）
         var order = new Entity { TableName = "orders" };
@@ -136,7 +145,10 @@ public sealed class OracleDdlRoundTripIntegrationTests(OracleContainerFixture fi
         var result = await new OracleSchemaImporter().ImportAsync(conn, Ct);
 
         // ---------- 検証: テーブル ----------
-        result.Entities.Select(e => e.TableName).Should().BeEquivalentTo("顧客", "orders", "profiles");
+        result
+            .Entities.Select(e => e.TableName)
+            .Should()
+            .BeEquivalentTo("顧客", "orders", "profiles");
 
         // 顧客テーブル: 列・型・NULL・PK
         var importedCustomer = result.Entities.Single(e => e.TableName == "顧客");
@@ -187,7 +199,9 @@ public sealed class OracleDdlRoundTripIntegrationTests(OracleContainerFixture fi
     /// <remarks>
     /// TIMESTAMP は Oracle の既定精度 6 が付与されるため <c>TIMESTAMP(6)</c> 等で取り込まれる。
     /// </remarks>
-    [Fact(DisplayName = "[Integration] A: 代表型を作成→取込し、型文字列が期待表記かつ TryParse 可能")]
+    [Fact(
+        DisplayName = "[Integration] A: 代表型を作成→取込し、型文字列が期待表記かつ TryParse 可能"
+    )]
     public async Task TypeCoverage_ImportedTypeStringsAreParseable()
     {
         Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);

@@ -45,7 +45,12 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
         WriteSection(statements, list, SchemaDiffKind.DropColumn, AppendDropColumn);
         WriteSection(statements, list, SchemaDiffKind.DropTable, AppendDropTable);
         WriteSection(statements, list, SchemaDiffKind.AddForeignKey, AppendAddForeignKey);
-        WriteSection(statements, list, SchemaDiffKind.SetTableDescription, AppendSetTableDescription);
+        WriteSection(
+            statements,
+            list,
+            SchemaDiffKind.SetTableDescription,
+            AppendSetTableDescription
+        );
         WriteSection(
             statements,
             list,
@@ -189,7 +194,10 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
         var sb = new StringBuilder();
 
         // ON UPDATE が指定されていても Oracle では無視される旨を注意コメントで残す
-        if (item.Relationship is not null && item.Relationship.OnUpdate != ForeignKeyReferentialAction.NoAction)
+        if (
+            item.Relationship is not null
+            && item.Relationship.OnUpdate != ForeignKeyReferentialAction.NoAction
+        )
         {
             sb.AppendLine("-- 注: Oracle は ON UPDATE をサポートしないため無視");
         }
@@ -230,7 +238,9 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
 
         // 制約名不明時は親子テーブル名から user_constraints を逆引きして PL/SQL ブロックで削除する。
         // 識別子はクォート付き作成のため、大文字小文字を保持した実名でカタログを照合する。
-        var childName = OracleIdentifier.EscapeStringLiteral(OracleIdentifier.TableNameOnly(childTbl));
+        var childName = OracleIdentifier.EscapeStringLiteral(
+            OracleIdentifier.TableNameOnly(childTbl)
+        );
         var parentName = OracleIdentifier.EscapeStringLiteral(
             OracleIdentifier.TableNameOnly(parentTbl)
         );

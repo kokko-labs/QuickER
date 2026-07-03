@@ -219,9 +219,7 @@ public class PostgreSqlSyncScriptBuilderTests
         );
 
         sql.Should()
-            .Contain(
-                "ALTER TABLE \"order\" DROP CONSTRAINT IF EXISTS \"FK_order_customer\";"
-            );
+            .Contain("ALTER TABLE \"order\" DROP CONSTRAINT IF EXISTS \"FK_order_customer\";");
     }
 
     /// <summary>制約名不明時に DO ブロックでカタログ逆引き削除を生成することを検証する</summary>

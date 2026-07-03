@@ -68,13 +68,18 @@ public sealed class PostgreSqlSchemaSyncIntegrationTests(PostgreSqlContainerFixt
             new[] { parent, child },
             new[] { rel }
         );
-        diff1.Items.Should().Contain(i => i.Kind == SchemaDiffKind.AddTable && i.TableName == "parent");
-        diff1.Items.Should().Contain(i => i.Kind == SchemaDiffKind.AddTable && i.TableName == "child");
+        diff1
+            .Items.Should()
+            .Contain(i => i.Kind == SchemaDiffKind.AddTable && i.TableName == "parent");
+        diff1
+            .Items.Should()
+            .Contain(i => i.Kind == SchemaDiffKind.AddTable && i.TableName == "child");
         diff1.Items.Should().Contain(i => i.Kind == SchemaDiffKind.AddForeignKey);
         diff1
             .Items.Should()
             .Contain(i =>
-                i.Kind == SchemaDiffKind.SetTableDescription && i.NewDescription == "親テーブルの説明"
+                i.Kind == SchemaDiffKind.SetTableDescription
+                && i.NewDescription == "親テーブルの説明"
             );
 
         await ApplyAsync(settings, diff1.Items);
@@ -82,8 +87,15 @@ public sealed class PostgreSqlSchemaSyncIntegrationTests(PostgreSqlContainerFixt
         // 再取込で往復確認
         var live1 = await ImportAsync();
         live1.Entities.Select(e => e.TableName).Should().BeEquivalentTo("parent", "child");
-        live1.Entities.Single(e => e.TableName == "parent").Description.Should().Be("親テーブルの説明");
-        live1.Entities.Single(e => e.TableName == "parent").Columns.Single(c => c.Name == "name").Description.Should().Be("名称");
+        live1
+            .Entities.Single(e => e.TableName == "parent")
+            .Description.Should()
+            .Be("親テーブルの説明");
+        live1
+            .Entities.Single(e => e.TableName == "parent")
+            .Columns.Single(c => c.Name == "name")
+            .Description.Should()
+            .Be("名称");
         live1.Relationships.Should().ContainSingle();
         live1.Relationships[0].ConstraintName.Should().Be("FK_child_parent");
         live1.Relationships[0].OnDelete.Should().Be(ForeignKeyReferentialAction.Cascade);
@@ -119,9 +131,15 @@ public sealed class PostgreSqlSchemaSyncIntegrationTests(PostgreSqlContainerFixt
             new[] { parentTarget, child2 },
             new[] { relKeep }
         );
-        diff2.Items.Should().Contain(i => i.Kind == SchemaDiffKind.AddColumn && i.ColumnName == "added");
-        diff2.Items.Should().Contain(i => i.Kind == SchemaDiffKind.AlterColumn && i.ColumnName == "to_alter");
-        diff2.Items.Should().Contain(i => i.Kind == SchemaDiffKind.DropColumn && i.ColumnName == "to_drop");
+        diff2
+            .Items.Should()
+            .Contain(i => i.Kind == SchemaDiffKind.AddColumn && i.ColumnName == "added");
+        diff2
+            .Items.Should()
+            .Contain(i => i.Kind == SchemaDiffKind.AlterColumn && i.ColumnName == "to_alter");
+        diff2
+            .Items.Should()
+            .Contain(i => i.Kind == SchemaDiffKind.DropColumn && i.ColumnName == "to_drop");
 
         // 破壊的差分は既定で未選択のため、全項目を選択して実行する
         foreach (var item in diff2.Items)
@@ -205,7 +223,9 @@ public sealed class PostgreSqlSchemaSyncIntegrationTests(PostgreSqlContainerFixt
     /// わざと不正な型で AlterColumn を流し、実行が失敗（Committed=false）してロールバックされ、
     /// スキーマが変化しないことを検証する。
     /// </summary>
-    [Fact(DisplayName = "[Integration] C: 不正な同期はロールバックされ Committed=false・スキーマ不変")]
+    [Fact(
+        DisplayName = "[Integration] C: 不正な同期はロールバックされ Committed=false・スキーマ不変"
+    )]
     public async Task SchemaSync_InvalidAlter_RollsBack()
     {
         Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);

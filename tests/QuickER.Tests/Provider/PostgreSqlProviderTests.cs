@@ -44,7 +44,9 @@ public class PostgreSqlProviderTests
         };
 
     /// <summary>PostgreSqlProvider が識別名・表示名・既定ポート・型カタログを公開することを検証する</summary>
-    [Fact(DisplayName = "PostgreSqlProvider は name / DisplayName / DefaultPort / 型カタログを公開する")]
+    [Fact(
+        DisplayName = "PostgreSqlProvider は name / DisplayName / DefaultPort / 型カタログを公開する"
+    )]
     public void PostgreSqlProvider_ExposesMetadataAndDataTypes()
     {
         var provider = new PostgreSqlProvider();
@@ -100,7 +102,9 @@ public class PostgreSqlProviderTests
     }
 
     /// <summary>接続文字列に Host / Port / Database / Username / ApplicationName が反映されることを検証する</summary>
-    [Fact(DisplayName = "BuildConnectionString は Host/Port/Database/Username/ApplicationName を反映する")]
+    [Fact(
+        DisplayName = "BuildConnectionString は Host/Port/Database/Username/ApplicationName を反映する"
+    )]
     public void BuildConnectionString_ReflectsSettings()
     {
         var provider = new PostgreSqlProvider();
@@ -140,9 +144,10 @@ public class PostgreSqlProviderTests
     [Fact(DisplayName = "レジストリに sqlserver と postgresql の 2 プロバイダが並ぶ")]
     public void Registry_ContainsBothProviders()
     {
-        var registry = new DatabaseProviderRegistry(
-            [new SqlServerProvider(), new PostgreSqlProvider()]
-        );
+        var registry = new DatabaseProviderRegistry([
+            new SqlServerProvider(),
+            new PostgreSqlProvider(),
+        ]);
 
         registry.All.Should().HaveCount(2);
         registry.Get("sqlserver").Should().BeOfType<SqlServerProvider>();

@@ -79,10 +79,9 @@ public sealed partial class MySqlTypeCatalog : ITypeCatalog
             .ToLowerInvariant();
         var name = NormalizeAlias(rawName);
         var argsRaw = match.Groups["args"].Success ? match.Groups["args"].Value.Trim() : null;
-        var isUnsigned = match.Groups["mods"].Value.Contains(
-            "unsigned",
-            StringComparison.OrdinalIgnoreCase
-        );
+        var isUnsigned = match
+            .Groups["mods"]
+            .Value.Contains("unsigned", StringComparison.OrdinalIgnoreCase);
 
         // enum / set は値リストを括弧に取る。値リストのパースには踏み込まず変換不能とする
         if (name is "enum" or "set")
@@ -303,7 +302,11 @@ public sealed partial class MySqlTypeCatalog : ITypeCatalog
     /// <c>tinyint</c> を解釈する。<c>tinyint(1)</c> は真偽値慣習として Boolean、
     /// <c>tinyint unsigned</c>（および長さ 1 以外）は TinyInt として扱う。
     /// </summary>
-    private static bool TryParseTinyInt(string? argsRaw, bool isUnsigned, out CanonicalType canonical)
+    private static bool TryParseTinyInt(
+        string? argsRaw,
+        bool isUnsigned,
+        out CanonicalType canonical
+    )
     {
         // tinyint(1)（unsigned なし）は真偽値慣習として Boolean と解釈する
         if (!isUnsigned && argsRaw == "1")
@@ -390,7 +393,11 @@ public sealed partial class MySqlTypeCatalog : ITypeCatalog
             scale = parsedScale;
         }
 
-        canonical = new CanonicalType(CanonicalTypeKind.Decimal, Precision: precision, Scale: scale);
+        canonical = new CanonicalType(
+            CanonicalTypeKind.Decimal,
+            Precision: precision,
+            Scale: scale
+        );
         return true;
     }
 

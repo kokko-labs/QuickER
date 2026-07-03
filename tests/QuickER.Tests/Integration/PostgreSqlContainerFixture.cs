@@ -114,8 +114,7 @@ public sealed class PostgreSqlContainerFixture : IAsyncLifetime
 
 /// <summary>PostgreSQL 統合テスト用のコレクション定義（コンテナをコレクション内で共有する）</summary>
 [CollectionDefinition(Name)]
-public sealed class PostgreSqlContainerCollection
-    : ICollectionFixture<PostgreSqlContainerFixture>
+public sealed class PostgreSqlContainerCollection : ICollectionFixture<PostgreSqlContainerFixture>
 {
     /// <summary>コレクション名（各統合テストクラスの <c>[Collection]</c> で参照する）</summary>
     public const string Name = "PostgreSQL Integration";

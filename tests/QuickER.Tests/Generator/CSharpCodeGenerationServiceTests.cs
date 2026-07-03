@@ -1079,6 +1079,129 @@ public class CSharpCodeGenerationServiceTests
     }
 
     /// <summary>
+    /// 生 SQL 実行の 3 メソッド（QueryBySqlAsync / ExecuteSqlAsync / ExecuteScalarSqlAsync）が
+    /// IRepository インターフェースと SqlServerRepository 基底の両方に生成され、
+    /// パラメータ束縛・厳密マッピングの補助（BindRawSqlParameters / MapEntityFromRawSql）も出力されることを検証する
+    /// </summary>
+    [Fact]
+    public void Generate_Repository_ShouldEmitRawSqlMethods()
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            SingleEntityDiagram(),
+            new CodeGenerationOptions { NamespaceName = "Sample.Domain" }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        var content = result.Files[0].Content;
+
+        // インターフェース側のシグネチャ（3 メソッド。abstract メソッド宣言なので本文なし）
+        content.Should().Contain("Task<IReadOnlyList<TEntity>> QueryBySqlAsync(");
+        content.Should().Contain("Task<int> ExecuteSqlAsync(");
+        content.Should().Contain("Task<TResult?> ExecuteScalarSqlAsync<TResult>(");
+
+        // 実装側（SqlServerRepository 基底）は公開シグネチャを保ちつつ ISqlExecutor へ委譲する
+        content.Should().Contain("public Task<IReadOnlyList<TEntity>> QueryBySqlAsync(");
+        content.Should().Contain("public Task<int> ExecuteSqlAsync(");
+        content.Should().Contain("public Task<TResult?> ExecuteScalarSqlAsync<TResult>(");
+        content
+            .Should()
+            .Contain("_sqlExecutor.QueryBySqlAsync<TEntity>(sql, parameters, cancellationToken);");
+        content
+            .Should()
+            .Contain("_sqlExecutor.ExecuteSqlAsync(sql, parameters, cancellationToken);");
+        content
+            .Should()
+            .Contain(
+                "_sqlExecutor.ExecuteScalarSqlAsync<TResult>(sql, parameters, cancellationToken);"
+            );
+        // 委譲先は SqlExecutor（Repository が private readonly で保持）
+        content
+            .Should()
+            .Contain(
+                "private readonly ISqlExecutor _sqlExecutor = new SqlExecutor(connectionFactory);"
+            );
+
+        // パラメータ束縛は SqlExecutor 側に 1 系統で集約（EntitySaveMetadata からは除去済み）
+        content
+            .Should()
+            .Contain("internal static void BindParameters(SqlCommand command, object? parameters)");
+        content
+            .Should()
+            .Contain(
+                "command.Parameters.AddWithValue($\"@{property.Name}\", value ?? DBNull.Value);"
+            );
+        content.Should().NotContain("BindRawSqlParameters");
+        // 厳密マッピング（列不足は全列を含む例外でラップ）は EntitySaveMetadata に残る
+        content
+            .Should()
+            .Contain("public TEntity MapEntityFromRawSql<TEntity>(SqlDataReader reader)");
+        content.Should().Contain("catch (IndexOutOfRangeException ex)");
+        content.Should().Contain("の全列（{ColumnList}）が必要です");
+        // スカラー・単一値変換は ChangeType(InvariantCulture) / 変換不能で例外
+        content
+            .Should()
+            .Contain("Convert.ChangeType(raw, targetType, CultureInfo.InvariantCulture)");
+        // InvariantCulture 使用のため System.Globalization を using
+        content.Should().Contain("using System.Globalization;");
+    }
+
+    /// <summary>
+    /// エンティティ非依存の生 SQL 実行器 <c>ISqlExecutor</c> / <c>SqlExecutor</c> が生成され、
+    /// 任意型射影 <c>QueryProjectionBySqlAsync</c>（単一値モード・DTO モード・typo ガード）と
+    /// DI 登録（Singleton）が出力されることを検証する
+    /// </summary>
+    [Fact]
+    public void Generate_Repository_ShouldEmitSqlExecutorAndProjection()
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            SingleEntityDiagram(),
+            new CodeGenerationOptions { NamespaceName = "Sample.Domain" }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        var content = result.Files[0].Content;
+
+        // インターフェースと実装（partial・sealed・ステートレス）
+        content.Should().Contain("public partial interface ISqlExecutor");
+        content
+            .Should()
+            .Contain(
+                "public sealed partial class SqlExecutor(ISqlConnectionFactory connectionFactory) : ISqlExecutor"
+            );
+
+        // 任意型射影のシグネチャ（インターフェース・実装の両方）
+        content
+            .Should()
+            .Contain("Task<IReadOnlyList<TResult>> QueryProjectionBySqlAsync<TResult>(");
+        content
+            .Should()
+            .Contain(
+                "public async Task<IReadOnlyList<TResult>> QueryProjectionBySqlAsync<TResult>("
+            );
+        // エンティティ厳密マップも執行器に存在する（型引数版）
+        content
+            .Should()
+            .Contain("public async Task<IReadOnlyList<TEntity>> QueryBySqlAsync<TEntity>(");
+
+        // 単一値モードの型判定（primitive/enum/string/decimal/日時/Guid/byte[]）
+        content.Should().Contain("private static bool IsSingleValueType(Type type)");
+        content.Should().Contain("actual == typeof(byte[])");
+        // DTO モード: 引数なしコンストラクタ必須・位置指定 record 非対応の例外
+        content.Should().Contain("位置指定 record は非対応");
+        // typo ガード: 1 列も一致しないと列名・プロパティ名を含む例外
+        content.Should().Contain("一致する列が結果セットにありません");
+        // 列⇔プロパティ解決子は ConcurrentDictionary でキャッシュ
+        content
+            .Should()
+            .Contain(
+                "private static readonly ConcurrentDictionary<Type, ProjectionAccessor> _projectionAccessorCache"
+            );
+
+        // DI 登録（SqlExecutor は Singleton）
+        content.Should().Contain("services.AddSingleton<ISqlExecutor, SqlExecutor>();");
+    }
+
+    /// <summary>
     /// SQL パラメータ型明示化のため、Repository 生成時に Entity プロパティへ [SqlColumnType(...)] が
     /// DB 型に応じて付与されること（varchar(50)→VarChar+Size50 / nvarchar(max)→NVarChar+Size-1 /
     /// decimal(10,2)→Precision10/Scale2 / int→Int / 未知型→属性なし）を検証する

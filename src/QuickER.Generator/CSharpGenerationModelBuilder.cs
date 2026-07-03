@@ -624,6 +624,7 @@ internal sealed partial class CSharpGenerationModelBuilder
             usings.Add("System.Collections");
             usings.Add("System.Collections.Concurrent");
             usings.Add("System.Data");
+            usings.Add("System.Globalization");
             usings.Add("System.Linq.Expressions");
             usings.Add("System.Reflection");
             usings.Add("System.Text.Json");
