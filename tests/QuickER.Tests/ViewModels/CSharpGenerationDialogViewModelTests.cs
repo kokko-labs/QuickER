@@ -141,10 +141,12 @@ public class CSharpGenerationDialogViewModelTests
         vm.SplitFilesByCategory = true;
 
         vm.ShowEfCoreNamespace.Should().BeFalse("EF Core 未選択では欄を出さない");
+        vm.ShowRepositoryNamespace.Should().BeFalse("DB アクセス「なし」では契約も出力されない");
 
         vm.DbAccessEfCore = true;
 
         vm.ShowEfCoreNamespace.Should().BeTrue();
+        vm.ShowRepositoryNamespace.Should().BeTrue("EF Core でも契約が Repository バケットに出力される");
         vm.EfCoreNamespace.Should().Be("Acme.App.EfCore");
 
         vm.BaseNamespace = "Contoso.Sales";

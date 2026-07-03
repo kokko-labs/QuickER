@@ -222,8 +222,12 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     /// <summary>Mapper 名前空間欄を表示するか</summary>
     public bool ShowMapperNamespace => SplitFilesByCategory && GenerateMappers;
 
-    /// <summary>Repository 名前空間欄を表示するか</summary>
-    public bool ShowRepositoryNamespace => SplitFilesByCategory && GenerateRepositories;
+    /// <summary>
+    /// Repository 名前空間欄を表示するか。EF Core 選択時も Repository バケット（共通契約＋Repository
+    /// インターフェイス）は出力されるため、DB アクセスが「なし」以外なら表示する
+    /// </summary>
+    public bool ShowRepositoryNamespace =>
+        SplitFilesByCategory && (GenerateRepositories || GenerateEfCore);
 
     /// <summary>ValueObject 名前空間欄を表示するか</summary>
     public bool ShowValueObjectNamespace => SplitFilesByCategory && GenerateValueObjects;

@@ -274,18 +274,18 @@
             />
             <RadioButton
               Margin="0,0,18,0"
-              Content="EF Core"
+              Content="Repository (EF Core)"
               GroupName="DbAccess"
               IsChecked="{Binding DbAccessEfCore}"
-              ToolTip="方言非依存の DbContext と EF 版 Repository を生成します（接続先はアプリ側の UseSqlServer / UseNpgsql 等で選択）"
+              ToolTip="EF Core 実装の Repository と方言非依存の DbContext を生成します（接続先はアプリ側の UseSqlServer / UseNpgsql 等で選択）"
             />
             <RadioButton
-              Content="Repository (SQL Server 専用)"
+              Content="Repository (SQL Server)"
               GroupName="DbAccess"
               IsChecked="{Binding DbAccessRepository}"
               IsEnabled="{Binding CanSelectSqlServerRepository}"
               ToolTipService.ShowOnDisabled="True"
-              ToolTip="Repository は SQL Server 専用です。SQL Server プロバイダの選択中のみ選べます"
+              ToolTip="SqlClient 直書きの自作 Repository を生成します。SQL Server 専用のため、SQL Server プロバイダの選択中のみ選べます"
             />
           </StackPanel>
         </Grid>
@@ -369,6 +369,7 @@
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
           </Grid.RowDefinitions>
 
           <TextBlock
@@ -439,7 +440,7 @@
             Visibility="{Binding ShowValueObjectNamespace, Converter={StaticResource BoolToVisibilityConverter}}"
           />
 
-          <!-- DB アクセス系は「生成内容」の並びに合わせて末尾。Repository と EfCore は排他選択のため同じ行（Row 4）を共有する -->
+          <!-- DB アクセス系は「生成内容」の並びに合わせて末尾。EF Core 選択時は契約（Repository）＋EfCore の 2 欄が並ぶ -->
           <TextBlock
             Grid.Row="4"
             Grid.Column="0"
@@ -458,7 +459,7 @@
           />
 
           <TextBlock
-            Grid.Row="4"
+            Grid.Row="5"
             Grid.Column="0"
             Margin="0,4"
             Style="{StaticResource FieldLabel}"
@@ -466,7 +467,7 @@
             Visibility="{Binding ShowEfCoreNamespace, Converter={StaticResource BoolToVisibilityConverter}}"
           />
           <TextBox
-            Grid.Row="4"
+            Grid.Row="5"
             Grid.Column="1"
             Margin="0,4"
             Style="{StaticResource FormInput}"
