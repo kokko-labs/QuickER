@@ -55,7 +55,7 @@ public sealed class CSharpCodeGenerationService
             .Select(spec => new GeneratedFile
             {
                 FileName = SanitizeFileName(spec.FileName),
-                Content = _renderer.Render(model, options, BuildScope(spec, model.Usings, options)),
+                Content = _renderer.Render(model, options, BuildScope(spec, options)),
             })
             .ToList();
 
@@ -66,28 +66,16 @@ public sealed class CSharpCodeGenerationService
     /// ファイル計画から描画スコープ（名前空間・using・出力バケット）を組み立てる
     /// </summary>
     /// <remarks>
-    /// using はモデルの System フレームワーク using に、他ファイルの名前空間（クロス参照）を加える。
-    /// <c>// &lt;auto-generated /&gt;</c> 出力により未使用 using 警告は抑止されるため、過剰な付与は無害
+    /// using は <see cref="GeneratedFileUsings"/> がバケット単位で解決する（そのファイルが含む全バケットの
+    /// 外部 using の和集合＋依存グラフ由来のクロス名前空間 using）。これにより SqlClient / EntityFrameworkCore /
+    /// DependencyInjection 等が、それらを使わないファイルへ漏れない。
     /// </remarks>
-    private static RenderScope BuildScope(
-        GeneratedFileSpec spec,
-        IReadOnlyList<string> systemUsings,
-        CodeGenerationOptions options
-    )
+    private static RenderScope BuildScope(GeneratedFileSpec spec, CodeGenerationOptions options)
     {
-        var usings = new List<string>(systemUsings);
-        foreach (var crossNamespace in spec.CrossNamespaceUsings)
-        {
-            if (!usings.Contains(crossNamespace))
-            {
-                usings.Add(crossNamespace);
-            }
-        }
-
         return new RenderScope
         {
             NamespaceName = spec.NamespaceName,
-            Usings = usings,
+            Usings = GeneratedFileUsings.Resolve(spec, options),
             Runtime = spec.Buckets.Contains(GenerationBucket.Runtime),
             ValueObjects = spec.Buckets.Contains(GenerationBucket.ValueObject),
             Entities = spec.Buckets.Contains(GenerationBucket.Entity),

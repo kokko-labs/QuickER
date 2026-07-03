@@ -98,6 +98,48 @@ public class GeneratedFilePlannerTests
         entity.CrossNamespaceUsings.Should().NotContain("Acme.App.Entities");
     }
 
+    /// <summary>クロス using が依存グラフに基づき、参照しないバケットの名前空間を using しないことを検証する</summary>
+    [Fact]
+    public void Plan_Split_CrossUsings_FollowDependencyGraph()
+    {
+        var options = new CodeGenerationOptions
+        {
+            NamespaceName = "Acme.App",
+            SplitFilesByCategory = true,
+            GenerateValueObjects = true,
+            GenerateEfCore = true,
+        };
+
+        var plan = GeneratedFilePlanner.Plan(options);
+
+        // Entity は Runtime / ValueObjects のみ依存し、Repositories / EfCore / Mappers は using しない
+        var entity = plan.Single(spec => spec.FileName == "Entities.g.cs");
+        entity
+            .CrossNamespaceUsings.Should()
+            .BeEquivalentTo("Acme.App.Runtime", "Acme.App.ValueObjects");
+
+        // Mapper は Entity / EditModel / Runtime に依存する（ValueObjects へは依存しない）
+        var mapper = plan.Single(spec => spec.FileName == "Mappers.g.cs");
+        mapper
+            .CrossNamespaceUsings.Should()
+            .BeEquivalentTo("Acme.App.Entities", "Acme.App.EditModels", "Acme.App.Runtime");
+
+        // EfCore は Entity / Repositories / Runtime / ValueObjects に依存する
+        var efCore = plan.Single(spec => spec.FileName == "EfCore.g.cs");
+        efCore
+            .CrossNamespaceUsings.Should()
+            .BeEquivalentTo(
+                "Acme.App.Entities",
+                "Acme.App.Repositories",
+                "Acme.App.Runtime",
+                "Acme.App.ValueObjects"
+            );
+
+        // Runtime は共有基盤で他バケットへ依存しない
+        var runtime = plan.Single(spec => spec.FileName == "Runtime.g.cs");
+        runtime.CrossNamespaceUsings.Should().BeEmpty();
+    }
+
     /// <summary>分割時に複数カテゴリが同一名前空間でも、ファイルは分かれ、自分自身は using しないことを検証する</summary>
     [Fact]
     public void Plan_Split_SameNamespace_KeepsSeparateFilesWithoutSelfUsing()

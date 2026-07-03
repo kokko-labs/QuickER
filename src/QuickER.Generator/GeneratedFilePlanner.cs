@@ -105,10 +105,52 @@ public static class GeneratedFilePlanner
     public static string DefaultFileName(GenerationBucket bucket) =>
         $"{DefaultSuffix(bucket)}.g.cs";
 
+    /// <summary>
+    /// 分割時、あるバケットのファイルが using すべき「他バケットの名前空間」を決めるための依存グラフ。
+    /// </summary>
+    /// <remarks>
+    /// 根拠（<c>Templates/CSharpRuntime.scriban</c> の型参照から確定）:
+    ///   Entity   → Runtime（EntityBase / 独自属性 / RowState）, ValueObject（プロパティ型が VO）
+    ///   EditModel→ Runtime（EditModelBase / EditModelCollection）, ValueObject（VO 由来のパース・検証）
+    ///   Mapper   → Entity（{Entity}）, EditModel（{Entity}EditModel）, Runtime（基底・RowState）
+    ///   ValueObject → Runtime（VO 基底 ValueObjectBase / IValueObject / JSON コンバータ）
+    ///   Repository → Entity（対象 Entity）, Runtime（契約基底・SqlQuery・メタデータ）, ValueObject（VO 束縛の unwrap）
+    ///   EfCore   → Entity（DbSet&lt;{Entity}&gt; / Fluent 構成）, Repository（契約・AddGeneratedEfCoreRepositories）,
+    ///              Runtime（EntityBase の Ignore 対象・翻訳プラグイン）, ValueObject（VO の変換構成）
+    ///   Runtime  → （他バケットへ依存しない共有基盤）
+    /// 依存先が有効バケットに存在しない構成（例: VO 無効）では、その名前空間はクロス using から自然に落ちる。
+    /// </remarks>
+    private static IReadOnlyList<GenerationBucket> BucketDependencies(GenerationBucket bucket) =>
+        bucket switch
+        {
+            GenerationBucket.Entity => [GenerationBucket.Runtime, GenerationBucket.ValueObject],
+            GenerationBucket.EditModel => [GenerationBucket.Runtime, GenerationBucket.ValueObject],
+            GenerationBucket.Mapper =>
+            [
+                GenerationBucket.Entity,
+                GenerationBucket.EditModel,
+                GenerationBucket.Runtime,
+            ],
+            GenerationBucket.ValueObject => [GenerationBucket.Runtime],
+            GenerationBucket.Repository =>
+            [
+                GenerationBucket.Entity,
+                GenerationBucket.Runtime,
+                GenerationBucket.ValueObject,
+            ],
+            GenerationBucket.EfCore =>
+            [
+                GenerationBucket.Entity,
+                GenerationBucket.Repository,
+                GenerationBucket.Runtime,
+                GenerationBucket.ValueObject,
+            ],
+            _ => [],
+        };
+
     /// <summary>生成対象として有効なバケットを正準順で返す</summary>
     /// <remarks>
-    /// 並び順は UI のカテゴリ別 namespace 欄と一致させる（Entity → EditModel → Mapper → ValueObject → Repository → EfCore → Runtime）。
-    /// DB アクセス系（Repository / EfCore）は UI の「DB アクセス」選択が値オブジェクトの下にあるため後段に置く。
+    /// 並び順は UI のカテゴリ別 namespace 欄と一致させる（Entity → EditModel → Mapper → ValueObject → Repository → EfCore → Runtime）
     /// Runtime は何らかのクラスを生成する限り常に必要（共有基盤を保持するため）で、UI と同じく末尾に置く
     /// </remarks>
     public static IReadOnlyList<GenerationBucket> ActiveBuckets(CodeGenerationOptions options)
@@ -195,13 +237,20 @@ public static class GeneratedFilePlanner
             bucket => bucket,
             bucket => ResolveNamespace(options, bucket)
         );
+        var activeSet = active.ToHashSet();
 
         return active
             .Select(bucket =>
             {
                 var ownNamespace = namespaceByBucket[bucket];
-                var crossUsings = namespaceByBucket
-                    .Values.Where(ns => !string.Equals(ns, ownNamespace, StringComparison.Ordinal))
+                // 依存グラフから「実際に参照する他バケット」の名前空間だけを using する
+                // （無差別に全バケットを using していた従来動作の不要 using を排除する）。
+                // 有効でない依存先（例: VO 無効時の ValueObject）は自然に除外される。また依存先が
+                // 自分と同一名前空間へ解決される場合は自分自身の using になるため除外する。
+                var crossUsings = BucketDependencies(bucket)
+                    .Where(dependency => activeSet.Contains(dependency))
+                    .Select(dependency => namespaceByBucket[dependency])
+                    .Where(ns => !string.Equals(ns, ownNamespace, StringComparison.Ordinal))
                     .Distinct(StringComparer.Ordinal)
                     .OrderBy(ns => ns, StringComparer.Ordinal)
                     .ToList();

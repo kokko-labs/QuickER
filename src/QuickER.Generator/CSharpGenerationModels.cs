@@ -18,9 +18,6 @@ internal sealed class CSharpGenerationModel
     /// <summary>Repository クラスの生成モデル一覧</summary>
     public required IReadOnlyList<CSharpRepositoryModel> RepositoryClasses { get; init; }
 
-    /// <summary>生成コード冒頭に出力する using 名前空間一覧</summary>
-    public required IReadOnlyList<string> Usings { get; init; }
-
     /// <summary>値オブジェクト（Value Object）クラスの生成モデル一覧（GenerateValueObjects が OFF のときは空）</summary>
     public required IReadOnlyList<CSharpValueObjectModel> ValueObjectClasses { get; init; }
 

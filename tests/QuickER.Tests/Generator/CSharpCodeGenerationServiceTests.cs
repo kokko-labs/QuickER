@@ -2897,6 +2897,93 @@ public class CSharpCodeGenerationServiceTests
             .NotContain("using Microsoft.EntityFrameworkCore;");
     }
 
+    /// <summary>
+    /// 分割×フル構成で、Entity / EditModel / Mapper / ValueObjects / Runtime の各ファイルに、それらが使わない
+    /// 外部 using（EntityFrameworkCore / Data.SqlClient / DependencyInjection）が 1 行も含まれないことを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 本テストは「using をバケット単位で解決する」設計（<see cref="GeneratedFileUsings"/>）の核心を守る。
+    /// 契約のみを持つ Repository ファイル（EF 単独時）に SqlClient / DI の using が漏れないことも併せて検証する。
+    /// EF 系フラグを両方 ON（GenerateRepositories=true・GenerateEfCore=true）にしてすべての外部 using が
+    /// 発生し得る最大構成で確認する。
+    /// </remarks>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Generate_Split_ShouldNotLeakForeignUsingsIntoUnrelatedFiles(bool vo)
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            ValueObjectDiagram(),
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                SplitFilesByCategory = true,
+                GenerateValueObjects = vo,
+                GenerateRepositories = true,
+                GenerateEfCore = true,
+            }
+        );
+
+        result.HasErrors.Should().BeFalse();
+
+        // これら 3 つの外部 using は、その依存を実際に使わないファイルへ現れてはならない
+        string[] forbiddenUsings =
+        [
+            "using Microsoft.EntityFrameworkCore",
+            "using Microsoft.Data.SqlClient;",
+            "using Microsoft.Extensions.DependencyInjection",
+        ];
+
+        string[] neutralFiles =
+        [
+            "Entities.g.cs",
+            "EditModels.g.cs",
+            "Mappers.g.cs",
+            "Runtime.g.cs",
+            .. (vo ? new[] { "ValueObjects.g.cs" } : []),
+        ];
+
+        foreach (var fileName in neutralFiles)
+        {
+            var content = Content(result, fileName);
+            foreach (var forbidden in forbiddenUsings)
+            {
+                content
+                    .Should()
+                    .NotContain(
+                        forbidden,
+                        $"{fileName} に外部 using「{forbidden}」が漏れてはならない（VO={vo}）"
+                    );
+            }
+        }
+    }
+
+    /// <summary>EF 単独出力の分割時、契約のみの Repository ファイルに SqlClient / DependencyInjection の using が漏れないことを検証する</summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Generate_EfCoreOnly_Split_RepositoryFile_ShouldNotUseSqlClientOrDi(bool vo)
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            ValueObjectDiagram(),
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                SplitFilesByCategory = true,
+                GenerateValueObjects = vo,
+                GenerateRepositories = false,
+                GenerateEfCore = true,
+            }
+        );
+
+        result.HasErrors.Should().BeFalse();
+
+        // 契約のみ（自作 SQL Server 実装なし）の Repository ファイルは SqlClient・DI に依存しない
+        var repository = Content(result, "Repositories.g.cs");
+        repository.Should().NotContain("using Microsoft.Data.SqlClient;");
+        repository.Should().NotContain("using Microsoft.Extensions.DependencyInjection;");
+    }
+
     /// <summary>EfCore カテゴリの名前空間を上書き指定できることを検証する</summary>
     [Fact]
     public void Generate_EfCore_Split_ShouldHonorCustomNamespace()

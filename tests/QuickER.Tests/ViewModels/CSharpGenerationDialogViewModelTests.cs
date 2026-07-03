@@ -146,7 +146,8 @@ public class CSharpGenerationDialogViewModelTests
         vm.DbAccessEfCore = true;
 
         vm.ShowEfCoreNamespace.Should().BeTrue();
-        vm.ShowRepositoryNamespace.Should().BeTrue("EF Core でも契約が Repository バケットに出力される");
+        vm.ShowRepositoryNamespace.Should()
+            .BeTrue("EF Core でも契約が Repository バケットに出力される");
         vm.EfCoreNamespace.Should().Be("Acme.App.EfCore");
 
         vm.BaseNamespace = "Contoso.Sales";

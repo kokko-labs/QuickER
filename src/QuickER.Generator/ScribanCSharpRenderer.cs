@@ -113,32 +113,12 @@ internal sealed class ScribanCSharpRenderer
             (options.GenerateRepositories || options.IncludeDataAnnotations)
             && model.EntityClasses.Any(c => c.Properties.Any(p => p.SqlDbTypeName is not null));
 
-        // EF Core の using はこのファイルが EfCore バケットを含むときのみ付与する。
-        // これにより GenerateEfCore=false や、分割時の非 EfCore ファイルへ EF 依存が漏れない
-        var usings = scope.Usings;
-        if (scope.EfCore)
-        {
-            // 値オブジェクトの文字列メソッド翻訳プラグイン（IMethodCallTranslatorPlugin 等）で使う
-            // EF Core の Query / Storage / Infrastructure / Diagnostics 名前空間も併せて補う。
-            string[] efNamespaces =
-            [
-                "Microsoft.EntityFrameworkCore",
-                "Microsoft.EntityFrameworkCore.Diagnostics",
-                "Microsoft.EntityFrameworkCore.Infrastructure",
-                "Microsoft.EntityFrameworkCore.Query",
-                "Microsoft.EntityFrameworkCore.Query.SqlExpressions",
-                "Microsoft.EntityFrameworkCore.Storage",
-                "Microsoft.Extensions.DependencyInjection",
-                "Microsoft.Extensions.DependencyInjection.Extensions",
-            ];
-            var missing = efNamespaces.Where(ns => !usings.Contains(ns)).ToArray();
-            usings = missing.Length == 0 ? usings : [.. usings, .. missing];
-        }
-
+        // using は呼び出し側（GeneratedFileUsings）がバケット単位で解決済み。EF Core など外部依存の
+        // 出し分けもそこで完結するため、レンダラーでは受け取った集合をそのまま流し込む
         var scriptObject = new Scriban.Runtime.ScriptObject
         {
             ["namespace_name"] = scope.NamespaceName,
-            ["usings"] = usings,
+            ["usings"] = scope.Usings,
             ["entity_classes"] = model.EntityClasses,
             ["edit_model_classes"] = model.EditModelClasses,
             ["mapper_classes"] = model.MapperClasses,

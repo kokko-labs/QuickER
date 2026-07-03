@@ -73,7 +73,6 @@ internal sealed partial class CSharpGenerationModelBuilder
                         .Cast<CSharpRepositoryModel>()
                         .ToList()
                     : [],
-            Usings = BuildUsings(options).ToList(),
             ValueObjectClasses = _valueObjects
                 .Values.OrderBy(vo => vo.ClassName, StringComparer.Ordinal)
                 .ToList(),
@@ -593,94 +592,6 @@ internal sealed partial class CSharpGenerationModelBuilder
         }
 
         return navigationsByEntity;
-    }
-
-    /// <summary>生成オプションに応じて必要な using 名前空間の集合を構築する</summary>
-    private static IEnumerable<string> BuildUsings(CodeGenerationOptions options)
-    {
-        // 明示的な using を網羅し、ImplicitUsings 無効のプロジェクトでもそのままコンパイルできるようにする。
-        // System / System.Collections.Generic / System.Linq は共有フレームワークに常時含まれ、生成コードの
-        // ほぼ全構成で使用するため無条件で付与する（未使用でも auto-generated ファイルでは警告抑止される）。
-        var usings = new HashSet<string> { "System", "System.Collections.Generic", "System.Linq" };
-
-        // EntityBase の値比較・値ハッシュ・JSON 出力／クローンで使用：
-        // StructuralComparisons（System.Collections）、値プロパティのキャッシュ（System.Collections.Concurrent /
-        // System.Reflection）、ToJson / Clone（System.Text.Json）
-        if (options.GenerateEntityClasses)
-        {
-            usings.Add("System.Collections");
-            usings.Add("System.Collections.Concurrent");
-            usings.Add("System.Reflection");
-            usings.Add("System.Text.Json");
-            usings.Add("System.Text.Json.Serialization");
-        }
-
-        // INotifyPropertyChanged / INotifyDataErrorInfo（EditModelBase）、EditModelCollection の ObservableCollection、
-        // Owner（IList）・GetErrors（IEnumerable）の System.Collections
-        if (options.GenerateEditModels)
-        {
-            usings.Add("System.ComponentModel");
-            usings.Add("System.Collections");
-            usings.Add("System.Collections.ObjectModel");
-        }
-
-        // 共通契約（インターフェイス群・SqlQuery・メタデータ・グラフセーバ・RawSqlMapper 等）は自作 SQL Server 実装と
-        // EF Core 実装の共有基盤であり、どちらか一方でも有効なら BCL 系の using が必要になる。
-        if (options.GenerateRepositories || options.GenerateEfCore)
-        {
-            usings.Add("System.Collections");
-            usings.Add("System.Collections.Concurrent");
-            usings.Add("System.Data");
-            usings.Add("System.Globalization");
-            usings.Add("System.Linq.Expressions");
-            usings.Add("System.Reflection");
-            usings.Add("System.Text.Json");
-            usings.Add("System.Text.Json.Serialization.Metadata");
-            usings.Add("System.Threading");
-            usings.Add("System.Threading.Tasks");
-
-            // 射影マッピングの共有ヘルパー（RawSqlMapper.ReadProjectionRowsAsync）はプロバイダ非依存の
-            // DbDataReader / DbCommand（System.Data.Common）を受け取る（自作・EF 版実行器で実装を共有するため）
-            usings.Add("System.Data.Common");
-        }
-
-        // Microsoft.Data.SqlClient は自作 SQL Server 実装（SqlExecutor / SqlServerRepository / SqlQuery の
-        // SQL Server パス等）専用の依存。EF 単独出力へ漏れないよう GenerateRepositories のときだけ付与する。
-        if (options.GenerateRepositories)
-        {
-            usings.Add("Microsoft.Data.SqlClient");
-            usings.Add("Microsoft.Extensions.DependencyInjection");
-        }
-
-        if (options.IncludeDataAnnotations)
-        {
-            usings.Add("System.ComponentModel.DataAnnotations");
-            usings.Add("System.ComponentModel.DataAnnotations.Schema");
-            // [SqlColumnType] は Repository 生成時に加え IncludeDataAnnotations 時にも出力され得るため、
-            // SqlDbType（System.Data、BCL）の using をこちらでも保証する（Repository なし構成向け）。
-            usings.Add("System.Data");
-        }
-
-        if (options.IncludeJsonIgnoreOnParentNavigation)
-        {
-            usings.Add("System.Text.Json.Serialization");
-        }
-
-        // 値オブジェクト：等価(StructuralComparisons)・JSON 変換器・SqlValueObjectActivator(CultureInfo)・リフレクション
-        if (options.GenerateValueObjects)
-        {
-            usings.Add("System.Collections");
-            usings.Add("System.Globalization");
-            usings.Add("System.Reflection");
-            usings.Add("System.Text.Json");
-            usings.Add("System.Text.Json.Serialization");
-        }
-
-        // System を先頭、続いて System.* を序数順、最後にそれ以外（Microsoft.* 等）を序数順で安定的に並べる
-        return usings
-            .OrderByDescending(ns => ns == "System")
-            .ThenByDescending(ns => ns.StartsWith("System", StringComparison.Ordinal))
-            .ThenBy(ns => ns, StringComparer.Ordinal);
     }
 
     /// <summary>プロパティ名から先頭小文字・アンダースコア始まりのフィールド名を導出する</summary>
