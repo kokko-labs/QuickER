@@ -41,7 +41,7 @@ public sealed class MySqlContainerFixture : IAsyncLifetime
     {
         try
         {
-            _container = new MySqlBuilder().WithImage("mysql:8.4").Build();
+            _container = new MySqlBuilder("mysql:8.4").Build();
             await _container.StartAsync().ConfigureAwait(false);
             // @fk 等のユーザー変数を使う動的 SQL のため AllowUserVariables を付与する
             var baseCs = _container.GetConnectionString();

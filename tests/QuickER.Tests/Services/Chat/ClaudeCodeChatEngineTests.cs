@@ -75,11 +75,11 @@ public class ClaudeCodeChatEngineTests
         engine.AssistantDeltaReceived += (_, d) => deltas.Add(d);
         engine.TurnCompleted += (_, r) => completed = r;
 
-        await engine.InitializeAsync();
+        await engine.InitializeAsync(TestContext.Current.CancellationToken);
         engine.IsReady.Should().BeTrue();
 
-        await engine.StartConversationAsync();
-        await engine.SendAsync("やあ");
+        await engine.StartConversationAsync(TestContext.Current.CancellationToken);
+        await engine.SendAsync("やあ", TestContext.Current.CancellationToken);
 
         deltas.Should().ContainSingle().Which.Should().Be("こんにちは");
         completed!.Value.Success.Should().BeTrue();
@@ -96,10 +96,10 @@ public class ClaudeCodeChatEngineTests
         client.Outcomes.Enqueue(new ClaudeCodeTurnOutcome(true, null, "s2", false));
         var engine = CreateEngine(client);
 
-        await engine.InitializeAsync();
-        await engine.StartConversationAsync();
-        await engine.SendAsync("1 回目");
-        await engine.SendAsync("2 回目");
+        await engine.InitializeAsync(TestContext.Current.CancellationToken);
+        await engine.StartConversationAsync(TestContext.Current.CancellationToken);
+        await engine.SendAsync("1 回目", TestContext.Current.CancellationToken);
+        await engine.SendAsync("2 回目", TestContext.Current.CancellationToken);
 
         client.ResumeSessionIdsAtCall.Should().Equal(new string?[] { null, "s1" });
 
@@ -117,9 +117,9 @@ public class ClaudeCodeChatEngineTests
         ErChatTurnResult? completed = null;
         engine.TurnCompleted += (_, r) => completed = r;
 
-        await engine.InitializeAsync();
-        await engine.StartConversationAsync();
-        await engine.SendAsync("やあ");
+        await engine.InitializeAsync(TestContext.Current.CancellationToken);
+        await engine.StartConversationAsync(TestContext.Current.CancellationToken);
+        await engine.SendAsync("やあ", TestContext.Current.CancellationToken);
 
         completed!.Value.Success.Should().BeFalse();
         completed!.Value.Error.Should().Contain("ログイン");
@@ -134,7 +134,7 @@ public class ClaudeCodeChatEngineTests
         var client = new FakeClaudeCodeClient { Available = false };
         var engine = CreateEngine(client);
 
-        await engine.InitializeAsync();
+        await engine.InitializeAsync(TestContext.Current.CancellationToken);
 
         engine.IsReady.Should().BeFalse();
         engine.StatusSummary.Should().Contain("見つかりません");
@@ -149,8 +149,8 @@ public class ClaudeCodeChatEngineTests
         var client = new FakeClaudeCodeClient();
         var engine = CreateEngine(client);
 
-        await engine.InitializeAsync();
-        await engine.InterruptAsync();
+        await engine.InitializeAsync(TestContext.Current.CancellationToken);
+        await engine.InterruptAsync(TestContext.Current.CancellationToken);
 
         client.Interrupted.Should().BeTrue();
 
@@ -164,7 +164,7 @@ public class ClaudeCodeChatEngineTests
         var client = new FakeClaudeCodeClient();
         var engine = CreateEngine(client);
 
-        await engine.InitializeAsync();
+        await engine.InitializeAsync(TestContext.Current.CancellationToken);
 
         engine.StatusLevel.Should().Be(ConnectionHealth.Pending);
         engine.StatusSummary.Should().Be("未確認");
@@ -179,8 +179,8 @@ public class ClaudeCodeChatEngineTests
         var client = new FakeClaudeCodeClient { ProbeResult = ClaudeLoginProbeResult.LoggedIn };
         var engine = CreateEngine(client);
 
-        await engine.InitializeAsync();
-        await engine.RefreshAsync();
+        await engine.InitializeAsync(TestContext.Current.CancellationToken);
+        await engine.RefreshAsync(TestContext.Current.CancellationToken);
 
         client.ProbeCallCount.Should().Be(1);
         engine.StatusLevel.Should().Be(ConnectionHealth.Ready);
@@ -195,8 +195,8 @@ public class ClaudeCodeChatEngineTests
         var client = new FakeClaudeCodeClient { ProbeResult = ClaudeLoginProbeResult.NotLoggedIn };
         var engine = CreateEngine(client);
 
-        await engine.InitializeAsync();
-        await engine.RefreshAsync();
+        await engine.InitializeAsync(TestContext.Current.CancellationToken);
+        await engine.RefreshAsync(TestContext.Current.CancellationToken);
 
         engine.StatusLevel.Should().Be(ConnectionHealth.NeedsAction);
         engine.Guidance.Should().Contain("/login");
@@ -211,8 +211,8 @@ public class ClaudeCodeChatEngineTests
         var client = new FakeClaudeCodeClient { Available = false };
         var engine = CreateEngine(client);
 
-        await engine.InitializeAsync();
-        await engine.RefreshAsync();
+        await engine.InitializeAsync(TestContext.Current.CancellationToken);
+        await engine.RefreshAsync(TestContext.Current.CancellationToken);
 
         client.ProbeCallCount.Should().Be(0);
         engine.StatusLevel.Should().Be(ConnectionHealth.NeedsAction);
@@ -228,9 +228,9 @@ public class ClaudeCodeChatEngineTests
         client.Outcomes.Enqueue(new ClaudeCodeTurnOutcome(true, null, "s1", false));
         var engine = CreateEngine(client);
 
-        await engine.InitializeAsync();
-        await engine.StartConversationAsync();
-        await engine.SendAsync("やあ");
+        await engine.InitializeAsync(TestContext.Current.CancellationToken);
+        await engine.StartConversationAsync(TestContext.Current.CancellationToken);
+        await engine.SendAsync("やあ", TestContext.Current.CancellationToken);
 
         engine.StatusLevel.Should().Be(ConnectionHealth.Ready);
 

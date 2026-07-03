@@ -62,17 +62,21 @@ internal sealed partial class CSharpGenerationModelBuilder
                     )
                     .ToList()
                 : [],
-            RepositoryClasses = options.GenerateRepositories
-                ? diagram
-                    .Entities.Select(entity => BuildRepositoryClass(entity, diagnostics))
-                    .Where(model => model is not null)
-                    .Cast<CSharpRepositoryModel>()
-                    .ToList()
-                : [],
-            Usings = BuildUsings(options).ToList(),
+            // 共通契約（インターフェイス群・SqlQuery・メタデータ等）と各エンティティ用リポジトリインターフェイスは、
+            // 自作 SQL Server 実装（GenerateRepositories）・EF Core 実装（GenerateEfCore）のどちらかが有効なら必要になる。
+            // EF 単独出力でも EF 版 Repository が I{Entity}Repository を実装するため、モデルを構築しておく
+            RepositoryClasses =
+                options.GenerateRepositories || options.GenerateEfCore
+                    ? diagram
+                        .Entities.Select(entity => BuildRepositoryClass(entity, diagnostics))
+                        .Where(model => model is not null)
+                        .Cast<CSharpRepositoryModel>()
+                        .ToList()
+                    : [],
             ValueObjectClasses = _valueObjects
                 .Values.OrderBy(vo => vo.ClassName, StringComparer.Ordinal)
                 .ToList(),
+            EfCore = BuildEfCoreModel(diagram, options),
         };
     }
 
@@ -588,82 +592,6 @@ internal sealed partial class CSharpGenerationModelBuilder
         }
 
         return navigationsByEntity;
-    }
-
-    /// <summary>生成オプションに応じて必要な using 名前空間の集合を構築する</summary>
-    private static IEnumerable<string> BuildUsings(CodeGenerationOptions options)
-    {
-        // 明示的な using を網羅し、ImplicitUsings 無効のプロジェクトでもそのままコンパイルできるようにする。
-        // System / System.Collections.Generic / System.Linq は共有フレームワークに常時含まれ、生成コードの
-        // ほぼ全構成で使用するため無条件で付与する（未使用でも auto-generated ファイルでは警告抑止される）。
-        var usings = new HashSet<string> { "System", "System.Collections.Generic", "System.Linq" };
-
-        // EntityBase の値比較・値ハッシュ・JSON 出力／クローンで使用：
-        // StructuralComparisons（System.Collections）、値プロパティのキャッシュ（System.Collections.Concurrent /
-        // System.Reflection）、ToJson / Clone（System.Text.Json）
-        if (options.GenerateEntityClasses)
-        {
-            usings.Add("System.Collections");
-            usings.Add("System.Collections.Concurrent");
-            usings.Add("System.Reflection");
-            usings.Add("System.Text.Json");
-            usings.Add("System.Text.Json.Serialization");
-        }
-
-        // INotifyPropertyChanged / INotifyDataErrorInfo（EditModelBase）、EditModelCollection の ObservableCollection、
-        // Owner（IList）・GetErrors（IEnumerable）の System.Collections
-        if (options.GenerateEditModels)
-        {
-            usings.Add("System.ComponentModel");
-            usings.Add("System.Collections");
-            usings.Add("System.Collections.ObjectModel");
-        }
-
-        if (options.GenerateRepositories)
-        {
-            usings.Add("System.Collections");
-            usings.Add("System.Collections.Concurrent");
-            usings.Add("System.Data");
-            usings.Add("System.Globalization");
-            usings.Add("System.Linq.Expressions");
-            usings.Add("System.Reflection");
-            usings.Add("System.Text.Json");
-            usings.Add("System.Text.Json.Serialization.Metadata");
-            usings.Add("System.Threading");
-            usings.Add("System.Threading.Tasks");
-            usings.Add("Microsoft.Data.SqlClient");
-            usings.Add("Microsoft.Extensions.DependencyInjection");
-        }
-
-        if (options.IncludeDataAnnotations)
-        {
-            usings.Add("System.ComponentModel.DataAnnotations");
-            usings.Add("System.ComponentModel.DataAnnotations.Schema");
-            // [SqlColumnType] は Repository 生成時に加え IncludeDataAnnotations 時にも出力され得るため、
-            // SqlDbType（System.Data、BCL）の using をこちらでも保証する（Repository なし構成向け）。
-            usings.Add("System.Data");
-        }
-
-        if (options.IncludeJsonIgnoreOnParentNavigation)
-        {
-            usings.Add("System.Text.Json.Serialization");
-        }
-
-        // 値オブジェクト：等価(StructuralComparisons)・JSON 変換器・SqlValueObjectActivator(CultureInfo)・リフレクション
-        if (options.GenerateValueObjects)
-        {
-            usings.Add("System.Collections");
-            usings.Add("System.Globalization");
-            usings.Add("System.Reflection");
-            usings.Add("System.Text.Json");
-            usings.Add("System.Text.Json.Serialization");
-        }
-
-        // System を先頭、続いて System.* を序数順、最後にそれ以外（Microsoft.* 等）を序数順で安定的に並べる
-        return usings
-            .OrderByDescending(ns => ns == "System")
-            .ThenByDescending(ns => ns.StartsWith("System", StringComparison.Ordinal))
-            .ThenBy(ns => ns, StringComparer.Ordinal);
     }
 
     /// <summary>プロパティ名から先頭小文字・アンダースコア始まりのフィールド名を導出する</summary>

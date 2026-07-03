@@ -36,6 +36,49 @@ public class GeneratedCodeCompilationTests
         return data;
     }
 
+    /// <summary>マトリクスケース: EF Core＋自作 Repository の両方生成（パリティ構成）× Split{off,on} × VO{off,on} の 4 ケース</summary>
+    public static TheoryData<string, CodeGenerationOptions> EfCoreMatrixCases()
+    {
+        var data = new TheoryData<string, CodeGenerationOptions>();
+        foreach (var split in new[] { false, true })
+        foreach (var vo in new[] { false, true })
+        {
+            data.Add(
+                $"EfCore Split={split} VO={vo}",
+                new CodeGenerationOptions
+                {
+                    NamespaceName = "Sample.Domain",
+                    SplitFilesByCategory = split,
+                    GenerateValueObjects = vo,
+                    GenerateEfCore = true,
+                }
+            );
+        }
+        return data;
+    }
+
+    /// <summary>マトリクスケース: EF 単独出力（自作 SQL Server 実装なし）× Split{off,on} × VO{off,on} の 4 ケース</summary>
+    public static TheoryData<string, CodeGenerationOptions> EfCoreOnlyMatrixCases()
+    {
+        var data = new TheoryData<string, CodeGenerationOptions>();
+        foreach (var split in new[] { false, true })
+        foreach (var vo in new[] { false, true })
+        {
+            data.Add(
+                $"EfCore 単独 Split={split} VO={vo}",
+                new CodeGenerationOptions
+                {
+                    NamespaceName = "Sample.Domain",
+                    SplitFilesByCategory = split,
+                    GenerateValueObjects = vo,
+                    GenerateEfCore = true,
+                    GenerateRepositories = false,
+                }
+            );
+        }
+        return data;
+    }
+
     /// <summary>マトリクスケース: カテゴリ削減の現実的な組み合わせ × Split{off,on}</summary>
     public static TheoryData<string, CodeGenerationOptions> ReducedCategoryCases()
     {
@@ -138,6 +181,22 @@ public class GeneratedCodeCompilationTests
     [Theory]
     [MemberData(nameof(FullMatrixCases))]
     public void Generate_FullMatrix_ShouldProduceCompilableCode(
+        string caseName,
+        CodeGenerationOptions options
+    ) => AssertCompiles(caseName, options);
+
+    /// <summary>EF Core＋自作 Repository（Split × VO の 4 ケース）で、生成コードがエラー・警告なしでコンパイルできることを検証する</summary>
+    [Theory]
+    [MemberData(nameof(EfCoreMatrixCases))]
+    public void Generate_EfCoreMatrix_ShouldProduceCompilableCode(
+        string caseName,
+        CodeGenerationOptions options
+    ) => AssertCompiles(caseName, options);
+
+    /// <summary>EF 単独出力（Split × VO の 4 ケース）で、生成コードがエラー・警告なしでコンパイルできることを検証する</summary>
+    [Theory]
+    [MemberData(nameof(EfCoreOnlyMatrixCases))]
+    public void Generate_EfCoreOnlyMatrix_ShouldProduceCompilableCode(
         string caseName,
         CodeGenerationOptions options
     ) => AssertCompiles(caseName, options);

@@ -174,7 +174,7 @@ public partial class MainViewModel
     [RelayCommand]
     private void GenerateCSharpCode()
     {
-        var dialogResult = _appDialogs.ShowCSharpGenerationDialog();
+        var dialogResult = _appDialogs.ShowCSharpGenerationDialog(CurrentProvider);
 
         if (dialogResult is null)
         {

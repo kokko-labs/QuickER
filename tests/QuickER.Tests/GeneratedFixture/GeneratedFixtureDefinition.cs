@@ -28,7 +28,7 @@ public static class GeneratedFixtureDefinition
     /// <summary>生成フィクスチャの名前空間（実行時テストはこの型を直接使用する）</summary>
     public const string NamespaceName = "QuickER.Tests.GeneratedFixture";
 
-    /// <summary>フィクスチャ生成に用いる決定的なオプション（全カテゴリ・VO 有効・単一ファイル）</summary>
+    /// <summary>フィクスチャ生成に用いる決定的なオプション（全カテゴリ・VO 有効・EF Core 有効・単一ファイル）</summary>
     public static CodeGenerationOptions Options { get; } =
         new()
         {
@@ -39,6 +39,7 @@ public static class GeneratedFixtureDefinition
             GenerateMappers = true,
             GenerateRepositories = true,
             GenerateValueObjects = true,
+            GenerateEfCore = true,
             SplitFilesByCategory = false,
         };
 

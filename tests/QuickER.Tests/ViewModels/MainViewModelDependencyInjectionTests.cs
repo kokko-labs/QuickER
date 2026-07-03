@@ -112,7 +112,9 @@ public class MainViewModelDependencyInjectionTests
     /// <summary>アプリ固有ダイアログを表示せず常にキャンセル相当を返すスタブ</summary>
     private sealed class StubAppDialogService : IAppDialogService
     {
-        public CSharpGenerationDialogResult? ShowCSharpGenerationDialog() => null;
+        public CSharpGenerationDialogResult? ShowCSharpGenerationDialog(
+            IDatabaseProvider currentProvider
+        ) => null;
 
         public DbConnectionDialogResult? ShowDbConnectionDialog(
             DbConnectionDialogMode mode,

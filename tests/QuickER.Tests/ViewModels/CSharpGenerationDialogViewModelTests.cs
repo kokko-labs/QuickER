@@ -10,10 +10,16 @@ namespace QuickER.Tests.ViewModels;
 public class CSharpGenerationDialogViewModelTests
 {
     /// <summary>一時フォルダのストアで ViewModel を生成する（実 %APPDATA% を汚さない）</summary>
-    private static CSharpGenerationDialogViewModel CreateViewModel(out string folder)
+    private static CSharpGenerationDialogViewModel CreateViewModel(
+        out string folder,
+        QuickER.Provider.IDatabaseProvider? currentProvider = null
+    )
     {
         folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
-        return new CSharpGenerationDialogViewModel(new CSharpGenerationSettingsStore(folder));
+        return new CSharpGenerationDialogViewModel(
+            new CSharpGenerationSettingsStore(folder),
+            currentProvider: currentProvider
+        );
     }
 
     /// <summary>OK 実行で namespace・出力先・生成オプションが結果へ反映され閉じることを検証する</summary>
@@ -32,23 +38,120 @@ public class CSharpGenerationDialogViewModelTests
         vm.Result!.Options.NamespaceName.Should().Be("Sample.Domain");
         vm.Result.Options.SplitFilesByCategory.Should().BeFalse();
         vm.Result.OutputDirectory.Should().Be(@"C:\temp");
-        vm.Result.Options.GenerateRepositories.Should().BeTrue();
+        // DB アクセスの既定は「なし」（自作 Repository も EF Core も生成しない）
+        vm.Result.Options.GenerateRepositories.Should().BeFalse();
+        vm.Result.Options.GenerateEfCore.Should().BeFalse();
         closed.Should().BeTrue();
     }
 
-    /// <summary>Repository 生成オプションの変更が結果へ反映されることを検証する</summary>
-    [Fact(DisplayName = "Repository 生成オプションを変更すると結果へ反映される")]
-    public void Ok_WithRepositoryOption_StoresSelection()
+    /// <summary>DB アクセスラジオが排他で動き、選択が結果オプションへ反映されることを検証する</summary>
+    [Fact(DisplayName = "DB アクセスラジオは排他選択で結果へ反映される")]
+    public void DbAccessRadios_AreExclusive_AndStoredInResult()
     {
         var vm = CreateViewModel(out _);
         vm.BaseNamespace = "Sample.Domain";
         vm.OutputFilePath = @"C:\temp\Entities.g.cs";
-        vm.GenerateRepositories = false;
 
+        vm.DbAccessNone.Should().BeTrue("既定は「なし」");
+
+        vm.DbAccessEfCore = true;
+        vm.GenerateEfCore.Should().BeTrue();
+        vm.GenerateRepositories.Should().BeFalse();
+
+        vm.DbAccessRepository = true;
+        vm.GenerateRepositories.Should().BeTrue();
+        vm.GenerateEfCore.Should().BeFalse("排他選択のため EF Core は外れる");
+
+        vm.DbAccessEfCore = true;
         vm.OkCommand.Execute(null);
 
         vm.Result.Should().NotBeNull();
-        vm.Result!.Options.GenerateRepositories.Should().BeFalse();
+        vm.Result!.Options.GenerateEfCore.Should().BeTrue();
+        vm.Result.Options.GenerateRepositories.Should().BeFalse();
+    }
+
+    /// <summary>Entity は保存値に依らず常に生成対象（強制 ON）であることを検証する</summary>
+    [Fact(DisplayName = "Entity は保存値に依らず常に生成対象になる")]
+    public void EntityGeneration_IsAlwaysForcedOn()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
+        var store = new CSharpGenerationSettingsStore(folder);
+        var settings = CSharpGenerationSettings.CreateDefault();
+        settings.GenerateEntityClasses = false;
+        store.Save(settings);
+
+        try
+        {
+            var vm = new CSharpGenerationDialogViewModel(store);
+
+            vm.GenerateEntityClasses.Should().BeTrue();
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    /// <summary>SQL Server 以外のプロバイダでは自作 Repository が選択不可になり、保存値も「なし」へ倒れることを検証する</summary>
+    [Fact(DisplayName = "SQL Server 以外では自作 Repository を選択できない")]
+    public void NonSqlServerProvider_DisablesRepositoryOption()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
+        var store = new CSharpGenerationSettingsStore(folder);
+        var settings = CSharpGenerationSettings.CreateDefault();
+        settings.GenerateRepositories = true;
+        store.Save(settings);
+
+        try
+        {
+            var vm = new CSharpGenerationDialogViewModel(
+                store,
+                currentProvider: new QuickER.PostgreSql.PostgreSqlProvider()
+            );
+
+            vm.CanSelectSqlServerRepository.Should().BeFalse();
+            vm.CurrentDatabaseDisplayName.Should()
+                .NotBeEmpty("DB アクセス欄に現在の DB を提示する");
+            // 保存されていた「自作 Repository」選択は矛盾生成物を防ぐため「なし」へ倒す
+            vm.GenerateRepositories.Should().BeFalse();
+            vm.DbAccessNone.Should().BeTrue();
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    /// <summary>SQL Server プロバイダでは自作 Repository を選択できることを検証する</summary>
+    [Fact(DisplayName = "SQL Server プロバイダでは自作 Repository を選択できる")]
+    public void SqlServerProvider_AllowsRepositoryOption()
+    {
+        var vm = CreateViewModel(out _, currentProvider: new QuickER.SqlServer.SqlServerProvider());
+
+        vm.CanSelectSqlServerRepository.Should().BeTrue();
+        vm.CurrentDatabaseDisplayName.Should().Be("SQL Server");
+    }
+
+    /// <summary>EF Core 選択＋分割モードで EfCore 名前空間欄が現れ、ベース変更へ追従することを検証する</summary>
+    [Fact(DisplayName = "EF Core 選択で EfCore 名前空間欄が連動する")]
+    public void EfCoreSelection_TogglesNamespaceField()
+    {
+        var vm = CreateViewModel(out _);
+        vm.BaseNamespace = "Acme.App";
+        vm.SplitFilesByCategory = true;
+
+        vm.ShowEfCoreNamespace.Should().BeFalse("EF Core 未選択では欄を出さない");
+        vm.ShowRepositoryNamespace.Should().BeFalse("DB アクセス「なし」では契約も出力されない");
+
+        vm.DbAccessEfCore = true;
+
+        vm.ShowEfCoreNamespace.Should().BeTrue();
+        vm.ShowRepositoryNamespace.Should()
+            .BeTrue("EF Core でも契約が Repository バケットに出力される");
+        vm.EfCoreNamespace.Should().Be("Acme.App.EfCore");
+
+        vm.BaseNamespace = "Contoso.Sales";
+        vm.EfCoreNamespace.Should().Be("Contoso.Sales.EfCore");
     }
 
     /// <summary>不正な名前空間ではエラーメッセージを表示し、確定・クローズしないことを検証する</summary>
@@ -207,14 +310,48 @@ public class CSharpGenerationDialogViewModelTests
         var vm = CreateViewModel(out _);
         vm.BaseNamespace = "Acme.App";
         vm.SplitFilesByCategory = true;
-        vm.GenerateRepositories = false;
+        vm.DbAccessEfCore = true;
         vm.GenerateValueObjects = true;
 
         vm.ClearCommand.Execute(null);
 
         vm.SplitFilesByCategory.Should().BeFalse();
         vm.BaseNamespace.Should().Be(CSharpGenerationSettings.DefaultBaseNamespace);
-        vm.GenerateRepositories.Should().BeTrue();
+        // 工場出荷既定は DB アクセス「なし」・Entity 常時 ON
+        vm.DbAccessNone.Should().BeTrue();
+        vm.GenerateEntityClasses.Should().BeTrue();
         vm.GenerateValueObjects.Should().BeFalse();
+    }
+
+    /// <summary>EF Core の選択と EfCore 名前空間が保存・復元されることを検証する</summary>
+    [Fact(DisplayName = "EF Core の選択が次回起動時に復元される")]
+    public void EfCoreSelection_IsPersistedAndRestored()
+    {
+        var vm = CreateViewModel(out var folder);
+
+        try
+        {
+            vm.BaseNamespace = "Acme.App";
+            vm.SplitFilesByCategory = true;
+            vm.DbAccessEfCore = true;
+            vm.EfCoreNamespace = "Acme.App.Persistence";
+            vm.OutputFolderPath = @"C:\out";
+            vm.OkCommand.Execute(null);
+
+            var restored = new CSharpGenerationDialogViewModel(
+                new CSharpGenerationSettingsStore(folder)
+            );
+
+            restored.DbAccessEfCore.Should().BeTrue();
+            restored.GenerateRepositories.Should().BeFalse();
+            restored.EfCoreNamespace.Should().Be("Acme.App.Persistence");
+        }
+        finally
+        {
+            if (Directory.Exists(folder))
+            {
+                Directory.Delete(folder, recursive: true);
+            }
+        }
     }
 }

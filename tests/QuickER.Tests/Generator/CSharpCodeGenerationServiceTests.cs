@@ -1121,7 +1121,7 @@ public class CSharpCodeGenerationServiceTests
                 "private readonly ISqlExecutor _sqlExecutor = new SqlExecutor(connectionFactory);"
             );
 
-        // パラメータ束縛は SqlExecutor 側に 1 系統で集約（EntitySaveMetadata からは除去済み）
+        // SqlCommand 版パラメータ束縛は SqlExecutor 側に集約（束縛対象プロパティの解決は RawSqlMapper と共有）
         content
             .Should()
             .Contain("internal static void BindParameters(SqlCommand command, object? parameters)");
@@ -2714,4 +2714,646 @@ public class CSharpCodeGenerationServiceTests
         result.HasErrors.Should().BeFalse();
         Content(result, "Runtime.g.cs").Should().Contain("namespace Acme.App.Runtime;");
     }
+
+    // ---- EF Core（DbContext・Fluent 構成）----
+
+    /// <summary>EF Core 生成 ON で DbContext・DbSet・ToTable/HasKey/HasColumnName/IsRequired/HasMaxLength/HasPrecision が出力されることを検証する</summary>
+    [Fact]
+    public void Generate_EfCore_ShouldEmitDbContextWithFluentConfiguration()
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            ValueObjectDiagram(),
+            new CodeGenerationOptions { NamespaceName = "Sample.Domain", GenerateEfCore = true }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        var content = result.Files[0].Content;
+
+        // using・DbContext・コンストラクタ・OnModelCreating
+        content.Should().Contain("using Microsoft.EntityFrameworkCore;");
+        content.Should().Contain("public partial class QuickErDbContext : DbContext");
+        content
+            .Should()
+            .Contain("public QuickErDbContext(DbContextOptions<QuickErDbContext> options)");
+        content
+            .Should()
+            .Contain("protected override void OnModelCreating(ModelBuilder modelBuilder)");
+        content.Should().Contain("partial void OnModelCreatingPartial(ModelBuilder modelBuilder);");
+
+        // DbSet（複数形プロパティ名）
+        content
+            .Should()
+            .Contain("public DbSet<CustomerEntity> Customers => Set<CustomerEntity>();");
+        content.Should().Contain("public DbSet<OrderEntity> Orders => Set<OrderEntity>();");
+
+        // テーブル・主キー・列・必須・最大長・精度
+        content.Should().Contain("modelBuilder.Entity<CustomerEntity>(entity =>");
+        content.Should().Contain("entity.ToTable(\"customers\");");
+        content.Should().Contain("entity.HasKey(e => e.CustomerId);");
+        content
+            .Should()
+            .Contain(
+                "entity.Property(e => e.Name).HasColumnName(\"name\").IsRequired().HasMaxLength(50);"
+            );
+        content
+            .Should()
+            .Contain(
+                "entity.Property(e => e.Balance).HasColumnName(\"balance\").HasPrecision(10, 2);"
+            );
+    }
+
+    /// <summary>EF Core 生成で EntityBase の永続化対象外メンバーが Fluent の Ignore で除外されることを検証する</summary>
+    [Fact]
+    public void Generate_EfCore_ShouldIgnoreEntityBaseMembers()
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            ValueObjectDiagram(),
+            new CodeGenerationOptions { NamespaceName = "Sample.Domain", GenerateEfCore = true }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        var content = result.Files[0].Content;
+        content.Should().Contain("entity.Ignore(e => e.RowState);");
+        content.Should().Contain("entity.Ignore(e => e.IsAdded);");
+        content.Should().Contain("entity.Ignore(e => e.HasChanges);");
+    }
+
+    /// <summary>EF Core 生成で 1 対多リレーションが HasMany/WithOne/HasForeignKey/OnDelete で構成されることを検証する</summary>
+    [Fact]
+    public void Generate_EfCore_ShouldConfigureOneToManyRelationship()
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            ValueObjectDiagram(),
+            new CodeGenerationOptions { NamespaceName = "Sample.Domain", GenerateEfCore = true }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        var content = result.Files[0].Content;
+        content.Should().Contain(".HasMany(e => e.Orders)");
+        content.Should().Contain(".WithOne(e => e.Customer)");
+        content.Should().Contain(".HasForeignKey(e => e.CustomerId)");
+        // OnDelete 既定（NoAction）はカスケードしないため Restrict
+        content.Should().Contain(".OnDelete(DeleteBehavior.Restrict);");
+    }
+
+    /// <summary>OnDelete=Cascade のリレーションでは OnDelete(DeleteBehavior.Cascade) が構成されることを検証する</summary>
+    [Fact]
+    public void Generate_EfCore_ShouldConfigureCascadeDeleteFromModel()
+    {
+        var diagram = ValueObjectDiagram();
+        diagram.Relationships[0].OnDelete = ForeignKeyReferentialAction.Cascade;
+
+        var result = new CSharpCodeGenerationService().Generate(
+            diagram,
+            new CodeGenerationOptions { NamespaceName = "Sample.Domain", GenerateEfCore = true }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        result.Files[0].Content.Should().Contain(".OnDelete(DeleteBehavior.Cascade);");
+    }
+
+    /// <summary>VO 生成 ON の EF Core では各 VO 列に HasConversion が構成されることを検証する</summary>
+    [Fact]
+    public void Generate_EfCore_WithValueObjects_ShouldEmitHasConversion()
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            ValueObjectDiagram(),
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                GenerateEfCore = true,
+                GenerateValueObjects = true,
+            }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        var content = result.Files[0].Content;
+        // 主キー VO の変換（v.Value / Create）
+        content.Should().Contain(".HasConversion(v => v!.Value, v => CustomerIdValue.Create(v!))");
+        // VO 列は Fluent の HasMaxLength/HasPrecision を出さない（長さ・桁数は VO 内部検証）
+        content.Should().NotContain(".HasMaxLength(50).HasConversion");
+    }
+
+    /// <summary>rowversion 列を持つエンティティの EF Core 構成で IsRowVersion() が出力されることを検証する</summary>
+    [Fact]
+    public void Generate_EfCore_ShouldConfigureRowVersion()
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            RowVersionDiagram(),
+            new CodeGenerationOptions { NamespaceName = "Sample.Domain", GenerateEfCore = true }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        var content = result.Files[0].Content;
+        content
+            .Should()
+            .Contain(
+                "entity.Property(e => e.RowVersion).HasColumnName(\"row_version\").IsRequired().IsRowVersion();"
+            );
+    }
+
+    /// <summary>EF Core 生成 OFF（既定）では EF への using も DbContext も一切出力されないことを検証する</summary>
+    [Fact]
+    public void Generate_EfCore_Disabled_ShouldNotEmitAnyEfCode()
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            ValueObjectDiagram(),
+            new CodeGenerationOptions { NamespaceName = "Sample.Domain" }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        var content = result.Files[0].Content;
+        content.Should().NotContain("Microsoft.EntityFrameworkCore");
+        content.Should().NotContain("QuickErDbContext");
+        content.Should().NotContain("OnModelCreating");
+        content.Should().NotContain("DbSet<");
+    }
+
+    /// <summary>分割出力時に EfCore カテゴリが独自ファイル・独自名前空間で出力され、他ファイルへ EF using が漏れないことを検証する</summary>
+    [Fact]
+    public void Generate_EfCore_Split_ShouldEmitDedicatedFileAndNamespace()
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            ValueObjectDiagram(),
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                SplitFilesByCategory = true,
+                GenerateEfCore = true,
+            }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        result.Files.Should().Contain(file => file.FileName == "EfCore.g.cs");
+
+        var efCore = Content(result, "EfCore.g.cs");
+        efCore.Should().Contain("namespace Sample.Domain.EfCore;");
+        efCore.Should().Contain("using Microsoft.EntityFrameworkCore;");
+        efCore.Should().Contain("public partial class QuickErDbContext : DbContext");
+
+        // EF の using は EfCore ファイルにのみ現れ、Entity ファイルには漏れない
+        Content(result, "Entities.g.cs")
+            .Should()
+            .NotContain("using Microsoft.EntityFrameworkCore;");
+    }
+
+    /// <summary>
+    /// 分割×フル構成で、Entity / EditModel / Mapper / ValueObjects / Runtime の各ファイルに、それらが使わない
+    /// 外部 using（EntityFrameworkCore / Data.SqlClient / DependencyInjection）が 1 行も含まれないことを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 本テストは「using をバケット単位で解決する」設計（<see cref="GeneratedFileUsings"/>）の核心を守る。
+    /// 契約のみを持つ Repository ファイル（EF 単独時）に SqlClient / DI の using が漏れないことも併せて検証する。
+    /// EF 系フラグを両方 ON（GenerateRepositories=true・GenerateEfCore=true）にしてすべての外部 using が
+    /// 発生し得る最大構成で確認する。
+    /// </remarks>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Generate_Split_ShouldNotLeakForeignUsingsIntoUnrelatedFiles(bool vo)
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            ValueObjectDiagram(),
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                SplitFilesByCategory = true,
+                GenerateValueObjects = vo,
+                GenerateRepositories = true,
+                GenerateEfCore = true,
+            }
+        );
+
+        result.HasErrors.Should().BeFalse();
+
+        // これら 3 つの外部 using は、その依存を実際に使わないファイルへ現れてはならない
+        string[] forbiddenUsings =
+        [
+            "using Microsoft.EntityFrameworkCore",
+            "using Microsoft.Data.SqlClient;",
+            "using Microsoft.Extensions.DependencyInjection",
+        ];
+
+        string[] neutralFiles =
+        [
+            "Entities.g.cs",
+            "EditModels.g.cs",
+            "Mappers.g.cs",
+            "Runtime.g.cs",
+            .. (vo ? new[] { "ValueObjects.g.cs" } : []),
+        ];
+
+        foreach (var fileName in neutralFiles)
+        {
+            var content = Content(result, fileName);
+            foreach (var forbidden in forbiddenUsings)
+            {
+                content
+                    .Should()
+                    .NotContain(
+                        forbidden,
+                        $"{fileName} に外部 using「{forbidden}」が漏れてはならない（VO={vo}）"
+                    );
+            }
+        }
+    }
+
+    /// <summary>EF 単独出力の分割時、契約のみの Repository ファイルに SqlClient / DependencyInjection の using が漏れないことを検証する</summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Generate_EfCoreOnly_Split_RepositoryFile_ShouldNotUseSqlClientOrDi(bool vo)
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            ValueObjectDiagram(),
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                SplitFilesByCategory = true,
+                GenerateValueObjects = vo,
+                GenerateRepositories = false,
+                GenerateEfCore = true,
+            }
+        );
+
+        result.HasErrors.Should().BeFalse();
+
+        // 契約のみ（自作 SQL Server 実装なし）の Repository ファイルは SqlClient・DI に依存しない
+        var repository = Content(result, "Repositories.g.cs");
+        repository.Should().NotContain("using Microsoft.Data.SqlClient;");
+        repository.Should().NotContain("using Microsoft.Extensions.DependencyInjection;");
+    }
+
+    /// <summary>EfCore カテゴリの名前空間を上書き指定できることを検証する</summary>
+    [Fact]
+    public void Generate_EfCore_Split_ShouldHonorCustomNamespace()
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            ValueObjectDiagram(),
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                SplitFilesByCategory = true,
+                GenerateEfCore = true,
+                EfCoreNamespace = "Acme.Persistence.EfCore",
+            }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        Content(result, "EfCore.g.cs").Should().Contain("namespace Acme.Persistence.EfCore;");
+    }
+
+    /// <summary>EF 単独出力（GenerateEfCore=true・GenerateRepositories=false）が合法で、エラーなく生成できることを検証する</summary>
+    [Fact]
+    public void Generate_EfCoreOnly_ShouldSucceedWithoutError()
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            ValueObjectDiagram(),
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                GenerateEfCore = true,
+                GenerateRepositories = false,
+            }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        result.Files.Should().NotBeEmpty();
+
+        var content = string.Concat(result.Files.Select(file => file.Content));
+        // 共通契約は出力される
+        content.Should().Contain("public partial interface ISqlExecutor");
+        content.Should().Contain("public sealed class SqlQuery<TEntity>");
+        content.Should().Contain("internal static class RawSqlMapper");
+        // EF 一式は出力される
+        content.Should().Contain("public partial class QuickErDbContext : DbContext");
+        content
+            .Should()
+            .Contain("public static IServiceCollection AddGeneratedEfCoreRepositories(");
+        // 自作 SQL Server 実装は出力されない
+        content.Should().NotContain("public sealed partial class SqlExecutor(");
+        content.Should().NotContain("public abstract partial class SqlServerRepository<");
+        content.Should().NotContain("public static IServiceCollection AddGeneratedRepositories(");
+    }
+
+    /// <summary>EF 単独出力（VO 有無 × 分割有無の 4 通り）の生成物全ファイルに Microsoft.Data.SqlClient 依存が一切現れないことを検証する</summary>
+    /// <remarks>
+    /// SqlParameterValue（値オブジェクト unwrap ヘルパー・BCL のみ）は "SqlParameter " のような型参照ではないため、
+    /// 誤検出しないよう "SqlParameter " は末尾スペース付きで（型参照のみ）判定する
+    /// </remarks>
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public void Generate_EfCoreOnly_ShouldNotDependOnSqlClient(bool split, bool vo)
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            ValueObjectDiagram(),
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                SplitFilesByCategory = split,
+                GenerateValueObjects = vo,
+                GenerateEfCore = true,
+                GenerateRepositories = false,
+            }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        result.Files.Should().NotBeEmpty();
+
+        // SqlClient 由来のトークンが 1 つでも現れたら EF 単独出力の前提（プロバイダのみで使える）が崩れる
+        string[] forbidden =
+        [
+            "Microsoft.Data.SqlClient",
+            "SqlCommand",
+            "SqlConnection(",
+            "SqlDataReader",
+            "SqlParameter ", // SqlParameterValue（VO unwrap・BCL のみ）は除外するため末尾スペース付き
+        ];
+
+        foreach (var file in result.Files)
+        {
+            foreach (var token in forbidden)
+            {
+                file.Content.Should()
+                    .NotContain(
+                        token,
+                        $"EF 単独出力のファイル {file.FileName} に SqlClient 依存トークン「{token}」が現れてはならない（Split={split} VO={vo}）"
+                    );
+            }
+        }
+    }
+
+    /// <summary>EF 単独出力の SqlQuery は SQL Server パス（FOR JSON・接続ファクトリ・SqlExpressionTranslator）を出力せず、実行器委譲のみになることを検証する</summary>
+    [Fact]
+    public void Generate_EfCoreOnly_SqlQuery_ShouldOnlyDelegateToExecutor()
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            SingleEntityDiagram(),
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                GenerateEfCore = true,
+                GenerateRepositories = false,
+            }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        var content = string.Concat(result.Files.Select(file => file.Content));
+
+        // 実行器委譲パスは出力される
+        content.Should().Contain("public sealed class SqlQuery<TEntity>");
+        content
+            .Should()
+            .Contain("return await _executor.ToListAsync(BuildPlan(), cancellationToken);");
+        // SQL Server 専用の要素は出力されない（コード本体で判定。FOR JSON 等は契約の doc コメントに残るためコードで確認する）
+        content.Should().NotContain("private readonly ISqlConnectionFactory _connectionFactory");
+        content.Should().NotContain("internal static class SqlExpressionTranslator");
+        content.Should().NotContain("internal static class JsonQueryPlanner");
+        content.Should().NotContain("private async Task<string> ReadJsonAsync(");
+        content.Should().NotContain("BuildJsonSelect(");
+        // 各エンティティ用リポジトリインターフェイス（契約）は出力される
+        content.Should().Contain(" : IRepository<");
+    }
+
+    // ---- EF Core（EF 版 Repository・SqlExecutor・DI 拡張）----
+
+    /// <summary>EF Core 生成 ON で EF 版 Repository（基底クラス＋エンティティ別実装）が生成されることを検証する</summary>
+    [Fact]
+    public void Generate_EfCore_ShouldEmitEfCoreRepositories()
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            ValueObjectDiagram(),
+            new CodeGenerationOptions { NamespaceName = "Sample.Domain", GenerateEfCore = true }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        var content = result.Files[0].Content;
+
+        // 基底クラス: IDbContextFactory を受け取り IRepository を実装する
+        content.Should().Contain("public abstract partial class EfCoreRepository<TEntity, TKey>(");
+        content.Should().Contain("IDbContextFactory<QuickErDbContext> contextFactory");
+        content.Should().Contain(") : IRepository<TEntity, TKey>");
+
+        // エンティティ別実装: 既存の I{Entity}Repository インターフェイスをそのまま実装する
+        content.Should().Contain("public sealed partial class EfCoreCustomerRepository(");
+        content.Should().Contain(") : EfCoreRepository<CustomerEntity, int>(contextFactory),");
+        content.Should().Contain("        ICustomerRepository { }");
+
+        // 読み取りは AsNoTracking（切断パターン）、事後状態は既存版と同じ Unchanged
+        content.Should().Contain(".AsNoTracking()");
+        content.Should().Contain("entity?.MarkUnchanged();");
+
+        // 単発の追加・一括追加は Entry.State 代入（Add/AddRange のグラフ走査を避け、既存版と同じ範囲を挿入する）
+        content.Should().Contain("context.Entry(entity).State = EntityState.Added;");
+    }
+
+    /// <summary>EF 版 SaveAsync が TrackGraph で RowState → EntityState 変換し、競合を SaveConflictException へ変換することを検証する</summary>
+    [Fact]
+    public void Generate_EfCore_ShouldConvertRowStateViaTrackGraphInSave()
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            ValueObjectDiagram(),
+            new CodeGenerationOptions { NamespaceName = "Sample.Domain", GenerateEfCore = true }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        var content = result.Files[0].Content;
+
+        // TrackGraph による切断グラフの登録と RowState → EntityState の変換表
+        content.Should().Contain("context.ChangeTracker.TrackGraph(");
+        content.Should().Contain("RowState.Added => EntityState.Added,");
+        content.Should().Contain("RowState.Updated => EntityState.Modified,");
+        content.Should().Contain("RowState.Removed => EntityState.Deleted,");
+        content.Should().Contain("_ => EntityState.Unchanged,");
+
+        // DbUpdateConcurrencyException → 既存契約（SaveConflictException / insertWhenUpdateMissing 切替）
+        content.Should().Contain("catch (DbUpdateConcurrencyException ex)");
+        content.Should().Contain("throw new SaveConflictException(");
+        content.Should().Contain("entry.State = EntityState.Added;");
+
+        // 保存後の事後状態は既存版と同じ（AcceptChanges で Added/Updated → Unchanged）
+        content.Should().Contain("EntityGraphSaver.AcceptChanges(entity, cascadeSave);");
+    }
+
+    /// <summary>EF 版 SqlExecutor が DbContext の接続上の ADO で既存版とマッピング・束縛を共有することを検証する</summary>
+    [Fact]
+    public void Generate_EfCore_ShouldEmitEfCoreSqlExecutor()
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            ValueObjectDiagram(),
+            new CodeGenerationOptions { NamespaceName = "Sample.Domain", GenerateEfCore = true }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        var content = result.Files[0].Content;
+
+        content
+            .Should()
+            .Contain(
+                "public sealed partial class EfCoreSqlExecutor(IDbContextFactory<QuickErDbContext> contextFactory)"
+            );
+        content.Should().Contain("    : ISqlExecutor");
+
+        // DbContext の接続上で ADO を直接実行し、共有ヘルパー RawSqlMapper のマッピング・束縛を使う
+        content.Should().Contain("context.Database.GetDbConnection().CreateCommand()");
+        content
+            .Should()
+            .Contain("RawSqlMapper.ReadProjectionRowsAsync<TResult>(reader, cancellationToken)");
+        content.Should().Contain("RawSqlMapper.BindParameters(command, parameters);");
+        content
+            .Should()
+            .Contain("internal static void BindParameters(DbCommand command, object? parameters)");
+
+        // 厳密マッピング（全列必須・DbDataReader 版）を既存版と共有する
+        content
+            .Should()
+            .Contain("public TEntity MapEntityFromRawSql<TEntity>(DbDataReader reader)");
+    }
+
+    /// <summary>EF 版 DI 拡張が DbContextFactory＋EF 版実装一式を既存と同じインターフェイスへ登録することを検証する</summary>
+    [Fact]
+    public void Generate_EfCore_ShouldEmitDiExtension()
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            ValueObjectDiagram(),
+            new CodeGenerationOptions { NamespaceName = "Sample.Domain", GenerateEfCore = true }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        var content = result.Files[0].Content;
+
+        content
+            .Should()
+            .Contain("public static IServiceCollection AddGeneratedEfCoreRepositories(");
+        content.Should().Contain("Action<DbContextOptionsBuilder> configureDbContext");
+        content
+            .Should()
+            .Contain("services.AddDbContextFactory<QuickErDbContext>(configureDbContext);");
+        content.Should().Contain("services.AddSingleton<ISqlExecutor, EfCoreSqlExecutor>();");
+        // 既存と同じインターフェイスへ EF 版実装を登録する（DI 差し替えだけで切替可能）
+        content
+            .Should()
+            .Contain("services.AddScoped<ICustomerRepository, EfCoreCustomerRepository>();");
+        content.Should().Contain("services.AddScoped<IOrderRepository, EfCoreOrderRepository>();");
+    }
+
+    /// <summary>EF Core 生成 ON の SqlQuery に実行器差し替えバックエンド（式木捕捉・EF 実行）が追加されることを検証する</summary>
+    [Fact]
+    public void Generate_EfCore_ShouldAddExecutorBackendToSqlQuery()
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            ValueObjectDiagram(),
+            new CodeGenerationOptions { NamespaceName = "Sample.Domain", GenerateEfCore = true }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        var content = result.Files[0].Content;
+
+        // 内部抽象（BCL 型のみ）と SqlQuery への注入コンストラクタ
+        content.Should().Contain("internal interface ISqlQueryExecutor<TEntity>");
+        content.Should().Contain("internal sealed record SqlQueryPlan<TEntity>(");
+        content.Should().Contain("internal SqlQuery(ISqlQueryExecutor<TEntity> executor)");
+
+        // SqlQuery 本体の公開シグネチャは不変（sealed のまま）
+        content.Should().Contain("public sealed class SqlQuery<TEntity>");
+
+        // EF モードでは自作トランスレータを通さず式木のまま捕捉する
+        content.Should().Contain("_predicates.Add(predicate);");
+        content
+            .Should()
+            .Contain("_orderSelectors.Add(new SqlQueryOrdering(keySelector, Descending: false));");
+
+        // EF 実行器: AsNoTracking・ドットパス Include・boxing を剥がした OrderBy 合成・Repository からの注入
+        content.Should().Contain("internal sealed class EfCoreSqlQueryExecutor<TEntity>(");
+        content
+            .Should()
+            .Contain(
+                "public SqlQuery<TEntity> Query() => new(new EfCoreSqlQueryExecutor<TEntity>(_contextFactory));"
+            );
+        content.Should().Contain("query = query.Include(path);");
+        content.Should().Contain("nameof(Queryable.OrderBy)");
+    }
+
+    /// <summary>EF Core 生成 OFF では SqlQuery の実行器バックエンドも EF 版クラスも一切出力されないことを検証する</summary>
+    [Fact]
+    public void Generate_EfCore_Disabled_ShouldNotEmitExecutorBackend()
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            ValueObjectDiagram(),
+            new CodeGenerationOptions { NamespaceName = "Sample.Domain" }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        var content = result.Files[0].Content;
+        content.Should().NotContain("ISqlQueryExecutor");
+        content.Should().NotContain("SqlQueryPlan");
+        content.Should().NotContain("_executor");
+        content.Should().NotContain("EfCore");
+        // 既存の SQL Server パスは SqlDataReader ベースのまま（生成出力の互換維持）
+        content
+            .Should()
+            .Contain("public TEntity MapEntityFromRawSql<TEntity>(SqlDataReader reader)");
+    }
+
+    /// <summary>分割出力時、EfCore ファイルの EF 版コードが SqlClient の型（SqlCommand 等）に依存しないことを検証する</summary>
+    [Fact]
+    public void Generate_EfCore_Split_ShouldKeepEfCodeFreeOfSqlClientTypes()
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            ValueObjectDiagram(),
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                SplitFilesByCategory = true,
+                GenerateEfCore = true,
+            }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        var efCore = Content(result, "EfCore.g.cs");
+
+        // EF 版コードは方言非依存（System.Data.Common の DbCommand/DbConnection/DbDataReader のみ使用）。
+        // SqlBulkCopy は「性能特性が異なる」旨の XML コメントでのみ言及されるため、型使用（"SqlBulkCopy("）だけを禁止する
+        efCore.Should().NotContain("SqlCommand");
+        efCore.Should().NotContain("SqlDataReader");
+        efCore.Should().NotContain("SqlBulkCopy(");
+        efCore.Should().NotContain("new SqlConnection");
+        efCore.Should().Contain("EfCoreSqlExecutor");
+        efCore.Should().Contain("EfCoreRepository<TEntity, TKey>");
+    }
+
+    /// <summary>rowversion 列と単一主キーを持つ最小ダイアグラム（IsRowVersion 構成の検証用）</summary>
+    private static ErDiagram RowVersionDiagram() =>
+        new()
+        {
+            Entities =
+            [
+                new Entity
+                {
+                    Id = Guid.NewGuid(),
+                    TableName = "documents",
+                    Columns =
+                    [
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "document_id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "row_version",
+                            DataType = "rowversion",
+                            IsNullable = false,
+                        },
+                    ],
+                },
+            ],
+        };
 }

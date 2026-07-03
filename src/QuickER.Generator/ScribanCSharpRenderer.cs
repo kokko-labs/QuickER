@@ -28,8 +28,14 @@ internal sealed class RenderScope
     /// <summary>Mapper クラスを出力するか</summary>
     public required bool Mappers { get; init; }
 
-    /// <summary>Repository クラス群を出力するか</summary>
+    /// <summary>Repository バケット（共通契約＋自作 SQL Server 実装）を出力するか</summary>
     public required bool Repositories { get; init; }
+
+    /// <summary>EF Core 用コード（DbContext・構成）を出力するか</summary>
+    public required bool EfCore { get; init; }
+
+    /// <summary>自作 SQL Server 実装（SqlClient 依存）を出力するか。Repository バケット内でこのフラグにより契約と実装を出し分ける</summary>
+    public required bool SqlServerImpl { get; init; }
 }
 
 /// <summary>生成モデルを Scriban テンプレートで C# ソースコードへレンダリングするレンダラー</summary>
@@ -92,11 +98,12 @@ internal sealed class ScribanCSharpRenderer
         var template = ParsedTemplate;
 
         // 独自属性 NavigationReference は (1) Entity のナビゲーションプロパティへの付与、
-        // (2) Repository の EntitySaveMetadata によるナビゲーション除外（リフレクション走査）のいずれかで参照される。
-        // リレーションが無くても Repository を生成する場合は属性定義が必要なため、その条件も含める。
+        // (2) 共通契約の EntitySaveMetadata / SqlQuery によるナビゲーション除外・Include 復元（リフレクション走査）で参照される。
+        // リレーションが無くても契約（自作 Repository か EF Core のいずれか）を生成する場合は属性定義が必要なため、その条件も含める。
         var emitNavRefAttr =
             (options.GenerateEntityClasses && model.EntityClasses.Any(c => c.Navigations.Count > 0))
-            || options.GenerateRepositories;
+            || options.GenerateRepositories
+            || options.GenerateEfCore;
 
         // SqlColumnType 属性は Entity プロパティに DB 列のメタ情報（SqlDbType・Size・Precision・Scale）を載せる。
         // ランタイムの EntitySaveMetadata が明示 SqlParameter を組み立てるのに使うほか、利用者コードが列メタ情報
@@ -106,6 +113,8 @@ internal sealed class ScribanCSharpRenderer
             (options.GenerateRepositories || options.IncludeDataAnnotations)
             && model.EntityClasses.Any(c => c.Properties.Any(p => p.SqlDbTypeName is not null));
 
+        // using は呼び出し側（GeneratedFileUsings）がバケット単位で解決済み。EF Core など外部依存の
+        // 出し分けもそこで完結するため、レンダラーでは受け取った集合をそのまま流し込む
         var scriptObject = new Scriban.Runtime.ScriptObject
         {
             ["namespace_name"] = scope.NamespaceName,
@@ -121,6 +130,7 @@ internal sealed class ScribanCSharpRenderer
             ["emit_sql_column_type_attr"] = emitSqlColumnTypeAttr,
             ["generate_value_objects"] = options.GenerateValueObjects,
             ["value_object_classes"] = model.ValueObjectClasses,
+            ["ef_core"] = model.EfCore,
             // 出力するバケットの絞り込み（分割時はファイルごとに切り替える。非分割時は全 true）
             ["render_runtime"] = scope.Runtime,
             ["render_value_objects"] = scope.ValueObjects,
@@ -128,6 +138,13 @@ internal sealed class ScribanCSharpRenderer
             ["render_edit_models"] = scope.EditModels,
             ["render_mappers"] = scope.Mappers,
             ["render_repositories"] = scope.Repositories,
+            ["render_ef_core"] = scope.EfCore,
+            // 共通契約（インターフェイス・SqlQuery・メタデータ・グラフセーバ・RawSqlMapper 等）を出力するか。
+            // 契約は Repository バケットに属し、分割時も Repository バケットのファイルにのみ出力する（EF 側は using で参照）
+            ["render_contract"] = scope.Repositories,
+            // 自作 SQL Server 実装（SqlClient 依存）を出力するか。Repository バケット内でこのフラグにより契約と実装を出し分ける
+            // （EF 単独出力＝false のとき SqlClient 依存のコードを一切生成しない）
+            ["repositories"] = scope.SqlServerImpl,
         };
 
         // テンプレートは本ライブラリ内に固定で持つ信頼済みのものであり、ループ回数・出力量は ER 図の規模に

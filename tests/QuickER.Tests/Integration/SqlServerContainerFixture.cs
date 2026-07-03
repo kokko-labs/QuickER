@@ -45,7 +45,7 @@ public sealed class SqlServerContainerFixture : IAsyncLifetime
     {
         try
         {
-            _container = new MsSqlBuilder().Build();
+            _container = new MsSqlBuilder("mcr.microsoft.com/mssql/server:2022-latest").Build();
             await _container.StartAsync().ConfigureAwait(false);
             // 開発用の自己署名証明書のため、暗号化は要求しつつサーバー証明書を信頼する
             var b = new SqlConnectionStringBuilder(_container.GetConnectionString())

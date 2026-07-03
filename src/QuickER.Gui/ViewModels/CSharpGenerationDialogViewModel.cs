@@ -6,7 +6,9 @@ using System.Text.RegularExpressions;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using QuickER.Generator;
+using QuickER.Provider;
 using QuickER.Services;
+using QuickER.SqlServer;
 
 namespace QuickER.ViewModels;
 
@@ -33,13 +35,26 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     public Action<bool>? CloseAction { get; set; }
 
     /// <summary>設定ストアとファイル選択サービスを指定して ViewModel を生成し、保存済み設定を復元する</summary>
+    /// <param name="currentProvider">
+    /// アプリの現在のプロバイダ。自作 Repository は SQL Server 専用のため、SQL Server 以外では
+    /// 選択肢を無効化し、表示名を「DB アクセス」欄に提示する（null は判定不要な文脈＝SQL Server 扱い）
+    /// </param>
     public CSharpGenerationDialogViewModel(
         CSharpGenerationSettingsStore? store = null,
-        IFileDialogService? files = null
+        IFileDialogService? files = null,
+        IDatabaseProvider? currentProvider = null
     )
     {
         _store = store ?? new CSharpGenerationSettingsStore();
         _files = files ?? new WpfFileDialogService();
+        CanSelectSqlServerRepository =
+            currentProvider is null
+            || string.Equals(
+                currentProvider.Name,
+                SqlServerProvider.ProviderName,
+                StringComparison.OrdinalIgnoreCase
+            );
+        CurrentDatabaseDisplayName = currentProvider?.DisplayName ?? string.Empty;
         ApplySettings(_store.Load());
     }
 
@@ -86,6 +101,10 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     [ObservableProperty]
     private string _valueObjectNamespace = string.Empty;
 
+    /// <summary>EfCore 名前空間</summary>
+    [ObservableProperty]
+    private string _efCoreNamespace = string.Empty;
+
     // ===== 出力先 =====
 
     /// <summary>非分割（モード①）時の出力ファイルパス</summary>
@@ -110,9 +129,13 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     [ObservableProperty]
     private bool _generateMappers = true;
 
-    /// <summary>Repository クラスを生成するかどうか</summary>
+    /// <summary>自作 SQL Server Repository を生成するかどうか（DB アクセスの排他選択の一角）</summary>
     [ObservableProperty]
-    private bool _generateRepositories = true;
+    private bool _generateRepositories;
+
+    /// <summary>EF Core 用コード（DbContext＋EF 版 Repository）を生成するかどうか（DB アクセスの排他選択の一角）</summary>
+    [ObservableProperty]
+    private bool _generateEfCore;
 
     /// <summary>全カラムを値オブジェクト（Value Object）として生成するかどうか</summary>
     [ObservableProperty]
@@ -125,6 +148,56 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     /// <summary>入力エラーや補助メッセージ</summary>
     [ObservableProperty]
     private string _statusMessage = string.Empty;
+
+    // ===== DB アクセス（排他選択ラジオ） =====
+
+    /// <summary>DB アクセスコードを生成しない（既定）</summary>
+    public bool DbAccessNone
+    {
+        get => !GenerateRepositories && !GenerateEfCore;
+        set
+        {
+            if (value)
+            {
+                GenerateRepositories = false;
+                GenerateEfCore = false;
+            }
+        }
+    }
+
+    /// <summary>自作 SQL Server Repository を生成する（SQL Server 専用）</summary>
+    public bool DbAccessRepository
+    {
+        get => GenerateRepositories;
+        set
+        {
+            if (value)
+            {
+                GenerateRepositories = true;
+                GenerateEfCore = false;
+            }
+        }
+    }
+
+    /// <summary>EF Core（DbContext＋EF 版 Repository）を生成する（方言非依存）</summary>
+    public bool DbAccessEfCore
+    {
+        get => GenerateEfCore;
+        set
+        {
+            if (value)
+            {
+                GenerateEfCore = true;
+                GenerateRepositories = false;
+            }
+        }
+    }
+
+    /// <summary>「自作 Repository」を選択できるか（現在のプロバイダが SQL Server のときのみ。理由は View 側ツールチップで提示）</summary>
+    public bool CanSelectSqlServerRepository { get; }
+
+    /// <summary>現在のプロバイダの UI 表示名（例: "SQL Server"。「DB アクセス」欄の隣に提示し、Repository 可否の文脈を伝える）</summary>
+    public string CurrentDatabaseDisplayName { get; }
 
     /// <summary>生成されるファイルのプレビュー（「ファイル名 → namespace」の一覧。設定に追従して更新）</summary>
     public ObservableCollection<string> PreviewFiles { get; } = new();
@@ -149,11 +222,18 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     /// <summary>Mapper 名前空間欄を表示するか</summary>
     public bool ShowMapperNamespace => SplitFilesByCategory && GenerateMappers;
 
-    /// <summary>Repository 名前空間欄を表示するか</summary>
-    public bool ShowRepositoryNamespace => SplitFilesByCategory && GenerateRepositories;
+    /// <summary>
+    /// Repository 名前空間欄を表示するか。EF Core 選択時も Repository バケット（共通契約＋Repository
+    /// インターフェイス）は出力されるため、DB アクセスが「なし」以外なら表示する
+    /// </summary>
+    public bool ShowRepositoryNamespace =>
+        SplitFilesByCategory && (GenerateRepositories || GenerateEfCore);
 
     /// <summary>ValueObject 名前空間欄を表示するか</summary>
     public bool ShowValueObjectNamespace => SplitFilesByCategory && GenerateValueObjects;
+
+    /// <summary>EfCore 名前空間欄を表示するか</summary>
+    public bool ShowEfCoreNamespace => SplitFilesByCategory && GenerateEfCore;
 
     // ===== 変更フック =====
 
@@ -169,9 +249,27 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
 
     partial void OnGenerateMappersChanged(bool value) => RaiseDerivedChanged();
 
-    partial void OnGenerateRepositoriesChanged(bool value) => RaiseDerivedChanged();
+    partial void OnGenerateRepositoriesChanged(bool value)
+    {
+        RaiseDbAccessChanged();
+        RaiseDerivedChanged();
+    }
+
+    partial void OnGenerateEfCoreChanged(bool value)
+    {
+        RaiseDbAccessChanged();
+        RaiseDerivedChanged();
+    }
 
     partial void OnGenerateValueObjectsChanged(bool value) => RaiseDerivedChanged();
+
+    /// <summary>DB アクセスラジオ（なし／自作 Repository／EF Core）の表示状態を再通知する</summary>
+    private void RaiseDbAccessChanged()
+    {
+        OnPropertyChanged(nameof(DbAccessNone));
+        OnPropertyChanged(nameof(DbAccessRepository));
+        OnPropertyChanged(nameof(DbAccessEfCore));
+    }
 
     partial void OnRuntimeNamespaceChanged(string value) => RefreshPreview();
 
@@ -184,6 +282,8 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     partial void OnRepositoryNamespaceChanged(string value) => RefreshPreview();
 
     partial void OnValueObjectNamespaceChanged(string value) => RefreshPreview();
+
+    partial void OnEfCoreNamespaceChanged(string value) => RefreshPreview();
 
     partial void OnOutputFilePathChanged(string value) => RefreshPreview();
 
@@ -209,6 +309,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
         OnPropertyChanged(nameof(ShowMapperNamespace));
         OnPropertyChanged(nameof(ShowRepositoryNamespace));
         OnPropertyChanged(nameof(ShowValueObjectNamespace));
+        OnPropertyChanged(nameof(ShowEfCoreNamespace));
         RefreshPreview();
     }
 
@@ -244,6 +345,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
                 newBase,
                 GenerationBucket.ValueObject
             );
+            EfCoreNamespace = FollowOne(EfCoreNamespace, oldBase, newBase, GenerationBucket.EfCore);
         }
         finally
         {
@@ -286,10 +388,15 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
                 settings.ValueObjectNamespace,
                 GenerationBucket.ValueObject
             );
-            GenerateEntityClasses = settings.GenerateEntityClasses;
+            EfCoreNamespace = Prefill(settings.EfCoreNamespace, GenerationBucket.EfCore);
+            // Entity は全カテゴリの前提のため常に生成する（保存値に依らず ON。UI もチェック解除不可）
+            GenerateEntityClasses = true;
             GenerateEditModels = settings.GenerateEditModels;
             GenerateMappers = settings.GenerateMappers;
-            GenerateRepositories = settings.GenerateRepositories;
+            // DB アクセスは排他選択。両方 true の保存値（手編集等）は自作 Repository を優先し、
+            // 現在のプロバイダが SQL Server 以外なら自作 Repository は選択不可のため「なし」へ倒す
+            GenerateRepositories = settings.GenerateRepositories && CanSelectSqlServerRepository;
+            GenerateEfCore = settings.GenerateEfCore && !GenerateRepositories;
             GenerateValueObjects = settings.GenerateValueObjects;
             UseGuidKeyForStringPrimaryKey = settings.UseGuidKeyForStringPrimaryKey;
             OutputFilePath = settings.OutputFilePath;
@@ -322,10 +429,12 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
             MapperNamespace = MapperNamespace.Trim(),
             RepositoryNamespace = RepositoryNamespace.Trim(),
             ValueObjectNamespace = ValueObjectNamespace.Trim(),
+            EfCoreNamespace = EfCoreNamespace.Trim(),
             GenerateEntityClasses = GenerateEntityClasses,
             GenerateEditModels = GenerateEditModels,
             GenerateMappers = GenerateMappers,
             GenerateRepositories = GenerateRepositories,
+            GenerateEfCore = GenerateEfCore,
             GenerateValueObjects = GenerateValueObjects,
             UseGuidKeyForStringPrimaryKey = UseGuidKeyForStringPrimaryKey,
             OutputFilePath = OutputFilePath.Trim(),
@@ -345,10 +454,12 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
             MapperNamespace = NullIfEmpty(MapperNamespace),
             RepositoryNamespace = NullIfEmpty(RepositoryNamespace),
             ValueObjectNamespace = NullIfEmpty(ValueObjectNamespace),
+            EfCoreNamespace = NullIfEmpty(EfCoreNamespace),
             GenerateEntityClasses = GenerateEntityClasses,
             GenerateEditModels = GenerateEditModels,
             GenerateMappers = GenerateMappers,
             GenerateRepositories = GenerateRepositories,
+            GenerateEfCore = GenerateEfCore,
             GenerateValueObjects = GenerateValueObjects,
             UseGuidKeyForStringPrimaryKey = UseGuidKeyForStringPrimaryKey,
         };
@@ -478,6 +589,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
             (ShowMapperNamespace, MapperNamespace, "Mapper の namespace"),
             (ShowRepositoryNamespace, RepositoryNamespace, "Repository の namespace"),
             (ShowValueObjectNamespace, ValueObjectNamespace, "ValueObject の namespace"),
+            (ShowEfCoreNamespace, EfCoreNamespace, "EfCore の namespace"),
         };
 
         foreach (var target in targets)

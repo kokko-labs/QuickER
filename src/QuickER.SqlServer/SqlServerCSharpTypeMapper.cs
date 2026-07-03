@@ -90,7 +90,9 @@ public sealed partial class SqlServerCSharpTypeMapper : IColumnTypeMapper
                 "byte[]",
                 sqlDbTypeName,
                 maxLength: null,
-                declaredLength: TryGetDeclaredLength(normalized)
+                declaredLength: TryGetDeclaredLength(normalized),
+                // rowversion / timestamp は行バージョン列。EF Core の IsRowVersion() 構成対象にする
+                isRowVersion: baseType is "rowversion" or "timestamp"
             ),
             // 文字列系のみ MaxLength を保持し、[MaxLength] 属性の生成に使う
             "char" or "varchar" or "nchar" or "nvarchar" or "text" or "ntext" or "xml" => Reference(
@@ -173,7 +175,8 @@ public sealed partial class SqlServerCSharpTypeMapper : IColumnTypeMapper
         string typeName,
         string? sqlDbTypeName,
         int? maxLength = null,
-        int declaredLength = 0
+        int declaredLength = 0,
+        bool isRowVersion = false
     ) =>
         new()
         {
@@ -182,6 +185,7 @@ public sealed partial class SqlServerCSharpTypeMapper : IColumnTypeMapper
             MaxLength = maxLength,
             SqlDbTypeName = sqlDbTypeName,
             SqlDeclaredLength = declaredLength,
+            IsRowVersion = isRowVersion,
         };
 
     /// <summary>

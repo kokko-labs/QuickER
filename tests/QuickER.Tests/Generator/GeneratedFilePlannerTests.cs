@@ -80,15 +80,15 @@ public class GeneratedFilePlannerTests
 
         var plan = GeneratedFilePlanner.Plan(options);
 
-        // 並び順は UI のカテゴリ別 namespace 欄と一致させる（Runtime は末尾の共有基盤）
+        // 並び順は UI のカテゴリ別 namespace 欄と一致させる（DB アクセス系は値オブジェクトの後・Runtime は末尾の共有基盤）
         plan.Select(spec => spec.FileName)
             .Should()
             .Equal(
                 "Entities.g.cs",
                 "EditModels.g.cs",
                 "Mappers.g.cs",
-                "Repositories.g.cs",
                 "ValueObjects.g.cs",
+                "Repositories.g.cs",
                 "Runtime.g.cs"
             );
 
@@ -96,6 +96,48 @@ public class GeneratedFilePlannerTests
         entity.NamespaceName.Should().Be("Acme.App.Entities");
         entity.CrossNamespaceUsings.Should().Contain("Acme.App.Runtime");
         entity.CrossNamespaceUsings.Should().NotContain("Acme.App.Entities");
+    }
+
+    /// <summary>クロス using が依存グラフに基づき、参照しないバケットの名前空間を using しないことを検証する</summary>
+    [Fact]
+    public void Plan_Split_CrossUsings_FollowDependencyGraph()
+    {
+        var options = new CodeGenerationOptions
+        {
+            NamespaceName = "Acme.App",
+            SplitFilesByCategory = true,
+            GenerateValueObjects = true,
+            GenerateEfCore = true,
+        };
+
+        var plan = GeneratedFilePlanner.Plan(options);
+
+        // Entity は Runtime / ValueObjects のみ依存し、Repositories / EfCore / Mappers は using しない
+        var entity = plan.Single(spec => spec.FileName == "Entities.g.cs");
+        entity
+            .CrossNamespaceUsings.Should()
+            .BeEquivalentTo("Acme.App.Runtime", "Acme.App.ValueObjects");
+
+        // Mapper は Entity / EditModel / Runtime に依存する（ValueObjects へは依存しない）
+        var mapper = plan.Single(spec => spec.FileName == "Mappers.g.cs");
+        mapper
+            .CrossNamespaceUsings.Should()
+            .BeEquivalentTo("Acme.App.Entities", "Acme.App.EditModels", "Acme.App.Runtime");
+
+        // EfCore は Entity / Repositories / Runtime / ValueObjects に依存する
+        var efCore = plan.Single(spec => spec.FileName == "EfCore.g.cs");
+        efCore
+            .CrossNamespaceUsings.Should()
+            .BeEquivalentTo(
+                "Acme.App.Entities",
+                "Acme.App.Repositories",
+                "Acme.App.Runtime",
+                "Acme.App.ValueObjects"
+            );
+
+        // Runtime は共有基盤で他バケットへ依存しない
+        var runtime = plan.Single(spec => spec.FileName == "Runtime.g.cs");
+        runtime.CrossNamespaceUsings.Should().BeEmpty();
     }
 
     /// <summary>分割時に複数カテゴリが同一名前空間でも、ファイルは分かれ、自分自身は using しないことを検証する</summary>

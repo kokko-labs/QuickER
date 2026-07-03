@@ -55,7 +55,7 @@ public sealed class CSharpCodeGenerationService
             .Select(spec => new GeneratedFile
             {
                 FileName = SanitizeFileName(spec.FileName),
-                Content = _renderer.Render(model, options, BuildScope(spec, model.Usings)),
+                Content = _renderer.Render(model, options, BuildScope(spec, options)),
             })
             .ToList();
 
@@ -66,33 +66,26 @@ public sealed class CSharpCodeGenerationService
     /// ファイル計画から描画スコープ（名前空間・using・出力バケット）を組み立てる
     /// </summary>
     /// <remarks>
-    /// using はモデルの System フレームワーク using に、他ファイルの名前空間（クロス参照）を加える。
-    /// <c>// &lt;auto-generated /&gt;</c> 出力により未使用 using 警告は抑止されるため、過剰な付与は無害
+    /// using は <see cref="GeneratedFileUsings"/> がバケット単位で解決する（そのファイルが含む全バケットの
+    /// 外部 using の和集合＋依存グラフ由来のクロス名前空間 using）。これにより SqlClient / EntityFrameworkCore /
+    /// DependencyInjection 等が、それらを使わないファイルへ漏れない。
     /// </remarks>
-    private static RenderScope BuildScope(
-        GeneratedFileSpec spec,
-        IReadOnlyList<string> systemUsings
-    )
+    private static RenderScope BuildScope(GeneratedFileSpec spec, CodeGenerationOptions options)
     {
-        var usings = new List<string>(systemUsings);
-        foreach (var crossNamespace in spec.CrossNamespaceUsings)
-        {
-            if (!usings.Contains(crossNamespace))
-            {
-                usings.Add(crossNamespace);
-            }
-        }
-
         return new RenderScope
         {
             NamespaceName = spec.NamespaceName,
-            Usings = usings,
+            Usings = GeneratedFileUsings.Resolve(spec, options),
             Runtime = spec.Buckets.Contains(GenerationBucket.Runtime),
             ValueObjects = spec.Buckets.Contains(GenerationBucket.ValueObject),
             Entities = spec.Buckets.Contains(GenerationBucket.Entity),
             EditModels = spec.Buckets.Contains(GenerationBucket.EditModel),
             Mappers = spec.Buckets.Contains(GenerationBucket.Mapper),
             Repositories = spec.Buckets.Contains(GenerationBucket.Repository),
+            EfCore = spec.Buckets.Contains(GenerationBucket.EfCore),
+            // 自作 SQL Server 実装は Repository バケットを含むファイルにのみ、かつ GenerateRepositories が有効なときだけ出力する
+            SqlServerImpl =
+                options.GenerateRepositories && spec.Buckets.Contains(GenerationBucket.Repository),
         };
     }
 
@@ -101,7 +94,7 @@ public sealed class CSharpCodeGenerationService
     /// </summary>
     /// <remarks>
     /// エラー: 生成対象が一つもない、エンティティが存在しない、テーブル名が空、
-    /// 生成対象間の依存違反（Mapper は Entity+EditModel、Repository は Entity と DataAnnotations が必要）。
+    /// 生成対象間の依存違反（Mapper は Entity+EditModel、Repository / EF Core は Entity と DataAnnotations が必要）。
     /// 警告: 複合主キー（[Key] 属性の生成が最小限になる）
     /// </remarks>
     private static void Validate(
@@ -115,11 +108,12 @@ public sealed class CSharpCodeGenerationService
             && !options.GenerateEditModels
             && !options.GenerateMappers
             && !options.GenerateRepositories
+            && !options.GenerateEfCore
         )
         {
             diagnostics.Add(
                 Error(
-                    "Entity / EditModel / Mapper / Repository のいずれも生成対象になっていません。少なくとも一つを有効にしてください。"
+                    "Entity / EditModel / Mapper / Repository / EF Core のいずれも生成対象になっていません。少なくとも一つを有効にしてください。"
                 )
             );
         }
@@ -137,23 +131,29 @@ public sealed class CSharpCodeGenerationService
             );
         }
 
-        // Repository は Entity クラスを参照するため、Entity 生成が必須
-        if (options.GenerateRepositories && !options.GenerateEntityClasses)
+        // Repository・EF Core はともに Entity クラス（および共通契約）を参照するため、Entity 生成が必須
+        if (
+            (options.GenerateRepositories || options.GenerateEfCore)
+            && !options.GenerateEntityClasses
+        )
         {
             diagnostics.Add(
                 Error(
-                    "Repository の生成には Entity クラスが必要です。Entity を生成対象に含めてください。"
+                    "Repository / EF Core の生成には Entity クラスが必要です。Entity を生成対象に含めてください。"
                 )
             );
         }
 
-        // Repository の SQL 組み立ては [Table] / [Key] / [Column] 属性をリフレクションで参照するため、
-        // DataAnnotations を無効にすると実行時に初期化例外となる。生成前にエラーとして検出する
-        if (options.GenerateRepositories && !options.IncludeDataAnnotations)
+        // Repository の SQL 組み立ておよび EF Core のマッピング（EntitySaveMetadata）は [Table] / [Key] / [Column]
+        // 属性をリフレクションで参照するため、DataAnnotations を無効にすると実行時に初期化例外となる。生成前に検出する
+        if (
+            (options.GenerateRepositories || options.GenerateEfCore)
+            && !options.IncludeDataAnnotations
+        )
         {
             diagnostics.Add(
                 Error(
-                    "Repository は [Table] / [Key] / [Column] 属性を利用するため、データアノテーションの付与が必要です。データアノテーションを有効にしてください。"
+                    "Repository / EF Core は [Table] / [Key] / [Column] 属性を利用するため、データアノテーションの付与が必要です。データアノテーションを有効にしてください。"
                 )
             );
         }

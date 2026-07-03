@@ -24,8 +24,24 @@ public sealed class CodeGenerationOptions
     /// <summary>Entity と EditModel を相互変換する Mapper クラスを生成するかどうか</summary>
     public bool GenerateMappers { get; init; } = true;
 
-    /// <summary>SQL Server 向けの Repository クラス群（インターフェース・基底クラス・DI 拡張を含む）を生成するかどうか</summary>
+    /// <summary>自作 SQL Server 実装（<c>Microsoft.Data.SqlClient</c> 依存）の Repository クラス群を生成するかどうか</summary>
+    /// <remarks>
+    /// SqlServerRepository 基底・各エンティティ実装・接続ファクトリ・SqlExecutor・SqlExpressionTranslator・
+    /// <c>AddGeneratedRepositories</c> を生成する。共通契約（インターフェイス・SqlQuery・メタデータ等）は
+    /// <see cref="GenerateEfCore"/> と共有し、どちらか一方が ON なら生成される
+    /// </remarks>
     public bool GenerateRepositories { get; init; } = true;
+
+    /// <summary>
+    /// EF Core 用コード（DbContext・Fluent API 構成・EF 版 Repository 実装）を生成するかどうか。
+    /// </summary>
+    /// <remarks>
+    /// 生成される DbContext は既存 Entity をそのまま既存スキーマへ接続する用途（方言非依存・1 本）で、
+    /// スキーマ作成（Migrations / EnsureCreated）は範囲外とする。<see cref="GenerateRepositories"/> とは独立に選べ、
+    /// EF 単独出力時は自作 SQL Server 実装（<c>Microsoft.Data.SqlClient</c> 依存）を一切含まない。
+    /// 共通契約（インターフェイス・SqlQuery・メタデータ等）は <see cref="GenerateRepositories"/> と共有する
+    /// </remarks>
+    public bool GenerateEfCore { get; init; }
 
     /// <summary>[Table] [Key] [Column] [Required] [MaxLength] などのデータアノテーション属性を付与するかどうか</summary>
     public bool IncludeDataAnnotations { get; init; } = true;
@@ -65,4 +81,7 @@ public sealed class CodeGenerationOptions
 
     /// <summary>分割時の値オブジェクトクラスの名前空間。空なら <see cref="NamespaceName"/> へフォールバックする</summary>
     public string? ValueObjectNamespace { get; init; }
+
+    /// <summary>分割時の EfCore（DbContext・構成）クラスの名前空間。空なら <see cref="NamespaceName"/> へフォールバックする</summary>
+    public string? EfCoreNamespace { get; init; }
 }

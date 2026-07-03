@@ -205,19 +205,20 @@
             <CheckBox
               Margin="0,0,18,0"
               Content="Entity"
-              IsChecked="{Binding GenerateEntityClasses}"
+              IsChecked="{Binding GenerateEntityClasses, Mode=OneWay}"
+              IsEnabled="False"
+              ToolTip="Entity は全カテゴリの前提のため常に生成されます"
             />
             <CheckBox
               Margin="0,0,18,0"
               Content="EditModel"
               IsChecked="{Binding GenerateEditModels}"
             />
-            <CheckBox Margin="0,0,18,0" Content="Mapper" IsChecked="{Binding GenerateMappers}" />
-            <CheckBox Content="Repository" IsChecked="{Binding GenerateRepositories}" />
+            <CheckBox Content="Mapper" IsChecked="{Binding GenerateMappers}" />
           </StackPanel>
         </Grid>
 
-        <Grid>
+        <Grid Margin="0,0,0,10">
           <Grid.ColumnDefinitions>
             <ColumnDefinition Width="96" />
             <ColumnDefinition Width="*" />
@@ -239,6 +240,52 @@
               Content="string 主キーを GuidKey 化"
               IsChecked="{Binding UseGuidKeyForStringPrimaryKey}"
               IsEnabled="{Binding GenerateValueObjects}"
+            />
+          </StackPanel>
+        </Grid>
+
+        <!-- DB アクセス（排他選択。自作 Repository は SQL Server 専用のため現在の DB を隣に提示する） -->
+        <Grid>
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="96" />
+            <ColumnDefinition Width="*" />
+          </Grid.ColumnDefinitions>
+          <TextBlock
+            Grid.Column="0"
+            Style="{StaticResource FieldLabel}"
+            VerticalAlignment="Top"
+            Margin="0,2,0,0"
+            Text="DB アクセス"
+          />
+          <StackPanel Grid.Column="1" Orientation="Horizontal">
+            <TextBlock
+              Margin="0,0,18,0"
+              VerticalAlignment="Center"
+              FontWeight="SemiBold"
+              Foreground="{StaticResource HeaderText}"
+              Text="{Binding CurrentDatabaseDisplayName}"
+              ToolTip="アプリで現在選択している DB（プロバイダ）"
+            />
+            <RadioButton
+              Margin="0,0,18,0"
+              Content="なし"
+              GroupName="DbAccess"
+              IsChecked="{Binding DbAccessNone}"
+            />
+            <RadioButton
+              Margin="0,0,18,0"
+              Content="Repository (EF Core)"
+              GroupName="DbAccess"
+              IsChecked="{Binding DbAccessEfCore}"
+              ToolTip="EF Core 実装の Repository と方言非依存の DbContext を生成します（接続先はアプリ側の UseSqlServer / UseNpgsql 等で選択）"
+            />
+            <RadioButton
+              Content="Repository (SQL Server)"
+              GroupName="DbAccess"
+              IsChecked="{Binding DbAccessRepository}"
+              IsEnabled="{Binding CanSelectSqlServerRepository}"
+              ToolTipService.ShowOnDisabled="True"
+              ToolTip="SqlClient 直書きの自作 Repository を生成します。SQL Server 専用のため、SQL Server プロバイダの選択中のみ選べます"
             />
           </StackPanel>
         </Grid>
@@ -322,6 +369,7 @@
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
           </Grid.RowDefinitions>
 
           <TextBlock
@@ -380,11 +428,29 @@
             Grid.Column="0"
             Margin="0,4"
             Style="{StaticResource FieldLabel}"
+            Text="ValueObject"
+            Visibility="{Binding ShowValueObjectNamespace, Converter={StaticResource BoolToVisibilityConverter}}"
+          />
+          <TextBox
+            Grid.Row="3"
+            Grid.Column="1"
+            Margin="0,4"
+            Style="{StaticResource FormInput}"
+            Text="{Binding ValueObjectNamespace, UpdateSourceTrigger=PropertyChanged}"
+            Visibility="{Binding ShowValueObjectNamespace, Converter={StaticResource BoolToVisibilityConverter}}"
+          />
+
+          <!-- DB アクセス系は「生成内容」の並びに合わせて末尾。EF Core 選択時は契約（Repository）＋EfCore の 2 欄が並ぶ -->
+          <TextBlock
+            Grid.Row="4"
+            Grid.Column="0"
+            Margin="0,4"
+            Style="{StaticResource FieldLabel}"
             Text="Repository"
             Visibility="{Binding ShowRepositoryNamespace, Converter={StaticResource BoolToVisibilityConverter}}"
           />
           <TextBox
-            Grid.Row="3"
+            Grid.Row="4"
             Grid.Column="1"
             Margin="0,4"
             Style="{StaticResource FormInput}"
@@ -393,24 +459,24 @@
           />
 
           <TextBlock
-            Grid.Row="4"
+            Grid.Row="5"
             Grid.Column="0"
             Margin="0,4"
             Style="{StaticResource FieldLabel}"
-            Text="ValueObject"
-            Visibility="{Binding ShowValueObjectNamespace, Converter={StaticResource BoolToVisibilityConverter}}"
+            Text="EF Core"
+            Visibility="{Binding ShowEfCoreNamespace, Converter={StaticResource BoolToVisibilityConverter}}"
           />
           <TextBox
-            Grid.Row="4"
+            Grid.Row="5"
             Grid.Column="1"
             Margin="0,4"
             Style="{StaticResource FormInput}"
-            Text="{Binding ValueObjectNamespace, UpdateSourceTrigger=PropertyChanged}"
-            Visibility="{Binding ShowValueObjectNamespace, Converter={StaticResource BoolToVisibilityConverter}}"
+            Text="{Binding EfCoreNamespace, UpdateSourceTrigger=PropertyChanged}"
+            Visibility="{Binding ShowEfCoreNamespace, Converter={StaticResource BoolToVisibilityConverter}}"
           />
         </Grid>
 
-        <!-- Runtime（共有基盤） -->
+        <!-- Runtime（共通基盤: 基底クラス・属性・JSON コンバータなど全カテゴリが使う土台） -->
         <Grid
           Margin="0,8,0,0"
           Visibility="{Binding ShowRuntimeNamespace, Converter={StaticResource BoolToVisibilityConverter}}"
@@ -419,9 +485,13 @@
             <ColumnDefinition Width="96" />
             <ColumnDefinition Width="*" />
           </Grid.ColumnDefinitions>
-          <StackPanel Grid.Column="0" VerticalAlignment="Center">
+          <StackPanel
+            Grid.Column="0"
+            VerticalAlignment="Center"
+            ToolTip="全カテゴリが共通して使う土台（基底クラス・属性・値オブジェクト基底・JSON コンバータなど）"
+          >
             <TextBlock Foreground="{StaticResource HeaderText}" Text="Runtime" />
-            <TextBlock FontSize="11" Foreground="{StaticResource MutedText}" Text="共有基盤" />
+            <TextBlock FontSize="11" Foreground="{StaticResource MutedText}" Text="(共通基盤)" />
           </StackPanel>
           <TextBox
             Grid.Column="1"
