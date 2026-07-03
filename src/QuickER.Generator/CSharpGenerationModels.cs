@@ -100,14 +100,20 @@ internal sealed class CSharpPropertyModel
     /// <summary>最大長（文字列型などで指定される場合）</summary>
     public int? MaxLength { get; init; }
 
-    /// <summary>DB カラムのメタ情報: 文字列の最大長（VO 抑制なしの生値。属性 [ColumnFacets] 用）</summary>
-    public int? FacetMaxLength { get; init; }
-
-    /// <summary>DB カラムのメタ情報: decimal の全体桁数 precision（属性 [ColumnFacets] 用）</summary>
+    /// <summary>DB カラムのメタ情報: decimal の全体桁数 precision（属性 [SqlColumnType] の Precision 用）</summary>
     public int? FacetPrecision { get; init; }
 
-    /// <summary>DB カラムのメタ情報: decimal の小数桁数 scale（属性 [ColumnFacets] 用）</summary>
+    /// <summary>DB カラムのメタ情報: decimal の小数桁数 scale（属性 [SqlColumnType] の Scale 用）</summary>
     public int? FacetScale { get; init; }
+
+    /// <summary>
+    /// SQL パラメータ型明示化に使う <c>SqlDbType</c> の列挙名（例: "VarChar"）。[SqlColumnType] 属性の生成に使う。
+    /// 未知の型は null で、属性を付与せず AddWithValue にフォールバックさせる。
+    /// </summary>
+    public string? SqlDbTypeName { get; init; }
+
+    /// <summary>[SqlColumnType] の Size に載せる宣言長（n / max=-1 / 無指定=0）。文字列・バイナリ以外は 0</summary>
+    public int SqlDeclaredLength { get; init; }
 
     /// <summary>フィールド初期化子の式</summary>
     public required string Initializer { get; init; }

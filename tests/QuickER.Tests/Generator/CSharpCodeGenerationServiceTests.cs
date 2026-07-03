@@ -1040,7 +1040,7 @@ public class CSharpCodeGenerationServiceTests
         content
             .Should()
             .Contain("public abstract partial class SqlServerRepository<TEntity, TKey>");
-        content.Should().Contain("internal sealed class SqlEntityMetadata<TEntity, TKey>");
+        content.Should().Contain("internal sealed class EntitySaveMetadata");
         content
             .Should()
             .Contain(
@@ -1056,7 +1056,7 @@ public class CSharpCodeGenerationServiceTests
         content
             .Should()
             .Contain(
-                "var columnList = string.Join(\", \", allColumns.Select(column => $\"[{column}]\"));"
+                "var columnList = string.Join(\", \", columns.Select(property => $\"[{GetColumnName(property)}]\"));"
             );
         content
             .Should()
@@ -1066,7 +1066,7 @@ public class CSharpCodeGenerationServiceTests
         content
             .Should()
             .Contain(
-                "$\"INSERT INTO {tableName} ({string.Join(\", \", insertColumns.Select(column => $\"[{column}]\"))}) VALUES ({string.Join(\", \", properties.Select(property => $\"@{property.Name}\"))});\""
+                "$\"INSERT INTO {tableName} ({string.Join(\", \", columns.Select(property => $\"[{GetColumnName(property)}]\"))}) VALUES ({string.Join(\", \", columns.Select(property => $\"@{property.Name}\"))});\""
             );
         content
             .Should()
@@ -1076,6 +1076,168 @@ public class CSharpCodeGenerationServiceTests
         content
             .Should()
             .Contain("DeleteSql = $\"DELETE FROM {tableName} WHERE [{keyColumnName}] = @id;\"");
+    }
+
+    /// <summary>
+    /// SQL パラメータ型明示化のため、Repository 生成時に Entity プロパティへ [SqlColumnType(...)] が
+    /// DB 型に応じて付与されること（varchar(50)→VarChar+Size50 / nvarchar(max)→NVarChar+Size-1 /
+    /// decimal(10,2)→Precision10/Scale2 / int→Int / 未知型→属性なし）を検証する
+    /// </summary>
+    [Fact]
+    public void Generate_Repository_ShouldEmitSqlColumnTypeAttributes()
+    {
+        var diagram = new ErDiagram
+        {
+            Entities =
+            [
+                new Entity
+                {
+                    Id = Guid.NewGuid(),
+                    TableName = "items",
+                    Columns =
+                    [
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "item_id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "code",
+                            DataType = "varchar(50)",
+                            IsNullable = false,
+                        },
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "note",
+                            DataType = "nvarchar(max)",
+                            IsNullable = true,
+                        },
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "price",
+                            DataType = "decimal(10,2)",
+                            IsNullable = false,
+                        },
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "location",
+                            DataType = "geography",
+                            IsNullable = true,
+                        },
+                    ],
+                },
+            ],
+        };
+
+        var result = new CSharpCodeGenerationService().Generate(
+            diagram,
+            new CodeGenerationOptions { NamespaceName = "Sample.Domain" }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        var content = result.Files[0].Content;
+        // 属性定義（SqlDbType 引数・Size/Precision/Scale の書き換え可能プロパティ）
+        content.Should().Contain("public sealed class SqlColumnTypeAttribute : Attribute");
+        content
+            .Should()
+            .Contain("public SqlColumnTypeAttribute(SqlDbType dbType) => DbType = dbType;");
+        // int → 型だけ（Size/Precision なし）
+        content.Should().Contain("[SqlColumnType(SqlDbType.Int)]");
+        // varchar(50) → VarChar + Size 50
+        content.Should().Contain("[SqlColumnType(SqlDbType.VarChar, Size = 50)]");
+        // nvarchar(max) → NVarChar + Size -1
+        content.Should().Contain("[SqlColumnType(SqlDbType.NVarChar, Size = -1)]");
+        // decimal(10,2) → Decimal + Precision/Scale
+        content.Should().Contain("[SqlColumnType(SqlDbType.Decimal, Precision = 10, Scale = 2)]");
+        // 未知型（geography）は属性を付けない（AddWithValue フォールバック）
+        content.Should().NotContain("SqlColumnType(SqlDbType.Udt");
+        // ランタイムは属性から明示 SqlParameter を組み立て、Size 安全ガードで超過時は値長を使う
+        content.Should().Contain("private static void AddColumnParameter(");
+        content.Should().Contain("var parameter = new SqlParameter(name, attribute.DbType);");
+        content
+            .Should()
+            .Contain(
+                "parameter.Size = valueLength > attribute.Size ? valueLength : attribute.Size;"
+            );
+    }
+
+    /// <summary>
+    /// [SqlColumnType] の出力条件が「Repository 生成 または IncludeDataAnnotations」の OR であることを検証する
+    /// （ColumnFacets 廃止・SqlColumnType への統合により、DataAnnotations 単独でも列メタ情報が必要なため）。
+    /// 両方 OFF のときのみ属性が一切出力されない。
+    /// </summary>
+    [Fact]
+    public void Generate_SqlColumnTypeAttribute_IsGatedOnRepositoryOrDataAnnotations()
+    {
+        var diagram = new ErDiagram
+        {
+            Entities =
+            [
+                new Entity
+                {
+                    Id = Guid.NewGuid(),
+                    TableName = "items",
+                    Columns =
+                    [
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "item_id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                    ],
+                },
+            ],
+        };
+
+        // 両方 OFF → 属性は一切出力されない
+        var neither = new CSharpCodeGenerationService().Generate(
+            diagram,
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                GenerateRepositories = false,
+                IncludeDataAnnotations = false,
+            }
+        );
+        neither.HasErrors.Should().BeFalse();
+        neither.Files[0].Content.Should().NotContain("SqlColumnType");
+
+        // Repository ON（Repository は IncludeDataAnnotations 必須のため両方 ON）→ 属性が出力される
+        var repoOn = new CSharpCodeGenerationService().Generate(
+            diagram,
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                GenerateRepositories = true,
+                IncludeDataAnnotations = true,
+            }
+        );
+        repoOn.HasErrors.Should().BeFalse();
+        repoOn.Files[0].Content.Should().Contain("[SqlColumnType(SqlDbType.Int)]");
+
+        // IncludeDataAnnotations のみ ON（Repository なし）→ 属性が出力される
+        var annotationsOnly = new CSharpCodeGenerationService().Generate(
+            diagram,
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                GenerateRepositories = false,
+                IncludeDataAnnotations = true,
+            }
+        );
+        annotationsOnly.HasErrors.Should().BeFalse();
+        annotationsOnly.Files[0].Content.Should().Contain("[SqlColumnType(SqlDbType.Int)]");
     }
 
     /// <summary>Repository にラムダ式ベースのクエリビルダー（Query / Where / OrderBy / 終端メソッド）が生成されることを検証する</summary>
@@ -1116,8 +1278,12 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("public async Task<TEntity?> FirstOrDefaultAsync(");
         content.Should().Contain("public async Task<int> CountAsync(");
         content.Should().Contain("public async Task<bool> AnyAsync(");
-        // 値はパラメータ化、OFFSET/FETCH でページング
-        content.Should().Contain("parameter.Value ?? DBNull.Value");
+        // 値はパラメータ化し、列名が判明していれば列型で明示 SqlParameter を構築（なければ AddWithValue へフォールバック）
+        content
+            .Should()
+            .Contain(
+                "metadata.AddQueryParameter(command, parameter.Name, parameter.ColumnName, value);"
+            );
         content.Should().Contain("FETCH NEXT {take.Value} ROWS ONLY");
     }
 
@@ -1462,7 +1628,7 @@ public class CSharpCodeGenerationServiceTests
         content
             .Should()
             .Contain(
-                "private static readonly SqlEntityMetadata<TEntity, TKey> _metadata = SqlEntityMetadata<"
+                "private static readonly EntitySaveMetadata _metadata = EntitySaveMetadata.For(typeof(TEntity));"
             );
         content
             .Should()
@@ -1878,11 +2044,77 @@ public class CSharpCodeGenerationServiceTests
 
         result.HasErrors.Should().BeFalse();
         var content = result.Files[0].Content;
-        // Repository の SqlEntityMetadata が参照する属性が未定義だと CS0246 になるため、定義の存在を確認
+        // Repository の EntitySaveMetadata が参照する属性が未定義だと CS0246 になるため、定義の存在を確認
         content.Should().Contain("public sealed class NavigationReferenceAttribute : Attribute");
         content
             .Should()
             .Contain("property.GetCustomAttribute<NavigationReferenceAttribute>() is null");
+    }
+
+    /// <summary>
+    /// IncludeDataAnnotations=true・GenerateRepositories=false でも [SqlColumnType] が出力され、
+    /// SqlDbType（System.Data）の using が含まれることを検証する（ColumnFacets 廃止に伴う OR 条件）
+    /// </summary>
+    [Fact]
+    public void Generate_IncludeDataAnnotationsWithoutRepository_ShouldEmitSqlColumnTypeAttribute()
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            ValueObjectDiagram(),
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                GenerateRepositories = false,
+                IncludeDataAnnotations = true,
+            }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        var content = result.Files[0].Content;
+        content.Should().Contain("public sealed class SqlColumnTypeAttribute : Attribute");
+        content.Should().Contain("[SqlColumnType(SqlDbType.NVarChar, Size = 50)]");
+        content.Should().Contain("[SqlColumnType(SqlDbType.Decimal, Precision = 10, Scale = 2)]");
+        // SqlDbType は System.Data（BCL）所属。Repository なし構成でも using が供給される必要がある
+        content.Should().Contain("using System.Data;");
+        // Repository が無いため EntitySaveMetadata 等のランタイム補助コードは出力されない
+        content.Should().NotContain("_columnTypeCache");
+    }
+
+    /// <summary>
+    /// IncludeDataAnnotations=false・GenerateRepositories=false の両方 OFF では [SqlColumnType] が一切出力されないことを検証する
+    /// </summary>
+    [Fact]
+    public void Generate_NoAnnotationsNoRepository_ShouldNotEmitSqlColumnTypeAttribute()
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            ValueObjectDiagram(),
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                GenerateRepositories = false,
+                IncludeDataAnnotations = false,
+            }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        var content = result.Files[0].Content;
+        content.Should().NotContain("SqlColumnTypeAttribute");
+        content.Should().NotContain("[SqlColumnType(");
+    }
+
+    /// <summary>[SqlColumnType].IntegralDigits が Precision - Scale を返し、decimal 以外（Precision 未指定）は -1 を返すことを検証する</summary>
+    [Fact]
+    public void Generate_SqlColumnType_IntegralDigitsProperty_ShouldComputeFromPrecisionAndScale()
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            ValueObjectDiagram(),
+            new CodeGenerationOptions { NamespaceName = "Sample.Domain" }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        var content = result.Files[0].Content;
+        content
+            .Should()
+            .Contain("public int IntegralDigits => Precision > 0 ? Precision - Scale : -1;");
     }
 
     /// <summary>主キー 1 列のみを持つ単純なエンティティ 1 件のダイアグラムを生成する</summary>
@@ -2011,10 +2243,10 @@ public class CSharpCodeGenerationServiceTests
             );
         // PK と同名 FK は同一 VO 型を共有（CustomerIdValue は 1 定義のみ）
         content.Split("public sealed partial class CustomerIdValue").Length.Should().Be(2);
-        // Entity プロパティに DB カラムのメタ情報属性が付く（VO 型でも付与）
-        content.Should().Contain("public sealed class ColumnFacetsAttribute : Attribute");
-        content.Should().Contain("[ColumnFacets(MaxLength = 50)]");
-        content.Should().Contain("[ColumnFacets(Precision = 10, Scale = 2)]");
+        // Entity プロパティに DB カラムのメタ情報属性が付く（VO 型でも付与）。ColumnFacets は SqlColumnType へ統合済み
+        content.Should().Contain("public sealed class SqlColumnTypeAttribute : Attribute");
+        content.Should().Contain("[SqlColumnType(SqlDbType.NVarChar, Size = 50)]");
+        content.Should().Contain("[SqlColumnType(SqlDbType.Decimal, Precision = 10, Scale = 2)]");
         // Entity の型が VO（非 NULL PK は null! 初期化）
         content.Should().Contain("public CustomerIdValue CustomerId { get; set; } = null!;");
         // EditModel 確定値は常に VO?（バインド setter は TryCreate）

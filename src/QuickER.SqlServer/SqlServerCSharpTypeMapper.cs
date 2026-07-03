@@ -64,59 +64,151 @@ public sealed partial class SqlServerCSharpTypeMapper : IColumnTypeMapper
         var baseType = GetBaseType(normalized);
         var maxLength = TryGetLength(normalized);
         var (precision, scale) = TryGetPrecisionScale(normalized);
+        // SQL パラメータの型明示化に使う SqlDbType 列挙名を解決する（未知型は null でフォールバック）
+        var sqlDbTypeName = ResolveSqlDbTypeName(baseType);
 
         return baseType switch
         {
-            "bit" => Value("bool"),
-            "tinyint" => Value("byte"),
-            "smallint" => Value("short"),
-            "int" => Value("int"),
-            "bigint" => Value("long"),
+            "bit" => Value("bool", sqlDbTypeName),
+            "tinyint" => Value("byte", sqlDbTypeName),
+            "smallint" => Value("short", sqlDbTypeName),
+            "int" => Value("int", sqlDbTypeName),
+            "bigint" => Value("long", sqlDbTypeName),
             // SQL Server の real は単精度、float は倍精度のため C# 側の対応が直感と逆になる点に注意
-            "real" => Value("float"),
-            "float" => Value("double"),
-            "decimal" or "numeric" => Decimal(precision, scale),
-            "money" or "smallmoney" => Value("decimal"),
-            "date" or "datetime" or "datetime2" or "smalldatetime" => Value("DateTime"),
-            "time" => Value("TimeSpan"),
-            "datetimeoffset" => Value("DateTimeOffset"),
-            "uniqueidentifier" => Value("Guid"),
+            "real" => Value("float", sqlDbTypeName),
+            "float" => Value("double", sqlDbTypeName),
+            "decimal" or "numeric" => Decimal(precision, scale, sqlDbTypeName),
+            "money" or "smallmoney" => Value("decimal", sqlDbTypeName),
+            "date" or "datetime" or "datetime2" or "smalldatetime" => Value(
+                "DateTime",
+                sqlDbTypeName
+            ),
+            "time" => Value("TimeSpan", sqlDbTypeName),
+            "datetimeoffset" => Value("DateTimeOffset", sqlDbTypeName),
+            "uniqueidentifier" => Value("Guid", sqlDbTypeName),
             "binary" or "varbinary" or "image" or "rowversion" or "timestamp" => Reference(
-                "byte[]"
+                "byte[]",
+                sqlDbTypeName,
+                maxLength: null,
+                declaredLength: TryGetDeclaredLength(normalized)
             ),
             // 文字列系のみ MaxLength を保持し、[MaxLength] 属性の生成に使う
             "char" or "varchar" or "nchar" or "nvarchar" or "text" or "ntext" or "xml" => Reference(
                 "string",
-                maxLength
+                sqlDbTypeName,
+                maxLength,
+                declaredLength: TryGetDeclaredLength(normalized)
             ),
-            // 未知の型は string として扱い、生成自体は継続させる
-            _ => Reference("string"),
+            // 未知の型は string として扱い、生成自体は継続させる（SqlDbTypeName は null のまま＝AddWithValue フォールバック）
+            _ => Reference("string", sqlDbTypeName: null),
         };
     }
 
+    /// <summary>
+    /// 基本型名を <c>System.Data.SqlDbType</c> の列挙名へ解決する（SQL パラメータの型明示化用）。
+    /// </summary>
+    /// <remarks>
+    /// マッパー本体（<see cref="Map"/>）の分岐と対応させる。未知型は null を返し、生成物側で AddWithValue にフォールバックさせる。
+    /// Generator は DB 非依存を保つため、ここでは <c>SqlDbType</c> 型そのものではなく列挙名を文字列で運ぶ。
+    /// </remarks>
+    private static string? ResolveSqlDbTypeName(string baseType) =>
+        baseType switch
+        {
+            "char" => "Char",
+            "varchar" => "VarChar",
+            "nchar" => "NChar",
+            "nvarchar" => "NVarChar",
+            "text" => "Text",
+            "ntext" => "NText",
+            "xml" => "Xml",
+            "decimal" or "numeric" => "Decimal",
+            "money" => "Money",
+            "smallmoney" => "SmallMoney",
+            "bit" => "Bit",
+            "tinyint" => "TinyInt",
+            "smallint" => "SmallInt",
+            "int" => "Int",
+            "bigint" => "BigInt",
+            "float" => "Float",
+            "real" => "Real",
+            "date" => "Date",
+            "time" => "Time",
+            "datetime" => "DateTime",
+            "datetime2" => "DateTime2",
+            "smalldatetime" => "SmallDateTime",
+            "datetimeoffset" => "DateTimeOffset",
+            "uniqueidentifier" => "UniqueIdentifier",
+            "binary" => "Binary",
+            "varbinary" => "VarBinary",
+            "image" => "Image",
+            "rowversion" or "timestamp" => "Timestamp",
+            _ => null,
+        };
+
     /// <summary>値型の型情報を作成する</summary>
-    private static CSharpTypeInfo Value(string typeName) =>
-        new() { TypeName = typeName, IsReferenceType = false };
+    private static CSharpTypeInfo Value(string typeName, string? sqlDbTypeName) =>
+        new()
+        {
+            TypeName = typeName,
+            IsReferenceType = false,
+            SqlDbTypeName = sqlDbTypeName,
+        };
 
     /// <summary>decimal 型の型情報を作成する（精度・スケールを保持し、値オブジェクトの桁数検証に使う）</summary>
-    private static CSharpTypeInfo Decimal(int? precision, int? scale) =>
+    private static CSharpTypeInfo Decimal(int? precision, int? scale, string? sqlDbTypeName) =>
         new()
         {
             TypeName = "decimal",
             IsReferenceType = false,
             Precision = precision,
             Scale = scale,
+            SqlDbTypeName = sqlDbTypeName,
         };
 
     /// <summary>参照型の型情報を作成する</summary>
+    /// <param name="sqlDbTypeName">SQL パラメータ型明示化用の SqlDbType 列挙名。未知型は null</param>
     /// <param name="maxLength">文字列型の最大長。長さ指定なし・max 指定の場合は null</param>
-    private static CSharpTypeInfo Reference(string typeName, int? maxLength = null) =>
+    /// <param name="declaredLength">SqlParameter.Size 用の宣言長（n / max=-1 / 無指定=0）</param>
+    private static CSharpTypeInfo Reference(
+        string typeName,
+        string? sqlDbTypeName,
+        int? maxLength = null,
+        int declaredLength = 0
+    ) =>
         new()
         {
             TypeName = typeName,
             IsReferenceType = true,
             MaxLength = maxLength,
+            SqlDbTypeName = sqlDbTypeName,
+            SqlDeclaredLength = declaredLength,
         };
+
+    /// <summary>
+    /// 文字列/バイナリの宣言長を三値で取り出す（SqlParameter.Size 用）。n → n、"(max)" → -1、長さ指定なし → 0。
+    /// </summary>
+    private static int TryGetDeclaredLength(string normalizedDataType)
+    {
+        var match = LengthRegex().Match(normalizedDataType);
+        if (!match.Success)
+        {
+            return 0;
+        }
+
+        if (match.Groups[1].Value.Equals("max", StringComparison.OrdinalIgnoreCase))
+        {
+            return -1;
+        }
+
+        return int.TryParse(
+            match.Groups[1].Value,
+            NumberStyles.Integer,
+            CultureInfo.InvariantCulture,
+            out var length
+        )
+            ? length
+            : 0;
+    }
 
     /// <summary>データ型表記を前後空白除去と小文字化で正規化する</summary>
     private static string Normalize(string dataType) => dataType.Trim().ToLowerInvariant();

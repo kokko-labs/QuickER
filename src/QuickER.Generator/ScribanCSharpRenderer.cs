@@ -92,19 +92,19 @@ internal sealed class ScribanCSharpRenderer
         var template = ParsedTemplate;
 
         // 独自属性 NavigationReference は (1) Entity のナビゲーションプロパティへの付与、
-        // (2) Repository の SqlEntityMetadata によるナビゲーション除外（リフレクション走査）のいずれかで参照される。
+        // (2) Repository の EntitySaveMetadata によるナビゲーション除外（リフレクション走査）のいずれかで参照される。
         // リレーションが無くても Repository を生成する場合は属性定義が必要なため、その条件も含める。
         var emitNavRefAttr =
             (options.GenerateEntityClasses && model.EntityClasses.Any(c => c.Navigations.Count > 0))
             || options.GenerateRepositories;
 
-        // ColumnFacets 属性は Entity プロパティに DB カラムのメタ情報（最大長 / precision / scale）を載せる。
-        // 実際に付与するプロパティが 1 つでもある場合のみ属性定義を出力する。
-        var emitColumnFacetsAttr =
-            options.IncludeDataAnnotations
-            && model.EntityClasses.Any(c =>
-                c.Properties.Any(p => p.FacetMaxLength is not null || p.FacetPrecision is not null)
-            );
+        // SqlColumnType 属性は Entity プロパティに DB 列のメタ情報（SqlDbType・Size・Precision・Scale）を載せる。
+        // ランタイムの EntitySaveMetadata が明示 SqlParameter を組み立てるのに使うほか、利用者コードが列メタ情報
+        // （最大長・桁数）を参照する用途も兼ねるため、Repository 生成時 または IncludeDataAnnotations 時のいずれか、
+        // かつ SqlDbType が判明したプロパティが 1 つでもある場合に属性定義と付与を出力する。
+        var emitSqlColumnTypeAttr =
+            (options.GenerateRepositories || options.IncludeDataAnnotations)
+            && model.EntityClasses.Any(c => c.Properties.Any(p => p.SqlDbTypeName is not null));
 
         var scriptObject = new Scriban.Runtime.ScriptObject
         {
@@ -118,7 +118,7 @@ internal sealed class ScribanCSharpRenderer
             ["include_json_ignore_on_parent_navigation"] =
                 options.IncludeJsonIgnoreOnParentNavigation,
             ["emit_nav_ref_attr"] = emitNavRefAttr,
-            ["emit_column_facets_attr"] = emitColumnFacetsAttr,
+            ["emit_sql_column_type_attr"] = emitSqlColumnTypeAttr,
             ["generate_value_objects"] = options.GenerateValueObjects,
             ["value_object_classes"] = model.ValueObjectClasses,
             // 出力するバケットの絞り込み（分割時はファイルごとに切り替える。非分割時は全 true）
