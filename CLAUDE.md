@@ -44,11 +44,12 @@ QuickER.AI       → Model    AI/MCP/ASP.NET Core（WPF非依存。VM操作は I
 - **Generator の DB 非依存**: 型解決（DB型→C#型）はプロバイダ側の責務。Generator は解決済み `CSharpTypeInfo` の辞書を入力に受け取る
 - **プロバイダの対称性**: 4方言は同じ構造（SchemaImporter / DdlGeneratorBase 派生 / 型マップ / Testcontainers 統合テスト）。方言 SQL の説明コメントは SQL Server 版と同水準に揃える。スキーマインポータの基底クラス化は**意図的に見送り**（方言差分が大きい）。共有部品は ForeignKeyRelationshipBuilder / UniqueColumnSetBuilder / SchemaTableEntry
 - **生成コードの汎用性**: 生成される C# は CommunityToolkit 等の UI フレームワークに依存させない（WPF 以外でも使える設計）。Repository 生成は単一キー・アプリ側採番前提（複合キー・DB自動採番は対象外）
+- **EF Core モード（GenerateEfCore）**: 既存 Entity をそのまま EF に乗せる方言非依存の QuickErDbContext＋EF 版 Repository を生成し、DI 登録（AddGeneratedRepositories ⇔ AddGeneratedEfCoreRepositories）の差し替えだけで自作 SQL Server 実装と交換できる。GenerateEfCore=false のとき生成物に EF への依存は一切出ない（using 含む）。スキーマ作成は従来どおり DDL 生成の責務で、EF は既存スキーマへの接続専用（Migrations / HasColumnType は範囲外）
 
 ## 不変条件（ビルド・型検査では検出できず、壊すと静かに回帰する）
 
 - `Templates/CSharpRuntime.scriban` は **CRLF 固定**（.gitattributes で強制）。生成コードのバイト一致が前提
-- **テンプレート変更時は** `tests/QuickER.Tests/GeneratedFixture/GeneratedFixture.g.cs` の再生成が必要。GeneratedFixtureDriftTests が「再生成→差分ゼロ」を検証し、失敗メッセージに再生成手順がある
+- **テンプレート変更時は** `tests/QuickER.Tests/GeneratedFixture/` の固定フィクスチャ **2 つ**（GeneratedFixture.g.cs と PortableFixture.g.cs）の再生成が必要。各ドリフトテスト（GeneratedFixtureDriftTests / PortableFixtureDriftTests）が「再生成→差分ゼロ」を検証し、失敗メッセージに再生成手順がある
 - DDL 出力の先頭コメントは `-- QuickER によって自動生成された DDL`（DdlGeneratorBase.cs）。このヘッダを検証するテストは存在しないため変更に気づきにくい
 - `PasswordBoxBehavior`（QuickER.Gui/Views）の DP 既定値は **null 必須**。string.Empty にすると空文字バインド時に PasswordChanged が購読されず入力が VM に届かない（PasswordBoxBehaviorTests が守る）。バインド先 VM プロパティは空文字で初期化する
 - 生成ランタイムの SqlParameter は `[SqlColumnType]` 属性由来の明示型。文字列 Size の「宣言長超過なら値長」ガードを固定 Size にするとサイレントなデータ破損を招く
