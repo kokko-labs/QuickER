@@ -4893,6 +4893,26 @@ public partial class QuickErDbContext : DbContext
     /// <summary>オプションを受け取り DbContext を初期化する</summary>
     public QuickErDbContext(DbContextOptions<QuickErDbContext> options)
         : base(options) { }
+{{~ if generate_value_objects ~}}
+
+    /// <summary>値オブジェクト列の文字列メソッド（Contains/StartsWith/EndsWith・.Value）を SQL へ翻訳する拡張を追加する</summary>
+    /// <remarks>
+    /// 値オブジェクトはコンバータ（v =&gt; v.Value）で string 列へ射影されるが、EF 既定では
+    /// <c>ValueObjectStringBase&lt;T&gt;.Contains</c> 等が翻訳できずクエリが失敗する。
+    /// <see cref="ValueObjectTranslationDbContextOptionsExtension"/> を差し込み、これらを LIKE / 素の string 列へ翻訳させる。
+    /// </remarks>
+    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+    {
+        base.OnConfiguring(optionsBuilder);
+
+        if (optionsBuilder.Options.FindExtension<ValueObjectTranslationDbContextOptionsExtension>() is null)
+        {
+            ((IDbContextOptionsBuilderInfrastructure)optionsBuilder).AddOrUpdateExtension(
+                new ValueObjectTranslationDbContextOptionsExtension()
+            );
+        }
+    }
+{{~ end ~}}
 {{~ for db_set in ef_core.db_sets ~}}
 
     /// <summary>{{ db_set.entity_class_name }} の DbSet</summary>
@@ -4942,6 +4962,280 @@ public partial class QuickErDbContext : DbContext
     /// <summary>利用者が追加構成を差し込むための拡張ポイント（partial・未実装ならゼロコスト）</summary>
     partial void OnModelCreatingPartial(ModelBuilder modelBuilder);
 }
+{{~ if generate_value_objects ~}}
+
+/// <summary>
+/// 文字列値オブジェクト（<see cref="ValueObjectStringBase{TSelf}"/> 由来）の Contains/StartsWith/EndsWith を
+/// SQL の LIKE へ翻訳する EF Core メソッド呼び出しトランスレータ。
+/// </summary>
+/// <remarks>
+/// <para>
+/// 値オブジェクト列はコンバータで string 列へ射影されるが、EF 既定ではこれらのインスタンスメソッドを翻訳できない。
+/// 自作 SQL Server 版と同じ意味論（Ordinal 部分一致 → LIKE・ワイルドカード <c>\ % _ [</c> のエスケープ・
+/// <c>ESCAPE '\'</c>・null 引数は空文字扱い）に合わせて <c>ISqlExpressionFactory.Like</c> を生成する。
+/// </para>
+/// <para>
+/// 引数は string オーバーロードと TSelf（値オブジェクト）オーバーロードの両方を受け付ける。定数はクライアント側で
+/// エスケープし、パラメータは REPLACE の連鎖（方言非依存）で SQL 側エスケープする。
+/// </para>
+/// </remarks>
+internal sealed class ValueObjectStringMethodTranslator(
+    ISqlExpressionFactory sqlExpressionFactory,
+    RelationalTypeMapping stringTypeMapping
+) : IMethodCallTranslator
+{
+    private readonly ISqlExpressionFactory _sqlExpressionFactory = sqlExpressionFactory;
+    private readonly RelationalTypeMapping _stringTypeMapping = stringTypeMapping;
+
+    /// <summary>REPLACE で順にエスケープする（元文字, 置換後）の組。バックスラッシュを最初に処理する</summary>
+    private static readonly (string From, string To)[] _escapePairs =
+    [
+        ("\\", "\\\\"),
+        ("%", "\\%"),
+        ("_", "\\_"),
+        ("[", "\\["),
+    ];
+
+    /// <summary>対象メソッドなら LIKE 式を返し、そうでなければ null（他トランスレータに委ねる）</summary>
+    public SqlExpression? Translate(
+        SqlExpression? instance,
+        MethodInfo method,
+        IReadOnlyList<SqlExpression> arguments,
+        IDiagnosticsLogger<DbLoggerCategory.Query> logger
+    )
+    {
+        // 文字列値オブジェクトの単一引数 Contains / StartsWith / EndsWith のみを対象にする
+        if (
+            instance is null
+            || arguments.Count != 1
+            || method.Name is not ("Contains" or "StartsWith" or "EndsWith")
+            || method.DeclaringType is not { IsGenericType: true } declaring
+            || declaring.GetGenericTypeDefinition() != typeof(ValueObjectStringBase<>)
+        )
+        {
+            return null;
+        }
+
+        // 引数のマッピングを決める。string 引数は素の string、TSelf 引数は列と同じコンバータ付き
+        // マッピング（VO→素値変換）で束縛する
+        var parameterType = method.GetParameters()[0].ParameterType;
+        SqlExpression argument;
+
+        if (parameterType == typeof(string))
+        {
+            argument = _sqlExpressionFactory.ApplyTypeMapping(arguments[0], _stringTypeMapping);
+        }
+        else if (parameterType == declaring.GetGenericArguments()[0])
+        {
+            argument = _sqlExpressionFactory.ApplyTypeMapping(arguments[0], instance.TypeMapping);
+        }
+        else
+        {
+            return null;
+        }
+
+        // 列を素の string としてコアースし、コンバータ経由の再読込（string→VO の不正キャスト）を避ける
+        var column = _sqlExpressionFactory.ApplyTypeMapping(instance, _stringTypeMapping);
+        var pattern = BuildLikePattern(method.Name, argument);
+
+        // 自作版と同じく ESCAPE '\' を明示する
+        return _sqlExpressionFactory.Like(
+            column,
+            pattern,
+            _sqlExpressionFactory.Constant("\\", _stringTypeMapping)
+        );
+    }
+
+    /// <summary>メソッド名に応じた LIKE パターン式（'%'＋エスケープ済み引数＋'%' 等）を組み立てる</summary>
+    private SqlExpression BuildLikePattern(string methodName, SqlExpression argument)
+    {
+        // 定数はクライアント側でエスケープして 1 つの定数パターンへ畳み込む（自作版と同じ形）。
+        // TSelf オーバーロードの定数（EF が Create(...) を定数へ畳んだもの）は素値へ開いてから扱う
+        if (argument is SqlConstantExpression { Value: var constantValue })
+        {
+            var raw = SqlParameterValue.Unwrap(constantValue) as string ?? string.Empty;
+            var escaped = EscapeLikePattern(raw);
+            var constantPattern = methodName switch
+            {
+                "Contains" => "%" + escaped + "%",
+                "StartsWith" => escaped + "%",
+                _ => "%" + escaped,
+            };
+            return _sqlExpressionFactory.Constant(constantPattern, _stringTypeMapping);
+        }
+
+        // パラメータ等は SQL 側でエスケープする。null は自作版（null→空文字）に合わせ COALESCE で空文字へ
+        SqlExpression escapedArgument = _sqlExpressionFactory.Coalesce(
+            argument,
+            _sqlExpressionFactory.Constant(string.Empty, _stringTypeMapping)
+        );
+
+        foreach (var (from, to) in _escapePairs)
+        {
+            escapedArgument = _sqlExpressionFactory.Function(
+                "REPLACE",
+                [
+                    escapedArgument,
+                    _sqlExpressionFactory.Constant(from, _stringTypeMapping),
+                    _sqlExpressionFactory.Constant(to, _stringTypeMapping),
+                ],
+                nullable: true,
+                argumentsPropagateNullability: [true, false, false],
+                typeof(string),
+                _stringTypeMapping
+            );
+        }
+
+        var wildcard = _sqlExpressionFactory.Constant("%", _stringTypeMapping);
+        return methodName switch
+        {
+            "Contains" => _sqlExpressionFactory.Add(
+                wildcard,
+                _sqlExpressionFactory.Add(escapedArgument, wildcard)
+            ),
+            "StartsWith" => _sqlExpressionFactory.Add(escapedArgument, wildcard),
+            _ => _sqlExpressionFactory.Add(wildcard, escapedArgument),
+        };
+    }
+
+    /// <summary>LIKE のワイルドカード（\ % _ [）をエスケープする（自作 SQL Server 版と同一規則）</summary>
+    private static string EscapeLikePattern(string value) =>
+        value.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_").Replace("[", "\\[");
+}
+
+/// <summary>
+/// 値オブジェクト（<see cref="ValueObjectBase{TSelf, TValue}"/> 由来）の <c>.Value</c> メンバ参照を、
+/// 素値の列として翻訳する EF Core メンバトランスレータ。
+/// </summary>
+/// <remarks>
+/// これにより <c>string.IsNullOrEmpty(x.Col.Value)</c> や <c>x.Col.Value &gt; 100</c> のような、素値を開いた
+/// 述語を EF が翻訳できるようになる（自作 SQL Server 版の「列は素の列でも VO の .Value でもよい」と同じ扱い）。
+/// 列はコンバータで素値へ射影済みのため、CONVERT で素値型へ明示コアースし、後段の翻訳が
+/// コンバータ経由で再読込（不正キャスト）しないようにする。
+/// </remarks>
+internal sealed class ValueObjectValueMemberTranslator(
+    ISqlExpressionFactory sqlExpressionFactory,
+    IRelationalTypeMappingSource typeMappingSource
+) : IMemberTranslator
+{
+    private readonly ISqlExpressionFactory _sqlExpressionFactory = sqlExpressionFactory;
+    private readonly IRelationalTypeMappingSource _typeMappingSource = typeMappingSource;
+
+    /// <summary>値オブジェクトの .Value なら素値の列として返し、そうでなければ null</summary>
+    public SqlExpression? Translate(
+        SqlExpression? instance,
+        MemberInfo member,
+        Type returnType,
+        IDiagnosticsLogger<DbLoggerCategory.Query> logger
+    )
+    {
+        if (
+            instance is null
+            || member.Name != "Value"
+            || member.DeclaringType is not { IsGenericType: true } declaring
+            || declaring.GetGenericTypeDefinition() != typeof(ValueObjectBase<,>)
+        )
+        {
+            return null;
+        }
+
+        // 素値型（string / int / decimal 等）の既定マッピングが得られない型は対象外（他トランスレータに委ねる）
+        if (_typeMappingSource.FindMapping(returnType) is not { } typeMapping)
+        {
+            return null;
+        }
+
+        return _sqlExpressionFactory.Convert(instance, returnType, typeMapping);
+    }
+}
+
+/// <summary>値オブジェクトの文字列翻訳トランスレータ（メソッド・メンバ）を束ねる EF Core プラグイン</summary>
+internal sealed class ValueObjectTranslatorPlugin
+    : IMethodCallTranslatorPlugin,
+        IMemberTranslatorPlugin
+{
+    private readonly IReadOnlyList<IMemberTranslator> _memberTranslators;
+
+    /// <summary>SQL 式ファクトリと型マッピング源からトランスレータ群を構築する</summary>
+    public ValueObjectTranslatorPlugin(
+        ISqlExpressionFactory sqlExpressionFactory,
+        IRelationalTypeMappingSource typeMappingSource
+    )
+    {
+        var stringTypeMapping = typeMappingSource.FindMapping(typeof(string))!;
+        Translators =
+        [
+            new ValueObjectStringMethodTranslator(sqlExpressionFactory, stringTypeMapping),
+        ];
+        _memberTranslators =
+        [
+            new ValueObjectValueMemberTranslator(sqlExpressionFactory, typeMappingSource),
+        ];
+    }
+
+    /// <summary>メソッド呼び出しトランスレータ群</summary>
+    public IEnumerable<IMethodCallTranslator> Translators { get; }
+
+    /// <summary>メンバトランスレータ群</summary>
+    IEnumerable<IMemberTranslator> IMemberTranslatorPlugin.Translators => _memberTranslators;
+}
+
+/// <summary>
+/// 値オブジェクトの文字列翻訳プラグインを EF Core の内部サービスコンテナへ登録する DbContext オプション拡張。
+/// </summary>
+/// <remarks>
+/// <see cref="IMethodCallTranslatorPlugin"/> / <see cref="IMemberTranslatorPlugin"/> は EF が定義するサービスのため、
+/// プロバイダ固有サービスではなく <c>TryAddEnumerable</c> で（既存プラグインを潰さずに）追加する。
+/// </remarks>
+internal sealed class ValueObjectTranslationDbContextOptionsExtension : IDbContextOptionsExtension
+{
+    private DbContextOptionsExtensionInfo? _info;
+
+    /// <summary>拡張の情報（ログ断片・サービスプロバイダキャッシュキーへの寄与）</summary>
+    public DbContextOptionsExtensionInfo Info => _info ??= new ExtensionInfo(this);
+
+    /// <summary>翻訳プラグインを EF の内部サービスコンテナへ登録する</summary>
+    public void ApplyServices(IServiceCollection services)
+    {
+        services.AddScoped<ValueObjectTranslatorPlugin>();
+        services.TryAddEnumerable(
+            ServiceDescriptor.Scoped<IMethodCallTranslatorPlugin, ValueObjectTranslatorPlugin>(
+                sp => sp.GetRequiredService<ValueObjectTranslatorPlugin>()
+            )
+        );
+        services.TryAddEnumerable(
+            ServiceDescriptor.Scoped<IMemberTranslatorPlugin, ValueObjectTranslatorPlugin>(
+                sp => sp.GetRequiredService<ValueObjectTranslatorPlugin>()
+            )
+        );
+    }
+
+    /// <summary>検証は不要（構成に依存する制約は持たない）</summary>
+    public void Validate(IDbContextOptions options) { }
+
+    /// <summary>拡張のメタ情報。サービス構成を変えるが方言プロバイダではない</summary>
+    private sealed class ExtensionInfo(IDbContextOptionsExtension extension)
+        : DbContextOptionsExtensionInfo(extension)
+    {
+        /// <summary>方言プロバイダ拡張ではない</summary>
+        public override bool IsDatabaseProvider => false;
+
+        /// <summary>ログに出す断片</summary>
+        public override string LogFragment => "using ValueObjectTranslation ";
+
+        /// <summary>サービスプロバイダのキャッシュキーへの寄与（一定なら同一構成とみなす）</summary>
+        public override int GetServiceProviderHashCode() => 0;
+
+        /// <summary>同一サービス構成なら同じサービスプロバイダを再利用してよい</summary>
+        public override bool ShouldUseSameServiceProvider(DbContextOptionsExtensionInfo other) =>
+            other is ExtensionInfo;
+
+        /// <summary>デバッグ情報へ有効化フラグを載せる</summary>
+        public override void PopulateDebugInfo(IDictionary<string, string> debugInfo) =>
+            debugInfo["ValueObjectTranslation"] = "1";
+    }
+}
+{{~ end ~}}
 
 /// <summary>エンティティに縛られない生 SQL 実行器の EF Core 版（DbContext の接続上で ADO を直接実行する）</summary>
 /// <remarks>

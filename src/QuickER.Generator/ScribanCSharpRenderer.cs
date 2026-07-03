@@ -114,9 +114,21 @@ internal sealed class ScribanCSharpRenderer
         var usings = scope.Usings;
         if (scope.EfCore)
         {
-            usings = usings.Contains("Microsoft.EntityFrameworkCore")
-                ? usings
-                : [.. usings, "Microsoft.EntityFrameworkCore"];
+            // 値オブジェクトの文字列メソッド翻訳プラグイン（IMethodCallTranslatorPlugin 等）で使う
+            // EF Core の Query / Storage / Infrastructure / Diagnostics 名前空間も併せて補う。
+            string[] efNamespaces =
+            [
+                "Microsoft.EntityFrameworkCore",
+                "Microsoft.EntityFrameworkCore.Diagnostics",
+                "Microsoft.EntityFrameworkCore.Infrastructure",
+                "Microsoft.EntityFrameworkCore.Query",
+                "Microsoft.EntityFrameworkCore.Query.SqlExpressions",
+                "Microsoft.EntityFrameworkCore.Storage",
+                "Microsoft.Extensions.DependencyInjection",
+                "Microsoft.Extensions.DependencyInjection.Extensions",
+            ];
+            var missing = efNamespaces.Where(ns => !usings.Contains(ns)).ToArray();
+            usings = missing.Length == 0 ? usings : [.. usings, .. missing];
         }
 
         var scriptObject = new Scriban.Runtime.ScriptObject
