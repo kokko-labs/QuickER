@@ -20,6 +20,9 @@ public enum GenerationBucket
 
     /// <summary>Repository クラス群（インターフェース・基底・DI 拡張を含む）</summary>
     Repository,
+
+    /// <summary>EF Core 用コード（DbContext と Fluent API 構成）</summary>
+    EfCore,
 }
 
 /// <summary>1 つの生成ファイルが「どの名前空間で・どのバケットを含み・どの名前空間を using するか」を表す計画</summary>
@@ -72,6 +75,7 @@ public static class GeneratedFilePlanner
             GenerationBucket.EditModel => options.EditModelNamespace,
             GenerationBucket.Mapper => options.MapperNamespace,
             GenerationBucket.Repository => options.RepositoryNamespace,
+            GenerationBucket.EfCore => options.EfCoreNamespace,
             _ => null,
         };
 
@@ -93,6 +97,7 @@ public static class GeneratedFilePlanner
             GenerationBucket.EditModel => "EditModels",
             GenerationBucket.Mapper => "Mappers",
             GenerationBucket.Repository => "Repositories",
+            GenerationBucket.EfCore => "EfCore",
             _ => "Generated",
         };
 
@@ -128,6 +133,11 @@ public static class GeneratedFilePlanner
         if (options.GenerateRepositories)
         {
             active.Add(GenerationBucket.Repository);
+        }
+
+        if (options.GenerateEfCore)
+        {
+            active.Add(GenerationBucket.EfCore);
         }
 
         if (options.GenerateValueObjects)

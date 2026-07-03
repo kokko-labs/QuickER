@@ -27,6 +27,15 @@ public sealed class CodeGenerationOptions
     /// <summary>SQL Server 向けの Repository クラス群（インターフェース・基底クラス・DI 拡張を含む）を生成するかどうか</summary>
     public bool GenerateRepositories { get; init; } = true;
 
+    /// <summary>
+    /// EF Core 用コード（DbContext と Fluent API 構成）を生成するかどうか。
+    /// </summary>
+    /// <remarks>
+    /// 生成される DbContext は既存 Entity をそのまま既存スキーマへ接続する用途（方言非依存・1 本）で、
+    /// スキーマ作成（Migrations / EnsureCreated）は範囲外とする。<see cref="GenerateRepositories"/> が必要
+    /// </remarks>
+    public bool GenerateEfCore { get; init; }
+
     /// <summary>[Table] [Key] [Column] [Required] [MaxLength] などのデータアノテーション属性を付与するかどうか</summary>
     public bool IncludeDataAnnotations { get; init; } = true;
 
@@ -65,4 +74,7 @@ public sealed class CodeGenerationOptions
 
     /// <summary>分割時の値オブジェクトクラスの名前空間。空なら <see cref="NamespaceName"/> へフォールバックする</summary>
     public string? ValueObjectNamespace { get; init; }
+
+    /// <summary>分割時の EfCore（DbContext・構成）クラスの名前空間。空なら <see cref="NamespaceName"/> へフォールバックする</summary>
+    public string? EfCoreNamespace { get; init; }
 }

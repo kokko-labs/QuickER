@@ -135,6 +135,14 @@ internal sealed partial class CSharpNameConverter
     /// <summary>カラム名を VO 共有キー（正規化 Pascal 名）へ変換する。同名判定・グルーピングに使う</summary>
     public string ToColumnKey(string columnName) => ToPascalCase(columnName);
 
+    /// <summary>テーブル名から DbContext の DbSet プロパティ名を生成する（例: "order_items" → "OrderItems"）</summary>
+    /// <remarks>単数形化してから複数形化することで、テーブル名の表記ゆれ（単数/複数）に依らず一定の複数形にする</remarks>
+    public string ToDbSetName(string tableName)
+    {
+        var baseName = ToPascalCase(Pluralize(Singularize(tableName)));
+        return Keywords.Contains(baseName) ? "@" + baseName : baseName;
+    }
+
     /// <summary>
     /// テーブル名からナビゲーションプロパティ名を生成する
     /// </summary>

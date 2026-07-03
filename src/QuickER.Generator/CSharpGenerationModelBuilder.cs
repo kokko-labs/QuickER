@@ -73,6 +73,7 @@ internal sealed partial class CSharpGenerationModelBuilder
             ValueObjectClasses = _valueObjects
                 .Values.OrderBy(vo => vo.ClassName, StringComparer.Ordinal)
                 .ToList(),
+            EfCore = BuildEfCoreModel(diagram, options),
         };
     }
 

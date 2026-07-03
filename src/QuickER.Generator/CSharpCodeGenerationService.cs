@@ -93,6 +93,7 @@ public sealed class CSharpCodeGenerationService
             EditModels = spec.Buckets.Contains(GenerationBucket.EditModel),
             Mappers = spec.Buckets.Contains(GenerationBucket.Mapper),
             Repositories = spec.Buckets.Contains(GenerationBucket.Repository),
+            EfCore = spec.Buckets.Contains(GenerationBucket.EfCore),
         };
     }
 
@@ -154,6 +155,17 @@ public sealed class CSharpCodeGenerationService
             diagnostics.Add(
                 Error(
                     "Repository は [Table] / [Key] / [Column] 属性を利用するため、データアノテーションの付与が必要です。データアノテーションを有効にしてください。"
+                )
+            );
+        }
+
+        // EF 版はこの後のフェーズで既存 Repository インターフェイスを実装するため、DbContext だけを
+        // 先行生成しても整合しない。EfCore 生成には Repository 生成を必須とする
+        if (options.GenerateEfCore && !options.GenerateRepositories)
+        {
+            diagnostics.Add(
+                Error(
+                    "EF Core（DbContext）の生成には Repository の生成が必要です。Repository を生成対象に含めてください。"
                 )
             );
         }

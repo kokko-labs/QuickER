@@ -23,6 +23,108 @@ internal sealed class CSharpGenerationModel
 
     /// <summary>値オブジェクト（Value Object）クラスの生成モデル一覧（GenerateValueObjects が OFF のときは空）</summary>
     public required IReadOnlyList<CSharpValueObjectModel> ValueObjectClasses { get; init; }
+
+    /// <summary>EF Core（DbContext・Fluent 構成）の生成モデル。GenerateEfCore が OFF のときは null</summary>
+    public CSharpEfCoreModel? EfCore { get; init; }
+}
+
+/// <summary>EF Core 用コード（DbContext と OnModelCreating の Fluent 構成）のルート生成モデル</summary>
+internal sealed class CSharpEfCoreModel
+{
+    /// <summary>DbContext 上の DbSet プロパティ一覧（宣言順はエンティティ順）</summary>
+    public required IReadOnlyList<CSharpEfCoreDbSetModel> DbSets { get; init; }
+
+    /// <summary>エンティティごとの Fluent 構成一覧</summary>
+    public required IReadOnlyList<CSharpEfCoreEntityConfigModel> Entities { get; init; }
+
+    /// <summary>EntityBase の永続化対象外メンバー（Ignore する get/set 可能な公開プロパティ名）一覧</summary>
+    public required IReadOnlyList<string> IgnoredBaseMembers { get; init; }
+}
+
+/// <summary>DbContext の 1 つの DbSet プロパティに対応する生成モデル</summary>
+internal sealed class CSharpEfCoreDbSetModel
+{
+    /// <summary>DbSet の要素となる Entity クラス名</summary>
+    public required string EntityClassName { get; init; }
+
+    /// <summary>DbSet プロパティ名（Entity クラス名から "Entity" を除いた複数形風の名前）</summary>
+    public required string PropertyName { get; init; }
+}
+
+/// <summary>1 エンティティの EF Core Fluent 構成（builder.Entity&lt;T&gt;(...) の中身）の生成モデル</summary>
+internal sealed class CSharpEfCoreEntityConfigModel
+{
+    /// <summary>対象の Entity クラス名</summary>
+    public required string EntityClassName { get; init; }
+
+    /// <summary>マッピング先テーブル名（ToTable 用）</summary>
+    public required string TableName { get; init; }
+
+    /// <summary>主キーを構成するプロパティ名一覧（HasKey 用。単一・複合の両方に対応）</summary>
+    public required IReadOnlyList<string> KeyPropertyNames { get; init; }
+
+    /// <summary>スカラープロパティの構成一覧</summary>
+    public required IReadOnlyList<CSharpEfCorePropertyConfigModel> Properties { get; init; }
+
+    /// <summary>このエンティティが principal（親）となるリレーションの構成一覧（HasOne/WithMany 等）</summary>
+    public required IReadOnlyList<CSharpEfCoreRelationshipConfigModel> Relationships { get; init; }
+}
+
+/// <summary>1 スカラープロパティの EF Core Fluent 構成の生成モデル</summary>
+internal sealed class CSharpEfCorePropertyConfigModel
+{
+    /// <summary>プロパティ名（Property(e =&gt; e.Xxx) 用）</summary>
+    public required string PropertyName { get; init; }
+
+    /// <summary>マッピング先カラム名（HasColumnName 用）</summary>
+    public required string ColumnName { get; init; }
+
+    /// <summary>必須（非 NULL）かどうか（IsRequired 用）</summary>
+    public required bool IsRequired { get; init; }
+
+    /// <summary>文字列の最大長（HasMaxLength 用）。無指定は null</summary>
+    public int? MaxLength { get; init; }
+
+    /// <summary>decimal の全体桁数（HasPrecision 用）。無指定・非 decimal は null</summary>
+    public int? Precision { get; init; }
+
+    /// <summary>decimal の小数桁数（HasPrecision の第 2 引数）。Precision がある場合のみ有効</summary>
+    public int? Scale { get; init; }
+
+    /// <summary>行バージョン列（IsRowVersion 用）かどうか</summary>
+    public required bool IsRowVersion { get; init; }
+
+    /// <summary>値オブジェクト型かどうか（HasConversion 構成の要否判定）</summary>
+    public required bool IsValueObject { get; init; }
+
+    /// <summary>値オブジェクトのクラス名（IsValueObject=true のときのみ有効）</summary>
+    public string ValueObjectClassName { get; init; } = string.Empty;
+}
+
+/// <summary>principal（親）から見た 1 リレーションの EF Core Fluent 構成の生成モデル</summary>
+/// <remarks>
+/// 親エンティティ側に構成をまとめる（HasMany/HasOne → WithOne/WithMany → HasForeignKey → OnDelete）。
+/// dependent（子）側は親への単一参照ナビゲーションを 1 つ持つ前提とする
+/// </remarks>
+internal sealed class CSharpEfCoreRelationshipConfigModel
+{
+    /// <summary>dependent（子・FK 側）の Entity クラス名</summary>
+    public required string DependentClassName { get; init; }
+
+    /// <summary>親側のナビゲーションプロパティ名（1 対多はコレクション、1 対 1 は単一参照）</summary>
+    public required string PrincipalNavigationName { get; init; }
+
+    /// <summary>子側の親参照ナビゲーションプロパティ名</summary>
+    public required string DependentNavigationName { get; init; }
+
+    /// <summary>1 対多（親がコレクションを持つ）かどうか。false は 1 対 1</summary>
+    public required bool IsCollection { get; init; }
+
+    /// <summary>FK を構成する子側プロパティ名一覧（HasForeignKey 用）</summary>
+    public required IReadOnlyList<string> ForeignKeyPropertyNames { get; init; }
+
+    /// <summary>親削除時にカスケード削除するかどうか（OnDelete の Cascade/Restrict 切り替え）</summary>
+    public required bool CascadeDelete { get; init; }
 }
 
 /// <summary>値オブジェクト（Value Object）クラスの生成モデル</summary>

@@ -30,6 +30,9 @@ internal sealed class RenderScope
 
     /// <summary>Repository クラス群を出力するか</summary>
     public required bool Repositories { get; init; }
+
+    /// <summary>EF Core 用コード（DbContext・構成）を出力するか</summary>
+    public required bool EfCore { get; init; }
 }
 
 /// <summary>生成モデルを Scriban テンプレートで C# ソースコードへレンダリングするレンダラー</summary>
@@ -106,10 +109,20 @@ internal sealed class ScribanCSharpRenderer
             (options.GenerateRepositories || options.IncludeDataAnnotations)
             && model.EntityClasses.Any(c => c.Properties.Any(p => p.SqlDbTypeName is not null));
 
+        // EF Core の using はこのファイルが EfCore バケットを含むときのみ付与する。
+        // これにより GenerateEfCore=false や、分割時の非 EfCore ファイルへ EF 依存が漏れない
+        var usings = scope.Usings;
+        if (scope.EfCore)
+        {
+            usings = usings.Contains("Microsoft.EntityFrameworkCore")
+                ? usings
+                : [.. usings, "Microsoft.EntityFrameworkCore"];
+        }
+
         var scriptObject = new Scriban.Runtime.ScriptObject
         {
             ["namespace_name"] = scope.NamespaceName,
-            ["usings"] = scope.Usings,
+            ["usings"] = usings,
             ["entity_classes"] = model.EntityClasses,
             ["edit_model_classes"] = model.EditModelClasses,
             ["mapper_classes"] = model.MapperClasses,
@@ -121,6 +134,7 @@ internal sealed class ScribanCSharpRenderer
             ["emit_sql_column_type_attr"] = emitSqlColumnTypeAttr,
             ["generate_value_objects"] = options.GenerateValueObjects,
             ["value_object_classes"] = model.ValueObjectClasses,
+            ["ef_core"] = model.EfCore,
             // 出力するバケットの絞り込み（分割時はファイルごとに切り替える。非分割時は全 true）
             ["render_runtime"] = scope.Runtime,
             ["render_value_objects"] = scope.ValueObjects,
@@ -128,6 +142,7 @@ internal sealed class ScribanCSharpRenderer
             ["render_edit_models"] = scope.EditModels,
             ["render_mappers"] = scope.Mappers,
             ["render_repositories"] = scope.Repositories,
+            ["render_ef_core"] = scope.EfCore,
         };
 
         // テンプレートは本ライブラリ内に固定で持つ信頼済みのものであり、ループ回数・出力量は ER 図の規模に

@@ -131,6 +131,16 @@ internal static class GeneratedCodeCompiler
                 .Location
         );
 
+        // EF Core（DbContext・Fluent 構成）を含む生成コードの検証用。
+        // Microsoft.EntityFrameworkCore（DbContext / DbSet）・.Relational（ToTable）・.Abstractions（DeleteBehavior 等）
+        AddPath(typeof(Microsoft.EntityFrameworkCore.DbContext).Assembly.Location);
+        AddPath(
+            typeof(Microsoft.EntityFrameworkCore.RelationalDatabaseFacadeExtensions)
+                .Assembly
+                .Location
+        );
+        AddPath(typeof(Microsoft.EntityFrameworkCore.DeleteBehavior).Assembly.Location);
+
         return referencesByPath.Values.ToArray();
     }
 }

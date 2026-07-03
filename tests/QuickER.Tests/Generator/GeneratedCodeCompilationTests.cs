@@ -36,6 +36,27 @@ public class GeneratedCodeCompilationTests
         return data;
     }
 
+    /// <summary>マトリクスケース: EF Core 生成あり × Split{off,on} × VO{off,on} の 4 ケース（Repository 必須のため常に有効）</summary>
+    public static TheoryData<string, CodeGenerationOptions> EfCoreMatrixCases()
+    {
+        var data = new TheoryData<string, CodeGenerationOptions>();
+        foreach (var split in new[] { false, true })
+        foreach (var vo in new[] { false, true })
+        {
+            data.Add(
+                $"EfCore Split={split} VO={vo}",
+                new CodeGenerationOptions
+                {
+                    NamespaceName = "Sample.Domain",
+                    SplitFilesByCategory = split,
+                    GenerateValueObjects = vo,
+                    GenerateEfCore = true,
+                }
+            );
+        }
+        return data;
+    }
+
     /// <summary>マトリクスケース: カテゴリ削減の現実的な組み合わせ × Split{off,on}</summary>
     public static TheoryData<string, CodeGenerationOptions> ReducedCategoryCases()
     {
@@ -138,6 +159,14 @@ public class GeneratedCodeCompilationTests
     [Theory]
     [MemberData(nameof(FullMatrixCases))]
     public void Generate_FullMatrix_ShouldProduceCompilableCode(
+        string caseName,
+        CodeGenerationOptions options
+    ) => AssertCompiles(caseName, options);
+
+    /// <summary>EF Core 生成あり（Split × VO の 4 ケース）で、生成コードがエラー・警告なしでコンパイルできることを検証する</summary>
+    [Theory]
+    [MemberData(nameof(EfCoreMatrixCases))]
+    public void Generate_EfCoreMatrix_ShouldProduceCompilableCode(
         string caseName,
         CodeGenerationOptions options
     ) => AssertCompiles(caseName, options);

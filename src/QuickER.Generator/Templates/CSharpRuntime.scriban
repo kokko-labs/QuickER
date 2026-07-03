@@ -4690,3 +4690,67 @@ public sealed partial class {{ repository.class_name }}(ISqlConnectionFactory co
         {{ repository.interface_name }} { }
 {{~ end ~}}
 {{~ end ~}}
+{{~ if ef_core && render_ef_core ~}}
+
+/// <summary>
+/// 既存スキーマへ接続する EF Core の DbContext。
+/// </summary>
+/// <remarks>
+/// スキーマ作成（Migrations / EnsureCreated）は範囲外で、既存 Entity を既存テーブルへマッピングして
+/// 読み書きするための構成のみを持つ。列の DB 型（HasColumnType）は焼き込まず、DDL 生成に委ねる
+/// </remarks>
+public partial class QuickErDbContext : DbContext
+{
+    /// <summary>オプションを受け取り DbContext を初期化する</summary>
+    public QuickErDbContext(DbContextOptions<QuickErDbContext> options)
+        : base(options) { }
+{{~ for db_set in ef_core.db_sets ~}}
+
+    /// <summary>{{ db_set.entity_class_name }} の DbSet</summary>
+    public DbSet<{{ db_set.entity_class_name }}> {{ db_set.property_name }} => Set<{{ db_set.entity_class_name }}>();
+{{~ end ~}}
+
+    /// <summary>エンティティごとのテーブル・キー・列・リレーションを Fluent API で構成する</summary>
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+{{~ for cfg in ef_core.entities ~}}
+{{ if !for.first }}
+{{ end }}        modelBuilder.Entity<{{ cfg.entity_class_name }}>(entity =>
+        {
+            entity.ToTable("{{ cfg.table_name }}");
+{{~ if cfg.key_property_names.size == 1 ~}}
+            entity.HasKey(e => e.{{ cfg.key_property_names[0] }});
+{{~ else if cfg.key_property_names.size > 1 ~}}
+            entity.HasKey(e => new { {{ for k in cfg.key_property_names }}e.{{ k }}{{ if !for.last }}, {{ end }}{{ end }} });
+{{~ end ~}}
+{{~ for member in ef_core.ignored_base_members ~}}
+            entity.Ignore(e => e.{{ member }});
+{{~ end ~}}
+{{~ for prop in cfg.properties ~}}
+            entity.Property(e => e.{{ prop.property_name }}).HasColumnName("{{ prop.column_name }}"){{ if prop.is_required }}.IsRequired(){{ end }}{{ if prop.max_length }}.HasMaxLength({{ prop.max_length }}){{ end }}{{ if prop.precision }}.HasPrecision({{ prop.precision }}{{ if prop.scale }}, {{ prop.scale }}{{ end }}){{ end }}{{ if prop.is_row_version }}.IsRowVersion(){{ end }}{{ if prop.is_value_object }}.HasConversion(v => v!.Value, v => {{ prop.value_object_class_name }}.Create(v!)){{ end }};
+{{~ end ~}}
+{{~ for rel in cfg.relationships ~}}
+{{~ if rel.is_collection ~}}
+            entity
+                .HasMany(e => e.{{ rel.principal_navigation_name }})
+                .WithOne({{ if rel.dependent_navigation_name != "" }}e => e.{{ rel.dependent_navigation_name }}{{ end }})
+                .HasForeignKey(e => {{ if rel.foreign_key_property_names.size == 1 }}e.{{ rel.foreign_key_property_names[0] }}{{ else }}new { {{ for k in rel.foreign_key_property_names }}e.{{ k }}{{ if !for.last }}, {{ end }}{{ end }} }{{ end }})
+                .OnDelete({{ if rel.cascade_delete }}DeleteBehavior.Cascade{{ else }}DeleteBehavior.Restrict{{ end }});
+{{~ else ~}}
+            entity
+                .HasOne(e => e.{{ rel.principal_navigation_name }})
+                .WithOne({{ if rel.dependent_navigation_name != "" }}e => e.{{ rel.dependent_navigation_name }}{{ end }})
+                .HasForeignKey<{{ rel.dependent_class_name }}>(e => {{ if rel.foreign_key_property_names.size == 1 }}e.{{ rel.foreign_key_property_names[0] }}{{ else }}new { {{ for k in rel.foreign_key_property_names }}e.{{ k }}{{ if !for.last }}, {{ end }}{{ end }} }{{ end }})
+                .OnDelete({{ if rel.cascade_delete }}DeleteBehavior.Cascade{{ else }}DeleteBehavior.Restrict{{ end }});
+{{~ end ~}}
+{{~ end ~}}
+        });
+{{~ end ~}}
+
+        OnModelCreatingPartial(modelBuilder);
+    }
+
+    /// <summary>利用者が追加構成を差し込むための拡張ポイント（partial・未実装ならゼロコスト）</summary>
+    partial void OnModelCreatingPartial(ModelBuilder modelBuilder);
+}
+{{~ end ~}}

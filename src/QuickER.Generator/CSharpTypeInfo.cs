@@ -37,4 +37,11 @@ public sealed class CSharpTypeInfo
     /// 無指定をどちらも null にするため区別できないので、Size 判定用にこの三値を別途保持する。
     /// </summary>
     public int SqlDeclaredLength { get; init; }
+
+    /// <summary>
+    /// 行バージョン（SQL Server の <c>rowversion</c> / <c>timestamp</c> 等）かどうか。
+    /// EF Core の Fluent 構成で <c>IsRowVersion()</c>（並行性トークン）を出すかの判定に使う。
+    /// 生成器は DB 非依存のため、この判定はプロバイダ（型マッパー）が行って渡す
+    /// </summary>
+    public bool IsRowVersion { get; init; }
 }

@@ -2714,4 +2714,262 @@ public class CSharpCodeGenerationServiceTests
         result.HasErrors.Should().BeFalse();
         Content(result, "Runtime.g.cs").Should().Contain("namespace Acme.App.Runtime;");
     }
+
+    // ---- EF Core（DbContext・Fluent 構成）----
+
+    /// <summary>EF Core 生成 ON で DbContext・DbSet・ToTable/HasKey/HasColumnName/IsRequired/HasMaxLength/HasPrecision が出力されることを検証する</summary>
+    [Fact]
+    public void Generate_EfCore_ShouldEmitDbContextWithFluentConfiguration()
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            ValueObjectDiagram(),
+            new CodeGenerationOptions { NamespaceName = "Sample.Domain", GenerateEfCore = true }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        var content = result.Files[0].Content;
+
+        // using・DbContext・コンストラクタ・OnModelCreating
+        content.Should().Contain("using Microsoft.EntityFrameworkCore;");
+        content.Should().Contain("public partial class QuickErDbContext : DbContext");
+        content
+            .Should()
+            .Contain("public QuickErDbContext(DbContextOptions<QuickErDbContext> options)");
+        content
+            .Should()
+            .Contain("protected override void OnModelCreating(ModelBuilder modelBuilder)");
+        content.Should().Contain("partial void OnModelCreatingPartial(ModelBuilder modelBuilder);");
+
+        // DbSet（複数形プロパティ名）
+        content
+            .Should()
+            .Contain("public DbSet<CustomerEntity> Customers => Set<CustomerEntity>();");
+        content.Should().Contain("public DbSet<OrderEntity> Orders => Set<OrderEntity>();");
+
+        // テーブル・主キー・列・必須・最大長・精度
+        content.Should().Contain("modelBuilder.Entity<CustomerEntity>(entity =>");
+        content.Should().Contain("entity.ToTable(\"customers\");");
+        content.Should().Contain("entity.HasKey(e => e.CustomerId);");
+        content
+            .Should()
+            .Contain(
+                "entity.Property(e => e.Name).HasColumnName(\"name\").IsRequired().HasMaxLength(50);"
+            );
+        content
+            .Should()
+            .Contain(
+                "entity.Property(e => e.Balance).HasColumnName(\"balance\").HasPrecision(10, 2);"
+            );
+    }
+
+    /// <summary>EF Core 生成で EntityBase の永続化対象外メンバーが Fluent の Ignore で除外されることを検証する</summary>
+    [Fact]
+    public void Generate_EfCore_ShouldIgnoreEntityBaseMembers()
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            ValueObjectDiagram(),
+            new CodeGenerationOptions { NamespaceName = "Sample.Domain", GenerateEfCore = true }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        var content = result.Files[0].Content;
+        content.Should().Contain("entity.Ignore(e => e.RowState);");
+        content.Should().Contain("entity.Ignore(e => e.IsAdded);");
+        content.Should().Contain("entity.Ignore(e => e.HasChanges);");
+    }
+
+    /// <summary>EF Core 生成で 1 対多リレーションが HasMany/WithOne/HasForeignKey/OnDelete で構成されることを検証する</summary>
+    [Fact]
+    public void Generate_EfCore_ShouldConfigureOneToManyRelationship()
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            ValueObjectDiagram(),
+            new CodeGenerationOptions { NamespaceName = "Sample.Domain", GenerateEfCore = true }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        var content = result.Files[0].Content;
+        content.Should().Contain(".HasMany(e => e.Orders)");
+        content.Should().Contain(".WithOne(e => e.Customer)");
+        content.Should().Contain(".HasForeignKey(e => e.CustomerId)");
+        // OnDelete 既定（NoAction）はカスケードしないため Restrict
+        content.Should().Contain(".OnDelete(DeleteBehavior.Restrict);");
+    }
+
+    /// <summary>OnDelete=Cascade のリレーションでは OnDelete(DeleteBehavior.Cascade) が構成されることを検証する</summary>
+    [Fact]
+    public void Generate_EfCore_ShouldConfigureCascadeDeleteFromModel()
+    {
+        var diagram = ValueObjectDiagram();
+        diagram.Relationships[0].OnDelete = ForeignKeyReferentialAction.Cascade;
+
+        var result = new CSharpCodeGenerationService().Generate(
+            diagram,
+            new CodeGenerationOptions { NamespaceName = "Sample.Domain", GenerateEfCore = true }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        result.Files[0].Content.Should().Contain(".OnDelete(DeleteBehavior.Cascade);");
+    }
+
+    /// <summary>VO 生成 ON の EF Core では各 VO 列に HasConversion が構成されることを検証する</summary>
+    [Fact]
+    public void Generate_EfCore_WithValueObjects_ShouldEmitHasConversion()
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            ValueObjectDiagram(),
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                GenerateEfCore = true,
+                GenerateValueObjects = true,
+            }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        var content = result.Files[0].Content;
+        // 主キー VO の変換（v.Value / Create）
+        content.Should().Contain(".HasConversion(v => v!.Value, v => CustomerIdValue.Create(v!))");
+        // VO 列は Fluent の HasMaxLength/HasPrecision を出さない（長さ・桁数は VO 内部検証）
+        content.Should().NotContain(".HasMaxLength(50).HasConversion");
+    }
+
+    /// <summary>rowversion 列を持つエンティティの EF Core 構成で IsRowVersion() が出力されることを検証する</summary>
+    [Fact]
+    public void Generate_EfCore_ShouldConfigureRowVersion()
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            RowVersionDiagram(),
+            new CodeGenerationOptions { NamespaceName = "Sample.Domain", GenerateEfCore = true }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        var content = result.Files[0].Content;
+        content
+            .Should()
+            .Contain(
+                "entity.Property(e => e.RowVersion).HasColumnName(\"row_version\").IsRequired().IsRowVersion();"
+            );
+    }
+
+    /// <summary>EF Core 生成 OFF（既定）では EF への using も DbContext も一切出力されないことを検証する</summary>
+    [Fact]
+    public void Generate_EfCore_Disabled_ShouldNotEmitAnyEfCode()
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            ValueObjectDiagram(),
+            new CodeGenerationOptions { NamespaceName = "Sample.Domain" }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        var content = result.Files[0].Content;
+        content.Should().NotContain("Microsoft.EntityFrameworkCore");
+        content.Should().NotContain("QuickErDbContext");
+        content.Should().NotContain("OnModelCreating");
+        content.Should().NotContain("DbSet<");
+    }
+
+    /// <summary>分割出力時に EfCore カテゴリが独自ファイル・独自名前空間で出力され、他ファイルへ EF using が漏れないことを検証する</summary>
+    [Fact]
+    public void Generate_EfCore_Split_ShouldEmitDedicatedFileAndNamespace()
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            ValueObjectDiagram(),
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                SplitFilesByCategory = true,
+                GenerateEfCore = true,
+            }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        result.Files.Should().Contain(file => file.FileName == "EfCore.g.cs");
+
+        var efCore = Content(result, "EfCore.g.cs");
+        efCore.Should().Contain("namespace Sample.Domain.EfCore;");
+        efCore.Should().Contain("using Microsoft.EntityFrameworkCore;");
+        efCore.Should().Contain("public partial class QuickErDbContext : DbContext");
+
+        // EF の using は EfCore ファイルにのみ現れ、Entity ファイルには漏れない
+        Content(result, "Entities.g.cs")
+            .Should()
+            .NotContain("using Microsoft.EntityFrameworkCore;");
+    }
+
+    /// <summary>EfCore カテゴリの名前空間を上書き指定できることを検証する</summary>
+    [Fact]
+    public void Generate_EfCore_Split_ShouldHonorCustomNamespace()
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            ValueObjectDiagram(),
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                SplitFilesByCategory = true,
+                GenerateEfCore = true,
+                EfCoreNamespace = "Acme.Persistence.EfCore",
+            }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        Content(result, "EfCore.g.cs").Should().Contain("namespace Acme.Persistence.EfCore;");
+    }
+
+    /// <summary>EF Core 生成には Repository が必要で、Repository なしではエラーになることを検証する</summary>
+    [Fact]
+    public void Generate_EfCore_WithoutRepositories_ShouldFailWithError()
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            ValueObjectDiagram(),
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                GenerateEfCore = true,
+                GenerateRepositories = false,
+            }
+        );
+
+        result.HasErrors.Should().BeTrue();
+        result.Files.Should().BeEmpty();
+        result
+            .Diagnostics.Should()
+            .Contain(diagnostic =>
+                diagnostic.Severity == GenerationDiagnosticSeverity.Error
+                && diagnostic.Message.Contains("EF Core")
+                && diagnostic.Message.Contains("Repository")
+            );
+    }
+
+    /// <summary>rowversion 列と単一主キーを持つ最小ダイアグラム（IsRowVersion 構成の検証用）</summary>
+    private static ErDiagram RowVersionDiagram() =>
+        new()
+        {
+            Entities =
+            [
+                new Entity
+                {
+                    Id = Guid.NewGuid(),
+                    TableName = "documents",
+                    Columns =
+                    [
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "document_id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "row_version",
+                            DataType = "rowversion",
+                            IsNullable = false,
+                        },
+                    ],
+                },
+            ],
+        };
 }
