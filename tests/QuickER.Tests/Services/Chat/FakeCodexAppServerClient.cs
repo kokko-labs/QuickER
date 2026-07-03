@@ -149,4 +149,25 @@ internal sealed class FakeCodexAppServerClient : ICodexAppServerClient
 
     public void RaiseDynamicToolCall(CodexDynamicToolCallRequest request) =>
         DynamicToolCallReceived?.Invoke(this, request);
+
+    public void RaiseNotification(CodexJsonRpcNotification notification) =>
+        NotificationReceived?.Invoke(this, notification);
+
+    public void RaiseLoginCompleted(CodexLoginCompletedNotification notification) =>
+        LoginCompleted?.Invoke(this, notification);
+
+    public void RaiseThreadStarted(CodexThreadStartedNotification notification) =>
+        ThreadStarted?.Invoke(this, notification);
+
+    public void RaiseTurnStarted(CodexTurnStartedNotification notification) =>
+        TurnStarted?.Invoke(this, notification);
+
+    public void RaiseItemStarted(CodexItemStartedNotification notification) =>
+        ItemStarted?.Invoke(this, notification);
+
+    public void RaiseItemCompleted(CodexItemCompletedNotification notification) =>
+        ItemCompleted?.Invoke(this, notification);
+
+    public void RaiseApprovalRequested(CodexApprovalRequest request) =>
+        ApprovalRequested?.Invoke(this, request);
 }

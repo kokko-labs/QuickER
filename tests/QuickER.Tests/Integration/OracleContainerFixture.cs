@@ -61,8 +61,7 @@ public sealed class OracleContainerFixture : IAsyncLifetime
     {
         try
         {
-            _container = new OracleBuilder()
-                .WithImage("gvenzl/oracle-free:23-slim-faststart")
+            _container = new OracleBuilder("gvenzl/oracle-free:23-slim-faststart")
                 .WithUsername(Username)
                 .WithPassword(Password)
                 .Build();
