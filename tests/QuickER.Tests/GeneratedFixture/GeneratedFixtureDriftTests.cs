@@ -1,8 +1,4 @@
-using System.IO;
-using System.Reflection;
-using FluentAssertions;
-using QuickER.Generator;
-using QuickER.SqlServer;
+using Xunit;
 
 namespace QuickER.Tests.GeneratedFixture;
 
@@ -17,33 +13,12 @@ namespace QuickER.Tests.GeneratedFixture;
 /// </para>
 /// <para>
 /// 図・オプションは <see cref="GeneratedFixtureDefinition"/>（単一ソース）を共有しており、
-/// 失敗時は「フィクスチャの再生成が必要」であることと再生成手順を示す。
+/// 検証・再生成の実処理は <see cref="FixtureDriftHarness"/> に集約している。
+/// テンプレート変更後の再生成手順は同ハーネスの docstring と失敗メッセージを参照。
 /// </para>
 /// </remarks>
 public sealed class GeneratedFixtureDriftTests
 {
-    /// <summary>コミット済みフィクスチャファイルの絶対パスを、テストアセンブリの位置から遡って解決する</summary>
-    private static string ResolveFixturePath()
-    {
-        // テスト実行ディレクトリ（bin/Debug/netX.Y-windows）から、ソースの GeneratedFixture フォルダを探す。
-        var dir = new DirectoryInfo(
-            Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)!
-        );
-        while (dir is not null)
-        {
-            var candidate = Path.Combine(dir.FullName, "GeneratedFixture", "GeneratedFixture.g.cs");
-            if (File.Exists(candidate))
-            {
-                return candidate;
-            }
-            dir = dir.Parent;
-        }
-
-        throw new FileNotFoundException(
-            "コミット済みフィクスチャ GeneratedFixture.g.cs が見つかりませんでした。"
-        );
-    }
-
     /// <summary>
     /// 単一ソースの図・オプションから再生成した内容が、コミット済みフィクスチャと完全一致することを検証する。
     /// </summary>
@@ -52,30 +27,12 @@ public sealed class GeneratedFixtureDriftTests
     )]
     public void CommittedFixture_MatchesRegeneratedOutput()
     {
-        var diagram = GeneratedFixtureDefinition.Build();
-        var columnTypes = SqlServerCSharpTypeMapper.ResolveColumnTypes(diagram);
-        var result = new CSharpCodeGenerationService().Generate(
-            diagram,
-            columnTypes,
-            GeneratedFixtureDefinition.Options
+        FixtureDriftHarness.VerifyOrRegenerate(
+            GeneratedFixtureDefinition.Build(),
+            GeneratedFixtureDefinition.Options,
+            GeneratedFixtureDefinition.Options.OutputFileName,
+            "コミット済みフィクスチャが現在のテンプレート出力と乖離しています。"
+                + "テンプレート（QuickER.Generator/Templates/CSharpRuntime.scriban 等）を変更した場合はフィクスチャの再生成が必要です。"
         );
-
-        result.HasErrors.Should().BeFalse("フィクスチャ図の生成でエラーが出てはならない");
-        result.Files.Should().ContainSingle("Split 無効のため 1 ファイルで生成される");
-
-        var regenerated = result.Files[0].Content;
-        var fixturePath = ResolveFixturePath();
-        var committed = File.ReadAllText(fixturePath);
-
-        committed
-            .Should()
-            .Be(
-                regenerated,
-                "コミット済みフィクスチャが現在のテンプレート出力と乖離しています。"
-                    + "テンプレート（QuickER.Generator/Templates/CSharpRuntime.scriban 等）を変更した場合は、"
-                    + "GeneratedFixtureDefinition から再生成した内容で "
-                    + $"{fixturePath} を上書きし直してください（生成は SqlServerCSharpTypeMapper で型解決 → "
-                    + "CSharpCodeGenerationService.Generate、単一ファイルの Content をそのまま書き出す）。"
-            );
     }
 }

@@ -1,8 +1,5 @@
-using System.IO;
-using System.Reflection;
-using FluentAssertions;
-using QuickER.Generator;
-using QuickER.SqlServer;
+using QuickER.Tests.GeneratedFixture;
+using Xunit;
 
 namespace QuickER.Tests.GeneratedPortableFixture;
 
@@ -11,37 +8,17 @@ namespace QuickER.Tests.GeneratedPortableFixture;
 /// 再生成したコードと文字列完全一致することを検証するドリフト検知テスト。
 /// </summary>
 /// <remarks>
+/// <para>
 /// 基準方言は SQL Server（<see cref="PortableDialect.SqlServer"/>）。生成される C# は方言非依存のため、
 /// どの方言の型表記から生成しても出力は一致する（<see cref="PortableFixtureDialectIndependenceTests"/> が保証）。
-/// テンプレート変更時はこのテストが乖離を検出し、失敗メッセージに再生成手順を示す。
+/// </para>
+/// <para>
+/// 検証・再生成の実処理は <see cref="FixtureDriftHarness"/> に集約している。
+/// テンプレート変更後の再生成手順は同ハーネスの docstring と失敗メッセージを参照。
+/// </para>
 /// </remarks>
 public sealed class PortableFixtureDriftTests
 {
-    /// <summary>コミット済みフィクスチャファイルの絶対パスを、テストアセンブリの位置から遡って解決する</summary>
-    private static string ResolveFixturePath()
-    {
-        var dir = new DirectoryInfo(
-            Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)!
-        );
-        while (dir is not null)
-        {
-            var candidate = Path.Combine(
-                dir.FullName,
-                "GeneratedFixture",
-                PortableFixtureDefinition.OutputFileName
-            );
-            if (File.Exists(candidate))
-            {
-                return candidate;
-            }
-            dir = dir.Parent;
-        }
-
-        throw new FileNotFoundException(
-            $"コミット済みフィクスチャ {PortableFixtureDefinition.OutputFileName} が見つかりませんでした。"
-        );
-    }
-
     /// <summary>
     /// 単一ソースの図（SQL Server 基準）・オプションから再生成した内容が、
     /// コミット済みフィクスチャと完全一致することを検証する。
@@ -51,29 +28,12 @@ public sealed class PortableFixtureDriftTests
     )]
     public void CommittedPortableFixture_MatchesRegeneratedOutput()
     {
-        var diagram = PortableFixtureDefinition.Build(PortableDialect.SqlServer);
-        var columnTypes = SqlServerCSharpTypeMapper.ResolveColumnTypes(diagram);
-        var result = new CSharpCodeGenerationService().Generate(
-            diagram,
-            columnTypes,
-            PortableFixtureDefinition.Options
+        FixtureDriftHarness.VerifyOrRegenerate(
+            PortableFixtureDefinition.Build(PortableDialect.SqlServer),
+            PortableFixtureDefinition.Options,
+            PortableFixtureDefinition.OutputFileName,
+            "コミット済み可搬フィクスチャが現在のテンプレート出力と乖離しています。"
+                + "PortableFixtureDefinition（SQL Server 基準）から再生成が必要です。"
         );
-
-        result.HasErrors.Should().BeFalse("可搬フィクスチャ図の生成でエラーが出てはならない");
-        result.Files.Should().ContainSingle("Split 無効のため 1 ファイルで生成される");
-
-        var regenerated = result.Files[0].Content;
-        var fixturePath = ResolveFixturePath();
-        var committed = File.ReadAllText(fixturePath);
-
-        committed
-            .Should()
-            .Be(
-                regenerated,
-                "コミット済み可搬フィクスチャが現在のテンプレート出力と乖離しています。"
-                    + "テンプレート（QuickER.Generator/Templates/CSharpRuntime.scriban 等）を変更した場合は、"
-                    + "PortableFixtureDefinition（SQL Server 基準）から再生成した内容で "
-                    + $"{fixturePath} を上書きし直してください。"
-            );
     }
 }
