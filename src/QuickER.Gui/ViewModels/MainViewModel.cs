@@ -767,12 +767,106 @@ public partial class MainViewModel : ObservableObject
         CopySelectedEntityCommand.NotifyCanExecuteChanged();
         PasteCopiedColumnCommand.NotifyCanExecuteChanged();
         DuplicateSelectedEntityCommand.NotifyCanExecuteChanged();
+
+        // 選択の変化に応じて関連ハイライト（減光／強調）を再計算する
+        UpdateRelatedHighlights();
     }
 
     /// <summary>リレーション選択の変化に応じて削除コマンドの実行可否を更新する</summary>
     partial void OnSelectedRelationshipChanged(RelationshipViewModel? value)
     {
         RemoveSelectedRelationshipCommand.NotifyCanExecuteChanged();
+
+        // 選択の変化に応じて関連ハイライト（減光／強調）を再計算する
+        UpdateRelatedHighlights();
+    }
+
+    /// <summary>
+    /// 現在の選択状態（エンティティ／リレーション）から各要素の関連ハイライト状態を再計算する
+    /// </summary>
+    /// <remarks>
+    /// これらは選択状態から導出する純粋な表示状態であり、Undo 履歴・保存対象には含めない
+    /// <list type="bullet">
+    /// <item>エンティティ選択時: 選択エンティティ・接続リレーション・その相手側エンティティは通常表示、それ以外を減光。接続リレーションは強調</item>
+    /// <item>リレーション選択時: 選択リレーションと両端エンティティは通常表示、それ以外を減光（強調は行わず選択自体の青強調に任せる）</item>
+    /// <item>未選択時: 全要素とも通常表示（減光・強調なし）</item>
+    /// </list>
+    /// 自己参照リレーション（Source==Target）も選択エンティティに接続していれば強調対象となる
+    /// </remarks>
+    private void UpdateRelatedHighlights()
+    {
+        // エンティティ選択を優先し、無ければリレーション選択、どちらも無ければ全解除とする
+        if (SelectedEntity is not null)
+        {
+            ApplyEntitySelectionHighlights(SelectedEntity);
+            return;
+        }
+
+        if (SelectedRelationship is not null)
+        {
+            ApplyRelationshipSelectionHighlights(SelectedRelationship);
+            return;
+        }
+
+        ClearRelatedHighlights();
+    }
+
+    /// <summary>選択エンティティを基準に、接続リレーションと相手側エンティティを通常表示に保ち他を減光する</summary>
+    private void ApplyEntitySelectionHighlights(EntityViewModel selected)
+    {
+        // 選択エンティティに接続するリレーションと、その相手側エンティティ群を収集する
+        var relatedEntities = new HashSet<EntityViewModel> { selected };
+
+        foreach (var relationship in Relationships)
+        {
+            var isConnected = relationship.Source == selected || relationship.Target == selected;
+
+            // 接続線は強調・非減光、相手側エンティティは非減光対象へ加える
+            relationship.IsEmphasized = isConnected;
+            relationship.IsDimmed = !isConnected;
+
+            if (isConnected)
+            {
+                relatedEntities.Add(relationship.Source);
+                relatedEntities.Add(relationship.Target);
+            }
+        }
+
+        foreach (var entity in Entities)
+        {
+            entity.IsDimmed = !relatedEntities.Contains(entity);
+        }
+    }
+
+    /// <summary>選択リレーションを基準に、両端エンティティを通常表示に保ち他を減光する（強調は行わない）</summary>
+    private void ApplyRelationshipSelectionHighlights(RelationshipViewModel selected)
+    {
+        foreach (var entity in Entities)
+        {
+            entity.IsDimmed = entity != selected.Source && entity != selected.Target;
+        }
+
+        foreach (var relationship in Relationships)
+        {
+            // 選択リレーション自体は青強調（IsSelected）に任せ、それ以外を減光する
+            relationship.IsEmphasized = false;
+            relationship.IsDimmed = relationship != selected;
+        }
+    }
+
+    /// <summary>全要素の減光・強調を解除し通常表示へ戻す</summary>
+    private void ClearRelatedHighlights()
+    {
+        foreach (var entity in Entities)
+        {
+            entity.IsDimmed = false;
+        }
+
+        foreach (var relationship in Relationships)
+        {
+            relationship.IsDimmed = false;
+            relationship.IsEmphasized = false;
+        }
     }
 
     // ---------------- Undo/Redo ----------------
@@ -1183,6 +1277,9 @@ public partial class MainViewModel : ObservableObject
 
         OnPropertyChanged(nameof(Entities));
         RefreshCanvasSize();
+
+        // エンティティの増減により関連構成が変わるため、関連ハイライトを再計算する
+        UpdateRelatedHighlights();
     }
 
     /// <summary>エンティティの位置・サイズ変更に追従してキャンバスサイズを更新する</summary>
@@ -1224,5 +1321,8 @@ public partial class MainViewModel : ObservableObject
 
         ApplyRelationshipColumnRules();
         OnPropertyChanged(nameof(Relationships));
+
+        // リレーションの増減により関連構成が変わるため、関連ハイライトを再計算する
+        UpdateRelatedHighlights();
     }
 }

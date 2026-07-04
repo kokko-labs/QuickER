@@ -58,6 +58,22 @@ public partial class RelationshipViewModel : ObservableObject
     [ObservableProperty]
     private bool _isSelected;
 
+    /// <summary>関連ハイライトで減光表示するかどうか（選択状態から導出する純粋な表示状態）</summary>
+    /// <remarks>
+    /// 他要素の選択によって関連から外れた際に不透明度を下げるためのフラグ
+    /// 選択状態から <see cref="MainViewModel"/> が再計算して設定するため、Undo 履歴・保存対象には含めない
+    /// </remarks>
+    [ObservableProperty]
+    private bool _isDimmed;
+
+    /// <summary>関連ハイライトで線を強調表示するかどうか（選択エンティティに接続された線に付与する）</summary>
+    /// <remarks>
+    /// 選択状態から <see cref="MainViewModel"/> が再計算して設定するため、Undo 履歴・保存対象には含めない
+    /// 選択リレーション本体の青強調（IsSelected）より弱い強調を表す
+    /// </remarks>
+    [ObservableProperty]
+    private bool _isEmphasized;
+
     /// <summary>リレーションの起点エンティティ（参照される PK 側）</summary>
     public EntityViewModel Source { get; }
 

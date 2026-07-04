@@ -52,6 +52,14 @@ public partial class EntityViewModel : ObservableObject
     [ObservableProperty]
     private bool _isSelected;
 
+    /// <summary>関連ハイライトで減光表示するかどうか（選択状態から導出する純粋な表示状態）</summary>
+    /// <remarks>
+    /// 他要素の選択によって関連から外れた際に不透明度を下げるためのフラグ
+    /// 選択状態から <see cref="MainViewModel"/> が再計算して設定するため、Undo 履歴・保存対象には含めない
+    /// </remarks>
+    [ObservableProperty]
+    private bool _isDimmed;
+
     /// <summary>このエンティティに含まれるカラム一覧</summary>
     public ObservableCollection<ColumnViewModel> Columns { get; }
 

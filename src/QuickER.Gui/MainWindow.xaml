@@ -374,11 +374,17 @@
       <Setter Property="RowHeaderWidth" Value="22" />
     </Style>
 
-    <!-- リレーション線本体のスタイル: 選択時に青く太く -->
+    <!-- リレーション線本体のスタイル: 選択時に青く太く、関連ハイライト時に軽く強調 -->
     <Style x:Key="RelationLineStyle" TargetType="Line">
       <Setter Property="Stroke" Value="{StaticResource LineBrush}" />
       <Setter Property="StrokeThickness" Value="1.6" />
       <Style.Triggers>
+        <!-- 関連ハイライトの強調（選択エンティティに接続された線）: 既定より強く、選択の青より弱い -->
+        <!-- IsSelected を後段に置き、選択リレーションの青 2.5 が後勝ちで優先されるようにする -->
+        <DataTrigger Binding="{Binding IsEmphasized}" Value="True">
+          <Setter Property="Stroke" Value="#374151" />
+          <Setter Property="StrokeThickness" Value="2.2" />
+        </DataTrigger>
         <DataTrigger Binding="{Binding IsSelected}" Value="True">
           <Setter Property="Stroke" Value="{StaticResource LineSelectedBrush}" />
           <Setter Property="StrokeThickness" Value="2.5" />
@@ -937,7 +943,17 @@
                   </ItemsControl.ItemsPanel>
                   <ItemsControl.ItemTemplate>
                     <DataTemplate DataType="{x:Type vm:RelationshipViewModel}">
+                      <!-- 関連ハイライトの減光: 選択に無関係なリレーション（線・マーカー・ラベル・自己ループ）をまとめて減光する -->
                       <Canvas>
+                        <Canvas.Style>
+                          <Style TargetType="Canvas">
+                            <Style.Triggers>
+                              <DataTrigger Binding="{Binding IsDimmed}" Value="True">
+                                <Setter Property="Opacity" Value="0.55" />
+                              </DataTrigger>
+                            </Style.Triggers>
+                          </Style>
+                        </Canvas.Style>
                         <!-- 線本体 (太いヒット領域 + 見た目) -->
                         <Line
                           X1="{Binding X1}"
@@ -1028,6 +1044,11 @@
                               <Style.Triggers>
                                 <DataTrigger Binding="{Binding ShowSelfLoop}" Value="True">
                                   <Setter Property="Visibility" Value="Visible" />
+                                </DataTrigger>
+                                <!-- 関連ハイライトの強調（自己ループ）: 線本体と同水準に揃える。IsSelected を後段に置き青が後勝ちで優先されるようにする -->
+                                <DataTrigger Binding="{Binding IsEmphasized}" Value="True">
+                                  <Setter Property="Stroke" Value="#374151" />
+                                  <Setter Property="StrokeThickness" Value="2.2" />
                                 </DataTrigger>
                                 <DataTrigger Binding="{Binding IsSelected}" Value="True">
                                   <Setter
@@ -1162,6 +1183,10 @@
                             <Setter Property="BorderBrush" Value="{StaticResource EntityBorder}" />
                             <Setter Property="BorderThickness" Value="1" />
                             <Style.Triggers>
+                              <!-- 関連ハイライトの減光: 選択に無関係なエンティティの不透明度を下げる -->
+                              <DataTrigger Binding="{Binding IsDimmed}" Value="True">
+                                <Setter Property="Opacity" Value="0.55" />
+                              </DataTrigger>
                               <DataTrigger Binding="{Binding IsSelected}" Value="True">
                                 <Setter
                                   Property="BorderBrush"
