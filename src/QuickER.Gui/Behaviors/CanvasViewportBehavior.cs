@@ -179,10 +179,11 @@ public static class CanvasViewportBehavior
 
             var oldZoom = vm.ZoomLevel;
 
-            // 1 ノッチ = ×1.1（乗算）。ホイールの符号で拡大・縮小を切り替える
-            var factor =
-                e.Delta > 0 ? ViewportCalculator.ZoomStep : 1.0 / ViewportCalculator.ZoomStep;
-            var newZoom = ViewportCalculator.ClampZoom(oldZoom * factor);
+            // 1 ノッチ = 10% 刻み（10% の倍数へスナップ）。ホイールの符号で拡大・縮小を切り替える
+            var newZoom =
+                e.Delta > 0
+                    ? ViewportCalculator.ZoomInStep(oldZoom)
+                    : ViewportCalculator.ZoomOutStep(oldZoom);
 
             ApplyZoomAtMouse(sv, vm, oldZoom, newZoom, e.GetPosition(sv));
             e.Handled = true;

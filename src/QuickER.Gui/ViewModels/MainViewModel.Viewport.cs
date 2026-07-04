@@ -22,15 +22,30 @@ public partial class MainViewModel
     /// <remarks>スクロールオフセットとビューポート実寸を持つのは View 側のため、計算・適用はそこで行う</remarks>
     public event EventHandler? FitToWindowRequested;
 
+    /// <summary><see cref="ViewportContentBounds"/> のバッキングフィールド</summary>
+    private Rect _viewportContentBounds = Rect.Empty;
+
     /// <summary>現在表示中のキャンバス領域（コンテンツ論理座標）。View が ScrollChanged のたびに更新する</summary>
     /// <remarks>
     /// 新規エンティティを「いま見えている場所」へ配置するための入力。
-    /// View が無いヘッドレス実行では空矩形のままとなり、追加位置は従来のカスケード配置へフォールバックする
+    /// View が無いヘッドレス実行では空矩形のままとなり、追加位置は従来のカスケード配置へフォールバックする。
+    /// スクロールのたびに設定されるため、setter ではミニマップのビューポート枠・可視判定だけを軽く更新し、
+    /// 全射影の再計算（射影データ）は行わない（<c>MainViewModel.MiniMap.cs</c> 側で分離）
     /// </remarks>
-    public Rect ViewportContentBounds { get; set; } = Rect.Empty;
+    public Rect ViewportContentBounds
+    {
+        get => _viewportContentBounds;
+        set
+        {
+            _viewportContentBounds = value;
+
+            // スクロール連動: ミニマップのビューポート枠と自動表示の可視判定のみを軽く更新する
+            OnViewportContentBoundsChanged();
+        }
+    }
 
     /// <summary>キャンバスのズーム倍率（1.0 = 100%）。設定時に範囲へクランプする</summary>
-    /// <remarks>ScaleTransform の ScaleX/ScaleY にバインドされる。10%〜200% の範囲を保証する</remarks>
+    /// <remarks>ScaleTransform の ScaleX/ScaleY にバインドされる。20%〜200% の範囲を保証する</remarks>
     public double ZoomLevel
     {
         get => _zoomLevel;
@@ -42,6 +57,11 @@ public partial class MainViewModel
             {
                 // 倍率表示ラベル（"100%" など）も併せて更新する
                 OnPropertyChanged(nameof(ZoomPercentText));
+
+                // 倍率変更で表示範囲が変わるため、ミニマップのビューポート枠・可視判定を更新する
+                // （射影データはズームに依存しないため軽い更新で足りる。ScrollChanged が届かない
+                //  ヘッドレス／タイミングでも枠が追従するようここでも呼ぶ）
+                OnViewportContentBoundsChanged();
             }
         }
     }
@@ -49,13 +69,13 @@ public partial class MainViewModel
     /// <summary>ステータスバーに表示する倍率文字列（例 "100%"）</summary>
     public string ZoomPercentText => $"{Math.Round(_zoomLevel * 100)}%";
 
-    /// <summary>1 ノッチ分ズームインする（ビューポート中央基準。補正は View 側）</summary>
+    /// <summary>10% 刻みでズームインする（次の 10% の倍数へスナップ。ビューポート中央基準・補正は View 側）</summary>
     [RelayCommand]
-    private void ZoomIn() => ZoomLevel = _zoomLevel * ViewportCalculator.ZoomStep;
+    private void ZoomIn() => ZoomLevel = ViewportCalculator.ZoomInStep(_zoomLevel);
 
-    /// <summary>1 ノッチ分ズームアウトする（ビューポート中央基準。補正は View 側）</summary>
+    /// <summary>10% 刻みでズームアウトする（前の 10% の倍数へスナップ。ビューポート中央基準・補正は View 側）</summary>
     [RelayCommand]
-    private void ZoomOut() => ZoomLevel = _zoomLevel / ViewportCalculator.ZoomStep;
+    private void ZoomOut() => ZoomLevel = ViewportCalculator.ZoomOutStep(_zoomLevel);
 
     /// <summary>ズーム倍率を 100% へ戻す</summary>
     [RelayCommand]

@@ -12,14 +12,27 @@ namespace QuickER.Services;
 /// </remarks>
 public static class ViewportCalculator
 {
-    /// <summary>ズーム倍率の下限（10%）</summary>
-    public const double MinZoom = 0.1;
+    /// <summary>ズーム倍率の下限（20%）</summary>
+    public const double MinZoom = 0.2;
 
     /// <summary>ズーム倍率の上限（200%）</summary>
     public const double MaxZoom = 2.0;
 
-    /// <summary>1 ノッチあたりのズーム倍率（乗算）</summary>
-    public const double ZoomStep = 1.1;
+    /// <summary>1 ステップあたりのズーム増分（10 ポイント刻みの加算）</summary>
+    public const double ZoomStep = 0.1;
+
+    /// <summary>現在倍率から 1 ステップズームインした倍率を求める（次の 10% の倍数へスナップ）</summary>
+    /// <remarks>
+    /// fit 直後などの中途半端な倍率（例 47.3%）からでも 10% の倍数（50%）へ揃える。
+    /// 浮動小数点誤差でちょうどの倍数が 1 つ下と誤判定されないよう、微小許容差を加えてから切り捨てる。
+    /// </remarks>
+    public static double ZoomInStep(double zoom) =>
+        ClampZoom((Math.Floor(zoom / ZoomStep + 1e-6) + 1) * ZoomStep);
+
+    /// <summary>現在倍率から 1 ステップズームアウトした倍率を求める（前の 10% の倍数へスナップ）</summary>
+    /// <remarks>スナップと浮動小数点誤差の扱いは <see cref="ZoomInStep"/> と対称</remarks>
+    public static double ZoomOutStep(double zoom) =>
+        ClampZoom((Math.Ceiling(zoom / ZoomStep - 1e-6) - 1) * ZoomStep);
 
     /// <summary>指定倍率を <see cref="MinZoom"/>〜<see cref="MaxZoom"/> の範囲へ丸める</summary>
     public static double ClampZoom(double zoom)
@@ -158,6 +171,86 @@ public static class ViewportCalculator
 
         return new Vector(Math.Max(0, offsetX), Math.Max(0, offsetY));
     }
+
+    /// <summary>
+    /// コンテンツのバウンディングボックス（＋余白）をミニマップ枠へ一様スケールで中央寄せ投影する射影を求める
+    /// </summary>
+    /// <param name="contentBounds">投影対象コンテンツのバウンディングボックス（論理座標）</param>
+    /// <param name="miniMapSize">ミニマップ枠のサイズ（px）</param>
+    /// <param name="margin">コンテンツ周囲に確保する余白（論理座標 px）</param>
+    /// <returns>順方向（コンテンツ→ミニマップ）／逆方向（ミニマップ→コンテンツ）の両変換を担う射影</returns>
+    /// <remarks>
+    /// <see cref="CalculateFit"/> は 20%〜100% にクランプするためミニマップ用途には流用できない。
+    /// こちらは縦横比を保つ一様スケールで、拡大・縮小いずれもクランプせず、
+    /// 余白込みコンテンツをミニマップ枠の中央に収める。空図・不正入力では等倍・原点の射影を返す。
+    /// </remarks>
+    public static MiniMapProjection CalculateMiniMapProjection(
+        Rect contentBounds,
+        Size miniMapSize,
+        double margin
+    )
+    {
+        // 空図・不正入力は等倍・原点の射影で返す（投影の意味がないため）
+        if (
+            contentBounds.IsEmpty
+            || contentBounds.Width <= 0
+            || contentBounds.Height <= 0
+            || miniMapSize.Width <= 0
+            || miniMapSize.Height <= 0
+        )
+        {
+            return new MiniMapProjection(1.0, 0, 0);
+        }
+
+        // 余白込みのコンテンツ寸法（論理座標）
+        var contentWidth = contentBounds.Width + margin * 2;
+        var contentHeight = contentBounds.Height + margin * 2;
+
+        // 幅・高さ双方が枠に収まる一様スケールを採用する（クランプなし）
+        var scale = Math.Min(miniMapSize.Width / contentWidth, miniMapSize.Height / contentHeight);
+
+        // 余白込みコンテンツの左上（論理座標）
+        var contentOriginX = contentBounds.X - margin;
+        var contentOriginY = contentBounds.Y - margin;
+
+        // スケール適用後のコンテンツ寸法と、枠中央へ収めるための余りを二等分したオフセット
+        var scaledWidth = contentWidth * scale;
+        var scaledHeight = contentHeight * scale;
+        var offsetX = (miniMapSize.Width - scaledWidth) / 2 - contentOriginX * scale;
+        var offsetY = (miniMapSize.Height - scaledHeight) / 2 - contentOriginY * scale;
+
+        return new MiniMapProjection(scale, offsetX, offsetY);
+    }
+}
+
+/// <summary>
+/// コンテンツ論理座標とミニマップ枠座標の間の一様スケール射影（順方向・逆方向）
+/// </summary>
+/// <param name="Scale">コンテンツ→ミニマップの一様スケール（px/px）</param>
+/// <param name="OffsetX">ミニマップ座標系での X オフセット（px）</param>
+/// <param name="OffsetY">ミニマップ座標系での Y オフセット（px）</param>
+/// <remarks>
+/// 順方向: miniMap = content * Scale + Offset。逆方向: content = (miniMap - Offset) / Scale。
+/// Scale は 0 にならない（空図・不正入力では 1.0 を採用する）ため逆変換のゼロ除算は起きない。
+/// </remarks>
+public readonly record struct MiniMapProjection(double Scale, double OffsetX, double OffsetY)
+{
+    /// <summary>コンテンツ論理座標の点をミニマップ枠座標へ写像する（順方向）</summary>
+    public Point ToMiniMap(Point content) =>
+        new(content.X * Scale + OffsetX, content.Y * Scale + OffsetY);
+
+    /// <summary>コンテンツ論理座標の矩形をミニマップ枠座標へ写像する（順方向）</summary>
+    public Rect ToMiniMap(Rect content) =>
+        new(
+            content.X * Scale + OffsetX,
+            content.Y * Scale + OffsetY,
+            content.Width * Scale,
+            content.Height * Scale
+        );
+
+    /// <summary>ミニマップ枠座標の点をコンテンツ論理座標へ写像する（逆方向）</summary>
+    public Point ToContent(Point miniMap) =>
+        new((miniMap.X - OffsetX) / Scale, (miniMap.Y - OffsetY) / Scale);
 }
 
 /// <summary>fit-to-window の計算結果（適用する倍率とスクロールオフセット）</summary>

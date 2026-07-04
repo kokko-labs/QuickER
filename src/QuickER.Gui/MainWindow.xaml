@@ -155,6 +155,40 @@
       </Setter>
     </Style>
 
+    <!-- ステータスバー右端のズームコントロールと同トーンの小ぶりなトグルボタン（ミニマップ表示切替用） -->
+    <Style x:Key="ZoomControlToggleButton" TargetType="ToggleButton">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="MinWidth" Value="22" />
+      <Setter Property="Padding" Value="6,1" />
+      <Setter Property="Margin" Value="1,0" />
+      <Setter Property="Foreground" Value="{StaticResource MutedText}" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="ToggleButton">
+            <Border
+              x:Name="Bd"
+              Background="{TemplateBinding Background}"
+              CornerRadius="4"
+              Padding="{TemplateBinding Padding}"
+            >
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="#EEF2F7" />
+              </Trigger>
+              <Trigger Property="IsChecked" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="#DCE7F5" />
+                <Setter Property="Foreground" Value="#1A73E8" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
     <!--  ツールバー区切り線  -->
     <Style x:Key="ToolBarSeparator" TargetType="Rectangle">
       <Setter Property="Width" Value="1" />
@@ -681,6 +715,13 @@
           VerticalAlignment="Center"
           Margin="16,0,0,0"
         >
+          <ToggleButton
+            Style="{StaticResource ZoomControlToggleButton}"
+            IsChecked="{Binding IsMiniMapEnabled, Mode=TwoWay}"
+            Content="⊞"
+            ToolTip="ミニマップの表示切替（図が収まらないときに右下へ表示）"
+          />
+          <Rectangle Style="{StaticResource ToolBarSeparator}" Margin="4,3" />
           <Button
             Style="{StaticResource ZoomControlButton}"
             Command="{Binding ZoomOutCommand}"
@@ -1454,6 +1495,105 @@
                 Visibility="{Binding SearchResults.Count, Converter={StaticResource CountToVisibilityConverter}}"
               />
             </StackPanel>
+          </Border>
+
+          <!--
+            ミニマップ（キャンバス右下の浮きカード）: 図がビューポートに収まらないときだけ自動表示。
+            エンティティ矩形＋リレーション線＋現在の表示範囲を示すビューポート枠を投影して描く（文字なし）。
+            MouseDown/Move/Up は押下地点を視点中心へジャンプ＋ドラッグ追従させる（コードビハインド）。
+          -->
+          <Border
+            HorizontalAlignment="Right"
+            VerticalAlignment="Bottom"
+            Margin="0,0,12,12"
+            Background="White"
+            BorderBrush="{StaticResource DividerBrush}"
+            BorderThickness="1"
+            CornerRadius="8"
+            Padding="6"
+            Visibility="{Binding IsMiniMapVisible, Converter={StaticResource BoolToVisibilityConverter}}"
+          >
+            <Border.Effect>
+              <DropShadowEffect Color="#88AABB" BlurRadius="10" ShadowDepth="2" Opacity="0.35" />
+            </Border.Effect>
+            <!-- 固定サイズの描画面。幅・高さは MainViewModel.MiniMapWidth/Height と一致させる -->
+            <Border
+              x:Name="MiniMapSurface"
+              Width="200"
+              Height="140"
+              Background="#F7F9FC"
+              BorderBrush="#E2E6EC"
+              BorderThickness="1"
+              CornerRadius="4"
+              ClipToBounds="True"
+              Cursor="Hand"
+              MouseLeftButtonDown="MiniMap_MouseLeftButtonDown"
+              MouseMove="MiniMap_MouseMove"
+              MouseLeftButtonUp="MiniMap_MouseLeftButtonUp"
+              LostMouseCapture="MiniMap_LostMouseCapture"
+            >
+              <Grid>
+                <!-- リレーション線レイヤ -->
+                <ItemsControl ItemsSource="{Binding MiniMapLines}" IsHitTestVisible="False">
+                  <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                      <Canvas IsItemsHost="True" />
+                    </ItemsPanelTemplate>
+                  </ItemsControl.ItemsPanel>
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <Line
+                        X1="{Binding X1}"
+                        Y1="{Binding Y1}"
+                        X2="{Binding X2}"
+                        Y2="{Binding Y2}"
+                        Stroke="#9AA6B4"
+                        StrokeThickness="0.7"
+                      />
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <!-- エンティティ矩形レイヤ（タイトル背景色を反映） -->
+                <ItemsControl ItemsSource="{Binding MiniMapEntities}" IsHitTestVisible="False">
+                  <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                      <Canvas IsItemsHost="True" />
+                    </ItemsPanelTemplate>
+                  </ItemsControl.ItemsPanel>
+                  <ItemsControl.ItemContainerStyle>
+                    <Style TargetType="ContentPresenter">
+                      <Setter Property="Canvas.Left" Value="{Binding X}" />
+                      <Setter Property="Canvas.Top" Value="{Binding Y}" />
+                    </Style>
+                  </ItemsControl.ItemContainerStyle>
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <Rectangle
+                        Width="{Binding Width}"
+                        Height="{Binding Height}"
+                        Fill="{Binding TitleBackgroundColor}"
+                        Stroke="#7C8CA0"
+                        StrokeThickness="0.5"
+                      />
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <!-- 現在の表示範囲を示すビューポート枠（半透明塗り＋枠線） -->
+                <Canvas IsHitTestVisible="False">
+                  <Rectangle
+                    Canvas.Left="{Binding MiniMapViewport.X}"
+                    Canvas.Top="{Binding MiniMapViewport.Y}"
+                    Width="{Binding MiniMapViewport.Width}"
+                    Height="{Binding MiniMapViewport.Height}"
+                    Fill="#331A73E8"
+                    Stroke="#1A73E8"
+                    StrokeThickness="1"
+                  />
+                </Canvas>
+              </Grid>
+            </Border>
           </Border>
         </Grid>
       </Border>

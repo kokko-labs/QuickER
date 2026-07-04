@@ -77,17 +77,31 @@ public class MainViewModelViewportTests
         vm.ZoomPercentText.Should().Be("150%");
     }
 
-    /// <summary>ZoomIn/ZoomOut が 1 ノッチ（×1.1）ずつ増減することを検証する</summary>
-    [Fact(DisplayName = "ZoomIn/ZoomOut: 1 ノッチ ×1.1 で増減する")]
-    public void ZoomInOut_StepsByFactor()
+    /// <summary>ZoomIn/ZoomOut が 10% 刻みで増減することを検証する</summary>
+    [Fact(DisplayName = "ZoomIn/ZoomOut: 10% 刻みで増減する")]
+    public void ZoomInOut_StepsByTenPercent()
     {
         var vm = new MainViewModel();
 
         vm.ZoomInCommand.Execute(null);
-        vm.ZoomLevel.Should().BeApproximately(ViewportCalculator.ZoomStep, 1e-9);
+        vm.ZoomLevel.Should().BeApproximately(1.1, 1e-9);
 
         vm.ZoomOutCommand.Execute(null);
         vm.ZoomLevel.Should().BeApproximately(1.0, 1e-9);
+    }
+
+    /// <summary>中途半端な倍率（fit 直後など）からの増減が 10% の倍数へスナップすることを検証する</summary>
+    [Fact(DisplayName = "ZoomIn/ZoomOut: 中途半端な倍率は 10% の倍数へスナップ")]
+    public void ZoomInOut_SnapsToTenPercentMultiples()
+    {
+        var vm = new MainViewModel { ZoomLevel = 0.473 };
+
+        vm.ZoomInCommand.Execute(null);
+        vm.ZoomLevel.Should().BeApproximately(0.5, 1e-9);
+
+        vm.ZoomLevel = 0.473;
+        vm.ZoomOutCommand.Execute(null);
+        vm.ZoomLevel.Should().BeApproximately(0.4, 1e-9);
     }
 
     /// <summary>ResetZoom が 100% へ戻すことを検証する</summary>
