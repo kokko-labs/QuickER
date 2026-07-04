@@ -98,4 +98,122 @@ public class DiagramMetricsServiceTests
 
         withNullability.Should().BeGreaterThan(withoutNullability);
     }
+
+    /// <summary>簡易表示時に PK/FK 以外のカラム行が高さから除外され、カードが縮むことを検証する</summary>
+    [Fact(DisplayName = "EstimateEntityHeight: 簡易表示時は PK/FK 以外の行分だけ縮む")]
+    public void EstimateEntityHeight_CompactView_CountsOnlyKeyColumns()
+    {
+        // PK1 + FK1 + 一般3 のエンティティ
+        var entity = new EntityViewModel(
+            new Entity
+            {
+                TableName = "Orders",
+                Columns =
+                {
+                    new Column
+                    {
+                        Name = "Id",
+                        DataType = "int",
+                        IsPrimaryKey = true,
+                    },
+                    new Column
+                    {
+                        Name = "CustomerId",
+                        DataType = "int",
+                        IsForeignKey = true,
+                    },
+                    new Column { Name = "Note1", DataType = "nvarchar(50)" },
+                    new Column { Name = "Note2", DataType = "nvarchar(50)" },
+                    new Column { Name = "Note3", DataType = "nvarchar(50)" },
+                },
+            },
+            new EntityLayout { Width = 220 }
+        );
+
+        var fullHeight = DiagramMetricsService.EstimateEntityHeight(
+            entity,
+            showDescriptions: false,
+            isCompactView: false
+        );
+        var compactHeight = DiagramMetricsService.EstimateEntityHeight(
+            entity,
+            showDescriptions: false,
+            isCompactView: true
+        );
+
+        // 一般カラム3行分縮むため簡易表示のほうが小さい
+        compactHeight.Should().BeLessThan(fullHeight);
+
+        // 簡易表示の高さは「PK/FK の 2 行のみ」を数えた高さと一致する
+        var twoKeyColumns = new EntityViewModel(
+            new Entity
+            {
+                TableName = "Orders",
+                Columns =
+                {
+                    new Column
+                    {
+                        Name = "Id",
+                        DataType = "int",
+                        IsPrimaryKey = true,
+                    },
+                    new Column
+                    {
+                        Name = "CustomerId",
+                        DataType = "int",
+                        IsForeignKey = true,
+                    },
+                },
+            },
+            new EntityLayout { Width = 220 }
+        );
+        var twoRowHeight = DiagramMetricsService.EstimateEntityHeight(
+            twoKeyColumns,
+            showDescriptions: false,
+            isCompactView: false
+        );
+
+        compactHeight.Should().Be(twoRowHeight);
+    }
+
+    /// <summary>PK/FK のみのエンティティは簡易表示でも高さが変わらないことを検証する</summary>
+    [Fact(DisplayName = "EstimateEntityHeight: PK/FK のみのエンティティは簡易表示で高さ不変")]
+    public void EstimateEntityHeight_CompactView_KeyOnlyEntity_IsUnchanged()
+    {
+        var entity = new EntityViewModel(
+            new Entity
+            {
+                TableName = "OrderItems",
+                Columns =
+                {
+                    new Column
+                    {
+                        Name = "OrderId",
+                        DataType = "int",
+                        IsPrimaryKey = true,
+                    },
+                    new Column
+                    {
+                        Name = "ProductId",
+                        DataType = "int",
+                        IsForeignKey = true,
+                    },
+                },
+            },
+            new EntityLayout { Width = 220 }
+        );
+
+        var fullHeight = DiagramMetricsService.EstimateEntityHeight(
+            entity,
+            showDescriptions: false,
+            isCompactView: false
+        );
+        var compactHeight = DiagramMetricsService.EstimateEntityHeight(
+            entity,
+            showDescriptions: false,
+            isCompactView: true
+        );
+
+        compactHeight.Should().Be(fullHeight);
+    }
 }

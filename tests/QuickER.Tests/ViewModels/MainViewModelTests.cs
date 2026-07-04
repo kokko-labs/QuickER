@@ -807,6 +807,45 @@ public class MainViewModelTests
         restored.ShowColumnDescriptionsInDiagram.Should().BeTrue();
     }
 
+    /// <summary>簡易表示の切替が全エンティティへ伝播することを検証する</summary>
+    [Fact(DisplayName = "簡易表示の切替は全エンティティへ伝播する")]
+    public void IsCompactViewInDiagram_PropagatesToAllEntities()
+    {
+        var vm = new MainViewModel(new StubDialogService());
+        vm.AddEntityCommand.Execute(null);
+        vm.AddEntityCommand.Execute(null);
+
+        vm.IsCompactViewInDiagram = true;
+
+        vm.Entities.Should().OnlyContain(e => e.IsCompactView);
+    }
+
+    /// <summary>簡易表示 ON のとき新規追加エンティティにも設定が適用されることを検証する</summary>
+    [Fact(DisplayName = "簡易表示 ON 中に追加したエンティティにも設定が適用される")]
+    public void IsCompactViewInDiagram_AppliesToNewlyAddedEntity()
+    {
+        var vm = new MainViewModel(new StubDialogService());
+        vm.IsCompactViewInDiagram = true;
+
+        vm.AddEntityCommand.Execute(null);
+
+        vm.Entities.Should().ContainSingle().Which.IsCompactView.Should().BeTrue();
+    }
+
+    /// <summary>初期化時に簡易表示状態が自動保存から復元されることを検証する</summary>
+    [Fact(DisplayName = "簡易表示状態は自動保存から復元される")]
+    public void Initialize_RestoresCompactViewState()
+    {
+        var vm = new MainViewModel();
+        vm.IsCompactViewInDiagram = true;
+        vm.AutoSave();
+
+        var restored = new MainViewModel();
+        restored.Initialize();
+
+        restored.IsCompactViewInDiagram.Should().BeTrue();
+    }
+
     /// <summary>カラム並び順の変更が Undo / Redo できることを検証する</summary>
     [Fact(DisplayName = "カラム順変更は Undo/Redo できる")]
     public void ColumnOrderChange_CanUndoRedo()

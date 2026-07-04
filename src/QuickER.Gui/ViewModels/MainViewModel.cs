@@ -91,6 +91,9 @@ public partial class MainViewModel : ObservableObject
     /// <summary><see cref="ShowNullabilityInDiagram"/> のバッキングフィールド（既定は表示）</summary>
     private bool _showNullabilityInDiagram = true;
 
+    /// <summary><see cref="IsCompactViewInDiagram"/> のバッキングフィールド（既定は簡易表示なし）</summary>
+    private bool _isCompactViewInDiagram;
+
     /// <summary>キャンバスの動的幅（最小 2400、エンティティ最右端 + 余白 400）</summary>
     public double CanvasWidth =>
         Math.Max(2400, Entities.Count == 0 ? 2400 : Entities.Max(e => e.X + e.Width) + 400);
@@ -356,6 +359,27 @@ public partial class MainViewModel : ObservableObject
             foreach (var entity in Entities)
             {
                 entity.ShowNullabilityInDiagram = value;
+            }
+
+            RefreshCanvasSize();
+        }
+    }
+
+    /// <summary>ER 図上で簡易表示（PK/FK カラムのみ）を行うかどうか（ツールバーから切替）</summary>
+    /// <remarks>変更時に全エンティティへ設定を伝播する必要があるため、生成属性を使わず手動実装とする</remarks>
+    public bool IsCompactViewInDiagram
+    {
+        get => _isCompactViewInDiagram;
+        set
+        {
+            if (!SetProperty(ref _isCompactViewInDiagram, value))
+            {
+                return;
+            }
+
+            foreach (var entity in Entities)
+            {
+                entity.IsCompactView = value;
             }
 
             RefreshCanvasSize();
@@ -1305,6 +1329,7 @@ public partial class MainViewModel : ObservableObject
                 // 追加されたエンティティへ現在のツールバー表示設定を引き継ぐ
                 entity.ShowDescriptionsInDiagram = ShowColumnDescriptionsInDiagram;
                 entity.ShowNullabilityInDiagram = ShowNullabilityInDiagram;
+                entity.IsCompactView = IsCompactViewInDiagram;
                 entity.PropertyChanged += OnEntityPropertyChanged;
                 _changeTracker.AttachEntity(entity);
             }

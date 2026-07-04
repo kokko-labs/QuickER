@@ -71,8 +71,16 @@ public static class DiagramMetricsService
         return Math.Max(DefaultEntityWidth, Math.Ceiling(Math.Max(headerWidth, bodyWidth)));
     }
 
-    /// <summary>現在の表示状態（説明表示の有無）に応じたエンティティの表示高さを見積もる</summary>
-    public static double EstimateEntityHeight(EntityViewModel entity, bool showDescriptions)
+    /// <summary>現在の表示状態（説明表示・簡易表示の有無）に応じたエンティティの表示高さを見積もる</summary>
+    /// <remarks>
+    /// 簡易表示（<paramref name="isCompactView"/>）が有効なときは PK/FK カラムのみを行として数える
+    /// これによりカードが縦に縮み、リレーション線の接続位置（<see cref="EntityViewModel.DisplayHeight"/> 依存）が可視カラムに整合する
+    /// </remarks>
+    public static double EstimateEntityHeight(
+        EntityViewModel entity,
+        bool showDescriptions,
+        bool isCompactView = false
+    )
     {
         var width = Math.Max(MinEntityWidth, entity.Width);
         var headerTextWidth = Math.Max(1, width - HeaderHorizontalPadding);
@@ -97,6 +105,12 @@ public static class DiagramMetricsService
 
         foreach (var column in entity.Columns)
         {
+            // 簡易表示中は PK/FK 以外のカラム行を表示しないため、高さの見積もりからも除外する
+            if (isCompactView && !column.IsPrimaryKey && !column.IsForeignKey)
+            {
+                continue;
+            }
+
             bodyHeight += ColumnRowMargin + rowHeight;
 
             if (showDescriptions && !string.IsNullOrWhiteSpace(column.Description))

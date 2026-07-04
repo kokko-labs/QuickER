@@ -37,6 +37,9 @@ public partial class EntityViewModel : ObservableObject
     /// <summary>ER 図上で NULL 許容表示を行うかどうかの実体フィールド</summary>
     private bool _showNullabilityInDiagram;
 
+    /// <summary>ER 図上で簡易表示（PK/FK カラムのみ）を行うかどうかの実体フィールド</summary>
+    private bool _isCompactView;
+
     /// <summary>メモ（プロパティパネルで編集する）</summary>
     [ObservableProperty]
     private string _memo;
@@ -96,6 +99,19 @@ public partial class EntityViewModel : ObservableObject
         }
     }
 
+    /// <summary>ER 図上で簡易表示（PK/FK カラムのみ）を行うかどうか（変更時は表示高さキャッシュを無効化する）</summary>
+    public bool IsCompactView
+    {
+        get => _isCompactView;
+        set
+        {
+            if (SetProperty(ref _isCompactView, value))
+            {
+                InvalidateDisplayHeight();
+            }
+        }
+    }
+
     /// <summary>表示高さ見積もりのキャッシュ（NaN は未計算を表す）</summary>
     private double _displayHeightCache = double.NaN;
 
@@ -113,7 +129,8 @@ public partial class EntityViewModel : ObservableObject
             {
                 _displayHeightCache = DiagramMetricsService.EstimateEntityHeight(
                     this,
-                    ShowDescriptionsInDiagram
+                    ShowDescriptionsInDiagram,
+                    IsCompactView
                 );
             }
 

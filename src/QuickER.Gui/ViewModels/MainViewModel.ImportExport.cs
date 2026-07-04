@@ -82,6 +82,7 @@ public partial class MainViewModel
                     {
                         ShowColumnDescriptionsInDiagram = ShowColumnDescriptionsInDiagram,
                         ShowNullabilityInDiagram = ShowNullabilityInDiagram,
+                        IsCompactViewInDiagram = IsCompactViewInDiagram,
                     }
                 )
             );
@@ -107,6 +108,7 @@ public partial class MainViewModel
                 {
                     ShowColumnDescriptionsInDiagram = uiState.ShowColumnDescriptionsInDiagram;
                     ShowNullabilityInDiagram = uiState.ShowNullabilityInDiagram;
+                    IsCompactViewInDiagram = uiState.IsCompactViewInDiagram;
                 }
             }
         }
@@ -595,5 +597,8 @@ public partial class MainViewModel
 
         /// <summary>ダイアグラム上に NULL 許容を表示するかどうか</summary>
         public bool ShowNullabilityInDiagram { get; init; } = true;
+
+        /// <summary>ダイアグラム上で簡易表示（PK/FK カラムのみ）を行うかどうか</summary>
+        public bool IsCompactViewInDiagram { get; init; }
     }
 }

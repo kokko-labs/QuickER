@@ -571,6 +571,16 @@
             <TextBlock Style="{StaticResource ToolBarCaption}" Text="NULL表示" />
           </StackPanel>
         </ToggleButton>
+        <ToggleButton
+          Style="{StaticResource ToolBarLabelToggleButton}"
+          IsChecked="{Binding IsCompactViewInDiagram, Mode=TwoWay}"
+          ToolTip="ER 図のカラム行を PK/FK のみに絞って簡易表示"
+        >
+          <StackPanel>
+            <TextBlock Style="{StaticResource ToolBarIcon}" Text="▤" />
+            <TextBlock Style="{StaticResource ToolBarCaption}" Text="簡易表示" />
+          </StackPanel>
+        </ToggleButton>
         <Rectangle Style="{StaticResource ToolBarSeparator}" />
         <Button
           Style="{StaticResource ToolBarLabelButton}"
@@ -1290,6 +1300,31 @@
                             <ItemsControl.ItemTemplate>
                               <DataTemplate>
                                 <StackPanel Margin="0,2">
+                                  <StackPanel.Style>
+                                    <Style TargetType="StackPanel">
+                                      <Setter Property="Visibility" Value="Visible" />
+                                      <Style.Triggers>
+                                        <!-- 簡易表示中は PK/FK 以外のカラム行を非表示にする（PK でも FK でもないとき折りたたむ） -->
+                                        <MultiDataTrigger>
+                                          <MultiDataTrigger.Conditions>
+                                            <Condition
+                                              Binding="{Binding DataContext.IsCompactViewInDiagram, RelativeSource={RelativeSource AncestorType=Window}}"
+                                              Value="True"
+                                            />
+                                            <Condition
+                                              Binding="{Binding IsPrimaryKey}"
+                                              Value="False"
+                                            />
+                                            <Condition
+                                              Binding="{Binding IsForeignKey}"
+                                              Value="False"
+                                            />
+                                          </MultiDataTrigger.Conditions>
+                                          <Setter Property="Visibility" Value="Collapsed" />
+                                        </MultiDataTrigger>
+                                      </Style.Triggers>
+                                    </Style>
+                                  </StackPanel.Style>
                                   <Grid>
                                     <Grid.ColumnDefinitions>
                                       <ColumnDefinition Width="34" />
