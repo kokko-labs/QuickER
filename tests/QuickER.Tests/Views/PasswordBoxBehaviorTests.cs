@@ -1,9 +1,9 @@
 using System.ComponentModel;
-using System.Threading;
 using System.Windows.Controls;
 using System.Windows.Data;
 using FluentAssertions;
 using QuickER.Views;
+using static QuickER.Tests.Views.WpfApplicationTestSupport;
 
 namespace QuickER.Tests.Views;
 
@@ -45,31 +45,6 @@ public class PasswordBoxBehaviorTests
             PasswordBoxBehavior.BoundPasswordProperty,
             new Binding(nameof(Source.Password)) { Source = source, Mode = BindingMode.TwoWay }
         );
-
-    /// <summary>STA スレッド上で検証を実行し、例外があれば失敗として報告する</summary>
-    private static void RunSta(Action action)
-    {
-        Exception? captured = null;
-
-        var thread = new Thread(() =>
-        {
-            try
-            {
-                action();
-            }
-            catch (Exception ex)
-            {
-                captured = ex;
-            }
-        });
-
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.IsBackground = true;
-        thread.Start();
-        thread.Join();
-
-        captured.Should().BeNull(captured?.ToString());
-    }
 
     [Fact(DisplayName = "VM の初期値が空文字でも PasswordBox への入力が VM へ伝わる")]
     public void EmptyInitialValue_TypedPasswordFlowsToViewModel()

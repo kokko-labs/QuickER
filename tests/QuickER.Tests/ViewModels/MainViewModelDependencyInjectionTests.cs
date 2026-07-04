@@ -128,6 +128,8 @@ public class MainViewModelDependencyInjectionTests
             IReadOnlyList<Entity> entities,
             IReadOnlyList<Relationship> relationships
         ) { }
+
+        public PrintOptions? ShowPrintOptionsDialog(string? defaultTitle) => null;
     }
 
     /// <summary>ファイル選択ダイアログを表示せず、設定済みの結果を返すスタブ</summary>

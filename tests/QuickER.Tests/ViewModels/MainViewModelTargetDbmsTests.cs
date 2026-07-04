@@ -240,6 +240,8 @@ public class MainViewModelTargetDbmsTests
             IReadOnlyList<Entity> entities,
             IReadOnlyList<Relationship> relationships
         ) { }
+
+        public PrintOptions? ShowPrintOptionsDialog(string? defaultTitle) => null;
     }
 
     private sealed class NoopFileDialogService : IFileDialogService

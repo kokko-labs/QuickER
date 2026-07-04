@@ -1,4 +1,4 @@
-﻿using System.IO;
+using System.IO;
 using System.Windows.Media;
 using CommunityToolkit.Mvvm.Input;
 using QuickER.Documents;
@@ -52,6 +52,13 @@ internal enum DiagramImportFormat
 public partial class MainViewModel
 {
     // ---------------- Auto-save / restore ----------------
+
+    /// <summary>最後に保存／読込した JSON のファイル名（拡張子なし）</summary>
+    /// <remarks>
+    /// 印刷ダイアログのタイトル入力欄の初期値専用。保存フォーマット・Undo 履歴には一切関与しない
+    /// （未保存のときは null のままで、初期値なしの空欄になる）
+    /// </remarks>
+    private string? _lastDocumentFileName;
 
     /// <summary>ダイアグラム自動保存ファイルのパス</summary>
     private static readonly string AutoSavePath = Path.Combine(
@@ -167,6 +174,43 @@ public partial class MainViewModel
         {
             _dialogs.ShowError(
                 $"出力できませんでした。{Environment.NewLine}{ex.Message}",
+                "エラー"
+            );
+        }
+    }
+
+    /// <summary>図全体を用紙 1 ページへ印刷する（縮小フィット／原寸大を選択）</summary>
+    /// <remarks>
+    /// 図はキャンバスの Visual を写すのではなく、VM から直接ベクタ描画する
+    /// （<see cref="DiagramPrintService"/> → <see cref="DiagramVectorRenderer"/>）。
+    /// 選択枠・減光など画面状態の影響を受けないため、キャンバス参照の受け渡しや
+    /// IsSelected / IsDimmed のスナップショット・復元は不要
+    /// </remarks>
+    [RelayCommand]
+    private void PrintDiagram()
+    {
+        // 印刷オプション（サイズモード・タイトル・日時印字）を選択させる。キャンセル時は何もしない
+        // タイトル欄の初期値には最後に保存／読込した文書名を提示する
+        var options = _appDialogs.ShowPrintOptionsDialog(_lastDocumentFileName);
+
+        if (options is null)
+        {
+            return;
+        }
+
+        try
+        {
+            DiagramPrintService.Print(
+                this,
+                options.Title,
+                options.IncludeTimestamp,
+                options.SizeMode
+            );
+        }
+        catch (Exception ex)
+        {
+            _dialogs.ShowError(
+                $"印刷できませんでした。{Environment.NewLine}{ex.Message}",
                 "エラー"
             );
         }
@@ -564,6 +608,9 @@ public partial class MainViewModel
         if (picked is not null)
         {
             JsonStorageService.Save(picked.Path, ToDocument());
+
+            // 印刷ダイアログのタイトル初期値用。保存フォーマット・Undo には関与しない
+            _lastDocumentFileName = Path.GetFileNameWithoutExtension(picked.Path);
         }
     }
 
@@ -587,6 +634,9 @@ public partial class MainViewModel
             clearUndoHistory: true,
             document.Layout
         );
+
+        // 印刷ダイアログのタイトル初期値用。保存フォーマット・Undo には関与しない
+        _lastDocumentFileName = Path.GetFileNameWithoutExtension(picked.Path);
     }
 
     /// <summary>自動保存対象の UI 表示状態（ダイアグラム上の表示トグル）</summary>

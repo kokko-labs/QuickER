@@ -28,18 +28,8 @@ public class DbConnectionDialogTests
             {
                 // BAML 内の {StaticResource BoolToVisibilityConverter} は App レベル定義のため、
                 // 実アプリと同様にアプリケーションリソースとして供給する（本検証の対象外の依存）。
-                if (Application.Current is null)
-                {
-                    _ = new Application();
-                }
-
-                if (!Application.Current!.Resources.Contains("BoolToVisibilityConverter"))
-                {
-                    Application.Current.Resources.Add(
-                        "BoolToVisibilityConverter",
-                        new BooleanToVisibilityConverter()
-                    );
-                }
+                // 生成は共有ヘルパーで直列化し、並列テストとの Application 二重生成競合を防ぐ
+                WpfApplicationTestSupport.EnsureApplicationResources();
 
                 var registry = new DatabaseProviderRegistry(
                     new IDatabaseProvider[] { new SqlServerProvider() }

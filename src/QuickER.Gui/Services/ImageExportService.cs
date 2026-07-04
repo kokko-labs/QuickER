@@ -74,7 +74,9 @@ public static class ImageExportService
     /// エンティティの高さ・行配置はキャンバス描画と同じ
     /// <see cref="DiagramMetricsService.CalculateCardLayout"/> を用いる
     /// リレーション線の端点は <see cref="EntityViewModel.DisplayHeight"/> を基礎に計算されるため、
-    /// 同一計算を共有することで線とカード枠のズレを防ぐ
+    /// 同一計算を共有することで線とカード枠のズレを防ぐ。
+    /// 印刷（<see cref="DiagramVectorRenderer"/>）は本メソッドと同じ見た目を DrawingContext で
+    /// 描く鏡写し実装のため、配色・フォント・座標を変えるときは両方を揃えること
     /// </remarks>
     public static string BuildSvg(MainViewModel vm)
     {

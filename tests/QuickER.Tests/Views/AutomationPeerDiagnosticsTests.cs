@@ -171,35 +171,9 @@ public class AutomationPeerDiagnosticsTests
     }
 
     /// <summary>MainWindow の BAML が参照する App レベルリソースを供給する</summary>
-    private static void EnsureApplicationResources()
-    {
-        if (Application.Current is null)
-        {
-            _ = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
-        }
-
-        var resources = Application.Current!.Resources;
-
-        if (!resources.Contains("BoolToVisibilityConverter"))
-        {
-            resources.Add("BoolToVisibilityConverter", new BooleanToVisibilityConverter());
-        }
-
-        if (!resources.Contains("NullToVisibilityConverter"))
-        {
-            resources.Add("NullToVisibilityConverter", new NullToVisibilityConverter());
-        }
-
-        if (!resources.Contains("NullToBooleanConverter"))
-        {
-            resources.Add("NullToBooleanConverter", new NullToBooleanConverter());
-        }
-
-        if (!resources.Contains("CountToVisibilityConverter"))
-        {
-            resources.Add("CountToVisibilityConverter", new CountToVisibilityConverter());
-        }
-    }
+    /// <remarks>生成は共有ヘルパーで直列化し、並列テストとの Application 二重生成競合を防ぐ</remarks>
+    private static void EnsureApplicationResources() =>
+        WpfApplicationTestSupport.EnsureApplicationResources();
 
     /// <summary>保留中のディスパッチャ処理（レイアウト・描画）を流し切る</summary>
     private static void DoEvents()

@@ -31,6 +31,8 @@
     <KeyBinding Key="Escape" Command="{Binding ClearSelectionCommand}" />
     <KeyBinding Key="Delete" Command="{Binding DeleteSelectedCommand}" />
     <KeyBinding Key="F" Modifiers="Control" Command="{Binding OpenSearchCommand}" />
+    <KeyBinding Key="P" Modifiers="Control" Command="{Binding PrintDiagramCommand}" />
+
     <!-- ズーム: Ctrl+0=100% / Ctrl+Shift+0=fit / Ctrl+Plus・Minus でズーム（OemPlus/Add・OemMinus/Subtract 両対応） -->
     <KeyBinding Key="D0" Modifiers="Control" Command="{Binding ResetZoomCommand}" />
     <KeyBinding Key="D0" Modifiers="Control+Shift" Command="{Binding FitToWindowCommand}" />
@@ -621,6 +623,17 @@
           <StackPanel>
             <TextBlock Style="{StaticResource ToolBarIcon}" Text="↔" />
             <TextBlock Style="{StaticResource ToolBarCaption}" Text="幅自動" />
+          </StackPanel>
+        </Button>
+        <Rectangle Style="{StaticResource ToolBarSeparator}" />
+        <Button
+          Style="{StaticResource ToolBarLabelButton}"
+          Command="{Binding PrintDiagramCommand}"
+          ToolTip="図全体を印刷（1ページ縮小 / 原寸大を選択、Ctrl+P）"
+        >
+          <StackPanel>
+            <TextBlock Style="{StaticResource ToolBarIcon}" Text="🖨" />
+            <TextBlock Style="{StaticResource ToolBarCaption}" Text="印刷" />
           </StackPanel>
         </Button>
         <Rectangle Style="{StaticResource ToolBarSeparator}" />
