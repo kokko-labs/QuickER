@@ -731,15 +731,15 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("public string BindingOrderId");
         content.Should().Contain("public string BindingAmount");
         // TryParse 検証
-        content.Should().Contain("int.TryParse(value, out var parsed)");
-        content.Should().Contain("decimal.TryParse(value, out var parsed)");
+        content.Should().Contain("int.TryParse(normalized, out var parsed)");
+        content.Should().Contain("decimal.TryParse(normalized, out var parsed)");
         // エラーメッセージは ResolveParseErrorMessage 経由で生成される
         content
             .Should()
-            .Contain("ResolveParseErrorMessage(nameof(BindingOrderId), value, \"int\")");
+            .Contain("ResolveParseErrorMessage(nameof(BindingOrderId), normalized, \"int\")");
         content
             .Should()
-            .Contain("ResolveParseErrorMessage(nameof(BindingAmount), value, \"decimal\")");
+            .Contain("ResolveParseErrorMessage(nameof(BindingAmount), normalized, \"decimal\")");
         // EditModelBase に BuildParseErrorMessage / CustomizeParseErrorMessage が存在する
         content.Should().Contain("protected virtual string BuildParseErrorMessage(");
         content.Should().Contain("partial void CustomizeParseErrorMessage(");
@@ -1734,7 +1734,7 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("public int? FileId");
         content.Should().Contain("public bool? IsActive");
         content.Should().Contain("public byte[] Filedata { get; set; } = Array.Empty<byte>();");
-        content.Should().Contain("Filedata = Convert.FromBase64String(value);");
+        content.Should().Contain("Filedata = Convert.FromBase64String(normalized);");
         content
             .Should()
             .Contain(

@@ -1612,6 +1612,7 @@ public partial class {{ item.class_name }} : EditModelBase
     //   検証追加      : partial void OnValidate();
     //   子の追加      : protected override void RegisterExtraChildren();  // 内部で AddChild/AddChildren で登録
     //   変換ﾒｯｾｰｼﾞ調整  : partial void CustomizeParseErrorMessage(string propertyName, string inputValue, string typeName, ref string message);
+    //   入力正規化調整 : partial void CustomizeInputNormalization(string propertyName, string rawValue, ref string normalizedValue);
     //   行編集        : partial void OnBeginEdit();  partial void OnEndEdit();  partial void OnCancelEdit();
     //   値変更通知    : partial void On{プロパティ}Changing(値) / Changed(値) / Changing(旧,新) / Changed(旧,新);  // 各プロパティに用意
     // ====================================================================================================
@@ -1675,19 +1676,31 @@ public partial class {{ item.class_name }} : EditModelBase
         get => {{ p.binding_field_name }};
         set
         {
-            if (!SetProperty(ref {{ p.binding_field_name }}, value, nameof({{ p.binding_property_name }})))
+            // 入力由来の値のみ正規化（ロード・復元時は元 Entity の鏡像を保つため素通し）
+            var normalized =
+                IsLoading || IsReverting
+                    ? value
+                    : NormalizeInput(nameof({{ p.binding_property_name }}), value);
+
+            if (!SetProperty(ref {{ p.binding_field_name }}, normalized, nameof({{ p.binding_property_name }})))
             {
+                // トリムで既存値と一致した場合、画面表示にだけ空白付き文字列が残るため表示を正規化値へ戻す
+                if (!string.Equals(value, normalized, StringComparison.Ordinal))
+                {
+                    OnPropertyChanged(nameof({{ p.binding_property_name }}));
+                }
+
                 return;
             }
 
             if (!IsReverting)
             {
-{{ if p.is_value_object }}                if (string.IsNullOrEmpty(value))
+{{ if p.is_value_object }}                if (string.IsNullOrEmpty(normalized))
                 {
                     {{ p.property_name }} = null;
                     SetError(nameof({{ p.binding_property_name }}), null);
                 }
-{{ if p.needs_parse }}                else if ({{ p.parse_type_name }}.TryParse(value, out var parsed))
+{{ if p.needs_parse }}                else if ({{ p.parse_type_name }}.TryParse(normalized, out var parsed))
                 {
                     if ({{ p.value_object_class_name }}.TryCreate(parsed, out var converted, out var voErrors))
                     {
@@ -1703,7 +1716,7 @@ public partial class {{ item.class_name }} : EditModelBase
                 {
                     SetError(
                         nameof({{ p.binding_property_name }}),
-                        ResolveParseErrorMessage(nameof({{ p.binding_property_name }}), value, "{{ p.parse_type_name }}")
+                        ResolveParseErrorMessage(nameof({{ p.binding_property_name }}), normalized, "{{ p.parse_type_name }}")
                     );
                 }
 {{ else if p.is_binary }}                else
@@ -1712,7 +1725,7 @@ public partial class {{ item.class_name }} : EditModelBase
                     {
                         if (
                             {{ p.value_object_class_name }}.TryCreate(
-                                Convert.FromBase64String(value),
+                                Convert.FromBase64String(normalized),
                                 out var converted,
                                 out var voErrors
                             )
@@ -1730,11 +1743,11 @@ public partial class {{ item.class_name }} : EditModelBase
                     {
                         SetError(
                             nameof({{ p.binding_property_name }}),
-                            ResolveParseErrorMessage(nameof({{ p.binding_property_name }}), value, "byte[]")
+                            ResolveParseErrorMessage(nameof({{ p.binding_property_name }}), normalized, "byte[]")
                         );
                     }
                 }
-{{ else }}                else if ({{ p.value_object_class_name }}.TryCreate(value, out var converted, out var voErrors))
+{{ else }}                else if ({{ p.value_object_class_name }}.TryCreate(normalized, out var converted, out var voErrors))
                 {
                     {{ p.property_name }} = converted;
                     SetError(nameof({{ p.binding_property_name }}), null);
@@ -1743,7 +1756,7 @@ public partial class {{ item.class_name }} : EditModelBase
                 {
                     SetError(nameof({{ p.binding_property_name }}), string.Join(" / ", voErrors));
                 }
-{{ end }}{{ else if p.needs_parse }}                if ({{ p.parse_type_name }}.TryParse(value, out var parsed))
+{{ end }}{{ else if p.needs_parse }}                if ({{ p.parse_type_name }}.TryParse(normalized, out var parsed))
                 {
                     {{ p.property_name }} = parsed;
                     SetError(nameof({{ p.binding_property_name }}), null);
@@ -1752,10 +1765,10 @@ public partial class {{ item.class_name }} : EditModelBase
                 {
                     SetError(
                         nameof({{ p.binding_property_name }}),
-                        ResolveParseErrorMessage(nameof({{ p.binding_property_name }}), value, "{{ p.parse_type_name }}")
+                        ResolveParseErrorMessage(nameof({{ p.binding_property_name }}), normalized, "{{ p.parse_type_name }}")
                     );
                 }
-{{ else if p.is_binary }}                if (string.IsNullOrEmpty(value))
+{{ else if p.is_binary }}                if (string.IsNullOrEmpty(normalized))
                 {
                     {{ p.property_name }} = Array.Empty<byte>();
                     SetError(nameof({{ p.binding_property_name }}), null);
@@ -1764,34 +1777,56 @@ public partial class {{ item.class_name }} : EditModelBase
                 {
                     try
                     {
-                        {{ p.property_name }} = Convert.FromBase64String(value);
+                        {{ p.property_name }} = Convert.FromBase64String(normalized);
                         SetError(nameof({{ p.binding_property_name }}), null);
                     }
                     catch (FormatException)
                     {
                         SetError(
                             nameof({{ p.binding_property_name }}),
-                            ResolveParseErrorMessage(nameof({{ p.binding_property_name }}), value, "byte[]")
+                            ResolveParseErrorMessage(nameof({{ p.binding_property_name }}), normalized, "byte[]")
                         );
                     }
                 }
-{{ else if p.is_nullable }}                if (string.IsNullOrEmpty(value))
+{{ else if p.is_nullable }}                if (string.IsNullOrEmpty(normalized))
                 {
                     {{ p.property_name }} = null;
                     SetError(nameof({{ p.binding_property_name }}), null);
                 }
                 else
                 {
-                    {{ p.property_name }} = value;
+                    {{ p.property_name }} = normalized;
                     SetError(nameof({{ p.binding_property_name }}), null);
                 }
-{{ else }}                {{ p.property_name }} = value;
+{{ else }}                {{ p.property_name }} = normalized;
                 SetError(nameof({{ p.binding_property_name }}), null);
 {{ end }}            }
         }
     }
 
-{{ end }}    // ---- navigation ----
+{{ end }}    /// <summary>画面入力文字列を正規化する（前後の空白・タブ・改行を除去。全角スペースも対象）</summary>
+    private string NormalizeInput(string propertyName, string value)
+    {
+        // ComboBox 等のバインドは実行時に null を書き込み得るため許容する（null は未入力として変換分岐が処理する）
+        if (value is null)
+        {
+            return value!;
+        }
+
+        // 前後の空白のみ除去する（中間の空白・改行は保持）
+        var normalized = value.Trim();
+        CustomizeInputNormalization(propertyName, value, ref normalized);
+        return normalized;
+    }
+
+    /// <summary>入力正規化を列単位で調整する（トリムを無効化したい列で normalizedValue に rawValue を戻す等。partial 実装で処理を追加）</summary>
+    partial void CustomizeInputNormalization(
+        string propertyName,
+        string rawValue,
+        ref string normalizedValue
+    );
+
+    // ---- navigation ----
 {{ for navigation in item.navigations }}{{ if navigation.cascade && navigation.is_collection }}    /// <summary>{{ navigation.property_name }} の子コレクションのバッキングフィールド</summary>
     private {{ navigation.display_type_name }} {{ navigation.field_name }}{{ navigation.initializer }}
 

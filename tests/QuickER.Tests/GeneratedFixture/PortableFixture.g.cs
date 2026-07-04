@@ -1953,6 +1953,7 @@ public partial class CustomerEditModel : EditModelBase
     //   検証追加      : partial void OnValidate();
     //   子の追加      : protected override void RegisterExtraChildren();  // 内部で AddChild/AddChildren で登録
     //   変換ﾒｯｾｰｼﾞ調整  : partial void CustomizeParseErrorMessage(string propertyName, string inputValue, string typeName, ref string message);
+    //   入力正規化調整 : partial void CustomizeInputNormalization(string propertyName, string rawValue, ref string normalizedValue);
     //   行編集        : partial void OnBeginEdit();  partial void OnEndEdit();  partial void OnCancelEdit();
     //   値変更通知    : partial void On{プロパティ}Changing(値) / Changed(値) / Changing(旧,新) / Changed(旧,新);  // 各プロパティに用意
     // ====================================================================================================
@@ -2014,19 +2015,31 @@ public partial class CustomerEditModel : EditModelBase
         get => _bindingCustomerId;
         set
         {
-            if (!SetProperty(ref _bindingCustomerId, value, nameof(BindingCustomerId)))
+            // 入力由来の値のみ正規化（ロード・復元時は元 Entity の鏡像を保つため素通し）
+            var normalized =
+                IsLoading || IsReverting
+                    ? value
+                    : NormalizeInput(nameof(BindingCustomerId), value);
+
+            if (!SetProperty(ref _bindingCustomerId, normalized, nameof(BindingCustomerId)))
             {
+                // トリムで既存値と一致した場合、画面表示にだけ空白付き文字列が残るため表示を正規化値へ戻す
+                if (!string.Equals(value, normalized, StringComparison.Ordinal))
+                {
+                    OnPropertyChanged(nameof(BindingCustomerId));
+                }
+
                 return;
             }
 
             if (!IsReverting)
             {
-                if (string.IsNullOrEmpty(value))
+                if (string.IsNullOrEmpty(normalized))
                 {
                     CustomerId = null;
                     SetError(nameof(BindingCustomerId), null);
                 }
-                else if (int.TryParse(value, out var parsed))
+                else if (int.TryParse(normalized, out var parsed))
                 {
                     if (CustomerIdValue.TryCreate(parsed, out var converted, out var voErrors))
                     {
@@ -2042,7 +2055,7 @@ public partial class CustomerEditModel : EditModelBase
                 {
                     SetError(
                         nameof(BindingCustomerId),
-                        ResolveParseErrorMessage(nameof(BindingCustomerId), value, "int")
+                        ResolveParseErrorMessage(nameof(BindingCustomerId), normalized, "int")
                     );
                 }
             }
@@ -2105,19 +2118,31 @@ public partial class CustomerEditModel : EditModelBase
         get => _bindingName;
         set
         {
-            if (!SetProperty(ref _bindingName, value, nameof(BindingName)))
+            // 入力由来の値のみ正規化（ロード・復元時は元 Entity の鏡像を保つため素通し）
+            var normalized =
+                IsLoading || IsReverting
+                    ? value
+                    : NormalizeInput(nameof(BindingName), value);
+
+            if (!SetProperty(ref _bindingName, normalized, nameof(BindingName)))
             {
+                // トリムで既存値と一致した場合、画面表示にだけ空白付き文字列が残るため表示を正規化値へ戻す
+                if (!string.Equals(value, normalized, StringComparison.Ordinal))
+                {
+                    OnPropertyChanged(nameof(BindingName));
+                }
+
                 return;
             }
 
             if (!IsReverting)
             {
-                if (string.IsNullOrEmpty(value))
+                if (string.IsNullOrEmpty(normalized))
                 {
                     Name = null;
                     SetError(nameof(BindingName), null);
                 }
-                else if (NameValue.TryCreate(value, out var converted, out var voErrors))
+                else if (NameValue.TryCreate(normalized, out var converted, out var voErrors))
                 {
                     Name = converted;
                     SetError(nameof(BindingName), null);
@@ -2186,19 +2211,31 @@ public partial class CustomerEditModel : EditModelBase
         get => _bindingBalance;
         set
         {
-            if (!SetProperty(ref _bindingBalance, value, nameof(BindingBalance)))
+            // 入力由来の値のみ正規化（ロード・復元時は元 Entity の鏡像を保つため素通し）
+            var normalized =
+                IsLoading || IsReverting
+                    ? value
+                    : NormalizeInput(nameof(BindingBalance), value);
+
+            if (!SetProperty(ref _bindingBalance, normalized, nameof(BindingBalance)))
             {
+                // トリムで既存値と一致した場合、画面表示にだけ空白付き文字列が残るため表示を正規化値へ戻す
+                if (!string.Equals(value, normalized, StringComparison.Ordinal))
+                {
+                    OnPropertyChanged(nameof(BindingBalance));
+                }
+
                 return;
             }
 
             if (!IsReverting)
             {
-                if (string.IsNullOrEmpty(value))
+                if (string.IsNullOrEmpty(normalized))
                 {
                     Balance = null;
                     SetError(nameof(BindingBalance), null);
                 }
-                else if (decimal.TryParse(value, out var parsed))
+                else if (decimal.TryParse(normalized, out var parsed))
                 {
                     if (BalanceValue.TryCreate(parsed, out var converted, out var voErrors))
                     {
@@ -2214,12 +2251,34 @@ public partial class CustomerEditModel : EditModelBase
                 {
                     SetError(
                         nameof(BindingBalance),
-                        ResolveParseErrorMessage(nameof(BindingBalance), value, "decimal")
+                        ResolveParseErrorMessage(nameof(BindingBalance), normalized, "decimal")
                     );
                 }
             }
         }
     }
+
+    /// <summary>画面入力文字列を正規化する（前後の空白・タブ・改行を除去。全角スペースも対象）</summary>
+    private string NormalizeInput(string propertyName, string value)
+    {
+        // ComboBox 等のバインドは実行時に null を書き込み得るため許容する（null は未入力として変換分岐が処理する）
+        if (value is null)
+        {
+            return value!;
+        }
+
+        // 前後の空白のみ除去する（中間の空白・改行は保持）
+        var normalized = value.Trim();
+        CustomizeInputNormalization(propertyName, value, ref normalized);
+        return normalized;
+    }
+
+    /// <summary>入力正規化を列単位で調整する（トリムを無効化したい列で normalizedValue に rawValue を戻す等。partial 実装で処理を追加）</summary>
+    partial void CustomizeInputNormalization(
+        string propertyName,
+        string rawValue,
+        ref string normalizedValue
+    );
 
     // ---- navigation ----
     /// <summary>Orders の子コレクションのバッキングフィールド</summary>
@@ -2352,6 +2411,7 @@ public partial class OrderEditModel : EditModelBase
     //   検証追加      : partial void OnValidate();
     //   子の追加      : protected override void RegisterExtraChildren();  // 内部で AddChild/AddChildren で登録
     //   変換ﾒｯｾｰｼﾞ調整  : partial void CustomizeParseErrorMessage(string propertyName, string inputValue, string typeName, ref string message);
+    //   入力正規化調整 : partial void CustomizeInputNormalization(string propertyName, string rawValue, ref string normalizedValue);
     //   行編集        : partial void OnBeginEdit();  partial void OnEndEdit();  partial void OnCancelEdit();
     //   値変更通知    : partial void On{プロパティ}Changing(値) / Changed(値) / Changing(旧,新) / Changed(旧,新);  // 各プロパティに用意
     // ====================================================================================================
@@ -2413,19 +2473,31 @@ public partial class OrderEditModel : EditModelBase
         get => _bindingOrderId;
         set
         {
-            if (!SetProperty(ref _bindingOrderId, value, nameof(BindingOrderId)))
+            // 入力由来の値のみ正規化（ロード・復元時は元 Entity の鏡像を保つため素通し）
+            var normalized =
+                IsLoading || IsReverting
+                    ? value
+                    : NormalizeInput(nameof(BindingOrderId), value);
+
+            if (!SetProperty(ref _bindingOrderId, normalized, nameof(BindingOrderId)))
             {
+                // トリムで既存値と一致した場合、画面表示にだけ空白付き文字列が残るため表示を正規化値へ戻す
+                if (!string.Equals(value, normalized, StringComparison.Ordinal))
+                {
+                    OnPropertyChanged(nameof(BindingOrderId));
+                }
+
                 return;
             }
 
             if (!IsReverting)
             {
-                if (string.IsNullOrEmpty(value))
+                if (string.IsNullOrEmpty(normalized))
                 {
                     OrderId = null;
                     SetError(nameof(BindingOrderId), null);
                 }
-                else if (int.TryParse(value, out var parsed))
+                else if (int.TryParse(normalized, out var parsed))
                 {
                     if (OrderIdValue.TryCreate(parsed, out var converted, out var voErrors))
                     {
@@ -2441,7 +2513,7 @@ public partial class OrderEditModel : EditModelBase
                 {
                     SetError(
                         nameof(BindingOrderId),
-                        ResolveParseErrorMessage(nameof(BindingOrderId), value, "int")
+                        ResolveParseErrorMessage(nameof(BindingOrderId), normalized, "int")
                     );
                 }
             }
@@ -2504,19 +2576,31 @@ public partial class OrderEditModel : EditModelBase
         get => _bindingCustomerId;
         set
         {
-            if (!SetProperty(ref _bindingCustomerId, value, nameof(BindingCustomerId)))
+            // 入力由来の値のみ正規化（ロード・復元時は元 Entity の鏡像を保つため素通し）
+            var normalized =
+                IsLoading || IsReverting
+                    ? value
+                    : NormalizeInput(nameof(BindingCustomerId), value);
+
+            if (!SetProperty(ref _bindingCustomerId, normalized, nameof(BindingCustomerId)))
             {
+                // トリムで既存値と一致した場合、画面表示にだけ空白付き文字列が残るため表示を正規化値へ戻す
+                if (!string.Equals(value, normalized, StringComparison.Ordinal))
+                {
+                    OnPropertyChanged(nameof(BindingCustomerId));
+                }
+
                 return;
             }
 
             if (!IsReverting)
             {
-                if (string.IsNullOrEmpty(value))
+                if (string.IsNullOrEmpty(normalized))
                 {
                     CustomerId = null;
                     SetError(nameof(BindingCustomerId), null);
                 }
-                else if (int.TryParse(value, out var parsed))
+                else if (int.TryParse(normalized, out var parsed))
                 {
                     if (CustomerIdValue.TryCreate(parsed, out var converted, out var voErrors))
                     {
@@ -2532,7 +2616,7 @@ public partial class OrderEditModel : EditModelBase
                 {
                     SetError(
                         nameof(BindingCustomerId),
-                        ResolveParseErrorMessage(nameof(BindingCustomerId), value, "int")
+                        ResolveParseErrorMessage(nameof(BindingCustomerId), normalized, "int")
                     );
                 }
             }
@@ -2595,19 +2679,31 @@ public partial class OrderEditModel : EditModelBase
         get => _bindingMemo;
         set
         {
-            if (!SetProperty(ref _bindingMemo, value, nameof(BindingMemo)))
+            // 入力由来の値のみ正規化（ロード・復元時は元 Entity の鏡像を保つため素通し）
+            var normalized =
+                IsLoading || IsReverting
+                    ? value
+                    : NormalizeInput(nameof(BindingMemo), value);
+
+            if (!SetProperty(ref _bindingMemo, normalized, nameof(BindingMemo)))
             {
+                // トリムで既存値と一致した場合、画面表示にだけ空白付き文字列が残るため表示を正規化値へ戻す
+                if (!string.Equals(value, normalized, StringComparison.Ordinal))
+                {
+                    OnPropertyChanged(nameof(BindingMemo));
+                }
+
                 return;
             }
 
             if (!IsReverting)
             {
-                if (string.IsNullOrEmpty(value))
+                if (string.IsNullOrEmpty(normalized))
                 {
                     Memo = null;
                     SetError(nameof(BindingMemo), null);
                 }
-                else if (MemoValue.TryCreate(value, out var converted, out var voErrors))
+                else if (MemoValue.TryCreate(normalized, out var converted, out var voErrors))
                 {
                     Memo = converted;
                     SetError(nameof(BindingMemo), null);
@@ -2676,19 +2772,31 @@ public partial class OrderEditModel : EditModelBase
         get => _bindingAmount;
         set
         {
-            if (!SetProperty(ref _bindingAmount, value, nameof(BindingAmount)))
+            // 入力由来の値のみ正規化（ロード・復元時は元 Entity の鏡像を保つため素通し）
+            var normalized =
+                IsLoading || IsReverting
+                    ? value
+                    : NormalizeInput(nameof(BindingAmount), value);
+
+            if (!SetProperty(ref _bindingAmount, normalized, nameof(BindingAmount)))
             {
+                // トリムで既存値と一致した場合、画面表示にだけ空白付き文字列が残るため表示を正規化値へ戻す
+                if (!string.Equals(value, normalized, StringComparison.Ordinal))
+                {
+                    OnPropertyChanged(nameof(BindingAmount));
+                }
+
                 return;
             }
 
             if (!IsReverting)
             {
-                if (string.IsNullOrEmpty(value))
+                if (string.IsNullOrEmpty(normalized))
                 {
                     Amount = null;
                     SetError(nameof(BindingAmount), null);
                 }
-                else if (decimal.TryParse(value, out var parsed))
+                else if (decimal.TryParse(normalized, out var parsed))
                 {
                     if (AmountValue.TryCreate(parsed, out var converted, out var voErrors))
                     {
@@ -2704,12 +2812,34 @@ public partial class OrderEditModel : EditModelBase
                 {
                     SetError(
                         nameof(BindingAmount),
-                        ResolveParseErrorMessage(nameof(BindingAmount), value, "decimal")
+                        ResolveParseErrorMessage(nameof(BindingAmount), normalized, "decimal")
                     );
                 }
             }
         }
     }
+
+    /// <summary>画面入力文字列を正規化する（前後の空白・タブ・改行を除去。全角スペースも対象）</summary>
+    private string NormalizeInput(string propertyName, string value)
+    {
+        // ComboBox 等のバインドは実行時に null を書き込み得るため許容する（null は未入力として変換分岐が処理する）
+        if (value is null)
+        {
+            return value!;
+        }
+
+        // 前後の空白のみ除去する（中間の空白・改行は保持）
+        var normalized = value.Trim();
+        CustomizeInputNormalization(propertyName, value, ref normalized);
+        return normalized;
+    }
+
+    /// <summary>入力正規化を列単位で調整する（トリムを無効化したい列で normalizedValue に rawValue を戻す等。partial 実装で処理を追加）</summary>
+    partial void CustomizeInputNormalization(
+        string propertyName,
+        string rawValue,
+        ref string normalizedValue
+    );
 
     // ---- navigation ----
     /// <summary>Customer ナビゲーションプロパティ</summary>
