@@ -50,7 +50,13 @@ QuickER.AI       → Model    AI/MCP/ASP.NET Core（WPF非依存。VM操作は I
 ## 不変条件（ビルド・型検査では検出できず、壊すと静かに回帰する）
 
 - `Templates/CSharpRuntime.scriban` は **CRLF 固定**（.gitattributes で強制）。生成コードのバイト一致が前提
-- **テンプレート変更時は** `tests/QuickER.Tests/GeneratedFixture/` の固定フィクスチャ **2 つ**（GeneratedFixture.g.cs と PortableFixture.g.cs）の再生成が必要。各ドリフトテスト（GeneratedFixtureDriftTests / PortableFixtureDriftTests）が「再生成→差分ゼロ」を検証し、失敗メッセージに再生成手順がある
+- **テンプレート変更時は** `tests/QuickER.Tests/GeneratedFixture/` の固定フィクスチャ **2 つ**（GeneratedFixture.g.cs と PortableFixture.g.cs）の再生成が必要。各ドリフトテスト（GeneratedFixtureDriftTests / PortableFixtureDriftTests）が「再生成→差分ゼロ」を検証し、失敗メッセージに再生成手順がある。再生成は次の 1 コマンド（環境変数 `QUICKER_REGEN_FIXTURES` を立てるとドリフト検知と同一経路で上書き。実処理は FixtureDriftHarness に集約）：
+
+  ```powershell
+  $env:QUICKER_REGEN_FIXTURES=1; dotnet test tests/QuickER.Tests/QuickER.Tests.csproj --filter "FullyQualifiedName~Drift"; $env:QUICKER_REGEN_FIXTURES=$null
+  ```
+
+  再生成後は環境変数なしで同じテストを流し、緑（ドリフトなし）を確認する
 - DDL 出力の先頭コメントは `-- QuickER によって自動生成された DDL`（DdlGeneratorBase.cs）。このヘッダを検証するテストは存在しないため変更に気づきにくい
 - `PasswordBoxBehavior`（QuickER.Gui/Views）の DP 既定値は **null 必須**。string.Empty にすると空文字バインド時に PasswordChanged が購読されず入力が VM に届かない（PasswordBoxBehaviorTests が守る）。バインド先 VM プロパティは空文字で初期化する
 - 生成ランタイムの SqlParameter は `[SqlColumnType]` 属性由来の明示型。文字列 Size の「宣言長超過なら値長」ガードを固定 Size にするとサイレントなデータ破損を招く
