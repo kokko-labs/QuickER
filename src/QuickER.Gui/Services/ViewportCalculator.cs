@@ -12,16 +12,16 @@ namespace QuickER.Services;
 /// </remarks>
 public static class ViewportCalculator
 {
-    /// <summary>ズーム倍率の下限（20%）</summary>
-    public const double MinZoom = 0.2;
+    /// <summary>ズーム倍率の下限（50%）</summary>
+    public const double MinZoom = 0.5;
 
-    /// <summary>fit-to-window（自動全体表示）で採用する倍率の下限（50%）</summary>
+    /// <summary>fit-to-window（自動全体表示）で採用する倍率の下限（80%）</summary>
     /// <remarks>
-    /// 手動ズーム（<see cref="MinZoom"/>=20%）より高く設定する。読込・整列直後の自動 fit が
-    /// 大きい図を 20% まで縮めると文字が読めず「小さすぎる初期表示」になるため、
-    /// 自動で縮むのは 50% までとし、それ以上の縮小はユーザーの手動操作に委ねる。
+    /// 手動ズーム（<see cref="MinZoom"/>=50%）より高く設定する。読込・整列直後の自動 fit が
+    /// 図を小さく縮めすぎると文字が読めず「小さすぎる初期表示」になるため、
+    /// 自動で縮むのは 80% までとし、それ以上の縮小はユーザーの手動操作に委ねる。
     /// </remarks>
-    public const double FitMinZoom = 0.5;
+    public const double FitMinZoom = 0.8;
 
     /// <summary>ズーム倍率の上限（200%）</summary>
     public const double MaxZoom = 2.0;
@@ -31,7 +31,7 @@ public static class ViewportCalculator
 
     /// <summary>現在倍率から 1 ステップズームインした倍率を求める（次の 10% の倍数へスナップ）</summary>
     /// <remarks>
-    /// fit 直後などの中途半端な倍率（例 47.3%）からでも 10% の倍数（50%）へ揃える。
+    /// fit 直後などの中途半端な倍率（例 87.3%）からでも 10% の倍数（90%）へ揃える。
     /// 浮動小数点誤差でちょうどの倍数が 1 つ下と誤判定されないよう、微小許容差を加えてから切り捨てる。
     /// </remarks>
     public static double ZoomInStep(double zoom) =>
@@ -91,8 +91,8 @@ public static class ViewportCalculator
     /// <remarks>
     /// 空図やゼロサイズのビューポートでは 100% ＋ 原点を返す。
     /// fit は「収まるよう縮小する」操作であり、小さい図を等倍超へ拡大すると
-    /// 文字が巨大化して不自然なため、倍率は <see cref="FitMinZoom"/>（50%）〜100% にクランプする。
-    /// 50% でも収まらない大きい図はコンテンツ中央を基準に一部が見える状態となり、
+    /// 文字が巨大化して不自然なため、倍率は <see cref="FitMinZoom"/>（80%）〜100% にクランプする。
+    /// 80% でも収まらない大きい図はコンテンツ中央を基準に一部が見える状態となり、
     /// さらに全体を見たい場合は手動ズーム（下限 <see cref="MinZoom"/>=20%）かミニマップに委ねる。
     /// </remarks>
     public static ViewportFit CalculateFit(Rect contentBounds, Size viewport, double margin)
@@ -113,7 +113,7 @@ public static class ViewportCalculator
         var contentWidth = contentBounds.Width + margin * 2;
         var contentHeight = contentBounds.Height + margin * 2;
 
-        // 幅・高さ双方が収まる倍率を採用する（拡大はせず上限は等倍、自動縮小の下限は 50%）
+        // 幅・高さ双方が収まる倍率を採用する（拡大はせず上限は等倍、自動縮小の下限は 80%）
         var zoom = Math.Clamp(
             Math.Min(viewport.Width / contentWidth, viewport.Height / contentHeight),
             FitMinZoom,
@@ -192,7 +192,7 @@ public static class ViewportCalculator
     /// <param name="margin">コンテンツ周囲に確保する余白（論理座標 px）</param>
     /// <returns>順方向（コンテンツ→ミニマップ）／逆方向（ミニマップ→コンテンツ）の両変換を担う射影</returns>
     /// <remarks>
-    /// <see cref="CalculateFit"/> は 50%〜100% にクランプするためミニマップ用途には流用できない。
+    /// <see cref="CalculateFit"/> は 80%〜100% にクランプするためミニマップ用途には流用できない。
     /// こちらは縦横比を保つ一様スケールで、拡大・縮小いずれもクランプせず、
     /// 余白込みコンテンツをミニマップ枠の中央に収める。空図・不正入力では等倍・原点の射影を返す。
     /// </remarks>

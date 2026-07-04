@@ -8,8 +8,8 @@ namespace QuickER.Tests.Services;
 /// <remarks>UI に依存しない純関数のみを対象とする</remarks>
 public class ViewportCalculatorTests
 {
-    /// <summary>下限（20%）未満は 20% へ丸められることを検証する</summary>
-    [Fact(DisplayName = "ClampZoom: 下限未満は 0.2 に丸める")]
+    /// <summary>下限（50%）未満は 50% へ丸められることを検証する</summary>
+    [Fact(DisplayName = "ClampZoom: 下限未満は 0.5 に丸める")]
     public void ClampZoom_BelowMin_ClampsToMin()
     {
         ViewportCalculator.ClampZoom(0.01).Should().Be(ViewportCalculator.MinZoom);
@@ -33,7 +33,7 @@ public class ViewportCalculatorTests
     [Fact(DisplayName = "ClampZoom: 境界値はそのまま採用")]
     public void ClampZoom_Boundaries_ReturnedAsIs()
     {
-        ViewportCalculator.ClampZoom(ViewportCalculator.MinZoom).Should().Be(0.2);
+        ViewportCalculator.ClampZoom(ViewportCalculator.MinZoom).Should().Be(0.5);
         ViewportCalculator.ClampZoom(ViewportCalculator.MaxZoom).Should().Be(2.0);
     }
 
@@ -47,7 +47,7 @@ public class ViewportCalculatorTests
     /// <summary>10% の倍数からの増減が次/前の倍数へ 1 ステップだけ進むことを検証する</summary>
     [Theory(DisplayName = "ZoomInStep/ZoomOutStep: 10% の倍数から 1 ステップ進む")]
     [InlineData(1.0, 1.1, 0.9)]
-    [InlineData(0.5, 0.6, 0.4)]
+    [InlineData(0.6, 0.7, 0.5)]
     [InlineData(1.9, 2.0, 1.8)]
     public void ZoomSteps_FromExactMultiple_AdvanceOneStep(
         double zoom,
@@ -63,19 +63,19 @@ public class ViewportCalculatorTests
     [Fact(DisplayName = "ZoomInStep/ZoomOutStep: 中途半端な倍率は 10% の倍数へスナップ")]
     public void ZoomSteps_FromArbitraryZoom_SnapToMultiples()
     {
-        ViewportCalculator.ZoomInStep(0.473).Should().BeApproximately(0.5, 1e-9);
-        ViewportCalculator.ZoomOutStep(0.473).Should().BeApproximately(0.4, 1e-9);
+        ViewportCalculator.ZoomInStep(0.873).Should().BeApproximately(0.9, 1e-9);
+        ViewportCalculator.ZoomOutStep(0.873).Should().BeApproximately(0.8, 1e-9);
     }
 
     /// <summary>二進浮動小数点で誤差を持つ倍数（0.1*3 等）でも 1 ステップだけ進むことを検証する</summary>
     [Fact(DisplayName = "ZoomInStep/ZoomOutStep: 浮動小数点誤差のある倍数でも 1 ステップ")]
     public void ZoomSteps_WithFloatNoise_AdvanceExactlyOneStep()
     {
-        // 0.1 * 3 は 0.30000000000000004 になる（二進表現の誤差）
-        var noisy = 0.1 * 3;
+        // 0.1 * 6 は 0.6000000000000001 になる（二進表現の誤差）
+        var noisy = 0.1 * 6;
 
-        ViewportCalculator.ZoomInStep(noisy).Should().BeApproximately(0.4, 1e-9);
-        ViewportCalculator.ZoomOutStep(noisy).Should().BeApproximately(0.2, 1e-9);
+        ViewportCalculator.ZoomInStep(noisy).Should().BeApproximately(0.7, 1e-9);
+        ViewportCalculator.ZoomOutStep(noisy).Should().BeApproximately(0.5, 1e-9);
     }
 
     /// <summary>上限・下限では 1 ステップ進めてもクランプで頭打ちになることを検証する</summary>
@@ -83,7 +83,7 @@ public class ViewportCalculatorTests
     public void ZoomSteps_AtBounds_AreClamped()
     {
         ViewportCalculator.ZoomInStep(ViewportCalculator.MaxZoom).Should().Be(2.0);
-        ViewportCalculator.ZoomOutStep(ViewportCalculator.MinZoom).Should().Be(0.2);
+        ViewportCalculator.ZoomOutStep(ViewportCalculator.MinZoom).Should().Be(0.5);
     }
 
     /// <summary>
@@ -143,12 +143,12 @@ public class ViewportCalculatorTests
     [Fact(DisplayName = "CalculateFit: 余白込みで収まる倍率を選ぶ")]
     public void CalculateFit_ChoosesFittingZoom()
     {
-        // 1800x800 のコンテンツ、余白 100、ビューポート 1000x1000
-        var bounds = new Rect(100, 100, 1800, 800);
-        var fit = ViewportCalculator.CalculateFit(bounds, new Size(1000, 1000), 100);
+        // 900x800 のコンテンツ、余白 50、ビューポート 900x900
+        var bounds = new Rect(100, 100, 900, 800);
+        var fit = ViewportCalculator.CalculateFit(bounds, new Size(900, 900), 50);
 
-        // 制約は幅: 1000 / (1800 + 200) = 0.5、高さ: 1000 / (800 + 200) = 1.0 → 小さい方の 0.5
-        fit.Zoom.Should().BeApproximately(0.5, 1e-9);
+        // 制約は幅: 900 / (900 + 100) = 0.9、高さ: 900 / (800 + 100) = 1.0 → 小さい方の 0.9
+        fit.Zoom.Should().BeApproximately(0.9, 1e-9);
     }
 
     /// <summary>fit 後、コンテンツ中心がビューポート中央に来ることを検証する</summary>
@@ -183,24 +183,24 @@ public class ViewportCalculatorTests
         fit.Zoom.Should().Be(1.0);
     }
 
-    /// <summary>巨大コンテンツでも自動 fit の倍率が下限 50% を下回らないことを検証する</summary>
-    [Fact(DisplayName = "CalculateFit: 倍率は fit 専用下限 50% でクランプ")]
+    /// <summary>巨大コンテンツでも自動 fit の倍率が下限 80% を下回らないことを検証する</summary>
+    [Fact(DisplayName = "CalculateFit: 倍率は fit 専用下限 80% でクランプ")]
     public void CalculateFit_ClampsToFitMinZoom()
     {
-        // 理論倍率が 50% を下回る大きいコンテンツは FitMinZoom で頭打ち
-        // （それ以上の縮小は手動ズーム＝MinZoom 20% やミニマップに委ねる）
+        // 理論倍率が 80% を下回る大きいコンテンツは FitMinZoom で頭打ち
+        // （それ以上の縮小は手動ズーム＝MinZoom 50% やミニマップに委ねる）
         var bounds = new Rect(0, 0, 100000, 100000);
         var fit = ViewportCalculator.CalculateFit(bounds, new Size(500, 500), 0);
 
         fit.Zoom.Should().Be(ViewportCalculator.FitMinZoom);
     }
 
-    /// <summary>fit の下限（50%）が手動ズームの下限（20%）より高いことを固定する</summary>
+    /// <summary>fit の下限（80%）が手動ズームの下限（50%）より高いことを固定する</summary>
     [Fact(DisplayName = "CalculateFit: fit 下限は手動ズーム下限より高い")]
     public void FitMinZoom_IsHigherThanManualMinZoom()
     {
         // 自動で縮む限界（読める大きさ）＞ 手動で縮める限界、の関係を仕様として固定する
-        ViewportCalculator.FitMinZoom.Should().Be(0.5);
+        ViewportCalculator.FitMinZoom.Should().Be(0.8);
         ViewportCalculator.FitMinZoom.Should().BeGreaterThan(ViewportCalculator.MinZoom);
     }
 
@@ -394,7 +394,7 @@ public class ViewportCalculatorTests
     [Fact(DisplayName = "MiniMap: 巨大コンテンツでもクランプしない")]
     public void MiniMapProjection_HugeContent_NotClamped()
     {
-        // 100000x100000・余白 0・枠 200x140 → 140/100000=0.0014（fit の下限 50% を大きく下回る）
+        // 100000x100000・余白 0・枠 200x140 → 140/100000=0.0014（fit の下限 80% を大きく下回る）
         var projection = ViewportCalculator.CalculateMiniMapProjection(
             new Rect(0, 0, 100000, 100000),
             new Size(200, 140),

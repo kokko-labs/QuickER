@@ -179,7 +179,7 @@ public partial class MainWindow : Window
     /// <remarks>新規エンティティを「いま見えている場所」へ配置するための入力（<see cref="MainViewModel.ViewportContentBounds"/>）</remarks>
     private void DiagramScrollViewer_ScrollChanged(object sender, ScrollChangedEventArgs e)
     {
-        // ZoomLevel は 20% 以上が保証されているためゼロ除算は起きない
+        // ZoomLevel は 50% 以上が保証されているためゼロ除算は起きない
         var zoom = _viewModel.ZoomLevel;
         _viewModel.ViewportContentBounds = new Rect(
             DiagramScrollViewer.HorizontalOffset / zoom,

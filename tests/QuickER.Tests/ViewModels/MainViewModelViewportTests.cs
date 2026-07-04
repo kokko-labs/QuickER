@@ -94,14 +94,14 @@ public class MainViewModelViewportTests
     [Fact(DisplayName = "ZoomIn/ZoomOut: 中途半端な倍率は 10% の倍数へスナップ")]
     public void ZoomInOut_SnapsToTenPercentMultiples()
     {
-        var vm = new MainViewModel { ZoomLevel = 0.473 };
+        var vm = new MainViewModel { ZoomLevel = 0.873 };
 
         vm.ZoomInCommand.Execute(null);
-        vm.ZoomLevel.Should().BeApproximately(0.5, 1e-9);
+        vm.ZoomLevel.Should().BeApproximately(0.9, 1e-9);
 
-        vm.ZoomLevel = 0.473;
+        vm.ZoomLevel = 0.873;
         vm.ZoomOutCommand.Execute(null);
-        vm.ZoomLevel.Should().BeApproximately(0.4, 1e-9);
+        vm.ZoomLevel.Should().BeApproximately(0.8, 1e-9);
     }
 
     /// <summary>ResetZoom が 100% へ戻すことを検証する</summary>

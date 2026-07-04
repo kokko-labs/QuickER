@@ -45,7 +45,7 @@ public partial class MainViewModel
     }
 
     /// <summary>キャンバスのズーム倍率（1.0 = 100%）。設定時に範囲へクランプする</summary>
-    /// <remarks>ScaleTransform の ScaleX/ScaleY にバインドされる。20%〜200% の範囲を保証する</remarks>
+    /// <remarks>ScaleTransform の ScaleX/ScaleY にバインドされる。50%〜200% の範囲を保証する</remarks>
     public double ZoomLevel
     {
         get => _zoomLevel;
