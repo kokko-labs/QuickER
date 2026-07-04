@@ -1,4 +1,5 @@
-﻿using System.Collections.ObjectModel;
+﻿using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using FluentAssertions;
 using QuickER.Documents;
 using QuickER.Model;
@@ -28,6 +29,49 @@ public class CommandTests
         cmd.Undo();
         e.X.Should().Be(10);
         e.Y.Should().Be(20);
+    }
+
+    /// <summary>GroupMoveEntitiesCommand の 1 回の Undo で複数メンバーが同時に元へ戻ることを検証する</summary>
+    [Fact(DisplayName = "GroupMoveEntitiesCommand: 単一 Undo で全メンバーが元座標へ戻る")]
+    public void GroupMoveEntitiesCommand_SingleUndoRestoresAllMembers()
+    {
+        var mgr = new UndoRedoManager();
+        var a = NewEntity(10, 10);
+        var b = NewEntity(50, 60);
+
+        // 両者を同一デルタ(+30, +40)で移動済みにしてから履歴登録する（ドラッグ相当）
+        a.X = 40;
+        a.Y = 50;
+        b.X = 80;
+        b.Y = 100;
+
+        mgr.Push(
+            new GroupMoveEntitiesCommand(
+                new List<(EntityViewModel, double, double, double, double)>
+                {
+                    (a, 10, 10, 40, 50),
+                    (b, 50, 60, 80, 100),
+                }
+            )
+        );
+
+        // 1 エントリのみ積まれている
+        mgr.CanUndo.Should().BeTrue();
+
+        // 1 回の Undo で両方が元座標へ戻る
+        mgr.Undo();
+        a.X.Should().Be(10);
+        a.Y.Should().Be(10);
+        b.X.Should().Be(50);
+        b.Y.Should().Be(60);
+        mgr.CanUndo.Should().BeFalse();
+
+        // Redo で両方が移動後へ戻る
+        mgr.Redo();
+        a.X.Should().Be(40);
+        a.Y.Should().Be(50);
+        b.X.Should().Be(80);
+        b.Y.Should().Be(100);
     }
 
     /// <summary>AddEntityCommand の Execute で追加、Undo で除去されることを検証する</summary>

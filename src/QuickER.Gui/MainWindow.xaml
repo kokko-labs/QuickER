@@ -25,6 +25,9 @@
     <KeyBinding Key="C" Modifiers="Control" Command="{Binding CopySelectedEntityCommand}" />
     <KeyBinding Key="V" Modifiers="Control" Command="{Binding PasteCopiedEntityCommand}" />
     <KeyBinding Key="D" Modifiers="Control" Command="{Binding DuplicateSelectedEntityCommand}" />
+    <!-- 全選択（Ctrl+A）／選択解除（Esc）。TextBox フォーカス中は各コントロールの標準動作が優先される -->
+    <KeyBinding Key="A" Modifiers="Control" Command="{Binding SelectAllEntitiesCommand}" />
+    <KeyBinding Key="Escape" Command="{Binding ClearSelectionCommand}" />
     <KeyBinding Key="Delete" Command="{Binding DeleteSelectedCommand}" />
     <KeyBinding Key="F" Modifiers="Control" Command="{Binding OpenSearchCommand}" />
     <!-- ズーム: Ctrl+0=100% / Ctrl+Shift+0=fit / Ctrl+Plus・Minus でズーム（OemPlus/Add・OemMinus/Subtract 両対応） -->
@@ -970,6 +973,7 @@
                 Width="{Binding CanvasWidth}"
                 Height="{Binding CanvasHeight}"
                 Background="{StaticResource GridBrush}"
+                beh:RubberBandBehavior.IsEnabled="True"
               >
                 <Grid.InputBindings>
                   <MouseBinding MouseAction="LeftClick" Command="{Binding CanvasClickCommand}" />
@@ -1424,6 +1428,24 @@
                     </DataTemplate>
                   </ItemsControl.ItemTemplate>
                 </ItemsControl>
+
+                <!--
+                  ラバーバンド（矩形選択）レイヤ: DiagramCanvas 内に描くため LayoutTransform（ズーム）へ
+                  透過的に追従する。ヒットテストは無効（ドラッグ判定はビヘイビアが担う）。
+                -->
+                <Canvas IsHitTestVisible="False">
+                  <Rectangle
+                    Canvas.Left="{Binding RubberBandX}"
+                    Canvas.Top="{Binding RubberBandY}"
+                    Width="{Binding RubberBandWidth}"
+                    Height="{Binding RubberBandHeight}"
+                    Fill="#1A1A73E8"
+                    Stroke="{StaticResource EntityBorderSelected}"
+                    StrokeThickness="1"
+                    StrokeDashArray="3 2"
+                    Visibility="{Binding IsRubberBandVisible, Converter={StaticResource BoolToVisibilityConverter}}"
+                  />
+                </Canvas>
               </Grid>
             </Grid>
           </ScrollViewer>
@@ -1623,6 +1645,8 @@
                       <MultiDataTrigger.Conditions>
                         <Condition Binding="{Binding SelectedEntity}" Value="{x:Null}" />
                         <Condition Binding="{Binding SelectedRelationship}" Value="{x:Null}" />
+                        <!-- 複数選択中は一括操作カードが出るため未選択プレースホルダーは出さない -->
+                        <Condition Binding="{Binding IsMultiSelectionActive}" Value="False" />
                       </MultiDataTrigger.Conditions>
                       <Setter Property="Visibility" Value="Visible" />
                     </MultiDataTrigger>
@@ -1635,7 +1659,25 @@
               />
             </Border>
 
-            <StackPanel Visibility="{Binding SelectedEntity, Converter={StaticResource NullToVisibilityConverter}}">
+            <!-- 単一選択時の詳細パネル: 主選択があり、かつ複数選択（2 個以上）でないときのみ表示 -->
+            <StackPanel>
+              <StackPanel.Style>
+                <Style TargetType="StackPanel">
+                  <Setter Property="Visibility" Value="Collapsed" />
+                  <Style.Triggers>
+                    <MultiDataTrigger>
+                      <MultiDataTrigger.Conditions>
+                        <Condition
+                          Binding="{Binding SelectedEntity, Converter={StaticResource NullToBooleanConverter}}"
+                          Value="True"
+                        />
+                        <Condition Binding="{Binding IsMultiSelectionActive}" Value="False" />
+                      </MultiDataTrigger.Conditions>
+                      <Setter Property="Visibility" Value="Visible" />
+                    </MultiDataTrigger>
+                  </Style.Triggers>
+                </Style>
+              </StackPanel.Style>
               <Border Style="{StaticResource PropertyCard}">
                 <Grid>
                   <Grid.RowDefinitions>
@@ -1931,6 +1973,61 @@
                     Height="120"
                     VerticalContentAlignment="Top"
                     VerticalScrollBarVisibility="Auto"
+                  />
+                </StackPanel>
+              </Border>
+            </StackPanel>
+
+            <!-- 複数選択（2 個以上）時の一括操作パネル: 件数表示＋タイトル色一括変更＋一括削除 -->
+            <StackPanel Visibility="{Binding IsMultiSelectionActive, Converter={StaticResource BoolToVisibilityConverter}}">
+              <Border Style="{StaticResource PropertyCard}">
+                <StackPanel>
+                  <TextBlock
+                    Style="{StaticResource PropertyCardTitle}"
+                    Text="{Binding SelectedEntityCountText}"
+                  />
+
+                  <TextBlock
+                    Style="{StaticResource PropertyFieldLabel}"
+                    HorizontalAlignment="Left"
+                    Margin="0,0,0,8"
+                    Text="タイトル背景を一括変更"
+                  />
+
+                  <!-- 色パレット: スウォッチ押下で選択中全員の TitleBackgroundColor を一括変更 -->
+                  <ItemsControl ItemsSource="{Binding EntityTitleColorOptions}">
+                    <ItemsControl.ItemsPanel>
+                      <ItemsPanelTemplate>
+                        <WrapPanel Orientation="Horizontal" />
+                      </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate>
+                        <Button
+                          Margin="0,0,8,8"
+                          Padding="0"
+                          BorderBrush="#CBD5E1"
+                          BorderThickness="1"
+                          ToolTip="{Binding Label}"
+                          Command="{Binding DataContext.BulkChangeTitleColorCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                          CommandParameter="{Binding ColorHex}"
+                        >
+                          <Border
+                            Width="40"
+                            Height="24"
+                            CornerRadius="6"
+                            Background="{Binding ColorHex}"
+                          />
+                        </Button>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+
+                  <Button
+                    Margin="0,14,0,0"
+                    Style="{StaticResource PropertyDangerButton}"
+                    Content="選択中をすべて削除"
+                    Command="{Binding RemoveSelectedEntityCommand}"
                   />
                 </StackPanel>
               </Border>

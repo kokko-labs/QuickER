@@ -1,4 +1,6 @@
-﻿using System.Windows;
+﻿using System.Collections.Generic;
+using System.Linq;
+using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -85,6 +87,13 @@ public static class DragBehavior
 
     /// <summary>ドラッグ中要素に対応するエンティティ ViewModel</summary>
     private static EntityViewModel? _draggedVm;
+
+    /// <summary>グループ移動中かどうか（選択済みメンバーを Ctrl なしで押下したとき）</summary>
+    private static bool _isGroupDragging;
+
+    /// <summary>グループ移動対象メンバーとドラッグ開始時の座標（押下対象を含む全選択メンバー）</summary>
+    private static List<(EntityViewModel Entity, double StartX, double StartY)> _groupMembers =
+        new();
 
     /// <summary>右端リサイズグリップの幅 (px)</summary>
     private const double GripWidth = 8;
@@ -175,6 +184,8 @@ public static class DragBehavior
         _startMouse = e.GetPosition(canvas);
         _startX = vm.X;
         _startY = vm.Y;
+        _isGroupDragging = false;
+        _groupMembers = new List<(EntityViewModel, double, double)>();
 
         // 右端グリップ範囲の押下はリサイズ、それ以外は移動として扱う
         var local = e.GetPosition(fe);
@@ -189,6 +200,21 @@ public static class DragBehavior
         {
             _isDragging = true;
             _isResizing = false;
+
+            // 選択済みメンバーを Ctrl なしで押下した場合はグループ移動へ入る
+            // （Ctrl 押下時はトグル操作の意図なのでグループ移動しない）
+            var isCtrlDown = (Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control;
+
+            if (
+                !isCtrlDown
+                && vm.IsSelected
+                && Window.GetWindow(fe)?.DataContext is MainViewModel main
+                && main.SelectedEntities.Count >= 2
+            )
+            {
+                _isGroupDragging = true;
+                _groupMembers = main.SelectedEntities.Select(m => (m, m.X, m.Y)).ToList();
+            }
         }
 
         fe.CaptureMouse();
@@ -234,6 +260,23 @@ public static class DragBehavior
             var delta = pos.X - _startMouse.X;
             var newWidth = Math.Max(120, _startWidth + delta);
             _draggedVm.Width = newWidth;
+        }
+        else if (_isDragging && _isGroupDragging)
+        {
+            // グループ移動: 全メンバーへ同一デルタを適用し相対配置を維持する。
+            // 左端／上端が 0 に当たる場合はデルタごとクランプ（グループ剛体）する。
+            var rawDeltaX = pos.X - _startMouse.X;
+            var rawDeltaY = pos.Y - _startMouse.Y;
+
+            var minX = _groupMembers.Min(m => m.StartX);
+            var minY = _groupMembers.Min(m => m.StartY);
+            var (deltaX, deltaY) = MainViewModel.ClampGroupDelta(minX, minY, rawDeltaX, rawDeltaY);
+
+            foreach (var member in _groupMembers)
+            {
+                member.Entity.X = member.StartX + deltaX;
+                member.Entity.Y = member.StartY + deltaY;
+            }
         }
         else if (_isDragging)
         {
@@ -283,9 +326,13 @@ public static class DragBehavior
         var oldX = _startX;
         var oldY = _startY;
         var wasResizing = _isResizing;
+        var wasGroupDragging = _isGroupDragging;
+        var groupMembers = _groupMembers;
 
         _isDragging = false;
         _isResizing = false;
+        _isGroupDragging = false;
+        _groupMembers = new List<(EntityViewModel, double, double)>();
         _draggedElement = null;
         _draggedVm = null;
 
@@ -307,24 +354,61 @@ public static class DragBehavior
             return;
         }
 
+        var isCtrlDown = (Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control;
+
         if (treatAsClick)
         {
-            // クリック扱い時はドラッグ中の微小な座標変化を取り消し、選択処理を ViewModel へ委譲する
-            vm.X = oldX;
-            vm.Y = oldY;
+            // クリック扱い時はドラッグ中の微小な座標変化を取り消す
+            if (wasGroupDragging)
+            {
+                foreach (var member in groupMembers)
+                {
+                    member.Entity.X = member.StartX;
+                    member.Entity.Y = member.StartY;
+                }
+            }
+            else
+            {
+                vm.X = oldX;
+                vm.Y = oldY;
+            }
 
+            // Ctrl 押下時はトグル追加／除外、それ以外は単一選択へ委譲する
+            // （グループのメンバーを Ctrl なしでクリックしたらその 1 個へ絞る＝Windows 標準）
             if (Window.GetWindow(element)?.DataContext is MainViewModel main)
             {
-                main.OnEntityClicked(vm);
+                if (isCtrlDown)
+                {
+                    main.ToggleEntitySelection(vm);
+                }
+                else
+                {
+                    main.OnEntityClicked(vm);
+                }
             }
 
             return;
         }
 
-        // 実際に座標が変わった場合のみ、適用済み移動を履歴へ登録する（再 Execute は不要）
-        if (vm.X != oldX || vm.Y != oldY)
+        var mgr = GetUndoRedoManager(element);
+
+        if (wasGroupDragging)
         {
-            var mgr = GetUndoRedoManager(element);
+            // グループ移動: 実際に座標が変わったメンバーがあれば複合コマンド 1 エントリで履歴登録する
+            var moves = groupMembers
+                .Select(m => (m.Entity, m.StartX, m.StartY, m.Entity.X, m.Entity.Y))
+                .ToList();
+
+            var hasMoved = moves.Any(m => m.Item4 != m.StartX || m.Item5 != m.StartY);
+
+            if (hasMoved)
+            {
+                mgr?.Push(new GroupMoveEntitiesCommand(moves));
+            }
+        }
+        else if (vm.X != oldX || vm.Y != oldY)
+        {
+            // 単一移動: 実際に座標が変わった場合のみ、適用済み移動を履歴へ登録する（再 Execute は不要）
             mgr?.Push(new MoveEntityCommand(vm, oldX, oldY, vm.X, vm.Y));
         }
 

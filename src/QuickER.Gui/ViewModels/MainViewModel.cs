@@ -44,7 +44,13 @@ public partial class MainViewModel : ObservableObject
     /// <summary>ダイアグラム上の全リレーション</summary>
     public ObservableCollection<RelationshipViewModel> Relationships { get; } = new();
 
-    /// <summary>選択中のエンティティ（未選択時は null）</summary>
+    /// <summary>主選択エンティティ（未選択時は null）</summary>
+    /// <remarks>
+    /// 選択の正はエンティティごとの <see cref="EntityViewModel.IsSelected"/> フラグであり、
+    /// <see cref="SelectedEntity"/> はそのうち「最後に操作した 1 個」＝主選択を表す。
+    /// プロパティパネル・コピー・複製・関連ハイライトなど「単一対象を前提とする機能」はこの主選択に作用する。
+    /// 複数選択の集合は派生ヘルパ <see cref="SelectedEntities"/> で取得する。
+    /// </remarks>
     [ObservableProperty]
     private EntityViewModel? _selectedEntity;
 
@@ -409,9 +415,22 @@ public partial class MainViewModel : ObservableObject
     }
 
     /// <summary>選択中のエンティティを削除する（Undo 可能）</summary>
+    /// <remarks>
+    /// 2 個以上選択されている場合は選択中の全エンティティ（と接続リレーション）を
+    /// <see cref="UndoRedo.GroupRemoveEntitiesCommand"/> で一括削除し、Undo は複合 1 エントリとなる。
+    /// </remarks>
     [RelayCommand(CanExecute = nameof(CanRemoveEntity))]
     private void RemoveSelectedEntity()
     {
+        var selected = SelectedEntities;
+
+        if (selected.Count >= 2)
+        {
+            UndoRedo.Execute(new GroupRemoveEntitiesCommand(this, selected));
+            SelectedEntity = null;
+            return;
+        }
+
         if (SelectedEntity is null)
         {
             return;
@@ -787,7 +806,8 @@ public partial class MainViewModel : ObservableObject
     /// <remarks>
     /// これらは選択状態から導出する純粋な表示状態であり、Undo 履歴・保存対象には含めない
     /// <list type="bullet">
-    /// <item>エンティティ選択時: 選択エンティティ・接続リレーション・その相手側エンティティは通常表示、それ以外を減光。接続リレーションは強調</item>
+    /// <item>エンティティ選択時（単一・複数とも）: 選択メンバー・その接続リレーション・相手側エンティティは
+    /// 通常表示、それ以外を減光。接続リレーションは強調（複数選択は単一選択の意味論を選択集合の和へ一般化）</item>
     /// <item>リレーション選択時: 選択リレーションと両端エンティティは通常表示、それ以外を減光（強調は行わず選択自体の青強調に任せる）</item>
     /// <item>未選択時: 全要素とも通常表示（減光・強調なし）</item>
     /// </list>
@@ -795,10 +815,20 @@ public partial class MainViewModel : ObservableObject
     /// </remarks>
     private void UpdateRelatedHighlights()
     {
-        // エンティティ選択を優先し、無ければリレーション選択、どちらも無ければ全解除とする
-        if (SelectedEntity is not null)
+        // 選択操作は必ずここを通るため、選択数・一括操作切替に関わる派生プロパティの通知もここへ集約する
+        NotifySelectionChanged();
+
+        var selectedEntities = Entities.Where(e => e.IsSelected).ToList();
+
+        // 主選択のみ設定されるケース（プログラム操作・テスト）は単一選択として扱う
+        if (selectedEntities.Count == 0 && SelectedEntity is not null)
         {
-            ApplyEntitySelectionHighlights(SelectedEntity);
+            selectedEntities.Add(SelectedEntity);
+        }
+
+        if (selectedEntities.Count > 0)
+        {
+            ApplyEntitySelectionHighlights(selectedEntities);
             return;
         }
 
@@ -811,15 +841,20 @@ public partial class MainViewModel : ObservableObject
         ClearRelatedHighlights();
     }
 
-    /// <summary>選択エンティティを基準に、接続リレーションと相手側エンティティを通常表示に保ち他を減光する</summary>
-    private void ApplyEntitySelectionHighlights(EntityViewModel selected)
+    /// <summary>選択エンティティ集合を基準に、接続リレーションと相手側エンティティを通常表示に保ち他を減光する</summary>
+    /// <remarks>単一選択は要素数 1 の集合として同じ規則で扱う（複数選択は関連の和集合）</remarks>
+    private void ApplyEntitySelectionHighlights(IReadOnlyList<EntityViewModel> selected)
     {
-        // 選択エンティティに接続するリレーションと、その相手側エンティティ群を収集する
-        var relatedEntities = new HashSet<EntityViewModel> { selected };
+        var selectedSet = selected.ToHashSet();
+
+        // 選択メンバーに接続するリレーションと、その相手側エンティティ群を収集する
+        var relatedEntities = new HashSet<EntityViewModel>(selectedSet);
 
         foreach (var relationship in Relationships)
         {
-            var isConnected = relationship.Source == selected || relationship.Target == selected;
+            var isConnected =
+                selectedSet.Contains(relationship.Source)
+                || selectedSet.Contains(relationship.Target);
 
             // 接続線は強調・非減光、相手側エンティティは非減光対象へ加える
             relationship.IsEmphasized = isConnected;
