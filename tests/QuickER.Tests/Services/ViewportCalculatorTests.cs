@@ -183,15 +183,25 @@ public class ViewportCalculatorTests
         fit.Zoom.Should().Be(1.0);
     }
 
-    /// <summary>巨大コンテンツでも倍率が下限 20% を下回らないことを検証する</summary>
-    [Fact(DisplayName = "CalculateFit: 倍率は下限 20% でクランプ")]
-    public void CalculateFit_ClampsToMinZoom()
+    /// <summary>巨大コンテンツでも自動 fit の倍率が下限 50% を下回らないことを検証する</summary>
+    [Fact(DisplayName = "CalculateFit: 倍率は fit 専用下限 50% でクランプ")]
+    public void CalculateFit_ClampsToFitMinZoom()
     {
-        // 理論倍率が 20% を下回る巨大コンテンツは MinZoom で頭打ち
+        // 理論倍率が 50% を下回る大きいコンテンツは FitMinZoom で頭打ち
+        // （それ以上の縮小は手動ズーム＝MinZoom 20% やミニマップに委ねる）
         var bounds = new Rect(0, 0, 100000, 100000);
         var fit = ViewportCalculator.CalculateFit(bounds, new Size(500, 500), 0);
 
-        fit.Zoom.Should().Be(ViewportCalculator.MinZoom);
+        fit.Zoom.Should().Be(ViewportCalculator.FitMinZoom);
+    }
+
+    /// <summary>fit の下限（50%）が手動ズームの下限（20%）より高いことを固定する</summary>
+    [Fact(DisplayName = "CalculateFit: fit 下限は手動ズーム下限より高い")]
+    public void FitMinZoom_IsHigherThanManualMinZoom()
+    {
+        // 自動で縮む限界（読める大きさ）＞ 手動で縮める限界、の関係を仕様として固定する
+        ViewportCalculator.FitMinZoom.Should().Be(0.5);
+        ViewportCalculator.FitMinZoom.Should().BeGreaterThan(ViewportCalculator.MinZoom);
     }
 
     /// <summary>空図（空矩形）は等倍・原点を返すことを検証する</summary>
@@ -384,7 +394,7 @@ public class ViewportCalculatorTests
     [Fact(DisplayName = "MiniMap: 巨大コンテンツでもクランプしない")]
     public void MiniMapProjection_HugeContent_NotClamped()
     {
-        // 100000x100000・余白 0・枠 200x140 → 140/100000=0.0014（fit の下限 20% を大きく下回る）
+        // 100000x100000・余白 0・枠 200x140 → 140/100000=0.0014（fit の下限 50% を大きく下回る）
         var projection = ViewportCalculator.CalculateMiniMapProjection(
             new Rect(0, 0, 100000, 100000),
             new Size(200, 140),
