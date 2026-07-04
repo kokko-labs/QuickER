@@ -8,8 +8,8 @@ namespace QuickER.Tests.Services;
 /// <remarks>UI に依存しない純関数のみを対象とする</remarks>
 public class ViewportCalculatorTests
 {
-    /// <summary>下限（10%）未満は 10% へ丸められることを検証する</summary>
-    [Fact(DisplayName = "ClampZoom: 下限未満は 0.1 に丸める")]
+    /// <summary>下限（20%）未満は 20% へ丸められることを検証する</summary>
+    [Fact(DisplayName = "ClampZoom: 下限未満は 0.2 に丸める")]
     public void ClampZoom_BelowMin_ClampsToMin()
     {
         ViewportCalculator.ClampZoom(0.01).Should().Be(ViewportCalculator.MinZoom);
@@ -33,7 +33,7 @@ public class ViewportCalculatorTests
     [Fact(DisplayName = "ClampZoom: 境界値はそのまま採用")]
     public void ClampZoom_Boundaries_ReturnedAsIs()
     {
-        ViewportCalculator.ClampZoom(ViewportCalculator.MinZoom).Should().Be(0.1);
+        ViewportCalculator.ClampZoom(ViewportCalculator.MinZoom).Should().Be(0.2);
         ViewportCalculator.ClampZoom(ViewportCalculator.MaxZoom).Should().Be(2.0);
     }
 
@@ -42,6 +42,48 @@ public class ViewportCalculatorTests
     public void ClampZoom_NaN_ReturnsOne()
     {
         ViewportCalculator.ClampZoom(double.NaN).Should().Be(1.0);
+    }
+
+    /// <summary>10% の倍数からの増減が次/前の倍数へ 1 ステップだけ進むことを検証する</summary>
+    [Theory(DisplayName = "ZoomInStep/ZoomOutStep: 10% の倍数から 1 ステップ進む")]
+    [InlineData(1.0, 1.1, 0.9)]
+    [InlineData(0.5, 0.6, 0.4)]
+    [InlineData(1.9, 2.0, 1.8)]
+    public void ZoomSteps_FromExactMultiple_AdvanceOneStep(
+        double zoom,
+        double expectedIn,
+        double expectedOut
+    )
+    {
+        ViewportCalculator.ZoomInStep(zoom).Should().BeApproximately(expectedIn, 1e-9);
+        ViewportCalculator.ZoomOutStep(zoom).Should().BeApproximately(expectedOut, 1e-9);
+    }
+
+    /// <summary>中途半端な倍率が次/前の 10% の倍数へスナップすることを検証する</summary>
+    [Fact(DisplayName = "ZoomInStep/ZoomOutStep: 中途半端な倍率は 10% の倍数へスナップ")]
+    public void ZoomSteps_FromArbitraryZoom_SnapToMultiples()
+    {
+        ViewportCalculator.ZoomInStep(0.473).Should().BeApproximately(0.5, 1e-9);
+        ViewportCalculator.ZoomOutStep(0.473).Should().BeApproximately(0.4, 1e-9);
+    }
+
+    /// <summary>二進浮動小数点で誤差を持つ倍数（0.1*3 等）でも 1 ステップだけ進むことを検証する</summary>
+    [Fact(DisplayName = "ZoomInStep/ZoomOutStep: 浮動小数点誤差のある倍数でも 1 ステップ")]
+    public void ZoomSteps_WithFloatNoise_AdvanceExactlyOneStep()
+    {
+        // 0.1 * 3 は 0.30000000000000004 になる（二進表現の誤差）
+        var noisy = 0.1 * 3;
+
+        ViewportCalculator.ZoomInStep(noisy).Should().BeApproximately(0.4, 1e-9);
+        ViewportCalculator.ZoomOutStep(noisy).Should().BeApproximately(0.2, 1e-9);
+    }
+
+    /// <summary>上限・下限では 1 ステップ進めてもクランプで頭打ちになることを検証する</summary>
+    [Fact(DisplayName = "ZoomInStep/ZoomOutStep: 上下限でクランプされる")]
+    public void ZoomSteps_AtBounds_AreClamped()
+    {
+        ViewportCalculator.ZoomInStep(ViewportCalculator.MaxZoom).Should().Be(2.0);
+        ViewportCalculator.ZoomOutStep(ViewportCalculator.MinZoom).Should().Be(0.2);
     }
 
     /// <summary>
@@ -141,11 +183,11 @@ public class ViewportCalculatorTests
         fit.Zoom.Should().Be(1.0);
     }
 
-    /// <summary>巨大コンテンツでも倍率が下限 10% を下回らないことを検証する</summary>
-    [Fact(DisplayName = "CalculateFit: 倍率は下限 10% でクランプ")]
+    /// <summary>巨大コンテンツでも倍率が下限 20% を下回らないことを検証する</summary>
+    [Fact(DisplayName = "CalculateFit: 倍率は下限 20% でクランプ")]
     public void CalculateFit_ClampsToMinZoom()
     {
-        // 理論倍率が 10% を下回る巨大コンテンツは MinZoom で頭打ち
+        // 理論倍率が 20% を下回る巨大コンテンツは MinZoom で頭打ち
         var bounds = new Rect(0, 0, 100000, 100000);
         var fit = ViewportCalculator.CalculateFit(bounds, new Size(500, 500), 0);
 
@@ -277,5 +319,129 @@ public class ViewportCalculatorTests
 
         offset.X.Should().Be(0);
         offset.Y.Should().Be(0);
+    }
+
+    // ---------------- CalculateMiniMapProjection / MiniMapProjection ----------------
+
+    /// <summary>縦横比を保つ一様スケール（横長は幅制約、縦長は高さ制約）が採用されることを検証する</summary>
+    [Fact(DisplayName = "MiniMap: 一様スケール（横長は幅、縦長は高さで制約）")]
+    public void MiniMapProjection_UsesUniformScale()
+    {
+        // 横長コンテンツ 800x200・余白 0・枠 200x140 → 幅制約 200/800=0.25、高さ制約 140/200=0.7 → 0.25
+        var wide = ViewportCalculator.CalculateMiniMapProjection(
+            new Rect(0, 0, 800, 200),
+            new Size(200, 140),
+            0
+        );
+        wide.Scale.Should().BeApproximately(0.25, 1e-9);
+
+        // 縦長コンテンツ 200x800 → 幅制約 200/200=1.0、高さ制約 140/800=0.175 → 0.175
+        var tall = ViewportCalculator.CalculateMiniMapProjection(
+            new Rect(0, 0, 200, 800),
+            new Size(200, 140),
+            0
+        );
+        tall.Scale.Should().BeApproximately(0.175, 1e-9);
+    }
+
+    /// <summary>余白込みコンテンツがミニマップ枠の中央に収まる（中心が枠中央へ来る）ことを検証する</summary>
+    [Fact(DisplayName = "MiniMap: 余白込みコンテンツを枠中央へ寄せる")]
+    public void MiniMapProjection_CentersContent()
+    {
+        var bounds = new Rect(100, 300, 800, 200);
+        var size = new Size(200, 140);
+        var projection = ViewportCalculator.CalculateMiniMapProjection(bounds, size, 40);
+
+        // コンテンツ中心（論理座標）を投影すると枠中央へ来る
+        var contentCenter = new Point(bounds.X + bounds.Width / 2, bounds.Y + bounds.Height / 2);
+        var mapped = projection.ToMiniMap(contentCenter);
+
+        mapped.X.Should().BeApproximately(size.Width / 2, 1e-6);
+        mapped.Y.Should().BeApproximately(size.Height / 2, 1e-6);
+    }
+
+    /// <summary>順変換→逆変換の往復で元の座標へ戻る（往復一致）ことを検証する</summary>
+    [Theory(DisplayName = "MiniMap: 順→逆変換の往復一致")]
+    [InlineData(150, 400)]
+    [InlineData(0, 0)]
+    [InlineData(900, 500)]
+    public void MiniMapProjection_RoundTrips(double x, double y)
+    {
+        var projection = ViewportCalculator.CalculateMiniMapProjection(
+            new Rect(50, 200, 900, 400),
+            new Size(200, 140),
+            40
+        );
+
+        var content = new Point(x, y);
+        var roundTripped = projection.ToContent(projection.ToMiniMap(content));
+
+        roundTripped.X.Should().BeApproximately(content.X, 1e-6);
+        roundTripped.Y.Should().BeApproximately(content.Y, 1e-6);
+    }
+
+    /// <summary>巨大コンテンツでもスケールがクランプされず、そのまま縮小率が採用されることを検証する</summary>
+    [Fact(DisplayName = "MiniMap: 巨大コンテンツでもクランプしない")]
+    public void MiniMapProjection_HugeContent_NotClamped()
+    {
+        // 100000x100000・余白 0・枠 200x140 → 140/100000=0.0014（fit の下限 20% を大きく下回る）
+        var projection = ViewportCalculator.CalculateMiniMapProjection(
+            new Rect(0, 0, 100000, 100000),
+            new Size(200, 140),
+            0
+        );
+
+        projection.Scale.Should().BeApproximately(140.0 / 100000.0, 1e-12);
+        projection.Scale.Should().BeLessThan(ViewportCalculator.MinZoom);
+    }
+
+    /// <summary>極小コンテンツでもスケールが等倍超へ拡大され、クランプされないことを検証する</summary>
+    [Fact(DisplayName = "MiniMap: 極小コンテンツは等倍超へ拡大（クランプしない）")]
+    public void MiniMapProjection_TinyContent_NotClamped()
+    {
+        // 10x10・余白 0・枠 200x140 → 幅 200/10=20、高さ 140/10=14 → 14（100% を大きく超える）
+        var projection = ViewportCalculator.CalculateMiniMapProjection(
+            new Rect(0, 0, 10, 10),
+            new Size(200, 140),
+            0
+        );
+
+        projection.Scale.Should().BeApproximately(14.0, 1e-9);
+        projection.Scale.Should().BeGreaterThan(1.0);
+    }
+
+    /// <summary>空図・不正入力は等倍・原点の射影（恒等寄り）を返すことを検証する</summary>
+    [Fact(DisplayName = "MiniMap: 空図・不正入力は等倍・原点の射影")]
+    public void MiniMapProjection_EmptyOrInvalid_ReturnsIdentity()
+    {
+        var empty = ViewportCalculator.CalculateMiniMapProjection(
+            Rect.Empty,
+            new Size(200, 140),
+            40
+        );
+        empty.Scale.Should().Be(1.0);
+        empty.OffsetX.Should().Be(0);
+        empty.OffsetY.Should().Be(0);
+
+        var zeroSize = ViewportCalculator.CalculateMiniMapProjection(
+            new Rect(0, 0, 100, 100),
+            new Size(0, 0),
+            40
+        );
+        zeroSize.Scale.Should().Be(1.0);
+    }
+
+    /// <summary>矩形の順変換が左上・寸法ともにスケール投影されることを検証する</summary>
+    [Fact(DisplayName = "MiniMap: 矩形の順変換は左上・寸法ともにスケールする")]
+    public void MiniMapProjection_RectForward_ScalesPositionAndSize()
+    {
+        var projection = new MiniMapProjection(0.5, 10, 20);
+
+        var mapped = projection.ToMiniMap(new Rect(100, 200, 40, 60));
+
+        mapped.X.Should().Be(100 * 0.5 + 10);
+        mapped.Y.Should().Be(200 * 0.5 + 20);
+        mapped.Width.Should().Be(40 * 0.5);
+        mapped.Height.Should().Be(60 * 0.5);
     }
 }

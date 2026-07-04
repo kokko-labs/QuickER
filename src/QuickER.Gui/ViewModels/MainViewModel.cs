@@ -1280,6 +1280,9 @@ public partial class MainViewModel : ObservableObject
 
         // エンティティの増減により関連構成が変わるため、関連ハイライトを再計算する
         UpdateRelatedHighlights();
+
+        // エンティティの増減でミニマップの射影・描画データを作り直す
+        RecalculateMiniMap();
     }
 
     /// <summary>エンティティの位置・サイズ変更に追従してキャンバスサイズを更新する</summary>
@@ -1294,6 +1297,9 @@ public partial class MainViewModel : ObservableObject
         )
         {
             RefreshCanvasSize();
+
+            // エンティティの移動・サイズ変更（ドラッグ中含む）でミニマップの射影・描画データを作り直す
+            RecalculateMiniMap();
         }
     }
 
@@ -1324,5 +1330,8 @@ public partial class MainViewModel : ObservableObject
 
         // リレーションの増減により関連構成が変わるため、関連ハイライトを再計算する
         UpdateRelatedHighlights();
+
+        // リレーションの増減でミニマップの線データを作り直す
+        RecalculateMiniMap();
     }
 }

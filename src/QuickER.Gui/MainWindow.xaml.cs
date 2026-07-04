@@ -21,6 +21,9 @@ public partial class MainWindow : Window
     /// <summary>中央基準ズーム補正の直前に記録したズーム倍率（ボタン・キー由来のズーム用）</summary>
     private double _lastZoomLevel = 1.0;
 
+    /// <summary>ミニマップ上でドラッグ追従中かどうか（押下でジャンプ→そのまま連続追従）</summary>
+    private bool _isMiniMapDragging;
+
     /// <summary>DI から注入された ViewModel を DataContext に結び、起動処理を行う</summary>
     public MainWindow(MainViewModel viewModel)
     {
@@ -176,7 +179,7 @@ public partial class MainWindow : Window
     /// <remarks>新規エンティティを「いま見えている場所」へ配置するための入力（<see cref="MainViewModel.ViewportContentBounds"/>）</remarks>
     private void DiagramScrollViewer_ScrollChanged(object sender, ScrollChangedEventArgs e)
     {
-        // ZoomLevel は 10% 以上が保証されているためゼロ除算は起きない
+        // ZoomLevel は 20% 以上が保証されているためゼロ除算は起きない
         var zoom = _viewModel.ZoomLevel;
         _viewModel.ViewportContentBounds = new Rect(
             DiagramScrollViewer.HorizontalOffset / zoom,
@@ -228,5 +231,57 @@ public partial class MainWindow : Window
                 DiagramScrollViewer.ScrollToVerticalOffset(offset.Y);
             })
         );
+    }
+
+    /// <summary>ミニマップ押下: その地点を視点中心へジャンプし、以降のドラッグ追従を開始する（ズーム倍率は変えない）</summary>
+    private void MiniMap_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        _isMiniMapDragging = true;
+        MiniMapSurface.CaptureMouse();
+        PanFromMiniMap(e.GetPosition(MiniMapSurface));
+        e.Handled = true;
+    }
+
+    /// <summary>ミニマップドラッグ中: 押下地点の移動に追従して視点中心を連続的に動かす</summary>
+    private void MiniMap_MouseMove(object sender, MouseEventArgs e)
+    {
+        if (!_isMiniMapDragging)
+        {
+            return;
+        }
+
+        PanFromMiniMap(e.GetPosition(MiniMapSurface));
+    }
+
+    /// <summary>ミニマップ押下解除: ドラッグ追従を終了しマウスキャプチャを解放する</summary>
+    private void MiniMap_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (!_isMiniMapDragging)
+        {
+            return;
+        }
+
+        _isMiniMapDragging = false;
+        MiniMapSurface.ReleaseMouseCapture();
+        e.Handled = true;
+    }
+
+    /// <summary>ミニマップドラッグ中にマウスキャプチャを失った場合（ポップアップ表示等）に状態を後始末する</summary>
+    private void MiniMap_LostMouseCapture(object sender, MouseEventArgs e)
+    {
+        _isMiniMapDragging = false;
+    }
+
+    /// <summary>ミニマップ枠座標の点を逆写像し、現在の倍率を保ったままその地点を視点中央へ据える</summary>
+    private void PanFromMiniMap(Point miniMapPoint)
+    {
+        var viewport = new Size(
+            DiagramScrollViewer.ViewportWidth,
+            DiagramScrollViewer.ViewportHeight
+        );
+        var offset = _viewModel.CalculateMiniMapPan(miniMapPoint, viewport);
+
+        DiagramScrollViewer.ScrollToHorizontalOffset(offset.X);
+        DiagramScrollViewer.ScrollToVerticalOffset(offset.Y);
     }
 }
