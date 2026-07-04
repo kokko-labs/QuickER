@@ -5,6 +5,7 @@
   xmlns:vm="clr-namespace:QuickER.ViewModels"
   xmlns:models="clr-namespace:QuickER.Model;assembly=QuickER.Model"
   xmlns:beh="clr-namespace:QuickER.Behaviors"
+  xmlns:views="clr-namespace:QuickER.Views"
   xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
   xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
   mc:Ignorable="d"
@@ -1218,7 +1219,8 @@
                   </ItemsControl.ItemContainerStyle>
                   <ItemsControl.ItemTemplate>
                     <DataTemplate DataType="{x:Type vm:EntityViewModel}">
-                      <Border
+                      <!-- EntityCardBorder: UIA へは単一要素として露出（大きい図で常駐 UIA クライアントの走査が UI を固めるのを防ぐ） -->
+                      <views:EntityCardBorder
                         Width="{Binding Width}"
                         Background="White"
                         CornerRadius="6"
@@ -1459,7 +1461,7 @@
                             </ItemsControl.ItemTemplate>
                           </ItemsControl>
                         </StackPanel>
-                      </Border>
+                      </views:EntityCardBorder>
                     </DataTemplate>
                   </ItemsControl.ItemTemplate>
                 </ItemsControl>
