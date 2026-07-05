@@ -85,49 +85,8 @@ public sealed class GeneratedEfCoreSqliteRuntimeTests
     protected override string Param(string name) => $"@{name}";
 
     // ==================== SQLite の既知制約に合わせて調整したシナリオ ====================
-
-    /// <summary>
-    /// 2（SQLite 調整版）: VO の Contains・.Value 比較・decimal 比較・VO オーバーロードを検証する。
-    /// </summary>
-    /// <remarks>
-    /// <b>基底との差分</b>: 基底は <c>%</c> / <c>_</c> / <c>[</c> をリテラル一致させる LIKE エスケープを検証するが、
-    /// SQLite の <c>LIKE</c> は既定でエスケープ文字を持たず、生成ランタイム（<c>CSharpRuntime.scriban</c> 由来の
-    /// LIKE エスケープ挙動）に SQLite 分岐が無いため、既定（<c>\</c> エスケープ・<c>ESCAPE</c> 非明示）では
-    /// <c>ESCAPE</c> 句なしのバックスラッシュが機能せず <c>0%</c> 等のリテラル一致が成立しない。
-    /// これはテンプレート（変更範囲外）に SQLite 用 LIKE エスケープが未実装であることに起因する制約のため、
-    /// ワイルドカードのリテラルエスケープ検証（基底の (b)(c)(d) 相当）は本 SQLite 版では割愛し、
-    /// エスケープに依存しない Contains・.Value 比較・decimal 比較・VO オーバーロードのみ検証する。
-    /// </remarks>
-    [Fact(
-        DisplayName = "[Dialect/SQLite] 2: VO の Contains・.Value 比較・decimal 比較・VO オーバーロード（LIKE エスケープ検証は SQLite 制約により割愛）"
-    )]
-    public override async Task Where_ValueObjectPredicates_TranslateAcrossDialects()
-    {
-        await ResetAndCreateSchemaAsync();
-
-        var repo = CreateCustomerRepository();
-        await repo.InsertAsync(NewCustomer(1, "Alice", balance: 100m), Ct);
-        await repo.InsertAsync(NewCustomer(2, "Bob", balance: 200m), Ct);
-        await repo.InsertAsync(NewCustomer(3, "Alicia", balance: 300m), Ct);
-
-        // (a) 文字列 VO の Contains → LIKE '%...%'（ワイルドカードを含まないパターンは方言横断で機能する）
-        var likeAli = await repo.Query().Where(c => c.Name.Contains("Ali")).ToListAsync(Ct);
-        likeAli.Select(c => c.CustomerId.Value).Should().BeEquivalentTo([1, 3]);
-
-        // (e) VO の .Value を開いた等値比較（string VO）
-        var byValue = await repo.Query().Where(c => c.Name.Value == "Bob").ToListAsync(Ct);
-        byValue.Select(c => c.CustomerId.Value).Should().BeEquivalentTo([2]);
-
-        // (f) VO の .Value を開いた数値比較（decimal VO・少量データではクライアント評価で成立する）
-        var byBalance = await repo.Query().Where(c => c.Balance!.Value >= 150m).ToListAsync(Ct);
-        byBalance.Select(c => c.CustomerId.Value).Should().BeEquivalentTo([2, 3]);
-
-        // (g) VO 引数のオーバーロード（TSelf）: 素値へ開いて部分一致
-        var byVo = await repo.Query()
-            .Where(c => c.Name.Contains(NameValue.Create("lic")))
-            .ToListAsync(Ct);
-        byVo.Select(c => c.CustomerId.Value).Should().BeEquivalentTo([1, 3]);
-    }
+    // テスト 2（% _ エスケープ含む式木クエリ）は、生成ランタイムの LikeEscapeBehavior に SQLite 分岐
+    // （ESCAPE '\' の明示）が実装されたため基底のまま実行する（override なし）。
 
     /// <summary>
     /// 6（SQLite 調整版）: 生 SQL 4 系統を検証する。

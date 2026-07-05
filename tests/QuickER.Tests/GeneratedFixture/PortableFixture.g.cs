@@ -4535,8 +4535,8 @@ internal sealed class ValueObjectValueMemberTranslator(
 ///   <item><see cref="EscapeChar"/>: LIKE のエスケープ文字。既定は <c>\</c>。ただし MySQL は文字列リテラルで
 ///   バックスラッシュがクォート打ち消しとして誤解釈されるため <c>!</c> を用いる（リテラル・REPLACE・ESCAPE 句すべてで統一）。</item>
 ///   <item><see cref="EscapeBracket"/>: <c>[</c> をエスケープするか。<c>[</c> が文字クラス開始となる SQL Server のみ true。</item>
-///   <item><see cref="EmitEscapeClause"/>: <c>ESCAPE</c> を明示するか。既定エスケープ文字を持たない SQL Server / Oracle と、
-///   非既定文字を使う MySQL は true。既定が <c>\</c> の PostgreSQL は false（明示不要）。</item>
+///   <item><see cref="EmitEscapeClause"/>: <c>ESCAPE</c> を明示するか。既定エスケープ文字を持たない
+///   SQL Server / Oracle / SQLite と、非既定文字を使う MySQL は true。既定が <c>\</c> の PostgreSQL は false（明示不要）。</item>
 /// </list>
 /// </remarks>
 internal readonly record struct LikeEscapeBehavior(
@@ -4566,6 +4566,12 @@ internal readonly record struct LikeEscapeBehavior(
         if (name.Contains("MySql", StringComparison.OrdinalIgnoreCase))
         {
             return new LikeEscapeBehavior("!", EscapeBracket: false, EmitEscapeClause: true);
+        }
+
+        // SQLite: LIKE は既定のエスケープ文字を持たないため ESCAPE を明示する。[ はワイルドカードでない。
+        if (name.Contains("Sqlite", StringComparison.OrdinalIgnoreCase))
+        {
+            return new LikeEscapeBehavior("\\", EscapeBracket: false, EmitEscapeClause: true);
         }
 
         // PostgreSQL 等: [ はワイルドカードでない。既定エスケープ文字が \ のため ESCAPE は明示しない。

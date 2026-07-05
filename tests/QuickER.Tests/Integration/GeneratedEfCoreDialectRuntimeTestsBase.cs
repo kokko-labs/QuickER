@@ -111,7 +111,7 @@ public abstract class GeneratedEfCoreDialectRuntimeTestsBase
     [Fact(
         DisplayName = "[Dialect] 2: 式木クエリ（VO の Contains・.Value 比較・% _ エスケープ）が正しい行を返す"
     )]
-    public virtual async Task Where_ValueObjectPredicates_TranslateAcrossDialects()
+    public async Task Where_ValueObjectPredicates_TranslateAcrossDialects()
     {
         await ResetAndCreateSchemaAsync();
 
