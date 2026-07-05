@@ -563,9 +563,24 @@ public partial class MainViewModel
 
     // ---------------- DB 書き込み (スキーマ同期) ----------------
 
+    /// <summary>DB 同期に未対応な方言（SQLite）のとき同期ボタンへ表示する理由メッセージ</summary>
+    private const string SyncUnsupportedTooltip =
+        "SQLite プロバイダは DB 同期に未対応です（将来対応予定）";
+
+    /// <summary>DB 同期ボタンのツールチップ（未対応方言のときは理由、対応方言のときは通常の説明）</summary>
+    /// <remarks>方言切替で <see cref="RaiseProviderChanged"/> から変更通知される</remarks>
+    public string SyncToDatabaseTooltip =>
+        CanSyncToDatabase
+            ? "現在のダイアグラムを既存 DB に書き戻し (差分 ALTER 実行)"
+            : SyncUnsupportedTooltip;
+
+    /// <summary>DB 同期を実行できるか（SQLite は同期未対応のため実行不可）</summary>
+    private bool CanSyncToDatabase =>
+        CurrentProvider.Name != QuickER.Sqlite.SqliteProvider.ProviderName;
+
     /// <summary>データベースへ接続し、現在のダイアグラムとの差分同期ダイアログを開く</summary>
     /// <remarks>同期先の方言は図の TargetDbms に固定する（接続ダイアログでは DBMS を選択できない）</remarks>
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanSyncToDatabase))]
     private void SyncToDatabase()
     {
         var picked = _appDialogs.ShowDbConnectionDialog(

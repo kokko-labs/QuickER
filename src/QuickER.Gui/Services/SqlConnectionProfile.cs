@@ -41,6 +41,9 @@ public class SqlConnectionProfile
     /// <summary>サービス名（Oracle 固有・将来使用）</summary>
     public string ServiceName { get; set; } = string.Empty;
 
+    /// <summary>データベースファイルのパス（SQLite 固有。旧データでは欠落＝空文字）</summary>
+    public string FilePath { get; set; } = string.Empty;
+
     /// <summary>接続タイムアウト（秒）</summary>
     public int ConnectTimeoutSeconds { get; set; } = 15;
 
@@ -59,6 +62,7 @@ public class SqlConnectionProfile
             Password = password,
             TrustServerCertificate = TrustServerCertificate,
             ServiceName = ServiceName,
+            FilePath = FilePath,
             ConnectTimeoutSeconds = ConnectTimeoutSeconds,
         };
 }

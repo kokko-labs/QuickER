@@ -97,7 +97,12 @@ public sealed class WpfAppDialogService : IAppDialogService
         string? title = null
     )
     {
-        var viewModel = new DbConnectionDialogViewModel(_providers, mode, fixedProvider);
+        var viewModel = new DbConnectionDialogViewModel(
+            _providers,
+            mode,
+            fixedProvider,
+            fileDialogService: _files
+        );
         var dialog = new Views.DbConnectionDialog(viewModel)
         {
             Owner = Application.Current?.MainWindow,

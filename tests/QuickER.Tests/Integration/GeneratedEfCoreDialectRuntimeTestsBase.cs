@@ -111,7 +111,7 @@ public abstract class GeneratedEfCoreDialectRuntimeTestsBase
     [Fact(
         DisplayName = "[Dialect] 2: 式木クエリ（VO の Contains・.Value 比較・% _ エスケープ）が正しい行を返す"
     )]
-    public async Task Where_ValueObjectPredicates_TranslateAcrossDialects()
+    public virtual async Task Where_ValueObjectPredicates_TranslateAcrossDialects()
     {
         await ResetAndCreateSchemaAsync();
 
@@ -300,7 +300,7 @@ public abstract class GeneratedEfCoreDialectRuntimeTestsBase
     [Fact(
         DisplayName = "[Dialect] 6: 生 SQL（厳密全列・寛容射影・単一値・影響行数・匿名パラメータ）が機能する"
     )]
-    public async Task RawSql_AllModes()
+    public virtual async Task RawSql_AllModes()
     {
         await ResetAndCreateSchemaAsync();
 

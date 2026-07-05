@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.9" />
+    <!-- Microsoft.Data.Sqlite 10.0.9 が推移的に持ち込む SQLitePCLRaw 2.1.11 には既知の脆弱性
+         (GHSA-2m69-gcr7-jv3q) があるため、修正済みの 3.0.3 を明示参照して上書きする -->
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\QuickER.Model\QuickER.Model.csproj" />
+    <ProjectReference Include="..\QuickER.Generator\QuickER.Generator.csproj" />
+    <ProjectReference Include="..\QuickER.Provider\QuickER.Provider.csproj" />
+  </ItemGroup>
+</Project>

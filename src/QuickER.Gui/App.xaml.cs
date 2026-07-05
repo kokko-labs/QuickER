@@ -5,6 +5,7 @@ using QuickER.Oracle;
 using QuickER.PostgreSql;
 using QuickER.Provider;
 using QuickER.Services;
+using QuickER.Sqlite;
 using QuickER.SqlServer;
 using QuickER.ViewModels;
 
@@ -38,6 +39,7 @@ namespace QuickER
             services.AddSingleton<IDatabaseProvider, PostgreSqlProvider>();
             services.AddSingleton<IDatabaseProvider, MySqlProvider>();
             services.AddSingleton<IDatabaseProvider, OracleProvider>();
+            services.AddSingleton<IDatabaseProvider, SqliteProvider>();
             services.AddSingleton(serviceProvider => new DatabaseProviderRegistry(
                 serviceProvider.GetServices<IDatabaseProvider>()
             ));

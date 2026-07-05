@@ -1,10 +1,12 @@
 using System.Collections.ObjectModel;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using QuickER.Provider;
 using QuickER.Services;
+using QuickER.Sqlite;
 
 namespace QuickER.ViewModels;
 
@@ -30,6 +32,9 @@ public partial class DbConnectionDialogViewModel : ObservableObject
 
     /// <summary>確認ダイアログの表示先（テストではスタブへ差し替える）</summary>
     private readonly IDialogService _dialogs;
+
+    /// <summary>ファイル選択ダイアログの表示先（SQLite のファイルパス参照に用いる。テストではスタブへ差し替える）</summary>
+    private readonly IFileDialogService _files;
 
     /// <summary>DBMS 選択肢（登録済み全プロバイダ）</summary>
     public ObservableCollection<IDatabaseProvider> Providers { get; } = new();
@@ -78,6 +83,10 @@ public partial class DbConnectionDialogViewModel : ObservableObject
     [ObservableProperty]
     private string _serviceName = string.Empty;
 
+    /// <summary>データベースファイルのパス（SQLite 固有。サーバー系フィールドの代わりに用いる）</summary>
+    [ObservableProperty]
+    private string _filePath = string.Empty;
+
     /// <summary>パスワードも DPAPI で暗号化保存するかどうか</summary>
     [ObservableProperty]
     private bool _savePassword;
@@ -125,11 +134,12 @@ public partial class DbConnectionDialogViewModel : ObservableObject
     public bool ShowAuthMode =>
         SelectedProvider?.Name == QuickER.SqlServer.SqlServerProvider.ProviderName;
 
-    /// <summary>ユーザー名入力欄を表示するか（Windows 認証以外・非 SQL Server は常に表示）</summary>
-    public bool ShowUserId => !ShowAuthMode || AuthMode != DbAuthMode.Windows;
+    /// <summary>ユーザー名入力欄を表示するか（Windows 認証以外・非 SQL Server は常に表示。SQLite では非表示）</summary>
+    public bool ShowUserId => ShowServerFields && (!ShowAuthMode || AuthMode != DbAuthMode.Windows);
 
-    /// <summary>パスワード入力欄を表示するか（ユーザー名/パスワード認証時。非 SQL Server は常に表示）</summary>
-    public bool ShowPassword => !ShowAuthMode || AuthMode == DbAuthMode.UsernamePassword;
+    /// <summary>パスワード入力欄を表示するか（ユーザー名/パスワード認証時。非 SQL Server は常に表示。SQLite では非表示）</summary>
+    public bool ShowPassword =>
+        ShowServerFields && (!ShowAuthMode || AuthMode == DbAuthMode.UsernamePassword);
 
     /// <summary>サーバー証明書信頼チェックを表示するか（SQL Server 固有）</summary>
     public bool ShowTrustServerCertificate => ShowAuthMode;
@@ -137,23 +147,32 @@ public partial class DbConnectionDialogViewModel : ObservableObject
     /// <summary>サービス名入力欄を表示するか（Oracle 固有・現状は常に非表示）</summary>
     public bool ShowServiceName => SelectedProvider?.Name == "oracle";
 
+    /// <summary>ファイルパス入力欄を表示するか（SQLite 固有。ファイル型 DB の接続に用いる）</summary>
+    public bool ShowFilePath => SelectedProvider?.Name == SqliteProvider.ProviderName;
+
+    /// <summary>サーバー系フィールド（ホスト・ポート・DB 名・認証・証明書）を表示するか（SQLite では非表示）</summary>
+    public bool ShowServerFields => !ShowFilePath;
+
     /// <summary>依存を注入して ViewModel を生成し、前回接続を復元する</summary>
     /// <param name="providers">プロバイダレジストリ</param>
     /// <param name="mode">ダイアログの用途</param>
     /// <param name="fixedProvider">同期モードで固定する方言（Import では初期選択に用いる）</param>
     /// <param name="store">プロファイル保存ストア（省略時は既定パスを使用）</param>
     /// <param name="dialogService">確認ダイアログの表示先（省略時は MessageBox、テストではスタブを注入）</param>
+    /// <param name="fileDialogService">ファイル選択ダイアログの表示先（SQLite の参照ボタン用。省略時は WPF 実装、テストではスタブを注入）</param>
     public DbConnectionDialogViewModel(
         DatabaseProviderRegistry providers,
         DbConnectionDialogMode mode = DbConnectionDialogMode.Import,
         IDatabaseProvider? fixedProvider = null,
         SqlConnectionProfileStore? store = null,
-        IDialogService? dialogService = null
+        IDialogService? dialogService = null,
+        IFileDialogService? fileDialogService = null
     )
     {
         _providers = providers;
         _store = store ?? new SqlConnectionProfileStore();
         _dialogs = dialogService ?? new MessageBoxDialogService();
+        _files = fileDialogService ?? new WpfFileDialogService();
         Mode = mode;
 
         foreach (var provider in _providers.All)
@@ -188,6 +207,8 @@ public partial class DbConnectionDialogViewModel : ObservableObject
         OnPropertyChanged(nameof(ShowPassword));
         OnPropertyChanged(nameof(ShowTrustServerCertificate));
         OnPropertyChanged(nameof(ShowServiceName));
+        OnPropertyChanged(nameof(ShowFilePath));
+        OnPropertyChanged(nameof(ShowServerFields));
     }
 
     partial void OnModeChanged(DbConnectionDialogMode value)
@@ -235,6 +256,7 @@ public partial class DbConnectionDialogViewModel : ObservableObject
         UserId = profile.UserId;
         TrustServerCertificate = profile.TrustServerCertificate;
         ServiceName = profile.ServiceName;
+        FilePath = profile.FilePath;
         ConnectTimeoutSeconds = profile.ConnectTimeoutSeconds;
         SavePassword = profile.SavePassword;
         Password = password;
@@ -259,6 +281,7 @@ public partial class DbConnectionDialogViewModel : ObservableObject
             UserId = UserId,
             TrustServerCertificate = TrustServerCertificate,
             ServiceName = ServiceName,
+            FilePath = FilePath,
             ConnectTimeoutSeconds = ConnectTimeoutSeconds,
             SavePassword = SavePassword,
         };
@@ -318,6 +341,7 @@ public partial class DbConnectionDialogViewModel : ObservableObject
             Password = Password,
             TrustServerCertificate = TrustServerCertificate,
             ServiceName = ServiceName,
+            FilePath = FilePath,
             ConnectTimeoutSeconds = ConnectTimeoutSeconds,
         };
 
@@ -402,11 +426,43 @@ public partial class DbConnectionDialogViewModel : ObservableObject
         StatusMessage = $"プロファイル '{name}' を削除しました。";
     }
 
+    /// <summary>ファイル選択ダイアログで SQLite のデータベースファイルを選ぶ（取込専用のため既存ファイルのみ）</summary>
+    [RelayCommand]
+    private void BrowseFile()
+    {
+        var picked = _files.PickOpenFile(
+            "SQLite データベース (*.db;*.sqlite;*.sqlite3)|*.db;*.sqlite;*.sqlite3|すべてのファイル (*.*)|*.*"
+        );
+
+        if (picked is null)
+        {
+            return;
+        }
+
+        FilePath = picked.Path;
+    }
+
     /// <summary>入力を検証して確定し、前回接続として保存したうえでダイアログを閉じる</summary>
     [RelayCommand]
     private void Ok()
     {
-        if (string.IsNullOrWhiteSpace(Host) || string.IsNullOrWhiteSpace(Database))
+        // SQLite はファイル型 DB のためファイルパスのみを検証する（ホスト・DB 名検証はスキップ）
+        if (ShowFilePath)
+        {
+            if (string.IsNullOrWhiteSpace(FilePath))
+            {
+                StatusMessage = "データベースファイルのパスを入力してください。";
+                return;
+            }
+
+            // 取込専用のため新規作成は許可せず、存在しないファイルは確定を拒否する
+            if (!File.Exists(FilePath))
+            {
+                StatusMessage = "指定したデータベースファイルが見つかりません。";
+                return;
+            }
+        }
+        else if (string.IsNullOrWhiteSpace(Host) || string.IsNullOrWhiteSpace(Database))
         {
             StatusMessage = "ホストとデータベース名を入力してください。";
             return;

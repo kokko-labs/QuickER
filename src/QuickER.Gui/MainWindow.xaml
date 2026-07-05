@@ -692,7 +692,8 @@
         <Button
           Style="{StaticResource ToolBarLabelButton}"
           Command="{Binding SyncToDatabaseCommand}"
-          ToolTip="現在のダイアグラムを既存 DB に書き戻し (差分 ALTER 実行)"
+          ToolTip="{Binding SyncToDatabaseTooltip}"
+          ToolTipService.ShowOnDisabled="True"
         >
           <StackPanel>
             <TextBlock Style="{StaticResource ToolBarIcon}" Text="⇪" />

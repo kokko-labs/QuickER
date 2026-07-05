@@ -1237,6 +1237,10 @@ public partial class MainViewModel : ObservableObject
         OnPropertyChanged(nameof(CurrentProvider));
         OnPropertyChanged(nameof(SelectedProvider));
         OnPropertyChanged(nameof(AvailableDataTypes));
+
+        // 方言により DB 同期の可否が変わるため、コマンドの実行可否とツールチップを更新する
+        SyncToDatabaseCommand.NotifyCanExecuteChanged();
+        OnPropertyChanged(nameof(SyncToDatabaseTooltip));
     }
 
     /// <summary>

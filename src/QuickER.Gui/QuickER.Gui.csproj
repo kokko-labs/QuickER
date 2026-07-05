@@ -26,6 +26,7 @@
     <ProjectReference Include="..\QuickER.Oracle\QuickER.Oracle.csproj" />
     <ProjectReference Include="..\QuickER.PostgreSql\QuickER.PostgreSql.csproj" />
     <ProjectReference Include="..\QuickER.Provider\QuickER.Provider.csproj" />
+    <ProjectReference Include="..\QuickER.Sqlite\QuickER.Sqlite.csproj" />
     <ProjectReference Include="..\QuickER.SqlServer\QuickER.SqlServer.csproj" />
   </ItemGroup>
 

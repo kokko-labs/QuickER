@@ -19,6 +19,7 @@
     <Project Path="src/QuickER.Oracle/QuickER.Oracle.csproj" />
     <Project Path="src/QuickER.PostgreSql/QuickER.PostgreSql.csproj" />
     <Project Path="src/QuickER.Provider/QuickER.Provider.csproj" />
+    <Project Path="src/QuickER.Sqlite/QuickER.Sqlite.csproj" />
     <Project Path="src/QuickER.SqlServer/QuickER.SqlServer.csproj" />
   </Folder>
   <Folder Name="/tests/">

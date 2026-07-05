@@ -40,6 +40,7 @@
       <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
     </Grid.RowDefinitions>
 
     <!-- 保存済みプロファイル -->
@@ -100,39 +101,87 @@
       IsEnabled="{Binding CanSelectDbms}"
     />
 
-    <TextBlock Grid.Row="4" Grid.Column="0" Text="ホスト" VerticalAlignment="Center" Margin="0,4" />
-    <TextBox
+    <!-- SQLite: データベースファイルのパス（参照ボタン付き。SQLite 選択時のみ表示） -->
+    <TextBlock
+      Grid.Row="4"
+      Grid.Column="0"
+      Text="ファイルパス"
+      VerticalAlignment="Center"
+      Margin="0,4"
+      Visibility="{Binding ShowFilePath, Converter={StaticResource BoolToVisibilityConverter}}"
+    />
+    <Grid
       Grid.Row="4"
       Grid.Column="1"
       Margin="0,4"
-      Text="{Binding Host, UpdateSourceTrigger=PropertyChanged}"
-    />
+      Visibility="{Binding ShowFilePath, Converter={StaticResource BoolToVisibilityConverter}}"
+    >
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="*" />
+        <ColumnDefinition Width="Auto" />
+      </Grid.ColumnDefinitions>
+      <TextBox Text="{Binding FilePath, UpdateSourceTrigger=PropertyChanged}" />
+      <Button
+        Grid.Column="1"
+        Margin="6,0,0,0"
+        Width="70"
+        Content="参照..."
+        Command="{Binding BrowseFileCommand}"
+        ToolTip="既存の SQLite データベースファイルを選択"
+      />
+    </Grid>
 
-    <TextBlock Grid.Row="5" Grid.Column="0" Text="ポート" VerticalAlignment="Center" Margin="0,4" />
+    <TextBlock
+      Grid.Row="5"
+      Grid.Column="0"
+      Text="ホスト"
+      VerticalAlignment="Center"
+      Margin="0,4"
+      Visibility="{Binding ShowServerFields, Converter={StaticResource BoolToVisibilityConverter}}"
+    />
     <TextBox
       Grid.Row="5"
       Grid.Column="1"
       Margin="0,4"
-      Text="{Binding Port, UpdateSourceTrigger=PropertyChanged}"
-      ToolTip="空欄の場合は方言の既定ポートを使用します"
+      Text="{Binding Host, UpdateSourceTrigger=PropertyChanged}"
+      Visibility="{Binding ShowServerFields, Converter={StaticResource BoolToVisibilityConverter}}"
     />
 
     <TextBlock
       Grid.Row="6"
       Grid.Column="0"
-      Text="データベース"
+      Text="ポート"
       VerticalAlignment="Center"
       Margin="0,4"
+      Visibility="{Binding ShowServerFields, Converter={StaticResource BoolToVisibilityConverter}}"
     />
     <TextBox
       Grid.Row="6"
       Grid.Column="1"
       Margin="0,4"
-      Text="{Binding Database, UpdateSourceTrigger=PropertyChanged}"
+      Text="{Binding Port, UpdateSourceTrigger=PropertyChanged}"
+      ToolTip="空欄の場合は方言の既定ポートを使用します"
+      Visibility="{Binding ShowServerFields, Converter={StaticResource BoolToVisibilityConverter}}"
     />
 
     <TextBlock
       Grid.Row="7"
+      Grid.Column="0"
+      Text="データベース"
+      VerticalAlignment="Center"
+      Margin="0,4"
+      Visibility="{Binding ShowServerFields, Converter={StaticResource BoolToVisibilityConverter}}"
+    />
+    <TextBox
+      Grid.Row="7"
+      Grid.Column="1"
+      Margin="0,4"
+      Text="{Binding Database, UpdateSourceTrigger=PropertyChanged}"
+      Visibility="{Binding ShowServerFields, Converter={StaticResource BoolToVisibilityConverter}}"
+    />
+
+    <TextBlock
+      Grid.Row="8"
       Grid.Column="0"
       Text="認証方式"
       VerticalAlignment="Center"
@@ -140,7 +189,7 @@
       Visibility="{Binding ShowAuthMode, Converter={StaticResource BoolToVisibilityConverter}}"
     />
     <ComboBox
-      Grid.Row="7"
+      Grid.Row="8"
       Grid.Column="1"
       Margin="0,4"
       ItemsSource="{Binding Source={StaticResource AuthModes}}"
@@ -149,7 +198,7 @@
     />
 
     <TextBlock
-      Grid.Row="8"
+      Grid.Row="9"
       Grid.Column="0"
       Text="ユーザー名"
       VerticalAlignment="Center"
@@ -157,7 +206,7 @@
       Visibility="{Binding ShowUserId, Converter={StaticResource BoolToVisibilityConverter}}"
     />
     <TextBox
-      Grid.Row="8"
+      Grid.Row="9"
       Grid.Column="1"
       Margin="0,4"
       Text="{Binding UserId, UpdateSourceTrigger=PropertyChanged}"
@@ -165,7 +214,7 @@
     />
 
     <TextBlock
-      Grid.Row="9"
+      Grid.Row="10"
       Grid.Column="0"
       Text="パスワード"
       VerticalAlignment="Center"
@@ -173,7 +222,7 @@
       Visibility="{Binding ShowPassword, Converter={StaticResource BoolToVisibilityConverter}}"
     />
     <Grid
-      Grid.Row="9"
+      Grid.Row="10"
       Grid.Column="1"
       Margin="0,4"
       Visibility="{Binding ShowPassword, Converter={StaticResource BoolToVisibilityConverter}}"
@@ -197,7 +246,7 @@
     </Grid>
 
     <CheckBox
-      Grid.Row="10"
+      Grid.Row="11"
       Grid.Column="1"
       Margin="0,8"
       IsChecked="{Binding TrustServerCertificate}"
@@ -206,7 +255,7 @@
     />
 
     <TextBlock
-      Grid.Row="11"
+      Grid.Row="12"
       Grid.ColumnSpan="2"
       Margin="0,6"
       TextWrapping="Wrap"
@@ -215,7 +264,7 @@
     />
 
     <StackPanel
-      Grid.Row="12"
+      Grid.Row="13"
       Grid.ColumnSpan="2"
       Orientation="Horizontal"
       HorizontalAlignment="Right"

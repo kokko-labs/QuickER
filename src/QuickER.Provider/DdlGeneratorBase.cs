@@ -19,7 +19,11 @@ public abstract class DdlGeneratorBase : IDdlGenerator
     /// <summary>ER 図定義から DDL 文字列を生成する</summary>
     /// <param name="diagram">対象の ER 図定義</param>
     /// <returns>対象方言の DDL スクリプト</returns>
-    public string Build(ErDiagram diagram)
+    /// <remarks>
+    /// 既定は「全テーブルを CREATE → FK を後段の ALTER TABLE で張る」共通経路。
+    /// ALTER TABLE ADD CONSTRAINT を使えない方言（SQLite 等）は、インライン制約で組み立てるため本メソッドを上書きする
+    /// </remarks>
+    public virtual string Build(ErDiagram diagram)
     {
         var sb = new StringBuilder();
         sb.AppendLine("-- QuickER によって自動生成された DDL");

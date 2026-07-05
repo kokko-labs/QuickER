@@ -8,6 +8,7 @@ using QuickER.MySql;
 using QuickER.Oracle;
 using QuickER.PostgreSql;
 using QuickER.Provider;
+using QuickER.Sqlite;
 using QuickER.SqlServer;
 
 namespace QuickER.Cli;
@@ -29,6 +30,7 @@ public static class CliApp
         new PostgreSqlProvider(),
         new MySqlProvider(),
         new OracleProvider(),
+        new SqliteProvider(),
     ]);
 
     /// <summary>引数を解析してコマンドを実行する</summary>

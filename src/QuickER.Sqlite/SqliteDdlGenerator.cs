@@ -1,0 +1,302 @@
+using System.Linq;
+using System.Text;
+using QuickER.Model;
+using QuickER.Provider;
+
+namespace QuickER.Sqlite;
+
+/// <summary>
+/// ER 図から SQLite 向けの DDL（インライン制約付き <c>CREATE TABLE</c>）を生成する
+/// </summary>
+/// <remarks>
+/// <para>
+/// SQLite は <c>ALTER TABLE ... ADD CONSTRAINT</c> をサポートしないため、他方言（<see cref="DdlGeneratorBase"/> 派生）が
+/// FK を後段の <c>ALTER TABLE</c> で張るのに対し、本ジェネレータは PRIMARY KEY / FOREIGN KEY / UNIQUE を
+/// すべて <c>CREATE TABLE</c> 内のインライン制約として出力する。そのため基底の <see cref="DdlGeneratorBase.Build"/> は
+/// 使わず、独自に組み立てる。ヘッダコメントは他方言と揃えるため基底と同一の文言を出力する。
+/// </para>
+/// <list type="bullet">
+///   <item>識別子は <see cref="SqliteIdentifier"/> で二重引用符クォートする（<c>"</c> は <c>""</c> にエスケープ）</item>
+///   <item>自動採番（<c>AUTOINCREMENT</c>）は出力しない。モデルに自動採番の概念がなく他方言も IDENTITY 等を
+///     出力しない（アプリ側採番前提）ため。宣言型を verbatim に維持し、往復無損失を守る</item>
+///   <item>PK は単一・複合とも列定義とは分離し、末尾に <c>PRIMARY KEY (...)</c> 制約としてまとめる</item>
+///   <item>SQLite にはコメント構文（拡張プロパティ）が無いため、テーブル・カラムの説明は <c>--</c> の SQL コメントとして出力する</item>
+///   <item>多対多はジャンクションテーブルが必要なためコメント行のみ出力する</item>
+/// </list>
+/// </remarks>
+public sealed partial class SqliteDdlGenerator : DdlGeneratorBase
+{
+    // ---- 以下の抽象メンバは基底の共通経路向け。本クラスは Build を上書きするため直接は使わないが、
+    //      契約充足のため他方言と同じ SQLite クォート方式を提供する ----
+
+    /// <inheritdoc />
+    protected override string QuoteQualifiedName(string name) => SqliteIdentifier.Quote(name);
+
+    /// <inheritdoc />
+    protected override string QuoteSimpleName(string name) => SqliteIdentifier.QuoteSimple(name);
+
+    /// <inheritdoc />
+    protected override string SafeName(string name) => SqliteIdentifier.SafeName(name);
+
+    /// <inheritdoc />
+    protected override string QuoteConstraintName(string constraintName) =>
+        $"\"{SqliteIdentifier.Escape(constraintName)}\"";
+
+    /// <summary>ER 図定義から SQLite の DDL 文字列を生成する（すべての制約をインラインで出力する）</summary>
+    /// <param name="diagram">対象の ER 図定義</param>
+    /// <returns>SQLite の DDL スクリプト</returns>
+    public override string Build(ErDiagram diagram)
+    {
+        var sb = new StringBuilder();
+        // ヘッダは他方言と揃える（DdlGeneratorBase と同一文言）
+        sb.AppendLine("-- QuickER によって自動生成された DDL");
+        sb.AppendLine($"-- 生成日時: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+        sb.AppendLine();
+
+        var entitiesById = diagram.Entities.ToDictionary(entity => entity.Id);
+
+        // テーブルごとに、そのテーブルを子（FK 保有側）とするリレーションを引けるよう索引化する。
+        // SQLite は FK を CREATE TABLE 内へ書くため、テーブル生成時点で FK 情報が必要になる。
+        var foreignKeysByChild = BuildForeignKeyIndex(diagram, entitiesById);
+
+        foreach (var entity in diagram.Entities)
+        {
+            AppendCreateTable(sb, entity, foreignKeysByChild);
+            sb.AppendLine();
+        }
+
+        // 多対多はジャンクションテーブルが必要なのでコメントのみ出力する（他方言と同挙動）
+        foreach (var rel in diagram.Relationships)
+        {
+            if (rel.Type != RelationshipType.ManyToMany)
+            {
+                continue;
+            }
+
+            if (
+                entitiesById.TryGetValue(rel.SourceEntityId, out var pkEntity)
+                && entitiesById.TryGetValue(rel.TargetEntityId, out var fkEntity)
+            )
+            {
+                sb.AppendLine(
+                    $"-- 多対多 ({pkEntity.TableName} ⇄ {fkEntity.TableName}): ジャンクションテーブルを別途定義してください。"
+                );
+            }
+        }
+
+        return sb.ToString();
+    }
+
+    /// <summary>1 テーブル分の <c>CREATE TABLE</c>（インライン PK / FK / 説明コメント）を出力する</summary>
+    private static void AppendCreateTable(
+        StringBuilder sb,
+        Entity entity,
+        IReadOnlyDictionary<Guid, List<ResolvedForeignKey>> foreignKeysByChild
+    )
+    {
+        var pks = entity.Columns.Where(c => c.IsPrimaryKey).ToList();
+        var fks = foreignKeysByChild.TryGetValue(entity.Id, out var list)
+            ? list
+            : new List<ResolvedForeignKey>();
+
+        // SQLite にはコメント構文が無いため、テーブルの説明は -- コメントで前置する
+        if (!string.IsNullOrWhiteSpace(entity.Description))
+        {
+            sb.AppendLine($"-- {entity.TableName}: {entity.Description}");
+        }
+
+        sb.AppendLine($"CREATE TABLE {SqliteIdentifier.Quote(entity.TableName)} (");
+
+        // 末尾に別立てで出す制約行（PK・全 FK）を収集する
+        var trailingConstraints = new List<string>();
+
+        if (pks.Count > 0)
+        {
+            var pkCols = string.Join(", ", pks.Select(p => SqliteIdentifier.QuoteSimple(p.Name)));
+            trailingConstraints.Add(
+                $"    CONSTRAINT \"PK_{SqliteIdentifier.SafeName(entity.TableName)}\" PRIMARY KEY ({pkCols})"
+            );
+        }
+
+        foreach (var fk in fks)
+        {
+            trailingConstraints.Add(BuildForeignKeyConstraint(fk));
+        }
+
+        // 列定義を出力する。後続の列行または末尾制約行が続く場合はカンマで区切る
+        for (var i = 0; i < entity.Columns.Count; i++)
+        {
+            var col = entity.Columns[i];
+            var line = BuildColumnDefinition(col);
+
+            var hasMoreColumns = i < entity.Columns.Count - 1;
+
+            if (hasMoreColumns || trailingConstraints.Count > 0)
+            {
+                line += ",";
+            }
+
+            sb.AppendLine(line);
+
+            // カラムの説明は -- コメントで各列行の直後に添える
+            if (!string.IsNullOrWhiteSpace(col.Description))
+            {
+                sb.AppendLine($"    -- {col.Name}: {col.Description}");
+            }
+        }
+
+        for (var i = 0; i < trailingConstraints.Count; i++)
+        {
+            var isLast = i == trailingConstraints.Count - 1;
+            sb.AppendLine(trailingConstraints[i] + (isLast ? string.Empty : ","));
+        }
+
+        sb.AppendLine(");");
+    }
+
+    /// <summary>1 列分の列定義を組み立てる（型・NULL 許容。宣言型は verbatim に維持する）</summary>
+    private static string BuildColumnDefinition(Column col)
+    {
+        var nameAndType =
+            $"    {SqliteIdentifier.QuoteSimple(col.Name)} {FormatDeclaredType(col.DataType)}";
+
+        // PK 列は IsNullable の設定値に関わらず NOT NULL を強制する
+        var nullClause = col.IsPrimaryKey || !col.IsNullable ? "NOT NULL" : "NULL";
+        return $"{nameAndType} {nullClause}";
+    }
+
+    /// <summary>宣言型を SQLite の CREATE TABLE で受理される形へ整形する（verbatim 往復を保ちつつ構文エラーを避ける）</summary>
+    /// <remarks>
+    /// SQLite の型名文法は括弧内引数を「符号付き数値（1 個または 2 個）」に限定するため、
+    /// <c>NVARCHAR(MAX)</c> / <c>VARBINARY(MAX)</c> のような非数値引数はそのままだと <c>near "MAX": syntax error</c> になる。
+    /// SQLite は<b>型名を二重引用符でクォートする</b>と 1 個の型名トークンとして受理し、<c>PRAGMA table_info</c> は
+    /// クォートを外した文字列を verbatim に返す（<see cref="SqliteSchemaImporter"/> が元の表記どおり読み戻せる）。
+    /// そのため、数値引数のみの通常型はそのまま出力し、非数値引数を含む型のみクォートする。
+    /// </remarks>
+    private static string FormatDeclaredType(string dataType)
+    {
+        if (string.IsNullOrWhiteSpace(dataType))
+        {
+            return dataType;
+        }
+
+        // SQLite が素の型名として受理できる形（"名前" ＋ 省略可能な "(数値)" / "(数値,数値)"）かを判定する
+        return DeclaredTypeIsParseableUnquoted(dataType)
+            ? dataType
+            : $"\"{SqliteIdentifier.Escape(dataType.Trim())}\"";
+    }
+
+    /// <summary>宣言型がクォートなしで SQLite の型名文法に適合するか（括弧内が符号付き数値のみか）を判定する</summary>
+    private static bool DeclaredTypeIsParseableUnquoted(string dataType) =>
+        UnquotedDeclaredTypePattern().IsMatch(dataType);
+
+    // 型名 ＋ 省略可能な括弧引数（符号付き数値 1 個または 2 個）。SQLite の type-name 文法に対応する。
+    [System.Text.RegularExpressions.GeneratedRegex(
+        @"^\s*[a-zA-Z_][a-zA-Z0-9_]*(\s+[a-zA-Z_][a-zA-Z0-9_]*)*\s*(\(\s*[+-]?\d+\s*(,\s*[+-]?\d+\s*)?\))?\s*$",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase
+    )]
+    private static partial System.Text.RegularExpressions.Regex UnquotedDeclaredTypePattern();
+
+    /// <summary>解決済み外部キー情報からインライン <c>FOREIGN KEY</c> 制約行を組み立てる</summary>
+    private static string BuildForeignKeyConstraint(ResolvedForeignKey fk)
+    {
+        var referentialActions = ForeignKeyReferentialActionHelper.BuildReferentialActionClause(
+            fk.OnDelete,
+            fk.OnUpdate
+        );
+
+        return $"    CONSTRAINT \"{SqliteIdentifier.Escape(fk.ConstraintName)}\" "
+            + $"FOREIGN KEY ({SqliteIdentifier.QuoteSimple(fk.FkColumnName)}) "
+            + $"REFERENCES {SqliteIdentifier.Quote(fk.ParentTableName)} ({SqliteIdentifier.QuoteSimple(fk.PkColumnName)}){referentialActions}";
+    }
+
+    /// <summary>リレーション一覧を「子テーブル ID → その子が持つ FK 一覧」へ解決する</summary>
+    /// <remarks>基底の FK 解決規則（参照カラムのフォールバック・FK 列名の命名規則）を踏襲する</remarks>
+    private static Dictionary<Guid, List<ResolvedForeignKey>> BuildForeignKeyIndex(
+        ErDiagram diagram,
+        IReadOnlyDictionary<Guid, Entity> entitiesById
+    )
+    {
+        var index = new Dictionary<Guid, List<ResolvedForeignKey>>();
+
+        foreach (var rel in diagram.Relationships)
+        {
+            // 多対多はコメント出力のみ（FK 制約は張らない）
+            if (rel.Type == RelationshipType.ManyToMany)
+            {
+                continue;
+            }
+
+            // 親（PK 側 = Source）・子（FK 保有 = Target）が解決できないリレーションはスキップする
+            if (
+                !entitiesById.TryGetValue(rel.SourceEntityId, out var pkEntity)
+                || !entitiesById.TryGetValue(rel.TargetEntityId, out var fkEntity)
+            )
+            {
+                continue;
+            }
+
+            // 参照カラムが明示されていればそれを優先し、未指定なら親の PK 列にフォールバックする
+            var pkCol = rel.SourceColumnId is not null
+                ? pkEntity.Columns.FirstOrDefault(c => c.Id == rel.SourceColumnId)
+                    ?? pkEntity.Columns.FirstOrDefault(c => c.IsPrimaryKey)
+                : pkEntity.Columns.FirstOrDefault(c => c.IsPrimaryKey);
+
+            // 親側に参照可能な列がなければ FK を生成できないためスキップする
+            if (pkCol is null)
+            {
+                continue;
+            }
+
+            var fkColName = rel.TargetColumnId is not null
+                ? fkEntity.Columns.FirstOrDefault(c => c.Id == rel.TargetColumnId)?.Name
+                : null;
+
+            // 子側カラム未指定時は「親テーブル名_PK列名」を FK カラム名として採用する
+            if (string.IsNullOrWhiteSpace(fkColName))
+            {
+                fkColName = SqliteIdentifier.SafeName(pkEntity.TableName) + "_" + pkCol.Name;
+            }
+
+            // 制約名はモデルの値を優先し、未設定なら FK_子_親 の命名規則で生成する
+            var constraintName = string.IsNullOrWhiteSpace(rel.ConstraintName)
+                ? $"FK_{SqliteIdentifier.SafeName(fkEntity.TableName)}_{SqliteIdentifier.SafeName(pkEntity.TableName)}"
+                : rel.ConstraintName;
+
+            if (!index.TryGetValue(fkEntity.Id, out var list))
+            {
+                list = new List<ResolvedForeignKey>();
+                index[fkEntity.Id] = list;
+            }
+
+            list.Add(
+                new ResolvedForeignKey(
+                    constraintName,
+                    fkColName,
+                    pkEntity.TableName,
+                    pkCol.Name,
+                    rel.OnDelete,
+                    rel.OnUpdate
+                )
+            );
+        }
+
+        return index;
+    }
+
+    /// <summary>DDL 出力用に解決済みの外部キー 1 件</summary>
+    /// <param name="ConstraintName">FK 制約名</param>
+    /// <param name="FkColumnName">子テーブル側の外部キー列名</param>
+    /// <param name="ParentTableName">参照先（親）テーブル名</param>
+    /// <param name="PkColumnName">参照先（親）の被参照列名</param>
+    /// <param name="OnDelete">親行削除時の参照アクション</param>
+    /// <param name="OnUpdate">親キー更新時の参照アクション</param>
+    private sealed record ResolvedForeignKey(
+        string ConstraintName,
+        string FkColumnName,
+        string ParentTableName,
+        string PkColumnName,
+        ForeignKeyReferentialAction OnDelete,
+        ForeignKeyReferentialAction OnUpdate
+    );
+}

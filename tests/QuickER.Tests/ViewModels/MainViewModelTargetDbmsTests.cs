@@ -5,6 +5,7 @@ using QuickER.Generator;
 using QuickER.Model;
 using QuickER.Provider;
 using QuickER.Services;
+using QuickER.Sqlite;
 using QuickER.SqlServer;
 using QuickER.Tests.TestDoubles;
 using QuickER.ViewModels;
@@ -110,6 +111,35 @@ public class MainViewModelTargetDbmsTests
         // ここでは AvailableDataTypes が SQL Server の型を返すことでフォールバックを確認する
         vm.AvailableDataTypes.Should().Contain("int");
         vm.CurrentProvider.Name.Should().Be("sqlserver");
+    }
+
+    /// <summary>SQLite では DB 同期コマンドが実行不可・他方言では実行可となることを検証する</summary>
+    [Fact(DisplayName = "SQLite では DB 同期コマンドが実行不可・他方言では実行可")]
+    public void SyncToDatabase_DisabledForSqlite_EnabledForOthers()
+    {
+        var sqlite = new SqliteProvider();
+        var registry = new DatabaseProviderRegistry(
+            new IDatabaseProvider[] { new SqlServerProvider(), sqlite }
+        );
+        var vm = new MainViewModel(
+            new StubDialogService(),
+            new NoopAppDialogService(),
+            new NoopFileDialogService(),
+            new NoopAiChatLauncher(),
+            registry
+        );
+
+        // 既定は SQL Server：同期は実行可
+        vm.SyncToDatabaseCommand.CanExecute(null).Should().BeTrue();
+
+        // SQLite へ切替：同期は実行不可、ツールチップに理由が出る
+        vm.SelectedProvider = sqlite;
+        vm.SyncToDatabaseCommand.CanExecute(null).Should().BeFalse();
+        vm.SyncToDatabaseTooltip.Should().Contain("未対応");
+
+        // SQL Server へ戻すと再び実行可
+        vm.SelectedProvider = registry.Get("sqlserver");
+        vm.SyncToDatabaseCommand.CanExecute(null).Should().BeTrue();
     }
 
     /// <summary>Undo 可能件数を数える（履歴に積まれたか判定用）</summary>

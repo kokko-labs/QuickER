@@ -2,6 +2,7 @@ using System.IO;
 using FluentAssertions;
 using QuickER.Provider;
 using QuickER.Services;
+using QuickER.Sqlite;
 using QuickER.SqlServer;
 using QuickER.Tests.TestDoubles;
 using QuickER.ViewModels;
@@ -17,6 +18,11 @@ public class DbConnectionDialogViewModelTests : IDisposable
     /// <summary>SQL Server のみを登録したレジストリ</summary>
     private static readonly DatabaseProviderRegistry Registry = new(
         new IDatabaseProvider[] { new SqlServerProvider() }
+    );
+
+    /// <summary>SQL Server と SQLite を登録したレジストリ（SQLite 分岐の検証用）</summary>
+    private static readonly DatabaseProviderRegistry RegistryWithSqlite = new(
+        new IDatabaseProvider[] { new SqlServerProvider(), new SqliteProvider() }
     );
 
     /// <summary>一時保存先フォルダを作成する</summary>
@@ -234,5 +240,159 @@ public class DbConnectionDialogViewModelTests : IDisposable
 
         vm.Profiles.Should().BeEmpty();
         vm.StatusMessage.Should().Contain("削除しました");
+    }
+
+    // ---------------- SQLite（ファイル型 DB）分岐 ----------------
+
+    /// <summary>SQLite を選択した取込モードの ViewModel を生成する</summary>
+    private DbConnectionDialogViewModel CreateSqliteVm(
+        SqlConnectionProfileStore store,
+        IFileDialogService? files = null
+    )
+    {
+        var vm = new DbConnectionDialogViewModel(
+            RegistryWithSqlite,
+            DbConnectionDialogMode.Import,
+            fixedProvider: null,
+            store,
+            dialogService: null,
+            fileDialogService: files ?? new StubFileDialogService()
+        )
+        {
+            SelectedProvider = RegistryWithSqlite.Get(SqliteProvider.ProviderName),
+        };
+
+        return vm;
+    }
+
+    /// <summary>SQLite 選択時にファイルパス欄が表示され、サーバー系フィールドが非表示になることを検証する</summary>
+    [Fact(DisplayName = "SQLite 選択時はファイルパス欄を表示しサーバー系フィールドを隠す")]
+    public void Sqlite_ShowsFilePath_HidesServerFields()
+    {
+        var vm = CreateSqliteVm(CreateStore());
+
+        vm.ShowFilePath.Should().BeTrue();
+        vm.ShowServerFields.Should().BeFalse();
+        vm.ShowUserId.Should().BeFalse();
+        vm.ShowPassword.Should().BeFalse();
+        vm.ShowAuthMode.Should().BeFalse();
+        vm.ShowTrustServerCertificate.Should().BeFalse();
+    }
+
+    /// <summary>SQLite でファイルパスが空のとき OK が拒否されることを検証する</summary>
+    [Fact(DisplayName = "SQLite: ファイルパスが空だと OK は拒否される")]
+    public void Sqlite_EmptyFilePath_RejectsOk()
+    {
+        var vm = CreateSqliteVm(CreateStore());
+        vm.FilePath = string.Empty;
+
+        vm.OkCommand.Execute(null);
+
+        vm.Result.Should().BeNull();
+        vm.StatusMessage.Should().Contain("ファイルのパス");
+    }
+
+    /// <summary>SQLite で存在しないパスのとき OK が拒否されることを検証する（取込専用・新規作成不可）</summary>
+    [Fact(DisplayName = "SQLite: 存在しないファイルパスだと OK は拒否される")]
+    public void Sqlite_MissingFile_RejectsOk()
+    {
+        var vm = CreateSqliteVm(CreateStore());
+        vm.FilePath = Path.Combine(_tempFolder, "does-not-exist.db");
+
+        vm.OkCommand.Execute(null);
+
+        vm.Result.Should().BeNull();
+        vm.StatusMessage.Should().Contain("見つかりません");
+    }
+
+    /// <summary>SQLite で実在するファイルパスのとき OK が確定し、結果へファイルパスが保持されることを検証する</summary>
+    [Fact(DisplayName = "SQLite: 実在するファイルパスだと OK が確定し結果に保持される")]
+    public void Sqlite_ExistingFile_ConfirmsOk_AndKeepsFilePath()
+    {
+        var dbPath = Path.Combine(_tempFolder, "sample.db");
+        File.WriteAllText(dbPath, string.Empty);
+
+        var vm = CreateSqliteVm(CreateStore());
+        vm.FilePath = dbPath;
+
+        vm.OkCommand.Execute(null);
+
+        vm.Result.Should().NotBeNull();
+        vm.Result!.FilePath.Should().Be(dbPath);
+        vm.ResultProvider!.Name.Should().Be(SqliteProvider.ProviderName);
+    }
+
+    /// <summary>参照コマンドが選択されたファイルパスを FilePath へ反映することを検証する</summary>
+    [Fact(DisplayName = "SQLite: 参照コマンドで選択したパスが FilePath に反映される")]
+    public void Sqlite_BrowseFile_SetsFilePath()
+    {
+        var picked = Path.Combine(_tempFolder, "picked.sqlite");
+        var files = new StubFileDialogService { OpenFileResult = picked };
+        var vm = CreateSqliteVm(CreateStore(), files);
+
+        vm.BrowseFileCommand.Execute(null);
+
+        vm.FilePath.Should().Be(picked);
+    }
+
+    /// <summary>SQLite プロファイルを保存し再適用するとファイルパスが往復することを検証する</summary>
+    [Fact(DisplayName = "SQLite: プロファイル保存→適用でファイルパスが往復する")]
+    public void Sqlite_ProfileRoundTrip_PreservesFilePath()
+    {
+        var dbPath = Path.Combine(_tempFolder, "roundtrip.db");
+        var store = CreateStore();
+        var vm = CreateSqliteVm(store);
+        vm.FilePath = dbPath;
+        vm.ProfileName = "SQLite接続";
+
+        vm.SaveProfileCommand.Execute(null);
+
+        // 再度開き、保存したプロファイルを選択してファイルパスが復元されることを確認する
+        var reopened = CreateSqliteVm(store);
+        var saved = reopened.Profiles.Single(p =>
+            p.Profile.Dbms == SqliteProvider.ProviderName && p.Profile.Name == "SQLite接続"
+        );
+        reopened.SelectedProfileItem = saved;
+
+        reopened.FilePath.Should().Be(dbPath);
+    }
+
+    /// <summary>SQL Server 選択時は従来どおりサーバー系フィールドを表示しファイルパスを隠すことを検証する</summary>
+    [Fact(DisplayName = "SQL Server 選択時は従来どおりサーバー系フィールドを表示する")]
+    public void SqlServer_ShowsServerFields_HidesFilePath()
+    {
+        var vm = new DbConnectionDialogViewModel(
+            RegistryWithSqlite,
+            DbConnectionDialogMode.Import,
+            fixedProvider: null,
+            CreateStore(),
+            dialogService: null,
+            fileDialogService: new StubFileDialogService()
+        )
+        {
+            SelectedProvider = RegistryWithSqlite.Get(SqlServerProvider.ProviderName),
+        };
+
+        vm.ShowFilePath.Should().BeFalse();
+        vm.ShowServerFields.Should().BeTrue();
+    }
+
+    /// <summary>テスト用のファイル選択ダイアログスタブ（開くファイルパスを固定で返す）</summary>
+    private sealed class StubFileDialogService : IFileDialogService
+    {
+        /// <summary>PickOpenFile が返すパス（null ならキャンセル扱い）</summary>
+        public string? OpenFileResult { get; init; }
+
+        public FileDialogResult? PickOpenFile(string filter) =>
+            OpenFileResult is null ? null : new FileDialogResult(OpenFileResult, 1);
+
+        public FileDialogResult? PickSaveFile(
+            string filter,
+            string defaultExt,
+            string? initialFileName = null,
+            string? initialDirectory = null
+        ) => null;
+
+        public string? PickFolder(string title, string? initialDirectory = null) => null;
     }
 }
