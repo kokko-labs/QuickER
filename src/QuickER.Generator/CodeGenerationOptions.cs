@@ -33,6 +33,27 @@ public sealed class CodeGenerationOptions
     public bool GenerateRepositories { get; init; } = true;
 
     /// <summary>
+    /// 自作 Repository の生成方言。生成時に固定される（tasks/todo.md の確定仕様）。
+    /// </summary>
+    /// <remarks>
+    /// 自作 Repository は生成時に単一方言へ固定される（EF Core モードと同じく、DB 切替は再生成＋DI 差し替え）。
+    /// 既定は <c>"sqlserver"</c>（現行の自作 SQL Server 実装）。テンプレートはこの値で方言別の識別子クォート・
+    /// ADO 型・SQL 句を吐き分ける。対応方言は <see cref="SupportedRepositoryDialects"/> を参照（GUI / CLI 共通）。
+    /// </remarks>
+    public string RepositoryDialect { get; init; } = "sqlserver";
+
+    /// <summary>
+    /// 自作 Repository が対応する生成方言の一覧（プロバイダ名と同一の識別子。例: <c>"sqlserver"</c>, <c>"sqlite"</c>）。
+    /// </summary>
+    /// <remarks>
+    /// GUI（生成ダイアログの選択可否判定）と CLI（未対応方言の早期エラー）が単一ソースとして参照する。
+    /// PostgreSQL / MySQL / Oracle は将来対応予定のためここには含めない。<c>QuickER.Generator</c> は DB 非依存を保つため、
+    /// ここに置くのは文字列識別子の一覧のみで、各プロバイダの実装や型情報は一切参照しない。
+    /// </remarks>
+    public static IReadOnlyList<string> SupportedRepositoryDialects { get; } =
+    ["sqlserver", "sqlite"];
+
+    /// <summary>
     /// EF Core 用コード（DbContext・Fluent API 構成・EF 版 Repository 実装）を生成するかどうか。
     /// </summary>
     /// <remarks>

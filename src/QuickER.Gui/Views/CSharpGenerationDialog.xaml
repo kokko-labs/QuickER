@@ -244,7 +244,7 @@
           </StackPanel>
         </Grid>
 
-        <!-- DB アクセス（排他選択。自作 Repository は SQL Server 専用のため現在の DB を隣に提示する） -->
+        <!-- DB アクセス（排他選択。自作 Repository は対応方言限定のため現在の DB を隣に提示する） -->
         <Grid>
           <Grid.ColumnDefinitions>
             <ColumnDefinition Width="96" />
@@ -280,12 +280,12 @@
               ToolTip="EF Core 実装の Repository と方言非依存の DbContext を生成します（接続先はアプリ側の UseSqlServer / UseNpgsql 等で選択）"
             />
             <RadioButton
-              Content="Repository (SQL Server)"
+              Content="Repository (QuickER)"
               GroupName="DbAccess"
               IsChecked="{Binding DbAccessRepository}"
-              IsEnabled="{Binding CanSelectSqlServerRepository}"
+              IsEnabled="{Binding CanSelectQuickErRepository}"
               ToolTipService.ShowOnDisabled="True"
-              ToolTip="SqlClient 直書きの自作 Repository を生成します。SQL Server 専用のため、SQL Server プロバイダの選択中のみ選べます"
+              ToolTip="{Binding QuickErRepositoryToolTip}"
             />
           </StackPanel>
         </Grid>

@@ -122,6 +122,8 @@ internal static class GeneratedCodeCompiler
         // TPA に含まれない可能性がある、生成コードが直接依存するアセンブリを明示的に追加する
         // （テストホストでは遅延ロードのため未ロード＝TPA 未列挙のことがある）
         AddPath(typeof(Microsoft.Data.SqlClient.SqlConnection).Assembly.Location);
+        // SQLite 方言の Repository 生成コード検証用（Microsoft.Data.Sqlite の Sqlite 系 ADO 型）
+        AddPath(typeof(Microsoft.Data.Sqlite.SqliteConnection).Assembly.Location);
         AddPath(
             typeof(Microsoft.Extensions.DependencyInjection.IServiceCollection).Assembly.Location
         );

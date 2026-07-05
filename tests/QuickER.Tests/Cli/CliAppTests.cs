@@ -1,4 +1,5 @@
 using System.IO;
+using System.Linq;
 using FluentAssertions;
 using QuickER.Cli;
 using QuickER.Documents;
@@ -89,6 +90,88 @@ public class CliAppTests
             ]);
 
             exit.Should().Be(1);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>
+    /// 自作 Repository の生成が要求されているが（quicker.json の GenerateRepositories=true）、
+    /// プロバイダが未対応方言（postgresql / mysql / oracle）の場合は終了コード 1 でエラーメッセージを出すことを検証する
+    /// </summary>
+    [Theory(DisplayName = "未対応方言＋GenerateRepositories 要求は終了コード 1")]
+    [InlineData("postgresql")]
+    [InlineData("mysql")]
+    [InlineData("oracle")]
+    public async Task Generate_UnsupportedDialectWithRepositories_ReturnsError(string providerName)
+    {
+        var (schemaPath, outDir, root) = CreateSampleSchema();
+        var configPath = Path.Combine(root, "quicker.json");
+        File.WriteAllText(configPath, """{ "GenerateRepositories": true }""");
+
+        try
+        {
+            var exit = await CliApp.InvokeAsync([
+                "generate",
+                "--schema",
+                schemaPath,
+                "--out",
+                outDir,
+                "--provider",
+                providerName,
+                "--config",
+                configPath,
+            ]);
+
+            exit.Should().Be(1);
+            Directory
+                .Exists(outDir)
+                .Should()
+                .BeFalse("生成前にエラーで中止するため出力は作られない");
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>
+    /// 対応方言（sqlite）＋ GenerateRepositories=true では生成が成功し、
+    /// RepositoryDialect が --provider の値（sqlite）で確定していることを検証する
+    /// </summary>
+    [Fact(DisplayName = "対応方言（sqlite）＋GenerateRepositories は生成が成功する")]
+    public async Task Generate_SupportedDialectWithRepositories_Succeeds()
+    {
+        var (schemaPath, outDir, root) = CreateSampleSchema();
+        var configPath = Path.Combine(root, "quicker.json");
+        File.WriteAllText(configPath, """{ "GenerateRepositories": true }""");
+
+        try
+        {
+            var exit = await CliApp.InvokeAsync([
+                "generate",
+                "--schema",
+                schemaPath,
+                "--out",
+                outDir,
+                "--provider",
+                "sqlite",
+                "--config",
+                configPath,
+            ]);
+
+            exit.Should().Be(0);
+            var files = Directory.GetFiles(outDir, "*.g.cs");
+            var code = string.Join("\n", files.Select(File.ReadAllText));
+            code.Should().Contain("Microsoft.Data.Sqlite");
         }
         finally
         {

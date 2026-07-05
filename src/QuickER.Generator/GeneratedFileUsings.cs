@@ -43,6 +43,10 @@ internal static class GeneratedFileUsings
         return ordered;
     }
 
+    /// <summary>自作 Repository の生成方言が SQLite かどうか（ADO using の出し分けに使う）</summary>
+    private static bool IsSqliteDialect(CodeGenerationOptions options) =>
+        string.Equals(options.RepositoryDialect, "sqlite", StringComparison.Ordinal);
+
     /// <summary>
     /// 1 バケットが必要とする外部（System.* / Microsoft.*）using 集合を、テンプレートの型参照を根拠に返す。
     /// </summary>
@@ -140,18 +144,28 @@ internal static class GeneratedFileUsings
                     yield return "System.ComponentModel.DataAnnotations.Schema";
                 }
 
-                // 自作 SQL Server 実装（SqlExecutor / SqlServerRepository / 接続ファクトリ / AddGeneratedRepositories）:
-                //   SqlConnection/SqlParameter（Microsoft.Data.SqlClient）、DI 登録（Microsoft.Extensions.DependencyInjection）、
-                //   さらに実装が使う IStructuralEquatable（System.Collections）・DataTable 相当（System.Data）・
-                //   JSON（System.Text.Json / System.Text.Json.Serialization.Metadata）
+                // 自作 Repository 実装（SqlExecutor / 方言別 Repository 基底 / 接続ファクトリ / AddGeneratedRepositories）:
+                //   ADO 型（方言依存: SQL Server=Microsoft.Data.SqlClient / SQLite=Microsoft.Data.Sqlite）、
+                //   DI 登録（Microsoft.Extensions.DependencyInjection）、さらに実装が使う
+                //   IStructuralEquatable（System.Collections）・DataTable 相当（System.Data）。
+                //   JSON（System.Text.Json / System.Text.Json.Serialization.Metadata）は FOR JSON 復元を使う
+                //   SQL Server 方言のみで必要（SQLite はプレーン SELECT＋DataReader 実体化のため不要）。
                 if (options.GenerateRepositories)
                 {
                     yield return "System.Collections";
                     yield return "System.Data";
-                    yield return "System.Text.Json";
-                    yield return "System.Text.Json.Serialization.Metadata";
-                    yield return "Microsoft.Data.SqlClient";
                     yield return "Microsoft.Extensions.DependencyInjection";
+
+                    if (IsSqliteDialect(options))
+                    {
+                        yield return "Microsoft.Data.Sqlite";
+                    }
+                    else
+                    {
+                        yield return "System.Text.Json";
+                        yield return "System.Text.Json.Serialization.Metadata";
+                        yield return "Microsoft.Data.SqlClient";
+                    }
                 }
 
                 break;

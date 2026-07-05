@@ -92,9 +92,12 @@ public class CSharpGenerationDialogViewModelTests
         }
     }
 
-    /// <summary>SQL Server 以外のプロバイダでは自作 Repository が選択不可になり、保存値も「なし」へ倒れることを検証する</summary>
-    [Fact(DisplayName = "SQL Server 以外では自作 Repository を選択できない")]
-    public void NonSqlServerProvider_DisablesRepositoryOption()
+    /// <summary>未対応方言のプロバイダでは自作 Repository が選択不可になり、保存値も「なし」へ倒れることを検証する</summary>
+    [Theory(DisplayName = "未対応方言では自作 Repository を選択できない")]
+    [InlineData(typeof(QuickER.PostgreSql.PostgreSqlProvider))]
+    [InlineData(typeof(QuickER.MySql.MySqlProvider))]
+    [InlineData(typeof(QuickER.Oracle.OracleProvider))]
+    public void UnsupportedDialectProvider_DisablesRepositoryOption(Type providerType)
     {
         var folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
         var store = new CSharpGenerationSettingsStore(folder);
@@ -104,14 +107,15 @@ public class CSharpGenerationDialogViewModelTests
 
         try
         {
-            var vm = new CSharpGenerationDialogViewModel(
-                store,
-                currentProvider: new QuickER.PostgreSql.PostgreSqlProvider()
-            );
+            var provider = (QuickER.Provider.IDatabaseProvider)
+                Activator.CreateInstance(providerType)!;
+            var vm = new CSharpGenerationDialogViewModel(store, currentProvider: provider);
 
-            vm.CanSelectSqlServerRepository.Should().BeFalse();
+            vm.CanSelectQuickErRepository.Should().BeFalse();
             vm.CurrentDatabaseDisplayName.Should()
                 .NotBeEmpty("DB アクセス欄に現在の DB を提示する");
+            vm.QuickErRepositoryToolTip.Should()
+                .Be("この方言の自作 Repository は未対応です（将来対応予定）");
             // 保存されていた「自作 Repository」選択は矛盾生成物を防ぐため「なし」へ倒す
             vm.GenerateRepositories.Should().BeFalse();
             vm.DbAccessNone.Should().BeTrue();
@@ -122,14 +126,51 @@ public class CSharpGenerationDialogViewModelTests
         }
     }
 
-    /// <summary>SQL Server プロバイダでは自作 Repository を選択できることを検証する</summary>
-    [Fact(DisplayName = "SQL Server プロバイダでは自作 Repository を選択できる")]
-    public void SqlServerProvider_AllowsRepositoryOption()
+    /// <summary>対応方言（SQL Server / SQLite）のプロバイダでは自作 Repository を選択できることを検証する</summary>
+    [Theory(DisplayName = "対応方言（SQL Server / SQLite）では自作 Repository を選択できる")]
+    [InlineData(typeof(QuickER.SqlServer.SqlServerProvider), "SQL Server")]
+    [InlineData(typeof(QuickER.Sqlite.SqliteProvider), "SQLite")]
+    public void SupportedDialectProvider_AllowsRepositoryOption(
+        Type providerType,
+        string expectedDisplayName
+    )
     {
-        var vm = CreateViewModel(out _, currentProvider: new QuickER.SqlServer.SqlServerProvider());
+        var provider = (QuickER.Provider.IDatabaseProvider)Activator.CreateInstance(providerType)!;
+        var vm = CreateViewModel(out _, currentProvider: provider);
 
-        vm.CanSelectSqlServerRepository.Should().BeTrue();
-        vm.CurrentDatabaseDisplayName.Should().Be("SQL Server");
+        vm.CanSelectQuickErRepository.Should().BeTrue();
+        vm.CurrentDatabaseDisplayName.Should().Be(expectedDisplayName);
+        vm.QuickErRepositoryToolTip.Should()
+            .Be("EF 非依存の軽量 Repository を生成します（対応方言: SQL Server / SQLite）");
+    }
+
+    /// <summary>ToOptions が現在のプロバイダ名を RepositoryDialect へ設定することを検証する</summary>
+    [Fact(DisplayName = "ToOptions は現在のプロバイダ名を RepositoryDialect に設定する")]
+    public void ToOptions_SetsRepositoryDialect_FromCurrentProvider()
+    {
+        var vm = CreateViewModel(out _, currentProvider: new QuickER.Sqlite.SqliteProvider());
+        vm.BaseNamespace = "Sample.Domain";
+        vm.OutputFilePath = @"C:\temp\Entities.g.cs";
+        vm.DbAccessRepository = true;
+
+        vm.OkCommand.Execute(null);
+
+        vm.Result.Should().NotBeNull();
+        vm.Result!.Options.RepositoryDialect.Should().Be("sqlite");
+    }
+
+    /// <summary>currentProvider 未指定（null）では RepositoryDialect が sqlserver へフォールバックすることを検証する</summary>
+    [Fact(DisplayName = "currentProvider 未指定では RepositoryDialect が sqlserver になる")]
+    public void ToOptions_SetsRepositoryDialect_DefaultsToSqlServer_WhenProviderUnset()
+    {
+        var vm = CreateViewModel(out _);
+        vm.BaseNamespace = "Sample.Domain";
+        vm.OutputFilePath = @"C:\temp\Entities.g.cs";
+
+        vm.OkCommand.Execute(null);
+
+        vm.Result.Should().NotBeNull();
+        vm.Result!.Options.RepositoryDialect.Should().Be("sqlserver");
     }
 
     /// <summary>EF Core 選択＋分割モードで EfCore 名前空間欄が現れ、ベース変更へ追従することを検証する</summary>

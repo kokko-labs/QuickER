@@ -125,6 +125,38 @@ public class GeneratedCodeCompilationTests
         return data;
     }
 
+    /// <summary>マトリクスケース: SQLite 方言の自作 Repository（Split{off,on} × VO{off,on} の 4 ケース）</summary>
+    public static TheoryData<string, CodeGenerationOptions> SqliteRepositoryMatrixCases()
+    {
+        var data = new TheoryData<string, CodeGenerationOptions>();
+        foreach (var split in new[] { false, true })
+        foreach (var vo in new[] { false, true })
+        {
+            data.Add(
+                $"SQLite Repository Split={split} VO={vo}",
+                new CodeGenerationOptions
+                {
+                    NamespaceName = "Sample.Domain",
+                    SplitFilesByCategory = split,
+                    GenerateValueObjects = vo,
+                    RepositoryDialect = "sqlite",
+                }
+            );
+        }
+
+        // EF Core と SQLite 自作 Repository の併存（パリティ検証相当の構成）でも生成が通ることを確認する
+        data.Add(
+            "SQLite Repository + EF Core",
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                RepositoryDialect = "sqlite",
+                GenerateEfCore = true,
+            }
+        );
+        return data;
+    }
+
     /// <summary>マトリクスケース: オプション単発（各種フラグ・Namespace 上書き）</summary>
     public static TheoryData<string, CodeGenerationOptions> SingleOptionCases()
     {
@@ -197,6 +229,14 @@ public class GeneratedCodeCompilationTests
     [Theory]
     [MemberData(nameof(EfCoreOnlyMatrixCases))]
     public void Generate_EfCoreOnlyMatrix_ShouldProduceCompilableCode(
+        string caseName,
+        CodeGenerationOptions options
+    ) => AssertCompiles(caseName, options);
+
+    /// <summary>SQLite 方言の自作 Repository（Split × VO の 4 ケース）で、生成コードがエラー・警告なしでコンパイルできることを検証する</summary>
+    [Theory]
+    [MemberData(nameof(SqliteRepositoryMatrixCases))]
+    public void Generate_SqliteRepositoryMatrix_ShouldProduceCompilableCode(
         string caseName,
         CodeGenerationOptions options
     ) => AssertCompiles(caseName, options);

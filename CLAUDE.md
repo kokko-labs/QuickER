@@ -45,12 +45,12 @@ QuickER.AI       → Model    AI/MCP/ASP.NET Core（WPF非依存。VM操作は I
 - **プロバイダの対称性**: 4方言は同じ構造（SchemaImporter / DdlGeneratorBase 派生 / 型マップ / Testcontainers 統合テスト）。方言 SQL の説明コメントは SQL Server 版と同水準に揃える。スキーマインポータの基底クラス化は**意図的に見送り**（方言差分が大きい）。共有部品は ForeignKeyRelationshipBuilder / UniqueColumnSetBuilder / SchemaTableEntry
 - **生成コードの汎用性**: 生成される C# は CommunityToolkit 等の UI フレームワークに依存させない（WPF 以外でも使える設計）。Repository 生成は単一キー・アプリ側採番前提（複合キー・DB自動採番は対象外）
 - **EF Core モード（GenerateEfCore）**: 既存 Entity をそのまま EF に乗せる方言非依存の QuickErDbContext＋EF 版 Repository を生成し、DI 登録（AddGeneratedRepositories ⇔ AddGeneratedEfCoreRepositories）の差し替えだけで自作 SQL Server 実装と交換できる。GenerateEfCore=false のとき生成物に EF への依存は一切出ない（using 含む）。スキーマ作成は従来どおり DDL 生成の責務で、EF は既存スキーマへの接続専用（Migrations / HasColumnType は範囲外）
-- **DB アクセスの排他と単独出力**: Repository バケットは「共通契約」（GenerateRepositories || GenerateEfCore で出力）と「自作 SQL Server 実装」（GenerateRepositories 時のみ）に分割されており、**GenerateEfCore 単独の生成物には Microsoft.Data.SqlClient への依存が一切出ない**（ガードテストあり）。GUI の生成ダイアログは DB アクセスをラジオ3択（なし既定／Repository＝SQL Server プロバイダ時のみ選択可／EF Core）で排他選択させる。両方 ON はパリティ検証用に CLI／オプション直指定でのみ可能
+- **DB アクセスの排他と単独出力**: Repository バケットは「共通契約」（GenerateRepositories || GenerateEfCore で出力）と「自作 Repository 実装」（GenerateRepositories 時のみ）に分割されており、**GenerateEfCore 単独の生成物には自作実装の ADO 依存（Microsoft.Data.SqlClient / Microsoft.Data.Sqlite）が一切出ない**（ガードテストあり）。自作 Repository は `RepositoryDialect` で方言を選ぶ多DB対応（既定 `sqlserver`＝FOR JSON／`sqlite`＝プレーン SELECT＋IncludeLoader マルチクエリ・LIMIT/OFFSET・strftime）で、生成時に片方言のみを出力し方言間の ADO 依存も排他（ガードテスト双方向）。GUI の生成ダイアログは DB アクセスをラジオ3択（なし既定／Repository (QuickER)＝対応方言 [SQL Server / SQLite] の図でのみ選択可／EF Core）で排他選択させる。両方 ON はパリティ検証用に CLI／オプション直指定でのみ可能
 
 ## 不変条件（ビルド・型検査では検出できず、壊すと静かに回帰する）
 
 - `Templates/CSharpRuntime.scriban` は **CRLF 固定**（.gitattributes で強制）。生成コードのバイト一致が前提
-- **テンプレート変更時は** `tests/QuickER.Tests/GeneratedFixture/` の固定フィクスチャ **2 つ**（GeneratedFixture.g.cs と PortableFixture.g.cs）の再生成が必要。各ドリフトテスト（GeneratedFixtureDriftTests / PortableFixtureDriftTests）が「再生成→差分ゼロ」を検証し、失敗メッセージに再生成手順がある。再生成は次の 1 コマンド（環境変数 `QUICKER_REGEN_FIXTURES` を立てるとドリフト検知と同一経路で上書き。実処理は FixtureDriftHarness に集約）：
+- **テンプレート変更時は** `tests/QuickER.Tests/GeneratedFixture/` の固定フィクスチャ **3 つ**（GeneratedFixture.g.cs＝SQL Server 全カバレッジ・PortableFixture.g.cs＝方言可搬な EF 単独出力・SqlitePortableFixture.g.cs＝SQLite 方言の自作 Repository＋EF Core 併存）の再生成が必要。各ドリフトテスト（GeneratedFixtureDriftTests / PortableFixtureDriftTests / SqlitePortableFixtureDriftTests）が「再生成→差分ゼロ」を検証し、失敗メッセージに再生成手順がある。再生成は次の 1 コマンドで 3 つまとめて処理する（環境変数 `QUICKER_REGEN_FIXTURES` を立てるとドリフト検知と同一経路で上書き。実処理は FixtureDriftHarness に集約）：
 
   ```powershell
   $env:QUICKER_REGEN_FIXTURES=1; dotnet test tests/QuickER.Tests/QuickER.Tests.csproj --filter "FullyQualifiedName~Drift"; $env:QUICKER_REGEN_FIXTURES=$null

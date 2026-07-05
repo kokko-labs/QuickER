@@ -105,12 +105,22 @@ internal sealed class ScribanCSharpRenderer
             || options.GenerateRepositories
             || options.GenerateEfCore;
 
+        // 自作 Repository の生成方言に応じた原始変数群。sqlserver のときは現行値（識別子クォート [ ]・
+        // ADO 型 SqlXxx）そのままで、テンプレートは細粒度置換した箇所でこれらを参照する。方言リテラルを
+        // 変数参照へ置き換えてもレンダリング結果は変わらないため、sqlserver 出力はバイト不変を保つ。
+        // 塊で異なる領域（FOR JSON プランナ vs マルチクエリ Include・OFFSET/FETCH vs LIMIT/OFFSET・
+        // SqlParameter 型付け等）はテンプレート側で {{ if repository_dialect == "sqlserver" }} ／ else により出し分ける。
+        var dialect = new RepositoryDialectVariables(options.RepositoryDialect);
+
         // SqlColumnType 属性は Entity プロパティに DB 列のメタ情報（SqlDbType・Size・Precision・Scale）を載せる。
         // ランタイムの EntitySaveMetadata が明示 SqlParameter を組み立てるのに使うほか、利用者コードが列メタ情報
         // （最大長・桁数）を参照する用途も兼ねるため、Repository 生成時 または IncludeDataAnnotations 時のいずれか、
         // かつ SqlDbType が判明したプロパティが 1 つでもある場合に属性定義と付与を出力する。
+        // [SqlColumnType]（System.Data.SqlDbType）は SQL Server 専用の意味を持つため、sqlserver 方言のときのみ出力する
+        // （SQLite は CLR 型から SqliteType を導出でき属性不要。生成物に SqlDbType 依存を出さない）。
         var emitSqlColumnTypeAttr =
-            (options.GenerateRepositories || options.IncludeDataAnnotations)
+            dialect.Dialect == "sqlserver"
+            && (options.GenerateRepositories || options.IncludeDataAnnotations)
             && model.EntityClasses.Any(c => c.Properties.Any(p => p.SqlDbTypeName is not null));
 
         // using は呼び出し側（GeneratedFileUsings）がバケット単位で解決済み。EF Core など外部依存の
@@ -145,6 +155,19 @@ internal sealed class ScribanCSharpRenderer
             // 自作 SQL Server 実装（SqlClient 依存）を出力するか。Repository バケット内でこのフラグにより契約と実装を出し分ける
             // （EF 単独出力＝false のとき SqlClient 依存のコードを一切生成しない）
             ["repositories"] = scope.SqlServerImpl,
+            // 自作 Repository の生成方言と方言別プリミティブ（識別子クォート・ADO 型名）。
+            ["repository_dialect"] = dialect.Dialect,
+            ["quote_open"] = dialect.QuoteOpen,
+            ["quote_close"] = dialect.QuoteClose,
+            ["quote_open_char"] = dialect.QuoteOpenChar,
+            ["quote_close_char"] = dialect.QuoteCloseChar,
+            ["sql_connection_type"] = dialect.ConnectionType,
+            ["sql_command_type"] = dialect.CommandType,
+            ["sql_parameter_type"] = dialect.ParameterType,
+            ["sql_data_reader_type"] = dialect.DataReaderType,
+            ["sql_transaction_type"] = dialect.TransactionType,
+            ["connection_factory_impl_type"] = dialect.ConnectionFactoryImplType,
+            ["repository_base_class"] = dialect.RepositoryBaseClass,
         };
 
         // テンプレートは本ライブラリ内に固定で持つ信頼済みのものであり、ループ回数・出力量は ER 図の規模に
@@ -167,4 +190,95 @@ internal sealed class ScribanCSharpRenderer
             Environment.NewLine + Environment.NewLine
         );
     }
+}
+
+/// <summary>
+/// 自作 Repository の生成方言ごとに変わるプリミティブ（識別子クォート文字・ADO 型名）を保持する。
+/// </summary>
+/// <remarks>
+/// テンプレートはこれらを細粒度置換した箇所で参照する。sqlserver は現行値（識別子クォート <c>[</c> <c>]</c>・
+/// <c>SqlConnection</c> 等）を返し、レンダリング結果を変えない（SQL Server 生成物のバイト不変を保つ）。
+/// sqlite は識別子クォート <c>"</c> と Microsoft.Data.Sqlite の <c>SqliteConnection</c> 等を返す。
+/// 未知方言は sqlserver 相当へフォールバックする（塊で異なる SQL は
+/// テンプレート側の <c>{{ if repository_dialect == "sqlserver" }}</c> ／ <c>else</c> で出し分ける）。
+/// </remarks>
+internal sealed class RepositoryDialectVariables
+{
+    public RepositoryDialectVariables(string? dialect)
+    {
+        Dialect = string.IsNullOrWhiteSpace(dialect) ? "sqlserver" : dialect;
+
+        // 方言ごとに ADO 型名・識別子クォート・基底クラス名を切り替える。方言固有の SQL の塊
+        // （FOR JSON プランナ vs マルチクエリ Include 等）はテンプレートの if 分岐が担うため、
+        // ここは細粒度プリミティブ（型名・クォート）に留める。未知方言は sqlserver 相当へフォールバックする。
+        switch (Dialect)
+        {
+            // SQLite: 識別子は二重引用符（"）、ADO 型は Microsoft.Data.Sqlite の Sqlite 系。
+            // クォートは通常の C# 補間文字列 $"..." 内へ埋め込むため、バックスラッシュでエスケープした \" の形で持つ
+            // （$"..." では "" は無効。エスケープは \" が正しい）。文字リテラル 'x' 比較用には素の 1 文字（"）を別変数で持つ。
+            case "sqlite":
+                QuoteOpen = "\\\"";
+                QuoteClose = "\\\"";
+                QuoteOpenChar = "\"";
+                QuoteCloseChar = "\"";
+                ConnectionType = "SqliteConnection";
+                CommandType = "SqliteCommand";
+                ParameterType = "SqliteParameter";
+                DataReaderType = "SqliteDataReader";
+                TransactionType = "SqliteTransaction";
+                ConnectionFactoryImplType = "SqliteConnectionFactory";
+                RepositoryBaseClass = "SqliteRepository";
+                break;
+
+            default:
+                QuoteOpen = "[";
+                QuoteClose = "]";
+                QuoteOpenChar = "[";
+                QuoteCloseChar = "]";
+                ConnectionType = "SqlConnection";
+                CommandType = "SqlCommand";
+                ParameterType = "SqlParameter";
+                DataReaderType = "SqlDataReader";
+                TransactionType = "SqlTransaction";
+                ConnectionFactoryImplType = "SqlConnectionFactory";
+                RepositoryBaseClass = "SqlServerRepository";
+                break;
+        }
+    }
+
+    /// <summary>生成方言（既定 "sqlserver"）</summary>
+    public string Dialect { get; }
+
+    /// <summary>識別子クォート開始（C# 文字列リテラル埋め込み用。SQL Server: <c>[</c>、SQLite: <c>""</c>）</summary>
+    public string QuoteOpen { get; }
+
+    /// <summary>識別子クォート終了（C# 文字列リテラル埋め込み用。SQL Server: <c>]</c>、SQLite: <c>""</c>）</summary>
+    public string QuoteClose { get; }
+
+    /// <summary>識別子クォート開始の 1 文字（C# 文字リテラル <c>'x'</c> 用。SQL Server: <c>[</c>、SQLite: <c>"</c>）</summary>
+    public string QuoteOpenChar { get; }
+
+    /// <summary>識別子クォート終了の 1 文字（C# 文字リテラル <c>'x'</c> 用。SQL Server: <c>]</c>、SQLite: <c>"</c>）</summary>
+    public string QuoteCloseChar { get; }
+
+    /// <summary>接続型名（SQL Server: <c>SqlConnection</c>）</summary>
+    public string ConnectionType { get; }
+
+    /// <summary>コマンド型名（SQL Server: <c>SqlCommand</c>）</summary>
+    public string CommandType { get; }
+
+    /// <summary>パラメータ型名（SQL Server: <c>SqlParameter</c>）</summary>
+    public string ParameterType { get; }
+
+    /// <summary>データリーダー型名（SQL Server: <c>SqlDataReader</c>）</summary>
+    public string DataReaderType { get; }
+
+    /// <summary>トランザクション型名（SQL Server: <c>SqlTransaction</c>）</summary>
+    public string TransactionType { get; }
+
+    /// <summary>接続ファクトリ実装クラス名（SQL Server: <c>SqlConnectionFactory</c>）</summary>
+    public string ConnectionFactoryImplType { get; }
+
+    /// <summary>Repository 基底クラス名（SQL Server: <c>SqlServerRepository</c>、SQLite: <c>SqliteRepository</c>）</summary>
+    public string RepositoryBaseClass { get; }
 }

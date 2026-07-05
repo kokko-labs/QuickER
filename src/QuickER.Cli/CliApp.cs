@@ -130,7 +130,17 @@ public static class CliApp
         }
 
         var document = JsonStorageService.Load(schemaFile.FullName);
-        var options = LoadOptions(config, ns, split);
+        CodeGenerationOptions options;
+        try
+        {
+            options = LoadOptions(config, ns, split, provider);
+        }
+        catch (RepositoryDialectUnsupportedException ex)
+        {
+            Console.Error.WriteLine(ex.Message);
+            return 1;
+        }
+
         var result = DiagramCodeGenerator.Generate(provider.TypeMapper, document.Schema, options);
         return WriteResult(result, output);
     }
@@ -226,7 +236,17 @@ public static class CliApp
             Entities = imported.Entities.ToList(),
             Relationships = imported.Relationships.ToList(),
         };
-        var options = LoadOptions(config, ns, split);
+        CodeGenerationOptions options;
+        try
+        {
+            options = LoadOptions(config, ns, split, provider);
+        }
+        catch (RepositoryDialectUnsupportedException ex)
+        {
+            Console.Error.WriteLine(ex.Message);
+            return 1;
+        }
+
         var result = DiagramCodeGenerator.Generate(provider.TypeMapper, diagram, options);
         return WriteResult(result, output);
     }
@@ -249,8 +269,21 @@ public static class CliApp
             Description = "カテゴリごとに別ファイル・別名前空間で出力する（設定ファイルを上書き）",
         };
 
-    /// <summary>設定ファイル（quicker.json）を読み、CLI フラグで上書きして生成オプションを構築する</summary>
-    private static CodeGenerationOptions LoadOptions(FileInfo? config, string? ns, bool split)
+    /// <summary>
+    /// 設定ファイル（quicker.json）を読み、CLI フラグ・<c>--provider</c> で上書きして生成オプションを構築する。
+    /// </summary>
+    /// <remarks>
+    /// <see cref="CodeGenerationOptions.RepositoryDialect"/> は常に <paramref name="provider"/> の名前で上書きする
+    /// （設定ファイルの値は無視する。図の TargetDbms から導出される値のため CLI 引数を単一の正とする）。
+    /// 自作 Repository 生成（<c>GenerateRepositories</c>）が要求され、かつプロバイダが対応方言でない場合は
+    /// <see cref="RepositoryDialectUnsupportedException"/> を送出する
+    /// </remarks>
+    private static CodeGenerationOptions LoadOptions(
+        FileInfo? config,
+        string? ns,
+        bool split,
+        IDatabaseProvider provider
+    )
     {
         var node = config is { Exists: true }
             ? JsonNode.Parse(File.ReadAllText(config.FullName))?.AsObject() ?? new JsonObject()
@@ -266,7 +299,26 @@ public static class CliApp
             node["SplitFilesByCategory"] = true;
         }
 
-        return node.Deserialize<CodeGenerationOptions>(OptionsJson) ?? new CodeGenerationOptions();
+        node["RepositoryDialect"] = provider.Name;
+
+        var options =
+            node.Deserialize<CodeGenerationOptions>(OptionsJson) ?? new CodeGenerationOptions();
+
+        if (
+            options.GenerateRepositories
+            && !CodeGenerationOptions.SupportedRepositoryDialects.Contains(
+                provider.Name,
+                StringComparer.OrdinalIgnoreCase
+            )
+        )
+        {
+            throw new RepositoryDialectUnsupportedException(
+                $"自作 Repository（GenerateRepositories）はプロバイダ '{provider.Name}' に対応していません。"
+                    + $"対応方言: {string.Join(", ", CodeGenerationOptions.SupportedRepositoryDialects)}"
+            );
+        }
+
+        return options;
     }
 
     /// <summary>生成結果の診断を表示し、エラーが無ければファイルを書き出す。終了コードを返す</summary>
@@ -295,3 +347,6 @@ public static class CliApp
         return 0;
     }
 }
+
+/// <summary>自作 Repository の生成が要求されたが、指定プロバイダの方言が未対応のときに送出する例外</summary>
+internal sealed class RepositoryDialectUnsupportedException(string message) : Exception(message);

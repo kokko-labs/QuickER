@@ -34,10 +34,14 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     /// <summary>ダイアログを閉じる際に呼ぶアクション（引数は確定可否）</summary>
     public Action<bool>? CloseAction { get; set; }
 
+    /// <summary>現在のプロバイダ（生成実行時に <see cref="CodeGenerationOptions.RepositoryDialect"/> へ反映する）</summary>
+    private readonly IDatabaseProvider? _currentProvider;
+
     /// <summary>設定ストアとファイル選択サービスを指定して ViewModel を生成し、保存済み設定を復元する</summary>
     /// <param name="currentProvider">
-    /// アプリの現在のプロバイダ。自作 Repository は SQL Server 専用のため、SQL Server 以外では
-    /// 選択肢を無効化し、表示名を「DB アクセス」欄に提示する（null は判定不要な文脈＝SQL Server 扱い）
+    /// アプリの現在のプロバイダ。自作 Repository は対応方言（<see cref="CodeGenerationOptions.SupportedRepositoryDialects"/>）
+    /// の図でのみ選択可能で、それ以外では選択肢を無効化し、表示名を「DB アクセス」欄に提示する
+    /// （null は判定不要な文脈＝SQL Server 扱い）
     /// </param>
     public CSharpGenerationDialogViewModel(
         CSharpGenerationSettingsStore? store = null,
@@ -47,12 +51,12 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     {
         _store = store ?? new CSharpGenerationSettingsStore();
         _files = files ?? new WpfFileDialogService();
-        CanSelectSqlServerRepository =
+        _currentProvider = currentProvider;
+        CanSelectQuickErRepository =
             currentProvider is null
-            || string.Equals(
+            || CodeGenerationOptions.SupportedRepositoryDialects.Contains(
                 currentProvider.Name,
-                SqlServerProvider.ProviderName,
-                StringComparison.OrdinalIgnoreCase
+                StringComparer.OrdinalIgnoreCase
             );
         CurrentDatabaseDisplayName = currentProvider?.DisplayName ?? string.Empty;
         ApplySettings(_store.Load());
@@ -129,7 +133,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     [ObservableProperty]
     private bool _generateMappers = true;
 
-    /// <summary>自作 SQL Server Repository を生成するかどうか（DB アクセスの排他選択の一角）</summary>
+    /// <summary>自作 Repository（QuickER）を生成するかどうか（DB アクセスの排他選択の一角）</summary>
     [ObservableProperty]
     private bool _generateRepositories;
 
@@ -165,7 +169,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
         }
     }
 
-    /// <summary>自作 SQL Server Repository を生成する（SQL Server 専用）</summary>
+    /// <summary>自作 Repository（QuickER）を生成する（対応方言の図でのみ選択可）</summary>
     public bool DbAccessRepository
     {
         get => GenerateRepositories;
@@ -193,11 +197,20 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
         }
     }
 
-    /// <summary>「自作 Repository」を選択できるか（現在のプロバイダが SQL Server のときのみ。理由は View 側ツールチップで提示）</summary>
-    public bool CanSelectSqlServerRepository { get; }
+    /// <summary>
+    /// 「自作 Repository (QuickER)」を選択できるか（現在のプロバイダが対応方言
+    /// <see cref="CodeGenerationOptions.SupportedRepositoryDialects"/> に含まれるときのみ。理由は View 側ツールチップで提示）
+    /// </summary>
+    public bool CanSelectQuickErRepository { get; }
 
     /// <summary>現在のプロバイダの UI 表示名（例: "SQL Server"。「DB アクセス」欄の隣に提示し、Repository 可否の文脈を伝える）</summary>
     public string CurrentDatabaseDisplayName { get; }
+
+    /// <summary>「自作 Repository (QuickER)」ラジオのツールチップ（選択可否で文言を切り替える）</summary>
+    public string QuickErRepositoryToolTip =>
+        CanSelectQuickErRepository
+            ? "EF 非依存の軽量 Repository を生成します（対応方言: SQL Server / SQLite）"
+            : "この方言の自作 Repository は未対応です（将来対応予定）";
 
     /// <summary>生成されるファイルのプレビュー（「ファイル名 → namespace」の一覧。設定に追従して更新）</summary>
     public ObservableCollection<string> PreviewFiles { get; } = new();
@@ -394,8 +407,8 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
             GenerateEditModels = settings.GenerateEditModels;
             GenerateMappers = settings.GenerateMappers;
             // DB アクセスは排他選択。両方 true の保存値（手編集等）は自作 Repository を優先し、
-            // 現在のプロバイダが SQL Server 以外なら自作 Repository は選択不可のため「なし」へ倒す
-            GenerateRepositories = settings.GenerateRepositories && CanSelectSqlServerRepository;
+            // 現在のプロバイダが対応方言でなければ自作 Repository は選択不可のため「なし」へ倒す
+            GenerateRepositories = settings.GenerateRepositories && CanSelectQuickErRepository;
             GenerateEfCore = settings.GenerateEfCore && !GenerateRepositories;
             GenerateValueObjects = settings.GenerateValueObjects;
             UseGuidKeyForStringPrimaryKey = settings.UseGuidKeyForStringPrimaryKey;
@@ -442,6 +455,10 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
         };
 
     /// <summary>現在の設定値からコード生成オプションを組み立てる</summary>
+    /// <remarks>
+    /// <see cref="CodeGenerationOptions.RepositoryDialect"/> は現在のプロバイダ名から常に設定する
+    /// （自作 Repository を生成しないときは意味を持たないが、設定して問題はない）
+    /// </remarks>
     public CodeGenerationOptions ToOptions() =>
         new()
         {
@@ -459,6 +476,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
             GenerateEditModels = GenerateEditModels,
             GenerateMappers = GenerateMappers,
             GenerateRepositories = GenerateRepositories,
+            RepositoryDialect = _currentProvider?.Name ?? SqlServerProvider.ProviderName,
             GenerateEfCore = GenerateEfCore,
             GenerateValueObjects = GenerateValueObjects,
             UseGuidKeyForStringPrimaryKey = UseGuidKeyForStringPrimaryKey,
