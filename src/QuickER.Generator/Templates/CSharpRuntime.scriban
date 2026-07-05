@@ -455,7 +455,7 @@ public static class ValueObjectValidationMessages
 {{~ if generate_value_objects && render_value_objects ~}}
 {{~ for vo in value_object_classes ~}}
 
-/// <summary>{{ vo.column_name }} 列に対応する値オブジェクト</summary>
+/// <summary>{{ if vo.description_xml_doc != "" }}{{ vo.description_xml_doc }}{{ else }}{{ vo.column_name }} 列に対応する値オブジェクト{{ end }}</summary>
 public sealed partial class {{ vo.class_name }}
     : {{ vo.base_declaration }},
         {{ vo.interface_declaration }}
@@ -750,13 +750,13 @@ public abstract partial class EntityBase
 {{~ if render_entities ~}}
 {{~ for item in entity_classes ~}}
 {{ if !for.first }}
-{{ end }}/// <summary>{{ item.table_name }} テーブルに対応するエンティティ</summary>
+{{ end }}/// <summary>{{ if item.description_xml_doc != "" }}{{ item.description_xml_doc }}{{ else }}{{ item.table_name }} テーブルに対応するエンティティ{{ end }}</summary>
 {{ if include_data_annotations }}[Table("{{ item.table_name }}")]
 {{ end }}{{ if emit_db_meta_attr && item.description != "" }}[DbTableMeta(Description = "{{ item.description }}")]
 {{ end }}public partial class {{ item.class_name }} : EntityBase
 {
 {{ for property in item.properties }}{{ if !for.first }}
-{{ end }}    /// <summary>{{ property.column_name }} 列に対応するプロパティ</summary>
+{{ end }}    /// <summary>{{ if property.description_xml_doc != "" }}{{ property.description_xml_doc }}{{ else }}{{ property.column_name }} 列に対応するプロパティ{{ end }}</summary>
 {{ if include_data_annotations && property.is_primary_key }}    [Key]
 {{ end }}{{ if include_data_annotations }}    [Column("{{ property.column_name }}")]
 {{ end }}{{ if include_data_annotations && !property.is_nullable && property.is_reference_type }}    [Required]
@@ -1647,7 +1647,7 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
 {{~ if render_edit_models ~}}
 {{~ for item in edit_model_classes ~}}
 {{ if !for.first }}
-{{ end }}/// <summary>{{ item.table_name }} テーブルの画面編集用モデル</summary>
+{{ end }}/// <summary>{{ if item.description_xml_doc != "" }}{{ item.description_xml_doc }}{{ else }}{{ item.table_name }} テーブルの画面編集用モデル{{ end }}</summary>
 public partial class {{ item.class_name }} : EditModelBase
 {
     // ===== 拡張ポイント（partial クラスで必要なものだけ実装。未実装の partial メソッドは消去され無コスト）=====
@@ -1665,7 +1665,7 @@ public partial class {{ item.class_name }} : EditModelBase
 {{ else }}    /// <summary>{{ p.property_name }} の確定値</summary>
     private {{ p.type_name }} {{ p.field_name }};
 {{ end }}
-    /// <summary>{{ p.property_name }} の画面入力文字列</summary>
+    /// <summary>{{ if p.description_xml_doc != "" }}{{ p.description_xml_doc }}{{ else }}{{ p.property_name }} の画面入力文字列{{ end }}</summary>
     private string {{ p.binding_field_name }} = {{ p.binding_field_initializer }};
 
     /// <summary>{{ p.property_name }} の確定値（外部からは読み取り専用）</summary>
@@ -1712,7 +1712,7 @@ public partial class {{ item.class_name }} : EditModelBase
     /// <summary>{{ p.property_name }} の確定値が変更された直後に呼ばれる（旧値・新値。partial 実装で処理を追加）</summary>
     partial void On{{ p.property_name }}Changed({{ p.type_name }} oldValue, {{ p.type_name }} newValue);
 
-    /// <summary>{{ p.property_name }} の画面入力用バインディング文字列（設定時に確定値へ変換）</summary>
+    /// <summary>{{ if p.description_xml_doc != "" }}{{ p.description_xml_doc }}{{ else }}{{ p.property_name }} の画面入力用バインディング文字列（設定時に確定値へ変換）{{ end }}</summary>
     public string {{ p.binding_property_name }}
     {
         get => {{ p.binding_field_name }};

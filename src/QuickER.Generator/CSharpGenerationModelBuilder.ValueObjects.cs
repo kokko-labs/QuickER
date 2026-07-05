@@ -107,6 +107,7 @@ internal sealed partial class CSharpGenerationModelBuilder
             InterfaceDeclaration = $"IValueObject<{className}, {valueType}>",
             IsGuidKey = isGuidKey,
             ColumnName = authoritative.Column.Name,
+            DescriptionXmlDoc = EscapeForXmlDocSummary(authoritative.Column.Description),
             MaxLength = maxLength,
             Precision = precision,
             Scale = scale,
@@ -136,6 +137,7 @@ internal sealed partial class CSharpGenerationModelBuilder
         return new CSharpEditModelPropertyModel
         {
             PropertyName = propertyName,
+            DescriptionXmlDoc = EscapeForXmlDocSummary(column.Description),
             TypeName = valueObject.ClassName + "?", // 確定値は常に NULL 許容
             FieldName = ToFieldName(propertyName),
             BindingPropertyName = bindingPropertyName,

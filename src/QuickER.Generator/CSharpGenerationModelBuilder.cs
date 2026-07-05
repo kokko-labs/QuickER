@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using QuickER.Model;
 
 namespace QuickER.Generator;
@@ -94,6 +95,7 @@ internal sealed partial class CSharpGenerationModelBuilder
             ClassName = className,
             TableName = entity.TableName,
             Description = entity.Description,
+            DescriptionXmlDoc = EscapeForXmlDocSummary(entity.Description),
             Properties = properties,
             Navigations = navigations.Select(BuildEntityNavigation).ToList(),
         };
@@ -113,6 +115,7 @@ internal sealed partial class CSharpGenerationModelBuilder
         {
             ClassName = className,
             TableName = entity.TableName,
+            DescriptionXmlDoc = EscapeForXmlDocSummary(entity.Description),
             Properties = properties,
             Navigations = navigationModels,
             HasCascadeNavigations = navigationModels.Any(navigation => navigation.Cascade),
@@ -269,6 +272,7 @@ internal sealed partial class CSharpGenerationModelBuilder
             // DB 定義メタ属性（[DbColumnMeta]）用。方言中立トークンと列の説明（型解決とは独立にモデルから引く）
             CanonicalTypeToken = typeInfo.CanonicalTypeToken,
             Description = column.Description,
+            DescriptionXmlDoc = EscapeForXmlDocSummary(column.Description),
             // 非 NULL の VO は妥当な空既定値を作れないため null! でロード前提を表明（NULL 許容 VO は初期化不要）
             Initializer = valueObject is not null
                 ? (column.IsNullable ? string.Empty : " = null!;")
@@ -334,6 +338,7 @@ internal sealed partial class CSharpGenerationModelBuilder
         return new CSharpEditModelPropertyModel
         {
             PropertyName = propertyName,
+            DescriptionXmlDoc = EscapeForXmlDocSummary(column.Description),
             TypeName = typeName,
             FieldName = fieldName,
             BindingPropertyName = bindingPropertyName,
@@ -614,4 +619,19 @@ internal sealed partial class CSharpGenerationModelBuilder
     /// <summary>警告レベルの診断情報を生成する</summary>
     private static GenerationDiagnostic Warning(string message) =>
         new() { Severity = GenerationDiagnosticSeverity.Warning, Message = message };
+
+    /// <summary>XML doc の summary へ説明文を安全に埋め込めるようエスケープする（&amp;/&lt;/&gt; エスケープ、改行は空白 1 つへ畳む）。空・空白のみは空文字列を返す</summary>
+    private static string EscapeForXmlDocSummary(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return string.Empty;
+        }
+
+        // & は最初にエスケープする（&lt; 等を二重エスケープしないため）
+        var escaped = text.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;");
+
+        // CRLF/LF/CR いずれの改行も空白 1 つへ畳む（summary は 1 行前提）
+        return Regex.Replace(escaped, "\r\n|\r|\n", " ");
+    }
 }

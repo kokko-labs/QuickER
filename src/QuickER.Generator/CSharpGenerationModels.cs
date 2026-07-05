@@ -146,6 +146,9 @@ internal sealed class CSharpValueObjectModel
     /// <summary>診断・エラーメッセージ用の代表カラム名</summary>
     public required string ColumnName { get; init; }
 
+    /// <summary>XML doc summary へ埋め込む列の説明（XML エスケープ・改行畳み込み済み）。空なら定型文へフォールバックする</summary>
+    public required string DescriptionXmlDoc { get; init; }
+
     /// <summary>string の最大長（自動 MaxLength 検証用）。無指定は null</summary>
     public int? MaxLength { get; init; }
 
@@ -167,6 +170,9 @@ internal sealed class CSharpClassModel
 
     /// <summary>テーブルの説明（DB 定義メタ属性 [DbTableMeta] の Description 用）。空なら属性ごと省略する</summary>
     public required string Description { get; init; }
+
+    /// <summary>XML doc summary へ埋め込むテーブルの説明（XML エスケープ・改行畳み込み済み）。空なら定型文へフォールバックする</summary>
+    public required string DescriptionXmlDoc { get; init; }
 
     /// <summary>スカラープロパティの生成モデル一覧</summary>
     public required IReadOnlyList<CSharpPropertyModel> Properties { get; init; }
@@ -224,6 +230,9 @@ internal sealed class CSharpPropertyModel
 
     /// <summary>カラムの説明（DB 定義メタ属性 [DbColumnMeta] の Description 用）。空なら named 引数ごと省略する</summary>
     public required string Description { get; init; }
+
+    /// <summary>XML doc summary へ埋め込む列の説明（XML エスケープ・改行畳み込み済み）。空なら定型文へフォールバックする</summary>
+    public required string DescriptionXmlDoc { get; init; }
 
     /// <summary>フィールド初期化子の式</summary>
     public required string Initializer { get; init; }
@@ -371,6 +380,9 @@ internal sealed class CSharpEditModelClassModel
     /// <summary>対応するテーブル名</summary>
     public required string TableName { get; init; }
 
+    /// <summary>XML doc summary へ埋め込むテーブルの説明（XML エスケープ・改行畳み込み済み）。空なら定型文へフォールバックする</summary>
+    public required string DescriptionXmlDoc { get; init; }
+
     /// <summary>EditModel のプロパティ生成モデル一覧</summary>
     public required IReadOnlyList<CSharpEditModelPropertyModel> Properties { get; init; }
 
@@ -390,6 +402,9 @@ internal sealed class CSharpEditModelPropertyModel
 {
     /// <summary>通常プロパティ名（例: CustomerId）</summary>
     public required string PropertyName { get; init; }
+
+    /// <summary>XML doc summary へ埋め込む列の説明（XML エスケープ・改行畳み込み済み）。空なら定型文へフォールバックする。フィールド・公開バインディングプロパティ両方のコメントで共用する</summary>
+    public required string DescriptionXmlDoc { get; init; }
 
     /// <summary>通常プロパティの型名（例: int, string?, Guid）</summary>
     public required string TypeName { get; init; }
