@@ -33,14 +33,75 @@ public sealed class CodeGenerationOptions
     public bool GenerateRepositories { get; init; } = true;
 
     /// <summary>
-    /// 自作 Repository の生成方言。生成時に固定される（tasks/todo.md の確定仕様）。
+    /// 自作 Repository の生成方言（後方互換の単一指定。実効値は <see cref="EffectiveRepositoryDialects"/> が解決する）。
     /// </summary>
     /// <remarks>
-    /// 自作 Repository は生成時に単一方言へ固定される（EF Core モードと同じく、DB 切替は再生成＋DI 差し替え）。
     /// 既定は <c>"sqlserver"</c>（現行の自作 SQL Server 実装）。テンプレートはこの値で方言別の識別子クォート・
-    /// ADO 型・SQL 句を吐き分ける。対応方言は <see cref="SupportedRepositoryDialects"/> を参照（GUI / CLI 共通）。
+    /// ADO 型・SQL 句を吐き分ける。複数方言を同時生成する場合は <see cref="RepositoryDialects"/> を使う。
+    /// 両者を指定した場合は <see cref="RepositoryDialects"/>（リスト）を優先する（設定ファイル・CLI 互換のため
+    /// 単一指定を残す）。対応方言は <see cref="SupportedRepositoryDialects"/> を参照（GUI / CLI 共通）。
     /// </remarks>
     public string RepositoryDialect { get; init; } = "sqlserver";
+
+    /// <summary>
+    /// 自作 Repository を同時生成する方言の一覧（複数指定で 1 回の生成に複数方言実装を同梱する）。
+    /// </summary>
+    /// <remarks>
+    /// <c>null</c> または空のときは後方互換のため <see cref="RepositoryDialect"/>（単一）へフォールバックする。
+    /// 指定時はこちらを優先する。実効値の解決・正規化（重複排除・未対応方言の検証）は
+    /// <see cref="EffectiveRepositoryDialects"/> に 1 箇所へ集約する。
+    /// </remarks>
+    public IReadOnlyList<string>? RepositoryDialects { get; init; }
+
+    /// <summary>
+    /// 実効的な自作 Repository 生成方言の一覧を解決する（唯一の正）。
+    /// </summary>
+    /// <remarks>
+    /// 解決規則:
+    /// <list type="number">
+    ///   <item><see cref="RepositoryDialects"/> が非空ならそれを、空/未指定なら <see cref="RepositoryDialect"/> の単一を採る（リスト優先）</item>
+    ///   <item>各要素を Trim し、空要素は除去する</item>
+    ///   <item>大文字小文字を無視して重複を除去する（初出の表記を保持し、指定順を維持する）</item>
+    ///   <item>未対応方言（<see cref="SupportedRepositoryDialects"/> 外）が含まれる場合は <see cref="ArgumentException"/> を投げる</item>
+    ///   <item>結果が空になった場合は既定 <c>"sqlserver"</c> の単一を返す（従来挙動の保険）</item>
+    /// </list>
+    /// </remarks>
+    public IReadOnlyList<string> EffectiveRepositoryDialects
+    {
+        get
+        {
+            var source = RepositoryDialects is { Count: > 0 }
+                ? RepositoryDialects
+                : [RepositoryDialect];
+
+            var resolved = new List<string>();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var raw in source)
+            {
+                var value = raw?.Trim();
+
+                if (string.IsNullOrEmpty(value))
+                {
+                    continue;
+                }
+
+                if (!SupportedRepositoryDialects.Contains(value, StringComparer.OrdinalIgnoreCase))
+                {
+                    throw new ArgumentException(
+                        $"未対応の Repository 方言: '{value}'。対応方言: {string.Join(", ", SupportedRepositoryDialects)}"
+                    );
+                }
+
+                if (seen.Add(value))
+                {
+                    resolved.Add(value);
+                }
+            }
+
+            return resolved.Count > 0 ? resolved : ["sqlserver"];
+        }
+    }
 
     /// <summary>
     /// 自作 Repository が対応する生成方言の一覧（プロバイダ名と同一の識別子。例: <c>"sqlserver"</c>, <c>"sqlite"</c>）。

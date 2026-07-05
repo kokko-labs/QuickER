@@ -230,10 +230,14 @@ public partial class MainViewModel
         try
         {
             var options = dialogResult.Options;
-            // 型解決（プロバイダ）→生成（Generator）の結合点は共有ファサードに集約し、CLI とドリフトさせない
+            // 型解決（プロバイダ）→生成（Generator）の結合点は共有ファサードに集約し、CLI とドリフトさせない。
+            // 自作 Repository の実効方言ごとに、レジストリから方言別の型マッパを解決して渡す
+            // （マルチ方言時は各方言バケットをその方言の型で解決し、単一方言時も同一経路で挙動は変わらない）。
             var diagram = ToDiagramModel();
+            var dialectMappers = ResolveDialectTypeMappers(options);
             var result = DiagramCodeGenerator.Generate(
                 CurrentProvider.TypeMapper,
+                dialectMappers,
                 diagram,
                 options
             );
@@ -287,6 +291,31 @@ public partial class MainViewModel
                 "エラー"
             );
         }
+    }
+
+    /// <summary>
+    /// 自作 Repository の実効方言（<see cref="CodeGenerationOptions.EffectiveRepositoryDialects"/>）ごとに、
+    /// プロバイダレジストリから方言別の型マッパを解決する。
+    /// </summary>
+    /// <remarks>
+    /// レジストリに存在しない方言名は除外し（<see cref="DiagramCodeGenerator"/> 側で図の方言の辞書へ代替される）、
+    /// 単一方言時も同じ経路を通るため挙動は変わらない。
+    /// </remarks>
+    private IReadOnlyDictionary<string, IColumnTypeMapper> ResolveDialectTypeMappers(
+        CodeGenerationOptions options
+    )
+    {
+        var mappers = new Dictionary<string, IColumnTypeMapper>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var dialect in options.EffectiveRepositoryDialects)
+        {
+            if (_providers.TryGet(dialect, out var provider))
+            {
+                mappers[dialect] = provider.TypeMapper;
+            }
+        }
+
+        return mappers;
     }
 
     /// <summary>コード生成の診断（警告・エラー）を 1 つのメッセージ文字列へ整形する</summary>

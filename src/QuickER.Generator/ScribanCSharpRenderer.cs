@@ -28,14 +28,31 @@ internal sealed class RenderScope
     /// <summary>Mapper クラスを出力するか</summary>
     public required bool Mappers { get; init; }
 
-    /// <summary>Repository バケット（共通契約＋自作 SQL Server 実装）を出力するか</summary>
-    public required bool Repositories { get; init; }
-
     /// <summary>EF Core 用コード（DbContext・構成）を出力するか</summary>
     public required bool EfCore { get; init; }
 
-    /// <summary>自作 SQL Server 実装（SqlClient 依存）を出力するか。Repository バケット内でこのフラグにより契約と実装を出し分ける</summary>
-    public required bool SqlServerImpl { get; init; }
+    /// <summary>自作 Repository の方言別実装（ADO 依存）を出力するか。Repository バケット内でこのフラグにより契約と実装を出し分ける</summary>
+    public required bool RepositoryImpl { get; init; }
+
+    /// <summary>共通契約（インターフェイス・SqlQuery・メタデータ等）を出力するか</summary>
+    /// <remarks>
+    /// 単一方言時は Repository バケットで契約＋実装を同一スコープに出す（true）。マルチ方言時は契約スペックのみ true、
+    /// 方言実装スペックは false（契約は 1 回だけ出し、実装は各方言スペックが出す）。
+    /// </remarks>
+    public required bool RenderContract { get; init; }
+
+    /// <summary>このスコープがレンダリングする自作 Repository の方言（"sqlserver" / "sqlite"）</summary>
+    public required string Dialect { get; init; }
+
+    /// <summary>マルチ方言レイアウト（実効方言 2 つ以上）かどうか。DI 拡張の方言別名＋keyed 版の出し分けに使う</summary>
+    public required bool MultiDialect { get; init; }
+
+    /// <summary>名前空間をブロック形式（<c>namespace X { ... }</c>）で出力するか。非分割マルチ方言で同一ファイルへ複数 namespace を連結するときに true</summary>
+    public required bool BlockNamespace { get; init; }
+
+    /// <summary>ファイル冒頭のヘッダ（<c>// &lt;auto-generated /&gt;</c>・<c>#nullable enable</c>・using）を出力するか</summary>
+    /// <remarks>1 ファイルに複数スペックを連結する場合、2 つ目以降はヘッダを出さず using は先頭スペックへ集約する</remarks>
+    public required bool RenderHeader { get; init; }
 }
 
 /// <summary>生成モデルを Scriban テンプレートで C# ソースコードへレンダリングするレンダラー</summary>
@@ -110,16 +127,24 @@ internal sealed class ScribanCSharpRenderer
         // 変数参照へ置き換えてもレンダリング結果は変わらないため、sqlserver 出力はバイト不変を保つ。
         // 塊で異なる領域（FOR JSON プランナ vs マルチクエリ Include・OFFSET/FETCH vs LIMIT/OFFSET・
         // SqlParameter 型付け等）はテンプレート側で {{ if repository_dialect == "sqlserver" }} ／ else により出し分ける。
-        var dialect = new RepositoryDialectVariables(options.RepositoryDialect);
+        // 方言はスコープから受け取る（マルチ方言時は方言実装スペックごとに異なる。単一方言時は実効単一方言）。
+        var dialect = new RepositoryDialectVariables(scope.Dialect);
 
         // SqlColumnType 属性は Entity プロパティに DB 列のメタ情報（SqlDbType・Size・Precision・Scale）を載せる。
         // ランタイムの EntitySaveMetadata が明示 SqlParameter を組み立てるのに使うほか、利用者コードが列メタ情報
         // （最大長・桁数）を参照する用途も兼ねるため、Repository 生成時 または IncludeDataAnnotations 時のいずれか、
         // かつ SqlDbType が判明したプロパティが 1 つでもある場合に属性定義と付与を出力する。
-        // [SqlColumnType]（System.Data.SqlDbType）は SQL Server 専用の意味を持つため、sqlserver 方言のときのみ出力する
-        // （SQLite は CLR 型から SqliteType を導出でき属性不要。生成物に SqlDbType 依存を出さない）。
+        // [SqlColumnType]（System.Data.SqlDbType）は SQL Server 専用の意味を持つため、sqlserver が生成対象方言に
+        // 含まれるときのみ出力する（SQLite は CLR 型から SqliteType を導出でき属性不要。生成物に SqlDbType 依存を出さない）。
+        // マルチ方言で図の方言が非 sqlserver でも、sqlserver 実装が属性を要するため「sqlserver がターゲットに含まれるか」で判定する
+        // （SqlDbTypeName は sqlserver 辞書からサービス側で共有 Entity へ補完済み）。属性の定義・付与は Entity/Runtime を
+        // 出力するスペックで行うため、方言実装スペック（Entity を出さない）ではこの条件が空振りして無害。
+        var sqlServerInTargets = options.EffectiveRepositoryDialects.Contains(
+            "sqlserver",
+            StringComparer.OrdinalIgnoreCase
+        );
         var emitSqlColumnTypeAttr =
-            dialect.Dialect == "sqlserver"
+            sqlServerInTargets
             && (options.GenerateRepositories || options.IncludeDataAnnotations)
             && model.EntityClasses.Any(c => c.Properties.Any(p => p.SqlDbTypeName is not null));
 
@@ -129,6 +154,15 @@ internal sealed class ScribanCSharpRenderer
         {
             ["namespace_name"] = scope.NamespaceName,
             ["usings"] = scope.Usings,
+            // ファイルヘッダ（auto-generated・using）と namespace 形式（file-scoped / block）の出し分け。
+            // 単一スペックのファイルは render_header=true・block_namespace=false で従来出力（バイト不変）。
+            // 非分割マルチ方言で 1 ファイルへ複数 namespace を連結するときは、先頭スペックのみヘッダを出し
+            // 各スペックを block namespace で包む。
+            ["render_header"] = scope.RenderHeader,
+            ["block_namespace"] = scope.BlockNamespace,
+            // マルチ方言レイアウトかどうかと、DI 拡張の方言別サフィックス（SqlServer / Sqlite）
+            ["multi_dialect"] = scope.MultiDialect,
+            ["dialect_di_suffix"] = GeneratedFilePlanner.DialectNamespaceSuffix(scope.Dialect),
             ["entity_classes"] = model.EntityClasses,
             ["edit_model_classes"] = model.EditModelClasses,
             ["mapper_classes"] = model.MapperClasses,
@@ -147,14 +181,14 @@ internal sealed class ScribanCSharpRenderer
             ["render_entities"] = scope.Entities,
             ["render_edit_models"] = scope.EditModels,
             ["render_mappers"] = scope.Mappers,
-            ["render_repositories"] = scope.Repositories,
             ["render_ef_core"] = scope.EfCore,
             // 共通契約（インターフェイス・SqlQuery・メタデータ・グラフセーバ・RawSqlMapper 等）を出力するか。
-            // 契約は Repository バケットに属し、分割時も Repository バケットのファイルにのみ出力する（EF 側は using で参照）
-            ["render_contract"] = scope.Repositories,
-            // 自作 SQL Server 実装（SqlClient 依存）を出力するか。Repository バケット内でこのフラグにより契約と実装を出し分ける
-            // （EF 単独出力＝false のとき SqlClient 依存のコードを一切生成しない）
-            ["repositories"] = scope.SqlServerImpl,
+            // 契約は Repository バケットに属し、分割時も Repository バケットのファイルにのみ出力する（EF 側は using で参照）。
+            // マルチ方言時は契約スペックのみ true・方言実装スペックは false（契約は 1 回だけ出す）
+            ["render_contract"] = scope.RenderContract,
+            // 自作 Repository の方言別実装（ADO 依存）を出力するか。Repository バケット内でこのフラグにより契約と実装を出し分ける
+            // （EF 単独出力＝false のとき ADO 依存のコードを一切生成しない）
+            ["repositories"] = scope.RepositoryImpl,
             // 自作 Repository の生成方言と方言別プリミティブ（識別子クォート・ADO 型名）。
             ["repository_dialect"] = dialect.Dialect,
             ["quote_open"] = dialect.QuoteOpen,
@@ -168,6 +202,7 @@ internal sealed class ScribanCSharpRenderer
             ["sql_transaction_type"] = dialect.TransactionType,
             ["connection_factory_impl_type"] = dialect.ConnectionFactoryImplType,
             ["repository_base_class"] = dialect.RepositoryBaseClass,
+            ["sql_query_executor_class"] = dialect.SqlQueryExecutorClass,
         };
 
         // テンプレートは本ライブラリ内に固定で持つ信頼済みのものであり、ループ回数・出力量は ER 図の規模に
@@ -228,6 +263,7 @@ internal sealed class RepositoryDialectVariables
                 TransactionType = "SqliteTransaction";
                 ConnectionFactoryImplType = "SqliteConnectionFactory";
                 RepositoryBaseClass = "SqliteRepository";
+                SqlQueryExecutorClass = "SqliteSqlQueryExecutor";
                 break;
 
             default:
@@ -242,6 +278,7 @@ internal sealed class RepositoryDialectVariables
                 TransactionType = "SqlTransaction";
                 ConnectionFactoryImplType = "SqlConnectionFactory";
                 RepositoryBaseClass = "SqlServerRepository";
+                SqlQueryExecutorClass = "SqlServerSqlQueryExecutor";
                 break;
         }
     }
@@ -281,4 +318,7 @@ internal sealed class RepositoryDialectVariables
 
     /// <summary>Repository 基底クラス名（SQL Server: <c>SqlServerRepository</c>、SQLite: <c>SqliteRepository</c>）</summary>
     public string RepositoryBaseClass { get; }
+
+    /// <summary>SqlQuery の ADO 実行器クラス名（SQL Server: <c>SqlServerSqlQueryExecutor</c>、SQLite: <c>SqliteSqlQueryExecutor</c>）</summary>
+    public string SqlQueryExecutorClass { get; }
 }

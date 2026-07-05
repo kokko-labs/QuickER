@@ -283,10 +283,28 @@
               Content="Repository (QuickER)"
               GroupName="DbAccess"
               IsChecked="{Binding DbAccessRepository}"
-              IsEnabled="{Binding CanSelectQuickErRepository}"
-              ToolTipService.ShowOnDisabled="True"
               ToolTip="{Binding QuickErRepositoryToolTip}"
             />
+          </StackPanel>
+        </Grid>
+
+        <!-- 自作 Repository の対象方言（Repository (QuickER) 選択時のみ表示。表示順固定: SQL Server → SQLite） -->
+        <Grid
+          Margin="0,10,0,0"
+          Visibility="{Binding ShowRepositoryDialectTargets, Converter={StaticResource BoolToVisibilityConverter}}"
+        >
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="96" />
+            <ColumnDefinition Width="*" />
+          </Grid.ColumnDefinitions>
+          <TextBlock Grid.Column="0" Style="{StaticResource FieldLabel}" Text="対象方言" />
+          <StackPanel Grid.Column="1" Orientation="Horizontal">
+            <CheckBox
+              Margin="0,0,18,0"
+              Content="SQL Server"
+              IsChecked="{Binding TargetSqlServer}"
+            />
+            <CheckBox Content="SQLite" IsChecked="{Binding TargetSqlite}" />
           </StackPanel>
         </Grid>
       </StackPanel>

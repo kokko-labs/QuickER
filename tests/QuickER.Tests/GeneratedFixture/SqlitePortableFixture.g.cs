@@ -3926,7 +3926,7 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
     }
 
     /// <summary>検索条件・並び順・Include をチェーン指定して取得するクエリを開始する</summary>
-    public SqlQuery<TEntity> Query() => new(_connectionFactory);
+    public SqlQuery<TEntity> Query() => new(new SqliteSqlQueryExecutor<TEntity>(_connectionFactory));
 
     /// <summary>RowState に従って 1 トランザクションで追加・更新・削除を保存する（既定で子をカスケード）</summary>
     public async Task<int> SaveAsync(
@@ -4084,15 +4084,19 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
 /// <param name="ColumnName">角括弧なしの対象カラム名。列を特定できない場合は null</param>
 internal readonly record struct SqlQueryParameter(string Name, object? Value, string? ColumnName);
 
-/// <summary>SqlQuery の 1 並び順（キー選択式と降順フラグ）。EF モードで式木のまま捕捉する</summary>
+/// <summary>SqlQuery の 1 並び順（キー選択式と降順フラグ）。式木のまま捕捉し、実行器側で列名／SQL へ翻訳する</summary>
 /// <param name="KeySelector">キー選択のラムダ式（object? への boxing を含み得る。実行器側で剥がす）</param>
 /// <param name="Descending">降順かどうか</param>
 internal readonly record struct SqlQueryOrdering(LambdaExpression KeySelector, bool Descending);
 
 /// <summary>
 /// SqlQuery が蓄積した内容（Where 式・並び順・Include ツリー・ページング）を
-/// 別バックエンドの実行器へ引き渡すためのスナップショット（BCL 型のみで構成）。
+/// 実行器へ引き渡すための方言中立なスナップショット（BCL 型のみで構成）。
 /// </summary>
+/// <remarks>
+/// 述語・並び順は式木のまま保持し、SQL への翻訳（識別子クォート・日付部品・LIKE 等の方言差）と実行は
+/// 各バックエンドの <see cref="ISqlQueryExecutor{TEntity}"/> 実装（ADO 方言別実行器・EF Core 実行器）の責務とする。
+/// </remarks>
 /// <param name="Predicates">Where で捕捉した述語式（AND 結合）</param>
 /// <param name="Orderings">OrderBy / OrderByDescending で捕捉した並び順（指定順）</param>
 /// <param name="Includes">Include / ThenInclude のナビゲーションツリー</param>
@@ -4107,8 +4111,9 @@ internal sealed record SqlQueryPlan<TEntity>(
 );
 
 /// <summary>
-/// SqlQuery の終端メソッドの実行を差し替える内部抽象。SQL Server 版（FOR JSON）以外の
-/// バックエンド（EF Core 版 Repository）が実装し、SqlQuery へコンストラクタ経由で注入する。
+/// SqlQuery の終端メソッドの実行を差し替える内部抽象。各バックエンド（ADO 方言別実行器・EF Core 版）が
+/// 実装し、SqlQuery へコンストラクタ経由で注入する。SqlQuery 自身は方言 SQL を持たず、捕捉した
+/// プラン（式木・Include・ページング）をこの実行器へ委譲する。
 /// </summary>
 internal interface ISqlQueryExecutor<TEntity>
     where TEntity : class
@@ -4141,83 +4146,49 @@ internal interface ISqlQueryExecutor<TEntity>
 
 /// <summary>検索条件・並び順・Include をチェーンで構築し、終端メソッド（ToListAsync 等）で実行するクエリ</summary>
 /// <remarks>
-/// SQLite 版はルートをプレーン SELECT で実体化し、Include は親子を IN 句のマルチクエリで引いてメモリで組み立てる。
-/// EF 版（別バックエンド実行器を注入）では捕捉した式木を EF が各方言へ翻訳する。
-/// 条件・並び順・Include はラムダ式で指定。値はパラメータ化、列名はメタデータ由来でインジェクション対策済み。
+/// 述語・並び順・Include はラムダ式（式木）のまま捕捉し、SQL への翻訳・実行は注入された
+/// <see cref="ISqlQueryExecutor{TEntity}"/> 実装（ADO 方言別実行器 or EF Core 実行器）へ委譲する。
+/// SqlQuery 自身は方言 SQL を一切持たない（方言差は実行器側に閉じる）。
 /// </remarks>
 public sealed class SqlQuery<TEntity>
     where TEntity : class
 {
-
-    private readonly ISqlConnectionFactory _connectionFactory;
-    private readonly List<string> _conditions = new();
-    private readonly List<string> _orderings = new();
-    private readonly List<SqlQueryParameter> _parameters = new();
     private readonly List<IncludeNode> _includes = new();
     private int? _take;
     private int? _skip;
 
-    /// <summary>別バックエンドの実行器（null なら従来どおり SQL Server の FOR JSON 実行）</summary>
-    private readonly ISqlQueryExecutor<TEntity>? _executor;
+    /// <summary>終端メソッドの実行を担うバックエンド実行器（ADO 方言別 or EF Core）</summary>
+    private readonly ISqlQueryExecutor<TEntity> _executor;
 
-    /// <summary>EF モードで捕捉した Where 式（翻訳せず式木のまま保持し、実行時に EF が各方言へ翻訳する）</summary>
+    /// <summary>捕捉した Where 式（翻訳せず式木のまま保持し、実行器が SQL / LINQ へ翻訳する）</summary>
     private readonly List<LambdaExpression> _predicates = new();
 
-    /// <summary>EF モードで捕捉した並び順（キー選択式と降順フラグ）</summary>
+    /// <summary>捕捉した並び順（キー選択式と降順フラグ）</summary>
     private readonly List<SqlQueryOrdering> _orderSelectors = new();
 
-    internal SqlQuery(ISqlConnectionFactory connectionFactory) =>
-        _connectionFactory = connectionFactory;
-
-    /// <summary>別バックエンドの実行器（EF Core 版）でクエリを実行する内部コンストラクタ</summary>
-    internal SqlQuery(ISqlQueryExecutor<TEntity> executor)
-    {
-        _executor = executor;
-        // SQL Server パスは終端メソッドの分岐で到達しないため、接続ファクトリは未使用
-        _connectionFactory = null!;
-    }
-
-    private static string TableName => EntitySaveMetadata.For(typeof(TEntity)).TableName;
+    /// <summary>バックエンド実行器を注入する内部コンストラクタ</summary>
+    internal SqlQuery(ISqlQueryExecutor<TEntity> executor) => _executor = executor;
 
     /// <summary>検索条件を追加する（複数指定は AND 結合）</summary>
     public SqlQuery<TEntity> Where(Expression<Func<TEntity, bool>> predicate)
     {
         ArgumentNullException.ThrowIfNull(predicate);
-
-        // EF モードでは自作トランスレータを通さず式木のまま捕捉する（表現力を EF の翻訳能力に委ねる）
-        if (_executor is not null)
-        {
-            _predicates.Add(predicate);
-            return this;
-        }
-
-        _conditions.Add(SqlExpressionTranslator.ToCondition(predicate.Body, _parameters));
+        // 式木のまま捕捉し、SQL / LINQ への翻訳は実行器に委ねる
+        _predicates.Add(predicate);
         return this;
     }
 
     /// <summary>昇順の並び順を追加する</summary>
     public SqlQuery<TEntity> OrderBy(Expression<Func<TEntity, object?>> keySelector)
     {
-        if (_executor is not null)
-        {
-            _orderSelectors.Add(new SqlQueryOrdering(keySelector, Descending: false));
-            return this;
-        }
-
-        _orderings.Add(SqlExpressionTranslator.ToColumn(keySelector) + " ASC");
+        _orderSelectors.Add(new SqlQueryOrdering(keySelector, Descending: false));
         return this;
     }
 
     /// <summary>降順の並び順を追加する</summary>
     public SqlQuery<TEntity> OrderByDescending(Expression<Func<TEntity, object?>> keySelector)
     {
-        if (_executor is not null)
-        {
-            _orderSelectors.Add(new SqlQueryOrdering(keySelector, Descending: true));
-            return this;
-        }
-
-        _orderings.Add(SqlExpressionTranslator.ToColumn(keySelector) + " DESC");
+        _orderSelectors.Add(new SqlQueryOrdering(keySelector, Descending: true));
         return this;
     }
 
@@ -4258,221 +4229,29 @@ public sealed class SqlQuery<TEntity>
     /// <summary>条件に一致するエンティティを（Include 指定分とともに）一覧取得する</summary>
     public async Task<IReadOnlyList<TEntity>> ToListAsync(
         CancellationToken cancellationToken = default
-    )
-    {
-        if (_executor is not null)
-        {
-            return await _executor.ToListAsync(BuildPlan(), cancellationToken);
-        }
-
-        await using var connection = _connectionFactory.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
-
-        // ルートをプレーン SELECT で実体化し、Include はメモリで親子を組み立てるマルチクエリで解決する
-        var roots = await MaterializeRootsAsync(connection, _take, _skip, cancellationToken);
-        await IncludeLoader
-            .For(typeof(TEntity))
-            .LoadAsync(roots, _includes, connection, cancellationToken);
-        return roots;
-    }
+    ) => await _executor.ToListAsync(BuildPlan(), cancellationToken);
 
     /// <summary>条件に一致する先頭の 1 件を（Include 指定分とともに）取得する（該当なしは null）</summary>
-    public async Task<TEntity?> FirstOrDefaultAsync(CancellationToken cancellationToken = default)
-    {
-        if (_executor is not null)
-        {
-            return await _executor.FirstOrDefaultAsync(BuildPlan(), cancellationToken);
-        }
-
-        await using var connection = _connectionFactory.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
-
-        // 先頭 1 件だけ実体化し（LIMIT 1）、Include はその 1 件に対して解決する
-        var roots = await MaterializeRootsAsync(connection, take: 1, _skip, cancellationToken);
-        if (roots.Count == 0)
-        {
-            return null;
-        }
-
-        await IncludeLoader
-            .For(typeof(TEntity))
-            .LoadAsync(roots, _includes, connection, cancellationToken);
-        return roots[0];
-    }
+    public async Task<TEntity?> FirstOrDefaultAsync(CancellationToken cancellationToken = default) =>
+        await _executor.FirstOrDefaultAsync(BuildPlan(), cancellationToken);
 
     /// <summary>条件に一致する件数を取得する</summary>
-    public async Task<int> CountAsync(CancellationToken cancellationToken = default)
-    {
-        if (_executor is not null)
-        {
-            return await _executor.CountAsync(BuildPlan(), cancellationToken);
-        }
-
-        await using var connection = _connectionFactory.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
-
-        await using var command = CreateCommand(
-            connection,
-            $"SELECT COUNT(*) FROM {TableName}{BuildWhereClause()};"
-        );
-        var result = await command.ExecuteScalarAsync(cancellationToken);
-        return Convert.ToInt32(result);
-    }
+    public async Task<int> CountAsync(CancellationToken cancellationToken = default) =>
+        await _executor.CountAsync(BuildPlan(), cancellationToken);
 
     /// <summary>条件に一致するレコードが存在するかを取得する</summary>
-    public async Task<bool> AnyAsync(CancellationToken cancellationToken = default)
-    {
-        if (_executor is not null)
-        {
-            return await _executor.AnyAsync(BuildPlan(), cancellationToken);
-        }
-
-        await using var connection = _connectionFactory.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
-
-        await using var command = CreateCommand(
-            connection,
-            $"SELECT CASE WHEN EXISTS (SELECT 1 FROM {TableName}{BuildWhereClause()}) THEN 1 ELSE 0 END;"
-        );
-        var result = await command.ExecuteScalarAsync(cancellationToken);
-        return Convert.ToInt32(result) != 0;
-    }
+    public async Task<bool> AnyAsync(CancellationToken cancellationToken = default) =>
+        await _executor.AnyAsync(BuildPlan(), cancellationToken);
 
     /// <summary>条件に一致する行を一括削除する。cascadeDelete=true で子孫も FK 連鎖で削除する</summary>
     public async Task<int> ExecuteDeleteAsync(
         bool cascadeDelete = false,
         CancellationToken cancellationToken = default
-    )
-    {
-        if (_executor is not null)
-        {
-            return await _executor.ExecuteDeleteAsync(BuildPlan(), cascadeDelete, cancellationToken);
-        }
-
-        var whereClause = BuildWhereClause();
-
-        await using var connection = _connectionFactory.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
-
-        if (!cascadeDelete)
-        {
-            await using var command = CreateCommand(
-                connection,
-                $"DELETE FROM {TableName}{whereClause};"
-            );
-            return await command.ExecuteNonQueryAsync(cancellationToken);
-        }
-
-        // カスケード: 子孫→本体の順に並んだ DELETE 文群を 1 トランザクションで実行する
-        await using var transaction = (SqliteTransaction)
-            await connection.BeginTransactionAsync(cancellationToken);
-
-        try
-        {
-            var rows = 0;
-
-            foreach (
-                var sql in CascadeDeletePlanner.BuildDeleteStatements(
-                    typeof(TEntity),
-                    TableName,
-                    whereClause
-                )
-            )
-            {
-                await using var command = new SqliteCommand(sql, connection, transaction);
-                AddParameters(command);
-                rows += await command.ExecuteNonQueryAsync(cancellationToken);
-            }
-
-            await transaction.CommitAsync(cancellationToken);
-            return rows;
-        }
-        catch
-        {
-            await transaction.RollbackAsync(cancellationToken);
-            throw;
-        }
-    }
+    ) => await _executor.ExecuteDeleteAsync(BuildPlan(), cascadeDelete, cancellationToken);
 
     /// <summary>捕捉済みの式・Include ツリー・ページングを、実行器へ渡すスナップショットへ固める</summary>
     private SqlQueryPlan<TEntity> BuildPlan() =>
         new(_predicates, _orderSelectors, _includes, _take, _skip);
-
-    /// <summary>ルートをプレーン SELECT で取得し、DataReader で実体化する（Include 前のルート集合）</summary>
-    private async Task<List<TEntity>> MaterializeRootsAsync(
-        SqliteConnection connection,
-        int? take,
-        int? skip,
-        CancellationToken cancellationToken
-    )
-    {
-        var metadata = EntitySaveMetadata.For(typeof(TEntity));
-        var sql =
-            $"SELECT {metadata.ColumnList} FROM {TableName}{BuildWhereClause()}{BuildOrderAndPaging(take, skip)};";
-
-        await using var command = CreateCommand(connection, sql);
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-
-        var roots = new List<TEntity>();
-        while (await reader.ReadAsync(cancellationToken))
-        {
-            roots.Add((TEntity)(object)metadata.MapEntityObject(reader));
-        }
-
-        return roots;
-    }
-
-    /// <summary>ORDER BY / LIMIT・OFFSET 句を組み立てる（SQLite はスキップのみの場合 LIMIT -1 で全件を許可する）</summary>
-    private string BuildOrderAndPaging(int? take, int? skip)
-    {
-        var ordering =
-            _orderings.Count == 0 ? string.Empty : " ORDER BY " + string.Join(", ", _orderings);
-
-        if (take.HasValue && skip.HasValue)
-        {
-            return $"{ordering} LIMIT {take.Value} OFFSET {skip.Value}";
-        }
-
-        if (take.HasValue)
-        {
-            return $"{ordering} LIMIT {take.Value}";
-        }
-
-        if (skip.HasValue)
-        {
-            // OFFSET には LIMIT が必須。全件を読み飛ばし以降取得するため上限なしの LIMIT -1 を添える
-            return $"{ordering} LIMIT -1 OFFSET {skip.Value}";
-        }
-
-        return ordering;
-    }
-
-    /// <summary>蓄積したパラメータを設定したコマンドを生成する</summary>
-    private SqliteCommand CreateCommand(SqliteConnection connection, string sql)
-    {
-        var command = new SqliteCommand(sql, connection);
-        AddParameters(command);
-        return command;
-    }
-
-    /// <summary>蓄積した条件パラメータをコマンドへ設定する</summary>
-    /// <remarks>
-    /// SQLite は Microsoft.Data.Sqlite の既定変換に委ねるため、いずれも AddWithValue で束縛する。
-    /// </remarks>
-    private void AddParameters(SqliteCommand command)
-    {
-        var metadata = EntitySaveMetadata.For(typeof(TEntity));
-        foreach (var parameter in _parameters)
-        {
-            var value =
-                SqlParameterValue.Unwrap(parameter.Value);
-            metadata.AddQueryParameter(command, parameter.Name, parameter.ColumnName, value);
-        }
-    }
-
-    /// <summary>WHERE 句を組み立てる（条件なしは空文字）</summary>
-    private string BuildWhereClause() =>
-        _conditions.Count == 0 ? string.Empty : " WHERE " + string.Join(" AND ", _conditions);
 }
 
 /// <summary>Include の対象ナビゲーションと、その配下（ThenInclude）の木構造</summary>
@@ -4588,6 +4367,292 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
     /// <summary>条件に一致するレコードが存在するかを取得する</summary>
     public Task<bool> AnyAsync(CancellationToken cancellationToken = default) =>
         _query.AnyAsync(cancellationToken);
+}
+
+/// <summary>
+/// <see cref="SqlQuery{TEntity}"/> の SQLite 向け ADO 実行器。
+/// プランの述語・並び順を <see cref="SqlExpressionTranslator"/> で SQL へ翻訳し、
+/// ルートをプレーン SELECT で実体化し、Include は親子を IN 句のマルチクエリで引いてメモリで組み立てる。
+/// </summary>
+/// <remarks>
+/// 方言 SQL（識別子クォート・SELECT 構文・ページング句）はこの実行器に閉じる。
+/// SqlQuery は方言中立の <see cref="SqlQueryPlan{TEntity}"/> を渡すだけで、方言差はここでのみ吸収する。
+/// </remarks>
+internal sealed class SqliteSqlQueryExecutor<TEntity>(ISqlConnectionFactory connectionFactory)
+    : ISqlQueryExecutor<TEntity>
+    where TEntity : EntityBase
+{
+    /// <summary>SQL 接続の生成元</summary>
+    private readonly ISqlConnectionFactory _connectionFactory = connectionFactory;
+
+    private static string TableName => EntitySaveMetadata.For(typeof(TEntity)).TableName;
+
+    /// <summary>条件に一致するエンティティを（Include 指定分とともに）一覧取得する</summary>
+    public async Task<IReadOnlyList<TEntity>> ToListAsync(
+        SqlQueryPlan<TEntity> plan,
+        CancellationToken cancellationToken
+    )
+    {
+        var parameters = new List<SqlQueryParameter>();
+        var whereClause = BuildWhereClause(plan, parameters);
+        await using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        // ルートをプレーン SELECT で実体化し、Include はメモリで親子を組み立てるマルチクエリで解決する
+        var roots = await MaterializeRootsAsync(
+            connection,
+            plan,
+            whereClause,
+            parameters,
+            plan.Take,
+            plan.Skip,
+            cancellationToken
+        );
+        await IncludeLoader
+            .For(typeof(TEntity))
+            .LoadAsync(roots, plan.Includes, connection, cancellationToken);
+        return roots;
+    }
+
+    /// <summary>条件に一致する先頭の 1 件を（Include 指定分とともに）取得する（該当なしは null）</summary>
+    public async Task<TEntity?> FirstOrDefaultAsync(
+        SqlQueryPlan<TEntity> plan,
+        CancellationToken cancellationToken
+    )
+    {
+        var parameters = new List<SqlQueryParameter>();
+        var whereClause = BuildWhereClause(plan, parameters);
+        await using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        // 先頭 1 件だけ実体化し（LIMIT 1）、Include はその 1 件に対して解決する
+        var roots = await MaterializeRootsAsync(
+            connection,
+            plan,
+            whereClause,
+            parameters,
+            take: 1,
+            plan.Skip,
+            cancellationToken
+        );
+        if (roots.Count == 0)
+        {
+            return null;
+        }
+
+        await IncludeLoader
+            .For(typeof(TEntity))
+            .LoadAsync(roots, plan.Includes, connection, cancellationToken);
+        return roots[0];
+    }
+
+    /// <summary>条件に一致する件数を取得する（並び順・ページング・Include は関与しない）</summary>
+    public async Task<int> CountAsync(SqlQueryPlan<TEntity> plan, CancellationToken cancellationToken)
+    {
+        var parameters = new List<SqlQueryParameter>();
+        var whereClause = BuildWhereClause(plan, parameters);
+
+        await using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        await using var command = CreateCommand(
+            connection,
+            $"SELECT COUNT(*) FROM {TableName}{whereClause};",
+            parameters
+        );
+        var result = await command.ExecuteScalarAsync(cancellationToken);
+        return Convert.ToInt32(result);
+    }
+
+    /// <summary>条件に一致するレコードが存在するかを取得する（並び順・ページング・Include は関与しない）</summary>
+    public async Task<bool> AnyAsync(SqlQueryPlan<TEntity> plan, CancellationToken cancellationToken)
+    {
+        var parameters = new List<SqlQueryParameter>();
+        var whereClause = BuildWhereClause(plan, parameters);
+
+        await using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        await using var command = CreateCommand(
+            connection,
+            $"SELECT CASE WHEN EXISTS (SELECT 1 FROM {TableName}{whereClause}) THEN 1 ELSE 0 END;",
+            parameters
+        );
+        var result = await command.ExecuteScalarAsync(cancellationToken);
+        return Convert.ToInt32(result) != 0;
+    }
+
+    /// <summary>条件に一致する行を一括削除する。cascadeDelete=true で子孫も FK 連鎖で削除する</summary>
+    public async Task<int> ExecuteDeleteAsync(
+        SqlQueryPlan<TEntity> plan,
+        bool cascadeDelete,
+        CancellationToken cancellationToken
+    )
+    {
+        var parameters = new List<SqlQueryParameter>();
+        var whereClause = BuildWhereClause(plan, parameters);
+
+        await using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        if (!cascadeDelete)
+        {
+            await using var command = CreateCommand(
+                connection,
+                $"DELETE FROM {TableName}{whereClause};",
+                parameters
+            );
+            return await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        // カスケード: 子孫→本体の順に並んだ DELETE 文群を 1 トランザクションで実行する
+        await using var transaction = (SqliteTransaction)
+            await connection.BeginTransactionAsync(cancellationToken);
+
+        try
+        {
+            var rows = 0;
+
+            foreach (
+                var sql in CascadeDeletePlanner.BuildDeleteStatements(
+                    typeof(TEntity),
+                    TableName,
+                    whereClause
+                )
+            )
+            {
+                await using var command = new SqliteCommand(sql, connection, transaction);
+                AddParameters(command, parameters);
+                rows += await command.ExecuteNonQueryAsync(cancellationToken);
+            }
+
+            await transaction.CommitAsync(cancellationToken);
+            return rows;
+        }
+        catch
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            throw;
+        }
+    }
+
+    /// <summary>ルートをプレーン SELECT で取得し、DataReader で実体化する（Include 前のルート集合）</summary>
+    private async Task<List<TEntity>> MaterializeRootsAsync(
+        SqliteConnection connection,
+        SqlQueryPlan<TEntity> plan,
+        string whereClause,
+        IReadOnlyList<SqlQueryParameter> parameters,
+        int? take,
+        int? skip,
+        CancellationToken cancellationToken
+    )
+    {
+        var metadata = EntitySaveMetadata.For(typeof(TEntity));
+        var sql =
+            $"SELECT {metadata.ColumnList} FROM {TableName}{whereClause}{BuildOrderAndPaging(plan, take, skip)};";
+
+        await using var command = CreateCommand(connection, sql, parameters);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+
+        var roots = new List<TEntity>();
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            roots.Add((TEntity)(object)metadata.MapEntityObject(reader));
+        }
+
+        return roots;
+    }
+
+    /// <summary>ORDER BY / LIMIT・OFFSET 句を組み立てる（SQLite はスキップのみの場合 LIMIT -1 で全件を許可する）</summary>
+    private static string BuildOrderAndPaging(SqlQueryPlan<TEntity> plan, int? take, int? skip)
+    {
+        var orderings = BuildOrderings(plan);
+        var ordering =
+            orderings.Count == 0 ? string.Empty : " ORDER BY " + string.Join(", ", orderings);
+
+        if (take.HasValue && skip.HasValue)
+        {
+            return $"{ordering} LIMIT {take.Value} OFFSET {skip.Value}";
+        }
+
+        if (take.HasValue)
+        {
+            return $"{ordering} LIMIT {take.Value}";
+        }
+
+        if (skip.HasValue)
+        {
+            // OFFSET には LIMIT が必須。全件を読み飛ばし以降取得するため上限なしの LIMIT -1 を添える
+            return $"{ordering} LIMIT -1 OFFSET {skip.Value}";
+        }
+
+        return ordering;
+    }
+
+    /// <summary>プランの並び順（式木）を SQL の ORDER BY 要素（"[col] ASC" 等）へ翻訳する</summary>
+    private static List<string> BuildOrderings(SqlQueryPlan<TEntity> plan)
+    {
+        var orderings = new List<string>(plan.Orderings.Count);
+        foreach (var ordering in plan.Orderings)
+        {
+            orderings.Add(
+                SqlExpressionTranslator.ToColumn(ordering.KeySelector)
+                    + (ordering.Descending ? " DESC" : " ASC")
+            );
+        }
+
+        return orderings;
+    }
+
+    /// <summary>プランの述語（式木）を WHERE 句へ翻訳し、値パラメータを parameters へ蓄積する（条件なしは空文字）</summary>
+    private static string BuildWhereClause(
+        SqlQueryPlan<TEntity> plan,
+        List<SqlQueryParameter> parameters
+    )
+    {
+        if (plan.Predicates.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        var conditions = new List<string>(plan.Predicates.Count);
+        foreach (var predicate in plan.Predicates)
+        {
+            conditions.Add(SqlExpressionTranslator.ToCondition(predicate.Body, parameters));
+        }
+
+        return " WHERE " + string.Join(" AND ", conditions);
+    }
+
+    /// <summary>蓄積したパラメータを設定したコマンドを生成する</summary>
+    private SqliteCommand CreateCommand(
+        SqliteConnection connection,
+        string sql,
+        IReadOnlyList<SqlQueryParameter> parameters
+    )
+    {
+        var command = new SqliteCommand(sql, connection);
+        AddParameters(command, parameters);
+        return command;
+    }
+
+    /// <summary>翻訳済みの条件パラメータをコマンドへ設定する</summary>
+    /// <remarks>
+    /// SQLite は Microsoft.Data.Sqlite の既定変換に委ねるため、いずれも AddWithValue で束縛する。
+    /// </remarks>
+    private static void AddParameters(
+        SqliteCommand command,
+        IReadOnlyList<SqlQueryParameter> parameters
+    )
+    {
+        var metadata = EntitySaveMetadata.For(typeof(TEntity));
+        foreach (var parameter in parameters)
+        {
+            var value =
+                SqlParameterValue.Unwrap(parameter.Value);
+            metadata.AddQueryParameter(command, parameter.Name, parameter.ColumnName, value);
+        }
+    }
 }
 
 /// <summary>

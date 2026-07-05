@@ -181,4 +181,170 @@ public class CliAppTests
             }
         }
     }
+
+    /// <summary>
+    /// --repository-dialects に複数方言（sqlserver,sqlite）を指定すると、両方言の namespace が
+    /// 同じ生成物に出力されることを検証する（マルチターゲット生成の CLI 経路）
+    /// </summary>
+    [Fact(DisplayName = "--repository-dialects 複数指定で両方言 namespace が出力される")]
+    public async Task Generate_MultipleRepositoryDialects_EmitsBothNamespaces()
+    {
+        var (schemaPath, outDir, root) = CreateSampleSchema();
+        var configPath = Path.Combine(root, "quicker.json");
+        File.WriteAllText(configPath, """{ "GenerateRepositories": true }""");
+
+        try
+        {
+            var exit = await CliApp.InvokeAsync([
+                "generate",
+                "--schema",
+                schemaPath,
+                "--out",
+                outDir,
+                "--provider",
+                "sqlserver",
+                "--config",
+                configPath,
+                "--repository-dialects",
+                "sqlserver,sqlite",
+            ]);
+
+            exit.Should().Be(0);
+            var files = Directory.GetFiles(outDir, "*.g.cs");
+            var code = string.Join("\n", files.Select(File.ReadAllText));
+            code.Should().Contain("Microsoft.Data.SqlClient");
+            code.Should().Contain("Microsoft.Data.Sqlite");
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>
+    /// --repository-dialects に未対応方言（postgresql）を含めると、生成前に終了コード 1 でエラーになることを検証する
+    /// </summary>
+    [Fact(DisplayName = "--repository-dialects に未対応方言を含めるとエラーになる")]
+    public async Task Generate_RepositoryDialects_WithUnsupportedDialect_ReturnsError()
+    {
+        var (schemaPath, outDir, root) = CreateSampleSchema();
+        var configPath = Path.Combine(root, "quicker.json");
+        File.WriteAllText(configPath, """{ "GenerateRepositories": true }""");
+
+        try
+        {
+            var exit = await CliApp.InvokeAsync([
+                "generate",
+                "--schema",
+                schemaPath,
+                "--out",
+                outDir,
+                "--provider",
+                "sqlserver",
+                "--config",
+                configPath,
+                "--repository-dialects",
+                "sqlserver,postgresql",
+            ]);
+
+            exit.Should().Be(1);
+            Directory
+                .Exists(outDir)
+                .Should()
+                .BeFalse("生成前にエラーで中止するため出力は作られない");
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>
+    /// --repository-dialects 未指定時は従来どおり --provider から単一方言が導出されることを検証する
+    /// （後方互換：既存の Generate_SupportedDialectWithRepositories_Succeeds と同じ経路で sqlserver 実装のみが出る）
+    /// </summary>
+    [Fact(DisplayName = "--repository-dialects 未指定時は --provider から単一導出する")]
+    public async Task Generate_WithoutRepositoryDialects_DerivesSingleDialectFromProvider()
+    {
+        var (schemaPath, outDir, root) = CreateSampleSchema();
+        var configPath = Path.Combine(root, "quicker.json");
+        File.WriteAllText(configPath, """{ "GenerateRepositories": true }""");
+
+        try
+        {
+            var exit = await CliApp.InvokeAsync([
+                "generate",
+                "--schema",
+                schemaPath,
+                "--out",
+                outDir,
+                "--provider",
+                "sqlserver",
+                "--config",
+                configPath,
+            ]);
+
+            exit.Should().Be(0);
+            var files = Directory.GetFiles(outDir, "*.g.cs");
+            var code = string.Join("\n", files.Select(File.ReadAllText));
+            code.Should().Contain("Microsoft.Data.SqlClient");
+            code.Should().NotContain("Microsoft.Data.Sqlite");
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>
+    /// マルチ方言（--repository-dialects 2 つ以上）＋ GenerateEfCore=true は生成器側の診断エラーとなり、
+    /// CLI が通常のエラー出力経路（終了コード 1・出力なし）でそれを表示できることを検証する
+    /// （生成器の排他検証は MultiTargetRepositoryGenerationTests で担保済みで、ここでは CLI 経路の伝播のみ確認する）
+    /// </summary>
+    [Fact(DisplayName = "マルチ方言＋GenerateEfCore は CLI でも終了コード 1 になる")]
+    public async Task Generate_MultiDialectWithEfCore_ReturnsError()
+    {
+        var (schemaPath, outDir, root) = CreateSampleSchema();
+        var configPath = Path.Combine(root, "quicker.json");
+        File.WriteAllText(
+            configPath,
+            """{ "GenerateRepositories": true, "GenerateEfCore": true }"""
+        );
+
+        try
+        {
+            var exit = await CliApp.InvokeAsync([
+                "generate",
+                "--schema",
+                schemaPath,
+                "--out",
+                outDir,
+                "--provider",
+                "sqlserver",
+                "--config",
+                configPath,
+                "--repository-dialects",
+                "sqlserver,sqlite",
+            ]);
+
+            exit.Should().Be(1);
+            Directory.Exists(outDir).Should().BeFalse("生成エラーのため出力は作られない");
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
 }

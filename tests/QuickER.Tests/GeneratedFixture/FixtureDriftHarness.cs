@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
 using FluentAssertions;
@@ -58,6 +59,45 @@ internal static class FixtureDriftHarness
         var columnTypes = SqlServerCSharpTypeMapper.ResolveColumnTypes(diagram);
         var result = new CSharpCodeGenerationService().Generate(diagram, columnTypes, options);
 
+        VerifyOrRegenerate(result, outputFileName, driftReason);
+    }
+
+    /// <summary>
+    /// マルチ辞書（方言ごとに解決した列型辞書）を使うフィクスチャ向けのオーバーロード。
+    /// 主辞書（図の方言）と方言辞書を渡し、マルチターゲット構成のコードを生成して照合する。
+    /// </summary>
+    /// <param name="diagram">単一ソース定義が返す決定的な ER 図</param>
+    /// <param name="primaryColumnTypes">共有バケット（Entity/EditModel/Mapper/VO）に使う主辞書</param>
+    /// <param name="columnTypesByDialect">方言名 → その方言で解決した列型辞書（各方言実装バケット用）</param>
+    /// <param name="options">フィクスチャ生成に用いる決定的なオプション</param>
+    /// <param name="outputFileName">コミット済みフィクスチャのファイル名（GeneratedFixture フォルダ内）</param>
+    /// <param name="driftReason">ドリフト時に表示する理由（末尾に再生成コマンドが自動付与される）</param>
+    public static void VerifyOrRegenerate(
+        ErDiagram diagram,
+        IReadOnlyDictionary<Guid, CSharpTypeInfo> primaryColumnTypes,
+        IReadOnlyDictionary<string, IReadOnlyDictionary<Guid, CSharpTypeInfo>> columnTypesByDialect,
+        CodeGenerationOptions options,
+        string outputFileName,
+        string driftReason
+    )
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            diagram,
+            primaryColumnTypes,
+            columnTypesByDialect,
+            options
+        );
+
+        VerifyOrRegenerate(result, outputFileName, driftReason);
+    }
+
+    /// <summary>生成結果をコミット済みフィクスチャと照合、または再生成する共通処理。</summary>
+    private static void VerifyOrRegenerate(
+        CodeGenerationResult result,
+        string outputFileName,
+        string driftReason
+    )
+    {
         result.HasErrors.Should().BeFalse("フィクスチャ図の生成でエラーが出てはならない");
         result.Files.Should().ContainSingle("Split 無効のため 1 ファイルで生成される");
 

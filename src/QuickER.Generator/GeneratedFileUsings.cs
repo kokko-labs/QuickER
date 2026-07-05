@@ -25,7 +25,7 @@ internal static class GeneratedFileUsings
 
         foreach (var bucket in spec.Buckets)
         {
-            foreach (var ns in FrameworkUsings(bucket, options))
+            foreach (var ns in FrameworkUsings(bucket, spec, options))
             {
                 external.Add(ns);
             }
@@ -43,9 +43,9 @@ internal static class GeneratedFileUsings
         return ordered;
     }
 
-    /// <summary>自作 Repository の生成方言が SQLite かどうか（ADO using の出し分けに使う）</summary>
-    private static bool IsSqliteDialect(CodeGenerationOptions options) =>
-        string.Equals(options.RepositoryDialect, "sqlite", StringComparison.Ordinal);
+    /// <summary>このスペックの方言が SQLite かどうか（ADO using の出し分けに使う）</summary>
+    private static bool IsSqliteDialect(GeneratedFileSpec spec) =>
+        string.Equals(spec.Dialect, "sqlite", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// 1 バケットが必要とする外部（System.* / Microsoft.*）using 集合を、テンプレートの型参照を根拠に返す。
@@ -53,10 +53,12 @@ internal static class GeneratedFileUsings
     /// <remarks>
     /// System / System.Collections.Generic / System.Linq は共有フレームワークに常時含まれ生成コードのほぼ全構成で使うため、
     /// 該当バケットへ広めに付与する（既存方針を踏襲）。オプションで出力が変わる箇所（VO 有無・DataAnnotations・
-    /// 自作 SQL Server 実装の有無）はその条件を反映する。
+    /// 自作 Repository 実装の有無）はその条件を反映する。マルチ方言時は ADO using をスペックの方言に応じて、
+    /// かつ方言実装スペック（<see cref="GeneratedFileSpec.ContractOnly"/> でない）にのみ付与する。
     /// </remarks>
     private static IEnumerable<string> FrameworkUsings(
         GenerationBucket bucket,
+        GeneratedFileSpec spec,
         CodeGenerationOptions options
     )
     {
@@ -150,13 +152,15 @@ internal static class GeneratedFileUsings
                 //   IStructuralEquatable（System.Collections）・DataTable 相当（System.Data）。
                 //   JSON（System.Text.Json / System.Text.Json.Serialization.Metadata）は FOR JSON 復元を使う
                 //   SQL Server 方言のみで必要（SQLite はプレーン SELECT＋DataReader 実体化のため不要）。
-                if (options.GenerateRepositories)
+                // 契約のみのスペック（マルチ方言の契約ファイル・EF 単独出力）は ADO / DI を出さない。
+                // 方言実装スペック（!ContractOnly）だけがその方言の ADO を出す（依存排他ガードの一般化）。
+                if (options.GenerateRepositories && !spec.ContractOnly)
                 {
                     yield return "System.Collections";
                     yield return "System.Data";
                     yield return "Microsoft.Extensions.DependencyInjection";
 
-                    if (IsSqliteDialect(options))
+                    if (IsSqliteDialect(spec))
                     {
                         yield return "Microsoft.Data.Sqlite";
                     }

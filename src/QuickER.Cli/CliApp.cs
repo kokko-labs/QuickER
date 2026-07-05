@@ -78,6 +78,7 @@ public static class CliApp
         var provider = ProviderOption();
         var ns = NamespaceOption();
         var split = SplitOption();
+        var repositoryDialects = RepositoryDialectsOption();
 
         var command = new Command("generate", "ER 図 JSON から C# コードを生成する")
         {
@@ -87,6 +88,7 @@ public static class CliApp
             provider,
             ns,
             split,
+            repositoryDialects,
         };
 
         command.SetAction(parseResult =>
@@ -96,7 +98,8 @@ public static class CliApp
                 parseResult.GetValue(config),
                 parseResult.GetValue(provider)!,
                 parseResult.GetValue(ns),
-                parseResult.GetValue(split)
+                parseResult.GetValue(split),
+                parseResult.GetValue(repositoryDialects)
             )
         );
 
@@ -109,7 +112,8 @@ public static class CliApp
         FileInfo? config,
         string providerName,
         string? ns,
-        bool split
+        bool split,
+        string? repositoryDialects
     )
     {
         if (!schemaFile.Exists)
@@ -133,7 +137,7 @@ public static class CliApp
         CodeGenerationOptions options;
         try
         {
-            options = LoadOptions(config, ns, split, provider);
+            options = LoadOptions(config, ns, split, provider, repositoryDialects);
         }
         catch (RepositoryDialectUnsupportedException ex)
         {
@@ -141,7 +145,13 @@ public static class CliApp
             return 1;
         }
 
-        var result = DiagramCodeGenerator.Generate(provider.TypeMapper, document.Schema, options);
+        var dialectMappers = ResolveDialectTypeMappers(options);
+        var result = DiagramCodeGenerator.Generate(
+            provider.TypeMapper,
+            dialectMappers,
+            document.Schema,
+            options
+        );
         return WriteResult(result, output);
     }
 
@@ -167,6 +177,7 @@ public static class CliApp
         var provider = ProviderOption();
         var ns = NamespaceOption();
         var split = SplitOption();
+        var repositoryDialects = RepositoryDialectsOption();
 
         var command = new Command(
             "scaffold",
@@ -179,6 +190,7 @@ public static class CliApp
             provider,
             ns,
             split,
+            repositoryDialects,
         };
 
         command.SetAction(
@@ -190,6 +202,7 @@ public static class CliApp
                     parseResult.GetValue(provider)!,
                     parseResult.GetValue(ns),
                     parseResult.GetValue(split),
+                    parseResult.GetValue(repositoryDialects),
                     cancellationToken
                 )
         );
@@ -204,6 +217,7 @@ public static class CliApp
         string providerName,
         string? ns,
         bool split,
+        string? repositoryDialects,
         CancellationToken cancellationToken
     )
     {
@@ -239,7 +253,7 @@ public static class CliApp
         CodeGenerationOptions options;
         try
         {
-            options = LoadOptions(config, ns, split, provider);
+            options = LoadOptions(config, ns, split, provider, repositoryDialects);
         }
         catch (RepositoryDialectUnsupportedException ex)
         {
@@ -247,7 +261,13 @@ public static class CliApp
             return 1;
         }
 
-        var result = DiagramCodeGenerator.Generate(provider.TypeMapper, diagram, options);
+        var dialectMappers = ResolveDialectTypeMappers(options);
+        var result = DiagramCodeGenerator.Generate(
+            provider.TypeMapper,
+            dialectMappers,
+            diagram,
+            options
+        );
         return WriteResult(result, output);
     }
 
@@ -269,20 +289,32 @@ public static class CliApp
             Description = "カテゴリごとに別ファイル・別名前空間で出力する（設定ファイルを上書き）",
         };
 
+    private static Option<string> RepositoryDialectsOption() =>
+        new("--repository-dialects")
+        {
+            Description =
+                "自作 Repository を同時生成する方言（カンマ区切り複数指定可。例: sqlserver,sqlite。"
+                + "未指定時は --provider から単一導出する。設定ファイルを上書き）",
+        };
+
     /// <summary>
-    /// 設定ファイル（quicker.json）を読み、CLI フラグ・<c>--provider</c> で上書きして生成オプションを構築する。
+    /// 設定ファイル（quicker.json）を読み、CLI フラグ・<c>--provider</c>・<c>--repository-dialects</c> で
+    /// 上書きして生成オプションを構築する。
     /// </summary>
     /// <remarks>
-    /// <see cref="CodeGenerationOptions.RepositoryDialect"/> は常に <paramref name="provider"/> の名前で上書きする
-    /// （設定ファイルの値は無視する。図の TargetDbms から導出される値のため CLI 引数を単一の正とする）。
-    /// 自作 Repository 生成（<c>GenerateRepositories</c>）が要求され、かつプロバイダが対応方言でない場合は
+    /// <paramref name="repositoryDialects"/>（<c>--repository-dialects</c>）指定時は
+    /// <see cref="CodeGenerationOptions.RepositoryDialects"/> へカンマ区切りの各方言を設定する。
+    /// 未指定時は従来どおり <paramref name="provider"/> の名前を単一 <see cref="CodeGenerationOptions.RepositoryDialect"/>
+    /// として設定する（設定ファイルの値は無視する。図の TargetDbms から導出される値のため CLI 引数を単一の正とする）。
+    /// 自作 Repository 生成（<c>GenerateRepositories</c>）が要求され、かつ実効方言に未対応方言が含まれる場合は
     /// <see cref="RepositoryDialectUnsupportedException"/> を送出する
     /// </remarks>
     private static CodeGenerationOptions LoadOptions(
         FileInfo? config,
         string? ns,
         bool split,
-        IDatabaseProvider provider
+        IDatabaseProvider provider,
+        string? repositoryDialects = null
     )
     {
         var node = config is { Exists: true }
@@ -299,26 +331,76 @@ public static class CliApp
             node["SplitFilesByCategory"] = true;
         }
 
-        node["RepositoryDialect"] = provider.Name;
+        if (!string.IsNullOrWhiteSpace(repositoryDialects))
+        {
+            var dialects = repositoryDialects
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .ToList();
+            node["RepositoryDialects"] = new JsonArray(
+                dialects.Select(dialect => JsonValue.Create(dialect)).ToArray()
+            );
+        }
+        else
+        {
+            node["RepositoryDialect"] = provider.Name;
+        }
 
         var options =
             node.Deserialize<CodeGenerationOptions>(OptionsJson) ?? new CodeGenerationOptions();
 
-        if (
-            options.GenerateRepositories
-            && !CodeGenerationOptions.SupportedRepositoryDialects.Contains(
-                provider.Name,
-                StringComparer.OrdinalIgnoreCase
-            )
-        )
+        if (options.GenerateRepositories)
         {
-            throw new RepositoryDialectUnsupportedException(
-                $"自作 Repository（GenerateRepositories）はプロバイダ '{provider.Name}' に対応していません。"
-                    + $"対応方言: {string.Join(", ", CodeGenerationOptions.SupportedRepositoryDialects)}"
-            );
+            IReadOnlyList<string> effectiveDialects;
+            try
+            {
+                effectiveDialects = options.EffectiveRepositoryDialects;
+            }
+            catch (ArgumentException ex)
+            {
+                throw new RepositoryDialectUnsupportedException(ex.Message);
+            }
+
+            var unsupported = effectiveDialects
+                .Where(dialect =>
+                    !CodeGenerationOptions.SupportedRepositoryDialects.Contains(
+                        dialect,
+                        StringComparer.OrdinalIgnoreCase
+                    )
+                )
+                .ToList();
+
+            if (unsupported.Count > 0)
+            {
+                throw new RepositoryDialectUnsupportedException(
+                    $"自作 Repository（GenerateRepositories）は方言 '{string.Join(", ", unsupported)}' に対応していません。"
+                        + $"対応方言: {string.Join(", ", CodeGenerationOptions.SupportedRepositoryDialects)}"
+                );
+            }
         }
 
         return options;
+    }
+
+    /// <summary>
+    /// 自作 Repository の実効方言（<see cref="CodeGenerationOptions.EffectiveRepositoryDialects"/>）ごとに、
+    /// CLI のプロバイダレジストリから方言別の型マッパを解決する。
+    /// </summary>
+    /// <remarks>レジストリに存在しない方言名は除外する（生成本体側で図の方言の辞書へ代替される）</remarks>
+    private static IReadOnlyDictionary<string, IColumnTypeMapper> ResolveDialectTypeMappers(
+        CodeGenerationOptions options
+    )
+    {
+        var mappers = new Dictionary<string, IColumnTypeMapper>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var dialect in options.EffectiveRepositoryDialects)
+        {
+            if (Providers.TryGet(dialect, out var provider))
+            {
+                mappers[dialect] = provider.TypeMapper;
+            }
+        }
+
+        return mappers;
     }
 
     /// <summary>生成結果の診断を表示し、エラーが無ければファイルを書き出す。終了コードを返す</summary>

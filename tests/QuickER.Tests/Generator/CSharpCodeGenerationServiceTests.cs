@@ -3105,9 +3105,7 @@ public class CSharpCodeGenerationServiceTests
 
         // 実行器委譲パスは出力される
         content.Should().Contain("public sealed class SqlQuery<TEntity>");
-        content
-            .Should()
-            .Contain("return await _executor.ToListAsync(BuildPlan(), cancellationToken);");
+        content.Should().Contain("=> await _executor.ToListAsync(BuildPlan(), cancellationToken);");
         // SQL Server 専用の要素は出力されない（コード本体で判定。FOR JSON 等は契約の doc コメントに残るためコードで確認する）
         content.Should().NotContain("private readonly ISqlConnectionFactory _connectionFactory");
         content.Should().NotContain("internal static class SqlExpressionTranslator");
@@ -3277,9 +3275,17 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("nameof(Queryable.OrderBy)");
     }
 
-    /// <summary>EF Core 生成 OFF では SqlQuery の実行器バックエンドも EF 版クラスも一切出力されないことを検証する</summary>
+    /// <summary>
+    /// EF Core 生成 OFF（自作 Repository 単独）でも、SqlQuery は実行器抽象（ISqlQueryExecutor / SqlQueryPlan）経由へ統一され、
+    /// 方言別 ADO 実行器（SqlServerSqlQueryExecutor）が出力される一方、EF 版クラスは一切出力されないことを検証する。
+    /// </summary>
+    /// <remarks>
+    /// M2a のランタイム統一により、SqlQuery は常に <c>ISqlQueryExecutor&lt;TEntity&gt;</c> 経由で実行するよう変更された
+    /// （以前は EF 生成時のみ実行器抽象が出て、自作 Repository は方言 SQL を SqlQuery 内に埋め込んでいた）。
+    /// EF Core 依存（EfCore プレフィックスのクラス・DbContext 等）が漏れないことは引き続き守る。
+    /// </remarks>
     [Fact]
-    public void Generate_EfCore_Disabled_ShouldNotEmitExecutorBackend()
+    public void Generate_EfCore_Disabled_ShouldStillUnifyThroughAdoExecutor()
     {
         var result = new CSharpCodeGenerationService().Generate(
             ValueObjectDiagram(),
@@ -3288,11 +3294,22 @@ public class CSharpCodeGenerationServiceTests
 
         result.HasErrors.Should().BeFalse();
         var content = result.Files[0].Content;
-        content.Should().NotContain("ISqlQueryExecutor");
-        content.Should().NotContain("SqlQueryPlan");
-        content.Should().NotContain("_executor");
+
+        // 実行器抽象と方言別 ADO 実行器は出力される（ランタイム統一）
+        content.Should().Contain("internal interface ISqlQueryExecutor<TEntity>");
+        content.Should().Contain("internal sealed record SqlQueryPlan<TEntity>(");
+        content.Should().Contain("internal sealed class SqlServerSqlQueryExecutor<TEntity>(");
+        content
+            .Should()
+            .Contain(
+                "public SqlQuery<TEntity> Query() => new(new SqlServerSqlQueryExecutor<TEntity>(_connectionFactory));"
+            );
+
+        // EF Core 依存（EfCore プレフィックスのクラス・DbContext）は一切出力されない
         content.Should().NotContain("EfCore");
-        // 既存の SQL Server パスは SqlDataReader ベースのまま（生成出力の互換維持）
+        content.Should().NotContain("QuickErDbContext");
+
+        // 既存の SQL Server パスは SqlDataReader ベースのまま（マッピングの互換維持）
         content
             .Should()
             .Contain("public TEntity MapEntityFromRawSql<TEntity>(SqlDataReader reader)");

@@ -92,45 +92,36 @@ public class CSharpGenerationDialogViewModelTests
         }
     }
 
-    /// <summary>未対応方言のプロバイダでは自作 Repository が選択不可になり、保存値も「なし」へ倒れることを検証する</summary>
-    [Theory(DisplayName = "未対応方言では自作 Repository を選択できない")]
+    /// <summary>未対応方言のプロバイダでも自作 Repository ラジオは常時選択可であり、対象方言チェックは両方 OFF から始まることを検証する</summary>
+    [Theory(
+        DisplayName = "未対応方言でも自作 Repository ラジオは選択可・対象方言チェックは両方 OFF から始まる"
+    )]
     [InlineData(typeof(QuickER.PostgreSql.PostgreSqlProvider))]
     [InlineData(typeof(QuickER.MySql.MySqlProvider))]
     [InlineData(typeof(QuickER.Oracle.OracleProvider))]
-    public void UnsupportedDialectProvider_DisablesRepositoryOption(Type providerType)
+    public void UnsupportedDialectProvider_StillAllowsRepositoryRadio_ButNoDialectPreselected(
+        Type providerType
+    )
     {
-        var folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
-        var store = new CSharpGenerationSettingsStore(folder);
-        var settings = CSharpGenerationSettings.CreateDefault();
-        settings.GenerateRepositories = true;
-        store.Save(settings);
+        var provider = (QuickER.Provider.IDatabaseProvider)Activator.CreateInstance(providerType)!;
+        var vm = CreateViewModel(out _, currentProvider: provider);
 
-        try
-        {
-            var provider = (QuickER.Provider.IDatabaseProvider)
-                Activator.CreateInstance(providerType)!;
-            var vm = new CSharpGenerationDialogViewModel(store, currentProvider: provider);
+        vm.CurrentDatabaseDisplayName.Should().NotBeEmpty("DB アクセス欄に現在の DB を提示する");
+        vm.TargetSqlServer.Should().BeFalse("未対応方言では対象方言を予選択しない");
+        vm.TargetSqlite.Should().BeFalse("未対応方言では対象方言を予選択しない");
 
-            vm.CanSelectQuickErRepository.Should().BeFalse();
-            vm.CurrentDatabaseDisplayName.Should()
-                .NotBeEmpty("DB アクセス欄に現在の DB を提示する");
-            vm.QuickErRepositoryToolTip.Should()
-                .Be("この方言の自作 Repository は未対応です（将来対応予定）");
-            // 保存されていた「自作 Repository」選択は矛盾生成物を防ぐため「なし」へ倒す
-            vm.GenerateRepositories.Should().BeFalse();
-            vm.DbAccessNone.Should().BeTrue();
-        }
-        finally
-        {
-            Directory.Delete(folder, recursive: true);
-        }
+        vm.DbAccessRepository = true;
+
+        vm.GenerateRepositories.Should().BeTrue("Repository ラジオは常時選択可");
     }
 
-    /// <summary>対応方言（SQL Server / SQLite）のプロバイダでは自作 Repository を選択できることを検証する</summary>
-    [Theory(DisplayName = "対応方言（SQL Server / SQLite）では自作 Repository を選択できる")]
+    /// <summary>対応方言（SQL Server / SQLite）のプロバイダでは、その方言のみ対象方言チェックが初期 ON になることを検証する</summary>
+    [Theory(
+        DisplayName = "対応方言（SQL Server / SQLite）ではその方言のみ対象方言チェックが初期 ON になる"
+    )]
     [InlineData(typeof(QuickER.SqlServer.SqlServerProvider), "SQL Server")]
     [InlineData(typeof(QuickER.Sqlite.SqliteProvider), "SQLite")]
-    public void SupportedDialectProvider_AllowsRepositoryOption(
+    public void SupportedDialectProvider_PreselectsItsDialect(
         Type providerType,
         string expectedDisplayName
     )
@@ -138,39 +129,108 @@ public class CSharpGenerationDialogViewModelTests
         var provider = (QuickER.Provider.IDatabaseProvider)Activator.CreateInstance(providerType)!;
         var vm = CreateViewModel(out _, currentProvider: provider);
 
-        vm.CanSelectQuickErRepository.Should().BeTrue();
         vm.CurrentDatabaseDisplayName.Should().Be(expectedDisplayName);
         vm.QuickErRepositoryToolTip.Should()
-            .Be("EF 非依存の軽量 Repository を生成します（対応方言: SQL Server / SQLite）");
+            .Be(
+                "EF 非依存の軽量 Repository を生成します（対象方言をチェックで選択: SQL Server / SQLite）"
+            );
+
+        if (provider.Name == "sqlserver")
+        {
+            vm.TargetSqlServer.Should().BeTrue();
+            vm.TargetSqlite.Should().BeFalse();
+        }
+        else
+        {
+            vm.TargetSqlServer.Should().BeFalse();
+            vm.TargetSqlite.Should().BeTrue();
+        }
     }
 
-    /// <summary>ToOptions が現在のプロバイダ名を RepositoryDialect へ設定することを検証する</summary>
-    [Fact(DisplayName = "ToOptions は現在のプロバイダ名を RepositoryDialect に設定する")]
-    public void ToOptions_SetsRepositoryDialect_FromCurrentProvider()
+    /// <summary>ToOptions がチェックした対象方言を固定順（sqlserver, sqlite）で RepositoryDialects へ設定することを検証する</summary>
+    [Fact(DisplayName = "ToOptions はチェックした対象方言を固定順で RepositoryDialects に設定する")]
+    public void ToOptions_SetsRepositoryDialects_InFixedOrder()
     {
         var vm = CreateViewModel(out _, currentProvider: new QuickER.Sqlite.SqliteProvider());
+        vm.BaseNamespace = "Sample.Domain";
+        vm.OutputFilePath = @"C:\temp\Entities.g.cs";
+        vm.DbAccessRepository = true;
+        vm.TargetSqlServer = true;
+        vm.TargetSqlite = true;
+
+        vm.OkCommand.Execute(null);
+
+        vm.Result.Should().NotBeNull();
+        vm.Result!.Options.RepositoryDialects.Should().Equal("sqlserver", "sqlite");
+    }
+
+    /// <summary>対象方言を 1 つもチェックしないまま自作 Repository を確定しようとすると拒否されることを検証する</summary>
+    [Fact(DisplayName = "対象方言 0 個では確定できない")]
+    public void Ok_Repository_WithNoTargetDialects_ShowsError()
+    {
+        var vm = CreateViewModel(
+            out _,
+            currentProvider: new QuickER.PostgreSql.PostgreSqlProvider()
+        );
         vm.BaseNamespace = "Sample.Domain";
         vm.OutputFilePath = @"C:\temp\Entities.g.cs";
         vm.DbAccessRepository = true;
 
         vm.OkCommand.Execute(null);
 
-        vm.Result.Should().NotBeNull();
-        vm.Result!.Options.RepositoryDialect.Should().Be("sqlite");
+        vm.Result.Should().BeNull();
+        vm.StatusMessage.Should().Be("対象方言を 1 つ以上選択してください。");
     }
 
-    /// <summary>currentProvider 未指定（null）では RepositoryDialect が sqlserver へフォールバックすることを検証する</summary>
-    [Fact(DisplayName = "currentProvider 未指定では RepositoryDialect が sqlserver になる")]
-    public void ToOptions_SetsRepositoryDialect_DefaultsToSqlServer_WhenProviderUnset()
+    /// <summary>対象方言チェック群は Repository (QuickER) 選択時のみ表示されることを検証する</summary>
+    [Fact(DisplayName = "対象方言チェック群は Repository (QuickER) 選択時のみ表示される")]
+    public void ShowRepositoryDialectTargets_TracksRepositorySelection()
     {
         var vm = CreateViewModel(out _);
-        vm.BaseNamespace = "Sample.Domain";
-        vm.OutputFilePath = @"C:\temp\Entities.g.cs";
 
-        vm.OkCommand.Execute(null);
+        vm.ShowRepositoryDialectTargets.Should().BeFalse("既定は DB アクセス「なし」");
 
-        vm.Result.Should().NotBeNull();
-        vm.Result!.Options.RepositoryDialect.Should().Be("sqlserver");
+        vm.DbAccessRepository = true;
+        vm.ShowRepositoryDialectTargets.Should().BeTrue();
+
+        vm.DbAccessNone = true;
+        vm.ShowRepositoryDialectTargets.Should().BeFalse();
+    }
+
+    /// <summary>対象方言チェックは設定として永続化されず、次回起動時は図の方言から再導出されることを検証する</summary>
+    [Fact(DisplayName = "対象方言チェックは保存されず図の方言から毎回導出される")]
+    public void TargetDialectChecks_AreNotPersisted()
+    {
+        var vm = CreateViewModel(
+            out var folder,
+            currentProvider: new QuickER.Sqlite.SqliteProvider()
+        );
+
+        try
+        {
+            vm.BaseNamespace = "Acme.App";
+            vm.OutputFilePath = @"C:\temp\Entities.g.cs";
+            vm.DbAccessRepository = true;
+            vm.TargetSqlServer = true;
+            vm.TargetSqlite = true;
+            vm.OkCommand.Execute(null);
+
+            // 次回はプロバイダを変えて再構築しても、保存されたチェック内容ではなく現在のプロバイダから導出される
+            var restored = new CSharpGenerationDialogViewModel(
+                new CSharpGenerationSettingsStore(folder),
+                currentProvider: new QuickER.SqlServer.SqlServerProvider()
+            );
+
+            restored.TargetSqlServer.Should().BeTrue();
+            restored.TargetSqlite.Should().BeFalse("SQLite のチェックは保存されず引き継がれない");
+        }
+        finally
+        {
+            if (Directory.Exists(folder))
+            {
+                Directory.Delete(folder, recursive: true);
+            }
+        }
     }
 
     /// <summary>EF Core 選択＋分割モードで EfCore 名前空間欄が現れ、ベース変更へ追従することを検証する</summary>

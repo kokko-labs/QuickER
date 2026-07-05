@@ -39,6 +39,31 @@ public sealed class GeneratedFileSpec
 
     /// <summary>このファイルが参照する他ファイルの名前空間（自分自身の名前空間は除外・重複排除済み・昇順）</summary>
     public required IReadOnlyList<string> CrossNamespaceUsings { get; init; }
+
+    /// <summary>
+    /// このスペックがレンダリングする自作 Repository の方言（例: <c>"sqlserver"</c> / <c>"sqlite"</c>）。
+    /// </summary>
+    /// <remarks>
+    /// 単一方言時・非 Repository スペックは実効単一方言をそのまま持つ（従来のレンダラー入力を保つ）。
+    /// マルチ方言時は方言実装スペックが各方言を持つ。契約のみのスペック（<see cref="ContractOnly"/>）は
+    /// 方言実装を出力しないため方言差分がなく、便宜上 sqlserver 相当を持つ（テンプレートは方言実装を描画しない）。
+    /// </remarks>
+    public required string Dialect { get; init; }
+
+    /// <summary>
+    /// このスペックが「中立契約のみ」を出力し、方言実装（SqlExecutor / 方言別 Repository 基底 / DI 等）を出さないか。
+    /// </summary>
+    /// <remarks>
+    /// マルチ方言時に契約を 1 回だけ出すためのフラグ。true のとき Repository バケットは契約のみをレンダリングし、
+    /// 方言実装は別の方言実装スペックが担う。単一方言時は常に false（契約＋実装を同一スコープで従来どおり出力する）。
+    /// </remarks>
+    public required bool ContractOnly { get; init; }
+
+    /// <summary>
+    /// マルチ方言レイアウト（実効方言 2 つ以上）かどうか。DI 拡張の方言別名＋keyed 版の出し分けに使う。
+    /// </summary>
+    /// <remarks>false（単一方言）のとき DI は従来の <c>AddGeneratedRepositories</c>（バイト不変）。</remarks>
+    public required bool MultiDialect { get; init; }
 }
 
 /// <summary>
@@ -207,30 +232,124 @@ public static class GeneratedFilePlanner
     }
 
     /// <summary>
+    /// 計画で各スペックへ載せる方言を、例外を投げずに解決する。
+    /// </summary>
+    /// <remarks>
+    /// 実効方言（<see cref="CodeGenerationOptions.EffectiveRepositoryDialects"/>）は未対応方言で例外を投げるが、
+    /// Plan はプレビューなどでも呼ばれ、Repository 非生成時には図の方言名（例 mysql）が <see cref="CodeGenerationOptions.RepositoryDialect"/> に
+    /// 残ることがある。ここで例外にすると生成しない構成のプレビューまで壊れるため、非例外で単一方言（先頭）を採り、
+    /// 未対応方言は <c>sqlserver</c> 相当へフォールバックさせる（実効方言の検証・診断は生成本体が担う）。
+    /// </remarks>
+    private static IReadOnlyList<string> ResolvePlanningDialects(CodeGenerationOptions options)
+    {
+        try
+        {
+            return options.EffectiveRepositoryDialects;
+        }
+        catch (ArgumentException)
+        {
+            return ["sqlserver"];
+        }
+    }
+
+    /// <summary>方言別実装の名前空間サフィックス（<c>{RepositoryNamespace}.SqlServer</c> 等）を返す</summary>
+    /// <remarks>UI 入力を増やさず、方言名から自動導出する（プロバイダ名 sqlserver / sqlite に一致）</remarks>
+    public static string DialectNamespaceSuffix(string dialect) =>
+        string.Equals(dialect, "sqlite", StringComparison.OrdinalIgnoreCase)
+            ? "Sqlite"
+            : "SqlServer";
+
+    /// <summary>
     /// 出力ファイルの計画を作成する
     /// </summary>
     /// <remarks>
+    /// <para>
     /// 非分割時は全バケットを 1 ファイル（<see cref="CodeGenerationOptions.OutputFileName"/>・ルート名前空間）へまとめる。
     /// 分割時は有効バケットを 1 カテゴリ 1 ファイルへ展開し、各ファイルに他ファイルの名前空間を using として付与する
-    /// （同一名前空間に解決されてもファイルは分け、自分自身の名前空間は using しない）
+    /// （同一名前空間に解決されてもファイルは分け、自分自身の名前空間は using しない）。
+    /// </para>
+    /// <para>
+    /// 実効方言（<see cref="CodeGenerationOptions.EffectiveRepositoryDialects"/>）が 1 つのときは現行プランを完全維持する
+    /// （出力バイト不変）。2 つ以上のときは Repository バケットを「中立契約（1 回）」と「方言別実装（方言ごと）」に分割し、
+    /// 方言実装は <c>{RepositoryNamespace}.SqlServer</c> / <c>.Sqlite</c> の別 namespace へ出す（分割時は別ファイル、
+    /// 非分割時は同一ファイルへ namespace ブロックとして連結）。
+    /// </para>
     /// </remarks>
     public static IReadOnlyList<GeneratedFileSpec> Plan(CodeGenerationOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
         var active = ActiveBuckets(options);
+        // 実効方言の先頭を各スペックへ持たせる（単一方言＝現行値。方言リテラル参照をスコープ由来に一本化する）。
+        // 型解決・診断・[SqlColumnType] 補完はマルチ辞書として M1 で機能する。
+        // Plan はプレビュー等でも呼ばれ、未対応方言指定（Repository 非生成時に残る図の方言名）でも例外にしてはならない。
+        // 実効方言の検証・診断は生成本体（CSharpCodeGenerationService.Generate）が担うため、ここでは非例外で先頭方言を採る
+        // （未対応値は RepositoryDialectVariables 側で sqlserver 相当へフォールバックする）。
+        var dialects = ResolvePlanningDialects(options);
+        var primaryDialect = dialects[0];
+
+        // マルチ方言（実効方言 2 つ以上）で Repository を生成するときのみ、契約 1 回＋方言別 namespace 実装の
+        // 新レイアウトを使う。単一方言・Repository 非生成時は従来レイアウトを完全維持する（バイト不変）。
+        var multiDialect =
+            options.GenerateRepositories
+            && dialects.Count >= 2
+            && active.Contains(GenerationBucket.Repository);
 
         if (!options.SplitFilesByCategory)
         {
-            return
-            [
+            // 非分割: 全バケットを 1 ファイルへ。マルチ方言時は Repository を「契約スペック＋方言別実装スペック」へ
+            // 展開し、同一ファイル名で連結する（RenderFiles が block namespace で連結・using を先頭へ集約）。
+            if (!multiDialect)
+            {
+                return
+                [
+                    new GeneratedFileSpec
+                    {
+                        FileName = options.OutputFileName,
+                        NamespaceName = ResolveRootNamespace(options),
+                        Buckets = active,
+                        CrossNamespaceUsings = [],
+                        Dialect = primaryDialect,
+                        ContractOnly = false,
+                        MultiDialect = false,
+                    },
+                ];
+            }
+
+            var root = ResolveRootNamespace(options);
+            var repositoryNamespace = ResolveNamespace(options, GenerationBucket.Repository);
+            var specs = new List<GeneratedFileSpec>();
+
+            // 契約＋非 Repository バケット（Entity/EditModel/Mapper/VO/Runtime）は従来どおりルート namespace の
+            // 契約スペックへまとめる。ContractOnly=true で Repository バケットは契約のみを描画する。
+            specs.Add(
                 new GeneratedFileSpec
                 {
                     FileName = options.OutputFileName,
-                    NamespaceName = ResolveRootNamespace(options),
+                    NamespaceName = root,
                     Buckets = active,
                     CrossNamespaceUsings = [],
-                },
-            ];
+                    Dialect = primaryDialect,
+                    ContractOnly = true,
+                    MultiDialect = true,
+                }
+            );
+
+            // 方言別実装スペック（Repository バケットのみ・{RepositoryNamespace}.Suffix）。同一 OutputFileName で
+            // 連結する。方言側は契約 namespace の型（I{Entity}Repository・IRepository・SqlQuery 等）を using する。
+            foreach (var dialect in dialects)
+            {
+                specs.Add(
+                    BuildDialectRepositorySpec(
+                        options,
+                        options.OutputFileName,
+                        repositoryNamespace,
+                        dialect,
+                        root
+                    )
+                );
+            }
+
+            return specs;
         }
 
         var namespaceByBucket = active.ToDictionary(
@@ -239,30 +358,115 @@ public static class GeneratedFilePlanner
         );
         var activeSet = active.ToHashSet();
 
-        return active
-            .Select(bucket =>
-            {
-                var ownNamespace = namespaceByBucket[bucket];
-                // 依存グラフから「実際に参照する他バケット」の名前空間だけを using する
-                // （無差別に全バケットを using していた従来動作の不要 using を排除する）。
-                // 有効でない依存先（例: VO 無効時の ValueObject）は自然に除外される。また依存先が
-                // 自分と同一名前空間へ解決される場合は自分自身の using になるため除外する。
-                var crossUsings = BucketDependencies(bucket)
-                    .Where(dependency => activeSet.Contains(dependency))
-                    .Select(dependency => namespaceByBucket[dependency])
-                    .Where(ns => !string.Equals(ns, ownNamespace, StringComparison.Ordinal))
-                    .Distinct(StringComparer.Ordinal)
-                    .OrderBy(ns => ns, StringComparer.Ordinal)
-                    .ToList();
+        var splitSpecs = new List<GeneratedFileSpec>();
 
-                return new GeneratedFileSpec
+        foreach (var bucket in active)
+        {
+            var ownNamespace = namespaceByBucket[bucket];
+            // 依存グラフから「実際に参照する他バケット」の名前空間だけを using する
+            // （無差別に全バケットを using していた従来動作の不要 using を排除する）。
+            // 有効でない依存先（例: VO 無効時の ValueObject）は自然に除外される。また依存先が
+            // 自分と同一名前空間へ解決される場合は自分自身の using になるため除外する。
+            var crossUsings = BucketDependencies(bucket)
+                .Where(dependency => activeSet.Contains(dependency))
+                .Select(dependency => namespaceByBucket[dependency])
+                .Where(ns => !string.Equals(ns, ownNamespace, StringComparison.Ordinal))
+                .Distinct(StringComparer.Ordinal)
+                .OrderBy(ns => ns, StringComparer.Ordinal)
+                .ToList();
+
+            // マルチ方言時の Repository バケットは契約のみを自 namespace へ出し、方言別実装は別ファイルへ分ける。
+            if (multiDialect && bucket == GenerationBucket.Repository)
+            {
+                splitSpecs.Add(
+                    new GeneratedFileSpec
+                    {
+                        FileName = DefaultFileName(bucket),
+                        NamespaceName = ownNamespace,
+                        Buckets = [bucket],
+                        CrossNamespaceUsings = crossUsings,
+                        Dialect = primaryDialect,
+                        ContractOnly = true,
+                        MultiDialect = true,
+                    }
+                );
+
+                // 方言別実装ファイル（Repositories.SqlServer.g.cs 等）。契約 namespace（＝Repository 自身の namespace）
+                // と、方言実装が参照する他バケット（Entity 等）を using する。
+                foreach (var dialect in dialects)
+                {
+                    splitSpecs.Add(
+                        BuildDialectRepositorySpec(
+                            options,
+                            DialectRepositoryFileName(dialect),
+                            ownNamespace,
+                            dialect,
+                            contractNamespace: ownNamespace,
+                            extraCrossUsings: crossUsings
+                        )
+                    );
+                }
+
+                continue;
+            }
+
+            splitSpecs.Add(
+                new GeneratedFileSpec
                 {
                     FileName = DefaultFileName(bucket),
                     NamespaceName = ownNamespace,
                     Buckets = [bucket],
                     CrossNamespaceUsings = crossUsings,
-                };
-            })
-            .ToList();
+                    Dialect = primaryDialect,
+                    ContractOnly = false,
+                    MultiDialect = false,
+                }
+            );
+        }
+
+        return splitSpecs;
     }
+
+    /// <summary>方言別実装スペックを組み立てる（Repository バケットのみ・{RepositoryNamespace}.Suffix・契約 namespace を using）</summary>
+    private static GeneratedFileSpec BuildDialectRepositorySpec(
+        CodeGenerationOptions options,
+        string fileName,
+        string repositoryNamespace,
+        string dialect,
+        string contractNamespace,
+        IReadOnlyList<string>? extraCrossUsings = null
+    )
+    {
+        var dialectNamespace = $"{repositoryNamespace}.{DialectNamespaceSuffix(dialect)}";
+
+        // 方言実装は契約 namespace（I{Entity}Repository / IRepository / SqlQuery / SqlQueryPlan / CascadeNavigation 等）を using する。
+        // 分割時は Entity 等の他バケット namespace も引き継ぐ（extraCrossUsings）。自 namespace は using しない。
+        var crossUsings = new List<string> { contractNamespace };
+
+        if (extraCrossUsings is not null)
+        {
+            crossUsings.AddRange(extraCrossUsings);
+        }
+
+        var orderedCrossUsings = crossUsings
+            .Where(ns => !string.Equals(ns, dialectNamespace, StringComparison.Ordinal))
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(ns => ns, StringComparer.Ordinal)
+            .ToList();
+
+        return new GeneratedFileSpec
+        {
+            FileName = fileName,
+            NamespaceName = dialectNamespace,
+            Buckets = [GenerationBucket.Repository],
+            CrossNamespaceUsings = orderedCrossUsings,
+            Dialect = dialect,
+            ContractOnly = false,
+            MultiDialect = true,
+        };
+    }
+
+    /// <summary>方言別実装の分割ファイル名（例: <c>Repositories.SqlServer.g.cs</c>）</summary>
+    private static string DialectRepositoryFileName(string dialect) =>
+        $"{DefaultSuffix(GenerationBucket.Repository)}.{DialectNamespaceSuffix(dialect)}.g.cs";
 }

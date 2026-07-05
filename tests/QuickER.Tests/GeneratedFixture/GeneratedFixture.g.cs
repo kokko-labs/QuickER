@@ -4839,7 +4839,7 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
     }
 
     /// <summary>検索条件・並び順・Include をチェーン指定して取得するクエリを開始する</summary>
-    public SqlQuery<TEntity> Query() => new(_connectionFactory);
+    public SqlQuery<TEntity> Query() => new(new SqlServerSqlQueryExecutor<TEntity>(_connectionFactory));
 
     /// <summary>RowState に従って 1 トランザクションで追加・更新・削除を保存する（既定で子をカスケード）</summary>
     public async Task<int> SaveAsync(
@@ -4997,15 +4997,19 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
 /// <param name="ColumnName">角括弧なしの対象カラム名。列を特定できない場合は null</param>
 internal readonly record struct SqlQueryParameter(string Name, object? Value, string? ColumnName);
 
-/// <summary>SqlQuery の 1 並び順（キー選択式と降順フラグ）。EF モードで式木のまま捕捉する</summary>
+/// <summary>SqlQuery の 1 並び順（キー選択式と降順フラグ）。式木のまま捕捉し、実行器側で列名／SQL へ翻訳する</summary>
 /// <param name="KeySelector">キー選択のラムダ式（object? への boxing を含み得る。実行器側で剥がす）</param>
 /// <param name="Descending">降順かどうか</param>
 internal readonly record struct SqlQueryOrdering(LambdaExpression KeySelector, bool Descending);
 
 /// <summary>
 /// SqlQuery が蓄積した内容（Where 式・並び順・Include ツリー・ページング）を
-/// 別バックエンドの実行器へ引き渡すためのスナップショット（BCL 型のみで構成）。
+/// 実行器へ引き渡すための方言中立なスナップショット（BCL 型のみで構成）。
 /// </summary>
+/// <remarks>
+/// 述語・並び順は式木のまま保持し、SQL への翻訳（識別子クォート・日付部品・LIKE 等の方言差）と実行は
+/// 各バックエンドの <see cref="ISqlQueryExecutor{TEntity}"/> 実装（ADO 方言別実行器・EF Core 実行器）の責務とする。
+/// </remarks>
 /// <param name="Predicates">Where で捕捉した述語式（AND 結合）</param>
 /// <param name="Orderings">OrderBy / OrderByDescending で捕捉した並び順（指定順）</param>
 /// <param name="Includes">Include / ThenInclude のナビゲーションツリー</param>
@@ -5020,8 +5024,9 @@ internal sealed record SqlQueryPlan<TEntity>(
 );
 
 /// <summary>
-/// SqlQuery の終端メソッドの実行を差し替える内部抽象。SQL Server 版（FOR JSON）以外の
-/// バックエンド（EF Core 版 Repository）が実装し、SqlQuery へコンストラクタ経由で注入する。
+/// SqlQuery の終端メソッドの実行を差し替える内部抽象。各バックエンド（ADO 方言別実行器・EF Core 版）が
+/// 実装し、SqlQuery へコンストラクタ経由で注入する。SqlQuery 自身は方言 SQL を持たず、捕捉した
+/// プラン（式木・Include・ページング）をこの実行器へ委譲する。
 /// </summary>
 internal interface ISqlQueryExecutor<TEntity>
     where TEntity : class
@@ -5054,137 +5059,49 @@ internal interface ISqlQueryExecutor<TEntity>
 
 /// <summary>検索条件・並び順・Include をチェーンで構築し、終端メソッド（ToListAsync 等）で実行するクエリ</summary>
 /// <remarks>
-/// SQL Server 版では FOR JSON でグラフを入れ子 JSON として 1 クエリ取得し、System.Text.Json で復元する。
-/// EF 版（別バックエンド実行器を注入）では捕捉した式木を EF が各方言へ翻訳する。
-/// 条件・並び順・Include はラムダ式で指定。値はパラメータ化、列名はメタデータ由来でインジェクション対策済み。
+/// 述語・並び順・Include はラムダ式（式木）のまま捕捉し、SQL への翻訳・実行は注入された
+/// <see cref="ISqlQueryExecutor{TEntity}"/> 実装（ADO 方言別実行器 or EF Core 実行器）へ委譲する。
+/// SqlQuery 自身は方言 SQL を一切持たない（方言差は実行器側に閉じる）。
 /// </remarks>
 public sealed class SqlQuery<TEntity>
     where TEntity : class
 {
-    // ナビゲーションは [JsonIgnore]（親参照の循環対策）が付くことがあるが、Include でのロードでは
-    // それらも復元する必要があるため、解決子修飾でナビゲーションプロパティを読み取り対象に含める。
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        PropertyNameCaseInsensitive = true,
-        TypeInfoResolver = new DefaultJsonTypeInfoResolver
-        {
-            Modifiers = { IncludeNavigationProperties },
-        },
-        Converters = { new ValueObjectJsonConverterFactory() },
-    };
-
-    /// <summary>[JsonIgnore] 等で契約から外れたナビゲーションプロパティを、デシリアライズ対象として再登録する</summary>
-    private static void IncludeNavigationProperties(JsonTypeInfo typeInfo)
-    {
-        if (typeInfo.Kind != JsonTypeInfoKind.Object)
-        {
-            return;
-        }
-
-        foreach (
-            var property in typeInfo.Type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
-        )
-        {
-            if (
-                !property.CanRead
-                || !property.CanWrite
-                || property.GetCustomAttribute<NavigationReferenceAttribute>() is null
-            )
-            {
-                continue;
-            }
-
-            var existing = typeInfo.Properties.FirstOrDefault(item =>
-                string.Equals(item.Name, property.Name, StringComparison.OrdinalIgnoreCase)
-            );
-            if (existing is not null)
-            {
-                // [JsonIgnore] で無効化（Get/Set が null）されている場合は復活させ、Include で読み込めるようにする
-                existing.Get ??= property.GetValue;
-                existing.Set ??= property.SetValue;
-            }
-            else
-            {
-                var jsonProperty = typeInfo.CreateJsonPropertyInfo(
-                    property.PropertyType,
-                    property.Name
-                );
-                jsonProperty.Get = property.GetValue;
-                jsonProperty.Set = property.SetValue;
-                typeInfo.Properties.Add(jsonProperty);
-            }
-        }
-    }
-
-    private readonly ISqlConnectionFactory _connectionFactory;
-    private readonly List<string> _conditions = new();
-    private readonly List<string> _orderings = new();
-    private readonly List<SqlQueryParameter> _parameters = new();
     private readonly List<IncludeNode> _includes = new();
     private int? _take;
     private int? _skip;
 
-    /// <summary>別バックエンドの実行器（null なら従来どおり SQL Server の FOR JSON 実行）</summary>
-    private readonly ISqlQueryExecutor<TEntity>? _executor;
+    /// <summary>終端メソッドの実行を担うバックエンド実行器（ADO 方言別 or EF Core）</summary>
+    private readonly ISqlQueryExecutor<TEntity> _executor;
 
-    /// <summary>EF モードで捕捉した Where 式（翻訳せず式木のまま保持し、実行時に EF が各方言へ翻訳する）</summary>
+    /// <summary>捕捉した Where 式（翻訳せず式木のまま保持し、実行器が SQL / LINQ へ翻訳する）</summary>
     private readonly List<LambdaExpression> _predicates = new();
 
-    /// <summary>EF モードで捕捉した並び順（キー選択式と降順フラグ）</summary>
+    /// <summary>捕捉した並び順（キー選択式と降順フラグ）</summary>
     private readonly List<SqlQueryOrdering> _orderSelectors = new();
 
-    internal SqlQuery(ISqlConnectionFactory connectionFactory) =>
-        _connectionFactory = connectionFactory;
-
-    /// <summary>別バックエンドの実行器（EF Core 版）でクエリを実行する内部コンストラクタ</summary>
-    internal SqlQuery(ISqlQueryExecutor<TEntity> executor)
-    {
-        _executor = executor;
-        // SQL Server パスは終端メソッドの分岐で到達しないため、接続ファクトリは未使用
-        _connectionFactory = null!;
-    }
-
-    private static string TableName => EntitySaveMetadata.For(typeof(TEntity)).TableName;
+    /// <summary>バックエンド実行器を注入する内部コンストラクタ</summary>
+    internal SqlQuery(ISqlQueryExecutor<TEntity> executor) => _executor = executor;
 
     /// <summary>検索条件を追加する（複数指定は AND 結合）</summary>
     public SqlQuery<TEntity> Where(Expression<Func<TEntity, bool>> predicate)
     {
         ArgumentNullException.ThrowIfNull(predicate);
-
-        // EF モードでは自作トランスレータを通さず式木のまま捕捉する（表現力を EF の翻訳能力に委ねる）
-        if (_executor is not null)
-        {
-            _predicates.Add(predicate);
-            return this;
-        }
-
-        _conditions.Add(SqlExpressionTranslator.ToCondition(predicate.Body, _parameters));
+        // 式木のまま捕捉し、SQL / LINQ への翻訳は実行器に委ねる
+        _predicates.Add(predicate);
         return this;
     }
 
     /// <summary>昇順の並び順を追加する</summary>
     public SqlQuery<TEntity> OrderBy(Expression<Func<TEntity, object?>> keySelector)
     {
-        if (_executor is not null)
-        {
-            _orderSelectors.Add(new SqlQueryOrdering(keySelector, Descending: false));
-            return this;
-        }
-
-        _orderings.Add(SqlExpressionTranslator.ToColumn(keySelector) + " ASC");
+        _orderSelectors.Add(new SqlQueryOrdering(keySelector, Descending: false));
         return this;
     }
 
     /// <summary>降順の並び順を追加する</summary>
     public SqlQuery<TEntity> OrderByDescending(Expression<Func<TEntity, object?>> keySelector)
     {
-        if (_executor is not null)
-        {
-            _orderSelectors.Add(new SqlQueryOrdering(keySelector, Descending: true));
-            return this;
-        }
-
-        _orderings.Add(SqlExpressionTranslator.ToColumn(keySelector) + " DESC");
+        _orderSelectors.Add(new SqlQueryOrdering(keySelector, Descending: true));
         return this;
     }
 
@@ -5225,209 +5142,29 @@ public sealed class SqlQuery<TEntity>
     /// <summary>条件に一致するエンティティを（Include 指定分とともに）一覧取得する</summary>
     public async Task<IReadOnlyList<TEntity>> ToListAsync(
         CancellationToken cancellationToken = default
-    )
-    {
-        if (_executor is not null)
-        {
-            return await _executor.ToListAsync(BuildPlan(), cancellationToken);
-        }
-
-        var json = await ReadJsonAsync(BuildJsonSelect(_take, _skip), cancellationToken);
-        if (string.IsNullOrWhiteSpace(json))
-        {
-            return new List<TEntity>();
-        }
-
-        return JsonSerializer.Deserialize<List<TEntity>>(json, JsonOptions) ?? new List<TEntity>();
-    }
+    ) => await _executor.ToListAsync(BuildPlan(), cancellationToken);
 
     /// <summary>条件に一致する先頭の 1 件を（Include 指定分とともに）取得する（該当なしは null）</summary>
-    public async Task<TEntity?> FirstOrDefaultAsync(CancellationToken cancellationToken = default)
-    {
-        if (_executor is not null)
-        {
-            return await _executor.FirstOrDefaultAsync(BuildPlan(), cancellationToken);
-        }
-
-        var json = await ReadJsonAsync(BuildJsonSelect(1, _skip), cancellationToken);
-        if (string.IsNullOrWhiteSpace(json))
-        {
-            return null;
-        }
-
-        var list = JsonSerializer.Deserialize<List<TEntity>>(json, JsonOptions);
-        return list is { Count: > 0 } ? list[0] : null;
-    }
+    public async Task<TEntity?> FirstOrDefaultAsync(CancellationToken cancellationToken = default) =>
+        await _executor.FirstOrDefaultAsync(BuildPlan(), cancellationToken);
 
     /// <summary>条件に一致する件数を取得する</summary>
-    public async Task<int> CountAsync(CancellationToken cancellationToken = default)
-    {
-        if (_executor is not null)
-        {
-            return await _executor.CountAsync(BuildPlan(), cancellationToken);
-        }
-
-        await using var connection = _connectionFactory.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
-
-        await using var command = CreateCommand(
-            connection,
-            $"SELECT COUNT(*) FROM {TableName}{BuildWhereClause()};"
-        );
-        var result = await command.ExecuteScalarAsync(cancellationToken);
-        return Convert.ToInt32(result);
-    }
+    public async Task<int> CountAsync(CancellationToken cancellationToken = default) =>
+        await _executor.CountAsync(BuildPlan(), cancellationToken);
 
     /// <summary>条件に一致するレコードが存在するかを取得する</summary>
-    public async Task<bool> AnyAsync(CancellationToken cancellationToken = default)
-    {
-        if (_executor is not null)
-        {
-            return await _executor.AnyAsync(BuildPlan(), cancellationToken);
-        }
-
-        await using var connection = _connectionFactory.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
-
-        await using var command = CreateCommand(
-            connection,
-            $"SELECT CASE WHEN EXISTS (SELECT 1 FROM {TableName}{BuildWhereClause()}) THEN 1 ELSE 0 END;"
-        );
-        var result = await command.ExecuteScalarAsync(cancellationToken);
-        return Convert.ToInt32(result) != 0;
-    }
+    public async Task<bool> AnyAsync(CancellationToken cancellationToken = default) =>
+        await _executor.AnyAsync(BuildPlan(), cancellationToken);
 
     /// <summary>条件に一致する行を一括削除する。cascadeDelete=true で子孫も FK 連鎖で削除する</summary>
     public async Task<int> ExecuteDeleteAsync(
         bool cascadeDelete = false,
         CancellationToken cancellationToken = default
-    )
-    {
-        if (_executor is not null)
-        {
-            return await _executor.ExecuteDeleteAsync(BuildPlan(), cascadeDelete, cancellationToken);
-        }
-
-        var whereClause = BuildWhereClause();
-
-        await using var connection = _connectionFactory.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
-
-        if (!cascadeDelete)
-        {
-            await using var command = CreateCommand(
-                connection,
-                $"DELETE FROM {TableName}{whereClause};"
-            );
-            return await command.ExecuteNonQueryAsync(cancellationToken);
-        }
-
-        // カスケード: 子孫→本体の順に並んだ DELETE 文群を 1 トランザクションで実行する
-        await using var transaction = (SqlTransaction)
-            await connection.BeginTransactionAsync(cancellationToken);
-
-        try
-        {
-            var rows = 0;
-
-            foreach (
-                var sql in CascadeDeletePlanner.BuildDeleteStatements(
-                    typeof(TEntity),
-                    TableName,
-                    whereClause
-                )
-            )
-            {
-                await using var command = new SqlCommand(sql, connection, transaction);
-                AddParameters(command);
-                rows += await command.ExecuteNonQueryAsync(cancellationToken);
-            }
-
-            await transaction.CommitAsync(cancellationToken);
-            return rows;
-        }
-        catch
-        {
-            await transaction.RollbackAsync(cancellationToken);
-            throw;
-        }
-    }
-
-    /// <summary>FOR JSON の結果（約 2KB ごとに複数行で返る）を全行連結して 1 つの JSON 文字列にする</summary>
-    private async Task<string> ReadJsonAsync(string sql, CancellationToken cancellationToken)
-    {
-        await using var connection = _connectionFactory.CreateConnection();
-        await connection.OpenAsync(cancellationToken);
-
-        await using var command = CreateCommand(connection, sql);
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-
-        var chunks = new List<string>();
-        while (await reader.ReadAsync(cancellationToken))
-        {
-            chunks.Add(reader.GetString(0));
-        }
-
-        return string.Concat(chunks);
-    }
+    ) => await _executor.ExecuteDeleteAsync(BuildPlan(), cascadeDelete, cancellationToken);
 
     /// <summary>捕捉済みの式・Include ツリー・ページングを、実行器へ渡すスナップショットへ固める</summary>
     private SqlQueryPlan<TEntity> BuildPlan() =>
         new(_predicates, _orderSelectors, _includes, _take, _skip);
-
-    /// <summary>ルートの WHERE・並び順・ページングと Include ツリーから FOR JSON の SELECT 文を組み立てる</summary>
-    private string BuildJsonSelect(int? take, int? skip) =>
-        JsonQueryPlanner.BuildSelect(
-            typeof(TEntity),
-            BuildWhereClause(),
-            BuildOrderAndPaging(take, skip),
-            _includes
-        );
-
-    /// <summary>ORDER BY / OFFSET・FETCH 句を組み立てる（take/skip 指定時は ORDER BY 必須のためダミー順序を補う）</summary>
-    private string BuildOrderAndPaging(int? take, int? skip)
-    {
-        if (take.HasValue || skip.HasValue)
-        {
-            var ordering =
-                _orderings.Count == 0
-                    ? " ORDER BY (SELECT NULL)"
-                    : " ORDER BY " + string.Join(", ", _orderings);
-            return take.HasValue
-                ? $"{ordering} OFFSET {skip ?? 0} ROWS FETCH NEXT {take.Value} ROWS ONLY"
-                : $"{ordering} OFFSET {skip ?? 0} ROWS";
-        }
-
-        return _orderings.Count == 0 ? string.Empty : " ORDER BY " + string.Join(", ", _orderings);
-    }
-
-    /// <summary>蓄積したパラメータを設定したコマンドを生成する</summary>
-    private SqlCommand CreateCommand(SqlConnection connection, string sql)
-    {
-        var command = new SqlCommand(sql, connection);
-        AddParameters(command);
-        return command;
-    }
-
-    /// <summary>蓄積した条件パラメータをコマンドへ設定する</summary>
-    /// <remarks>
-    /// 列名が判明しているパラメータは、その列の [SqlColumnType] を用いて明示 SqlParameter を構築する
-    /// （LOWER 越し比較など関数越しでも同型どうしのため無害）。列が特定できない場合は従来どおり AddWithValue。
-    /// </remarks>
-    private void AddParameters(SqlCommand command)
-    {
-        var metadata = EntitySaveMetadata.For(typeof(TEntity));
-        foreach (var parameter in _parameters)
-        {
-            var value =
-                SqlParameterValue.Unwrap(parameter.Value);
-            metadata.AddQueryParameter(command, parameter.Name, parameter.ColumnName, value);
-        }
-    }
-
-    /// <summary>WHERE 句を組み立てる（条件なしは空文字）</summary>
-    private string BuildWhereClause() =>
-        _conditions.Count == 0 ? string.Empty : " WHERE " + string.Join(" AND ", _conditions);
 }
 
 /// <summary>Include の対象ナビゲーションと、その配下（ThenInclude）の木構造</summary>
@@ -5543,6 +5280,334 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
     /// <summary>条件に一致するレコードが存在するかを取得する</summary>
     public Task<bool> AnyAsync(CancellationToken cancellationToken = default) =>
         _query.AnyAsync(cancellationToken);
+}
+
+/// <summary>
+/// <see cref="SqlQuery{TEntity}"/> の SQL Server 向け ADO 実行器。
+/// プランの述語・並び順を <see cref="SqlExpressionTranslator"/> で SQL へ翻訳し、
+/// FOR JSON でグラフを入れ子 JSON として 1 クエリ取得し、System.Text.Json で復元する。
+/// </summary>
+/// <remarks>
+/// 方言 SQL（識別子クォート・SELECT 構文・ページング句）はこの実行器に閉じる。
+/// SqlQuery は方言中立の <see cref="SqlQueryPlan{TEntity}"/> を渡すだけで、方言差はここでのみ吸収する。
+/// </remarks>
+internal sealed class SqlServerSqlQueryExecutor<TEntity>(ISqlConnectionFactory connectionFactory)
+    : ISqlQueryExecutor<TEntity>
+    where TEntity : EntityBase
+{
+    /// <summary>SQL 接続の生成元</summary>
+    private readonly ISqlConnectionFactory _connectionFactory = connectionFactory;
+
+    private static string TableName => EntitySaveMetadata.For(typeof(TEntity)).TableName;
+
+    // ナビゲーションは [JsonIgnore]（親参照の循環対策）が付くことがあるが、Include でのロードでは
+    // それらも復元する必要があるため、解決子修飾でナビゲーションプロパティを読み取り対象に含める。
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+        TypeInfoResolver = new DefaultJsonTypeInfoResolver
+        {
+            Modifiers = { IncludeNavigationProperties },
+        },
+        Converters = { new ValueObjectJsonConverterFactory() },
+    };
+
+    /// <summary>[JsonIgnore] 等で契約から外れたナビゲーションプロパティを、デシリアライズ対象として再登録する</summary>
+    private static void IncludeNavigationProperties(JsonTypeInfo typeInfo)
+    {
+        if (typeInfo.Kind != JsonTypeInfoKind.Object)
+        {
+            return;
+        }
+
+        foreach (
+            var property in typeInfo.Type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
+        )
+        {
+            if (
+                !property.CanRead
+                || !property.CanWrite
+                || property.GetCustomAttribute<NavigationReferenceAttribute>() is null
+            )
+            {
+                continue;
+            }
+
+            var existing = typeInfo.Properties.FirstOrDefault(item =>
+                string.Equals(item.Name, property.Name, StringComparison.OrdinalIgnoreCase)
+            );
+            if (existing is not null)
+            {
+                // [JsonIgnore] で無効化（Get/Set が null）されている場合は復活させ、Include で読み込めるようにする
+                existing.Get ??= property.GetValue;
+                existing.Set ??= property.SetValue;
+            }
+            else
+            {
+                var jsonProperty = typeInfo.CreateJsonPropertyInfo(
+                    property.PropertyType,
+                    property.Name
+                );
+                jsonProperty.Get = property.GetValue;
+                jsonProperty.Set = property.SetValue;
+                typeInfo.Properties.Add(jsonProperty);
+            }
+        }
+    }
+
+    /// <summary>条件に一致するエンティティを（Include 指定分とともに）一覧取得する</summary>
+    public async Task<IReadOnlyList<TEntity>> ToListAsync(
+        SqlQueryPlan<TEntity> plan,
+        CancellationToken cancellationToken
+    )
+    {
+        var parameters = new List<SqlQueryParameter>();
+        var whereClause = BuildWhereClause(plan, parameters);
+        var json = await ReadJsonAsync(
+            BuildJsonSelect(plan, whereClause, plan.Take, plan.Skip),
+            parameters,
+            cancellationToken
+        );
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return new List<TEntity>();
+        }
+
+        return JsonSerializer.Deserialize<List<TEntity>>(json, JsonOptions) ?? new List<TEntity>();
+    }
+
+    /// <summary>条件に一致する先頭の 1 件を（Include 指定分とともに）取得する（該当なしは null）</summary>
+    public async Task<TEntity?> FirstOrDefaultAsync(
+        SqlQueryPlan<TEntity> plan,
+        CancellationToken cancellationToken
+    )
+    {
+        var parameters = new List<SqlQueryParameter>();
+        var whereClause = BuildWhereClause(plan, parameters);
+        var json = await ReadJsonAsync(
+            BuildJsonSelect(plan, whereClause, 1, plan.Skip),
+            parameters,
+            cancellationToken
+        );
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return null;
+        }
+
+        var list = JsonSerializer.Deserialize<List<TEntity>>(json, JsonOptions);
+        return list is { Count: > 0 } ? list[0] : null;
+    }
+
+    /// <summary>条件に一致する件数を取得する（並び順・ページング・Include は関与しない）</summary>
+    public async Task<int> CountAsync(SqlQueryPlan<TEntity> plan, CancellationToken cancellationToken)
+    {
+        var parameters = new List<SqlQueryParameter>();
+        var whereClause = BuildWhereClause(plan, parameters);
+
+        await using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        await using var command = CreateCommand(
+            connection,
+            $"SELECT COUNT(*) FROM {TableName}{whereClause};",
+            parameters
+        );
+        var result = await command.ExecuteScalarAsync(cancellationToken);
+        return Convert.ToInt32(result);
+    }
+
+    /// <summary>条件に一致するレコードが存在するかを取得する（並び順・ページング・Include は関与しない）</summary>
+    public async Task<bool> AnyAsync(SqlQueryPlan<TEntity> plan, CancellationToken cancellationToken)
+    {
+        var parameters = new List<SqlQueryParameter>();
+        var whereClause = BuildWhereClause(plan, parameters);
+
+        await using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        await using var command = CreateCommand(
+            connection,
+            $"SELECT CASE WHEN EXISTS (SELECT 1 FROM {TableName}{whereClause}) THEN 1 ELSE 0 END;",
+            parameters
+        );
+        var result = await command.ExecuteScalarAsync(cancellationToken);
+        return Convert.ToInt32(result) != 0;
+    }
+
+    /// <summary>条件に一致する行を一括削除する。cascadeDelete=true で子孫も FK 連鎖で削除する</summary>
+    public async Task<int> ExecuteDeleteAsync(
+        SqlQueryPlan<TEntity> plan,
+        bool cascadeDelete,
+        CancellationToken cancellationToken
+    )
+    {
+        var parameters = new List<SqlQueryParameter>();
+        var whereClause = BuildWhereClause(plan, parameters);
+
+        await using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        if (!cascadeDelete)
+        {
+            await using var command = CreateCommand(
+                connection,
+                $"DELETE FROM {TableName}{whereClause};",
+                parameters
+            );
+            return await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        // カスケード: 子孫→本体の順に並んだ DELETE 文群を 1 トランザクションで実行する
+        await using var transaction = (SqlTransaction)
+            await connection.BeginTransactionAsync(cancellationToken);
+
+        try
+        {
+            var rows = 0;
+
+            foreach (
+                var sql in CascadeDeletePlanner.BuildDeleteStatements(
+                    typeof(TEntity),
+                    TableName,
+                    whereClause
+                )
+            )
+            {
+                await using var command = new SqlCommand(sql, connection, transaction);
+                AddParameters(command, parameters);
+                rows += await command.ExecuteNonQueryAsync(cancellationToken);
+            }
+
+            await transaction.CommitAsync(cancellationToken);
+            return rows;
+        }
+        catch
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            throw;
+        }
+    }
+
+    /// <summary>FOR JSON の結果（約 2KB ごとに複数行で返る）を全行連結して 1 つの JSON 文字列にする</summary>
+    private async Task<string> ReadJsonAsync(
+        string sql,
+        IReadOnlyList<SqlQueryParameter> parameters,
+        CancellationToken cancellationToken
+    )
+    {
+        await using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        await using var command = CreateCommand(connection, sql, parameters);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+
+        var chunks = new List<string>();
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            chunks.Add(reader.GetString(0));
+        }
+
+        return string.Concat(chunks);
+    }
+
+    /// <summary>ルートの WHERE・並び順・ページングと Include ツリーから FOR JSON の SELECT 文を組み立てる</summary>
+    private static string BuildJsonSelect(
+        SqlQueryPlan<TEntity> plan,
+        string whereClause,
+        int? take,
+        int? skip
+    ) =>
+        JsonQueryPlanner.BuildSelect(
+            typeof(TEntity),
+            whereClause,
+            BuildOrderAndPaging(plan, take, skip),
+            plan.Includes
+        );
+
+    /// <summary>ORDER BY / OFFSET・FETCH 句を組み立てる（take/skip 指定時は ORDER BY 必須のためダミー順序を補う）</summary>
+    private static string BuildOrderAndPaging(SqlQueryPlan<TEntity> plan, int? take, int? skip)
+    {
+        var orderings = BuildOrderings(plan);
+
+        if (take.HasValue || skip.HasValue)
+        {
+            var ordering =
+                orderings.Count == 0
+                    ? " ORDER BY (SELECT NULL)"
+                    : " ORDER BY " + string.Join(", ", orderings);
+            return take.HasValue
+                ? $"{ordering} OFFSET {skip ?? 0} ROWS FETCH NEXT {take.Value} ROWS ONLY"
+                : $"{ordering} OFFSET {skip ?? 0} ROWS";
+        }
+
+        return orderings.Count == 0 ? string.Empty : " ORDER BY " + string.Join(", ", orderings);
+    }
+
+    /// <summary>プランの並び順（式木）を SQL の ORDER BY 要素（"[col] ASC" 等）へ翻訳する</summary>
+    private static List<string> BuildOrderings(SqlQueryPlan<TEntity> plan)
+    {
+        var orderings = new List<string>(plan.Orderings.Count);
+        foreach (var ordering in plan.Orderings)
+        {
+            orderings.Add(
+                SqlExpressionTranslator.ToColumn(ordering.KeySelector)
+                    + (ordering.Descending ? " DESC" : " ASC")
+            );
+        }
+
+        return orderings;
+    }
+
+    /// <summary>プランの述語（式木）を WHERE 句へ翻訳し、値パラメータを parameters へ蓄積する（条件なしは空文字）</summary>
+    private static string BuildWhereClause(
+        SqlQueryPlan<TEntity> plan,
+        List<SqlQueryParameter> parameters
+    )
+    {
+        if (plan.Predicates.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        var conditions = new List<string>(plan.Predicates.Count);
+        foreach (var predicate in plan.Predicates)
+        {
+            conditions.Add(SqlExpressionTranslator.ToCondition(predicate.Body, parameters));
+        }
+
+        return " WHERE " + string.Join(" AND ", conditions);
+    }
+
+    /// <summary>蓄積したパラメータを設定したコマンドを生成する</summary>
+    private SqlCommand CreateCommand(
+        SqlConnection connection,
+        string sql,
+        IReadOnlyList<SqlQueryParameter> parameters
+    )
+    {
+        var command = new SqlCommand(sql, connection);
+        AddParameters(command, parameters);
+        return command;
+    }
+
+    /// <summary>翻訳済みの条件パラメータをコマンドへ設定する</summary>
+    /// <remarks>
+    /// 列名が判明しているパラメータは、その列の [SqlColumnType] を用いて明示 SqlParameter を構築する
+    /// （LOWER 越し比較など関数越しでも同型どうしのため無害）。列が特定できない場合は従来どおり AddWithValue。
+    /// </remarks>
+    private static void AddParameters(
+        SqlCommand command,
+        IReadOnlyList<SqlQueryParameter> parameters
+    )
+    {
+        var metadata = EntitySaveMetadata.For(typeof(TEntity));
+        foreach (var parameter in parameters)
+        {
+            var value =
+                SqlParameterValue.Unwrap(parameter.Value);
+            metadata.AddQueryParameter(command, parameter.Name, parameter.ColumnName, value);
+        }
+    }
 }
 
 /// <summary>Include ツリーと FK メタデータから FOR JSON の SELECT 文を組み立てるプランナー（DB 非依存・純粋）</summary>
