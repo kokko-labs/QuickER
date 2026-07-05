@@ -108,6 +108,10 @@ internal sealed partial class CSharpGenerationModelBuilder
             IsGuidKey = isGuidKey,
             ColumnName = authoritative.Column.Name,
             DescriptionXmlDoc = EscapeForXmlDocSummary(authoritative.Column.Description),
+            // 既定表示名: 代表列の Description があればそれ、無ければプロパティ名（例 "Name"。メッセージの後方互換）
+            DisplayName = string.IsNullOrWhiteSpace(authoritative.Column.Description)
+                ? _nameConverter.ToPropertyName(authoritative.Column.Name)
+                : EscapeForCSharpString(authoritative.Column.Description),
             MaxLength = maxLength,
             Precision = precision,
             Scale = scale,
@@ -137,6 +141,10 @@ internal sealed partial class CSharpGenerationModelBuilder
         return new CSharpEditModelPropertyModel
         {
             PropertyName = propertyName,
+            // VO 有効プロパティの表示名は VO の静的 DisplayName を参照するため既定値は使われないが、必須フィールドを満たす
+            DisplayName = string.IsNullOrWhiteSpace(column.Description)
+                ? propertyName
+                : EscapeForCSharpString(column.Description),
             DescriptionXmlDoc = EscapeForXmlDocSummary(column.Description),
             TypeName = valueObject.ClassName + "?", // 確定値は常に NULL 許容
             FieldName = ToFieldName(propertyName),

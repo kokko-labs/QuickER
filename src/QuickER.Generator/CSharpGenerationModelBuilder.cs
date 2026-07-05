@@ -45,14 +45,14 @@ internal sealed partial class CSharpGenerationModelBuilder
             EntityClasses = options.GenerateEntityClasses
                 ? diagram
                     .Entities.Select(entity =>
-                        BuildEntityClass(entity, navigationsByEntity[entity.Id])
+                        BuildEntityClass(entity, navigationsByEntity[entity.Id], diagnostics)
                     )
                     .ToList()
                 : [],
             EditModelClasses = options.GenerateEditModels
                 ? diagram
                     .Entities.Select(entity =>
-                        BuildEditModelClass(entity, navigationsByEntity[entity.Id])
+                        BuildEditModelClass(entity, navigationsByEntity[entity.Id], diagnostics)
                     )
                     .ToList()
                 : [],
@@ -84,32 +84,106 @@ internal sealed partial class CSharpGenerationModelBuilder
     /// <summary>エンティティ定義と解決済みナビゲーションからエンティティクラスの生成モデルを構築する</summary>
     private CSharpClassModel BuildEntityClass(
         Entity entity,
-        IReadOnlyList<NavigationInfo> navigations
+        IReadOnlyList<NavigationInfo> navigations,
+        ICollection<GenerationDiagnostic> diagnostics
     )
     {
         var className = _nameConverter.ToEntityClassName(entity.TableName);
         var properties = entity.Columns.Select(BuildProperty).ToList();
 
+        // 列由来プロパティ名が生成する静的メンバー（DisplayName / CustomizeDisplayName）と衝突する場合は、
+        // そのエンティティのみ両メンバーを省略する（生成は完走・警告診断を出す）。
+        var hasDisplayNameCollision = properties.Any(property =>
+            EntityDisplayNameReservedMembers.Contains(property.PropertyName)
+        );
+
+        if (hasDisplayNameCollision)
+        {
+            diagnostics.Add(
+                Warning(
+                    $"エンティティ '{className}'（テーブル '{entity.TableName}'）は列由来プロパティ名が DisplayName / CustomizeDisplayName と衝突するため、"
+                        + "静的 DisplayName プロパティと CustomizeDisplayName フックの生成を省略しました。"
+                )
+            );
+        }
+
         return new CSharpClassModel
         {
             ClassName = className,
             TableName = entity.TableName,
-            Description = entity.Description,
+            // [DbTableMeta(Description = "...")] へ C# リテラルとして埋め込むためエスケープする（未エスケープだと " や \ でコンパイル不能になる）
+            Description = EscapeForCSharpString(entity.Description),
             DescriptionXmlDoc = EscapeForXmlDocSummary(entity.Description),
+            // 既定表示名: Description があればそれ、無ければクラス名。C# リテラルへエスケープして埋め込む
+            DisplayName = string.IsNullOrWhiteSpace(entity.Description)
+                ? className
+                : EscapeForCSharpString(entity.Description),
+            HasDisplayNameCollision = hasDisplayNameCollision,
             Properties = properties,
             Navigations = navigations.Select(BuildEntityNavigation).ToList(),
         };
     }
 
+    /// <summary>Entity が生成する静的表示名メンバー名（列由来プロパティ名がこれらと一致すると衝突とみなす）</summary>
+    private static readonly HashSet<string> EntityDisplayNameReservedMembers = new(
+        StringComparer.Ordinal
+    )
+    {
+        "DisplayName",
+        "CustomizeDisplayName",
+    };
+
+    /// <summary>EditModel が生成する表示名解決ヘルパ名（列由来プロパティ名がこれらと一致すると衝突とみなす）</summary>
+    private static readonly HashSet<string> EditModelDisplayNameReservedMembers = new(
+        StringComparer.Ordinal
+    )
+    {
+        "GetDisplayName",
+        "CustomizePropertyDisplayName",
+    };
+
     /// <summary>エンティティ定義と解決済みナビゲーションから EditModel クラスの生成モデルを構築する</summary>
     private CSharpEditModelClassModel BuildEditModelClass(
         Entity entity,
-        IReadOnlyList<NavigationInfo> navigations
+        IReadOnlyList<NavigationInfo> navigations,
+        ICollection<GenerationDiagnostic> diagnostics
     )
     {
         var className = _nameConverter.ToEditModelClassName(entity.TableName);
         var properties = entity.Columns.Select(BuildEditModelProperty).ToList();
         var navigationModels = navigations.Select(BuildEditModelNavigation).ToList();
+
+        // 列由来プロパティ名（確定値・バインディング両方）が表示名解決ヘルパ（GetDisplayName /
+        // CustomizePropertyDisplayName）と衝突する場合は、この EditModel のみ表示名機構を省略し、
+        // 検証メッセージを従来どおりプロパティ名で構築する（生成は完走・警告診断を出す）。
+        var hasDisplayNameCollision = properties.Any(property =>
+            EditModelDisplayNameReservedMembers.Contains(property.PropertyName)
+            || EditModelDisplayNameReservedMembers.Contains(property.BindingPropertyName)
+        );
+
+        if (hasDisplayNameCollision)
+        {
+            diagnostics.Add(
+                Warning(
+                    $"EditModel '{className}'（テーブル '{entity.TableName}'）は列由来プロパティ名が表示名解決ヘルパ"
+                        + " GetDisplayName / CustomizePropertyDisplayName と衝突するため、表示名機構の生成を省略し、"
+                        + "検証メッセージは従来どおりプロパティ名で構築します。"
+                )
+            );
+        }
+
+        // 各プロパティの検証メッセージへ渡す表示名式を解決する（衝突時は従来どおり nameof(Prop)）
+        properties = properties
+            .Select(property =>
+                property with
+                {
+                    DisplayNameExpression = ResolveEditModelDisplayNameExpression(
+                        property,
+                        hasDisplayNameCollision
+                    ),
+                }
+            )
+            .ToList();
 
         return new CSharpEditModelClassModel
         {
@@ -120,7 +194,36 @@ internal sealed partial class CSharpGenerationModelBuilder
             Navigations = navigationModels,
             HasCascadeNavigations = navigationModels.Any(navigation => navigation.Cascade),
             TypedParentModelTypeName = ResolveTypedParentModelTypeName(className, navigationModels),
+            HasDisplayNameCollision = hasDisplayNameCollision,
+            HasNonValueObjectProperty = properties.Any(property => !property.IsValueObject),
         };
+    }
+
+    /// <summary>
+    /// EditModel プロパティの検証メッセージへ渡す表示名の C# 式を解決する。
+    /// VO 有効時は VO の静的 <c>DisplayName</c> を参照（VO 側の Customize 上書きが自動反映）、
+    /// VO 無効時は EditModel 内蔵の既定表示名＋<c>CustomizePropertyDisplayName</c> フック経由（<c>GetDisplayName</c> ヘルパ）。
+    /// 表示名衝突（<paramref name="hasCollision"/>）のときは従来どおり <c>nameof(Prop)</c> を返す（後方互換）。
+    /// </summary>
+    private string ResolveEditModelDisplayNameExpression(
+        CSharpEditModelPropertyModel property,
+        bool hasCollision
+    )
+    {
+        // VO 有効時は VO 側の DisplayName を参照する（衝突は EditModel ヘルパの話で VO には無関係のため優先）
+        if (property.IsValueObject)
+        {
+            return $"{property.ValueObjectClassName}.DisplayName";
+        }
+
+        // 衝突時はヘルパを生成しないため、従来どおりプロパティ名を渡す（メッセージは変わらない）
+        if (hasCollision)
+        {
+            return $"nameof({property.PropertyName})";
+        }
+
+        // 既定表示名: Description があればそれ、無ければプロパティ名（メッセージの後方互換）
+        return $"GetDisplayName(nameof({property.PropertyName}), \"{property.DisplayName}\")";
     }
 
     /// <summary>型付き ParentModel を生成できる場合の親 EditModel 型名を解決する（親候補型がちょうど 1 つのときのみ）</summary>
@@ -271,7 +374,8 @@ internal sealed partial class CSharpGenerationModelBuilder
             SqlDeclaredLength = typeInfo.SqlDeclaredLength,
             // DB 定義メタ属性（[DbColumnMeta]）用。方言中立トークンと列の説明（型解決とは独立にモデルから引く）
             CanonicalTypeToken = typeInfo.CanonicalTypeToken,
-            Description = column.Description,
+            // [DbColumnMeta(..., Description = "...")] へ C# リテラルとして埋め込むためエスケープする（未エスケープだと " や \ でコンパイル不能になる）
+            Description = EscapeForCSharpString(column.Description),
             DescriptionXmlDoc = EscapeForXmlDocSummary(column.Description),
             // 非 NULL の VO は妥当な空既定値を作れないため null! でロード前提を表明（NULL 許容 VO は初期化不要）
             Initializer = valueObject is not null
@@ -338,6 +442,10 @@ internal sealed partial class CSharpGenerationModelBuilder
         return new CSharpEditModelPropertyModel
         {
             PropertyName = propertyName,
+            // 既定表示名: Description があればそれ、無ければプロパティ名（メッセージの後方互換）
+            DisplayName = string.IsNullOrWhiteSpace(column.Description)
+                ? propertyName
+                : EscapeForCSharpString(column.Description),
             DescriptionXmlDoc = EscapeForXmlDocSummary(column.Description),
             TypeName = typeName,
             FieldName = fieldName,
@@ -632,6 +740,25 @@ internal sealed partial class CSharpGenerationModelBuilder
         var escaped = text.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;");
 
         // CRLF/LF/CR いずれの改行も空白 1 つへ畳む（summary は 1 行前提）
+        return Regex.Replace(escaped, "\r\n|\r|\n", " ");
+    }
+
+    /// <summary>
+    /// 文字列を C# の通常文字列リテラル（<c>"..."</c>）へ安全に埋め込めるようエスケープする。
+    /// バックスラッシュと二重引用符をエスケープし、改行（CRLF/LF/CR）は空白 1 つへ畳む（リテラルは 1 行前提）。
+    /// 空・空白のみは空文字列を返す。<c>[DbColumnMeta]</c> / <c>[DbTableMeta]</c> の Description や DisplayName 既定値に共用する。
+    /// </summary>
+    private static string EscapeForCSharpString(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return string.Empty;
+        }
+
+        // バックスラッシュを最初にエスケープする（後続の \" を二重エスケープしないため）
+        var escaped = text.Replace("\\", "\\\\").Replace("\"", "\\\"");
+
+        // CRLF/LF/CR いずれの改行も空白 1 つへ畳む（1 行リテラル前提）
         return Regex.Replace(escaped, "\r\n|\r|\n", " ");
     }
 }

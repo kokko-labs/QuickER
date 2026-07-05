@@ -514,6 +514,20 @@ public sealed partial class {{ vo.class_name }}
 
     /// <summary>ユーザー定義の追加検証（partial・未実装ならゼロコスト）</summary>
     static partial void OnValidate({{ vo.value_type_name }} value, ICollection<string> errors);
+
+    /// <summary>この値オブジェクトの表示名（エラーメッセージ等で使う）。既定は列の説明、無指定はプロパティ名。CustomizeDisplayName で上書き可能</summary>
+    public static string DisplayName
+    {
+        get
+        {
+            var displayName = "{{ vo.display_name }}";
+            CustomizeDisplayName(ref displayName);
+            return displayName;
+        }
+    }
+
+    /// <summary>表示名を差し替える拡張ポイント（partial・未実装なら既定の表示名）</summary>
+    static partial void CustomizeDisplayName(ref string displayName);
     {{~ if vo.max_length ~}}
 
     /// <summary>最大長エラーメッセージの差し替え（partial・未実装なら既定メッセージ）</summary>
@@ -769,6 +783,20 @@ public abstract partial class EntityBase
 {{ if include_json_ignore_on_parent_navigation && navigation.is_parent_reference }}    [JsonIgnore]
 {{ end }}    [NavigationReference("{{ navigation.principal_table_name }}", "{{ navigation.principal_column_name }}", "{{ navigation.dependent_table_name }}", "{{ navigation.dependent_column_name }}", {{ navigation.is_collection }}, {{ navigation.cascade }}, {{ navigation.is_parent_reference }})]
     public {{ navigation.display_type_name }} {{ navigation.property_name }} { get; set; }{{ navigation.initializer }}
+{{ end }}{{ if !item.has_display_name_collision }}
+    /// <summary>このエンティティの表示名（画面ラベル等で使う）。既定はテーブルの説明、無指定はクラス名。CustomizeDisplayName で上書き可能</summary>
+    public static string DisplayName
+    {
+        get
+        {
+            var displayName = "{{ item.display_name }}";
+            CustomizeDisplayName(ref displayName);
+            return displayName;
+        }
+    }
+
+    /// <summary>表示名を差し替える拡張ポイント（partial・未実装なら既定の表示名）</summary>
+    static partial void CustomizeDisplayName(ref string displayName);
 {{ end }}}
 {{~ end ~}}
 {{~ end ~}}
@@ -1351,11 +1379,12 @@ public abstract partial class EditModelBase
     /// <summary>CancelEdit の本体（具象クラスがスナップショットからの復元を実装）</summary>
     protected virtual void CancelEditCore() { }
 
-    /// <summary>必須項目の未入力エラーメッセージを構築する（派生クラスで override し方針を差し替え可能）</summary>
+    /// <summary>必須項目の未入力エラーメッセージを構築する（引数は表示名。派生クラスで override し方針を差し替え可能）</summary>
+    /// <remarks>表示名は変換エラー（'入力値' 表記）と揃え、.NET の識別子引用慣例に沿ってシングルクォートで囲む</remarks>
     protected virtual string BuildRequiredErrorMessage(string propertyName) =>
-        $"{propertyName} は必須です。";
+        $"'{propertyName}' は必須です。";
 
-    /// <summary>バインディング値の変換エラーメッセージを構築する（派生クラスで override し方針を差し替え可能）</summary>
+    /// <summary>バインディング値の変換エラーメッセージを構築する（第 1 引数は表示名。派生クラスで override し方針を差し替え可能）</summary>
     protected virtual string BuildParseErrorMessage(
         string propertyName,
         string inputValue,
@@ -1655,7 +1684,8 @@ public partial class {{ item.class_name }} : EditModelBase
     //   子の追加      : protected override void RegisterExtraChildren();  // 内部で AddChild/AddChildren で登録
     //   変換ﾒｯｾｰｼﾞ調整  : partial void CustomizeParseErrorMessage(string propertyName, string inputValue, string typeName, ref string message);
     //   入力正規化調整 : partial void CustomizeInputNormalization(string propertyName, string rawValue, ref string normalizedValue);
-    //   行編集        : partial void OnBeginEdit();  partial void OnEndEdit();  partial void OnCancelEdit();
+{{ if !item.has_display_name_collision && item.has_non_value_object_property }}    //   表示名調整    : partial void CustomizePropertyDisplayName(string propertyName, ref string displayName);  // 検証メッセージの表示名を上書き
+{{ end }}    //   行編集        : partial void OnBeginEdit();  partial void OnEndEdit();  partial void OnCancelEdit();
     //   値変更通知    : partial void On{プロパティ}Changing(値) / Changed(値) / Changing(旧,新) / Changed(旧,新);  // 各プロパティに用意
     // ====================================================================================================
 
@@ -1758,7 +1788,7 @@ public partial class {{ item.class_name }} : EditModelBase
                 {
                     SetError(
                         nameof({{ p.binding_property_name }}),
-                        ResolveParseErrorMessage(nameof({{ p.binding_property_name }}), normalized, "{{ p.parse_type_name }}")
+                        ResolveParseErrorMessage({{ p.display_name_expression }}, normalized, "{{ p.parse_type_name }}")
                     );
                 }
 {{ else if p.is_binary }}                else
@@ -1785,7 +1815,7 @@ public partial class {{ item.class_name }} : EditModelBase
                     {
                         SetError(
                             nameof({{ p.binding_property_name }}),
-                            ResolveParseErrorMessage(nameof({{ p.binding_property_name }}), normalized, "byte[]")
+                            ResolveParseErrorMessage({{ p.display_name_expression }}, normalized, "byte[]")
                         );
                     }
                 }
@@ -1807,7 +1837,7 @@ public partial class {{ item.class_name }} : EditModelBase
                 {
                     SetError(
                         nameof({{ p.binding_property_name }}),
-                        ResolveParseErrorMessage(nameof({{ p.binding_property_name }}), normalized, "{{ p.parse_type_name }}")
+                        ResolveParseErrorMessage({{ p.display_name_expression }}, normalized, "{{ p.parse_type_name }}")
                     );
                 }
 {{ else if p.is_binary }}                if (string.IsNullOrEmpty(normalized))
@@ -1826,7 +1856,7 @@ public partial class {{ item.class_name }} : EditModelBase
                     {
                         SetError(
                             nameof({{ p.binding_property_name }}),
-                            ResolveParseErrorMessage(nameof({{ p.binding_property_name }}), normalized, "byte[]")
+                            ResolveParseErrorMessage({{ p.display_name_expression }}, normalized, "byte[]")
                         );
                     }
                 }
@@ -1929,7 +1959,7 @@ public partial class {{ item.class_name }} : EditModelBase
     {
 {{ for p in item.properties }}{{ if p.is_required }}        if ({{ p.property_name }} is null)
         {
-            SetError(nameof({{ p.binding_property_name }}), BuildRequiredErrorMessage(nameof({{ p.property_name }})));
+            SetError(nameof({{ p.binding_property_name }}), BuildRequiredErrorMessage({{ p.display_name_expression }}));
         }
 {{ end }}{{ end }}        OnValidate();
     }
@@ -1937,7 +1967,18 @@ public partial class {{ item.class_name }} : EditModelBase
     /// <summary>追加の検証ルールを実装するフック（partial 実装で SetError によりエラー登録）</summary>
     partial void OnValidate();
 
-{{ if item.has_cascade_navigations }}    /// <summary>既知のカスケード子をレジストリへ登録する（検証・収集・確定・ダーティ判定に参加。partial 追加の子は RegisterExtraChildren で登録）</summary>
+{{ if !item.has_display_name_collision && item.has_non_value_object_property }}    /// <summary>プロパティの表示名を解決する（既定＝列の説明・無指定はプロパティ名。CustomizePropertyDisplayName で上書き可能）。検証メッセージで使う</summary>
+    private static string GetDisplayName(string propertyName, string defaultDisplayName)
+    {
+        var displayName = defaultDisplayName;
+        CustomizePropertyDisplayName(propertyName, ref displayName);
+        return displayName;
+    }
+
+    /// <summary>プロパティの表示名を差し替える拡張ポイント（partial・未実装なら既定の表示名）</summary>
+    static partial void CustomizePropertyDisplayName(string propertyName, ref string displayName);
+
+{{ end }}{{ if item.has_cascade_navigations }}    /// <summary>既知のカスケード子をレジストリへ登録する（検証・収集・確定・ダーティ判定に参加。partial 追加の子は RegisterExtraChildren で登録）</summary>
     protected override void RegisterChildren()
     {
 {{ for nav in item.navigations }}{{ if nav.cascade }}{{ if nav.is_collection }}        AddChildren("{{ nav.property_name }}", {{ nav.property_name }});

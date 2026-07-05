@@ -325,7 +325,7 @@ public class CSharpCodeGenerationServiceTests
         content
             .Should()
             .Contain(
-                "SetError(nameof(BindingCustomerId), BuildRequiredErrorMessage(nameof(CustomerId)));"
+                "SetError(nameof(BindingCustomerId), BuildRequiredErrorMessage(GetDisplayName(nameof(CustomerId), \"CustomerId\")));"
             );
         content.Should().Contain("partial void OnValidate();");
         content.Should().Contain("if (includeChildren)");
@@ -733,13 +733,17 @@ public class CSharpCodeGenerationServiceTests
         // TryParse 検証
         content.Should().Contain("int.TryParse(normalized, out var parsed)");
         content.Should().Contain("decimal.TryParse(normalized, out var parsed)");
-        // エラーメッセージは ResolveParseErrorMessage 経由で生成される
+        // エラーメッセージは ResolveParseErrorMessage 経由で生成され、表示名（Description 無指定はプロパティ名）を渡す
         content
             .Should()
-            .Contain("ResolveParseErrorMessage(nameof(BindingOrderId), normalized, \"int\")");
+            .Contain(
+                "ResolveParseErrorMessage(GetDisplayName(nameof(OrderId), \"OrderId\"), normalized, \"int\")"
+            );
         content
             .Should()
-            .Contain("ResolveParseErrorMessage(nameof(BindingAmount), normalized, \"decimal\")");
+            .Contain(
+                "ResolveParseErrorMessage(GetDisplayName(nameof(Amount), \"Amount\"), normalized, \"decimal\")"
+            );
         // EditModelBase に BuildParseErrorMessage / CustomizeParseErrorMessage が存在する
         content.Should().Contain("protected virtual string BuildParseErrorMessage(");
         content.Should().Contain("partial void CustomizeParseErrorMessage(");

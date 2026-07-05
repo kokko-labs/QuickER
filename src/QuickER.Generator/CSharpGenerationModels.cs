@@ -149,6 +149,12 @@ internal sealed class CSharpValueObjectModel
     /// <summary>XML doc summary へ埋め込む列の説明（XML エスケープ・改行畳み込み済み）。空なら定型文へフォールバックする</summary>
     public required string DescriptionXmlDoc { get; init; }
 
+    /// <summary>
+    /// 静的 <c>DisplayName</c> プロパティの既定値（C# 文字列リテラルへエスケープ済み）。
+    /// 列の Description が非空ならそれ、空ならプロパティ名（例 "Name"）にフォールバックする（メッセージの後方互換）。
+    /// </summary>
+    public required string DisplayName { get; init; }
+
     /// <summary>string の最大長（自動 MaxLength 検証用）。無指定は null</summary>
     public int? MaxLength { get; init; }
 
@@ -173,6 +179,18 @@ internal sealed class CSharpClassModel
 
     /// <summary>XML doc summary へ埋め込むテーブルの説明（XML エスケープ・改行畳み込み済み）。空なら定型文へフォールバックする</summary>
     public required string DescriptionXmlDoc { get; init; }
+
+    /// <summary>
+    /// 静的 <c>DisplayName</c> プロパティの既定値（C# 文字列リテラルへエスケープ済み）。
+    /// テーブルの Description が非空ならそれ、空ならクラス名にフォールバックする。
+    /// </summary>
+    public required string DisplayName { get; init; }
+
+    /// <summary>
+    /// 列由来プロパティ名が <c>DisplayName</c> / <c>CustomizeDisplayName</c> と衝突するため、
+    /// <c>DisplayName</c> プロパティと <c>CustomizeDisplayName</c> フックの生成を省略するかどうか。
+    /// </summary>
+    public required bool HasDisplayNameCollision { get; init; }
 
     /// <summary>スカラープロパティの生成モデル一覧</summary>
     public required IReadOnlyList<CSharpPropertyModel> Properties { get; init; }
@@ -394,14 +412,33 @@ internal sealed class CSharpEditModelClassModel
 
     /// <summary>親モデルの型が一意に定まるときの型付き ParentModel の型名（定まらない場合は null＝基底の EditModelBase? のみ）</summary>
     public string? TypedParentModelTypeName { get; init; }
+
+    /// <summary>
+    /// 列由来プロパティ名が表示名解決ヘルパ（<c>GetDisplayName</c> / <c>CustomizePropertyDisplayName</c>）と衝突するため、
+    /// 表示名機構（ヘルパ・フック）を省略し、検証メッセージを従来どおりプロパティ名で構築するかどうか。
+    /// </summary>
+    public required bool HasDisplayNameCollision { get; init; }
+
+    /// <summary>
+    /// VO 化されていないプロパティを 1 つ以上持つかどうか。
+    /// <c>GetDisplayName</c> ヘルパ／<c>CustomizePropertyDisplayName</c> フックは VO 無効プロパティのみが使うため、
+    /// 全プロパティが VO のときはヘルパを生成しない（未使用メンバーを出さない）。
+    /// </summary>
+    public required bool HasNonValueObjectProperty { get; init; }
 }
 
 /// <summary>EditModel の 1 プロパティに対応する生成モデル</summary>
 /// <remarks>確定値プロパティと UI バインディング用文字列プロパティを併せ持つ構成を表す</remarks>
-internal sealed class CSharpEditModelPropertyModel
+internal sealed record CSharpEditModelPropertyModel
 {
     /// <summary>通常プロパティ名（例: CustomerId）</summary>
     public required string PropertyName { get; init; }
+
+    /// <summary>
+    /// 表示名機構（VO 無効時の <c>GetDisplayName</c> ヘルパ）へ渡す既定表示名（C# 文字列リテラルへエスケープ済み）。
+    /// 列の Description が非空ならそれ、空ならプロパティ名（メッセージの後方互換）。
+    /// </summary>
+    public required string DisplayName { get; init; }
 
     /// <summary>XML doc summary へ埋め込む列の説明（XML エスケープ・改行畳み込み済み）。空なら定型文へフォールバックする。フィールド・公開バインディングプロパティ両方のコメントで共用する</summary>
     public required string DescriptionXmlDoc { get; init; }
@@ -444,6 +481,14 @@ internal sealed class CSharpEditModelPropertyModel
 
     /// <summary>確定値からバインディング文字列へ戻す式</summary>
     public required string RevertBindingExpression { get; init; }
+
+    /// <summary>
+    /// 検証メッセージ（必須・入力変換）へ渡す表示名の C# 式。
+    /// VO 有効時は <c>{VoClass}.DisplayName</c>、VO 無効時は <c>GetDisplayName(nameof(Prop), "既定表示名")</c>。
+    /// EditModel が表示名衝突（<see cref="CSharpEditModelClassModel.HasDisplayNameCollision"/>）のときは従来どおり <c>nameof(Prop)</c>。
+    /// クラス構築時（<c>with</c>）に確定するため既定は空文字列。
+    /// </summary>
+    public string DisplayNameExpression { get; init; } = string.Empty;
 
     /// <summary>確定値が値オブジェクト型かどうか（true なら確定値は VO?、バインド setter は TryCreate で検証して生成する）</summary>
     public bool IsValueObject { get; init; }

@@ -518,6 +518,20 @@ public sealed partial class AmountValue
     /// <summary>ユーザー定義の追加検証（partial・未実装ならゼロコスト）</summary>
     static partial void OnValidate(decimal value, ICollection<string> errors);
 
+    /// <summary>この値オブジェクトの表示名（エラーメッセージ等で使う）。既定は列の説明、無指定はプロパティ名。CustomizeDisplayName で上書き可能</summary>
+    public static string DisplayName
+    {
+        get
+        {
+            var displayName = "Amount";
+            CustomizeDisplayName(ref displayName);
+            return displayName;
+        }
+    }
+
+    /// <summary>表示名を差し替える拡張ポイント（partial・未実装なら既定の表示名）</summary>
+    static partial void CustomizeDisplayName(ref string displayName);
+
     /// <summary>decimal の桁数検証（丸めない・超過は弾く）。末尾ゼロは scale に数える</summary>
     private static void ValidateDecimal(
         decimal value,
@@ -608,6 +622,20 @@ public sealed partial class BalanceValue
 
     /// <summary>ユーザー定義の追加検証（partial・未実装ならゼロコスト）</summary>
     static partial void OnValidate(decimal value, ICollection<string> errors);
+
+    /// <summary>この値オブジェクトの表示名（エラーメッセージ等で使う）。既定は列の説明、無指定はプロパティ名。CustomizeDisplayName で上書き可能</summary>
+    public static string DisplayName
+    {
+        get
+        {
+            var displayName = "Balance";
+            CustomizeDisplayName(ref displayName);
+            return displayName;
+        }
+    }
+
+    /// <summary>表示名を差し替える拡張ポイント（partial・未実装なら既定の表示名）</summary>
+    static partial void CustomizeDisplayName(ref string displayName);
 
     /// <summary>decimal の桁数検証（丸めない・超過は弾く）。末尾ゼロは scale に数える</summary>
     private static void ValidateDecimal(
@@ -705,6 +733,20 @@ public sealed partial class BioValue
     /// <summary>ユーザー定義の追加検証（partial・未実装ならゼロコスト）</summary>
     static partial void OnValidate(string value, ICollection<string> errors);
 
+    /// <summary>この値オブジェクトの表示名（エラーメッセージ等で使う）。既定は列の説明、無指定はプロパティ名。CustomizeDisplayName で上書き可能</summary>
+    public static string DisplayName
+    {
+        get
+        {
+            var displayName = "Bio";
+            CustomizeDisplayName(ref displayName);
+            return displayName;
+        }
+    }
+
+    /// <summary>表示名を差し替える拡張ポイント（partial・未実装なら既定の表示名）</summary>
+    static partial void CustomizeDisplayName(ref string displayName);
+
     /// <summary>最大長エラーメッセージの差し替え（partial・未実装なら既定メッセージ）</summary>
     static partial void CustomizeMaxLengthErrorMessage(
         string value,
@@ -761,6 +803,20 @@ public sealed partial class CustomerIdValue
 
     /// <summary>ユーザー定義の追加検証（partial・未実装ならゼロコスト）</summary>
     static partial void OnValidate(int value, ICollection<string> errors);
+
+    /// <summary>この値オブジェクトの表示名（エラーメッセージ等で使う）。既定は列の説明、無指定はプロパティ名。CustomizeDisplayName で上書き可能</summary>
+    public static string DisplayName
+    {
+        get
+        {
+            var displayName = "CustomerId";
+            CustomizeDisplayName(ref displayName);
+            return displayName;
+        }
+    }
+
+    /// <summary>表示名を差し替える拡張ポイント（partial・未実装なら既定の表示名）</summary>
+    static partial void CustomizeDisplayName(ref string displayName);
 }
 
 /// <summary>is_active 列に対応する値オブジェクト</summary>
@@ -811,6 +867,20 @@ public sealed partial class IsActiveValue
 
     /// <summary>ユーザー定義の追加検証（partial・未実装ならゼロコスト）</summary>
     static partial void OnValidate(bool value, ICollection<string> errors);
+
+    /// <summary>この値オブジェクトの表示名（エラーメッセージ等で使う）。既定は列の説明、無指定はプロパティ名。CustomizeDisplayName で上書き可能</summary>
+    public static string DisplayName
+    {
+        get
+        {
+            var displayName = "IsActive";
+            CustomizeDisplayName(ref displayName);
+            return displayName;
+        }
+    }
+
+    /// <summary>表示名を差し替える拡張ポイント（partial・未実装なら既定の表示名）</summary>
+    static partial void CustomizeDisplayName(ref string displayName);
 }
 
 /// <summary>memo 列に対応する値オブジェクト</summary>
@@ -867,6 +937,20 @@ public sealed partial class MemoValue
 
     /// <summary>ユーザー定義の追加検証（partial・未実装ならゼロコスト）</summary>
     static partial void OnValidate(string value, ICollection<string> errors);
+
+    /// <summary>この値オブジェクトの表示名（エラーメッセージ等で使う）。既定は列の説明、無指定はプロパティ名。CustomizeDisplayName で上書き可能</summary>
+    public static string DisplayName
+    {
+        get
+        {
+            var displayName = "Memo";
+            CustomizeDisplayName(ref displayName);
+            return displayName;
+        }
+    }
+
+    /// <summary>表示名を差し替える拡張ポイント（partial・未実装なら既定の表示名）</summary>
+    static partial void CustomizeDisplayName(ref string displayName);
 
     /// <summary>最大長エラーメッセージの差し替え（partial・未実装なら既定メッセージ）</summary>
     static partial void CustomizeMaxLengthErrorMessage(
@@ -931,6 +1015,20 @@ public sealed partial class NameValue
     /// <summary>ユーザー定義の追加検証（partial・未実装ならゼロコスト）</summary>
     static partial void OnValidate(string value, ICollection<string> errors);
 
+    /// <summary>この値オブジェクトの表示名（エラーメッセージ等で使う）。既定は列の説明、無指定はプロパティ名。CustomizeDisplayName で上書き可能</summary>
+    public static string DisplayName
+    {
+        get
+        {
+            var displayName = "Name";
+            CustomizeDisplayName(ref displayName);
+            return displayName;
+        }
+    }
+
+    /// <summary>表示名を差し替える拡張ポイント（partial・未実装なら既定の表示名）</summary>
+    static partial void CustomizeDisplayName(ref string displayName);
+
     /// <summary>最大長エラーメッセージの差し替え（partial・未実装なら既定メッセージ）</summary>
     static partial void CustomizeMaxLengthErrorMessage(
         string value,
@@ -987,6 +1085,20 @@ public sealed partial class OrderIdValue
 
     /// <summary>ユーザー定義の追加検証（partial・未実装ならゼロコスト）</summary>
     static partial void OnValidate(int value, ICollection<string> errors);
+
+    /// <summary>この値オブジェクトの表示名（エラーメッセージ等で使う）。既定は列の説明、無指定はプロパティ名。CustomizeDisplayName で上書き可能</summary>
+    public static string DisplayName
+    {
+        get
+        {
+            var displayName = "OrderId";
+            CustomizeDisplayName(ref displayName);
+            return displayName;
+        }
+    }
+
+    /// <summary>表示名を差し替える拡張ポイント（partial・未実装なら既定の表示名）</summary>
+    static partial void CustomizeDisplayName(ref string displayName);
 }
 
 /// <summary>profile_id 列に対応する値オブジェクト</summary>
@@ -1037,6 +1149,20 @@ public sealed partial class ProfileIdValue
 
     /// <summary>ユーザー定義の追加検証（partial・未実装ならゼロコスト）</summary>
     static partial void OnValidate(int value, ICollection<string> errors);
+
+    /// <summary>この値オブジェクトの表示名（エラーメッセージ等で使う）。既定は列の説明、無指定はプロパティ名。CustomizeDisplayName で上書き可能</summary>
+    public static string DisplayName
+    {
+        get
+        {
+            var displayName = "ProfileId";
+            CustomizeDisplayName(ref displayName);
+            return displayName;
+        }
+    }
+
+    /// <summary>表示名を差し替える拡張ポイント（partial・未実装なら既定の表示名）</summary>
+    static partial void CustomizeDisplayName(ref string displayName);
 }
 
 /// <summary>エンティティ・EditModel の変更状態</summary>
@@ -1251,6 +1377,20 @@ public partial class CustomerEntity : EntityBase
     /// <summary>CustomerProfile ナビゲーションプロパティ</summary>
     [NavigationReference("customers", "customer_id", "customer_profiles", "customer_id", false, true, false)]
     public CustomerProfileEntity CustomerProfile { get; set; } = null!;
+
+    /// <summary>このエンティティの表示名（画面ラベル等で使う）。既定はテーブルの説明、無指定はクラス名。CustomizeDisplayName で上書き可能</summary>
+    public static string DisplayName
+    {
+        get
+        {
+            var displayName = "CustomerEntity";
+            CustomizeDisplayName(ref displayName);
+            return displayName;
+        }
+    }
+
+    /// <summary>表示名を差し替える拡張ポイント（partial・未実装なら既定の表示名）</summary>
+    static partial void CustomizeDisplayName(ref string displayName);
 }
 
 /// <summary>orders テーブルに対応するエンティティ</summary>
@@ -1289,6 +1429,20 @@ public partial class OrderEntity : EntityBase
     [JsonIgnore]
     [NavigationReference("customers", "customer_id", "orders", "customer_id", false, false, true)]
     public CustomerEntity Customer { get; set; } = null!;
+
+    /// <summary>このエンティティの表示名（画面ラベル等で使う）。既定はテーブルの説明、無指定はクラス名。CustomizeDisplayName で上書き可能</summary>
+    public static string DisplayName
+    {
+        get
+        {
+            var displayName = "OrderEntity";
+            CustomizeDisplayName(ref displayName);
+            return displayName;
+        }
+    }
+
+    /// <summary>表示名を差し替える拡張ポイント（partial・未実装なら既定の表示名）</summary>
+    static partial void CustomizeDisplayName(ref string displayName);
 }
 
 /// <summary>customer_profiles テーブルに対応するエンティティ</summary>
@@ -1320,6 +1474,20 @@ public partial class CustomerProfileEntity : EntityBase
     [JsonIgnore]
     [NavigationReference("customers", "customer_id", "customer_profiles", "customer_id", false, false, true)]
     public CustomerEntity Customer { get; set; } = null!;
+
+    /// <summary>このエンティティの表示名（画面ラベル等で使う）。既定はテーブルの説明、無指定はクラス名。CustomizeDisplayName で上書き可能</summary>
+    public static string DisplayName
+    {
+        get
+        {
+            var displayName = "CustomerProfileEntity";
+            CustomizeDisplayName(ref displayName);
+            return displayName;
+        }
+    }
+
+    /// <summary>表示名を差し替える拡張ポイント（partial・未実装なら既定の表示名）</summary>
+    static partial void CustomizeDisplayName(ref string displayName);
 }
 
 /// <summary>EditModel 共通の変更通知・エラー管理・補助処理を提供する基底クラス</summary>
@@ -1899,11 +2067,12 @@ public abstract partial class EditModelBase
     /// <summary>CancelEdit の本体（具象クラスがスナップショットからの復元を実装）</summary>
     protected virtual void CancelEditCore() { }
 
-    /// <summary>必須項目の未入力エラーメッセージを構築する（派生クラスで override し方針を差し替え可能）</summary>
+    /// <summary>必須項目の未入力エラーメッセージを構築する（引数は表示名。派生クラスで override し方針を差し替え可能）</summary>
+    /// <remarks>表示名は変換エラー（'入力値' 表記）と揃え、.NET の識別子引用慣例に沿ってシングルクォートで囲む</remarks>
     protected virtual string BuildRequiredErrorMessage(string propertyName) =>
-        $"{propertyName} は必須です。";
+        $"'{propertyName}' は必須です。";
 
-    /// <summary>バインディング値の変換エラーメッセージを構築する（派生クラスで override し方針を差し替え可能）</summary>
+    /// <summary>バインディング値の変換エラーメッセージを構築する（第 1 引数は表示名。派生クラスで override し方針を差し替え可能）</summary>
     protected virtual string BuildParseErrorMessage(
         string propertyName,
         string inputValue,
@@ -2301,7 +2470,7 @@ public partial class CustomerEditModel : EditModelBase
                 {
                     SetError(
                         nameof(BindingCustomerId),
-                        ResolveParseErrorMessage(nameof(BindingCustomerId), normalized, "int")
+                        ResolveParseErrorMessage(CustomerIdValue.DisplayName, normalized, "int")
                     );
                 }
             }
@@ -2497,7 +2666,7 @@ public partial class CustomerEditModel : EditModelBase
                 {
                     SetError(
                         nameof(BindingBalance),
-                        ResolveParseErrorMessage(nameof(BindingBalance), normalized, "decimal")
+                        ResolveParseErrorMessage(BalanceValue.DisplayName, normalized, "decimal")
                     );
                 }
             }
@@ -2600,7 +2769,7 @@ public partial class CustomerEditModel : EditModelBase
                 {
                     SetError(
                         nameof(BindingIsActive),
-                        ResolveParseErrorMessage(nameof(BindingIsActive), normalized, "bool")
+                        ResolveParseErrorMessage(IsActiveValue.DisplayName, normalized, "bool")
                     );
                 }
             }
@@ -2694,15 +2863,15 @@ public partial class CustomerEditModel : EditModelBase
     {
         if (CustomerId is null)
         {
-            SetError(nameof(BindingCustomerId), BuildRequiredErrorMessage(nameof(CustomerId)));
+            SetError(nameof(BindingCustomerId), BuildRequiredErrorMessage(CustomerIdValue.DisplayName));
         }
         if (Name is null)
         {
-            SetError(nameof(BindingName), BuildRequiredErrorMessage(nameof(Name)));
+            SetError(nameof(BindingName), BuildRequiredErrorMessage(NameValue.DisplayName));
         }
         if (IsActive is null)
         {
-            SetError(nameof(BindingIsActive), BuildRequiredErrorMessage(nameof(IsActive)));
+            SetError(nameof(BindingIsActive), BuildRequiredErrorMessage(IsActiveValue.DisplayName));
         }
         OnValidate();
     }
@@ -2895,7 +3064,7 @@ public partial class OrderEditModel : EditModelBase
                 {
                     SetError(
                         nameof(BindingOrderId),
-                        ResolveParseErrorMessage(nameof(BindingOrderId), normalized, "int")
+                        ResolveParseErrorMessage(OrderIdValue.DisplayName, normalized, "int")
                     );
                 }
             }
@@ -2998,7 +3167,7 @@ public partial class OrderEditModel : EditModelBase
                 {
                     SetError(
                         nameof(BindingCustomerId),
-                        ResolveParseErrorMessage(nameof(BindingCustomerId), normalized, "int")
+                        ResolveParseErrorMessage(CustomerIdValue.DisplayName, normalized, "int")
                     );
                 }
             }
@@ -3194,7 +3363,7 @@ public partial class OrderEditModel : EditModelBase
                 {
                     SetError(
                         nameof(BindingAmount),
-                        ResolveParseErrorMessage(nameof(BindingAmount), normalized, "decimal")
+                        ResolveParseErrorMessage(AmountValue.DisplayName, normalized, "decimal")
                     );
                 }
             }
@@ -3245,15 +3414,15 @@ public partial class OrderEditModel : EditModelBase
     {
         if (OrderId is null)
         {
-            SetError(nameof(BindingOrderId), BuildRequiredErrorMessage(nameof(OrderId)));
+            SetError(nameof(BindingOrderId), BuildRequiredErrorMessage(OrderIdValue.DisplayName));
         }
         if (CustomerId is null)
         {
-            SetError(nameof(BindingCustomerId), BuildRequiredErrorMessage(nameof(CustomerId)));
+            SetError(nameof(BindingCustomerId), BuildRequiredErrorMessage(CustomerIdValue.DisplayName));
         }
         if (Amount is null)
         {
-            SetError(nameof(BindingAmount), BuildRequiredErrorMessage(nameof(Amount)));
+            SetError(nameof(BindingAmount), BuildRequiredErrorMessage(AmountValue.DisplayName));
         }
         OnValidate();
     }
@@ -3443,7 +3612,7 @@ public partial class CustomerProfileEditModel : EditModelBase
                 {
                     SetError(
                         nameof(BindingProfileId),
-                        ResolveParseErrorMessage(nameof(BindingProfileId), normalized, "int")
+                        ResolveParseErrorMessage(ProfileIdValue.DisplayName, normalized, "int")
                     );
                 }
             }
@@ -3546,7 +3715,7 @@ public partial class CustomerProfileEditModel : EditModelBase
                 {
                     SetError(
                         nameof(BindingCustomerId),
-                        ResolveParseErrorMessage(nameof(BindingCustomerId), normalized, "int")
+                        ResolveParseErrorMessage(CustomerIdValue.DisplayName, normalized, "int")
                     );
                 }
             }
@@ -3688,11 +3857,11 @@ public partial class CustomerProfileEditModel : EditModelBase
     {
         if (ProfileId is null)
         {
-            SetError(nameof(BindingProfileId), BuildRequiredErrorMessage(nameof(ProfileId)));
+            SetError(nameof(BindingProfileId), BuildRequiredErrorMessage(ProfileIdValue.DisplayName));
         }
         if (CustomerId is null)
         {
-            SetError(nameof(BindingCustomerId), BuildRequiredErrorMessage(nameof(CustomerId)));
+            SetError(nameof(BindingCustomerId), BuildRequiredErrorMessage(CustomerIdValue.DisplayName));
         }
         OnValidate();
     }
