@@ -44,4 +44,15 @@ public sealed class CSharpTypeInfo
     /// 生成器は DB 非依存のため、この判定はプロバイダ（型マッパー）が行って渡す
     /// </summary>
     public bool IsRowVersion { get; init; }
+
+    /// <summary>
+    /// DB 定義メタ属性（<c>[DbColumnMeta]</c>）へ刻む方言中立の型トークン（例 <c>"string(50)"</c> / <c>"decimal(10,2)"</c> / <c>"int32"</c>）。
+    /// 型カタログで解析できない自由記述型は <c>null</c> で、属性を付与しない（黙って誤った型を刻まない）。
+    /// </summary>
+    /// <remarks>
+    /// 値は図の方言の <c>ITypeCatalog.TryParse</c> → <c>CanonicalTypeToken.Format</c> で解決した中立トークンで、
+    /// Generator は DB 非依存を保つためプロバイダ層（<c>DiagramCodeGenerator</c> の後処理）が付加する。
+    /// canonical 由来のため、可搬図では各方言の型表記から同一トークンが得られる（EF 単独出力の方言可搬性を保つ）。
+    /// </remarks>
+    public string? CanonicalTypeToken { get; init; }
 }

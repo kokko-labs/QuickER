@@ -165,6 +165,9 @@ internal sealed class CSharpClassModel
     /// <summary>対応するテーブル名</summary>
     public required string TableName { get; init; }
 
+    /// <summary>テーブルの説明（DB 定義メタ属性 [DbTableMeta] の Description 用）。空なら属性ごと省略する</summary>
+    public required string Description { get; init; }
+
     /// <summary>スカラープロパティの生成モデル一覧</summary>
     public required IReadOnlyList<CSharpPropertyModel> Properties { get; init; }
 
@@ -213,6 +216,14 @@ internal sealed class CSharpPropertyModel
 
     /// <summary>[SqlColumnType] の Size に載せる宣言長（n / max=-1 / 無指定=0）。文字列・バイナリ以外は 0</summary>
     public int SqlDeclaredLength { get; init; }
+
+    /// <summary>
+    /// DB 定義メタ属性（[DbColumnMeta]）へ刻む方言中立の型トークン（例 "string(50)"）。型カタログで解析できない自由記述型は null で属性を省略する。
+    /// </summary>
+    public string? CanonicalTypeToken { get; init; }
+
+    /// <summary>カラムの説明（DB 定義メタ属性 [DbColumnMeta] の Description 用）。空なら named 引数ごと省略する</summary>
+    public required string Description { get; init; }
 
     /// <summary>フィールド初期化子の式</summary>
     public required string Initializer { get; init; }

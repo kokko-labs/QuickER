@@ -77,6 +77,38 @@ public sealed class NavigationReferenceAttribute : Attribute
     }
 }
 
+/// <summary>
+/// Entity プロパティに DB 列の定義メタ情報（方言中立の型トークン・説明）を付与する独自属性。
+/// 生成 Entity を「DB 定義の自己記述ドキュメント」にし、リフレクションで列定義を復元できるようにする。
+/// </summary>
+/// <remarks>
+/// <see cref="TypeToken"/> は方言に依存しない中立表記（例 <c>string(50)</c> / <c>decimal(10,2)</c> / <c>int32</c>）で、
+/// 任意方言のネイティブ型へ復元できる。実行時の SQL パラメータ型付けは <see cref="SqlColumnTypeAttribute"/> の責務で、本属性は定義用メタに徹する。
+/// </remarks>
+[AttributeUsage(AttributeTargets.Property, AllowMultiple = false)]
+public sealed class DbColumnMetaAttribute : Attribute
+{
+    /// <summary>方言中立の型トークン（例 <c>string(50)</c>）</summary>
+    public string TypeToken { get; }
+
+    /// <summary>列の説明（DB の拡張プロパティ等に由来）。未設定は空文字</summary>
+    public string Description { get; set; } = string.Empty;
+
+    /// <summary>方言中立の型トークンを受け取り初期化する</summary>
+    public DbColumnMetaAttribute(string typeToken) => TypeToken = typeToken;
+}
+
+/// <summary>
+/// Entity クラスにテーブルの定義メタ情報（説明）を付与する独自属性。
+/// 生成 Entity を「DB 定義の自己記述ドキュメント」にし、リフレクションでテーブル説明を復元できるようにする。
+/// </summary>
+[AttributeUsage(AttributeTargets.Class, AllowMultiple = false)]
+public sealed class DbTableMetaAttribute : Attribute
+{
+    /// <summary>テーブルの説明（DB の拡張プロパティ等に由来）。未設定は空文字</summary>
+    public string Description { get; set; } = string.Empty;
+}
+
 /// <summary>値オブジェクト（Value Object）の非ジェネリックマーカー。内包値の取り出し・型判定に使う</summary>
 public interface IValueObject
 {
@@ -997,15 +1029,18 @@ public partial class CustomerEntity : EntityBase
     [Key]
     [Column("customer_id")]
     [Required]
+    [DbColumnMeta("int32")]
     public CustomerIdValue CustomerId { get; set; } = null!;
 
     /// <summary>name 列に対応するプロパティ</summary>
     [Column("name")]
     [Required]
+    [DbColumnMeta("string(50)")]
     public NameValue Name { get; set; } = null!;
 
     /// <summary>balance 列に対応するプロパティ</summary>
     [Column("balance")]
+    [DbColumnMeta("decimal(10,2)")]
     public BalanceValue? Balance { get; set; }
 
     /// <summary>Orders ナビゲーションプロパティ</summary>
@@ -1021,20 +1056,24 @@ public partial class OrderEntity : EntityBase
     [Key]
     [Column("order_id")]
     [Required]
+    [DbColumnMeta("int32")]
     public OrderIdValue OrderId { get; set; } = null!;
 
     /// <summary>customer_id 列に対応するプロパティ</summary>
     [Column("customer_id")]
     [Required]
+    [DbColumnMeta("int32")]
     public CustomerIdValue CustomerId { get; set; } = null!;
 
     /// <summary>memo 列に対応するプロパティ</summary>
     [Column("memo")]
+    [DbColumnMeta("string(50)")]
     public MemoValue? Memo { get; set; }
 
     /// <summary>amount 列に対応するプロパティ</summary>
     [Column("amount")]
     [Required]
+    [DbColumnMeta("decimal(10,2)")]
     public AmountValue Amount { get; set; } = null!;
 
     /// <summary>Customer ナビゲーションプロパティ</summary>

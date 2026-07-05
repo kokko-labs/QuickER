@@ -5,6 +5,7 @@ using System.Reflection;
 using FluentAssertions;
 using QuickER.Generator;
 using QuickER.Model;
+using QuickER.Provider;
 using QuickER.SqlServer;
 
 namespace QuickER.Tests.GeneratedFixture;
@@ -57,6 +58,12 @@ internal static class FixtureDriftHarness
     )
     {
         var columnTypes = SqlServerCSharpTypeMapper.ResolveColumnTypes(diagram);
+        // 実生成経路（DiagramCodeGenerator）と同じく、図の方言の型カタログ由来の DB 定義メタトークンを付加する
+        columnTypes = CanonicalTypeTokenAttacher.Attach(
+            columnTypes,
+            diagram,
+            new SqlServerTypeCatalog()
+        );
         var result = new CSharpCodeGenerationService().Generate(diagram, columnTypes, options);
 
         VerifyOrRegenerate(result, outputFileName, driftReason);
@@ -81,9 +88,16 @@ internal static class FixtureDriftHarness
         string driftReason
     )
     {
+        // 実生成経路（DiagramCodeGenerator）と同じく、図の方言（本フィクスチャは SQL Server 型表記）の
+        // 型カタログ由来の DB 定義メタトークンを主辞書へ付加する。共有 Entity にのみ影響し、canonical 由来で方言に依らない
+        var primaryWithToken = CanonicalTypeTokenAttacher.Attach(
+            primaryColumnTypes,
+            diagram,
+            new SqlServerTypeCatalog()
+        );
         var result = new CSharpCodeGenerationService().Generate(
             diagram,
-            primaryColumnTypes,
+            primaryWithToken,
             columnTypesByDialect,
             options
         );

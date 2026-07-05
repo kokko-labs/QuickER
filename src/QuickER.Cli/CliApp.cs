@@ -148,6 +148,7 @@ public static class CliApp
         var dialectMappers = ResolveDialectTypeMappers(options);
         var result = DiagramCodeGenerator.Generate(
             provider.TypeMapper,
+            provider.TypeCatalog,
             dialectMappers,
             document.Schema,
             options
@@ -264,6 +265,7 @@ public static class CliApp
         var dialectMappers = ResolveDialectTypeMappers(options);
         var result = DiagramCodeGenerator.Generate(
             provider.TypeMapper,
+            provider.TypeCatalog,
             dialectMappers,
             diagram,
             options

@@ -76,6 +76,7 @@ public class ProviderTests
 
         var result = DiagramCodeGenerator.Generate(
             provider.TypeMapper,
+            provider.TypeCatalog,
             diagram,
             new CodeGenerationOptions { NamespaceName = "Sample.Domain" }
         );

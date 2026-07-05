@@ -4,6 +4,7 @@ using QuickER.Model;
 using QuickER.MySql;
 using QuickER.Oracle;
 using QuickER.PostgreSql;
+using QuickER.Provider;
 using QuickER.SqlServer;
 
 namespace QuickER.Tests.GeneratedPortableFixture;
@@ -34,13 +35,23 @@ namespace QuickER.Tests.GeneratedPortableFixture;
 public sealed class PortableFixtureDialectIndependenceTests
 {
     /// <summary>指定方言の型表記の図を、その方言の型マッパで解決して C# を生成する</summary>
+    /// <remarks>
+    /// 実生成経路と同じく、その方言の型カタログ由来の DB 定義メタトークンを付加する。トークンは canonical 由来で
+    /// 方言に依存しないため、可搬図の型（整数・Unicode 文字列・decimal。文字列は Ansi/Unicode 差でトークンが
+    /// 割れないよう Unicode 表記で統一——PortableFixtureDefinition 参照）は全方言で同一トークンとなり、
+    /// 生成 C# の方言非依存性（バイト一致）を崩さない。
+    /// </remarks>
     private static string GenerateFor(
         PortableDialect dialect,
         Func<ErDiagram, IReadOnlyDictionary<Guid, CSharpTypeInfo>> resolve
     )
     {
         var diagram = PortableFixtureDefinition.Build(dialect);
-        var columnTypes = resolve(diagram);
+        var columnTypes = CanonicalTypeTokenAttacher.Attach(
+            resolve(diagram),
+            diagram,
+            CatalogFor(dialect)
+        );
         var result = new CSharpCodeGenerationService().Generate(
             diagram,
             columnTypes,
@@ -50,6 +61,17 @@ public sealed class PortableFixtureDialectIndependenceTests
         result.HasErrors.Should().BeFalse($"{dialect} の生成でエラーが出てはならない");
         return result.Files.Should().ContainSingle().Subject.Content;
     }
+
+    /// <summary>方言に対応する型カタログを返す（DB 定義メタトークンの解析に使う）</summary>
+    private static ITypeCatalog CatalogFor(PortableDialect dialect) =>
+        dialect switch
+        {
+            PortableDialect.SqlServer => new SqlServerTypeCatalog(),
+            PortableDialect.PostgreSql => new PostgreSqlTypeCatalog(),
+            PortableDialect.MySql => new MySqlTypeCatalog(),
+            PortableDialect.Oracle => new OracleTypeCatalog(),
+            _ => throw new ArgumentOutOfRangeException(nameof(dialect)),
+        };
 
     /// <summary>
     /// フィクスチャの実ランタイム対象（PostgreSql / MySql / Oracle）の生成 C# が完全一致し、

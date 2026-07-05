@@ -237,6 +237,7 @@ public partial class MainViewModel
             var dialectMappers = ResolveDialectTypeMappers(options);
             var result = DiagramCodeGenerator.Generate(
                 CurrentProvider.TypeMapper,
+                CurrentProvider.TypeCatalog,
                 dialectMappers,
                 diagram,
                 options

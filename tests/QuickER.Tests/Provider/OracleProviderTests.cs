@@ -93,6 +93,7 @@ public class OracleProviderTests
 
         var result = DiagramCodeGenerator.Generate(
             provider.TypeMapper,
+            provider.TypeCatalog,
             diagram,
             new CodeGenerationOptions { NamespaceName = "Sample.Domain" }
         );

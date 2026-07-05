@@ -32,9 +32,9 @@ public enum PortableDialect
 /// <para>
 /// 可搬型セット（各方言の DDL 往復統合テストで実証済みの型から選択）:
 /// <list type="bullet">
-///   <item>整数（PK/FK）: SqlServer <c>int</c> / PG <c>integer</c> / MySQL <c>int</c> / Oracle <c>NUMBER(10)</c> → すべて <c>int</c></item>
-///   <item>文字列: <c>varchar(50)</c>（Oracle は <c>VARCHAR2(50)</c>）→ すべて <c>string</c>（MaxLength 50）</item>
-///   <item>固定小数: <c>decimal(10,2)</c>（PG <c>numeric(10,2)</c> / Oracle <c>NUMBER(10,2)</c>）→ すべて <c>decimal(10,2)</c></item>
+///   <item>整数（PK/FK）: SqlServer <c>int</c> / PG <c>integer</c> / MySQL <c>int</c> / Oracle <c>NUMBER(10)</c> → すべて <c>int</c>（正規型 <c>int32</c>）</item>
+///   <item>文字列: SqlServer <c>nvarchar(50)</c> / PG・MySQL <c>varchar(50)</c> / Oracle <c>NVARCHAR2(50)</c> → すべて <c>string</c>（MaxLength 50・正規型 <c>string(50)</c>）</item>
+///   <item>固定小数: <c>decimal(10,2)</c>（PG <c>numeric(10,2)</c> / Oracle <c>NUMBER(10,2)</c>）→ すべて <c>decimal(10,2)</c>（正規型 <c>decimal(10,2)</c>）</item>
 /// </list>
 /// bool は Oracle が <c>NUMBER(1)</c> 事情を持ち方言差が大きいため<b>意図的に除外</b>する。
 /// </para>
@@ -82,15 +82,21 @@ public static class PortableFixtureDefinition
     private static readonly Guid RelCustomerOrders = new("cccccccc-0000-0000-0000-000000000001");
 
     /// <summary>方言ごとの可搬型表記（整数・文字列・固定小数）を返す</summary>
+    /// <remarks>
+    /// 文字列は Unicode 可変長で統一する（SqlServer <c>nvarchar</c> / Oracle <c>NVARCHAR2</c>・PG/MySQL の <c>varchar</c> は
+    /// 既定で Unicode）。各方言の型カタログはこれらをすべて正規型 <c>String</c> へ解析するため、DB 定義メタ属性の
+    /// 中立トークンが全方言で <c>string(50)</c> に揃い、EF 単独出力の方言可搬性（バイト一致）が保たれる。
+    /// 非 Unicode の <c>varchar</c>（SqlServer/Oracle は AnsiString）を使うと方言間でトークンが割れるため用いない。
+    /// </remarks>
     private static (string Int, string Varchar50, string Decimal) TypesFor(
         PortableDialect dialect
     ) =>
         dialect switch
         {
-            PortableDialect.SqlServer => ("int", "varchar(50)", "decimal(10,2)"),
+            PortableDialect.SqlServer => ("int", "nvarchar(50)", "decimal(10,2)"),
             PortableDialect.PostgreSql => ("integer", "varchar(50)", "numeric(10,2)"),
             PortableDialect.MySql => ("int", "varchar(50)", "decimal(10,2)"),
-            PortableDialect.Oracle => ("NUMBER(10)", "VARCHAR2(50)", "NUMBER(10,2)"),
+            PortableDialect.Oracle => ("NUMBER(10)", "NVARCHAR2(50)", "NUMBER(10,2)"),
             _ => throw new ArgumentOutOfRangeException(nameof(dialect)),
         };
 

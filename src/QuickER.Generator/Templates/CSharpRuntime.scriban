@@ -87,6 +87,39 @@ public sealed class SqlColumnTypeAttribute : Attribute
     public SqlColumnTypeAttribute(SqlDbType dbType) => DbType = dbType;
 }
 {{ end }}
+{{~ if emit_db_meta_attr && render_runtime ~}}
+/// <summary>
+/// Entity プロパティに DB 列の定義メタ情報（方言中立の型トークン・説明）を付与する独自属性。
+/// 生成 Entity を「DB 定義の自己記述ドキュメント」にし、リフレクションで列定義を復元できるようにする。
+/// </summary>
+/// <remarks>
+/// <see cref="TypeToken"/> は方言に依存しない中立表記（例 <c>string(50)</c> / <c>decimal(10,2)</c> / <c>int32</c>）で、
+/// 任意方言のネイティブ型へ復元できる。実行時の SQL パラメータ型付けは <see cref="SqlColumnTypeAttribute"/> の責務で、本属性は定義用メタに徹する。
+/// </remarks>
+[AttributeUsage(AttributeTargets.Property, AllowMultiple = false)]
+public sealed class DbColumnMetaAttribute : Attribute
+{
+    /// <summary>方言中立の型トークン（例 <c>string(50)</c>）</summary>
+    public string TypeToken { get; }
+
+    /// <summary>列の説明（DB の拡張プロパティ等に由来）。未設定は空文字</summary>
+    public string Description { get; set; } = string.Empty;
+
+    /// <summary>方言中立の型トークンを受け取り初期化する</summary>
+    public DbColumnMetaAttribute(string typeToken) => TypeToken = typeToken;
+}
+
+/// <summary>
+/// Entity クラスにテーブルの定義メタ情報（説明）を付与する独自属性。
+/// 生成 Entity を「DB 定義の自己記述ドキュメント」にし、リフレクションでテーブル説明を復元できるようにする。
+/// </summary>
+[AttributeUsage(AttributeTargets.Class, AllowMultiple = false)]
+public sealed class DbTableMetaAttribute : Attribute
+{
+    /// <summary>テーブルの説明（DB の拡張プロパティ等に由来）。未設定は空文字</summary>
+    public string Description { get; set; } = string.Empty;
+}
+{{ end }}
 {{~ if generate_value_objects && render_runtime ~}}
 /// <summary>値オブジェクト（Value Object）の非ジェネリックマーカー。内包値の取り出し・型判定に使う</summary>
 public interface IValueObject
@@ -719,6 +752,7 @@ public abstract partial class EntityBase
 {{ if !for.first }}
 {{ end }}/// <summary>{{ item.table_name }} テーブルに対応するエンティティ</summary>
 {{ if include_data_annotations }}[Table("{{ item.table_name }}")]
+{{ end }}{{ if emit_db_meta_attr && item.description != "" }}[DbTableMeta(Description = "{{ item.description }}")]
 {{ end }}public partial class {{ item.class_name }} : EntityBase
 {
 {{ for property in item.properties }}{{ if !for.first }}
@@ -728,6 +762,7 @@ public abstract partial class EntityBase
 {{ end }}{{ if include_data_annotations && !property.is_nullable && property.is_reference_type }}    [Required]
 {{ end }}{{ if include_data_annotations && property.max_length }}    [MaxLength({{ property.max_length }})]
 {{ end }}{{ if emit_sql_column_type_attr && property.sql_db_type_name }}    [SqlColumnType(SqlDbType.{{ property.sql_db_type_name }}{{ if property.sql_declared_length != 0 }}, Size = {{ property.sql_declared_length }}{{ end }}{{ if property.facet_precision }}, Precision = {{ property.facet_precision }}, Scale = {{ property.facet_scale }}{{ end }})]
+{{ end }}{{ if emit_db_meta_attr && property.canonical_type_token }}    [DbColumnMeta("{{ property.canonical_type_token }}"{{ if property.description != "" }}, Description = "{{ property.description }}"{{ end }})]
 {{ end }}    public {{ property.type_name }} {{ property.property_name }} { get; set; }{{ property.initializer }}
 {{ end }}{{ for navigation in item.navigations }}
     /// <summary>{{ navigation.property_name }} ナビゲーションプロパティ</summary>

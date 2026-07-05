@@ -148,6 +148,21 @@ internal sealed class ScribanCSharpRenderer
             && (options.GenerateRepositories || options.IncludeDataAnnotations)
             && model.EntityClasses.Any(c => c.Properties.Any(p => p.SqlDbTypeName is not null));
 
+        // DB 定義メタ属性（[DbColumnMeta] / [DbTableMeta]）は、生成 Entity を「DB 定義の自己記述ドキュメント」に
+        // するための方言中立メタ（型トークン・説明）を載せる。付与は対象 DB・Repository/EF 設定に依らず、
+        // データアノテーション付与（[Table]/[Column] と同列）かつ Entity 生成時のみ。canonical 由来のため
+        // 可搬図では方言によらず同一メタになる。刻む中身が 1 つでもある（トークン付き列 または 説明付きテーブル/列）
+        // ときだけ属性定義・付与を出力し、実体のない属性クラスは出さない。
+        var emitDbMetaAttr =
+            options.IncludeDataAnnotations
+            && options.GenerateEntityClasses
+            && model.EntityClasses.Any(c =>
+                !string.IsNullOrEmpty(c.Description)
+                || c.Properties.Any(p =>
+                    p.CanonicalTypeToken is not null || !string.IsNullOrEmpty(p.Description)
+                )
+            );
+
         // using は呼び出し側（GeneratedFileUsings）がバケット単位で解決済み。EF Core など外部依存の
         // 出し分けもそこで完結するため、レンダラーでは受け取った集合をそのまま流し込む
         var scriptObject = new Scriban.Runtime.ScriptObject
@@ -172,6 +187,7 @@ internal sealed class ScribanCSharpRenderer
                 options.IncludeJsonIgnoreOnParentNavigation,
             ["emit_nav_ref_attr"] = emitNavRefAttr,
             ["emit_sql_column_type_attr"] = emitSqlColumnTypeAttr,
+            ["emit_db_meta_attr"] = emitDbMetaAttr,
             ["generate_value_objects"] = options.GenerateValueObjects,
             ["value_object_classes"] = model.ValueObjectClasses,
             ["ef_core"] = model.EfCore,

@@ -93,6 +93,7 @@ internal sealed partial class CSharpGenerationModelBuilder
         {
             ClassName = className,
             TableName = entity.TableName,
+            Description = entity.Description,
             Properties = properties,
             Navigations = navigations.Select(BuildEntityNavigation).ToList(),
         };
@@ -265,6 +266,9 @@ internal sealed partial class CSharpGenerationModelBuilder
             // SQL パラメータ型明示化（[SqlColumnType]）用。VO 有無に関わらず DB 由来の生値を載せる（束縛は素値へ開いてから）
             SqlDbTypeName = typeInfo.SqlDbTypeName,
             SqlDeclaredLength = typeInfo.SqlDeclaredLength,
+            // DB 定義メタ属性（[DbColumnMeta]）用。方言中立トークンと列の説明（型解決とは独立にモデルから引く）
+            CanonicalTypeToken = typeInfo.CanonicalTypeToken,
+            Description = column.Description,
             // 非 NULL の VO は妥当な空既定値を作れないため null! でロード前提を表明（NULL 許容 VO は初期化不要）
             Initializer = valueObject is not null
                 ? (column.IsNullable ? string.Empty : " = null!;")
