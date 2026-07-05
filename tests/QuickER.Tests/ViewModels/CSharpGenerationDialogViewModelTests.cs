@@ -92,9 +92,9 @@ public class CSharpGenerationDialogViewModelTests
         }
     }
 
-    /// <summary>未対応方言のプロバイダでも自作 Repository ラジオは常時選択可であり、対象方言チェックは両方 OFF から始まることを検証する</summary>
+    /// <summary>未対応方言のプロバイダでも自作 Repository ラジオは常時選択可であり、対象 DB チェックは両方 OFF から始まることを検証する</summary>
     [Theory(
-        DisplayName = "未対応方言でも自作 Repository ラジオは選択可・対象方言チェックは両方 OFF から始まる"
+        DisplayName = "未対応方言でも自作 Repository ラジオは選択可・対象 DB チェックは両方 OFF から始まる"
     )]
     [InlineData(typeof(QuickER.PostgreSql.PostgreSqlProvider))]
     [InlineData(typeof(QuickER.MySql.MySqlProvider))]
@@ -106,33 +106,28 @@ public class CSharpGenerationDialogViewModelTests
         var provider = (QuickER.Provider.IDatabaseProvider)Activator.CreateInstance(providerType)!;
         var vm = CreateViewModel(out _, currentProvider: provider);
 
-        vm.CurrentDatabaseDisplayName.Should().NotBeEmpty("DB アクセス欄に現在の DB を提示する");
-        vm.TargetSqlServer.Should().BeFalse("未対応方言では対象方言を予選択しない");
-        vm.TargetSqlite.Should().BeFalse("未対応方言では対象方言を予選択しない");
+        vm.TargetSqlServer.Should().BeFalse("未対応方言では対象 DB を予選択しない");
+        vm.TargetSqlite.Should().BeFalse("未対応方言では対象 DB を予選択しない");
 
         vm.DbAccessRepository = true;
 
         vm.GenerateRepositories.Should().BeTrue("Repository ラジオは常時選択可");
     }
 
-    /// <summary>対応方言（SQL Server / SQLite）のプロバイダでは、その方言のみ対象方言チェックが初期 ON になることを検証する</summary>
+    /// <summary>対応方言（SQL Server / SQLite）のプロバイダでは、その方言のみ対象 DB チェックが初期 ON になることを検証する</summary>
     [Theory(
-        DisplayName = "対応方言（SQL Server / SQLite）ではその方言のみ対象方言チェックが初期 ON になる"
+        DisplayName = "対応方言（SQL Server / SQLite）ではその方言のみ対象 DB チェックが初期 ON になる"
     )]
-    [InlineData(typeof(QuickER.SqlServer.SqlServerProvider), "SQL Server")]
-    [InlineData(typeof(QuickER.Sqlite.SqliteProvider), "SQLite")]
-    public void SupportedDialectProvider_PreselectsItsDialect(
-        Type providerType,
-        string expectedDisplayName
-    )
+    [InlineData(typeof(QuickER.SqlServer.SqlServerProvider))]
+    [InlineData(typeof(QuickER.Sqlite.SqliteProvider))]
+    public void SupportedDialectProvider_PreselectsItsDialect(Type providerType)
     {
         var provider = (QuickER.Provider.IDatabaseProvider)Activator.CreateInstance(providerType)!;
         var vm = CreateViewModel(out _, currentProvider: provider);
 
-        vm.CurrentDatabaseDisplayName.Should().Be(expectedDisplayName);
         vm.QuickErRepositoryToolTip.Should()
             .Be(
-                "EF 非依存の軽量 Repository を生成します（対象方言をチェックで選択: SQL Server / SQLite）"
+                "EF 非依存の軽量 Repository を生成します（対象 DB をチェックで選択: SQL Server / SQLite）"
             );
 
         if (provider.Name == "sqlserver")
@@ -147,8 +142,8 @@ public class CSharpGenerationDialogViewModelTests
         }
     }
 
-    /// <summary>ToOptions がチェックした対象方言を固定順（sqlserver, sqlite）で RepositoryDialects へ設定することを検証する</summary>
-    [Fact(DisplayName = "ToOptions はチェックした対象方言を固定順で RepositoryDialects に設定する")]
+    /// <summary>ToOptions がチェックした対象 DB を固定順（sqlserver, sqlite）で RepositoryDialects へ設定することを検証する</summary>
+    [Fact(DisplayName = "ToOptions はチェックした対象 DB を固定順で RepositoryDialects に設定する")]
     public void ToOptions_SetsRepositoryDialects_InFixedOrder()
     {
         var vm = CreateViewModel(out _, currentProvider: new QuickER.Sqlite.SqliteProvider());
@@ -164,8 +159,8 @@ public class CSharpGenerationDialogViewModelTests
         vm.Result!.Options.RepositoryDialects.Should().Equal("sqlserver", "sqlite");
     }
 
-    /// <summary>対象方言を 1 つもチェックしないまま自作 Repository を確定しようとすると拒否されることを検証する</summary>
-    [Fact(DisplayName = "対象方言 0 個では確定できない")]
+    /// <summary>対象 DB を 1 つもチェックしないまま自作 Repository を確定しようとすると拒否されることを検証する</summary>
+    [Fact(DisplayName = "対象 DB 0 個では確定できない")]
     public void Ok_Repository_WithNoTargetDialects_ShowsError()
     {
         var vm = CreateViewModel(
@@ -179,11 +174,11 @@ public class CSharpGenerationDialogViewModelTests
         vm.OkCommand.Execute(null);
 
         vm.Result.Should().BeNull();
-        vm.StatusMessage.Should().Be("対象方言を 1 つ以上選択してください。");
+        vm.StatusMessage.Should().Be("対象 DB を 1 つ以上選択してください。");
     }
 
-    /// <summary>対象方言チェック群は Repository (QuickER) 選択時のみ表示されることを検証する</summary>
-    [Fact(DisplayName = "対象方言チェック群は Repository (QuickER) 選択時のみ表示される")]
+    /// <summary>対象 DB チェック群は Repository (QuickER) 選択時のみ表示されることを検証する</summary>
+    [Fact(DisplayName = "対象 DB チェック群は Repository (QuickER) 選択時のみ表示される")]
     public void ShowRepositoryDialectTargets_TracksRepositorySelection()
     {
         var vm = CreateViewModel(out _);
@@ -197,8 +192,8 @@ public class CSharpGenerationDialogViewModelTests
         vm.ShowRepositoryDialectTargets.Should().BeFalse();
     }
 
-    /// <summary>対象方言チェックは設定として永続化されず、次回起動時は図の方言から再導出されることを検証する</summary>
-    [Fact(DisplayName = "対象方言チェックは保存されず図の方言から毎回導出される")]
+    /// <summary>対象 DB チェックは設定として永続化されず、次回起動時は図の方言から再導出されることを検証する</summary>
+    [Fact(DisplayName = "対象 DB チェックは保存されず図の方言から毎回導出される")]
     public void TargetDialectChecks_AreNotPersisted()
     {
         var vm = CreateViewModel(

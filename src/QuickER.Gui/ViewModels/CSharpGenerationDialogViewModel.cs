@@ -37,7 +37,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
 
     /// <summary>設定ストアとファイル選択サービスを指定して ViewModel を生成し、保存済み設定を復元する</summary>
     /// <param name="currentProvider">
-    /// アプリの現在のプロバイダ。自作 Repository の対象方言チェックは、図の方言が対応方言
+    /// アプリの現在のプロバイダ。自作 Repository の対象 DB チェックは、図の方言が対応方言
     /// （<see cref="CodeGenerationOptions.SupportedRepositoryDialects"/>）ならその方言のみ初期 ON にし、
     /// 未対応方言（PostgreSQL / MySQL / Oracle）なら両方 OFF から始める（null は SQL Server 扱い）
     /// </param>
@@ -49,9 +49,8 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     {
         _store = store ?? new CSharpGenerationSettingsStore();
         _files = files ?? new WpfFileDialogService();
-        CurrentDatabaseDisplayName = currentProvider?.DisplayName ?? string.Empty;
 
-        // 対象方言チェックの初期値: 図の方言が対応方言（sqlserver/sqlite）ならその方言のみ ON、
+        // 対象 DB チェックの初期値: 図の方言が対応方言（sqlserver/sqlite）ならその方言のみ ON、
         // 未対応方言（PostgreSQL 等）なら両方 OFF（ユーザーに明示的な選択を求める）。
         // null（判定不要文脈）のみ sqlserver を既定 ON にする（主にテスト用途。実 GUI 経路では常に currentProvider が渡る）。
         var dialectName = currentProvider?.Name;
@@ -206,26 +205,23 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
         }
     }
 
-    /// <summary>現在のプロバイダの UI 表示名（例: "SQL Server"。「DB アクセス」欄の隣に提示する）</summary>
-    public string CurrentDatabaseDisplayName { get; }
-
     /// <summary>
-    /// 「自作 Repository (QuickER)」ラジオのツールチップ（常時選択可。対象方言をチェックで選ぶ運用を案内する）
+    /// 「自作 Repository (QuickER)」ラジオのツールチップ（常時選択可。対象 DB をチェックで選ぶ運用を案内する）
     /// </summary>
     public string QuickErRepositoryToolTip =>
-        "EF 非依存の軽量 Repository を生成します（対象方言をチェックで選択: SQL Server / SQLite）";
+        "EF 非依存の軽量 Repository を生成します（対象 DB をチェックで選択: SQL Server / SQLite）";
 
-    // ===== 自作 Repository の対象方言（チェックボックス群。Repository ラジオ選択時のみ表示） =====
+    // ===== 自作 Repository の対象 DB（チェックボックス群。Repository ラジオ選択時のみ表示） =====
 
-    /// <summary>対象方言に SQL Server を含めるか</summary>
+    /// <summary>対象 DB に SQL Server を含めるか</summary>
     [ObservableProperty]
     private bool _targetSqlServer;
 
-    /// <summary>対象方言に SQLite を含めるか</summary>
+    /// <summary>対象 DB に SQLite を含めるか</summary>
     [ObservableProperty]
     private bool _targetSqlite;
 
-    /// <summary>対象方言チェックボックス群を表示するか（自作 Repository 選択時のみ）</summary>
+    /// <summary>対象 DB チェックボックス群を表示するか（自作 Repository 選択時のみ）</summary>
     public bool ShowRepositoryDialectTargets => GenerateRepositories;
 
     partial void OnTargetSqlServerChanged(bool value) => RefreshPreview();
@@ -477,7 +473,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
 
     /// <summary>現在の設定値からコード生成オプションを組み立てる</summary>
     /// <remarks>
-    /// <see cref="CodeGenerationOptions.RepositoryDialects"/> はチェックされた対象方言を
+    /// <see cref="CodeGenerationOptions.RepositoryDialects"/> はチェックされた対象 DB を
     /// 固定順（sqlserver, sqlite）で設定する（リストが単一指定 <see cref="CodeGenerationOptions.RepositoryDialect"/>
     /// より優先されるため、こちらのみ設定すれば足りる）
     /// </remarks>
@@ -504,7 +500,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
             UseGuidKeyForStringPrimaryKey = UseGuidKeyForStringPrimaryKey,
         };
 
-    /// <summary>チェックされた対象方言を固定順（SQL Server → SQLite）で返す</summary>
+    /// <summary>チェックされた対象 DB を固定順（SQL Server → SQLite）で返す</summary>
     private List<string> SelectedRepositoryDialects()
     {
         var dialects = new List<string>();
@@ -600,7 +596,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
 
         if (GenerateRepositories && !TargetSqlServer && !TargetSqlite)
         {
-            StatusMessage = "対象方言を 1 つ以上選択してください。";
+            StatusMessage = "対象 DB を 1 つ以上選択してください。";
             return;
         }
 
