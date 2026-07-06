@@ -148,7 +148,7 @@ public sealed class MockProjectAgentRunner
         EmitLine($"出力フォルダ: {outputDirectory}");
         EmitLine($"プロジェクト名: {projectName}");
 
-        var options = BuildLaunchOptions(model, outputDirectory);
+        var options = BuildLaunchOptions(model, outputDirectory, projectName);
         var prompt = BuildPrompt(projectName);
 
         _runCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -284,11 +284,12 @@ public sealed class MockProjectAgentRunner
     /// </remarks>
     internal static ClaudeCodeLaunchOptions BuildLaunchOptions(
         string model,
-        string workingDirectory
+        string workingDirectory,
+        string projectName
     ) =>
         new(
             Model: model ?? string.Empty,
-            SystemPrompt: BuildSystemPrompt(),
+            SystemPrompt: BuildSystemPrompt(projectName),
             McpConfigPath: string.Empty,
             AllowedTool: string.Empty,
             WorkingDirectory: workingDirectory
@@ -299,36 +300,43 @@ public sealed class MockProjectAgentRunner
         };
 
     /// <summary>ヘッドレス実行のシステムプロンプト（規約・制約）を組み立てる</summary>
-    internal static string BuildSystemPrompt() =>
+    /// <remarks>
+    /// 出力は Visual Studio 標準構成（cwd 直下に <c>{ProjectName}.sln</c>、プロジェクト一式は <c>{ProjectName}/</c> 配下）。
+    /// パス案内はプロジェクトフォルダ配下を指し、ビルドは cwd で <c>dotnet build</c>（sln を拾う）を指示する。
+    /// </remarks>
+    internal static string BuildSystemPrompt(string projectName) =>
         $@"あなたは WPF (.NET) の熟練エンジニアで、既存のプロジェクトに GUI（UI 層）を実装します。
-このフォルダには QuickER が生成した WPF プロジェクトの雛形と、データ層のコードが既に用意されています。
+このフォルダは Visual Studio 標準構成で、直下にソリューション {projectName}.sln があり、プロジェクト一式は {projectName}/ フォルダ配下に、QuickER が生成した WPF プロジェクトの雛形とデータ層のコードが既に用意されています。
 
 # 守るべき規約
-- 作業を始める前に、必ず {ReadmeFileName} を読み、その規約に従ってください。
-- {DesignHtmlRelativePath} がデザイン仕様です。この HTML の画面構成・項目・画面遷移を WPF で忠実に再現してください（HTML をそのまま埋め込むのではなく、WPF のネイティブ UI で作り直します）。
-- Generated/ 配下（データ層の自動生成コード）は読み取り専用です。絶対に編集・削除しないでください。UI からは I{{Entity}}Repository を DI 経由で使います。
+- 作業を始める前に、必ず {projectName}/{ReadmeFileName} を読み、その規約に従ってください。
+- {projectName}/{DesignHtmlRelativePath} がデザイン仕様です。この HTML の画面構成・項目・画面遷移を WPF で忠実に再現してください（HTML をそのまま埋め込むのではなく、WPF のネイティブ UI で作り直します）。
+- {projectName}/Generated/ 配下（データ層の自動生成コード）は読み取り専用です。絶対に編集・削除しないでください。UI からは I{{Entity}}Repository を DI 経由で使います。
 - UI は CommunityToolkit.Mvvm を用いた MVVM（ObservableObject / RelayCommand / ObservableProperty）で実装してください。
 - 起動時の DI 登録は AddGeneratedInMemoryRepositories()（サンプルデータ入り）を使ってください（実 DB 接続は不要）。
 
 # 進め方
+- App.xaml / App.xaml.cs 等の UI 層のソースは {projectName}/ フォルダ配下（csproj と同じ場所）に追加します。
 - App.xaml / App.xaml.cs で DI を構成し、MainWindow とビュー・ビューモデルを実装します。
-- design/mock.html の各画面（一覧・登録／編集・遷移等）を WPF のウィンドウ／ページ／ユーザーコントロールとして再現します。
-- 実装が一段落したら `dotnet build` を実行し、警告なし・エラーなしで通るまで修正を繰り返してください。
+- {projectName}/design/mock.html の各画面（一覧・登録／編集・遷移等）を WPF のウィンドウ／ページ／ユーザーコントロールとして再現します。
+- 実装が一段落したら、このフォルダ（ソリューション直下）で `dotnet build` を実行し、警告なし・エラーなしで通るまで修正を繰り返してください。
 - 最後に、ビルドがエラー・警告なしで成功したことを確認した旨を報告してください。";
 
     /// <summary>初回プロンプト（実装の起点となる具体指示）を組み立てる</summary>
     internal static string BuildPrompt(string projectName) =>
         $@"プロジェクト『{projectName}』の WPF UI 層を実装してください。
 
+このフォルダは Visual Studio 標準構成です。直下にソリューション {projectName}.sln があり、プロジェクト一式は {projectName}/ フォルダ配下にあります。UI 層のソースは {projectName}/ フォルダ配下（csproj と同じ場所）に追加してください。
+
 手順:
-1. まず {ReadmeFileName} を読み、プロジェクト構成と規約を把握する。
-2. {DesignHtmlRelativePath} を読み、再現すべき画面構成・項目・遷移を把握する。
-3. Generated/ 配下のデータ層（Entity / I{{Entity}}Repository / AddGeneratedInMemoryRepositories 等）を確認し、UI から利用する。
+1. まず {projectName}/{ReadmeFileName} を読み、プロジェクト構成と規約を把握する。
+2. {projectName}/{DesignHtmlRelativePath} を読み、再現すべき画面構成・項目・遷移を把握する。
+3. {projectName}/Generated/ 配下のデータ層（Entity / I{{Entity}}Repository / AddGeneratedInMemoryRepositories 等）を確認し、UI から利用する。
 4. App.xaml(.cs)・MainWindow・各ビュー／ビューモデルを CommunityToolkit.Mvvm の MVVM で実装する。DI には AddGeneratedInMemoryRepositories() を使う。
-5. `dotnet build` を実行し、エラー・警告なしで通るまで自己修正する。
+5. このフォルダ（ソリューション直下）で `dotnet build` を実行し、エラー・警告なしで通るまで自己修正する。
 6. ビルドが成功したことを確認して報告する。
 
-Generated/ 配下は読み取り専用です。編集しないでください。";
+{projectName}/Generated/ 配下は読み取り専用です。編集しないでください。";
 
     /// <summary>出力フォルダに csproj と xaml が存在するかを軽く検証する</summary>
     private static bool HasArtifacts(string outputDirectory)

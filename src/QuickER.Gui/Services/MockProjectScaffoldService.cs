@@ -1,5 +1,6 @@
 using System.IO;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Text;
 using QuickER.Generator;
 using QuickER.Model;
@@ -8,13 +9,17 @@ using QuickER.Provider;
 namespace QuickER.Services;
 
 /// <summary>決定的スキャフォールドの生成結果</summary>
-/// <param name="ProjectFilePath">生成した csproj の絶対パス</param>
+/// <param name="SolutionFilePath">生成したソリューション（<c>{ProjectName}.sln</c>）の絶対パス（出力フォルダ直下）</param>
+/// <param name="ProjectDirectory">プロジェクトフォルダ（<c>{出力フォルダ}/{ProjectName}/</c>）の絶対パス</param>
+/// <param name="ProjectFilePath">生成した csproj の絶対パス（プロジェクトフォルダ配下）</param>
 /// <param name="GeneratedDirectory">データ層コードを書き出した <c>Generated/</c> の絶対パス</param>
 /// <param name="DesignHtmlPath">デザイン仕様 HTML（<c>design/mock.html</c>）の絶対パス</param>
 /// <param name="ReadmePath">規約ドキュメント（<c>README-QuickER.md</c>）の絶対パス</param>
 /// <param name="RepositoryDialect">自作 Repository を出力した方言（未出力なら null）</param>
 /// <param name="WrittenFiles">書き出した全ファイルの絶対パス</param>
 public sealed record MockProjectScaffoldResult(
+    string SolutionFilePath,
+    string ProjectDirectory,
     string ProjectFilePath,
     string GeneratedDirectory,
     string DesignHtmlPath,
@@ -28,8 +33,10 @@ public sealed record MockProjectScaffoldResult(
 /// </summary>
 /// <remarks>
 /// <para>
-/// 生成物: データ層コード（Entity/EditModel/Mapper/InMemory＋図の方言が対応方言なら自作 Repository・Split 出力）を
-/// <c>Generated/</c> へ、csproj スケルトン・<c>README-QuickER.md</c>・<c>design/mock.html</c> をフォルダ直下へ書き出す。
+/// 出力構成は Visual Studio 標準（ソリューション＋プロジェクトフォルダ）とする。ソリューションファイル
+/// <c>{ProjectName}.sln</c> を出力フォルダ直下に、プロジェクト一式（csproj スケルトン・<c>README-QuickER.md</c>・
+/// <c>design/mock.html</c>・データ層コード <c>Generated/</c>）を <c>{出力フォルダ}/{ProjectName}/</c> 配下へ書き出す。
+/// データ層コードは Entity/EditModel/Mapper/InMemory＋図の方言が対応方言なら自作 Repository を Split 出力する。
 /// UI 層（App/MainWindow/ビュー・ビューモデル）は AI（Claude Code）に書かせるため、ここでは生成しない。
 /// </para>
 /// <para>
@@ -47,6 +54,9 @@ public sealed class MockProjectScaffoldService
 
     /// <summary>規約ドキュメントのファイル名</summary>
     public const string ReadmeFileName = "README-QuickER.md";
+
+    /// <summary>C# プロジェクトのソリューション種別 GUID（.sln の Project 行に埋め込む固定値）</summary>
+    private const string CSharpProjectTypeGuid = "FAE04EC0-301F-11D3-BF4B-00C04F79EFBC";
 
     private readonly DatabaseProviderRegistry _providers;
 
@@ -87,23 +97,33 @@ public sealed class MockProjectScaffoldService
         // 図の方言が対応方言（sqlserver/sqlite）なら自作 Repository も出力する（対称に InMemory も出す）
         var repositoryDialect = ResolveRepositoryDialect(diagram.TargetDbms);
 
+        // Visual Studio 標準構成: プロジェクト一式はプロジェクトフォルダ配下、ソリューションは出力フォルダ直下へ出す
+        var projectDirectory = Path.Combine(outputDirectory, projectName);
+        Directory.CreateDirectory(projectDirectory);
+
         var options = BuildOptions(generatedNamespace, repositoryDialect);
-        var generatedDirectory = Path.Combine(outputDirectory, GeneratedFolderName);
+        var generatedDirectory = Path.Combine(projectDirectory, GeneratedFolderName);
         WriteGeneratedCode(diagram, options, repositoryDialect, generatedDirectory, written);
 
-        var projectFilePath = Path.Combine(outputDirectory, $"{projectName}.csproj");
+        var projectFilePath = Path.Combine(projectDirectory, $"{projectName}.csproj");
         WriteText(projectFilePath, BuildCsproj(rootNamespace, repositoryDialect), written);
 
-        var readmePath = Path.Combine(outputDirectory, ReadmeFileName);
+        var readmePath = Path.Combine(projectDirectory, ReadmeFileName);
         WriteText(readmePath, BuildReadme(projectName, rootNamespace, repositoryDialect), written);
 
         var designHtmlPath = Path.Combine(
-            outputDirectory,
+            projectDirectory,
             DesignHtmlRelativePath.Replace('/', Path.DirectorySeparatorChar)
         );
         WriteText(designHtmlPath, designHtml, written);
 
+        // ソリューションはプロジェクトを 1 つ参照する最小構成で出力フォルダ直下へ出す（GUID は名前から決定的に導出）
+        var solutionFilePath = Path.Combine(outputDirectory, $"{projectName}.sln");
+        WriteText(solutionFilePath, BuildSolution(projectName), written);
+
         return new MockProjectScaffoldResult(
+            SolutionFilePath: solutionFilePath,
+            ProjectDirectory: projectDirectory,
             ProjectFilePath: projectFilePath,
             GeneratedDirectory: generatedDirectory,
             DesignHtmlPath: designHtmlPath,
@@ -258,6 +278,59 @@ public sealed class MockProjectScaffoldService
 ";
     }
 
+    /// <summary>
+    /// プロジェクトを 1 つ参照する最小のソリューションテキスト（Format Version 12.00）を組み立てる。
+    /// </summary>
+    /// <remarks>
+    /// プロジェクト GUID はプロジェクト名から決定的に導出する（同名なら常に同 GUID＝テストが決定的になる）。
+    /// Debug/Release × Any CPU の標準構成を含める。プロジェクトへの相対パスは <c>{ProjectName}\{ProjectName}.csproj</c>。
+    /// 改行は Visual Studio 標準に合わせて CRLF で固定する。
+    /// </remarks>
+    private static string BuildSolution(string projectName)
+    {
+        // GUID は大文字・波括弧付きが VS の慣習
+        var projectGuid = DeriveDeterministicProjectGuid(projectName)
+            .ToString("B")
+            .ToUpperInvariant();
+        var typeGuid = "{" + CSharpProjectTypeGuid + "}";
+        var projectRelativePath = $@"{projectName}\{projectName}.csproj";
+
+        var lines = new[]
+        {
+            "Microsoft Visual Studio Solution File, Format Version 12.00",
+            "# Visual Studio Version 17",
+            $"Project(\"{typeGuid}\") = \"{projectName}\", \"{projectRelativePath}\", \"{projectGuid}\"",
+            "EndProject",
+            "Global",
+            "\tGlobalSection(SolutionConfigurationPlatforms) = preSolution",
+            "\t\tDebug|Any CPU = Debug|Any CPU",
+            "\t\tRelease|Any CPU = Release|Any CPU",
+            "\tEndGlobalSection",
+            "\tGlobalSection(ProjectConfigurationPlatforms) = postSolution",
+            $"\t\t{projectGuid}.Debug|Any CPU.ActiveCfg = Debug|Any CPU",
+            $"\t\t{projectGuid}.Debug|Any CPU.Build.0 = Debug|Any CPU",
+            $"\t\t{projectGuid}.Release|Any CPU.ActiveCfg = Release|Any CPU",
+            $"\t\t{projectGuid}.Release|Any CPU.Build.0 = Release|Any CPU",
+            "\tEndGlobalSection",
+            "\tGlobalSection(SolutionProperties) = preSolution",
+            "\t\tHideSolutionNode = FALSE",
+            "\tEndGlobalSection",
+            "EndGlobal",
+        };
+
+        return string.Join("\r\n", lines) + "\r\n";
+    }
+
+    /// <summary>プロジェクト名から決定的な GUID を導出する（MD5 ハッシュの先頭 16 バイトを Guid 化）</summary>
+    /// <remarks>
+    /// 暗号強度は不要（識別子の決定性が目的）。同名なら常に同一 GUID となり、テストが決定的になる。
+    /// </remarks>
+    private static Guid DeriveDeterministicProjectGuid(string projectName)
+    {
+        var hash = MD5.HashData(Encoding.UTF8.GetBytes(projectName));
+        return new Guid(hash);
+    }
+
     /// <summary>AI・人間の双方向けの規約ドキュメントを組み立てる</summary>
     private static string BuildReadme(
         string projectName,
@@ -287,10 +360,15 @@ QuickER が確定 HTML モックから生成した WPF モックプロジェク�
 
 ## プロジェクト構成
 
-- `Generated/` … QuickER が生成したデータ層（Entity / EditModel / Mapper / Repository 契約・実装 / インメモリ実装）。
+このフォルダは Visual Studio 標準構成です。出力フォルダ直下に `{projectName}.sln`（ソリューション）があり、
+プロジェクト一式は `{projectName}/` フォルダ配下にあります。
+
+- `{projectName}.sln` … ソリューションファイル（出力フォルダ直下）。`dotnet build` はこの場所で実行すれば sln を拾います。
+- `{projectName}/{projectName}.csproj` … WPF（net10.0-windows）のプロジェクトファイル。
+- `{projectName}/Generated/` … QuickER が生成したデータ層（Entity / EditModel / Mapper / Repository 契約・実装 / インメモリ実装）。
   **このフォルダは自動生成コードのため、手で編集・削除しないでください（再生成で上書きされます）。**
-- `design/mock.html` … 再現すべき画面のデザイン仕様（画面構成・項目・遷移）。
-- `{projectName}.csproj` … WPF（net10.0-windows）のプロジェクトファイル。
+- `{projectName}/design/mock.html` … 再現すべき画面のデザイン仕様（画面構成・項目・遷移）。
+- App / MainWindow / ビュー・ビューモデル等の UI 層は `{projectName}/` フォルダ配下に追加してください。
 
 ## 実装の規約
 

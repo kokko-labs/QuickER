@@ -168,10 +168,16 @@ public class MockProjectAgentRunnerTests
             options.McpConfigPath.Should().BeEmpty();
             options.WorkingDirectory.Should().Be(folder);
 
-            // プロンプトはデザイン仕様・README 規約・読み取り専用を案内する
-            client.CapturedPrompt.Should().Contain("design/mock.html");
-            client.CapturedPrompt.Should().Contain("README-QuickER.md");
-            client.CapturedPrompt.Should().Contain("Generated/");
+            // プロンプトはデザイン仕様・README 規約・読み取り専用を案内する（VS 標準構成のプロジェクトフォルダ配下パス）
+            client.CapturedPrompt.Should().Contain("AcmeMock/design/mock.html");
+            client.CapturedPrompt.Should().Contain("AcmeMock/README-QuickER.md");
+            client.CapturedPrompt.Should().Contain("AcmeMock/Generated/");
+            // ソリューション直下でビルドする案内が入る
+            client.CapturedPrompt.Should().Contain("AcmeMock.sln");
+
+            // システムプロンプトも VS 標準構成（sln・プロジェクトフォルダ）を案内する
+            options.SystemPrompt.Should().Contain("AcmeMock.sln");
+            options.SystemPrompt.Should().Contain("AcmeMock/Generated/");
         }
         finally
         {

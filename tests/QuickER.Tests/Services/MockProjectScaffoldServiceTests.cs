@@ -64,8 +64,8 @@ public class MockProjectScaffoldServiceTests
         }
     }
 
-    /// <summary>スキャフォールドが Generated/・csproj・README・design/mock.html を出力することを検証する</summary>
-    [Fact(DisplayName = "スキャフォールドは土台一式を出力フォルダへ書き出す")]
+    /// <summary>スキャフォールドが sln・Generated/・csproj・README・design/mock.html を VS 標準構成で出力することを検証する</summary>
+    [Fact(DisplayName = "スキャフォールドは土台一式を VS 標準構成で書き出す")]
     public void Scaffold_WritesFullSkeleton()
     {
         var folder = NewTempFolder();
@@ -79,6 +79,18 @@ public class MockProjectScaffoldServiceTests
                 "AcmeMock",
                 DesignHtml
             );
+
+            // VS 標準構成: sln は出力フォルダ直下、プロジェクト一式はプロジェクトフォルダ配下
+            var projectDirectory = Path.Combine(folder, "AcmeMock");
+            result.ProjectDirectory.Should().Be(projectDirectory);
+            result.SolutionFilePath.Should().Be(Path.Combine(folder, "AcmeMock.sln"));
+            File.Exists(result.SolutionFilePath).Should().BeTrue();
+
+            // csproj・README・design・Generated はプロジェクトフォルダ配下にある
+            result.ProjectFilePath.Should().StartWith(projectDirectory);
+            result.ReadmePath.Should().StartWith(projectDirectory);
+            result.DesignHtmlPath.Should().StartWith(projectDirectory);
+            result.GeneratedDirectory.Should().StartWith(projectDirectory);
 
             // csproj は WPF・net10.0-windows・MVVM 依存を持つ
             File.Exists(result.ProjectFilePath).Should().BeTrue();
@@ -210,5 +222,107 @@ public class MockProjectScaffoldServiceTests
         {
             Cleanup(folder);
         }
+    }
+
+    /// <summary>生成した .sln の構文（Format Version・Project/EndProject・構成セクション・プロジェクト参照）を検証する</summary>
+    [Fact(DisplayName = "sln は VS 標準の構文とプロジェクト参照を含む")]
+    public void Scaffold_SolutionHasValidSyntax()
+    {
+        var folder = NewTempFolder();
+        var service = new MockProjectScaffoldService(BuildRegistry());
+
+        try
+        {
+            var result = service.Scaffold(
+                BuildDiagram(SqlServerProvider.ProviderName),
+                folder,
+                "AcmeMock",
+                DesignHtml
+            );
+
+            var sln = File.ReadAllText(result.SolutionFilePath);
+
+            // ヘッダ（Format Version 12.00）
+            sln.Should().Contain("Microsoft Visual Studio Solution File, Format Version 12.00");
+
+            // C# プロジェクト種別 GUID と、プロジェクトフォルダ配下の csproj を参照する Project 行
+            sln.Should()
+                .Contain("Project(\"{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}\") = \"AcmeMock\"");
+            sln.Should().Contain(@"AcmeMock\AcmeMock.csproj");
+            sln.Should().Contain("EndProject");
+
+            // 構成セクション（Debug/Release × Any CPU）
+            sln.Should().Contain("GlobalSection(SolutionConfigurationPlatforms) = preSolution");
+            sln.Should().Contain("Debug|Any CPU = Debug|Any CPU");
+            sln.Should().Contain("Release|Any CPU = Release|Any CPU");
+            sln.Should().Contain("GlobalSection(ProjectConfigurationPlatforms) = postSolution");
+            sln.Should().Contain(".Debug|Any CPU.ActiveCfg = Debug|Any CPU");
+            sln.Should().Contain(".Release|Any CPU.Build.0 = Release|Any CPU");
+            sln.Should().Contain("EndGlobal");
+
+            // 改行は CRLF（VS 標準）
+            sln.Should().Contain("\r\n");
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>プロジェクト GUID が名前から決定的に導出される（同名なら同 GUID・別名なら別 GUID）ことを検証する</summary>
+    [Fact(DisplayName = "sln のプロジェクト GUID は名前から決定的")]
+    public void Scaffold_SolutionProjectGuidIsDeterministic()
+    {
+        var folder1 = NewTempFolder();
+        var folder2 = NewTempFolder();
+        var folder3 = NewTempFolder();
+        var service = new MockProjectScaffoldService(BuildRegistry());
+
+        try
+        {
+            var same1 = service.Scaffold(
+                BuildDiagram(SqlServerProvider.ProviderName),
+                folder1,
+                "AcmeMock",
+                DesignHtml
+            );
+            var same2 = service.Scaffold(
+                BuildDiagram(SqlServerProvider.ProviderName),
+                folder2,
+                "AcmeMock",
+                DesignHtml
+            );
+            var other = service.Scaffold(
+                BuildDiagram(SqlServerProvider.ProviderName),
+                folder3,
+                "OtherMock",
+                DesignHtml
+            );
+
+            var guid1 = ExtractProjectGuid(File.ReadAllText(same1.SolutionFilePath));
+            var guid2 = ExtractProjectGuid(File.ReadAllText(same2.SolutionFilePath));
+            var guidOther = ExtractProjectGuid(File.ReadAllText(other.SolutionFilePath));
+
+            // 同名なら同一 GUID（決定的）
+            guid1.Should().Be(guid2);
+            // 別名なら別 GUID
+            guid1.Should().NotBe(guidOther);
+        }
+        finally
+        {
+            Cleanup(folder1);
+            Cleanup(folder2);
+            Cleanup(folder3);
+        }
+    }
+
+    /// <summary>.sln テキストから Project 行のプロジェクト GUID（末尾の "{...}"）を取り出す</summary>
+    private static string ExtractProjectGuid(string sln)
+    {
+        var projectLine = sln.Split('\n')
+            .First(line => line.StartsWith("Project(", StringComparison.Ordinal));
+        // Project("{型GUID}") = "名前", "パス", "{プロジェクトGUID}" の末尾 GUID を取る
+        var lastBrace = projectLine.LastIndexOf('{');
+        return projectLine[lastBrace..].Trim().TrimEnd('"');
     }
 }
