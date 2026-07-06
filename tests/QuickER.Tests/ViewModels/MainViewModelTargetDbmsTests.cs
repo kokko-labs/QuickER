@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Linq;
 using FluentAssertions;
 using QuickER.CodeGen.CSharp;
+using QuickER.CodeGen.UI;
 using QuickER.Gui.Abstractions;
 using QuickER.Model;
 using QuickER.Provider;

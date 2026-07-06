@@ -1,6 +1,6 @@
 using System.IO;
 using FluentAssertions;
-using QuickER.Services;
+using QuickER.CodeGen.UI;
 
 namespace QuickER.Tests.Services;
 

@@ -1,9 +1,8 @@
 using System.IO;
 using System.Linq;
 using FluentAssertions;
+using QuickER.CodeGen.UI;
 using QuickER.Gui.Abstractions;
-using QuickER.Services;
-using QuickER.ViewModels;
 
 namespace QuickER.Tests.ViewModels;
 

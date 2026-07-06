@@ -1,7 +1,7 @@
 using System.IO;
 using System.Text.Json;
 
-namespace QuickER.Services;
+namespace QuickER.CodeGen.UI;
 
 /// <summary>C# コード生成ダイアログの設定（次回起動時に復元する永続化対象）</summary>
 public class CSharpGenerationSettings

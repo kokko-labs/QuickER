@@ -25,6 +25,7 @@
     <ProjectReference Include="..\QuickER.Gui.Abstractions\QuickER.Gui.Abstractions.csproj" />
     <ProjectReference Include="..\QuickER.Document\QuickER.Document.csproj" />
     <ProjectReference Include="..\QuickER.CodeGen.CSharp\QuickER.CodeGen.CSharp.csproj" />
+    <ProjectReference Include="..\QuickER.CodeGen.UI\QuickER.CodeGen.UI.csproj" />
     <ProjectReference Include="..\QuickER.Model\QuickER.Model.csproj" />
     <ProjectReference Include="..\QuickER.MySql\QuickER.MySql.csproj" />
     <ProjectReference Include="..\QuickER.Oracle\QuickER.Oracle.csproj" />
@@ -32,16 +33,5 @@
     <ProjectReference Include="..\QuickER.Provider\QuickER.Provider.csproj" />
     <ProjectReference Include="..\QuickER.Sqlite\QuickER.Sqlite.csproj" />
     <ProjectReference Include="..\QuickER.SqlServer\QuickER.SqlServer.csproj" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <Compile Update="ViewModels\CSharpGenerationDialogViewModel.cs" />
-    <Compile Update="Views\CSharpGenerationDialog.xaml.cs">
-      <DependentUpon>CSharpGenerationDialog.xaml</DependentUpon>
-    </Compile>
-    <Page Update="Views\CSharpGenerationDialog.xaml">
-      <Generator>MSBuild:Compile</Generator>
-      <SubType>Designer</SubType>
-    </Page>
   </ItemGroup>
 </Project>

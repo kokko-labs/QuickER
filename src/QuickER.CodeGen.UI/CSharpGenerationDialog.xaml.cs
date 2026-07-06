@@ -1,7 +1,6 @@
 using System.Windows;
-using QuickER.ViewModels;
 
-namespace QuickER.Views;
+namespace QuickER.CodeGen.UI;
 
 /// <summary>C# コード生成ダイアログのコードビハインド</summary>
 /// <remarks>画面制御（DataContext 結線・閉じる要求の受け）のみを担い、操作ロジックは ViewModel に置く</remarks>

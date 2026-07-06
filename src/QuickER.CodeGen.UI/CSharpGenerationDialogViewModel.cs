@@ -5,15 +5,13 @@ using System.Linq;
 using System.Text.RegularExpressions;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using QuickER.AI.UI;
 using QuickER.CodeGen.CSharp;
 using QuickER.Gui.Abstractions;
 using QuickER.Provider;
-using QuickER.Services;
 using QuickER.Sqlite;
 using QuickER.SqlServer;
 
-namespace QuickER.ViewModels;
+namespace QuickER.CodeGen.UI;
 
 /// <summary>C# コード生成ダイアログの ViewModel</summary>
 /// <remarks>
@@ -50,7 +48,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     )
     {
         _store = store ?? new CSharpGenerationSettingsStore();
-        _files = files ?? new WpfFileDialogService();
+        _files = files ?? NullFileDialogService.Instance;
 
         // 対象 DB チェックの初期値: 図の方言が対応方言（sqlserver/sqlite）ならその方言のみ ON、
         // 未対応方言（PostgreSQL 等）なら両方 OFF（ユーザーに明示的な選択を求める）。
@@ -719,3 +717,25 @@ public sealed record CSharpGenerationDialogResult(
     CodeGenerationOptions Options,
     string OutputDirectory
 );
+
+/// <summary>何も表示せず常にキャンセル扱いを返す <see cref="IFileDialogService"/>（未注入時＝テスト用の既定）</summary>
+/// <remarks>実 GUI 経路では合成側（WpfAppDialogService）が必ず実装を注入するため、この既定は使われない</remarks>
+file sealed class NullFileDialogService : IFileDialogService
+{
+    /// <summary>共有インスタンス（状態を持たないため単一でよい）</summary>
+    public static NullFileDialogService Instance { get; } = new();
+
+    /// <inheritdoc />
+    public FileDialogResult? PickOpenFile(string filter) => null;
+
+    /// <inheritdoc />
+    public FileDialogResult? PickSaveFile(
+        string filter,
+        string defaultExt,
+        string? initialFileName = null,
+        string? initialDirectory = null
+    ) => null;
+
+    /// <inheritdoc />
+    public string? PickFolder(string title, string? initialDirectory = null) => null;
+}

@@ -1,4 +1,5 @@
 using System.Windows;
+using QuickER.CodeGen.UI;
 using QuickER.Gui.Abstractions;
 using QuickER.Model;
 using QuickER.Provider;
@@ -83,7 +84,7 @@ public sealed class WpfAppDialogService : IAppDialogService
             files: _files,
             currentProvider: currentProvider
         );
-        var dialog = new Views.CSharpGenerationDialog(viewModel)
+        var dialog = new CSharpGenerationDialog(viewModel)
         {
             Owner = Application.Current?.MainWindow,
         };
