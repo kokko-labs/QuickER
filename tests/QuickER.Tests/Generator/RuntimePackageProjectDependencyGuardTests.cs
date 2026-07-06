@@ -10,8 +10,9 @@ using Xunit;
 namespace QuickER.Tests.Generator;
 
 /// <summary>
-/// ランタイムパッケージ 3 プロジェクト（<c>QuickER.Runtime</c> / <c>.SqlServer</c> / <c>.Sqlite</c>）の
-/// csproj が宣言する依存集合（PackageReference / ProjectReference）を検証し、パッケージ境界での依存排他を守る。
+/// ランタイムパッケージ 4 プロジェクト（<c>QuickER.Runtime</c> / <c>.SqlServer</c> / <c>.Sqlite</c> /
+/// <c>.EntityFrameworkCore</c>）の csproj が宣言する依存集合（PackageReference / ProjectReference）を検証し、
+/// パッケージ境界での依存排他を守る。
 /// </summary>
 /// <remarks>
 /// <para>
@@ -82,6 +83,31 @@ public sealed class RuntimePackageProjectDependencyGuardTests
         // 依存はコアへの ProjectReference のみ（他方言プロジェクトを参照しない）
         var projects = ProjectReferences(
             "src/QuickER.Runtime.Sqlite/QuickER.Runtime.Sqlite.csproj"
+        );
+        projects.Should().ContainSingle().Which.Should().EndWith("QuickER.Runtime.csproj");
+    }
+
+    /// <summary>EntityFrameworkCore パッケージは EF Core（Relational）のみを持ち、ADO / DI 系を持たない</summary>
+    [Fact(
+        DisplayName = "QuickER.Runtime.EntityFrameworkCore は Microsoft.EntityFrameworkCore.Relational のみ（ADO / DI なし）"
+    )]
+    public void EntityFrameworkCore_HasEfCoreRelationalOnly()
+    {
+        var packages = PackageReferences(
+            "src/QuickER.Runtime.EntityFrameworkCore/QuickER.Runtime.EntityFrameworkCore.csproj"
+        );
+
+        packages
+            .Should()
+            .BeEquivalentTo(
+                new[] { "Microsoft.EntityFrameworkCore.Relational" },
+                "EF パッケージの NuGet 依存は EF Core（Relational・本体は推移取得）だけに保つ"
+                    + "（ADO（SqlClient / Sqlite）／DI 系が混ざってはならない。DI 登録拡張は具象 DbContext を参照するスキーマ依存物として生成側に出力される）"
+            );
+
+        // 依存はコアへの ProjectReference のみ（方言プロジェクトを参照しない）
+        var projects = ProjectReferences(
+            "src/QuickER.Runtime.EntityFrameworkCore/QuickER.Runtime.EntityFrameworkCore.csproj"
         );
         projects.Should().ContainSingle().Which.Should().EndWith("QuickER.Runtime.csproj");
     }

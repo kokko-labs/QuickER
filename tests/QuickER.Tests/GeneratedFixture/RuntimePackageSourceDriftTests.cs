@@ -15,10 +15,9 @@ namespace QuickER.Tests.GeneratedFixture;
 /// チェックイン済みソースが古くなり得るため、このテストで乖離を検出する。
 /// </para>
 /// <para>
-/// EF パッケージ（<see cref="RuntimePackageSourceRenderer.RenderEfCore"/>）は現時点で公開保留のため、
-/// チェックインもドリフト検知も行わない（レンダラー／既存の Roslyn 検証テストは維持）。
+/// 対象は 4 パッケージのソース（Core / SqlServer / Sqlite / EntityFrameworkCore）。
 /// 検証・再生成の実処理は既存フィクスチャと同じ <see cref="FixtureDriftHarness"/> に集約しており、
-/// <c>QUICKER_REGEN_FIXTURES=1</c> のとき既存 4 フィクスチャと同一経路でこの 3 ソースも上書き再生成される。
+/// <c>QUICKER_REGEN_FIXTURES=1</c> のとき既存フィクスチャと同一経路でこの 4 ソースも上書き再生成される。
 /// テンプレート変更後の再生成手順は同ハーネスの docstring と失敗メッセージを参照。
 /// </para>
 /// </remarks>
@@ -64,6 +63,20 @@ public sealed class RuntimePackageSourceDriftTests
             Renderer.RenderSqlite(),
             "src/QuickER.Runtime.Sqlite/QuickERRuntimeSqlite.g.cs",
             "Sqlite パッケージのチェックイン済みソースが現在のテンプレート出力と乖離しています。"
+                + "テンプレート（QuickER.Generator/Templates/CSharpRuntime.scriban 等）を変更した場合は再生成が必要です。"
+        );
+    }
+
+    /// <summary>EF 共通部品（<c>QuickER.Runtime.EntityFrameworkCore</c>）のチェックイン済みソースが一致する</summary>
+    [Fact(
+        DisplayName = "EntityFrameworkCore パッケージのチェックイン済みソースが現在のレンダラー出力と完全一致する（ドリフト検知）"
+    )]
+    public void EntityFrameworkCoreSource_MatchesRenderedOutput()
+    {
+        FixtureDriftHarness.VerifyOrRegeneratePackageSource(
+            Renderer.RenderEfCore(),
+            "src/QuickER.Runtime.EntityFrameworkCore/QuickERRuntimeEntityFrameworkCore.g.cs",
+            "EntityFrameworkCore パッケージのチェックイン済みソースが現在のテンプレート出力と乖離しています。"
                 + "テンプレート（QuickER.Generator/Templates/CSharpRuntime.scriban 等）を変更した場合は再生成が必要です。"
         );
     }

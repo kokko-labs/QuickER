@@ -387,18 +387,22 @@ public class CliAppTests
     }
 
     /// <summary>
-    /// --runtime-packages と GenerateEfCore=true の併用は生成器側の診断エラー（排他）となり、
-    /// CLI がスタックトレースなしの分かりやすいエラーメッセージ（終了コード 1）で表示することを検証する
+    /// --runtime-packages と GenerateEfCore=true の併用は解禁されており、生成が成功（終了コード 0）して
+    /// 案内に EF パッケージ（QuickER.Runtime.EntityFrameworkCore）が含まれることを検証する
     /// </summary>
-    [Fact(DisplayName = "--runtime-packages と EF Core の併用は終了コード 1")]
-    public async Task Generate_RuntimePackagesWithEfCore_ReturnsError()
+    [Fact(DisplayName = "--runtime-packages と EF Core の併用は成功し EF パッケージが案内される")]
+    public async Task Generate_RuntimePackagesWithEfCore_SucceedsWithEfPackageGuidance()
     {
         var (schemaPath, outDir, root) = CreateSampleSchema();
         var configPath = Path.Combine(root, "quicker.json");
-        File.WriteAllText(configPath, """{ "GenerateEfCore": true }""");
-        var originalError = Console.Error;
-        var errorWriter = new StringWriter();
-        Console.SetError(errorWriter);
+        // EF 単独（自作 Repository なし）でパッケージ参照モードにする
+        File.WriteAllText(
+            configPath,
+            """{ "GenerateRepositories": false, "GenerateEfCore": true }"""
+        );
+        var originalOut = Console.Out;
+        var outWriter = new StringWriter();
+        Console.SetOut(outWriter);
 
         try
         {
@@ -413,15 +417,22 @@ public class CliAppTests
                 "--runtime-packages",
             ]);
 
-            exit.Should().Be(1);
-            Directory.Exists(outDir).Should().BeFalse("生成エラーのため出力は作られない");
-            var stderr = errorWriter.ToString();
-            stderr.Should().Contain("UseRuntimePackages");
-            stderr.Should().NotContain("   at "); // スタックトレースが裸で出ないことの簡易確認
+            exit.Should().Be(0);
+            Directory.Exists(outDir).Should().BeTrue("生成成功のため出力が作られる");
+            var stdout = outWriter.ToString();
+            stdout
+                .Should()
+                .Contain(
+                    "QuickER.Runtime.EntityFrameworkCore",
+                    "EF パッケージが PackageReference 案内に含まれる"
+                );
+            // EF 単独では自作方言パッケージ（SqlServer / Sqlite）は案内されない
+            stdout.Should().NotContain("QuickER.Runtime.SqlServer");
+            stdout.Should().NotContain("QuickER.Runtime.Sqlite");
         }
         finally
         {
-            Console.SetError(originalError);
+            Console.SetOut(originalOut);
 
             if (Directory.Exists(root))
             {

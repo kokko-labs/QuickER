@@ -34,9 +34,10 @@ jobs:
       - name: テスト
         run: dotnet test QuickER.slnx --no-build --logger "console;verbosity=normal"
 
-      - name: パッケージ生成検証（ランタイム3種+CLI）
+      - name: パッケージ生成検証（ランタイム4種+CLI）
         run: |
           dotnet pack src/QuickER.Runtime/QuickER.Runtime.csproj --no-build --output ${{ runner.temp }}/nupkg
           dotnet pack src/QuickER.Runtime.SqlServer/QuickER.Runtime.SqlServer.csproj --no-build --output ${{ runner.temp }}/nupkg
           dotnet pack src/QuickER.Runtime.Sqlite/QuickER.Runtime.Sqlite.csproj --no-build --output ${{ runner.temp }}/nupkg
+          dotnet pack src/QuickER.Runtime.EntityFrameworkCore/QuickER.Runtime.EntityFrameworkCore.csproj --no-build --output ${{ runner.temp }}/nupkg
           dotnet pack src/QuickER.Cli/QuickER.Cli.csproj --no-build --output ${{ runner.temp }}/nupkg

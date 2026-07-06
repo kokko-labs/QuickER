@@ -75,7 +75,7 @@ public class RuntimePackageModeCompilationTests
         var packages = RuntimePackageReferenceGuidance.Compute(options);
         var packageRefs = BuildPackageReferences(packages);
 
-        var compilation = CompileGenerated(result, packageRefs);
+        var compilation = CompileGenerated(result, packages, packageRefs);
 
         compilation
             .Success.Should()
@@ -157,29 +157,45 @@ public class RuntimePackageModeCompilationTests
             .Equal(RuntimePackages.Core, RuntimePackages.SqlServer, RuntimePackages.Sqlite);
     }
 
-    /// <summary>EF Core とパッケージ参照モードの併用は診断エラーになる（設計上の排他）</summary>
+    /// <summary>EF 単独×パッケージの案内は Core＋EF のみ（ADO を含まない）になる</summary>
     [Fact]
-    public void PackageMode_WithEfCore_IsDiagnosticError()
+    public void EfCoreOnly_Guidance_IsCoreAndEfCore_NoAdo()
     {
         var options = WithPackageMode(
-            new CodeGenerationOptions { NamespaceName = "Sample.Domain", GenerateEfCore = true }
-        );
-        var diagram = Diagram();
-        var (primary, byDialect) = ResolveTypes(diagram, options);
-
-        var result = new CSharpCodeGenerationService().Generate(
-            diagram,
-            primary,
-            byDialect,
-            options
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                GenerateRepositories = false,
+                GenerateEfCore = true,
+            }
         );
 
-        result.HasErrors.Should().BeTrue();
-        result
-            .Diagnostics.Should()
-            .Contain(d =>
-                d.Severity == GenerationDiagnosticSeverity.Error
-                && d.Message.Contains("UseRuntimePackages")
+        RuntimePackageReferenceGuidance
+            .Compute(options)
+            .Should()
+            .Equal(RuntimePackages.Core, RuntimePackages.EntityFrameworkCore);
+    }
+
+    /// <summary>自作 sqlserver＋EF 併存×パッケージの案内は Core＋SqlServer＋EF になる</summary>
+    [Fact]
+    public void RepositoryPlusEfCore_Guidance_IsCoreSqlServerAndEfCore()
+    {
+        var options = WithPackageMode(
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                GenerateRepositories = true,
+                GenerateEfCore = true,
+            }
+        );
+
+        RuntimePackageReferenceGuidance
+            .Compute(options)
+            .Should()
+            .Equal(
+                RuntimePackages.Core,
+                RuntimePackages.SqlServer,
+                RuntimePackages.EntityFrameworkCore
             );
     }
 
@@ -246,6 +262,26 @@ public class RuntimePackageModeCompilationTests
                     NamespaceName = "Sample.Domain",
                     SplitFilesByCategory = split,
                     RepositoryDialects = ["sqlserver", "sqlite"],
+                }
+            );
+            data.Add(
+                $"EF 単独 Split={split}",
+                new CodeGenerationOptions
+                {
+                    NamespaceName = "Sample.Domain",
+                    SplitFilesByCategory = split,
+                    GenerateRepositories = false,
+                    GenerateEfCore = true,
+                }
+            );
+            data.Add(
+                $"自作 sqlserver＋EF 併存 Split={split}",
+                new CodeGenerationOptions
+                {
+                    NamespaceName = "Sample.Domain",
+                    SplitFilesByCategory = split,
+                    GenerateRepositories = true,
+                    GenerateEfCore = true,
                 }
             );
         }
@@ -524,14 +560,23 @@ public class RuntimePackageModeCompilationTests
         return peStream.ToArray();
     }
 
-    /// <summary>生成コードを「案内されたパッケージ参照＋BCL＋DI」だけでコンパイルする</summary>
+    /// <summary>生成コードを「案内されたパッケージ参照＋BCL＋DI（＋EF 生成時のみ EF Core）」だけでコンパイルする</summary>
+    /// <remarks>
+    /// 生成コードが直接使うのは BCL＋DI（登録拡張）＋案内パッケージ。方言 ADO（SqlClient / Sqlite）はパッケージ側だけが
+    /// 参照するため含めない。ただし EF 生成時は、生成側の QuickErDbContext（<c>: DbContext</c>）や
+    /// AddGeneratedEfCoreRepositories（<c>DbContextOptionsBuilder</c> / <c>AddDbContextFactory</c>）が EF Core の型を
+    /// 直接参照するため、EF パッケージが案内に含まれるときは EF Core 参照も生成コードのコンパイルへ渡す。
+    /// </remarks>
     private static GeneratedCompileResult CompileGenerated(
         CodeGenerationResult result,
+        IReadOnlyList<string> packages,
         IReadOnlyList<MetadataReference> packageReferences
     )
     {
-        // 生成コードが直接使うのは BCL＋DI（登録拡張）＋案内パッケージのみ。方言 ADO / EF はパッケージ側だけが参照する。
-        var references = new List<MetadataReference>(RuntimeReferenceSet.GeneratedCode.Build());
+        var referenceSet = packages.Contains(RuntimePackages.EntityFrameworkCore)
+            ? RuntimeReferenceSet.GeneratedCodeWithEfCore
+            : RuntimeReferenceSet.GeneratedCode;
+        var references = new List<MetadataReference>(referenceSet.Build());
         references.AddRange(packageReferences);
 
         var syntaxTrees = result
@@ -620,6 +665,10 @@ internal sealed class RuntimeReferenceSet
 
     /// <summary>生成コード: BCL＋DI（登録拡張）のみ。方言 ADO / EF はパッケージ側だけが参照する</summary>
     public static RuntimeReferenceSet GeneratedCode { get; } = new(false, false, false, true);
+
+    /// <summary>生成コード（EF 生成時）: BCL＋DI＋EF Core。生成側の QuickErDbContext / DI 拡張が EF Core 型を直接参照する</summary>
+    public static RuntimeReferenceSet GeneratedCodeWithEfCore { get; } =
+        new(false, false, true, true);
 
     private static readonly IReadOnlyList<string> ExclusiveAssemblyFileNames =
     [

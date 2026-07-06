@@ -312,7 +312,7 @@ public static class CliApp
         {
             Description =
                 "生成コードにランタイム（固定コード）を含めず、NuGet パッケージ QuickER.Runtime.* への参照で賄う"
-                + "（既定 false。EF Core 生成とは併用不可。設定ファイルを上書き）",
+                + "（既定 false。EF Core 生成とも併用可。設定ファイルを上書き）",
         };
 
     /// <summary>

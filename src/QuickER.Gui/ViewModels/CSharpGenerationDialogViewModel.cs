@@ -161,20 +161,18 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     /// ランタイム（固定コード）を生成物に含めず、NuGet パッケージ QuickER.Runtime.* への参照で賄うかどうか
     /// </summary>
     /// <remarks>
-    /// EF Core（<see cref="GenerateEfCore"/>）とは併用できないため、EF Core 選択中は
-    /// <see cref="CanUseRuntimePackages"/> が false になり、UI 側でチェックボックスを無効化＋チェック解除する
+    /// EF Core（<see cref="GenerateEfCore"/>）とも併用できる（EF 固定 infra は QuickER.Runtime.EntityFrameworkCore
+    /// パッケージが担い、スキーマ依存の QuickErDbContext・DI 登録は生成側に出力される）。常に操作可能。
     /// </remarks>
     [ObservableProperty]
     private bool _useRuntimePackages;
 
-    /// <summary>「ランタイムを NuGet パッケージ参照にする」チェックボックスを操作可能かどうか（EF Core 選択中は不可）</summary>
-    public bool CanUseRuntimePackages => !GenerateEfCore;
+    /// <summary>「ランタイムを NuGet パッケージ参照にする」チェックボックスを操作可能かどうか（常に可能）</summary>
+    public bool CanUseRuntimePackages => true;
 
-    /// <summary>パッケージ参照モードのチェックボックスのツールチップ（EF Core 選択時は理由を示す）</summary>
+    /// <summary>パッケージ参照モードのチェックボックスのツールチップ</summary>
     public string UseRuntimePackagesToolTip =>
-        GenerateEfCore
-            ? "EF Core 生成とは併用できません（EF の DbContext はスキーマ依存のためパッケージ境界を跨げません）"
-            : "生成コードから固定のランタイムコードを省き、NuGet パッケージ QuickER.Runtime.* への参照で賄います";
+        "生成コードから固定のランタイムコードを省き、NuGet パッケージ QuickER.Runtime.* への参照で賄います（EF Core とも併用可）";
 
     /// <summary>入力エラーや補助メッセージ</summary>
     [ObservableProperty]
@@ -305,14 +303,8 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
 
     partial void OnGenerateEfCoreChanged(bool value)
     {
-        // EF Core 選択中はパッケージ参照モードと併用できないため、チェックを強制的に外し操作不可にする
-        if (value)
-        {
-            UseRuntimePackages = false;
-        }
-
-        OnPropertyChanged(nameof(CanUseRuntimePackages));
-        OnPropertyChanged(nameof(UseRuntimePackagesToolTip));
+        // EF Core はパッケージ参照モードと併用できるため、チェックの強制解除・無効化は行わない。
+        // 参照案内（EF パッケージの追加）は生成後メッセージ・ヘッダで反映されるためプレビューのみ追従する。
         RaiseDbAccessChanged();
         RaiseDerivedChanged();
     }
@@ -457,8 +449,8 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
             // （Repository ラジオは常時選択可のため、方言による無効化は行わない）
             GenerateRepositories = settings.GenerateRepositories;
             GenerateEfCore = settings.GenerateEfCore && !GenerateRepositories;
-            // EF Core 選択時は併用不可のため、保存値に依らず false になる（OnGenerateEfCoreChanged が強制済み）
-            UseRuntimePackages = settings.UseRuntimePackages && !GenerateEfCore;
+            // パッケージ参照モードは EF Core とも併用できるため、保存値をそのまま復元する
+            UseRuntimePackages = settings.UseRuntimePackages;
             GenerateValueObjects = settings.GenerateValueObjects;
             UseGuidKeyForStringPrimaryKey = settings.UseGuidKeyForStringPrimaryKey;
             OutputFilePath = settings.OutputFilePath;

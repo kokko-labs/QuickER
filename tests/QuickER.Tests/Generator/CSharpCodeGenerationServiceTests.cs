@@ -3134,14 +3134,17 @@ public class CSharpCodeGenerationServiceTests
         result.HasErrors.Should().BeFalse();
         var content = result.Files[0].Content;
 
-        // 基底クラス: IDbContextFactory を受け取り IRepository を実装する
-        content.Should().Contain("public abstract partial class EfCoreRepository<TEntity, TKey>(");
-        content.Should().Contain("IDbContextFactory<QuickErDbContext> contextFactory");
+        // 基底クラス: 具象 DbContext 非依存で TContext ジェネリック化し、IDbContextFactory<TContext> を受け取る
+        content
+            .Should()
+            .Contain("public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(");
+        content.Should().Contain("IDbContextFactory<TContext> contextFactory");
         content.Should().Contain(") : IRepository<TEntity, TKey>");
+        content.Should().Contain("where TContext : DbContext");
 
-        // エンティティ別実装: 既存の I{Entity}Repository インターフェイスをそのまま実装する
+        // エンティティ別実装: 生成側で TContext=QuickErDbContext を閉じ、既存の I{Entity}Repository を実装する
         content.Should().Contain("public sealed partial class EfCoreCustomerRepository(");
-        content.Should().Contain(") : EfCoreRepository<CustomerEntity, int>(contextFactory),");
+        content.Should().Contain(") : EfCoreRepository<CustomerEntity, int, QuickErDbContext>(");
         content.Should().Contain("        ICustomerRepository { }");
 
         // 読み取りは AsNoTracking（切断パターン）、事後状態は既存版と同じ Unchanged
@@ -3192,12 +3195,14 @@ public class CSharpCodeGenerationServiceTests
         result.HasErrors.Should().BeFalse();
         var content = result.Files[0].Content;
 
+        // 具象 DbContext 非依存で TContext ジェネリック化（IDbContextFactory<TContext> を受け取る）
         content
             .Should()
             .Contain(
-                "public sealed partial class EfCoreSqlExecutor(IDbContextFactory<QuickErDbContext> contextFactory)"
+                "public sealed partial class EfCoreSqlExecutor<TContext>(IDbContextFactory<TContext> contextFactory)"
             );
         content.Should().Contain("    : ISqlExecutor");
+        content.Should().Contain("where TContext : DbContext");
 
         // DbContext の接続上で ADO を直接実行し、共有ヘルパー RawSqlMapper のマッピング・束縛を使う
         content.Should().Contain("context.Database.GetDbConnection().CreateCommand()");
@@ -3234,7 +3239,9 @@ public class CSharpCodeGenerationServiceTests
         content
             .Should()
             .Contain("services.AddDbContextFactory<QuickErDbContext>(configureDbContext);");
-        content.Should().Contain("services.AddSingleton<ISqlExecutor, EfCoreSqlExecutor>();");
+        content
+            .Should()
+            .Contain("services.AddSingleton<ISqlExecutor, EfCoreSqlExecutor<QuickErDbContext>>();");
         // 既存と同じインターフェイスへ EF 版実装を登録する（DI 差し替えだけで切替可能）
         content
             .Should()
@@ -3269,12 +3276,13 @@ public class CSharpCodeGenerationServiceTests
             .Contain("_orderSelectors.Add(new SqlQueryOrdering(keySelector, Descending: false));");
 
         // EF 実行器: AsNoTracking・ドットパス Include・boxing を剥がした OrderBy 合成・Repository からの注入
-        content.Should().Contain("internal sealed class EfCoreSqlQueryExecutor<TEntity>(");
+        // 実行器も TContext ジェネリック（具象 DbContext 非依存）
         content
             .Should()
-            .Contain(
-                "public SqlQuery<TEntity> Query() => new(new EfCoreSqlQueryExecutor<TEntity>(_contextFactory));"
-            );
+            .Contain("internal sealed class EfCoreSqlQueryExecutor<TEntity, TContext>(");
+        content
+            .Should()
+            .Contain("new(new EfCoreSqlQueryExecutor<TEntity, TContext>(_contextFactory));");
         content.Should().Contain("query = query.Include(path);");
         content.Should().Contain("nameof(Queryable.OrderBy)");
     }
@@ -3343,7 +3351,7 @@ public class CSharpCodeGenerationServiceTests
         efCore.Should().NotContain("SqlBulkCopy(");
         efCore.Should().NotContain("new SqlConnection");
         efCore.Should().Contain("EfCoreSqlExecutor");
-        efCore.Should().Contain("EfCoreRepository<TEntity, TKey>");
+        efCore.Should().Contain("EfCoreRepository<TEntity, TKey, TContext>");
     }
 
     /// <summary>rowversion 列と単一主キーを持つ最小ダイアグラム（IsRowVersion 構成の検証用）</summary>

@@ -7620,16 +7620,22 @@ internal sealed class ValueObjectTranslationDbContextOptionsExtension : IDbConte
 /// <remarks>
 /// <para>
 /// EF の FromSqlRaw / SqlQueryRaw はマッピング規則が既存 SQL Server 版（厳密全列必須・寛容射影・単一値モード）と
-/// 一致しないため、<see cref="QuickErDbContext"/> の <see cref="DbConnection"/> 上で <see cref="DbCommand"/> を
+/// 一致しないため、<typeparamref name="TContext"/> の <see cref="DbConnection"/> 上で <see cref="DbCommand"/> を
 /// 直接実行し、既存版とマッピング・束縛の実装を共有する（意味論は <see cref="ISqlExecutor"/> の定義どおり）。
+/// </para>
+/// <para>
+/// 具象 DbContext には依存せず <typeparamref name="TContext"/>（<see cref="DbContext"/> 派生）で受け取る。
+/// 具象型は生成側（DI 登録・エンティティ別実装）で閉じる。
 /// </para>
 /// <para>ステートレス（コンテキストファクトリのみ保持）のため DI では Singleton 登録できる。</para>
 /// </remarks>
-public sealed partial class EfCoreSqlExecutor(IDbContextFactory<QuickErDbContext> contextFactory)
+/// <typeparam name="TContext">接続を提供する DbContext の具象型</typeparam>
+public sealed partial class EfCoreSqlExecutor<TContext>(IDbContextFactory<TContext> contextFactory)
     : ISqlExecutor
+    where TContext : DbContext
 {
     /// <summary>DbContext の生成元</summary>
-    private readonly IDbContextFactory<QuickErDbContext> _contextFactory = contextFactory;
+    private readonly IDbContextFactory<TContext> _contextFactory = contextFactory;
 
     /// <summary>生 SQL の SELECT を実行し、結果行を {TEntity} へ厳密（全列必須）にマップして返す</summary>
     public async Task<IReadOnlyList<TEntity>> QueryBySqlAsync<TEntity>(
@@ -7730,7 +7736,7 @@ public sealed partial class EfCoreSqlExecutor(IDbContextFactory<QuickErDbContext
 
     /// <summary>接続を開き、SQL とパラメータを束縛した DbCommand を生成する（束縛規約は SQL Server 版と同一）</summary>
     private static async Task<DbCommand> CreateCommandAsync(
-        QuickErDbContext context,
+        TContext context,
         string sql,
         object? parameters,
         CancellationToken cancellationToken
@@ -7748,21 +7754,24 @@ public sealed partial class EfCoreSqlExecutor(IDbContextFactory<QuickErDbContext
 
 /// <summary>
 /// <see cref="SqlQuery{TEntity}"/> の EF Core 実行器。捕捉された式木を LINQ クエリへ合成し、
-/// 短命の <see cref="QuickErDbContext"/>（AsNoTracking）で実行する。
+/// 短命の <typeparamref name="TContext"/>（AsNoTracking）で実行する。
 /// </summary>
 /// <remarks>
 /// Where は捕捉済みの述語式をそのまま適用し、各方言への翻訳は EF プロバイダに委ねる。
 /// OrderBy は object? への boxing（Convert）を剥がして実キー型の OrderBy / ThenBy を合成する。
 /// Include は <see cref="IncludeNode"/> ツリーから "Orders.Details" 形式のドットパスを組み立てて適用する。
 /// 取得結果のグラフは既存 SQL Server 版のマッピングと同じく RowState=Unchanged に揃える。
+/// 具象 DbContext には依存せず <typeparamref name="TContext"/>（<see cref="DbContext"/> 派生）で受け取る。
 /// </remarks>
-internal sealed class EfCoreSqlQueryExecutor<TEntity>(
-    IDbContextFactory<QuickErDbContext> contextFactory
+/// <typeparam name="TContext">クエリを実行する DbContext の具象型</typeparam>
+internal sealed class EfCoreSqlQueryExecutor<TEntity, TContext>(
+    IDbContextFactory<TContext> contextFactory
 ) : ISqlQueryExecutor<TEntity>
     where TEntity : EntityBase
+    where TContext : DbContext
 {
     /// <summary>DbContext の生成元</summary>
-    private readonly IDbContextFactory<QuickErDbContext> _contextFactory = contextFactory;
+    private readonly IDbContextFactory<TContext> _contextFactory = contextFactory;
 
     /// <summary>条件に一致するエンティティを（Include 指定分とともに）一覧取得する</summary>
     public async Task<IReadOnlyList<TEntity>> ToListAsync(
@@ -7870,12 +7879,12 @@ internal sealed class EfCoreSqlQueryExecutor<TEntity>(
 
     /// <summary>DeleteSubtreeAsync を実行時の子型でジェネリック展開するためのメソッド情報</summary>
     private static readonly MethodInfo _deleteSubtreeMethod = typeof(
-        EfCoreSqlQueryExecutor<TEntity>
+        EfCoreSqlQueryExecutor<TEntity, TContext>
     ).GetMethod(nameof(DeleteSubtreeAsync), BindingFlags.NonPublic | BindingFlags.Static)!;
 
     /// <summary>クエリに一致する行の子孫を末端（孫）から順に削除し、最後に自身を削除する（削除行数を返す）</summary>
     private static async Task<int> DeleteSubtreeAsync<TCurrent>(
-        QuickErDbContext context,
+        TContext context,
         IQueryable<TCurrent> query,
         ISet<Type> visited,
         CancellationToken cancellationToken
@@ -7916,7 +7925,7 @@ internal sealed class EfCoreSqlQueryExecutor<TEntity>(
 
     /// <summary>親クエリの主キー集合を参照する子クエリ（child => parentKeys.Contains(child.FK)）を組み立てる</summary>
     private static IQueryable BuildChildQuery(
-        QuickErDbContext context,
+        TContext context,
         IQueryable parentQuery,
         Type parentType,
         CascadeNavigation navigation
@@ -8127,28 +8136,36 @@ internal sealed class EfCoreSqlQueryExecutor<TEntity>(
     }
 }
 
-/// <summary>メタデータと EF Core（<see cref="QuickErDbContext"/>）で CRUD を実装するリポジトリ基底クラス</summary>
+/// <summary>メタデータと EF Core（<typeparamref name="TContext"/>）で CRUD を実装するリポジトリ基底クラス</summary>
 /// <remarks>
 /// <para>
 /// 自作 SQL Server 版（<see cref="SqlServerRepository{TEntity, TKey}"/>）と同じ契約を DbContext ベースで
 /// 実装する。DbContext は呼び出し単位で短命に生成し（呼び出しごとに接続を開く単位と同じ）、
 /// 読み取りは AsNoTracking、保存は <c>ChangeTracker.TrackGraph</c> による RowState → EntityState 変換で行う。
 /// </para>
+/// <para>
+/// 具象 DbContext には依存せず <typeparamref name="TContext"/>（<see cref="DbContext"/> 派生）で受け取る。
+/// 具象型（QuickErDbContext 等）は生成側（エンティティ別実装・DI 登録）で閉じる。
+/// </para>
 /// <para>UseSqlServer / UseNpgsql 等の方言選択はアプリ側の DbContextOptions 構成に委ねる（方言非依存）。</para>
 /// </remarks>
-public abstract partial class EfCoreRepository<TEntity, TKey>(
-    IDbContextFactory<QuickErDbContext> contextFactory
+/// <typeparam name="TEntity">対象エンティティ型</typeparam>
+/// <typeparam name="TKey">主キー型</typeparam>
+/// <typeparam name="TContext">CRUD を実行する DbContext の具象型</typeparam>
+public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
+    IDbContextFactory<TContext> contextFactory
 ) : IRepository<TEntity, TKey>
     where TEntity : EntityBase, new()
+    where TContext : DbContext
 {
     /// <summary>エンティティ型ごとに 1 度だけ構築されるメタデータ（静的フィールドで再利用）</summary>
     private static readonly EntitySaveMetadata _metadata = EntitySaveMetadata.For(typeof(TEntity));
 
     /// <summary>DbContext の生成元</summary>
-    private readonly IDbContextFactory<QuickErDbContext> _contextFactory = contextFactory;
+    private readonly IDbContextFactory<TContext> _contextFactory = contextFactory;
 
     /// <summary>生 SQL メソッドの委譲先（束縛・マッピングを 1 系統に集約）</summary>
-    private readonly ISqlExecutor _sqlExecutor = new EfCoreSqlExecutor(contextFactory);
+    private readonly ISqlExecutor _sqlExecutor = new EfCoreSqlExecutor<TContext>(contextFactory);
 
     /// <summary>主キーによる単一エンティティ取得（該当なしは null）</summary>
     /// <remarks>既存版と同じく単一テーブルのみを読む（ナビゲーションのロードは <see cref="Query"/> の Include で行う）</remarks>
@@ -8260,7 +8277,8 @@ public abstract partial class EfCoreRepository<TEntity, TKey>(
     }
 
     /// <summary>検索条件・並び順・Include をチェーン指定して取得するクエリを開始する（EF Core で実行）</summary>
-    public SqlQuery<TEntity> Query() => new(new EfCoreSqlQueryExecutor<TEntity>(_contextFactory));
+    public SqlQuery<TEntity> Query() =>
+        new(new EfCoreSqlQueryExecutor<TEntity, TContext>(_contextFactory));
 
     /// <summary>RowState に従って 1 トランザクションで追加・更新・削除を保存する（既定で子をカスケード）</summary>
     public async Task<int> SaveAsync(
@@ -8373,7 +8391,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey>(
 
     /// <summary>RowState → EntityState の変換でグラフを DbContext へ登録する（切断パターンの保存前処理）</summary>
     private static void TrackGraph(
-        QuickErDbContext context,
+        TContext context,
         TEntity entity,
         bool cascadeSave,
         bool cascadeDelete
@@ -8427,7 +8445,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey>(
     /// それ以外は <see cref="SaveConflictException"/>）。
     /// </summary>
     private static async Task<int> SaveTrackedChangesAsync(
-        QuickErDbContext context,
+        TContext context,
         bool insertWhenUpdateMissing,
         CancellationToken cancellationToken
     )
@@ -8487,7 +8505,7 @@ public static class GeneratedEfCoreRepositoryServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(configureDbContext);
 
         services.AddDbContextFactory<QuickErDbContext>(configureDbContext);
-        services.AddSingleton<ISqlExecutor, EfCoreSqlExecutor>();
+        services.AddSingleton<ISqlExecutor, EfCoreSqlExecutor<QuickErDbContext>>();
         services.AddScoped<ICustomerRepository, EfCoreCustomerRepository>();
         services.AddScoped<IOrderRepository, EfCoreOrderRepository>();
         services.AddScoped<ICustomerProfileRepository, EfCoreCustomerProfileRepository>();
@@ -8499,17 +8517,23 @@ public static class GeneratedEfCoreRepositoryServiceCollectionExtensions
 /// <summary>CustomerEntity 用リポジトリの EF Core 版実装</summary>
 public sealed partial class EfCoreCustomerRepository(
     IDbContextFactory<QuickErDbContext> contextFactory
-) : EfCoreRepository<CustomerEntity, CustomerIdValue>(contextFactory),
+) : EfCoreRepository<CustomerEntity, CustomerIdValue, QuickErDbContext>(
+        contextFactory
+    ),
         ICustomerRepository { }
 
 /// <summary>OrderEntity 用リポジトリの EF Core 版実装</summary>
 public sealed partial class EfCoreOrderRepository(
     IDbContextFactory<QuickErDbContext> contextFactory
-) : EfCoreRepository<OrderEntity, OrderIdValue>(contextFactory),
+) : EfCoreRepository<OrderEntity, OrderIdValue, QuickErDbContext>(
+        contextFactory
+    ),
         IOrderRepository { }
 
 /// <summary>CustomerProfileEntity 用リポジトリの EF Core 版実装</summary>
 public sealed partial class EfCoreCustomerProfileRepository(
     IDbContextFactory<QuickErDbContext> contextFactory
-) : EfCoreRepository<CustomerProfileEntity, ProfileIdValue>(contextFactory),
+) : EfCoreRepository<CustomerProfileEntity, ProfileIdValue, QuickErDbContext>(
+        contextFactory
+    ),
         ICustomerProfileRepository { }

@@ -106,21 +106,11 @@ public sealed class CSharpCodeGenerationService
             );
         }
 
-        // ランタイムのパッケージ参照モードは EF Core 生成と併用できない。EF の QuickErDbContext は DbSet 等が
-        // スキーマ依存で生成側にしか作れないが、EF 固定 infra（EfCoreRepository / EfCoreSqlExecutor 等）は
-        // 同一アセンブリの具象 QuickErDbContext を参照するため、パッケージ境界（別アセンブリ）を跨げない。
-        // 自作 Repository（方言 Repository 基底はジェネリックで具象生成型に依存しない）や Entity のみの構成は
-        // パッケージ参照で成立するため、EF Core 時のみ早期に診断エラーとする。
-        if (options.UseRuntimePackages && options.GenerateEfCore)
-        {
-            diagnostics.Add(
-                Error(
-                    "ランタイムの NuGet パッケージ参照モード（UseRuntimePackages）は EF Core の生成と併用できません。"
-                        + "EF の QuickErDbContext はスキーマ依存で、EF 固定 infra が同一アセンブリの具象 DbContext を参照するためです。"
-                        + "EF Core を無効にするか、パッケージ参照モードを無効にしてください。"
-                )
-            );
-        }
+        // ランタイムのパッケージ参照モードと EF Core 生成は併用できる（EF 固定 infra を TContext ジェネリック化した
+        // ことで、EF エンジン（EfCoreRepository / EfCoreSqlExecutor 等）は具象 QuickErDbContext を参照しなくなった）。
+        // スキーマ依存物（QuickErDbContext・Fluent 構成・EfCore{Entity}Repository・AddGeneratedEfCoreRepositories）は
+        // パッケージモードでも常に生成側に出力し、EF 固定 infra はパッケージ QuickER.Runtime.EntityFrameworkCore が担う。
+        // なお EF Core と自作 Repository のマルチターゲット（実効方言 2 つ以上）の排他は別理由（契約の型同一性）で上に残す。
 
         // マルチ辞書が渡されているときは方言間の C# 型不一致を検証し、[SqlColumnType] を sqlserver 辞書から補完する
         var columnTypes = primaryColumnTypes;

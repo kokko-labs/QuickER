@@ -251,11 +251,11 @@ public class CSharpGenerationDialogViewModelTests
     }
 
     /// <summary>
-    /// EF Core 選択中はパッケージ参照モードのチェックボックスが無効化され、
-    /// 既にチェック済みだった場合は EF Core 選択時に自動で解除されることを検証する
+    /// EF Core 選択中もパッケージ参照モードのチェックボックスは操作可能で、
+    /// チェック済みのまま EF Core を選んでも解除されず、結果に両方が反映されることを検証する（併用解禁）
     /// </summary>
-    [Fact(DisplayName = "EF Core 選択中はパッケージ参照モードが無効化・チェック解除される")]
-    public void UseRuntimePackages_IsDisabledAndCleared_WhenEfCoreSelected()
+    [Fact(DisplayName = "EF Core 選択中もパッケージ参照モードは操作可能・併用が結果へ反映される")]
+    public void UseRuntimePackages_StaysEnabled_AndCoexistsWithEfCore()
     {
         var vm = CreateViewModel(out _);
         vm.BaseNamespace = "Sample.Domain";
@@ -268,16 +268,15 @@ public class CSharpGenerationDialogViewModelTests
 
         vm.DbAccessEfCore = true;
 
-        vm.CanUseRuntimePackages.Should().BeFalse("EF Core とは併用できないため操作不可になる");
-        vm.UseRuntimePackages.Should().BeFalse("EF Core 選択時にチェックが自動で解除される");
+        vm.CanUseRuntimePackages.Should().BeTrue("EF Core とも併用できるため操作可能のまま");
+        vm.UseRuntimePackages.Should().BeTrue("EF Core 選択でもチェックは解除されない");
 
-        // EF Core を選んだ後にチェックを入れようとしても、UI 側は IsEnabled=False で弾く想定だが、
-        // VM 単体としても「解除された状態を維持する」ことを OK 確定結果で確認する
         vm.OkCommand.Execute(null);
 
         vm.Result.Should().NotBeNull();
         vm.Result!.Options.GenerateEfCore.Should().BeTrue();
-        vm.Result.Options.UseRuntimePackages.Should().BeFalse();
+        vm.Result.Options.UseRuntimePackages.Should()
+            .BeTrue("EF Core とパッケージ参照モードの併用が結果へ反映される");
     }
 
     /// <summary>
@@ -302,18 +301,18 @@ public class CSharpGenerationDialogViewModelTests
         vm.Result.Options.GenerateRepositories.Should().BeTrue();
     }
 
-    /// <summary>EF Core 選択中に一度外れても、選択解除後は再びパッケージ参照モードが操作可能に戻ることを検証する</summary>
-    [Fact(DisplayName = "EF Core 選択解除後はパッケージ参照モードが再び操作可能になる")]
-    public void UseRuntimePackages_BecomesEnabledAgain_AfterEfCoreDeselected()
+    /// <summary>DB アクセス選択（なし／自作 Repository／EF Core）に依らず、パッケージ参照モードは常に操作可能なことを検証する</summary>
+    [Fact(DisplayName = "パッケージ参照モードは DB アクセス選択に依らず常に操作可能")]
+    public void UseRuntimePackages_IsAlwaysEnabled_AcrossDbAccessChoices()
     {
         var vm = CreateViewModel(out _);
         vm.BaseNamespace = "Sample.Domain";
 
         vm.DbAccessEfCore = true;
-        vm.CanUseRuntimePackages.Should().BeFalse();
+        vm.CanUseRuntimePackages.Should().BeTrue("EF Core 選択でも操作可能");
 
         vm.DbAccessNone = true;
-        vm.CanUseRuntimePackages.Should().BeTrue("EF Core 選択解除で再び操作可能になる");
+        vm.CanUseRuntimePackages.Should().BeTrue("DB アクセスなしでも操作可能");
 
         vm.UseRuntimePackages = true;
         vm.UseRuntimePackages.Should().BeTrue();
