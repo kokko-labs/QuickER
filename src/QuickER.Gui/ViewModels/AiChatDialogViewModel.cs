@@ -840,18 +840,17 @@ public partial class AiChatDialogViewModel : ObservableObject
         Messages.Add(new ErChatMessage { Role = ErChatMessageRole.System, Content = text });
 
     /// <summary>処理を UI スレッドで実行する</summary>
-    private void RunOnUi(Action action)
-    {
-        var dispatcher = Application.Current?.Dispatcher;
-
-        if (dispatcher is null || dispatcher.CheckAccess())
+    /// <remarks>
+    /// <see cref="Application.Current"/> を直接参照せず、注入された <see cref="IUiDispatcher"/> で
+    /// マーシャリングする（テストでは同期実行のフェイクに差し替わり、他テストが作った
+    /// Application の非ポンプなディスパッチャを拾って処理が実行されない順序依存を防ぐ）。
+    /// </remarks>
+    private void RunOnUi(Action action) =>
+        _dispatcher.Invoke(() =>
         {
             action();
-            return;
-        }
-
-        _ = dispatcher.InvokeAsync(action);
-    }
+            return true;
+        });
 
     /// <summary>ツール無効時に使うダミーホスト（MainViewModel 不在時）</summary>
     private sealed class NullToolHost : IErDiagramToolHost
