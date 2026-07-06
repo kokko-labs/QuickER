@@ -1,6 +1,7 @@
 using System.IO;
 using FluentAssertions;
 using QuickER.AI;
+using QuickER.AI.Chat;
 
 namespace QuickER.Tests.Services.Chat;
 
@@ -78,7 +79,8 @@ public class ClaudeCodeChatEngineAttachmentTests
         var engine = new ClaudeCodeChatEngine(
             new RecordingClaudeCodeClient(),
             toolHost: null,
-            new SyncUiDispatcher()
+            new SyncUiDispatcher(),
+            ErDesignProfile.ErDesign
         );
 
         engine
@@ -99,7 +101,12 @@ public class ClaudeCodeChatEngineAttachmentTests
     public async Task SendAsync_WithAttachment_WritesFileAppendsPathAndAllowsRead()
     {
         var client = new RecordingClaudeCodeClient();
-        var engine = new ClaudeCodeChatEngine(client, toolHost: null, new SyncUiDispatcher());
+        var engine = new ClaudeCodeChatEngine(
+            client,
+            toolHost: null,
+            new SyncUiDispatcher(),
+            ErDesignProfile.ErDesign
+        );
 
         await engine.InitializeAsync(TestContext.Current.CancellationToken);
         await engine.StartConversationAsync(TestContext.Current.CancellationToken);
@@ -131,7 +138,12 @@ public class ClaudeCodeChatEngineAttachmentTests
     public async Task SendAsync_NoAttachment_DoesNotAllowRead()
     {
         var client = new RecordingClaudeCodeClient();
-        var engine = new ClaudeCodeChatEngine(client, toolHost: null, new SyncUiDispatcher());
+        var engine = new ClaudeCodeChatEngine(
+            client,
+            toolHost: null,
+            new SyncUiDispatcher(),
+            ErDesignProfile.ErDesign
+        );
 
         await engine.InitializeAsync(TestContext.Current.CancellationToken);
         await engine.StartConversationAsync(TestContext.Current.CancellationToken);
@@ -151,7 +163,12 @@ public class ClaudeCodeChatEngineAttachmentTests
     public async Task SendAsync_AfterAttachment_KeepsReadAllowed()
     {
         var client = new RecordingClaudeCodeClient();
-        var engine = new ClaudeCodeChatEngine(client, toolHost: null, new SyncUiDispatcher());
+        var engine = new ClaudeCodeChatEngine(
+            client,
+            toolHost: null,
+            new SyncUiDispatcher(),
+            ErDesignProfile.ErDesign
+        );
 
         await engine.InitializeAsync(TestContext.Current.CancellationToken);
         await engine.StartConversationAsync(TestContext.Current.CancellationToken);
@@ -178,7 +195,12 @@ public class ClaudeCodeChatEngineAttachmentTests
     public async Task SendAsync_TextAndBinary_WritesAndAppendsPath()
     {
         var client = new RecordingClaudeCodeClient();
-        var engine = new ClaudeCodeChatEngine(client, toolHost: null, new SyncUiDispatcher());
+        var engine = new ClaudeCodeChatEngine(
+            client,
+            toolHost: null,
+            new SyncUiDispatcher(),
+            ErDesignProfile.ErDesign
+        );
 
         await engine.InitializeAsync(TestContext.Current.CancellationToken);
         await engine.StartConversationAsync(TestContext.Current.CancellationToken);
@@ -207,7 +229,12 @@ public class ClaudeCodeChatEngineAttachmentTests
     public async Task SendAsync_WithBinary_AppendsFallbackNote()
     {
         var client = new RecordingClaudeCodeClient();
-        var engine = new ClaudeCodeChatEngine(client, toolHost: null, new SyncUiDispatcher());
+        var engine = new ClaudeCodeChatEngine(
+            client,
+            toolHost: null,
+            new SyncUiDispatcher(),
+            ErDesignProfile.ErDesign
+        );
 
         await engine.InitializeAsync(TestContext.Current.CancellationToken);
         await engine.StartConversationAsync(TestContext.Current.CancellationToken);
@@ -228,7 +255,12 @@ public class ClaudeCodeChatEngineAttachmentTests
     public async Task SendAsync_WithoutBinary_NoFallbackNote()
     {
         var client = new RecordingClaudeCodeClient();
-        var engine = new ClaudeCodeChatEngine(client, toolHost: null, new SyncUiDispatcher());
+        var engine = new ClaudeCodeChatEngine(
+            client,
+            toolHost: null,
+            new SyncUiDispatcher(),
+            ErDesignProfile.ErDesign
+        );
 
         await engine.InitializeAsync(TestContext.Current.CancellationToken);
         await engine.StartConversationAsync(TestContext.Current.CancellationToken);
@@ -248,7 +280,12 @@ public class ClaudeCodeChatEngineAttachmentTests
     public async Task SendAsync_DuplicateNames_WritesSeparateFiles()
     {
         var client = new RecordingClaudeCodeClient();
-        var engine = new ClaudeCodeChatEngine(client, toolHost: null, new SyncUiDispatcher());
+        var engine = new ClaudeCodeChatEngine(
+            client,
+            toolHost: null,
+            new SyncUiDispatcher(),
+            ErDesignProfile.ErDesign
+        );
 
         await engine.InitializeAsync(TestContext.Current.CancellationToken);
         await engine.StartConversationAsync(TestContext.Current.CancellationToken);

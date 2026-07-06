@@ -1,7 +1,7 @@
 using System.IO;
 using FluentAssertions;
 using QuickER.AI;
-using QuickER.ViewModels;
+using QuickER.AI.UI;
 
 namespace QuickER.Tests.ViewModels;
 

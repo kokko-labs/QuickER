@@ -2,7 +2,7 @@ using System.ComponentModel;
 using System.Windows.Controls;
 using System.Windows.Data;
 using FluentAssertions;
-using QuickER.Views;
+using QuickER.AI.UI;
 using static QuickER.Tests.Views.WpfApplicationTestSupport;
 
 namespace QuickER.Tests.Views;

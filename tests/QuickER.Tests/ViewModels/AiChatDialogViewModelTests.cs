@@ -1,11 +1,11 @@
 using System.IO;
 using FluentAssertions;
 using QuickER.AI;
-using QuickER.Services;
-using QuickER.Services.Chat;
+using QuickER.AI.Chat;
+using QuickER.AI.UI;
+using QuickER.Gui.Abstractions;
 using QuickER.Tests.Services.Chat;
 using QuickER.Tests.TestDoubles;
-using QuickER.ViewModels;
 
 namespace QuickER.Tests.ViewModels;
 

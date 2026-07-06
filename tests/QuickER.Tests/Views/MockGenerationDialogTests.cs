@@ -2,12 +2,10 @@ using System.IO;
 using System.Threading;
 using FluentAssertions;
 using QuickER.AI;
+using QuickER.AI.Mock;
 using QuickER.Model;
 using QuickER.Provider;
-using QuickER.Services.Chat;
 using QuickER.SqlServer;
-using QuickER.ViewModels;
-using QuickER.Views;
 
 namespace QuickER.Tests.Views;
 

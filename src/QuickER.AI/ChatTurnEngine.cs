@@ -99,7 +99,7 @@ public sealed class ChatTurnEngine : IErChatEngine
     /// <param name="toolHost">ツール実行ホスト</param>
     /// <param name="dispatcher">UI スレッドへのマーシャリング</param>
     /// <param name="isReady">送信可能判定（API キー有無など）</param>
-    /// <param name="profile">用途プロファイル（システムプロンプト等。省略時は ER 図設計）</param>
+    /// <param name="profile">用途プロファイル（システムプロンプト等。合成ルートが明示的に指定する）</param>
     /// <param name="attachmentSupport">
     /// 添付対応範囲を返す関数（省略時は添付非対応）。API キー接続はプロバイダー依存
     /// （Anthropic=画像＋PDF・OpenAI=画像・Ollama=なし）のため、合成ルートから注入する
@@ -109,7 +109,7 @@ public sealed class ChatTurnEngine : IErChatEngine
         IErDiagramToolHost toolHost,
         IUiDispatcher dispatcher,
         Func<bool> isReady,
-        ErChatProfile? profile = null,
+        ErChatProfile profile,
         Func<AttachmentSupport>? attachmentSupport = null
     )
     {
@@ -117,7 +117,7 @@ public sealed class ChatTurnEngine : IErChatEngine
         _toolHost = toolHost;
         _dispatcher = dispatcher;
         _isReady = isReady;
-        _profile = profile ?? ErChatProfile.ErDesign;
+        _profile = profile;
         _attachmentSupport = attachmentSupport ?? (() => AttachmentSupport.None);
     }
 

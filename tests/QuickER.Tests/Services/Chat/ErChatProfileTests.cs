@@ -1,5 +1,7 @@
 using FluentAssertions;
 using QuickER.AI;
+using QuickER.AI.Chat;
+using QuickER.AI.Mock;
 
 namespace QuickER.Tests.Services.Chat;
 
@@ -13,7 +15,7 @@ public class ErChatProfileTests
     [Fact(DisplayName = "既定プロファイルのシステムプロンプトは従来の ER 設計プロンプトと一致する")]
     public void ErDesign_SystemPrompt_MatchesErDesignRules()
     {
-        ErChatProfile
+        ErDesignProfile
             .ErDesign.BuildSystemPrompt()
             .Should()
             .Be(ErDesignRules.BuildChatSystemPrompt());
@@ -23,7 +25,7 @@ public class ErChatProfileTests
     [Fact(DisplayName = "既定プロファイルの Codex 指示は従来の developer instructions と一致する")]
     public void ErDesign_CodexInstructions_MatchesErDesignRules()
     {
-        ErChatProfile
+        ErDesignProfile
             .ErDesign.BuildCodexDeveloperInstructions()
             .Should()
             .Be(ErDesignRules.BuildCodexDeveloperInstructions());
@@ -34,7 +36,7 @@ public class ErChatProfileTests
     public void ErDesign_Tools_MatchesErDiagramToolDefinitions()
     {
         var expected = ErDiagramToolDefinitions.GetDefinitions();
-        var actual = ErChatProfile.ErDesign.Tools;
+        var actual = ErDesignProfile.ErDesign.Tools;
 
         actual.Select(tool => tool.Name).Should().Equal(expected.Select(tool => tool.Name));
         actual
@@ -47,7 +49,7 @@ public class ErChatProfileTests
     [Fact(DisplayName = "既定プロファイルの MCP サーバー名は従来値と一致する")]
     public void ErDesign_McpServerName_MatchesErDiagramMcpServer()
     {
-        ErChatProfile.ErDesign.McpServerName.Should().Be(ErDiagramMcpServer.ServerName);
+        ErDesignProfile.ErDesign.McpServerName.Should().Be(ErDiagramMcpServer.ServerName);
     }
 
     /// <summary>ツール形式変換の一般化オーバーロードが従来の無引数版とバイト不変であることを検証する（OpenAI）</summary>
@@ -84,7 +86,7 @@ public class ErChatProfileTests
     [Fact(DisplayName = "モック生成プロファイルは save_mock_html ツールを 1 つ持つ")]
     public void MockDesign_HasSingleSaveMockHtmlTool()
     {
-        ErChatProfile
+        MockDesignProfile
             .MockDesign.Tools.Should()
             .ContainSingle()
             .Which.Name.Should()

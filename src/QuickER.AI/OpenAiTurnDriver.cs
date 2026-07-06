@@ -39,14 +39,11 @@ public sealed class OpenAiTurnDriver : IChatTurnDriver
 
     /// <summary>接続設定プロバイダからドライバを生成する（設定変更を毎ターン反映するため遅延取得する）</summary>
     /// <param name="connectionProvider">接続設定を返す関数</param>
-    /// <param name="profile">用途プロファイル（ツール定義セット。省略時は ER 図設計）</param>
-    public OpenAiTurnDriver(
-        Func<OpenAiChatConnection> connectionProvider,
-        ErChatProfile? profile = null
-    )
+    /// <param name="profile">用途プロファイル（ツール定義セット。合成ルートが明示的に指定する）</param>
+    public OpenAiTurnDriver(Func<OpenAiChatConnection> connectionProvider, ErChatProfile profile)
     {
         _connectionProvider = connectionProvider;
-        _tools = ErDiagramToolDefinitions.ToOpenAiTools((profile ?? ErChatProfile.ErDesign).Tools);
+        _tools = ChatToolConverter.ToOpenAiTools(profile.Tools);
     }
 
     /// <inheritdoc />

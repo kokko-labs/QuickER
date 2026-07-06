@@ -1,4 +1,5 @@
 using System.Windows;
+using QuickER.Gui.Abstractions;
 using QuickER.Model;
 using QuickER.Provider;
 using QuickER.ViewModels;

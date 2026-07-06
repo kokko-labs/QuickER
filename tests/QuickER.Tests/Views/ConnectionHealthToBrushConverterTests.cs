@@ -2,8 +2,7 @@ using System.Globalization;
 using System.Windows.Media;
 using FluentAssertions;
 using QuickER.AI;
-using QuickER.Services.Chat;
-using QuickER.Views;
+using QuickER.AI.UI;
 
 namespace QuickER.Tests.Views;
 

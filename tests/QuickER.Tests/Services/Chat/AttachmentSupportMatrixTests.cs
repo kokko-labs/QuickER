@@ -1,5 +1,6 @@
 using FluentAssertions;
 using QuickER.AI;
+using QuickER.AI.Chat;
 
 namespace QuickER.Tests.Services.Chat;
 
@@ -66,6 +67,7 @@ public class AttachmentSupportMatrixTests
             new NoopToolHost(),
             new SyncUiDispatcher(),
             () => true,
+            ErDesignProfile.ErDesign,
             attachmentSupport: () => AttachmentSupportResolver.ForApiKeyProvider(provider)
         );
 
@@ -92,7 +94,8 @@ public class AttachmentSupportMatrixTests
         var engine = new ClaudeCodeChatEngine(
             new FakeAvailableClaudeCodeClient(),
             toolHost: null,
-            new SyncUiDispatcher()
+            new SyncUiDispatcher(),
+            ErDesignProfile.ErDesign
         );
 
         engine.AttachmentSupport.Should().Be(ClaudeCodeSupport);

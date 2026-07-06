@@ -1,6 +1,6 @@
 using FluentAssertions;
 using QuickER.AI;
-using QuickER.Services;
+using QuickER.AI.Chat;
 
 namespace QuickER.Tests.Services;
 

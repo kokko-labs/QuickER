@@ -81,18 +81,18 @@ public sealed class CodexChatEngine : IErChatEngine
     /// <param name="client">Codex App Server クライアント</param>
     /// <param name="toolHost">ER 図操作ツールの実行ホスト（null ならツール無効）</param>
     /// <param name="dispatcher">UI スレッドへのマーシャリング</param>
-    /// <param name="profile">用途プロファイル（ツール定義・developer instructions。省略時は ER 図設計）</param>
+    /// <param name="profile">用途プロファイル（ツール定義・developer instructions。合成ルートが明示的に指定する）</param>
     public CodexChatEngine(
         ICodexAppServerClient client,
         IErDiagramToolHost? toolHost,
         IUiDispatcher dispatcher,
-        ErChatProfile? profile = null
+        ErChatProfile profile
     )
     {
         _client = client;
         _toolHost = toolHost;
         _dispatcher = dispatcher;
-        _profile = profile ?? ErChatProfile.ErDesign;
+        _profile = profile;
         _client.AgentMessageDeltaReceived += OnAgentMessageDelta;
         _client.TurnCompleted += OnTurnCompleted;
         _client.DynamicToolCallReceived += OnDynamicToolCallReceived;

@@ -1,6 +1,7 @@
 using System.Text.Json;
 using FluentAssertions;
 using QuickER.AI;
+using QuickER.AI.Chat;
 using QuickER.Services;
 using QuickER.ViewModels;
 

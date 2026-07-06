@@ -1,6 +1,6 @@
 using FluentAssertions;
 using QuickER.AI;
-using QuickER.Services.Chat;
+using QuickER.AI.Chat;
 
 namespace QuickER.Tests.Services.Chat;
 
@@ -60,7 +60,7 @@ public class ClaudeCodeChatEngineTests
     }
 
     private static ClaudeCodeChatEngine CreateEngine(FakeClaudeCodeClient client) =>
-        new(client, toolHost: null, new SyncUiDispatcher());
+        new(client, toolHost: null, new SyncUiDispatcher(), ErDesignProfile.ErDesign);
 
     /// <summary>利用可能なら初期化後に送信可能となり、テキストを流して成功完了することを検証する</summary>
     [Fact(DisplayName = "送信はテキストを流し成功完了する")]

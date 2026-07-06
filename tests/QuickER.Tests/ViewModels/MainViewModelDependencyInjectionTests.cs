@@ -1,5 +1,6 @@
 using System.IO;
 using FluentAssertions;
+using QuickER.Gui.Abstractions;
 using QuickER.Model;
 using QuickER.Provider;
 using QuickER.Services;

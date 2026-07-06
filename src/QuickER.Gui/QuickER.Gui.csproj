@@ -15,11 +15,14 @@
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
     <PackageReference Include="Microsoft.Data.SqlClient" Version="7.0.1" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.0" />
-    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4022.49" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\QuickER.AI\QuickER.AI.csproj" />
+    <ProjectReference Include="..\QuickER.AI.UI\QuickER.AI.UI.csproj" />
+    <ProjectReference Include="..\QuickER.AI.Chat\QuickER.AI.Chat.csproj" />
+    <ProjectReference Include="..\QuickER.AI.Mock\QuickER.AI.Mock.csproj" />
+    <ProjectReference Include="..\QuickER.Gui.Abstractions\QuickER.Gui.Abstractions.csproj" />
     <ProjectReference Include="..\QuickER.Document\QuickER.Document.csproj" />
     <ProjectReference Include="..\QuickER.CodeGen.CSharp\QuickER.CodeGen.CSharp.csproj" />
     <ProjectReference Include="..\QuickER.Model\QuickER.Model.csproj" />

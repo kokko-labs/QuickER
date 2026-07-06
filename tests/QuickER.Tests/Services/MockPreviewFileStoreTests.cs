@@ -1,7 +1,7 @@
 using System.IO;
 using System.Text;
 using FluentAssertions;
-using QuickER.Services;
+using QuickER.AI.Mock;
 
 namespace QuickER.Tests.Services;
 

@@ -1,10 +1,9 @@
 using System.IO;
 using FluentAssertions;
 using QuickER.AI;
+using QuickER.AI.Mock;
+using QuickER.Gui.Abstractions;
 using QuickER.Model;
-using QuickER.Services;
-using QuickER.Services.Chat;
-using QuickER.ViewModels;
 
 namespace QuickER.Tests.ViewModels;
 

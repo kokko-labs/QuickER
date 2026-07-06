@@ -14,7 +14,7 @@ namespace QuickER.AI;
 /// <summary>
 /// ER 図操作ツールを Claude Code へ公開する、プロセス内 HTTP/SSE MCP サーバー。
 /// 127.0.0.1 のエフェメラルポートで Kestrel を起動し、bearer トークンで保護する。
-/// ツール定義は <see cref="ErDiagramToolDefinitions.GetDefinitions"/> を単一ソースとして生成し、
+/// ツール定義は生成時に注入されたセット（機能側 QuickER.AI.Chat の ErDiagramToolDefinitions が単一ソース）を用い、
 /// 呼び出しは注入された実行コールバック（UI スレッドへのマーシャリングは呼び出し側の責務）へ委譲する。
 /// </summary>
 public sealed class ErDiagramMcpServer : IAsyncDisposable
@@ -34,14 +34,14 @@ public sealed class ErDiagramMcpServer : IAsyncDisposable
 
     /// <summary>ツール実行コールバック（ツール名・引数 JSON → 結果テキストと成否）を指定して生成する</summary>
     /// <param name="execute">ツール実行コールバック</param>
-    /// <param name="tools">公開するツール定義セット（省略時は ER 図操作ツール）</param>
+    /// <param name="tools">公開するツール定義セット（合成ルート／エンジンが明示的に指定する）</param>
     public ErDiagramMcpServer(
         Func<string, string, (string Result, bool Success)> execute,
-        IReadOnlyList<CodexDynamicToolDefinition>? tools = null
+        IReadOnlyList<CodexDynamicToolDefinition> tools
     )
     {
         _execute = execute;
-        _tools = tools ?? ErDiagramToolDefinitions.GetDefinitions();
+        _tools = tools;
     }
 
     /// <summary>サーバーを起動し、<see cref="Url"/> / <see cref="AuthToken"/> を確定する（起動済みなら何もしない）</summary>

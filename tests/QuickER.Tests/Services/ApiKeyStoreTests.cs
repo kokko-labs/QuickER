@@ -1,5 +1,5 @@
 ﻿using FluentAssertions;
-using QuickER.Services;
+using QuickER.AI.UI;
 
 namespace QuickER.Tests.Services;
 

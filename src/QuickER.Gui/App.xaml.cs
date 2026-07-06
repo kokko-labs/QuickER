@@ -1,5 +1,7 @@
 using System.Windows;
 using Microsoft.Extensions.DependencyInjection;
+using QuickER.AI.UI;
+using QuickER.Gui.Abstractions;
 using QuickER.MySql;
 using QuickER.Oracle;
 using QuickER.PostgreSql;

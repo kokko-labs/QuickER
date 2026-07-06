@@ -1,6 +1,6 @@
 using FluentAssertions;
 using QuickER.AI;
-using QuickER.Services.Chat;
+using QuickER.AI.Chat;
 
 namespace QuickER.Tests.Services.Chat;
 
@@ -62,7 +62,7 @@ public class ChatTurnEngineTests
         ScriptedTurnDriver driver,
         RecordingToolHost host,
         bool isReady = true
-    ) => new(driver, host, new SyncUiDispatcher(), () => isReady);
+    ) => new(driver, host, new SyncUiDispatcher(), () => isReady, ErDesignProfile.ErDesign);
 
     /// <summary>画像添付を受け付けるエンジンを生成する（添付履歴系テスト用）</summary>
     private static ChatTurnEngine CreateImageEngine(
@@ -74,6 +74,7 @@ public class ChatTurnEngineTests
             host,
             new SyncUiDispatcher(),
             () => true,
+            ErDesignProfile.ErDesign,
             attachmentSupport: () => AttachmentSupport.Images
         );
 
@@ -219,6 +220,7 @@ public class ChatTurnEngineTests
             new RecordingToolHost(),
             new SyncUiDispatcher(),
             () => true,
+            ErDesignProfile.ErDesign,
             attachmentSupport: () => AttachmentSupport.Images
         );
 
@@ -250,7 +252,13 @@ public class ChatTurnEngineTests
         var driver = new ScriptedTurnDriver([]);
         var host = new RecordingToolHost();
 
-        var defaultEngine = new ChatTurnEngine(driver, host, new SyncUiDispatcher(), () => true);
+        var defaultEngine = new ChatTurnEngine(
+            driver,
+            host,
+            new SyncUiDispatcher(),
+            () => true,
+            ErDesignProfile.ErDesign
+        );
         defaultEngine.AttachmentSupport.Should().Be(AttachmentSupport.None);
 
         var imageEngine = new ChatTurnEngine(
@@ -258,6 +266,7 @@ public class ChatTurnEngineTests
             host,
             new SyncUiDispatcher(),
             () => true,
+            ErDesignProfile.ErDesign,
             attachmentSupport: () => AttachmentSupport.Images
         );
         imageEngine.AttachmentSupport.Should().Be(AttachmentSupport.Images);

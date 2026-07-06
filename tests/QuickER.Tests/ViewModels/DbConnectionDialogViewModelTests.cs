@@ -1,5 +1,6 @@
 using System.IO;
 using FluentAssertions;
+using QuickER.Gui.Abstractions;
 using QuickER.Provider;
 using QuickER.Services;
 using QuickER.Sqlite;

@@ -1,4 +1,4 @@
-using QuickER.Services;
+using QuickER.Gui.Abstractions;
 
 namespace QuickER.Tests.TestDoubles;
 

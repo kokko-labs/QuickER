@@ -1,3 +1,4 @@
+using QuickER.AI.Mock;
 using QuickER.Services.Chat;
 using QuickER.ViewModels;
 
@@ -18,11 +19,11 @@ public interface IMockGenerationLauncher
     void Close();
 }
 
-/// <summary><c>Views.MockGenerationDialog</c> を保持・再利用する <see cref="IMockGenerationLauncher"/> の既定実装</summary>
+/// <summary><c>MockGenerationDialog</c> を保持・再利用する <see cref="IMockGenerationLauncher"/> の既定実装</summary>
 public sealed class MockGenerationLauncher : IMockGenerationLauncher
 {
     /// <summary>シングルトンのモック生成ウィンドウ（未生成時は null）</summary>
-    private Views.MockGenerationDialog? _dialog;
+    private MockGenerationDialog? _dialog;
 
     /// <inheritdoc />
     public void Open(MainViewModel host)
@@ -31,7 +32,7 @@ public sealed class MockGenerationLauncher : IMockGenerationLauncher
         {
             var source = new MainViewModelMockDiagramSource(host);
             var viewModel = new MockGenerationDialogViewModel(source);
-            _dialog = new Views.MockGenerationDialog(viewModel);
+            _dialog = new MockGenerationDialog(viewModel);
         }
 
         _dialog.Owner = null;

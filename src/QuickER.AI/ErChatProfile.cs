@@ -7,7 +7,8 @@ namespace QuickER.AI;
 /// <remarks>
 /// これにより「ER 図設計チャット」以外の用途（例: Web モック HTML 生成）を、
 /// エンジン実装を変更せずにプロファイル差し替えだけで載せられる。
-/// 既定インスタンス <see cref="ErDesign"/> は従来のハードコード内容と完全一致する。
+/// 具体プロファイルは機能側が提供する（ER 設計＝<c>QuickER.AI.Chat.ErDesignProfile.ErDesign</c>、
+/// モック生成＝<c>QuickER.AI.Mock.MockDesignProfile.MockDesign</c>）。
 /// </remarks>
 /// <param name="BuildSystemPrompt">
 /// API キー接続チャット（OpenAI/Anthropic）用のシステムプロンプトを生成する関数
@@ -22,29 +23,4 @@ public sealed record ErChatProfile(
     Func<string> BuildCodexDeveloperInstructions,
     IReadOnlyList<CodexDynamicToolDefinition> Tools,
     string McpServerName
-)
-{
-    /// <summary>
-    /// ER 図設計チャットの既定プロファイル。
-    /// システムプロンプト・Codex 指示・ツール定義・MCP サーバー名のいずれも従来のハードコード内容と一致する。
-    /// </summary>
-    public static ErChatProfile ErDesign { get; } =
-        new(
-            ErDesignRules.BuildChatSystemPrompt,
-            ErDesignRules.BuildCodexDeveloperInstructions,
-            ErDiagramToolDefinitions.GetDefinitions(),
-            ErDiagramMcpServer.ServerName
-        );
-
-    /// <summary>
-    /// ER 図から Web モック HTML を生成するチャットのプロファイル。
-    /// システムプロンプト・Codex 指示は <see cref="MockDesignPrompts"/>、ツールは <see cref="MockDesignTools"/>。
-    /// </summary>
-    public static ErChatProfile MockDesign { get; } =
-        new(
-            MockDesignPrompts.BuildSystemPrompt,
-            MockDesignPrompts.BuildCodexDeveloperInstructions,
-            MockDesignTools.GetDefinitions(),
-            "erdesigner_mock"
-        );
-}
+);

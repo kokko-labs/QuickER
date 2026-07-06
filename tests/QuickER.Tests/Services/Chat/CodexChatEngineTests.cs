@@ -1,8 +1,7 @@
 using System.Text.Json;
 using FluentAssertions;
 using QuickER.AI;
-using QuickER.Services;
-using QuickER.Services.Chat;
+using QuickER.AI.Chat;
 
 namespace QuickER.Tests.Services.Chat;
 
@@ -45,7 +44,12 @@ public class CodexChatEngineTests
     public void AgentMessageDelta_IsForwardedAsAssistantDelta()
     {
         var client = new FakeCodexAppServerClient();
-        var engine = new CodexChatEngine(client, new RecordingToolHost(), new SyncUiDispatcher());
+        var engine = new CodexChatEngine(
+            client,
+            new RecordingToolHost(),
+            new SyncUiDispatcher(),
+            ErDesignProfile.ErDesign
+        );
         var deltas = new List<string>();
         engine.AssistantDeltaReceived += (_, d) => deltas.Add(d);
 
@@ -61,7 +65,12 @@ public class CodexChatEngineTests
     {
         var client = new FakeCodexAppServerClient();
         var host = new RecordingToolHost();
-        var engine = new CodexChatEngine(client, host, new SyncUiDispatcher());
+        var engine = new CodexChatEngine(
+            client,
+            host,
+            new SyncUiDispatcher(),
+            ErDesignProfile.ErDesign
+        );
         var activities = new List<ErChatToolActivity>();
         engine.ToolActivityReceived += (_, a) => activities.Add(a);
 
@@ -81,7 +90,12 @@ public class CodexChatEngineTests
     public void TurnCompleted_IsTranslatedByStatus(string status, bool expectedSuccess)
     {
         var client = new FakeCodexAppServerClient();
-        var engine = new CodexChatEngine(client, new RecordingToolHost(), new SyncUiDispatcher());
+        var engine = new CodexChatEngine(
+            client,
+            new RecordingToolHost(),
+            new SyncUiDispatcher(),
+            ErDesignProfile.ErDesign
+        );
         ErChatTurnResult? result = null;
         engine.TurnCompleted += (_, r) => result = r;
 
@@ -96,7 +110,12 @@ public class CodexChatEngineTests
     public async Task IsReady_NonOpenAiProvider_RequiresNoAuth()
     {
         var client = new FakeCodexAppServerClient();
-        var engine = new CodexChatEngine(client, new RecordingToolHost(), new SyncUiDispatcher())
+        var engine = new CodexChatEngine(
+            client,
+            new RecordingToolHost(),
+            new SyncUiDispatcher(),
+            ErDesignProfile.ErDesign
+        )
         {
             ModelProvider = "ollama-launch",
         };
@@ -113,7 +132,8 @@ public class CodexChatEngineTests
         var engine = new CodexChatEngine(
             new FakeCodexAppServerClient(),
             new RecordingToolHost(),
-            new SyncUiDispatcher()
+            new SyncUiDispatcher(),
+            ErDesignProfile.ErDesign
         );
 
         engine.AttachmentSupport.Should().Be(AttachmentSupport.None);
@@ -126,7 +146,8 @@ public class CodexChatEngineTests
         var engine = new CodexChatEngine(
             new FakeCodexAppServerClient(),
             new RecordingToolHost(),
-            new SyncUiDispatcher()
+            new SyncUiDispatcher(),
+            ErDesignProfile.ErDesign
         );
 
         byte[] pngData = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];

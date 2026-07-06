@@ -1,3 +1,5 @@
+using QuickER.AI.Chat;
+using QuickER.Services.Chat;
 using QuickER.ViewModels;
 
 namespace QuickER.Services;
@@ -17,20 +19,20 @@ public interface IAiChatLauncher
     void Close();
 }
 
-/// <summary><c>Views.AiChatDialog</c> を保持・再利用する <see cref="IAiChatLauncher"/> の既定実装</summary>
+/// <summary><c>AiChatDialog</c> を保持・再利用する <see cref="IAiChatLauncher"/> の既定実装</summary>
 public sealed class AiChatLauncher : IAiChatLauncher
 {
     /// <summary>シングルトンの AI チャットウィンドウ（未生成時は null）</summary>
-    private Views.AiChatDialog? _dialog;
+    private AiChatDialog? _dialog;
 
     /// <inheritdoc />
     public void Open(MainViewModel host)
     {
         if (_dialog is null)
         {
-            var chatHost = new Chat.MainViewModelChatHost(host);
+            var chatHost = new MainViewModelChatHost(host);
             var viewModel = new AiChatDialogViewModel(chatHost);
-            _dialog = new Views.AiChatDialog(viewModel);
+            _dialog = new AiChatDialog(viewModel);
         }
 
         _dialog.Owner = null;

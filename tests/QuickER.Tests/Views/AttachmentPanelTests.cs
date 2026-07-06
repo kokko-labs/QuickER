@@ -3,8 +3,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using FluentAssertions;
-using QuickER.ViewModels;
-using QuickER.Views;
+using QuickER.AI.UI;
 
 namespace QuickER.Tests.Views;
 

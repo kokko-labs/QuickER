@@ -1,6 +1,7 @@
 using System.IO;
 using FluentAssertions;
 using QuickER.AI;
+using QuickER.AI.Mock;
 
 namespace QuickER.Tests.Services.Chat;
 

@@ -1,8 +1,8 @@
 using System.IO;
 using FluentAssertions;
+using QuickER.AI.Mock;
 using QuickER.Model;
 using QuickER.Provider;
-using QuickER.Services;
 using QuickER.Sqlite;
 using QuickER.SqlServer;
 
