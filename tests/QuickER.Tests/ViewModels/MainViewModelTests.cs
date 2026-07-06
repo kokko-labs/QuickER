@@ -793,6 +793,36 @@ public class MainViewModelTests
         vm.UndoRedo.CanRedo.Should().BeFalse();
     }
 
+    /// <summary>ウィンドウタイトルが文書ファイル名に連動して変化することを検証する</summary>
+    [Fact(
+        DisplayName = "WindowTitle: 未保存は「QuickER」、ファイル名設定で「ファイル名 - QuickER」になる"
+    )]
+    public void WindowTitle_FollowsLastDocumentFileName()
+    {
+        var vm = new MainViewModel();
+        var raised = new List<string?>();
+        vm.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
+
+        vm.WindowTitle.Should().Be("QuickER");
+
+        vm.LastDocumentFileName = "Sample";
+
+        vm.WindowTitle.Should().Be("Sample - QuickER");
+        raised.Should().Contain(nameof(MainViewModel.WindowTitle));
+    }
+
+    /// <summary>新規作成でウィンドウタイトルが既定へ戻ることを検証する</summary>
+    [Fact(DisplayName = "WindowTitle: 新規作成で「QuickER」へ戻る")]
+    public void NewDiagram_ResetsWindowTitle()
+    {
+        var vm = new MainViewModel(new StubDialogService());
+        vm.LastDocumentFileName = "Sample";
+
+        vm.NewDiagramCommand.Execute(null);
+
+        vm.WindowTitle.Should().Be("QuickER");
+    }
+
     /// <summary>初期化時に説明表示状態が自動保存から復元されることを検証する</summary>
     [Fact(DisplayName = "説明表示状態は自動保存から復元される")]
     public void Initialize_RestoresShowDescriptionsState()

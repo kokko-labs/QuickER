@@ -401,6 +401,9 @@ public partial class MainViewModel : ObservableObject
         }
 
         ReplaceDiagram(Array.Empty<Entity>(), Array.Empty<Relationship>(), clearUndoHistory: true);
+
+        // 新規図はどのファイルにも紐付かないため、ウィンドウタイトルを既定（QuickER）へ戻す
+        LastDocumentFileName = null;
     }
 
     /// <summary>PK カラム付きの新規エンティティを追加して選択する（Undo 可能）</summary>

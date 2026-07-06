@@ -1,5 +1,6 @@
 using System.IO;
 using System.Windows.Media;
+using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using QuickER.Documents;
 using QuickER.Generator;
@@ -55,10 +56,18 @@ public partial class MainViewModel
 
     /// <summary>最後に保存／読込した JSON のファイル名（拡張子なし）</summary>
     /// <remarks>
-    /// 印刷ダイアログのタイトル入力欄の初期値専用。保存フォーマット・Undo 履歴には一切関与しない
-    /// （未保存のときは null のままで、初期値なしの空欄になる）
+    /// ウィンドウタイトルと印刷ダイアログのタイトル入力欄の初期値に使用する。
+    /// 保存フォーマット・Undo 履歴には一切関与しない（未保存のときは null）
     /// </remarks>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(WindowTitle))]
     private string? _lastDocumentFileName;
+
+    /// <summary>ウィンドウタイトル（読込／保存済みなら「ファイル名 - QuickER」、未保存なら「QuickER」）</summary>
+    public string WindowTitle =>
+        string.IsNullOrEmpty(LastDocumentFileName)
+            ? "QuickER"
+            : $"{LastDocumentFileName} - QuickER";
 
     /// <summary>ダイアグラム自動保存ファイルのパス</summary>
     private static readonly string AutoSavePath = Path.Combine(
@@ -191,7 +200,7 @@ public partial class MainViewModel
     {
         // 印刷オプション（サイズモード・タイトル・日時印字）を選択させる。キャンセル時は何もしない
         // タイトル欄の初期値には最後に保存／読込した文書名を提示する
-        var options = _appDialogs.ShowPrintOptionsDialog(_lastDocumentFileName);
+        var options = _appDialogs.ShowPrintOptionsDialog(LastDocumentFileName);
 
         if (options is null)
         {
@@ -669,8 +678,8 @@ public partial class MainViewModel
         {
             JsonStorageService.Save(picked.Path, ToDocument());
 
-            // 印刷ダイアログのタイトル初期値用。保存フォーマット・Undo には関与しない
-            _lastDocumentFileName = Path.GetFileNameWithoutExtension(picked.Path);
+            // ウィンドウタイトル・印刷ダイアログのタイトル初期値用。保存フォーマット・Undo には関与しない
+            LastDocumentFileName = Path.GetFileNameWithoutExtension(picked.Path);
         }
     }
 
@@ -695,8 +704,8 @@ public partial class MainViewModel
             document.Layout
         );
 
-        // 印刷ダイアログのタイトル初期値用。保存フォーマット・Undo には関与しない
-        _lastDocumentFileName = Path.GetFileNameWithoutExtension(picked.Path);
+        // ウィンドウタイトル・印刷ダイアログのタイトル初期値用。保存フォーマット・Undo には関与しない
+        LastDocumentFileName = Path.GetFileNameWithoutExtension(picked.Path);
     }
 
     /// <summary>自動保存対象の UI 表示状態（ダイアグラム上の表示トグル）</summary>

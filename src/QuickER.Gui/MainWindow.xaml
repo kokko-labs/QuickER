@@ -9,7 +9,7 @@
   xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
   xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
   mc:Ignorable="d"
-  Title="ER図作成ツール"
+  Title="{Binding WindowTitle, FallbackValue=QuickER}"
   Height="1000"
   Width="1800"
   FontFamily="Segoe UI, Yu Gothic UI, Meiryo"
