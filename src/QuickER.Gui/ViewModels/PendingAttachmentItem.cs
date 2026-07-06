@@ -16,8 +16,24 @@ public sealed class PendingAttachmentItem
     /// <summary>表示ファイル名</summary>
     public string FileName => Attachment.FileName;
 
-    /// <summary>画像か（サムネイル表示・PDF アイコン表示の分岐に使う）</summary>
+    /// <summary>添付の種別（チップのアイコン分岐に使う）</summary>
+    public ChatAttachmentKind Kind => Attachment.Kind;
+
+    /// <summary>画像か（サムネイル表示・非画像アイコン表示の分岐に使う）</summary>
     public bool IsImage => Attachment.Kind == ChatAttachmentKind.Image;
+
+    /// <summary>
+    /// 非画像チップに表示するアイコン絵文字（PDF=📄・テキスト=📃・バイナリ=📦・画像は空）。
+    /// XAML の DataTrigger を種別ごとに増やさず、1 つの TextBlock で切り替えられるようにする。
+    /// </summary>
+    public string KindIcon =>
+        Attachment.Kind switch
+        {
+            ChatAttachmentKind.Pdf => "📄",
+            ChatAttachmentKind.Text => "📃",
+            ChatAttachmentKind.Binary => "📦",
+            _ => string.Empty,
+        };
 
     /// <summary>画像添付のサムネイル（生成不能・PDF のときは null）</summary>
     public BitmapImage? Thumbnail { get; }

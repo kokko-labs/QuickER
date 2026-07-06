@@ -442,12 +442,15 @@ public partial class MockGenerationDialogViewModel : ObservableObject
 
     /// <summary>
     /// 選択中バックエンドに応じて添付部品の対応範囲を再評価する。
-    /// API キー=プロバイダー依存・Codex=なし・Claude Code=画像＋PDF（エンジン生成前でも判定できるよう規則で解決する）。
+    /// API キー=プロバイダー依存・Codex=なし・Claude Code=全種別（エンジン生成前でも判定できるよう規則で解決する）。
     /// </summary>
     private void RefreshAttachmentSupport() =>
         Attachments.Support = SelectedBackend switch
         {
-            ErChatBackendKind.ClaudeCode => AttachmentSupport.ImagesAndPdf,
+            ErChatBackendKind.ClaudeCode => AttachmentSupport.Images
+                | AttachmentSupport.Pdf
+                | AttachmentSupport.Text
+                | AttachmentSupport.Binary,
             ErChatBackendKind.Codex => AttachmentSupport.None,
             _ => AttachmentSupportResolver.ForApiKeyProvider(ApiProvider),
         };

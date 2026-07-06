@@ -619,16 +619,22 @@ public class MockGenerationDialogViewModelTests
         return data;
     }
 
-    /// <summary>Claude Code バックエンド（ImagesAndPdf）では添付範囲が画像＋PDF になることを検証する</summary>
-    [Fact(DisplayName = "Claude Code では添付範囲が画像＋PDF")]
-    public void AttachmentSupport_ClaudeCode_IsImagesAndPdf()
+    /// <summary>Claude Code バックエンドでは添付範囲が全種別になることを検証する</summary>
+    [Fact(DisplayName = "Claude Code では添付範囲が全種別")]
+    public void AttachmentSupport_ClaudeCode_IsAllKinds()
     {
         var (vm, _, folder) = CreateVm(NonEmptyDiagram());
 
         try
         {
             vm.SelectedBackend = ErChatBackendKind.ClaudeCode;
-            vm.Attachments.Support.Should().Be(AttachmentSupport.ImagesAndPdf);
+            vm.Attachments.Support.Should()
+                .Be(
+                    AttachmentSupport.Images
+                        | AttachmentSupport.Pdf
+                        | AttachmentSupport.Text
+                        | AttachmentSupport.Binary
+                );
 
             // Codex はエンジンが添付非対応
             vm.SelectedBackend = ErChatBackendKind.Codex;

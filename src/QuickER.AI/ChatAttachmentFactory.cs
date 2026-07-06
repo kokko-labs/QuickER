@@ -1,21 +1,22 @@
 using System.IO;
+using System.Text;
 
 namespace QuickER.AI;
 
 /// <summary>添付作成に失敗した理由（呼び出し側でメッセージへ整形する）</summary>
 public enum ChatAttachmentError
 {
-    /// <summary>対応していない拡張子・形式</summary>
-    UnsupportedFormat,
-
-    /// <summary>中身（マジックバイト）が拡張子と一致しない・判別できない</summary>
-    ContentMismatch,
-
     /// <summary>画像がサイズ上限を超過している（縮小しても収まらない場合を含む）</summary>
     ImageTooLarge,
 
     /// <summary>PDF がサイズ上限を超過している</summary>
     PdfTooLarge,
+
+    /// <summary>テキストがサイズ上限を超過している（本文インライン展開の上限）</summary>
+    TextTooLarge,
+
+    /// <summary>バイナリがサイズ上限を超過している</summary>
+    BinaryTooLarge,
 
     /// <summary>データが空</summary>
     Empty,
@@ -44,27 +45,17 @@ public readonly record struct ChatAttachmentResult(
 
 /// <summary>
 /// バイト列・ファイルから <see cref="ChatAttachment"/> を生成・検証するファクトリ。
-/// 種別判定は拡張子とマジックバイトの両方で行い、上限（画像 5MB・PDF 32MB）を検証する。
-/// 画像がサイズ超過のときは注入された「縮小デリゲート」を試し、なお超過なら拒否する。
+/// 「読めるかは AI に任せる」思想で拡張子は不問とし、内容（マジックバイト・スニッフィング）で
+/// 画像 / PDF / テキスト / その他バイナリの 4 種へ分類する。各種別の上限を検証し、
+/// 画像がサイズ超過のときは注入された「縮小デリゲート」を試す。
 /// WPF 非依存のため縮小の実装自体は持たず、差し込み口（デリゲート）だけを備える。
 /// </summary>
 public static class ChatAttachmentFactory
 {
-    /// <summary>対応拡張子（小文字・ドット付き）と MIME タイプ・種別の対応表</summary>
-    private static readonly IReadOnlyDictionary<
-        string,
-        (string MediaType, ChatAttachmentKind Kind)
-    > ExtensionMap = new Dictionary<string, (string, ChatAttachmentKind)>(
-        StringComparer.OrdinalIgnoreCase
-    )
-    {
-        [".png"] = ("image/png", ChatAttachmentKind.Image),
-        [".jpg"] = ("image/jpeg", ChatAttachmentKind.Image),
-        [".jpeg"] = ("image/jpeg", ChatAttachmentKind.Image),
-        [".gif"] = ("image/gif", ChatAttachmentKind.Image),
-        [".webp"] = ("image/webp", ChatAttachmentKind.Image),
-        [".pdf"] = ("application/pdf", ChatAttachmentKind.Pdf),
-    };
+    /// <summary>MIME タイプ既定値（種別ごと）</summary>
+    private const string PdfMediaType = "application/pdf";
+    private const string TextMediaType = "text/plain";
+    private const string BinaryMediaType = "application/octet-stream";
 
     /// <summary>
     /// 画像のサイズ超過時に呼ぶ縮小デリゲートの型。
@@ -73,10 +64,7 @@ public static class ChatAttachmentFactory
     /// <remarks>本体（QuickER.AI）は WPF の画像 API を持たないため、実装は Gui 側で注入する。</remarks>
     public delegate byte[]? ImageShrinker(byte[] data, string mediaType);
 
-    /// <summary>対応拡張子の一覧（ドット付き・小文字。UI のファイルフィルタ生成用）</summary>
-    public static IReadOnlyCollection<string> SupportedExtensions => ExtensionMap.Keys.ToArray();
-
-    /// <summary>ファイルパスから添付を生成する（拡張子とマジックバイトで種別を確定する）</summary>
+    /// <summary>ファイルパスから添付を生成する（内容で種別を確定する。拡張子は不問）</summary>
     /// <param name="filePath">読み込むファイルのパス</param>
     /// <param name="shrinker">画像縮小デリゲート（null 可）</param>
     public static ChatAttachmentResult CreateFromFile(
@@ -84,49 +72,30 @@ public static class ChatAttachmentFactory
         ImageShrinker? shrinker = null
     )
     {
-        var extension = Path.GetExtension(filePath);
-
-        if (!ExtensionMap.ContainsKey(extension))
-        {
-            return ChatAttachmentResult.Fail(
-                ChatAttachmentError.UnsupportedFormat,
-                $"対応していない形式です: {Path.GetFileName(filePath)}（対応: PNG/JPEG/GIF/WebP/PDF）"
-            );
-        }
-
         var data = File.ReadAllBytes(filePath);
-        return Create(Path.GetFileName(filePath), extension, data, shrinker);
+        return Create(Path.GetFileName(filePath), data, shrinker);
     }
 
     /// <summary>
-    /// ファイル名・バイト列から添付を生成する。拡張子で候補種別を決め、マジックバイトで実体を検証し、
-    /// 種別ごとの上限を適用する（画像は超過時に縮小を試みる）。
+    /// ファイル名・バイト列から添付を生成する。内容から種別を判定（画像/PDF/テキスト/バイナリ）し、
+    /// 種別ごとの上限を適用する（画像は超過時に縮小を試みる）。拡張子は判定に使わない。
     /// </summary>
-    /// <param name="fileName">元ファイル名（拡張子を含む）</param>
+    /// <param name="fileName">元ファイル名（表示・書き出し用）</param>
     /// <param name="data">ファイルのバイト列</param>
     /// <param name="shrinker">画像縮小デリゲート（null 可）</param>
     public static ChatAttachmentResult CreateFromBytes(
         string fileName,
         byte[] data,
         ImageShrinker? shrinker = null
-    ) => Create(fileName, Path.GetExtension(fileName), data, shrinker);
+    ) => Create(fileName, data, shrinker);
 
-    /// <summary>ファイル名・拡張子・バイト列から添付を生成する共通処理</summary>
+    /// <summary>ファイル名・バイト列から添付を生成する共通処理（内容分類→種別別の上限検証）</summary>
     private static ChatAttachmentResult Create(
         string fileName,
-        string extension,
         byte[] data,
         ImageShrinker? shrinker
     )
     {
-        if (!ExtensionMap.TryGetValue(extension, out var mapped))
-        {
-            return ChatAttachmentResult.Fail(
-                ChatAttachmentError.UnsupportedFormat,
-                $"対応していない形式です: {fileName}（対応: PNG/JPEG/GIF/WebP/PDF）"
-            );
-        }
-
         if (data.Length == 0)
         {
             return ChatAttachmentResult.Fail(
@@ -135,20 +104,40 @@ public static class ChatAttachmentFactory
             );
         }
 
-        // マジックバイトから実体の種別を判定し、拡張子由来の候補種別と一致するか確認する
-        var detected = DetectKind(data);
+        // 内容から種別を確定する（画像→PDF→テキスト→バイナリの優先順で判定）
+        var (kind, mediaType) = Classify(data);
 
-        if (detected is null || detected.Value != mapped.Kind)
+        return kind switch
         {
-            return ChatAttachmentResult.Fail(
-                ChatAttachmentError.ContentMismatch,
-                $"ファイルの中身が {extension} と一致しません: {fileName}"
-            );
+            ChatAttachmentKind.Image => BuildImage(fileName, mediaType, data, shrinker),
+            ChatAttachmentKind.Pdf => BuildPdf(fileName, mediaType, data),
+            ChatAttachmentKind.Text => BuildText(fileName, mediaType, data),
+            _ => BuildBinary(fileName, mediaType, data),
+        };
+    }
+
+    /// <summary>
+    /// バイト列の内容から種別と MIME タイプを判定する。
+    /// マジックバイトで画像・PDF を確定し、残りは UTF-8 テキスト判定（BOM・制御文字比率）で
+    /// テキスト / その他バイナリへ振り分ける。
+    /// </summary>
+    internal static (ChatAttachmentKind Kind, string MediaType) Classify(byte[] data)
+    {
+        var imageMediaType = DetectImageMediaType(data);
+
+        if (imageMediaType is not null)
+        {
+            return (ChatAttachmentKind.Image, imageMediaType);
         }
 
-        return mapped.Kind == ChatAttachmentKind.Image
-            ? BuildImage(fileName, mapped.MediaType, data, shrinker)
-            : BuildPdf(fileName, mapped.MediaType, data);
+        if (IsPdf(data))
+        {
+            return (ChatAttachmentKind.Pdf, PdfMediaType);
+        }
+
+        return IsProbablyText(data)
+            ? (ChatAttachmentKind.Text, TextMediaType)
+            : (ChatAttachmentKind.Binary, BinaryMediaType);
     }
 
     /// <summary>画像添付を組み立てる（上限超過時は縮小を試み、なお超過なら拒否する）</summary>
@@ -195,10 +184,43 @@ public static class ChatAttachmentFactory
         );
     }
 
-    /// <summary>マジックバイト（先頭シグネチャ）から種別を判定する（不明なら null）</summary>
+    /// <summary>テキスト添付を組み立てる（上限超過なら明確なメッセージで拒否する）</summary>
+    private static ChatAttachmentResult BuildText(string fileName, string mediaType, byte[] data)
+    {
+        if (data.LongLength > ChatAttachmentLimits.MaxTextBytes)
+        {
+            return ChatAttachmentResult.Fail(
+                ChatAttachmentError.TextTooLarge,
+                $"テキストが上限（{ChatAttachmentLimits.MaxTextBytes / 1024}KB）を超えています: {fileName}"
+            );
+        }
+
+        return ChatAttachmentResult.Ok(
+            new ChatAttachment(fileName, ChatAttachmentKind.Text, mediaType, data)
+        );
+    }
+
+    /// <summary>バイナリ添付を組み立てる（上限超過なら拒否する。縮小は行わない）</summary>
+    private static ChatAttachmentResult BuildBinary(string fileName, string mediaType, byte[] data)
+    {
+        if (data.LongLength > ChatAttachmentLimits.MaxBinaryBytes)
+        {
+            return ChatAttachmentResult.Fail(
+                ChatAttachmentError.BinaryTooLarge,
+                $"ファイルが上限（{ChatAttachmentLimits.MaxBinaryBytes / (1024 * 1024)}MB）を超えています: {fileName}"
+            );
+        }
+
+        return ChatAttachmentResult.Ok(
+            new ChatAttachment(fileName, ChatAttachmentKind.Binary, mediaType, data)
+        );
+    }
+
+    /// <summary>マジックバイト（先頭シグネチャ）から種別を判定する（画像/PDF のみ・不明なら null）</summary>
+    /// <remarks>テキスト/バイナリ判定は <see cref="Classify"/> のスニッフィングで行う（マジックバイトを持たないため）。</remarks>
     internal static ChatAttachmentKind? DetectKind(byte[] data)
     {
-        if (IsPng(data) || IsJpeg(data) || IsGif(data) || IsWebp(data))
+        if (DetectImageMediaType(data) is not null)
         {
             return ChatAttachmentKind.Image;
         }
@@ -209,6 +231,83 @@ public static class ChatAttachmentFactory
         }
 
         return null;
+    }
+
+    /// <summary>画像のマジックバイトから MIME タイプを判定する（画像でなければ null）</summary>
+    private static string? DetectImageMediaType(byte[] data)
+    {
+        if (IsPng(data))
+        {
+            return "image/png";
+        }
+
+        if (IsJpeg(data))
+        {
+            return "image/jpeg";
+        }
+
+        if (IsGif(data))
+        {
+            return "image/gif";
+        }
+
+        if (IsWebp(data))
+        {
+            return "image/webp";
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// バイト列が UTF-8 テキストとして妥当かをスニッフィングする（明快さ優先の簡易判定）。
+    /// UTF-8 BOM 付きは即テキスト。NUL バイトを含めばバイナリ。制御文字（改行・タブ等を除く）の
+    /// 比率が高ければバイナリ。UTF-8 として厳格にデコードできればテキストとみなす。
+    /// </summary>
+    internal static bool IsProbablyText(byte[] data)
+    {
+        // UTF-8 BOM（EF BB BF）はテキスト確定
+        if (data.Length >= 3 && data[0] == 0xEF && data[1] == 0xBB && data[2] == 0xBF)
+        {
+            return true;
+        }
+
+        // NUL バイトはテキストに現れない → バイナリとみなす
+        if (Array.IndexOf(data, (byte)0x00) >= 0)
+        {
+            return false;
+        }
+
+        // 制御文字（許容: タブ 0x09・改行 0x0A・復帰 0x0D）の比率が高ければバイナリ
+        var controlCount = 0;
+
+        foreach (var b in data)
+        {
+            if (b < 0x20 && b != 0x09 && b != 0x0A && b != 0x0D)
+            {
+                controlCount++;
+            }
+        }
+
+        if ((double)controlCount / data.Length > 0.05)
+        {
+            return false;
+        }
+
+        // 最後に UTF-8 として厳格デコードできるかを確認する（不正シーケンスは例外→バイナリ）
+        try
+        {
+            var strict = new UTF8Encoding(
+                encoderShouldEmitUTF8Identifier: false,
+                throwOnInvalidBytes: true
+            );
+            strict.GetString(data);
+            return true;
+        }
+        catch (DecoderFallbackException)
+        {
+            return false;
+        }
     }
 
     /// <summary>PNG シグネチャ（89 50 4E 47 0D 0A 1A 0A）か</summary>

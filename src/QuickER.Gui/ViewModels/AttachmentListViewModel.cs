@@ -10,7 +10,8 @@ namespace QuickER.ViewModels;
 /// <summary>
 /// チャット／モック会話へ同梱する「送信待ち添付」を束ねる共通 VM 部品。
 /// 追加（ファイルパス群・クリップボード画像）・削除・クリア・上限／種別の検証と通知・
-/// <see cref="AttachmentSupport"/> による可否（None=無効＋理由・Images=PDF 拒否）を担う。
+/// <see cref="AttachmentSupport"/>（[Flags]）による種別ごとの可否ゲーティング（非対応種別は
+/// 追加時に明確なエラーで拒否・切替時は非対応分を除去）を担う。
 /// </summary>
 /// <remarks>
 /// AiChatDialog / MockGenerationDialog の両方が保持し、UI（チップ列＋クリップボタン）を共通化する。
@@ -69,11 +70,10 @@ public partial class AttachmentListViewModel : ObservableObject
                     Clear();
                     _reportStatus("この接続方式は添付に対応していないため、添付をクリアしました。");
                 }
-                else if (value == AttachmentSupport.Images && HasPdf)
+                else
                 {
-                    // 画像のみ対応へ切り替わったら PDF を除去する
-                    RemovePdfs();
-                    _reportStatus("この接続方式は PDF 添付に非対応のため、PDF を除外しました。");
+                    // 一部種別のみ非対応へ切り替わったら、非対応になった種別だけを除去する
+                    RemoveUnsupported();
                 }
             }
         }
@@ -99,8 +99,11 @@ public partial class AttachmentListViewModel : ObservableObject
     /// <summary>添付操作が可能か（対応エンジン・ターン非実行中）</summary>
     public bool IsEnabled => Support != AttachmentSupport.None && !IsTurnInProgress;
 
-    /// <summary>PDF を受け付けるか（Images では拒否・ImagesAndPdf のみ許可）</summary>
-    public bool AllowsPdf => Support == AttachmentSupport.ImagesAndPdf;
+    /// <summary>PDF を受け付けるか（Support に Pdf ビットが立っているか）</summary>
+    public bool AllowsPdf => Support.HasFlag(AttachmentSupport.Pdf);
+
+    /// <summary>バイナリを受け付けるか（Claude Code のみ）</summary>
+    public bool AllowsBinary => Support.HasFlag(AttachmentSupport.Binary);
 
     /// <summary>添付が無効なときの理由（有効時は空文字）</summary>
     public string DisabledReason
@@ -109,7 +112,7 @@ public partial class AttachmentListViewModel : ObservableObject
         {
             if (Support == AttachmentSupport.None)
             {
-                return "この接続方式は添付（画像・PDF）に対応していません。";
+                return "この接続方式は添付に対応していません。";
             }
 
             if (IsTurnInProgress)
@@ -131,26 +134,42 @@ public partial class AttachmentListViewModel : ObservableObject
                 return DisabledReason;
             }
 
-            return AllowsPdf
-                ? "画像・PDF を添付（PNG/JPEG/GIF/WebP/PDF）"
-                : "画像を添付（PNG/JPEG/GIF/WebP）";
+            // 対応種別を人間可読の一覧にして案内する
+            var kinds = new List<string> { "画像" };
+
+            if (AllowsPdf)
+            {
+                kinds.Add("PDF");
+            }
+
+            if (Support.HasFlag(AttachmentSupport.Text))
+            {
+                kinds.Add("テキスト");
+            }
+
+            if (AllowsBinary)
+            {
+                kinds.Add("その他ファイル");
+            }
+
+            return $"ファイルを添付（{string.Join("・", kinds)}）";
         }
     }
 
     /// <summary>送信待ちの添付があるか</summary>
     public bool HasAttachments => Items.Count > 0;
 
-    /// <summary>送信待ちに PDF が含まれるか</summary>
-    private bool HasPdf => Items.Any(i => i.Attachment.Kind == ChatAttachmentKind.Pdf);
-
     /// <summary>現在の画像枚数</summary>
     private int ImageCount => Items.Count(i => i.Attachment.Kind == ChatAttachmentKind.Image);
 
-    /// <summary>ファイル選択ダイアログのフィルタ（対応範囲に応じ画像のみ／画像＋PDF）</summary>
+    /// <summary>
+    /// ファイル選択ダイアログのフィルタ。全形式を既定（すべてのファイル）とし、
+    /// 補助フィルタ（画像・PDF）を添える。種別ごとの可否は取り込み時にゲーティングする。
+    /// </summary>
     public string FileDialogFilter =>
-        AllowsPdf
-            ? "画像・PDF (*.png;*.jpg;*.jpeg;*.gif;*.webp;*.pdf)|*.png;*.jpg;*.jpeg;*.gif;*.webp;*.pdf"
-            : "画像 (*.png;*.jpg;*.jpeg;*.gif;*.webp)|*.png;*.jpg;*.jpeg;*.gif;*.webp";
+        "すべてのファイル (*.*)|*.*"
+        + "|画像 (*.png;*.jpg;*.jpeg;*.gif;*.webp)|*.png;*.jpg;*.jpeg;*.gif;*.webp"
+        + "|PDF (*.pdf)|*.pdf";
 
     /// <summary>ファイルパス群を添付として取り込む（1 件ずつ検証・失敗はステータス通知）</summary>
     /// <param name="paths">追加するファイルのパス群</param>
@@ -237,10 +256,10 @@ public partial class AttachmentListViewModel : ObservableObject
 
         var attachment = result.Attachment;
 
-        // PDF は対応範囲外なら拒否する（Images では PDF を受け付けない）
-        if (attachment.Kind == ChatAttachmentKind.Pdf && !AllowsPdf)
+        // 種別が現在の接続でサポート外なら、明確な理由で拒否する
+        if (!Support.Allows(attachment.Kind))
         {
-            _reportStatus($"この接続方式は PDF 添付に非対応です: {attachment.FileName}");
+            _reportStatus(RejectionMessage(attachment.Kind, attachment.FileName));
             return;
         }
 
@@ -260,12 +279,24 @@ public partial class AttachmentListViewModel : ObservableObject
         OnPropertyChanged(nameof(HasAttachments));
     }
 
+    /// <summary>サポート外種別の拒否メッセージ（種別ごとに分かる文言・代替接続を案内する）</summary>
+    private static string RejectionMessage(ChatAttachmentKind kind, string fileName) =>
+        kind switch
+        {
+            ChatAttachmentKind.Pdf =>
+                $"この接続では PDF を読めません。Claude 接続をご利用ください: {fileName}",
+            ChatAttachmentKind.Text => $"この接続ではテキストファイルを読めません: {fileName}",
+            ChatAttachmentKind.Binary =>
+                $"この接続ではテキスト・画像・PDF 以外を読めません。Claude 接続をご利用ください: {fileName}",
+            _ => $"この接続では画像を読めません: {fileName}",
+        };
+
     /// <summary>添付操作が可能かを確認し、不可ならステータス通知して false を返す</summary>
     private bool EnsureEditable()
     {
         if (Support == AttachmentSupport.None)
         {
-            _reportStatus("この接続方式は添付（画像・PDF）に対応していません。");
+            _reportStatus("この接続方式は添付に対応していません。");
             return false;
         }
 
@@ -278,16 +309,25 @@ public partial class AttachmentListViewModel : ObservableObject
         return true;
     }
 
-    /// <summary>送信待ちから PDF をすべて除去する（画像のみ対応への切替時）</summary>
-    private void RemovePdfs()
+    /// <summary>
+    /// 送信待ちから、現在の接続でサポート外になった種別の添付を除去する
+    /// （対応範囲が縮小するバックエンド切替時に呼ぶ）。除去したら理由を通知する。
+    /// </summary>
+    private void RemoveUnsupported()
     {
-        var pdfs = Items.Where(i => i.Attachment.Kind == ChatAttachmentKind.Pdf).ToArray();
+        var unsupported = Items.Where(i => !Support.Allows(i.Attachment.Kind)).ToArray();
 
-        foreach (var pdf in pdfs)
+        if (unsupported.Length == 0)
         {
-            Items.Remove(pdf);
+            return;
+        }
+
+        foreach (var item in unsupported)
+        {
+            Items.Remove(item);
         }
 
         OnPropertyChanged(nameof(HasAttachments));
+        _reportStatus("この接続方式で読めない種別の添付を除外しました。");
     }
 }

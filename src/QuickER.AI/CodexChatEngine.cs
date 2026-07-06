@@ -296,7 +296,7 @@ public sealed class CodexChatEngine : IErChatEngine
     {
         if (attachments is { Count: > 0 })
         {
-            throw new NotSupportedException("Codex 接続は添付（画像・PDF）に対応していません。");
+            throw new NotSupportedException("Codex 接続は添付に対応していません。");
         }
 
         return SendAsync(prompt, cancellationToken);

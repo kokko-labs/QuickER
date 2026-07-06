@@ -11,6 +11,21 @@ namespace QuickER.Tests.ViewModels;
 /// </summary>
 public class AttachmentListViewModelTests
 {
+    /// <summary>API キー(Claude) 相当の種別集合（画像＋PDF＋テキスト）</summary>
+    private const AttachmentSupport ClaudeApiSupport =
+        AttachmentSupport.Images | AttachmentSupport.Pdf | AttachmentSupport.Text;
+
+    /// <summary>API キー(OpenAI) 相当の種別集合（画像＋テキスト・PDF/バイナリ非対応）</summary>
+    private const AttachmentSupport OpenAiSupport =
+        AttachmentSupport.Images | AttachmentSupport.Text;
+
+    /// <summary>Claude Code 相当の全種別集合</summary>
+    private const AttachmentSupport ClaudeCodeSupport =
+        AttachmentSupport.Images
+        | AttachmentSupport.Pdf
+        | AttachmentSupport.Text
+        | AttachmentSupport.Binary;
+
     /// <summary>PNG シグネチャ＋任意末尾でバイト列を作る</summary>
     private static byte[] PngBytes(int totalLength = 16)
     {
@@ -31,7 +46,7 @@ public class AttachmentListViewModelTests
 
     /// <summary>ステータス通知を記録するリストと VM を生成する</summary>
     private static (AttachmentListViewModel vm, List<string> statuses) CreateVm(
-        AttachmentSupport support = AttachmentSupport.ImagesAndPdf
+        AttachmentSupport support = ClaudeCodeSupport
     )
     {
         var statuses = new List<string>();
@@ -90,11 +105,11 @@ public class AttachmentListViewModelTests
         statuses.Should().ContainSingle().Which.Should().Contain("対応していません");
     }
 
-    /// <summary>Support=Images では（ファイル経由で読み込んだ）PDF を拒否し通知することを検証する</summary>
-    [Fact(DisplayName = "Images では PDF を拒否する")]
-    public void SupportImages_RejectsPdf()
+    /// <summary>Support=OpenAI（画像＋テキスト）では（ファイル経由で読み込んだ）PDF を拒否し通知することを検証する</summary>
+    [Fact(DisplayName = "PDF 非対応では PDF を拒否する")]
+    public void SupportWithoutPdf_RejectsPdf()
     {
-        var (vm, statuses) = CreateVm(AttachmentSupport.Images);
+        var (vm, statuses) = CreateVm(OpenAiSupport);
         vm.AllowsPdf.Should().BeFalse();
 
         var pdfPath = Path.Combine(Path.GetTempPath(), $"QuickERTests_{Guid.NewGuid():N}.pdf");
@@ -110,6 +125,64 @@ public class AttachmentListViewModelTests
         finally
         {
             File.Delete(pdfPath);
+        }
+    }
+
+    /// <summary>
+    /// テキストファイルはテキスト対応接続では受理され、テキスト非対応接続（None）では
+    /// 拒否されることを検証する（内容ベース分類でテキストと判定される）。
+    /// </summary>
+    [Fact(DisplayName = "テキストはテキスト対応で受理・非対応で拒否")]
+    public void TextFile_GatedByTextSupport()
+    {
+        var textPath = Path.Combine(Path.GetTempPath(), $"QuickERTests_{Guid.NewGuid():N}.txt");
+        File.WriteAllText(textPath, "これはテキスト添付のテストです。\nline2");
+
+        try
+        {
+            var (openAi, _) = CreateVm(OpenAiSupport);
+            openAi.AddFiles(new[] { textPath });
+            openAi.Items.Should().ContainSingle();
+            openAi.Items[0].Attachment.Kind.Should().Be(ChatAttachmentKind.Text);
+
+            // 画像のみ（テキストなし）の接続ではテキストを拒否する
+            var (imagesOnly, statuses) = CreateVm(AttachmentSupport.Images);
+            imagesOnly.AddFiles(new[] { textPath });
+            imagesOnly.Items.Should().BeEmpty();
+            statuses.Should().Contain(s => s.Contains("テキスト"));
+        }
+        finally
+        {
+            File.Delete(textPath);
+        }
+    }
+
+    /// <summary>
+    /// バイナリファイルは Claude Code（バイナリ対応）でのみ受理され、
+    /// API キー接続（バイナリ非対応）では明確なメッセージで拒否されることを検証する。
+    /// </summary>
+    [Fact(DisplayName = "バイナリは Claude Code のみ受理・API キーは拒否")]
+    public void BinaryFile_GatedByBinarySupport()
+    {
+        var binPath = Path.Combine(Path.GetTempPath(), $"QuickERTests_{Guid.NewGuid():N}.bin");
+        // NUL バイトを含むためバイナリと分類される
+        File.WriteAllBytes(binPath, new byte[] { 0x00, 0x01, 0x02, 0xFF, 0x00, 0x10 });
+
+        try
+        {
+            var (claudeCode, _) = CreateVm(ClaudeCodeSupport);
+            claudeCode.AddFiles(new[] { binPath });
+            claudeCode.Items.Should().ContainSingle();
+            claudeCode.Items[0].Attachment.Kind.Should().Be(ChatAttachmentKind.Binary);
+
+            var (apiKey, statuses) = CreateVm(ClaudeApiSupport);
+            apiKey.AddFiles(new[] { binPath });
+            apiKey.Items.Should().BeEmpty();
+            statuses.Should().Contain(s => s.Contains("Claude 接続"));
+        }
+        finally
+        {
+            File.Delete(binPath);
         }
     }
 
@@ -163,30 +236,33 @@ public class AttachmentListViewModelTests
         statuses.Should().Contain(s => s.Contains("クリアしました"));
     }
 
-    /// <summary>ImagesAndPdf→Images へ切り替えると PDF だけが除去されることを検証する</summary>
-    [Fact(DisplayName = "Images へ切替で PDF を除外する")]
-    public void SwitchToImages_RemovesPdfKeepsImages()
+    /// <summary>対応範囲を縮小（全種別→画像＋テキスト）すると、非対応になった PDF だけが除去されることを検証する</summary>
+    [Fact(DisplayName = "対応縮小で非対応種別（PDF）を除外する")]
+    public void ShrinkSupport_RemovesUnsupportedKeepsSupported()
     {
         var (vm, statuses) = CreateVm();
         AddImage(vm);
         var pdf = ChatAttachmentFactory.CreateFromBytes("spec.pdf", PdfBytes());
         vm.Items.Add(new PendingAttachmentItem(pdf.Attachment!));
 
-        vm.Support = AttachmentSupport.Images;
+        // PDF 非対応（画像＋テキスト）へ縮小する
+        vm.Support = OpenAiSupport;
 
         vm.Items.Should().ContainSingle();
         vm.Items[0].Attachment.Kind.Should().Be(ChatAttachmentKind.Image);
-        statuses.Should().Contain(s => s.Contains("PDF"));
+        statuses.Should().Contain(s => s.Contains("除外しました"));
     }
 
-    /// <summary>ファイルフィルタが対応範囲に応じて画像のみ／画像＋PDF になることを検証する</summary>
-    [Fact(DisplayName = "ファイルフィルタは対応範囲に追従する")]
-    public void FileDialogFilter_TracksSupport()
+    /// <summary>ファイルフィルタが全形式開放（すべてのファイル）＋補助フィルタを含むことを検証する</summary>
+    [Fact(DisplayName = "ファイルフィルタは全形式開放＋補助フィルタ")]
+    public void FileDialogFilter_OpensAllFormats()
     {
-        var (vm, _) = CreateVm(AttachmentSupport.Images);
-        vm.FileDialogFilter.Should().NotContain("pdf");
+        var (vm, _) = CreateVm(OpenAiSupport);
 
-        vm.Support = AttachmentSupport.ImagesAndPdf;
-        vm.FileDialogFilter.Should().Contain("pdf");
+        vm.FileDialogFilter.Should().Contain("すべてのファイル");
+        vm.FileDialogFilter.Should().Contain("*.*");
+        // 補助フィルタ（画像・PDF）も含む
+        vm.FileDialogFilter.Should().Contain("*.png");
+        vm.FileDialogFilter.Should().Contain("*.pdf");
     }
 }

@@ -155,6 +155,20 @@ public sealed class ChatTurnEngine : IErChatEngine
             await StartConversationAsync(cancellationToken).ConfigureAwait(false);
         }
 
+        // UI がゲートする前提だが、防御的にサポート外種別の添付を分かる失敗として弾く
+        // （履歴を汚さないよう、User 項目を積む前に検査する）
+        if (FindUnsupportedAttachment(attachments) is { } unsupported)
+        {
+            TurnCompleted?.Invoke(
+                this,
+                new ErChatTurnResult(
+                    false,
+                    $"この接続方式は添付「{unsupported.FileName}」（{unsupported.Kind}）に対応していません。"
+                )
+            );
+            return;
+        }
+
         // 添付は User 履歴項目に載せ、ステートレス API の毎ターン再送でも再構築されるようにする
         _history.Add(
             new ChatHistoryItem(
@@ -186,6 +200,18 @@ public sealed class ChatTurnEngine : IErChatEngine
             _turnCts?.Dispose();
             _turnCts = null;
         }
+    }
+
+    /// <summary>添付にサポート外の種別が含まれていれば、その 1 件目を返す（無ければ null）</summary>
+    private ChatAttachment? FindUnsupportedAttachment(IReadOnlyList<ChatAttachment> attachments)
+    {
+        if (attachments is not { Count: > 0 })
+        {
+            return null;
+        }
+
+        var support = AttachmentSupport;
+        return attachments.FirstOrDefault(a => !support.Allows(a.Kind));
     }
 
     /// <summary>応答→ツール実行→再送信のループを、ツール要求が無くなるまで回す</summary>

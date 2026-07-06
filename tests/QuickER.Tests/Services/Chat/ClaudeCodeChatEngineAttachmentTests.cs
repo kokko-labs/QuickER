@@ -52,9 +52,28 @@ public class ClaudeCodeChatEngineAttachmentTests
         return new ChatAttachment(fileName, ChatAttachmentKind.Image, "image/png", pngData);
     }
 
-    /// <summary>Claude Code の添付対応は ImagesAndPdf であることを検証する</summary>
-    [Fact(DisplayName = "AttachmentSupport は ImagesAndPdf")]
-    public void AttachmentSupport_IsImagesAndPdf()
+    /// <summary>テキスト添付を作る</summary>
+    private static ChatAttachment TextAttachment(string fileName = "spec.txt")
+    {
+        var data = System.Text.Encoding.UTF8.GetBytes("要件メモ");
+        return new ChatAttachment(fileName, ChatAttachmentKind.Text, "text/plain", data);
+    }
+
+    /// <summary>バイナリ添付を作る</summary>
+    private static ChatAttachment BinaryAttachment(string fileName = "data.bin")
+    {
+        byte[] data = [0x00, 0x01, 0x02, 0xFF];
+        return new ChatAttachment(
+            fileName,
+            ChatAttachmentKind.Binary,
+            "application/octet-stream",
+            data
+        );
+    }
+
+    /// <summary>Claude Code の添付対応は全種別（画像・PDF・テキスト・バイナリ）であることを検証する</summary>
+    [Fact(DisplayName = "AttachmentSupport は全種別")]
+    public void AttachmentSupport_IsAllKinds()
     {
         var engine = new ClaudeCodeChatEngine(
             new RecordingClaudeCodeClient(),
@@ -62,7 +81,14 @@ public class ClaudeCodeChatEngineAttachmentTests
             new SyncUiDispatcher()
         );
 
-        engine.AttachmentSupport.Should().Be(AttachmentSupport.ImagesAndPdf);
+        engine
+            .AttachmentSupport.Should()
+            .Be(
+                AttachmentSupport.Images
+                    | AttachmentSupport.Pdf
+                    | AttachmentSupport.Text
+                    | AttachmentSupport.Binary
+            );
     }
 
     /// <summary>
@@ -140,6 +166,79 @@ public class ClaudeCodeChatEngineAttachmentTests
         await engine.SendAsync("続けて", TestContext.Current.CancellationToken);
 
         client.Options[1].AdditionalAllowedTools.Should().Contain("Read");
+
+        await engine.DisposeAsync();
+    }
+
+    /// <summary>
+    /// テキスト・バイナリ添付も画像/PDF と同様に attachments/ へ書き出され、パスが付記され、
+    /// Read 許可が付くことを検証する（Read 経路は種別に依らず共通）。
+    /// </summary>
+    [Fact(DisplayName = "テキスト・バイナリも書き出し・パス付記・Read 追加")]
+    public async Task SendAsync_TextAndBinary_WritesAndAppendsPath()
+    {
+        var client = new RecordingClaudeCodeClient();
+        var engine = new ClaudeCodeChatEngine(client, toolHost: null, new SyncUiDispatcher());
+
+        await engine.InitializeAsync(TestContext.Current.CancellationToken);
+        await engine.StartConversationAsync(TestContext.Current.CancellationToken);
+        await engine.SendAsync(
+            "参考資料",
+            new[] { TextAttachment(), BinaryAttachment() },
+            TestContext.Current.CancellationToken
+        );
+
+        client.Prompts[0].Should().Contain("spec.txt");
+        client.Prompts[0].Should().Contain("data.bin");
+        client.Options[0].AdditionalAllowedTools.Should().Contain("Read");
+
+        // 実ファイルが書き出されている
+        foreach (var name in new[] { "spec.txt", "data.bin" })
+        {
+            var line = client.Prompts[0].Split('\n').First(l => l.Contains(name));
+            File.Exists(line.TrimStart('-', ' ')).Should().BeTrue();
+        }
+
+        await engine.DisposeAsync();
+    }
+
+    /// <summary>バイナリを含む添付では、代替案をユーザーへ伝える一文がプロンプトに付記されることを検証する</summary>
+    [Fact(DisplayName = "バイナリ含む送信は代替案の付記が入る")]
+    public async Task SendAsync_WithBinary_AppendsFallbackNote()
+    {
+        var client = new RecordingClaudeCodeClient();
+        var engine = new ClaudeCodeChatEngine(client, toolHost: null, new SyncUiDispatcher());
+
+        await engine.InitializeAsync(TestContext.Current.CancellationToken);
+        await engine.StartConversationAsync(TestContext.Current.CancellationToken);
+        await engine.SendAsync(
+            "これ何？",
+            new[] { BinaryAttachment() },
+            TestContext.Current.CancellationToken
+        );
+
+        client.Prompts[0].Should().Contain("Read で読めない形式");
+        client.Prompts[0].Should().Contain("代替案");
+
+        await engine.DisposeAsync();
+    }
+
+    /// <summary>バイナリを含まない（画像のみ）送信では、代替案の付記が入らないことを検証する</summary>
+    [Fact(DisplayName = "バイナリ無しは代替案の付記が入らない")]
+    public async Task SendAsync_WithoutBinary_NoFallbackNote()
+    {
+        var client = new RecordingClaudeCodeClient();
+        var engine = new ClaudeCodeChatEngine(client, toolHost: null, new SyncUiDispatcher());
+
+        await engine.InitializeAsync(TestContext.Current.CancellationToken);
+        await engine.StartConversationAsync(TestContext.Current.CancellationToken);
+        await engine.SendAsync(
+            "図を見て",
+            new[] { PngAttachment() },
+            TestContext.Current.CancellationToken
+        );
+
+        client.Prompts[0].Should().NotContain("Read で読めない形式");
 
         await engine.DisposeAsync();
     }

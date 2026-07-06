@@ -103,7 +103,8 @@ public class AttachmentPanelTests
 
                 var list = new AttachmentListViewModel(_ => { })
                 {
-                    Support = QuickER.AI.AttachmentSupport.ImagesAndPdf,
+                    Support =
+                        QuickER.AI.AttachmentSupport.Images | QuickER.AI.AttachmentSupport.Pdf,
                 };
                 list.AddClipboardImage(TinyPng, new DateTime(2026, 7, 6, 12, 0, 0));
                 list.Items.Should().HaveCount(1, "前提: 添付が 1 件追加されていること");

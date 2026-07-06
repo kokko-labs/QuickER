@@ -10,6 +10,12 @@ public enum ChatAttachmentKind
 
     /// <summary>PDF 文書</summary>
     Pdf,
+
+    /// <summary>テキスト（UTF-8 として妥当と判定された内容。API キー接続では本文へインライン展開する）</summary>
+    Text,
+
+    /// <summary>その他バイナリ（Claude Code へのみ添付可。Read で読めるかは AI 次第）</summary>
+    Binary,
 }
 
 /// <summary>
@@ -32,17 +38,45 @@ public sealed record ChatAttachment(
     public string ToBase64() => Convert.ToBase64String(Data);
 }
 
-/// <summary>チャットエンジンが受け付けられる添付の範囲（UI の可否判定に使う）</summary>
+/// <summary>
+/// チャットエンジンが受け付けられる添付の種別集合（UI の可否判定に使う）。
+/// 各接続がサポートする種別のビット和で表す（例 Anthropic=Images|Pdf|Text）。
+/// </summary>
+[Flags]
 public enum AttachmentSupport
 {
     /// <summary>添付非対応</summary>
-    None,
+    None = 0,
 
-    /// <summary>画像のみ対応</summary>
-    Images,
+    /// <summary>画像（PNG / JPEG / GIF / WebP）</summary>
+    Images = 1,
 
-    /// <summary>画像と PDF に対応</summary>
-    ImagesAndPdf,
+    /// <summary>PDF 文書</summary>
+    Pdf = 2,
+
+    /// <summary>テキスト（本文インライン展開 / Read）</summary>
+    Text = 4,
+
+    /// <summary>その他バイナリ（Claude Code のみ）</summary>
+    Binary = 8,
+}
+
+/// <summary><see cref="AttachmentSupport"/> と <see cref="ChatAttachmentKind"/> の対応・判定の共有ヘルパ</summary>
+public static class AttachmentSupportExtensions
+{
+    /// <summary>種別を対応する <see cref="AttachmentSupport"/> ビットへ写像する</summary>
+    public static AttachmentSupport ToSupportFlag(this ChatAttachmentKind kind) =>
+        kind switch
+        {
+            ChatAttachmentKind.Image => AttachmentSupport.Images,
+            ChatAttachmentKind.Pdf => AttachmentSupport.Pdf,
+            ChatAttachmentKind.Text => AttachmentSupport.Text,
+            _ => AttachmentSupport.Binary,
+        };
+
+    /// <summary>指定の種別を受け付けられるか（フラグに該当ビットが立っているか）</summary>
+    public static bool Allows(this AttachmentSupport support, ChatAttachmentKind kind) =>
+        support.HasFlag(kind.ToSupportFlag());
 }
 
 /// <summary>プロバイダー選択から添付範囲を導く共有規則（合成ルートと UI・テストで同一判定を保つため）</summary>
@@ -50,13 +84,17 @@ public static class AttachmentSupportResolver
 {
     /// <summary>
     /// API キー接続のプロバイダー選択に応じた添付範囲を返す。
-    /// Claude=画像＋PDF・OpenAI=画像・その他（Ollama 等）=なし。
+    /// Claude=画像＋PDF＋テキスト・OpenAI=画像＋テキスト・その他（Ollama 等）=なし。
+    /// テキストはコンテンツ型に依らず本文へインライン展開できるため、画像対応の両プロバイダーで許可する。
+    /// バイナリは API キー接続では扱えない（Claude Code の Read 経路のみ）。
     /// </summary>
     public static AttachmentSupport ForApiKeyProvider(AiProvider provider) =>
         provider switch
         {
-            AiProvider.Claude => AttachmentSupport.ImagesAndPdf,
-            AiProvider.OpenAI => AttachmentSupport.Images,
+            AiProvider.Claude => AttachmentSupport.Images
+                | AttachmentSupport.Pdf
+                | AttachmentSupport.Text,
+            AiProvider.OpenAI => AttachmentSupport.Images | AttachmentSupport.Text,
             _ => AttachmentSupport.None,
         };
 }
@@ -72,4 +110,10 @@ public static class ChatAttachmentLimits
 
     /// <summary>PDF 1 件あたりの上限バイト数（32MB。Anthropic 上限に整合）</summary>
     public const long MaxPdfBytes = 32L * 1024 * 1024;
+
+    /// <summary>テキスト 1 件あたりの上限バイト数（200KB。本文インライン展開の肥大を防ぐ）</summary>
+    public const long MaxTextBytes = 200L * 1024;
+
+    /// <summary>バイナリ 1 件あたりの上限バイト数（32MB。Claude Code 経路のみ）</summary>
+    public const long MaxBinaryBytes = 32L * 1024 * 1024;
 }

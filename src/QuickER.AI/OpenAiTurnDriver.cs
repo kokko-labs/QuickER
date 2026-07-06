@@ -141,24 +141,27 @@ public sealed class OpenAiTurnDriver : IChatTurnDriver
         };
 
     /// <summary>
-    /// ユーザー履歴項目を UserChatMessage へ変換する。画像添付があれば image コンテンツパート
-    /// （バイト列 + MIME）をテキストと共に積む。
+    /// ユーザー履歴項目を UserChatMessage へ変換する。画像添付は image コンテンツパート
+    /// （バイト列 + MIME）として積み、テキスト添付は本文末尾へインライン展開する。
     /// </summary>
     /// <remarks>
-    /// PDF は添付対象外（<see cref="OpenAiTurnDriver"/> の AttachmentSupport は Images）。
+    /// PDF は添付対象外（<see cref="OpenAiTurnDriver"/> の AttachmentSupport に Pdf を含めない）。
     /// 根拠: OpenAI .NET SDK 2.10.0 の <c>ChatMessageContentPart.CreateFilePart</c> は実験的属性
     /// （OPENAI001＝「評価目的のみ・将来変更/削除の可能性」）でコンパイルエラーになる不安定 API のため、
     /// PDF ファイル入力は本フェーズでは組み立てない。画像パート（CreateImagePart(bytes, mediaType)）は安定 API。
     /// </remarks>
     internal static UserChatMessage ToUserMessage(ChatHistoryItem item)
     {
+        // テキスト添付は本文へインライン展開する（履歴再送でも同じ本文に再構築される）
+        var effectiveText = TextAttachmentInliner.BuildEffectiveText(item.Text, item.Attachments);
+
         var images =
             item.Attachments?.Where(a => a.Kind == ChatAttachmentKind.Image).ToList()
             ?? new List<ChatAttachment>();
 
         if (images.Count == 0)
         {
-            return new UserChatMessage(item.Text);
+            return new UserChatMessage(effectiveText);
         }
 
         var parts = new List<ChatMessageContentPart>();
@@ -173,9 +176,9 @@ public sealed class OpenAiTurnDriver : IChatTurnDriver
             );
         }
 
-        if (!string.IsNullOrEmpty(item.Text))
+        if (!string.IsNullOrEmpty(effectiveText))
         {
-            parts.Add(ChatMessageContentPart.CreateTextPart(item.Text));
+            parts.Add(ChatMessageContentPart.CreateTextPart(effectiveText));
         }
 
         return new UserChatMessage(parts);

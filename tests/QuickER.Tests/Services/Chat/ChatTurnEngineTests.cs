@@ -64,6 +64,19 @@ public class ChatTurnEngineTests
         bool isReady = true
     ) => new(driver, host, new SyncUiDispatcher(), () => isReady);
 
+    /// <summary>画像添付を受け付けるエンジンを生成する（添付履歴系テスト用）</summary>
+    private static ChatTurnEngine CreateImageEngine(
+        ScriptedTurnDriver driver,
+        RecordingToolHost host
+    ) =>
+        new(
+            driver,
+            host,
+            new SyncUiDispatcher(),
+            () => true,
+            attachmentSupport: () => AttachmentSupport.Images
+        );
+
     /// <summary>ツール呼び出しの無いターンが、ストリーミングと成功完了で終わることを検証する</summary>
     [Fact(DisplayName = "ツール無しターンは delta を流し成功完了する")]
     public async Task SendAsync_NoToolCalls_StreamsAndCompletes()
@@ -140,7 +153,7 @@ public class ChatTurnEngineTests
     public async Task SendAsync_WithAttachments_StoredOnUserHistoryItem()
     {
         var driver = new ScriptedTurnDriver([new ChatAssistantTurn("ok", [])]);
-        var engine = CreateEngine(driver, new RecordingToolHost());
+        var engine = CreateImageEngine(driver, new RecordingToolHost());
 
         byte[] pngData = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
         var attachment = new ChatAttachment(
@@ -170,7 +183,7 @@ public class ChatTurnEngineTests
             new ChatAssistantTurn("ok1", []),
             new ChatAssistantTurn("ok2", []),
         ]);
-        var engine = CreateEngine(driver, new RecordingToolHost());
+        var engine = CreateImageEngine(driver, new RecordingToolHost());
 
         byte[] pngData = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
         var attachment = new ChatAttachment(
@@ -190,6 +203,44 @@ public class ChatTurnEngineTests
             .Count(item => item.Role == ChatHistoryRole.User && item.Attachments is { Count: > 0 })
             .Should()
             .Be(1);
+    }
+
+    /// <summary>
+    /// サポート外種別の添付を含む送信は、防御的に NotSupportedException で弾かれ、
+    /// TurnCompleted に失敗（エラーメッセージ付き）が通知されることを検証する。
+    /// </summary>
+    [Fact(DisplayName = "サポート外種別の添付は分かる失敗になる")]
+    public async Task SendAsync_UnsupportedAttachmentKind_FailsTurn()
+    {
+        var driver = new ScriptedTurnDriver([new ChatAssistantTurn("ok", [])]);
+        // Images のみ対応のエンジンへ PDF を渡す
+        var engine = new ChatTurnEngine(
+            driver,
+            new RecordingToolHost(),
+            new SyncUiDispatcher(),
+            () => true,
+            attachmentSupport: () => AttachmentSupport.Images
+        );
+
+        ErChatTurnResult? completed = null;
+        engine.TurnCompleted += (_, r) => completed = r;
+
+        var pdf = new ChatAttachment(
+            "spec.pdf",
+            ChatAttachmentKind.Pdf,
+            "application/pdf",
+            "%PDF-1.7"u8.ToArray()
+        );
+
+        await engine.StartConversationAsync(TestContext.Current.CancellationToken);
+        await engine.SendAsync("見て", [pdf], TestContext.Current.CancellationToken);
+
+        completed.Should().NotBeNull();
+        completed!.Value.Success.Should().BeFalse();
+        completed!.Value.Error.Should().Contain("対応していません");
+
+        // ドライバは呼ばれない（ガードで送信前に弾かれる）
+        driver.HistoryCountsAtCall.Should().BeEmpty();
     }
 
     /// <summary>AttachmentSupport はコンストラクタ注入の関数で決まることを検証する（既定は None）</summary>

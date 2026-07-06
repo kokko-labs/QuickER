@@ -134,27 +134,38 @@ public sealed class AnthropicChatTurnDriver : IChatTurnDriver
     }
 
     /// <summary>
-    /// ユーザー履歴項目を MessageParam へ変換する。添付があれば image / document(PDF) ブロックを
-    /// テキストブロックと共に content 配列へ積む（添付なしなら従来どおり単純なテキストメッセージ）。
+    /// ユーザー履歴項目を MessageParam へ変換する。画像・PDF 添付は image / document(PDF) ブロックへ、
+    /// テキスト添付は本文末尾へインライン展開する（添付なしなら従来どおり単純なテキストメッセージ）。
     /// </summary>
     internal static MessageParam ToUserParam(ChatHistoryItem item)
     {
-        if (item.Attachments is not { Count: > 0 })
+        // テキスト添付は本文へインライン展開する（履歴再送でも同じ本文に再構築される）
+        var effectiveText = TextAttachmentInliner.BuildEffectiveText(item.Text, item.Attachments);
+
+        // 画像・PDF はコンテンツブロックとして積む対象（テキストはインライン済みなので除外）
+        var mediaAttachments =
+            item.Attachments?.Where(a =>
+                    a.Kind is ChatAttachmentKind.Image or ChatAttachmentKind.Pdf
+                )
+                .ToList()
+            ?? new List<ChatAttachment>();
+
+        if (mediaAttachments.Count == 0)
         {
-            return new MessageParam { Role = Role.User, Content = item.Text };
+            return new MessageParam { Role = Role.User, Content = effectiveText };
         }
 
         var blocks = new List<ContentBlockParam>();
 
-        // 画像・PDF を先に置き、その後にユーザーのテキストを添える構成にする
-        foreach (var attachment in item.Attachments)
+        // 画像・PDF を先に置き、その後にユーザーのテキスト（インライン展開済み）を添える構成にする
+        foreach (var attachment in mediaAttachments)
         {
             blocks.Add(ToContentBlock(attachment));
         }
 
-        if (!string.IsNullOrEmpty(item.Text))
+        if (!string.IsNullOrEmpty(effectiveText))
         {
-            blocks.Add(new TextBlockParam { Text = item.Text });
+            blocks.Add(new TextBlockParam { Text = effectiveText });
         }
 
         return new MessageParam { Role = Role.User, Content = blocks };

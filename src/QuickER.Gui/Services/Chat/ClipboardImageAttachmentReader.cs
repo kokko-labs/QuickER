@@ -23,8 +23,9 @@ public static class ClipboardImageAttachmentReader
         $"{FileNamePrefix}_{timestamp:yyyyMMdd_HHmmss}.png";
 
     /// <summary>
-    /// PNG バイト列から添付を生成する変換ロジック（WPF 非依存・テスト対象）。
+    /// PNG バイト列から画像添付を生成する変換ロジック（WPF 非依存・テスト対象）。
     /// タイムスタンプ由来のファイル名を付け、<see cref="ChatAttachmentFactory"/> の検証・縮小を通す。
+    /// クリップボード画像専用の入口のため、内容が画像でなければ（PNG エンコードに失敗した想定）失敗を返す。
     /// </summary>
     /// <param name="pngData">PNG エンコード済みのバイト列</param>
     /// <param name="timestamp">ファイル名に使う時刻</param>
@@ -33,7 +34,27 @@ public static class ClipboardImageAttachmentReader
         byte[] pngData,
         DateTime timestamp,
         ChatAttachmentFactory.ImageShrinker? shrinker = null
-    ) => ChatAttachmentFactory.CreateFromBytes(BuildFileName(timestamp), pngData, shrinker);
+    )
+    {
+        var result = ChatAttachmentFactory.CreateFromBytes(
+            BuildFileName(timestamp),
+            pngData,
+            shrinker
+        );
+
+        // 全形式対応のファクトリは非画像も受理するが、ここは画像専用の入口なので画像以外は弾く
+        if (result.Success && result.Attachment!.Kind != ChatAttachmentKind.Image)
+        {
+            return new ChatAttachmentResult(
+                false,
+                null,
+                ChatAttachmentError.Empty,
+                "クリップボードの内容を画像として取り込めませんでした。"
+            );
+        }
+
+        return result;
+    }
 
     /// <summary>
     /// 現在のクリップボードに画像があれば PNG バイト列を取り出す（無ければ null）。WPF の Clipboard に依存する。

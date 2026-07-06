@@ -341,10 +341,11 @@ public class AiChatDialogViewModelTests
         try
         {
             vm.ApiProvider = AiProvider.OpenAI;
-            vm.Attachments.Support.Should().Be(AttachmentSupport.Images);
+            vm.Attachments.Support.Should().Be(AttachmentSupport.Images | AttachmentSupport.Text);
 
             vm.ApiProvider = AiProvider.Claude;
-            vm.Attachments.Support.Should().Be(AttachmentSupport.ImagesAndPdf);
+            vm.Attachments.Support.Should()
+                .Be(AttachmentSupport.Images | AttachmentSupport.Pdf | AttachmentSupport.Text);
 
             vm.ApiProvider = AiProvider.Ollama;
             vm.Attachments.Support.Should().Be(AttachmentSupport.None);
@@ -355,16 +356,22 @@ public class AiChatDialogViewModelTests
         }
     }
 
-    /// <summary>Claude Code バックエンドでは添付範囲が画像＋PDF になることを検証する</summary>
-    [Fact(DisplayName = "Claude Code では添付範囲が画像＋PDF")]
-    public void AttachmentSupport_ClaudeCodeBackend_IsImagesAndPdf()
+    /// <summary>Claude Code バックエンドでは添付範囲が全種別になることを検証する</summary>
+    [Fact(DisplayName = "Claude Code では添付範囲が全種別")]
+    public void AttachmentSupport_ClaudeCodeBackend_IsAllKinds()
     {
         var (vm, _, folder) = CreateVm();
 
         try
         {
             vm.SelectedBackend = ErChatBackendKind.ClaudeCode;
-            vm.Attachments.Support.Should().Be(AttachmentSupport.ImagesAndPdf);
+            vm.Attachments.Support.Should()
+                .Be(
+                    AttachmentSupport.Images
+                        | AttachmentSupport.Pdf
+                        | AttachmentSupport.Text
+                        | AttachmentSupport.Binary
+                );
         }
         finally
         {

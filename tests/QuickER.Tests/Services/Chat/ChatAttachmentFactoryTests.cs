@@ -4,8 +4,9 @@ using QuickER.AI;
 namespace QuickER.Tests.Services.Chat;
 
 /// <summary>
-/// <see cref="ChatAttachmentFactory"/> の種別判定（拡張子＋マジックバイト）・上限検証・
-/// 画像縮小デリゲートの呼び出し・超過拒否メッセージを検証するテストクラス。
+/// <see cref="ChatAttachmentFactory"/> の内容ベース種別判定（画像/PDF/テキスト/バイナリ）・
+/// 上限検証・画像縮小デリゲートの呼び出し・超過拒否メッセージを検証するテストクラス。
+/// 拡張子は判定に使わない（「読めるかは AI に任せる」思想）。
 /// </summary>
 public class ChatAttachmentFactoryTests
 {
@@ -50,25 +51,94 @@ public class ChatAttachmentFactoryTests
         result.Attachment!.MediaType.Should().Be("application/pdf");
     }
 
-    /// <summary>未対応拡張子は UnsupportedFormat で拒否されることを検証する</summary>
-    [Fact(DisplayName = "未対応拡張子は拒否される")]
-    public void CreateFromBytes_UnsupportedExtension_Fails()
+    /// <summary>拡張子が .png でも中身が PDF なら、内容で PDF と分類されることを検証する（拡張子不問）</summary>
+    [Fact(DisplayName = "拡張子より内容を優先する（.png だが中身 PDF は PDF）")]
+    public void CreateFromBytes_ContentOverridesExtension()
     {
-        var result = ChatAttachmentFactory.CreateFromBytes("note.txt", PngBytes());
-
-        result.Success.Should().BeFalse();
-        result.Error.Should().Be(ChatAttachmentError.UnsupportedFormat);
-    }
-
-    /// <summary>拡張子は対応だが中身のマジックバイトが一致しないと ContentMismatch で拒否されることを検証する</summary>
-    [Fact(DisplayName = "中身と拡張子の不一致は拒否される")]
-    public void CreateFromBytes_ContentMismatch_Fails()
-    {
-        // .png だが中身は PDF シグネチャ
         var result = ChatAttachmentFactory.CreateFromBytes("fake.png", PdfBytes());
 
+        result.Success.Should().BeTrue();
+        result.Attachment!.Kind.Should().Be(ChatAttachmentKind.Pdf);
+    }
+
+    /// <summary>UTF-8 テキスト内容は拡張子に依らずテキストとして受理されることを検証する</summary>
+    [Fact(DisplayName = "UTF-8 テキストはテキストとして受理される")]
+    public void CreateFromBytes_Utf8Text_ClassifiedAsText()
+    {
+        var data = System.Text.Encoding.UTF8.GetBytes("Hello, これはテキスト。\nsecond line\ttab");
+
+        var result = ChatAttachmentFactory.CreateFromBytes("note.log", data);
+
+        result.Success.Should().BeTrue();
+        result.Attachment!.Kind.Should().Be(ChatAttachmentKind.Text);
+        result.Attachment!.MediaType.Should().Be("text/plain");
+    }
+
+    /// <summary>NUL バイトを含む内容はバイナリとして受理されることを検証する（拡張子が .txt でも内容優先）</summary>
+    [Fact(DisplayName = "NUL 含む内容はバイナリとして受理される")]
+    public void CreateFromBytes_NulBytes_ClassifiedAsBinary()
+    {
+        byte[] data = [0x00, 0x01, 0x02, 0xFF, 0x00, 0x42];
+
+        var result = ChatAttachmentFactory.CreateFromBytes("data.txt", data);
+
+        result.Success.Should().BeTrue();
+        result.Attachment!.Kind.Should().Be(ChatAttachmentKind.Binary);
+        result.Attachment!.MediaType.Should().Be("application/octet-stream");
+    }
+
+    /// <summary>不正な UTF-8 シーケンスはバイナリと分類されることを検証する（境界ケース）</summary>
+    [Fact(DisplayName = "不正 UTF-8 はバイナリと分類される")]
+    public void CreateFromBytes_InvalidUtf8_ClassifiedAsBinary()
+    {
+        // 0xC3 は 2 バイト UTF-8 の先頭バイトだが後続が無い不正シーケンス
+        byte[] data = [0x48, 0x69, 0xC3, 0x28, 0x21];
+
+        var result = ChatAttachmentFactory.CreateFromBytes("weird.txt", data);
+
+        result.Success.Should().BeTrue();
+        result.Attachment!.Kind.Should().Be(ChatAttachmentKind.Binary);
+    }
+
+    /// <summary>UTF-8 BOM 付き内容はテキストと分類されることを検証する</summary>
+    [Fact(DisplayName = "UTF-8 BOM 付きはテキストと分類される")]
+    public void CreateFromBytes_Utf8Bom_ClassifiedAsText()
+    {
+        byte[] bom = [0xEF, 0xBB, 0xBF];
+        var body = System.Text.Encoding.UTF8.GetBytes("body");
+        var data = bom.Concat(body).ToArray();
+
+        var result = ChatAttachmentFactory.CreateFromBytes("bom.txt", data);
+
+        result.Success.Should().BeTrue();
+        result.Attachment!.Kind.Should().Be(ChatAttachmentKind.Text);
+    }
+
+    /// <summary>テキストが上限（200KB）を超えると TextTooLarge で明確なメッセージで拒否されることを検証する</summary>
+    [Fact(DisplayName = "テキスト超過は明確なメッセージで拒否")]
+    public void CreateFromBytes_LargeText_Fails()
+    {
+        var big = new byte[ChatAttachmentLimits.MaxTextBytes + 1];
+        Array.Fill(big, (byte)'a');
+
+        var result = ChatAttachmentFactory.CreateFromBytes("big.txt", big);
+
         result.Success.Should().BeFalse();
-        result.Error.Should().Be(ChatAttachmentError.ContentMismatch);
+        result.Error.Should().Be(ChatAttachmentError.TextTooLarge);
+        result.Message.Should().Contain("KB");
+    }
+
+    /// <summary>バイナリが上限（32MB）を超えると BinaryTooLarge で拒否されることを検証する</summary>
+    [Fact(DisplayName = "バイナリ超過は拒否される")]
+    public void CreateFromBytes_LargeBinary_Fails()
+    {
+        var big = new byte[ChatAttachmentLimits.MaxBinaryBytes + 1];
+        big[0] = 0x00; // NUL でバイナリ確定
+
+        var result = ChatAttachmentFactory.CreateFromBytes("big.bin", big);
+
+        result.Success.Should().BeFalse();
+        result.Error.Should().Be(ChatAttachmentError.BinaryTooLarge);
     }
 
     /// <summary>上限超過の画像で縮小デリゲートが呼ばれ、収まれば受理されることを検証する</summary>

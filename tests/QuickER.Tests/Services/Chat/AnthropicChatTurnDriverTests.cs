@@ -129,6 +129,60 @@ public class AnthropicChatTurnDriverTests
         param.Content.Value.Should().BeOfType<string>().Which.Should().Be("こんにちは");
     }
 
+    /// <summary>
+    /// テキスト添付のみの User 項目は、テキストが本文へインライン展開された単純なテキストメッセージに
+    /// なることを検証する（コンテンツブロックは作らない）。
+    /// </summary>
+    [Fact(DisplayName = "テキスト添付は本文へインライン展開される")]
+    public void ToUserParam_TextAttachment_InlinedIntoBody()
+    {
+        var body = System.Text.Encoding.UTF8.GetBytes("要件A\n要件B");
+        var item = new ChatHistoryItem(
+            ChatHistoryRole.User,
+            "この要件で",
+            Attachments: new[]
+            {
+                new ChatAttachment("req.md", ChatAttachmentKind.Text, "text/plain", body),
+            }
+        );
+
+        var param = AnthropicChatTurnDriver.ToUserParam(item);
+
+        var text = param.Content.Value.Should().BeOfType<string>().Subject;
+        text.Should().Contain("この要件で");
+        text.Should().Contain("【添付ファイル: req.md】");
+        text.Should().Contain("要件A");
+    }
+
+    /// <summary>PDF＋テキスト混在では PDF は document ブロック・テキストは本文へインラインされることを検証する</summary>
+    [Fact(DisplayName = "PDF＋テキスト混在は document ブロック＋インライン本文")]
+    public void ToUserParam_PdfAndText_MixesCorrectly()
+    {
+        var pdfData = "%PDF-1.7"u8.ToArray();
+        var textData = System.Text.Encoding.UTF8.GetBytes("補足メモ");
+        var item = new ChatHistoryItem(
+            ChatHistoryRole.User,
+            "両方参照",
+            Attachments: new[]
+            {
+                new ChatAttachment("s.pdf", ChatAttachmentKind.Pdf, "application/pdf", pdfData),
+                new ChatAttachment("n.txt", ChatAttachmentKind.Text, "text/plain", textData),
+            }
+        );
+
+        var param = AnthropicChatTurnDriver.ToUserParam(item);
+
+        var blocks = param.Content.Value.As<IReadOnlyList<ContentBlockParam>>();
+        // document ブロック 1 ＋ テキストブロック 1（テキスト添付はインライン済みで本文へ）
+        blocks.Should().HaveCount(2);
+        blocks[0].Value.Should().BeOfType<DocumentBlockParam>();
+
+        var textBlock = (TextBlockParam)blocks[1].Value!;
+        textBlock.Text.Should().Contain("両方参照");
+        textBlock.Text.Should().Contain("【添付ファイル: n.txt】");
+        textBlock.Text.Should().Contain("補足メモ");
+    }
+
     /// <summary>添付付き履歴が再構築（ToMessageParams 経由）でも image ブロックを保持することを検証する（毎ターン再送）</summary>
     [Fact(DisplayName = "履歴再構築でも添付ブロックが保持される")]
     public void ToMessageParams_WithAttachment_RebuildsImageBlock()

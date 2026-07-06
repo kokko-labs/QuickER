@@ -90,7 +90,12 @@ public sealed class ClaudeCodeChatEngine : IErChatEngine
     public bool IsReady => _initialized && _client.IsAvailable();
 
     /// <inheritdoc />
-    public AttachmentSupport AttachmentSupport => AttachmentSupport.ImagesAndPdf;
+    /// <remarks>Claude Code は Read でファイルを読み返せるため、テキスト・バイナリを含む全種別に対応する。</remarks>
+    public AttachmentSupport AttachmentSupport =>
+        AttachmentSupport.Images
+        | AttachmentSupport.Pdf
+        | AttachmentSupport.Text
+        | AttachmentSupport.Binary;
 
     /// <inheritdoc />
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
@@ -201,7 +206,8 @@ public sealed class ClaudeCodeChatEngine : IErChatEngine
         if (attachments is { Count: > 0 })
         {
             var paths = WriteAttachments(attachments);
-            effectivePrompt = AppendAttachmentPaths(prompt, paths);
+            var hasBinary = attachments.Any(a => a.Kind == ChatAttachmentKind.Binary);
+            effectivePrompt = AppendAttachmentPaths(prompt, paths, hasBinary);
             _attachmentsUsedInConversation = true;
         }
 
@@ -336,8 +342,15 @@ public sealed class ClaudeCodeChatEngine : IErChatEngine
         }
     }
 
-    /// <summary>プロンプト末尾に、添付ファイルの絶対パス一覧（Read ツールで読む案内付き）を付記する</summary>
-    internal static string AppendAttachmentPaths(string prompt, IReadOnlyList<string> paths)
+    /// <summary>
+    /// プロンプト末尾に、添付ファイルの絶対パス一覧（Read ツールで読む案内付き）を付記する。
+    /// バイナリ（Read で読めない可能性がある形式）を含むときは、代替案をユーザーへ伝える一文を加える。
+    /// </summary>
+    internal static string AppendAttachmentPaths(
+        string prompt,
+        IReadOnlyList<string> paths,
+        bool hasBinary = false
+    )
     {
         if (paths.Count == 0)
         {
@@ -345,7 +358,15 @@ public sealed class ClaudeCodeChatEngine : IErChatEngine
         }
 
         var list = string.Join("\n", paths.Select(path => $"- {path}"));
-        return $"{prompt}\n\n添付ファイル（Read ツールで読むこと）:\n{list}";
+        var appended = $"{prompt}\n\n添付ファイル（Read ツールで読むこと）:\n{list}";
+
+        if (hasBinary)
+        {
+            appended +=
+                "\n\n注: Read で読めない形式のファイルがある場合は、その旨と代替案をユーザーへ伝えること。";
+        }
+
+        return appended;
     }
 
     /// <summary>MCP サーバーの URL・トークンから mcp-config ファイルを書き出し、そのパスを返す</summary>

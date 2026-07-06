@@ -89,8 +89,13 @@
               >
                 <Image Source="{Binding Thumbnail}" Stretch="UniformToFill" />
               </Border>
-              <!-- PDF アイコン -->
-              <TextBlock Text="📄" FontSize="16" Margin="0,0,6,0" VerticalAlignment="Center">
+              <!-- 非画像アイコン（PDF=📄・テキスト=📃・バイナリ=📦。種別で切替） -->
+              <TextBlock
+                Text="{Binding KindIcon}"
+                FontSize="16"
+                Margin="0,0,6,0"
+                VerticalAlignment="Center"
+              >
                 <TextBlock.Style>
                   <Style TargetType="TextBlock">
                     <Setter Property="Visibility" Value="Collapsed" />
