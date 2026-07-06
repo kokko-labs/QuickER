@@ -1,0 +1,50 @@
+# QuickER パッケージ公開ワークフロー（手動トリガのみ）
+#
+# 運用メモ:
+# - 初回公開は README（P0）完成後・NUGET_API_KEY シークレットの登録が前提
+# - バージョンは Directory.Build.props の VersionPrefix で管理する
+#   （公開済みの版は再公開不可なので、公開前に必ずバージョンを上げること）
+# - dry_run=true（既定）では pack と検証までを行い、NuGet.org への push は行わない
+name: Publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "true の場合は pack と検証のみを行い、NuGet.org への push は行わない"
+        required: true
+        type: boolean
+        default: true
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: リポジトリを取得
+        uses: actions/checkout@v4
+
+      - name: .NET SDK をセットアップ
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: ビルド
+        run: dotnet build QuickER.slnx
+
+      - name: テスト
+        run: dotnet test QuickER.slnx --no-build --logger "console;verbosity=normal"
+
+      - name: パッケージ生成（ランタイム3種+CLI）
+        run: |
+          dotnet pack src/QuickER.Runtime/QuickER.Runtime.csproj --no-build --output ${{ runner.temp }}/nupkg
+          dotnet pack src/QuickER.Runtime.SqlServer/QuickER.Runtime.SqlServer.csproj --no-build --output ${{ runner.temp }}/nupkg
+          dotnet pack src/QuickER.Runtime.Sqlite/QuickER.Runtime.Sqlite.csproj --no-build --output ${{ runner.temp }}/nupkg
+          dotnet pack src/QuickER.Cli/QuickER.Cli.csproj --no-build --output ${{ runner.temp }}/nupkg
+
+      - name: 生成物一覧を表示
+        run: Get-ChildItem "${{ runner.temp }}/nupkg" -Recurse
+
+      - name: NuGet.org へ push（dry_run=false のときのみ）
+        if: ${{ inputs.dry_run == false }}
+        run: dotnet nuget push "${{ runner.temp }}/nupkg/*.nupkg" --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate

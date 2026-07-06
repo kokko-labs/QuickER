@@ -10,6 +10,14 @@
 *.scriban text eol=crlf
 
 ###############################################################################
+# ランタイムパッケージのチェックイン済み生成ソース（RuntimePackageSourceRenderer 出力）は、
+# ドリフト検知がレンダラー出力（CRLF）とのバイト単位一致を前提とするため CRLF に固定する。
+###############################################################################
+src/QuickER.Runtime/QuickERRuntime.g.cs text eol=crlf
+src/QuickER.Runtime.SqlServer/QuickERRuntimeSqlServer.g.cs text eol=crlf
+src/QuickER.Runtime.Sqlite/QuickERRuntimeSqlite.g.cs text eol=crlf
+
+###############################################################################
 # Set default behavior for command prompt diff.
 #
 # This is need for earlier builds of msysgit that does not have it on by

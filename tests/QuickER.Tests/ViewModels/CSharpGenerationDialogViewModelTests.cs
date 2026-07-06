@@ -250,6 +250,75 @@ public class CSharpGenerationDialogViewModelTests
         vm.EfCoreNamespace.Should().Be("Contoso.Sales.EfCore");
     }
 
+    /// <summary>
+    /// EF Core 選択中はパッケージ参照モードのチェックボックスが無効化され、
+    /// 既にチェック済みだった場合は EF Core 選択時に自動で解除されることを検証する
+    /// </summary>
+    [Fact(DisplayName = "EF Core 選択中はパッケージ参照モードが無効化・チェック解除される")]
+    public void UseRuntimePackages_IsDisabledAndCleared_WhenEfCoreSelected()
+    {
+        var vm = CreateViewModel(out _);
+        vm.BaseNamespace = "Sample.Domain";
+        vm.OutputFilePath = @"C:\temp\Entities.g.cs";
+
+        vm.CanUseRuntimePackages.Should().BeTrue("既定は DB アクセス「なし」のため操作可能");
+
+        vm.UseRuntimePackages = true;
+        vm.UseRuntimePackages.Should().BeTrue();
+
+        vm.DbAccessEfCore = true;
+
+        vm.CanUseRuntimePackages.Should().BeFalse("EF Core とは併用できないため操作不可になる");
+        vm.UseRuntimePackages.Should().BeFalse("EF Core 選択時にチェックが自動で解除される");
+
+        // EF Core を選んだ後にチェックを入れようとしても、UI 側は IsEnabled=False で弾く想定だが、
+        // VM 単体としても「解除された状態を維持する」ことを OK 確定結果で確認する
+        vm.OkCommand.Execute(null);
+
+        vm.Result.Should().NotBeNull();
+        vm.Result!.Options.GenerateEfCore.Should().BeTrue();
+        vm.Result.Options.UseRuntimePackages.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// 自作 Repository 選択（EF Core ではない）ではパッケージ参照モードが操作可能で、
+    /// チェックした場合に結果オプションへ反映されることを検証する
+    /// </summary>
+    [Fact(DisplayName = "自作 Repository 選択ではパッケージ参照モードが結果へ反映される")]
+    public void UseRuntimePackages_IsReflectedInResult_WhenRepositorySelected()
+    {
+        var vm = CreateViewModel(out _, currentProvider: new QuickER.SqlServer.SqlServerProvider());
+        vm.BaseNamespace = "Sample.Domain";
+        vm.OutputFilePath = @"C:\temp\Entities.g.cs";
+        vm.DbAccessRepository = true;
+
+        vm.CanUseRuntimePackages.Should().BeTrue();
+        vm.UseRuntimePackages = true;
+
+        vm.OkCommand.Execute(null);
+
+        vm.Result.Should().NotBeNull();
+        vm.Result!.Options.UseRuntimePackages.Should().BeTrue();
+        vm.Result.Options.GenerateRepositories.Should().BeTrue();
+    }
+
+    /// <summary>EF Core 選択中に一度外れても、選択解除後は再びパッケージ参照モードが操作可能に戻ることを検証する</summary>
+    [Fact(DisplayName = "EF Core 選択解除後はパッケージ参照モードが再び操作可能になる")]
+    public void UseRuntimePackages_BecomesEnabledAgain_AfterEfCoreDeselected()
+    {
+        var vm = CreateViewModel(out _);
+        vm.BaseNamespace = "Sample.Domain";
+
+        vm.DbAccessEfCore = true;
+        vm.CanUseRuntimePackages.Should().BeFalse();
+
+        vm.DbAccessNone = true;
+        vm.CanUseRuntimePackages.Should().BeTrue("EF Core 選択解除で再び操作可能になる");
+
+        vm.UseRuntimePackages = true;
+        vm.UseRuntimePackages.Should().BeTrue();
+    }
+
     /// <summary>不正な名前空間ではエラーメッセージを表示し、確定・クローズしないことを検証する</summary>
     [Fact(DisplayName = "不正な namespace ではエラーメッセージを表示して閉じない")]
     public void Ok_WithInvalidNamespace_ShowsError()
@@ -319,6 +388,27 @@ public class CSharpGenerationDialogViewModelTests
         vm.PreviewFiles.Should().Contain(line => line.Contains("Entities.g.cs"));
         vm.PreviewFiles.Should().Contain(line => line.Contains("Runtime.g.cs"));
         vm.PreviewFiles.Should().Contain(line => line.Contains("namespace Acme.App.Entities"));
+    }
+
+    /// <summary>パッケージ参照モードの切替でプレビューが追従し、Runtime ファイルの有無が連動することを検証する</summary>
+    [Fact(DisplayName = "パッケージ参照モード切替でプレビューから Runtime が消える")]
+    public void UseRuntimePackages_TogglesRuntimeFileInPreview()
+    {
+        var vm = CreateViewModel(out _);
+        vm.BaseNamespace = "Acme.App";
+        vm.SplitFilesByCategory = true;
+
+        vm.UseRuntimePackages = true;
+
+        vm.PreviewFiles.Should()
+            .NotContain(
+                line => line.Contains("Runtime.g.cs"),
+                "パッケージ参照モードではランタイムを出力しないため、プレビューにも Runtime ファイルが現れてはならない"
+            );
+
+        vm.UseRuntimePackages = false;
+
+        vm.PreviewFiles.Should().Contain(line => line.Contains("Runtime.g.cs"));
     }
 
     /// <summary>生成対象を外すと、その名前空間欄が隠れプレビューからも消えることを検証する</summary>

@@ -53,6 +53,63 @@ internal sealed class RenderScope
     /// <summary>ファイル冒頭のヘッダ（<c>// &lt;auto-generated /&gt;</c>・<c>#nullable enable</c>・using）を出力するか</summary>
     /// <remarks>1 ファイルに複数スペックを連結する場合、2 つ目以降はヘッダを出さず using は先頭スペックへ集約する</remarks>
     public required bool RenderHeader { get; init; }
+
+    /// <summary>
+    /// ランタイム（スキーマ非依存の固定コード）を NuGet パッケージ用ソースとして書き出すモードかどうか（既定 false）。
+    /// </summary>
+    /// <remarks>
+    /// true のとき、スキーマが空でも固定 infra コードを完全に書き出せるよう、テンプレートの
+    /// 「スキーマが空だと出力されない」ガード（<c>entity_classes.size &gt; 0</c> 等）を加算的に緩める。
+    /// 既定 false では通常生成の出力はバイト 1 つ変わらない（<see cref="RuntimePackageSourceRenderer"/> のみが true を渡す）。
+    /// </remarks>
+    public bool RuntimePackageExport { get; init; }
+
+    /// <summary>
+    /// パッケージ化対象の固定 infra 型・メンバーの可視性（既定 <c>"internal"</c>）。
+    /// </summary>
+    /// <remarks>
+    /// 通常生成では <c>"internal"</c> のままで出力はバイト不変。パッケージ書き出し時は <c>"public"</c> を渡し、
+    /// 生成コード（別アセンブリ）や別パッケージから参照可能にする。
+    /// </remarks>
+    public string InfraVisibility { get; init; } = "internal";
+
+    /// <summary>
+    /// スキーマ非依存の固定 infra 型（契約・方言エンジン・EF 共通部品・EntityBase/属性/VO 基底 等）を出力するか（既定 true）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 通常生成（インライン）では <c>true</c> で固定 infra を生成コードに同梱し、出力はバイト不変。
+    /// パッケージ参照モード（<see cref="CodeGenerationOptions.UseRuntimePackages"/>）の生成では <c>false</c> を渡し、
+    /// 固定 infra を出力せず NuGet パッケージ <c>QuickER.Runtime.*</c> の型を <c>using</c> で参照する。
+    /// </para>
+    /// <para>
+    /// <see cref="RuntimePackageExport"/>（パッケージ用ソースの<b>書き出し</b>）とは別軸。書き出し時は <c>true</c>（固定 infra を全出力）、
+    /// 参照モードの通常生成時は <c>false</c>（固定 infra を落として per-entity・DI・DbContext のスキーマ依存物だけを残す）。
+    /// スキーマ依存物（Entity/EditModel/Mapper/VO 具象/I{Entity}Repository/エンティティ別実装/DI 登録）は本フラグに依らず常に出力する。
+    /// </para>
+    /// </remarks>
+    public bool EmitSharedInfra { get; init; } = true;
+
+    /// <summary>
+    /// パッケージ参照モードで生成ファイルの先頭コメントへ載せる案内テキスト（必要な PackageReference 等）。既定は空。
+    /// </summary>
+    /// <remarks>
+    /// 通常生成（インライン）では空リストを渡し、ヘッダに追加行は出ない（バイト不変）。パッケージ参照モードのみ
+    /// <see cref="RuntimePackageReferenceGuidance"/> の出力を渡し、各行を <c>// </c> 接頭辞でヘッダへ差し込む。
+    /// </remarks>
+    public IReadOnlyList<string> PackageGuidanceLines { get; init; } = [];
+
+    /// <summary>
+    /// ブロック名前空間（<see cref="BlockNamespace"/>）の内側へ出力する using（名前空間スコープ using）。既定は空。
+    /// </summary>
+    /// <remarks>
+    /// 非分割マルチ方言のパッケージ参照モードで、方言エンジンパッケージ（<c>QuickER.Runtime.SqlServer</c> /
+    /// <c>QuickER.Runtime.Sqlite</c>）を各方言 namespace ブロックの内側へ限定して <c>using</c> する。
+    /// ファイル先頭で両方言パッケージを開くと <c>ISqlConnectionFactory</c> 等が方言間で曖昧参照になるため、
+    /// 方言別実装のブロック内でだけ自方言のパッケージを開く（インライン多方言が方言別 namespace 内で型を定義していたのと対称）。
+    /// 通常生成では空（追加行なし＝バイト不変）。
+    /// </remarks>
+    public IReadOnlyList<string> BlockUsings { get; init; } = [];
 }
 
 /// <summary>生成モデルを Scriban テンプレートで C# ソースコードへレンダリングするレンダラー</summary>
@@ -219,6 +276,19 @@ internal sealed class ScribanCSharpRenderer
             ["connection_factory_impl_type"] = dialect.ConnectionFactoryImplType,
             ["repository_base_class"] = dialect.RepositoryBaseClass,
             ["sql_query_executor_class"] = dialect.SqlQueryExecutorClass,
+            // ランタイムのパッケージ書き出しモードと固定 infra の可視性。通常生成では既定（false / "internal"）で
+            // 供給し、出力はバイト不変。パッケージ書き出し時のみ RuntimePackageSourceRenderer が true / "public" を渡す。
+            // 全既存経路へ必ず供給する（供給漏れがあると scriban が空文字を出しバイト不変が壊れるため）。
+            ["runtime_package_export"] = scope.RuntimePackageExport,
+            ["infra_visibility"] = scope.InfraVisibility,
+            // スキーマ非依存の固定 infra を出力するか。通常生成は true（バイト不変）。パッケージ参照モードの
+            // 通常生成のみ false を渡し、固定 infra を落として per-entity・DI・DbContext だけを残す。
+            // 全既存経路へ必ず供給する（供給漏れは scriban が空文字を出しバイト不変を壊すため）。
+            ["emit_shared_infra"] = scope.EmitSharedInfra,
+            // パッケージ参照モードでヘッダへ載せる案内行。通常生成は空リスト（追加行なし＝バイト不変）。
+            ["package_guidance_lines"] = scope.PackageGuidanceLines,
+            // ブロック名前空間の内側へ出す方言限定 using（非分割マルチ方言のパッケージ参照モードのみ非空）。
+            ["block_usings"] = scope.BlockUsings,
         };
 
         // テンプレートは本ライブラリ内に固定で持つ信頼済みのものであり、ループ回数・出力量は ER 図の規模に

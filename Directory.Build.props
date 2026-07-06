@@ -1,0 +1,13 @@
+<Project>
+  <!--
+    QuickER 全プロジェクト共有のバージョン一元化（ロックステップ版管理）。
+
+    ランタイム NuGet パッケージ（QuickER.Runtime / .SqlServer / .Sqlite）と、CLI／本体ツールの
+    バージョンをこの VersionPrefix 単一ソースで一元管理する。パッケージ版＝ツール版として発行し、
+    同一メジャー内では生成コードとランタイムパッケージが互換であることを SemVer で宣言する運用とする。
+    バージョンを上げるときはここ 1 箇所を変更する。
+  -->
+  <PropertyGroup>
+    <VersionPrefix>0.1.0</VersionPrefix>
+  </PropertyGroup>
+</Project>

@@ -283,6 +283,21 @@ public partial class MainViewModel
             var message = string.IsNullOrWhiteSpace(diagnostics)
                 ? "C# コードの生成が完了しました。"
                 : $"C# コードの生成が完了しました。{Environment.NewLine}{Environment.NewLine}{diagnostics}";
+
+            // パッケージ参照モードのときは、必要な PackageReference をコピー可能な形で続けて提示する
+            // （メッセージボックスの本文はドラッグ選択でコピーできるため、新規ダイアログは設けない）
+            if (options.UseRuntimePackages)
+            {
+                var guidance = string.Join(
+                    Environment.NewLine,
+                    RuntimePackageReferenceGuidance.BuildGuidanceLines(
+                        options,
+                        RuntimePackages.ResolveGuidanceVersion()
+                    )
+                );
+                message += $"{Environment.NewLine}{Environment.NewLine}{guidance}";
+            }
+
             _dialogs.ShowInformation(message, "完了");
         }
         catch (Exception ex)

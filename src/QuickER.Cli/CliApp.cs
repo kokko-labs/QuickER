@@ -79,6 +79,7 @@ public static class CliApp
         var ns = NamespaceOption();
         var split = SplitOption();
         var repositoryDialects = RepositoryDialectsOption();
+        var runtimePackages = RuntimePackagesOption();
 
         var command = new Command("generate", "ER 図 JSON から C# コードを生成する")
         {
@@ -89,6 +90,7 @@ public static class CliApp
             ns,
             split,
             repositoryDialects,
+            runtimePackages,
         };
 
         command.SetAction(parseResult =>
@@ -99,7 +101,8 @@ public static class CliApp
                 parseResult.GetValue(provider)!,
                 parseResult.GetValue(ns),
                 parseResult.GetValue(split),
-                parseResult.GetValue(repositoryDialects)
+                parseResult.GetValue(repositoryDialects),
+                parseResult.GetValue(runtimePackages)
             )
         );
 
@@ -113,7 +116,8 @@ public static class CliApp
         string providerName,
         string? ns,
         bool split,
-        string? repositoryDialects
+        string? repositoryDialects,
+        bool runtimePackages
     )
     {
         if (!schemaFile.Exists)
@@ -137,7 +141,7 @@ public static class CliApp
         CodeGenerationOptions options;
         try
         {
-            options = LoadOptions(config, ns, split, provider, repositoryDialects);
+            options = LoadOptions(config, ns, split, provider, repositoryDialects, runtimePackages);
         }
         catch (RepositoryDialectUnsupportedException ex)
         {
@@ -153,7 +157,7 @@ public static class CliApp
             document.Schema,
             options
         );
-        return WriteResult(result, output);
+        return WriteResult(result, output, options);
     }
 
     // ---------------- scaffold ----------------
@@ -179,6 +183,7 @@ public static class CliApp
         var ns = NamespaceOption();
         var split = SplitOption();
         var repositoryDialects = RepositoryDialectsOption();
+        var runtimePackages = RuntimePackagesOption();
 
         var command = new Command(
             "scaffold",
@@ -192,6 +197,7 @@ public static class CliApp
             ns,
             split,
             repositoryDialects,
+            runtimePackages,
         };
 
         command.SetAction(
@@ -204,6 +210,7 @@ public static class CliApp
                     parseResult.GetValue(ns),
                     parseResult.GetValue(split),
                     parseResult.GetValue(repositoryDialects),
+                    parseResult.GetValue(runtimePackages),
                     cancellationToken
                 )
         );
@@ -219,6 +226,7 @@ public static class CliApp
         string? ns,
         bool split,
         string? repositoryDialects,
+        bool runtimePackages,
         CancellationToken cancellationToken
     )
     {
@@ -254,7 +262,7 @@ public static class CliApp
         CodeGenerationOptions options;
         try
         {
-            options = LoadOptions(config, ns, split, provider, repositoryDialects);
+            options = LoadOptions(config, ns, split, provider, repositoryDialects, runtimePackages);
         }
         catch (RepositoryDialectUnsupportedException ex)
         {
@@ -270,7 +278,7 @@ public static class CliApp
             diagram,
             options
         );
-        return WriteResult(result, output);
+        return WriteResult(result, output, options);
     }
 
     // ---------------- 共有 ----------------
@@ -299,15 +307,25 @@ public static class CliApp
                 + "未指定時は --provider から単一導出する。設定ファイルを上書き）",
         };
 
+    private static Option<bool> RuntimePackagesOption() =>
+        new("--runtime-packages")
+        {
+            Description =
+                "生成コードにランタイム（固定コード）を含めず、NuGet パッケージ QuickER.Runtime.* への参照で賄う"
+                + "（既定 false。EF Core 生成とは併用不可。設定ファイルを上書き）",
+        };
+
     /// <summary>
-    /// 設定ファイル（quicker.json）を読み、CLI フラグ・<c>--provider</c>・<c>--repository-dialects</c> で
-    /// 上書きして生成オプションを構築する。
+    /// 設定ファイル（quicker.json）を読み、CLI フラグ・<c>--provider</c>・<c>--repository-dialects</c>・
+    /// <c>--runtime-packages</c> で上書きして生成オプションを構築する。
     /// </summary>
     /// <remarks>
     /// <paramref name="repositoryDialects"/>（<c>--repository-dialects</c>）指定時は
     /// <see cref="CodeGenerationOptions.RepositoryDialects"/> へカンマ区切りの各方言を設定する。
     /// 未指定時は従来どおり <paramref name="provider"/> の名前を単一 <see cref="CodeGenerationOptions.RepositoryDialect"/>
     /// として設定する（設定ファイルの値は無視する。図の TargetDbms から導出される値のため CLI 引数を単一の正とする）。
+    /// <paramref name="runtimePackages"/>（<c>--runtime-packages</c>）指定時は
+    /// <see cref="CodeGenerationOptions.UseRuntimePackages"/> を true にする（未指定時は設定ファイルの値を使う）。
     /// 自作 Repository 生成（<c>GenerateRepositories</c>）が要求され、かつ実効方言に未対応方言が含まれる場合は
     /// <see cref="RepositoryDialectUnsupportedException"/> を送出する
     /// </remarks>
@@ -316,7 +334,8 @@ public static class CliApp
         string? ns,
         bool split,
         IDatabaseProvider provider,
-        string? repositoryDialects = null
+        string? repositoryDialects = null,
+        bool runtimePackages = false
     )
     {
         var node = config is { Exists: true }
@@ -331,6 +350,11 @@ public static class CliApp
         if (split)
         {
             node["SplitFilesByCategory"] = true;
+        }
+
+        if (runtimePackages)
+        {
+            node["UseRuntimePackages"] = true;
         }
 
         if (!string.IsNullOrWhiteSpace(repositoryDialects))
@@ -406,7 +430,15 @@ public static class CliApp
     }
 
     /// <summary>生成結果の診断を表示し、エラーが無ければファイルを書き出す。終了コードを返す</summary>
-    private static int WriteResult(CodeGenerationResult result, DirectoryInfo output)
+    /// <remarks>
+    /// <paramref name="options"/>.<see cref="CodeGenerationOptions.UseRuntimePackages"/> が有効な場合、
+    /// 生成成功後に必要な PackageReference の案内（<see cref="RuntimePackageReferenceGuidance"/>）を続けて出力する。
+    /// </remarks>
+    private static int WriteResult(
+        CodeGenerationResult result,
+        DirectoryInfo output,
+        CodeGenerationOptions options
+    )
     {
         foreach (var diagnostic in result.Diagnostics)
         {
@@ -428,6 +460,22 @@ public static class CliApp
         }
 
         Console.WriteLine($"{written.Count} 個のファイルを生成しました。");
+
+        if (options.UseRuntimePackages)
+        {
+            Console.WriteLine();
+
+            foreach (
+                var line in RuntimePackageReferenceGuidance.BuildGuidanceLines(
+                    options,
+                    RuntimePackages.ResolveGuidanceVersion()
+                )
+            )
+            {
+                Console.WriteLine(line);
+            }
+        }
+
         return 0;
     }
 }

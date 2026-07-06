@@ -40,7 +40,69 @@ internal static class GeneratedFileUsings
             .ToList();
 
         ordered.AddRange(spec.CrossNamespaceUsings);
+
+        // パッケージ参照モード: 固定 infra（Runtime バケット・契約・方言エンジン・EF 部品）を出力しないため、
+        // 生成コードは固定名前空間の型を using で参照する。プランナはこのモードで Runtime バケットのファイルを
+        // 計画せず、Runtime を指すクロス using も付けない（PackageRuntimeUsings が唯一の供給元）。
+        if (options.UseRuntimePackages)
+        {
+            foreach (var ns in PackageRuntimeUsings(spec, options))
+            {
+                if (!ordered.Contains(ns, StringComparer.Ordinal))
+                {
+                    ordered.Add(ns);
+                }
+            }
+        }
+
         return ordered;
+    }
+
+    /// <summary>
+    /// パッケージ参照モードで、指定ファイル（含有バケット・方言・生成対象）が参照すべき固定名前空間
+    /// （<see cref="RuntimePackages"/>）の一覧を返す（唯一の正）。
+    /// </summary>
+    /// <remarks>
+    /// <list type="bullet">
+    ///   <item>共有基盤・方言中立契約（EntityBase・属性・VO 基底・IRepository・SqlQuery・ISqlExecutor 等）→ <see cref="RuntimePackages.Core"/>。
+    ///     いずれかのバケットを含むファイルに常に必要（Entity のみでも EntityBase／属性を参照するため）</item>
+    ///   <item>Repository バケットを含み自作 Repository 実装を出す（<c>GenerateRepositories</c>）ファイル → その方言の
+    ///     方言エンジン（<see cref="RuntimePackages.SqlServer"/> / <see cref="RuntimePackages.Sqlite"/>）。
+    ///     エンティティ別実装が方言 Repository 基底・接続ファクトリ・実行器を参照する</item>
+    ///   <item>EfCore バケットを含むファイル → <see cref="RuntimePackages.EntityFrameworkCore"/>
+    ///     （DbContext・EF 版実装が EF 共通部品を参照する）</item>
+    /// </list>
+    /// マルチターゲット時は方言実装スペックが各自の方言エンジンだけを参照する（spec.Dialect による）。
+    /// </remarks>
+    private static IEnumerable<string> PackageRuntimeUsings(
+        GeneratedFileSpec spec,
+        CodeGenerationOptions options
+    )
+    {
+        if (spec.Buckets.Count == 0)
+        {
+            yield break;
+        }
+
+        // コア（共通基盤＋方言中立契約）はいずれのバケットでも必要。
+        yield return RuntimePackages.Core;
+
+        // 自作 Repository 実装を出すファイルは、その方言の方言エンジンパッケージを参照する。
+        // 契約のみ（マルチ方言の契約スペック・EF 単独出力）は方言エンジンを参照しない（コアの契約で足りる）。
+        if (
+            spec.Buckets.Contains(GenerationBucket.Repository)
+            && options.GenerateRepositories
+            && !spec.ContractOnly
+        )
+        {
+            yield return IsSqliteDialect(spec) ? RuntimePackages.Sqlite : RuntimePackages.SqlServer;
+        }
+
+        // EF 生成物（DbContext・EF 版実装）は EF 共通部品パッケージを参照する。
+        if (spec.Buckets.Contains(GenerationBucket.EfCore))
+        {
+            yield return RuntimePackages.EntityFrameworkCore;
+        }
     }
 
     /// <summary>このスペックの方言が SQLite かどうか（ADO using の出し分けに使う）</summary>
@@ -154,21 +216,28 @@ internal static class GeneratedFileUsings
                 //   SQL Server 方言のみで必要（SQLite はプレーン SELECT＋DataReader 実体化のため不要）。
                 // 契約のみのスペック（マルチ方言の契約ファイル・EF 単独出力）は ADO / DI を出さない。
                 // 方言実装スペック（!ContractOnly）だけがその方言の ADO を出す（依存排他ガードの一般化）。
+                // パッケージ参照モードでは方言 Repository 基底・実行器・接続ファクトリ（ADO を使う固定 infra）は
+                // 方言エンジンパッケージが持つため、生成側の ADO / JSON 直接依存は不要。DI 登録拡張だけが残るため
+                // Microsoft.Extensions.DependencyInjection のみを付ける（SqlClient / Sqlite / System.Text.Json は落とす）。
                 if (options.GenerateRepositories && !spec.ContractOnly)
                 {
-                    yield return "System.Collections";
-                    yield return "System.Data";
                     yield return "Microsoft.Extensions.DependencyInjection";
 
-                    if (IsSqliteDialect(spec))
+                    if (!options.UseRuntimePackages)
                     {
-                        yield return "Microsoft.Data.Sqlite";
-                    }
-                    else
-                    {
-                        yield return "System.Text.Json";
-                        yield return "System.Text.Json.Serialization.Metadata";
-                        yield return "Microsoft.Data.SqlClient";
+                        yield return "System.Collections";
+                        yield return "System.Data";
+
+                        if (IsSqliteDialect(spec))
+                        {
+                            yield return "Microsoft.Data.Sqlite";
+                        }
+                        else
+                        {
+                            yield return "System.Text.Json";
+                            yield return "System.Text.Json.Serialization.Metadata";
+                            yield return "Microsoft.Data.SqlClient";
+                        }
                     }
                 }
 

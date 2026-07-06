@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <!-- 生成ソース（.g.cs）は using を明示するため ImplicitUsings は無効にする（暗黙 using との重複警告を避ける） -->
+    <ImplicitUsings>disable</ImplicitUsings>
+
+    <!-- NuGet パッケージメタデータ。バージョンは Directory.Build.props の VersionPrefix に一元化 -->
+    <IsPackable>true</IsPackable>
+    <PackageId>QuickER.Runtime</PackageId>
+    <Description>QuickER が生成するコードのランタイム（共通基盤・方言中立の Repository 共通契約）。BCL のみに依存する。</Description>
+    <!-- TODO: 公開時に実リポジトリ URL へ差し替える -->
+    <RepositoryUrl>https://github.com/QuickER/QuickER</RepositoryUrl>
+    <!-- TODO: リポジトリに LICENSE ファイルが無いためライセンス表現は未設定。LICENSE 追加後に PackageLicenseExpression 等を設定する -->
+  </PropertyGroup>
+</Project>

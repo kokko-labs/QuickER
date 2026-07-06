@@ -157,6 +157,25 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     [ObservableProperty]
     private bool _useGuidKeyForStringPrimaryKey;
 
+    /// <summary>
+    /// ランタイム（固定コード）を生成物に含めず、NuGet パッケージ QuickER.Runtime.* への参照で賄うかどうか
+    /// </summary>
+    /// <remarks>
+    /// EF Core（<see cref="GenerateEfCore"/>）とは併用できないため、EF Core 選択中は
+    /// <see cref="CanUseRuntimePackages"/> が false になり、UI 側でチェックボックスを無効化＋チェック解除する
+    /// </remarks>
+    [ObservableProperty]
+    private bool _useRuntimePackages;
+
+    /// <summary>「ランタイムを NuGet パッケージ参照にする」チェックボックスを操作可能かどうか（EF Core 選択中は不可）</summary>
+    public bool CanUseRuntimePackages => !GenerateEfCore;
+
+    /// <summary>パッケージ参照モードのチェックボックスのツールチップ（EF Core 選択時は理由を示す）</summary>
+    public string UseRuntimePackagesToolTip =>
+        GenerateEfCore
+            ? "EF Core 生成とは併用できません（EF の DbContext はスキーマ依存のためパッケージ境界を跨げません）"
+            : "生成コードから固定のランタイムコードを省き、NuGet パッケージ QuickER.Runtime.* への参照で賄います";
+
     /// <summary>入力エラーや補助メッセージ</summary>
     [ObservableProperty]
     private string _statusMessage = string.Empty;
@@ -286,11 +305,22 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
 
     partial void OnGenerateEfCoreChanged(bool value)
     {
+        // EF Core 選択中はパッケージ参照モードと併用できないため、チェックを強制的に外し操作不可にする
+        if (value)
+        {
+            UseRuntimePackages = false;
+        }
+
+        OnPropertyChanged(nameof(CanUseRuntimePackages));
+        OnPropertyChanged(nameof(UseRuntimePackagesToolTip));
         RaiseDbAccessChanged();
         RaiseDerivedChanged();
     }
 
     partial void OnGenerateValueObjectsChanged(bool value) => RaiseDerivedChanged();
+
+    // パッケージ参照モードの切替は Runtime ファイルの有無を変えるため、生成されるファイルのプレビューを追従させる
+    partial void OnUseRuntimePackagesChanged(bool value) => RefreshPreview();
 
     /// <summary>DB アクセスラジオ（なし／自作 Repository／EF Core）の表示状態を再通知する</summary>
     private void RaiseDbAccessChanged()
@@ -427,6 +457,8 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
             // （Repository ラジオは常時選択可のため、方言による無効化は行わない）
             GenerateRepositories = settings.GenerateRepositories;
             GenerateEfCore = settings.GenerateEfCore && !GenerateRepositories;
+            // EF Core 選択時は併用不可のため、保存値に依らず false になる（OnGenerateEfCoreChanged が強制済み）
+            UseRuntimePackages = settings.UseRuntimePackages && !GenerateEfCore;
             GenerateValueObjects = settings.GenerateValueObjects;
             UseGuidKeyForStringPrimaryKey = settings.UseGuidKeyForStringPrimaryKey;
             OutputFilePath = settings.OutputFilePath;
@@ -465,6 +497,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
             GenerateMappers = GenerateMappers,
             GenerateRepositories = GenerateRepositories,
             GenerateEfCore = GenerateEfCore,
+            UseRuntimePackages = UseRuntimePackages,
             GenerateValueObjects = GenerateValueObjects,
             UseGuidKeyForStringPrimaryKey = UseGuidKeyForStringPrimaryKey,
             OutputFilePath = OutputFilePath.Trim(),
@@ -496,6 +529,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
             GenerateRepositories = GenerateRepositories,
             RepositoryDialects = SelectedRepositoryDialects(),
             GenerateEfCore = GenerateEfCore,
+            UseRuntimePackages = UseRuntimePackages,
             GenerateValueObjects = GenerateValueObjects,
             UseGuidKeyForStringPrimaryKey = UseGuidKeyForStringPrimaryKey,
         };

@@ -48,6 +48,12 @@ public class CSharpGenerationSettings
     /// <summary>EF Core 用コード（DbContext＋EF 版 Repository）を生成するか（DB アクセスの排他選択）</summary>
     public bool GenerateEfCore { get; set; }
 
+    /// <summary>
+    /// ランタイム（固定コード）を生成物に含めず、NuGet パッケージ QuickER.Runtime.* への参照で賄うか
+    /// （既定 false。EF Core 生成とは併用不可のため EF Core 選択時は強制的に false になる）
+    /// </summary>
+    public bool UseRuntimePackages { get; set; }
+
     /// <summary>全カラムを値オブジェクト化するか</summary>
     public bool GenerateValueObjects { get; set; }
 

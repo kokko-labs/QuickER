@@ -105,6 +105,36 @@ internal static class FixtureDriftHarness
         VerifyOrRegenerate(result, outputFileName, driftReason);
     }
 
+    /// <summary>
+    /// ランタイムパッケージ用のチェックイン済みソース（<see cref="RuntimePackageSourceRenderer"/> 出力）を照合、
+    /// または再生成する。既存フィクスチャと同一経路（<see cref="RegenEnvVar"/>）で上書き再生成される。
+    /// </summary>
+    /// <param name="rendered">レンダラーが生成した現在のソース文字列（CRLF・バイト一致の基準）</param>
+    /// <param name="repoRelativePath">リポジトリ直下からの相対パス（例 <c>src/QuickER.Runtime/QuickERRuntime.g.cs</c>）</param>
+    /// <param name="driftReason">ドリフト時に表示する理由（末尾に再生成コマンドが自動付与される）</param>
+    public static void VerifyOrRegeneratePackageSource(
+        string rendered,
+        string repoRelativePath,
+        string driftReason
+    )
+    {
+        var checkedInPath = ResolveRepoRelativePath(repoRelativePath);
+
+        if (IsRegenerationRequested())
+        {
+            // File.WriteAllText は UTF-8（BOM なし）で書き出し、改行はそのまま（レンダラー由来の CRLF を保持）
+            File.WriteAllText(checkedInPath, rendered);
+
+            return;
+        }
+
+        var committed = File.ReadAllText(checkedInPath);
+
+        committed
+            .Should()
+            .Be(rendered, $"{driftReason} 再生成先: {checkedInPath}。{RegenCommandHint}");
+    }
+
     /// <summary>生成結果をコミット済みフィクスチャと照合、または再生成する共通処理。</summary>
     private static void VerifyOrRegenerate(
         CodeGenerationResult result,
@@ -164,6 +194,35 @@ internal static class FixtureDriftHarness
 
         throw new FileNotFoundException(
             $"コミット済みフィクスチャ {outputFileName} が見つかりませんでした。"
+        );
+    }
+
+    /// <summary>
+    /// リポジトリ直下からの相対パス（例 <c>src/QuickER.Runtime/QuickERRuntime.g.cs</c>）を、
+    /// テストアセンブリの位置から <c>QuickER.slnx</c> を目印にリポジトリ直下を遡って解決する。
+    /// </summary>
+    private static string ResolveRepoRelativePath(string repoRelativePath)
+    {
+        var dir = new DirectoryInfo(
+            Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)!
+        );
+
+        while (dir is not null)
+        {
+            // リポジトリ直下は QuickER.slnx が存在する位置で判定する。
+            if (File.Exists(Path.Combine(dir.FullName, "QuickER.slnx")))
+            {
+                return Path.Combine(
+                    dir.FullName,
+                    repoRelativePath.Replace('/', Path.DirectorySeparatorChar)
+                );
+            }
+
+            dir = dir.Parent;
+        }
+
+        throw new FileNotFoundException(
+            $"リポジトリ直下（QuickER.slnx）が見つからず {repoRelativePath} を解決できませんでした。"
         );
     }
 }

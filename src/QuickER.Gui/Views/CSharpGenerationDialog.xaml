@@ -299,6 +299,22 @@
             <CheckBox Content="SQLite" IsChecked="{Binding TargetSqlite}" />
           </StackPanel>
         </Grid>
+
+        <!-- ランタイムのパッケージ参照モード（EF Core 選択中は併用不可のため無効化） -->
+        <Grid Margin="0,10,0,0">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="96" />
+            <ColumnDefinition Width="*" />
+          </Grid.ColumnDefinitions>
+          <TextBlock Grid.Column="0" Style="{StaticResource FieldLabel}" Text="ランタイム" />
+          <CheckBox
+            Grid.Column="1"
+            Content="ランタイムを NuGet パッケージ参照にする（生成物にランタイムを含めない）"
+            IsChecked="{Binding UseRuntimePackages}"
+            IsEnabled="{Binding CanUseRuntimePackages}"
+            ToolTip="{Binding UseRuntimePackagesToolTip}"
+          />
+        </Grid>
       </StackPanel>
     </Border>
 

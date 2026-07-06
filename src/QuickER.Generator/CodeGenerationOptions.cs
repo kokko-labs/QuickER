@@ -166,4 +166,26 @@ public sealed class CodeGenerationOptions
 
     /// <summary>分割時の EfCore（DbContext・構成）クラスの名前空間。空なら <see cref="NamespaceName"/> へフォールバックする</summary>
     public string? EfCoreNamespace { get; init; }
+
+    /// <summary>
+    /// スキーマ非依存の固定コード（ランタイム）を生成コードへ同梱せず、NuGet パッケージ <c>QuickER.Runtime.*</c> への参照で賄うかどうか（既定 false）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>true</c> のとき、固定 infra（<c>EntityBase</c>・属性・VO 基底・<c>IRepository</c>・<c>SqlQuery</c>・<c>ISqlExecutor</c>・
+    /// 方言 Repository 基底・式木翻訳・実行器・接続ファクトリ等）を出力せず、生成コードは
+    /// <see cref="RuntimePackages.Core"/> / <see cref="RuntimePackages.SqlServer"/> / <see cref="RuntimePackages.Sqlite"/> /
+    /// <see cref="RuntimePackages.EntityFrameworkCore"/> の型を <c>using</c> で参照する。スキーマ依存物
+    /// （Entity / EditModel / Mapper / VO 具象 / I{Entity}Repository / エンティティ別実装 / DI 登録）は従来どおり出力する。
+    /// </para>
+    /// <para>
+    /// 分割時（<see cref="SplitFilesByCategory"/>）の共有基盤名前空間 <see cref="RuntimeNamespace"/> は本モードでは無視される
+    /// （固定 infra を出力しないため）。必要なパッケージ参照は <see cref="RuntimePackageReferenceGuidance"/> が案内する。
+    /// </para>
+    /// <para>
+    /// 本モードは <see cref="GenerateEfCore"/> とは併用できない（EF の <c>QuickErDbContext</c> がスキーマ依存で、
+    /// EF 固定 infra が同一アセンブリの具象 DbContext を参照するためパッケージ境界を跨げない）。併用指定は生成時に診断エラーになる。
+    /// </para>
+    /// </remarks>
+    public bool UseRuntimePackages { get; init; }
 }

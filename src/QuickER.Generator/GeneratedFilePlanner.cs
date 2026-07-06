@@ -352,15 +352,22 @@ public static class GeneratedFilePlanner
             return specs;
         }
 
-        var namespaceByBucket = active.ToDictionary(
+        // パッケージ参照モードの分割生成では、共有基盤（Runtime バケット）は固定 infra だけで構成されるため
+        // ファイルを作らない（全型がパッケージ QuickER.Runtime に移る）。他バケットの Runtime 向けクロス using は
+        // activeSet から外れることで自然に落ち、代わりに GeneratedFileUsings が固定名前空間 using を付ける。
+        var emittedBuckets = options.UseRuntimePackages
+            ? active.Where(bucket => bucket != GenerationBucket.Runtime).ToList()
+            : active;
+
+        var namespaceByBucket = emittedBuckets.ToDictionary(
             bucket => bucket,
             bucket => ResolveNamespace(options, bucket)
         );
-        var activeSet = active.ToHashSet();
+        var activeSet = emittedBuckets.ToHashSet();
 
         var splitSpecs = new List<GeneratedFileSpec>();
 
-        foreach (var bucket in active)
+        foreach (var bucket in emittedBuckets)
         {
             var ownNamespace = namespaceByBucket[bucket];
             // 依存グラフから「実際に参照する他バケット」の名前空間だけを using する

@@ -306,6 +306,131 @@ public class CliAppTests
     }
 
     /// <summary>
+    /// --runtime-packages 指定時は生成コードにランタイム（固定コード）の EntityBase が含まれず、
+    /// QuickER.Runtime への using 参照に切り替わり、PackageReference 案内が標準出力へ表示されることを検証する
+    /// </summary>
+    [Fact(DisplayName = "--runtime-packages 指定でランタイム非同梱＋案内が出力される")]
+    public async Task Generate_WithRuntimePackages_OmitsRuntimeAndPrintsGuidance()
+    {
+        var (schemaPath, outDir, root) = CreateSampleSchema();
+        var originalOut = Console.Out;
+        var writer = new StringWriter();
+        Console.SetOut(writer);
+
+        try
+        {
+            var exit = await CliApp.InvokeAsync([
+                "generate",
+                "--schema",
+                schemaPath,
+                "--out",
+                outDir,
+                "--namespace",
+                "Test.Pkg",
+                "--runtime-packages",
+            ]);
+
+            exit.Should().Be(0);
+            var files = Directory.GetFiles(outDir, "*.g.cs");
+            var code = string.Join("\n", files.Select(File.ReadAllText));
+            code.Should().NotContain("class EntityBase");
+            code.Should().Contain("using QuickER.Runtime;");
+
+            var stdout = writer.ToString();
+            stdout.Should().Contain("PackageReference");
+            stdout.Should().Contain("QuickER.Runtime");
+        }
+        finally
+        {
+            Console.SetOut(originalOut);
+
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>
+    /// --runtime-packages 未指定時は従来どおりランタイム（固定コード）が生成物に含まれることを検証する
+    /// （バイト不変の回帰確認を兼ねる軽量チェック。厳密なバイト一致は GeneratedFixtureDriftTests が担保）
+    /// </summary>
+    [Fact(DisplayName = "--runtime-packages 未指定時は従来どおりランタイムが同梱される")]
+    public async Task Generate_WithoutRuntimePackages_IncludesRuntimeAsBefore()
+    {
+        var (schemaPath, outDir, root) = CreateSampleSchema();
+
+        try
+        {
+            var exit = await CliApp.InvokeAsync([
+                "generate",
+                "--schema",
+                schemaPath,
+                "--out",
+                outDir,
+                "--namespace",
+                "Test.Inline",
+            ]);
+
+            exit.Should().Be(0);
+            var files = Directory.GetFiles(outDir, "*.g.cs");
+            var code = string.Join("\n", files.Select(File.ReadAllText));
+            code.Should().Contain("class EntityBase");
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>
+    /// --runtime-packages と GenerateEfCore=true の併用は生成器側の診断エラー（排他）となり、
+    /// CLI がスタックトレースなしの分かりやすいエラーメッセージ（終了コード 1）で表示することを検証する
+    /// </summary>
+    [Fact(DisplayName = "--runtime-packages と EF Core の併用は終了コード 1")]
+    public async Task Generate_RuntimePackagesWithEfCore_ReturnsError()
+    {
+        var (schemaPath, outDir, root) = CreateSampleSchema();
+        var configPath = Path.Combine(root, "quicker.json");
+        File.WriteAllText(configPath, """{ "GenerateEfCore": true }""");
+        var originalError = Console.Error;
+        var errorWriter = new StringWriter();
+        Console.SetError(errorWriter);
+
+        try
+        {
+            var exit = await CliApp.InvokeAsync([
+                "generate",
+                "--schema",
+                schemaPath,
+                "--out",
+                outDir,
+                "--config",
+                configPath,
+                "--runtime-packages",
+            ]);
+
+            exit.Should().Be(1);
+            Directory.Exists(outDir).Should().BeFalse("生成エラーのため出力は作られない");
+            var stderr = errorWriter.ToString();
+            stderr.Should().Contain("UseRuntimePackages");
+            stderr.Should().NotContain("   at "); // スタックトレースが裸で出ないことの簡易確認
+        }
+        finally
+        {
+            Console.SetError(originalError);
+
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>
     /// マルチ方言（--repository-dialects 2 つ以上）＋ GenerateEfCore=true は生成器側の診断エラーとなり、
     /// CLI が通常のエラー出力経路（終了コード 1・出力なし）でそれを表示できることを検証する
     /// （生成器の排他検証は MultiTargetRepositoryGenerationTests で担保済みで、ここでは CLI 経路の伝播のみ確認する）
