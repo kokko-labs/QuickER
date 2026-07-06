@@ -328,7 +328,17 @@
     />
   </Window.Resources>
 
-  <Grid Margin="16" AllowDrop="True" DragOver="ChatArea_DragOver" Drop="ChatArea_Drop">
+  <!--
+    D&D はトンネル段（Preview*）で受ける: メッセージバブルはコピー可能にするため TextBox で実装しており、
+    TextBox の組み込みドラッグ処理がバブリング段の DragOver/Drop を飲み込むため、
+    バブルの上へのファイルドロップがバブリングでは親 Grid に届かない
+  -->
+  <Grid
+    Margin="16"
+    AllowDrop="True"
+    PreviewDragOver="ChatArea_PreviewDragOver"
+    PreviewDrop="ChatArea_PreviewDrop"
+  >
     <Grid.RowDefinitions>
       <RowDefinition Height="Auto" />
       <RowDefinition Height="*" />

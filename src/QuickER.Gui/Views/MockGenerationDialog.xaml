@@ -301,8 +301,16 @@
         <ColumnDefinition Width="*" MinWidth="360" />
       </Grid.ColumnDefinitions>
 
-      <!-- 左: チャット + 接続設定 -->
-      <Grid Grid.Column="0" AllowDrop="True" DragOver="ChatArea_DragOver" Drop="ChatArea_Drop">
+      <!--
+        左: チャット + 接続設定。D&D はトンネル段（Preview*）で受ける
+        （メッセージバブル＝コピー可能な TextBox の組み込みドラッグ処理に飲み込まれないように）
+      -->
+      <Grid
+        Grid.Column="0"
+        AllowDrop="True"
+        PreviewDragOver="ChatArea_PreviewDragOver"
+        PreviewDrop="ChatArea_PreviewDrop"
+      >
         <Grid.RowDefinitions>
           <RowDefinition Height="Auto" />
           <RowDefinition Height="*" />

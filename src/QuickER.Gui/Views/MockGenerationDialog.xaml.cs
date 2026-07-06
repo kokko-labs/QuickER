@@ -165,18 +165,24 @@ public partial class MockGenerationDialog : Window
         e.Handled = true;
     }
 
-    /// <summary>チャット領域上のドラッグを、ファイルドロップのときだけ受け入れる</summary>
-    private void ChatArea_DragOver(object sender, DragEventArgs e)
+    /// <summary>
+    /// チャット領域上のファイルドラッグをトンネル段で先取りして受け入れる。
+    /// バブリング段だとメッセージバブル（コピー可能な TextBox）の組み込みドラッグ処理に
+    /// 飲み込まれ、バブルの上へのドロップが効かなくなる。テキスト等のドラッグは既定動作に任せる。
+    /// </summary>
+    private void ChatArea_PreviewDragOver(object sender, DragEventArgs e)
     {
-        e.Effects =
-            ViewModel.Attachments.IsEnabled && e.Data.GetDataPresent(DataFormats.FileDrop)
-                ? DragDropEffects.Copy
-                : DragDropEffects.None;
+        if (!e.Data.GetDataPresent(DataFormats.FileDrop))
+        {
+            return;
+        }
+
+        e.Effects = ViewModel.Attachments.IsEnabled ? DragDropEffects.Copy : DragDropEffects.None;
         e.Handled = true;
     }
 
-    /// <summary>ドロップされたファイルを添付へ取り込む（対応拡張子のみ・非対応は VM がステータス通知する）</summary>
-    private void ChatArea_Drop(object sender, DragEventArgs e)
+    /// <summary>ドロップされたファイルを添付へ取り込む（非対応種別は VM がステータス通知する）</summary>
+    private void ChatArea_PreviewDrop(object sender, DragEventArgs e)
     {
         if (!e.Data.GetDataPresent(DataFormats.FileDrop))
         {
