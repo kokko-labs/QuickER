@@ -1,4 +1,4 @@
-using QuickER.Generator;
+using QuickER.CodeGen.CSharp;
 using QuickER.Model;
 
 namespace QuickER.Provider;
@@ -8,7 +8,7 @@ namespace QuickER.Provider;
 /// </summary>
 /// <remarks>
 /// <para>
-/// 生成器（<c>QuickER.Generator</c>）は DB 非依存のため、型カタログの解釈はプロバイダ層のここで行う。
+/// 生成器（<c>QuickER.CodeGen.CSharp</c>）は DB 非依存のため、型カタログの解釈はプロバイダ層のここで行う。
 /// 各列の <see cref="Column.DataType"/> を <see cref="ITypeCatalog.TryParse"/> で正規型へ解析し、成功したものだけ
 /// <see cref="CanonicalTypeToken.Format"/> でトークン化して型情報へ載せる。解析不能な自由記述型はトークン null のまま
 /// （属性を省略する）。

@@ -1,6 +1,6 @@
 using System.Text;
 
-namespace QuickER.Generator;
+namespace QuickER.CodeGen.CSharp;
 
 /// <summary>
 /// 生成結果のファイルをディスクへ書き出すライター

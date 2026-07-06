@@ -1,4 +1,4 @@
-using QuickER.Generator;
+using QuickER.CodeGen.CSharp;
 using QuickER.Model;
 
 namespace QuickER.Tests.GeneratedSqliteFixture;

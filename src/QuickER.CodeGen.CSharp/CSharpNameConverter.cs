@@ -2,7 +2,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
 
-namespace QuickER.Generator;
+namespace QuickER.CodeGen.CSharp;
 
 /// <summary>
 /// テーブル名・カラム名を C# の識別子へ変換するコンバーター

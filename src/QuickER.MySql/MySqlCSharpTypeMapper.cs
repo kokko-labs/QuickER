@@ -1,6 +1,6 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
-using QuickER.Generator;
+using QuickER.CodeGen.CSharp;
 using QuickER.Model;
 using QuickER.Provider;
 

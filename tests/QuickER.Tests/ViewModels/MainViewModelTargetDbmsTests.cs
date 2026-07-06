@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using FluentAssertions;
-using QuickER.Generator;
+using QuickER.CodeGen.CSharp;
 using QuickER.Model;
 using QuickER.Provider;
 using QuickER.Services;

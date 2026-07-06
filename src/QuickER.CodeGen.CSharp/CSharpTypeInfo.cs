@@ -1,4 +1,4 @@
-namespace QuickER.Generator;
+namespace QuickER.CodeGen.CSharp;
 
 /// <summary>
 /// SQL Server 型から解決された C# 型の情報

@@ -26,7 +26,7 @@ csharpier format .                                       # 整形（グローバ
 ```
 QuickER.Model        意味モデル（依存ゼロ。X/Y/色などの視覚情報を持たない）
   ▲
-QuickER.Generator    DB非依存のC#コード生成エンジン（Scriban・テンプレートは埋め込みリソース）
+QuickER.CodeGen.CSharp    DB非依存のC#コード生成エンジン（Scriban・テンプレートは埋め込みリソース）
   ▲
 QuickER.Provider     DB抽象化の共通基盤（DdlGeneratorBase、インポータ共有部品）
   ▲

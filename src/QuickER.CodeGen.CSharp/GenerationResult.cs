@@ -1,4 +1,4 @@
-namespace QuickER.Generator;
+namespace QuickER.CodeGen.CSharp;
 
 /// <summary>
 /// コード生成の結果（生成ファイルと診断情報）

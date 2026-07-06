@@ -1,4 +1,4 @@
-namespace QuickER.Generator;
+namespace QuickER.CodeGen.CSharp;
 
 /// <summary>
 /// 生成ファイルの using を「バケット単位」で解決する唯一の正。

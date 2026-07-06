@@ -1,4 +1,4 @@
-using QuickER.Generator;
+using QuickER.CodeGen.CSharp;
 using Xunit;
 
 namespace QuickER.Tests.GeneratedFixture;
@@ -35,7 +35,7 @@ public sealed class RuntimePackageSourceDriftTests
             Renderer.RenderCore(),
             "src/QuickER.Runtime/QuickERRuntime.g.cs",
             "コアパッケージのチェックイン済みソースが現在のテンプレート出力と乖離しています。"
-                + "テンプレート（QuickER.Generator/Templates/CSharpRuntime.scriban 等）を変更した場合は再生成が必要です。"
+                + "テンプレート（QuickER.CodeGen.CSharp/Templates/CSharpRuntime.scriban 等）を変更した場合は再生成が必要です。"
         );
     }
 
@@ -49,7 +49,7 @@ public sealed class RuntimePackageSourceDriftTests
             Renderer.RenderSqlServer(),
             "src/QuickER.Runtime.SqlServer/QuickERRuntimeSqlServer.g.cs",
             "SqlServer パッケージのチェックイン済みソースが現在のテンプレート出力と乖離しています。"
-                + "テンプレート（QuickER.Generator/Templates/CSharpRuntime.scriban 等）を変更した場合は再生成が必要です。"
+                + "テンプレート（QuickER.CodeGen.CSharp/Templates/CSharpRuntime.scriban 等）を変更した場合は再生成が必要です。"
         );
     }
 
@@ -63,7 +63,7 @@ public sealed class RuntimePackageSourceDriftTests
             Renderer.RenderSqlite(),
             "src/QuickER.Runtime.Sqlite/QuickERRuntimeSqlite.g.cs",
             "Sqlite パッケージのチェックイン済みソースが現在のテンプレート出力と乖離しています。"
-                + "テンプレート（QuickER.Generator/Templates/CSharpRuntime.scriban 等）を変更した場合は再生成が必要です。"
+                + "テンプレート（QuickER.CodeGen.CSharp/Templates/CSharpRuntime.scriban 等）を変更した場合は再生成が必要です。"
         );
     }
 
@@ -77,7 +77,7 @@ public sealed class RuntimePackageSourceDriftTests
             Renderer.RenderEfCore(),
             "src/QuickER.Runtime.EntityFrameworkCore/QuickERRuntimeEntityFrameworkCore.g.cs",
             "EntityFrameworkCore パッケージのチェックイン済みソースが現在のテンプレート出力と乖離しています。"
-                + "テンプレート（QuickER.Generator/Templates/CSharpRuntime.scriban 等）を変更した場合は再生成が必要です。"
+                + "テンプレート（QuickER.CodeGen.CSharp/Templates/CSharpRuntime.scriban 等）を変更した場合は再生成が必要です。"
         );
     }
 }

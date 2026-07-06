@@ -1,6 +1,6 @@
 using QuickER.Model;
 
-namespace QuickER.Generator;
+namespace QuickER.CodeGen.CSharp;
 
 /// <summary>
 /// 値オブジェクト（Value Object）の定義レジストリを構築する部分。

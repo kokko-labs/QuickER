@@ -1,5 +1,5 @@
 using FluentAssertions;
-using QuickER.Generator;
+using QuickER.CodeGen.CSharp;
 using QuickER.Model;
 using QuickER.PostgreSql;
 using QuickER.Provider;

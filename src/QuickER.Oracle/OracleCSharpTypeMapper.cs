@@ -1,6 +1,6 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
-using QuickER.Generator;
+using QuickER.CodeGen.CSharp;
 using QuickER.Model;
 using QuickER.Provider;
 
@@ -33,7 +33,7 @@ public sealed partial class OracleCSharpTypeMapper : IColumnTypeMapper
     /// ER 図の全カラムの Oracle 型を解決し、カラム ID → C# 型情報の対応表を構築する。
     /// </summary>
     /// <remarks>
-    /// コード生成器（<see cref="QuickER.Generator.CSharpCodeGenerationService" />）は DB 非依存で、
+    /// コード生成器（<see cref="QuickER.CodeGen.CSharp.CSharpCodeGenerationService" />）は DB 非依存で、
     /// 解決済みの型情報を入力として受け取る。型解決という Oracle 固有の責務はこのライブラリが担う。
     /// </remarks>
     public static IReadOnlyDictionary<Guid, CSharpTypeInfo> ResolveColumnTypes(ErDiagram diagram)

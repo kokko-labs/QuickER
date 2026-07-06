@@ -1,8 +1,8 @@
 using System.CommandLine;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using QuickER.CodeGen.CSharp;
 using QuickER.Documents;
-using QuickER.Generator;
 using QuickER.Model;
 using QuickER.MySql;
 using QuickER.Oracle;

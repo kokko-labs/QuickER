@@ -10,7 +10,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\QuickER.Cli\QuickER.Cli.csproj" />
     <ProjectReference Include="..\..\src\QuickER.Document\QuickER.Document.csproj" />
-    <ProjectReference Include="..\..\src\QuickER.Generator\QuickER.Generator.csproj" />
+    <ProjectReference Include="..\..\src\QuickER.CodeGen.CSharp\QuickER.CodeGen.CSharp.csproj" />
     <ProjectReference Include="..\..\src\QuickER.MySql\QuickER.MySql.csproj" />
     <ProjectReference Include="..\..\src\QuickER.Oracle\QuickER.Oracle.csproj" />
     <ProjectReference Include="..\..\src\QuickER.PostgreSql\QuickER.PostgreSql.csproj" />

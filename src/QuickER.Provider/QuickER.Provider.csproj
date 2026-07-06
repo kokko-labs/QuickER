@@ -6,7 +6,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\QuickER.Generator\QuickER.Generator.csproj" />
+    <ProjectReference Include="..\QuickER.CodeGen.CSharp\QuickER.CodeGen.CSharp.csproj" />
     <ProjectReference Include="..\QuickER.Model\QuickER.Model.csproj" />
   </ItemGroup>
 </Project>

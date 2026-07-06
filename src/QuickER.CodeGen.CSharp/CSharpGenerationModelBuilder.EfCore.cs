@@ -1,6 +1,6 @@
 using QuickER.Model;
 
-namespace QuickER.Generator;
+namespace QuickER.CodeGen.CSharp;
 
 /// <summary>
 /// EF Core 用コード（DbContext と OnModelCreating の Fluent 構成）の生成モデルを構築する部分。

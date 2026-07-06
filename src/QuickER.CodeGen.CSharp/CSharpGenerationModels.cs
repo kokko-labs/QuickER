@@ -1,4 +1,4 @@
-namespace QuickER.Generator;
+namespace QuickER.CodeGen.CSharp;
 
 /// <summary>Scriban テンプレートへ渡す C# コード生成のルートモデル</summary>
 internal sealed class CSharpGenerationModel

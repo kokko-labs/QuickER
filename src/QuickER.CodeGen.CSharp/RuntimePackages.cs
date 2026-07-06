@@ -1,6 +1,6 @@
 using System.Reflection;
 
-namespace QuickER.Generator;
+namespace QuickER.CodeGen.CSharp;
 
 /// <summary>
 /// QuickER のランタイム（スキーマ非依存の固定コード）を配布する NuGet パッケージの ID を単一ソースとして定義する。
@@ -35,7 +35,7 @@ public static class RuntimePackages
     /// </summary>
     /// <remarks>
     /// 版はツール版とロックステップ（パッケージ版＝ツール版）で運用する。<see cref="ResolveGuidanceVersion"/> が
-    /// <c>QuickER.Generator</c> アセンブリのバージョン情報から解決できなかった場合にのみ用いるフォールバック値。
+    /// <c>QuickER.CodeGen.CSharp</c> アセンブリのバージョン情報から解決できなかった場合にのみ用いるフォールバック値。
     /// </remarks>
     public const string DefaultVersion = "0.1.0";
 
@@ -44,7 +44,7 @@ public static class RuntimePackages
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <c>QuickER.Generator</c> アセンブリの <see cref="AssemblyInformationalVersionAttribute"/>
+    /// <c>QuickER.CodeGen.CSharp</c> アセンブリの <see cref="AssemblyInformationalVersionAttribute"/>
     /// （<c>Directory.Build.props</c> の <c>VersionPrefix</c> 由来。ロックステップでパッケージ版と一致する）から
     /// 解決する。ビルドメタデータ（コミットハッシュ等。<c>"+"</c> 以降）が付与されている場合は除去する
     /// （<c>0.1.0+abcdef...</c> → <c>0.1.0</c>。NuGet バージョンにビルドメタデータを含めない運用のため）。

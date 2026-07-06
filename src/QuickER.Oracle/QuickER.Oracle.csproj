@@ -11,7 +11,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\QuickER.Model\QuickER.Model.csproj" />
-    <ProjectReference Include="..\QuickER.Generator\QuickER.Generator.csproj" />
+    <ProjectReference Include="..\QuickER.CodeGen.CSharp\QuickER.CodeGen.CSharp.csproj" />
     <ProjectReference Include="..\QuickER.Provider\QuickER.Provider.csproj" />
   </ItemGroup>
 </Project>

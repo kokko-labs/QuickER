@@ -5,7 +5,7 @@ using System.Linq;
 using System.Text.RegularExpressions;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using QuickER.Generator;
+using QuickER.CodeGen.CSharp;
 using QuickER.Provider;
 using QuickER.Services;
 using QuickER.Sqlite;

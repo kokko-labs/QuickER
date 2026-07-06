@@ -2,7 +2,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using Scriban;
 
-namespace QuickER.Generator;
+namespace QuickER.CodeGen.CSharp;
 
 /// <summary>1 ファイル分の描画スコープ。名前空間・using と、出力するバケットの選択を表す</summary>
 internal sealed class RenderScope
@@ -129,7 +129,7 @@ internal sealed class ScribanCSharpRenderer
     /// <summary>埋め込みリソースから Scriban テンプレート本文を読み込む</summary>
     private static string LoadTemplate()
     {
-        const string resourceName = "QuickER.Generator.Templates.CSharpRuntime.scriban";
+        const string resourceName = "QuickER.CodeGen.CSharp.Templates.CSharpRuntime.scriban";
         var assembly = typeof(ScribanCSharpRenderer).Assembly;
         using var stream =
             assembly.GetManifestResourceStream(resourceName)

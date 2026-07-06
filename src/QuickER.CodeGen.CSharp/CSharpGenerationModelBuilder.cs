@@ -1,7 +1,7 @@
 using System.Text.RegularExpressions;
 using QuickER.Model;
 
-namespace QuickER.Generator;
+namespace QuickER.CodeGen.CSharp;
 
 /// <summary>ER 図定義からテンプレート用の C# コード生成モデルを構築するビルダー</summary>
 internal sealed partial class CSharpGenerationModelBuilder

@@ -1,4 +1,4 @@
-namespace QuickER.Generator;
+namespace QuickER.CodeGen.CSharp;
 
 /// <summary>生成コードのカテゴリ（バケット）。共有基盤と各クラス種別を表す</summary>
 public enum GenerationBucket

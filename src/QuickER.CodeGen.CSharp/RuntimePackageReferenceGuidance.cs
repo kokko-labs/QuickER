@@ -1,4 +1,4 @@
-namespace QuickER.Generator;
+namespace QuickER.CodeGen.CSharp;
 
 /// <summary>
 /// パッケージ参照モード（<see cref="CodeGenerationOptions.UseRuntimePackages"/>）で、生成コードが必要とする

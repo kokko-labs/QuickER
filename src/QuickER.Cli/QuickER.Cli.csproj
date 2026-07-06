@@ -16,7 +16,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\QuickER.Document\QuickER.Document.csproj" />
-    <ProjectReference Include="..\QuickER.Generator\QuickER.Generator.csproj" />
+    <ProjectReference Include="..\QuickER.CodeGen.CSharp\QuickER.CodeGen.CSharp.csproj" />
     <ProjectReference Include="..\QuickER.Model\QuickER.Model.csproj" />
     <ProjectReference Include="..\QuickER.MySql\QuickER.MySql.csproj" />
     <ProjectReference Include="..\QuickER.Oracle\QuickER.Oracle.csproj" />

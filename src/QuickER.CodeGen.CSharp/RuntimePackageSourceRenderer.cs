@@ -1,4 +1,4 @@
-namespace QuickER.Generator;
+namespace QuickER.CodeGen.CSharp;
 
 /// <summary>
 /// QuickER のランタイム（スキーマ非依存の固定コード）を、NuGet パッケージ用の C# ソースとしてレンダリングする。

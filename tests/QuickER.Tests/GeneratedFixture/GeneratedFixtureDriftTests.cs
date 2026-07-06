@@ -32,7 +32,7 @@ public sealed class GeneratedFixtureDriftTests
             GeneratedFixtureDefinition.Options,
             GeneratedFixtureDefinition.Options.OutputFileName,
             "コミット済みフィクスチャが現在のテンプレート出力と乖離しています。"
-                + "テンプレート（QuickER.Generator/Templates/CSharpRuntime.scriban 等）を変更した場合はフィクスチャの再生成が必要です。"
+                + "テンプレート（QuickER.CodeGen.CSharp/Templates/CSharpRuntime.scriban 等）を変更した場合はフィクスチャの再生成が必要です。"
         );
     }
 }

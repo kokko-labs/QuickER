@@ -1,6 +1,6 @@
 using QuickER.Model;
 
-namespace QuickER.Generator;
+namespace QuickER.CodeGen.CSharp;
 
 /// <summary>
 /// ER 図定義から C# コードを生成するライブラリのエントリポイント

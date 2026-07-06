@@ -1,5 +1,5 @@
 using FluentAssertions;
-using QuickER.Generator;
+using QuickER.CodeGen.CSharp;
 
 namespace QuickER.Tests.Generator;
 
