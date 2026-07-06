@@ -25,11 +25,16 @@ public sealed class AnthropicChatTurnDriver : IChatTurnDriver
     private readonly IReadOnlyList<ToolUnion> _tools;
 
     /// <summary>接続設定プロバイダからドライバを生成する（設定変更を毎ターン反映するため遅延取得する）</summary>
-    public AnthropicChatTurnDriver(Func<AnthropicChatConnection> connectionProvider)
+    /// <param name="connectionProvider">接続設定を返す関数</param>
+    /// <param name="profile">用途プロファイル（ツール定義セット。省略時は ER 図設計）</param>
+    public AnthropicChatTurnDriver(
+        Func<AnthropicChatConnection> connectionProvider,
+        ErChatProfile? profile = null
+    )
     {
         _connectionProvider = connectionProvider;
         _tools = ErDiagramToolDefinitions
-            .ToAnthropicTools()
+            .ToAnthropicTools((profile ?? ErChatProfile.ErDesign).Tools)
             .Select(tool => (ToolUnion)tool)
             .ToList();
     }

@@ -10,12 +10,13 @@ namespace QuickER.AI;
 /// </summary>
 public sealed class ClaudeCodeChatEngine : IErChatEngine
 {
-    /// <summary>許可するツール指定（MCP サーバー名配下のすべて）</summary>
-    private const string AllowedTool = "mcp__" + ErDiagramMcpServer.ServerName;
-
     private readonly IClaudeCodeClient _client;
     private readonly IErDiagramToolHost? _toolHost;
     private readonly IUiDispatcher _dispatcher;
+    private readonly ErChatProfile _profile;
+
+    /// <summary>許可するツール指定（プロファイルの MCP サーバー名配下のすべて）</summary>
+    private string AllowedTool => "mcp__" + _profile.McpServerName;
 
     private ErDiagramMcpServer? _mcpServer;
     private string _workingDirectory = string.Empty;
@@ -59,15 +60,21 @@ public sealed class ClaudeCodeChatEngine : IErChatEngine
     public event EventHandler<string>? StatusChanged;
 
     /// <summary>クライアント・ツールホスト・ディスパッチャを指定して生成する</summary>
+    /// <param name="client">Claude Code クライアント</param>
+    /// <param name="toolHost">ER 図操作ツールの実行ホスト（null ならツール無効）</param>
+    /// <param name="dispatcher">UI スレッドへのマーシャリング</param>
+    /// <param name="profile">用途プロファイル（システムプロンプト・ツール・MCP サーバー名。省略時は ER 図設計）</param>
     public ClaudeCodeChatEngine(
         IClaudeCodeClient client,
         IErDiagramToolHost? toolHost,
-        IUiDispatcher dispatcher
+        IUiDispatcher dispatcher,
+        ErChatProfile? profile = null
     )
     {
         _client = client;
         _toolHost = toolHost;
         _dispatcher = dispatcher;
+        _profile = profile ?? ErChatProfile.ErDesign;
     }
 
     /// <inheritdoc />
@@ -90,7 +97,7 @@ public sealed class ClaudeCodeChatEngine : IErChatEngine
         if (_mcpServer is null && _toolHost is not null)
         {
             _workingDirectory = CreateWorkingDirectory();
-            _mcpServer = new ErDiagramMcpServer(ExecuteTool);
+            _mcpServer = new ErDiagramMcpServer(ExecuteTool, _profile.Tools);
             await _mcpServer.StartAsync(cancellationToken).ConfigureAwait(false);
             _mcpConfigPath = WriteMcpConfig(_mcpServer);
         }
@@ -167,7 +174,7 @@ public sealed class ClaudeCodeChatEngine : IErChatEngine
 
         var options = new ClaudeCodeLaunchOptions(
             Model,
-            _toolHost is not null ? ErDesignRules.BuildChatSystemPrompt() : string.Empty,
+            _toolHost is not null ? _profile.BuildSystemPrompt() : string.Empty,
             _mcpConfigPath,
             AllowedTool,
             _workingDirectory
@@ -250,7 +257,7 @@ public sealed class ClaudeCodeChatEngine : IErChatEngine
         {
             mcpServers = new Dictionary<string, object>
             {
-                [ErDiagramMcpServer.ServerName] = new
+                [_profile.McpServerName] = new
                 {
                     type = "http",
                     url = server.Url,

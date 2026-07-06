@@ -32,6 +32,7 @@ namespace QuickER
             services.AddSingleton<IAppDialogService, WpfAppDialogService>();
             services.AddSingleton<IFileDialogService, WpfFileDialogService>();
             services.AddSingleton<IAiChatLauncher, AiChatLauncher>();
+            services.AddSingleton<IMockGenerationLauncher, MockGenerationLauncher>();
 
             // DB プロバイダを登録し、識別名で解決するレジストリをシングルトンで供給する
             // 新 DBMS 対応時は IDatabaseProvider 実装を追加登録するだけで済む
@@ -49,6 +50,7 @@ namespace QuickER
                 serviceProvider.GetRequiredService<IAppDialogService>(),
                 serviceProvider.GetRequiredService<IFileDialogService>(),
                 serviceProvider.GetRequiredService<IAiChatLauncher>(),
+                serviceProvider.GetRequiredService<IMockGenerationLauncher>(),
                 serviceProvider.GetRequiredService<DatabaseProviderRegistry>()
             ));
             services.AddTransient<MainWindow>();

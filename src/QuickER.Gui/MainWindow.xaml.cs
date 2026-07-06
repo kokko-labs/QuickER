@@ -53,6 +53,7 @@ public partial class MainWindow : Window
 
         // メイン画面終了時に AI チャット画面も強制終了する
         _viewModel.CloseAiChatDialog();
+        _viewModel.CloseMockGenerationDialog();
     }
 
     /// <summary>fit-to-window 要求を受けてバウンディングボックスから倍率とスクロール位置を計算・適用する</summary>

@@ -30,6 +30,7 @@ public sealed class CodexChatEngine : IErChatEngine
     private readonly ICodexAppServerClient _client;
     private readonly IErDiagramToolHost? _toolHost;
     private readonly IUiDispatcher _dispatcher;
+    private readonly ErChatProfile _profile;
 
     private string? _currentThreadId;
     private string? _currentTurnId;
@@ -80,15 +81,18 @@ public sealed class CodexChatEngine : IErChatEngine
     /// <param name="client">Codex App Server クライアント</param>
     /// <param name="toolHost">ER 図操作ツールの実行ホスト（null ならツール無効）</param>
     /// <param name="dispatcher">UI スレッドへのマーシャリング</param>
+    /// <param name="profile">用途プロファイル（ツール定義・developer instructions。省略時は ER 図設計）</param>
     public CodexChatEngine(
         ICodexAppServerClient client,
         IErDiagramToolHost? toolHost,
-        IUiDispatcher dispatcher
+        IUiDispatcher dispatcher,
+        ErChatProfile? profile = null
     )
     {
         _client = client;
         _toolHost = toolHost;
         _dispatcher = dispatcher;
+        _profile = profile ?? ErChatProfile.ErDesign;
         _client.AgentMessageDeltaReceived += OnAgentMessageDelta;
         _client.TurnCompleted += OnTurnCompleted;
         _client.DynamicToolCallReceived += OnDynamicToolCallReceived;
@@ -315,9 +319,9 @@ public sealed class CodexChatEngine : IErChatEngine
             ApprovalPolicy = ApprovalPolicyNever,
             ModelProvider = NormalizeOptionalText(ModelProvider),
             Model = NormalizeOptionalText(Model),
-            DynamicTools = _toolHost is not null ? ErDiagramToolDefinitions.GetDefinitions() : null,
+            DynamicTools = _toolHost is not null ? _profile.Tools : null,
             DeveloperInstructions = _toolHost is not null
-                ? ErDesignRules.BuildCodexDeveloperInstructions()
+                ? _profile.BuildCodexDeveloperInstructions()
                 : null,
         };
 

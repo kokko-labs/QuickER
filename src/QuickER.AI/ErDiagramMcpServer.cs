@@ -19,10 +19,11 @@ namespace QuickER.AI;
 /// </summary>
 public sealed class ErDiagramMcpServer : IAsyncDisposable
 {
-    /// <summary>mcp-config に書くサーバー名（ツール名は <c>mcp__erdesigner__&lt;tool&gt;</c> になる）</summary>
+    /// <summary>mcp-config に書く既定サーバー名（ツール名は <c>mcp__erdesigner__&lt;tool&gt;</c> になる）</summary>
     public const string ServerName = "erdesigner";
 
     private readonly Func<string, string, (string Result, bool Success)> _execute;
+    private readonly IReadOnlyList<CodexDynamicToolDefinition> _tools;
     private WebApplication? _app;
 
     /// <summary>解決済みのサーバー URL（例: <c>http://127.0.0.1:54321</c>）。未起動なら null</summary>
@@ -32,9 +33,15 @@ public sealed class ErDiagramMcpServer : IAsyncDisposable
     public string? AuthToken { get; private set; }
 
     /// <summary>ツール実行コールバック（ツール名・引数 JSON → 結果テキストと成否）を指定して生成する</summary>
-    public ErDiagramMcpServer(Func<string, string, (string Result, bool Success)> execute)
+    /// <param name="execute">ツール実行コールバック</param>
+    /// <param name="tools">公開するツール定義セット（省略時は ER 図操作ツール）</param>
+    public ErDiagramMcpServer(
+        Func<string, string, (string Result, bool Success)> execute,
+        IReadOnlyList<CodexDynamicToolDefinition>? tools = null
+    )
     {
         _execute = execute;
+        _tools = tools ?? ErDiagramToolDefinitions.GetDefinitions();
     }
 
     /// <summary>サーバーを起動し、<see cref="Url"/> / <see cref="AuthToken"/> を確定する（起動済みなら何もしない）</summary>
@@ -79,8 +86,7 @@ public sealed class ErDiagramMcpServer : IAsyncDisposable
     }
 
     /// <summary>全ツール定義を MCP ツールへ変換する</summary>
-    private IReadOnlyList<McpServerTool> BuildTools() =>
-        ErDiagramToolDefinitions.GetDefinitions().Select(CreateTool).ToList();
+    private IReadOnlyList<McpServerTool> BuildTools() => _tools.Select(CreateTool).ToList();
 
     /// <summary>1 つの dynamicTool 定義を、固定スキーマと実行委譲を持つ MCP ツールへ変換する</summary>
     private McpServerTool CreateTool(CodexDynamicToolDefinition definition)

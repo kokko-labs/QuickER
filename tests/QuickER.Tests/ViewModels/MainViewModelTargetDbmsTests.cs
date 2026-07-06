@@ -31,7 +31,7 @@ public class MainViewModelTargetDbmsTests
             new NoopAppDialogService(),
             new NoopFileDialogService(),
             new NoopAiChatLauncher(),
-            registry
+            providers: registry
         );
         return (vm, fake, dialogs);
     }
@@ -104,7 +104,7 @@ public class MainViewModelTargetDbmsTests
             new NoopAppDialogService(),
             new NoopFileDialogService(),
             new NoopAiChatLauncher(),
-            registry
+            providers: registry
         );
 
         // 未知方言の図を読込む（Open 相当の内部経路を模すため公開 API 経由で確認）
@@ -126,7 +126,7 @@ public class MainViewModelTargetDbmsTests
             new NoopAppDialogService(),
             new NoopFileDialogService(),
             new NoopAiChatLauncher(),
-            registry
+            providers: registry
         );
 
         // 既定は SQL Server：同期は実行可

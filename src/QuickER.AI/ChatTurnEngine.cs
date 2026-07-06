@@ -72,6 +72,7 @@ public sealed class ChatTurnEngine : IErChatEngine
     private readonly IErDiagramToolHost _toolHost;
     private readonly IUiDispatcher _dispatcher;
     private readonly Func<bool> _isReady;
+    private readonly ErChatProfile _profile;
     private readonly List<ChatHistoryItem> _history = new();
     private CancellationTokenSource? _turnCts;
 
@@ -92,17 +93,20 @@ public sealed class ChatTurnEngine : IErChatEngine
     /// <param name="toolHost">ツール実行ホスト</param>
     /// <param name="dispatcher">UI スレッドへのマーシャリング</param>
     /// <param name="isReady">送信可能判定（API キー有無など）</param>
+    /// <param name="profile">用途プロファイル（システムプロンプト等。省略時は ER 図設計）</param>
     public ChatTurnEngine(
         IChatTurnDriver driver,
         IErDiagramToolHost toolHost,
         IUiDispatcher dispatcher,
-        Func<bool> isReady
+        Func<bool> isReady,
+        ErChatProfile? profile = null
     )
     {
         _driver = driver;
         _toolHost = toolHost;
         _dispatcher = dispatcher;
         _isReady = isReady;
+        _profile = profile ?? ErChatProfile.ErDesign;
     }
 
     /// <inheritdoc />
@@ -116,9 +120,7 @@ public sealed class ChatTurnEngine : IErChatEngine
     public Task StartConversationAsync(CancellationToken cancellationToken = default)
     {
         _history.Clear();
-        _history.Add(
-            new ChatHistoryItem(ChatHistoryRole.System, ErDesignRules.BuildChatSystemPrompt())
-        );
+        _history.Add(new ChatHistoryItem(ChatHistoryRole.System, _profile.BuildSystemPrompt()));
         return Task.CompletedTask;
     }
 

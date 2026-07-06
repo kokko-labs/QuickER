@@ -1,0 +1,536 @@
+using System.IO;
+using FluentAssertions;
+using QuickER.AI;
+using QuickER.Model;
+using QuickER.Services;
+using QuickER.Services.Chat;
+using QuickER.ViewModels;
+
+namespace QuickER.Tests.ViewModels;
+
+/// <summary>
+/// <see cref="MockGenerationDialogViewModel"/> の生成可否・HTML 提出通知・ターン中の入力禁止・
+/// フィードバック送信・HTML 保存を、フェイクエンジン／セッションで検証するテストクラス。
+/// </summary>
+public class MockGenerationDialogViewModelTests
+{
+    private sealed class SyncUiDispatcher : IUiDispatcher
+    {
+        public T Invoke<T>(Func<T> func) => func();
+    }
+
+    /// <summary>現在の ER 図を供給するスタブ（空判定を切り替え可能）</summary>
+    private sealed class StubDiagramSource : IMockDiagramSource
+    {
+        private readonly ErDiagram _diagram;
+
+        public StubDiagramSource(ErDiagram diagram) => _diagram = diagram;
+
+        public bool IsEmpty => _diagram.Entities.Count == 0;
+
+        public ErDiagram GetDiagram() => _diagram;
+
+        public QuickER.Provider.DatabaseProviderRegistry Providers { get; } =
+            new([new QuickER.SqlServer.SqlServerProvider()]);
+    }
+
+    /// <summary>スクリプトされたツール呼び出しをツールホストへ橋渡しするフェイクエンジン</summary>
+    private sealed class FakeChatEngine : IErChatEngine
+    {
+        private readonly IErDiagramToolHost _toolHost;
+
+        public FakeChatEngine(IErDiagramToolHost toolHost) => _toolHost = toolHost;
+
+        public List<string> SentPrompts { get; } = new();
+
+        /// <summary>次の SendAsync で再生するツール呼び出し（ツール名・引数 JSON）</summary>
+        public (string Tool, string Args)? ScriptedToolCall { get; set; }
+
+        public event EventHandler<string>? AssistantDeltaReceived;
+        public event EventHandler<ErChatToolActivity>? ToolActivityReceived;
+        public event EventHandler<ErChatTurnResult>? TurnCompleted;
+        public event EventHandler<string>? StatusChanged;
+
+        public bool IsReady => true;
+
+        public Task InitializeAsync(CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+
+        public Task StartConversationAsync(CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+
+        public Task SendAsync(string prompt, CancellationToken cancellationToken = default)
+        {
+            SentPrompts.Add(prompt);
+            StatusChanged?.Invoke(this, "生成中...");
+            AssistantDeltaReceived?.Invoke(this, "了解しました。");
+
+            if (ScriptedToolCall is { } call)
+            {
+                var result = _toolHost.Execute(call.Tool, call.Args);
+                ToolActivityReceived?.Invoke(
+                    this,
+                    new ErChatToolActivity(call.Tool, result.Result, result.Success)
+                );
+                ScriptedToolCall = null;
+            }
+
+            TurnCompleted?.Invoke(this, new ErChatTurnResult(true, null));
+            return Task.CompletedTask;
+        }
+
+        public Task InterruptAsync(CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    /// <summary>WPF モック生成の第2ステップをスクリプト化するフェイク生成器</summary>
+    private sealed class FakeMockProjectGenerator : IMockProjectGenerator
+    {
+        public bool ClaudeAvailable { get; set; } = true;
+        public bool DotnetAvailable { get; set; } = true;
+        public bool ResultSuccess { get; set; } = true;
+        public bool Interrupted { get; private set; }
+        public int GenerateCallCount { get; private set; }
+        public string? CapturedOutputFolder { get; private set; }
+        public string? CapturedProjectName { get; private set; }
+
+        public bool IsClaudeAvailable() => ClaudeAvailable;
+
+        public Task<bool> IsDotnetAvailableAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult(DotnetAvailable);
+
+        public Task<MockProjectGenerationResult> GenerateAsync(
+            ErDiagram diagram,
+            string designHtml,
+            string outputDirectory,
+            string projectName,
+            string model,
+            Action<string> onProgress,
+            CancellationToken cancellationToken = default
+        )
+        {
+            GenerateCallCount++;
+            CapturedOutputFolder = outputDirectory;
+            CapturedProjectName = projectName;
+            onProgress("進捗: 生成中...\n");
+
+            return Task.FromResult(
+                new MockProjectGenerationResult(
+                    ResultSuccess,
+                    ResultSuccess ? "完了しました。" : "失敗しました。",
+                    outputDirectory,
+                    Path.Combine(outputDirectory, "quickr-mock-generation.log")
+                )
+            );
+        }
+
+        public Task InterruptAsync()
+        {
+            Interrupted = true;
+            return Task.CompletedTask;
+        }
+    }
+
+    private const string ValidHtml =
+        "<!DOCTYPE html><html lang=\"ja\"><head><style>body{}</style></head>"
+        + "<body><h1>顧客一覧</h1></body></html>";
+
+    /// <summary>顧客テーブル 1 つを持つ非空の図を返す</summary>
+    private static ErDiagram NonEmptyDiagram() =>
+        new()
+        {
+            Entities =
+            {
+                new Entity { TableName = "Customer", Description = "顧客" },
+            },
+        };
+
+    /// <summary>フェイクエンジンを注入して ViewModel を生成する（settings は一時フォルダへ隔離）</summary>
+    private static (
+        MockGenerationDialogViewModel vm,
+        FakeChatEngine[] engineBox,
+        string folder
+    ) CreateVm(ErDiagram diagram)
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
+        var engineBox = new FakeChatEngine[1];
+
+        var vm = new MockGenerationDialogViewModel(
+            new StubDiagramSource(diagram),
+            new SyncUiDispatcher(),
+            files: null,
+            codexSettingsStore: new CodexAppServerSettingsStore(folder),
+            apiKeyEngineFactory: (_, toolHost) => engineBox[0] = new FakeChatEngine(toolHost),
+            codexEngineFactory: null,
+            claudeCodeEngineFactory: null
+        );
+        vm.ApiProvider = AiProvider.Ollama; // 認証不要にして接続 OK 状態にする
+        return (vm, engineBox, folder);
+    }
+
+    private static void Cleanup(string folder)
+    {
+        if (Directory.Exists(folder))
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    /// <summary>フェイク生成器を注入して VM を生成する（第2ステップ検証用）</summary>
+    private static (
+        MockGenerationDialogViewModel vm,
+        FakeChatEngine[] engineBox,
+        FakeMockProjectGenerator generator,
+        string folder
+    ) CreateVmWithGenerator(ErDiagram diagram)
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
+        var engineBox = new FakeChatEngine[1];
+        var generator = new FakeMockProjectGenerator();
+
+        var vm = new MockGenerationDialogViewModel(
+            new StubDiagramSource(diagram),
+            new SyncUiDispatcher(),
+            files: null,
+            codexSettingsStore: new CodexAppServerSettingsStore(folder),
+            apiKeyEngineFactory: null,
+            codexEngineFactory: null,
+            claudeCodeEngineFactory: (_, toolHost) => engineBox[0] = new FakeChatEngine(toolHost),
+            mockProjectGenerator: generator
+        );
+
+        return (vm, engineBox, generator, folder);
+    }
+
+    /// <summary>Claude Code バックエンドで生成→HTML 提出まで進め、第2ステップの前提を整える</summary>
+    private static async Task SubmitHtmlOnClaudeCode(
+        MockGenerationDialogViewModel vm,
+        FakeChatEngine[] engineBox
+    )
+    {
+        vm.SelectedBackend = ErChatBackendKind.ClaudeCode;
+        // Claude Code バックエンドは接続 OK を外部から反映する
+        vm.ApplyClaudeCodeReadiness(true, "ログイン済み", ConnectionHealth.Ready, string.Empty);
+
+        await vm.StartGenerationCommand.ExecuteAsync(null);
+        var args = $"{{\"html\":{System.Text.Json.JsonSerializer.Serialize(ValidHtml)}}}";
+        engineBox[0].ScriptedToolCall = (MockDesignTools.SaveMockHtmlToolName, args);
+        vm.FeedbackInput = "提出";
+        await vm.SendFeedbackCommand.ExecuteAsync(null);
+    }
+
+    /// <summary>空の図では生成開始が無効、非空なら有効になることを検証する</summary>
+    [Fact(DisplayName = "空図では生成開始不可・非空なら可能")]
+    public void CanStartGeneration_DependsOnDiagramEmptiness()
+    {
+        var (emptyVm, _, emptyFolder) = CreateVm(new ErDiagram());
+
+        try
+        {
+            emptyVm.IsDiagramEmpty.Should().BeTrue();
+            emptyVm.CanStartGeneration.Should().BeFalse();
+        }
+        finally
+        {
+            Cleanup(emptyFolder);
+        }
+
+        var (vm, _, folder) = CreateVm(NonEmptyDiagram());
+
+        try
+        {
+            vm.IsDiagramEmpty.Should().BeFalse();
+            vm.CanStartGeneration.Should().BeTrue();
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>生成開始で初回プロンプトが送られ、補足指示が含まれることを検証する</summary>
+    [Fact(DisplayName = "生成開始で図＋補足指示がエンジンへ送られる")]
+    public async Task StartGeneration_SendsSchemaWithInstructions()
+    {
+        var (vm, engineBox, folder) = CreateVm(NonEmptyDiagram());
+
+        try
+        {
+            vm.Instructions = "モダンな配色にして";
+            await vm.StartGenerationCommand.ExecuteAsync(null);
+
+            engineBox[0].Should().NotBeNull();
+            engineBox[0].SentPrompts.Should().ContainSingle();
+            engineBox[0].SentPrompts[0].Should().Contain("Customer");
+            engineBox[0].SentPrompts[0].Should().Contain("モダンな配色にして");
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>HTML 提出で HtmlUpdated が発火し、保存コマンドが有効化されることを検証する</summary>
+    [Fact(DisplayName = "HTML 提出で HtmlUpdated 発火・保存コマンド有効化")]
+    public async Task HtmlUpdated_RaisesEventAndEnablesSave()
+    {
+        var (vm, engineBox, folder) = CreateVm(NonEmptyDiagram());
+
+        try
+        {
+            MockHtmlUpdate? received = null;
+            vm.HtmlUpdated += (_, u) => received = u;
+
+            var args =
+                $"{{\"html\":{System.Text.Json.JsonSerializer.Serialize(ValidHtml)},\"revision_note\":\"初版\"}}";
+
+            // 生成開始時に構築されるエンジンへツール呼び出しを仕込むため、
+            // ファクトリ生成直後に ScriptedToolCall を設定する必要がある。
+            // ここでは生成開始を走らせ、その中でエンジンが作られる前に仕込めないため、
+            // apiKeyEngineFactory で捕捉した engineBox を使い、2 回目のフィードバックで検証する。
+            await vm.StartGenerationCommand.ExecuteAsync(null);
+            engineBox[0].ScriptedToolCall = (MockDesignTools.SaveMockHtmlToolName, args);
+
+            vm.CanSaveHtml.Should().BeFalse();
+            vm.SaveHtmlCommand.CanExecute(null).Should().BeFalse();
+
+            vm.FeedbackInput = "HTML を提出して";
+            await vm.SendFeedbackCommand.ExecuteAsync(null);
+
+            received.Should().NotBeNull();
+            received!.Value.Html.Should().Be(ValidHtml);
+            vm.CanSaveHtml.Should().BeTrue();
+            vm.SaveHtmlCommand.CanExecute(null).Should().BeTrue();
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>提出済み HTML が保存ダイアログのパスへ書き出されることを検証する</summary>
+    [Fact(DisplayName = "HTML 保存は選択パスへ書き出す")]
+    public async Task SaveHtml_WritesToPickedPath()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
+        var path = Path.Combine(folder, "out.html");
+        Directory.CreateDirectory(folder);
+        var files = new RecordingFileDialogService(new FileDialogResult(path, 1));
+        var engineBox = new FakeChatEngine[1];
+
+        var vm = new MockGenerationDialogViewModel(
+            new StubDiagramSource(NonEmptyDiagram()),
+            new SyncUiDispatcher(),
+            files: files,
+            codexSettingsStore: new CodexAppServerSettingsStore(folder),
+            apiKeyEngineFactory: (_, toolHost) => engineBox[0] = new FakeChatEngine(toolHost),
+            codexEngineFactory: null,
+            claudeCodeEngineFactory: null
+        );
+        vm.ApiProvider = AiProvider.Ollama;
+
+        try
+        {
+            await vm.StartGenerationCommand.ExecuteAsync(null);
+            var args = $"{{\"html\":{System.Text.Json.JsonSerializer.Serialize(ValidHtml)}}}";
+            engineBox[0].ScriptedToolCall = (MockDesignTools.SaveMockHtmlToolName, args);
+            vm.FeedbackInput = "提出";
+            await vm.SendFeedbackCommand.ExecuteAsync(null);
+
+            vm.SaveHtmlCommand.Execute(null);
+
+            File.Exists(path).Should().BeTrue();
+            File.ReadAllText(path).Should().Be(ValidHtml);
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>フィードバックはセッション開始前は送信不可であることを検証する</summary>
+    [Fact(DisplayName = "フィードバックは生成開始前は送信不可")]
+    public void CanSendFeedback_FalseBeforeGeneration()
+    {
+        var (vm, _, folder) = CreateVm(NonEmptyDiagram());
+
+        try
+        {
+            vm.FeedbackInput = "列を減らして";
+            vm.CanSendFeedback.Should().BeFalse();
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    // ── 第2ステップ: WPF モックプロジェクト生成 ──
+
+    /// <summary>確定 HTML・接続・claude/dotnet 検出・入力が揃うと生成可能になることを検証する</summary>
+    [Fact(DisplayName = "第2ステップの有効条件がすべて揃うと生成可能")]
+    public async Task CanGenerateMockProject_RequiresAllConditions()
+    {
+        var (vm, engineBox, generator, folder) = CreateVmWithGenerator(NonEmptyDiagram());
+
+        try
+        {
+            generator.ClaudeAvailable = true;
+            generator.DotnetAvailable = true;
+            await vm.RefreshMockGenAvailabilityAsync();
+
+            // HTML 未提出では不可
+            vm.CanGenerateMockProject.Should().BeFalse();
+
+            await SubmitHtmlOnClaudeCode(vm, engineBox);
+            vm.OutputFolder = folder;
+            vm.ProjectName = "AcmeMock";
+
+            // ここまでで全条件が揃う
+            vm.CanGenerateMockProject.Should().BeTrue();
+
+            // 出力フォルダを空にすると不可・理由が出る
+            vm.OutputFolder = string.Empty;
+            vm.CanGenerateMockProject.Should().BeFalse();
+            vm.MockGenDisabledReason.Should().Contain("出力フォルダ");
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>claude CLI 未検出では生成不可・理由が案内されることを検証する</summary>
+    [Fact(DisplayName = "claude 未検出では生成不可")]
+    public async Task CanGenerateMockProject_FalseWhenClaudeMissing()
+    {
+        var (vm, engineBox, generator, folder) = CreateVmWithGenerator(NonEmptyDiagram());
+
+        try
+        {
+            generator.ClaudeAvailable = false;
+            generator.DotnetAvailable = true;
+            await vm.RefreshMockGenAvailabilityAsync();
+
+            await SubmitHtmlOnClaudeCode(vm, engineBox);
+            vm.OutputFolder = folder;
+            vm.ProjectName = "AcmeMock";
+
+            vm.CanGenerateMockProject.Should().BeFalse();
+            vm.MockGenDisabledReason.Should().Contain("claude");
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>生成実行で状態遷移・進捗転送・成功時のフォルダ表示が起きることを検証する</summary>
+    [Fact(DisplayName = "生成実行で進捗転送・成功でフォルダ表示")]
+    public async Task GenerateMockProject_TransitionsAndForwardsProgress()
+    {
+        var (vm, engineBox, generator, folder) = CreateVmWithGenerator(NonEmptyDiagram());
+
+        try
+        {
+            generator.ResultSuccess = true;
+            await vm.RefreshMockGenAvailabilityAsync();
+            await SubmitHtmlOnClaudeCode(vm, engineBox);
+            vm.OutputFolder = folder;
+            vm.ProjectName = "AcmeMock";
+
+            await vm.GenerateMockProjectCommand.ExecuteAsync(null);
+
+            generator.GenerateCallCount.Should().Be(1);
+            generator.CapturedOutputFolder.Should().Be(folder);
+            generator.CapturedProjectName.Should().Be("AcmeMock");
+            vm.MockGenLog.Should().Contain("進捗: 生成中");
+            vm.IsMockGenInProgress.Should().BeFalse();
+            vm.MockGenCompleted.Should().BeTrue();
+            vm.MockGenSucceeded.Should().BeTrue();
+            vm.ShowOpenFolder.Should().BeTrue();
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>生成失敗時はフォルダ表示せず完了フラグのみ立つことを検証する</summary>
+    [Fact(DisplayName = "生成失敗ではフォルダを開くボタンを出さない")]
+    public async Task GenerateMockProject_FailureHidesOpenFolder()
+    {
+        var (vm, engineBox, generator, folder) = CreateVmWithGenerator(NonEmptyDiagram());
+
+        try
+        {
+            generator.ResultSuccess = false;
+            await vm.RefreshMockGenAvailabilityAsync();
+            await SubmitHtmlOnClaudeCode(vm, engineBox);
+            vm.OutputFolder = folder;
+            vm.ProjectName = "AcmeMock";
+
+            await vm.GenerateMockProjectCommand.ExecuteAsync(null);
+
+            vm.MockGenCompleted.Should().BeTrue();
+            vm.MockGenSucceeded.Should().BeFalse();
+            vm.ShowOpenFolder.Should().BeFalse();
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>API キー接続では第2ステップが無効（Claude Code 限定）であることを検証する</summary>
+    [Fact(DisplayName = "API キー接続では第2ステップ無効")]
+    public async Task CanGenerateMockProject_FalseOnNonClaudeBackend()
+    {
+        var (vm, engineBox, generator, folder) = CreateVmWithGenerator(NonEmptyDiagram());
+
+        try
+        {
+            await vm.RefreshMockGenAvailabilityAsync();
+            await SubmitHtmlOnClaudeCode(vm, engineBox);
+            vm.OutputFolder = folder;
+            vm.ProjectName = "AcmeMock";
+            vm.CanGenerateMockProject.Should().BeTrue();
+
+            // バックエンドを API キーへ切り替えると無効になる
+            vm.SelectedBackend = ErChatBackendKind.ApiKey;
+            vm.CanGenerateMockProject.Should().BeFalse();
+            vm.MockGenDisabledReason.Should().Contain("Claude Code");
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>選択済み結果を返し、初期ファイル名を記録するファイルダイアログスタブ</summary>
+    private sealed class RecordingFileDialogService : IFileDialogService
+    {
+        private readonly FileDialogResult? _saveResult;
+
+        public RecordingFileDialogService(FileDialogResult? saveResult) => _saveResult = saveResult;
+
+        public string? LastInitialFileName { get; private set; }
+
+        public FileDialogResult? PickOpenFile(string filter) => null;
+
+        public FileDialogResult? PickSaveFile(
+            string filter,
+            string defaultExt,
+            string? initialFileName = null,
+            string? initialDirectory = null
+        )
+        {
+            LastInitialFileName = initialFileName;
+            return _saveResult;
+        }
+
+        public string? PickFolder(string title, string? initialDirectory = null) => null;
+    }
+}

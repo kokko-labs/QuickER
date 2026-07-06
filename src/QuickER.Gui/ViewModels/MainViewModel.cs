@@ -121,6 +121,9 @@ public partial class MainViewModel : ObservableObject
     /// <summary>AI チャットウィンドウのライフサイクル管理</summary>
     private readonly IAiChatLauncher _aiChat;
 
+    /// <summary>AI モック生成ウィンドウのライフサイクル管理</summary>
+    private readonly IMockGenerationLauncher _mockGeneration;
+
     /// <summary>登録済み DB プロバイダのレジストリ（現在方言の解決に用いる）</summary>
     private readonly DatabaseProviderRegistry _providers;
 
@@ -135,6 +138,9 @@ public partial class MainViewModel : ObservableObject
 
     /// <summary>現在の図のターゲット DBMS プロバイダ</summary>
     public IDatabaseProvider CurrentProvider => _currentProvider;
+
+    /// <summary>登録済み DB プロバイダのレジストリ（モック生成の型解決など、方言別マッパ解決に用いる）</summary>
+    public DatabaseProviderRegistry Providers => _providers;
 
     /// <summary>DBMS 切替 ComboBox の選択肢（登録済み全プロバイダ）</summary>
     public IReadOnlyList<IDatabaseProvider> AvailableProviders => _providers.All.ToList();
@@ -170,6 +176,7 @@ public partial class MainViewModel : ObservableObject
         IAppDialogService? appDialogs = null,
         IFileDialogService? files = null,
         IAiChatLauncher? aiChat = null,
+        IMockGenerationLauncher? mockGeneration = null,
         DatabaseProviderRegistry? providers = null
     )
     {
@@ -180,6 +187,7 @@ public partial class MainViewModel : ObservableObject
         _appDialogs = appDialogs ?? new WpfAppDialogService(resolvedFiles, resolvedProviders);
         _files = resolvedFiles;
         _aiChat = aiChat ?? new AiChatLauncher();
+        _mockGeneration = mockGeneration ?? new MockGenerationLauncher();
         _providers = resolvedProviders;
         _currentProvider = ResolveProvider("sqlserver", warnOnFallback: false);
         _changeTracker = new DiagramChangeTracker(

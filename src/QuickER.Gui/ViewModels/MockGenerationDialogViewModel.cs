@@ -1,0 +1,1001 @@
+using System.Collections.ObjectModel;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
+using System.Windows;
+using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
+using QuickER.AI;
+using QuickER.Model;
+using QuickER.Services;
+using QuickER.Services.Chat;
+
+namespace QuickER.ViewModels;
+
+/// <summary>
+/// AI モック生成ダイアログ（左チャット／右 HTML プレビュー）の ViewModel。
+/// </summary>
+/// <remarks>
+/// 接続方式（API キー / Codex / Claude）の選択・接続状態は <see cref="AiChatDialogViewModel"/> と
+/// 同じ構造を踏襲する。生成は現在の ER 図＋補足指示で <see cref="MockDesignSession"/> を開始し、
+/// 提出された HTML を <see cref="HtmlUpdated"/> で通知する。プレビューへの反映（一時ファイル書き出し）は
+/// ダイアログ側が受け取り、WebView2 へ Navigate する。
+/// </remarks>
+public partial class MockGenerationDialogViewModel : ObservableObject
+{
+    /// <summary>OpenAI API キーの保存名（AiChatDialogViewModel と共有）</summary>
+    private const string OpenAiApiKeyStoreName = "OpenAiApiKey";
+
+    /// <summary>Anthropic (Claude) API キーの保存名（AiChatDialogViewModel と共有）</summary>
+    private const string ClaudeApiKeyStoreName = "ClaudeApiKey";
+
+    private const string OpenAiProviderName = "openai";
+
+    private readonly IMockDiagramSource _diagramSource;
+    private readonly IUiDispatcher _dispatcher;
+    private readonly IFileDialogService _files;
+    private readonly IMockProjectGenerator _mockProjectGenerator;
+    private readonly Func<ErChatProfile, IErDiagramToolHost, IErChatEngine> _apiKeyEngineFactory;
+    private readonly Func<ErChatProfile, IErDiagramToolHost, IErChatEngine> _codexEngineFactory;
+    private readonly Func<
+        ErChatProfile,
+        IErDiagramToolHost,
+        IErChatEngine
+    > _claudeCodeEngineFactory;
+    private readonly CodexAppServerSettingsStore _codexSettingsStore;
+    private readonly ClaudeCodeSettingsStore _claudeCodeSettingsStore;
+
+    /// <summary>現在の生成セッション（生成開始前は null）</summary>
+    private MockDesignSession? _session;
+
+    private bool _isInitializing;
+
+    /// <summary>ブラウザで URL を開く処理（テスト時に差し替え可能）</summary>
+    internal Action<string> OpenBrowser { get; set; } =
+        url => Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+
+    /// <summary>フォルダをエクスプローラで開く処理（テスト時に差し替え可能）</summary>
+    internal Action<string> OpenFolder { get; set; } =
+        path => Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+
+    /// <summary>チャットメッセージ一覧</summary>
+    public ObservableCollection<ErChatMessage> Messages { get; } = new();
+
+    /// <summary>モック HTML が更新されたときにダイアログへ通知する（プレビュー反映用）</summary>
+    public event EventHandler<MockHtmlUpdate>? HtmlUpdated;
+
+    // ── 共通のチャット状態 ──
+
+    [ObservableProperty]
+    private ErChatBackendKind _selectedBackend = ErChatBackendKind.ApiKey;
+
+    [ObservableProperty]
+    private string _instructions = string.Empty;
+
+    [ObservableProperty]
+    private string _feedbackInput = string.Empty;
+
+    [ObservableProperty]
+    private string _statusMessage = string.Empty;
+
+    private bool _isTurnInProgress;
+
+    /// <summary>ターンが実行中か（生成開始・フィードバック・中断コマンドの可否に連動）</summary>
+    public bool IsTurnInProgress
+    {
+        get => _isTurnInProgress;
+        set
+        {
+            if (SetProperty(ref _isTurnInProgress, value))
+            {
+                StartGenerationCommand.NotifyCanExecuteChanged();
+                SendFeedbackCommand.NotifyCanExecuteChanged();
+                InterruptCommand.NotifyCanExecuteChanged();
+                OnPropertyChanged(nameof(CanEditInput));
+                NotifyMockGenChanged();
+            }
+        }
+    }
+
+    /// <summary>API キー接続タブが選択されているか</summary>
+    public bool IsApiKeyBackend => SelectedBackend == ErChatBackendKind.ApiKey;
+
+    /// <summary>Codex 接続タブが選択されているか</summary>
+    public bool IsCodexBackend => SelectedBackend == ErChatBackendKind.Codex;
+
+    /// <summary>Claude Code 接続タブが選択されているか</summary>
+    public bool IsClaudeCodeBackend => SelectedBackend == ErChatBackendKind.ClaudeCode;
+
+    /// <summary>現在選択中のバックエンドが送信可能な状態か（接続・認証が整っているか）</summary>
+    public bool IsBackendReady =>
+        SelectedBackend switch
+        {
+            ErChatBackendKind.Codex => _codexReady,
+            ErChatBackendKind.ClaudeCode => _claudeCodeReady,
+            _ => ApiProvider == AiProvider.Ollama || !string.IsNullOrWhiteSpace(ApiKey),
+        };
+
+    /// <summary>図が空（エンティティ 0）か（生成開始の可否に使う）</summary>
+    public bool IsDiagramEmpty => _diagramSource.IsEmpty;
+
+    /// <summary>生成を開始できるか（接続 OK・図が空でない・ターン非実行中）</summary>
+    public bool CanStartGeneration => IsBackendReady && !IsDiagramEmpty && !IsTurnInProgress;
+
+    /// <summary>フィードバックを送信できるか（セッション開始済み・接続 OK・入力あり・ターン非実行中）</summary>
+    public bool CanSendFeedback =>
+        _session is not null
+        && IsBackendReady
+        && !IsTurnInProgress
+        && !string.IsNullOrWhiteSpace(FeedbackInput);
+
+    /// <summary>入力欄を編集できるか（ターン実行中は禁止）</summary>
+    public bool CanEditInput => !IsTurnInProgress;
+
+    /// <summary>HTML を保存できるか（1 度でもモックが提出されているか）</summary>
+    public bool CanSaveHtml => !string.IsNullOrEmpty(_session?.CurrentHtml);
+
+    // ── 第2ステップ: WPF モックプロジェクト生成（Claude Code 限定） ──
+
+    /// <summary>生成先の出力フォルダ</summary>
+    [ObservableProperty]
+    private string _outputFolder = string.Empty;
+
+    /// <summary>生成するプロジェクト名（既定は図名由来の PascalCase）</summary>
+    [ObservableProperty]
+    private string _projectName = "MockApp";
+
+    /// <summary>WPF モック生成の進捗ログ（追記式・自動スクロール表示）</summary>
+    [ObservableProperty]
+    private string _mockGenLog = string.Empty;
+
+    /// <summary>claude CLI が検出済みか（第2ステップの有効条件）</summary>
+    [ObservableProperty]
+    private bool _isClaudeCliAvailable;
+
+    /// <summary>dotnet SDK が検出済みか（第2ステップの有効条件）</summary>
+    [ObservableProperty]
+    private bool _isDotnetAvailable;
+
+    private bool _isMockGenInProgress;
+
+    /// <summary>WPF モック生成が実行中か（生成・中断ボタンの可否に連動）</summary>
+    public bool IsMockGenInProgress
+    {
+        get => _isMockGenInProgress;
+        set
+        {
+            if (SetProperty(ref _isMockGenInProgress, value))
+            {
+                NotifyMockGenChanged();
+            }
+        }
+    }
+
+    private bool _mockGenCompleted;
+
+    /// <summary>直近の WPF モック生成が完了したか（成功・失敗を問わず。フォルダを開く／ログ案内の表示制御）</summary>
+    public bool MockGenCompleted
+    {
+        get => _mockGenCompleted;
+        private set
+        {
+            if (SetProperty(ref _mockGenCompleted, value))
+            {
+                OnPropertyChanged(nameof(ShowOpenFolder));
+                OpenOutputFolderCommand.NotifyCanExecuteChanged();
+            }
+        }
+    }
+
+    private bool _mockGenSucceeded;
+
+    /// <summary>直近の WPF モック生成が成功したか（フォルダを開くボタンの表示制御）</summary>
+    public bool MockGenSucceeded
+    {
+        get => _mockGenSucceeded;
+        private set
+        {
+            if (SetProperty(ref _mockGenSucceeded, value))
+            {
+                OnPropertyChanged(nameof(ShowOpenFolder));
+            }
+        }
+    }
+
+    /// <summary>「フォルダを開く」ボタンを表示するか（完了かつ成功で表示）</summary>
+    public bool ShowOpenFolder => MockGenCompleted && MockGenSucceeded;
+
+    /// <summary>第2ステップの入力欄（出力フォルダ等）を編集できるか（実行中は不可）</summary>
+    public bool CanEditMockGenInput => !IsMockGenInProgress;
+
+    /// <summary>
+    /// WPF モック生成を開始できるか（確定 HTML あり・Claude Code バックエンド・claude CLI 検出・
+    /// dotnet SDK 検出・出力フォルダ／プロジェクト名あり・非実行中）。
+    /// </summary>
+    public bool CanGenerateMockProject =>
+        CanSaveHtml
+        && SelectedBackend == ErChatBackendKind.ClaudeCode
+        && IsClaudeCliAvailable
+        && IsDotnetAvailable
+        && !string.IsNullOrWhiteSpace(OutputFolder)
+        && !string.IsNullOrWhiteSpace(ProjectName)
+        && !IsMockGenInProgress
+        && !IsTurnInProgress;
+
+    /// <summary>WPF モック生成が無効な場合の理由（ツールチップ／案内文用）</summary>
+    public string MockGenDisabledReason
+    {
+        get
+        {
+            if (IsMockGenInProgress)
+            {
+                return "生成を実行中です。";
+            }
+
+            if (!CanSaveHtml)
+            {
+                return "先にモック HTML を確定してください（プレビューに反映された状態が必要です）。";
+            }
+
+            if (SelectedBackend != ErChatBackendKind.ClaudeCode)
+            {
+                return "WPF モック生成はバックエンドが Claude Code のときのみ利用できます。";
+            }
+
+            if (!IsClaudeCliAvailable)
+            {
+                return "claude CLI が見つかりません。Claude Code をインストールし PATH を通してください。";
+            }
+
+            if (!IsDotnetAvailable)
+            {
+                return ".NET SDK（dotnet）が見つかりません。.NET SDK をインストールしてください。";
+            }
+
+            if (string.IsNullOrWhiteSpace(OutputFolder))
+            {
+                return "出力フォルダを選択してください。";
+            }
+
+            if (string.IsNullOrWhiteSpace(ProjectName))
+            {
+                return "プロジェクト名を入力してください。";
+            }
+
+            return string.Empty;
+        }
+    }
+
+    // ── API キー接続タブ ──
+
+    [ObservableProperty]
+    private AiProvider _apiProvider = AiProvider.OpenAI;
+
+    [ObservableProperty]
+    private string _apiModel = AiModelCatalog.DefaultOpenAiModel;
+
+    [ObservableProperty]
+    private string _apiKey = string.Empty;
+
+    [ObservableProperty]
+    private bool _saveApiKey = true;
+
+    [ObservableProperty]
+    private string _endpointOverride = string.Empty;
+
+    /// <summary>API キー接続で利用可能なプロバイダー一覧</summary>
+    public IReadOnlyList<AiProvider> ApiProviders { get; } =
+    [AiProvider.OpenAI, AiProvider.Claude, AiProvider.Ollama];
+
+    /// <summary>現在の API プロバイダーに応じたモデル候補</summary>
+    public IReadOnlyList<string> ApiModelCandidates =>
+        ApiProvider switch
+        {
+            AiProvider.Ollama => AiModelCatalog.OllamaModels,
+            AiProvider.Claude => AiModelCatalog.ClaudeModels,
+            _ => AiModelCatalog.OpenAiModels,
+        };
+
+    /// <summary>API キー欄を表示するか（API キーが必要な OpenAI / Claude 選択時のみ）</summary>
+    public bool ShowApiKey => ApiProvider is AiProvider.OpenAI or AiProvider.Claude;
+
+    /// <summary>エンドポイント欄を表示するか（Ollama 選択時のみ）</summary>
+    public bool ShowEndpoint => ApiProvider == AiProvider.Ollama;
+
+    // ── Codex 接続タブ ──
+
+    /// <summary>Codex モデルプロバイダー候補</summary>
+    public ObservableCollection<string> CodexModelProviderCandidates { get; } = new();
+
+    /// <summary>Codex モデル候補</summary>
+    public ObservableCollection<string> CodexModelCandidates { get; } = new();
+
+    [ObservableProperty]
+    private string _codexModelProvider = OpenAiProviderName;
+
+    [ObservableProperty]
+    private string _codexModel = AiModelCatalog.DefaultOpenAiModel;
+
+    [ObservableProperty]
+    private string _codexAccountSummary = "未接続";
+
+    [ObservableProperty]
+    private ConnectionHealth _codexStatusLevel = ConnectionHealth.Pending;
+
+    private bool _codexReady;
+    private CodexConfigToml _configToml = new();
+
+    // ── Claude Code 接続タブ ──
+
+    [ObservableProperty]
+    private string _claudeCodeModel = AiModelCatalog.DefaultClaudeCodeModel;
+
+    [ObservableProperty]
+    private string _claudeCodeStatusSummary = "未確認";
+
+    [ObservableProperty]
+    private ConnectionHealth _claudeCodeStatusLevel = ConnectionHealth.Pending;
+
+    [ObservableProperty]
+    private string _claudeCodeGuidance = "「再確認」を押すとログイン状態を確認できます。";
+
+    private bool _claudeCodeReady;
+
+    /// <summary>Claude Code のモデル候補（エイリアス）</summary>
+    public IReadOnlyList<string> ClaudeCodeModelCandidates { get; } =
+        AiModelCatalog.ClaudeCodeModels;
+
+    /// <summary>本番構成（実クライアント・WPF ディスパッチャ）で生成する</summary>
+    public MockGenerationDialogViewModel(IMockDiagramSource diagramSource)
+        : this(
+            diagramSource,
+            new WpfUiDispatcher(),
+            files: null,
+            codexSettingsStore: null,
+            apiKeyEngineFactory: null,
+            codexEngineFactory: null,
+            claudeCodeEngineFactory: null,
+            mockProjectGenerator: null
+        ) { }
+
+    /// <summary>依存を注入して生成する（テスト用）</summary>
+    /// <param name="diagramSource">生成対象の ER 図の供給元</param>
+    /// <param name="dispatcher">UI スレッドへのマーシャリング</param>
+    /// <param name="files">HTML 保存ダイアログの供給元</param>
+    /// <param name="codexSettingsStore">Codex 設定ストア</param>
+    /// <param name="apiKeyEngineFactory">API キーエンジンのファクトリ（プロファイル・ツールホスト受け取り）</param>
+    /// <param name="codexEngineFactory">Codex エンジンのファクトリ</param>
+    /// <param name="claudeCodeEngineFactory">Claude Code エンジンのファクトリ</param>
+    /// <param name="mockProjectGenerator">WPF モックプロジェクト生成器（省略時は図の供給元のプロバイダから構築）</param>
+    public MockGenerationDialogViewModel(
+        IMockDiagramSource diagramSource,
+        IUiDispatcher dispatcher,
+        IFileDialogService? files,
+        CodexAppServerSettingsStore? codexSettingsStore,
+        Func<ErChatProfile, IErDiagramToolHost, IErChatEngine>? apiKeyEngineFactory,
+        Func<ErChatProfile, IErDiagramToolHost, IErChatEngine>? codexEngineFactory,
+        Func<ErChatProfile, IErDiagramToolHost, IErChatEngine>? claudeCodeEngineFactory,
+        IMockProjectGenerator? mockProjectGenerator = null
+    )
+    {
+        _diagramSource = diagramSource;
+        _dispatcher = dispatcher;
+        _files = files ?? new WpfFileDialogService();
+        _mockProjectGenerator =
+            mockProjectGenerator ?? new MockProjectGenerator(diagramSource.Providers);
+        _codexSettingsStore = codexSettingsStore ?? new CodexAppServerSettingsStore();
+        _claudeCodeSettingsStore = new ClaudeCodeSettingsStore();
+
+        _apiKeyEngineFactory =
+            apiKeyEngineFactory ?? ((profile, toolHost) => BuildApiKeyEngine(profile, toolHost));
+        _codexEngineFactory =
+            codexEngineFactory
+            ?? (
+                (profile, toolHost) =>
+                    new CodexChatEngine(new CodexAppServerClient(), toolHost, _dispatcher, profile)
+                    {
+                        ModelProvider = CodexModelProvider,
+                        Model = CodexModel,
+                    }
+            );
+        _claudeCodeEngineFactory =
+            claudeCodeEngineFactory
+            ?? (
+                (profile, toolHost) =>
+                    new ClaudeCodeChatEngine(
+                        new ClaudeCodeProcessClient(),
+                        toolHost,
+                        _dispatcher,
+                        profile
+                    )
+                    {
+                        Model = ClaudeCodeModel,
+                    }
+            );
+
+        LoadSettings();
+    }
+
+    /// <summary>ダイアログ表示時に設定・API キーを読み込む</summary>
+    public void Initialize()
+    {
+        _isInitializing = true;
+        LoadSettings();
+        ApiKey = CurrentApiKeyStoreName is { } slot ? ApiKeyStore.Load(slot) : string.Empty;
+        _isInitializing = false;
+        NotifyReadinessChanged();
+
+        // 第2ステップ（WPF モック生成）の有効条件（claude CLI・dotnet SDK 検出）を非同期に確認する
+        _ = RefreshMockGenAvailabilityAsync();
+    }
+
+    /// <summary>本番の API キーエンジン（プロバイダ振り分けドライバ）を組み立てる</summary>
+    private ChatTurnEngine BuildApiKeyEngine(ErChatProfile profile, IErDiagramToolHost toolHost) =>
+        new(
+            new ProviderRoutingTurnDriver(
+                () => ApiProvider,
+                new OpenAiTurnDriver(BuildOpenAiConnection),
+                new AnthropicChatTurnDriver(BuildAnthropicConnection)
+            ),
+            toolHost,
+            _dispatcher,
+            () => ApiProvider == AiProvider.Ollama || !string.IsNullOrWhiteSpace(ApiKey),
+            profile
+        );
+
+    /// <summary>現在の図＋補足指示でモック生成を開始する</summary>
+    [RelayCommand(CanExecute = nameof(CanStartGeneration))]
+    private async Task StartGenerationAsync()
+    {
+        var diagram = _diagramSource.GetDiagram();
+
+        // 選択中バックエンドのエンジンを、モック生成プロファイル注入・セッション自身をツールホストにして生成する。
+        // エンジン⇔セッションの相互依存は MockDesignSession のファクトリコンストラクタが解く。
+        var factory = SelectedFactory();
+        var session = new MockDesignSession(toolHost =>
+            factory(ErChatProfile.MockDesign, toolHost)
+        );
+        AttachSession(session);
+
+        Messages.Clear();
+        AddSystemMessage("モックの生成を開始しました。しばらくお待ちください。");
+        IsTurnInProgress = true;
+
+        try
+        {
+            await session
+                .StartAsync(diagram, string.IsNullOrWhiteSpace(Instructions) ? null : Instructions)
+                .ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            IsTurnInProgress = false;
+            StatusMessage = $"生成の開始に失敗しました: {ex.Message}";
+        }
+    }
+
+    /// <summary>修正フィードバックを 1 ターンとして送信する</summary>
+    [RelayCommand(CanExecute = nameof(CanSendFeedback))]
+    private async Task SendFeedbackAsync()
+    {
+        if (_session is null || string.IsNullOrWhiteSpace(FeedbackInput))
+        {
+            return;
+        }
+
+        var feedback = FeedbackInput.Trim();
+        FeedbackInput = string.Empty;
+        Messages.Add(new ErChatMessage { Role = ErChatMessageRole.User, Content = feedback });
+        IsTurnInProgress = true;
+
+        try
+        {
+            await _session.SendFeedbackAsync(feedback).ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            IsTurnInProgress = false;
+            StatusMessage = $"送信に失敗しました: {ex.Message}";
+        }
+    }
+
+    /// <summary>実行中のターンを中断する</summary>
+    [RelayCommand(CanExecute = nameof(IsTurnInProgress))]
+    private async Task InterruptAsync()
+    {
+        if (_session is not null)
+        {
+            await _session.InterruptAsync().ConfigureAwait(true);
+        }
+    }
+
+    /// <summary>現在のモック HTML をファイルへ保存する</summary>
+    [RelayCommand(CanExecute = nameof(CanSaveHtml))]
+    private void SaveHtml()
+    {
+        var html = _session?.CurrentHtml;
+
+        if (string.IsNullOrEmpty(html))
+        {
+            return;
+        }
+
+        var picked = _files.PickSaveFile(
+            "HTML ファイル (*.html)|*.html",
+            ".html",
+            initialFileName: "mock.html"
+        );
+
+        if (picked is null)
+        {
+            return;
+        }
+
+        try
+        {
+            System.IO.File.WriteAllText(
+                picked.Path,
+                html,
+                new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false)
+            );
+            StatusMessage = "HTML を保存しました。";
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"HTML を保存できませんでした: {ex.Message}";
+        }
+    }
+
+    // ── 第2ステップ: WPF モックプロジェクト生成 ──
+
+    /// <summary>出力フォルダを選択する</summary>
+    [RelayCommand]
+    private void BrowseOutputFolder()
+    {
+        var picked = _files.PickFolder(
+            "WPF モックプロジェクトの出力先フォルダを選択",
+            OutputFolder
+        );
+
+        if (!string.IsNullOrWhiteSpace(picked))
+        {
+            OutputFolder = picked;
+        }
+    }
+
+    /// <summary>スキャフォールド＋Claude Code で WPF モックプロジェクトを生成する</summary>
+    [RelayCommand(CanExecute = nameof(CanGenerateMockProject))]
+    private async Task GenerateMockProjectAsync()
+    {
+        var html = _session?.CurrentHtml;
+
+        if (string.IsNullOrEmpty(html))
+        {
+            return;
+        }
+
+        var outputFolder = OutputFolder.Trim();
+
+        // 非空フォルダのときは上書きの確認案内をログへ出す（破壊的削除はしない。既存ファイルは温存）
+        if (
+            Directory.Exists(outputFolder)
+            && Directory.EnumerateFileSystemEntries(outputFolder).Any()
+        )
+        {
+            AppendMockGenLog(
+                "※ 出力フォルダは空ではありません。既存ファイルは残したまま生成物を追加します。\n"
+            );
+        }
+
+        var diagram = _diagramSource.GetDiagram();
+        var projectName = ProjectName.Trim();
+
+        MockGenLog = string.Empty;
+        MockGenCompleted = false;
+        MockGenSucceeded = false;
+        IsMockGenInProgress = true;
+        StatusMessage = "WPF モックプロジェクトを生成しています...";
+
+        _mockGenCts = new CancellationTokenSource();
+
+        try
+        {
+            var result = await _mockProjectGenerator
+                .GenerateAsync(
+                    diagram,
+                    html,
+                    outputFolder,
+                    projectName,
+                    ClaudeCodeModel,
+                    delta => RunOnUi(() => AppendMockGenLog(delta)),
+                    _mockGenCts.Token
+                )
+                .ConfigureAwait(true);
+
+            MockGenSucceeded = result.Success;
+            StatusMessage = result.Message;
+        }
+        catch (Exception ex)
+        {
+            MockGenSucceeded = false;
+            AppendMockGenLog($"\n生成中にエラーが発生しました: {ex.Message}\n");
+            StatusMessage = $"WPF モック生成に失敗しました: {ex.Message}";
+        }
+        finally
+        {
+            _mockGenCts?.Dispose();
+            _mockGenCts = null;
+            IsMockGenInProgress = false;
+            MockGenCompleted = true;
+        }
+    }
+
+    /// <summary>WPF モック生成の中断起点</summary>
+    private CancellationTokenSource? _mockGenCts;
+
+    /// <summary>実行中の WPF モック生成を中断する</summary>
+    [RelayCommand(CanExecute = nameof(IsMockGenInProgress))]
+    private async Task InterruptMockGenAsync()
+    {
+        _mockGenCts?.Cancel();
+        await _mockProjectGenerator.InterruptAsync().ConfigureAwait(true);
+    }
+
+    /// <summary>出力フォルダをエクスプローラで開く</summary>
+    [RelayCommand(CanExecute = nameof(ShowOpenFolder))]
+    private void OpenOutputFolder()
+    {
+        var folder = OutputFolder.Trim();
+
+        if (Directory.Exists(folder))
+        {
+            OpenFolder(folder);
+        }
+    }
+
+    /// <summary>進捗ログへ追記する</summary>
+    private void AppendMockGenLog(string text) => MockGenLog += text;
+
+    /// <summary>claude CLI・dotnet SDK の検出状態を取得して第2ステップの有効条件へ反映する</summary>
+    public async Task RefreshMockGenAvailabilityAsync()
+    {
+        IsClaudeCliAvailable = _mockProjectGenerator.IsClaudeAvailable();
+
+        try
+        {
+            IsDotnetAvailable = await _mockProjectGenerator
+                .IsDotnetAvailableAsync()
+                .ConfigureAwait(true);
+        }
+        catch (Exception)
+        {
+            IsDotnetAvailable = false;
+        }
+
+        NotifyMockGenChanged();
+    }
+
+    /// <summary>第2ステップの可否・派生表示・コマンド可否をまとめて通知する</summary>
+    private void NotifyMockGenChanged()
+    {
+        OnPropertyChanged(nameof(CanGenerateMockProject));
+        OnPropertyChanged(nameof(MockGenDisabledReason));
+        OnPropertyChanged(nameof(CanEditMockGenInput));
+        GenerateMockProjectCommand.NotifyCanExecuteChanged();
+        InterruptMockGenCommand.NotifyCanExecuteChanged();
+    }
+
+    /// <summary>選択中バックエンドのエンジンファクトリ（プロファイル・ツールホスト受け取り）を返す</summary>
+    private Func<ErChatProfile, IErDiagramToolHost, IErChatEngine> SelectedFactory() =>
+        SelectedBackend switch
+        {
+            ErChatBackendKind.Codex => _codexEngineFactory,
+            ErChatBackendKind.ClaudeCode => _claudeCodeEngineFactory,
+            _ => _apiKeyEngineFactory,
+        };
+
+    /// <summary>新しいセッションを結び付け、イベントを購読する（旧セッションは破棄する）</summary>
+    private void AttachSession(MockDesignSession session)
+    {
+        _session = session;
+        session.AssistantDeltaReceived += OnAssistantDelta;
+        session.HtmlUpdated += OnHtmlUpdated;
+        session.TurnCompleted += OnTurnCompleted;
+        session.StatusChanged += OnStatus;
+        SaveHtmlCommand.NotifyCanExecuteChanged();
+        SendFeedbackCommand.NotifyCanExecuteChanged();
+    }
+
+    /// <summary>組み立て中のアシスタント吹き出し（差分追記先）</summary>
+    private ErChatMessage? _currentAssistantMessage;
+
+    private void OnAssistantDelta(object? sender, string delta) => RunOnUi(() => ApplyDelta(delta));
+
+    private void OnHtmlUpdated(object? sender, MockHtmlUpdate update) =>
+        RunOnUi(() => ApplyHtmlUpdated(update));
+
+    private void OnTurnCompleted(object? sender, ErChatTurnResult result) =>
+        RunOnUi(() => ApplyTurnCompleted(result));
+
+    private void OnStatus(object? sender, string message) => RunOnUi(() => StatusMessage = message);
+
+    /// <summary>ストリーミング差分を組み立て中のアシスタント吹き出しへ追記する</summary>
+    private void ApplyDelta(string delta)
+    {
+        if (_currentAssistantMessage is null)
+        {
+            _currentAssistantMessage = new ErChatMessage
+            {
+                Role = ErChatMessageRole.Assistant,
+                Content = delta,
+            };
+            Messages.Add(_currentAssistantMessage);
+        }
+        else
+        {
+            _currentAssistantMessage.Content += delta;
+        }
+    }
+
+    /// <summary>提出された HTML をプレビュー通知し、チャットへ更新メモを表示、保存可否を更新する</summary>
+    private void ApplyHtmlUpdated(MockHtmlUpdate update)
+    {
+        // 次のアシスタント発話は新しい吹き出しにする
+        _currentAssistantMessage = null;
+
+        var note = string.IsNullOrWhiteSpace(update.RevisionNote)
+            ? "モックを更新しました。"
+            : $"更新: {update.RevisionNote}";
+        AddSystemMessage(note);
+
+        HtmlUpdated?.Invoke(this, update);
+        SaveHtmlCommand.NotifyCanExecuteChanged();
+        // 確定 HTML ができたので第2ステップ（WPF モック生成）の可否を更新する
+        NotifyMockGenChanged();
+    }
+
+    /// <summary>ターン完了で進行状態を解除し、結果に応じてステータスを更新する</summary>
+    private void ApplyTurnCompleted(ErChatTurnResult result)
+    {
+        IsTurnInProgress = false;
+        _currentAssistantMessage = null;
+        NotifyReadinessChanged();
+
+        if (result.Success)
+        {
+            StatusMessage = "応答が完了しました。";
+        }
+        else if (!string.IsNullOrWhiteSpace(result.Error))
+        {
+            AddSystemMessage($"エラー: {result.Error}");
+            StatusMessage = $"エラーが発生しました: {result.Error}";
+        }
+        else
+        {
+            StatusMessage = "処理が中断されました。";
+        }
+    }
+
+    /// <summary>OpenAI 接続設定を現在の入力から組み立てる</summary>
+    private OpenAiChatConnection BuildOpenAiConnection() =>
+        new(
+            ApiProvider,
+            ApiKey,
+            ApiModel,
+            string.IsNullOrWhiteSpace(EndpointOverride) ? null : EndpointOverride
+        );
+
+    /// <summary>Anthropic (Claude) 接続設定を現在の入力から組み立てる</summary>
+    private AnthropicChatConnection BuildAnthropicConnection() => new(ApiKey, ApiModel);
+
+    /// <summary>現在のプロバイダーに対応する API キー保存名（API キー不要のプロバイダーは null）</summary>
+    private string? CurrentApiKeyStoreName =>
+        ApiProvider switch
+        {
+            AiProvider.OpenAI => OpenAiApiKeyStoreName,
+            AiProvider.Claude => ClaudeApiKeyStoreName,
+            _ => null,
+        };
+
+    /// <summary>保存済み設定と config.toml の候補を読み込む</summary>
+    private void LoadSettings()
+    {
+        var settings = _codexSettingsStore.Load();
+        LoadCodexModelCandidates();
+        CodexModelProvider = string.IsNullOrWhiteSpace(settings.ModelProvider)
+            ? OpenAiProviderName
+            : settings.ModelProvider;
+        CodexModel = string.IsNullOrWhiteSpace(settings.Model)
+            ? AiModelCatalog.DefaultOpenAiModel
+            : settings.Model;
+
+        ClaudeCodeModel = _claudeCodeSettingsStore.Load().Model;
+    }
+
+    /// <summary>config.toml から Codex のプロバイダー・モデル候補を読み込む</summary>
+    private void LoadCodexModelCandidates()
+    {
+        _configToml = CodexConfigTomlReader.Read();
+        CodexModelProviderCandidates.Clear();
+        CodexModelProviderCandidates.Add(OpenAiProviderName);
+
+        foreach (var name in _configToml.ProviderNames)
+        {
+            if (!CodexModelProviderCandidates.Contains(name, StringComparer.OrdinalIgnoreCase))
+            {
+                CodexModelProviderCandidates.Add(name);
+            }
+        }
+
+        RefreshCodexModelCandidates();
+    }
+
+    /// <summary>現在の Codex プロバイダーに応じてモデル候補を更新する</summary>
+    private void RefreshCodexModelCandidates()
+    {
+        CodexModelCandidates.Clear();
+        var isOpenAi =
+            string.IsNullOrWhiteSpace(CodexModelProvider)
+            || CodexModelProvider
+                .Trim()
+                .Equals(OpenAiProviderName, StringComparison.OrdinalIgnoreCase);
+
+        if (isOpenAi)
+        {
+            foreach (var m in AiModelCatalog.OpenAiModels)
+            {
+                CodexModelCandidates.Add(m);
+            }
+        }
+        else if (_configToml.ProviderModels.TryGetValue(CodexModelProvider.Trim(), out var models))
+        {
+            foreach (var m in models)
+            {
+                CodexModelCandidates.Add(m);
+            }
+        }
+        else if (!string.IsNullOrWhiteSpace(_configToml.Model))
+        {
+            CodexModelCandidates.Add(_configToml.Model);
+        }
+    }
+
+    /// <summary>設定を保存する（ウィンドウ非表示化時などに外部から呼ぶ）</summary>
+    public void SaveSettings()
+    {
+        _codexSettingsStore.Save(
+            new CodexAppServerSettings
+            {
+                ModelProvider = CodexModelProvider?.Trim() ?? string.Empty,
+                Model = CodexModel?.Trim() ?? string.Empty,
+            }
+        );
+
+        _claudeCodeSettingsStore.Save(
+            new ClaudeCodeSettings { Model = ClaudeCodeModel?.Trim() ?? string.Empty }
+        );
+    }
+
+    // ── 設定変更フック ──
+
+    partial void OnSelectedBackendChanged(ErChatBackendKind value)
+    {
+        OnPropertyChanged(nameof(IsApiKeyBackend));
+        OnPropertyChanged(nameof(IsCodexBackend));
+        OnPropertyChanged(nameof(IsClaudeCodeBackend));
+        NotifyReadinessChanged();
+        NotifyMockGenChanged();
+    }
+
+    partial void OnApiProviderChanged(AiProvider value)
+    {
+        OnPropertyChanged(nameof(ApiModelCandidates));
+        OnPropertyChanged(nameof(ShowApiKey));
+        OnPropertyChanged(nameof(ShowEndpoint));
+        ApiModel = ApiModelCandidates[0];
+
+        if (value == AiProvider.Ollama && string.IsNullOrWhiteSpace(EndpointOverride))
+        {
+            EndpointOverride = "http://localhost:11434/v1";
+        }
+
+        // プロバイダーごとに別の API キーを保持するため、切替時に保存済みキーを読み直す
+        var wasInitializing = _isInitializing;
+        _isInitializing = true;
+        ApiKey = CurrentApiKeyStoreName is { } slot ? ApiKeyStore.Load(slot) : string.Empty;
+        _isInitializing = wasInitializing;
+
+        NotifyReadinessChanged();
+    }
+
+    partial void OnApiKeyChanged(string value)
+    {
+        PersistApiKey();
+        NotifyReadinessChanged();
+    }
+
+    partial void OnSaveApiKeyChanged(bool value) => PersistApiKey();
+
+    partial void OnFeedbackInputChanged(string value) =>
+        SendFeedbackCommand.NotifyCanExecuteChanged();
+
+    partial void OnOutputFolderChanged(string value) => NotifyMockGenChanged();
+
+    partial void OnProjectNameChanged(string value) => NotifyMockGenChanged();
+
+    partial void OnIsClaudeCliAvailableChanged(bool value) => NotifyMockGenChanged();
+
+    partial void OnIsDotnetAvailableChanged(bool value) => NotifyMockGenChanged();
+
+    partial void OnCodexModelProviderChanged(string value) => RefreshCodexModelCandidates();
+
+    /// <summary>保存設定に従い、現在のプロバイダーの API キーを永続化する（キー不要のプロバイダーは何もしない）</summary>
+    private void PersistApiKey()
+    {
+        if (_isInitializing)
+        {
+            return;
+        }
+
+        if (CurrentApiKeyStoreName is { } slot)
+        {
+            ApiKeyStore.Save(slot, SaveApiKey ? ApiKey : string.Empty);
+        }
+    }
+
+    /// <summary>Codex 接続状態を外部（ダイアログのコードビハインド）から反映する</summary>
+    public void ApplyCodexReadiness(bool ready, string summary, ConnectionHealth level)
+    {
+        _codexReady = ready;
+        CodexAccountSummary = summary;
+        CodexStatusLevel = level;
+        NotifyReadinessChanged();
+    }
+
+    /// <summary>Claude Code 接続状態を外部から反映する</summary>
+    public void ApplyClaudeCodeReadiness(
+        bool ready,
+        string summary,
+        ConnectionHealth level,
+        string guidance
+    )
+    {
+        _claudeCodeReady = ready;
+        ClaudeCodeStatusSummary = summary;
+        ClaudeCodeStatusLevel = level;
+        ClaudeCodeGuidance = guidance;
+        NotifyReadinessChanged();
+    }
+
+    /// <summary>生成開始・フィードバック・保存の可否変更をまとめて通知する</summary>
+    private void NotifyReadinessChanged()
+    {
+        OnPropertyChanged(nameof(IsBackendReady));
+        OnPropertyChanged(nameof(IsDiagramEmpty));
+        OnPropertyChanged(nameof(CanStartGeneration));
+        OnPropertyChanged(nameof(CanSendFeedback));
+        OnPropertyChanged(nameof(CanSaveHtml));
+        StartGenerationCommand.NotifyCanExecuteChanged();
+        SendFeedbackCommand.NotifyCanExecuteChanged();
+        SaveHtmlCommand.NotifyCanExecuteChanged();
+        // 第2ステップの可否は確定 HTML の有無・接続状態にも依存するため合わせて更新する
+        NotifyMockGenChanged();
+    }
+
+    /// <summary>システムメッセージをチャットへ追加する</summary>
+    private void AddSystemMessage(string text) =>
+        Messages.Add(new ErChatMessage { Role = ErChatMessageRole.System, Content = text });
+
+    /// <summary>処理を UI スレッドで実行する</summary>
+    /// <remarks>
+    /// <see cref="Application.Current"/> を直接参照せず、注入された <see cref="IUiDispatcher"/> で
+    /// マーシャリングする（テストでは同期実行のフェイクに差し替わり、他テストが作った
+    /// Application の非ポンプなディスパッチャを拾って処理が実行されない順序依存を防ぐ）。
+    /// </remarks>
+    private void RunOnUi(Action action) =>
+        _dispatcher.Invoke(() =>
+        {
+            action();
+            return true;
+        });
+}

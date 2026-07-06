@@ -10,13 +10,31 @@ namespace QuickER.AI;
 /// <param name="McpConfigPath">ER ツールを公開する MCP 設定ファイルのパス</param>
 /// <param name="AllowedTool">許可するツール指定（例: <c>mcp__erdesigner</c>）</param>
 /// <param name="WorkingDirectory">作業ディレクトリ（一時フォルダ）</param>
+/// <remarks>
+/// 既定（<see cref="PermissionMode"/> 空・<see cref="AdditionalAllowedTools"/> 空）は従来のチャット用途で、
+/// MCP ツール 1 系統だけを許可する。WPF モック生成のようにファイル編集・コマンド実行をヘッドレスで許可したい
+/// 場合は <see cref="PermissionMode"/>（例 <c>acceptEdits</c>）と <see cref="AdditionalAllowedTools"/>
+/// （例 <c>Edit</c> / <c>Write</c> / <c>Bash</c>）を指定する。既存チャット経路はこれらを指定しないため挙動不変。
+/// </remarks>
 public sealed record ClaudeCodeLaunchOptions(
     string Model,
     string SystemPrompt,
     string McpConfigPath,
     string AllowedTool,
     string WorkingDirectory
-);
+)
+{
+    /// <summary>
+    /// <c>--permission-mode</c> に渡す値（例 <c>acceptEdits</c>）。空なら渡さない（既定＝プロンプト都度確認相当）。
+    /// </summary>
+    public string PermissionMode { get; init; } = string.Empty;
+
+    /// <summary>
+    /// <see cref="AllowedTool"/>（MCP 系）に追加して許可するツール名の一覧（例 <c>Edit</c> / <c>Write</c> / <c>Bash</c>）。
+    /// </summary>
+    /// <remarks>空（既定）ならチャット用途のまま。指定時は MCP ツールと合わせて <c>--allowed-tools</c> へ列挙する。</remarks>
+    public IReadOnlyList<string> AdditionalAllowedTools { get; init; } = [];
+}
 
 /// <summary>Claude Code の 1 ターン実行結果</summary>
 /// <param name="Success">成功したか</param>
@@ -125,8 +143,36 @@ public sealed class ClaudeCodeProcessClient : IClaudeCodeClient
         {
             startInfo.ArgumentList.Add("--mcp-config");
             startInfo.ArgumentList.Add(options.McpConfigPath);
+        }
+
+        // 許可ツールを組み立てる: MCP ツール（McpConfigPath 指定時）＋追加ツール（ファイル編集・コマンド実行等）。
+        // 既存チャット用途では McpConfigPath のみ・追加ツール空のため、従来と同じ 1 系統の許可指定になる。
+        var allowedTools = new List<string>();
+
+        if (
+            !string.IsNullOrWhiteSpace(options.McpConfigPath)
+            && !string.IsNullOrWhiteSpace(options.AllowedTool)
+        )
+        {
+            allowedTools.Add(options.AllowedTool);
+        }
+
+        allowedTools.AddRange(
+            options.AdditionalAllowedTools.Where(tool => !string.IsNullOrWhiteSpace(tool))
+        );
+
+        if (allowedTools.Count > 0)
+        {
             startInfo.ArgumentList.Add("--allowed-tools");
-            startInfo.ArgumentList.Add(options.AllowedTool);
+            startInfo.ArgumentList.Add(string.Join(",", allowedTools));
+        }
+
+        // 許可モード（acceptEdits 等）はヘッドレスでのファイル編集・コマンド実行を通すために指定する。
+        // 空（既定）なら渡さず、従来のチャット挙動を保つ。
+        if (!string.IsNullOrWhiteSpace(options.PermissionMode))
+        {
+            startInfo.ArgumentList.Add("--permission-mode");
+            startInfo.ArgumentList.Add(options.PermissionMode);
         }
 
         if (!string.IsNullOrWhiteSpace(options.SystemPrompt))

@@ -8,11 +8,16 @@ namespace QuickER.AI;
 /// <remarks>VM 非依存の純粋なツール定義。実行は app 側 <c>ErDiagramDynamicTools.Execute</c> が担う</remarks>
 public static class ErDiagramToolDefinitions
 {
-    /// <summary>全ツール定義を OpenAI SDK の <see cref="ChatTool"/> 一覧へ変換する（Function Calling 用）</summary>
+    /// <summary>ER 図操作ツール定義を OpenAI SDK の <see cref="ChatTool"/> 一覧へ変換する（Function Calling 用）</summary>
     /// <remarks>定義・説明文は <see cref="GetDefinitions"/> と共有し、二重管理を避ける</remarks>
-    public static IReadOnlyList<ChatTool> ToOpenAiTools()
+    public static IReadOnlyList<ChatTool> ToOpenAiTools() => ToOpenAiTools(GetDefinitions());
+
+    /// <summary>任意のツール定義一覧を OpenAI SDK の <see cref="ChatTool"/> 一覧へ変換する（用途プロファイル対応）</summary>
+    public static IReadOnlyList<ChatTool> ToOpenAiTools(
+        IReadOnlyList<CodexDynamicToolDefinition> definitions
+    )
     {
-        return GetDefinitions()
+        return definitions
             .Select(definition =>
                 ChatTool.CreateFunctionTool(
                     functionName: definition.Name,
@@ -25,11 +30,16 @@ public static class ErDiagramToolDefinitions
             .ToList();
     }
 
-    /// <summary>全ツール定義を Anthropic SDK の <see cref="Tool"/> 一覧へ変換する（Claude の Tool Use 用）</summary>
+    /// <summary>ER 図操作ツール定義を Anthropic SDK の <see cref="Tool"/> 一覧へ変換する（Claude の Tool Use 用）</summary>
     /// <remarks>定義・説明文・入力スキーマは <see cref="GetDefinitions"/> と共有し、二重管理を避ける</remarks>
-    public static IReadOnlyList<Tool> ToAnthropicTools()
+    public static IReadOnlyList<Tool> ToAnthropicTools() => ToAnthropicTools(GetDefinitions());
+
+    /// <summary>任意のツール定義一覧を Anthropic SDK の <see cref="Tool"/> 一覧へ変換する（用途プロファイル対応）</summary>
+    public static IReadOnlyList<Tool> ToAnthropicTools(
+        IReadOnlyList<CodexDynamicToolDefinition> definitions
+    )
     {
-        return GetDefinitions().Select(ToAnthropicTool).ToList();
+        return definitions.Select(ToAnthropicTool).ToList();
     }
 
     /// <summary>1 つの dynamicTool 定義を Anthropic の <see cref="Tool"/> へ変換する</summary>
