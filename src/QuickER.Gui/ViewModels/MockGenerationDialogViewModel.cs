@@ -46,6 +46,12 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     private readonly CodexAppServerSettingsStore _codexSettingsStore;
     private readonly ClaudeCodeSettingsStore _claudeCodeSettingsStore;
 
+    /// <summary>UI 状態（最後に使った接続タブ）の保存先</summary>
+    private readonly ChatUiSettingsStore _uiSettingsStore;
+
+    /// <summary>起動時に選択すべき接続方式（前回使ったタブ。保存が無ければ API キー）</summary>
+    public ErChatBackendKind InitialBackend { get; private set; } = ErChatBackendKind.ApiKey;
+
     /// <summary>現在の生成セッション（会話開始前は null）</summary>
     private MockDesignSession? _session;
 
@@ -392,7 +398,8 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         Func<ErChatProfile, IErDiagramToolHost, IErChatEngine>? codexEngineFactory,
         Func<ErChatProfile, IErDiagramToolHost, IErChatEngine>? claudeCodeEngineFactory,
         IMockProjectGenerator? mockProjectGenerator = null,
-        ChatAttachmentFactory.ImageShrinker? imageShrinker = null
+        ChatAttachmentFactory.ImageShrinker? imageShrinker = null,
+        ChatUiSettingsStore? uiSettingsStore = null
     )
     {
         _diagramSource = diagramSource;
@@ -408,6 +415,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
             mockProjectGenerator ?? new MockProjectGenerator(diagramSource.Providers);
         _codexSettingsStore = codexSettingsStore ?? new CodexAppServerSettingsStore();
         _claudeCodeSettingsStore = new ClaudeCodeSettingsStore();
+        _uiSettingsStore = uiSettingsStore ?? new ChatUiSettingsStore("mock-generation-ui.json");
 
         _apiKeyEngineFactory =
             apiKeyEngineFactory ?? ((profile, toolHost) => BuildApiKeyEngine(profile, toolHost));
@@ -909,6 +917,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
             : settings.Model;
 
         ClaudeCodeModel = _claudeCodeSettingsStore.Load().Model;
+        InitialBackend = _uiSettingsStore.Load().ParseLastBackend() ?? ErChatBackendKind.ApiKey;
     }
 
     /// <summary>config.toml から Codex のプロバイダー・モデル候補を読み込む</summary>
@@ -973,6 +982,8 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         _claudeCodeSettingsStore.Save(
             new ClaudeCodeSettings { Model = ClaudeCodeModel?.Trim() ?? string.Empty }
         );
+
+        _uiSettingsStore.Save(new ChatUiSettings { LastBackend = SelectedBackend.ToString() });
     }
 
     // ── 設定変更フック ──

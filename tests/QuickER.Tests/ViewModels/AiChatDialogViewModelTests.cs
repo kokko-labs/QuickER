@@ -44,6 +44,45 @@ public class AiChatDialogViewModelTests
         }
     }
 
+    /// <summary>SaveSettings が接続タブを保存し、次回構築時の InitialBackend として復元されることを検証する</summary>
+    [Fact(DisplayName = "SaveSettings が接続タブを保存し次回の InitialBackend に復元される")]
+    public void SaveSettings_PersistsSelectedBackend_AndRestoresOnNextLoad()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
+
+        try
+        {
+            var uiStore = new ChatUiSettingsStore("ai-chat-ui.json", folder);
+            var vm = new AiChatDialogViewModel(
+                host: null,
+                dispatcher: new SyncUiDispatcher(),
+                settingsStore: new CodexAppServerSettingsStore(folder),
+                codexClient: new FakeCodexAppServerClient(),
+                uiSettingsStore: uiStore
+            );
+
+            // 保存が無い初回は API キータブが既定
+            vm.InitialBackend.Should().Be(ErChatBackendKind.ApiKey);
+
+            vm.TryChangeBackend(ErChatBackendKind.ClaudeCode).Should().BeTrue();
+            vm.SaveSettings();
+
+            var restored = new AiChatDialogViewModel(
+                host: null,
+                dispatcher: new SyncUiDispatcher(),
+                settingsStore: new CodexAppServerSettingsStore(folder),
+                codexClient: new FakeCodexAppServerClient(),
+                uiSettingsStore: uiStore
+            );
+
+            restored.InitialBackend.Should().Be(ErChatBackendKind.ClaudeCode);
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
     /// <summary>MainViewModel 具象なしで、IErDiagramChatHost 抽象のみからツール seam を得て構築できることを検証する</summary>
     [Fact(DisplayName = "MainViewModel 無しでも IErDiagramChatHost 注入で構築できる")]
     public void Constructs_WithChatHostStub_WithoutMainViewModel()

@@ -34,6 +34,26 @@ public partial class AiChatDialog : Window
     {
         Loaded -= OnLoaded;
         await ViewModel.InitializeAsync();
+        ApplyInitialBackendTab();
+    }
+
+    /// <summary>
+    /// 前回使った接続タブを復元する。SelectedIndex の変更で通常のタブ切替処理
+    /// （<see cref="BackendTabs_SelectionChanged"/>）が走り、切替経路を一本に保つ。
+    /// </summary>
+    private void ApplyInitialBackendTab()
+    {
+        var index = ViewModel.InitialBackend switch
+        {
+            ErChatBackendKind.Codex => 1,
+            ErChatBackendKind.ClaudeCode => 2,
+            _ => 0,
+        };
+
+        if (index != BackendTabs.SelectedIndex)
+        {
+            BackendTabs.SelectedIndex = index;
+        }
     }
 
     /// <summary>×ボタンでは閉じず、設定を保存して非表示にし状態を維持する（シングルトン動作）</summary>

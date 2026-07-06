@@ -235,6 +235,51 @@ public class MockGenerationDialogViewModelTests
         await vm.SendMessageCommand.ExecuteAsync(null);
     }
 
+    /// <summary>SaveSettings が接続タブを保存し、次回構築時の InitialBackend として復元されることを検証する</summary>
+    [Fact(DisplayName = "SaveSettings が接続タブを保存し次回の InitialBackend に復元される")]
+    public void SaveSettings_PersistsSelectedBackend_AndRestoresOnNextLoad()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
+
+        try
+        {
+            var uiStore = new ChatUiSettingsStore("mock-generation-ui.json", folder);
+            var vm = new MockGenerationDialogViewModel(
+                new StubDiagramSource(NonEmptyDiagram()),
+                new SyncUiDispatcher(),
+                files: null,
+                codexSettingsStore: new CodexAppServerSettingsStore(folder),
+                apiKeyEngineFactory: null,
+                codexEngineFactory: null,
+                claudeCodeEngineFactory: null,
+                uiSettingsStore: uiStore
+            );
+
+            // 保存が無い初回は API キータブが既定
+            vm.InitialBackend.Should().Be(ErChatBackendKind.ApiKey);
+
+            vm.SelectedBackend = ErChatBackendKind.ClaudeCode;
+            vm.SaveSettings();
+
+            var restored = new MockGenerationDialogViewModel(
+                new StubDiagramSource(NonEmptyDiagram()),
+                new SyncUiDispatcher(),
+                files: null,
+                codexSettingsStore: new CodexAppServerSettingsStore(folder),
+                apiKeyEngineFactory: null,
+                codexEngineFactory: null,
+                claudeCodeEngineFactory: null,
+                uiSettingsStore: uiStore
+            );
+
+            restored.InitialBackend.Should().Be(ErChatBackendKind.ClaudeCode);
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
     /// <summary>空の図では「＋新しい会話」が無効、非空なら有効になることを検証する</summary>
     [Fact(DisplayName = "空図では新しい会話不可・非空なら可能")]
     public void CanStartConversation_DependsOnDiagramEmptiness()
