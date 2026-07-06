@@ -103,6 +103,8 @@ public partial class MockGenerationDialogViewModel : ObservableObject
                 SendMessageCommand.NotifyCanExecuteChanged();
                 InterruptCommand.NotifyCanExecuteChanged();
                 OnPropertyChanged(nameof(CanEditInput));
+                // ターン実行中は添付操作も禁止する
+                Attachments.IsTurnInProgress = value;
                 NotifyMockGenChanged();
             }
         }
@@ -356,6 +358,9 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     public IReadOnlyList<string> ClaudeCodeModelCandidates { get; } =
         AiModelCatalog.ClaudeCodeModels;
 
+    /// <summary>送信待ち添付を束ねる共通 VM 部品（チップ列・可否・追加/削除）</summary>
+    public AttachmentListViewModel Attachments { get; }
+
     /// <summary>本番構成（実クライアント・WPF ディスパッチャ）で生成する</summary>
     public MockGenerationDialogViewModel(IMockDiagramSource diagramSource)
         : this(
@@ -386,12 +391,19 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         Func<ErChatProfile, IErDiagramToolHost, IErChatEngine>? apiKeyEngineFactory,
         Func<ErChatProfile, IErDiagramToolHost, IErChatEngine>? codexEngineFactory,
         Func<ErChatProfile, IErDiagramToolHost, IErChatEngine>? claudeCodeEngineFactory,
-        IMockProjectGenerator? mockProjectGenerator = null
+        IMockProjectGenerator? mockProjectGenerator = null,
+        ChatAttachmentFactory.ImageShrinker? imageShrinker = null
     )
     {
         _diagramSource = diagramSource;
         _dispatcher = dispatcher;
         _files = files ?? new WpfFileDialogService();
+
+        // 添付部品は本番では WPF の画像縮小を差し込む（テストでは注入された縮小・null）
+        Attachments = new AttachmentListViewModel(
+            reportStatus: message => StatusMessage = message,
+            shrinker: imageShrinker ?? WpfImageShrinker.Shrink
+        );
         _mockProjectGenerator =
             mockProjectGenerator ?? new MockProjectGenerator(diagramSource.Providers);
         _codexSettingsStore = codexSettingsStore ?? new CodexAppServerSettingsStore();
@@ -425,7 +437,40 @@ public partial class MockGenerationDialogViewModel : ObservableObject
             );
 
         LoadSettings();
+        RefreshAttachmentSupport();
     }
+
+    /// <summary>
+    /// 選択中バックエンドに応じて添付部品の対応範囲を再評価する。
+    /// API キー=プロバイダー依存・Codex=なし・Claude Code=画像＋PDF（エンジン生成前でも判定できるよう規則で解決する）。
+    /// </summary>
+    private void RefreshAttachmentSupport() =>
+        Attachments.Support = SelectedBackend switch
+        {
+            ErChatBackendKind.ClaudeCode => AttachmentSupport.ImagesAndPdf,
+            ErChatBackendKind.Codex => AttachmentSupport.None,
+            _ => AttachmentSupportResolver.ForApiKeyProvider(ApiProvider),
+        };
+
+    /// <summary>添付ボタン押下でファイル選択ダイアログを開き、選択ファイルを添付へ取り込む</summary>
+    public void PickAndAddAttachments()
+    {
+        if (!Attachments.IsEnabled)
+        {
+            return;
+        }
+
+        var paths = _files.PickOpenFiles(Attachments.FileDialogFilter);
+
+        if (paths.Count > 0)
+        {
+            Attachments.AddFiles(paths);
+        }
+    }
+
+    /// <summary>ドロップされたファイル群を添付へ取り込む（非対応は VM がステータス通知する）</summary>
+    /// <param name="paths">ドロップされたファイルパス群</param>
+    public void AddDroppedFiles(IReadOnlyList<string> paths) => Attachments.AddFiles(paths);
 
     /// <summary>ダイアログ表示時に設定・API キーを読み込む</summary>
     public void Initialize()
@@ -451,7 +496,8 @@ public partial class MockGenerationDialogViewModel : ObservableObject
             toolHost,
             _dispatcher,
             () => ApiProvider == AiProvider.Ollama || !string.IsNullOrWhiteSpace(ApiKey),
-            profile
+            profile,
+            attachmentSupport: () => AttachmentSupportResolver.ForApiKeyProvider(ApiProvider)
         );
 
     /// <summary>新しい会話を開始する（履歴クリア・新セッション用意・案内表示）</summary>
@@ -491,23 +537,36 @@ public partial class MockGenerationDialogViewModel : ObservableObject
 
         var message = UserInput.Trim();
         UserInput = string.Empty;
-        Messages.Add(new ErChatMessage { Role = ErChatMessageRole.User, Content = message });
+
+        // 送信の直前に添付を取り出し、ユーザー吹き出しへ「📎 name」の要約を載せる
+        var attachments = Attachments.BuildAttachments();
+        Messages.Add(
+            new ErChatMessage
+            {
+                Role = ErChatMessageRole.User,
+                Content = message,
+                AttachmentSummary = Attachments.BuildSummary(),
+            }
+        );
         IsTurnInProgress = true;
 
         try
         {
             if (!_firstMessageSent)
             {
-                // 初回送信はスキーマ自動添付＋要望で会話を開始する
+                // 初回送信はスキーマ自動添付＋要望で会話を開始する（添付をデザイン参考として同梱）
                 _firstMessageSent = true;
                 var diagram = _diagramSource.GetDiagram();
-                await _session.StartAsync(diagram, message).ConfigureAwait(true);
+                await _session.StartAsync(diagram, message, attachments).ConfigureAwait(true);
             }
             else
             {
-                // 2 回目以降は修正フィードバックとして送る
-                await _session.SendFeedbackAsync(message).ConfigureAwait(true);
+                // 2 回目以降は修正フィードバックとして送る（添付を同梱）
+                await _session.SendFeedbackAsync(message, attachments).ConfigureAwait(true);
             }
+
+            // 送信できたら添付をクリアする（メッセージ単位のライフサイクル）
+            Attachments.Clear();
         }
         catch (Exception ex)
         {
@@ -924,6 +983,8 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         OnPropertyChanged(nameof(IsApiKeyBackend));
         OnPropertyChanged(nameof(IsCodexBackend));
         OnPropertyChanged(nameof(IsClaudeCodeBackend));
+        // バックエンド切替で添付範囲を再評価する（非対応になったら添付部品側で Pending をクリア・通知する）
+        RefreshAttachmentSupport();
         NotifyReadinessChanged();
         NotifyMockGenChanged();
     }
@@ -956,6 +1017,12 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         _isInitializing = true;
         ApiKey = CurrentApiKeyStoreName is { } slot ? ApiKeyStore.Load(slot) : string.Empty;
         _isInitializing = wasInitializing;
+
+        // API キー接続はプロバイダーで添付範囲が変わる（OpenAI=画像・Claude=画像＋PDF・Ollama=なし）
+        if (IsApiKeyBackend)
+        {
+            RefreshAttachmentSupport();
+        }
 
         NotifyReadinessChanged();
     }

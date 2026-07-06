@@ -62,6 +62,15 @@ public sealed class ErChatMessage : INotifyPropertyChanged
         }
     }
 
+    /// <summary>
+    /// このメッセージに同梱された添付の要約（ユーザー発話の吹き出しに「📎 ファイル名」で表示するための文言・省略時は null）。
+    /// 添付なしの既存メッセージは null のままで挙動不変。
+    /// </summary>
+    public string? AttachmentSummary { get; init; }
+
+    /// <summary>添付要約を持つか（吹き出しの添付行の表示制御に使う）</summary>
+    public bool HasAttachments => !string.IsNullOrEmpty(AttachmentSummary);
+
     /// <summary>指定プロパティの変更を通知する</summary>
     private void OnPropertyChanged([CallerMemberName] string? propertyName = null) =>
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));

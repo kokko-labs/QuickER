@@ -106,7 +106,7 @@ public sealed class AnthropicChatTurnDriver : IChatTurnDriver
                     // System は MessageCreateParams.System へ回すためメッセージ列には積まない
                     break;
                 case ChatHistoryRole.User:
-                    messages.Add(new MessageParam { Role = Role.User, Content = item.Text });
+                    messages.Add(ToUserParam(item));
                     break;
                 case ChatHistoryRole.Assistant:
                     messages.Add(ToAssistantParam(item));
@@ -132,6 +132,59 @@ public sealed class AnthropicChatTurnDriver : IChatTurnDriver
 
         return messages;
     }
+
+    /// <summary>
+    /// ユーザー履歴項目を MessageParam へ変換する。添付があれば image / document(PDF) ブロックを
+    /// テキストブロックと共に content 配列へ積む（添付なしなら従来どおり単純なテキストメッセージ）。
+    /// </summary>
+    internal static MessageParam ToUserParam(ChatHistoryItem item)
+    {
+        if (item.Attachments is not { Count: > 0 })
+        {
+            return new MessageParam { Role = Role.User, Content = item.Text };
+        }
+
+        var blocks = new List<ContentBlockParam>();
+
+        // 画像・PDF を先に置き、その後にユーザーのテキストを添える構成にする
+        foreach (var attachment in item.Attachments)
+        {
+            blocks.Add(ToContentBlock(attachment));
+        }
+
+        if (!string.IsNullOrEmpty(item.Text))
+        {
+            blocks.Add(new TextBlockParam { Text = item.Text });
+        }
+
+        return new MessageParam { Role = Role.User, Content = blocks };
+    }
+
+    /// <summary>添付 1 件を Anthropic のコンテンツブロック（image base64 / document PDF base64）へ変換する</summary>
+    internal static ContentBlockParam ToContentBlock(ChatAttachment attachment) =>
+        attachment.Kind == ChatAttachmentKind.Image
+            ? new ImageBlockParam
+            {
+                Source = new Base64ImageSource
+                {
+                    Data = attachment.ToBase64(),
+                    MediaType = ToImageMediaType(attachment.MediaType),
+                },
+            }
+            : new DocumentBlockParam
+            {
+                Source = new Base64PdfSource { Data = attachment.ToBase64() },
+            };
+
+    /// <summary>MIME 文字列を Anthropic の画像 MediaType 列挙へ変換する（未知は PNG 扱い）</summary>
+    private static MediaType ToImageMediaType(string mediaType) =>
+        mediaType switch
+        {
+            "image/jpeg" => MediaType.ImageJpeg,
+            "image/gif" => MediaType.ImageGif,
+            "image/webp" => MediaType.ImageWebP,
+            _ => MediaType.ImagePng,
+        };
 
     /// <summary>アシスタント履歴項目を、テキスト・ツール呼び出しを保持した MessageParam へ変換する</summary>
     private static MessageParam ToAssistantParam(ChatHistoryItem item)

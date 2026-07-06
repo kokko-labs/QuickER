@@ -320,4 +320,77 @@ public class AiChatDialogViewModelTests
             Cleanup(folder);
         }
     }
+
+    // ── 添付 ──
+
+    /// <summary>PNG シグネチャ付きバイト列を作る（添付テスト用）</summary>
+    private static byte[] PngBytes()
+    {
+        var data = new byte[16];
+        byte[] signature = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+        Array.Copy(signature, data, signature.Length);
+        return data;
+    }
+
+    /// <summary>API キー接続の添付範囲がプロバイダー選択に追従することを検証する</summary>
+    [Fact(DisplayName = "添付範囲はプロバイダーに追従する")]
+    public void AttachmentSupport_TracksApiProvider()
+    {
+        var (vm, _, folder) = CreateVm();
+
+        try
+        {
+            vm.ApiProvider = AiProvider.OpenAI;
+            vm.Attachments.Support.Should().Be(AttachmentSupport.Images);
+
+            vm.ApiProvider = AiProvider.Claude;
+            vm.Attachments.Support.Should().Be(AttachmentSupport.ImagesAndPdf);
+
+            vm.ApiProvider = AiProvider.Ollama;
+            vm.Attachments.Support.Should().Be(AttachmentSupport.None);
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>Claude Code バックエンドでは添付範囲が画像＋PDF になることを検証する</summary>
+    [Fact(DisplayName = "Claude Code では添付範囲が画像＋PDF")]
+    public void AttachmentSupport_ClaudeCodeBackend_IsImagesAndPdf()
+    {
+        var (vm, _, folder) = CreateVm();
+
+        try
+        {
+            vm.SelectedBackend = ErChatBackendKind.ClaudeCode;
+            vm.Attachments.Support.Should().Be(AttachmentSupport.ImagesAndPdf);
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>添付非対応のプロバイダー（Ollama）へ切り替えると Pending がクリアされることを検証する</summary>
+    [Fact(DisplayName = "非対応プロバイダーへ切替で添付をクリア")]
+    public void SwitchToUnsupportedProvider_ClearsAttachments()
+    {
+        var (vm, _, folder) = CreateVm();
+
+        try
+        {
+            vm.ApiProvider = AiProvider.Claude;
+            vm.Attachments.AddClipboardImage(PngBytes(), DateTime.Now);
+            vm.Attachments.Items.Should().HaveCount(1);
+
+            vm.ApiProvider = AiProvider.Ollama;
+
+            vm.Attachments.Items.Should().BeEmpty();
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
 }

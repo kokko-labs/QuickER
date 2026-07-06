@@ -15,6 +15,17 @@ public interface IFileDialogService
     /// <summary>ファイルを開くダイアログを表示する（キャンセル時は null）</summary>
     FileDialogResult? PickOpenFile(string filter);
 
+    /// <summary>
+    /// 複数ファイルを選択できる「開く」ダイアログを表示する（キャンセル・未選択時は空配列）。
+    /// 既定実装は単一選択（<see cref="PickOpenFile"/>）へフォールバックする（既存スタブの互換のため）。
+    /// </summary>
+    /// <param name="filter">ファイルフィルタ</param>
+    IReadOnlyList<string> PickOpenFiles(string filter)
+    {
+        var picked = PickOpenFile(filter);
+        return picked is null ? Array.Empty<string>() : [picked.Path];
+    }
+
     /// <summary>ファイルを保存するダイアログを表示する（キャンセル時は null）</summary>
     /// <param name="initialFileName">初期表示するファイル名（省略可）</param>
     /// <param name="initialDirectory">初期表示するフォルダ（省略可）</param>
@@ -41,6 +52,14 @@ public sealed class WpfFileDialogService : IFileDialogService
         return dialog.ShowDialog() == true
             ? new FileDialogResult(dialog.FileName, dialog.FilterIndex)
             : null;
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyList<string> PickOpenFiles(string filter)
+    {
+        var dialog = new OpenFileDialog { Filter = filter, Multiselect = true };
+
+        return dialog.ShowDialog() == true ? dialog.FileNames : Array.Empty<string>();
     }
 
     /// <inheritdoc />

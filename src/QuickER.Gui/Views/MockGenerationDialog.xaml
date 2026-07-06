@@ -209,15 +209,26 @@
         HorizontalAlignment="Right"
         MaxWidth="440"
       >
-        <TextBox
-          Text="{Binding Content, Mode=OneWay}"
-          TextWrapping="Wrap"
-          IsReadOnly="True"
-          BorderThickness="0"
-          Background="Transparent"
-          Foreground="White"
-          FontSize="13"
-        />
+        <StackPanel>
+          <TextBox
+            Text="{Binding Content, Mode=OneWay}"
+            TextWrapping="Wrap"
+            IsReadOnly="True"
+            BorderThickness="0"
+            Background="Transparent"
+            Foreground="White"
+            FontSize="13"
+          />
+          <!-- 添付要約（📎 name。添付ありのメッセージのみ表示） -->
+          <TextBlock
+            Margin="0,6,0,0"
+            Text="{Binding AttachmentSummary}"
+            TextWrapping="Wrap"
+            Foreground="#DCE9FF"
+            FontSize="12"
+            Visibility="{Binding HasAttachments, Converter={StaticResource BoolToVisibilityConverter}}"
+          />
+        </StackPanel>
       </Border>
     </DataTemplate>
 
@@ -291,7 +302,7 @@
       </Grid.ColumnDefinitions>
 
       <!-- 左: チャット + 接続設定 -->
-      <Grid Grid.Column="0">
+      <Grid Grid.Column="0" AllowDrop="True" DragOver="ChatArea_DragOver" Drop="ChatArea_Drop">
         <Grid.RowDefinitions>
           <RowDefinition Height="Auto" />
           <RowDefinition Height="*" />
@@ -552,37 +563,58 @@
           </Grid>
         </Border>
 
-        <!-- 入力エリア（入力欄 1 つ + 送信） -->
+        <!-- 入力エリア（添付チップ列＋クリップ + 入力欄 + 送信） -->
         <Grid Grid.Row="2" Margin="0,12,0,0">
-          <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="*" />
-            <ColumnDefinition Width="Auto" />
-          </Grid.ColumnDefinitions>
-          <TextBox
-            x:Name="UserInputBox"
-            Grid.Column="0"
-            Style="{StaticResource ChatInputBox}"
-            Margin="0,0,8,0"
-            MinHeight="48"
-            MaxHeight="140"
-            TextWrapping="Wrap"
-            AcceptsReturn="True"
-            IsEnabled="{Binding CanEditInput}"
-            Text="{Binding UserInput, UpdateSourceTrigger=PropertyChanged}"
-            ToolTip="モックへの要望・修正指示（Ctrl+Enter で送信）"
-          >
-            <TextBox.InputBindings>
-              <KeyBinding Modifiers="Control" Key="Return" Command="{Binding SendMessageCommand}" />
-            </TextBox.InputBindings>
-          </TextBox>
-          <Button
-            Grid.Column="1"
-            Style="{StaticResource PrimaryButton}"
-            Width="96"
-            VerticalAlignment="Stretch"
-            Content="送信"
-            Command="{Binding SendMessageCommand}"
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+          </Grid.RowDefinitions>
+
+          <!-- 添付チップ列＋クリップボタン（入力欄の上） -->
+          <local:AttachmentPanel
+            x:Name="Attachments"
+            Grid.Row="0"
+            Margin="0,0,0,6"
+            AttachmentList="{Binding Attachments}"
+            AttachRequested="Attachments_AttachRequested"
           />
+
+          <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="*" />
+              <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBox
+              x:Name="UserInputBox"
+              Grid.Column="0"
+              Style="{StaticResource ChatInputBox}"
+              Margin="0,0,8,0"
+              MinHeight="48"
+              MaxHeight="140"
+              TextWrapping="Wrap"
+              AcceptsReturn="True"
+              IsEnabled="{Binding CanEditInput}"
+              Text="{Binding UserInput, UpdateSourceTrigger=PropertyChanged}"
+              ToolTip="モックへの要望・修正指示（Ctrl+Enter で送信 / Ctrl+V で画像を添付）"
+              PreviewKeyDown="UserInputBox_PreviewKeyDown"
+            >
+              <TextBox.InputBindings>
+                <KeyBinding
+                  Modifiers="Control"
+                  Key="Return"
+                  Command="{Binding SendMessageCommand}"
+                />
+              </TextBox.InputBindings>
+            </TextBox>
+            <Button
+              Grid.Column="1"
+              Style="{StaticResource PrimaryButton}"
+              Width="96"
+              VerticalAlignment="Stretch"
+              Content="送信"
+              Command="{Binding SendMessageCommand}"
+            />
+          </Grid>
         </Grid>
       </Grid>
 

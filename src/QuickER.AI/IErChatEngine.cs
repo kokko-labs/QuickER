@@ -45,6 +45,12 @@ public interface IErChatEngine : IAsyncDisposable
     /// <summary>チャット送信が可能な状態か（接続済み・必要なら認証済み）</summary>
     bool IsReady { get; }
 
+    /// <summary>
+    /// このエンジンが受け付けられる添付の範囲（UI の添付可否判定に使う）。
+    /// 既定は <see cref="AttachmentSupport.None"/> で、添付対応エンジンのみが上書きする。
+    /// </summary>
+    AttachmentSupport AttachmentSupport => AttachmentSupport.None;
+
     /// <summary>エンジンを初期化する（接続・設定読込など）</summary>
     Task InitializeAsync(CancellationToken cancellationToken = default);
 
@@ -53,6 +59,20 @@ public interface IErChatEngine : IAsyncDisposable
 
     /// <summary>ユーザー発話を 1 ターンとして送信し、応答・ツール実行を進める</summary>
     Task SendAsync(string prompt, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 添付（画像・PDF）を同梱してユーザー発話を 1 ターンとして送信する。
+    /// 既定実装は添付を無視して <see cref="SendAsync(string, CancellationToken)"/> へ委譲するため、
+    /// 添付対応エンジンだけがこのオーバーロードを上書きすればよい（既存実装は不変）。
+    /// </summary>
+    /// <param name="prompt">ユーザー発話</param>
+    /// <param name="attachments">同梱する添付（空なら添付なしと同じ挙動）</param>
+    /// <param name="cancellationToken">キャンセルトークン</param>
+    Task SendAsync(
+        string prompt,
+        IReadOnlyList<ChatAttachment> attachments,
+        CancellationToken cancellationToken = default
+    ) => SendAsync(prompt, cancellationToken);
 
     /// <summary>実行中のターンを中断する</summary>
     Task InterruptAsync(CancellationToken cancellationToken = default);

@@ -105,4 +105,41 @@ public class CodexChatEngineTests
 
         engine.IsReady.Should().BeTrue();
     }
+
+    /// <summary>Codex は添付非対応（AttachmentSupport=None）であることを検証する</summary>
+    [Fact(DisplayName = "Codex の AttachmentSupport は None")]
+    public void AttachmentSupport_IsNone()
+    {
+        var engine = new CodexChatEngine(
+            new FakeCodexAppServerClient(),
+            new RecordingToolHost(),
+            new SyncUiDispatcher()
+        );
+
+        engine.AttachmentSupport.Should().Be(AttachmentSupport.None);
+    }
+
+    /// <summary>添付付き送信は防御的に NotSupportedException で弾かれることを検証する</summary>
+    [Fact(DisplayName = "添付付き送信は NotSupportedException")]
+    public async Task SendAsync_WithAttachments_Throws()
+    {
+        var engine = new CodexChatEngine(
+            new FakeCodexAppServerClient(),
+            new RecordingToolHost(),
+            new SyncUiDispatcher()
+        );
+
+        byte[] pngData = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+        var attachment = new ChatAttachment(
+            "a.png",
+            ChatAttachmentKind.Image,
+            "image/png",
+            pngData
+        );
+
+        var act = () =>
+            engine.SendAsync("やあ", [attachment], TestContext.Current.CancellationToken);
+
+        await act.Should().ThrowAsync<NotSupportedException>();
+    }
 }

@@ -89,9 +89,24 @@ public sealed class MockDesignSession : IErDiagramToolHost
     /// <param name="diagram">モックの元になる ER 図</param>
     /// <param name="userInstructions">ユーザーからの補足指示（省略可）</param>
     /// <param name="cancellationToken">キャンセルトークン</param>
+    public Task StartAsync(
+        ErDiagram diagram,
+        string? userInstructions,
+        CancellationToken cancellationToken = default
+    ) => StartAsync(diagram, userInstructions, attachments: null, cancellationToken);
+
+    /// <summary>
+    /// 会話を開始する（添付付きオーバーロード）。スキーマ直列化＋ユーザー補足指示を初回プロンプトとし、
+    /// 添付（画像・PDF）をデザイン参考としてエンジンへ透過的に渡す。
+    /// </summary>
+    /// <param name="diagram">モックの元になる ER 図</param>
+    /// <param name="userInstructions">ユーザーからの補足指示（省略可）</param>
+    /// <param name="attachments">同梱する添付（省略可・null なら添付なし）</param>
+    /// <param name="cancellationToken">キャンセルトークン</param>
     public async Task StartAsync(
         ErDiagram diagram,
         string? userInstructions,
+        IReadOnlyList<ChatAttachment>? attachments,
         CancellationToken cancellationToken = default
     )
     {
@@ -101,14 +116,31 @@ public sealed class MockDesignSession : IErDiagramToolHost
         await _engine.StartConversationAsync(cancellationToken).ConfigureAwait(false);
 
         var prompt = BuildInitialPrompt(diagram, userInstructions);
-        await _engine.SendAsync(prompt, cancellationToken).ConfigureAwait(false);
+        await _engine
+            .SendAsync(prompt, attachments ?? Array.Empty<ChatAttachment>(), cancellationToken)
+            .ConfigureAwait(false);
     }
 
     /// <summary>修正指示を 1 ターンとして送信する</summary>
     /// <param name="feedback">ユーザーの修正指示</param>
     /// <param name="cancellationToken">キャンセルトークン</param>
     public Task SendFeedbackAsync(string feedback, CancellationToken cancellationToken = default) =>
-        _engine.SendAsync(feedback, cancellationToken);
+        SendFeedbackAsync(feedback, attachments: null, cancellationToken);
+
+    /// <summary>修正指示を 1 ターンとして送信する（添付付きオーバーロード。添付を透過的に渡す）</summary>
+    /// <param name="feedback">ユーザーの修正指示</param>
+    /// <param name="attachments">同梱する添付（省略可・null なら添付なし）</param>
+    /// <param name="cancellationToken">キャンセルトークン</param>
+    public Task SendFeedbackAsync(
+        string feedback,
+        IReadOnlyList<ChatAttachment>? attachments,
+        CancellationToken cancellationToken = default
+    ) =>
+        _engine.SendAsync(
+            feedback,
+            attachments ?? Array.Empty<ChatAttachment>(),
+            cancellationToken
+        );
 
     /// <summary>実行中のターンを中断する</summary>
     public Task InterruptAsync(CancellationToken cancellationToken = default) =>

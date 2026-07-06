@@ -25,6 +25,15 @@ public sealed class ClaudeCodeChatEngine : IErChatEngine
     private bool _initialized;
     private CancellationTokenSource? _turnCts;
 
+    /// <summary>この会話で一度でも添付を使ったか（以降のターンも Read 許可を維持するためのフラグ）</summary>
+    private bool _attachmentsUsedInConversation;
+
+    /// <summary>添付書き出し先サブフォルダ名（作業ディレクトリ配下）</summary>
+    private const string AttachmentsSubfolder = "attachments";
+
+    /// <summary>添付使用時に追加で許可するツール（ファイル読取）</summary>
+    private const string ReadTool = "Read";
+
     private const string PendingGuidance = "「再確認」を押すとログイン状態を確認できます。";
     private const string InstallGuidance = "Claude Code をインストールし、PATH を通してください。";
     private const string LoggedInGuidance = "ローカルの Claude Code をそのまま使用します。";
@@ -79,6 +88,9 @@ public sealed class ClaudeCodeChatEngine : IErChatEngine
 
     /// <inheritdoc />
     public bool IsReady => _initialized && _client.IsAvailable();
+
+    /// <inheritdoc />
+    public AttachmentSupport AttachmentSupport => AttachmentSupport.ImagesAndPdf;
 
     /// <inheritdoc />
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
@@ -157,11 +169,21 @@ public sealed class ClaudeCodeChatEngine : IErChatEngine
     public Task StartConversationAsync(CancellationToken cancellationToken = default)
     {
         _sessionId = null;
+        // 新しい会話では添付使用状態もリセットする（前会話の Read 許可を持ち越さない）
+        _attachmentsUsedInConversation = false;
         return Task.CompletedTask;
     }
 
     /// <inheritdoc />
-    public async Task SendAsync(string prompt, CancellationToken cancellationToken = default)
+    public Task SendAsync(string prompt, CancellationToken cancellationToken = default) =>
+        SendAsync(prompt, Array.Empty<ChatAttachment>(), cancellationToken);
+
+    /// <inheritdoc />
+    public async Task SendAsync(
+        string prompt,
+        IReadOnlyList<ChatAttachment> attachments,
+        CancellationToken cancellationToken = default
+    )
     {
         if (!_initialized)
         {
@@ -172,19 +194,38 @@ public sealed class ClaudeCodeChatEngine : IErChatEngine
         var token = _turnCts.Token;
         StatusChanged?.Invoke(this, "Claude Code が処理中です...");
 
+        // 添付があれば作業フォルダ配下へ書き出し、プロンプト末尾に絶対パス一覧を付記する。
+        // 一度でも添付を使った会話は以降のターンも Read 許可を維持する（_attachmentsUsedInConversation）。
+        var effectivePrompt = prompt;
+
+        if (attachments is { Count: > 0 })
+        {
+            var paths = WriteAttachments(attachments);
+            effectivePrompt = AppendAttachmentPaths(prompt, paths);
+            _attachmentsUsedInConversation = true;
+        }
+
+        // 添付を使った会話では Read を追加許可する（MCP ツールと併記）。従来の添付なし会話は MCP のみで不変。
+        var additionalTools = _attachmentsUsedInConversation
+            ? new[] { ReadTool }
+            : Array.Empty<string>();
+
         var options = new ClaudeCodeLaunchOptions(
             Model,
             _toolHost is not null ? _profile.BuildSystemPrompt() : string.Empty,
             _mcpConfigPath,
             AllowedTool,
             _workingDirectory
-        );
+        )
+        {
+            AdditionalAllowedTools = additionalTools,
+        };
 
         try
         {
             var outcome = await _client
                 .RunTurnAsync(
-                    prompt,
+                    effectivePrompt,
                     _sessionId,
                     options,
                     text => AssistantDeltaReceived?.Invoke(this, text),
@@ -248,6 +289,63 @@ public sealed class ClaudeCodeChatEngine : IErChatEngine
 
         ToolActivityReceived?.Invoke(this, new ErChatToolActivity(toolName, result, success));
         return (result, success);
+    }
+
+    /// <summary>
+    /// 添付を作業ディレクトリ配下の <c>attachments/</c> へ書き出し、書き出した絶対パス一覧を返す。
+    /// ファイル名衝突は連番（<c>name (2).ext</c>）で回避する。
+    /// </summary>
+    private List<string> WriteAttachments(IReadOnlyList<ChatAttachment> attachments)
+    {
+        var directory = Path.Combine(_workingDirectory, AttachmentsSubfolder);
+        Directory.CreateDirectory(directory);
+
+        var paths = new List<string>();
+
+        foreach (var attachment in attachments)
+        {
+            var path = ResolveUniquePath(directory, attachment.FileName);
+            File.WriteAllBytes(path, attachment.Data);
+            paths.Add(path);
+        }
+
+        return paths;
+    }
+
+    /// <summary>指定フォルダ内で衝突しないパスを解決する（衝突時は <c>name (2).ext</c> 形式で連番を付す）</summary>
+    private static string ResolveUniquePath(string directory, string fileName)
+    {
+        var candidate = Path.Combine(directory, fileName);
+
+        if (!File.Exists(candidate))
+        {
+            return candidate;
+        }
+
+        var baseName = Path.GetFileNameWithoutExtension(fileName);
+        var extension = Path.GetExtension(fileName);
+
+        for (var index = 2; ; index++)
+        {
+            candidate = Path.Combine(directory, $"{baseName} ({index}){extension}");
+
+            if (!File.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+    }
+
+    /// <summary>プロンプト末尾に、添付ファイルの絶対パス一覧（Read ツールで読む案内付き）を付記する</summary>
+    internal static string AppendAttachmentPaths(string prompt, IReadOnlyList<string> paths)
+    {
+        if (paths.Count == 0)
+        {
+            return prompt;
+        }
+
+        var list = string.Join("\n", paths.Select(path => $"- {path}"));
+        return $"{prompt}\n\n添付ファイル（Read ツールで読むこと）:\n{list}";
     }
 
     /// <summary>MCP サーバーの URL・トークンから mcp-config ファイルを書き出し、そのパスを返す</summary>

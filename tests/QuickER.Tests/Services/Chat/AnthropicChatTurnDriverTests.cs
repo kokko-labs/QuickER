@@ -1,3 +1,4 @@
+using Anthropic.Models.Messages;
 using FluentAssertions;
 using QuickER.AI;
 using QuickER.Services.Chat;
@@ -61,5 +62,95 @@ public class AnthropicChatTurnDriverTests
         var messages = AnthropicChatTurnDriver.ToMessageParams(history);
 
         messages.Should().HaveCount(2);
+    }
+
+    /// <summary>画像添付付き User 項目が image(base64) ブロック＋テキストブロックの content 配列になることを検証する</summary>
+    [Fact(DisplayName = "画像添付は Base64ImageSource の image ブロックになる")]
+    public void ToUserParam_ImageAttachment_ProducesImageBlock()
+    {
+        byte[] pngData = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+        var item = new ChatHistoryItem(
+            ChatHistoryRole.User,
+            "この図を参考に",
+            Attachments: new[]
+            {
+                new ChatAttachment("figure.png", ChatAttachmentKind.Image, "image/png", pngData),
+            }
+        );
+
+        var param = AnthropicChatTurnDriver.ToUserParam(item);
+
+        // content はブロック配列（画像＋テキスト）になる
+        var blocks = param.Content.Value.As<IReadOnlyList<ContentBlockParam>>();
+        blocks.Should().HaveCount(2);
+        blocks[0].Value.Should().BeOfType<ImageBlockParam>();
+
+        var image = (ImageBlockParam)blocks[0].Value!;
+        var source = image.Source.Value.As<Base64ImageSource>();
+        source.Data.Should().Be(Convert.ToBase64String(pngData));
+        source.MediaType.Value().Should().Be(MediaType.ImagePng);
+
+        blocks[1].Value.Should().BeOfType<TextBlockParam>();
+    }
+
+    /// <summary>PDF 添付付き User 項目が Base64PdfSource の document ブロックになることを検証する</summary>
+    [Fact(DisplayName = "PDF 添付は Base64PdfSource の document ブロックになる")]
+    public void ToUserParam_PdfAttachment_ProducesDocumentBlock()
+    {
+        var pdfData = "%PDF-1.7"u8.ToArray();
+        var item = new ChatHistoryItem(
+            ChatHistoryRole.User,
+            "この仕様書に沿って",
+            Attachments: new[]
+            {
+                new ChatAttachment("spec.pdf", ChatAttachmentKind.Pdf, "application/pdf", pdfData),
+            }
+        );
+
+        var param = AnthropicChatTurnDriver.ToUserParam(item);
+
+        var blocks = param.Content.Value.As<IReadOnlyList<ContentBlockParam>>();
+        blocks[0].Value.Should().BeOfType<DocumentBlockParam>();
+
+        var document = (DocumentBlockParam)blocks[0].Value!;
+        var source = document.Source.Value.As<Base64PdfSource>();
+        source.Data.Should().Be(Convert.ToBase64String(pdfData));
+    }
+
+    /// <summary>添付が無い User 項目は従来どおり単純なテキストメッセージになることを検証する（挙動不変）</summary>
+    [Fact(DisplayName = "添付なし User はテキストメッセージのまま")]
+    public void ToUserParam_NoAttachments_ProducesPlainText()
+    {
+        var item = new ChatHistoryItem(ChatHistoryRole.User, "こんにちは");
+
+        var param = AnthropicChatTurnDriver.ToUserParam(item);
+
+        // content は文字列（ブロック配列ではない）
+        param.Content.Value.Should().BeOfType<string>().Which.Should().Be("こんにちは");
+    }
+
+    /// <summary>添付付き履歴が再構築（ToMessageParams 経由）でも image ブロックを保持することを検証する（毎ターン再送）</summary>
+    [Fact(DisplayName = "履歴再構築でも添付ブロックが保持される")]
+    public void ToMessageParams_WithAttachment_RebuildsImageBlock()
+    {
+        byte[] pngData = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+        var history = new List<ChatHistoryItem>
+        {
+            new(ChatHistoryRole.System, "指示"),
+            new(
+                ChatHistoryRole.User,
+                "図を見て",
+                Attachments: new[]
+                {
+                    new ChatAttachment("a.png", ChatAttachmentKind.Image, "image/png", pngData),
+                }
+            ),
+        };
+
+        var messages = AnthropicChatTurnDriver.ToMessageParams(history);
+
+        messages.Should().ContainSingle();
+        var blocks = messages[0].Content.Value.As<IReadOnlyList<ContentBlockParam>>();
+        blocks[0].Value.Should().BeOfType<ImageBlockParam>();
     }
 }

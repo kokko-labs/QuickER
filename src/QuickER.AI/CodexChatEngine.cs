@@ -106,6 +106,10 @@ public sealed class CodexChatEngine : IErChatEngine
     public bool IsReady => IsStarted && (!IsOpenAiProvider || !RequiresOpenAiAuth || IsLoggedIn);
 
     /// <inheritdoc />
+    /// <remarks>Codex は添付プロトコルが未対応のため添付不可（UI 側で無効化・防御的にガードもする）。</remarks>
+    public AttachmentSupport AttachmentSupport => AttachmentSupport.None;
+
+    /// <inheritdoc />
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
         await ConnectAsync(cancellationToken).ConfigureAwait(false);
@@ -277,6 +281,25 @@ public sealed class CodexChatEngine : IErChatEngine
             _turnInProgress = false;
             TurnCompleted?.Invoke(this, new ErChatTurnResult(false, ex.Message));
         }
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Codex は添付非対応。UI 側で添付操作を無効化する前提だが、万一添付付きで呼ばれたら
+    /// 分かる例外で弾く（無言で添付を落として送るとユーザーの意図とずれるため）。
+    /// </remarks>
+    public Task SendAsync(
+        string prompt,
+        IReadOnlyList<ChatAttachment> attachments,
+        CancellationToken cancellationToken = default
+    )
+    {
+        if (attachments is { Count: > 0 })
+        {
+            throw new NotSupportedException("Codex 接続は添付（画像・PDF）に対応していません。");
+        }
+
+        return SendAsync(prompt, cancellationToken);
     }
 
     /// <inheritdoc />

@@ -22,6 +22,9 @@ public class MockDesignSessionTests
 
         public List<string> SentPrompts { get; } = new();
 
+        /// <summary>各 SendAsync で渡された添付を記録する（透過検証用）</summary>
+        public List<IReadOnlyList<ChatAttachment>> SentAttachments { get; } = new();
+
         /// <summary>次の SendAsync で再生するツール呼び出し（ツール名・引数 JSON）</summary>
         public (string Tool, string Args)? ScriptedToolCall { get; set; }
 
@@ -41,9 +44,17 @@ public class MockDesignSessionTests
         public Task StartConversationAsync(CancellationToken cancellationToken = default) =>
             Task.CompletedTask;
 
-        public Task SendAsync(string prompt, CancellationToken cancellationToken = default)
+        public Task SendAsync(string prompt, CancellationToken cancellationToken = default) =>
+            SendAsync(prompt, Array.Empty<ChatAttachment>(), cancellationToken);
+
+        public Task SendAsync(
+            string prompt,
+            IReadOnlyList<ChatAttachment> attachments,
+            CancellationToken cancellationToken = default
+        )
         {
             SentPrompts.Add(prompt);
+            SentAttachments.Add(attachments);
 
             // 実エンジンと同様に、ステータス通知と応答断片を 1 つ流す（イベント転送の検証も兼ねる）
             StatusChanged?.Invoke(this, "生成中...");
@@ -206,6 +217,62 @@ public class MockDesignSessionTests
         // エンジンのイベントがセッション経由で転送されることも確認する
         deltas.Should().Contain("了解しました。");
         completed!.Value.Success.Should().BeTrue();
+    }
+
+    /// <summary>PNG シグネチャの画像添付を作る</summary>
+    private static ChatAttachment PngAttachment(string fileName = "ref.png")
+    {
+        byte[] pngData = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+        return new ChatAttachment(fileName, ChatAttachmentKind.Image, "image/png", pngData);
+    }
+
+    /// <summary>StartAsync の添付オーバーロードが添付をエンジンへ透過的に渡すことを検証する</summary>
+    [Fact(DisplayName = "StartAsync は添付をエンジンへ透過する")]
+    public async Task StartAsync_WithAttachments_ForwardsToEngine()
+    {
+        var engine = new FakeChatEngine(new NullToolHost());
+        var session = new MockDesignSession(engine);
+
+        await session.StartAsync(
+            new ErDiagram(),
+            "この画面を参考に",
+            new[] { PngAttachment() },
+            TestContext.Current.CancellationToken
+        );
+
+        engine.SentAttachments.Should().ContainSingle();
+        engine.SentAttachments[0].Should().ContainSingle();
+        engine.SentAttachments[0][0].FileName.Should().Be("ref.png");
+    }
+
+    /// <summary>SendFeedbackAsync の添付オーバーロードが添付をエンジンへ透過的に渡すことを検証する</summary>
+    [Fact(DisplayName = "SendFeedbackAsync は添付をエンジンへ透過する")]
+    public async Task SendFeedbackAsync_WithAttachments_ForwardsToEngine()
+    {
+        var engine = new FakeChatEngine(new NullToolHost());
+        var session = new MockDesignSession(engine);
+
+        await session.SendFeedbackAsync(
+            "この色に寄せて",
+            new[] { PngAttachment("palette.png") },
+            TestContext.Current.CancellationToken
+        );
+
+        engine.SentAttachments.Should().ContainSingle();
+        engine.SentAttachments[0][0].FileName.Should().Be("palette.png");
+    }
+
+    /// <summary>既存の添付なしオーバーロードは空の添付でエンジンへ渡ることを検証する（挙動不変）</summary>
+    [Fact(DisplayName = "添付なしオーバーロードは空添付で渡る")]
+    public async Task StartAsync_NoAttachments_ForwardsEmpty()
+    {
+        var engine = new FakeChatEngine(new NullToolHost());
+        var session = new MockDesignSession(engine);
+
+        await session.StartAsync(new ErDiagram(), null, TestContext.Current.CancellationToken);
+
+        engine.SentAttachments.Should().ContainSingle();
+        engine.SentAttachments[0].Should().BeEmpty();
     }
 
     /// <summary>セッション確定後に遅延解決するツールホスト（フェイクエンジンにセッションを渡す循環を解く）</summary>

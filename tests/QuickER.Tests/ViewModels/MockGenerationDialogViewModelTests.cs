@@ -43,6 +43,9 @@ public class MockGenerationDialogViewModelTests
 
         public List<string> SentPrompts { get; } = new();
 
+        /// <summary>各 SendAsync で受け取った添付（添付付きオーバーロード検証用）</summary>
+        public List<IReadOnlyList<ChatAttachment>> SentAttachments { get; } = new();
+
         /// <summary>次の SendAsync で再生するツール呼び出し（ツール名・引数 JSON）</summary>
         public (string Tool, string Args)? ScriptedToolCall { get; set; }
 
@@ -58,6 +61,16 @@ public class MockGenerationDialogViewModelTests
 
         public Task StartConversationAsync(CancellationToken cancellationToken = default) =>
             Task.CompletedTask;
+
+        public Task SendAsync(
+            string prompt,
+            IReadOnlyList<ChatAttachment> attachments,
+            CancellationToken cancellationToken = default
+        )
+        {
+            SentAttachments.Add(attachments);
+            return SendAsync(prompt, cancellationToken);
+        }
 
         public Task SendAsync(string prompt, CancellationToken cancellationToken = default)
         {
@@ -590,6 +603,94 @@ public class MockGenerationDialogViewModelTests
             vm.SelectedBackend = ErChatBackendKind.ApiKey;
             vm.CanGenerateMockProject.Should().BeFalse();
             vm.MockGenDisabledReason.Should().Contain("Claude Code");
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>PNG シグネチャ付きバイト列を作る（添付テスト用）</summary>
+    private static byte[] PngBytes()
+    {
+        var data = new byte[16];
+        byte[] signature = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+        Array.Copy(signature, data, signature.Length);
+        return data;
+    }
+
+    /// <summary>Claude Code バックエンド（ImagesAndPdf）では添付範囲が画像＋PDF になることを検証する</summary>
+    [Fact(DisplayName = "Claude Code では添付範囲が画像＋PDF")]
+    public void AttachmentSupport_ClaudeCode_IsImagesAndPdf()
+    {
+        var (vm, _, folder) = CreateVm(NonEmptyDiagram());
+
+        try
+        {
+            vm.SelectedBackend = ErChatBackendKind.ClaudeCode;
+            vm.Attachments.Support.Should().Be(AttachmentSupport.ImagesAndPdf);
+
+            // Codex はエンジンが添付非対応
+            vm.SelectedBackend = ErChatBackendKind.Codex;
+            vm.Attachments.Support.Should().Be(AttachmentSupport.None);
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>添付付き送信がセッション経由でエンジンへ渡り、送信後にチップがクリアされることを検証する</summary>
+    [Fact(DisplayName = "添付付き送信がエンジンへ渡りクリアされる")]
+    public async Task SendWithAttachment_PassesToEngine_AndClears()
+    {
+        // Claude Code バックエンドのエンジンをフェイクへ差し替える（engineBox で捕捉する）
+        var (vm, engineBox, _, folder) = CreateVmWithGenerator(NonEmptyDiagram());
+
+        try
+        {
+            vm.SelectedBackend = ErChatBackendKind.ClaudeCode;
+            vm.ApplyClaudeCodeReadiness(true, "ログイン済み", ConnectionHealth.Ready, string.Empty);
+            vm.StartConversationCommand.Execute(null);
+
+            vm.Attachments.AddClipboardImage(PngBytes(), DateTime.Now);
+            vm.Attachments.Items.Should().HaveCount(1);
+
+            vm.UserInput = "この画面イメージで作って";
+            await vm.SendMessageCommand.ExecuteAsync(null);
+
+            // 初回送信の添付がエンジンへ渡っている
+            engineBox[0].SentAttachments.Should().ContainSingle();
+            engineBox[0].SentAttachments[0].Should().HaveCount(1);
+
+            // 送信後にチップはクリアされる
+            vm.Attachments.Items.Should().BeEmpty();
+
+            // ユーザー吹き出しに添付要約が載る
+            vm.Messages.Should()
+                .ContainSingle(m => m.Role == ErChatMessageRole.User && m.HasAttachments);
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>バックエンドを添付非対応（Codex）へ切り替えると Pending がクリアされることを検証する</summary>
+    [Fact(DisplayName = "非対応バックエンドへ切替で添付をクリア")]
+    public void SwitchToUnsupportedBackend_ClearsAttachments()
+    {
+        var (vm, _, folder) = CreateVm(NonEmptyDiagram());
+
+        try
+        {
+            vm.SelectedBackend = ErChatBackendKind.ClaudeCode;
+            vm.Attachments.AddClipboardImage(PngBytes(), DateTime.Now);
+            vm.Attachments.Items.Should().HaveCount(1);
+
+            vm.SelectedBackend = ErChatBackendKind.Codex;
+
+            vm.Attachments.Items.Should().BeEmpty();
         }
         finally
         {

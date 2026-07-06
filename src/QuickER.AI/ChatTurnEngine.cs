@@ -27,11 +27,16 @@ public sealed record ChatToolCallRequest(string Id, string Name, string Argument
 /// <param name="Text">本文（無い場合は空文字）</param>
 /// <param name="ToolCalls">アシスタントが要求したツール呼び出し一覧（任意）</param>
 /// <param name="ToolCallId">Tool 役割時の対応するツール呼び出し ID（任意）</param>
+/// <param name="Attachments">
+/// User 役割に同梱された添付（画像・PDF）。API キー接続では履歴に残り毎ターン再送されるため、
+/// ステートレス API でも添付付きメッセージが正しく再構築される。既定は空。
+/// </param>
 public sealed record ChatHistoryItem(
     ChatHistoryRole Role,
     string Text,
     IReadOnlyList<ChatToolCallRequest>? ToolCalls = null,
-    string? ToolCallId = null
+    string? ToolCallId = null,
+    IReadOnlyList<ChatAttachment>? Attachments = null
 );
 
 /// <summary>アシスタント 1 ターンの応答（テキストと要求されたツール呼び出し）</summary>
@@ -73,6 +78,7 @@ public sealed class ChatTurnEngine : IErChatEngine
     private readonly IUiDispatcher _dispatcher;
     private readonly Func<bool> _isReady;
     private readonly ErChatProfile _profile;
+    private readonly Func<AttachmentSupport> _attachmentSupport;
     private readonly List<ChatHistoryItem> _history = new();
     private CancellationTokenSource? _turnCts;
 
@@ -94,12 +100,17 @@ public sealed class ChatTurnEngine : IErChatEngine
     /// <param name="dispatcher">UI スレッドへのマーシャリング</param>
     /// <param name="isReady">送信可能判定（API キー有無など）</param>
     /// <param name="profile">用途プロファイル（システムプロンプト等。省略時は ER 図設計）</param>
+    /// <param name="attachmentSupport">
+    /// 添付対応範囲を返す関数（省略時は添付非対応）。API キー接続はプロバイダー依存
+    /// （Anthropic=画像＋PDF・OpenAI=画像・Ollama=なし）のため、合成ルートから注入する
+    /// </param>
     public ChatTurnEngine(
         IChatTurnDriver driver,
         IErDiagramToolHost toolHost,
         IUiDispatcher dispatcher,
         Func<bool> isReady,
-        ErChatProfile? profile = null
+        ErChatProfile? profile = null,
+        Func<AttachmentSupport>? attachmentSupport = null
     )
     {
         _driver = driver;
@@ -107,10 +118,14 @@ public sealed class ChatTurnEngine : IErChatEngine
         _dispatcher = dispatcher;
         _isReady = isReady;
         _profile = profile ?? ErChatProfile.ErDesign;
+        _attachmentSupport = attachmentSupport ?? (() => AttachmentSupport.None);
     }
 
     /// <inheritdoc />
     public bool IsReady => _isReady();
+
+    /// <inheritdoc />
+    public AttachmentSupport AttachmentSupport => _attachmentSupport();
 
     /// <inheritdoc />
     public Task InitializeAsync(CancellationToken cancellationToken = default) =>
@@ -125,14 +140,29 @@ public sealed class ChatTurnEngine : IErChatEngine
     }
 
     /// <inheritdoc />
-    public async Task SendAsync(string prompt, CancellationToken cancellationToken = default)
+    public Task SendAsync(string prompt, CancellationToken cancellationToken = default) =>
+        SendAsync(prompt, Array.Empty<ChatAttachment>(), cancellationToken);
+
+    /// <inheritdoc />
+    public async Task SendAsync(
+        string prompt,
+        IReadOnlyList<ChatAttachment> attachments,
+        CancellationToken cancellationToken = default
+    )
     {
         if (_history.Count == 0)
         {
             await StartConversationAsync(cancellationToken).ConfigureAwait(false);
         }
 
-        _history.Add(new ChatHistoryItem(ChatHistoryRole.User, prompt));
+        // 添付は User 履歴項目に載せ、ステートレス API の毎ターン再送でも再構築されるようにする
+        _history.Add(
+            new ChatHistoryItem(
+                ChatHistoryRole.User,
+                prompt,
+                Attachments: attachments is { Count: > 0 } ? attachments : null
+            )
+        );
 
         _turnCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var token = _turnCts.Token;

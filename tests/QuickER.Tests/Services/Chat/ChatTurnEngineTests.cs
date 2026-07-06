@@ -24,6 +24,9 @@ public class ChatTurnEngineTests
         /// <summary>各ターン実行時点の履歴件数を記録する</summary>
         public List<int> HistoryCountsAtCall { get; } = new();
 
+        /// <summary>各ターン実行時点の履歴スナップショット（添付検証用）</summary>
+        public List<IReadOnlyList<ChatHistoryItem>> HistoriesAtCall { get; } = new();
+
         public Task<ChatAssistantTurn> RunAsync(
             IReadOnlyList<ChatHistoryItem> history,
             Action<string> onTextDelta,
@@ -31,6 +34,7 @@ public class ChatTurnEngineTests
         )
         {
             HistoryCountsAtCall.Add(history.Count);
+            HistoriesAtCall.Add(history.ToList());
             var turn = _turns.Dequeue();
 
             if (!string.IsNullOrEmpty(turn.Text))
@@ -129,5 +133,82 @@ public class ChatTurnEngineTests
 
         // 1 回目の呼び出し時点の履歴 = system + user の 2 件
         driver.HistoryCountsAtCall[0].Should().Be(2);
+    }
+
+    /// <summary>添付付き送信で、添付が User 履歴項目に載ることを検証する</summary>
+    [Fact(DisplayName = "添付は User 履歴項目に載る")]
+    public async Task SendAsync_WithAttachments_StoredOnUserHistoryItem()
+    {
+        var driver = new ScriptedTurnDriver([new ChatAssistantTurn("ok", [])]);
+        var engine = CreateEngine(driver, new RecordingToolHost());
+
+        byte[] pngData = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+        var attachment = new ChatAttachment(
+            "a.png",
+            ChatAttachmentKind.Image,
+            "image/png",
+            pngData
+        );
+
+        await engine.StartConversationAsync(TestContext.Current.CancellationToken);
+        await engine.SendAsync("図を見て", [attachment], TestContext.Current.CancellationToken);
+
+        var history = driver.HistoriesAtCall[0];
+        var userItem = history.Single(item => item.Role == ChatHistoryRole.User);
+        userItem.Attachments.Should().ContainSingle();
+        userItem.Attachments![0].FileName.Should().Be("a.png");
+    }
+
+    /// <summary>
+    /// 2 ターン目（添付なし）でも、1 ターン目の添付付き User 項目が履歴に残り再送されることを検証する
+    /// （ステートレス API の毎ターン全履歴送信で添付が再構築される）。
+    /// </summary>
+    [Fact(DisplayName = "添付付き履歴は次ターンでも履歴に残り再送される")]
+    public async Task SendAsync_SecondTurn_RetainsAttachmentHistory()
+    {
+        var driver = new ScriptedTurnDriver([
+            new ChatAssistantTurn("ok1", []),
+            new ChatAssistantTurn("ok2", []),
+        ]);
+        var engine = CreateEngine(driver, new RecordingToolHost());
+
+        byte[] pngData = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+        var attachment = new ChatAttachment(
+            "a.png",
+            ChatAttachmentKind.Image,
+            "image/png",
+            pngData
+        );
+
+        await engine.StartConversationAsync(TestContext.Current.CancellationToken);
+        await engine.SendAsync("図を見て", [attachment], TestContext.Current.CancellationToken);
+        await engine.SendAsync("続けて", TestContext.Current.CancellationToken);
+
+        // 2 ターン目の履歴にも 1 ターン目の添付付き User 項目が含まれる
+        var secondTurnHistory = driver.HistoriesAtCall[1];
+        secondTurnHistory
+            .Count(item => item.Role == ChatHistoryRole.User && item.Attachments is { Count: > 0 })
+            .Should()
+            .Be(1);
+    }
+
+    /// <summary>AttachmentSupport はコンストラクタ注入の関数で決まることを検証する（既定は None）</summary>
+    [Fact(DisplayName = "AttachmentSupport は注入関数で決まる（既定 None）")]
+    public void AttachmentSupport_ReflectsInjectedSelector()
+    {
+        var driver = new ScriptedTurnDriver([]);
+        var host = new RecordingToolHost();
+
+        var defaultEngine = new ChatTurnEngine(driver, host, new SyncUiDispatcher(), () => true);
+        defaultEngine.AttachmentSupport.Should().Be(AttachmentSupport.None);
+
+        var imageEngine = new ChatTurnEngine(
+            driver,
+            host,
+            new SyncUiDispatcher(),
+            () => true,
+            attachmentSupport: () => AttachmentSupport.Images
+        );
+        imageEngine.AttachmentSupport.Should().Be(AttachmentSupport.Images);
     }
 }

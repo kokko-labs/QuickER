@@ -76,6 +76,8 @@ public partial class AiChatDialogViewModel : ObservableObject
             {
                 SendMessageCommand.NotifyCanExecuteChanged();
                 InterruptCommand.NotifyCanExecuteChanged();
+                // ターン実行中は添付操作も禁止する（ボタン・削除の無効化に連動）
+                Attachments.IsTurnInProgress = value;
             }
         }
     }
@@ -221,6 +223,12 @@ public partial class AiChatDialogViewModel : ObservableObject
     public IReadOnlyList<string> ClaudeCodeModelCandidates { get; } =
         AiModelCatalog.ClaudeCodeModels;
 
+    /// <summary>送信待ち添付を束ねる共通 VM 部品（チップ列・可否・追加/削除）</summary>
+    public AttachmentListViewModel Attachments { get; }
+
+    /// <summary>ファイル選択ダイアログの供給元（添付ボタンのファイル選択に使う）</summary>
+    private readonly IFileDialogService _files;
+
     /// <summary>本番構成（実クライアント・WPF ディスパッチャ）で生成する</summary>
     public AiChatDialogViewModel(IErDiagramChatHost? host, IDialogService? dialogService = null)
         : this(
@@ -239,14 +247,23 @@ public partial class AiChatDialogViewModel : ObservableObject
         CodexAppServerSettingsStore? settingsStore,
         ICodexAppServerClient? codexClient,
         IClaudeCodeClient? claudeCodeClient = null,
-        IDialogService? dialogService = null
+        IDialogService? dialogService = null,
+        IFileDialogService? files = null,
+        ChatAttachmentFactory.ImageShrinker? imageShrinker = null
     )
     {
         _host = host;
         _dispatcher = dispatcher;
         _dialogs = dialogService ?? new MessageBoxDialogService();
+        _files = files ?? new WpfFileDialogService();
         _codexSettingsStore = settingsStore ?? new CodexAppServerSettingsStore();
         _claudeCodeSettingsStore = new ClaudeCodeSettingsStore();
+
+        // 添付部品は本番では WPF の画像縮小を差し込む（テストでは注入された縮小・null）
+        Attachments = new AttachmentListViewModel(
+            reportStatus: message => StatusMessage = message,
+            shrinker: imageShrinker ?? WpfImageShrinker.Shrink
+        );
 
         IErDiagramToolHost? toolHost = host?.ToolHost;
 
@@ -258,7 +275,8 @@ public partial class AiChatDialogViewModel : ObservableObject
             ),
             toolHost ?? new NullToolHost(),
             dispatcher,
-            () => ApiProvider == AiProvider.Ollama || !string.IsNullOrWhiteSpace(ApiKey)
+            () => ApiProvider == AiProvider.Ollama || !string.IsNullOrWhiteSpace(ApiKey),
+            attachmentSupport: () => AttachmentSupportResolver.ForApiKeyProvider(ApiProvider)
         );
 
         var client = codexClient ?? new CodexAppServerClient();
@@ -275,7 +293,32 @@ public partial class AiChatDialogViewModel : ObservableObject
         _engine = _apiKeyEngine;
         SubscribeEngine(_engine);
         LoadSettings();
+        RefreshAttachmentSupport();
     }
+
+    /// <summary>添付ボタン押下でファイル選択ダイアログを開き、選択ファイルを添付へ取り込む</summary>
+    public void PickAndAddAttachments()
+    {
+        if (!Attachments.IsEnabled)
+        {
+            return;
+        }
+
+        var paths = _files.PickOpenFiles(Attachments.FileDialogFilter);
+
+        if (paths.Count > 0)
+        {
+            Attachments.AddFiles(paths);
+        }
+    }
+
+    /// <summary>ドロップされたファイル群を対応拡張子のみ添付へ取り込む（非対応はステータス通知）</summary>
+    /// <param name="paths">ドロップされたファイルパス群</param>
+    public void AddDroppedFiles(IReadOnlyList<string> paths) => Attachments.AddFiles(paths);
+
+    /// <summary>現在のエンジンに応じて添付部品の対応範囲を再評価する</summary>
+    /// <remarks>API キーエンジンはプロバイダー依存（合成ルールを注入済み）・Codex/Claude Code は固定値を公開する</remarks>
+    private void RefreshAttachmentSupport() => Attachments.Support = _engine.AttachmentSupport;
 
     /// <summary>ダイアログ表示時に設定・API キーを読み込み、Codex タブなら自動接続する</summary>
     public async Task InitializeAsync()
@@ -367,7 +410,17 @@ public partial class AiChatDialogViewModel : ObservableObject
 
         var prompt = UserInput.Trim();
         UserInput = string.Empty;
-        Messages.Add(new ErChatMessage { Role = ErChatMessageRole.User, Content = prompt });
+
+        // 送信の直前に添付を取り出し、ユーザー吹き出しへ「📎 name」の要約を載せる
+        var attachments = Attachments.BuildAttachments();
+        Messages.Add(
+            new ErChatMessage
+            {
+                Role = ErChatMessageRole.User,
+                Content = prompt,
+                AttachmentSummary = Attachments.BuildSummary(),
+            }
+        );
 
         IsTurnInProgress = true;
         _currentAssistantMessage = null;
@@ -376,7 +429,9 @@ public partial class AiChatDialogViewModel : ObservableObject
 
         try
         {
-            await _engine.SendAsync(prompt).ConfigureAwait(true);
+            await _engine.SendAsync(prompt, attachments).ConfigureAwait(true);
+            // 送信できたら添付をクリアする（メッセージ単位のライフサイクル）
+            Attachments.Clear();
         }
         catch (Exception ex)
         {
@@ -602,6 +657,8 @@ public partial class AiChatDialogViewModel : ObservableObject
         OnPropertyChanged(nameof(IsApiKeyBackend));
         OnPropertyChanged(nameof(IsCodexBackend));
         OnPropertyChanged(nameof(IsClaudeCodeBackend));
+        // バックエンド切替で添付範囲を再評価する（非対応になったら添付部品側で Pending をクリア・通知する）
+        RefreshAttachmentSupport();
         NotifyReadinessChanged();
 
         if (value == ErChatBackendKind.Codex)
@@ -632,6 +689,12 @@ public partial class AiChatDialogViewModel : ObservableObject
         _isInitializing = true;
         ApiKey = CurrentApiKeyStoreName is { } slot ? ApiKeyStore.Load(slot) : string.Empty;
         _isInitializing = wasInitializing;
+
+        // API キー接続はプロバイダーで添付範囲が変わる（OpenAI=画像・Claude=画像＋PDF・Ollama=なし）
+        if (IsApiKeyBackend)
+        {
+            RefreshAttachmentSupport();
+        }
 
         NotifyReadinessChanged();
     }

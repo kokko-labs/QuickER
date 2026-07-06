@@ -1,6 +1,8 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using QuickER.AI;
+using QuickER.Services;
 using QuickER.Services.Chat;
 using QuickER.ViewModels;
 
@@ -130,5 +132,66 @@ public partial class AiChatDialog : Window
             },
             System.Windows.Threading.DispatcherPriority.Background
         );
+    }
+
+    // ── 添付: ボタン・Ctrl+V・ドラッグ&ドロップ ──
+
+    /// <summary>クリップボタン押下でファイル選択を開き、選択ファイルを添付へ取り込む</summary>
+    private void Attachments_AttachRequested(object sender, RoutedEventArgs e) =>
+        ViewModel.PickAndAddAttachments();
+
+    /// <summary>
+    /// 入力欄フォーカス時の Ctrl+V を捕捉し、クリップボードに画像があればチップ化する。
+    /// 画像が無ければ何もせず（テキスト貼付の既定動作を妨げない）。
+    /// </summary>
+    private void UserInputBox_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.V || (Keyboard.Modifiers & ModifierKeys.Control) != ModifierKeys.Control)
+        {
+            return;
+        }
+
+        if (!ViewModel.Attachments.IsEnabled)
+        {
+            return;
+        }
+
+        var png = ClipboardImageAttachmentReader.TryGetClipboardPng();
+
+        if (png is null)
+        {
+            // 画像が無ければ既定のテキスト貼付に委ねる
+            return;
+        }
+
+        ViewModel.Attachments.AddClipboardImage(png, DateTime.Now);
+        // 画像を取り込んだので既定のテキスト貼付は抑止する
+        e.Handled = true;
+    }
+
+    /// <summary>チャット領域上のドラッグを、ファイルドロップのときだけ受け入れる</summary>
+    private void ChatArea_DragOver(object sender, DragEventArgs e)
+    {
+        e.Effects =
+            ViewModel.Attachments.IsEnabled && e.Data.GetDataPresent(DataFormats.FileDrop)
+                ? DragDropEffects.Copy
+                : DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    /// <summary>ドロップされたファイルを添付へ取り込む（対応拡張子のみ・非対応は VM がステータス通知する）</summary>
+    private void ChatArea_Drop(object sender, DragEventArgs e)
+    {
+        if (!e.Data.GetDataPresent(DataFormats.FileDrop))
+        {
+            return;
+        }
+
+        if (e.Data.GetData(DataFormats.FileDrop) is string[] paths && paths.Length > 0)
+        {
+            ViewModel.AddDroppedFiles(paths);
+        }
+
+        e.Handled = true;
     }
 }

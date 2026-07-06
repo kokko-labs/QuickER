@@ -135,10 +135,51 @@ public sealed class OpenAiTurnDriver : IChatTurnDriver
         item.Role switch
         {
             ChatHistoryRole.System => new SystemChatMessage(item.Text),
-            ChatHistoryRole.User => new UserChatMessage(item.Text),
+            ChatHistoryRole.User => ToUserMessage(item),
             ChatHistoryRole.Tool => new ToolChatMessage(item.ToolCallId ?? string.Empty, item.Text),
             _ => ToAssistantMessage(item),
         };
+
+    /// <summary>
+    /// ユーザー履歴項目を UserChatMessage へ変換する。画像添付があれば image コンテンツパート
+    /// （バイト列 + MIME）をテキストと共に積む。
+    /// </summary>
+    /// <remarks>
+    /// PDF は添付対象外（<see cref="OpenAiTurnDriver"/> の AttachmentSupport は Images）。
+    /// 根拠: OpenAI .NET SDK 2.10.0 の <c>ChatMessageContentPart.CreateFilePart</c> は実験的属性
+    /// （OPENAI001＝「評価目的のみ・将来変更/削除の可能性」）でコンパイルエラーになる不安定 API のため、
+    /// PDF ファイル入力は本フェーズでは組み立てない。画像パート（CreateImagePart(bytes, mediaType)）は安定 API。
+    /// </remarks>
+    internal static UserChatMessage ToUserMessage(ChatHistoryItem item)
+    {
+        var images =
+            item.Attachments?.Where(a => a.Kind == ChatAttachmentKind.Image).ToList()
+            ?? new List<ChatAttachment>();
+
+        if (images.Count == 0)
+        {
+            return new UserChatMessage(item.Text);
+        }
+
+        var parts = new List<ChatMessageContentPart>();
+
+        foreach (var image in images)
+        {
+            parts.Add(
+                ChatMessageContentPart.CreateImagePart(
+                    BinaryData.FromBytes(image.Data),
+                    image.MediaType
+                )
+            );
+        }
+
+        if (!string.IsNullOrEmpty(item.Text))
+        {
+            parts.Add(ChatMessageContentPart.CreateTextPart(item.Text));
+        }
+
+        return new UserChatMessage(parts);
+    }
 
     /// <summary>アシスタント履歴項目を、ツール呼び出し・テキストを保持した AssistantChatMessage へ変換する</summary>
     private static AssistantChatMessage ToAssistantMessage(ChatHistoryItem item)
