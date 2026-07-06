@@ -514,13 +514,20 @@
                     VerticalAlignment="Center"
                   />
                 </StackPanel>
-                <Button
-                  Grid.Column="2"
-                  Style="{StaticResource SecondaryButton}"
-                  Content="中断"
-                  Command="{Binding InterruptCommand}"
-                  Visibility="{Binding IsTurnInProgress, Converter={StaticResource BoolToVisibilityConverter}}"
-                />
+                <StackPanel Grid.Column="2" Orientation="Horizontal">
+                  <Button
+                    Style="{StaticResource SecondaryButton}"
+                    Margin="0,0,8,0"
+                    Content="中断"
+                    Command="{Binding InterruptCommand}"
+                    Visibility="{Binding IsTurnInProgress, Converter={StaticResource BoolToVisibilityConverter}}"
+                  />
+                  <Button
+                    Style="{StaticResource SecondaryButton}"
+                    Content="＋ 新しい会話"
+                    Command="{Binding StartConversationCommand}"
+                  />
+                </StackPanel>
               </Grid>
             </Border>
 
@@ -545,60 +552,38 @@
           </Grid>
         </Border>
 
-        <!-- 入力エリア（補足指示 + 生成開始 / フィードバック + 送信） -->
-        <StackPanel Grid.Row="2" Margin="0,12,0,0">
+        <!-- 入力エリア（入力欄 1 つ + 送信） -->
+        <Grid Grid.Row="2" Margin="0,12,0,0">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="Auto" />
+          </Grid.ColumnDefinitions>
           <TextBox
+            x:Name="UserInputBox"
+            Grid.Column="0"
             Style="{StaticResource ChatInputBox}"
+            Margin="0,0,8,0"
             MinHeight="48"
-            MaxHeight="96"
+            MaxHeight="140"
             TextWrapping="Wrap"
             AcceptsReturn="True"
             IsEnabled="{Binding CanEditInput}"
-            Text="{Binding Instructions, UpdateSourceTrigger=PropertyChanged}"
-            ToolTip="補足指示（配色・画面構成など。省略可）"
+            Text="{Binding UserInput, UpdateSourceTrigger=PropertyChanged}"
+            ToolTip="モックへの要望・修正指示（Ctrl+Enter で送信）"
+          >
+            <TextBox.InputBindings>
+              <KeyBinding Modifiers="Control" Key="Return" Command="{Binding SendMessageCommand}" />
+            </TextBox.InputBindings>
+          </TextBox>
+          <Button
+            Grid.Column="1"
+            Style="{StaticResource PrimaryButton}"
+            Width="96"
+            VerticalAlignment="Stretch"
+            Content="送信"
+            Command="{Binding SendMessageCommand}"
           />
-          <Grid Margin="0,8,0,0">
-            <Grid.ColumnDefinitions>
-              <ColumnDefinition Width="*" />
-              <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
-            <TextBox
-              Grid.Column="0"
-              Style="{StaticResource ChatInputBox}"
-              Margin="0,0,8,0"
-              MinHeight="48"
-              MaxHeight="120"
-              TextWrapping="Wrap"
-              AcceptsReturn="True"
-              IsEnabled="{Binding CanEditInput}"
-              Text="{Binding FeedbackInput, UpdateSourceTrigger=PropertyChanged}"
-              ToolTip="修正指示（Ctrl+Enter で送信）"
-            >
-              <TextBox.InputBindings>
-                <KeyBinding
-                  Modifiers="Control"
-                  Key="Return"
-                  Command="{Binding SendFeedbackCommand}"
-                />
-              </TextBox.InputBindings>
-            </TextBox>
-            <StackPanel Grid.Column="1" VerticalAlignment="Bottom">
-              <Button
-                Style="{StaticResource PrimaryButton}"
-                Width="110"
-                Content="生成開始"
-                Command="{Binding StartGenerationCommand}"
-              />
-              <Button
-                Style="{StaticResource SecondaryButton}"
-                Width="110"
-                Margin="0,6,0,0"
-                Content="修正を送信"
-                Command="{Binding SendFeedbackCommand}"
-              />
-            </StackPanel>
-          </Grid>
-        </StackPanel>
+        </Grid>
       </Grid>
 
       <GridSplitter

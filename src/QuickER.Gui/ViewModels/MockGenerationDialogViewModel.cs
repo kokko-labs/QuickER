@@ -17,7 +17,8 @@ namespace QuickER.ViewModels;
 /// </summary>
 /// <remarks>
 /// 接続方式（API キー / Codex / Claude）の選択・接続状態は <see cref="AiChatDialogViewModel"/> と
-/// 同じ構造を踏襲する。生成は現在の ER 図＋補足指示で <see cref="MockDesignSession"/> を開始し、
+/// 同じ構造を踏襲する。会話は「＋新しい会話」で <see cref="MockDesignSession"/> を用意し、初回送信で
+/// 現在の ER 図＋要望を、2 回目以降はフィードバックを送信して、
 /// 提出された HTML を <see cref="HtmlUpdated"/> で通知する。プレビューへの反映（一時ファイル書き出し）は
 /// ダイアログ側が受け取り、WebView2 へ Navigate する。
 /// </remarks>
@@ -45,8 +46,21 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     private readonly CodexAppServerSettingsStore _codexSettingsStore;
     private readonly ClaudeCodeSettingsStore _claudeCodeSettingsStore;
 
-    /// <summary>現在の生成セッション（生成開始前は null）</summary>
+    /// <summary>現在の生成セッション（会話開始前は null）</summary>
     private MockDesignSession? _session;
+
+    /// <summary>会話が開始済みか（「＋新しい会話」で true、バックエンド切替でリセット）</summary>
+    private bool _conversationStarted;
+
+    /// <summary>この会話で初回送信を済ませたか（初回=StartAsync／2 回目以降=SendFeedbackAsync の分岐に使う）</summary>
+    private bool _firstMessageSent;
+
+    /// <summary>
+    /// 直近に確定した（提出された）モック HTML。
+    /// セッション破棄（「＋新しい会話」）後もプレビュー・保存・第2ステップの有効性を維持するため、
+    /// <see cref="MockDesignSession.CurrentHtml"/> ではなく VM 側で保持する。
+    /// </summary>
+    private string? _lastHtml;
 
     private bool _isInitializing;
 
@@ -70,10 +84,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     private ErChatBackendKind _selectedBackend = ErChatBackendKind.ApiKey;
 
     [ObservableProperty]
-    private string _instructions = string.Empty;
-
-    [ObservableProperty]
-    private string _feedbackInput = string.Empty;
+    private string _userInput = string.Empty;
 
     [ObservableProperty]
     private string _statusMessage = string.Empty;
@@ -88,8 +99,8 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         {
             if (SetProperty(ref _isTurnInProgress, value))
             {
-                StartGenerationCommand.NotifyCanExecuteChanged();
-                SendFeedbackCommand.NotifyCanExecuteChanged();
+                StartConversationCommand.NotifyCanExecuteChanged();
+                SendMessageCommand.NotifyCanExecuteChanged();
                 InterruptCommand.NotifyCanExecuteChanged();
                 OnPropertyChanged(nameof(CanEditInput));
                 NotifyMockGenChanged();
@@ -115,24 +126,24 @@ public partial class MockGenerationDialogViewModel : ObservableObject
             _ => ApiProvider == AiProvider.Ollama || !string.IsNullOrWhiteSpace(ApiKey),
         };
 
-    /// <summary>図が空（エンティティ 0）か（生成開始の可否に使う）</summary>
+    /// <summary>図が空（エンティティ 0）か（会話開始の可否に使う）</summary>
     public bool IsDiagramEmpty => _diagramSource.IsEmpty;
 
-    /// <summary>生成を開始できるか（接続 OK・図が空でない・ターン非実行中）</summary>
-    public bool CanStartGeneration => IsBackendReady && !IsDiagramEmpty && !IsTurnInProgress;
+    /// <summary>新しい会話を開始できるか（接続 OK・図が空でない・ターン非実行中）</summary>
+    public bool CanStartConversation => IsBackendReady && !IsDiagramEmpty && !IsTurnInProgress;
 
-    /// <summary>フィードバックを送信できるか（セッション開始済み・接続 OK・入力あり・ターン非実行中）</summary>
-    public bool CanSendFeedback =>
-        _session is not null
+    /// <summary>メッセージを送信できるか（会話開始済み・接続 OK・入力あり・ターン非実行中）</summary>
+    public bool CanSendMessage =>
+        _conversationStarted
         && IsBackendReady
         && !IsTurnInProgress
-        && !string.IsNullOrWhiteSpace(FeedbackInput);
+        && !string.IsNullOrWhiteSpace(UserInput);
 
     /// <summary>入力欄を編集できるか（ターン実行中は禁止）</summary>
     public bool CanEditInput => !IsTurnInProgress;
 
     /// <summary>HTML を保存できるか（1 度でもモックが提出されているか）</summary>
-    public bool CanSaveHtml => !string.IsNullOrEmpty(_session?.CurrentHtml);
+    public bool CanSaveHtml => !string.IsNullOrEmpty(_lastHtml);
 
     // ── 第2ステップ: WPF モックプロジェクト生成（Claude Code 限定） ──
 
@@ -443,12 +454,14 @@ public partial class MockGenerationDialogViewModel : ObservableObject
             profile
         );
 
-    /// <summary>現在の図＋補足指示でモック生成を開始する</summary>
-    [RelayCommand(CanExecute = nameof(CanStartGeneration))]
-    private async Task StartGenerationAsync()
+    /// <summary>新しい会話を開始する（履歴クリア・新セッション用意・案内表示）</summary>
+    /// <remarks>
+    /// 選択中バックエンドで新しい <see cref="MockDesignSession"/> を用意し、旧セッションのイベント購読は解除する。
+    /// 確定 HTML（<see cref="_lastHtml"/>）は保持したままにし、プレビュー・保存・第2ステップの有効性を失わない。
+    /// </remarks>
+    [RelayCommand(CanExecute = nameof(CanStartConversation))]
+    private void StartConversation()
     {
-        var diagram = _diagramSource.GetDiagram();
-
         // 選択中バックエンドのエンジンを、モック生成プロファイル注入・セッション自身をツールホストにして生成する。
         // エンジン⇔セッションの相互依存は MockDesignSession のファクトリコンストラクタが解く。
         var factory = SelectedFactory();
@@ -458,39 +471,43 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         AttachSession(session);
 
         Messages.Clear();
-        AddSystemMessage("モックの生成を開始しました。しばらくお待ちください。");
-        IsTurnInProgress = true;
-
-        try
-        {
-            await session
-                .StartAsync(diagram, string.IsNullOrWhiteSpace(Instructions) ? null : Instructions)
-                .ConfigureAwait(true);
-        }
-        catch (Exception ex)
-        {
-            IsTurnInProgress = false;
-            StatusMessage = $"生成の開始に失敗しました: {ex.Message}";
-        }
+        _currentAssistantMessage = null;
+        _conversationStarted = true;
+        _firstMessageSent = false;
+        AddSystemMessage(
+            "会話を開始しました。モックへの要望を入力して送信してください（例: シンプルな管理画面で）。"
+        );
+        SendMessageCommand.NotifyCanExecuteChanged();
     }
 
-    /// <summary>修正フィードバックを 1 ターンとして送信する</summary>
-    [RelayCommand(CanExecute = nameof(CanSendFeedback))]
-    private async Task SendFeedbackAsync()
+    /// <summary>ユーザー入力を 1 ターンとして送信する（初回はスキーマ添付＋要望、2 回目以降はフィードバック）</summary>
+    [RelayCommand(CanExecute = nameof(CanSendMessage))]
+    private async Task SendMessageAsync()
     {
-        if (_session is null || string.IsNullOrWhiteSpace(FeedbackInput))
+        if (_session is null || string.IsNullOrWhiteSpace(UserInput))
         {
             return;
         }
 
-        var feedback = FeedbackInput.Trim();
-        FeedbackInput = string.Empty;
-        Messages.Add(new ErChatMessage { Role = ErChatMessageRole.User, Content = feedback });
+        var message = UserInput.Trim();
+        UserInput = string.Empty;
+        Messages.Add(new ErChatMessage { Role = ErChatMessageRole.User, Content = message });
         IsTurnInProgress = true;
 
         try
         {
-            await _session.SendFeedbackAsync(feedback).ConfigureAwait(true);
+            if (!_firstMessageSent)
+            {
+                // 初回送信はスキーマ自動添付＋要望で会話を開始する
+                _firstMessageSent = true;
+                var diagram = _diagramSource.GetDiagram();
+                await _session.StartAsync(diagram, message).ConfigureAwait(true);
+            }
+            else
+            {
+                // 2 回目以降は修正フィードバックとして送る
+                await _session.SendFeedbackAsync(message).ConfigureAwait(true);
+            }
         }
         catch (Exception ex)
         {
@@ -513,7 +530,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanSaveHtml))]
     private void SaveHtml()
     {
-        var html = _session?.CurrentHtml;
+        var html = _lastHtml;
 
         if (string.IsNullOrEmpty(html))
         {
@@ -567,7 +584,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanGenerateMockProject))]
     private async Task GenerateMockProjectAsync()
     {
-        var html = _session?.CurrentHtml;
+        var html = _lastHtml;
 
         if (string.IsNullOrEmpty(html))
         {
@@ -694,16 +711,33 @@ public partial class MockGenerationDialogViewModel : ObservableObject
             _ => _apiKeyEngineFactory,
         };
 
-    /// <summary>新しいセッションを結び付け、イベントを購読する（旧セッションは破棄する）</summary>
+    /// <summary>新しいセッションを結び付け、イベントを購読する（旧セッションは購読解除して破棄する）</summary>
     private void AttachSession(MockDesignSession session)
     {
+        DetachSession();
+
         _session = session;
         session.AssistantDeltaReceived += OnAssistantDelta;
         session.HtmlUpdated += OnHtmlUpdated;
         session.TurnCompleted += OnTurnCompleted;
         session.StatusChanged += OnStatus;
         SaveHtmlCommand.NotifyCanExecuteChanged();
-        SendFeedbackCommand.NotifyCanExecuteChanged();
+        SendMessageCommand.NotifyCanExecuteChanged();
+    }
+
+    /// <summary>現在のセッションのイベント購読を解除する（新セッションへの差し替え・会話リセット時に呼ぶ）</summary>
+    private void DetachSession()
+    {
+        if (_session is null)
+        {
+            return;
+        }
+
+        _session.AssistantDeltaReceived -= OnAssistantDelta;
+        _session.HtmlUpdated -= OnHtmlUpdated;
+        _session.TurnCompleted -= OnTurnCompleted;
+        _session.StatusChanged -= OnStatus;
+        _session = null;
     }
 
     /// <summary>組み立て中のアシスタント吹き出し（差分追記先）</summary>
@@ -742,6 +776,9 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     {
         // 次のアシスタント発話は新しい吹き出しにする
         _currentAssistantMessage = null;
+
+        // 確定 HTML は VM 側で保持する（「＋新しい会話」でセッションを破棄しても保存・第2ステップを維持するため）
+        _lastHtml = update.Html;
 
         var note = string.IsNullOrWhiteSpace(update.RevisionNote)
             ? "モックを更新しました。"
@@ -880,11 +917,26 @@ public partial class MockGenerationDialogViewModel : ObservableObject
 
     partial void OnSelectedBackendChanged(ErChatBackendKind value)
     {
+        // バックエンドを切り替えたら会話はリセットする（旧セッションのエンジンは選択前のバックエンドのため）。
+        // 確定 HTML（_lastHtml）は保持し、プレビュー・保存・第2ステップの有効性は失わない。
+        ResetConversation();
+
         OnPropertyChanged(nameof(IsApiKeyBackend));
         OnPropertyChanged(nameof(IsCodexBackend));
         OnPropertyChanged(nameof(IsClaudeCodeBackend));
         NotifyReadinessChanged();
         NotifyMockGenChanged();
+    }
+
+    /// <summary>会話を未開始状態へ戻す（セッション購読解除・履歴クリア・可否更新）。確定 HTML は保持する</summary>
+    private void ResetConversation()
+    {
+        DetachSession();
+        _conversationStarted = false;
+        _firstMessageSent = false;
+        _currentAssistantMessage = null;
+        Messages.Clear();
+        SendMessageCommand.NotifyCanExecuteChanged();
     }
 
     partial void OnApiProviderChanged(AiProvider value)
@@ -916,8 +968,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
 
     partial void OnSaveApiKeyChanged(bool value) => PersistApiKey();
 
-    partial void OnFeedbackInputChanged(string value) =>
-        SendFeedbackCommand.NotifyCanExecuteChanged();
+    partial void OnUserInputChanged(string value) => SendMessageCommand.NotifyCanExecuteChanged();
 
     partial void OnOutputFolderChanged(string value) => NotifyMockGenChanged();
 
@@ -967,16 +1018,16 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         NotifyReadinessChanged();
     }
 
-    /// <summary>生成開始・フィードバック・保存の可否変更をまとめて通知する</summary>
+    /// <summary>会話開始・送信・保存の可否変更をまとめて通知する</summary>
     private void NotifyReadinessChanged()
     {
         OnPropertyChanged(nameof(IsBackendReady));
         OnPropertyChanged(nameof(IsDiagramEmpty));
-        OnPropertyChanged(nameof(CanStartGeneration));
-        OnPropertyChanged(nameof(CanSendFeedback));
+        OnPropertyChanged(nameof(CanStartConversation));
+        OnPropertyChanged(nameof(CanSendMessage));
         OnPropertyChanged(nameof(CanSaveHtml));
-        StartGenerationCommand.NotifyCanExecuteChanged();
-        SendFeedbackCommand.NotifyCanExecuteChanged();
+        StartConversationCommand.NotifyCanExecuteChanged();
+        SendMessageCommand.NotifyCanExecuteChanged();
         SaveHtmlCommand.NotifyCanExecuteChanged();
         // 第2ステップの可否は確定 HTML の有無・接続状態にも依存するため合わせて更新する
         NotifyMockGenChanged();

@@ -204,7 +204,7 @@ public class MockGenerationDialogViewModelTests
         return (vm, engineBox, generator, folder);
     }
 
-    /// <summary>Claude Code バックエンドで生成→HTML 提出まで進め、第2ステップの前提を整える</summary>
+    /// <summary>Claude Code バックエンドで会話開始→初回送信で HTML 提出まで進め、第2ステップの前提を整える</summary>
     private static async Task SubmitHtmlOnClaudeCode(
         MockGenerationDialogViewModel vm,
         FakeChatEngine[] engineBox
@@ -214,23 +214,24 @@ public class MockGenerationDialogViewModelTests
         // Claude Code バックエンドは接続 OK を外部から反映する
         vm.ApplyClaudeCodeReadiness(true, "ログイン済み", ConnectionHealth.Ready, string.Empty);
 
-        await vm.StartGenerationCommand.ExecuteAsync(null);
+        // 「＋新しい会話」でセッションを用意すると、その中でエンジンが構築され engineBox に入る
+        vm.StartConversationCommand.Execute(null);
         var args = $"{{\"html\":{System.Text.Json.JsonSerializer.Serialize(ValidHtml)}}}";
         engineBox[0].ScriptedToolCall = (MockDesignTools.SaveMockHtmlToolName, args);
-        vm.FeedbackInput = "提出";
-        await vm.SendFeedbackCommand.ExecuteAsync(null);
+        vm.UserInput = "提出";
+        await vm.SendMessageCommand.ExecuteAsync(null);
     }
 
-    /// <summary>空の図では生成開始が無効、非空なら有効になることを検証する</summary>
-    [Fact(DisplayName = "空図では生成開始不可・非空なら可能")]
-    public void CanStartGeneration_DependsOnDiagramEmptiness()
+    /// <summary>空の図では「＋新しい会話」が無効、非空なら有効になることを検証する</summary>
+    [Fact(DisplayName = "空図では新しい会話不可・非空なら可能")]
+    public void CanStartConversation_DependsOnDiagramEmptiness()
     {
         var (emptyVm, _, emptyFolder) = CreateVm(new ErDiagram());
 
         try
         {
             emptyVm.IsDiagramEmpty.Should().BeTrue();
-            emptyVm.CanStartGeneration.Should().BeFalse();
+            emptyVm.CanStartConversation.Should().BeFalse();
         }
         finally
         {
@@ -242,7 +243,7 @@ public class MockGenerationDialogViewModelTests
         try
         {
             vm.IsDiagramEmpty.Should().BeFalse();
-            vm.CanStartGeneration.Should().BeTrue();
+            vm.CanStartConversation.Should().BeTrue();
         }
         finally
         {
@@ -250,21 +251,99 @@ public class MockGenerationDialogViewModelTests
         }
     }
 
-    /// <summary>生成開始で初回プロンプトが送られ、補足指示が含まれることを検証する</summary>
-    [Fact(DisplayName = "生成開始で図＋補足指示がエンジンへ送られる")]
-    public async Task StartGeneration_SendsSchemaWithInstructions()
+    /// <summary>会話開始前は送信不可・開始後に入力ありで送信可能になることを検証する</summary>
+    [Fact(DisplayName = "会話開始前は送信不可・開始後は入力ありで可能")]
+    public void CanSendMessage_RequiresStartedConversationAndInput()
+    {
+        var (vm, _, folder) = CreateVm(NonEmptyDiagram());
+
+        try
+        {
+            // 会話開始前は入力があっても送信不可
+            vm.UserInput = "シンプルな管理画面で";
+            vm.CanSendMessage.Should().BeFalse();
+
+            // 会話を開始し、入力ありなら送信可能
+            vm.StartConversationCommand.Execute(null);
+            vm.CanSendMessage.Should().BeTrue();
+
+            // 入力が空になると送信不可
+            vm.UserInput = string.Empty;
+            vm.CanSendMessage.Should().BeFalse();
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>初回送信でスキーマ（テーブル名）＋要望が送られることを検証する</summary>
+    [Fact(DisplayName = "初回送信で図＋要望がエンジンへ送られる")]
+    public async Task FirstSend_SendsSchemaWithUserRequest()
     {
         var (vm, engineBox, folder) = CreateVm(NonEmptyDiagram());
 
         try
         {
-            vm.Instructions = "モダンな配色にして";
-            await vm.StartGenerationCommand.ExecuteAsync(null);
-
+            vm.StartConversationCommand.Execute(null);
             engineBox[0].Should().NotBeNull();
+
+            vm.UserInput = "モダンな配色にして";
+            await vm.SendMessageCommand.ExecuteAsync(null);
+
             engineBox[0].SentPrompts.Should().ContainSingle();
             engineBox[0].SentPrompts[0].Should().Contain("Customer");
             engineBox[0].SentPrompts[0].Should().Contain("モダンな配色にして");
+            // 送信後は入力欄がクリアされる
+            vm.UserInput.Should().BeEmpty();
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>2 回目以降の送信はフィードバックとして（スキーマ添付なしで）送られることを検証する</summary>
+    [Fact(DisplayName = "2 回目の送信はフィードバックとして送られる")]
+    public async Task SecondSend_SendsFeedbackWithoutSchema()
+    {
+        var (vm, engineBox, folder) = CreateVm(NonEmptyDiagram());
+
+        try
+        {
+            vm.StartConversationCommand.Execute(null);
+
+            vm.UserInput = "初回の要望";
+            await vm.SendMessageCommand.ExecuteAsync(null);
+
+            vm.UserInput = "列を減らして";
+            await vm.SendMessageCommand.ExecuteAsync(null);
+
+            engineBox[0].SentPrompts.Should().HaveCount(2);
+            // 2 回目はスキーマ（テーブル名）を含まない生のフィードバック
+            engineBox[0].SentPrompts[1].Should().Be("列を減らして");
+            engineBox[0].SentPrompts[1].Should().NotContain("Customer");
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>ターン実行中は送信できないことを検証する</summary>
+    [Fact(DisplayName = "ターン実行中は送信不可")]
+    public void CanSendMessage_FalseDuringTurn()
+    {
+        var (vm, _, folder) = CreateVm(NonEmptyDiagram());
+
+        try
+        {
+            vm.StartConversationCommand.Execute(null);
+            vm.UserInput = "要望";
+            vm.CanSendMessage.Should().BeTrue();
+
+            vm.IsTurnInProgress = true;
+            vm.CanSendMessage.Should().BeFalse();
         }
         finally
         {
@@ -286,21 +365,47 @@ public class MockGenerationDialogViewModelTests
             var args =
                 $"{{\"html\":{System.Text.Json.JsonSerializer.Serialize(ValidHtml)},\"revision_note\":\"初版\"}}";
 
-            // 生成開始時に構築されるエンジンへツール呼び出しを仕込むため、
-            // ファクトリ生成直後に ScriptedToolCall を設定する必要がある。
-            // ここでは生成開始を走らせ、その中でエンジンが作られる前に仕込めないため、
-            // apiKeyEngineFactory で捕捉した engineBox を使い、2 回目のフィードバックで検証する。
-            await vm.StartGenerationCommand.ExecuteAsync(null);
+            // 「＋新しい会話」でエンジンが構築されるので、その直後にツール呼び出しを仕込み、
+            // 初回送信（StartAsync 経由の SendAsync）でツールが再生されるようにする。
+            vm.StartConversationCommand.Execute(null);
             engineBox[0].ScriptedToolCall = (MockDesignTools.SaveMockHtmlToolName, args);
 
             vm.CanSaveHtml.Should().BeFalse();
             vm.SaveHtmlCommand.CanExecute(null).Should().BeFalse();
 
-            vm.FeedbackInput = "HTML を提出して";
-            await vm.SendFeedbackCommand.ExecuteAsync(null);
+            vm.UserInput = "HTML を提出して";
+            await vm.SendMessageCommand.ExecuteAsync(null);
 
             received.Should().NotBeNull();
             received!.Value.Html.Should().Be(ValidHtml);
+            vm.CanSaveHtml.Should().BeTrue();
+            vm.SaveHtmlCommand.CanExecute(null).Should().BeTrue();
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>HTML 提出後に「＋新しい会話」でリセットしても保存が有効なまま（VM が確定 HTML を保持）を検証する</summary>
+    [Fact(DisplayName = "新しい会話後も保存が有効のまま")]
+    public async Task StartConversation_KeepsSaveEnabledAfterReset()
+    {
+        var (vm, engineBox, folder) = CreateVm(NonEmptyDiagram());
+
+        try
+        {
+            var args = $"{{\"html\":{System.Text.Json.JsonSerializer.Serialize(ValidHtml)}}}";
+
+            vm.StartConversationCommand.Execute(null);
+            engineBox[0].ScriptedToolCall = (MockDesignTools.SaveMockHtmlToolName, args);
+            vm.UserInput = "提出";
+            await vm.SendMessageCommand.ExecuteAsync(null);
+
+            vm.CanSaveHtml.Should().BeTrue();
+
+            // 新しい会話でセッションを破棄しても、確定 HTML は VM に残り保存は有効のまま
+            vm.StartConversationCommand.Execute(null);
             vm.CanSaveHtml.Should().BeTrue();
             vm.SaveHtmlCommand.CanExecute(null).Should().BeTrue();
         }
@@ -333,33 +438,16 @@ public class MockGenerationDialogViewModelTests
 
         try
         {
-            await vm.StartGenerationCommand.ExecuteAsync(null);
+            vm.StartConversationCommand.Execute(null);
             var args = $"{{\"html\":{System.Text.Json.JsonSerializer.Serialize(ValidHtml)}}}";
             engineBox[0].ScriptedToolCall = (MockDesignTools.SaveMockHtmlToolName, args);
-            vm.FeedbackInput = "提出";
-            await vm.SendFeedbackCommand.ExecuteAsync(null);
+            vm.UserInput = "提出";
+            await vm.SendMessageCommand.ExecuteAsync(null);
 
             vm.SaveHtmlCommand.Execute(null);
 
             File.Exists(path).Should().BeTrue();
             File.ReadAllText(path).Should().Be(ValidHtml);
-        }
-        finally
-        {
-            Cleanup(folder);
-        }
-    }
-
-    /// <summary>フィードバックはセッション開始前は送信不可であることを検証する</summary>
-    [Fact(DisplayName = "フィードバックは生成開始前は送信不可")]
-    public void CanSendFeedback_FalseBeforeGeneration()
-    {
-        var (vm, _, folder) = CreateVm(NonEmptyDiagram());
-
-        try
-        {
-            vm.FeedbackInput = "列を減らして";
-            vm.CanSendFeedback.Should().BeFalse();
         }
         finally
         {
