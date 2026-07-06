@@ -254,6 +254,15 @@ internal sealed class CSharpPropertyModel
 
     /// <summary>フィールド初期化子の式</summary>
     public required string Initializer { get; init; }
+
+    /// <summary>
+    /// インメモリ Repository の決定的サンプルデータ（<c>InMemorySampleData</c>）で、この列に代入する値の C# 式。
+    /// </summary>
+    /// <remarks>
+    /// シーダーの <c>for</c> ループ変数 <c>index</c>（1..3）を参照してよい。型・主キー/外部キー・NULL 可・値オブジェクト有無から
+    /// 決定的に構築する（FK は親キーの実在値＝<c>index</c> を指し、NULL 可列は 3 件中 1 件を null にする）。既定は空文字。
+    /// </remarks>
+    public string SampleValueExpression { get; init; } = string.Empty;
 }
 
 /// <summary>ナビゲーションプロパティの生成モデル</summary>

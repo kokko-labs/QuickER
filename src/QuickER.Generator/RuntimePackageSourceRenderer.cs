@@ -265,6 +265,8 @@ public sealed class RuntimePackageSourceRenderer
             EfCore = efCore,
             RepositoryImpl = repositoryImpl,
             RenderContract = renderContract,
+            // インメモリ Repository はスキーマ依存物（生成側専用）であり、パッケージ固定 infra には含めない
+            InMemory = false,
             Dialect = dialect,
             MultiDialect = false,
             BlockNamespace = false,

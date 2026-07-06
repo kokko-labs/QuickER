@@ -64,10 +64,13 @@ internal sealed partial class CSharpGenerationModelBuilder
                     .ToList()
                 : [],
             // 共通契約（インターフェイス群・SqlQuery・メタデータ等）と各エンティティ用リポジトリインターフェイスは、
-            // 自作 SQL Server 実装（GenerateRepositories）・EF Core 実装（GenerateEfCore）のどちらかが有効なら必要になる。
-            // EF 単独出力でも EF 版 Repository が I{Entity}Repository を実装するため、モデルを構築しておく
+            // 自作 SQL Server 実装（GenerateRepositories）・EF Core 実装（GenerateEfCore）・インメモリ実装
+            // （GenerateInMemoryRepositories）のいずれかが有効なら必要になる。
+            // EF・インメモリ単独出力でも各 Repository が I{Entity}Repository を実装するため、モデルを構築しておく
             RepositoryClasses =
-                options.GenerateRepositories || options.GenerateEfCore
+                options.GenerateRepositories
+                || options.GenerateEfCore
+                || options.GenerateInMemoryRepositories
                     ? diagram
                         .Entities.Select(entity => BuildRepositoryClass(entity, diagnostics))
                         .Where(model => model is not null)
@@ -381,8 +384,137 @@ internal sealed partial class CSharpGenerationModelBuilder
             Initializer = valueObject is not null
                 ? (column.IsNullable ? string.Empty : " = null!;")
                 : BuildEntityInitializer(typeName, column.IsNullable),
+            // インメモリ Repository のシーダー用の決定的サンプル値式
+            SampleValueExpression = BuildSampleValueExpression(column, typeInfo, valueObject),
         };
     }
+
+    /// <summary>
+    /// インメモリ Repository の決定的シーダーで、指定カラムへ代入する値の C# 式を構築する。
+    /// </summary>
+    /// <remarks>
+    /// シーダーは各エンティティ 3 件（ループ変数 <c>index</c> = 1..3）を親→子の順で投入する。
+    /// 主キー（int/long 等）は <c>index</c>、string 主キーは <c>"{TABLE}-00n"</c>、FK は親キーの実在値（<c>index</c>）を指す。
+    /// NULL 可列は 3 件中 1 件（<c>index == 3</c>）を null にする。値オブジェクトは <c>Create</c> で包む。型ベースの固定値で決定的。
+    /// </remarks>
+    private string BuildSampleValueExpression(
+        Column column,
+        CSharpTypeInfo typeInfo,
+        CSharpValueObjectModel? valueObject
+    )
+    {
+        // 値オブジェクトは内包値を作ってから Create で包む（GuidKey は無引数生成の代わりに決定的 GUID を渡す）
+        if (valueObject is not null)
+        {
+            var innerExpr = valueObject.IsGuidKey
+                ? SampleGuidLiteral() + ".ToString()"
+                : BuildSampleScalarExpression(
+                    column,
+                    valueObject.ValueTypeName,
+                    valueObject.MaxLength
+                );
+            var created = $"{valueObject.ClassName}.Create({innerExpr})";
+
+            // NULL 可 VO 列は 3 件中 1 件を null にする（確定値型は VoClass?）
+            return column.IsNullable ? $"index == 3 ? null : {created}" : created;
+        }
+
+        var baseType = typeInfo.TypeName.TrimEnd('?');
+        var scalar = BuildSampleScalarExpression(column, baseType, typeInfo.MaxLength);
+
+        // NULL 可列は 3 件中 1 件（index == 3）を null にする（プロパティ型は T?・target-typed conditional で解決）
+        return column.IsNullable ? $"index == 3 ? null : {scalar}" : scalar;
+    }
+
+    /// <summary>型・主キー/外部キー・列名から、非 NULL のスカラーサンプル値式を構築する</summary>
+    private string BuildSampleScalarExpression(Column column, string baseType, int? maxLength)
+    {
+        // 主キー・外部キーは決定的な行番号（index）で表現し、親子の FK 整合を保つ
+        var isKey = column.IsPrimaryKey || column.IsForeignKey;
+
+        switch (baseType)
+        {
+            case "int":
+                return isKey ? "index" : "index * 10";
+
+            case "long":
+                return isKey ? "(long)index" : "index * 10L";
+
+            case "short":
+                return isKey ? "(short)index" : "(short)(index * 10)";
+
+            case "byte":
+                return "(byte)index";
+
+            case "decimal":
+                return "index * 100.50m";
+
+            case "double":
+                return "index * 100.5d";
+
+            case "float":
+                return "index * 100.5f";
+
+            case "bool":
+                return "index % 2 == 1";
+
+            case "System.Guid":
+            case "Guid":
+                return SampleGuidLiteral();
+
+            case "System.DateTime":
+            case "DateTime":
+                return "new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc).AddDays(index)";
+
+            case "System.DateTimeOffset":
+            case "DateTimeOffset":
+                return "new DateTimeOffset(2024, 1, 1, 0, 0, 0, TimeSpan.Zero).AddDays(index)";
+
+            case "System.TimeSpan":
+            case "TimeSpan":
+                return "TimeSpan.FromHours(index)";
+
+            case "byte[]":
+                return "new byte[] { (byte)index, (byte)(index + 1), (byte)(index + 2) }";
+
+            case "string":
+                return BuildSampleStringExpression(column, maxLength);
+
+            default:
+                // enum など未知の値型は既定値へフォールバックする（決定的・コンパイル可能）
+                return $"default({baseType})";
+        }
+    }
+
+    /// <summary>string 列のサンプル値式を構築する（主キーは "{TABLE}-00n"・それ以外は "{列名} n"。MaxLength で切り詰め）</summary>
+    private string BuildSampleStringExpression(Column column, int? maxLength)
+    {
+        string expression;
+
+        if (column.IsPrimaryKey)
+        {
+            // string 主キーは "{TABLE}-001" 形式（テーブル名は大文字化）
+            var prefix = EscapeForCSharpString(column.Name.ToUpperInvariant());
+            expression = $"$\"{prefix}-00{{index}}\"";
+        }
+        else
+        {
+            var label = EscapeForCSharpString(column.Name);
+            expression = $"$\"{label} {{index}}\"";
+        }
+
+        // MaxLength があれば宣言長を超えないよう安全側で切り詰める（決定的・実行時例外を避ける）
+        if (maxLength is > 0)
+        {
+            return $"({expression}).Length > {maxLength} ? ({expression})[..{maxLength}] : ({expression})";
+        }
+
+        return expression;
+    }
+
+    /// <summary>決定的な GUID リテラル式を返す（index を末尾に埋め込み 3 件を区別する）</summary>
+    private static string SampleGuidLiteral() =>
+        "new Guid($\"00000000-0000-0000-0000-00000000000{index}\")";
 
     /// <summary>カラム定義から EditModel のプロパティ生成モデルを構築する</summary>
     /// <remarks>

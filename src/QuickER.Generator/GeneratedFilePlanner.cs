@@ -64,6 +64,17 @@ public sealed class GeneratedFileSpec
     /// </summary>
     /// <remarks>false（単一方言）のとき DI は従来の <c>AddGeneratedRepositories</c>（バイト不変）。</remarks>
     public required bool MultiDialect { get; init; }
+
+    /// <summary>
+    /// このスペックが DB 非依存のインメモリ Repository 群（<c>InMemory{Entity}Repository</c>・<c>InMemoryDataStore</c>・
+    /// <c>InMemorySampleData</c>・<c>AddGeneratedInMemoryRepositories</c>）を出力するか。
+    /// </summary>
+    /// <remarks>
+    /// インメモリ実装は方言非依存のため、Repository バケットを含み契約を出すスペック（単一方言＝契約＋実装スペック、
+    /// マルチ方言＝契約スペック）で 1 度だけ出力する。方言実装スペック（ContractOnly=false かつ MultiDialect）では出さない。
+    /// 既定 false（未指定のスペックは常に false でバイト不変）。
+    /// </remarks>
+    public bool InMemory { get; init; }
 }
 
 /// <summary>
@@ -204,9 +215,14 @@ public static class GeneratedFilePlanner
         }
 
         // Repository バケットは共通契約（インターフェイス・SqlQuery・メタデータ・グラフセーバ・RawSqlMapper 等）＋
-        // 自作 SQL Server 実装を保持する。契約は EF Core 側も参照するため、自作実装・EF Core のどちらかが有効なら出力する。
-        // EF 単独出力時は Repository バケットに「契約のみ」が入る（自作実装はテンプレート内で出し分ける）
-        if (options.GenerateRepositories || options.GenerateEfCore)
+        // 自作 SQL Server 実装を保持する。契約は EF Core 側・インメモリ側も参照するため、自作実装・EF Core・
+        // インメモリのいずれかが有効なら出力する。EF/インメモリ単独出力時は Repository バケットに「契約のみ」＋
+        // インメモリ実装が入る（自作 ADO 実装はテンプレート内で出し分ける）
+        if (
+            options.GenerateRepositories
+            || options.GenerateEfCore
+            || options.GenerateInMemoryRepositories
+        )
         {
             active.Add(GenerationBucket.Repository);
         }
@@ -221,7 +237,8 @@ public static class GeneratedFilePlanner
             || options.GenerateEditModels
             || options.GenerateMappers
             || options.GenerateRepositories
-            || options.GenerateEfCore;
+            || options.GenerateEfCore
+            || options.GenerateInMemoryRepositories;
 
         if (anyClass)
         {
@@ -311,6 +328,9 @@ public static class GeneratedFilePlanner
                         Dialect = primaryDialect,
                         ContractOnly = false,
                         MultiDialect = false,
+                        InMemory =
+                            options.GenerateInMemoryRepositories
+                            && active.Contains(GenerationBucket.Repository),
                     },
                 ];
             }
@@ -331,6 +351,8 @@ public static class GeneratedFilePlanner
                     Dialect = primaryDialect,
                     ContractOnly = true,
                     MultiDialect = true,
+                    // インメモリ実装は方言非依存のため契約スペックへ 1 度だけ載せる（方言実装スペックには載せない）
+                    InMemory = options.GenerateInMemoryRepositories,
                 }
             );
 
@@ -395,6 +417,8 @@ public static class GeneratedFilePlanner
                         Dialect = primaryDialect,
                         ContractOnly = true,
                         MultiDialect = true,
+                        // インメモリ実装は方言非依存のため契約（Repository バケット）スペックへ 1 度だけ載せる
+                        InMemory = options.GenerateInMemoryRepositories,
                     }
                 );
 
@@ -427,6 +451,10 @@ public static class GeneratedFilePlanner
                     Dialect = primaryDialect,
                     ContractOnly = false,
                     MultiDialect = false,
+                    // 分割・単一方言時は Repository バケットのファイルへインメモリ実装を載せる
+                    InMemory =
+                        options.GenerateInMemoryRepositories
+                        && bucket == GenerationBucket.Repository,
                 }
             );
         }

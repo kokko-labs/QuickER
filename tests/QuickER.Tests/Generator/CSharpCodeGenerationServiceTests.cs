@@ -3385,4 +3385,65 @@ public class CSharpCodeGenerationServiceTests
                 },
             ],
         };
+
+    /// <summary>インメモリ Repository 単独出力（契約＋インメモリ実装）が生成され、ADO・EF 依存を含まないことを検証する</summary>
+    [Fact(
+        DisplayName = "インメモリ Repository 単独出力は契約＋インメモリ実装を出し ADO/EF 依存を含まない"
+    )]
+    public void Generate_InMemoryOnly_EmitsContractAndInMemory_NoAdoOrEf()
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            SingleEntityDiagram(),
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                GenerateRepositories = false,
+                GenerateEfCore = false,
+                GenerateInMemoryRepositories = true,
+            }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        var content = result.Files[0].Content;
+
+        // 契約・インメモリ実装・データストア・シーダー・DI が出る
+        content.Should().Contain("public partial interface IItemRepository");
+        content.Should().Contain("class InMemoryDataStore");
+        content.Should().Contain("class InMemoryItemRepository");
+        content.Should().Contain("class InMemorySampleData");
+        content.Should().Contain("AddGeneratedInMemoryRepositories");
+        // 方言非依存: ADO・EF・自作 Repository 実装は一切出ない
+        content.Should().NotContain("Microsoft.Data.SqlClient");
+        content.Should().NotContain("Microsoft.Data.Sqlite");
+        content.Should().NotContain("Microsoft.EntityFrameworkCore");
+        content.Should().NotContain("class ItemRepository");
+        content.Should().NotContain("AddGeneratedRepositories");
+    }
+
+    /// <summary>インメモリ Repository とランタイムパッケージ参照モードの併用が診断エラーになることを検証する</summary>
+    [Fact(DisplayName = "インメモリ Repository ＋ UseRuntimePackages は診断エラー（併用不可）")]
+    public void Generate_InMemoryWithRuntimePackages_ReturnsErrorDiagnostic()
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            SingleEntityDiagram(),
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                GenerateRepositories = false,
+                GenerateEfCore = false,
+                GenerateInMemoryRepositories = true,
+                UseRuntimePackages = true,
+            }
+        );
+
+        result.HasErrors.Should().BeTrue();
+        result
+            .Diagnostics.Should()
+            .Contain(d =>
+                d.Severity == GenerationDiagnosticSeverity.Error
+                && d.Message.Contains("インメモリ")
+                && d.Message.Contains("UseRuntimePackages")
+            );
+        result.Files.Should().BeEmpty("診断エラー時はファイルを出力しない");
+    }
 }

@@ -125,6 +125,25 @@ public sealed class CodeGenerationOptions
     /// </remarks>
     public bool GenerateEfCore { get; init; }
 
+    /// <summary>
+    /// DB 非依存のインメモリ Repository 群（<c>InMemory{Entity}Repository</c>・<c>InMemoryDataStore</c>・
+    /// <c>InMemorySampleData</c>・<c>AddGeneratedInMemoryRepositories</c>）を生成するかどうか（既定 false）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 実 DB を使わず、共通契約（<c>I{Entity}Repository</c> / <c>IRepository</c> / <c>SqlQuery</c> 等）と同じ API を
+    /// メモリ上の辞書で満たす。プロトタイピング・UI 検証・単体テスト向けで、生 SQL 系メソッドは
+    /// <see cref="NotSupportedException"/> を投げる（実 DB の Repository へ切り替える案内）。共通契約は
+    /// <see cref="GenerateRepositories"/> / <see cref="GenerateEfCore"/> と共有する（どれか一つでも ON なら契約を生成）。
+    /// </para>
+    /// <para>
+    /// 方言に依存しないため、自作 Repository のマルチターゲットや <see cref="GenerateEfCore"/> とは併用できる。
+    /// 固定 infra を出力しない <see cref="UseRuntimePackages"/> とは併用できない（インメモリ実行器がパッケージ側に
+    /// 存在せず生成側の固定 infra を必要とするため）。併用指定は生成時に診断エラーになる。
+    /// </para>
+    /// </remarks>
+    public bool GenerateInMemoryRepositories { get; init; }
+
     /// <summary>[Table] [Key] [Column] [Required] [MaxLength] などのデータアノテーション属性を付与するかどうか</summary>
     public bool IncludeDataAnnotations { get; init; } = true;
 

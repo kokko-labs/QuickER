@@ -41,6 +41,10 @@ internal sealed class RenderScope
     /// </remarks>
     public required bool RenderContract { get; init; }
 
+    /// <summary>DB 非依存のインメモリ Repository 群（InMemoryDataStore・InMemory{Entity}Repository・InMemorySampleData・DI）を出力するか</summary>
+    /// <remarks>方言非依存のため契約を出すスペック（単一方言＝契約＋実装、マルチ方言＝契約スペック）で 1 度だけ true。方言実装スペックでは false</remarks>
+    public required bool InMemory { get; init; }
+
     /// <summary>このスコープがレンダリングする自作 Repository の方言（"sqlserver" / "sqlite"）</summary>
     public required string Dialect { get; init; }
 
@@ -177,7 +181,9 @@ internal sealed class ScribanCSharpRenderer
         var emitNavRefAttr =
             (options.GenerateEntityClasses && model.EntityClasses.Any(c => c.Navigations.Count > 0))
             || options.GenerateRepositories
-            || options.GenerateEfCore;
+            || options.GenerateEfCore
+            // インメモリ Repository はメタデータ（CascadeNavigations）・Include 復元で NavigationReference を参照する
+            || options.GenerateInMemoryRepositories;
 
         // 自作 Repository の生成方言に応じた原始変数群。sqlserver のときは現行値（識別子クォート [ ]・
         // ADO 型 SqlXxx）そのままで、テンプレートは細粒度置換した箇所でこれらを参照する。方言リテラルを
@@ -262,6 +268,9 @@ internal sealed class ScribanCSharpRenderer
             // 自作 Repository の方言別実装（ADO 依存）を出力するか。Repository バケット内でこのフラグにより契約と実装を出し分ける
             // （EF 単独出力＝false のとき ADO 依存のコードを一切生成しない）
             ["repositories"] = scope.RepositoryImpl,
+            // DB 非依存のインメモリ Repository 群（InMemoryDataStore・InMemory{Entity}Repository・シーダー・DI）を出力するか。
+            // 方言非依存のため契約を出すスペックで 1 度だけ true（既存経路は常に false でバイト不変）
+            ["in_memory"] = scope.InMemory,
             // 自作 Repository の生成方言と方言別プリミティブ（識別子クォート・ADO 型名）。
             ["repository_dialect"] = dialect.Dialect,
             ["quote_open"] = dialect.QuoteOpen,

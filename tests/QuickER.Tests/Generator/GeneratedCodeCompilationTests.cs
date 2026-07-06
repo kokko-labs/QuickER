@@ -157,6 +157,66 @@ public class GeneratedCodeCompilationTests
         return data;
     }
 
+    /// <summary>マトリクスケース: インメモリ Repository（Split{off,on} × VO{off,on} の 4 ケース）＋ EF・自作 sqlserver 併存</summary>
+    public static TheoryData<string, CodeGenerationOptions> InMemoryRepositoryMatrixCases()
+    {
+        var data = new TheoryData<string, CodeGenerationOptions>();
+        foreach (var split in new[] { false, true })
+        foreach (var vo in new[] { false, true })
+        {
+            data.Add(
+                $"InMemory 単独 Split={split} VO={vo}",
+                new CodeGenerationOptions
+                {
+                    NamespaceName = "Sample.Domain",
+                    SplitFilesByCategory = split,
+                    GenerateValueObjects = vo,
+                    GenerateRepositories = false,
+                    GenerateEfCore = false,
+                    GenerateInMemoryRepositories = true,
+                }
+            );
+        }
+
+        // インメモリ＋EF Core 併存（契約は共有・二重定義にならないこと）
+        data.Add(
+            "InMemory + EF Core",
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                GenerateRepositories = false,
+                GenerateEfCore = true,
+                GenerateInMemoryRepositories = true,
+            }
+        );
+
+        // インメモリ＋自作 sqlserver Repository 併存
+        data.Add(
+            "InMemory + 自作 sqlserver Repository",
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                GenerateRepositories = true,
+                RepositoryDialect = "sqlserver",
+                GenerateInMemoryRepositories = true,
+            }
+        );
+
+        // インメモリ＋自作マルチターゲット（sqlserver/sqlite）併存（方言非依存のインメモリはマルチと共存可）
+        data.Add(
+            "InMemory + 自作マルチターゲット(sqlserver/sqlite)",
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                GenerateRepositories = true,
+                RepositoryDialects = ["sqlserver", "sqlite"],
+                GenerateInMemoryRepositories = true,
+            }
+        );
+
+        return data;
+    }
+
     /// <summary>マトリクスケース: オプション単発（各種フラグ・Namespace 上書き）</summary>
     public static TheoryData<string, CodeGenerationOptions> SingleOptionCases()
     {
@@ -237,6 +297,14 @@ public class GeneratedCodeCompilationTests
     [Theory]
     [MemberData(nameof(SqliteRepositoryMatrixCases))]
     public void Generate_SqliteRepositoryMatrix_ShouldProduceCompilableCode(
+        string caseName,
+        CodeGenerationOptions options
+    ) => AssertCompiles(caseName, options);
+
+    /// <summary>インメモリ Repository（Split × VO の 4 ケース）＋ EF・自作併存で、生成コードがエラー・警告なしでコンパイルできることを検証する</summary>
+    [Theory]
+    [MemberData(nameof(InMemoryRepositoryMatrixCases))]
+    public void Generate_InMemoryRepositoryMatrix_ShouldProduceCompilableCode(
         string caseName,
         CodeGenerationOptions options
     ) => AssertCompiles(caseName, options);

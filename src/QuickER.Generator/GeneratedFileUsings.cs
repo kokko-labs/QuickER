@@ -241,6 +241,15 @@ internal static class GeneratedFileUsings
                     }
                 }
 
+                // インメモリ Repository（InMemoryDataStore・InMemory{Entity}Repository・シーダー・
+                // AddGeneratedInMemoryRepositories）: DI 登録拡張のため DependencyInjection を付ける。
+                // 述語・並び順の式木 Compile（System.Linq.Expressions）・リフレクション（System.Reflection）・
+                // LINQ（System.Linq）は契約バケットで既に付与済み。ADO・EF 依存は一切出さない（方言非依存）。
+                if (spec.InMemory)
+                {
+                    yield return "Microsoft.Extensions.DependencyInjection";
+                }
+
                 break;
 
             // EfCore: DbContext / DbSet / ModelBuilder（Microsoft.EntityFrameworkCore）、AddGeneratedEfCoreRepositories の

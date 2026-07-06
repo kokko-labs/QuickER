@@ -106,6 +106,21 @@ public sealed class CSharpCodeGenerationService
             );
         }
 
+        // インメモリ Repository はパッケージ参照モードと併用できない。インメモリ実行器（InMemoryQueryExecutor・
+        // InMemoryDataStore）は生成側の固定 infra として出力され、パッケージ（QuickER.Runtime.*）には存在しない。
+        // UseRuntimePackages は固定 infra を出力しないため、インメモリ実装が参照先を失いコンパイル不能になる。
+        // よって併用指定は早期に診断エラーとする（インメモリはインライン既定＝固定 infra 同梱でのみ成立する）。
+        if (options.GenerateInMemoryRepositories && options.UseRuntimePackages)
+        {
+            diagnostics.Add(
+                Error(
+                    "インメモリ Repository の生成はランタイムパッケージ参照モード（UseRuntimePackages）と併用できません。"
+                        + "インメモリ実行器は生成側の固定コードとして出力されるため、固定コードを出力しないパッケージ参照モードでは"
+                        + "参照先を失います。UseRuntimePackages を無効にする（固定コードをインライン出力する）か、インメモリ生成を無効にしてください。"
+                )
+            );
+        }
+
         // ランタイムのパッケージ参照モードと EF Core 生成は併用できる（EF 固定 infra を TContext ジェネリック化した
         // ことで、EF エンジン（EfCoreRepository / EfCoreSqlExecutor 等）は具象 QuickErDbContext を参照しなくなった）。
         // スキーマ依存物（QuickErDbContext・Fluent 構成・EfCore{Entity}Repository・AddGeneratedEfCoreRepositories）は
@@ -439,6 +454,8 @@ public sealed class CSharpCodeGenerationService
             RenderHeader = renderHeader,
             // 方言実装（ADO 依存）は Repository バケットを含み、契約のみでなく、GenerateRepositories が有効なときだけ出力する
             RepositoryImpl = options.GenerateRepositories && hasRepository && !spec.ContractOnly,
+            // DB 非依存のインメモリ実装は、計画（GeneratedFilePlanner）が契約を出すスペックへ 1 度だけ載せる（spec.InMemory）
+            InMemory = spec.InMemory,
             // パッケージ参照モードでは固定 infra（契約・方言エンジン・EntityBase/属性/VO 基底 等）を出力せず、
             // 生成コードはパッケージ QuickER.Runtime.* の型を using で参照する。スキーマ依存物（Entity/EditModel/
             // Mapper/VO 具象/I{Entity}Repository/エンティティ別実装/DI 登録）は本フラグに依らず出力する。
@@ -501,11 +518,12 @@ public sealed class CSharpCodeGenerationService
             && !options.GenerateMappers
             && !options.GenerateRepositories
             && !options.GenerateEfCore
+            && !options.GenerateInMemoryRepositories
         )
         {
             diagnostics.Add(
                 Error(
-                    "Entity / EditModel / Mapper / Repository / EF Core のいずれも生成対象になっていません。少なくとも一つを有効にしてください。"
+                    "Entity / EditModel / Mapper / Repository / EF Core / インメモリ Repository のいずれも生成対象になっていません。少なくとも一つを有効にしてください。"
                 )
             );
         }
@@ -523,29 +541,35 @@ public sealed class CSharpCodeGenerationService
             );
         }
 
-        // Repository・EF Core はともに Entity クラス（および共通契約）を参照するため、Entity 生成が必須
+        // Repository・EF Core・インメモリ Repository はいずれも Entity クラス（および共通契約）を参照するため、Entity 生成が必須
         if (
-            (options.GenerateRepositories || options.GenerateEfCore)
-            && !options.GenerateEntityClasses
+            (
+                options.GenerateRepositories
+                || options.GenerateEfCore
+                || options.GenerateInMemoryRepositories
+            ) && !options.GenerateEntityClasses
         )
         {
             diagnostics.Add(
                 Error(
-                    "Repository / EF Core の生成には Entity クラスが必要です。Entity を生成対象に含めてください。"
+                    "Repository / EF Core / インメモリ Repository の生成には Entity クラスが必要です。Entity を生成対象に含めてください。"
                 )
             );
         }
 
-        // Repository の SQL 組み立ておよび EF Core のマッピング（EntitySaveMetadata）は [Table] / [Key] / [Column]
+        // Repository の SQL 組み立て・EF Core・インメモリのマッピング（EntitySaveMetadata）は [Table] / [Key] / [Column]
         // 属性をリフレクションで参照するため、DataAnnotations を無効にすると実行時に初期化例外となる。生成前に検出する
         if (
-            (options.GenerateRepositories || options.GenerateEfCore)
-            && !options.IncludeDataAnnotations
+            (
+                options.GenerateRepositories
+                || options.GenerateEfCore
+                || options.GenerateInMemoryRepositories
+            ) && !options.IncludeDataAnnotations
         )
         {
             diagnostics.Add(
                 Error(
-                    "Repository / EF Core は [Table] / [Key] / [Column] 属性を利用するため、データアノテーションの付与が必要です。データアノテーションを有効にしてください。"
+                    "Repository / EF Core / インメモリ Repository は [Table] / [Key] / [Column] 属性を利用するため、データアノテーションの付与が必要です。データアノテーションを有効にしてください。"
                 )
             );
         }
