@@ -19,6 +19,14 @@ src/QuickER.Runtime.Sqlite/QuickERRuntimeSqlite.g.cs text eol=crlf
 src/QuickER.Runtime.EntityFrameworkCore/QuickERRuntimeEntityFrameworkCore.g.cs text eol=crlf
 
 ###############################################################################
+# samples/ec-order のチェックイン済み生成物・図 JSON は、ドリフト検知が生成器出力
+# （CRLF）とのバイト単位一致を前提とするため CRLF に固定する（チェックアウト環境の改行変換を防ぐ）。
+###############################################################################
+samples/ec-order/EcOrder.json text eol=crlf
+samples/ec-order/EcOrder.sql text eol=crlf
+samples/ec-order/EcOrderSample/Generated/EcOrder.g.cs text eol=crlf
+
+###############################################################################
 # Set default behavior for command prompt diff.
 #
 # This is need for earlier builds of msysgit that does not have it on by

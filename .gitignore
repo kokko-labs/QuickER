@@ -361,3 +361,6 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+
+# サンプル（samples/ec-order）が実行時に作成する SQLite ファイル DB（既定は bin 配下だが作業ディレクトリ実行の保険）
+ec-order.db

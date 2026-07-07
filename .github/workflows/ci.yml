@@ -34,6 +34,14 @@ jobs:
       - name: テスト
         run: dotnet test QuickER.slnx --no-build --logger "console;verbosity=normal"
 
+      - name: サンプルのビルドと実行（samples/ec-order）
+        # 利用者のプロジェクトを模した動くサンプル。QuickER 本体へは参照せず NuGet パッケージのみで、
+        # チェックイン済みの生成コード＋DDL で SQLite ファイル DB を作成し CRUD を実演する（外部 DB 不要）。
+        # DB ファイルは実行ファイルと同じ bin 配下に作られるため作業ディレクトリを汚さない。
+        run: |
+          dotnet build samples/ec-order/EcOrderSample/EcOrderSample.csproj
+          dotnet run --project samples/ec-order/EcOrderSample/EcOrderSample.csproj --no-build
+
       - name: パッケージ生成検証（ランタイム4種+CLI）
         run: |
           dotnet pack src/QuickER.Runtime/QuickER.Runtime.csproj --no-build --output ${{ runner.temp }}/nupkg

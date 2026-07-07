@@ -1,0 +1,236 @@
+{
+  "Version": 1,
+  "Schema": {
+    "Entities": [
+      {
+        "Id": "e1111111-0000-0000-0000-000000000001",
+        "TableName": "customers",
+        "Memo": "",
+        "Description": "\u9867\u5BA2\u3002\u6CE8\u6587\u306E\u767A\u6CE8\u5143\u3068\u306A\u308B\u8CFC\u5165\u8005\u30DE\u30B9\u30BF",
+        "Columns": [
+          {
+            "Id": "e1111111-0000-0000-0000-000000000002",
+            "Name": "customer_id",
+            "DataType": "int",
+            "IsPrimaryKey": true,
+            "IsForeignKey": false,
+            "IsNullable": false,
+            "Description": "\u9867\u5BA2ID\uFF08\u4E3B\u30AD\u30FC\u3002\u30A2\u30D7\u30EA\u5074\u3067\u63A1\u756A\uFF09"
+          },
+          {
+            "Id": "e1111111-0000-0000-0000-000000000003",
+            "Name": "name",
+            "DataType": "nvarchar(50)",
+            "IsPrimaryKey": false,
+            "IsForeignKey": false,
+            "IsNullable": false,
+            "Description": "\u9867\u5BA2\u540D"
+          },
+          {
+            "Id": "e1111111-0000-0000-0000-000000000004",
+            "Name": "email",
+            "DataType": "nvarchar(100)",
+            "IsPrimaryKey": false,
+            "IsForeignKey": false,
+            "IsNullable": true,
+            "Description": "\u9023\u7D61\u5148\u30E1\u30FC\u30EB\u30A2\u30C9\u30EC\u30B9\uFF08\u4EFB\u610F\uFF09"
+          }
+        ]
+      },
+      {
+        "Id": "e2222222-0000-0000-0000-000000000001",
+        "TableName": "products",
+        "Memo": "",
+        "Description": "\u5546\u54C1\u30DE\u30B9\u30BF\u3002\u8CA9\u58F2\u5BFE\u8C61\u3068\u306A\u308B\u5546\u54C1\u306E\u5B9A\u7FA9",
+        "Columns": [
+          {
+            "Id": "e2222222-0000-0000-0000-000000000002",
+            "Name": "product_id",
+            "DataType": "int",
+            "IsPrimaryKey": true,
+            "IsForeignKey": false,
+            "IsNullable": false,
+            "Description": "\u5546\u54C1ID\uFF08\u4E3B\u30AD\u30FC\u3002\u30A2\u30D7\u30EA\u5074\u3067\u63A1\u756A\uFF09"
+          },
+          {
+            "Id": "e2222222-0000-0000-0000-000000000003",
+            "Name": "name",
+            "DataType": "nvarchar(50)",
+            "IsPrimaryKey": false,
+            "IsForeignKey": false,
+            "IsNullable": false,
+            "Description": "\u5546\u54C1\u540D"
+          },
+          {
+            "Id": "e2222222-0000-0000-0000-000000000004",
+            "Name": "unit_price",
+            "DataType": "decimal(10,2)",
+            "IsPrimaryKey": false,
+            "IsForeignKey": false,
+            "IsNullable": false,
+            "Description": "\u5546\u54C1\u30DE\u30B9\u30BF\u4E0A\u306E\u8CA9\u58F2\u5358\u4FA1"
+          }
+        ]
+      },
+      {
+        "Id": "e3333333-0000-0000-0000-000000000001",
+        "TableName": "orders",
+        "Memo": "",
+        "Description": "\u6CE8\u6587\u30D8\u30C3\u30C0\u30021 \u9867\u5BA2\u306E 1 \u56DE\u306E\u6CE8\u6587\u3092\u8868\u3059",
+        "Columns": [
+          {
+            "Id": "e3333333-0000-0000-0000-000000000002",
+            "Name": "order_id",
+            "DataType": "int",
+            "IsPrimaryKey": true,
+            "IsForeignKey": false,
+            "IsNullable": false,
+            "Description": "\u6CE8\u6587ID\uFF08\u4E3B\u30AD\u30FC\u3002\u30A2\u30D7\u30EA\u5074\u3067\u63A1\u756A\uFF09"
+          },
+          {
+            "Id": "e3333333-0000-0000-0000-000000000003",
+            "Name": "customer_id",
+            "DataType": "int",
+            "IsPrimaryKey": false,
+            "IsForeignKey": true,
+            "IsNullable": false,
+            "Description": "\u767A\u6CE8\u3057\u305F\u9867\u5BA2ID\uFF08customers \u3078\u306E\u5916\u90E8\u30AD\u30FC\uFF09"
+          },
+          {
+            "Id": "e3333333-0000-0000-0000-000000000004",
+            "Name": "ordered_at",
+            "DataType": "datetime2",
+            "IsPrimaryKey": false,
+            "IsForeignKey": false,
+            "IsNullable": false,
+            "Description": "\u6CE8\u6587\u65E5\u6642"
+          },
+          {
+            "Id": "e3333333-0000-0000-0000-000000000005",
+            "Name": "memo",
+            "DataType": "nvarchar(100)",
+            "IsPrimaryKey": false,
+            "IsForeignKey": false,
+            "IsNullable": true,
+            "Description": "\u6CE8\u6587\u306B\u6DFB\u3048\u308B\u5099\u8003\uFF08\u4EFB\u610F\uFF09"
+          }
+        ]
+      },
+      {
+        "Id": "e4444444-0000-0000-0000-000000000001",
+        "TableName": "order_lines",
+        "Memo": "",
+        "Description": "\u6CE8\u6587\u660E\u7D30\u3002\u6CE8\u6587\u3068\u5546\u54C1\u3092\u591A\u5BFE\u591A\u3067\u7D50\u3076\u660E\u7D30\u884C",
+        "Columns": [
+          {
+            "Id": "e4444444-0000-0000-0000-000000000002",
+            "Name": "order_line_id",
+            "DataType": "int",
+            "IsPrimaryKey": true,
+            "IsForeignKey": false,
+            "IsNullable": false,
+            "Description": "\u6CE8\u6587\u660E\u7D30ID\uFF08\u4E3B\u30AD\u30FC\u3002\u30A2\u30D7\u30EA\u5074\u3067\u63A1\u756A\uFF09"
+          },
+          {
+            "Id": "e4444444-0000-0000-0000-000000000003",
+            "Name": "order_id",
+            "DataType": "int",
+            "IsPrimaryKey": false,
+            "IsForeignKey": true,
+            "IsNullable": false,
+            "Description": "\u6240\u5C5E\u3059\u308B\u6CE8\u6587ID\uFF08orders \u3078\u306E\u5916\u90E8\u30AD\u30FC\uFF09"
+          },
+          {
+            "Id": "e4444444-0000-0000-0000-000000000004",
+            "Name": "product_id",
+            "DataType": "int",
+            "IsPrimaryKey": false,
+            "IsForeignKey": true,
+            "IsNullable": false,
+            "Description": "\u5BFE\u8C61\u306E\u5546\u54C1ID\uFF08products \u3078\u306E\u5916\u90E8\u30AD\u30FC\uFF09"
+          },
+          {
+            "Id": "e4444444-0000-0000-0000-000000000005",
+            "Name": "quantity",
+            "DataType": "int",
+            "IsPrimaryKey": false,
+            "IsForeignKey": false,
+            "IsNullable": false,
+            "Description": "\u6CE8\u6587\u6570\u91CF"
+          },
+          {
+            "Id": "e4444444-0000-0000-0000-000000000006",
+            "Name": "unit_price",
+            "DataType": "decimal(10,2)",
+            "IsPrimaryKey": false,
+            "IsForeignKey": false,
+            "IsNullable": false,
+            "Description": "\u6CE8\u6587\u6642\u5358\u4FA1\uFF08\u5546\u54C1\u30DE\u30B9\u30BF\u306E\u6539\u5B9A\u306B\u5F71\u97FF\u3055\u308C\u306A\u3044\u3088\u3046\u6CE8\u6587\u884C\u306B\u4FDD\u6301\uFF09"
+          }
+        ]
+      }
+    ],
+    "Relationships": [
+      {
+        "Id": "f0000000-0000-0000-0000-000000000001",
+        "SourceEntityId": "e1111111-0000-0000-0000-000000000001",
+        "TargetEntityId": "e3333333-0000-0000-0000-000000000001",
+        "Type": "OneToMany",
+        "SourceColumnId": "e1111111-0000-0000-0000-000000000002",
+        "TargetColumnId": "e3333333-0000-0000-0000-000000000003",
+        "ConstraintName": "FK_orders_customers",
+        "OnDelete": "Cascade",
+        "OnUpdate": "NoAction"
+      },
+      {
+        "Id": "f0000000-0000-0000-0000-000000000002",
+        "SourceEntityId": "e3333333-0000-0000-0000-000000000001",
+        "TargetEntityId": "e4444444-0000-0000-0000-000000000001",
+        "Type": "OneToMany",
+        "SourceColumnId": "e3333333-0000-0000-0000-000000000002",
+        "TargetColumnId": "e4444444-0000-0000-0000-000000000003",
+        "ConstraintName": "FK_order_lines_orders",
+        "OnDelete": "Cascade",
+        "OnUpdate": "NoAction"
+      },
+      {
+        "Id": "f0000000-0000-0000-0000-000000000003",
+        "SourceEntityId": "e2222222-0000-0000-0000-000000000001",
+        "TargetEntityId": "e4444444-0000-0000-0000-000000000001",
+        "Type": "OneToMany",
+        "SourceColumnId": "e2222222-0000-0000-0000-000000000002",
+        "TargetColumnId": "e4444444-0000-0000-0000-000000000004",
+        "ConstraintName": "FK_order_lines_products",
+        "OnDelete": "NoAction",
+        "OnUpdate": "NoAction"
+      }
+    ],
+    "TargetDbms": "sqlite"
+  },
+  "Layout": {
+    "e1111111-0000-0000-0000-000000000001": {
+      "X": 60,
+      "Y": 60,
+      "Width": 200,
+      "TitleBackgroundColor": "#DCEBFF"
+    },
+    "e3333333-0000-0000-0000-000000000001": {
+      "X": 420,
+      "Y": 60,
+      "Width": 200,
+      "TitleBackgroundColor": "#DCEBFF"
+    },
+    "e4444444-0000-0000-0000-000000000001": {
+      "X": 420,
+      "Y": 430,
+      "Width": 200,
+      "TitleBackgroundColor": "#DCEBFF"
+    },
+    "e2222222-0000-0000-0000-000000000001": {
+      "X": 60,
+      "Y": 430,
+      "Width": 200,
+      "TitleBackgroundColor": "#DCEBFF"
+    }
+  }
+}
