@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.IO;
 using FluentAssertions;
 using QuickER.AI;
@@ -178,7 +179,7 @@ public class MockGenerationDialogViewModelTests
             codexEngineFactory: null,
             claudeCodeEngineFactory: null
         );
-        vm.ApiProvider = AiProvider.Ollama; // 認証不要にして接続 OK 状態にする
+        vm.Connection.ApiProvider = AiProvider.Ollama; // 認証不要にして接続 OK 状態にする
         return (vm, engineBox, folder);
     }
 
@@ -222,7 +223,7 @@ public class MockGenerationDialogViewModelTests
         FakeChatEngine[] engineBox
     )
     {
-        vm.SelectedBackend = ErChatBackendKind.ClaudeCode;
+        vm.Connection.SelectedBackend = ErChatBackendKind.ClaudeCode;
         // Claude Code バックエンドは接続 OK を外部から反映する
         vm.ApplyClaudeCodeReadiness(true, "ログイン済み", ConnectionHealth.Ready, string.Empty);
 
@@ -255,9 +256,9 @@ public class MockGenerationDialogViewModelTests
             );
 
             // 保存が無い初回は API キータブが既定
-            vm.InitialBackend.Should().Be(ErChatBackendKind.ApiKey);
+            vm.Connection.InitialBackend.Should().Be(ErChatBackendKind.ApiKey);
 
-            vm.SelectedBackend = ErChatBackendKind.ClaudeCode;
+            vm.Connection.SelectedBackend = ErChatBackendKind.ClaudeCode;
             vm.SaveSettings();
 
             var restored = new MockGenerationDialogViewModel(
@@ -271,7 +272,7 @@ public class MockGenerationDialogViewModelTests
                 uiSettingsStore: uiStore
             );
 
-            restored.InitialBackend.Should().Be(ErChatBackendKind.ClaudeCode);
+            restored.Connection.InitialBackend.Should().Be(ErChatBackendKind.ClaudeCode);
         }
         finally
         {
@@ -491,7 +492,7 @@ public class MockGenerationDialogViewModelTests
             codexEngineFactory: null,
             claudeCodeEngineFactory: null
         );
-        vm.ApiProvider = AiProvider.Ollama;
+        vm.Connection.ApiProvider = AiProvider.Ollama;
 
         try
         {
@@ -505,6 +506,40 @@ public class MockGenerationDialogViewModelTests
 
             File.Exists(path).Should().BeTrue();
             File.ReadAllText(path).Should().Be(ValidHtml);
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>
+    /// 子 <see cref="ChatConnectionSettingsViewModel.ApiProvider"/> の変更で、親の
+    /// <see cref="MockGenerationDialogViewModel.IsBackendReady"/> の PropertyChanged が発火することを検証する
+    /// （Connection.PropertyChanged → 親ハンドラ → NotifyReadinessChanged の連鎖の取りこぼしを恒久検知する）。
+    /// </summary>
+    [Fact(DisplayName = "Connection.ApiProvider 変更で親の IsBackendReady が通知される")]
+    public void ConnectionApiProviderChange_RaisesIsBackendReadyOnParent()
+    {
+        var (vm, _, folder) = CreateVm(NonEmptyDiagram());
+
+        try
+        {
+            // 既定は Ollama（CreateVm）。一旦 OpenAI へ寄せてから Ollama へ戻して変化を作る
+            vm.Connection.ApiProvider = AiProvider.OpenAI;
+
+            var raised = new List<string>();
+            vm.PropertyChanged += (_, e) =>
+            {
+                if (e.PropertyName is not null)
+                {
+                    raised.Add(e.PropertyName);
+                }
+            };
+
+            vm.Connection.ApiProvider = AiProvider.Ollama;
+
+            raised.Should().Contain(nameof(MockGenerationDialogViewModel.IsBackendReady));
         }
         finally
         {
@@ -644,7 +679,7 @@ public class MockGenerationDialogViewModelTests
             vm.CanGenerateMockProject.Should().BeTrue();
 
             // バックエンドを API キーへ切り替えると無効になる
-            vm.SelectedBackend = ErChatBackendKind.ApiKey;
+            vm.Connection.SelectedBackend = ErChatBackendKind.ApiKey;
             vm.CanGenerateMockProject.Should().BeFalse();
             vm.MockGenDisabledReason.Should().Contain("Claude Code");
         }
@@ -671,7 +706,7 @@ public class MockGenerationDialogViewModelTests
 
         try
         {
-            vm.SelectedBackend = ErChatBackendKind.ClaudeCode;
+            vm.Connection.SelectedBackend = ErChatBackendKind.ClaudeCode;
             vm.Attachments.Support.Should()
                 .Be(
                     AttachmentSupport.Images
@@ -681,7 +716,7 @@ public class MockGenerationDialogViewModelTests
                 );
 
             // Codex はエンジンが添付非対応
-            vm.SelectedBackend = ErChatBackendKind.Codex;
+            vm.Connection.SelectedBackend = ErChatBackendKind.Codex;
             vm.Attachments.Support.Should().Be(AttachmentSupport.None);
         }
         finally
@@ -699,7 +734,7 @@ public class MockGenerationDialogViewModelTests
 
         try
         {
-            vm.SelectedBackend = ErChatBackendKind.ClaudeCode;
+            vm.Connection.SelectedBackend = ErChatBackendKind.ClaudeCode;
             vm.ApplyClaudeCodeReadiness(true, "ログイン済み", ConnectionHealth.Ready, string.Empty);
             vm.StartConversationCommand.Execute(null);
 
@@ -734,11 +769,11 @@ public class MockGenerationDialogViewModelTests
 
         try
         {
-            vm.SelectedBackend = ErChatBackendKind.ClaudeCode;
+            vm.Connection.SelectedBackend = ErChatBackendKind.ClaudeCode;
             vm.Attachments.AddClipboardImage(PngBytes(), DateTime.Now);
             vm.Attachments.Items.Should().HaveCount(1);
 
-            vm.SelectedBackend = ErChatBackendKind.Codex;
+            vm.Connection.SelectedBackend = ErChatBackendKind.Codex;
 
             vm.Attachments.Items.Should().BeEmpty();
         }

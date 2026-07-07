@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -24,14 +25,6 @@ namespace QuickER.AI.Mock;
 /// </remarks>
 public partial class MockGenerationDialogViewModel : ObservableObject
 {
-    /// <summary>OpenAI API キーの保存名（AiChatDialogViewModel と共有）</summary>
-    private const string OpenAiApiKeyStoreName = "OpenAiApiKey";
-
-    /// <summary>Anthropic (Claude) API キーの保存名（AiChatDialogViewModel と共有）</summary>
-    private const string ClaudeApiKeyStoreName = "ClaudeApiKey";
-
-    private const string OpenAiProviderName = "openai";
-
     private readonly IMockDiagramSource _diagramSource;
     private readonly IUiDispatcher _dispatcher;
     private readonly IFileDialogService _files;
@@ -43,14 +36,9 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         IErDiagramToolHost,
         IErChatEngine
     > _claudeCodeEngineFactory;
-    private readonly CodexAppServerSettingsStore _codexSettingsStore;
-    private readonly ClaudeCodeSettingsStore _claudeCodeSettingsStore;
 
-    /// <summary>UI 状態（最後に使った接続タブ）の保存先</summary>
-    private readonly ChatUiSettingsStore _uiSettingsStore;
-
-    /// <summary>起動時に選択すべき接続方式（前回使ったタブ。保存が無ければ API キー）</summary>
-    public ErChatBackendKind InitialBackend { get; private set; } = ErChatBackendKind.ApiKey;
+    /// <summary>接続方式タブ（API キー / Codex / Claude Code）の状態と永続化を束ねる共通 VM 部品</summary>
+    public ChatConnectionSettingsViewModel Connection { get; }
 
     /// <summary>現在の生成セッション（会話開始前は null）</summary>
     private MockDesignSession? _session;
@@ -68,8 +56,6 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     /// </summary>
     private string? _lastHtml;
 
-    private bool _isInitializing;
-
     /// <summary>ブラウザで URL を開く処理（テスト時に差し替え可能）</summary>
     internal Action<string> OpenBrowser { get; set; } =
         url => Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
@@ -85,9 +71,6 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     public event EventHandler<MockHtmlUpdate>? HtmlUpdated;
 
     // ── 共通のチャット状態 ──
-
-    [ObservableProperty]
-    private ErChatBackendKind _selectedBackend = ErChatBackendKind.ApiKey;
 
     [ObservableProperty]
     private string _userInput = string.Empty;
@@ -116,22 +99,14 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         }
     }
 
-    /// <summary>API キー接続タブが選択されているか</summary>
-    public bool IsApiKeyBackend => SelectedBackend == ErChatBackendKind.ApiKey;
-
-    /// <summary>Codex 接続タブが選択されているか</summary>
-    public bool IsCodexBackend => SelectedBackend == ErChatBackendKind.Codex;
-
-    /// <summary>Claude Code 接続タブが選択されているか</summary>
-    public bool IsClaudeCodeBackend => SelectedBackend == ErChatBackendKind.ClaudeCode;
-
     /// <summary>現在選択中のバックエンドが送信可能な状態か（接続・認証が整っているか）</summary>
     public bool IsBackendReady =>
-        SelectedBackend switch
+        Connection.SelectedBackend switch
         {
             ErChatBackendKind.Codex => _codexReady,
             ErChatBackendKind.ClaudeCode => _claudeCodeReady,
-            _ => ApiProvider == AiProvider.Ollama || !string.IsNullOrWhiteSpace(ApiKey),
+            _ => Connection.ApiProvider == AiProvider.Ollama
+                || !string.IsNullOrWhiteSpace(Connection.ApiKey),
         };
 
     /// <summary>図が空（エンティティ 0）か（会話開始の可否に使う）</summary>
@@ -233,7 +208,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     /// </summary>
     public bool CanGenerateMockProject =>
         CanSaveHtml
-        && SelectedBackend == ErChatBackendKind.ClaudeCode
+        && Connection.SelectedBackend == ErChatBackendKind.ClaudeCode
         && IsClaudeCliAvailable
         && IsDotnetAvailable
         && !string.IsNullOrWhiteSpace(OutputFolder)
@@ -256,7 +231,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
                 return "先にモック HTML を確定してください（プレビューに反映された状態が必要です）。";
             }
 
-            if (SelectedBackend != ErChatBackendKind.ClaudeCode)
+            if (Connection.SelectedBackend != ErChatBackendKind.ClaudeCode)
             {
                 return "WPF モック生成はバックエンドが Claude Code のときのみ利用できます。";
             }
@@ -285,55 +260,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         }
     }
 
-    // ── API キー接続タブ ──
-
-    [ObservableProperty]
-    private AiProvider _apiProvider = AiProvider.OpenAI;
-
-    [ObservableProperty]
-    private string _apiModel = AiModelCatalog.DefaultOpenAiModel;
-
-    [ObservableProperty]
-    private string _apiKey = string.Empty;
-
-    [ObservableProperty]
-    private bool _saveApiKey = true;
-
-    [ObservableProperty]
-    private string _endpointOverride = string.Empty;
-
-    /// <summary>API キー接続で利用可能なプロバイダー一覧</summary>
-    public IReadOnlyList<AiProvider> ApiProviders { get; } =
-    [AiProvider.OpenAI, AiProvider.Claude, AiProvider.Ollama];
-
-    /// <summary>現在の API プロバイダーに応じたモデル候補</summary>
-    public IReadOnlyList<string> ApiModelCandidates =>
-        ApiProvider switch
-        {
-            AiProvider.Ollama => AiModelCatalog.OllamaModels,
-            AiProvider.Claude => AiModelCatalog.ClaudeModels,
-            _ => AiModelCatalog.OpenAiModels,
-        };
-
-    /// <summary>API キー欄を表示するか（API キーが必要な OpenAI / Claude 選択時のみ）</summary>
-    public bool ShowApiKey => ApiProvider is AiProvider.OpenAI or AiProvider.Claude;
-
-    /// <summary>エンドポイント欄を表示するか（Ollama 選択時のみ）</summary>
-    public bool ShowEndpoint => ApiProvider == AiProvider.Ollama;
-
-    // ── Codex 接続タブ ──
-
-    /// <summary>Codex モデルプロバイダー候補</summary>
-    public ObservableCollection<string> CodexModelProviderCandidates { get; } = new();
-
-    /// <summary>Codex モデル候補</summary>
-    public ObservableCollection<string> CodexModelCandidates { get; } = new();
-
-    [ObservableProperty]
-    private string _codexModelProvider = OpenAiProviderName;
-
-    [ObservableProperty]
-    private string _codexModel = AiModelCatalog.DefaultOpenAiModel;
+    // ── Codex 認証状態（子の状態タブとは別に、認証解決はダイアログ側プローブの責務） ──
 
     [ObservableProperty]
     private string _codexAccountSummary = "未接続";
@@ -342,27 +269,8 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     private ConnectionHealth _codexStatusLevel = ConnectionHealth.Pending;
 
     private bool _codexReady;
-    private CodexConfigToml _configToml = new();
-
-    // ── Claude Code 接続タブ ──
-
-    [ObservableProperty]
-    private string _claudeCodeModel = AiModelCatalog.DefaultClaudeCodeModel;
-
-    [ObservableProperty]
-    private string _claudeCodeStatusSummary = "未確認";
-
-    [ObservableProperty]
-    private ConnectionHealth _claudeCodeStatusLevel = ConnectionHealth.Pending;
-
-    [ObservableProperty]
-    private string _claudeCodeGuidance = "「再確認」を押すとログイン状態を確認できます。";
 
     private bool _claudeCodeReady;
-
-    /// <summary>Claude Code のモデル候補（エイリアス）</summary>
-    public IReadOnlyList<string> ClaudeCodeModelCandidates { get; } =
-        AiModelCatalog.ClaudeCodeModels;
 
     /// <summary>送信待ち添付を束ねる共通 VM 部品（チップ列・可否・追加/削除）</summary>
     public AttachmentListViewModel Attachments { get; }
@@ -413,9 +321,14 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         );
         _mockProjectGenerator =
             mockProjectGenerator ?? new MockProjectGenerator(diagramSource.Providers);
-        _codexSettingsStore = codexSettingsStore ?? new CodexAppServerSettingsStore();
-        _claudeCodeSettingsStore = new ClaudeCodeSettingsStore();
-        _uiSettingsStore = uiSettingsStore ?? new ChatUiSettingsStore("mock-generation-ui.json");
+
+        // 接続方式タブの状態部品。エンジンのファクトリ既定ラムダより前に用意し、get-only プロパティを
+        // ラムダから参照させる（PropertyChanged 購読と LoadSettings は下記の ctor 順序に従い後段で行う）。
+        Connection = new ChatConnectionSettingsViewModel(
+            "mock-generation-ui.json",
+            codexSettingsStore,
+            uiSettingsStore
+        );
 
         _apiKeyEngineFactory =
             apiKeyEngineFactory ?? ((profile, toolHost) => BuildApiKeyEngine(profile, toolHost));
@@ -425,8 +338,8 @@ public partial class MockGenerationDialogViewModel : ObservableObject
                 (profile, toolHost) =>
                     new CodexChatEngine(new CodexAppServerClient(), toolHost, _dispatcher, profile)
                     {
-                        ModelProvider = CodexModelProvider,
-                        Model = CodexModel,
+                        ModelProvider = Connection.CodexModelProvider,
+                        Model = Connection.CodexModel,
                     }
             );
         _claudeCodeEngineFactory =
@@ -440,11 +353,15 @@ public partial class MockGenerationDialogViewModel : ObservableObject
                         profile
                     )
                     {
-                        Model = ClaudeCodeModel,
+                        Model = Connection.ClaudeCodeModel,
                     }
             );
 
-        LoadSettings();
+        // ctor 順序厳守: Connection 生成 → PropertyChanged 購読 → Connection.LoadSettings
+        // （購読前にロードするとモデル同期・可否再評価が漏れる）
+        Connection.PropertyChanged += OnConnectionPropertyChanged;
+        Connection.LoadSettings();
+
         RefreshAttachmentSupport();
     }
 
@@ -453,14 +370,14 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     /// API キー=プロバイダー依存・Codex=なし・Claude Code=全種別（エンジン生成前でも判定できるよう規則で解決する）。
     /// </summary>
     private void RefreshAttachmentSupport() =>
-        Attachments.Support = SelectedBackend switch
+        Attachments.Support = Connection.SelectedBackend switch
         {
             ErChatBackendKind.ClaudeCode => AttachmentSupport.Images
                 | AttachmentSupport.Pdf
                 | AttachmentSupport.Text
                 | AttachmentSupport.Binary,
             ErChatBackendKind.Codex => AttachmentSupport.None,
-            _ => AttachmentSupportResolver.ForApiKeyProvider(ApiProvider),
+            _ => AttachmentSupportResolver.ForApiKeyProvider(Connection.ApiProvider),
         };
 
     /// <summary>添付ボタン押下でファイル選択ダイアログを開き、選択ファイルを添付へ取り込む</summary>
@@ -483,13 +400,12 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     /// <param name="paths">ドロップされたファイルパス群</param>
     public void AddDroppedFiles(IReadOnlyList<string> paths) => Attachments.AddFiles(paths);
 
-    /// <summary>ダイアログ表示時に設定・API キーを読み込む</summary>
+    /// <summary>ダイアログ表示時に API キーを読み込む</summary>
+    /// <remarks>設定・候補の読込は ctor で <see cref="ChatConnectionSettingsViewModel.LoadSettings"/> 済み。</remarks>
     public void Initialize()
     {
-        _isInitializing = true;
-        LoadSettings();
-        ApiKey = CurrentApiKeyStoreName is { } slot ? ApiKeyStore.Load(slot) : string.Empty;
-        _isInitializing = false;
+        // 現在のプロバイダーの保存済み API キーを読み直す（子側で _isInitializing 抑止）
+        Connection.Initialize();
         NotifyReadinessChanged();
 
         // 第2ステップ（WPF モック生成）の有効条件（claude CLI・dotnet SDK 検出）を非同期に確認する
@@ -500,15 +416,18 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     private ChatTurnEngine BuildApiKeyEngine(ErChatProfile profile, IErDiagramToolHost toolHost) =>
         new(
             new ProviderRoutingTurnDriver(
-                () => ApiProvider,
+                () => Connection.ApiProvider,
                 new OpenAiTurnDriver(BuildOpenAiConnection, profile),
                 new AnthropicChatTurnDriver(BuildAnthropicConnection, profile)
             ),
             toolHost,
             _dispatcher,
-            () => ApiProvider == AiProvider.Ollama || !string.IsNullOrWhiteSpace(ApiKey),
+            () =>
+                Connection.ApiProvider == AiProvider.Ollama
+                || !string.IsNullOrWhiteSpace(Connection.ApiKey),
             profile,
-            attachmentSupport: () => AttachmentSupportResolver.ForApiKeyProvider(ApiProvider)
+            attachmentSupport: () =>
+                AttachmentSupportResolver.ForApiKeyProvider(Connection.ApiProvider)
         );
 
     /// <summary>新しい会話を開始する（履歴クリア・新セッション用意・案内表示）</summary>
@@ -693,7 +612,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
                     html,
                     outputFolder,
                     projectName,
-                    ClaudeCodeModel,
+                    Connection.ClaudeCodeModel,
                     delta => RunOnUi(() => AppendMockGenLog(delta)),
                     _mockGenCts.Token
                 )
@@ -774,7 +693,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
 
     /// <summary>選択中バックエンドのエンジンファクトリ（プロファイル・ツールホスト受け取り）を返す</summary>
     private Func<ErChatProfile, IErDiagramToolHost, IErChatEngine> SelectedFactory() =>
-        SelectedBackend switch
+        Connection.SelectedBackend switch
         {
             ErChatBackendKind.Codex => _codexEngineFactory,
             ErChatBackendKind.ClaudeCode => _claudeCodeEngineFactory,
@@ -886,121 +805,60 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     /// <summary>OpenAI 接続設定を現在の入力から組み立てる</summary>
     private OpenAiChatConnection BuildOpenAiConnection() =>
         new(
-            ApiProvider,
-            ApiKey,
-            ApiModel,
-            string.IsNullOrWhiteSpace(EndpointOverride) ? null : EndpointOverride
+            Connection.ApiProvider,
+            Connection.ApiKey,
+            Connection.ApiModel,
+            string.IsNullOrWhiteSpace(Connection.EndpointOverride)
+                ? null
+                : Connection.EndpointOverride
         );
 
     /// <summary>Anthropic (Claude) 接続設定を現在の入力から組み立てる</summary>
-    private AnthropicChatConnection BuildAnthropicConnection() => new(ApiKey, ApiModel);
-
-    /// <summary>現在のプロバイダーに対応する API キー保存名（API キー不要のプロバイダーは null）</summary>
-    private string? CurrentApiKeyStoreName =>
-        ApiProvider switch
-        {
-            AiProvider.OpenAI => OpenAiApiKeyStoreName,
-            AiProvider.Claude => ClaudeApiKeyStoreName,
-            _ => null,
-        };
-
-    /// <summary>保存済み設定と config.toml の候補を読み込む</summary>
-    private void LoadSettings()
-    {
-        var settings = _codexSettingsStore.Load();
-        LoadCodexModelCandidates();
-        CodexModelProvider = string.IsNullOrWhiteSpace(settings.ModelProvider)
-            ? OpenAiProviderName
-            : settings.ModelProvider;
-        CodexModel = string.IsNullOrWhiteSpace(settings.Model)
-            ? AiModelCatalog.DefaultOpenAiModel
-            : settings.Model;
-
-        ClaudeCodeModel = _claudeCodeSettingsStore.Load().Model;
-        InitialBackend = _uiSettingsStore.Load().ParseLastBackend() ?? ErChatBackendKind.ApiKey;
-    }
-
-    /// <summary>config.toml から Codex のプロバイダー・モデル候補を読み込む</summary>
-    private void LoadCodexModelCandidates()
-    {
-        _configToml = CodexConfigTomlReader.Read();
-        CodexModelProviderCandidates.Clear();
-        CodexModelProviderCandidates.Add(OpenAiProviderName);
-
-        foreach (var name in _configToml.ProviderNames)
-        {
-            if (!CodexModelProviderCandidates.Contains(name, StringComparer.OrdinalIgnoreCase))
-            {
-                CodexModelProviderCandidates.Add(name);
-            }
-        }
-
-        RefreshCodexModelCandidates();
-    }
-
-    /// <summary>現在の Codex プロバイダーに応じてモデル候補を更新する</summary>
-    private void RefreshCodexModelCandidates()
-    {
-        CodexModelCandidates.Clear();
-        var isOpenAi =
-            string.IsNullOrWhiteSpace(CodexModelProvider)
-            || CodexModelProvider
-                .Trim()
-                .Equals(OpenAiProviderName, StringComparison.OrdinalIgnoreCase);
-
-        if (isOpenAi)
-        {
-            foreach (var m in AiModelCatalog.OpenAiModels)
-            {
-                CodexModelCandidates.Add(m);
-            }
-        }
-        else if (_configToml.ProviderModels.TryGetValue(CodexModelProvider.Trim(), out var models))
-        {
-            foreach (var m in models)
-            {
-                CodexModelCandidates.Add(m);
-            }
-        }
-        else if (!string.IsNullOrWhiteSpace(_configToml.Model))
-        {
-            CodexModelCandidates.Add(_configToml.Model);
-        }
-    }
+    private AnthropicChatConnection BuildAnthropicConnection() =>
+        new(Connection.ApiKey, Connection.ApiModel);
 
     /// <summary>設定を保存する（ウィンドウ非表示化時などに外部から呼ぶ）</summary>
-    public void SaveSettings()
-    {
-        _codexSettingsStore.Save(
-            new CodexAppServerSettings
-            {
-                ModelProvider = CodexModelProvider?.Trim() ?? string.Empty,
-                Model = CodexModel?.Trim() ?? string.Empty,
-            }
-        );
-
-        _claudeCodeSettingsStore.Save(
-            new ClaudeCodeSettings { Model = ClaudeCodeModel?.Trim() ?? string.Empty }
-        );
-
-        _uiSettingsStore.Save(new ChatUiSettings { LastBackend = SelectedBackend.ToString() });
-    }
+    /// <remarks>接続タブの状態保存は子（<see cref="ChatConnectionSettingsViewModel.SaveSettings"/>）へ委譲する。</remarks>
+    public void SaveSettings() => Connection.SaveSettings();
 
     // ── 設定変更フック ──
 
-    partial void OnSelectedBackendChanged(ErChatBackendKind value)
+    /// <summary>
+    /// 接続方式タブ（子 VM）の変更を購読し、親の責務（会話リセット・添付範囲再評価・readiness 再評価）を反映する。
+    /// </summary>
+    /// <remarks>
+    /// 子は partial フック完了後に PropertyChanged を発火するため、本ハンドラ実行時点で子の内部状態は整合済み。
+    /// 子側の候補更新・Is* 通知・API キー永続化・キー読み直しは子が済ませており、ここでは親固有の処理のみを行う。
+    /// </remarks>
+    private void OnConnectionPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        // バックエンドを切り替えたら会話はリセットする（旧セッションのエンジンは選択前のバックエンドのため）。
-        // 確定 HTML（_lastHtml）は保持し、プレビュー・保存・第2ステップの有効性は失わない。
-        ResetConversation();
+        switch (e.PropertyName)
+        {
+            case nameof(ChatConnectionSettingsViewModel.SelectedBackend):
+                // バックエンドを切り替えたら会話はリセットする（旧セッションのエンジンは選択前のバックエンドのため）。
+                // 確定 HTML（_lastHtml）は保持し、プレビュー・保存・第2ステップの有効性は失わない。
+                ResetConversation();
+                // バックエンド切替で添付範囲を再評価する（非対応になったら添付部品側で Pending をクリア・通知する）
+                RefreshAttachmentSupport();
+                NotifyReadinessChanged();
+                NotifyMockGenChanged();
+                break;
 
-        OnPropertyChanged(nameof(IsApiKeyBackend));
-        OnPropertyChanged(nameof(IsCodexBackend));
-        OnPropertyChanged(nameof(IsClaudeCodeBackend));
-        // バックエンド切替で添付範囲を再評価する（非対応になったら添付部品側で Pending をクリア・通知する）
-        RefreshAttachmentSupport();
-        NotifyReadinessChanged();
-        NotifyMockGenChanged();
+            case nameof(ChatConnectionSettingsViewModel.ApiProvider):
+                // API キー接続はプロバイダーで添付範囲が変わる（OpenAI=画像・Claude=画像＋PDF・Ollama=なし）
+                if (Connection.IsApiKeyBackend)
+                {
+                    RefreshAttachmentSupport();
+                }
+
+                NotifyReadinessChanged();
+                break;
+
+            case nameof(ChatConnectionSettingsViewModel.ApiKey):
+                // API キー永続化は子が済ませている。親は readiness 再評価のみ。
+                NotifyReadinessChanged();
+                break;
+        }
     }
 
     /// <summary>会話を未開始状態へ戻す（セッション購読解除・履歴クリア・可否更新）。確定 HTML は保持する</summary>
@@ -1014,41 +872,6 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         SendMessageCommand.NotifyCanExecuteChanged();
     }
 
-    partial void OnApiProviderChanged(AiProvider value)
-    {
-        OnPropertyChanged(nameof(ApiModelCandidates));
-        OnPropertyChanged(nameof(ShowApiKey));
-        OnPropertyChanged(nameof(ShowEndpoint));
-        ApiModel = ApiModelCandidates[0];
-
-        if (value == AiProvider.Ollama && string.IsNullOrWhiteSpace(EndpointOverride))
-        {
-            EndpointOverride = "http://localhost:11434/v1";
-        }
-
-        // プロバイダーごとに別の API キーを保持するため、切替時に保存済みキーを読み直す
-        var wasInitializing = _isInitializing;
-        _isInitializing = true;
-        ApiKey = CurrentApiKeyStoreName is { } slot ? ApiKeyStore.Load(slot) : string.Empty;
-        _isInitializing = wasInitializing;
-
-        // API キー接続はプロバイダーで添付範囲が変わる（OpenAI=画像・Claude=画像＋PDF・Ollama=なし）
-        if (IsApiKeyBackend)
-        {
-            RefreshAttachmentSupport();
-        }
-
-        NotifyReadinessChanged();
-    }
-
-    partial void OnApiKeyChanged(string value)
-    {
-        PersistApiKey();
-        NotifyReadinessChanged();
-    }
-
-    partial void OnSaveApiKeyChanged(bool value) => PersistApiKey();
-
     partial void OnUserInputChanged(string value) => SendMessageCommand.NotifyCanExecuteChanged();
 
     partial void OnOutputFolderChanged(string value) => NotifyMockGenChanged();
@@ -1058,22 +881,6 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     partial void OnIsClaudeCliAvailableChanged(bool value) => NotifyMockGenChanged();
 
     partial void OnIsDotnetAvailableChanged(bool value) => NotifyMockGenChanged();
-
-    partial void OnCodexModelProviderChanged(string value) => RefreshCodexModelCandidates();
-
-    /// <summary>保存設定に従い、現在のプロバイダーの API キーを永続化する（キー不要のプロバイダーは何もしない）</summary>
-    private void PersistApiKey()
-    {
-        if (_isInitializing)
-        {
-            return;
-        }
-
-        if (CurrentApiKeyStoreName is { } slot)
-        {
-            ApiKeyStore.Save(slot, SaveApiKey ? ApiKey : string.Empty);
-        }
-    }
 
     /// <summary>Codex 接続状態を外部（ダイアログのコードビハインド）から反映する</summary>
     public void ApplyCodexReadiness(bool ready, string summary, ConnectionHealth level)
@@ -1093,9 +900,9 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     )
     {
         _claudeCodeReady = ready;
-        ClaudeCodeStatusSummary = summary;
-        ClaudeCodeStatusLevel = level;
-        ClaudeCodeGuidance = guidance;
+        Connection.ClaudeCodeStatusSummary = summary;
+        Connection.ClaudeCodeStatusLevel = level;
+        Connection.ClaudeCodeGuidance = guidance;
         NotifyReadinessChanged();
     }
 

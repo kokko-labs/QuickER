@@ -100,7 +100,7 @@ public partial class MockGenerationDialog : Window
     /// </summary>
     private void ApplyInitialBackendTab()
     {
-        var index = ViewModel.InitialBackend switch
+        var index = ViewModel.Connection.InitialBackend switch
         {
             ErChatBackendKind.Codex => 1,
             ErChatBackendKind.ClaudeCode => 2,
@@ -249,7 +249,7 @@ public partial class MockGenerationDialog : Window
             2 => ErChatBackendKind.ClaudeCode,
             _ => ErChatBackendKind.ApiKey,
         };
-        ViewModel.SelectedBackend = backend;
+        ViewModel.Connection.SelectedBackend = backend;
 
         if (backend == ErChatBackendKind.Codex)
         {
@@ -269,8 +269,8 @@ public partial class MockGenerationDialog : Window
             return;
         }
 
-        _codexProbe.ModelProvider = ViewModel.CodexModelProvider;
-        _codexProbe.Model = ViewModel.CodexModel;
+        _codexProbe.ModelProvider = ViewModel.Connection.CodexModelProvider;
+        _codexProbe.Model = ViewModel.Connection.CodexModel;
         await _codexProbe.InitializeAsync();
     }
 
@@ -302,7 +302,7 @@ public partial class MockGenerationDialog : Window
     /// <summary>Claude Code を初期化し、状態を ViewModel へ反映する</summary>
     private async Task EnsureClaudeCodeInitializedAsync()
     {
-        _claudeCodeProbe.Model = ViewModel.ClaudeCodeModel;
+        _claudeCodeProbe.Model = ViewModel.Connection.ClaudeCodeModel;
         await _claudeCodeProbe.InitializeAsync();
         ApplyClaudeCodeState();
 
