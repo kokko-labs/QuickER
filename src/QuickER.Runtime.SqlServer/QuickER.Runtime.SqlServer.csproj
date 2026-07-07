@@ -11,7 +11,7 @@
     <Description>QuickER が生成するコードのランタイム（自作 SQL Server 方言エンジン）。QuickER.Runtime の共通契約を実装する。</Description>
     <!-- TODO: 公開時に実リポジトリ URL へ差し替える -->
     <RepositoryUrl>https://github.com/QuickER/QuickER</RepositoryUrl>
-    <!-- TODO: リポジトリに LICENSE ファイルが無いためライセンス表現は未設定。LICENSE 追加後に PackageLicenseExpression 等を設定する -->
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
   </PropertyGroup>
 
   <ItemGroup>

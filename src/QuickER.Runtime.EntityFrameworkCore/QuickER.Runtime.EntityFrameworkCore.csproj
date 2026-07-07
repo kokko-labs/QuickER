@@ -11,7 +11,7 @@
     <Description>QuickER が生成するコードのランタイム（EF Core 共通部品。TContext ジェネリックの EF 版 Repository 基底・値オブジェクト翻訳プラグイン）。QuickER.Runtime の共通契約を実装する。</Description>
     <!-- TODO: 公開時に実リポジトリ URL へ差し替える -->
     <RepositoryUrl>https://github.com/QuickER/QuickER</RepositoryUrl>
-    <!-- TODO: リポジトリに LICENSE ファイルが無いためライセンス表現は未設定。LICENSE 追加後に PackageLicenseExpression 等を設定する -->
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
   </PropertyGroup>
 
   <ItemGroup>
