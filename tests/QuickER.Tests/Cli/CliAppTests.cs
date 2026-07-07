@@ -442,6 +442,71 @@ public class CliAppTests
     }
 
     /// <summary>
+    /// --api-docs 指定時は出力ディレクトリに API リファレンス Markdown（.g.md）が 1 つ書き出されることを検証する
+    /// </summary>
+    [Fact(DisplayName = "--api-docs 指定で .g.md が出力される")]
+    public async Task Generate_WithApiDocs_WritesMarkdown()
+    {
+        var (schemaPath, outDir, root) = CreateSampleSchema();
+
+        try
+        {
+            var exit = await CliApp.InvokeAsync([
+                "generate",
+                "--schema",
+                schemaPath,
+                "--out",
+                outDir,
+                "--namespace",
+                "Test.Docs",
+                "--api-docs",
+            ]);
+
+            exit.Should().Be(0);
+            var markdownFiles = Directory.GetFiles(outDir, "*.g.md");
+            markdownFiles.Should().ContainSingle("--api-docs 指定で .g.md が 1 つ出力される");
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>--api-docs 未指定時は API リファレンス Markdown（.g.md）が出力されないことを検証する</summary>
+    [Fact(DisplayName = "--api-docs 未指定では .g.md が出力されない")]
+    public async Task Generate_WithoutApiDocs_DoesNotWriteMarkdown()
+    {
+        var (schemaPath, outDir, root) = CreateSampleSchema();
+
+        try
+        {
+            var exit = await CliApp.InvokeAsync([
+                "generate",
+                "--schema",
+                schemaPath,
+                "--out",
+                outDir,
+                "--namespace",
+                "Test.NoDocs",
+            ]);
+
+            exit.Should().Be(0);
+            var markdownFiles = Directory.GetFiles(outDir, "*.g.md");
+            markdownFiles.Should().BeEmpty("--api-docs 未指定では .g.md を出力しない");
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>
     /// マルチ方言（--repository-dialects 2 つ以上）＋ GenerateEfCore=true は生成器側の診断エラーとなり、
     /// CLI が通常のエラー出力経路（終了コード 1・出力なし）でそれを表示できることを検証する
     /// （生成器の排他検証は MultiTargetRepositoryGenerationTests で担保済みで、ここでは CLI 経路の伝播のみ確認する）

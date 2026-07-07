@@ -1082,6 +1082,8 @@ public static class SqlExpressionTranslator
         return $"{Operand(left, parameters, RawColumnName(rightColumnSql))} {op} {Operand(right, parameters, RawColumnName(leftColumnSql))}";
     }
 
+    /// <param name="expression">オペランドの式（列参照か定数値のいずれか）</param>
+    /// <param name="parameters">値オペランドをパラメータ化する際の追加先リスト</param>
     /// <param name="counterpartColumn">値としてパラメータ化する場合に添える対面の列名（角括弧なし）。無ければ null</param>
     private static string Operand(
         Expression expression,
@@ -1401,6 +1403,8 @@ public static class SqlExpressionTranslator
             ? constant.Value
             : Expression.Lambda(expression).Compile().DynamicInvoke();
 
+    /// <param name="value">パラメータ化する実値（null 可）</param>
+    /// <param name="parameters">生成したパラメータの追加先リスト</param>
     /// <param name="columnName">対象カラム名（角括弧なし）。列を特定できる場合のみ渡し、型明示化に使う</param>
     private static string AddParameter(
         object? value,
@@ -1778,6 +1782,9 @@ public sealed class EntitySaveMetadata
     }
 
     /// <summary>[SqlColumnType] 属性が生成されない場合の束縛。従来どおり AddWithValue で追加する</summary>
+    /// <param name="command">パラメータを追加する対象コマンド</param>
+    /// <param name="name">パラメータ名（@付き）</param>
+    /// <param name="property">対象列に対応するプロパティ（この分岐では未使用）</param>
     /// <param name="rawValue">値オブジェクトは既に素値へ開いた後の値。null は DBNull.Value として束縛する</param>
     private static void AddColumnParameter(
         SqliteCommand command,
@@ -1790,6 +1797,8 @@ public sealed class EntitySaveMetadata
     /// クエリ WHERE 句パラメータを束縛する。列名が判明していてその列プロパティが見つかれば列型で明示構築し、
     /// なければ AddWithValue にフォールバックする。
     /// </summary>
+    /// <param name="command">パラメータを追加する対象コマンド</param>
+    /// <param name="name">パラメータ名（@付き）</param>
     /// <param name="columnName">角括弧なしのカラム名。列が特定できない場合は null</param>
     /// <param name="rawValue">値オブジェクトは既に素値へ開いた後の値。null は DBNull.Value として束縛する</param>
     public void AddQueryParameter(
@@ -1816,6 +1825,7 @@ public sealed class EntitySaveMetadata
 public static class CascadeDeletePlanner
 {
     /// <summary>条件に一致する rootType の行と、その子孫を削除する DELETE 文を「子→親」の実行順で返す</summary>
+    /// <param name="rootType">削除の起点となるエンティティ型</param>
     /// <param name="rootTable">角括弧付きのルートテーブル名</param>
     /// <param name="whereClause">ルートの WHERE 句（" WHERE …" または空文字）</param>
     public static IReadOnlyList<string> BuildDeleteStatements(

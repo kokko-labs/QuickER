@@ -53,6 +53,9 @@ public class CSharpGenerationSettings
     /// </summary>
     public bool UseRuntimePackages { get; set; }
 
+    /// <summary>API リファレンス Markdown（.g.md）を追加出力するか（既定 false）</summary>
+    public bool GenerateApiDocs { get; set; }
+
     /// <summary>全カラムを値オブジェクト化するか</summary>
     public bool GenerateValueObjects { get; set; }
 

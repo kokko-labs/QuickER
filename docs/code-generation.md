@@ -136,3 +136,16 @@ DB なしでユニットテストするためのインメモリ実装を追加�
 | `QuickER.Runtime.EntityFrameworkCore` | EF 共通部品 | Microsoft.EntityFrameworkCore.Relational |
 
 パッケージ版とツール版はロックステップ（同一バージョン）で公開され、同一メジャー内で互換です。DI 登録拡張・`QuickErDbContext`・エンティティ別実装などのスキーマ依存物は、本モードでも常に生成側に出力されます。
+
+## API リファレンス（.g.md）
+
+生成コードと同名ベースの API リファレンス Markdown を追加出力できます。GUI の生成ダイアログの「API リファレンス (.g.md) を出力する」チェック、または CLI の `--api-docs` フラグで有効化します（**既定 OFF**）。DB アクセスの選択（なし / Repository (QuickER) / EF Core）とは独立して、常に選択できます。
+
+有効化すると、`.g.cs` と同じベース名の `.g.md` が 1 つ出力されます（例: `EcOrder.g.cs` → `EcOrder.g.md`）。内容は次のとおりです。
+
+- エンティティ一覧と、各エンティティのプロパティ表（DB 型トークン込み。`string(50)` / `decimal(10,2)` など）
+- Repository 契約（`IRepository<TEntity, TKey>` と各エンティティのインターフェイス）
+- DI 登録・CRUD・クエリの使い方例
+- 生成ファイル構成表
+
+`.g.md` は自動生成ファイルです。再生成で上書きされるため、直接編集しないでください。

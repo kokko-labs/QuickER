@@ -78,7 +78,7 @@ public sealed class NavigationReferenceAttribute : Attribute
 
 /// <summary>
 /// Entity プロパティに DB 列のメタ情報（SqlDbType・Size・Precision・Scale）を付与する独自属性。
-/// ランタイム（EntitySaveMetadata）が明示 <see cref="SqlParameter"/> を組み立てるのに使うほか、
+/// ランタイム（EntitySaveMetadata）が明示 <c>SqlParameter</c> を組み立てるのに使うほか、
 /// 利用者コードが列のメタ情報（最大長・桁数）を参照する用途にも使える。
 /// </summary>
 [AttributeUsage(AttributeTargets.Property, AllowMultiple = false)]
@@ -3356,6 +3356,7 @@ public partial interface IRepository<TEntity, TKey>
 
     /// <summary>エンティティのコレクションを SqlBulkCopy で一括追加する</summary>
     /// <param name="entities">追加対象の一覧</param>
+    /// <param name="cancellationToken">キャンセルトークン</param>
     /// <returns>追加した件数</returns>
     Task<int> BulkInsertAsync(
         IEnumerable<TEntity> entities,
@@ -3376,6 +3377,7 @@ public partial interface IRepository<TEntity, TKey>
     /// <param name="cascadeSave">子オブジェクトを連鎖的に保存するか</param>
     /// <param name="cascadeDelete">削除時に子オブジェクトを連鎖削除するか</param>
     /// <param name="insertWhenUpdateMissing">更新対象が存在しない場合に INSERT へ切り替えるか（既定は例外）</param>
+    /// <param name="cancellationToken">キャンセルトークン</param>
     /// <returns>保存したレコード数</returns>
     Task<int> SaveAsync(
         TEntity entity,
@@ -3390,6 +3392,7 @@ public partial interface IRepository<TEntity, TKey>
     /// <param name="cascadeSave">子オブジェクトを連鎖的に保存するか</param>
     /// <param name="cascadeDelete">削除時に子オブジェクトを連鎖削除するか</param>
     /// <param name="insertWhenUpdateMissing">更新対象が存在しない場合に INSERT へ切り替えるか（既定は例外）</param>
+    /// <param name="cancellationToken">キャンセルトークン</param>
     /// <returns>保存したレコード数</returns>
     Task<int> SaveAsync(
         IEnumerable<TEntity> entities,
@@ -3414,6 +3417,7 @@ public partial interface IRepository<TEntity, TKey>
     /// </remarks>
     /// <param name="sql">全列を返す SELECT 文</param>
     /// <param name="parameters">@名 パラメータへ束縛する匿名オブジェクト（null でパラメータなし）</param>
+    /// <param name="cancellationToken">キャンセルトークン</param>
     Task<IReadOnlyList<TEntity>> QueryBySqlAsync(
         string sql,
         object? parameters = null,
@@ -3434,6 +3438,7 @@ public partial interface IRepository<TEntity, TKey>
     /// </remarks>
     /// <param name="sql">実行する DML 文</param>
     /// <param name="parameters">@名 パラメータへ束縛する匿名オブジェクト（null でパラメータなし）</param>
+    /// <param name="cancellationToken">キャンセルトークン</param>
     Task<int> ExecuteSqlAsync(
         string sql,
         object? parameters = null,
@@ -3454,6 +3459,7 @@ public partial interface IRepository<TEntity, TKey>
     /// </remarks>
     /// <param name="sql">単一値を返す SELECT 文（例: <c>SELECT COUNT(*) ...</c>）</param>
     /// <param name="parameters">@名 パラメータへ束縛する匿名オブジェクト（null でパラメータなし）</param>
+    /// <param name="cancellationToken">キャンセルトークン</param>
     Task<TResult?> ExecuteScalarSqlAsync<TResult>(
         string sql,
         object? parameters = null,
@@ -3468,7 +3474,7 @@ public partial interface IRepository<TEntity, TKey>
 /// エンティティ横断の JOIN・集計クエリを任意の DTO へ射影できる。Repository の生 SQL メソッドは内部でこの実行器へ委譲する。
 /// </para>
 /// <para>
-/// <paramref name="parameters"/> の束縛は Repository の生 SQL メソッドと同じ（匿名オブジェクトの public プロパティ名 <c>Foo</c> を
+/// <c>parameters</c> の束縛は Repository の生 SQL メソッドと同じ（匿名オブジェクトの public プロパティ名 <c>Foo</c> を
 /// <c>@Foo</c> として型明示なしで束縛。null でパラメータなし）。
 /// <b>値は必ずパラメータで渡すこと（SQL への文字列連結はインジェクションの危険がある）。</b>
 /// </para>
@@ -3482,6 +3488,7 @@ public partial interface ISqlExecutor
     /// </remarks>
     /// <param name="sql">全列を返す SELECT 文</param>
     /// <param name="parameters">@名 パラメータへ束縛する匿名オブジェクト（null でパラメータなし）</param>
+    /// <param name="cancellationToken">キャンセルトークン</param>
     Task<IReadOnlyList<TEntity>> QueryBySqlAsync<TEntity>(
         string sql,
         object? parameters = null,
@@ -3508,6 +3515,7 @@ public partial interface ISqlExecutor
     /// </remarks>
     /// <param name="sql">射影する SELECT 文</param>
     /// <param name="parameters">@名 パラメータへ束縛する匿名オブジェクト（null でパラメータなし）</param>
+    /// <param name="cancellationToken">キャンセルトークン</param>
     Task<IReadOnlyList<TResult>> QueryProjectionBySqlAsync<TResult>(
         string sql,
         object? parameters = null,
@@ -3521,6 +3529,7 @@ public partial interface ISqlExecutor
     /// </remarks>
     /// <param name="sql">実行する DML 文</param>
     /// <param name="parameters">@名 パラメータへ束縛する匿名オブジェクト（null でパラメータなし）</param>
+    /// <param name="cancellationToken">キャンセルトークン</param>
     Task<int> ExecuteSqlAsync(
         string sql,
         object? parameters = null,
@@ -3535,6 +3544,7 @@ public partial interface ISqlExecutor
     /// </remarks>
     /// <param name="sql">単一値を返す SELECT 文（例: <c>SELECT COUNT(*) ...</c>）</param>
     /// <param name="parameters">@名 パラメータへ束縛する匿名オブジェクト（null でパラメータなし）</param>
+    /// <param name="cancellationToken">キャンセルトークン</param>
     Task<TResult?> ExecuteScalarSqlAsync<TResult>(
         string sql,
         object? parameters = null,
@@ -4003,6 +4013,7 @@ public sealed class SqlQuery<TEntity>
 /// <summary>Include の対象ナビゲーションと、その配下（ThenInclude）の木構造</summary>
 internal sealed class IncludeNode
 {
+    /// <summary>対象ナビゲーションプロパティを指定して Include ノードを生成する</summary>
     public IncludeNode(PropertyInfo property) => Property = property;
 
     /// <summary>取得対象のナビゲーションプロパティ</summary>
@@ -4920,6 +4931,7 @@ public sealed partial class EfCoreSqlExecutor<TContext>(IDbContextFactory<TConte
 /// 取得結果のグラフは既存 SQL Server 版のマッピングと同じく RowState=Unchanged に揃える。
 /// 具象 DbContext には依存せず <typeparamref name="TContext"/>（<see cref="DbContext"/> 派生）で受け取る。
 /// </remarks>
+/// <typeparam name="TEntity">クエリ対象のエンティティ型</typeparam>
 /// <typeparam name="TContext">クエリを実行する DbContext の具象型</typeparam>
 internal sealed class EfCoreSqlQueryExecutor<TEntity, TContext>(
     IDbContextFactory<TContext> contextFactory

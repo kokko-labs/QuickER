@@ -5,7 +5,7 @@ namespace QuickER.CodeGen.CSharp;
 /// <summary>
 /// 生成結果のファイルをディスクへ書き出すライター
 /// </summary>
-/// <remarks>誤って手書きコードを上書きしないよう、出力対象を ".g.cs" 拡張子のファイルに限定する</remarks>
+/// <remarks>誤って手書きコードを上書きしないよう、出力対象を ".g.cs"（生成コード）・".g.md"（生成 API リファレンス）拡張子のファイルに限定する</remarks>
 public sealed class GeneratedFileWriter
 {
     /// <summary>
@@ -14,7 +14,7 @@ public sealed class GeneratedFileWriter
     /// <param name="outputDirectory">出力先ディレクトリ。存在しない場合は作成する</param>
     /// <param name="result">書き出す生成結果</param>
     /// <returns>書き出したファイルの絶対パス一覧</returns>
-    /// <exception cref="InvalidOperationException">ファイル名が ".g.cs" で終わらない場合（手書きファイル保護のため上書きを拒否する）</exception>
+    /// <exception cref="InvalidOperationException">ファイル名が ".g.cs" または ".g.md" で終わらない場合（手書きファイル保護のため上書きを拒否する）</exception>
     public IReadOnlyList<string> WriteFiles(string outputDirectory, CodeGenerationResult result)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(outputDirectory);
@@ -27,10 +27,13 @@ public sealed class GeneratedFileWriter
         {
             // Path.GetFileName でディレクトリ要素を除去し、パストラバーサルによる出力先外への書き込みを防ぐ
             var fileName = Path.GetFileName(file.FileName);
-            if (!fileName.EndsWith(".g.cs", StringComparison.OrdinalIgnoreCase))
+            if (
+                !fileName.EndsWith(".g.cs", StringComparison.OrdinalIgnoreCase)
+                && !fileName.EndsWith(".g.md", StringComparison.OrdinalIgnoreCase)
+            )
             {
                 throw new InvalidOperationException(
-                    "生成ファイル以外は上書きできません。出力ファイル名は .g.cs で終わる必要があります。"
+                    "生成ファイル以外は上書きできません。出力ファイル名は .g.cs または .g.md で終わる必要があります。"
                 );
             }
 

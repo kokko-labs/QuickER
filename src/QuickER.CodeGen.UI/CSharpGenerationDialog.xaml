@@ -315,6 +315,21 @@
             ToolTip="{Binding UseRuntimePackagesToolTip}"
           />
         </Grid>
+
+        <!-- API リファレンス出力（DB アクセス選択とは独立。常に選択可） -->
+        <Grid Margin="0,10,0,0">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="96" />
+            <ColumnDefinition Width="*" />
+          </Grid.ColumnDefinitions>
+          <TextBlock Grid.Column="0" Style="{StaticResource FieldLabel}" Text="ドキュメント" />
+          <CheckBox
+            Grid.Column="1"
+            Content="API リファレンス (.g.md) を出力する"
+            IsChecked="{Binding GenerateApiDocs}"
+            ToolTip="生成コードと同名ベースの API リファレンス Markdown（{ベース名}.g.md）を 1 つ追加出力します（再生成で上書き）"
+          />
+        </Grid>
       </StackPanel>
     </Border>
 

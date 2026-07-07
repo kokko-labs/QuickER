@@ -728,6 +728,7 @@ public sealed partial class EfCoreSqlExecutor<TContext>(IDbContextFactory<TConte
 /// 取得結果のグラフは既存 SQL Server 版のマッピングと同じく RowState=Unchanged に揃える。
 /// 具象 DbContext には依存せず <typeparamref name="TContext"/>（<see cref="DbContext"/> 派生）で受け取る。
 /// </remarks>
+/// <typeparam name="TEntity">クエリ対象のエンティティ型</typeparam>
 /// <typeparam name="TContext">クエリを実行する DbContext の具象型</typeparam>
 public sealed class EfCoreSqlQueryExecutor<TEntity, TContext>(
     IDbContextFactory<TContext> contextFactory

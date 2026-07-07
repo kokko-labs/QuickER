@@ -149,6 +149,10 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     [ObservableProperty]
     private bool _generateEfCore;
 
+    /// <summary>API リファレンス Markdown（.g.md）を追加出力するかどうか（既定 OFF。DB アクセス選択とは独立）</summary>
+    [ObservableProperty]
+    private bool _generateApiDocs;
+
     /// <summary>全カラムを値オブジェクト（Value Object）として生成するかどうか</summary>
     [ObservableProperty]
     private bool _generateValueObjects;
@@ -451,6 +455,8 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
             GenerateEfCore = settings.GenerateEfCore && !GenerateRepositories;
             // パッケージ参照モードは EF Core とも併用できるため、保存値をそのまま復元する
             UseRuntimePackages = settings.UseRuntimePackages;
+            // API リファレンス出力は DB アクセス選択とは独立のため、保存値をそのまま復元する
+            GenerateApiDocs = settings.GenerateApiDocs;
             GenerateValueObjects = settings.GenerateValueObjects;
             UseGuidKeyForStringPrimaryKey = settings.UseGuidKeyForStringPrimaryKey;
             OutputFilePath = settings.OutputFilePath;
@@ -490,6 +496,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
             GenerateRepositories = GenerateRepositories,
             GenerateEfCore = GenerateEfCore,
             UseRuntimePackages = UseRuntimePackages,
+            GenerateApiDocs = GenerateApiDocs,
             GenerateValueObjects = GenerateValueObjects,
             UseGuidKeyForStringPrimaryKey = UseGuidKeyForStringPrimaryKey,
             OutputFilePath = OutputFilePath.Trim(),
@@ -522,6 +529,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
             RepositoryDialects = SelectedRepositoryDialects(),
             GenerateEfCore = GenerateEfCore,
             UseRuntimePackages = UseRuntimePackages,
+            GenerateApiDocs = GenerateApiDocs,
             GenerateValueObjects = GenerateValueObjects,
             UseGuidKeyForStringPrimaryKey = UseGuidKeyForStringPrimaryKey,
         };

@@ -80,6 +80,7 @@ public static class CliApp
         var split = SplitOption();
         var repositoryDialects = RepositoryDialectsOption();
         var runtimePackages = RuntimePackagesOption();
+        var apiDocs = ApiDocsOption();
 
         var command = new Command("generate", "ER 図 JSON から C# コードを生成する")
         {
@@ -91,6 +92,7 @@ public static class CliApp
             split,
             repositoryDialects,
             runtimePackages,
+            apiDocs,
         };
 
         command.SetAction(parseResult =>
@@ -102,7 +104,8 @@ public static class CliApp
                 parseResult.GetValue(ns),
                 parseResult.GetValue(split),
                 parseResult.GetValue(repositoryDialects),
-                parseResult.GetValue(runtimePackages)
+                parseResult.GetValue(runtimePackages),
+                parseResult.GetValue(apiDocs)
             )
         );
 
@@ -117,7 +120,8 @@ public static class CliApp
         string? ns,
         bool split,
         string? repositoryDialects,
-        bool runtimePackages
+        bool runtimePackages,
+        bool apiDocs
     )
     {
         if (!schemaFile.Exists)
@@ -141,7 +145,15 @@ public static class CliApp
         CodeGenerationOptions options;
         try
         {
-            options = LoadOptions(config, ns, split, provider, repositoryDialects, runtimePackages);
+            options = LoadOptions(
+                config,
+                ns,
+                split,
+                provider,
+                repositoryDialects,
+                runtimePackages,
+                apiDocs
+            );
         }
         catch (RepositoryDialectUnsupportedException ex)
         {
@@ -184,6 +196,7 @@ public static class CliApp
         var split = SplitOption();
         var repositoryDialects = RepositoryDialectsOption();
         var runtimePackages = RuntimePackagesOption();
+        var apiDocs = ApiDocsOption();
 
         var command = new Command(
             "scaffold",
@@ -198,6 +211,7 @@ public static class CliApp
             split,
             repositoryDialects,
             runtimePackages,
+            apiDocs,
         };
 
         command.SetAction(
@@ -211,6 +225,7 @@ public static class CliApp
                     parseResult.GetValue(split),
                     parseResult.GetValue(repositoryDialects),
                     parseResult.GetValue(runtimePackages),
+                    parseResult.GetValue(apiDocs),
                     cancellationToken
                 )
         );
@@ -227,6 +242,7 @@ public static class CliApp
         bool split,
         string? repositoryDialects,
         bool runtimePackages,
+        bool apiDocs,
         CancellationToken cancellationToken
     )
     {
@@ -262,7 +278,15 @@ public static class CliApp
         CodeGenerationOptions options;
         try
         {
-            options = LoadOptions(config, ns, split, provider, repositoryDialects, runtimePackages);
+            options = LoadOptions(
+                config,
+                ns,
+                split,
+                provider,
+                repositoryDialects,
+                runtimePackages,
+                apiDocs
+            );
         }
         catch (RepositoryDialectUnsupportedException ex)
         {
@@ -315,6 +339,14 @@ public static class CliApp
                 + "（既定 false。EF Core 生成とも併用可。設定ファイルを上書き）",
         };
 
+    private static Option<bool> ApiDocsOption() =>
+        new("--api-docs")
+        {
+            Description =
+                "API リファレンス Markdown（{ベース名}.g.md）を 1 つ追加出力する"
+                + "（既定 false。設定ファイルを上書き）",
+        };
+
     /// <summary>
     /// 設定ファイル（quicker.json）を読み、CLI フラグ・<c>--provider</c>・<c>--repository-dialects</c>・
     /// <c>--runtime-packages</c> で上書きして生成オプションを構築する。
@@ -326,6 +358,8 @@ public static class CliApp
     /// として設定する（設定ファイルの値は無視する。図の TargetDbms から導出される値のため CLI 引数を単一の正とする）。
     /// <paramref name="runtimePackages"/>（<c>--runtime-packages</c>）指定時は
     /// <see cref="CodeGenerationOptions.UseRuntimePackages"/> を true にする（未指定時は設定ファイルの値を使う）。
+    /// <paramref name="apiDocs"/>（<c>--api-docs</c>）指定時は
+    /// <see cref="CodeGenerationOptions.GenerateApiDocs"/> を true にする（未指定時は設定ファイルの値を使う）。
     /// 自作 Repository 生成（<c>GenerateRepositories</c>）が要求され、かつ実効方言に未対応方言が含まれる場合は
     /// <see cref="RepositoryDialectUnsupportedException"/> を送出する
     /// </remarks>
@@ -335,7 +369,8 @@ public static class CliApp
         bool split,
         IDatabaseProvider provider,
         string? repositoryDialects = null,
-        bool runtimePackages = false
+        bool runtimePackages = false,
+        bool apiDocs = false
     )
     {
         var node = config is { Exists: true }
@@ -355,6 +390,11 @@ public static class CliApp
         if (runtimePackages)
         {
             node["UseRuntimePackages"] = true;
+        }
+
+        if (apiDocs)
+        {
+            node["GenerateApiDocs"] = true;
         }
 
         if (!string.IsNullOrWhiteSpace(repositoryDialects))

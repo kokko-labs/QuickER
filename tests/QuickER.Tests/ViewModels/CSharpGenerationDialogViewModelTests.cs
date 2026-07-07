@@ -318,6 +318,65 @@ public class CSharpGenerationDialogViewModelTests
         vm.UseRuntimePackages.Should().BeTrue();
     }
 
+    /// <summary>API リファレンス出力チェックの既定は OFF で、ON にすると結果オプションへ反映されることを検証する</summary>
+    [Fact(DisplayName = "API リファレンス出力チェックは既定 OFF・ON で結果へ反映される")]
+    public void GenerateApiDocs_DefaultsOff_AndReflectedInResult()
+    {
+        var vm = CreateViewModel(out _);
+        vm.BaseNamespace = "Sample.Domain";
+        vm.OutputFilePath = @"C:\temp\Entities.g.cs";
+
+        vm.GenerateApiDocs.Should().BeFalse("既定は OFF");
+
+        vm.GenerateApiDocs = true;
+        vm.OkCommand.Execute(null);
+
+        vm.Result.Should().NotBeNull();
+        vm.Result!.Options.GenerateApiDocs.Should().BeTrue();
+    }
+
+    /// <summary>API リファレンス出力チェックの既定 OFF が結果オプションにも反映されることを検証する</summary>
+    [Fact(DisplayName = "API リファレンス出力チェック未操作では GenerateApiDocs=false")]
+    public void GenerateApiDocs_WhenUntouched_ResultIsFalse()
+    {
+        var vm = CreateViewModel(out _);
+        vm.BaseNamespace = "Sample.Domain";
+        vm.OutputFilePath = @"C:\temp\Entities.g.cs";
+
+        vm.OkCommand.Execute(null);
+
+        vm.Result.Should().NotBeNull();
+        vm.Result!.Options.GenerateApiDocs.Should().BeFalse();
+    }
+
+    /// <summary>API リファレンス出力チェックの状態が保存・復元されることを検証する</summary>
+    [Fact(DisplayName = "API リファレンス出力チェックが次回起動時に復元される")]
+    public void GenerateApiDocs_IsPersistedAndRestored()
+    {
+        var vm = CreateViewModel(out var folder);
+
+        try
+        {
+            vm.BaseNamespace = "Acme.App";
+            vm.OutputFilePath = @"C:\temp\Entities.g.cs";
+            vm.GenerateApiDocs = true;
+            vm.OkCommand.Execute(null);
+
+            var restored = new CSharpGenerationDialogViewModel(
+                new CSharpGenerationSettingsStore(folder)
+            );
+
+            restored.GenerateApiDocs.Should().BeTrue();
+        }
+        finally
+        {
+            if (Directory.Exists(folder))
+            {
+                Directory.Delete(folder, recursive: true);
+            }
+        }
+    }
+
     /// <summary>不正な名前空間ではエラーメッセージを表示し、確定・クローズしないことを検証する</summary>
     [Fact(DisplayName = "不正な namespace ではエラーメッセージを表示して閉じない")]
     public void Ok_WithInvalidNamespace_ShowsError()

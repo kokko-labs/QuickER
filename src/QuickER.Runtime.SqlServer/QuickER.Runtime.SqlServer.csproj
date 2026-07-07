@@ -7,6 +7,8 @@
 
     <!-- NuGet パッケージメタデータ。バージョンは Directory.Build.props の VersionPrefix に一元化 -->
     <IsPackable>true</IsPackable>
+    <!-- パッケージ参照モードの利用者に IntelliSense 説明を届けるため XML ドキュメントを同梱する -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <PackageId>QuickER.Runtime.SqlServer</PackageId>
     <Description>QuickER が生成するコードのランタイム（自作 SQL Server 方言エンジン）。QuickER.Runtime の共通契約を実装する。</Description>
     <!-- TODO: 公開時に実リポジトリ URL へ差し替える -->

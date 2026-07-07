@@ -1,0 +1,120 @@
+# {{ namespace_name }} API リファレンス
+
+<!-- QuickER によって自動生成された API リファレンス。手編集しないでください（再生成で上書きされます） -->
+
+この図から生成されたコード（名前空間 `{{ namespace_name }}`）の API をまとめます。各エンティティのプロパティと、生成される場合はデータアクセス API（Repository 契約）の使い方を掲載します。
+
+## エンティティ一覧
+
+| クラス | テーブル | 説明 |
+| --- | --- | --- |
+{{~ for entity in entities ~}}
+| `{{ entity.class_name }}` | `{{ entity.table_name }}` | {{ entity.description }} |
+{{~ end ~}}
+
+## 各エンティティ
+{{~ for entity in entities ~}}
+
+### {{ entity.class_name }}
+{{~ if entity.description != "" }}
+
+{{ entity.description }}
+{{~ end }}
+
+| プロパティ | C# 型 | DB 型 | PK | 必須 | 説明 |
+| --- | --- | --- | --- | --- | --- |
+{{~ for prop in entity.properties ~}}
+| `{{ prop.name }}` | `{{ prop.type_name }}` | {{ if prop.canonical_type_token != "" }}`{{ prop.canonical_type_token }}`{{ end }} | {{ if prop.is_primary_key }}○{{ end }} | {{ if prop.is_required }}○{{ end }} | {{ prop.description }} |
+{{~ end ~}}
+{{~ if entity.navigations.size > 0 }}
+
+ナビゲーション:
+
+| プロパティ | 種別 | 相手エンティティ |
+| --- | --- | --- |
+{{~ for nav in entity.navigations ~}}
+| `{{ nav.name }}` | {{ nav.kind }} | `{{ nav.target }}` |
+{{~ end ~}}
+{{~ end }}
+{{~ if has_contract }}
+
+リポジトリ契約: `{{ entity.repository_interface }}`（主キー型 `{{ entity.key_type_name }}`）が生成されます。
+{{~ end }}
+{{~ end ~}}
+{{~ if has_contract }}
+
+## データアクセス API
+
+生成される各リポジトリは `IRepository<TEntity, TKey>` を実装します。主なメソッドは次のとおりです。
+
+| メソッド | 説明 |
+| --- | --- |
+| `GetByIdAsync(id, ct)` | 主キーで 1 件取得します（該当なしは null）。 |
+| `GetAllAsync(ct)` | 全件を取得します。 |
+| `InsertAsync(entity, ct)` | 1 件を追加します。 |
+| `UpdateAsync(entity, ct)` | 主キー一致の 1 件を更新します（成否を返します）。 |
+| `DeleteAsync(id, ct)` | 主キー一致の 1 件を削除します（成否を返します）。 |
+| `BulkInsertAsync(entities, ct)` | 複数件をまとめて追加します（追加件数を返します）。 |
+| `Query()` | 絞り込み・並べ替え・件数制限などのクエリを組み立てます。 |
+
+`Query()` の対応範囲・詳細は [docs/code-generation.md](https://github.com/QuickER/QuickER/blob/main/docs/code-generation.md) を参照してください。
+
+## 使い方
+
+### DI 登録
+{{~ for reg in di_registrations }}
+
+{{ reg.description }}
+
+```csharp
+{{ reg.code }}
+```
+{{~ end }}
+{{~ if example }}
+
+### CRUD とクエリ
+
+`{{ example.entity_class }}`（主キー型 `{{ example.key_type_name }}`）を例に、代表的な操作を示します。
+
+```csharp
+// 追加
+var entity = new {{ example.entity_class }}();
+await {{ example.repository_field }}.InsertAsync(entity);
+
+// 主キーで取得
+var found = await {{ example.repository_field }}.GetByIdAsync({{ example.sample_key_literal }});
+
+// 全件取得
+var all = await {{ example.repository_field }}.GetAllAsync();
+
+// クエリ（絞り込み・並べ替え）
+var results = await {{ example.repository_field }}
+    .Query()
+    .OrderBy(x => x.{{ example.order_property }})
+    .ToListAsync();
+
+// 更新・削除
+if (found is not null)
+{
+    await {{ example.repository_field }}.UpdateAsync(found);
+    await {{ example.repository_field }}.DeleteAsync({{ example.sample_key_literal }});
+}
+```
+{{~ end }}
+{{~ if package_guidance_lines.size > 0 }}
+
+### 必要な NuGet パッケージ
+
+{{~ for line in package_guidance_lines }}
+{{ line }}
+{{~ end }}
+{{~ end }}
+{{~ end }}
+
+## 生成ファイル構成
+
+| ファイル | 名前空間 | 内容 |
+| --- | --- | --- |
+{{~ for file in generated_files ~}}
+| `{{ file.file_name }}` | `{{ file.namespace_name }}` | {{ file.buckets }} |
+{{~ end ~}}

@@ -75,7 +75,7 @@ public sealed class NavigationReferenceAttribute : Attribute
 
 /// <summary>
 /// Entity プロパティに DB 列のメタ情報（SqlDbType・Size・Precision・Scale）を付与する独自属性。
-/// ランタイム（EntitySaveMetadata）が明示 <see cref="SqlParameter"/> を組み立てるのに使うほか、
+/// ランタイム（EntitySaveMetadata）が明示 <c>SqlParameter</c> を組み立てるのに使うほか、
 /// 利用者コードが列のメタ情報（最大長・桁数）を参照する用途にも使える。
 /// </summary>
 [AttributeUsage(AttributeTargets.Property, AllowMultiple = false)]
@@ -3353,6 +3353,7 @@ public partial interface IRepository<TEntity, TKey>
 
     /// <summary>エンティティのコレクションを SqlBulkCopy で一括追加する</summary>
     /// <param name="entities">追加対象の一覧</param>
+    /// <param name="cancellationToken">キャンセルトークン</param>
     /// <returns>追加した件数</returns>
     Task<int> BulkInsertAsync(
         IEnumerable<TEntity> entities,
@@ -3373,6 +3374,7 @@ public partial interface IRepository<TEntity, TKey>
     /// <param name="cascadeSave">子オブジェクトを連鎖的に保存するか</param>
     /// <param name="cascadeDelete">削除時に子オブジェクトを連鎖削除するか</param>
     /// <param name="insertWhenUpdateMissing">更新対象が存在しない場合に INSERT へ切り替えるか（既定は例外）</param>
+    /// <param name="cancellationToken">キャンセルトークン</param>
     /// <returns>保存したレコード数</returns>
     Task<int> SaveAsync(
         TEntity entity,
@@ -3387,6 +3389,7 @@ public partial interface IRepository<TEntity, TKey>
     /// <param name="cascadeSave">子オブジェクトを連鎖的に保存するか</param>
     /// <param name="cascadeDelete">削除時に子オブジェクトを連鎖削除するか</param>
     /// <param name="insertWhenUpdateMissing">更新対象が存在しない場合に INSERT へ切り替えるか（既定は例外）</param>
+    /// <param name="cancellationToken">キャンセルトークン</param>
     /// <returns>保存したレコード数</returns>
     Task<int> SaveAsync(
         IEnumerable<TEntity> entities,
@@ -3411,6 +3414,7 @@ public partial interface IRepository<TEntity, TKey>
     /// </remarks>
     /// <param name="sql">全列を返す SELECT 文</param>
     /// <param name="parameters">@名 パラメータへ束縛する匿名オブジェクト（null でパラメータなし）</param>
+    /// <param name="cancellationToken">キャンセルトークン</param>
     Task<IReadOnlyList<TEntity>> QueryBySqlAsync(
         string sql,
         object? parameters = null,
@@ -3431,6 +3435,7 @@ public partial interface IRepository<TEntity, TKey>
     /// </remarks>
     /// <param name="sql">実行する DML 文</param>
     /// <param name="parameters">@名 パラメータへ束縛する匿名オブジェクト（null でパラメータなし）</param>
+    /// <param name="cancellationToken">キャンセルトークン</param>
     Task<int> ExecuteSqlAsync(
         string sql,
         object? parameters = null,
@@ -3451,6 +3456,7 @@ public partial interface IRepository<TEntity, TKey>
     /// </remarks>
     /// <param name="sql">単一値を返す SELECT 文（例: <c>SELECT COUNT(*) ...</c>）</param>
     /// <param name="parameters">@名 パラメータへ束縛する匿名オブジェクト（null でパラメータなし）</param>
+    /// <param name="cancellationToken">キャンセルトークン</param>
     Task<TResult?> ExecuteScalarSqlAsync<TResult>(
         string sql,
         object? parameters = null,
@@ -3465,7 +3471,7 @@ public partial interface IRepository<TEntity, TKey>
 /// エンティティ横断の JOIN・集計クエリを任意の DTO へ射影できる。Repository の生 SQL メソッドは内部でこの実行器へ委譲する。
 /// </para>
 /// <para>
-/// <paramref name="parameters"/> の束縛は Repository の生 SQL メソッドと同じ（匿名オブジェクトの public プロパティ名 <c>Foo</c> を
+/// <c>parameters</c> の束縛は Repository の生 SQL メソッドと同じ（匿名オブジェクトの public プロパティ名 <c>Foo</c> を
 /// <c>@Foo</c> として型明示なしで束縛。null でパラメータなし）。
 /// <b>値は必ずパラメータで渡すこと（SQL への文字列連結はインジェクションの危険がある）。</b>
 /// </para>
@@ -3479,6 +3485,7 @@ public partial interface ISqlExecutor
     /// </remarks>
     /// <param name="sql">全列を返す SELECT 文</param>
     /// <param name="parameters">@名 パラメータへ束縛する匿名オブジェクト（null でパラメータなし）</param>
+    /// <param name="cancellationToken">キャンセルトークン</param>
     Task<IReadOnlyList<TEntity>> QueryBySqlAsync<TEntity>(
         string sql,
         object? parameters = null,
@@ -3505,6 +3512,7 @@ public partial interface ISqlExecutor
     /// </remarks>
     /// <param name="sql">射影する SELECT 文</param>
     /// <param name="parameters">@名 パラメータへ束縛する匿名オブジェクト（null でパラメータなし）</param>
+    /// <param name="cancellationToken">キャンセルトークン</param>
     Task<IReadOnlyList<TResult>> QueryProjectionBySqlAsync<TResult>(
         string sql,
         object? parameters = null,
@@ -3518,6 +3526,7 @@ public partial interface ISqlExecutor
     /// </remarks>
     /// <param name="sql">実行する DML 文</param>
     /// <param name="parameters">@名 パラメータへ束縛する匿名オブジェクト（null でパラメータなし）</param>
+    /// <param name="cancellationToken">キャンセルトークン</param>
     Task<int> ExecuteSqlAsync(
         string sql,
         object? parameters = null,
@@ -3532,6 +3541,7 @@ public partial interface ISqlExecutor
     /// </remarks>
     /// <param name="sql">単一値を返す SELECT 文（例: <c>SELECT COUNT(*) ...</c>）</param>
     /// <param name="parameters">@名 パラメータへ束縛する匿名オブジェクト（null でパラメータなし）</param>
+    /// <param name="cancellationToken">キャンセルトークン</param>
     Task<TResult?> ExecuteScalarSqlAsync<TResult>(
         string sql,
         object? parameters = null,
@@ -4000,6 +4010,7 @@ public sealed class SqlQuery<TEntity>
 /// <summary>Include の対象ナビゲーションと、その配下（ThenInclude）の木構造</summary>
 internal sealed class IncludeNode
 {
+    /// <summary>対象ナビゲーションプロパティを指定して Include ノードを生成する</summary>
     public IncludeNode(PropertyInfo property) => Property = property;
 
     /// <summary>取得対象のナビゲーションプロパティ</summary>
@@ -5089,6 +5100,8 @@ internal static class SqlExpressionTranslator
         return $"{Operand(left, parameters, RawColumnName(rightColumnSql))} {op} {Operand(right, parameters, RawColumnName(leftColumnSql))}";
     }
 
+    /// <param name="expression">オペランドの式（列参照か定数値のいずれか）</param>
+    /// <param name="parameters">値オペランドをパラメータ化する際の追加先リスト</param>
     /// <param name="counterpartColumn">値としてパラメータ化する場合に添える対面の列名（角括弧なし）。無ければ null</param>
     private static string Operand(
         Expression expression,
@@ -5407,6 +5420,8 @@ internal static class SqlExpressionTranslator
             ? constant.Value
             : Expression.Lambda(expression).Compile().DynamicInvoke();
 
+    /// <param name="value">パラメータ化する実値（null 可）</param>
+    /// <param name="parameters">生成したパラメータの追加先リスト</param>
     /// <param name="columnName">対象カラム名（角括弧なし）。列を特定できる場合のみ渡し、型明示化に使う</param>
     private static string AddParameter(
         object? value,
@@ -5672,6 +5687,9 @@ internal sealed class EntitySaveMetadata
     /// 列プロパティの [SqlColumnType] 属性から明示 <see cref="SqlParameter"/> を組み立てて追加する。
     /// 属性が無い（手書きエンティティ・未知型）場合は従来どおり AddWithValue にフォールバックする。
     /// </summary>
+    /// <param name="command">パラメータを追加する対象コマンド</param>
+    /// <param name="name">パラメータ名（@付き）</param>
+    /// <param name="property">対象列に対応するプロパティ（型付けの根拠）</param>
     /// <param name="rawValue">値オブジェクトは既に素値へ開いた後の値。null は DBNull.Value として束縛する</param>
     private static void AddColumnParameter(
         SqlCommand command,
@@ -5724,6 +5742,8 @@ internal sealed class EntitySaveMetadata
     /// クエリ WHERE 句パラメータを束縛する。列名が判明していてその列プロパティが見つかれば列型で明示構築し、
     /// なければ AddWithValue にフォールバックする。
     /// </summary>
+    /// <param name="command">パラメータを追加する対象コマンド</param>
+    /// <param name="name">パラメータ名（@付き）</param>
     /// <param name="columnName">角括弧なしのカラム名。列が特定できない場合は null</param>
     /// <param name="rawValue">値オブジェクトは既に素値へ開いた後の値。null は DBNull.Value として束縛する</param>
     public void AddQueryParameter(
@@ -5870,6 +5890,7 @@ internal sealed class EntitySaveMetadata
 internal static class CascadeDeletePlanner
 {
     /// <summary>条件に一致する rootType の行と、その子孫を削除する DELETE 文を「子→親」の実行順で返す</summary>
+    /// <param name="rootType">削除の起点となるエンティティ型</param>
     /// <param name="rootTable">角括弧付きのルートテーブル名</param>
     /// <param name="whereClause">ルートの WHERE 句（" WHERE …" または空文字）</param>
     public static IReadOnlyList<string> BuildDeleteStatements(
@@ -7292,6 +7313,8 @@ internal static class SqlExpressionTranslator
         return $"{Operand(left, parameters, RawColumnName(rightColumnSql))} {op} {Operand(right, parameters, RawColumnName(leftColumnSql))}";
     }
 
+    /// <param name="expression">オペランドの式（列参照か定数値のいずれか）</param>
+    /// <param name="parameters">値オペランドをパラメータ化する際の追加先リスト</param>
     /// <param name="counterpartColumn">値としてパラメータ化する場合に添える対面の列名（角括弧なし）。無ければ null</param>
     private static string Operand(
         Expression expression,
@@ -7611,6 +7634,8 @@ internal static class SqlExpressionTranslator
             ? constant.Value
             : Expression.Lambda(expression).Compile().DynamicInvoke();
 
+    /// <param name="value">パラメータ化する実値（null 可）</param>
+    /// <param name="parameters">生成したパラメータの追加先リスト</param>
     /// <param name="columnName">対象カラム名（角括弧なし）。列を特定できる場合のみ渡し、型明示化に使う</param>
     private static string AddParameter(
         object? value,
@@ -7988,6 +8013,9 @@ internal sealed class EntitySaveMetadata
     }
 
     /// <summary>[SqlColumnType] 属性が生成されない場合の束縛。従来どおり AddWithValue で追加する</summary>
+    /// <param name="command">パラメータを追加する対象コマンド</param>
+    /// <param name="name">パラメータ名（@付き）</param>
+    /// <param name="property">対象列に対応するプロパティ（この分岐では未使用）</param>
     /// <param name="rawValue">値オブジェクトは既に素値へ開いた後の値。null は DBNull.Value として束縛する</param>
     private static void AddColumnParameter(
         SqliteCommand command,
@@ -8000,6 +8028,8 @@ internal sealed class EntitySaveMetadata
     /// クエリ WHERE 句パラメータを束縛する。列名が判明していてその列プロパティが見つかれば列型で明示構築し、
     /// なければ AddWithValue にフォールバックする。
     /// </summary>
+    /// <param name="command">パラメータを追加する対象コマンド</param>
+    /// <param name="name">パラメータ名（@付き）</param>
     /// <param name="columnName">角括弧なしのカラム名。列が特定できない場合は null</param>
     /// <param name="rawValue">値オブジェクトは既に素値へ開いた後の値。null は DBNull.Value として束縛する</param>
     public void AddQueryParameter(
@@ -8026,6 +8056,7 @@ internal sealed class EntitySaveMetadata
 internal static class CascadeDeletePlanner
 {
     /// <summary>条件に一致する rootType の行と、その子孫を削除する DELETE 文を「子→親」の実行順で返す</summary>
+    /// <param name="rootType">削除の起点となるエンティティ型</param>
     /// <param name="rootTable">角括弧付きのルートテーブル名</param>
     /// <param name="whereClause">ルートの WHERE 句（" WHERE …" または空文字）</param>
     public static IReadOnlyList<string> BuildDeleteStatements(

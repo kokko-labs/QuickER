@@ -18,6 +18,9 @@ public sealed class CSharpCodeGenerationService
     /// <summary>生成モデルを C# ソース文字列へ描画する Scriban レンダラー</summary>
     private readonly ScribanCSharpRenderer _renderer = new();
 
+    /// <summary>生成モデルを API リファレンス Markdown へ描画する Scriban レンダラー</summary>
+    private readonly ApiReferenceDocRenderer _apiDocRenderer = new();
+
     /// <summary>
     /// ER 図定義から C# コードを生成する（単一方言。共有バケット・Repository 実装ともに <paramref name="columnTypes"/> を使う）
     /// </summary>
@@ -159,6 +162,19 @@ public sealed class CSharpCodeGenerationService
         // 各ファイルを範囲を絞って描画する。1 ファイルに複数スペック（非分割マルチ方言）が対応する場合は連結する。
         var specs = GeneratedFilePlanner.Plan(options);
         var files = RenderFiles(model, options, specs, packageGuidanceLines);
+
+        // API リファレンス Markdown（既定 OFF）。ON のとき、その図のスキーマに即した .g.md を 1 つだけ追加する。
+        // ここは検証エラーで早期 return した後の経路のため、Files が空になる場合は Markdown も出ない（自然に乗る）。
+        if (options.GenerateApiDocs)
+        {
+            files.Add(
+                new GeneratedFile
+                {
+                    FileName = ApiDocsFileName(options.OutputFileName),
+                    Content = _apiDocRenderer.Render(model, options),
+                }
+            );
+        }
 
         return new CodeGenerationResult { Files = files, Diagnostics = diagnostics };
     }
@@ -610,6 +626,20 @@ public sealed class CSharpCodeGenerationService
         return value.EndsWith(".g.cs", StringComparison.OrdinalIgnoreCase)
             ? value
             : Path.GetFileNameWithoutExtension(value) + ".g.cs";
+    }
+
+    /// <summary>
+    /// API リファレンス Markdown の出力ファイル名を、正規化済みの C# 出力ファイル名から導出する。
+    /// </summary>
+    /// <remarks>
+    /// <see cref="SanitizeFileName"/> で ".g.cs" に正規化した名前の末尾を ".g.md" に置換する
+    /// （例: <c>EcOrder.g.cs</c> → <c>EcOrder.g.md</c>）。<see cref="GeneratedFileWriter"/> は
+    /// ".g.md" の書き出しを許可する（手書きファイルの保護は維持する）。
+    /// </remarks>
+    private static string ApiDocsFileName(string outputFileName)
+    {
+        var normalized = SanitizeFileName(outputFileName);
+        return normalized[..^".g.cs".Length] + ".g.md";
     }
 
     /// <summary>エラー診断を作成する</summary>

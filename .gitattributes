@@ -25,6 +25,7 @@ src/QuickER.Runtime.EntityFrameworkCore/QuickERRuntimeEntityFrameworkCore.g.cs t
 samples/ec-order/EcOrder.json text eol=crlf
 samples/ec-order/EcOrder.sql text eol=crlf
 samples/ec-order/EcOrderSample/Generated/EcOrder.g.cs text eol=crlf
+samples/ec-order/EcOrderSample/Generated/EcOrder.g.md text eol=crlf
 
 ###############################################################################
 # Set default behavior for command prompt diff.

@@ -207,4 +207,21 @@ public sealed class CodeGenerationOptions
     /// </para>
     /// </remarks>
     public bool UseRuntimePackages { get; init; }
+
+    /// <summary>
+    /// 生成コード（.g.cs）と一緒に、その図のスキーマに即した API リファレンス Markdown（<c>.g.md</c>・日本語）を出力するかどうか（既定 false）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>true</c> のとき、<see cref="OutputFileName"/> のベース名を <c>.g.md</c> に置換した Markdown ファイルを 1 つ追加出力する
+    /// （例: <c>EcOrder.g.cs</c> → <c>EcOrder.g.md</c>）。内容は「スキーマ依存部（Entity 一覧・各エンティティのプロパティ／
+    /// ナビゲーション・Repository 契約）＋その図のエンティティ名で具体化した使い方例」で、固定ランタイム API の詳細は
+    /// <c>docs/code-generation.md</c> へのリンクで済ませる（本文へ複製しない）。
+    /// </para>
+    /// <para>
+    /// <see cref="SplitFilesByCategory"/>（カテゴリ別分割）でも Markdown は 1 ファイルのみ出力する。生成日時など非決定的な
+    /// 要素は一切含めないため、同一入力に対して常にバイト一致する。検証エラーで生成ファイルが空になる場合は Markdown も出さない。
+    /// </para>
+    /// </remarks>
+    public bool GenerateApiDocs { get; init; }
 }

@@ -31,6 +31,7 @@ quicker generate --schema diagram.json --out ./Generated --provider sqlserver --
 | `--split` | | カテゴリごとに別ファイル・別名前空間で出力する（設定ファイルを上書き） |
 | `--repository-dialects <list>` | | 自作 Repository を同時生成する方言（カンマ区切り。例 `sqlserver,sqlite`）。未指定時は `--provider` から単一導出する |
 | `--runtime-packages` | | ランタイム（固定コード）を出力せず、NuGet パッケージ `QuickER.Runtime.*` への参照で賄う |
+| `--api-docs` | | API リファレンス Markdown（`{ベース名}.g.md`）を 1 つ追加出力する（既定 OFF・設定ファイルを上書き） |
 
 ## quicker scaffold
 
@@ -44,7 +45,7 @@ quicker scaffold --connection "Server=.;Database=Shop;Integrated Security=true;T
 |---|:-:|---|
 | `--connection <string>` | ✅ | 接続文字列（形式は `--provider` の DBMS に従う） |
 
-そのほかのオプション（`--out` / `--config` / `--provider` / `--namespace` / `--split` / `--repository-dialects` / `--runtime-packages`）は `generate` と同じです。
+そのほかのオプション（`--out` / `--config` / `--provider` / `--namespace` / `--split` / `--repository-dialects` / `--runtime-packages` / `--api-docs`）は `generate` と同じです。
 
 ## 設定ファイル（quicker.json）
 
@@ -81,6 +82,7 @@ quicker scaffold --connection "Server=.;Database=Shop;Integrated Security=true;T
 | `IncludeDataAnnotations`（`true`） | `[Required]` / `[MaxLength]` 等の DataAnnotations と、DB 定義メタ属性（`[DbTableMeta]` / `[DbColumnMeta]`）を付与する |
 | `SplitFilesByCategory`（`false`） | カテゴリごとに別ファイル・別名前空間で出力する。`EntityNamespace` / `RepositoryNamespace` などで名前空間を個別指定できる |
 | `UseRuntimePackages`（`false`） | ランタイム固定コードを出力せず NuGet パッケージ参照で賄う（[生成コードの使い方](code-generation.md) 参照） |
+| `GenerateApiDocs`（`false`） | API リファレンス Markdown（`{ベース名}.g.md`）を追加出力する（CLI の `--api-docs` に対応。[生成コードの使い方](code-generation.md) 参照） |
 
 ## 実行例 — リポジトリ同梱サンプルの再生成
 
@@ -89,5 +91,9 @@ dotnet run --project src/QuickER.Cli -- generate `
   --schema samples/ec-order/EcOrder.json `
   --out samples/ec-order/EcOrderSample/Generated `
   --provider sqlite `
-  --config samples/ec-order/quicker.json
+  --config samples/ec-order/quicker.json `
+  --api-docs
 ```
+
+`--api-docs` により、生成コード `EcOrder.g.cs` と同じベース名の API リファレンス Markdown
+`EcOrder.g.md` も同梱出力されます（いずれもチェックイン済み・ドリフト検知の対象）。
