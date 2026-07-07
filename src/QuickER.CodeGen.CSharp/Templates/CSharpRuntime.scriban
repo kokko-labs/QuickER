@@ -4866,7 +4866,16 @@ public sealed class SaveConflictException : Exception
             }
             else
             {
-                property.SetValue(entity, {{ if generate_value_objects }}SqlValueObjectActivator.Wrap(value, property.PropertyType){{ else }}value{{ end }});
+{{~ if generate_value_objects ~}}
+                // 値オブジェクトは内包型へ変換して包み直す（Wrap 内で Convert.ChangeType 済み）
+                property.SetValue(entity, SqlValueObjectActivator.Wrap(value, property.PropertyType));
+{{~ else if repositories && repository_dialect != "sqlserver" ~}}
+                // 素の列は SQLite の格納型（int→long・decimal/Guid/DateTime→TEXT 等）をプロパティ型へ寄せる
+                property.SetValue(entity, CoerceScalar(value, property.PropertyType));
+{{~ else ~}}
+                // SQL Server の ADO は列に対応する厳密な CLR 型を返すため素通しで代入する
+                property.SetValue(entity, value);
+{{~ end ~}}
             }
         }
 

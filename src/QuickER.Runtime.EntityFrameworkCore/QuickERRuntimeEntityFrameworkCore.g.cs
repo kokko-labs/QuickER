@@ -130,6 +130,7 @@ public sealed class EntitySaveMetadata
             }
             else
             {
+                // 値オブジェクトは内包型へ変換して包み直す（Wrap 内で Convert.ChangeType 済み）
                 property.SetValue(entity, SqlValueObjectActivator.Wrap(value, property.PropertyType));
             }
         }
