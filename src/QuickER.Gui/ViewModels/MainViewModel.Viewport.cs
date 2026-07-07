@@ -37,12 +37,41 @@ public partial class MainViewModel
         get => _viewportContentBounds;
         set
         {
+            // ビューポートの寸法変化（ウィンドウリサイズ・ズーム・スクロールバー出没）は
+            // キャンバスの下限サイズ（CanvasMinimumSize）に影響するため後段で追従させる。
+            // オフセットだけのスクロールでは寸法は変わらず、キャンバス再計算は走らない
+            var sizeChanged =
+                value.Width != _viewportContentBounds.Width
+                || value.Height != _viewportContentBounds.Height;
+
             _viewportContentBounds = value;
 
             // スクロール連動: ミニマップのビューポート枠と自動表示の可視判定のみを軽く更新する
             OnViewportContentBoundsChanged();
+
+            if (sizeChanged)
+            {
+                RefreshCanvasSize();
+            }
         }
     }
+
+    /// <summary>キャンバスサイズの下限として用いるビューポートの論理サイズ</summary>
+    /// <remarks>
+    /// キャンバスがビューポートより大きいと、図が収まっていても不要なスクロールバーが出るため、
+    /// 下限＝ビューポート実寸（ズーム換算後の論理座標）とする。浮動小数点誤差やレイアウト丸めで
+    /// 「拡大後キャンバス寸法がビューポートを紙一重で超えて」スクロールバーが出没を繰り返さないよう、
+    /// 切り捨てでわずかに小さく寄せる（1px 未満の隙間は視認されない）。
+    /// View 未接続（ヘッドレステスト・初期化前）ではビューポート実寸が得られないため、
+    /// 従来の既定サイズ 2400×1600 へフォールバックする。
+    /// </remarks>
+    private Size CanvasMinimumSize =>
+        _viewportContentBounds.Width > 0 && _viewportContentBounds.Height > 0
+            ? new Size(
+                Math.Floor(_viewportContentBounds.Width),
+                Math.Floor(_viewportContentBounds.Height)
+            )
+            : new Size(2400, 1600);
 
     /// <summary>キャンバスのズーム倍率（1.0 = 100%）。設定時に範囲へクランプする</summary>
     /// <remarks>ScaleTransform の ScaleX/ScaleY にバインドされる。50%〜200% の範囲を保証する</remarks>

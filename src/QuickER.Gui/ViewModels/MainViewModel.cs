@@ -96,13 +96,24 @@ public partial class MainViewModel : ObservableObject
     /// <summary><see cref="IsCompactViewInDiagram"/> のバッキングフィールド（既定は簡易表示なし）</summary>
     private bool _isCompactViewInDiagram;
 
-    /// <summary>キャンバスの動的幅（最小 2400、エンティティ最右端 + 余白 400）</summary>
-    public double CanvasWidth =>
-        Math.Max(2400, Entities.Count == 0 ? 2400 : Entities.Max(e => e.X + e.Width) + 400);
+    /// <summary>エンティティ最右端・最下端の外側に確保する余白（エンティティを外側へ広げるためのドラッグ用スペース、論理px）</summary>
+    private const double CanvasContentMargin = 100;
 
-    /// <summary>キャンバスの動的高さ（最小 1600、エンティティ最下端 + 余白 400）</summary>
+    /// <summary>キャンバスの動的幅（ビューポート論理幅と「エンティティ最右端 + 余白」の大きい方）</summary>
+    /// <remarks>図がビューポートに収まる間はビューポートと同寸に保ち、不要な横スクロールバーを出さない</remarks>
+    public double CanvasWidth =>
+        Math.Max(
+            CanvasMinimumSize.Width,
+            Entities.Count == 0 ? 0 : Entities.Max(e => e.X + e.Width) + CanvasContentMargin
+        );
+
+    /// <summary>キャンバスの動的高さ（ビューポート論理高さと「エンティティ最下端 + 余白」の大きい方）</summary>
+    /// <remarks>図がビューポートに収まる間はビューポートと同寸に保ち、不要な縦スクロールバーを出さない</remarks>
     public double CanvasHeight =>
-        Math.Max(1600, Entities.Count == 0 ? 1600 : Entities.Max(e => e.Y + e.DisplayHeight) + 400);
+        Math.Max(
+            CanvasMinimumSize.Height,
+            Entities.Count == 0 ? 0 : Entities.Max(e => e.Y + e.DisplayHeight) + CanvasContentMargin
+        );
 
     /// <summary>型 ComboBox に表示する、現在方言のデータ型一覧</summary>
     public IReadOnlyList<string> AvailableDataTypes => CurrentProvider.TypeCatalog.DataTypes;
