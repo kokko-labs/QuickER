@@ -1,0 +1,68 @@
+# QuickER GUI 配布ワークフロー（手動トリガのみ）
+#
+# 運用メモ:
+# - QuickER.Gui をフレームワーク依存で publish し、zip を GitHub Releases へ添付する
+#   （利用者は .NET 10 Desktop Runtime と ASP.NET Core Runtime のインストールが必要。README に明記）
+# - バージョンは Directory.Build.props の VersionPrefix で管理する（NuGet パッケージとロックステップ）
+# - dry_run=true（既定）では publish と zip 生成までを行い、zip をワークフロー成果物として
+#   アップロードする（Release の作成・タグ付けは行わない）
+# - dry_run=false ではタグ v{Version} で GitHub Release を作成し zip を添付する
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "true の場合は publish と zip 生成のみを行い、GitHub Release の作成は行わない"
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: リポジトリを取得
+        uses: actions/checkout@v4
+
+      - name: .NET SDK をセットアップ
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: ビルド
+        run: dotnet build QuickER.slnx -c Release
+
+      - name: テスト
+        run: dotnet test QuickER.slnx -c Release --no-build --logger "console;verbosity=normal"
+
+      - name: バージョンを取得（Directory.Build.props の VersionPrefix）
+        id: version
+        run: |
+          [xml]$props = Get-Content Directory.Build.props
+          $version = ($props.Project.PropertyGroup.VersionPrefix | Where-Object { $_ }) | Select-Object -First 1
+          if (-not $version) { throw "VersionPrefix が Directory.Build.props から取得できませんでした" }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          Write-Host "Version: $version"
+
+      - name: GUI を publish（フレームワーク依存・win-x64）
+        run: dotnet publish src/QuickER.Gui/QuickER.Gui.csproj -c Release -r win-x64 --self-contained false -o ${{ runner.temp }}/gui-publish
+
+      - name: zip を作成
+        run: Compress-Archive -Path "${{ runner.temp }}/gui-publish/*" -DestinationPath "${{ runner.temp }}/QuickER-${{ steps.version.outputs.version }}-win-x64.zip"
+
+      - name: zip をワークフロー成果物としてアップロード（dry_run 検証用）
+        uses: actions/upload-artifact@v4
+        with:
+          name: QuickER-${{ steps.version.outputs.version }}-win-x64
+          path: ${{ runner.temp }}/QuickER-${{ steps.version.outputs.version }}-win-x64.zip
+
+      - name: GitHub Release を作成して zip を添付（dry_run=false のときのみ）
+        if: ${{ inputs.dry_run == false }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "v${{ steps.version.outputs.version }}" "${{ runner.temp }}/QuickER-${{ steps.version.outputs.version }}-win-x64.zip" --title "QuickER v${{ steps.version.outputs.version }}" --generate-notes
