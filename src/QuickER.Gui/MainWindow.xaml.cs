@@ -80,15 +80,11 @@ public partial class MainWindow : Window
         _lastZoomLevel = _viewModel.ZoomLevel;
         CanvasViewportBehavior.SuppressCenterZoomCorrection = false;
 
-        // 倍率適用後にスクロール範囲が確定するため、もう 1 拍置いてからオフセットを反映する
-        Dispatcher.BeginInvoke(
-            DispatcherPriority.Loaded,
-            new Action(() =>
-            {
-                DiagramScrollViewer.ScrollToHorizontalOffset(fit.Offset.X);
-                DiagramScrollViewer.ScrollToVerticalOffset(fit.Offset.Y);
-            })
-        );
+        // 倍率とオフセットは同一フレーム内で確定させる（遅延反映は中間フレームのちらつきを生む）。
+        // UpdateLayout でスクロール範囲を即時確定してから続けてオフセットを適用する
+        DiagramScrollViewer.UpdateLayout();
+        DiagramScrollViewer.ScrollToHorizontalOffset(fit.Offset.X);
+        DiagramScrollViewer.ScrollToVerticalOffset(fit.Offset.Y);
     }
 
     /// <summary>全エンティティを包含するバウンディングボックス（論理座標）を求める。空図なら空矩形を返す</summary>
@@ -166,14 +162,11 @@ public partial class MainWindow : Window
             new Vector(DiagramScrollViewer.HorizontalOffset, DiagramScrollViewer.VerticalOffset)
         );
 
-        Dispatcher.BeginInvoke(
-            DispatcherPriority.Loaded,
-            new Action(() =>
-            {
-                DiagramScrollViewer.ScrollToHorizontalOffset(newOffset.X);
-                DiagramScrollViewer.ScrollToVerticalOffset(newOffset.Y);
-            })
-        );
+        // 倍率とオフセットは同一フレーム内で確定させる（遅延反映は中間フレームのちらつきを生む）。
+        // UpdateLayout でスクロール範囲を即時確定してから続けてオフセットを適用する
+        DiagramScrollViewer.UpdateLayout();
+        DiagramScrollViewer.ScrollToHorizontalOffset(newOffset.X);
+        DiagramScrollViewer.ScrollToVerticalOffset(newOffset.Y);
     }
 
     /// <summary>スクロール・ズーム・リサイズのたびに、表示中のコンテンツ領域（論理座標）を VM へ知らせる</summary>

@@ -229,15 +229,12 @@ public static class CanvasViewportBehavior
         vm.ZoomLevel = newZoom;
         SuppressCenterZoomCorrection = false;
 
-        // LayoutTransform 適用後にスクロール範囲が確定するため、1 拍置いてからオフセットを反映する
-        sv.Dispatcher.BeginInvoke(
-            System.Windows.Threading.DispatcherPriority.Loaded,
-            new Action(() =>
-            {
-                sv.ScrollToHorizontalOffset(newOffset.X);
-                sv.ScrollToVerticalOffset(newOffset.Y);
-            })
-        );
+        // 倍率とオフセットは同一フレーム内で確定させる。遅延（BeginInvoke）で反映すると
+        // 「新倍率＋旧オフセット」の中間フレームが 1 枚描画されて画面がちらつくため、
+        // UpdateLayout でスクロール範囲を即時確定してから続けてオフセットを適用する
+        sv.UpdateLayout();
+        sv.ScrollToHorizontalOffset(newOffset.X);
+        sv.ScrollToVerticalOffset(newOffset.Y);
     }
 
     // ---------- パン ----------
