@@ -35,14 +35,15 @@ QuickER.SqlServer / PostgreSql / MySql / Oracle    方言プロバイダ（4実�
 QuickER.Gui (WPF) / QuickER.Cli                    合成ルート（全プロジェクトを参照）
 
 QuickER.Document → Model    保存単位 DiagramDocument = schema(意味) + layout(視覚) の1ファイル
-QuickER.AI       → Model    AIチャットエンジン共通基盤 AI/MCP/ASP.NET Core（WPF非依存。VM操作は IErDiagramToolHost 経由でアプリ側）
+QuickER.AI       → Model, Settings    AIチャットエンジン共通基盤 AI/MCP/ASP.NET Core（WPF非依存。VM操作は IErDiagramToolHost 経由でアプリ側）
+QuickER.Settings     設定 JSON の汎用永続化ストア JsonSettingsStore<T>（依存ゼロ・net10.0。AI / CodeGen.UI が参照）
 
 機能プロジェクト（WPF。Gui を参照しない＝Gui が参照する。MainViewModel 依存のアダプタとランチャーは Gui 側に残る）:
 QuickER.Gui.Abstractions  アプリ汎用 UI サービス抽象（IDialogService / IFileDialogService。実装は Gui / AI.UI 側）
 QuickER.AI.UI      → AI, Gui.Abstractions    AI 共有 UI 部品（接続パネル・添付・ApiKeyStore・ダイアログサービス実装）
 QuickER.AI.Chat    → AI, AI.UI, Gui.Abstractions    チャット機能（ErDesign プロファイル・ER 設計ツール定義・チャットダイアログ）
 QuickER.AI.Mock    → AI, AI.UI, Gui.Abstractions, CodeGen.CSharp, Provider    モック生成機能（MockDesign 一式・WPF モック生成）
-QuickER.CodeGen.UI → CodeGen.CSharp, Gui.Abstractions, Provider, SqlServer, Sqlite    C# コード生成ダイアログ
+QuickER.CodeGen.UI → CodeGen.CSharp, Gui.Abstractions, Provider, Settings, SqlServer, Sqlite    C# コード生成ダイアログ
 ```
 
 押さえるべき設計判断：
