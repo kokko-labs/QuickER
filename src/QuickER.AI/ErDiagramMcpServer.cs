@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -66,7 +67,7 @@ public sealed class ErDiagramMcpServer : IAsyncDisposable
         app.Use(
             async (context, next) =>
             {
-                if (context.Request.Headers.Authorization != $"Bearer {token}")
+                if (!IsAuthorized(context.Request.Headers.Authorization, token))
                 {
                     context.Response.StatusCode = StatusCodes.Status401Unauthorized;
                     return;
@@ -83,6 +84,18 @@ public sealed class ErDiagramMcpServer : IAsyncDisposable
         _app = app;
         AuthToken = token;
         Url = app.Urls.FirstOrDefault();
+    }
+
+    /// <summary>Authorization ヘッダー値が期待する Bearer トークンと一致するかを判定する</summary>
+    /// <remarks>
+    /// 通常の文字列比較は不一致位置で早期終了するため、応答時間の差からトークンを推測される余地を残す。
+    /// ループバック限定でも他プロセスからの試行はあり得るので固定時間比較を用いる
+    /// </remarks>
+    internal static bool IsAuthorized(string? authorizationHeader, string expectedToken)
+    {
+        var expected = Encoding.UTF8.GetBytes($"Bearer {expectedToken}");
+        var actual = Encoding.UTF8.GetBytes(authorizationHeader ?? string.Empty);
+        return CryptographicOperations.FixedTimeEquals(actual, expected);
     }
 
     /// <summary>全ツール定義を MCP ツールへ変換する</summary>

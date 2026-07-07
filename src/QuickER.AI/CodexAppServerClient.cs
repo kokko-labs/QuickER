@@ -1310,7 +1310,7 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
     /// codex コマンドの実体が .cmd / .bat（npm のシム等）の場合、<c>UseShellExecute = false</c> では直接起動できないため
     /// cmd.exe /c でラップして stdin/stdout のリダイレクトを機能させる
     /// </remarks>
-    private static (string fileName, string arguments) ResolveStartInfo(
+    internal static (string fileName, string arguments) ResolveStartInfo(
         string executablePath,
         string appServerArguments
     )
@@ -1348,8 +1348,29 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
 
         if (extension == ".cmd" || extension == ".bat")
         {
-            // バッチファイルは cmd.exe /c 経由で起動しないとリダイレクトが機能しない
-            return ("cmd.exe", $"/c \"{resolvedPath}\" {appServerArguments}");
+            // 引用符を含むパス（正規の Windows パスには現れない）は引用の切断＝コマンド挿入につながるため起動前に拒否する
+            if (resolvedPath.Contains('"'))
+            {
+                throw new InvalidOperationException(
+                    $"codex コマンドのパスに引用符が含まれるため起動できません: {resolvedPath}"
+                );
+            }
+
+            // 引数側は cmd のメタ文字（引用符・連結・リダイレクト・エスケープ・環境変数展開）が
+            // 引用の外で解釈されコマンド挿入につながるため、含まれていたら起動前に拒否する
+            var metaIndex = appServerArguments.IndexOfAny(['"', '&', '|', '<', '>', '^', '%']);
+
+            if (metaIndex >= 0)
+            {
+                throw new InvalidOperationException(
+                    $"codex コマンドの引数に cmd で解釈される文字 '{appServerArguments[metaIndex]}' が含まれるため起動できません: {appServerArguments}"
+                );
+            }
+
+            // バッチファイルは cmd.exe /c 経由で起動しないとリダイレクトが機能しない。
+            // /d は AutoRun レジストリコマンドの実行を抑止し、/s は外側の引用符で囲んだ全体を
+            // 1 つのコマンド行として扱わせて引用符の解釈を決定的にする
+            return ("cmd.exe", $"/d /s /c \"\"{resolvedPath}\" {appServerArguments}\"");
         }
 
         return (executablePath, appServerArguments);
