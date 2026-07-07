@@ -1,0 +1,89 @@
+# バグ報告フォーム。環境情報と再現手順を必須化し、調査不能な報告を構造的に防ぐ
+name: バグ報告（Bug report）
+description: 不具合の報告はこちらから
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        報告ありがとうございます。環境情報と再現手順が調査の前提になるため、各項目の記入をお願いします。
+        （English is welcome — feel free to write in English.）
+
+        **注意**: 本文・添付に DB 接続文字列や API キーなどの秘密情報を含めないでください。
+  - type: input
+    id: version
+    attributes:
+      label: QuickER のバージョン
+      description: GUI zip / NuGet パッケージの版番号。ソースからビルドした場合はコミット ID
+      placeholder: "例: 0.1.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: distribution
+    attributes:
+      label: 入手方法
+      options:
+        - GitHub Releases の zip（GUI）
+        - dotnet tool（CLI）
+        - NuGet ランタイムパッケージ
+        - ソースからビルド
+    validations:
+      required: true
+  - type: dropdown
+    id: component
+    attributes:
+      label: 対象
+      options:
+        - GUI（ER 図エディタ）
+        - コード生成（生成された C# / ランタイム）
+        - DDL 生成・スキーマ取込・差分同期
+        - CLI（quicker generate / scaffold）
+        - AI チャット / モック生成
+        - その他・不明
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS
+      placeholder: "例: Windows 11 Pro 24H2"
+    validations:
+      required: true
+  - type: input
+    id: dotnet-runtime
+    attributes:
+      label: .NET Runtime のバージョン
+      description: "`dotnet --list-runtimes` の出力から該当行（GUI の場合は Microsoft.WindowsDesktop.App）"
+      placeholder: "例: Microsoft.WindowsDesktop.App 10.0.0"
+    validations:
+      required: true
+  - type: textarea
+    id: repro-steps
+    attributes:
+      label: 再現手順
+      placeholder: |
+        1. ○○ の図を開く
+        2. △△ を実行する
+        3. …
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期待した動作
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: 実際の動作
+      description: エラーメッセージがあれば全文を貼ってください
+    validations:
+      required: true
+  - type: textarea
+    id: additional
+    attributes:
+      label: 追加情報（任意）
+      description: 再現に使える図の JSON・生成コード・ログ・スクリーンショットなど（秘密情報は除去してください）
+    validations:
+      required: false

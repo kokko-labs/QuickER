@@ -153,6 +153,12 @@ dotnet test QuickER.slnx         # 全テスト（Docker があれば実 DB 統�
 - [AI チャットの設定](docs/ai-chat.md)
 - [動くサンプル（EC 注文ドメイン）](samples/ec-order/README.md)
 
+## サポート・貢献
+
+個人開発のため、サポートは**ベストエフォート**（対応期限の約束なし）・対象は**最新版のみ**です。バグ報告・機能要望は Issue へどうぞ（日本語・英語どちらでも歓迎）。Pull Request は事前に Issue での相談をお願いします — 詳細は [CONTRIBUTING.md](CONTRIBUTING.md)、脆弱性の報告は [SECURITY.md](SECURITY.md) を参照してください。
+
+変更履歴は [CHANGELOG.md](CHANGELOG.md) にあります。
+
 ## ライセンス
 
 [MIT License](LICENSE)
