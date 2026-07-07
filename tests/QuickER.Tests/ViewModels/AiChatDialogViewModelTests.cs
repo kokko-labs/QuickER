@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.IO;
 using FluentAssertions;
 using QuickER.AI;
@@ -62,7 +63,7 @@ public class AiChatDialogViewModelTests
             );
 
             // 保存が無い初回は API キータブが既定
-            vm.InitialBackend.Should().Be(ErChatBackendKind.ApiKey);
+            vm.Connection.InitialBackend.Should().Be(ErChatBackendKind.ApiKey);
 
             vm.TryChangeBackend(ErChatBackendKind.ClaudeCode).Should().BeTrue();
             vm.SaveSettings();
@@ -75,7 +76,7 @@ public class AiChatDialogViewModelTests
                 uiSettingsStore: uiStore
             );
 
-            restored.InitialBackend.Should().Be(ErChatBackendKind.ClaudeCode);
+            restored.Connection.InitialBackend.Should().Be(ErChatBackendKind.ClaudeCode);
         }
         finally
         {
@@ -144,9 +145,9 @@ public class AiChatDialogViewModelTests
 
         try
         {
-            vm.SelectedBackend.Should().Be(ErChatBackendKind.ApiKey);
-            vm.IsApiKeyBackend.Should().BeTrue();
-            vm.IsCodexBackend.Should().BeFalse();
+            vm.Connection.SelectedBackend.Should().Be(ErChatBackendKind.ApiKey);
+            vm.Connection.IsApiKeyBackend.Should().BeTrue();
+            vm.Connection.IsCodexBackend.Should().BeFalse();
         }
         finally
         {
@@ -162,16 +163,16 @@ public class AiChatDialogViewModelTests
 
         try
         {
-            vm.ApiProvider = AiProvider.OpenAI;
-            vm.ApiKey = string.Empty;
+            vm.Connection.ApiProvider = AiProvider.OpenAI;
+            vm.Connection.ApiKey = string.Empty;
             vm.CanStartConversation.Should().BeFalse();
 
-            vm.ApiKey = "sk-test";
+            vm.Connection.ApiKey = "sk-test";
             vm.CanStartConversation.Should().BeTrue();
         }
         finally
         {
-            vm.SaveApiKey = false;
+            vm.Connection.SaveApiKey = false;
             ApiKeyStore.Save("OpenAiApiKey", string.Empty);
             Cleanup(folder);
         }
@@ -185,10 +186,10 @@ public class AiChatDialogViewModelTests
 
         try
         {
-            vm.ApiProvider = AiProvider.Ollama;
+            vm.Connection.ApiProvider = AiProvider.Ollama;
             vm.CanStartConversation.Should().BeTrue();
-            vm.ShowEndpoint.Should().BeTrue();
-            vm.ShowApiKey.Should().BeFalse();
+            vm.Connection.ShowEndpoint.Should().BeTrue();
+            vm.Connection.ShowApiKey.Should().BeFalse();
         }
         finally
         {
@@ -204,7 +205,7 @@ public class AiChatDialogViewModelTests
 
         try
         {
-            vm.ApiProvider = AiProvider.Ollama;
+            vm.Connection.ApiProvider = AiProvider.Ollama;
             vm.UserInput = "本のテーブルを作って";
 
             // 会話未開始のうちは送信不可
@@ -224,9 +225,9 @@ public class AiChatDialogViewModelTests
 
         try
         {
-            vm.SelectedBackend = ErChatBackendKind.Codex;
-            vm.IsCodexBackend.Should().BeTrue();
-            vm.IsApiKeyBackend.Should().BeFalse();
+            vm.Connection.SelectedBackend = ErChatBackendKind.Codex;
+            vm.Connection.IsCodexBackend.Should().BeTrue();
+            vm.Connection.IsApiKeyBackend.Should().BeFalse();
         }
         finally
         {
@@ -299,7 +300,7 @@ public class AiChatDialogViewModelTests
             var result = vm.TryChangeBackend(ErChatBackendKind.Codex);
 
             result.Should().BeTrue();
-            vm.SelectedBackend.Should().Be(ErChatBackendKind.Codex);
+            vm.Connection.SelectedBackend.Should().Be(ErChatBackendKind.Codex);
             dialogs.ConfirmMessages.Should().BeEmpty();
         }
         finally
@@ -324,7 +325,7 @@ public class AiChatDialogViewModelTests
             var result = vm.TryChangeBackend(ErChatBackendKind.Codex);
 
             result.Should().BeTrue();
-            vm.SelectedBackend.Should().Be(ErChatBackendKind.Codex);
+            vm.Connection.SelectedBackend.Should().Be(ErChatBackendKind.Codex);
             vm.HasConversation.Should().BeFalse();
             dialogs.ConfirmMessages.Should().ContainSingle();
         }
@@ -350,12 +351,47 @@ public class AiChatDialogViewModelTests
             var result = vm.TryChangeBackend(ErChatBackendKind.Codex);
 
             result.Should().BeFalse();
-            vm.SelectedBackend.Should().Be(ErChatBackendKind.ApiKey);
+            vm.Connection.SelectedBackend.Should().Be(ErChatBackendKind.ApiKey);
             vm.HasConversation.Should().BeTrue();
             dialogs.ConfirmMessages.Should().ContainSingle();
         }
         finally
         {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>
+    /// 子 <see cref="ChatConnectionSettingsViewModel.ApiKey"/> の変更で、親の
+    /// <see cref="AiChatDialogViewModel.CanStartConversation"/> の PropertyChanged が発火することを検証する
+    /// （Connection.PropertyChanged → 親ハンドラ → NotifyReadinessChanged の連鎖の取りこぼしを恒久検知する）。
+    /// </summary>
+    [Fact(DisplayName = "Connection.ApiKey 変更で親の CanStartConversation が通知される")]
+    public void ConnectionApiKeyChange_RaisesCanStartConversationOnParent()
+    {
+        var (vm, _, folder) = CreateVm();
+
+        try
+        {
+            vm.Connection.ApiProvider = AiProvider.OpenAI;
+
+            var raised = new List<string>();
+            vm.PropertyChanged += (_, e) =>
+            {
+                if (e.PropertyName is not null)
+                {
+                    raised.Add(e.PropertyName);
+                }
+            };
+
+            vm.Connection.ApiKey = "sk-test";
+
+            raised.Should().Contain(nameof(AiChatDialogViewModel.CanStartConversation));
+        }
+        finally
+        {
+            vm.Connection.SaveApiKey = false;
+            ApiKeyStore.Save("OpenAiApiKey", string.Empty);
             Cleanup(folder);
         }
     }
@@ -379,14 +415,14 @@ public class AiChatDialogViewModelTests
 
         try
         {
-            vm.ApiProvider = AiProvider.OpenAI;
+            vm.Connection.ApiProvider = AiProvider.OpenAI;
             vm.Attachments.Support.Should().Be(AttachmentSupport.Images | AttachmentSupport.Text);
 
-            vm.ApiProvider = AiProvider.Claude;
+            vm.Connection.ApiProvider = AiProvider.Claude;
             vm.Attachments.Support.Should()
                 .Be(AttachmentSupport.Images | AttachmentSupport.Pdf | AttachmentSupport.Text);
 
-            vm.ApiProvider = AiProvider.Ollama;
+            vm.Connection.ApiProvider = AiProvider.Ollama;
             vm.Attachments.Support.Should().Be(AttachmentSupport.None);
         }
         finally
@@ -403,7 +439,7 @@ public class AiChatDialogViewModelTests
 
         try
         {
-            vm.SelectedBackend = ErChatBackendKind.ClaudeCode;
+            vm.Connection.SelectedBackend = ErChatBackendKind.ClaudeCode;
             vm.Attachments.Support.Should()
                 .Be(
                     AttachmentSupport.Images
@@ -426,11 +462,11 @@ public class AiChatDialogViewModelTests
 
         try
         {
-            vm.ApiProvider = AiProvider.Claude;
+            vm.Connection.ApiProvider = AiProvider.Claude;
             vm.Attachments.AddClipboardImage(PngBytes(), DateTime.Now);
             vm.Attachments.Items.Should().HaveCount(1);
 
-            vm.ApiProvider = AiProvider.Ollama;
+            vm.Connection.ApiProvider = AiProvider.Ollama;
 
             vm.Attachments.Items.Should().BeEmpty();
         }

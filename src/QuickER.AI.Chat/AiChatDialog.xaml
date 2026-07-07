@@ -369,22 +369,22 @@
               Grid.Column="1"
               Margin="0,0,16,0"
               Padding="6,4"
-              ItemsSource="{Binding ApiProviders}"
-              SelectedItem="{Binding ApiProvider}"
+              ItemsSource="{Binding Connection.ApiProviders}"
+              SelectedItem="{Binding Connection.ApiProvider}"
             />
             <TextBlock Grid.Column="2" Style="{StaticResource FieldLabel}" Text="モデル名" />
             <ComboBox
               Grid.Column="3"
               Padding="6,4"
               IsEditable="True"
-              Text="{Binding ApiModel, UpdateSourceTrigger=PropertyChanged}"
-              ItemsSource="{Binding ApiModelCandidates}"
+              Text="{Binding Connection.ApiModel, UpdateSourceTrigger=PropertyChanged}"
+              ItemsSource="{Binding Connection.ApiModelCandidates}"
             />
           </Grid>
 
           <Grid
             Margin="0,12,0,0"
-            Visibility="{Binding ShowApiKey, Converter={StaticResource BoolToVisibilityConverter}}"
+            Visibility="{Binding Connection.ShowApiKey, Converter={StaticResource BoolToVisibilityConverter}}"
           >
             <Grid.ColumnDefinitions>
               <ColumnDefinition Width="Auto" />
@@ -398,19 +398,19 @@
               Padding="4,5"
               Margin="0,0,8,0"
               ToolTip="API キー（OpenAI: sk-... / Claude: sk-ant-...）"
-              ui:PasswordBoxBehavior.BoundPassword="{Binding ApiKey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+              ui:PasswordBoxBehavior.BoundPassword="{Binding Connection.ApiKey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
             />
             <CheckBox
               Grid.Column="2"
               VerticalAlignment="Center"
               Content="保存"
-              IsChecked="{Binding SaveApiKey}"
+              IsChecked="{Binding Connection.SaveApiKey}"
             />
           </Grid>
 
           <Grid
             Margin="0,12,0,0"
-            Visibility="{Binding ShowEndpoint, Converter={StaticResource BoolToVisibilityConverter}}"
+            Visibility="{Binding Connection.ShowEndpoint, Converter={StaticResource BoolToVisibilityConverter}}"
           >
             <Grid.ColumnDefinitions>
               <ColumnDefinition Width="Auto" />
@@ -420,7 +420,7 @@
             <TextBox
               Grid.Column="1"
               Padding="6,4"
-              Text="{Binding EndpointOverride, UpdateSourceTrigger=PropertyChanged}"
+              Text="{Binding Connection.EndpointOverride, UpdateSourceTrigger=PropertyChanged}"
               ToolTip="OpenAI 互換エンドポイント（Ollama 等）"
             />
           </Grid>
@@ -446,16 +446,16 @@
               Margin="0,0,16,0"
               Padding="6,4"
               IsEditable="True"
-              Text="{Binding CodexModelProvider, UpdateSourceTrigger=PropertyChanged}"
-              ItemsSource="{Binding CodexModelProviderCandidates}"
+              Text="{Binding Connection.CodexModelProvider, UpdateSourceTrigger=PropertyChanged}"
+              ItemsSource="{Binding Connection.CodexModelProviderCandidates}"
             />
             <TextBlock Grid.Column="2" Style="{StaticResource FieldLabel}" Text="モデル名" />
             <ComboBox
               Grid.Column="3"
               Padding="6,4"
               IsEditable="True"
-              Text="{Binding CodexModel, UpdateSourceTrigger=PropertyChanged}"
-              ItemsSource="{Binding CodexModelCandidates}"
+              Text="{Binding Connection.CodexModel, UpdateSourceTrigger=PropertyChanged}"
+              ItemsSource="{Binding Connection.CodexModelCandidates}"
             />
           </Grid>
 
@@ -512,15 +512,15 @@
               Grid.Column="1"
               Padding="6,4"
               IsEditable="True"
-              Text="{Binding ClaudeCodeModel, UpdateSourceTrigger=PropertyChanged}"
-              ItemsSource="{Binding ClaudeCodeModelCandidates}"
+              Text="{Binding Connection.ClaudeCodeModel, UpdateSourceTrigger=PropertyChanged}"
+              ItemsSource="{Binding Connection.ClaudeCodeModelCandidates}"
             />
           </Grid>
 
           <ui:ConnectionStatusPanel
             Margin="0,12,0,0"
-            StatusLevel="{Binding ClaudeCodeStatusLevel}"
-            SummaryText="{Binding ClaudeCodeStatusSummary}"
+            StatusLevel="{Binding Connection.ClaudeCodeStatusLevel}"
+            SummaryText="{Binding Connection.ClaudeCodeStatusSummary}"
             RefreshCommand="{Binding ClaudeCodeRefreshCommand}"
           >
             <ui:ConnectionStatusPanel.Body>
@@ -528,7 +528,7 @@
                 Margin="0,10,0,0"
                 Foreground="{StaticResource MutedText}"
                 TextWrapping="Wrap"
-                Text="{Binding ClaudeCodeGuidance}"
+                Text="{Binding Connection.ClaudeCodeGuidance}"
               />
             </ui:ConnectionStatusPanel.Body>
           </ui:ConnectionStatusPanel>

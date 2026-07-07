@@ -41,7 +41,7 @@ public partial class AiChatDialog : Window
     /// </summary>
     private void ApplyInitialBackendTab()
     {
-        var index = ViewModel.InitialBackend switch
+        var index = ViewModel.Connection.InitialBackend switch
         {
             ErChatBackendKind.Codex => 1,
             ErChatBackendKind.ClaudeCode => 2,
