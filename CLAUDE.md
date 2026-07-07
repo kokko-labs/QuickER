@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## プロジェクト概要
 
-QuickER は WPF 製の ER 図デザイナ。DB スキーマのインポート／DDL 生成（SQL Server / PostgreSQL / MySQL / Oracle の4方言）、Scriban テンプレートによる C# コード生成、AI チャットによる図の操作（MCP サーバ内蔵）を持つ。コメント・コミットメッセージは日本語。
+QuickER は WPF 製の ER 図デザイナ。DB スキーマのインポート／DDL 生成（SQL Server / PostgreSQL / MySQL / Oracle / SQLite の5方言）、Scriban テンプレートによる C# コード生成、AI チャットによる図の操作（MCP サーバ内蔵）を持つ。コメント・コミットメッセージは日本語。
 
 ## コマンド
 
@@ -16,7 +16,7 @@ csharpier format .                                       # 整形（グローバ
 ```
 
 - テストは net10.0-windows / WPF 依存のため **Windows でのみ実行可能**（CI も windows-latest）
-- `tests/QuickER.Tests/Integration/` は Testcontainers による実 DB テスト。**Docker 不在時は自動スキップ**される（フィクスチャが検出）。この開発機では Docker 稼働＝全件実行・スキップ 0 が正常値。CI では Linux コンテナが使えないため常にスキップされる
+- `tests/QuickER.Tests/Integration/` は実 DB テスト。SQL Server / PostgreSQL / MySQL / Oracle は Testcontainers の実コンテナを使い、**Docker 不在時は自動スキップ**される（フィクスチャが検出）。この開発機では Docker 稼働＝全件実行・スキップ 0 が正常値。CI では Linux コンテナが使えないため常にスキップされる。SQLite 系は実ファイル DB（SqliteTempDatabase）を使うため **Docker 不要＝CI でも常時実行**される
 - 生成コードの Roslyn コンパイル検証（GeneratedCodeCompilationTests）は Docker 不要で常時実行される
 
 ## アーキテクチャ
@@ -30,7 +30,7 @@ QuickER.CodeGen.CSharp    DB非依存のC#コード生成エンジン（Scriban�
   ▲
 QuickER.Provider     DB抽象化の共通基盤（DdlGeneratorBase、インポータ共有部品）
   ▲
-QuickER.SqlServer / PostgreSql / MySql / Oracle    方言プロバイダ（4実装で対称構造）
+QuickER.SqlServer / PostgreSql / MySql / Oracle / Sqlite    方言プロバイダ（5実装で対称構造）
   ▲
 QuickER.Gui (WPF) / QuickER.Cli                    合成ルート（全プロジェクトを参照）
 
@@ -50,7 +50,7 @@ QuickER.CodeGen.UI → CodeGen.CSharp, Gui.Abstractions, Provider, Settings, Sql
 
 - **意味と視覚の分離**: `Entity`（Model）は座標・色を持たない。視覚状態は `EntityViewModel` と `EntityLayout`（Document）が保持。エクスポータ・生成器は意味モデル `ErDiagram` のみを消費する
 - **CodeGen.CSharp の DB 非依存**: 型解決（DB型→C#型）はプロバイダ側の責務。CodeGen.CSharp は解決済み `CSharpTypeInfo` の辞書を入力に受け取る
-- **プロバイダの対称性**: 4方言は同じ構造（SchemaImporter / DdlGeneratorBase 派生 / 型マップ / Testcontainers 統合テスト）。方言 SQL の説明コメントは SQL Server 版と同水準に揃える。スキーマインポータの基底クラス化は**意図的に見送り**（方言差分が大きい）。共有部品は ForeignKeyRelationshipBuilder / UniqueColumnSetBuilder / SchemaTableEntry
+- **プロバイダの対称性**: 5方言は同じ構造（SchemaImporter / DdlGeneratorBase 派生 / 型マップ / 実 DB 統合テスト。統合テストは SQL Server / PostgreSQL / MySQL / Oracle が Testcontainers、SQLite は実ファイル DB）。方言 SQL の説明コメントは SQL Server 版と同水準に揃える。スキーマインポータの基底クラス化は**意図的に見送り**（方言差分が大きい）。共有部品は ForeignKeyRelationshipBuilder / UniqueColumnSetBuilder / SchemaTableEntry
 - **生成コードの汎用性**: 生成される C# は CommunityToolkit 等の UI フレームワークに依存させない（WPF 以外でも使える設計）。Repository 生成は単一キー・アプリ側採番前提（複合キー・DB自動採番は対象外）
 - **EF Core モード（GenerateEfCore）**: 既存 Entity をそのまま EF に乗せる方言非依存の QuickErDbContext＋EF 版 Repository を生成し、DI 登録（AddGeneratedRepositories ⇔ AddGeneratedEfCoreRepositories）の差し替えだけで自作 SQL Server 実装と交換できる。GenerateEfCore=false のとき生成物に EF への依存は一切出ない（using 含む）。スキーマ作成は従来どおり DDL 生成の責務で、EF は既存スキーマへの接続専用（Migrations / HasColumnType は範囲外）
 - **DB 定義メタ属性（`[DbColumnMeta]` / `[DbTableMeta]`）**: 生成 Entity を「DB 定義の自己記述ドキュメント」にする定義用メタ（将来の C#→ErDiagram リバースの布石）。列に方言中立の型トークン（`CanonicalTypeToken`。例 `string(50)` / `decimal(10,2)` / `int32`・小文字・-1=max）と説明、テーブルに説明を刻む。付与は `IncludeDataAnnotations` ON かつ Entity 生成時のみで**対象 DB・Repository/EF 設定に依らない**。トークンは図の方言 `ITypeCatalog.TryParse` → `CanonicalTypeToken.Format` を `DiagramCodeGenerator` の後処理（`CanonicalTypeTokenAttacher`）で主辞書へ付加する（マッパ実装は無変更・解析不能な自由記述型はトークン null＝属性省略）。実行時型付けの `[SqlColumnType]`（SQL Server 専用・Size ガード）とは**責務分離**で無関係。canonical 由来のため可搬図では方言に依らず同一トークン（PortableFixtureDialectIndependenceTests が保証。**可搬フィクスチャの文字列は Unicode で統一すること**＝Ansi/Unicode 差でトークンが割れるため。lessons.md 参照）
