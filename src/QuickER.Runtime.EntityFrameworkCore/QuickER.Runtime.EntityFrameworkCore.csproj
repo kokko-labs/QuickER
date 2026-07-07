@@ -14,7 +14,12 @@
     <!-- TODO: 公開時に実リポジトリ URL へ差し替える -->
     <RepositoryUrl>https://github.com/QuickER/QuickER</RepositoryUrl>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="README.md" />
+  </ItemGroup>
 
   <ItemGroup>
     <!-- EF 版 Repository 基底・翻訳プラグインは Relational 層の型（RelationalTypeMapping / ISqlExpressionFactory 等）を使う。

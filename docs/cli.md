@@ -97,3 +97,7 @@ dotnet run --project src/QuickER.Cli -- generate `
 
 `--api-docs` により、生成コード `EcOrder.g.cs` と同じベース名の API リファレンス Markdown
 `EcOrder.g.md` も同梱出力されます（いずれもチェックイン済み・ドリフト検知の対象）。
+
+## ライセンス注記
+
+CLI（`QuickER.Cli`）とコード生成エンジンには [PolyForm Noncommercial 1.0.0](../LICENSE-NC.md) が適用されます。**現在は商用利用を含め全員無料**です。将来の提供方針（商用利用のみ有償化の可能性・個人/非商用は永続無料・基本生成は永続無料・有償化時は事前告知と移行期間）は [README の「ライセンス」節](../README.md#ライセンス)を参照してください。**生成されたコードはあなたの成果物**であり、ライセンスによる制限はありません。

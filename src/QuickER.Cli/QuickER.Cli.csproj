@@ -13,8 +13,15 @@
     <Description>QuickER の CLI（dotnet tool）。ER 図 JSON からの C# コード生成（generate）と、データベース直結のスキャフォールド（scaffold）を提供する。</Description>
     <!-- TODO: 公開時に実リポジトリ URL へ差し替える -->
     <RepositoryUrl>https://github.com/QuickER/QuickER</RepositoryUrl>
-    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <!-- PolyForm Noncommercial は OSI/FSF 承認外のため license expression が使えず、ライセンスファイル同梱方式にする -->
+    <PackageLicenseFile>LICENSE-NC.md</PackageLicenseFile>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\..\LICENSE-NC.md" Pack="true" PackagePath="LICENSE-NC.md" Visible="false" />
+    <None Include="README.md" Pack="true" PackagePath="README.md" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="System.CommandLine" Version="2.0.9" />

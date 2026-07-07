@@ -14,5 +14,10 @@
     <!-- TODO: 公開時に実リポジトリ URL へ差し替える -->
     <RepositoryUrl>https://github.com/QuickER/QuickER</RepositoryUrl>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="README.md" />
+  </ItemGroup>
 </Project>

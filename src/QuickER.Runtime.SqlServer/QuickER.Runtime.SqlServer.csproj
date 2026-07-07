@@ -14,7 +14,12 @@
     <!-- TODO: 公開時に実リポジトリ URL へ差し替える -->
     <RepositoryUrl>https://github.com/QuickER/QuickER</RepositoryUrl>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="README.md" />
+  </ItemGroup>
 
   <ItemGroup>
     <!-- DI 登録拡張（AddGenerated*Repositories）はスキーマ依存物として生成側に出力されるため、
