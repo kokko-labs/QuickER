@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using QuickER.Resources;
 using QuickER.ViewModels;
 
 namespace QuickER.UndoRedo;
@@ -29,7 +30,7 @@ public class AddColumnCommand : IUndoableCommand
     }
 
     /// <inheritdoc />
-    public string Description => $"カラム追加: {_column.Name}";
+    public string Description => string.Format(Strings.Undo_AddColumn, _column.Name);
 
     /// <inheritdoc />
     public void Execute()

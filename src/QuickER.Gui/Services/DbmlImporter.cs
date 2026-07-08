@@ -1,6 +1,7 @@
 using System.IO;
 using System.Text.RegularExpressions;
 using QuickER.Model;
+using QuickER.Resources;
 
 namespace QuickER.Services;
 
@@ -45,7 +46,7 @@ public static partial class DbmlImporter
     {
         if (string.IsNullOrWhiteSpace(text))
         {
-            throw new InvalidDataException("DBML テキストが空です。");
+            throw new InvalidDataException(Strings.Dbml_EmptyText);
         }
 
         var lines = text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
@@ -84,7 +85,7 @@ public static partial class DbmlImporter
                 if (!entities.TryAdd(tableName, new Entity { TableName = tableName }))
                 {
                     throw new InvalidDataException(
-                        $"エンティティ '{tableName}' が重複しています。"
+                        string.Format(Strings.Dbml_DuplicateEntity, tableName)
                     );
                 }
 
@@ -102,13 +103,13 @@ public static partial class DbmlImporter
         if (currentEntity is not null)
         {
             throw new InvalidDataException(
-                $"エンティティ '{currentEntity.TableName}' の閉じ括弧 '}}' がありません。"
+                string.Format(Strings.Dbml_MissingClosingBrace, currentEntity.TableName)
             );
         }
 
         if (entities.Count == 0)
         {
-            throw new InvalidDataException("DBML にエンティティ定義がありません。");
+            throw new InvalidDataException(Strings.Dbml_NoEntities);
         }
 
         EnsureEntitiesHaveColumns(entities.Values);
@@ -141,7 +142,7 @@ public static partial class DbmlImporter
         if (tokens.Length < 2)
         {
             throw new InvalidDataException(
-                $"テーブル '{tableName}' のカラム定義 '{line}' を解析できません。"
+                string.Format(Strings.Dbml_ColumnParseError, tableName, line)
             );
         }
 
@@ -208,7 +209,9 @@ public static partial class DbmlImporter
 
         if (!match.Success)
         {
-            throw new InvalidDataException($"リレーション定義 '{line}' を解析できません。");
+            throw new InvalidDataException(
+                string.Format(Strings.Dbml_RelationshipParseError, line)
+            );
         }
 
         var leftTable = match.Groups["leftTable"].Value;
@@ -221,14 +224,14 @@ public static partial class DbmlImporter
         if (!entities.ContainsKey(leftTable))
         {
             throw new InvalidDataException(
-                $"リレーションの参照元テーブル '{leftTable}' が未定義です。"
+                string.Format(Strings.Dbml_RelationshipSourceUndefined, leftTable)
             );
         }
 
         if (!entities.ContainsKey(rightTable))
         {
             throw new InvalidDataException(
-                $"リレーションの参照先テーブル '{rightTable}' が未定義です。"
+                string.Format(Strings.Dbml_RelationshipTargetUndefined, rightTable)
             );
         }
 
@@ -241,7 +244,9 @@ public static partial class DbmlImporter
                 "-" => RelationshipType.OneToOne,
                 "<" => RelationshipType.OneToMany,
                 "<>" => RelationshipType.ManyToMany,
-                _ => throw new InvalidDataException($"未対応のリレーション記号 '{symbol}' です。"),
+                _ => throw new InvalidDataException(
+                    string.Format(Strings.Dbml_UnsupportedRelationshipSymbol, symbol)
+                ),
             },
             ConstraintName = note,
         };

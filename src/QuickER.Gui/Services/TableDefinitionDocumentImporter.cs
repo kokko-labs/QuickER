@@ -1,6 +1,7 @@
 using System.IO;
 using ClosedXML.Excel;
 using QuickER.Model;
+using QuickER.Resources;
 
 namespace QuickER.Services;
 
@@ -43,11 +44,13 @@ public static class TableDefinitionDocumentImporter
     {
         var summarySheet =
             FindWorksheet(workbook, SummarySheetName)
-            ?? throw new InvalidDataException($"'{SummarySheetName}' シートが見つかりません。");
+            ?? throw new InvalidDataException(
+                string.Format(Strings.TableDoc_SheetNotFound, SummarySheetName)
+            );
         var relationshipSheet =
             FindWorksheet(workbook, RelationshipSheetName)
             ?? throw new InvalidDataException(
-                $"'{RelationshipSheetName}' シートが見つかりません。"
+                string.Format(Strings.TableDoc_SheetNotFound, RelationshipSheetName)
             );
 
         var summaries = ReadSummarySheet(summarySheet);
@@ -83,14 +86,14 @@ public static class TableDefinitionDocumentImporter
             )
             {
                 throw new InvalidDataException(
-                    $"テーブル一覧シートに重複したテーブル名 '{tableName}' があります。"
+                    string.Format(Strings.TableDoc_SummaryDuplicateTable, tableName)
                 );
             }
         }
 
         if (summaries.Count == 0)
         {
-            throw new InvalidDataException("テーブル一覧シートにテーブル情報がありません。");
+            throw new InvalidDataException(Strings.TableDoc_SummaryNoTables);
         }
 
         return summaries;
@@ -116,7 +119,7 @@ public static class TableDefinitionDocumentImporter
 
         if (detailSheets.Count != summaries.Count)
         {
-            throw new InvalidDataException("テーブル一覧シートと詳細シートの件数が一致しません。");
+            throw new InvalidDataException(Strings.TableDoc_CountMismatch);
         }
 
         foreach (var sheet in detailSheets)
@@ -126,21 +129,25 @@ public static class TableDefinitionDocumentImporter
             if (string.IsNullOrWhiteSpace(tableName))
             {
                 throw new InvalidDataException(
-                    $"シート '{sheet.Name}' の B{DetailTableInfoRow} にテーブル名がありません。"
+                    string.Format(
+                        Strings.TableDoc_DetailMissingTableName,
+                        sheet.Name,
+                        DetailTableInfoRow
+                    )
                 );
             }
 
             if (!summaries.TryGetValue(tableName, out var summary))
             {
                 throw new InvalidDataException(
-                    $"詳細シート '{sheet.Name}' のテーブル名 '{tableName}' がテーブル一覧シートに存在しません。"
+                    string.Format(Strings.TableDoc_DetailTableNotInSummary, sheet.Name, tableName)
                 );
             }
 
             if (entities.ContainsKey(tableName))
             {
                 throw new InvalidDataException(
-                    $"詳細シートに重複したテーブル名 '{tableName}' があります。"
+                    string.Format(Strings.TableDoc_DetailDuplicateTable, tableName)
                 );
             }
 
@@ -153,7 +160,7 @@ public static class TableDefinitionDocumentImporter
             )
             {
                 throw new InvalidDataException(
-                    $"テーブル '{tableName}' の説明がテーブル一覧と詳細シートで一致しません。"
+                    string.Format(Strings.TableDoc_DescriptionMismatch, tableName)
                 );
             }
 
@@ -175,7 +182,7 @@ public static class TableDefinitionDocumentImporter
             if (!entities.ContainsKey(summary))
             {
                 throw new InvalidDataException(
-                    $"テーブル '{summary}' の詳細シートが見つかりません。"
+                    string.Format(Strings.TableDoc_DetailSheetNotFound, summary)
                 );
             }
         }
@@ -200,7 +207,11 @@ public static class TableDefinitionDocumentImporter
             if (string.IsNullOrWhiteSpace(dataType))
             {
                 throw new InvalidDataException(
-                    $"テーブル '{entity.TableName}' のカラム '{columnName}' にデータ型がありません。"
+                    string.Format(
+                        Strings.TableDoc_ColumnMissingDataType,
+                        entity.TableName,
+                        columnName
+                    )
                 );
             }
 
@@ -221,7 +232,7 @@ public static class TableDefinitionDocumentImporter
         if (entity.Columns.Count == 0)
         {
             throw new InvalidDataException(
-                $"テーブル '{entity.TableName}' にカラム定義がありません。"
+                string.Format(Strings.TableDoc_TableNoColumns, entity.TableName)
             );
         }
     }
@@ -257,28 +268,28 @@ public static class TableDefinitionDocumentImporter
             )
             {
                 throw new InvalidDataException(
-                    $"リレーション一覧シートの {row} 行目に参照元または参照先テーブル名がありません。"
+                    string.Format(Strings.TableDoc_RelMissingTableName, row)
                 );
             }
 
             if (!entities.TryGetValue(parentTableName, out var parent))
             {
                 throw new InvalidDataException(
-                    $"リレーション一覧シートの参照先テーブル '{parentTableName}' が存在しません。"
+                    string.Format(Strings.TableDoc_RelParentNotFound, parentTableName)
                 );
             }
 
             if (!entities.TryGetValue(childTableName, out var child))
             {
                 throw new InvalidDataException(
-                    $"リレーション一覧シートの参照元テーブル '{childTableName}' が存在しません。"
+                    string.Format(Strings.TableDoc_RelChildNotFound, childTableName)
                 );
             }
 
             if (!existingPairs.Add((parent.TableName, child.TableName)))
             {
                 throw new InvalidDataException(
-                    $"テーブル '{parent.TableName}' と '{child.TableName}' のリレーションが重複しています。"
+                    string.Format(Strings.TableDoc_RelDuplicate, parent.TableName, child.TableName)
                 );
             }
 
@@ -304,7 +315,7 @@ public static class TableDefinitionDocumentImporter
                 )
                 {
                     throw new InvalidDataException(
-                        $"リレーション一覧シートの {row} 行目に参照カラムがありません。"
+                        string.Format(Strings.TableDoc_RelMissingColumn, row)
                     );
                 }
 
@@ -318,14 +329,22 @@ public static class TableDefinitionDocumentImporter
                 if (childColumn is null)
                 {
                     throw new InvalidDataException(
-                        $"テーブル '{child.TableName}' に参照元カラム '{childColumnName}' が存在しません。"
+                        string.Format(
+                            Strings.TableDoc_RelChildColumnNotFound,
+                            child.TableName,
+                            childColumnName
+                        )
                     );
                 }
 
                 if (parentColumn is null)
                 {
                     throw new InvalidDataException(
-                        $"テーブル '{parent.TableName}' に参照先カラム '{parentColumnName}' が存在しません。"
+                        string.Format(
+                            Strings.TableDoc_RelParentColumnNotFound,
+                            parent.TableName,
+                            parentColumnName
+                        )
                     );
                 }
 
@@ -349,7 +368,7 @@ public static class TableDefinitionDocumentImporter
             "N:1" => RelationshipType.OneToMany,
             "N:N" => RelationshipType.ManyToMany,
             _ => throw new InvalidDataException(
-                $"リレーション一覧シートの {row} 行目の関係 '{text}' を解釈できません。"
+                string.Format(Strings.TableDoc_RelUnknownRelation, row, text)
             ),
         };
     }

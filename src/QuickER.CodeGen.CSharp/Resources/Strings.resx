@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <!--
+    中立（既定=日本語）リソース。英語は Strings.en.resx サテライトで賦与する（ResxKeyParityTests がキー集合一致を検証）。
+  -->
+  <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
+    <xsd:element name="root" msdata:IsDataSet="true">
+      <xsd:complexType>
+        <xsd:choice maxOccurs="unbounded">
+          <xsd:element name="metadata">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" />
+              </xsd:sequence>
+              <xsd:attribute name="name" use="required" type="xsd:string" />
+              <xsd:attribute name="type" type="xsd:string" />
+              <xsd:attribute name="mimetype" type="xsd:string" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="assembly">
+            <xsd:complexType>
+              <xsd:attribute name="alias" type="xsd:string" />
+              <xsd:attribute name="name" type="xsd:string" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="data">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+                <xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" msdata:Ordinal="1" />
+              <xsd:attribute name="type" type="xsd:string" msdata:Ordinal="3" />
+              <xsd:attribute name="mimetype" type="xsd:string" msdata:Ordinal="4" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="resheader">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" />
+            </xsd:complexType>
+          </xsd:element>
+        </xsd:choice>
+      </xsd:complexType>
+    </xsd:element>
+  </xsd:schema>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <data name="CodeGen_Error_MultiTargetEfCoreExclusive" xml:space="preserve">
+    <value>EF Core の生成は自作 Repository のマルチターゲット（実効方言 2 つ以上）と併用できません。方言を 1 つに絞るか、EF Core を無効にしてください（両者は排他選択です）。</value>
+  </data>
+  <data name="CodeGen_Error_InMemoryRuntimePackagesExclusive" xml:space="preserve">
+    <value>インメモリ Repository の生成はランタイムパッケージ参照モード（UseRuntimePackages）と併用できません。インメモリ実行器は生成側の固定コードとして出力されるため、固定コードを出力しないパッケージ参照モードでは参照先を失います。UseRuntimePackages を無効にする（固定コードをインライン出力する）か、インメモリ生成を無効にしてください。</value>
+  </data>
+  <data name="CodeGen_Error_TypeMismatch" xml:space="preserve">
+    <value>テーブル '{0}' の列 '{1}' は方言間で C# 型が食い違います（{2}: {3} / {4}: {5}）。共有 Entity は単一型のため、両方言で同じ C# 型へ解決される必要があります。</value>
+  </data>
+  <data name="CodeGen_Error_NoGenerationTarget" xml:space="preserve">
+    <value>Entity / EditModel / Mapper / Repository / EF Core / インメモリ Repository のいずれも生成対象になっていません。少なくとも一つを有効にしてください。</value>
+  </data>
+  <data name="CodeGen_Error_MapperRequiresEntityAndEditModel" xml:space="preserve">
+    <value>Mapper の生成には Entity クラスと EditModel クラスの両方が必要です。両方を生成対象に含めてください。</value>
+  </data>
+  <data name="CodeGen_Error_RepositoryRequiresEntity" xml:space="preserve">
+    <value>Repository / EF Core / インメモリ Repository の生成には Entity クラスが必要です。Entity を生成対象に含めてください。</value>
+  </data>
+  <data name="CodeGen_Error_RepositoryRequiresDataAnnotations" xml:space="preserve">
+    <value>Repository / EF Core / インメモリ Repository は [Table] / [Key] / [Column] 属性を利用するため、データアノテーションの付与が必要です。データアノテーションを有効にしてください。</value>
+  </data>
+  <data name="CodeGen_Error_NoEntities" xml:space="preserve">
+    <value>ER 図にエンティティがありません。</value>
+  </data>
+  <data name="CodeGen_Error_EmptyTableName" xml:space="preserve">
+    <value>テーブル名が空のエンティティがあります。</value>
+  </data>
+  <data name="CodeGen_Warning_CompositeKey" xml:space="preserve">
+    <value>テーブル '{0}' は複合主キーのため [Key] 属性生成は最小限になります。MVP では単一主キーを推奨します。</value>
+  </data>
+  <data name="CodeGen_Error_UnsupportedRepositoryDialect" xml:space="preserve">
+    <value>未対応の Repository 方言: '{0}'。対応方言: {1}</value>
+  </data>
+  <data name="CodeGen_Error_NonGeneratedFileOverwrite" xml:space="preserve">
+    <value>生成ファイル以外は上書きできません。出力ファイル名は .g.cs または .g.md で終わる必要があります。</value>
+  </data>
+  <data name="CodeGen_Warning_EntityDisplayNameCollision" xml:space="preserve">
+    <value>エンティティ '{0}'（テーブル '{1}'）は列由来プロパティ名が DisplayName / CustomizeDisplayName と衝突するため、静的 DisplayName プロパティと CustomizeDisplayName フックの生成を省略しました。</value>
+  </data>
+  <data name="CodeGen_Warning_EditModelDisplayNameCollision" xml:space="preserve">
+    <value>EditModel '{0}'（テーブル '{1}'）は列由来プロパティ名が表示名解決ヘルパ GetDisplayName / CustomizePropertyDisplayName と衝突するため、表示名機構の生成を省略し、検証メッセージは従来どおりプロパティ名で構築します。</value>
+  </data>
+  <data name="CodeGen_Warning_RepositorySingleKeyOnly" xml:space="preserve">
+    <value>テーブル '{0}' の Repository は単一主キーのみ対応のため生成をスキップしました。</value>
+  </data>
+  <data name="CodeGen_Warning_ManyToManySkipped" xml:space="preserve">
+    <value>多対多リレーション '{0}' は C# 生成対象外のためスキップしました。</value>
+  </data>
+  <data name="CodeGen_Warning_RelationshipTargetNotFound" xml:space="preserve">
+    <value>リレーション '{0}' は参照先エンティティが見つからないためスキップしました。</value>
+  </data>
+  <data name="CodeGen_Warning_RelationshipKeyUnknown" xml:space="preserve">
+    <value>リレーション '{0}' はキーが不明なためナビゲーション生成をスキップしました。</value>
+  </data>
+  <data name="CodeGen_Warning_ValueObjectDefinitionMismatch" xml:space="preserve">
+    <value>値オブジェクト '{0}' に集約される同名列の定義が一致しません。PK 定義優先（無ければ最大定義）で生成しますが、ER 図の定義統一を推奨します: {1}</value>
+  </data>
+</root>

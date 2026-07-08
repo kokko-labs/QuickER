@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.IO;
 using System.Text.Json;
+using QuickER.AI.Resources;
 
 namespace QuickER.AI;
 
@@ -122,12 +123,7 @@ public sealed class ClaudeCodeProcessClient : IClaudeCodeClient
 
         if (executable is null)
         {
-            return new ClaudeCodeTurnOutcome(
-                false,
-                "claude CLI が見つかりません。Claude Code をインストールしてください。",
-                null,
-                false
-            );
+            return new ClaudeCodeTurnOutcome(false, Strings.ClaudeCode_CliNotFound, null, false);
         }
 
         var startInfo = CreateStartInfo(executable, options.WorkingDirectory);
@@ -197,7 +193,7 @@ public sealed class ClaudeCodeProcessClient : IClaudeCodeClient
 
         if (!process.Start())
         {
-            return new ClaudeCodeTurnOutcome(false, "claude の起動に失敗しました。", null, false);
+            return new ClaudeCodeTurnOutcome(false, Strings.ClaudeCode_LaunchFailed, null, false);
         }
 
         _currentProcess = process;
@@ -434,7 +430,7 @@ public sealed class ClaudeCodeProcessClient : IClaudeCodeClient
             message is not null
             && message.Contains("Not logged in", StringComparison.OrdinalIgnoreCase);
 
-        return (false, message ?? "Claude Code でエラーが発生しました。", notLoggedIn);
+        return (false, message ?? Strings.ClaudeCode_GenericError, notLoggedIn);
     }
 
     /// <inheritdoc />

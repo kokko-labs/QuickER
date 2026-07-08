@@ -4,6 +4,8 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
+    <!-- 中立（既定）リソースのカルチャ＝日本語。英語は Strings.en.resx サテライトで賦与する -->
+    <NeutralResourcesLanguage>ja</NeutralResourcesLanguage>
   </PropertyGroup>
 
   <ItemGroup>
@@ -14,5 +16,21 @@
     <ProjectReference Include="..\QuickER.AI\QuickER.AI.csproj" />
     <ProjectReference Include="..\QuickER.AI.UI\QuickER.AI.UI.csproj" />
     <ProjectReference Include="..\QuickER.Gui.Abstractions\QuickER.Gui.Abstractions.csproj" />
+  </ItemGroup>
+
+  <!--
+    多言語リソース: Strings.resx（中立＝日本語）と Strings.en.resx（英語サテライト）。
+    厳密型アクセサ（Strings.Designer.cs）は VS 以外でも確実に通るよう手書きでチェックイン済み。
+  -->
+  <ItemGroup>
+    <EmbeddedResource Update="Resources\Strings.resx">
+      <Generator>PublicResXFileCodeGenerator</Generator>
+      <LastGenOutput>Strings.Designer.cs</LastGenOutput>
+    </EmbeddedResource>
+    <Compile Update="Resources\Strings.Designer.cs">
+      <DesignTime>True</DesignTime>
+      <AutoGen>True</AutoGen>
+      <DependentUpon>Strings.resx</DependentUpon>
+    </Compile>
   </ItemGroup>
 </Project>

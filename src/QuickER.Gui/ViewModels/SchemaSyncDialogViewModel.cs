@@ -8,6 +8,7 @@ using QuickER.AI.UI;
 using QuickER.Gui.Abstractions;
 using QuickER.Model;
 using QuickER.Provider;
+using QuickER.Resources;
 using QuickER.Services;
 
 namespace QuickER.ViewModels;
@@ -78,7 +79,7 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
     private async Task RefreshAsync()
     {
         IsBusy = true;
-        StatusMessage = "DB スキーマを取得中...";
+        StatusMessage = Strings.SchemaSync_Fetching;
 
         try
         {
@@ -106,7 +107,10 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
                     {
                         Kind = SchemaDiffKind.RebuildTable,
                         TableName = tableName,
-                        Description = $"列順変更は DB 同期しません: [{tableName}]",
+                        Description = string.Format(
+                            Strings.SchemaSync_ColumnOrderNotSynced,
+                            tableName
+                        ),
                         IsSelected = false,
                         IsSelectable = false,
                     }
@@ -131,12 +135,12 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
             HasDiff = DiffItems.Count > 0;
             UpdatePreview();
             StatusMessage = HasDiff
-                ? $"{DiffItems.Count} 件の差分があります。"
-                : "差分はありません。";
+                ? string.Format(Strings.SchemaSync_DiffCount, DiffItems.Count)
+                : Strings.SchemaSync_NoDiff;
         }
         catch (Exception ex)
         {
-            StatusMessage = "差分計算に失敗しました: " + ex.Message;
+            StatusMessage = string.Format(Strings.SchemaSync_DiffFailed, ex.Message);
         }
         finally
         {
@@ -180,22 +184,22 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
     {
         if (string.IsNullOrWhiteSpace(ScriptPreview))
         {
-            StatusMessage = "実行するスクリプトがありません。";
+            StatusMessage = Strings.SchemaSync_NoScript;
             return;
         }
 
         // 削除・型変更など破壊的変更を含む場合は、確認文言を切り替えて誤実行を防ぐ
         var destructive = DiffItems.Any(i => i.IsSelected && i.IsDestructive);
         var msg = destructive
-            ? $"破壊的な変更 (削除/型変更) を含むスクリプトを {_settings.Database} に実行します。よろしいですか？"
-            : $"スクリプトを {_settings.Database} に実行します。よろしいですか？";
-        if (!_dialogs.ConfirmWarning(msg, "確認"))
+            ? string.Format(Strings.SchemaSync_ExecuteConfirmDestructive, _settings.Database)
+            : string.Format(Strings.SchemaSync_ExecuteConfirm, _settings.Database);
+        if (!_dialogs.ConfirmWarning(msg, Strings.Common_Confirm))
         {
             return;
         }
 
         IsBusy = true;
-        StatusMessage = "実行中...";
+        StatusMessage = Strings.SchemaSync_Executing;
 
         try
         {
@@ -205,23 +209,26 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
 
             if (result.Committed)
             {
-                StatusMessage = $"成功: {result.Batches.Count} バッチを実行し COMMIT しました。";
-                _dialogs.ShowInformation(StatusMessage, "完了");
+                StatusMessage = string.Format(
+                    Strings.SchemaSync_ExecuteSucceeded,
+                    result.Batches.Count
+                );
+                _dialogs.ShowInformation(StatusMessage, Strings.Common_Complete);
                 // 適用後の最新状態を反映するため差分を再計算する
                 await RefreshAsync().ConfigureAwait(true);
             }
             else
             {
-                StatusMessage = "失敗: " + result.Error;
+                StatusMessage = string.Format(Strings.SchemaSync_ExecuteFailedStatus, result.Error);
                 _dialogs.ShowError(
-                    "実行に失敗したため ROLLBACK されました:\n" + result.Error,
-                    "エラー"
+                    Strings.SchemaSync_RollbackMessage + "\n" + result.Error,
+                    Strings.Common_Error
                 );
             }
         }
         catch (Exception ex)
         {
-            StatusMessage = "実行に失敗しました: " + ex.Message;
+            StatusMessage = string.Format(Strings.SchemaSync_ExecuteError, ex.Message);
         }
         finally
         {

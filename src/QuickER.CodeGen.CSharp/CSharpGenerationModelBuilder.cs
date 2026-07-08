@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using QuickER.CodeGen.CSharp.Resources;
 using QuickER.Model;
 
 namespace QuickER.CodeGen.CSharp;
@@ -104,8 +105,11 @@ internal sealed partial class CSharpGenerationModelBuilder
         {
             diagnostics.Add(
                 Warning(
-                    $"エンティティ '{className}'（テーブル '{entity.TableName}'）は列由来プロパティ名が DisplayName / CustomizeDisplayName と衝突するため、"
-                        + "静的 DisplayName プロパティと CustomizeDisplayName フックの生成を省略しました。"
+                    string.Format(
+                        Strings.CodeGen_Warning_EntityDisplayNameCollision,
+                        className,
+                        entity.TableName
+                    )
                 )
             );
         }
@@ -168,9 +172,11 @@ internal sealed partial class CSharpGenerationModelBuilder
         {
             diagnostics.Add(
                 Warning(
-                    $"EditModel '{className}'（テーブル '{entity.TableName}'）は列由来プロパティ名が表示名解決ヘルパ"
-                        + " GetDisplayName / CustomizePropertyDisplayName と衝突するため、表示名機構の生成を省略し、"
-                        + "検証メッセージは従来どおりプロパティ名で構築します。"
+                    string.Format(
+                        Strings.CodeGen_Warning_EditModelDisplayNameCollision,
+                        className,
+                        entity.TableName
+                    )
                 )
             );
         }
@@ -320,7 +326,7 @@ internal sealed partial class CSharpGenerationModelBuilder
         {
             diagnostics.Add(
                 Warning(
-                    $"テーブル '{entity.TableName}' の Repository は単一主キーのみ対応のため生成をスキップしました。"
+                    string.Format(Strings.CodeGen_Warning_RepositorySingleKeyOnly, entity.TableName)
                 )
             );
             return null;
@@ -746,7 +752,7 @@ internal sealed partial class CSharpGenerationModelBuilder
             {
                 diagnostics.Add(
                     Warning(
-                        $"多対多リレーション '{relationship.Id}' は C# 生成対象外のためスキップしました。"
+                        string.Format(Strings.CodeGen_Warning_ManyToManySkipped, relationship.Id)
                     )
                 );
                 continue;
@@ -763,7 +769,10 @@ internal sealed partial class CSharpGenerationModelBuilder
             {
                 diagnostics.Add(
                     Warning(
-                        $"リレーション '{relationship.Id}' は参照先エンティティが見つからないためスキップしました。"
+                        string.Format(
+                            Strings.CodeGen_Warning_RelationshipTargetNotFound,
+                            relationship.Id
+                        )
                     )
                 );
                 continue;
@@ -789,7 +798,10 @@ internal sealed partial class CSharpGenerationModelBuilder
             {
                 diagnostics.Add(
                     Warning(
-                        $"リレーション '{relationship.Id}' はキーが不明なためナビゲーション生成をスキップしました。"
+                        string.Format(
+                            Strings.CodeGen_Warning_RelationshipKeyUnknown,
+                            relationship.Id
+                        )
                     )
                 );
                 continue;

@@ -5,7 +5,8 @@
   xmlns:chat="clr-namespace:QuickER.AI;assembly=QuickER.AI"
   xmlns:ui="clr-namespace:QuickER.AI.UI;assembly=QuickER.AI.UI"
   xmlns:local="clr-namespace:QuickER.AI.Mock"
-  Title="AI モック生成"
+  xmlns:res="clr-namespace:QuickER.AI.Mock.Resources"
+  Title="{x:Static res:Strings.Mock_WindowTitle}"
   Width="1160"
   Height="760"
   MinWidth="900"
@@ -324,7 +325,7 @@
           Style="{StaticResource SettingsTabs}"
           SelectionChanged="BackendTabs_SelectionChanged"
         >
-          <TabItem Header="API キー">
+          <TabItem Header="{x:Static res:Strings.Mock_TabApiKey}">
             <StackPanel Margin="14,12">
               <Grid>
                 <Grid.ColumnDefinitions>
@@ -334,7 +335,7 @@
                 <TextBlock
                   Grid.Column="0"
                   Style="{StaticResource FieldLabel}"
-                  Text="プロバイダー"
+                  Text="{x:Static res:Strings.Mock_Provider}"
                 />
                 <ComboBox
                   Grid.Column="1"
@@ -348,7 +349,11 @@
                   <ColumnDefinition Width="Auto" />
                   <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
-                <TextBlock Grid.Column="0" Style="{StaticResource FieldLabel}" Text="モデル名" />
+                <TextBlock
+                  Grid.Column="0"
+                  Style="{StaticResource FieldLabel}"
+                  Text="{x:Static res:Strings.Mock_ModelName}"
+                />
                 <ComboBox
                   Grid.Column="1"
                   Padding="6,4"
@@ -366,19 +371,23 @@
                   <ColumnDefinition Width="*" />
                   <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
-                <TextBlock Grid.Column="0" Style="{StaticResource FieldLabel}" Text="API キー" />
+                <TextBlock
+                  Grid.Column="0"
+                  Style="{StaticResource FieldLabel}"
+                  Text="{x:Static res:Strings.Mock_ApiKey}"
+                />
                 <PasswordBox
                   x:Name="ApiKeyBox"
                   Grid.Column="1"
                   Padding="4,5"
                   Margin="0,0,8,0"
-                  ToolTip="API キー（OpenAI: sk-... / Claude: sk-ant-...）"
+                  ToolTip="{x:Static res:Strings.Mock_ApiKeyTooltip}"
                   ui:PasswordBoxBehavior.BoundPassword="{Binding Connection.ApiKey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                 />
                 <CheckBox
                   Grid.Column="2"
                   VerticalAlignment="Center"
-                  Content="保存"
+                  Content="{x:Static res:Strings.Mock_Save}"
                   IsChecked="{Binding Connection.SaveApiKey}"
                 />
               </Grid>
@@ -393,13 +402,13 @@
                 <TextBlock
                   Grid.Column="0"
                   Style="{StaticResource FieldLabel}"
-                  Text="エンドポイント"
+                  Text="{x:Static res:Strings.Mock_Endpoint}"
                 />
                 <TextBox
                   Grid.Column="1"
                   Padding="6,4"
                   Text="{Binding Connection.EndpointOverride, UpdateSourceTrigger=PropertyChanged}"
-                  ToolTip="OpenAI 互換エンドポイント（Ollama 等）"
+                  ToolTip="{x:Static res:Strings.Mock_EndpointTooltip}"
                 />
               </Grid>
             </StackPanel>
@@ -415,7 +424,7 @@
                 <TextBlock
                   Grid.Column="0"
                   Style="{StaticResource FieldLabel}"
-                  Text="プロバイダー"
+                  Text="{x:Static res:Strings.Mock_Provider}"
                 />
                 <ComboBox
                   Grid.Column="1"
@@ -430,7 +439,11 @@
                   <ColumnDefinition Width="Auto" />
                   <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
-                <TextBlock Grid.Column="0" Style="{StaticResource FieldLabel}" Text="モデル名" />
+                <TextBlock
+                  Grid.Column="0"
+                  Style="{StaticResource FieldLabel}"
+                  Text="{x:Static res:Strings.Mock_ModelName}"
+                />
                 <ComboBox
                   Grid.Column="1"
                   Padding="6,4"
@@ -455,7 +468,11 @@
                   <ColumnDefinition Width="Auto" />
                   <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
-                <TextBlock Grid.Column="0" Style="{StaticResource FieldLabel}" Text="モデル" />
+                <TextBlock
+                  Grid.Column="0"
+                  Style="{StaticResource FieldLabel}"
+                  Text="{x:Static res:Strings.Mock_Model}"
+                />
                 <ComboBox
                   Grid.Column="1"
                   Padding="6,4"
@@ -516,7 +533,7 @@
                   VerticalAlignment="Center"
                   FontWeight="SemiBold"
                   Foreground="{StaticResource HeaderText}"
-                  Text="会話"
+                  Text="{x:Static res:Strings.Mock_ConversationHeader}"
                 />
                 <StackPanel
                   Grid.Column="1"
@@ -527,7 +544,7 @@
                 >
                   <Ellipse Width="7" Height="7" Margin="0,0,6,0" Fill="{StaticResource Accent}" />
                   <TextBlock
-                    Text="生成中..."
+                    Text="{x:Static res:Strings.Mock_Generating}"
                     Foreground="{StaticResource Accent}"
                     FontSize="12"
                     VerticalAlignment="Center"
@@ -537,13 +554,13 @@
                   <Button
                     Style="{StaticResource SecondaryButton}"
                     Margin="0,0,8,0"
-                    Content="中断"
+                    Content="{x:Static res:Strings.Mock_Interrupt}"
                     Command="{Binding InterruptCommand}"
                     Visibility="{Binding IsTurnInProgress, Converter={StaticResource BoolToVisibilityConverter}}"
                   />
                   <Button
                     Style="{StaticResource SecondaryButton}"
-                    Content="＋ 新しい会話"
+                    Content="{x:Static res:Strings.Mock_NewConversation}"
                     Command="{Binding StartConversationCommand}"
                   />
                 </StackPanel>
@@ -603,7 +620,7 @@
               AcceptsReturn="True"
               IsEnabled="{Binding CanEditInput}"
               Text="{Binding UserInput, UpdateSourceTrigger=PropertyChanged}"
-              ToolTip="モックへの要望・修正指示（Ctrl+Enter で送信 / Ctrl+V で画像を添付）"
+              ToolTip="{x:Static res:Strings.Mock_InputTooltip}"
               PreviewKeyDown="UserInputBox_PreviewKeyDown"
             >
               <TextBox.InputBindings>
@@ -619,7 +636,7 @@
               Style="{StaticResource PrimaryButton}"
               Width="96"
               VerticalAlignment="Stretch"
-              Content="送信"
+              Content="{x:Static res:Strings.Mock_Send}"
               Command="{Binding SendMessageCommand}"
             />
           </Grid>
@@ -666,12 +683,12 @@
                 VerticalAlignment="Center"
                 FontWeight="SemiBold"
                 Foreground="{StaticResource HeaderText}"
-                Text="プレビュー"
+                Text="{x:Static res:Strings.Mock_PreviewHeader}"
               />
               <Button
                 Grid.Column="2"
                 Style="{StaticResource SecondaryButton}"
-                Content="HTML を保存"
+                Content="{x:Static res:Strings.Mock_SaveHtml}"
                 Command="{Binding SaveHtmlCommand}"
               />
             </Grid>
@@ -695,7 +712,7 @@
           <TextBlock
             FontWeight="SemiBold"
             Foreground="{StaticResource HeaderText}"
-            Text="WPF モックプロジェクトを生成（Claude Code）"
+            Text="{x:Static res:Strings.Mock_Step2Header}"
           />
         </Expander.Header>
 
@@ -707,7 +724,11 @@
               <ColumnDefinition Width="*" />
               <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
-            <TextBlock Grid.Column="0" Style="{StaticResource FieldLabel}" Text="出力フォルダ" />
+            <TextBlock
+              Grid.Column="0"
+              Style="{StaticResource FieldLabel}"
+              Text="{x:Static res:Strings.Mock_OutputFolder}"
+            />
             <TextBox
               Grid.Column="1"
               Padding="6,4"
@@ -719,7 +740,7 @@
             <Button
               Grid.Column="2"
               Style="{StaticResource SecondaryButton}"
-              Content="参照..."
+              Content="{x:Static res:Strings.Mock_Browse}"
               Command="{Binding BrowseOutputFolderCommand}"
             />
           </Grid>
@@ -730,7 +751,11 @@
               <ColumnDefinition Width="Auto" />
               <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
-            <TextBlock Grid.Column="0" Style="{StaticResource FieldLabel}" Text="プロジェクト名" />
+            <TextBlock
+              Grid.Column="0"
+              Style="{StaticResource FieldLabel}"
+              Text="{x:Static res:Strings.Mock_ProjectName}"
+            />
             <TextBox
               Grid.Column="1"
               Padding="6,4"
@@ -758,14 +783,14 @@
             <StackPanel Grid.Column="1" Orientation="Horizontal">
               <Button
                 Style="{StaticResource SecondaryButton}"
-                Content="フォルダを開く"
+                Content="{x:Static res:Strings.Mock_OpenFolder}"
                 Margin="0,0,8,0"
                 Command="{Binding OpenOutputFolderCommand}"
                 Visibility="{Binding ShowOpenFolder, Converter={StaticResource BoolToVisibilityConverter}}"
               />
               <Button
                 Style="{StaticResource SecondaryButton}"
-                Content="中断"
+                Content="{x:Static res:Strings.Mock_Interrupt}"
                 Margin="0,0,8,0"
                 Command="{Binding InterruptMockGenCommand}"
                 Visibility="{Binding IsMockGenInProgress, Converter={StaticResource BoolToVisibilityConverter}}"
@@ -773,7 +798,7 @@
               <Button
                 Style="{StaticResource PrimaryButton}"
                 Width="150"
-                Content="WPF モックを生成"
+                Content="{x:Static res:Strings.Mock_GenerateWpf}"
                 Command="{Binding GenerateMockProjectCommand}"
                 ToolTip="{Binding MockGenDisabledReason}"
               />

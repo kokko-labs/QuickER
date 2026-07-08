@@ -1,0 +1,869 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <!--
+    英語サテライトリソース。中立（日本語）の Strings.resx と同じキー集合を保つこと
+    （ResxKeyParityTests がキー集合の一致を検証する）。
+  -->
+  <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
+    <xsd:element name="root" msdata:IsDataSet="true">
+      <xsd:complexType>
+        <xsd:choice maxOccurs="unbounded">
+          <xsd:element name="metadata">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" />
+              </xsd:sequence>
+              <xsd:attribute name="name" use="required" type="xsd:string" />
+              <xsd:attribute name="type" type="xsd:string" />
+              <xsd:attribute name="mimetype" type="xsd:string" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="assembly">
+            <xsd:complexType>
+              <xsd:attribute name="alias" type="xsd:string" />
+              <xsd:attribute name="name" type="xsd:string" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="data">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+                <xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" msdata:Ordinal="1" />
+              <xsd:attribute name="type" type="xsd:string" msdata:Ordinal="3" />
+              <xsd:attribute name="mimetype" type="xsd:string" msdata:Ordinal="4" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="resheader">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" />
+            </xsd:complexType>
+          </xsd:element>
+        </xsd:choice>
+      </xsd:complexType>
+    </xsd:element>
+  </xsd:schema>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <data name="Language_Caption" xml:space="preserve">
+    <value>Language</value>
+  </data>
+  <data name="Language_Tooltip" xml:space="preserve">
+    <value>Switch display language (takes effect after restart)</value>
+  </data>
+  <data name="Language_Japanese" xml:space="preserve">
+    <value>日本語</value>
+  </data>
+  <data name="Language_English" xml:space="preserve">
+    <value>English</value>
+  </data>
+  <data name="Language_RestartRequired" xml:space="preserve">
+    <value>Language setting changed. It will take effect after restart.</value>
+  </data>
+  <data name="Language_RestartRequiredTitle" xml:space="preserve">
+    <value>Language</value>
+  </data>
+  <data name="Common_Cancel" xml:space="preserve">
+    <value>Cancel</value>
+  </data>
+  <data name="Common_Close" xml:space="preserve">
+    <value>Close</value>
+  </data>
+  <data name="Common_Confirm" xml:space="preserve">
+    <value>Confirm</value>
+  </data>
+  <data name="Common_Error" xml:space="preserve">
+    <value>Error</value>
+  </data>
+  <data name="Common_Complete" xml:space="preserve">
+    <value>Done</value>
+  </data>
+  <data name="Toolbar_New" xml:space="preserve">
+    <value>New</value>
+  </data>
+  <data name="Toolbar_NewTooltip" xml:space="preserve">
+    <value>New (Ctrl+N)</value>
+  </data>
+  <data name="Toolbar_Open" xml:space="preserve">
+    <value>Open</value>
+  </data>
+  <data name="Toolbar_OpenTooltip" xml:space="preserve">
+    <value>Open (Ctrl+O)</value>
+  </data>
+  <data name="Toolbar_Save" xml:space="preserve">
+    <value>Save</value>
+  </data>
+  <data name="Toolbar_SaveTooltip" xml:space="preserve">
+    <value>Save (Ctrl+S)</value>
+  </data>
+  <data name="Toolbar_Undo" xml:space="preserve">
+    <value>Undo</value>
+  </data>
+  <data name="Toolbar_UndoTooltip" xml:space="preserve">
+    <value>Undo (Ctrl+Z)</value>
+  </data>
+  <data name="Toolbar_Redo" xml:space="preserve">
+    <value>Redo</value>
+  </data>
+  <data name="Toolbar_RedoTooltip" xml:space="preserve">
+    <value>Redo (Ctrl+Y)</value>
+  </data>
+  <data name="Toolbar_Duplicate" xml:space="preserve">
+    <value>Duplicate</value>
+  </data>
+  <data name="Toolbar_DuplicateTooltip" xml:space="preserve">
+    <value>Duplicate (Ctrl+D)</value>
+  </data>
+  <data name="Toolbar_ShowDescriptions" xml:space="preserve">
+    <value>Descriptions</value>
+  </data>
+  <data name="Toolbar_ShowDescriptionsTooltip" xml:space="preserve">
+    <value>Show column descriptions in the ER diagram</value>
+  </data>
+  <data name="Toolbar_ShowNullability" xml:space="preserve">
+    <value>Nullability</value>
+  </data>
+  <data name="Toolbar_ShowNullabilityTooltip" xml:space="preserve">
+    <value>Show column nullability in the ER diagram</value>
+  </data>
+  <data name="Toolbar_CompactView" xml:space="preserve">
+    <value>Compact</value>
+  </data>
+  <data name="Toolbar_CompactViewTooltip" xml:space="preserve">
+    <value>Compact view showing only PK/FK columns in the ER diagram</value>
+  </data>
+  <data name="Toolbar_ArrangeGrid" xml:space="preserve">
+    <value>Arrange (Grid)</value>
+  </data>
+  <data name="Toolbar_ArrangeGridTooltip" xml:space="preserve">
+    <value>Auto-arrange in a grid</value>
+  </data>
+  <data name="Toolbar_ArrangeTree" xml:space="preserve">
+    <value>Arrange (Tree)</value>
+  </data>
+  <data name="Toolbar_ArrangeTreeTooltip" xml:space="preserve">
+    <value>Auto-arrange as a tree</value>
+  </data>
+  <data name="Toolbar_ArrangeForce" xml:space="preserve">
+    <value>Arrange (Force)</value>
+  </data>
+  <data name="Toolbar_ArrangeForceTooltip" xml:space="preserve">
+    <value>Roughly place by relationship connections, then align to a grid</value>
+  </data>
+  <data name="Toolbar_AutoWidth" xml:space="preserve">
+    <value>Auto Width</value>
+  </data>
+  <data name="Toolbar_AutoWidthTooltip" xml:space="preserve">
+    <value>Auto-fit widths so column names and types don't overlap</value>
+  </data>
+  <data name="Toolbar_Print" xml:space="preserve">
+    <value>Print</value>
+  </data>
+  <data name="Toolbar_PrintTooltip" xml:space="preserve">
+    <value>Print the whole diagram (fit to one page / actual size, Ctrl+P)</value>
+  </data>
+  <data name="Toolbar_Export" xml:space="preserve">
+    <value>Export</value>
+  </data>
+  <data name="Toolbar_ExportTooltip" xml:space="preserve">
+    <value>Export as PNG / SVG / DDL / Mermaid / DBML / definition document</value>
+  </data>
+  <data name="Toolbar_Import" xml:space="preserve">
+    <value>Import</value>
+  </data>
+  <data name="Toolbar_ImportTooltip" xml:space="preserve">
+    <value>Import from Mermaid / DBML / definition document</value>
+  </data>
+  <data name="Toolbar_TargetDbLabel" xml:space="preserve">
+    <value>Target DB:</value>
+  </data>
+  <data name="Toolbar_TargetDbTooltip" xml:space="preserve">
+    <value>Switch the target DB for this diagram (converts existing types)</value>
+  </data>
+  <data name="Toolbar_ImportFromDb" xml:space="preserve">
+    <value>DB Import</value>
+  </data>
+  <data name="Toolbar_ImportFromDbTooltip" xml:space="preserve">
+    <value>Import schema from a database</value>
+  </data>
+  <data name="Toolbar_SyncToDb" xml:space="preserve">
+    <value>DB Sync</value>
+  </data>
+  <data name="Toolbar_OpenAiChat" xml:space="preserve">
+    <value>AI Chat</value>
+  </data>
+  <data name="Toolbar_OpenAiChatTooltip" xml:space="preserve">
+    <value>Create and edit ER diagrams via AI chat (API key / Codex connection)</value>
+  </data>
+  <data name="Toolbar_MockGeneration" xml:space="preserve">
+    <value>AI Mock</value>
+  </data>
+  <data name="Toolbar_MockGenerationTooltip" xml:space="preserve">
+    <value>Generate a web mock screen (HTML) from the current ER diagram with AI</value>
+  </data>
+  <data name="Toolbar_GenerateCSharp" xml:space="preserve">
+    <value>C# Codegen</value>
+  </data>
+  <data name="Toolbar_GenerateCSharpTooltip" xml:space="preserve">
+    <value>Generate C# Entity / BindingModel from the current ER diagram</value>
+  </data>
+  <data name="Status_Ready" xml:space="preserve">
+    <value>Ready</value>
+  </data>
+  <data name="Status_EntitiesLabel" xml:space="preserve">
+    <value>Entities:</value>
+  </data>
+  <data name="Status_RelationshipsLabel" xml:space="preserve">
+    <value>   Relationships:</value>
+  </data>
+  <data name="Status_MiniMapTooltip" xml:space="preserve">
+    <value>Toggle the mini-map (shown at bottom-right when the diagram doesn't fit)</value>
+  </data>
+  <data name="Status_ZoomOutTooltip" xml:space="preserve">
+    <value>Zoom out (Ctrl+-)</value>
+  </data>
+  <data name="Status_ZoomResetTooltip" xml:space="preserve">
+    <value>Click to reset to 100% (Ctrl+0)</value>
+  </data>
+  <data name="Status_ZoomInTooltip" xml:space="preserve">
+    <value>Zoom in (Ctrl++)</value>
+  </data>
+  <data name="Status_FitTooltip" xml:space="preserve">
+    <value>Fit to window (Ctrl+Shift+0)</value>
+  </data>
+  <data name="Toolbox_Title" xml:space="preserve">
+    <value>Toolbox</value>
+  </data>
+  <data name="Toolbox_EntitySection" xml:space="preserve">
+    <value>Entities</value>
+  </data>
+  <data name="Toolbox_AddEntity" xml:space="preserve">
+    <value>Add Entity</value>
+  </data>
+  <data name="Toolbox_AddEntityTooltip" xml:space="preserve">
+    <value>Add a new table to the canvas</value>
+  </data>
+  <data name="Toolbox_RemoveEntity" xml:space="preserve">
+    <value>Delete Entity</value>
+  </data>
+  <data name="Toolbox_RemoveEntityTooltip" xml:space="preserve">
+    <value>Delete the selected entity from the diagram</value>
+  </data>
+  <data name="Toolbox_RelationshipSection" xml:space="preserve">
+    <value>Relationships</value>
+  </data>
+  <data name="Toolbox_OneToOne" xml:space="preserve">
+    <value>One-to-One</value>
+  </data>
+  <data name="Toolbox_OneToOneTooltip" xml:space="preserve">
+    <value>Switch to one-to-one relationship creation mode</value>
+  </data>
+  <data name="Toolbox_OneToMany" xml:space="preserve">
+    <value>One-to-Many</value>
+  </data>
+  <data name="Toolbox_OneToManyTooltip" xml:space="preserve">
+    <value>Create a one-to-many relationship representing a parent-child relationship</value>
+  </data>
+  <data name="Toolbox_ManyToMany" xml:space="preserve">
+    <value>Many-to-Many</value>
+  </data>
+  <data name="Toolbox_ManyToManyTooltip" xml:space="preserve">
+    <value>Create a many-to-many relationship assuming a junction table</value>
+  </data>
+  <data name="Toolbox_RemoveRelationship" xml:space="preserve">
+    <value>Delete Relationship</value>
+  </data>
+  <data name="Toolbox_RemoveRelationshipTooltip" xml:space="preserve">
+    <value>Delete the selected relationship</value>
+  </data>
+  <data name="Toolbox_RelationshipModeHint" xml:space="preserve">
+    <value>Creating relationship: click two entities in order. Click the same entity twice to create a self-referencing relationship.</value>
+  </data>
+  <data name="Search_Tooltip" xml:space="preserve">
+    <value>Search table and column names by partial match (case-insensitive)</value>
+  </data>
+  <data name="Search_CloseTooltip" xml:space="preserve">
+    <value>Close search (Esc)</value>
+  </data>
+  <data name="Property_Title" xml:space="preserve">
+    <value>Properties</value>
+  </data>
+  <data name="Property_Placeholder" xml:space="preserve">
+    <value>Select an entity or relationship to edit its details here.</value>
+  </data>
+  <data name="Property_TableName" xml:space="preserve">
+    <value>Table Name</value>
+  </data>
+  <data name="Property_Description" xml:space="preserve">
+    <value>Description</value>
+  </data>
+  <data name="Property_DescriptionTooltip" xml:space="preserve">
+    <value>Synchronized with SQL Server's MS_Description</value>
+  </data>
+  <data name="Property_TitleBackground" xml:space="preserve">
+    <value>Title Background</value>
+  </data>
+  <data name="Property_ColumnsHeader" xml:space="preserve">
+    <value>Columns</value>
+  </data>
+  <data name="Property_AddColumnTooltip" xml:space="preserve">
+    <value>Add column</value>
+  </data>
+  <data name="Property_RemoveColumnTooltip" xml:space="preserve">
+    <value>Delete the selected column</value>
+  </data>
+  <data name="Property_ReorderHint" xml:space="preserve">
+    <value>Drag rows to change their order.</value>
+  </data>
+  <data name="Property_Memo" xml:space="preserve">
+    <value>Notes</value>
+  </data>
+  <data name="Property_BulkTitleBackground" xml:space="preserve">
+    <value>Change title background in bulk</value>
+  </data>
+  <data name="Property_RemoveAllSelected" xml:space="preserve">
+    <value>Delete all selected</value>
+  </data>
+  <data name="Property_RelationshipTitle" xml:space="preserve">
+    <value>Relationship</value>
+  </data>
+  <data name="Property_RelationType" xml:space="preserve">
+    <value>Type</value>
+  </data>
+  <data name="Property_ConstraintName" xml:space="preserve">
+    <value>Constraint Name</value>
+  </data>
+  <data name="Property_SourceEndpoint" xml:space="preserve">
+    <value>Source</value>
+  </data>
+  <data name="Property_ReferencedColumn" xml:space="preserve">
+    <value>Referenced Column</value>
+  </data>
+  <data name="Property_TargetEndpoint" xml:space="preserve">
+    <value>Target</value>
+  </data>
+  <data name="Property_ForeignKeyColumn" xml:space="preserve">
+    <value>Foreign Key Column</value>
+  </data>
+  <data name="Property_RemoveRelationship" xml:space="preserve">
+    <value>Delete Relationship</value>
+  </data>
+  <data name="Grid_ColumnName" xml:space="preserve">
+    <value>Column Name</value>
+  </data>
+  <data name="Grid_Type" xml:space="preserve">
+    <value>Type</value>
+  </data>
+  <data name="Grid_RemoveColumnTooltip" xml:space="preserve">
+    <value>Delete this column</value>
+  </data>
+  <data name="Print_Title" xml:space="preserve">
+    <value>Print Options</value>
+  </data>
+  <data name="Print_DiagramTitle" xml:space="preserve">
+    <value>Diagram Title</value>
+  </data>
+  <data name="Print_SizeSection" xml:space="preserve">
+    <value>Print Size</value>
+  </data>
+  <data name="Print_FitToPage" xml:space="preserve">
+    <value>Scale to fit one page</value>
+  </data>
+  <data name="Print_ActualSize" xml:space="preserve">
+    <value>Print at actual size (match paper size to the diagram's real size; good for PDF output)</value>
+  </data>
+  <data name="Print_Timestamp" xml:space="preserve">
+    <value>Print the timestamp in the header</value>
+  </data>
+  <data name="Print_UntitledJob" xml:space="preserve">
+    <value>Untitled</value>
+  </data>
+  <data name="Print_JobName" xml:space="preserve">
+    <value>QuickER ER Diagram - {0}</value>
+  </data>
+  <data name="DbConnection_Title" xml:space="preserve">
+    <value>Connect to Database</value>
+  </data>
+  <data name="DbConnection_SavedConnections" xml:space="preserve">
+    <value>Saved Connections</value>
+  </data>
+  <data name="DbConnection_DeleteProfile" xml:space="preserve">
+    <value>🗑 Delete</value>
+  </data>
+  <data name="DbConnection_DeleteProfileTooltip" xml:space="preserve">
+    <value>Delete the selected profile</value>
+  </data>
+  <data name="DbConnection_ProfileName" xml:space="preserve">
+    <value>Profile Name</value>
+  </data>
+  <data name="DbConnection_SaveProfile" xml:space="preserve">
+    <value>💾 Save</value>
+  </data>
+  <data name="DbConnection_SaveProfileTooltip" xml:space="preserve">
+    <value>Save the current input under the profile name</value>
+  </data>
+  <data name="DbConnection_TargetDb" xml:space="preserve">
+    <value>Target DB</value>
+  </data>
+  <data name="DbConnection_FilePath" xml:space="preserve">
+    <value>File Path</value>
+  </data>
+  <data name="DbConnection_Browse" xml:space="preserve">
+    <value>Browse...</value>
+  </data>
+  <data name="DbConnection_BrowseTooltip" xml:space="preserve">
+    <value>Select an existing SQLite database file</value>
+  </data>
+  <data name="DbConnection_Host" xml:space="preserve">
+    <value>Host</value>
+  </data>
+  <data name="DbConnection_Port" xml:space="preserve">
+    <value>Port</value>
+  </data>
+  <data name="DbConnection_PortTooltip" xml:space="preserve">
+    <value>If left blank, the dialect's default port is used</value>
+  </data>
+  <data name="DbConnection_Database" xml:space="preserve">
+    <value>Database</value>
+  </data>
+  <data name="DbConnection_AuthMethod" xml:space="preserve">
+    <value>Authentication</value>
+  </data>
+  <data name="DbConnection_UserName" xml:space="preserve">
+    <value>User Name</value>
+  </data>
+  <data name="DbConnection_Password" xml:space="preserve">
+    <value>Password</value>
+  </data>
+  <data name="DbConnection_SavePassword" xml:space="preserve">
+    <value>Save</value>
+  </data>
+  <data name="DbConnection_SavePasswordTooltip" xml:space="preserve">
+    <value>Encrypt with Windows DPAPI and save together with the profile</value>
+  </data>
+  <data name="DbConnection_TrustServerCertificate" xml:space="preserve">
+    <value>Trust the server certificate (TrustServerCertificate)</value>
+  </data>
+  <data name="DbConnection_TestConnection" xml:space="preserve">
+    <value>Test Connection</value>
+  </data>
+  <data name="DbConnection_Restored" xml:space="preserve">
+    <value>Restored the previous connection settings.</value>
+  </data>
+  <data name="DbConnection_ProfileDialectMismatch" xml:space="preserve">
+    <value>Profile '{0}' cannot be selected because its dialect differs.</value>
+  </data>
+  <data name="DbConnection_ProfileLoaded" xml:space="preserve">
+    <value>Loaded profile '{0}'.</value>
+  </data>
+  <data name="DbConnection_Connecting" xml:space="preserve">
+    <value>Connecting...</value>
+  </data>
+  <data name="DbConnection_ConnectSucceeded" xml:space="preserve">
+    <value>Connected: detected {0} table(s).</value>
+  </data>
+  <data name="DbConnection_ConnectFailed" xml:space="preserve">
+    <value>Connection failed: {0}</value>
+  </data>
+  <data name="DbConnection_ProfileNameRequired" xml:space="preserve">
+    <value>Enter a profile name.</value>
+  </data>
+  <data name="DbConnection_ProfileSaved" xml:space="preserve">
+    <value>Saved profile '{0}'.</value>
+  </data>
+  <data name="DbConnection_SelectProfileToDelete" xml:space="preserve">
+    <value>Select a profile to delete.</value>
+  </data>
+  <data name="DbConnection_DeleteProfileConfirm" xml:space="preserve">
+    <value>Delete profile '{0}'. Are you sure?</value>
+  </data>
+  <data name="DbConnection_ProfileDeleted" xml:space="preserve">
+    <value>Deleted profile '{0}'.</value>
+  </data>
+  <data name="DbConnection_SqliteFileFilter" xml:space="preserve">
+    <value>SQLite Database (*.db;*.sqlite;*.sqlite3)|*.db;*.sqlite;*.sqlite3|All Files (*.*)|*.*</value>
+  </data>
+  <data name="DbConnection_FilePathRequired" xml:space="preserve">
+    <value>Enter the database file path.</value>
+  </data>
+  <data name="DbConnection_FileNotFound" xml:space="preserve">
+    <value>The specified database file was not found.</value>
+  </data>
+  <data name="DbConnection_HostAndDatabaseRequired" xml:space="preserve">
+    <value>Enter the host and database name.</value>
+  </data>
+  <data name="SchemaSync_Title" xml:space="preserve">
+    <value>DB Schema Sync (Apply Diff)</value>
+  </data>
+  <data name="SchemaSync_Recalculate" xml:space="preserve">
+    <value>🔄 Recalculate Diff</value>
+  </data>
+  <data name="SchemaSync_SelectAll" xml:space="preserve">
+    <value>✓ Select All</value>
+  </data>
+  <data name="SchemaSync_DeselectAll" xml:space="preserve">
+    <value>✗ Deselect All</value>
+  </data>
+  <data name="SchemaSync_Execute" xml:space="preserve">
+    <value>🛢 Execute</value>
+  </data>
+  <data name="SchemaSync_DiffList" xml:space="preserve">
+    <value>Diff List</value>
+  </data>
+  <data name="SchemaSync_SqlPreview" xml:space="preserve">
+    <value>Generated SQL Preview</value>
+  </data>
+  <data name="SchemaSync_Fetching" xml:space="preserve">
+    <value>Retrieving DB schema...</value>
+  </data>
+  <data name="SchemaSync_ColumnOrderNotSynced" xml:space="preserve">
+    <value>Column order changes are not synced to the DB: [{0}]</value>
+  </data>
+  <data name="SchemaSync_DiffCount" xml:space="preserve">
+    <value>{0} difference(s) found.</value>
+  </data>
+  <data name="SchemaSync_NoDiff" xml:space="preserve">
+    <value>No differences.</value>
+  </data>
+  <data name="SchemaSync_DiffFailed" xml:space="preserve">
+    <value>Failed to compute diff: {0}</value>
+  </data>
+  <data name="SchemaSync_NoScript" xml:space="preserve">
+    <value>There is no script to execute.</value>
+  </data>
+  <data name="SchemaSync_ExecuteConfirmDestructive" xml:space="preserve">
+    <value>This script contains destructive changes (drops/type changes) and will run against {0}. Are you sure?</value>
+  </data>
+  <data name="SchemaSync_ExecuteConfirm" xml:space="preserve">
+    <value>Run the script against {0}. Are you sure?</value>
+  </data>
+  <data name="SchemaSync_Executing" xml:space="preserve">
+    <value>Executing...</value>
+  </data>
+  <data name="SchemaSync_ExecuteSucceeded" xml:space="preserve">
+    <value>Success: executed {0} batch(es) and committed.</value>
+  </data>
+  <data name="SchemaSync_ExecuteFailedStatus" xml:space="preserve">
+    <value>Failed: {0}</value>
+  </data>
+  <data name="SchemaSync_RollbackMessage" xml:space="preserve">
+    <value>Execution failed and was rolled back:</value>
+  </data>
+  <data name="SchemaSync_ExecuteError" xml:space="preserve">
+    <value>Execution failed: {0}</value>
+  </data>
+  <data name="Color_Blue" xml:space="preserve">
+    <value>Blue</value>
+  </data>
+  <data name="Color_Green" xml:space="preserve">
+    <value>Green</value>
+  </data>
+  <data name="Color_Yellow" xml:space="preserve">
+    <value>Yellow</value>
+  </data>
+  <data name="Color_Purple" xml:space="preserve">
+    <value>Purple</value>
+  </data>
+  <data name="Color_Pink" xml:space="preserve">
+    <value>Pink</value>
+  </data>
+  <data name="Color_Gray" xml:space="preserve">
+    <value>Gray</value>
+  </data>
+  <data name="Undo_AddColumn" xml:space="preserve">
+    <value>Add column: {0}</value>
+  </data>
+  <data name="Undo_AddEntity" xml:space="preserve">
+    <value>Add entity: {0}</value>
+  </data>
+  <data name="Undo_AddRelationship" xml:space="preserve">
+    <value>Add relationship</value>
+  </data>
+  <data name="Undo_ChangeTargetDbms" xml:space="preserve">
+    <value>Change DB type to {0}</value>
+  </data>
+  <data name="Undo_DuplicateEntity" xml:space="preserve">
+    <value>Duplicate: {0}</value>
+  </data>
+  <data name="Undo_GroupChangeTitleColor" xml:space="preserve">
+    <value>Bulk change title color: {0}</value>
+  </data>
+  <data name="Undo_GroupMoveEntities" xml:space="preserve">
+    <value>Group move: {0}</value>
+  </data>
+  <data name="Undo_GroupRemoveEntities" xml:space="preserve">
+    <value>Bulk delete entities: {0}</value>
+  </data>
+  <data name="Undo_ImportSchema" xml:space="preserve">
+    <value>Import schema from DB</value>
+  </data>
+  <data name="Undo_MoveColumnOrder" xml:space="preserve">
+    <value>Reorder column: {0}</value>
+  </data>
+  <data name="Undo_MoveEntity" xml:space="preserve">
+    <value>Move: {0}</value>
+  </data>
+  <data name="Undo_PropertyChange" xml:space="preserve">
+    <value>Change: {0}</value>
+  </data>
+  <data name="Undo_RemoveColumn" xml:space="preserve">
+    <value>Delete column: {0}</value>
+  </data>
+  <data name="Undo_RemoveEntity" xml:space="preserve">
+    <value>Delete entity: {0}</value>
+  </data>
+  <data name="Undo_RemoveRelationship" xml:space="preserve">
+    <value>Delete relationship</value>
+  </data>
+  <data name="Undo_SnapshotChange" xml:space="preserve">
+    <value>Property change</value>
+  </data>
+  <data name="Confirm_ClearDiagram" xml:space="preserve">
+    <value>This will clear the current diagram. Are you sure?</value>
+  </data>
+  <data name="Relationship_DuplicateMessage" xml:space="preserve">
+    <value>A relationship with the same association already exists. Please edit the existing relationship.</value>
+  </data>
+  <data name="Relationship_DuplicateTitle" xml:space="preserve">
+    <value>Duplicate Relationship</value>
+  </data>
+  <data name="Dbms_UnsupportedFallback" xml:space="preserve">
+    <value>Unsupported database type '{0}' was specified; treating it as SQL Server.</value>
+  </data>
+  <data name="Dbms_Title" xml:space="preserve">
+    <value>Database Type</value>
+  </data>
+  <data name="TypeConversion_WarningTitle" xml:space="preserve">
+    <value>Type Conversion Warning</value>
+  </data>
+  <data name="TypeConversion_WarningHeader" xml:space="preserve">
+    <value>Columns that could not be converted (original types kept):</value>
+  </data>
+  <data name="TypeConversion_ColumnLine" xml:space="preserve">
+    <value>• {0}.{1} ({2})</value>
+  </data>
+  <data name="TypeConversion_MoreItems" xml:space="preserve">
+    <value>…and {0} more</value>
+  </data>
+  <data name="Export_Failed" xml:space="preserve">
+    <value>Failed to export.</value>
+  </data>
+  <data name="Print_Failed" xml:space="preserve">
+    <value>Failed to print.</value>
+  </data>
+  <data name="Csharp_GenerationErrorTitle" xml:space="preserve">
+    <value>C# Generation Error</value>
+  </data>
+  <data name="Csharp_WarningLine" xml:space="preserve">
+    <value>• {0}</value>
+  </data>
+  <data name="Csharp_WarningIntro" xml:space="preserve">
+    <value>The following warnings were found.</value>
+  </data>
+  <data name="Csharp_WarningPrompt" xml:space="preserve">
+    <value>Do you want to generate anyway? (We recommend canceling and fixing the ER diagram definitions.)</value>
+  </data>
+  <data name="Csharp_WarningTitle" xml:space="preserve">
+    <value>C# Generation Warning</value>
+  </data>
+  <data name="Csharp_GeneratedSuccess" xml:space="preserve">
+    <value>C# code generation completed.</value>
+  </data>
+  <data name="Csharp_GenerationFailed" xml:space="preserve">
+    <value>Failed to generate C# code.</value>
+  </data>
+  <data name="Import_Failed" xml:space="preserve">
+    <value>Failed to import.</value>
+  </data>
+  <data name="ExportFormat_Png" xml:space="preserve">
+    <value>PNG Image</value>
+  </data>
+  <data name="ExportFormat_Svg" xml:space="preserve">
+    <value>SVG Image</value>
+  </data>
+  <data name="Format_DefinitionDocument" xml:space="preserve">
+    <value>Definition Document</value>
+  </data>
+  <data name="Format_File" xml:space="preserve">
+    <value>File</value>
+  </data>
+  <data name="Export_PngCanvasInfoMissing" xml:space="preserve">
+    <value>Could not obtain the canvas information required for PNG export.</value>
+  </data>
+  <data name="Export_Completed" xml:space="preserve">
+    <value>Exported {0}.</value>
+  </data>
+  <data name="Import_UnsupportedFormat" xml:space="preserve">
+    <value>Unsupported import format.</value>
+  </data>
+  <data name="Import_ReplaceConfirm" xml:space="preserve">
+    <value>This will replace the current diagram with the contents of {0}. Are you sure?</value>
+  </data>
+  <data name="Import_Completed" xml:space="preserve">
+    <value>Imported {0}.</value>
+  </data>
+  <data name="Export_FormatUndetermined" xml:space="preserve">
+    <value>Could not determine the export format.</value>
+  </data>
+  <data name="Import_FormatUndetermined" xml:space="preserve">
+    <value>Could not determine the import format.</value>
+  </data>
+  <data name="Db_ImportTitle" xml:space="preserve">
+    <value>Import from Database</value>
+  </data>
+  <data name="Db_ImportReplaceConfirm" xml:space="preserve">
+    <value>This will replace the current diagram with the retrieved result. Are you sure?</value>
+  </data>
+  <data name="Db_ImportFailed" xml:space="preserve">
+    <value>Failed to import: {0}</value>
+  </data>
+  <data name="Db_SyncSqliteUnsupported" xml:space="preserve">
+    <value>The SQLite provider does not support DB sync yet (planned for the future)</value>
+  </data>
+  <data name="Db_SyncWriteBack" xml:space="preserve">
+    <value>Write the current diagram back to the existing DB (apply diff ALTER)</value>
+  </data>
+  <data name="Db_SyncTitle" xml:space="preserve">
+    <value>Sync with Database</value>
+  </data>
+  <data name="Selection_CountText" xml:space="preserve">
+    <value>{0} selected</value>
+  </data>
+  <data name="Dbml_EmptyText" xml:space="preserve">
+    <value>The DBML text is empty.</value>
+  </data>
+  <data name="Dbml_DuplicateEntity" xml:space="preserve">
+    <value>Entity '{0}' is duplicated.</value>
+  </data>
+  <data name="Dbml_MissingClosingBrace" xml:space="preserve">
+    <value>Entity '{0}' is missing its closing brace '}}'.</value>
+  </data>
+  <data name="Dbml_NoEntities" xml:space="preserve">
+    <value>The DBML contains no entity definitions.</value>
+  </data>
+  <data name="Dbml_ColumnParseError" xml:space="preserve">
+    <value>Cannot parse column definition '{1}' of table '{0}'.</value>
+  </data>
+  <data name="Dbml_RelationshipParseError" xml:space="preserve">
+    <value>Cannot parse relationship definition '{0}'.</value>
+  </data>
+  <data name="Dbml_RelationshipSourceUndefined" xml:space="preserve">
+    <value>The relationship's source table '{0}' is undefined.</value>
+  </data>
+  <data name="Dbml_RelationshipTargetUndefined" xml:space="preserve">
+    <value>The relationship's target table '{0}' is undefined.</value>
+  </data>
+  <data name="Dbml_UnsupportedRelationshipSymbol" xml:space="preserve">
+    <value>Unsupported relationship symbol '{0}'.</value>
+  </data>
+  <data name="Mermaid_EmptyText" xml:space="preserve">
+    <value>The Mermaid text is empty.</value>
+  </data>
+  <data name="Mermaid_MissingHeader" xml:space="preserve">
+    <value>Mermaid must start with an erDiagram header.</value>
+  </data>
+  <data name="Mermaid_MissingEntityName" xml:space="preserve">
+    <value>The entity name is missing.</value>
+  </data>
+  <data name="Mermaid_DuplicateEntity" xml:space="preserve">
+    <value>Entity '{0}' is duplicated.</value>
+  </data>
+  <data name="Mermaid_HeaderNotFound" xml:space="preserve">
+    <value>The Mermaid erDiagram header was not found.</value>
+  </data>
+  <data name="Mermaid_MissingClosingBrace" xml:space="preserve">
+    <value>Entity '{0}' is missing its closing brace '}}'.</value>
+  </data>
+  <data name="Mermaid_NoEntities" xml:space="preserve">
+    <value>The Mermaid contains no entity definitions.</value>
+  </data>
+  <data name="Mermaid_ColumnParseError" xml:space="preserve">
+    <value>Cannot parse column definition '{1}' of table '{0}'.</value>
+  </data>
+  <data name="Mermaid_RelationshipParseError" xml:space="preserve">
+    <value>Cannot parse relationship definition '{0}'.</value>
+  </data>
+  <data name="Mermaid_RelationshipLeftUndefined" xml:space="preserve">
+    <value>The relationship's left-hand table '{0}' is undefined.</value>
+  </data>
+  <data name="Mermaid_RelationshipRightUndefined" xml:space="preserve">
+    <value>The relationship's right-hand table '{0}' is undefined.</value>
+  </data>
+  <data name="Mermaid_UnsupportedRelationshipSymbol" xml:space="preserve">
+    <value>Unsupported relationship symbol '{0}'.</value>
+  </data>
+  <data name="TableDoc_SheetNotFound" xml:space="preserve">
+    <value>Sheet '{0}' was not found.</value>
+  </data>
+  <data name="TableDoc_SummaryDuplicateTable" xml:space="preserve">
+    <value>The Table List sheet contains a duplicate table name '{0}'.</value>
+  </data>
+  <data name="TableDoc_SummaryNoTables" xml:space="preserve">
+    <value>The Table List sheet contains no table information.</value>
+  </data>
+  <data name="TableDoc_CountMismatch" xml:space="preserve">
+    <value>The number of entries in the Table List sheet and the detail sheets do not match.</value>
+  </data>
+  <data name="TableDoc_DetailMissingTableName" xml:space="preserve">
+    <value>Sheet '{0}' has no table name in B{1}.</value>
+  </data>
+  <data name="TableDoc_DetailTableNotInSummary" xml:space="preserve">
+    <value>Table name '{1}' in detail sheet '{0}' does not exist in the Table List sheet.</value>
+  </data>
+  <data name="TableDoc_DetailDuplicateTable" xml:space="preserve">
+    <value>The detail sheets contain a duplicate table name '{0}'.</value>
+  </data>
+  <data name="TableDoc_DescriptionMismatch" xml:space="preserve">
+    <value>The description of table '{0}' does not match between the Table List and detail sheets.</value>
+  </data>
+  <data name="TableDoc_DetailSheetNotFound" xml:space="preserve">
+    <value>The detail sheet for table '{0}' was not found.</value>
+  </data>
+  <data name="TableDoc_ColumnMissingDataType" xml:space="preserve">
+    <value>Column '{1}' of table '{0}' has no data type.</value>
+  </data>
+  <data name="TableDoc_TableNoColumns" xml:space="preserve">
+    <value>Table '{0}' has no column definitions.</value>
+  </data>
+  <data name="TableDoc_RelMissingTableName" xml:space="preserve">
+    <value>Row {0} of the Relationship List sheet is missing a source or target table name.</value>
+  </data>
+  <data name="TableDoc_RelParentNotFound" xml:space="preserve">
+    <value>The target table '{0}' in the Relationship List sheet does not exist.</value>
+  </data>
+  <data name="TableDoc_RelChildNotFound" xml:space="preserve">
+    <value>The source table '{0}' in the Relationship List sheet does not exist.</value>
+  </data>
+  <data name="TableDoc_RelDuplicate" xml:space="preserve">
+    <value>The relationship between tables '{0}' and '{1}' is duplicated.</value>
+  </data>
+  <data name="TableDoc_RelMissingColumn" xml:space="preserve">
+    <value>Row {0} of the Relationship List sheet is missing a reference column.</value>
+  </data>
+  <data name="TableDoc_RelChildColumnNotFound" xml:space="preserve">
+    <value>Table '{0}' does not have the source column '{1}'.</value>
+  </data>
+  <data name="TableDoc_RelParentColumnNotFound" xml:space="preserve">
+    <value>Table '{0}' does not have the target column '{1}'.</value>
+  </data>
+  <data name="TableDoc_RelUnknownRelation" xml:space="preserve">
+    <value>Cannot interpret the relationship '{1}' in row {0} of the Relationship List sheet.</value>
+  </data>
+</root>

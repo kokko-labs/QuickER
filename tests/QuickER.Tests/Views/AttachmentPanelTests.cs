@@ -4,6 +4,7 @@ using System.Windows.Controls;
 using System.Windows.Media;
 using FluentAssertions;
 using QuickER.AI.UI;
+using AiUiStrings = QuickER.AI.UI.Resources.Strings;
 
 namespace QuickER.Tests.Views;
 
@@ -164,7 +165,10 @@ public class AttachmentPanelTests
         {
             var child = VisualTreeHelper.GetChild(root, i);
 
-            if (child is Button button && Equals(button.ToolTip, "削除"))
+            if (
+                child is Button button
+                && Equals(button.ToolTip, AiUiStrings.Attachment_RemoveTooltip)
+            )
             {
                 return button;
             }

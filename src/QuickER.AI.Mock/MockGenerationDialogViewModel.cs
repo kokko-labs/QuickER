@@ -7,6 +7,7 @@ using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using QuickER.AI;
+using QuickER.AI.Mock.Resources;
 using QuickER.AI.UI;
 using QuickER.Gui.Abstractions;
 using QuickER.Model;
@@ -223,37 +224,37 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         {
             if (IsMockGenInProgress)
             {
-                return "生成を実行中です。";
+                return Strings.Mock_DisabledReason_InProgress;
             }
 
             if (!CanSaveHtml)
             {
-                return "先にモック HTML を確定してください（プレビューに反映された状態が必要です）。";
+                return Strings.Mock_DisabledReason_ConfirmHtml;
             }
 
             if (Connection.SelectedBackend != ErChatBackendKind.ClaudeCode)
             {
-                return "WPF モック生成はバックエンドが Claude Code のときのみ利用できます。";
+                return Strings.Mock_DisabledReason_ClaudeCodeOnly;
             }
 
             if (!IsClaudeCliAvailable)
             {
-                return "claude CLI が見つかりません。Claude Code をインストールし PATH を通してください。";
+                return Strings.Mock_DisabledReason_ClaudeCli;
             }
 
             if (!IsDotnetAvailable)
             {
-                return ".NET SDK（dotnet）が見つかりません。.NET SDK をインストールしてください。";
+                return Strings.Mock_DisabledReason_Dotnet;
             }
 
             if (string.IsNullOrWhiteSpace(OutputFolder))
             {
-                return "出力フォルダを選択してください。";
+                return Strings.Mock_DisabledReason_OutputFolder;
             }
 
             if (string.IsNullOrWhiteSpace(ProjectName))
             {
-                return "プロジェクト名を入力してください。";
+                return Strings.Mock_DisabledReason_ProjectName;
             }
 
             return string.Empty;
@@ -263,7 +264,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     // ── Codex 認証状態（子の状態タブとは別に、認証解決はダイアログ側プローブの責務） ──
 
     [ObservableProperty]
-    private string _codexAccountSummary = "未接続";
+    private string _codexAccountSummary = Strings.Mock_CodexNotConnected;
 
     [ObservableProperty]
     private ConnectionHealth _codexStatusLevel = ConnectionHealth.Pending;
@@ -450,9 +451,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         _currentAssistantMessage = null;
         _conversationStarted = true;
         _firstMessageSent = false;
-        AddSystemMessage(
-            "会話を開始しました。モックへの要望を入力して送信してください（例: シンプルな管理画面で）。"
-        );
+        AddSystemMessage(Strings.Mock_ConversationStarted);
         SendMessageCommand.NotifyCanExecuteChanged();
     }
 
@@ -501,7 +500,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         catch (Exception ex)
         {
             IsTurnInProgress = false;
-            StatusMessage = $"送信に失敗しました: {ex.Message}";
+            StatusMessage = string.Format(Strings.Mock_SendFailedFormat, ex.Message);
         }
     }
 
@@ -527,7 +526,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         }
 
         var picked = _files.PickSaveFile(
-            "HTML ファイル (*.html)|*.html",
+            Strings.Mock_HtmlFileFilter,
             ".html",
             initialFileName: "mock.html"
         );
@@ -544,11 +543,11 @@ public partial class MockGenerationDialogViewModel : ObservableObject
                 html,
                 new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false)
             );
-            StatusMessage = "HTML を保存しました。";
+            StatusMessage = Strings.Mock_HtmlSaved;
         }
         catch (Exception ex)
         {
-            StatusMessage = $"HTML を保存できませんでした: {ex.Message}";
+            StatusMessage = string.Format(Strings.Mock_HtmlSaveFailedFormat, ex.Message);
         }
     }
 
@@ -558,10 +557,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     [RelayCommand]
     private void BrowseOutputFolder()
     {
-        var picked = _files.PickFolder(
-            "WPF モックプロジェクトの出力先フォルダを選択",
-            OutputFolder
-        );
+        var picked = _files.PickFolder(Strings.Mock_PickOutputFolderTitle, OutputFolder);
 
         if (!string.IsNullOrWhiteSpace(picked))
         {
@@ -588,9 +584,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
             && Directory.EnumerateFileSystemEntries(outputFolder).Any()
         )
         {
-            AppendMockGenLog(
-                "※ 出力フォルダは空ではありません。既存ファイルは残したまま生成物を追加します。\n"
-            );
+            AppendMockGenLog(Strings.Mock_OutputFolderNotEmpty);
         }
 
         var diagram = _diagramSource.GetDiagram();
@@ -600,7 +594,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         MockGenCompleted = false;
         MockGenSucceeded = false;
         IsMockGenInProgress = true;
-        StatusMessage = "WPF モックプロジェクトを生成しています...";
+        StatusMessage = Strings.Mock_GeneratingProject;
 
         _mockGenCts = new CancellationTokenSource();
 
@@ -624,8 +618,8 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         catch (Exception ex)
         {
             MockGenSucceeded = false;
-            AppendMockGenLog($"\n生成中にエラーが発生しました: {ex.Message}\n");
-            StatusMessage = $"WPF モック生成に失敗しました: {ex.Message}";
+            AppendMockGenLog(string.Format(Strings.Mock_GenerationErrorLogFormat, ex.Message));
+            StatusMessage = string.Format(Strings.Mock_GenerationFailedFormat, ex.Message);
         }
         finally
         {
@@ -770,8 +764,8 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         _lastHtml = update.Html;
 
         var note = string.IsNullOrWhiteSpace(update.RevisionNote)
-            ? "モックを更新しました。"
-            : $"更新: {update.RevisionNote}";
+            ? Strings.Mock_MockUpdated
+            : string.Format(Strings.Mock_UpdateNoteFormat, update.RevisionNote);
         AddSystemMessage(note);
 
         HtmlUpdated?.Invoke(this, update);
@@ -789,16 +783,16 @@ public partial class MockGenerationDialogViewModel : ObservableObject
 
         if (result.Success)
         {
-            StatusMessage = "応答が完了しました。";
+            StatusMessage = Strings.Mock_ResponseCompleted;
         }
         else if (!string.IsNullOrWhiteSpace(result.Error))
         {
-            AddSystemMessage($"エラー: {result.Error}");
-            StatusMessage = $"エラーが発生しました: {result.Error}";
+            AddSystemMessage(string.Format(Strings.Mock_ErrorSystemFormat, result.Error));
+            StatusMessage = string.Format(Strings.Mock_ErrorStatusFormat, result.Error);
         }
         else
         {
-            StatusMessage = "処理が中断されました。";
+            StatusMessage = Strings.Mock_Interrupted;
         }
     }
 

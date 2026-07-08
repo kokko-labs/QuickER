@@ -2,6 +2,7 @@ using System.IO;
 using FluentAssertions;
 using QuickER.AI;
 using QuickER.AI.UI;
+using AiUiStrings = QuickER.AI.UI.Resources.Strings;
 
 namespace QuickER.Tests.ViewModels;
 
@@ -102,7 +103,11 @@ public class AttachmentListViewModelTests
         AddImage(vm);
 
         vm.Items.Should().BeEmpty();
-        statuses.Should().ContainSingle().Which.Should().Contain("対応していません");
+        statuses
+            .Should()
+            .ContainSingle()
+            .Which.Should()
+            .Contain(AiUiStrings.Attachment_DisabledUnsupported);
     }
 
     /// <summary>Support=OpenAI（画像＋テキスト）では（ファイル経由で読み込んだ）PDF を拒否し通知することを検証する</summary>
@@ -149,7 +154,11 @@ public class AttachmentListViewModelTests
             var (imagesOnly, statuses) = CreateVm(AttachmentSupport.Images);
             imagesOnly.AddFiles(new[] { textPath });
             imagesOnly.Items.Should().BeEmpty();
-            statuses.Should().Contain(s => s.Contains("テキスト"));
+            statuses
+                .Should()
+                .Contain(
+                    string.Format(AiUiStrings.Attachment_RejectText, Path.GetFileName(textPath))
+                );
         }
         finally
         {
@@ -178,7 +187,11 @@ public class AttachmentListViewModelTests
             var (apiKey, statuses) = CreateVm(ClaudeApiSupport);
             apiKey.AddFiles(new[] { binPath });
             apiKey.Items.Should().BeEmpty();
-            statuses.Should().Contain(s => s.Contains("Claude 接続"));
+            statuses
+                .Should()
+                .Contain(
+                    string.Format(AiUiStrings.Attachment_RejectBinary, Path.GetFileName(binPath))
+                );
         }
         finally
         {
@@ -202,7 +215,9 @@ public class AttachmentListViewModelTests
         AddImage(vm); // 6 枚目
 
         vm.Items.Should().HaveCount(ChatAttachmentLimits.MaxImagesPerMessage);
-        statuses.Should().Contain(s => s.Contains("最大"));
+        statuses
+            .Should()
+            .Contain(s => s.Contains(ChatAttachmentLimits.MaxImagesPerMessage.ToString()));
     }
 
     /// <summary>ターン実行中は追加・削除ができないことを検証する</summary>
@@ -233,7 +248,7 @@ public class AttachmentListViewModelTests
         vm.Support = AttachmentSupport.None;
 
         vm.Items.Should().BeEmpty();
-        statuses.Should().Contain(s => s.Contains("クリアしました"));
+        statuses.Should().Contain(AiUiStrings.Attachment_ClearedUnsupported);
     }
 
     /// <summary>対応範囲を縮小（全種別→画像＋テキスト）すると、非対応になった PDF だけが除去されることを検証する</summary>
@@ -250,7 +265,7 @@ public class AttachmentListViewModelTests
 
         vm.Items.Should().ContainSingle();
         vm.Items[0].Attachment.Kind.Should().Be(ChatAttachmentKind.Image);
-        statuses.Should().Contain(s => s.Contains("除外しました"));
+        statuses.Should().Contain(AiUiStrings.Attachment_RemovedUnsupported);
     }
 
     /// <summary>ファイルフィルタが全形式開放（すべてのファイル）＋補助フィルタを含むことを検証する</summary>
@@ -259,7 +274,7 @@ public class AttachmentListViewModelTests
     {
         var (vm, _) = CreateVm(OpenAiSupport);
 
-        vm.FileDialogFilter.Should().Contain("すべてのファイル");
+        vm.FileDialogFilter.Should().Contain(AiUiStrings.Attachment_FilterAllFiles);
         vm.FileDialogFilter.Should().Contain("*.*");
         // 補助フィルタ（画像・PDF）も含む
         vm.FileDialogFilter.Should().Contain("*.png");

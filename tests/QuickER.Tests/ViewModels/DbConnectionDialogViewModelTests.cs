@@ -2,6 +2,7 @@ using System.IO;
 using FluentAssertions;
 using QuickER.Gui.Abstractions;
 using QuickER.Provider;
+using QuickER.Resources;
 using QuickER.Services;
 using QuickER.Sqlite;
 using QuickER.SqlServer;
@@ -139,7 +140,7 @@ public class DbConnectionDialogViewModelTests : IDisposable
         reopened.Database.Should().Be("restored-db");
         reopened.UserId.Should().Be("sa");
         reopened.Password.Should().Be("secret");
-        reopened.StatusMessage.Should().Be("前回接続情報を復元しました。");
+        reopened.StatusMessage.Should().Be(Strings.DbConnection_Restored);
     }
 
     /// <summary>OK 確定で選択されていた方言が結果へ反映されることを検証する</summary>
@@ -240,7 +241,7 @@ public class DbConnectionDialogViewModelTests : IDisposable
         vm.DeleteProfileCommand.Execute(null);
 
         vm.Profiles.Should().BeEmpty();
-        vm.StatusMessage.Should().Contain("削除しました");
+        vm.StatusMessage.Should().Be(string.Format(Strings.DbConnection_ProfileDeleted, "TestDB"));
     }
 
     // ---------------- SQLite（ファイル型 DB）分岐 ----------------
@@ -290,7 +291,7 @@ public class DbConnectionDialogViewModelTests : IDisposable
         vm.OkCommand.Execute(null);
 
         vm.Result.Should().BeNull();
-        vm.StatusMessage.Should().Contain("ファイルのパス");
+        vm.StatusMessage.Should().Be(Strings.DbConnection_FilePathRequired);
     }
 
     /// <summary>SQLite で存在しないパスのとき OK が拒否されることを検証する（取込専用・新規作成不可）</summary>
@@ -303,7 +304,7 @@ public class DbConnectionDialogViewModelTests : IDisposable
         vm.OkCommand.Execute(null);
 
         vm.Result.Should().BeNull();
-        vm.StatusMessage.Should().Contain("見つかりません");
+        vm.StatusMessage.Should().Be(Strings.DbConnection_FileNotFound);
     }
 
     /// <summary>SQLite で実在するファイルパスのとき OK が確定し、結果へファイルパスが保持されることを検証する</summary>

@@ -1,3 +1,4 @@
+using QuickER.Resources;
 using QuickER.ViewModels;
 
 namespace QuickER.UndoRedo;
@@ -21,7 +22,7 @@ public class AddEntityCommand : IUndoableCommand
     }
 
     /// <inheritdoc />
-    public string Description => $"エンティティ追加: {_entity.TableName}";
+    public string Description => string.Format(Strings.Undo_AddEntity, _entity.TableName);
 
     /// <inheritdoc />
     public void Execute() => _main.Entities.Add(_entity);

@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <!--
+    英語サテライトリソース。中立（日本語）の Strings.resx と同じキー集合を保つこと（ResxKeyParityTests がキー集合の一致を検証する）。
+  -->
+  <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
+    <xsd:element name="root" msdata:IsDataSet="true">
+      <xsd:complexType>
+        <xsd:choice maxOccurs="unbounded">
+          <xsd:element name="metadata">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" />
+              </xsd:sequence>
+              <xsd:attribute name="name" use="required" type="xsd:string" />
+              <xsd:attribute name="type" type="xsd:string" />
+              <xsd:attribute name="mimetype" type="xsd:string" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="assembly">
+            <xsd:complexType>
+              <xsd:attribute name="alias" type="xsd:string" />
+              <xsd:attribute name="name" type="xsd:string" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="data">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+                <xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" msdata:Ordinal="1" />
+              <xsd:attribute name="type" type="xsd:string" msdata:Ordinal="3" />
+              <xsd:attribute name="mimetype" type="xsd:string" msdata:Ordinal="4" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="resheader">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" />
+            </xsd:complexType>
+          </xsd:element>
+        </xsd:choice>
+      </xsd:complexType>
+    </xsd:element>
+  </xsd:schema>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <data name="Cli_RootDescription" xml:space="preserve">
+    <value>QuickER - a CLI that generates C# code from an ER diagram or database</value>
+  </data>
+  <data name="Cli_Opt_Schema" xml:space="preserve">
+    <value>Input ER diagram JSON file (the app's save format)</value>
+  </data>
+  <data name="Cli_Opt_Out" xml:space="preserve">
+    <value>Output folder for the generated code</value>
+  </data>
+  <data name="Cli_Opt_Config" xml:space="preserve">
+    <value>Generation option settings file (quicker.json)</value>
+  </data>
+  <data name="Cli_Cmd_Generate" xml:space="preserve">
+    <value>Generate C# code from an ER diagram JSON</value>
+  </data>
+  <data name="Cli_Opt_Connection" xml:space="preserve">
+    <value>Connection string (e.g. Server=.;Database=Foo;Integrated Security=true;TrustServerCertificate=true)</value>
+  </data>
+  <data name="Cli_Cmd_Scaffold" xml:space="preserve">
+    <value>Connect directly to a database and generate C# code from its schema</value>
+  </data>
+  <data name="Cli_Opt_Provider" xml:space="preserve">
+    <value>Target database type (default: sqlserver)</value>
+  </data>
+  <data name="Cli_Opt_Namespace" xml:space="preserve">
+    <value>Root namespace of the generated code (overrides the settings file)</value>
+  </data>
+  <data name="Cli_Opt_Split" xml:space="preserve">
+    <value>Output each category in a separate file and namespace (overrides the settings file)</value>
+  </data>
+  <data name="Cli_Opt_RepositoryDialects" xml:space="preserve">
+    <value>Dialects for which to also generate custom Repositories (comma-separated, multiple allowed; e.g. sqlserver,sqlite). When omitted, a single dialect is derived from --provider. Overrides the settings file.</value>
+  </data>
+  <data name="Cli_Opt_RuntimePackages" xml:space="preserve">
+    <value>Do not include the runtime (fixed code) in the generated code; rely on references to the NuGet packages QuickER.Runtime.* instead (default false; can be combined with EF Core generation; overrides the settings file)</value>
+  </data>
+  <data name="Cli_Opt_ApiDocs" xml:space="preserve">
+    <value>Additionally output one API reference Markdown ({baseName}.g.md) (default false; overrides the settings file)</value>
+  </data>
+  <data name="Cli_SchemaFileNotFound" xml:space="preserve">
+    <value>Schema file not found: {0}</value>
+  </data>
+  <data name="Cli_SchemaImportFailed" xml:space="preserve">
+    <value>Failed to import the schema from the database: {0}</value>
+  </data>
+  <data name="Cli_RepositoryDialectUnsupported" xml:space="preserve">
+    <value>Custom Repository (GenerateRepositories) does not support the dialect '{0}'. Supported dialects: {1}</value>
+  </data>
+  <data name="Cli_GenerationAborted" xml:space="preserve">
+    <value>Aborted due to a generation error.</value>
+  </data>
+  <data name="Cli_GeneratedFile" xml:space="preserve">
+    <value>Generated: {0}</value>
+  </data>
+  <data name="Cli_GeneratedCount" xml:space="preserve">
+    <value>Generated {0} file(s).</value>
+  </data>
+</root>

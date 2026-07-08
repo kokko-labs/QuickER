@@ -2,6 +2,7 @@ using System.IO;
 using System.Windows;
 using System.Windows.Media.Imaging;
 using QuickER.AI;
+using QuickER.AI.UI.Resources;
 
 namespace QuickER.AI.UI;
 
@@ -15,7 +16,7 @@ namespace QuickER.AI.UI;
 public static class ClipboardImageAttachmentReader
 {
     /// <summary>クリップボード画像に付けるファイル名の接頭辞</summary>
-    private const string FileNamePrefix = "クリップボード画像";
+    private static string FileNamePrefix => Strings.Attachment_ClipboardImagePrefix;
 
     /// <summary>クリップボード画像のファイル名を組み立てる（yyyyMMdd_HHmmss のタイムスタンプ付き PNG）</summary>
     /// <param name="timestamp">ファイル名に埋め込む時刻</param>
@@ -49,7 +50,7 @@ public static class ClipboardImageAttachmentReader
                 false,
                 null,
                 ChatAttachmentError.Empty,
-                "クリップボードの内容を画像として取り込めませんでした。"
+                Strings.Attachment_ClipboardCaptureFailed
             );
         }
 

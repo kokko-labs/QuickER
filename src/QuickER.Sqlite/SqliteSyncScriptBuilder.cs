@@ -20,6 +20,6 @@ public sealed class SqliteSyncScriptBuilder : ISyncScriptBuilder
     /// <summary>常に <see cref="NotSupportedException"/> を投げる（SQLite の同期は未対応）</summary>
     public string Build(IEnumerable<SchemaDiffItem> items) =>
         throw new NotSupportedException(
-            "SQLite プロバイダは DB 同期に未対応です。将来的にテーブル再構築方式で対応予定です。"
+            QuickER.Provider.Resources.Strings.Sync_Sqlite_NotSupported
         );
 }

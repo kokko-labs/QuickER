@@ -4,7 +4,8 @@
   xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
   xmlns:chat="clr-namespace:QuickER.AI;assembly=QuickER.AI"
   xmlns:ui="clr-namespace:QuickER.AI.UI;assembly=QuickER.AI.UI"
-  Title="AI チャット"
+  xmlns:res="clr-namespace:QuickER.AI.Chat.Resources"
+  Title="{x:Static res:Strings.Chat_WindowTitle}"
   Width="860"
   Height="720"
   MinWidth="640"
@@ -296,7 +297,7 @@
             <StackPanel Orientation="Horizontal">
               <TextBlock Text="🛠" FontSize="13" Margin="0,0,6,0" />
               <TextBlock
-                Text="作業ログ"
+                Text="{x:Static res:Strings.Chat_ToolCallHeader}"
                 FontSize="12"
                 FontWeight="SemiBold"
                 VerticalAlignment="Center"
@@ -351,7 +352,7 @@
       Style="{StaticResource SettingsTabs}"
       SelectionChanged="BackendTabs_SelectionChanged"
     >
-      <TabItem Header="API キー接続">
+      <TabItem Header="{x:Static res:Strings.Chat_TabApiKey}">
         <StackPanel Margin="16,14">
           <Grid>
             <Grid.ColumnDefinitions>
@@ -363,7 +364,7 @@
             <TextBlock
               Grid.Column="0"
               Style="{StaticResource FieldLabel}"
-              Text="モデルプロバイダー"
+              Text="{x:Static res:Strings.Chat_ModelProvider}"
             />
             <ComboBox
               Grid.Column="1"
@@ -372,7 +373,11 @@
               ItemsSource="{Binding Connection.ApiProviders}"
               SelectedItem="{Binding Connection.ApiProvider}"
             />
-            <TextBlock Grid.Column="2" Style="{StaticResource FieldLabel}" Text="モデル名" />
+            <TextBlock
+              Grid.Column="2"
+              Style="{StaticResource FieldLabel}"
+              Text="{x:Static res:Strings.Chat_ModelName}"
+            />
             <ComboBox
               Grid.Column="3"
               Padding="6,4"
@@ -391,19 +396,23 @@
               <ColumnDefinition Width="*" />
               <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
-            <TextBlock Grid.Column="0" Style="{StaticResource FieldLabel}" Text="API キー" />
+            <TextBlock
+              Grid.Column="0"
+              Style="{StaticResource FieldLabel}"
+              Text="{x:Static res:Strings.Chat_ApiKey}"
+            />
             <PasswordBox
               x:Name="ApiKeyBox"
               Grid.Column="1"
               Padding="4,5"
               Margin="0,0,8,0"
-              ToolTip="API キー（OpenAI: sk-... / Claude: sk-ant-...）"
+              ToolTip="{x:Static res:Strings.Chat_ApiKeyTooltip}"
               ui:PasswordBoxBehavior.BoundPassword="{Binding Connection.ApiKey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
             />
             <CheckBox
               Grid.Column="2"
               VerticalAlignment="Center"
-              Content="保存"
+              Content="{x:Static res:Strings.Chat_Save}"
               IsChecked="{Binding Connection.SaveApiKey}"
             />
           </Grid>
@@ -416,18 +425,22 @@
               <ColumnDefinition Width="Auto" />
               <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
-            <TextBlock Grid.Column="0" Style="{StaticResource FieldLabel}" Text="エンドポイント" />
+            <TextBlock
+              Grid.Column="0"
+              Style="{StaticResource FieldLabel}"
+              Text="{x:Static res:Strings.Chat_Endpoint}"
+            />
             <TextBox
               Grid.Column="1"
               Padding="6,4"
               Text="{Binding Connection.EndpointOverride, UpdateSourceTrigger=PropertyChanged}"
-              ToolTip="OpenAI 互換エンドポイント（Ollama 等）"
+              ToolTip="{x:Static res:Strings.Chat_EndpointTooltip}"
             />
           </Grid>
         </StackPanel>
       </TabItem>
 
-      <TabItem Header="Codex 接続">
+      <TabItem Header="{x:Static res:Strings.Chat_TabCodex}">
         <StackPanel Margin="16,14">
           <Grid>
             <Grid.ColumnDefinitions>
@@ -439,7 +452,7 @@
             <TextBlock
               Grid.Column="0"
               Style="{StaticResource FieldLabel}"
-              Text="モデルプロバイダー"
+              Text="{x:Static res:Strings.Chat_ModelProvider}"
             />
             <ComboBox
               Grid.Column="1"
@@ -449,7 +462,11 @@
               Text="{Binding Connection.CodexModelProvider, UpdateSourceTrigger=PropertyChanged}"
               ItemsSource="{Binding Connection.CodexModelProviderCandidates}"
             />
-            <TextBlock Grid.Column="2" Style="{StaticResource FieldLabel}" Text="モデル名" />
+            <TextBlock
+              Grid.Column="2"
+              Style="{StaticResource FieldLabel}"
+              Text="{x:Static res:Strings.Chat_ModelName}"
+            />
             <ComboBox
               Grid.Column="3"
               Padding="6,4"
@@ -475,13 +492,13 @@
                   <TextBlock
                     Foreground="{StaticResource MutedText}"
                     TextWrapping="Wrap"
-                    Text="ChatGPT アカウントでログインしてください。API キーで利用する場合は「API キー接続」タブを使用します。"
+                    Text="{x:Static res:Strings.Chat_CodexLoginGuidance}"
                   />
                   <Button
                     Margin="0,8,0,0"
                     HorizontalAlignment="Left"
                     Style="{StaticResource PrimaryButton}"
-                    Content="ChatGPT ブラウザでログイン"
+                    Content="{x:Static res:Strings.Chat_CodexLoginButton}"
                     Command="{Binding CodexStartChatGptLoginCommand}"
                   />
                 </StackPanel>
@@ -490,7 +507,7 @@
                   Margin="0,10,0,0"
                   HorizontalAlignment="Left"
                   Style="{StaticResource SecondaryButton}"
-                  Content="ログアウト"
+                  Content="{x:Static res:Strings.Chat_Logout}"
                   Command="{Binding CodexLogoutCommand}"
                   Visibility="{Binding ShowCodexLogout, Converter={StaticResource BoolToVisibilityConverter}}"
                 />
@@ -500,14 +517,18 @@
         </StackPanel>
       </TabItem>
 
-      <TabItem Header="Claude 接続">
+      <TabItem Header="{x:Static res:Strings.Chat_TabClaude}">
         <StackPanel Margin="16,14">
           <Grid>
             <Grid.ColumnDefinitions>
               <ColumnDefinition Width="Auto" />
               <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
-            <TextBlock Grid.Column="0" Style="{StaticResource FieldLabel}" Text="モデル" />
+            <TextBlock
+              Grid.Column="0"
+              Style="{StaticResource FieldLabel}"
+              Text="{x:Static res:Strings.Chat_Model}"
+            />
             <ComboBox
               Grid.Column="1"
               Padding="6,4"
@@ -570,7 +591,7 @@
               VerticalAlignment="Center"
               FontWeight="SemiBold"
               Foreground="{StaticResource HeaderText}"
-              Text="チャット"
+              Text="{x:Static res:Strings.Chat_ChatHeader}"
             />
             <StackPanel
               Grid.Column="1"
@@ -581,7 +602,7 @@
             >
               <Ellipse Width="7" Height="7" Margin="0,0,6,0" Fill="{StaticResource Accent}" />
               <TextBlock
-                Text="応答中..."
+                Text="{x:Static res:Strings.Chat_Responding}"
                 Foreground="{StaticResource Accent}"
                 FontSize="12"
                 VerticalAlignment="Center"
@@ -591,13 +612,13 @@
               <Button
                 Style="{StaticResource SecondaryButton}"
                 Margin="0,0,8,0"
-                Content="中断"
+                Content="{x:Static res:Strings.Chat_Interrupt}"
                 Command="{Binding InterruptCommand}"
                 Visibility="{Binding IsTurnInProgress, Converter={StaticResource BoolToVisibilityConverter}}"
               />
               <Button
                 Style="{StaticResource SecondaryButton}"
-                Content="＋ 新しい会話"
+                Content="{x:Static res:Strings.Chat_NewConversation}"
                 Command="{Binding StartConversationCommand}"
               />
             </StackPanel>
@@ -658,7 +679,7 @@
           TextWrapping="Wrap"
           AcceptsReturn="True"
           Text="{Binding UserInput, UpdateSourceTrigger=PropertyChanged}"
-          ToolTip="Ctrl+Enter で送信 / Ctrl+V で画像を添付"
+          ToolTip="{x:Static res:Strings.Chat_InputTooltip}"
           PreviewKeyDown="UserInputBox_PreviewKeyDown"
         >
           <TextBox.InputBindings>
@@ -670,7 +691,7 @@
           Style="{StaticResource PrimaryButton}"
           Width="96"
           VerticalAlignment="Stretch"
-          Content="送信"
+          Content="{x:Static res:Strings.Chat_Send}"
           Command="{Binding SendMessageCommand}"
         />
       </Grid>

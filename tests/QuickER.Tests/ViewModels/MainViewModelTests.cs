@@ -1,6 +1,7 @@
 using FluentAssertions;
 using QuickER.Documents;
 using QuickER.Model;
+using QuickER.Resources;
 using QuickER.Tests.TestDoubles;
 using QuickER.UndoRedo;
 using QuickER.ViewModels;
@@ -966,7 +967,11 @@ public class MainViewModelTests
         vm.NewDiagramCommand.Execute(null);
 
         vm.Entities.Should().HaveCount(1);
-        dialogs.ConfirmMessages.Should().ContainSingle().Which.Should().Contain("クリア");
+        dialogs
+            .ConfirmMessages.Should()
+            .ContainSingle()
+            .Which.Should()
+            .Be(Strings.Confirm_ClearDiagram);
     }
 
     /// <summary>新規作成の確認で OK するとダイアグラムがクリアされることを検証する</summary>
@@ -1007,6 +1012,6 @@ public class MainViewModelTests
             .InformationMessages.Should()
             .ContainSingle()
             .Which.Should()
-            .Contain("すでに存在します");
+            .Be(Strings.Relationship_DuplicateMessage);
     }
 }

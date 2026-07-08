@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using QuickER.Resources;
 using QuickER.ViewModels;
 
 namespace QuickER.UndoRedo;
@@ -35,7 +36,7 @@ public sealed class GroupChangeTitleColorCommand : IUndoableCommand
     }
 
     /// <inheritdoc />
-    public string Description => $"タイトル色一括変更: {_changes.Count} 個";
+    public string Description => string.Format(Strings.Undo_GroupChangeTitleColor, _changes.Count);
 
     /// <inheritdoc />
     public void Execute()

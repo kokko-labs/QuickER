@@ -4,6 +4,7 @@ using System.Windows;
 using FluentAssertions;
 using QuickER.Documents;
 using QuickER.Model;
+using QuickER.Resources;
 using QuickER.ViewModels;
 
 namespace QuickER.Tests.ViewModels;
@@ -106,13 +107,13 @@ public class MainViewModelBulkOperationTests
 
         vm.ToggleEntitySelection(a);
         vm.IsMultiSelectionActive.Should().BeFalse();
-        vm.SelectedEntityCountText.Should().Be("1 個選択中");
+        vm.SelectedEntityCountText.Should().Be(string.Format(Strings.Selection_CountText, 1));
 
         raised.Clear();
         vm.ToggleEntitySelection(b);
 
         vm.IsMultiSelectionActive.Should().BeTrue();
-        vm.SelectedEntityCountText.Should().Be("2 個選択中");
+        vm.SelectedEntityCountText.Should().Be(string.Format(Strings.Selection_CountText, 2));
         raised.Should().Contain(nameof(MainViewModel.IsMultiSelectionActive));
         raised.Should().Contain(nameof(MainViewModel.SelectedEntityCountText));
     }
@@ -130,21 +131,21 @@ public class MainViewModelBulkOperationTests
         // 全選択 → 3 個
         vm.SelectAllEntitiesCommand.Execute(null);
         vm.IsMultiSelectionActive.Should().BeTrue();
-        vm.SelectedEntityCountText.Should().Be("3 個選択中");
+        vm.SelectedEntityCountText.Should().Be(string.Format(Strings.Selection_CountText, 3));
         raised.Should().Contain(nameof(MainViewModel.IsMultiSelectionActive));
 
         // 全解除 → 0 個
         raised.Clear();
         vm.ClearSelectionCommand.Execute(null);
         vm.IsMultiSelectionActive.Should().BeFalse();
-        vm.SelectedEntityCountText.Should().Be("0 個選択中");
+        vm.SelectedEntityCountText.Should().Be(string.Format(Strings.Selection_CountText, 0));
         raised.Should().Contain(nameof(MainViewModel.IsMultiSelectionActive));
 
         // ラバーバンドで全域選択 → 3 個
         raised.Clear();
         vm.ApplyRubberBandSelection(new Rect(-100, -100, 10000, 10000), additive: false);
         vm.IsMultiSelectionActive.Should().BeTrue();
-        vm.SelectedEntityCountText.Should().Be("3 個選択中");
+        vm.SelectedEntityCountText.Should().Be(string.Format(Strings.Selection_CountText, 3));
         raised.Should().Contain(nameof(MainViewModel.SelectedEntityCountText));
     }
 

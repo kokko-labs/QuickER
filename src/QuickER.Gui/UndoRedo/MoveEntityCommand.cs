@@ -1,3 +1,4 @@
+using QuickER.Resources;
 using QuickER.ViewModels;
 
 namespace QuickER.UndoRedo;
@@ -39,7 +40,7 @@ public class MoveEntityCommand : IUndoableCommand
     }
 
     /// <inheritdoc />
-    public string Description => $"移動: {_entity.TableName}";
+    public string Description => string.Format(Strings.Undo_MoveEntity, _entity.TableName);
 
     /// <inheritdoc />
     public void Execute()

@@ -27,7 +27,9 @@ public sealed class DatabaseProviderRegistry
         }
 
         var known = string.Join(", ", _byName.Keys.OrderBy(k => k));
-        throw new ArgumentException($"未対応のプロバイダ: '{name}'。対応プロバイダ: {known}");
+        throw new ArgumentException(
+            string.Format(Resources.Strings.Provider_UnsupportedProvider, name, known)
+        );
     }
 
     /// <summary>プロバイダ名で解決を試みる</summary>

@@ -6,6 +6,7 @@ using System.Text.RegularExpressions;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using QuickER.CodeGen.CSharp;
+using QuickER.CodeGen.UI.Resources;
 using QuickER.Gui.Abstractions;
 using QuickER.Provider;
 using QuickER.Sqlite;
@@ -175,8 +176,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     public bool CanUseRuntimePackages => true;
 
     /// <summary>パッケージ参照モードのチェックボックスのツールチップ</summary>
-    public string UseRuntimePackagesToolTip =>
-        "生成コードから固定のランタイムコードを省き、NuGet パッケージ QuickER.Runtime.* への参照で賄います（EF Core とも併用可）";
+    public string UseRuntimePackagesToolTip => Strings.CodeGen_UseRuntimePackagesToolTip;
 
     /// <summary>入力エラーや補助メッセージ</summary>
     [ObservableProperty]
@@ -229,8 +229,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     /// <summary>
     /// 「自作 Repository (QuickER)」ラジオのツールチップ（常時選択可。対象 DB をチェックで選ぶ運用を案内する）
     /// </summary>
-    public string QuickErRepositoryToolTip =>
-        "EF 非依存の軽量 Repository を生成します（対象 DB をチェックで選択: SQL Server / SQLite）";
+    public string QuickErRepositoryToolTip => Strings.CodeGen_QuickErRepositoryToolTip;
 
     // ===== 自作 Repository の対象 DB（チェックボックス群。Repository ラジオ選択時のみ表示） =====
 
@@ -597,7 +596,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     [RelayCommand]
     private void BrowseOutputFolder()
     {
-        var selectedPath = _files.PickFolder("出力先フォルダを選択", OutputFolderPath);
+        var selectedPath = _files.PickFolder(Strings.CodeGen_PickFolderTitle, OutputFolderPath);
 
         if (string.IsNullOrWhiteSpace(selectedPath))
         {
@@ -618,19 +617,19 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     {
         if (string.IsNullOrWhiteSpace(BaseNamespace))
         {
-            StatusMessage = "namespace を入力してください。";
+            StatusMessage = Strings.CodeGen_Status_NamespaceRequired;
             return;
         }
 
         if (!IsValidNamespace(BaseNamespace))
         {
-            StatusMessage = "namespace の形式が正しくありません。";
+            StatusMessage = Strings.CodeGen_Status_NamespaceInvalid;
             return;
         }
 
         if (GenerateRepositories && !TargetSqlServer && !TargetSqlite)
         {
-            StatusMessage = "対象 DB を 1 つ以上選択してください。";
+            StatusMessage = Strings.CodeGen_Status_TargetDbRequired;
             return;
         }
 
@@ -638,19 +637,22 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
         {
             if (!ValidateSplitNamespaces(out var invalidName))
             {
-                StatusMessage = $"{invalidName} の形式が正しくありません。";
+                StatusMessage = string.Format(
+                    Strings.CodeGen_Status_NamespaceInvalidFormat,
+                    invalidName
+                );
                 return;
             }
 
             if (string.IsNullOrWhiteSpace(OutputFolderPath))
             {
-                StatusMessage = "出力先フォルダを指定してください。";
+                StatusMessage = Strings.CodeGen_Status_OutputFolderRequired;
                 return;
             }
         }
         else if (string.IsNullOrWhiteSpace(OutputFilePath))
         {
-            StatusMessage = "出力先ファイルを指定してください。";
+            StatusMessage = Strings.CodeGen_Status_OutputFileRequired;
             return;
         }
 
@@ -677,13 +679,21 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     {
         var targets = new (bool Show, string Value, string Name)[]
         {
-            (ShowRuntimeNamespace, RuntimeNamespace, "Runtime の namespace"),
-            (ShowEntityNamespace, EntityNamespace, "Entity の namespace"),
-            (ShowEditModelNamespace, EditModelNamespace, "EditModel の namespace"),
-            (ShowMapperNamespace, MapperNamespace, "Mapper の namespace"),
-            (ShowRepositoryNamespace, RepositoryNamespace, "Repository の namespace"),
-            (ShowValueObjectNamespace, ValueObjectNamespace, "ValueObject の namespace"),
-            (ShowEfCoreNamespace, EfCoreNamespace, "EfCore の namespace"),
+            (ShowRuntimeNamespace, RuntimeNamespace, Strings.CodeGen_NamespaceLabel_Runtime),
+            (ShowEntityNamespace, EntityNamespace, Strings.CodeGen_NamespaceLabel_Entity),
+            (ShowEditModelNamespace, EditModelNamespace, Strings.CodeGen_NamespaceLabel_EditModel),
+            (ShowMapperNamespace, MapperNamespace, Strings.CodeGen_NamespaceLabel_Mapper),
+            (
+                ShowRepositoryNamespace,
+                RepositoryNamespace,
+                Strings.CodeGen_NamespaceLabel_Repository
+            ),
+            (
+                ShowValueObjectNamespace,
+                ValueObjectNamespace,
+                Strings.CodeGen_NamespaceLabel_ValueObject
+            ),
+            (ShowEfCoreNamespace, EfCoreNamespace, Strings.CodeGen_NamespaceLabel_EfCore),
         };
 
         foreach (var target in targets)

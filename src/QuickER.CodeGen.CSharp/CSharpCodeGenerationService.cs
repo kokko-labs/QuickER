@@ -1,3 +1,4 @@
+using QuickER.CodeGen.CSharp.Resources;
 using QuickER.Model;
 
 namespace QuickER.CodeGen.CSharp;
@@ -101,12 +102,7 @@ public sealed class CSharpCodeGenerationService
         // GenerateRepositories の実効方言が 2 つ以上かつ GenerateEfCore のときは早期に診断エラーとする。
         if (options.GenerateRepositories && options.GenerateEfCore && effectiveDialects.Count >= 2)
         {
-            diagnostics.Add(
-                Error(
-                    "EF Core の生成は自作 Repository のマルチターゲット（実効方言 2 つ以上）と併用できません。"
-                        + "方言を 1 つに絞るか、EF Core を無効にしてください（両者は排他選択です）。"
-                )
-            );
+            diagnostics.Add(Error(Strings.CodeGen_Error_MultiTargetEfCoreExclusive));
         }
 
         // インメモリ Repository はパッケージ参照モードと併用できない。インメモリ実行器（InMemoryQueryExecutor・
@@ -115,13 +111,7 @@ public sealed class CSharpCodeGenerationService
         // よって併用指定は早期に診断エラーとする（インメモリはインライン既定＝固定 infra 同梱でのみ成立する）。
         if (options.GenerateInMemoryRepositories && options.UseRuntimePackages)
         {
-            diagnostics.Add(
-                Error(
-                    "インメモリ Repository の生成はランタイムパッケージ参照モード（UseRuntimePackages）と併用できません。"
-                        + "インメモリ実行器は生成側の固定コードとして出力されるため、固定コードを出力しないパッケージ参照モードでは"
-                        + "参照先を失います。UseRuntimePackages を無効にする（固定コードをインライン出力する）か、インメモリ生成を無効にしてください。"
-                )
-            );
+            diagnostics.Add(Error(Strings.CodeGen_Error_InMemoryRuntimePackagesExclusive));
         }
 
         // ランタイムのパッケージ参照モードと EF Core 生成は併用できる（EF 固定 infra を TContext ジェネリック化した
@@ -364,9 +354,15 @@ public sealed class CSharpCodeGenerationService
                     {
                         diagnostics.Add(
                             Error(
-                                $"テーブル '{entity.TableName}' の列 '{column.Name}' は方言間で C# 型が食い違います"
-                                    + $"（{baseline.Dialect}: {baseInfo.TypeName} / {dialect}: {info.TypeName}）。"
-                                    + "共有 Entity は単一型のため、両方言で同じ C# 型へ解決される必要があります。"
+                                string.Format(
+                                    Strings.CodeGen_Error_TypeMismatch,
+                                    entity.TableName,
+                                    column.Name,
+                                    baseline.Dialect,
+                                    baseInfo.TypeName,
+                                    dialect,
+                                    info.TypeName
+                                )
                             )
                         );
                     }
@@ -537,11 +533,7 @@ public sealed class CSharpCodeGenerationService
             && !options.GenerateInMemoryRepositories
         )
         {
-            diagnostics.Add(
-                Error(
-                    "Entity / EditModel / Mapper / Repository / EF Core / インメモリ Repository のいずれも生成対象になっていません。少なくとも一つを有効にしてください。"
-                )
-            );
+            diagnostics.Add(Error(Strings.CodeGen_Error_NoGenerationTarget));
         }
 
         // Mapper は Entity クラスと EditModel クラスの両方を参照するため、単独生成するとコンパイル不能になる
@@ -550,11 +542,7 @@ public sealed class CSharpCodeGenerationService
             && (!options.GenerateEntityClasses || !options.GenerateEditModels)
         )
         {
-            diagnostics.Add(
-                Error(
-                    "Mapper の生成には Entity クラスと EditModel クラスの両方が必要です。両方を生成対象に含めてください。"
-                )
-            );
+            diagnostics.Add(Error(Strings.CodeGen_Error_MapperRequiresEntityAndEditModel));
         }
 
         // Repository・EF Core・インメモリ Repository はいずれも Entity クラス（および共通契約）を参照するため、Entity 生成が必須
@@ -566,11 +554,7 @@ public sealed class CSharpCodeGenerationService
             ) && !options.GenerateEntityClasses
         )
         {
-            diagnostics.Add(
-                Error(
-                    "Repository / EF Core / インメモリ Repository の生成には Entity クラスが必要です。Entity を生成対象に含めてください。"
-                )
-            );
+            diagnostics.Add(Error(Strings.CodeGen_Error_RepositoryRequiresEntity));
         }
 
         // Repository の SQL 組み立て・EF Core・インメモリのマッピング（EntitySaveMetadata）は [Table] / [Key] / [Column]
@@ -583,31 +567,25 @@ public sealed class CSharpCodeGenerationService
             ) && !options.IncludeDataAnnotations
         )
         {
-            diagnostics.Add(
-                Error(
-                    "Repository / EF Core / インメモリ Repository は [Table] / [Key] / [Column] 属性を利用するため、データアノテーションの付与が必要です。データアノテーションを有効にしてください。"
-                )
-            );
+            diagnostics.Add(Error(Strings.CodeGen_Error_RepositoryRequiresDataAnnotations));
         }
 
         if (diagram.Entities.Count == 0)
         {
-            diagnostics.Add(Error("ER 図にエンティティがありません。"));
+            diagnostics.Add(Error(Strings.CodeGen_Error_NoEntities));
         }
 
         foreach (var entity in diagram.Entities)
         {
             if (string.IsNullOrWhiteSpace(entity.TableName))
             {
-                diagnostics.Add(Error("テーブル名が空のエンティティがあります。"));
+                diagnostics.Add(Error(Strings.CodeGen_Error_EmptyTableName));
             }
 
             if (entity.Columns.Count(column => column.IsPrimaryKey) > 1)
             {
                 diagnostics.Add(
-                    Warning(
-                        $"テーブル '{entity.TableName}' は複合主キーのため [Key] 属性生成は最小限になります。MVP では単一主キーを推奨します。"
-                    )
+                    Warning(string.Format(Strings.CodeGen_Warning_CompositeKey, entity.TableName))
                 );
             }
         }

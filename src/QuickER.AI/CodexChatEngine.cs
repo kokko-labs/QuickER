@@ -1,4 +1,5 @@
 using System.Text.Json;
+using QuickER.AI.Resources;
 
 namespace QuickER.AI;
 
@@ -52,7 +53,7 @@ public sealed class CodexChatEngine : IErChatEngine
     public CodexAuthMode AuthMode { get; private set; }
 
     /// <summary>アカウント概要の表示文言</summary>
-    public string AccountSummary { get; private set; } = "未接続";
+    public string AccountSummary { get; private set; } = Strings.Codex_NotConnected;
 
     /// <summary>現在のプロバイダーが openai か（openai のみ認証が必要）</summary>
     public bool IsOpenAiProvider =>
@@ -134,7 +135,7 @@ public sealed class CodexChatEngine : IErChatEngine
         }
         catch (Exception ex)
         {
-            StatusChanged?.Invoke(this, $"接続に失敗しました: {ex.Message}");
+            StatusChanged?.Invoke(this, string.Format(Strings.Codex_ConnectFailed, ex.Message));
         }
 
         RaiseAuthStateChanged();
@@ -147,7 +148,7 @@ public sealed class CodexChatEngine : IErChatEngine
         {
             IsStarted = false;
             AuthMode = CodexAuthMode.None;
-            AccountSummary = "未接続";
+            AccountSummary = Strings.Codex_NotConnected;
             RequiresOpenAiAuth = true;
             RaiseAuthStateChanged();
             return;
@@ -162,7 +163,10 @@ public sealed class CodexChatEngine : IErChatEngine
         }
         catch (Exception ex)
         {
-            StatusChanged?.Invoke(this, $"アカウント状態の取得に失敗しました: {ex.Message}");
+            StatusChanged?.Invoke(
+                this,
+                string.Format(Strings.Codex_AccountStateFailed, ex.Message)
+            );
         }
 
         RaiseAuthStateChanged();
@@ -176,7 +180,7 @@ public sealed class CodexChatEngine : IErChatEngine
             return null;
         }
 
-        StatusChanged?.Invoke(this, "ChatGPT ログイン URL を取得中...");
+        StatusChanged?.Invoke(this, Strings.Codex_ChatGptLoginUrlFetching);
 
         try
         {
@@ -186,16 +190,19 @@ public sealed class CodexChatEngine : IErChatEngine
 
             if (string.IsNullOrWhiteSpace(result.AuthUrl))
             {
-                StatusChanged?.Invoke(this, "ChatGPT ログイン URL を取得できませんでした。");
+                StatusChanged?.Invoke(this, Strings.Codex_ChatGptLoginUrlFailed);
                 return null;
             }
 
-            StatusChanged?.Invoke(this, "ブラウザで ChatGPT ログインを完了してください。");
+            StatusChanged?.Invoke(this, Strings.Codex_ChatGptCompleteInBrowser);
             return result.AuthUrl;
         }
         catch (Exception ex)
         {
-            StatusChanged?.Invoke(this, $"ChatGPT ログイン開始に失敗しました: {ex.Message}");
+            StatusChanged?.Invoke(
+                this,
+                string.Format(Strings.Codex_ChatGptLoginStartFailed, ex.Message)
+            );
             return null;
         }
     }
@@ -208,18 +215,18 @@ public sealed class CodexChatEngine : IErChatEngine
             return;
         }
 
-        StatusChanged?.Invoke(this, "ログアウト中...");
+        StatusChanged?.Invoke(this, Strings.Codex_LoggingOut);
 
         try
         {
             await _client.LogoutAsync(cancellationToken).ConfigureAwait(false);
             RequiresOpenAiAuth = true;
-            AccountSummary = "未ログイン";
-            StatusChanged?.Invoke(this, "ログアウトしました。");
+            AccountSummary = Strings.Codex_NotLoggedIn;
+            StatusChanged?.Invoke(this, Strings.Codex_LoggedOut);
         }
         catch (Exception ex)
         {
-            StatusChanged?.Invoke(this, $"ログアウトに失敗しました: {ex.Message}");
+            StatusChanged?.Invoke(this, string.Format(Strings.Codex_LogoutFailed, ex.Message));
         }
 
         RaiseAuthStateChanged();
@@ -233,7 +240,7 @@ public sealed class CodexChatEngine : IErChatEngine
             return;
         }
 
-        StatusChanged?.Invoke(this, "会話を開始中...");
+        StatusChanged?.Invoke(this, Strings.Codex_StartingConversation);
 
         try
         {
@@ -241,11 +248,14 @@ public sealed class CodexChatEngine : IErChatEngine
                 .StartThreadAsync(BuildThreadStartOptions(), cancellationToken)
                 .ConfigureAwait(false);
             _currentThreadId = thread.Id;
-            StatusChanged?.Invoke(this, "会話を開始しました。");
+            StatusChanged?.Invoke(this, Strings.Codex_StartedConversation);
         }
         catch (Exception ex)
         {
-            StatusChanged?.Invoke(this, $"会話の開始に失敗しました: {ex.Message}");
+            StatusChanged?.Invoke(
+                this,
+                string.Format(Strings.Codex_StartConversationFailed, ex.Message)
+            );
         }
     }
 
@@ -261,13 +271,13 @@ public sealed class CodexChatEngine : IErChatEngine
         {
             TurnCompleted?.Invoke(
                 this,
-                new ErChatTurnResult(false, "会話を開始できませんでした。")
+                new ErChatTurnResult(false, Strings.Codex_CouldNotStartConversation)
             );
             return;
         }
 
         _turnInProgress = true;
-        StatusChanged?.Invoke(this, "Codex が処理中です...");
+        StatusChanged?.Invoke(this, Strings.Codex_Processing);
 
         try
         {
@@ -296,7 +306,7 @@ public sealed class CodexChatEngine : IErChatEngine
     {
         if (attachments is { Count: > 0 })
         {
-            throw new NotSupportedException("Codex 接続は添付に対応していません。");
+            throw new NotSupportedException(Strings.Codex_AttachmentsNotSupported);
         }
 
         return SendAsync(prompt, cancellationToken);
@@ -318,7 +328,7 @@ public sealed class CodexChatEngine : IErChatEngine
         }
         catch (Exception ex)
         {
-            StatusChanged?.Invoke(this, $"処理の中断に失敗しました: {ex.Message}");
+            StatusChanged?.Invoke(this, string.Format(Strings.Codex_InterruptFailed, ex.Message));
         }
     }
 
@@ -397,17 +407,17 @@ public sealed class CodexChatEngine : IErChatEngine
     ) =>
         authMode switch
         {
-            CodexAuthMode.ApiKey => "API キーでログイン済み",
+            CodexAuthMode.ApiKey => Strings.Codex_Account_ApiKey,
             CodexAuthMode.ChatGpt => string.IsNullOrWhiteSpace(email)
                 ? string.IsNullOrWhiteSpace(planType)
-                    ? "ChatGPT でログイン済み"
-                    : $"ChatGPT でログイン済み ({planType})"
+                    ? Strings.Codex_Account_ChatGpt
+                    : string.Format(Strings.Codex_Account_ChatGptWithPlan, planType)
                 : string.IsNullOrWhiteSpace(planType)
-                    ? $"{email} でログイン済み"
+                    ? string.Format(Strings.Codex_Account_EmailLoggedIn, email)
                     : $"{email} / {planType}",
-            _ => showNotLoggedInWhenUnauthenticated ? "未ログイン"
-            : isOpenAiProvider ? "接続済み"
-            : "ログイン不要",
+            _ => showNotLoggedInWhenUnauthenticated ? Strings.Codex_NotLoggedIn
+            : isOpenAiProvider ? Strings.Codex_Account_Connected
+            : Strings.Codex_Account_NoLoginRequired,
         };
 
     /// <summary>空白を null へ正規化する</summary>
@@ -483,7 +493,10 @@ public sealed class CodexChatEngine : IErChatEngine
         }
         catch (Exception ex)
         {
-            StatusChanged?.Invoke(this, $"ツールレスポンスの送信に失敗しました: {ex.Message}");
+            StatusChanged?.Invoke(
+                this,
+                string.Format(Strings.Codex_ToolResponseSendFailed, ex.Message)
+            );
         }
     }
 
@@ -502,7 +515,10 @@ public sealed class CodexChatEngine : IErChatEngine
         }
         catch (Exception ex)
         {
-            StatusChanged?.Invoke(this, $"承認レスポンスの送信に失敗しました: {ex.Message}");
+            StatusChanged?.Invoke(
+                this,
+                string.Format(Strings.Codex_ApprovalResponseSendFailed, ex.Message)
+            );
         }
     }
 
@@ -525,7 +541,9 @@ public sealed class CodexChatEngine : IErChatEngine
     {
         StatusChanged?.Invoke(
             this,
-            e.Success ? "ログインしました。" : $"ログインに失敗しました: {e.Error}"
+            e.Success
+                ? Strings.Codex_LoginSucceeded
+                : string.Format(Strings.Codex_LoginFailed, e.Error)
         );
     }
 
@@ -537,7 +555,7 @@ public sealed class CodexChatEngine : IErChatEngine
             return;
         }
 
-        var message = "不明なエラーが発生しました。";
+        var message = Strings.Codex_UnknownError;
 
         if (
             e.Params is JsonElement paramsElement
@@ -555,7 +573,7 @@ public sealed class CodexChatEngine : IErChatEngine
         }
         else
         {
-            StatusChanged?.Invoke(this, $"エラーが発生しました: {message}");
+            StatusChanged?.Invoke(this, string.Format(Strings.Codex_ErrorOccurred, message));
         }
     }
 

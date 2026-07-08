@@ -1,5 +1,6 @@
 ﻿using System.Collections.Generic;
 using System.Linq;
+using QuickER.Resources;
 using QuickER.ViewModels;
 
 namespace QuickER.UndoRedo;
@@ -26,7 +27,7 @@ public class RemoveEntityCommand : IUndoableCommand
     }
 
     /// <inheritdoc />
-    public string Description => $"エンティティ削除: {_entity.TableName}";
+    public string Description => string.Format(Strings.Undo_RemoveEntity, _entity.TableName);
 
     /// <inheritdoc />
     public void Execute()

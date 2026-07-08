@@ -1,3 +1,4 @@
+using QuickER.Resources;
 using QuickER.ViewModels;
 
 namespace QuickER.UndoRedo;
@@ -19,7 +20,7 @@ public class AddRelationshipCommand : IUndoableCommand
     }
 
     /// <inheritdoc />
-    public string Description => "リレーション追加";
+    public string Description => Strings.Undo_AddRelationship;
 
     /// <inheritdoc />
     public void Execute()

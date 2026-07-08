@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Windows.Media;
 using QuickER.Documents;
+using QuickER.Resources;
 
 namespace QuickER.Services;
 
@@ -27,12 +28,12 @@ public static class EntityTitleColorPalette
     /// <summary>UI で選択可能な色候補の一覧</summary>
     public static IReadOnlyList<EntityTitleColorOption> Options { get; } =
     [
-        new("ブルー", EntityLayout.DefaultTitleBackgroundColor),
-        new("グリーン", "#E4F1C9"),
-        new("イエロー", "#FFF0BF"),
-        new("パープル", "#E7DDF9"),
-        new("ピンク", "#F8DDD7"),
-        new("グレー", "#E9EEF5"),
+        new(Strings.Color_Blue, EntityLayout.DefaultTitleBackgroundColor),
+        new(Strings.Color_Green, "#E4F1C9"),
+        new(Strings.Color_Yellow, "#FFF0BF"),
+        new(Strings.Color_Purple, "#E7DDF9"),
+        new(Strings.Color_Pink, "#F8DDD7"),
+        new(Strings.Color_Gray, "#E9EEF5"),
     ];
 
     /// <summary>色コード文字列を <c>#RRGGBB</c> 形式へ正規化する</summary>

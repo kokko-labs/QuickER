@@ -46,6 +46,20 @@ public partial class MainWindow : Window
         Closing += MainWindow_Closing;
     }
 
+    /// <summary>言語切替ボタン押下で、その場に言語選択の ContextMenu を開く</summary>
+    /// <remarks>
+    /// 左クリックでも開けるよう明示的に開く（ContextMenu は既定では右クリックで開くため）。
+    /// PlacementTarget を通じてメニューはボタンの DataContext（MainViewModel）を引き継ぐ。
+    /// </remarks>
+    private void LanguageButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { ContextMenu: { } menu } button)
+        {
+            menu.PlacementTarget = button;
+            menu.IsOpen = true;
+        }
+    }
+
     /// <summary>ウィンドウ終了時に自動保存と AI チャット画面の終了を行う</summary>
     private void MainWindow_Closing(object? sender, CancelEventArgs e)
     {

@@ -1,6 +1,7 @@
 using System.IO;
 using System.Text.RegularExpressions;
 using QuickER.Model;
+using QuickER.Resources;
 
 namespace QuickER.Services;
 
@@ -22,7 +23,7 @@ public static partial class MermaidImporter
     {
         if (string.IsNullOrWhiteSpace(text))
         {
-            throw new InvalidDataException("Mermaid テキストが空です。");
+            throw new InvalidDataException(Strings.Mermaid_EmptyText);
         }
 
         var lines = text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
@@ -45,9 +46,7 @@ public static partial class MermaidImporter
             {
                 if (!string.Equals(line, "erDiagram", StringComparison.Ordinal))
                 {
-                    throw new InvalidDataException(
-                        "Mermaid は先頭に erDiagram ヘッダーが必要です。"
-                    );
+                    throw new InvalidDataException(Strings.Mermaid_MissingHeader);
                 }
 
                 foundHeader = true;
@@ -73,13 +72,13 @@ public static partial class MermaidImporter
 
                 if (string.IsNullOrWhiteSpace(tableName))
                 {
-                    throw new InvalidDataException("エンティティ名がありません。");
+                    throw new InvalidDataException(Strings.Mermaid_MissingEntityName);
                 }
 
                 if (!entities.TryAdd(tableName, new Entity { TableName = tableName }))
                 {
                     throw new InvalidDataException(
-                        $"エンティティ '{tableName}' が重複しています。"
+                        string.Format(Strings.Mermaid_DuplicateEntity, tableName)
                     );
                 }
 
@@ -92,19 +91,19 @@ public static partial class MermaidImporter
 
         if (!foundHeader)
         {
-            throw new InvalidDataException("Mermaid の erDiagram ヘッダーが見つかりません。");
+            throw new InvalidDataException(Strings.Mermaid_HeaderNotFound);
         }
 
         if (currentEntity is not null)
         {
             throw new InvalidDataException(
-                $"エンティティ '{currentEntity.TableName}' の閉じ括弧 '}}' がありません。"
+                string.Format(Strings.Mermaid_MissingClosingBrace, currentEntity.TableName)
             );
         }
 
         if (entities.Count == 0)
         {
-            throw new InvalidDataException("Mermaid にエンティティ定義がありません。");
+            throw new InvalidDataException(Strings.Mermaid_NoEntities);
         }
 
         EnsureEntitiesHaveColumns(entities.Values);
@@ -122,7 +121,7 @@ public static partial class MermaidImporter
         if (tokens.Length < 2)
         {
             throw new InvalidDataException(
-                $"テーブル '{tableName}' のカラム定義 '{line}' を解析できません。"
+                string.Format(Strings.Mermaid_ColumnParseError, tableName, line)
             );
         }
 
@@ -169,7 +168,9 @@ public static partial class MermaidImporter
 
         if (!match.Success)
         {
-            throw new InvalidDataException($"リレーション定義 '{line}' を解析できません。");
+            throw new InvalidDataException(
+                string.Format(Strings.Mermaid_RelationshipParseError, line)
+            );
         }
 
         var leftTable = match.Groups["left"].Value;
@@ -180,14 +181,14 @@ public static partial class MermaidImporter
         if (!entities.ContainsKey(leftTable))
         {
             throw new InvalidDataException(
-                $"リレーションの左側テーブル '{leftTable}' が未定義です。"
+                string.Format(Strings.Mermaid_RelationshipLeftUndefined, leftTable)
             );
         }
 
         if (!entities.ContainsKey(rightTable))
         {
             throw new InvalidDataException(
-                $"リレーションの右側テーブル '{rightTable}' が未定義です。"
+                string.Format(Strings.Mermaid_RelationshipRightUndefined, rightTable)
             );
         }
 
@@ -209,7 +210,9 @@ public static partial class MermaidImporter
             "||--||" or "|o--o|" or "|o--||" or "||--o|" => RelationshipType.OneToOne,
             "||--o{" or "||--|{" or "|o--o{" or "|o--|{" => RelationshipType.OneToMany,
             "}o--o{" or "}|--|{" or "}o--|{" or "}|--o{" => RelationshipType.ManyToMany,
-            _ => throw new InvalidDataException($"未対応のリレーション記号 '{symbol}' です。"),
+            _ => throw new InvalidDataException(
+                string.Format(Strings.Mermaid_UnsupportedRelationshipSymbol, symbol)
+            ),
         };
     }
 

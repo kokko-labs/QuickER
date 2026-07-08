@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Threading;
 using System.Windows;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.AI.UI;
@@ -27,6 +29,10 @@ namespace QuickER
         protected override void OnStartup(StartupEventArgs e)
         {
             base.OnStartup(e);
+
+            // 起動最初期に表示言語のカルチャを適用する。
+            // 切替は再起動反映方式のため、ウィンドウ生成前のここで一度だけ設定する。
+            ApplyUiCulture();
 
             var services = new ServiceCollection();
 
@@ -60,6 +66,20 @@ namespace QuickER
             _provider = services.BuildServiceProvider();
 
             _provider.GetRequiredService<MainWindow>().Show();
+        }
+
+        /// <summary>
+        /// 保存された言語設定（未設定なら OS 言語から導出）を実効カルチャとして UI へ適用する。
+        /// 以降に生成されるスレッド既定と現在スレッドの <see cref="Thread.CurrentUICulture"/> を上書きする。
+        /// </summary>
+        private static void ApplyUiCulture()
+        {
+            var settings = new GuiAppSettingsStore().Load();
+            var languageCode = AppLanguage.Resolve(settings.Language, CultureInfo.CurrentUICulture);
+            var culture = new CultureInfo(languageCode);
+
+            CultureInfo.DefaultThreadCurrentUICulture = culture;
+            Thread.CurrentThread.CurrentUICulture = culture;
         }
 
         /// <summary>終了時に DI コンテナを破棄する</summary>

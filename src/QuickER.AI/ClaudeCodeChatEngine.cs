@@ -1,5 +1,6 @@
 using System.IO;
 using System.Text.Json;
+using QuickER.AI.Resources;
 
 namespace QuickER.AI;
 
@@ -34,18 +35,18 @@ public sealed class ClaudeCodeChatEngine : IErChatEngine
     /// <summary>添付使用時に追加で許可するツール（ファイル読取）</summary>
     private const string ReadTool = "Read";
 
-    private const string PendingGuidance = "「再確認」を押すとログイン状態を確認できます。";
-    private const string InstallGuidance = "Claude Code をインストールし、PATH を通してください。";
-    private const string LoggedInGuidance = "ローカルの Claude Code をそのまま使用します。";
-    private const string NotLoggedInGuidance =
-        "ターミナルで claude を起動し /login で認証後、「再確認」を押してください。";
-    private const string InconclusiveGuidance = "しばらくして「再確認」を押してください。";
+    // 案内文は表示言語（OS カルチャ）依存のため const ではなく resx から解決する static readonly にする
+    private static readonly string PendingGuidance = Strings.ClaudeCode_Guidance_Pending;
+    private static readonly string InstallGuidance = Strings.ClaudeCode_Guidance_Install;
+    private static readonly string LoggedInGuidance = Strings.ClaudeCode_Guidance_LoggedIn;
+    private static readonly string NotLoggedInGuidance = Strings.ClaudeCode_Guidance_NotLoggedIn;
+    private static readonly string InconclusiveGuidance = Strings.ClaudeCode_Guidance_Inconclusive;
 
     /// <summary>使用するモデルエイリアス（空なら Claude Code 既定）</summary>
     public string Model { get; set; } = string.Empty;
 
     /// <summary>状態サマリー（UI 表示用）</summary>
-    public string StatusSummary { get; private set; } = "未確認";
+    public string StatusSummary { get; private set; } = Strings.ClaudeCode_Status_Unconfirmed;
 
     /// <summary>状態ドットの健全度（緑/灰/赤）</summary>
     public ConnectionHealth StatusLevel { get; private set; } = ConnectionHealth.Pending;
@@ -103,7 +104,7 @@ public sealed class ClaudeCodeChatEngine : IErChatEngine
         if (!_client.IsAvailable())
         {
             UpdateStatus(
-                "Claude Code が見つかりません",
+                Strings.ClaudeCode_Status_NotFound,
                 ConnectionHealth.NeedsAction,
                 InstallGuidance
             );
@@ -126,7 +127,11 @@ public sealed class ClaudeCodeChatEngine : IErChatEngine
         _initialized = true;
 
         // 検出はできたがログインは未確認（プローブは明示操作時のみ）。緑を偽装せず灰にする。
-        UpdateStatus("未確認", ConnectionHealth.Pending, PendingGuidance);
+        UpdateStatus(
+            Strings.ClaudeCode_Status_Unconfirmed,
+            ConnectionHealth.Pending,
+            PendingGuidance
+        );
     }
 
     /// <summary>
@@ -138,7 +143,7 @@ public sealed class ClaudeCodeChatEngine : IErChatEngine
         if (!_client.IsAvailable())
         {
             UpdateStatus(
-                "Claude Code が見つかりません",
+                Strings.ClaudeCode_Status_NotFound,
                 ConnectionHealth.NeedsAction,
                 InstallGuidance
             );
@@ -155,14 +160,22 @@ public sealed class ClaudeCodeChatEngine : IErChatEngine
         switch (result)
         {
             case ClaudeLoginProbeResult.LoggedIn:
-                UpdateStatus("ログイン済み", ConnectionHealth.Ready, LoggedInGuidance);
+                UpdateStatus(
+                    Strings.ClaudeCode_Status_LoggedIn,
+                    ConnectionHealth.Ready,
+                    LoggedInGuidance
+                );
                 break;
             case ClaudeLoginProbeResult.NotLoggedIn:
-                UpdateStatus("未ログイン", ConnectionHealth.NeedsAction, NotLoggedInGuidance);
+                UpdateStatus(
+                    Strings.ClaudeCode_Status_NotLoggedIn,
+                    ConnectionHealth.NeedsAction,
+                    NotLoggedInGuidance
+                );
                 break;
             default:
                 UpdateStatus(
-                    "ログイン状態を確認できませんでした",
+                    Strings.ClaudeCode_Status_Inconclusive,
                     ConnectionHealth.NeedsAction,
                     InconclusiveGuidance
                 );
@@ -197,7 +210,7 @@ public sealed class ClaudeCodeChatEngine : IErChatEngine
 
         _turnCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var token = _turnCts.Token;
-        StatusChanged?.Invoke(this, "Claude Code が処理中です...");
+        StatusChanged?.Invoke(this, Strings.ClaudeCode_Processing);
 
         // 添付があれば作業フォルダ配下へ書き出し、プロンプト末尾に絶対パス一覧を付記する。
         // 一度でも添付を使った会話は以降のターンも Read 許可を維持する（_attachmentsUsedInConversation）。
@@ -247,19 +260,24 @@ public sealed class ClaudeCodeChatEngine : IErChatEngine
             if (outcome.NotLoggedIn)
             {
                 // 実ターンで未ログインが判明 → 赤に反映
-                UpdateStatus("未ログイン", ConnectionHealth.NeedsAction, NotLoggedInGuidance);
+                UpdateStatus(
+                    Strings.ClaudeCode_Status_NotLoggedIn,
+                    ConnectionHealth.NeedsAction,
+                    NotLoggedInGuidance
+                );
                 TurnCompleted?.Invoke(
                     this,
-                    new ErChatTurnResult(
-                        false,
-                        "Claude Code が未ログインです。ターミナルで `claude` を起動し /login でログインしてください。"
-                    )
+                    new ErChatTurnResult(false, Strings.ClaudeCode_TurnNotLoggedIn)
                 );
             }
             else if (outcome.Success)
             {
                 // ターンが通った＝ログイン済み → 緑に反映
-                UpdateStatus("ログイン済み", ConnectionHealth.Ready, LoggedInGuidance);
+                UpdateStatus(
+                    Strings.ClaudeCode_Status_LoggedIn,
+                    ConnectionHealth.Ready,
+                    LoggedInGuidance
+                );
                 TurnCompleted?.Invoke(this, new ErChatTurnResult(true, null));
             }
             else

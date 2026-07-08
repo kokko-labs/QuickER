@@ -1,6 +1,7 @@
 ﻿using System.Collections.Generic;
 using System.Linq;
 using QuickER.Model;
+using QuickER.Provider.Resources;
 
 namespace QuickER.Provider;
 
@@ -43,7 +44,11 @@ public class SchemaDiffService
                         Kind = SchemaDiffKind.AddTable,
                         TableName = name,
                         Entity = target,
-                        Description = $"テーブル [{name}] を作成 (列 {target.Columns.Count} 件)",
+                        Description = string.Format(
+                            Strings.Diff_AddTable,
+                            name,
+                            target.Columns.Count
+                        ),
                     }
                 );
 
@@ -60,8 +65,11 @@ public class SchemaDiffService
                             Entity = target,
                             NewDescription = newTblDesc,
                             OldDescription = null,
-                            Description =
-                                $"テーブル [{name}] の説明を設定: \"{Truncate(newTblDesc)}\"",
+                            Description = string.Format(
+                                Strings.Diff_SetTableDescription,
+                                name,
+                                Truncate(newTblDesc)
+                            ),
                         }
                     );
                 }
@@ -84,8 +92,12 @@ public class SchemaDiffService
                             Column = c,
                             NewDescription = c.Description,
                             OldDescription = null,
-                            Description =
-                                $"列 [{name}].[{c.Name}] の説明を設定: \"{Truncate(c.Description)}\"",
+                            Description = string.Format(
+                                Strings.Diff_SetColumnDescription,
+                                name,
+                                c.Name,
+                                Truncate(c.Description)
+                            ),
                         }
                     );
                 }
@@ -115,8 +127,12 @@ public class SchemaDiffService
                         NewDescription = targetTableDesc,
                         OldDescription = liveTableDesc,
                         Description = string.IsNullOrEmpty(targetTableDesc)
-                            ? $"テーブル [{name}] の説明を削除"
-                            : $"テーブル [{name}] の説明を更新: \"{Truncate(targetTableDesc)}\"",
+                            ? string.Format(Strings.Diff_RemoveTableDescription, name)
+                            : string.Format(
+                                Strings.Diff_UpdateTableDescription,
+                                name,
+                                Truncate(targetTableDesc)
+                            ),
                     }
                 );
             }
@@ -133,7 +149,12 @@ public class SchemaDiffService
                             ColumnName = cname,
                             Entity = target,
                             Column = tcol,
-                            Description = $"列 [{name}].[{cname}] {tcol.DataType} を追加",
+                            Description = string.Format(
+                                Strings.Diff_AddColumn,
+                                name,
+                                cname,
+                                tcol.DataType
+                            ),
                         }
                     );
 
@@ -150,8 +171,12 @@ public class SchemaDiffService
                                 Column = tcol,
                                 NewDescription = tcol.Description,
                                 OldDescription = null,
-                                Description =
-                                    $"列 [{name}].[{cname}] の説明を設定: \"{Truncate(tcol.Description)}\"",
+                                Description = string.Format(
+                                    Strings.Diff_SetColumnDescription,
+                                    name,
+                                    cname,
+                                    Truncate(tcol.Description)
+                                ),
                             }
                         );
                     }
@@ -167,13 +192,19 @@ public class SchemaDiffService
 
                         if (!IsSameType(lcol.DataType, tcol.DataType))
                         {
-                            changeParts.Add($"型を {lcol.DataType} → {tcol.DataType} に変更");
+                            changeParts.Add(
+                                string.Format(Strings.Diff_TypeChange, lcol.DataType, tcol.DataType)
+                            );
                         }
 
                         if (lcol.IsNullable != tcol.IsNullable)
                         {
                             changeParts.Add(
-                                $"NULL許容を {(lcol.IsNullable ? "許可" : "禁止")} → {(tcol.IsNullable ? "許可" : "禁止")} に変更"
+                                string.Format(
+                                    Strings.Diff_NullableChange,
+                                    NullableLabel(lcol.IsNullable),
+                                    NullableLabel(tcol.IsNullable)
+                                )
                             );
                         }
 
@@ -188,7 +219,8 @@ public class SchemaDiffService
                                 OldColumn = lcol,
                                 IsSelected = false,
                                 Description =
-                                    $"列 [{name}].[{cname}] " + string.Join(" / ", changeParts),
+                                    string.Format(Strings.Diff_ColumnChangePrefix, name, cname)
+                                    + string.Join(" / ", changeParts),
                             }
                         );
                     }
@@ -209,8 +241,17 @@ public class SchemaDiffService
                                 NewDescription = newColDesc,
                                 OldDescription = oldColDesc,
                                 Description = string.IsNullOrEmpty(newColDesc)
-                                    ? $"列 [{name}].[{cname}] の説明を削除"
-                                    : $"列 [{name}].[{cname}] の説明を更新: \"{Truncate(newColDesc)}\"",
+                                    ? string.Format(
+                                        Strings.Diff_RemoveColumnDescription,
+                                        name,
+                                        cname
+                                    )
+                                    : string.Format(
+                                        Strings.Diff_UpdateColumnDescription,
+                                        name,
+                                        cname,
+                                        Truncate(newColDesc)
+                                    ),
                             }
                         );
                     }
@@ -230,7 +271,12 @@ public class SchemaDiffService
                             Entity = live,
                             Column = lcol,
                             IsSelected = false,
-                            Description = $"列 [{name}].[{cname}] ({lcol.DataType}) を削除",
+                            Description = string.Format(
+                                Strings.Diff_DropColumn,
+                                name,
+                                cname,
+                                lcol.DataType
+                            ),
                         }
                     );
                 }
@@ -248,7 +294,7 @@ public class SchemaDiffService
                         TableName = name,
                         Entity = live,
                         IsSelected = false,
-                        Description = $"テーブル [{name}] を削除",
+                        Description = string.Format(Strings.Diff_DropTable, name),
                     }
                 );
             }
@@ -310,8 +356,18 @@ public class SchemaDiffService
                     ChildEntity = child,
                     Relationship = rel,
                     Description = fkColName is not null
-                        ? $"外部キー [{NormalizeTable(child)}].[{fkColName}] → [{NormalizeTable(parent)}].[{pkCol.Name}] を追加"
-                        : $"外部キー [{NormalizeTable(child)}] → [{NormalizeTable(parent)}] を追加 (※ FK 列が未定義のためスクリプトはスキップされます)",
+                        ? string.Format(
+                            Strings.Diff_AddForeignKey,
+                            NormalizeTable(child),
+                            fkColName,
+                            NormalizeTable(parent),
+                            pkCol.Name
+                        )
+                        : string.Format(
+                            Strings.Diff_AddForeignKeyNoColumn,
+                            NormalizeTable(child),
+                            NormalizeTable(parent)
+                        ),
                 }
             );
         }
@@ -363,8 +419,11 @@ public class SchemaDiffService
                     Relationship = rel,
                     ForeignKeyName = rel.ConstraintName,
                     IsSelected = false,
-                    Description =
-                        $"外部キー [{NormalizeTable(child)}] → [{NormalizeTable(parent)}] を削除",
+                    Description = string.Format(
+                        Strings.Diff_DropForeignKey,
+                        NormalizeTable(child),
+                        NormalizeTable(parent)
+                    ),
                 }
             );
         }
@@ -553,4 +612,8 @@ public class SchemaDiffService
     /// <summary>説明文を指定長で切り詰め、超過時は末尾に省略記号を付ける</summary>
     private static string Truncate(string s, int max = 30) =>
         s.Length <= max ? s : s.Substring(0, max) + "…";
+
+    /// <summary>NULL 許容の可否を表示言語のラベル（許可 / 禁止）へ変換する</summary>
+    private static string NullableLabel(bool isNullable) =>
+        isNullable ? Strings.Diff_Nullable_Allow : Strings.Diff_Nullable_Deny;
 }

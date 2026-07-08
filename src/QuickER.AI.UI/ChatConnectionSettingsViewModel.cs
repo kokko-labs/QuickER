@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Linq;
 using CommunityToolkit.Mvvm.ComponentModel;
 using QuickER.AI;
+using QuickER.AI.UI.Resources;
 
 namespace QuickER.AI.UI;
 
@@ -154,13 +155,13 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
     private string _claudeCodeModel = AiModelCatalog.DefaultClaudeCodeModel;
 
     [ObservableProperty]
-    private string _claudeCodeStatusSummary = "未確認";
+    private string _claudeCodeStatusSummary = Strings.Connection_ClaudeCodeStatusUnverified;
 
     [ObservableProperty]
     private ConnectionHealth _claudeCodeStatusLevel = ConnectionHealth.Pending;
 
     [ObservableProperty]
-    private string _claudeCodeGuidance = "「再確認」を押すとログイン状態を確認できます。";
+    private string _claudeCodeGuidance = Strings.Connection_ClaudeCodeGuidanceDefault;
 
     /// <summary>Claude Code のモデル候補（エイリアス）</summary>
     public IReadOnlyList<string> ClaudeCodeModelCandidates { get; } =

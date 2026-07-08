@@ -67,9 +67,11 @@ public sealed class OracleSchemaSyncExecutor : ISchemaSyncExecutor
                 result.Batches.Add(new SchemaSyncBatchResult(i + 1, sql, false, ex.Message));
                 // DDL は暗黙コミットのため、直前までに成功した文は取り消せない。
                 // 部分適用の可能性を明示し、以降の文は実行を打ち切る。
-                result.Error =
-                    $"{ex.Message}（Oracle の DDL は暗黙コミットされるため、"
-                    + $"直前までに成功した {i} 文は取り消されず部分適用されている可能性があります）";
+                result.Error = string.Format(
+                    QuickER.Provider.Resources.Strings.Sync_Error_OracleStatementFailed,
+                    ex.Message,
+                    i
+                );
                 return result;
             }
         }

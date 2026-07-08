@@ -1,5 +1,6 @@
 using FluentAssertions;
 using QuickER.CodeGen.CSharp;
+using QuickER.CodeGen.CSharp.Resources;
 using QuickER.Model;
 
 namespace QuickER.Tests.Generator;
@@ -570,11 +571,13 @@ public class CSharpCodeGenerationServiceTests
         );
 
         result.HasErrors.Should().BeFalse();
+        // 警告文言はカルチャ依存のため、resx テンプレートのプレースホルダ前プレフィックスで照合する
+        var manyToManyWarningPrefix = Strings.CodeGen_Warning_ManyToManySkipped.Split("{0}")[0];
         result
             .Diagnostics.Should()
             .Contain(diagnostic =>
                 diagnostic.Severity == GenerationDiagnosticSeverity.Warning
-                && diagnostic.Message.Contains("多対多")
+                && diagnostic.Message.Contains(manyToManyWarningPrefix)
             );
         result.Files[0].Content.Should().NotContain("ICollection<RoleEntity>");
     }
@@ -1867,7 +1870,7 @@ public class CSharpCodeGenerationServiceTests
             .Diagnostics.Should()
             .Contain(diagnostic =>
                 diagnostic.Severity == GenerationDiagnosticSeverity.Error
-                && diagnostic.Message.Contains("データアノテーション")
+                && diagnostic.Message == Strings.CodeGen_Error_RepositoryRequiresDataAnnotations
             );
     }
 
@@ -1982,8 +1985,10 @@ public class CSharpCodeGenerationServiceTests
         );
 
         result.HasErrors.Should().BeFalse();
+        // 警告文言はカルチャ依存のため、resx テンプレートのプレースホルダ前プレフィックスで照合する
+        var manyToManyWarningPrefix = Strings.CodeGen_Warning_ManyToManySkipped.Split("{0}")[0];
         result
-            .Diagnostics.Count(diagnostic => diagnostic.Message.Contains("多対多"))
+            .Diagnostics.Count(diagnostic => diagnostic.Message.Contains(manyToManyWarningPrefix))
             .Should()
             .Be(1);
     }
@@ -3441,8 +3446,7 @@ public class CSharpCodeGenerationServiceTests
             .Diagnostics.Should()
             .Contain(d =>
                 d.Severity == GenerationDiagnosticSeverity.Error
-                && d.Message.Contains("インメモリ")
-                && d.Message.Contains("UseRuntimePackages")
+                && d.Message == Strings.CodeGen_Error_InMemoryRuntimePackagesExclusive
             );
         result.Files.Should().BeEmpty("診断エラー時はファイルを出力しない");
     }

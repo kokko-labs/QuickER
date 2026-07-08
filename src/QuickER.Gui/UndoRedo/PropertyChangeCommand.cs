@@ -1,4 +1,6 @@
-﻿namespace QuickER.UndoRedo;
+﻿using QuickER.Resources;
+
+namespace QuickER.UndoRedo;
 
 /// <summary>任意オブジェクトのプロパティ 1 件の変更を Undo / Redo するコマンド</summary>
 /// <remarks>変更前後の値と対象プロパティのアクセサを渡して生成・登録する</remarks>
@@ -50,7 +52,7 @@ public class PropertyChangeCommand : IUndoableCommand
     public string PropertyName => _property.Name;
 
     /// <inheritdoc />
-    public string Description => $"変更: {_property.Name}";
+    public string Description => string.Format(Strings.Undo_PropertyChange, _property.Name);
 
     /// <inheritdoc />
     public void Execute()

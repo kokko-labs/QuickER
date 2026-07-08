@@ -7,7 +7,8 @@
   xmlns:ui="clr-namespace:QuickER.AI.UI;assembly=QuickER.AI.UI"
   xmlns:prov="clr-namespace:QuickER.Provider;assembly=QuickER.Provider"
   xmlns:sys="clr-namespace:System;assembly=System.Runtime"
-  Title="データベースに接続"
+  xmlns:resources="clr-namespace:QuickER.Resources"
+  Title="{x:Static resources:Strings.DbConnection_Title}"
   Width="520"
   SizeToContent="Height"
   ResizeMode="NoResize"
@@ -48,7 +49,7 @@
     <TextBlock
       Grid.Row="0"
       Grid.Column="0"
-      Text="保存済み接続"
+      Text="{x:Static resources:Strings.DbConnection_SavedConnections}"
       VerticalAlignment="Center"
       Margin="0,4"
     />
@@ -66,13 +67,19 @@
         Grid.Column="1"
         Margin="6,0,0,0"
         Width="60"
-        Content="🗑 削除"
+        Content="{x:Static resources:Strings.DbConnection_DeleteProfile}"
         Command="{Binding DeleteProfileCommand}"
-        ToolTip="選択中のプロファイルを削除"
+        ToolTip="{x:Static resources:Strings.DbConnection_DeleteProfileTooltip}"
       />
     </Grid>
 
-    <TextBlock Grid.Row="1" Grid.Column="0" Text="保存名" VerticalAlignment="Center" Margin="0,4" />
+    <TextBlock
+      Grid.Row="1"
+      Grid.Column="0"
+      Text="{x:Static resources:Strings.DbConnection_ProfileName}"
+      VerticalAlignment="Center"
+      Margin="0,4"
+    />
     <Grid Grid.Row="1" Grid.Column="1" Margin="0,4">
       <Grid.ColumnDefinitions>
         <ColumnDefinition Width="*" />
@@ -83,15 +90,21 @@
         Grid.Column="1"
         Margin="6,0,0,0"
         Width="60"
-        Content="💾 保存"
+        Content="{x:Static resources:Strings.DbConnection_SaveProfile}"
         Command="{Binding SaveProfileCommand}"
-        ToolTip="現在の入力内容を保存名で保存"
+        ToolTip="{x:Static resources:Strings.DbConnection_SaveProfileTooltip}"
       />
     </Grid>
 
     <Separator Grid.Row="2" Grid.ColumnSpan="2" Margin="0,8" />
 
-    <TextBlock Grid.Row="3" Grid.Column="0" Text="対象DB" VerticalAlignment="Center" Margin="0,4" />
+    <TextBlock
+      Grid.Row="3"
+      Grid.Column="0"
+      Text="{x:Static resources:Strings.DbConnection_TargetDb}"
+      VerticalAlignment="Center"
+      Margin="0,4"
+    />
     <ComboBox
       Grid.Row="3"
       Grid.Column="1"
@@ -106,7 +119,7 @@
     <TextBlock
       Grid.Row="4"
       Grid.Column="0"
-      Text="ファイルパス"
+      Text="{x:Static resources:Strings.DbConnection_FilePath}"
       VerticalAlignment="Center"
       Margin="0,4"
       Visibility="{Binding ShowFilePath, Converter={StaticResource BoolToVisibilityConverter}}"
@@ -126,16 +139,16 @@
         Grid.Column="1"
         Margin="6,0,0,0"
         Width="70"
-        Content="参照..."
+        Content="{x:Static resources:Strings.DbConnection_Browse}"
         Command="{Binding BrowseFileCommand}"
-        ToolTip="既存の SQLite データベースファイルを選択"
+        ToolTip="{x:Static resources:Strings.DbConnection_BrowseTooltip}"
       />
     </Grid>
 
     <TextBlock
       Grid.Row="5"
       Grid.Column="0"
-      Text="ホスト"
+      Text="{x:Static resources:Strings.DbConnection_Host}"
       VerticalAlignment="Center"
       Margin="0,4"
       Visibility="{Binding ShowServerFields, Converter={StaticResource BoolToVisibilityConverter}}"
@@ -151,7 +164,7 @@
     <TextBlock
       Grid.Row="6"
       Grid.Column="0"
-      Text="ポート"
+      Text="{x:Static resources:Strings.DbConnection_Port}"
       VerticalAlignment="Center"
       Margin="0,4"
       Visibility="{Binding ShowServerFields, Converter={StaticResource BoolToVisibilityConverter}}"
@@ -161,14 +174,14 @@
       Grid.Column="1"
       Margin="0,4"
       Text="{Binding Port, UpdateSourceTrigger=PropertyChanged}"
-      ToolTip="空欄の場合は方言の既定ポートを使用します"
+      ToolTip="{x:Static resources:Strings.DbConnection_PortTooltip}"
       Visibility="{Binding ShowServerFields, Converter={StaticResource BoolToVisibilityConverter}}"
     />
 
     <TextBlock
       Grid.Row="7"
       Grid.Column="0"
-      Text="データベース"
+      Text="{x:Static resources:Strings.DbConnection_Database}"
       VerticalAlignment="Center"
       Margin="0,4"
       Visibility="{Binding ShowServerFields, Converter={StaticResource BoolToVisibilityConverter}}"
@@ -184,7 +197,7 @@
     <TextBlock
       Grid.Row="8"
       Grid.Column="0"
-      Text="認証方式"
+      Text="{x:Static resources:Strings.DbConnection_AuthMethod}"
       VerticalAlignment="Center"
       Margin="0,4"
       Visibility="{Binding ShowAuthMode, Converter={StaticResource BoolToVisibilityConverter}}"
@@ -201,7 +214,7 @@
     <TextBlock
       Grid.Row="9"
       Grid.Column="0"
-      Text="ユーザー名"
+      Text="{x:Static resources:Strings.DbConnection_UserName}"
       VerticalAlignment="Center"
       Margin="0,4"
       Visibility="{Binding ShowUserId, Converter={StaticResource BoolToVisibilityConverter}}"
@@ -217,7 +230,7 @@
     <TextBlock
       Grid.Row="10"
       Grid.Column="0"
-      Text="パスワード"
+      Text="{x:Static resources:Strings.DbConnection_Password}"
       VerticalAlignment="Center"
       Margin="0,4"
       Visibility="{Binding ShowPassword, Converter={StaticResource BoolToVisibilityConverter}}"
@@ -240,9 +253,9 @@
         Grid.Column="1"
         Margin="8,0,0,0"
         VerticalAlignment="Center"
-        Content="保存"
+        Content="{x:Static resources:Strings.DbConnection_SavePassword}"
         IsChecked="{Binding SavePassword}"
-        ToolTip="Windows DPAPI で暗号化してプロファイルとともに保存"
+        ToolTip="{x:Static resources:Strings.DbConnection_SavePasswordTooltip}"
       />
     </Grid>
 
@@ -251,7 +264,7 @@
       Grid.Column="1"
       Margin="0,8"
       IsChecked="{Binding TrustServerCertificate}"
-      Content="サーバー証明書を信頼する (TrustServerCertificate)"
+      Content="{x:Static resources:Strings.DbConnection_TrustServerCertificate}"
       Visibility="{Binding ShowTrustServerCertificate, Converter={StaticResource BoolToVisibilityConverter}}"
     />
 
@@ -272,7 +285,7 @@
       Margin="0,8,0,0"
     >
       <Button
-        Content="接続テスト"
+        Content="{x:Static resources:Strings.DbConnection_TestConnection}"
         Width="100"
         Margin="0,0,8,0"
         Command="{Binding TestConnectionCommand}"
@@ -284,7 +297,12 @@
         IsDefault="True"
         Command="{Binding OkCommand}"
       />
-      <Button Content="キャンセル" Width="80" IsCancel="True" Command="{Binding CancelCommand}" />
+      <Button
+        Content="{x:Static resources:Strings.Common_Cancel}"
+        Width="80"
+        IsCancel="True"
+        Command="{Binding CancelCommand}"
+      />
     </StackPanel>
   </Grid>
 </Window>

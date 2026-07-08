@@ -1,6 +1,7 @@
 using System.IO;
 using System.Text;
 using QuickER.AI;
+using QuickER.AI.Mock.Resources;
 
 namespace QuickER.AI.Mock;
 
@@ -145,9 +146,9 @@ public sealed class MockProjectAgentRunner
             onProgress(line + "\n");
         }
 
-        EmitLine("== WPF モック生成を開始します ==");
-        EmitLine($"出力フォルダ: {outputDirectory}");
-        EmitLine($"プロジェクト名: {projectName}");
+        EmitLine(Strings.Mock_Run_Start);
+        EmitLine(string.Format(Strings.Mock_Run_OutputFolderFormat, outputDirectory));
+        EmitLine(string.Format(Strings.Mock_Run_ProjectNameFormat, projectName));
 
         var options = BuildLaunchOptions(model, outputDirectory, projectName);
         var prompt = BuildPrompt(projectName);
@@ -181,20 +182,25 @@ public sealed class MockProjectAgentRunner
 
         if (timedOut)
         {
-            EmitLine($"\n== タイムアウト（{_timeout.TotalMinutes:0} 分）により打ち切りました ==");
+            EmitLine(
+                string.Format(Strings.Mock_Run_TimedOutFormat, _timeout.TotalMinutes.ToString("0"))
+            );
         }
         else if (canceled)
         {
-            EmitLine("\n== 中断されました ==");
+            EmitLine(Strings.Mock_Run_Canceled);
         }
         else if (outcome.Success)
         {
-            EmitLine("\n== Claude Code の実行が完了しました ==");
+            EmitLine(Strings.Mock_Run_ClientCompleted);
         }
         else
         {
             EmitLine(
-                "\n== Claude Code の実行が失敗しました: " + (outcome.Error ?? "詳細不明") + " =="
+                string.Format(
+                    Strings.Mock_Run_ClientFailedFormat,
+                    outcome.Error ?? Strings.Mock_ErrorUnknown
+                )
             );
         }
 
@@ -205,8 +211,8 @@ public sealed class MockProjectAgentRunner
         {
             EmitLine(
                 artifactsPresent
-                    ? "成果物チェック: csproj と xaml を確認しました。"
-                    : "成果物チェック: csproj または xaml が見つかりません。"
+                    ? Strings.Mock_Run_ArtifactsFound
+                    : Strings.Mock_Run_ArtifactsMissing
             );
         }
 
@@ -216,7 +222,7 @@ public sealed class MockProjectAgentRunner
 
         if (!timedOut && !canceled && artifactsPresent)
         {
-            EmitLine("\n== 最終ビルドを検証します（dotnet build） ==");
+            EmitLine(Strings.Mock_Run_BuildVerify);
 
             try
             {
@@ -231,15 +237,13 @@ public sealed class MockProjectAgentRunner
                 }
 
                 EmitLine(
-                    buildSucceeded
-                        ? "最終ビルド: 成功しました。"
-                        : "最終ビルド: 失敗しました（ログを確認してください）。"
+                    buildSucceeded ? Strings.Mock_Run_BuildSucceeded : Strings.Mock_Run_BuildFailed
                 );
             }
             catch (OperationCanceledException)
             {
                 canceled = true;
-                EmitLine("最終ビルドの検証が中断されました。");
+                EmitLine(Strings.Mock_Run_BuildVerifyCanceled);
             }
         }
 
@@ -369,42 +373,43 @@ public sealed class MockProjectAgentRunner
     {
         if (success)
         {
-            return "WPF モックの生成が完了しました（ビルド成功を確認）。";
+            return Strings.Mock_Result_Success;
         }
 
         if (timedOut)
         {
-            return "タイムアウトにより打ち切りました。生成途中のファイルとログは出力フォルダに残っています。";
+            return Strings.Mock_Result_TimedOut;
         }
 
         if (canceled)
         {
-            return "生成を中断しました。途中経過とログは出力フォルダに残っています。";
+            return Strings.Mock_Result_Canceled;
         }
 
         if (outcome.NotLoggedIn)
         {
-            return "Claude Code が未ログインです。ターミナルで `claude` を起動し /login でログインしてください。";
+            return Strings.Mock_Result_NotLoggedIn;
         }
 
         if (!outcome.Success)
         {
-            return "Claude Code の実行に失敗しました: "
-                + (outcome.Error ?? "詳細不明")
-                + "。ログを確認してください。";
+            return string.Format(
+                Strings.Mock_Result_ClientFailedFormat,
+                outcome.Error ?? Strings.Mock_ErrorUnknown
+            );
         }
 
         if (!artifactsPresent)
         {
-            return "生成物（csproj / xaml）を確認できませんでした。ログを確認してください。";
+            return Strings.Mock_Result_ArtifactsMissing;
         }
 
         if (!buildSucceeded)
         {
-            return "最終ビルドが失敗しました。生成物とログは出力フォルダに残っています。";
+            return Strings.Mock_Result_BuildFailed;
         }
 
-        return "生成に失敗しました。ログを確認してください。";
+        return Strings.Mock_Result_Failed;
     }
 
     /// <summary>実行ログを出力フォルダへ書き出す（成功・失敗を問わず。ベストエフォート）</summary>

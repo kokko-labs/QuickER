@@ -1,3 +1,4 @@
+using QuickER.CodeGen.CSharp.Resources;
 using QuickER.Model;
 
 namespace QuickER.CodeGen.CSharp;
@@ -94,7 +95,11 @@ internal sealed partial class CSharpGenerationModelBuilder
             );
             diagnostics.Add(
                 Warning(
-                    $"値オブジェクト '{className}' に集約される同名列の定義が一致しません。PK 定義優先（無ければ最大定義）で生成しますが、ER 図の定義統一を推奨します: {locations}"
+                    string.Format(
+                        Strings.CodeGen_Warning_ValueObjectDefinitionMismatch,
+                        className,
+                        locations
+                    )
                 )
             );
         }

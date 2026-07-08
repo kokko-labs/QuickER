@@ -1,6 +1,7 @@
 using FluentAssertions;
 using QuickER.AI;
 using QuickER.AI.Chat;
+using QuickER.AI.Resources;
 
 namespace QuickER.Tests.Services.Chat;
 
@@ -122,7 +123,7 @@ public class ClaudeCodeChatEngineTests
         await engine.SendAsync("やあ", TestContext.Current.CancellationToken);
 
         completed!.Value.Success.Should().BeFalse();
-        completed!.Value.Error.Should().Contain("ログイン");
+        completed!.Value.Error.Should().Be(Strings.ClaudeCode_TurnNotLoggedIn);
 
         await engine.DisposeAsync();
     }
@@ -137,7 +138,7 @@ public class ClaudeCodeChatEngineTests
         await engine.InitializeAsync(TestContext.Current.CancellationToken);
 
         engine.IsReady.Should().BeFalse();
-        engine.StatusSummary.Should().Contain("見つかりません");
+        engine.StatusSummary.Should().Be(Strings.ClaudeCode_Status_NotFound);
 
         await engine.DisposeAsync();
     }
@@ -167,7 +168,7 @@ public class ClaudeCodeChatEngineTests
         await engine.InitializeAsync(TestContext.Current.CancellationToken);
 
         engine.StatusLevel.Should().Be(ConnectionHealth.Pending);
-        engine.StatusSummary.Should().Be("未確認");
+        engine.StatusSummary.Should().Be(Strings.ClaudeCode_Status_Unconfirmed);
 
         await engine.DisposeAsync();
     }

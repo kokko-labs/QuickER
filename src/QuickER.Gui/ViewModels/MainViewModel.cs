@@ -8,6 +8,7 @@ using QuickER.Documents;
 using QuickER.Gui.Abstractions;
 using QuickER.Model;
 using QuickER.Provider;
+using QuickER.Resources;
 using QuickER.Services;
 using QuickER.SqlServer;
 using QuickER.UndoRedo;
@@ -32,6 +33,9 @@ public partial class MainViewModel : ObservableObject
 {
     /// <summary>Undo/Redo 履歴を管理するスタック</summary>
     public UndoRedoManager UndoRedo { get; } = new();
+
+    /// <summary>ツールバーの言語切替ボタン用の子 ViewModel（表示言語の選択・保存）</summary>
+    public LanguageSwitchViewModel LanguageSwitch { get; }
 
     /// <summary>選択中エンティティを内部バッファへコピーするコマンド</summary>
     /// <remarks>ペースト側の実行可否が非バインド対象の内部バッファに依存するため、生成属性を使わず手動で構築する</remarks>
@@ -209,6 +213,7 @@ public partial class MainViewModel : ObservableObject
             Relationships,
             ApplyRelationshipColumnRules
         );
+        LanguageSwitch = new LanguageSwitchViewModel(_dialogs);
         CopySelectedEntityCommand = new RelayCommand(CopySelectedEntity, CanCopySelectedEntity);
         PasteCopiedEntityCommand = new RelayCommand(PasteCopiedEntity, CanPasteCopiedEntity);
         Entities.CollectionChanged += OnEntitiesCollectionChanged;
@@ -415,7 +420,7 @@ public partial class MainViewModel : ObservableObject
     {
         if (
             Entities.Count > 0
-            && !_dialogs.Confirm("現在のダイアグラムをクリアします。よろしいですか？", "確認")
+            && !_dialogs.Confirm(Strings.Confirm_ClearDiagram, Strings.Common_Confirm)
         )
         {
             return;
@@ -744,8 +749,8 @@ public partial class MainViewModel : ObservableObject
             if (HasSameRelationship(PendingRelationshipSource, entity))
             {
                 _dialogs.ShowInformation(
-                    "同じ関係のリレーションはすでに存在します。既存のリレーションを編集してください。",
-                    "重複リレーション"
+                    Strings.Relationship_DuplicateMessage,
+                    Strings.Relationship_DuplicateTitle
                 );
 
                 IsRelationshipMode = false;
@@ -1018,7 +1023,7 @@ public partial class MainViewModel : ObservableObject
     {
         ApplyLayoutWithUndo(
             () => AutoLayoutService.LayoutGrid(Entities, Relationships),
-            "整列(格子)"
+            Strings.Toolbar_ArrangeGrid
         );
 
         // 整列後の全体像が収まるよう fit-to-window を要求する
@@ -1031,7 +1036,7 @@ public partial class MainViewModel : ObservableObject
     {
         ApplyLayoutWithUndo(
             () => AutoLayoutService.LayoutTree(Entities, Relationships),
-            "整列(木)"
+            Strings.Toolbar_ArrangeTree
         );
 
         // 整列後の全体像が収まるよう fit-to-window を要求する
@@ -1044,7 +1049,7 @@ public partial class MainViewModel : ObservableObject
     {
         ApplyLayoutWithUndo(
             () => AutoLayoutService.LayoutForceDirected(Entities, Relationships),
-            "整列(自由)"
+            Strings.Toolbar_ArrangeForce
         );
 
         // 整列後の全体像が収まるよう fit-to-window を要求する
@@ -1239,8 +1244,8 @@ public partial class MainViewModel : ObservableObject
         {
             _fallbackWarningShown = true;
             _dialogs.ShowInformation(
-                $"未対応のデータベース種別 '{dbms}' が指定されたため、SQL Server として扱います。",
-                "データベース種別"
+                string.Format(Strings.Dbms_UnsupportedFallback, dbms),
+                Strings.Dbms_Title
             );
         }
 
@@ -1308,7 +1313,10 @@ public partial class MainViewModel : ObservableObject
         // 変換できなかったカラムがあれば警告を提示する
         if (plan.Unconverted.Count > 0)
         {
-            _dialogs.ShowInformation(BuildUnconvertedWarning(plan.Unconverted), "型変換の警告");
+            _dialogs.ShowInformation(
+                BuildUnconvertedWarning(plan.Unconverted),
+                Strings.TypeConversion_WarningTitle
+            );
         }
     }
 
@@ -1325,15 +1333,24 @@ public partial class MainViewModel : ObservableObject
         const int limit = 30;
         var lines = unconverted
             .Take(limit)
-            .Select(c => $"・{c.TableName}.{c.ColumnName} ({c.OldType})");
+            .Select(c =>
+                string.Format(
+                    Strings.TypeConversion_ColumnLine,
+                    c.TableName,
+                    c.ColumnName,
+                    c.OldType
+                )
+            );
         var body = string.Join(Environment.NewLine, lines);
 
         if (unconverted.Count > limit)
         {
-            body += $"{Environment.NewLine}…他 {unconverted.Count - limit} 件";
+            body +=
+                Environment.NewLine
+                + string.Format(Strings.TypeConversion_MoreItems, unconverted.Count - limit);
         }
 
-        return $"変換できなかった列（元の型を保持します）:{Environment.NewLine}{body}";
+        return Strings.TypeConversion_WarningHeader + Environment.NewLine + body;
     }
 
     // ---------------- Collection changed handlers ----------------

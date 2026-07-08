@@ -1,3 +1,5 @@
+using QuickER.AI.Resources;
+
 namespace QuickER.AI;
 
 /// <summary>会話履歴 1 項目の役割</summary>
@@ -163,7 +165,11 @@ public sealed class ChatTurnEngine : IErChatEngine
                 this,
                 new ErChatTurnResult(
                     false,
-                    $"この接続方式は添付「{unsupported.FileName}」（{unsupported.Kind}）に対応していません。"
+                    string.Format(
+                        Strings.Chat_UnsupportedAttachment,
+                        unsupported.FileName,
+                        unsupported.Kind
+                    )
                 )
             );
             return;
@@ -180,7 +186,7 @@ public sealed class ChatTurnEngine : IErChatEngine
 
         _turnCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var token = _turnCts.Token;
-        StatusChanged?.Invoke(this, "生成中...");
+        StatusChanged?.Invoke(this, Strings.Chat_Generating);
 
         try
         {

@@ -4,6 +4,7 @@ using System.Linq;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using QuickER.AI;
+using QuickER.AI.UI.Resources;
 
 namespace QuickER.AI.UI;
 
@@ -68,7 +69,7 @@ public partial class AttachmentListViewModel : ObservableObject
                 if (value == AttachmentSupport.None && Items.Count > 0)
                 {
                     Clear();
-                    _reportStatus("この接続方式は添付に対応していないため、添付をクリアしました。");
+                    _reportStatus(Strings.Attachment_ClearedUnsupported);
                 }
                 else
                 {
@@ -112,12 +113,12 @@ public partial class AttachmentListViewModel : ObservableObject
         {
             if (Support == AttachmentSupport.None)
             {
-                return "この接続方式は添付に対応していません。";
+                return Strings.Attachment_DisabledUnsupported;
             }
 
             if (IsTurnInProgress)
             {
-                return "応答中は添付を変更できません。";
+                return Strings.Attachment_DisabledTurnInProgress;
             }
 
             return string.Empty;
@@ -135,7 +136,7 @@ public partial class AttachmentListViewModel : ObservableObject
             }
 
             // 対応種別を人間可読の一覧にして案内する
-            var kinds = new List<string> { "画像" };
+            var kinds = new List<string> { Strings.Attachment_KindImage };
 
             if (AllowsPdf)
             {
@@ -144,15 +145,18 @@ public partial class AttachmentListViewModel : ObservableObject
 
             if (Support.HasFlag(AttachmentSupport.Text))
             {
-                kinds.Add("テキスト");
+                kinds.Add(Strings.Attachment_KindText);
             }
 
             if (AllowsBinary)
             {
-                kinds.Add("その他ファイル");
+                kinds.Add(Strings.Attachment_KindOther);
             }
 
-            return $"ファイルを添付（{string.Join("・", kinds)}）";
+            return string.Format(
+                Strings.Attachment_ButtonTooltipFormat,
+                string.Join(Strings.Attachment_KindSeparator, kinds)
+            );
         }
     }
 
@@ -167,9 +171,9 @@ public partial class AttachmentListViewModel : ObservableObject
     /// 補助フィルタ（画像・PDF）を添える。種別ごとの可否は取り込み時にゲーティングする。
     /// </summary>
     public string FileDialogFilter =>
-        "すべてのファイル (*.*)|*.*"
-        + "|画像 (*.png;*.jpg;*.jpeg;*.gif;*.webp)|*.png;*.jpg;*.jpeg;*.gif;*.webp"
-        + "|PDF (*.pdf)|*.pdf";
+        $"{Strings.Attachment_FilterAllFiles}|*.*"
+        + $"|{Strings.Attachment_FilterImages}|*.png;*.jpg;*.jpeg;*.gif;*.webp"
+        + $"|{Strings.Attachment_FilterPdf}|*.pdf";
 
     /// <summary>ファイルパス群を添付として取り込む（1 件ずつ検証・失敗はステータス通知）</summary>
     /// <param name="paths">追加するファイルのパス群</param>
@@ -270,7 +274,11 @@ public partial class AttachmentListViewModel : ObservableObject
         )
         {
             _reportStatus(
-                $"画像は 1 メッセージ最大 {ChatAttachmentLimits.MaxImagesPerMessage} 枚までです: {attachment.FileName}"
+                string.Format(
+                    Strings.Attachment_ImageLimitFormat,
+                    ChatAttachmentLimits.MaxImagesPerMessage,
+                    attachment.FileName
+                )
             );
             return;
         }
@@ -283,12 +291,10 @@ public partial class AttachmentListViewModel : ObservableObject
     private static string RejectionMessage(ChatAttachmentKind kind, string fileName) =>
         kind switch
         {
-            ChatAttachmentKind.Pdf =>
-                $"この接続では PDF を読めません。Claude 接続をご利用ください: {fileName}",
-            ChatAttachmentKind.Text => $"この接続ではテキストファイルを読めません: {fileName}",
-            ChatAttachmentKind.Binary =>
-                $"この接続ではテキスト・画像・PDF 以外を読めません。Claude 接続をご利用ください: {fileName}",
-            _ => $"この接続では画像を読めません: {fileName}",
+            ChatAttachmentKind.Pdf => string.Format(Strings.Attachment_RejectPdf, fileName),
+            ChatAttachmentKind.Text => string.Format(Strings.Attachment_RejectText, fileName),
+            ChatAttachmentKind.Binary => string.Format(Strings.Attachment_RejectBinary, fileName),
+            _ => string.Format(Strings.Attachment_RejectImage, fileName),
         };
 
     /// <summary>添付操作が可能かを確認し、不可ならステータス通知して false を返す</summary>
@@ -296,13 +302,13 @@ public partial class AttachmentListViewModel : ObservableObject
     {
         if (Support == AttachmentSupport.None)
         {
-            _reportStatus("この接続方式は添付に対応していません。");
+            _reportStatus(Strings.Attachment_DisabledUnsupported);
             return false;
         }
 
         if (IsTurnInProgress)
         {
-            _reportStatus("応答中は添付を変更できません。");
+            _reportStatus(Strings.Attachment_DisabledTurnInProgress);
             return false;
         }
 
@@ -328,6 +334,6 @@ public partial class AttachmentListViewModel : ObservableObject
         }
 
         OnPropertyChanged(nameof(HasAttachments));
-        _reportStatus("この接続方式で読めない種別の添付を除外しました。");
+        _reportStatus(Strings.Attachment_RemovedUnsupported);
     }
 }

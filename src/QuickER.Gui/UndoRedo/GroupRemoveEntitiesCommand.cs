@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Linq;
+using QuickER.Resources;
 using QuickER.ViewModels;
 
 namespace QuickER.UndoRedo;
@@ -31,7 +32,7 @@ public sealed class GroupRemoveEntitiesCommand : IUndoableCommand
     }
 
     /// <inheritdoc />
-    public string Description => $"エンティティ一括削除: {_entities.Count} 個";
+    public string Description => string.Format(Strings.Undo_GroupRemoveEntities, _entities.Count);
 
     /// <inheritdoc />
     public void Execute()

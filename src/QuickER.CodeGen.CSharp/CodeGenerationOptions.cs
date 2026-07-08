@@ -1,3 +1,5 @@
+using QuickER.CodeGen.CSharp.Resources;
+
 namespace QuickER.CodeGen.CSharp;
 
 /// <summary>
@@ -89,7 +91,11 @@ public sealed class CodeGenerationOptions
                 if (!SupportedRepositoryDialects.Contains(value, StringComparer.OrdinalIgnoreCase))
                 {
                     throw new ArgumentException(
-                        $"未対応の Repository 方言: '{value}'。対応方言: {string.Join(", ", SupportedRepositoryDialects)}"
+                        string.Format(
+                            Strings.CodeGen_Error_UnsupportedRepositoryDialect,
+                            value,
+                            string.Join(", ", SupportedRepositoryDialects)
+                        )
                     );
                 }
 

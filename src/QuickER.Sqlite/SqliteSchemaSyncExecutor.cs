@@ -18,6 +18,6 @@ public sealed class SqliteSchemaSyncExecutor : ISchemaSyncExecutor
         CancellationToken ct = default
     ) =>
         throw new NotSupportedException(
-            "SQLite プロバイダは DB 同期に未対応です。将来的にテーブル再構築方式で対応予定です。"
+            QuickER.Provider.Resources.Strings.Sync_Sqlite_NotSupported
         );
 }

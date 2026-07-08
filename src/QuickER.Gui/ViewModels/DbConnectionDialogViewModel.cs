@@ -7,6 +7,7 @@ using CommunityToolkit.Mvvm.Input;
 using QuickER.AI.UI;
 using QuickER.Gui.Abstractions;
 using QuickER.Provider;
+using QuickER.Resources;
 using QuickER.Services;
 using QuickER.Sqlite;
 
@@ -236,7 +237,7 @@ public partial class DbConnectionDialogViewModel : ObservableObject
 
         // 同期モードで方言固定中は、異なる方言の前回接続は方言のみ復元しない
         ApplyProfile(lastUsed.Value.Profile, lastUsed.Value.Password, updateProfileName: false);
-        StatusMessage = "前回接続情報を復元しました。";
+        StatusMessage = Strings.DbConnection_Restored;
     }
 
     /// <summary>プロファイルまたは前回接続情報の内容を入力欄へ反映する</summary>
@@ -315,7 +316,10 @@ public partial class DbConnectionDialogViewModel : ObservableObject
         // 同期モードでは異なる方言のプロファイルは適用しない（方言固定を優先）
         if (Mode == DbConnectionDialogMode.Sync && !IsSameDbms(profile.Dbms))
         {
-            StatusMessage = $"プロファイル '{profile.Name}' は方言が異なるため選択できません。";
+            StatusMessage = string.Format(
+                Strings.DbConnection_ProfileDialectMismatch,
+                profile.Name
+            );
             return;
         }
 
@@ -324,7 +328,7 @@ public partial class DbConnectionDialogViewModel : ObservableObject
             profile.SavePassword ? _store.LoadPassword(profile.Id) : string.Empty,
             updateProfileName: true
         );
-        StatusMessage = $"プロファイル '{profile.Name}' を読み込みました。";
+        StatusMessage = string.Format(Strings.DbConnection_ProfileLoaded, profile.Name);
     }
 
     /// <summary>指定 DBMS 名が現在の選択方言と一致するか（大文字小文字無視）</summary>
@@ -353,7 +357,7 @@ public partial class DbConnectionDialogViewModel : ObservableObject
     private async Task TestConnectionAsync()
     {
         IsBusy = true;
-        StatusMessage = "接続中...";
+        StatusMessage = Strings.DbConnection_Connecting;
 
         try
         {
@@ -361,11 +365,14 @@ public partial class DbConnectionDialogViewModel : ObservableObject
             var result = await SelectedProvider
                 .SchemaImporter.ImportAsync(connectionString)
                 .ConfigureAwait(true);
-            StatusMessage = $"接続成功: {result.Entities.Count} テーブルを検出しました。";
+            StatusMessage = string.Format(
+                Strings.DbConnection_ConnectSucceeded,
+                result.Entities.Count
+            );
         }
         catch (Exception ex)
         {
-            StatusMessage = "接続失敗: " + ex.Message;
+            StatusMessage = string.Format(Strings.DbConnection_ConnectFailed, ex.Message);
         }
         finally
         {
@@ -379,7 +386,7 @@ public partial class DbConnectionDialogViewModel : ObservableObject
     {
         if (string.IsNullOrWhiteSpace(ProfileName))
         {
-            StatusMessage = "保存名を入力してください。";
+            StatusMessage = Strings.DbConnection_ProfileNameRequired;
             return;
         }
 
@@ -398,7 +405,7 @@ public partial class DbConnectionDialogViewModel : ObservableObject
         _store.Upsert(profile, Password);
         ReloadProfiles();
         SelectedProfileItem = Profiles.FirstOrDefault(p => p.Profile.Id == profile.Id);
-        StatusMessage = $"プロファイル '{profile.Name}' を保存しました。";
+        StatusMessage = string.Format(Strings.DbConnection_ProfileSaved, profile.Name);
     }
 
     /// <summary>選択中プロファイルを確認のうえ削除する</summary>
@@ -407,14 +414,14 @@ public partial class DbConnectionDialogViewModel : ObservableObject
     {
         if (SelectedProfile is null)
         {
-            StatusMessage = "削除するプロファイルを選択してください。";
+            StatusMessage = Strings.DbConnection_SelectProfileToDelete;
             return;
         }
 
         if (
             !_dialogs.Confirm(
-                $"プロファイル '{SelectedProfile.Name}' を削除します。よろしいですか？",
-                "確認"
+                string.Format(Strings.DbConnection_DeleteProfileConfirm, SelectedProfile.Name),
+                Strings.Common_Confirm
             )
         )
         {
@@ -425,16 +432,14 @@ public partial class DbConnectionDialogViewModel : ObservableObject
         _store.Delete(SelectedProfile.Id);
         ReloadProfiles();
         SelectedProfileItem = null;
-        StatusMessage = $"プロファイル '{name}' を削除しました。";
+        StatusMessage = string.Format(Strings.DbConnection_ProfileDeleted, name);
     }
 
     /// <summary>ファイル選択ダイアログで SQLite のデータベースファイルを選ぶ（取込専用のため既存ファイルのみ）</summary>
     [RelayCommand]
     private void BrowseFile()
     {
-        var picked = _files.PickOpenFile(
-            "SQLite データベース (*.db;*.sqlite;*.sqlite3)|*.db;*.sqlite;*.sqlite3|すべてのファイル (*.*)|*.*"
-        );
+        var picked = _files.PickOpenFile(Strings.DbConnection_SqliteFileFilter);
 
         if (picked is null)
         {
@@ -453,20 +458,20 @@ public partial class DbConnectionDialogViewModel : ObservableObject
         {
             if (string.IsNullOrWhiteSpace(FilePath))
             {
-                StatusMessage = "データベースファイルのパスを入力してください。";
+                StatusMessage = Strings.DbConnection_FilePathRequired;
                 return;
             }
 
             // 取込専用のため新規作成は許可せず、存在しないファイルは確定を拒否する
             if (!File.Exists(FilePath))
             {
-                StatusMessage = "指定したデータベースファイルが見つかりません。";
+                StatusMessage = Strings.DbConnection_FileNotFound;
                 return;
             }
         }
         else if (string.IsNullOrWhiteSpace(Host) || string.IsNullOrWhiteSpace(Database))
         {
-            StatusMessage = "ホストとデータベース名を入力してください。";
+            StatusMessage = Strings.DbConnection_HostAndDatabaseRequired;
             return;
         }
 

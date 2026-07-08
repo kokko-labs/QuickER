@@ -3,6 +3,7 @@ using System.Printing;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using QuickER.Resources;
 using QuickER.ViewModels;
 
 namespace QuickER.Services;
@@ -250,10 +251,10 @@ public static class DiagramPrintService
             imageableArea = ResolveImageableArea(printDialog);
         }
 
-        var jobName = string.IsNullOrWhiteSpace(title) ? "無題" : title;
+        var jobName = string.IsNullOrWhiteSpace(title) ? Strings.Print_UntitledJob : title;
         var pageVisual = CreatePrintVisual(vm, bounds, imageableArea, headerText);
 
-        printDialog.PrintVisual(pageVisual, $"QuickER ER図 - {jobName}");
+        printDialog.PrintVisual(pageVisual, string.Format(Strings.Print_JobName, jobName));
     }
 
     /// <summary>ヘッダ描画用の <see cref="FormattedText"/> を生成する（合成と用紙サイズ計算で共用）</summary>

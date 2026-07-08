@@ -1,4 +1,5 @@
 using QuickER.AI;
+using QuickER.AI.Mock.Resources;
 using QuickER.Model;
 using QuickER.Provider;
 
@@ -103,7 +104,7 @@ public sealed class MockProjectGenerator : IMockProjectGenerator
         {
             return new MockProjectGenerationResult(
                 Success: false,
-                Message: $"スキャフォールドの生成に失敗しました: {ex.Message}",
+                Message: string.Format(Strings.Mock_ScaffoldFailedFormat, ex.Message),
                 OutputDirectory: outputDirectory,
                 LogPath: null
             );

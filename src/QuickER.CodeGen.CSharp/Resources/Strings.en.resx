@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <!--
+    英語サテライトリソース。中立（日本語）の Strings.resx と同じキー集合を保つこと（ResxKeyParityTests がキー集合の一致を検証する）。
+  -->
+  <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
+    <xsd:element name="root" msdata:IsDataSet="true">
+      <xsd:complexType>
+        <xsd:choice maxOccurs="unbounded">
+          <xsd:element name="metadata">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" />
+              </xsd:sequence>
+              <xsd:attribute name="name" use="required" type="xsd:string" />
+              <xsd:attribute name="type" type="xsd:string" />
+              <xsd:attribute name="mimetype" type="xsd:string" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="assembly">
+            <xsd:complexType>
+              <xsd:attribute name="alias" type="xsd:string" />
+              <xsd:attribute name="name" type="xsd:string" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="data">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+                <xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" msdata:Ordinal="1" />
+              <xsd:attribute name="type" type="xsd:string" msdata:Ordinal="3" />
+              <xsd:attribute name="mimetype" type="xsd:string" msdata:Ordinal="4" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="resheader">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" />
+            </xsd:complexType>
+          </xsd:element>
+        </xsd:choice>
+      </xsd:complexType>
+    </xsd:element>
+  </xsd:schema>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <data name="CodeGen_Error_MultiTargetEfCoreExclusive" xml:space="preserve">
+    <value>EF Core generation cannot be combined with multi-target custom Repositories (two or more effective dialects). Narrow it to a single dialect or disable EF Core (the two are mutually exclusive).</value>
+  </data>
+  <data name="CodeGen_Error_InMemoryRuntimePackagesExclusive" xml:space="preserve">
+    <value>In-memory Repository generation cannot be combined with the runtime package reference mode (UseRuntimePackages). The in-memory executor is emitted as fixed code on the generated side, so in a package reference mode that does not emit fixed code it loses its reference target. Disable UseRuntimePackages (emit the fixed code inline) or disable in-memory generation.</value>
+  </data>
+  <data name="CodeGen_Error_TypeMismatch" xml:space="preserve">
+    <value>Column '{1}' of table '{0}' resolves to different C# types across dialects ({2}: {3} / {4}: {5}). The shared Entity is a single type, so both dialects must resolve to the same C# type.</value>
+  </data>
+  <data name="CodeGen_Error_NoGenerationTarget" xml:space="preserve">
+    <value>None of Entity / EditModel / Mapper / Repository / EF Core / in-memory Repository is selected for generation. Enable at least one.</value>
+  </data>
+  <data name="CodeGen_Error_MapperRequiresEntityAndEditModel" xml:space="preserve">
+    <value>Generating a Mapper requires both the Entity class and the EditModel class. Include both as generation targets.</value>
+  </data>
+  <data name="CodeGen_Error_RepositoryRequiresEntity" xml:space="preserve">
+    <value>Generating a Repository / EF Core / in-memory Repository requires the Entity class. Include Entity as a generation target.</value>
+  </data>
+  <data name="CodeGen_Error_RepositoryRequiresDataAnnotations" xml:space="preserve">
+    <value>Repository / EF Core / in-memory Repository use the [Table] / [Key] / [Column] attributes, so data annotations must be applied. Enable data annotations.</value>
+  </data>
+  <data name="CodeGen_Error_NoEntities" xml:space="preserve">
+    <value>The ER diagram has no entities.</value>
+  </data>
+  <data name="CodeGen_Error_EmptyTableName" xml:space="preserve">
+    <value>There is an entity with an empty table name.</value>
+  </data>
+  <data name="CodeGen_Warning_CompositeKey" xml:space="preserve">
+    <value>Table '{0}' has a composite primary key, so [Key] attribute generation is minimal. A single primary key is recommended for the MVP.</value>
+  </data>
+  <data name="CodeGen_Error_UnsupportedRepositoryDialect" xml:space="preserve">
+    <value>Unsupported Repository dialect: '{0}'. Supported dialects: {1}</value>
+  </data>
+  <data name="CodeGen_Error_NonGeneratedFileOverwrite" xml:space="preserve">
+    <value>Only generated files can be overwritten. The output file name must end with .g.cs or .g.md.</value>
+  </data>
+  <data name="CodeGen_Warning_EntityDisplayNameCollision" xml:space="preserve">
+    <value>Entity '{0}' (table '{1}') has a column-derived property name that collides with DisplayName / CustomizeDisplayName, so the static DisplayName property and the CustomizeDisplayName hook were not generated.</value>
+  </data>
+  <data name="CodeGen_Warning_EditModelDisplayNameCollision" xml:space="preserve">
+    <value>EditModel '{0}' (table '{1}') has a column-derived property name that collides with the display-name helpers GetDisplayName / CustomizePropertyDisplayName, so the display-name mechanism was not generated and validation messages use property names as before.</value>
+  </data>
+  <data name="CodeGen_Warning_RepositorySingleKeyOnly" xml:space="preserve">
+    <value>The Repository for table '{0}' supports single primary keys only, so its generation was skipped.</value>
+  </data>
+  <data name="CodeGen_Warning_ManyToManySkipped" xml:space="preserve">
+    <value>Many-to-many relationship '{0}' is out of scope for C# generation and was skipped.</value>
+  </data>
+  <data name="CodeGen_Warning_RelationshipTargetNotFound" xml:space="preserve">
+    <value>Relationship '{0}' was skipped because its referenced entity was not found.</value>
+  </data>
+  <data name="CodeGen_Warning_RelationshipKeyUnknown" xml:space="preserve">
+    <value>Relationship '{0}' was skipped for navigation generation because its keys are unknown.</value>
+  </data>
+  <data name="CodeGen_Warning_ValueObjectDefinitionMismatch" xml:space="preserve">
+    <value>The definitions of the same-named columns aggregated into value object '{0}' do not match. Generation proceeds with the PK definition preferred (otherwise the largest definition), but unifying the definitions in the ER diagram is recommended: {1}</value>
+  </data>
+</root>

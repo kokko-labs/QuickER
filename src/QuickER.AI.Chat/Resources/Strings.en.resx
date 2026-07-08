@@ -1,0 +1,163 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <!--
+    英語サテライトリソース。中立（日本語）の Strings.resx と同じキー集合を保つこと（ResxKeyParityTests がキー集合の一致を検証する）。
+  -->
+  <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
+    <xsd:element name="root" msdata:IsDataSet="true">
+      <xsd:complexType>
+        <xsd:choice maxOccurs="unbounded">
+          <xsd:element name="metadata">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" />
+              </xsd:sequence>
+              <xsd:attribute name="name" use="required" type="xsd:string" />
+              <xsd:attribute name="type" type="xsd:string" />
+              <xsd:attribute name="mimetype" type="xsd:string" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="assembly">
+            <xsd:complexType>
+              <xsd:attribute name="alias" type="xsd:string" />
+              <xsd:attribute name="name" type="xsd:string" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="data">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+                <xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" msdata:Ordinal="1" />
+              <xsd:attribute name="type" type="xsd:string" msdata:Ordinal="3" />
+              <xsd:attribute name="mimetype" type="xsd:string" msdata:Ordinal="4" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="resheader">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" />
+            </xsd:complexType>
+          </xsd:element>
+        </xsd:choice>
+      </xsd:complexType>
+    </xsd:element>
+  </xsd:schema>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <data name="Chat_WindowTitle" xml:space="preserve">
+    <value>AI Chat</value>
+  </data>
+  <data name="Chat_TabApiKey" xml:space="preserve">
+    <value>API Key Connection</value>
+  </data>
+  <data name="Chat_ModelProvider" xml:space="preserve">
+    <value>Model Provider</value>
+  </data>
+  <data name="Chat_ModelName" xml:space="preserve">
+    <value>Model Name</value>
+  </data>
+  <data name="Chat_ApiKey" xml:space="preserve">
+    <value>API Key</value>
+  </data>
+  <data name="Chat_ApiKeyTooltip" xml:space="preserve">
+    <value>API key (OpenAI: sk-... / Claude: sk-ant-...)</value>
+  </data>
+  <data name="Chat_Save" xml:space="preserve">
+    <value>Save</value>
+  </data>
+  <data name="Chat_Endpoint" xml:space="preserve">
+    <value>Endpoint</value>
+  </data>
+  <data name="Chat_EndpointTooltip" xml:space="preserve">
+    <value>OpenAI-compatible endpoint (Ollama, etc.)</value>
+  </data>
+  <data name="Chat_TabCodex" xml:space="preserve">
+    <value>Codex Connection</value>
+  </data>
+  <data name="Chat_CodexLoginGuidance" xml:space="preserve">
+    <value>Please log in with your ChatGPT account. To use an API key instead, use the "API Key Connection" tab.</value>
+  </data>
+  <data name="Chat_CodexLoginButton" xml:space="preserve">
+    <value>Log in with ChatGPT in browser</value>
+  </data>
+  <data name="Chat_Logout" xml:space="preserve">
+    <value>Log out</value>
+  </data>
+  <data name="Chat_TabClaude" xml:space="preserve">
+    <value>Claude Connection</value>
+  </data>
+  <data name="Chat_Model" xml:space="preserve">
+    <value>Model</value>
+  </data>
+  <data name="Chat_ChatHeader" xml:space="preserve">
+    <value>Chat</value>
+  </data>
+  <data name="Chat_Responding" xml:space="preserve">
+    <value>Responding...</value>
+  </data>
+  <data name="Chat_Interrupt" xml:space="preserve">
+    <value>Stop</value>
+  </data>
+  <data name="Chat_NewConversation" xml:space="preserve">
+    <value>+ New Conversation</value>
+  </data>
+  <data name="Chat_ToolCallHeader" xml:space="preserve">
+    <value>Work Log</value>
+  </data>
+  <data name="Chat_InputTooltip" xml:space="preserve">
+    <value>Send with Ctrl+Enter / Attach an image with Ctrl+V</value>
+  </data>
+  <data name="Chat_Send" xml:space="preserve">
+    <value>Send</value>
+  </data>
+  <data name="Chat_CodexNotConnected" xml:space="preserve">
+    <value>Not connected</value>
+  </data>
+  <data name="Chat_ConversationStarted" xml:space="preserve">
+    <value>Conversation started. Talk to me about the ER diagram.</value>
+  </data>
+  <data name="Chat_SwitchBackendConfirm" xml:space="preserve">
+    <value>Clear the current conversation and switch the connection method?</value>
+  </data>
+  <data name="Chat_SwitchBackendConfirmTitle" xml:space="preserve">
+    <value>Clear Conversation</value>
+  </data>
+  <data name="Chat_SendFailedFormat" xml:space="preserve">
+    <value>Failed to send: {0}</value>
+  </data>
+  <data name="Chat_BrowserOpenFailedFormat" xml:space="preserve">
+    <value>Could not open the browser: {0}</value>
+  </data>
+  <data name="Chat_ResponseCompleted" xml:space="preserve">
+    <value>Response completed.</value>
+  </data>
+  <data name="Chat_ErrorSystemFormat" xml:space="preserve">
+    <value>Error: {0}</value>
+  </data>
+  <data name="Chat_ErrorStatusFormat" xml:space="preserve">
+    <value>An error occurred: {0}</value>
+  </data>
+  <data name="Chat_Interrupted" xml:space="preserve">
+    <value>The operation was interrupted.</value>
+  </data>
+  <data name="Chat_ToolsUnavailable" xml:space="preserve">
+    <value>Tools are unavailable.</value>
+  </data>
+</root>

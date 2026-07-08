@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <!--
+    中立（既定=日本語）リソース。英語は Strings.en.resx サテライトで賦与する（ResxKeyParityTests がキー集合一致を検証）。
+  -->
+  <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
+    <xsd:element name="root" msdata:IsDataSet="true">
+      <xsd:complexType>
+        <xsd:choice maxOccurs="unbounded">
+          <xsd:element name="metadata">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" />
+              </xsd:sequence>
+              <xsd:attribute name="name" use="required" type="xsd:string" />
+              <xsd:attribute name="type" type="xsd:string" />
+              <xsd:attribute name="mimetype" type="xsd:string" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="assembly">
+            <xsd:complexType>
+              <xsd:attribute name="alias" type="xsd:string" />
+              <xsd:attribute name="name" type="xsd:string" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="data">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+                <xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" msdata:Ordinal="1" />
+              <xsd:attribute name="type" type="xsd:string" msdata:Ordinal="3" />
+              <xsd:attribute name="mimetype" type="xsd:string" msdata:Ordinal="4" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="resheader">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" />
+            </xsd:complexType>
+          </xsd:element>
+        </xsd:choice>
+      </xsd:complexType>
+    </xsd:element>
+  </xsd:schema>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <data name="Attachment_RemoveTooltip" xml:space="preserve">
+    <value>削除</value>
+  </data>
+  <data name="Connection_Refresh" xml:space="preserve">
+    <value>再確認</value>
+  </data>
+  <data name="Connection_ClaudeCodeStatusUnverified" xml:space="preserve">
+    <value>未確認</value>
+  </data>
+  <data name="Connection_ClaudeCodeGuidanceDefault" xml:space="preserve">
+    <value>「再確認」を押すとログイン状態を確認できます。</value>
+  </data>
+  <data name="Attachment_ClearedUnsupported" xml:space="preserve">
+    <value>この接続方式は添付に対応していないため、添付をクリアしました。</value>
+  </data>
+  <data name="Attachment_DisabledUnsupported" xml:space="preserve">
+    <value>この接続方式は添付に対応していません。</value>
+  </data>
+  <data name="Attachment_DisabledTurnInProgress" xml:space="preserve">
+    <value>応答中は添付を変更できません。</value>
+  </data>
+  <data name="Attachment_RemovedUnsupported" xml:space="preserve">
+    <value>この接続方式で読めない種別の添付を除外しました。</value>
+  </data>
+  <data name="Attachment_KindImage" xml:space="preserve">
+    <value>画像</value>
+  </data>
+  <data name="Attachment_KindText" xml:space="preserve">
+    <value>テキスト</value>
+  </data>
+  <data name="Attachment_KindOther" xml:space="preserve">
+    <value>その他ファイル</value>
+  </data>
+  <data name="Attachment_KindSeparator" xml:space="preserve">
+    <value>・</value>
+  </data>
+  <data name="Attachment_ButtonTooltipFormat" xml:space="preserve">
+    <value>ファイルを添付（{0}）</value>
+  </data>
+  <data name="Attachment_FilterAllFiles" xml:space="preserve">
+    <value>すべてのファイル (*.*)</value>
+  </data>
+  <data name="Attachment_FilterImages" xml:space="preserve">
+    <value>画像 (*.png;*.jpg;*.jpeg;*.gif;*.webp)</value>
+  </data>
+  <data name="Attachment_FilterPdf" xml:space="preserve">
+    <value>PDF (*.pdf)</value>
+  </data>
+  <data name="Attachment_ImageLimitFormat" xml:space="preserve">
+    <value>画像は 1 メッセージ最大 {0} 枚までです: {1}</value>
+  </data>
+  <data name="Attachment_RejectPdf" xml:space="preserve">
+    <value>この接続では PDF を読めません。Claude 接続をご利用ください: {0}</value>
+  </data>
+  <data name="Attachment_RejectText" xml:space="preserve">
+    <value>この接続ではテキストファイルを読めません: {0}</value>
+  </data>
+  <data name="Attachment_RejectBinary" xml:space="preserve">
+    <value>この接続ではテキスト・画像・PDF 以外を読めません。Claude 接続をご利用ください: {0}</value>
+  </data>
+  <data name="Attachment_RejectImage" xml:space="preserve">
+    <value>この接続では画像を読めません: {0}</value>
+  </data>
+  <data name="Attachment_ClipboardImagePrefix" xml:space="preserve">
+    <value>クリップボード画像</value>
+  </data>
+  <data name="Attachment_ClipboardCaptureFailed" xml:space="preserve">
+    <value>クリップボードの内容を画像として取り込めませんでした。</value>
+  </data>
+</root>

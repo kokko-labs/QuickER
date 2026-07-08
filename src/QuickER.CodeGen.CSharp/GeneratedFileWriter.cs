@@ -1,4 +1,5 @@
 using System.Text;
+using QuickER.CodeGen.CSharp.Resources;
 
 namespace QuickER.CodeGen.CSharp;
 
@@ -33,7 +34,7 @@ public sealed class GeneratedFileWriter
             )
             {
                 throw new InvalidOperationException(
-                    "生成ファイル以外は上書きできません。出力ファイル名は .g.cs または .g.md で終わる必要があります。"
+                    Strings.CodeGen_Error_NonGeneratedFileOverwrite
                 );
             }
 

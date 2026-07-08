@@ -1,3 +1,5 @@
+using QuickER.Resources;
+
 namespace QuickER.UndoRedo;
 
 /// <summary>複数プロパティの変更前後スナップショットを Undo / Redo 時に一括適用する汎用コマンド</summary>
@@ -32,7 +34,7 @@ public sealed class SnapshotChangeCommand : IUndoableCommand
         IReadOnlyDictionary<string, object?> after,
         Action<object, IReadOnlyDictionary<string, object?>> applySnapshot,
         Action? afterApply = null,
-        string description = "プロパティ変更"
+        string? description = null
     )
     {
         _target = target;
@@ -40,7 +42,7 @@ public sealed class SnapshotChangeCommand : IUndoableCommand
         _after = after;
         _applySnapshot = applySnapshot;
         _afterApply = afterApply;
-        Description = description;
+        Description = description ?? Strings.Undo_SnapshotChange;
     }
 
     /// <inheritdoc />

@@ -5,6 +5,7 @@ using QuickER.AI;
 using QuickER.AI.Mock;
 using QuickER.Gui.Abstractions;
 using QuickER.Model;
+using MockStrings = QuickER.AI.Mock.Resources.Strings;
 
 namespace QuickER.Tests.ViewModels;
 
@@ -574,7 +575,7 @@ public class MockGenerationDialogViewModelTests
             // 出力フォルダを空にすると不可・理由が出る
             vm.OutputFolder = string.Empty;
             vm.CanGenerateMockProject.Should().BeFalse();
-            vm.MockGenDisabledReason.Should().Contain("出力フォルダ");
+            vm.MockGenDisabledReason.Should().Be(MockStrings.Mock_DisabledReason_OutputFolder);
         }
         finally
         {

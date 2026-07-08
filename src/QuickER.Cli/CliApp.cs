@@ -1,6 +1,7 @@
 using System.CommandLine;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using QuickER.Cli.Resources;
 using QuickER.CodeGen.CSharp;
 using QuickER.Documents;
 using QuickER.Model;
@@ -38,7 +39,7 @@ public static class CliApp
     {
         TrySetUtf8Output();
 
-        var root = new RootCommand("QuickER — ER図/データベースから C# コードを生成する CLI");
+        var root = new RootCommand(Strings.Cli_RootDescription);
         root.Subcommands.Add(BuildGenerateCommand());
         root.Subcommands.Add(BuildScaffoldCommand());
         return root.Parse(args).InvokeAsync();
@@ -63,18 +64,15 @@ public static class CliApp
     {
         var schema = new Option<FileInfo>("--schema")
         {
-            Description = "入力する ER 図 JSON ファイル（アプリの保存形式）",
+            Description = Strings.Cli_Opt_Schema,
             Required = true,
         };
         var output = new Option<DirectoryInfo>("--out")
         {
-            Description = "生成コードの出力先フォルダ",
+            Description = Strings.Cli_Opt_Out,
             Required = true,
         };
-        var config = new Option<FileInfo>("--config")
-        {
-            Description = "生成オプション設定ファイル（quicker.json）",
-        };
+        var config = new Option<FileInfo>("--config") { Description = Strings.Cli_Opt_Config };
         var provider = ProviderOption();
         var ns = NamespaceOption();
         var split = SplitOption();
@@ -82,7 +80,7 @@ public static class CliApp
         var runtimePackages = RuntimePackagesOption();
         var apiDocs = ApiDocsOption();
 
-        var command = new Command("generate", "ER 図 JSON から C# コードを生成する")
+        var command = new Command("generate", Strings.Cli_Cmd_Generate)
         {
             schema,
             output,
@@ -126,7 +124,9 @@ public static class CliApp
     {
         if (!schemaFile.Exists)
         {
-            Console.Error.WriteLine($"スキーマファイルが見つかりません: {schemaFile.FullName}");
+            Console.Error.WriteLine(
+                string.Format(Strings.Cli_SchemaFileNotFound, schemaFile.FullName)
+            );
             return 1;
         }
 
@@ -178,19 +178,15 @@ public static class CliApp
     {
         var connection = new Option<string>("--connection")
         {
-            Description =
-                "接続文字列（例: Server=.;Database=Foo;Integrated Security=true;TrustServerCertificate=true）",
+            Description = Strings.Cli_Opt_Connection,
             Required = true,
         };
         var output = new Option<DirectoryInfo>("--out")
         {
-            Description = "生成コードの出力先フォルダ",
+            Description = Strings.Cli_Opt_Out,
             Required = true,
         };
-        var config = new Option<FileInfo>("--config")
-        {
-            Description = "生成オプション設定ファイル（quicker.json）",
-        };
+        var config = new Option<FileInfo>("--config") { Description = Strings.Cli_Opt_Config };
         var provider = ProviderOption();
         var ns = NamespaceOption();
         var split = SplitOption();
@@ -198,10 +194,7 @@ public static class CliApp
         var runtimePackages = RuntimePackagesOption();
         var apiDocs = ApiDocsOption();
 
-        var command = new Command(
-            "scaffold",
-            "データベースへ直接接続してスキーマから C# コードを生成する"
-        )
+        var command = new Command("scaffold", Strings.Cli_Cmd_Scaffold)
         {
             connection,
             output,
@@ -266,7 +259,7 @@ public static class CliApp
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"データベースからのスキーマ取得に失敗しました: {ex.Message}");
+            Console.Error.WriteLine(string.Format(Strings.Cli_SchemaImportFailed, ex.Message));
             return 1;
         }
 
@@ -310,42 +303,24 @@ public static class CliApp
     private static Option<string> ProviderOption() =>
         new("--provider")
         {
-            Description = "対象データベースの種類（既定: sqlserver）",
+            Description = Strings.Cli_Opt_Provider,
             DefaultValueFactory = _ => SqlServerProvider.ProviderName,
         };
 
     private static Option<string> NamespaceOption() =>
-        new("--namespace") { Description = "生成コードのルート名前空間（設定ファイルを上書き）" };
+        new("--namespace") { Description = Strings.Cli_Opt_Namespace };
 
     private static Option<bool> SplitOption() =>
-        new("--split")
-        {
-            Description = "カテゴリごとに別ファイル・別名前空間で出力する（設定ファイルを上書き）",
-        };
+        new("--split") { Description = Strings.Cli_Opt_Split };
 
     private static Option<string> RepositoryDialectsOption() =>
-        new("--repository-dialects")
-        {
-            Description =
-                "自作 Repository を同時生成する方言（カンマ区切り複数指定可。例: sqlserver,sqlite。"
-                + "未指定時は --provider から単一導出する。設定ファイルを上書き）",
-        };
+        new("--repository-dialects") { Description = Strings.Cli_Opt_RepositoryDialects };
 
     private static Option<bool> RuntimePackagesOption() =>
-        new("--runtime-packages")
-        {
-            Description =
-                "生成コードにランタイム（固定コード）を含めず、NuGet パッケージ QuickER.Runtime.* への参照で賄う"
-                + "（既定 false。EF Core 生成とも併用可。設定ファイルを上書き）",
-        };
+        new("--runtime-packages") { Description = Strings.Cli_Opt_RuntimePackages };
 
     private static Option<bool> ApiDocsOption() =>
-        new("--api-docs")
-        {
-            Description =
-                "API リファレンス Markdown（{ベース名}.g.md）を 1 つ追加出力する"
-                + "（既定 false。設定ファイルを上書き）",
-        };
+        new("--api-docs") { Description = Strings.Cli_Opt_ApiDocs };
 
     /// <summary>
     /// 設定ファイル（quicker.json）を読み、CLI フラグ・<c>--provider</c>・<c>--repository-dialects</c>・
@@ -438,8 +413,11 @@ public static class CliApp
             if (unsupported.Count > 0)
             {
                 throw new RepositoryDialectUnsupportedException(
-                    $"自作 Repository（GenerateRepositories）は方言 '{string.Join(", ", unsupported)}' に対応していません。"
-                        + $"対応方言: {string.Join(", ", CodeGenerationOptions.SupportedRepositoryDialects)}"
+                    string.Format(
+                        Strings.Cli_RepositoryDialectUnsupported,
+                        string.Join(", ", unsupported),
+                        string.Join(", ", CodeGenerationOptions.SupportedRepositoryDialects)
+                    )
                 );
             }
         }
@@ -487,7 +465,7 @@ public static class CliApp
 
         if (result.HasErrors)
         {
-            Console.Error.WriteLine("生成エラーのため中止しました。");
+            Console.Error.WriteLine(Strings.Cli_GenerationAborted);
             return 1;
         }
 
@@ -496,10 +474,10 @@ public static class CliApp
 
         foreach (var file in written)
         {
-            Console.WriteLine($"生成: {file}");
+            Console.WriteLine(string.Format(Strings.Cli_GeneratedFile, file));
         }
 
-        Console.WriteLine($"{written.Count} 個のファイルを生成しました。");
+        Console.WriteLine(string.Format(Strings.Cli_GeneratedCount, written.Count));
 
         if (options.UseRuntimePackages)
         {

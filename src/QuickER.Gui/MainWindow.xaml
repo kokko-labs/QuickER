@@ -6,6 +6,7 @@
   xmlns:models="clr-namespace:QuickER.Model;assembly=QuickER.Model"
   xmlns:beh="clr-namespace:QuickER.Behaviors"
   xmlns:views="clr-namespace:QuickER.Views"
+  xmlns:resources="clr-namespace:QuickER.Resources"
   xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
   xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
   mc:Ignorable="d"
@@ -492,31 +493,40 @@
         <Button
           Style="{StaticResource ToolBarLabelButton}"
           Command="{Binding NewDiagramCommand}"
-          ToolTip="新規 (Ctrl+N)"
+          ToolTip="{x:Static resources:Strings.Toolbar_NewTooltip}"
         >
           <StackPanel>
             <TextBlock Style="{StaticResource ToolBarIcon}" Text="🗒" />
-            <TextBlock Style="{StaticResource ToolBarCaption}" Text="新規" />
+            <TextBlock
+              Style="{StaticResource ToolBarCaption}"
+              Text="{x:Static resources:Strings.Toolbar_New}"
+            />
           </StackPanel>
         </Button>
         <Button
           Style="{StaticResource ToolBarLabelButton}"
           Command="{Binding OpenCommand}"
-          ToolTip="開く (Ctrl+O)"
+          ToolTip="{x:Static resources:Strings.Toolbar_OpenTooltip}"
         >
           <StackPanel>
             <TextBlock Style="{StaticResource ToolBarIcon}" Text="📂" />
-            <TextBlock Style="{StaticResource ToolBarCaption}" Text="開く" />
+            <TextBlock
+              Style="{StaticResource ToolBarCaption}"
+              Text="{x:Static resources:Strings.Toolbar_Open}"
+            />
           </StackPanel>
         </Button>
         <Button
           Style="{StaticResource ToolBarLabelButton}"
           Command="{Binding SaveCommand}"
-          ToolTip="保存 (Ctrl+S)"
+          ToolTip="{x:Static resources:Strings.Toolbar_SaveTooltip}"
         >
           <StackPanel>
             <TextBlock Style="{StaticResource ToolBarIcon}" Text="💾" />
-            <TextBlock Style="{StaticResource ToolBarCaption}" Text="保存" />
+            <TextBlock
+              Style="{StaticResource ToolBarCaption}"
+              Text="{x:Static resources:Strings.Toolbar_Save}"
+            />
           </StackPanel>
         </Button>
         <Rectangle Style="{StaticResource ToolBarSeparator}" />
@@ -524,116 +534,149 @@
           Style="{StaticResource ToolBarLabelButton}"
           Command="{Binding UndoCommand}"
           IsEnabled="{Binding UndoRedo.CanUndo}"
-          ToolTip="元に戻す (Ctrl+Z)"
+          ToolTip="{x:Static resources:Strings.Toolbar_UndoTooltip}"
         >
           <StackPanel>
             <TextBlock Style="{StaticResource ToolBarIcon}" Text="↶" />
-            <TextBlock Style="{StaticResource ToolBarCaption}" Text="元に戻す" />
+            <TextBlock
+              Style="{StaticResource ToolBarCaption}"
+              Text="{x:Static resources:Strings.Toolbar_Undo}"
+            />
           </StackPanel>
         </Button>
         <Button
           Style="{StaticResource ToolBarLabelButton}"
           Command="{Binding RedoCommand}"
           IsEnabled="{Binding UndoRedo.CanRedo}"
-          ToolTip="やり直す (Ctrl+Y)"
+          ToolTip="{x:Static resources:Strings.Toolbar_RedoTooltip}"
         >
           <StackPanel>
             <TextBlock Style="{StaticResource ToolBarIcon}" Text="↷" />
-            <TextBlock Style="{StaticResource ToolBarCaption}" Text="やり直す" />
+            <TextBlock
+              Style="{StaticResource ToolBarCaption}"
+              Text="{x:Static resources:Strings.Toolbar_Redo}"
+            />
           </StackPanel>
         </Button>
         <Rectangle Style="{StaticResource ToolBarSeparator}" />
         <Button
           Style="{StaticResource ToolBarLabelButton}"
           Command="{Binding DuplicateSelectedEntityCommand}"
-          ToolTip="複製 (Ctrl+D)"
+          ToolTip="{x:Static resources:Strings.Toolbar_DuplicateTooltip}"
         >
           <StackPanel>
             <TextBlock Style="{StaticResource ToolBarIcon}" Text="❏" />
-            <TextBlock Style="{StaticResource ToolBarCaption}" Text="複製" />
+            <TextBlock
+              Style="{StaticResource ToolBarCaption}"
+              Text="{x:Static resources:Strings.Toolbar_Duplicate}"
+            />
           </StackPanel>
         </Button>
         <Rectangle Style="{StaticResource ToolBarSeparator}" />
         <ToggleButton
           Style="{StaticResource ToolBarLabelToggleButton}"
           IsChecked="{Binding ShowColumnDescriptionsInDiagram, Mode=TwoWay}"
-          ToolTip="ER 図のカラム行に「説明」を表示"
+          ToolTip="{x:Static resources:Strings.Toolbar_ShowDescriptionsTooltip}"
         >
           <StackPanel>
             <TextBlock Style="{StaticResource ToolBarIcon}" Text="💬" />
-            <TextBlock Style="{StaticResource ToolBarCaption}" Text="説明表示" />
+            <TextBlock
+              Style="{StaticResource ToolBarCaption}"
+              Text="{x:Static resources:Strings.Toolbar_ShowDescriptions}"
+            />
           </StackPanel>
         </ToggleButton>
         <ToggleButton
           Style="{StaticResource ToolBarLabelToggleButton}"
           IsChecked="{Binding ShowNullabilityInDiagram, Mode=TwoWay}"
-          ToolTip="ER 図のカラム行に NULL 許容を表示"
+          ToolTip="{x:Static resources:Strings.Toolbar_ShowNullabilityTooltip}"
         >
           <StackPanel>
             <TextBlock Style="{StaticResource ToolBarIcon}" Text="∅" />
-            <TextBlock Style="{StaticResource ToolBarCaption}" Text="NULL表示" />
+            <TextBlock
+              Style="{StaticResource ToolBarCaption}"
+              Text="{x:Static resources:Strings.Toolbar_ShowNullability}"
+            />
           </StackPanel>
         </ToggleButton>
         <ToggleButton
           Style="{StaticResource ToolBarLabelToggleButton}"
           IsChecked="{Binding IsCompactViewInDiagram, Mode=TwoWay}"
-          ToolTip="ER 図のカラム行を PK/FK のみに絞って簡易表示"
+          ToolTip="{x:Static resources:Strings.Toolbar_CompactViewTooltip}"
         >
           <StackPanel>
             <TextBlock Style="{StaticResource ToolBarIcon}" Text="▤" />
-            <TextBlock Style="{StaticResource ToolBarCaption}" Text="簡易表示" />
+            <TextBlock
+              Style="{StaticResource ToolBarCaption}"
+              Text="{x:Static resources:Strings.Toolbar_CompactView}"
+            />
           </StackPanel>
         </ToggleButton>
         <Rectangle Style="{StaticResource ToolBarSeparator}" />
         <Button
           Style="{StaticResource ToolBarLabelButton}"
           Command="{Binding AutoLayoutGridCommand}"
-          ToolTip="格子状に自動整列"
+          ToolTip="{x:Static resources:Strings.Toolbar_ArrangeGridTooltip}"
         >
           <StackPanel>
             <TextBlock Style="{StaticResource ToolBarIcon}" Text="▦" />
-            <TextBlock Style="{StaticResource ToolBarCaption}" Text="整列(格子)" />
+            <TextBlock
+              Style="{StaticResource ToolBarCaption}"
+              Text="{x:Static resources:Strings.Toolbar_ArrangeGrid}"
+            />
           </StackPanel>
         </Button>
         <Button
           Style="{StaticResource ToolBarLabelButton}"
           Command="{Binding AutoLayoutTreeCommand}"
-          ToolTip="ツリー状に自動整列"
+          ToolTip="{x:Static resources:Strings.Toolbar_ArrangeTreeTooltip}"
         >
           <StackPanel>
             <TextBlock Style="{StaticResource ToolBarIcon}" Text="⌬" />
-            <TextBlock Style="{StaticResource ToolBarCaption}" Text="整列(木)" />
+            <TextBlock
+              Style="{StaticResource ToolBarCaption}"
+              Text="{x:Static resources:Strings.Toolbar_ArrangeTree}"
+            />
           </StackPanel>
         </Button>
         <Button
           Style="{StaticResource ToolBarLabelButton}"
           Command="{Binding AutoLayoutForceCommand}"
-          ToolTip="リレーションの繋がりで大まかな配置を決めてから格子に揃えて整列"
+          ToolTip="{x:Static resources:Strings.Toolbar_ArrangeForceTooltip}"
         >
           <StackPanel>
             <TextBlock Style="{StaticResource ToolBarIcon}" Text="✺" />
-            <TextBlock Style="{StaticResource ToolBarCaption}" Text="整列(自由)" />
+            <TextBlock
+              Style="{StaticResource ToolBarCaption}"
+              Text="{x:Static resources:Strings.Toolbar_ArrangeForce}"
+            />
           </StackPanel>
         </Button>
         <Button
           Style="{StaticResource ToolBarLabelButton}"
           Command="{Binding AutoFitEntityWidthsCommand}"
-          ToolTip="カラム名と型が重ならない幅に自動調整"
+          ToolTip="{x:Static resources:Strings.Toolbar_AutoWidthTooltip}"
         >
           <StackPanel>
             <TextBlock Style="{StaticResource ToolBarIcon}" Text="↔" />
-            <TextBlock Style="{StaticResource ToolBarCaption}" Text="幅自動" />
+            <TextBlock
+              Style="{StaticResource ToolBarCaption}"
+              Text="{x:Static resources:Strings.Toolbar_AutoWidth}"
+            />
           </StackPanel>
         </Button>
         <Rectangle Style="{StaticResource ToolBarSeparator}" />
         <Button
           Style="{StaticResource ToolBarLabelButton}"
           Command="{Binding PrintDiagramCommand}"
-          ToolTip="図全体を印刷（1ページ縮小 / 原寸大を選択、Ctrl+P）"
+          ToolTip="{x:Static resources:Strings.Toolbar_PrintTooltip}"
         >
           <StackPanel>
             <TextBlock Style="{StaticResource ToolBarIcon}" Text="🖨" />
-            <TextBlock Style="{StaticResource ToolBarCaption}" Text="印刷" />
+            <TextBlock
+              Style="{StaticResource ToolBarCaption}"
+              Text="{x:Static resources:Strings.Toolbar_Print}"
+            />
           </StackPanel>
         </Button>
         <Rectangle Style="{StaticResource ToolBarSeparator}" />
@@ -641,27 +684,33 @@
           Style="{StaticResource ToolBarLabelButton}"
           Command="{Binding ExportDiagramCommand}"
           CommandParameter="{Binding ElementName=DiagramCanvas}"
-          ToolTip="PNG / SVG / DDL / Mermaid / DBML / 定義書を選択して出力"
+          ToolTip="{x:Static resources:Strings.Toolbar_ExportTooltip}"
         >
           <StackPanel>
             <TextBlock Style="{StaticResource ToolBarIcon}" Text="📤" />
-            <TextBlock Style="{StaticResource ToolBarCaption}" Text="出力" />
+            <TextBlock
+              Style="{StaticResource ToolBarCaption}"
+              Text="{x:Static resources:Strings.Toolbar_Export}"
+            />
           </StackPanel>
         </Button>
         <Button
           Style="{StaticResource ToolBarLabelButton}"
           Command="{Binding ImportDiagramCommand}"
-          ToolTip="Mermaid / DBML / 定義書を選択して取り込み"
+          ToolTip="{x:Static resources:Strings.Toolbar_ImportTooltip}"
         >
           <StackPanel>
             <TextBlock Style="{StaticResource ToolBarIcon}" Text="📥" />
-            <TextBlock Style="{StaticResource ToolBarCaption}" Text="取込" />
+            <TextBlock
+              Style="{StaticResource ToolBarCaption}"
+              Text="{x:Static resources:Strings.Toolbar_Import}"
+            />
           </StackPanel>
         </Button>
         <Rectangle Style="{StaticResource ToolBarSeparator}" />
         <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="4,0">
           <TextBlock
-            Text="対象DB:"
+            Text="{x:Static resources:Strings.Toolbar_TargetDbLabel}"
             VerticalAlignment="Center"
             Foreground="#374151"
             Margin="0,0,4,0"
@@ -676,17 +725,20 @@
             ItemsSource="{Binding AvailableProviders}"
             SelectedItem="{Binding SelectedProvider}"
             DisplayMemberPath="DisplayName"
-            ToolTip="この図のターゲット DB を切り替え（既存の型を変換）"
+            ToolTip="{x:Static resources:Strings.Toolbar_TargetDbTooltip}"
           />
         </StackPanel>
         <Button
           Style="{StaticResource ToolBarLabelButton}"
           Command="{Binding ImportFromDatabaseCommand}"
-          ToolTip="データベースからスキーマを取り込み"
+          ToolTip="{x:Static resources:Strings.Toolbar_ImportFromDbTooltip}"
         >
           <StackPanel>
             <TextBlock Style="{StaticResource ToolBarIcon}" Text="🛢" />
-            <TextBlock Style="{StaticResource ToolBarCaption}" Text="DB取込" />
+            <TextBlock
+              Style="{StaticResource ToolBarCaption}"
+              Text="{x:Static resources:Strings.Toolbar_ImportFromDb}"
+            />
           </StackPanel>
         </Button>
         <Button
@@ -697,40 +749,90 @@
         >
           <StackPanel>
             <TextBlock Style="{StaticResource ToolBarIcon}" Text="⇪" />
-            <TextBlock Style="{StaticResource ToolBarCaption}" Text="DB同期" />
+            <TextBlock
+              Style="{StaticResource ToolBarCaption}"
+              Text="{x:Static resources:Strings.Toolbar_SyncToDb}"
+            />
           </StackPanel>
         </Button>
         <Rectangle Style="{StaticResource ToolBarSeparator}" />
         <Button
           Style="{StaticResource ToolBarLabelButton}"
           Command="{Binding OpenAiChatCommand}"
-          ToolTip="AI チャットで ER 図を作成・編集（API キー / Codex 接続）"
+          ToolTip="{x:Static resources:Strings.Toolbar_OpenAiChatTooltip}"
         >
           <StackPanel>
             <TextBlock Style="{StaticResource ToolBarIcon}" Text="🤖" />
-            <TextBlock Style="{StaticResource ToolBarCaption}" Text="AIチャット" />
+            <TextBlock
+              Style="{StaticResource ToolBarCaption}"
+              Text="{x:Static resources:Strings.Toolbar_OpenAiChat}"
+            />
           </StackPanel>
         </Button>
         <Button
           Style="{StaticResource ToolBarLabelButton}"
           Command="{Binding OpenMockGenerationCommand}"
-          ToolTip="現在の ER 図から AI で Web モック画面（HTML）を生成"
+          ToolTip="{x:Static resources:Strings.Toolbar_MockGenerationTooltip}"
         >
           <StackPanel>
             <TextBlock Style="{StaticResource ToolBarIcon}" Text="🖼" />
-            <TextBlock Style="{StaticResource ToolBarCaption}" Text="AIモック" />
+            <TextBlock
+              Style="{StaticResource ToolBarCaption}"
+              Text="{x:Static resources:Strings.Toolbar_MockGeneration}"
+            />
           </StackPanel>
         </Button>
         <Rectangle Style="{StaticResource ToolBarSeparator}" />
         <Button
           Style="{StaticResource ToolBarLabelButton}"
           Command="{Binding GenerateCSharpCodeCommand}"
-          ToolTip="現在の ER 図から C# Entity / BindingModel を生成"
+          ToolTip="{x:Static resources:Strings.Toolbar_GenerateCSharpTooltip}"
         >
           <StackPanel>
             <TextBlock Style="{StaticResource ToolBarIcon}" Text="⌘" />
-            <TextBlock Style="{StaticResource ToolBarCaption}" Text="C#生成" />
+            <TextBlock
+              Style="{StaticResource ToolBarCaption}"
+              Text="{x:Static resources:Strings.Toolbar_GenerateCSharp}"
+            />
           </StackPanel>
+        </Button>
+        <Rectangle Style="{StaticResource ToolBarSeparator}" />
+        <!--
+          言語切替: クリックで ContextMenu（日本語 / English）を開く。選択で設定を保存し、
+          再起動反映方式のため「再起動後に反映」を通知する。キャプション・ツールチップは resx 参照。
+          ContextMenu は配置対象の DataContext（MainViewModel）を引き継いでチェック状態を束縛する。
+        -->
+        <Button
+          x:Name="LanguageButton"
+          Style="{StaticResource ToolBarLabelButton}"
+          Click="LanguageButton_Click"
+          ToolTip="{x:Static resources:Strings.Language_Tooltip}"
+        >
+          <StackPanel>
+            <TextBlock Style="{StaticResource ToolBarIcon}" Text="🌐" />
+            <TextBlock
+              Style="{StaticResource ToolBarCaption}"
+              Text="{x:Static resources:Strings.Language_Caption}"
+            />
+          </StackPanel>
+          <Button.ContextMenu>
+            <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
+              <MenuItem
+                Header="{x:Static resources:Strings.Language_Japanese}"
+                IsCheckable="True"
+                IsChecked="{Binding LanguageSwitch.IsJapaneseChecked, Mode=OneWay}"
+                Command="{Binding LanguageSwitch.SelectLanguageCommand}"
+                CommandParameter="ja"
+              />
+              <MenuItem
+                Header="{x:Static resources:Strings.Language_English}"
+                IsCheckable="True"
+                IsChecked="{Binding LanguageSwitch.IsEnglishChecked, Mode=OneWay}"
+                Command="{Binding LanguageSwitch.SelectLanguageCommand}"
+                CommandParameter="en"
+              />
+            </ContextMenu>
+          </Button.ContextMenu>
         </Button>
       </StackPanel>
     </Border>
@@ -744,7 +846,11 @@
       Padding="10,4"
     >
       <DockPanel>
-        <TextBlock DockPanel.Dock="Left" Text="準備完了" Foreground="{StaticResource MutedText}" />
+        <TextBlock
+          DockPanel.Dock="Left"
+          Text="{x:Static resources:Strings.Status_Ready}"
+          Foreground="{StaticResource MutedText}"
+        />
 
         <!-- 右端: ズームコントロール（− / 倍率表示（クリックで 100%）/ ＋ / fit） -->
         <StackPanel
@@ -757,33 +863,33 @@
             Style="{StaticResource ZoomControlToggleButton}"
             IsChecked="{Binding IsMiniMapEnabled, Mode=TwoWay}"
             Content="⊞"
-            ToolTip="ミニマップの表示切替（図が収まらないときに右下へ表示）"
+            ToolTip="{x:Static resources:Strings.Status_MiniMapTooltip}"
           />
           <Rectangle Style="{StaticResource ToolBarSeparator}" Margin="4,3" />
           <Button
             Style="{StaticResource ZoomControlButton}"
             Command="{Binding ZoomOutCommand}"
             Content="−"
-            ToolTip="ズームアウト (Ctrl+-)"
+            ToolTip="{x:Static resources:Strings.Status_ZoomOutTooltip}"
           />
           <Button
             Style="{StaticResource ZoomControlButton}"
             Command="{Binding ResetZoomCommand}"
             Content="{Binding ZoomPercentText}"
             MinWidth="44"
-            ToolTip="クリックで 100% に戻す (Ctrl+0)"
+            ToolTip="{x:Static resources:Strings.Status_ZoomResetTooltip}"
           />
           <Button
             Style="{StaticResource ZoomControlButton}"
             Command="{Binding ZoomInCommand}"
             Content="＋"
-            ToolTip="ズームイン (Ctrl++)"
+            ToolTip="{x:Static resources:Strings.Status_ZoomInTooltip}"
           />
           <Button
             Style="{StaticResource ZoomControlButton}"
             Command="{Binding FitToWindowCommand}"
             Content="⛶"
-            ToolTip="全体を表示 (Ctrl+Shift+0)"
+            ToolTip="{x:Static resources:Strings.Status_FitTooltip}"
           />
         </StackPanel>
 
@@ -792,9 +898,9 @@
           HorizontalAlignment="Right"
           Foreground="{StaticResource MutedText}"
         >
-          <Run Text="エンティティ:" />
+          <Run Text="{x:Static resources:Strings.Status_EntitiesLabel}" />
           <Run Text="{Binding Entities.Count, Mode=OneWay}" />
-          <Run Text="   リレーション:" />
+          <Run Text="{x:Static resources:Strings.Status_RelationshipsLabel}" />
           <Run Text="{Binding Relationships.Count, Mode=OneWay}" />
         </TextBlock>
       </DockPanel>
@@ -827,7 +933,7 @@
         <ScrollViewer VerticalScrollBarVisibility="Auto">
           <StackPanel Margin="12,10,12,12">
             <TextBlock
-              Text="ツールボックス"
+              Text="{x:Static resources:Strings.Toolbox_Title}"
               FontWeight="Bold"
               Foreground="{StaticResource HeaderText}"
               Margin="0,0,0,10"
@@ -835,16 +941,19 @@
 
             <Border Style="{StaticResource ToolboxSectionCard}">
               <StackPanel>
-                <TextBlock Text="エンティティ" Style="{StaticResource ToolboxSectionTitle}" />
+                <TextBlock
+                  Text="{x:Static resources:Strings.Toolbox_EntitySection}"
+                  Style="{StaticResource ToolboxSectionTitle}"
+                />
                 <Button
                   Style="{StaticResource ToolboxItemButton}"
                   Command="{Binding AddEntityCommand}"
-                  ToolTip="新しいテーブルをキャンバスに追加します"
+                  ToolTip="{x:Static resources:Strings.Toolbox_AddEntityTooltip}"
                 >
                   <StackPanel Orientation="Horizontal">
                     <TextBlock Text="▭" Style="{StaticResource ToolboxItemIcon}" />
                     <TextBlock
-                      Text="エンティティを追加"
+                      Text="{x:Static resources:Strings.Toolbox_AddEntity}"
                       Style="{StaticResource ToolboxItemTitle}"
                       VerticalAlignment="Center"
                     />
@@ -853,12 +962,12 @@
                 <Button
                   Style="{StaticResource ToolboxItemButton}"
                   Command="{Binding RemoveSelectedEntityCommand}"
-                  ToolTip="選択中のエンティティをダイアグラムから削除します"
+                  ToolTip="{x:Static resources:Strings.Toolbox_RemoveEntityTooltip}"
                 >
                   <StackPanel Orientation="Horizontal">
                     <TextBlock Text="🗑" Style="{StaticResource ToolboxItemIcon}" />
                     <TextBlock
-                      Text="エンティティ削除"
+                      Text="{x:Static resources:Strings.Toolbox_RemoveEntity}"
                       Style="{StaticResource ToolboxItemTitle}"
                       VerticalAlignment="Center"
                     />
@@ -869,16 +978,19 @@
 
             <Border Style="{StaticResource ToolboxSectionCard}">
               <StackPanel>
-                <TextBlock Text="リレーションシップ" Style="{StaticResource ToolboxSectionTitle}" />
+                <TextBlock
+                  Text="{x:Static resources:Strings.Toolbox_RelationshipSection}"
+                  Style="{StaticResource ToolboxSectionTitle}"
+                />
                 <Button
                   Style="{StaticResource ToolboxItemButton}"
                   Command="{Binding StartAddOneToOneCommand}"
-                  ToolTip="1対1 のリレーション作成モードに切り替えます"
+                  ToolTip="{x:Static resources:Strings.Toolbox_OneToOneTooltip}"
                 >
                   <StackPanel Orientation="Horizontal">
                     <TextBlock Text="│─│" Style="{StaticResource ToolboxItemIcon}" />
                     <TextBlock
-                      Text="1対1"
+                      Text="{x:Static resources:Strings.Toolbox_OneToOne}"
                       Style="{StaticResource ToolboxItemTitle}"
                       VerticalAlignment="Center"
                     />
@@ -887,12 +999,12 @@
                 <Button
                   Style="{StaticResource ToolboxItemButton}"
                   Command="{Binding StartAddOneToManyCommand}"
-                  ToolTip="親子関係を表す 1対多 リレーションを作成できます"
+                  ToolTip="{x:Static resources:Strings.Toolbox_OneToManyTooltip}"
                 >
                   <StackPanel Orientation="Horizontal">
                     <TextBlock Text="│─≪" Style="{StaticResource ToolboxItemIcon}" />
                     <TextBlock
-                      Text="1対多"
+                      Text="{x:Static resources:Strings.Toolbox_OneToMany}"
                       Style="{StaticResource ToolboxItemTitle}"
                       VerticalAlignment="Center"
                     />
@@ -901,12 +1013,12 @@
                 <Button
                   Style="{StaticResource ToolboxItemButton}"
                   Command="{Binding StartAddManyToManyCommand}"
-                  ToolTip="中間テーブルを想定した多対多リレーションを作成します"
+                  ToolTip="{x:Static resources:Strings.Toolbox_ManyToManyTooltip}"
                 >
                   <StackPanel Orientation="Horizontal">
                     <TextBlock Text="≫─≪" Style="{StaticResource ToolboxItemIcon}" />
                     <TextBlock
-                      Text="多対多"
+                      Text="{x:Static resources:Strings.Toolbox_ManyToMany}"
                       Style="{StaticResource ToolboxItemTitle}"
                       VerticalAlignment="Center"
                     />
@@ -915,12 +1027,12 @@
                 <Button
                   Style="{StaticResource ToolboxItemButton}"
                   Command="{Binding RemoveSelectedRelationshipCommand}"
-                  ToolTip="選択中のリレーションを削除します"
+                  ToolTip="{x:Static resources:Strings.Toolbox_RemoveRelationshipTooltip}"
                 >
                   <StackPanel Orientation="Horizontal">
                     <TextBlock Text="🗑" Style="{StaticResource ToolboxItemIcon}" />
                     <TextBlock
-                      Text="リレーション削除"
+                      Text="{x:Static resources:Strings.Toolbox_RemoveRelationship}"
                       Style="{StaticResource ToolboxItemTitle}"
                       VerticalAlignment="Center"
                     />
@@ -941,11 +1053,11 @@
                   TextWrapping="Wrap"
                   Foreground="#7A5F00"
                   FontSize="11"
-                  Text="リレーション作成中: 2つのエンティティを順番にクリックしてください。同じエンティティを2回クリックすると自己参照リレーションを作成できます。"
+                  Text="{x:Static resources:Strings.Toolbox_RelationshipModeHint}"
                 />
                 <Button
                   Margin="0,6,0,0"
-                  Content="キャンセル"
+                  Content="{x:Static resources:Strings.Common_Cancel}"
                   Command="{Binding CancelRelationshipModeCommand}"
                 />
               </StackPanel>
@@ -1541,7 +1653,7 @@
                   Style="{StaticResource PropertyInputTextBox}"
                   MinHeight="30"
                   Text="{Binding SearchQuery, UpdateSourceTrigger=PropertyChanged}"
-                  ToolTip="テーブル名・カラム名を部分一致で検索（大文字小文字は無視）"
+                  ToolTip="{x:Static resources:Strings.Search_Tooltip}"
                   PreviewKeyDown="SearchTextBox_PreviewKeyDown"
                 >
                   <TextBox.InputBindings>
@@ -1561,7 +1673,7 @@
                   Style="{StaticResource ZoomControlButton}"
                   Command="{Binding CloseSearchCommand}"
                   Content="✕"
-                  ToolTip="検索を閉じる (Esc)"
+                  ToolTip="{x:Static resources:Strings.Search_CloseTooltip}"
                 />
               </Grid>
 
@@ -1691,7 +1803,7 @@
         <ScrollViewer VerticalScrollBarVisibility="Auto">
           <StackPanel Margin="12,10,12,12">
             <TextBlock
-              Text="プロパティ"
+              Text="{x:Static resources:Strings.Property_Title}"
               FontWeight="Bold"
               Foreground="{StaticResource HeaderText}"
               Margin="0,0,0,10"
@@ -1716,7 +1828,7 @@
               </Border.Style>
               <TextBlock
                 Style="{StaticResource PropertyHintText}"
-                Text="エンティティまたはリレーションを選択すると、ここで詳細を編集できます。"
+                Text="{x:Static resources:Strings.Property_Placeholder}"
               />
             </Border>
 
@@ -1763,7 +1875,7 @@
                     <TextBlock
                       Grid.Row="0"
                       Style="{StaticResource PropertyFieldLabel}"
-                      Text="テーブル名"
+                      Text="{x:Static resources:Strings.Property_TableName}"
                     />
                     <TextBox
                       Grid.Row="0"
@@ -1776,7 +1888,7 @@
                     <TextBlock
                       Grid.Row="2"
                       Style="{StaticResource PropertyFieldLabel}"
-                      Text="説明"
+                      Text="{x:Static resources:Strings.Property_Description}"
                     />
                     <TextBox
                       Grid.Row="2"
@@ -1784,13 +1896,13 @@
                       Grid.ColumnSpan="2"
                       Style="{StaticResource PropertyInputTextBox}"
                       Text="{Binding SelectedEntity.Description, UpdateSourceTrigger=LostFocus}"
-                      ToolTip="SQL Server の MS_Description と同期します"
+                      ToolTip="{x:Static resources:Strings.Property_DescriptionTooltip}"
                     />
 
                     <TextBlock
                       Grid.Row="4"
                       Style="{StaticResource PropertyFieldLabel}"
-                      Text="タイトル背景"
+                      Text="{x:Static resources:Strings.Property_TitleBackground}"
                     />
                     <ComboBox
                       Grid.Row="4"
@@ -1850,7 +1962,7 @@
                     <TextBlock
                       Grid.Column="0"
                       Style="{StaticResource PropertyCardTitle}"
-                      Text="項目"
+                      Text="{x:Static resources:Strings.Property_ColumnsHeader}"
                       Margin="0"
                       VerticalAlignment="Center"
                     />
@@ -1861,7 +1973,7 @@
                     >
                       <Button
                         Style="{StaticResource PropertyIconButton}"
-                        ToolTip="カラムを追加"
+                        ToolTip="{x:Static resources:Strings.Property_AddColumnTooltip}"
                         Command="{Binding AddColumnCommand}"
                       >
                         <TextBlock
@@ -1875,7 +1987,7 @@
                       </Button>
                       <Button
                         Style="{StaticResource PropertyIconButton}"
-                        ToolTip="選択中のカラムを削除"
+                        ToolTip="{x:Static resources:Strings.Property_RemoveColumnTooltip}"
                         Command="{Binding RemoveSelectedColumnCommand}"
                       >
                         <TextBlock
@@ -1895,7 +2007,7 @@
                     Grid.Row="1"
                     Style="{StaticResource PropertyHintText}"
                     Margin="0,0,0,0"
-                    Text="行のドラッグで並び順を変更できます。"
+                    Text="{x:Static resources:Strings.Property_ReorderHint}"
                   />
 
                   <DataGrid
@@ -1962,13 +2074,16 @@
                         </DataGridTemplateColumn.CellTemplate>
                       </DataGridTemplateColumn>
                       <DataGridTextColumn
-                        Header="カラム名"
+                        Header="{x:Static resources:Strings.Grid_ColumnName}"
                         Binding="{Binding Name, UpdateSourceTrigger=LostFocus}"
                         Width="*"
                         ElementStyle="{StaticResource PropertyDataGridTextDisplay}"
                         EditingElementStyle="{StaticResource PropertyDataGridTextEditor}"
                       />
-                      <DataGridTemplateColumn Header="型" Width="120">
+                      <DataGridTemplateColumn
+                        Header="{x:Static resources:Strings.Grid_Type}"
+                        Width="120"
+                      >
                         <DataGridTemplateColumn.CellTemplate>
                           <DataTemplate>
                             <TextBlock
@@ -1990,7 +2105,7 @@
                         </DataGridTemplateColumn.CellEditingTemplate>
                       </DataGridTemplateColumn>
                       <DataGridTextColumn
-                        Header="説明"
+                        Header="{x:Static resources:Strings.Property_Description}"
                         Width="*"
                         Binding="{Binding Description, UpdateSourceTrigger=LostFocus}"
                         ElementStyle="{StaticResource PropertyDataGridTextDisplay}"
@@ -2001,7 +2116,7 @@
                           <DataTemplate>
                             <Button
                               Style="{StaticResource PropertyIconButton}"
-                              ToolTip="このカラムを削除"
+                              ToolTip="{x:Static resources:Strings.Grid_RemoveColumnTooltip}"
                               Command="{Binding DataContext.RemoveColumnCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                               CommandParameter="{Binding}"
                             >
@@ -2025,7 +2140,10 @@
 
               <Border Style="{StaticResource PropertyCard}">
                 <StackPanel>
-                  <TextBlock Style="{StaticResource PropertyCardTitle}" Text="メモ" />
+                  <TextBlock
+                    Style="{StaticResource PropertyCardTitle}"
+                    Text="{x:Static resources:Strings.Property_Memo}"
+                  />
                   <TextBox
                     Style="{StaticResource PropertyInputTextBox}"
                     Text="{Binding SelectedEntity.Memo, UpdateSourceTrigger=PropertyChanged}"
@@ -2052,7 +2170,7 @@
                     Style="{StaticResource PropertyFieldLabel}"
                     HorizontalAlignment="Left"
                     Margin="0,0,0,8"
-                    Text="タイトル背景を一括変更"
+                    Text="{x:Static resources:Strings.Property_BulkTitleBackground}"
                   />
 
                   <!-- 色パレット: スウォッチ押下で選択中全員の TitleBackgroundColor を一括変更 -->
@@ -2087,7 +2205,7 @@
                   <Button
                     Margin="0,14,0,0"
                     Style="{StaticResource PropertyDangerButton}"
-                    Content="選択中をすべて削除"
+                    Content="{x:Static resources:Strings.Property_RemoveAllSelected}"
                     Command="{Binding RemoveSelectedEntityCommand}"
                   />
                 </StackPanel>
@@ -2097,7 +2215,10 @@
             <StackPanel Visibility="{Binding SelectedRelationship, Converter={StaticResource NullToVisibilityConverter}}">
               <Border Style="{StaticResource PropertyCard}">
                 <StackPanel DataContext="{Binding SelectedRelationship}">
-                  <TextBlock Style="{StaticResource PropertyCardTitle}" Text="リレーション" />
+                  <TextBlock
+                    Style="{StaticResource PropertyCardTitle}"
+                    Text="{x:Static resources:Strings.Property_RelationshipTitle}"
+                  />
 
                   <Grid>
                     <Grid.ColumnDefinitions>
@@ -2123,7 +2244,7 @@
                     <TextBlock
                       Grid.Row="0"
                       Style="{StaticResource PropertyFieldLabel}"
-                      Text="種別"
+                      Text="{x:Static resources:Strings.Property_RelationType}"
                     />
                     <ComboBox
                       Grid.Row="0"
@@ -2139,7 +2260,7 @@
                     <TextBlock
                       Grid.Row="2"
                       Style="{StaticResource PropertyFieldLabel}"
-                      Text="制約名"
+                      Text="{x:Static resources:Strings.Property_ConstraintName}"
                     />
                     <TextBox
                       Grid.Row="2"
@@ -2151,7 +2272,7 @@
                     <TextBlock
                       Grid.Row="4"
                       Style="{StaticResource PropertyFieldLabel}"
-                      Text="起点"
+                      Text="{x:Static resources:Strings.Property_SourceEndpoint}"
                     />
                     <TextBlock
                       Grid.Row="4"
@@ -2164,7 +2285,7 @@
                     <TextBlock
                       Grid.Row="6"
                       Style="{StaticResource PropertyFieldLabel}"
-                      Text="参照先列"
+                      Text="{x:Static resources:Strings.Property_ReferencedColumn}"
                     />
                     <ComboBox
                       Grid.Row="6"
@@ -2180,7 +2301,7 @@
                     <TextBlock
                       Grid.Row="8"
                       Style="{StaticResource PropertyFieldLabel}"
-                      Text="終点"
+                      Text="{x:Static resources:Strings.Property_TargetEndpoint}"
                     />
                     <TextBlock
                       Grid.Row="8"
@@ -2193,7 +2314,7 @@
                     <TextBlock
                       Grid.Row="10"
                       Style="{StaticResource PropertyFieldLabel}"
-                      Text="外部キー列"
+                      Text="{x:Static resources:Strings.Property_ForeignKeyColumn}"
                     />
                     <ComboBox
                       Grid.Row="10"
@@ -2239,7 +2360,7 @@
                   <Button
                     Margin="0,14,0,0"
                     Style="{StaticResource PropertyDangerButton}"
-                    Content="リレーションを削除"
+                    Content="{x:Static resources:Strings.Property_RemoveRelationship}"
                     Command="{Binding DataContext.RemoveSelectedRelationshipCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                   />
                 </StackPanel>

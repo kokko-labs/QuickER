@@ -73,9 +73,12 @@ public sealed class MySqlSchemaSyncExecutor : ISchemaSyncExecutor
             {
                 // DDL は暗黙コミットのためここまでに実行済みの文は取り消せない（部分適用の可能性）
                 var applied = index - 1;
-                result.Error =
-                    $"{index} 文目の実行に失敗しました（{applied} 文まで適用済みの可能性があります。"
-                    + $"MySQL の DDL は暗黙コミットされるためロールバックできません）: {ex.Message}";
+                result.Error = string.Format(
+                    QuickER.Provider.Resources.Strings.Sync_Error_MySqlStatementFailed,
+                    index,
+                    applied,
+                    ex.Message
+                );
                 result.Batches.Add(new SchemaSyncBatchResult(index, statement, false, ex.Message));
                 result.Committed = false;
                 return result;

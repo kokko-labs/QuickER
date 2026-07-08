@@ -182,7 +182,9 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
         // 参照先列が特定できない場合は不正な DDL を出さず、コメントでスキップを明示する
         if (pkCol is null || item.ColumnName is null)
         {
-            return $"-- スキップ: 外部キー追加に必要な列が解決できませんでした。 ({item.Description})";
+            // スキップ理由の識別子は生成 SQL の決定性を保つため方言中立・カルチャ非依存にする
+            // （表示用の item.Description は UI 言語で変わるため使わない）
+            return $"-- スキップ: 外部キー追加に必要な列が解決できませんでした。 ({SchemaDiffService.NormalizeTable(item.ChildEntity)} -> {SchemaDiffService.NormalizeTable(item.ParentEntity)})";
         }
 
         var childTbl = SchemaDiffService.NormalizeTable(item.ChildEntity);

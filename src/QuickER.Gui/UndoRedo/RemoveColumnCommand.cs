@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using QuickER.Resources;
 using QuickER.ViewModels;
 
 namespace QuickER.UndoRedo;
@@ -53,7 +54,7 @@ public class RemoveColumnCommand : IUndoableCommand
     }
 
     /// <inheritdoc />
-    public string Description => $"カラム削除: {_column.Name}";
+    public string Description => string.Format(Strings.Undo_RemoveColumn, _column.Name);
 
     /// <inheritdoc />
     public void Execute()

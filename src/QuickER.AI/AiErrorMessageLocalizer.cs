@@ -1,18 +1,19 @@
 ﻿using System.ClientModel;
 using System.Net.Http;
 using System.Text.Json;
+using QuickER.AI.Resources;
 
 namespace QuickER.AI;
 
 /// <summary>
-/// AI 呼び出し (OpenAI / Ollama 等) で発生した例外をユーザー向けの日本語メッセージへ変換するヘルパー
+/// AI 呼び出し (OpenAI / Ollama 等) で発生した例外を、表示言語のユーザー向けメッセージへ変換するヘルパー
 /// </summary>
 public static class AiErrorMessageLocalizer
 {
-    /// <summary>例外を日本語の表示用メッセージへ変換する</summary>
+    /// <summary>例外を表示言語の表示用メッセージへ変換する</summary>
     /// <param name="ex">AI 呼び出しで発生した例外</param>
-    /// <returns>ユーザーへ表示する日本語メッセージ</returns>
-    public static string ToJapanese(Exception ex)
+    /// <returns>ユーザーへ表示するメッセージ（表示言語は OS カルチャに従う）</returns>
+    public static string ToUserMessage(Exception ex)
     {
         if (ex is ClientResultException cre)
         {
@@ -21,26 +22,26 @@ public static class AiErrorMessageLocalizer
 
         if (ex is JsonException)
         {
-            return "AI からの応答を JSON として解釈できませんでした。プロンプトを変えて再実行してください。";
+            return Strings.Ai_JsonParseError;
         }
 
         if (ex is TaskCanceledException || ex is OperationCanceledException)
         {
-            return "通信がタイムアウトまたはキャンセルされました。ネットワーク接続を確認してください。";
+            return Strings.Ai_Timeout;
         }
 
         if (ex is HttpRequestException)
         {
-            return "サーバーに接続できませんでした。エンドポイント URL とネットワーク接続を確認してください。"
+            return Strings.Ai_ConnectionFailed
                 + Environment.NewLine
-                + "詳細: "
+                + Strings.Ai_DetailLabel
                 + ex.Message;
         }
 
-        return "予期しないエラーが発生しました: " + ex.Message;
+        return Strings.Ai_Unexpected + ex.Message;
     }
 
-    /// <summary>HTTP エラー (<see cref="ClientResultException"/>) を OpenAI のエラーコードと HTTP ステータスに基づく日本語メッセージへ変換する</summary>
+    /// <summary>HTTP エラー (<see cref="ClientResultException"/>) を OpenAI のエラーコードと HTTP ステータスに基づく表示用メッセージへ変換する</summary>
     private static string TranslateClientResult(ClientResultException ex)
     {
         // エラーコードが特定できればコード別の対処方法を優先して案内し、不明な場合は HTTP ステータス別の汎用メッセージへフォールバックする
@@ -53,44 +54,46 @@ public static class AiErrorMessageLocalizer
         {
             case "insufficient_quota":
                 return prefix
-                    + " 利用枠不足: OpenAI アカウントのクレジット残高が不足しています。"
+                    + Strings.Ai_Http_InsufficientQuota
                     + Environment.NewLine
-                    + "https://platform.openai.com/settings/organization/billing/overview から残高を確認・追加してください。";
+                    + Strings.Ai_Http_InsufficientQuotaBilling;
 
             case "invalid_api_key":
-                return prefix
-                    + " 認証エラー: API キーが無効です。正しいキーを入力するか再発行してください。";
+                return prefix + Strings.Ai_Http_InvalidApiKey;
 
             case "model_not_found":
-                return prefix
-                    + " モデルが見つかりません: 指定したモデル名がアカウントで利用できません。モデル名を変更してください。";
+                return prefix + Strings.Ai_Http_ModelNotFound;
 
             case "context_length_exceeded":
-                return prefix + " コンテキスト長超過: 入力が長すぎます。要件を短くしてください。";
+                return prefix + Strings.Ai_Http_ContextLengthExceeded;
 
             case "rate_limit_exceeded":
-                return prefix
-                    + " レート制限: リクエスト頻度が制限を超えました。しばらく待ってから再実行してください。";
+                return prefix + Strings.Ai_Http_RateLimitExceeded;
 
             case "billing_hard_limit_reached":
-                return prefix
-                    + " 課金上限到達: 月の利用上限に達しました。OpenAI の請求設定を確認してください。";
+                return prefix + Strings.Ai_Http_BillingHardLimit;
         }
 
         return status switch
         {
-            401 => prefix + " 認証エラー: API キーが正しくありません。",
-            403 => prefix + " 権限エラー: このリソースへのアクセス権がありません。",
-            404 => prefix
-                + " 見つかりません: モデル名またはエンドポイント URL が正しいか確認してください。",
-            408 => prefix + " タイムアウト: サーバー応答が遅延しています。再実行してください。",
-            429 => prefix
-                + " レート制限または利用枠不足です。OpenAI の課金設定を確認してください。",
+            401 => prefix + Strings.Ai_Http_401,
+            403 => prefix + Strings.Ai_Http_403,
+            404 => prefix + Strings.Ai_Http_404,
+            408 => prefix + Strings.Ai_Http_408,
+            429 => prefix + Strings.Ai_Http_429,
             >= 500 => prefix
-                + " サーバーエラー: しばらく待ってから再実行してください。"
-                + (string.IsNullOrEmpty(message) ? "" : Environment.NewLine + "詳細: " + message),
+                + Strings.Ai_Http_ServerError
+                + (
+                    string.IsNullOrEmpty(message)
+                        ? ""
+                        : Environment.NewLine + Strings.Ai_DetailLabel + message
+                ),
             _ => prefix
-                + (string.IsNullOrEmpty(message) ? " 通信エラーが発生しました。" : ": " + message),
+                + (
+                    string.IsNullOrEmpty(message)
+                        ? Strings.Ai_Http_GenericCommError
+                        : ": " + message
+                ),
         };
     }
 

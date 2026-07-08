@@ -1,6 +1,7 @@
 ﻿using System.Collections.Generic;
 using System.Linq;
 using QuickER.Model;
+using QuickER.Resources;
 using QuickER.ViewModels;
 
 namespace QuickER.UndoRedo;
@@ -41,13 +42,13 @@ public class ImportSchemaCommand : IUndoableCommand
         MainViewModel main,
         IReadOnlyList<Entity> entities,
         IReadOnlyList<Relationship> relationships,
-        string description = "DB からスキーマ取込"
+        string? description = null
     )
     {
         _main = main;
         _newEntities = entities;
         _newRelationships = relationships;
-        _description = description;
+        _description = description ?? Strings.Undo_ImportSchema;
     }
 
     /// <inheritdoc />

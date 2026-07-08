@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <!--
+    英語サテライトリソース。中立（日本語）の Strings.resx と同じキー集合を保つこと（ResxKeyParityTests がキー集合の一致を検証する）。
+  -->
+  <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
+    <xsd:element name="root" msdata:IsDataSet="true">
+      <xsd:complexType>
+        <xsd:choice maxOccurs="unbounded">
+          <xsd:element name="metadata">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" />
+              </xsd:sequence>
+              <xsd:attribute name="name" use="required" type="xsd:string" />
+              <xsd:attribute name="type" type="xsd:string" />
+              <xsd:attribute name="mimetype" type="xsd:string" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="assembly">
+            <xsd:complexType>
+              <xsd:attribute name="alias" type="xsd:string" />
+              <xsd:attribute name="name" type="xsd:string" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="data">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+                <xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" msdata:Ordinal="1" />
+              <xsd:attribute name="type" type="xsd:string" msdata:Ordinal="3" />
+              <xsd:attribute name="mimetype" type="xsd:string" msdata:Ordinal="4" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="resheader">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" />
+            </xsd:complexType>
+          </xsd:element>
+        </xsd:choice>
+      </xsd:complexType>
+    </xsd:element>
+  </xsd:schema>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <data name="Diff_AddTable" xml:space="preserve">
+    <value>Create table [{0}] ({1} columns)</value>
+  </data>
+  <data name="Diff_SetTableDescription" xml:space="preserve">
+    <value>Set description of table [{0}]: "{1}"</value>
+  </data>
+  <data name="Diff_SetColumnDescription" xml:space="preserve">
+    <value>Set description of column [{0}].[{1}]: "{2}"</value>
+  </data>
+  <data name="Diff_RemoveTableDescription" xml:space="preserve">
+    <value>Remove description of table [{0}]</value>
+  </data>
+  <data name="Diff_UpdateTableDescription" xml:space="preserve">
+    <value>Update description of table [{0}]: "{1}"</value>
+  </data>
+  <data name="Diff_AddColumn" xml:space="preserve">
+    <value>Add column [{0}].[{1}] {2}</value>
+  </data>
+  <data name="Diff_TypeChange" xml:space="preserve">
+    <value>Change type from {0} to {1}</value>
+  </data>
+  <data name="Diff_NullableChange" xml:space="preserve">
+    <value>Change nullability from {0} to {1}</value>
+  </data>
+  <data name="Diff_Nullable_Allow" xml:space="preserve">
+    <value>Allowed</value>
+  </data>
+  <data name="Diff_Nullable_Deny" xml:space="preserve">
+    <value>Not allowed</value>
+  </data>
+  <data name="Diff_ColumnChangePrefix" xml:space="preserve">
+    <value>Column [{0}].[{1}] </value>
+  </data>
+  <data name="Diff_RemoveColumnDescription" xml:space="preserve">
+    <value>Remove description of column [{0}].[{1}]</value>
+  </data>
+  <data name="Diff_UpdateColumnDescription" xml:space="preserve">
+    <value>Update description of column [{0}].[{1}]: "{2}"</value>
+  </data>
+  <data name="Diff_DropColumn" xml:space="preserve">
+    <value>Drop column [{0}].[{1}] ({2})</value>
+  </data>
+  <data name="Diff_DropTable" xml:space="preserve">
+    <value>Drop table [{0}]</value>
+  </data>
+  <data name="Diff_AddForeignKey" xml:space="preserve">
+    <value>Add foreign key [{0}].[{1}] → [{2}].[{3}]</value>
+  </data>
+  <data name="Diff_AddForeignKeyNoColumn" xml:space="preserve">
+    <value>Add foreign key [{0}] → [{1}] (note: the FK column is undefined, so the script is skipped)</value>
+  </data>
+  <data name="Diff_DropForeignKey" xml:space="preserve">
+    <value>Drop foreign key [{0}] → [{1}]</value>
+  </data>
+  <data name="Provider_UnsupportedProvider" xml:space="preserve">
+    <value>Unsupported provider: '{0}'. Supported providers: {1}</value>
+  </data>
+  <data name="Sync_Error_MySqlStatementFailed" xml:space="preserve">
+    <value>Statement {0} failed to execute (up to {1} statement(s) may already be applied; MySQL DDL is implicitly committed and cannot be rolled back): {2}</value>
+  </data>
+  <data name="Sync_Error_OracleStatementFailed" xml:space="preserve">
+    <value>{0} (Oracle DDL is implicitly committed, so the {1} statement(s) that succeeded beforehand are not rolled back and may be partially applied)</value>
+  </data>
+  <data name="Sync_Sqlite_NotSupported" xml:space="preserve">
+    <value>The SQLite provider does not support DB synchronization yet. It is planned to be supported via a table-rebuild approach in the future.</value>
+  </data>
+</root>

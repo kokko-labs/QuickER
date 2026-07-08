@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using QuickER.AI.Resources;
 
 namespace QuickER.AI;
 
@@ -250,7 +251,7 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
 
         if (!process.Start())
         {
-            throw new InvalidOperationException("Codex App Server を起動できませんでした。");
+            throw new InvalidOperationException(Strings.Codex_ServerStartFailed);
         }
 
         _process = process;
@@ -572,7 +573,11 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
                 {
                     pending.TrySetException(
                         new TimeoutException(
-                            $"Codex App Server からのレスポンスがタイムアウトしました (method: {method})。{BuildRecentStandardErrorSuffix()}"
+                            string.Format(
+                                Strings.Codex_ResponseTimeout,
+                                method,
+                                BuildRecentStandardErrorSuffix()
+                            )
                         )
                     );
                 }
@@ -700,7 +705,7 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
             if (_pendingRequests.TryRemove(pending.Key, out var request))
             {
                 request.TrySetException(
-                    new InvalidOperationException("Codex App Server との接続が切断されました。")
+                    new InvalidOperationException(Strings.Codex_ConnectionClosed)
                 );
             }
         }
@@ -811,9 +816,7 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
             || !element.TryGetProperty("thread", out var threadElement)
         )
         {
-            throw new InvalidOperationException(
-                "thread/start の応答に thread が含まれていません。"
-            );
+            throw new InvalidOperationException(Strings.Codex_ThreadStartMissingThread);
         }
 
         return ParseThreadInfo(threadElement);
@@ -828,7 +831,7 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
             || !element.TryGetProperty("turn", out var turnElement)
         )
         {
-            throw new InvalidOperationException("turn/start の応答に turn が含まれていません。");
+            throw new InvalidOperationException(Strings.Codex_TurnStartMissingTurn);
         }
 
         return ParseTurnInfo(turnElement);
@@ -886,9 +889,7 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
             || !element.TryGetProperty("thread", out var threadElement)
         )
         {
-            throw new InvalidOperationException(
-                "thread/started 通知に thread が含まれていません。"
-            );
+            throw new InvalidOperationException(Strings.Codex_ThreadStartedMissingThread);
         }
 
         return new CodexThreadStartedNotification { Thread = ParseThreadInfo(threadElement) };
@@ -1071,9 +1072,7 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
     {
         if (parameters is not JsonElement element)
         {
-            throw new InvalidOperationException(
-                "item/tool/call リクエストを解釈できませんでした。"
-            );
+            throw new InvalidOperationException(Strings.Codex_ToolCallUninterpretable);
         }
 
         return new CodexDynamicToolCallRequest
@@ -1211,7 +1210,7 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
             return new CodexLoginCompletedNotification
             {
                 Success = false,
-                Error = "ログイン完了通知を解釈できませんでした。",
+                Error = Strings.Codex_LoginCompletedUninterpretable,
             };
         }
 
@@ -1352,7 +1351,7 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
             if (resolvedPath.Contains('"'))
             {
                 throw new InvalidOperationException(
-                    $"codex コマンドのパスに引用符が含まれるため起動できません: {resolvedPath}"
+                    string.Format(Strings.Codex_PathHasQuote, resolvedPath)
                 );
             }
 
@@ -1363,7 +1362,11 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
             if (metaIndex >= 0)
             {
                 throw new InvalidOperationException(
-                    $"codex コマンドの引数に cmd で解釈される文字 '{appServerArguments[metaIndex]}' が含まれるため起動できません: {appServerArguments}"
+                    string.Format(
+                        Strings.Codex_ArgHasCmdMeta,
+                        appServerArguments[metaIndex],
+                        appServerArguments
+                    )
                 );
             }
 
@@ -1384,7 +1387,7 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
             : "unknown";
         var messageText = errorElement.TryGetProperty("message", out var messageElement)
             ? messageElement.GetString()
-            : "Codex App Server エラー";
+            : Strings.Codex_ServerErrorFallback;
         return $"{messageText} (code: {codeText})";
     }
 
@@ -1407,7 +1410,7 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
     {
         if (!IsStarted)
         {
-            throw new InvalidOperationException("Codex App Server はまだ起動していません。");
+            throw new InvalidOperationException(Strings.Codex_ServerNotStarted);
         }
     }
 }

@@ -1,5 +1,6 @@
 using System.IO;
 using System.Text;
+using QuickER.AI.Resources;
 
 namespace QuickER.AI;
 
@@ -100,7 +101,7 @@ public static class ChatAttachmentFactory
         {
             return ChatAttachmentResult.Fail(
                 ChatAttachmentError.Empty,
-                $"ファイルが空です: {fileName}"
+                string.Format(Strings.Attachment_Empty, fileName)
             );
         }
 
@@ -156,7 +157,11 @@ public static class ChatAttachmentFactory
             {
                 return ChatAttachmentResult.Fail(
                     ChatAttachmentError.ImageTooLarge,
-                    $"画像が上限（{ChatAttachmentLimits.MaxImageBytes / (1024 * 1024)}MB）を超えています: {fileName}"
+                    string.Format(
+                        Strings.Attachment_ImageTooLarge,
+                        ChatAttachmentLimits.MaxImageBytes / (1024 * 1024),
+                        fileName
+                    )
                 );
             }
 
@@ -175,7 +180,11 @@ public static class ChatAttachmentFactory
         {
             return ChatAttachmentResult.Fail(
                 ChatAttachmentError.PdfTooLarge,
-                $"PDF が上限（{ChatAttachmentLimits.MaxPdfBytes / (1024 * 1024)}MB）を超えています: {fileName}"
+                string.Format(
+                    Strings.Attachment_PdfTooLarge,
+                    ChatAttachmentLimits.MaxPdfBytes / (1024 * 1024),
+                    fileName
+                )
             );
         }
 
@@ -191,7 +200,11 @@ public static class ChatAttachmentFactory
         {
             return ChatAttachmentResult.Fail(
                 ChatAttachmentError.TextTooLarge,
-                $"テキストが上限（{ChatAttachmentLimits.MaxTextBytes / 1024}KB）を超えています: {fileName}"
+                string.Format(
+                    Strings.Attachment_TextTooLarge,
+                    ChatAttachmentLimits.MaxTextBytes / 1024,
+                    fileName
+                )
             );
         }
 
@@ -207,7 +220,11 @@ public static class ChatAttachmentFactory
         {
             return ChatAttachmentResult.Fail(
                 ChatAttachmentError.BinaryTooLarge,
-                $"ファイルが上限（{ChatAttachmentLimits.MaxBinaryBytes / (1024 * 1024)}MB）を超えています: {fileName}"
+                string.Format(
+                    Strings.Attachment_BinaryTooLarge,
+                    ChatAttachmentLimits.MaxBinaryBytes / (1024 * 1024),
+                    fileName
+                )
             );
         }
 

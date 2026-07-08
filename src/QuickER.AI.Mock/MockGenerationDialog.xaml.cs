@@ -3,6 +3,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using CommunityToolkit.Mvvm.Input;
 using QuickER.AI;
+using QuickER.AI.Mock.Resources;
 using QuickER.AI.UI;
 
 namespace QuickER.AI.Mock;
@@ -144,7 +145,10 @@ public partial class MockGenerationDialog : Window
         }
         catch (Exception ex)
         {
-            ViewModel.StatusMessage = $"プレビューを更新できませんでした: {ex.Message}";
+            ViewModel.StatusMessage = string.Format(
+                Strings.Mock_PreviewUpdateFailedFormat,
+                ex.Message
+            );
         }
     }
 

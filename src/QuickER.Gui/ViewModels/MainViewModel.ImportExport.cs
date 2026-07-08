@@ -6,6 +6,7 @@ using QuickER.CodeGen.CSharp;
 using QuickER.Documents;
 using QuickER.Model;
 using QuickER.Provider;
+using QuickER.Resources;
 using QuickER.Services;
 
 namespace QuickER.ViewModels;
@@ -182,8 +183,8 @@ public partial class MainViewModel
         catch (Exception ex)
         {
             _dialogs.ShowError(
-                $"出力できませんでした。{Environment.NewLine}{ex.Message}",
-                "エラー"
+                Strings.Export_Failed + Environment.NewLine + ex.Message,
+                Strings.Common_Error
             );
         }
     }
@@ -219,8 +220,8 @@ public partial class MainViewModel
         catch (Exception ex)
         {
             _dialogs.ShowError(
-                $"印刷できませんでした。{Environment.NewLine}{ex.Message}",
-                "エラー"
+                Strings.Print_Failed + Environment.NewLine + ex.Message,
+                Strings.Common_Error
             );
         }
     }
@@ -254,7 +255,10 @@ public partial class MainViewModel
 
             if (result.HasErrors)
             {
-                _dialogs.ShowError(BuildGenerationDiagnosticsMessage(result), "C# 生成エラー");
+                _dialogs.ShowError(
+                    BuildGenerationDiagnosticsMessage(result),
+                    Strings.Csharp_GenerationErrorTitle
+                );
                 return;
             }
 
@@ -268,11 +272,19 @@ public partial class MainViewModel
             {
                 var warningMessage = string.Join(
                     Environment.NewLine,
-                    warnings.Select(diagnostic => $"・{diagnostic.Message}")
+                    warnings.Select(diagnostic =>
+                        string.Format(Strings.Csharp_WarningLine, diagnostic.Message)
+                    )
                 );
                 var confirmed = _dialogs.Confirm(
-                    $"次の警告があります。{Environment.NewLine}{Environment.NewLine}{warningMessage}{Environment.NewLine}{Environment.NewLine}このまま生成しますか？（中止して ER 図の定義を修正することを推奨します）",
-                    "C# 生成の警告"
+                    Strings.Csharp_WarningIntro
+                        + Environment.NewLine
+                        + Environment.NewLine
+                        + warningMessage
+                        + Environment.NewLine
+                        + Environment.NewLine
+                        + Strings.Csharp_WarningPrompt,
+                    Strings.Csharp_WarningTitle
                 );
                 if (!confirmed)
                 {
@@ -290,8 +302,11 @@ public partial class MainViewModel
 
             var diagnostics = BuildGenerationDiagnosticsMessage(result);
             var message = string.IsNullOrWhiteSpace(diagnostics)
-                ? "C# コードの生成が完了しました。"
-                : $"C# コードの生成が完了しました。{Environment.NewLine}{Environment.NewLine}{diagnostics}";
+                ? Strings.Csharp_GeneratedSuccess
+                : Strings.Csharp_GeneratedSuccess
+                    + Environment.NewLine
+                    + Environment.NewLine
+                    + diagnostics;
 
             // パッケージ参照モードのときは、必要な PackageReference をコピー可能な形で続けて提示する
             // （メッセージボックスの本文はドラッグ選択でコピーできるため、新規ダイアログは設けない）
@@ -307,13 +322,13 @@ public partial class MainViewModel
                 message += $"{Environment.NewLine}{Environment.NewLine}{guidance}";
             }
 
-            _dialogs.ShowInformation(message, "完了");
+            _dialogs.ShowInformation(message, Strings.Common_Complete);
         }
         catch (Exception ex)
         {
             _dialogs.ShowError(
-                $"C# コードを生成できませんでした。{Environment.NewLine}{ex.Message}",
-                "エラー"
+                Strings.Csharp_GenerationFailed + Environment.NewLine + ex.Message,
+                Strings.Common_Error
             );
         }
     }
@@ -394,7 +409,7 @@ public partial class MainViewModel
             return true;
         }
 
-        return _dialogs.Confirm(message, "確認");
+        return _dialogs.Confirm(message, Strings.Common_Confirm);
     }
 
     /// <summary>ファイル選択ダイアログで選択したファイルの形式に応じて ER 図を取り込む</summary>
@@ -419,8 +434,8 @@ public partial class MainViewModel
         catch (Exception ex)
         {
             _dialogs.ShowError(
-                $"取り込めませんでした。{Environment.NewLine}{ex.Message}",
-                "エラー"
+                Strings.Import_Failed + Environment.NewLine + ex.Message,
+                Strings.Common_Error
             );
         }
     }
@@ -430,13 +445,13 @@ public partial class MainViewModel
     {
         var displayName = format switch
         {
-            DiagramExportFormat.Png => "PNG 画像",
-            DiagramExportFormat.Svg => "SVG 画像",
+            DiagramExportFormat.Png => Strings.ExportFormat_Png,
+            DiagramExportFormat.Svg => Strings.ExportFormat_Svg,
             DiagramExportFormat.Sql => "SQL DDL",
             DiagramExportFormat.Mermaid => "Mermaid",
             DiagramExportFormat.Dbml => "DBML",
-            DiagramExportFormat.Excel => "定義書",
-            _ => "ファイル",
+            DiagramExportFormat.Excel => Strings.Format_DefinitionDocument,
+            _ => Strings.Format_File,
         };
 
         switch (format)
@@ -444,9 +459,7 @@ public partial class MainViewModel
             case DiagramExportFormat.Png:
                 if (visual is not Visual pngVisual)
                 {
-                    throw new InvalidOperationException(
-                        "PNG 出力に必要なキャンバス情報を取得できませんでした。"
-                    );
+                    throw new InvalidOperationException(Strings.Export_PngCanvasInfoMissing);
                 }
 
                 ImageExportService.ExportPng(pngVisual, path);
@@ -477,7 +490,10 @@ public partial class MainViewModel
                 break;
         }
 
-        _dialogs.ShowInformation($"{displayName}の出力が完了しました。", "完了");
+        _dialogs.ShowInformation(
+            string.Format(Strings.Export_Completed, displayName),
+            Strings.Common_Complete
+        );
     }
 
     /// <summary>指定形式のダイアグラムファイルを読み込み、確認のうえ現在の図を置換する</summary>
@@ -488,22 +504,22 @@ public partial class MainViewModel
             DiagramImportFormat.Mermaid => MermaidImporter.Load(path),
             DiagramImportFormat.Dbml => DbmlImporter.Load(path),
             DiagramImportFormat.Excel => TableDefinitionDocumentImporter.Load(path),
-            _ => throw new InvalidOperationException("未対応の取込形式です。"),
+            _ => throw new InvalidOperationException(Strings.Import_UnsupportedFormat),
         };
 
         var displayName = format switch
         {
             DiagramImportFormat.Mermaid => "Mermaid",
             DiagramImportFormat.Dbml => "DBML",
-            DiagramImportFormat.Excel => "定義書",
-            _ => "ファイル",
+            DiagramImportFormat.Excel => Strings.Format_DefinitionDocument,
+            _ => Strings.Format_File,
         };
 
         if (
             !ConfirmDiagramReplacement(
                 diagram.Entities,
                 diagram.Relationships,
-                $"現在のダイアグラムを{displayName}の内容で置換します。よろしいですか？"
+                string.Format(Strings.Import_ReplaceConfirm, displayName)
             )
         )
         {
@@ -511,7 +527,10 @@ public partial class MainViewModel
         }
 
         ReplaceDiagramWithoutHistory(diagram.Entities, diagram.Relationships, autoLayout: true);
-        _dialogs.ShowInformation($"{displayName}の取り込みが完了しました。", "完了");
+        _dialogs.ShowInformation(
+            string.Format(Strings.Import_Completed, displayName),
+            Strings.Common_Complete
+        );
     }
 
     /// <summary>
@@ -540,7 +559,7 @@ public partial class MainViewModel
                 5 => DiagramExportFormat.Mermaid,
                 6 => DiagramExportFormat.Dbml,
                 7 => DiagramExportFormat.Excel,
-                _ => throw new InvalidOperationException("出力形式を判定できませんでした。"),
+                _ => throw new InvalidOperationException(Strings.Export_FormatUndetermined),
             },
         };
     }
@@ -561,7 +580,7 @@ public partial class MainViewModel
                 1 => DiagramImportFormat.Mermaid,
                 2 => DiagramImportFormat.Dbml,
                 3 => DiagramImportFormat.Excel,
-                _ => throw new InvalidOperationException("取込形式を判定できませんでした。"),
+                _ => throw new InvalidOperationException(Strings.Import_FormatUndetermined),
             },
         };
     }
@@ -576,7 +595,7 @@ public partial class MainViewModel
         var picked = _appDialogs.ShowDbConnectionDialog(
             DbConnectionDialogMode.Import,
             fixedProvider: CurrentProvider,
-            title: "データベースから取込"
+            title: Strings.Db_ImportTitle
         );
 
         if (picked is null)
@@ -596,7 +615,7 @@ public partial class MainViewModel
                 !ConfirmDiagramReplacement(
                     result.Entities,
                     result.Relationships,
-                    "現在のダイアグラムを取得結果で置換します。よろしいですか？"
+                    Strings.Db_ImportReplaceConfirm
                 )
             )
             {
@@ -611,22 +630,22 @@ public partial class MainViewModel
         }
         catch (System.Exception ex)
         {
-            _dialogs.ShowError("取り込みに失敗しました: " + ex.Message, "エラー");
+            _dialogs.ShowError(
+                string.Format(Strings.Db_ImportFailed, ex.Message),
+                Strings.Common_Error
+            );
         }
     }
 
     // ---------------- DB 書き込み (スキーマ同期) ----------------
 
     /// <summary>DB 同期に未対応な方言（SQLite）のとき同期ボタンへ表示する理由メッセージ</summary>
-    private const string SyncUnsupportedTooltip =
-        "SQLite プロバイダは DB 同期に未対応です（将来対応予定）";
+    private static string SyncUnsupportedTooltip => Strings.Db_SyncSqliteUnsupported;
 
     /// <summary>DB 同期ボタンのツールチップ（未対応方言のときは理由、対応方言のときは通常の説明）</summary>
     /// <remarks>方言切替で <see cref="RaiseProviderChanged"/> から変更通知される</remarks>
     public string SyncToDatabaseTooltip =>
-        CanSyncToDatabase
-            ? "現在のダイアグラムを既存 DB に書き戻し (差分 ALTER 実行)"
-            : SyncUnsupportedTooltip;
+        CanSyncToDatabase ? Strings.Db_SyncWriteBack : SyncUnsupportedTooltip;
 
     /// <summary>DB 同期を実行できるか（SQLite は同期未対応のため実行不可）</summary>
     private bool CanSyncToDatabase =>
@@ -640,7 +659,7 @@ public partial class MainViewModel
         var picked = _appDialogs.ShowDbConnectionDialog(
             DbConnectionDialogMode.Sync,
             fixedProvider: CurrentProvider,
-            title: "データベースと同期"
+            title: Strings.Db_SyncTitle
         );
 
         if (picked is null)

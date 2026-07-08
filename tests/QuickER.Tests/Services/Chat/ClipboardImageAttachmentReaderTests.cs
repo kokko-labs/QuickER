@@ -1,6 +1,7 @@
 using FluentAssertions;
 using QuickER.AI;
 using QuickER.AI.UI;
+using AiUiStrings = QuickER.AI.UI.Resources.Strings;
 
 namespace QuickER.Tests.Services.Chat;
 
@@ -25,7 +26,7 @@ public class ClipboardImageAttachmentReaderTests
     {
         var name = ClipboardImageAttachmentReader.BuildFileName(new DateTime(2026, 7, 6, 13, 5, 9));
 
-        name.Should().Be("クリップボード画像_20260706_130509.png");
+        name.Should().Be($"{AiUiStrings.Attachment_ClipboardImagePrefix}_20260706_130509.png");
     }
 
     /// <summary>PNG バイト列から画像添付が生成され、名前・種別・MIME が正しいことを検証する</summary>
@@ -41,7 +42,9 @@ public class ClipboardImageAttachmentReaderTests
         result.Attachment.Should().NotBeNull();
         result.Attachment!.Kind.Should().Be(ChatAttachmentKind.Image);
         result.Attachment.MediaType.Should().Be("image/png");
-        result.Attachment.FileName.Should().Be("クリップボード画像_20260706_130509.png");
+        result
+            .Attachment.FileName.Should()
+            .Be($"{AiUiStrings.Attachment_ClipboardImagePrefix}_20260706_130509.png");
     }
 
     /// <summary>中身が PNG でない（マジックバイト不一致）場合は失敗結果になることを検証する</summary>

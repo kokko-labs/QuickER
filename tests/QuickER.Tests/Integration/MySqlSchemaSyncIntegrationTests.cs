@@ -249,8 +249,9 @@ public sealed class MySqlSchemaSyncIntegrationTests(MySqlContainerFixture fixtur
 
         result.Committed.Should().BeFalse("不正な DDL は失敗するはず");
         result.Error.Should().NotBeNullOrEmpty();
-        // MySQL は暗黙コミットのため部分適用があり得る旨がメッセージに含まれること
-        result.Error.Should().Contain("暗黙コミット");
+        // 部分適用があり得る旨のメッセージが表示言語（resx）で構築されること。
+        // 文言は表示言語依存のため、方言に紐づく culture 安定トークン "MySQL" で確認する。
+        result.Error.Should().Contain("MySQL");
     }
 
     /// <summary>

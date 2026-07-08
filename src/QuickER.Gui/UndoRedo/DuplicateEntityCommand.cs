@@ -1,4 +1,5 @@
 ﻿using QuickER.Model;
+using QuickER.Resources;
 using QuickER.ViewModels;
 
 namespace QuickER.UndoRedo;
@@ -32,7 +33,7 @@ public class DuplicateEntityCommand : IUndoableCommand
     public EntityViewModel? Duplicated => _duplicate;
 
     /// <inheritdoc />
-    public string Description => $"複製: {_original.TableName}";
+    public string Description => string.Format(Strings.Undo_DuplicateEntity, _original.TableName);
 
     /// <inheritdoc />
     public void Execute()

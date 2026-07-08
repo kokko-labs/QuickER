@@ -1,6 +1,7 @@
 using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using QuickER.Resources;
 using QuickER.UndoRedo;
 
 namespace QuickER.ViewModels;
@@ -48,7 +49,8 @@ public partial class MainViewModel
     public bool IsMultiSelectionActive => Entities.Count(e => e.IsSelected) >= 2;
 
     /// <summary>一括操作パネルの件数表示テキスト（例: "3 個選択中"）</summary>
-    public string SelectedEntityCountText => $"{Entities.Count(e => e.IsSelected)} 個選択中";
+    public string SelectedEntityCountText =>
+        string.Format(Strings.Selection_CountText, Entities.Count(e => e.IsSelected));
 
     /// <summary>選択状態の変化を派生プロパティへ通知する（選択操作の各経路から呼ぶ集約点）</summary>
     /// <remarks>

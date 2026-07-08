@@ -2,7 +2,8 @@
   x:Class="QuickER.Views.SchemaSyncDialog"
   xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
   xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-  Title="DB スキーマ同期 (差分実行)"
+  xmlns:resources="clr-namespace:QuickER.Resources"
+  Title="{x:Static resources:Strings.SchemaSync_Title}"
   Width="900"
   Height="600"
   WindowStartupLocation="CenterOwner"
@@ -13,25 +14,25 @@
     <!-- 上部ツールバー -->
     <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,8">
       <Button
-        Content="🔄 差分を再計算"
+        Content="{x:Static resources:Strings.SchemaSync_Recalculate}"
         Margin="0,0,8,0"
         Padding="8,3"
         Command="{Binding RefreshCommand}"
       />
       <Button
-        Content="✓ 全選択"
+        Content="{x:Static resources:Strings.SchemaSync_SelectAll}"
         Margin="0,0,4,0"
         Padding="8,3"
         Command="{Binding SelectAllCommand}"
       />
       <Button
-        Content="✗ 全解除"
+        Content="{x:Static resources:Strings.SchemaSync_DeselectAll}"
         Margin="0,0,16,0"
         Padding="8,3"
         Command="{Binding DeselectAllCommand}"
       />
       <Button
-        Content="🛢 実行"
+        Content="{x:Static resources:Strings.SchemaSync_Execute}"
         Padding="14,3"
         Background="#DCFCE7"
         FontWeight="Bold"
@@ -50,7 +51,7 @@
       <DockPanel>
         <Button
           DockPanel.Dock="Right"
-          Content="閉じる"
+          Content="{x:Static resources:Strings.Common_Close}"
           Width="80"
           Command="{Binding CloseCommand}"
           IsCancel="True"
@@ -73,7 +74,12 @@
       </Grid.ColumnDefinitions>
 
       <DockPanel Grid.Column="0">
-        <TextBlock DockPanel.Dock="Top" Text="差分一覧" FontWeight="Bold" Margin="0,0,0,4" />
+        <TextBlock
+          DockPanel.Dock="Top"
+          Text="{x:Static resources:Strings.SchemaSync_DiffList}"
+          FontWeight="Bold"
+          Margin="0,0,0,4"
+        />
         <ListBox ItemsSource="{Binding DiffItems}" HorizontalContentAlignment="Stretch">
           <ListBox.ItemTemplate>
             <DataTemplate>
@@ -107,7 +113,7 @@
       <DockPanel Grid.Column="2">
         <TextBlock
           DockPanel.Dock="Top"
-          Text="生成 SQL プレビュー"
+          Text="{x:Static resources:Strings.SchemaSync_SqlPreview}"
           FontWeight="Bold"
           Margin="0,0,0,4"
         />

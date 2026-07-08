@@ -3,6 +3,8 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <!-- 中立（既定）リソースのカルチャ＝日本語。英語は Strings.en.resx サテライトで賦与する -->
+    <NeutralResourcesLanguage>ja</NeutralResourcesLanguage>
   </PropertyGroup>
 
   <ItemGroup>
@@ -16,5 +18,21 @@
   <ItemGroup>
     <EmbeddedResource Include="Templates\CSharpRuntime.scriban" />
     <EmbeddedResource Include="Templates\ApiReferenceDoc.scriban" />
+  </ItemGroup>
+
+  <!--
+    多言語リソース: Strings.resx（中立＝日本語）と Strings.en.resx（英語サテライト）。
+    厳密型アクセサ（Strings.Designer.cs）は VS 以外でも確実に通るよう手書きでチェックイン済み。
+  -->
+  <ItemGroup>
+    <EmbeddedResource Update="Resources\Strings.resx">
+      <Generator>PublicResXFileCodeGenerator</Generator>
+      <LastGenOutput>Strings.Designer.cs</LastGenOutput>
+    </EmbeddedResource>
+    <Compile Update="Resources\Strings.Designer.cs">
+      <DesignTime>True</DesignTime>
+      <AutoGen>True</AutoGen>
+      <DependentUpon>Strings.resx</DependentUpon>
+    </Compile>
   </ItemGroup>
 </Project>

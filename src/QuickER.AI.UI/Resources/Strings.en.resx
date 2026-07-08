@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <!--
+    英語サテライトリソース。中立（日本語）の Strings.resx と同じキー集合を保つこと（ResxKeyParityTests がキー集合の一致を検証する）。
+  -->
+  <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
+    <xsd:element name="root" msdata:IsDataSet="true">
+      <xsd:complexType>
+        <xsd:choice maxOccurs="unbounded">
+          <xsd:element name="metadata">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" />
+              </xsd:sequence>
+              <xsd:attribute name="name" use="required" type="xsd:string" />
+              <xsd:attribute name="type" type="xsd:string" />
+              <xsd:attribute name="mimetype" type="xsd:string" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="assembly">
+            <xsd:complexType>
+              <xsd:attribute name="alias" type="xsd:string" />
+              <xsd:attribute name="name" type="xsd:string" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="data">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+                <xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" msdata:Ordinal="1" />
+              <xsd:attribute name="type" type="xsd:string" msdata:Ordinal="3" />
+              <xsd:attribute name="mimetype" type="xsd:string" msdata:Ordinal="4" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="resheader">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" />
+            </xsd:complexType>
+          </xsd:element>
+        </xsd:choice>
+      </xsd:complexType>
+    </xsd:element>
+  </xsd:schema>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <data name="Attachment_RemoveTooltip" xml:space="preserve">
+    <value>Remove</value>
+  </data>
+  <data name="Connection_Refresh" xml:space="preserve">
+    <value>Recheck</value>
+  </data>
+  <data name="Connection_ClaudeCodeStatusUnverified" xml:space="preserve">
+    <value>Not verified</value>
+  </data>
+  <data name="Connection_ClaudeCodeGuidanceDefault" xml:space="preserve">
+    <value>Click "Recheck" to verify the login status.</value>
+  </data>
+  <data name="Attachment_ClearedUnsupported" xml:space="preserve">
+    <value>This connection method does not support attachments, so the attachments were cleared.</value>
+  </data>
+  <data name="Attachment_DisabledUnsupported" xml:space="preserve">
+    <value>This connection method does not support attachments.</value>
+  </data>
+  <data name="Attachment_DisabledTurnInProgress" xml:space="preserve">
+    <value>Attachments cannot be changed while responding.</value>
+  </data>
+  <data name="Attachment_RemovedUnsupported" xml:space="preserve">
+    <value>Removed attachments of kinds this connection method cannot read.</value>
+  </data>
+  <data name="Attachment_KindImage" xml:space="preserve">
+    <value>Image</value>
+  </data>
+  <data name="Attachment_KindText" xml:space="preserve">
+    <value>Text</value>
+  </data>
+  <data name="Attachment_KindOther" xml:space="preserve">
+    <value>Other files</value>
+  </data>
+  <data name="Attachment_KindSeparator" xml:space="preserve">
+    <value>, </value>
+  </data>
+  <data name="Attachment_ButtonTooltipFormat" xml:space="preserve">
+    <value>Attach files ({0})</value>
+  </data>
+  <data name="Attachment_FilterAllFiles" xml:space="preserve">
+    <value>All files (*.*)</value>
+  </data>
+  <data name="Attachment_FilterImages" xml:space="preserve">
+    <value>Images (*.png;*.jpg;*.jpeg;*.gif;*.webp)</value>
+  </data>
+  <data name="Attachment_FilterPdf" xml:space="preserve">
+    <value>PDF (*.pdf)</value>
+  </data>
+  <data name="Attachment_ImageLimitFormat" xml:space="preserve">
+    <value>Up to {0} images per message: {1}</value>
+  </data>
+  <data name="Attachment_RejectPdf" xml:space="preserve">
+    <value>This connection cannot read PDF files. Please use a Claude connection: {0}</value>
+  </data>
+  <data name="Attachment_RejectText" xml:space="preserve">
+    <value>This connection cannot read text files: {0}</value>
+  </data>
+  <data name="Attachment_RejectBinary" xml:space="preserve">
+    <value>This connection cannot read files other than text, images, and PDF. Please use a Claude connection: {0}</value>
+  </data>
+  <data name="Attachment_RejectImage" xml:space="preserve">
+    <value>This connection cannot read images: {0}</value>
+  </data>
+  <data name="Attachment_ClipboardImagePrefix" xml:space="preserve">
+    <value>Clipboard image</value>
+  </data>
+  <data name="Attachment_ClipboardCaptureFailed" xml:space="preserve">
+    <value>Could not capture the clipboard contents as an image.</value>
+  </data>
+</root>

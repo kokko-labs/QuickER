@@ -1,0 +1,301 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <!--
+    中立（既定=日本語）リソース。英語は Strings.en.resx サテライトで賦与する（ResxKeyParityTests がキー集合一致を検証）。
+  -->
+  <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
+    <xsd:element name="root" msdata:IsDataSet="true">
+      <xsd:complexType>
+        <xsd:choice maxOccurs="unbounded">
+          <xsd:element name="metadata">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" />
+              </xsd:sequence>
+              <xsd:attribute name="name" use="required" type="xsd:string" />
+              <xsd:attribute name="type" type="xsd:string" />
+              <xsd:attribute name="mimetype" type="xsd:string" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="assembly">
+            <xsd:complexType>
+              <xsd:attribute name="alias" type="xsd:string" />
+              <xsd:attribute name="name" type="xsd:string" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="data">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+                <xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" msdata:Ordinal="1" />
+              <xsd:attribute name="type" type="xsd:string" msdata:Ordinal="3" />
+              <xsd:attribute name="mimetype" type="xsd:string" msdata:Ordinal="4" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="resheader">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" />
+            </xsd:complexType>
+          </xsd:element>
+        </xsd:choice>
+      </xsd:complexType>
+    </xsd:element>
+  </xsd:schema>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <data name="Mock_WindowTitle" xml:space="preserve">
+    <value>AI モック生成</value>
+  </data>
+  <data name="Mock_TabApiKey" xml:space="preserve">
+    <value>API キー</value>
+  </data>
+  <data name="Mock_Provider" xml:space="preserve">
+    <value>プロバイダー</value>
+  </data>
+  <data name="Mock_ModelName" xml:space="preserve">
+    <value>モデル名</value>
+  </data>
+  <data name="Mock_ApiKey" xml:space="preserve">
+    <value>API キー</value>
+  </data>
+  <data name="Mock_ApiKeyTooltip" xml:space="preserve">
+    <value>API キー（OpenAI: sk-... / Claude: sk-ant-...）</value>
+  </data>
+  <data name="Mock_Save" xml:space="preserve">
+    <value>保存</value>
+  </data>
+  <data name="Mock_Endpoint" xml:space="preserve">
+    <value>エンドポイント</value>
+  </data>
+  <data name="Mock_EndpointTooltip" xml:space="preserve">
+    <value>OpenAI 互換エンドポイント（Ollama 等）</value>
+  </data>
+  <data name="Mock_Model" xml:space="preserve">
+    <value>モデル</value>
+  </data>
+  <data name="Mock_ConversationHeader" xml:space="preserve">
+    <value>会話</value>
+  </data>
+  <data name="Mock_Generating" xml:space="preserve">
+    <value>生成中...</value>
+  </data>
+  <data name="Mock_Interrupt" xml:space="preserve">
+    <value>中断</value>
+  </data>
+  <data name="Mock_NewConversation" xml:space="preserve">
+    <value>＋ 新しい会話</value>
+  </data>
+  <data name="Mock_InputTooltip" xml:space="preserve">
+    <value>モックへの要望・修正指示（Ctrl+Enter で送信 / Ctrl+V で画像を添付）</value>
+  </data>
+  <data name="Mock_Send" xml:space="preserve">
+    <value>送信</value>
+  </data>
+  <data name="Mock_PreviewHeader" xml:space="preserve">
+    <value>プレビュー</value>
+  </data>
+  <data name="Mock_SaveHtml" xml:space="preserve">
+    <value>HTML を保存</value>
+  </data>
+  <data name="Mock_Step2Header" xml:space="preserve">
+    <value>WPF モックプロジェクトを生成（Claude Code）</value>
+  </data>
+  <data name="Mock_OutputFolder" xml:space="preserve">
+    <value>出力フォルダ</value>
+  </data>
+  <data name="Mock_Browse" xml:space="preserve">
+    <value>参照...</value>
+  </data>
+  <data name="Mock_ProjectName" xml:space="preserve">
+    <value>プロジェクト名</value>
+  </data>
+  <data name="Mock_OpenFolder" xml:space="preserve">
+    <value>フォルダを開く</value>
+  </data>
+  <data name="Mock_GenerateWpf" xml:space="preserve">
+    <value>WPF モックを生成</value>
+  </data>
+  <data name="MockPreview_EmptyText" xml:space="preserve">
+    <value>ここに生成されたモック画面が表示されます。
+左のチャットで「＋新しい会話」を開始し、モックへの要望を送信してください。</value>
+  </data>
+  <data name="MockPreview_UnavailableTitle" xml:space="preserve">
+    <value>プレビューを表示できません</value>
+  </data>
+  <data name="MockPreview_UnavailableMessage" xml:space="preserve">
+    <value>WebView2 ランタイムが見つかりませんでした。Microsoft Edge WebView2 Runtime（Evergreen）をインストールすると、生成したモックをこの画面でプレビューできます。生成された HTML は「HTML を保存」から書き出せます。</value>
+  </data>
+  <data name="Mock_CodexNotConnected" xml:space="preserve">
+    <value>未接続</value>
+  </data>
+  <data name="Mock_DisabledReason_InProgress" xml:space="preserve">
+    <value>生成を実行中です。</value>
+  </data>
+  <data name="Mock_DisabledReason_ConfirmHtml" xml:space="preserve">
+    <value>先にモック HTML を確定してください（プレビューに反映された状態が必要です）。</value>
+  </data>
+  <data name="Mock_DisabledReason_ClaudeCodeOnly" xml:space="preserve">
+    <value>WPF モック生成はバックエンドが Claude Code のときのみ利用できます。</value>
+  </data>
+  <data name="Mock_DisabledReason_ClaudeCli" xml:space="preserve">
+    <value>claude CLI が見つかりません。Claude Code をインストールし PATH を通してください。</value>
+  </data>
+  <data name="Mock_DisabledReason_Dotnet" xml:space="preserve">
+    <value>.NET SDK（dotnet）が見つかりません。.NET SDK をインストールしてください。</value>
+  </data>
+  <data name="Mock_DisabledReason_OutputFolder" xml:space="preserve">
+    <value>出力フォルダを選択してください。</value>
+  </data>
+  <data name="Mock_DisabledReason_ProjectName" xml:space="preserve">
+    <value>プロジェクト名を入力してください。</value>
+  </data>
+  <data name="Mock_ConversationStarted" xml:space="preserve">
+    <value>会話を開始しました。モックへの要望を入力して送信してください（例: シンプルな管理画面で）。</value>
+  </data>
+  <data name="Mock_SendFailedFormat" xml:space="preserve">
+    <value>送信に失敗しました: {0}</value>
+  </data>
+  <data name="Mock_HtmlFileFilter" xml:space="preserve">
+    <value>HTML ファイル (*.html)|*.html</value>
+  </data>
+  <data name="Mock_HtmlSaved" xml:space="preserve">
+    <value>HTML を保存しました。</value>
+  </data>
+  <data name="Mock_HtmlSaveFailedFormat" xml:space="preserve">
+    <value>HTML を保存できませんでした: {0}</value>
+  </data>
+  <data name="Mock_PickOutputFolderTitle" xml:space="preserve">
+    <value>WPF モックプロジェクトの出力先フォルダを選択</value>
+  </data>
+  <data name="Mock_OutputFolderNotEmpty" xml:space="preserve">
+    <value>※ 出力フォルダは空ではありません。既存ファイルは残したまま生成物を追加します。
+</value>
+  </data>
+  <data name="Mock_GeneratingProject" xml:space="preserve">
+    <value>WPF モックプロジェクトを生成しています...</value>
+  </data>
+  <data name="Mock_GenerationErrorLogFormat" xml:space="preserve">
+    <value>
+生成中にエラーが発生しました: {0}
+</value>
+  </data>
+  <data name="Mock_GenerationFailedFormat" xml:space="preserve">
+    <value>WPF モック生成に失敗しました: {0}</value>
+  </data>
+  <data name="Mock_MockUpdated" xml:space="preserve">
+    <value>モックを更新しました。</value>
+  </data>
+  <data name="Mock_UpdateNoteFormat" xml:space="preserve">
+    <value>更新: {0}</value>
+  </data>
+  <data name="Mock_ResponseCompleted" xml:space="preserve">
+    <value>応答が完了しました。</value>
+  </data>
+  <data name="Mock_ErrorSystemFormat" xml:space="preserve">
+    <value>エラー: {0}</value>
+  </data>
+  <data name="Mock_ErrorStatusFormat" xml:space="preserve">
+    <value>エラーが発生しました: {0}</value>
+  </data>
+  <data name="Mock_Interrupted" xml:space="preserve">
+    <value>処理が中断されました。</value>
+  </data>
+  <data name="Mock_PreviewUpdateFailedFormat" xml:space="preserve">
+    <value>プレビューを更新できませんでした: {0}</value>
+  </data>
+  <data name="Mock_ErrorUnknown" xml:space="preserve">
+    <value>詳細不明</value>
+  </data>
+  <data name="Mock_Run_Start" xml:space="preserve">
+    <value>== WPF モック生成を開始します ==</value>
+  </data>
+  <data name="Mock_Run_OutputFolderFormat" xml:space="preserve">
+    <value>出力フォルダ: {0}</value>
+  </data>
+  <data name="Mock_Run_ProjectNameFormat" xml:space="preserve">
+    <value>プロジェクト名: {0}</value>
+  </data>
+  <data name="Mock_Run_TimedOutFormat" xml:space="preserve">
+    <value>
+== タイムアウト（{0} 分）により打ち切りました ==</value>
+  </data>
+  <data name="Mock_Run_Canceled" xml:space="preserve">
+    <value>
+== 中断されました ==</value>
+  </data>
+  <data name="Mock_Run_ClientCompleted" xml:space="preserve">
+    <value>
+== Claude Code の実行が完了しました ==</value>
+  </data>
+  <data name="Mock_Run_ClientFailedFormat" xml:space="preserve">
+    <value>
+== Claude Code の実行が失敗しました: {0} ==</value>
+  </data>
+  <data name="Mock_Run_ArtifactsFound" xml:space="preserve">
+    <value>成果物チェック: csproj と xaml を確認しました。</value>
+  </data>
+  <data name="Mock_Run_ArtifactsMissing" xml:space="preserve">
+    <value>成果物チェック: csproj または xaml が見つかりません。</value>
+  </data>
+  <data name="Mock_Run_BuildVerify" xml:space="preserve">
+    <value>
+== 最終ビルドを検証します（dotnet build） ==</value>
+  </data>
+  <data name="Mock_Run_BuildSucceeded" xml:space="preserve">
+    <value>最終ビルド: 成功しました。</value>
+  </data>
+  <data name="Mock_Run_BuildFailed" xml:space="preserve">
+    <value>最終ビルド: 失敗しました（ログを確認してください）。</value>
+  </data>
+  <data name="Mock_Run_BuildVerifyCanceled" xml:space="preserve">
+    <value>最終ビルドの検証が中断されました。</value>
+  </data>
+  <data name="Mock_Result_Success" xml:space="preserve">
+    <value>WPF モックの生成が完了しました（ビルド成功を確認）。</value>
+  </data>
+  <data name="Mock_Result_TimedOut" xml:space="preserve">
+    <value>タイムアウトにより打ち切りました。生成途中のファイルとログは出力フォルダに残っています。</value>
+  </data>
+  <data name="Mock_Result_Canceled" xml:space="preserve">
+    <value>生成を中断しました。途中経過とログは出力フォルダに残っています。</value>
+  </data>
+  <data name="Mock_Result_NotLoggedIn" xml:space="preserve">
+    <value>Claude Code が未ログインです。ターミナルで `claude` を起動し /login でログインしてください。</value>
+  </data>
+  <data name="Mock_Result_ClientFailedFormat" xml:space="preserve">
+    <value>Claude Code の実行に失敗しました: {0}。ログを確認してください。</value>
+  </data>
+  <data name="Mock_Result_ArtifactsMissing" xml:space="preserve">
+    <value>生成物（csproj / xaml）を確認できませんでした。ログを確認してください。</value>
+  </data>
+  <data name="Mock_Result_BuildFailed" xml:space="preserve">
+    <value>最終ビルドが失敗しました。生成物とログは出力フォルダに残っています。</value>
+  </data>
+  <data name="Mock_Result_Failed" xml:space="preserve">
+    <value>生成に失敗しました。ログを確認してください。</value>
+  </data>
+  <data name="Mock_DotnetStartFailed" xml:space="preserve">
+    <value>dotnet プロセスの起動に失敗しました。</value>
+  </data>
+  <data name="Mock_ScaffoldFailedFormat" xml:space="preserve">
+    <value>スキャフォールドの生成に失敗しました: {0}</value>
+  </data>
+</root>

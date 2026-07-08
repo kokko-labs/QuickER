@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.IO;
 using System.Text;
+using QuickER.AI.Mock.Resources;
 
 namespace QuickER.AI.Mock;
 
@@ -75,7 +76,7 @@ public sealed class DotnetBuildRunner : IBuildRunner
 
         if (!process.Start())
         {
-            return new BuildRunResult(false, "dotnet プロセスの起動に失敗しました。");
+            return new BuildRunResult(false, Strings.Mock_DotnetStartFailed);
         }
 
         var output = new StringBuilder();

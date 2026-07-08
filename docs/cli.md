@@ -7,6 +7,8 @@ QuickER の CLI は 2 つのサブコマンドを提供します。
 | `quicker generate` | ER 図 JSON（GUI の保存形式） | C# コード |
 | `quicker scaffold` | データベース接続文字列（スキーマを直接取込） | C# コード |
 
+CLI の表示言語は OS の言語設定に従います（日本語 / 英語）。
+
 NuGet 公開後は `dotnet tool install --global QuickER.Cli` でインストールできます。未公開の間はソースから実行してください:
 
 ```powershell

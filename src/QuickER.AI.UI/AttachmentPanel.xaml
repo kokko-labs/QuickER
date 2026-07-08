@@ -5,6 +5,7 @@
   xmlns:conv="clr-namespace:QuickER.AI.UI"
   xmlns:vm="clr-namespace:QuickER.AI.UI"
   xmlns:local="clr-namespace:QuickER.AI.UI"
+  xmlns:res="clr-namespace:QuickER.AI.UI.Resources"
   x:Name="Root"
   d:DesignHeight="80"
   d:DesignWidth="400"
@@ -130,7 +131,7 @@
                 Foreground="{StaticResource MutedText}"
                 Command="{Binding AttachmentList.RemoveCommand, ElementName=Root}"
                 CommandParameter="{Binding}"
-                ToolTip="削除"
+                ToolTip="{x:Static res:Strings.Attachment_RemoveTooltip}"
               />
             </StackPanel>
           </Border>

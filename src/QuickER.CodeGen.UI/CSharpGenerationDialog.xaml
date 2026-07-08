@@ -2,7 +2,8 @@
   x:Class="QuickER.CodeGen.UI.CSharpGenerationDialog"
   xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
   xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-  Title="C# コード生成"
+  xmlns:res="clr-namespace:QuickER.CodeGen.UI.Resources"
+  Title="{x:Static res:Strings.CodeGen_WindowTitle}"
   Width="720"
   SizeToContent="Height"
   ResizeMode="NoResize"
@@ -154,16 +155,19 @@
     <!-- 出力モード -->
     <Border Style="{StaticResource Card}">
       <StackPanel>
-        <TextBlock Style="{StaticResource SectionHeader}" Text="出力モード" />
+        <TextBlock
+          Style="{StaticResource SectionHeader}"
+          Text="{x:Static res:Strings.CodeGen_OutputMode}"
+        />
         <StackPanel Orientation="Horizontal">
           <RadioButton
             Margin="0,0,28,0"
-            Content="1 ファイルにまとめる"
+            Content="{x:Static res:Strings.CodeGen_MergeSingleFile}"
             GroupName="OutputMode"
             IsChecked="{Binding MergeIntoSingleFile}"
           />
           <RadioButton
-            Content="レイヤごとに分割する"
+            Content="{x:Static res:Strings.CodeGen_SplitByLayer}"
             GroupName="OutputMode"
             IsChecked="{Binding SplitFilesByCategory}"
           />
@@ -174,7 +178,10 @@
     <!-- 生成内容 -->
     <Border Style="{StaticResource Card}">
       <StackPanel>
-        <TextBlock Style="{StaticResource SectionHeader}" Text="生成内容" />
+        <TextBlock
+          Style="{StaticResource SectionHeader}"
+          Text="{x:Static res:Strings.CodeGen_GenerationContent}"
+        />
 
         <Grid Margin="0,0,0,12">
           <Grid.ColumnDefinitions>
@@ -199,7 +206,7 @@
             Style="{StaticResource FieldLabel}"
             VerticalAlignment="Top"
             Margin="0,2,0,0"
-            Text="生成対象"
+            Text="{x:Static res:Strings.CodeGen_GenerationTarget}"
           />
           <StackPanel Grid.Column="1" Orientation="Horizontal">
             <CheckBox
@@ -207,7 +214,7 @@
               Content="Entity"
               IsChecked="{Binding GenerateEntityClasses, Mode=OneWay}"
               IsEnabled="False"
-              ToolTip="Entity は全カテゴリの前提のため常に生成されます"
+              ToolTip="{x:Static res:Strings.CodeGen_EntityTooltip}"
             />
             <CheckBox
               Margin="0,0,18,0"
@@ -228,16 +235,16 @@
             Style="{StaticResource FieldLabel}"
             VerticalAlignment="Top"
             Margin="0,2,0,0"
-            Text="値オブジェクト"
+            Text="{x:Static res:Strings.CodeGen_ValueObject}"
           />
           <StackPanel Grid.Column="1" Orientation="Horizontal">
             <CheckBox
               Margin="0,0,18,0"
-              Content="全カラムを値オブジェクト化"
+              Content="{x:Static res:Strings.CodeGen_AllColumnsValueObject}"
               IsChecked="{Binding GenerateValueObjects}"
             />
             <CheckBox
-              Content="string 主キーを GuidKey 化"
+              Content="{x:Static res:Strings.CodeGen_StringPkGuidKey}"
               IsChecked="{Binding UseGuidKeyForStringPrimaryKey}"
               IsEnabled="{Binding GenerateValueObjects}"
             />
@@ -255,12 +262,12 @@
             Style="{StaticResource FieldLabel}"
             VerticalAlignment="Top"
             Margin="0,2,0,0"
-            Text="DB アクセス"
+            Text="{x:Static res:Strings.CodeGen_DbAccess}"
           />
           <StackPanel Grid.Column="1" Orientation="Horizontal">
             <RadioButton
               Margin="0,0,18,0"
-              Content="なし"
+              Content="{x:Static res:Strings.CodeGen_DbAccessNone}"
               GroupName="DbAccess"
               IsChecked="{Binding DbAccessNone}"
             />
@@ -269,7 +276,7 @@
               Content="Repository (EF Core)"
               GroupName="DbAccess"
               IsChecked="{Binding DbAccessEfCore}"
-              ToolTip="EF Core 実装の Repository と方言非依存の DbContext を生成します（接続先はアプリ側の UseSqlServer / UseNpgsql 等で選択）"
+              ToolTip="{x:Static res:Strings.CodeGen_DbAccessEfCoreTooltip}"
             />
             <RadioButton
               Content="Repository (QuickER)"
@@ -289,7 +296,11 @@
             <ColumnDefinition Width="96" />
             <ColumnDefinition Width="*" />
           </Grid.ColumnDefinitions>
-          <TextBlock Grid.Column="0" Style="{StaticResource FieldLabel}" Text="対象DB" />
+          <TextBlock
+            Grid.Column="0"
+            Style="{StaticResource FieldLabel}"
+            Text="{x:Static res:Strings.CodeGen_TargetDb}"
+          />
           <StackPanel Grid.Column="1" Orientation="Horizontal">
             <CheckBox
               Margin="0,0,18,0"
@@ -306,10 +317,14 @@
             <ColumnDefinition Width="96" />
             <ColumnDefinition Width="*" />
           </Grid.ColumnDefinitions>
-          <TextBlock Grid.Column="0" Style="{StaticResource FieldLabel}" Text="ランタイム" />
+          <TextBlock
+            Grid.Column="0"
+            Style="{StaticResource FieldLabel}"
+            Text="{x:Static res:Strings.CodeGen_Runtime}"
+          />
           <CheckBox
             Grid.Column="1"
-            Content="ランタイムを NuGet パッケージ参照にする（生成物にランタイムを含めない）"
+            Content="{x:Static res:Strings.CodeGen_UseRuntimePackages}"
             IsChecked="{Binding UseRuntimePackages}"
             IsEnabled="{Binding CanUseRuntimePackages}"
             ToolTip="{Binding UseRuntimePackagesToolTip}"
@@ -322,12 +337,16 @@
             <ColumnDefinition Width="96" />
             <ColumnDefinition Width="*" />
           </Grid.ColumnDefinitions>
-          <TextBlock Grid.Column="0" Style="{StaticResource FieldLabel}" Text="ドキュメント" />
+          <TextBlock
+            Grid.Column="0"
+            Style="{StaticResource FieldLabel}"
+            Text="{x:Static res:Strings.CodeGen_Documentation}"
+          />
           <CheckBox
             Grid.Column="1"
-            Content="API リファレンス (.g.md) を出力する"
+            Content="{x:Static res:Strings.CodeGen_GenerateApiDocs}"
             IsChecked="{Binding GenerateApiDocs}"
-            ToolTip="生成コードと同名ベースの API リファレンス Markdown（{ベース名}.g.md）を 1 つ追加出力します（再生成で上書き）"
+            ToolTip="{x:Static res:Strings.CodeGen_ApiDocsTooltip}"
           />
         </Grid>
       </StackPanel>
@@ -339,14 +358,21 @@
       Visibility="{Binding ShowSingleFileOutput, Converter={StaticResource BoolToVisibilityConverter}}"
     >
       <StackPanel>
-        <TextBlock Style="{StaticResource SectionHeader}" Text="出力先" />
+        <TextBlock
+          Style="{StaticResource SectionHeader}"
+          Text="{x:Static res:Strings.CodeGen_OutputDestination}"
+        />
         <Grid>
           <Grid.ColumnDefinitions>
             <ColumnDefinition Width="96" />
             <ColumnDefinition Width="*" />
             <ColumnDefinition Width="Auto" />
           </Grid.ColumnDefinitions>
-          <TextBlock Grid.Column="0" Style="{StaticResource FieldLabel}" Text="ファイル" />
+          <TextBlock
+            Grid.Column="0"
+            Style="{StaticResource FieldLabel}"
+            Text="{x:Static res:Strings.CodeGen_File}"
+          />
           <TextBox
             Grid.Column="1"
             Style="{StaticResource FormInput}"
@@ -355,7 +381,7 @@
           <Button
             Grid.Column="2"
             Margin="8,0,0,0"
-            Content="参照..."
+            Content="{x:Static res:Strings.CodeGen_Browse}"
             Style="{StaticResource SecondaryButton}"
             Command="{Binding BrowseOutputFileCommand}"
           />
@@ -369,7 +395,10 @@
       Visibility="{Binding ShowSplitOptions, Converter={StaticResource BoolToVisibilityConverter}}"
     >
       <StackPanel>
-        <TextBlock Style="{StaticResource SectionHeader}" Text="出力先 / 分割設定" />
+        <TextBlock
+          Style="{StaticResource SectionHeader}"
+          Text="{x:Static res:Strings.CodeGen_OutputAndSplit}"
+        />
 
         <!-- 出力フォルダ -->
         <Grid Margin="0,0,0,14">
@@ -378,7 +407,11 @@
             <ColumnDefinition Width="*" />
             <ColumnDefinition Width="Auto" />
           </Grid.ColumnDefinitions>
-          <TextBlock Grid.Column="0" Style="{StaticResource FieldLabel}" Text="フォルダ" />
+          <TextBlock
+            Grid.Column="0"
+            Style="{StaticResource FieldLabel}"
+            Text="{x:Static res:Strings.CodeGen_Folder}"
+          />
           <TextBox
             Grid.Column="1"
             Style="{StaticResource FormInput}"
@@ -387,7 +420,7 @@
           <Button
             Grid.Column="2"
             Margin="8,0,0,0"
-            Content="参照..."
+            Content="{x:Static res:Strings.CodeGen_Browse}"
             Style="{StaticResource SecondaryButton}"
             Command="{Binding BrowseOutputFolderCommand}"
           />
@@ -397,7 +430,7 @@
         <TextBlock
           Margin="0,0,0,6"
           Foreground="{StaticResource MutedText}"
-          Text="カテゴリ別 namespace"
+          Text="{x:Static res:Strings.CodeGen_CategoryNamespace}"
         />
         <Grid>
           <Grid.ColumnDefinitions>
@@ -529,10 +562,14 @@
           <StackPanel
             Grid.Column="0"
             VerticalAlignment="Center"
-            ToolTip="全カテゴリが共通して使う土台（基底クラス・属性・値オブジェクト基底・JSON コンバータなど）"
+            ToolTip="{x:Static res:Strings.CodeGen_RuntimeTooltip}"
           >
             <TextBlock Foreground="{StaticResource HeaderText}" Text="Runtime" />
-            <TextBlock FontSize="11" Foreground="{StaticResource MutedText}" Text="(共通基盤)" />
+            <TextBlock
+              FontSize="11"
+              Foreground="{StaticResource MutedText}"
+              Text="{x:Static res:Strings.CodeGen_RuntimeBaseNote}"
+            />
           </StackPanel>
           <TextBox
             Grid.Column="1"
@@ -546,7 +583,7 @@
         <TextBlock
           Margin="0,14,0,6"
           Foreground="{StaticResource MutedText}"
-          Text="生成されるファイル"
+          Text="{x:Static res:Strings.CodeGen_GeneratedFiles}"
         />
         <Border
           Background="#F9FAFB"
@@ -578,7 +615,7 @@
       Margin="2,0,2,4"
       Foreground="{StaticResource MutedText}"
       TextWrapping="Wrap"
-      Text="生成される .g.cs は自動生成ファイルです。再生成で上書きされるため直接編集せず、追加実装は別ファイルの partial クラスで行ってください。"
+      Text="{x:Static res:Strings.CodeGen_AutoGenNote}"
     />
 
     <!-- フッタ -->
@@ -593,19 +630,19 @@
       <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
         <Button
           Margin="0,0,8,0"
-          Content="初期設定に戻す"
+          Content="{x:Static res:Strings.CodeGen_RestoreDefaults}"
           Style="{StaticResource SecondaryButton}"
           Command="{Binding ClearCommand}"
         />
         <Button
           Margin="0,0,8,0"
           IsDefault="True"
-          Content="生成"
+          Content="{x:Static res:Strings.CodeGen_Generate}"
           Style="{StaticResource PrimaryButton}"
           Command="{Binding OkCommand}"
         />
         <Button
-          Content="キャンセル"
+          Content="{x:Static res:Strings.CodeGen_Cancel}"
           IsCancel="True"
           Style="{StaticResource SecondaryButton}"
           Command="{Binding CancelCommand}"

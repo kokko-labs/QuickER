@@ -6,6 +6,7 @@ using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using QuickER.AI;
+using QuickER.AI.Chat.Resources;
 using QuickER.AI.UI;
 using QuickER.Gui.Abstractions;
 
@@ -88,9 +89,14 @@ public partial class AiChatDialogViewModel : ObservableObject
     // ── Codex 認証状態（子の状態タブとは別に、認証解決は親エンジンの責務） ──
 
     [ObservableProperty]
-    private string _codexAccountSummary = "未接続";
+    private string _codexAccountSummary = Strings.Chat_CodexNotConnected;
 
-    private CodexAuthState _codexAuth = new(false, true, CodexAuthMode.None, "未接続");
+    private CodexAuthState _codexAuth = new(
+        false,
+        true,
+        CodexAuthMode.None,
+        Strings.Chat_CodexNotConnected
+    );
 
     /// <summary>Codex 接続・認証状態の解決中か（解決までログインパネルのちらつきを抑止する）</summary>
     private bool _codexConnecting;
@@ -279,7 +285,7 @@ public partial class AiChatDialogViewModel : ObservableObject
             await _engine.StartConversationAsync().ConfigureAwait(true);
             _conversationStarted = true;
             Messages.Clear();
-            AddSystemMessage("会話を開始しました。ER 図について話しかけてください。");
+            AddSystemMessage(Strings.Chat_ConversationStarted);
             SendMessageCommand.NotifyCanExecuteChanged();
         }
         finally
@@ -304,8 +310,8 @@ public partial class AiChatDialogViewModel : ObservableObject
         {
             if (
                 !_dialogs.Confirm(
-                    "現在の会話をクリアして接続方式を切り替えますか？",
-                    "会話のクリア"
+                    Strings.Chat_SwitchBackendConfirm,
+                    Strings.Chat_SwitchBackendConfirmTitle
                 )
             )
             {
@@ -366,7 +372,7 @@ public partial class AiChatDialogViewModel : ObservableObject
         catch (Exception ex)
         {
             IsTurnInProgress = false;
-            StatusMessage = $"送信に失敗しました: {ex.Message}";
+            StatusMessage = string.Format(Strings.Chat_SendFailedFormat, ex.Message);
         }
     }
 
@@ -398,7 +404,7 @@ public partial class AiChatDialogViewModel : ObservableObject
             }
             catch (Exception ex)
             {
-                StatusMessage = $"ブラウザを開けませんでした: {ex.Message}";
+                StatusMessage = string.Format(Strings.Chat_BrowserOpenFailedFormat, ex.Message);
             }
         }
     }
@@ -665,16 +671,16 @@ public partial class AiChatDialogViewModel : ObservableObject
         if (result.Success)
         {
             ArrangeNewDiagramIfCreated();
-            StatusMessage = "応答が完了しました。";
+            StatusMessage = Strings.Chat_ResponseCompleted;
         }
         else if (!string.IsNullOrWhiteSpace(result.Error))
         {
-            AddSystemMessage($"エラー: {result.Error}");
-            StatusMessage = $"エラーが発生しました: {result.Error}";
+            AddSystemMessage(string.Format(Strings.Chat_ErrorSystemFormat, result.Error));
+            StatusMessage = string.Format(Strings.Chat_ErrorStatusFormat, result.Error);
         }
         else
         {
-            StatusMessage = "処理が中断されました。";
+            StatusMessage = Strings.Chat_Interrupted;
         }
     }
 
@@ -742,6 +748,6 @@ public partial class AiChatDialogViewModel : ObservableObject
     private sealed class NullToolHost : IErDiagramToolHost
     {
         public (string Result, bool Success) Execute(string toolName, string argumentsJson) =>
-            ("ツールは利用できません。", false);
+            (Strings.Chat_ToolsUnavailable, false);
     }
 }

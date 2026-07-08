@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using QuickER.Resources;
 using QuickER.ViewModels;
 
 namespace QuickER.UndoRedo;
@@ -32,7 +33,7 @@ public class MoveColumnOrderCommand : IUndoableCommand
     }
 
     /// <inheritdoc />
-    public string Description => $"列順変更: {_column.Name}";
+    public string Description => string.Format(Strings.Undo_MoveColumnOrder, _column.Name);
 
     /// <inheritdoc />
     public void Execute()

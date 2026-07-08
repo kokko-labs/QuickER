@@ -257,7 +257,9 @@ public sealed class MultiTargetRepositoryGenerationTests
             .Contain(d =>
                 d.Severity == GenerationDiagnosticSeverity.Error
                 && d.Message.Contains("customer_id")
-                && d.Message.Contains("食い違")
+                // 型不一致診断であることを表示言語に依存しないトークン（方言名・食い違う型名）で確認する
+                && d.Message.Contains("sqlite")
+                && d.Message.Contains("string")
             );
     }
 

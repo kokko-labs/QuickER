@@ -3,6 +3,7 @@ using System.Linq;
 using FluentAssertions;
 using QuickER.CodeGen.UI;
 using QuickER.Gui.Abstractions;
+using CodeGenStrings = QuickER.CodeGen.UI.Resources.Strings;
 
 namespace QuickER.Tests.ViewModels;
 
@@ -125,10 +126,7 @@ public class CSharpGenerationDialogViewModelTests
         var provider = (QuickER.Provider.IDatabaseProvider)Activator.CreateInstance(providerType)!;
         var vm = CreateViewModel(out _, currentProvider: provider);
 
-        vm.QuickErRepositoryToolTip.Should()
-            .Be(
-                "EF 非依存の軽量 Repository を生成します（対象 DB をチェックで選択: SQL Server / SQLite）"
-            );
+        vm.QuickErRepositoryToolTip.Should().Be(CodeGenStrings.CodeGen_QuickErRepositoryToolTip);
 
         if (provider.Name == "sqlserver")
         {
@@ -174,7 +172,7 @@ public class CSharpGenerationDialogViewModelTests
         vm.OkCommand.Execute(null);
 
         vm.Result.Should().BeNull();
-        vm.StatusMessage.Should().Be("対象 DB を 1 つ以上選択してください。");
+        vm.StatusMessage.Should().Be(CodeGenStrings.CodeGen_Status_TargetDbRequired);
     }
 
     /// <summary>対象 DB チェック群は Repository (QuickER) 選択時のみ表示されることを検証する</summary>
@@ -389,7 +387,7 @@ public class CSharpGenerationDialogViewModelTests
         vm.OkCommand.Execute(null);
 
         vm.Result.Should().BeNull();
-        vm.StatusMessage.Should().Be("namespace の形式が正しくありません。");
+        vm.StatusMessage.Should().Be(CodeGenStrings.CodeGen_Status_NamespaceInvalid);
         closed.Should().BeFalse();
     }
 
@@ -512,7 +510,7 @@ public class CSharpGenerationDialogViewModelTests
         vm.OkCommand.Execute(null);
 
         vm.Result.Should().BeNull();
-        vm.StatusMessage.Should().Be("出力先フォルダを指定してください。");
+        vm.StatusMessage.Should().Be(CodeGenStrings.CodeGen_Status_OutputFolderRequired);
     }
 
     /// <summary>確定で保存した設定が、次回の ViewModel 構築で復元されることを検証する</summary>

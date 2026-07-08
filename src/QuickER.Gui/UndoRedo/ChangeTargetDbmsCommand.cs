@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using QuickER.Provider;
+using QuickER.Resources;
 using QuickER.ViewModels;
 
 namespace QuickER.UndoRedo;
@@ -60,7 +61,7 @@ public sealed class ChangeTargetDbmsCommand : IUndoableCommand
     }
 
     /// <inheritdoc />
-    public string Description => $"DB 種別を {_to.DisplayName} へ変更";
+    public string Description => string.Format(Strings.Undo_ChangeTargetDbms, _to.DisplayName);
 
     /// <inheritdoc />
     public void Execute()

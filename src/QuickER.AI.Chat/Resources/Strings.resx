@@ -1,0 +1,163 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <!--
+    中立（既定=日本語）リソース。英語は Strings.en.resx サテライトで賦与する（ResxKeyParityTests がキー集合一致を検証）。
+  -->
+  <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
+    <xsd:element name="root" msdata:IsDataSet="true">
+      <xsd:complexType>
+        <xsd:choice maxOccurs="unbounded">
+          <xsd:element name="metadata">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" />
+              </xsd:sequence>
+              <xsd:attribute name="name" use="required" type="xsd:string" />
+              <xsd:attribute name="type" type="xsd:string" />
+              <xsd:attribute name="mimetype" type="xsd:string" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="assembly">
+            <xsd:complexType>
+              <xsd:attribute name="alias" type="xsd:string" />
+              <xsd:attribute name="name" type="xsd:string" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="data">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+                <xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" msdata:Ordinal="1" />
+              <xsd:attribute name="type" type="xsd:string" msdata:Ordinal="3" />
+              <xsd:attribute name="mimetype" type="xsd:string" msdata:Ordinal="4" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="resheader">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" />
+            </xsd:complexType>
+          </xsd:element>
+        </xsd:choice>
+      </xsd:complexType>
+    </xsd:element>
+  </xsd:schema>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <data name="Chat_WindowTitle" xml:space="preserve">
+    <value>AI チャット</value>
+  </data>
+  <data name="Chat_TabApiKey" xml:space="preserve">
+    <value>API キー接続</value>
+  </data>
+  <data name="Chat_ModelProvider" xml:space="preserve">
+    <value>モデルプロバイダー</value>
+  </data>
+  <data name="Chat_ModelName" xml:space="preserve">
+    <value>モデル名</value>
+  </data>
+  <data name="Chat_ApiKey" xml:space="preserve">
+    <value>API キー</value>
+  </data>
+  <data name="Chat_ApiKeyTooltip" xml:space="preserve">
+    <value>API キー（OpenAI: sk-... / Claude: sk-ant-...）</value>
+  </data>
+  <data name="Chat_Save" xml:space="preserve">
+    <value>保存</value>
+  </data>
+  <data name="Chat_Endpoint" xml:space="preserve">
+    <value>エンドポイント</value>
+  </data>
+  <data name="Chat_EndpointTooltip" xml:space="preserve">
+    <value>OpenAI 互換エンドポイント（Ollama 等）</value>
+  </data>
+  <data name="Chat_TabCodex" xml:space="preserve">
+    <value>Codex 接続</value>
+  </data>
+  <data name="Chat_CodexLoginGuidance" xml:space="preserve">
+    <value>ChatGPT アカウントでログインしてください。API キーで利用する場合は「API キー接続」タブを使用します。</value>
+  </data>
+  <data name="Chat_CodexLoginButton" xml:space="preserve">
+    <value>ChatGPT ブラウザでログイン</value>
+  </data>
+  <data name="Chat_Logout" xml:space="preserve">
+    <value>ログアウト</value>
+  </data>
+  <data name="Chat_TabClaude" xml:space="preserve">
+    <value>Claude 接続</value>
+  </data>
+  <data name="Chat_Model" xml:space="preserve">
+    <value>モデル</value>
+  </data>
+  <data name="Chat_ChatHeader" xml:space="preserve">
+    <value>チャット</value>
+  </data>
+  <data name="Chat_Responding" xml:space="preserve">
+    <value>応答中...</value>
+  </data>
+  <data name="Chat_Interrupt" xml:space="preserve">
+    <value>中断</value>
+  </data>
+  <data name="Chat_NewConversation" xml:space="preserve">
+    <value>＋ 新しい会話</value>
+  </data>
+  <data name="Chat_ToolCallHeader" xml:space="preserve">
+    <value>作業ログ</value>
+  </data>
+  <data name="Chat_InputTooltip" xml:space="preserve">
+    <value>Ctrl+Enter で送信 / Ctrl+V で画像を添付</value>
+  </data>
+  <data name="Chat_Send" xml:space="preserve">
+    <value>送信</value>
+  </data>
+  <data name="Chat_CodexNotConnected" xml:space="preserve">
+    <value>未接続</value>
+  </data>
+  <data name="Chat_ConversationStarted" xml:space="preserve">
+    <value>会話を開始しました。ER 図について話しかけてください。</value>
+  </data>
+  <data name="Chat_SwitchBackendConfirm" xml:space="preserve">
+    <value>現在の会話をクリアして接続方式を切り替えますか？</value>
+  </data>
+  <data name="Chat_SwitchBackendConfirmTitle" xml:space="preserve">
+    <value>会話のクリア</value>
+  </data>
+  <data name="Chat_SendFailedFormat" xml:space="preserve">
+    <value>送信に失敗しました: {0}</value>
+  </data>
+  <data name="Chat_BrowserOpenFailedFormat" xml:space="preserve">
+    <value>ブラウザを開けませんでした: {0}</value>
+  </data>
+  <data name="Chat_ResponseCompleted" xml:space="preserve">
+    <value>応答が完了しました。</value>
+  </data>
+  <data name="Chat_ErrorSystemFormat" xml:space="preserve">
+    <value>エラー: {0}</value>
+  </data>
+  <data name="Chat_ErrorStatusFormat" xml:space="preserve">
+    <value>エラーが発生しました: {0}</value>
+  </data>
+  <data name="Chat_Interrupted" xml:space="preserve">
+    <value>処理が中断されました。</value>
+  </data>
+  <data name="Chat_ToolsUnavailable" xml:space="preserve">
+    <value>ツールは利用できません。</value>
+  </data>
+</root>
