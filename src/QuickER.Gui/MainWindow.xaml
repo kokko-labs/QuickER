@@ -58,7 +58,8 @@
     <Style x:Key="ToolBarLabelButton" TargetType="Button">
       <Setter Property="Background" Value="Transparent" />
       <Setter Property="BorderThickness" Value="0" />
-      <Setter Property="Width" Value="54" />
+      <!-- 幅は固定せず MinWidth とし、英語など長いキャプションでもボタンが伸びて文字が切れないようにする -->
+      <Setter Property="MinWidth" Value="54" />
       <Setter Property="Padding" Value="4,6" />
       <Setter Property="Margin" Value="2,0" />
       <Setter Property="Cursor" Value="Hand" />
@@ -89,7 +90,8 @@
     <Style x:Key="ToolBarLabelToggleButton" TargetType="ToggleButton">
       <Setter Property="Background" Value="Transparent" />
       <Setter Property="BorderThickness" Value="0" />
-      <Setter Property="Width" Value="76" />
+      <!-- 幅は固定せず MinWidth とし、英語など長いキャプションでもボタンが伸びて文字が切れないようにする -->
+      <Setter Property="MinWidth" Value="76" />
       <Setter Property="Padding" Value="4,6" />
       <Setter Property="Margin" Value="2,0" />
       <Setter Property="Cursor" Value="Hand" />
@@ -987,56 +989,80 @@
                   Command="{Binding StartAddOneToOneCommand}"
                   ToolTip="{x:Static resources:Strings.Toolbox_OneToOneTooltip}"
                 >
-                  <StackPanel Orientation="Horizontal">
-                    <TextBlock Text="│─│" Style="{StaticResource ToolboxItemIcon}" />
+                  <!-- アイコンを左固定し、タイトルは残り幅で折り返す（英語など長いラベルの切れを防ぐ） -->
+                  <DockPanel>
+                    <TextBlock
+                      Text="│─│"
+                      Style="{StaticResource ToolboxItemIcon}"
+                      DockPanel.Dock="Left"
+                    />
                     <TextBlock
                       Text="{x:Static resources:Strings.Toolbox_OneToOne}"
                       Style="{StaticResource ToolboxItemTitle}"
                       VerticalAlignment="Center"
+                      TextWrapping="Wrap"
                     />
-                  </StackPanel>
+                  </DockPanel>
                 </Button>
                 <Button
                   Style="{StaticResource ToolboxItemButton}"
                   Command="{Binding StartAddOneToManyCommand}"
                   ToolTip="{x:Static resources:Strings.Toolbox_OneToManyTooltip}"
                 >
-                  <StackPanel Orientation="Horizontal">
-                    <TextBlock Text="│─≪" Style="{StaticResource ToolboxItemIcon}" />
+                  <!-- アイコンを左固定し、タイトルは残り幅で折り返す（英語など長いラベルの切れを防ぐ） -->
+                  <DockPanel>
+                    <TextBlock
+                      Text="│─≪"
+                      Style="{StaticResource ToolboxItemIcon}"
+                      DockPanel.Dock="Left"
+                    />
                     <TextBlock
                       Text="{x:Static resources:Strings.Toolbox_OneToMany}"
                       Style="{StaticResource ToolboxItemTitle}"
                       VerticalAlignment="Center"
+                      TextWrapping="Wrap"
                     />
-                  </StackPanel>
+                  </DockPanel>
                 </Button>
                 <Button
                   Style="{StaticResource ToolboxItemButton}"
                   Command="{Binding StartAddManyToManyCommand}"
                   ToolTip="{x:Static resources:Strings.Toolbox_ManyToManyTooltip}"
                 >
-                  <StackPanel Orientation="Horizontal">
-                    <TextBlock Text="≫─≪" Style="{StaticResource ToolboxItemIcon}" />
+                  <!-- アイコンを左固定し、タイトルは残り幅で折り返す（英語など長いラベルの切れを防ぐ） -->
+                  <DockPanel>
+                    <TextBlock
+                      Text="≫─≪"
+                      Style="{StaticResource ToolboxItemIcon}"
+                      DockPanel.Dock="Left"
+                    />
                     <TextBlock
                       Text="{x:Static resources:Strings.Toolbox_ManyToMany}"
                       Style="{StaticResource ToolboxItemTitle}"
                       VerticalAlignment="Center"
+                      TextWrapping="Wrap"
                     />
-                  </StackPanel>
+                  </DockPanel>
                 </Button>
                 <Button
                   Style="{StaticResource ToolboxItemButton}"
                   Command="{Binding RemoveSelectedRelationshipCommand}"
                   ToolTip="{x:Static resources:Strings.Toolbox_RemoveRelationshipTooltip}"
                 >
-                  <StackPanel Orientation="Horizontal">
-                    <TextBlock Text="🗑" Style="{StaticResource ToolboxItemIcon}" />
+                  <!-- アイコンを左固定し、タイトルは残り幅で折り返す（英語など長いラベルの切れを防ぐ） -->
+                  <DockPanel>
+                    <TextBlock
+                      Text="🗑"
+                      Style="{StaticResource ToolboxItemIcon}"
+                      DockPanel.Dock="Left"
+                    />
                     <TextBlock
                       Text="{x:Static resources:Strings.Toolbox_RemoveRelationship}"
                       Style="{StaticResource ToolboxItemTitle}"
                       VerticalAlignment="Center"
+                      TextWrapping="Wrap"
                     />
-                  </StackPanel>
+                  </DockPanel>
                 </Button>
               </StackPanel>
             </Border>
