@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <root>
   <!--
-    中立（既定=日本語）リソース。英語は Strings.en.resx サテライトで賦与する（ResxKeyParityTests がキー集合一致を検証）。
+    中立（既定）リソース＝英語。日本語は Strings.ja.resx サテライトで賦与する（ResxKeyParityTests がキー集合の一致を検証する）。
   -->
   <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
     <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
@@ -62,60 +62,60 @@
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
   <data name="Cli_RootDescription" xml:space="preserve">
-    <value>QuickER — ER図/データベースから C# コードを生成する CLI</value>
+    <value>QuickER - a CLI that generates C# code from an ER diagram or database</value>
   </data>
   <data name="Cli_Opt_Schema" xml:space="preserve">
-    <value>入力する ER 図 JSON ファイル（アプリの保存形式）</value>
+    <value>Input ER diagram JSON file (the app's save format)</value>
   </data>
   <data name="Cli_Opt_Out" xml:space="preserve">
-    <value>生成コードの出力先フォルダ</value>
+    <value>Output folder for the generated code</value>
   </data>
   <data name="Cli_Opt_Config" xml:space="preserve">
-    <value>生成オプション設定ファイル（quicker.json）</value>
+    <value>Generation option settings file (quicker.json)</value>
   </data>
   <data name="Cli_Cmd_Generate" xml:space="preserve">
-    <value>ER 図 JSON から C# コードを生成する</value>
+    <value>Generate C# code from an ER diagram JSON</value>
   </data>
   <data name="Cli_Opt_Connection" xml:space="preserve">
-    <value>接続文字列（例: Server=.;Database=Foo;Integrated Security=true;TrustServerCertificate=true）</value>
+    <value>Connection string (e.g. Server=.;Database=Foo;Integrated Security=true;TrustServerCertificate=true)</value>
   </data>
   <data name="Cli_Cmd_Scaffold" xml:space="preserve">
-    <value>データベースへ直接接続してスキーマから C# コードを生成する</value>
+    <value>Connect directly to a database and generate C# code from its schema</value>
   </data>
   <data name="Cli_Opt_Provider" xml:space="preserve">
-    <value>対象データベースの種類（既定: sqlserver）</value>
+    <value>Target database type (default: sqlserver)</value>
   </data>
   <data name="Cli_Opt_Namespace" xml:space="preserve">
-    <value>生成コードのルート名前空間（設定ファイルを上書き）</value>
+    <value>Root namespace of the generated code (overrides the settings file)</value>
   </data>
   <data name="Cli_Opt_Split" xml:space="preserve">
-    <value>カテゴリごとに別ファイル・別名前空間で出力する（設定ファイルを上書き）</value>
+    <value>Output each category in a separate file and namespace (overrides the settings file)</value>
   </data>
   <data name="Cli_Opt_RepositoryDialects" xml:space="preserve">
-    <value>自作 Repository を同時生成する方言（カンマ区切り複数指定可。例: sqlserver,sqlite。未指定時は --provider から単一導出する。設定ファイルを上書き）</value>
+    <value>Dialects for which to also generate custom Repositories (comma-separated, multiple allowed; e.g. sqlserver,sqlite). When omitted, a single dialect is derived from --provider. Overrides the settings file.</value>
   </data>
   <data name="Cli_Opt_RuntimePackages" xml:space="preserve">
-    <value>生成コードにランタイム（固定コード）を含めず、NuGet パッケージ QuickER.Runtime.* への参照で賄う（既定 false。EF Core 生成とも併用可。設定ファイルを上書き）</value>
+    <value>Do not include the runtime (fixed code) in the generated code; rely on references to the NuGet packages QuickER.Runtime.* instead (default false; can be combined with EF Core generation; overrides the settings file)</value>
   </data>
   <data name="Cli_Opt_ApiDocs" xml:space="preserve">
-    <value>API リファレンス Markdown（{ベース名}.g.md）を 1 つ追加出力する（既定 false。設定ファイルを上書き）</value>
+    <value>Additionally output one API reference Markdown ({baseName}.g.md) (default false; overrides the settings file)</value>
   </data>
   <data name="Cli_SchemaFileNotFound" xml:space="preserve">
-    <value>スキーマファイルが見つかりません: {0}</value>
+    <value>Schema file not found: {0}</value>
   </data>
   <data name="Cli_SchemaImportFailed" xml:space="preserve">
-    <value>データベースからのスキーマ取得に失敗しました: {0}</value>
+    <value>Failed to import the schema from the database: {0}</value>
   </data>
   <data name="Cli_RepositoryDialectUnsupported" xml:space="preserve">
-    <value>自作 Repository（GenerateRepositories）は方言 '{0}' に対応していません。対応方言: {1}</value>
+    <value>Custom Repository (GenerateRepositories) does not support the dialect '{0}'. Supported dialects: {1}</value>
   </data>
   <data name="Cli_GenerationAborted" xml:space="preserve">
-    <value>生成エラーのため中止しました。</value>
+    <value>Aborted due to a generation error.</value>
   </data>
   <data name="Cli_GeneratedFile" xml:space="preserve">
-    <value>生成: {0}</value>
+    <value>Generated: {0}</value>
   </data>
   <data name="Cli_GeneratedCount" xml:space="preserve">
-    <value>{0} 個のファイルを生成しました。</value>
+    <value>Generated {0} file(s).</value>
   </data>
 </root>

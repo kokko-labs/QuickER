@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <root>
   <!--
-    中立（既定=日本語）リソース。英語は Strings.en.resx サテライトで賦与する（ResxKeyParityTests がキー集合一致を検証）。
+    中立（既定）リソース＝英語。日本語は Strings.ja.resx サテライトで賦与する（ResxKeyParityTests がキー集合の一致を検証する）。
   -->
   <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
     <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
@@ -62,252 +62,252 @@
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
   <data name="Ai_JsonParseError" xml:space="preserve">
-    <value>AI からの応答を JSON として解釈できませんでした。プロンプトを変えて再実行してください。</value>
+    <value>The AI response could not be parsed as JSON. Change the prompt and try again.</value>
   </data>
   <data name="Ai_Timeout" xml:space="preserve">
-    <value>通信がタイムアウトまたはキャンセルされました。ネットワーク接続を確認してください。</value>
+    <value>The request timed out or was canceled. Check your network connection.</value>
   </data>
   <data name="Ai_ConnectionFailed" xml:space="preserve">
-    <value>サーバーに接続できませんでした。エンドポイント URL とネットワーク接続を確認してください。</value>
+    <value>Could not connect to the server. Check the endpoint URL and your network connection.</value>
   </data>
   <data name="Ai_DetailLabel" xml:space="preserve">
-    <value>詳細: </value>
+    <value>Details: </value>
   </data>
   <data name="Ai_Unexpected" xml:space="preserve">
-    <value>予期しないエラーが発生しました: </value>
+    <value>An unexpected error occurred: </value>
   </data>
   <data name="Ai_Http_InsufficientQuota" xml:space="preserve">
-    <value> 利用枠不足: OpenAI アカウントのクレジット残高が不足しています。</value>
+    <value> Insufficient quota: your OpenAI account is out of credit.</value>
   </data>
   <data name="Ai_Http_InsufficientQuotaBilling" xml:space="preserve">
-    <value>https://platform.openai.com/settings/organization/billing/overview から残高を確認・追加してください。</value>
+    <value>Check and top up your balance at https://platform.openai.com/settings/organization/billing/overview.</value>
   </data>
   <data name="Ai_Http_InvalidApiKey" xml:space="preserve">
-    <value> 認証エラー: API キーが無効です。正しいキーを入力するか再発行してください。</value>
+    <value> Authentication error: the API key is invalid. Enter a correct key or reissue one.</value>
   </data>
   <data name="Ai_Http_ModelNotFound" xml:space="preserve">
-    <value> モデルが見つかりません: 指定したモデル名がアカウントで利用できません。モデル名を変更してください。</value>
+    <value> Model not found: the specified model is not available for your account. Change the model name.</value>
   </data>
   <data name="Ai_Http_ContextLengthExceeded" xml:space="preserve">
-    <value> コンテキスト長超過: 入力が長すぎます。要件を短くしてください。</value>
+    <value> Context length exceeded: the input is too long. Shorten your request.</value>
   </data>
   <data name="Ai_Http_RateLimitExceeded" xml:space="preserve">
-    <value> レート制限: リクエスト頻度が制限を超えました。しばらく待ってから再実行してください。</value>
+    <value> Rate limit: request frequency exceeded the limit. Wait a moment and try again.</value>
   </data>
   <data name="Ai_Http_BillingHardLimit" xml:space="preserve">
-    <value> 課金上限到達: 月の利用上限に達しました。OpenAI の請求設定を確認してください。</value>
+    <value> Billing hard limit reached: the monthly usage limit has been reached. Check your OpenAI billing settings.</value>
   </data>
   <data name="Ai_Http_401" xml:space="preserve">
-    <value> 認証エラー: API キーが正しくありません。</value>
+    <value> Authentication error: the API key is incorrect.</value>
   </data>
   <data name="Ai_Http_403" xml:space="preserve">
-    <value> 権限エラー: このリソースへのアクセス権がありません。</value>
+    <value> Permission error: you do not have access to this resource.</value>
   </data>
   <data name="Ai_Http_404" xml:space="preserve">
-    <value> 見つかりません: モデル名またはエンドポイント URL が正しいか確認してください。</value>
+    <value> Not found: check that the model name or endpoint URL is correct.</value>
   </data>
   <data name="Ai_Http_408" xml:space="preserve">
-    <value> タイムアウト: サーバー応答が遅延しています。再実行してください。</value>
+    <value> Timeout: the server response is delayed. Try again.</value>
   </data>
   <data name="Ai_Http_429" xml:space="preserve">
-    <value> レート制限または利用枠不足です。OpenAI の課金設定を確認してください。</value>
+    <value> Rate limit or insufficient quota. Check your OpenAI billing settings.</value>
   </data>
   <data name="Ai_Http_ServerError" xml:space="preserve">
-    <value> サーバーエラー: しばらく待ってから再実行してください。</value>
+    <value> Server error: wait a moment and try again.</value>
   </data>
   <data name="Ai_Http_GenericCommError" xml:space="preserve">
-    <value> 通信エラーが発生しました。</value>
+    <value> A communication error occurred.</value>
   </data>
   <data name="Attachment_Empty" xml:space="preserve">
-    <value>ファイルが空です: {0}</value>
+    <value>The file is empty: {0}</value>
   </data>
   <data name="Attachment_ImageTooLarge" xml:space="preserve">
-    <value>画像が上限（{0}MB）を超えています: {1}</value>
+    <value>The image exceeds the limit ({0} MB): {1}</value>
   </data>
   <data name="Attachment_PdfTooLarge" xml:space="preserve">
-    <value>PDF が上限（{0}MB）を超えています: {1}</value>
+    <value>The PDF exceeds the limit ({0} MB): {1}</value>
   </data>
   <data name="Attachment_TextTooLarge" xml:space="preserve">
-    <value>テキストが上限（{0}KB）を超えています: {1}</value>
+    <value>The text exceeds the limit ({0} KB): {1}</value>
   </data>
   <data name="Attachment_BinaryTooLarge" xml:space="preserve">
-    <value>ファイルが上限（{0}MB）を超えています: {1}</value>
+    <value>The file exceeds the limit ({0} MB): {1}</value>
   </data>
   <data name="Chat_UnsupportedAttachment" xml:space="preserve">
-    <value>この接続方式は添付「{0}」（{1}）に対応していません。</value>
+    <value>This connection method does not support the attachment "{0}" ({1}).</value>
   </data>
   <data name="Chat_Generating" xml:space="preserve">
-    <value>生成中...</value>
+    <value>Generating...</value>
   </data>
   <data name="ClaudeCode_Guidance_Pending" xml:space="preserve">
-    <value>「再確認」を押すとログイン状態を確認できます。</value>
+    <value>Press "Recheck" to verify the login status.</value>
   </data>
   <data name="ClaudeCode_Guidance_Install" xml:space="preserve">
-    <value>Claude Code をインストールし、PATH を通してください。</value>
+    <value>Install Claude Code and add it to your PATH.</value>
   </data>
   <data name="ClaudeCode_Guidance_LoggedIn" xml:space="preserve">
-    <value>ローカルの Claude Code をそのまま使用します。</value>
+    <value>The local Claude Code will be used as is.</value>
   </data>
   <data name="ClaudeCode_Guidance_NotLoggedIn" xml:space="preserve">
-    <value>ターミナルで claude を起動し /login で認証後、「再確認」を押してください。</value>
+    <value>Launch claude in a terminal, authenticate with /login, then press "Recheck".</value>
   </data>
   <data name="ClaudeCode_Guidance_Inconclusive" xml:space="preserve">
-    <value>しばらくして「再確認」を押してください。</value>
+    <value>Wait a moment and press "Recheck".</value>
   </data>
   <data name="ClaudeCode_Status_Unconfirmed" xml:space="preserve">
-    <value>未確認</value>
+    <value>Not verified</value>
   </data>
   <data name="ClaudeCode_Status_NotFound" xml:space="preserve">
-    <value>Claude Code が見つかりません</value>
+    <value>Claude Code not found</value>
   </data>
   <data name="ClaudeCode_Status_LoggedIn" xml:space="preserve">
-    <value>ログイン済み</value>
+    <value>Logged in</value>
   </data>
   <data name="ClaudeCode_Status_NotLoggedIn" xml:space="preserve">
-    <value>未ログイン</value>
+    <value>Not logged in</value>
   </data>
   <data name="ClaudeCode_Status_Inconclusive" xml:space="preserve">
-    <value>ログイン状態を確認できませんでした</value>
+    <value>Could not verify the login status</value>
   </data>
   <data name="ClaudeCode_Processing" xml:space="preserve">
-    <value>Claude Code が処理中です...</value>
+    <value>Claude Code is processing...</value>
   </data>
   <data name="ClaudeCode_TurnNotLoggedIn" xml:space="preserve">
-    <value>Claude Code が未ログインです。ターミナルで `claude` を起動し /login でログインしてください。</value>
+    <value>Claude Code is not logged in. Launch `claude` in a terminal and log in with /login.</value>
   </data>
   <data name="ClaudeCode_CliNotFound" xml:space="preserve">
-    <value>claude CLI が見つかりません。Claude Code をインストールしてください。</value>
+    <value>The claude CLI was not found. Install Claude Code.</value>
   </data>
   <data name="ClaudeCode_LaunchFailed" xml:space="preserve">
-    <value>claude の起動に失敗しました。</value>
+    <value>Failed to launch claude.</value>
   </data>
   <data name="ClaudeCode_GenericError" xml:space="preserve">
-    <value>Claude Code でエラーが発生しました。</value>
+    <value>An error occurred in Claude Code.</value>
   </data>
   <data name="Codex_NotConnected" xml:space="preserve">
-    <value>未接続</value>
+    <value>Not connected</value>
   </data>
   <data name="Codex_ConnectFailed" xml:space="preserve">
-    <value>接続に失敗しました: {0}</value>
+    <value>Failed to connect: {0}</value>
   </data>
   <data name="Codex_AccountStateFailed" xml:space="preserve">
-    <value>アカウント状態の取得に失敗しました: {0}</value>
+    <value>Failed to get the account state: {0}</value>
   </data>
   <data name="Codex_ChatGptLoginUrlFetching" xml:space="preserve">
-    <value>ChatGPT ログイン URL を取得中...</value>
+    <value>Fetching the ChatGPT login URL...</value>
   </data>
   <data name="Codex_ChatGptLoginUrlFailed" xml:space="preserve">
-    <value>ChatGPT ログイン URL を取得できませんでした。</value>
+    <value>Could not get the ChatGPT login URL.</value>
   </data>
   <data name="Codex_ChatGptCompleteInBrowser" xml:space="preserve">
-    <value>ブラウザで ChatGPT ログインを完了してください。</value>
+    <value>Complete the ChatGPT login in your browser.</value>
   </data>
   <data name="Codex_ChatGptLoginStartFailed" xml:space="preserve">
-    <value>ChatGPT ログイン開始に失敗しました: {0}</value>
+    <value>Failed to start the ChatGPT login: {0}</value>
   </data>
   <data name="Codex_LoggingOut" xml:space="preserve">
-    <value>ログアウト中...</value>
+    <value>Logging out...</value>
   </data>
   <data name="Codex_NotLoggedIn" xml:space="preserve">
-    <value>未ログイン</value>
+    <value>Not logged in</value>
   </data>
   <data name="Codex_LoggedOut" xml:space="preserve">
-    <value>ログアウトしました。</value>
+    <value>Logged out.</value>
   </data>
   <data name="Codex_LogoutFailed" xml:space="preserve">
-    <value>ログアウトに失敗しました: {0}</value>
+    <value>Failed to log out: {0}</value>
   </data>
   <data name="Codex_StartingConversation" xml:space="preserve">
-    <value>会話を開始中...</value>
+    <value>Starting the conversation...</value>
   </data>
   <data name="Codex_StartedConversation" xml:space="preserve">
-    <value>会話を開始しました。</value>
+    <value>Conversation started.</value>
   </data>
   <data name="Codex_StartConversationFailed" xml:space="preserve">
-    <value>会話の開始に失敗しました: {0}</value>
+    <value>Failed to start the conversation: {0}</value>
   </data>
   <data name="Codex_CouldNotStartConversation" xml:space="preserve">
-    <value>会話を開始できませんでした。</value>
+    <value>Could not start the conversation.</value>
   </data>
   <data name="Codex_Processing" xml:space="preserve">
-    <value>Codex が処理中です...</value>
+    <value>Codex is processing...</value>
   </data>
   <data name="Codex_AttachmentsNotSupported" xml:space="preserve">
-    <value>Codex 接続は添付に対応していません。</value>
+    <value>The Codex connection does not support attachments.</value>
   </data>
   <data name="Codex_InterruptFailed" xml:space="preserve">
-    <value>処理の中断に失敗しました: {0}</value>
+    <value>Failed to interrupt processing: {0}</value>
   </data>
   <data name="Codex_ToolResponseSendFailed" xml:space="preserve">
-    <value>ツールレスポンスの送信に失敗しました: {0}</value>
+    <value>Failed to send the tool response: {0}</value>
   </data>
   <data name="Codex_ApprovalResponseSendFailed" xml:space="preserve">
-    <value>承認レスポンスの送信に失敗しました: {0}</value>
+    <value>Failed to send the approval response: {0}</value>
   </data>
   <data name="Codex_LoginSucceeded" xml:space="preserve">
-    <value>ログインしました。</value>
+    <value>Logged in.</value>
   </data>
   <data name="Codex_LoginFailed" xml:space="preserve">
-    <value>ログインに失敗しました: {0}</value>
+    <value>Failed to log in: {0}</value>
   </data>
   <data name="Codex_UnknownError" xml:space="preserve">
-    <value>不明なエラーが発生しました。</value>
+    <value>An unknown error occurred.</value>
   </data>
   <data name="Codex_ErrorOccurred" xml:space="preserve">
-    <value>エラーが発生しました: {0}</value>
+    <value>An error occurred: {0}</value>
   </data>
   <data name="Codex_Account_ApiKey" xml:space="preserve">
-    <value>API キーでログイン済み</value>
+    <value>Logged in with an API key</value>
   </data>
   <data name="Codex_Account_ChatGpt" xml:space="preserve">
-    <value>ChatGPT でログイン済み</value>
+    <value>Logged in with ChatGPT</value>
   </data>
   <data name="Codex_Account_ChatGptWithPlan" xml:space="preserve">
-    <value>ChatGPT でログイン済み ({0})</value>
+    <value>Logged in with ChatGPT ({0})</value>
   </data>
   <data name="Codex_Account_EmailLoggedIn" xml:space="preserve">
-    <value>{0} でログイン済み</value>
+    <value>Logged in as {0}</value>
   </data>
   <data name="Codex_Account_Connected" xml:space="preserve">
-    <value>接続済み</value>
+    <value>Connected</value>
   </data>
   <data name="Codex_Account_NoLoginRequired" xml:space="preserve">
-    <value>ログイン不要</value>
+    <value>No login required</value>
   </data>
   <data name="Codex_ServerStartFailed" xml:space="preserve">
-    <value>Codex App Server を起動できませんでした。</value>
+    <value>Could not start the Codex App Server.</value>
   </data>
   <data name="Codex_ResponseTimeout" xml:space="preserve">
-    <value>Codex App Server からのレスポンスがタイムアウトしました (method: {0})。{1}</value>
+    <value>The response from the Codex App Server timed out (method: {0}).{1}</value>
   </data>
   <data name="Codex_ConnectionClosed" xml:space="preserve">
-    <value>Codex App Server との接続が切断されました。</value>
+    <value>The connection to the Codex App Server was closed.</value>
   </data>
   <data name="Codex_ThreadStartMissingThread" xml:space="preserve">
-    <value>thread/start の応答に thread が含まれていません。</value>
+    <value>The thread/start response does not contain a thread.</value>
   </data>
   <data name="Codex_TurnStartMissingTurn" xml:space="preserve">
-    <value>turn/start の応答に turn が含まれていません。</value>
+    <value>The turn/start response does not contain a turn.</value>
   </data>
   <data name="Codex_ThreadStartedMissingThread" xml:space="preserve">
-    <value>thread/started 通知に thread が含まれていません。</value>
+    <value>The thread/started notification does not contain a thread.</value>
   </data>
   <data name="Codex_ToolCallUninterpretable" xml:space="preserve">
-    <value>item/tool/call リクエストを解釈できませんでした。</value>
+    <value>Could not interpret the item/tool/call request.</value>
   </data>
   <data name="Codex_LoginCompletedUninterpretable" xml:space="preserve">
-    <value>ログイン完了通知を解釈できませんでした。</value>
+    <value>Could not interpret the login-completed notification.</value>
   </data>
   <data name="Codex_PathHasQuote" xml:space="preserve">
-    <value>codex コマンドのパスに引用符が含まれるため起動できません: {0}</value>
+    <value>Cannot launch because the codex command path contains a quotation mark: {0}</value>
   </data>
   <data name="Codex_ArgHasCmdMeta" xml:space="preserve">
-    <value>codex コマンドの引数に cmd で解釈される文字 '{0}' が含まれるため起動できません: {1}</value>
+    <value>Cannot launch because the codex command arguments contain the character '{0}' interpreted by cmd: {1}</value>
   </data>
   <data name="Codex_ServerErrorFallback" xml:space="preserve">
-    <value>Codex App Server エラー</value>
+    <value>Codex App Server error</value>
   </data>
   <data name="Codex_ServerNotStarted" xml:space="preserve">
-    <value>Codex App Server はまだ起動していません。</value>
+    <value>The Codex App Server has not started yet.</value>
   </data>
 </root>

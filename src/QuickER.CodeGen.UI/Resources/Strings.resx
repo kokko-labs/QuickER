@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <root>
   <!--
-    中立（既定=日本語）リソース。英語は Strings.en.resx サテライトで賦与する（ResxKeyParityTests がキー集合一致を検証）。
+    中立（既定）リソース＝英語。日本語は Strings.ja.resx サテライトで賦与する（ResxKeyParityTests がキー集合の一致を検証する）。
   -->
   <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
     <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
@@ -62,147 +62,147 @@
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
   <data name="CodeGen_WindowTitle" xml:space="preserve">
-    <value>C# コード生成</value>
+    <value>C# Code Generation</value>
   </data>
   <data name="CodeGen_OutputMode" xml:space="preserve">
-    <value>出力モード</value>
+    <value>Output Mode</value>
   </data>
   <data name="CodeGen_MergeSingleFile" xml:space="preserve">
-    <value>1 ファイルにまとめる</value>
+    <value>Merge into a single file</value>
   </data>
   <data name="CodeGen_SplitByLayer" xml:space="preserve">
-    <value>レイヤごとに分割する</value>
+    <value>Split by layer</value>
   </data>
   <data name="CodeGen_GenerationContent" xml:space="preserve">
-    <value>生成内容</value>
+    <value>What to Generate</value>
   </data>
   <data name="CodeGen_GenerationTarget" xml:space="preserve">
-    <value>生成対象</value>
+    <value>Targets</value>
   </data>
   <data name="CodeGen_EntityTooltip" xml:space="preserve">
-    <value>Entity は全カテゴリの前提のため常に生成されます</value>
+    <value>Entity is a prerequisite for all categories, so it is always generated</value>
   </data>
   <data name="CodeGen_ValueObject" xml:space="preserve">
-    <value>値オブジェクト</value>
+    <value>Value Objects</value>
   </data>
   <data name="CodeGen_AllColumnsValueObject" xml:space="preserve">
-    <value>全カラムを値オブジェクト化</value>
+    <value>Turn all columns into value objects</value>
   </data>
   <data name="CodeGen_StringPkGuidKey" xml:space="preserve">
-    <value>string 主キーを GuidKey 化</value>
+    <value>Use GuidKey for string primary keys</value>
   </data>
   <data name="CodeGen_DbAccess" xml:space="preserve">
-    <value>DB アクセス</value>
+    <value>DB Access</value>
   </data>
   <data name="CodeGen_DbAccessNone" xml:space="preserve">
-    <value>なし</value>
+    <value>None</value>
   </data>
   <data name="CodeGen_DbAccessEfCoreTooltip" xml:space="preserve">
-    <value>EF Core 実装の Repository と方言非依存の DbContext を生成します（接続先はアプリ側の UseSqlServer / UseNpgsql 等で選択）</value>
+    <value>Generates an EF Core Repository and a dialect-independent DbContext (choose the target on the app side with UseSqlServer / UseNpgsql, etc.)</value>
   </data>
   <data name="CodeGen_TargetDb" xml:space="preserve">
-    <value>対象DB</value>
+    <value>Target DB</value>
   </data>
   <data name="CodeGen_Runtime" xml:space="preserve">
-    <value>ランタイム</value>
+    <value>Runtime</value>
   </data>
   <data name="CodeGen_UseRuntimePackages" xml:space="preserve">
-    <value>ランタイムを NuGet パッケージ参照にする（生成物にランタイムを含めない）</value>
+    <value>Reference the runtime as NuGet packages (do not include the runtime in the output)</value>
   </data>
   <data name="CodeGen_Documentation" xml:space="preserve">
-    <value>ドキュメント</value>
+    <value>Documentation</value>
   </data>
   <data name="CodeGen_GenerateApiDocs" xml:space="preserve">
-    <value>API リファレンス (.g.md) を出力する</value>
+    <value>Output an API reference (.g.md)</value>
   </data>
   <data name="CodeGen_ApiDocsTooltip" xml:space="preserve">
-    <value>生成コードと同名ベースの API リファレンス Markdown（{ベース名}.g.md）を 1 つ追加出力します（再生成で上書き）</value>
+    <value>Additionally outputs one API reference Markdown ({baseName}.g.md) sharing the generated code's base name (overwritten on regeneration)</value>
   </data>
   <data name="CodeGen_OutputDestination" xml:space="preserve">
-    <value>出力先</value>
+    <value>Output</value>
   </data>
   <data name="CodeGen_File" xml:space="preserve">
-    <value>ファイル</value>
+    <value>File</value>
   </data>
   <data name="CodeGen_Browse" xml:space="preserve">
-    <value>参照...</value>
+    <value>Browse...</value>
   </data>
   <data name="CodeGen_OutputAndSplit" xml:space="preserve">
-    <value>出力先 / 分割設定</value>
+    <value>Output / Split Settings</value>
   </data>
   <data name="CodeGen_Folder" xml:space="preserve">
-    <value>フォルダ</value>
+    <value>Folder</value>
   </data>
   <data name="CodeGen_CategoryNamespace" xml:space="preserve">
-    <value>カテゴリ別 namespace</value>
+    <value>Namespace per Category</value>
   </data>
   <data name="CodeGen_RuntimeBaseNote" xml:space="preserve">
-    <value>(共通基盤)</value>
+    <value>(shared base)</value>
   </data>
   <data name="CodeGen_RuntimeTooltip" xml:space="preserve">
-    <value>全カテゴリが共通して使う土台（基底クラス・属性・値オブジェクト基底・JSON コンバータなど）</value>
+    <value>The foundation shared by all categories (base classes, attributes, value-object base, JSON converters, etc.)</value>
   </data>
   <data name="CodeGen_GeneratedFiles" xml:space="preserve">
-    <value>生成されるファイル</value>
+    <value>Generated Files</value>
   </data>
   <data name="CodeGen_AutoGenNote" xml:space="preserve">
-    <value>生成される .g.cs は自動生成ファイルです。再生成で上書きされるため直接編集せず、追加実装は別ファイルの partial クラスで行ってください。</value>
+    <value>The generated .g.cs are auto-generated files. They are overwritten on regeneration, so do not edit them directly; add implementations in a partial class in a separate file.</value>
   </data>
   <data name="CodeGen_RestoreDefaults" xml:space="preserve">
-    <value>初期設定に戻す</value>
+    <value>Restore Defaults</value>
   </data>
   <data name="CodeGen_Generate" xml:space="preserve">
-    <value>生成</value>
+    <value>Generate</value>
   </data>
   <data name="CodeGen_Cancel" xml:space="preserve">
-    <value>キャンセル</value>
+    <value>Cancel</value>
   </data>
   <data name="CodeGen_UseRuntimePackagesToolTip" xml:space="preserve">
-    <value>生成コードから固定のランタイムコードを省き、NuGet パッケージ QuickER.Runtime.* への参照で賄います（EF Core とも併用可）</value>
+    <value>Omits the fixed runtime code from the generated output and relies on references to the NuGet packages QuickER.Runtime.* (can be combined with EF Core)</value>
   </data>
   <data name="CodeGen_QuickErRepositoryToolTip" xml:space="preserve">
-    <value>EF 非依存の軽量 Repository を生成します（対象 DB をチェックで選択: SQL Server / SQLite）</value>
+    <value>Generates a lightweight, EF-independent Repository (choose target DBs with checkboxes: SQL Server / SQLite)</value>
   </data>
   <data name="CodeGen_PickFolderTitle" xml:space="preserve">
-    <value>出力先フォルダを選択</value>
+    <value>Select the output folder</value>
   </data>
   <data name="CodeGen_Status_NamespaceRequired" xml:space="preserve">
-    <value>namespace を入力してください。</value>
+    <value>Please enter a namespace.</value>
   </data>
   <data name="CodeGen_Status_NamespaceInvalid" xml:space="preserve">
-    <value>namespace の形式が正しくありません。</value>
+    <value>The namespace format is invalid.</value>
   </data>
   <data name="CodeGen_Status_TargetDbRequired" xml:space="preserve">
-    <value>対象 DB を 1 つ以上選択してください。</value>
+    <value>Please select at least one target DB.</value>
   </data>
   <data name="CodeGen_Status_NamespaceInvalidFormat" xml:space="preserve">
-    <value>{0} の形式が正しくありません。</value>
+    <value>The {0} format is invalid.</value>
   </data>
   <data name="CodeGen_Status_OutputFolderRequired" xml:space="preserve">
-    <value>出力先フォルダを指定してください。</value>
+    <value>Please specify an output folder.</value>
   </data>
   <data name="CodeGen_Status_OutputFileRequired" xml:space="preserve">
-    <value>出力先ファイルを指定してください。</value>
+    <value>Please specify an output file.</value>
   </data>
   <data name="CodeGen_NamespaceLabel_Runtime" xml:space="preserve">
-    <value>Runtime の namespace</value>
+    <value>Runtime namespace</value>
   </data>
   <data name="CodeGen_NamespaceLabel_Entity" xml:space="preserve">
-    <value>Entity の namespace</value>
+    <value>Entity namespace</value>
   </data>
   <data name="CodeGen_NamespaceLabel_EditModel" xml:space="preserve">
-    <value>EditModel の namespace</value>
+    <value>EditModel namespace</value>
   </data>
   <data name="CodeGen_NamespaceLabel_Mapper" xml:space="preserve">
-    <value>Mapper の namespace</value>
+    <value>Mapper namespace</value>
   </data>
   <data name="CodeGen_NamespaceLabel_Repository" xml:space="preserve">
-    <value>Repository の namespace</value>
+    <value>Repository namespace</value>
   </data>
   <data name="CodeGen_NamespaceLabel_ValueObject" xml:space="preserve">
-    <value>ValueObject の namespace</value>
+    <value>ValueObject namespace</value>
   </data>
   <data name="CodeGen_NamespaceLabel_EfCore" xml:space="preserve">
-    <value>EfCore の namespace</value>
+    <value>EfCore namespace</value>
   </data>
 </root>

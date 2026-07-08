@@ -3,8 +3,8 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <!-- 中立（既定）リソースのカルチャ＝日本語。英語は Strings.en.resx サテライトで賦与する -->
-    <NeutralResourcesLanguage>ja</NeutralResourcesLanguage>
+    <!-- 中立（既定）リソースのカルチャ＝英語。日本語は Strings.ja.resx サテライトで賦与する -->
+    <NeutralResourcesLanguage>en</NeutralResourcesLanguage>
   </PropertyGroup>
 
   <ItemGroup>
@@ -21,7 +21,7 @@
   </ItemGroup>
 
   <!--
-    多言語リソース: Strings.resx（中立＝日本語）と Strings.en.resx（英語サテライト）。
+    多言語リソース: Strings.resx（中立＝英語）と Strings.ja.resx（日本語サテライト）。
     厳密型アクセサ（Strings.Designer.cs）は VS 以外でも確実に通るよう手書きでチェックイン済み。
   -->
   <ItemGroup>

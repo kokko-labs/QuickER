@@ -7,8 +7,8 @@
     <RootNamespace>QuickER.Cli</RootNamespace>
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>quicker</ToolCommandName>
-    <!-- 中立（既定）リソースのカルチャ＝日本語。英語は Strings.en.resx サテライト。表示言語は OS カルチャに従う -->
-    <NeutralResourcesLanguage>ja</NeutralResourcesLanguage>
+    <!-- 中立（既定）リソースのカルチャ＝英語。日本語は Strings.ja.resx サテライト。表示言語は OS カルチャに従う -->
+    <NeutralResourcesLanguage>en</NeutralResourcesLanguage>
 
     <!-- NuGet パッケージメタデータ。バージョンは Directory.Build.props の VersionPrefix に一元化 -->
     <PackageId>QuickER.Cli</PackageId>
@@ -30,7 +30,7 @@
   </ItemGroup>
 
   <!--
-    多言語リソース: Strings.resx（中立＝日本語）と Strings.en.resx（英語サテライト）。
+    多言語リソース: Strings.resx（中立＝英語）と Strings.ja.resx（日本語サテライト）。
     厳密型アクセサ（Strings.Designer.cs）は VS 以外でも確実に通るよう手書きでチェックイン済み。
   -->
   <ItemGroup>

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <root>
   <!--
-    中立（既定=日本語）リソース。英語は Strings.en.resx サテライトで賦与する（ResxKeyParityTests がキー集合一致を検証）。
+    中立（既定）リソース＝英語。日本語は Strings.ja.resx サテライトで賦与する（ResxKeyParityTests がキー集合の一致を検証する）。
   -->
   <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
     <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
@@ -62,102 +62,102 @@
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
   <data name="Chat_WindowTitle" xml:space="preserve">
-    <value>AI チャット</value>
+    <value>AI Chat</value>
   </data>
   <data name="Chat_TabApiKey" xml:space="preserve">
-    <value>API キー接続</value>
+    <value>API Key Connection</value>
   </data>
   <data name="Chat_ModelProvider" xml:space="preserve">
-    <value>モデルプロバイダー</value>
+    <value>Model Provider</value>
   </data>
   <data name="Chat_ModelName" xml:space="preserve">
-    <value>モデル名</value>
+    <value>Model Name</value>
   </data>
   <data name="Chat_ApiKey" xml:space="preserve">
-    <value>API キー</value>
+    <value>API Key</value>
   </data>
   <data name="Chat_ApiKeyTooltip" xml:space="preserve">
-    <value>API キー（OpenAI: sk-... / Claude: sk-ant-...）</value>
+    <value>API key (OpenAI: sk-... / Claude: sk-ant-...)</value>
   </data>
   <data name="Chat_Save" xml:space="preserve">
-    <value>保存</value>
+    <value>Save</value>
   </data>
   <data name="Chat_Endpoint" xml:space="preserve">
-    <value>エンドポイント</value>
+    <value>Endpoint</value>
   </data>
   <data name="Chat_EndpointTooltip" xml:space="preserve">
-    <value>OpenAI 互換エンドポイント（Ollama 等）</value>
+    <value>OpenAI-compatible endpoint (Ollama, etc.)</value>
   </data>
   <data name="Chat_TabCodex" xml:space="preserve">
-    <value>Codex 接続</value>
+    <value>Codex Connection</value>
   </data>
   <data name="Chat_CodexLoginGuidance" xml:space="preserve">
-    <value>ChatGPT アカウントでログインしてください。API キーで利用する場合は「API キー接続」タブを使用します。</value>
+    <value>Please log in with your ChatGPT account. To use an API key instead, use the "API Key Connection" tab.</value>
   </data>
   <data name="Chat_CodexLoginButton" xml:space="preserve">
-    <value>ChatGPT ブラウザでログイン</value>
+    <value>Log in with ChatGPT in browser</value>
   </data>
   <data name="Chat_Logout" xml:space="preserve">
-    <value>ログアウト</value>
+    <value>Log out</value>
   </data>
   <data name="Chat_TabClaude" xml:space="preserve">
-    <value>Claude 接続</value>
+    <value>Claude Connection</value>
   </data>
   <data name="Chat_Model" xml:space="preserve">
-    <value>モデル</value>
+    <value>Model</value>
   </data>
   <data name="Chat_ChatHeader" xml:space="preserve">
-    <value>チャット</value>
+    <value>Chat</value>
   </data>
   <data name="Chat_Responding" xml:space="preserve">
-    <value>応答中...</value>
+    <value>Responding...</value>
   </data>
   <data name="Chat_Interrupt" xml:space="preserve">
-    <value>中断</value>
+    <value>Stop</value>
   </data>
   <data name="Chat_NewConversation" xml:space="preserve">
-    <value>＋ 新しい会話</value>
+    <value>+ New Conversation</value>
   </data>
   <data name="Chat_ToolCallHeader" xml:space="preserve">
-    <value>作業ログ</value>
+    <value>Work Log</value>
   </data>
   <data name="Chat_InputTooltip" xml:space="preserve">
-    <value>Ctrl+Enter で送信 / Ctrl+V で画像を添付</value>
+    <value>Send with Ctrl+Enter / Attach an image with Ctrl+V</value>
   </data>
   <data name="Chat_Send" xml:space="preserve">
-    <value>送信</value>
+    <value>Send</value>
   </data>
   <data name="Chat_CodexNotConnected" xml:space="preserve">
-    <value>未接続</value>
+    <value>Not connected</value>
   </data>
   <data name="Chat_ConversationStarted" xml:space="preserve">
-    <value>会話を開始しました。ER 図について話しかけてください。</value>
+    <value>Conversation started. Talk to me about the ER diagram.</value>
   </data>
   <data name="Chat_SwitchBackendConfirm" xml:space="preserve">
-    <value>現在の会話をクリアして接続方式を切り替えますか？</value>
+    <value>Clear the current conversation and switch the connection method?</value>
   </data>
   <data name="Chat_SwitchBackendConfirmTitle" xml:space="preserve">
-    <value>会話のクリア</value>
+    <value>Clear Conversation</value>
   </data>
   <data name="Chat_SendFailedFormat" xml:space="preserve">
-    <value>送信に失敗しました: {0}</value>
+    <value>Failed to send: {0}</value>
   </data>
   <data name="Chat_BrowserOpenFailedFormat" xml:space="preserve">
-    <value>ブラウザを開けませんでした: {0}</value>
+    <value>Could not open the browser: {0}</value>
   </data>
   <data name="Chat_ResponseCompleted" xml:space="preserve">
-    <value>応答が完了しました。</value>
+    <value>Response completed.</value>
   </data>
   <data name="Chat_ErrorSystemFormat" xml:space="preserve">
-    <value>エラー: {0}</value>
+    <value>Error: {0}</value>
   </data>
   <data name="Chat_ErrorStatusFormat" xml:space="preserve">
-    <value>エラーが発生しました: {0}</value>
+    <value>An error occurred: {0}</value>
   </data>
   <data name="Chat_Interrupted" xml:space="preserve">
-    <value>処理が中断されました。</value>
+    <value>The operation was interrupted.</value>
   </data>
   <data name="Chat_ToolsUnavailable" xml:space="preserve">
-    <value>ツールは利用できません。</value>
+    <value>Tools are unavailable.</value>
   </data>
 </root>

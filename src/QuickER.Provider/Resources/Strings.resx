@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <root>
   <!--
-    中立（既定=日本語）リソース。英語は Strings.en.resx サテライトで賦与する（ResxKeyParityTests がキー集合一致を検証）。
+    中立（既定）リソース＝英語。日本語は Strings.ja.resx サテライトで賦与する（ResxKeyParityTests がキー集合の一致を検証する）。
   -->
   <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
     <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
@@ -62,69 +62,69 @@
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
   <data name="Diff_AddTable" xml:space="preserve">
-    <value>テーブル [{0}] を作成 (列 {1} 件)</value>
+    <value>Create table [{0}] ({1} columns)</value>
   </data>
   <data name="Diff_SetTableDescription" xml:space="preserve">
-    <value>テーブル [{0}] の説明を設定: "{1}"</value>
+    <value>Set description of table [{0}]: "{1}"</value>
   </data>
   <data name="Diff_SetColumnDescription" xml:space="preserve">
-    <value>列 [{0}].[{1}] の説明を設定: "{2}"</value>
+    <value>Set description of column [{0}].[{1}]: "{2}"</value>
   </data>
   <data name="Diff_RemoveTableDescription" xml:space="preserve">
-    <value>テーブル [{0}] の説明を削除</value>
+    <value>Remove description of table [{0}]</value>
   </data>
   <data name="Diff_UpdateTableDescription" xml:space="preserve">
-    <value>テーブル [{0}] の説明を更新: "{1}"</value>
+    <value>Update description of table [{0}]: "{1}"</value>
   </data>
   <data name="Diff_AddColumn" xml:space="preserve">
-    <value>列 [{0}].[{1}] {2} を追加</value>
+    <value>Add column [{0}].[{1}] {2}</value>
   </data>
   <data name="Diff_TypeChange" xml:space="preserve">
-    <value>型を {0} → {1} に変更</value>
+    <value>Change type from {0} to {1}</value>
   </data>
   <data name="Diff_NullableChange" xml:space="preserve">
-    <value>NULL許容を {0} → {1} に変更</value>
+    <value>Change nullability from {0} to {1}</value>
   </data>
   <data name="Diff_Nullable_Allow" xml:space="preserve">
-    <value>許可</value>
+    <value>Allowed</value>
   </data>
   <data name="Diff_Nullable_Deny" xml:space="preserve">
-    <value>禁止</value>
+    <value>Not allowed</value>
   </data>
   <data name="Diff_ColumnChangePrefix" xml:space="preserve">
-    <value>列 [{0}].[{1}] </value>
+    <value>Column [{0}].[{1}] </value>
   </data>
   <data name="Diff_RemoveColumnDescription" xml:space="preserve">
-    <value>列 [{0}].[{1}] の説明を削除</value>
+    <value>Remove description of column [{0}].[{1}]</value>
   </data>
   <data name="Diff_UpdateColumnDescription" xml:space="preserve">
-    <value>列 [{0}].[{1}] の説明を更新: "{2}"</value>
+    <value>Update description of column [{0}].[{1}]: "{2}"</value>
   </data>
   <data name="Diff_DropColumn" xml:space="preserve">
-    <value>列 [{0}].[{1}] ({2}) を削除</value>
+    <value>Drop column [{0}].[{1}] ({2})</value>
   </data>
   <data name="Diff_DropTable" xml:space="preserve">
-    <value>テーブル [{0}] を削除</value>
+    <value>Drop table [{0}]</value>
   </data>
   <data name="Diff_AddForeignKey" xml:space="preserve">
-    <value>外部キー [{0}].[{1}] → [{2}].[{3}] を追加</value>
+    <value>Add foreign key [{0}].[{1}] → [{2}].[{3}]</value>
   </data>
   <data name="Diff_AddForeignKeyNoColumn" xml:space="preserve">
-    <value>外部キー [{0}] → [{1}] を追加 (※ FK 列が未定義のためスクリプトはスキップされます)</value>
+    <value>Add foreign key [{0}] → [{1}] (note: the FK column is undefined, so the script is skipped)</value>
   </data>
   <data name="Diff_DropForeignKey" xml:space="preserve">
-    <value>外部キー [{0}] → [{1}] を削除</value>
+    <value>Drop foreign key [{0}] → [{1}]</value>
   </data>
   <data name="Provider_UnsupportedProvider" xml:space="preserve">
-    <value>未対応のプロバイダ: '{0}'。対応プロバイダ: {1}</value>
+    <value>Unsupported provider: '{0}'. Supported providers: {1}</value>
   </data>
   <data name="Sync_Error_MySqlStatementFailed" xml:space="preserve">
-    <value>{0} 文目の実行に失敗しました（{1} 文まで適用済みの可能性があります。MySQL の DDL は暗黙コミットされるためロールバックできません）: {2}</value>
+    <value>Statement {0} failed to execute (up to {1} statement(s) may already be applied; MySQL DDL is implicitly committed and cannot be rolled back): {2}</value>
   </data>
   <data name="Sync_Error_OracleStatementFailed" xml:space="preserve">
-    <value>{0}（Oracle の DDL は暗黙コミットされるため、直前までに成功した {1} 文は取り消されず部分適用されている可能性があります）</value>
+    <value>{0} (Oracle DDL is implicitly committed, so the {1} statement(s) that succeeded beforehand are not rolled back and may be partially applied)</value>
   </data>
   <data name="Sync_Sqlite_NotSupported" xml:space="preserve">
-    <value>SQLite プロバイダは DB 同期に未対応です。将来的にテーブル再構築方式で対応予定です。</value>
+    <value>The SQLite provider does not support DB synchronization yet. It is planned to be supported via a table-rebuild approach in the future.</value>
   </data>
 </root>

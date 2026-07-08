@@ -13,15 +13,15 @@ using Xunit;
 namespace QuickER.Tests.Resources;
 
 /// <summary>
-/// src 配下の resx について、中立リソースと英語サテライト（<c>.en.resx</c>）のキー集合が
-/// 完全一致することを検証するガードテスト。新しい resx が増えても走査で自動的にカバーされる。
+/// src 配下の resx について、中立リソース（<c>Strings.resx</c>＝英語）と日本語サテライト（<c>.ja.resx</c>）の
+/// キー集合が完全一致することを検証するガードテスト。新しい resx が増えても走査で自動的にカバーされる。
 /// </summary>
 /// <remarks>
 /// <para>
-/// 非 UI 層まで含めた全文言の英語化が完了したため、「中立 <c>Strings.resx</c> に対して
-/// <c>.en.resx</c> が欠落していたら失敗」の強制モードで検証する
-/// （<see cref="AllNeutralResxHaveEnglishSatellite"/>）。新しい中立 resx を追加したら
-/// 対応する英語サテライトも必ず用意する必要がある。
+/// 中立カルチャは英語（国際標準構成）。日本語は <c>Strings.ja.resx</c> サテライトで賦与する。
+/// 「中立 <c>Strings.resx</c> に対して <c>.ja.resx</c> が欠落していたら失敗」の強制モードで検証する
+/// （<see cref="AllNeutralResxHaveJapaneseSatellite"/>）。新しい中立 resx を追加したら
+/// 対応する日本語サテライトも必ず用意する必要がある。
 /// </para>
 /// </remarks>
 public class ResxKeyParityTests
@@ -34,53 +34,53 @@ public class ResxKeyParityTests
         _output = output;
     }
 
-    /// <summary>中立 resx と対応する英語サテライトのキー集合が完全一致することを検証する</summary>
-    [Fact(DisplayName = "中立 resx と .en.resx のキー集合が一致する")]
-    public void NeutralAndEnglishResx_HaveIdenticalKeySets()
+    /// <summary>中立 resx（英語）と対応する日本語サテライトのキー集合が完全一致することを検証する</summary>
+    [Fact(DisplayName = "中立 resx と .ja.resx のキー集合が一致する")]
+    public void NeutralAndJapaneseResx_HaveIdenticalKeySets()
     {
         var pairs = EnumerateResxPairs().ToList();
 
         // 基盤 Stage の時点で少なくとも 1 ペア（言語切替 UI の Strings）が存在するはず。
         // ゼロ件のまま緑になると「検証していないのに合格」になるためガードする。
-        pairs.Should().NotBeEmpty("検証対象の中立 resx / .en.resx ペアが 1 つも見つからない");
+        pairs.Should().NotBeEmpty("検証対象の中立 resx / .ja.resx ペアが 1 つも見つからない");
 
         foreach (var pair in pairs)
         {
-            _output.WriteLine($"検証ペア: {pair.NeutralPath} <-> {pair.EnglishPath}");
+            _output.WriteLine($"検証ペア: {pair.NeutralPath} <-> {pair.SatellitePath}");
 
             var neutralKeys = ReadKeys(pair.NeutralPath);
-            var englishKeys = ReadKeys(pair.EnglishPath);
+            var japaneseKeys = ReadKeys(pair.SatellitePath);
 
-            englishKeys
+            japaneseKeys
                 .Should()
                 .BeEquivalentTo(
                     neutralKeys,
-                    $"英語サテライト {pair.EnglishPath} のキー集合は中立 {pair.NeutralPath} と一致すべき"
+                    $"日本語サテライト {pair.SatellitePath} のキー集合は中立 {pair.NeutralPath} と一致すべき"
                 );
         }
     }
 
     /// <summary>
-    /// 中立 <c>Strings.resx</c> はすべて対応する英語サテライト（<c>.en.resx</c>）を持つことを強制する。
-    /// 英語訳が揃った現在は「サテライト欠落 = 失敗」の強制モードで検証する。
+    /// 中立 <c>Strings.resx</c>（英語）はすべて対応する日本語サテライト（<c>.ja.resx</c>）を持つことを強制する。
+    /// 日本語訳が揃っているため「サテライト欠落 = 失敗」の強制モードで検証する。
     /// </summary>
-    [Fact(DisplayName = "英語サテライトを持たない中立 resx は存在しない")]
-    public void AllNeutralResxHaveEnglishSatellite()
+    [Fact(DisplayName = "日本語サテライトを持たない中立 resx は存在しない")]
+    public void AllNeutralResxHaveJapaneseSatellite()
     {
-        var neutralWithoutEnglish = EnumerateNeutralResx()
-            .Where(neutral => !File.Exists(ToEnglishSatellitePath(neutral)))
+        var neutralWithoutJapanese = EnumerateNeutralResx()
+            .Where(neutral => !File.Exists(ToJapaneseSatellitePath(neutral)))
             .ToList();
 
-        foreach (var path in neutralWithoutEnglish)
+        foreach (var path in neutralWithoutJapanese)
         {
-            _output.WriteLine($"英語サテライト未整備の中立 resx: {path}");
+            _output.WriteLine($"日本語サテライト未整備の中立 resx: {path}");
         }
 
-        // 全文言の英語化が完了したため、英語サテライト欠落は失敗とする。
-        // 新しい中立 resx を追加したら対応する .en.resx も必ず用意すること。
-        neutralWithoutEnglish
+        // 中立（英語）と日本語サテライトは対で揃える。日本語サテライト欠落は失敗とする。
+        // 新しい中立 resx を追加したら対応する .ja.resx も必ず用意すること。
+        neutralWithoutJapanese
             .Should()
-            .BeEmpty("すべての中立 Strings.resx は対応する .en.resx を持つ必要がある");
+            .BeEmpty("すべての中立 Strings.resx は対応する .ja.resx を持つ必要がある");
     }
 
     /// <summary>
@@ -210,19 +210,19 @@ public class ResxKeyParityTests
             .ToHashSet();
     }
 
-    /// <summary>中立 resx とその英語サテライトのペア</summary>
-    private sealed record ResxPair(string NeutralPath, string EnglishPath);
+    /// <summary>中立 resx（英語）とその日本語サテライトのペア</summary>
+    private sealed record ResxPair(string NeutralPath, string SatellitePath);
 
-    /// <summary>src 配下の全 resx から、英語サテライトを持つ中立 resx のペアを列挙する</summary>
+    /// <summary>src 配下の全 resx から、日本語サテライトを持つ中立 resx のペアを列挙する</summary>
     private static IEnumerable<ResxPair> EnumerateResxPairs()
     {
         foreach (var neutral in EnumerateNeutralResx())
         {
-            var english = ToEnglishSatellitePath(neutral);
+            var japanese = ToJapaneseSatellitePath(neutral);
 
-            if (File.Exists(english))
+            if (File.Exists(japanese))
             {
-                yield return new ResxPair(neutral, english);
+                yield return new ResxPair(neutral, japanese);
             }
         }
     }
@@ -240,13 +240,13 @@ public class ResxKeyParityTests
             .Where(path => !HasCultureSuffix(path));
     }
 
-    /// <summary>中立 resx パスから対応する英語サテライト（<c>.en.resx</c>）のパスを求める</summary>
-    private static string ToEnglishSatellitePath(string neutralResxPath)
+    /// <summary>中立 resx パスから対応する日本語サテライト（<c>.ja.resx</c>）のパスを求める</summary>
+    private static string ToJapaneseSatellitePath(string neutralResxPath)
     {
         var directory = Path.GetDirectoryName(neutralResxPath)!;
         var baseName = Path.GetFileNameWithoutExtension(neutralResxPath);
 
-        return Path.Combine(directory, $"{baseName}.en.resx");
+        return Path.Combine(directory, $"{baseName}.ja.resx");
     }
 
     /// <summary>resx の <c>&lt;data name="..."&gt;</c> エントリのキー集合を読み出す</summary>
@@ -266,8 +266,8 @@ public class ResxKeyParityTests
     /// <summary>ファイル名にカルチャ接尾辞（例 <c>.en</c>）を持つ resx かどうかを判定する</summary>
     private static bool HasCultureSuffix(string resxPath)
     {
-        // 例: "Strings.en.resx" → GetFileNameWithoutExtension は "Strings.en"。
-        // 内側の拡張子（".en"）が既知カルチャなら中立ではない（サテライト）。
+        // 例: "Strings.ja.resx" → GetFileNameWithoutExtension は "Strings.ja"。
+        // 内側の拡張子（".ja"）が既知カルチャなら中立ではない（サテライト）。
         var withoutResx = Path.GetFileNameWithoutExtension(resxPath);
         var innerExtension = Path.GetExtension(withoutResx);
 
