@@ -273,16 +273,16 @@
             />
             <RadioButton
               Margin="0,0,18,0"
-              Content="Repository (EF Core)"
-              GroupName="DbAccess"
-              IsChecked="{Binding DbAccessEfCore}"
-              ToolTip="{x:Static res:Strings.CodeGen_DbAccessEfCoreTooltip}"
-            />
-            <RadioButton
               Content="Repository (QuickER)"
               GroupName="DbAccess"
               IsChecked="{Binding DbAccessRepository}"
               ToolTip="{Binding QuickErRepositoryToolTip}"
+            />
+            <RadioButton
+              Content="Repository (EF Core)"
+              GroupName="DbAccess"
+              IsChecked="{Binding DbAccessEfCore}"
+              ToolTip="{x:Static res:Strings.CodeGen_DbAccessEfCoreTooltip}"
             />
           </StackPanel>
         </Grid>
