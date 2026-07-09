@@ -80,13 +80,13 @@
     <value>English</value>
     <comment>言語選択メニューの英語項目</comment>
   </data>
-  <data name="Language_RestartRequired" xml:space="preserve">
-    <value>言語設定を変更しました。再起動後に反映されます。</value>
-    <comment>言語変更後の再起動案内メッセージ</comment>
+  <data name="Language_RestartConfirm" xml:space="preserve">
+    <value>表示言語を変更しました。今すぐ再起動して反映しますか？</value>
+    <comment>言語変更後の再起動確認メッセージ</comment>
   </data>
-  <data name="Language_RestartRequiredTitle" xml:space="preserve">
-    <value>言語設定</value>
-    <comment>再起動案内ダイアログのタイトル</comment>
+  <data name="Language_RestartConfirmTitle" xml:space="preserve">
+    <value>再起動</value>
+    <comment>再起動確認ダイアログのタイトル</comment>
   </data>
   <data name="Common_Cancel" xml:space="preserve">
     <value>キャンセル</value>

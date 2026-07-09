@@ -17,11 +17,14 @@ namespace QuickER.ViewModels;
 /// </remarks>
 public partial class LanguageSwitchViewModel : ObservableObject
 {
-    /// <summary>再起動案内などの通知ダイアログの表示先</summary>
+    /// <summary>再起動確認などのダイアログの表示先</summary>
     private readonly IDialogService _dialogs;
 
     /// <summary>言語設定の永続化ストア</summary>
     private readonly GuiAppSettingsStore _store;
+
+    /// <summary>アプリ再起動サービス（確認で OK のとき呼び出す）</summary>
+    private readonly IApplicationRestartService _restart;
 
     /// <summary>現在選択されている表示言語コード（<c>"ja"</c> / <c>"en"</c>。メニューのチェック表示に使う）</summary>
     [ObservableProperty]
@@ -35,13 +38,19 @@ public partial class LanguageSwitchViewModel : ObservableObject
     /// <summary>英語が現在選択されているか（メニュー項目のチェック用）</summary>
     public bool IsEnglishChecked => CurrentLanguage == AppLanguage.English;
 
-    /// <summary>依存を注入して生成する（ストア省略時は既定の保存先を使う）</summary>
-    /// <param name="dialogs">通知ダイアログの表示先</param>
+    /// <summary>依存を注入して生成する（ストア・再起動サービス省略時は既定を使う）</summary>
+    /// <param name="dialogs">確認ダイアログの表示先</param>
     /// <param name="store">言語設定ストア（省略時は既定の %APPDATA%\QuickER 保存先）</param>
-    public LanguageSwitchViewModel(IDialogService dialogs, GuiAppSettingsStore? store = null)
+    /// <param name="restart">アプリ再起動サービス（省略時は WPF 実装。単体テストではスタブを渡す）</param>
+    public LanguageSwitchViewModel(
+        IDialogService dialogs,
+        GuiAppSettingsStore? store = null,
+        IApplicationRestartService? restart = null
+    )
     {
         _dialogs = dialogs;
         _store = store ?? new GuiAppSettingsStore();
+        _restart = restart ?? new WpfApplicationRestartService();
 
         // 現在の実効言語は、起動時に App が適用したカルチャ（＝設定＋OS 導出の結果）を正とする
         var settings = _store.Load();
@@ -74,9 +83,11 @@ public partial class LanguageSwitchViewModel : ObservableObject
 
         CurrentLanguage = resolved;
 
-        _dialogs.ShowInformation(
-            Strings.Language_RestartRequired,
-            Strings.Language_RestartRequiredTitle
-        );
+        // 再起動反映方式のため、今すぐ再起動するか確認する。OK なら再起動して即座に反映する。
+        // 断った場合も設定は保存済みで、次回起動時に反映される。
+        if (_dialogs.Confirm(Strings.Language_RestartConfirm, Strings.Language_RestartConfirmTitle))
+        {
+            _restart.Restart();
+        }
     }
 }

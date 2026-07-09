@@ -92,20 +92,20 @@ namespace QuickER.Resources {
         }
         
         /// <summary>
-        ///   言語設定を変更しました。再起動後に反映されます。 に類似しているローカライズされた文字列を検索します。
+        ///   表示言語を変更しました。今すぐ再起動して反映しますか？ に類似しているローカライズされた文字列を検索します。
         /// </summary>
-        public static string Language_RestartRequired {
+        public static string Language_RestartConfirm {
             get {
-                return ResourceManager.GetString("Language_RestartRequired", resourceCulture);
+                return ResourceManager.GetString("Language_RestartConfirm", resourceCulture);
             }
         }
-        
+
         /// <summary>
-        ///   言語設定 に類似しているローカライズされた文字列を検索します。
+        ///   再起動 に類似しているローカライズされた文字列を検索します。
         /// </summary>
-        public static string Language_RestartRequiredTitle {
+        public static string Language_RestartConfirmTitle {
             get {
-                return ResourceManager.GetString("Language_RestartRequiredTitle", resourceCulture);
+                return ResourceManager.GetString("Language_RestartConfirmTitle", resourceCulture);
             }
         }
         

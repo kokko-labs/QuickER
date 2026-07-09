@@ -74,11 +74,11 @@
   <data name="Language_English" xml:space="preserve">
     <value>English</value>
   </data>
-  <data name="Language_RestartRequired" xml:space="preserve">
-    <value>Language setting changed. It will take effect after restart.</value>
+  <data name="Language_RestartConfirm" xml:space="preserve">
+    <value>The display language has been changed. Restart the app now to apply it?</value>
   </data>
-  <data name="Language_RestartRequiredTitle" xml:space="preserve">
-    <value>Language</value>
+  <data name="Language_RestartConfirmTitle" xml:space="preserve">
+    <value>Restart</value>
   </data>
   <data name="Common_Cancel" xml:space="preserve">
     <value>Cancel</value>
