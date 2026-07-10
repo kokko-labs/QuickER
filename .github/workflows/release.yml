@@ -52,6 +52,11 @@ jobs:
       - name: GUI を publish（フレームワーク依存・win-x64）
         run: dotnet publish src/QuickER.Gui/QuickER.Gui.csproj -c Release -r win-x64 --self-contained false -o ${{ runner.temp }}/gui-publish
 
+      # PolyForm NC の Notices 条項（条文をコピーの受領者へ渡す義務）に対応するため、
+      # ライセンス文書 2 種を配布 zip に必ず同梱する
+      - name: ライセンス文書を同梱
+        run: Copy-Item LICENSE, LICENSE-NC.md -Destination ${{ runner.temp }}/gui-publish
+
       - name: zip を作成
         run: Compress-Archive -Path "${{ runner.temp }}/gui-publish/*" -DestinationPath "${{ runner.temp }}/QuickER-${{ steps.version.outputs.version }}-win-x64.zip"
 

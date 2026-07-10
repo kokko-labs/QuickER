@@ -12,6 +12,15 @@ The license in this file (the PolyForm Noncommercial License 1.0.0) applies **on
 
 Code that QuickER generates (including the inlined runtime portion) is your work product and is not subject to this license. For the policy on providing the official distributions (GUI / CLI) free of charge and the notice about possible future paid licensing, see the "License" section of the README.
 
+## Additional Grants
+
+In addition to the PolyForm Noncommercial License 1.0.0 below, the licensor grants the following additional permissions for the projects listed above. Each grant applies per released version: once a version has been made available with a grant in effect, that grant remains in force for that version permanently and is never withdrawn retroactively.
+
+1. **Basic code generation — permanent.** Everyone is granted, permanently and for commercial purposes as well, a license to use the basic code generation features (generation of Entity / EditModel / Mapper code).
+2. **All other features — interim.** Everyone is currently granted a license to use the software for commercial purposes as well, including the AI features and the DB-access code generation (Repository (QuickER) / EF Core / multi-target). This interim grant may be withdrawn **only for future versions**, with advance public notice and a transition period, as described in the "License" section of the README.
+
+These additional grants cover **use** of the software. Distribution of, and changes and new works based on, the software beyond noncommercial purposes remain governed by the PolyForm Noncommercial License 1.0.0 below.
+
 The following is the original license text (English, authoritative).
 
 ---

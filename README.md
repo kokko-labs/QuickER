@@ -2,6 +2,8 @@
 
 *[日本語](README.ja.md) | English*
 
+*License: [MIT](LICENSE) (core) + [PolyForm NC](LICENSE-NC.md) (AI features and code generation — currently free for everyone, including commercial use). See [License](#license) for details.*
+
 **A Windows ER diagram designer that connects AI-assisted visual ER design × multi-DB round-tripping (import, sync, DDL) × C# code generation (Repository / EF Core) end to end.**
 
 Draw an ER diagram → create a database → generate C# data-access code and run it — all in a single tool, round-tripping between each step. It also imports from and diff-syncs with existing databases, and you can generate and edit diagrams through AI chat.
@@ -185,3 +187,5 @@ The repository itself uses two licenses, split per project:
   - **Basic code generation (Entity / EditModel / Mapper) remains permanently free, including commercial use**
   - **If we introduce paid licensing, we will announce it in advance and provide a transition period for existing users**
 - The source code of the PolyForm NC portion remains available for use, modification, and redistribution for non-commercial purposes
+
+The promises above are codified as the "Additional Grants" section of [LICENSE-NC.md](LICENSE-NC.md) — the license file itself grants them, so commercial use today rests on the license text, not on this README alone.
