@@ -1,41 +1,41 @@
 # QuickER.Cli
 
-QuickER（AI 支援のビジュアル ER 設計 × マルチ DB 往復 × C# コード生成を一気通貫でつなぐ Windows 用 ER 図デザイナ）のコマンドライン ツールです。GUI なしで、ER 図 JSON からの C# コード生成（`generate`）と、データベース直結のスキャフォールド（`scaffold`）を実行できます。
+The command-line tool for QuickER (a Windows ER diagram designer that connects AI-assisted visual ER design × multi-DB round-tripping × C# code generation end to end). Without the GUI, it can generate C# code from an ER diagram JSON (`generate`) and scaffold directly from a database (`scaffold`).
 
-## インストール
+## Install
 
 ```powershell
 dotnet tool install --global QuickER.Cli
 ```
 
-## 使い方
+## Usage
 
 ```powershell
-# ER 図 JSON（GUI の保存形式）→ C# コード（Entity / EditModel / Mapper / Repository / EF Core）
+# ER diagram JSON (the GUI save format) → C# code (Entity / EditModel / Mapper / Repository / EF Core)
 quicker generate --schema diagram.json --out ./Generated --provider sqlserver
 
-# 実 DB へ直接接続してスキーマを取込 → C# コード
+# Connect directly to a live DB and import the schema → C# code
 quicker scaffold --connection "Server=.;Database=Shop;Integrated Security=true;TrustServerCertificate=true" --out ./Generated --provider sqlserver
 ```
 
-主なオプション:
+Main options:
 
-| オプション | 説明 |
+| Option | Description |
 |---|---|
-| `--provider <name>` | 対象 DB。`sqlserver`（既定）/ `postgresql` / `mysql` / `oracle` / `sqlite` |
-| `--config <file>` | 生成オプション設定ファイル（quicker.json） |
-| `--namespace <name>` / `--split` | ルート名前空間の指定／カテゴリ別ファイル分割 |
-| `--repository-dialects <list>` | 自作 Repository のマルチターゲット生成（例 `sqlserver,sqlite`・keyed DI） |
-| `--runtime-packages` | ランタイム固定コードを出力せず `QuickER.Runtime.*` パッケージ参照で賄う |
-| `--api-docs` | API リファレンス Markdown（`{ベース名}.g.md`）を追加出力 |
+| `--provider <name>` | Target DB. `sqlserver` (default) / `postgresql` / `mysql` / `oracle` / `sqlite` |
+| `--config <file>` | Generation option settings file (quicker.json) |
+| `--namespace <name>` / `--split` | Set the root namespace / split files by category |
+| `--repository-dialects <list>` | Multi-target generation of the custom Repository (e.g. `sqlserver,sqlite`, keyed DI) |
+| `--runtime-packages` | Do not emit the fixed runtime code; provide it via `QuickER.Runtime.*` package references instead |
+| `--api-docs` | Additionally output an API reference Markdown (`{base name}.g.md`) |
 
-詳細な CLI リファレンス・生成コードの使い方・動くサンプルは、リポジトリのドキュメントを参照してください:
+For the detailed CLI reference, how to use the generated code, and a working sample, see the repository documentation:
 
 <!-- TODO: 公開時に実リポジトリ URL へ差し替える -->
 https://github.com/QuickER/QuickER
 
-## ライセンス
+## License
 
-PolyForm Noncommercial 1.0.0（パッケージ同梱の LICENSE-NC.md）。**現在は商用利用を含め全員が無料**で利用できます。将来、商用利用のみ有償ライセンス化する可能性があります（個人・非商用は永続無料／基本生成＝Entity / EditModel / Mapper は商用含め永続無料／有償化する場合は事前に告知し、既存利用者には移行期間を設けます）。
+PolyForm Noncommercial 1.0.0 (the LICENSE-NC.md bundled with the package). **It is currently free for everyone, including commercial use.** In the future, commercial use only may become paid-licensed (personal and non-commercial use remains permanently free / basic generation—Entity / EditModel / Mapper—remains permanently free including commercial use / if we introduce paid licensing, we will announce it in advance and provide a transition period for existing users).
 
-**CLI が生成したコード（インライン出力されるランタイム部分を含む）はあなたの成果物**であり、ライセンスによる制限なく自由に利用・改変・配布できます。
+**Code that the CLI generates (including the inlined runtime portion) is your work product**, and you may use, modify, and distribute it freely with no license restrictions.

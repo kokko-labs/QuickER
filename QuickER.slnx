@@ -24,6 +24,7 @@
     <File Path="samples/ec-order/EcOrder.json" />
     <File Path="samples/ec-order/EcOrder.sql" />
     <File Path="samples/ec-order/README.md" />
+    <File Path="samples/ec-order/README.ja.md" />
     <File Path="samples/ec-order/quicker.json" />
     <Project Path="samples/ec-order/EcOrderSample/EcOrderSample.csproj" />
   </Folder>

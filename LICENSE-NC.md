@@ -1,6 +1,6 @@
-# LICENSE-NC — PolyForm Noncommercial License 1.0.0 の適用範囲
+# LICENSE-NC — Scope of the PolyForm Noncommercial License 1.0.0
 
-本ファイルのライセンス（PolyForm Noncommercial License 1.0.0）は、本リポジトリのうち**以下のプロジェクト（ディレクトリ）にのみ**適用されます。それ以外の部分には [LICENSE](LICENSE)（MIT License）が適用されます。
+The license in this file (the PolyForm Noncommercial License 1.0.0) applies **only to the following projects (directories)** in this repository. All other parts are covered by [LICENSE](LICENSE) (the MIT License).
 
 - `src/QuickER.AI`
 - `src/QuickER.AI.UI`
@@ -10,9 +10,9 @@
 - `src/QuickER.CodeGen.UI`
 - `src/QuickER.Cli`
 
-QuickER が**生成したコード（インライン出力されるランタイム部分を含む）は利用者の成果物**であり、本ライセンスの対象外です。公式配布物（GUI・CLI）の無料提供の方針と将来の有償化に関する予告は、README の「ライセンス」節を参照してください。
+Code that QuickER generates (including the inlined runtime portion) is your work product and is not subject to this license. For the policy on providing the official distributions (GUI / CLI) free of charge and the notice about possible future paid licensing, see the "License" section of the README.
 
-以下はライセンスの原文（英語・正文）です。
+The following is the original license text (English, authoritative).
 
 ---
 

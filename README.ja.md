@@ -80,7 +80,7 @@ dotnet run --project samples/ec-order/EcOrderSample
 3. **DDL** — GUI の「出力」から DDL をエクスポートして `EcOrder.sql` を更新する
 4. **実行** — `dotnet run --project samples/ec-order/EcOrderSample` で動かす
 
-詳細は [samples/ec-order/README.md](samples/ec-order/README.md) を参照してください。
+詳細は [samples/ec-order/README.ja.md](samples/ec-order/README.ja.md) を参照してください。
 
 ## インストール / 入手
 
@@ -153,7 +153,7 @@ dotnet test QuickER.slnx         # 全テスト（Docker があれば実 DB 統�
 - [CLI リファレンス（generate / scaffold・quicker.json）](docs/cli.md)
 - [生成コードの使い方（Repository API・EF Core・ランタイムパッケージ）](docs/code-generation.md)
 - [AI チャットの設定](docs/ai-chat.md)
-- [動くサンプル（EC 注文ドメイン）](samples/ec-order/README.md)
+- [動くサンプル（EC 注文ドメイン）](samples/ec-order/README.ja.md)
 
 ## サポート・貢献
 

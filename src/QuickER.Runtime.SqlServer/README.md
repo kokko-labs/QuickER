@@ -1,20 +1,20 @@
 # QuickER.Runtime.SqlServer
 
-QuickER（ER 図デザイナ）が生成する C# コードのランタイムのうち、自作 Repository の **SQL Server 方言エンジン**です。`QuickER.Runtime` の方言中立契約を SQL Server（`FOR JSON PATH` による取得系・`OFFSET/FETCH` など）で実装します。依存は `Microsoft.Data.SqlClient` のみです。
+The **SQL Server dialect engine** for the custom Repository, part of the runtime for the C# code that QuickER (an ER diagram designer) generates. It implements the dialect-neutral contracts of `QuickER.Runtime` for SQL Server (reads via `FOR JSON PATH`, `OFFSET/FETCH`, etc.). Its only dependency is `Microsoft.Data.SqlClient`.
 
-## 使いどき
+## When you need it
 
-既定では QuickER の生成コードはランタイム込みのインライン出力で自己完結するため、**本パッケージは不要**です。生成時に `--runtime-packages`（CLI）またはランタイムをパッケージ参照にするオプション（GUI）を指定し、Repository (QuickER) の対象 DB に SQL Server を含めた場合に、`QuickER.Runtime` とあわせて参照します。必要な PackageReference は生成コードのヘッダと CLI 出力に案内されます。
+By default, QuickER's generated code is self-contained with the runtime inlined into the output, so **this package is not required**. When you generate with `--runtime-packages` (CLI) or the option that switches the runtime to package references (GUI) and include SQL Server among the target DBs for Repository (QuickER), reference it together with `QuickER.Runtime`. The required `PackageReference`s are shown in the generated code header and the CLI output.
 
-DI 登録拡張（`AddGeneratedSqlServerRepositories` など）はスキーマ依存物のため本パッケージには含まれず、常に生成コード側に出力されます。
+The DI registration extensions (`AddGeneratedSqlServerRepositories`, etc.) are schema-dependent, so they are not included in this package and are always emitted on the generated-code side.
 
-## バージョン互換
+## Version compatibility
 
-パッケージ版は QuickER ツール版とロックステップ（同一バージョン）で公開され、同一メジャー内で互換です。
+The package version is published in lockstep with the QuickER tool version (identical version) and is compatible within the same major version.
 
-## ライセンス
+## License
 
-MIT License。QuickER が生成したコードとあわせて、制限なく利用・改変・配布できます。
+MIT License. Together with the code that QuickER generates, you may use, modify, and distribute it with no restrictions.
 
 <!-- TODO: 公開時に実リポジトリ URL へ差し替える -->
-詳細: https://github.com/QuickER/QuickER
+Details: https://github.com/QuickER/QuickER

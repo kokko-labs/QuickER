@@ -1,43 +1,46 @@
-# EC 注文サンプル（ec-order）
+# EC order sample (ec-order)
 
-QuickER が ER 図から生成した C# コードを、外部 DB なしで実際に動かせる最小サンプルです。
-題材は EC の注文ドメイン（顧客・商品・注文・注文明細）で、SQLite ファイル DB に対して
-自作 Repository（`RepositoryDialect=sqlite`）による CRUD・グラフ保存・Include・生 SQL 集計・
-削除カスケードを実演します。
+*[日本語](README.ja.md) | English*
 
-## 構成
+A minimal sample that lets you actually run the C# code QuickER generated from an ER diagram, with no external DB.
+The subject is an e-commerce order domain (customers, products, orders, order lines), and it demonstrates
+CRUD, graph save, Include, raw-SQL aggregation, and delete cascade against a SQLite file DB via the custom
+Repository (`RepositoryDialect=sqlite`).
 
-| ファイル | 役割 |
+## Structure
+
+| File | Role |
 |---|---|
-| `EcOrder.json` | ER 図（GUI の保存形式）。GUI で開いて編集できる |
-| `EcOrder.sql` | 図から生成した SQLite DDL（チェックイン済み） |
-| `quicker.json` | CLI の生成オプション（名前空間・出力ファイル名のみの最小構成） |
-| `EcOrderSample/Generated/EcOrder.g.cs` | 図から生成した C# コード（チェックイン済み） |
-| `EcOrderSample/Generated/EcOrder.g.md` | 生成 API のリファレンス Markdown（`--api-docs` の同梱出力・チェックイン済み） |
-| `EcOrderSample/Program.cs` | DDL で DB を作成し CRUD を実演するコンソールアプリ |
+| `EcOrder.json` | The ER diagram (the GUI save format). You can open and edit it in the GUI |
+| `EcOrder.sql` | The SQLite DDL generated from the diagram (checked in) |
+| `quicker.json` | The CLI generation options (a minimal config with only the namespace and output file names) |
+| `EcOrderSample/Generated/EcOrder.g.cs` | The C# code generated from the diagram (checked in) |
+| `EcOrderSample/Generated/EcOrder.g.md` | The generated API reference Markdown (the bundled output of `--api-docs`, checked in) |
+| `EcOrderSample/Program.cs` | A console app that creates the DB from the DDL and demonstrates CRUD |
 
-コンソールアプリは QuickER 本体プロジェクトには一切参照せず、利用者のプロジェクトと同じく
-NuGet パッケージ（`Microsoft.Data.Sqlite` など）のみを参照します。
+The console app references none of the QuickER main projects at all; like a user's own project, it references
+only NuGet packages (`Microsoft.Data.Sqlite`, etc.).
 
-## 実行する
+## Run it
 
-リポジトリ直下から次を実行します（.NET 10 SDK が必要）。
+From the repository root, run the following (the .NET 10 SDK is required).
 
 ```powershell
 dotnet run --project samples/ec-order/EcOrderSample
 ```
 
-起動時に `EcOrder.sql` の DDL で SQLite ファイル DB（`ec-order.db`。実行ファイルと同じ `bin` 配下に作成）を
-作り直し、各シナリオの結果を日本語で表示します。期待値と異なる場合は例外で終了（終了コード非 0）します。
+At startup it recreates a SQLite file DB (`ec-order.db`, created under the same `bin` folder as the executable)
+from the `EcOrder.sql` DDL and prints the result of each scenario in Japanese. If a value differs from what is
+expected, it exits with an exception (a non-zero exit code).
 
-## 図を GUI で開く
+## Open the diagram in the GUI
 
-`EcOrder.json` は GUI（QuickER.Gui）の保存形式そのものです。GUI を起動し、
-`samples/ec-order/EcOrder.json` を開くと図を閲覧・編集できます。
+`EcOrder.json` is exactly the save format of the GUI (QuickER.Gui). Launch the GUI and open
+`samples/ec-order/EcOrder.json` to view and edit the diagram.
 
-## 生成コード・DDL を再生成する
+## Regenerate the generated code / DDL
 
-### 実 CLI で再生成する
+### Regenerate with the real CLI
 
 ```powershell
 dotnet run --project src/QuickER.Cli -- generate `
@@ -48,16 +51,17 @@ dotnet run --project src/QuickER.Cli -- generate `
   --api-docs
 ```
 
-`--api-docs` を付けると `EcOrder.g.cs` と同じベース名で API リファレンス Markdown
-`EcOrder.g.md` も出力されます（どちらもドリフトテストの検証対象）。
+Adding `--api-docs` also outputs the API reference Markdown `EcOrder.g.md` with the same base name as
+`EcOrder.g.cs` (both are subject to the drift tests).
 
-### ドリフトテストの再生成モードで一括再生成する
+### Regenerate everything at once with the drift tests' regeneration mode
 
-チェックイン済みの生成物は `EcOrderSampleDriftTests` が「実 CLI と同一経路の再生成物とバイト一致」を
-検証します。テンプレート等を変更したら、既存フィクスチャと同じ 1 コマンドで再生成できます。
+`EcOrderSampleDriftTests` verifies that the checked-in generated artifacts are byte-identical to what the
+real CLI regenerates via the same path. After changing a template or the like, you can regenerate them with
+the same single command as the existing fixtures.
 
 ```powershell
 $env:QUICKER_REGEN_FIXTURES=1; dotnet test tests/QuickER.Tests/QuickER.Tests.csproj --filter "FullyQualifiedName~Drift"; $env:QUICKER_REGEN_FIXTURES=$null
 ```
 
-再生成後は環境変数なしで同じテストを流し、緑（ドリフトなし）になることを確認してください。
+After regenerating, run the same tests again without the environment variable and confirm they are green (no drift).

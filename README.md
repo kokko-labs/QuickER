@@ -152,7 +152,7 @@ dotnet test QuickER.slnx         # all tests (real-DB integration tests also run
 
 ## Documentation
 
-> The documents below are currently written in Japanese.
+> The docs/ pages below are currently written in Japanese.
 
 - [CLI reference (generate / scaffold, quicker.json)](docs/cli.md)
 - [Using the generated code (Repository API, EF Core, runtime packages)](docs/code-generation.md)
