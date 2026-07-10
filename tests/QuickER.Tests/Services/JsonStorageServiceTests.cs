@@ -1,8 +1,10 @@
 ﻿using System.IO;
 using FluentAssertions;
 using QuickER.Documents;
+using QuickER.Gui.Abstractions;
 using QuickER.Model;
 using QuickER.Services;
+using QuickER.Tests.TestDoubles;
 using QuickER.ViewModels;
 
 namespace QuickER.Tests.Services;
@@ -79,5 +81,115 @@ public class JsonStorageServiceTests
                 File.Delete(path);
             }
         }
+    }
+
+    /// <summary>フォーマットバージョンが CurrentVersion より大きい文書は IsNewerFormat が立つことを検証する</summary>
+    [Fact(DisplayName = "Load: CurrentVersion より新しいフォーマットは IsNewerFormat が true")]
+    public void Load_NewerVersion_SetsIsNewerFormat()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"er-newer-{Guid.NewGuid()}.json");
+
+        try
+        {
+            JsonStorageService.Save(
+                path,
+                new DiagramDocument { Version = DiagramDocument.CurrentVersion + 1 }
+            );
+
+            JsonStorageService.Load(path).IsNewerFormat.Should().BeTrue();
+
+            JsonStorageService.Save(path, new DiagramDocument());
+
+            JsonStorageService.Load(path).IsNewerFormat.Should().BeFalse();
+        }
+        finally
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+    }
+
+    /// <summary>新しいフォーマットの文書を開くとき、警告確認でキャンセルすると現在の図が保持されることを検証する</summary>
+    [Fact(DisplayName = "Open: 新しいフォーマットの警告をキャンセルすると読み込まない")]
+    public void Open_NewerFormat_CancelKeepsCurrentDiagram()
+    {
+        var path = SaveNewerFormatDocument();
+        var dialogs = new StubDialogService { ConfirmResult = false };
+        var vm = new MainViewModel(
+            dialogs,
+            files: new StubFileDialogService { OpenResult = new FileDialogResult(path, 1) }
+        );
+
+        try
+        {
+            vm.OpenCommand.Execute(null);
+
+            vm.Entities.Should().BeEmpty();
+            dialogs.WarningConfirmMessages.Should().ContainSingle();
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    /// <summary>新しいフォーマットの文書を開くとき、警告確認で続行すると読み込まれることを検証する</summary>
+    [Fact(DisplayName = "Open: 新しいフォーマットの警告に続行すると読み込む")]
+    public void Open_NewerFormat_ConfirmLoads()
+    {
+        var path = SaveNewerFormatDocument();
+        var dialogs = new StubDialogService { ConfirmResult = true };
+        var vm = new MainViewModel(
+            dialogs,
+            files: new StubFileDialogService { OpenResult = new FileDialogResult(path, 1) }
+        );
+
+        try
+        {
+            vm.OpenCommand.Execute(null);
+
+            vm.Entities.Should().ContainSingle();
+            dialogs.WarningConfirmMessages.Should().ContainSingle();
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    /// <summary>CurrentVersion より新しいフォーマットバージョンでエンティティ 1 件の文書を一時ファイルへ保存する</summary>
+    private static string SaveNewerFormatDocument()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"er-newer-{Guid.NewGuid()}.json");
+        var document = new DiagramDocument
+        {
+            Version = DiagramDocument.CurrentVersion + 1,
+            Schema = new ErDiagram
+            {
+                TargetDbms = "sqlserver",
+                Entities = { new Entity { TableName = "T1" } },
+            },
+        };
+        JsonStorageService.Save(path, document);
+        return path;
+    }
+
+    /// <summary>ファイル選択ダイアログを表示せず、設定済みの結果を返すスタブ</summary>
+    private sealed class StubFileDialogService : IFileDialogService
+    {
+        public FileDialogResult? OpenResult { get; init; }
+
+        public FileDialogResult? PickOpenFile(string filter) => OpenResult;
+
+        public FileDialogResult? PickSaveFile(
+            string filter,
+            string defaultExt,
+            string? initialFileName = null,
+            string? initialDirectory = null
+        ) => null;
+
+        public string? PickFolder(string title, string? initialDirectory = null) => null;
     }
 }

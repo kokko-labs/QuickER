@@ -1233,7 +1233,13 @@ namespace QuickER.Resources {
                 return ResourceManager.GetString("Confirm_ClearDiagram", resourceCulture);
             }
         }
-        
+
+        public static string Confirm_NewerDocumentFormat {
+            get {
+                return ResourceManager.GetString("Confirm_NewerDocumentFormat", resourceCulture);
+            }
+        }
+
         public static string Relationship_DuplicateMessage {
             get {
                 return ResourceManager.GetString("Relationship_DuplicateMessage", resourceCulture);

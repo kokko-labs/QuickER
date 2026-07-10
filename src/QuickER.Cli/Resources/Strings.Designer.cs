@@ -144,6 +144,12 @@ namespace QuickER.Cli.Resources {
             }
         }
 
+        public static string Cli_SchemaNewerFormatWarning {
+            get {
+                return ResourceManager.GetString("Cli_SchemaNewerFormatWarning", resourceCulture);
+            }
+        }
+
         public static string Cli_SchemaImportFailed {
             get {
                 return ResourceManager.GetString("Cli_SchemaImportFailed", resourceCulture);

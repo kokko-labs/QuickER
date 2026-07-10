@@ -646,6 +646,9 @@
   <data name="Confirm_ClearDiagram" xml:space="preserve">
     <value>現在のダイアグラムをクリアします。よろしいですか？</value>
   </data>
+  <data name="Confirm_NewerDocumentFormat" xml:space="preserve">
+    <value>このファイルはこのバージョンの QuickER が対応するより新しいフォーマット（v{0}。対応は v{1} まで）で保存されています。続行すると未対応のデータが失われる可能性があります。開きますか？</value>
+  </data>
   <data name="Relationship_DuplicateMessage" xml:space="preserve">
     <value>同じ関係のリレーションはすでに存在します。既存のリレーションを編集してください。</value>
   </data>

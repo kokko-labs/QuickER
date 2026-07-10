@@ -722,6 +722,21 @@ public partial class MainViewModel
 
         var document = JsonStorageService.Load(picked.Path);
 
+        // 新しいフォーマットの文書は未対応のデータが失われる可能性があるため、開く前に確認する
+        if (document.IsNewerFormat)
+        {
+            var message = string.Format(
+                Strings.Confirm_NewerDocumentFormat,
+                document.Version,
+                DiagramDocument.CurrentVersion
+            );
+
+            if (!_dialogs.ConfirmWarning(message, Strings.Common_Confirm))
+            {
+                return;
+            }
+        }
+
         SetCurrentProviderFromDbms(document.Schema.TargetDbms);
         ReplaceDiagram(
             document.Schema.Entities,

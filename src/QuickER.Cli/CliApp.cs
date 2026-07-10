@@ -142,6 +142,19 @@ public static class CliApp
         }
 
         var document = JsonStorageService.Load(schemaFile.FullName);
+
+        // 新しいフォーマットの文書は未知のプロパティを黙って無視するため、警告してから続行する
+        if (document.IsNewerFormat)
+        {
+            Console.Error.WriteLine(
+                string.Format(
+                    Strings.Cli_SchemaNewerFormatWarning,
+                    document.Version,
+                    DiagramDocument.CurrentVersion
+                )
+            );
+        }
+
         CodeGenerationOptions options;
         try
         {

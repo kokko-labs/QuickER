@@ -103,6 +103,9 @@
   <data name="Cli_SchemaFileNotFound" xml:space="preserve">
     <value>スキーマファイルが見つかりません: {0}</value>
   </data>
+  <data name="Cli_SchemaNewerFormatWarning" xml:space="preserve">
+    <value>警告: スキーマファイルはこのバージョンが対応するより新しいフォーマット（v{0}。対応は v{1} まで）で保存されています。未対応のデータは無視されます。</value>
+  </data>
   <data name="Cli_SchemaImportFailed" xml:space="preserve">
     <value>データベースからのスキーマ取得に失敗しました: {0}</value>
   </data>

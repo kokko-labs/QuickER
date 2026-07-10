@@ -71,6 +71,52 @@ public class CliAppTests
         }
     }
 
+    /// <summary>新しいフォーマットバージョンのスキーマは標準エラーへ警告を出しつつ生成を続行することを検証する</summary>
+    [Fact(DisplayName = "generate は新しいフォーマットのスキーマで警告を出して続行する")]
+    public async Task Generate_NewerFormatSchema_WarnsAndContinues()
+    {
+        var (schemaPath, outDir, root) = CreateSampleSchema();
+
+        // 保存済みスキーマを CurrentVersion より新しいフォーマットバージョンへ書き換える
+        var document = JsonStorageService.Load(schemaPath);
+        document.Version = DiagramDocument.CurrentVersion + 1;
+        JsonStorageService.Save(schemaPath, document);
+
+        var originalError = Console.Error;
+        var stderr = new StringWriter();
+        Console.SetError(stderr);
+
+        try
+        {
+            var exit = await CliApp.InvokeAsync([
+                "generate",
+                "--schema",
+                schemaPath,
+                "--out",
+                outDir,
+                "--namespace",
+                "Test.Ns",
+            ]);
+
+            exit.Should().Be(0);
+            Directory.GetFiles(outDir, "*.g.cs").Should().NotBeEmpty();
+
+            // 警告文言はロケール依存のため、埋め込まれるバージョン番号で検証する
+            var warning = stderr.ToString();
+            warning.Should().Contain($"v{DiagramDocument.CurrentVersion + 1}");
+            warning.Should().Contain($"v{DiagramDocument.CurrentVersion}");
+        }
+        finally
+        {
+            Console.SetError(originalError);
+
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
     /// <summary>未対応プロバイダを指定すると終了コード 1 を返すことを検証する</summary>
     [Fact(DisplayName = "未対応プロバイダ指定は終了コード 1")]
     public async Task Generate_UnknownProvider_ReturnsError()

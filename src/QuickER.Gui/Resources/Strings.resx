@@ -638,6 +638,9 @@
   <data name="Confirm_ClearDiagram" xml:space="preserve">
     <value>This will clear the current diagram. Are you sure?</value>
   </data>
+  <data name="Confirm_NewerDocumentFormat" xml:space="preserve">
+    <value>This file was saved in a newer format (v{0}) than this version of QuickER supports (up to v{1}). Unsupported data may be lost if you continue. Open anyway?</value>
+  </data>
   <data name="Relationship_DuplicateMessage" xml:space="preserve">
     <value>A relationship with the same association already exists. Please edit the existing relationship.</value>
   </data>

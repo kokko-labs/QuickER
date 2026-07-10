@@ -103,6 +103,9 @@
   <data name="Cli_SchemaFileNotFound" xml:space="preserve">
     <value>Schema file not found: {0}</value>
   </data>
+  <data name="Cli_SchemaNewerFormatWarning" xml:space="preserve">
+    <value>Warning: the schema file was saved in a newer format (v{0}) than this version supports (up to v{1}). Unsupported data will be ignored.</value>
+  </data>
   <data name="Cli_SchemaImportFailed" xml:space="preserve">
     <value>Failed to import the schema from the database: {0}</value>
   </data>

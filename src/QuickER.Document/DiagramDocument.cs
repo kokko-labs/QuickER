@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using QuickER.Model;
 
 namespace QuickER.Documents;
@@ -16,6 +17,15 @@ public sealed class DiagramDocument
 
     /// <summary>保存フォーマットのバージョン</summary>
     public int Version { get; set; } = CurrentVersion;
+
+    /// <summary>このバージョンが対応するより新しいフォーマットで保存された文書かどうか</summary>
+    /// <remarks>
+    /// 未知のプロパティはデシリアライズで黙って無視されるため、新しいフォーマットの文書を
+    /// そのまま読み書きすると未対応のデータが静かに失われる。読み込み側はこのフラグを見て
+    /// ユーザーへ警告すること（GUI は続行確認、CLI は標準エラーへの警告出力）。
+    /// </remarks>
+    [JsonIgnore]
+    public bool IsNewerFormat => Version > CurrentVersion;
 
     /// <summary>意味モデル（エンティティ・リレーション）</summary>
     public ErDiagram Schema { get; set; } = new();
