@@ -17,6 +17,7 @@ using System.Linq.Expressions;
 using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
@@ -3652,11 +3653,57 @@ internal static class RawSqlMapper
         {
             var value =
                 SqlParameterValue.Unwrap(property.GetValue(parameters));
+
+            // コレクション値（IN 用）は @名0, @名1, ... へ展開して束縛する（SQL 側の @名 も書き換える）
+            if (IsCollectionParameter(value))
+            {
+                BindCollectionParameter(command, property.Name, (System.Collections.IEnumerable)value!);
+                continue;
+            }
+
             var parameter = command.CreateParameter();
             parameter.ParameterName = $"@{property.Name}";
             parameter.Value = value ?? DBNull.Value;
             command.Parameters.Add(parameter);
         }
+    }
+
+    /// <summary>IN 展開の対象となるコレクション値かどうか（string / byte[] は単一値として扱う）</summary>
+    internal static bool IsCollectionParameter(object? value) =>
+        value is System.Collections.IEnumerable && value is not string && value is not byte[];
+
+    /// <summary>
+    /// コレクション値パラメータを IN 用に展開して束縛する。SQL 内の <c>@名</c> を要素ごとの
+    /// <c>@名0, @名1, ...</c> へ書き換え、各要素を個別パラメータとして追加する。
+    /// </summary>
+    /// <remarks>
+    /// SQL 側は <c>IN (@名)</c> のように括弧の中で参照すること。空コレクションは <c>NULL</c> 1 個へ
+    /// 展開され（<c>IN (NULL)</c>）、どの行にも一致しない（SQL の三値論理に従う）。
+    /// </remarks>
+    internal static void BindCollectionParameter(
+        DbCommand command,
+        string name,
+        System.Collections.IEnumerable values
+    )
+    {
+        var names = new List<string>();
+
+        foreach (var item in values)
+        {
+            var value = SqlParameterValue.Unwrap(item);
+            var parameter = command.CreateParameter();
+            parameter.ParameterName = $"@{name}{names.Count}";
+            parameter.Value = value ?? DBNull.Value;
+            command.Parameters.Add(parameter);
+            names.Add(parameter.ParameterName);
+        }
+
+        // @名 の後に識別子文字が続く場合（@名0 や @名X）は別パラメータなので書き換えない
+        command.CommandText = Regex.Replace(
+            command.CommandText,
+            $"@{Regex.Escape(name)}(?![0-9A-Za-z_])",
+            names.Count == 0 ? "NULL" : string.Join(", ", names)
+        );
     }
 
     /// <summary>
@@ -3998,6 +4045,25 @@ public sealed class SqlQuery<TEntity>
     /// <summary>条件に一致するレコードが存在するかを取得する</summary>
     public async Task<bool> AnyAsync(CancellationToken cancellationToken = default) =>
         await _executor.AnyAsync(BuildPlan(), cancellationToken);
+
+    /// <summary>条件に一致するエンティティを取得し、指定の射影で変換して一覧を返す（名前付きクエリの射影用）</summary>
+    /// <remarks>
+    /// 条件・並び順・ページングはバックエンド（方言 SQL / EF / インメモリ）側で適用され、
+    /// 射影はエンティティの実体化後にメモリ内で行う（v1 では列の刈り込みは行わない設計判断）。
+    /// </remarks>
+    /// <param name="selector">エンティティから射影 DTO への変換式</param>
+    /// <param name="cancellationToken">キャンセルトークン</param>
+    public async Task<IReadOnlyList<TResult>> ToProjectionListAsync<TResult>(
+        Expression<Func<TEntity, TResult>> selector,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(selector);
+
+        var entities = await ToListAsync(cancellationToken);
+        var project = selector.Compile();
+        return entities.Select(project).ToList();
+    }
 
     /// <summary>条件に一致する行を一括削除する。cascadeDelete=true で子孫も FK 連鎖で削除する</summary>
     public async Task<int> ExecuteDeleteAsync(

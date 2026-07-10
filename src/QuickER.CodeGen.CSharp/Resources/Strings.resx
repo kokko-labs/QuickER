@@ -118,4 +118,118 @@
   <data name="CodeGen_Warning_ValueObjectDefinitionMismatch" xml:space="preserve">
     <value>The definitions of the same-named columns aggregated into value object '{0}' do not match. Generation proceeds with the PK definition preferred (otherwise the largest definition), but unifying the definitions in the ER diagram is recommended: {1}</value>
   </data>
+  <data name="CodeGen_Query_UnexpectedCharacter" xml:space="preserve">
+    <value>Unexpected character '{0}' in the condition.</value>
+  </data>
+  <data name="CodeGen_Query_UnexpectedToken" xml:space="preserve">
+    <value>Unexpected '{0}' in the condition.</value>
+  </data>
+  <data name="CodeGen_Query_UnexpectedEnd" xml:space="preserve">
+    <value>The condition ends in the middle of an expression.</value>
+  </data>
+  <data name="CodeGen_Query_UnterminatedString" xml:space="preserve">
+    <value>A string literal in the condition is not closed (missing ').</value>
+  </data>
+  <data name="CodeGen_Query_ExpectedColumnOrParen" xml:space="preserve">
+    <value>Expected a column name or '(' but found '{0}'.</value>
+  </data>
+  <data name="CodeGen_Query_EndOfInput" xml:space="preserve">
+    <value>end of input</value>
+  </data>
+  <data name="CodeGen_Query_ExpectedComparison" xml:space="preserve">
+    <value>Expected a comparison operator (=, &lt;&gt;, !=, &lt;, &lt;=, &gt;, &gt;=), IS [NOT] NULL, [NOT] LIKE, [NOT] IN, CONTAINS, STARTSWITH, or ENDSWITH after column '{0}'.</value>
+  </data>
+  <data name="CodeGen_Query_ExpectedNullAfterIs" xml:space="preserve">
+    <value>IS must be followed by NULL or NOT NULL.</value>
+  </data>
+  <data name="CodeGen_Query_ExpectedOperand" xml:space="preserve">
+    <value>Expected a parameter (@name) or a literal after the operator.</value>
+  </data>
+  <data name="CodeGen_Query_ExpectedInParameter" xml:space="preserve">
+    <value>IN must be followed by a list parameter (e.g. @values).</value>
+  </data>
+  <data name="CodeGen_Query_StringMatchRequiresText" xml:space="preserve">
+    <value>LIKE / CONTAINS / STARTSWITH / ENDSWITH requires a parameter or a string literal on the right-hand side.</value>
+  </data>
+  <data name="CodeGen_Query_UnsupportedLikePattern" xml:space="preserve">
+    <value>The LIKE pattern '{0}' cannot be expressed in the mini DSL (only a leading/trailing % is supported; _ is not). Use free SQL or manual mode instead.</value>
+  </data>
+  <data name="CodeGen_Query_UnknownColumn" xml:space="preserve">
+    <value>The condition references column '{0}', which does not exist on entity '{1}'.</value>
+  </data>
+  <data name="CodeGen_Query_UnknownParameter" xml:space="preserve">
+    <value>The condition references parameter '@{0}', which is not defined on the query.</value>
+  </data>
+  <data name="CodeGen_Query_InRequiresListParameter" xml:space="preserve">
+    <value>IN requires a list parameter ('@{0}' is not a list).</value>
+  </data>
+  <data name="CodeGen_Query_ListParameterOnlyWithIn" xml:space="preserve">
+    <value>List parameter '@{0}' can only be used with IN.</value>
+  </data>
+  <data name="CodeGen_Query_NullCheckOnNonNullableColumn" xml:space="preserve">
+    <value>IS NULL / IS NOT NULL cannot be used on column '{0}' because it does not allow NULL.</value>
+  </data>
+  <data name="CodeGen_Query_UnknownEntity" xml:space="preserve">
+    <value>Named query '{0}' was skipped because its target entity was not found.</value>
+  </data>
+  <data name="CodeGen_Query_InvalidName" xml:space="preserve">
+    <value>Named query name '{0}' cannot be converted to a valid method name.</value>
+  </data>
+  <data name="CodeGen_Query_ReservedMethodName" xml:space="preserve">
+    <value>Named query '{0}': method name '{1}' conflicts with a standard repository member.</value>
+  </data>
+  <data name="CodeGen_Query_DuplicateMethodName" xml:space="preserve">
+    <value>Named query '{0}': method name '{1}' duplicates that of another query on entity '{2}'.</value>
+  </data>
+  <data name="CodeGen_Query_InvalidParameterName" xml:space="preserve">
+    <value>Named query '{0}': parameter name '{1}' is not a valid C# identifier.</value>
+  </data>
+  <data name="CodeGen_Query_DuplicateParameterName" xml:space="preserve">
+    <value>Named query '{0}': parameter name '{1}' is duplicated.</value>
+  </data>
+  <data name="CodeGen_Query_UnresolvedTypeToken" xml:space="preserve">
+    <value>Named query '{0}': the type token '{1}' could not be resolved.</value>
+  </data>
+  <data name="CodeGen_Query_ConditionInvalid" xml:space="preserve">
+    <value>Named query '{0}', condition: {1}</value>
+  </data>
+  <data name="CodeGen_Query_ScalarRequiresType" xml:space="preserve">
+    <value>Named query '{0}': the scalar return shape requires a scalar type token.</value>
+  </data>
+  <data name="CodeGen_Query_ScalarDslUnsupported" xml:space="preserve">
+    <value>Named query '{0}': the scalar return shape cannot be expressed with the mini DSL. Use free SQL or manual mode.</value>
+  </data>
+  <data name="CodeGen_Query_ProjectionRequiresFields" xml:space="preserve">
+    <value>Named query '{0}': the projection return shape requires a result type name and at least one field.</value>
+  </data>
+  <data name="CodeGen_Query_InvalidResultTypeName" xml:space="preserve">
+    <value>Named query '{0}': result type name '{1}' is not a valid C# identifier.</value>
+  </data>
+  <data name="CodeGen_Query_ProjectionDslRequiresColumns" xml:space="preserve">
+    <value>Named query '{0}': every projection field must reference a source column when using the mini DSL (free-form fields are for free SQL only).</value>
+  </data>
+  <data name="CodeGen_Query_PagingRequiresList" xml:space="preserve">
+    <value>Named query '{0}': paging can only be used when the return shape is a list or a projection.</value>
+  </data>
+  <data name="CodeGen_Query_OrderByRequiresList" xml:space="preserve">
+    <value>Named query '{0}': ordering can only be specified when the return shape is a list, a projection, or a single row.</value>
+  </data>
+  <data name="CodeGen_Query_OrderByColumnNotFound" xml:space="preserve">
+    <value>Named query '{0}': an ordering references a column that does not exist on the entity.</value>
+  </data>
+  <data name="CodeGen_Query_UnknownSqlDialect" xml:space="preserve">
+    <value>Named query '{0}': the SQL dialect key '{1}' is not supported and will be ignored.</value>
+  </data>
+  <data name="CodeGen_Query_InvalidFieldName" xml:space="preserve">
+    <value>Named query '{0}': field name '{1}' is not a valid C# identifier.</value>
+  </data>
+  <data name="CodeGen_Query_FieldColumnNotFound" xml:space="preserve">
+    <value>Named query '{0}': the source column referenced by field '{1}' does not exist on the entity.</value>
+  </data>
+  <data name="CodeGen_Query_ParameterColumnNotFound" xml:space="preserve">
+    <value>Named query '{0}': the source column referenced by parameter '{1}' does not exist on the entity.</value>
+  </data>
+  <data name="CodeGen_Query_DuplicateResultTypeName" xml:space="preserve">
+    <value>Named query '{0}': result type name '{1}' is already used by another query. Result type names must be unique within the generated namespace.</value>
+  </data>
 </root>

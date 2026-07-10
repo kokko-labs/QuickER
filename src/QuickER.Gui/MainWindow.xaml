@@ -798,6 +798,19 @@
             />
           </StackPanel>
         </Button>
+        <Button
+          Style="{StaticResource ToolBarLabelButton}"
+          Command="{Binding OpenQueryDefinitionsCommand}"
+          ToolTip="{x:Static resources:Strings.Toolbar_QueryDefinitionsTooltip}"
+        >
+          <StackPanel>
+            <TextBlock Style="{StaticResource ToolBarIcon}" Text="🔎" />
+            <TextBlock
+              Style="{StaticResource ToolBarCaption}"
+              Text="{x:Static resources:Strings.Toolbar_QueryDefinitions}"
+            />
+          </StackPanel>
+        </Button>
         <Rectangle Style="{StaticResource ToolBarSeparator}" />
         <!--
           言語切替: クリックで ContextMenu（日本語 / English）を開く。選択で設定を保存し、

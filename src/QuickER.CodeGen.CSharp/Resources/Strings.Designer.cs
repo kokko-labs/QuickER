@@ -173,5 +173,233 @@ namespace QuickER.CodeGen.CSharp.Resources {
                 return ResourceManager.GetString("CodeGen_Warning_ValueObjectDefinitionMismatch", resourceCulture);
             }
         }
+
+        public static string CodeGen_Query_UnexpectedCharacter {
+            get {
+                return ResourceManager.GetString("CodeGen_Query_UnexpectedCharacter", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_Query_UnexpectedToken {
+            get {
+                return ResourceManager.GetString("CodeGen_Query_UnexpectedToken", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_Query_UnexpectedEnd {
+            get {
+                return ResourceManager.GetString("CodeGen_Query_UnexpectedEnd", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_Query_UnterminatedString {
+            get {
+                return ResourceManager.GetString("CodeGen_Query_UnterminatedString", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_Query_ExpectedColumnOrParen {
+            get {
+                return ResourceManager.GetString("CodeGen_Query_ExpectedColumnOrParen", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_Query_EndOfInput {
+            get {
+                return ResourceManager.GetString("CodeGen_Query_EndOfInput", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_Query_ExpectedComparison {
+            get {
+                return ResourceManager.GetString("CodeGen_Query_ExpectedComparison", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_Query_ExpectedNullAfterIs {
+            get {
+                return ResourceManager.GetString("CodeGen_Query_ExpectedNullAfterIs", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_Query_ExpectedOperand {
+            get {
+                return ResourceManager.GetString("CodeGen_Query_ExpectedOperand", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_Query_ExpectedInParameter {
+            get {
+                return ResourceManager.GetString("CodeGen_Query_ExpectedInParameter", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_Query_StringMatchRequiresText {
+            get {
+                return ResourceManager.GetString("CodeGen_Query_StringMatchRequiresText", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_Query_UnsupportedLikePattern {
+            get {
+                return ResourceManager.GetString("CodeGen_Query_UnsupportedLikePattern", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_Query_UnknownColumn {
+            get {
+                return ResourceManager.GetString("CodeGen_Query_UnknownColumn", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_Query_UnknownParameter {
+            get {
+                return ResourceManager.GetString("CodeGen_Query_UnknownParameter", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_Query_InRequiresListParameter {
+            get {
+                return ResourceManager.GetString("CodeGen_Query_InRequiresListParameter", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_Query_ListParameterOnlyWithIn {
+            get {
+                return ResourceManager.GetString("CodeGen_Query_ListParameterOnlyWithIn", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_Query_NullCheckOnNonNullableColumn {
+            get {
+                return ResourceManager.GetString("CodeGen_Query_NullCheckOnNonNullableColumn", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_Query_UnknownEntity {
+            get {
+                return ResourceManager.GetString("CodeGen_Query_UnknownEntity", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_Query_InvalidName {
+            get {
+                return ResourceManager.GetString("CodeGen_Query_InvalidName", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_Query_ReservedMethodName {
+            get {
+                return ResourceManager.GetString("CodeGen_Query_ReservedMethodName", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_Query_DuplicateMethodName {
+            get {
+                return ResourceManager.GetString("CodeGen_Query_DuplicateMethodName", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_Query_InvalidParameterName {
+            get {
+                return ResourceManager.GetString("CodeGen_Query_InvalidParameterName", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_Query_DuplicateParameterName {
+            get {
+                return ResourceManager.GetString("CodeGen_Query_DuplicateParameterName", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_Query_UnresolvedTypeToken {
+            get {
+                return ResourceManager.GetString("CodeGen_Query_UnresolvedTypeToken", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_Query_ConditionInvalid {
+            get {
+                return ResourceManager.GetString("CodeGen_Query_ConditionInvalid", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_Query_ScalarRequiresType {
+            get {
+                return ResourceManager.GetString("CodeGen_Query_ScalarRequiresType", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_Query_ScalarDslUnsupported {
+            get {
+                return ResourceManager.GetString("CodeGen_Query_ScalarDslUnsupported", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_Query_ProjectionRequiresFields {
+            get {
+                return ResourceManager.GetString("CodeGen_Query_ProjectionRequiresFields", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_Query_InvalidResultTypeName {
+            get {
+                return ResourceManager.GetString("CodeGen_Query_InvalidResultTypeName", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_Query_ProjectionDslRequiresColumns {
+            get {
+                return ResourceManager.GetString("CodeGen_Query_ProjectionDslRequiresColumns", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_Query_PagingRequiresList {
+            get {
+                return ResourceManager.GetString("CodeGen_Query_PagingRequiresList", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_Query_OrderByRequiresList {
+            get {
+                return ResourceManager.GetString("CodeGen_Query_OrderByRequiresList", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_Query_OrderByColumnNotFound {
+            get {
+                return ResourceManager.GetString("CodeGen_Query_OrderByColumnNotFound", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_Query_UnknownSqlDialect {
+            get {
+                return ResourceManager.GetString("CodeGen_Query_UnknownSqlDialect", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_Query_InvalidFieldName {
+            get {
+                return ResourceManager.GetString("CodeGen_Query_InvalidFieldName", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_Query_FieldColumnNotFound {
+            get {
+                return ResourceManager.GetString("CodeGen_Query_FieldColumnNotFound", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_Query_ParameterColumnNotFound {
+            get {
+                return ResourceManager.GetString("CodeGen_Query_ParameterColumnNotFound", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_Query_DuplicateResultTypeName {
+            get {
+                return ResourceManager.GetString("CodeGen_Query_DuplicateResultTypeName", resourceCulture);
+            }
+        }
     }
 }

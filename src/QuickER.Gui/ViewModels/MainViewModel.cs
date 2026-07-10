@@ -4,6 +4,7 @@ using System.ComponentModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using QuickER.AI.UI;
+using QuickER.CodeGen.CSharp.Queries;
 using QuickER.Documents;
 using QuickER.Gui.Abstractions;
 using QuickER.Model;
@@ -49,6 +50,16 @@ public partial class MainViewModel : ObservableObject
 
     /// <summary>ダイアグラム上の全リレーション</summary>
     public ObservableCollection<RelationshipViewModel> Relationships { get; } = new();
+
+    /// <summary>現在の図に付随する名前付きクエリ定義（意味モデル。キャンバスには表示しない）</summary>
+    /// <remarks>
+    /// エンティティ・列を Guid 参照する生モデルのまま保持する（座標などの視覚情報を持たないため
+    /// ViewModel 化・ObservableCollection 化は不要）。保存文書（<see cref="ToDocument"/>）へ含め、
+    /// ファイル由来の図に置き換えるときだけ復元する。ファイル由来でない置換（新規・取込・DB 取込・
+    /// AI 生成）では古い図の Guid 参照が新しい図と噛み合わないため空にする（<see cref="ReplaceDiagram"/>）。
+    /// エンティティ削除時の孤児クエリは v1 では削除しない（生成時に警告が出る設計のため、そこで気づける）。
+    /// </remarks>
+    public List<QueryDefinition> Queries { get; private set; } = new();
 
     /// <summary>主選択エンティティ（未選択時は null）</summary>
     /// <remarks>
@@ -211,7 +222,8 @@ public partial class MainViewModel : ObservableObject
             UndoRedo,
             Entities,
             Relationships,
-            ApplyRelationshipColumnRules
+            ApplyRelationshipColumnRules,
+            OnColumnRenamed
         );
         LanguageSwitch = new LanguageSwitchViewModel(_dialogs);
         CopySelectedEntityCommand = new RelayCommand(CopySelectedEntity, CanCopySelectedEntity);
@@ -235,14 +247,23 @@ public partial class MainViewModel : ObservableObject
 
     /// <summary>ダイアグラム全体を指定モデルの内容で置き換える</summary>
     /// <param name="clearUndoHistory"><c>true</c> の場合は置換後に Undo/Redo 履歴を破棄する</param>
+    /// <param name="queries">
+    /// ファイル由来の図に付随する名前付きクエリ定義。<c>null</c>（既定）はファイル由来でない置換
+    /// （新規・取込・DB 取込・AI 生成）を意味し、古い図の Guid 参照を持ち越さないようクエリを空にする
+    /// </param>
     /// <remarks>既存リレーションは <see cref="RelationshipViewModel.Detach"/> で購読解除してから破棄し、イベントリークを防ぐ</remarks>
     private void ReplaceDiagram(
         IEnumerable<Entity> entities,
         IEnumerable<Relationship> relationships,
         bool clearUndoHistory,
-        IReadOnlyDictionary<Guid, EntityLayout>? layout = null
+        IReadOnlyDictionary<Guid, EntityLayout>? layout = null,
+        IReadOnlyList<QueryDefinition>? queries = null
     )
     {
+        // ファイル由来のときだけクエリを復元し、それ以外の置換ではクエリを空にする
+        // （旧図のクエリが新図に残ると列・エンティティの Guid 参照が壊れるため）
+        Queries = queries?.ToList() ?? new List<QueryDefinition>();
+
         _changeTracker.RunWithoutTracking(() =>
         {
             foreach (var r in Relationships)
@@ -295,6 +316,39 @@ public partial class MainViewModel : ObservableObject
     {
         UndoRedo.Clear();
         OnPropertyChanged(nameof(UndoRedo));
+    }
+
+    /// <summary>
+    /// カラム名がユーザー編集で変更されたとき、その列が属するエンティティの名前付きクエリの
+    /// 条件式（ミニ DSL）内の列参照を新名へ書き換える（<see cref="DiagramChangeTracker"/> から通知される）
+    /// </summary>
+    /// <remarks>
+    /// 適用はエンティティ単位（<see cref="QueryDefinition.EntityId"/> 一致）なので、他エンティティに
+    /// 同名の列があっても巻き込まない。書き換えは <see cref="QueryConditionRenamer"/> が列参照のスパンだけを
+    /// 置換するため、パラメータ名や文字列リテラル中の同名文字列には影響しない。
+    /// </remarks>
+    private void OnColumnRenamed(ColumnViewModel column, string oldName, string newName)
+    {
+        if (Queries.Count == 0)
+        {
+            return;
+        }
+
+        // 列を保持するエンティティを特定し、そのエンティティのクエリだけを対象にする
+        var owner = Entities.FirstOrDefault(entity => entity.Columns.Contains(column));
+
+        if (owner is null)
+        {
+            return;
+        }
+
+        foreach (var query in Queries.Where(query => query.EntityId == owner.Id))
+        {
+            if (query.Condition is { } condition)
+            {
+                query.Condition = QueryConditionRenamer.RenameColumn(condition, oldName, newName);
+            }
+        }
     }
 
     /// <summary>全エンティティの現在位置を履歴登録用にスナップショットする</summary>

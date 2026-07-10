@@ -118,6 +118,8 @@ public class MainViewModelDependencyInjectionTests
             IDatabaseProvider currentProvider
         ) => null;
 
+        public List<QueryDefinition>? ShowQueryDefinitionDialog(ErDiagram diagram) => null;
+
         public DbConnectionDialogResult? ShowDbConnectionDialog(
             DbConnectionDialogMode mode,
             IDatabaseProvider? fixedProvider = null,

@@ -227,10 +227,16 @@
     <value>現在の ER 図から AI で Web モック画面（HTML）を生成</value>
   </data>
   <data name="Toolbar_GenerateCSharp" xml:space="preserve">
-    <value>C#生成</value>
+    <value>コード生成</value>
   </data>
   <data name="Toolbar_GenerateCSharpTooltip" xml:space="preserve">
     <value>現在の ER 図から C# Entity / BindingModel を生成</value>
+  </data>
+  <data name="Toolbar_QueryDefinitions" xml:space="preserve">
+    <value>クエリ定義</value>
+  </data>
+  <data name="Toolbar_QueryDefinitionsTooltip" xml:space="preserve">
+    <value>Repository メソッドになる名前付きクエリを定義</value>
   </data>
   <data name="Status_Ready" xml:space="preserve">
     <value>準備完了</value>

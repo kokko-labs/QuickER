@@ -48,6 +48,35 @@ public sealed class CSharpCodeGenerationService
     }
 
     /// <summary>
+    /// ER 図定義から C# コードを生成する（名前付きクエリの型トークン辞書つき・単一辞書）。
+    /// </summary>
+    /// <param name="diagram">生成元の ER 図定義</param>
+    /// <param name="columnTypes">カラム ID → 解決済み C# 型情報</param>
+    /// <param name="options">生成対象や属性付与を制御するオプション</param>
+    /// <param name="queryParameterTypes">
+    /// 名前付きクエリの型トークン（例: <c>int32</c> / <c>string(50)</c>）→ 解決済み C# 型情報。
+    /// 列型と同じく解決はプロバイダ側の責務（<c>QueryParameterTypeResolver</c>）。null なら空として扱い、
+    /// クエリ定義がトークンを参照すると解決不能の診断エラーになる
+    /// </param>
+    public CodeGenerationResult Generate(
+        ErDiagram diagram,
+        IReadOnlyDictionary<Guid, CSharpTypeInfo> columnTypes,
+        CodeGenerationOptions options,
+        IReadOnlyDictionary<string, CSharpTypeInfo>? queryParameterTypes
+    )
+    {
+        ArgumentNullException.ThrowIfNull(columnTypes);
+
+        return Generate(
+            diagram,
+            columnTypes,
+            columnTypesByDialect: null,
+            options,
+            queryParameterTypes
+        );
+    }
+
+    /// <summary>
     /// ER 図定義から C# コードを生成する（マルチ辞書対応）。
     /// </summary>
     /// <param name="diagram">生成元の ER 図定義</param>
@@ -71,7 +100,8 @@ public sealed class CSharpCodeGenerationService
             string,
             IReadOnlyDictionary<Guid, CSharpTypeInfo>
         >? columnTypesByDialect,
-        CodeGenerationOptions options
+        CodeGenerationOptions options,
+        IReadOnlyDictionary<string, CSharpTypeInfo>? queryParameterTypes = null
     )
     {
         ArgumentNullException.ThrowIfNull(diagram);
@@ -137,7 +167,21 @@ public sealed class CSharpCodeGenerationService
             return new CodeGenerationResult { Files = [], Diagnostics = diagnostics };
         }
 
-        var model = _modelBuilder.Build(diagram, columnTypes, options, diagnostics);
+        var model = _modelBuilder.Build(
+            diagram,
+            columnTypes,
+            options,
+            diagnostics,
+            queryParameterTypes
+        );
+
+        // 名前付きクエリの検証（メソッド名衝突・条件式・型トークン等）でエラーが出た場合もファイルを出さない
+        if (
+            diagnostics.Any(diagnostic => diagnostic.Severity == GenerationDiagnosticSeverity.Error)
+        )
+        {
+            return new CodeGenerationResult { Files = [], Diagnostics = diagnostics };
+        }
 
         // パッケージ参照モードでは、各生成ファイルの先頭コメントへ必要な PackageReference を案内する。
         // 通常生成では空リスト（ヘッダに追加行なし＝バイト不変）。案内はファイル横断で同一のため 1 度だけ組み立てる。

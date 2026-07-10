@@ -2518,11 +2518,57 @@ public sealed class SqlConnectionFactory(string connectionString) : ISqlConnecti
         {
             var value =
                 {{ if generate_value_objects }}SqlParameterValue.Unwrap(property.GetValue(parameters)){{ else }}property.GetValue(parameters){{ end }};
+
+            // コレクション値（IN 用）は @名0, @名1, ... へ展開して束縛する（SQL 側の @名 も書き換える）
+            if (IsCollectionParameter(value))
+            {
+                BindCollectionParameter(command, property.Name, (System.Collections.IEnumerable)value!);
+                continue;
+            }
+
             var parameter = command.CreateParameter();
             parameter.ParameterName = $"@{property.Name}";
             parameter.Value = value ?? DBNull.Value;
             command.Parameters.Add(parameter);
         }
+    }
+
+    /// <summary>IN 展開の対象となるコレクション値かどうか（string / byte[] は単一値として扱う）</summary>
+    {{ infra_visibility }} static bool IsCollectionParameter(object? value) =>
+        value is System.Collections.IEnumerable && value is not string && value is not byte[];
+
+    /// <summary>
+    /// コレクション値パラメータを IN 用に展開して束縛する。SQL 内の <c>@名</c> を要素ごとの
+    /// <c>@名0, @名1, ...</c> へ書き換え、各要素を個別パラメータとして追加する。
+    /// </summary>
+    /// <remarks>
+    /// SQL 側は <c>IN (@名)</c> のように括弧の中で参照すること。空コレクションは <c>NULL</c> 1 個へ
+    /// 展開され（<c>IN (NULL)</c>）、どの行にも一致しない（SQL の三値論理に従う）。
+    /// </remarks>
+    {{ infra_visibility }} static void BindCollectionParameter(
+        DbCommand command,
+        string name,
+        System.Collections.IEnumerable values
+    )
+    {
+        var names = new List<string>();
+
+        foreach (var item in values)
+        {
+            var value = {{ if generate_value_objects }}SqlParameterValue.Unwrap(item){{ else }}item{{ end }};
+            var parameter = command.CreateParameter();
+            parameter.ParameterName = $"@{name}{names.Count}";
+            parameter.Value = value ?? DBNull.Value;
+            command.Parameters.Add(parameter);
+            names.Add(parameter.ParameterName);
+        }
+
+        // @名 の後に識別子文字が続く場合（@名0 や @名X）は別パラメータなので書き換えない
+        command.CommandText = Regex.Replace(
+            command.CommandText,
+            $"@{Regex.Escape(name)}(?![0-9A-Za-z_])",
+            names.Count == 0 ? "NULL" : string.Join(", ", names)
+        );
     }
 
     /// <summary>
@@ -2820,6 +2866,18 @@ public sealed partial class SqlExecutor(ISqlConnectionFactory connectionFactory)
         {
             var value =
                 {{ if generate_value_objects }}SqlParameterValue.Unwrap(property.GetValue(parameters)){{ else }}property.GetValue(parameters){{ end }};
+
+            // コレクション値（IN 用）は共有ヘルパーで @名0, @名1, ... へ展開する（SQL 側の @名 も書き換え）
+            if (RawSqlMapper.IsCollectionParameter(value))
+            {
+                RawSqlMapper.BindCollectionParameter(
+                    command,
+                    property.Name,
+                    (System.Collections.IEnumerable)value!
+                );
+                continue;
+            }
+
             command.Parameters.AddWithValue($"@{property.Name}", value ?? DBNull.Value);
         }
     }
@@ -3167,6 +3225,18 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
         object? parameters = null,
         CancellationToken cancellationToken = default
     ) => _sqlExecutor.ExecuteScalarSqlAsync<TResult>(sql, parameters, cancellationToken);
+
+    /// <summary>生 SQL の SELECT を実行し、結果行を任意の <typeparamref name="TResult"/> へ寛容に射影して返す（名前付きクエリの自由 SQL 射影用）</summary>
+    /// <remarks>
+    /// パラメータ束縛は <see cref="QueryBySqlAsync"/> と同じ
+    /// （<b>値は必ずパラメータで渡すこと。文字列連結はインジェクションの危険がある</b>）。
+    /// 実装は <see cref="ISqlExecutor"/> へ委譲する。
+    /// </remarks>
+    protected Task<IReadOnlyList<TResult>> QueryProjectionBySqlAsync<TResult>(
+        string sql,
+        object? parameters = null,
+        CancellationToken cancellationToken = default
+    ) => _sqlExecutor.QueryProjectionBySqlAsync<TResult>(sql, parameters, cancellationToken);
 }
 
 /// <summary>クエリ WHERE 句パラメータ（名前・値・対象カラム名）。カラム名は判明時のみ設定し、型明示化に使う</summary>
@@ -3337,6 +3407,25 @@ public sealed class SqlQuery<TEntity>
     /// <summary>条件に一致するレコードが存在するかを取得する</summary>
     public async Task<bool> AnyAsync(CancellationToken cancellationToken = default) =>
         await _executor.AnyAsync(BuildPlan(), cancellationToken);
+
+    /// <summary>条件に一致するエンティティを取得し、指定の射影で変換して一覧を返す（名前付きクエリの射影用）</summary>
+    /// <remarks>
+    /// 条件・並び順・ページングはバックエンド（方言 SQL / EF / インメモリ）側で適用され、
+    /// 射影はエンティティの実体化後にメモリ内で行う（v1 では列の刈り込みは行わない設計判断）。
+    /// </remarks>
+    /// <param name="selector">エンティティから射影 DTO への変換式</param>
+    /// <param name="cancellationToken">キャンセルトークン</param>
+    public async Task<IReadOnlyList<TResult>> ToProjectionListAsync<TResult>(
+        Expression<Func<TEntity, TResult>> selector,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(selector);
+
+        var entities = await ToListAsync(cancellationToken);
+        var project = selector.Compile();
+        return entities.Select(project).ToList();
+    }
 
     /// <summary>条件に一致する行を一括削除する。cascadeDelete=true で子孫も FK 連鎖で削除する</summary>
     public async Task<int> ExecuteDeleteAsync(
@@ -5712,14 +5801,25 @@ public static class GeneratedRepositoryServiceCollectionExtensions
 {{~ if render_contract ~}}
 {{ if !for.first }}
 {{ end }}/// <summary>{{ repository.entity_class_name }} 用リポジトリインターフェース</summary>
-public partial interface {{ repository.interface_name }} : IRepository<{{ repository.entity_class_name }}, {{ repository.key_type_name }}> { }
+public partial interface {{ repository.interface_name }} : IRepository<{{ repository.entity_class_name }}, {{ repository.key_type_name }}>{{ if repository.query_interface_block == "" }} { }{{ else }}
+{
+{{ repository.query_interface_block }}
+}{{ end }}
+{{~ if repository.query_dto_block != "" ~}}
+
+{{ repository.query_dto_block }}
+{{~ end ~}}
 {{~ end ~}}
 {{~ if repositories ~}}
+{{~ ado_query_impl_block = repository.query_impl_blocks_by_dialect[repository_dialect] ~}}
 
 /// <summary>{{ repository.entity_class_name }} 用リポジトリ実装</summary>
 public sealed partial class {{ repository.class_name }}(ISqlConnectionFactory connectionFactory)
     : {{ repository_base_class }}<{{ repository.entity_class_name }}, {{ repository.key_type_name }}>(connectionFactory),
-        {{ repository.interface_name }} { }
+        {{ repository.interface_name }}{{ if ado_query_impl_block == "" }} { }{{ else }}
+{
+{{ ado_query_impl_block }}
+}{{ end }}
 {{~ end ~}}
 {{~ end ~}}
 {{~ end ~}}
@@ -6582,7 +6682,10 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(InMemoryDataStor
 /// <summary>{{ repository.entity_class_name }} 用リポジトリのインメモリ実装</summary>
 public sealed partial class InMemory{{ repository.class_name }}(InMemoryDataStore store)
     : InMemoryRepository<{{ repository.entity_class_name }}, {{ repository.key_type_name }}>(store),
-        {{ repository.interface_name }} { }
+        {{ repository.interface_name }}{{ if repository.query_shared_impl_block == "" }} { }{{ else }}
+{
+{{ repository.query_shared_impl_block }}
+}{{ end }}
 {{~ end ~}}
 
 /// <summary>決定的なサンプルデータをインメモリストアへ投入するシーダー（FK 依存順に 3 件/エンティティ）</summary>
@@ -8000,7 +8103,10 @@ public sealed partial class EfCore{{ repository.class_name }}(
 ) : EfCoreRepository<{{ repository.entity_class_name }}, {{ repository.key_type_name }}, QuickErDbContext>(
         contextFactory
     ),
-        {{ repository.interface_name }} { }
+        {{ repository.interface_name }}{{ if repository.query_shared_impl_block == "" }} { }{{ else }}
+{
+{{ repository.query_shared_impl_block }}
+}{{ end }}
 {{~ end ~}}
 {{~ end ~}}
 {{~ if block_namespace ~}}

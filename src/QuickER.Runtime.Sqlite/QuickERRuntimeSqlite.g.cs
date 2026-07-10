@@ -15,6 +15,7 @@ using System.Globalization;
 using System.Linq;
 using System.Linq.Expressions;
 using System.Reflection;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Data.Sqlite;
@@ -144,6 +145,18 @@ public sealed partial class SqlExecutor(ISqlConnectionFactory connectionFactory)
         {
             var value =
                 SqlParameterValue.Unwrap(property.GetValue(parameters));
+
+            // コレクション値（IN 用）は共有ヘルパーで @名0, @名1, ... へ展開する（SQL 側の @名 も書き換え）
+            if (RawSqlMapper.IsCollectionParameter(value))
+            {
+                RawSqlMapper.BindCollectionParameter(
+                    command,
+                    property.Name,
+                    (System.Collections.IEnumerable)value!
+                );
+                continue;
+            }
+
             command.Parameters.AddWithValue($"@{property.Name}", value ?? DBNull.Value);
         }
     }
@@ -453,6 +466,18 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
         object? parameters = null,
         CancellationToken cancellationToken = default
     ) => _sqlExecutor.ExecuteScalarSqlAsync<TResult>(sql, parameters, cancellationToken);
+
+    /// <summary>生 SQL の SELECT を実行し、結果行を任意の <typeparamref name="TResult"/> へ寛容に射影して返す（名前付きクエリの自由 SQL 射影用）</summary>
+    /// <remarks>
+    /// パラメータ束縛は <see cref="QueryBySqlAsync"/> と同じ
+    /// （<b>値は必ずパラメータで渡すこと。文字列連結はインジェクションの危険がある</b>）。
+    /// 実装は <see cref="ISqlExecutor"/> へ委譲する。
+    /// </remarks>
+    protected Task<IReadOnlyList<TResult>> QueryProjectionBySqlAsync<TResult>(
+        string sql,
+        object? parameters = null,
+        CancellationToken cancellationToken = default
+    ) => _sqlExecutor.QueryProjectionBySqlAsync<TResult>(sql, parameters, cancellationToken);
 }
 
 /// <summary>クエリ WHERE 句パラメータ（名前・値・対象カラム名）。カラム名は判明時のみ設定し、型明示化に使う</summary>

@@ -199,6 +199,8 @@ internal static class GeneratedFileUsings
                 yield return "System.Linq";
                 yield return "System.Linq.Expressions";
                 yield return "System.Reflection";
+                // RawSqlMapper のコレクションパラメータ展開（IN 用の @名 書き換え）で Regex を使う
+                yield return "System.Text.RegularExpressions";
                 yield return "System.Threading";
                 yield return "System.Threading.Tasks";
 

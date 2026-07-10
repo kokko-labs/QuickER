@@ -205,4 +205,139 @@
   <data name="CodeGen_NamespaceLabel_EfCore" xml:space="preserve">
     <value>EfCore の namespace</value>
   </data>
+  <data name="QueryDialog_WindowTitle" xml:space="preserve">
+    <value>クエリ定義</value>
+  </data>
+  <data name="QueryDialog_QueriesHeader" xml:space="preserve">
+    <value>クエリ一覧</value>
+  </data>
+  <data name="QueryDialog_Add" xml:space="preserve">
+    <value>追加</value>
+  </data>
+  <data name="QueryDialog_Remove" xml:space="preserve">
+    <value>削除</value>
+  </data>
+  <data name="QueryDialog_NoSelection" xml:space="preserve">
+    <value>左のクエリを選択するか、新しく追加してください。</value>
+  </data>
+  <data name="QueryDialog_Entity" xml:space="preserve">
+    <value>エンティティ</value>
+  </data>
+  <data name="QueryDialog_MethodName" xml:space="preserve">
+    <value>メソッド名</value>
+  </data>
+  <data name="QueryDialog_GeneratedNameLabel" xml:space="preserve">
+    <value>生成名:</value>
+  </data>
+  <data name="QueryDialog_Description" xml:space="preserve">
+    <value>説明</value>
+  </data>
+  <data name="QueryDialog_ReturnShape" xml:space="preserve">
+    <value>戻り形</value>
+  </data>
+  <data name="QueryDialog_ReturnList" xml:space="preserve">
+    <value>一覧</value>
+  </data>
+  <data name="QueryDialog_ReturnSingle" xml:space="preserve">
+    <value>単一</value>
+  </data>
+  <data name="QueryDialog_ReturnCount" xml:space="preserve">
+    <value>件数</value>
+  </data>
+  <data name="QueryDialog_ReturnScalar" xml:space="preserve">
+    <value>スカラー</value>
+  </data>
+  <data name="QueryDialog_ReturnProjection" xml:space="preserve">
+    <value>射影</value>
+  </data>
+  <data name="QueryDialog_ScalarType" xml:space="preserve">
+    <value>スカラー型</value>
+  </data>
+  <data name="QueryDialog_Parameters" xml:space="preserve">
+    <value>パラメータ</value>
+  </data>
+  <data name="QueryDialog_ParamName" xml:space="preserve">
+    <value>名前</value>
+  </data>
+  <data name="QueryDialog_ParamType" xml:space="preserve">
+    <value>型トークン</value>
+  </data>
+  <data name="QueryDialog_ParamIsList" xml:space="preserve">
+    <value>リスト</value>
+  </data>
+  <data name="QueryDialog_Condition" xml:space="preserve">
+    <value>条件</value>
+  </data>
+  <data name="QueryDialog_ConditionValid" xml:space="preserve">
+    <value>✓ 条件は有効です</value>
+  </data>
+  <data name="QueryDialog_OrderBy" xml:space="preserve">
+    <value>並び順</value>
+  </data>
+  <data name="QueryDialog_Descending" xml:space="preserve">
+    <value>降順</value>
+  </data>
+  <data name="QueryDialog_Paging" xml:space="preserve">
+    <value>ページングを有効にする（take / skip）</value>
+  </data>
+  <data name="QueryDialog_Implementation" xml:space="preserve">
+    <value>実装方式</value>
+  </data>
+  <data name="QueryDialog_ImplDsl" xml:space="preserve">
+    <value>ミニ DSL</value>
+  </data>
+  <data name="QueryDialog_ImplSql" xml:space="preserve">
+    <value>自由 SQL</value>
+  </data>
+  <data name="QueryDialog_ImplManual" xml:space="preserve">
+    <value>manual</value>
+  </data>
+  <data name="QueryDialog_SqlServerSql" xml:space="preserve">
+    <value>SQL Server SQL</value>
+  </data>
+  <data name="QueryDialog_SqliteSql" xml:space="preserve">
+    <value>SQLite SQL</value>
+  </data>
+  <data name="QueryDialog_Projection" xml:space="preserve">
+    <value>射影</value>
+  </data>
+  <data name="QueryDialog_ResultTypeName" xml:space="preserve">
+    <value>DTO 型名</value>
+  </data>
+  <data name="QueryDialog_FieldName" xml:space="preserve">
+    <value>フィールド名</value>
+  </data>
+  <data name="QueryDialog_FieldSource" xml:space="preserve">
+    <value>参照元列</value>
+  </data>
+  <data name="QueryDialog_FieldSourceNone" xml:space="preserve">
+    <value>（なし＝自由フィールド）</value>
+  </data>
+  <data name="QueryDialog_FieldType" xml:space="preserve">
+    <value>型トークン</value>
+  </data>
+  <data name="QueryDialog_SignaturePreview" xml:space="preserve">
+    <value>シグネチャプレビュー</value>
+  </data>
+  <data name="QueryDialog_Ok" xml:space="preserve">
+    <value>OK</value>
+  </data>
+  <data name="QueryDialog_Cancel" xml:space="preserve">
+    <value>キャンセル</value>
+  </data>
+  <data name="QueryDialog_Status_NameRequired" xml:space="preserve">
+    <value>メソッド名は必須です。</value>
+  </data>
+  <data name="QueryDialog_Status_EntityRequired" xml:space="preserve">
+    <value>エンティティの選択は必須です。</value>
+  </data>
+  <data name="QueryDialog_Status_ProjectionRequired" xml:space="preserve">
+    <value>射影クエリには DTO 型名と 1 件以上のフィールドが必要です。</value>
+  </data>
+  <data name="QueryDialog_Status_ConditionInvalid" xml:space="preserve">
+    <value>条件のエラーを解消してください。</value>
+  </data>
+  <data name="QueryDialog_Status_DuplicateName" xml:space="preserve">
+    <value>メソッド名 '{0}' が同一エンティティ内で重複しています。</value>
+  </data>
 </root>

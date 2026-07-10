@@ -64,7 +64,19 @@ internal static class FixtureDriftHarness
             diagram,
             new SqlServerTypeCatalog()
         );
-        var result = new CSharpCodeGenerationService().Generate(diagram, columnTypes, options);
+        // 名前付きクエリの型トークンも実生成経路と同じく解決する（クエリなしの図では空辞書＝出力不変）
+        var provider = new SqlServerProvider();
+        var queryParameterTypes = QueryParameterTypeResolver.Resolve(
+            diagram,
+            provider.TypeMapper,
+            provider.TypeCatalog
+        );
+        var result = new CSharpCodeGenerationService().Generate(
+            diagram,
+            columnTypes,
+            options,
+            queryParameterTypes
+        );
 
         VerifyOrRegenerate(result, outputFileName, driftReason);
     }

@@ -83,6 +83,139 @@ public class JsonStorageServiceTests
         }
     }
 
+    /// <summary>名前付きクエリ定義の全フィールドが保存・読込で往復することを検証する</summary>
+    [Fact(DisplayName = "Save → Load で名前付きクエリ定義が全フィールド復元される")]
+    public void SaveAndLoad_QueryDefinition_RoundTrip()
+    {
+        var entity = new Entity { TableName = "Order" };
+        var amountColumn = new Column { Name = "Amount", DataType = "decimal(12,2)" };
+        entity.Columns.Add(amountColumn);
+
+        var query = new QueryDefinition
+        {
+            EntityId = entity.Id,
+            Name = "GetByCustomer",
+            Description = "顧客IDで注文を検索する",
+            Returns = QueryReturnShape.Projection,
+            ScalarType = null,
+            Parameters =
+            {
+                new QueryParameter
+                {
+                    Name = "customerId",
+                    Type = "int32",
+                    SourceColumnId = amountColumn.Id,
+                },
+                new QueryParameter
+                {
+                    Name = "statuses",
+                    Type = "int32",
+                    IsList = true,
+                },
+            },
+            Condition = "CustomerId = @customerId AND Status IN @statuses",
+            OrderBy =
+            {
+                new QueryOrdering { ColumnId = amountColumn.Id, Descending = true },
+            },
+            HasPaging = true,
+            Implementation = QueryImplementationKind.Sql,
+            Sql = { ["sqlserver"] = "SELECT ...", ["sqlite"] = "SELECT ... LIMIT ..." },
+            ResultTypeName = "OrderSummaryRow",
+            Fields =
+            {
+                new ProjectionField
+                {
+                    Name = "TotalAmount",
+                    Type = "decimal(12,2)",
+                    SourceColumnId = amountColumn.Id,
+                },
+            },
+        };
+
+        var document = new DiagramDocument();
+        document.Schema.Entities.Add(entity);
+        document.Schema.Queries.Add(query);
+
+        var path = Path.Combine(Path.GetTempPath(), $"er-query-{Guid.NewGuid()}.json");
+
+        try
+        {
+            JsonStorageService.Save(path, document);
+            var loaded = JsonStorageService
+                .Load(path)
+                .Schema.Queries.Should()
+                .ContainSingle()
+                .Which;
+
+            loaded.Id.Should().Be(query.Id);
+            loaded.EntityId.Should().Be(entity.Id);
+            loaded.Name.Should().Be("GetByCustomer");
+            loaded.Description.Should().Be("顧客IDで注文を検索する");
+            loaded.Returns.Should().Be(QueryReturnShape.Projection);
+            loaded.ScalarType.Should().BeNull();
+            loaded.Parameters.Should().HaveCount(2);
+            loaded.Parameters[0].SourceColumnId.Should().Be(amountColumn.Id);
+            loaded.Parameters[1].Name.Should().Be("statuses");
+            loaded.Parameters[1].IsList.Should().BeTrue();
+            loaded.Parameters[1].SourceColumnId.Should().BeNull();
+            loaded.Condition.Should().Be("CustomerId = @customerId AND Status IN @statuses");
+            loaded.OrderBy.Should().ContainSingle();
+            loaded.OrderBy[0].ColumnId.Should().Be(amountColumn.Id);
+            loaded.OrderBy[0].Descending.Should().BeTrue();
+            loaded.HasPaging.Should().BeTrue();
+            loaded.Implementation.Should().Be(QueryImplementationKind.Sql);
+            loaded.Sql.Should().HaveCount(2).And.ContainKey("sqlite");
+            loaded.ResultTypeName.Should().Be("OrderSummaryRow");
+            loaded.Fields.Should().ContainSingle();
+            loaded.Fields[0].SourceColumnId.Should().Be(amountColumn.Id);
+        }
+        finally
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+    }
+
+    /// <summary>queries を持たない既存フォーマットの JSON が空のクエリ一覧で読み込めることを検証する（後方互換）</summary>
+    [Fact(DisplayName = "Load: queries が無い既存 JSON は空のクエリ一覧になる")]
+    public void Load_LegacyJsonWithoutQueries_YieldsEmptyQueries()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"er-legacy-{Guid.NewGuid()}.json");
+
+        try
+        {
+            File.WriteAllText(
+                path,
+                """
+                {
+                  "Version": 1,
+                  "Schema": {
+                    "Entities": [ { "TableName": "Customer" } ],
+                    "Relationships": [],
+                    "TargetDbms": "sqlserver"
+                  },
+                  "Layout": {}
+                }
+                """
+            );
+
+            var loaded = JsonStorageService.Load(path);
+
+            loaded.Schema.Entities.Should().ContainSingle();
+            loaded.Schema.Queries.Should().BeEmpty();
+        }
+        finally
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+    }
+
     /// <summary>フォーマットバージョンが CurrentVersion より大きい文書は IsNewerFormat が立つことを検証する</summary>
     [Fact(DisplayName = "Load: CurrentVersion より新しいフォーマットは IsNewerFormat が true")]
     public void Load_NewerVersion_SetsIsNewerFormat()

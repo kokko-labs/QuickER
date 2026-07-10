@@ -36,6 +36,10 @@ public interface IAppDialogService
     /// </param>
     CSharpGenerationDialogResult? ShowCSharpGenerationDialog(IDatabaseProvider currentProvider);
 
+    /// <summary>名前付きクエリ定義エディタを表示し、確定した定義リストを返す（キャンセル時は null）</summary>
+    /// <param name="diagram">エンティティと既存クエリを含む現在の ER 図（この参照は変更しない）</param>
+    List<QueryDefinition>? ShowQueryDefinitionDialog(ErDiagram diagram);
+
     /// <summary>DB 接続ダイアログを表示し、接続設定と方言を返す（キャンセル時は null）</summary>
     /// <param name="mode">用途（取込は DBMS 選択可・同期は方言固定）</param>
     /// <param name="fixedProvider">同期時に固定する方言（取込では初期選択に用いる）</param>
@@ -85,6 +89,18 @@ public sealed class WpfAppDialogService : IAppDialogService
             currentProvider: currentProvider
         );
         var dialog = new CSharpGenerationDialog(viewModel)
+        {
+            Owner = Application.Current?.MainWindow,
+        };
+
+        return dialog.ShowDialog() == true ? dialog.ViewModel.Result : null;
+    }
+
+    /// <inheritdoc />
+    public List<QueryDefinition>? ShowQueryDefinitionDialog(ErDiagram diagram)
+    {
+        var viewModel = new QueryDefinitionDialogViewModel(diagram);
+        var dialog = new QueryDefinitionDialog(viewModel)
         {
             Owner = Application.Current?.MainWindow,
         };
