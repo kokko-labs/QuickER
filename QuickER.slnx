@@ -28,6 +28,9 @@
     <File Path="samples/ec-order/quicker.json" />
     <Project Path="samples/ec-order/EcOrderSample/EcOrderSample.csproj" />
   </Folder>
+  <Folder Name="/scripts/">
+    <File Path="scripts/regen-fixtures.ps1" />
+  </Folder>
   <Folder Name="/src/">
     <Project Path="src/QuickER.AI.Chat/QuickER.AI.Chat.csproj" />
     <Project Path="src/QuickER.AI.Mock/QuickER.AI.Mock.csproj" />

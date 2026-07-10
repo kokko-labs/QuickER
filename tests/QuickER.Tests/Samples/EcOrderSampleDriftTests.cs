@@ -110,8 +110,11 @@ public sealed class EcOrderSampleDriftTests
     /// <remarks>
     /// DDL 先頭の <c>-- 生成日時:</c> 行は <see cref="DateTime.Now"/> 由来で毎回変わるため、
     /// <see cref="FixtureDriftHarness.VerifyOrRegeneratePackageSource"/>（厳密文字列一致）はそのまま使えない。
-    /// 再生成モードでは実際の DDL（生成日時入り）をそのまま書き込み、検証モードでは生成日時行だけを固定文言へ
-    /// 正規化して比較する（既存フィクスチャと同じ環境変数 <see cref="FixtureDriftHarness.RegenEnvVar"/> に従う）。
+    /// 検証モードでは生成日時行だけを固定文言へ正規化して比較する
+    /// （既存フィクスチャと同じ環境変数 <see cref="FixtureDriftHarness.RegenEnvVar"/> に従う）。
+    /// 再生成モードでは<b>実質差分（生成日時行以外）があるときだけ</b>書き込む。無条件に書き込むと、
+    /// テンプレート・スキーマを何も変えていなくても再生成のたびに生成日時行だけが変わり、
+    /// 無意味な 1 行差分がコミットへ紛れ込むため（検証側が無視する行で作業ツリーを汚さない）。
     /// </remarks>
     [Fact(
         DisplayName = "サンプル DDL EcOrder.sql が SqliteDdlGenerator の再生成と一致する（ドリフト検知）"
@@ -127,14 +130,34 @@ public sealed class EcOrderSampleDriftTests
 
         if (regenRequested)
         {
-            // 再生成: 実際の生成日時入り DDL をそのまま書き込む（UTF-8 BOM なし・改行は生成器由来を保持）
-            File.WriteAllText(ddlPath, regenerated);
+            RegenerateSampleDdl(ddlPath, regenerated);
             return;
         }
 
         // 検証: 生成日時行のみ固定文言へ正規化して突き合わせる（それ以外は完全一致を要求）
         var committed = File.ReadAllText(ddlPath);
         Assert.Equal(NormalizeGeneratedAt(regenerated), NormalizeGeneratedAt(committed));
+    }
+
+    /// <summary>
+    /// 再生成モードで DDL を書き出す（実質差分がなければ書き込まず、既存の生成日時行を保持する）。
+    /// </summary>
+    /// <remarks>
+    /// 実質差分の有無は、検証側と同じ <see cref="NormalizeGeneratedAt"/> による正規化で判定する。
+    /// これにより「検証が無視する差分は再生成でも作らない」という対称性が保たれる
+    /// </remarks>
+    private static void RegenerateSampleDdl(string ddlPath, string regenerated)
+    {
+        if (
+            File.Exists(ddlPath)
+            && NormalizeGeneratedAt(File.ReadAllText(ddlPath)) == NormalizeGeneratedAt(regenerated)
+        )
+        {
+            return;
+        }
+
+        // 実質差分あり: 実際の生成日時入り DDL をそのまま書き込む（UTF-8 BOM なし・改行は生成器由来を保持）
+        File.WriteAllText(ddlPath, regenerated);
     }
 
     /// <summary>
