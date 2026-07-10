@@ -71,6 +71,65 @@ public class CliAppTests
         }
     }
 
+    /// <summary>名前付きクエリ定義入りのスキーマから、クエリメソッドがコード生成されることを検証する（CLI の end-to-end）</summary>
+    [Fact(DisplayName = "generate は名前付きクエリ定義からクエリメソッドを生成する")]
+    public async Task Generate_WithNamedQueries_EmitsQueryMethod()
+    {
+        var (schemaPath, outDir, root) = CreateSampleSchema();
+
+        // 保存済みスキーマへ名前付きクエリを追加して上書きする（GUI で定義した図を CLI へ渡す想定）
+        var document = JsonStorageService.Load(schemaPath);
+        var entity = document.Schema.Entities[0];
+        document.Schema.Queries.Add(
+            new QueryDefinition
+            {
+                EntityId = entity.Id,
+                Name = "SearchByName",
+                Returns = QueryReturnShape.List,
+                Parameters =
+                {
+                    new QueryParameter { Name = "keyword", Type = "string(50)" },
+                },
+                Condition = "Name LIKE @keyword",
+            }
+        );
+        JsonStorageService.Save(schemaPath, document);
+
+        var configPath = Path.Combine(root, "quicker.json");
+        File.WriteAllText(configPath, """{ "GenerateRepositories": true }""");
+
+        try
+        {
+            var exit = await CliApp.InvokeAsync([
+                "generate",
+                "--schema",
+                schemaPath,
+                "--out",
+                outDir,
+                "--namespace",
+                "Test.Ns",
+                "--config",
+                configPath,
+            ]);
+
+            exit.Should().Be(0);
+            var files = Directory.GetFiles(outDir, "*.g.cs");
+            files.Should().NotBeEmpty();
+            var content = string.Join("\n", files.Select(File.ReadAllText));
+            content
+                .Should()
+                .Contain("SearchByNameAsync(string keyword,")
+                .And.Contain("Query().Where(e => e.Name!.Contains(keyword))");
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
     /// <summary>新しいフォーマットバージョンのスキーマは標準エラーへ警告を出しつつ生成を続行することを検証する</summary>
     [Fact(DisplayName = "generate は新しいフォーマットのスキーマで警告を出して続行する")]
     public async Task Generate_NewerFormatSchema_WarnsAndContinues()

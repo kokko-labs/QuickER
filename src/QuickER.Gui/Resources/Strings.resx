@@ -219,10 +219,16 @@
     <value>Generate a web mock screen (HTML) from the current ER diagram with AI</value>
   </data>
   <data name="Toolbar_GenerateCSharp" xml:space="preserve">
-    <value>C# Codegen</value>
+    <value>Codegen</value>
   </data>
   <data name="Toolbar_GenerateCSharpTooltip" xml:space="preserve">
     <value>Generate C# Entity / BindingModel from the current ER diagram</value>
+  </data>
+  <data name="Toolbar_QueryDefinitions" xml:space="preserve">
+    <value>Query Definitions</value>
+  </data>
+  <data name="Toolbar_QueryDefinitionsTooltip" xml:space="preserve">
+    <value>Define named queries that are generated as Repository methods</value>
   </data>
   <data name="Status_Ready" xml:space="preserve">
     <value>Ready</value>

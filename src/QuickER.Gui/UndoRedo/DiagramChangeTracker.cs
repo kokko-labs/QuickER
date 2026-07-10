@@ -123,6 +123,12 @@ public sealed class DiagramChangeTracker
     /// <summary>リレーションに基づく外部キー列ルールを適用するアクション</summary>
     private readonly Action<object?> _applyRelationshipColumnRules;
 
+    /// <summary>
+    /// ユーザー編集でカラム名が変更されたときに通知するコールバック（カラム・旧名・新名）
+    /// </summary>
+    /// <remarks>名前付きクエリ条件の列参照書き換えに用いる。Undo/Redo 再生中（追跡停止中）は発火しない</remarks>
+    private readonly Action<ColumnViewModel, string, string> _onColumnRenamed;
+
     /// <summary>対象オブジェクトごとの直近スナップショット（プロパティ名 → 値）</summary>
     /// <remarks>変更前後の差分算出に用いる</remarks>
     private readonly Dictionary<object, Dictionary<string, object?>> _trackedPropertySnapshots =
@@ -136,17 +142,20 @@ public sealed class DiagramChangeTracker
     /// <param name="entities">追跡対象のエンティティコレクション</param>
     /// <param name="relationships">追跡対象のリレーションコレクション</param>
     /// <param name="applyRelationshipColumnRules">リレーションに基づくカラムルール適用アクション</param>
+    /// <param name="onColumnRenamed">カラム名変更時に呼び出すコールバック（カラム・旧名・新名）</param>
     public DiagramChangeTracker(
         UndoRedoManager undoRedo,
         ObservableCollection<EntityViewModel> entities,
         ObservableCollection<RelationshipViewModel> relationships,
-        Action<object?> applyRelationshipColumnRules
+        Action<object?> applyRelationshipColumnRules,
+        Action<ColumnViewModel, string, string> onColumnRenamed
     )
     {
         _undoRedo = undoRedo;
         _entities = entities;
         _relationships = relationships;
         _applyRelationshipColumnRules = applyRelationshipColumnRules;
+        _onColumnRenamed = onColumnRenamed;
     }
 
     /// <summary>エンティティとその配下カラムの変更追跡を開始する</summary>
@@ -416,6 +425,18 @@ public sealed class DiagramChangeTracker
             )
         );
         snapshots[property.Name] = newValue;
+
+        // カラム名のユーザー編集は、名前付きクエリ条件の列参照書き換えのため所有側へ通知する
+        // （追跡停止中＝Undo/Redo・一括置換では、この経路自体を通らないため発火しない）
+        if (
+            sender is ColumnViewModel column
+            && property.Name == nameof(ColumnViewModel.Name)
+            && oldValue is string oldName
+            && newValue is string newName
+        )
+        {
+            _onColumnRenamed(column, oldName, newName);
+        }
     }
 
     /// <summary>

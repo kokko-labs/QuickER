@@ -383,6 +383,14 @@ internal sealed class CSharpMapperNavigationModel
 /// <summary>Repository クラスの生成モデル</summary>
 internal sealed class CSharpRepositoryModel
 {
+    /// <summary>方言別実装ブロックの既定値（全対応方言のキーを空文字で持つ。テンプレートの辞書引きを常に成立させる）</summary>
+    internal static readonly IReadOnlyDictionary<string, string> EmptyQueryImplBlocks =
+        CodeGenerationOptions.SupportedRepositoryDialects.ToDictionary(
+            dialect => dialect,
+            _ => string.Empty,
+            StringComparer.Ordinal
+        );
+
     /// <summary>生成する Repository インターフェース名</summary>
     public required string InterfaceName { get; init; }
 
@@ -394,6 +402,23 @@ internal sealed class CSharpRepositoryModel
 
     /// <summary>主キーの型名</summary>
     public required string KeyTypeName { get; init; }
+
+    /// <summary>名前付きクエリの契約メンバー群（インターフェイス本体・整形済み。無ければ空文字）</summary>
+    public string QueryInterfaceBlock { get; init; } = string.Empty;
+
+    /// <summary>名前付きクエリの共有実装メンバー群（ミニ DSL 系。EF Core・インメモリ実装用。無ければ空文字）</summary>
+    public string QuerySharedImplBlock { get; init; } = string.Empty;
+
+    /// <summary>
+    /// 名前付きクエリの実装メンバー群（自作 Repository 用・方言名→整形済みテキスト）。
+    /// ミニ DSL 系（全方言共通）と自由 SQL 系（その方言の SQL があるもののみ）を定義順に含む。
+    /// 全対応方言のキーを常に持つ（SQL が無い実装先は manual 扱い＝メンバーを含まない）
+    /// </summary>
+    public IReadOnlyDictionary<string, string> QueryImplBlocksByDialect { get; init; } =
+        EmptyQueryImplBlocks;
+
+    /// <summary>名前付きクエリの射影 DTO クラス群（整形済み。無ければ空文字）</summary>
+    public string QueryDtoBlock { get; init; } = string.Empty;
 }
 
 // ---- EditModel 専用モデル ----

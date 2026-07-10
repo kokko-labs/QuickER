@@ -205,4 +205,139 @@
   <data name="CodeGen_NamespaceLabel_EfCore" xml:space="preserve">
     <value>EfCore namespace</value>
   </data>
+  <data name="QueryDialog_WindowTitle" xml:space="preserve">
+    <value>Query Definitions</value>
+  </data>
+  <data name="QueryDialog_QueriesHeader" xml:space="preserve">
+    <value>Queries</value>
+  </data>
+  <data name="QueryDialog_Add" xml:space="preserve">
+    <value>Add</value>
+  </data>
+  <data name="QueryDialog_Remove" xml:space="preserve">
+    <value>Remove</value>
+  </data>
+  <data name="QueryDialog_NoSelection" xml:space="preserve">
+    <value>Select a query on the left, or add a new one.</value>
+  </data>
+  <data name="QueryDialog_Entity" xml:space="preserve">
+    <value>Entity</value>
+  </data>
+  <data name="QueryDialog_MethodName" xml:space="preserve">
+    <value>Method name</value>
+  </data>
+  <data name="QueryDialog_GeneratedNameLabel" xml:space="preserve">
+    <value>Generated:</value>
+  </data>
+  <data name="QueryDialog_Description" xml:space="preserve">
+    <value>Description</value>
+  </data>
+  <data name="QueryDialog_ReturnShape" xml:space="preserve">
+    <value>Return shape</value>
+  </data>
+  <data name="QueryDialog_ReturnList" xml:space="preserve">
+    <value>List</value>
+  </data>
+  <data name="QueryDialog_ReturnSingle" xml:space="preserve">
+    <value>Single</value>
+  </data>
+  <data name="QueryDialog_ReturnCount" xml:space="preserve">
+    <value>Count</value>
+  </data>
+  <data name="QueryDialog_ReturnScalar" xml:space="preserve">
+    <value>Scalar</value>
+  </data>
+  <data name="QueryDialog_ReturnProjection" xml:space="preserve">
+    <value>Projection</value>
+  </data>
+  <data name="QueryDialog_ScalarType" xml:space="preserve">
+    <value>Scalar type</value>
+  </data>
+  <data name="QueryDialog_Parameters" xml:space="preserve">
+    <value>Parameters</value>
+  </data>
+  <data name="QueryDialog_ParamName" xml:space="preserve">
+    <value>Name</value>
+  </data>
+  <data name="QueryDialog_ParamType" xml:space="preserve">
+    <value>Type token</value>
+  </data>
+  <data name="QueryDialog_ParamIsList" xml:space="preserve">
+    <value>List</value>
+  </data>
+  <data name="QueryDialog_Condition" xml:space="preserve">
+    <value>Condition</value>
+  </data>
+  <data name="QueryDialog_ConditionValid" xml:space="preserve">
+    <value>✓ Condition is valid</value>
+  </data>
+  <data name="QueryDialog_OrderBy" xml:space="preserve">
+    <value>Order by</value>
+  </data>
+  <data name="QueryDialog_Descending" xml:space="preserve">
+    <value>Descending</value>
+  </data>
+  <data name="QueryDialog_Paging" xml:space="preserve">
+    <value>Enable paging (take / skip)</value>
+  </data>
+  <data name="QueryDialog_Implementation" xml:space="preserve">
+    <value>Implementation</value>
+  </data>
+  <data name="QueryDialog_ImplDsl" xml:space="preserve">
+    <value>Mini DSL</value>
+  </data>
+  <data name="QueryDialog_ImplSql" xml:space="preserve">
+    <value>Free SQL</value>
+  </data>
+  <data name="QueryDialog_ImplManual" xml:space="preserve">
+    <value>Manual</value>
+  </data>
+  <data name="QueryDialog_SqlServerSql" xml:space="preserve">
+    <value>SQL Server SQL</value>
+  </data>
+  <data name="QueryDialog_SqliteSql" xml:space="preserve">
+    <value>SQLite SQL</value>
+  </data>
+  <data name="QueryDialog_Projection" xml:space="preserve">
+    <value>Projection</value>
+  </data>
+  <data name="QueryDialog_ResultTypeName" xml:space="preserve">
+    <value>DTO type name</value>
+  </data>
+  <data name="QueryDialog_FieldName" xml:space="preserve">
+    <value>Field name</value>
+  </data>
+  <data name="QueryDialog_FieldSource" xml:space="preserve">
+    <value>Source column</value>
+  </data>
+  <data name="QueryDialog_FieldSourceNone" xml:space="preserve">
+    <value>(none = free field)</value>
+  </data>
+  <data name="QueryDialog_FieldType" xml:space="preserve">
+    <value>Type token</value>
+  </data>
+  <data name="QueryDialog_SignaturePreview" xml:space="preserve">
+    <value>Signature preview</value>
+  </data>
+  <data name="QueryDialog_Ok" xml:space="preserve">
+    <value>OK</value>
+  </data>
+  <data name="QueryDialog_Cancel" xml:space="preserve">
+    <value>Cancel</value>
+  </data>
+  <data name="QueryDialog_Status_NameRequired" xml:space="preserve">
+    <value>Every query needs a method name.</value>
+  </data>
+  <data name="QueryDialog_Status_EntityRequired" xml:space="preserve">
+    <value>Every query needs an entity.</value>
+  </data>
+  <data name="QueryDialog_Status_ProjectionRequired" xml:space="preserve">
+    <value>Projection queries need a DTO type name and at least one field.</value>
+  </data>
+  <data name="QueryDialog_Status_ConditionInvalid" xml:space="preserve">
+    <value>Fix the condition errors before saving.</value>
+  </data>
+  <data name="QueryDialog_Status_DuplicateName" xml:space="preserve">
+    <value>The method name '{0}' is duplicated within the same entity.</value>
+  </data>
 </root>

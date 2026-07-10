@@ -32,7 +32,18 @@ public static class DiagramCodeGenerator
         var columnTypes = typeMapper.ResolveColumnTypes(diagram);
         // DB 定義メタ属性用の方言中立トークンを後処理で付加する（マッパ実装は変更しない）
         columnTypes = CanonicalTypeTokenAttacher.Attach(columnTypes, diagram, typeCatalog);
-        return new CSharpCodeGenerationService().Generate(diagram, columnTypes, options);
+        // 名前付きクエリの型トークン（パラメータ・スカラー・射影フィールド）も列と同じ経路で C# 型へ解決する
+        var queryParameterTypes = QueryParameterTypeResolver.Resolve(
+            diagram,
+            typeMapper,
+            typeCatalog
+        );
+        return new CSharpCodeGenerationService().Generate(
+            diagram,
+            columnTypes,
+            options,
+            queryParameterTypes
+        );
     }
 
     /// <summary>
@@ -96,7 +107,9 @@ public static class DiagramCodeGenerator
             diagram,
             primaryColumnTypes,
             columnTypesByDialect,
-            options
+            options,
+            // 名前付きクエリの型トークンは共有 Entity と同じく図の方言（主マッパ・主カタログ）で解決する
+            QueryParameterTypeResolver.Resolve(diagram, primaryTypeMapper, primaryTypeCatalog)
         );
     }
 }

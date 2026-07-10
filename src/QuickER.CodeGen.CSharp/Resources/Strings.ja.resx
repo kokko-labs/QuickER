@@ -118,4 +118,118 @@
   <data name="CodeGen_Warning_ValueObjectDefinitionMismatch" xml:space="preserve">
     <value>値オブジェクト '{0}' に集約される同名列の定義が一致しません。PK 定義優先（無ければ最大定義）で生成しますが、ER 図の定義統一を推奨します: {1}</value>
   </data>
+  <data name="CodeGen_Query_UnexpectedCharacter" xml:space="preserve">
+    <value>条件式に想定外の文字 '{0}' があります。</value>
+  </data>
+  <data name="CodeGen_Query_UnexpectedToken" xml:space="preserve">
+    <value>条件式に想定外の '{0}' があります。</value>
+  </data>
+  <data name="CodeGen_Query_UnexpectedEnd" xml:space="preserve">
+    <value>条件式が途中で終わっています。</value>
+  </data>
+  <data name="CodeGen_Query_UnterminatedString" xml:space="preserve">
+    <value>条件式の文字列リテラルが閉じられていません（' が不足しています）。</value>
+  </data>
+  <data name="CodeGen_Query_ExpectedColumnOrParen" xml:space="preserve">
+    <value>列名または '(' が必要ですが、'{0}' が見つかりました。</value>
+  </data>
+  <data name="CodeGen_Query_EndOfInput" xml:space="preserve">
+    <value>条件式の終わり</value>
+  </data>
+  <data name="CodeGen_Query_ExpectedComparison" xml:space="preserve">
+    <value>列 '{0}' の後には比較演算子（= &lt;&gt; != &lt; &lt;= &gt; &gt;=）・IS [NOT] NULL・[NOT] LIKE・[NOT] IN・CONTAINS・STARTSWITH・ENDSWITH のいずれかが必要です。</value>
+  </data>
+  <data name="CodeGen_Query_ExpectedNullAfterIs" xml:space="preserve">
+    <value>IS の後には NULL または NOT NULL が必要です。</value>
+  </data>
+  <data name="CodeGen_Query_ExpectedOperand" xml:space="preserve">
+    <value>演算子の後にはパラメータ（@名前）またはリテラルが必要です。</value>
+  </data>
+  <data name="CodeGen_Query_ExpectedInParameter" xml:space="preserve">
+    <value>IN の後にはリストパラメータ（例: @values）が必要です。</value>
+  </data>
+  <data name="CodeGen_Query_StringMatchRequiresText" xml:space="preserve">
+    <value>LIKE・CONTAINS・STARTSWITH・ENDSWITH の右辺にはパラメータまたは文字列リテラルが必要です。</value>
+  </data>
+  <data name="CodeGen_Query_UnsupportedLikePattern" xml:space="preserve">
+    <value>LIKE パターン '{0}' はミニ DSL では表現できません（先頭・末尾の % のみ対応。_ は不可）。自由 SQL か manual モードを使ってください。</value>
+  </data>
+  <data name="CodeGen_Query_UnknownColumn" xml:space="preserve">
+    <value>条件式が参照する列 '{0}' はエンティティ '{1}' に存在しません。</value>
+  </data>
+  <data name="CodeGen_Query_UnknownParameter" xml:space="preserve">
+    <value>条件式が参照するパラメータ '@{0}' はクエリに定義されていません。</value>
+  </data>
+  <data name="CodeGen_Query_InRequiresListParameter" xml:space="preserve">
+    <value>IN にはリストパラメータが必要です（'@{0}' はリストではありません）。</value>
+  </data>
+  <data name="CodeGen_Query_ListParameterOnlyWithIn" xml:space="preserve">
+    <value>リストパラメータ '@{0}' は IN でのみ使用できます。</value>
+  </data>
+  <data name="CodeGen_Query_NullCheckOnNonNullableColumn" xml:space="preserve">
+    <value>列 '{0}' は NULL を許容しないため、IS NULL / IS NOT NULL は使えません。</value>
+  </data>
+  <data name="CodeGen_Query_UnknownEntity" xml:space="preserve">
+    <value>名前付きクエリ '{0}' は対象エンティティが見つからないためスキップしました。</value>
+  </data>
+  <data name="CodeGen_Query_InvalidName" xml:space="preserve">
+    <value>名前付きクエリ名 '{0}' から有効なメソッド名を作れません。</value>
+  </data>
+  <data name="CodeGen_Query_ReservedMethodName" xml:space="preserve">
+    <value>名前付きクエリ '{0}': メソッド名 '{1}' は標準の Repository メンバーと衝突します。</value>
+  </data>
+  <data name="CodeGen_Query_DuplicateMethodName" xml:space="preserve">
+    <value>名前付きクエリ '{0}': メソッド名 '{1}' がエンティティ '{2}' の別クエリと重複しています。</value>
+  </data>
+  <data name="CodeGen_Query_InvalidParameterName" xml:space="preserve">
+    <value>名前付きクエリ '{0}': パラメータ名 '{1}' は有効な C# 識別子ではありません。</value>
+  </data>
+  <data name="CodeGen_Query_DuplicateParameterName" xml:space="preserve">
+    <value>名前付きクエリ '{0}': パラメータ名 '{1}' が重複しています。</value>
+  </data>
+  <data name="CodeGen_Query_UnresolvedTypeToken" xml:space="preserve">
+    <value>名前付きクエリ '{0}': 型トークン '{1}' を解決できません。</value>
+  </data>
+  <data name="CodeGen_Query_ConditionInvalid" xml:space="preserve">
+    <value>名前付きクエリ '{0}' の条件式: {1}</value>
+  </data>
+  <data name="CodeGen_Query_ScalarRequiresType" xml:space="preserve">
+    <value>名前付きクエリ '{0}': スカラー戻り形には型トークン（scalarType）が必要です。</value>
+  </data>
+  <data name="CodeGen_Query_ScalarDslUnsupported" xml:space="preserve">
+    <value>名前付きクエリ '{0}': スカラー戻り形はミニ DSL では表現できません。自由 SQL か manual モードを使ってください。</value>
+  </data>
+  <data name="CodeGen_Query_ProjectionRequiresFields" xml:space="preserve">
+    <value>名前付きクエリ '{0}': 射影の戻り形には DTO 型名と 1 つ以上のフィールド定義が必要です。</value>
+  </data>
+  <data name="CodeGen_Query_InvalidResultTypeName" xml:space="preserve">
+    <value>名前付きクエリ '{0}': DTO 型名 '{1}' は有効な C# 識別子ではありません。</value>
+  </data>
+  <data name="CodeGen_Query_ProjectionDslRequiresColumns" xml:space="preserve">
+    <value>名前付きクエリ '{0}': ミニ DSL の射影では全フィールドに参照元列が必要です（自由フィールドは自由 SQL 専用）。</value>
+  </data>
+  <data name="CodeGen_Query_PagingRequiresList" xml:space="preserve">
+    <value>名前付きクエリ '{0}': ページングは戻り形が一覧・射影のときのみ使えます。</value>
+  </data>
+  <data name="CodeGen_Query_OrderByRequiresList" xml:space="preserve">
+    <value>名前付きクエリ '{0}': 並び順は戻り形が一覧・射影・単一のときのみ指定できます。</value>
+  </data>
+  <data name="CodeGen_Query_OrderByColumnNotFound" xml:space="preserve">
+    <value>名前付きクエリ '{0}': 並び順が参照する列がエンティティに存在しません。</value>
+  </data>
+  <data name="CodeGen_Query_UnknownSqlDialect" xml:space="preserve">
+    <value>名前付きクエリ '{0}': SQL 辞書の方言キー '{1}' は未対応のため無視されます。</value>
+  </data>
+  <data name="CodeGen_Query_InvalidFieldName" xml:space="preserve">
+    <value>名前付きクエリ '{0}': フィールド名 '{1}' は有効な C# 識別子ではありません。</value>
+  </data>
+  <data name="CodeGen_Query_FieldColumnNotFound" xml:space="preserve">
+    <value>名前付きクエリ '{0}': フィールド '{1}' が参照する列がエンティティに存在しません。</value>
+  </data>
+  <data name="CodeGen_Query_ParameterColumnNotFound" xml:space="preserve">
+    <value>名前付きクエリ '{0}': パラメータ '{1}' が参照する列がエンティティに存在しません。</value>
+  </data>
+  <data name="CodeGen_Query_DuplicateResultTypeName" xml:space="preserve">
+    <value>名前付きクエリ '{0}': DTO 型名 '{1}' は別のクエリで使用済みです。DTO 型名は生成 namespace 内で一意にしてください。</value>
+  </data>
 </root>

@@ -405,7 +405,19 @@ namespace QuickER.Resources {
                 return ResourceManager.GetString("Toolbar_GenerateCSharpTooltip", resourceCulture);
             }
         }
-        
+
+        public static string Toolbar_QueryDefinitions {
+            get {
+                return ResourceManager.GetString("Toolbar_QueryDefinitions", resourceCulture);
+            }
+        }
+
+        public static string Toolbar_QueryDefinitionsTooltip {
+            get {
+                return ResourceManager.GetString("Toolbar_QueryDefinitionsTooltip", resourceCulture);
+            }
+        }
+
         public static string Status_Ready {
             get {
                 return ResourceManager.GetString("Status_Ready", resourceCulture);

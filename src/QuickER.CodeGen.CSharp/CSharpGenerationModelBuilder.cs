@@ -31,10 +31,29 @@ internal sealed partial class CSharpGenerationModelBuilder
         ErDiagram diagram,
         IReadOnlyDictionary<Guid, CSharpTypeInfo> columnTypes,
         CodeGenerationOptions options,
-        ICollection<GenerationDiagnostic> diagnostics
+        ICollection<GenerationDiagnostic> diagnostics,
+        IReadOnlyDictionary<string, CSharpTypeInfo>? queryParameterTypes = null
     )
     {
         _columnTypes = columnTypes;
+        _queryTokenTypes =
+            queryParameterTypes
+            ?? new Dictionary<string, CSharpTypeInfo>(StringComparer.OrdinalIgnoreCase);
+        _queriesByEntity = diagram
+            .Queries.GroupBy(query => query.EntityId)
+            .ToDictionary(group => group.Key, group => group.ToList());
+        _queryDtoNames.Clear();
+
+        // 参照先エンティティが存在しないクエリ定義（削除済みエンティティの残骸等）は警告してスキップする
+        var entityIds = diagram.Entities.Select(entity => entity.Id).ToHashSet();
+
+        foreach (var orphan in diagram.Queries.Where(query => !entityIds.Contains(query.EntityId)))
+        {
+            diagnostics.Add(
+                Warning(string.Format(Strings.CodeGen_Query_UnknownEntity, orphan.Name))
+            );
+        }
+
         var navigationsByEntity = ResolveAllNavigations(diagram, diagnostics);
         _valueObjects = BuildValueObjects(diagram, options, diagnostics);
 
@@ -73,7 +92,9 @@ internal sealed partial class CSharpGenerationModelBuilder
                 || options.GenerateEfCore
                 || options.GenerateInMemoryRepositories
                     ? diagram
-                        .Entities.Select(entity => BuildRepositoryClass(entity, diagnostics))
+                        .Entities.Select(entity =>
+                            BuildRepositoryClass(entity, options, diagnostics)
+                        )
                         .Where(model => model is not null)
                         .Cast<CSharpRepositoryModel>()
                         .ToList()
@@ -316,6 +337,7 @@ internal sealed partial class CSharpGenerationModelBuilder
     /// <returns>単一主キーを持たないテーブルは対象外として null を返す</returns>
     private CSharpRepositoryModel? BuildRepositoryClass(
         Entity entity,
+        CodeGenerationOptions options,
         ICollection<GenerationDiagnostic> diagnostics
     )
     {
@@ -337,6 +359,7 @@ internal sealed partial class CSharpGenerationModelBuilder
             ? entityClassName[..^"Entity".Length]
             : entityClassName;
         var keyTypeName = BuildProperty(keyColumn[0]).TypeName.TrimEnd('?');
+        var queryBlocks = BuildQueryBlocks(entity, options, diagnostics);
 
         return new CSharpRepositoryModel
         {
@@ -344,6 +367,10 @@ internal sealed partial class CSharpGenerationModelBuilder
             ClassName = $"{repositoryName}Repository",
             EntityClassName = entityClassName,
             KeyTypeName = keyTypeName,
+            QueryInterfaceBlock = queryBlocks.InterfaceBlock,
+            QuerySharedImplBlock = queryBlocks.SharedImplBlock,
+            QueryImplBlocksByDialect = queryBlocks.ImplBlocksByDialect,
+            QueryDtoBlock = queryBlocks.DtoBlock,
         };
     }
 

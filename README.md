@@ -17,6 +17,7 @@ Draw an ER diagram → create a database → generate C# data-access code and ru
 - **C# code generation** — in addition to Entity / EditModel / Mapper, choose a data-access layer to generate:
   - **Repository (QuickER)** — a lightweight, minimal-dependency Repository (expression-tree queries, Include, graph save, optimistic concurrency, and a raw-SQL escape hatch)
   - **EF Core** — a DbContext that hosts your existing entities as-is, plus an EF implementation of the same interfaces. Swap it with Repository (QuickER) **by changing a single line of DI registration**
+  - **Named queries** — store search-method definitions (condition, ordering, paging, projection) in the diagram and generate them as typed Repository methods (e.g. `GetByCustomerAsync(int customerId, ...)`) for every implementation (Repository (QuickER) / EF Core). Conditions are written in a mini DSL (`CustomerId = @customerId AND Memo LIKE @keyword`, etc.) with live validation in the GUI editor
 - **AI chat** — generate and edit ER diagrams through conversation (supports OpenAI / Anthropic API keys, Ollama, Codex, and Claude Code). It can also generate web mockup screens (HTML) from an ER diagram
 - **Rich import/export** — import: DBML / Mermaid / Excel definition sheets / live DBs (5 dialects). Export: PNG / SVG / SQL DDL / Mermaid / DBML / Excel definition sheets / vector printing (scale-to-one-page and actual-size PDF)
 - **git-friendly save format** — a single JSON file that separates the semantic model (table definitions) from the visual information (coordinates and colors)

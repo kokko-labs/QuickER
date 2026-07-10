@@ -148,7 +148,8 @@ public partial class MainViewModel
                 document.Schema.Entities,
                 document.Schema.Relationships,
                 clearUndoHistory: true,
-                document.Layout
+                document.Layout,
+                document.Schema.Queries
             );
         }
         catch
@@ -224,6 +225,25 @@ public partial class MainViewModel
                 Strings.Common_Error
             );
         }
+    }
+
+    /// <summary>名前付きクエリ定義エディタを開き、確定結果で現在の図のクエリを置き換える</summary>
+    /// <remarks>
+    /// 編集はダイアログ側の複製に対して行われ、OK 確定時のみ結果が返る（キャンセルは無影響）。
+    /// 置換後は他の変更経路と同様に自動保存へ反映する。
+    /// </remarks>
+    [RelayCommand]
+    private void OpenQueryDefinitions()
+    {
+        var result = _appDialogs.ShowQueryDefinitionDialog(ToDiagramModel());
+
+        if (result is null)
+        {
+            return;
+        }
+
+        Queries = result;
+        AutoSave();
     }
 
     /// <summary>現在の ER 図から C# の Entity / EditModel / Mapper / Repository コードを生成する</summary>
@@ -366,12 +386,14 @@ public partial class MainViewModel
         );
 
     /// <summary>現在の ER 図を意味モデル（<see cref="ErDiagram"/>・視覚情報なし）へ変換する</summary>
+    /// <remarks>名前付きクエリ定義（<see cref="Queries"/>）も保存単位として含める</remarks>
     public ErDiagram ToDiagramModel() =>
         new()
         {
             Entities = Entities.Select(entity => entity.ToModel()).ToList(),
             Relationships = Relationships.Select(relationship => relationship.ToModel()).ToList(),
             TargetDbms = CurrentProvider.Name,
+            Queries = Queries,
         };
 
     /// <summary>現在の ER 図を保存文書（意味モデル＋レイアウトサイドカー）へ変換する</summary>
@@ -742,7 +764,8 @@ public partial class MainViewModel
             document.Schema.Entities,
             document.Schema.Relationships,
             clearUndoHistory: true,
-            document.Layout
+            document.Layout,
+            document.Schema.Queries
         );
 
         // ウィンドウタイトル・印刷ダイアログのタイトル初期値用。保存フォーマット・Undo には関与しない
