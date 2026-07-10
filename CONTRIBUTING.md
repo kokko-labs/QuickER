@@ -20,7 +20,13 @@ QuickER は個人開発の OSS です。Issue・Pull Request を歓迎します�
 - コメント・コミットメッセージは日本語で書きます
 - コード修正後は `csharpier format .` を実行してください（グローバルツール）
 - `dotnet test QuickER.slnx` が緑であることを確認してください
-- 生成テンプレート（`Templates/CSharpRuntime.scriban`）を変更した場合は、固定フィクスチャ等の再生成が必要です:
+- 生成テンプレート（`Templates/CSharpRuntime.scriban`）を変更した場合は、固定フィクスチャ等の再生成が必要です。再生成 → 検証 → 差分表示までを次のスクリプトが行います:
+
+  ```powershell
+  ./scripts/regen-fixtures.ps1
+  ```
+
+  スクリプトを使わない場合は、次の 1 コマンドで再生成し、そのあと環境変数なしで同じテストを流して緑を確認してください:
 
   ```powershell
   $env:QUICKER_REGEN_FIXTURES=1; dotnet test tests/QuickER.Tests/QuickER.Tests.csproj --filter "FullyQualifiedName~Drift"; $env:QUICKER_REGEN_FIXTURES=$null
