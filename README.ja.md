@@ -159,6 +159,7 @@ dotnet test QuickER.slnx         # 全テスト（Docker があれば実 DB 統�
 - [生成コードの使い方（Repository API・EF Core・ランタイムパッケージ）](docs/code-generation.md)
 - [AI チャットの設定](docs/ai-chat.md)
 - [動くサンプル（EC 注文ドメイン）](samples/ec-order/README.ja.md)
+- [動くサンプル（3 階層構成 — クライアント → HTTP+JSON → サーバー → SQLite）](samples/ec-order-remote/README.ja.md)
 
 ## サポート・貢献
 

@@ -163,6 +163,7 @@ dotnet test QuickER.slnx         # all tests (real-DB integration tests also run
 - [Using the generated code (Repository API, EF Core, runtime packages)](docs/code-generation.md)
 - [Configuring AI chat](docs/ai-chat.md)
 - [The working sample (EC order domain)](samples/ec-order/README.md)
+- [The working sample (3-tier — client → HTTP+JSON → server → SQLite)](samples/ec-order-remote/README.md)
 
 ## Support & contributing
 

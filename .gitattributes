@@ -28,6 +28,15 @@ samples/ec-order/EcOrderSample/Generated/EcOrder.g.cs text eol=crlf
 samples/ec-order/EcOrderSample/Generated/EcOrder.g.md text eol=crlf
 
 ###############################################################################
+# samples/ec-order-remote（3 階層構成サンプル）のチェックイン済み生成物・図 JSON も
+# 同様にドリフト検知がバイト単位一致を前提とするため CRLF に固定する。
+###############################################################################
+samples/ec-order-remote/EcOrderRemote.json text eol=crlf
+samples/ec-order-remote/EcOrderRemote.sql text eol=crlf
+samples/ec-order-remote/Generated/EcOrderRemote.g.cs text eol=crlf
+samples/ec-order-remote/Generated/EcOrderRemote.RemoteServer.g.cs text eol=crlf
+
+###############################################################################
 # Set default behavior for command prompt diff.
 #
 # This is need for earlier builds of msysgit that does not have it on by

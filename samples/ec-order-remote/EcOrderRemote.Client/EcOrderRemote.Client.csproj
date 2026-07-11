@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>EcOrderRemoteSample.Client</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      クライアントは共有の本体生成物（リモート面契約・HTTP クライアント実装・DI 拡張）だけを参照する。
+      HTTP クライアントは BCL の HttpClient のみで動くため、サーバー生成物や ASP.NET Core への依存は持たない。
+    -->
+    <ProjectReference Include="../EcOrderRemote.Shared/EcOrderRemote.Shared.csproj" />
+  </ItemGroup>
+</Project>

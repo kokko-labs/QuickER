@@ -5711,7 +5711,7 @@ public sealed record RemoteSaveManyRequest<TEntity>(
 /// （DelegatingHandler・既定ヘッダー）に委ねる。
 /// </para>
 /// <para>
-/// グラフ保存（Save）成功後は直結時と同じく <see cref="EntityBase.AcceptChanges"/> でローカルエンティティの
+/// グラフ保存（Save）成功後は直結時（<c>EntityGraphSaver.AcceptChanges</c>）と同じ意味論でローカルエンティティの
 /// RowState を確定させる（直結⇔リモートの差し替えで保存後の状態遷移が変わらない）。
 /// </para>
 /// </remarks>

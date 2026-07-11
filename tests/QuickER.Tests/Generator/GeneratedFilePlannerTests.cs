@@ -98,6 +98,34 @@ public class GeneratedFilePlannerTests
         entity.CrossNamespaceUsings.Should().NotContain("Acme.App.Entities");
     }
 
+    /// <summary>
+    /// 分割＋リモートサービス生成時、RemoteServer.g.cs が Repositories.g.cs の直後（EfCore / Runtime より前）に
+    /// 並ぶことを検証する（リモート面の契約の隣に置く。プレビュー表示・出力順の両方がこの計画順に従う）。
+    /// </summary>
+    [Fact]
+    public void Plan_Split_RemoteServer_ComesRightAfterRepositories()
+    {
+        var options = new CodeGenerationOptions
+        {
+            NamespaceName = "Acme.App",
+            SplitFilesByCategory = true,
+            GenerateRemoteServices = true,
+        };
+
+        var plan = GeneratedFilePlanner.Plan(options);
+
+        plan.Select(spec => spec.FileName)
+            .Should()
+            .Equal(
+                "Entities.g.cs",
+                "EditModels.g.cs",
+                "Mappers.g.cs",
+                "Repositories.g.cs",
+                "RemoteServer.g.cs",
+                "Runtime.g.cs"
+            );
+    }
+
     /// <summary>クロス using が依存グラフに基づき、参照しないバケットの名前空間を using しないことを検証する</summary>
     [Fact]
     public void Plan_Split_CrossUsings_FollowDependencyGraph()

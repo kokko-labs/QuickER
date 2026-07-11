@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>EcOrderRemoteSample.Server</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 共有の本体生成物（Entity・自作 SQLite Repository・リモート面契約・DI 拡張）を参照する -->
+    <ProjectReference Include="../EcOrderRemote.Shared/EcOrderRemote.Shared.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      サーバー生成物をリンクする。MapGeneratedRemoteEndpoints（Minimal API）は ASP.NET Core の
+      FrameworkReference を必要とするため、Web SDK を使う本プロジェクトでのみリンクする（Shared 側ではリンクしない）。
+    -->
+    <Compile
+      Include="../Generated/EcOrderRemote.RemoteServer.g.cs"
+      Link="Generated/EcOrderRemote.RemoteServer.g.cs"
+    />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- DDL を出力ディレクトリへコピーし、起動時にファイル DB を作成する -->
+    <None
+      Include="../EcOrderRemote.sql"
+      Link="EcOrderRemote.sql"
+      CopyToOutputDirectory="PreserveNewest"
+    />
+  </ItemGroup>
+</Project>

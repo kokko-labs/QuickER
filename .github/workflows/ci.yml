@@ -42,6 +42,26 @@ jobs:
           dotnet build samples/ec-order/EcOrderSample/EcOrderSample.csproj
           dotnet run --project samples/ec-order/EcOrderSample/EcOrderSample.csproj --no-build
 
+      - name: 3 階層サンプルのビルドと実行（samples/ec-order-remote）
+        # クライアント → HTTP+JSON → サーバー → SQLite の実 2 プロセススモーク。
+        # クライアントは接続リトライを内蔵しており、サーバーの起動待ちを吸収する。
+        # サーバーは dotnet run ではなくビルド済み DLL を直接起動する（dotnet run は子プロセスに
+        # 実体を生むため、親だけを止めるとサーバーが残留する。DLL 直接起動なら単一プロセス）。
+        shell: pwsh
+        run: |
+          dotnet build samples/ec-order-remote/EcOrderRemote.Server/EcOrderRemote.Server.csproj
+          dotnet build samples/ec-order-remote/EcOrderRemote.Client/EcOrderRemote.Client.csproj
+          $serverDll = "samples/ec-order-remote/EcOrderRemote.Server/bin/Debug/net10.0/EcOrderRemote.Server.dll"
+          $server = Start-Process dotnet -ArgumentList $serverDll -PassThru -NoNewWindow
+          try {
+            dotnet run --project samples/ec-order-remote/EcOrderRemote.Client --no-build
+            if ($LASTEXITCODE -ne 0) { throw "クライアントの実行が失敗しました（終了コード: $LASTEXITCODE）" }
+          }
+          finally {
+            # 成否に関わらずサーバーを確実に停止する（残留プロセスでランナーを塞がない）
+            if (-not $server.HasExited) { Stop-Process -Id $server.Id -Force }
+          }
+
       - name: パッケージ生成検証（ランタイム4種+CLI）
         run: |
           dotnet pack src/QuickER.Runtime/QuickER.Runtime.csproj --no-build --output ${{ runner.temp }}/nupkg
