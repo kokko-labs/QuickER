@@ -286,6 +286,35 @@ public class RuntimePackageModeCompilationTests
             );
         }
 
+        // リモート契約生成×パッケージ参照モード（IRemoteRepository は Core パッケージが提供する）
+        data.Add(
+            "remote 自作 sqlserver",
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                GenerateRemoteContracts = true,
+            }
+        );
+        data.Add(
+            "remote マルチターゲット sqlserver+sqlite",
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                RepositoryDialects = ["sqlserver", "sqlite"],
+                GenerateRemoteContracts = true,
+            }
+        );
+        data.Add(
+            "remote 自作 sqlite＋EF 併存",
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                RepositoryDialect = "sqlite",
+                GenerateEfCore = true,
+                GenerateRemoteContracts = true,
+            }
+        );
+
         return data;
     }
 
@@ -313,6 +342,7 @@ public class RuntimePackageModeCompilationTests
             RepositoryNamespace = options.RepositoryNamespace,
             ValueObjectNamespace = options.ValueObjectNamespace,
             EfCoreNamespace = options.EfCoreNamespace,
+            GenerateRemoteContracts = options.GenerateRemoteContracts,
             UseRuntimePackages = true,
         };
 

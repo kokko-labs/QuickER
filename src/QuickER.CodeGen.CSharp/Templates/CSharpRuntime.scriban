@@ -2186,8 +2186,21 @@ public sealed partial class {{ mapper.class_name }}
 
 {{~ if (repository_classes.size > 0 || runtime_package_export) && (render_contract || repositories || (ef_core && render_ef_core && runtime_package_export)) ~}}
 {{~ if render_contract && emit_shared_infra ~}}
-/// <summary>エンティティの CRUD 操作を提供するリポジトリ共通インターフェース</summary>
-public partial interface IRepository<TEntity, TKey>
+/// <summary>ネットワーク境界を越えて提供できる操作に絞ったリポジトリ共通インターフェース（リモート面）</summary>
+/// <remarks>
+/// <para>
+/// 単一エンティティ・エンティティグラフの CRUD と保存だけを持ち、式木（<see cref="IRepository{TEntity, TKey}.Query"/>）や
+/// 生 SQL のような「プロセス外へ運べない引数」を受け取るメンバーを含まない。全メンバーの引数・戻り値は
+/// 純粋なデータ（エンティティ・主キー・件数）のため、この面だけに依存するコードは、将来実体を
+/// リモート実装（Web サービス経由）へ差し替えてもコンパイル時に安全が保証される。
+/// </para>
+/// <para>
+/// <see cref="IRepository{TEntity, TKey}"/> が本インターフェースを継承して全メソッドを提供するため、
+/// 既存の利用コードは変わらない。リモート契約生成（GenerateRemoteContracts）では、この面（＋名前付きクエリ）だけを持つ
+/// I{Entity}RemoteRepository が追加生成され、I{Entity}Repository がそれを継承する。
+/// </para>
+/// </remarks>
+public partial interface IRemoteRepository<TEntity, TKey>
     where TEntity : EntityBase, new()
 {
     /// <summary>主キーによる単一エンティティ取得（該当なしは null）</summary>
@@ -2199,23 +2212,11 @@ public partial interface IRepository<TEntity, TKey>
     /// <summary>エンティティ追加</summary>
     Task InsertAsync(TEntity entity, CancellationToken cancellationToken = default);
 
-    /// <summary>エンティティのコレクションを{{ if repository_dialect == "sqlserver" }} SqlBulkCopy で{{ end }}一括追加する</summary>
-    /// <param name="entities">追加対象の一覧</param>
-    /// <param name="cancellationToken">キャンセルトークン</param>
-    /// <returns>追加した件数</returns>
-    Task<int> BulkInsertAsync(
-        IEnumerable<TEntity> entities,
-        CancellationToken cancellationToken = default
-    );
-
     /// <summary>エンティティ更新（更新対象ありで true）</summary>
     Task<bool> UpdateAsync(TEntity entity, CancellationToken cancellationToken = default);
 
     /// <summary>主キーによるエンティティ削除（削除対象ありで true）</summary>
     Task<bool> DeleteAsync(TKey id, CancellationToken cancellationToken = default);
-
-    /// <summary>検索条件・並び順・Include をチェーン指定して取得するクエリを開始する</summary>
-    SqlQuery<TEntity> Query();
 
     /// <summary>RowState に従って 1 トランザクションで追加・更新・削除を保存する（既定で子をカスケード）</summary>
     /// <param name="entity">保存対象（集約ルート）</param>
@@ -2246,6 +2247,27 @@ public partial interface IRepository<TEntity, TKey>
         bool insertWhenUpdateMissing = false,
         CancellationToken cancellationToken = default
     );
+}
+
+/// <summary>エンティティの CRUD 操作を提供するリポジトリ共通インターフェース</summary>
+/// <remarks>
+/// リモート面（<see cref="IRemoteRepository{TEntity, TKey}"/>）に加え、ローカル実行（DB 直結）を前提とするメンバー
+/// （式木クエリ・生 SQL・一括追加）を持つ全機能面。I{Entity}Repository は常にこの全機能面を提供する。
+/// </remarks>
+public partial interface IRepository<TEntity, TKey> : IRemoteRepository<TEntity, TKey>
+    where TEntity : EntityBase, new()
+{
+    /// <summary>エンティティのコレクションを{{ if repository_dialect == "sqlserver" }} SqlBulkCopy で{{ end }}一括追加する</summary>
+    /// <param name="entities">追加対象の一覧</param>
+    /// <param name="cancellationToken">キャンセルトークン</param>
+    /// <returns>追加した件数</returns>
+    Task<int> BulkInsertAsync(
+        IEnumerable<TEntity> entities,
+        CancellationToken cancellationToken = default
+    );
+
+    /// <summary>検索条件・並び順・Include をチェーン指定して取得するクエリを開始する</summary>
+    SqlQuery<TEntity> Query();
 
     /// <summary>生 SQL の SELECT を実行し、結果行を {TEntity} へマップして返す</summary>
     /// <remarks>
@@ -5739,7 +5761,10 @@ public static class Generated{{ dialect_di_suffix }}RepositoryServiceCollectionE
         ));
         services.AddSingleton<ISqlExecutor, SqlExecutor>();
 {{ for repository in repository_classes }}        services.AddScoped<{{ repository.interface_name }}, {{ repository.class_name }}>();
-{{ end }}
+{{ if remote_contracts }}        services.AddScoped<{{ repository.remote_interface_name }}>(provider =>
+            provider.GetRequiredService<{{ repository.interface_name }}>()
+        );
+{{ end }}{{ end }}
         return services;
     }
 
@@ -5768,7 +5793,11 @@ public static class Generated{{ dialect_di_suffix }}RepositoryServiceCollectionE
             serviceKey,
             (_, _) => new {{ repository.class_name }}(connectionFactory)
         );
-{{ end }}
+{{ if remote_contracts }}        services.AddKeyedScoped<{{ repository.remote_interface_name }}>(
+            serviceKey,
+            (provider, key) => provider.GetRequiredKeyedService<{{ repository.interface_name }}>(key)
+        );
+{{ end }}{{ end }}
         return services;
     }
 }
@@ -5790,7 +5819,10 @@ public static class GeneratedRepositoryServiceCollectionExtensions
         ));
         services.AddSingleton<ISqlExecutor, SqlExecutor>();
 {{ for repository in repository_classes }}        services.AddScoped<{{ repository.interface_name }}, {{ repository.class_name }}>();
-{{ end }}
+{{ if remote_contracts }}        services.AddScoped<{{ repository.remote_interface_name }}>(provider =>
+            provider.GetRequiredService<{{ repository.interface_name }}>()
+        );
+{{ end }}{{ end }}
         return services;
     }
 }
@@ -5799,12 +5831,26 @@ public static class GeneratedRepositoryServiceCollectionExtensions
 
 {{~ for repository in repository_classes ~}}
 {{~ if render_contract ~}}
+{{~ if remote_contracts ~}}
+{{ if !for.first }}
+{{ end }}/// <summary>{{ repository.entity_class_name }} 用リポジトリのリモート面（ネットワーク境界を越えられる CRUD・保存・名前付きクエリのみ。将来リモート実装へ差し替え可能）</summary>
+public partial interface {{ repository.remote_interface_name }} : IRemoteRepository<{{ repository.entity_class_name }}, {{ repository.key_type_name }}>{{ if repository.query_interface_block == "" }} { }{{ else }}
+{
+{{ repository.query_interface_block }}
+}{{ end }}
+
+/// <summary>{{ repository.entity_class_name }} 用リポジトリインターフェース（全機能面＝リモート面に式木クエリ・生 SQL・一括追加を追加）</summary>
+public partial interface {{ repository.interface_name }}
+    : {{ repository.remote_interface_name }},
+        IRepository<{{ repository.entity_class_name }}, {{ repository.key_type_name }}> { }
+{{~ else ~}}
 {{ if !for.first }}
 {{ end }}/// <summary>{{ repository.entity_class_name }} 用リポジトリインターフェース</summary>
 public partial interface {{ repository.interface_name }} : IRepository<{{ repository.entity_class_name }}, {{ repository.key_type_name }}>{{ if repository.query_interface_block == "" }} { }{{ else }}
 {
 {{ repository.query_interface_block }}
 }{{ end }}
+{{~ end ~}}
 {{~ if repository.query_dto_block != "" ~}}
 
 {{ repository.query_dto_block }}
@@ -6749,7 +6795,10 @@ public static class GeneratedInMemoryRepositoryServiceCollectionExtensions
 
         services.AddSingleton(store);
 {{ for repository in repository_classes }}        services.AddScoped<{{ repository.interface_name }}, InMemory{{ repository.class_name }}>();
-{{ end }}
+{{ if remote_contracts }}        services.AddScoped<{{ repository.remote_interface_name }}>(provider =>
+            provider.GetRequiredService<{{ repository.interface_name }}>()
+        );
+{{ end }}{{ end }}
         return services;
     }
 }
@@ -8091,7 +8140,10 @@ public static class GeneratedEfCoreRepositoryServiceCollectionExtensions
         services.AddDbContextFactory<QuickErDbContext>(configureDbContext);
         services.AddSingleton<ISqlExecutor, EfCoreSqlExecutor<QuickErDbContext>>();
 {{ for repository in repository_classes }}        services.AddScoped<{{ repository.interface_name }}, EfCore{{ repository.class_name }}>();
-{{ end }}
+{{ if remote_contracts }}        services.AddScoped<{{ repository.remote_interface_name }}>(provider =>
+            provider.GetRequiredService<{{ repository.interface_name }}>()
+        );
+{{ end }}{{ end }}
         return services;
     }
 }

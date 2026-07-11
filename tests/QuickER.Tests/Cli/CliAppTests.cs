@@ -547,6 +547,119 @@ public class CliAppTests
     }
 
     /// <summary>
+    /// --remote-contracts 指定時は、リモート面 I{Entity}RemoteRepository（ここでは ICustomerRemoteRepository）が
+    /// 追加生成されることを検証する（CLI の end-to-end）
+    /// </summary>
+    [Fact(DisplayName = "--remote-contracts 指定でリモート面インターフェイスが追加生成される")]
+    public async Task Generate_WithRemoteContracts_EmitsRemoteRepositoryInterface()
+    {
+        var (schemaPath, outDir, root) = CreateSampleSchema();
+
+        try
+        {
+            var exit = await CliApp.InvokeAsync([
+                "generate",
+                "--schema",
+                schemaPath,
+                "--out",
+                outDir,
+                "--namespace",
+                "Test.Remote",
+                "--remote-contracts",
+            ]);
+
+            exit.Should().Be(0);
+            var files = Directory.GetFiles(outDir, "*.g.cs");
+            var code = string.Join("\n", files.Select(File.ReadAllText));
+            code.Should().Contain("public partial interface ICustomerRemoteRepository");
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>
+    /// remote-contracts 未指定（既定 OFF）のとき、エンティティ別のリモート面が生成されないことを検証する
+    /// </summary>
+    [Fact(DisplayName = "remote-contracts 未指定（既定 OFF）ではリモート面が生成されない")]
+    public async Task Generate_WithoutRemoteContracts_DoesNotEmitRemoteRepositoryInterface()
+    {
+        var (schemaPath, outDir, root) = CreateSampleSchema();
+
+        try
+        {
+            var exit = await CliApp.InvokeAsync([
+                "generate",
+                "--schema",
+                schemaPath,
+                "--out",
+                outDir,
+                "--namespace",
+                "Test.Full",
+            ]);
+
+            exit.Should().Be(0);
+            var files = Directory.GetFiles(outDir, "*.g.cs");
+            var code = string.Join("\n", files.Select(File.ReadAllText));
+            // 既定 OFF ではエンティティ別のリモート面は生成されない
+            // （ランタイム基底 IRemoteRepository は常時出力されるため、エンティティ別のインターフェイス名で判定する）
+            code.Should().NotContain("ICustomerRemoteRepository");
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>
+    /// quicker.json の GenerateRemoteContracts=true 指定でも、リモート面が追加生成されることを検証する
+    /// </summary>
+    [Fact(DisplayName = "quicker.json の GenerateRemoteContracts=true でリモート面が生成される")]
+    public async Task Generate_WithRemoteContractsFromConfig_EmitsRemoteRepositoryInterface()
+    {
+        var (schemaPath, outDir, root) = CreateSampleSchema();
+        var configPath = Path.Combine(root, "quicker.json");
+        File.WriteAllText(
+            configPath,
+            """{ "GenerateRepositories": true, "GenerateRemoteContracts": true }"""
+        );
+
+        try
+        {
+            var exit = await CliApp.InvokeAsync([
+                "generate",
+                "--schema",
+                schemaPath,
+                "--out",
+                outDir,
+                "--namespace",
+                "Test.RemoteConfig",
+                "--config",
+                configPath,
+            ]);
+
+            exit.Should().Be(0);
+            var files = Directory.GetFiles(outDir, "*.g.cs");
+            var code = string.Join("\n", files.Select(File.ReadAllText));
+            code.Should().Contain("public partial interface ICustomerRemoteRepository");
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>
     /// --api-docs 指定時は出力ディレクトリに API リファレンス Markdown（.g.md）が 1 つ書き出されることを検証する
     /// </summary>
     [Fact(DisplayName = "--api-docs 指定で .g.md が出力される")]

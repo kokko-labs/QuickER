@@ -18,6 +18,7 @@ ER 図を描く → データベースを作る → C# のデータアクセス�
   - **Repository (QuickER)** — 依存最小の軽量 Repository（式木クエリ・Include・グラフ保存・楽観排他・生 SQL の逃げ道付き）
   - **EF Core** — 既存 Entity をそのまま載せる DbContext ＋ 同一インターフェイスの EF 実装。**DI 登録 1 行の差し替え**で Repository (QuickER) と交換可能
   - **名前付きクエリ** — 検索メソッドの定義（条件・並び順・ページング・射影）を図に保存し、型付きの Repository メソッド（例 `GetByCustomerAsync(int customerId, ...)`）として全実装（Repository (QuickER) / EF Core）へ自動生成。条件はミニ DSL（`CustomerId = @customerId AND Memo LIKE @keyword` 等）で書き、GUI エディタが即時検証
+  - **リモート対応インターフェイス（--remote-contracts）** — CRUD・保存・名前付きクエリ（＝将来 Web サービス越しに提供できる操作）だけを持つ `I{Entity}RemoteRepository` を追加生成するオプション。`I{Entity}Repository` は全メソッドを持ったままこれを継承するため既存コードに影響はなく、アプリ本体をリモート面だけに依存させておけば、将来のリモート実装への差し替えがコンパイル時に安全になる
 - **AI チャット** — 対話で ER 図を生成・編集（OpenAI / Anthropic の API キー、Ollama、Codex、Claude Code に対応）。ER 図から Web モック画面（HTML）の生成も可能
 - **豊富な入出力** — 取込: DBML / Mermaid / Excel 定義書 / 実 DB（5 方言）。出力: PNG / SVG / SQL DDL / Mermaid / DBML / Excel 定義書 / ベクタ印刷（1 ページ縮小・原寸大 PDF）
 - **git フレンドリーな保存形式** — 意味モデル（テーブル定義）と視覚情報（座標・色）を分離した JSON 1 ファイル

@@ -30,7 +30,7 @@ using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
-namespace QuickER.Tests.GeneratedSqliteFixture;
+namespace QuickER.Tests.GeneratedRemoteContractFixture;
 
 /// <summary>Entity ナビゲーションへ参照テーブル・カラム情報を付加する独自属性</summary>
 [AttributeUsage(AttributeTargets.Property, AllowMultiple = false)]
@@ -6330,27 +6330,135 @@ public static class GeneratedRepositoryServiceCollectionExtensions
         ));
         services.AddSingleton<ISqlExecutor, SqlExecutor>();
         services.AddScoped<ICustomerRepository, CustomerRepository>();
+        services.AddScoped<ICustomerRemoteRepository>(provider =>
+            provider.GetRequiredService<ICustomerRepository>()
+        );
         services.AddScoped<IOrderRepository, OrderRepository>();
+        services.AddScoped<IOrderRemoteRepository>(provider =>
+            provider.GetRequiredService<IOrderRepository>()
+        );
 
         return services;
     }
 }
 
-/// <summary>CustomerEntity 用リポジトリインターフェース</summary>
-public partial interface ICustomerRepository : IRepository<CustomerEntity, CustomerIdValue> { }
+/// <summary>CustomerEntity 用リポジトリのリモート面（ネットワーク境界を越えられる CRUD・保存・名前付きクエリのみ。将来リモート実装へ差し替え可能）</summary>
+public partial interface ICustomerRemoteRepository : IRemoteRepository<CustomerEntity, CustomerIdValue> { }
+
+/// <summary>CustomerEntity 用リポジトリインターフェース（全機能面＝リモート面に式木クエリ・生 SQL・一括追加を追加）</summary>
+public partial interface ICustomerRepository
+    : ICustomerRemoteRepository,
+        IRepository<CustomerEntity, CustomerIdValue> { }
 
 /// <summary>CustomerEntity 用リポジトリ実装</summary>
 public sealed partial class CustomerRepository(ISqlConnectionFactory connectionFactory)
     : SqliteRepository<CustomerEntity, CustomerIdValue>(connectionFactory),
         ICustomerRepository { }
 
-/// <summary>OrderEntity 用リポジトリインターフェース</summary>
-public partial interface IOrderRepository : IRepository<OrderEntity, OrderIdValue> { }
+/// <summary>OrderEntity 用リポジトリのリモート面（ネットワーク境界を越えられる CRUD・保存・名前付きクエリのみ。将来リモート実装へ差し替え可能）</summary>
+public partial interface IOrderRemoteRepository : IRemoteRepository<OrderEntity, OrderIdValue>
+{
+    /// <summary>顧客IDで注文を新しい順（注文ID降順）に検索する（ページング付き）</summary>
+    Task<IReadOnlyList<OrderEntity>> GetByCustomerAsync(int customerId, int take, int skip = 0, CancellationToken cancellationToken = default);
+
+    /// <summary>最新（注文IDが最大）の注文を 1 件取得する</summary>
+    Task<OrderEntity?> FindTopAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>顧客IDに紐づく注文件数を取得する</summary>
+    Task<int> CountByCustomerAsync(int customerId, CancellationToken cancellationToken = default);
+
+    /// <summary>メモの部分一致で注文を検索する</summary>
+    Task<IReadOnlyList<OrderEntity>> SearchMemoAsync(string keyword, CancellationToken cancellationToken = default);
+
+    /// <summary>注文IDの一覧で注文を取得する</summary>
+    Task<IReadOnlyList<OrderEntity>> GetByIdsAsync(IReadOnlyList<int> ids, CancellationToken cancellationToken = default);
+
+    /// <summary>顧客IDに紐づく注文を射影（顧客ID・金額）で新しい順に取得する</summary>
+    Task<IReadOnlyList<OrderSummaryRow>> GetSummariesAsync(int customerId, int take, int skip = 0, CancellationToken cancellationToken = default);
+
+    /// <summary>顧客IDに紐づく注文金額の合計を取得する（自由 SQL・SQLite）</summary>
+    /// <remarks>実装が生成されない実装先（EF Core・SQL 未定義の方言・インメモリ）では partial クラスでの実装が必要。</remarks>
+    Task<decimal?> SumAmountsAsync(int customerId, CancellationToken cancellationToken = default);
+
+    /// <summary>注文IDの一覧で注文を取得する（自由 SQL・IN のリスト展開）</summary>
+    /// <remarks>実装が生成されない実装先（EF Core・SQL 未定義の方言・インメモリ）では partial クラスでの実装が必要。</remarks>
+    Task<IReadOnlyList<OrderEntity>> GetByIdsRawAsync(IReadOnlyList<int> ids, CancellationToken cancellationToken = default);
+
+    /// <summary>顧客IDで注文を古い順に検索する（列参照型付け＝VO 有効時は VO 引数）</summary>
+    Task<IReadOnlyList<OrderEntity>> GetByCustomerTypedAsync(CustomerIdValue customerId, CancellationToken cancellationToken = default);
+
+    /// <summary>利用者が partial クラスで実装する特別な検索（manual）</summary>
+    /// <remarks>実装が生成されない実装先（EF Core・SQL 未定義の方言・インメモリ）では partial クラスでの実装が必要。</remarks>
+    Task<OrderEntity?> SpecialLookupAsync(int customerId, CancellationToken cancellationToken = default);
+}
+
+/// <summary>OrderEntity 用リポジトリインターフェース（全機能面＝リモート面に式木クエリ・生 SQL・一括追加を追加）</summary>
+public partial interface IOrderRepository
+    : IOrderRemoteRepository,
+        IRepository<OrderEntity, OrderIdValue> { }
+
+/// <summary>名前付きクエリ GetSummaries の射影 DTO（orders）</summary>
+public sealed partial class OrderSummaryRow
+{
+    /// <summary>CustomerId</summary>
+    public CustomerIdValue? CustomerId { get; set; }
+
+    /// <summary>Amount</summary>
+    public AmountValue? Amount { get; set; }
+}
 
 /// <summary>OrderEntity 用リポジトリ実装</summary>
 public sealed partial class OrderRepository(ISqlConnectionFactory connectionFactory)
     : SqliteRepository<OrderEntity, OrderIdValue>(connectionFactory),
-        IOrderRepository { }
+        IOrderRepository
+{
+    /// <summary>顧客IDで注文を新しい順（注文ID降順）に検索する（ページング付き）</summary>
+    public Task<IReadOnlyList<OrderEntity>> GetByCustomerAsync(int customerId, int take, int skip = 0, CancellationToken cancellationToken = default) =>
+        Query().Where(e => e.CustomerId == CustomerIdValue.Create(customerId)).OrderByDescending(e => e.OrderId).Skip(skip).Take(take).ToListAsync(cancellationToken);
+
+    /// <summary>最新（注文IDが最大）の注文を 1 件取得する</summary>
+    public Task<OrderEntity?> FindTopAsync(CancellationToken cancellationToken = default) =>
+        Query().OrderByDescending(e => e.OrderId).FirstOrDefaultAsync(cancellationToken);
+
+    /// <summary>顧客IDに紐づく注文件数を取得する</summary>
+    public Task<int> CountByCustomerAsync(int customerId, CancellationToken cancellationToken = default) =>
+        Query().Where(e => e.CustomerId == CustomerIdValue.Create(customerId)).CountAsync(cancellationToken);
+
+    /// <summary>メモの部分一致で注文を検索する</summary>
+    public Task<IReadOnlyList<OrderEntity>> SearchMemoAsync(string keyword, CancellationToken cancellationToken = default) =>
+        Query().Where(e => e.Memo!.Contains(keyword)).ToListAsync(cancellationToken);
+
+    /// <summary>注文IDの一覧で注文を取得する</summary>
+    public Task<IReadOnlyList<OrderEntity>> GetByIdsAsync(IReadOnlyList<int> ids, CancellationToken cancellationToken = default)
+    {
+        var idsValues = ids.Select(OrderIdValue.Create).ToList();
+        return Query().Where(e => idsValues.Contains(e.OrderId)).ToListAsync(cancellationToken);
+    }
+
+    /// <summary>顧客IDに紐づく注文を射影（顧客ID・金額）で新しい順に取得する</summary>
+    public Task<IReadOnlyList<OrderSummaryRow>> GetSummariesAsync(int customerId, int take, int skip = 0, CancellationToken cancellationToken = default) =>
+        Query().Where(e => e.CustomerId == CustomerIdValue.Create(customerId)).OrderByDescending(e => e.OrderId).Skip(skip).Take(take).ToProjectionListAsync(e => new OrderSummaryRow { CustomerId = e.CustomerId, Amount = e.Amount }, cancellationToken);
+
+    /// <summary>顧客IDに紐づく注文金額の合計を取得する（自由 SQL・SQLite）</summary>
+    public Task<decimal?> SumAmountsAsync(int customerId, CancellationToken cancellationToken = default) =>
+        ExecuteScalarSqlAsync<decimal?>(
+            @"SELECT SUM(""amount"") FROM ""orders"" WHERE ""customer_id"" = @customerId",
+            new { customerId },
+            cancellationToken
+        );
+
+    /// <summary>注文IDの一覧で注文を取得する（自由 SQL・IN のリスト展開）</summary>
+    public Task<IReadOnlyList<OrderEntity>> GetByIdsRawAsync(IReadOnlyList<int> ids, CancellationToken cancellationToken = default) =>
+        QueryBySqlAsync(
+            @"SELECT * FROM ""orders"" WHERE ""order_id"" IN (@ids) ORDER BY ""order_id""",
+            new { ids },
+            cancellationToken
+        );
+
+    /// <summary>顧客IDで注文を古い順に検索する（列参照型付け＝VO 有効時は VO 引数）</summary>
+    public Task<IReadOnlyList<OrderEntity>> GetByCustomerTypedAsync(CustomerIdValue customerId, CancellationToken cancellationToken = default) =>
+        Query().Where(e => e.CustomerId == customerId).OrderBy(e => e.OrderId).ToListAsync(cancellationToken);
+}
 
 /// <summary>
 /// 既存スキーマへ接続する EF Core の DbContext。
@@ -7680,7 +7788,13 @@ public static class GeneratedEfCoreRepositoryServiceCollectionExtensions
         services.AddDbContextFactory<QuickErDbContext>(configureDbContext);
         services.AddSingleton<ISqlExecutor, EfCoreSqlExecutor<QuickErDbContext>>();
         services.AddScoped<ICustomerRepository, EfCoreCustomerRepository>();
+        services.AddScoped<ICustomerRemoteRepository>(provider =>
+            provider.GetRequiredService<ICustomerRepository>()
+        );
         services.AddScoped<IOrderRepository, EfCoreOrderRepository>();
+        services.AddScoped<IOrderRemoteRepository>(provider =>
+            provider.GetRequiredService<IOrderRepository>()
+        );
 
         return services;
     }
@@ -7700,4 +7814,36 @@ public sealed partial class EfCoreOrderRepository(
 ) : EfCoreRepository<OrderEntity, OrderIdValue, QuickErDbContext>(
         contextFactory
     ),
-        IOrderRepository { }
+        IOrderRepository
+{
+    /// <summary>顧客IDで注文を新しい順（注文ID降順）に検索する（ページング付き）</summary>
+    public Task<IReadOnlyList<OrderEntity>> GetByCustomerAsync(int customerId, int take, int skip = 0, CancellationToken cancellationToken = default) =>
+        Query().Where(e => e.CustomerId == CustomerIdValue.Create(customerId)).OrderByDescending(e => e.OrderId).Skip(skip).Take(take).ToListAsync(cancellationToken);
+
+    /// <summary>最新（注文IDが最大）の注文を 1 件取得する</summary>
+    public Task<OrderEntity?> FindTopAsync(CancellationToken cancellationToken = default) =>
+        Query().OrderByDescending(e => e.OrderId).FirstOrDefaultAsync(cancellationToken);
+
+    /// <summary>顧客IDに紐づく注文件数を取得する</summary>
+    public Task<int> CountByCustomerAsync(int customerId, CancellationToken cancellationToken = default) =>
+        Query().Where(e => e.CustomerId == CustomerIdValue.Create(customerId)).CountAsync(cancellationToken);
+
+    /// <summary>メモの部分一致で注文を検索する</summary>
+    public Task<IReadOnlyList<OrderEntity>> SearchMemoAsync(string keyword, CancellationToken cancellationToken = default) =>
+        Query().Where(e => e.Memo!.Contains(keyword)).ToListAsync(cancellationToken);
+
+    /// <summary>注文IDの一覧で注文を取得する</summary>
+    public Task<IReadOnlyList<OrderEntity>> GetByIdsAsync(IReadOnlyList<int> ids, CancellationToken cancellationToken = default)
+    {
+        var idsValues = ids.Select(OrderIdValue.Create).ToList();
+        return Query().Where(e => idsValues.Contains(e.OrderId)).ToListAsync(cancellationToken);
+    }
+
+    /// <summary>顧客IDに紐づく注文を射影（顧客ID・金額）で新しい順に取得する</summary>
+    public Task<IReadOnlyList<OrderSummaryRow>> GetSummariesAsync(int customerId, int take, int skip = 0, CancellationToken cancellationToken = default) =>
+        Query().Where(e => e.CustomerId == CustomerIdValue.Create(customerId)).OrderByDescending(e => e.OrderId).Skip(skip).Take(take).ToProjectionListAsync(e => new OrderSummaryRow { CustomerId = e.CustomerId, Amount = e.Amount }, cancellationToken);
+
+    /// <summary>顧客IDで注文を古い順に検索する（列参照型付け＝VO 有効時は VO 引数）</summary>
+    public Task<IReadOnlyList<OrderEntity>> GetByCustomerTypedAsync(CustomerIdValue customerId, CancellationToken cancellationToken = default) =>
+        Query().Where(e => e.CustomerId == customerId).OrderBy(e => e.OrderId).ToListAsync(cancellationToken);
+}

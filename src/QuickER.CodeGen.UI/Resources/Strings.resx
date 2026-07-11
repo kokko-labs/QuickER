@@ -118,6 +118,15 @@
   <data name="CodeGen_ApiDocsTooltip" xml:space="preserve">
     <value>Additionally outputs one API reference Markdown ({baseName}.g.md) sharing the generated code's base name (overwritten on regeneration)</value>
   </data>
+  <data name="CodeGen_RemoteAccess" xml:space="preserve">
+    <value>Remote</value>
+  </data>
+  <data name="CodeGen_GenerateRemoteContracts" xml:space="preserve">
+    <value>Generate Repository interfaces for remote operations</value>
+  </data>
+  <data name="CodeGen_RemoteContractsToolTip" xml:space="preserve">
+    <value>Additionally generates I{Entity}RemoteRepository with only the operations that can cross a network boundary (CRUD, save, named queries). I{Entity}Repository keeps all methods and inherits it, so existing code is unaffected. Code that depends only on the remote surface can later be switched safely to a web-service-backed implementation</value>
+  </data>
   <data name="CodeGen_OutputDestination" xml:space="preserve">
     <value>Output</value>
   </data>

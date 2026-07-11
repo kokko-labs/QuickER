@@ -217,6 +217,75 @@ public class GeneratedCodeCompilationTests
         return data;
     }
 
+    /// <summary>マトリクスケース: リモート契約生成（GenerateRemoteContracts）の実装先横断ケース</summary>
+    public static TheoryData<string, CodeGenerationOptions> RemoteContractMatrixCases()
+    {
+        var data = new TheoryData<string, CodeGenerationOptions>();
+        foreach (var split in new[] { false, true })
+        foreach (var vo in new[] { false, true })
+        {
+            data.Add(
+                $"remote 自作 sqlserver Split={split} VO={vo}",
+                new CodeGenerationOptions
+                {
+                    NamespaceName = "Sample.Domain",
+                    SplitFilesByCategory = split,
+                    GenerateValueObjects = vo,
+                    GenerateRemoteContracts = true,
+                }
+            );
+        }
+
+        // EF 単独（ローカル面・両面 DI が EF 実装だけでも成立すること）
+        data.Add(
+            "remote EF 単独",
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                GenerateRepositories = false,
+                GenerateEfCore = true,
+                GenerateRemoteContracts = true,
+            }
+        );
+
+        // SQLite 自作＋EF 併存（パリティ構成）
+        data.Add(
+            "remote SQLite + EF Core",
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                RepositoryDialect = "sqlite",
+                GenerateEfCore = true,
+                GenerateRemoteContracts = true,
+            }
+        );
+
+        // インメモリ単独（両面 DI・ローカル面実装）
+        data.Add(
+            "remote InMemory 単独",
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                GenerateRepositories = false,
+                GenerateInMemoryRepositories = true,
+                GenerateRemoteContracts = true,
+            }
+        );
+
+        // マルチターゲット（中立契約 1 回＋方言別実装・keyed 両面 DI）
+        data.Add(
+            "remote マルチターゲット(sqlserver/sqlite)",
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                RepositoryDialects = ["sqlserver", "sqlite"],
+                GenerateRemoteContracts = true,
+            }
+        );
+
+        return data;
+    }
+
     /// <summary>マトリクスケース: オプション単発（各種フラグ・Namespace 上書き）</summary>
     public static TheoryData<string, CodeGenerationOptions> SingleOptionCases()
     {
@@ -321,6 +390,14 @@ public class GeneratedCodeCompilationTests
     [Theory]
     [MemberData(nameof(SingleOptionCases))]
     public void Generate_SingleOptions_ShouldProduceCompilableCode(
+        string caseName,
+        CodeGenerationOptions options
+    ) => AssertCompiles(caseName, options);
+
+    /// <summary>リモート契約生成（GenerateRemoteContracts）の実装先横断ケースで、生成コードがエラー・警告なしでコンパイルできることを検証する</summary>
+    [Theory]
+    [MemberData(nameof(RemoteContractMatrixCases))]
+    public void Generate_RemoteContractMatrix_ShouldProduceCompilableCode(
         string caseName,
         CodeGenerationOptions options
     ) => AssertCompiles(caseName, options);

@@ -178,6 +178,25 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     /// <summary>パッケージ参照モードのチェックボックスのツールチップ</summary>
     public string UseRuntimePackagesToolTip => Strings.CodeGen_UseRuntimePackagesToolTip;
 
+    /// <summary>
+    /// リモート操作用の Repository インターフェイス（<c>I{Entity}RemoteRepository</c>）を追加生成するか（既定 false）
+    /// </summary>
+    /// <remarks>
+    /// 純粋に追加的なオプションで、ON にしても <c>I{Entity}Repository</c>（全機能面）は変わらない。
+    /// DB アクセスが「なし」のときは Repository 契約自体が生成されず無意味なため、行ごと非表示にする
+    /// （<see cref="ShowRemoteContracts"/>）。値は保持され、DB アクセスを選び直すと再び表示される。
+    /// </remarks>
+    [ObservableProperty]
+    private bool _generateRemoteContracts;
+
+    /// <summary>
+    /// リモート対応の行を表示するかどうか（DB アクセスが「なし」以外＝Repository 契約が生成される場合のみ）
+    /// </summary>
+    public bool ShowRemoteContracts => GenerateRepositories || GenerateEfCore;
+
+    /// <summary>リモート対応チェックボックスのツールチップ</summary>
+    public string RemoteContractsToolTip => Strings.CodeGen_RemoteContractsToolTip;
+
     /// <summary>入力エラーや補助メッセージ</summary>
     [ObservableProperty]
     private string _statusMessage = string.Empty;
@@ -323,6 +342,8 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
         OnPropertyChanged(nameof(DbAccessNone));
         OnPropertyChanged(nameof(DbAccessRepository));
         OnPropertyChanged(nameof(DbAccessEfCore));
+        // リモート対応行の表示/非表示は DB アクセス選択に連動する（「なし」で非表示）
+        OnPropertyChanged(nameof(ShowRemoteContracts));
     }
 
     partial void OnRuntimeNamespaceChanged(string value) => RefreshPreview();
@@ -454,6 +475,8 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
             GenerateEfCore = settings.GenerateEfCore && !GenerateRepositories;
             // パッケージ参照モードは EF Core とも併用できるため、保存値をそのまま復元する
             UseRuntimePackages = settings.UseRuntimePackages;
+            // リモート対応（リモート面の追加生成）は保存値をそのまま復元する（行の表示/非表示は UI 側で連動）
+            GenerateRemoteContracts = settings.GenerateRemoteContracts;
             // API リファレンス出力は DB アクセス選択とは独立のため、保存値をそのまま復元する
             GenerateApiDocs = settings.GenerateApiDocs;
             GenerateValueObjects = settings.GenerateValueObjects;
@@ -495,6 +518,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
             GenerateRepositories = GenerateRepositories,
             GenerateEfCore = GenerateEfCore,
             UseRuntimePackages = UseRuntimePackages,
+            GenerateRemoteContracts = GenerateRemoteContracts,
             GenerateApiDocs = GenerateApiDocs,
             GenerateValueObjects = GenerateValueObjects,
             UseGuidKeyForStringPrimaryKey = UseGuidKeyForStringPrimaryKey,
@@ -528,6 +552,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
             RepositoryDialects = SelectedRepositoryDialects(),
             GenerateEfCore = GenerateEfCore,
             UseRuntimePackages = UseRuntimePackages,
+            GenerateRemoteContracts = GenerateRemoteContracts,
             GenerateApiDocs = GenerateApiDocs,
             GenerateValueObjects = GenerateValueObjects,
             UseGuidKeyForStringPrimaryKey = UseGuidKeyForStringPrimaryKey,

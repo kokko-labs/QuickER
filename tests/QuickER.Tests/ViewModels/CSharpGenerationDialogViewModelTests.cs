@@ -375,6 +375,82 @@ public class CSharpGenerationDialogViewModelTests
         }
     }
 
+    /// <summary>
+    /// リモート対応のチェックを ON にすると、結果オプションの GenerateRemoteContracts が true になり、
+    /// OFF（既定）では false になることを検証する
+    /// </summary>
+    [Fact(
+        DisplayName = "リモート対応 ON で GenerateRemoteContracts=true・OFF で false が結果へ反映される"
+    )]
+    public void GenerateRemoteContracts_IsReflectedInResultOptions()
+    {
+        var vm = CreateViewModel(out _, currentProvider: new QuickER.SqlServer.SqlServerProvider());
+        vm.BaseNamespace = "Sample.Domain";
+        vm.OutputFilePath = @"C:\temp\Entities.g.cs";
+        vm.DbAccessRepository = true;
+
+        // 既定（OFF）は false
+        vm.GenerateRemoteContracts.Should().BeFalse("既定は OFF");
+        vm.ToOptions().GenerateRemoteContracts.Should().BeFalse();
+
+        vm.GenerateRemoteContracts = true;
+        vm.OkCommand.Execute(null);
+
+        vm.Result.Should().NotBeNull();
+        vm.Result!.Options.GenerateRemoteContracts.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// リモート対応行の表示フラグは DB アクセス選択に連動し、「なし」では非表示・
+    /// 自作 Repository / EF Core 選択で表示になることを検証する
+    /// </summary>
+    [Fact(DisplayName = "リモート対応行は DB アクセス「なし」で非表示・Repository/EF Core で表示")]
+    public void ShowRemoteContracts_TracksDbAccessSelection()
+    {
+        var vm = CreateViewModel(out _, currentProvider: new QuickER.SqlServer.SqlServerProvider());
+        vm.BaseNamespace = "Sample.Domain";
+
+        vm.ShowRemoteContracts.Should().BeFalse("既定は DB アクセス「なし」のため非表示");
+
+        vm.DbAccessRepository = true;
+        vm.ShowRemoteContracts.Should().BeTrue("自作 Repository 選択で表示");
+
+        vm.DbAccessEfCore = true;
+        vm.ShowRemoteContracts.Should().BeTrue("EF Core 選択でも表示");
+
+        vm.DbAccessNone = true;
+        vm.ShowRemoteContracts.Should().BeFalse("DB アクセス「なし」に戻すと非表示");
+    }
+
+    /// <summary>リモート対応チェックの状態が保存・復元されることを検証する</summary>
+    [Fact(DisplayName = "リモート対応チェックが次回起動時に復元される")]
+    public void GenerateRemoteContracts_IsPersistedAndRestored()
+    {
+        var vm = CreateViewModel(out var folder);
+
+        try
+        {
+            vm.BaseNamespace = "Acme.App";
+            vm.OutputFilePath = @"C:\temp\Entities.g.cs";
+            vm.DbAccessRepository = true;
+            vm.GenerateRemoteContracts = true;
+            vm.OkCommand.Execute(null);
+
+            var restored = new CSharpGenerationDialogViewModel(
+                new CSharpGenerationSettingsStore(folder)
+            );
+
+            restored.GenerateRemoteContracts.Should().BeTrue();
+        }
+        finally
+        {
+            if (Directory.Exists(folder))
+            {
+                Directory.Delete(folder, recursive: true);
+            }
+        }
+    }
+
     /// <summary>不正な名前空間ではエラーメッセージを表示し、確定・クローズしないことを検証する</summary>
     [Fact(DisplayName = "不正な namespace ではエラーメッセージを表示して閉じない")]
     public void Ok_WithInvalidNamespace_ShowsError()
