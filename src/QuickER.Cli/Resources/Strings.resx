@@ -103,6 +103,9 @@
   <data name="Cli_Opt_RemoteContracts" xml:space="preserve">
     <value>Additionally generate remote-capable Repository interfaces I{Entity}RemoteRepository (CRUD, save, named queries only; I{Entity}Repository keeps all methods and inherits it) (default false; overrides the settings file)</value>
   </data>
+  <data name="Cli_Opt_RemoteServices" xml:space="preserve">
+    <value>Include the HTTP client implementation of the remote surface in the main output, and additionally output an ASP.NET Core server implementation to {baseName}.RemoteServer.g.cs (implies the remote surface --remote-contracts automatically; default false; overrides the settings file)</value>
+  </data>
   <data name="Cli_SchemaFileNotFound" xml:space="preserve">
     <value>Schema file not found: {0}</value>
   </data>

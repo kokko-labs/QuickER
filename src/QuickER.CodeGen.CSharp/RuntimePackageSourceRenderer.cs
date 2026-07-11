@@ -44,14 +44,21 @@ public sealed class RuntimePackageSourceRenderer
 
         // Runtime（共通基盤）＋ Repository 契約（ContractOnly）の using を、通常生成と同じ解決器から得る。
         // 契約のみのため ADO（SqlClient / Sqlite）・DI は付かない。
+        // リモートクライアントの固定 infra（HttpRemoteRepository 等）を含めるため includeRemoteServices を立てるが、
+        // DI 登録拡張（AddGeneratedHttpRemoteRepositories）はスキーマ依存物でパッケージに入れないため、
+        // その using（Microsoft.Extensions.DependencyInjection）は除外して Core の依存ゼロを保つ
+        // （方言エンジンパッケージの除外と同じ理由）。
         var usings = ResolveUsings(
-            options,
-            [GenerationBucket.Runtime, GenerationBucket.Repository],
-            dialect: "sqlserver",
-            contractOnly: true,
-            generateRepositories: true,
-            crossUsings: []
-        );
+                options,
+                [GenerationBucket.Runtime, GenerationBucket.Repository],
+                dialect: "sqlserver",
+                contractOnly: true,
+                generateRepositories: true,
+                crossUsings: [],
+                includeRemoteServices: true
+            )
+            .Where(u => u != "Microsoft.Extensions.DependencyInjection")
+            .ToList();
 
         var scope = BuildScope(
             RuntimePackages.Core,
@@ -181,6 +188,10 @@ public sealed class RuntimePackageSourceRenderer
             GenerateMappers = true,
             GenerateRepositories = true,
             GenerateEfCore = true,
+            // リモートサービスのクライアント側固定 infra（RemoteJson・RemoteRepositoryException・HttpRemoteRepository 等）
+            // は BCL のみ依存のため Core パッケージへ含める（per-entity クライアント・DI 登録はスキーマ依存物として
+            // 常に生成側＝!runtime_package_export ゲートで除外される）
+            GenerateRemoteServices = true,
             GenerateValueObjects = true,
             IncludeDataAnnotations = true,
             IncludeJsonIgnoreOnParentNavigation = true,
@@ -209,23 +220,25 @@ public sealed class RuntimePackageSourceRenderer
         string dialect,
         bool contractOnly,
         bool generateRepositories,
-        IReadOnlyList<string> crossUsings
+        IReadOnlyList<string> crossUsings,
+        bool includeRemoteServices = false
     )
     {
-        // GenerateRepositories は Repository バケットの ADO using 有無に影響するため、パッケージごとに切り替える。
-        var usingOptions = generateRepositories
-            ? options
-            : new CodeGenerationOptions
-            {
-                GenerateEntityClasses = options.GenerateEntityClasses,
-                GenerateEditModels = options.GenerateEditModels,
-                GenerateMappers = options.GenerateMappers,
-                GenerateRepositories = false,
-                GenerateEfCore = options.GenerateEfCore,
-                GenerateValueObjects = options.GenerateValueObjects,
-                IncludeDataAnnotations = options.IncludeDataAnnotations,
-                IncludeJsonIgnoreOnParentNavigation = options.IncludeJsonIgnoreOnParentNavigation,
-            };
+        // GenerateRepositories（Repository バケットの ADO using 有無）と GenerateRemoteServices
+        // （HttpClient / JSON の using 有無。リモート固定 infra を内包するのはコアパッケージのみ）を
+        // パッケージごとに切り替える。
+        var usingOptions = new CodeGenerationOptions
+        {
+            GenerateEntityClasses = options.GenerateEntityClasses,
+            GenerateEditModels = options.GenerateEditModels,
+            GenerateMappers = options.GenerateMappers,
+            GenerateRepositories = generateRepositories,
+            GenerateEfCore = options.GenerateEfCore,
+            GenerateRemoteServices = includeRemoteServices && options.GenerateRemoteServices,
+            GenerateValueObjects = options.GenerateValueObjects,
+            IncludeDataAnnotations = options.IncludeDataAnnotations,
+            IncludeJsonIgnoreOnParentNavigation = options.IncludeJsonIgnoreOnParentNavigation,
+        };
 
         var spec = new GeneratedFileSpec
         {

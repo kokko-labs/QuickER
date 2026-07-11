@@ -16,6 +16,8 @@ using System.Data.Common;
 using System.Globalization;
 using System.Linq;
 using System.Linq.Expressions;
+using System.Net.Http;
+using System.Net.Http.Json;
 using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -2393,3 +2395,286 @@ public sealed record CascadeNavigation(
     string PrincipalColumn,
     string DependentColumn
 );
+
+/// <summary>リモート転送（HTTP + JSON）で使う共有シリアライズ設定</summary>
+/// <remarks>
+/// エンティティの JSON 往復（<see cref="EntityBase.ToJson"/> / <see cref="EntityBase.Clone"/>）と同じ意味論
+/// （get/set プロパティのみ・RowState 込み・親参照ナビゲーションは [JsonIgnore] で循環なし）に、
+/// 転送用の大文字小文字非依存読み取りを加えたもの。クライアント・サーバーの双方がこの設定を使うことでワイヤ表現が一致する。
+/// </remarks>
+public static class RemoteJson
+{
+    /// <summary>クライアント・サーバー共通の転送用 JSON 設定</summary>
+    /// <remarks>
+    /// IgnoreReadOnlyProperties は指定しない（クエリ転送のエンベロープに使う匿名型は get-only プロパティのため、
+    /// 指定すると本文が空 JSON になる）。エンティティの派生フラグ（IsAdded 等の get-only bool）は余分に
+    /// 出力されるが、読み取り時にセッターが無く無視されるため往復の意味論（RowState 込み）は変わらない。
+    /// </remarks>
+    public static JsonSerializerOptions Options { get; } =
+        new()
+        {
+            ReferenceHandler = ReferenceHandler.IgnoreCycles,
+            PropertyNameCaseInsensitive = true,
+            Converters = { new ValueObjectJsonConverterFactory() },
+        };
+}
+
+/// <summary>リモート呼び出しがサーバー側エラーで失敗したことを表す例外（HTTP ステータスとサーバーのメッセージを保持）</summary>
+/// <remarks>楽観的競合（HTTP 409）は本例外ではなく <see cref="SaveConflictException"/> として復元される（直結時と同じ catch が機能する）</remarks>
+public sealed class RemoteRepositoryException : Exception
+{
+    /// <summary>HTTP ステータスコードとメッセージを指定して初期化する</summary>
+    public RemoteRepositoryException(int statusCode, string message)
+        : base(message)
+    {
+        StatusCode = statusCode;
+    }
+
+    /// <summary>サーバーが返した HTTP ステータスコード</summary>
+    public int StatusCode { get; }
+}
+
+/// <summary>転送エラーの構造化ペイロード（サーバー→クライアント。種別でクライアント側の例外型を復元する）</summary>
+public sealed class RemoteError
+{
+    /// <summary>エラー種別（"SaveConflict"＝楽観的競合 / "Error"＝その他）</summary>
+    public string Type { get; set; } = string.Empty;
+
+    /// <summary>サーバー側の例外メッセージ</summary>
+    public string Message { get; set; } = string.Empty;
+}
+
+/// <summary>主キー 1 つを運ぶリクエスト本文（GetById / Delete）</summary>
+public sealed record RemoteIdRequest<TKey>(TKey Id);
+
+/// <summary>エンティティ 1 件を運ぶリクエスト本文（Insert / Update）</summary>
+public sealed record RemoteEntityRequest<TEntity>(TEntity Entity);
+
+/// <summary>グラフ保存（単一ルート）のリクエスト本文</summary>
+public sealed record RemoteSaveRequest<TEntity>(
+    TEntity Entity,
+    bool CascadeSave,
+    bool CascadeDelete,
+    bool InsertWhenUpdateMissing
+);
+
+/// <summary>グラフ保存（複数ルート）のリクエスト本文</summary>
+public sealed record RemoteSaveManyRequest<TEntity>(
+    List<TEntity> Entities,
+    bool CascadeSave,
+    bool CascadeDelete,
+    bool InsertWhenUpdateMissing
+);
+
+/// <summary>
+/// リモート面（<see cref="IRemoteRepository{TEntity, TKey}"/>）を HTTP + JSON で呼び出すクライアント実装の共通基底。
+/// </summary>
+/// <remarks>
+/// <para>
+/// 各操作は <c>POST {BaseAddress}{エンティティルート}/{操作名}</c> へ JSON 本文を送り、結果 JSON を復元する。
+/// <see cref="HttpClient.BaseAddress"/> はサーバー側 <c>MapGeneratedRemoteEndpoints</c> の prefix（既定 <c>/quicker</c>）まで
+/// 含み、末尾 <c>/</c> で終わること（例 <c>https://server:5001/quicker/</c>）。認証・TLS 等は HttpClient の構成
+/// （DelegatingHandler・既定ヘッダー）に委ねる。
+/// </para>
+/// <para>
+/// グラフ保存（Save）成功後は直結時と同じく <see cref="EntityBase.AcceptChanges"/> でローカルエンティティの
+/// RowState を確定させる（直結⇔リモートの差し替えで保存後の状態遷移が変わらない）。
+/// </para>
+/// </remarks>
+public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepository<TEntity, TKey>
+    where TEntity : EntityBase, new()
+{
+    private readonly HttpClient _httpClient;
+    private readonly string _entityRoute;
+
+    /// <summary>HTTP クライアントとエンティティルート（例 "Order"）を指定して初期化する</summary>
+    protected HttpRemoteRepository(HttpClient httpClient, string entityRoute)
+    {
+        ArgumentNullException.ThrowIfNull(httpClient);
+        ArgumentException.ThrowIfNullOrWhiteSpace(entityRoute);
+        _httpClient = httpClient;
+        _entityRoute = entityRoute;
+    }
+
+    /// <summary>操作を POST し、結果 JSON を <typeparamref name="TResult"/> へ復元する（生成される転送メソッドの共通経路）</summary>
+    /// <remarks>失敗応答は <see cref="RemoteError"/> を読み、409＋SaveConflict は <see cref="SaveConflictException"/>・それ以外は <see cref="RemoteRepositoryException"/> を送出する</remarks>
+    protected async Task<TResult> InvokeAsync<TResult>(
+        string operation,
+        object? payload,
+        CancellationToken cancellationToken
+    )
+    {
+        using var response = await _httpClient.PostAsJsonAsync(
+            $"{_entityRoute}/{operation}",
+            payload,
+            RemoteJson.Options,
+            cancellationToken
+        );
+
+        await EnsureSuccessAsync(response, cancellationToken);
+
+        var result = await response.Content.ReadFromJsonAsync<TResult>(
+            RemoteJson.Options,
+            cancellationToken
+        );
+        return result!;
+    }
+
+    /// <summary>失敗応答を例外へ変換する（既知の種別は元の例外型を復元する）</summary>
+    private static async Task EnsureSuccessAsync(
+        HttpResponseMessage response,
+        CancellationToken cancellationToken
+    )
+    {
+        if (response.IsSuccessStatusCode)
+        {
+            return;
+        }
+
+        RemoteError? error = null;
+
+        try
+        {
+            error = await response.Content.ReadFromJsonAsync<RemoteError>(
+                RemoteJson.Options,
+                cancellationToken
+            );
+        }
+        catch (JsonException)
+        {
+            // エラーペイロードが JSON でない（プロキシ・インフラ由来の応答など）場合はステータスのみで報告する
+        }
+
+        var statusCode = (int)response.StatusCode;
+        var message =
+            error?.Message ?? $"リモート呼び出しが失敗しました（HTTP {statusCode}）。";
+
+        if (statusCode == 409 && error?.Type == "SaveConflict")
+        {
+            throw new SaveConflictException(message);
+        }
+
+        throw new RemoteRepositoryException(statusCode, message);
+    }
+
+    /// <summary>主キーによる単一エンティティ取得（該当なしは null）</summary>
+    public Task<TEntity?> GetByIdAsync(TKey id, CancellationToken cancellationToken = default) =>
+        InvokeAsync<TEntity?>("GetById", new RemoteIdRequest<TKey>(id), cancellationToken);
+
+    /// <summary>全エンティティ取得</summary>
+    public Task<IReadOnlyList<TEntity>> GetAllAsync(CancellationToken cancellationToken = default) =>
+        InvokeAsync<IReadOnlyList<TEntity>>("GetAll", null, cancellationToken);
+
+    /// <summary>エンティティ追加</summary>
+    public async Task InsertAsync(TEntity entity, CancellationToken cancellationToken = default) =>
+        await InvokeAsync<bool>(
+            "Insert",
+            new RemoteEntityRequest<TEntity>(entity),
+            cancellationToken
+        );
+
+    /// <summary>エンティティ更新（更新対象ありで true）</summary>
+    public Task<bool> UpdateAsync(TEntity entity, CancellationToken cancellationToken = default) =>
+        InvokeAsync<bool>("Update", new RemoteEntityRequest<TEntity>(entity), cancellationToken);
+
+    /// <summary>主キーによるエンティティ削除（削除対象ありで true）</summary>
+    public Task<bool> DeleteAsync(TKey id, CancellationToken cancellationToken = default) =>
+        InvokeAsync<bool>("Delete", new RemoteIdRequest<TKey>(id), cancellationToken);
+
+    /// <summary>RowState に従って 1 トランザクションで追加・更新・削除を保存する（既定で子をカスケード）</summary>
+    public async Task<int> SaveAsync(
+        TEntity entity,
+        bool cascadeSave = true,
+        bool cascadeDelete = true,
+        bool insertWhenUpdateMissing = false,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var affected = await InvokeAsync<int>(
+            "Save",
+            new RemoteSaveRequest<TEntity>(entity, cascadeSave, cascadeDelete, insertWhenUpdateMissing),
+            cancellationToken
+        );
+
+        // 直結時（EntityGraphSaver）と同じく、保存成功後にローカルの RowState を確定させる
+        AcceptChanges(entity, cascadeSave);
+        return affected;
+    }
+
+    /// <summary>複数の集約ルートを 1 トランザクションでまとめて保存する（全件成功か全件ロールバックの原子的処理）</summary>
+    public async Task<int> SaveAsync(
+        IEnumerable<TEntity> entities,
+        bool cascadeSave = true,
+        bool cascadeDelete = true,
+        bool insertWhenUpdateMissing = false,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var list = entities.ToList();
+        var affected = await InvokeAsync<int>(
+            "SaveMany",
+            new RemoteSaveManyRequest<TEntity>(list, cascadeSave, cascadeDelete, insertWhenUpdateMissing),
+            cancellationToken
+        );
+
+        foreach (var entity in list)
+        {
+            AcceptChanges(entity, cascadeSave);
+        }
+
+        return affected;
+    }
+
+    /// <summary>型ごとのカスケード対象ナビゲーションプロパティ（[NavigationReference(Cascade=true)]）のキャッシュ</summary>
+    private static readonly ConcurrentDictionary<Type, PropertyInfo[]> _cascadeNavigations = new();
+
+    /// <summary>コミット後に保存済みエンティティを Unchanged に確定する（直結の EntityGraphSaver.AcceptChanges と同じ意味論）</summary>
+    /// <remarks>削除済み（Removed）は状態を保つ。カスケード時は [NavigationReference] の子方向ナビゲーションを再帰的に確定する</remarks>
+    private static void AcceptChanges(EntityBase entity, bool cascade)
+    {
+        if (entity.IsRemoved)
+        {
+            return;
+        }
+
+        entity.MarkUnchanged();
+
+        if (!cascade)
+        {
+            return;
+        }
+
+        foreach (var property in CascadeNavigationProperties(entity.GetType()))
+        {
+            var value = property.GetValue(entity);
+
+            if (value is EntityBase child)
+            {
+                AcceptChanges(child, true);
+            }
+            else if (value is IEnumerable<EntityBase> children)
+            {
+                foreach (var item in children)
+                {
+                    if (item is not null)
+                    {
+                        AcceptChanges(item, true);
+                    }
+                }
+            }
+        }
+    }
+
+    /// <summary>カスケード対象（子方向）のナビゲーションプロパティを列挙する</summary>
+    private static PropertyInfo[] CascadeNavigationProperties(Type entityType) =>
+        _cascadeNavigations.GetOrAdd(
+            entityType,
+            static type =>
+                type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                    .Where(property =>
+                        property.GetCustomAttribute<NavigationReferenceAttribute>()
+                            is { Cascade: true }
+                    )
+                    .ToArray()
+        );
+}

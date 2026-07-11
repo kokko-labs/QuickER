@@ -252,6 +252,20 @@ internal static class GeneratedFileUsings
                     yield return "Microsoft.Extensions.DependencyInjection";
                 }
 
+                // リモートサービス（クライアント側）: 固定 infra（RemoteJson・RemoteRepositoryException・
+                // HttpRemoteRepository）と per-entity クライアント・AddGeneratedHttpRemoteRepositories は
+                // 契約を出すスペック（単一方言＝契約＋実装、マルチ方言＝契約スペック）にのみ出力される。
+                // HttpClient / PostAsJsonAsync（System.Net.Http(.Json)）・JSON 設定（System.Text.Json(.Serialization)）・
+                // DI 登録拡張（Microsoft.Extensions.DependencyInjection）を使う（すべて BCL＋共有フレームワーク）。
+                if (options.GenerateRemoteServices && (spec.ContractOnly || !spec.MultiDialect))
+                {
+                    yield return "System.Net.Http";
+                    yield return "System.Net.Http.Json";
+                    yield return "System.Text.Json";
+                    yield return "System.Text.Json.Serialization";
+                    yield return "Microsoft.Extensions.DependencyInjection";
+                }
+
                 break;
 
             // EfCore: DbContext / DbSet / ModelBuilder（Microsoft.EntityFrameworkCore）、AddGeneratedEfCoreRepositories の
@@ -275,6 +289,21 @@ internal static class GeneratedFileUsings
                 yield return "Microsoft.EntityFrameworkCore.Storage";
                 yield return "Microsoft.Extensions.DependencyInjection";
                 yield return "Microsoft.Extensions.DependencyInjection.Extensions";
+                break;
+
+            // RemoteServer: ASP.NET Core Minimal API のエンドポイントマッピング。
+            //   MapGroup/MapPost（Microsoft.AspNetCore.Builder / Routing）、HttpContext・ReadFromJsonAsync・
+            //   WriteAsJsonAsync（Microsoft.AspNetCore.Http）、リポジトリ解決（Microsoft.Extensions.DependencyInjection）、
+            //   ハンドラの Func<Task<object?>>（System）・非同期（System.Threading.Tasks）。
+            //   このバケットのファイルは FrameworkReference（Microsoft.AspNetCore.App）を持つプロジェクトに置く前提。
+            case GenerationBucket.RemoteServer:
+                yield return "System";
+                yield return "System.Collections.Generic";
+                yield return "System.Threading.Tasks";
+                yield return "Microsoft.AspNetCore.Builder";
+                yield return "Microsoft.AspNetCore.Http";
+                yield return "Microsoft.AspNetCore.Routing";
+                yield return "Microsoft.Extensions.DependencyInjection";
                 break;
         }
     }

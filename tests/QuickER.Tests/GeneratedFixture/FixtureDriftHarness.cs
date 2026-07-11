@@ -157,7 +157,62 @@ internal static class FixtureDriftHarness
         result.HasErrors.Should().BeFalse("フィクスチャ図の生成でエラーが出てはならない");
         result.Files.Should().ContainSingle("Split 無効のため 1 ファイルで生成される");
 
-        var regenerated = result.Files[0].Content;
+        VerifyOrRegenerateFile(result.Files[0].Content, outputFileName, driftReason);
+    }
+
+    /// <summary>
+    /// 複数ファイルを出力するフィクスチャ（例: リモートサービス＝本体＋RemoteServer）向けのオーバーロード。
+    /// 生成結果の各ファイルを、同名のコミット済みフィクスチャと照合（または再生成）する。
+    /// </summary>
+    /// <param name="diagram">単一ソース定義が返す決定的な ER 図</param>
+    /// <param name="options">フィクスチャ生成に用いる決定的なオプション</param>
+    /// <param name="expectedFileNames">期待する出力ファイル名の一覧（生成結果と完全一致していること）</param>
+    /// <param name="driftReason">ドリフト時に表示する理由（末尾に再生成コマンドが自動付与される）</param>
+    public static void VerifyOrRegenerate(
+        ErDiagram diagram,
+        CodeGenerationOptions options,
+        IReadOnlyList<string> expectedFileNames,
+        string driftReason
+    )
+    {
+        var columnTypes = SqlServerCSharpTypeMapper.ResolveColumnTypes(diagram);
+        columnTypes = CanonicalTypeTokenAttacher.Attach(
+            columnTypes,
+            diagram,
+            new SqlServerTypeCatalog()
+        );
+        var provider = new SqlServerProvider();
+        var queryParameterTypes = QueryParameterTypeResolver.Resolve(
+            diagram,
+            provider.TypeMapper,
+            provider.TypeCatalog
+        );
+        var result = new CSharpCodeGenerationService().Generate(
+            diagram,
+            columnTypes,
+            options,
+            queryParameterTypes
+        );
+
+        result.HasErrors.Should().BeFalse("フィクスチャ図の生成でエラーが出てはならない");
+        result
+            .Files.Select(file => file.FileName)
+            .Should()
+            .Equal(expectedFileNames, "出力ファイル構成そのものもドリフト検知の対象とする");
+
+        foreach (var file in result.Files)
+        {
+            VerifyOrRegenerateFile(file.Content, file.FileName, driftReason);
+        }
+    }
+
+    /// <summary>1 ファイル分の照合（または再生成）を行う。</summary>
+    private static void VerifyOrRegenerateFile(
+        string regenerated,
+        string outputFileName,
+        string driftReason
+    )
+    {
         var fixturePath = ResolveFixturePath(outputFileName);
 
         if (IsRegenerationRequested())

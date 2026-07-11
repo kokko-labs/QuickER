@@ -149,6 +149,41 @@ public sealed class OrderMaintenance(IOrderRepository orders)
 
 このオプションは純粋に追加的です。ON にしても `I{Entity}Repository`・実装クラス・DI の実装登録は従来のまま変わらず、リモート面が同一インスタンスへの転送として DI に追加登録されるだけなので、既存コードを壊さずいつでも有効化できます（`AddGenerated*Repositories` でどちらの面も解決できます）。
 
+## リモートサービス（--remote-services）— 3 階層構成
+
+`--remote-services`（quicker.json の `GenerateRemoteServices`、GUI の「リモート対応」2 つ目のチェックボックス）を指定すると、リモート面を **HTTP + JSON** でネットワーク越しに提供するクライアント／サーバー実装を生成します（リモート面 `--remote-contracts` は自動的に有効になります）。
+
+| 生成物 | 置き場所 | 内容 |
+|---|---|---|
+| HTTP クライアント実装 | 本体生成物へ同梱（依存は BCL の `HttpClient` のみ） | `Http{Entity}RemoteRepository`（`I{Entity}RemoteRepository` 実装）＋ `AddGeneratedHttpRemoteRepositories` |
+| サーバー実装 | `{ベース名}.RemoteServer.g.cs`（別ファイル） | `MapGeneratedRemoteEndpoints`（Minimal API。`POST {prefix}/{エンティティ}/{操作}`・prefix 既定 `/quicker`） |
+
+推奨のプロジェクト構成は「**共有クラスライブラリ**（本体生成物＝エンティティ・契約・クライアント実装）を**サーバー**（ASP.NET Core）と**クライアントアプリ**（WPF 等）の両方が参照し、サーバーファイルだけをサーバープロジェクトへ置く」形です。
+
+```csharp
+// ---- サーバー（ASP.NET Core・Microsoft.NET.Sdk.Web）----
+var builder = WebApplication.CreateBuilder(args);
+builder.Services.AddGeneratedRepositories(connectionString);   // 実体は自作 Repository でも EF Core でもよい
+
+var app = builder.Build();
+app.MapGeneratedRemoteEndpoints();          // 認可を付けるなら .RequireAuthorization() を続ける
+app.Run();
+
+// ---- クライアントアプリ（DI 登録 1 行で直結⇔リモートを切り替え）----
+// 直結:    services.AddGeneratedRepositories(connectionString);
+// リモート: services.AddGeneratedHttpRemoteRepositories("https://server:5001/quicker");
+// アプリ本体はどちらでも IOrderRemoteRepository を注入して使う（コード変更なし）
+```
+
+押さえておくポイント:
+
+- **直列化**はエンティティの JSON 往復（`ToJson` / `Clone`）と同じ意味論（VO は内包値・RowState 込み・親参照ナビは循環しない）で、クライアント・サーバーが共有の `RemoteJson.Options` を使います
+- **名前付きクエリは実装方式（DSL／自由 SQL／manual）に依らず全部**リモート面経由で呼び出せます（実装の実体はサーバー側のリポジトリ）
+- **例外は型が復元されます**: サーバーの `SaveConflictException` は HTTP 409 を介してクライアントでも `SaveConflictException` として送出され（直結時と同じ catch が機能）、その他のサーバー例外は `RemoteRepositoryException`（ステータスコード・メッセージ保持）になります
+- **グラフ保存（Save）成功後はローカルの RowState も確定**します（直結時と同じ挙動）
+- 認証・TLS はスコープ外です。クライアントは `AddGeneratedHttpRemoteRepositories(Func<IServiceProvider, HttpClient>)` で認証ハンドラ付きの HttpClient を構成し、サーバーは `MapGeneratedRemoteEndpoints()` の戻り値（`RouteGroupBuilder`）へ ASP.NET Core の認可を付与してください
+- サーバーファイルは ASP.NET Core の FrameworkReference（`Microsoft.AspNetCore.App`）が必要です（SDK が `Microsoft.NET.Sdk.Web` のプロジェクトなら追加設定不要）
+
 ## テスト用インメモリ Repository（GenerateInMemoryRepositories）
 
 DB なしでユニットテストするためのインメモリ実装を追加生成できます。同一契約を実装し、サポート外の操作は実 DB の Repository へ切り替える案内付きの `NotSupportedException` を送出します。

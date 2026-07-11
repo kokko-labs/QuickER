@@ -423,6 +423,22 @@ internal sealed class CSharpRepositoryModel
 
     /// <summary>名前付きクエリの射影 DTO クラス群（整形済み。無ければ空文字）</summary>
     public string QueryDtoBlock { get; init; } = string.Empty;
+
+    /// <summary>リモートサービス生成時の HTTP クライアント実装クラス名（<c>Http{Entity}RemoteRepository</c>）</summary>
+    /// <remarks>GenerateRemoteServices が OFF のときは参照されない（テンプレートが ON 時のみ出力・使用する）</remarks>
+    public required string RemoteClientClassName { get; init; }
+
+    /// <summary>リモート呼び出しのルートセグメント（例 <c>Order</c>。クライアント・サーバーで同一文字列を使う）</summary>
+    public required string RemoteRouteName { get; init; }
+
+    /// <summary>名前付きクエリの HTTP クライアント転送メソッド群（整形済み。無ければ空文字）</summary>
+    public string QueryRemoteClientBlock { get; init; } = string.Empty;
+
+    /// <summary>名前付きクエリのサーバー側エンドポイントマッピング群（Map{Entity}Endpoints 内へ挿入。無ければ空文字）</summary>
+    public string QueryRemoteServerBlock { get; init; } = string.Empty;
+
+    /// <summary>名前付きクエリのサーバー側リクエストレコード群（クラスレベルへ挿入。無ければ空文字）</summary>
+    public string QueryRemoteServerRecordsBlock { get; init; } = string.Empty;
 }
 
 // ---- EditModel 専用モデル ----

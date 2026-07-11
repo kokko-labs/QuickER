@@ -402,6 +402,107 @@ public class GeneratedCodeCompilationTests
         CodeGenerationOptions options
     ) => AssertCompiles(caseName, options);
 
+    /// <summary>マトリクスケース: リモートサービス生成（HTTP クライアント同梱）の横断ケース</summary>
+    public static TheoryData<string, CodeGenerationOptions> RemoteServiceMatrixCases()
+    {
+        var data = new TheoryData<string, CodeGenerationOptions>();
+        foreach (var vo in new[] { false, true })
+        {
+            data.Add(
+                $"remote-services 自作 sqlserver VO={vo}",
+                new CodeGenerationOptions
+                {
+                    NamespaceName = "Sample.Domain",
+                    GenerateValueObjects = vo,
+                    GenerateRemoteServices = true,
+                }
+            );
+        }
+
+        data.Add(
+            "remote-services SQLite + EF Core",
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                RepositoryDialect = "sqlite",
+                GenerateEfCore = true,
+                GenerateRemoteServices = true,
+            }
+        );
+        data.Add(
+            "remote-services EF 単独",
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                GenerateRepositories = false,
+                GenerateEfCore = true,
+                GenerateRemoteServices = true,
+            }
+        );
+
+        return data;
+    }
+
+    /// <summary>
+    /// リモートサービス生成の本体ファイル（クライアント実装同梱）がエラー・警告なしでコンパイルできることを検証する。
+    /// </summary>
+    /// <remarks>
+    /// サーバーファイル（{ベース名}.RemoteServer.g.cs）は ASP.NET Core の FrameworkReference を要するため
+    /// Roslyn マトリクスの参照集合ではコンパイルせず除外する。サーバーファイルの実コンパイル検証は、
+    /// チェックイン済みフィクスチャ（RemoteServiceFixture.RemoteServer.g.cs）が本テストプロジェクトの
+    /// コンパイル対象に含まれることで担保する。
+    /// </remarks>
+    [Theory]
+    [MemberData(nameof(RemoteServiceMatrixCases))]
+    public void Generate_RemoteServiceMatrix_MainOutputShouldCompile(
+        string caseName,
+        CodeGenerationOptions options
+    )
+    {
+        var result = new CSharpCodeGenerationService().Generate(FullCoverageDiagram(), options);
+
+        result
+            .HasErrors.Should()
+            .BeFalse(
+                $"「{caseName}」の生成自体でエラーが発生: "
+                    + string.Join(
+                        " / ",
+                        result
+                            .Diagnostics.Where(diagnostic =>
+                                diagnostic.Severity == GenerationDiagnosticSeverity.Error
+                            )
+                            .Select(diagnostic => diagnostic.Message)
+                    )
+            );
+
+        var mainFiles = new CodeGenerationResult
+        {
+            Files = result
+                .Files.Where(file =>
+                    !file.FileName.EndsWith(".RemoteServer.g.cs", StringComparison.Ordinal)
+                )
+                .ToList(),
+            Diagnostics = result.Diagnostics,
+        };
+        mainFiles.Files.Should().NotBeEmpty($"「{caseName}」は本体ファイルが生成されるはず");
+
+        var compilation = GeneratedCodeCompiler.Compile(
+            mainFiles,
+            assemblyName: $"QuickER.Generated.Tests.{Guid.NewGuid():N}"
+        );
+
+        compilation
+            .Success.Should()
+            .BeTrue(
+                $"「{caseName}」の生成コードにコンパイルエラーが発生:{Environment.NewLine}{compilation.DescribeErrors()}"
+            );
+        compilation
+            .Warnings.Should()
+            .BeEmpty(
+                $"「{caseName}」の生成コードに生成コード起因の警告が発生:{Environment.NewLine}{compilation.DescribeWarnings()}"
+            );
+    }
+
     /// <summary>指定オプションで生成し、Roslyn コンパイルがエラー・報告対象警告なしで成功することを検証する共通アサーション</summary>
     private static void AssertCompiles(string caseName, CodeGenerationOptions options)
     {

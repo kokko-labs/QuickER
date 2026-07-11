@@ -190,12 +190,49 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     private bool _generateRemoteContracts;
 
     /// <summary>
+    /// リモート面の HTTP クライアント／サーバー実装（<c>Http{Entity}RemoteRepository</c>・
+    /// <c>{ベース名}.RemoteServer.g.cs</c>）を生成するかどうか（既定 false）
+    /// </summary>
+    /// <remarks>
+    /// ON にすると <see cref="GenerateRemoteContracts"/>（リモート面インターフェイス）を自動的に含意する
+    /// （UI 連動＝<see cref="OnGenerateRemoteServicesChanged"/> で親を ON にし、親を OFF にすると
+    /// <see cref="OnGenerateRemoteContractsChanged"/> で子も OFF に戻る）。リモート対応行と同じく、
+    /// DB アクセスが「なし」のときは非表示にする（<see cref="ShowRemoteContracts"/>）
+    /// </remarks>
+    [ObservableProperty]
+    private bool _generateRemoteServices;
+
+    /// <summary>
     /// リモート対応の行を表示するかどうか（DB アクセスが「なし」以外＝Repository 契約が生成される場合のみ）
     /// </summary>
     public bool ShowRemoteContracts => GenerateRepositories || GenerateEfCore;
 
     /// <summary>リモート対応チェックボックスのツールチップ</summary>
     public string RemoteContractsToolTip => Strings.CodeGen_RemoteContractsToolTip;
+
+    /// <summary>HTTP クライアント／サーバー実装チェックボックスのツールチップ</summary>
+    public string RemoteServicesToolTip => Strings.CodeGen_RemoteServicesToolTip;
+
+    /// <summary>リモート面の HTTP 実装 ON はリモート面インターフェイスの生成を自動的に含意する（親を ON にする）</summary>
+    partial void OnGenerateRemoteServicesChanged(bool value)
+    {
+        if (value)
+        {
+            GenerateRemoteContracts = true;
+        }
+
+        // サーバーファイル（{ベース名}.RemoteServer.g.cs）の有無が変わるため、出力ファイルのプレビューを更新する
+        RefreshPreview();
+    }
+
+    /// <summary>リモート面インターフェイスを OFF にしたら、それに依存する HTTP 実装も OFF に戻す（親 OFF で子も OFF）</summary>
+    partial void OnGenerateRemoteContractsChanged(bool value)
+    {
+        if (!value)
+        {
+            GenerateRemoteServices = false;
+        }
+    }
 
     /// <summary>入力エラーや補助メッセージ</summary>
     [ObservableProperty]
@@ -477,6 +514,9 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
             UseRuntimePackages = settings.UseRuntimePackages;
             // リモート対応（リモート面の追加生成）は保存値をそのまま復元する（行の表示/非表示は UI 側で連動）
             GenerateRemoteContracts = settings.GenerateRemoteContracts;
+            // リモート面の HTTP クライアント／サーバー実装も保存値をそのまま復元する
+            // （親（GenerateRemoteContracts）を先に復元しているため、含意の UI 連動で親が意図せず OFF になることはない）
+            GenerateRemoteServices = settings.GenerateRemoteServices;
             // API リファレンス出力は DB アクセス選択とは独立のため、保存値をそのまま復元する
             GenerateApiDocs = settings.GenerateApiDocs;
             GenerateValueObjects = settings.GenerateValueObjects;
@@ -519,6 +559,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
             GenerateEfCore = GenerateEfCore,
             UseRuntimePackages = UseRuntimePackages,
             GenerateRemoteContracts = GenerateRemoteContracts,
+            GenerateRemoteServices = GenerateRemoteServices,
             GenerateApiDocs = GenerateApiDocs,
             GenerateValueObjects = GenerateValueObjects,
             UseGuidKeyForStringPrimaryKey = UseGuidKeyForStringPrimaryKey,
@@ -553,6 +594,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
             GenerateEfCore = GenerateEfCore,
             UseRuntimePackages = UseRuntimePackages,
             GenerateRemoteContracts = GenerateRemoteContracts,
+            GenerateRemoteServices = GenerateRemoteServices,
             GenerateApiDocs = GenerateApiDocs,
             GenerateValueObjects = GenerateValueObjects,
             UseGuidKeyForStringPrimaryKey = UseGuidKeyForStringPrimaryKey,

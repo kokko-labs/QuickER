@@ -325,12 +325,19 @@
             Style="{StaticResource FieldLabel}"
             Text="{x:Static res:Strings.CodeGen_RemoteAccess}"
           />
-          <CheckBox
-            Grid.Column="1"
-            Content="{x:Static res:Strings.CodeGen_GenerateRemoteContracts}"
-            IsChecked="{Binding GenerateRemoteContracts}"
-            ToolTip="{Binding RemoteContractsToolTip}"
-          />
+          <StackPanel Grid.Column="1" Orientation="Vertical">
+            <CheckBox
+              Content="{x:Static res:Strings.CodeGen_GenerateRemoteContracts}"
+              IsChecked="{Binding GenerateRemoteContracts}"
+              ToolTip="{Binding RemoteContractsToolTip}"
+            />
+            <CheckBox
+              Margin="0,6,0,0"
+              Content="{x:Static res:Strings.CodeGen_GenerateRemoteServices}"
+              IsChecked="{Binding GenerateRemoteServices}"
+              ToolTip="{Binding RemoteServicesToolTip}"
+            />
+          </StackPanel>
         </Grid>
 
         <!-- ランタイムのパッケージ参照モード（EF Core 選択中は併用不可のため無効化） -->

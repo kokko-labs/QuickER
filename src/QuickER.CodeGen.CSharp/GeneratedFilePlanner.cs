@@ -23,6 +23,9 @@ public enum GenerationBucket
 
     /// <summary>EF Core 用コード（DbContext と Fluent API 構成）</summary>
     EfCore,
+
+    /// <summary>リモート面の ASP.NET Core サーバー実装（エンドポイントマッピング。常に別ファイル）</summary>
+    RemoteServer,
 }
 
 /// <summary>1 つの生成ファイルが「どの名前空間で・どのバケットを含み・どの名前空間を using するか」を表す計画</summary>
@@ -112,6 +115,7 @@ public static class GeneratedFilePlanner
             GenerationBucket.Mapper => options.MapperNamespace,
             GenerationBucket.Repository => options.RepositoryNamespace,
             GenerationBucket.EfCore => options.EfCoreNamespace,
+            // RemoteServer に個別の名前空間オプションは設けない（既定 {root}.RemoteServer へフォールバック）
             _ => null,
         };
 
@@ -134,6 +138,7 @@ public static class GeneratedFilePlanner
             GenerationBucket.Mapper => "Mappers",
             GenerationBucket.Repository => "Repositories",
             GenerationBucket.EfCore => "EfCore",
+            GenerationBucket.RemoteServer => "RemoteServer",
             _ => "Generated",
         };
 
@@ -175,6 +180,15 @@ public static class GeneratedFilePlanner
                 GenerationBucket.ValueObject,
             ],
             GenerationBucket.EfCore =>
+            [
+                GenerationBucket.Entity,
+                GenerationBucket.Repository,
+                GenerationBucket.Runtime,
+                GenerationBucket.ValueObject,
+            ],
+            // サーバー実装はエンティティ・リモート契約（Repository バケット）・共有基盤（RemoteJson / エンベロープ /
+            // SaveConflictException）・VO（主キー型）を参照する
+            GenerationBucket.RemoteServer =>
             [
                 GenerationBucket.Entity,
                 GenerationBucket.Repository,
@@ -317,9 +331,9 @@ public static class GeneratedFilePlanner
             // 展開し、同一ファイル名で連結する（RenderFiles が block namespace で連結・using を先頭へ集約）。
             if (!multiDialect)
             {
-                return
-                [
-                    new GeneratedFileSpec
+                var singleSpecs = new List<GeneratedFileSpec>
+                {
+                    new()
                     {
                         FileName = options.OutputFileName,
                         NamespaceName = ResolveRootNamespace(options),
@@ -332,7 +346,10 @@ public static class GeneratedFilePlanner
                             options.GenerateInMemoryRepositories
                             && active.Contains(GenerationBucket.Repository),
                     },
-                ];
+                };
+                AddRemoteServerSpec(singleSpecs, options, active, primaryDialect);
+
+                return singleSpecs;
             }
 
             var root = ResolveRootNamespace(options);
@@ -370,6 +387,8 @@ public static class GeneratedFilePlanner
                     )
                 );
             }
+
+            AddRemoteServerSpec(specs, options, active, primaryDialect);
 
             return specs;
         }
@@ -459,7 +478,90 @@ public static class GeneratedFilePlanner
             );
         }
 
+        AddRemoteServerSpec(splitSpecs, options, active, primaryDialect);
+
         return splitSpecs;
+    }
+
+    /// <summary>非分割時のサーバー実装ファイル名（例: <c>MyApp.g.cs</c> → <c>MyApp.RemoteServer.g.cs</c>）</summary>
+    public static string RemoteServerFileName(string outputFileName)
+    {
+        const string suffix = ".g.cs";
+        var baseName = outputFileName.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)
+            ? outputFileName[..^suffix.Length]
+            : outputFileName;
+
+        return $"{baseName}.RemoteServer{suffix}";
+    }
+
+    /// <summary>
+    /// リモートサービス生成（<see cref="CodeGenerationOptions.GenerateRemoteServices"/>）時に、サーバー実装の
+    /// スペック（常に別ファイル）を計画へ追加する。
+    /// </summary>
+    /// <remarks>
+    /// サーバー実装は ASP.NET Core（FrameworkReference）を要するため、非分割でも本体ファイルへは連結しない。
+    /// Repository バケット（＝リモート面の契約）が有効でない構成では何も追加しない（契約が無ければ実装先が無い）。
+    /// </remarks>
+    private static void AddRemoteServerSpec(
+        List<GeneratedFileSpec> specs,
+        CodeGenerationOptions options,
+        IReadOnlyList<GenerationBucket> active,
+        string primaryDialect
+    )
+    {
+        if (!options.GenerateRemoteServices || !active.Contains(GenerationBucket.Repository))
+        {
+            return;
+        }
+
+        if (!options.SplitFilesByCategory)
+        {
+            // 非分割: 本体と同じルート namespace（同一プロジェクト内なら using 不要）で別ファイルへ出す
+            specs.Add(
+                new GeneratedFileSpec
+                {
+                    FileName = RemoteServerFileName(options.OutputFileName),
+                    NamespaceName = ResolveRootNamespace(options),
+                    Buckets = [GenerationBucket.RemoteServer],
+                    CrossNamespaceUsings = [],
+                    Dialect = primaryDialect,
+                    ContractOnly = false,
+                    MultiDialect = false,
+                }
+            );
+
+            return;
+        }
+
+        // 分割: 専用 namespace（{root}.RemoteServer）へ出し、依存グラフから他バケットの namespace を using する。
+        // パッケージ参照モードでは Runtime バケットのファイルが無いため using から自然に落ちる
+        // （共有基盤の型は GeneratedFileUsings が付ける QuickER.Runtime で解決される）。
+        var activeSet = (
+            options.UseRuntimePackages
+                ? active.Where(bucket => bucket != GenerationBucket.Runtime)
+                : active
+        ).ToHashSet();
+        var ownNamespace = ResolveNamespace(options, GenerationBucket.RemoteServer);
+        var crossUsings = BucketDependencies(GenerationBucket.RemoteServer)
+            .Where(dependency => activeSet.Contains(dependency))
+            .Select(dependency => ResolveNamespace(options, dependency))
+            .Where(ns => !string.Equals(ns, ownNamespace, StringComparison.Ordinal))
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(ns => ns, StringComparer.Ordinal)
+            .ToList();
+
+        specs.Add(
+            new GeneratedFileSpec
+            {
+                FileName = DefaultFileName(GenerationBucket.RemoteServer),
+                NamespaceName = ownNamespace,
+                Buckets = [GenerationBucket.RemoteServer],
+                CrossNamespaceUsings = crossUsings,
+                Dialect = primaryDialect,
+                ContractOnly = false,
+                MultiDialect = false,
+            }
+        );
     }
 
     /// <summary>方言別実装スペックを組み立てる（Repository バケットのみ・{RepositoryNamespace}.Suffix・契約 namespace を using）</summary>

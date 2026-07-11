@@ -71,11 +71,22 @@ public class RuntimePackageModeCompilationTests
         allContent.Should().NotContain("class SqlServerRepository<");
         allContent.Should().NotContain("class SqliteRepository<");
 
-        // 案内が指示するパッケージ集合だけを参照集合として構築し、生成コードをコンパイルする
+        // 案内が指示するパッケージ集合だけを参照集合として構築し、生成コードをコンパイルする。
+        // サーバー実装ファイル（.RemoteServer.g.cs）は ASP.NET Core の FrameworkReference を要するため
+        // 本ハーネスの参照集合ではコンパイルしない（実コンパイル検証はチェックイン済みフィクスチャが担う）
+        var compilableResult = new CodeGenerationResult
+        {
+            Files = result
+                .Files.Where(f =>
+                    !f.FileName.EndsWith(".RemoteServer.g.cs", StringComparison.Ordinal)
+                )
+                .ToList(),
+            Diagnostics = result.Diagnostics,
+        };
         var packages = RuntimePackageReferenceGuidance.Compute(options);
         var packageRefs = BuildPackageReferences(packages);
 
-        var compilation = CompileGenerated(result, packages, packageRefs);
+        var compilation = CompileGenerated(compilableResult, packages, packageRefs);
 
         compilation
             .Success.Should()
@@ -312,6 +323,18 @@ public class RuntimePackageModeCompilationTests
                 RepositoryDialect = "sqlite",
                 GenerateEfCore = true,
                 GenerateRemoteContracts = true,
+            }
+        );
+
+        // リモートサービス生成×パッケージ参照モード（クライアント固定 infra＝HttpRemoteRepository 等は Core パッケージが提供し、
+        // per-entity クライアント・DI 登録は生成側に残る。サーバーファイルは ASP.NET Core 前提のため本ハーネスの
+        // コンパイル対象から除外される＝Generate_PackageMode 側の除外処理を参照）
+        data.Add(
+            "remote-services 自作 sqlserver",
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                GenerateRemoteServices = true,
             }
         );
 

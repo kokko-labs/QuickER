@@ -80,6 +80,7 @@ public static class CliApp
         var runtimePackages = RuntimePackagesOption();
         var apiDocs = ApiDocsOption();
         var remoteContracts = RemoteContractsOption();
+        var remoteServices = RemoteServicesOption();
 
         var command = new Command("generate", Strings.Cli_Cmd_Generate)
         {
@@ -93,6 +94,7 @@ public static class CliApp
             runtimePackages,
             apiDocs,
             remoteContracts,
+            remoteServices,
         };
 
         command.SetAction(parseResult =>
@@ -106,7 +108,8 @@ public static class CliApp
                 parseResult.GetValue(repositoryDialects),
                 parseResult.GetValue(runtimePackages),
                 parseResult.GetValue(apiDocs),
-                parseResult.GetValue(remoteContracts)
+                parseResult.GetValue(remoteContracts),
+                parseResult.GetValue(remoteServices)
             )
         );
 
@@ -123,7 +126,8 @@ public static class CliApp
         string? repositoryDialects,
         bool runtimePackages,
         bool apiDocs,
-        bool remoteContracts
+        bool remoteContracts,
+        bool remoteServices
     )
     {
         if (!schemaFile.Exists)
@@ -170,7 +174,8 @@ public static class CliApp
                 repositoryDialects,
                 runtimePackages,
                 apiDocs,
-                remoteContracts
+                remoteContracts,
+                remoteServices
             );
         }
         catch (RepositoryDialectUnsupportedException ex)
@@ -212,6 +217,7 @@ public static class CliApp
         var runtimePackages = RuntimePackagesOption();
         var apiDocs = ApiDocsOption();
         var remoteContracts = RemoteContractsOption();
+        var remoteServices = RemoteServicesOption();
 
         var command = new Command("scaffold", Strings.Cli_Cmd_Scaffold)
         {
@@ -225,6 +231,7 @@ public static class CliApp
             runtimePackages,
             apiDocs,
             remoteContracts,
+            remoteServices,
         };
 
         command.SetAction(
@@ -240,6 +247,7 @@ public static class CliApp
                     parseResult.GetValue(runtimePackages),
                     parseResult.GetValue(apiDocs),
                     parseResult.GetValue(remoteContracts),
+                    parseResult.GetValue(remoteServices),
                     cancellationToken
                 )
         );
@@ -258,6 +266,7 @@ public static class CliApp
         bool runtimePackages,
         bool apiDocs,
         bool remoteContracts,
+        bool remoteServices,
         CancellationToken cancellationToken
     )
     {
@@ -301,7 +310,8 @@ public static class CliApp
                 repositoryDialects,
                 runtimePackages,
                 apiDocs,
-                remoteContracts
+                remoteContracts,
+                remoteServices
             );
         }
         catch (RepositoryDialectUnsupportedException ex)
@@ -348,6 +358,9 @@ public static class CliApp
     private static Option<bool> RemoteContractsOption() =>
         new("--remote-contracts") { Description = Strings.Cli_Opt_RemoteContracts };
 
+    private static Option<bool> RemoteServicesOption() =>
+        new("--remote-services") { Description = Strings.Cli_Opt_RemoteServices };
+
     /// <summary>
     /// 設定ファイル（quicker.json）を読み、CLI フラグ・<c>--provider</c>・<c>--repository-dialects</c>・
     /// <c>--runtime-packages</c> で上書きして生成オプションを構築する。
@@ -363,6 +376,8 @@ public static class CliApp
     /// <see cref="CodeGenerationOptions.GenerateApiDocs"/> を true にする（未指定時は設定ファイルの値を使う）。
     /// <paramref name="remoteContracts"/>（<c>--remote-contracts</c>）指定時は
     /// <see cref="CodeGenerationOptions.GenerateRemoteContracts"/> を true にする（未指定時は設定ファイルの値を使う）。
+    /// <paramref name="remoteServices"/>（<c>--remote-services</c>）指定時は
+    /// <see cref="CodeGenerationOptions.GenerateRemoteServices"/> を true にする（未指定時は設定ファイルの値を使う）。
     /// 自作 Repository 生成（<c>GenerateRepositories</c>）が要求され、かつ実効方言に未対応方言が含まれる場合は
     /// <see cref="RepositoryDialectUnsupportedException"/> を送出する
     /// </remarks>
@@ -374,7 +389,8 @@ public static class CliApp
         string? repositoryDialects = null,
         bool runtimePackages = false,
         bool apiDocs = false,
-        bool remoteContracts = false
+        bool remoteContracts = false,
+        bool remoteServices = false
     )
     {
         var node = config is { Exists: true }
@@ -404,6 +420,11 @@ public static class CliApp
         if (remoteContracts)
         {
             node["GenerateRemoteContracts"] = true;
+        }
+
+        if (remoteServices)
+        {
+            node["GenerateRemoteServices"] = true;
         }
 
         if (!string.IsNullOrWhiteSpace(repositoryDialects))
