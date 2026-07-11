@@ -248,7 +248,7 @@
     <value>説明</value>
   </data>
   <data name="QueryDialog_ReturnShape" xml:space="preserve">
-    <value>戻り形</value>
+    <value>戻り値の型</value>
   </data>
   <data name="QueryDialog_ReturnList" xml:space="preserve">
     <value>一覧</value>
@@ -268,8 +268,11 @@
   <data name="QueryDialog_ScalarType" xml:space="preserve">
     <value>スカラー型</value>
   </data>
+  <data name="QueryDialog_ScalarRequiresSqlOrManual" xml:space="preserve">
+    <value>スカラーの戻り値は生 SQL か手動実装 (partial クラス) 専用です。</value>
+  </data>
   <data name="QueryDialog_Parameters" xml:space="preserve">
-    <value>パラメータ</value>
+    <value>パラメータ定義</value>
   </data>
   <data name="QueryDialog_ParamName" xml:space="preserve">
     <value>名前</value>
@@ -299,13 +302,13 @@
     <value>実装方式</value>
   </data>
   <data name="QueryDialog_ImplDsl" xml:space="preserve">
-    <value>ミニ DSL</value>
+    <value>簡易 DSL</value>
   </data>
   <data name="QueryDialog_ImplSql" xml:space="preserve">
-    <value>自由 SQL</value>
+    <value>生 SQL</value>
   </data>
   <data name="QueryDialog_ImplManual" xml:space="preserve">
-    <value>manual</value>
+    <value>手動実装 (partial クラス)</value>
   </data>
   <data name="QueryDialog_SqlServerSql" xml:space="preserve">
     <value>SQL Server SQL</value>
@@ -332,7 +335,7 @@
     <value>型トークン</value>
   </data>
   <data name="QueryDialog_SignaturePreview" xml:space="preserve">
-    <value>シグネチャプレビュー</value>
+    <value>メソッド定義プレビュー</value>
   </data>
   <data name="QueryDialog_Ok" xml:space="preserve">
     <value>OK</value>

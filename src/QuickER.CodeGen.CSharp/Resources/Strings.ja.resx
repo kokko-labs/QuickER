@@ -152,7 +152,7 @@
     <value>LIKE・CONTAINS・STARTSWITH・ENDSWITH の右辺にはパラメータまたは文字列リテラルが必要です。</value>
   </data>
   <data name="CodeGen_Query_UnsupportedLikePattern" xml:space="preserve">
-    <value>LIKE パターン '{0}' はミニ DSL では表現できません（先頭・末尾の % のみ対応。_ は不可）。自由 SQL か manual モードを使ってください。</value>
+    <value>LIKE パターン '{0}' は簡易 DSL では表現できません（先頭・末尾の % のみ対応。_ は不可）。生 SQL か手動実装 (partial クラス) を使ってください。</value>
   </data>
   <data name="CodeGen_Query_UnknownColumn" xml:space="preserve">
     <value>条件式が参照する列 '{0}' はエンティティ '{1}' に存在しません。</value>
@@ -197,7 +197,7 @@
     <value>名前付きクエリ '{0}': スカラー戻り形には型トークン（scalarType）が必要です。</value>
   </data>
   <data name="CodeGen_Query_ScalarDslUnsupported" xml:space="preserve">
-    <value>名前付きクエリ '{0}': スカラー戻り形はミニ DSL では表現できません。自由 SQL か manual モードを使ってください。</value>
+    <value>名前付きクエリ '{0}': スカラー戻り形は簡易 DSL では表現できません。生 SQL か手動実装 (partial クラス) を使ってください。</value>
   </data>
   <data name="CodeGen_Query_ProjectionRequiresFields" xml:space="preserve">
     <value>名前付きクエリ '{0}': 射影の戻り形には DTO 型名と 1 つ以上のフィールド定義が必要です。</value>
@@ -206,7 +206,7 @@
     <value>名前付きクエリ '{0}': DTO 型名 '{1}' は有効な C# 識別子ではありません。</value>
   </data>
   <data name="CodeGen_Query_ProjectionDslRequiresColumns" xml:space="preserve">
-    <value>名前付きクエリ '{0}': ミニ DSL の射影では全フィールドに参照元列が必要です（自由フィールドは自由 SQL 専用）。</value>
+    <value>名前付きクエリ '{0}': 簡易 DSL の射影では全フィールドに参照元列が必要です（参照元列なしの自由フィールドは生 SQL 専用）。</value>
   </data>
   <data name="CodeGen_Query_PagingRequiresList" xml:space="preserve">
     <value>名前付きクエリ '{0}': ページングは戻り形が一覧・射影のときのみ使えます。</value>

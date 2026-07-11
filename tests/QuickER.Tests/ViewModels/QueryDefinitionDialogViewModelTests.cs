@@ -255,4 +255,121 @@ public class QueryDefinitionDialogViewModelTests
         field.SourceColumnId = null;
         field.IsTypeEditable.Should().BeTrue();
     }
+
+    /// <summary>実装方式ごとに項目の出し分けフラグ（DSL 面・SQL 面・スカラー可否）が切り替わることを検証する</summary>
+    [Fact(DisplayName = "実装方式で表示フラグが切り替わる")]
+    public void Implementation_TogglesDisplayFlags()
+    {
+        var diagram = CreateDiagram(out _, out _, out _);
+        var vm = new QueryDefinitionDialogViewModel(diagram);
+        var query = vm.SelectedQuery!;
+
+        // 簡易 DSL: 条件・並び順（DSL 面）を表示・SQL 欄は隠す・スカラーは選べない
+        query.Implementation = QueryImplementationKind.Dsl;
+        query.IsDslImplementation.Should().BeTrue();
+        query.ShowSqlEditors.Should().BeFalse();
+        query.CanSelectScalar.Should().BeFalse();
+
+        // 生 SQL: SQL 欄を表示・DSL 面は隠す・スカラーを選べる
+        query.Implementation = QueryImplementationKind.Sql;
+        query.ShowSqlEditors.Should().BeTrue();
+        query.IsDslImplementation.Should().BeFalse();
+        query.CanSelectScalar.Should().BeTrue();
+
+        // 手動実装: DSL 面・SQL 面ともに隠す・スカラーを選べる
+        query.Implementation = QueryImplementationKind.Manual;
+        query.IsDslImplementation.Should().BeFalse();
+        query.ShowSqlEditors.Should().BeFalse();
+        query.CanSelectScalar.Should().BeTrue();
+    }
+
+    /// <summary>スカラー選択中に DSL へ切り替えると、戻り値の型が既定（一覧）へリセットされることを検証する</summary>
+    [Fact(DisplayName = "スカラー選択中の DSL 切替は戻り値の型を一覧へリセットする")]
+    public void ScalarReturn_SwitchingToDsl_ResetsReturnsToList()
+    {
+        var diagram = CreateDiagram(out _, out _, out _);
+        var vm = new QueryDefinitionDialogViewModel(diagram);
+        var query = vm.SelectedQuery!;
+
+        // 生 SQL + スカラーは成立する（OK 可能）
+        query.Implementation = QueryImplementationKind.Sql;
+        query.Returns = QueryReturnShape.Scalar;
+        query.ScalarType = "int32";
+        vm.OkCommand.CanExecute(null).Should().BeTrue();
+        vm.StatusMessage.Should().BeEmpty();
+
+        // DSL へ切り替えるとスカラーが解除され一覧へ戻る（不正な組合せのまま残らない）
+        query.Implementation = QueryImplementationKind.Dsl;
+        query.Returns.Should().Be(QueryReturnShape.List);
+        query.ReturnsScalar.Should().BeFalse();
+        query.ShowScalarType.Should().BeFalse();
+        vm.OkCommand.CanExecute(null).Should().BeTrue();
+        vm.StatusMessage.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// 既存図にスカラー×DSL の不正な定義が保存されていた場合（読み込みはフィールド直接代入で
+    /// リセットを通らない）、フォーム検証が OK を防ぐことを検証する。
+    /// </summary>
+    [Fact(DisplayName = "読み込んだスカラー×DSL 定義はフォームエラーで OK 不可になる")]
+    public void LoadedScalarDslDefinition_BlocksOk()
+    {
+        var diagram = CreateDiagram(out var entityId, out _, out _);
+        diagram.Queries.Add(
+            new QueryDefinition
+            {
+                EntityId = entityId,
+                Name = "SumAmounts",
+                Returns = QueryReturnShape.Scalar,
+                ScalarType = "decimal(12,2)",
+                Implementation = QueryImplementationKind.Dsl,
+            }
+        );
+
+        var vm = new QueryDefinitionDialogViewModel(diagram);
+        vm.SelectedQuery = vm.Queries.Single(q => q.Name == "SumAmounts");
+
+        // 不正な組合せのまま読み込まれ、OK は専用メッセージで防がれる
+        vm.SelectedQuery.Returns.Should().Be(QueryReturnShape.Scalar);
+        vm.OkCommand.CanExecute(null).Should().BeFalse();
+        vm.StatusMessage.Should()
+            .Be(QuickER.CodeGen.UI.Resources.Strings.QueryDialog_ScalarRequiresSqlOrManual);
+
+        // 生 SQL へ切り替えれば（スカラーのまま）解消する
+        vm.SelectedQuery.Implementation = QueryImplementationKind.Sql;
+        vm.OkCommand.CanExecute(null).Should().BeTrue();
+        vm.StatusMessage.Should().BeEmpty();
+    }
+
+    /// <summary>非表示になる項目（条件・並び順・SQL 本文）が実装方式の往復でクリアされず保持されることを検証する</summary>
+    [Fact(DisplayName = "実装方式の往復で入力値が保持される")]
+    public void SwitchingImplementation_RetainsInputs()
+    {
+        var diagram = CreateDiagram(out _, out _, out _);
+        var vm = new QueryDefinitionDialogViewModel(diagram);
+        var query = vm.SelectedQuery!;
+
+        // DSL 面（条件・並び順）と SQL 面（本文）をひととおり入力する
+        query.Implementation = QueryImplementationKind.Dsl;
+        query.Condition = "CustomerId = @customerId";
+        query.AddOrderingCommand.Execute(null);
+        query.SqlServerSql = "SELECT * FROM [Order]";
+
+        query.OrderBy.Should().ContainSingle();
+
+        // 手動実装へ切り替えても入力は失われない
+        query.Implementation = QueryImplementationKind.Manual;
+        query.Condition.Should().Be("CustomerId = @customerId");
+        query.OrderBy.Should().ContainSingle();
+        query.SqlServerSql.Should().Be("SELECT * FROM [Order]");
+
+        // DSL へ戻すと条件・並び順が残っている
+        query.Implementation = QueryImplementationKind.Dsl;
+        query.Condition.Should().Be("CustomerId = @customerId");
+        query.OrderBy.Should().ContainSingle();
+
+        // 生 SQL へ戻すと SQL 本文が残っている
+        query.Implementation = QueryImplementationKind.Sql;
+        query.SqlServerSql.Should().Be("SELECT * FROM [Order]");
+    }
 }

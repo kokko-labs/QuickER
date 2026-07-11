@@ -364,3 +364,6 @@ FodyWeavers.xsd
 
 # サンプル（samples/ec-order）が実行時に作成する SQLite ファイル DB（既定は bin 配下だが作業ディレクトリ実行の保険）
 ec-order.db
+# ツール（VS / dotnet run）が自動生成する launchSettings.json はコミットしない
+# （サンプルサーバーの待ち受け URL は Program.cs の UseUrls に一本化する設計のため）
+**/launchSettings.json

@@ -152,7 +152,7 @@
     <value>LIKE / CONTAINS / STARTSWITH / ENDSWITH requires a parameter or a string literal on the right-hand side.</value>
   </data>
   <data name="CodeGen_Query_UnsupportedLikePattern" xml:space="preserve">
-    <value>The LIKE pattern '{0}' cannot be expressed in the mini DSL (only a leading/trailing % is supported; _ is not). Use free SQL or manual mode instead.</value>
+    <value>The LIKE pattern '{0}' cannot be expressed in the simple DSL (only a leading/trailing % is supported; _ is not). Use raw SQL or a manual implementation (partial class) instead.</value>
   </data>
   <data name="CodeGen_Query_UnknownColumn" xml:space="preserve">
     <value>The condition references column '{0}', which does not exist on entity '{1}'.</value>
@@ -197,7 +197,7 @@
     <value>Named query '{0}': the scalar return shape requires a scalar type token.</value>
   </data>
   <data name="CodeGen_Query_ScalarDslUnsupported" xml:space="preserve">
-    <value>Named query '{0}': the scalar return shape cannot be expressed with the mini DSL. Use free SQL or manual mode.</value>
+    <value>Named query '{0}': the scalar return shape cannot be expressed with the simple DSL. Use raw SQL or a manual implementation (partial class).</value>
   </data>
   <data name="CodeGen_Query_ProjectionRequiresFields" xml:space="preserve">
     <value>Named query '{0}': the projection return shape requires a result type name and at least one field.</value>
@@ -206,7 +206,7 @@
     <value>Named query '{0}': result type name '{1}' is not a valid C# identifier.</value>
   </data>
   <data name="CodeGen_Query_ProjectionDslRequiresColumns" xml:space="preserve">
-    <value>Named query '{0}': every projection field must reference a source column when using the mini DSL (free-form fields are for free SQL only).</value>
+    <value>Named query '{0}': every projection field must reference a source column when using the simple DSL (free-form fields without a source column are for raw SQL only).</value>
   </data>
   <data name="CodeGen_Query_PagingRequiresList" xml:space="preserve">
     <value>Named query '{0}': paging can only be used when the return shape is a list or a projection.</value>

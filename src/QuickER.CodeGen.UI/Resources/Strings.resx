@@ -248,7 +248,7 @@
     <value>Description</value>
   </data>
   <data name="QueryDialog_ReturnShape" xml:space="preserve">
-    <value>Return shape</value>
+    <value>Return type</value>
   </data>
   <data name="QueryDialog_ReturnList" xml:space="preserve">
     <value>List</value>
@@ -268,8 +268,11 @@
   <data name="QueryDialog_ScalarType" xml:space="preserve">
     <value>Scalar type</value>
   </data>
+  <data name="QueryDialog_ScalarRequiresSqlOrManual" xml:space="preserve">
+    <value>The scalar return type requires raw SQL or a manual implementation (partial class).</value>
+  </data>
   <data name="QueryDialog_Parameters" xml:space="preserve">
-    <value>Parameters</value>
+    <value>Parameter definitions</value>
   </data>
   <data name="QueryDialog_ParamName" xml:space="preserve">
     <value>Name</value>
@@ -299,13 +302,13 @@
     <value>Implementation</value>
   </data>
   <data name="QueryDialog_ImplDsl" xml:space="preserve">
-    <value>Mini DSL</value>
+    <value>Simple DSL</value>
   </data>
   <data name="QueryDialog_ImplSql" xml:space="preserve">
-    <value>Free SQL</value>
+    <value>Raw SQL</value>
   </data>
   <data name="QueryDialog_ImplManual" xml:space="preserve">
-    <value>Manual</value>
+    <value>Manual (partial class)</value>
   </data>
   <data name="QueryDialog_SqlServerSql" xml:space="preserve">
     <value>SQL Server SQL</value>
@@ -332,7 +335,7 @@
     <value>Type token</value>
   </data>
   <data name="QueryDialog_SignaturePreview" xml:space="preserve">
-    <value>Signature preview</value>
+    <value>Method definition preview</value>
   </data>
   <data name="QueryDialog_Ok" xml:space="preserve">
     <value>OK</value>

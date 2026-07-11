@@ -153,6 +153,16 @@ public partial class QueryDefinitionDialogViewModel : ObservableObject
                 return Strings.QueryDialog_Status_ProjectionRequired;
             }
 
+            // スカラー戻り値は簡易 DSL では成立しない（生 SQL / 手動実装 専用）。
+            // ラジオ無効化だけでは、選択済みで DSL へ切替・既存定義の読み込みで到達し得るため防御する。
+            if (
+                query.Returns == QueryReturnShape.Scalar
+                && query.Implementation == QueryImplementationKind.Dsl
+            )
+            {
+                return Strings.QueryDialog_ScalarRequiresSqlOrManual;
+            }
+
             if (!query.IsConditionValid)
             {
                 return Strings.QueryDialog_Status_ConditionInvalid;
