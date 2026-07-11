@@ -28,6 +28,16 @@
     <File Path="samples/ec-order/quicker.json" />
     <Project Path="samples/ec-order/EcOrderSample/EcOrderSample.csproj" />
   </Folder>
+  <Folder Name="/samples/ec-order-remote/">
+    <File Path="samples/ec-order-remote/EcOrderRemote.json" />
+    <File Path="samples/ec-order-remote/EcOrderRemote.sql" />
+    <File Path="samples/ec-order-remote/README.md" />
+    <File Path="samples/ec-order-remote/README.ja.md" />
+    <File Path="samples/ec-order-remote/quicker.json" />
+    <Project Path="samples/ec-order-remote/EcOrderRemote.Shared/EcOrderRemote.Shared.csproj" />
+    <Project Path="samples/ec-order-remote/EcOrderRemote.Server/EcOrderRemote.Server.csproj" />
+    <Project Path="samples/ec-order-remote/EcOrderRemote.Client/EcOrderRemote.Client.csproj" />
+  </Folder>
   <Folder Name="/scripts/">
     <File Path="scripts/regen-fixtures.ps1" />
   </Folder>

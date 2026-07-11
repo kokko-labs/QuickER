@@ -320,8 +320,10 @@
             <ColumnDefinition Width="84" />
             <ColumnDefinition Width="*" />
           </Grid.ColumnDefinitions>
+          <!-- 2 段チェックの行のため、ラベルは中央寄せ（FieldLabel 既定）でなく上段チェックと揃う上詰めにする -->
           <TextBlock
             Grid.Column="0"
+            VerticalAlignment="Top"
             Style="{StaticResource FieldLabel}"
             Text="{x:Static res:Strings.CodeGen_RemoteAccess}"
           />

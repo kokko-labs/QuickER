@@ -501,6 +501,8 @@ public static class GeneratedFilePlanner
     /// <remarks>
     /// サーバー実装は ASP.NET Core（FrameworkReference）を要するため、非分割でも本体ファイルへは連結しない。
     /// Repository バケット（＝リモート面の契約）が有効でない構成では何も追加しない（契約が無ければ実装先が無い）。
+    /// 挿入位置は「Repository バケットを含む最後のスペックの直後」＝リモート面の契約・実装の隣に並べる
+    /// （プレビュー・出力順で Repositories の下に RemoteServer が来る。非分割は本体 1 ファイルの後ろ＝従来どおり末尾）。
     /// </remarks>
     private static void AddRemoteServerSpec(
         List<GeneratedFileSpec> specs,
@@ -517,7 +519,8 @@ public static class GeneratedFilePlanner
         if (!options.SplitFilesByCategory)
         {
             // 非分割: 本体と同じルート namespace（同一プロジェクト内なら using 不要）で別ファイルへ出す
-            specs.Add(
+            InsertAfterRepositorySpecs(
+                specs,
                 new GeneratedFileSpec
                 {
                     FileName = RemoteServerFileName(options.OutputFileName),
@@ -550,7 +553,8 @@ public static class GeneratedFilePlanner
             .OrderBy(ns => ns, StringComparer.Ordinal)
             .ToList();
 
-        specs.Add(
+        InsertAfterRepositorySpecs(
+            specs,
             new GeneratedFileSpec
             {
                 FileName = DefaultFileName(GenerationBucket.RemoteServer),
@@ -562,6 +566,24 @@ public static class GeneratedFilePlanner
                 MultiDialect = false,
             }
         );
+    }
+
+    /// <summary>
+    /// サーバー実装スペックを「Repository バケットを含む最後のスペックの直後」へ挿入する
+    /// （分割時に Repositories（方言別実装含む）の下・EfCore / Runtime より前へ並べるため）。
+    /// </summary>
+    private static void InsertAfterRepositorySpecs(
+        List<GeneratedFileSpec> specs,
+        GeneratedFileSpec remoteServerSpec
+    )
+    {
+        var lastRepositoryIndex = specs.FindLastIndex(spec =>
+            spec.Buckets.Contains(GenerationBucket.Repository)
+        );
+
+        // 呼び出し元で Repository バケットの有効性を確認済みだが、万一見つからない場合は末尾へ退避する
+        var insertIndex = lastRepositoryIndex < 0 ? specs.Count : lastRepositoryIndex + 1;
+        specs.Insert(insertIndex, remoteServerSpec);
     }
 
     /// <summary>方言別実装スペックを組み立てる（Repository バケットのみ・{RepositoryNamespace}.Suffix・契約 namespace を using）</summary>
