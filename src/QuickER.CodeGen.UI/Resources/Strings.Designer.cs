@@ -474,6 +474,12 @@ namespace QuickER.CodeGen.UI.Resources {
             }
         }
 
+        public static string QueryDialog_ScalarRequiresSqlOrManual {
+            get {
+                return ResourceManager.GetString("QueryDialog_ScalarRequiresSqlOrManual", resourceCulture);
+            }
+        }
+
         public static string QueryDialog_Parameters {
             get {
                 return ResourceManager.GetString("QueryDialog_Parameters", resourceCulture);

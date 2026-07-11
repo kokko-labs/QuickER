@@ -209,8 +209,15 @@ public partial class QueryItemViewModel : ObservableObject
     /// <summary>実装方式＝ミニ DSL のとき（条件欄を有効化・即時検証する）</summary>
     public bool IsDslImplementation => Implementation == QueryImplementationKind.Dsl;
 
-    /// <summary>実装方式＝自由 SQL のとき（方言別 SQL 欄を表示する）</summary>
+    /// <summary>実装方式＝生 SQL のとき（方言別 SQL 欄を表示する）</summary>
     public bool ShowSqlEditors => Implementation == QueryImplementationKind.Sql;
+
+    /// <summary>戻り形＝スカラーを選べるか（DSL 以外＝生 SQL / 手動実装のときのみ）</summary>
+    /// <remarks>
+    /// スカラーは生 SQL か手動実装でしか成立しない（DSL は列比較の条件式に閉じる）ため、
+    /// DSL のときはラジオを無効化して選ばせない。既に選ばれている場合はフォーム検証が弾く。
+    /// </remarks>
+    public bool CanSelectScalar => Implementation != QueryImplementationKind.Dsl;
 
     // ===== 戻り形ラジオ（bool プロキシ。既存ダイアログの流儀に合わせる） =====
 
@@ -404,11 +411,19 @@ public partial class QueryItemViewModel : ObservableObject
 
     partial void OnImplementationChanged(QueryImplementationKind value)
     {
+        // 簡易 DSL はスカラー戻り値を持てないため、スカラー選択中に DSL へ切り替えたら既定（一覧）へ戻す。
+        // 図の読み込み時はフィールド直接代入でここを通らないため、不正な既存定義はフォーム検証が防ぐ
+        if (value == QueryImplementationKind.Dsl && Returns == QueryReturnShape.Scalar)
+        {
+            Returns = QueryReturnShape.List;
+        }
+
         OnPropertyChanged(nameof(ImplementationDsl));
         OnPropertyChanged(nameof(ImplementationSql));
         OnPropertyChanged(nameof(ImplementationManual));
         OnPropertyChanged(nameof(IsDslImplementation));
         OnPropertyChanged(nameof(ShowSqlEditors));
+        OnPropertyChanged(nameof(CanSelectScalar));
         ValidateCondition();
         _notifyParent?.Invoke();
     }
