@@ -512,6 +512,8 @@ public sealed class CSharpCodeGenerationService
             RepositoryImpl = options.GenerateRepositories && hasRepository && !spec.ContractOnly,
             // DB 非依存のインメモリ実装は、計画（GeneratedFilePlanner）が契約を出すスペックへ 1 度だけ載せる（spec.InMemory）
             InMemory = spec.InMemory,
+            // リモート面のサーバー実装はサーバー専用スペック（{ベース名}.RemoteServer.g.cs）だけが出力する
+            RemoteServer = spec.Buckets.Contains(GenerationBucket.RemoteServer),
             // パッケージ参照モードでは固定 infra（契約・方言エンジン・EntityBase/属性/VO 基底 等）を出力せず、
             // 生成コードはパッケージ QuickER.Runtime.* の型を using で参照する。スキーマ依存物（Entity/EditModel/
             // Mapper/VO 具象/I{Entity}Repository/エンティティ別実装/DI 登録）は本フラグに依らず出力する。

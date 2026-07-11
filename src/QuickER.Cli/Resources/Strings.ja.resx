@@ -103,6 +103,9 @@
   <data name="Cli_Opt_RemoteContracts" xml:space="preserve">
     <value>リモート操作用の Repository インターフェイス I{Entity}RemoteRepository（CRUD・保存・名前付きクエリのみ）を追加生成する。I{Entity}Repository は全メソッドを持ったままこれを継承する（既定 false。設定ファイルを上書き）</value>
   </data>
+  <data name="Cli_Opt_RemoteServices" xml:space="preserve">
+    <value>リモート面の HTTP クライアント実装を本体へ同梱し、ASP.NET Core サーバー実装を {ベース名}.RemoteServer.g.cs へ追加出力する（リモート面 --remote-contracts を自動的に含意。既定 false。設定ファイルを上書き）</value>
+  </data>
   <data name="Cli_SchemaFileNotFound" xml:space="preserve">
     <value>スキーマファイルが見つかりません: {0}</value>
   </data>

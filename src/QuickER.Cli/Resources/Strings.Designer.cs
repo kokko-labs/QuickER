@@ -144,6 +144,12 @@ namespace QuickER.Cli.Resources {
             }
         }
 
+        public static string Cli_Opt_RemoteServices {
+            get {
+                return ResourceManager.GetString("Cli_Opt_RemoteServices", resourceCulture);
+            }
+        }
+
         public static string Cli_SchemaFileNotFound {
             get {
                 return ResourceManager.GetString("Cli_SchemaFileNotFound", resourceCulture);

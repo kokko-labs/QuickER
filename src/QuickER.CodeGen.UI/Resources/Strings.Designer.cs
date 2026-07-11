@@ -192,6 +192,18 @@ namespace QuickER.CodeGen.UI.Resources {
             }
         }
 
+        public static string CodeGen_GenerateRemoteServices {
+            get {
+                return ResourceManager.GetString("CodeGen_GenerateRemoteServices", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_RemoteServicesToolTip {
+            get {
+                return ResourceManager.GetString("CodeGen_RemoteServicesToolTip", resourceCulture);
+            }
+        }
+
         public static string CodeGen_OutputDestination {
             get {
                 return ResourceManager.GetString("CodeGen_OutputDestination", resourceCulture);

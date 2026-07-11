@@ -58,6 +58,12 @@ public class CSharpGenerationSettings
     /// </summary>
     public bool GenerateRemoteContracts { get; set; }
 
+    /// <summary>
+    /// リモート面の HTTP クライアント／サーバー実装（<c>Http{Entity}RemoteRepository</c>・
+    /// <c>{ベース名}.RemoteServer.g.cs</c>）を生成するか（既定 false。ON はリモート面の生成を自動的に含意する）
+    /// </summary>
+    public bool GenerateRemoteServices { get; set; }
+
     /// <summary>API リファレンス Markdown（.g.md）を追加出力するか（既定 false）</summary>
     public bool GenerateApiDocs { get; set; }
 

@@ -359,7 +359,7 @@ internal sealed partial class CSharpGenerationModelBuilder
             ? entityClassName[..^"Entity".Length]
             : entityClassName;
         var keyTypeName = BuildProperty(keyColumn[0]).TypeName.TrimEnd('?');
-        var queryBlocks = BuildQueryBlocks(entity, options, diagnostics);
+        var queryBlocks = BuildQueryBlocks(entity, repositoryName, options, diagnostics);
 
         return new CSharpRepositoryModel
         {
@@ -372,6 +372,11 @@ internal sealed partial class CSharpGenerationModelBuilder
             QuerySharedImplBlock = queryBlocks.SharedImplBlock,
             QueryImplBlocksByDialect = queryBlocks.ImplBlocksByDialect,
             QueryDtoBlock = queryBlocks.DtoBlock,
+            RemoteClientClassName = $"Http{repositoryName}RemoteRepository",
+            RemoteRouteName = repositoryName,
+            QueryRemoteClientBlock = queryBlocks.RemoteClientBlock,
+            QueryRemoteServerBlock = queryBlocks.RemoteServerBlock,
+            QueryRemoteServerRecordsBlock = queryBlocks.RemoteServerRecordsBlock,
         };
     }
 

@@ -139,6 +139,25 @@ public sealed class CodeGenerationOptions
     public bool GenerateRemoteContracts { get; init; }
 
     /// <summary>
+    /// リモート面を HTTP + JSON で提供するクライアント／サーバー実装を生成するかどうか（既定 false）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>true</c> のとき、(1) リモート面の HTTP クライアント実装（<c>Http{Entity}RemoteRepository</c>＝BCL の
+    /// <c>HttpClient</c> のみ使用・<c>AddGeneratedHttpRemoteRepositories</c> で DI 登録）を本体生成物へ同梱し、
+    /// (2) ASP.NET Core Minimal API のサーバー実装（<c>MapGeneratedRemoteEndpoints</c>）を別ファイル
+    /// <c>{ベース名}.RemoteServer.g.cs</c> へ追加出力する。サーバーファイルは ASP.NET Core の
+    /// FrameworkReference（<c>Microsoft.AspNetCore.App</c>）を持つプロジェクトに置くこと。
+    /// </para>
+    /// <para>
+    /// リモート面（<see cref="GenerateRemoteContracts"/>）が前提のため、本オプション ON はリモート面の生成を自動的に含意する。
+    /// 直列化はランタイム既存の JSON 設定（VO コンバータ・RowState 込み）を使い、
+    /// <c>SaveConflictException</c> は HTTP 409 を介して型ごと復元される（直結⇔リモートで catch が変わらない）。
+    /// </para>
+    /// </remarks>
+    public bool GenerateRemoteServices { get; init; }
+
+    /// <summary>
     /// EF Core 用コード（DbContext・Fluent API 構成・EF 版 Repository 実装）を生成するかどうか。
     /// </summary>
     /// <remarks>

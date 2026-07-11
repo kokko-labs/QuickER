@@ -45,6 +45,9 @@ internal sealed class RenderScope
     /// <remarks>方言非依存のため契約を出すスペック（単一方言＝契約＋実装、マルチ方言＝契約スペック）で 1 度だけ true。方言実装スペックでは false</remarks>
     public required bool InMemory { get; init; }
 
+    /// <summary>リモート面の ASP.NET Core サーバー実装（MapGeneratedRemoteEndpoints）を出力するか（サーバー専用スペックのみ true）</summary>
+    public bool RemoteServer { get; init; }
+
     /// <summary>このスコープがレンダリングする自作 Repository の方言（"sqlserver" / "sqlite"）</summary>
     public required string Dialect { get; init; }
 
@@ -271,7 +274,14 @@ internal sealed class ScribanCSharpRenderer
             // リモート操作用インターフェイス（I{Entity}RemoteRepository）を追加生成するか。OFF（既定）では
             // per-entity 契約・DI の出力は従来と同一。ON は純粋に追加的で、リモート面と転送 DI 登録が増えるだけ
             // （I{Entity}Repository は全機能面のまま）。固定 infra の基底分割（IRemoteRepository）は常時出力する（非破壊）。
-            ["remote_contracts"] = options.GenerateRemoteContracts,
+            // リモートサービス生成（remote_services）はリモート面を前提とするため自動的に含意する。
+            ["remote_contracts"] =
+                options.GenerateRemoteContracts || options.GenerateRemoteServices,
+            // リモート面の HTTP クライアント／サーバー実装を生成するか。クライアント固定 infra（RemoteJson・
+            // RemoteRepositoryException・HttpRemoteRepository 等）と per-entity クライアント・DI 登録の出力を制御する。
+            ["remote_services"] = options.GenerateRemoteServices,
+            // このスペックがサーバー実装ファイル（{ベース名}.RemoteServer.g.cs）かどうか。
+            ["render_remote_server"] = scope.RemoteServer,
             // DB 非依存のインメモリ Repository 群（InMemoryDataStore・InMemory{Entity}Repository・シーダー・DI）を出力するか。
             // 方言非依存のため契約を出すスペックで 1 度だけ true（既存経路は常に false でバイト不変）
             ["in_memory"] = scope.InMemory,

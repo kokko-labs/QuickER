@@ -127,6 +127,12 @@
   <data name="CodeGen_RemoteContractsToolTip" xml:space="preserve">
     <value>ネットワーク境界を越えられる操作（CRUD・保存・名前付きクエリ）だけを持つ I{Entity}RemoteRepository を追加生成します。I{Entity}Repository は全メソッドを持ったままこれを継承するため、既存コードには影響しません。リモート面だけに依存したコードは、将来 Web サービス経由の実装へ安全に差し替えられます</value>
   </data>
+  <data name="CodeGen_GenerateRemoteServices" xml:space="preserve">
+    <value>HTTP クライアント／サーバー実装を生成する</value>
+  </data>
+  <data name="CodeGen_RemoteServicesToolTip" xml:space="preserve">
+    <value>リモート面の HTTP クライアント実装（Http{Entity}RemoteRepository）を本体へ同梱し、ASP.NET Core サーバー実装を {ベース名}.RemoteServer.g.cs へ追加出力します。ON にするとリモート面インターフェースの生成も自動的に有効になります</value>
+  </data>
   <data name="CodeGen_OutputDestination" xml:space="preserve">
     <value>出力先</value>
   </data>

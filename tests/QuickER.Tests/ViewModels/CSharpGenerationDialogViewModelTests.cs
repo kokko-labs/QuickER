@@ -451,6 +451,123 @@ public class CSharpGenerationDialogViewModelTests
         }
     }
 
+    /// <summary>
+    /// HTTP クライアント／サーバー実装のチェックを ON にすると、結果オプションの GenerateRemoteServices が true になり、
+    /// かつ含意により GenerateRemoteContracts（リモート面インターフェイス）も true に連動することを検証する
+    /// </summary>
+    [Fact(
+        DisplayName = "HTTP 実装 ON で GenerateRemoteServices=true・GenerateRemoteContracts も連動して true"
+    )]
+    public void GenerateRemoteServices_On_ImpliesRemoteContracts()
+    {
+        var vm = CreateViewModel(out _, currentProvider: new QuickER.SqlServer.SqlServerProvider());
+        vm.BaseNamespace = "Sample.Domain";
+        vm.OutputFilePath = @"C:\temp\Entities.g.cs";
+        vm.DbAccessRepository = true;
+
+        // 既定（OFF）は両方 false
+        vm.GenerateRemoteServices.Should().BeFalse("既定は OFF");
+        vm.ToOptions().GenerateRemoteServices.Should().BeFalse();
+
+        vm.GenerateRemoteServices = true;
+
+        // ON にすると含意でリモート面インターフェイスも ON になる
+        vm.GenerateRemoteContracts.Should()
+            .BeTrue("HTTP 実装 ON はリモート面インターフェイスを含意する");
+
+        vm.OkCommand.Execute(null);
+
+        vm.Result.Should().NotBeNull();
+        vm.Result!.Options.GenerateRemoteServices.Should().BeTrue();
+        vm.Result!.Options.GenerateRemoteContracts.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// リモート面インターフェイス（GenerateRemoteContracts）を OFF にすると、それに依存する
+    /// HTTP クライアント／サーバー実装（GenerateRemoteServices）も OFF に連動することを検証する
+    /// </summary>
+    [Fact(DisplayName = "リモート面インターフェイス OFF で HTTP 実装も OFF に連動する")]
+    public void GenerateRemoteContracts_Off_TurnsOffRemoteServices()
+    {
+        var vm = CreateViewModel(out _, currentProvider: new QuickER.SqlServer.SqlServerProvider());
+        vm.BaseNamespace = "Sample.Domain";
+        vm.DbAccessRepository = true;
+
+        // HTTP 実装を ON にすると親（リモート面）も ON
+        vm.GenerateRemoteServices = true;
+        vm.GenerateRemoteContracts.Should().BeTrue();
+
+        // 親を OFF にすると子（HTTP 実装）も OFF に戻る
+        vm.GenerateRemoteContracts = false;
+        vm.GenerateRemoteServices.Should().BeFalse("親 OFF で子も OFF に連動する");
+    }
+
+    /// <summary>
+    /// HTTP クライアント／サーバー実装のチェック切り替えで、出力ファイルのプレビューへ
+    /// サーバーファイル（{ベース名}.RemoteServer.g.cs）が即時に現れ・消えることを検証する
+    /// </summary>
+    [Fact(DisplayName = "HTTP 実装の切替でプレビューに RemoteServer ファイルが連動する")]
+    public void GenerateRemoteServices_TogglesRemoteServerFileInPreview()
+    {
+        var vm = CreateViewModel(out _, currentProvider: new QuickER.SqlServer.SqlServerProvider());
+        vm.BaseNamespace = "Sample.Domain";
+        vm.OutputFilePath = @"C:\temp\Shop.g.cs";
+        vm.DbAccessRepository = true;
+
+        vm.PreviewFiles.Should()
+            .NotContain(
+                line => line.Contains("RemoteServer.g.cs"),
+                "OFF（既定）ではサーバーファイルを出力しない"
+            );
+
+        vm.GenerateRemoteServices = true;
+
+        vm.PreviewFiles.Should()
+            .Contain(
+                line => line.Contains("Shop.RemoteServer.g.cs"),
+                "ON にした直後にプレビューへサーバーファイルが現れる"
+            );
+
+        vm.GenerateRemoteServices = false;
+
+        vm.PreviewFiles.Should()
+            .NotContain(
+                line => line.Contains("RemoteServer.g.cs"),
+                "OFF に戻した直後にプレビューからサーバーファイルが消える"
+            );
+    }
+
+    /// <summary>HTTP クライアント／サーバー実装チェックの状態が保存・復元されることを検証する</summary>
+    [Fact(DisplayName = "HTTP クライアント／サーバー実装チェックが次回起動時に復元される")]
+    public void GenerateRemoteServices_IsPersistedAndRestored()
+    {
+        var vm = CreateViewModel(out var folder);
+
+        try
+        {
+            vm.BaseNamespace = "Acme.App";
+            vm.OutputFilePath = @"C:\temp\Entities.g.cs";
+            vm.DbAccessRepository = true;
+            vm.GenerateRemoteServices = true;
+            vm.OkCommand.Execute(null);
+
+            var restored = new CSharpGenerationDialogViewModel(
+                new CSharpGenerationSettingsStore(folder)
+            );
+
+            restored.GenerateRemoteServices.Should().BeTrue();
+            // 含意により復元後もリモート面インターフェイスは ON のまま
+            restored.GenerateRemoteContracts.Should().BeTrue();
+        }
+        finally
+        {
+            if (Directory.Exists(folder))
+            {
+                Directory.Delete(folder, recursive: true);
+            }
+        }
+    }
+
     /// <summary>不正な名前空間ではエラーメッセージを表示し、確定・クローズしないことを検証する</summary>
     [Fact(DisplayName = "不正な namespace ではエラーメッセージを表示して閉じない")]
     public void Ok_WithInvalidNamespace_ShowsError()

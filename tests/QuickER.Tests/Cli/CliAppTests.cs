@@ -660,6 +660,111 @@ public class CliAppTests
     }
 
     /// <summary>
+    /// --remote-services 指定時は、リモート面のサーバー実装ファイル（*.RemoteServer.g.cs）が
+    /// 追加出力され、その中に ASP.NET Core のエンドポイントマッピング（MapGeneratedRemoteEndpoints）が含まれ、
+    /// 本体には HTTP クライアント実装（HttpCustomerRemoteRepository）が同梱されることを検証する（CLI の end-to-end）
+    /// </summary>
+    [Fact(
+        DisplayName = "--remote-services 指定でサーバー実装ファイルと HTTP クライアント実装が生成される"
+    )]
+    public async Task Generate_WithRemoteServices_EmitsServerFileAndHttpClient()
+    {
+        var (schemaPath, outDir, root) = CreateSampleSchema();
+
+        try
+        {
+            var exit = await CliApp.InvokeAsync([
+                "generate",
+                "--schema",
+                schemaPath,
+                "--out",
+                outDir,
+                "--namespace",
+                "Test.RemoteServices",
+                "--remote-services",
+            ]);
+
+            exit.Should().Be(0);
+
+            // サーバー実装は専用ファイル（*.RemoteServer.g.cs）へ出力される
+            var serverFiles = Directory.GetFiles(outDir, "*.RemoteServer.g.cs");
+            serverFiles
+                .Should()
+                .NotBeEmpty("--remote-services 指定でサーバー実装ファイルが出力される");
+            var serverCode = string.Join("\n", serverFiles.Select(File.ReadAllText));
+            serverCode.Should().Contain("MapGeneratedRemoteEndpoints");
+
+            // HTTP クライアント実装は本体（通常の .g.cs）へ同梱される
+            var code = string.Join(
+                "\n",
+                Directory.GetFiles(outDir, "*.g.cs").Select(File.ReadAllText)
+            );
+            code.Should().Contain("HttpCustomerRemoteRepository");
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>
+    /// quicker.json の GenerateRemoteServices=true 指定でも、サーバー実装ファイルと HTTP クライアント実装が
+    /// 生成されることを検証する
+    /// </summary>
+    [Fact(
+        DisplayName = "quicker.json の GenerateRemoteServices=true でサーバー実装と HTTP クライアントが生成される"
+    )]
+    public async Task Generate_WithRemoteServicesFromConfig_EmitsServerFileAndHttpClient()
+    {
+        var (schemaPath, outDir, root) = CreateSampleSchema();
+        var configPath = Path.Combine(root, "quicker.json");
+        File.WriteAllText(
+            configPath,
+            """{ "GenerateRepositories": true, "GenerateRemoteServices": true }"""
+        );
+
+        try
+        {
+            var exit = await CliApp.InvokeAsync([
+                "generate",
+                "--schema",
+                schemaPath,
+                "--out",
+                outDir,
+                "--namespace",
+                "Test.RemoteServicesConfig",
+                "--config",
+                configPath,
+            ]);
+
+            exit.Should().Be(0);
+
+            var serverFiles = Directory.GetFiles(outDir, "*.RemoteServer.g.cs");
+            serverFiles
+                .Should()
+                .NotBeEmpty("GenerateRemoteServices=true でサーバー実装ファイルが出力される");
+            var serverCode = string.Join("\n", serverFiles.Select(File.ReadAllText));
+            serverCode.Should().Contain("MapGeneratedRemoteEndpoints");
+
+            var code = string.Join(
+                "\n",
+                Directory.GetFiles(outDir, "*.g.cs").Select(File.ReadAllText)
+            );
+            code.Should().Contain("HttpCustomerRemoteRepository");
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>
     /// --api-docs 指定時は出力ディレクトリに API リファレンス Markdown（.g.md）が 1 つ書き出されることを検証する
     /// </summary>
     [Fact(DisplayName = "--api-docs 指定で .g.md が出力される")]

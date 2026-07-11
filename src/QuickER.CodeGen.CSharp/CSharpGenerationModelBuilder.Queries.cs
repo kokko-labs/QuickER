@@ -58,7 +58,22 @@ internal sealed partial class CSharpGenerationModelBuilder
         string InterfaceBlock,
         string SharedImplBlock,
         IReadOnlyDictionary<string, string> ImplBlocksByDialect,
-        string DtoBlock
+        string DtoBlock,
+        string RemoteClientBlock,
+        string RemoteServerBlock,
+        string RemoteServerRecordsBlock
+    );
+
+    /// <summary>クエリメソッドのペイロードパラメータ（HTTP 転送のエンベロープに載る引数。CancellationToken は含まない）</summary>
+    private sealed record QueryPayloadParameter(string TypeName, string Name);
+
+    /// <summary>1 クエリ分のメソッド形状（リモート転送メソッド・サーバーハンドラの生成素材）</summary>
+    private sealed record QueryMethodShape(
+        string MethodName,
+        string ParameterList,
+        string ReturnTypeName,
+        string Summary,
+        IReadOnlyList<QueryPayloadParameter> PayloadParameters
     );
 
     /// <summary>1 クエリ分の生成済みメンバー（出し分け前の素材）</summary>
@@ -66,7 +81,8 @@ internal sealed partial class CSharpGenerationModelBuilder
         string InterfaceMember,
         string? SharedImplMember,
         IReadOnlyDictionary<string, string> DialectImplMembers,
-        string? DtoClass
+        string? DtoClass,
+        QueryMethodShape Shape
     );
 
     /// <summary>ブロックが空のときの既定値</summary>
@@ -74,12 +90,16 @@ internal sealed partial class CSharpGenerationModelBuilder
         string.Empty,
         string.Empty,
         CSharpRepositoryModel.EmptyQueryImplBlocks,
+        string.Empty,
+        string.Empty,
+        string.Empty,
         string.Empty
     );
 
     /// <summary>エンティティの名前付きクエリからテンプレート用ブロックを構築する</summary>
     private QueryBlocks BuildQueryBlocks(
         Entity entity,
+        string repositoryName,
         CodeGenerationOptions options,
         ICollection<GenerationDiagnostic> diagnostics
     )
@@ -97,6 +117,9 @@ internal sealed partial class CSharpGenerationModelBuilder
             StringComparer.Ordinal
         );
         var dtoClasses = new List<string>();
+        var remoteClientMembers = new List<string>();
+        var remoteServerMaps = new List<string>();
+        var remoteServerRecords = new List<string>();
         var usedMethodNames = new HashSet<string>(ReservedQueryMethodNames, StringComparer.Ordinal);
 
         foreach (var query in queries)
@@ -133,6 +156,19 @@ internal sealed partial class CSharpGenerationModelBuilder
             {
                 dtoClasses.Add(dto);
             }
+
+            // リモートサービス生成時: クエリの実装方式に依らず、クライアントは同一シグネチャの転送メソッド・
+            // サーバーはリクエスト復元→リモート面呼び出しのハンドラを生成する（実装の実体はサーバー側リポジトリ）
+            if (options.GenerateRemoteServices)
+            {
+                remoteClientMembers.Add(BuildRemoteClientMember(members.Shape));
+                remoteServerMaps.Add(BuildRemoteServerMap(members.Shape, repositoryName));
+
+                if (BuildRemoteServerRecord(members.Shape, repositoryName) is { } record)
+                {
+                    remoteServerRecords.Add(record);
+                }
+            }
         }
 
         return new QueryBlocks(
@@ -143,7 +179,10 @@ internal sealed partial class CSharpGenerationModelBuilder
                 pair => string.Join("\n\n", pair.Value),
                 StringComparer.Ordinal
             ),
-            string.Join("\n\n", dtoClasses)
+            string.Join("\n\n", dtoClasses),
+            string.Join("\n\n", remoteClientMembers),
+            string.Join("\n\n", remoteServerMaps),
+            string.Join("\n\n", remoteServerRecords)
         );
     }
 
@@ -241,6 +280,7 @@ internal sealed partial class CSharpGenerationModelBuilder
         // ---- パラメータ（識別子・重複・型トークン解決） ----
         var parameterDecls = new List<string>();
         var argumentNames = new List<string>();
+        var payloadParameters = new List<QueryPayloadParameter>();
         var seenParameterNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
             "cancellationToken",
@@ -325,18 +365,18 @@ internal sealed partial class CSharpGenerationModelBuilder
                 continue;
             }
 
-            parameterDecls.Add(
-                parameter.IsList
-                    ? $"IReadOnlyList<{typeName}> {parameter.Name}"
-                    : $"{typeName} {parameter.Name}"
-            );
+            var declaredType = parameter.IsList ? $"IReadOnlyList<{typeName}>" : typeName;
+            parameterDecls.Add($"{declaredType} {parameter.Name}");
             argumentNames.Add(parameter.Name);
+            payloadParameters.Add(new QueryPayloadParameter(declaredType, parameter.Name));
         }
 
         if (query.HasPaging)
         {
             parameterDecls.Add("int take");
             parameterDecls.Add("int skip = 0");
+            payloadParameters.Add(new QueryPayloadParameter("int", "take"));
+            payloadParameters.Add(new QueryPayloadParameter("int", "skip"));
         }
 
         parameterDecls.Add("CancellationToken cancellationToken = default");
@@ -561,7 +601,14 @@ internal sealed partial class CSharpGenerationModelBuilder
             interfaceMember,
             sharedImplMember,
             dialectImplMembers,
-            dtoClass
+            dtoClass,
+            new QueryMethodShape(
+                methodName,
+                parameterList,
+                returnTypeName,
+                summary,
+                payloadParameters
+            )
         );
     }
 
