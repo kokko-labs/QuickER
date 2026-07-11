@@ -53,6 +53,11 @@ public class CSharpGenerationSettings
     /// </summary>
     public bool UseRuntimePackages { get; set; }
 
+    /// <summary>
+    /// リモート操作用の Repository インターフェイス（<c>I{Entity}RemoteRepository</c>）を追加生成するか（既定 false）
+    /// </summary>
+    public bool GenerateRemoteContracts { get; set; }
+
     /// <summary>API リファレンス Markdown（.g.md）を追加出力するか（既定 false）</summary>
     public bool GenerateApiDocs { get; set; }
 

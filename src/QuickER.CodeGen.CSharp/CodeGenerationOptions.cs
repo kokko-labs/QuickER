@@ -121,6 +121,24 @@ public sealed class CodeGenerationOptions
     ["sqlserver", "sqlite"];
 
     /// <summary>
+    /// リモート操作用の Repository インターフェイス（<c>I{Entity}RemoteRepository</c>）を追加生成するかどうか（既定 false）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>true</c> のとき、ネットワーク境界を越えられる操作（CRUD・保存・名前付きクエリ）だけを持つ
+    /// <c>I{Entity}RemoteRepository</c>（<see cref="IRemoteRepository{TEntity, TKey}"/> 相当の基底を継承）を追加生成し、
+    /// 既存の <c>I{Entity}Repository</c> はそれを継承する全機能面（従来どおり <c>Query()</c>・生 SQL・一括追加も持つ）になる。
+    /// 純粋に追加的な変更のため、ON にしても既存の利用コードは一切壊れない。
+    /// </para>
+    /// <para>
+    /// アプリ本体がリモート面だけに依存すれば、将来その実体を Web サービス経由の実装（3 階層化）へ差し替えても
+    /// コンパイル時に安全が保証される。DI はリモート面を同一実装インスタンスへの転送として追加登録する
+    /// （keyed 版も同様）。実装クラス・ランタイムエンジンに分岐はなく、間仕切りは純粋にインターフェイス水準。
+    /// </para>
+    /// </remarks>
+    public bool GenerateRemoteContracts { get; init; }
+
+    /// <summary>
     /// EF Core 用コード（DbContext・Fluent API 構成・EF 版 Repository 実装）を生成するかどうか。
     /// </summary>
     /// <remarks>

@@ -268,6 +268,10 @@ internal sealed class ScribanCSharpRenderer
             // 自作 Repository の方言別実装（ADO 依存）を出力するか。Repository バケット内でこのフラグにより契約と実装を出し分ける
             // （EF 単独出力＝false のとき ADO 依存のコードを一切生成しない）
             ["repositories"] = scope.RepositoryImpl,
+            // リモート操作用インターフェイス（I{Entity}RemoteRepository）を追加生成するか。OFF（既定）では
+            // per-entity 契約・DI の出力は従来と同一。ON は純粋に追加的で、リモート面と転送 DI 登録が増えるだけ
+            // （I{Entity}Repository は全機能面のまま）。固定 infra の基底分割（IRemoteRepository）は常時出力する（非破壊）。
+            ["remote_contracts"] = options.GenerateRemoteContracts,
             // DB 非依存のインメモリ Repository 群（InMemoryDataStore・InMemory{Entity}Repository・シーダー・DI）を出力するか。
             // 方言非依存のため契約を出すスペックで 1 度だけ true（既存経路は常に false でバイト不変）
             ["in_memory"] = scope.InMemory,

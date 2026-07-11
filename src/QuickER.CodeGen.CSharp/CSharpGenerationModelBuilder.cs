@@ -364,6 +364,7 @@ internal sealed partial class CSharpGenerationModelBuilder
         return new CSharpRepositoryModel
         {
             InterfaceName = $"I{repositoryName}Repository",
+            RemoteInterfaceName = $"I{repositoryName}RemoteRepository",
             ClassName = $"{repositoryName}Repository",
             EntityClassName = entityClassName,
             KeyTypeName = keyTypeName,

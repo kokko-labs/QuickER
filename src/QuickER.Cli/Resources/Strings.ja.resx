@@ -100,6 +100,9 @@
   <data name="Cli_Opt_ApiDocs" xml:space="preserve">
     <value>API リファレンス Markdown（{ベース名}.g.md）を 1 つ追加出力する（既定 false。設定ファイルを上書き）</value>
   </data>
+  <data name="Cli_Opt_RemoteContracts" xml:space="preserve">
+    <value>リモート操作用の Repository インターフェイス I{Entity}RemoteRepository（CRUD・保存・名前付きクエリのみ）を追加生成する。I{Entity}Repository は全メソッドを持ったままこれを継承する（既定 false。設定ファイルを上書き）</value>
+  </data>
   <data name="Cli_SchemaFileNotFound" xml:space="preserve">
     <value>スキーマファイルが見つかりません: {0}</value>
   </data>

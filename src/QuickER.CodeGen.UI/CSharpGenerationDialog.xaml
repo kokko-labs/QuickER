@@ -287,13 +287,13 @@
           </StackPanel>
         </Grid>
 
-        <!-- 自作 Repository の対象 DB（Repository (QuickER) 選択時のみ表示。表示順固定: SQL Server → SQLite） -->
+        <!-- 自作 Repository の対象 DB（DB アクセス配下＝インデント表示。Repository (QuickER) 選択時のみ表示。表示順固定: SQL Server → SQLite） -->
         <Grid
-          Margin="0,10,0,0"
+          Margin="12,10,0,0"
           Visibility="{Binding ShowRepositoryDialectTargets, Converter={StaticResource BoolToVisibilityConverter}}"
         >
           <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="96" />
+            <ColumnDefinition Width="84" />
             <ColumnDefinition Width="*" />
           </Grid.ColumnDefinitions>
           <TextBlock
@@ -309,6 +309,28 @@
             />
             <CheckBox Content="SQLite" IsChecked="{Binding TargetSqlite}" />
           </StackPanel>
+        </Grid>
+
+        <!-- リモート対応（DB アクセス配下＝インデント表示。Repository を生成する場合のみ表示） -->
+        <Grid
+          Margin="12,10,0,0"
+          Visibility="{Binding ShowRemoteContracts, Converter={StaticResource BoolToVisibilityConverter}}"
+        >
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="84" />
+            <ColumnDefinition Width="*" />
+          </Grid.ColumnDefinitions>
+          <TextBlock
+            Grid.Column="0"
+            Style="{StaticResource FieldLabel}"
+            Text="{x:Static res:Strings.CodeGen_RemoteAccess}"
+          />
+          <CheckBox
+            Grid.Column="1"
+            Content="{x:Static res:Strings.CodeGen_GenerateRemoteContracts}"
+            IsChecked="{Binding GenerateRemoteContracts}"
+            ToolTip="{Binding RemoteContractsToolTip}"
+          />
         </Grid>
 
         <!-- ランタイムのパッケージ参照モード（EF Core 選択中は併用不可のため無効化） -->

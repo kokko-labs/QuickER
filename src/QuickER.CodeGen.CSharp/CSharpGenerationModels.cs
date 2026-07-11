@@ -394,6 +394,10 @@ internal sealed class CSharpRepositoryModel
     /// <summary>生成する Repository インターフェース名</summary>
     public required string InterfaceName { get; init; }
 
+    /// <summary>リモート契約生成時に追加するリモート面のインターフェース名（<c>I{Entity}RemoteRepository</c>）</summary>
+    /// <remarks>GenerateRemoteContracts が OFF のときは参照されない（テンプレートが ON 時のみ出力・使用する）</remarks>
+    public required string RemoteInterfaceName { get; init; }
+
     /// <summary>生成する Repository 実装クラス名</summary>
     public required string ClassName { get; init; }
 

@@ -118,6 +118,15 @@
   <data name="CodeGen_ApiDocsTooltip" xml:space="preserve">
     <value>生成コードと同名ベースの API リファレンス Markdown（{ベース名}.g.md）を 1 つ追加出力します（再生成で上書き）</value>
   </data>
+  <data name="CodeGen_RemoteAccess" xml:space="preserve">
+    <value>リモート対応</value>
+  </data>
+  <data name="CodeGen_GenerateRemoteContracts" xml:space="preserve">
+    <value>リモート操作用の Repository インターフェースを生成する</value>
+  </data>
+  <data name="CodeGen_RemoteContractsToolTip" xml:space="preserve">
+    <value>ネットワーク境界を越えられる操作（CRUD・保存・名前付きクエリ）だけを持つ I{Entity}RemoteRepository を追加生成します。I{Entity}Repository は全メソッドを持ったままこれを継承するため、既存コードには影響しません。リモート面だけに依存したコードは、将来 Web サービス経由の実装へ安全に差し替えられます</value>
+  </data>
   <data name="CodeGen_OutputDestination" xml:space="preserve">
     <value>出力先</value>
   </data>

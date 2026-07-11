@@ -4302,8 +4302,21 @@ public sealed partial class CustomerProfileMapper
     partial void OnEditModelLoaded(CustomerProfileEntity entity, CustomerProfileEditModel editModel);
 }
 
-/// <summary>エンティティの CRUD 操作を提供するリポジトリ共通インターフェース</summary>
-public partial interface IRepository<TEntity, TKey>
+/// <summary>ネットワーク境界を越えて提供できる操作に絞ったリポジトリ共通インターフェース（リモート面）</summary>
+/// <remarks>
+/// <para>
+/// 単一エンティティ・エンティティグラフの CRUD と保存だけを持ち、式木（<see cref="IRepository{TEntity, TKey}.Query"/>）や
+/// 生 SQL のような「プロセス外へ運べない引数」を受け取るメンバーを含まない。全メンバーの引数・戻り値は
+/// 純粋なデータ（エンティティ・主キー・件数）のため、この面だけに依存するコードは、将来実体を
+/// リモート実装（Web サービス経由）へ差し替えてもコンパイル時に安全が保証される。
+/// </para>
+/// <para>
+/// <see cref="IRepository{TEntity, TKey}"/> が本インターフェースを継承して全メソッドを提供するため、
+/// 既存の利用コードは変わらない。リモート契約生成（GenerateRemoteContracts）では、この面（＋名前付きクエリ）だけを持つ
+/// I{Entity}RemoteRepository が追加生成され、I{Entity}Repository がそれを継承する。
+/// </para>
+/// </remarks>
+public partial interface IRemoteRepository<TEntity, TKey>
     where TEntity : EntityBase, new()
 {
     /// <summary>主キーによる単一エンティティ取得（該当なしは null）</summary>
@@ -4315,23 +4328,11 @@ public partial interface IRepository<TEntity, TKey>
     /// <summary>エンティティ追加</summary>
     Task InsertAsync(TEntity entity, CancellationToken cancellationToken = default);
 
-    /// <summary>エンティティのコレクションを SqlBulkCopy で一括追加する</summary>
-    /// <param name="entities">追加対象の一覧</param>
-    /// <param name="cancellationToken">キャンセルトークン</param>
-    /// <returns>追加した件数</returns>
-    Task<int> BulkInsertAsync(
-        IEnumerable<TEntity> entities,
-        CancellationToken cancellationToken = default
-    );
-
     /// <summary>エンティティ更新（更新対象ありで true）</summary>
     Task<bool> UpdateAsync(TEntity entity, CancellationToken cancellationToken = default);
 
     /// <summary>主キーによるエンティティ削除（削除対象ありで true）</summary>
     Task<bool> DeleteAsync(TKey id, CancellationToken cancellationToken = default);
-
-    /// <summary>検索条件・並び順・Include をチェーン指定して取得するクエリを開始する</summary>
-    SqlQuery<TEntity> Query();
 
     /// <summary>RowState に従って 1 トランザクションで追加・更新・削除を保存する（既定で子をカスケード）</summary>
     /// <param name="entity">保存対象（集約ルート）</param>
@@ -4362,6 +4363,27 @@ public partial interface IRepository<TEntity, TKey>
         bool insertWhenUpdateMissing = false,
         CancellationToken cancellationToken = default
     );
+}
+
+/// <summary>エンティティの CRUD 操作を提供するリポジトリ共通インターフェース</summary>
+/// <remarks>
+/// リモート面（<see cref="IRemoteRepository{TEntity, TKey}"/>）に加え、ローカル実行（DB 直結）を前提とするメンバー
+/// （式木クエリ・生 SQL・一括追加）を持つ全機能面。I{Entity}Repository は常にこの全機能面を提供する。
+/// </remarks>
+public partial interface IRepository<TEntity, TKey> : IRemoteRepository<TEntity, TKey>
+    where TEntity : EntityBase, new()
+{
+    /// <summary>エンティティのコレクションを SqlBulkCopy で一括追加する</summary>
+    /// <param name="entities">追加対象の一覧</param>
+    /// <param name="cancellationToken">キャンセルトークン</param>
+    /// <returns>追加した件数</returns>
+    Task<int> BulkInsertAsync(
+        IEnumerable<TEntity> entities,
+        CancellationToken cancellationToken = default
+    );
+
+    /// <summary>検索条件・並び順・Include をチェーン指定して取得するクエリを開始する</summary>
+    SqlQuery<TEntity> Query();
 
     /// <summary>生 SQL の SELECT を実行し、結果行を {TEntity} へマップして返す</summary>
     /// <remarks>

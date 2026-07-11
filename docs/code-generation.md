@@ -120,6 +120,35 @@ var primary = provider.GetRequiredKeyedService<ICustomerRepository>("primary");
 var local   = provider.GetRequiredKeyedService<ICustomerRepository>("local");
 ```
 
+## リモート対応インターフェイス（--remote-contracts）
+
+`I{Entity}Repository` は CRUD・保存・名前付きクエリに加え、`Query()`（式木クエリ）・生 SQL・一括追加まで全メソッドを持つ全機能面です。`--remote-contracts`（quicker.json の `GenerateRemoteContracts`、GUI の「リモート対応」チェックボックス）を指定すると、リモート操作用のインターフェイスを**追加生成**します。
+
+| 面 | インターフェイス | 含まれる操作 |
+|---|---|---|
+| リモート面（追加生成） | `I{Entity}RemoteRepository` | CRUD（GetById / GetAll / Insert / Update / Delete）・グラフ保存（Save）・名前付きクエリ |
+| 全機能面（従来どおり） | `I{Entity}Repository`（リモート面を継承） | 上記＋ `Query()`（式木）・生 SQL 3 種・一括追加 |
+
+リモート面の全メソッドは引数・戻り値が純粋なデータ（エンティティ・主キー・件数）だけで構成され、原理的にネットワーク境界を越えられます。アプリ本体をリモート面だけに依存させておけば、将来 Repository の実体を Web サービス経由のリモート実装へ差し替えるときもコンパイル時に安全が保証されます。式木や生 SQL が必要な処理は従来どおり `I{Entity}Repository` を使えばよく、「ここは DB 直結が必要」なことが型で読み取れます。
+
+```csharp
+// アプリ本体はリモート面だけに依存する（将来リモート実装へ差し替え可能な部分）
+public sealed class OrderService(IOrderRemoteRepository orders)
+{
+    public Task<IReadOnlyList<OrderEntity>> GetByCustomerAsync(int customerId, CancellationToken ct) =>
+        orders.GetByCustomerAsync(customerId, ct);   // 名前付きクエリはリモート面に載る
+}
+
+// 生 SQL・式木クエリが要る処理は従来どおり全機能面を要求する（DB 直結前提であることが型で明示される）
+public sealed class OrderMaintenance(IOrderRepository orders)
+{
+    public Task<int> ArchiveAsync(CancellationToken ct) =>
+        orders.ExecuteSqlAsync("UPDATE orders SET archived = 1 WHERE ...", cancellationToken: ct);
+}
+```
+
+このオプションは純粋に追加的です。ON にしても `I{Entity}Repository`・実装クラス・DI の実装登録は従来のまま変わらず、リモート面が同一インスタンスへの転送として DI に追加登録されるだけなので、既存コードを壊さずいつでも有効化できます（`AddGenerated*Repositories` でどちらの面も解決できます）。
+
 ## テスト用インメモリ Repository（GenerateInMemoryRepositories）
 
 DB なしでユニットテストするためのインメモリ実装を追加生成できます。同一契約を実装し、サポート外の操作は実 DB の Repository へ切り替える案内付きの `NotSupportedException` を送出します。
