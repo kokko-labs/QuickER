@@ -1,4 +1,6 @@
 using System;
+using System.Windows;
+using QuickER.Services;
 using Velopack;
 
 namespace QuickER
@@ -23,9 +25,44 @@ namespace QuickER
             // 未インストール実行時は何もせずそのまま返る。
             VelopackApp.Build().Run();
 
+            // 単一インスタンス制御。既に起動済みなら、そちらのウィンドウをアクティブ化して
+            // 自分は WPF を初期化せず即終了する（二重起動しない）
+            using var singleInstance = SingleInstanceGuard.TryAcquire();
+
+            if (singleInstance is null)
+            {
+                return;
+            }
+
             App app = new();
             app.InitializeComponent();
+
+            // 後続インスタンスからのアクティブ化要求を受けたら、UI スレッドで前面へ出す
+            singleInstance.ListenForActivation(() =>
+                app.Dispatcher.BeginInvoke(() => ActivateMainWindow(app))
+            );
+
             app.Run();
+        }
+
+        /// <summary>メインウィンドウを前面へ出す（最小化されていれば復元する）</summary>
+        private static void ActivateMainWindow(App app)
+        {
+            var window = app.MainWindow;
+
+            // 起動直後でウィンドウ生成前なら何もしない（次の要求で拾う）
+            if (window is null)
+            {
+                return;
+            }
+
+            if (window.WindowState == WindowState.Minimized)
+            {
+                window.WindowState = WindowState.Normal;
+            }
+
+            window.Show();
+            window.Activate();
         }
     }
 }
