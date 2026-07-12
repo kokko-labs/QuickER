@@ -69,15 +69,18 @@ public class QueryDefinitionDialogEntityChangeViewTests
             };
 
             var viewModel = new QueryDefinitionDialogViewModel(diagram);
-            // 画面外・非アクティブで Show する（ライブグループと選択の実配線を実体化するため）
-            var dialog = new QueryDefinitionDialog(viewModel)
-            {
-                WindowStartupLocation = System.Windows.WindowStartupLocation.Manual,
-                Left = -4000,
-                Top = -4000,
-                ShowInTaskbar = false,
-                ShowActivated = false,
-            };
+            // 画面外・非アクティブで Show する（ライブグループと選択の実配線を実体化するため）。
+            // BAML ロードは並列テストと競合しないよう直列化する
+            var dialog = WpfApplicationTestSupport.LoadXamlComponent(() =>
+                new QueryDefinitionDialog(viewModel)
+                {
+                    WindowStartupLocation = System.Windows.WindowStartupLocation.Manual,
+                    Left = -4000,
+                    Top = -4000,
+                    ShowInTaskbar = false,
+                    ShowActivated = false,
+                }
+            );
 
             try
             {

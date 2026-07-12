@@ -43,6 +43,24 @@ internal static class WpfApplicationTestSupport
     /// <summary>Application 生成・リソース登録を直列化するためのロック</summary>
     private static readonly object Gate = new();
 
+    /// <summary>XAML（BAML）ロードを直列化するためのロック</summary>
+    private static readonly object XamlLoadGate = new();
+
+    /// <summary>
+    /// ダイアログ等の XAML（BAML）ロードを伴う生成を直列化して実行する。
+    /// <see cref="Application.LoadComponent(object, Uri)"/> が使う System.IO.Packaging は
+    /// スレッドセーフでないため、複数の STA テストクラスが同一アセンブリのダイアログを
+    /// 並列に生成すると PackagePart の内部リスト操作が競合して散発的に失敗する。
+    /// </summary>
+    /// <param name="factory">ダイアログ等を生成するファクトリ（InitializeComponent を含む）</param>
+    public static T LoadXamlComponent<T>(Func<T> factory)
+    {
+        lock (XamlLoadGate)
+        {
+            return factory();
+        }
+    }
+
     /// <summary>Application を必要なら生成し、BAML が参照する App レベルリソースを登録する</summary>
     public static void EnsureApplicationResources()
     {

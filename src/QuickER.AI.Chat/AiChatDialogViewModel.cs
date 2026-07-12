@@ -170,7 +170,9 @@ public partial class AiChatDialogViewModel : ObservableObject
         IDialogService? dialogService = null,
         IFileDialogService? files = null,
         ChatAttachmentFactory.ImageShrinker? imageShrinker = null,
-        ChatUiSettingsStore? uiSettingsStore = null
+        ChatUiSettingsStore? uiSettingsStore = null,
+        ApiModelHistoryStore? apiModelHistoryStore = null,
+        CodexModelHistoryStore? codexModelHistoryStore = null
     )
     {
         _host = host;
@@ -191,7 +193,9 @@ public partial class AiChatDialogViewModel : ObservableObject
         Connection = new ChatConnectionSettingsViewModel(
             "ai-chat-ui.json",
             settingsStore,
-            uiSettingsStore
+            uiSettingsStore,
+            apiModelHistoryStore: apiModelHistoryStore,
+            codexModelHistoryStore: codexModelHistoryStore
         );
 
         _apiKeyEngine = new ChatTurnEngine(
@@ -670,6 +674,8 @@ public partial class AiChatDialogViewModel : ObservableObject
 
         if (result.Success)
         {
+            // 成功したターンで使ったモデルを MRU 履歴へ記録する（Ollama / Codex のガードは子 VM 側）
+            Connection.RecordSuccessfulModel();
             ArrangeNewDiagramIfCreated();
             StatusMessage = Strings.Chat_ResponseCompleted;
         }

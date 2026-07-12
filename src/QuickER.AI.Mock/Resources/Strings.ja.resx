@@ -298,4 +298,7 @@
   <data name="Mock_ScaffoldFailedFormat" xml:space="preserve">
     <value>スキャフォールドの生成に失敗しました: {0}</value>
   </data>
+  <data name="Mock_RemoveModelFromHistory" xml:space="preserve">
+    <value>履歴から削除</value>
+  </data>
 </root>

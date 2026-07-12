@@ -32,7 +32,10 @@ public class AiChatDialogViewModelTests
             dispatcher: new SyncUiDispatcher(),
             settingsStore: settingsStore,
             codexClient: client,
-            dialogService: dialogService
+            dialogService: dialogService,
+            // モデル履歴（Ollama / Codex）を一時フォルダへ隔離する（実 %APPDATA% を保護）
+            apiModelHistoryStore: new ApiModelHistoryStore(folder),
+            codexModelHistoryStore: new CodexModelHistoryStore(folder)
         );
         return (vm, client, folder);
     }
@@ -59,7 +62,9 @@ public class AiChatDialogViewModelTests
                 dispatcher: new SyncUiDispatcher(),
                 settingsStore: new CodexAppServerSettingsStore(folder),
                 codexClient: new FakeCodexAppServerClient(),
-                uiSettingsStore: uiStore
+                uiSettingsStore: uiStore,
+                apiModelHistoryStore: new ApiModelHistoryStore(folder),
+                codexModelHistoryStore: new CodexModelHistoryStore(folder)
             );
 
             // 保存が無い初回は API キータブが既定
@@ -73,7 +78,9 @@ public class AiChatDialogViewModelTests
                 dispatcher: new SyncUiDispatcher(),
                 settingsStore: new CodexAppServerSettingsStore(folder),
                 codexClient: new FakeCodexAppServerClient(),
-                uiSettingsStore: uiStore
+                uiSettingsStore: uiStore,
+                apiModelHistoryStore: new ApiModelHistoryStore(folder),
+                codexModelHistoryStore: new CodexModelHistoryStore(folder)
             );
 
             restored.Connection.InitialBackend.Should().Be(ErChatBackendKind.ClaudeCode);
@@ -97,7 +104,9 @@ public class AiChatDialogViewModelTests
                 host: host,
                 dispatcher: new SyncUiDispatcher(),
                 settingsStore: new CodexAppServerSettingsStore(folder),
-                codexClient: new FakeCodexAppServerClient()
+                codexClient: new FakeCodexAppServerClient(),
+                apiModelHistoryStore: new ApiModelHistoryStore(folder),
+                codexModelHistoryStore: new CodexModelHistoryStore(folder)
             );
 
             // ツール実行 seam は host 抽象から取得され、MainViewModel 具象には依存しない
@@ -392,6 +401,70 @@ public class AiChatDialogViewModelTests
         {
             vm.Connection.SaveApiKey = false;
             ApiKeyStore.Save("OpenAiApiKey", string.Empty);
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>
+    /// Codex バックエンドの成功ターンでは API モデル履歴が記録されないことを検証する（負方向）。
+    /// ApplyTurnCompleted は成功分岐で無条件に <see cref="ChatConnectionSettingsViewModel.RecordSuccessfulModel"/>
+    /// を呼ぶが、子側ガード（バックエンドが API キーでない）で記録されないことを確認する。
+    /// 正方向（API キー接続で記録される）は Connection 単体テストと Mock VM の
+    /// エンドツーエンドテストでカバーする（Chat VM には API キーエンジンの注入 seam が無いため）。
+    /// </summary>
+    [Fact(DisplayName = "Codex 成功ターンでは API モデル履歴を記録しない")]
+    public void CodexSuccessfulTurn_DoesNotRecordApiHistory()
+    {
+        var (vm, client, folder) = CreateVm();
+
+        try
+        {
+            // Ollama＋モデルを設定してからバックエンドを Codex へ切り替える
+            // （ガードが無ければ記録されうる状態を作り、ガードが効くことを確かめる）
+            vm.Connection.ApiProvider = AiProvider.Ollama;
+            vm.Connection.ApiModel = "qwen3.6:35b";
+            vm.Connection.SelectedBackend = ErChatBackendKind.Codex;
+
+            // Codex エンジン経由で成功ターン完了を発火させる
+            client.RaiseTurnCompleted("completed");
+
+            // API 履歴には記録されない（api-model-history.json は作られない）
+            File.Exists(new ApiModelHistoryStore(folder).SettingsPath).Should().BeFalse();
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>
+    /// Codex バックエンド×非 openai プロバイダの成功ターンで、使用モデルが Codex 履歴へ
+    /// 記録されることをエンドツーエンド（<see cref="FakeCodexAppServerClient.RaiseTurnCompleted"/> 経由）で検証する（正方向）。
+    /// </summary>
+    [Fact(DisplayName = "Codex×非 openai の成功ターンで使用モデルが履歴へ記録される")]
+    public void CodexSuccessfulTurn_NonOpenAiProvider_RecordsCodexHistory()
+    {
+        var (vm, client, folder) = CreateVm();
+
+        try
+        {
+            // 注意: Chat VM の Connection は実 config.toml を読む（seam 無し）ため、
+            // 実環境のプロバイダ設定に依存しないよう、プロバイダ・モデルともテスト固有の名前を使う
+            vm.Connection.SelectedBackend = ErChatBackendKind.Codex;
+            vm.Connection.CodexModelProvider = "mru-e2e-provider";
+            vm.Connection.CodexModel = "mru-e2e-model";
+
+            // Codex エンジン経由で成功ターン完了を発火させる
+            client.RaiseTurnCompleted("completed");
+
+            // プロバイダ別履歴へ記録され、候補にも × 付きで現れる
+            var reloaded = new CodexModelHistoryStore(folder).Load();
+            reloaded.ModelsFor("mru-e2e-provider").Should().Equal("mru-e2e-model");
+            vm.Connection.CodexModelCandidates.Should()
+                .Contain(c => c.Name == "mru-e2e-model" && c.IsRemovable);
+        }
+        finally
+        {
             Cleanup(folder);
         }
     }

@@ -67,8 +67,8 @@
   <data name="Chat_TabApiKey" xml:space="preserve">
     <value>API キー接続</value>
   </data>
-  <data name="Chat_ModelProvider" xml:space="preserve">
-    <value>モデルプロバイダー</value>
+  <data name="Chat_Provider" xml:space="preserve">
+    <value>プロバイダー</value>
   </data>
   <data name="Chat_ModelName" xml:space="preserve">
     <value>モデル名</value>
@@ -159,5 +159,8 @@
   </data>
   <data name="Chat_ToolsUnavailable" xml:space="preserve">
     <value>ツールは利用できません。</value>
+  </data>
+  <data name="Chat_RemoveModelFromHistory" xml:space="preserve">
+    <value>履歴から削除</value>
   </data>
 </root>

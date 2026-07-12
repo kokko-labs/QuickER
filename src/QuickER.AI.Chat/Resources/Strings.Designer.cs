@@ -72,9 +72,9 @@ namespace QuickER.AI.Chat.Resources {
             }
         }
 
-        public static string Chat_ModelProvider {
+        public static string Chat_Provider {
             get {
-                return ResourceManager.GetString("Chat_ModelProvider", resourceCulture);
+                return ResourceManager.GetString("Chat_Provider", resourceCulture);
             }
         }
 
@@ -255,6 +255,12 @@ namespace QuickER.AI.Chat.Resources {
         public static string Chat_ToolsUnavailable {
             get {
                 return ResourceManager.GetString("Chat_ToolsUnavailable", resourceCulture);
+            }
+        }
+
+        public static string Chat_RemoveModelFromHistory {
+            get {
+                return ResourceManager.GetString("Chat_RemoveModelFromHistory", resourceCulture);
             }
         }
     }

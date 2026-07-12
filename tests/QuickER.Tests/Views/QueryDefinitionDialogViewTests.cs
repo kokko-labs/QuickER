@@ -32,7 +32,10 @@ public class QueryDefinitionDialogViewTests
 
             var viewModel = new QueryDefinitionDialogViewModel(diagram);
 
-            var dialog = new QueryDefinitionDialog(viewModel);
+            // BAML ロードは並列テストと競合しないよう直列化する
+            var dialog = WpfApplicationTestSupport.LoadXamlComponent(() =>
+                new QueryDefinitionDialog(viewModel)
+            );
 
             dialog.ViewModel.Should().BeSameAs(viewModel);
         });
@@ -56,7 +59,10 @@ public class QueryDefinitionDialogViewTests
             var diagram = new ErDiagram { Entities = { entity } };
 
             var viewModel = new QueryDefinitionDialogViewModel(diagram);
-            var dialog = new QueryDefinitionDialog(viewModel);
+            // BAML ロードは並列テストと競合しないよう直列化する
+            var dialog = WpfApplicationTestSupport.LoadXamlComponent(() =>
+                new QueryDefinitionDialog(viewModel)
+            );
 
             // Window を Show せずに検証するため論理ツリーから探す（DataTrigger の Style は
             // DataContext 設定済みなら描画なしでも評価される）

@@ -178,7 +178,10 @@ public class MockGenerationDialogViewModelTests
             codexSettingsStore: new CodexAppServerSettingsStore(folder),
             apiKeyEngineFactory: (_, toolHost) => engineBox[0] = new FakeChatEngine(toolHost),
             codexEngineFactory: null,
-            claudeCodeEngineFactory: null
+            claudeCodeEngineFactory: null,
+            // Ollama モデル履歴を一時フォルダへ隔離する（成功ターンの記録が実 %APPDATA% に触れないようにする）
+            apiModelHistoryStore: new ApiModelHistoryStore(folder),
+            codexModelHistoryStore: new CodexModelHistoryStore(folder)
         );
         vm.Connection.ApiProvider = AiProvider.Ollama; // 認証不要にして接続 OK 状態にする
         return (vm, engineBox, folder);
@@ -212,7 +215,9 @@ public class MockGenerationDialogViewModelTests
             apiKeyEngineFactory: null,
             codexEngineFactory: null,
             claudeCodeEngineFactory: (_, toolHost) => engineBox[0] = new FakeChatEngine(toolHost),
-            mockProjectGenerator: generator
+            mockProjectGenerator: generator,
+            apiModelHistoryStore: new ApiModelHistoryStore(folder),
+            codexModelHistoryStore: new CodexModelHistoryStore(folder)
         );
 
         return (vm, engineBox, generator, folder);
@@ -253,7 +258,9 @@ public class MockGenerationDialogViewModelTests
                 apiKeyEngineFactory: null,
                 codexEngineFactory: null,
                 claudeCodeEngineFactory: null,
-                uiSettingsStore: uiStore
+                uiSettingsStore: uiStore,
+                apiModelHistoryStore: new ApiModelHistoryStore(folder),
+                codexModelHistoryStore: new CodexModelHistoryStore(folder)
             );
 
             // 保存が無い初回は API キータブが既定
@@ -270,7 +277,9 @@ public class MockGenerationDialogViewModelTests
                 apiKeyEngineFactory: null,
                 codexEngineFactory: null,
                 claudeCodeEngineFactory: null,
-                uiSettingsStore: uiStore
+                uiSettingsStore: uiStore,
+                apiModelHistoryStore: new ApiModelHistoryStore(folder),
+                codexModelHistoryStore: new CodexModelHistoryStore(folder)
             );
 
             restored.Connection.InitialBackend.Should().Be(ErChatBackendKind.ClaudeCode);
@@ -491,7 +500,9 @@ public class MockGenerationDialogViewModelTests
             codexSettingsStore: new CodexAppServerSettingsStore(folder),
             apiKeyEngineFactory: (_, toolHost) => engineBox[0] = new FakeChatEngine(toolHost),
             codexEngineFactory: null,
-            claudeCodeEngineFactory: null
+            claudeCodeEngineFactory: null,
+            apiModelHistoryStore: new ApiModelHistoryStore(folder),
+            codexModelHistoryStore: new CodexModelHistoryStore(folder)
         );
         vm.Connection.ApiProvider = AiProvider.Ollama;
 
@@ -683,6 +694,36 @@ public class MockGenerationDialogViewModelTests
             vm.Connection.SelectedBackend = ErChatBackendKind.ApiKey;
             vm.CanGenerateMockProject.Should().BeFalse();
             vm.MockGenDisabledReason.Should().Contain("Claude Code");
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>
+    /// Ollama＋モデル設定で成功ターンが完了すると、使用モデルが候補・JSON 履歴へ記録されることを
+    /// エンドツーエンド（フェイクエンジンの成功 TurnCompleted 経由）で検証する。
+    /// </summary>
+    [Fact(DisplayName = "Ollama 成功ターンで使用モデルが候補・履歴へ記録される")]
+    public async Task SuccessfulOllamaTurn_RecordsModelToHistory()
+    {
+        var (vm, _, folder) = CreateVm(NonEmptyDiagram());
+
+        try
+        {
+            // CreateVm で ApiProvider=Ollama・バックエンドは既定の API キー
+            vm.Connection.ApiModel = "qwen3.6:35b";
+
+            vm.StartConversationCommand.Execute(null);
+            vm.UserInput = "管理画面を作って";
+            await vm.SendMessageCommand.ExecuteAsync(null);
+
+            // フェイクエンジンが成功 TurnCompleted を発火し、記録が走る
+            vm.Connection.ApiModelCandidates.Select(c => c.Name).Should().Contain("qwen3.6:35b");
+
+            var reloaded = new ApiModelHistoryStore(folder).Load();
+            reloaded.ModelsFor("ollama").Should().Contain("qwen3.6:35b");
         }
         finally
         {

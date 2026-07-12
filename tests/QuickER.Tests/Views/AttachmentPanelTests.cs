@@ -109,7 +109,10 @@ public class AttachmentPanelTests
                 list.AddClipboardImage(TinyPng, new DateTime(2026, 7, 6, 12, 0, 0));
                 list.Items.Should().HaveCount(1, "前提: 添付が 1 件追加されていること");
 
-                var panel = new AttachmentPanel { AttachmentList = list };
+                // BAML ロードは並列テストと競合しないよう直列化する
+                var panel = WpfApplicationTestSupport.LoadXamlComponent(() =>
+                    new AttachmentPanel { AttachmentList = list }
+                );
 
                 // ビジュアルツリーを実体化して ItemsControl のコンテナとテンプレートを生成する
                 var window = new Window
