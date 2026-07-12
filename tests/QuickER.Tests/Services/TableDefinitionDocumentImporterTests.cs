@@ -4,6 +4,7 @@ using FluentAssertions;
 using QuickER.Model;
 using QuickER.Services;
 using QuickER.ViewModels;
+using GuiStrings = QuickER.Resources.Strings;
 
 namespace QuickER.Tests.Services;
 
@@ -126,7 +127,9 @@ public class TableDefinitionDocumentImporterTests
 
         var act = () => TableDefinitionDocumentImporter.Load(workbook);
 
-        act.Should().Throw<InvalidDataException>().WithMessage("*詳細シート*");
+        // 詳細シート自体が1枚も無いため、実際に投げられるのは件数不一致（テーブル一覧1件・詳細シート0件）。
+        // 製品コードと同じ resx キーから期待値を導出し、カルチャに依らず完全一致で検証する
+        act.Should().Throw<InvalidDataException>().WithMessage(GuiStrings.TableDoc_CountMismatch);
     }
 
     /// <summary>リレーション一覧の参照カラムが実在しない場合に取込が例外となることを検証する</summary>
@@ -195,6 +198,11 @@ public class TableDefinitionDocumentImporterTests
 
         var act = () => TableDefinitionDocumentImporter.Load(workbook);
 
-        act.Should().Throw<InvalidDataException>().WithMessage("*参照元カラム*MissingColumn*");
+        // 製品コードと同じ resx キーからフォーマット済みメッセージを導出し、カルチャに依らず完全一致で検証する
+        act.Should()
+            .Throw<InvalidDataException>()
+            .WithMessage(
+                string.Format(GuiStrings.TableDoc_RelChildColumnNotFound, "Child", "MissingColumn")
+            );
     }
 }

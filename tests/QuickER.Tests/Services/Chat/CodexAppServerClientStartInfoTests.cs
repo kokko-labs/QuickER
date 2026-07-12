@@ -1,5 +1,6 @@
 using FluentAssertions;
 using QuickER.AI;
+using AiStrings = QuickER.AI.Resources.Strings;
 
 namespace QuickER.Tests.Services.Chat;
 
@@ -38,10 +39,13 @@ public class CodexAppServerClientStartInfoTests
     [Fact]
     public void ResolveStartInfo_引用符を含むパスは起動前に拒否する()
     {
-        var act = () =>
-            CodexAppServerClient.ResolveStartInfo(@"C:\tools\evil"" & calc & ""x.cmd", Arguments);
+        const string path = @"C:\tools\evil"" & calc & ""x.cmd";
+        var act = () => CodexAppServerClient.ResolveStartInfo(path, Arguments);
 
-        act.Should().Throw<InvalidOperationException>().WithMessage("*引用符*");
+        // 製品コードと同じ resx キーからフォーマット済みメッセージを導出し、カルチャに依らず完全一致で検証する
+        act.Should()
+            .Throw<InvalidOperationException>()
+            .WithMessage(string.Format(AiStrings.Codex_PathHasQuote, path));
     }
 
     [Theory]
@@ -56,7 +60,9 @@ public class CodexAppServerClientStartInfoTests
     {
         var act = () => CodexAppServerClient.ResolveStartInfo(@"C:\tools\codex.cmd", arguments);
 
-        act.Should().Throw<InvalidOperationException>().WithMessage("*cmd で解釈される文字*");
+        // 検出文字の再現は実装ロジックの重複になるため、resx の書式引数より前の固定部分（プレフィックス）で照合する
+        var prefix = AiStrings.Codex_ArgHasCmdMeta.Split("{0}")[0];
+        act.Should().Throw<InvalidOperationException>().WithMessage(prefix + "*");
     }
 
     [Fact]

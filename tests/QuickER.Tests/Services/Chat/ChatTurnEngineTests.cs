@@ -1,6 +1,7 @@
 using FluentAssertions;
 using QuickER.AI;
 using QuickER.AI.Chat;
+using AiStrings = QuickER.AI.Resources.Strings;
 
 namespace QuickER.Tests.Services.Chat;
 
@@ -239,7 +240,17 @@ public class ChatTurnEngineTests
 
         completed.Should().NotBeNull();
         completed!.Value.Success.Should().BeFalse();
-        completed!.Value.Error.Should().Contain("対応していません");
+
+        // 製品コードと同じ resx キーからフォーマット済みメッセージを導出し、カルチャに依らず完全一致で検証する
+        completed!
+            .Value.Error.Should()
+            .Be(
+                string.Format(
+                    AiStrings.Chat_UnsupportedAttachment,
+                    pdf.FileName,
+                    ChatAttachmentKind.Pdf
+                )
+            );
 
         // ドライバは呼ばれない（ガードで送信前に弾かれる）
         driver.HistoryCountsAtCall.Should().BeEmpty();

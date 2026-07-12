@@ -11,6 +11,7 @@ using QuickER.Sqlite;
 using QuickER.SqlServer;
 using QuickER.Tests.TestDoubles;
 using QuickER.ViewModels;
+using GuiStrings = QuickER.Resources.Strings;
 
 namespace QuickER.Tests.ViewModels;
 
@@ -137,7 +138,8 @@ public class MainViewModelTargetDbmsTests
         // SQLite へ切替：同期は実行不可、ツールチップに理由が出る
         vm.SelectedProvider = sqlite;
         vm.SyncToDatabaseCommand.CanExecute(null).Should().BeFalse();
-        vm.SyncToDatabaseTooltip.Should().Contain("未対応");
+        // 製品コードと同じ resx キーから期待値を導出し、カルチャに依らず完全一致で検証する
+        vm.SyncToDatabaseTooltip.Should().Be(GuiStrings.Db_SyncSqliteUnsupported);
 
         // SQL Server へ戻すと再び実行可
         vm.SelectedProvider = registry.Get("sqlserver");

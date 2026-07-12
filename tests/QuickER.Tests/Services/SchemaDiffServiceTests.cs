@@ -4,6 +4,7 @@ using QuickER.Model;
 using QuickER.Provider;
 using QuickER.Services;
 using QuickER.SqlServer;
+using ProviderStrings = QuickER.Provider.Resources.Strings;
 
 namespace QuickER.Tests.Services;
 
@@ -125,7 +126,18 @@ public class SchemaDiffServiceTests
             .Which;
         alter.ColumnName.Should().Be("Name");
         alter.IsSelected.Should().BeFalse();
-        alter.Description.Should().Contain("NULL許容");
+
+        // 製品コードと同じ resx キーから期待値を組み立て、カルチャに依らず完全一致で検証する
+        // （型は変わらず NULL 許容のみ変化するため、変更点は NullableChange の 1 件のみ）
+        var expectedNullableChange = string.Format(
+            ProviderStrings.Diff_NullableChange,
+            ProviderStrings.Diff_Nullable_Allow,
+            ProviderStrings.Diff_Nullable_Deny
+        );
+        var expectedDescription =
+            string.Format(ProviderStrings.Diff_ColumnChangePrefix, "Customer", "Name")
+            + expectedNullableChange;
+        alter.Description.Should().Be(expectedDescription);
     }
 
     /// <summary>ER 図に存在しない列が DropColumn として検出され、既定では未選択であることを検証する</summary>

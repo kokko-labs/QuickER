@@ -4,6 +4,7 @@ using QuickER.Model;
 using QuickER.Provider;
 using QuickER.Sqlite;
 using QuickER.SqlServer;
+using ProviderStrings = QuickER.Provider.Resources.Strings;
 
 namespace QuickER.Tests.Provider;
 
@@ -126,7 +127,10 @@ public class SqliteProviderTests
 
         var act = () => provider.SyncScriptBuilder.Build([]);
 
-        act.Should().Throw<NotSupportedException>().WithMessage("*SQLite*同期*");
+        // 製品コードと同じ resx キーから期待値を導出し、カルチャに依らず完全一致で検証する
+        act.Should()
+            .Throw<NotSupportedException>()
+            .WithMessage(ProviderStrings.Sync_Sqlite_NotSupported);
     }
 
     /// <summary>同期実行スタブが NotSupportedException を投げることを検証する</summary>
@@ -137,7 +141,10 @@ public class SqliteProviderTests
 
         var act = () => provider.SyncExecutor.ExecuteAsync(new DbConnectionSettings(), "SELECT 1;");
 
-        await act.Should().ThrowAsync<NotSupportedException>().WithMessage("*SQLite*同期*");
+        // 製品コードと同じ resx キーから期待値を導出し、カルチャに依らず完全一致で検証する
+        await act.Should()
+            .ThrowAsync<NotSupportedException>()
+            .WithMessage(ProviderStrings.Sync_Sqlite_NotSupported);
     }
 
     /// <summary>レジストリに SQL Server と SQLite を登録し、両方が名前で解決できることを検証する</summary>
