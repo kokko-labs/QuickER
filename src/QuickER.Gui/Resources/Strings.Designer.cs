@@ -108,7 +108,25 @@ namespace QuickER.Resources {
                 return ResourceManager.GetString("Language_RestartConfirmTitle", resourceCulture);
             }
         }
-        
+
+        /// <summary>
+        ///   Update Available に類似しているローカライズされた文字列を検索します。
+        /// </summary>
+        public static string Update_ConfirmTitle {
+            get {
+                return ResourceManager.GetString("Update_ConfirmTitle", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   A new version {0} is available. Download it and restart to apply? に類似しているローカライズされた文字列を検索します。
+        /// </summary>
+        public static string Update_ConfirmMessage {
+            get {
+                return ResourceManager.GetString("Update_ConfirmMessage", resourceCulture);
+            }
+        }
+
         /// <summary>
         ///   表示言語を切り替え（再起動後に反映） に類似しているローカライズされた文字列を検索します。
         /// </summary>

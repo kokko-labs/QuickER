@@ -63,9 +63,21 @@ namespace QuickER
             ));
             services.AddTransient<MainWindow>();
 
+            // 起動時更新チェックサービス。本番用ファクトリ（feed => Velopack 実装）と
+            // 環境変数取得（Environment.GetEnvironmentVariable）を注入する。
+            services.AddSingleton(serviceProvider => new UpdateService(
+                serviceProvider.GetRequiredService<IDialogService>(),
+                feed => new VelopackAppUpdater(feed),
+                Environment.GetEnvironmentVariable
+            ));
+
             _provider = services.BuildServiceProvider();
 
             _provider.GetRequiredService<MainWindow>().Show();
+
+            // 起動を阻害しない fire-and-forget での更新チェック。
+            // 例外・フィード未設定・非インストール実行はすべて UpdateService 内で処理済み。
+            _ = _provider.GetRequiredService<UpdateService>().CheckOnStartupAsync();
         }
 
         /// <summary>

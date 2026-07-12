@@ -88,6 +88,14 @@
     <value>再起動</value>
     <comment>再起動確認ダイアログのタイトル</comment>
   </data>
+  <data name="Update_ConfirmTitle" xml:space="preserve">
+    <value>更新のお知らせ</value>
+    <comment>更新確認ダイアログのタイトル</comment>
+  </data>
+  <data name="Update_ConfirmMessage" xml:space="preserve">
+    <value>新しいバージョン {0} が利用可能です。ダウンロードして再起動し、更新を適用しますか？</value>
+    <comment>更新確認メッセージ（{0} は新バージョン番号）</comment>
+  </data>
   <data name="Common_Cancel" xml:space="preserve">
     <value>キャンセル</value>
   </data>

@@ -91,7 +91,13 @@ dotnet run --project samples/ec-order/EcOrderSample
 
 ### GUI（QuickER 本体）
 
-- **GitHub Releases** — zip をダウンロードして展開し、`QuickER.exe` を実行します。フレームワーク依存のため、[.NET 10 Desktop Runtime と ASP.NET Core Runtime](https://dotnet.microsoft.com/download/dotnet/10.0) のインストールが必要です
+- **GitHub Releases** — 2 チャンネル構成で、それぞれ Setup.exe（インストーラー・起動時自動更新あり）と Portable zip（展開して `QuickER.exe` を実行）を提供します:
+
+  | チャンネル             | Setup.exe                    | Portable zip                    | ランタイム                                                                                                           |
+  | ---------------------- | ---------------------------- | ------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+  | **Full**（推奨）       | `QuickER-win-full-Setup.exe` | `QuickER-win-full-Portable.zip` | 不要（同梱）                                                                                                           |
+  | **Lite**               | `QuickER-win-lite-Setup.exe` | `QuickER-win-lite-Portable.zip` | [.NET 10 Desktop Runtime と ASP.NET Core Runtime](https://dotnet.microsoft.com/download/dotnet/10.0) のインストールが必要 |
+
 - **ソースから** — `.NET 10 SDK` があれば次で起動できます:
 
   ```powershell

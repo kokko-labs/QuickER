@@ -1,19 +1,23 @@
 # QuickER GUI 配布ワークフロー（手動トリガのみ）
 #
 # 運用メモ:
-# - QuickER.Gui をフレームワーク依存で publish し、zip を GitHub Releases へ添付する
-#   （利用者は .NET 10 Desktop Runtime と ASP.NET Core Runtime のインストールが必要。README に明記）
+# - Velopack で 2 チャンネル配布する: win-full（--self-contained true・ランタイム同梱）と
+#   win-lite（--self-contained false・利用者は .NET 10 Desktop Runtime と ASP.NET Core Runtime の
+#   インストールが必要。README に明記）。各チャンネルにつき vpk pack が Setup.exe と Portable zip を
+#   生成する（計 4 成果物）
+# - 自動更新はアプリが GitHub Releases の資産（releases.win-*.json 等）を読む方式のため、
+#   vpk の出力ファイルはすべて Release へ添付する
 # - バージョンは Directory.Build.props の VersionPrefix で管理する（NuGet パッケージとロックステップ）
-# - dry_run=true（既定）では publish と zip 生成までを行い、zip をワークフロー成果物として
-#   アップロードする（Release の作成・タグ付けは行わない）
-# - dry_run=false ではタグ v{Version} で GitHub Release を作成し zip を添付する
+# - dry_run=true（既定）では publish と vpk pack までを行い、両チャンネルの出力一式を
+#   ワークフロー成果物としてアップロードする（Release の作成・タグ付けは行わない）
+# - dry_run=false ではタグ v{Version} で GitHub Release を作成し、両チャンネルの出力を全部添付する
 name: Release
 
 on:
   workflow_dispatch:
     inputs:
       dry_run:
-        description: "true の場合は publish と zip 生成のみを行い、GitHub Release の作成は行わない"
+        description: "true の場合は publish と vpk pack のみを行い、GitHub Release の作成は行わない"
         required: true
         type: boolean
         default: true
@@ -49,25 +53,57 @@ jobs:
           "version=$version" >> $env:GITHUB_OUTPUT
           Write-Host "Version: $version"
 
-      - name: GUI を publish（フレームワーク依存・win-x64）
-        run: dotnet publish src/QuickER.Gui/QuickER.Gui.csproj -c Release -r win-x64 --self-contained false -o ${{ runner.temp }}/gui-publish
+      - name: GUI を publish（self-contained・win-full 用）
+        run: dotnet publish src/QuickER.Gui/QuickER.Gui.csproj -c Release -r win-x64 --self-contained true -o ${{ runner.temp }}/publish-full
+
+      - name: GUI を publish（フレームワーク依存・win-lite 用）
+        run: dotnet publish src/QuickER.Gui/QuickER.Gui.csproj -c Release -r win-x64 --self-contained false -o ${{ runner.temp }}/publish-lite
 
       # PolyForm NC の Notices 条項（条文をコピーの受領者へ渡す義務）に対応するため、
-      # ライセンス文書 2 種を配布 zip に必ず同梱する
+      # ライセンス文書 2 種を両チャンネルの publish ディレクトリへ必ず同梱する
       - name: ライセンス文書を同梱
-        run: Copy-Item LICENSE, LICENSE-NC.md -Destination ${{ runner.temp }}/gui-publish
+        run: |
+          Copy-Item LICENSE, LICENSE-NC.md -Destination ${{ runner.temp }}/publish-full
+          Copy-Item LICENSE, LICENSE-NC.md -Destination ${{ runner.temp }}/publish-lite
 
-      - name: zip を作成
-        run: Compress-Archive -Path "${{ runner.temp }}/gui-publish/*" -DestinationPath "${{ runner.temp }}/QuickER-${{ steps.version.outputs.version }}-win-x64.zip"
+      - name: Velopack CLI (vpk) をインストール
+        run: dotnet tool install --global vpk
 
-      - name: zip をワークフロー成果物としてアップロード（dry_run 検証用）
+      # 差分更新パッケージを生成するため既存リリースの資産を取得する。リポジトリ未公開の間や
+      # 初回リリースでは資産が存在せず失敗するため、ワークフロー全体を止めないよう許容する
+      - name: 既存リリースを取得（win-full・差分更新用）
+        continue-on-error: true
+        run: vpk download github --repoUrl https://github.com/${{ github.repository }} --channel win-full --outputDir ${{ runner.temp }}/releases-full
+
+      - name: win-full を vpk pack（Setup.exe + Portable zip）
+        run: vpk pack --packId QuickER --packVersion ${{ steps.version.outputs.version }} --packDir ${{ runner.temp }}/publish-full --mainExe QuickER.exe --channel win-full --outputDir ${{ runner.temp }}/releases-full
+
+      - name: 既存リリースを取得（win-lite・差分更新用）
+        continue-on-error: true
+        run: vpk download github --repoUrl https://github.com/${{ github.repository }} --channel win-lite --outputDir ${{ runner.temp }}/releases-lite
+
+      - name: win-lite を vpk pack（Setup.exe + Portable zip）
+        run: vpk pack --packId QuickER --packVersion ${{ steps.version.outputs.version }} --packDir ${{ runner.temp }}/publish-lite --mainExe QuickER.exe --channel win-lite --outputDir ${{ runner.temp }}/releases-lite
+
+      - name: 成果物をワークフロー成果物としてアップロード（dry_run 検証用・win-full）
         uses: actions/upload-artifact@v4
         with:
-          name: QuickER-${{ steps.version.outputs.version }}-win-x64
-          path: ${{ runner.temp }}/QuickER-${{ steps.version.outputs.version }}-win-x64.zip
+          name: QuickER-${{ steps.version.outputs.version }}-win-full
+          path: ${{ runner.temp }}/releases-full
 
-      - name: GitHub Release を作成して zip を添付（dry_run=false のときのみ）
+      - name: 成果物をワークフロー成果物としてアップロード（dry_run 検証用・win-lite）
+        uses: actions/upload-artifact@v4
+        with:
+          name: QuickER-${{ steps.version.outputs.version }}-win-lite
+          path: ${{ runner.temp }}/releases-lite
+
+      - name: GitHub Release を作成して両チャンネルの成果物を添付（dry_run=false のときのみ）
         if: ${{ inputs.dry_run == false }}
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "v${{ steps.version.outputs.version }}" "${{ runner.temp }}/QuickER-${{ steps.version.outputs.version }}-win-x64.zip" --title "QuickER v${{ steps.version.outputs.version }}" --generate-notes
+        run: |
+          # 自動更新（GithubSource）は Release の資産から releases.win-*.json 等の更新メタを
+          # 読むため、vpk が出力したファイルは（Setup.exe / Portable zip / nupkg / メタとも）
+          # すべて添付する
+          $assets = Get-ChildItem -Path "${{ runner.temp }}/releases-full", "${{ runner.temp }}/releases-lite" -File | Select-Object -ExpandProperty FullName
+          gh release create "v${{ steps.version.outputs.version }}" $assets --title "QuickER v${{ steps.version.outputs.version }}" --generate-notes

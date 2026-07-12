@@ -93,7 +93,13 @@ See [samples/ec-order/README.md](samples/ec-order/README.md) for details.
 
 ### GUI (QuickER itself)
 
-- **GitHub Releases** — download the zip, extract it, and run `QuickER.exe`. Because it is framework-dependent, you need the [.NET 10 Desktop Runtime and ASP.NET Core Runtime](https://dotnet.microsoft.com/download/dotnet/10.0)
+- **GitHub Releases** — two channels, each with a Setup.exe (installer, auto-updating) and a Portable zip (extract and run `QuickER.exe`):
+
+  | Channel                | Setup.exe                    | Portable zip                    | Runtime                                                                                                             |
+  | ---------------------- | ---------------------------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+  | **Full** (recommended) | `QuickER-win-full-Setup.exe` | `QuickER-win-full-Portable.zip` | none — bundled                                                                                                       |
+  | **Lite**               | `QuickER-win-lite-Setup.exe` | `QuickER-win-lite-Portable.zip` | requires the [.NET 10 Desktop Runtime and ASP.NET Core Runtime](https://dotnet.microsoft.com/download/dotnet/10.0) |
+
 - **From source** — with the `.NET 10 SDK` you can launch it with:
 
   ```powershell
