@@ -308,7 +308,9 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         Func<ErChatProfile, IErDiagramToolHost, IErChatEngine>? claudeCodeEngineFactory,
         IMockProjectGenerator? mockProjectGenerator = null,
         ChatAttachmentFactory.ImageShrinker? imageShrinker = null,
-        ChatUiSettingsStore? uiSettingsStore = null
+        ChatUiSettingsStore? uiSettingsStore = null,
+        ApiModelHistoryStore? apiModelHistoryStore = null,
+        CodexModelHistoryStore? codexModelHistoryStore = null
     )
     {
         _diagramSource = diagramSource;
@@ -328,7 +330,9 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         Connection = new ChatConnectionSettingsViewModel(
             "mock-generation-ui.json",
             codexSettingsStore,
-            uiSettingsStore
+            uiSettingsStore,
+            apiModelHistoryStore: apiModelHistoryStore,
+            codexModelHistoryStore: codexModelHistoryStore
         );
 
         _apiKeyEngineFactory =
@@ -783,6 +787,8 @@ public partial class MockGenerationDialogViewModel : ObservableObject
 
         if (result.Success)
         {
+            // 成功したターンで使ったモデルを MRU 履歴へ記録する（Ollama / Codex のガードは子 VM 側）
+            Connection.RecordSuccessfulModel();
             StatusMessage = Strings.Mock_ResponseCompleted;
         }
         else if (!string.IsNullOrWhiteSpace(result.Error))

@@ -67,8 +67,8 @@
   <data name="Chat_TabApiKey" xml:space="preserve">
     <value>API Key Connection</value>
   </data>
-  <data name="Chat_ModelProvider" xml:space="preserve">
-    <value>Model Provider</value>
+  <data name="Chat_Provider" xml:space="preserve">
+    <value>Provider</value>
   </data>
   <data name="Chat_ModelName" xml:space="preserve">
     <value>Model Name</value>
@@ -159,5 +159,8 @@
   </data>
   <data name="Chat_ToolsUnavailable" xml:space="preserve">
     <value>Tools are unavailable.</value>
+  </data>
+  <data name="Chat_RemoveModelFromHistory" xml:space="preserve">
+    <value>Remove from history</value>
   </data>
 </root>

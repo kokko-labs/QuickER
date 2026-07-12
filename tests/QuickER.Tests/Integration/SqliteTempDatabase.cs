@@ -173,8 +173,19 @@ internal sealed class SqliteTempDatabase : IDisposable
     /// <summary>接続プールを解放し、一時ファイル・ディレクトリを削除する</summary>
     public void Dispose()
     {
-        // Microsoft.Data.Sqlite はプールでファイルを掴むため、削除前にプールを解放する
-        SqliteConnection.ClearAllPools();
+        // Microsoft.Data.Sqlite はプールでファイルを掴むため、削除前にプールを解放する。
+        // ClearAllPools はプロセス全体のプールを破棄し、並列実行中の他テスト（別の一時 DB）が
+        // 使用中の native ハンドルまで破棄して稀に ObjectDisposedException を誘発するため、
+        // この DB の接続文字列（ReadWriteCreate / ReadOnly の 2 種）に限定して解放する
+        using (var rw = new SqliteConnection(ReadWriteCreateConnectionString))
+        {
+            SqliteConnection.ClearPool(rw);
+        }
+
+        using (var ro = new SqliteConnection(ReadOnlyConnectionString))
+        {
+            SqliteConnection.ClearPool(ro);
+        }
 
         try
         {

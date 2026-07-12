@@ -515,5 +515,11 @@ namespace QuickER.AI.Mock.Resources {
                 return ResourceManager.GetString("Mock_ScaffoldFailedFormat", resourceCulture);
             }
         }
+
+        public static string Mock_RemoveModelFromHistory {
+            get {
+                return ResourceManager.GetString("Mock_RemoveModelFromHistory", resourceCulture);
+            }
+        }
     }
 }

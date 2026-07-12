@@ -13,10 +13,6 @@ public sealed class CodexConfigToml
 
     /// <summary>config.toml に定義されたプロバイダー名の一覧（[model_providers.xxx] セクションから収集）</summary>
     public IReadOnlyList<string> ProviderNames { get; init; } = [];
-
-    /// <summary>プロバイダー名ごとのモデル候補辞書</summary>
-    public IReadOnlyDictionary<string, IReadOnlyList<string>> ProviderModels { get; init; } =
-        new Dictionary<string, IReadOnlyList<string>>();
 }
 
 /// <summary>Codex の config.toml を読み込むリーダー</summary>
@@ -121,22 +117,11 @@ public static class CodexConfigTomlReader
             }
         }
 
-        // トップレベルの model_provider と model をプロバイダー別モデル候補辞書に登録する
-        var providerModels = new Dictionary<string, IReadOnlyList<string>>(
-            StringComparer.OrdinalIgnoreCase
-        );
-
-        if (!string.IsNullOrEmpty(modelProvider) && !string.IsNullOrEmpty(model))
-        {
-            providerModels[modelProvider] = [model];
-        }
-
         return new CodexConfigToml
         {
             Model = model,
             ModelProvider = modelProvider,
             ProviderNames = providerNames.AsReadOnly(),
-            ProviderModels = providerModels,
         };
     }
 

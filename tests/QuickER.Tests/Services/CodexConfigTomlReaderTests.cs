@@ -49,27 +49,6 @@ public class CodexConfigTomlReaderTests
         result.ProviderNames.Should().Contain("ollama-launch");
     }
 
-    /// <summary>デフォルトモデルが対応プロバイダーの ProviderModels 候補に登録されることを検証する</summary>
-    [Fact(
-        DisplayName = "プロバイダー別モデル候補辞書に config.toml のデフォルトモデルが登録される"
-    )]
-    public void Parse_ProviderModels_ContainsDefaultModel()
-    {
-        var lines = new[]
-        {
-            "model = \"gemma4:31b-cloud\"",
-            "model_provider = \"ollama-launch\"",
-            "",
-            "[model_providers.ollama-launch]",
-            "name = \"Ollama\"",
-        };
-
-        var result = CodexConfigTomlReader.Parse(lines);
-
-        result.ProviderModels.Should().ContainKey("ollama-launch");
-        result.ProviderModels["ollama-launch"].Should().Contain("gemma4:31b-cloud");
-    }
-
     /// <summary>行頭 # のコメント行が無視され、値後方のインラインコメントが除去されることを検証する</summary>
     [Fact(DisplayName = "コメント行と # 付き値が正しく無視・除去される")]
     public void Parse_CommentsAreIgnored()

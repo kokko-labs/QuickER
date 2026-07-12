@@ -18,6 +18,7 @@
 >
   <Window.Resources>
     <ui:BoolToVisibilityConverter x:Key="BoolToVisibilityConverter" />
+    <ui:CodexProviderDisplayNameConverter x:Key="CodexProviderDisplayNameConverter" />
 
     <!-- ── 配色 ── -->
     <SolidColorBrush x:Key="Accent" Color="#1A73E8" />
@@ -364,7 +365,7 @@
             <TextBlock
               Grid.Column="0"
               Style="{StaticResource FieldLabel}"
-              Text="{x:Static res:Strings.Chat_ModelProvider}"
+              Text="{x:Static res:Strings.Chat_Provider}"
             />
             <ComboBox
               Grid.Column="1"
@@ -379,12 +380,42 @@
               Text="{x:Static res:Strings.Chat_ModelName}"
             />
             <ComboBox
+              x:Name="ApiModelBox"
               Grid.Column="3"
               Padding="6,4"
               IsEditable="True"
+              TextSearch.TextPath="Name"
               Text="{Binding Connection.ApiModel, UpdateSourceTrigger=PropertyChanged}"
               ItemsSource="{Binding Connection.ApiModelCandidates}"
-            />
+            >
+              <!-- ドロップダウン項目を横いっぱいに広げ、× ボタンを右端へ寄せる -->
+              <ComboBox.ItemContainerStyle>
+                <Style TargetType="ComboBoxItem">
+                  <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                </Style>
+              </ComboBox.ItemContainerStyle>
+              <ComboBox.ItemTemplate>
+                <DataTemplate>
+                  <DockPanel LastChildFill="True">
+                    <!-- 右端の × は履歴由来（IsRemovable=true）の候補だけ表示し、履歴から個別削除する -->
+                    <Button
+                      DockPanel.Dock="Right"
+                      Content="✕"
+                      Padding="6,0"
+                      Background="Transparent"
+                      BorderThickness="0"
+                      Cursor="Hand"
+                      Foreground="{StaticResource MutedText}"
+                      ToolTip="{x:Static res:Strings.Chat_RemoveModelFromHistory}"
+                      Visibility="{Binding IsRemovable, Converter={StaticResource BoolToVisibilityConverter}}"
+                      Command="{Binding DataContext.Connection.RemoveApiModelHistoryCommand, RelativeSource={RelativeSource AncestorType=ComboBox}}"
+                      CommandParameter="{Binding Name}"
+                    />
+                    <TextBlock VerticalAlignment="Center" Text="{Binding Name}" />
+                  </DockPanel>
+                </DataTemplate>
+              </ComboBox.ItemTemplate>
+            </ComboBox>
           </Grid>
 
           <Grid
@@ -452,28 +483,65 @@
             <TextBlock
               Grid.Column="0"
               Style="{StaticResource FieldLabel}"
-              Text="{x:Static res:Strings.Chat_ModelProvider}"
+              Text="{x:Static res:Strings.Chat_Provider}"
             />
+            <!-- プロバイダーはリスト選択のみ（自由入力不可）。内部値 "openai" は表示のみ "OpenAI" にする -->
             <ComboBox
+              x:Name="CodexProviderBox"
               Grid.Column="1"
               Margin="0,0,16,0"
               Padding="6,4"
-              IsEditable="True"
-              Text="{Binding Connection.CodexModelProvider, UpdateSourceTrigger=PropertyChanged}"
+              SelectedItem="{Binding Connection.CodexModelProvider}"
               ItemsSource="{Binding Connection.CodexModelProviderCandidates}"
-            />
+            >
+              <ComboBox.ItemTemplate>
+                <DataTemplate>
+                  <TextBlock Text="{Binding Converter={StaticResource CodexProviderDisplayNameConverter}}" />
+                </DataTemplate>
+              </ComboBox.ItemTemplate>
+            </ComboBox>
             <TextBlock
               Grid.Column="2"
               Style="{StaticResource FieldLabel}"
               Text="{x:Static res:Strings.Chat_ModelName}"
             />
             <ComboBox
+              x:Name="CodexModelBox"
               Grid.Column="3"
               Padding="6,4"
               IsEditable="True"
+              TextSearch.TextPath="Name"
               Text="{Binding Connection.CodexModel, UpdateSourceTrigger=PropertyChanged}"
               ItemsSource="{Binding Connection.CodexModelCandidates}"
-            />
+            >
+              <!-- ドロップダウン項目を横いっぱいに広げ、× ボタンを右端へ寄せる -->
+              <ComboBox.ItemContainerStyle>
+                <Style TargetType="ComboBoxItem">
+                  <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                </Style>
+              </ComboBox.ItemContainerStyle>
+              <ComboBox.ItemTemplate>
+                <DataTemplate>
+                  <DockPanel LastChildFill="True">
+                    <!-- 右端の × は履歴由来（IsRemovable=true）の候補だけ表示し、履歴から個別削除する -->
+                    <Button
+                      DockPanel.Dock="Right"
+                      Content="✕"
+                      Padding="6,0"
+                      Background="Transparent"
+                      BorderThickness="0"
+                      Cursor="Hand"
+                      Foreground="{StaticResource MutedText}"
+                      ToolTip="{x:Static res:Strings.Chat_RemoveModelFromHistory}"
+                      Visibility="{Binding IsRemovable, Converter={StaticResource BoolToVisibilityConverter}}"
+                      Command="{Binding DataContext.Connection.RemoveCodexModelHistoryCommand, RelativeSource={RelativeSource AncestorType=ComboBox}}"
+                      CommandParameter="{Binding Name}"
+                    />
+                    <TextBlock VerticalAlignment="Center" Text="{Binding Name}" />
+                  </DockPanel>
+                </DataTemplate>
+              </ComboBox.ItemTemplate>
+            </ComboBox>
           </Grid>
 
           <ui:ConnectionStatusPanel

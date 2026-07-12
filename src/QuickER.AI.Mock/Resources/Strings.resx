@@ -298,4 +298,7 @@ An error occurred during generation: {0}
   <data name="Mock_ScaffoldFailedFormat" xml:space="preserve">
     <value>Failed to generate the scaffold: {0}</value>
   </data>
+  <data name="Mock_RemoveModelFromHistory" xml:space="preserve">
+    <value>Remove from history</value>
+  </data>
 </root>

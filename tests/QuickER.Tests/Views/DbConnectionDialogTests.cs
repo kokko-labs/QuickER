@@ -38,7 +38,10 @@ public class DbConnectionDialogTests
 
                 // InitializeComponent がここで実行される。DbAuthMode の型解決に失敗すると
                 // XamlParseException が送出される。
-                _ = new DbConnectionDialog(viewModel);
+                // BAML ロードは並列テストと競合しないよう直列化する
+                _ = WpfApplicationTestSupport.LoadXamlComponent(() =>
+                    new DbConnectionDialog(viewModel)
+                );
             }
             catch (Exception ex)
             {

@@ -63,7 +63,10 @@ public class MockGenerationDialogTests
 
                 // InitializeComponent がここで実行される。WebView2 を含む XAML の
                 // 名前空間・型解決に失敗すると XamlParseException が送出される。
-                _ = new MockGenerationDialog(viewModel);
+                // BAML ロードは並列テストと競合しないよう直列化する
+                _ = WpfApplicationTestSupport.LoadXamlComponent(() =>
+                    new MockGenerationDialog(viewModel)
+                );
             }
             catch (Exception ex)
             {
