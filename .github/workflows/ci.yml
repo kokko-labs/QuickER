@@ -9,7 +9,26 @@ name: CI
 on:
   push:
     branches: [main]
+    # ドキュメント・作業記録だけの変更ではフル CI（Windows ランナー・約 12 分の枠消費）を
+    # 走らせない。ルート直下の *.md のみ除外し、src/ 配下の README（NuGet 同梱物）や
+    # samples/ 配下の .g.md（ドリフト検知対象）の変更では従来どおり CI を実行する
+    paths-ignore:
+      - "docs/**"
+      - "tasks/**"
+      - "*.md"
+      - "LICENSE"
+      - ".github/*.md"
+      - ".github/ISSUE_TEMPLATE/**"
+      - ".github/FUNDING.yml"
   pull_request:
+    paths-ignore:
+      - "docs/**"
+      - "tasks/**"
+      - "*.md"
+      - "LICENSE"
+      - ".github/*.md"
+      - ".github/ISSUE_TEMPLATE/**"
+      - ".github/FUNDING.yml"
 
 concurrency:
   group: ci-${{ github.ref }}
