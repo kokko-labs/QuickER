@@ -211,7 +211,7 @@ public sealed class ApiReferenceDocTests
         // docs/code-generation.md へのリンク
         markdown
             .Should()
-            .Contain("https://github.com/QuickER/QuickER/blob/main/docs/code-generation.md");
+            .Contain("https://github.com/kokko-labs/QuickER/blob/main/docs/code-generation.md");
     }
 
     [Fact(DisplayName = "EF Core 構成では AddGeneratedEfCoreRepositories を含む")]

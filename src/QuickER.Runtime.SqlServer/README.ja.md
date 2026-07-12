@@ -18,5 +18,4 @@ DI 登録拡張（`AddGeneratedSqlServerRepositories` など）はスキーマ�
 
 MIT License。QuickER が生成したコードとあわせて、制限なく利用・改変・配布できます。
 
-<!-- TODO: 公開時に実リポジトリ URL へ差し替える -->
-詳細: https://github.com/QuickER/QuickER
+詳細: https://github.com/kokko-labs/QuickER

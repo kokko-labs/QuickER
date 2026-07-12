@@ -13,8 +13,7 @@
     <!-- NuGet パッケージメタデータ。バージョンは Directory.Build.props の VersionPrefix に一元化 -->
     <PackageId>QuickER.Cli</PackageId>
     <Description>QuickER の CLI（dotnet tool）。ER 図 JSON からの C# コード生成（generate）と、データベース直結のスキャフォールド（scaffold）を提供する。</Description>
-    <!-- TODO: 公開時に実リポジトリ URL へ差し替える -->
-    <RepositoryUrl>https://github.com/QuickER/QuickER</RepositoryUrl>
+    <RepositoryUrl>https://github.com/kokko-labs/QuickER</RepositoryUrl>
     <!-- PolyForm Noncommercial は OSI/FSF 承認外のため license expression が使えず、ライセンスファイル同梱方式にする -->
     <PackageLicenseFile>LICENSE-NC.md</PackageLicenseFile>
     <PackageReadmeFile>README.md</PackageReadmeFile>

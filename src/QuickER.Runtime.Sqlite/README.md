@@ -16,5 +16,4 @@ The package version is published in lockstep with the QuickER tool version (iden
 
 MIT License. Together with the code that QuickER generates, you may use, modify, and distribute it with no restrictions.
 
-<!-- TODO: 公開時に実リポジトリ URL へ差し替える -->
-Details: https://github.com/QuickER/QuickER
+Details: https://github.com/kokko-labs/QuickER

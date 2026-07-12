@@ -11,8 +11,7 @@
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <PackageId>QuickER.Runtime.Sqlite</PackageId>
     <Description>QuickER が生成するコードのランタイム（自作 SQLite 方言エンジン）。QuickER.Runtime の共通契約を実装する。</Description>
-    <!-- TODO: 公開時に実リポジトリ URL へ差し替える -->
-    <RepositoryUrl>https://github.com/QuickER/QuickER</RepositoryUrl>
+    <RepositoryUrl>https://github.com/kokko-labs/QuickER</RepositoryUrl>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>

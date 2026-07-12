@@ -11,8 +11,7 @@
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <PackageId>QuickER.Runtime.EntityFrameworkCore</PackageId>
     <Description>QuickER が生成するコードのランタイム（EF Core 共通部品。TContext ジェネリックの EF 版 Repository 基底・値オブジェクト翻訳プラグイン）。QuickER.Runtime の共通契約を実装する。</Description>
-    <!-- TODO: 公開時に実リポジトリ URL へ差し替える -->
-    <RepositoryUrl>https://github.com/QuickER/QuickER</RepositoryUrl>
+    <RepositoryUrl>https://github.com/kokko-labs/QuickER</RepositoryUrl>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>

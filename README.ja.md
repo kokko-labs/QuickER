@@ -42,7 +42,7 @@ ER 図を描く → データベースを作る → C# のデータアクセス�
 リポジトリには「設計 → 保存 → 生成 → ビルド → 実行」を一往復した完成品のサンプル（[samples/ec-order](samples/ec-order)）が入っています。SQLite ファイル DB を使うため、**.NET 10 SDK さえあれば clone 直後にそのまま動きます**。
 
 ```powershell
-git clone https://github.com/QuickER/QuickER.git
+git clone https://github.com/kokko-labs/QuickER.git
 cd QuickER
 dotnet run --project samples/ec-order/EcOrderSample
 ```

@@ -33,8 +33,7 @@ quicker scaffold --connection "Server=.;Database=Shop;Integrated Security=true;T
 
 詳細な CLI リファレンス・生成コードの使い方・動くサンプルは、リポジトリのドキュメントを参照してください:
 
-<!-- TODO: 公開時に実リポジトリ URL へ差し替える -->
-https://github.com/QuickER/QuickER
+https://github.com/kokko-labs/QuickER
 
 ## ライセンス
 

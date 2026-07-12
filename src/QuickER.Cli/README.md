@@ -31,8 +31,7 @@ Main options:
 
 For the detailed CLI reference, how to use the generated code, and a working sample, see the repository documentation:
 
-<!-- TODO: 公開時に実リポジトリ URL へ差し替える -->
-https://github.com/QuickER/QuickER
+https://github.com/kokko-labs/QuickER
 
 ## License
 

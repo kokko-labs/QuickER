@@ -42,7 +42,7 @@ Import and sync against live databases are continuously verified by real-DB inte
 The repository includes a finished sample ([samples/ec-order](samples/ec-order)) that has been round-tripped once through "design → save → generate → build → run." Because it uses a SQLite file DB, **it runs as-is right after cloning, as long as you have the .NET 10 SDK**.
 
 ```powershell
-git clone https://github.com/QuickER/QuickER.git
+git clone https://github.com/kokko-labs/QuickER.git
 cd QuickER
 dotnet run --project samples/ec-order/EcOrderSample
 ```

@@ -11,8 +11,7 @@
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <PackageId>QuickER.Runtime</PackageId>
     <Description>QuickER が生成するコードのランタイム（共通基盤・方言中立の Repository 共通契約）。BCL のみに依存する。</Description>
-    <!-- TODO: 公開時に実リポジトリ URL へ差し替える -->
-    <RepositoryUrl>https://github.com/QuickER/QuickER</RepositoryUrl>
+    <RepositoryUrl>https://github.com/kokko-labs/QuickER</RepositoryUrl>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
