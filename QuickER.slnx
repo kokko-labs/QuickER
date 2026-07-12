@@ -39,6 +39,7 @@
     <Project Path="samples/ec-order-remote/EcOrderRemote.Client/EcOrderRemote.Client.csproj" />
   </Folder>
   <Folder Name="/scripts/">
+    <File Path="scripts/pack-velopack.ps1" />
     <File Path="scripts/regen-fixtures.ps1" />
   </Folder>
   <Folder Name="/src/">

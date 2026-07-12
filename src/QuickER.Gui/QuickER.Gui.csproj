@@ -10,6 +10,14 @@
     <RootNamespace>QuickER</RootNamespace>
     <!-- 中立（既定）リソースのカルチャ＝英語。日本語は Strings.ja.resx サテライトで賦与する -->
     <NeutralResourcesLanguage>en</NeutralResourcesLanguage>
+    <!--
+      Velopack のインストール/更新フックを WPF 初期化より前に処理するため、エントリポイントを
+      自前の QuickER.Program.Main に差し替える。既定の App.xaml 由来 Main は生成させない
+      （EnableDefaultApplicationDefinition=false で App.xaml を ApplicationDefinition ではなく
+      Page としてコンパイルし、InitializeComponent のみ生成させる）。
+    -->
+    <StartupObject>QuickER.Program</StartupObject>
+    <EnableDefaultApplicationDefinition>false</EnableDefaultApplicationDefinition>
   </PropertyGroup>
 
   <ItemGroup>
@@ -17,6 +25,7 @@
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
     <PackageReference Include="Microsoft.Data.SqlClient" Version="7.0.2" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.9" />
+    <PackageReference Include="Velopack" Version="1.2.0" />
   </ItemGroup>
 
   <ItemGroup>

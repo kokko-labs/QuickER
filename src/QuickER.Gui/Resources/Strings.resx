@@ -80,6 +80,12 @@
   <data name="Language_RestartConfirmTitle" xml:space="preserve">
     <value>Restart</value>
   </data>
+  <data name="Update_ConfirmTitle" xml:space="preserve">
+    <value>Update Available</value>
+  </data>
+  <data name="Update_ConfirmMessage" xml:space="preserve">
+    <value>A new version {0} is available. Download it and restart to apply?</value>
+  </data>
   <data name="Common_Cancel" xml:space="preserve">
     <value>Cancel</value>
   </data>
