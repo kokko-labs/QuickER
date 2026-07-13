@@ -1,10 +1,15 @@
 # QuickER パッケージ公開ワークフロー（手動トリガのみ）
 #
 # 運用メモ:
-# - 初回公開は README（P0）完成後・NUGET_API_KEY シークレットの登録が前提
+# - 認証は Trusted Publishing（GitHub OIDC）。長期 API キーの管理・ローテーションは不要で、
+#   NuGet/login が実行時に 1 時間有効の一時キーへ交換する（シークレット登録は不要）。
+#   前提: nuget.org の Trusted Publishing ポリシー（Owner=kokko-labs / Repository=QuickER /
+#   Workflow File=publish.yml）が有効であること。プライベートリポジトリの間、ポリシーは
+#   「7 日間の仮アクティブ」状態で、初回公開の前に nuget.org 側で窓の再開始が必要になる場合がある
 # - バージョンは Directory.Build.props の VersionPrefix で管理する
 #   （公開済みの版は再公開不可なので、公開前に必ずバージョンを上げること）
 # - dry_run=true（既定）では pack と検証までを行い、NuGet.org への push は行わない
+#   （NuGet/login も dry_run では実行しない＝dry_run は nuget.org 側の状態に依存しない）
 name: Publish
 
 on:
@@ -15,6 +20,10 @@ on:
         required: true
         type: boolean
         default: true
+
+permissions:
+  contents: read
+  id-token: write # Trusted Publishing（NuGet/login の OIDC トークン要求）に必要
 
 jobs:
   publish:
@@ -49,6 +58,14 @@ jobs:
       - name: 生成物一覧を表示
         run: Get-ChildItem "${{ runner.temp }}/nupkg" -Recurse
 
+      # 一時キーの有効期限は 1 時間のため、push の直前に取得する
+      - name: NuGet.org へログイン（Trusted Publishing・dry_run=false のときのみ）
+        if: ${{ inputs.dry_run == false }}
+        id: nuget-login
+        uses: NuGet/login@v1
+        with:
+          user: kokko-labs
+
       - name: NuGet.org へ push（dry_run=false のときのみ）
         if: ${{ inputs.dry_run == false }}
-        run: dotnet nuget push "${{ runner.temp }}/nupkg/*.nupkg" --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
+        run: dotnet nuget push "${{ runner.temp }}/nupkg/*.nupkg" --api-key ${{ steps.nuget-login.outputs.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
