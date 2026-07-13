@@ -362,6 +362,10 @@ MigrationBackup/
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
 
+# 内部文書（非公開・別プライベートリポジトリで管理）。tasks/ はローカルではジャンクションとして存在する
+tasks/
+docs/ASSESSMENT.md
+
 # サンプル（samples/ec-order）が実行時に作成する SQLite ファイル DB（既定は bin 配下だが作業ディレクトリ実行の保険）
 ec-order.db
 # ツール（VS / dotnet run）が自動生成する launchSettings.json はコミットしない
