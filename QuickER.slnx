@@ -1,6 +1,8 @@
 <Solution>
   <Folder Name="/ソリューション項目/">
     <File Path=".editorconfig" />
+    <File Path="CLAUDE.md" />
+    <File Path="Directory.Build.props" />
     <File Path="LICENSE" />
     <File Path="LICENSE-NC.md" />
     <File Path="README.md" />
@@ -10,7 +12,6 @@
     <File Path="SECURITY.md" />
   </Folder>
   <Folder Name="/docs/">
-    <File Path="docs/ASSESSMENT.md" />
     <File Path="docs/ai-chat.md" />
     <File Path="docs/cli.md" />
     <File Path="docs/code-generation.md" />
