@@ -1,61 +1,63 @@
-# QuickER への貢献ガイド
+# Contributing to QuickER
 
-QuickER は個人開発の OSS です。Issue・Pull Request を歓迎しますが、対応は**ベストエフォート**（対応期限の約束なし）で、**サポート対象は最新版のみ**です。
+*[日本語](CONTRIBUTING.ja.md) | English*
 
-## Issue（バグ報告・機能要望）
+QuickER is a solo-developed OSS project. Issues and pull requests are welcome, but support is **best-effort** (no promised response times) and covers **the latest version only**.
 
-- テンプレート（バグ報告・機能要望）を使ってください。テンプレートに合わない相談・質問は空 Issue で構いません
-- 日本語・英語どちらでも歓迎します（Issues in English are welcome）
-- バグ報告では環境情報（バージョン・入手方法・OS・.NET Runtime）と再現手順が調査の前提になります
-- **脆弱性の報告は公開 Issue に書かないでください**。[SECURITY.md](SECURITY.md) の手順で非公開に報告してください
+## Issues (bug reports / feature requests)
 
-## Pull Request
+- Please use the issue templates (bug report / feature request). For questions or discussions that don't fit the templates, a blank issue is fine
+- Japanese and English are both welcome
+- For bug reports, environment information (version, how you installed it, OS, .NET runtime) and reproduction steps are prerequisites for investigation
+- **Do not report vulnerabilities in public Issues.** Follow the private reporting procedure in [SECURITY.md](SECURITY.md)
 
-- **PR を作る前に、まず Issue で方針を相談してください**（事前相談制）。typo 修正などの小さな修正は相談不要です
-- 事前相談のない大きな PR は、方針に合わない場合クローズすることがあります
+## Pull requests
 
-### 開発規約の要点
+- **Before opening a PR, please discuss your plan in an Issue first** (discussion-first policy). Small fixes such as typo corrections don't need prior discussion
+- Large PRs without prior discussion may be closed if they don't fit the project direction
 
-- 開発環境は Windows ＋ .NET 10 SDK（テストが WPF 依存のため）。Docker があれば実 DB 統合テストも実行されます（無ければ自動スキップ）
-- コメント・コミットメッセージは日本語で書きます
-- コード修正後は `csharpier format .` を実行してください（グローバルツール）
-- `dotnet test QuickER.slnx` が緑であることを確認してください
-- 生成テンプレート（`Templates/CSharpRuntime.scriban`）を変更した場合は、固定フィクスチャ等の再生成が必要です。再生成 → 検証 → 差分表示までを次のスクリプトが行います:
+### Development conventions
+
+- Development environment: Windows + .NET 10 SDK (the tests depend on WPF). With Docker running, the real-DB integration tests also run (they are skipped automatically otherwise)
+- Comments and commit messages are written in Japanese
+- Run `csharpier format .` after code changes (global tool)
+- Make sure `dotnet test QuickER.slnx` is green
+- If you change the generation templates (`Templates/CSharpRuntime.scriban`), the checked-in fixtures etc. must be regenerated. The following script performs regenerate → verify → show diff:
 
   ```powershell
   ./scripts/regen-fixtures.ps1
   ```
 
-  スクリプトを使わない場合は、次の 1 コマンドで再生成し、そのあと環境変数なしで同じテストを流して緑を確認してください:
+  Without the script, regenerate with the following one-liner, then run the same tests again without the environment variable and confirm they are green:
 
   ```powershell
   $env:QUICKER_REGEN_FIXTURES=1; dotnet test tests/QuickER.Tests/QuickER.Tests.csproj --filter "FullyQualifiedName~Drift"; $env:QUICKER_REGEN_FIXTURES=$null
   ```
 
-- 利用者に影響する変更は [CHANGELOG.md](CHANGELOG.md) の Unreleased 欄へ 1 行追記してください（内部リファクタリング・テストのみの変更は不要）
+- For changes that affect users, add a one-line entry to the Unreleased section of the changelog — **both** [CHANGELOG.md](CHANGELOG.md) (English) and [CHANGELOG.ja.md](CHANGELOG.ja.md) (Japanese). Not needed for internal refactoring or test-only changes
 
-アーキテクチャと「壊すと静かに回帰する不変条件」は [CLAUDE.md](CLAUDE.md) にまとまっています。
+The architecture and the invariants that break silently (not caught by the build or the type checker) are documented in [CLAUDE.md](CLAUDE.md).
 
-## ライセンスと貢献時の権利処理
+## License and rights handling for contributions
 
-- 本リポジトリはプロジェクトごとに **MIT** と **PolyForm Noncommercial 1.0.0** を使い分けています（対象一覧は [LICENSE-NC.md](LICENSE-NC.md)、提供方針は README の「ライセンス」節を参照）
-- 提出されたコードは、**取り込み先プロジェクトの現行ライセンスで公開されること**に同意したものとみなします
-- PolyForm NC 対象プロジェクトへの貢献では、あわせて**作者（リポジトリオーナー）が当該コードを含むソフトウェアに商用ライセンスを提供し、または将来ライセンスを変更（無料開放を含む）する権利**を許諾したものとみなします（将来の提供方針の変更を外部貢献が阻害しないための取り決めです）
+- This repository uses **MIT** and **PolyForm Noncommercial 1.0.0** on a per-project basis (see [LICENSE-NC.md](LICENSE-NC.md) for the covered projects, and the "License" section of the README for the provisioning policy)
+- By submitting code, you agree that it will be published under the current license of the project it is merged into
+- For contributions to the PolyForm NC projects, you additionally grant the author (the repository owner) the right to offer commercial licenses for software containing your code, and to change its license in the future (including making it free of charge) — this arrangement keeps external contributions from blocking future changes to the provisioning policy
 
-## バージョニング
+## Versioning
 
-- [Semantic Versioning](https://semver.org/lang/ja/) に従います。全配布物（GUI・CLI・ランタイムパッケージ 4 種）はロックステップ＝`Directory.Build.props` の `VersionPrefix` で共通管理です
-- 0.x の間の版上げルール:
-  - **minor**（0.2.0 → 0.3.0）: 新機能、非互換変更（Repository API や生成コードのシグネチャ・構造の変化、パッケージの依存変更）
-  - **patch**（0.2.0 → 0.2.1）: バグ修正のみ。利用側の呼び出しコードが壊れない修正は、生成コードの内部実装が変わっても patch とします
-- 1.0.0 は「生成コードと Repository API の互換性を約束できる」と判断した時点で宣言します
+- We follow [Semantic Versioning](https://semver.org/). All distributables (the GUI, the CLI, and the 4 runtime packages) are versioned in lockstep, managed via `VersionPrefix` in `Directory.Build.props`
+- Version bump rules during 0.x:
+  - **minor** (0.2.0 → 0.3.0): new features and breaking changes (changes to the Repository API or to the signatures/structure of the generated code, package dependency changes)
+  - **patch** (0.2.0 → 0.2.1): bug fixes only. A fix that doesn't break calling code counts as a patch, even if the internals of the generated code change
+- 1.0.0 will be declared when we judge that compatibility of the generated code and the Repository API can be promised
 
-## リリース手順（メンテナ向け）
+## Release procedure (for maintainers)
 
-リリースは**常に全配布物同時**（NuGet 5 パッケージ＋GUI zip＋git タグ `v{版}`）。時期は任意で、頻度は約束しません。
+Releases always ship **all distributables together** (the 5 NuGet packages, the GUI distributables (Velopack: full / lite × Setup.exe / Portable zip), and the git tag `v{version}`). Timing is discretionary; no cadence is promised.
 
-1. [CHANGELOG.md](CHANGELOG.md) の Unreleased 欄を確認し、版番号（上記ルールで minor / patch を判断）と日付を付けて確定する
-2. `Directory.Build.props` の `VersionPrefix` を更新し、CHANGELOG の確定と合わせて 1 コミットにする
-3. publish.yml（NuGet 5 パッケージ）を workflow_dispatch で実行する（まず dry_run で確認してから本番実行）
-4. release.yml（GUI zip の発行と git タグ作成）を workflow_dispatch で実行する
-5. GitHub Release のノートへ CHANGELOG の該当版の内容を転記する
+1. Review the Unreleased section of the changelog, decide the version number (minor / patch per the rules above), and finalize the entry with a date — in **both [CHANGELOG.md](CHANGELOG.md) and [CHANGELOG.ja.md](CHANGELOG.ja.md)**
+2. Update `VersionPrefix` in `Directory.Build.props` and commit it together with the changelog finalization as a single commit
+3. Run publish.yml (the 5 NuGet packages) via workflow_dispatch (confirm with dry_run first, then run for real)
+4. Run release.yml (publishes the GUI distributables and creates the git tag) via workflow_dispatch
+5. Copy the changelog content for the version into the GitHub Release notes

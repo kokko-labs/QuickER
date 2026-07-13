@@ -8,7 +8,7 @@
 
 ER 図を描く → データベースを作る → C# のデータアクセスコードを生成して動かす、までを 1 つのツールで往復できます。既存 DB からの取込・差分同期にも対応し、AI チャットで図の生成・編集もできます。
 
-![QuickER のメイン画面（EC 注文サンプルの ER 図）](docs/images/sample-ec-order.png)
+![QuickER のメイン画面（EC 注文サンプルの ER 図）](docs/images/sample-ec-order.ja.png)
 
 ## 特徴
 
@@ -169,9 +169,9 @@ dotnet test QuickER.slnx         # 全テスト（Docker があれば実 DB 統�
 
 ## サポート・貢献
 
-個人開発のため、サポートは**ベストエフォート**（対応期限の約束なし）・対象は**最新版のみ**です。バグ報告・機能要望は Issue へどうぞ（日本語・英語どちらでも歓迎）。Pull Request は事前に Issue での相談をお願いします — 詳細は [CONTRIBUTING.md](CONTRIBUTING.md)、脆弱性の報告は [SECURITY.md](SECURITY.md) を参照してください。
+個人開発のため、サポートは**ベストエフォート**（対応期限の約束なし）・対象は**最新版のみ**です。バグ報告・機能要望は Issue へどうぞ（日本語・英語どちらでも歓迎）。Pull Request は事前に Issue での相談をお願いします — 詳細は [CONTRIBUTING.ja.md](CONTRIBUTING.ja.md)、脆弱性の報告は [SECURITY.ja.md](SECURITY.ja.md) を参照してください。
 
-変更履歴は [CHANGELOG.md](CHANGELOG.md) にあります。
+変更履歴は [CHANGELOG.ja.md](CHANGELOG.ja.md) にあります。
 
 ## ライセンス
 

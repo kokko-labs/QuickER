@@ -13,4 +13,4 @@
 - [ ] `csharpier format .` を実行した
 - [ ] コメント・コミットメッセージは日本語（既存の規約に合わせた）
 - [ ] （該当時）生成テンプレート変更に伴う固定フィクスチャの再生成を実行した（CONTRIBUTING.md 参照）
-- [ ] （該当時）利用者に影響する変更を CHANGELOG.md の Unreleased 欄へ追記した
+- [ ] （該当時）利用者に影響する変更を CHANGELOG.md と CHANGELOG.ja.md **両方**の Unreleased 欄へ追記した

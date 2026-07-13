@@ -8,7 +8,7 @@
 
 Draw an ER diagram → create a database → generate C# data-access code and run it — all in a single tool, round-tripping between each step. It also imports from and diff-syncs with existing databases, and you can generate and edit diagrams through AI chat.
 
-![QuickER main screen (the EC order sample ER diagram)](docs/images/sample-ec-order-en.png)
+![QuickER main screen (the EC order sample ER diagram)](docs/images/sample-ec-order.png)
 
 ## Features
 

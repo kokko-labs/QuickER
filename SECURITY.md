@@ -1,13 +1,15 @@
-# セキュリティポリシー
+# Security Policy
 
-## サポート対象
+*[日本語](SECURITY.ja.md) | English*
 
-最新版のみサポートします。脆弱性の修正は最新版に対して行います。
+## Supported versions
 
-## 脆弱性の報告
+Only the latest version is supported. Vulnerability fixes are applied to the latest version.
 
-**公開 Issue には書かないでください**（修正前に攻撃者へ情報を提供してしまうため）。
+## Reporting a vulnerability
 
-本リポジトリの **Security タブ →「Report a vulnerability」**（GitHub Private Vulnerability Reporting）から非公開で報告してください。個人開発のため対応はベストエフォートですが、報告には可能な限り速やかに返信します。
+**Do not report vulnerabilities in public Issues** (doing so would hand the information to attackers before a fix is available).
 
-QuickER は DB 接続文字列や AI の API キーを扱うアプリケーションです。報告の再現情報に、実際の接続文字列・API キー等の秘密情報を含めないでください。
+Please report privately via this repository's **Security tab → "Report a vulnerability"** (GitHub Private Vulnerability Reporting). As a solo project, responses are best-effort, but reports will be answered as quickly as possible.
+
+QuickER is an application that handles DB connection strings and AI API keys. Please do not include real connection strings, API keys, or other secrets in the reproduction details of your report.
