@@ -3684,12 +3684,14 @@ internal readonly record struct SqlQueryOrdering(LambdaExpression KeySelector, b
 /// <param name="Includes">Include / ThenInclude のナビゲーションツリー</param>
 /// <param name="Take">取得件数の上限（未指定は null）</param>
 /// <param name="Skip">読み飛ばす件数（未指定は null）</param>
+/// <param name="WithUnboundedBinary">無制限バイナリ列を含めて取得するか（true で全列プレーン SELECT・Include とは併用不可）</param>
 internal sealed record SqlQueryPlan<TEntity>(
     IReadOnlyList<LambdaExpression> Predicates,
     IReadOnlyList<SqlQueryOrdering> Orderings,
     IReadOnlyList<IncludeNode> Includes,
     int? Take,
-    int? Skip
+    int? Skip,
+    bool WithUnboundedBinary
 );
 
 /// <summary>
@@ -3813,6 +3815,9 @@ public sealed class SqlQuery<TEntity>
     private int? _take;
     private int? _skip;
 
+    /// <summary>WithUnboundedBinary 指定フラグ（true で無制限バイナリ列を含めた全列取得＝Include とは併用不可）</summary>
+    private bool _withUnboundedBinary;
+
     /// <summary>終端メソッドの実行を担うバックエンド実行器（ADO 方言別 or EF Core）</summary>
     private readonly ISqlQueryExecutor<TEntity> _executor;
 
@@ -3859,6 +3864,23 @@ public sealed class SqlQuery<TEntity>
     public SqlQuery<TEntity> Skip(int count)
     {
         _skip = count;
+        return this;
+    }
+
+    /// <summary>
+    /// 無制限バイナリ列（<c>UnboundedBinaryColumnAttribute</c> 付き）を含めてエンティティを取得する。ExcludeUnboundedBinaryColumns で
+    /// 既定 SELECT から外れている列を、この呼び出しに限り取得したいときに指定する（除外列がなければ何もしない no-op）。
+    /// </summary>
+    /// <remarks>
+    /// Include とは併用できない（終端メソッド実行時に <see cref="InvalidOperationException"/>）。無制限バイナリ列が
+    /// 必要な場合は Include なしの別クエリで取得すること。SQL Server では（既定の JSON 経由ではなく）プレーン SELECT になり、
+    /// 巨大 blob の Base64 膨張（ピークメモリ 5〜6 倍）を回避する。効果があるのは ToListAsync / FirstOrDefaultAsync のみ
+    /// （射影・件数・存在確認には影響しない）。取得したエンティティは通常取得と同等（RowState=Unchanged）だが、除外列が
+    /// UPDATE 対象外である点は変わらないため、そのまま UpdateAsync すると既存ガードで例外になる（更新は生 SQL で行う）。
+    /// </remarks>
+    public SqlQuery<TEntity> WithUnboundedBinary()
+    {
+        _withUnboundedBinary = true;
         return this;
     }
 
@@ -3925,8 +3947,20 @@ public sealed class SqlQuery<TEntity>
     ) => await _executor.ExecuteDeleteAsync(BuildPlan(), cascadeDelete, cancellationToken);
 
     /// <summary>捕捉済みの式・Include ツリー・ページングを、実行器へ渡すスナップショットへ固める</summary>
-    private SqlQueryPlan<TEntity> BuildPlan() =>
-        new(_predicates, _orderSelectors, _includes, _take, _skip);
+    private SqlQueryPlan<TEntity> BuildPlan()
+    {
+        // WithUnboundedBinary は Include と併用できない（Include→With / With→Include の両順序をここで検出する）。
+        // SQL Server の Include 経路は既定の JSON 経由（Base64）で巨大 blob のメモリ膨張を招くため、
+        // 「無制限バイナリ列を含める」目的と両立しない。終端の種別に依らず併用自体を常に拒否する。
+        if (_withUnboundedBinary && _includes.Count > 0)
+        {
+            throw new InvalidOperationException(
+                "WithUnboundedBinary は Include と併用できません。無制限バイナリ列が必要な場合は Include なしの別クエリで取得してください。"
+            );
+        }
+
+        return new(_predicates, _orderSelectors, _includes, _take, _skip, _withUnboundedBinary);
+    }
 }
 
 /// <summary>Include の対象ナビゲーションと、その配下（ThenInclude）の木構造</summary>
@@ -4026,6 +4060,9 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
 
     /// <summary>先頭から読み飛ばす件数を指定する</summary>
     public SqlQuery<TEntity> Skip(int count) => _query.Skip(count);
+
+    /// <summary>無制限バイナリ列を含めて取得する（Include との併用は終端実行時に例外）</summary>
+    public SqlQuery<TEntity> WithUnboundedBinary() => _query.WithUnboundedBinary();
 
     /// <summary>条件に一致するエンティティを一覧取得する</summary>
     public Task<IReadOnlyList<TEntity>> ToListAsync(
@@ -4466,12 +4503,18 @@ internal sealed class InMemoryQueryExecutor<TEntity>(InMemoryDataStore store)
         var result = _store.Read(scope =>
         {
             var matched = ApplyOrderingAndPaging(FilterRaw(plan), plan);
-            // 複製してから Include を装着する（ストアの実体を書き換えないため）。返却複製は無制限バイナリ列を未取得状態へ落とす
+            // 複製してから Include を装着する（ストアの実体を書き換えないため）。返却複製は既定で無制限バイナリ列を未取得状態へ落とす
+            // （WithUnboundedBinary 指定時は strip せず完全クローンを返す＝除外列も取得できる。Include なしは終端でガード済み）
             var cloned = matched
                 .Select(entity =>
                 {
                     var clone = (TEntity)entity.Clone();
-                    UnboundedBinaryColumns.StripExcluded(clone);
+
+                    if (!plan.WithUnboundedBinary)
+                    {
+                        UnboundedBinaryColumns.StripExcluded(clone);
+                    }
+
                     return clone;
                 })
                 .ToList();
@@ -4549,7 +4592,13 @@ internal sealed class InMemoryQueryExecutor<TEntity>(InMemoryDataStore store)
             }
 
             var cloned = (TEntity)first.Clone();
-            UnboundedBinaryColumns.StripExcluded(cloned);
+
+            // 既定は無制限バイナリ列を未取得状態へ落とす。WithUnboundedBinary 指定時は strip せず完全クローンを返す
+            if (!plan.WithUnboundedBinary)
+            {
+                UnboundedBinaryColumns.StripExcluded(cloned);
+            }
+
             IncludeAttacher.Attach(cloned, plan.Includes, scope);
             return cloned;
         });

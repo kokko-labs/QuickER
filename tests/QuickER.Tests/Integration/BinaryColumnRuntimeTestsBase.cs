@@ -1,9 +1,12 @@
 using System;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using FluentAssertions;
 using Microsoft.Data.Sqlite;
 using QuickER.Sqlite;
 using QuickER.Tests.GeneratedBinaryFixture;
+using Xunit;
 
 namespace QuickER.Tests.Integration;
 
@@ -107,6 +110,98 @@ public abstract class BinaryColumnRuntimeTestsBase : IDisposable
             DocumentId = documentId,
             Note = note,
         };
+
+    // ── 読み取りオプトイン WithUnboundedBinary() の検証 ──
+    // 「除外列を含めて取得する」効果は自作 Repository と EF Core で結果が同一（EF は元々全列）のため、
+    // パリティを担保するべく本基底に [Fact] を置き、Ado / EF 両派生で同じテストを実行させる。
+
+    /// <summary>WithUnboundedBinary().FirstOrDefaultAsync() は除外列（payload/thumb）の実データを返し、RowState は Unchanged になる</summary>
+    [Fact(
+        DisplayName = "[Binary] WithUnboundedBinary/FirstOrDefault は除外列の実データを返す（RowState=Unchanged）"
+    )]
+    public async Task WithUnboundedBinary_FirstOrDefault_ReturnsBinaryData()
+    {
+        await ResetAndSeedAsync();
+        var documents = CreateDocumentRepository();
+
+        var doc = await documents
+            .Query()
+            .Where(d => d.DocumentId == 1)
+            .WithUnboundedBinary()
+            .FirstOrDefaultAsync(Ct);
+
+        doc.Should().NotBeNull();
+        doc!
+            .Payload.Should()
+            .Equal(Doc1Payload, "WithUnboundedBinary で除外列 payload の実データが取れる");
+        doc.Thumb.Should()
+            .Equal(Doc1Thumb, "WithUnboundedBinary で除外列 thumb の実データが取れる");
+        doc.Checksum.Should().Equal(Doc1Checksum, "除外対象外の列も通常どおり取れる");
+        doc.RowState.Should()
+            .Be(RowState.Unchanged, "通常取得と同等の正当なエンティティ（DB 読み込み行）である");
+    }
+
+    /// <summary>WithUnboundedBinary().ToListAsync() は各エンティティの除外列（payload/thumb）を実データで返す</summary>
+    [Fact(
+        DisplayName = "[Binary] WithUnboundedBinary/ToList は各エンティティの除外列を実データで返す"
+    )]
+    public async Task WithUnboundedBinary_ToList_ReturnsBinaryData()
+    {
+        await ResetAndSeedAsync();
+        var documents = CreateDocumentRepository();
+
+        var docs = await documents
+            .Query()
+            .Where(d => d.DocumentId == 1)
+            .WithUnboundedBinary()
+            .ToListAsync(Ct);
+
+        docs.Should().ContainSingle();
+        docs[0].Payload.Should().Equal(Doc1Payload);
+        docs[0].Thumb.Should().Equal(Doc1Thumb);
+        docs[0].RowState.Should().Be(RowState.Unchanged);
+    }
+
+    /// <summary>WithUnboundedBinary と Include の併用は、指定順序に依らず・終端種別に依らず InvalidOperationException になる</summary>
+    [Fact(
+        DisplayName = "[Binary] WithUnboundedBinary と Include の併用は両順序・全終端で例外になる"
+    )]
+    public async Task WithUnboundedBinary_WithInclude_Throws()
+    {
+        await ResetAndSeedAsync();
+        var documents = CreateDocumentRepository();
+
+        // 順序 1: Include → WithUnboundedBinary
+        var includeThenWith = async () =>
+            await documents
+                .Query()
+                .Where(d => d.DocumentId == 1)
+                .Include(d => d.DocumentNotes)
+                .WithUnboundedBinary()
+                .FirstOrDefaultAsync(Ct);
+        (await includeThenWith.Should().ThrowAsync<InvalidOperationException>())
+            .Which.Message.Should()
+            .Contain("Include");
+
+        // 順序 2: WithUnboundedBinary → Include
+        var withThenInclude = async () =>
+            await documents
+                .Query()
+                .Where(d => d.DocumentId == 1)
+                .WithUnboundedBinary()
+                .Include(d => d.DocumentNotes)
+                .ToListAsync(Ct);
+        await withThenInclude.Should().ThrowAsync<InvalidOperationException>();
+
+        // 終端の種別に依らず併用自体が拒否される（Count でも throw＝予測可能性優先）
+        var countTerminal = async () =>
+            await documents
+                .Query()
+                .Include(d => d.DocumentNotes)
+                .WithUnboundedBinary()
+                .CountAsync(Ct);
+        await countTerminal.Should().ThrowAsync<InvalidOperationException>();
+    }
 
     /// <summary>使い終えた一時 DB を破棄する（派生の DI コンテナ破棄は派生側で行う）</summary>
     public virtual void Dispose() => _db.Dispose();

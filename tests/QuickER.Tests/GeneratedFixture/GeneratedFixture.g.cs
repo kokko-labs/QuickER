@@ -5428,12 +5428,14 @@ internal readonly record struct SqlQueryOrdering(LambdaExpression KeySelector, b
 /// <param name="Includes">Include / ThenInclude のナビゲーションツリー</param>
 /// <param name="Take">取得件数の上限（未指定は null）</param>
 /// <param name="Skip">読み飛ばす件数（未指定は null）</param>
+/// <param name="WithUnboundedBinary">無制限バイナリ列を含めて取得するか（true で全列プレーン SELECT・Include とは併用不可）</param>
 internal sealed record SqlQueryPlan<TEntity>(
     IReadOnlyList<LambdaExpression> Predicates,
     IReadOnlyList<SqlQueryOrdering> Orderings,
     IReadOnlyList<IncludeNode> Includes,
     int? Take,
-    int? Skip
+    int? Skip,
+    bool WithUnboundedBinary
 );
 
 /// <summary>
@@ -5557,6 +5559,9 @@ public sealed class SqlQuery<TEntity>
     private int? _take;
     private int? _skip;
 
+    /// <summary>WithUnboundedBinary 指定フラグ（true で無制限バイナリ列を含めた全列取得＝Include とは併用不可）</summary>
+    private bool _withUnboundedBinary;
+
     /// <summary>終端メソッドの実行を担うバックエンド実行器（ADO 方言別 or EF Core）</summary>
     private readonly ISqlQueryExecutor<TEntity> _executor;
 
@@ -5603,6 +5608,23 @@ public sealed class SqlQuery<TEntity>
     public SqlQuery<TEntity> Skip(int count)
     {
         _skip = count;
+        return this;
+    }
+
+    /// <summary>
+    /// 無制限バイナリ列（<c>UnboundedBinaryColumnAttribute</c> 付き）を含めてエンティティを取得する。ExcludeUnboundedBinaryColumns で
+    /// 既定 SELECT から外れている列を、この呼び出しに限り取得したいときに指定する（除外列がなければ何もしない no-op）。
+    /// </summary>
+    /// <remarks>
+    /// Include とは併用できない（終端メソッド実行時に <see cref="InvalidOperationException"/>）。無制限バイナリ列が
+    /// 必要な場合は Include なしの別クエリで取得すること。SQL Server では（既定の JSON 経由ではなく）プレーン SELECT になり、
+    /// 巨大 blob の Base64 膨張（ピークメモリ 5〜6 倍）を回避する。効果があるのは ToListAsync / FirstOrDefaultAsync のみ
+    /// （射影・件数・存在確認には影響しない）。取得したエンティティは通常取得と同等（RowState=Unchanged）だが、除外列が
+    /// UPDATE 対象外である点は変わらないため、そのまま UpdateAsync すると既存ガードで例外になる（更新は生 SQL で行う）。
+    /// </remarks>
+    public SqlQuery<TEntity> WithUnboundedBinary()
+    {
+        _withUnboundedBinary = true;
         return this;
     }
 
@@ -5669,8 +5691,20 @@ public sealed class SqlQuery<TEntity>
     ) => await _executor.ExecuteDeleteAsync(BuildPlan(), cascadeDelete, cancellationToken);
 
     /// <summary>捕捉済みの式・Include ツリー・ページングを、実行器へ渡すスナップショットへ固める</summary>
-    private SqlQueryPlan<TEntity> BuildPlan() =>
-        new(_predicates, _orderSelectors, _includes, _take, _skip);
+    private SqlQueryPlan<TEntity> BuildPlan()
+    {
+        // WithUnboundedBinary は Include と併用できない（Include→With / With→Include の両順序をここで検出する）。
+        // SQL Server の Include 経路は既定の JSON 経由（Base64）で巨大 blob のメモリ膨張を招くため、
+        // 「無制限バイナリ列を含める」目的と両立しない。終端の種別に依らず併用自体を常に拒否する。
+        if (_withUnboundedBinary && _includes.Count > 0)
+        {
+            throw new InvalidOperationException(
+                "WithUnboundedBinary は Include と併用できません。無制限バイナリ列が必要な場合は Include なしの別クエリで取得してください。"
+            );
+        }
+
+        return new(_predicates, _orderSelectors, _includes, _take, _skip, _withUnboundedBinary);
+    }
 }
 
 /// <summary>Include の対象ナビゲーションと、その配下（ThenInclude）の木構造</summary>
@@ -5771,6 +5805,9 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
     /// <summary>先頭から読み飛ばす件数を指定する</summary>
     public SqlQuery<TEntity> Skip(int count) => _query.Skip(count);
 
+    /// <summary>無制限バイナリ列を含めて取得する（Include との併用は終端実行時に例外）</summary>
+    public SqlQuery<TEntity> WithUnboundedBinary() => _query.WithUnboundedBinary();
+
     /// <summary>条件に一致するエンティティを一覧取得する</summary>
     public Task<IReadOnlyList<TEntity>> ToListAsync(
         CancellationToken cancellationToken = default
@@ -5870,6 +5907,19 @@ internal sealed class SqlServerSqlQueryExecutor<TEntity>(ISqlConnectionFactory c
     {
         var parameters = new List<SqlQueryParameter>();
         var whereClause = BuildWhereClause(plan, parameters);
+
+        if (plan.WithUnboundedBinary)
+        {
+            // 無制限バイナリ列を含める指定: 方言に依らず全列プレーン SELECT で実体化する（Include なしは終端でガード済み）
+            return await MaterializeWithUnboundedBinaryAsync(
+                plan,
+                whereClause,
+                parameters,
+                plan.Take,
+                plan.Skip,
+                cancellationToken
+            );
+        }
         var json = await ReadJsonAsync(
             BuildJsonSelect(plan, whereClause, plan.Take, plan.Skip),
             parameters,
@@ -5945,6 +5995,20 @@ internal sealed class SqlServerSqlQueryExecutor<TEntity>(ISqlConnectionFactory c
     {
         var parameters = new List<SqlQueryParameter>();
         var whereClause = BuildWhereClause(plan, parameters);
+
+        if (plan.WithUnboundedBinary)
+        {
+            // 無制限バイナリ列を含める指定: 先頭 1 件を全列プレーン SELECT で実体化する（Include なしは終端でガード済み）
+            var withBinary = await MaterializeWithUnboundedBinaryAsync(
+                plan,
+                whereClause,
+                parameters,
+                take: 1,
+                plan.Skip,
+                cancellationToken
+            );
+            return withBinary.Count > 0 ? withBinary[0] : null;
+        }
         var json = await ReadJsonAsync(
             BuildJsonSelect(plan, whereClause, 1, plan.Skip),
             parameters,
@@ -6047,6 +6111,48 @@ internal sealed class SqlServerSqlQueryExecutor<TEntity>(ISqlConnectionFactory c
             await transaction.RollbackAsync(cancellationToken);
             throw;
         }
+    }
+
+    /// <summary>
+    /// WithUnboundedBinary 指定時の実体化。Include を使わず全列（無制限バイナリ列を含む）を
+    /// プレーン SELECT し、RowState=Unchanged の正当なエンティティとして実体化する（方言共通）。
+    /// SQL Server では既定の JSON 経由（Base64）を避けメモリ膨張を防ぐ。Include なし限定（終端でガード済み）。
+    /// </summary>
+    private async Task<IReadOnlyList<TEntity>> MaterializeWithUnboundedBinaryAsync(
+        SqlQueryPlan<TEntity> plan,
+        string whereClause,
+        IReadOnlyList<SqlQueryParameter> parameters,
+        int? take,
+        int? skip,
+        CancellationToken cancellationToken
+    )
+    {
+        var metadata = EntitySaveMetadata.For(typeof(TEntity));
+        // 全列（除外列＝無制限バイナリ列を含む）をプレーン SELECT する
+        var sql =
+            $"SELECT {metadata.BuildColumnList(metadata.AllProperties)} FROM {TableName}{whereClause}{BuildOrderAndPaging(plan, take, skip)};";
+
+        await using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        await using var command = CreateCommand(connection, sql, parameters);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+
+        var results = new List<TEntity>();
+
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            // 全列を束縛した正当なエンティティ（RowState=Unchanged）として実体化する
+            results.Add(
+                metadata.MapEntityColumns<TEntity>(
+                    reader,
+                    metadata.AllProperties,
+                    markUnchanged: true
+                )
+            );
+        }
+
+        return results;
     }
 
     /// <summary>FOR JSON の結果（約 2KB ごとに複数行で返る）を全行連結して 1 つの JSON 文字列にする</summary>
@@ -7028,12 +7134,15 @@ internal sealed class EntitySaveMetadata
         );
 
     /// <summary>
-    /// データリーダーの 1 行を、指定した列プロパティのみマッピングした {TEntity} を返す（射影のサーバー側列刈り込み用）。
-    /// SELECT に含めた列だけを束縛し、それ以外の列（主キー含む）は既定値のまま（RowState はセレクタ適用後に捨てるため設定しない）。
+    /// データリーダーの 1 行を、指定した列プロパティのみマッピングした {TEntity} を返す（射影のサーバー側列刈り込み・WithUnboundedBinary の全列取得で共用）。
+    /// SELECT に含めた列だけを束縛し、それ以外の列は既定値のまま。射影用途（<paramref name="markUnchanged"/> = false・既定）は
+    /// セレクタ適用後に捨てるため RowState を設定しないが、WithUnboundedBinary の全列取得（<paramref name="markUnchanged"/> = true）は
+    /// 通常取得と同等の正当なエンティティを返すため RowState=Unchanged を確定する。
     /// </summary>
     public TEntity MapEntityColumns<TEntity>(
         SqlDataReader reader,
-        IReadOnlyList<PropertyInfo> properties
+        IReadOnlyList<PropertyInfo> properties,
+        bool markUnchanged = false
     )
         where TEntity : EntityBase
     {
@@ -7053,6 +7162,12 @@ internal sealed class EntitySaveMetadata
                 // 値オブジェクトは内包型へ変換して包み直す（Wrap 内で Convert.ChangeType 済み）
                 property.SetValue(entity, SqlValueObjectActivator.Wrap(value, property.PropertyType));
             }
+        }
+
+        if (markUnchanged)
+        {
+            // 全列を束縛した「正当なエンティティ」として返す場合は、DB 読み込み行として変更なしを確定する
+            entity.RowState = RowState.Unchanged;
         }
 
         return entity;
