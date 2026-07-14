@@ -1059,11 +1059,11 @@ public class CSharpCodeGenerationServiceTests
                 "public sealed partial class CustomerRepository(ISqlConnectionFactory connectionFactory)"
             );
         content.Should().Contain("services.AddScoped<ICustomerRepository, CustomerRepository>();");
-        // カラム一覧は columnList へ抽出して SELECT 系で共用する
+        // カラム一覧は columnList へ抽出して SELECT 系で共用する（無制限バイナリ列を除いた SELECT 用列集合）
         content
             .Should()
             .Contain(
-                "var columnList = string.Join(\", \", columns.Select(property => $\"[{GetColumnName(property)}]\"));"
+                "var columnList = string.Join(\", \", selectProperties.Select(property => $\"[{GetColumnName(property)}]\"));"
             );
         content
             .Should()
@@ -1142,8 +1142,12 @@ public class CSharpCodeGenerationServiceTests
         content
             .Should()
             .Contain("public TEntity MapEntityFromRawSql<TEntity>(SqlDataReader reader)");
-        content.Should().Contain("catch (IndexOutOfRangeException ex)");
-        content.Should().Contain("の全列（{ColumnList}）が必要です");
+        content
+            .Should()
+            .Contain(
+                "catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentOutOfRangeException)"
+            );
+        content.Should().Contain("の列（{ColumnList}）が必要です");
         // スカラー・単一値変換は ChangeType(InvariantCulture) / 変換不能で例外
         content
             .Should()
@@ -3449,5 +3453,109 @@ public class CSharpCodeGenerationServiceTests
                 && d.Message == Strings.CodeGen_Error_InMemoryRuntimePackagesExclusive
             );
         result.Files.Should().BeEmpty("診断エラー時はファイルを出力しない");
+    }
+
+    /// <summary>varbinary(max)（無制限バイナリ）と rowversion（有界バイナリ）を持つ単一エンティティ図（除外機能の検証用）</summary>
+    private static ErDiagram BinaryColumnDiagram() =>
+        new()
+        {
+            Entities =
+            [
+                new Entity
+                {
+                    Id = Guid.NewGuid(),
+                    TableName = "documents",
+                    Columns =
+                    [
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "document_id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "photo",
+                            DataType = "varbinary(max)",
+                            IsNullable = true,
+                        },
+                        new Column
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = "row_version",
+                            DataType = "rowversion",
+                            IsNullable = false,
+                        },
+                    ],
+                },
+            ],
+        };
+
+    /// <summary>
+    /// ExcludeUnboundedBinaryColumns=true のとき、varbinary(max) 列にマーカー属性が付与され、
+    /// Info 診断が 1 件出ることを検証する（rowversion 列には付与されない。ヘッダには出さない＝
+    /// 生成コード側の可視化は属性が担い、一覧は生成時の診断でのみ通知する）。
+    /// </summary>
+    [Fact(DisplayName = "無制限バイナリ除外 ON: マーカー付与・Info 診断（rowversion は対象外）")]
+    public void Generate_ExcludeUnboundedBinary_On_MarksColumnAndReportsInfo()
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            BinaryColumnDiagram(),
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                ExcludeUnboundedBinaryColumns = true,
+            }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        var content = result.Files.Single(f => f.FileName.EndsWith(".g.cs")).Content;
+
+        // マーカー属性クラスの定義が出る
+        content.Should().Contain("public sealed class UnboundedBinaryColumnAttribute : Attribute");
+        // varbinary(max) の Photo プロパティにマーカーが付く
+        content
+            .Should()
+            .MatchRegex(@"\[UnboundedBinaryColumn\]\s*\r?\n\s*public byte\[\]\? Photo");
+        // 付与は varbinary(max) の 1 列のみ（rowversion の RowVersion には付かない）
+        System
+            .Text.RegularExpressions.Regex.Matches(content, @"\[UnboundedBinaryColumn\]")
+            .Count.Should()
+            .Be(1, "付与対象は無制限バイナリの photo 1 列だけで rowversion は対象外");
+        // ヘッダには除外列一覧を出さない（属性と Info 診断で可視化する）
+        content.Should().NotContain("無制限バイナリ列（SELECT / UPDATE 除外）");
+        // Info 診断が 1 件出る
+        result
+            .Diagnostics.Should()
+            .ContainSingle(d => d.Severity == GenerationDiagnosticSeverity.Info)
+            .Which.Message.Should()
+            .Contain("DocumentEntity.Photo（documents.photo）");
+    }
+
+    /// <summary>
+    /// ExcludeUnboundedBinaryColumns=false（既定）のとき、マーカー付与・Info 診断が出ないことを検証する
+    /// （属性クラスの定義自体は Repository 生成のため出力される）。
+    /// </summary>
+    [Fact(DisplayName = "無制限バイナリ除外 OFF: 付与・Info なし（属性定義は repo 生成で出る）")]
+    public void Generate_ExcludeUnboundedBinary_Off_DoesNotMarkOrReport()
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            BinaryColumnDiagram(),
+            new CodeGenerationOptions { NamespaceName = "Sample.Domain" }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        var content = result.Files.Single(f => f.FileName.EndsWith(".g.cs")).Content;
+
+        // 付与・Info 診断はいずれも出ない
+        content.Should().NotContain("[UnboundedBinaryColumn]");
+        result
+            .Diagnostics.Should()
+            .NotContain(d => d.Severity == GenerationDiagnosticSeverity.Info);
+        // ただし属性クラスの定義は Repository 生成（既定 ON）のため出力される（後続ステージの固定 infra が参照する）
+        content.Should().Contain("public sealed class UnboundedBinaryColumnAttribute : Attribute");
     }
 }

@@ -118,6 +118,12 @@
   <data name="CodeGen_ApiDocsTooltip" xml:space="preserve">
     <value>Additionally outputs one API reference Markdown ({baseName}.g.md) sharing the generated code's base name (overwritten on regeneration)</value>
   </data>
+  <data name="CodeGen_ExcludeUnboundedBinary" xml:space="preserve">
+    <value>Do not fetch unbounded binary columns (varbinary(max) / BLOB)</value>
+  </data>
+  <data name="CodeGen_ExcludeUnboundedBinaryToolTip" xml:space="preserve">
+    <value>Excludes unbounded binary columns from SELECT / UPDATE. INSERT keeps all columns. Update such columns with raw SQL (ExecuteSqlAsync). Not applied to EF Core</value>
+  </data>
   <data name="CodeGen_RemoteAccess" xml:space="preserve">
     <value>Remote</value>
   </data>

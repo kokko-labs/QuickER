@@ -106,6 +106,9 @@
   <data name="Cli_Opt_RemoteServices" xml:space="preserve">
     <value>Include the HTTP client implementation of the remote surface in the main output, and additionally output an ASP.NET Core server implementation to {baseName}.RemoteServer.g.cs (implies the remote surface --remote-contracts automatically; default false; overrides the settings file)</value>
   </data>
+  <data name="Cli_Opt_ExcludeUnboundedBinary" xml:space="preserve">
+    <value>Exclude unbounded binary columns (varbinary(max), BLOB without a length) from the generated Repository's SELECT/UPDATE; INSERT keeps all columns (default false; overrides the settings file)</value>
+  </data>
   <data name="Cli_SchemaFileNotFound" xml:space="preserve">
     <value>Schema file not found: {0}</value>
   </data>

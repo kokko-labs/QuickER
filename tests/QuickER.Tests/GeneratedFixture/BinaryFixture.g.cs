@@ -14,6 +14,8 @@ using System.Data.Common;
 using System.Globalization;
 using System.Linq;
 using System.Linq.Expressions;
+using System.Net.Http;
+using System.Net.Http.Json;
 using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -30,7 +32,7 @@ using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
-namespace QuickER.Tests.GeneratedRemoteContractFixture;
+namespace QuickER.Tests.GeneratedBinaryFixture;
 
 /// <summary>Entity ナビゲーションへ参照テーブル・カラム情報を付加する独自属性</summary>
 [AttributeUsage(AttributeTargets.Property, AllowMultiple = false)]
@@ -191,14 +193,9 @@ internal static class UnboundedBinaryColumns
         }
     }
 
-    /// <summary>値が「未取得状態と同等（null / 空 byte[] / 内包値が空の値オブジェクト）」かどうか</summary>
+    /// <summary>値が「未取得状態と同等（null / 空 byte[]）」かどうか</summary>
     private static bool IsUnset(object? value)
     {
-        // 値オブジェクトは内包値を取り出して判定する
-        if (value is IValueObject valueObject)
-        {
-            value = valueObject.UnderlyingValue;
-        }
         return value switch
         {
             null => true,
@@ -206,829 +203,6 @@ internal static class UnboundedBinaryColumns
             _ => false,
         };
     }
-}
-
-/// <summary>値オブジェクト（Value Object）の非ジェネリックマーカー。内包値の取り出し・型判定に使う</summary>
-public interface IValueObject
-{
-    /// <summary>内包する値を object として取得する（SQL パラメータ束縛などで素の値へ開くのに使う）</summary>
-    object? UnderlyingValue { get; }
-
-    /// <summary>画面表示用の文字列（既定は ToString()。具象 VO で override して書式を変えられる）</summary>
-    string DisplayValue { get; }
-}
-
-/// <summary>値オブジェクトの汎用インターフェース。static ファクトリを型パラメータ経由で呼べるようにする</summary>
-public interface IValueObject<TSelf, TValue> : IValueObject
-    where TSelf : IValueObject<TSelf, TValue>
-{
-    /// <summary>検証して生成する（違反時は ValueObjectValidationException）</summary>
-    static abstract TSelf Create(TValue value);
-
-    /// <summary>生成可なら true＋値オブジェクト、不可なら false＋エラー内容を返す</summary>
-    static abstract bool TryCreate(
-        TValue value,
-        out TSelf? result,
-        out IReadOnlyList<string> errors
-    );
-
-    /// <summary>内包する値</summary>
-    TValue Value { get; }
-}
-
-/// <summary>値オブジェクトの検証違反を表す例外</summary>
-public sealed class ValueObjectValidationException : Exception
-{
-    /// <summary>違反した値オブジェクトの型</summary>
-    public Type ValueObjectType { get; }
-
-    /// <summary>検証エラーの一覧</summary>
-    public IReadOnlyList<string> Errors { get; }
-
-    /// <summary>対象型と検証エラー一覧で初期化する</summary>
-    public ValueObjectValidationException(Type valueObjectType, IReadOnlyList<string> errors)
-        : base($"{valueObjectType.Name} の値が不正です: {string.Join(" / ", errors)}")
-    {
-        ValueObjectType = valueObjectType;
-        Errors = errors;
-    }
-}
-
-/// <summary>値オブジェクト共通の基底。値の保持・等価・ToString・素値の取り出しを提供する（順序比較は派生で付与）</summary>
-public abstract partial class ValueObjectBase<TSelf, TValue> : IValueObject
-    where TSelf : ValueObjectBase<TSelf, TValue>
-{
-    /// <summary>内包する値（不変）</summary>
-    public TValue Value { get; }
-
-    /// <summary>検証済みの値で初期化する（検証は具象の Create/TryCreate が事前に行う）</summary>
-    protected ValueObjectBase(TValue value) => Value = value;
-
-    /// <summary>内包値を object として取得する（SQL 束縛などで素の値へ開く）</summary>
-    object? IValueObject.UnderlyingValue => Value;
-
-    /// <summary>画面表示用の文字列（既定は ToString()）。具象 VO の partial クラスで override して書式を変えられる</summary>
-    public virtual string DisplayValue => ToString();
-
-    /// <summary>値ベースの等価判定（byte[] などの配列は要素単位で比較する）</summary>
-    public override bool Equals(object? obj) =>
-        obj is ValueObjectBase<TSelf, TValue> other
-        && StructuralComparisons.StructuralEqualityComparer.Equals(Value, other.Value);
-
-    /// <summary>値ベースのハッシュコード（配列は構造的に算出）</summary>
-    public override int GetHashCode() =>
-        Value is null ? 0 : StructuralComparisons.StructuralEqualityComparer.GetHashCode(Value);
-
-    /// <summary>値ベースの等価演算子</summary>
-    public static bool operator ==(
-        ValueObjectBase<TSelf, TValue>? left,
-        ValueObjectBase<TSelf, TValue>? right
-    ) => left is null ? right is null : left.Equals(right);
-
-    /// <summary>値ベースの非等価演算子</summary>
-    public static bool operator !=(
-        ValueObjectBase<TSelf, TValue>? left,
-        ValueObjectBase<TSelf, TValue>? right
-    ) => !(left == right);
-
-    /// <summary>内包値の文字列表現を返す</summary>
-    public override string ToString() => Value?.ToString() ?? string.Empty;
-}
-
-/// <summary>順序付け可能な値オブジェクトの基底（数値・日時系）。比較演算子と CompareTo を提供する</summary>
-public abstract partial class ValueObjectOrderedBase<TSelf, TValue>
-    : ValueObjectBase<TSelf, TValue>,
-        IComparable<TSelf>,
-        IComparable
-    where TSelf : ValueObjectOrderedBase<TSelf, TValue>
-    where TValue : IComparable<TValue>
-{
-    /// <summary>検証済みの値で初期化する</summary>
-    protected ValueObjectOrderedBase(TValue value)
-        : base(value) { }
-
-    /// <summary>内包値どうしを比較する</summary>
-    public int CompareTo(TSelf? other) => other is null ? 1 : Value.CompareTo(other.Value);
-
-    /// <summary>非ジェネリック比較（型不一致は例外）</summary>
-    int IComparable.CompareTo(object? obj) =>
-        obj is null ? 1
-        : obj is TSelf other ? CompareTo(other)
-        : throw new ArgumentException(
-            $"{obj.GetType().Name} は {typeof(TSelf).Name} と比較できません。",
-            nameof(obj)
-        );
-
-    /// <summary>未満</summary>
-    public static bool operator <(
-        ValueObjectOrderedBase<TSelf, TValue>? left,
-        ValueObjectOrderedBase<TSelf, TValue>? right
-    ) => Compare(left, right) < 0;
-
-    /// <summary>超過</summary>
-    public static bool operator >(
-        ValueObjectOrderedBase<TSelf, TValue>? left,
-        ValueObjectOrderedBase<TSelf, TValue>? right
-    ) => Compare(left, right) > 0;
-
-    /// <summary>以下</summary>
-    public static bool operator <=(
-        ValueObjectOrderedBase<TSelf, TValue>? left,
-        ValueObjectOrderedBase<TSelf, TValue>? right
-    ) => Compare(left, right) <= 0;
-
-    /// <summary>以上</summary>
-    public static bool operator >=(
-        ValueObjectOrderedBase<TSelf, TValue>? left,
-        ValueObjectOrderedBase<TSelf, TValue>? right
-    ) => Compare(left, right) >= 0;
-
-    private static int Compare(
-        ValueObjectOrderedBase<TSelf, TValue>? left,
-        ValueObjectOrderedBase<TSelf, TValue>? right
-    ) =>
-        left is null ? (right is null ? 0 : -1)
-        : right is null ? 1
-        : left.Value.CompareTo(right.Value);
-}
-
-/// <summary>string 値オブジェクトの基底。部分一致系メソッドと序数比較を提供する（順序演算子は付けない）</summary>
-public abstract partial class ValueObjectStringBase<TSelf>
-    : ValueObjectBase<TSelf, string>,
-        IComparable<TSelf>,
-        IComparable
-    where TSelf : ValueObjectStringBase<TSelf>
-{
-    /// <summary>検証済みの値で初期化する</summary>
-    protected ValueObjectStringBase(string value)
-        : base(value) { }
-
-    /// <summary>指定文字列を含むか</summary>
-    public bool Contains(string? value) =>
-        value is not null && Value.Contains(value, StringComparison.Ordinal);
-
-    /// <summary>指定文字列で始まるか</summary>
-    public bool StartsWith(string? value) =>
-        value is not null && Value.StartsWith(value, StringComparison.Ordinal);
-
-    /// <summary>指定文字列で終わるか</summary>
-    public bool EndsWith(string? value) =>
-        value is not null && Value.EndsWith(value, StringComparison.Ordinal);
-
-    /// <summary>他の値オブジェクトの値を含むか</summary>
-    public bool Contains(TSelf? value) => value is not null && Contains(value.Value);
-
-    /// <summary>他の値オブジェクトの値で始まるか</summary>
-    public bool StartsWith(TSelf? value) => value is not null && StartsWith(value.Value);
-
-    /// <summary>他の値オブジェクトの値で終わるか</summary>
-    public bool EndsWith(TSelf? value) => value is not null && EndsWith(value.Value);
-
-    /// <summary>序数で比較する</summary>
-    public int CompareTo(TSelf? other) =>
-        other is null ? 1 : string.CompareOrdinal(Value, other.Value);
-
-    /// <summary>非ジェネリック比較（型不一致は例外）</summary>
-    int IComparable.CompareTo(object? obj) =>
-        obj is null ? 1
-        : obj is TSelf other ? CompareTo(other)
-        : throw new ArgumentException(
-            $"{obj.GetType().Name} は {typeof(TSelf).Name} と比較できません。",
-            nameof(obj)
-        );
-}
-
-/// <summary>bool 値オブジェクトの基底。True/False ファクトリと真偽判定を提供する（順序比較は持たない）</summary>
-public abstract partial class ValueObjectBooleanBase<TSelf> : ValueObjectBase<TSelf, bool>
-    where TSelf : ValueObjectBooleanBase<TSelf>, IValueObject<TSelf, bool>
-{
-    /// <summary>検証済みの値で初期化する</summary>
-    protected ValueObjectBooleanBase(bool value)
-        : base(value) { }
-
-    /// <summary>true 値で生成する</summary>
-    public static TSelf True => TSelf.Create(true);
-
-    /// <summary>false 値で生成する</summary>
-    public static TSelf False => TSelf.Create(false);
-
-    /// <summary>値が true かどうか</summary>
-    public bool IsTrue => Value;
-
-    /// <summary>値が false かどうか</summary>
-    public bool IsFalse => !Value;
-}
-
-/// <summary>DateTime 値オブジェクトの基底。Now/Today ファクトリを提供する</summary>
-public abstract partial class ValueObjectDateTimeBase<TSelf>
-    : ValueObjectOrderedBase<TSelf, DateTime>
-    where TSelf : ValueObjectDateTimeBase<TSelf>, IValueObject<TSelf, DateTime>
-{
-    /// <summary>検証済みの値で初期化する</summary>
-    protected ValueObjectDateTimeBase(DateTime value)
-        : base(value) { }
-
-    /// <summary>現在日時で生成する</summary>
-    public static TSelf Now => TSelf.Create(DateTime.Now);
-
-    /// <summary>本日（時刻 0:00）で生成する</summary>
-    public static TSelf Today => TSelf.Create(DateTime.Today);
-}
-
-/// <summary>byte[] 値オブジェクトの基底。ToString は Base64 を返す（等価は基底の構造的比較）</summary>
-public abstract partial class ValueObjectBinaryBase<TSelf> : ValueObjectBase<TSelf, byte[]>
-    where TSelf : ValueObjectBinaryBase<TSelf>
-{
-    /// <summary>検証済みの値で初期化する</summary>
-    protected ValueObjectBinaryBase(byte[] value)
-        : base(value) { }
-
-    /// <summary>Base64 文字列として返す</summary>
-    public override string ToString() =>
-        Value is null ? string.Empty : Convert.ToBase64String(Value);
-}
-
-/// <summary>GUID を文字列で保持する主キー値オブジェクトの基底。無引数生成で GUID を自動採番する</summary>
-public abstract partial class ValueObjectGuidKeyBase<TSelf>
-    : ValueObjectBase<TSelf, string>,
-        IComparable<TSelf>,
-        IComparable
-    where TSelf : ValueObjectGuidKeyBase<TSelf>, IValueObject<TSelf, string>
-{
-    /// <summary>検証済みの値で初期化する</summary>
-    protected ValueObjectGuidKeyBase(string value)
-        : base(value) { }
-
-    /// <summary>新しい GUID を採番して生成する</summary>
-    public static TSelf Create() => TSelf.Create(Guid.NewGuid().ToString());
-
-    /// <summary>序数で比較する</summary>
-    public int CompareTo(TSelf? other) =>
-        other is null ? 1 : string.CompareOrdinal(Value, other.Value);
-
-    /// <summary>非ジェネリック比較（型不一致は例外）</summary>
-    int IComparable.CompareTo(object? obj) =>
-        obj is null ? 1
-        : obj is TSelf other ? CompareTo(other)
-        : throw new ArgumentException(
-            $"{obj.GetType().Name} は {typeof(TSelf).Name} と比較できません。",
-            nameof(obj)
-        );
-}
-
-/// <summary>値オブジェクトを内包値（素の値）として JSON 入出力する変換器</summary>
-public sealed class ValueObjectJsonConverter<TVo, TValue> : JsonConverter<TVo>
-    where TVo : class, IValueObject<TVo, TValue>
-{
-    /// <summary>素の値を読み取り、Create で値オブジェクトを復元する</summary>
-    public override TVo? Read(
-        ref Utf8JsonReader reader,
-        Type typeToConvert,
-        JsonSerializerOptions options
-    )
-    {
-        var value = JsonSerializer.Deserialize<TValue>(ref reader, options);
-        return value is null ? null : TVo.Create(value);
-    }
-
-    /// <summary>内包値（素の値）として書き出す</summary>
-    public override void Write(Utf8JsonWriter writer, TVo value, JsonSerializerOptions options) =>
-        JsonSerializer.Serialize(writer, value.Value, options);
-}
-
-/// <summary>IValueObject&lt;,&gt; を実装する型に汎用変換器を適用するファクトリ</summary>
-public sealed class ValueObjectJsonConverterFactory : JsonConverterFactory
-{
-    /// <summary>値オブジェクト型かどうか</summary>
-    public override bool CanConvert(Type typeToConvert) =>
-        Array.Exists(
-            typeToConvert.GetInterfaces(),
-            i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IValueObject<,>)
-        );
-
-    /// <summary>対象型の TValue を解決して閉じた変換器を生成する</summary>
-    public override JsonConverter CreateConverter(Type typeToConvert, JsonSerializerOptions options)
-    {
-        var iface = Array.Find(
-            typeToConvert.GetInterfaces(),
-            i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IValueObject<,>)
-        )!;
-        var valueType = iface.GetGenericArguments()[1];
-        var converterType = typeof(ValueObjectJsonConverter<,>).MakeGenericType(
-            typeToConvert,
-            valueType
-        );
-        return (JsonConverter)Activator.CreateInstance(converterType)!;
-    }
-}
-
-/// <summary>値オブジェクトの自動検証メッセージ（全 VO 共通の既定）。アプリ起動時に差し替えると全 VO に反映される</summary>
-public static class ValueObjectValidationMessages
-{
-    /// <summary>最大長超過メッセージ（引数: 最大長, 現在の文字数）</summary>
-    public static Func<int, int, string> MaxLengthExceeded { get; set; } =
-        (maxLength, actualLength) =>
-            $"{maxLength} 文字以内で入力してください。（現在 {actualLength} 文字）";
-
-    /// <summary>小数部桁数超過メッセージ（引数: 許容スケール）</summary>
-    public static Func<int, string> ScaleExceeded { get; set; } =
-        scale => $"小数点以下は {scale} 桁以内で入力してください。";
-
-    /// <summary>整数部桁数超過メッセージ（引数: 許容整数部桁数）</summary>
-    public static Func<int, string> PrecisionExceeded { get; set; } =
-        maxIntegralDigits => $"整数部は {maxIntegralDigits} 桁以内で入力してください。";
-}
-
-/// <summary>amount 列に対応する値オブジェクト</summary>
-public sealed partial class AmountValue
-    : ValueObjectOrderedBase<AmountValue, decimal>,
-        IValueObject<AmountValue, decimal>
-{
-    private AmountValue(decimal value)
-        : base(value) { }
-
-    /// <summary>検証して生成する（違反時は ValueObjectValidationException）</summary>
-    public static AmountValue Create(decimal value)
-    {
-        var errors = new List<string>();
-        Validate(value, errors);
-        if (errors.Count > 0)
-        {
-            throw new ValueObjectValidationException(typeof(AmountValue), errors);
-        }
-        return new AmountValue(value);
-    }
-
-    /// <summary>生成可なら true＋値オブジェクト、不可なら false＋エラー内容を返す</summary>
-    public static bool TryCreate(
-        decimal value,
-        out AmountValue? result,
-        out IReadOnlyList<string> errors
-    )
-    {
-        var list = new List<string>();
-        Validate(value, list);
-        if (list.Count > 0)
-        {
-            result = null;
-            errors = list;
-            return false;
-        }
-        result = new AmountValue(value);
-        errors = Array.Empty<string>();
-        return true;
-    }
-
-    /// <summary>自動生成された検証＋ユーザー拡張（OnValidate）。partial・自前コードからも呼べる</summary>
-    internal static void Validate(decimal value, ICollection<string> errors)
-    {
-        ValidateDecimal(value, 10, 2, errors);
-        OnValidate(value, errors);
-    }
-
-    /// <summary>ユーザー定義の追加検証（partial・未実装ならゼロコスト）</summary>
-    static partial void OnValidate(decimal value, ICollection<string> errors);
-
-    /// <summary>この値オブジェクトの表示名（エラーメッセージ等で使う）。既定は列の説明、無指定はプロパティ名。CustomizeDisplayName で上書き可能</summary>
-    public static string DisplayName
-    {
-        get
-        {
-            var displayName = "Amount";
-            CustomizeDisplayName(ref displayName);
-            return displayName;
-        }
-    }
-
-    /// <summary>表示名を差し替える拡張ポイント（partial・未実装なら既定の表示名）</summary>
-    static partial void CustomizeDisplayName(ref string displayName);
-
-    /// <summary>decimal の桁数検証（丸めない・超過は弾く）。末尾ゼロは scale に数える</summary>
-    private static void ValidateDecimal(
-        decimal value,
-        int precision,
-        int scale,
-        ICollection<string> errors
-    )
-    {
-        var valueScale = (decimal.GetBits(value)[3] >> 16) & 0xFF;
-        if (valueScale > scale)
-        {
-            var message = ValueObjectValidationMessages.ScaleExceeded(scale);
-            CustomizeScaleErrorMessage(value, scale, ref message);
-            errors.Add(message);
-        }
-        var integral = Math.Truncate(Math.Abs(value));
-        var integralDigits = 0;
-        while (integral >= 1)
-        {
-            integral = Math.Truncate(integral / 10);
-            integralDigits++;
-        }
-        if (integralDigits > precision - scale)
-        {
-            var message = ValueObjectValidationMessages.PrecisionExceeded(precision - scale);
-            CustomizePrecisionErrorMessage(value, precision - scale, ref message);
-            errors.Add(message);
-        }
-    }
-
-    /// <summary>小数部桁数エラーメッセージの差し替え（partial・未実装なら既定メッセージ）</summary>
-    static partial void CustomizeScaleErrorMessage(decimal value, int scale, ref string message);
-
-    /// <summary>整数部桁数エラーメッセージの差し替え（partial・未実装なら既定メッセージ）</summary>
-    static partial void CustomizePrecisionErrorMessage(
-        decimal value,
-        int maxIntegralDigits,
-        ref string message
-    );
-}
-
-/// <summary>balance 列に対応する値オブジェクト</summary>
-public sealed partial class BalanceValue
-    : ValueObjectOrderedBase<BalanceValue, decimal>,
-        IValueObject<BalanceValue, decimal>
-{
-    private BalanceValue(decimal value)
-        : base(value) { }
-
-    /// <summary>検証して生成する（違反時は ValueObjectValidationException）</summary>
-    public static BalanceValue Create(decimal value)
-    {
-        var errors = new List<string>();
-        Validate(value, errors);
-        if (errors.Count > 0)
-        {
-            throw new ValueObjectValidationException(typeof(BalanceValue), errors);
-        }
-        return new BalanceValue(value);
-    }
-
-    /// <summary>生成可なら true＋値オブジェクト、不可なら false＋エラー内容を返す</summary>
-    public static bool TryCreate(
-        decimal value,
-        out BalanceValue? result,
-        out IReadOnlyList<string> errors
-    )
-    {
-        var list = new List<string>();
-        Validate(value, list);
-        if (list.Count > 0)
-        {
-            result = null;
-            errors = list;
-            return false;
-        }
-        result = new BalanceValue(value);
-        errors = Array.Empty<string>();
-        return true;
-    }
-
-    /// <summary>自動生成された検証＋ユーザー拡張（OnValidate）。partial・自前コードからも呼べる</summary>
-    internal static void Validate(decimal value, ICollection<string> errors)
-    {
-        ValidateDecimal(value, 10, 2, errors);
-        OnValidate(value, errors);
-    }
-
-    /// <summary>ユーザー定義の追加検証（partial・未実装ならゼロコスト）</summary>
-    static partial void OnValidate(decimal value, ICollection<string> errors);
-
-    /// <summary>この値オブジェクトの表示名（エラーメッセージ等で使う）。既定は列の説明、無指定はプロパティ名。CustomizeDisplayName で上書き可能</summary>
-    public static string DisplayName
-    {
-        get
-        {
-            var displayName = "Balance";
-            CustomizeDisplayName(ref displayName);
-            return displayName;
-        }
-    }
-
-    /// <summary>表示名を差し替える拡張ポイント（partial・未実装なら既定の表示名）</summary>
-    static partial void CustomizeDisplayName(ref string displayName);
-
-    /// <summary>decimal の桁数検証（丸めない・超過は弾く）。末尾ゼロは scale に数える</summary>
-    private static void ValidateDecimal(
-        decimal value,
-        int precision,
-        int scale,
-        ICollection<string> errors
-    )
-    {
-        var valueScale = (decimal.GetBits(value)[3] >> 16) & 0xFF;
-        if (valueScale > scale)
-        {
-            var message = ValueObjectValidationMessages.ScaleExceeded(scale);
-            CustomizeScaleErrorMessage(value, scale, ref message);
-            errors.Add(message);
-        }
-        var integral = Math.Truncate(Math.Abs(value));
-        var integralDigits = 0;
-        while (integral >= 1)
-        {
-            integral = Math.Truncate(integral / 10);
-            integralDigits++;
-        }
-        if (integralDigits > precision - scale)
-        {
-            var message = ValueObjectValidationMessages.PrecisionExceeded(precision - scale);
-            CustomizePrecisionErrorMessage(value, precision - scale, ref message);
-            errors.Add(message);
-        }
-    }
-
-    /// <summary>小数部桁数エラーメッセージの差し替え（partial・未実装なら既定メッセージ）</summary>
-    static partial void CustomizeScaleErrorMessage(decimal value, int scale, ref string message);
-
-    /// <summary>整数部桁数エラーメッセージの差し替え（partial・未実装なら既定メッセージ）</summary>
-    static partial void CustomizePrecisionErrorMessage(
-        decimal value,
-        int maxIntegralDigits,
-        ref string message
-    );
-}
-
-/// <summary>customer_id 列に対応する値オブジェクト</summary>
-public sealed partial class CustomerIdValue
-    : ValueObjectOrderedBase<CustomerIdValue, int>,
-        IValueObject<CustomerIdValue, int>
-{
-    private CustomerIdValue(int value)
-        : base(value) { }
-
-    /// <summary>検証して生成する（違反時は ValueObjectValidationException）</summary>
-    public static CustomerIdValue Create(int value)
-    {
-        var errors = new List<string>();
-        Validate(value, errors);
-        if (errors.Count > 0)
-        {
-            throw new ValueObjectValidationException(typeof(CustomerIdValue), errors);
-        }
-        return new CustomerIdValue(value);
-    }
-
-    /// <summary>生成可なら true＋値オブジェクト、不可なら false＋エラー内容を返す</summary>
-    public static bool TryCreate(
-        int value,
-        out CustomerIdValue? result,
-        out IReadOnlyList<string> errors
-    )
-    {
-        var list = new List<string>();
-        Validate(value, list);
-        if (list.Count > 0)
-        {
-            result = null;
-            errors = list;
-            return false;
-        }
-        result = new CustomerIdValue(value);
-        errors = Array.Empty<string>();
-        return true;
-    }
-
-    /// <summary>自動生成された検証＋ユーザー拡張（OnValidate）。partial・自前コードからも呼べる</summary>
-    internal static void Validate(int value, ICollection<string> errors)
-    {
-        OnValidate(value, errors);
-    }
-
-    /// <summary>ユーザー定義の追加検証（partial・未実装ならゼロコスト）</summary>
-    static partial void OnValidate(int value, ICollection<string> errors);
-
-    /// <summary>この値オブジェクトの表示名（エラーメッセージ等で使う）。既定は列の説明、無指定はプロパティ名。CustomizeDisplayName で上書き可能</summary>
-    public static string DisplayName
-    {
-        get
-        {
-            var displayName = "CustomerId";
-            CustomizeDisplayName(ref displayName);
-            return displayName;
-        }
-    }
-
-    /// <summary>表示名を差し替える拡張ポイント（partial・未実装なら既定の表示名）</summary>
-    static partial void CustomizeDisplayName(ref string displayName);
-}
-
-/// <summary>memo 列に対応する値オブジェクト</summary>
-public sealed partial class MemoValue
-    : ValueObjectStringBase<MemoValue>,
-        IValueObject<MemoValue, string>
-{
-    private MemoValue(string value)
-        : base(value) { }
-
-    /// <summary>検証して生成する（違反時は ValueObjectValidationException）</summary>
-    public static MemoValue Create(string value)
-    {
-        var errors = new List<string>();
-        Validate(value, errors);
-        if (errors.Count > 0)
-        {
-            throw new ValueObjectValidationException(typeof(MemoValue), errors);
-        }
-        return new MemoValue(value);
-    }
-
-    /// <summary>生成可なら true＋値オブジェクト、不可なら false＋エラー内容を返す</summary>
-    public static bool TryCreate(
-        string value,
-        out MemoValue? result,
-        out IReadOnlyList<string> errors
-    )
-    {
-        var list = new List<string>();
-        Validate(value, list);
-        if (list.Count > 0)
-        {
-            result = null;
-            errors = list;
-            return false;
-        }
-        result = new MemoValue(value);
-        errors = Array.Empty<string>();
-        return true;
-    }
-
-    /// <summary>自動生成された検証＋ユーザー拡張（OnValidate）。partial・自前コードからも呼べる</summary>
-    internal static void Validate(string value, ICollection<string> errors)
-    {
-        if (value.Length > 50)
-        {
-            var message = ValueObjectValidationMessages.MaxLengthExceeded(50, value.Length);
-            CustomizeMaxLengthErrorMessage(value, 50, ref message);
-            errors.Add(message);
-        }
-        OnValidate(value, errors);
-    }
-
-    /// <summary>ユーザー定義の追加検証（partial・未実装ならゼロコスト）</summary>
-    static partial void OnValidate(string value, ICollection<string> errors);
-
-    /// <summary>この値オブジェクトの表示名（エラーメッセージ等で使う）。既定は列の説明、無指定はプロパティ名。CustomizeDisplayName で上書き可能</summary>
-    public static string DisplayName
-    {
-        get
-        {
-            var displayName = "Memo";
-            CustomizeDisplayName(ref displayName);
-            return displayName;
-        }
-    }
-
-    /// <summary>表示名を差し替える拡張ポイント（partial・未実装なら既定の表示名）</summary>
-    static partial void CustomizeDisplayName(ref string displayName);
-
-    /// <summary>最大長エラーメッセージの差し替え（partial・未実装なら既定メッセージ）</summary>
-    static partial void CustomizeMaxLengthErrorMessage(
-        string value,
-        int maxLength,
-        ref string message
-    );
-}
-
-/// <summary>name 列に対応する値オブジェクト</summary>
-public sealed partial class NameValue
-    : ValueObjectStringBase<NameValue>,
-        IValueObject<NameValue, string>
-{
-    private NameValue(string value)
-        : base(value) { }
-
-    /// <summary>検証して生成する（違反時は ValueObjectValidationException）</summary>
-    public static NameValue Create(string value)
-    {
-        var errors = new List<string>();
-        Validate(value, errors);
-        if (errors.Count > 0)
-        {
-            throw new ValueObjectValidationException(typeof(NameValue), errors);
-        }
-        return new NameValue(value);
-    }
-
-    /// <summary>生成可なら true＋値オブジェクト、不可なら false＋エラー内容を返す</summary>
-    public static bool TryCreate(
-        string value,
-        out NameValue? result,
-        out IReadOnlyList<string> errors
-    )
-    {
-        var list = new List<string>();
-        Validate(value, list);
-        if (list.Count > 0)
-        {
-            result = null;
-            errors = list;
-            return false;
-        }
-        result = new NameValue(value);
-        errors = Array.Empty<string>();
-        return true;
-    }
-
-    /// <summary>自動生成された検証＋ユーザー拡張（OnValidate）。partial・自前コードからも呼べる</summary>
-    internal static void Validate(string value, ICollection<string> errors)
-    {
-        if (value.Length > 50)
-        {
-            var message = ValueObjectValidationMessages.MaxLengthExceeded(50, value.Length);
-            CustomizeMaxLengthErrorMessage(value, 50, ref message);
-            errors.Add(message);
-        }
-        OnValidate(value, errors);
-    }
-
-    /// <summary>ユーザー定義の追加検証（partial・未実装ならゼロコスト）</summary>
-    static partial void OnValidate(string value, ICollection<string> errors);
-
-    /// <summary>この値オブジェクトの表示名（エラーメッセージ等で使う）。既定は列の説明、無指定はプロパティ名。CustomizeDisplayName で上書き可能</summary>
-    public static string DisplayName
-    {
-        get
-        {
-            var displayName = "Name";
-            CustomizeDisplayName(ref displayName);
-            return displayName;
-        }
-    }
-
-    /// <summary>表示名を差し替える拡張ポイント（partial・未実装なら既定の表示名）</summary>
-    static partial void CustomizeDisplayName(ref string displayName);
-
-    /// <summary>最大長エラーメッセージの差し替え（partial・未実装なら既定メッセージ）</summary>
-    static partial void CustomizeMaxLengthErrorMessage(
-        string value,
-        int maxLength,
-        ref string message
-    );
-}
-
-/// <summary>order_id 列に対応する値オブジェクト</summary>
-public sealed partial class OrderIdValue
-    : ValueObjectOrderedBase<OrderIdValue, int>,
-        IValueObject<OrderIdValue, int>
-{
-    private OrderIdValue(int value)
-        : base(value) { }
-
-    /// <summary>検証して生成する（違反時は ValueObjectValidationException）</summary>
-    public static OrderIdValue Create(int value)
-    {
-        var errors = new List<string>();
-        Validate(value, errors);
-        if (errors.Count > 0)
-        {
-            throw new ValueObjectValidationException(typeof(OrderIdValue), errors);
-        }
-        return new OrderIdValue(value);
-    }
-
-    /// <summary>生成可なら true＋値オブジェクト、不可なら false＋エラー内容を返す</summary>
-    public static bool TryCreate(
-        int value,
-        out OrderIdValue? result,
-        out IReadOnlyList<string> errors
-    )
-    {
-        var list = new List<string>();
-        Validate(value, list);
-        if (list.Count > 0)
-        {
-            result = null;
-            errors = list;
-            return false;
-        }
-        result = new OrderIdValue(value);
-        errors = Array.Empty<string>();
-        return true;
-    }
-
-    /// <summary>自動生成された検証＋ユーザー拡張（OnValidate）。partial・自前コードからも呼べる</summary>
-    internal static void Validate(int value, ICollection<string> errors)
-    {
-        OnValidate(value, errors);
-    }
-
-    /// <summary>ユーザー定義の追加検証（partial・未実装ならゼロコスト）</summary>
-    static partial void OnValidate(int value, ICollection<string> errors);
-
-    /// <summary>この値オブジェクトの表示名（エラーメッセージ等で使う）。既定は列の説明、無指定はプロパティ名。CustomizeDisplayName で上書き可能</summary>
-    public static string DisplayName
-    {
-        get
-        {
-            var displayName = "OrderId";
-            CustomizeDisplayName(ref displayName);
-            return displayName;
-        }
-    }
-
-    /// <summary>表示名を差し替える拡張ポイント（partial・未実装なら既定の表示名）</summary>
-    static partial void CustomizeDisplayName(ref string displayName);
 }
 
 /// <summary>エンティティ・EditModel の変更状態</summary>
@@ -1167,7 +341,6 @@ public abstract partial class EntityBase
     {
         IgnoreReadOnlyProperties = true,
         ReferenceHandler = ReferenceHandler.IgnoreCycles,
-        Converters = { new ValueObjectJsonConverterFactory() },
     };
 
     /// <summary>整形出力（writeIndented=true）用の設定。WriteIndented は初回利用後に変更できないため別インスタンスにする</summary>
@@ -1176,7 +349,6 @@ public abstract partial class EntityBase
         IgnoreReadOnlyProperties = true,
         ReferenceHandler = ReferenceHandler.IgnoreCycles,
         WriteIndented = true,
-        Converters = { new ValueObjectJsonConverterFactory() },
     };
 
     /// <summary>このエンティティを JSON 文字列へシリアライズする（WebAPI へのデータ受け渡しなどに使用）</summary>
@@ -1204,38 +376,55 @@ public abstract partial class EntityBase
     }
 }
 
-/// <summary>customers テーブルに対応するエンティティ</summary>
-[Table("customers")]
-public partial class CustomerEntity : EntityBase
+/// <summary>documents テーブルに対応するエンティティ</summary>
+[Table("documents")]
+public partial class DocumentEntity : EntityBase
 {
-    /// <summary>customer_id 列に対応するプロパティ</summary>
+    /// <summary>document_id 列に対応するプロパティ</summary>
     [Key]
-    [Column("customer_id")]
-    [Required]
+    [Column("document_id")]
     [DbColumnMeta("int32")]
-    public CustomerIdValue CustomerId { get; set; } = null!;
+    public int DocumentId { get; set; }
 
-    /// <summary>name 列に対応するプロパティ</summary>
-    [Column("name")]
+    /// <summary>title 列に対応するプロパティ</summary>
+    [Column("title")]
     [Required]
+    [MaxLength(50)]
     [DbColumnMeta("string(50)")]
-    public NameValue Name { get; set; } = null!;
+    public string Title { get; set; } = string.Empty;
 
-    /// <summary>balance 列に対応するプロパティ</summary>
-    [Column("balance")]
-    [DbColumnMeta("decimal(10,2)")]
-    public BalanceValue? Balance { get; set; }
+    /// <summary>payload 列に対応するプロパティ</summary>
+    [Column("payload")]
+    [DbColumnMeta("binary(max)")]
+    [UnboundedBinaryColumn]
+    public byte[]? Payload { get; set; }
 
-    /// <summary>Orders ナビゲーションプロパティ</summary>
-    [NavigationReference("customers", "customer_id", "orders", "customer_id", true, true, false)]
-    public ICollection<OrderEntity> Orders { get; set; } = new List<OrderEntity>();
+    /// <summary>thumb 列に対応するプロパティ</summary>
+    [Column("thumb")]
+    [Required]
+    [DbColumnMeta("binary(max)")]
+    [UnboundedBinaryColumn]
+    public byte[] Thumb { get; set; } = Array.Empty<byte>();
+
+    /// <summary>checksum 列に対応するプロパティ</summary>
+    [Column("checksum")]
+    [DbColumnMeta("binary(16)")]
+    public byte[]? Checksum { get; set; }
+
+    /// <summary>row_ver 列に対応するプロパティ</summary>
+    [Column("row_ver")]
+    public byte[]? RowVer { get; set; }
+
+    /// <summary>DocumentNotes ナビゲーションプロパティ</summary>
+    [NavigationReference("documents", "document_id", "document_notes", "document_id", true, true, false)]
+    public ICollection<DocumentNoteEntity> DocumentNotes { get; set; } = new List<DocumentNoteEntity>();
 
     /// <summary>このエンティティの表示名（画面ラベル等で使う）。既定はテーブルの説明、無指定はクラス名。CustomizeDisplayName で上書き可能</summary>
     public static string DisplayName
     {
         get
         {
-            var displayName = "CustomerEntity";
+            var displayName = "DocumentEntity";
             CustomizeDisplayName(ref displayName);
             return displayName;
         }
@@ -1245,45 +434,39 @@ public partial class CustomerEntity : EntityBase
     static partial void CustomizeDisplayName(ref string displayName);
 }
 
-/// <summary>orders テーブルに対応するエンティティ</summary>
-[Table("orders")]
-public partial class OrderEntity : EntityBase
+/// <summary>document_notes テーブルに対応するエンティティ</summary>
+[Table("document_notes")]
+public partial class DocumentNoteEntity : EntityBase
 {
-    /// <summary>order_id 列に対応するプロパティ</summary>
+    /// <summary>note_id 列に対応するプロパティ</summary>
     [Key]
-    [Column("order_id")]
-    [Required]
+    [Column("note_id")]
     [DbColumnMeta("int32")]
-    public OrderIdValue OrderId { get; set; } = null!;
+    public int NoteId { get; set; }
 
-    /// <summary>customer_id 列に対応するプロパティ</summary>
-    [Column("customer_id")]
-    [Required]
+    /// <summary>document_id 列に対応するプロパティ</summary>
+    [Column("document_id")]
     [DbColumnMeta("int32")]
-    public CustomerIdValue CustomerId { get; set; } = null!;
+    public int DocumentId { get; set; }
 
-    /// <summary>memo 列に対応するプロパティ</summary>
-    [Column("memo")]
-    [DbColumnMeta("string(50)")]
-    public MemoValue? Memo { get; set; }
-
-    /// <summary>amount 列に対応するプロパティ</summary>
-    [Column("amount")]
+    /// <summary>note 列に対応するプロパティ</summary>
+    [Column("note")]
     [Required]
-    [DbColumnMeta("decimal(10,2)")]
-    public AmountValue Amount { get; set; } = null!;
+    [MaxLength(100)]
+    [DbColumnMeta("string(100)")]
+    public string Note { get; set; } = string.Empty;
 
-    /// <summary>Customer ナビゲーションプロパティ</summary>
+    /// <summary>Document ナビゲーションプロパティ</summary>
     [JsonIgnore]
-    [NavigationReference("customers", "customer_id", "orders", "customer_id", false, false, true)]
-    public CustomerEntity Customer { get; set; } = null!;
+    [NavigationReference("documents", "document_id", "document_notes", "document_id", false, false, true)]
+    public DocumentEntity Document { get; set; } = null!;
 
     /// <summary>このエンティティの表示名（画面ラベル等で使う）。既定はテーブルの説明、無指定はクラス名。CustomizeDisplayName で上書き可能</summary>
     public static string DisplayName
     {
         get
         {
-            var displayName = "OrderEntity";
+            var displayName = "DocumentNoteEntity";
             CustomizeDisplayName(ref displayName);
             return displayName;
         }
@@ -2164,50 +1347,51 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
     }
 }
 
-/// <summary>customers テーブルの画面編集用モデル</summary>
-public partial class CustomerEditModel : EditModelBase
+/// <summary>documents テーブルの画面編集用モデル</summary>
+public partial class DocumentEditModel : EditModelBase
 {
     // ===== 拡張ポイント（partial クラスで必要なものだけ実装。未実装の partial メソッドは消去され無コスト）=====
     //   検証追加      : partial void OnValidate();
     //   子の追加      : protected override void RegisterExtraChildren();  // 内部で AddChild/AddChildren で登録
     //   変換ﾒｯｾｰｼﾞ調整  : partial void CustomizeParseErrorMessage(string propertyName, string inputValue, string typeName, ref string message);
     //   入力正規化調整 : partial void CustomizeInputNormalization(string propertyName, string rawValue, ref string normalizedValue);
+    //   表示名調整    : partial void CustomizePropertyDisplayName(string propertyName, ref string displayName);  // 検証メッセージの表示名を上書き
     //   行編集        : partial void OnBeginEdit();  partial void OnEndEdit();  partial void OnCancelEdit();
     //   値変更通知    : partial void On{プロパティ}Changing(値) / Changed(値) / Changing(旧,新) / Changed(旧,新);  // 各プロパティに用意
     // ====================================================================================================
 
     // 各列につき「確定値」「画面入力文字列」の 2 種を保持する（変換エラーはエラーディクショナリが保持する）
-    /// <summary>CustomerId の確定値</summary>
-    private CustomerIdValue? _customerId;
+    /// <summary>DocumentId の確定値</summary>
+    private int? _documentId;
 
-    /// <summary>CustomerId の画面入力文字列</summary>
-    private string _bindingCustomerId = string.Empty;
+    /// <summary>DocumentId の画面入力文字列</summary>
+    private string _bindingDocumentId = string.Empty;
 
-    /// <summary>CustomerId の確定値（外部からは読み取り専用）</summary>
-    public CustomerIdValue? CustomerId
+    /// <summary>DocumentId の確定値（外部からは読み取り専用）</summary>
+    public int? DocumentId
     {
-        get => _customerId;
+        get => _documentId;
         private set
         {
-            if (EqualityComparer<CustomerIdValue?>.Default.Equals(_customerId, value))
+            if (EqualityComparer<int?>.Default.Equals(_documentId, value))
             {
                 return;
             }
 
-            var oldValue = _customerId;
-            OnCustomerIdChanging(value);
-            OnCustomerIdChanging(oldValue, value);
-            _customerId = value;
-            OnCustomerIdChanged(value);
-            OnCustomerIdChanged(oldValue, value);
-            OnPropertyChanged(nameof(CustomerId));
+            var oldValue = _documentId;
+            OnDocumentIdChanging(value);
+            OnDocumentIdChanging(oldValue, value);
+            _documentId = value;
+            OnDocumentIdChanged(value);
+            OnDocumentIdChanged(oldValue, value);
+            OnPropertyChanged(nameof(DocumentId));
 
             // 確定値が変化したら更新対象へ昇格（ロード中は昇格させず、状態は元 Entity の鏡のままにする）
             if (!IsLoading)
             {
-                OnConfirmedValueChanged(nameof(CustomerId));
+                OnConfirmedValueChanged(nameof(DocumentId));
 
-                if (ShouldMarkUpdated(nameof(CustomerId)))
+                if (ShouldMarkUpdated(nameof(DocumentId)))
                 {
                     MarkUpdated();
                 }
@@ -2215,36 +1399,36 @@ public partial class CustomerEditModel : EditModelBase
         }
     }
 
-    /// <summary>CustomerId の確定値が変更される直前に呼ばれる（新値のみ。partial 実装で処理を追加）</summary>
-    partial void OnCustomerIdChanging(CustomerIdValue? value);
+    /// <summary>DocumentId の確定値が変更される直前に呼ばれる（新値のみ。partial 実装で処理を追加）</summary>
+    partial void OnDocumentIdChanging(int? value);
 
-    /// <summary>CustomerId の確定値が変更される直前に呼ばれる（旧値・新値。partial 実装で処理を追加）</summary>
-    partial void OnCustomerIdChanging(CustomerIdValue? oldValue, CustomerIdValue? newValue);
+    /// <summary>DocumentId の確定値が変更される直前に呼ばれる（旧値・新値。partial 実装で処理を追加）</summary>
+    partial void OnDocumentIdChanging(int? oldValue, int? newValue);
 
-    /// <summary>CustomerId の確定値が変更された直後に呼ばれる（新値のみ。partial 実装で処理を追加）</summary>
-    partial void OnCustomerIdChanged(CustomerIdValue? value);
+    /// <summary>DocumentId の確定値が変更された直後に呼ばれる（新値のみ。partial 実装で処理を追加）</summary>
+    partial void OnDocumentIdChanged(int? value);
 
-    /// <summary>CustomerId の確定値が変更された直後に呼ばれる（旧値・新値。partial 実装で処理を追加）</summary>
-    partial void OnCustomerIdChanged(CustomerIdValue? oldValue, CustomerIdValue? newValue);
+    /// <summary>DocumentId の確定値が変更された直後に呼ばれる（旧値・新値。partial 実装で処理を追加）</summary>
+    partial void OnDocumentIdChanged(int? oldValue, int? newValue);
 
-    /// <summary>CustomerId の画面入力用バインディング文字列（設定時に確定値へ変換）</summary>
-    public string BindingCustomerId
+    /// <summary>DocumentId の画面入力用バインディング文字列（設定時に確定値へ変換）</summary>
+    public string BindingDocumentId
     {
-        get => _bindingCustomerId;
+        get => _bindingDocumentId;
         set
         {
             // 入力由来の値のみ正規化（ロード・復元時は元 Entity の鏡像を保つため素通し）
             var normalized =
                 IsLoading || IsReverting
                     ? value
-                    : NormalizeInput(nameof(BindingCustomerId), value);
+                    : NormalizeInput(nameof(BindingDocumentId), value);
 
-            if (!SetProperty(ref _bindingCustomerId, normalized, nameof(BindingCustomerId)))
+            if (!SetProperty(ref _bindingDocumentId, normalized, nameof(BindingDocumentId)))
             {
                 // トリムで既存値と一致した場合、画面表示にだけ空白付き文字列が残るため表示を正規化値へ戻す
                 if (!string.Equals(value, normalized, StringComparison.Ordinal))
                 {
-                    OnPropertyChanged(nameof(BindingCustomerId));
+                    OnPropertyChanged(nameof(BindingDocumentId));
                 }
 
                 return;
@@ -2252,65 +1436,53 @@ public partial class CustomerEditModel : EditModelBase
 
             if (!IsReverting)
             {
-                if (string.IsNullOrEmpty(normalized))
+                if (int.TryParse(normalized, out var parsed))
                 {
-                    CustomerId = null;
-                    SetError(nameof(BindingCustomerId), null);
-                }
-                else if (int.TryParse(normalized, out var parsed))
-                {
-                    if (CustomerIdValue.TryCreate(parsed, out var converted, out var voErrors))
-                    {
-                        CustomerId = converted;
-                        SetError(nameof(BindingCustomerId), null);
-                    }
-                    else
-                    {
-                        SetError(nameof(BindingCustomerId), string.Join(" / ", voErrors));
-                    }
+                    DocumentId = parsed;
+                    SetError(nameof(BindingDocumentId), null);
                 }
                 else
                 {
                     SetError(
-                        nameof(BindingCustomerId),
-                        ResolveParseErrorMessage(CustomerIdValue.DisplayName, normalized, "int")
+                        nameof(BindingDocumentId),
+                        ResolveParseErrorMessage(GetDisplayName(nameof(DocumentId), "DocumentId"), normalized, "int")
                     );
                 }
             }
         }
     }
 
-    /// <summary>Name の確定値</summary>
-    private NameValue? _name;
+    /// <summary>Title の確定値</summary>
+    private string? _title;
 
-    /// <summary>Name の画面入力文字列</summary>
-    private string _bindingName = string.Empty;
+    /// <summary>Title の画面入力文字列</summary>
+    private string _bindingTitle = string.Empty;
 
-    /// <summary>Name の確定値（外部からは読み取り専用）</summary>
-    public NameValue? Name
+    /// <summary>Title の確定値（外部からは読み取り専用）</summary>
+    public string? Title
     {
-        get => _name;
+        get => _title;
         private set
         {
-            if (EqualityComparer<NameValue?>.Default.Equals(_name, value))
+            if (EqualityComparer<string?>.Default.Equals(_title, value))
             {
                 return;
             }
 
-            var oldValue = _name;
-            OnNameChanging(value);
-            OnNameChanging(oldValue, value);
-            _name = value;
-            OnNameChanged(value);
-            OnNameChanged(oldValue, value);
-            OnPropertyChanged(nameof(Name));
+            var oldValue = _title;
+            OnTitleChanging(value);
+            OnTitleChanging(oldValue, value);
+            _title = value;
+            OnTitleChanged(value);
+            OnTitleChanged(oldValue, value);
+            OnPropertyChanged(nameof(Title));
 
             // 確定値が変化したら更新対象へ昇格（ロード中は昇格させず、状態は元 Entity の鏡のままにする）
             if (!IsLoading)
             {
-                OnConfirmedValueChanged(nameof(Name));
+                OnConfirmedValueChanged(nameof(Title));
 
-                if (ShouldMarkUpdated(nameof(Name)))
+                if (ShouldMarkUpdated(nameof(Title)))
                 {
                     MarkUpdated();
                 }
@@ -2318,36 +1490,36 @@ public partial class CustomerEditModel : EditModelBase
         }
     }
 
-    /// <summary>Name の確定値が変更される直前に呼ばれる（新値のみ。partial 実装で処理を追加）</summary>
-    partial void OnNameChanging(NameValue? value);
+    /// <summary>Title の確定値が変更される直前に呼ばれる（新値のみ。partial 実装で処理を追加）</summary>
+    partial void OnTitleChanging(string? value);
 
-    /// <summary>Name の確定値が変更される直前に呼ばれる（旧値・新値。partial 実装で処理を追加）</summary>
-    partial void OnNameChanging(NameValue? oldValue, NameValue? newValue);
+    /// <summary>Title の確定値が変更される直前に呼ばれる（旧値・新値。partial 実装で処理を追加）</summary>
+    partial void OnTitleChanging(string? oldValue, string? newValue);
 
-    /// <summary>Name の確定値が変更された直後に呼ばれる（新値のみ。partial 実装で処理を追加）</summary>
-    partial void OnNameChanged(NameValue? value);
+    /// <summary>Title の確定値が変更された直後に呼ばれる（新値のみ。partial 実装で処理を追加）</summary>
+    partial void OnTitleChanged(string? value);
 
-    /// <summary>Name の確定値が変更された直後に呼ばれる（旧値・新値。partial 実装で処理を追加）</summary>
-    partial void OnNameChanged(NameValue? oldValue, NameValue? newValue);
+    /// <summary>Title の確定値が変更された直後に呼ばれる（旧値・新値。partial 実装で処理を追加）</summary>
+    partial void OnTitleChanged(string? oldValue, string? newValue);
 
-    /// <summary>Name の画面入力用バインディング文字列（設定時に確定値へ変換）</summary>
-    public string BindingName
+    /// <summary>Title の画面入力用バインディング文字列（設定時に確定値へ変換）</summary>
+    public string BindingTitle
     {
-        get => _bindingName;
+        get => _bindingTitle;
         set
         {
             // 入力由来の値のみ正規化（ロード・復元時は元 Entity の鏡像を保つため素通し）
             var normalized =
                 IsLoading || IsReverting
                     ? value
-                    : NormalizeInput(nameof(BindingName), value);
+                    : NormalizeInput(nameof(BindingTitle), value);
 
-            if (!SetProperty(ref _bindingName, normalized, nameof(BindingName)))
+            if (!SetProperty(ref _bindingTitle, normalized, nameof(BindingTitle)))
             {
                 // トリムで既存値と一致した場合、画面表示にだけ空白付き文字列が残るため表示を正規化値へ戻す
                 if (!string.Equals(value, normalized, StringComparison.Ordinal))
                 {
-                    OnPropertyChanged(nameof(BindingName));
+                    OnPropertyChanged(nameof(BindingTitle));
                 }
 
                 return;
@@ -2357,53 +1529,49 @@ public partial class CustomerEditModel : EditModelBase
             {
                 if (string.IsNullOrEmpty(normalized))
                 {
-                    Name = null;
-                    SetError(nameof(BindingName), null);
-                }
-                else if (NameValue.TryCreate(normalized, out var converted, out var voErrors))
-                {
-                    Name = converted;
-                    SetError(nameof(BindingName), null);
+                    Title = null;
+                    SetError(nameof(BindingTitle), null);
                 }
                 else
                 {
-                    SetError(nameof(BindingName), string.Join(" / ", voErrors));
+                    Title = normalized;
+                    SetError(nameof(BindingTitle), null);
                 }
             }
         }
     }
 
-    /// <summary>Balance の確定値</summary>
-    private BalanceValue? _balance;
+    /// <summary>Payload の確定値</summary>
+    private byte[]? _payload;
 
-    /// <summary>Balance の画面入力文字列</summary>
-    private string _bindingBalance = string.Empty;
+    /// <summary>Payload の画面入力文字列</summary>
+    private string _bindingPayload = string.Empty;
 
-    /// <summary>Balance の確定値（外部からは読み取り専用）</summary>
-    public BalanceValue? Balance
+    /// <summary>Payload の確定値（外部からは読み取り専用）</summary>
+    public byte[]? Payload
     {
-        get => _balance;
+        get => _payload;
         private set
         {
-            if (EqualityComparer<BalanceValue?>.Default.Equals(_balance, value))
+            if (EqualityComparer<byte[]?>.Default.Equals(_payload, value))
             {
                 return;
             }
 
-            var oldValue = _balance;
-            OnBalanceChanging(value);
-            OnBalanceChanging(oldValue, value);
-            _balance = value;
-            OnBalanceChanged(value);
-            OnBalanceChanged(oldValue, value);
-            OnPropertyChanged(nameof(Balance));
+            var oldValue = _payload;
+            OnPayloadChanging(value);
+            OnPayloadChanging(oldValue, value);
+            _payload = value;
+            OnPayloadChanged(value);
+            OnPayloadChanged(oldValue, value);
+            OnPropertyChanged(nameof(Payload));
 
             // 確定値が変化したら更新対象へ昇格（ロード中は昇格させず、状態は元 Entity の鏡のままにする）
             if (!IsLoading)
             {
-                OnConfirmedValueChanged(nameof(Balance));
+                OnConfirmedValueChanged(nameof(Payload));
 
-                if (ShouldMarkUpdated(nameof(Balance)))
+                if (ShouldMarkUpdated(nameof(Payload)))
                 {
                     MarkUpdated();
                 }
@@ -2411,36 +1579,36 @@ public partial class CustomerEditModel : EditModelBase
         }
     }
 
-    /// <summary>Balance の確定値が変更される直前に呼ばれる（新値のみ。partial 実装で処理を追加）</summary>
-    partial void OnBalanceChanging(BalanceValue? value);
+    /// <summary>Payload の確定値が変更される直前に呼ばれる（新値のみ。partial 実装で処理を追加）</summary>
+    partial void OnPayloadChanging(byte[]? value);
 
-    /// <summary>Balance の確定値が変更される直前に呼ばれる（旧値・新値。partial 実装で処理を追加）</summary>
-    partial void OnBalanceChanging(BalanceValue? oldValue, BalanceValue? newValue);
+    /// <summary>Payload の確定値が変更される直前に呼ばれる（旧値・新値。partial 実装で処理を追加）</summary>
+    partial void OnPayloadChanging(byte[]? oldValue, byte[]? newValue);
 
-    /// <summary>Balance の確定値が変更された直後に呼ばれる（新値のみ。partial 実装で処理を追加）</summary>
-    partial void OnBalanceChanged(BalanceValue? value);
+    /// <summary>Payload の確定値が変更された直後に呼ばれる（新値のみ。partial 実装で処理を追加）</summary>
+    partial void OnPayloadChanged(byte[]? value);
 
-    /// <summary>Balance の確定値が変更された直後に呼ばれる（旧値・新値。partial 実装で処理を追加）</summary>
-    partial void OnBalanceChanged(BalanceValue? oldValue, BalanceValue? newValue);
+    /// <summary>Payload の確定値が変更された直後に呼ばれる（旧値・新値。partial 実装で処理を追加）</summary>
+    partial void OnPayloadChanged(byte[]? oldValue, byte[]? newValue);
 
-    /// <summary>Balance の画面入力用バインディング文字列（設定時に確定値へ変換）</summary>
-    public string BindingBalance
+    /// <summary>Payload の画面入力用バインディング文字列（設定時に確定値へ変換）</summary>
+    public string BindingPayload
     {
-        get => _bindingBalance;
+        get => _bindingPayload;
         set
         {
             // 入力由来の値のみ正規化（ロード・復元時は元 Entity の鏡像を保つため素通し）
             var normalized =
                 IsLoading || IsReverting
                     ? value
-                    : NormalizeInput(nameof(BindingBalance), value);
+                    : NormalizeInput(nameof(BindingPayload), value);
 
-            if (!SetProperty(ref _bindingBalance, normalized, nameof(BindingBalance)))
+            if (!SetProperty(ref _bindingPayload, normalized, nameof(BindingPayload)))
             {
                 // トリムで既存値と一致した場合、画面表示にだけ空白付き文字列が残るため表示を正規化値へ戻す
                 if (!string.Equals(value, normalized, StringComparison.Ordinal))
                 {
-                    OnPropertyChanged(nameof(BindingBalance));
+                    OnPropertyChanged(nameof(BindingPayload));
                 }
 
                 return;
@@ -2450,27 +1618,320 @@ public partial class CustomerEditModel : EditModelBase
             {
                 if (string.IsNullOrEmpty(normalized))
                 {
-                    Balance = null;
-                    SetError(nameof(BindingBalance), null);
-                }
-                else if (decimal.TryParse(normalized, out var parsed))
-                {
-                    if (BalanceValue.TryCreate(parsed, out var converted, out var voErrors))
-                    {
-                        Balance = converted;
-                        SetError(nameof(BindingBalance), null);
-                    }
-                    else
-                    {
-                        SetError(nameof(BindingBalance), string.Join(" / ", voErrors));
-                    }
+                    Payload = Array.Empty<byte>();
+                    SetError(nameof(BindingPayload), null);
                 }
                 else
                 {
-                    SetError(
-                        nameof(BindingBalance),
-                        ResolveParseErrorMessage(BalanceValue.DisplayName, normalized, "decimal")
-                    );
+                    try
+                    {
+                        Payload = Convert.FromBase64String(normalized);
+                        SetError(nameof(BindingPayload), null);
+                    }
+                    catch (FormatException)
+                    {
+                        SetError(
+                            nameof(BindingPayload),
+                            ResolveParseErrorMessage(GetDisplayName(nameof(Payload), "Payload"), normalized, "byte[]")
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// <summary>Thumb の確定値</summary>
+    private byte[]? _thumb;
+
+    /// <summary>Thumb の画面入力文字列</summary>
+    private string _bindingThumb = string.Empty;
+
+    /// <summary>Thumb の確定値（外部からは読み取り専用）</summary>
+    public byte[]? Thumb
+    {
+        get => _thumb;
+        private set
+        {
+            if (EqualityComparer<byte[]?>.Default.Equals(_thumb, value))
+            {
+                return;
+            }
+
+            var oldValue = _thumb;
+            OnThumbChanging(value);
+            OnThumbChanging(oldValue, value);
+            _thumb = value;
+            OnThumbChanged(value);
+            OnThumbChanged(oldValue, value);
+            OnPropertyChanged(nameof(Thumb));
+
+            // 確定値が変化したら更新対象へ昇格（ロード中は昇格させず、状態は元 Entity の鏡のままにする）
+            if (!IsLoading)
+            {
+                OnConfirmedValueChanged(nameof(Thumb));
+
+                if (ShouldMarkUpdated(nameof(Thumb)))
+                {
+                    MarkUpdated();
+                }
+            }
+        }
+    }
+
+    /// <summary>Thumb の確定値が変更される直前に呼ばれる（新値のみ。partial 実装で処理を追加）</summary>
+    partial void OnThumbChanging(byte[]? value);
+
+    /// <summary>Thumb の確定値が変更される直前に呼ばれる（旧値・新値。partial 実装で処理を追加）</summary>
+    partial void OnThumbChanging(byte[]? oldValue, byte[]? newValue);
+
+    /// <summary>Thumb の確定値が変更された直後に呼ばれる（新値のみ。partial 実装で処理を追加）</summary>
+    partial void OnThumbChanged(byte[]? value);
+
+    /// <summary>Thumb の確定値が変更された直後に呼ばれる（旧値・新値。partial 実装で処理を追加）</summary>
+    partial void OnThumbChanged(byte[]? oldValue, byte[]? newValue);
+
+    /// <summary>Thumb の画面入力用バインディング文字列（設定時に確定値へ変換）</summary>
+    public string BindingThumb
+    {
+        get => _bindingThumb;
+        set
+        {
+            // 入力由来の値のみ正規化（ロード・復元時は元 Entity の鏡像を保つため素通し）
+            var normalized =
+                IsLoading || IsReverting
+                    ? value
+                    : NormalizeInput(nameof(BindingThumb), value);
+
+            if (!SetProperty(ref _bindingThumb, normalized, nameof(BindingThumb)))
+            {
+                // トリムで既存値と一致した場合、画面表示にだけ空白付き文字列が残るため表示を正規化値へ戻す
+                if (!string.Equals(value, normalized, StringComparison.Ordinal))
+                {
+                    OnPropertyChanged(nameof(BindingThumb));
+                }
+
+                return;
+            }
+
+            if (!IsReverting)
+            {
+                if (string.IsNullOrEmpty(normalized))
+                {
+                    Thumb = Array.Empty<byte>();
+                    SetError(nameof(BindingThumb), null);
+                }
+                else
+                {
+                    try
+                    {
+                        Thumb = Convert.FromBase64String(normalized);
+                        SetError(nameof(BindingThumb), null);
+                    }
+                    catch (FormatException)
+                    {
+                        SetError(
+                            nameof(BindingThumb),
+                            ResolveParseErrorMessage(GetDisplayName(nameof(Thumb), "Thumb"), normalized, "byte[]")
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// <summary>Checksum の確定値</summary>
+    private byte[]? _checksum;
+
+    /// <summary>Checksum の画面入力文字列</summary>
+    private string _bindingChecksum = string.Empty;
+
+    /// <summary>Checksum の確定値（外部からは読み取り専用）</summary>
+    public byte[]? Checksum
+    {
+        get => _checksum;
+        private set
+        {
+            if (EqualityComparer<byte[]?>.Default.Equals(_checksum, value))
+            {
+                return;
+            }
+
+            var oldValue = _checksum;
+            OnChecksumChanging(value);
+            OnChecksumChanging(oldValue, value);
+            _checksum = value;
+            OnChecksumChanged(value);
+            OnChecksumChanged(oldValue, value);
+            OnPropertyChanged(nameof(Checksum));
+
+            // 確定値が変化したら更新対象へ昇格（ロード中は昇格させず、状態は元 Entity の鏡のままにする）
+            if (!IsLoading)
+            {
+                OnConfirmedValueChanged(nameof(Checksum));
+
+                if (ShouldMarkUpdated(nameof(Checksum)))
+                {
+                    MarkUpdated();
+                }
+            }
+        }
+    }
+
+    /// <summary>Checksum の確定値が変更される直前に呼ばれる（新値のみ。partial 実装で処理を追加）</summary>
+    partial void OnChecksumChanging(byte[]? value);
+
+    /// <summary>Checksum の確定値が変更される直前に呼ばれる（旧値・新値。partial 実装で処理を追加）</summary>
+    partial void OnChecksumChanging(byte[]? oldValue, byte[]? newValue);
+
+    /// <summary>Checksum の確定値が変更された直後に呼ばれる（新値のみ。partial 実装で処理を追加）</summary>
+    partial void OnChecksumChanged(byte[]? value);
+
+    /// <summary>Checksum の確定値が変更された直後に呼ばれる（旧値・新値。partial 実装で処理を追加）</summary>
+    partial void OnChecksumChanged(byte[]? oldValue, byte[]? newValue);
+
+    /// <summary>Checksum の画面入力用バインディング文字列（設定時に確定値へ変換）</summary>
+    public string BindingChecksum
+    {
+        get => _bindingChecksum;
+        set
+        {
+            // 入力由来の値のみ正規化（ロード・復元時は元 Entity の鏡像を保つため素通し）
+            var normalized =
+                IsLoading || IsReverting
+                    ? value
+                    : NormalizeInput(nameof(BindingChecksum), value);
+
+            if (!SetProperty(ref _bindingChecksum, normalized, nameof(BindingChecksum)))
+            {
+                // トリムで既存値と一致した場合、画面表示にだけ空白付き文字列が残るため表示を正規化値へ戻す
+                if (!string.Equals(value, normalized, StringComparison.Ordinal))
+                {
+                    OnPropertyChanged(nameof(BindingChecksum));
+                }
+
+                return;
+            }
+
+            if (!IsReverting)
+            {
+                if (string.IsNullOrEmpty(normalized))
+                {
+                    Checksum = Array.Empty<byte>();
+                    SetError(nameof(BindingChecksum), null);
+                }
+                else
+                {
+                    try
+                    {
+                        Checksum = Convert.FromBase64String(normalized);
+                        SetError(nameof(BindingChecksum), null);
+                    }
+                    catch (FormatException)
+                    {
+                        SetError(
+                            nameof(BindingChecksum),
+                            ResolveParseErrorMessage(GetDisplayName(nameof(Checksum), "Checksum"), normalized, "byte[]")
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// <summary>RowVer の確定値</summary>
+    private byte[]? _rowVer;
+
+    /// <summary>RowVer の画面入力文字列</summary>
+    private string _bindingRowVer = string.Empty;
+
+    /// <summary>RowVer の確定値（外部からは読み取り専用）</summary>
+    public byte[]? RowVer
+    {
+        get => _rowVer;
+        private set
+        {
+            if (EqualityComparer<byte[]?>.Default.Equals(_rowVer, value))
+            {
+                return;
+            }
+
+            var oldValue = _rowVer;
+            OnRowVerChanging(value);
+            OnRowVerChanging(oldValue, value);
+            _rowVer = value;
+            OnRowVerChanged(value);
+            OnRowVerChanged(oldValue, value);
+            OnPropertyChanged(nameof(RowVer));
+
+            // 確定値が変化したら更新対象へ昇格（ロード中は昇格させず、状態は元 Entity の鏡のままにする）
+            if (!IsLoading)
+            {
+                OnConfirmedValueChanged(nameof(RowVer));
+
+                if (ShouldMarkUpdated(nameof(RowVer)))
+                {
+                    MarkUpdated();
+                }
+            }
+        }
+    }
+
+    /// <summary>RowVer の確定値が変更される直前に呼ばれる（新値のみ。partial 実装で処理を追加）</summary>
+    partial void OnRowVerChanging(byte[]? value);
+
+    /// <summary>RowVer の確定値が変更される直前に呼ばれる（旧値・新値。partial 実装で処理を追加）</summary>
+    partial void OnRowVerChanging(byte[]? oldValue, byte[]? newValue);
+
+    /// <summary>RowVer の確定値が変更された直後に呼ばれる（新値のみ。partial 実装で処理を追加）</summary>
+    partial void OnRowVerChanged(byte[]? value);
+
+    /// <summary>RowVer の確定値が変更された直後に呼ばれる（旧値・新値。partial 実装で処理を追加）</summary>
+    partial void OnRowVerChanged(byte[]? oldValue, byte[]? newValue);
+
+    /// <summary>RowVer の画面入力用バインディング文字列（設定時に確定値へ変換）</summary>
+    public string BindingRowVer
+    {
+        get => _bindingRowVer;
+        set
+        {
+            // 入力由来の値のみ正規化（ロード・復元時は元 Entity の鏡像を保つため素通し）
+            var normalized =
+                IsLoading || IsReverting
+                    ? value
+                    : NormalizeInput(nameof(BindingRowVer), value);
+
+            if (!SetProperty(ref _bindingRowVer, normalized, nameof(BindingRowVer)))
+            {
+                // トリムで既存値と一致した場合、画面表示にだけ空白付き文字列が残るため表示を正規化値へ戻す
+                if (!string.Equals(value, normalized, StringComparison.Ordinal))
+                {
+                    OnPropertyChanged(nameof(BindingRowVer));
+                }
+
+                return;
+            }
+
+            if (!IsReverting)
+            {
+                if (string.IsNullOrEmpty(normalized))
+                {
+                    RowVer = Array.Empty<byte>();
+                    SetError(nameof(BindingRowVer), null);
+                }
+                else
+                {
+                    try
+                    {
+                        RowVer = Convert.FromBase64String(normalized);
+                        SetError(nameof(BindingRowVer), null);
+                    }
+                    catch (FormatException)
+                    {
+                        SetError(
+                            nameof(BindingRowVer),
+                            ResolveParseErrorMessage(GetDisplayName(nameof(RowVer), "RowVer"), normalized, "byte[]")
+                        );
+                    }
                 }
             }
         }
@@ -2499,74 +1960,104 @@ public partial class CustomerEditModel : EditModelBase
     );
 
     // ---- navigation ----
-    /// <summary>Orders の子コレクションのバッキングフィールド</summary>
-    private EditModelCollection<OrderEditModel> _orders = new EditModelCollection<OrderEditModel>();
+    /// <summary>DocumentNotes の子コレクションのバッキングフィールド</summary>
+    private EditModelCollection<DocumentNoteEditModel> _documentNotes = new EditModelCollection<DocumentNoteEditModel>();
 
-    /// <summary>Orders ナビゲーションプロパティ（子コレクション。要素の ParentModel に自身が設定される）</summary>
-    public EditModelCollection<OrderEditModel> Orders
+    /// <summary>DocumentNotes ナビゲーションプロパティ（子コレクション。要素の ParentModel に自身が設定される）</summary>
+    public EditModelCollection<DocumentNoteEditModel> DocumentNotes
     {
         get
         {
-            _orders.OwnerModel ??= this;
-            return _orders;
+            _documentNotes.OwnerModel ??= this;
+            return _documentNotes;
         }
         set
         {
-            if (ReferenceEquals(_orders, value))
+            if (ReferenceEquals(_documentNotes, value))
             {
                 return;
             }
 
-            _orders.OwnerModel = null;
-            _orders = value;
-            _orders.OwnerModel = this;
-            OnPropertyChanged(nameof(Orders));
+            _documentNotes.OwnerModel = null;
+            _documentNotes = value;
+            _documentNotes.OwnerModel = this;
+            OnPropertyChanged(nameof(DocumentNotes));
         }
     }
 
     /// <summary>確定値をバインディング用プロパティへ書き戻しエラーをクリアする（RevertInput から呼ばれる）</summary>
     protected override void RevertCore()
     {
-        BindingCustomerId = CustomerId?.ToString() ?? string.Empty;
-        SetError(nameof(BindingCustomerId), null);
-        BindingName = Name?.ToString() ?? string.Empty;
-        SetError(nameof(BindingName), null);
-        BindingBalance = Balance?.ToString() ?? string.Empty;
-        SetError(nameof(BindingBalance), null);
+        BindingDocumentId = DocumentId?.ToString() ?? string.Empty;
+        SetError(nameof(BindingDocumentId), null);
+        BindingTitle = Title?.ToString() ?? string.Empty;
+        SetError(nameof(BindingTitle), null);
+        BindingPayload = Payload is null ? string.Empty : Convert.ToBase64String(Payload);
+        SetError(nameof(BindingPayload), null);
+        BindingThumb = Thumb is null ? string.Empty : Convert.ToBase64String(Thumb);
+        SetError(nameof(BindingThumb), null);
+        BindingChecksum = Checksum is null ? string.Empty : Convert.ToBase64String(Checksum);
+        SetError(nameof(BindingChecksum), null);
+        BindingRowVer = RowVer is null ? string.Empty : Convert.ToBase64String(RowVer);
+        SetError(nameof(BindingRowVer), null);
     }
 
     /// <summary>このノード自身の検証（必須項目の未入力チェック＋追加検証フック）。Validate から呼ばれる</summary>
     protected override void ValidateSelf()
     {
-        if (CustomerId is null)
+        if (DocumentId is null)
         {
-            SetError(nameof(BindingCustomerId), BuildRequiredErrorMessage(CustomerIdValue.DisplayName));
+            SetError(nameof(BindingDocumentId), BuildRequiredErrorMessage(GetDisplayName(nameof(DocumentId), "DocumentId")));
         }
-        if (Name is null)
+        if (Title is null)
         {
-            SetError(nameof(BindingName), BuildRequiredErrorMessage(NameValue.DisplayName));
+            SetError(nameof(BindingTitle), BuildRequiredErrorMessage(GetDisplayName(nameof(Title), "Title")));
+        }
+        if (Thumb is null)
+        {
+            SetError(nameof(BindingThumb), BuildRequiredErrorMessage(GetDisplayName(nameof(Thumb), "Thumb")));
         }
         OnValidate();
     }
 
     /// <summary>追加の検証ルールを実装するフック（partial 実装で SetError によりエラー登録）</summary>
     partial void OnValidate();
+
+    /// <summary>プロパティの表示名を解決する（既定＝列の説明・無指定はプロパティ名。CustomizePropertyDisplayName で上書き可能）。検証メッセージで使う</summary>
+    private static string GetDisplayName(string propertyName, string defaultDisplayName)
+    {
+        var displayName = defaultDisplayName;
+        CustomizePropertyDisplayName(propertyName, ref displayName);
+        return displayName;
+    }
+
+    /// <summary>プロパティの表示名を差し替える拡張ポイント（partial・未実装なら既定の表示名）</summary>
+    static partial void CustomizePropertyDisplayName(string propertyName, ref string displayName);
 
     /// <summary>既知のカスケード子をレジストリへ登録する（検証・収集・確定・ダーティ判定に参加。partial 追加の子は RegisterExtraChildren で登録）</summary>
     protected override void RegisterChildren()
     {
-        AddChildren("Orders", Orders);
+        AddChildren("DocumentNotes", DocumentNotes);
     }
 
     // ---- 行編集（IEditableObject）用スナップショット ----
-    /// <summary>CustomerId の編集前スナップショット</summary>
-    private string _bindingCustomerIdSnapshot = string.Empty;
+    /// <summary>DocumentId の編集前スナップショット</summary>
+    private string _bindingDocumentIdSnapshot = string.Empty;
 
-    /// <summary>Name の編集前スナップショット</summary>
-    private string _bindingNameSnapshot = string.Empty;
+    /// <summary>Title の編集前スナップショット</summary>
+    private string _bindingTitleSnapshot = string.Empty;
 
-    /// <summary>Balance の編集前スナップショット</summary>
-    private string _bindingBalanceSnapshot = string.Empty;
+    /// <summary>Payload の編集前スナップショット</summary>
+    private string _bindingPayloadSnapshot = string.Empty;
+
+    /// <summary>Thumb の編集前スナップショット</summary>
+    private string _bindingThumbSnapshot = string.Empty;
+
+    /// <summary>Checksum の編集前スナップショット</summary>
+    private string _bindingChecksumSnapshot = string.Empty;
+
+    /// <summary>RowVer の編集前スナップショット</summary>
+    private string _bindingRowVerSnapshot = string.Empty;
 
     /// <summary>編集前の RowState スナップショット</summary>
     private RowState _rowStateSnapshot;
@@ -2574,9 +2065,12 @@ public partial class CustomerEditModel : EditModelBase
     /// <summary>BeginEdit の本体。各バインディング入力と RowState をスナップショットする</summary>
     protected override void BeginEditCore()
     {
-        _bindingCustomerIdSnapshot = _bindingCustomerId;
-        _bindingNameSnapshot = _bindingName;
-        _bindingBalanceSnapshot = _bindingBalance;
+        _bindingDocumentIdSnapshot = _bindingDocumentId;
+        _bindingTitleSnapshot = _bindingTitle;
+        _bindingPayloadSnapshot = _bindingPayload;
+        _bindingThumbSnapshot = _bindingThumb;
+        _bindingChecksumSnapshot = _bindingChecksum;
+        _bindingRowVerSnapshot = _bindingRowVer;
         _rowStateSnapshot = RowState;
         OnBeginEdit();
     }
@@ -2595,9 +2089,12 @@ public partial class CustomerEditModel : EditModelBase
     {
         ExecuteLoad(() =>
         {
-            BindingCustomerId = _bindingCustomerIdSnapshot;
-            BindingName = _bindingNameSnapshot;
-            BindingBalance = _bindingBalanceSnapshot;
+            BindingDocumentId = _bindingDocumentIdSnapshot;
+            BindingTitle = _bindingTitleSnapshot;
+            BindingPayload = _bindingPayloadSnapshot;
+            BindingThumb = _bindingThumbSnapshot;
+            BindingChecksum = _bindingChecksumSnapshot;
+            BindingRowVer = _bindingRowVerSnapshot;
             OnCancelEdit();
         });
 
@@ -2608,64 +2105,65 @@ public partial class CustomerEditModel : EditModelBase
     partial void OnCancelEdit();
 
     /// <summary>所属コレクション内で自身の次の要素を取得する（所属していない／末尾なら null）</summary>
-    public new CustomerEditModel? GetNext() => (CustomerEditModel?)base.GetNext();
+    public new DocumentEditModel? GetNext() => (DocumentEditModel?)base.GetNext();
 
     /// <summary>所属コレクション内で自身の前の要素を取得する（所属していない／先頭なら null）</summary>
-    public new CustomerEditModel? GetPrevious() => (CustomerEditModel?)base.GetPrevious();
+    public new DocumentEditModel? GetPrevious() => (DocumentEditModel?)base.GetPrevious();
 
     /// <summary>自身が所属する親コレクション（所属していなければ null）</summary>
-    public EditModelCollection<CustomerEditModel>? ParentCollection =>
-        Owner as EditModelCollection<CustomerEditModel>;
+    public EditModelCollection<DocumentEditModel>? ParentCollection =>
+        Owner as EditModelCollection<DocumentEditModel>;
 
     /// <summary>所属コレクションの並び替え本体。型付きコレクションの Move を呼ぶ（MoveTo* から使用される）</summary>
     protected override void MoveCore(int oldIndex, int newIndex) =>
         ParentCollection?.Move(oldIndex, newIndex);
 }
 
-/// <summary>orders テーブルの画面編集用モデル</summary>
-public partial class OrderEditModel : EditModelBase
+/// <summary>document_notes テーブルの画面編集用モデル</summary>
+public partial class DocumentNoteEditModel : EditModelBase
 {
     // ===== 拡張ポイント（partial クラスで必要なものだけ実装。未実装の partial メソッドは消去され無コスト）=====
     //   検証追加      : partial void OnValidate();
     //   子の追加      : protected override void RegisterExtraChildren();  // 内部で AddChild/AddChildren で登録
     //   変換ﾒｯｾｰｼﾞ調整  : partial void CustomizeParseErrorMessage(string propertyName, string inputValue, string typeName, ref string message);
     //   入力正規化調整 : partial void CustomizeInputNormalization(string propertyName, string rawValue, ref string normalizedValue);
+    //   表示名調整    : partial void CustomizePropertyDisplayName(string propertyName, ref string displayName);  // 検証メッセージの表示名を上書き
     //   行編集        : partial void OnBeginEdit();  partial void OnEndEdit();  partial void OnCancelEdit();
     //   値変更通知    : partial void On{プロパティ}Changing(値) / Changed(値) / Changing(旧,新) / Changed(旧,新);  // 各プロパティに用意
     // ====================================================================================================
 
     // 各列につき「確定値」「画面入力文字列」の 2 種を保持する（変換エラーはエラーディクショナリが保持する）
-    /// <summary>OrderId の確定値</summary>
-    private OrderIdValue? _orderId;
+    /// <summary>NoteId の確定値</summary>
+    private int? _noteId;
 
-    /// <summary>OrderId の画面入力文字列</summary>
-    private string _bindingOrderId = string.Empty;
+    /// <summary>NoteId の画面入力文字列</summary>
+    private string _bindingNoteId = string.Empty;
 
-    /// <summary>OrderId の確定値（外部からは読み取り専用）</summary>
-    public OrderIdValue? OrderId
+    /// <summary>NoteId の確定値（外部からは読み取り専用）</summary>
+    public int? NoteId
     {
-        get => _orderId;
+        get => _noteId;
         private set
         {
-            if (EqualityComparer<OrderIdValue?>.Default.Equals(_orderId, value))
+            if (EqualityComparer<int?>.Default.Equals(_noteId, value))
             {
                 return;
             }
 
-            var oldValue = _orderId;
-            OnOrderIdChanging(value);
-            OnOrderIdChanging(oldValue, value);
-            _orderId = value;
-            OnOrderIdChanged(value);
-            OnOrderIdChanged(oldValue, value);
-            OnPropertyChanged(nameof(OrderId));
+            var oldValue = _noteId;
+            OnNoteIdChanging(value);
+            OnNoteIdChanging(oldValue, value);
+            _noteId = value;
+            OnNoteIdChanged(value);
+            OnNoteIdChanged(oldValue, value);
+            OnPropertyChanged(nameof(NoteId));
 
             // 確定値が変化したら更新対象へ昇格（ロード中は昇格させず、状態は元 Entity の鏡のままにする）
             if (!IsLoading)
             {
-                OnConfirmedValueChanged(nameof(OrderId));
+                OnConfirmedValueChanged(nameof(NoteId));
 
-                if (ShouldMarkUpdated(nameof(OrderId)))
+                if (ShouldMarkUpdated(nameof(NoteId)))
                 {
                     MarkUpdated();
                 }
@@ -2673,36 +2171,36 @@ public partial class OrderEditModel : EditModelBase
         }
     }
 
-    /// <summary>OrderId の確定値が変更される直前に呼ばれる（新値のみ。partial 実装で処理を追加）</summary>
-    partial void OnOrderIdChanging(OrderIdValue? value);
+    /// <summary>NoteId の確定値が変更される直前に呼ばれる（新値のみ。partial 実装で処理を追加）</summary>
+    partial void OnNoteIdChanging(int? value);
 
-    /// <summary>OrderId の確定値が変更される直前に呼ばれる（旧値・新値。partial 実装で処理を追加）</summary>
-    partial void OnOrderIdChanging(OrderIdValue? oldValue, OrderIdValue? newValue);
+    /// <summary>NoteId の確定値が変更される直前に呼ばれる（旧値・新値。partial 実装で処理を追加）</summary>
+    partial void OnNoteIdChanging(int? oldValue, int? newValue);
 
-    /// <summary>OrderId の確定値が変更された直後に呼ばれる（新値のみ。partial 実装で処理を追加）</summary>
-    partial void OnOrderIdChanged(OrderIdValue? value);
+    /// <summary>NoteId の確定値が変更された直後に呼ばれる（新値のみ。partial 実装で処理を追加）</summary>
+    partial void OnNoteIdChanged(int? value);
 
-    /// <summary>OrderId の確定値が変更された直後に呼ばれる（旧値・新値。partial 実装で処理を追加）</summary>
-    partial void OnOrderIdChanged(OrderIdValue? oldValue, OrderIdValue? newValue);
+    /// <summary>NoteId の確定値が変更された直後に呼ばれる（旧値・新値。partial 実装で処理を追加）</summary>
+    partial void OnNoteIdChanged(int? oldValue, int? newValue);
 
-    /// <summary>OrderId の画面入力用バインディング文字列（設定時に確定値へ変換）</summary>
-    public string BindingOrderId
+    /// <summary>NoteId の画面入力用バインディング文字列（設定時に確定値へ変換）</summary>
+    public string BindingNoteId
     {
-        get => _bindingOrderId;
+        get => _bindingNoteId;
         set
         {
             // 入力由来の値のみ正規化（ロード・復元時は元 Entity の鏡像を保つため素通し）
             var normalized =
                 IsLoading || IsReverting
                     ? value
-                    : NormalizeInput(nameof(BindingOrderId), value);
+                    : NormalizeInput(nameof(BindingNoteId), value);
 
-            if (!SetProperty(ref _bindingOrderId, normalized, nameof(BindingOrderId)))
+            if (!SetProperty(ref _bindingNoteId, normalized, nameof(BindingNoteId)))
             {
                 // トリムで既存値と一致した場合、画面表示にだけ空白付き文字列が残るため表示を正規化値へ戻す
                 if (!string.Equals(value, normalized, StringComparison.Ordinal))
                 {
-                    OnPropertyChanged(nameof(BindingOrderId));
+                    OnPropertyChanged(nameof(BindingNoteId));
                 }
 
                 return;
@@ -2710,65 +2208,53 @@ public partial class OrderEditModel : EditModelBase
 
             if (!IsReverting)
             {
-                if (string.IsNullOrEmpty(normalized))
+                if (int.TryParse(normalized, out var parsed))
                 {
-                    OrderId = null;
-                    SetError(nameof(BindingOrderId), null);
-                }
-                else if (int.TryParse(normalized, out var parsed))
-                {
-                    if (OrderIdValue.TryCreate(parsed, out var converted, out var voErrors))
-                    {
-                        OrderId = converted;
-                        SetError(nameof(BindingOrderId), null);
-                    }
-                    else
-                    {
-                        SetError(nameof(BindingOrderId), string.Join(" / ", voErrors));
-                    }
+                    NoteId = parsed;
+                    SetError(nameof(BindingNoteId), null);
                 }
                 else
                 {
                     SetError(
-                        nameof(BindingOrderId),
-                        ResolveParseErrorMessage(OrderIdValue.DisplayName, normalized, "int")
+                        nameof(BindingNoteId),
+                        ResolveParseErrorMessage(GetDisplayName(nameof(NoteId), "NoteId"), normalized, "int")
                     );
                 }
             }
         }
     }
 
-    /// <summary>CustomerId の確定値</summary>
-    private CustomerIdValue? _customerId;
+    /// <summary>DocumentId の確定値</summary>
+    private int? _documentId;
 
-    /// <summary>CustomerId の画面入力文字列</summary>
-    private string _bindingCustomerId = string.Empty;
+    /// <summary>DocumentId の画面入力文字列</summary>
+    private string _bindingDocumentId = string.Empty;
 
-    /// <summary>CustomerId の確定値（外部からは読み取り専用）</summary>
-    public CustomerIdValue? CustomerId
+    /// <summary>DocumentId の確定値（外部からは読み取り専用）</summary>
+    public int? DocumentId
     {
-        get => _customerId;
+        get => _documentId;
         private set
         {
-            if (EqualityComparer<CustomerIdValue?>.Default.Equals(_customerId, value))
+            if (EqualityComparer<int?>.Default.Equals(_documentId, value))
             {
                 return;
             }
 
-            var oldValue = _customerId;
-            OnCustomerIdChanging(value);
-            OnCustomerIdChanging(oldValue, value);
-            _customerId = value;
-            OnCustomerIdChanged(value);
-            OnCustomerIdChanged(oldValue, value);
-            OnPropertyChanged(nameof(CustomerId));
+            var oldValue = _documentId;
+            OnDocumentIdChanging(value);
+            OnDocumentIdChanging(oldValue, value);
+            _documentId = value;
+            OnDocumentIdChanged(value);
+            OnDocumentIdChanged(oldValue, value);
+            OnPropertyChanged(nameof(DocumentId));
 
             // 確定値が変化したら更新対象へ昇格（ロード中は昇格させず、状態は元 Entity の鏡のままにする）
             if (!IsLoading)
             {
-                OnConfirmedValueChanged(nameof(CustomerId));
+                OnConfirmedValueChanged(nameof(DocumentId));
 
-                if (ShouldMarkUpdated(nameof(CustomerId)))
+                if (ShouldMarkUpdated(nameof(DocumentId)))
                 {
                     MarkUpdated();
                 }
@@ -2776,36 +2262,36 @@ public partial class OrderEditModel : EditModelBase
         }
     }
 
-    /// <summary>CustomerId の確定値が変更される直前に呼ばれる（新値のみ。partial 実装で処理を追加）</summary>
-    partial void OnCustomerIdChanging(CustomerIdValue? value);
+    /// <summary>DocumentId の確定値が変更される直前に呼ばれる（新値のみ。partial 実装で処理を追加）</summary>
+    partial void OnDocumentIdChanging(int? value);
 
-    /// <summary>CustomerId の確定値が変更される直前に呼ばれる（旧値・新値。partial 実装で処理を追加）</summary>
-    partial void OnCustomerIdChanging(CustomerIdValue? oldValue, CustomerIdValue? newValue);
+    /// <summary>DocumentId の確定値が変更される直前に呼ばれる（旧値・新値。partial 実装で処理を追加）</summary>
+    partial void OnDocumentIdChanging(int? oldValue, int? newValue);
 
-    /// <summary>CustomerId の確定値が変更された直後に呼ばれる（新値のみ。partial 実装で処理を追加）</summary>
-    partial void OnCustomerIdChanged(CustomerIdValue? value);
+    /// <summary>DocumentId の確定値が変更された直後に呼ばれる（新値のみ。partial 実装で処理を追加）</summary>
+    partial void OnDocumentIdChanged(int? value);
 
-    /// <summary>CustomerId の確定値が変更された直後に呼ばれる（旧値・新値。partial 実装で処理を追加）</summary>
-    partial void OnCustomerIdChanged(CustomerIdValue? oldValue, CustomerIdValue? newValue);
+    /// <summary>DocumentId の確定値が変更された直後に呼ばれる（旧値・新値。partial 実装で処理を追加）</summary>
+    partial void OnDocumentIdChanged(int? oldValue, int? newValue);
 
-    /// <summary>CustomerId の画面入力用バインディング文字列（設定時に確定値へ変換）</summary>
-    public string BindingCustomerId
+    /// <summary>DocumentId の画面入力用バインディング文字列（設定時に確定値へ変換）</summary>
+    public string BindingDocumentId
     {
-        get => _bindingCustomerId;
+        get => _bindingDocumentId;
         set
         {
             // 入力由来の値のみ正規化（ロード・復元時は元 Entity の鏡像を保つため素通し）
             var normalized =
                 IsLoading || IsReverting
                     ? value
-                    : NormalizeInput(nameof(BindingCustomerId), value);
+                    : NormalizeInput(nameof(BindingDocumentId), value);
 
-            if (!SetProperty(ref _bindingCustomerId, normalized, nameof(BindingCustomerId)))
+            if (!SetProperty(ref _bindingDocumentId, normalized, nameof(BindingDocumentId)))
             {
                 // トリムで既存値と一致した場合、画面表示にだけ空白付き文字列が残るため表示を正規化値へ戻す
                 if (!string.Equals(value, normalized, StringComparison.Ordinal))
                 {
-                    OnPropertyChanged(nameof(BindingCustomerId));
+                    OnPropertyChanged(nameof(BindingDocumentId));
                 }
 
                 return;
@@ -2813,65 +2299,53 @@ public partial class OrderEditModel : EditModelBase
 
             if (!IsReverting)
             {
-                if (string.IsNullOrEmpty(normalized))
+                if (int.TryParse(normalized, out var parsed))
                 {
-                    CustomerId = null;
-                    SetError(nameof(BindingCustomerId), null);
-                }
-                else if (int.TryParse(normalized, out var parsed))
-                {
-                    if (CustomerIdValue.TryCreate(parsed, out var converted, out var voErrors))
-                    {
-                        CustomerId = converted;
-                        SetError(nameof(BindingCustomerId), null);
-                    }
-                    else
-                    {
-                        SetError(nameof(BindingCustomerId), string.Join(" / ", voErrors));
-                    }
+                    DocumentId = parsed;
+                    SetError(nameof(BindingDocumentId), null);
                 }
                 else
                 {
                     SetError(
-                        nameof(BindingCustomerId),
-                        ResolveParseErrorMessage(CustomerIdValue.DisplayName, normalized, "int")
+                        nameof(BindingDocumentId),
+                        ResolveParseErrorMessage(GetDisplayName(nameof(DocumentId), "DocumentId"), normalized, "int")
                     );
                 }
             }
         }
     }
 
-    /// <summary>Memo の確定値</summary>
-    private MemoValue? _memo;
+    /// <summary>Note の確定値</summary>
+    private string? _note;
 
-    /// <summary>Memo の画面入力文字列</summary>
-    private string _bindingMemo = string.Empty;
+    /// <summary>Note の画面入力文字列</summary>
+    private string _bindingNote = string.Empty;
 
-    /// <summary>Memo の確定値（外部からは読み取り専用）</summary>
-    public MemoValue? Memo
+    /// <summary>Note の確定値（外部からは読み取り専用）</summary>
+    public string? Note
     {
-        get => _memo;
+        get => _note;
         private set
         {
-            if (EqualityComparer<MemoValue?>.Default.Equals(_memo, value))
+            if (EqualityComparer<string?>.Default.Equals(_note, value))
             {
                 return;
             }
 
-            var oldValue = _memo;
-            OnMemoChanging(value);
-            OnMemoChanging(oldValue, value);
-            _memo = value;
-            OnMemoChanged(value);
-            OnMemoChanged(oldValue, value);
-            OnPropertyChanged(nameof(Memo));
+            var oldValue = _note;
+            OnNoteChanging(value);
+            OnNoteChanging(oldValue, value);
+            _note = value;
+            OnNoteChanged(value);
+            OnNoteChanged(oldValue, value);
+            OnPropertyChanged(nameof(Note));
 
             // 確定値が変化したら更新対象へ昇格（ロード中は昇格させず、状態は元 Entity の鏡のままにする）
             if (!IsLoading)
             {
-                OnConfirmedValueChanged(nameof(Memo));
+                OnConfirmedValueChanged(nameof(Note));
 
-                if (ShouldMarkUpdated(nameof(Memo)))
+                if (ShouldMarkUpdated(nameof(Note)))
                 {
                     MarkUpdated();
                 }
@@ -2879,36 +2353,36 @@ public partial class OrderEditModel : EditModelBase
         }
     }
 
-    /// <summary>Memo の確定値が変更される直前に呼ばれる（新値のみ。partial 実装で処理を追加）</summary>
-    partial void OnMemoChanging(MemoValue? value);
+    /// <summary>Note の確定値が変更される直前に呼ばれる（新値のみ。partial 実装で処理を追加）</summary>
+    partial void OnNoteChanging(string? value);
 
-    /// <summary>Memo の確定値が変更される直前に呼ばれる（旧値・新値。partial 実装で処理を追加）</summary>
-    partial void OnMemoChanging(MemoValue? oldValue, MemoValue? newValue);
+    /// <summary>Note の確定値が変更される直前に呼ばれる（旧値・新値。partial 実装で処理を追加）</summary>
+    partial void OnNoteChanging(string? oldValue, string? newValue);
 
-    /// <summary>Memo の確定値が変更された直後に呼ばれる（新値のみ。partial 実装で処理を追加）</summary>
-    partial void OnMemoChanged(MemoValue? value);
+    /// <summary>Note の確定値が変更された直後に呼ばれる（新値のみ。partial 実装で処理を追加）</summary>
+    partial void OnNoteChanged(string? value);
 
-    /// <summary>Memo の確定値が変更された直後に呼ばれる（旧値・新値。partial 実装で処理を追加）</summary>
-    partial void OnMemoChanged(MemoValue? oldValue, MemoValue? newValue);
+    /// <summary>Note の確定値が変更された直後に呼ばれる（旧値・新値。partial 実装で処理を追加）</summary>
+    partial void OnNoteChanged(string? oldValue, string? newValue);
 
-    /// <summary>Memo の画面入力用バインディング文字列（設定時に確定値へ変換）</summary>
-    public string BindingMemo
+    /// <summary>Note の画面入力用バインディング文字列（設定時に確定値へ変換）</summary>
+    public string BindingNote
     {
-        get => _bindingMemo;
+        get => _bindingNote;
         set
         {
             // 入力由来の値のみ正規化（ロード・復元時は元 Entity の鏡像を保つため素通し）
             var normalized =
                 IsLoading || IsReverting
                     ? value
-                    : NormalizeInput(nameof(BindingMemo), value);
+                    : NormalizeInput(nameof(BindingNote), value);
 
-            if (!SetProperty(ref _bindingMemo, normalized, nameof(BindingMemo)))
+            if (!SetProperty(ref _bindingNote, normalized, nameof(BindingNote)))
             {
                 // トリムで既存値と一致した場合、画面表示にだけ空白付き文字列が残るため表示を正規化値へ戻す
                 if (!string.Equals(value, normalized, StringComparison.Ordinal))
                 {
-                    OnPropertyChanged(nameof(BindingMemo));
+                    OnPropertyChanged(nameof(BindingNote));
                 }
 
                 return;
@@ -2918,120 +2392,13 @@ public partial class OrderEditModel : EditModelBase
             {
                 if (string.IsNullOrEmpty(normalized))
                 {
-                    Memo = null;
-                    SetError(nameof(BindingMemo), null);
-                }
-                else if (MemoValue.TryCreate(normalized, out var converted, out var voErrors))
-                {
-                    Memo = converted;
-                    SetError(nameof(BindingMemo), null);
+                    Note = null;
+                    SetError(nameof(BindingNote), null);
                 }
                 else
                 {
-                    SetError(nameof(BindingMemo), string.Join(" / ", voErrors));
-                }
-            }
-        }
-    }
-
-    /// <summary>Amount の確定値</summary>
-    private AmountValue? _amount;
-
-    /// <summary>Amount の画面入力文字列</summary>
-    private string _bindingAmount = string.Empty;
-
-    /// <summary>Amount の確定値（外部からは読み取り専用）</summary>
-    public AmountValue? Amount
-    {
-        get => _amount;
-        private set
-        {
-            if (EqualityComparer<AmountValue?>.Default.Equals(_amount, value))
-            {
-                return;
-            }
-
-            var oldValue = _amount;
-            OnAmountChanging(value);
-            OnAmountChanging(oldValue, value);
-            _amount = value;
-            OnAmountChanged(value);
-            OnAmountChanged(oldValue, value);
-            OnPropertyChanged(nameof(Amount));
-
-            // 確定値が変化したら更新対象へ昇格（ロード中は昇格させず、状態は元 Entity の鏡のままにする）
-            if (!IsLoading)
-            {
-                OnConfirmedValueChanged(nameof(Amount));
-
-                if (ShouldMarkUpdated(nameof(Amount)))
-                {
-                    MarkUpdated();
-                }
-            }
-        }
-    }
-
-    /// <summary>Amount の確定値が変更される直前に呼ばれる（新値のみ。partial 実装で処理を追加）</summary>
-    partial void OnAmountChanging(AmountValue? value);
-
-    /// <summary>Amount の確定値が変更される直前に呼ばれる（旧値・新値。partial 実装で処理を追加）</summary>
-    partial void OnAmountChanging(AmountValue? oldValue, AmountValue? newValue);
-
-    /// <summary>Amount の確定値が変更された直後に呼ばれる（新値のみ。partial 実装で処理を追加）</summary>
-    partial void OnAmountChanged(AmountValue? value);
-
-    /// <summary>Amount の確定値が変更された直後に呼ばれる（旧値・新値。partial 実装で処理を追加）</summary>
-    partial void OnAmountChanged(AmountValue? oldValue, AmountValue? newValue);
-
-    /// <summary>Amount の画面入力用バインディング文字列（設定時に確定値へ変換）</summary>
-    public string BindingAmount
-    {
-        get => _bindingAmount;
-        set
-        {
-            // 入力由来の値のみ正規化（ロード・復元時は元 Entity の鏡像を保つため素通し）
-            var normalized =
-                IsLoading || IsReverting
-                    ? value
-                    : NormalizeInput(nameof(BindingAmount), value);
-
-            if (!SetProperty(ref _bindingAmount, normalized, nameof(BindingAmount)))
-            {
-                // トリムで既存値と一致した場合、画面表示にだけ空白付き文字列が残るため表示を正規化値へ戻す
-                if (!string.Equals(value, normalized, StringComparison.Ordinal))
-                {
-                    OnPropertyChanged(nameof(BindingAmount));
-                }
-
-                return;
-            }
-
-            if (!IsReverting)
-            {
-                if (string.IsNullOrEmpty(normalized))
-                {
-                    Amount = null;
-                    SetError(nameof(BindingAmount), null);
-                }
-                else if (decimal.TryParse(normalized, out var parsed))
-                {
-                    if (AmountValue.TryCreate(parsed, out var converted, out var voErrors))
-                    {
-                        Amount = converted;
-                        SetError(nameof(BindingAmount), null);
-                    }
-                    else
-                    {
-                        SetError(nameof(BindingAmount), string.Join(" / ", voErrors));
-                    }
-                }
-                else
-                {
-                    SetError(
-                        nameof(BindingAmount),
-                        ResolveParseErrorMessage(AmountValue.DisplayName, normalized, "decimal")
-                    );
+                    Note = normalized;
+                    SetError(nameof(BindingNote), null);
                 }
             }
         }
@@ -3060,36 +2427,34 @@ public partial class OrderEditModel : EditModelBase
     );
 
     // ---- navigation ----
-    /// <summary>Customer ナビゲーションプロパティ</summary>
-    public CustomerEditModel Customer { get; set; } = null!;
+    /// <summary>Document ナビゲーションプロパティ</summary>
+    public DocumentEditModel Document { get; set; } = null!;
 
     /// <summary>確定値をバインディング用プロパティへ書き戻しエラーをクリアする（RevertInput から呼ばれる）</summary>
     protected override void RevertCore()
     {
-        BindingOrderId = OrderId?.ToString() ?? string.Empty;
-        SetError(nameof(BindingOrderId), null);
-        BindingCustomerId = CustomerId?.ToString() ?? string.Empty;
-        SetError(nameof(BindingCustomerId), null);
-        BindingMemo = Memo?.ToString() ?? string.Empty;
-        SetError(nameof(BindingMemo), null);
-        BindingAmount = Amount?.ToString() ?? string.Empty;
-        SetError(nameof(BindingAmount), null);
+        BindingNoteId = NoteId?.ToString() ?? string.Empty;
+        SetError(nameof(BindingNoteId), null);
+        BindingDocumentId = DocumentId?.ToString() ?? string.Empty;
+        SetError(nameof(BindingDocumentId), null);
+        BindingNote = Note?.ToString() ?? string.Empty;
+        SetError(nameof(BindingNote), null);
     }
 
     /// <summary>このノード自身の検証（必須項目の未入力チェック＋追加検証フック）。Validate から呼ばれる</summary>
     protected override void ValidateSelf()
     {
-        if (OrderId is null)
+        if (NoteId is null)
         {
-            SetError(nameof(BindingOrderId), BuildRequiredErrorMessage(OrderIdValue.DisplayName));
+            SetError(nameof(BindingNoteId), BuildRequiredErrorMessage(GetDisplayName(nameof(NoteId), "NoteId")));
         }
-        if (CustomerId is null)
+        if (DocumentId is null)
         {
-            SetError(nameof(BindingCustomerId), BuildRequiredErrorMessage(CustomerIdValue.DisplayName));
+            SetError(nameof(BindingDocumentId), BuildRequiredErrorMessage(GetDisplayName(nameof(DocumentId), "DocumentId")));
         }
-        if (Amount is null)
+        if (Note is null)
         {
-            SetError(nameof(BindingAmount), BuildRequiredErrorMessage(AmountValue.DisplayName));
+            SetError(nameof(BindingNote), BuildRequiredErrorMessage(GetDisplayName(nameof(Note), "Note")));
         }
         OnValidate();
     }
@@ -3097,18 +2462,26 @@ public partial class OrderEditModel : EditModelBase
     /// <summary>追加の検証ルールを実装するフック（partial 実装で SetError によりエラー登録）</summary>
     partial void OnValidate();
 
+    /// <summary>プロパティの表示名を解決する（既定＝列の説明・無指定はプロパティ名。CustomizePropertyDisplayName で上書き可能）。検証メッセージで使う</summary>
+    private static string GetDisplayName(string propertyName, string defaultDisplayName)
+    {
+        var displayName = defaultDisplayName;
+        CustomizePropertyDisplayName(propertyName, ref displayName);
+        return displayName;
+    }
+
+    /// <summary>プロパティの表示名を差し替える拡張ポイント（partial・未実装なら既定の表示名）</summary>
+    static partial void CustomizePropertyDisplayName(string propertyName, ref string displayName);
+
     // ---- 行編集（IEditableObject）用スナップショット ----
-    /// <summary>OrderId の編集前スナップショット</summary>
-    private string _bindingOrderIdSnapshot = string.Empty;
+    /// <summary>NoteId の編集前スナップショット</summary>
+    private string _bindingNoteIdSnapshot = string.Empty;
 
-    /// <summary>CustomerId の編集前スナップショット</summary>
-    private string _bindingCustomerIdSnapshot = string.Empty;
+    /// <summary>DocumentId の編集前スナップショット</summary>
+    private string _bindingDocumentIdSnapshot = string.Empty;
 
-    /// <summary>Memo の編集前スナップショット</summary>
-    private string _bindingMemoSnapshot = string.Empty;
-
-    /// <summary>Amount の編集前スナップショット</summary>
-    private string _bindingAmountSnapshot = string.Empty;
+    /// <summary>Note の編集前スナップショット</summary>
+    private string _bindingNoteSnapshot = string.Empty;
 
     /// <summary>編集前の RowState スナップショット</summary>
     private RowState _rowStateSnapshot;
@@ -3116,10 +2489,9 @@ public partial class OrderEditModel : EditModelBase
     /// <summary>BeginEdit の本体。各バインディング入力と RowState をスナップショットする</summary>
     protected override void BeginEditCore()
     {
-        _bindingOrderIdSnapshot = _bindingOrderId;
-        _bindingCustomerIdSnapshot = _bindingCustomerId;
-        _bindingMemoSnapshot = _bindingMemo;
-        _bindingAmountSnapshot = _bindingAmount;
+        _bindingNoteIdSnapshot = _bindingNoteId;
+        _bindingDocumentIdSnapshot = _bindingDocumentId;
+        _bindingNoteSnapshot = _bindingNote;
         _rowStateSnapshot = RowState;
         OnBeginEdit();
     }
@@ -3138,10 +2510,9 @@ public partial class OrderEditModel : EditModelBase
     {
         ExecuteLoad(() =>
         {
-            BindingOrderId = _bindingOrderIdSnapshot;
-            BindingCustomerId = _bindingCustomerIdSnapshot;
-            BindingMemo = _bindingMemoSnapshot;
-            BindingAmount = _bindingAmountSnapshot;
+            BindingNoteId = _bindingNoteIdSnapshot;
+            BindingDocumentId = _bindingDocumentIdSnapshot;
+            BindingNote = _bindingNoteSnapshot;
             OnCancelEdit();
         });
 
@@ -3152,49 +2523,49 @@ public partial class OrderEditModel : EditModelBase
     partial void OnCancelEdit();
 
     /// <summary>所属コレクション内で自身の次の要素を取得する（所属していない／末尾なら null）</summary>
-    public new OrderEditModel? GetNext() => (OrderEditModel?)base.GetNext();
+    public new DocumentNoteEditModel? GetNext() => (DocumentNoteEditModel?)base.GetNext();
 
     /// <summary>所属コレクション内で自身の前の要素を取得する（所属していない／先頭なら null）</summary>
-    public new OrderEditModel? GetPrevious() => (OrderEditModel?)base.GetPrevious();
+    public new DocumentNoteEditModel? GetPrevious() => (DocumentNoteEditModel?)base.GetPrevious();
 
     /// <summary>自身が所属する親コレクション（所属していなければ null）</summary>
-    public EditModelCollection<OrderEditModel>? ParentCollection =>
-        Owner as EditModelCollection<OrderEditModel>;
+    public EditModelCollection<DocumentNoteEditModel>? ParentCollection =>
+        Owner as EditModelCollection<DocumentNoteEditModel>;
 
     /// <summary>自身を子として保持する親モデル（カスケード親。未所属／ルートは null）</summary>
-    public new CustomerEditModel? ParentModel =>
-        base.ParentModel as CustomerEditModel;
+    public new DocumentEditModel? ParentModel =>
+        base.ParentModel as DocumentEditModel;
 
     /// <summary>所属コレクションの並び替え本体。型付きコレクションの Move を呼ぶ（MoveTo* から使用される）</summary>
     protected override void MoveCore(int oldIndex, int newIndex) =>
         ParentCollection?.Move(oldIndex, newIndex);
 }
 
-/// <summary>CustomerEntity と CustomerEditModel の相互変換</summary>
-public sealed partial class CustomerMapper
+/// <summary>DocumentEntity と DocumentEditModel の相互変換</summary>
+public sealed partial class DocumentMapper
 {
-    /// <summary>初期値を設定した新しい CustomerEntity を生成する（保存時に追加対象となる）</summary>
-    public CustomerEntity CreateEntity()
+    /// <summary>初期値を設定した新しい DocumentEntity を生成する（保存時に追加対象となる）</summary>
+    public DocumentEntity CreateEntity()
     {
-        var entity = new CustomerEntity();
+        var entity = new DocumentEntity();
         entity.MarkAdded();
         OnEntityCreated(entity);
         return entity;
     }
 
-    /// <summary>初期値を設定した新しい CustomerEntity に CustomerEditModel の確定値を反映して生成する</summary>
+    /// <summary>初期値を設定した新しい DocumentEntity に DocumentEditModel の確定値を反映して生成する</summary>
     /// <param name="includeRemoved">削除追跡分（Removed）も復元して反映するか（保存用は true、帳票表示用などは false）</param>
-    public CustomerEntity CreateEntity(CustomerEditModel editModel, bool includeRemoved = false)
+    public DocumentEntity CreateEntity(DocumentEditModel editModel, bool includeRemoved = false)
     {
         var entity = CreateEntity();
         ApplyToEntity(editModel, entity, includeRemoved);
         return entity;
     }
 
-    /// <summary>CustomerEditModel の EditModelCollection を基に CustomerEntity のリストを生成する</summary>
+    /// <summary>DocumentEditModel の EditModelCollection を基に DocumentEntity のリストを生成する</summary>
     /// <param name="includeRemoved">削除追跡分（Removed）も復元して含めるか（保存用は true、帳票表示用などは false）</param>
-    public List<CustomerEntity> CreateEntities(
-        EditModelCollection<CustomerEditModel> editModels,
+    public List<DocumentEntity> CreateEntities(
+        EditModelCollection<DocumentEditModel> editModels,
         bool includeRemoved = false
     )
     {
@@ -3212,71 +2583,78 @@ public sealed partial class CustomerMapper
         return entities;
     }
 
-    /// <summary>新しい CustomerEntity の生成直後に呼ばれる（partial 実装で初期値を設定）</summary>
-    partial void OnEntityCreated(CustomerEntity entity);
+    /// <summary>新しい DocumentEntity の生成直後に呼ばれる（partial 実装で初期値を設定）</summary>
+    partial void OnEntityCreated(DocumentEntity entity);
 
-    /// <summary>新規入力用の CustomerEditModel を生成する（追加対象の Entity を基に作る）</summary>
-    public CustomerEditModel CreateEditModel()
+    /// <summary>新規入力用の DocumentEditModel を生成する（追加対象の Entity を基に作る）</summary>
+    public DocumentEditModel CreateEditModel()
     {
         var entity = CreateEntity();
         var editModel = CreateEditModel(entity);
         return editModel;
     }
 
-    /// <summary>CustomerEntity を基に新しい CustomerEditModel を生成する</summary>
-    public CustomerEditModel CreateEditModel(CustomerEntity entity)
+    /// <summary>DocumentEntity を基に新しい DocumentEditModel を生成する</summary>
+    public DocumentEditModel CreateEditModel(DocumentEntity entity)
     {
-        var editModel = new CustomerEditModel();
+        var editModel = new DocumentEditModel();
         ApplyToEditModel(entity, editModel);
         OnEditModelCreated(editModel);
         return editModel;
     }
 
-    /// <summary>CustomerEntity の列挙を基に CustomerEditModel の EditModelCollection を生成する</summary>
-    public EditModelCollection<CustomerEditModel> CreateEditModels(
-        IEnumerable<CustomerEntity> entities
+    /// <summary>DocumentEntity の列挙を基に DocumentEditModel の EditModelCollection を生成する</summary>
+    public EditModelCollection<DocumentEditModel> CreateEditModels(
+        IEnumerable<DocumentEntity> entities
     )
     {
-        return new EditModelCollection<CustomerEditModel>(
+        return new EditModelCollection<DocumentEditModel>(
             entities.Select(entity => CreateEditModel(entity))
         );
     }
 
-    /// <summary>新しい CustomerEditModel の生成直後（ロード後）に呼ばれる（partial 実装で初期値を設定。新規のみは IsAdded で分岐）</summary>
-    partial void OnEditModelCreated(CustomerEditModel editModel);
+    /// <summary>新しい DocumentEditModel の生成直後（ロード後）に呼ばれる（partial 実装で初期値を設定。新規のみは IsAdded で分岐）</summary>
+    partial void OnEditModelCreated(DocumentEditModel editModel);
 
-    /// <summary>CustomerEditModel の確定値を既存の CustomerEntity へ反映する（破壊的更新）</summary>
+    /// <summary>DocumentEditModel の確定値を既存の DocumentEntity へ反映する（破壊的更新）</summary>
     /// <param name="includeRemoved">削除追跡分（Removed）も復元して反映するか（保存用は true、帳票表示用などは false）</param>
     public void ApplyToEntity(
-        CustomerEditModel editModel,
-        CustomerEntity entity,
+        DocumentEditModel editModel,
+        DocumentEntity entity,
         bool includeRemoved = false
     )
     {
-        entity.CustomerId =
-            editModel.CustomerId ?? throw new InvalidOperationException("CustomerId が未入力です。");
-        entity.Name =
-            editModel.Name ?? throw new InvalidOperationException("Name が未入力です。");
-        entity.Balance = editModel.Balance;
+        entity.DocumentId =
+            editModel.DocumentId ?? throw new InvalidOperationException("DocumentId が未入力です。");
+        entity.Title =
+            editModel.Title ?? throw new InvalidOperationException("Title が未入力です。");
+        entity.Payload = editModel.Payload;
+        entity.Thumb =
+            editModel.Thumb ?? throw new InvalidOperationException("Thumb が未入力です。");
+        entity.Checksum = editModel.Checksum;
+        entity.RowVer = editModel.RowVer;
         // 確定値の変更で EditModel 側に立った RowState をそのまま転写する（ここでは状態を作らない）
         entity.RowState = editModel.RowState;
-        entity.Orders = new OrderMapper().CreateEntities(editModel.Orders, includeRemoved);
+        entity.DocumentNotes = new DocumentNoteMapper().CreateEntities(editModel.DocumentNotes, includeRemoved);
         OnEntityApplied(editModel, entity);
     }
 
-    /// <summary>CustomerEditModel の確定値を CustomerEntity へ反映した後に呼ばれる（partial 実装で追加プロパティを保存）</summary>
-    partial void OnEntityApplied(CustomerEditModel editModel, CustomerEntity entity);
+    /// <summary>DocumentEditModel の確定値を DocumentEntity へ反映した後に呼ばれる（partial 実装で追加プロパティを保存）</summary>
+    partial void OnEntityApplied(DocumentEditModel editModel, DocumentEntity entity);
 
-    /// <summary>CustomerEntity の値を既存の CustomerEditModel へ反映する（バインディング経由）</summary>
-    public void ApplyToEditModel(CustomerEntity entity, CustomerEditModel editModel)
+    /// <summary>DocumentEntity の値を既存の DocumentEditModel へ反映する（バインディング経由）</summary>
+    public void ApplyToEditModel(DocumentEntity entity, DocumentEditModel editModel)
     {
         editModel.ExecuteLoad(() =>
         {
             editModel.RevertInput();
-            editModel.BindingCustomerId = entity.CustomerId?.ToString() ?? string.Empty;
-            editModel.BindingName = entity.Name?.ToString() ?? string.Empty;
-            editModel.BindingBalance = entity.Balance?.ToString() ?? string.Empty;
-            editModel.Orders = new OrderMapper().CreateEditModels(entity.Orders);
+            editModel.BindingDocumentId = entity.DocumentId.ToString() ?? string.Empty;
+            editModel.BindingTitle = entity.Title.ToString() ?? string.Empty;
+            editModel.BindingPayload = entity.Payload is null ? string.Empty : Convert.ToBase64String(entity.Payload);
+            editModel.BindingThumb = entity.Thumb is null ? string.Empty : Convert.ToBase64String(entity.Thumb);
+            editModel.BindingChecksum = entity.Checksum is null ? string.Empty : Convert.ToBase64String(entity.Checksum);
+            editModel.BindingRowVer = entity.RowVer is null ? string.Empty : Convert.ToBase64String(entity.RowVer);
+            editModel.DocumentNotes = new DocumentNoteMapper().CreateEditModels(entity.DocumentNotes);
             OnEditModelLoaded(entity, editModel);
         });
 
@@ -3284,35 +2662,35 @@ public sealed partial class CustomerMapper
         editModel.RowState = entity.RowState;
     }
 
-    /// <summary>CustomerEditModel への既定ロード後に呼ばれる（partial 実装で追加プロパティをロード）</summary>
-    partial void OnEditModelLoaded(CustomerEntity entity, CustomerEditModel editModel);
+    /// <summary>DocumentEditModel への既定ロード後に呼ばれる（partial 実装で追加プロパティをロード）</summary>
+    partial void OnEditModelLoaded(DocumentEntity entity, DocumentEditModel editModel);
 }
 
-/// <summary>OrderEntity と OrderEditModel の相互変換</summary>
-public sealed partial class OrderMapper
+/// <summary>DocumentNoteEntity と DocumentNoteEditModel の相互変換</summary>
+public sealed partial class DocumentNoteMapper
 {
-    /// <summary>初期値を設定した新しい OrderEntity を生成する（保存時に追加対象となる）</summary>
-    public OrderEntity CreateEntity()
+    /// <summary>初期値を設定した新しい DocumentNoteEntity を生成する（保存時に追加対象となる）</summary>
+    public DocumentNoteEntity CreateEntity()
     {
-        var entity = new OrderEntity();
+        var entity = new DocumentNoteEntity();
         entity.MarkAdded();
         OnEntityCreated(entity);
         return entity;
     }
 
-    /// <summary>初期値を設定した新しい OrderEntity に OrderEditModel の確定値を反映して生成する</summary>
+    /// <summary>初期値を設定した新しい DocumentNoteEntity に DocumentNoteEditModel の確定値を反映して生成する</summary>
     /// <param name="includeRemoved">削除追跡分（Removed）も復元して反映するか（保存用は true、帳票表示用などは false）</param>
-    public OrderEntity CreateEntity(OrderEditModel editModel, bool includeRemoved = false)
+    public DocumentNoteEntity CreateEntity(DocumentNoteEditModel editModel, bool includeRemoved = false)
     {
         var entity = CreateEntity();
         ApplyToEntity(editModel, entity, includeRemoved);
         return entity;
     }
 
-    /// <summary>OrderEditModel の EditModelCollection を基に OrderEntity のリストを生成する</summary>
+    /// <summary>DocumentNoteEditModel の EditModelCollection を基に DocumentNoteEntity のリストを生成する</summary>
     /// <param name="includeRemoved">削除追跡分（Removed）も復元して含めるか（保存用は true、帳票表示用などは false）</param>
-    public List<OrderEntity> CreateEntities(
-        EditModelCollection<OrderEditModel> editModels,
+    public List<DocumentNoteEntity> CreateEntities(
+        EditModelCollection<DocumentNoteEditModel> editModels,
         bool includeRemoved = false
     )
     {
@@ -3330,72 +2708,70 @@ public sealed partial class OrderMapper
         return entities;
     }
 
-    /// <summary>新しい OrderEntity の生成直後に呼ばれる（partial 実装で初期値を設定）</summary>
-    partial void OnEntityCreated(OrderEntity entity);
+    /// <summary>新しい DocumentNoteEntity の生成直後に呼ばれる（partial 実装で初期値を設定）</summary>
+    partial void OnEntityCreated(DocumentNoteEntity entity);
 
-    /// <summary>新規入力用の OrderEditModel を生成する（追加対象の Entity を基に作る）</summary>
-    public OrderEditModel CreateEditModel()
+    /// <summary>新規入力用の DocumentNoteEditModel を生成する（追加対象の Entity を基に作る）</summary>
+    public DocumentNoteEditModel CreateEditModel()
     {
         var entity = CreateEntity();
         var editModel = CreateEditModel(entity);
         return editModel;
     }
 
-    /// <summary>OrderEntity を基に新しい OrderEditModel を生成する</summary>
-    public OrderEditModel CreateEditModel(OrderEntity entity)
+    /// <summary>DocumentNoteEntity を基に新しい DocumentNoteEditModel を生成する</summary>
+    public DocumentNoteEditModel CreateEditModel(DocumentNoteEntity entity)
     {
-        var editModel = new OrderEditModel();
+        var editModel = new DocumentNoteEditModel();
         ApplyToEditModel(entity, editModel);
         OnEditModelCreated(editModel);
         return editModel;
     }
 
-    /// <summary>OrderEntity の列挙を基に OrderEditModel の EditModelCollection を生成する</summary>
-    public EditModelCollection<OrderEditModel> CreateEditModels(
-        IEnumerable<OrderEntity> entities
+    /// <summary>DocumentNoteEntity の列挙を基に DocumentNoteEditModel の EditModelCollection を生成する</summary>
+    public EditModelCollection<DocumentNoteEditModel> CreateEditModels(
+        IEnumerable<DocumentNoteEntity> entities
     )
     {
-        return new EditModelCollection<OrderEditModel>(
+        return new EditModelCollection<DocumentNoteEditModel>(
             entities.Select(entity => CreateEditModel(entity))
         );
     }
 
-    /// <summary>新しい OrderEditModel の生成直後（ロード後）に呼ばれる（partial 実装で初期値を設定。新規のみは IsAdded で分岐）</summary>
-    partial void OnEditModelCreated(OrderEditModel editModel);
+    /// <summary>新しい DocumentNoteEditModel の生成直後（ロード後）に呼ばれる（partial 実装で初期値を設定。新規のみは IsAdded で分岐）</summary>
+    partial void OnEditModelCreated(DocumentNoteEditModel editModel);
 
-    /// <summary>OrderEditModel の確定値を既存の OrderEntity へ反映する（破壊的更新）</summary>
+    /// <summary>DocumentNoteEditModel の確定値を既存の DocumentNoteEntity へ反映する（破壊的更新）</summary>
     /// <param name="includeRemoved">削除追跡分（Removed）も復元して反映するか（保存用は true、帳票表示用などは false）</param>
     public void ApplyToEntity(
-        OrderEditModel editModel,
-        OrderEntity entity,
+        DocumentNoteEditModel editModel,
+        DocumentNoteEntity entity,
         bool includeRemoved = false
     )
     {
-        entity.OrderId =
-            editModel.OrderId ?? throw new InvalidOperationException("OrderId が未入力です。");
-        entity.CustomerId =
-            editModel.CustomerId ?? throw new InvalidOperationException("CustomerId が未入力です。");
-        entity.Memo = editModel.Memo;
-        entity.Amount =
-            editModel.Amount ?? throw new InvalidOperationException("Amount が未入力です。");
+        entity.NoteId =
+            editModel.NoteId ?? throw new InvalidOperationException("NoteId が未入力です。");
+        entity.DocumentId =
+            editModel.DocumentId ?? throw new InvalidOperationException("DocumentId が未入力です。");
+        entity.Note =
+            editModel.Note ?? throw new InvalidOperationException("Note が未入力です。");
         // 確定値の変更で EditModel 側に立った RowState をそのまま転写する（ここでは状態を作らない）
         entity.RowState = editModel.RowState;
         OnEntityApplied(editModel, entity);
     }
 
-    /// <summary>OrderEditModel の確定値を OrderEntity へ反映した後に呼ばれる（partial 実装で追加プロパティを保存）</summary>
-    partial void OnEntityApplied(OrderEditModel editModel, OrderEntity entity);
+    /// <summary>DocumentNoteEditModel の確定値を DocumentNoteEntity へ反映した後に呼ばれる（partial 実装で追加プロパティを保存）</summary>
+    partial void OnEntityApplied(DocumentNoteEditModel editModel, DocumentNoteEntity entity);
 
-    /// <summary>OrderEntity の値を既存の OrderEditModel へ反映する（バインディング経由）</summary>
-    public void ApplyToEditModel(OrderEntity entity, OrderEditModel editModel)
+    /// <summary>DocumentNoteEntity の値を既存の DocumentNoteEditModel へ反映する（バインディング経由）</summary>
+    public void ApplyToEditModel(DocumentNoteEntity entity, DocumentNoteEditModel editModel)
     {
         editModel.ExecuteLoad(() =>
         {
             editModel.RevertInput();
-            editModel.BindingOrderId = entity.OrderId?.ToString() ?? string.Empty;
-            editModel.BindingCustomerId = entity.CustomerId?.ToString() ?? string.Empty;
-            editModel.BindingMemo = entity.Memo?.ToString() ?? string.Empty;
-            editModel.BindingAmount = entity.Amount?.ToString() ?? string.Empty;
+            editModel.BindingNoteId = entity.NoteId.ToString() ?? string.Empty;
+            editModel.BindingDocumentId = entity.DocumentId.ToString() ?? string.Empty;
+            editModel.BindingNote = entity.Note.ToString() ?? string.Empty;
             OnEditModelLoaded(entity, editModel);
         });
 
@@ -3403,8 +2779,8 @@ public sealed partial class OrderMapper
         editModel.RowState = entity.RowState;
     }
 
-    /// <summary>OrderEditModel への既定ロード後に呼ばれる（partial 実装で追加プロパティをロード）</summary>
-    partial void OnEditModelLoaded(OrderEntity entity, OrderEditModel editModel);
+    /// <summary>DocumentNoteEditModel への既定ロード後に呼ばれる（partial 実装で追加プロパティをロード）</summary>
+    partial void OnEditModelLoaded(DocumentNoteEntity entity, DocumentNoteEditModel editModel);
 }
 
 /// <summary>ネットワーク境界を越えて提供できる操作に絞ったリポジトリ共通インターフェース（リモート面）</summary>
@@ -3588,7 +2964,7 @@ public partial interface ISqlExecutor
     /// <remarks>
     /// <para>
     /// <b>単一値モード</b>: <typeparamref name="TResult"/>（Nullable は基底型で判定）が primitive / enum / string / decimal /
-    /// DateTime / DateTimeOffset / TimeSpan / Guid / byte[] / 値オブジェクト（IValueObject 実装） のときは、
+    /// DateTime / DateTimeOffset / TimeSpan / Guid / byte[] のときは、
     /// 各行の<b>先頭列</b>を変換して返す（DBNull は <c>default</c>）。変換はスカラー系と同じく Nullable 対応の
     /// <see cref="System.Convert.ChangeType(object, System.Type, System.IFormatProvider)"/> による。
     /// </para>
@@ -3654,68 +3030,6 @@ public sealed class SqlConnectionFactory(string connectionString) : ISqlConnecti
     public SqliteConnection CreateConnection() => new(connectionString);
 }
 
-/// <summary>SQL パラメータへ渡す値を素の値へ開くヘルパー（値オブジェクトは内包値へ変換し、SqlClient が扱える型にする）</summary>
-internal static class SqlParameterValue
-{
-    /// <summary>値オブジェクトなら内包値、それ以外はそのまま返す</summary>
-    public static object? Unwrap(object? value) =>
-        value is IValueObject valueObject ? valueObject.UnderlyingValue : value;
-}
-
-/// <summary>DB から読み取った素の値を、対象プロパティが値オブジェクト型なら Create で包み直す逆変換ヘルパー（Unwrap の対）</summary>
-internal static class SqlValueObjectActivator
-{
-    /// <summary>プロパティ型ごとに解決した「素の値 → 値オブジェクト」変換子をキャッシュする（VO でない型は null）</summary>
-    private static readonly ConcurrentDictionary<Type, Func<object, object>?> _factoryCache = new();
-
-    /// <summary>対象型が値オブジェクトなら素の値を Create で包み、それ以外はそのまま返す</summary>
-    public static object? Wrap(object? value, Type targetType)
-    {
-        if (value is null)
-        {
-            return null;
-        }
-
-        var factory = _factoryCache.GetOrAdd(targetType, ResolveFactory);
-        return factory is null ? value : factory(value);
-    }
-
-    /// <summary>対象型の IValueObject&lt;,&gt; から TValue と Create(TValue) を解決し変換子を組み立てる（VO でなければ null）</summary>
-    private static Func<object, object>? ResolveFactory(Type targetType)
-    {
-        var iface = Array.Find(
-            targetType.GetInterfaces(),
-            i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IValueObject<,>)
-        );
-        if (iface is null)
-        {
-            return null;
-        }
-
-        var valueType = iface.GetGenericArguments()[1];
-        var createMethod = targetType.GetMethod(
-            "Create",
-            BindingFlags.Public | BindingFlags.Static,
-            binder: null,
-            new[] { valueType },
-            modifiers: null
-        );
-        if (createMethod is null)
-        {
-            return null;
-        }
-
-        return raw =>
-        {
-            // DB から返る素の型が TValue と異なる場合のみ変換する（byte[]/Guid 等は IConvertible 非対応のため型一致時はそのまま）
-            var converted = valueType.IsInstanceOfType(raw)
-                ? raw
-                : Convert.ChangeType(raw, valueType, CultureInfo.InvariantCulture);
-            return createMethod.Invoke(null, new[] { converted })!;
-        };
-    }
-}
-
 /// <summary>
 /// 生 SQL の束縛・スカラー変換・射影マッピングを担う共有ヘルパー（自作 SQL Server 版と EF Core 版の実行器で 1 系統を共有）。
 /// </summary>
@@ -3753,7 +3067,7 @@ internal static class RawSqlMapper
         foreach (var property in GetBindableProperties(parameters.GetType()))
         {
             var value =
-                SqlParameterValue.Unwrap(property.GetValue(parameters));
+                property.GetValue(parameters);
 
             // コレクション値（IN 用）は @名0, @名1, ... へ展開して束縛する（SQL 側の @名 も書き換える）
             if (IsCollectionParameter(value))
@@ -3791,7 +3105,7 @@ internal static class RawSqlMapper
 
         foreach (var item in values)
         {
-            var value = SqlParameterValue.Unwrap(item);
+            var value = item;
             var parameter = command.CreateParameter();
             parameter.ParameterName = $"@{name}{names.Count}";
             parameter.Value = value ?? DBNull.Value;
@@ -3819,7 +3133,7 @@ internal static class RawSqlMapper
         var resultType = typeof(TResult);
         var items = new List<TResult>();
 
-        // 単一値モード（primitive/enum/string/decimal/日時/Guid/byte[]/値オブジェクト）は各行の先頭列を変換して返す
+        // 単一値モード（primitive/enum/string/decimal/日時/Guid/byte[]）は各行の先頭列を変換して返す
         if (IsSingleValueType(resultType))
         {
             while (await reader.ReadAsync(cancellationToken))
@@ -3897,12 +3211,8 @@ internal static class RawSqlMapper
             return typed;
         }
 
-        // 値オブジェクトなら素の値を Create で包む。TResult が Nullable<T> なら基底型へ変換する（ChangeType は Nullable を直接扱えない）
+        // TResult が Nullable<T> なら基底型へ変換する（ChangeType は Nullable を直接扱えない）
         var targetType = Nullable.GetUnderlyingType(typeof(TResult)) ?? typeof(TResult);
-        if (typeof(IValueObject).IsAssignableFrom(targetType))
-        {
-            return (TResult?)SqlValueObjectActivator.Wrap(raw, targetType);
-        }
 
         try
         {
@@ -3918,14 +3228,10 @@ internal static class RawSqlMapper
         }
     }
 
-    /// <summary>単一値モードとして扱う型か（primitive/enum/string/decimal/日時/Guid/byte[]/値オブジェクト。Nullable は基底型で判定）</summary>
+    /// <summary>単一値モードとして扱う型か（primitive/enum/string/decimal/日時/Guid/byte[]。Nullable は基底型で判定）</summary>
     private static bool IsSingleValueType(Type type)
     {
         var actual = Nullable.GetUnderlyingType(type) ?? type;
-        if (typeof(IValueObject).IsAssignableFrom(actual))
-        {
-            return true;
-        }
 
         return actual.IsPrimitive
             || actual.IsEnum
@@ -3980,7 +3286,7 @@ internal static class RawSqlMapper
                     target,
                     raw is null
                         ? null
-                        : SqlValueObjectActivator.Wrap(raw, propertyType)
+                        : raw
                 );
         }
 
@@ -4095,7 +3401,7 @@ public sealed partial class SqlExecutor(ISqlConnectionFactory connectionFactory)
         foreach (var property in RawSqlMapper.GetBindableProperties(parameters.GetType()))
         {
             var value =
-                SqlParameterValue.Unwrap(property.GetValue(parameters));
+                property.GetValue(parameters);
 
             // コレクション値（IN 用）は共有ヘルパーで @名0, @名1, ... へ展開する（SQL 側の @名 も書き換え）
             if (RawSqlMapper.IsCollectionParameter(value))
@@ -5150,7 +4456,7 @@ internal sealed class SqliteSqlQueryExecutor<TEntity>(ISqlConnectionFactory conn
         foreach (var parameter in parameters)
         {
             var value =
-                SqlParameterValue.Unwrap(parameter.Value);
+                parameter.Value;
             metadata.AddQueryParameter(command, parameter.Name, parameter.ColumnName, value);
         }
     }
@@ -5414,7 +4720,7 @@ internal static class SqlExpressionTranslator
                 when TryGetLike(call, out var likeColumn, out var likeKind):
                 // 引数は string でも値オブジェクト（TSelf オーバーロード）でもよい。VO なら素値（string）へ開く
                 var raw =
-                    SqlParameterValue.Unwrap(Evaluate(call.Arguments[0])) as string ?? string.Empty;
+                    Evaluate(call.Arguments[0]) as string ?? string.Empty;
                 var pattern = likeKind switch
                 {
                     LikeKind.Contains => "%" + EscapeLike(raw) + "%",
@@ -5520,7 +4826,6 @@ internal static class SqlExpressionTranslator
             || call.Arguments.Count != 1
             || (
                 call.Method.DeclaringType != typeof(string)
-                && !IsValueObjectStringMethod(call.Method)
             )
         )
         {
@@ -5715,11 +5020,6 @@ internal static class SqlExpressionTranslator
         return true;
     }
 
-    /// <summary>文字列値オブジェクト（ValueObjectStringBase 由来）の Contains/StartsWith/EndsWith かどうか</summary>
-    private static bool IsValueObjectStringMethod(MethodInfo method) =>
-        method.DeclaringType is { IsGenericType: true } declaring
-        && declaring.GetGenericTypeDefinition() == typeof(ValueObjectStringBase<>);
-
     /// <summary>object へのボックス化などの Convert を取り除く</summary>
     private static Expression Unwrap(Expression expression)
     {
@@ -5758,18 +5058,6 @@ internal static class SqlExpressionTranslator
         if (IsColumn(member))
         {
             return ColumnName(member.Member);
-        }
-
-        // 値オブジェクトの .Value を剥がし、内側の列（[col]）へ解決する（x.Col.Value → [col]）
-        if (
-            member.Member.Name == "Value"
-            && typeof(IValueObject).IsAssignableFrom(member.Member.DeclaringType)
-            && member.Expression is { } inner
-            && Unwrap(inner) is MemberExpression valueObjectColumn
-            && IsColumn(valueObjectColumn)
-        )
-        {
-            return ColumnName(valueObjectColumn.Member);
         }
 
         return null;
@@ -5853,6 +5141,340 @@ internal sealed record CascadeNavigation(
     string PrincipalColumn,
     string DependentColumn
 );
+
+/// <summary>リモート転送（HTTP + JSON）で使う共有シリアライズ設定</summary>
+/// <remarks>
+/// エンティティの JSON 往復（<see cref="EntityBase.ToJson"/> / <see cref="EntityBase.Clone"/>）と同じ意味論
+/// （get/set プロパティのみ・RowState 込み・親参照ナビゲーションは [JsonIgnore] で循環なし）に、
+/// 転送用の大文字小文字非依存読み取りを加えたもの。クライアント・サーバーの双方がこの設定を使うことでワイヤ表現が一致する。
+/// </remarks>
+public static class RemoteJson
+{
+    /// <summary>クライアント・サーバー共通の転送用 JSON 設定</summary>
+    /// <remarks>
+    /// IgnoreReadOnlyProperties は指定しない（クエリ転送のエンベロープに使う匿名型は get-only プロパティのため、
+    /// 指定すると本文が空 JSON になる）。エンティティの派生フラグ（IsAdded 等の get-only bool）は余分に
+    /// 出力されるが、読み取り時にセッターが無く無視されるため往復の意味論（RowState 込み）は変わらない。
+    /// </remarks>
+    public static JsonSerializerOptions Options { get; } =
+        new()
+        {
+            ReferenceHandler = ReferenceHandler.IgnoreCycles,
+            PropertyNameCaseInsensitive = true,
+        };
+}
+
+/// <summary>リモート呼び出しがサーバー側エラーで失敗したことを表す例外（HTTP ステータスとサーバーのメッセージを保持）</summary>
+/// <remarks>楽観的競合（HTTP 409）は本例外ではなく <see cref="SaveConflictException"/> として復元される（直結時と同じ catch が機能する）</remarks>
+public sealed class RemoteRepositoryException : Exception
+{
+    /// <summary>HTTP ステータスコードとメッセージを指定して初期化する</summary>
+    public RemoteRepositoryException(int statusCode, string message)
+        : base(message)
+    {
+        StatusCode = statusCode;
+    }
+
+    /// <summary>サーバーが返した HTTP ステータスコード</summary>
+    public int StatusCode { get; }
+}
+
+/// <summary>転送エラーの構造化ペイロード（サーバー→クライアント。種別でクライアント側の例外型を復元する）</summary>
+public sealed class RemoteError
+{
+    /// <summary>エラー種別（"SaveConflict"＝楽観的競合 / "Error"＝その他）</summary>
+    public string Type { get; set; } = string.Empty;
+
+    /// <summary>サーバー側の例外メッセージ</summary>
+    public string Message { get; set; } = string.Empty;
+}
+
+/// <summary>主キー 1 つを運ぶリクエスト本文（GetById / Delete）</summary>
+public sealed record RemoteIdRequest<TKey>(TKey Id);
+
+/// <summary>エンティティ 1 件を運ぶリクエスト本文（Insert / Update）</summary>
+public sealed record RemoteEntityRequest<TEntity>(TEntity Entity);
+
+/// <summary>グラフ保存（単一ルート）のリクエスト本文</summary>
+public sealed record RemoteSaveRequest<TEntity>(
+    TEntity Entity,
+    bool CascadeSave,
+    bool CascadeDelete,
+    bool InsertWhenUpdateMissing
+);
+
+/// <summary>グラフ保存（複数ルート）のリクエスト本文</summary>
+public sealed record RemoteSaveManyRequest<TEntity>(
+    List<TEntity> Entities,
+    bool CascadeSave,
+    bool CascadeDelete,
+    bool InsertWhenUpdateMissing
+);
+
+/// <summary>
+/// リモート面（<see cref="IRemoteRepository{TEntity, TKey}"/>）を HTTP + JSON で呼び出すクライアント実装の共通基底。
+/// </summary>
+/// <remarks>
+/// <para>
+/// 各操作は <c>POST {BaseAddress}{エンティティルート}/{操作名}</c> へ JSON 本文を送り、結果 JSON を復元する。
+/// <see cref="HttpClient.BaseAddress"/> はサーバー側 <c>MapGeneratedRemoteEndpoints</c> の prefix（既定 <c>/quicker</c>）まで
+/// 含み、末尾 <c>/</c> で終わること（例 <c>https://server:5001/quicker/</c>）。認証・TLS 等は HttpClient の構成
+/// （DelegatingHandler・既定ヘッダー）に委ねる。
+/// </para>
+/// <para>
+/// グラフ保存（Save）成功後は直結時（<c>EntityGraphSaver.AcceptChanges</c>）と同じ意味論でローカルエンティティの
+/// RowState を確定させる（直結⇔リモートの差し替えで保存後の状態遷移が変わらない）。
+/// </para>
+/// </remarks>
+public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepository<TEntity, TKey>
+    where TEntity : EntityBase, new()
+{
+    private readonly HttpClient _httpClient;
+    private readonly string _entityRoute;
+
+    /// <summary>HTTP クライアントとエンティティルート（例 "Order"）を指定して初期化する</summary>
+    protected HttpRemoteRepository(HttpClient httpClient, string entityRoute)
+    {
+        ArgumentNullException.ThrowIfNull(httpClient);
+        ArgumentException.ThrowIfNullOrWhiteSpace(entityRoute);
+        _httpClient = httpClient;
+        _entityRoute = entityRoute;
+    }
+
+    /// <summary>操作を POST し、結果 JSON を <typeparamref name="TResult"/> へ復元する（生成される転送メソッドの共通経路）</summary>
+    /// <remarks>失敗応答は <see cref="RemoteError"/> を読み、409＋SaveConflict は <see cref="SaveConflictException"/>・それ以外は <see cref="RemoteRepositoryException"/> を送出する</remarks>
+    protected async Task<TResult> InvokeAsync<TResult>(
+        string operation,
+        object? payload,
+        CancellationToken cancellationToken
+    )
+    {
+        using var response = await _httpClient.PostAsJsonAsync(
+            $"{_entityRoute}/{operation}",
+            payload,
+            RemoteJson.Options,
+            cancellationToken
+        );
+
+        await EnsureSuccessAsync(response, cancellationToken);
+
+        var result = await response.Content.ReadFromJsonAsync<TResult>(
+            RemoteJson.Options,
+            cancellationToken
+        );
+        return result!;
+    }
+
+    /// <summary>失敗応答を例外へ変換する（既知の種別は元の例外型を復元する）</summary>
+    private static async Task EnsureSuccessAsync(
+        HttpResponseMessage response,
+        CancellationToken cancellationToken
+    )
+    {
+        if (response.IsSuccessStatusCode)
+        {
+            return;
+        }
+
+        RemoteError? error = null;
+
+        try
+        {
+            error = await response.Content.ReadFromJsonAsync<RemoteError>(
+                RemoteJson.Options,
+                cancellationToken
+            );
+        }
+        catch (JsonException)
+        {
+            // エラーペイロードが JSON でない（プロキシ・インフラ由来の応答など）場合はステータスのみで報告する
+        }
+
+        var statusCode = (int)response.StatusCode;
+        var message =
+            error?.Message ?? $"リモート呼び出しが失敗しました（HTTP {statusCode}）。";
+
+        if (statusCode == 409 && error?.Type == "SaveConflict")
+        {
+            throw new SaveConflictException(message);
+        }
+
+        throw new RemoteRepositoryException(statusCode, message);
+    }
+
+    /// <summary>主キーによる単一エンティティ取得（該当なしは null）</summary>
+    public Task<TEntity?> GetByIdAsync(TKey id, CancellationToken cancellationToken = default) =>
+        InvokeAsync<TEntity?>("GetById", new RemoteIdRequest<TKey>(id), cancellationToken);
+
+    /// <summary>全エンティティ取得</summary>
+    public Task<IReadOnlyList<TEntity>> GetAllAsync(CancellationToken cancellationToken = default) =>
+        InvokeAsync<IReadOnlyList<TEntity>>("GetAll", null, cancellationToken);
+
+    /// <summary>エンティティ追加</summary>
+    public async Task InsertAsync(TEntity entity, CancellationToken cancellationToken = default) =>
+        await InvokeAsync<bool>(
+            "Insert",
+            new RemoteEntityRequest<TEntity>(entity),
+            cancellationToken
+        );
+
+    /// <summary>エンティティ更新（更新対象ありで true）</summary>
+    public Task<bool> UpdateAsync(TEntity entity, CancellationToken cancellationToken = default)
+    {
+        // 無制限バイナリ列に値が残ったままの更新は送信前に弾く（サーバーの UPDATE 対象外でサイレントに失われるため）
+        UnboundedBinaryColumns.ThrowIfExcludedAssigned(entity);
+        return InvokeAsync<bool>(
+            "Update",
+            new RemoteEntityRequest<TEntity>(entity),
+            cancellationToken
+        );
+    }
+
+    /// <summary>主キーによるエンティティ削除（削除対象ありで true）</summary>
+    public Task<bool> DeleteAsync(TKey id, CancellationToken cancellationToken = default) =>
+        InvokeAsync<bool>("Delete", new RemoteIdRequest<TKey>(id), cancellationToken);
+
+    /// <summary>RowState に従って 1 トランザクションで追加・更新・削除を保存する（既定で子をカスケード）</summary>
+    public async Task<int> SaveAsync(
+        TEntity entity,
+        bool cascadeSave = true,
+        bool cascadeDelete = true,
+        bool insertWhenUpdateMissing = false,
+        CancellationToken cancellationToken = default
+    )
+    {
+        // 更新対象（RowState==Updated）に無制限バイナリ列の値が残っていれば送信前に弾く（カスケード対象も走査）
+        GuardUnboundedBinaryOnSave(entity, cascadeSave);
+
+        var affected = await InvokeAsync<int>(
+            "Save",
+            new RemoteSaveRequest<TEntity>(entity, cascadeSave, cascadeDelete, insertWhenUpdateMissing),
+            cancellationToken
+        );
+
+        // 直結時（EntityGraphSaver）と同じく、保存成功後にローカルの RowState を確定させる
+        AcceptChanges(entity, cascadeSave);
+        return affected;
+    }
+
+    /// <summary>複数の集約ルートを 1 トランザクションでまとめて保存する（全件成功か全件ロールバックの原子的処理）</summary>
+    public async Task<int> SaveAsync(
+        IEnumerable<TEntity> entities,
+        bool cascadeSave = true,
+        bool cascadeDelete = true,
+        bool insertWhenUpdateMissing = false,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var list = entities.ToList();
+
+        // 各集約ルート（カスケード対象含む）の更新エンティティに無制限バイナリ列の値が残っていれば送信前に弾く
+        foreach (var entity in list)
+        {
+            GuardUnboundedBinaryOnSave(entity, cascadeSave);
+        }
+
+        var affected = await InvokeAsync<int>(
+            "SaveMany",
+            new RemoteSaveManyRequest<TEntity>(list, cascadeSave, cascadeDelete, insertWhenUpdateMissing),
+            cancellationToken
+        );
+
+        foreach (var entity in list)
+        {
+            AcceptChanges(entity, cascadeSave);
+        }
+
+        return affected;
+    }
+
+    /// <summary>保存対象グラフのうち更新（Updated）エンティティに無制限バイナリ列の値が残っていないか検証する（AcceptChanges と同じ子方向走査）</summary>
+    private static void GuardUnboundedBinaryOnSave(EntityBase entity, bool cascade)
+    {
+        if (entity.IsUpdated)
+        {
+            UnboundedBinaryColumns.ThrowIfExcludedAssigned(entity);
+        }
+
+        if (!cascade)
+        {
+            return;
+        }
+
+        foreach (var property in CascadeNavigationProperties(entity.GetType()))
+        {
+            var value = property.GetValue(entity);
+
+            if (value is EntityBase child)
+            {
+                GuardUnboundedBinaryOnSave(child, true);
+            }
+            else if (value is IEnumerable<EntityBase> children)
+            {
+                foreach (var item in children)
+                {
+                    if (item is not null)
+                    {
+                        GuardUnboundedBinaryOnSave(item, true);
+                    }
+                }
+            }
+        }
+    }
+
+    /// <summary>型ごとのカスケード対象ナビゲーションプロパティ（[NavigationReference(Cascade=true)]）のキャッシュ</summary>
+    private static readonly ConcurrentDictionary<Type, PropertyInfo[]> _cascadeNavigations = new();
+
+    /// <summary>コミット後に保存済みエンティティを Unchanged に確定する（直結の EntityGraphSaver.AcceptChanges と同じ意味論）</summary>
+    /// <remarks>削除済み（Removed）は状態を保つ。カスケード時は [NavigationReference] の子方向ナビゲーションを再帰的に確定する</remarks>
+    private static void AcceptChanges(EntityBase entity, bool cascade)
+    {
+        if (entity.IsRemoved)
+        {
+            return;
+        }
+
+        entity.MarkUnchanged();
+
+        if (!cascade)
+        {
+            return;
+        }
+
+        foreach (var property in CascadeNavigationProperties(entity.GetType()))
+        {
+            var value = property.GetValue(entity);
+
+            if (value is EntityBase child)
+            {
+                AcceptChanges(child, true);
+            }
+            else if (value is IEnumerable<EntityBase> children)
+            {
+                foreach (var item in children)
+                {
+                    if (item is not null)
+                    {
+                        AcceptChanges(item, true);
+                    }
+                }
+            }
+        }
+    }
+
+    /// <summary>カスケード対象（子方向）のナビゲーションプロパティを列挙する</summary>
+    private static PropertyInfo[] CascadeNavigationProperties(Type entityType) =>
+        _cascadeNavigations.GetOrAdd(
+            entityType,
+            static type =>
+                type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                    .Where(property =>
+                        property.GetCustomAttribute<NavigationReferenceAttribute>()
+                            is { Cascade: true }
+                    )
+                    .ToArray()
+        );
+}
 
 /// <summary>エンティティ型の属性からテーブル・カラム情報、CRUD 用 SQL、カスケード子ナビゲーションを構築・保持し、行マッピングとパラメータ束縛を提供するメタデータ</summary>
 /// <remarks>型をキーに 1 度だけ構築しキャッシュする（リフレクションコスト削減）。Repository の CRUD・グラフ保存・JSON クエリプランナ・カスケード削除プランナが共用する</remarks>
@@ -6027,8 +5649,8 @@ internal sealed class EntitySaveMetadata
             }
             else
             {
-                // 値オブジェクトは内包型へ変換して包み直す（Wrap 内で Convert.ChangeType 済み）
-                property.SetValue(entity, SqlValueObjectActivator.Wrap(value, property.PropertyType));
+                // 素の列は SQLite の格納型（int→long・decimal/Guid/DateTime→TEXT 等）をプロパティ型へ寄せる
+                property.SetValue(entity, CoerceScalar(value, property.PropertyType));
             }
         }
 
@@ -6084,7 +5706,7 @@ internal sealed class EntitySaveMetadata
                 }
                 else
                 {
-                    property.SetValue(entity, SqlValueObjectActivator.Wrap(value, property.PropertyType));
+                    property.SetValue(entity, CoerceScalar(value, property.PropertyType));
                 }
             }
 
@@ -6172,8 +5794,8 @@ internal sealed class EntitySaveMetadata
             }
             else
             {
-                // 値オブジェクトは内包型へ変換して包み直す（Wrap 内で Convert.ChangeType 済み）
-                property.SetValue(entity, SqlValueObjectActivator.Wrap(value, property.PropertyType));
+                // 素の列は SQLite の格納型（int→long・decimal/Guid/DateTime→TEXT 等）をプロパティ型へ寄せる
+                property.SetValue(entity, CoerceScalar(value, property.PropertyType));
             }
         }
 
@@ -6200,15 +5822,8 @@ internal sealed class EntitySaveMetadata
             }
             else
             {
-                // 値オブジェクトは内包型へ変換して包み直す（Wrap 内で Convert.ChangeType 済み）。
-                // 素の列は SQLite の格納型（int→long・decimal/Guid/DateTime→TEXT 等）をプロパティ型へ寄せる
-                var propertyType = property.PropertyType;
-                property.SetValue(
-                    entity,
-                    typeof(IValueObject).IsAssignableFrom(propertyType)
-                        ? SqlValueObjectActivator.Wrap(value, propertyType)
-                        : CoerceScalar(value, propertyType)
-                );
+                // SQLite の格納型（int→long・decimal/Guid/DateTime→TEXT 等）をプロパティの CLR 型へ寄せる
+                property.SetValue(entity, CoerceScalar(value, property.PropertyType));
             }
         }
 
@@ -6294,7 +5909,7 @@ internal sealed class EntitySaveMetadata
         }
 
         var value = property.GetValue(entity);
-        return SqlParameterValue.Unwrap(value);
+        return value;
     }
     /// <summary>INSERT 用パラメータ（全カラム）を設定する（追加・グラフ挿入で共用）</summary>
     public void BindInsertParameters(SqliteCommand command, EntityBase entity)
@@ -6305,7 +5920,7 @@ internal sealed class EntitySaveMetadata
                 command,
                 $"@{property.Name}",
                 property,
-                SqlParameterValue.Unwrap(property.GetValue(entity))
+                property.GetValue(entity)
             );
         }
     }
@@ -6323,7 +5938,7 @@ internal sealed class EntitySaveMetadata
                 command,
                 $"@{property.Name}",
                 property,
-                SqlParameterValue.Unwrap(property.GetValue(entity))
+                property.GetValue(entity)
             );
         }
 
@@ -6331,7 +5946,7 @@ internal sealed class EntitySaveMetadata
             command,
             "@id",
             KeyProperty,
-            SqlParameterValue.Unwrap(KeyProperty.GetValue(entity))
+            KeyProperty.GetValue(entity)
         );
     }
 
@@ -6342,7 +5957,7 @@ internal sealed class EntitySaveMetadata
             command,
             "@id",
             KeyProperty,
-            SqlParameterValue.Unwrap(KeyProperty.GetValue(entity))
+            KeyProperty.GetValue(entity)
         );
     }
 
@@ -6350,7 +5965,7 @@ internal sealed class EntitySaveMetadata
     public void BindKeyParameter(SqliteCommand command, object? id)
     {
         var value =
-            SqlParameterValue.Unwrap(id)
+            id
             ?? throw new InvalidOperationException("id は null にできません。");
         AddColumnParameter(command, "@id", KeyProperty, value);
     }
@@ -6703,135 +6318,1171 @@ public static class GeneratedRepositoryServiceCollectionExtensions
             connectionString
         ));
         services.AddSingleton<ISqlExecutor, SqlExecutor>();
-        services.AddScoped<ICustomerRepository, CustomerRepository>();
-        services.AddScoped<ICustomerRemoteRepository>(provider =>
-            provider.GetRequiredService<ICustomerRepository>()
+        services.AddScoped<IDocumentRepository, DocumentRepository>();
+        services.AddScoped<IDocumentRemoteRepository>(provider =>
+            provider.GetRequiredService<IDocumentRepository>()
         );
-        services.AddScoped<IOrderRepository, OrderRepository>();
-        services.AddScoped<IOrderRemoteRepository>(provider =>
-            provider.GetRequiredService<IOrderRepository>()
+        services.AddScoped<IDocumentNoteRepository, DocumentNoteRepository>();
+        services.AddScoped<IDocumentNoteRemoteRepository>(provider =>
+            provider.GetRequiredService<IDocumentNoteRepository>()
         );
 
         return services;
     }
 }
 
-/// <summary>CustomerEntity 用リポジトリのリモート面（ネットワーク境界を越えられる CRUD・保存・名前付きクエリのみ。将来リモート実装へ差し替え可能）</summary>
-public partial interface ICustomerRemoteRepository : IRemoteRepository<CustomerEntity, CustomerIdValue> { }
-
-/// <summary>CustomerEntity 用リポジトリインターフェース（全機能面＝リモート面に式木クエリ・生 SQL・一括追加を追加）</summary>
-public partial interface ICustomerRepository
-    : ICustomerRemoteRepository,
-        IRepository<CustomerEntity, CustomerIdValue> { }
-
-/// <summary>CustomerEntity 用リポジトリ実装</summary>
-public sealed partial class CustomerRepository(ISqlConnectionFactory connectionFactory)
-    : SqliteRepository<CustomerEntity, CustomerIdValue>(connectionFactory),
-        ICustomerRepository { }
-
-/// <summary>OrderEntity 用リポジトリのリモート面（ネットワーク境界を越えられる CRUD・保存・名前付きクエリのみ。将来リモート実装へ差し替え可能）</summary>
-public partial interface IOrderRemoteRepository : IRemoteRepository<OrderEntity, OrderIdValue>
+/// <summary>DocumentEntity 用リポジトリのリモート面（ネットワーク境界を越えられる CRUD・保存・名前付きクエリのみ。将来リモート実装へ差し替え可能）</summary>
+public partial interface IDocumentRemoteRepository : IRemoteRepository<DocumentEntity, int>
 {
-    /// <summary>顧客IDで注文を新しい順（注文ID降順）に検索する（ページング付き）</summary>
-    Task<IReadOnlyList<OrderEntity>> GetByCustomerAsync(int customerId, int take, int skip = 0, CancellationToken cancellationToken = default);
+    /// <summary>文書 ID と本体バイナリ（除外列 payload）を射影で取得する（文書 ID 昇順）</summary>
+    Task<IReadOnlyList<DocumentPayloadRow>> GetPayloadsAsync(CancellationToken cancellationToken = default);
 
-    /// <summary>最新（注文IDが最大）の注文を 1 件取得する</summary>
-    Task<OrderEntity?> FindTopAsync(CancellationToken cancellationToken = default);
+    /// <summary>タイトル完全一致で文書を取得する（除外列 payload は取得されない）</summary>
+    Task<IReadOnlyList<DocumentEntity>> GetByTitleAsync(string title, CancellationToken cancellationToken = default);
 
-    /// <summary>顧客IDに紐づく注文件数を取得する</summary>
-    Task<int> CountByCustomerAsync(int customerId, CancellationToken cancellationToken = default);
-
-    /// <summary>メモの部分一致で注文を検索する</summary>
-    Task<IReadOnlyList<OrderEntity>> SearchMemoAsync(string keyword, CancellationToken cancellationToken = default);
-
-    /// <summary>注文IDの一覧で注文を取得する</summary>
-    Task<IReadOnlyList<OrderEntity>> GetByIdsAsync(IReadOnlyList<int> ids, CancellationToken cancellationToken = default);
-
-    /// <summary>顧客IDに紐づく注文を射影（顧客ID・金額）で新しい順に取得する</summary>
-    Task<IReadOnlyList<OrderSummaryRow>> GetSummariesAsync(int customerId, int take, int skip = 0, CancellationToken cancellationToken = default);
-
-    /// <summary>顧客IDに紐づく注文金額の合計を取得する（自由 SQL・SQLite）</summary>
-    /// <remarks>実装が生成されない実装先（EF Core・SQL 未定義の方言・インメモリ）では partial クラスでの実装が必要。</remarks>
-    Task<decimal?> SumAmountsAsync(int customerId, CancellationToken cancellationToken = default);
-
-    /// <summary>注文IDの一覧で注文を取得する（自由 SQL・IN のリスト展開）</summary>
-    /// <remarks>実装が生成されない実装先（EF Core・SQL 未定義の方言・インメモリ）では partial クラスでの実装が必要。</remarks>
-    Task<IReadOnlyList<OrderEntity>> GetByIdsRawAsync(IReadOnlyList<int> ids, CancellationToken cancellationToken = default);
-
-    /// <summary>顧客IDで注文を古い順に検索する（列参照型付け＝VO 有効時は VO 引数）</summary>
-    Task<IReadOnlyList<OrderEntity>> GetByCustomerTypedAsync(CustomerIdValue customerId, CancellationToken cancellationToken = default);
-
-    /// <summary>利用者が partial クラスで実装する特別な検索（manual）</summary>
-    /// <remarks>実装が生成されない実装先（EF Core・SQL 未定義の方言・インメモリ）では partial クラスでの実装が必要。</remarks>
-    Task<OrderEntity?> SpecialLookupAsync(int customerId, CancellationToken cancellationToken = default);
+    /// <summary>本体バイナリ（payload）が存在する文書の件数を取得する</summary>
+    Task<int> CountWithPayloadAsync(CancellationToken cancellationToken = default);
 }
 
-/// <summary>OrderEntity 用リポジトリインターフェース（全機能面＝リモート面に式木クエリ・生 SQL・一括追加を追加）</summary>
-public partial interface IOrderRepository
-    : IOrderRemoteRepository,
-        IRepository<OrderEntity, OrderIdValue> { }
+/// <summary>DocumentEntity 用リポジトリインターフェース（全機能面＝リモート面に式木クエリ・生 SQL・一括追加を追加）</summary>
+public partial interface IDocumentRepository
+    : IDocumentRemoteRepository,
+        IRepository<DocumentEntity, int> { }
 
-/// <summary>名前付きクエリ GetSummaries の射影 DTO（orders）</summary>
-public sealed partial class OrderSummaryRow
+/// <summary>名前付きクエリ GetPayloads の射影 DTO（documents）</summary>
+public sealed partial class DocumentPayloadRow
 {
-    /// <summary>CustomerId</summary>
-    public CustomerIdValue? CustomerId { get; set; }
+    /// <summary>DocumentId</summary>
+    public int? DocumentId { get; set; }
 
-    /// <summary>Amount</summary>
-    public AmountValue? Amount { get; set; }
+    /// <summary>Payload</summary>
+    public byte[]? Payload { get; set; }
 }
 
-/// <summary>OrderEntity 用リポジトリ実装</summary>
-public sealed partial class OrderRepository(ISqlConnectionFactory connectionFactory)
-    : SqliteRepository<OrderEntity, OrderIdValue>(connectionFactory),
-        IOrderRepository
+/// <summary>DocumentEntity 用リポジトリ実装</summary>
+public sealed partial class DocumentRepository(ISqlConnectionFactory connectionFactory)
+    : SqliteRepository<DocumentEntity, int>(connectionFactory),
+        IDocumentRepository
 {
-    /// <summary>顧客IDで注文を新しい順（注文ID降順）に検索する（ページング付き）</summary>
-    public Task<IReadOnlyList<OrderEntity>> GetByCustomerAsync(int customerId, int take, int skip = 0, CancellationToken cancellationToken = default) =>
-        Query().Where(e => e.CustomerId == CustomerIdValue.Create(customerId)).OrderByDescending(e => e.OrderId).Skip(skip).Take(take).ToListAsync(cancellationToken);
+    /// <summary>文書 ID と本体バイナリ（除外列 payload）を射影で取得する（文書 ID 昇順）</summary>
+    public Task<IReadOnlyList<DocumentPayloadRow>> GetPayloadsAsync(CancellationToken cancellationToken = default) =>
+        Query().OrderBy(e => e.DocumentId).ToProjectionListAsync(e => new DocumentPayloadRow { DocumentId = e.DocumentId, Payload = e.Payload }, cancellationToken);
 
-    /// <summary>最新（注文IDが最大）の注文を 1 件取得する</summary>
-    public Task<OrderEntity?> FindTopAsync(CancellationToken cancellationToken = default) =>
-        Query().OrderByDescending(e => e.OrderId).FirstOrDefaultAsync(cancellationToken);
+    /// <summary>タイトル完全一致で文書を取得する（除外列 payload は取得されない）</summary>
+    public Task<IReadOnlyList<DocumentEntity>> GetByTitleAsync(string title, CancellationToken cancellationToken = default) =>
+        Query().Where(e => e.Title == title).ToListAsync(cancellationToken);
 
-    /// <summary>顧客IDに紐づく注文件数を取得する</summary>
-    public Task<int> CountByCustomerAsync(int customerId, CancellationToken cancellationToken = default) =>
-        Query().Where(e => e.CustomerId == CustomerIdValue.Create(customerId)).CountAsync(cancellationToken);
+    /// <summary>本体バイナリ（payload）が存在する文書の件数を取得する</summary>
+    public Task<int> CountWithPayloadAsync(CancellationToken cancellationToken = default) =>
+        Query().Where(e => e.Payload != null).CountAsync(cancellationToken);
+}
 
-    /// <summary>メモの部分一致で注文を検索する</summary>
-    public Task<IReadOnlyList<OrderEntity>> SearchMemoAsync(string keyword, CancellationToken cancellationToken = default) =>
-        Query().Where(e => e.Memo!.Contains(keyword)).ToListAsync(cancellationToken);
+/// <summary>DocumentNoteEntity 用リポジトリのリモート面（ネットワーク境界を越えられる CRUD・保存・名前付きクエリのみ。将来リモート実装へ差し替え可能）</summary>
+public partial interface IDocumentNoteRemoteRepository : IRemoteRepository<DocumentNoteEntity, int> { }
 
-    /// <summary>注文IDの一覧で注文を取得する</summary>
-    public Task<IReadOnlyList<OrderEntity>> GetByIdsAsync(IReadOnlyList<int> ids, CancellationToken cancellationToken = default)
+/// <summary>DocumentNoteEntity 用リポジトリインターフェース（全機能面＝リモート面に式木クエリ・生 SQL・一括追加を追加）</summary>
+public partial interface IDocumentNoteRepository
+    : IDocumentNoteRemoteRepository,
+        IRepository<DocumentNoteEntity, int> { }
+
+/// <summary>DocumentNoteEntity 用リポジトリ実装</summary>
+public sealed partial class DocumentNoteRepository(ISqlConnectionFactory connectionFactory)
+    : SqliteRepository<DocumentNoteEntity, int>(connectionFactory),
+        IDocumentNoteRepository { }
+
+/// <summary>DocumentEntity 用リモート面（IDocumentRemoteRepository）の HTTP クライアント実装</summary>
+/// <remarks>サーバー側 <c>MapGeneratedRemoteEndpoints</c> のエンドポイントを呼び出す。HttpClient の BaseAddress は prefix（既定 /quicker/）まで含むこと</remarks>
+public sealed partial class HttpDocumentRemoteRepository(HttpClient httpClient)
+    : HttpRemoteRepository<DocumentEntity, int>(httpClient, "Document"),
+        IDocumentRemoteRepository
+{
+    /// <summary>文書 ID と本体バイナリ（除外列 payload）を射影で取得する（文書 ID 昇順）</summary>
+    public Task<IReadOnlyList<DocumentPayloadRow>> GetPayloadsAsync(CancellationToken cancellationToken = default) =>
+        InvokeAsync<IReadOnlyList<DocumentPayloadRow>>("GetPayloads", null, cancellationToken);
+
+    /// <summary>タイトル完全一致で文書を取得する（除外列 payload は取得されない）</summary>
+    public Task<IReadOnlyList<DocumentEntity>> GetByTitleAsync(string title, CancellationToken cancellationToken = default) =>
+        InvokeAsync<IReadOnlyList<DocumentEntity>>("GetByTitle", new { title }, cancellationToken);
+
+    /// <summary>本体バイナリ（payload）が存在する文書の件数を取得する</summary>
+    public Task<int> CountWithPayloadAsync(CancellationToken cancellationToken = default) =>
+        InvokeAsync<int>("CountWithPayload", null, cancellationToken);
+}
+
+/// <summary>DocumentNoteEntity 用リモート面（IDocumentNoteRemoteRepository）の HTTP クライアント実装</summary>
+/// <remarks>サーバー側 <c>MapGeneratedRemoteEndpoints</c> のエンドポイントを呼び出す。HttpClient の BaseAddress は prefix（既定 /quicker/）まで含むこと</remarks>
+public sealed partial class HttpDocumentNoteRemoteRepository(HttpClient httpClient)
+    : HttpRemoteRepository<DocumentNoteEntity, int>(httpClient, "DocumentNote"),
+        IDocumentNoteRemoteRepository { }
+
+/// <summary>リモート面（I{Entity}RemoteRepository）の HTTP クライアント実装を DI コンテナへ登録する拡張</summary>
+public static class GeneratedHttpRemoteRepositoryServiceCollectionExtensions
+{
+    /// <summary>ベースアドレスを指定して HTTP クライアント実装を登録する（単純構成向け・HttpClient は共有シングルトン）</summary>
+    /// <param name="services">登録先のサービスコレクション</param>
+    /// <param name="baseAddress">サーバーの prefix まで含むベースアドレス（例 <c>https://server:5001/quicker</c>。末尾 / は自動補完）</param>
+    public static IServiceCollection AddGeneratedHttpRemoteRepositories(
+        this IServiceCollection services,
+        string baseAddress
+    )
     {
-        var idsValues = ids.Select(OrderIdValue.Create).ToList();
-        return Query().Where(e => idsValues.Contains(e.OrderId)).ToListAsync(cancellationToken);
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentException.ThrowIfNullOrWhiteSpace(baseAddress);
+
+        // 相対パス（"Order/GetById" 等）の解決に末尾 / が必須のため補完する
+        var normalized = baseAddress.EndsWith('/') ? baseAddress : baseAddress + "/";
+        var sharedClient = new HttpClient { BaseAddress = new Uri(normalized) };
+
+        return AddGeneratedHttpRemoteRepositories(services, _ => sharedClient);
     }
 
-    /// <summary>顧客IDに紐づく注文を射影（顧客ID・金額）で新しい順に取得する</summary>
-    public Task<IReadOnlyList<OrderSummaryRow>> GetSummariesAsync(int customerId, int take, int skip = 0, CancellationToken cancellationToken = default) =>
-        Query().Where(e => e.CustomerId == CustomerIdValue.Create(customerId)).OrderByDescending(e => e.OrderId).Skip(skip).Take(take).ToProjectionListAsync(e => new OrderSummaryRow { CustomerId = e.CustomerId, Amount = e.Amount }, cancellationToken);
+    /// <summary>HttpClient のファクトリを指定して HTTP クライアント実装を登録する（認証ハンドラ等を構成する場合）</summary>
+    /// <remarks>ファクトリが返す HttpClient の BaseAddress は prefix まで含み、末尾 / で終わること</remarks>
+    /// <param name="services">登録先のサービスコレクション</param>
+    /// <param name="httpClientFactory">リポジトリ生成時に使う HttpClient を返すファクトリ</param>
+    public static IServiceCollection AddGeneratedHttpRemoteRepositories(
+        this IServiceCollection services,
+        Func<IServiceProvider, HttpClient> httpClientFactory
+    )
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(httpClientFactory);
 
-    /// <summary>顧客IDに紐づく注文金額の合計を取得する（自由 SQL・SQLite）</summary>
-    public Task<decimal?> SumAmountsAsync(int customerId, CancellationToken cancellationToken = default) =>
-        ExecuteScalarSqlAsync<decimal?>(
-            @"SELECT SUM(""amount"") FROM ""orders"" WHERE ""customer_id"" = @customerId",
-            new { customerId },
-            cancellationToken
+        services.AddScoped<IDocumentRemoteRepository>(provider => new HttpDocumentRemoteRepository(
+            httpClientFactory(provider)
+        ));
+        services.AddScoped<IDocumentNoteRemoteRepository>(provider => new HttpDocumentNoteRemoteRepository(
+            httpClientFactory(provider)
+        ));
+
+        return services;
+    }
+}
+
+/// <summary>
+/// DB を使わずエンティティをメモリ上に保持するインメモリデータストア（DI で Singleton 共有）。
+/// </summary>
+/// <remarks>
+/// <para>
+/// エンティティ型ごとに「主キー → スナップショット複製」の辞書を持つ。書き込み（保存・削除）と読み取り（取得・クエリ）は
+/// 内部で常に <see cref="EntityBase.Clone"/> による複製を介するため、返却したエンティティを呼び出し側で変更しても
+/// ストアの内容は変化しない（実 DB の値渡し意味論に合わせる）。すべての操作は <c>lock</c> で直列化しスレッド安全にする。
+/// </para>
+/// <para>
+/// 主キーは <see cref="EntitySaveMetadata.KeyProperty"/> から取り出し、値オブジェクトは内包値へ開いて辞書キーにする
+/// （値等価で突き合わせるため）。
+/// </para>
+/// </remarks>
+public sealed class InMemoryDataStore
+{
+    private readonly object _gate = new();
+    private readonly Dictionary<Type, Dictionary<object, EntityBase>> _tables = new();
+
+    /// <summary>指定型のテーブル（主キー → スナップショット）を取得する（無ければ生成する）。呼び出しは lock 済みであること</summary>
+    private Dictionary<object, EntityBase> Table(Type entityType)
+    {
+        if (!_tables.TryGetValue(entityType, out var table))
+        {
+            table = new Dictionary<object, EntityBase>();
+            _tables[entityType] = table;
+        }
+
+        return table;
+    }
+
+    /// <summary>エンティティの主キー値を辞書キーへ正規化する（値オブジェクトは内包値へ開く。null は不可）</summary>
+    internal static object KeyOf(EntityBase entity)
+    {
+        var metadata = EntitySaveMetadata.For(entity.GetType());
+        var raw = metadata.KeyProperty.GetValue(entity);
+
+        return raw
+            ?? throw new InvalidOperationException(
+                $"{entity.GetType().Name} の主キーが null です。インメモリ保存には主キー値が必要です。"
+            );
+    }
+
+    /// <summary>指定型の全スナップショットを（複製して）取得する</summary>
+    /// <remarks>返却複製は無制限バイナリ列を「未取得状態」へ落とす（実 DB の SELECT 除外と揃える。ストアの実体は保持）</remarks>
+    public IReadOnlyList<TEntity> Snapshot<TEntity>()
+        where TEntity : EntityBase, new()
+    {
+        lock (_gate)
+        {
+            return Table(typeof(TEntity))
+                .Values.Select(entity =>
+                {
+                    var clone = (TEntity)entity.Clone();
+                    UnboundedBinaryColumns.StripExcluded(clone);
+                    return clone;
+                })
+                .ToList();
+        }
+    }
+
+    /// <summary>指定型・主キーのスナップショットを（複製して）取得する（該当なしは null）</summary>
+    /// <remarks>返却複製は無制限バイナリ列を「未取得状態」へ落とす（実 DB の SELECT 除外と揃える。ストアの実体は保持）</remarks>
+    public TEntity? Find<TEntity>(object key)
+        where TEntity : EntityBase, new()
+    {
+        lock (_gate)
+        {
+            if (!Table(typeof(TEntity)).TryGetValue(key, out var entity))
+            {
+                return null;
+            }
+
+            var clone = (TEntity)entity.Clone();
+            UnboundedBinaryColumns.StripExcluded(clone);
+            return clone;
+        }
+    }
+
+    /// <summary>指定型・主キーの生スナップショット（複製なし）を取得する。Include のキー突き合わせなど内部走査で使う。呼び出しは lock 済みであること</summary>
+    private EntityBase? FindRaw(Type entityType, object key) =>
+        Table(entityType).TryGetValue(key, out var entity) ? entity : null;
+
+    /// <summary>指定型の生スナップショット一覧（複製なし）を取得する。クエリ実行器の内部走査で使う。呼び出しは lock 済みであること</summary>
+    private IReadOnlyList<EntityBase> RawAll(Type entityType) => Table(entityType).Values.ToList();
+
+    /// <summary>指定型の生スナップショット一覧（複製なし）を取得する。実行器へ複製前のスナップショットを渡すために lock 内で使う</summary>
+    internal IReadOnlyList<EntityBase> RawSnapshotUnlocked(Type entityType) => RawAll(entityType);
+
+    /// <summary>ストア全体で任意の読み取り走査を lock 下で実行する（Include のキー突き合わせで複数テーブルを横断するため）</summary>
+    internal TResult Read<TResult>(Func<InMemoryReadScope, TResult> reader)
+    {
+        lock (_gate)
+        {
+            return reader(new InMemoryReadScope(this));
+        }
+    }
+
+    /// <summary>スナップショット（複製）を格納する（追加・更新共通。既存キーは置換）</summary>
+    internal void Put(EntityBase entity)
+    {
+        lock (_gate)
+        {
+            var snapshot = entity.Clone();
+            snapshot.MarkUnchanged();
+            Table(entity.GetType())[KeyOf(entity)] = snapshot;
+        }
+    }
+
+    /// <summary>指定型・主キーのスナップショットを削除する（該当ありで true）</summary>
+    internal bool Remove(Type entityType, object key)
+    {
+        lock (_gate)
+        {
+            return Table(entityType).Remove(key);
+        }
+    }
+
+    /// <summary>複数の書き込み（追加・更新・削除）を 1 つの lock 下でまとめて適用する（グラフ保存の原子性を保つ）</summary>
+    internal TResult Write<TResult>(Func<InMemoryWriteScope, TResult> writer)
+    {
+        lock (_gate)
+        {
+            return writer(new InMemoryWriteScope(this));
+        }
+    }
+
+    /// <summary>全テーブルを空にする（テストのリセット用）</summary>
+    public void Clear()
+    {
+        lock (_gate)
+        {
+            _tables.Clear();
+        }
+    }
+
+    /// <summary>lock 下で複数テーブルを横断読み取りするためのスコープ（Include のキー突き合わせで使う）</summary>
+    internal readonly struct InMemoryReadScope(InMemoryDataStore store)
+    {
+        /// <summary>指定型の生スナップショット一覧（複製なし）</summary>
+        public IReadOnlyList<EntityBase> All(Type entityType) => store.RawAll(entityType);
+
+        /// <summary>指定型・主キーの生スナップショット（複製なし。該当なしは null）</summary>
+        public EntityBase? Find(Type entityType, object key) => store.FindRaw(entityType, key);
+    }
+
+    /// <summary>lock 下でグラフ全体の書き込みを適用するためのスコープ</summary>
+    internal readonly struct InMemoryWriteScope(InMemoryDataStore store)
+    {
+        /// <summary>スナップショットを格納する（追加・更新）。lock 済み前提のため内部辞書へ直接反映する</summary>
+        public void Put(EntityBase entity)
+        {
+            var snapshot = entity.Clone();
+            snapshot.MarkUnchanged();
+            store.Table(entity.GetType())[KeyOf(entity)] = snapshot;
+        }
+
+        /// <summary>指定型・主キーのスナップショットを削除する（該当ありで true）</summary>
+        public bool Remove(Type entityType, object key) => store.Table(entityType).Remove(key);
+
+        /// <summary>指定型・主キーのスナップショットが存在するか</summary>
+        public bool Exists(Type entityType, object key) => store.Table(entityType).ContainsKey(key);
+
+        /// <summary>指定型の生スナップショット一覧（複製なし）。カスケード削除の子孫走査で使う</summary>
+        public IReadOnlyList<EntityBase> All(Type entityType) => store.RawAll(entityType);
+    }
+}
+
+/// <summary>
+/// <see cref="ISqlQueryExecutor{TEntity}"/> のインメモリ実装。<see cref="SqlQueryPlan{TEntity}"/> の述語・並び順・
+/// ページングを LINQ-to-Objects で評価し、Include ツリーは FK メタデータからナビゲーションを復元して装着する。
+/// </summary>
+/// <remarks>
+/// 述語（<see cref="LambdaExpression"/>）は <see cref="LambdaExpression.Compile"/> でデリゲート化して評価する
+/// （SQL 翻訳は行わない）。返却するエンティティは常にストアのスナップショットを複製したもので、Include で装着した
+/// ナビゲーションも複製済みの子/親を指す（呼び出し側の変更がストアへ波及しない）。
+/// </remarks>
+internal sealed class InMemoryQueryExecutor<TEntity>(InMemoryDataStore store)
+    : ISqlQueryExecutor<TEntity>
+    where TEntity : EntityBase, new()
+{
+    private readonly InMemoryDataStore _store = store;
+
+    /// <summary>述語（AND 結合）・並び順・Skip/Take を適用した結果を、Include 装着済み複製として返す</summary>
+    public Task<IReadOnlyList<TEntity>> ToListAsync(
+        SqlQueryPlan<TEntity> plan,
+        CancellationToken cancellationToken
+    )
+    {
+        var result = _store.Read(scope =>
+        {
+            var matched = ApplyOrderingAndPaging(FilterRaw(plan), plan);
+            // 複製してから Include を装着する（ストアの実体を書き換えないため）。返却複製は無制限バイナリ列を未取得状態へ落とす
+            var cloned = matched
+                .Select(entity =>
+                {
+                    var clone = (TEntity)entity.Clone();
+                    UnboundedBinaryColumns.StripExcluded(clone);
+                    return clone;
+                })
+                .ToList();
+
+            foreach (var entity in cloned)
+            {
+                IncludeAttacher.Attach(entity, plan.Includes, scope);
+            }
+
+            return (IReadOnlyList<TEntity>)cloned;
+        });
+
+        return Task.FromResult(result);
+    }
+
+    /// <summary>述語・並び順・Skip/Take を適用した複製に射影を適用して一覧を返す（実 DB の列刈り込みと結果同値）</summary>
+    /// <remarks>
+    /// Include なし・列参照のみのセレクタなら「完全クローンから射影」する（無制限バイナリ列も参照可能＝実 DB が
+    /// 参照列を SELECT に含めるのと同じパリティ）。Include 併用時や列参照を抽出できない場合は、従来経路
+    /// （ToListAsync と同じく無制限バイナリ列を strip した複製）から射影する（実 DB のフォールバックと同じパリティ）。
+    /// </remarks>
+    public Task<IReadOnlyList<TResult>> ToProjectionListAsync<TResult>(
+        SqlQueryPlan<TEntity> plan,
+        Expression<Func<TEntity, TResult>> selector,
+        CancellationToken cancellationToken
+    )
+    {
+        var project = selector.Compile();
+
+        // Include なし・列参照のみなら完全クローンから射影（除外列も参照できる）。不能時は strip 済みから射影
+        var prunable =
+            plan.Includes.Count == 0
+            && ProjectionColumnCollector.TryCollect(selector, out var referenced)
+            && EntitySaveMetadata.For(typeof(TEntity)).ResolveProjectionColumns(referenced) is not null;
+
+        var result = _store.Read(scope =>
+        {
+            var matched = ApplyOrderingAndPaging(FilterRaw(plan), plan);
+            var projected = new List<TResult>(matched.Count);
+
+            foreach (var entity in matched)
+            {
+                // ストア実体と byte[] 等を共有しないよう必ず複製してから射影する
+                var clone = (TEntity)entity.Clone();
+
+                if (!prunable)
+                {
+                    // 従来経路（ToListAsync）と同一パリティ: 無制限バイナリ列を strip し、Include を装着してから射影する
+                    UnboundedBinaryColumns.StripExcluded(clone);
+                    IncludeAttacher.Attach(clone, plan.Includes, scope);
+                }
+
+                projected.Add(project(clone));
+            }
+
+            return (IReadOnlyList<TResult>)projected;
+        });
+
+        return Task.FromResult(result);
+    }
+
+    /// <summary>先頭 1 件を Include 装着済み複製として返す（該当なしは null）</summary>
+    public Task<TEntity?> FirstOrDefaultAsync(
+        SqlQueryPlan<TEntity> plan,
+        CancellationToken cancellationToken
+    )
+    {
+        var result = _store.Read(scope =>
+        {
+            var first = ApplyOrderingAndPaging(FilterRaw(plan), plan).FirstOrDefault();
+
+            if (first is null)
+            {
+                return null;
+            }
+
+            var cloned = (TEntity)first.Clone();
+            UnboundedBinaryColumns.StripExcluded(cloned);
+            IncludeAttacher.Attach(cloned, plan.Includes, scope);
+            return cloned;
+        });
+
+        return Task.FromResult(result);
+    }
+
+    /// <summary>条件に一致する件数を返す（並び順・ページング・Include は関与しない）</summary>
+    public Task<int> CountAsync(SqlQueryPlan<TEntity> plan, CancellationToken cancellationToken) =>
+        Task.FromResult(_store.Read(_ => FilterRaw(plan).Count()));
+
+    /// <summary>条件に一致する行が存在するかを返す</summary>
+    public Task<bool> AnyAsync(SqlQueryPlan<TEntity> plan, CancellationToken cancellationToken) =>
+        Task.FromResult(_store.Read(_ => FilterRaw(plan).Any()));
+
+    /// <summary>条件に一致する行を削除する。cascadeDelete=true で子孫も FK 連鎖で削除する</summary>
+    public Task<int> ExecuteDeleteAsync(
+        SqlQueryPlan<TEntity> plan,
+        bool cascadeDelete,
+        CancellationToken cancellationToken
+    )
+    {
+        var rows = _store.Write(scope =>
+        {
+            // 削除対象は評価時点のスナップショット（複製前）の主キーで確定する
+            var targets = FilterRaw(plan).ToList();
+            var removed = 0;
+
+            foreach (var target in targets)
+            {
+                if (cascadeDelete)
+                {
+                    removed += InMemoryCascade.DeleteDescendants(target, scope);
+                }
+
+                if (scope.Remove(typeof(TEntity), InMemoryDataStore.KeyOf(target)))
+                {
+                    removed++;
+                }
+            }
+
+            return removed;
+        });
+
+        return Task.FromResult(rows);
+    }
+
+    /// <summary>ストアの生スナップショットに述語（AND 結合）を適用して絞り込む（複製前・列挙のみ）</summary>
+    private IEnumerable<EntityBase> FilterRaw(SqlQueryPlan<TEntity> plan)
+    {
+        IEnumerable<TEntity> query = _store.RawSnapshotUnlocked(typeof(TEntity)).Cast<TEntity>();
+
+        foreach (var predicate in plan.Predicates)
+        {
+            var compiled = (Func<TEntity, bool>)predicate.Compile();
+            query = query.Where(compiled);
+        }
+
+        return query;
+    }
+
+    /// <summary>並び順（指定順に安定ソート）と Skip/Take を適用する</summary>
+    private static IReadOnlyList<EntityBase> ApplyOrderingAndPaging(
+        IEnumerable<EntityBase> source,
+        SqlQueryPlan<TEntity> plan
+    )
+    {
+        var typed = source.Cast<TEntity>();
+        IOrderedEnumerable<TEntity>? ordered = null;
+
+        foreach (var ordering in plan.Orderings)
+        {
+            var keySelector = (Func<TEntity, object?>)ordering.KeySelector.Compile();
+
+            if (ordered is null)
+            {
+                ordered = ordering.Descending
+                    ? typed.OrderByDescending(keySelector)
+                    : typed.OrderBy(keySelector);
+            }
+            else
+            {
+                ordered = ordering.Descending
+                    ? ordered.ThenByDescending(keySelector)
+                    : ordered.ThenBy(keySelector);
+            }
+        }
+
+        IEnumerable<TEntity> result = ordered ?? typed;
+
+        if (plan.Skip is { } skip)
+        {
+            result = result.Skip(skip);
+        }
+
+        if (plan.Take is { } take)
+        {
+            result = result.Take(take);
+        }
+
+        return result.Cast<EntityBase>().ToList();
+    }
+}
+
+/// <summary>Include ツリーに沿って FK メタデータからナビゲーション（子集合・親参照）を復元し、複製グラフへ装着する</summary>
+internal static class IncludeAttacher
+{
+    /// <summary>指定エンティティ（複製）へ Include ツリー分のナビゲーションを再帰的に装着する</summary>
+    public static void Attach(
+        EntityBase entity,
+        IReadOnlyList<IncludeNode> includes,
+        InMemoryDataStore.InMemoryReadScope scope
+    )
+    {
+        foreach (var node in includes)
+        {
+            var attribute =
+                node.Property.GetCustomAttribute<NavigationReferenceAttribute>()
+                ?? throw new InvalidOperationException(
+                    $"{node.Property.Name} は [NavigationReference] を持つナビゲーションではありません。"
+                );
+
+            var metadata = EntitySaveMetadata.For(entity.GetType());
+
+            if (attribute.IsCollection || !attribute.IsParentReference)
+            {
+                AttachChildren(entity, node, attribute, metadata, scope);
+            }
+            else
+            {
+                AttachParent(entity, node, attribute, metadata, scope);
+            }
+        }
+    }
+
+    /// <summary>コレクション/子方向の単一参照ナビゲーションを、FK が親キーへ一致する子で埋める</summary>
+    private static void AttachChildren(
+        EntityBase parent,
+        IncludeNode node,
+        NavigationReferenceAttribute attribute,
+        EntitySaveMetadata parentMetadata,
+        InMemoryDataStore.InMemoryReadScope scope
+    )
+    {
+        var childType = attribute.IsCollection
+            ? node.Property.PropertyType.GetGenericArguments()[0]
+            : node.Property.PropertyType;
+        var childMetadata = EntitySaveMetadata.For(childType);
+
+        var parentKey = ColumnValue(parent, attribute.PrincipalColumn, parentMetadata);
+        var matched = new List<EntityBase>();
+
+        foreach (var child in scope.All(childType))
+        {
+            var fk = ColumnValue(child, attribute.DependentColumn, childMetadata);
+
+            if (parentKey is not null && Equals(fk, parentKey))
+            {
+                var clonedChild = child.Clone();
+                UnboundedBinaryColumns.StripExcluded(clonedChild);
+                Attach(clonedChild, node.Children, scope);
+                matched.Add(clonedChild);
+            }
+        }
+
+        if (attribute.IsCollection)
+        {
+            // ICollection<childType> の具象 List を生成して詰める
+            var listType = typeof(List<>).MakeGenericType(childType);
+            var list = (System.Collections.IList)Activator.CreateInstance(listType)!;
+
+            foreach (var child in matched)
+            {
+                list.Add(child);
+            }
+
+            node.Property.SetValue(parent, list);
+        }
+        else
+        {
+            node.Property.SetValue(parent, matched.Count > 0 ? matched[0] : null);
+        }
+    }
+
+    /// <summary>親参照ナビゲーションを、自身の FK が指す親で埋める</summary>
+    private static void AttachParent(
+        EntityBase dependent,
+        IncludeNode node,
+        NavigationReferenceAttribute attribute,
+        EntitySaveMetadata dependentMetadata,
+        InMemoryDataStore.InMemoryReadScope scope
+    )
+    {
+        var parentType = node.Property.PropertyType;
+        var parentMetadata = EntitySaveMetadata.For(parentType);
+
+        var fk = ColumnValue(dependent, attribute.DependentColumn, dependentMetadata);
+
+        if (fk is null)
+        {
+            node.Property.SetValue(dependent, null);
+            return;
+        }
+
+        foreach (var candidate in scope.All(parentType))
+        {
+            var principal = ColumnValue(candidate, attribute.PrincipalColumn, parentMetadata);
+
+            if (Equals(principal, fk))
+            {
+                var clonedParent = candidate.Clone();
+                UnboundedBinaryColumns.StripExcluded(clonedParent);
+                Attach(clonedParent, node.Children, scope);
+                node.Property.SetValue(dependent, clonedParent);
+                return;
+            }
+        }
+
+        node.Property.SetValue(dependent, null);
+    }
+
+    /// <summary>指定カラムの値をエンティティから取り出す（値オブジェクトは内包値へ開く）</summary>
+    private static object? ColumnValue(
+        EntityBase entity,
+        string columnName,
+        EntitySaveMetadata metadata
+    )
+    {
+        if (!metadata.PropertyByColumn.TryGetValue(columnName, out var property))
+        {
+            throw new InvalidOperationException(
+                $"{entity.GetType().Name} にカラム {columnName} に対応するプロパティがありません。"
+            );
+        }
+
+        var value = property.GetValue(entity);
+        return value;
+    }
+}
+
+/// <summary>インメモリ Repository のカスケード保存・削除（FK メタデータ由来の子ナビゲーション走査）</summary>
+internal static class InMemoryCascade
+{
+    /// <summary>カスケード対象の子エンティティを列挙する（null は除外）</summary>
+    public static IEnumerable<EntityBase> EnumerateChildren(EntityBase entity)
+    {
+        foreach (var navigation in EntitySaveMetadata.For(entity.GetType()).CascadeNavigations)
+        {
+            var value = navigation.Property.GetValue(entity);
+
+            if (value is null)
+            {
+                continue;
+            }
+
+            if (navigation.IsCollection)
+            {
+                if (value is IEnumerable<EntityBase> children)
+                {
+                    foreach (var child in children)
+                    {
+                        if (child is not null)
+                        {
+                            yield return child;
+                        }
+                    }
+                }
+            }
+            else if (value is EntityBase child)
+            {
+                yield return child;
+            }
+        }
+    }
+
+    /// <summary>RowState 駆動でグラフを保存し、書き込んだ件数を返す（自作 EntityGraphSaver と同じ意味論）</summary>
+    /// <remarks>
+    /// IsRemoved は子から削除し自身を削除、IsAdded は挿入、IsUpdated は更新（対象なしは
+    /// insertWhenUpdateMissing で挿入 or 競合例外）。追加・更新は自身を先に、削除は子を先に処理する。
+    /// </remarks>
+    public static int Save(
+        EntityBase entity,
+        InMemoryDataStore.InMemoryWriteScope scope,
+        bool cascadeSave,
+        bool cascadeDelete,
+        bool insertWhenUpdateMissing
+    )
+    {
+        if (!EntityGraphSaver.HasChanges(entity, cascadeSave))
+        {
+            return 0;
+        }
+
+        var rows = 0;
+        var entityType = entity.GetType();
+        var key = InMemoryDataStore.KeyOf(entity);
+
+        if (entity.IsRemoved)
+        {
+            if (cascadeDelete)
+            {
+                foreach (var child in EnumerateChildren(entity))
+                {
+                    rows += DeleteGraph(child, scope);
+                }
+            }
+
+            if (scope.Remove(entityType, key))
+            {
+                rows++;
+            }
+
+            return rows;
+        }
+
+        if (entity.IsAdded)
+        {
+            scope.Put(entity);
+            rows++;
+        }
+        else if (entity.IsUpdated)
+        {
+            // 実 DB のグラフ更新と同じく、無制限バイナリ列に値が残ったままの更新は弾く
+            UnboundedBinaryColumns.ThrowIfExcludedAssigned(entity);
+
+            if (scope.Exists(entityType, key))
+            {
+                scope.Put(entity);
+                rows++;
+            }
+            else if (insertWhenUpdateMissing)
+            {
+                scope.Put(entity);
+                rows++;
+            }
+            else
+            {
+                throw new SaveConflictException(
+                    $"更新対象のレコードが見つかりませんでした（{entityType.Name}、キー {key}）。他のユーザーに削除された可能性があります。"
+                );
+            }
+        }
+
+        if (cascadeSave)
+        {
+            foreach (var child in EnumerateChildren(entity))
+            {
+                rows += Save(child, scope, cascadeSave, cascadeDelete, insertWhenUpdateMissing);
+            }
+        }
+
+        return rows;
+    }
+
+    /// <summary>サブツリーを子から順に削除する（状態に関わらず削除）</summary>
+    private static int DeleteGraph(EntityBase entity, InMemoryDataStore.InMemoryWriteScope scope)
+    {
+        var rows = 0;
+
+        foreach (var child in EnumerateChildren(entity))
+        {
+            rows += DeleteGraph(child, scope);
+        }
+
+        if (scope.Remove(entity.GetType(), InMemoryDataStore.KeyOf(entity)))
+        {
+            rows++;
+        }
+
+        return rows;
+    }
+
+    /// <summary>ロード済みグラフを持たない ExecuteDelete 用に、ストア上の子孫を FK 連鎖で削除する（子→孫を先に削除）</summary>
+    /// <remarks>
+    /// カスケードナビゲーション（FK メタデータ）を辿り、DependentColumn が親の PrincipalColumn 値に一致する子を
+    /// ストアから探して削除する。循環するカスケード（自己参照等）は固定走査で表現できないため未対応とする。
+    /// </remarks>
+    public static int DeleteDescendants(
+        EntityBase root,
+        InMemoryDataStore.InMemoryWriteScope scope
+    ) => DeleteDescendants(root, scope, new HashSet<Type> { root.GetType() });
+
+    private static int DeleteDescendants(
+        EntityBase parent,
+        InMemoryDataStore.InMemoryWriteScope scope,
+        HashSet<Type> visited
+    )
+    {
+        var rows = 0;
+        var parentMetadata = EntitySaveMetadata.For(parent.GetType());
+
+        foreach (var navigation in parentMetadata.CascadeNavigations)
+        {
+            if (!visited.Add(navigation.ChildType))
+            {
+                throw new NotSupportedException(
+                    $"循環するカスケード（{navigation.ChildType.Name}）は ExecuteDeleteAsync では未対応です。グラフをロードして SaveAsync を使うか、ロード済みグラフに対して SaveAsync を使ってください。"
+                );
+            }
+
+            var childMetadata = EntitySaveMetadata.For(navigation.ChildType);
+            var parentKey = ColumnValue(parent, navigation.PrincipalColumn, parentMetadata);
+
+            // 子スナップショットは削除中に列挙が壊れないよう先に確定してから削除する
+            var children = scope
+                .All(navigation.ChildType)
+                .Where(child =>
+                    parentKey is not null
+                    && Equals(
+                        ColumnValue(child, navigation.DependentColumn, childMetadata),
+                        parentKey
+                    )
+                )
+                .ToList();
+
+            foreach (var child in children)
+            {
+                // 先に孫以下を削除してから子を削除する（FK 整合）
+                rows += DeleteDescendants(child, scope, visited);
+
+                if (scope.Remove(navigation.ChildType, InMemoryDataStore.KeyOf(child)))
+                {
+                    rows++;
+                }
+            }
+
+            visited.Remove(navigation.ChildType);
+        }
+
+        return rows;
+    }
+
+    /// <summary>指定カラムの値をエンティティから取り出す（値オブジェクトは内包値へ開く）</summary>
+    private static object? ColumnValue(
+        EntityBase entity,
+        string columnName,
+        EntitySaveMetadata metadata
+    )
+    {
+        if (!metadata.PropertyByColumn.TryGetValue(columnName, out var property))
+        {
+            throw new InvalidOperationException(
+                $"{entity.GetType().Name} にカラム {columnName} に対応するプロパティがありません。"
+            );
+        }
+
+        var value = property.GetValue(entity);
+        return value;
+    }
+}
+
+/// <summary>メモリ上のデータストアで CRUD を実装するインメモリ Repository 基底クラス（方言非依存・実 DB 不要）</summary>
+/// <remarks>
+/// <para>
+/// 取得系（GetById/GetAll/Query）は常にストアのスナップショットを複製して返し、RowState=Unchanged にする
+/// （返却エンティティを変更してもストアは不変）。保存系（Insert/Update/Delete/Save）はスナップショットを差し替える。
+/// 生 SQL 系（QueryBySql/ExecuteSql/ExecuteScalarSql）はインメモリでは実行できないため <see cref="NotSupportedException"/> を投げる。
+/// </para>
+/// </remarks>
+public abstract partial class InMemoryRepository<TEntity, TKey>(InMemoryDataStore store)
+    : IRepository<TEntity, TKey>
+    where TEntity : EntityBase, new()
+{
+    /// <summary>スナップショットを保持するデータストア（DI で共有）</summary>
+    protected InMemoryDataStore Store { get; } = store;
+
+    private const string RawSqlNotSupported =
+        "インメモリ Repository は生 SQL を実行できません。実 DB の Repository へ切り替えてください。";
+
+    /// <summary>主キーによる単一エンティティ取得（該当なしは null）</summary>
+    public Task<TEntity?> GetByIdAsync(TKey id, CancellationToken cancellationToken = default) =>
+        Task.FromResult(Store.Find<TEntity>(NormalizeKey(id)));
+
+    /// <summary>全エンティティ取得</summary>
+    public Task<IReadOnlyList<TEntity>> GetAllAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult(Store.Snapshot<TEntity>());
+
+    /// <summary>エンティティ追加</summary>
+    public Task InsertAsync(TEntity entity, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(entity);
+        Store.Put(entity);
+        entity.MarkUnchanged();
+        return Task.CompletedTask;
+    }
+
+    /// <summary>エンティティのコレクションを一括追加する</summary>
+    public Task<int> BulkInsertAsync(
+        IEnumerable<TEntity> entities,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(entities);
+        var count = 0;
+
+        foreach (var entity in entities)
+        {
+            if (entity is null)
+            {
+                continue;
+            }
+
+            Store.Put(entity);
+            entity.MarkUnchanged();
+            count++;
+        }
+
+        return Task.FromResult(count);
+    }
+
+    /// <summary>エンティティ更新（更新対象ありで true）</summary>
+    public Task<bool> UpdateAsync(TEntity entity, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(entity);
+
+        // 実 DB と同じく、無制限バイナリ列に値が残ったままの更新は弾く（BindUpdateParameters を通らないため個別に）
+        UnboundedBinaryColumns.ThrowIfExcludedAssigned(entity);
+
+        var updated = Store.Write(scope =>
+        {
+            var key = InMemoryDataStore.KeyOf(entity);
+
+            if (!scope.Exists(typeof(TEntity), key))
+            {
+                return false;
+            }
+
+            scope.Put(entity);
+            return true;
+        });
+
+        if (updated)
+        {
+            entity.MarkUnchanged();
+        }
+
+        return Task.FromResult(updated);
+    }
+
+    /// <summary>主キーによるエンティティ削除（削除対象ありで true）</summary>
+    public Task<bool> DeleteAsync(TKey id, CancellationToken cancellationToken = default) =>
+        Task.FromResult(Store.Remove(typeof(TEntity), NormalizeKey(id)));
+
+    /// <summary>検索条件・並び順・Include をチェーン指定して取得するクエリを開始する</summary>
+    public SqlQuery<TEntity> Query() => new(new InMemoryQueryExecutor<TEntity>(Store));
+
+    /// <summary>RowState に従ってグラフを保存する（既定で子をカスケード）</summary>
+    public Task<int> SaveAsync(
+        TEntity entity,
+        bool cascadeSave = true,
+        bool cascadeDelete = true,
+        bool insertWhenUpdateMissing = false,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(entity);
+
+        var rows = Store.Write(scope =>
+            InMemoryCascade.Save(entity, scope, cascadeSave, cascadeDelete, insertWhenUpdateMissing)
         );
 
-    /// <summary>注文IDの一覧で注文を取得する（自由 SQL・IN のリスト展開）</summary>
-    public Task<IReadOnlyList<OrderEntity>> GetByIdsRawAsync(IReadOnlyList<int> ids, CancellationToken cancellationToken = default) =>
-        QueryBySqlAsync(
-            @"SELECT * FROM ""orders"" WHERE ""order_id"" IN (@ids) ORDER BY ""order_id""",
-            new { ids },
-            cancellationToken
+        // コミット後に保存済みグラフを Unchanged 確定する
+        EntityGraphSaver.AcceptChanges(entity, cascadeSave);
+        return Task.FromResult(rows);
+    }
+
+    /// <summary>複数の集約ルートを 1 まとめで保存する（全件成功か全件ロールバックの原子的処理）</summary>
+    public Task<int> SaveAsync(
+        IEnumerable<TEntity> entities,
+        bool cascadeSave = true,
+        bool cascadeDelete = true,
+        bool insertWhenUpdateMissing = false,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(entities);
+        var roots = entities.Where(entity => entity is not null).ToList();
+
+        var rows = Store.Write(scope =>
+        {
+            var total = 0;
+
+            foreach (var entity in roots)
+            {
+                total += InMemoryCascade.Save(
+                    entity,
+                    scope,
+                    cascadeSave,
+                    cascadeDelete,
+                    insertWhenUpdateMissing
+                );
+            }
+
+            return total;
+        });
+
+        foreach (var entity in roots)
+        {
+            EntityGraphSaver.AcceptChanges(entity, cascadeSave);
+        }
+
+        return Task.FromResult(rows);
+    }
+
+    /// <summary>生 SQL はインメモリでは実行できない</summary>
+    public Task<IReadOnlyList<TEntity>> QueryBySqlAsync(
+        string sql,
+        object? parameters = null,
+        CancellationToken cancellationToken = default
+    ) => throw new NotSupportedException(RawSqlNotSupported);
+
+    /// <summary>生 SQL はインメモリでは実行できない</summary>
+    public Task<int> ExecuteSqlAsync(
+        string sql,
+        object? parameters = null,
+        CancellationToken cancellationToken = default
+    ) => throw new NotSupportedException(RawSqlNotSupported);
+
+    /// <summary>生 SQL はインメモリでは実行できない</summary>
+    public Task<TResult?> ExecuteScalarSqlAsync<TResult>(
+        string sql,
+        object? parameters = null,
+        CancellationToken cancellationToken = default
+    ) => throw new NotSupportedException(RawSqlNotSupported);
+
+    /// <summary>主キー引数（TKey）を辞書キーへ正規化する（値オブジェクトは内包値へ開く）</summary>
+    private static object NormalizeKey(TKey id)
+    {
+        object? raw = id;
+
+        return raw
+            ?? throw new ArgumentNullException(nameof(id), "主キーに null は指定できません。");
+    }
+}
+
+/// <summary>DocumentEntity 用リポジトリのインメモリ実装</summary>
+public sealed partial class InMemoryDocumentRepository(InMemoryDataStore store)
+    : InMemoryRepository<DocumentEntity, int>(store),
+        IDocumentRepository
+{
+    /// <summary>文書 ID と本体バイナリ（除外列 payload）を射影で取得する（文書 ID 昇順）</summary>
+    public Task<IReadOnlyList<DocumentPayloadRow>> GetPayloadsAsync(CancellationToken cancellationToken = default) =>
+        Query().OrderBy(e => e.DocumentId).ToProjectionListAsync(e => new DocumentPayloadRow { DocumentId = e.DocumentId, Payload = e.Payload }, cancellationToken);
+
+    /// <summary>タイトル完全一致で文書を取得する（除外列 payload は取得されない）</summary>
+    public Task<IReadOnlyList<DocumentEntity>> GetByTitleAsync(string title, CancellationToken cancellationToken = default) =>
+        Query().Where(e => e.Title == title).ToListAsync(cancellationToken);
+
+    /// <summary>本体バイナリ（payload）が存在する文書の件数を取得する</summary>
+    public Task<int> CountWithPayloadAsync(CancellationToken cancellationToken = default) =>
+        Query().Where(e => e.Payload != null).CountAsync(cancellationToken);
+}
+
+/// <summary>DocumentNoteEntity 用リポジトリのインメモリ実装</summary>
+public sealed partial class InMemoryDocumentNoteRepository(InMemoryDataStore store)
+    : InMemoryRepository<DocumentNoteEntity, int>(store),
+        IDocumentNoteRepository { }
+
+/// <summary>決定的なサンプルデータをインメモリストアへ投入するシーダー（FK 依存順に 3 件/エンティティ）</summary>
+/// <remarks>
+/// 値は列メタから決定的に生成する（int キー=1,2,3・string キー="{TABLE}-00n"・Guid=固定シードから決定的・
+/// 文字列列="{列名} n"・数値/日付は型ベースの固定値・NULL 可列は 3 件中 1 件を null）。
+/// FK 列は親キーの実在値を参照するため、親→子の順で投入する。
+/// </remarks>
+public static class InMemorySampleData
+{
+    /// <summary>1 エンティティあたりの投入件数</summary>
+    public const int RowsPerEntity = 3;
+
+    /// <summary>すべてのエンティティへサンプルデータを投入する（親→子の FK 依存順）</summary>
+    public static void Seed(InMemoryDataStore store)
+    {
+        ArgumentNullException.ThrowIfNull(store);
+        SeedDocumentEntity(store);
+        SeedDocumentNoteEntity(store);
+
+    }
+
+    /// <summary>documents のサンプルデータを投入する</summary>
+    private static void SeedDocumentEntity(InMemoryDataStore store)
+    {
+        for (var index = 1; index <= RowsPerEntity; index++)
+        {
+            var entity = new DocumentEntity
+            {
+                DocumentId = index,
+                Title = ($"title {index}").Length > 50 ? ($"title {index}")[..50] : ($"title {index}"),
+                Payload = index == 3 ? null : new byte[] { (byte)index, (byte)(index + 1), (byte)(index + 2) },
+                Thumb = new byte[] { (byte)index, (byte)(index + 1), (byte)(index + 2) },
+                Checksum = index == 3 ? null : new byte[] { (byte)index, (byte)(index + 1), (byte)(index + 2) },
+                RowVer = index == 3 ? null : new byte[] { (byte)index, (byte)(index + 1), (byte)(index + 2) },
+            };
+            entity.MarkAdded();
+            store.Put(entity);
+            entity.MarkUnchanged();
+        }
+    }
+
+    /// <summary>document_notes のサンプルデータを投入する</summary>
+    private static void SeedDocumentNoteEntity(InMemoryDataStore store)
+    {
+        for (var index = 1; index <= RowsPerEntity; index++)
+        {
+            var entity = new DocumentNoteEntity
+            {
+                NoteId = index,
+                DocumentId = index,
+                Note = ($"note {index}").Length > 100 ? ($"note {index}")[..100] : ($"note {index}"),
+            };
+            entity.MarkAdded();
+            store.Put(entity);
+            entity.MarkUnchanged();
+        }
+    }
+}
+
+/// <summary>インメモリ Repository 群を DI コンテナへ登録する拡張</summary>
+public static class GeneratedInMemoryRepositoryServiceCollectionExtensions
+{
+    /// <summary>インメモリデータストア（Singleton）と各インメモリ Repository（Scoped）を登録する</summary>
+    /// <param name="services">登録先のサービスコレクション</param>
+    /// <param name="seedSampleData">true（既定）で <see cref="InMemorySampleData"/> の決定的サンプルデータを投入済みで登録する</param>
+    public static IServiceCollection AddGeneratedInMemoryRepositories(
+        this IServiceCollection services,
+        bool seedSampleData = true
+    )
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        var store = new InMemoryDataStore();
+
+        if (seedSampleData)
+        {
+            InMemorySampleData.Seed(store);
+        }
+
+        services.AddSingleton(store);
+        services.AddScoped<IDocumentRepository, InMemoryDocumentRepository>();
+        services.AddScoped<IDocumentRemoteRepository>(provider =>
+            provider.GetRequiredService<IDocumentRepository>()
+        );
+        services.AddScoped<IDocumentNoteRepository, InMemoryDocumentNoteRepository>();
+        services.AddScoped<IDocumentNoteRemoteRepository>(provider =>
+            provider.GetRequiredService<IDocumentNoteRepository>()
         );
 
-    /// <summary>顧客IDで注文を古い順に検索する（列参照型付け＝VO 有効時は VO 引数）</summary>
-    public Task<IReadOnlyList<OrderEntity>> GetByCustomerTypedAsync(CustomerIdValue customerId, CancellationToken cancellationToken = default) =>
-        Query().Where(e => e.CustomerId == customerId).OrderBy(e => e.OrderId).ToListAsync(cancellationToken);
+        return services;
+    }
 }
 
 /// <summary>
@@ -6847,65 +7498,49 @@ public partial class QuickErDbContext : DbContext
     public QuickErDbContext(DbContextOptions<QuickErDbContext> options)
         : base(options) { }
 
-    /// <summary>値オブジェクト列の文字列メソッド（Contains/StartsWith/EndsWith・.Value）を SQL へ翻訳する拡張を追加する</summary>
-    /// <remarks>
-    /// 値オブジェクトはコンバータ（v =&gt; v.Value）で string 列へ射影されるが、EF 既定では
-    /// <c>ValueObjectStringBase&lt;T&gt;.Contains</c> 等が翻訳できずクエリが失敗する。
-    /// <see cref="ValueObjectTranslationDbContextOptionsExtension"/> を差し込み、これらを LIKE / 素の string 列へ翻訳させる。
-    /// </remarks>
-    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
-    {
-        base.OnConfiguring(optionsBuilder);
+    /// <summary>DocumentEntity の DbSet</summary>
+    public DbSet<DocumentEntity> Documents => Set<DocumentEntity>();
 
-        if (optionsBuilder.Options.FindExtension<ValueObjectTranslationDbContextOptionsExtension>() is null)
-        {
-            ((IDbContextOptionsBuilderInfrastructure)optionsBuilder).AddOrUpdateExtension(
-                new ValueObjectTranslationDbContextOptionsExtension()
-            );
-        }
-    }
-
-    /// <summary>CustomerEntity の DbSet</summary>
-    public DbSet<CustomerEntity> Customers => Set<CustomerEntity>();
-
-    /// <summary>OrderEntity の DbSet</summary>
-    public DbSet<OrderEntity> Orders => Set<OrderEntity>();
+    /// <summary>DocumentNoteEntity の DbSet</summary>
+    public DbSet<DocumentNoteEntity> DocumentNotes => Set<DocumentNoteEntity>();
 
     /// <summary>エンティティごとのテーブル・キー・列・リレーションを Fluent API で構成する</summary>
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
-        modelBuilder.Entity<CustomerEntity>(entity =>
+        modelBuilder.Entity<DocumentEntity>(entity =>
         {
-            entity.ToTable("customers");
-            entity.HasKey(e => e.CustomerId);
+            entity.ToTable("documents");
+            entity.HasKey(e => e.DocumentId);
             entity.Ignore(e => e.RowState);
             entity.Ignore(e => e.IsAdded);
             entity.Ignore(e => e.IsUpdated);
             entity.Ignore(e => e.IsRemoved);
             entity.Ignore(e => e.HasChanges);
-            entity.Property(e => e.CustomerId).HasColumnName("customer_id").IsRequired().HasConversion(v => v!.Value, v => CustomerIdValue.Create(v!));
-            entity.Property(e => e.Name).HasColumnName("name").IsRequired().HasConversion(v => v!.Value, v => NameValue.Create(v!));
-            entity.Property(e => e.Balance).HasColumnName("balance").HasConversion(v => v!.Value, v => BalanceValue.Create(v!));
+            entity.Property(e => e.DocumentId).HasColumnName("document_id").IsRequired();
+            entity.Property(e => e.Title).HasColumnName("title").IsRequired().HasMaxLength(50);
+            entity.Property(e => e.Payload).HasColumnName("payload");
+            entity.Property(e => e.Thumb).HasColumnName("thumb").IsRequired();
+            entity.Property(e => e.Checksum).HasColumnName("checksum");
+            entity.Property(e => e.RowVer).HasColumnName("row_ver").IsRowVersion();
             entity
-                .HasMany(e => e.Orders)
-                .WithOne(e => e.Customer)
-                .HasForeignKey(e => e.CustomerId)
+                .HasMany(e => e.DocumentNotes)
+                .WithOne(e => e.Document)
+                .HasForeignKey(e => e.DocumentId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
-        modelBuilder.Entity<OrderEntity>(entity =>
+        modelBuilder.Entity<DocumentNoteEntity>(entity =>
         {
-            entity.ToTable("orders");
-            entity.HasKey(e => e.OrderId);
+            entity.ToTable("document_notes");
+            entity.HasKey(e => e.NoteId);
             entity.Ignore(e => e.RowState);
             entity.Ignore(e => e.IsAdded);
             entity.Ignore(e => e.IsUpdated);
             entity.Ignore(e => e.IsRemoved);
             entity.Ignore(e => e.HasChanges);
-            entity.Property(e => e.OrderId).HasColumnName("order_id").IsRequired().HasConversion(v => v!.Value, v => OrderIdValue.Create(v!));
-            entity.Property(e => e.CustomerId).HasColumnName("customer_id").IsRequired().HasConversion(v => v!.Value, v => CustomerIdValue.Create(v!));
-            entity.Property(e => e.Memo).HasColumnName("memo").HasConversion(v => v!.Value, v => MemoValue.Create(v!));
-            entity.Property(e => e.Amount).HasColumnName("amount").IsRequired().HasConversion(v => v!.Value, v => AmountValue.Create(v!));
+            entity.Property(e => e.NoteId).HasColumnName("note_id").IsRequired();
+            entity.Property(e => e.DocumentId).HasColumnName("document_id").IsRequired();
+            entity.Property(e => e.Note).HasColumnName("note").IsRequired().HasMaxLength(100);
         });
 
         OnModelCreatingPartial(modelBuilder);
@@ -6913,361 +7548,6 @@ public partial class QuickErDbContext : DbContext
 
     /// <summary>利用者が追加構成を差し込むための拡張ポイント（partial・未実装ならゼロコスト）</summary>
     partial void OnModelCreatingPartial(ModelBuilder modelBuilder);
-}
-
-/// <summary>
-/// 文字列値オブジェクト（<see cref="ValueObjectStringBase{TSelf}"/> 由来）の Contains/StartsWith/EndsWith を
-/// SQL の LIKE へ翻訳する EF Core メソッド呼び出しトランスレータ。
-/// </summary>
-/// <remarks>
-/// <para>
-/// 値オブジェクト列はコンバータで string 列へ射影されるが、EF 既定ではこれらのインスタンスメソッドを翻訳できない。
-/// 自作 SQL Server 版と同じ意味論（Ordinal 部分一致 → LIKE・ワイルドカード <c>\ % _ [</c> のエスケープ・
-/// <c>ESCAPE '\'</c>・null 引数は空文字扱い）に合わせて <c>ISqlExpressionFactory.Like</c> を生成する。
-/// </para>
-/// <para>
-/// 引数は string オーバーロードと TSelf（値オブジェクト）オーバーロードの両方を受け付ける。定数はクライアント側で
-/// エスケープし、パラメータは REPLACE の連鎖（方言非依存）で SQL 側エスケープする。
-/// </para>
-/// </remarks>
-internal sealed class ValueObjectStringMethodTranslator(
-    ISqlExpressionFactory sqlExpressionFactory,
-    RelationalTypeMapping stringTypeMapping,
-    LikeEscapeBehavior escapeBehavior
-) : IMethodCallTranslator
-{
-    private readonly ISqlExpressionFactory _sqlExpressionFactory = sqlExpressionFactory;
-    private readonly RelationalTypeMapping _stringTypeMapping = stringTypeMapping;
-    private readonly LikeEscapeBehavior _escapeBehavior = escapeBehavior;
-
-    /// <summary>
-    /// REPLACE で順にエスケープする（元文字, 置換後）の組。エスケープ文字自身を最初に二重化する。
-    /// <c>[</c> は SQL Server のみ文字クラス開始のためエスケープ対象で、他方言（<c>[</c> はワイルドカードでない）では
-    /// エスケープしない。特に Oracle は非ワイルドカードのエスケープを ORA-01424 で拒否するため <c>[</c> を含めてはならない。
-    /// エスケープ文字は方言依存で、MySQL は文字列リテラルでバックスラッシュがクォート打ち消しとして
-    /// 誤解釈されるため <c>\</c> 以外（<see cref="LikeEscapeBehavior.EscapeChar"/>）を用いる。
-    /// </summary>
-    private IEnumerable<(string From, string To)> EscapePairs()
-    {
-        var e = _escapeBehavior.EscapeChar;
-
-        // エスケープ文字自身 → 二重化（必ず最初に処理する）
-        yield return (e, e + e);
-        yield return ("%", e + "%");
-        yield return ("_", e + "_");
-
-        if (_escapeBehavior.EscapeBracket)
-        {
-            yield return ("[", e + "[");
-        }
-    }
-
-    /// <summary>対象メソッドなら LIKE 式を返し、そうでなければ null（他トランスレータに委ねる）</summary>
-    public SqlExpression? Translate(
-        SqlExpression? instance,
-        MethodInfo method,
-        IReadOnlyList<SqlExpression> arguments,
-        IDiagnosticsLogger<DbLoggerCategory.Query> logger
-    )
-    {
-        // 文字列値オブジェクトの単一引数 Contains / StartsWith / EndsWith のみを対象にする
-        if (
-            instance is null
-            || arguments.Count != 1
-            || method.Name is not ("Contains" or "StartsWith" or "EndsWith")
-            || method.DeclaringType is not { IsGenericType: true } declaring
-            || declaring.GetGenericTypeDefinition() != typeof(ValueObjectStringBase<>)
-        )
-        {
-            return null;
-        }
-
-        // 引数のマッピングを決める。string 引数は素の string、TSelf 引数は列と同じコンバータ付き
-        // マッピング（VO→素値変換）で束縛する
-        var parameterType = method.GetParameters()[0].ParameterType;
-        SqlExpression argument;
-
-        if (parameterType == typeof(string))
-        {
-            argument = _sqlExpressionFactory.ApplyTypeMapping(arguments[0], _stringTypeMapping);
-        }
-        else if (parameterType == declaring.GetGenericArguments()[0])
-        {
-            argument = _sqlExpressionFactory.ApplyTypeMapping(arguments[0], instance.TypeMapping);
-        }
-        else
-        {
-            return null;
-        }
-
-        // 列を素の string としてコアースし、コンバータ経由の再読込（string→VO の不正キャスト）を避ける
-        var column = _sqlExpressionFactory.ApplyTypeMapping(instance, _stringTypeMapping);
-        var pattern = BuildLikePattern(method.Name, argument);
-
-        // ESCAPE の明示は方言依存。既定エスケープ文字が既にバックスラッシュの PostgreSQL では明示しない。
-        // SQL Server / Oracle は既定にエスケープ文字を持たないため明示する。MySQL は文字列リテラルの
-        // バックスラッシュ誤解釈を避けるためエスケープ文字を \ 以外にしたうえで明示する。
-        var escapeChar = _escapeBehavior.EmitEscapeClause
-            ? _sqlExpressionFactory.Constant(_escapeBehavior.EscapeChar, _stringTypeMapping)
-            : null;
-
-        return _sqlExpressionFactory.Like(column, pattern, escapeChar);
-    }
-
-    /// <summary>メソッド名に応じた LIKE パターン式（'%'＋エスケープ済み引数＋'%' 等）を組み立てる</summary>
-    private SqlExpression BuildLikePattern(string methodName, SqlExpression argument)
-    {
-        // 定数はクライアント側でエスケープして 1 つの定数パターンへ畳み込む（自作版と同じ形）。
-        // TSelf オーバーロードの定数（EF が Create(...) を定数へ畳んだもの）は素値へ開いてから扱う
-        if (argument is SqlConstantExpression { Value: var constantValue })
-        {
-            var raw = SqlParameterValue.Unwrap(constantValue) as string ?? string.Empty;
-            var escaped = EscapeLikePattern(raw);
-            var constantPattern = methodName switch
-            {
-                "Contains" => "%" + escaped + "%",
-                "StartsWith" => escaped + "%",
-                _ => "%" + escaped,
-            };
-            return _sqlExpressionFactory.Constant(constantPattern, _stringTypeMapping);
-        }
-
-        // パラメータ等は SQL 側でエスケープする。null は自作版（null→空文字）に合わせ COALESCE で空文字へ
-        SqlExpression escapedArgument = _sqlExpressionFactory.Coalesce(
-            argument,
-            _sqlExpressionFactory.Constant(string.Empty, _stringTypeMapping)
-        );
-
-        foreach (var (from, to) in EscapePairs())
-        {
-            escapedArgument = _sqlExpressionFactory.Function(
-                "REPLACE",
-                [
-                    escapedArgument,
-                    _sqlExpressionFactory.Constant(from, _stringTypeMapping),
-                    _sqlExpressionFactory.Constant(to, _stringTypeMapping),
-                ],
-                nullable: true,
-                argumentsPropagateNullability: [true, false, false],
-                typeof(string),
-                _stringTypeMapping
-            );
-        }
-
-        var wildcard = _sqlExpressionFactory.Constant("%", _stringTypeMapping);
-        return methodName switch
-        {
-            "Contains" => _sqlExpressionFactory.Add(
-                wildcard,
-                _sqlExpressionFactory.Add(escapedArgument, wildcard)
-            ),
-            "StartsWith" => _sqlExpressionFactory.Add(escapedArgument, wildcard),
-            _ => _sqlExpressionFactory.Add(wildcard, escapedArgument),
-        };
-    }
-
-    /// <summary>
-    /// LIKE のワイルドカードをエスケープする（定数パターン用）。エスケープ文字自身・<c>%</c>・<c>_</c> は全方言共通、
-    /// <c>[</c> は SQL Server のみ（<see cref="LikeEscapeBehavior.EscapeBracket"/>）対象にする。
-    /// エスケープ文字は方言依存（<see cref="LikeEscapeBehavior.EscapeChar"/>）。
-    /// </summary>
-    private string EscapeLikePattern(string value)
-    {
-        var e = _escapeBehavior.EscapeChar;
-        var escaped = value.Replace(e, e + e).Replace("%", e + "%").Replace("_", e + "_");
-        return _escapeBehavior.EscapeBracket ? escaped.Replace("[", e + "[") : escaped;
-    }
-}
-
-/// <summary>
-/// 値オブジェクト（<see cref="ValueObjectBase{TSelf, TValue}"/> 由来）の <c>.Value</c> メンバ参照を、
-/// 素値の列として翻訳する EF Core メンバトランスレータ。
-/// </summary>
-/// <remarks>
-/// これにより <c>string.IsNullOrEmpty(x.Col.Value)</c> や <c>x.Col.Value &gt; 100</c> のような、素値を開いた
-/// 述語を EF が翻訳できるようになる（自作 SQL Server 版の「列は素の列でも VO の .Value でもよい」と同じ扱い）。
-/// 列はコンバータで素値へ射影済みのため、CONVERT で素値型へ明示コアースし、後段の翻訳が
-/// コンバータ経由で再読込（不正キャスト）しないようにする。
-/// </remarks>
-internal sealed class ValueObjectValueMemberTranslator(
-    ISqlExpressionFactory sqlExpressionFactory,
-    IRelationalTypeMappingSource typeMappingSource
-) : IMemberTranslator
-{
-    private readonly ISqlExpressionFactory _sqlExpressionFactory = sqlExpressionFactory;
-    private readonly IRelationalTypeMappingSource _typeMappingSource = typeMappingSource;
-
-    /// <summary>値オブジェクトの .Value なら素値の列として返し、そうでなければ null</summary>
-    public SqlExpression? Translate(
-        SqlExpression? instance,
-        MemberInfo member,
-        Type returnType,
-        IDiagnosticsLogger<DbLoggerCategory.Query> logger
-    )
-    {
-        if (
-            instance is null
-            || member.Name != "Value"
-            || member.DeclaringType is not { IsGenericType: true } declaring
-            || declaring.GetGenericTypeDefinition() != typeof(ValueObjectBase<,>)
-        )
-        {
-            return null;
-        }
-
-        // 素値型（string / int / decimal 等）の既定マッピングが得られない型は対象外（他トランスレータに委ねる）
-        if (_typeMappingSource.FindMapping(returnType) is not { } typeMapping)
-        {
-            return null;
-        }
-
-        return _sqlExpressionFactory.Convert(instance, returnType, typeMapping);
-    }
-}
-
-/// <summary>
-/// LIKE 述語の方言差（エスケープ文字・<c>[</c> エスケープ・明示 ESCAPE 句）を吸収する挙動。
-/// </summary>
-/// <remarks>
-/// <list type="bullet">
-///   <item><see cref="EscapeChar"/>: LIKE のエスケープ文字。既定は <c>\</c>。ただし MySQL は文字列リテラルで
-///   バックスラッシュがクォート打ち消しとして誤解釈されるため <c>!</c> を用いる（リテラル・REPLACE・ESCAPE 句すべてで統一）。</item>
-///   <item><see cref="EscapeBracket"/>: <c>[</c> をエスケープするか。<c>[</c> が文字クラス開始となる SQL Server のみ true。</item>
-///   <item><see cref="EmitEscapeClause"/>: <c>ESCAPE</c> を明示するか。既定エスケープ文字を持たない
-///   SQL Server / Oracle / SQLite と、非既定文字を使う MySQL は true。既定が <c>\</c> の PostgreSQL は false（明示不要）。</item>
-/// </list>
-/// </remarks>
-internal readonly record struct LikeEscapeBehavior(
-    string EscapeChar,
-    bool EscapeBracket,
-    bool EmitEscapeClause
-)
-{
-    /// <summary>EF プロバイダ名から方言別の LIKE エスケープ挙動を決定する</summary>
-    public static LikeEscapeBehavior FromProviderName(string? providerName)
-    {
-        var name = providerName ?? string.Empty;
-
-        // SQL Server: [ は文字クラス開始のためエスケープ必須。既定にエスケープ文字が無いため ESCAPE を明示。
-        if (name.Contains("SqlServer", StringComparison.Ordinal))
-        {
-            return new LikeEscapeBehavior("\\", EscapeBracket: true, EmitEscapeClause: true);
-        }
-
-        // Oracle: [ はワイルドカードでないためエスケープしない（ORA-01424 回避）。既定にエスケープ文字が無いため ESCAPE は明示。
-        if (name.Contains("Oracle", StringComparison.Ordinal))
-        {
-            return new LikeEscapeBehavior("\\", EscapeBracket: false, EmitEscapeClause: true);
-        }
-
-        // MySQL: 文字列リテラルの \ 誤解釈を避けるためエスケープ文字を ! にし、ESCAPE '!' を明示する。
-        if (name.Contains("MySql", StringComparison.OrdinalIgnoreCase))
-        {
-            return new LikeEscapeBehavior("!", EscapeBracket: false, EmitEscapeClause: true);
-        }
-
-        // SQLite: LIKE は既定のエスケープ文字を持たないため ESCAPE を明示する。[ はワイルドカードでない。
-        if (name.Contains("Sqlite", StringComparison.OrdinalIgnoreCase))
-        {
-            return new LikeEscapeBehavior("\\", EscapeBracket: false, EmitEscapeClause: true);
-        }
-
-        // PostgreSQL 等: [ はワイルドカードでない。既定エスケープ文字が \ のため ESCAPE は明示しない。
-        return new LikeEscapeBehavior("\\", EscapeBracket: false, EmitEscapeClause: false);
-    }
-}
-
-/// <summary>値オブジェクトの文字列翻訳トランスレータ（メソッド・メンバ）を束ねる EF Core プラグイン</summary>
-internal sealed class ValueObjectTranslatorPlugin
-    : IMethodCallTranslatorPlugin,
-        IMemberTranslatorPlugin
-{
-    private readonly IReadOnlyList<IMemberTranslator> _memberTranslators;
-
-    /// <summary>SQL 式ファクトリ・型マッピング源・方言プロバイダからトランスレータ群を構築する</summary>
-    public ValueObjectTranslatorPlugin(
-        ISqlExpressionFactory sqlExpressionFactory,
-        IRelationalTypeMappingSource typeMappingSource,
-        IDatabaseProvider databaseProvider
-    )
-    {
-        var stringTypeMapping = typeMappingSource.FindMapping(typeof(string))!;
-        var escapeBehavior = LikeEscapeBehavior.FromProviderName(databaseProvider.Name);
-        Translators =
-        [
-            new ValueObjectStringMethodTranslator(
-                sqlExpressionFactory,
-                stringTypeMapping,
-                escapeBehavior
-            ),
-        ];
-        _memberTranslators =
-        [
-            new ValueObjectValueMemberTranslator(sqlExpressionFactory, typeMappingSource),
-        ];
-    }
-
-    /// <summary>メソッド呼び出しトランスレータ群</summary>
-    public IEnumerable<IMethodCallTranslator> Translators { get; }
-
-    /// <summary>メンバトランスレータ群</summary>
-    IEnumerable<IMemberTranslator> IMemberTranslatorPlugin.Translators => _memberTranslators;
-}
-
-/// <summary>
-/// 値オブジェクトの文字列翻訳プラグインを EF Core の内部サービスコンテナへ登録する DbContext オプション拡張。
-/// </summary>
-/// <remarks>
-/// <see cref="IMethodCallTranslatorPlugin"/> / <see cref="IMemberTranslatorPlugin"/> は EF が定義するサービスのため、
-/// プロバイダ固有サービスではなく <c>TryAddEnumerable</c> で（既存プラグインを潰さずに）追加する。
-/// </remarks>
-internal sealed class ValueObjectTranslationDbContextOptionsExtension : IDbContextOptionsExtension
-{
-    private DbContextOptionsExtensionInfo? _info;
-
-    /// <summary>拡張の情報（ログ断片・サービスプロバイダキャッシュキーへの寄与）</summary>
-    public DbContextOptionsExtensionInfo Info => _info ??= new ExtensionInfo(this);
-
-    /// <summary>翻訳プラグインを EF の内部サービスコンテナへ登録する</summary>
-    public void ApplyServices(IServiceCollection services)
-    {
-        services.AddScoped<ValueObjectTranslatorPlugin>();
-        services.TryAddEnumerable(
-            ServiceDescriptor.Scoped<IMethodCallTranslatorPlugin, ValueObjectTranslatorPlugin>(
-                sp => sp.GetRequiredService<ValueObjectTranslatorPlugin>()
-            )
-        );
-        services.TryAddEnumerable(
-            ServiceDescriptor.Scoped<IMemberTranslatorPlugin, ValueObjectTranslatorPlugin>(
-                sp => sp.GetRequiredService<ValueObjectTranslatorPlugin>()
-            )
-        );
-    }
-
-    /// <summary>検証は不要（構成に依存する制約は持たない）</summary>
-    public void Validate(IDbContextOptions options) { }
-
-    /// <summary>拡張のメタ情報。サービス構成を変えるが方言プロバイダではない</summary>
-    private sealed class ExtensionInfo(IDbContextOptionsExtension extension)
-        : DbContextOptionsExtensionInfo(extension)
-    {
-        /// <summary>方言プロバイダ拡張ではない</summary>
-        public override bool IsDatabaseProvider => false;
-
-        /// <summary>ログに出す断片</summary>
-        public override string LogFragment => "using ValueObjectTranslation ";
-
-        /// <summary>サービスプロバイダのキャッシュキーへの寄与（一定なら同一構成とみなす）</summary>
-        public override int GetServiceProviderHashCode() => 0;
-
-        /// <summary>同一サービス構成なら同じサービスプロバイダを再利用してよい</summary>
-        public override bool ShouldUseSameServiceProvider(DbContextOptionsExtensionInfo other) =>
-            other is ExtensionInfo;
-
-        /// <summary>デバッグ情報へ有効化フラグを載せる</summary>
-        public override void PopulateDebugInfo(IDictionary<string, string> debugInfo) =>
-            debugInfo["ValueObjectTranslation"] = "1";
-    }
 }
 
 /// <summary>エンティティに縛られない生 SQL 実行器の EF Core 版（DbContext の接続上で ADO を直接実行する）</summary>
@@ -8197,63 +8477,44 @@ public static class GeneratedEfCoreRepositoryServiceCollectionExtensions
 
         services.AddDbContextFactory<QuickErDbContext>(configureDbContext);
         services.AddSingleton<ISqlExecutor, EfCoreSqlExecutor<QuickErDbContext>>();
-        services.AddScoped<ICustomerRepository, EfCoreCustomerRepository>();
-        services.AddScoped<ICustomerRemoteRepository>(provider =>
-            provider.GetRequiredService<ICustomerRepository>()
+        services.AddScoped<IDocumentRepository, EfCoreDocumentRepository>();
+        services.AddScoped<IDocumentRemoteRepository>(provider =>
+            provider.GetRequiredService<IDocumentRepository>()
         );
-        services.AddScoped<IOrderRepository, EfCoreOrderRepository>();
-        services.AddScoped<IOrderRemoteRepository>(provider =>
-            provider.GetRequiredService<IOrderRepository>()
+        services.AddScoped<IDocumentNoteRepository, EfCoreDocumentNoteRepository>();
+        services.AddScoped<IDocumentNoteRemoteRepository>(provider =>
+            provider.GetRequiredService<IDocumentNoteRepository>()
         );
 
         return services;
     }
 }
 
-/// <summary>CustomerEntity 用リポジトリの EF Core 版実装</summary>
-public sealed partial class EfCoreCustomerRepository(
+/// <summary>DocumentEntity 用リポジトリの EF Core 版実装</summary>
+public sealed partial class EfCoreDocumentRepository(
     IDbContextFactory<QuickErDbContext> contextFactory
-) : EfCoreRepository<CustomerEntity, CustomerIdValue, QuickErDbContext>(
+) : EfCoreRepository<DocumentEntity, int, QuickErDbContext>(
         contextFactory
     ),
-        ICustomerRepository { }
-
-/// <summary>OrderEntity 用リポジトリの EF Core 版実装</summary>
-public sealed partial class EfCoreOrderRepository(
-    IDbContextFactory<QuickErDbContext> contextFactory
-) : EfCoreRepository<OrderEntity, OrderIdValue, QuickErDbContext>(
-        contextFactory
-    ),
-        IOrderRepository
+        IDocumentRepository
 {
-    /// <summary>顧客IDで注文を新しい順（注文ID降順）に検索する（ページング付き）</summary>
-    public Task<IReadOnlyList<OrderEntity>> GetByCustomerAsync(int customerId, int take, int skip = 0, CancellationToken cancellationToken = default) =>
-        Query().Where(e => e.CustomerId == CustomerIdValue.Create(customerId)).OrderByDescending(e => e.OrderId).Skip(skip).Take(take).ToListAsync(cancellationToken);
+    /// <summary>文書 ID と本体バイナリ（除外列 payload）を射影で取得する（文書 ID 昇順）</summary>
+    public Task<IReadOnlyList<DocumentPayloadRow>> GetPayloadsAsync(CancellationToken cancellationToken = default) =>
+        Query().OrderBy(e => e.DocumentId).ToProjectionListAsync(e => new DocumentPayloadRow { DocumentId = e.DocumentId, Payload = e.Payload }, cancellationToken);
 
-    /// <summary>最新（注文IDが最大）の注文を 1 件取得する</summary>
-    public Task<OrderEntity?> FindTopAsync(CancellationToken cancellationToken = default) =>
-        Query().OrderByDescending(e => e.OrderId).FirstOrDefaultAsync(cancellationToken);
+    /// <summary>タイトル完全一致で文書を取得する（除外列 payload は取得されない）</summary>
+    public Task<IReadOnlyList<DocumentEntity>> GetByTitleAsync(string title, CancellationToken cancellationToken = default) =>
+        Query().Where(e => e.Title == title).ToListAsync(cancellationToken);
 
-    /// <summary>顧客IDに紐づく注文件数を取得する</summary>
-    public Task<int> CountByCustomerAsync(int customerId, CancellationToken cancellationToken = default) =>
-        Query().Where(e => e.CustomerId == CustomerIdValue.Create(customerId)).CountAsync(cancellationToken);
-
-    /// <summary>メモの部分一致で注文を検索する</summary>
-    public Task<IReadOnlyList<OrderEntity>> SearchMemoAsync(string keyword, CancellationToken cancellationToken = default) =>
-        Query().Where(e => e.Memo!.Contains(keyword)).ToListAsync(cancellationToken);
-
-    /// <summary>注文IDの一覧で注文を取得する</summary>
-    public Task<IReadOnlyList<OrderEntity>> GetByIdsAsync(IReadOnlyList<int> ids, CancellationToken cancellationToken = default)
-    {
-        var idsValues = ids.Select(OrderIdValue.Create).ToList();
-        return Query().Where(e => idsValues.Contains(e.OrderId)).ToListAsync(cancellationToken);
-    }
-
-    /// <summary>顧客IDに紐づく注文を射影（顧客ID・金額）で新しい順に取得する</summary>
-    public Task<IReadOnlyList<OrderSummaryRow>> GetSummariesAsync(int customerId, int take, int skip = 0, CancellationToken cancellationToken = default) =>
-        Query().Where(e => e.CustomerId == CustomerIdValue.Create(customerId)).OrderByDescending(e => e.OrderId).Skip(skip).Take(take).ToProjectionListAsync(e => new OrderSummaryRow { CustomerId = e.CustomerId, Amount = e.Amount }, cancellationToken);
-
-    /// <summary>顧客IDで注文を古い順に検索する（列参照型付け＝VO 有効時は VO 引数）</summary>
-    public Task<IReadOnlyList<OrderEntity>> GetByCustomerTypedAsync(CustomerIdValue customerId, CancellationToken cancellationToken = default) =>
-        Query().Where(e => e.CustomerId == customerId).OrderBy(e => e.OrderId).ToListAsync(cancellationToken);
+    /// <summary>本体バイナリ（payload）が存在する文書の件数を取得する</summary>
+    public Task<int> CountWithPayloadAsync(CancellationToken cancellationToken = default) =>
+        Query().Where(e => e.Payload != null).CountAsync(cancellationToken);
 }
+
+/// <summary>DocumentNoteEntity 用リポジトリの EF Core 版実装</summary>
+public sealed partial class EfCoreDocumentNoteRepository(
+    IDbContextFactory<QuickErDbContext> contextFactory
+) : EfCoreRepository<DocumentNoteEntity, int, QuickErDbContext>(
+        contextFactory
+    ),
+        IDocumentNoteRepository { }

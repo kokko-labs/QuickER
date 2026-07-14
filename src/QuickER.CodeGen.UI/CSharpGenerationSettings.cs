@@ -67,6 +67,11 @@ public class CSharpGenerationSettings
     /// <summary>API リファレンス Markdown（.g.md）を追加出力するか（既定 false）</summary>
     public bool GenerateApiDocs { get; set; }
 
+    /// <summary>
+    /// 無制限バイナリ列（varbinary(max) / BLOB 等）を自作 Repository の SELECT / UPDATE から除外するか（既定 false）
+    /// </summary>
+    public bool ExcludeUnboundedBinaryColumns { get; set; }
+
     /// <summary>全カラムを値オブジェクト化するか</summary>
     public bool GenerateValueObjects { get; set; }
 

@@ -376,6 +376,83 @@ public class CSharpGenerationDialogViewModelTests
     }
 
     /// <summary>
+    /// 無制限バイナリ列の除外チェックを ON にすると、結果オプションの ExcludeUnboundedBinaryColumns が true になり、
+    /// OFF（既定）では false になることを検証する
+    /// </summary>
+    [Fact(
+        DisplayName = "無制限バイナリ列の除外は既定 OFF・ON で ExcludeUnboundedBinaryColumns へ反映される"
+    )]
+    public void ExcludeUnboundedBinary_IsReflectedInResultOptions()
+    {
+        var vm = CreateViewModel(out _, currentProvider: new QuickER.SqlServer.SqlServerProvider());
+        vm.BaseNamespace = "Sample.Domain";
+        vm.OutputFilePath = @"C:\temp\Entities.g.cs";
+        vm.DbAccessRepository = true;
+
+        // 既定（OFF）は false
+        vm.ExcludeUnboundedBinaryColumns.Should().BeFalse("既定は OFF");
+        vm.ToOptions().ExcludeUnboundedBinaryColumns.Should().BeFalse();
+
+        vm.ExcludeUnboundedBinaryColumns = true;
+        vm.OkCommand.Execute(null);
+
+        vm.Result.Should().NotBeNull();
+        vm.Result!.Options.ExcludeUnboundedBinaryColumns.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// 無制限バイナリ列の除外行の表示フラグは自作 Repository 生成に追従し、「なし」/ EF Core では非表示・
+    /// 自作 Repository 選択時のみ表示になることを検証する
+    /// </summary>
+    [Fact(DisplayName = "無制限バイナリ列の除外行は自作 Repository 選択時のみ表示")]
+    public void ShowExcludeUnboundedBinary_TracksRepositorySelection()
+    {
+        var vm = CreateViewModel(out _, currentProvider: new QuickER.SqlServer.SqlServerProvider());
+        vm.BaseNamespace = "Sample.Domain";
+
+        vm.ShowExcludeUnboundedBinary.Should().BeFalse("既定は DB アクセス「なし」のため非表示");
+
+        vm.DbAccessRepository = true;
+        vm.ShowExcludeUnboundedBinary.Should().BeTrue("自作 Repository 選択で表示");
+
+        vm.DbAccessEfCore = true;
+        vm.ShowExcludeUnboundedBinary.Should()
+            .BeFalse("EF Core 選択では非表示（自作 Repository 専用）");
+
+        vm.DbAccessNone = true;
+        vm.ShowExcludeUnboundedBinary.Should().BeFalse("DB アクセス「なし」でも非表示");
+    }
+
+    /// <summary>無制限バイナリ列の除外チェックの状態が保存・復元されることを検証する</summary>
+    [Fact(DisplayName = "無制限バイナリ列の除外チェックが次回起動時に復元される")]
+    public void ExcludeUnboundedBinary_IsPersistedAndRestored()
+    {
+        var vm = CreateViewModel(out var folder);
+
+        try
+        {
+            vm.BaseNamespace = "Acme.App";
+            vm.OutputFilePath = @"C:\temp\Entities.g.cs";
+            vm.DbAccessRepository = true;
+            vm.ExcludeUnboundedBinaryColumns = true;
+            vm.OkCommand.Execute(null);
+
+            var restored = new CSharpGenerationDialogViewModel(
+                new CSharpGenerationSettingsStore(folder)
+            );
+
+            restored.ExcludeUnboundedBinaryColumns.Should().BeTrue();
+        }
+        finally
+        {
+            if (Directory.Exists(folder))
+            {
+                Directory.Delete(folder, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>
     /// リモート対応のチェックを ON にすると、結果オプションの GenerateRemoteContracts が true になり、
     /// OFF（既定）では false になることを検証する
     /// </summary>

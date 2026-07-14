@@ -80,4 +80,25 @@ public class SqlServerCSharpTypeMapperTests
         info.SqlDbTypeName.Should().Be("NVarChar");
         info.SqlDeclaredLength.Should().Be(100);
     }
+
+    [Theory(
+        DisplayName = "無制限バイナリ（varbinary(max) / image）だけ IsUnboundedBinary=true になる"
+    )]
+    [InlineData("varbinary(max)", true)]
+    [InlineData("image", true)]
+    [InlineData("varbinary(100)", false)]
+    [InlineData("binary(16)", false)]
+    [InlineData("rowversion", false)]
+    [InlineData("timestamp", false)]
+    public void Map_ResolvesUnboundedBinary(string dataType, bool expected)
+    {
+        Mapper.Map(dataType).IsUnboundedBinary.Should().Be(expected);
+    }
+
+    [Fact(DisplayName = "非バイナリ型は IsUnboundedBinary=false になる")]
+    public void Map_NonBinaryType_IsUnboundedBinaryIsFalse()
+    {
+        Mapper.Map("nvarchar(max)").IsUnboundedBinary.Should().BeFalse();
+        Mapper.Map("int").IsUnboundedBinary.Should().BeFalse();
+    }
 }

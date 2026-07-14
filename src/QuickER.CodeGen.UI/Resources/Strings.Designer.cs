@@ -174,6 +174,18 @@ namespace QuickER.CodeGen.UI.Resources {
             }
         }
 
+        public static string CodeGen_ExcludeUnboundedBinary {
+            get {
+                return ResourceManager.GetString("CodeGen_ExcludeUnboundedBinary", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_ExcludeUnboundedBinaryToolTip {
+            get {
+                return ResourceManager.GetString("CodeGen_ExcludeUnboundedBinaryToolTip", resourceCulture);
+            }
+        }
+
         public static string CodeGen_RemoteAccess {
             get {
                 return ResourceManager.GetString("CodeGen_RemoteAccess", resourceCulture);

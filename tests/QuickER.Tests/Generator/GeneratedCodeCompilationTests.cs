@@ -54,6 +54,18 @@ public class GeneratedCodeCompilationTests
                 }
             );
         }
+
+        // 自作 Repository + EF Core 併用で無制限バイナリ列除外を ON（属性定義・付与が両バケット併存でも成立すること）
+        data.Add(
+            "EfCore + 自作 Repository + ExcludeUnboundedBinaryColumns",
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                GenerateEfCore = true,
+                ExcludeUnboundedBinaryColumns = true,
+            }
+        );
+
         return data;
     }
 
@@ -315,6 +327,14 @@ public class GeneratedCodeCompilationTests
                     NamespaceName = "Sample.Domain",
                     GenerateValueObjects = true,
                     UseGuidKeyForStringPrimaryKey = true,
+                }
+            },
+            {
+                "ExcludeUnboundedBinaryColumns=true（varbinary(max) の photo 列にマーカー付与）",
+                new CodeGenerationOptions
+                {
+                    NamespaceName = "Sample.Domain",
+                    ExcludeUnboundedBinaryColumns = true,
                 }
             },
             {

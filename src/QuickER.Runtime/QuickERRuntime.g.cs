@@ -132,6 +132,104 @@ public sealed class DbTableMetaAttribute : Attribute
     public string Description { get; set; } = string.Empty;
 }
 
+/// <summary>
+/// 無制限バイナリ列（<c>varbinary(max)</c> / 長さ宣言なし BLOB 等）を SELECT / UPDATE 対象から除外するマーカー属性。
+/// INSERT / BulkInsert は全列のまま扱う。値を設定したままの更新は実行時例外になる（更新は生 SQL の <c>ExecuteSqlAsync</c> で行う）。
+/// </summary>
+[AttributeUsage(AttributeTargets.Property, AllowMultiple = false)]
+public sealed class UnboundedBinaryColumnAttribute : Attribute
+{
+}
+
+/// <summary>
+/// <see cref="UnboundedBinaryColumnAttribute"/> の付いた列プロパティ（無制限バイナリ列）を型ごとにリフレクションで解決し、
+/// 更新ガードと読み取り strip の実行時判定を提供する共有ヘルパー。
+/// </summary>
+/// <remarks>
+/// スキーマ非依存・属性駆動で、除外列名や列集合を焼き込まない。方言別パッケージのメタデータとコアパッケージの
+/// リモートクライアント基底の双方から参照するため、いずれのパッケージにも属さないようコアの共有 infra に独立した
+/// static クラスとして置く（型 → 除外プロパティをキャッシュする）。
+/// </remarks>
+public static class UnboundedBinaryColumns
+{
+    // 型 → 除外列プロパティ（UnboundedBinaryColumnAttribute 付き）。1 度だけ解決してキャッシュする
+    private static readonly ConcurrentDictionary<Type, PropertyInfo[]> _excluded = new();
+
+    // 型 → 「未取得状態」の既定インスタンス（strip で除外列の初期値を写す元）。1 度だけ生成してキャッシュする
+    private static readonly ConcurrentDictionary<Type, object> _defaults = new();
+
+    /// <summary>指定型の無制限バイナリ列プロパティ（除外列）を取得する（属性なしは空配列）</summary>
+    public static PropertyInfo[] For(Type entityType) =>
+        _excluded.GetOrAdd(
+            entityType,
+            static type =>
+                type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                    .Where(property =>
+                        property.GetCustomAttribute<UnboundedBinaryColumnAttribute>() is not null
+                    )
+                    .ToArray()
+        );
+
+    /// <summary>
+    /// 除外列に「未取得状態」でない値（null でも空でもない blob）が入ったまま更新しようとしたら例外にする。
+    /// 無制限バイナリ列は Repository の UPDATE 対象外のため、値を保持したままの更新はサイレントに失われてしまう。
+    /// </summary>
+    public static void ThrowIfExcludedAssigned(EntityBase entity)
+    {
+        foreach (var property in For(entity.GetType()))
+        {
+            if (!IsUnset(property.GetValue(entity)))
+            {
+                throw new InvalidOperationException(
+                    $"列 {property.Name} は無制限バイナリ列（UnboundedBinaryColumnAttribute）で Repository の UPDATE 対象外です。"
+                        + "挿入後は値を null（または空）に戻すか再取得してください。この列の更新は生 SQL（ExecuteSqlAsync）で行ってください。"
+                );
+            }
+        }
+    }
+
+    /// <summary>
+    /// 読み取り複製の除外列を「未取得状態」（既定インスタンスの初期値）へ落とす。実 DB 側の未取得
+    /// （MapEntity が SetValue しない＝コンストラクタ初期化子のまま。非 null byte[] は空配列・nullable は null）と揃える。
+    /// </summary>
+    public static void StripExcluded(EntityBase entity)
+    {
+        var excluded = For(entity.GetType());
+
+        if (excluded.Length == 0)
+        {
+            return;
+        }
+
+        // 既定インスタンス（初期化子適用済み）から除外列の初期値を写す（型に依らず正確・型ごとに 1 度だけ生成）
+        var prototype = _defaults.GetOrAdd(
+            entity.GetType(),
+            static type => Activator.CreateInstance(type)!
+        );
+
+        foreach (var property in excluded)
+        {
+            property.SetValue(entity, property.GetValue(prototype));
+        }
+    }
+
+    /// <summary>値が「未取得状態と同等（null / 空 byte[] / 内包値が空の値オブジェクト）」かどうか</summary>
+    private static bool IsUnset(object? value)
+    {
+        // 値オブジェクトは内包値を取り出して判定する
+        if (value is IValueObject valueObject)
+        {
+            value = valueObject.UnderlyingValue;
+        }
+        return value switch
+        {
+            null => true,
+            byte[] bytes => bytes.Length == 0,
+            _ => false,
+        };
+    }
+}
+
 /// <summary>値オブジェクト（Value Object）の非ジェネリックマーカー。内包値の取り出し・型判定に使う</summary>
 public interface IValueObject
 {
@@ -2114,6 +2212,13 @@ public interface ISqlQueryExecutor<TEntity>
         CancellationToken cancellationToken
     );
 
+    /// <summary>条件に一致するエンティティを射影して取得する（実装先が可能ならサーバー側で列を刈り込む）</summary>
+    Task<IReadOnlyList<TResult>> ToProjectionListAsync<TResult>(
+        SqlQueryPlan<TEntity> plan,
+        Expression<Func<TEntity, TResult>> selector,
+        CancellationToken cancellationToken
+    );
+
     /// <summary>条件に一致する先頭の 1 件を（Include 指定分とともに）取得する（該当なしは null）</summary>
     Task<TEntity?> FirstOrDefaultAsync(
         SqlQueryPlan<TEntity> plan,
@@ -2132,6 +2237,73 @@ public interface ISqlQueryExecutor<TEntity>
         bool cascadeDelete,
         CancellationToken cancellationToken
     );
+}
+
+/// <summary>
+/// 射影セレクタ（<c>v =&gt; new Dto { ... v.Prop ... }</c>）を走査し、「参照している列プロパティ名の集合」と
+/// 「その集合だけで射影を安全に再構成できるか（＝サーバー側列刈り込みが可能か）」を判定する式木ビジタ。
+/// </summary>
+/// <remarks>
+/// ラムダパラメータ（対象エンティティ）が「直上メンバー参照（<c>v.Prop</c>）」以外の位置に現れたら抽出不能とする
+/// （<c>v</c> 丸ごと参照・エンティティを引数/レシーバに取るメソッド呼び出し・多段ナビゲーション参照など）。
+/// 収集する名前が実際に列プロパティかどうか（ナビゲーションでないか）の突き合わせは呼び出し側（各実行器）が
+/// <c>EntitySaveMetadata.ResolveProjectionColumns</c> で行う（本クラスのみ収載する構成では EntitySaveMetadata が
+/// 同居しないため cref にしない）。抽出不能なら実行器は従来経路
+/// （全列取得 → メモリ内で射影）へフォールバックする。
+/// </remarks>
+public sealed class ProjectionColumnCollector : ExpressionVisitor
+{
+    private readonly ParameterExpression _parameter;
+    private readonly HashSet<string> _members = new(StringComparer.Ordinal);
+    private bool _extractable = true;
+
+    private ProjectionColumnCollector(ParameterExpression parameter) => _parameter = parameter;
+
+    /// <summary>
+    /// セレクタが参照する直上メンバー名を収集する。列参照のみで安全に抽出できたら true＋参照名集合、
+    /// 抽出不能（丸ごと参照・メソッド呼び出し等）なら false を返す。
+    /// </summary>
+    public static bool TryCollect<TEntity, TResult>(
+        Expression<Func<TEntity, TResult>> selector,
+        out IReadOnlyCollection<string> referencedProperties
+    )
+    {
+        // 単一パラメータ（対象エンティティ 1 つ）のラムダのみ扱う
+        if (selector.Parameters.Count != 1)
+        {
+            referencedProperties = Array.Empty<string>();
+            return false;
+        }
+
+        var collector = new ProjectionColumnCollector(selector.Parameters[0]);
+        collector.Visit(selector.Body);
+        referencedProperties = collector._members;
+        return collector._extractable;
+    }
+
+    /// <summary>メンバー参照を訪問する。レシーバがラムダパラメータ直上（<c>v.Prop</c>）なら名前を収集し、内側へは降りない</summary>
+    protected override Expression VisitMember(MemberExpression node)
+    {
+        if (node.Expression == _parameter && node.Member is PropertyInfo property)
+        {
+            // v.Prop の形。列参照候補として名前だけ収集し、内側のパラメータ訪問（丸ごと参照扱い）は避ける
+            _members.Add(property.Name);
+            return node;
+        }
+
+        return base.VisitMember(node);
+    }
+
+    /// <summary>ラムダパラメータの訪問。メンバー参照の直上以外で現れた＝丸ごと参照のため抽出不能とする</summary>
+    protected override Expression VisitParameter(ParameterExpression node)
+    {
+        if (node == _parameter)
+        {
+            _extractable = false;
+        }
+
+        return node;
+    }
 }
 
 /// <summary>検索条件・並び順・Include をチェーンで構築し、終端メソッド（ToListAsync 等）で実行するクエリ</summary>
@@ -2235,8 +2407,10 @@ public sealed class SqlQuery<TEntity>
 
     /// <summary>条件に一致するエンティティを取得し、指定の射影で変換して一覧を返す（名前付きクエリの射影用）</summary>
     /// <remarks>
-    /// 条件・並び順・ページングはバックエンド（方言 SQL / EF / インメモリ）側で適用され、
-    /// 射影はエンティティの実体化後にメモリ内で行う（v1 では列の刈り込みは行わない設計判断）。
+    /// 条件・並び順・ページングはバックエンド（方言 SQL / EF / インメモリ）側で適用される。
+    /// 射影の列は、セレクタが列プロパティ参照のみ（Include なし）のとき実装先が可能ならサーバー側で刈り込む
+    /// （SELECT する列・EF の射影・インメモリ複製を参照列に絞る）。Include 併用時やセレクタから列参照を
+    /// 安全に抽出できない場合は、従来どおり全列を取得してからメモリ内で射影する。
     /// </remarks>
     /// <param name="selector">エンティティから射影 DTO への変換式</param>
     /// <param name="cancellationToken">キャンセルトークン</param>
@@ -2247,9 +2421,7 @@ public sealed class SqlQuery<TEntity>
     {
         ArgumentNullException.ThrowIfNull(selector);
 
-        var entities = await ToListAsync(cancellationToken);
-        var project = selector.Compile();
-        return entities.Select(project).ToList();
+        return await _executor.ToProjectionListAsync(BuildPlan(), selector, cancellationToken);
     }
 
     /// <summary>条件に一致する行を一括削除する。cascadeDelete=true で子孫も FK 連鎖で削除する</summary>
@@ -2574,8 +2746,16 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         );
 
     /// <summary>エンティティ更新（更新対象ありで true）</summary>
-    public Task<bool> UpdateAsync(TEntity entity, CancellationToken cancellationToken = default) =>
-        InvokeAsync<bool>("Update", new RemoteEntityRequest<TEntity>(entity), cancellationToken);
+    public Task<bool> UpdateAsync(TEntity entity, CancellationToken cancellationToken = default)
+    {
+        // 無制限バイナリ列に値が残ったままの更新は送信前に弾く（サーバーの UPDATE 対象外でサイレントに失われるため）
+        UnboundedBinaryColumns.ThrowIfExcludedAssigned(entity);
+        return InvokeAsync<bool>(
+            "Update",
+            new RemoteEntityRequest<TEntity>(entity),
+            cancellationToken
+        );
+    }
 
     /// <summary>主キーによるエンティティ削除（削除対象ありで true）</summary>
     public Task<bool> DeleteAsync(TKey id, CancellationToken cancellationToken = default) =>
@@ -2590,6 +2770,9 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         CancellationToken cancellationToken = default
     )
     {
+        // 更新対象（RowState==Updated）に無制限バイナリ列の値が残っていれば送信前に弾く（カスケード対象も走査）
+        GuardUnboundedBinaryOnSave(entity, cascadeSave);
+
         var affected = await InvokeAsync<int>(
             "Save",
             new RemoteSaveRequest<TEntity>(entity, cascadeSave, cascadeDelete, insertWhenUpdateMissing),
@@ -2611,6 +2794,13 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
     )
     {
         var list = entities.ToList();
+
+        // 各集約ルート（カスケード対象含む）の更新エンティティに無制限バイナリ列の値が残っていれば送信前に弾く
+        foreach (var entity in list)
+        {
+            GuardUnboundedBinaryOnSave(entity, cascadeSave);
+        }
+
         var affected = await InvokeAsync<int>(
             "SaveMany",
             new RemoteSaveManyRequest<TEntity>(list, cascadeSave, cascadeDelete, insertWhenUpdateMissing),
@@ -2623,6 +2813,40 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         }
 
         return affected;
+    }
+
+    /// <summary>保存対象グラフのうち更新（Updated）エンティティに無制限バイナリ列の値が残っていないか検証する（AcceptChanges と同じ子方向走査）</summary>
+    private static void GuardUnboundedBinaryOnSave(EntityBase entity, bool cascade)
+    {
+        if (entity.IsUpdated)
+        {
+            UnboundedBinaryColumns.ThrowIfExcludedAssigned(entity);
+        }
+
+        if (!cascade)
+        {
+            return;
+        }
+
+        foreach (var property in CascadeNavigationProperties(entity.GetType()))
+        {
+            var value = property.GetValue(entity);
+
+            if (value is EntityBase child)
+            {
+                GuardUnboundedBinaryOnSave(child, true);
+            }
+            else if (value is IEnumerable<EntityBase> children)
+            {
+                foreach (var item in children)
+                {
+                    if (item is not null)
+                    {
+                        GuardUnboundedBinaryOnSave(item, true);
+                    }
+                }
+            }
+        }
     }
 
     /// <summary>型ごとのカスケード対象ナビゲーションプロパティ（[NavigationReference(Cascade=true)]）のキャッシュ</summary>

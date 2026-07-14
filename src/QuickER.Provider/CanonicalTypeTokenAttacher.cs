@@ -77,6 +77,7 @@ public static class CanonicalTypeTokenAttacher
                 SqlDbTypeName = typeInfo.SqlDbTypeName,
                 SqlDeclaredLength = typeInfo.SqlDeclaredLength,
                 IsRowVersion = typeInfo.IsRowVersion,
+                IsUnboundedBinary = typeInfo.IsUnboundedBinary,
                 CanonicalTypeToken = token,
             };
         }

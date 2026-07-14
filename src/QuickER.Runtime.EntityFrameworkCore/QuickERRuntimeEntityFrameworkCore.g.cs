@@ -37,8 +37,14 @@ public sealed class EntitySaveMetadata
     /// <summary>主キーに対応するプロパティ</summary>
     public required PropertyInfo KeyProperty { get; init; }
 
-    /// <summary>マッピング対象の全カラムプロパティ（ナビゲーション・基底プロパティ除く）</summary>
+    /// <summary>マッピング対象の全カラムプロパティ（ナビゲーション・基底プロパティ除く）。INSERT / BulkInsert は常にこれを使う</summary>
     public required IReadOnlyList<PropertyInfo> AllProperties { get; init; }
+
+    /// <summary>SELECT / UPDATE 対象の列プロパティ（全列から無制限バイナリ列を除いたもの。除外列なしは全列と一致）。行マッピングで使う</summary>
+    public required IReadOnlyList<PropertyInfo> SelectProperties { get; init; }
+
+    /// <summary>SELECT / UPDATE から除外する無制限バイナリ列（<see cref="UnboundedBinaryColumnAttribute"/> 付き）。除外列なしは空</summary>
+    public required IReadOnlyList<PropertyInfo> ExcludedProperties { get; init; }
 
     /// <summary>カラム名 → 列プロパティの対応（クエリ WHERE 句パラメータの型明示化で列型を引くのに使う）</summary>
     public required IReadOnlyDictionary<string, PropertyInfo> PropertyByColumn { get; init; }
@@ -83,7 +89,18 @@ public sealed class EntitySaveMetadata
                 $"{entityType.Name} の [Key] 属性付きプロパティは 1 つのみ許可されます（複合キーは Repository 非対応。対象: {string.Join(", ", keyProperties.Select(property => property.Name))}）。"
             ),
         };
-        var columnList = string.Join(", ", columns.Select(property => $"[{GetColumnName(property)}]"));
+        // 無制限バイナリ列（UnboundedBinaryColumnAttribute）を SELECT / UPDATE から外す。全列（AllProperties）は
+        // INSERT / BulkInsert のため保持し、SELECT 用列集合（selectProperties）だけを縮小する。除外列なしは全列と一致
+        var excludedColumns = columns
+            .Where(property =>
+                property.GetCustomAttribute<UnboundedBinaryColumnAttribute>() is not null
+            )
+            .ToList();
+        var selectProperties =
+            excludedColumns.Count == 0
+                ? columns
+                : columns.Where(property => !excludedColumns.Contains(property)).ToList();
+        var columnList = string.Join(", ", selectProperties.Select(property => $"[{GetColumnName(property)}]"));
         var cascades = allProperties
             .Select(property =>
                 (property, attribute: property.GetCustomAttribute<NavigationReferenceAttribute>())
@@ -104,6 +121,8 @@ public sealed class EntitySaveMetadata
         {
             KeyProperty = keyProperty,
             AllProperties = columns,
+            SelectProperties = selectProperties,
+            ExcludedProperties = excludedColumns,
             PropertyByColumn = columns.ToDictionary(
                 GetColumnName,
                 property => property,
@@ -120,7 +139,8 @@ public sealed class EntitySaveMetadata
     {
         var entity = new TEntity();
 
-        foreach (var property in AllProperties)
+        // 無制限バイナリ列は既定で SELECT 除外のため SelectProperties のみをマップする（除外列なしは全列と一致）
+        foreach (var property in SelectProperties)
         {
             var columnName = GetColumnName(property);
             var value = reader[columnName];
@@ -142,25 +162,108 @@ public sealed class EntitySaveMetadata
     }
 
     /// <summary>
-    /// 生 SQL の結果行を {TEntity} へマップする。<see cref="MapEntity"/> と同じ厳密マッピング（全列必須）だが、
-    /// 列不足（部分 SELECT）で <see cref="IndexOutOfRangeException"/> が出た場合は、必要な全列を含む
-    /// <see cref="InvalidOperationException"/> でラップして分かりやすくする。
+    /// 生 SQL の結果行を {TEntity} へマップする。<see cref="MapEntity"/> と同じ厳密マッピング（SELECT 対象列は必須）だが、
+    /// 列不足（部分 SELECT）で列が引けなかった場合は、必要な列を含む <see cref="InvalidOperationException"/> でラップして
+    /// 分かりやすくする。未知の列参照で投げられる例外はデータリーダーの実装で異なる
+    /// （<see cref="IndexOutOfRangeException"/> と <see cref="ArgumentOutOfRangeException"/>）ため両方を捕捉する。
+    /// 無制限バイナリ列は既定では取得しないが、生 SQL の SELECT に明示的に含まれていれば追加でマップする（ユーザーが意図して選んだ場合に取得できる）。
     /// </summary>
     public TEntity MapEntityFromRawSql<TEntity>(DbDataReader reader)
         where TEntity : EntityBase, new()
     {
+        TEntity entity;
+
         try
         {
-            return MapEntity<TEntity>(reader);
+            entity = MapEntity<TEntity>(reader);
         }
-        catch (IndexOutOfRangeException ex)
+        catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentOutOfRangeException)
         {
             throw new InvalidOperationException(
-                $"生 SQL の SELECT には {typeof(TEntity).Name} の全列（{ColumnList}）が必要です（SELECT * または全列指定）。"
+                $"生 SQL の SELECT には {typeof(TEntity).Name} の列（{ColumnList}）が必要です（SELECT * または全列指定）。"
                     + $"結果セットに不足している列があります: {ex.Message}",
                 ex
             );
         }
+
+        // 除外列（無制限バイナリ）が生 SQL の結果に含まれていれば opportunistic に取り込む
+        if (ExcludedProperties.Count > 0)
+        {
+            var present = RawReaderColumnNames(reader);
+
+            foreach (var property in ExcludedProperties)
+            {
+                var columnName = GetColumnName(property);
+
+                if (!present.Contains(columnName))
+                {
+                    continue;
+                }
+
+                var value = reader[columnName];
+
+                if (value is DBNull)
+                {
+                    property.SetValue(entity, null);
+                }
+                else
+                {
+                    property.SetValue(entity, SqlValueObjectActivator.Wrap(value, property.PropertyType));
+                }
+            }
+
+            // opportunistic な代入で状態が動かないよう変更なしを再確定する（列プロパティは素の auto-property だが念のため）
+            entity.RowState = RowState.Unchanged;
+        }
+
+        return entity;
+    }
+
+    /// <summary>データリーダーの列名集合を大文字小文字無視で 1 度だけ列挙する（生 SQL の除外列有無判定に使う）</summary>
+    private static HashSet<string> RawReaderColumnNames(DbDataReader reader)
+    {
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        for (var i = 0; i < reader.FieldCount; i++)
+        {
+            names.Add(reader.GetName(i));
+        }
+
+        return names;
+    }
+
+    /// <summary>
+    /// 射影セレクタが参照する列プロパティ名集合を、SELECT すべき列プロパティ（<see cref="PropertyInfo"/>）へ解決する。
+    /// 参照がすべて列プロパティ（無制限バイナリ列を含む）なら順序どおりの一覧を返し、1 つでもナビゲーション等の
+    /// 非列名が混じる、あるいは参照が 0 件なら <c>null</c>（＝サーバー側列刈り込み不可・従来経路へフォールバック）を返す。
+    /// </summary>
+    public IReadOnlyList<PropertyInfo>? ResolveProjectionColumns(
+        IReadOnlyCollection<string> propertyNames
+    )
+    {
+        // 参照列が 0 件だと SELECT する列が無くフォールバックが必要（例: 定数のみの射影）
+        if (propertyNames.Count == 0)
+        {
+            return null;
+        }
+
+        var resolved = new List<PropertyInfo>(propertyNames.Count);
+
+        foreach (var name in propertyNames)
+        {
+            // 全列（AllProperties）から名前一致で引く（除外＝無制限バイナリ列も射影が参照していれば取得対象にする）
+            var property = AllProperties.FirstOrDefault(candidate => candidate.Name == name);
+
+            if (property is null)
+            {
+                // 列でない（ナビゲーション等）が混じった＝安全に刈り込めない
+                return null;
+            }
+
+            resolved.Add(property);
+        }
+
+        return resolved;
     }
 
     private static string GetColumnName(PropertyInfo property) =>
@@ -760,6 +863,42 @@ public sealed class EfCoreSqlQueryExecutor<TEntity, TContext>(
         }
 
         return items;
+    }
+
+    /// <summary>条件に一致するエンティティを射影して取得する（列参照のみ・Include なしのときは EF にサーバー側射影させる）</summary>
+    /// <remarks>
+    /// Include があるか、セレクタから列参照のみを安全に抽出できない場合は、従来経路
+    /// （全列取得 → メモリ内で射影）へフォールバックする。刈り込み可能時は、フィルタ・並び順・ページングを
+    /// 適用した <see cref="IQueryable{T}"/> に <c>Select(selector)</c> を直適用し、EF に列を絞らせる。
+    /// </remarks>
+    public async Task<IReadOnlyList<TResult>> ToProjectionListAsync<TResult>(
+        SqlQueryPlan<TEntity> plan,
+        Expression<Func<TEntity, TResult>> selector,
+        CancellationToken cancellationToken
+    )
+    {
+        // Include なし・列参照のみのときだけ EF の Select 直適用でサーバー側射影する（可否判定は ADO と同じ収集器）
+        var prunable =
+            plan.Includes.Count == 0
+            && ProjectionColumnCollector.TryCollect(selector, out var referenced)
+            && EntitySaveMetadata.For(typeof(TEntity)).ResolveProjectionColumns(referenced) is not null;
+
+        if (!prunable)
+        {
+            // フォールバック: 全列（Include 分含む）を取得してからメモリ内で射影する
+            var entities = await ToListAsync(plan, cancellationToken);
+            return entities.Select(selector.Compile()).ToList();
+        }
+
+        await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+
+        // Include は無い前提のため適用しない。並び順・ページングを適用してから Select を直適用する
+        var query = ApplyPaging(
+            ApplyOrderings(ApplyPredicates(context.Set<TEntity>().AsNoTracking(), plan), plan),
+            plan
+        );
+
+        return await query.Select(selector).ToListAsync(cancellationToken);
     }
 
     /// <summary>条件に一致する先頭の 1 件を（Include 指定分とともに）取得する（該当なしは null）</summary>

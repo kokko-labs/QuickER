@@ -150,6 +150,12 @@ namespace QuickER.Cli.Resources {
             }
         }
 
+        public static string Cli_Opt_ExcludeUnboundedBinary {
+            get {
+                return ResourceManager.GetString("Cli_Opt_ExcludeUnboundedBinary", resourceCulture);
+            }
+        }
+
         public static string Cli_SchemaFileNotFound {
             get {
                 return ResourceManager.GetString("Cli_SchemaFileNotFound", resourceCulture);

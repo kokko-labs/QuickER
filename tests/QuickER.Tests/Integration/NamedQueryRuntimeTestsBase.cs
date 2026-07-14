@@ -215,6 +215,33 @@ public abstract class NamedQueryRuntimeTestsBase : IDisposable
         (await orders.GetByCustomerTypedAsync(CustomerIdValue.Create(999), Ct)).Should().BeEmpty();
     }
 
+    /// <summary>
+    /// 11. Include＋射影（ナビゲーション参照）は列刈り込み対象外で従来経路（全列取得→メモリ内射影）へ
+    /// フォールバックし、Include で読み込んだナビゲーションを射影できる（Ado・EF 両実装で同一結果）。
+    /// </summary>
+    [Fact(
+        DisplayName = "[NamedQuery] 11: Include＋射影はフォールバックしナビゲーションを射影できる"
+    )]
+    public async Task Projection_WithInclude_FallsBackAndProjectsNavigation()
+    {
+        await ResetAndSeedAsync();
+        var orders = CreateOrderRepository();
+
+        // Include したナビ（Customer）をセレクタが参照する＝列刈り込み不可。従来経路で Customer を読み射影する
+        var rows = await orders
+            .Query()
+            .Where(o => o.CustomerId == CustomerIdValue.Create(1))
+            .Include(o => o.Customer)
+            .OrderBy(o => o.OrderId)
+            .ToProjectionListAsync(
+                o => new OrderCustomerRow(o.OrderId.Value, o.Customer.Name.Value),
+                Ct
+            );
+
+        rows.Select(r => r.OrderId).Should().Equal(10, 11, 13);
+        rows.Should().OnlyContain(r => r.CustomerName == "Alice");
+    }
+
     /// <summary>9. manual クエリ（SpecialLookup・partial 実装）が契約経由で呼び出せる</summary>
     [Fact(DisplayName = "[NamedQuery] 9: manual クエリ（partial 実装）が契約経由で動く")]
     public async Task Manual_PartialImplementation_Works()
@@ -230,3 +257,6 @@ public abstract class NamedQueryRuntimeTestsBase : IDisposable
     /// <summary>使い終えた一時 DB を破棄する（派生の DI コンテナ破棄は派生側で行う）</summary>
     public virtual void Dispose() => _db.Dispose();
 }
+
+/// <summary>Include＋射影のフォールバック検証で使う DTO（注文ID と Include で読んだ顧客名）</summary>
+public sealed record OrderCustomerRow(int OrderId, string CustomerName);

@@ -414,6 +414,9 @@ internal sealed partial class CSharpGenerationModelBuilder
             // SQL パラメータ型明示化（[SqlColumnType]）用。VO 有無に関わらず DB 由来の生値を載せる（束縛は素値へ開いてから）
             SqlDbTypeName = typeInfo.SqlDbTypeName,
             SqlDeclaredLength = typeInfo.SqlDeclaredLength,
+            // 無制限バイナリ列のマーカー（[UnboundedBinaryColumn] 付与判定用）。付与可否はテンプレート側の
+            // グローバル変数（exclude_unbounded_binary）で制御するため、ここでは options 条件を掛けず常時転記する
+            IsUnboundedBinary = typeInfo.IsUnboundedBinary,
             // DB 定義メタ属性（[DbColumnMeta]）用。方言中立トークンと列の説明（型解決とは独立にモデルから引く）
             CanonicalTypeToken = typeInfo.CanonicalTypeToken,
             // [DbColumnMeta(..., Description = "...")] へ C# リテラルとして埋め込むためエスケープする（未エスケープだと " や \ でコンパイル不能になる）

@@ -192,6 +192,25 @@ public sealed class CSharpCodeGenerationService
             )
             : [];
 
+        // 無制限バイナリ列の除外（ExcludeUnboundedBinaryColumns）が ON のとき、除外対象列の一覧を組み立てる
+        // （Info 診断専用。生成コード側の可視化は各プロパティの [UnboundedBinaryColumn] 属性が担う）。
+        var excludedColumnLines = options.ExcludeUnboundedBinaryColumns
+            ? BuildExcludedColumnLines(model)
+            : [];
+
+        // 除外列が 1 つ以上あれば Info 診断で通知する（利用者へ「どの列が SELECT / UPDATE から外れたか」を明示）。
+        if (excludedColumnLines.Count > 0)
+        {
+            diagnostics.Add(
+                Info(
+                    string.Format(
+                        Strings.CodeGen_Info_ExcludedUnboundedBinaryColumns,
+                        string.Join(", ", excludedColumnLines)
+                    )
+                )
+            );
+        }
+
         // 出力ファイルの構成（非分割=1 ファイル、分割=カテゴリごと、マルチ方言=契約＋方言別実装）を決め、
         // 各ファイルを範囲を絞って描画する。1 ファイルに複数スペック（非分割マルチ方言）が対応する場合は連結する。
         var specs = GeneratedFilePlanner.Plan(options);
@@ -466,6 +485,7 @@ public sealed class CSharpCodeGenerationService
                 SqlDbTypeName = sqlServer.SqlDbTypeName,
                 SqlDeclaredLength = sqlServer.SqlDeclaredLength,
                 IsRowVersion = primary.IsRowVersion,
+                IsUnboundedBinary = primary.IsUnboundedBinary,
             };
         }
 
@@ -666,6 +686,24 @@ public sealed class CSharpCodeGenerationService
         return normalized[..^".g.cs".Length] + ".g.md";
     }
 
+    /// <summary>
+    /// 無制限バイナリ列の除外対象一覧を <c>{EntityClass}.{Property}（{テーブル}.{列名}）</c> 形式の行で組み立てる。
+    /// </summary>
+    /// <remarks>
+    /// 生成 Entity のプロパティのうち <see cref="CSharpPropertyModel.IsUnboundedBinary"/> のものを対象にする
+    /// （マーカー属性 <c>[UnboundedBinaryColumn]</c> の付与対象と一致）。Info 診断のメッセージ組み立てに使う。
+    /// </remarks>
+    private static IReadOnlyList<string> BuildExcludedColumnLines(CSharpGenerationModel model) =>
+        model
+            .EntityClasses.SelectMany(entity =>
+                entity
+                    .Properties.Where(property => property.IsUnboundedBinary)
+                    .Select(property =>
+                        $"{entity.ClassName}.{property.PropertyName}（{entity.TableName}.{property.ColumnName}）"
+                    )
+            )
+            .ToList();
+
     /// <summary>エラー診断を作成する</summary>
     private static GenerationDiagnostic Error(string message) =>
         new() { Severity = GenerationDiagnosticSeverity.Error, Message = message };
@@ -673,4 +711,8 @@ public sealed class CSharpCodeGenerationService
     /// <summary>警告診断を作成する</summary>
     private static GenerationDiagnostic Warning(string message) =>
         new() { Severity = GenerationDiagnosticSeverity.Warning, Message = message };
+
+    /// <summary>情報診断を作成する</summary>
+    private static GenerationDiagnostic Info(string message) =>
+        new() { Severity = GenerationDiagnosticSeverity.Info, Message = message };
 }
