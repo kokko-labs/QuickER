@@ -1,11 +1,9 @@
 using System;
-using System.Data;
 using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
-using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.SqlServer;
 using QuickER.Tests.GeneratedSqlServerBinaryFixture;
@@ -26,11 +24,10 @@ namespace QuickER.Tests.Integration;
 /// (2) 除外の FOR JSON 縮小 SELECT、(3) <c>WithUnboundedBinary()</c> のプレーン全列 SELECT——を実 DB で往復検証する。
 /// </para>
 /// <para>
-/// シードは <b>生 SQL のパラメータ付き INSERT</b> で行う（<c>row_ver</c>＝<c>rowversion</c> 列を列指定から外し、
-/// SQL Server に自動採番させる）。これは store-generated な rowversion 列を持つテーブルへの正しい投入方法である。
-/// なお、生成された Repository の <c>InsertAsync</c>（全列 INSERT）は rowversion 列へ明示値を書こうとして
-/// SQL Server が拒否するため、本テストの投入には用いない（この制約は本タスクの検証対象＝Stream/除外 SELECT とは
-/// 独立した既存の課題。詳細は報告参照）。
+/// シードは <b>生成された Repository の <c>InsertAsync</c></b> で行う。<c>row_ver</c>＝<c>rowversion</c> 列は
+/// <c>[StoreGeneratedColumn]</c> により INSERT / BulkInsert / UPDATE の対象から自動的に外れ、SQL Server が採番する
+/// （store-generated 列の除外＝本テストが検証する修正の 1 つ）。<c>InsertAsync</c> が rowversion 列入りテーブルで
+/// クラッシュしないこと自体が <see cref="InitializeAsync"/> のシード成立で実証される。
 /// </para>
 /// <para>
 /// SQL Server 側は Docker（Testcontainers）依存のため、Docker 不在時は <see cref="SqlServerContainerFixture"/> の
@@ -63,7 +60,7 @@ public sealed class SqlServerBinaryColumnRuntimeTests(SqlServerContainerFixture 
     /// <summary>文書 3 の本体バイナリ（payload。CountWithPayload の 2 件目）</summary>
     private static readonly byte[] Doc3Payload = [5, 6];
 
-    /// <summary>スキーマを作成し、生 SQL でシードデータを投入する（rowversion 列は SQL Server が自動採番）。</summary>
+    /// <summary>スキーマを作成し、Repository の <c>InsertAsync</c> でシードデータを投入する（rowversion 列は SQL Server が自動採番）。</summary>
     public async ValueTask InitializeAsync()
     {
         Assert.SkipUnless(_fixture.IsAvailable, _fixture.UnavailableReason);
@@ -96,8 +93,9 @@ public sealed class SqlServerBinaryColumnRuntimeTests(SqlServerContainerFixture 
     private IDocumentRepository Documents() => _provider.GetRequiredService<IDocumentRepository>();
 
     /// <summary>
-    /// 生 SQL のパラメータ付き INSERT で 1 行投入する。rowversion（store-generated）の <c>row_ver</c> は
-    /// 列指定から外し、SQL Server に自動採番させる（rowversion 列を持つテーブルへの正しい投入方法）。
+    /// 生成された Repository の <c>InsertAsync</c> で 1 行投入する。無制限バイナリ列（<c>payload</c> / <c>thumb</c>）は
+    /// INSERT に含まれるため値を渡せる。rowversion（store-generated）の <c>row_ver</c> は <c>[StoreGeneratedColumn]</c> で
+    /// INSERT から自動的に外れ、SQL Server が採番する（明示値を書かないためクラッシュしない）。
     /// </summary>
     private async Task SeedDocumentAsync(
         int id,
@@ -107,31 +105,18 @@ public sealed class SqlServerBinaryColumnRuntimeTests(SqlServerContainerFixture 
         byte[]? checksum
     )
     {
-        await using var connection = await _fixture.OpenConnectionAsync(Ct);
-        await using var command = connection.CreateCommand();
-        command.CommandText =
-            "INSERT INTO [documents] ([document_id], [title], [payload], [thumb], [checksum]) "
-            + "VALUES (@id, @title, @payload, @thumb, @checksum);";
-        command.Parameters.Add(new SqlParameter("@id", SqlDbType.Int) { Value = id });
-        command.Parameters.Add(
-            new SqlParameter("@title", SqlDbType.NVarChar, 50) { Value = title }
-        );
-        command.Parameters.Add(
-            new SqlParameter("@payload", SqlDbType.VarBinary, -1)
-            {
-                Value = (object?)payload ?? DBNull.Value,
-            }
-        );
-        command.Parameters.Add(
-            new SqlParameter("@thumb", SqlDbType.VarBinary, -1) { Value = thumb }
-        );
-        command.Parameters.Add(
-            new SqlParameter("@checksum", SqlDbType.VarBinary, 16)
-            {
-                Value = (object?)checksum ?? DBNull.Value,
-            }
-        );
-        await command.ExecuteNonQueryAsync(Ct);
+        await Documents()
+            .InsertAsync(
+                new DocumentEntity
+                {
+                    DocumentId = id,
+                    Title = title,
+                    Payload = payload,
+                    Thumb = thumb,
+                    Checksum = checksum,
+                },
+                Ct
+            );
     }
 
     // ── Stream アクセサ（Read/Write{Column}Async）の実 DB 検証 ──
@@ -354,6 +339,101 @@ public sealed class SqlServerBinaryColumnRuntimeTests(SqlServerContainerFixture 
         (await documents.CountWithPayloadAsync(Ct))
             .Should()
             .Be(2);
+    }
+
+    // ── rowversion（store-generated 列）の書き込み経路の実 DB 検証 ──
+
+    /// <summary>9. rowversion テーブルで InsertAsync が成功し、挿入後に rowversion を SELECT で読める</summary>
+    [Fact(
+        DisplayName = "[Binary/SqlServer] rowversion: InsertAsync 成功・rowversion が SELECT で読める"
+    )]
+    public async Task RowVersion_InsertAsync_Succeeds_AndRowVersionIsReadable()
+    {
+        var documents = Documents();
+
+        // InitializeAsync のシードは InsertAsync で投入済み（rowversion 列でクラッシュしない＝修正の実証）。
+        // 追加でもう 1 行を InsertAsync し、rowversion が DB 採番されて SELECT で取れることを確認する
+        await documents.InsertAsync(
+            new DocumentEntity
+            {
+                DocumentId = 20,
+                Title = "insert-check",
+                Thumb = [7],
+            },
+            Ct
+        );
+
+        var doc = await documents.GetByIdAsync(20, Ct);
+        doc.Should().NotBeNull();
+        doc!
+            .RowVer.Should()
+            .NotBeNull("rowversion は DB（SQL Server）が採番し SELECT で取得できる（除外対象外）");
+        doc.RowVer!.Length.Should().Be(8, "SQL Server の rowversion は 8 バイト");
+    }
+
+    /// <summary>10. UpdateAsync が成功し、UPDATE 後に rowversion の値が DB により変わっている</summary>
+    [Fact(
+        DisplayName = "[Binary/SqlServer] rowversion: UpdateAsync 成功・UPDATE 後に rowversion が変わる"
+    )]
+    public async Task RowVersion_UpdateAsync_Succeeds_AndDbBumpsRowVersion()
+    {
+        var documents = Documents();
+
+        // 取得したエンティティの除外列（payload=null・thumb=空）は未取得状態のため UPDATE ガードに触れない
+        var before = await documents.GetByIdAsync(1, Ct);
+        before.Should().NotBeNull();
+        var beforeRowVer = before!.RowVer;
+        beforeRowVer.Should().NotBeNull("更新前から rowversion は読める");
+
+        before.Title = "alpha-updated";
+        (await documents.UpdateAsync(before, Ct))
+            .Should()
+            .BeTrue(
+                "rowversion 列入りテーブルでも UPDATE は成功する（rowversion は SET から除外）"
+            );
+
+        var after = await documents.GetByIdAsync(1, Ct);
+        after.Should().NotBeNull();
+        after!.Title.Should().Be("alpha-updated", "非 store-generated 列は更新される");
+        after.RowVer.Should().NotBeNull();
+        after
+            .RowVer.Should()
+            .NotEqual(beforeRowVer!, "UPDATE のたびに DB が rowversion を自動更新する");
+    }
+
+    /// <summary>11. rowversion テーブルで BulkInsertAsync（SqlBulkCopy）が成功する</summary>
+    [Fact(DisplayName = "[Binary/SqlServer] rowversion: BulkInsertAsync（SqlBulkCopy）が成功する")]
+    public async Task RowVersion_BulkInsertAsync_Succeeds()
+    {
+        var documents = Documents();
+
+        var inserted = await documents.BulkInsertAsync(
+            [
+                new DocumentEntity
+                {
+                    DocumentId = 30,
+                    Title = "bulk-30",
+                    Thumb = [1],
+                },
+                new DocumentEntity
+                {
+                    DocumentId = 31,
+                    Title = "bulk-31",
+                    Thumb = [2],
+                },
+            ],
+            Ct
+        );
+        inserted
+            .Should()
+            .Be(
+                2,
+                "rowversion 列入りテーブルでも BulkInsert は成功する（rowversion は列マッピング対象外）"
+            );
+
+        var doc = await documents.GetByIdAsync(30, Ct);
+        doc.Should().NotBeNull();
+        doc!.RowVer.Should().NotBeNull("BulkInsert 後も DB が rowversion を採番している");
     }
 
     /// <summary>CanSeek を持たない読み取り専用ストリーム（length 指定必須経路の検証用）</summary>

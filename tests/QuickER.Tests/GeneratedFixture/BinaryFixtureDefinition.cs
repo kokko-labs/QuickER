@@ -18,8 +18,10 @@ namespace QuickER.Tests.GeneratedBinaryFixture;
 /// <para>
 /// 値オブジェクトは OFF（シンプル優先）。バイナリ列を素の <c>byte[]</c> のまま扱うことで、除外の意味論
 /// （null / 空配列の未取得状態・更新ガード・生 SQL の opportunistic マップ）を素直に検証できる。
-/// <c>row_ver</c> は nullable にする＝DB 側で自動採番される <c>rowversion</c> を SQLite/EF が生成しないため、
-/// 全列 INSERT（QuickER）・列省略 INSERT（EF の store-generated 扱い）のどちらでも成立させる。
+/// <c>row_ver</c>（<c>rowversion</c>）は store-generated 列として <c>[StoreGeneratedColumn]</c> が付与され、
+/// QuickER の INSERT / BulkInsert / UPDATE の対象から外れる（DB が採番するため。SELECT では取得する）。EF も
+/// Fluent の <c>IsRowVersion()</c> で store-generated として扱う。nullable にする＝SQLite/EF は <c>rowversion</c> を
+/// 自動採番しないため、INSERT で列が省略されても NULL のまま成立させる。
 /// 文字列列は Unicode（<c>nvarchar</c>）で統一する（可搬フィクスチャの不変条件）。
 /// </para>
 /// <para>
@@ -138,7 +140,8 @@ public static class BinaryFixtureDefinition
                     DataType = "varbinary(16)",
                     IsNullable = true,
                 },
-                // rowversion ＝除外対象外の検証用。DB 側自動採番のため nullable（QuickER は全列 INSERT・EF は store-generated 扱い）
+                // rowversion ＝store-generated 列（[StoreGeneratedColumn]）。QuickER も EF も INSERT / UPDATE から除外し DB が採番する。
+                // DB 側自動採番のため nullable（SQLite/EF は自動採番しないので INSERT 省略で NULL のまま）
                 new Column
                 {
                     Id = DocumentRowVerColId,

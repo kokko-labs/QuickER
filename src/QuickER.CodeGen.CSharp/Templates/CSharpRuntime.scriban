@@ -137,6 +137,17 @@ public sealed class DbTableMetaAttribute : Attribute
     public string Description { get; set; } = string.Empty;
 }
 {{ end }}
+{{~ if (emit_store_generated_attr || runtime_package_export) && render_runtime && emit_shared_infra ~}}
+/// <summary>
+/// DB が値を生成する列（SQL Server の <c>rowversion</c> / <c>timestamp</c> 等）のマーカー属性。
+/// これらの列は DB 側が採番するため、Repository (QuickER) の INSERT / BulkInsert / UPDATE の対象から除外される（SELECT では取得される）。
+/// 付与は生成オプションに依らず、DB が値を生成する列であれば常に行う。
+/// </summary>
+[AttributeUsage(AttributeTargets.Property, AllowMultiple = false)]
+public sealed class StoreGeneratedColumnAttribute : Attribute
+{
+}
+{{ end }}
 {{~ if (emit_unbounded_binary_attr || runtime_package_export) && render_runtime && emit_shared_infra ~}}
 /// <summary>
 /// 無制限バイナリ列（<c>varbinary(max)</c> / 長さ宣言なし BLOB 等）を SELECT / UPDATE 対象から除外するマーカー属性。
@@ -924,6 +935,7 @@ public abstract partial class EntityBase
 {{ end }}{{ if emit_sql_column_type_attr && property.sql_db_type_name }}    [SqlColumnType(SqlDbType.{{ property.sql_db_type_name }}{{ if property.sql_declared_length != 0 }}, Size = {{ property.sql_declared_length }}{{ end }}{{ if property.facet_precision }}, Precision = {{ property.facet_precision }}, Scale = {{ property.facet_scale }}{{ end }})]
 {{ end }}{{ if emit_db_meta_attr && property.canonical_type_token }}    [DbColumnMeta("{{ property.canonical_type_token }}"{{ if property.description != "" }}, Description = "{{ property.description }}"{{ end }})]
 {{ end }}{{ if exclude_unbounded_binary && property.is_unbounded_binary }}    [UnboundedBinaryColumn]
+{{ end }}{{ if property.is_row_version }}    [StoreGeneratedColumn]
 {{ end }}    public {{ property.type_name }} {{ property.property_name }} { get; set; }{{ property.initializer }}
 {{ end }}{{ for navigation in item.navigations }}
     /// <summary>{{ navigation.property_name }} ナビゲーションプロパティ</summary>
@@ -5782,6 +5794,9 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
     public required IReadOnlyList<PropertyInfo> ExcludedProperties { get; init; }
 
 {{~ if repositories ~}}
+    /// <summary>INSERT / BulkInsert 対象の列プロパティ（全列から store-generated 列を除いたもの。store-generated 列なしは全列と一致）</summary>
+    public required IReadOnlyList<PropertyInfo> InsertProperties { get; init; }
+
     /// <summary>主キーを除くカラムプロパティ</summary>
     public required IReadOnlyList<PropertyInfo> NonKeyProperties { get; init; }
 
@@ -5861,8 +5876,22 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
                 ? columns
                 : columns.Where(property => !excludedColumns.Contains(property)).ToList();
 {{~ if repositories ~}}
+        // DB が値を生成する列（rowversion / timestamp 等・StoreGeneratedColumnAttribute）は INSERT / UPDATE の対象から外す。
+        // これらは DB が採番するため明示的な書き込みは実行時エラーになる（SQL Server の timestamp 列など）。SELECT では取得する
+        var storeGeneratedColumns = columns
+            .Where(property =>
+                property.GetCustomAttribute<StoreGeneratedColumnAttribute>() is not null
+            )
+            .ToList();
+        // INSERT / BulkInsert 対象は全列から store-generated 列を除いたもの（store-generated 列なしは全列と一致）
+        var insertProperties =
+            storeGeneratedColumns.Count == 0
+                ? columns
+                : columns.Where(property => !storeGeneratedColumns.Contains(property)).ToList();
         var nonKeyProperties = selectProperties
-            .Where(property => property != keyProperty)
+            .Where(property =>
+                property != keyProperty && !storeGeneratedColumns.Contains(property)
+            )
             .ToList();
         var tableName = $"{{ quote_open }}{tableAttribute.Name}{{ quote_close }}";
         var keyColumnName = GetColumnName(keyProperty);
@@ -5908,6 +5937,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
             SelectProperties = selectProperties,
             ExcludedProperties = excludedColumns,
 {{~ if repositories ~}}
+            InsertProperties = insertProperties,
             NonKeyProperties = nonKeyProperties,
             Columns = selectProperties.Select(property => (property.Name, GetColumnName(property))).ToList(),
 {{~ end ~}}
@@ -5921,7 +5951,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
             SelectAllSql = $"SELECT {columnList} FROM {tableName};",
             SelectByIdSql = $"SELECT {columnList} FROM {tableName} WHERE {{ quote_open }}{keyColumnName}{{ quote_close }} = @id;",
             InsertSql =
-                $"INSERT INTO {tableName} ({string.Join(", ", columns.Select(property => $"{{ quote_open }}{GetColumnName(property)}{{ quote_close }}"))}) VALUES ({string.Join(", ", columns.Select(property => $"@{property.Name}"))});",
+                $"INSERT INTO {tableName} ({string.Join(", ", insertProperties.Select(property => $"{{ quote_open }}{GetColumnName(property)}{{ quote_close }}"))}) VALUES ({string.Join(", ", insertProperties.Select(property => $"@{property.Name}"))});",
             UpdateSql =
                 $"UPDATE {tableName} SET {string.Join(", ", updateAssignments)} WHERE {{ quote_open }}{keyColumnName}{{ quote_close }} = @id;",
             DeleteSql = $"DELETE FROM {tableName} WHERE {{ quote_open }}{keyColumnName}{{ quote_close }} = @id;",
@@ -6260,10 +6290,10 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
     }
 {{~ end ~}}
 {{~ if repositories ~}}
-    /// <summary>INSERT 用パラメータ（全カラム）を設定する（追加・グラフ挿入で共用）</summary>
+    /// <summary>INSERT 用パラメータ（store-generated 列を除く挿入対象カラム）を設定する（追加・グラフ挿入で共用）</summary>
     public void BindInsertParameters({{ sql_command_type }} command, EntityBase entity)
     {
-        foreach (var property in AllProperties)
+        foreach (var property in InsertProperties)
         {
             AddColumnParameter(
                 command,
@@ -6418,9 +6448,9 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
     }
 
 {{~ if repository_dialect == "sqlserver" ~}}
-    /// <summary>エンティティのコレクションを 1 行ずつ読み出す SqlBulkCopy 用の IDataReader を生成する</summary>
+    /// <summary>エンティティのコレクションを 1 行ずつ読み出す SqlBulkCopy 用の IDataReader を生成する（store-generated 列は挿入対象外）</summary>
     public IDataReader CreateDataReader(IEnumerable<EntityBase> entities) =>
-        new EntityDataReader(AllProperties, entities);
+        new EntityDataReader(InsertProperties, entities);
 
     /// <summary>エンティティ列を 1 行ずつ読み出して SqlBulkCopy へ流す IDataReader（DataTable を介さずメモリ効率を高める）</summary>
     /// <remarks>SqlBulkCopy は Read・GetValue・FieldCount・GetName・GetOrdinal のみ使用するため、それ以外の型付き取得は未対応とする</remarks>
