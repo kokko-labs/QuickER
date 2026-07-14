@@ -10,7 +10,7 @@ namespace QuickER.Tests.GeneratedRemoteServiceFixture;
 // リモートサービス生成でもサーバー側の実装クラスは従来どおりで、HTTP クライアント側は全クエリを
 // 転送メソッドとして自動生成するため、manual 実装が必要なのはサーバー側だけになる。
 
-/// <summary>manual クエリ（SpecialLookup）の自作 Repository 側実装</summary>
+/// <summary>manual クエリ（SpecialLookup）のRepository (QuickER) 側実装</summary>
 public sealed partial class OrderRepository
 {
     /// <summary>顧客IDに紐づく注文のうち最初の 1 件を返す（manual 実装の見本）</summary>
@@ -27,7 +27,7 @@ public sealed partial class OrderRepository
 /// <summary>EF Core 実装で生成されないメンバー（自由 SQL 2 件＋manual 1 件）の partial 実装</summary>
 public sealed partial class EfCoreOrderRepository
 {
-    /// <summary>顧客IDに紐づく注文金額の合計（該当なしは null。自作側の SUM と同じ意味論）</summary>
+    /// <summary>顧客IDに紐づく注文金額の合計（該当なしは null。QuickER 側の SUM と同じ意味論）</summary>
     public async Task<decimal?> SumAmountsAsync(
         int customerId,
         CancellationToken cancellationToken = default
@@ -39,7 +39,7 @@ public sealed partial class EfCoreOrderRepository
         return items.Count == 0 ? null : items.Sum(e => e.Amount!.Value);
     }
 
-    /// <summary>注文IDの一覧で注文を取得する（自作側の自由 SQL と同じ意味論）</summary>
+    /// <summary>注文IDの一覧で注文を取得する（QuickER 側の自由 SQL と同じ意味論）</summary>
     public Task<IReadOnlyList<OrderEntity>> GetByIdsRawAsync(
         IReadOnlyList<int> ids,
         CancellationToken cancellationToken = default

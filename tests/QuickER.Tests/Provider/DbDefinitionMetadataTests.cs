@@ -153,7 +153,7 @@ public class DbDefinitionMetadataTests
     {
         var diagram = BuildDiagram();
 
-        // sqlserver 単独（自作 Repository）
+        // sqlserver 単独（Repository (QuickER)）
         var sqlServerOnly = GenerateEntityMetaLines(
             diagram,
             new CodeGenerationOptions
@@ -164,7 +164,7 @@ public class DbDefinitionMetadataTests
             }
         );
 
-        // sqlite 単独（自作 Repository）
+        // sqlite 単独（Repository (QuickER)）
         var sqliteOnly = GenerateEntityMetaLines(
             diagram,
             new CodeGenerationOptions

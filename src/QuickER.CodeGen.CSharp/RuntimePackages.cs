@@ -9,7 +9,7 @@ namespace QuickER.CodeGen.CSharp;
 /// <para>
 /// 生成コードのうちスキーマに依存しない固定部分（EntityBase・属性・VO 基底・JSON コンバータ・Repository 共通契約・
 /// 方言別エンジン・EF 共通部品）は <c>Templates/CSharpRuntime.scriban</c> から出力される。これを 4 分割の NuGet
-/// パッケージ（コア＋自作方言エンジン×方言数＋EF）として配布できるようにするための ID を集約する。
+/// パッケージ（コア＋QuickER の方言エンジン×方言数＋EF）として配布できるようにするための ID を集約する。
 /// </para>
 /// <para>
 /// パッケージ ID は、パッケージ書き出し時のソースの名前空間と一致させる（<see cref="RuntimePackageSourceRenderer"/> が
@@ -21,10 +21,10 @@ public static class RuntimePackages
     /// <summary>コアパッケージ（共通基盤・共通契約。BCL のみ依存）の ID＝固定名前空間。</summary>
     public const string Core = "QuickER.Runtime";
 
-    /// <summary>自作 SQL Server エンジンパッケージ（<c>Microsoft.Data.SqlClient</c> 依存）の ID＝固定名前空間。</summary>
+    /// <summary>QuickER の SQL Server エンジンパッケージ（<c>Microsoft.Data.SqlClient</c> 依存）の ID＝固定名前空間。</summary>
     public const string SqlServer = "QuickER.Runtime.SqlServer";
 
-    /// <summary>自作 SQLite エンジンパッケージ（<c>Microsoft.Data.Sqlite</c> 依存）の ID＝固定名前空間。</summary>
+    /// <summary>QuickER の SQLite エンジンパッケージ（<c>Microsoft.Data.Sqlite</c> 依存）の ID＝固定名前空間。</summary>
     public const string Sqlite = "QuickER.Runtime.Sqlite";
 
     /// <summary>EF 共通部品パッケージ（EF Core 依存）の ID＝固定名前空間。</summary>

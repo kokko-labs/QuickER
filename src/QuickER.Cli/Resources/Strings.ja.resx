@@ -92,7 +92,7 @@
     <value>カテゴリごとに別ファイル・別名前空間で出力する（設定ファイルを上書き）</value>
   </data>
   <data name="Cli_Opt_RepositoryDialects" xml:space="preserve">
-    <value>自作 Repository を同時生成する方言（カンマ区切り複数指定可。例: sqlserver,sqlite。未指定時は --provider から単一導出する。設定ファイルを上書き）</value>
+    <value>Repository (QuickER) を同時生成する方言（カンマ区切り複数指定可。例: sqlserver,sqlite。未指定時は --provider から単一導出する。設定ファイルを上書き）</value>
   </data>
   <data name="Cli_Opt_RuntimePackages" xml:space="preserve">
     <value>生成コードにランタイム（固定コード）を含めず、NuGet パッケージ QuickER.Runtime.* への参照で賄う（既定 false。EF Core 生成とも併用可。設定ファイルを上書き）</value>
@@ -119,7 +119,7 @@
     <value>データベースからのスキーマ取得に失敗しました: {0}</value>
   </data>
   <data name="Cli_RepositoryDialectUnsupported" xml:space="preserve">
-    <value>自作 Repository（GenerateRepositories）は方言 '{0}' に対応していません。対応方言: {1}</value>
+    <value>Repository (QuickER)（GenerateRepositories）は方言 '{0}' に対応していません。対応方言: {1}</value>
   </data>
   <data name="Cli_GenerationAborted" xml:space="preserve">
     <value>生成エラーのため中止しました。</value>

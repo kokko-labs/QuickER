@@ -148,6 +148,38 @@ var doc = await documents
 - 取得したエンティティは正当なエンティティですが、除外列が UPDATE 対象外である点は変わりません。そのまま `UpdateAsync` すると既存ガードで例外になります（除外列の更新は上記の生 SQL `ExecuteSqlAsync` で行ってください）。
 - EF Core モードでは EF が元々全列を読むため no-op です（`Include` 併用エラーだけはパリティで同様に送出します）。
 
+#### Stream アクセサ `Read/Write{Column}Async`
+
+除外オプションを有効（かつ Repository (QuickER) を生成）にすると、除外列ごとに **ストリーミング**の読み書きメソッドが `I{Entity}Repository`（全機能面）へ追加生成されます。`byte[]` の一括読み込みを避け、**O(チャンク)＝blob 全量をメモリに載せずに** DB⇔ストリーム（またはファイル）を転送できます。GB 級のバイナリを扱う唯一正しいメモリ特性を持つ手段です。
+
+```csharp
+// documents.payload（除外列）に対して生成される例
+Task<bool> ReadPayloadAsync(int id, Stream destination, CancellationToken ct = default);
+Task<bool> WritePayloadAsync(int id, Stream? source, long? length = null, CancellationToken ct = default);
+// ファイル糖衣（拡張メソッド・Stream 版へ委譲）
+Task<bool> ReadPayloadToFileAsync(int id, string path, CancellationToken ct = default);
+Task<bool> WritePayloadFromFileAsync(int id, string path, CancellationToken ct = default);
+```
+
+意味論:
+
+- **戻り値**: `Read` は宛先へ書いたら `true`（空 blob も `true`）、行なし・列 NULL は `false`（宛先へ何も書きません）。`Write` は更新できたら `true`、行なしは `false`。既存の `UpdateAsync` の bool 規約に揃えています。
+- **`Write(id, null)`** は列を `NULL` に設定します（除外列を「未設定」へ戻す手段）。
+- **長さ**: `source` が `CanSeek` なら自動（`Length - Position`）、そうでなければ `length` 引数が必須です（欠落は `ArgumentException`）。SQLite の `zeroblob` が書き込み前に長さを要求するためで、契約は方言中立に統一しています。
+- **楽観排他（rowversion 等）はスコープ外**です（生 SQL と同格の直接列操作）。
+- **INSERT 専用メソッドはありません**。新規行は「INSERT（blob は `null` または空）→ `Write{Column}Async` で本体を流し込む」の 2 段で書きます。
+- **EF Core モードでは使用できません**（`NotSupportedException`）。EF は方言非依存設計のため方言固有のストリーミングを持てません。Repository (QuickER) を使うか、`partial` クラスで実装してください（`GenerateEfCore` と Repository (QuickER) を併用する構成では、EF 版実装のみ例外になります）。
+- **リモート面（`I{Entity}RemoteRepository`）には載りません**（HTTP クライアント・サーバーも無変更）。ネットワーク境界を越えるストリーミングは将来対応です。
+
+`WithUnboundedBinary()` との使い分け:
+
+| | `WithUnboundedBinary()` | Stream アクセサ |
+|---|---|---|
+| 単位 | エンティティ形（複数列・複数行・Include なし） | 列 1 本の読み書き |
+| メモリ | 中規模（`byte[]` で一括） | 無制限（O(チャンク)） |
+| 用途 | 除外列込みのエンティティが一時的に欲しい | 巨大 blob を DB⇔ファイル/ストリームで転送 |
+| 書き込み | 不可（取得のみ・更新は生 SQL） | `Write{Column}Async` で列単位に書ける |
+
 ## EF Core（GenerateEfCore）
 
 既存 Entity をそのまま EF に載せる方言非依存の `QuickErDbContext` と、**同一 Repository インターフェイスの EF 実装**を生成します。マイグレーションは範囲外で、スキーマ作成は DDL 生成の責務です（EF は既存スキーマへの接続専用）。
@@ -220,7 +252,7 @@ public sealed class OrderMaintenance(IOrderRepository orders)
 ```csharp
 // ---- サーバー（ASP.NET Core・Microsoft.NET.Sdk.Web）----
 var builder = WebApplication.CreateBuilder(args);
-builder.Services.AddGeneratedRepositories(connectionString);   // 実体は自作 Repository でも EF Core でもよい
+builder.Services.AddGeneratedRepositories(connectionString);   // 実体は Repository (QuickER) でも EF Core でもよい
 
 var app = builder.Build();
 app.MapGeneratedRemoteEndpoints();          // 認可を付けるなら .RequireAuthorization() を続ける
@@ -254,8 +286,8 @@ DB なしでユニットテストするためのインメモリ実装を追加�
 | パッケージ | 内容 | 依存 |
 |---|---|---|
 | `QuickER.Runtime` | 共通基盤・方言中立の契約 | なし |
-| `QuickER.Runtime.SqlServer` | 自作 SQL Server 方言エンジン | Microsoft.Data.SqlClient |
-| `QuickER.Runtime.Sqlite` | 自作 SQLite 方言エンジン | Microsoft.Data.Sqlite |
+| `QuickER.Runtime.SqlServer` | QuickER の SQL Server 方言エンジン | Microsoft.Data.SqlClient |
+| `QuickER.Runtime.Sqlite` | QuickER の SQLite 方言エンジン | Microsoft.Data.Sqlite |
 | `QuickER.Runtime.EntityFrameworkCore` | EF 共通部品 | Microsoft.EntityFrameworkCore.Relational |
 
 パッケージ版とツール版はロックステップ（同一バージョン）で公開され、同一メジャー内で互換です。DI 登録拡張・`QuickErDbContext`・エンティティ別実装などのスキーマ依存物は、本モードでも常に生成側に出力されます。

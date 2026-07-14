@@ -20,7 +20,7 @@ public sealed record QueryColumnBinding(
 /// </summary>
 /// <remarks>
 /// <para>
-/// 生成するのは <c>Query().Where(...)</c> に渡す単一の式で、自作 Repository（ADO）の
+/// 生成するのは <c>Query().Where(...)</c> に渡す単一の式で、Repository (QuickER)（ADO）の
 /// SqlExpressionTranslator と EF Core の双方が翻訳できる形に限定する：
 /// 比較・論理結合・否定・null 判定・文字列 Contains / StartsWith / EndsWith・コレクション Contains（IN）。
 /// 方言 SQL への翻訳は実行時にランタイム側が行うため、このエミッタに方言分岐はない。

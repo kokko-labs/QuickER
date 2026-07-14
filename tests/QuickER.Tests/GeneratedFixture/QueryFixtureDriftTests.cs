@@ -25,7 +25,7 @@ public sealed class QueryFixtureDriftTests
             QueryFixtureDefinition.Options,
             QueryFixtureDefinition.OutputFileName,
             "コミット済みクエリフィクスチャが現在のテンプレート出力と乖離しています。"
-                + "QueryFixtureDefinition（SQLite 方言・自作 Repository＋EF Core・名前付きクエリ入り）から再生成が必要です。"
+                + "QueryFixtureDefinition（SQLite 方言・Repository (QuickER)＋EF Core・名前付きクエリ入り）から再生成が必要です。"
         );
     }
 }

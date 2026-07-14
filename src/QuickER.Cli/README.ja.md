@@ -27,7 +27,7 @@ quicker scaffold --connection "Server=.;Database=Shop;Integrated Security=true;T
 | `--provider <name>` | 対象 DB。`sqlserver`（既定）/ `postgresql` / `mysql` / `oracle` / `sqlite` |
 | `--config <file>` | 生成オプション設定ファイル（quicker.json） |
 | `--namespace <name>` / `--split` | ルート名前空間の指定／カテゴリ別ファイル分割 |
-| `--repository-dialects <list>` | 自作 Repository のマルチターゲット生成（例 `sqlserver,sqlite`・keyed DI） |
+| `--repository-dialects <list>` | Repository (QuickER) のマルチターゲット生成（例 `sqlserver,sqlite`・keyed DI） |
 | `--runtime-packages` | ランタイム固定コードを出力せず `QuickER.Runtime.*` パッケージ参照で賄う |
 | `--api-docs` | API リファレンス Markdown（`{ベース名}.g.md`）を追加出力 |
 

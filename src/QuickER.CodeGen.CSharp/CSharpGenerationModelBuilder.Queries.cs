@@ -15,9 +15,9 @@ namespace QuickER.CodeGen.CSharp;
 /// </para>
 /// <list type="bullet">
 ///   <item>ミニ DSL（<see cref="QueryImplementationKind.Dsl"/>）→ 単一の共有本体を
-///     自作 Repository（全方言）・EF Core・インメモリのすべてへ出力</item>
+///     Repository (QuickER)（全方言）・EF Core・インメモリのすべてへ出力</item>
 ///   <item>自由 SQL（<see cref="QueryImplementationKind.Sql"/>）→ SQL 辞書にある方言の
-///     自作 Repository のみへ出力（EF Core・インメモリ・辞書にない方言は manual 扱い）</item>
+///     Repository (QuickER) のみへ出力（EF Core・インメモリ・辞書にない方言は manual 扱い）</item>
 ///   <item>manual（<see cref="QueryImplementationKind.Manual"/>）→ 契約宣言のみ</item>
 /// </list>
 /// </remarks>
@@ -135,7 +135,7 @@ internal sealed partial class CSharpGenerationModelBuilder
 
             if (members.SharedImplMember is { } shared)
             {
-                // ミニ DSL 系の共有本体は全方言の自作 Repository にも同一テキストで出力する
+                // ミニ DSL 系の共有本体は全方言のRepository (QuickER) にも同一テキストで出力する
                 foreach (var list in dialectMembers.Values)
                 {
                     list.Add(shared);

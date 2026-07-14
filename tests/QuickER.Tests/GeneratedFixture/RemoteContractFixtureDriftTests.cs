@@ -24,7 +24,7 @@ public sealed class RemoteContractFixtureDriftTests
             RemoteContractFixtureDefinition.Options,
             RemoteContractFixtureDefinition.OutputFileName,
             "コミット済みリモート契約フィクスチャが現在のテンプレート出力と乖離しています。"
-                + "RemoteContractFixtureDefinition（SQLite 方言・自作 Repository＋EF Core・リモート契約生成・名前付きクエリ入り）から再生成が必要です。"
+                + "RemoteContractFixtureDefinition（SQLite 方言・Repository (QuickER)＋EF Core・リモート契約生成・名前付きクエリ入り）から再生成が必要です。"
         );
     }
 }

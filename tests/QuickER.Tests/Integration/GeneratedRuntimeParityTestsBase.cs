@@ -7,7 +7,7 @@ using QuickER.Tests.GeneratedFixture;
 namespace QuickER.Tests.Integration;
 
 /// <summary>
-/// 生成ランタイム（自作 SQL Server 版と EF Core 版）を、同一シナリオで実 SQL Server（Testcontainers）に
+/// 生成ランタイム（QuickER の SQL Server 実装と EF Core 版）を、同一シナリオで実 SQL Server（Testcontainers）に
 /// 流して検証するパリティスイートの共通基底。シナリオはすべて生成インターフェイス
 /// （<see cref="ICustomerRepository"/> / <see cref="IOrderRepository"/> / <see cref="ISqlExecutor"/>）
 /// 経由で記述し、リポジトリ・エグゼキュータの生成方法だけを派生クラスが与える。
@@ -28,7 +28,7 @@ public abstract class GeneratedRuntimeParityTestsBase(SqlServerContainerFixture 
 
     // --- 派生クラスが与えるバックエンド固有のファクトリ ---
 
-    /// <summary>顧客リポジトリを生成する（自作 = 直接 new / EF = DbContextFactory 経由）</summary>
+    /// <summary>顧客リポジトリを生成する（QuickER = 直接 new / EF = DbContextFactory 経由）</summary>
     protected abstract ICustomerRepository CreateCustomerRepository();
 
     /// <summary>注文リポジトリを生成する</summary>

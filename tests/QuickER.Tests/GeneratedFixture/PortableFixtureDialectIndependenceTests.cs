@@ -21,7 +21,7 @@ namespace QuickER.Tests.GeneratedPortableFixture;
 /// <see cref="PortableFixtureDefinition"/> の型セットが可搬でない（見直しが必要）ことを意味する。
 /// </para>
 /// <para>
-/// 唯一の方言差は自作 SQL Server 版 ADO パス専用の <c>[SqlColumnType(SqlDbType.X)]</c> 属性
+/// 唯一の方言差はQuickER の SQL Server 実装 ADO パス専用の <c>[SqlColumnType(SqlDbType.X)]</c> 属性
 /// （およびその属性クラス・束縛ヘルパー）で、これは SQL Server 型マッパのみが付与する SQL Server 固有情報である
 /// （EF パスは参照しない）。そのため本テストは 2 段で証明する:
 /// <list type="number">
@@ -128,7 +128,7 @@ public sealed class PortableFixtureDialectIndependenceTests
             .Should()
             .Contain(
                 "[SqlColumnType(SqlDbType.",
-                "SqlServer は自作 ADO パス用の [SqlColumnType] 属性を付与する"
+                "SqlServer はQuickER の ADO パス用の [SqlColumnType] 属性を付与する"
             );
         postgreSql
             .Should()

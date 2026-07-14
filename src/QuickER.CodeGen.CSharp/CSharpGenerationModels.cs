@@ -420,7 +420,7 @@ internal sealed class CSharpRepositoryModel
     public string QuerySharedImplBlock { get; init; } = string.Empty;
 
     /// <summary>
-    /// 名前付きクエリの実装メンバー群（自作 Repository 用・方言名→整形済みテキスト）。
+    /// 名前付きクエリの実装メンバー群（Repository (QuickER) 用・方言名→整形済みテキスト）。
     /// ミニ DSL 系（全方言共通）と自由 SQL 系（その方言の SQL があるもののみ）を定義順に含む。
     /// 全対応方言のキーを常に持つ（SQL が無い実装先は manual 扱い＝メンバーを含まない）
     /// </summary>
@@ -445,6 +445,28 @@ internal sealed class CSharpRepositoryModel
 
     /// <summary>名前付きクエリのサーバー側リクエストレコード群（クラスレベルへ挿入。無ければ空文字）</summary>
     public string QueryRemoteServerRecordsBlock { get; init; } = string.Empty;
+
+    /// <summary>
+    /// 無制限バイナリ列の Stream アクセサの契約メンバー群（<c>I{Entity}Repository</c> 全機能面へ挿入・整形済み）。
+    /// <c>GenerateRepositories &amp;&amp; ExcludeUnboundedBinaryColumns</c> かつ除外列があるときのみ非空。リモート面には載せない。
+    /// </summary>
+    public string BinaryStreamContractBlock { get; init; } = string.Empty;
+
+    /// <summary>
+    /// 無制限バイナリ列の Stream アクセサの薄い実装メンバー群（固定 infra のエンジンへ委譲）。
+    /// Repository (QuickER) 2 方言の実装クラスとインメモリ実装クラスの双方へ同一テキストで挿入する（無ければ空文字）。
+    /// </summary>
+    public string BinaryStreamThinImplBlock { get; init; } = string.Empty;
+
+    /// <summary>
+    /// 無制限バイナリ列の Stream アクセサの EF Core 実装メンバー群（<c>NotSupportedException</c> を投げる。無ければ空文字）。
+    /// </summary>
+    public string BinaryStreamEfImplBlock { get; init; } = string.Empty;
+
+    /// <summary>
+    /// 無制限バイナリ列の Stream アクセサのファイル糖衣（Read/Write{Column}ToFile/FromFile）の拡張メソッド静的クラス全体（整形済み・無ければ空文字）。
+    /// </summary>
+    public string BinaryStreamFileExtensionsBlock { get; init; } = string.Empty;
 }
 
 // ---- EditModel 専用モデル ----

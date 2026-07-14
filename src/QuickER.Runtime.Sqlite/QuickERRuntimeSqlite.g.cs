@@ -12,6 +12,7 @@ using System.ComponentModel.DataAnnotations.Schema;
 using System.Data;
 using System.Data.Common;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Linq.Expressions;
 using System.Reflection;
@@ -317,6 +318,169 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
 
     /// <summary>検索条件・並び順・Include をチェーン指定して取得するクエリを開始する</summary>
     public SqlQuery<TEntity> Query() => new(new SqliteSqlQueryExecutor<TEntity>(_connectionFactory));
+
+    /// <summary>
+    /// 無制限バイナリ列（除外列）を主キー指定で宛先ストリームへ読み出す（O(チャンク) のストリーミング＝blob 全量を
+    /// メモリに載せない）。<paramref name="propertyName"/> は対象列の C# プロパティ名。行なし・列 NULL は
+    /// <c>false</c>（宛先へ何も書かない）、データを書いた場合は <c>true</c>（空 blob も true）を返す。
+    /// 楽観排他（rowversion）はスコープ外＝生 SQL と同格の直接列操作。
+    /// </summary>
+    protected async Task<bool> ReadUnboundedBinaryColumnAsync(
+        string propertyName,
+        TKey id,
+        Stream destination,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(destination);
+
+        var column = _metadata.ColumnByPropertyName(propertyName);
+        var quotedColumn = _metadata.QuotedColumnName(column);
+
+        await using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        // rowid 解決＋NULL 判定を 1 度の SELECT で行う（SqliteBlob は rowid テーブル前提。QuickER の SQLite DDL は
+        // WITHOUT ROWID を生成しないため安全）。IS NULL は 1（真）を返す
+        long rowid;
+
+        await using (
+            var probe = new SqliteCommand(
+                $"SELECT rowid, {quotedColumn} IS NULL FROM {_metadata.TableName} WHERE \"{_metadata.KeyColumnName}\" = @id;",
+                connection
+            )
+        )
+        {
+            _metadata.BindKeyParameter(probe, id);
+            await using var reader = await probe.ExecuteReaderAsync(cancellationToken);
+
+            if (!await reader.ReadAsync(cancellationToken))
+            {
+                return false;
+            }
+
+            if (reader.GetInt64(1) != 0)
+            {
+                return false;
+            }
+
+            rowid = reader.GetInt64(0);
+        }
+
+        await using var blob = new SqliteBlob(
+            connection,
+            _metadata.RawTableName,
+            _metadata.RawColumnName(column),
+            rowid,
+            readOnly: true
+        );
+        await blob.CopyToAsync(
+            destination,
+            UnboundedBinaryColumns.StreamCopyBufferSize,
+            cancellationToken
+        );
+        return true;
+    }
+
+    /// <summary>
+    /// 無制限バイナリ列（除外列）を主キー指定でストリームから書き込む（O(チャンク) のストリーミング）。
+    /// <paramref name="source"/> が <c>null</c> のとき列を NULL に設定する。<c>CanSeek</c> でない Stream は
+    /// <paramref name="length"/> の指定が必須（欠落は <see cref="ArgumentException"/>）。更新した場合は <c>true</c>、
+    /// 該当行なしは <c>false</c> を返す。楽観排他（rowversion）はスコープ外＝生 SQL と同格の直接列操作。
+    /// </summary>
+    protected async Task<bool> WriteUnboundedBinaryColumnAsync(
+        string propertyName,
+        TKey id,
+        Stream? source,
+        long? length = null,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var column = _metadata.ColumnByPropertyName(propertyName);
+        var quotedColumn = _metadata.QuotedColumnName(column);
+
+        await using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        // source=null は列を NULL に設定する（除外列を「未設定」に戻す手段）
+        if (source is null)
+        {
+            await using var nullCommand = new SqliteCommand(
+                $"UPDATE {_metadata.TableName} SET {quotedColumn} = NULL WHERE \"{_metadata.KeyColumnName}\" = @id;",
+                connection
+            );
+            _metadata.BindKeyParameter(nullCommand, id);
+            return await nullCommand.ExecuteNonQueryAsync(cancellationToken) > 0;
+        }
+
+        // CanSeek/length の契約検証は方言に依らず統一する（SQLite の zeroblob は長さ確定が必須）
+        var payloadLength = UnboundedBinaryColumns.ResolveWriteLength(source, length);
+
+        // 1 トランザクション内で zeroblob(len) を確保し、rowid を引いて SqliteBlob（書き込みモード）へチャンクコピーする
+        await using var transaction = (SqliteTransaction)
+            await connection.BeginTransactionAsync(cancellationToken);
+
+        try
+        {
+            await using (
+                var allocate = new SqliteCommand(
+                    $"UPDATE {_metadata.TableName} SET {quotedColumn} = zeroblob(@len) WHERE \"{_metadata.KeyColumnName}\" = @id;",
+                    connection,
+                    transaction
+                )
+            )
+            {
+                allocate.Parameters.AddWithValue("@len", payloadLength);
+                _metadata.BindKeyParameter(allocate, id);
+
+                if (await allocate.ExecuteNonQueryAsync(cancellationToken) == 0)
+                {
+                    // 該当行なし（zeroblob を確保できなかった）
+                    await transaction.RollbackAsync(cancellationToken);
+                    return false;
+                }
+            }
+
+            long rowid;
+
+            await using (
+                var rowidCommand = new SqliteCommand(
+                    $"SELECT rowid FROM {_metadata.TableName} WHERE \"{_metadata.KeyColumnName}\" = @id;",
+                    connection,
+                    transaction
+                )
+            )
+            {
+                _metadata.BindKeyParameter(rowidCommand, id);
+                rowid = (long)(await rowidCommand.ExecuteScalarAsync(cancellationToken))!;
+            }
+
+            await using (
+                var blob = new SqliteBlob(
+                    connection,
+                    _metadata.RawTableName,
+                    _metadata.RawColumnName(column),
+                    rowid,
+                    readOnly: false
+                )
+            )
+            {
+                await source.CopyToAsync(
+                    blob,
+                    UnboundedBinaryColumns.StreamCopyBufferSize,
+                    cancellationToken
+                );
+            }
+
+            await transaction.CommitAsync(cancellationToken);
+            return true;
+        }
+        catch
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            throw;
+        }
+    }
 
     /// <summary>RowState に従って 1 トランザクションで追加・更新・削除を保存する（既定で子をカスケード）</summary>
     public async Task<int> SaveAsync(
@@ -1587,6 +1751,8 @@ public sealed class EntitySaveMetadata
 
     /// <summary>角括弧で囲んだテーブル名</summary>
     public required string TableName { get; init; }
+    /// <summary>クォートなしの生テーブル名（無制限バイナリ列の Stream アクセサで SqliteBlob 等が要求する）</summary>
+    public required string RawTableName { get; init; }
 
     /// <summary>主キーに対応するプロパティ</summary>
     public required PropertyInfo KeyProperty { get; init; }
@@ -1707,6 +1873,7 @@ public sealed class EntitySaveMetadata
         {
             EntityType = entityType,
             TableName = tableName,
+            RawTableName = tableAttribute.Name,
             KeyProperty = keyProperty,
             KeyColumnName = keyColumnName,
             AllProperties = columns,
@@ -2124,6 +2291,20 @@ public sealed class EntitySaveMetadata
 
     private static string GetColumnName(PropertyInfo property) =>
         property.GetCustomAttribute<ColumnAttribute>()?.Name ?? property.Name;
+
+    /// <summary>C# プロパティ名から対応する列プロパティを引く（無制限バイナリ列＝除外列を含む全列から探す）。Stream アクセサが Repository / インメモリ双方で使う</summary>
+    public PropertyInfo ColumnByPropertyName(string propertyName) =>
+        AllProperties.FirstOrDefault(property => property.Name == propertyName)
+        ?? throw new InvalidOperationException(
+            $"プロパティ {propertyName} は列として見つかりませんでした。"
+        );
+
+    /// <summary>指定した列プロパティのクォート付きカラム名（例: \"payload\"）を返す（Stream アクセサの SQL 組み立て用）</summary>
+    public string QuotedColumnName(PropertyInfo property) =>
+        $"\"{GetColumnName(property)}\"";
+
+    /// <summary>指定した列プロパティのクォートなし生カラム名を返す（SqliteBlob 等が要求する）</summary>
+    public string RawColumnName(PropertyInfo property) => GetColumnName(property);
 }
 
 /// <summary>カスケード削除の DELETE 文群を FK メタデータから組み立てるプランナー（DB 非依存・純粋）</summary>

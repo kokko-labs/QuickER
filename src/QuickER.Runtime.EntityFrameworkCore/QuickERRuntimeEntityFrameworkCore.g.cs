@@ -10,6 +10,7 @@ using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using System.Data.Common;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Linq.Expressions;
 using System.Reflection;
@@ -268,6 +269,13 @@ public sealed class EntitySaveMetadata
 
     private static string GetColumnName(PropertyInfo property) =>
         property.GetCustomAttribute<ColumnAttribute>()?.Name ?? property.Name;
+
+    /// <summary>C# プロパティ名から対応する列プロパティを引く（無制限バイナリ列＝除外列を含む全列から探す）。Stream アクセサが Repository / インメモリ双方で使う</summary>
+    public PropertyInfo ColumnByPropertyName(string propertyName) =>
+        AllProperties.FirstOrDefault(property => property.Name == propertyName)
+        ?? throw new InvalidOperationException(
+            $"プロパティ {propertyName} は列として見つかりませんでした。"
+        );
 }
 
 /// <summary>RowState に従ってエンティティのグラフを 1 トランザクションで保存する内部エンジン</summary>
@@ -337,7 +345,7 @@ public static class EntityGraphSaver
 /// <remarks>
 /// <para>
 /// 値オブジェクト列はコンバータで string 列へ射影されるが、EF 既定ではこれらのインスタンスメソッドを翻訳できない。
-/// 自作 SQL Server 版と同じ意味論（Ordinal 部分一致 → LIKE・ワイルドカード <c>\ % _ [</c> のエスケープ・
+/// QuickER の SQL Server 実装と同じ意味論（Ordinal 部分一致 → LIKE・ワイルドカード <c>\ % _ [</c> のエスケープ・
 /// <c>ESCAPE '\'</c>・null 引数は空文字扱い）に合わせて <c>ISqlExpressionFactory.Like</c> を生成する。
 /// </para>
 /// <para>
@@ -432,7 +440,7 @@ public sealed class ValueObjectStringMethodTranslator(
     /// <summary>メソッド名に応じた LIKE パターン式（'%'＋エスケープ済み引数＋'%' 等）を組み立てる</summary>
     private SqlExpression BuildLikePattern(string methodName, SqlExpression argument)
     {
-        // 定数はクライアント側でエスケープして 1 つの定数パターンへ畳み込む（自作版と同じ形）。
+        // 定数はクライアント側でエスケープして 1 つの定数パターンへ畳み込む（QuickER 版と同じ形）。
         // TSelf オーバーロードの定数（EF が Create(...) を定数へ畳んだもの）は素値へ開いてから扱う
         if (argument is SqlConstantExpression { Value: var constantValue })
         {
@@ -447,7 +455,7 @@ public sealed class ValueObjectStringMethodTranslator(
             return _sqlExpressionFactory.Constant(constantPattern, _stringTypeMapping);
         }
 
-        // パラメータ等は SQL 側でエスケープする。null は自作版（null→空文字）に合わせ COALESCE で空文字へ
+        // パラメータ等は SQL 側でエスケープする。null は QuickER 版（null→空文字）に合わせ COALESCE で空文字へ
         SqlExpression escapedArgument = _sqlExpressionFactory.Coalesce(
             argument,
             _sqlExpressionFactory.Constant(string.Empty, _stringTypeMapping)
@@ -500,7 +508,7 @@ public sealed class ValueObjectStringMethodTranslator(
 /// </summary>
 /// <remarks>
 /// これにより <c>string.IsNullOrEmpty(x.Col.Value)</c> や <c>x.Col.Value &gt; 100</c> のような、素値を開いた
-/// 述語を EF が翻訳できるようになる（自作 SQL Server 版の「列は素の列でも VO の .Value でもよい」と同じ扱い）。
+/// 述語を EF が翻訳できるようになる（QuickER の SQL Server 実装の「列は素の列でも VO の .Value でもよい」と同じ扱い）。
 /// 列はコンバータで素値へ射影済みのため、CONVERT で素値型へ明示コアースし、後段の翻訳が
 /// コンバータ経由で再読込（不正キャスト）しないようにする。
 /// </remarks>
@@ -1245,7 +1253,7 @@ public sealed class EfCoreSqlQueryExecutor<TEntity, TContext>(
 /// <summary>メタデータと EF Core（<typeparamref name="TContext"/>）で CRUD を実装するリポジトリ基底クラス</summary>
 /// <remarks>
 /// <para>
-/// 自作 SQL Server 版と同じ契約を DbContext ベースで
+/// QuickER の SQL Server 実装と同じ契約を DbContext ベースで
 /// 実装する。DbContext は呼び出し単位で短命に生成し（呼び出しごとに接続を開く単位と同じ）、
 /// 読み取りは AsNoTracking、保存は <c>ChangeTracker.TrackGraph</c> による RowState → EntityState 変換で行う。
 /// </para>

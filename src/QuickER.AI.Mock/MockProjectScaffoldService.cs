@@ -15,7 +15,7 @@ namespace QuickER.AI.Mock;
 /// <param name="GeneratedDirectory">データ層コードを書き出した <c>Generated/</c> の絶対パス</param>
 /// <param name="DesignHtmlPath">デザイン仕様 HTML（<c>design/mock.html</c>）の絶対パス</param>
 /// <param name="ReadmePath">規約ドキュメント（<c>README-QuickER.md</c>）の絶対パス</param>
-/// <param name="RepositoryDialect">自作 Repository を出力した方言（未出力なら null）</param>
+/// <param name="RepositoryDialect">Repository (QuickER) を出力した方言（未出力なら null）</param>
 /// <param name="WrittenFiles">書き出した全ファイルの絶対パス</param>
 public sealed record MockProjectScaffoldResult(
     string SolutionFilePath,
@@ -36,7 +36,7 @@ public sealed record MockProjectScaffoldResult(
 /// 出力構成は Visual Studio 標準（ソリューション＋プロジェクトフォルダ）とする。ソリューションファイル
 /// <c>{ProjectName}.sln</c> を出力フォルダ直下に、プロジェクト一式（csproj スケルトン・<c>README-QuickER.md</c>・
 /// <c>design/mock.html</c>・データ層コード <c>Generated/</c>）を <c>{出力フォルダ}/{ProjectName}/</c> 配下へ書き出す。
-/// データ層コードは Entity/EditModel/Mapper/InMemory＋図の方言が対応方言なら自作 Repository を Split 出力する。
+/// データ層コードは Entity/EditModel/Mapper/InMemory＋図の方言が対応方言ならRepository (QuickER) を Split 出力する。
 /// UI 層（App/MainWindow/ビュー・ビューモデル）は AI（Claude Code）に書かせるため、ここでは生成しない。
 /// </para>
 /// <para>
@@ -61,7 +61,7 @@ public sealed class MockProjectScaffoldService
     private readonly DatabaseProviderRegistry _providers;
 
     /// <summary>プロバイダレジストリを注入して生成する</summary>
-    /// <param name="providers">図の方言・自作 Repository 方言の型マッパを解決するレジストリ</param>
+    /// <param name="providers">図の方言・Repository (QuickER) 方言の型マッパを解決するレジストリ</param>
     public MockProjectScaffoldService(DatabaseProviderRegistry providers)
     {
         _providers = providers;
@@ -94,7 +94,7 @@ public sealed class MockProjectScaffoldService
         var rootNamespace = SanitizeNamespace(projectName);
         var generatedNamespace = $"{rootNamespace}.Generated";
 
-        // 図の方言が対応方言（sqlserver/sqlite）なら自作 Repository も出力する（対称に InMemory も出す）
+        // 図の方言が対応方言（sqlserver/sqlite）ならRepository (QuickER) も出力する（対称に InMemory も出す）
         var repositoryDialect = ResolveRepositoryDialect(diagram.TargetDbms);
 
         // Visual Studio 標準構成: プロジェクト一式はプロジェクトフォルダ配下、ソリューションは出力フォルダ直下へ出す
@@ -133,7 +133,7 @@ public sealed class MockProjectScaffoldService
         );
     }
 
-    /// <summary>図の方言が自作 Repository の対応方言（sqlserver/sqlite）なら小文字方言名を、非対応なら null を返す</summary>
+    /// <summary>図の方言がRepository (QuickER) の対応方言（sqlserver/sqlite）なら小文字方言名を、非対応なら null を返す</summary>
     private static string? ResolveRepositoryDialect(string? targetDbms)
     {
         if (string.IsNullOrWhiteSpace(targetDbms))
@@ -148,7 +148,7 @@ public sealed class MockProjectScaffoldService
         return match;
     }
 
-    /// <summary>スキャフォールドのコード生成オプションを組み立てる（Split 出力・InMemory 必須・対応方言なら自作 Repository）</summary>
+    /// <summary>スキャフォールドのコード生成オプションを組み立てる（Split 出力・InMemory 必須・対応方言ならRepository (QuickER)）</summary>
     private static CodeGenerationOptions BuildOptions(
         string generatedNamespace,
         string? repositoryDialect
@@ -184,7 +184,7 @@ public sealed class MockProjectScaffoldService
 
         if (repositoryDialect is null)
         {
-            // 自作 Repository を出さない場合は単一辞書の後方互換オーバーロードで足りる
+            // Repository (QuickER) を出さない場合は単一辞書の後方互換オーバーロードで足りる
             result = DiagramCodeGenerator.Generate(
                 primaryProvider.TypeMapper,
                 primaryProvider.TypeCatalog,
@@ -194,7 +194,7 @@ public sealed class MockProjectScaffoldService
         }
         else
         {
-            // 自作 Repository の方言バケットは、その方言の型で解決した辞書を使う
+            // Repository (QuickER) の方言バケットは、その方言の型で解決した辞書を使う
             var dialectMappers = new Dictionary<string, IColumnTypeMapper>(
                 StringComparer.OrdinalIgnoreCase
             );
@@ -348,7 +348,7 @@ public sealed class MockProjectScaffoldService
                 "3. 実 DB（SQLite）へ切り替えるには、`AddGeneratedInMemoryRepositories()` を "
                     + "`AddGeneratedRepositories(接続文字列)` に差し替えます。",
             _ =>
-                "3. 実 DB へ切り替える場合は、QuickER で対応方言（SQL Server / SQLite）の自作 Repository を"
+                "3. 実 DB へ切り替える場合は、QuickER で対応方言（SQL Server / SQLite）のRepository (QuickER) を"
                     + "生成し直し、`AddGeneratedInMemoryRepositories()` を対応する DI 登録へ差し替えます。",
         };
 

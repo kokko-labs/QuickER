@@ -8,7 +8,7 @@ using QuickER.SqlServer;
 namespace QuickER.Tests.GeneratedMultiTargetFixture;
 
 /// <summary>
-/// 自作 Repository のマルチターゲット構成（SQL Server / SQLite の 2 方言同時生成）を含む
+/// Repository (QuickER) のマルチターゲット構成（SQL Server / SQLite の 2 方言同時生成）を含む
 /// 「第4の固定フィクスチャ」を生成する単一ソース。
 /// </summary>
 /// <remarks>
@@ -40,7 +40,7 @@ public static class MultiTargetPortableFixtureDefinition
 
     /// <summary>
     /// フィクスチャ生成に用いる決定的なオプション。
-    /// SQL Server / SQLite の自作 Repository を同時生成する（EF Core は併用不可）。
+    /// SQL Server / SQLite のRepository (QuickER) を同時生成する（EF Core は併用不可）。
     /// </summary>
     public static CodeGenerationOptions Options { get; } =
         new()

@@ -26,7 +26,7 @@ public static class RuntimePackageReferenceGuidance
     /// <summary>
     /// 生成オプションから、参照すべきパッケージ ID の一覧を決定する（Core を先頭に、方言・EF を続ける安定順）。
     /// </summary>
-    /// <param name="options">生成オプション（実効方言・自作 Repository / EF Core の有無を参照する）</param>
+    /// <param name="options">生成オプション（実効方言・Repository (QuickER) / EF Core の有無を参照する）</param>
     /// <returns>参照が必要なパッケージ ID（重複なし・安定順）。<see cref="RuntimePackages.Core"/> を必ず含む</returns>
     public static IReadOnlyList<string> Compute(CodeGenerationOptions options)
     {

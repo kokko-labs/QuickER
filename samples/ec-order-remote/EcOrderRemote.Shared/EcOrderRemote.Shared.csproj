@@ -20,7 +20,7 @@
 
   <ItemGroup>
     <!--
-      本体生成物のみをリンクする。Entity・自作 SQLite Repository・リモート面契約・HTTP クライアント・DI 拡張を含み、
+      本体生成物のみをリンクする。Entity・SQLite 方言の Repository (QuickER)・リモート面契約・HTTP クライアント・DI 拡張を含み、
       BCL＋上記 NuGet だけでコンパイルできる（クライアント／サーバー双方が共有する土台）。
       サーバー生成物（EcOrderRemote.RemoteServer.g.cs）はここではリンクしない。CLI は 2 ファイルを同一 out ディレクトリへ
       出力するが、サーバー実装は ASP.NET Core の FrameworkReference を必要とするため Server プロジェクト側でリンクする。

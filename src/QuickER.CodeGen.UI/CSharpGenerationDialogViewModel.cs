@@ -38,7 +38,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
 
     /// <summary>設定ストアとファイル選択サービスを指定して ViewModel を生成し、保存済み設定を復元する</summary>
     /// <param name="currentProvider">
-    /// アプリの現在のプロバイダ。自作 Repository の対象 DB チェックは、図の方言が対応方言
+    /// アプリの現在のプロバイダ。Repository (QuickER) の対象 DB チェックは、図の方言が対応方言
     /// （<see cref="CodeGenerationOptions.SupportedRepositoryDialects"/>）ならその方言のみ初期 ON にし、
     /// 未対応方言（PostgreSQL / MySQL / Oracle）なら両方 OFF から始める（null は SQL Server 扱い）
     /// </param>
@@ -142,7 +142,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     [ObservableProperty]
     private bool _generateMappers = true;
 
-    /// <summary>自作 Repository（QuickER）を生成するかどうか（DB アクセスの排他選択の一角）</summary>
+    /// <summary>Repository (QuickER)を生成するかどうか（DB アクセスの排他選択の一角）</summary>
     [ObservableProperty]
     private bool _generateRepositories;
 
@@ -155,11 +155,11 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     private bool _generateApiDocs;
 
     /// <summary>
-    /// 無制限バイナリ列（varbinary(max) / BLOB 等）を自作 Repository の SELECT / UPDATE から除外するかどうか（既定 OFF）
+    /// 無制限バイナリ列（varbinary(max) / BLOB 等）をRepository (QuickER) の SELECT / UPDATE から除外するかどうか（既定 OFF）
     /// </summary>
     /// <remarks>
-    /// 自作 Repository を生成する場合のみ意味を持つため、行ごと <see cref="ShowExcludeUnboundedBinary"/> で
-    /// 表示制御する（値は保持され、自作 Repository を選び直すと再び表示される）
+    /// Repository (QuickER) を生成する場合のみ意味を持つため、行ごと <see cref="ShowExcludeUnboundedBinary"/> で
+    /// 表示制御する（値は保持され、Repository (QuickER) を選び直すと再び表示される）
     /// </remarks>
     [ObservableProperty]
     private bool _excludeUnboundedBinaryColumns;
@@ -264,7 +264,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
         }
     }
 
-    /// <summary>自作 Repository（QuickER）を生成する（対応方言の図でのみ選択可）</summary>
+    /// <summary>Repository (QuickER)を生成する（対応方言の図でのみ選択可）</summary>
     public bool DbAccessRepository
     {
         get => GenerateRepositories;
@@ -293,11 +293,11 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     }
 
     /// <summary>
-    /// 「自作 Repository (QuickER)」ラジオのツールチップ（常時選択可。対象 DB をチェックで選ぶ運用を案内する）
+    /// 「Repository (QuickER)」ラジオのツールチップ（常時選択可。対象 DB をチェックで選ぶ運用を案内する）
     /// </summary>
     public string QuickErRepositoryToolTip => Strings.CodeGen_QuickErRepositoryToolTip;
 
-    // ===== 自作 Repository の対象 DB（チェックボックス群。Repository ラジオ選択時のみ表示） =====
+    // ===== Repository (QuickER) の対象 DB（チェックボックス群。Repository ラジオ選択時のみ表示） =====
 
     /// <summary>対象 DB に SQL Server を含めるか</summary>
     [ObservableProperty]
@@ -307,10 +307,10 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     [ObservableProperty]
     private bool _targetSqlite;
 
-    /// <summary>対象 DB チェックボックス群を表示するか（自作 Repository 選択時のみ）</summary>
+    /// <summary>対象 DB チェックボックス群を表示するか（Repository (QuickER) 選択時のみ）</summary>
     public bool ShowRepositoryDialectTargets => GenerateRepositories;
 
-    /// <summary>無制限バイナリ列の除外チェックボックスを表示するか（自作 Repository 選択時のみ）</summary>
+    /// <summary>無制限バイナリ列の除外チェックボックスを表示するか（Repository (QuickER) 選択時のみ）</summary>
     public bool ShowExcludeUnboundedBinary => GenerateRepositories;
 
     /// <summary>無制限バイナリ列の除外チェックボックスのツールチップ</summary>
@@ -389,7 +389,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     // パッケージ参照モードの切替は Runtime ファイルの有無を変えるため、生成されるファイルのプレビューを追従させる
     partial void OnUseRuntimePackagesChanged(bool value) => RefreshPreview();
 
-    /// <summary>DB アクセスラジオ（なし／自作 Repository／EF Core）の表示状態を再通知する</summary>
+    /// <summary>DB アクセスラジオ（なし／Repository (QuickER)／EF Core）の表示状態を再通知する</summary>
     private void RaiseDbAccessChanged()
     {
         OnPropertyChanged(nameof(DbAccessNone));
@@ -523,7 +523,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
             GenerateEntityClasses = true;
             GenerateEditModels = settings.GenerateEditModels;
             GenerateMappers = settings.GenerateMappers;
-            // DB アクセスは排他選択。両方 true の保存値（手編集等）は自作 Repository を優先する
+            // DB アクセスは排他選択。両方 true の保存値（手編集等）はRepository (QuickER) を優先する
             // （Repository ラジオは常時選択可のため、方言による無効化は行わない）
             GenerateRepositories = settings.GenerateRepositories;
             GenerateEfCore = settings.GenerateEfCore && !GenerateRepositories;
@@ -536,7 +536,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
             GenerateRemoteServices = settings.GenerateRemoteServices;
             // API リファレンス出力は DB アクセス選択とは独立のため、保存値をそのまま復元する
             GenerateApiDocs = settings.GenerateApiDocs;
-            // 無制限バイナリ列の除外は自作 Repository 選択時のみ効くが、値は保存値のまま復元する（行の表示/非表示は UI 側で連動）
+            // 無制限バイナリ列の除外はRepository (QuickER) 選択時のみ効くが、値は保存値のまま復元する（行の表示/非表示は UI 側で連動）
             ExcludeUnboundedBinaryColumns = settings.ExcludeUnboundedBinaryColumns;
             GenerateValueObjects = settings.GenerateValueObjects;
             UseGuidKeyForStringPrimaryKey = settings.UseGuidKeyForStringPrimaryKey;

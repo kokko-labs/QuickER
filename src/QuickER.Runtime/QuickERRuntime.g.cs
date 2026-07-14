@@ -14,6 +14,7 @@ using System.ComponentModel.DataAnnotations.Schema;
 using System.Data;
 using System.Data.Common;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Linq.Expressions;
 using System.Net.Http;
@@ -227,6 +228,32 @@ public static class UnboundedBinaryColumns
             byte[] bytes => bytes.Length == 0,
             _ => false,
         };
+    }
+
+    /// <summary>Stream アクセサのチャンクコピーで使う既定バッファサイズ（O(チャンク)＝blob 全量をメモリに載せない）</summary>
+    public const int StreamCopyBufferSize = 81920;
+
+    /// <summary>
+    /// 書き込み Stream の長さを決定する（方言に依らず契約を統一する共通検証）。<paramref name="source"/> が
+    /// <c>CanSeek</c> なら <c>Length - Position</c> を採用し、そうでなければ <paramref name="length"/> が必須
+    /// （欠落は <see cref="ArgumentException"/>）。SQLite の zeroblob は書き込み前に長さが確定している必要があるため。
+    /// </summary>
+    public static long ResolveWriteLength(Stream source, long? length)
+    {
+        if (source.CanSeek)
+        {
+            return source.Length - source.Position;
+        }
+
+        if (length is null)
+        {
+            throw new ArgumentException(
+                "CanSeek でない Stream は length 指定が必要です。",
+                nameof(length)
+            );
+        }
+
+        return length.Value;
     }
 }
 
@@ -1901,11 +1928,11 @@ public static class SqlValueObjectActivator
 }
 
 /// <summary>
-/// 生 SQL の束縛・スカラー変換・射影マッピングを担う共有ヘルパー（自作 SQL Server 版と EF Core 版の実行器で 1 系統を共有）。
+/// 生 SQL の束縛・スカラー変換・射影マッピングを担う共有ヘルパー（QuickER の SQL Server 実装と EF Core 版の実行器で 1 系統を共有）。
 /// </summary>
 /// <remarks>
 /// プロバイダ非依存の <see cref="DbCommand"/> / <see cref="DbDataReader"/> のみを扱い、特定 DB クライアントには依存しない。
-/// EF 単独出力（自作 SQL Server 実装を含まない構成）でも共通契約としてこのクラスを出力し、EF 版実行器が呼び出す。
+/// EF 単独出力（QuickER の SQL Server 実装を含まない構成）でも共通契約としてこのクラスを出力し、EF 版実行器が呼び出す。
 /// </remarks>
 public static class RawSqlMapper
 {
@@ -1993,7 +2020,7 @@ public static class RawSqlMapper
 
     /// <summary>
     /// 結果セットを <typeparamref name="TResult"/> へ寛容に射影して読み切る（単一値モード・DTO モードの 1 系統）。
-    /// プロバイダ非依存の <see cref="DbDataReader"/> を受け取り、自作・EF 版実行器でマッピング実装を共有する。
+    /// プロバイダ非依存の <see cref="DbDataReader"/> を受け取り、QuickER・EF 版実行器でマッピング実装を共有する。
     /// </summary>
     public static async Task<IReadOnlyList<TResult>> ReadProjectionRowsAsync<TResult>(
         DbDataReader reader,

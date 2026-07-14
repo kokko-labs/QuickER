@@ -39,7 +39,7 @@ public enum PortableDialect
 /// bool は Oracle が <c>NUMBER(1)</c> 事情を持ち方言差が大きいため<b>意図的に除外</b>する。
 /// </para>
 /// <para>
-/// オプションは「Entity/EditModel/Mapper・VO 有効・<b>EF 単独出力（自作 SQL Server 実装なし）</b>・単一ファイル・専用 namespace」。
+/// オプションは「Entity/EditModel/Mapper・VO 有効・<b>EF 単独出力（QuickER の SQL Server 実装なし）</b>・単一ファイル・専用 namespace」。
 /// 本フィクスチャの方言ランタイムテストは EF Core しか使わないため、GenerateRepositories=false（EF 単独）に切り替え、
 /// 新モード（EF 単独出力）の実 DB 実証を兼ねる。namespace は既存フィクスチャ（<c>QuickER.Tests.GeneratedFixture</c>）と衝突させない。
 /// </para>

@@ -1,6 +1,6 @@
 # QuickER.Runtime.SqlServer
 
-The **SQL Server dialect engine** for the custom Repository, part of the runtime for the C# code that QuickER (an ER diagram designer) generates. It implements the dialect-neutral contracts of `QuickER.Runtime` for SQL Server (reads via `FOR JSON PATH`, `OFFSET/FETCH`, etc.). Its only dependency is `Microsoft.Data.SqlClient`.
+The **SQL Server dialect engine** for the QuickER Repository, part of the runtime for the C# code that QuickER (an ER diagram designer) generates. It implements the dialect-neutral contracts of `QuickER.Runtime` for SQL Server (reads via `FOR JSON PATH`, `OFFSET/FETCH`, etc.). Its only dependency is `Microsoft.Data.SqlClient`.
 
 ## When you need it
 

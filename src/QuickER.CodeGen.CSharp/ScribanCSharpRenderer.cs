@@ -31,7 +31,7 @@ internal sealed class RenderScope
     /// <summary>EF Core 用コード（DbContext・構成）を出力するか</summary>
     public required bool EfCore { get; init; }
 
-    /// <summary>自作 Repository の方言別実装（ADO 依存）を出力するか。Repository バケット内でこのフラグにより契約と実装を出し分ける</summary>
+    /// <summary>Repository (QuickER) の方言別実装（ADO 依存）を出力するか。Repository バケット内でこのフラグにより契約と実装を出し分ける</summary>
     public required bool RepositoryImpl { get; init; }
 
     /// <summary>共通契約（インターフェイス・SqlQuery・メタデータ等）を出力するか</summary>
@@ -48,7 +48,7 @@ internal sealed class RenderScope
     /// <summary>リモート面の ASP.NET Core サーバー実装（MapGeneratedRemoteEndpoints）を出力するか（サーバー専用スペックのみ true）</summary>
     public bool RemoteServer { get; init; }
 
-    /// <summary>このスコープがレンダリングする自作 Repository の方言（"sqlserver" / "sqlite"）</summary>
+    /// <summary>このスコープがレンダリングするRepository (QuickER) の方言（"sqlserver" / "sqlite"）</summary>
     public required string Dialect { get; init; }
 
     /// <summary>マルチ方言レイアウト（実効方言 2 つ以上）かどうか。DI 拡張の方言別名＋keyed 版の出し分けに使う</summary>
@@ -180,7 +180,7 @@ internal sealed class ScribanCSharpRenderer
 
         // 独自属性 NavigationReference は (1) Entity のナビゲーションプロパティへの付与、
         // (2) 共通契約の EntitySaveMetadata / SqlQuery によるナビゲーション除外・Include 復元（リフレクション走査）で参照される。
-        // リレーションが無くても契約（自作 Repository か EF Core のいずれか）を生成する場合は属性定義が必要なため、その条件も含める。
+        // リレーションが無くても契約（Repository (QuickER) か EF Core のいずれか）を生成する場合は属性定義が必要なため、その条件も含める。
         var emitNavRefAttr =
             (options.GenerateEntityClasses && model.EntityClasses.Any(c => c.Navigations.Count > 0))
             || options.GenerateRepositories
@@ -188,7 +188,7 @@ internal sealed class ScribanCSharpRenderer
             // インメモリ Repository はメタデータ（CascadeNavigations）・Include 復元で NavigationReference を参照する
             || options.GenerateInMemoryRepositories;
 
-        // 自作 Repository の生成方言に応じた原始変数群。sqlserver のときは現行値（識別子クォート [ ]・
+        // Repository (QuickER) の生成方言に応じた原始変数群。sqlserver のときは現行値（識別子クォート [ ]・
         // ADO 型 SqlXxx）そのままで、テンプレートは細粒度置換した箇所でこれらを参照する。方言リテラルを
         // 変数参照へ置き換えてもレンダリング結果は変わらないため、sqlserver 出力はバイト不変を保つ。
         // 塊で異なる領域（FOR JSON プランナ vs マルチクエリ Include・OFFSET/FETCH vs LIMIT/OFFSET・
@@ -283,7 +283,7 @@ internal sealed class ScribanCSharpRenderer
             // 契約は Repository バケットに属し、分割時も Repository バケットのファイルにのみ出力する（EF 側は using で参照）。
             // マルチ方言時は契約スペックのみ true・方言実装スペックは false（契約は 1 回だけ出す）
             ["render_contract"] = scope.RenderContract,
-            // 自作 Repository の方言別実装（ADO 依存）を出力するか。Repository バケット内でこのフラグにより契約と実装を出し分ける
+            // Repository (QuickER) の方言別実装（ADO 依存）を出力するか。Repository バケット内でこのフラグにより契約と実装を出し分ける
             // （EF 単独出力＝false のとき ADO 依存のコードを一切生成しない）
             ["repositories"] = scope.RepositoryImpl,
             // リモート操作用インターフェイス（I{Entity}RemoteRepository）を追加生成するか。OFF（既定）では
@@ -300,7 +300,7 @@ internal sealed class ScribanCSharpRenderer
             // DB 非依存のインメモリ Repository 群（InMemoryDataStore・InMemory{Entity}Repository・シーダー・DI）を出力するか。
             // 方言非依存のため契約を出すスペックで 1 度だけ true（既存経路は常に false でバイト不変）
             ["in_memory"] = scope.InMemory,
-            // 自作 Repository の生成方言と方言別プリミティブ（識別子クォート・ADO 型名）。
+            // Repository (QuickER) の生成方言と方言別プリミティブ（識別子クォート・ADO 型名）。
             ["repository_dialect"] = dialect.Dialect,
             ["quote_open"] = dialect.QuoteOpen,
             ["quote_close"] = dialect.QuoteClose,
@@ -352,7 +352,7 @@ internal sealed class ScribanCSharpRenderer
 }
 
 /// <summary>
-/// 自作 Repository の生成方言ごとに変わるプリミティブ（識別子クォート文字・ADO 型名）を保持する。
+/// Repository (QuickER) の生成方言ごとに変わるプリミティブ（識別子クォート文字・ADO 型名）を保持する。
 /// </summary>
 /// <remarks>
 /// テンプレートはこれらを細粒度置換した箇所で参照する。sqlserver は現行値（識別子クォート <c>[</c> <c>]</c>・

@@ -2,7 +2,7 @@
 
 *[English](README.md) | 日本語*
 
-QuickER（ER 図デザイナ）が生成する C# コードのランタイムのうち、自作 Repository の **SQL Server 方言エンジン**です。`QuickER.Runtime` の方言中立契約を SQL Server（`FOR JSON PATH` による取得系・`OFFSET/FETCH` など）で実装します。依存は `Microsoft.Data.SqlClient` のみです。
+QuickER（ER 図デザイナ）が生成する C# コードのランタイムのうち、Repository (QuickER) の **SQL Server 方言エンジン**です。`QuickER.Runtime` の方言中立契約を SQL Server（`FOR JSON PATH` による取得系・`OFFSET/FETCH` など）で実装します。依存は `Microsoft.Data.SqlClient` のみです。
 
 ## 使いどき
 

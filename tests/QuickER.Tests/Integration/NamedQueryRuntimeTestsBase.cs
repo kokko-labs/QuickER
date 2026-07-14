@@ -12,7 +12,7 @@ namespace QuickER.Tests.Integration;
 
 /// <summary>
 /// 名前付きクエリの生成メソッドを、実 SQLite（一時ファイル DB・Docker 不要＝CI 常時実行）で意味検証する
-/// パリティスイートの共通基底。自作 <c>SqliteRepository</c> 版と EF Core Sqlite 版の派生が同一シナリオを流す。
+/// パリティスイートの共通基底。QuickER の <c>SqliteRepository</c> 版と EF Core Sqlite 版の派生が同一シナリオを流す。
 /// </summary>
 /// <remarks>
 /// <para>
@@ -38,7 +38,7 @@ public abstract class NamedQueryRuntimeTestsBase : IDisposable
     /// <summary>書き込み可能な接続文字列（バックエンドはこの実ファイルへ読み書きする）</summary>
     protected string ConnectionString => _db.ReadWriteCreateConnectionString;
 
-    /// <summary>顧客リポジトリを生成する（自作 = AddGeneratedRepositories / EF = AddGeneratedEfCoreRepositories）</summary>
+    /// <summary>顧客リポジトリを生成する（QuickER = AddGeneratedRepositories / EF = AddGeneratedEfCoreRepositories）</summary>
     protected abstract ICustomerRepository CreateCustomerRepository();
 
     /// <summary>注文リポジトリを生成する</summary>

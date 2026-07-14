@@ -66,7 +66,7 @@ internal static class GeneratedFileUsings
     /// <list type="bullet">
     ///   <item>共有基盤・方言中立契約（EntityBase・属性・VO 基底・IRepository・SqlQuery・ISqlExecutor 等）→ <see cref="RuntimePackages.Core"/>。
     ///     いずれかのバケットを含むファイルに常に必要（Entity のみでも EntityBase／属性を参照するため）</item>
-    ///   <item>Repository バケットを含み自作 Repository 実装を出す（<c>GenerateRepositories</c>）ファイル → その方言の
+    ///   <item>Repository バケットを含みRepository (QuickER) 実装を出す（<c>GenerateRepositories</c>）ファイル → その方言の
     ///     方言エンジン（<see cref="RuntimePackages.SqlServer"/> / <see cref="RuntimePackages.Sqlite"/>）。
     ///     エンティティ別実装が方言 Repository 基底・接続ファクトリ・実行器を参照する</item>
     ///   <item>EfCore バケットを含むファイル → <see cref="RuntimePackages.EntityFrameworkCore"/>
@@ -87,7 +87,7 @@ internal static class GeneratedFileUsings
         // コア（共通基盤＋方言中立契約）はいずれのバケットでも必要。
         yield return RuntimePackages.Core;
 
-        // 自作 Repository 実装を出すファイルは、その方言の方言エンジンパッケージを参照する。
+        // Repository (QuickER) 実装を出すファイルは、その方言の方言エンジンパッケージを参照する。
         // 契約のみ（マルチ方言の契約スペック・EF 単独出力）は方言エンジンを参照しない（コアの契約で足りる）。
         if (
             spec.Buckets.Contains(GenerationBucket.Repository)
@@ -115,7 +115,7 @@ internal static class GeneratedFileUsings
     /// <remarks>
     /// System / System.Collections.Generic / System.Linq は共有フレームワークに常時含まれ生成コードのほぼ全構成で使うため、
     /// 該当バケットへ広めに付与する（既存方針を踏襲）。オプションで出力が変わる箇所（VO 有無・DataAnnotations・
-    /// 自作 Repository 実装の有無）はその条件を反映する。マルチ方言時は ADO using をスペックの方言に応じて、
+    /// Repository (QuickER) 実装の有無）はその条件を反映する。マルチ方言時は ADO using をスペックの方言に応じて、
     /// かつ方言実装スペック（<see cref="GeneratedFileSpec.ContractOnly"/> でない）にのみ付与する。
     /// </remarks>
     private static IEnumerable<string> FrameworkUsings(
@@ -144,6 +144,13 @@ internal static class GeneratedFileUsings
                 yield return "System.Reflection";
                 yield return "System.Text.Json";
                 yield return "System.Text.Json.Serialization";
+
+                // 無制限バイナリ除外の共有ヘルパー（UnboundedBinaryColumns.ResolveWriteLength）は Stream を引数に取る
+                if (options.ExcludeUnboundedBinaryColumns)
+                {
+                    yield return "System.IO";
+                }
+
                 break;
 
             // 値オブジェクト（具象）: 生成コードは Runtime の VO 基底を継承するだけで、外部型は BCL の基本のみ
@@ -184,7 +191,7 @@ internal static class GeneratedFileUsings
                 break;
 
             // Repository バケット: 共通契約（インターフェイス・SqlQuery・メタデータ・グラフセーバ・RawSqlMapper 等）は
-            //   常に出力され、自作 SQL Server 実装は options.GenerateRepositories のときのみ加わる。
+            //   常に出力され、QuickER の SQL Server 実装は options.GenerateRepositories のときのみ加わる。
             //   契約側で使う外部型:
             //     LINQ 式ツリー（System.Linq.Expressions）、リフレクション（System.Reflection）、
             //     ConcurrentDictionary（System.Collections.Concurrent）、CultureInfo（System.Globalization）、
@@ -204,13 +211,20 @@ internal static class GeneratedFileUsings
                 yield return "System.Threading";
                 yield return "System.Threading.Tasks";
 
+                // 無制限バイナリ列の Stream アクセサ（契約の Stream 引数・エンジンの Stream/MemoryStream・
+                // ファイル糖衣の File）は System.IO を要求する
+                if (options.ExcludeUnboundedBinaryColumns)
+                {
+                    yield return "System.IO";
+                }
+
                 if (options.IncludeDataAnnotations)
                 {
                     yield return "System.ComponentModel.DataAnnotations";
                     yield return "System.ComponentModel.DataAnnotations.Schema";
                 }
 
-                // 自作 Repository 実装（SqlExecutor / 方言別 Repository 基底 / 接続ファクトリ / AddGeneratedRepositories）:
+                // Repository (QuickER) 実装（SqlExecutor / 方言別 Repository 基底 / 接続ファクトリ / AddGeneratedRepositories）:
                 //   ADO 型（方言依存: SQL Server=Microsoft.Data.SqlClient / SQLite=Microsoft.Data.Sqlite）、
                 //   DI 登録（Microsoft.Extensions.DependencyInjection）、さらに実装が使う
                 //   IStructuralEquatable（System.Collections）・DataTable 相当（System.Data）。
@@ -281,6 +295,12 @@ internal static class GeneratedFileUsings
                 yield return "System.Reflection";
                 yield return "System.Threading";
                 yield return "System.Threading.Tasks";
+
+                // EF Core 版の Stream アクセサ（NotSupportedException を投げるスタブ）の Stream 引数型
+                if (options.ExcludeUnboundedBinaryColumns)
+                {
+                    yield return "System.IO";
+                }
                 yield return "Microsoft.EntityFrameworkCore";
                 yield return "Microsoft.EntityFrameworkCore.Diagnostics";
                 yield return "Microsoft.EntityFrameworkCore.Infrastructure";

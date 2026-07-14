@@ -287,7 +287,7 @@
           </StackPanel>
         </Grid>
 
-        <!-- 自作 Repository の対象 DB（DB アクセス配下＝インデント表示。Repository (QuickER) 選択時のみ表示。表示順固定: SQL Server → SQLite） -->
+        <!-- Repository (QuickER) の対象 DB（DB アクセス配下＝インデント表示。Repository (QuickER) 選択時のみ表示。表示順固定: SQL Server → SQLite） -->
         <Grid
           Margin="12,10,0,0"
           Visibility="{Binding ShowRepositoryDialectTargets, Converter={StaticResource BoolToVisibilityConverter}}"

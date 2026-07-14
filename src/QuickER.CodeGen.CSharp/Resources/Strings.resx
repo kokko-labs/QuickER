@@ -62,7 +62,7 @@
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
   <data name="CodeGen_Error_MultiTargetEfCoreExclusive" xml:space="preserve">
-    <value>EF Core generation cannot be combined with multi-target custom Repositories (two or more effective dialects). Narrow it to a single dialect or disable EF Core (the two are mutually exclusive).</value>
+    <value>EF Core generation cannot be combined with multi-target QuickER Repositories (two or more effective dialects). Narrow it to a single dialect or disable EF Core (the two are mutually exclusive).</value>
   </data>
   <data name="CodeGen_Error_InMemoryRuntimePackagesExclusive" xml:space="preserve">
     <value>In-memory Repository generation cannot be combined with the runtime package reference mode (UseRuntimePackages). The in-memory executor is emitted as fixed code on the generated side, so in a package reference mode that does not emit fixed code it loses its reference target. Disable UseRuntimePackages (emit the fixed code inline) or disable in-memory generation.</value>

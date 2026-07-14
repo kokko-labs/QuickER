@@ -3403,11 +3403,11 @@ public partial interface ISqlExecutor
 }
 
 /// <summary>
-/// 生 SQL の束縛・スカラー変換・射影マッピングを担う共有ヘルパー（自作 SQL Server 版と EF Core 版の実行器で 1 系統を共有）。
+/// 生 SQL の束縛・スカラー変換・射影マッピングを担う共有ヘルパー（QuickER の SQL Server 実装と EF Core 版の実行器で 1 系統を共有）。
 /// </summary>
 /// <remarks>
 /// プロバイダ非依存の <see cref="DbCommand"/> / <see cref="DbDataReader"/> のみを扱い、特定 DB クライアントには依存しない。
-/// EF 単独出力（自作 SQL Server 実装を含まない構成）でも共通契約としてこのクラスを出力し、EF 版実行器が呼び出す。
+/// EF 単独出力（QuickER の SQL Server 実装を含まない構成）でも共通契約としてこのクラスを出力し、EF 版実行器が呼び出す。
 /// </remarks>
 internal static class RawSqlMapper
 {
@@ -3495,7 +3495,7 @@ internal static class RawSqlMapper
 
     /// <summary>
     /// 結果セットを <typeparamref name="TResult"/> へ寛容に射影して読み切る（単一値モード・DTO モードの 1 系統）。
-    /// プロバイダ非依存の <see cref="DbDataReader"/> を受け取り、自作・EF 版実行器でマッピング実装を共有する。
+    /// プロバイダ非依存の <see cref="DbDataReader"/> を受け取り、QuickER・EF 版実行器でマッピング実装を共有する。
     /// </summary>
     internal static async Task<IReadOnlyList<TResult>> ReadProjectionRowsAsync<TResult>(
         DbDataReader reader,
@@ -4874,7 +4874,7 @@ internal static class InMemoryCascade
         }
     }
 
-    /// <summary>RowState 駆動でグラフを保存し、書き込んだ件数を返す（自作 EntityGraphSaver と同じ意味論）</summary>
+    /// <summary>RowState 駆動でグラフを保存し、書き込んだ件数を返す（QuickER の EntityGraphSaver と同じ意味論）</summary>
     /// <remarks>
     /// IsRemoved は子から削除し自身を削除、IsAdded は挿入、IsUpdated は更新（対象なしは
     /// insertWhenUpdateMissing で挿入 or 競合例外）。追加・更新は自身を先に、削除は子を先に処理する。

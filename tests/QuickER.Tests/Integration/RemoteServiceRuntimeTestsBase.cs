@@ -18,7 +18,7 @@ namespace QuickER.Tests.Integration;
 /// </summary>
 /// <remarks>
 /// <para>
-/// サーバー側は生成された <c>MapGeneratedRemoteEndpoints</c>＋実体リポジトリ（派生が自作 SqliteRepository 版と
+/// サーバー側は生成された <c>MapGeneratedRemoteEndpoints</c>＋実体リポジトリ（派生がQuickER の SqliteRepository 版と
 /// EF Core 版を差し替える）、クライアント側は生成された <c>AddGeneratedHttpRemoteRepositories</c> の
 /// <c>Http{Entity}RemoteRepository</c> だけを使う＝利用者が組む 3 階層とまったく同じ経路で検証する。
 /// </para>
@@ -43,7 +43,7 @@ public abstract class RemoteServiceRuntimeTestsBase : IAsyncLifetime
     /// <summary>HTTP クライアント実装を登録した DI コンテナ</summary>
     private ServiceProvider? _clientProvider;
 
-    /// <summary>サーバー側 DI へ実体リポジトリ群を登録する（自作 = AddGeneratedRepositories / EF = AddGeneratedEfCoreRepositories）</summary>
+    /// <summary>サーバー側 DI へ実体リポジトリ群を登録する（QuickER = AddGeneratedRepositories / EF = AddGeneratedEfCoreRepositories）</summary>
     protected abstract void ConfigureServerRepositories(
         IServiceCollection services,
         string connectionString
@@ -252,7 +252,7 @@ public abstract class RemoteServiceRuntimeTestsBase : IAsyncLifetime
     }
 }
 
-/// <summary>リモートサービスの e2e スイートを、サーバー実体＝自作 SqliteRepository で実行する派生</summary>
+/// <summary>リモートサービスの e2e スイートを、サーバー実体＝QuickER の SqliteRepository で実行する派生</summary>
 public sealed class RemoteServiceAdoRuntimeTests : RemoteServiceRuntimeTestsBase
 {
     protected override void ConfigureServerRepositories(
