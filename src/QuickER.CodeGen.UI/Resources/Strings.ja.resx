@@ -118,6 +118,12 @@
   <data name="CodeGen_ApiDocsTooltip" xml:space="preserve">
     <value>生成コードと同名ベースの API リファレンス Markdown（{ベース名}.g.md）を 1 つ追加出力します（再生成で上書き）</value>
   </data>
+  <data name="CodeGen_ExcludeUnboundedBinary" xml:space="preserve">
+    <value>無制限バイナリ列を取得しない (varbinary(max) / BLOB)</value>
+  </data>
+  <data name="CodeGen_ExcludeUnboundedBinaryToolTip" xml:space="preserve">
+    <value>無制限バイナリ列を SELECT / UPDATE から除外します。INSERT は全列のまま。除外列の更新は生 SQL（ExecuteSqlAsync）で行います。EF Core には適用されません</value>
+  </data>
   <data name="CodeGen_RemoteAccess" xml:space="preserve">
     <value>リモート対応</value>
   </data>

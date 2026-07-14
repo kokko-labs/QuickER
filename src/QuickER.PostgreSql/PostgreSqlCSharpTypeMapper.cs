@@ -17,7 +17,7 @@ namespace QuickER.PostgreSql;
 /// <item><description>numeric / decimal / money → decimal</description></item>
 /// <item><description>date / timestamp → DateTime、time → TimeSpan、timestamptz → DateTimeOffset</description></item>
 /// <item><description>uuid → Guid</description></item>
-/// <item><description>bytea → byte[]（参照型）</description></item>
+/// <item><description>bytea → byte[]（参照型）。長さ宣言を持たないため常に無制限バイナリ</description></item>
 /// <item><description>varchar / char / text / xml / json / jsonb → string（長さ指定があれば MaxLength として保持）</description></item>
 /// <item><description>未知の型 → string（生成失敗を避けるための安全側フォールバック）</description></item>
 /// </list>
@@ -80,7 +80,8 @@ public sealed partial class PostgreSqlCSharpTypeMapper : IColumnTypeMapper
                 : Value("DateTime"),
             "time" => Value("TimeSpan"),
             "uuid" => Value("Guid"),
-            "bytea" => Reference("byte[]"),
+            // bytea は長さ宣言を持たず上限が分からないため無制限バイナリ
+            "bytea" => Reference("byte[]", isUnboundedBinary: true),
             // 文字列系のみ MaxLength を保持し、[MaxLength] 属性の生成に使う
             "varchar" or "char" or "text" or "xml" or "json" or "jsonb" => Reference(
                 "string",
@@ -107,12 +108,18 @@ public sealed partial class PostgreSqlCSharpTypeMapper : IColumnTypeMapper
 
     /// <summary>参照型の型情報を作成する</summary>
     /// <param name="maxLength">文字列型の最大長。長さ指定なしの場合は null</param>
-    private static CSharpTypeInfo Reference(string typeName, int? maxLength = null) =>
+    /// <param name="isUnboundedBinary">無制限バイナリ（bytea 等）かどうか</param>
+    private static CSharpTypeInfo Reference(
+        string typeName,
+        int? maxLength = null,
+        bool isUnboundedBinary = false
+    ) =>
         new()
         {
             TypeName = typeName,
             IsReferenceType = true,
             MaxLength = maxLength,
+            IsUnboundedBinary = isUnboundedBinary,
         };
 
     /// <summary>データ型表記を前後空白除去・小文字化・空白畳み込みで正規化する</summary>

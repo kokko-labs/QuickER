@@ -81,6 +81,7 @@ public static class CliApp
         var apiDocs = ApiDocsOption();
         var remoteContracts = RemoteContractsOption();
         var remoteServices = RemoteServicesOption();
+        var excludeUnboundedBinary = ExcludeUnboundedBinaryOption();
 
         var command = new Command("generate", Strings.Cli_Cmd_Generate)
         {
@@ -95,6 +96,7 @@ public static class CliApp
             apiDocs,
             remoteContracts,
             remoteServices,
+            excludeUnboundedBinary,
         };
 
         command.SetAction(parseResult =>
@@ -109,7 +111,8 @@ public static class CliApp
                 parseResult.GetValue(runtimePackages),
                 parseResult.GetValue(apiDocs),
                 parseResult.GetValue(remoteContracts),
-                parseResult.GetValue(remoteServices)
+                parseResult.GetValue(remoteServices),
+                parseResult.GetValue(excludeUnboundedBinary)
             )
         );
 
@@ -127,7 +130,8 @@ public static class CliApp
         bool runtimePackages,
         bool apiDocs,
         bool remoteContracts,
-        bool remoteServices
+        bool remoteServices,
+        bool excludeUnboundedBinary
     )
     {
         if (!schemaFile.Exists)
@@ -175,7 +179,8 @@ public static class CliApp
                 runtimePackages,
                 apiDocs,
                 remoteContracts,
-                remoteServices
+                remoteServices,
+                excludeUnboundedBinary
             );
         }
         catch (RepositoryDialectUnsupportedException ex)
@@ -218,6 +223,7 @@ public static class CliApp
         var apiDocs = ApiDocsOption();
         var remoteContracts = RemoteContractsOption();
         var remoteServices = RemoteServicesOption();
+        var excludeUnboundedBinary = ExcludeUnboundedBinaryOption();
 
         var command = new Command("scaffold", Strings.Cli_Cmd_Scaffold)
         {
@@ -232,6 +238,7 @@ public static class CliApp
             apiDocs,
             remoteContracts,
             remoteServices,
+            excludeUnboundedBinary,
         };
 
         command.SetAction(
@@ -248,6 +255,7 @@ public static class CliApp
                     parseResult.GetValue(apiDocs),
                     parseResult.GetValue(remoteContracts),
                     parseResult.GetValue(remoteServices),
+                    parseResult.GetValue(excludeUnboundedBinary),
                     cancellationToken
                 )
         );
@@ -267,6 +275,7 @@ public static class CliApp
         bool apiDocs,
         bool remoteContracts,
         bool remoteServices,
+        bool excludeUnboundedBinary,
         CancellationToken cancellationToken
     )
     {
@@ -311,7 +320,8 @@ public static class CliApp
                 runtimePackages,
                 apiDocs,
                 remoteContracts,
-                remoteServices
+                remoteServices,
+                excludeUnboundedBinary
             );
         }
         catch (RepositoryDialectUnsupportedException ex)
@@ -355,6 +365,9 @@ public static class CliApp
     private static Option<bool> ApiDocsOption() =>
         new("--api-docs") { Description = Strings.Cli_Opt_ApiDocs };
 
+    private static Option<bool> ExcludeUnboundedBinaryOption() =>
+        new("--exclude-unbounded-binary") { Description = Strings.Cli_Opt_ExcludeUnboundedBinary };
+
     private static Option<bool> RemoteContractsOption() =>
         new("--remote-contracts") { Description = Strings.Cli_Opt_RemoteContracts };
 
@@ -378,6 +391,8 @@ public static class CliApp
     /// <see cref="CodeGenerationOptions.GenerateRemoteContracts"/> を true にする（未指定時は設定ファイルの値を使う）。
     /// <paramref name="remoteServices"/>（<c>--remote-services</c>）指定時は
     /// <see cref="CodeGenerationOptions.GenerateRemoteServices"/> を true にする（未指定時は設定ファイルの値を使う）。
+    /// <paramref name="excludeUnboundedBinary"/>（<c>--exclude-unbounded-binary</c>）指定時は
+    /// <see cref="CodeGenerationOptions.ExcludeUnboundedBinaryColumns"/> を true にする（未指定時は設定ファイルの値を使う）。
     /// 自作 Repository 生成（<c>GenerateRepositories</c>）が要求され、かつ実効方言に未対応方言が含まれる場合は
     /// <see cref="RepositoryDialectUnsupportedException"/> を送出する
     /// </remarks>
@@ -390,7 +405,8 @@ public static class CliApp
         bool runtimePackages = false,
         bool apiDocs = false,
         bool remoteContracts = false,
-        bool remoteServices = false
+        bool remoteServices = false,
+        bool excludeUnboundedBinary = false
     )
     {
         var node = config is { Exists: true }
@@ -425,6 +441,11 @@ public static class CliApp
         if (remoteServices)
         {
             node["GenerateRemoteServices"] = true;
+        }
+
+        if (excludeUnboundedBinary)
+        {
+            node["ExcludeUnboundedBinaryColumns"] = true;
         }
 
         if (!string.IsNullOrWhiteSpace(repositoryDialects))

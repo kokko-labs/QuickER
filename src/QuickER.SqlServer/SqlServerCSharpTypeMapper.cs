@@ -17,7 +17,7 @@ namespace QuickER.SqlServer;
 /// <item><description>decimal / numeric / money / smallmoney → decimal</description></item>
 /// <item><description>date / datetime / datetime2 / smalldatetime → DateTime、time → TimeSpan、datetimeoffset → DateTimeOffset</description></item>
 /// <item><description>uniqueidentifier → Guid</description></item>
-/// <item><description>binary / varbinary / image / rowversion / timestamp → byte[]（参照型）</description></item>
+/// <item><description>binary / varbinary / image / rowversion / timestamp → byte[]（参照型）。image・varbinary(max) は無制限バイナリ、binary(n)/varbinary(n)/rowversion/timestamp は有界</description></item>
 /// <item><description>char / varchar / nchar / nvarchar / text / ntext / xml → string（長さ指定があれば MaxLength として保持）</description></item>
 /// <item><description>未知の型 → string（生成失敗を避けるための安全側フォールバック）</description></item>
 /// </list>
@@ -92,7 +92,10 @@ public sealed partial class SqlServerCSharpTypeMapper : IColumnTypeMapper
                 maxLength: null,
                 declaredLength: TryGetDeclaredLength(normalized),
                 // rowversion / timestamp は行バージョン列。EF Core の IsRowVersion() 構成対象にする
-                isRowVersion: baseType is "rowversion" or "timestamp"
+                isRowVersion: baseType is "rowversion" or "timestamp",
+                // image・varbinary(max) は宣言で上限が分からない無制限バイナリ。binary(n)/varbinary(n)/rowversion/timestamp は有界
+                isUnboundedBinary: baseType is "image"
+                    || (baseType is "varbinary" && TryGetDeclaredLength(normalized) == -1)
             ),
             // 文字列系のみ MaxLength を保持し、[MaxLength] 属性の生成に使う
             "char" or "varchar" or "nchar" or "nvarchar" or "text" or "ntext" or "xml" => Reference(
@@ -171,12 +174,14 @@ public sealed partial class SqlServerCSharpTypeMapper : IColumnTypeMapper
     /// <param name="sqlDbTypeName">SQL パラメータ型明示化用の SqlDbType 列挙名。未知型は null</param>
     /// <param name="maxLength">文字列型の最大長。長さ指定なし・max 指定の場合は null</param>
     /// <param name="declaredLength">SqlParameter.Size 用の宣言長（n / max=-1 / 無指定=0）</param>
+    /// <param name="isUnboundedBinary">無制限バイナリ（varbinary(max) / image 等）かどうか</param>
     private static CSharpTypeInfo Reference(
         string typeName,
         string? sqlDbTypeName,
         int? maxLength = null,
         int declaredLength = 0,
-        bool isRowVersion = false
+        bool isRowVersion = false,
+        bool isUnboundedBinary = false
     ) =>
         new()
         {
@@ -186,6 +191,7 @@ public sealed partial class SqlServerCSharpTypeMapper : IColumnTypeMapper
             SqlDbTypeName = sqlDbTypeName,
             SqlDeclaredLength = declaredLength,
             IsRowVersion = isRowVersion,
+            IsUnboundedBinary = isUnboundedBinary,
         };
 
     /// <summary>

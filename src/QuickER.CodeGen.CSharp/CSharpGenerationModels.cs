@@ -242,6 +242,12 @@ internal sealed class CSharpPropertyModel
     public int SqlDeclaredLength { get; init; }
 
     /// <summary>
+    /// 無制限バイナリ列（varbinary(max) / image / 長さ宣言なし BLOB 等）かどうか。<c>ExcludeUnboundedBinaryColumns</c> オプション ON のとき
+    /// マーカー属性 [UnboundedBinaryColumn] を付与する対象の識別に使う（判定はプロバイダの型マッパーの責務）。
+    /// </summary>
+    public bool IsUnboundedBinary { get; init; }
+
+    /// <summary>
     /// DB 定義メタ属性（[DbColumnMeta]）へ刻む方言中立の型トークン（例 "string(50)"）。型カタログで解析できない自由記述型は null で属性を省略する。
     /// </summary>
     public string? CanonicalTypeToken { get; init; }

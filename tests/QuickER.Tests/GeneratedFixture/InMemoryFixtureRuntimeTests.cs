@@ -300,6 +300,49 @@ public sealed class InMemoryFixtureRuntimeTests
         (await orders.GetAllAsync(Ct)).Should().BeEmpty();
     }
 
+    [Fact(
+        DisplayName = "ToProjectionListAsync: 列参照のみの射影が並び順込みで DTO を返す（刈り込み経路）"
+    )]
+    public async Task Projection_ColumnsOnly_ReturnsRows()
+    {
+        var (_, customers, orders, _) = BuildFresh();
+        await customers.InsertAsync(NewCustomer(1, "Alice"), Ct);
+        await orders.InsertAsync(NewOrder(10, 1, 5m), Ct);
+        await orders.InsertAsync(NewOrder(11, 1, 6m), Ct);
+
+        // 列参照のみ・Include なし＝刈り込み可能経路（完全クローンから射影）
+        var rows = await orders
+            .Query()
+            .Where(o => o.CustomerId == 1)
+            .OrderBy(o => o.OrderId)
+            .ToProjectionListAsync(o => new { o.OrderId, o.Amount }, Ct);
+
+        rows.Select(r => r.OrderId).Should().Equal(10, 11);
+        rows.Select(r => r.Amount).Should().Equal(5m, 6m);
+    }
+
+    [Fact(
+        DisplayName = "ToProjectionListAsync: Include＋ナビゲーション参照射影はフォールバックして動く"
+    )]
+    public async Task Projection_WithInclude_ProjectsNavigation()
+    {
+        var (_, customers, orders, _) = BuildFresh();
+        await customers.InsertAsync(NewCustomer(1, "Alice"), Ct);
+        await orders.InsertAsync(NewOrder(10, 1, 5m), Ct);
+        await orders.InsertAsync(NewOrder(11, 1, 6m), Ct);
+
+        // Include したナビ（Customer）をセレクタが参照＝刈り込み不可。従来経路（strip 済み複製）で Include を装着し射影する
+        var rows = await orders
+            .Query()
+            .Where(o => o.CustomerId == 1)
+            .Include(o => o.Customer)
+            .OrderBy(o => o.OrderId)
+            .ToProjectionListAsync(o => new { o.OrderId, CustomerName = o.Customer.Name }, Ct);
+
+        rows.Select(r => r.OrderId).Should().Equal(10, 11);
+        rows.Should().OnlyContain(r => r.CustomerName == "Alice");
+    }
+
     [Fact(DisplayName = "生 SQL 系メソッドは NotSupportedException を投げる")]
     public async Task RawSql_NotSupported()
     {

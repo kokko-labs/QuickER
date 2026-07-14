@@ -267,4 +267,22 @@ public sealed class CodeGenerationOptions
     /// </para>
     /// </remarks>
     public bool GenerateApiDocs { get; init; }
+
+    /// <summary>
+    /// 無制限バイナリ列（<c>varbinary(max)</c> / <c>image</c> / 長さ宣言なし BLOB / <c>bytea</c> 等）を、生成 Entity のプロパティに
+    /// マーカー属性 <c>[UnboundedBinaryColumn]</c> で印付けし、自作 Repository の SELECT / UPDATE 対象から除外するかどうか（既定 false）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>true</c> のとき、無制限バイナリ列の Entity プロパティへ <c>[UnboundedBinaryColumn]</c> を付与する。ランタイム
+    /// （<c>EntitySaveMetadata</c>）はこの属性をリフレクションで読み、自作 Repository の SELECT（列読み出し）・UPDATE
+    /// （更新列）から当該列を外す。INSERT / BulkInsert は全列のまま（初回書き込みは通常どおり値を渡せる）。
+    /// </para>
+    /// <para>
+    /// 大きな BLOB を一覧・更新のたびに往復させないための最適化で、除外列の値の更新は生 SQL（<c>ExecuteSqlAsync</c>）で行う。
+    /// 除外列に値を設定したまま UPDATE を試みると実行時例外になる（黙ってデータを取りこぼさない）。
+    /// EF Core モードの <c>DbSet</c> 経由クエリ / <c>SaveChanges</c> には適用されない（EF の列選択は EF の責務）。
+    /// </para>
+    /// </remarks>
+    public bool ExcludeUnboundedBinaryColumns { get; init; }
 }

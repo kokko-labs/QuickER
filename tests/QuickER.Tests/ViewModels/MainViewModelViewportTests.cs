@@ -235,6 +235,10 @@ public class MainViewModelViewportTests
         public void ShowInformation(string message, string title) { }
 
         public void ShowError(string message, string title) { }
+
+        public void ShowInformationDetails(string message, string details, string title) { }
+
+        public void ShowErrorDetails(string message, string details, string title) { }
     }
 
     /// <summary>ファイル選択ダイアログを表示せず、設定済みの結果を返すスタブ</summary>

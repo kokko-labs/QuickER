@@ -871,4 +871,112 @@ public class CliAppTests
             }
         }
     }
+
+    /// <summary>varbinary(max) 列を持つ ER 図 JSON を一時フォルダに作成する（無制限バイナリ列の除外検証用）</summary>
+    private static (string schemaPath, string outDir, string root) CreateSchemaWithBinaryColumn()
+    {
+        var root = Path.Combine(
+            Path.GetTempPath(),
+            "QuickERCliTests",
+            Guid.NewGuid().ToString("N")
+        );
+        Directory.CreateDirectory(root);
+        var schemaPath = Path.Combine(root, "schema.json");
+
+        var document = new DiagramDocument();
+        var entity = new Entity { TableName = "Document" };
+        entity.Columns.Add(
+            new Column
+            {
+                Name = "Id",
+                DataType = "int",
+                IsPrimaryKey = true,
+                IsNullable = false,
+            }
+        );
+        entity.Columns.Add(new Column { Name = "Payload", DataType = "varbinary(max)" });
+        document.Schema.Entities.Add(entity);
+        JsonStorageService.Save(schemaPath, document);
+
+        return (schemaPath, Path.Combine(root, "out"), root);
+    }
+
+    /// <summary>
+    /// --exclude-unbounded-binary 指定時は、無制限バイナリ列（varbinary(max)）の Entity プロパティへ
+    /// マーカー属性 [UnboundedBinaryColumn] が付与されることを検証する（CLI がオプションを生成器へ伝播している証跡）
+    /// </summary>
+    [Fact(DisplayName = "--exclude-unbounded-binary 指定で [UnboundedBinaryColumn] が付与される")]
+    public async Task Generate_WithExcludeUnboundedBinary_MarksColumn()
+    {
+        var (schemaPath, outDir, root) = CreateSchemaWithBinaryColumn();
+
+        try
+        {
+            var exit = await CliApp.InvokeAsync([
+                "generate",
+                "--schema",
+                schemaPath,
+                "--out",
+                outDir,
+                "--namespace",
+                "Test.ExcludeBinary",
+                "--exclude-unbounded-binary",
+            ]);
+
+            exit.Should().Be(0);
+            var files = Directory.GetFiles(outDir, "*.g.cs");
+            var code = string.Join("\n", files.Select(File.ReadAllText));
+            code.Should()
+                .Contain(
+                    "[UnboundedBinaryColumn]",
+                    "--exclude-unbounded-binary 指定で無制限バイナリ列にマーカー属性が付く"
+                );
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>
+    /// --exclude-unbounded-binary 未指定（既定 OFF）のときは、マーカー属性 [UnboundedBinaryColumn] が
+    /// 付与されないことを検証する
+    /// </summary>
+    [Fact(DisplayName = "--exclude-unbounded-binary 未指定では [UnboundedBinaryColumn] が付かない")]
+    public async Task Generate_WithoutExcludeUnboundedBinary_DoesNotMarkColumn()
+    {
+        var (schemaPath, outDir, root) = CreateSchemaWithBinaryColumn();
+
+        try
+        {
+            var exit = await CliApp.InvokeAsync([
+                "generate",
+                "--schema",
+                schemaPath,
+                "--out",
+                outDir,
+                "--namespace",
+                "Test.NoExcludeBinary",
+            ]);
+
+            exit.Should().Be(0);
+            var files = Directory.GetFiles(outDir, "*.g.cs");
+            var code = string.Join("\n", files.Select(File.ReadAllText));
+            code.Should()
+                .NotContain(
+                    "[UnboundedBinaryColumn]",
+                    "既定 OFF では無制限バイナリ列にマーカー属性を付けない"
+                );
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
 }

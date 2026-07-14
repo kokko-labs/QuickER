@@ -275,7 +275,9 @@ public partial class MainViewModel
 
             if (result.HasErrors)
             {
-                _dialogs.ShowError(
+                // 導入文（message）と診断一覧（details）を分けて、広い詳細領域を持つエラーダイアログで提示する
+                _dialogs.ShowErrorDetails(
+                    Strings.Csharp_GenerationFailedIntro,
                     BuildGenerationDiagnosticsMessage(result),
                     Strings.Csharp_GenerationErrorTitle
                 );
@@ -320,29 +322,43 @@ public partial class MainViewModel
                 result
             );
 
+            // 診断一覧と PackageReference 案内は「詳細」としてまとめ、空行区切りで連結する。
+            // パッケージ参照モードのときは、必要な PackageReference をコピー可能な形で詳細へ続けて載せる。
+            var detailSections = new List<string>();
             var diagnostics = BuildGenerationDiagnosticsMessage(result);
-            var message = string.IsNullOrWhiteSpace(diagnostics)
-                ? Strings.Csharp_GeneratedSuccess
-                : Strings.Csharp_GeneratedSuccess
-                    + Environment.NewLine
-                    + Environment.NewLine
-                    + diagnostics;
-
-            // パッケージ参照モードのときは、必要な PackageReference をコピー可能な形で続けて提示する
-            // （メッセージボックスの本文はドラッグ選択でコピーできるため、新規ダイアログは設けない）
-            if (options.UseRuntimePackages)
+            if (!string.IsNullOrWhiteSpace(diagnostics))
             {
-                var guidance = string.Join(
-                    Environment.NewLine,
-                    RuntimePackageReferenceGuidance.BuildGuidanceLines(
-                        options,
-                        RuntimePackages.ResolveGuidanceVersion()
-                    )
-                );
-                message += $"{Environment.NewLine}{Environment.NewLine}{guidance}";
+                detailSections.Add(diagnostics);
             }
 
-            _dialogs.ShowInformation(message, Strings.Common_Complete);
+            if (options.UseRuntimePackages)
+            {
+                detailSections.Add(
+                    string.Join(
+                        Environment.NewLine,
+                        RuntimePackageReferenceGuidance.BuildGuidanceLines(
+                            options,
+                            RuntimePackages.ResolveGuidanceVersion()
+                        )
+                    )
+                );
+            }
+
+            // 詳細（診断一覧・PackageReference 案内）がある場合はコピー可能な専用ダイアログで提示し、
+            // 詳細が無い（診断ゼロかつパッケージ案内なし）場合は従来どおり単文の完了通知で知らせる
+            // （単文の完了通知に大型ダイアログは出さない）。
+            if (detailSections.Count > 0)
+            {
+                _dialogs.ShowInformationDetails(
+                    Strings.Csharp_GeneratedSuccess,
+                    string.Join(Environment.NewLine + Environment.NewLine, detailSections),
+                    Strings.Common_Complete
+                );
+            }
+            else
+            {
+                _dialogs.ShowInformation(Strings.Csharp_GeneratedSuccess, Strings.Common_Complete);
+            }
         }
         catch (Exception ex)
         {

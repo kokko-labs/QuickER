@@ -91,6 +91,43 @@ var affected = await customers.ExecuteSqlAsync("UPDATE customers SET balance = 0
 
 SQL Server 方言では `rowversion` 列を持つテーブルに対して楽観排他が有効になり、競合時は `SaveConflictException` が送出されます。
 
+### 無制限バイナリ列の除外（ExcludeUnboundedBinaryColumns）
+
+巨大な BLOB を一覧取得・更新のたびに往復させない（メモリを保護する）ためのオプションです（既定 OFF。CLI `--exclude-unbounded-binary` / GUI「無制限バイナリ列を取得しない」チェックボックス / quicker.json の `ExcludeUnboundedBinaryColumns`）。ON にすると、**サイズ上限のないバイナリ列**の Entity プロパティへマーカー属性 `[UnboundedBinaryColumn]` が付与され、Repository (QuickER) の SELECT / UPDATE から当該列が除外されます。生成時には除外した列の一覧が Info 診断（CLI 出力・GUI の生成結果ダイアログ）で通知されます。
+
+判定は列の宣言型で行います（`rowversion` や `binary(n)` / `varbinary(n)` など長さ宣言のある型は対象外）:
+
+| 方言 | 除外対象 | 対象外（有界） |
+|---|---|---|
+| SQL Server | `varbinary(max)` / `image` | `binary(n)` / `varbinary(n)` / `rowversion` |
+| SQLite | 長さ宣言なし `BLOB` | `BLOB(n)` |
+| PostgreSQL | `bytea` | — |
+| MySQL | `BLOB` / `MEDIUMBLOB` / `LONGBLOB` | `TINYBLOB` / `BINARY(n)` / `VARBINARY(n)` |
+| Oracle | `BLOB` / `LONG RAW` | `RAW(n)` |
+
+挙動の要点:
+
+- **SELECT から除外**: `GetByIdAsync` / `GetAllAsync` / `Query()` の結果で除外列は常に `null`（DB から読み出さない）
+- **UPDATE から除外**: 更新 SQL の SET 句に除外列は含まれない。除外列に値を設定したまま `UpdateAsync` / `SaveAsync` を実行すると**実行時例外**になる（黙ってデータを取りこぼさない）
+- **INSERT / BulkInsert は全列のまま**: 初回書き込みは通常どおり値を渡せる
+- **名前付きクエリの射影**が除外列を参照する場合は取得される（射影は明示的な列選択のため）
+- **生 SQL** で明示的に SELECT すれば取得できる（下記の運用例）
+- **EF Core モード（`DbSet` 経由のクエリ / `SaveChanges`）には適用されない**（EF の列選択は EF の責務）
+- インメモリ Repository（`GenerateInMemoryRepositories`）は実 DB とパリティ（同じ除外挙動）
+
+除外列の読み書きは生 SQL で行います:
+
+```csharp
+// 除外列（画像など）を明示的に読む
+var payload = await documents.QueryProjectionBySqlAsync<byte[]>(
+    "SELECT payload FROM documents WHERE document_id = @id", new { id = 1 });
+
+// 除外列を更新する（UPDATE の SET 句には自動で含まれないため生 SQL で書く）
+await documents.ExecuteSqlAsync(
+    "UPDATE documents SET payload = @payload WHERE document_id = @id",
+    new { payload = bytes, id = 1 });
+```
+
 ## EF Core（GenerateEfCore）
 
 既存 Entity をそのまま EF に載せる方言非依存の `QuickErDbContext` と、**同一 Repository インターフェイスの EF 実装**を生成します。マイグレーションは範囲外で、スキーマ作成は DDL 生成の責務です（EF は既存スキーマへの接続専用）。

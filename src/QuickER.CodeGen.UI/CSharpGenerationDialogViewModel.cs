@@ -154,6 +154,16 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     [ObservableProperty]
     private bool _generateApiDocs;
 
+    /// <summary>
+    /// 無制限バイナリ列（varbinary(max) / BLOB 等）を自作 Repository の SELECT / UPDATE から除外するかどうか（既定 OFF）
+    /// </summary>
+    /// <remarks>
+    /// 自作 Repository を生成する場合のみ意味を持つため、行ごと <see cref="ShowExcludeUnboundedBinary"/> で
+    /// 表示制御する（値は保持され、自作 Repository を選び直すと再び表示される）
+    /// </remarks>
+    [ObservableProperty]
+    private bool _excludeUnboundedBinaryColumns;
+
     /// <summary>全カラムを値オブジェクト（Value Object）として生成するかどうか</summary>
     [ObservableProperty]
     private bool _generateValueObjects;
@@ -300,6 +310,12 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     /// <summary>対象 DB チェックボックス群を表示するか（自作 Repository 選択時のみ）</summary>
     public bool ShowRepositoryDialectTargets => GenerateRepositories;
 
+    /// <summary>無制限バイナリ列の除外チェックボックスを表示するか（自作 Repository 選択時のみ）</summary>
+    public bool ShowExcludeUnboundedBinary => GenerateRepositories;
+
+    /// <summary>無制限バイナリ列の除外チェックボックスのツールチップ</summary>
+    public string ExcludeUnboundedBinaryToolTip => Strings.CodeGen_ExcludeUnboundedBinaryToolTip;
+
     partial void OnTargetSqlServerChanged(bool value) => RefreshPreview();
 
     partial void OnTargetSqliteChanged(bool value) => RefreshPreview();
@@ -423,6 +439,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
         OnPropertyChanged(nameof(ShowValueObjectNamespace));
         OnPropertyChanged(nameof(ShowEfCoreNamespace));
         OnPropertyChanged(nameof(ShowRepositoryDialectTargets));
+        OnPropertyChanged(nameof(ShowExcludeUnboundedBinary));
         RefreshPreview();
     }
 
@@ -519,6 +536,8 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
             GenerateRemoteServices = settings.GenerateRemoteServices;
             // API リファレンス出力は DB アクセス選択とは独立のため、保存値をそのまま復元する
             GenerateApiDocs = settings.GenerateApiDocs;
+            // 無制限バイナリ列の除外は自作 Repository 選択時のみ効くが、値は保存値のまま復元する（行の表示/非表示は UI 側で連動）
+            ExcludeUnboundedBinaryColumns = settings.ExcludeUnboundedBinaryColumns;
             GenerateValueObjects = settings.GenerateValueObjects;
             UseGuidKeyForStringPrimaryKey = settings.UseGuidKeyForStringPrimaryKey;
             OutputFilePath = settings.OutputFilePath;
@@ -561,6 +580,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
             GenerateRemoteContracts = GenerateRemoteContracts,
             GenerateRemoteServices = GenerateRemoteServices,
             GenerateApiDocs = GenerateApiDocs,
+            ExcludeUnboundedBinaryColumns = ExcludeUnboundedBinaryColumns,
             GenerateValueObjects = GenerateValueObjects,
             UseGuidKeyForStringPrimaryKey = UseGuidKeyForStringPrimaryKey,
             OutputFilePath = OutputFilePath.Trim(),
@@ -596,6 +616,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
             GenerateRemoteContracts = GenerateRemoteContracts,
             GenerateRemoteServices = GenerateRemoteServices,
             GenerateApiDocs = GenerateApiDocs,
+            ExcludeUnboundedBinaryColumns = ExcludeUnboundedBinaryColumns,
             GenerateValueObjects = GenerateValueObjects,
             UseGuidKeyForStringPrimaryKey = UseGuidKeyForStringPrimaryKey,
         };

@@ -16,7 +16,7 @@ namespace QuickER.Oracle;
 /// <item><description>NUMBER(p,s)／その他の NUMBER(p)／NUMBER → decimal（精度・スケールを保持）</description></item>
 /// <item><description>BINARY_FLOAT → float、BINARY_DOUBLE / FLOAT → double</description></item>
 /// <item><description>NVARCHAR2 / VARCHAR2 / NCHAR / CHAR / NCLOB / CLOB / XMLTYPE → string（長さ指定があれば MaxLength として保持）</description></item>
-/// <item><description>RAW / BLOB → byte[]（参照型）</description></item>
+/// <item><description>RAW / BLOB / LONG RAW → byte[]（参照型）。BLOB・LONG RAW は無制限バイナリ、RAW(n) は有界</description></item>
 /// <item><description>DATE / TIMESTAMP → DateTime、TIMESTAMP WITH TIME ZONE → DateTimeOffset</description></item>
 /// <item><description>未知の型 → string（生成失敗を避けるための安全側フォールバック）</description></item>
 /// </list>
@@ -74,7 +74,11 @@ public sealed partial class OracleCSharpTypeMapper : IColumnTypeMapper
                 "DateTimeOffset"
             ),
             "date" or "timestamp" => Value("DateTime"),
-            "raw" or "blob" or "long raw" => Reference("byte[]"),
+            // blob・long raw は上限不明の無制限バイナリ、raw(n) は有界
+            "raw" or "blob" or "long raw" => Reference(
+                "byte[]",
+                isUnboundedBinary: baseType is "blob" or "long raw"
+            ),
             // 文字列系のみ MaxLength を保持し、[MaxLength] 属性の生成に使う
             "nvarchar2"
             or "varchar2"
@@ -125,12 +129,18 @@ public sealed partial class OracleCSharpTypeMapper : IColumnTypeMapper
 
     /// <summary>参照型の型情報を作成する</summary>
     /// <param name="maxLength">文字列型の最大長。長さ指定なしの場合は null</param>
-    private static CSharpTypeInfo Reference(string typeName, int? maxLength = null) =>
+    /// <param name="isUnboundedBinary">無制限バイナリ（BLOB / LONG RAW 等）かどうか</param>
+    private static CSharpTypeInfo Reference(
+        string typeName,
+        int? maxLength = null,
+        bool isUnboundedBinary = false
+    ) =>
         new()
         {
             TypeName = typeName,
             IsReferenceType = true,
             MaxLength = maxLength,
+            IsUnboundedBinary = isUnboundedBinary,
         };
 
     /// <summary>データ型表記を前後空白除去・小文字化・空白畳み込みで正規化する</summary>

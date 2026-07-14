@@ -1364,11 +1364,12 @@ public partial class MainViewModel : ObservableObject
         _changeTracker.RunWithoutTracking(command.Execute);
         UndoRedo.Push(command);
 
-        // 変換できなかったカラムがあれば警告を提示する
+        // 変換できなかったカラムがあれば、導入文（message）と一覧（details）を分けて詳細ダイアログで提示する
         if (plan.Unconverted.Count > 0)
         {
-            _dialogs.ShowInformation(
-                BuildUnconvertedWarning(plan.Unconverted),
+            _dialogs.ShowInformationDetails(
+                Strings.TypeConversion_WarningHeader,
+                BuildUnconvertedColumnList(plan.Unconverted),
                 Strings.TypeConversion_WarningTitle
             );
         }
@@ -1381,8 +1382,11 @@ public partial class MainViewModel : ObservableObject
         RaiseProviderChanged();
     }
 
-    /// <summary>変換できなかったカラムの一覧を警告メッセージへ整形する（30 件超は省略）</summary>
-    private static string BuildUnconvertedWarning(IReadOnlyList<ColumnTypeConversion> unconverted)
+    /// <summary>変換できなかったカラムの一覧（本文のみ・導入文は含めない）を整形する（30 件超は省略）</summary>
+    /// <remarks>導入文は呼び出し側が <see cref="Strings.TypeConversion_WarningHeader"/> を message に使う</remarks>
+    private static string BuildUnconvertedColumnList(
+        IReadOnlyList<ColumnTypeConversion> unconverted
+    )
     {
         const int limit = 30;
         var lines = unconverted
@@ -1404,7 +1408,7 @@ public partial class MainViewModel : ObservableObject
                 + string.Format(Strings.TypeConversion_MoreItems, unconverted.Count - limit);
         }
 
-        return Strings.TypeConversion_WarningHeader + Environment.NewLine + body;
+        return body;
     }
 
     // ---------------- Collection changed handlers ----------------

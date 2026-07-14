@@ -106,6 +106,9 @@
   <data name="CodeGen_Warning_RepositorySingleKeyOnly" xml:space="preserve">
     <value>テーブル '{0}' の Repository は単一主キーのみ対応のため生成をスキップしました。</value>
   </data>
+  <data name="CodeGen_Info_ExcludedUnboundedBinaryColumns" xml:space="preserve">
+    <value>無制限バイナリ列を SELECT / UPDATE 対象から除外しました:{0}</value>
+  </data>
   <data name="CodeGen_Warning_ManyToManySkipped" xml:space="preserve">
     <value>多対多リレーション '{0}' は C# 生成対象外のためスキップしました。</value>
   </data>

@@ -22,7 +22,7 @@ namespace QuickER.Sqlite;
 /// <item><description>DECIMAL/NUMERIC/MONEY → decimal（精度・スケールを保持）</description></item>
 /// <item><description>DATE/DATETIME/DATETIME2 → DateTime、TIME → TimeSpan、DATETIMEOFFSET → DateTimeOffset</description></item>
 /// <item><description>UNIQUEIDENTIFIER → Guid</description></item>
-/// <item><description>BINARY/VARBINARY/BLOB → byte[]（参照型）</description></item>
+/// <item><description>BINARY/VARBINARY/BLOB → byte[]（参照型）。長さ宣言なし（および (MAX)）は無制限バイナリ、BLOB(n) 等の長さ付きは有界</description></item>
 /// <item><description>CHAR/VARCHAR/NCHAR/NVARCHAR/TEXT/XML/JSON → string（長さ指定があれば MaxLength として保持）</description></item>
 /// <item><description>未知の型 → string（生成失敗を避けるための安全側フォールバック）</description></item>
 /// </list>
@@ -85,7 +85,11 @@ public sealed partial class SqliteCSharpTypeMapper : IColumnTypeMapper
             "time" => Value("TimeSpan"),
             "datetimeoffset" => Value("DateTimeOffset"),
             "uniqueidentifier" => Value("Guid"),
-            "binary" or "varbinary" or "blob" => Reference("byte[]"),
+            // 長さ宣言なし（TryGetLength が null＝無指定・(MAX) の双方）は上限不明の無制限バイナリ、BLOB(n) 等は有界
+            "binary" or "varbinary" or "blob" => Reference(
+                "byte[]",
+                isUnboundedBinary: maxLength is null
+            ),
             // 文字列系のみ MaxLength を保持し、[MaxLength] 属性の生成に使う
             "char" or "varchar" or "nchar" or "nvarchar" or "text" or "xml" or "json" => Reference(
                 "string",
@@ -112,12 +116,18 @@ public sealed partial class SqliteCSharpTypeMapper : IColumnTypeMapper
 
     /// <summary>参照型の型情報を作成する</summary>
     /// <param name="maxLength">文字列型の最大長。長さ指定なし・MAX 指定の場合は null</param>
-    private static CSharpTypeInfo Reference(string typeName, int? maxLength = null) =>
+    /// <param name="isUnboundedBinary">無制限バイナリ（長さ宣言なし BLOB / varbinary(max) 等）かどうか</param>
+    private static CSharpTypeInfo Reference(
+        string typeName,
+        int? maxLength = null,
+        bool isUnboundedBinary = false
+    ) =>
         new()
         {
             TypeName = typeName,
             IsReferenceType = true,
             MaxLength = maxLength,
+            IsUnboundedBinary = isUnboundedBinary,
         };
 
     /// <summary>データ型表記を前後空白除去と小文字化で正規化する</summary>

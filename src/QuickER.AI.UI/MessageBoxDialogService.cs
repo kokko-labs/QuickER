@@ -23,4 +23,19 @@ public sealed class MessageBoxDialogService : IDialogService
     /// <inheritdoc />
     public void ShowError(string message, string title) =>
         MessageBox.Show(message, title, MessageBoxButton.OK, MessageBoxImage.Error);
+
+    /// <inheritdoc />
+    public void ShowInformationDetails(string message, string details, string title) =>
+        ShowDetails(message, details, title, isError: false);
+
+    /// <inheritdoc />
+    public void ShowErrorDetails(string message, string details, string title) =>
+        ShowDetails(message, details, title, isError: true);
+
+    /// <summary>要約＋詳細の情報ダイアログをモーダル表示する（情報／エラー共通の内部ヘルパー）</summary>
+    private static void ShowDetails(string message, string details, string title, bool isError) =>
+        new InformationDetailsDialog(message, details, title, isError)
+        {
+            Owner = Application.Current?.MainWindow,
+        }.ShowDialog();
 }

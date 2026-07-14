@@ -229,6 +229,17 @@ internal sealed class ScribanCSharpRenderer
                 )
             );
 
+        // 無制限バイナリ列のマーカー属性 [UnboundedBinaryColumn] は (1) オプション ON 時に Entity プロパティへ付与し、
+        // (2) 共通契約の EntitySaveMetadata が SELECT / UPDATE から除外する列の識別にリフレクションで参照する。
+        // 付与のみでも属性型の定義が要るため、Repository / EF / InMemory を生成する場合（メタデータが読む）に加え、
+        // オプション ON かつ Entity 生成時（付与のみで契約が無い構成）でも定義を出す。emitNavRefAttr と同型の条件で、
+        // scriban 側のゲートで || runtime_package_export を足し、パッケージ書き出し時も常に定義を出す（NavigationReference と対称）。
+        var emitUnboundedBinaryAttr =
+            options.GenerateRepositories
+            || options.GenerateEfCore
+            || options.GenerateInMemoryRepositories
+            || (options.ExcludeUnboundedBinaryColumns && options.GenerateEntityClasses);
+
         // using は呼び出し側（GeneratedFileUsings）がバケット単位で解決済み。EF Core など外部依存の
         // 出し分けもそこで完結するため、レンダラーでは受け取った集合をそのまま流し込む
         var scriptObject = new Scriban.Runtime.ScriptObject
@@ -254,6 +265,10 @@ internal sealed class ScribanCSharpRenderer
             ["emit_nav_ref_attr"] = emitNavRefAttr,
             ["emit_sql_column_type_attr"] = emitSqlColumnTypeAttr,
             ["emit_db_meta_attr"] = emitDbMetaAttr,
+            // 無制限バイナリ列のマーカー属性の定義出力可否（付与可否は exclude_unbounded_binary で別制御）。
+            ["emit_unbounded_binary_attr"] = emitUnboundedBinaryAttr,
+            // マーカー属性 [UnboundedBinaryColumn] を Entity プロパティへ付与するか（オプション ON のときのみ真）。
+            ["exclude_unbounded_binary"] = options.ExcludeUnboundedBinaryColumns,
             ["generate_value_objects"] = options.GenerateValueObjects,
             ["value_object_classes"] = model.ValueObjectClasses,
             ["ef_core"] = model.EfCore,

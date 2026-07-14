@@ -46,6 +46,16 @@ public sealed class CSharpTypeInfo
     public bool IsRowVersion { get; init; }
 
     /// <summary>
+    /// 無制限バイナリ型（<c>varbinary(max)</c> / <c>image</c> / 長さ宣言なし BLOB / <c>bytea</c> 等）かどうか。
+    /// </summary>
+    /// <remarks>
+    /// カラム定義（宣言）ベースの静的判定。<c>ExcludeUnboundedBinaryColumns</c> オプション有効時に
+    /// 生成 Repository の SELECT / UPDATE 対象から除外する列の識別に使う（判定はプロバイダの型マッパーの責務）。
+    /// <c>rowversion</c> / <c>timestamp</c> / <c>binary(n)</c> / <c>varbinary(n)</c> など有界のバイナリは対象外。
+    /// </remarks>
+    public bool IsUnboundedBinary { get; init; }
+
+    /// <summary>
     /// DB 定義メタ属性（<c>[DbColumnMeta]</c>）へ刻む方言中立の型トークン（例 <c>"string(50)"</c> / <c>"decimal(10,2)"</c> / <c>"int32"</c>）。
     /// 型カタログで解析できない自由記述型は <c>null</c> で、属性を付与しない（黙って誤った型を刻まない）。
     /// </summary>

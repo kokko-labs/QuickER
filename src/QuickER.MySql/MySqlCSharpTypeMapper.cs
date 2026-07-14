@@ -16,7 +16,7 @@ namespace QuickER.MySql;
 /// <item><description>float → float、double → double</description></item>
 /// <item><description>decimal / numeric → decimal</description></item>
 /// <item><description>date / datetime → DateTime、time → TimeSpan、timestamp → DateTimeOffset</description></item>
-/// <item><description>varbinary / binary / blob 系 → byte[]（参照型）</description></item>
+/// <item><description>varbinary / binary / tinyblob / blob / mediumblob / longblob → byte[]（参照型）。blob/mediumblob/longblob は無制限バイナリ、tinyblob(255B)/binary(n)/varbinary(n) は有界</description></item>
 /// <item><description>varchar / char / text 系 / json → string（長さ指定があれば MaxLength として保持）</description></item>
 /// <item><description>未知の型 → string（生成失敗を避けるための安全側フォールバック）</description></item>
 /// </list>
@@ -83,7 +83,12 @@ public sealed partial class MySqlCSharpTypeMapper : IColumnTypeMapper
             "date" or "datetime" => Value("DateTime"),
             "timestamp" => Value("DateTimeOffset"),
             "time" => Value("TimeSpan"),
-            "varbinary" or "binary" or "blob" or "mediumblob" or "longblob" => Reference("byte[]"),
+            // tinyblob(255B) も byte[]。blob/mediumblob/longblob は上限不明の無制限バイナリ、tinyblob/binary(n)/varbinary(n) は有界
+            "varbinary" or "binary" or "tinyblob" or "blob" or "mediumblob" or "longblob" =>
+                Reference(
+                    "byte[]",
+                    isUnboundedBinary: baseType is "blob" or "mediumblob" or "longblob"
+                ),
             // 文字列系のみ MaxLength を保持し、[MaxLength] 属性の生成に使う
             "varchar" or "char" or "text" or "mediumtext" or "longtext" or "json" => Reference(
                 "string",
@@ -110,12 +115,18 @@ public sealed partial class MySqlCSharpTypeMapper : IColumnTypeMapper
 
     /// <summary>参照型の型情報を作成する</summary>
     /// <param name="maxLength">文字列型の最大長。長さ指定なしの場合は null</param>
-    private static CSharpTypeInfo Reference(string typeName, int? maxLength = null) =>
+    /// <param name="isUnboundedBinary">無制限バイナリ（blob / mediumblob / longblob 等）かどうか</param>
+    private static CSharpTypeInfo Reference(
+        string typeName,
+        int? maxLength = null,
+        bool isUnboundedBinary = false
+    ) =>
         new()
         {
             TypeName = typeName,
             IsReferenceType = true,
             MaxLength = maxLength,
+            IsUnboundedBinary = isUnboundedBinary,
         };
 
     /// <summary>データ型表記を前後空白除去・小文字化・空白畳み込みで正規化する</summary>

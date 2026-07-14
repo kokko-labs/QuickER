@@ -696,6 +696,9 @@
   <data name="Csharp_GenerationErrorTitle" xml:space="preserve">
     <value>C# 生成エラー</value>
   </data>
+  <data name="Csharp_GenerationFailedIntro" xml:space="preserve">
+    <value>C# コードを生成できませんでした。以下の診断を確認してください。</value>
+  </data>
   <data name="Csharp_WarningLine" xml:space="preserve">
     <value>・{0}</value>
   </data>
