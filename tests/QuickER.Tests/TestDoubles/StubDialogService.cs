@@ -23,6 +23,17 @@ public sealed class StubDialogService : IDialogService
     /// <summary>ShowError に渡されたメッセージの記録</summary>
     public List<string> ErrorMessages { get; } = new();
 
+    /// <summary>ShowInformationDetails に渡された (要約, 詳細, タイトル) の記録</summary>
+    public List<(
+        string Message,
+        string Details,
+        string Title
+    )> InformationDetailsMessages { get; } = new();
+
+    /// <summary>ShowErrorDetails に渡された (要約, 詳細, タイトル) の記録</summary>
+    public List<(string Message, string Details, string Title)> ErrorDetailsMessages { get; } =
+        new();
+
     /// <summary>メッセージを記録し <see cref="ConfirmResult"/> を返す</summary>
     public bool Confirm(string message, string title)
     {
@@ -42,4 +53,12 @@ public sealed class StubDialogService : IDialogService
 
     /// <summary>エラーメッセージを記録する</summary>
     public void ShowError(string message, string title) => ErrorMessages.Add(message);
+
+    /// <summary>要約＋詳細の情報表示を (要約, 詳細, タイトル) として記録する</summary>
+    public void ShowInformationDetails(string message, string details, string title) =>
+        InformationDetailsMessages.Add((message, details, title));
+
+    /// <summary>要約＋詳細のエラー表示を (要約, 詳細, タイトル) として記録する</summary>
+    public void ShowErrorDetails(string message, string details, string title) =>
+        ErrorDetailsMessages.Add((message, details, title));
 }

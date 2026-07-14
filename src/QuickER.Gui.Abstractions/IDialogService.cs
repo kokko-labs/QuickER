@@ -17,4 +17,16 @@ public interface IDialogService
 
     /// <summary>エラーメッセージを表示する</summary>
     void ShowError(string message, string title);
+
+    /// <summary>先頭メッセージと複数行の詳細（一覧）を、広い読み取り専用領域を持つ情報ダイアログで表示する</summary>
+    /// <param name="message">上部に表示する要約メッセージ</param>
+    /// <param name="details">読み取り専用領域に表示する複数行の詳細（一覧本文）</param>
+    /// <param name="title">ダイアログのタイトル</param>
+    void ShowInformationDetails(string message, string details, string title);
+
+    /// <summary>先頭メッセージと複数行の詳細（一覧）を、エラー表示の詳細ダイアログで表示する</summary>
+    /// <param name="message">上部に表示する要約メッセージ</param>
+    /// <param name="details">読み取り専用領域に表示する複数行の詳細（一覧本文）</param>
+    /// <param name="title">ダイアログのタイトル</param>
+    void ShowErrorDetails(string message, string details, string title);
 }

@@ -199,13 +199,18 @@ public sealed class CSharpCodeGenerationService
             : [];
 
         // 除外列が 1 つ以上あれば Info 診断で通知する（利用者へ「どの列が SELECT / UPDATE から外れたか」を明示）。
+        // ダイアログ／CLI で 1 行 1 列に見えるよう、導入文の後に改行＋インデント 2 スペースで各列を並べる。
         if (excludedColumnLines.Count > 0)
         {
+            var excludedColumnList = string.Join(
+                Environment.NewLine,
+                excludedColumnLines.Select(line => "  " + line)
+            );
             diagnostics.Add(
                 Info(
                     string.Format(
                         Strings.CodeGen_Info_ExcludedUnboundedBinaryColumns,
-                        string.Join(", ", excludedColumnLines)
+                        Environment.NewLine + excludedColumnList
                     )
                 )
             );

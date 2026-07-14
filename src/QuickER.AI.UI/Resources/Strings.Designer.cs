@@ -197,5 +197,11 @@ namespace QuickER.AI.UI.Resources {
                 return ResourceManager.GetString("Attachment_ClipboardCaptureFailed", resourceCulture);
             }
         }
+
+        public static string Common_OK {
+            get {
+                return ResourceManager.GetString("Common_OK", resourceCulture);
+            }
+        }
     }
 }

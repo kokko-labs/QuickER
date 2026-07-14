@@ -1335,7 +1335,13 @@ namespace QuickER.Resources {
                 return ResourceManager.GetString("Csharp_GenerationErrorTitle", resourceCulture);
             }
         }
-        
+
+        public static string Csharp_GenerationFailedIntro {
+            get {
+                return ResourceManager.GetString("Csharp_GenerationFailedIntro", resourceCulture);
+            }
+        }
+
         public static string Csharp_WarningLine {
             get {
                 return ResourceManager.GetString("Csharp_WarningLine", resourceCulture);

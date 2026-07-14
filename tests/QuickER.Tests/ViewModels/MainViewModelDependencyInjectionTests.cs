@@ -109,6 +109,10 @@ public class MainViewModelDependencyInjectionTests
         public void ShowInformation(string message, string title) { }
 
         public void ShowError(string message, string title) { }
+
+        public void ShowInformationDetails(string message, string details, string title) { }
+
+        public void ShowErrorDetails(string message, string details, string title) { }
     }
 
     /// <summary>アプリ固有ダイアログを表示せず常にキャンセル相当を返すスタブ</summary>

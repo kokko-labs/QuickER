@@ -107,7 +107,7 @@
     <value>The Repository for table '{0}' supports single primary keys only, so its generation was skipped.</value>
   </data>
   <data name="CodeGen_Info_ExcludedUnboundedBinaryColumns" xml:space="preserve">
-    <value>Excluded unbounded binary columns from SELECT / UPDATE: {0}</value>
+    <value>Excluded unbounded binary columns from SELECT / UPDATE:{0}</value>
   </data>
   <data name="CodeGen_Warning_ManyToManySkipped" xml:space="preserve">
     <value>Many-to-many relationship '{0}' is out of scope for C# generation and was skipped.</value>

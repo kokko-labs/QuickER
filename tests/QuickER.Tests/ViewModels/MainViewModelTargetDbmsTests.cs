@@ -74,8 +74,8 @@ public class MainViewModelTargetDbmsTests
         CountUndoable(vm).Should().Be(undoCountBefore);
     }
 
-    /// <summary>変換できない型がある場合に警告メッセージが提示されることを検証する</summary>
-    [Fact(DisplayName = "未変換の列は警告メッセージに列挙される")]
+    /// <summary>変換できない型がある場合に、導入文（message）と一覧（details）が分割提示されることを検証する</summary>
+    [Fact(DisplayName = "未変換の列は導入文と一覧に分割して詳細ダイアログで列挙される")]
     public void ChangeDbms_Unconverted_ShowsWarning()
     {
         var (vm, fake, dialogs) = CreateVm();
@@ -85,12 +85,12 @@ public class MainViewModelTargetDbmsTests
 
         vm.SelectedProvider = fake;
 
-        dialogs
-            .InformationMessages.Should()
-            .ContainSingle()
-            .Which.Should()
-            .Contain("NewTable")
-            .And.Contain("uniqueidentifier");
+        // 単文の ShowInformation ではなく、要約＋詳細の ShowInformationDetails に移行している
+        dialogs.InformationMessages.Should().BeEmpty();
+        var entry = dialogs.InformationDetailsMessages.Should().ContainSingle().Subject;
+        // 導入文（message）は変換警告の見出し・一覧（details）に未変換列が並ぶ
+        entry.Message.Should().Be(GuiStrings.TypeConversion_WarningHeader);
+        entry.Details.Should().Contain("NewTable").And.Contain("uniqueidentifier");
     }
 
     /// <summary>未知の TargetDbms を持つ図の読込相当で、SQL Server として動作することを検証する</summary>
