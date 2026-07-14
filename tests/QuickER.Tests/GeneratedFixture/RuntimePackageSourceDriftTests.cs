@@ -39,7 +39,7 @@ public sealed class RuntimePackageSourceDriftTests
         );
     }
 
-    /// <summary>自作 SQL Server エンジン（<c>QuickER.Runtime.SqlServer</c>）のチェックイン済みソースが一致する</summary>
+    /// <summary>QuickER の SQL Server エンジン（<c>QuickER.Runtime.SqlServer</c>）のチェックイン済みソースが一致する</summary>
     [Fact(
         DisplayName = "SqlServer パッケージのチェックイン済みソースが現在のレンダラー出力と完全一致する（ドリフト検知）"
     )]
@@ -53,7 +53,7 @@ public sealed class RuntimePackageSourceDriftTests
         );
     }
 
-    /// <summary>自作 SQLite エンジン（<c>QuickER.Runtime.Sqlite</c>）のチェックイン済みソースが一致する</summary>
+    /// <summary>QuickER の SQLite エンジン（<c>QuickER.Runtime.Sqlite</c>）のチェックイン済みソースが一致する</summary>
     [Fact(
         DisplayName = "Sqlite パッケージのチェックイン済みソースが現在のレンダラー出力と完全一致する（ドリフト検知）"
     )]

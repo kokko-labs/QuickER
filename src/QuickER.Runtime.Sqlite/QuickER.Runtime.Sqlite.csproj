@@ -10,7 +10,7 @@
     <!-- パッケージ参照モードの利用者に IntelliSense 説明を届けるため XML ドキュメントを同梱する -->
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <PackageId>QuickER.Runtime.Sqlite</PackageId>
-    <Description>QuickER が生成するコードのランタイム（自作 SQLite 方言エンジン）。QuickER.Runtime の共通契約を実装する。</Description>
+    <Description>QuickER が生成するコードのランタイム（QuickER の SQLite 方言エンジン）。QuickER.Runtime の共通契約を実装する。</Description>
     <RepositoryUrl>https://github.com/kokko-labs/QuickER</RepositoryUrl>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>

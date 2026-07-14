@@ -7,22 +7,22 @@ using QuickER.Tests.GeneratedSqliteFixture;
 namespace QuickER.Tests.Integration;
 
 /// <summary>
-/// SQLite 方言ランタイムスイートを<b>自作 <c>SqliteRepository</c> 版</b>で実行する派生。
+/// SQLite 方言ランタイムスイートを<b>QuickER の <c>SqliteRepository</c> 版</b>で実行する派生。
 /// リポジトリ・エグゼキュータは実運用と同じ DI 経路（<c>AddGeneratedRepositories(connectionString)</c> →
 /// <see cref="ServiceProvider"/> から解決）で取得する。接続は一時ファイル DB の書き込み可能接続文字列。
 /// </summary>
 /// <remarks>
-/// これは Phase T の「SQLite 自作 Repository の方言ランタイムテスト」に相当する。基底
+/// これは Phase T の「SQLite Repository (QuickER) の方言ランタイムテスト」に相当する。基底
 /// <see cref="GeneratedSqliteRuntimeTestsBase"/> の全シナリオ（CRUD・式木・ページング・Include マルチクエリ・
 /// 生 SQL・グラフ保存・BulkInsert・削除カスケード）を、SQLite 固有の実行経路（プレーン SELECT＋DataReader・
 /// LIMIT/OFFSET・IncludeLoader・AddWithValue・1Tx INSERT ループ）で流す。
 /// </remarks>
 public sealed class GeneratedSqliteAdoRuntimeTests : GeneratedSqliteRuntimeTestsBase
 {
-    /// <summary>自作 SQLite リポジトリ群を登録した DI コンテナ（接続文字列は基底の一時 DB）</summary>
+    /// <summary>QuickER の SQLite リポジトリ群を登録した DI コンテナ（接続文字列は基底の一時 DB）</summary>
     private ServiceProvider? _provider;
 
-    /// <summary>AddGeneratedRepositories → 自作 SqliteRepository の DI 経路でリポジトリ群を解決する</summary>
+    /// <summary>AddGeneratedRepositories → QuickER の SqliteRepository の DI 経路でリポジトリ群を解決する</summary>
     private ServiceProvider Provider() =>
         _provider ??= new ServiceCollection()
             .AddGeneratedRepositories(ConnectionString)
@@ -38,7 +38,7 @@ public sealed class GeneratedSqliteAdoRuntimeTests : GeneratedSqliteRuntimeTests
         Provider().GetRequiredService<ISqlExecutor>();
 
     /// <summary>
-    /// 追加（自作 SQLite のみ）: 式木トランスレータが日付部品（Year/Month/Day/Hour/Minute/Second/DayOfYear）へ
+    /// 追加（QuickER の SQLite のみ）: 式木トランスレータが日付部品（Year/Month/Day/Hour/Minute/Second/DayOfYear）へ
     /// 生成する strftime フラグメントが、実 SQLite の ISO8601 TEXT に対して正しい整数値を返すことを検証する。
     /// </summary>
     /// <remarks>

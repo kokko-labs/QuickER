@@ -2991,7 +2991,7 @@ public class CSharpCodeGenerationServiceTests
 
         result.HasErrors.Should().BeFalse();
 
-        // 契約のみ（自作 SQL Server 実装なし）の Repository ファイルは SqlClient・DI に依存しない
+        // 契約のみ（QuickER の SQL Server 実装なし）の Repository ファイルは SqlClient・DI に依存しない
         var repository = Content(result, "Repositories.g.cs");
         repository.Should().NotContain("using Microsoft.Data.SqlClient;");
         repository.Should().NotContain("using Microsoft.Extensions.DependencyInjection;");
@@ -3043,7 +3043,7 @@ public class CSharpCodeGenerationServiceTests
         content
             .Should()
             .Contain("public static IServiceCollection AddGeneratedEfCoreRepositories(");
-        // 自作 SQL Server 実装は出力されない
+        // QuickER の SQL Server 実装は出力されない
         content.Should().NotContain("public sealed partial class SqlExecutor(");
         content.Should().NotContain("public abstract partial class SqlServerRepository<");
         content.Should().NotContain("public static IServiceCollection AddGeneratedRepositories(");
@@ -3278,7 +3278,7 @@ public class CSharpCodeGenerationServiceTests
         // SqlQuery 本体の公開シグネチャは不変（sealed のまま）
         content.Should().Contain("public sealed class SqlQuery<TEntity>");
 
-        // EF モードでは自作トランスレータを通さず式木のまま捕捉する
+        // EF モードではQuickER のトランスレータを通さず式木のまま捕捉する
         content.Should().Contain("_predicates.Add(predicate);");
         content
             .Should()
@@ -3297,12 +3297,12 @@ public class CSharpCodeGenerationServiceTests
     }
 
     /// <summary>
-    /// EF Core 生成 OFF（自作 Repository 単独）でも、SqlQuery は実行器抽象（ISqlQueryExecutor / SqlQueryPlan）経由へ統一され、
+    /// EF Core 生成 OFF（Repository (QuickER) 単独）でも、SqlQuery は実行器抽象（ISqlQueryExecutor / SqlQueryPlan）経由へ統一され、
     /// 方言別 ADO 実行器（SqlServerSqlQueryExecutor）が出力される一方、EF 版クラスは一切出力されないことを検証する。
     /// </summary>
     /// <remarks>
     /// M2a のランタイム統一により、SqlQuery は常に <c>ISqlQueryExecutor&lt;TEntity&gt;</c> 経由で実行するよう変更された
-    /// （以前は EF 生成時のみ実行器抽象が出て、自作 Repository は方言 SQL を SqlQuery 内に埋め込んでいた）。
+    /// （以前は EF 生成時のみ実行器抽象が出て、Repository (QuickER) は方言 SQL を SqlQuery 内に埋め込んでいた）。
     /// EF Core 依存（EfCore プレフィックスのクラス・DbContext 等）が漏れないことは引き続き守る。
     /// </remarks>
     [Fact]
@@ -3421,7 +3421,7 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("class InMemoryItemRepository");
         content.Should().Contain("class InMemorySampleData");
         content.Should().Contain("AddGeneratedInMemoryRepositories");
-        // 方言非依存: ADO・EF・自作 Repository 実装は一切出ない
+        // 方言非依存: ADO・EF・Repository (QuickER) 実装は一切出ない
         content.Should().NotContain("Microsoft.Data.SqlClient");
         content.Should().NotContain("Microsoft.Data.Sqlite");
         content.Should().NotContain("Microsoft.EntityFrameworkCore");
@@ -3557,5 +3557,108 @@ public class CSharpCodeGenerationServiceTests
             .NotContain(d => d.Severity == GenerationDiagnosticSeverity.Info);
         // ただし属性クラスの定義は Repository 生成（既定 ON）のため出力される（後続ステージの固定 infra が参照する）
         content.Should().Contain("public sealed class UnboundedBinaryColumnAttribute : Attribute");
+    }
+
+    /// <summary>
+    /// GenerateRepositories &amp;&amp; ExcludeUnboundedBinaryColumns のとき、除外列ごとに Stream アクセサ
+    /// （契約の Read/Write・エンジンへの委譲・ファイル糖衣の拡張メソッド）が生成されることを検証する。
+    /// </summary>
+    [Fact(DisplayName = "Stream アクセサ: 除外列に契約・委譲・ファイル糖衣が生成される")]
+    public void Generate_BinaryStreamAccessors_On_GeneratesContractAndSugar()
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            BinaryColumnDiagram(),
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                ExcludeUnboundedBinaryColumns = true,
+            }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        var content = result.Files.Single(f => f.FileName.EndsWith(".g.cs")).Content;
+
+        // 全機能インターフェイスへ Read/Write の Stream 版が載る
+        content
+            .Should()
+            .Contain("Task<bool> ReadPhotoAsync(int id, Stream destination, CancellationToken")
+            .And.Contain(
+                "Task<bool> WritePhotoAsync(int id, Stream? source, long? length = null, CancellationToken"
+            );
+        // 実装は固定 infra のエンジンへ委譲する
+        content
+            .Should()
+            .Contain("ReadUnboundedBinaryColumnAsync(nameof(DocumentEntity.Photo)")
+            .And.Contain("WriteUnboundedBinaryColumnAsync(nameof(DocumentEntity.Photo)");
+        // ファイル糖衣は拡張メソッド静的クラスとして 1 本出る
+        content
+            .Should()
+            .Contain("public static class DocumentRepositoryBinaryStreamExtensions")
+            .And.Contain("ReadPhotoToFileAsync")
+            .And.Contain("WritePhotoFromFileAsync");
+    }
+
+    /// <summary>ExcludeUnboundedBinaryColumns=false（既定）のとき、Stream アクセサは生成されない</summary>
+    [Fact(DisplayName = "Stream アクセサ: 除外 OFF では生成されない")]
+    public void Generate_BinaryStreamAccessors_Off_NotGenerated()
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            BinaryColumnDiagram(),
+            new CodeGenerationOptions { NamespaceName = "Sample.Domain" }
+        );
+
+        var content = result.Files.Single(f => f.FileName.EndsWith(".g.cs")).Content;
+        content.Should().NotContain("ReadPhotoAsync");
+        content.Should().NotContain("BinaryStreamExtensions");
+    }
+
+    /// <summary>
+    /// EF Core 単独生成（GenerateRepositories=false・GenerateEfCore=true）では、除外オプション ON でも
+    /// Stream アクセサは契約にも現れない（Repository (QuickER) 前提の機能のため）。
+    /// </summary>
+    [Fact(DisplayName = "Stream アクセサ: EF 単独生成では契約にも出ない")]
+    public void Generate_BinaryStreamAccessors_EfOnly_NotGenerated()
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            BinaryColumnDiagram(),
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                GenerateRepositories = false,
+                GenerateEfCore = true,
+                ExcludeUnboundedBinaryColumns = true,
+            }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        var content = result.Files.Single(f => f.FileName.EndsWith(".g.cs")).Content;
+        content.Should().NotContain("ReadPhotoAsync");
+        content.Should().NotContain("BinaryStreamExtensions");
+    }
+
+    /// <summary>
+    /// リモート契約生成時、Stream アクセサは全機能面（<c>I{Entity}Repository</c>）にのみ載り、
+    /// リモート面（<c>I{Entity}RemoteRepository</c>）には載らない（ネットワーク境界を越えるストリーミングは対象外）。
+    /// </summary>
+    [Fact(DisplayName = "Stream アクセサ: リモート面には載らず全機能面にのみ載る")]
+    public void Generate_BinaryStreamAccessors_NotOnRemoteInterface()
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            BinaryColumnDiagram(),
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                ExcludeUnboundedBinaryColumns = true,
+                GenerateRemoteContracts = true,
+            }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        var content = result.Files.Single(f => f.FileName.EndsWith(".g.cs")).Content;
+
+        // 全機能面には載る
+        content.Should().Contain("Task<bool> ReadPhotoAsync(int id, Stream destination");
+        // リモート面（インターフェイス宣言直後の本体）には載らない
+        content.Should().NotMatchRegex(@"interface IDocumentRemoteRepository[^}]*ReadPhotoAsync");
     }
 }

@@ -2,7 +2,7 @@
 
 *[English](README.md) | 日本語*
 
-QuickER（ER 図デザイナ）が生成する C# コードのランタイムのうち、自作 Repository の **SQLite 方言エンジン**です。`QuickER.Runtime` の方言中立契約を SQLite（マルチクエリの IncludeLoader・`LIMIT/OFFSET`・`strftime` など）で実装します。依存は `Microsoft.Data.Sqlite`（と脆弱性修正版 SQLitePCLRaw のピン）のみです。
+QuickER（ER 図デザイナ）が生成する C# コードのランタイムのうち、Repository (QuickER) の **SQLite 方言エンジン**です。`QuickER.Runtime` の方言中立契約を SQLite（マルチクエリの IncludeLoader・`LIMIT/OFFSET`・`strftime` など）で実装します。依存は `Microsoft.Data.Sqlite`（と脆弱性修正版 SQLitePCLRaw のピン）のみです。
 
 ## 使いどき
 

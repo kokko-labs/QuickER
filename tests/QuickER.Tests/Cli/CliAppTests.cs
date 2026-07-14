@@ -206,7 +206,7 @@ public class CliAppTests
     }
 
     /// <summary>
-    /// 自作 Repository の生成が要求されているが（quicker.json の GenerateRepositories=true）、
+    /// Repository (QuickER) の生成が要求されているが（quicker.json の GenerateRepositories=true）、
     /// プロバイダが未対応方言（postgresql / mysql / oracle）の場合は終了コード 1 でエラーメッセージを出すことを検証する
     /// </summary>
     [Theory(DisplayName = "未対応方言＋GenerateRepositories 要求は終了コード 1")]
@@ -500,7 +500,7 @@ public class CliAppTests
     {
         var (schemaPath, outDir, root) = CreateSampleSchema();
         var configPath = Path.Combine(root, "quicker.json");
-        // EF 単独（自作 Repository なし）でパッケージ参照モードにする
+        // EF 単独（Repository (QuickER) なし）でパッケージ参照モードにする
         File.WriteAllText(
             configPath,
             """{ "GenerateRepositories": false, "GenerateEfCore": true }"""
@@ -531,7 +531,7 @@ public class CliAppTests
                     "QuickER.Runtime.EntityFrameworkCore",
                     "EF パッケージが PackageReference 案内に含まれる"
                 );
-            // EF 単独では自作方言パッケージ（SqlServer / Sqlite）は案内されない
+            // EF 単独ではQuickER の方言パッケージ（SqlServer / Sqlite）は案内されない
             stdout.Should().NotContain("QuickER.Runtime.SqlServer");
             stdout.Should().NotContain("QuickER.Runtime.Sqlite");
         }

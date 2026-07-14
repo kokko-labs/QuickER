@@ -9,7 +9,7 @@ namespace QuickER.Tests.GeneratedBinaryFixture;
 /// </summary>
 /// <remarks>
 /// <para>
-/// 独立した図（他フィクスチャと共有しない）で、無制限バイナリ列の全経路（自作 SQLite Repository・EF Core・
+/// 独立した図（他フィクスチャと共有しない）で、無制限バイナリ列の全経路（QuickER の SQLite Repository・EF Core・
 /// インメモリ・リモートサービス）を 1 つのアセンブリで検証できるよう、オプションを併存させる。
 /// エンティティ <c>documents</c> は無制限バイナリ列（<c>payload</c>＝nullable・<c>thumb</c>＝非 nullable）と、
 /// 除外対象外のバイナリ（<c>checksum</c>＝有界 <c>varbinary(16)</c>・<c>row_ver</c>＝<c>rowversion</c>）を併せ持ち、
@@ -19,7 +19,7 @@ namespace QuickER.Tests.GeneratedBinaryFixture;
 /// 値オブジェクトは OFF（シンプル優先）。バイナリ列を素の <c>byte[]</c> のまま扱うことで、除外の意味論
 /// （null / 空配列の未取得状態・更新ガード・生 SQL の opportunistic マップ）を素直に検証できる。
 /// <c>row_ver</c> は nullable にする＝DB 側で自動採番される <c>rowversion</c> を SQLite/EF が生成しないため、
-/// 全列 INSERT（自作）・列省略 INSERT（EF の store-generated 扱い）のどちらでも成立させる。
+/// 全列 INSERT（QuickER）・列省略 INSERT（EF の store-generated 扱い）のどちらでも成立させる。
 /// 文字列列は Unicode（<c>nvarchar</c>）で統一する（可搬フィクスチャの不変条件）。
 /// </para>
 /// <para>
@@ -44,7 +44,7 @@ public static class BinaryFixtureDefinition
 
     /// <summary>
     /// フィクスチャ生成に用いる決定的なオプション。
-    /// SQLite 方言の自作 Repository・EF Core・インメモリ・リモートサービスを併存させ、無制限バイナリ除外を有効にする。
+    /// SQLite 方言のRepository (QuickER)・EF Core・インメモリ・リモートサービスを併存させ、無制限バイナリ除外を有効にする。
     /// </summary>
     public static CodeGenerationOptions Options { get; } =
         new()
@@ -138,7 +138,7 @@ public static class BinaryFixtureDefinition
                     DataType = "varbinary(16)",
                     IsNullable = true,
                 },
-                // rowversion ＝除外対象外の検証用。DB 側自動採番のため nullable（自作は全列 INSERT・EF は store-generated 扱い）
+                // rowversion ＝除外対象外の検証用。DB 側自動採番のため nullable（QuickER は全列 INSERT・EF は store-generated 扱い）
                 new Column
                 {
                     Id = DocumentRowVerColId,

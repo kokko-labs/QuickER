@@ -112,7 +112,7 @@
 
 ### DI 登録
 
-自作 Repository を DI コンテナへ登録します。
+Repository (QuickER) を DI コンテナへ登録します。
 
 ```csharp
 services.AddGeneratedRepositories(connectionString);

@@ -1,6 +1,6 @@
 # QuickER.Runtime.Sqlite
 
-The **SQLite dialect engine** for the custom Repository, part of the runtime for the C# code that QuickER (an ER diagram designer) generates. It implements the dialect-neutral contracts of `QuickER.Runtime` for SQLite (multi-query IncludeLoader, `LIMIT/OFFSET`, `strftime`, etc.). Its only dependencies are `Microsoft.Data.Sqlite` (and the pinned, vulnerability-fixed SQLitePCLRaw).
+The **SQLite dialect engine** for the QuickER Repository, part of the runtime for the C# code that QuickER (an ER diagram designer) generates. It implements the dialect-neutral contracts of `QuickER.Runtime` for SQLite (multi-query IncludeLoader, `LIMIT/OFFSET`, `strftime`, etc.). Its only dependencies are `Microsoft.Data.Sqlite` (and the pinned, vulnerability-fixed SQLitePCLRaw).
 
 ## When you need it
 

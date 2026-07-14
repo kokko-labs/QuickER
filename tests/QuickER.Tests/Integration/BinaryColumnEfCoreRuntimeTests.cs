@@ -1,3 +1,5 @@
+using System;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using FluentAssertions;
@@ -78,6 +80,27 @@ public sealed class BinaryColumnEfCoreRuntimeTests : BinaryColumnRuntimeTestsBas
         (await documents.CountWithPayloadAsync(Ct))
             .Should()
             .Be(2);
+    }
+
+    /// <summary>EF Core モードでは Stream アクセサ（Read/Write）は NotSupportedException を投げる</summary>
+    [Fact(DisplayName = "[Binary/EF] Stream アクセサは NotSupportedException")]
+    public async Task StreamAccessors_ThrowNotSupported()
+    {
+        await ResetAndSeedAsync();
+        var documents = CreateDocumentRepository();
+
+        var read = async () => await documents.ReadPayloadAsync(1, new MemoryStream(), Ct);
+        (await read.Should().ThrowAsync<NotSupportedException>())
+            .Which.Message.Should()
+            .Contain("EF Core");
+
+        var write = async () =>
+            await documents.WritePayloadAsync(
+                1,
+                new MemoryStream([1, 2, 3]),
+                cancellationToken: Ct
+            );
+        await write.Should().ThrowAsync<NotSupportedException>();
     }
 
     public override void Dispose()

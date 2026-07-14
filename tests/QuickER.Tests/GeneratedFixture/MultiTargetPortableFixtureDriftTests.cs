@@ -9,7 +9,7 @@ namespace QuickER.Tests.GeneratedMultiTargetFixture;
 /// </summary>
 /// <remarks>
 /// <para>
-/// 入力の図は方言可搬フィクスチャと同一だが、オプションが自作 Repository のマルチターゲット
+/// 入力の図は方言可搬フィクスチャと同一だが、オプションがRepository (QuickER) のマルチターゲット
 /// （<c>RepositoryDialects=["sqlserver","sqlite"]</c>・EF Core なし）である点が異なる
 /// （<see cref="MultiTargetPortableFixtureDefinition.Options"/>）。契約 1 回＋方言別 namespace 実装
 /// （<c>.SqlServer</c> / <c>.Sqlite</c>）＋方言別 DI（keyed 版含む）のテキストがテンプレート変更で
@@ -41,7 +41,7 @@ public sealed class MultiTargetPortableFixtureDriftTests
             MultiTargetPortableFixtureDefinition.Options,
             MultiTargetPortableFixtureDefinition.OutputFileName,
             "コミット済みマルチターゲットフィクスチャが現在のテンプレート出力と乖離しています。"
-                + "MultiTargetPortableFixtureDefinition（sqlserver / sqlite の自作 Repository・EF なし）から再生成が必要です。"
+                + "MultiTargetPortableFixtureDefinition（sqlserver / sqlite のRepository (QuickER)・EF なし）から再生成が必要です。"
         );
     }
 }

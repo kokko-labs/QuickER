@@ -9,7 +9,7 @@ namespace QuickER.Tests.GeneratedSqliteFixture;
 /// </summary>
 /// <remarks>
 /// <para>
-/// 入力の図は方言可搬フィクスチャと同一だが、オプションが SQLite 方言の自作 Repository＋EF Core 併存
+/// 入力の図は方言可搬フィクスチャと同一だが、オプションが SQLite 方言のRepository (QuickER)＋EF Core 併存
 /// （<see cref="SqlitePortableFixtureDefinition.Options"/>）である点が異なる。SQLite 方言ランタイム
 /// （<c>SqliteRepository</c>・<c>IncludeLoader</c>・LIMIT/OFFSET・strftime）のテキストがテンプレート変更で
 /// 乖離していないことを守る。
@@ -35,7 +35,7 @@ public sealed class SqlitePortableFixtureDriftTests
             SqlitePortableFixtureDefinition.Options,
             SqlitePortableFixtureDefinition.OutputFileName,
             "コミット済み SQLite フィクスチャが現在のテンプレート出力と乖離しています。"
-                + "SqlitePortableFixtureDefinition（SQLite 方言・自作 Repository＋EF Core）から再生成が必要です。"
+                + "SqlitePortableFixtureDefinition（SQLite 方言・Repository (QuickER)＋EF Core）から再生成が必要です。"
         );
     }
 }

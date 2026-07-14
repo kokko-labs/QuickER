@@ -11,7 +11,7 @@ using QuickER.Tests.GeneratedSqliteFixture;
 namespace QuickER.Tests.Integration;
 
 /// <summary>
-/// SQLite 方言の生成物（自作 <c>SqliteRepository</c> 版と EF Core Sqlite 版）を、同一シナリオで実 SQLite
+/// SQLite 方言の生成物（QuickER の <c>SqliteRepository</c> 版と EF Core Sqlite 版）を、同一シナリオで実 SQLite
 /// （一時ファイル DB・インプロセス）に流して検証するパリティ／ランタイムスイートの共通基底。
 /// </summary>
 /// <remarks>
@@ -22,7 +22,7 @@ namespace QuickER.Tests.Integration;
 /// 経由で記述し、リポジトリ・エグゼキュータの生成方法だけを派生クラスが与える。
 /// </para>
 /// <para>
-/// これにより「AddGeneratedRepositories（自作 SQLite）と AddGeneratedEfCoreRepositories＋UseSqlite（EF）を
+/// これにより「AddGeneratedRepositories（QuickER の SQLite）と AddGeneratedEfCoreRepositories＋UseSqlite（EF）を
 /// 差し替えるだけで交換可能」という契約を、両バックエンドで同一アサーションにより証明する。Docker 不要のため
 /// CI でも常時実行される。スキーマは <see cref="SqliteDdlGenerator"/> が生成する DDL で用意する。
 /// </para>
@@ -30,7 +30,7 @@ namespace QuickER.Tests.Integration;
 /// EF Core Sqlite は <c>decimal</c> を TEXT として格納しサーバー側の <c>ORDER BY</c> / 比較 / 集計を直接は
 /// サポートしないため（"SQLite does not support expressions of type 'decimal'"）、両バックエンドで同一に走る
 /// シナリオは並び替え・ページングを <b>整数キー</b>で行う。decimal に依存する検証は少量データのクライアント評価
-/// （EF）で成立する範囲に限る。生 SQL の集計は自作／EF 双方で <c>ExecuteScalarSqlAsync&lt;decimal&gt;</c>
+/// （EF）で成立する範囲に限る。生 SQL の集計はQuickER／EF 双方で <c>ExecuteScalarSqlAsync&lt;decimal&gt;</c>
 /// （<c>Convert.ChangeType</c> 経路）を用いる。
 /// </para>
 /// </remarks>
@@ -48,7 +48,7 @@ public abstract class GeneratedSqliteRuntimeTestsBase : IDisposable
 
     // --- 派生クラスが与えるバックエンド固有のファクトリ ---
 
-    /// <summary>顧客リポジトリを生成する（自作 = DI 直接 / EF = AddGeneratedEfCoreRepositories 経由）</summary>
+    /// <summary>顧客リポジトリを生成する（QuickER = DI 直接 / EF = AddGeneratedEfCoreRepositories 経由）</summary>
     protected abstract ICustomerRepository CreateCustomerRepository();
 
     /// <summary>注文リポジトリを生成する</summary>
@@ -107,7 +107,7 @@ public abstract class GeneratedSqliteRuntimeTestsBase : IDisposable
             Memo = memo is null ? null : MemoValue.Create(memo),
         };
 
-    // ==================== 共通シナリオ（自作 SQLite・EF Core Sqlite の双方で実行） ====================
+    // ==================== 共通シナリオ（QuickER の SQLite・EF Core Sqlite の双方で実行） ====================
 
     /// <summary>1. CRUD 往復（VO 込み・null 混在・RowState）: Insert→GetById→Update→Delete で値・VO・状態が復元される</summary>
     [Fact(
@@ -312,7 +312,7 @@ public abstract class GeneratedSqliteRuntimeTestsBase : IDisposable
     /// 4b. ThenInclude 再帰（親→子→親のサイクル）が子の親参照を正しくロードする。
     /// </summary>
     /// <remarks>
-    /// 自作 <c>IncludeLoader</c>（マルチクエリ）はサイクルを段階的なクエリで解決できるが、EF Core の
+    /// QuickER の <c>IncludeLoader</c>（マルチクエリ）はサイクルを段階的なクエリで解決できるが、EF Core の
     /// no-tracking クエリは Include パス <c>Orders-&gt;Customer</c> のサイクルを拒否する
     /// （"Cycles are not allowed in no-tracking queries"）。そのため本テストはバックエンド別に置き、
     /// EF 派生では非サイクルの等価経路（子を Include(Customer) で別ロード）へ置き換える
@@ -480,7 +480,7 @@ public abstract class GeneratedSqliteRuntimeTestsBase : IDisposable
         finalCustomer.Orders.Select(o => o.OrderId.Value).Should().BeEquivalentTo([11, 12]);
     }
 
-    /// <summary>7. BulkInsertAsync（自作は 1Tx INSERT ループ）で数十件が一括追加され件数が一致する</summary>
+    /// <summary>7. BulkInsertAsync（QuickER は 1Tx INSERT ループ）で数十件が一括追加され件数が一致する</summary>
     [Fact(DisplayName = "[SQLite] 7: BulkInsertAsync で数十件が一括追加され件数が一致する")]
     public async Task BulkInsert_InsertsAllRows()
     {

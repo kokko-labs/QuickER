@@ -132,7 +132,7 @@ quicker generate --schema diagram.json --out ./Generated --provider sqlserver
 Repository (QuickER) と EF Core は**同じインターフェイス**を実装するため、DI 登録 1 行の差し替えで交換できます:
 
 ```csharp
-// Repository (QuickER・自作 SQLite 実装)
+// Repository (QuickER・SQLite 実装)
 services.AddGeneratedRepositories(connectionString);
 
 // EF Core 実装（同じ ICustomerRepository などが解決される）

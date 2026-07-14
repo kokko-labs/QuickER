@@ -10,7 +10,7 @@ namespace QuickER.Tests.Integration;
 
 /// <summary>
 /// EF Core 版ランタイム固有の追加シナリオ（共通パリティスイートで扱いきれない EF 経路の穴を埋める）と、
-/// 自作版⇔EF 版の直接パリティ比較（同一シードへ同一クエリを流して結果を突き合わせる）を実 SQL Server で検証する。
+/// QuickER 版⇔EF 版の直接パリティ比較（同一シードへ同一クエリを流して結果を突き合わせる）を実 SQL Server で検証する。
 /// </summary>
 /// <remarks>
 /// ExecuteDeleteAsync（cascade 含む）・OrderBy/Skip/Take・生 SQL（EfCoreSqlExecutor）を EF 経路で確認し、
@@ -256,17 +256,17 @@ public sealed class GeneratedRuntimeEfCoreSpecificTests(SqlServerContainerFixtur
     }
 
     /// <summary>
-    /// EF-6. 直接パリティ比較: 同一シードへ同一クエリ（式木・Include・生 SQL）を自作版と EF 版の両方で流し、
+    /// EF-6. 直接パリティ比較: 同一シードへ同一クエリ（式木・Include・生 SQL）をQuickER 版と EF 版の両方で流し、
     /// 結果同士を突き合わせて完全一致することを確認する（交換可能性のより強い証明）。
     /// </summary>
     [Fact(
-        DisplayName = "[EF] 6: 同一シード・同一クエリで自作版と EF 版の結果が完全一致する（パリティ比較）"
+        DisplayName = "[EF] 6: 同一シード・同一クエリでQuickER 版と EF 版の結果が完全一致する（パリティ比較）"
     )]
     public async Task Parity_SameQuery_BothBackendsAgree()
     {
         await ResetAndCreateSchemaAsync();
 
-        // シードは自作版で 1 回だけ投入する（DB 状態は 1 つ）
+        // シードはQuickER 版で 1 回だけ投入する（DB 状態は 1 つ）
         var seedCustomers = new CustomerRepository(
             new SqlConnectionFactory(fixture.ConnectionString)
         );
@@ -277,7 +277,7 @@ public sealed class GeneratedRuntimeEfCoreSpecificTests(SqlServerContainerFixtur
         await seedOrders.InsertAsync(NewOrder(10, 1, 100m), Ct);
         await seedOrders.InsertAsync(NewOrder(11, 1, 50m), Ct);
 
-        // 自作版と EF 版のリポジトリ
+        // QuickER 版と EF 版のリポジトリ
         var ado = new CustomerRepository(new SqlConnectionFactory(fixture.ConnectionString));
         var ef = EfCustomers();
 

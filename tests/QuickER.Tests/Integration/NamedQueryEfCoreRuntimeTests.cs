@@ -6,7 +6,7 @@ namespace QuickER.Tests.Integration;
 
 /// <summary>
 /// 名前付きクエリのランタイムスイートを<b>EF Core Sqlite 版</b>で実行する派生。
-/// 自作版（<see cref="NamedQueryAdoRuntimeTests"/>）と同一のアサーション集合を緑にすることで、
+/// QuickER 版（<see cref="NamedQueryAdoRuntimeTests"/>）と同一のアサーション集合を緑にすることで、
 /// ミニ DSL 由来の共有本体（単一ラムダ→両バックエンド翻訳）のパリティを証明する。
 /// 自由 SQL・manual 分は partial 実装（QueryFixtureManualImplementations）が担う。
 /// </summary>

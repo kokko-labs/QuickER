@@ -15,7 +15,7 @@ namespace QuickER.Tests.Integration;
 
 /// <summary>
 /// 無制限バイナリ除外の生成物を、実 HTTP（Kestrel を 127.0.0.1 の空きポートで in-process 起動）＋実 SQLite の
-/// 3 階層構成で検証する。サーバー実体は自作 <c>SqliteRepository</c>（除外が効く側）で、クライアントは
+/// 3 階層構成で検証する。サーバー実体はQuickER の <c>SqliteRepository</c>（除外が効く側）で、クライアントは
 /// 生成された HTTP リモート実装のみを使う。
 /// </summary>
 /// <remarks>
@@ -34,7 +34,7 @@ public sealed class BinaryColumnRemoteRuntimeTests : IAsyncLifetime
     private static readonly byte[] Doc1Payload = [1, 2, 3, 4];
     private static readonly byte[] Doc1Thumb = [9, 9];
 
-    /// <summary>スキーマ作成 → Kestrel 起動（空きポート・サーバー実体は自作 SqliteRepository）→ HTTP クライアント DI 構築</summary>
+    /// <summary>スキーマ作成 → Kestrel 起動（空きポート・サーバー実体はQuickER の SqliteRepository）→ HTTP クライアント DI 構築</summary>
     public async ValueTask InitializeAsync()
     {
         var ddl = new SqliteDdlGenerator().Build(BinaryFixtureDefinition.Build());

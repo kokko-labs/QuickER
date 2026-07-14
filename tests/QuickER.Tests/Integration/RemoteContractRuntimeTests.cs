@@ -16,13 +16,13 @@ namespace QuickER.Tests.Integration;
 /// <remarks>
 /// <para>
 /// 入力はリモート契約フィクスチャ（<see cref="RemoteContractFixtureDefinition"/>＝SQLite 方言の
-/// 自作 Repository＋EF Core 併存・名前付きクエリ入り）。検証の柱は 3 つ:
+/// Repository (QuickER)＋EF Core 併存・名前付きクエリ入り）。検証の柱は 3 つ:
 /// (1) リモート面（I{Entity}RemoteRepository）だけで CRUD・グラフ保存・名前付きクエリが完結する、
 /// (2) リモート面と全機能面（I{Entity}Repository）が同一インスタンスとして解決され、全機能面では Query()・生 SQL も使える、
 /// (3) リモート面の契約にローカル実行前提のメンバー（Query()・生 SQL・一括追加）が現れない（リフレクションで面の分割を証明）。
 /// </para>
 /// <para>
-/// 自作（AddGeneratedRepositories）・EF Core（AddGeneratedEfCoreRepositories）の両 DI 経路で同じ検証を流す。
+/// QuickER（AddGeneratedRepositories）・EF Core（AddGeneratedEfCoreRepositories）の両 DI 経路で同じ検証を流す。
 /// </para>
 /// </remarks>
 [Trait("Category", "Integration")]
@@ -37,7 +37,7 @@ public sealed class RemoteContractRuntimeTests : IDisposable
     /// <summary>破棄対象の DI コンテナ</summary>
     private readonly List<ServiceProvider> _providers = [];
 
-    /// <summary>スキーマを作成し、自作 SqliteRepository 版の DI コンテナを返す</summary>
+    /// <summary>スキーマを作成し、QuickER の SqliteRepository 版の DI コンテナを返す</summary>
     private async Task<ServiceProvider> CreateAdoProviderAsync()
     {
         await ApplySchemaAsync();
@@ -123,8 +123,10 @@ public sealed class RemoteContractRuntimeTests : IDisposable
         (await orders.GetAllAsync(Ct)).Should().ContainSingle();
     }
 
-    /// <summary>自作 SqliteRepository 版: リモート面だけで CRUD・保存・名前付きクエリが動く</summary>
-    [Fact(DisplayName = "[remote] 自作 Sqlite: リモート面だけで CRUD・保存・名前付きクエリが動く")]
+    /// <summary>QuickER の SqliteRepository 版: リモート面だけで CRUD・保存・名前付きクエリが動く</summary>
+    [Fact(
+        DisplayName = "[remote] QuickER の Sqlite: リモート面だけで CRUD・保存・名前付きクエリが動く"
+    )]
     public async Task Ado_RemoteFace_SupportsCrudSaveAndNamedQueries()
     {
         var provider = await CreateAdoProviderAsync();

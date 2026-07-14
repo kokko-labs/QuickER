@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -149,5 +150,74 @@ public sealed class BinaryInMemoryFixtureRuntimeTests
                 .FirstOrDefaultAsync(Ct);
 
         await act.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    // ── Stream アクセサ（Read/Write{Column}Async）のインメモリ・パリティ ──
+
+    /// <summary>Write→Read の往復でデータが一致する（MemoryStream パリティ）</summary>
+    [Fact(DisplayName = "[Binary/InMemory] Stream: Write→Read の往復が一致する")]
+    public async Task Stream_WriteThenRead_RoundTrips()
+    {
+        var (_, documents) = await SeededAsync();
+
+        var payload = new byte[64 * 1024];
+        new Random(11).NextBytes(payload);
+        (await documents.WritePayloadAsync(1, new MemoryStream(payload), cancellationToken: Ct))
+            .Should()
+            .BeTrue();
+
+        using var destination = new MemoryStream();
+        (await documents.ReadPayloadAsync(1, destination, Ct)).Should().BeTrue();
+        destination.ToArray().Should().Equal(payload);
+    }
+
+    /// <summary>Read は行なし・列 NULL で false（宛先へ何も書かない）</summary>
+    [Fact(DisplayName = "[Binary/InMemory] Stream: Read は行なし・NULL で false")]
+    public async Task Stream_Read_ReturnsFalse_ForMissingRowOrNull()
+    {
+        var (_, documents) = await SeededAsync();
+
+        using var noRow = new MemoryStream();
+        (await documents.ReadPayloadAsync(999, noRow, Ct)).Should().BeFalse();
+        noRow.Length.Should().Be(0);
+
+        // payload を NULL に設定してから読むと false
+        (await documents.WritePayloadAsync(1, null, cancellationToken: Ct))
+            .Should()
+            .BeTrue();
+        using var nullColumn = new MemoryStream();
+        (await documents.ReadPayloadAsync(1, nullColumn, Ct)).Should().BeFalse();
+        nullColumn.Length.Should().Be(0);
+    }
+
+    /// <summary>Write はストア実体を直接書き換えず複製を差し戻す（既に取得済みのエンティティに影響しない）</summary>
+    [Fact(DisplayName = "[Binary/InMemory] Stream: Write はストア実体を直接書き換えない")]
+    public async Task Stream_Write_DoesNotMutateStoreInPlace()
+    {
+        var (_, documents) = await SeededAsync();
+
+        // WithUnboundedBinary で取得した複製（元 payload を保持）
+        var before = await documents
+            .Query()
+            .Where(d => d.DocumentId == 1)
+            .WithUnboundedBinary()
+            .FirstOrDefaultAsync(Ct);
+
+        var replacement = new byte[256];
+        new Random(22).NextBytes(replacement);
+        (await documents.WritePayloadAsync(1, new MemoryStream(replacement), cancellationToken: Ct))
+            .Should()
+            .BeTrue();
+
+        // 先に取得していた複製は書き換わらない（返却複製の独立性）
+        before!.Payload.Should().Equal(Doc1Payload, "取得済み複製は Write の影響を受けない");
+
+        // ストアには新しい blob が反映されている
+        var after = await documents
+            .Query()
+            .Where(d => d.DocumentId == 1)
+            .WithUnboundedBinary()
+            .FirstOrDefaultAsync(Ct);
+        after!.Payload.Should().Equal(replacement);
     }
 }

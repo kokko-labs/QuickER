@@ -84,7 +84,7 @@ internal sealed partial class CSharpGenerationModelBuilder
                     .ToList()
                 : [],
             // 共通契約（インターフェイス群・SqlQuery・メタデータ等）と各エンティティ用リポジトリインターフェイスは、
-            // 自作 SQL Server 実装（GenerateRepositories）・EF Core 実装（GenerateEfCore）・インメモリ実装
+            // QuickER の SQL Server 実装（GenerateRepositories）・EF Core 実装（GenerateEfCore）・インメモリ実装
             // （GenerateInMemoryRepositories）のいずれかが有効なら必要になる。
             // EF・インメモリ単独出力でも各 Repository が I{Entity}Repository を実装するため、モデルを構築しておく
             RepositoryClasses =
@@ -360,6 +360,14 @@ internal sealed partial class CSharpGenerationModelBuilder
             : entityClassName;
         var keyTypeName = BuildProperty(keyColumn[0]).TypeName.TrimEnd('?');
         var queryBlocks = BuildQueryBlocks(entity, repositoryName, options, diagnostics);
+        var binaryStreamBlocks = BuildBinaryStreamBlocks(
+            entity,
+            entityClassName,
+            $"I{repositoryName}Repository",
+            repositoryName,
+            keyTypeName,
+            options
+        );
 
         return new CSharpRepositoryModel
         {
@@ -377,6 +385,10 @@ internal sealed partial class CSharpGenerationModelBuilder
             QueryRemoteClientBlock = queryBlocks.RemoteClientBlock,
             QueryRemoteServerBlock = queryBlocks.RemoteServerBlock,
             QueryRemoteServerRecordsBlock = queryBlocks.RemoteServerRecordsBlock,
+            BinaryStreamContractBlock = binaryStreamBlocks.ContractBlock,
+            BinaryStreamThinImplBlock = binaryStreamBlocks.ThinImplBlock,
+            BinaryStreamEfImplBlock = binaryStreamBlocks.EfImplBlock,
+            BinaryStreamFileExtensionsBlock = binaryStreamBlocks.FileExtensionsBlock,
         };
     }
 

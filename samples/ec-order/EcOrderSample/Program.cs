@@ -37,7 +37,7 @@ await CreateSchemaAsync(connectionString);
 Console.WriteLine("[準備] EcOrder.sql の DDL で SQLite ファイル DB（ec-order.db）を作成しました。");
 Console.WriteLine();
 
-// 生成された DI 登録拡張で全リポジトリ（自作 SQLite 実装）を解決する
+// 生成された DI 登録拡張で全リポジトリ（QuickER の SQLite 実装）を解決する
 using var provider = new ServiceCollection()
     .AddGeneratedRepositories(connectionString)
     .BuildServiceProvider();

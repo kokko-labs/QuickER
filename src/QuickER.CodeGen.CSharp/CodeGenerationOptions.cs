@@ -26,7 +26,7 @@ public sealed class CodeGenerationOptions
     /// <summary>Entity と EditModel を相互変換する Mapper クラスを生成するかどうか</summary>
     public bool GenerateMappers { get; init; } = true;
 
-    /// <summary>自作 SQL Server 実装（<c>Microsoft.Data.SqlClient</c> 依存）の Repository クラス群を生成するかどうか</summary>
+    /// <summary>QuickER の SQL Server 実装（<c>Microsoft.Data.SqlClient</c> 依存）の Repository クラス群を生成するかどうか</summary>
     /// <remarks>
     /// SqlServerRepository 基底・各エンティティ実装・接続ファクトリ・SqlExecutor・SqlExpressionTranslator・
     /// <c>AddGeneratedRepositories</c> を生成する。共通契約（インターフェイス・SqlQuery・メタデータ等）は
@@ -35,10 +35,10 @@ public sealed class CodeGenerationOptions
     public bool GenerateRepositories { get; init; } = true;
 
     /// <summary>
-    /// 自作 Repository の生成方言（後方互換の単一指定。実効値は <see cref="EffectiveRepositoryDialects"/> が解決する）。
+    /// Repository (QuickER) の生成方言（後方互換の単一指定。実効値は <see cref="EffectiveRepositoryDialects"/> が解決する）。
     /// </summary>
     /// <remarks>
-    /// 既定は <c>"sqlserver"</c>（現行の自作 SQL Server 実装）。テンプレートはこの値で方言別の識別子クォート・
+    /// 既定は <c>"sqlserver"</c>（現行の QuickER SQL Server 実装）。テンプレートはこの値で方言別の識別子クォート・
     /// ADO 型・SQL 句を吐き分ける。複数方言を同時生成する場合は <see cref="RepositoryDialects"/> を使う。
     /// 両者を指定した場合は <see cref="RepositoryDialects"/>（リスト）を優先する（設定ファイル・CLI 互換のため
     /// 単一指定を残す）。対応方言は <see cref="SupportedRepositoryDialects"/> を参照（GUI / CLI 共通）。
@@ -46,7 +46,7 @@ public sealed class CodeGenerationOptions
     public string RepositoryDialect { get; init; } = "sqlserver";
 
     /// <summary>
-    /// 自作 Repository を同時生成する方言の一覧（複数指定で 1 回の生成に複数方言実装を同梱する）。
+    /// Repository (QuickER) を同時生成する方言の一覧（複数指定で 1 回の生成に複数方言実装を同梱する）。
     /// </summary>
     /// <remarks>
     /// <c>null</c> または空のときは後方互換のため <see cref="RepositoryDialect"/>（単一）へフォールバックする。
@@ -56,7 +56,7 @@ public sealed class CodeGenerationOptions
     public IReadOnlyList<string>? RepositoryDialects { get; init; }
 
     /// <summary>
-    /// 実効的な自作 Repository 生成方言の一覧を解決する（唯一の正）。
+    /// 実効的なRepository (QuickER) 生成方言の一覧を解決する（唯一の正）。
     /// </summary>
     /// <remarks>
     /// 解決規則:
@@ -110,7 +110,7 @@ public sealed class CodeGenerationOptions
     }
 
     /// <summary>
-    /// 自作 Repository が対応する生成方言の一覧（プロバイダ名と同一の識別子。例: <c>"sqlserver"</c>, <c>"sqlite"</c>）。
+    /// Repository (QuickER) が対応する生成方言の一覧（プロバイダ名と同一の識別子。例: <c>"sqlserver"</c>, <c>"sqlite"</c>）。
     /// </summary>
     /// <remarks>
     /// GUI（生成ダイアログの選択可否判定）と CLI（未対応方言の早期エラー）が単一ソースとして参照する。
@@ -163,7 +163,7 @@ public sealed class CodeGenerationOptions
     /// <remarks>
     /// 生成される DbContext は既存 Entity をそのまま既存スキーマへ接続する用途（方言非依存・1 本）で、
     /// スキーマ作成（Migrations / EnsureCreated）は範囲外とする。<see cref="GenerateRepositories"/> とは独立に選べ、
-    /// EF 単独出力時は自作 SQL Server 実装（<c>Microsoft.Data.SqlClient</c> 依存）を一切含まない。
+    /// EF 単独出力時はQuickER の SQL Server 実装（<c>Microsoft.Data.SqlClient</c> 依存）を一切含まない。
     /// 共通契約（インターフェイス・SqlQuery・メタデータ等）は <see cref="GenerateRepositories"/> と共有する
     /// </remarks>
     public bool GenerateEfCore { get; init; }
@@ -180,7 +180,7 @@ public sealed class CodeGenerationOptions
     /// <see cref="GenerateRepositories"/> / <see cref="GenerateEfCore"/> と共有する（どれか一つでも ON なら契約を生成）。
     /// </para>
     /// <para>
-    /// 方言に依存しないため、自作 Repository のマルチターゲットや <see cref="GenerateEfCore"/> とは併用できる。
+    /// 方言に依存しないため、Repository (QuickER) のマルチターゲットや <see cref="GenerateEfCore"/> とは併用できる。
     /// 固定 infra を出力しない <see cref="UseRuntimePackages"/> とは併用できない（インメモリ実行器がパッケージ側に
     /// 存在せず生成側の固定 infra を必要とするため）。併用指定は生成時に診断エラーになる。
     /// </para>
@@ -270,12 +270,12 @@ public sealed class CodeGenerationOptions
 
     /// <summary>
     /// 無制限バイナリ列（<c>varbinary(max)</c> / <c>image</c> / 長さ宣言なし BLOB / <c>bytea</c> 等）を、生成 Entity のプロパティに
-    /// マーカー属性 <c>[UnboundedBinaryColumn]</c> で印付けし、自作 Repository の SELECT / UPDATE 対象から除外するかどうか（既定 false）。
+    /// マーカー属性 <c>[UnboundedBinaryColumn]</c> で印付けし、Repository (QuickER) の SELECT / UPDATE 対象から除外するかどうか（既定 false）。
     /// </summary>
     /// <remarks>
     /// <para>
     /// <c>true</c> のとき、無制限バイナリ列の Entity プロパティへ <c>[UnboundedBinaryColumn]</c> を付与する。ランタイム
-    /// （<c>EntitySaveMetadata</c>）はこの属性をリフレクションで読み、自作 Repository の SELECT（列読み出し）・UPDATE
+    /// （<c>EntitySaveMetadata</c>）はこの属性をリフレクションで読み、Repository (QuickER) の SELECT（列読み出し）・UPDATE
     /// （更新列）から当該列を外す。INSERT / BulkInsert は全列のまま（初回書き込みは通常どおり値を渡せる）。
     /// </para>
     /// <para>

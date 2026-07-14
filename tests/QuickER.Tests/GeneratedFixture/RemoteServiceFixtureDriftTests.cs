@@ -28,7 +28,7 @@ public sealed class RemoteServiceFixtureDriftTests
                 RemoteServiceFixtureDefinition.ServerOutputFileName,
             ],
             "コミット済みリモートサービスフィクスチャが現在のテンプレート出力と乖離しています。"
-                + "RemoteServiceFixtureDefinition（SQLite 方言・自作 Repository＋EF Core・リモートサービス生成・名前付きクエリ入り）から再生成が必要です。"
+                + "RemoteServiceFixtureDefinition（SQLite 方言・Repository (QuickER)＋EF Core・リモートサービス生成・名前付きクエリ入り）から再生成が必要です。"
         );
     }
 }

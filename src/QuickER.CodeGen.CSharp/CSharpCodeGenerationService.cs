@@ -127,7 +127,7 @@ public sealed class CSharpCodeGenerationService
         // マルチ方言（実効方言 2 つ以上）レイアウトと EF Core 生成は併存できない。
         // マルチ方言では契約 namespace に ADO・方言 SQL を一切置かず、EntitySaveMetadata / EntityGraphSaver を
         // 各方言 namespace へ複製する（自方言メタデータ・自前キャッシュ）。一方 EF Core（方言非依存・契約 namespace）は
-        // これらを参照するため、マルチ方言時は契約 namespace に該当型が存在せず解決不能になる。EF Core は自作
+        // これらを参照するため、マルチ方言時は契約 namespace に該当型が存在せず解決不能になる。EF Core は QuickER
         // マルチターゲットと排他（GUI はラジオで排他）で、パリティ用の両 ON は単一方言でのみ意味を持つため、
         // GenerateRepositories の実効方言が 2 つ以上かつ GenerateEfCore のときは早期に診断エラーとする。
         if (options.GenerateRepositories && options.GenerateEfCore && effectiveDialects.Count >= 2)
@@ -148,7 +148,7 @@ public sealed class CSharpCodeGenerationService
         // ことで、EF エンジン（EfCoreRepository / EfCoreSqlExecutor 等）は具象 QuickErDbContext を参照しなくなった）。
         // スキーマ依存物（QuickErDbContext・Fluent 構成・EfCore{Entity}Repository・AddGeneratedEfCoreRepositories）は
         // パッケージモードでも常に生成側に出力し、EF 固定 infra はパッケージ QuickER.Runtime.EntityFrameworkCore が担う。
-        // なお EF Core と自作 Repository のマルチターゲット（実効方言 2 つ以上）の排他は別理由（契約の型同一性）で上に残す。
+        // なお EF Core と Repository (QuickER) のマルチターゲット（実効方言 2 つ以上）の排他は別理由（契約の型同一性）で上に残す。
 
         // マルチ辞書が渡されているときは方言間の C# 型不一致を検証し、[SqlColumnType] を sqlserver 辞書から補完する
         var columnTypes = primaryColumnTypes;

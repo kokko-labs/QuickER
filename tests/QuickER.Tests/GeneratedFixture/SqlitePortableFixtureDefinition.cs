@@ -4,7 +4,7 @@ using QuickER.Model;
 namespace QuickER.Tests.GeneratedSqliteFixture;
 
 /// <summary>
-/// SQLite 方言の自作 Repository を含む「第3の固定フィクスチャ」を生成する単一ソース。
+/// SQLite 方言のRepository (QuickER) を含む「第3の固定フィクスチャ」を生成する単一ソース。
 /// </summary>
 /// <remarks>
 /// <para>
@@ -31,7 +31,7 @@ public static class SqlitePortableFixtureDefinition
 
     /// <summary>
     /// フィクスチャ生成に用いる決定的なオプション。
-    /// SQLite 方言の自作 Repository と EF Core を両方生成する（パリティ検証用の構成）。
+    /// SQLite 方言のRepository (QuickER) と EF Core を両方生成する（パリティ検証用の構成）。
     /// </summary>
     public static CodeGenerationOptions Options { get; } =
         new()

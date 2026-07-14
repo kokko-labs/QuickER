@@ -12,6 +12,7 @@ using System.ComponentModel.DataAnnotations.Schema;
 using System.Data;
 using System.Data.Common;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Linq.Expressions;
 using System.Net.Http;
@@ -202,6 +203,32 @@ internal static class UnboundedBinaryColumns
             byte[] bytes => bytes.Length == 0,
             _ => false,
         };
+    }
+
+    /// <summary>Stream アクセサのチャンクコピーで使う既定バッファサイズ（O(チャンク)＝blob 全量をメモリに載せない）</summary>
+    public const int StreamCopyBufferSize = 81920;
+
+    /// <summary>
+    /// 書き込み Stream の長さを決定する（方言に依らず契約を統一する共通検証）。<paramref name="source"/> が
+    /// <c>CanSeek</c> なら <c>Length - Position</c> を採用し、そうでなければ <paramref name="length"/> が必須
+    /// （欠落は <see cref="ArgumentException"/>）。SQLite の zeroblob は書き込み前に長さが確定している必要があるため。
+    /// </summary>
+    public static long ResolveWriteLength(Stream source, long? length)
+    {
+        if (source.CanSeek)
+        {
+            return source.Length - source.Position;
+        }
+
+        if (length is null)
+        {
+            throw new ArgumentException(
+                "CanSeek でない Stream は length 指定が必要です。",
+                nameof(length)
+            );
+        }
+
+        return length.Value;
     }
 }
 
@@ -3031,11 +3058,11 @@ public sealed class SqlConnectionFactory(string connectionString) : ISqlConnecti
 }
 
 /// <summary>
-/// 生 SQL の束縛・スカラー変換・射影マッピングを担う共有ヘルパー（自作 SQL Server 版と EF Core 版の実行器で 1 系統を共有）。
+/// 生 SQL の束縛・スカラー変換・射影マッピングを担う共有ヘルパー（QuickER の SQL Server 実装と EF Core 版の実行器で 1 系統を共有）。
 /// </summary>
 /// <remarks>
 /// プロバイダ非依存の <see cref="DbCommand"/> / <see cref="DbDataReader"/> のみを扱い、特定 DB クライアントには依存しない。
-/// EF 単独出力（自作 SQL Server 実装を含まない構成）でも共通契約としてこのクラスを出力し、EF 版実行器が呼び出す。
+/// EF 単独出力（QuickER の SQL Server 実装を含まない構成）でも共通契約としてこのクラスを出力し、EF 版実行器が呼び出す。
 /// </remarks>
 internal static class RawSqlMapper
 {
@@ -3123,7 +3150,7 @@ internal static class RawSqlMapper
 
     /// <summary>
     /// 結果セットを <typeparamref name="TResult"/> へ寛容に射影して読み切る（単一値モード・DTO モードの 1 系統）。
-    /// プロバイダ非依存の <see cref="DbDataReader"/> を受け取り、自作・EF 版実行器でマッピング実装を共有する。
+    /// プロバイダ非依存の <see cref="DbDataReader"/> を受け取り、QuickER・EF 版実行器でマッピング実装を共有する。
     /// </summary>
     internal static async Task<IReadOnlyList<TResult>> ReadProjectionRowsAsync<TResult>(
         DbDataReader reader,
@@ -3574,6 +3601,169 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
 
     /// <summary>検索条件・並び順・Include をチェーン指定して取得するクエリを開始する</summary>
     public SqlQuery<TEntity> Query() => new(new SqliteSqlQueryExecutor<TEntity>(_connectionFactory));
+
+    /// <summary>
+    /// 無制限バイナリ列（除外列）を主キー指定で宛先ストリームへ読み出す（O(チャンク) のストリーミング＝blob 全量を
+    /// メモリに載せない）。<paramref name="propertyName"/> は対象列の C# プロパティ名。行なし・列 NULL は
+    /// <c>false</c>（宛先へ何も書かない）、データを書いた場合は <c>true</c>（空 blob も true）を返す。
+    /// 楽観排他（rowversion）はスコープ外＝生 SQL と同格の直接列操作。
+    /// </summary>
+    protected async Task<bool> ReadUnboundedBinaryColumnAsync(
+        string propertyName,
+        TKey id,
+        Stream destination,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(destination);
+
+        var column = _metadata.ColumnByPropertyName(propertyName);
+        var quotedColumn = _metadata.QuotedColumnName(column);
+
+        await using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        // rowid 解決＋NULL 判定を 1 度の SELECT で行う（SqliteBlob は rowid テーブル前提。QuickER の SQLite DDL は
+        // WITHOUT ROWID を生成しないため安全）。IS NULL は 1（真）を返す
+        long rowid;
+
+        await using (
+            var probe = new SqliteCommand(
+                $"SELECT rowid, {quotedColumn} IS NULL FROM {_metadata.TableName} WHERE \"{_metadata.KeyColumnName}\" = @id;",
+                connection
+            )
+        )
+        {
+            _metadata.BindKeyParameter(probe, id);
+            await using var reader = await probe.ExecuteReaderAsync(cancellationToken);
+
+            if (!await reader.ReadAsync(cancellationToken))
+            {
+                return false;
+            }
+
+            if (reader.GetInt64(1) != 0)
+            {
+                return false;
+            }
+
+            rowid = reader.GetInt64(0);
+        }
+
+        await using var blob = new SqliteBlob(
+            connection,
+            _metadata.RawTableName,
+            _metadata.RawColumnName(column),
+            rowid,
+            readOnly: true
+        );
+        await blob.CopyToAsync(
+            destination,
+            UnboundedBinaryColumns.StreamCopyBufferSize,
+            cancellationToken
+        );
+        return true;
+    }
+
+    /// <summary>
+    /// 無制限バイナリ列（除外列）を主キー指定でストリームから書き込む（O(チャンク) のストリーミング）。
+    /// <paramref name="source"/> が <c>null</c> のとき列を NULL に設定する。<c>CanSeek</c> でない Stream は
+    /// <paramref name="length"/> の指定が必須（欠落は <see cref="ArgumentException"/>）。更新した場合は <c>true</c>、
+    /// 該当行なしは <c>false</c> を返す。楽観排他（rowversion）はスコープ外＝生 SQL と同格の直接列操作。
+    /// </summary>
+    protected async Task<bool> WriteUnboundedBinaryColumnAsync(
+        string propertyName,
+        TKey id,
+        Stream? source,
+        long? length = null,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var column = _metadata.ColumnByPropertyName(propertyName);
+        var quotedColumn = _metadata.QuotedColumnName(column);
+
+        await using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        // source=null は列を NULL に設定する（除外列を「未設定」に戻す手段）
+        if (source is null)
+        {
+            await using var nullCommand = new SqliteCommand(
+                $"UPDATE {_metadata.TableName} SET {quotedColumn} = NULL WHERE \"{_metadata.KeyColumnName}\" = @id;",
+                connection
+            );
+            _metadata.BindKeyParameter(nullCommand, id);
+            return await nullCommand.ExecuteNonQueryAsync(cancellationToken) > 0;
+        }
+
+        // CanSeek/length の契約検証は方言に依らず統一する（SQLite の zeroblob は長さ確定が必須）
+        var payloadLength = UnboundedBinaryColumns.ResolveWriteLength(source, length);
+
+        // 1 トランザクション内で zeroblob(len) を確保し、rowid を引いて SqliteBlob（書き込みモード）へチャンクコピーする
+        await using var transaction = (SqliteTransaction)
+            await connection.BeginTransactionAsync(cancellationToken);
+
+        try
+        {
+            await using (
+                var allocate = new SqliteCommand(
+                    $"UPDATE {_metadata.TableName} SET {quotedColumn} = zeroblob(@len) WHERE \"{_metadata.KeyColumnName}\" = @id;",
+                    connection,
+                    transaction
+                )
+            )
+            {
+                allocate.Parameters.AddWithValue("@len", payloadLength);
+                _metadata.BindKeyParameter(allocate, id);
+
+                if (await allocate.ExecuteNonQueryAsync(cancellationToken) == 0)
+                {
+                    // 該当行なし（zeroblob を確保できなかった）
+                    await transaction.RollbackAsync(cancellationToken);
+                    return false;
+                }
+            }
+
+            long rowid;
+
+            await using (
+                var rowidCommand = new SqliteCommand(
+                    $"SELECT rowid FROM {_metadata.TableName} WHERE \"{_metadata.KeyColumnName}\" = @id;",
+                    connection,
+                    transaction
+                )
+            )
+            {
+                _metadata.BindKeyParameter(rowidCommand, id);
+                rowid = (long)(await rowidCommand.ExecuteScalarAsync(cancellationToken))!;
+            }
+
+            await using (
+                var blob = new SqliteBlob(
+                    connection,
+                    _metadata.RawTableName,
+                    _metadata.RawColumnName(column),
+                    rowid,
+                    readOnly: false
+                )
+            )
+            {
+                await source.CopyToAsync(
+                    blob,
+                    UnboundedBinaryColumns.StreamCopyBufferSize,
+                    cancellationToken
+                );
+            }
+
+            await transaction.CommitAsync(cancellationToken);
+            return true;
+        }
+        catch
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            throw;
+        }
+    }
 
     /// <summary>RowState に従って 1 トランザクションで追加・更新・削除を保存する（既定で子をカスケード）</summary>
     public async Task<int> SaveAsync(
@@ -5594,6 +5784,9 @@ internal sealed class EntitySaveMetadata
     /// <summary>角括弧で囲んだテーブル名</summary>
     public required string TableName { get; init; }
 
+    /// <summary>クォートなしの生テーブル名（無制限バイナリ列の Stream アクセサで SqliteBlob 等が要求する）</summary>
+    public required string RawTableName { get; init; }
+
     /// <summary>主キーに対応するプロパティ</summary>
     public required PropertyInfo KeyProperty { get; init; }
 
@@ -5713,6 +5906,7 @@ internal sealed class EntitySaveMetadata
         {
             EntityType = entityType,
             TableName = tableName,
+            RawTableName = tableAttribute.Name,
             KeyProperty = keyProperty,
             KeyColumnName = keyColumnName,
             AllProperties = columns,
@@ -6123,6 +6317,20 @@ internal sealed class EntitySaveMetadata
 
     private static string GetColumnName(PropertyInfo property) =>
         property.GetCustomAttribute<ColumnAttribute>()?.Name ?? property.Name;
+
+    /// <summary>C# プロパティ名から対応する列プロパティを引く（無制限バイナリ列＝除外列を含む全列から探す）。Stream アクセサが Repository / インメモリ双方で使う</summary>
+    public PropertyInfo ColumnByPropertyName(string propertyName) =>
+        AllProperties.FirstOrDefault(property => property.Name == propertyName)
+        ?? throw new InvalidOperationException(
+            $"プロパティ {propertyName} は列として見つかりませんでした。"
+        );
+
+    /// <summary>指定した列プロパティのクォート付きカラム名（例: \"payload\"）を返す（Stream アクセサの SQL 組み立て用）</summary>
+    public string QuotedColumnName(PropertyInfo property) =>
+        $"\"{GetColumnName(property)}\"";
+
+    /// <summary>指定した列プロパティのクォートなし生カラム名を返す（SqliteBlob 等が要求する）</summary>
+    public string RawColumnName(PropertyInfo property) => GetColumnName(property);
 }
 
 /// <summary>カスケード削除の DELETE 文群を FK メタデータから組み立てるプランナー（DB 非依存・純粋）</summary>
@@ -6462,7 +6670,20 @@ public partial interface IDocumentRemoteRepository : IRemoteRepository<DocumentE
 /// <summary>DocumentEntity 用リポジトリインターフェース（全機能面＝リモート面に式木クエリ・生 SQL・一括追加を追加）</summary>
 public partial interface IDocumentRepository
     : IDocumentRemoteRepository,
-        IRepository<DocumentEntity, int> { }
+        IRepository<DocumentEntity, int>
+{
+    /// <summary>payload を宛先ストリームへ読み出す（無制限バイナリ列・O(チャンク) のストリーミング。true=書き込んだ・false=行なし または NULL）</summary>
+    Task<bool> ReadPayloadAsync(int id, Stream destination, CancellationToken cancellationToken = default);
+
+    /// <summary>payload をストリームから書き込む（無制限バイナリ列・O(チャンク) のストリーミング。source=null で NULL を設定・CanSeek でない Stream は length 指定が必須。true=更新した・false=行なし）</summary>
+    Task<bool> WritePayloadAsync(int id, Stream? source, long? length = null, CancellationToken cancellationToken = default);
+
+    /// <summary>thumb を宛先ストリームへ読み出す（無制限バイナリ列・O(チャンク) のストリーミング。true=書き込んだ・false=行なし または NULL）</summary>
+    Task<bool> ReadThumbAsync(int id, Stream destination, CancellationToken cancellationToken = default);
+
+    /// <summary>thumb をストリームから書き込む（無制限バイナリ列・O(チャンク) のストリーミング。source=null で NULL を設定・CanSeek でない Stream は length 指定が必須。true=更新した・false=行なし）</summary>
+    Task<bool> WriteThumbAsync(int id, Stream? source, long? length = null, CancellationToken cancellationToken = default);
+}
 
 /// <summary>名前付きクエリ GetPayloads の射影 DTO（documents）</summary>
 public sealed partial class DocumentPayloadRow
@@ -6472,6 +6693,62 @@ public sealed partial class DocumentPayloadRow
 
     /// <summary>Payload</summary>
     public byte[]? Payload { get; set; }
+}
+
+/// <summary>DocumentEntity の無制限バイナリ列アクセサのファイル糖衣（DB⇔ファイルの blob 転送を 1 呼び出しで行う・Stream 版へ委譲）</summary>
+public static class DocumentRepositoryBinaryStreamExtensions
+{
+    /// <summary>payload をファイルへ読み出す（Stream 版へ委譲。true=書き込んだ・false=行なし または NULL）</summary>
+    public static async Task<bool> ReadPayloadToFileAsync(
+        this IDocumentRepository repository,
+        int id,
+        string path,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(repository);
+        await using var destination = File.Create(path);
+        return await repository.ReadPayloadAsync(id, destination, cancellationToken);
+    }
+
+    /// <summary>payload をファイルから書き込む（Stream 版へ委譲。true=更新した・false=行なし）</summary>
+    public static async Task<bool> WritePayloadFromFileAsync(
+        this IDocumentRepository repository,
+        int id,
+        string path,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(repository);
+        await using var source = File.OpenRead(path);
+        return await repository.WritePayloadAsync(id, source, source.Length, cancellationToken);
+    }
+
+    /// <summary>thumb をファイルへ読み出す（Stream 版へ委譲。true=書き込んだ・false=行なし または NULL）</summary>
+    public static async Task<bool> ReadThumbToFileAsync(
+        this IDocumentRepository repository,
+        int id,
+        string path,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(repository);
+        await using var destination = File.Create(path);
+        return await repository.ReadThumbAsync(id, destination, cancellationToken);
+    }
+
+    /// <summary>thumb をファイルから書き込む（Stream 版へ委譲。true=更新した・false=行なし）</summary>
+    public static async Task<bool> WriteThumbFromFileAsync(
+        this IDocumentRepository repository,
+        int id,
+        string path,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(repository);
+        await using var source = File.OpenRead(path);
+        return await repository.WriteThumbAsync(id, source, source.Length, cancellationToken);
+    }
 }
 
 /// <summary>DocumentEntity 用リポジトリ実装</summary>
@@ -6490,6 +6767,22 @@ public sealed partial class DocumentRepository(ISqlConnectionFactory connectionF
     /// <summary>本体バイナリ（payload）が存在する文書の件数を取得する</summary>
     public Task<int> CountWithPayloadAsync(CancellationToken cancellationToken = default) =>
         Query().Where(e => e.Payload != null).CountAsync(cancellationToken);
+
+    /// <inheritdoc />
+    public Task<bool> ReadPayloadAsync(int id, Stream destination, CancellationToken cancellationToken = default) =>
+        ReadUnboundedBinaryColumnAsync(nameof(DocumentEntity.Payload), id, destination, cancellationToken);
+
+    /// <inheritdoc />
+    public Task<bool> WritePayloadAsync(int id, Stream? source, long? length = null, CancellationToken cancellationToken = default) =>
+        WriteUnboundedBinaryColumnAsync(nameof(DocumentEntity.Payload), id, source, length, cancellationToken);
+
+    /// <inheritdoc />
+    public Task<bool> ReadThumbAsync(int id, Stream destination, CancellationToken cancellationToken = default) =>
+        ReadUnboundedBinaryColumnAsync(nameof(DocumentEntity.Thumb), id, destination, cancellationToken);
+
+    /// <inheritdoc />
+    public Task<bool> WriteThumbAsync(int id, Stream? source, long? length = null, CancellationToken cancellationToken = default) =>
+        WriteUnboundedBinaryColumnAsync(nameof(DocumentEntity.Thumb), id, source, length, cancellationToken);
 }
 
 /// <summary>DocumentNoteEntity 用リポジトリのリモート面（ネットワーク境界を越えられる CRUD・保存・名前付きクエリのみ。将来リモート実装へ差し替え可能）</summary>
@@ -6689,6 +6982,48 @@ public sealed class InMemoryDataStore
         lock (_gate)
         {
             return Table(entityType).Remove(key);
+        }
+    }
+
+    /// <summary>
+    /// 指定型・主キーの列値を strip なしで読み取る（無制限バイナリ列の Stream アクセサ用）。
+    /// ストア実体の生の値を返す（読み取り複製の strip を経由しない＝除外列の実データが取れる）。
+    /// </summary>
+    internal object? ReadColumnValue(
+        Type entityType,
+        object key,
+        PropertyInfo column,
+        out bool rowExists
+    )
+    {
+        lock (_gate)
+        {
+            var entity = FindRaw(entityType, key);
+            rowExists = entity is not null;
+            return entity is null ? null : column.GetValue(entity);
+        }
+    }
+
+    /// <summary>
+    /// 指定型・主キーの列値を書き換える（無制限バイナリ列の Stream アクセサ用・該当ありで true）。
+    /// ストア実体を直接書き換えず、複製を更新して差し戻す（既存の Clone/Put 意味論に従う）。
+    /// </summary>
+    internal bool WriteColumnValue(Type entityType, object key, PropertyInfo column, object? value)
+    {
+        lock (_gate)
+        {
+            var entity = FindRaw(entityType, key);
+
+            if (entity is null)
+            {
+                return false;
+            }
+
+            var clone = entity.Clone();
+            column.SetValue(clone, value);
+            clone.MarkUnchanged();
+            Table(entityType)[key] = clone;
+            return true;
         }
     }
 
@@ -7137,7 +7472,7 @@ internal static class InMemoryCascade
         }
     }
 
-    /// <summary>RowState 駆動でグラフを保存し、書き込んだ件数を返す（自作 EntityGraphSaver と同じ意味論）</summary>
+    /// <summary>RowState 駆動でグラフを保存し、書き込んだ件数を返す（QuickER の EntityGraphSaver と同じ意味論）</summary>
     /// <remarks>
     /// IsRemoved は子から削除し自身を削除、IsAdded は挿入、IsUpdated は更新（対象なしは
     /// insertWhenUpdateMissing で挿入 or 競合例外）。追加・更新は自身を先に、削除は子を先に処理する。
@@ -7408,6 +7743,77 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(InMemoryDataStor
     /// <summary>検索条件・並び順・Include をチェーン指定して取得するクエリを開始する</summary>
     public SqlQuery<TEntity> Query() => new(new InMemoryQueryExecutor<TEntity>(Store));
 
+    /// <summary>
+    /// 無制限バイナリ列（除外列）を主キー指定で宛先ストリームへ読み出す（実 DB のストリーミングに対する
+    /// インメモリ・パリティ）。ストア実体の生の値（strip なし）を MemoryStream 経由で書き出す。
+    /// 行なし・列 NULL（未設定含む）は <c>false</c>、データを書いた場合は <c>true</c> を返す。
+    /// </summary>
+    protected async Task<bool> ReadUnboundedBinaryColumnAsync(
+        string propertyName,
+        TKey id,
+        Stream destination,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(destination);
+
+        var column = EntitySaveMetadata.For(typeof(TEntity)).ColumnByPropertyName(propertyName);
+        var value = Store.ReadColumnValue(typeof(TEntity), NormalizeKey(id), column, out var rowExists);
+
+        if (!rowExists)
+        {
+            return false;
+        }
+
+        if (value is not byte[] bytes)
+        {
+            // 列 NULL（または未設定）は何も書かない
+            return false;
+        }
+
+        await destination.WriteAsync(bytes, cancellationToken);
+        return true;
+    }
+
+    /// <summary>
+    /// 無制限バイナリ列（除外列）を主キー指定でストリームから書き込む（インメモリ・パリティ）。<paramref name="source"/>
+    /// が <c>null</c> のとき列を NULL に設定する。<c>CanSeek</c> でない Stream は <paramref name="length"/> が必須。
+    /// ストア実体は直接書き換えず複製を差し戻す。更新した場合は <c>true</c>、該当行なしは <c>false</c> を返す。
+    /// </summary>
+    protected async Task<bool> WriteUnboundedBinaryColumnAsync(
+        string propertyName,
+        TKey id,
+        Stream? source,
+        long? length = null,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var column = EntitySaveMetadata.For(typeof(TEntity)).ColumnByPropertyName(propertyName);
+        object? stored;
+
+        if (source is null)
+        {
+            stored = null;
+        }
+        else
+        {
+            // CanSeek/length の契約検証は実 DB と揃える（方言中立パリティ）
+            _ = UnboundedBinaryColumns.ResolveWriteLength(source, length);
+
+            // インメモリは実 DB のストリーミングを持たないため全読みして byte[] 化する（契約・意味論は同一）
+            using var buffer = new MemoryStream();
+            await source.CopyToAsync(
+                buffer,
+                UnboundedBinaryColumns.StreamCopyBufferSize,
+                cancellationToken
+            );
+            var bytes = buffer.ToArray();
+            stored = bytes;
+        }
+
+        return Store.WriteColumnValue(typeof(TEntity), NormalizeKey(id), column, stored);
+    }
+
     /// <summary>RowState に従ってグラフを保存する（既定で子をカスケード）</summary>
     public Task<int> SaveAsync(
         TEntity entity,
@@ -7513,6 +7919,22 @@ public sealed partial class InMemoryDocumentRepository(InMemoryDataStore store)
     /// <summary>本体バイナリ（payload）が存在する文書の件数を取得する</summary>
     public Task<int> CountWithPayloadAsync(CancellationToken cancellationToken = default) =>
         Query().Where(e => e.Payload != null).CountAsync(cancellationToken);
+
+    /// <inheritdoc />
+    public Task<bool> ReadPayloadAsync(int id, Stream destination, CancellationToken cancellationToken = default) =>
+        ReadUnboundedBinaryColumnAsync(nameof(DocumentEntity.Payload), id, destination, cancellationToken);
+
+    /// <inheritdoc />
+    public Task<bool> WritePayloadAsync(int id, Stream? source, long? length = null, CancellationToken cancellationToken = default) =>
+        WriteUnboundedBinaryColumnAsync(nameof(DocumentEntity.Payload), id, source, length, cancellationToken);
+
+    /// <inheritdoc />
+    public Task<bool> ReadThumbAsync(int id, Stream destination, CancellationToken cancellationToken = default) =>
+        ReadUnboundedBinaryColumnAsync(nameof(DocumentEntity.Thumb), id, destination, cancellationToken);
+
+    /// <inheritdoc />
+    public Task<bool> WriteThumbAsync(int id, Stream? source, long? length = null, CancellationToken cancellationToken = default) =>
+        WriteUnboundedBinaryColumnAsync(nameof(DocumentEntity.Thumb), id, source, length, cancellationToken);
 }
 
 /// <summary>DocumentNoteEntity 用リポジトリのインメモリ実装</summary>
@@ -8237,7 +8659,7 @@ internal sealed class EfCoreSqlQueryExecutor<TEntity, TContext>(
 /// <summary>メタデータと EF Core（<typeparamref name="TContext"/>）で CRUD を実装するリポジトリ基底クラス</summary>
 /// <remarks>
 /// <para>
-/// 自作 SQL Server 版（<see cref="SqliteRepository{TEntity, TKey}"/>）と同じ契約を DbContext ベースで
+/// QuickER の SQL Server 実装（<see cref="SqliteRepository{TEntity, TKey}"/>）と同じ契約を DbContext ベースで
 /// 実装する。DbContext は呼び出し単位で短命に生成し（呼び出しごとに接続を開く単位と同じ）、
 /// 読み取りは AsNoTracking、保存は <c>ChangeTracker.TrackGraph</c> による RowState → EntityState 変換で行う。
 /// </para>
@@ -8590,7 +9012,7 @@ public static class GeneratedEfCoreRepositoryServiceCollectionExtensions
     /// <summary>DbContext 構成とともに、生成された EF Core 版の全リポジトリを DI コンテナへ登録する</summary>
     /// <remarks>
     /// 既存の <c>AddGeneratedRepositories</c> と同じインターフェイスへ EF 版実装を登録するため、
-    /// 呼び出しの差し替えだけで自作 SQL Server 実装 ⇔ EF Core（方言はアプリ側の構成で選択）を切り替えられる。
+    /// 呼び出しの差し替えだけでQuickER の SQL Server 実装 ⇔ EF Core（方言はアプリ側の構成で選択）を切り替えられる。
     /// </remarks>
     /// <param name="services">登録先のサービスコレクション</param>
     /// <param name="configureDbContext">方言プロバイダ・接続文字列の構成（例: <c>options => options.UseSqlServer(...)</c>）</param>
@@ -8636,6 +9058,30 @@ public sealed partial class EfCoreDocumentRepository(
     /// <summary>本体バイナリ（payload）が存在する文書の件数を取得する</summary>
     public Task<int> CountWithPayloadAsync(CancellationToken cancellationToken = default) =>
         Query().Where(e => e.Payload != null).CountAsync(cancellationToken);
+
+    /// <inheritdoc />
+    public Task<bool> ReadPayloadAsync(int id, Stream destination, CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException(
+            "EF Core モードでは Stream アクセサ（無制限バイナリ列の読み書き）は使用できません。Repository (QuickER) を使うか、partial クラスで実装してください。"
+        );
+
+    /// <inheritdoc />
+    public Task<bool> WritePayloadAsync(int id, Stream? source, long? length = null, CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException(
+            "EF Core モードでは Stream アクセサ（無制限バイナリ列の読み書き）は使用できません。Repository (QuickER) を使うか、partial クラスで実装してください。"
+        );
+
+    /// <inheritdoc />
+    public Task<bool> ReadThumbAsync(int id, Stream destination, CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException(
+            "EF Core モードでは Stream アクセサ（無制限バイナリ列の読み書き）は使用できません。Repository (QuickER) を使うか、partial クラスで実装してください。"
+        );
+
+    /// <inheritdoc />
+    public Task<bool> WriteThumbAsync(int id, Stream? source, long? length = null, CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException(
+            "EF Core モードでは Stream アクセサ（無制限バイナリ列の読み書き）は使用できません。Repository (QuickER) を使うか、partial クラスで実装してください。"
+        );
 }
 
 /// <summary>DocumentNoteEntity 用リポジトリの EF Core 版実装</summary>

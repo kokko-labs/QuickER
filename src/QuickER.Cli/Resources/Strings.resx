@@ -92,7 +92,7 @@
     <value>Output each category in a separate file and namespace (overrides the settings file)</value>
   </data>
   <data name="Cli_Opt_RepositoryDialects" xml:space="preserve">
-    <value>Dialects for which to also generate custom Repositories (comma-separated, multiple allowed; e.g. sqlserver,sqlite). When omitted, a single dialect is derived from --provider. Overrides the settings file.</value>
+    <value>Dialects for which to also generate QuickER Repositories (comma-separated, multiple allowed; e.g. sqlserver,sqlite). When omitted, a single dialect is derived from --provider. Overrides the settings file.</value>
   </data>
   <data name="Cli_Opt_RuntimePackages" xml:space="preserve">
     <value>Do not include the runtime (fixed code) in the generated code; rely on references to the NuGet packages QuickER.Runtime.* instead (default false; can be combined with EF Core generation; overrides the settings file)</value>
@@ -119,7 +119,7 @@
     <value>Failed to import the schema from the database: {0}</value>
   </data>
   <data name="Cli_RepositoryDialectUnsupported" xml:space="preserve">
-    <value>Custom Repository (GenerateRepositories) does not support the dialect '{0}'. Supported dialects: {1}</value>
+    <value>QuickER Repository (GenerateRepositories) does not support the dialect '{0}'. Supported dialects: {1}</value>
   </data>
   <data name="Cli_GenerationAborted" xml:space="preserve">
     <value>Aborted due to a generation error.</value>

@@ -3717,11 +3717,11 @@ internal static class SqlValueObjectActivator
 }
 
 /// <summary>
-/// 生 SQL の束縛・スカラー変換・射影マッピングを担う共有ヘルパー（自作 SQL Server 版と EF Core 版の実行器で 1 系統を共有）。
+/// 生 SQL の束縛・スカラー変換・射影マッピングを担う共有ヘルパー（QuickER の SQL Server 実装と EF Core 版の実行器で 1 系統を共有）。
 /// </summary>
 /// <remarks>
 /// プロバイダ非依存の <see cref="DbCommand"/> / <see cref="DbDataReader"/> のみを扱い、特定 DB クライアントには依存しない。
-/// EF 単独出力（自作 SQL Server 実装を含まない構成）でも共通契約としてこのクラスを出力し、EF 版実行器が呼び出す。
+/// EF 単独出力（QuickER の SQL Server 実装を含まない構成）でも共通契約としてこのクラスを出力し、EF 版実行器が呼び出す。
 /// </remarks>
 internal static class RawSqlMapper
 {
@@ -3809,7 +3809,7 @@ internal static class RawSqlMapper
 
     /// <summary>
     /// 結果セットを <typeparamref name="TResult"/> へ寛容に射影して読み切る（単一値モード・DTO モードの 1 系統）。
-    /// プロバイダ非依存の <see cref="DbDataReader"/> を受け取り、自作・EF 版実行器でマッピング実装を共有する。
+    /// プロバイダ非依存の <see cref="DbDataReader"/> を受け取り、QuickER・EF 版実行器でマッピング実装を共有する。
     /// </summary>
     internal static async Task<IReadOnlyList<TResult>> ReadProjectionRowsAsync<TResult>(
         DbDataReader reader,
@@ -7021,7 +7021,7 @@ public partial class QuickErDbContext : DbContext
 /// <remarks>
 /// <para>
 /// 値オブジェクト列はコンバータで string 列へ射影されるが、EF 既定ではこれらのインスタンスメソッドを翻訳できない。
-/// 自作 SQL Server 版と同じ意味論（Ordinal 部分一致 → LIKE・ワイルドカード <c>\ % _ [</c> のエスケープ・
+/// QuickER の SQL Server 実装と同じ意味論（Ordinal 部分一致 → LIKE・ワイルドカード <c>\ % _ [</c> のエスケープ・
 /// <c>ESCAPE '\'</c>・null 引数は空文字扱い）に合わせて <c>ISqlExpressionFactory.Like</c> を生成する。
 /// </para>
 /// <para>
@@ -7116,7 +7116,7 @@ internal sealed class ValueObjectStringMethodTranslator(
     /// <summary>メソッド名に応じた LIKE パターン式（'%'＋エスケープ済み引数＋'%' 等）を組み立てる</summary>
     private SqlExpression BuildLikePattern(string methodName, SqlExpression argument)
     {
-        // 定数はクライアント側でエスケープして 1 つの定数パターンへ畳み込む（自作版と同じ形）。
+        // 定数はクライアント側でエスケープして 1 つの定数パターンへ畳み込む（QuickER 版と同じ形）。
         // TSelf オーバーロードの定数（EF が Create(...) を定数へ畳んだもの）は素値へ開いてから扱う
         if (argument is SqlConstantExpression { Value: var constantValue })
         {
@@ -7131,7 +7131,7 @@ internal sealed class ValueObjectStringMethodTranslator(
             return _sqlExpressionFactory.Constant(constantPattern, _stringTypeMapping);
         }
 
-        // パラメータ等は SQL 側でエスケープする。null は自作版（null→空文字）に合わせ COALESCE で空文字へ
+        // パラメータ等は SQL 側でエスケープする。null は QuickER 版（null→空文字）に合わせ COALESCE で空文字へ
         SqlExpression escapedArgument = _sqlExpressionFactory.Coalesce(
             argument,
             _sqlExpressionFactory.Constant(string.Empty, _stringTypeMapping)
@@ -7184,7 +7184,7 @@ internal sealed class ValueObjectStringMethodTranslator(
 /// </summary>
 /// <remarks>
 /// これにより <c>string.IsNullOrEmpty(x.Col.Value)</c> や <c>x.Col.Value &gt; 100</c> のような、素値を開いた
-/// 述語を EF が翻訳できるようになる（自作 SQL Server 版の「列は素の列でも VO の .Value でもよい」と同じ扱い）。
+/// 述語を EF が翻訳できるようになる（QuickER の SQL Server 実装の「列は素の列でも VO の .Value でもよい」と同じ扱い）。
 /// 列はコンバータで素値へ射影済みのため、CONVERT で素値型へ明示コアースし、後段の翻訳が
 /// コンバータ経由で再読込（不正キャスト）しないようにする。
 /// </remarks>
@@ -7929,7 +7929,7 @@ internal sealed class EfCoreSqlQueryExecutor<TEntity, TContext>(
 /// <summary>メタデータと EF Core（<typeparamref name="TContext"/>）で CRUD を実装するリポジトリ基底クラス</summary>
 /// <remarks>
 /// <para>
-/// 自作 SQL Server 版（<see cref="SqliteRepository{TEntity, TKey}"/>）と同じ契約を DbContext ベースで
+/// QuickER の SQL Server 実装（<see cref="SqliteRepository{TEntity, TKey}"/>）と同じ契約を DbContext ベースで
 /// 実装する。DbContext は呼び出し単位で短命に生成し（呼び出しごとに接続を開く単位と同じ）、
 /// 読み取りは AsNoTracking、保存は <c>ChangeTracker.TrackGraph</c> による RowState → EntityState 変換で行う。
 /// </para>
@@ -8282,7 +8282,7 @@ public static class GeneratedEfCoreRepositoryServiceCollectionExtensions
     /// <summary>DbContext 構成とともに、生成された EF Core 版の全リポジトリを DI コンテナへ登録する</summary>
     /// <remarks>
     /// 既存の <c>AddGeneratedRepositories</c> と同じインターフェイスへ EF 版実装を登録するため、
-    /// 呼び出しの差し替えだけで自作 SQL Server 実装 ⇔ EF Core（方言はアプリ側の構成で選択）を切り替えられる。
+    /// 呼び出しの差し替えだけでQuickER の SQL Server 実装 ⇔ EF Core（方言はアプリ側の構成で選択）を切り替えられる。
     /// </remarks>
     /// <param name="services">登録先のサービスコレクション</param>
     /// <param name="configureDbContext">方言プロバイダ・接続文字列の構成（例: <c>options => options.UseSqlServer(...)</c>）</param>

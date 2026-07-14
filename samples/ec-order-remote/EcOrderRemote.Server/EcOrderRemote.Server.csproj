@@ -7,7 +7,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- 共有の本体生成物（Entity・自作 SQLite Repository・リモート面契約・DI 拡張）を参照する -->
+    <!-- 共有の本体生成物（Entity・SQLite 方言の Repository (QuickER)・リモート面契約・DI 拡張）を参照する -->
     <ProjectReference Include="../EcOrderRemote.Shared/EcOrderRemote.Shared.csproj" />
   </ItemGroup>
 

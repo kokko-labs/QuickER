@@ -22,7 +22,7 @@ namespace QuickER.Tests.Integration;
 /// クリーンな状態から始めることで確保する。
 /// </para>
 /// <para>
-/// 生成された自作 ORM ランタイムは <c>Microsoft.Data.SqlClient</c> を使うため、
+/// 生成されたQuickER の ORM ランタイムは <c>Microsoft.Data.SqlClient</c> を使うため、
 /// このフィクスチャも同ドライバで接続を張る。
 /// </para>
 /// </remarks>

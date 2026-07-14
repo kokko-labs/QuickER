@@ -187,7 +187,7 @@ public class RuntimePackageModeCompilationTests
             .Equal(RuntimePackages.Core, RuntimePackages.EntityFrameworkCore);
     }
 
-    /// <summary>自作 sqlserver＋EF 併存×パッケージの案内は Core＋SqlServer＋EF になる</summary>
+    /// <summary>QuickER sqlserver＋EF 併存×パッケージの案内は Core＋SqlServer＋EF になる</summary>
     [Fact]
     public void RepositoryPlusEfCore_Guidance_IsCoreSqlServerAndEfCore()
     {
@@ -232,7 +232,7 @@ public class RuntimePackageModeCompilationTests
 
     // ---- テストデータ ----
 
-    /// <summary>代表構成×分割: (a) Entity+EditModel+Mapper+VO のみ (b) 自作 sqlserver (c) 自作 sqlite (d) マルチターゲット</summary>
+    /// <summary>代表構成×分割: (a) Entity+EditModel+Mapper+VO のみ (b) QuickER sqlserver (c) QuickER sqlite (d) マルチターゲット</summary>
     public static TheoryData<string, CodeGenerationOptions> PackageModeCases()
     {
         var data = new TheoryData<string, CodeGenerationOptions>();
@@ -250,7 +250,7 @@ public class RuntimePackageModeCompilationTests
                 }
             );
             data.Add(
-                $"自作 sqlserver 単独 Split={split}",
+                $"QuickER sqlserver 単独 Split={split}",
                 new CodeGenerationOptions
                 {
                     NamespaceName = "Sample.Domain",
@@ -258,7 +258,7 @@ public class RuntimePackageModeCompilationTests
                 }
             );
             data.Add(
-                $"自作 sqlite 単独 Split={split}",
+                $"QuickER sqlite 単独 Split={split}",
                 new CodeGenerationOptions
                 {
                     NamespaceName = "Sample.Domain",
@@ -286,7 +286,7 @@ public class RuntimePackageModeCompilationTests
                 }
             );
             data.Add(
-                $"自作 sqlserver＋EF 併存 Split={split}",
+                $"QuickER sqlserver＋EF 併存 Split={split}",
                 new CodeGenerationOptions
                 {
                     NamespaceName = "Sample.Domain",
@@ -299,7 +299,7 @@ public class RuntimePackageModeCompilationTests
 
         // リモート契約生成×パッケージ参照モード（IRemoteRepository は Core パッケージが提供する）
         data.Add(
-            "remote 自作 sqlserver",
+            "remote QuickER sqlserver",
             new CodeGenerationOptions
             {
                 NamespaceName = "Sample.Domain",
@@ -316,7 +316,7 @@ public class RuntimePackageModeCompilationTests
             }
         );
         data.Add(
-            "remote 自作 sqlite＋EF 併存",
+            "remote QuickER sqlite＋EF 併存",
             new CodeGenerationOptions
             {
                 NamespaceName = "Sample.Domain",
@@ -330,7 +330,7 @@ public class RuntimePackageModeCompilationTests
         // per-entity クライアント・DI 登録は生成側に残る。サーバーファイルは ASP.NET Core 前提のため本ハーネスの
         // コンパイル対象から除外される＝Generate_PackageMode 側の除外処理を参照）
         data.Add(
-            "remote-services 自作 sqlserver",
+            "remote-services QuickER sqlserver",
             new CodeGenerationOptions
             {
                 NamespaceName = "Sample.Domain",

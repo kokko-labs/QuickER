@@ -62,7 +62,7 @@
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
   <data name="CodeGen_Error_MultiTargetEfCoreExclusive" xml:space="preserve">
-    <value>EF Core の生成は自作 Repository のマルチターゲット（実効方言 2 つ以上）と併用できません。方言を 1 つに絞るか、EF Core を無効にしてください（両者は排他選択です）。</value>
+    <value>EF Core の生成は Repository (QuickER) のマルチターゲット（実効方言 2 つ以上）と併用できません。方言を 1 つに絞るか、EF Core を無効にしてください（両者は排他選択です）。</value>
   </data>
   <data name="CodeGen_Error_InMemoryRuntimePackagesExclusive" xml:space="preserve">
     <value>インメモリ Repository の生成はランタイムパッケージ参照モード（UseRuntimePackages）と併用できません。インメモリ実行器は生成側の固定コードとして出力されるため、固定コードを出力しないパッケージ参照モードでは参照先を失います。UseRuntimePackages を無効にする（固定コードをインライン出力する）か、インメモリ生成を無効にしてください。</value>

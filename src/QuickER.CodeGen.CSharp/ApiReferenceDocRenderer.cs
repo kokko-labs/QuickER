@@ -68,7 +68,7 @@ internal sealed class ApiReferenceDocRenderer
     /// </summary>
     public string Render(CSharpGenerationModel model, CodeGenerationOptions options)
     {
-        // 共通契約（Repository 契約・データアクセス API）が生成されるか。自作 Repository・EF Core・
+        // 共通契約（Repository 契約・データアクセス API）が生成されるか。Repository (QuickER)・EF Core・
         // インメモリのいずれかが有効なら契約が出るため、データアクセス節・使い方節を出力する。
         var hasContract =
             options.GenerateRepositories
@@ -213,7 +213,7 @@ internal sealed class ApiReferenceDocRenderer
                     var suffix = GeneratedFilePlanner.DialectNamespaceSuffix(dialect);
                     registrations.Add(
                         Registration(
-                            $"自作 Repository（{suffix}）を DI コンテナへ登録します。",
+                            $"Repository (QuickER)（{suffix}）を DI コンテナへ登録します。",
                             $"services.AddGenerated{suffix}Repositories(connectionString);"
                         )
                     );
@@ -237,7 +237,7 @@ internal sealed class ApiReferenceDocRenderer
             {
                 registrations.Add(
                     Registration(
-                        "自作 Repository を DI コンテナへ登録します。",
+                        "Repository (QuickER) を DI コンテナへ登録します。",
                         "services.AddGeneratedRepositories(connectionString);"
                     )
                 );

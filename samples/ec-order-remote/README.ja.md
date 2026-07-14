@@ -19,7 +19,7 @@ HTTP + JSON で自動的につなぎます。
 | `EcOrderRemote.json` | ER 図（GUI の保存形式）。名前付きクエリ 2 本を含む。GUI で開いて編集できる |
 | `quicker.json` | CLI の生成オプション（名前空間・出力ファイル名・`GenerateRemoteServices=true`） |
 | `EcOrderRemote.sql` | 図から生成した SQLite DDL（チェックイン済み） |
-| `Generated/EcOrderRemote.g.cs` | 本体生成物（Entity・自作 SQLite Repository・リモート面契約・HTTP クライアント・DI 拡張。チェックイン済み） |
+| `Generated/EcOrderRemote.g.cs` | 本体生成物（Entity・SQLite 方言の Repository (QuickER)・リモート面契約・HTTP クライアント・DI 拡張。チェックイン済み） |
 | `Generated/EcOrderRemote.RemoteServer.g.cs` | サーバー生成物（Minimal API の `MapGeneratedRemoteEndpoints`。ASP.NET Core を要する別ファイル。チェックイン済み） |
 | `EcOrderRemote.Shared/` | 本体生成物のみをリンクする共有クラスライブラリ（クライアント／サーバー双方の土台） |
 | `EcOrderRemote.Server/` | サーバー生成物をリンクし、SQLite で待ち受ける Web アプリ（`Microsoft.NET.Sdk.Web`） |

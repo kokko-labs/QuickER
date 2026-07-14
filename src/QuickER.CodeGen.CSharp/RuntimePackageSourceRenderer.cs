@@ -74,12 +74,12 @@ public sealed class RuntimePackageSourceRenderer
     }
 
     /// <summary>
-    /// 自作 SQL Server エンジンパッケージ（<see cref="RuntimePackages.SqlServer"/>）のソースをレンダリングする。
+    /// QuickER の SQL Server エンジンパッケージ（<see cref="RuntimePackages.SqlServer"/>）のソースをレンダリングする。
     /// </summary>
     public string RenderSqlServer() => RenderDialectEngine("sqlserver", RuntimePackages.SqlServer);
 
     /// <summary>
-    /// 自作 SQLite エンジンパッケージ（<see cref="RuntimePackages.Sqlite"/>）のソースをレンダリングする。
+    /// QuickER の SQLite エンジンパッケージ（<see cref="RuntimePackages.Sqlite"/>）のソースをレンダリングする。
     /// </summary>
     public string RenderSqlite() => RenderDialectEngine("sqlite", RuntimePackages.Sqlite);
 
@@ -238,6 +238,9 @@ public sealed class RuntimePackageSourceRenderer
             GenerateValueObjects = options.GenerateValueObjects,
             IncludeDataAnnotations = options.IncludeDataAnnotations,
             IncludeJsonIgnoreOnParentNavigation = options.IncludeJsonIgnoreOnParentNavigation,
+            // パッケージソースは全機能 ON でレンダリングするため、無制限バイナリの共有ヘルパー・Stream
+            // アクセサのエンジン（System.IO を要求する固定 infra）を常に含む
+            ExcludeUnboundedBinaryColumns = true,
         };
 
         var spec = new GeneratedFileSpec
