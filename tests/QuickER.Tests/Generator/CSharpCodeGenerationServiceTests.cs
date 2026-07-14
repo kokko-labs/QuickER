@@ -1073,7 +1073,7 @@ public class CSharpCodeGenerationServiceTests
         content
             .Should()
             .Contain(
-                "$\"INSERT INTO {tableName} ({string.Join(\", \", columns.Select(property => $\"[{GetColumnName(property)}]\"))}) VALUES ({string.Join(\", \", columns.Select(property => $\"@{property.Name}\"))});\""
+                "$\"INSERT INTO {tableName} ({string.Join(\", \", insertProperties.Select(property => $\"[{GetColumnName(property)}]\"))}) VALUES ({string.Join(\", \", insertProperties.Select(property => $\"@{property.Name}\"))});\""
             );
         content
             .Should()
@@ -3557,6 +3557,67 @@ public class CSharpCodeGenerationServiceTests
             .NotContain(d => d.Severity == GenerationDiagnosticSeverity.Info);
         // ただし属性クラスの定義は Repository 生成（既定 ON）のため出力される（後続ステージの固定 infra が参照する）
         content.Should().Contain("public sealed class UnboundedBinaryColumnAttribute : Attribute");
+    }
+
+    /// <summary>
+    /// rowversion（store-generated）列に <c>[StoreGeneratedColumn]</c> が付与され、EntitySaveMetadata が
+    /// 書き込み集合（<c>InsertProperties</c>）から除外することを検証する（付与はオプション非依存で無条件）。
+    /// SELECT 系（プロパティ生成）には残るため rowversion は読める。
+    /// </summary>
+    [Fact(
+        DisplayName = "rowversion 列: [StoreGeneratedColumn] 付与・書き込み集合から除外（SELECT は残す）"
+    )]
+    public void Generate_RowVersionColumn_MarksStoreGeneratedAndExcludesFromWrite()
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            BinaryColumnDiagram(),
+            new CodeGenerationOptions { NamespaceName = "Sample.Domain" }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        var content = result.Files.Single(f => f.FileName.EndsWith(".g.cs")).Content;
+
+        // マーカー属性クラスの定義が出る
+        content.Should().Contain("public sealed class StoreGeneratedColumnAttribute : Attribute");
+        // rowversion の RowVersion プロパティ（非 nullable byte[]）にマーカーが付く（オプション非依存で無条件）
+        content
+            .Should()
+            .MatchRegex(@"\[StoreGeneratedColumn\]\s*\r?\n\s*public byte\[\] RowVersion");
+        // 付与は rowversion の 1 列だけ（主キー・photo には付かない）
+        System
+            .Text.RegularExpressions.Regex.Matches(content, @"\[StoreGeneratedColumn\]")
+            .Count.Should()
+            .Be(1, "付与対象は rowversion の row_version 1 列だけ");
+        // EntitySaveMetadata が store-generated 列を検出し、INSERT / UPDATE の書き込み集合から除外する
+        content
+            .Should()
+            .Contain("GetCustomAttribute<StoreGeneratedColumnAttribute>()")
+            .And.Contain("InsertProperties");
+        // SELECT 系: RowVersion プロパティは通常どおり生成され読める（除外は書き込みのみ）
+        content.Should().Contain("public byte[] RowVersion");
+    }
+
+    /// <summary>
+    /// rowversion 列を持たない図では <c>[StoreGeneratedColumn]</c> の付与が起きないことを検証する
+    /// （属性クラスの定義自体は Repository 生成のため出力される）。
+    /// </summary>
+    [Fact(
+        DisplayName = "rowversion なし: [StoreGeneratedColumn] 付与なし（属性定義は repo 生成で出る）"
+    )]
+    public void Generate_NoRowVersion_DoesNotMarkStoreGenerated()
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            SingleEntityDiagram(),
+            new CodeGenerationOptions { NamespaceName = "Sample.Domain" }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        var content = result.Files.Single(f => f.FileName.EndsWith(".g.cs")).Content;
+
+        // 付与は起きない
+        content.Should().NotContain("[StoreGeneratedColumn]");
+        // ただし属性クラスの定義は Repository 生成（既定 ON）のため出力される（固定 infra が参照する）
+        content.Should().Contain("public sealed class StoreGeneratedColumnAttribute : Attribute");
     }
 
     /// <summary>

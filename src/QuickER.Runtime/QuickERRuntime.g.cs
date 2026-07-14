@@ -134,6 +134,16 @@ public sealed class DbTableMetaAttribute : Attribute
 }
 
 /// <summary>
+/// DB が値を生成する列（SQL Server の <c>rowversion</c> / <c>timestamp</c> 等）のマーカー属性。
+/// これらの列は DB 側が採番するため、Repository (QuickER) の INSERT / BulkInsert / UPDATE の対象から除外される（SELECT では取得される）。
+/// 付与は生成オプションに依らず、DB が値を生成する列であれば常に行う。
+/// </summary>
+[AttributeUsage(AttributeTargets.Property, AllowMultiple = false)]
+public sealed class StoreGeneratedColumnAttribute : Attribute
+{
+}
+
+/// <summary>
 /// 無制限バイナリ列（<c>varbinary(max)</c> / 長さ宣言なし BLOB 等）を SELECT / UPDATE 対象から除外するマーカー属性。
 /// INSERT / BulkInsert は全列のまま扱う。値を設定したままの更新は実行時例外になる（更新は生 SQL の <c>ExecuteSqlAsync</c> で行う）。
 /// </summary>

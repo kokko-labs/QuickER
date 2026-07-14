@@ -87,9 +87,14 @@ var total = await orders.ExecuteScalarSqlAsync<decimal>(
 var affected = await customers.ExecuteSqlAsync("UPDATE customers SET balance = 0", null);
 ```
 
-### 楽観排他
+### store-generated 列（rowversion / timestamp）
 
-SQL Server 方言では `rowversion` 列を持つテーブルに対して楽観排他が有効になり、競合時は `SaveConflictException` が送出されます。
+DB が値を生成する列（SQL Server の `rowversion` / `timestamp` など）は、生成 Entity のプロパティにマーカー属性 `[StoreGeneratedColumn]` が付与され、Repository (QuickER) の **INSERT / BulkInsert / UPDATE の対象から自動的に除外**されます（付与は生成オプションに依らず、DB が値を生成する列であれば常に行われます）。
+
+- **書き込みでは触れない**: これらの列には DB が値を採番するため、Repository は明示的な値を書き込みません。明示挿入を試みると SQL Server は `Cannot insert an explicit value into a timestamp column.` を返しますが、除外によりこの実行時エラーを回避します。
+- **SELECT では取得する**: `GetByIdAsync` / `GetAllAsync` / `Query()` の結果に含まれ、値を読めます（並行性トークンとして参照できます）。
+- **EF Core モード**では Fluent 構成の `IsRowVersion()` が同じく store-generated として扱うため、この機構は適用されません。
+- **rowversion を使った楽観排他（UPDATE の WHERE でのバージョン比較）はスコープ外**です（将来対応）。なお、グラフ保存（`SaveAsync`）で更新対象行が見つからない（他ユーザーに削除された等）場合は `SaveConflictException` が送出されますが、これは影響行数 0 に基づく存在チェックで、rowversion の比較とは無関係です。
 
 ### 無制限バイナリ列の除外（ExcludeUnboundedBinaryColumns）
 

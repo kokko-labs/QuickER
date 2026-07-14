@@ -240,6 +240,16 @@ internal sealed class ScribanCSharpRenderer
             || options.GenerateInMemoryRepositories
             || (options.ExcludeUnboundedBinaryColumns && options.GenerateEntityClasses);
 
+        // store-generated 列のマーカー属性 [StoreGeneratedColumn] は (1) rowversion / timestamp 等の列へ生成オプションに依らず
+        // 無条件で付与し、(2) 共通契約の EntitySaveMetadata が INSERT / UPDATE から除外する列の識別にリフレクションで参照する。
+        // 付与を読む固定 infra（Repository / EF / InMemory）に加え、付与のみが起きる Entity 単独生成でも定義を出す（emitUnboundedBinaryAttr
+        // と同型で、scriban 側のゲートで || runtime_package_export を足しパッケージ書き出し時も常に定義する）。
+        var emitStoreGeneratedAttr =
+            options.GenerateRepositories
+            || options.GenerateEfCore
+            || options.GenerateInMemoryRepositories
+            || options.GenerateEntityClasses;
+
         // using は呼び出し側（GeneratedFileUsings）がバケット単位で解決済み。EF Core など外部依存の
         // 出し分けもそこで完結するため、レンダラーでは受け取った集合をそのまま流し込む
         var scriptObject = new Scriban.Runtime.ScriptObject
@@ -267,6 +277,8 @@ internal sealed class ScribanCSharpRenderer
             ["emit_db_meta_attr"] = emitDbMetaAttr,
             // 無制限バイナリ列のマーカー属性の定義出力可否（付与可否は exclude_unbounded_binary で別制御）。
             ["emit_unbounded_binary_attr"] = emitUnboundedBinaryAttr,
+            // store-generated 列（rowversion 等）のマーカー属性の定義出力可否（付与は property.is_row_version により無条件）。
+            ["emit_store_generated_attr"] = emitStoreGeneratedAttr,
             // マーカー属性 [UnboundedBinaryColumn] を Entity プロパティへ付与するか（オプション ON のときのみ真）。
             ["exclude_unbounded_binary"] = options.ExcludeUnboundedBinaryColumns,
             ["generate_value_objects"] = options.GenerateValueObjects,

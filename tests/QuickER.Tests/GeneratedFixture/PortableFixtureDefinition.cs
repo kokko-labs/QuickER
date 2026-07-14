@@ -24,9 +24,9 @@ public enum PortableDialect
 /// </summary>
 /// <remarks>
 /// <para>
-/// 既存の <c>GeneratedFixtureDefinition</c> は <c>rowversion</c> 列（DB 側自動更新前提）を含み
-/// SQL Server 専用のため、PostgreSQL / MySQL / Oracle では動かない。本フィクスチャは
-/// <b>rowversion なし</b>・<b>4 方言の型マッパがすべて同じ C# 型へ解決する型のみ</b>で構成した
+/// 既存の <c>GeneratedFixtureDefinition</c> は SQL Server 方言（FOR JSON・SQL Server 固有型）を前提とするため、
+/// PostgreSQL / MySQL / Oracle では動かない。本フィクスチャは
+/// <b>4 方言の型マッパがすべて同じ C# 型へ解決する型のみ</b>で構成した
 /// 小さな図（2 エンティティ・1対多カスケード・VO 有効）で、方言非依存の生成物が実 DB で動くことを証明する。
 /// </para>
 /// <para>

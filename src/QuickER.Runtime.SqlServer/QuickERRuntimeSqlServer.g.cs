@@ -1577,6 +1577,7 @@ public sealed class EntitySaveMetadata
 
     /// <summary>角括弧で囲んだテーブル名</summary>
     public required string TableName { get; init; }
+
     /// <summary>クォートなしの生テーブル名（無制限バイナリ列の Stream アクセサで SqliteBlob 等が要求する）</summary>
     public required string RawTableName { get; init; }
 
@@ -1594,6 +1595,9 @@ public sealed class EntitySaveMetadata
 
     /// <summary>SELECT / UPDATE から除外する無制限バイナリ列（<see cref="UnboundedBinaryColumnAttribute"/> 付き）。除外列なしは空</summary>
     public required IReadOnlyList<PropertyInfo> ExcludedProperties { get; init; }
+
+    /// <summary>INSERT / BulkInsert 対象の列プロパティ（全列から store-generated 列を除いたもの。store-generated 列なしは全列と一致）</summary>
+    public required IReadOnlyList<PropertyInfo> InsertProperties { get; init; }
 
     /// <summary>主キーを除くカラムプロパティ</summary>
     public required IReadOnlyList<PropertyInfo> NonKeyProperties { get; init; }
@@ -1670,8 +1674,22 @@ public sealed class EntitySaveMetadata
             excludedColumns.Count == 0
                 ? columns
                 : columns.Where(property => !excludedColumns.Contains(property)).ToList();
+        // DB が値を生成する列（rowversion / timestamp 等・StoreGeneratedColumnAttribute）は INSERT / UPDATE の対象から外す。
+        // これらは DB が採番するため明示的な書き込みは実行時エラーになる（SQL Server の timestamp 列など）。SELECT では取得する
+        var storeGeneratedColumns = columns
+            .Where(property =>
+                property.GetCustomAttribute<StoreGeneratedColumnAttribute>() is not null
+            )
+            .ToList();
+        // INSERT / BulkInsert 対象は全列から store-generated 列を除いたもの（store-generated 列なしは全列と一致）
+        var insertProperties =
+            storeGeneratedColumns.Count == 0
+                ? columns
+                : columns.Where(property => !storeGeneratedColumns.Contains(property)).ToList();
         var nonKeyProperties = selectProperties
-            .Where(property => property != keyProperty)
+            .Where(property =>
+                property != keyProperty && !storeGeneratedColumns.Contains(property)
+            )
             .ToList();
         var tableName = $"[{tableAttribute.Name}]";
         var keyColumnName = GetColumnName(keyProperty);
@@ -1704,6 +1722,7 @@ public sealed class EntitySaveMetadata
             AllProperties = columns,
             SelectProperties = selectProperties,
             ExcludedProperties = excludedColumns,
+            InsertProperties = insertProperties,
             NonKeyProperties = nonKeyProperties,
             Columns = selectProperties.Select(property => (property.Name, GetColumnName(property))).ToList(),
             PropertyByColumn = columns.ToDictionary(
@@ -1715,7 +1734,7 @@ public sealed class EntitySaveMetadata
             SelectAllSql = $"SELECT {columnList} FROM {tableName};",
             SelectByIdSql = $"SELECT {columnList} FROM {tableName} WHERE [{keyColumnName}] = @id;",
             InsertSql =
-                $"INSERT INTO {tableName} ({string.Join(", ", columns.Select(property => $"[{GetColumnName(property)}]"))}) VALUES ({string.Join(", ", columns.Select(property => $"@{property.Name}"))});",
+                $"INSERT INTO {tableName} ({string.Join(", ", insertProperties.Select(property => $"[{GetColumnName(property)}]"))}) VALUES ({string.Join(", ", insertProperties.Select(property => $"@{property.Name}"))});",
             UpdateSql =
                 $"UPDATE {tableName} SET {string.Join(", ", updateAssignments)} WHERE [{keyColumnName}] = @id;",
             DeleteSql = $"DELETE FROM {tableName} WHERE [{keyColumnName}] = @id;",
@@ -1903,10 +1922,10 @@ public sealed class EntitySaveMetadata
         return entity;
     }
 
-    /// <summary>INSERT 用パラメータ（全カラム）を設定する（追加・グラフ挿入で共用）</summary>
+    /// <summary>INSERT 用パラメータ（store-generated 列を除く挿入対象カラム）を設定する（追加・グラフ挿入で共用）</summary>
     public void BindInsertParameters(SqlCommand command, EntityBase entity)
     {
-        foreach (var property in AllProperties)
+        foreach (var property in InsertProperties)
         {
             AddColumnParameter(
                 command,
@@ -1998,9 +2017,9 @@ public sealed class EntitySaveMetadata
         command.Parameters.AddWithValue(name, rawValue ?? DBNull.Value);
     }
 
-    /// <summary>エンティティのコレクションを 1 行ずつ読み出す SqlBulkCopy 用の IDataReader を生成する</summary>
+    /// <summary>エンティティのコレクションを 1 行ずつ読み出す SqlBulkCopy 用の IDataReader を生成する（store-generated 列は挿入対象外）</summary>
     public IDataReader CreateDataReader(IEnumerable<EntityBase> entities) =>
-        new EntityDataReader(AllProperties, entities);
+        new EntityDataReader(InsertProperties, entities);
 
     /// <summary>エンティティ列を 1 行ずつ読み出して SqlBulkCopy へ流す IDataReader（DataTable を介さずメモリ効率を高める）</summary>
     /// <remarks>SqlBulkCopy は Read・GetValue・FieldCount・GetName・GetOrdinal のみ使用するため、それ以外の型付き取得は未対応とする</remarks>

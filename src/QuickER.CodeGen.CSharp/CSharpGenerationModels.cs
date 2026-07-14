@@ -248,6 +248,12 @@ internal sealed class CSharpPropertyModel
     public bool IsUnboundedBinary { get; init; }
 
     /// <summary>
+    /// DB が値を生成する列（SQL Server の <c>rowversion</c> / <c>timestamp</c> 等）かどうか。オプション非依存で常にマーカー属性
+    /// [StoreGeneratedColumn] を付与する対象の識別に使う（判定はプロバイダの型マッパーの責務）。Repository (QuickER) の INSERT / UPDATE 対象から除外される。
+    /// </summary>
+    public bool IsRowVersion { get; init; }
+
+    /// <summary>
     /// DB 定義メタ属性（[DbColumnMeta]）へ刻む方言中立の型トークン（例 "string(50)"）。型カタログで解析できない自由記述型は null で属性を省略する。
     /// </summary>
     public string? CanonicalTypeToken { get; init; }
