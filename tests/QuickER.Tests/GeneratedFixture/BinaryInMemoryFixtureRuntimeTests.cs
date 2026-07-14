@@ -103,4 +103,51 @@ public sealed class BinaryInMemoryFixtureRuntimeTests
         rows[0].DocumentId.Should().Be(1);
         rows[0].Payload.Should().Equal(Doc1Payload, "射影は完全クローンから作るため除外列も取れる");
     }
+
+    /// <summary>WithUnboundedBinary は除外列を strip しない完全クローンを返す（blob が取れる・返却は複製）</summary>
+    [Fact(
+        DisplayName = "[Binary/InMemory] WithUnboundedBinary は除外列 strip なしの複製を返す（blob が取れる）"
+    )]
+    public async Task WithUnboundedBinary_ReturnsUnstrippedClone()
+    {
+        var (store, documents) = await SeededAsync();
+
+        var doc = await documents
+            .Query()
+            .Where(d => d.DocumentId == 1)
+            .WithUnboundedBinary()
+            .FirstOrDefaultAsync(Ct);
+
+        doc.Should().NotBeNull();
+        doc!.Payload.Should().Equal(Doc1Payload, "strip されず除外列 payload が取れる");
+        doc.Thumb.Should().Equal(Doc1Thumb, "strip されず除外列 thumb が取れる");
+
+        // 返却は複製＝取得エンティティを書き換えてもストアの実体（次回取得）へは波及しない
+        doc.Payload![0] = 0xFF;
+        var reread = await documents
+            .Query()
+            .Where(d => d.DocumentId == 1)
+            .WithUnboundedBinary()
+            .FirstOrDefaultAsync(Ct);
+        reread!
+            .Payload.Should()
+            .Equal(Doc1Payload, "返却は完全クローンのためストアは書き換わらない");
+    }
+
+    /// <summary>WithUnboundedBinary と Include の併用はインメモリでも例外になる（実 DB とパリティ）</summary>
+    [Fact(DisplayName = "[Binary/InMemory] WithUnboundedBinary と Include の併用は例外になる")]
+    public async Task WithUnboundedBinary_WithInclude_Throws()
+    {
+        var (_, documents) = await SeededAsync();
+
+        var act = async () =>
+            await documents
+                .Query()
+                .Where(d => d.DocumentId == 1)
+                .Include(d => d.DocumentNotes)
+                .WithUnboundedBinary()
+                .FirstOrDefaultAsync(Ct);
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+    }
 }

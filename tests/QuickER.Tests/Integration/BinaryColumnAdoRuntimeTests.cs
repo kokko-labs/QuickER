@@ -230,6 +230,63 @@ public sealed class BinaryColumnAdoRuntimeTests : BinaryColumnRuntimeTestsBase
         await act.Should().ThrowAsync<InvalidOperationException>();
     }
 
+    /// <summary>10. WithUnboundedBinary で取得したエンティティをそのまま UpdateAsync すると既存の除外列ガードで例外になる</summary>
+    [Fact(
+        DisplayName = "[Binary/Ado] 10: WithUnboundedBinary 取得エンティティの UpdateAsync は既存ガードで例外"
+    )]
+    public async Task WithUnboundedBinary_ThenUpdate_Throws()
+    {
+        await ResetAndSeedAsync();
+        var documents = CreateDocumentRepository();
+
+        // 除外列を含めて取得すると payload / thumb に実値が載る。そのまま UpdateAsync すると
+        // 「除外列は UPDATE 対象外」の既存ガードが働く（更新は生 SQL へ誘導される）
+        var doc = await documents
+            .Query()
+            .Where(d => d.DocumentId == 1)
+            .WithUnboundedBinary()
+            .FirstOrDefaultAsync(Ct);
+        doc!.Title = "alpha-x";
+
+        var act = async () => await documents.UpdateAsync(doc, Ct);
+
+        (await act.Should().ThrowAsync<InvalidOperationException>())
+            .Which.Message.Should()
+            .Contain("ExecuteSqlAsync");
+    }
+
+    /// <summary>11. 取得後に除外列を未取得状態（null / 空）へ戻して非除外列を変更すれば UpdateAsync は成功する（正当なエンティティである証明）</summary>
+    [Fact(
+        DisplayName = "[Binary/Ado] 11: 除外列を未取得状態へ戻せば WithUnboundedBinary 取得エンティティの Update は成功"
+    )]
+    public async Task WithUnboundedBinary_ResetExcluded_ThenUpdate_Succeeds()
+    {
+        await ResetAndSeedAsync();
+        var documents = CreateDocumentRepository();
+
+        var doc = await documents
+            .Query()
+            .Where(d => d.DocumentId == 1)
+            .WithUnboundedBinary()
+            .FirstOrDefaultAsync(Ct);
+
+        // 除外列を「未取得状態」（nullable=null・非 nullable=空配列）へ戻し、非除外列だけを変更する
+        doc!.Payload = null;
+        doc.Thumb = [];
+        doc.Title = "alpha-reset";
+
+        (await documents.UpdateAsync(doc, Ct)).Should().BeTrue();
+        (await documents.GetByIdAsync(1, Ct))!.Title.Should().Be("alpha-reset");
+
+        // UPDATE は除外列に触れないため DB の blob は温存される（RowState=Unchanged の正当なエンティティだった証拠）
+        var payloadLength = await documents.ExecuteScalarSqlAsync<long>(
+            "SELECT length(payload) FROM documents WHERE document_id = @id",
+            new { id = 1 },
+            Ct
+        );
+        payloadLength.Should().Be(Doc1Payload.Length);
+    }
+
     public override void Dispose()
     {
         _provider?.Dispose();

@@ -128,6 +128,26 @@ await documents.ExecuteSqlAsync(
     new { payload = bytes, id = 1 });
 ```
 
+#### 読み取りオプトイン `WithUnboundedBinary()`
+
+除外を有効にした図でも、**この呼び出しに限り**除外列を含めてエンティティを取得したい場合は、`Query()` チェーンに `WithUnboundedBinary()` を挟みます（除外列が無ければ何もしない no-op のため、API は常に存在します）。生 SQL の射影を書かずに、通常のエンティティ（`RowState = Unchanged`・除外列も実データでマップ済み）を取得できます。
+
+```csharp
+// GetById 相当を、除外列（payload / thumb）込みで取得する
+var doc = await documents
+    .Query()
+    .Where(d => d.DocumentId == 1)
+    .WithUnboundedBinary()
+    .FirstOrDefaultAsync();
+```
+
+制約と挙動:
+
+- **`Include` とは併用できません**（終端メソッド実行時に `InvalidOperationException`）。無制限バイナリ列が必要な場合は `Include` なしの別クエリで取得してください。これは SQL Server の `Include` 経路が FOR JSON＝Base64 経由で巨大 BLOB のメモリ膨張（ピーク 5〜6 倍）を招くためで、「巨大 BLOB を扱う」目的に常に正しいメモリ特性を保証します（SQL Server では FOR JSON を使わず**プレーン SELECT** で取得します）。
+- 効果があるのは `ToListAsync` / `FirstOrDefaultAsync` のみです（件数・存在確認・射影 `ToProjectionListAsync` には影響しません）。
+- 取得したエンティティは正当なエンティティですが、除外列が UPDATE 対象外である点は変わりません。そのまま `UpdateAsync` すると既存ガードで例外になります（除外列の更新は上記の生 SQL `ExecuteSqlAsync` で行ってください）。
+- EF Core モードでは EF が元々全列を読むため no-op です（`Include` 併用エラーだけはパリティで同様に送出します）。
+
 ## EF Core（GenerateEfCore）
 
 既存 Entity をそのまま EF に載せる方言非依存の `QuickErDbContext` と、**同一 Repository インターフェイスの EF 実装**を生成します。マイグレーションは範囲外で、スキーマ作成は DDL 生成の責務です（EF は既存スキーマへの接続専用）。

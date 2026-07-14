@@ -512,6 +512,19 @@ public sealed class SqliteSqlQueryExecutor<TEntity>(ISqlConnectionFactory connec
     {
         var parameters = new List<SqlQueryParameter>();
         var whereClause = BuildWhereClause(plan, parameters);
+
+        if (plan.WithUnboundedBinary)
+        {
+            // 無制限バイナリ列を含める指定: 方言に依らず全列プレーン SELECT で実体化する（Include なしは終端でガード済み）
+            return await MaterializeWithUnboundedBinaryAsync(
+                plan,
+                whereClause,
+                parameters,
+                plan.Take,
+                plan.Skip,
+                cancellationToken
+            );
+        }
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
 
@@ -593,6 +606,20 @@ public sealed class SqliteSqlQueryExecutor<TEntity>(ISqlConnectionFactory connec
     {
         var parameters = new List<SqlQueryParameter>();
         var whereClause = BuildWhereClause(plan, parameters);
+
+        if (plan.WithUnboundedBinary)
+        {
+            // 無制限バイナリ列を含める指定: 先頭 1 件を全列プレーン SELECT で実体化する（Include なしは終端でガード済み）
+            var withBinary = await MaterializeWithUnboundedBinaryAsync(
+                plan,
+                whereClause,
+                parameters,
+                take: 1,
+                plan.Skip,
+                cancellationToken
+            );
+            return withBinary.Count > 0 ? withBinary[0] : null;
+        }
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
 
@@ -705,6 +732,48 @@ public sealed class SqliteSqlQueryExecutor<TEntity>(ISqlConnectionFactory connec
             await transaction.RollbackAsync(cancellationToken);
             throw;
         }
+    }
+
+    /// <summary>
+    /// WithUnboundedBinary 指定時の実体化。Include を使わず全列（無制限バイナリ列を含む）を
+    /// プレーン SELECT し、RowState=Unchanged の正当なエンティティとして実体化する（方言共通）。
+    /// SQL Server では既定の JSON 経由（Base64）を避けメモリ膨張を防ぐ。Include なし限定（終端でガード済み）。
+    /// </summary>
+    private async Task<IReadOnlyList<TEntity>> MaterializeWithUnboundedBinaryAsync(
+        SqlQueryPlan<TEntity> plan,
+        string whereClause,
+        IReadOnlyList<SqlQueryParameter> parameters,
+        int? take,
+        int? skip,
+        CancellationToken cancellationToken
+    )
+    {
+        var metadata = EntitySaveMetadata.For(typeof(TEntity));
+        // 全列（除外列＝無制限バイナリ列を含む）をプレーン SELECT する
+        var sql =
+            $"SELECT {metadata.BuildColumnList(metadata.AllProperties)} FROM {TableName}{whereClause}{BuildOrderAndPaging(plan, take, skip)};";
+
+        await using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        await using var command = CreateCommand(connection, sql, parameters);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+
+        var results = new List<TEntity>();
+
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            // 全列を束縛した正当なエンティティ（RowState=Unchanged）として実体化する
+            results.Add(
+                metadata.MapEntityColumns<TEntity>(
+                    reader,
+                    metadata.AllProperties,
+                    markUnchanged: true
+                )
+            );
+        }
+
+        return results;
     }
 
     /// <summary>ルートをプレーン SELECT で取得し、DataReader で実体化する（Include 前のルート集合）</summary>
@@ -1803,12 +1872,15 @@ public sealed class EntitySaveMetadata
         );
 
     /// <summary>
-    /// データリーダーの 1 行を、指定した列プロパティのみマッピングした {TEntity} を返す（射影のサーバー側列刈り込み用）。
-    /// SELECT に含めた列だけを束縛し、それ以外の列（主キー含む）は既定値のまま（RowState はセレクタ適用後に捨てるため設定しない）。
+    /// データリーダーの 1 行を、指定した列プロパティのみマッピングした {TEntity} を返す（射影のサーバー側列刈り込み・WithUnboundedBinary の全列取得で共用）。
+    /// SELECT に含めた列だけを束縛し、それ以外の列は既定値のまま。射影用途（<paramref name="markUnchanged"/> = false・既定）は
+    /// セレクタ適用後に捨てるため RowState を設定しないが、WithUnboundedBinary の全列取得（<paramref name="markUnchanged"/> = true）は
+    /// 通常取得と同等の正当なエンティティを返すため RowState=Unchanged を確定する。
     /// </summary>
     public TEntity MapEntityColumns<TEntity>(
         SqliteDataReader reader,
-        IReadOnlyList<PropertyInfo> properties
+        IReadOnlyList<PropertyInfo> properties,
+        bool markUnchanged = false
     )
         where TEntity : EntityBase
     {
@@ -1828,6 +1900,12 @@ public sealed class EntitySaveMetadata
                 // 値オブジェクトは内包型へ変換して包み直す（Wrap 内で Convert.ChangeType 済み）
                 property.SetValue(entity, SqlValueObjectActivator.Wrap(value, property.PropertyType));
             }
+        }
+
+        if (markUnchanged)
+        {
+            // 全列を束縛した「正当なエンティティ」として返す場合は、DB 読み込み行として変更なしを確定する
+            entity.RowState = RowState.Unchanged;
         }
 
         return entity;
