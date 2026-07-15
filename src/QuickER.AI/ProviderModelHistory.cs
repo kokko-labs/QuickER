@@ -1,12 +1,11 @@
-using QuickER.Settings;
-
 namespace QuickER.AI;
 
 /// <summary>
 /// プロバイダ別のモデル名 MRU（最近使った順）履歴。AI チャット／AI モックの両ダイアログで共有し、
 /// チャットのターンが成功したときに使用モデルを記録して、次回からドロップダウン候補に出す。
 /// API キー接続（キーは "openai" / "claude" / "ollama"）と Codex 接続（キーは config.toml の
-/// プロバイダ名）がそれぞれ別ファイルのストアで同じ形式を使う。
+/// プロバイダ名）が、<see cref="AiSettings"/> の別セクション（<see cref="AiSettings.ApiModelHistory"/> /
+/// <see cref="AiSettings.CodexModelHistory"/>）で同じ形式を使う。
 /// </summary>
 public class ProviderModelHistory
 {
@@ -82,45 +81,4 @@ public class ProviderModelHistory
 
         return removed;
     }
-}
-
-/// <summary>
-/// Codex 接続（非 openai プロバイダ）の <see cref="ProviderModelHistory"/> を JSON ファイル
-/// （%APPDATA%\QuickER\codex-model-history.json）へ保存・読込するストア。
-/// AI チャット／AI モックの両ダイアログで同一ファイルを共有する。
-/// </summary>
-public class CodexModelHistoryStore : JsonSettingsStore<ProviderModelHistory>
-{
-    /// <summary>既定の保存ファイル名（両ダイアログ共有）</summary>
-    public const string DefaultFileName = "codex-model-history.json";
-
-    /// <summary>既定の保存先（%APPDATA%\QuickER）で履歴ストアを生成する</summary>
-    public CodexModelHistoryStore()
-        : base(DefaultFileName) { }
-
-    /// <summary>保存先フォルダを指定して履歴ストアを生成する（テスト用）</summary>
-    /// <param name="folder">保存先フォルダ</param>
-    public CodexModelHistoryStore(string folder)
-        : base(DefaultFileName, folder) { }
-}
-
-/// <summary>
-/// API キー接続の <see cref="ProviderModelHistory"/> を JSON ファイル
-/// （%APPDATA%\QuickER\api-model-history.json）へ保存・読込するストア。
-/// キーは <see cref="AiProvider"/> の小文字名（"openai" / "claude" / "ollama"）で、
-/// AI チャット／AI モックの両ダイアログで同一ファイルを共有する。
-/// </summary>
-public class ApiModelHistoryStore : JsonSettingsStore<ProviderModelHistory>
-{
-    /// <summary>既定の保存ファイル名（両ダイアログ共有）</summary>
-    public const string DefaultFileName = "api-model-history.json";
-
-    /// <summary>既定の保存先（%APPDATA%\QuickER）で履歴ストアを生成する</summary>
-    public ApiModelHistoryStore()
-        : base(DefaultFileName) { }
-
-    /// <summary>保存先フォルダを指定して履歴ストアを生成する（テスト用）</summary>
-    /// <param name="folder">保存先フォルダ</param>
-    public ApiModelHistoryStore(string folder)
-        : base(DefaultFileName, folder) { }
 }

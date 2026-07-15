@@ -55,7 +55,7 @@ public class MockGenerationDialogTests
                     new StubDiagramSource(),
                     new SyncUiDispatcher(),
                     files: null,
-                    codexSettingsStore: new CodexAppServerSettingsStore(settingsFolder),
+                    settingsStore: new AiSettingsStore(settingsFolder),
                     apiKeyEngineFactory: null,
                     codexEngineFactory: null,
                     claudeCodeEngineFactory: null

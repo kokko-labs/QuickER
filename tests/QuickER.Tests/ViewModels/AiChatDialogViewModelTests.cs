@@ -25,17 +25,15 @@ public class AiChatDialogViewModelTests
     ) CreateVm(IDialogService? dialogService = null)
     {
         var folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
-        var settingsStore = new CodexAppServerSettingsStore(folder);
+        // 設定・UI 状態・モデル履歴を集約した 1 ファイルを一時フォルダへ隔離する（実 %APPDATA% を保護）
+        var settingsStore = new AiSettingsStore(folder);
         var client = new FakeCodexAppServerClient();
         var vm = new AiChatDialogViewModel(
             host: null,
             dispatcher: new SyncUiDispatcher(),
             settingsStore: settingsStore,
             codexClient: client,
-            dialogService: dialogService,
-            // モデル履歴（Ollama / Codex）を一時フォルダへ隔離する（実 %APPDATA% を保護）
-            apiModelHistoryStore: new ApiModelHistoryStore(folder),
-            codexModelHistoryStore: new CodexModelHistoryStore(folder)
+            dialogService: dialogService
         );
         return (vm, client, folder);
     }
@@ -56,15 +54,11 @@ public class AiChatDialogViewModelTests
 
         try
         {
-            var uiStore = new ChatUiSettingsStore("ai-chat-ui.json", folder);
             var vm = new AiChatDialogViewModel(
                 host: null,
                 dispatcher: new SyncUiDispatcher(),
-                settingsStore: new CodexAppServerSettingsStore(folder),
-                codexClient: new FakeCodexAppServerClient(),
-                uiSettingsStore: uiStore,
-                apiModelHistoryStore: new ApiModelHistoryStore(folder),
-                codexModelHistoryStore: new CodexModelHistoryStore(folder)
+                settingsStore: new AiSettingsStore(folder),
+                codexClient: new FakeCodexAppServerClient()
             );
 
             // 保存が無い初回は API キータブが既定
@@ -76,11 +70,8 @@ public class AiChatDialogViewModelTests
             var restored = new AiChatDialogViewModel(
                 host: null,
                 dispatcher: new SyncUiDispatcher(),
-                settingsStore: new CodexAppServerSettingsStore(folder),
-                codexClient: new FakeCodexAppServerClient(),
-                uiSettingsStore: uiStore,
-                apiModelHistoryStore: new ApiModelHistoryStore(folder),
-                codexModelHistoryStore: new CodexModelHistoryStore(folder)
+                settingsStore: new AiSettingsStore(folder),
+                codexClient: new FakeCodexAppServerClient()
             );
 
             restored.Connection.InitialBackend.Should().Be(ErChatBackendKind.ClaudeCode);
@@ -103,10 +94,8 @@ public class AiChatDialogViewModelTests
             var vm = new AiChatDialogViewModel(
                 host: host,
                 dispatcher: new SyncUiDispatcher(),
-                settingsStore: new CodexAppServerSettingsStore(folder),
-                codexClient: new FakeCodexAppServerClient(),
-                apiModelHistoryStore: new ApiModelHistoryStore(folder),
-                codexModelHistoryStore: new CodexModelHistoryStore(folder)
+                settingsStore: new AiSettingsStore(folder),
+                codexClient: new FakeCodexAppServerClient()
             );
 
             // ツール実行 seam は host 抽象から取得され、MainViewModel 具象には依存しない
@@ -428,8 +417,8 @@ public class AiChatDialogViewModelTests
             // Codex エンジン経由で成功ターン完了を発火させる
             client.RaiseTurnCompleted("completed");
 
-            // API 履歴には記録されない（api-model-history.json は作られない）
-            File.Exists(new ApiModelHistoryStore(folder).SettingsPath).Should().BeFalse();
+            // API 履歴には記録されない（ai-settings.json は作られない）
+            File.Exists(new AiSettingsStore(folder).SettingsPath).Should().BeFalse();
         }
         finally
         {
@@ -458,7 +447,7 @@ public class AiChatDialogViewModelTests
             client.RaiseTurnCompleted("completed");
 
             // プロバイダ別履歴へ記録され、候補にも × 付きで現れる
-            var reloaded = new CodexModelHistoryStore(folder).Load();
+            var reloaded = new AiSettingsStore(folder).Load().CodexModelHistory;
             reloaded.ModelsFor("mru-e2e-provider").Should().Equal("mru-e2e-model");
             vm.Connection.CodexModelCandidates.Should()
                 .Contain(c => c.Name == "mru-e2e-model" && c.IsRemovable);
