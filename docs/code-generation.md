@@ -9,6 +9,7 @@ QuickER が生成する C# コードの構成と、データアクセス層（Qu
 | Entity | テーブルに対応する POCO。UI フレームワーク非依存（CommunityToolkit 等に依存しない）。`RowState`（Unchanged / Added / Updated / Removed）と `MarkAdded()` などの状態遷移メソッド、ナビゲーションプロパティ（親参照・子コレクション）を持つ |
 | EditModel | 画面編集用のモデルと Entity との相互変換 |
 | Mapper | Entity ⇄ EditModel の変換器 |
+| 値オブジェクト（オプション） | 列名ごとの値オブジェクト型（`CustomerIdValue` など）。`GenerateValueObjects` 有効時のみ（[値オブジェクト](#値オブジェクトgeneratevalueobjects) 参照） |
 | Repository 共通契約 | `IRepository<TEntity, TKey>` と各エンティティのインターフェイス（`ICustomerRepository` など）。QuickER 版 Repository と EF Core 版 Repository が同じ契約を実装する |
 | QuickER 版 Repository 実装 | 方言別（SQL Server / SQLite）の軽量実装＋ DI 登録拡張 |
 | EF Core 版 Repository | `QuickErDbContext`（Fluent 構成込み）＋ EF Core 版 Repository ＋ DI 登録拡張 |
@@ -17,6 +18,85 @@ QuickER が生成する C# コードの構成と、データアクセス層（Qu
 Entity には既定で DataAnnotations と **DB 定義メタ属性**（`[DbTableMeta]` / `[DbColumnMeta]`）が付き、方言中立の型トークン（`string(50)` / `decimal(10,2)` など）と説明が刻まれます。生成コードは DB 定義の自己記述ドキュメントとしても機能します。
 
 > **前提**: Repository の生成は単一主キー・アプリ側採番が対象です（複合キー・DB 自動採番のテーブルは Entity / EditModel のみ利用できます）。
+
+## 値オブジェクト（GenerateValueObjects）
+
+列を素の型（`int` / `string` など）でなく、列ごとの**値オブジェクト型**（`CustomerIdValue` / `NameValue` など）として生成するオプションです（既定 OFF。quicker.json の `GenerateValueObjects` / GUI「値オブジェクト」行の「全カラムを値オブジェクト化」チェックボックス。専用の CLI フラグはなく `--config` で指定します）。DB アクセスの選択（なし / QuickER 版 Repository / EF Core）に依らず選択でき、マルチターゲット・インメモリ・リモートとも併用できます。
+
+ON にすると、全テーブルの列を**列名で**グローバルにグルーピングし、列名ごとに 1 つの値オブジェクト型を生成します。主キーと同名の外部キー列は**同一の型を共有**するため、ID の取り違えがコンパイルエラーになります。Entity のプロパティと Repository のキー型も値オブジェクトになります:
+
+```csharp
+// ICustomerRepository : IRepository<CustomerEntity, CustomerIdValue>
+var customer = await customers.GetByIdAsync(CustomerIdValue.Create(1));
+
+// orders.GetByIdAsync(customer.CustomerId) は OrderIdValue でないためコンパイルエラー
+```
+
+同名列の定義（型・長さ・精度）が食い違う場合は Warning 診断を出し、主キーの定義を優先（主キーが無ければ最も広い定義）して 1 つの型に揃えます。
+
+### 生成される型と検証
+
+各値オブジェクトは `sealed partial class` で、コンストラクタは非公開・生成は静的ファクトリ経由のみです。図の列定義から検証コードが自動生成されます（文字列は最大長、`decimal` は精度・スケール＝丸めずに弾く）:
+
+```csharp
+var name = NameValue.Create("山田");   // 検証違反は ValueObjectValidationException
+
+if (NameValue.TryCreate(input, out var vo, out var errors))   // 例外なしで検証
+{
+    entity.Name = vo!;
+}
+```
+
+基底クラスは値の型に応じて選ばれ、値ベースの等価（`==` / `Equals`）に加えて、数値・日時系は比較演算子（`<` / `>=` など）、文字列は `Contains` / `StartsWith` / `EndsWith` を備えます。
+
+### partial 拡張点
+
+生成される値オブジェクトは partial クラスで、自前コードから検証・表示を拡張できます:
+
+```csharp
+public sealed partial class NameValue
+{
+    // 追加の検証（自動生成の検証の後に呼ばれる）
+    static partial void OnValidate(string value, ICollection<string> errors)
+    {
+        if (value.Contains(' '))
+        {
+            errors.Add("空白は使えません。");
+        }
+    }
+
+    // 検証メッセージ等で使う表示名の差し替え（既定は列の説明・無指定はプロパティ名）
+    static partial void CustomizeDisplayName(ref string displayName) => displayName = "氏名";
+}
+```
+
+このほか、最大長・桁数エラーの文言を型ごとに差し替える `Customize*ErrorMessage` の partial や、画面表示用文字列 `DisplayValue`（virtual）の override も使えます。既定文言を全値オブジェクトへ一括で差し替えるには、アプリ起動時に `ValueObjectValidationMessages` の static プロパティを設定します。
+
+### 各機能との統合（透過対応）
+
+値オブジェクトは生成コード全体で透過に扱えます。素の値へ手で開く必要はありません:
+
+| 機能 | 挙動 |
+|---|---|
+| QuickER 版 Repository | SQL パラメータは内包値へ自動変換して束縛し、読み出しは `Create` で値オブジェクトへ復元する |
+| `Query()`（式木） | 値オブジェクトどうしの比較・文字列の `Contains` などをそのまま SQL へ翻訳する |
+| EF Core モード | Fluent 構成に値変換（`HasConversion`）と翻訳プラグイン（文字列メソッド・`.Value` 参照のサーバーサイド翻訳）を自動適用する |
+| 名前付きクエリ | メソッドのパラメータは素の型のまま。生成される条件式が値オブジェクト比較へ自動変換する（IN はリストを持ち上げ） |
+| EditModel | 確定値プロパティは `NameValue?` などの値オブジェクト。画面バインド用の `BindingXxx`（文字列）は `TryCreate` で検証し、エラーを `INotifyDataErrorInfo` へ載せる |
+| JSON（`ToJson` / `Clone` / リモート転送） | **内包値として**直列化する（`{"customerId": 1}`。値オブジェクトのラッパー構造は JSON に現れない） |
+
+> **注意**: DB や JSON からの読み出しも `Create` 経由で検証されます。検証を通らない値が既存データに残っていると読み出し時に `ValueObjectValidationException` になるため、`OnValidate` で足す追加検証は既存データと整合させてください。
+
+### string 主キーの GUID 化（UseGuidKeyForStringPrimaryKey）
+
+`GenerateValueObjects` と併せて `UseGuidKeyForStringPrimaryKey`（GUI「string 主キーを GuidKey 化」）を ON にすると、string 主キーの値オブジェクトが GUID 採番基底（`ValueObjectGuidKeyBase`）になり、引数なしの `Create()` で新しいキーを採番できます:
+
+```csharp
+// document_id が string 主キーの場合
+var id = DocumentIdValue.Create();   // Guid.NewGuid() を文字列で内包した新キー
+```
+
+「主キーはアプリ側採番」という Repository 生成の前提（上記）を、採番ロジックを書かずに満たせます。
 
 ## QuickER 版 Repository
 
