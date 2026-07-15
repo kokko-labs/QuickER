@@ -144,11 +144,11 @@ public sealed class CSharpCodeGenerationService
             diagnostics.Add(Error(Strings.CodeGen_Error_InMemoryRuntimePackagesExclusive));
         }
 
-        // ランタイムのパッケージ参照モードと EF Core 生成は併用できる（EF 固定 infra を TContext ジェネリック化した
-        // ことで、EF エンジン（EfCoreRepository / EfCoreSqlExecutor 等）は具象 QuickErDbContext を参照しなくなった）。
+        // ランタイムのパッケージ参照モードと EF Core 生成は併用できる（EF Core 固定 infra を TContext ジェネリック化した
+        // ことで、EF Core エンジン（EfCoreRepository / EfCoreSqlExecutor 等）は具象 QuickErDbContext を参照しなくなった）。
         // スキーマ依存物（QuickErDbContext・Fluent 構成・EfCore{Entity}Repository・AddGeneratedEfCoreRepositories）は
-        // パッケージモードでも常に生成側に出力し、EF 固定 infra はパッケージ QuickER.Runtime.EntityFrameworkCore が担う。
-        // なお EF Core と Repository (QuickER) のマルチターゲット（実効方言 2 つ以上）の排他は別理由（契約の型同一性）で上に残す。
+        // パッケージモードでも常に生成側に出力し、EF Core 固定 infra はパッケージ QuickER.Runtime.EntityFrameworkCore が担う。
+        // なお EF Core と QuickER 版 Repository のマルチターゲット（実効方言 2 つ以上）の排他は別理由（契約の型同一性）で上に残す。
 
         // マルチ辞書が渡されているときは方言間の C# 型不一致を検証し、[SqlColumnType] を sqlserver 辞書から補完する
         var columnTypes = primaryColumnTypes;

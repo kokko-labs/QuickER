@@ -9,11 +9,11 @@ using QuickER.Tests.GeneratedFixture;
 namespace QuickER.Tests.Integration;
 
 /// <summary>
-/// EF Core 版ランタイム固有の追加シナリオ（共通パリティスイートで扱いきれない EF 経路の穴を埋める）と、
-/// QuickER 版⇔EF 版の直接パリティ比較（同一シードへ同一クエリを流して結果を突き合わせる）を実 SQL Server で検証する。
+/// EF Core 版ランタイム固有の追加シナリオ（共通パリティスイートで扱いきれない EF Core 経路の穴を埋める）と、
+/// QuickER 版⇔EF Core 版の直接パリティ比較（同一シードへ同一クエリを流して結果を突き合わせる）を実 SQL Server で検証する。
 /// </summary>
 /// <remarks>
-/// ExecuteDeleteAsync（cascade 含む）・OrderBy/Skip/Take・生 SQL（EfCoreSqlExecutor）を EF 経路で確認し、
+/// ExecuteDeleteAsync（cascade 含む）・OrderBy/Skip/Take・生 SQL（EfCoreSqlExecutor）を EF Core 経路で確認し、
 /// SaveConflictException（DbUpdateConcurrencyException 変換）・insertWhenUpdateMissing 切替・
 /// カスケード削除の true/false 差もカバーする。
 /// </remarks>
@@ -24,7 +24,7 @@ public sealed class GeneratedRuntimeEfCoreSpecificTests(SqlServerContainerFixtur
 {
     private static readonly CancellationToken Ct = TestContext.Current.CancellationToken;
 
-    /// <summary>EF 版リポジトリ群を登録した DI コンテナ</summary>
+    /// <summary>EF Core 版リポジトリ群を登録した DI コンテナ</summary>
     private ServiceProvider? _provider;
 
     private ServiceProvider Provider() =>
@@ -68,8 +68,10 @@ public sealed class GeneratedRuntimeEfCoreSpecificTests(SqlServerContainerFixtur
             Memo = null,
         };
 
-    /// <summary>EF-1. OrderBy / OrderByDescending / Skip / Take が EF 経路で正しい並び・範囲を返す</summary>
-    [Fact(DisplayName = "[EF] 1: OrderBy/OrderByDescending/Skip/Take が正しい並び・範囲を返す")]
+    /// <summary>EF Core-1. OrderBy / OrderByDescending / Skip / Take が EF Core 経路で正しい並び・範囲を返す</summary>
+    [Fact(
+        DisplayName = "[EF Core] 1: OrderBy/OrderByDescending/Skip/Take が正しい並び・範囲を返す"
+    )]
     public async Task OrderBy_Skip_Take_Works()
     {
         await ResetAndCreateSchemaAsync();
@@ -89,8 +91,8 @@ public sealed class GeneratedRuntimeEfCoreSpecificTests(SqlServerContainerFixtur
         desc.Select(c => c.CustomerId.Value).Should().Equal(5, 4, 3);
     }
 
-    /// <summary>EF-2. ExecuteDeleteAsync（cascade なし）: 条件一致の行のみ一括削除し件数を返す</summary>
-    [Fact(DisplayName = "[EF] 2: ExecuteDeleteAsync（cascade なし）で条件一致行のみ削除する")]
+    /// <summary>EF Core-2. ExecuteDeleteAsync（cascade なし）: 条件一致の行のみ一括削除し件数を返す</summary>
+    [Fact(DisplayName = "[EF Core] 2: ExecuteDeleteAsync（cascade なし）で条件一致行のみ削除する")]
     public async Task ExecuteDelete_NonCascade_DeletesMatchingRows()
     {
         await ResetAndCreateSchemaAsync();
@@ -111,11 +113,13 @@ public sealed class GeneratedRuntimeEfCoreSpecificTests(SqlServerContainerFixtur
     }
 
     /// <summary>
-    /// EF-3. ExecuteDeleteAsync（cascadeDelete true/false の差）: 子を持つ親を条件削除する。
+    /// EF Core-3. ExecuteDeleteAsync（cascadeDelete true/false の差）: 子を持つ親を条件削除する。
     /// フィクスチャの FK は ON DELETE CASCADE のため DB 側でも子が連鎖削除される。観測できる差は
     /// アプリが発行する DELETE の返す件数（false=親のみ 1 / true=子 2＋親 1 の 3）で、どちらも最終状態は空。
     /// </summary>
-    [Fact(DisplayName = "[EF] 3: ExecuteDeleteAsync の cascadeDelete で返す削除件数が切り替わる")]
+    [Fact(
+        DisplayName = "[EF Core] 3: ExecuteDeleteAsync の cascadeDelete で返す削除件数が切り替わる"
+    )]
     public async Task ExecuteDelete_CascadeFlag_TogglesReportedRowCount()
     {
         await ResetAndCreateSchemaAsync();
@@ -151,11 +155,11 @@ public sealed class GeneratedRuntimeEfCoreSpecificTests(SqlServerContainerFixtur
     }
 
     /// <summary>
-    /// EF-4. cascadeSave=false のグラフ保存: ルートのみ保存し、子の変更（追加）を無視する
-    /// （切断グラフの部分保存フラグが EF 経路で効くことの確認）。
+    /// EF Core-4. cascadeSave=false のグラフ保存: ルートのみ保存し、子の変更（追加）を無視する
+    /// （切断グラフの部分保存フラグが EF Core 経路で効くことの確認）。
     /// </summary>
     [Fact(
-        DisplayName = "[EF] 4: SaveAsync の cascadeSave=false でルートのみ保存し子の追加を無視する"
+        DisplayName = "[EF Core] 4: SaveAsync の cascadeSave=false でルートのみ保存し子の追加を無視する"
     )]
     public async Task SaveAsync_CascadeSaveFalse_SavesRootOnly()
     {
@@ -184,9 +188,9 @@ public sealed class GeneratedRuntimeEfCoreSpecificTests(SqlServerContainerFixtur
         (await orders.GetAllAsync(Ct)).Should().BeEmpty("cascadeSave=false のため子は保存されない");
     }
 
-    /// <summary>EF-5. EfCoreSqlExecutor の生 SQL 4 系統（厳密全列・寛容射影・単一値・匿名パラメータ）</summary>
+    /// <summary>EF Core-5. EfCoreSqlExecutor の生 SQL 4 系統（厳密全列・寛容射影・単一値・匿名パラメータ）</summary>
     [Fact(
-        DisplayName = "[EF] 5: EfCoreSqlExecutor の生 SQL（厳密全列・寛容射影・単一値・匿名パラメータ）が機能する"
+        DisplayName = "[EF Core] 5: EfCoreSqlExecutor の生 SQL（厳密全列・寛容射影・単一値・匿名パラメータ）が機能する"
     )]
     public async Task EfCoreSqlExecutor_RawSql_AllModes()
     {
@@ -232,7 +236,7 @@ public sealed class GeneratedRuntimeEfCoreSpecificTests(SqlServerContainerFixtur
         );
         names.Should().Equal("Alice", "Bob");
 
-        // (d) 影響行数（ExecuteSql）とスカラー（ExecuteScalar）も EF 経路で機能する
+        // (d) 影響行数（ExecuteSql）とスカラー（ExecuteScalar）も EF Core 経路で機能する
         var affected = await executor.ExecuteSqlAsync(
             "UPDATE [customers] SET [is_active] = @v WHERE [customer_id] = @id;",
             new { v = false, id = 2 },
@@ -256,11 +260,11 @@ public sealed class GeneratedRuntimeEfCoreSpecificTests(SqlServerContainerFixtur
     }
 
     /// <summary>
-    /// EF-6. 直接パリティ比較: 同一シードへ同一クエリ（式木・Include・生 SQL）をQuickER 版と EF 版の両方で流し、
+    /// EF Core-6. 直接パリティ比較: 同一シードへ同一クエリ（式木・Include・生 SQL）をQuickER 版と EF Core 版の両方で流し、
     /// 結果同士を突き合わせて完全一致することを確認する（交換可能性のより強い証明）。
     /// </summary>
     [Fact(
-        DisplayName = "[EF] 6: 同一シード・同一クエリでQuickER 版と EF 版の結果が完全一致する（パリティ比較）"
+        DisplayName = "[EF Core] 6: 同一シード・同一クエリでQuickER 版と EF Core 版の結果が完全一致する（パリティ比較）"
     )]
     public async Task Parity_SameQuery_BothBackendsAgree()
     {
@@ -277,7 +281,7 @@ public sealed class GeneratedRuntimeEfCoreSpecificTests(SqlServerContainerFixtur
         await seedOrders.InsertAsync(NewOrder(10, 1, 100m), Ct);
         await seedOrders.InsertAsync(NewOrder(11, 1, 50m), Ct);
 
-        // QuickER 版と EF 版のリポジトリ
+        // QuickER 版と EF Core 版のリポジトリ
         var ado = new CustomerRepository(new SqlConnectionFactory(fixture.ConnectionString));
         var ef = EfCustomers();
 

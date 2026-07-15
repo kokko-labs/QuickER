@@ -133,7 +133,7 @@ public sealed class DbTableMetaAttribute : Attribute
 
 /// <summary>
 /// DB が値を生成する列（SQL Server の <c>rowversion</c> / <c>timestamp</c> 等）のマーカー属性。
-/// これらの列は DB 側が採番するため、Repository (QuickER) の INSERT / BulkInsert / UPDATE の対象から除外される（SELECT では取得される）。
+/// これらの列は DB 側が採番するため、QuickER 版 Repository の INSERT / BulkInsert / UPDATE の対象から除外される（SELECT では取得される）。
 /// 付与は生成オプションに依らず、DB が値を生成する列であれば常に行う。
 /// </summary>
 [AttributeUsage(AttributeTargets.Property, AllowMultiple = false)]
@@ -3665,7 +3665,7 @@ internal sealed class SaveHookInvoker<TEntity>(IEnumerable<ISaveHook<TEntity>> h
 /// </summary>
 /// <remarks>
 /// プロバイダ非依存の <see cref="DbCommand"/> / <see cref="DbDataReader"/> のみを扱い、特定 DB クライアントには依存しない。
-/// EF 単独出力（QuickER の SQL Server 実装を含まない構成）でも共通契約としてこのクラスを出力し、EF 版実行器が呼び出す。
+/// EF Core 単独出力（QuickER の SQL Server 実装を含まない構成）でも共通契約としてこのクラスを出力し、EF Core 版実行器が呼び出す。
 /// </remarks>
 internal static class RawSqlMapper
 {
@@ -3753,7 +3753,7 @@ internal static class RawSqlMapper
 
     /// <summary>
     /// 結果セットを <typeparamref name="TResult"/> へ寛容に射影して読み切る（単一値モード・DTO モードの 1 系統）。
-    /// プロバイダ非依存の <see cref="DbDataReader"/> を受け取り、QuickER・EF 版実行器でマッピング実装を共有する。
+    /// プロバイダ非依存の <see cref="DbDataReader"/> を受け取り、QuickER・EF Core 版実行器でマッピング実装を共有する。
     /// </summary>
     internal static async Task<IReadOnlyList<TResult>> ReadProjectionRowsAsync<TResult>(
         DbDataReader reader,
@@ -4181,9 +4181,9 @@ public sealed class SqlQuery<TEntity>
 
     /// <summary>条件に一致するエンティティを取得し、指定の射影で変換して一覧を返す（名前付きクエリの射影用）</summary>
     /// <remarks>
-    /// 条件・並び順・ページングはバックエンド（方言 SQL / EF / インメモリ）側で適用される。
+    /// 条件・並び順・ページングはバックエンド（方言 SQL / EF Core / インメモリ）側で適用される。
     /// 射影の列は、セレクタが列プロパティ参照のみ（Include なし）のとき実装先が可能ならサーバー側で刈り込む
-    /// （SELECT する列・EF の射影・インメモリ複製を参照列に絞る）。Include 併用時やセレクタから列参照を
+    /// （SELECT する列・EF Core の射影・インメモリ複製を参照列に絞る）。Include 併用時やセレクタから列参照を
     /// 安全に抽出できない場合は、従来どおり全列を取得してからメモリ内で射影する。
     /// </remarks>
     /// <param name="selector">エンティティから射影 DTO への変換式</param>
@@ -4502,7 +4502,7 @@ internal sealed class EntitySaveMetadata
 
 /// <summary>1 回の Save 呼び出しの間だけ生きる Save フックのセッション（レジストリ・context ファクトリ・スキップ集合を持ち回る）</summary>
 /// <remarks>
-/// context ファクトリはバックエンド（QuickER 方言・EF・InMemory）が進行中のトランザクション文脈を閉じ込めて渡す。
+/// context ファクトリはバックエンド（QuickER 方言・EF Core・InMemory）が進行中のトランザクション文脈を閉じ込めて渡す。
 /// スキップ集合は参照等価（<see cref="ReferenceEqualityComparer"/>）で追跡し、コミット後の <c>AcceptChanges</c> で状態据え置きに使う。
 /// </remarks>
 internal sealed class SaveHookSession(

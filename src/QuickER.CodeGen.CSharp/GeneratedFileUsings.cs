@@ -41,7 +41,7 @@ internal static class GeneratedFileUsings
 
         ordered.AddRange(spec.CrossNamespaceUsings);
 
-        // パッケージ参照モード: 固定 infra（Runtime バケット・契約・方言エンジン・EF 部品）を出力しないため、
+        // パッケージ参照モード: 固定 infra（Runtime バケット・契約・方言エンジン・EF Core 部品）を出力しないため、
         // 生成コードは固定名前空間の型を using で参照する。プランナはこのモードで Runtime バケットのファイルを
         // 計画せず、Runtime を指すクロス using も付けない（PackageRuntimeUsings が唯一の供給元）。
         if (options.UseRuntimePackages)
@@ -66,11 +66,11 @@ internal static class GeneratedFileUsings
     /// <list type="bullet">
     ///   <item>共有基盤・方言中立契約（EntityBase・属性・VO 基底・IRepository・SqlQuery・ISqlExecutor 等）→ <see cref="RuntimePackages.Core"/>。
     ///     いずれかのバケットを含むファイルに常に必要（Entity のみでも EntityBase／属性を参照するため）</item>
-    ///   <item>Repository バケットを含みRepository (QuickER) 実装を出す（<c>GenerateRepositories</c>）ファイル → その方言の
+    ///   <item>Repository バケットを含みQuickER 版 Repository 実装を出す（<c>GenerateRepositories</c>）ファイル → その方言の
     ///     方言エンジン（<see cref="RuntimePackages.SqlServer"/> / <see cref="RuntimePackages.Sqlite"/>）。
     ///     エンティティ別実装が方言 Repository 基底・接続ファクトリ・実行器を参照する</item>
     ///   <item>EfCore バケットを含むファイル → <see cref="RuntimePackages.EntityFrameworkCore"/>
-    ///     （DbContext・EF 版実装が EF 共通部品を参照する）</item>
+    ///     （DbContext・EF Core 版実装が EF Core 共通部品を参照する）</item>
     /// </list>
     /// マルチターゲット時は方言実装スペックが各自の方言エンジンだけを参照する（spec.Dialect による）。
     /// </remarks>
@@ -87,8 +87,8 @@ internal static class GeneratedFileUsings
         // コア（共通基盤＋方言中立契約）はいずれのバケットでも必要。
         yield return RuntimePackages.Core;
 
-        // Repository (QuickER) 実装を出すファイルは、その方言の方言エンジンパッケージを参照する。
-        // 契約のみ（マルチ方言の契約スペック・EF 単独出力）は方言エンジンを参照しない（コアの契約で足りる）。
+        // QuickER 版 Repository 実装を出すファイルは、その方言の方言エンジンパッケージを参照する。
+        // 契約のみ（マルチ方言の契約スペック・EF Core 単独出力）は方言エンジンを参照しない（コアの契約で足りる）。
         if (
             spec.Buckets.Contains(GenerationBucket.Repository)
             && options.GenerateRepositories
@@ -98,7 +98,7 @@ internal static class GeneratedFileUsings
             yield return IsSqliteDialect(spec) ? RuntimePackages.Sqlite : RuntimePackages.SqlServer;
         }
 
-        // EF 生成物（DbContext・EF 版実装）は EF 共通部品パッケージを参照する。
+        // EF Core 生成物（DbContext・EF Core 版実装）は EF Core 共通部品パッケージを参照する。
         if (spec.Buckets.Contains(GenerationBucket.EfCore))
         {
             yield return RuntimePackages.EntityFrameworkCore;
@@ -115,7 +115,7 @@ internal static class GeneratedFileUsings
     /// <remarks>
     /// System / System.Collections.Generic / System.Linq は共有フレームワークに常時含まれ生成コードのほぼ全構成で使うため、
     /// 該当バケットへ広めに付与する（既存方針を踏襲）。オプションで出力が変わる箇所（VO 有無・DataAnnotations・
-    /// Repository (QuickER) 実装の有無）はその条件を反映する。マルチ方言時は ADO using をスペックの方言に応じて、
+    /// QuickER 版 Repository 実装の有無）はその条件を反映する。マルチ方言時は ADO using をスペックの方言に応じて、
     /// かつ方言実装スペック（<see cref="GeneratedFileSpec.ContractOnly"/> でない）にのみ付与する。
     /// </remarks>
     private static IEnumerable<string> FrameworkUsings(
@@ -196,7 +196,7 @@ internal static class GeneratedFileUsings
             //     LINQ 式ツリー（System.Linq.Expressions）、リフレクション（System.Reflection）、
             //     ConcurrentDictionary（System.Collections.Concurrent）、CultureInfo（System.Globalization）、
             //     非同期（System.Threading / System.Threading.Tasks）、RawSqlMapper の DbDataReader/DbCommand（System.Data.Common）、
-            //     属性参照（DataAnnotations(.Schema)）。契約のみ（EF 単独）では SqlClient / DI は不要。
+            //     属性参照（DataAnnotations(.Schema)）。契約のみ（EF Core 単独）では SqlClient / DI は不要。
             case GenerationBucket.Repository:
                 yield return "System";
                 yield return "System.Collections.Generic";
@@ -221,13 +221,13 @@ internal static class GeneratedFileUsings
                     yield return "System.ComponentModel.DataAnnotations.Schema";
                 }
 
-                // Repository (QuickER) 実装（SqlExecutor / 方言別 Repository 基底 / 接続ファクトリ / AddGeneratedRepositories）:
+                // QuickER 版 Repository 実装（SqlExecutor / 方言別 Repository 基底 / 接続ファクトリ / AddGeneratedRepositories）:
                 //   ADO 型（方言依存: SQL Server=Microsoft.Data.SqlClient / SQLite=Microsoft.Data.Sqlite）、
                 //   DI 登録（Microsoft.Extensions.DependencyInjection）、さらに実装が使う
                 //   IStructuralEquatable（System.Collections）・DataTable 相当（System.Data）。
                 //   JSON（System.Text.Json / System.Text.Json.Serialization.Metadata）は FOR JSON 復元を使う
                 //   SQL Server 方言のみで必要（SQLite はプレーン SELECT＋DataReader 実体化のため不要）。
-                // 契約のみのスペック（マルチ方言の契約ファイル・EF 単独出力）は ADO / DI を出さない。
+                // 契約のみのスペック（マルチ方言の契約ファイル・EF Core 単独出力）は ADO / DI を出さない。
                 // 方言実装スペック（!ContractOnly）だけがその方言の ADO を出す（依存排他ガードの一般化）。
                 // パッケージ参照モードでは方言 Repository 基底・実行器・接続ファクトリ（ADO を使う固定 infra）は
                 // 方言エンジンパッケージが持つため、生成側の ADO / JSON 直接依存は不要。DI 登録拡張だけが残るため
@@ -259,7 +259,7 @@ internal static class GeneratedFileUsings
                 // インメモリ Repository（InMemoryDataStore・InMemory{Entity}Repository・シーダー・
                 // AddGeneratedInMemoryRepositories）: DI 登録拡張のため DependencyInjection を付ける。
                 // 述語・並び順の式木 Compile（System.Linq.Expressions）・リフレクション（System.Reflection）・
-                // LINQ（System.Linq）は契約バケットで既に付与済み。ADO・EF 依存は一切出さない（方言非依存）。
+                // LINQ（System.Linq）は契約バケットで既に付与済み。ADO・EF Core 依存は一切出さない（方言非依存）。
                 if (spec.InMemory)
                 {
                     yield return "Microsoft.Extensions.DependencyInjection";
@@ -295,7 +295,7 @@ internal static class GeneratedFileUsings
             // EfCore: DbContext / DbSet / ModelBuilder（Microsoft.EntityFrameworkCore）、AddGeneratedEfCoreRepositories の
             //   DI（Microsoft.Extensions.DependencyInjection(.Extensions)）、ADO 実行器の DbDataReader/DbCommand（System.Data.Common）、
             //   リフレクション・LINQ 式・非同期。VO の文字列メソッド翻訳プラグイン（IMethodCallTranslatorPlugin 等）で
-            //   EF Core の Query / Storage / Infrastructure / Diagnostics 名前空間も使うため、EfCore バケットには EF 系一式を付与する
+            //   EF Core の Query / Storage / Infrastructure / Diagnostics 名前空間も使うため、EfCore バケットには EF Core 系一式を付与する
             case GenerationBucket.EfCore:
                 yield return "System";
                 yield return "System.Collections.Generic";
@@ -306,11 +306,11 @@ internal static class GeneratedFileUsings
                 yield return "System.Threading";
                 yield return "System.Threading.Tasks";
 
-                // Save フックの EF context（EfCoreSaveHookContext.WriteBinaryColumnAsync）と EF 版 Stream アクセサの
-                // Stream 引数型は常に System.IO を要求する（契約 ISaveHookContext が常に Stream を含むため、分割 EF ファイルでも必須）
+                // Save フックの EF Core context（EfCoreSaveHookContext.WriteBinaryColumnAsync）と EF Core 版 Stream アクセサの
+                // Stream 引数型は常に System.IO を要求する（契約 ISaveHookContext が常に Stream を含むため、分割 EF Core ファイルでも必須）
                 yield return "System.IO";
                 yield return "Microsoft.EntityFrameworkCore";
-                // Save フックの EF 経路（TrackGraph の記録＝EntityEntry の保持・State 落とし込み）で使う
+                // Save フックの EF Core 経路（TrackGraph の記録＝EntityEntry の保持・State 落とし込み）で使う
                 yield return "Microsoft.EntityFrameworkCore.ChangeTracking";
                 yield return "Microsoft.EntityFrameworkCore.Diagnostics";
                 yield return "Microsoft.EntityFrameworkCore.Infrastructure";

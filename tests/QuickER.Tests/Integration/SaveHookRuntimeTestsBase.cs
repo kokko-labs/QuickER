@@ -9,7 +9,7 @@ using Xunit;
 namespace QuickER.Tests.Integration;
 
 /// <summary>
-/// Save フック（<see cref="ISaveHook{TEntity}"/>）の意味論を、実装先（Repository (QuickER) の SQLite・EF Core・インメモリ）を
+/// Save フック（<see cref="ISaveHook{TEntity}"/>）の意味論を、実装先（QuickER 版 Repository の SQLite・EF Core・インメモリ）を
 /// 跨いでパリティ検証する共通基底。バックエンド非依存のシナリオ（スキップ・短絡順序・insertWhenUpdateMissing の非対称・
 /// サブツリー削除の per-node 発火・直接操作の素通り・未登録 no-op・IEnumerable 形態）を <c>[Fact]</c> として持ち、
 /// 各派生はリポジトリ生成・シードだけを差し込む。
@@ -21,7 +21,7 @@ namespace QuickER.Tests.Integration;
 /// 同じアサーションが成立する。
 /// </para>
 /// <para>
-/// 実装先で唯一期待が分かれるのは<b>「After 例外時の残留」</b>で、Repository (QuickER)・EF Core は 1 トランザクションのため
+/// 実装先で唯一期待が分かれるのは<b>「After 例外時の残留」</b>で、QuickER 版 Repository・EF Core は 1 トランザクションのため
 /// ロールバックして残らず（<see cref="AfterExceptionLeavesResidue"/>=false）、インメモリは実トランザクションを持たず保存フェーズの
 /// 変更が残る（=true）。After の同一トランザクション書き込み（除外列 blob・生 SQL）や FK 制約ロールバックは、context 操作の
 /// 対応が実装先で異なるため各派生のバックエンド固有 <c>[Fact]</c> で検証する。
@@ -46,7 +46,7 @@ public abstract class SaveHookRuntimeTestsBase
     /// <summary>指定した Save フック群を登録した文書メモ（子）リポジトリを生成する</summary>
     protected abstract IDocumentNoteRepository Notes(params object[] hooks);
 
-    /// <summary>After が例外を投げたとき、保存フェーズで確定した変更が残るか（QuickER/EF=false・InMemory=true）</summary>
+    /// <summary>After が例外を投げたとき、保存フェーズで確定した変更が残るか（QuickER/EF Core=false・InMemory=true）</summary>
     protected abstract bool AfterExceptionLeavesResidue { get; }
 
     /// <summary>文書エンティティを組み立てる</summary>
@@ -123,9 +123,9 @@ public abstract class SaveHookRuntimeTestsBase
 
     // ── 4（row 版）. After 例外時の残留（実装先で期待が分岐する唯一の点） ──
 
-    /// <summary>After が例外を投げると、保存フェーズで行った更新は QuickER/EF では残らず、インメモリでは残る</summary>
+    /// <summary>After が例外を投げると、保存フェーズで行った更新は QuickER/EF Core では残らず、インメモリでは残る</summary>
     [Fact(
-        DisplayName = "[SaveHook] After 例外時の残留は実装先で分岐する（QuickER/EF=残らない・InMemory=残る）"
+        DisplayName = "[SaveHook] After 例外時の残留は実装先で分岐する（QuickER/EF Core=残らない・InMemory=残る）"
     )]
     public async Task After_Throws_RowResidueDependsOnBackend()
     {
@@ -262,7 +262,7 @@ public abstract class SaveHookRuntimeTestsBase
         await documents.SaveAsync(doc, cancellationToken: Ct);
 
         // 子ごとに Before/After(Delete) が発火し、root は Before(Delete) が false でスキップ（After なし）。
-        // per-node の発火順は実装先で異なる（QuickER/InMemory は子先行・EF は追跡順）ため Contain で検証する
+        // per-node の発火順は実装先で異なる（QuickER/InMemory は子先行・EF Core は追跡順）ため Contain で検証する
         log.Should()
             .Contain("note:before:Delete:100")
             .And.Contain("note:after:Delete:100")
@@ -322,7 +322,7 @@ public abstract class SaveHookRuntimeTestsBase
 
     /// <summary>10. SaveAsync(IEnumerable) でも各エンティティで Before/After が発火する（各エンティティ内で Before→After の順は保たれる）</summary>
     /// <remarks>
-    /// After の発火位置は実装先で異なる（Repository (QuickER)＝各 DML 直後の interleave・EF/InMemory＝バッチ後）ため、
+    /// After の発火位置は実装先で異なる（QuickER 版 Repository＝各 DML 直後の interleave・EF Core/InMemory＝バッチ後）ため、
     /// エンティティを跨いだ厳密な順序ではなく「各エンティティで Before が自身の After より前」という不変条件で検証する。
     /// </remarks>
     [Fact(

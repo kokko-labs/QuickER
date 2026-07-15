@@ -32,7 +32,7 @@ public interface IAppDialogService
 {
     /// <summary>C# コード生成ダイアログを表示し、生成設定を返す（キャンセル時は null）</summary>
     /// <param name="currentProvider">
-    /// アプリの現在のプロバイダ。Repository (QuickER)（SQL Server 専用）の選択可否判定と DB 表示名の提示に使う
+    /// アプリの現在のプロバイダ。QuickER 版 Repository（SQL Server 専用）の選択可否判定と DB 表示名の提示に使う
     /// </param>
     CSharpGenerationDialogResult? ShowCSharpGenerationDialog(IDatabaseProvider currentProvider);
 

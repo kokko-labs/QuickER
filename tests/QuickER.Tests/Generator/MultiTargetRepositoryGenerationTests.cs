@@ -11,7 +11,7 @@ using Xunit;
 namespace QuickER.Tests.Generator;
 
 /// <summary>
-/// Repository (QuickER) のマルチターゲット生成（複数方言）の Generator 側基盤を検証する。
+/// QuickER 版 Repository のマルチターゲット生成（複数方言）の Generator 側基盤を検証する。
 /// </summary>
 /// <remarks>
 /// <para>
@@ -500,7 +500,9 @@ public sealed class MultiTargetRepositoryGenerationTests
         sqlite.Should().NotContain("public partial interface IRepository<TEntity, TKey>");
     }
 
-    [Fact(DisplayName = "マルチ方言＋EF Core は診断エラー（QuickER マルチターゲットと EF は排他）")]
+    [Fact(
+        DisplayName = "マルチ方言＋EF Core は診断エラー（QuickER マルチターゲットと EF Core は排他）"
+    )]
     public void MultiDialect_WithEfCore_ReturnsErrorDiagnostic()
     {
         var diagram = BuildDiagram();

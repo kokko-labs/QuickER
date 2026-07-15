@@ -118,7 +118,7 @@ public sealed class DbTableMetaAttribute : Attribute
 
 /// <summary>
 /// DB が値を生成する列（SQL Server の <c>rowversion</c> / <c>timestamp</c> 等）のマーカー属性。
-/// これらの列は DB 側が採番するため、Repository (QuickER) の INSERT / BulkInsert / UPDATE の対象から除外される（SELECT では取得される）。
+/// これらの列は DB 側が採番するため、QuickER 版 Repository の INSERT / BulkInsert / UPDATE の対象から除外される（SELECT では取得される）。
 /// 付与は生成オプションに依らず、DB が値を生成する列であれば常に行う。
 /// </summary>
 [AttributeUsage(AttributeTargets.Property, AllowMultiple = false)]
@@ -3322,7 +3322,7 @@ public sealed class SqlConnectionFactory(string connectionString) : ISqlConnecti
 /// </summary>
 /// <remarks>
 /// プロバイダ非依存の <see cref="DbCommand"/> / <see cref="DbDataReader"/> のみを扱い、特定 DB クライアントには依存しない。
-/// EF 単独出力（QuickER の SQL Server 実装を含まない構成）でも共通契約としてこのクラスを出力し、EF 版実行器が呼び出す。
+/// EF Core 単独出力（QuickER の SQL Server 実装を含まない構成）でも共通契約としてこのクラスを出力し、EF Core 版実行器が呼び出す。
 /// </remarks>
 internal static class RawSqlMapper
 {
@@ -3410,7 +3410,7 @@ internal static class RawSqlMapper
 
     /// <summary>
     /// 結果セットを <typeparamref name="TResult"/> へ寛容に射影して読み切る（単一値モード・DTO モードの 1 系統）。
-    /// プロバイダ非依存の <see cref="DbDataReader"/> を受け取り、QuickER・EF 版実行器でマッピング実装を共有する。
+    /// プロバイダ非依存の <see cref="DbDataReader"/> を受け取り、QuickER・EF Core 版実行器でマッピング実装を共有する。
     /// </summary>
     internal static async Task<IReadOnlyList<TResult>> ReadProjectionRowsAsync<TResult>(
         DbDataReader reader,
@@ -4619,9 +4619,9 @@ public sealed class SqlQuery<TEntity>
 
     /// <summary>条件に一致するエンティティを取得し、指定の射影で変換して一覧を返す（名前付きクエリの射影用）</summary>
     /// <remarks>
-    /// 条件・並び順・ページングはバックエンド（方言 SQL / EF / インメモリ）側で適用される。
+    /// 条件・並び順・ページングはバックエンド（方言 SQL / EF Core / インメモリ）側で適用される。
     /// 射影の列は、セレクタが列プロパティ参照のみ（Include なし）のとき実装先が可能ならサーバー側で刈り込む
-    /// （SELECT する列・EF の射影・インメモリ複製を参照列に絞る）。Include 併用時やセレクタから列参照を
+    /// （SELECT する列・EF Core の射影・インメモリ複製を参照列に絞る）。Include 併用時やセレクタから列参照を
     /// 安全に抽出できない場合は、従来どおり全列を取得してからメモリ内で射影する。
     /// </remarks>
     /// <param name="selector">エンティティから射影 DTO への変換式</param>
@@ -6936,7 +6936,7 @@ internal static class CascadeDeletePlanner
 
 /// <summary>1 回の Save 呼び出しの間だけ生きる Save フックのセッション（レジストリ・context ファクトリ・スキップ集合を持ち回る）</summary>
 /// <remarks>
-/// context ファクトリはバックエンド（QuickER 方言・EF・InMemory）が進行中のトランザクション文脈を閉じ込めて渡す。
+/// context ファクトリはバックエンド（QuickER 方言・EF Core・InMemory）が進行中のトランザクション文脈を閉じ込めて渡す。
 /// スキップ集合は参照等価（<see cref="ReferenceEqualityComparer"/>）で追跡し、コミット後の <c>AcceptChanges</c> で状態据え置きに使う。
 /// </remarks>
 internal sealed class SaveHookSession(
@@ -9114,7 +9114,7 @@ public partial class QuickErDbContext : DbContext
 /// <summary>エンティティに縛られない生 SQL 実行器の EF Core 版（DbContext の接続上で ADO を直接実行する）</summary>
 /// <remarks>
 /// <para>
-/// EF の FromSqlRaw / SqlQueryRaw はマッピング規則が既存 SQL Server 版（厳密全列必須・寛容射影・単一値モード）と
+/// EF Core の FromSqlRaw / SqlQueryRaw はマッピング規則が既存 SQL Server 版（厳密全列必須・寛容射影・単一値モード）と
 /// 一致しないため、<typeparamref name="TContext"/> の <see cref="DbConnection"/> 上で <see cref="DbCommand"/> を
 /// 直接実行し、既存版とマッピング・束縛の実装を共有する（意味論は <see cref="ISqlExecutor"/> の定義どおり）。
 /// </para>
@@ -9252,7 +9252,7 @@ public sealed partial class EfCoreSqlExecutor<TContext>(IDbContextFactory<TConte
 /// 短命の <typeparamref name="TContext"/>（AsNoTracking）で実行する。
 /// </summary>
 /// <remarks>
-/// Where は捕捉済みの述語式をそのまま適用し、各方言への翻訳は EF プロバイダに委ねる。
+/// Where は捕捉済みの述語式をそのまま適用し、各方言への翻訳は EF Core プロバイダに委ねる。
 /// OrderBy は object? への boxing（Convert）を剥がして実キー型の OrderBy / ThenBy を合成する。
 /// Include は <see cref="IncludeNode"/> ツリーから "Orders.Details" 形式のドットパスを組み立てて適用する。
 /// 取得結果のグラフは既存 SQL Server 版のマッピングと同じく RowState=Unchanged に揃える。
@@ -9291,11 +9291,11 @@ internal sealed class EfCoreSqlQueryExecutor<TEntity, TContext>(
         return items;
     }
 
-    /// <summary>条件に一致するエンティティを射影して取得する（列参照のみ・Include なしのときは EF にサーバー側射影させる）</summary>
+    /// <summary>条件に一致するエンティティを射影して取得する（列参照のみ・Include なしのときは EF Core にサーバー側射影させる）</summary>
     /// <remarks>
     /// Include があるか、セレクタから列参照のみを安全に抽出できない場合は、従来経路
     /// （全列取得 → メモリ内で射影）へフォールバックする。刈り込み可能時は、フィルタ・並び順・ページングを
-    /// 適用した <see cref="IQueryable{T}"/> に <c>Select(selector)</c> を直適用し、EF に列を絞らせる。
+    /// 適用した <see cref="IQueryable{T}"/> に <c>Select(selector)</c> を直適用し、EF Core に列を絞らせる。
     /// </remarks>
     public async Task<IReadOnlyList<TResult>> ToProjectionListAsync<TResult>(
         SqlQueryPlan<TEntity> plan,
@@ -9303,7 +9303,7 @@ internal sealed class EfCoreSqlQueryExecutor<TEntity, TContext>(
         CancellationToken cancellationToken
     )
     {
-        // Include なし・列参照のみのときだけ EF の Select 直適用でサーバー側射影する（可否判定は ADO と同じ収集器）
+        // Include なし・列参照のみのときだけ EF Core の Select 直適用でサーバー側射影する（可否判定は ADO と同じ収集器）
         var prunable =
             plan.Includes.Count == 0
             && ProjectionColumnCollector.TryCollect(selector, out var referenced)
@@ -9434,7 +9434,7 @@ internal sealed class EfCoreSqlQueryExecutor<TEntity, TContext>(
                 );
             }
 
-            // 子クエリ: child => 親クエリの主キー集合.Contains(child.FK)（EF が IN サブクエリへ翻訳する）
+            // 子クエリ: child => 親クエリの主キー集合.Contains(child.FK)（EF Core が IN サブクエリへ翻訳する）
             var childQuery = BuildChildQuery(context, query, typeof(TCurrent), navigation);
             var subtreeTask = (Task<int>)
                 _deleteSubtreeMethod
@@ -9703,7 +9703,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
     /// <summary>Save フックのレジストリ（未指定＝null＝フックなしで完全 no-op）</summary>
     private readonly ISaveHookRegistry? _saveHooks = saveHooks;
 
-    /// <summary>TrackGraph で記録した「保存対象エンティティ・EF エントリ・実行操作」の 1 件（操作は再試行での切替で更新される）</summary>
+    /// <summary>TrackGraph で記録した「保存対象エンティティ・EF Core エントリ・実行操作」の 1 件（操作は再試行での切替で更新される）</summary>
     private sealed class TrackedOperation(
         EntityBase entity,
         EntityEntry entry,
@@ -9713,7 +9713,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
         /// <summary>保存対象エンティティ</summary>
         public EntityBase Entity { get; } = entity;
 
-        /// <summary>対応する EF の追跡エントリ（State の落とし込み・再試行での型判定に使う）</summary>
+        /// <summary>対応する EF Core の追跡エントリ（State の落とし込み・再試行での型判定に使う）</summary>
         public EntityEntry Entry { get; } = entry;
 
         /// <summary>実際に行う操作（<c>insertWhenUpdateMissing</c> の切替時に Update→Insert へ更新される）</summary>
@@ -9766,7 +9766,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
 
     /// <summary>エンティティのコレクションを一括追加する</summary>
     /// <remarks>
-    /// EF 版は全件を Added で追跡して 1 回の SaveChanges で保存する（バッチ化された INSERT 文）。
+    /// EF Core 版は全件を Added で追跡して 1 回の SaveChanges で保存する（バッチ化された INSERT 文）。
     /// SqlBulkCopy を使う既存 SQL Server 版とは性能特性が異なり、大量件数では遅くなる可能性がある。
     /// 挿入範囲は既存版と同じく渡されたエンティティのみで、ナビゲーション先はたどらない。
     /// </remarks>
@@ -9991,7 +9991,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
     /// <summary>生 SQL の SELECT を実行し、結果行を {TEntity} へマップして返す</summary>
     /// <remarks>
     /// マッピング・束縛の意味論は既存 SQL Server 版と同一（全列必須・RowState=Unchanged）。
-    /// 実装は <see cref="ISqlExecutor"/>（EF 版）へ委譲する（束縛・マッピングの 1 系統化）。
+    /// 実装は <see cref="ISqlExecutor"/>（EF Core 版）へ委譲する（束縛・マッピングの 1 系統化）。
     /// </remarks>
     public Task<IReadOnlyList<TEntity>> QueryBySqlAsync(
         string sql,
@@ -10002,7 +10002,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
     /// <summary>生 SQL（UPDATE/DELETE/任意 DML）を実行し、影響行数を返す</summary>
     /// <remarks>
     /// 呼び出しごとに DbContext（接続）を開閉する。複数文をアトミックに実行したい場合は、
-    /// 1 回の呼び出し内に方言のトランザクション文を記述すること。実装は <see cref="ISqlExecutor"/>（EF 版）へ委譲する。
+    /// 1 回の呼び出し内に方言のトランザクション文を記述すること。実装は <see cref="ISqlExecutor"/>（EF Core 版）へ委譲する。
     /// </remarks>
     public Task<int> ExecuteSqlAsync(
         string sql,
@@ -10011,7 +10011,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
     ) => _sqlExecutor.ExecuteSqlAsync(sql, parameters, cancellationToken);
 
     /// <summary>生 SQL を実行し、単一のスカラー値を返す（該当なし・DBNull は <c>default</c>）</summary>
-    /// <remarks>変換・束縛の意味論は既存 SQL Server 版と同一。実装は <see cref="ISqlExecutor"/>（EF 版）へ委譲する。</remarks>
+    /// <remarks>変換・束縛の意味論は既存 SQL Server 版と同一。実装は <see cref="ISqlExecutor"/>（EF Core 版）へ委譲する。</remarks>
     public Task<TResult?> ExecuteScalarSqlAsync<TResult>(
         string sql,
         object? parameters = null,
@@ -10096,7 +10096,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
         }
     }
 
-    /// <summary>RowState を EF の EntityState へ変換する</summary>
+    /// <summary>RowState を EF Core の EntityState へ変換する</summary>
     private static EntityState ToEntityState(RowState rowState) =>
         rowState switch
         {
@@ -10171,8 +10171,8 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
 /// </para>
 /// <para>
 /// 除外列バイナリの書き込み（<see cref="WriteBinaryColumnAsync"/>）は、EF Core が方言固有のストリーミングを持てないため
-/// <see cref="NotSupportedException"/> を投げる（Stream アクセサの EF 方針と同じ）。同一トランザクションで列を更新したい場合は
-/// <see cref="ExecuteSqlAsync"/> を使うか、Repository (QuickER) を利用する。
+/// <see cref="NotSupportedException"/> を投げる（Stream アクセサの EF Core 方針と同じ）。同一トランザクションで列を更新したい場合は
+/// <see cref="ExecuteSqlAsync"/> を使うか、QuickER 版 Repository を利用する。
 /// </para>
 /// </remarks>
 internal sealed class EfCoreSaveHookContext(DbContext context) : ISaveHookContext
@@ -10199,7 +10199,7 @@ internal sealed class EfCoreSaveHookContext(DbContext context) : ISaveHookContex
         return await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
-    /// <summary>EF Core モードでは除外列バイナリの書き込みは非対応（Stream アクセサと同方針＝生 SQL か Repository (QuickER) を使う）</summary>
+    /// <summary>EF Core モードでは除外列バイナリの書き込みは非対応（Stream アクセサと同方針＝生 SQL か QuickER 版 Repository を使う）</summary>
     public Task<bool> WriteBinaryColumnAsync(
         string propertyName,
         object key,
@@ -10209,7 +10209,7 @@ internal sealed class EfCoreSaveHookContext(DbContext context) : ISaveHookContex
     ) =>
         throw new NotSupportedException(
             "EF Core モードでは Save フックの除外列バイナリ書き込み（WriteBinaryColumnAsync）は使用できません。"
-                + "生 SQL（ExecuteSqlAsync）で更新するか、Repository (QuickER) を使ってください。"
+                + "生 SQL（ExecuteSqlAsync）で更新するか、QuickER 版 Repository を使ってください。"
         );
 }
 
@@ -10218,7 +10218,7 @@ public static class GeneratedEfCoreRepositoryServiceCollectionExtensions
 {
     /// <summary>DbContext 構成とともに、生成された EF Core 版の全リポジトリを DI コンテナへ登録する</summary>
     /// <remarks>
-    /// 既存の <c>AddGeneratedRepositories</c> と同じインターフェイスへ EF 版実装を登録するため、
+    /// 既存の <c>AddGeneratedRepositories</c> と同じインターフェイスへ EF Core 版実装を登録するため、
     /// 呼び出しの差し替えだけでQuickER の SQL Server 実装 ⇔ EF Core（方言はアプリ側の構成で選択）を切り替えられる。
     /// </remarks>
     /// <param name="services">登録先のサービスコレクション</param>
@@ -10276,25 +10276,25 @@ public sealed partial class EfCoreDocumentRepository(
     /// <inheritdoc />
     public Task<bool> ReadPayloadAsync(int id, Stream destination, CancellationToken cancellationToken = default) =>
         throw new NotSupportedException(
-            "EF Core モードでは Stream アクセサ（無制限バイナリ列の読み書き）は使用できません。Repository (QuickER) を使うか、partial クラスで実装してください。"
+            "EF Core モードでは Stream アクセサ（無制限バイナリ列の読み書き）は使用できません。QuickER 版 Repository を使うか、partial クラスで実装してください。"
         );
 
     /// <inheritdoc />
     public Task<bool> WritePayloadAsync(int id, Stream? source, long? length = null, CancellationToken cancellationToken = default) =>
         throw new NotSupportedException(
-            "EF Core モードでは Stream アクセサ（無制限バイナリ列の読み書き）は使用できません。Repository (QuickER) を使うか、partial クラスで実装してください。"
+            "EF Core モードでは Stream アクセサ（無制限バイナリ列の読み書き）は使用できません。QuickER 版 Repository を使うか、partial クラスで実装してください。"
         );
 
     /// <inheritdoc />
     public Task<bool> ReadThumbAsync(int id, Stream destination, CancellationToken cancellationToken = default) =>
         throw new NotSupportedException(
-            "EF Core モードでは Stream アクセサ（無制限バイナリ列の読み書き）は使用できません。Repository (QuickER) を使うか、partial クラスで実装してください。"
+            "EF Core モードでは Stream アクセサ（無制限バイナリ列の読み書き）は使用できません。QuickER 版 Repository を使うか、partial クラスで実装してください。"
         );
 
     /// <inheritdoc />
     public Task<bool> WriteThumbAsync(int id, Stream? source, long? length = null, CancellationToken cancellationToken = default) =>
         throw new NotSupportedException(
-            "EF Core モードでは Stream アクセサ（無制限バイナリ列の読み書き）は使用できません。Repository (QuickER) を使うか、partial クラスで実装してください。"
+            "EF Core モードでは Stream アクセサ（無制限バイナリ列の読み書き）は使用できません。QuickER 版 Repository を使うか、partial クラスで実装してください。"
         );
 }
 

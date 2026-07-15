@@ -16,7 +16,7 @@ namespace QuickER.Tests.Generator;
 /// </summary>
 /// <remarks>
 /// <para>
-/// 生成物レベルの依存排他ガード（<c>CSharpCodeGenerationServiceTests</c> の「EF 単独出力に SqlClient なし」等・
+/// 生成物レベルの依存排他ガード（<c>CSharpCodeGenerationServiceTests</c> の「EF Core 単独出力に SqlClient なし」等・
 /// <c>MultiTargetRepositoryGenerationTests</c> の方言別排他）と対をなす、csproj レベルの排他ガード。
 /// これにより、公開される .nupkg の nuspec 依存が意図どおり（Core=依存ゼロ・方言相互排他）であることを構造上保証する。
 /// </para>
@@ -101,7 +101,7 @@ public sealed class RuntimePackageProjectDependencyGuardTests
             .Should()
             .BeEquivalentTo(
                 new[] { "Microsoft.EntityFrameworkCore.Relational" },
-                "EF パッケージの NuGet 依存は EF Core（Relational・本体は推移取得）だけに保つ"
+                "EF Core パッケージの NuGet 依存は EF Core（Relational・本体は推移取得）だけに保つ"
                     + "（ADO（SqlClient / Sqlite）／DI 系が混ざってはならない。DI 登録拡張は具象 DbContext を参照するスキーマ依存物として生成側に出力される）"
             );
 

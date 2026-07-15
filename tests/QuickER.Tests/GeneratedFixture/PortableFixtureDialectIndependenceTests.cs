@@ -17,13 +17,13 @@ namespace QuickER.Tests.GeneratedPortableFixture;
 /// <remarks>
 /// <para>
 /// 可搬型セット（int / string / decimal(10,2)）は 4 方言の型マッパがすべて同じ C# 型へ解決するため、
-/// エンティティ・DbContext・EF リポジトリ・VO などの生成物は方言によらず一致する。ここが崩れる場合は
+/// エンティティ・DbContext・EF Core リポジトリ・VO などの生成物は方言によらず一致する。ここが崩れる場合は
 /// <see cref="PortableFixtureDefinition"/> の型セットが可搬でない（見直しが必要）ことを意味する。
 /// </para>
 /// <para>
 /// 唯一の方言差はQuickER の SQL Server 実装 ADO パス専用の <c>[SqlColumnType(SqlDbType.X)]</c> 属性
 /// （およびその属性クラス・束縛ヘルパー）で、これは SQL Server 型マッパのみが付与する SQL Server 固有情報である
-/// （EF パスは参照しない）。そのため本テストは 2 段で証明する:
+/// （EF Core パスは参照しない）。そのため本テストは 2 段で証明する:
 /// <list type="number">
 ///   <item>本フィクスチャの実ランタイム対象である <b>PostgreSql / MySql / Oracle の 3 方言は生成 C# が完全一致する</b>
 ///   （いずれも <c>[SqlColumnType]</c> を付与しないため、正規化なしのバイト一致で証明できる）。</item>
@@ -104,7 +104,7 @@ public sealed class PortableFixtureDialectIndependenceTests
             SqlServerCSharpTypeMapper.ResolveColumnTypes
         );
 
-        // 方言非依存のエンティティ・DbContext・EF リポジトリ宣言は SqlServer にもそのまま含まれる
+        // 方言非依存のエンティティ・DbContext・EF Core リポジトリ宣言は SqlServer にもそのまま含まれる
         foreach (
             var marker in new[]
             {

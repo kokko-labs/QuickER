@@ -25,7 +25,7 @@ public sealed class BinaryFixtureDriftTests
             BinaryFixtureDefinition.Options,
             [BinaryFixtureDefinition.OutputFileName, BinaryFixtureDefinition.ServerOutputFileName],
             "コミット済みバイナリ除外フィクスチャが現在のテンプレート出力と乖離しています。"
-                + "BinaryFixtureDefinition（SQLite 方言・Repository (QuickER)＋EF Core＋インメモリ＋リモートサービス・無制限バイナリ除外・名前付きクエリ入り）から再生成が必要です。"
+                + "BinaryFixtureDefinition（SQLite 方言・QuickER 版 Repository＋EF Core＋インメモリ＋リモートサービス・無制限バイナリ除外・名前付きクエリ入り）から再生成が必要です。"
         );
     }
 }

@@ -12,14 +12,14 @@ using Xunit;
 namespace QuickER.Tests.Integration;
 
 /// <summary>
-/// Save フック（<see cref="ISaveHook{TEntity}"/>）を<b>Repository (QuickER) の SQLite 実装</b>（<c>AddGeneratedRepositories</c>）で
+/// Save フック（<see cref="ISaveHook{TEntity}"/>）を<b>QuickER 版 Repository の SQLite 実装</b>（<c>AddGeneratedRepositories</c>）で
 /// 実 SQLite（一時ファイル DB・Docker 不要＝CI 常時実行）に流して検証する。
 /// </summary>
 /// <remarks>
 /// <para>
 /// バックエンド非依存のシナリオ（スキップ・短絡順序・insertWhenUpdateMissing・サブツリー削除・素通り・no-op・
 /// IEnumerable 形態・After 例外時の残留）は基底 <see cref="SaveHookRuntimeTestsBase"/> が持ち、本クラスは
-/// Repository (QuickER) 固有の 1 トランザクション原子性（FK 違反ロールバック・After の同一トランザクション書き込み＝
+/// QuickER 版 Repository 固有の 1 トランザクション原子性（FK 違反ロールバック・After の同一トランザクション書き込み＝
 /// 除外列 blob と生 SQL 監査行のアトミック性）を検証する。
 /// </para>
 /// <para>
@@ -39,7 +39,7 @@ public sealed class SaveHookAdoRuntimeTests : SaveHookRuntimeTestsBase, IDisposa
             ForeignKeys = true,
         }.ConnectionString;
 
-    /// <summary>Repository (QuickER) は 1 トランザクションのため After 例外で保存変更は残らない</summary>
+    /// <summary>QuickER 版 Repository は 1 トランザクションのため After 例外で保存変更は残らない</summary>
     protected override bool AfterExceptionLeavesResidue => false;
 
     /// <summary>指定した Save フック群を登録した DI プロバイダを構築する（テスト終了時にまとめて破棄）</summary>
@@ -116,7 +116,7 @@ public sealed class SaveHookAdoRuntimeTests : SaveHookRuntimeTestsBase, IDisposa
         await notes.InsertAsync(NewNote(101, 1, "note-b"), Ct);
     }
 
-    /// <summary>行の存在を数える生 SQL ヘルパー（Repository (QuickER) の生 SQL 経路）</summary>
+    /// <summary>行の存在を数える生 SQL ヘルパー（QuickER 版 Repository の生 SQL 経路）</summary>
     private async Task<long> ScalarAsync(string sql, object? parameters = null) =>
         await Documents().ExecuteScalarSqlAsync<long>(sql, parameters, Ct);
 

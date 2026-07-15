@@ -20,14 +20,14 @@ public sealed record QueryColumnBinding(
 /// </summary>
 /// <remarks>
 /// <para>
-/// 生成するのは <c>Query().Where(...)</c> に渡す単一の式で、Repository (QuickER)（ADO）の
+/// 生成するのは <c>Query().Where(...)</c> に渡す単一の式で、QuickER 版 Repository（ADO）の
 /// SqlExpressionTranslator と EF Core の双方が翻訳できる形に限定する：
 /// 比較・論理結合・否定・null 判定・文字列 Contains / StartsWith / EndsWith・コレクション Contains（IN）。
 /// 方言 SQL への翻訳は実行時にランタイム側が行うため、このエミッタに方言分岐はない。
 /// </para>
 /// <para>
 /// 値オブジェクト（VO）列は「VO 同士の比較」（<c>e.Prop == VoClass.Create(値)</c>）で出力する。
-/// ADO 側はパラメータ化時に素値へ開き、EF 側はコンバータで列型へ写すため両系統で翻訳できる。
+/// ADO 側はパラメータ化時に素値へ開き、EF Core 側はコンバータで列型へ写すため両系統で翻訳できる。
 /// IN のリストパラメータのみ、行ごとの生成を避けるためメソッド冒頭で VO リストへ持ち上げる
 /// （<see cref="EmitResult.PreludeLines"/>）。
 /// </para>

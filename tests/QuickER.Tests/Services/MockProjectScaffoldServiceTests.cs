@@ -10,7 +10,7 @@ namespace QuickER.Tests.Services;
 
 /// <summary>
 /// <see cref="MockProjectScaffoldService"/> の決定的スキャフォールド（Generated/ 生成コード・csproj・
-/// README・design/mock.html の書き出し）と、図の方言に応じたRepository (QuickER) 出力を検証するテストクラス。
+/// README・design/mock.html の書き出し）と、図の方言に応じたQuickER 版 Repository 出力を検証するテストクラス。
 /// </summary>
 public class MockProjectScaffoldServiceTests
 {
@@ -132,7 +132,7 @@ public class MockProjectScaffoldServiceTests
     }
 
     /// <summary>SQL Server 方言の図ではQuickER の SQL Server Repository（と SqlClient 依存）が出力されることを検証する</summary>
-    [Fact(DisplayName = "SQL Server 方言ではRepository (QuickER) と SqlClient 依存を出す")]
+    [Fact(DisplayName = "SQL Server 方言ではQuickER 版 Repository と SqlClient 依存を出す")]
     public void Scaffold_SqlServer_EmitsRepositoryAndAdoPackage()
     {
         var folder = NewTempFolder();
@@ -165,7 +165,7 @@ public class MockProjectScaffoldServiceTests
     }
 
     /// <summary>SQLite 方言の図ではQuickER の SQLite Repository（と Sqlite 依存）が出力されることを検証する</summary>
-    [Fact(DisplayName = "SQLite 方言ではRepository (QuickER) と Sqlite 依存を出す")]
+    [Fact(DisplayName = "SQLite 方言ではQuickER 版 Repository と Sqlite 依存を出す")]
     public void Scaffold_Sqlite_EmitsRepositoryAndAdoPackage()
     {
         var folder = NewTempFolder();
@@ -189,8 +189,8 @@ public class MockProjectScaffoldServiceTests
         }
     }
 
-    /// <summary>非対応方言（PostgreSQL 等）の図ではRepository (QuickER) を出さず、ADO 依存も含めないことを検証する</summary>
-    [Fact(DisplayName = "非対応方言ではRepository (QuickER) を出さない")]
+    /// <summary>非対応方言（PostgreSQL 等）の図ではQuickER 版 Repository を出さず、ADO 依存も含めないことを検証する</summary>
+    [Fact(DisplayName = "非対応方言ではQuickER 版 Repository を出さない")]
     public void Scaffold_UnsupportedDialect_OmitsRepository()
     {
         var folder = NewTempFolder();

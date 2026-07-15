@@ -10,7 +10,7 @@ using QuickER.Tests.GeneratedPortableFixture;
 namespace QuickER.Tests.Integration;
 
 /// <summary>
-/// 方言可搬な生成物（EF 版）を実 SQLite（一時ファイル DB・インプロセス）で流す方言ランタイムテスト。
+/// 方言可搬な生成物（EF Core 版）を実 SQLite（一時ファイル DB・インプロセス）で流す方言ランタイムテスト。
 /// スキーマは <see cref="SqliteDdlGenerator"/> の DDL、接続は <c>UseSqlite</c> で構成する。
 /// </summary>
 /// <remarks>
@@ -36,7 +36,7 @@ public sealed class GeneratedEfCoreSqliteRuntimeTests
     private readonly SqliteTempDatabase _db = SqliteTempDatabase.Create();
     private ServiceProvider? _provider;
 
-    /// <summary>書き込み可能な接続文字列（EF はこの実ファイルへ読み書きする）</summary>
+    /// <summary>書き込み可能な接続文字列（EF Core はこの実ファイルへ読み書きする）</summary>
     private string ConnectionString => _db.ReadWriteCreateConnectionString;
 
     /// <summary>AddGeneratedEfCoreRepositories → UseSqlite の DI 経路でリポジトリ群を解決する</summary>
@@ -56,8 +56,8 @@ public sealed class GeneratedEfCoreSqliteRuntimeTests
 
     /// <summary>スキーマを初期化し、SQLite の DdlGenerator が生成した DDL でテーブルを作成する</summary>
     /// <remarks>
-    /// 一時ファイル DB のため、テーブルを明示 DROP してから作り直す。EF Migrations は使わない
-    /// （EF は既存スキーマ接続専用という設計）。DROP は依存順（子 → 親）で実行する。
+    /// 一時ファイル DB のため、テーブルを明示 DROP してから作り直す。EF Core Migrations は使わない
+    /// （EF Core は既存スキーマ接続専用という設計）。DROP は依存順（子 → 親）で実行する。
     /// </remarks>
     protected override async Task ResetAndCreateSchemaAsync()
     {

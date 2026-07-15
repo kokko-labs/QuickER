@@ -9,7 +9,7 @@ namespace QuickER.Tests.GeneratedQueryFixture;
 // 利用者がそうするのと同じ形（partial クラス）で実装する。
 // 実装漏れはこのテストプロジェクトのコンパイルエラーとして検出される＝統一規則の実証を兼ねる。
 
-/// <summary>manual クエリ（SpecialLookup）のRepository (QuickER) 側実装</summary>
+/// <summary>manual クエリ（SpecialLookup）のQuickER 版 Repository 側実装</summary>
 public sealed partial class OrderRepository
 {
     /// <summary>顧客IDに紐づく注文のうち最初の 1 件を返す（manual 実装の見本）</summary>

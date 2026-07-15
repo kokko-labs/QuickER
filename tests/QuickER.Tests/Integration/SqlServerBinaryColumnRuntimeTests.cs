@@ -13,7 +13,7 @@ namespace QuickER.Tests.Integration;
 
 /// <summary>
 /// 無制限バイナリ列の除外（<c>ExcludeUnboundedBinaryColumns</c>）と Stream アクセサ（<c>Read/Write{Column}Async</c>）を、
-/// <b>SQL Server 方言</b>のRepository (QuickER) で実 SQL Server（Testcontainers・Docker 依存）に流して検証する。
+/// <b>SQL Server 方言</b>のQuickER 版 Repository で実 SQL Server（Testcontainers・Docker 依存）に流して検証する。
 /// </summary>
 /// <remarks>
 /// <para>

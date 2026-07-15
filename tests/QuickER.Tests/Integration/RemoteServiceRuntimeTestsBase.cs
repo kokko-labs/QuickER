@@ -43,7 +43,7 @@ public abstract class RemoteServiceRuntimeTestsBase : IAsyncLifetime
     /// <summary>HTTP クライアント実装を登録した DI コンテナ</summary>
     private ServiceProvider? _clientProvider;
 
-    /// <summary>サーバー側 DI へ実体リポジトリ群を登録する（QuickER = AddGeneratedRepositories / EF = AddGeneratedEfCoreRepositories）</summary>
+    /// <summary>サーバー側 DI へ実体リポジトリ群を登録する（QuickER = AddGeneratedRepositories / EF Core = AddGeneratedEfCoreRepositories）</summary>
     protected abstract void ConfigureServerRepositories(
         IServiceCollection services,
         string connectionString

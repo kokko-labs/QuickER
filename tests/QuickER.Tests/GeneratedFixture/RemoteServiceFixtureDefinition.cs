@@ -14,7 +14,7 @@ namespace QuickER.Tests.GeneratedRemoteServiceFixture;
 /// どちらもチェックインしてドリフト検知＋テストプロジェクトでの実コンパイル検証を兼ねる。
 /// </para>
 /// <para>
-/// SQLite 方言のRepository (QuickER)＋EF Core 併存のため、実ファイル DB（Docker 不要＝CI 常時実行）の
+/// SQLite 方言のQuickER 版 Repository＋EF Core 併存のため、実ファイル DB（Docker 不要＝CI 常時実行）の
 /// in-process HTTP end-to-end テスト（RemoteServiceRuntimeTests）が両バックエンドでこの生成物を検証できる。
 /// </para>
 /// </remarks>
@@ -29,7 +29,7 @@ public static class RemoteServiceFixtureDefinition
     /// <summary>コミット済みフィクスチャファイル名（サーバー実装）</summary>
     public const string ServerOutputFileName = "RemoteServiceFixture.RemoteServer.g.cs";
 
-    /// <summary>フィクスチャ生成に用いる決定的なオプション（SQLite 方言・QuickER＋EF 併存・VO 有効・リモートサービス生成）</summary>
+    /// <summary>フィクスチャ生成に用いる決定的なオプション（SQLite 方言・QuickER＋EF Core 併存・VO 有効・リモートサービス生成）</summary>
     public static CodeGenerationOptions Options { get; } =
         new()
         {

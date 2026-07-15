@@ -2,7 +2,7 @@
 
 *[English](README.md) | 日本語*
 
-QuickER（ER 図デザイナ）が生成する C# コードのランタイムのうち、**EF Core 版 Repository の共通部品**です。`TContext : DbContext` ジェネリックの EF 版 Repository 基底や値オブジェクト翻訳プラグインを提供し、`QuickER.Runtime` の方言中立契約を EF Core で実装します。依存は `Microsoft.EntityFrameworkCore.Relational` のみ（ADO・DI 系への依存なし）です。
+QuickER（ER 図デザイナ）が生成する C# コードのランタイムのうち、**EF Core 版 Repository の共通部品**です。`TContext : DbContext` ジェネリックの EF Core 版 Repository 基底や値オブジェクト翻訳プラグインを提供し、`QuickER.Runtime` の方言中立契約を EF Core で実装します。依存は `Microsoft.EntityFrameworkCore.Relational` のみ（ADO・DI 系への依存なし）です。
 
 ## 使いどき
 

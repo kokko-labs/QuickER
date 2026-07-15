@@ -16,7 +16,7 @@ namespace QuickER.Tests.Integration;
 /// <remarks>
 /// <para>
 /// 入力はリモート契約フィクスチャ（<see cref="RemoteContractFixtureDefinition"/>＝SQLite 方言の
-/// Repository (QuickER)＋EF Core 併存・名前付きクエリ入り）。検証の柱は 3 つ:
+/// QuickER 版 Repository＋EF Core 併存・名前付きクエリ入り）。検証の柱は 3 つ:
 /// (1) リモート面（I{Entity}RemoteRepository）だけで CRUD・グラフ保存・名前付きクエリが完結する、
 /// (2) リモート面と全機能面（I{Entity}Repository）が同一インスタンスとして解決され、全機能面では Query()・生 SQL も使える、
 /// (3) リモート面の契約にローカル実行前提のメンバー（Query()・生 SQL・一括追加）が現れない（リフレクションで面の分割を証明）。

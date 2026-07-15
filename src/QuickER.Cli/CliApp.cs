@@ -393,7 +393,7 @@ public static class CliApp
     /// <see cref="CodeGenerationOptions.GenerateRemoteServices"/> を true にする（未指定時は設定ファイルの値を使う）。
     /// <paramref name="excludeUnboundedBinary"/>（<c>--exclude-unbounded-binary</c>）指定時は
     /// <see cref="CodeGenerationOptions.ExcludeUnboundedBinaryColumns"/> を true にする（未指定時は設定ファイルの値を使う）。
-    /// Repository (QuickER) 生成（<c>GenerateRepositories</c>）が要求され、かつ実効方言に未対応方言が含まれる場合は
+    /// QuickER 版 Repository 生成（<c>GenerateRepositories</c>）が要求され、かつ実効方言に未対応方言が含まれる場合は
     /// <see cref="RepositoryDialectUnsupportedException"/> を送出する
     /// </remarks>
     private static CodeGenerationOptions LoadOptions(
@@ -502,7 +502,7 @@ public static class CliApp
     }
 
     /// <summary>
-    /// Repository (QuickER) の実効方言（<see cref="CodeGenerationOptions.EffectiveRepositoryDialects"/>）ごとに、
+    /// QuickER 版 Repository の実効方言（<see cref="CodeGenerationOptions.EffectiveRepositoryDialects"/>）ごとに、
     /// CLI のプロバイダレジストリから方言別の型マッパを解決する。
     /// </summary>
     /// <remarks>レジストリに存在しない方言名は除外する（生成本体側で図の方言の辞書へ代替される）</remarks>
@@ -574,5 +574,5 @@ public static class CliApp
     }
 }
 
-/// <summary>Repository (QuickER) の生成が要求されたが、指定プロバイダの方言が未対応のときに送出する例外</summary>
+/// <summary>QuickER 版 Repository の生成が要求されたが、指定プロバイダの方言が未対応のときに送出する例外</summary>
 internal sealed class RepositoryDialectUnsupportedException(string message) : Exception(message);

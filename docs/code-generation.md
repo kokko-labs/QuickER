@@ -1,6 +1,6 @@
 # 生成コードの使い方
 
-QuickER が生成する C# コードの構成と、データアクセス層（Repository (QuickER) / EF Core）の使い方をまとめます。生成方法は [CLI リファレンス](cli.md)、動く実例は [samples/ec-order](../samples/ec-order) を参照してください。
+QuickER が生成する C# コードの構成と、データアクセス層（QuickER 版 Repository / EF Core）の使い方をまとめます。生成方法は [CLI リファレンス](cli.md)、動く実例は [samples/ec-order](../samples/ec-order) を参照してください。
 
 ## 生成されるもの
 
@@ -9,16 +9,16 @@ QuickER が生成する C# コードの構成と、データアクセス層（Re
 | Entity | テーブルに対応する POCO。UI フレームワーク非依存（CommunityToolkit 等に依存しない）。`RowState`（Unchanged / Added / Updated / Removed）と `MarkAdded()` などの状態遷移メソッド、ナビゲーションプロパティ（親参照・子コレクション）を持つ |
 | EditModel | 画面編集用のモデルと Entity との相互変換 |
 | Mapper | Entity ⇄ EditModel の変換器 |
-| Repository 共通契約 | `IRepository<TEntity, TKey>` と各エンティティのインターフェイス（`ICustomerRepository` など）。Repository (QuickER) と EF Core が同じ契約を実装する |
-| Repository (QuickER) 実装 | 方言別（SQL Server / SQLite）の軽量実装＋ DI 登録拡張 |
-| EF Core 実装 | `QuickErDbContext`（Fluent 構成込み）＋ EF 版 Repository ＋ DI 登録拡張 |
+| Repository 共通契約 | `IRepository<TEntity, TKey>` と各エンティティのインターフェイス（`ICustomerRepository` など）。QuickER 版 Repository と EF Core 版 Repository が同じ契約を実装する |
+| QuickER 版 Repository 実装 | 方言別（SQL Server / SQLite）の軽量実装＋ DI 登録拡張 |
+| EF Core 版 Repository | `QuickErDbContext`（Fluent 構成込み）＋ EF Core 版 Repository ＋ DI 登録拡張 |
 | ランタイム | 上記が使う固定コード（既定でインライン出力。パッケージ参照モードあり） |
 
 Entity には既定で DataAnnotations と **DB 定義メタ属性**（`[DbTableMeta]` / `[DbColumnMeta]`）が付き、方言中立の型トークン（`string(50)` / `decimal(10,2)` など）と説明が刻まれます。生成コードは DB 定義の自己記述ドキュメントとしても機能します。
 
 > **前提**: Repository の生成は単一主キー・アプリ側採番が対象です（複合キー・DB 自動採番のテーブルは Entity / EditModel のみ利用できます）。
 
-## Repository (QuickER)
+## QuickER 版 Repository
 
 依存最小（ADO のみ）の軽量 Repository です。対象方言は SQL Server（`FOR JSON` ベース）と SQLite（プレーン SELECT ＋ マルチクエリ）。
 
@@ -137,7 +137,7 @@ context が提供する操作（生ハンドルは公開しません）:
 
 | 実装先 | フック発火 | context の対応 |
 |---|---|---|
-| Repository (QuickER)（SQL Server / SQLite） | 完全対応（After は各操作の直後） | `WriteBinaryColumnAsync` / `ExecuteSqlAsync` とも対応 |
+| QuickER 版 Repository（SQL Server / SQLite） | 完全対応（After は各操作の直後） | `WriteBinaryColumnAsync` / `ExecuteSqlAsync` とも対応 |
 | EF Core（`GenerateEfCore`） | 対応（After は `SaveChanges` 後に一括） | `ExecuteSqlAsync` は対応・`WriteBinaryColumnAsync` は `NotSupportedException` |
 | インメモリ（`GenerateInMemoryRepositories`） | 対応（擬似トランザクション） | `WriteBinaryColumnAsync` はストアへ・`ExecuteSqlAsync` は `NotSupportedException`。実トランザクションがないため**After が例外を投げてもストアの変更は残ります**（ベストエフォート） |
 | リモート（`--remote-services`） | **サーバー側の DI に登録したフックが発火**します | サーバー側の実体実装に準じます。**既知の制限**: Before でサーバーがスキップした行でも、クライアント側の `RowState` はスキップを反映せず `Unchanged` に確定します |
@@ -162,7 +162,7 @@ var affected = await customers.ExecuteSqlAsync("UPDATE customers SET balance = 0
 
 ### store-generated 列（rowversion / timestamp）
 
-DB が値を生成する列（SQL Server の `rowversion` / `timestamp` など）は、生成 Entity のプロパティにマーカー属性 `[StoreGeneratedColumn]` が付与され、Repository (QuickER) の **INSERT / BulkInsert / UPDATE の対象から自動的に除外**されます（付与は生成オプションに依らず、DB が値を生成する列であれば常に行われます）。
+DB が値を生成する列（SQL Server の `rowversion` / `timestamp` など）は、生成 Entity のプロパティにマーカー属性 `[StoreGeneratedColumn]` が付与され、QuickER 版 Repository の **INSERT / BulkInsert / UPDATE の対象から自動的に除外**されます（付与は生成オプションに依らず、DB が値を生成する列であれば常に行われます）。
 
 - **書き込みでは触れない**: これらの列には DB が値を採番するため、Repository は明示的な値を書き込みません。明示挿入を試みると SQL Server は `Cannot insert an explicit value into a timestamp column.` を返しますが、除外によりこの実行時エラーを回避します。
 - **SELECT では取得する**: `GetByIdAsync` / `GetAllAsync` / `Query()` の結果に含まれ、値を読めます（並行性トークンとして参照できます）。
@@ -171,7 +171,7 @@ DB が値を生成する列（SQL Server の `rowversion` / `timestamp` など�
 
 ### 無制限バイナリ列の除外（ExcludeUnboundedBinaryColumns）
 
-巨大な BLOB を一覧取得・更新のたびに往復させない（メモリを保護する）ためのオプションです（既定 OFF。CLI `--exclude-unbounded-binary` / GUI「無制限バイナリ列を取得しない」チェックボックス / quicker.json の `ExcludeUnboundedBinaryColumns`）。ON にすると、**サイズ上限のないバイナリ列**の Entity プロパティへマーカー属性 `[UnboundedBinaryColumn]` が付与され、Repository (QuickER) の SELECT / UPDATE から当該列が除外されます。生成時には除外した列の一覧が Info 診断（CLI 出力・GUI の生成結果ダイアログ）で通知されます。
+巨大な BLOB を一覧取得・更新のたびに往復させない（メモリを保護する）ためのオプションです（既定 OFF。CLI `--exclude-unbounded-binary` / GUI「無制限バイナリ列を取得しない」チェックボックス / quicker.json の `ExcludeUnboundedBinaryColumns`）。ON にすると、**サイズ上限のないバイナリ列**の Entity プロパティへマーカー属性 `[UnboundedBinaryColumn]` が付与され、QuickER 版 Repository の SELECT / UPDATE から当該列が除外されます。生成時には除外した列の一覧が Info 診断（CLI 出力・GUI の生成結果ダイアログ）で通知されます。
 
 判定は列の宣言型で行います（`rowversion` や `binary(n)` / `varbinary(n)` など長さ宣言のある型は対象外）:
 
@@ -190,7 +190,7 @@ DB が値を生成する列（SQL Server の `rowversion` / `timestamp` など�
 - **INSERT / BulkInsert は全列のまま**: 初回書き込みは通常どおり値を渡せる
 - **名前付きクエリの射影**が除外列を参照する場合は取得される（射影は明示的な列選択のため）
 - **生 SQL** で明示的に SELECT すれば取得できる（下記の運用例）
-- **EF Core モード（`DbSet` 経由のクエリ / `SaveChanges`）には適用されない**（EF の列選択は EF の責務）
+- **EF Core モード（`DbSet` 経由のクエリ / `SaveChanges`）には適用されない**（EF Core の列選択は EF Core の責務）
 - インメモリ Repository（`GenerateInMemoryRepositories`）は実 DB とパリティ（同じ除外挙動）
 
 除外列の読み書きは生 SQL で行います:
@@ -224,11 +224,11 @@ var doc = await documents
 - **`Include` とは併用できません**（終端メソッド実行時に `InvalidOperationException`）。無制限バイナリ列が必要な場合は `Include` なしの別クエリで取得してください。これは SQL Server の `Include` 経路が FOR JSON＝Base64 経由で巨大 BLOB のメモリ膨張（ピーク 5〜6 倍）を招くためで、「巨大 BLOB を扱う」目的に常に正しいメモリ特性を保証します（SQL Server では FOR JSON を使わず**プレーン SELECT** で取得します）。
 - 効果があるのは `ToListAsync` / `FirstOrDefaultAsync` のみです（件数・存在確認・射影 `ToProjectionListAsync` には影響しません）。
 - 取得したエンティティは正当なエンティティですが、除外列が UPDATE 対象外である点は変わりません。そのまま `UpdateAsync` すると既存ガードで例外になります（除外列の更新は上記の生 SQL `ExecuteSqlAsync` で行ってください）。
-- EF Core モードでは EF が元々全列を読むため no-op です（`Include` 併用エラーだけはパリティで同様に送出します）。
+- EF Core モードでは EF Core が元々全列を読むため no-op です（`Include` 併用エラーだけはパリティで同様に送出します）。
 
 #### Stream アクセサ `Read/Write{Column}Async`
 
-除外オプションを有効（かつ Repository (QuickER) を生成）にすると、除外列ごとに **ストリーミング**の読み書きメソッドが追加生成されます（挿入先はリモート契約の有無で変わります。後述）。`byte[]` の一括読み込みを避け、**O(チャンク)＝blob 全量をメモリに載せずに** DB⇔ストリーム（またはファイル）を転送できます。GB 級のバイナリを扱う唯一正しいメモリ特性を持つ手段です。
+除外オプションを有効（かつ QuickER 版 Repository を生成）にすると、除外列ごとに **ストリーミング**の読み書きメソッドが追加生成されます（挿入先はリモート契約の有無で変わります。後述）。`byte[]` の一括読み込みを避け、**O(チャンク)＝blob 全量をメモリに載せずに** DB⇔ストリーム（またはファイル）を転送できます。GB 級のバイナリを扱う唯一正しいメモリ特性を持つ手段です。
 
 ```csharp
 // documents.payload（除外列）に対して生成される例
@@ -246,7 +246,7 @@ Task<bool> WritePayloadFromFileAsync(int id, string path, CancellationToken ct =
 - **長さ**: `source` が `CanSeek` なら自動（`Length - Position`）、そうでなければ `length` 引数が必須です（欠落は `ArgumentException`）。SQLite の `zeroblob` が書き込み前に長さを要求するためで、契約は方言中立に統一しています。
 - **楽観排他（rowversion 等）はスコープ外**です（生 SQL と同格の直接列操作）。
 - **INSERT 専用メソッドはありません**。新規行は「INSERT（blob は `null` または空）→ `Write{Column}Async` で本体を流し込む」の 2 段で書きます。
-- **EF Core モードでは使用できません**（`NotSupportedException`）。EF は方言非依存設計のため方言固有のストリーミングを持てません。Repository (QuickER) を使うか、`partial` クラスで実装してください（`GenerateEfCore` と Repository (QuickER) を併用する構成では、EF 版実装のみ例外になります）。
+- **EF Core モードでは使用できません**（`NotSupportedException`）。EF Core は方言非依存設計のため方言固有のストリーミングを持てません。QuickER 版 Repository を使うか、`partial` クラスで実装してください（`GenerateEfCore` と QuickER 版 Repository を併用する構成では、EF Core 版実装のみ例外になります）。
 - **挿入先**: リモート契約（`--remote-contracts` / `--remote-services`）が無効なら全機能面 `I{Entity}Repository` に直接載ります。有効な場合はリモート面 `I{Entity}RemoteRepository` へ移設されます（全機能面はリモート面を継承するので、どちらの構成でも利用コードは同じ・純粋に追加的）。ファイル糖衣もその対象インターフェイスに合わせます。リモートサービス（`--remote-services`）を有効にすると HTTP で転送できます（後述の「バイナリ転送エンドポイント」）。
 
 `WithUnboundedBinary()` との使い分け:
@@ -258,21 +258,21 @@ Task<bool> WritePayloadFromFileAsync(int id, string path, CancellationToken ct =
 | 用途 | 除外列込みのエンティティが一時的に欲しい | 巨大 blob を DB⇔ファイル/ストリームで転送 |
 | 書き込み | 不可（取得のみ・更新は生 SQL） | `Write{Column}Async` で列単位に書ける |
 
-## EF Core（GenerateEfCore）
+## EF Core モード（GenerateEfCore）
 
-既存 Entity をそのまま EF に載せる方言非依存の `QuickErDbContext` と、**同一 Repository インターフェイスの EF 実装**を生成します。マイグレーションは範囲外で、スキーマ作成は DDL 生成の責務です（EF は既存スキーマへの接続専用）。
+既存 Entity をそのまま EF Core に載せる方言非依存の `QuickErDbContext` と、**同一 Repository インターフェイスの EF Core 版実装**を生成します。マイグレーションは範囲外で、スキーマ作成は DDL 生成の責務です（EF Core は既存スキーマへの接続専用）。
 
 ```csharp
-// DI 登録 1 行の差し替えで Repository (QuickER) と交換できる
+// DI 登録 1 行の差し替えで QuickER 版 Repository と交換できる
 services.AddGeneratedEfCoreRepositories(options => options.UseSqlServer(connectionString));
 // SQLite / PostgreSQL / MySQL / Oracle は対応する EF Core プロバイダの Use* を指定する
 ```
 
-- 保存は `TrackGraph` による切断グラフ保存（`RowState` を EF の状態へ変換）
-- 楽観排他の競合は EF の例外を `SaveConflictException` へ変換（契約を統一）
+- 保存は `TrackGraph` による切断グラフ保存（`RowState` を EF Core の状態へ変換）
+- 楽観排他の競合は EF Core の例外を `SaveConflictException` へ変換（契約を統一）
 - 生 SQL 系 API も完全パリティ
 
-**Repository (QuickER) との併用生成**（両方 ON）はパリティ検証用で、CLI / 設定ファイルでのみ指定できます。GUI は排他選択です。また EF Core とマルチターゲット Repository（下記）は併用できません（診断エラー）。
+**QuickER 版 Repository との併用生成**（両方 ON）はパリティ検証用で、CLI / 設定ファイルでのみ指定できます。GUI は排他選択です。また EF Core とマルチターゲット Repository（下記）は併用できません（診断エラー）。
 
 ## マルチターゲット Repository（sqlserver + sqlite）
 
@@ -330,7 +330,7 @@ public sealed class OrderMaintenance(IOrderRepository orders)
 ```csharp
 // ---- サーバー（ASP.NET Core・Microsoft.NET.Sdk.Web）----
 var builder = WebApplication.CreateBuilder(args);
-builder.Services.AddGeneratedRepositories(connectionString);   // 実体は Repository (QuickER) でも EF Core でもよい
+builder.Services.AddGeneratedRepositories(connectionString);   // 実体は QuickER 版 Repository でも EF Core でもよい
 
 var app = builder.Build();
 app.MapGeneratedRemoteEndpoints();          // 認可を付けるなら .RequireAuthorization() を続ける
@@ -382,13 +382,13 @@ DB なしでユニットテストするためのインメモリ実装を追加�
 | `QuickER.Runtime` | 共通基盤・方言中立の契約 | なし |
 | `QuickER.Runtime.SqlServer` | QuickER の SQL Server 方言エンジン | Microsoft.Data.SqlClient |
 | `QuickER.Runtime.Sqlite` | QuickER の SQLite 方言エンジン | Microsoft.Data.Sqlite |
-| `QuickER.Runtime.EntityFrameworkCore` | EF 共通部品 | Microsoft.EntityFrameworkCore.Relational |
+| `QuickER.Runtime.EntityFrameworkCore` | EF Core 共通部品 | Microsoft.EntityFrameworkCore.Relational |
 
 パッケージ版とツール版はロックステップ（同一バージョン）で公開され、同一メジャー内で互換です。DI 登録拡張・`QuickErDbContext`・エンティティ別実装などのスキーマ依存物は、本モードでも常に生成側に出力されます。
 
 ## API リファレンス（.g.md）
 
-生成コードと同名ベースの API リファレンス Markdown を追加出力できます。GUI の生成ダイアログの「API リファレンス (.g.md) を出力する」チェック、または CLI の `--api-docs` フラグで有効化します（**既定 OFF**）。DB アクセスの選択（なし / Repository (QuickER) / EF Core）とは独立して、常に選択できます。
+生成コードと同名ベースの API リファレンス Markdown を追加出力できます。GUI の生成ダイアログの「API リファレンス (.g.md) を出力する」チェック、または CLI の `--api-docs` フラグで有効化します（**既定 OFF**）。DB アクセスの選択（なし / QuickER 版 Repository / EF Core）とは独立して、常に選択できます。
 
 有効化すると、`.g.cs` と同じベース名の `.g.md` が 1 つ出力されます（例: `EcOrder.g.cs` → `EcOrder.g.md`）。内容は次のとおりです。
 

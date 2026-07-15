@@ -17,7 +17,7 @@ namespace QuickER.Tests.Generator;
 /// <remarks>
 /// <para>
 /// ランタイム側は <see cref="RuntimePackageSourceRenderer"/> の出力（Core / SqlServer / Sqlite / EfCore）を
-/// in-memory アセンブリへ順にコンパイル（Core → 方言/EF の参照順）して <see cref="MetadataReference"/> 化し、
+/// in-memory アセンブリへ順にコンパイル（Core → 方言/EF Core の参照順）して <see cref="MetadataReference"/> 化し、
 /// 生成コードのコンパイルへ「案内が指示するパッケージだけ」を渡す。これにより案内の十分性（不足なくコンパイル可能）と
 /// 依存最小性（余計なパッケージなしで成立）を同時に証明する。
 /// </para>
@@ -95,7 +95,7 @@ public class RuntimePackageModeCompilationTests
             );
     }
 
-    /// <summary>Entity のみ（Repository/EF なし）は Core だけで成立し、参照集合に ADO/EF が含まれない</summary>
+    /// <summary>Entity のみ（Repository/EF Core なし）は Core だけで成立し、参照集合に ADO/EF Core が含まれない</summary>
     [Fact]
     public void EntityOnly_GuidanceIsCoreOnly_NoAdoOrEf()
     {
@@ -143,14 +143,14 @@ public class RuntimePackageModeCompilationTests
         var allContent = string.Join(Environment.NewLine, result.Files.Select(f => f.Content));
         allContent.Should().NotContain("Microsoft.Data.SqlClient");
 
-        // 案内は Core＋Sqlite のみ（SqlServer / EF を含まない）
+        // 案内は Core＋Sqlite のみ（SqlServer / EF Core を含まない）
         RuntimePackageReferenceGuidance
             .Compute(options)
             .Should()
             .Equal(RuntimePackages.Core, RuntimePackages.Sqlite);
     }
 
-    /// <summary>マルチターゲット（sqlserver+sqlite）の案内は Core＋両方言（EF なし）になる</summary>
+    /// <summary>マルチターゲット（sqlserver+sqlite）の案内は Core＋両方言（EF Core なし）になる</summary>
     [Fact]
     public void MultiTarget_Guidance_IsCoreAndBothDialects()
     {
@@ -168,7 +168,7 @@ public class RuntimePackageModeCompilationTests
             .Equal(RuntimePackages.Core, RuntimePackages.SqlServer, RuntimePackages.Sqlite);
     }
 
-    /// <summary>EF 単独×パッケージの案内は Core＋EF のみ（ADO を含まない）になる</summary>
+    /// <summary>EF Core 単独×パッケージの案内は Core＋EF Core のみ（ADO を含まない）になる</summary>
     [Fact]
     public void EfCoreOnly_Guidance_IsCoreAndEfCore_NoAdo()
     {
@@ -187,7 +187,7 @@ public class RuntimePackageModeCompilationTests
             .Equal(RuntimePackages.Core, RuntimePackages.EntityFrameworkCore);
     }
 
-    /// <summary>QuickER sqlserver＋EF 併存×パッケージの案内は Core＋SqlServer＋EF になる</summary>
+    /// <summary>QuickER sqlserver＋EF Core 併存×パッケージの案内は Core＋SqlServer＋EF Core になる</summary>
     [Fact]
     public void RepositoryPlusEfCore_Guidance_IsCoreSqlServerAndEfCore()
     {
@@ -276,7 +276,7 @@ public class RuntimePackageModeCompilationTests
                 }
             );
             data.Add(
-                $"EF 単独 Split={split}",
+                $"EF Core 単独 Split={split}",
                 new CodeGenerationOptions
                 {
                     NamespaceName = "Sample.Domain",
@@ -286,7 +286,7 @@ public class RuntimePackageModeCompilationTests
                 }
             );
             data.Add(
-                $"QuickER sqlserver＋EF 併存 Split={split}",
+                $"QuickER sqlserver＋EF Core 併存 Split={split}",
                 new CodeGenerationOptions
                 {
                     NamespaceName = "Sample.Domain",
@@ -316,7 +316,7 @@ public class RuntimePackageModeCompilationTests
             }
         );
         data.Add(
-            "remote QuickER sqlite＋EF 併存",
+            "remote QuickER sqlite＋EF Core 併存",
             new CodeGenerationOptions
             {
                 NamespaceName = "Sample.Domain",
@@ -495,7 +495,7 @@ public class RuntimePackageModeCompilationTests
     /// 案内パッケージ集合を、実際の in-memory アセンブリ参照へ変換する。
     /// </summary>
     /// <remarks>
-    /// Core を先にコンパイルし、方言/EF は Core アセンブリを参照してコンパイルする（参照順を守る）。
+    /// Core を先にコンパイルし、方言/EF Core は Core アセンブリを参照してコンパイルする（参照順を守る）。
     /// 各パッケージのコンパイルは、そのパッケージが正当に必要とする外部依存だけを許して行い（依存最小性の担保）、
     /// 生成コードのコンパイルには「案内された各パッケージ＋その参照」を渡す。
     /// </remarks>
@@ -554,10 +554,10 @@ public class RuntimePackageModeCompilationTests
     /// パッケージソースを 1 アセンブリへコンパイルし、PE イメージ（バイト列）を返す。
     /// </summary>
     /// <remarks>
-    /// 方言/EF パッケージは Core の型（EntityBase・IRepository 等）を参照するため、Core の PE イメージを
+    /// 方言/EF Core パッケージは Core の型（EntityBase・IRepository 等）を参照するため、Core の PE イメージを
     /// メタデータ参照として渡す。ソースにも Core を含めているのは、Core を単独アセンブリにするための便宜
-    /// （Core アセンブリを渡す構成では方言/EF ソースだけを渡すと二重定義になるため、方言/EF は Core を参照に持ち
-    /// 方言/EF ソースのみをコンパイルする）。
+    /// （Core アセンブリを渡す構成では方言/EF Core ソースだけを渡すと二重定義になるため、方言/EF Core は Core を参照に持ち
+    /// 方言/EF Core ソースのみをコンパイルする）。
     /// </remarks>
     private static byte[] CompilePackageAssembly(
         string assemblyName,
@@ -566,7 +566,7 @@ public class RuntimePackageModeCompilationTests
         byte[]? corePeImage
     )
     {
-        // Core アセンブリを参照する構成では、方言/EF ソースだけをコンパイルする（Core は参照から解決）。
+        // Core アセンブリを参照する構成では、方言/EF Core ソースだけをコンパイルする（Core は参照から解決）。
         var sources = corePeImage is null ? allSources : allSources.Skip(1).ToArray();
 
         var references = referenceSet.Build();
@@ -613,12 +613,12 @@ public class RuntimePackageModeCompilationTests
         return peStream.ToArray();
     }
 
-    /// <summary>生成コードを「案内されたパッケージ参照＋BCL＋DI（＋EF 生成時のみ EF Core）」だけでコンパイルする</summary>
+    /// <summary>生成コードを「案内されたパッケージ参照＋BCL＋DI（＋EF Core 生成時のみ EF Core）」だけでコンパイルする</summary>
     /// <remarks>
     /// 生成コードが直接使うのは BCL＋DI（登録拡張）＋案内パッケージ。方言 ADO（SqlClient / Sqlite）はパッケージ側だけが
-    /// 参照するため含めない。ただし EF 生成時は、生成側の QuickErDbContext（<c>: DbContext</c>）や
+    /// 参照するため含めない。ただし EF Core 生成時は、生成側の QuickErDbContext（<c>: DbContext</c>）や
     /// AddGeneratedEfCoreRepositories（<c>DbContextOptionsBuilder</c> / <c>AddDbContextFactory</c>）が EF Core の型を
-    /// 直接参照するため、EF パッケージが案内に含まれるときは EF Core 参照も生成コードのコンパイルへ渡す。
+    /// 直接参照するため、EF Core パッケージが案内に含まれるときは EF Core 参照も生成コードのコンパイルへ渡す。
     /// </remarks>
     private static GeneratedCompileResult CompileGenerated(
         CodeGenerationResult result,
@@ -704,7 +704,7 @@ internal sealed class RuntimeReferenceSet
         _di = di;
     }
 
-    /// <summary>Core パッケージ: BCL のみ（ADO / EF / DI なし）</summary>
+    /// <summary>Core パッケージ: BCL のみ（ADO / EF Core / DI なし）</summary>
     public static RuntimeReferenceSet CoreOnly { get; } = new(false, false, false, false);
 
     /// <summary>SqlServer パッケージ: BCL＋SqlClient＋DI</summary>
@@ -716,10 +716,10 @@ internal sealed class RuntimeReferenceSet
     /// <summary>EfCore パッケージ: BCL＋EF Core＋DI</summary>
     public static RuntimeReferenceSet EfCore { get; } = new(false, false, true, true);
 
-    /// <summary>生成コード: BCL＋DI（登録拡張）のみ。方言 ADO / EF はパッケージ側だけが参照する</summary>
+    /// <summary>生成コード: BCL＋DI（登録拡張）のみ。方言 ADO / EF Core はパッケージ側だけが参照する</summary>
     public static RuntimeReferenceSet GeneratedCode { get; } = new(false, false, false, true);
 
-    /// <summary>生成コード（EF 生成時）: BCL＋DI＋EF Core。生成側の QuickErDbContext / DI 拡張が EF Core 型を直接参照する</summary>
+    /// <summary>生成コード（EF Core 生成時）: BCL＋DI＋EF Core。生成側の QuickErDbContext / DI 拡張が EF Core 型を直接参照する</summary>
     public static RuntimeReferenceSet GeneratedCodeWithEfCore { get; } =
         new(false, false, true, true);
 

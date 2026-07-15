@@ -39,7 +39,7 @@ public class CSharpGenerationDialogViewModelTests
         vm.Result!.Options.NamespaceName.Should().Be("Sample.Domain");
         vm.Result.Options.SplitFilesByCategory.Should().BeFalse();
         vm.Result.OutputDirectory.Should().Be(@"C:\temp");
-        // DB アクセスの既定は「なし」（Repository (QuickER) も EF Core も生成しない）
+        // DB アクセスの既定は「なし」（QuickER 版 Repository も EF Core も生成しない）
         vm.Result.Options.GenerateRepositories.Should().BeFalse();
         vm.Result.Options.GenerateEfCore.Should().BeFalse();
         closed.Should().BeTrue();
@@ -93,9 +93,9 @@ public class CSharpGenerationDialogViewModelTests
         }
     }
 
-    /// <summary>未対応方言のプロバイダでもRepository (QuickER) ラジオは常時選択可であり、対象 DB チェックは両方 OFF から始まることを検証する</summary>
+    /// <summary>未対応方言のプロバイダでもQuickER 版 Repository ラジオは常時選択可であり、対象 DB チェックは両方 OFF から始まることを検証する</summary>
     [Theory(
-        DisplayName = "未対応方言でもRepository (QuickER) ラジオは選択可・対象 DB チェックは両方 OFF から始まる"
+        DisplayName = "未対応方言でもQuickER 版 Repository ラジオは選択可・対象 DB チェックは両方 OFF から始まる"
     )]
     [InlineData(typeof(QuickER.PostgreSql.PostgreSqlProvider))]
     [InlineData(typeof(QuickER.MySql.MySqlProvider))]
@@ -157,7 +157,7 @@ public class CSharpGenerationDialogViewModelTests
         vm.Result!.Options.RepositoryDialects.Should().Equal("sqlserver", "sqlite");
     }
 
-    /// <summary>対象 DB を 1 つもチェックしないままRepository (QuickER) を確定しようとすると拒否されることを検証する</summary>
+    /// <summary>対象 DB を 1 つもチェックしないままQuickER 版 Repository を確定しようとすると拒否されることを検証する</summary>
     [Fact(DisplayName = "対象 DB 0 個では確定できない")]
     public void Ok_Repository_WithNoTargetDialects_ShowsError()
     {
@@ -175,8 +175,8 @@ public class CSharpGenerationDialogViewModelTests
         vm.StatusMessage.Should().Be(CodeGenStrings.CodeGen_Status_TargetDbRequired);
     }
 
-    /// <summary>対象 DB チェック群は Repository (QuickER) 選択時のみ表示されることを検証する</summary>
-    [Fact(DisplayName = "対象 DB チェック群は Repository (QuickER) 選択時のみ表示される")]
+    /// <summary>対象 DB チェック群は QuickER 版 Repository 選択時のみ表示されることを検証する</summary>
+    [Fact(DisplayName = "対象 DB チェック群は QuickER 版 Repository 選択時のみ表示される")]
     public void ShowRepositoryDialectTargets_TracksRepositorySelection()
     {
         var vm = CreateViewModel(out _);
@@ -278,10 +278,10 @@ public class CSharpGenerationDialogViewModelTests
     }
 
     /// <summary>
-    /// Repository (QuickER) 選択（EF Core ではない）ではパッケージ参照モードが操作可能で、
+    /// QuickER 版 Repository 選択（EF Core ではない）ではパッケージ参照モードが操作可能で、
     /// チェックした場合に結果オプションへ反映されることを検証する
     /// </summary>
-    [Fact(DisplayName = "Repository (QuickER) 選択ではパッケージ参照モードが結果へ反映される")]
+    [Fact(DisplayName = "QuickER 版 Repository 選択ではパッケージ参照モードが結果へ反映される")]
     public void UseRuntimePackages_IsReflectedInResult_WhenRepositorySelected()
     {
         var vm = CreateViewModel(out _, currentProvider: new QuickER.SqlServer.SqlServerProvider());
@@ -299,7 +299,7 @@ public class CSharpGenerationDialogViewModelTests
         vm.Result.Options.GenerateRepositories.Should().BeTrue();
     }
 
-    /// <summary>DB アクセス選択（なし／Repository (QuickER)／EF Core）に依らず、パッケージ参照モードは常に操作可能なことを検証する</summary>
+    /// <summary>DB アクセス選択（なし／QuickER 版 Repository／EF Core）に依らず、パッケージ参照モードは常に操作可能なことを検証する</summary>
     [Fact(DisplayName = "パッケージ参照モードは DB アクセス選択に依らず常に操作可能")]
     public void UseRuntimePackages_IsAlwaysEnabled_AcrossDbAccessChoices()
     {
@@ -401,10 +401,10 @@ public class CSharpGenerationDialogViewModelTests
     }
 
     /// <summary>
-    /// 無制限バイナリ列の除外行の表示フラグはRepository (QuickER) 生成に追従し、「なし」/ EF Core では非表示・
-    /// Repository (QuickER) 選択時のみ表示になることを検証する
+    /// 無制限バイナリ列の除外行の表示フラグはQuickER 版 Repository 生成に追従し、「なし」/ EF Core では非表示・
+    /// QuickER 版 Repository 選択時のみ表示になることを検証する
     /// </summary>
-    [Fact(DisplayName = "無制限バイナリ列の除外行はRepository (QuickER) 選択時のみ表示")]
+    [Fact(DisplayName = "無制限バイナリ列の除外行はQuickER 版 Repository 選択時のみ表示")]
     public void ShowExcludeUnboundedBinary_TracksRepositorySelection()
     {
         var vm = CreateViewModel(out _, currentProvider: new QuickER.SqlServer.SqlServerProvider());
@@ -413,11 +413,11 @@ public class CSharpGenerationDialogViewModelTests
         vm.ShowExcludeUnboundedBinary.Should().BeFalse("既定は DB アクセス「なし」のため非表示");
 
         vm.DbAccessRepository = true;
-        vm.ShowExcludeUnboundedBinary.Should().BeTrue("Repository (QuickER) 選択で表示");
+        vm.ShowExcludeUnboundedBinary.Should().BeTrue("QuickER 版 Repository 選択で表示");
 
         vm.DbAccessEfCore = true;
         vm.ShowExcludeUnboundedBinary.Should()
-            .BeFalse("EF Core 選択では非表示（Repository (QuickER) 専用）");
+            .BeFalse("EF Core 選択では非表示（QuickER 版 Repository 専用）");
 
         vm.DbAccessNone = true;
         vm.ShowExcludeUnboundedBinary.Should().BeFalse("DB アクセス「なし」でも非表示");
@@ -479,7 +479,7 @@ public class CSharpGenerationDialogViewModelTests
 
     /// <summary>
     /// リモート対応行の表示フラグは DB アクセス選択に連動し、「なし」では非表示・
-    /// Repository (QuickER) / EF Core 選択で表示になることを検証する
+    /// QuickER 版 Repository / EF Core 選択で表示になることを検証する
     /// </summary>
     [Fact(DisplayName = "リモート対応行は DB アクセス「なし」で非表示・Repository/EF Core で表示")]
     public void ShowRemoteContracts_TracksDbAccessSelection()
@@ -490,7 +490,7 @@ public class CSharpGenerationDialogViewModelTests
         vm.ShowRemoteContracts.Should().BeFalse("既定は DB アクセス「なし」のため非表示");
 
         vm.DbAccessRepository = true;
-        vm.ShowRemoteContracts.Should().BeTrue("Repository (QuickER) 選択で表示");
+        vm.ShowRemoteContracts.Should().BeTrue("QuickER 版 Repository 選択で表示");
 
         vm.DbAccessEfCore = true;
         vm.ShowRemoteContracts.Should().BeTrue("EF Core 選択でも表示");

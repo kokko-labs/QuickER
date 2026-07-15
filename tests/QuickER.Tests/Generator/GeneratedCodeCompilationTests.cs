@@ -36,7 +36,7 @@ public class GeneratedCodeCompilationTests
         return data;
     }
 
-    /// <summary>マトリクスケース: EF Core＋Repository (QuickER) の両方生成（パリティ構成）× Split{off,on} × VO{off,on} の 4 ケース</summary>
+    /// <summary>マトリクスケース: EF Core＋QuickER 版 Repository の両方生成（パリティ構成）× Split{off,on} × VO{off,on} の 4 ケース</summary>
     public static TheoryData<string, CodeGenerationOptions> EfCoreMatrixCases()
     {
         var data = new TheoryData<string, CodeGenerationOptions>();
@@ -55,9 +55,9 @@ public class GeneratedCodeCompilationTests
             );
         }
 
-        // Repository (QuickER) + EF Core 併用で無制限バイナリ列除外を ON（属性定義・付与が両バケット併存でも成立すること）
+        // QuickER 版 Repository + EF Core 併用で無制限バイナリ列除外を ON（属性定義・付与が両バケット併存でも成立すること）
         data.Add(
-            "EfCore + Repository (QuickER) + ExcludeUnboundedBinaryColumns",
+            "EfCore + QuickER 版 Repository + ExcludeUnboundedBinaryColumns",
             new CodeGenerationOptions
             {
                 NamespaceName = "Sample.Domain",
@@ -69,7 +69,7 @@ public class GeneratedCodeCompilationTests
         return data;
     }
 
-    /// <summary>マトリクスケース: EF 単独出力（QuickER の SQL Server 実装なし）× Split{off,on} × VO{off,on} の 4 ケース</summary>
+    /// <summary>マトリクスケース: EF Core 単独出力（QuickER の SQL Server 実装なし）× Split{off,on} × VO{off,on} の 4 ケース</summary>
     public static TheoryData<string, CodeGenerationOptions> EfCoreOnlyMatrixCases()
     {
         var data = new TheoryData<string, CodeGenerationOptions>();
@@ -137,7 +137,7 @@ public class GeneratedCodeCompilationTests
         return data;
     }
 
-    /// <summary>マトリクスケース: SQLite 方言のRepository (QuickER)（Split{off,on} × VO{off,on} の 4 ケース）</summary>
+    /// <summary>マトリクスケース: SQLite 方言のQuickER 版 Repository（Split{off,on} × VO{off,on} の 4 ケース）</summary>
     public static TheoryData<string, CodeGenerationOptions> SqliteRepositoryMatrixCases()
     {
         var data = new TheoryData<string, CodeGenerationOptions>();
@@ -156,7 +156,7 @@ public class GeneratedCodeCompilationTests
             );
         }
 
-        // EF Core と SQLite Repository (QuickER) の併存（パリティ検証相当の構成）でも生成が通ることを確認する
+        // EF Core と SQLite QuickER 版 Repository の併存（パリティ検証相当の構成）でも生成が通ることを確認する
         data.Add(
             "SQLite Repository + EF Core",
             new CodeGenerationOptions
@@ -169,7 +169,7 @@ public class GeneratedCodeCompilationTests
         return data;
     }
 
-    /// <summary>マトリクスケース: インメモリ Repository（Split{off,on} × VO{off,on} の 4 ケース）＋ EF・QuickER sqlserver 併存</summary>
+    /// <summary>マトリクスケース: インメモリ Repository（Split{off,on} × VO{off,on} の 4 ケース）＋ EF Core・QuickER sqlserver 併存</summary>
     public static TheoryData<string, CodeGenerationOptions> InMemoryRepositoryMatrixCases()
     {
         var data = new TheoryData<string, CodeGenerationOptions>();
@@ -248,9 +248,9 @@ public class GeneratedCodeCompilationTests
             );
         }
 
-        // EF 単独（ローカル面・両面 DI が EF 実装だけでも成立すること）
+        // EF Core 単独（ローカル面・両面 DI が EF Core 版 Repository だけでも成立すること）
         data.Add(
-            "remote EF 単独",
+            "remote EF Core 単独",
             new CodeGenerationOptions
             {
                 NamespaceName = "Sample.Domain",
@@ -260,7 +260,7 @@ public class GeneratedCodeCompilationTests
             }
         );
 
-        // SQLite QuickER＋EF 併存（パリティ構成）
+        // SQLite QuickER＋EF Core 併存（パリティ構成）
         data.Add(
             "remote SQLite + EF Core",
             new CodeGenerationOptions
@@ -366,7 +366,7 @@ public class GeneratedCodeCompilationTests
         CodeGenerationOptions options
     ) => AssertCompiles(caseName, options);
 
-    /// <summary>EF Core＋Repository (QuickER)（Split × VO の 4 ケース）で、生成コードがエラー・警告なしでコンパイルできることを検証する</summary>
+    /// <summary>EF Core＋QuickER 版 Repository（Split × VO の 4 ケース）で、生成コードがエラー・警告なしでコンパイルできることを検証する</summary>
     [Theory]
     [MemberData(nameof(EfCoreMatrixCases))]
     public void Generate_EfCoreMatrix_ShouldProduceCompilableCode(
@@ -374,7 +374,7 @@ public class GeneratedCodeCompilationTests
         CodeGenerationOptions options
     ) => AssertCompiles(caseName, options);
 
-    /// <summary>EF 単独出力（Split × VO の 4 ケース）で、生成コードがエラー・警告なしでコンパイルできることを検証する</summary>
+    /// <summary>EF Core 単独出力（Split × VO の 4 ケース）で、生成コードがエラー・警告なしでコンパイルできることを検証する</summary>
     [Theory]
     [MemberData(nameof(EfCoreOnlyMatrixCases))]
     public void Generate_EfCoreOnlyMatrix_ShouldProduceCompilableCode(
@@ -382,7 +382,7 @@ public class GeneratedCodeCompilationTests
         CodeGenerationOptions options
     ) => AssertCompiles(caseName, options);
 
-    /// <summary>SQLite 方言のRepository (QuickER)（Split × VO の 4 ケース）で、生成コードがエラー・警告なしでコンパイルできることを検証する</summary>
+    /// <summary>SQLite 方言のQuickER 版 Repository（Split × VO の 4 ケース）で、生成コードがエラー・警告なしでコンパイルできることを検証する</summary>
     [Theory]
     [MemberData(nameof(SqliteRepositoryMatrixCases))]
     public void Generate_SqliteRepositoryMatrix_ShouldProduceCompilableCode(
@@ -390,7 +390,7 @@ public class GeneratedCodeCompilationTests
         CodeGenerationOptions options
     ) => AssertCompiles(caseName, options);
 
-    /// <summary>インメモリ Repository（Split × VO の 4 ケース）＋ EF・QuickER 併存で、生成コードがエラー・警告なしでコンパイルできることを検証する</summary>
+    /// <summary>インメモリ Repository（Split × VO の 4 ケース）＋ EF Core・QuickER 併存で、生成コードがエラー・警告なしでコンパイルできることを検証する</summary>
     [Theory]
     [MemberData(nameof(InMemoryRepositoryMatrixCases))]
     public void Generate_InMemoryRepositoryMatrix_ShouldProduceCompilableCode(
@@ -450,7 +450,7 @@ public class GeneratedCodeCompilationTests
             }
         );
         data.Add(
-            "remote-services EF 単独",
+            "remote-services EF Core 単独",
             new CodeGenerationOptions
             {
                 NamespaceName = "Sample.Domain",

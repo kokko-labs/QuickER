@@ -39,9 +39,9 @@ public enum PortableDialect
 /// bool は Oracle が <c>NUMBER(1)</c> 事情を持ち方言差が大きいため<b>意図的に除外</b>する。
 /// </para>
 /// <para>
-/// オプションは「Entity/EditModel/Mapper・VO 有効・<b>EF 単独出力（QuickER の SQL Server 実装なし）</b>・単一ファイル・専用 namespace」。
-/// 本フィクスチャの方言ランタイムテストは EF Core しか使わないため、GenerateRepositories=false（EF 単独）に切り替え、
-/// 新モード（EF 単独出力）の実 DB 実証を兼ねる。namespace は既存フィクスチャ（<c>QuickER.Tests.GeneratedFixture</c>）と衝突させない。
+/// オプションは「Entity/EditModel/Mapper・VO 有効・<b>EF Core 単独出力（QuickER の SQL Server 実装なし）</b>・単一ファイル・専用 namespace」。
+/// 本フィクスチャの方言ランタイムテストは EF Core しか使わないため、GenerateRepositories=false（EF Core 単独）に切り替え、
+/// 新モード（EF Core 単独出力）の実 DB 実証を兼ねる。namespace は既存フィクスチャ（<c>QuickER.Tests.GeneratedFixture</c>）と衝突させない。
 /// </para>
 /// </remarks>
 public static class PortableFixtureDefinition
@@ -52,7 +52,7 @@ public static class PortableFixtureDefinition
     /// <summary>コミット済みフィクスチャファイル名</summary>
     public const string OutputFileName = "PortableFixture.g.cs";
 
-    /// <summary>フィクスチャ生成に用いる決定的なオプション（Entity/EditModel/Mapper・VO 有効・EF 単独出力・単一ファイル）</summary>
+    /// <summary>フィクスチャ生成に用いる決定的なオプション（Entity/EditModel/Mapper・VO 有効・EF Core 単独出力・単一ファイル）</summary>
     public static CodeGenerationOptions Options { get; } =
         new()
         {
@@ -85,7 +85,7 @@ public static class PortableFixtureDefinition
     /// <remarks>
     /// 文字列は Unicode 可変長で統一する（SqlServer <c>nvarchar</c> / Oracle <c>NVARCHAR2</c>・PG/MySQL の <c>varchar</c> は
     /// 既定で Unicode）。各方言の型カタログはこれらをすべて正規型 <c>String</c> へ解析するため、DB 定義メタ属性の
-    /// 中立トークンが全方言で <c>string(50)</c> に揃い、EF 単独出力の方言可搬性（バイト一致）が保たれる。
+    /// 中立トークンが全方言で <c>string(50)</c> に揃い、EF Core 単独出力の方言可搬性（バイト一致）が保たれる。
     /// 非 Unicode の <c>varchar</c>（SqlServer/Oracle は AnsiString）を使うと方言間でトークンが割れるため用いない。
     /// </remarks>
     private static (string Int, string Varchar50, string Decimal) TypesFor(

@@ -13,7 +13,7 @@ namespace QuickER.Tests.Generator;
 /// <remarks>
 /// <para>
 /// Core は BCL のみ（Microsoft.Data.SqlClient / Microsoft.Data.Sqlite / EntityFrameworkCore を参照に含めない）で
-/// コンパイル成立＝依存ゼロを証明する。方言／EF は Core ソース＋該当依存のみで成立し、他方言の ADO や EF を参照しない。
+/// コンパイル成立＝依存ゼロを証明する。方言／EF Core は Core ソース＋該当依存のみで成立し、他方言の ADO や EF Core を参照しない。
 /// </para>
 /// <para>
 /// 参照集合は実行時の Trusted Platform Assemblies（BCL）をベースに、除外対象アセンブリ
@@ -24,7 +24,7 @@ public class RuntimePackageSourceRendererTests
 {
     private readonly RuntimePackageSourceRenderer _renderer = new();
 
-    /// <summary>Core は BCL のみ（ADO / EF / DI なし）でコンパイルでき、診断ゼロになる</summary>
+    /// <summary>Core は BCL のみ（ADO / EF Core / DI なし）でコンパイルでき、診断ゼロになる</summary>
     [Fact]
     public void RenderCore_CompilesWithFrameworkReferencesOnly()
     {
@@ -37,7 +37,7 @@ public class RuntimePackageSourceRendererTests
             .BeTrue($"Core は BCL のみで成立するはず:{Environment.NewLine}{result.Describe()}");
     }
 
-    /// <summary>SqlServer は Core＋SqlClient 参照でコンパイルでき、Sqlite / EF 参照なしで成立する</summary>
+    /// <summary>SqlServer は Core＋SqlClient 参照でコンパイルでき、Sqlite / EF Core 参照なしで成立する</summary>
     [Fact]
     public void RenderSqlServer_CompilesWithCoreAndSqlClientOnly()
     {
@@ -58,7 +58,7 @@ public class RuntimePackageSourceRendererTests
             );
     }
 
-    /// <summary>Sqlite は Core＋Microsoft.Data.Sqlite 参照でコンパイルでき、SqlClient / EF 参照なしで成立する</summary>
+    /// <summary>Sqlite は Core＋Microsoft.Data.Sqlite 参照でコンパイルでき、SqlClient / EF Core 参照なしで成立する</summary>
     [Fact]
     public void RenderSqlite_CompilesWithCoreAndSqliteOnly()
     {
@@ -100,7 +100,7 @@ public class RuntimePackageSourceRendererTests
             );
     }
 
-    /// <summary>Core ソースには方言 ADO / EF の名前空間文字列が現れない（依存排他の文字列ガード）</summary>
+    /// <summary>Core ソースには方言 ADO / EF Core の名前空間文字列が現れない（依存排他の文字列ガード）</summary>
     [Fact]
     public void RenderCore_DoesNotReferenceDialectOrEfNamespaces()
     {
@@ -111,7 +111,7 @@ public class RuntimePackageSourceRendererTests
         core.Should().NotContain("EntityFrameworkCore");
     }
 
-    /// <summary>各パッケージソースは固定名前空間で出力され、方言／EF はコア契約を using する</summary>
+    /// <summary>各パッケージソースは固定名前空間で出力され、方言／EF Core はコア契約を using する</summary>
     [Fact]
     public void RenderedSources_UseFixedNamespacesAndCoreUsing()
     {
@@ -136,7 +136,7 @@ public class RuntimePackageSourceRendererTests
     /// <remarks>
     /// BCL（TPA）から SqlClient / Sqlite / EF Core / DI のアセンブリをファイル名で除外してから、
     /// <paramref name="allowSqlClient"/> 等が true のものだけを明示的に戻す。DI（<c>Microsoft.Extensions.DependencyInjection</c>）は
-    /// EF 部品（AddGeneratedEfCoreRepositories）だけが必要とする。方言パッケージの DI 登録拡張はスキーマ依存物として
+    /// EF Core 部品（AddGeneratedEfCoreRepositories）だけが必要とする。方言パッケージの DI 登録拡張はスキーマ依存物として
     /// 生成側に出力される（パッケージ書き出しでは抑止）ため、方言許可では DI を戻さない＝DI 非依存をコンパイルで証明する。
     /// </remarks>
     private static CompileResult Compile(
@@ -236,7 +236,7 @@ public class RuntimePackageSourceRendererTests
             }
         }
 
-        // DI（登録拡張）を必要とするのは EF 部品（AddGeneratedEfCoreRepositories）だけ。
+        // DI（登録拡張）を必要とするのは EF Core 部品（AddGeneratedEfCoreRepositories）だけ。
         // 方言パッケージは DI 非依存（DI 登録拡張はスキーマ依存物として生成側に出力される）のため戻さない。
         if (allowEfCore)
         {

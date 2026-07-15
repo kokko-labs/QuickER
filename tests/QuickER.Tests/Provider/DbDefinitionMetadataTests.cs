@@ -13,7 +13,7 @@ namespace QuickER.Tests.Provider;
 /// DB 定義メタ属性（<c>[DbColumnMeta]</c> / <c>[DbTableMeta]</c>）の付与条件・内容を検証するテストクラス。
 /// </summary>
 /// <remarks>
-/// 付与は <c>IncludeDataAnnotations</c> と Entity 生成に連動し、対象 DB・Repository/EF 設定に依らない。
+/// 付与は <c>IncludeDataAnnotations</c> と Entity 生成に連動し、対象 DB・Repository/EF Core 設定に依らない。
 /// トークンは方言中立（canonical 由来）で、解析不能な自由記述型は属性を省略する。説明（Description）は
 /// モデル（Column/Entity）から流れ、空なら named 引数ごと省略する。
 /// </remarks>
@@ -153,7 +153,7 @@ public class DbDefinitionMetadataTests
     {
         var diagram = BuildDiagram();
 
-        // sqlserver 単独（Repository (QuickER)）
+        // sqlserver 単独（QuickER 版 Repository）
         var sqlServerOnly = GenerateEntityMetaLines(
             diagram,
             new CodeGenerationOptions
@@ -164,7 +164,7 @@ public class DbDefinitionMetadataTests
             }
         );
 
-        // sqlite 単独（Repository (QuickER)）
+        // sqlite 単独（QuickER 版 Repository）
         var sqliteOnly = GenerateEntityMetaLines(
             diagram,
             new CodeGenerationOptions

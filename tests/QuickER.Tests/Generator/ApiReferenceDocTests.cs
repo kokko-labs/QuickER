@@ -262,7 +262,7 @@ public sealed class ApiReferenceDocTests
     }
 
     [Fact(
-        DisplayName = "Entity のみ生成（Repository/EF/InMemory すべて false）ではデータアクセス節が出ない"
+        DisplayName = "Entity のみ生成（Repository/EF Core/InMemory すべて false）ではデータアクセス節が出ない"
     )]
     public void EntityOnly_OmitsDataAccessSections()
     {

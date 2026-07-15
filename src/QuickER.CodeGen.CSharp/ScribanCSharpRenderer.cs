@@ -31,7 +31,7 @@ internal sealed class RenderScope
     /// <summary>EF Core 用コード（DbContext・構成）を出力するか</summary>
     public required bool EfCore { get; init; }
 
-    /// <summary>Repository (QuickER) の方言別実装（ADO 依存）を出力するか。Repository バケット内でこのフラグにより契約と実装を出し分ける</summary>
+    /// <summary>QuickER 版 Repository の方言別実装（ADO 依存）を出力するか。Repository バケット内でこのフラグにより契約と実装を出し分ける</summary>
     public required bool RepositoryImpl { get; init; }
 
     /// <summary>共通契約（インターフェイス・SqlQuery・メタデータ等）を出力するか</summary>
@@ -48,7 +48,7 @@ internal sealed class RenderScope
     /// <summary>リモート面の ASP.NET Core サーバー実装（MapGeneratedRemoteEndpoints）を出力するか（サーバー専用スペックのみ true）</summary>
     public bool RemoteServer { get; init; }
 
-    /// <summary>このスコープがレンダリングするRepository (QuickER) の方言（"sqlserver" / "sqlite"）</summary>
+    /// <summary>このスコープがレンダリングするQuickER 版 Repository の方言（"sqlserver" / "sqlite"）</summary>
     public required string Dialect { get; init; }
 
     /// <summary>マルチ方言レイアウト（実効方言 2 つ以上）かどうか。DI 拡張の方言別名＋keyed 版の出し分けに使う</summary>
@@ -81,7 +81,7 @@ internal sealed class RenderScope
     public string InfraVisibility { get; init; } = "internal";
 
     /// <summary>
-    /// スキーマ非依存の固定 infra 型（契約・方言エンジン・EF 共通部品・EntityBase/属性/VO 基底 等）を出力するか（既定 true）。
+    /// スキーマ非依存の固定 infra 型（契約・方言エンジン・EF Core 共通部品・EntityBase/属性/VO 基底 等）を出力するか（既定 true）。
     /// </summary>
     /// <remarks>
     /// <para>
@@ -180,7 +180,7 @@ internal sealed class ScribanCSharpRenderer
 
         // 独自属性 NavigationReference は (1) Entity のナビゲーションプロパティへの付与、
         // (2) 共通契約の EntitySaveMetadata / SqlQuery によるナビゲーション除外・Include 復元（リフレクション走査）で参照される。
-        // リレーションが無くても契約（Repository (QuickER) か EF Core のいずれか）を生成する場合は属性定義が必要なため、その条件も含める。
+        // リレーションが無くても契約（QuickER 版 Repository か EF Core のいずれか）を生成する場合は属性定義が必要なため、その条件も含める。
         var emitNavRefAttr =
             (options.GenerateEntityClasses && model.EntityClasses.Any(c => c.Navigations.Count > 0))
             || options.GenerateRepositories
@@ -188,7 +188,7 @@ internal sealed class ScribanCSharpRenderer
             // インメモリ Repository はメタデータ（CascadeNavigations）・Include 復元で NavigationReference を参照する
             || options.GenerateInMemoryRepositories;
 
-        // Repository (QuickER) の生成方言に応じた原始変数群。sqlserver のときは現行値（識別子クォート [ ]・
+        // QuickER 版 Repository の生成方言に応じた原始変数群。sqlserver のときは現行値（識別子クォート [ ]・
         // ADO 型 SqlXxx）そのままで、テンプレートは細粒度置換した箇所でこれらを参照する。方言リテラルを
         // 変数参照へ置き換えてもレンダリング結果は変わらないため、sqlserver 出力はバイト不変を保つ。
         // 塊で異なる領域（FOR JSON プランナ vs マルチクエリ Include・OFFSET/FETCH vs LIMIT/OFFSET・
@@ -215,7 +215,7 @@ internal sealed class ScribanCSharpRenderer
             && model.EntityClasses.Any(c => c.Properties.Any(p => p.SqlDbTypeName is not null));
 
         // DB 定義メタ属性（[DbColumnMeta] / [DbTableMeta]）は、生成 Entity を「DB 定義の自己記述ドキュメント」に
-        // するための方言中立メタ（型トークン・説明）を載せる。付与は対象 DB・Repository/EF 設定に依らず、
+        // するための方言中立メタ（型トークン・説明）を載せる。付与は対象 DB・Repository/EF Core 設定に依らず、
         // データアノテーション付与（[Table]/[Column] と同列）かつ Entity 生成時のみ。canonical 由来のため
         // 可搬図では方言によらず同一メタになる。刻む中身が 1 つでもある（トークン付き列 または 説明付きテーブル/列）
         // ときだけ属性定義・付与を出力し、実体のない属性クラスは出さない。
@@ -231,7 +231,7 @@ internal sealed class ScribanCSharpRenderer
 
         // 無制限バイナリ列のマーカー属性 [UnboundedBinaryColumn] は (1) オプション ON 時に Entity プロパティへ付与し、
         // (2) 共通契約の EntitySaveMetadata が SELECT / UPDATE から除外する列の識別にリフレクションで参照する。
-        // 付与のみでも属性型の定義が要るため、Repository / EF / InMemory を生成する場合（メタデータが読む）に加え、
+        // 付与のみでも属性型の定義が要るため、Repository / EF Core / InMemory を生成する場合（メタデータが読む）に加え、
         // オプション ON かつ Entity 生成時（付与のみで契約が無い構成）でも定義を出す。emitNavRefAttr と同型の条件で、
         // scriban 側のゲートで || runtime_package_export を足し、パッケージ書き出し時も常に定義を出す（NavigationReference と対称）。
         var emitUnboundedBinaryAttr =
@@ -242,7 +242,7 @@ internal sealed class ScribanCSharpRenderer
 
         // store-generated 列のマーカー属性 [StoreGeneratedColumn] は (1) rowversion / timestamp 等の列へ生成オプションに依らず
         // 無条件で付与し、(2) 共通契約の EntitySaveMetadata が INSERT / UPDATE から除外する列の識別にリフレクションで参照する。
-        // 付与を読む固定 infra（Repository / EF / InMemory）に加え、付与のみが起きる Entity 単独生成でも定義を出す（emitUnboundedBinaryAttr
+        // 付与を読む固定 infra（Repository / EF Core / InMemory）に加え、付与のみが起きる Entity 単独生成でも定義を出す（emitUnboundedBinaryAttr
         // と同型で、scriban 側のゲートで || runtime_package_export を足しパッケージ書き出し時も常に定義する）。
         var emitStoreGeneratedAttr =
             options.GenerateRepositories
@@ -292,11 +292,11 @@ internal sealed class ScribanCSharpRenderer
             ["render_mappers"] = scope.Mappers,
             ["render_ef_core"] = scope.EfCore,
             // 共通契約（インターフェイス・SqlQuery・メタデータ・グラフセーバ・RawSqlMapper 等）を出力するか。
-            // 契約は Repository バケットに属し、分割時も Repository バケットのファイルにのみ出力する（EF 側は using で参照）。
+            // 契約は Repository バケットに属し、分割時も Repository バケットのファイルにのみ出力する（EF Core 側は using で参照）。
             // マルチ方言時は契約スペックのみ true・方言実装スペックは false（契約は 1 回だけ出す）
             ["render_contract"] = scope.RenderContract,
-            // Repository (QuickER) の方言別実装（ADO 依存）を出力するか。Repository バケット内でこのフラグにより契約と実装を出し分ける
-            // （EF 単独出力＝false のとき ADO 依存のコードを一切生成しない）
+            // QuickER 版 Repository の方言別実装（ADO 依存）を出力するか。Repository バケット内でこのフラグにより契約と実装を出し分ける
+            // （EF Core 単独出力＝false のとき ADO 依存のコードを一切生成しない）
             ["repositories"] = scope.RepositoryImpl,
             // リモート操作用インターフェイス（I{Entity}RemoteRepository）を追加生成するか。OFF（既定）では
             // per-entity 契約・DI の出力は従来と同一。ON は純粋に追加的で、リモート面と転送 DI 登録が増えるだけ
@@ -312,7 +312,7 @@ internal sealed class ScribanCSharpRenderer
             // DB 非依存のインメモリ Repository 群（InMemoryDataStore・InMemory{Entity}Repository・シーダー・DI）を出力するか。
             // 方言非依存のため契約を出すスペックで 1 度だけ true（既存経路は常に false でバイト不変）
             ["in_memory"] = scope.InMemory,
-            // Repository (QuickER) の生成方言と方言別プリミティブ（識別子クォート・ADO 型名）。
+            // QuickER 版 Repository の生成方言と方言別プリミティブ（識別子クォート・ADO 型名）。
             ["repository_dialect"] = dialect.Dialect,
             ["quote_open"] = dialect.QuoteOpen,
             ["quote_close"] = dialect.QuoteClose,
@@ -364,7 +364,7 @@ internal sealed class ScribanCSharpRenderer
 }
 
 /// <summary>
-/// Repository (QuickER) の生成方言ごとに変わるプリミティブ（識別子クォート文字・ADO 型名）を保持する。
+/// QuickER 版 Repository の生成方言ごとに変わるプリミティブ（識別子クォート文字・ADO 型名）を保持する。
 /// </summary>
 /// <remarks>
 /// テンプレートはこれらを細粒度置換した箇所で参照する。sqlserver は現行値（識別子クォート <c>[</c> <c>]</c>・

@@ -18,7 +18,7 @@ namespace QuickER.CodeGen.CSharp;
 /// 契約はリモート契約生成（<c>GenerateRemoteContracts</c> または <c>GenerateRemoteServices</c>）の有無で挿入先が変わる
 /// （リモート面 ON なら <c>I{Entity}RemoteRepository</c>＝ネットワーク境界を越えられる操作・OFF なら全機能面 <c>I{Entity}Repository</c>。
 /// 全機能面はリモート面を継承するため、移設しても既存の実装クラス・利用コードはコンパイル無変更で通る）。実装は
-/// Repository (QuickER) 2 方言・インメモリを固定 infra のエンジンへ委譲する薄いメソッドで賄い、EF Core は方言固有ストリーミングを
+/// QuickER 版 Repository 2 方言・インメモリを固定 infra のエンジンへ委譲する薄いメソッドで賄い、EF Core は方言固有ストリーミングを
 /// 持てないため <c>NotSupportedException</c> を投げる。ファイル糖衣（<c>Read/Write{Column}ToFile/FromFile</c>）は各実装クラスへ
 /// 重複させず、契約面（リモート面 ON ならリモート面）への拡張メソッド静的クラス 1 本にする。
 /// </para>
@@ -32,7 +32,7 @@ internal sealed partial class CSharpGenerationModelBuilder
 {
     /// <summary>EF Core で Stream アクセサが使えないことを示す例外メッセージ（生成コードへ埋め込む）</summary>
     private const string EfCoreStreamNotSupportedMessage =
-        "EF Core モードでは Stream アクセサ（無制限バイナリ列の読み書き）は使用できません。Repository (QuickER) を使うか、partial クラスで実装してください。";
+        "EF Core モードでは Stream アクセサ（無制限バイナリ列の読み書き）は使用できません。QuickER 版 Repository を使うか、partial クラスで実装してください。";
 
     /// <summary>1 エンティティ分の Stream アクセサブロック（テンプレートへ渡す整形済みテキスト群）</summary>
     private sealed record BinaryStreamBlocks(
@@ -63,7 +63,7 @@ internal sealed partial class CSharpGenerationModelBuilder
         CodeGenerationOptions options
     )
     {
-        // 生成条件: Repository (QuickER) を生成し、無制限バイナリ除外オプションが ON で、除外列が実在すること。
+        // 生成条件: QuickER 版 Repository を生成し、無制限バイナリ除外オプションが ON で、除外列が実在すること。
         // どれか一つでも欠ければ Stream アクセサは生成しない（契約にも現れない）。
         if (!options.GenerateRepositories || !options.ExcludeUnboundedBinaryColumns)
         {

@@ -62,7 +62,7 @@ public sealed class CSharpTypeInfo
     /// <remarks>
     /// 値は図の方言の <c>ITypeCatalog.TryParse</c> → <c>CanonicalTypeToken.Format</c> で解決した中立トークンで、
     /// Generator は DB 非依存を保つためプロバイダ層（<c>DiagramCodeGenerator</c> の後処理）が付加する。
-    /// canonical 由来のため、可搬図では各方言の型表記から同一トークンが得られる（EF 単独出力の方言可搬性を保つ）。
+    /// canonical 由来のため、可搬図では各方言の型表記から同一トークンが得られる（EF Core 単独出力の方言可搬性を保つ）。
     /// </remarks>
     public string? CanonicalTypeToken { get; init; }
 }

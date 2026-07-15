@@ -44,7 +44,7 @@ public sealed class GeneratedFileSpec
     public required IReadOnlyList<string> CrossNamespaceUsings { get; init; }
 
     /// <summary>
-    /// このスペックがレンダリングするRepository (QuickER) の方言（例: <c>"sqlserver"</c> / <c>"sqlite"</c>）。
+    /// このスペックがレンダリングするQuickER 版 Repository の方言（例: <c>"sqlserver"</c> / <c>"sqlite"</c>）。
     /// </summary>
     /// <remarks>
     /// 単一方言時・非 Repository スペックは実効単一方言をそのまま持つ（従来のレンダラー入力を保つ）。
@@ -229,8 +229,8 @@ public static class GeneratedFilePlanner
         }
 
         // Repository バケットは共通契約（インターフェイス・SqlQuery・メタデータ・グラフセーバ・RawSqlMapper 等）＋
-        // QuickER の SQL Server 実装を保持する。契約は EF Core 側・インメモリ側も参照するため、QuickER 実装・EF Core・
-        // インメモリのいずれかが有効なら出力する。EF/インメモリ単独出力時は Repository バケットに「契約のみ」＋
+        // QuickER の SQL Server 実装を保持する。契約は EF Core 側・インメモリ側も参照するため、QuickER 版 Repository・EF Core・
+        // インメモリのいずれかが有効なら出力する。EF Core/インメモリ単独出力時は Repository バケットに「契約のみ」＋
         // インメモリ実装が入る（QuickER の ADO 実装はテンプレート内で出し分ける）
         if (
             options.GenerateRepositories

@@ -182,7 +182,7 @@
     <value>生成コードから固定のランタイムコードを省き、NuGet パッケージ QuickER.Runtime.* への参照で賄います（EF Core とも併用可）</value>
   </data>
   <data name="CodeGen_QuickErRepositoryToolTip" xml:space="preserve">
-    <value>EF 非依存の軽量 Repository を生成します（対象 DB をチェックで選択: SQL Server / SQLite）</value>
+    <value>EF Core 非依存の軽量 Repository を生成します（対象 DB をチェックで選択: SQL Server / SQLite）</value>
   </data>
   <data name="CodeGen_PickFolderTitle" xml:space="preserve">
     <value>出力先フォルダを選択</value>

@@ -17,7 +17,7 @@ namespace QuickER.CodeGen.CSharp;
 ///     JSON コンバータ）＋方言中立の Repository 共通契約（IRepository・ISqlExecutor・SqlQuery・RawSqlMapper 等）</item>
 ///   <item><b>SqlServer / Sqlite</b>: 方言エンジンの固定コード（方言 Repository 基底・式木翻訳・実行器・接続ファクトリ・
 ///     方言別メタデータ）。<c>using QuickER.Runtime;</c> でコアの契約を参照する</item>
-///   <item><b>EfCore</b>: EF 共通部品（EF 版 Repository 基底・VO 翻訳プラグイン・SaveConflict 変換・DbContext 基盤）。
+///   <item><b>EfCore</b>: EF Core 共通部品（EF Core 版 Repository 基底・VO 翻訳プラグイン・SaveConflict 変換・DbContext 基盤）。
 ///     同じく <c>using QuickER.Runtime;</c> 付き</item>
 /// </list>
 /// </para>
@@ -35,7 +35,7 @@ public sealed class RuntimePackageSourceRenderer
     /// </summary>
     /// <remarks>
     /// 共通基盤（全機能 ON）＋方言中立の Repository 共通契約を、名前空間 <c>QuickER.Runtime</c> で 1 ファイルへ出力する。
-    /// 方言実装（ADO 依存）・EF 部品・スキーマ依存物は含めない（BCL のみ依存）。
+    /// 方言実装（ADO 依存）・EF Core 部品・スキーマ依存物は含めない（BCL のみ依存）。
     /// </remarks>
     public string RenderCore()
     {
@@ -125,10 +125,10 @@ public sealed class RuntimePackageSourceRenderer
     }
 
     /// <summary>
-    /// EF 共通部品パッケージ（<see cref="RuntimePackages.EntityFrameworkCore"/>）のソースをレンダリングする。
+    /// EF Core 共通部品パッケージ（<see cref="RuntimePackages.EntityFrameworkCore"/>）のソースをレンダリングする。
     /// </summary>
     /// <remarks>
-    /// EF 版 Repository 基底・VO 翻訳プラグイン・SaveConflict 変換・DbContext 基盤と、EF が使うメタデータ
+    /// EF Core 版 Repository 基底・VO 翻訳プラグイン・SaveConflict 変換・DbContext 基盤と、EF Core が使うメタデータ
     /// （EntitySaveMetadata / EntityGraphSaver）を、名前空間 <c>QuickER.Runtime.EntityFrameworkCore</c> で 1 ファイルへ出力する。
     /// 共通契約（IRepository・SqlQuery 等）はコアを <c>using QuickER.Runtime;</c> で参照する（重複定義しない）。
     /// </remarks>
@@ -136,8 +136,8 @@ public sealed class RuntimePackageSourceRenderer
     {
         var options = BuildAllFeaturesOptions();
 
-        // EF 部品はメタデータ（EntitySaveMetadata 等）を必要とする。runtime_package_export の EF パッケージ経路で
-        // これらを EF 名前空間へ出すため、空の EF モデル（DbSet・構成なし）を与え、DbContext 基盤と固定 infra だけを描く。
+        // EF Core 部品はメタデータ（EntitySaveMetadata 等）を必要とする。runtime_package_export の EF Core パッケージ経路で
+        // これらを EF Core 名前空間へ出すため、空の EF Core モデル（DbSet・構成なし）を与え、DbContext 基盤と固定 infra だけを描く。
         var model = new CSharpGenerationModel
         {
             NamespaceName = string.Empty,
@@ -154,9 +154,9 @@ public sealed class RuntimePackageSourceRenderer
             },
         };
 
-        // EF パッケージは EntitySaveMetadata / EntityGraphSaver（バックエンド共通メタデータ）も内包するため、
+        // EF Core パッケージは EntitySaveMetadata / EntityGraphSaver（バックエンド共通メタデータ）も内包するため、
         // EfCore バケットに加えて Repository 契約バケットの using（ConcurrentDictionary・DataAnnotations・
-        // Globalization・式木リフレクション等）も取り込む。ContractOnly＝ADO・DI は付かない（EF 依存のみ）。
+        // Globalization・式木リフレクション等）も取り込む。ContractOnly＝ADO・DI は付かない（EF Core 依存のみ）。
         var usings = ResolveUsings(
             options,
             [GenerationBucket.EfCore, GenerationBucket.Repository],

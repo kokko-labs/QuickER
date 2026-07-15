@@ -17,11 +17,11 @@ namespace QuickER.Tests.Integration;
 /// UseSqlite）で実 SQLite（一時ファイル DB・Docker 不要＝CI 常時実行）に流して検証する。
 /// </summary>
 /// <remarks>
-/// バックエンド非依存のシナリオは基底 <see cref="SaveHookRuntimeTestsBase"/> が持ち、本クラスは EF 固有の検証を行う:
+/// バックエンド非依存のシナリオは基底 <see cref="SaveHookRuntimeTestsBase"/> が持ち、本クラスは EF Core 固有の検証を行う:
 /// TrackGraph 記録に基づく Before/After 発火・明示トランザクション内での After（生 SQL の監査行が After 例外でロールバック）・
 /// context の除外列書き込みが <see cref="NotSupportedException"/>・FK 違反での全体ロールバック。
-/// insertWhenUpdateMissing の再試行×After=Insert（DbUpdateConcurrencyException→Added 切替）は基底シナリオ 6 が EF 経路で担保し、
-/// フック未登録時に明示トランザクションを張らない（意味的同一）ことは既存 EF テスト群と基底シナリオ 9 の全緑で担保する。
+/// insertWhenUpdateMissing の再試行×After=Insert（DbUpdateConcurrencyException→Added 切替）は基底シナリオ 6 が EF Core 経路で担保し、
+/// フック未登録時に明示トランザクションを張らない（意味的同一）ことは既存 EF Core テスト群と基底シナリオ 9 の全緑で担保する。
 /// EF Core の SQLite プロバイダは既定で <c>PRAGMA foreign_keys=ON</c> を送るため FK が有効になる。
 /// </remarks>
 public sealed class SaveHookEfCoreRuntimeTests : SaveHookRuntimeTestsBase, IDisposable
@@ -33,7 +33,7 @@ public sealed class SaveHookEfCoreRuntimeTests : SaveHookRuntimeTestsBase, IDisp
     /// <summary>EF Core は SaveChanges＋After を 1 つの明示トランザクションで囲うため After 例外で保存変更は残らない</summary>
     protected override bool AfterExceptionLeavesResidue => false;
 
-    /// <summary>EF 版リポジトリ群とフックを登録した DI プロバイダを構築する（フックなしは状態確認用に使い回す）</summary>
+    /// <summary>EF Core 版リポジトリ群とフックを登録した DI プロバイダを構築する（フックなしは状態確認用に使い回す）</summary>
     private ServiceProvider Provider(object[] hooks)
     {
         // フックなし（状態確認・シード）は使い回す。フック指定があるたびに専用プロバイダを構築する
@@ -63,7 +63,7 @@ public sealed class SaveHookEfCoreRuntimeTests : SaveHookRuntimeTestsBase, IDisp
     protected override IDocumentNoteRepository Notes(params object[] hooks) =>
         Provider(hooks).GetRequiredService<IDocumentNoteRepository>();
 
-    /// <summary>スキーマ（＋監査テーブル）を作成し、共通シードを EF リポジトリ経由で投入する</summary>
+    /// <summary>スキーマ（＋監査テーブル）を作成し、共通シードを EF Core リポジトリ経由で投入する</summary>
     protected override async Task ResetAndSeedAsync()
     {
         await using (var conn = new SqliteConnection(_db.ReadWriteCreateConnectionString))
@@ -99,10 +99,10 @@ public sealed class SaveHookEfCoreRuntimeTests : SaveHookRuntimeTestsBase, IDisp
         await notes.InsertAsync(NewNote(101, 1, "note-b"), Ct);
     }
 
-    // ── EF 固有 1: FK 違反での全体ロールバック ──
+    // ── EF Core 固有 1: FK 違反での全体ロールバック ──
 
-    /// <summary>新規親をスキップしつつ新規子を保存すると FK 違反 → 例外 → 全体ロールバック（EF は明示トランザクション）</summary>
-    [Fact(DisplayName = "[SaveHook/EF] 親スキップ×子保存は FK 違反で全体ロールバックする")]
+    /// <summary>新規親をスキップしつつ新規子を保存すると FK 違反 → 例外 → 全体ロールバック（EF Core は明示トランザクション）</summary>
+    [Fact(DisplayName = "[SaveHook/EF Core] 親スキップ×子保存は FK 違反で全体ロールバックする")]
     public async Task Parent_Skipped_ChildSaved_ForeignKeyRollsBackAll()
     {
         await ResetAndSeedAsync();
@@ -126,11 +126,11 @@ public sealed class SaveHookEfCoreRuntimeTests : SaveHookRuntimeTestsBase, IDisp
         (await NoteCountAsync(50)).Should().Be(0);
     }
 
-    // ── EF 固有 2: After の生 SQL が同一トランザクションに参加し、例外でロールバックされる ──
+    // ── EF Core 固有 2: After の生 SQL が同一トランザクションに参加し、例外でロールバックされる ──
 
     /// <summary>After の context.ExecuteSqlAsync（監査行）は保存中トランザクションに参加し、After 例外で行更新とともにロールバックされる</summary>
     [Fact(
-        DisplayName = "[SaveHook/EF] After の生 SQL 監査行が After 例外で行更新とともにロールバックされる"
+        DisplayName = "[SaveHook/EF Core] After の生 SQL 監査行が After 例外で行更新とともにロールバックされる"
     )]
     public async Task After_ExecuteSql_RollsBackWithRowOnException()
     {
@@ -166,10 +166,12 @@ public sealed class SaveHookEfCoreRuntimeTests : SaveHookRuntimeTestsBase, IDisp
             .Be(0, "監査行はロールバックされた");
     }
 
-    // ── EF 固有 3: context の除外列書き込みは NotSupported ──
+    // ── EF Core 固有 3: context の除外列書き込みは NotSupported ──
 
     /// <summary>EF Core モードでは After の context.WriteBinaryColumnAsync は NotSupportedException を投げる</summary>
-    [Fact(DisplayName = "[SaveHook/EF] After の WriteBinaryColumnAsync は NotSupportedException")]
+    [Fact(
+        DisplayName = "[SaveHook/EF Core] After の WriteBinaryColumnAsync は NotSupportedException"
+    )]
     public async Task After_WriteBinaryColumn_ThrowsNotSupported()
     {
         await ResetAndSeedAsync();
