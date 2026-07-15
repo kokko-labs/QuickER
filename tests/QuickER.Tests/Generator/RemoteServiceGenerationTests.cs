@@ -232,8 +232,8 @@ public class RemoteServiceGenerationTests
         server.Content.Should().Contain("using Acme.Runtime;");
     }
 
-    /// <summary>EF 単独＋リモートサービス: 契約・クライアント・サーバーが EF 実装基準でも成立することを検証する</summary>
-    [Fact(DisplayName = "EF 単独でもクライアント／サーバーが出力される")]
+    /// <summary>EF Core 単独＋リモートサービス: 契約・クライアント・サーバーが EF Core 版 Repository 基準でも成立することを検証する</summary>
+    [Fact(DisplayName = "EF Core 単独でもクライアント／サーバーが出力される")]
     public void Generate_RemoteServicesWithEfCoreOnly_Works()
     {
         var result = Generate(

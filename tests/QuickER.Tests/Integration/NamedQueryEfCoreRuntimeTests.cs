@@ -12,7 +12,7 @@ namespace QuickER.Tests.Integration;
 /// </summary>
 public sealed class NamedQueryEfCoreRuntimeTests : NamedQueryRuntimeTestsBase
 {
-    /// <summary>EF 版リポジトリ群を登録した DI コンテナ（UseSqlite・接続文字列は基底の一時 DB）</summary>
+    /// <summary>EF Core 版リポジトリ群を登録した DI コンテナ（UseSqlite・接続文字列は基底の一時 DB）</summary>
     private ServiceProvider? _provider;
 
     /// <summary>AddGeneratedEfCoreRepositories → UseSqlite の DI 経路でリポジトリ群を解決する</summary>

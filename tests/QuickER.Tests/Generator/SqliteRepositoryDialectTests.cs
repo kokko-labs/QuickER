@@ -5,7 +5,7 @@ using QuickER.Model;
 namespace QuickER.Tests.Generator;
 
 /// <summary>
-/// Repository (QuickER) の SQLite 方言生成（<see cref="CodeGenerationOptions.RepositoryDialect"/> = "sqlite"）が、
+/// QuickER 版 Repository の SQLite 方言生成（<see cref="CodeGenerationOptions.RepositoryDialect"/> = "sqlite"）が、
 /// SQLite 固有の実行経路（プレーン SELECT・LIMIT/OFFSET・マルチクエリ Include・SqliteXxx 型）を出力し、
 /// SQL Server 依存（Microsoft.Data.SqlClient / FOR JSON / SqlDbType / SqlServerRepository）を一切含まないことを検証する。
 /// </summary>

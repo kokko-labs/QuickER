@@ -182,7 +182,7 @@
     <value>Omits the fixed runtime code from the generated output and relies on references to the NuGet packages QuickER.Runtime.* (can be combined with EF Core)</value>
   </data>
   <data name="CodeGen_QuickErRepositoryToolTip" xml:space="preserve">
-    <value>Generates a lightweight, EF-independent Repository (choose target DBs with checkboxes: SQL Server / SQLite)</value>
+    <value>Generates a lightweight, EF Core-independent Repository (choose target DBs with checkboxes: SQL Server / SQLite)</value>
   </data>
   <data name="CodeGen_PickFolderTitle" xml:space="preserve">
     <value>Select the output folder</value>

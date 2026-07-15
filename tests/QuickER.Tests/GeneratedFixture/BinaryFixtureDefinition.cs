@@ -19,8 +19,8 @@ namespace QuickER.Tests.GeneratedBinaryFixture;
 /// 値オブジェクトは OFF（シンプル優先）。バイナリ列を素の <c>byte[]</c> のまま扱うことで、除外の意味論
 /// （null / 空配列の未取得状態・更新ガード・生 SQL の opportunistic マップ）を素直に検証できる。
 /// <c>row_ver</c>（<c>rowversion</c>）は store-generated 列として <c>[StoreGeneratedColumn]</c> が付与され、
-/// QuickER の INSERT / BulkInsert / UPDATE の対象から外れる（DB が採番するため。SELECT では取得する）。EF も
-/// Fluent の <c>IsRowVersion()</c> で store-generated として扱う。nullable にする＝SQLite/EF は <c>rowversion</c> を
+/// QuickER の INSERT / BulkInsert / UPDATE の対象から外れる（DB が採番するため。SELECT では取得する）。EF Core も
+/// Fluent の <c>IsRowVersion()</c> で store-generated として扱う。nullable にする＝SQLite/EF Core は <c>rowversion</c> を
 /// 自動採番しないため、INSERT で列が省略されても NULL のまま成立させる。
 /// 文字列列は Unicode（<c>nvarchar</c>）で統一する（可搬フィクスチャの不変条件）。
 /// </para>
@@ -46,7 +46,7 @@ public static class BinaryFixtureDefinition
 
     /// <summary>
     /// フィクスチャ生成に用いる決定的なオプション。
-    /// SQLite 方言のRepository (QuickER)・EF Core・インメモリ・リモートサービスを併存させ、無制限バイナリ除外を有効にする。
+    /// SQLite 方言のQuickER 版 Repository・EF Core・インメモリ・リモートサービスを併存させ、無制限バイナリ除外を有効にする。
     /// </summary>
     public static CodeGenerationOptions Options { get; } =
         new()
@@ -140,8 +140,8 @@ public static class BinaryFixtureDefinition
                     DataType = "varbinary(16)",
                     IsNullable = true,
                 },
-                // rowversion ＝store-generated 列（[StoreGeneratedColumn]）。QuickER も EF も INSERT / UPDATE から除外し DB が採番する。
-                // DB 側自動採番のため nullable（SQLite/EF は自動採番しないので INSERT 省略で NULL のまま）
+                // rowversion ＝store-generated 列（[StoreGeneratedColumn]）。QuickER も EF Core も INSERT / UPDATE から除外し DB が採番する。
+                // DB 側自動採番のため nullable（SQLite/EF Core は自動採番しないので INSERT 省略で NULL のまま）
                 new Column
                 {
                     Id = DocumentRowVerColId,

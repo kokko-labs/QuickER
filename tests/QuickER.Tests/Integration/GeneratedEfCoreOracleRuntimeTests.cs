@@ -7,7 +7,7 @@ using QuickER.Tests.GeneratedPortableFixture;
 namespace QuickER.Tests.Integration;
 
 /// <summary>
-/// 方言可搬な生成物（EF 版）を実 Oracle（Testcontainers）で流す方言ランタイムテスト。
+/// 方言可搬な生成物（EF Core 版）を実 Oracle（Testcontainers）で流す方言ランタイムテスト。
 /// スキーマは <see cref="OracleDdlGenerator"/> の DDL、接続は <c>UseOracle</c> で構成する。
 /// </summary>
 /// <remarks>Oracle コンテナは起動が重い（数分）。既存 Oracle 統合テストのフィクスチャ・タイムアウトに従う。</remarks>

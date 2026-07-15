@@ -6,7 +6,7 @@ using QuickER.Tests.GeneratedPortableFixture;
 namespace QuickER.Tests.Integration;
 
 /// <summary>
-/// 方言非依存の生成物（EF 版 <see cref="QuickErDbContext"/> + <c>EfCore{Entity}Repository</c> + VO 翻訳プラグイン）が
+/// 方言非依存の生成物（EF Core 版 <see cref="QuickErDbContext"/> + <c>EfCore{Entity}Repository</c> + VO 翻訳プラグイン）が
 /// 実 PostgreSQL / MySQL / Oracle（Testcontainers）で動くことを証明する共通シナリオの基底。
 /// </summary>
 /// <remarks>

@@ -10,7 +10,7 @@ namespace QuickER.Tests.GeneratedRemoteServiceFixture;
 // リモートサービス生成でもサーバー側の実装クラスは従来どおりで、HTTP クライアント側は全クエリを
 // 転送メソッドとして自動生成するため、manual 実装が必要なのはサーバー側だけになる。
 
-/// <summary>manual クエリ（SpecialLookup）のRepository (QuickER) 側実装</summary>
+/// <summary>manual クエリ（SpecialLookup）のQuickER 版 Repository 側実装</summary>
 public sealed partial class OrderRepository
 {
     /// <summary>顧客IDに紐づく注文のうち最初の 1 件を返す（manual 実装の見本）</summary>

@@ -72,7 +72,7 @@ public class QueryGenerationTests
         );
     }
 
-    /// <summary>Repository (QuickER)＋EF Core 併存の標準オプション</summary>
+    /// <summary>QuickER 版 Repository＋EF Core 併存の標準オプション</summary>
     private static CodeGenerationOptions CreateOptions() =>
         new()
         {
@@ -87,8 +87,8 @@ public class QueryGenerationTests
     private static string AllContent(CodeGenerationResult result) =>
         string.Join("\n", result.Files.Select(file => file.Content));
 
-    /// <summary>ミニ DSL の一覧クエリ（条件・並び順・ページング）が契約・QuickER 実装・EF 実装に同一本体で出ることを検証する</summary>
-    [Fact(DisplayName = "DSL 一覧クエリ: 契約＋QuickER＋EF に同一の Query() 本体が出る")]
+    /// <summary>ミニ DSL の一覧クエリ（条件・並び順・ページング）が契約・QuickER 版 Repository・EF Core 版 Repository に同一本体で出ることを検証する</summary>
+    [Fact(DisplayName = "DSL 一覧クエリ: 契約＋QuickER＋EF Core に同一の Query() 本体が出る")]
     public void Generate_DslListQuery_EmitsSharedBody()
     {
         var amountColumn = _order.Columns.First(c => c.Name == "Amount");
@@ -129,13 +129,13 @@ public class QueryGenerationTests
                 "Task<IReadOnlyList<OrderEntity>> GetByCustomerAsync(int customerId, int take, int skip = 0, CancellationToken cancellationToken = default);"
             );
 
-        // 共有本体（Repository (QuickER) と EF Core の双方に同一テキスト）
+        // 共有本体（QuickER 版 Repository と EF Core の双方に同一テキスト）
         var body =
             "Query().Where(e => e.CustomerId == customerId).OrderByDescending(e => e.Amount).Skip(skip).Take(take).ToListAsync(cancellationToken)";
         content
             .Split(body)
             .Length.Should()
-            .Be(3, "QuickER 実装と EF 実装の 2 箇所に同一本体が出る");
+            .Be(3, "QuickER 版 Repository と EF Core 版 Repository の 2 箇所に同一本体が出る");
 
         // XML doc に説明が載る
         content.Should().Contain("/// <summary>顧客IDで注文を検索する</summary>");
@@ -280,8 +280,8 @@ public class QueryGenerationTests
             );
     }
 
-    /// <summary>自由 SQL: Repository (QuickER) のみ実装され、EF は契約宣言のみ（manual 扱い）になることを検証する</summary>
-    [Fact(DisplayName = "自由 SQL: QuickER のみ実装・EF は manual 扱い")]
+    /// <summary>自由 SQL: QuickER 版 Repository のみ実装され、EF Core 版 Repository は契約宣言のみ（manual 扱い）になることを検証する</summary>
+    [Fact(DisplayName = "自由 SQL: QuickER のみ実装・EF Core 版 Repository は manual 扱い")]
     public void Generate_SqlQuery_AdoOnlyAndEfManual()
     {
         var diagram = CreateDiagram(
@@ -325,12 +325,12 @@ public class QueryGenerationTests
             .Should()
             .Contain("実装が生成されない実装先（EF Core・SQL 未定義の方言・インメモリ）");
 
-        // QuickER 実装（sqlserver 方言）には SQL 入り本体が出る
+        // QuickER 版 Repository（sqlserver 方言）には SQL 入り本体が出る
         content.Should().Contain("QueryBySqlAsync(");
         content.Should().Contain("@\"SELECT * FROM [Order] WHERE [Amount] > 0\"");
         content.Should().Contain("ExecuteScalarSqlAsync<decimal?>(");
 
-        // EF 実装クラスには自由 SQL・manual の実装が出ない（クラス本体に SQL 文字列が含まれない）
+        // EF Core 版 Repository クラスには自由 SQL・manual の実装が出ない（クラス本体に SQL 文字列が含まれない）
         var efClass = ExtractClassBody(content, "EfCoreOrderRepository");
         efClass.Should().NotContain("QueryBySqlAsync").And.NotContain("SpecialLookupAsync");
     }

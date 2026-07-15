@@ -14,7 +14,7 @@ internal sealed partial class CSharpGenerationModelBuilder
 {
     /// <summary>EntityBase の永続化対象外メンバー（get/set 可能な公開プロパティ）。Fluent の Ignore で除外する</summary>
     /// <remarks>
-    /// EF は get-only プロパティ（IsAdded / HasChanges 等）を既定でマップしないが、RowState は get/set のため
+    /// EF Core は get-only プロパティ（IsAdded / HasChanges 等）を既定でマップしないが、RowState は get/set のため
     /// マップ対象になり得る。get-only 派生フラグも意図を明示するため併せて Ignore する
     /// </remarks>
     private static readonly IReadOnlyList<string> EntityBaseIgnoredMembers =

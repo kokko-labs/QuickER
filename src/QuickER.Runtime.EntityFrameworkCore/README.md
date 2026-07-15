@@ -1,6 +1,6 @@
 # QuickER.Runtime.EntityFrameworkCore
 
-The **shared components of the EF Core Repository**, part of the runtime for the C# code that QuickER (an ER diagram designer) generates. It provides the `TContext : DbContext` generic EF Repository base and value-object translation plugins, implementing the dialect-neutral contracts of `QuickER.Runtime` on EF Core. Its only dependency is `Microsoft.EntityFrameworkCore.Relational` (no ADO or DI dependencies).
+The **shared components of the EF Core Repository**, part of the runtime for the C# code that QuickER (an ER diagram designer) generates. It provides the `TContext : DbContext` generic EF Core Repository base and value-object translation plugins, implementing the dialect-neutral contracts of `QuickER.Runtime` on EF Core. Its only dependency is `Microsoft.EntityFrameworkCore.Relational` (no ADO or DI dependencies).
 
 ## When you need it
 

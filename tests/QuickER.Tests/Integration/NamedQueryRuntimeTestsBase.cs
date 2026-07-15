@@ -38,7 +38,7 @@ public abstract class NamedQueryRuntimeTestsBase : IDisposable
     /// <summary>書き込み可能な接続文字列（バックエンドはこの実ファイルへ読み書きする）</summary>
     protected string ConnectionString => _db.ReadWriteCreateConnectionString;
 
-    /// <summary>顧客リポジトリを生成する（QuickER = AddGeneratedRepositories / EF = AddGeneratedEfCoreRepositories）</summary>
+    /// <summary>顧客リポジトリを生成する（QuickER = AddGeneratedRepositories / EF Core = AddGeneratedEfCoreRepositories）</summary>
     protected abstract ICustomerRepository CreateCustomerRepository();
 
     /// <summary>注文リポジトリを生成する</summary>
@@ -217,7 +217,7 @@ public abstract class NamedQueryRuntimeTestsBase : IDisposable
 
     /// <summary>
     /// 11. Include＋射影（ナビゲーション参照）は列刈り込み対象外で従来経路（全列取得→メモリ内射影）へ
-    /// フォールバックし、Include で読み込んだナビゲーションを射影できる（Ado・EF 両実装で同一結果）。
+    /// フォールバックし、Include で読み込んだナビゲーションを射影できる（Ado・EF Core 両実装で同一結果）。
     /// </summary>
     [Fact(
         DisplayName = "[NamedQuery] 11: Include＋射影はフォールバックしナビゲーションを射影できる"

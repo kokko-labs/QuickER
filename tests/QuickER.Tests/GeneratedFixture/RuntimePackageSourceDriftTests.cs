@@ -67,7 +67,7 @@ public sealed class RuntimePackageSourceDriftTests
         );
     }
 
-    /// <summary>EF 共通部品（<c>QuickER.Runtime.EntityFrameworkCore</c>）のチェックイン済みソースが一致する</summary>
+    /// <summary>EF Core 共通部品（<c>QuickER.Runtime.EntityFrameworkCore</c>）のチェックイン済みソースが一致する</summary>
     [Fact(
         DisplayName = "EntityFrameworkCore パッケージのチェックイン済みソースが現在のレンダラー出力と完全一致する（ドリフト検知）"
     )]

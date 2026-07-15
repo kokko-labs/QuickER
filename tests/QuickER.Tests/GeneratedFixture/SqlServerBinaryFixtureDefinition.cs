@@ -5,13 +5,13 @@ namespace QuickER.Tests.GeneratedSqlServerBinaryFixture;
 
 /// <summary>
 /// 無制限バイナリ列の除外（<see cref="CodeGenerationOptions.ExcludeUnboundedBinaryColumns"/>）を
-/// <b>SQL Server 方言</b>のRepository (QuickER) で生成する固定フィクスチャの単一ソース。
+/// <b>SQL Server 方言</b>のQuickER 版 Repository で生成する固定フィクスチャの単一ソース。
 /// </summary>
 /// <remarks>
 /// <para>
 /// 入力の ER 図はバイナリフィクスチャ（<see cref="Tests.GeneratedBinaryFixture.BinaryFixtureDefinition"/>）と
 /// 同一（<c>documents</c>＝無制限バイナリ列 payload/thumb・有界バイナリ checksum・rowversion row_ver、子
-/// <c>document_notes</c>、名前付きクエリ 3 本）で、オプションだけを SQL Server 方言のRepository (QuickER) 単独へ
+/// <c>document_notes</c>、名前付きクエリ 3 本）で、オプションだけを SQL Server 方言のQuickER 版 Repository 単独へ
 /// 差し替えたもの（<c>RemoteContractFixtureDefinition</c> が <c>QueryFixtureDefinition</c> へ委譲する先例と同型）。
 /// </para>
 /// <para>
@@ -35,7 +35,7 @@ public static class SqlServerBinaryFixtureDefinition
 
     /// <summary>
     /// フィクスチャ生成に用いる決定的なオプション。
-    /// SQL Server 方言のRepository (QuickER) 単独＋無制限バイナリ除外の最小構成。
+    /// SQL Server 方言のQuickER 版 Repository 単独＋無制限バイナリ除外の最小構成。
     /// </summary>
     public static CodeGenerationOptions Options { get; } =
         new()

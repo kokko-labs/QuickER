@@ -2865,7 +2865,7 @@ public class CSharpCodeGenerationServiceTests
             );
     }
 
-    /// <summary>EF Core 生成 OFF（既定）では EF への using も DbContext も一切出力されないことを検証する</summary>
+    /// <summary>EF Core 生成 OFF（既定）では EF Core への using も DbContext も一切出力されないことを検証する</summary>
     [Fact]
     public void Generate_EfCore_Disabled_ShouldNotEmitAnyEfCode()
     {
@@ -2882,7 +2882,7 @@ public class CSharpCodeGenerationServiceTests
         content.Should().NotContain("DbSet<");
     }
 
-    /// <summary>分割出力時に EfCore カテゴリが独自ファイル・独自名前空間で出力され、他ファイルへ EF using が漏れないことを検証する</summary>
+    /// <summary>分割出力時に EfCore カテゴリが独自ファイル・独自名前空間で出力され、他ファイルへ EF Core using が漏れないことを検証する</summary>
     [Fact]
     public void Generate_EfCore_Split_ShouldEmitDedicatedFileAndNamespace()
     {
@@ -2904,7 +2904,7 @@ public class CSharpCodeGenerationServiceTests
         efCore.Should().Contain("using Microsoft.EntityFrameworkCore;");
         efCore.Should().Contain("public partial class QuickErDbContext : DbContext");
 
-        // EF の using は EfCore ファイルにのみ現れ、Entity ファイルには漏れない
+        // EF Core の using は EfCore ファイルにのみ現れ、Entity ファイルには漏れない
         Content(result, "Entities.g.cs")
             .Should()
             .NotContain("using Microsoft.EntityFrameworkCore;");
@@ -2916,8 +2916,8 @@ public class CSharpCodeGenerationServiceTests
     /// </summary>
     /// <remarks>
     /// 本テストは「using をバケット単位で解決する」設計（<see cref="GeneratedFileUsings"/>）の核心を守る。
-    /// 契約のみを持つ Repository ファイル（EF 単独時）に SqlClient / DI の using が漏れないことも併せて検証する。
-    /// EF 系フラグを両方 ON（GenerateRepositories=true・GenerateEfCore=true）にしてすべての外部 using が
+    /// 契約のみを持つ Repository ファイル（EF Core 単独時）に SqlClient / DI の using が漏れないことも併せて検証する。
+    /// EF Core 系フラグを両方 ON（GenerateRepositories=true・GenerateEfCore=true）にしてすべての外部 using が
     /// 発生し得る最大構成で確認する。
     /// </remarks>
     [Theory]
@@ -2971,7 +2971,7 @@ public class CSharpCodeGenerationServiceTests
         }
     }
 
-    /// <summary>EF 単独出力の分割時、契約のみの Repository ファイルに SqlClient / DependencyInjection の using が漏れないことを検証する</summary>
+    /// <summary>EF Core 単独出力の分割時、契約のみの Repository ファイルに SqlClient / DependencyInjection の using が漏れないことを検証する</summary>
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -3016,7 +3016,7 @@ public class CSharpCodeGenerationServiceTests
         Content(result, "EfCore.g.cs").Should().Contain("namespace Acme.Persistence.EfCore;");
     }
 
-    /// <summary>EF 単独出力（GenerateEfCore=true・GenerateRepositories=false）が合法で、エラーなく生成できることを検証する</summary>
+    /// <summary>EF Core 単独出力（GenerateEfCore=true・GenerateRepositories=false）が合法で、エラーなく生成できることを検証する</summary>
     [Fact]
     public void Generate_EfCoreOnly_ShouldSucceedWithoutError()
     {
@@ -3038,7 +3038,7 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("public partial interface ISqlExecutor");
         content.Should().Contain("public sealed class SqlQuery<TEntity>");
         content.Should().Contain("internal static class RawSqlMapper");
-        // EF 一式は出力される
+        // EF Core 一式は出力される
         content.Should().Contain("public partial class QuickErDbContext : DbContext");
         content
             .Should()
@@ -3049,7 +3049,7 @@ public class CSharpCodeGenerationServiceTests
         content.Should().NotContain("public static IServiceCollection AddGeneratedRepositories(");
     }
 
-    /// <summary>EF 単独出力（VO 有無 × 分割有無の 4 通り）の生成物全ファイルに Microsoft.Data.SqlClient 依存が一切現れないことを検証する</summary>
+    /// <summary>EF Core 単独出力（VO 有無 × 分割有無の 4 通り）の生成物全ファイルに Microsoft.Data.SqlClient 依存が一切現れないことを検証する</summary>
     /// <remarks>
     /// SqlParameterValue（値オブジェクト unwrap ヘルパー・BCL のみ）は "SqlParameter " のような型参照ではないため、
     /// 誤検出しないよう "SqlParameter " は末尾スペース付きで（型参照のみ）判定する
@@ -3076,7 +3076,7 @@ public class CSharpCodeGenerationServiceTests
         result.HasErrors.Should().BeFalse();
         result.Files.Should().NotBeEmpty();
 
-        // SqlClient 由来のトークンが 1 つでも現れたら EF 単独出力の前提（プロバイダのみで使える）が崩れる
+        // SqlClient 由来のトークンが 1 つでも現れたら EF Core 単独出力の前提（プロバイダのみで使える）が崩れる
         string[] forbidden =
         [
             "Microsoft.Data.SqlClient",
@@ -3093,13 +3093,13 @@ public class CSharpCodeGenerationServiceTests
                 file.Content.Should()
                     .NotContain(
                         token,
-                        $"EF 単独出力のファイル {file.FileName} に SqlClient 依存トークン「{token}」が現れてはならない（Split={split} VO={vo}）"
+                        $"EF Core 単独出力のファイル {file.FileName} に SqlClient 依存トークン「{token}」が現れてはならない（Split={split} VO={vo}）"
                     );
             }
         }
     }
 
-    /// <summary>EF 単独出力の SqlQuery は SQL Server パス（FOR JSON・接続ファクトリ・SqlExpressionTranslator）を出力せず、実行器委譲のみになることを検証する</summary>
+    /// <summary>EF Core 単独出力の SqlQuery は SQL Server パス（FOR JSON・接続ファクトリ・SqlExpressionTranslator）を出力せず、実行器委譲のみになることを検証する</summary>
     [Fact]
     public void Generate_EfCoreOnly_SqlQuery_ShouldOnlyDelegateToExecutor()
     {
@@ -3129,9 +3129,9 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain(" : IRepository<");
     }
 
-    // ---- EF Core（EF 版 Repository・SqlExecutor・DI 拡張）----
+    // ---- EF Core（EF Core 版 Repository・SqlExecutor・DI 拡張）----
 
-    /// <summary>EF Core 生成 ON で EF 版 Repository（基底クラス＋エンティティ別実装）が生成されることを検証する</summary>
+    /// <summary>EF Core 生成 ON で EF Core 版 Repository（基底クラス＋エンティティ別実装）が生成されることを検証する</summary>
     [Fact]
     public void Generate_EfCore_ShouldEmitEfCoreRepositories()
     {
@@ -3164,7 +3164,7 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("context.Entry(entity).State = EntityState.Added;");
     }
 
-    /// <summary>EF 版 SaveAsync が TrackGraph で RowState → EntityState 変換し、競合を SaveConflictException へ変換することを検証する</summary>
+    /// <summary>EF Core 版 SaveAsync が TrackGraph で RowState → EntityState 変換し、競合を SaveConflictException へ変換することを検証する</summary>
     [Fact]
     public void Generate_EfCore_ShouldConvertRowStateViaTrackGraphInSave()
     {
@@ -3193,7 +3193,7 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("EntityGraphSaver.AcceptChanges(root, cascadeSave);");
     }
 
-    /// <summary>EF 版 SqlExecutor が DbContext の接続上の ADO で既存版とマッピング・束縛を共有することを検証する</summary>
+    /// <summary>EF Core 版 SqlExecutor が DbContext の接続上の ADO で既存版とマッピング・束縛を共有することを検証する</summary>
     [Fact]
     public void Generate_EfCore_ShouldEmitEfCoreSqlExecutor()
     {
@@ -3230,7 +3230,7 @@ public class CSharpCodeGenerationServiceTests
             .Contain("public TEntity MapEntityFromRawSql<TEntity>(DbDataReader reader)");
     }
 
-    /// <summary>EF 版 DI 拡張が DbContextFactory＋EF 版実装一式を既存と同じインターフェイスへ登録することを検証する</summary>
+    /// <summary>EF Core 版 DI 拡張が DbContextFactory＋EF Core 版実装一式を既存と同じインターフェイスへ登録することを検証する</summary>
     [Fact]
     public void Generate_EfCore_ShouldEmitDiExtension()
     {
@@ -3252,14 +3252,14 @@ public class CSharpCodeGenerationServiceTests
         content
             .Should()
             .Contain("services.AddSingleton<ISqlExecutor, EfCoreSqlExecutor<QuickErDbContext>>();");
-        // 既存と同じインターフェイスへ EF 版実装を登録する（DI 差し替えだけで切替可能）
+        // 既存と同じインターフェイスへ EF Core 版実装を登録する（DI 差し替えだけで切替可能）
         content
             .Should()
             .Contain("services.AddScoped<ICustomerRepository, EfCoreCustomerRepository>();");
         content.Should().Contain("services.AddScoped<IOrderRepository, EfCoreOrderRepository>();");
     }
 
-    /// <summary>EF Core 生成 ON の SqlQuery に実行器差し替えバックエンド（式木捕捉・EF 実行）が追加されることを検証する</summary>
+    /// <summary>EF Core 生成 ON の SqlQuery に実行器差し替えバックエンド（式木捕捉・EF Core 実行）が追加されることを検証する</summary>
     [Fact]
     public void Generate_EfCore_ShouldAddExecutorBackendToSqlQuery()
     {
@@ -3279,13 +3279,13 @@ public class CSharpCodeGenerationServiceTests
         // SqlQuery 本体の公開シグネチャは不変（sealed のまま）
         content.Should().Contain("public sealed class SqlQuery<TEntity>");
 
-        // EF モードではQuickER のトランスレータを通さず式木のまま捕捉する
+        // EF Core モードではQuickER のトランスレータを通さず式木のまま捕捉する
         content.Should().Contain("_predicates.Add(predicate);");
         content
             .Should()
             .Contain("_orderSelectors.Add(new SqlQueryOrdering(keySelector, Descending: false));");
 
-        // EF 実行器: AsNoTracking・ドットパス Include・boxing を剥がした OrderBy 合成・Repository からの注入
+        // EF Core 実行器: AsNoTracking・ドットパス Include・boxing を剥がした OrderBy 合成・Repository からの注入
         // 実行器も TContext ジェネリック（具象 DbContext 非依存）
         content
             .Should()
@@ -3298,12 +3298,12 @@ public class CSharpCodeGenerationServiceTests
     }
 
     /// <summary>
-    /// EF Core 生成 OFF（Repository (QuickER) 単独）でも、SqlQuery は実行器抽象（ISqlQueryExecutor / SqlQueryPlan）経由へ統一され、
-    /// 方言別 ADO 実行器（SqlServerSqlQueryExecutor）が出力される一方、EF 版クラスは一切出力されないことを検証する。
+    /// EF Core 生成 OFF（QuickER 版 Repository 単独）でも、SqlQuery は実行器抽象（ISqlQueryExecutor / SqlQueryPlan）経由へ統一され、
+    /// 方言別 ADO 実行器（SqlServerSqlQueryExecutor）が出力される一方、EF Core 版クラスは一切出力されないことを検証する。
     /// </summary>
     /// <remarks>
     /// M2a のランタイム統一により、SqlQuery は常に <c>ISqlQueryExecutor&lt;TEntity&gt;</c> 経由で実行するよう変更された
-    /// （以前は EF 生成時のみ実行器抽象が出て、Repository (QuickER) は方言 SQL を SqlQuery 内に埋め込んでいた）。
+    /// （以前は EF Core 生成時のみ実行器抽象が出て、QuickER 版 Repository は方言 SQL を SqlQuery 内に埋め込んでいた）。
     /// EF Core 依存（EfCore プレフィックスのクラス・DbContext 等）が漏れないことは引き続き守る。
     /// </remarks>
     [Fact]
@@ -3337,7 +3337,7 @@ public class CSharpCodeGenerationServiceTests
             .Contain("public TEntity MapEntityFromRawSql<TEntity>(SqlDataReader reader)");
     }
 
-    /// <summary>分割出力時、EfCore ファイルの EF 版コードが SqlClient の型（SqlCommand 等）に依存しないことを検証する</summary>
+    /// <summary>分割出力時、EfCore ファイルの EF Core 版コードが SqlClient の型（SqlCommand 等）に依存しないことを検証する</summary>
     [Fact]
     public void Generate_EfCore_Split_ShouldKeepEfCodeFreeOfSqlClientTypes()
     {
@@ -3354,7 +3354,7 @@ public class CSharpCodeGenerationServiceTests
         result.HasErrors.Should().BeFalse();
         var efCore = Content(result, "EfCore.g.cs");
 
-        // EF 版コードは方言非依存（System.Data.Common の DbCommand/DbConnection/DbDataReader のみ使用）。
+        // EF Core 版コードは方言非依存（System.Data.Common の DbCommand/DbConnection/DbDataReader のみ使用）。
         // SqlBulkCopy は「性能特性が異なる」旨の XML コメントでのみ言及されるため、型使用（"SqlBulkCopy("）だけを禁止する
         efCore.Should().NotContain("SqlCommand");
         efCore.Should().NotContain("SqlDataReader");
@@ -3396,9 +3396,9 @@ public class CSharpCodeGenerationServiceTests
             ],
         };
 
-    /// <summary>インメモリ Repository 単独出力（契約＋インメモリ実装）が生成され、ADO・EF 依存を含まないことを検証する</summary>
+    /// <summary>インメモリ Repository 単独出力（契約＋インメモリ実装）が生成され、ADO・EF Core 依存を含まないことを検証する</summary>
     [Fact(
-        DisplayName = "インメモリ Repository 単独出力は契約＋インメモリ実装を出し ADO/EF 依存を含まない"
+        DisplayName = "インメモリ Repository 単独出力は契約＋インメモリ実装を出し ADO/EF Core 依存を含まない"
     )]
     public void Generate_InMemoryOnly_EmitsContractAndInMemory_NoAdoOrEf()
     {
@@ -3422,7 +3422,7 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("class InMemoryItemRepository");
         content.Should().Contain("class InMemorySampleData");
         content.Should().Contain("AddGeneratedInMemoryRepositories");
-        // 方言非依存: ADO・EF・Repository (QuickER) 実装は一切出ない
+        // 方言非依存: ADO・EF Core・QuickER 版 Repository 実装は一切出ない
         content.Should().NotContain("Microsoft.Data.SqlClient");
         content.Should().NotContain("Microsoft.Data.Sqlite");
         content.Should().NotContain("Microsoft.EntityFrameworkCore");
@@ -3676,9 +3676,9 @@ public class CSharpCodeGenerationServiceTests
 
     /// <summary>
     /// EF Core 単独生成（GenerateRepositories=false・GenerateEfCore=true）では、除外オプション ON でも
-    /// Stream アクセサは契約にも現れない（Repository (QuickER) 前提の機能のため）。
+    /// Stream アクセサは契約にも現れない（QuickER 版 Repository 前提の機能のため）。
     /// </summary>
-    [Fact(DisplayName = "Stream アクセサ: EF 単独生成では契約にも出ない")]
+    [Fact(DisplayName = "Stream アクセサ: EF Core 単独生成では契約にも出ない")]
     public void Generate_BinaryStreamAccessors_EfOnly_NotGenerated()
     {
         var result = new CSharpCodeGenerationService().Generate(

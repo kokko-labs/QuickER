@@ -86,7 +86,7 @@ internal sealed partial class CSharpGenerationModelBuilder
             // 共通契約（インターフェイス群・SqlQuery・メタデータ等）と各エンティティ用リポジトリインターフェイスは、
             // QuickER の SQL Server 実装（GenerateRepositories）・EF Core 実装（GenerateEfCore）・インメモリ実装
             // （GenerateInMemoryRepositories）のいずれかが有効なら必要になる。
-            // EF・インメモリ単独出力でも各 Repository が I{Entity}Repository を実装するため、モデルを構築しておく
+            // EF Core・インメモリ単独出力でも各 Repository が I{Entity}Repository を実装するため、モデルを構築しておく
             RepositoryClasses =
                 options.GenerateRepositories
                 || options.GenerateEfCore

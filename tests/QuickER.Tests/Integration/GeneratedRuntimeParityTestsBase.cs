@@ -28,7 +28,7 @@ public abstract class GeneratedRuntimeParityTestsBase(SqlServerContainerFixture 
 
     // --- 派生クラスが与えるバックエンド固有のファクトリ ---
 
-    /// <summary>顧客リポジトリを生成する（QuickER = 直接 new / EF = DbContextFactory 経由）</summary>
+    /// <summary>顧客リポジトリを生成する（QuickER = 直接 new / EF Core = DbContextFactory 経由）</summary>
     protected abstract ICustomerRepository CreateCustomerRepository();
 
     /// <summary>注文リポジトリを生成する</summary>

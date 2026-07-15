@@ -261,7 +261,7 @@ public partial class MainViewModel
         {
             var options = dialogResult.Options;
             // 型解決（プロバイダ）→生成（Generator）の結合点は共有ファサードに集約し、CLI とドリフトさせない。
-            // Repository (QuickER) の実効方言ごとに、レジストリから方言別の型マッパを解決して渡す
+            // QuickER 版 Repository の実効方言ごとに、レジストリから方言別の型マッパを解決して渡す
             // （マルチ方言時は各方言バケットをその方言の型で解決し、単一方言時も同一経路で挙動は変わらない）。
             var diagram = ToDiagramModel();
             var dialectMappers = ResolveDialectTypeMappers(options);
@@ -370,7 +370,7 @@ public partial class MainViewModel
     }
 
     /// <summary>
-    /// Repository (QuickER) の実効方言（<see cref="CodeGenerationOptions.EffectiveRepositoryDialects"/>）ごとに、
+    /// QuickER 版 Repository の実効方言（<see cref="CodeGenerationOptions.EffectiveRepositoryDialects"/>）ごとに、
     /// プロバイダレジストリから方言別の型マッパを解決する。
     /// </summary>
     /// <remarks>

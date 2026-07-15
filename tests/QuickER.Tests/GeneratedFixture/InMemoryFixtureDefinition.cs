@@ -10,7 +10,7 @@ namespace QuickER.Tests.GeneratedInMemoryFixture;
 /// <para>
 /// 契約（<c>I{Entity}Repository</c> / <c>IRepository</c> / <c>SqlQuery</c> 等）＋インメモリ実装のみを出力する
 /// （<c>GenerateRepositories=false</c> / <c>GenerateEfCore=false</c> / <c>GenerateInMemoryRepositories=true</c>・VO off・Split off）。
-/// これによりインメモリ単独出力（QuickER の ADO 実装・EF なし）がコンパイル可能かつ実行時に正しく動くことを実証する。
+/// これによりインメモリ単独出力（QuickER の ADO 実装・EF Core なし）がコンパイル可能かつ実行時に正しく動くことを実証する。
 /// </para>
 /// <para>
 /// 図は実行時テストに適した最小構成:

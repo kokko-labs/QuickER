@@ -41,10 +41,10 @@ public class CSharpGenerationSettings
     /// <summary>Mapper クラスを生成するか</summary>
     public bool GenerateMappers { get; set; } = true;
 
-    /// <summary>Repository (QuickER) を生成するか（DB アクセスの排他選択。既定は「なし」）</summary>
+    /// <summary>QuickER 版 Repository を生成するか（DB アクセスの排他選択。既定は「なし」）</summary>
     public bool GenerateRepositories { get; set; }
 
-    /// <summary>EF Core 用コード（DbContext＋EF 版 Repository）を生成するか（DB アクセスの排他選択）</summary>
+    /// <summary>EF Core 用コード（DbContext＋EF Core 版 Repository）を生成するか（DB アクセスの排他選択）</summary>
     public bool GenerateEfCore { get; set; }
 
     /// <summary>
@@ -68,7 +68,7 @@ public class CSharpGenerationSettings
     public bool GenerateApiDocs { get; set; }
 
     /// <summary>
-    /// 無制限バイナリ列（varbinary(max) / BLOB 等）をRepository (QuickER) の SELECT / UPDATE から除外するか（既定 false）
+    /// 無制限バイナリ列（varbinary(max) / BLOB 等）をQuickER 版 Repository の SELECT / UPDATE から除外するか（既定 false）
     /// </summary>
     public bool ExcludeUnboundedBinaryColumns { get; set; }
 

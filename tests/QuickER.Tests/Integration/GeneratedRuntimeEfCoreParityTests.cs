@@ -19,7 +19,7 @@ public sealed class GeneratedRuntimeEfCoreParityTests(SqlServerContainerFixture 
     : GeneratedRuntimeParityTestsBase(fixture),
         IDisposable
 {
-    /// <summary>EF 版リポジトリ群を登録した DI コンテナ（接続文字列が有効なときのみ構築）</summary>
+    /// <summary>EF Core 版リポジトリ群を登録した DI コンテナ（接続文字列が有効なときのみ構築）</summary>
     private ServiceProvider? _provider;
 
     /// <summary>DI コンテナを遅延構築する（フィクスチャ利用可能時のみ。接続文字列は Initialize 後に確定するため）</summary>

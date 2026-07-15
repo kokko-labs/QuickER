@@ -206,7 +206,7 @@ public class CliAppTests
     }
 
     /// <summary>
-    /// Repository (QuickER) の生成が要求されているが（quicker.json の GenerateRepositories=true）、
+    /// QuickER 版 Repository の生成が要求されているが（quicker.json の GenerateRepositories=true）、
     /// プロバイダが未対応方言（postgresql / mysql / oracle）の場合は終了コード 1 でエラーメッセージを出すことを検証する
     /// </summary>
     [Theory(DisplayName = "未対応方言＋GenerateRepositories 要求は終了コード 1")]
@@ -493,14 +493,16 @@ public class CliAppTests
 
     /// <summary>
     /// --runtime-packages と GenerateEfCore=true の併用は解禁されており、生成が成功（終了コード 0）して
-    /// 案内に EF パッケージ（QuickER.Runtime.EntityFrameworkCore）が含まれることを検証する
+    /// 案内に EF Core パッケージ（QuickER.Runtime.EntityFrameworkCore）が含まれることを検証する
     /// </summary>
-    [Fact(DisplayName = "--runtime-packages と EF Core の併用は成功し EF パッケージが案内される")]
+    [Fact(
+        DisplayName = "--runtime-packages と EF Core の併用は成功し EF Core パッケージが案内される"
+    )]
     public async Task Generate_RuntimePackagesWithEfCore_SucceedsWithEfPackageGuidance()
     {
         var (schemaPath, outDir, root) = CreateSampleSchema();
         var configPath = Path.Combine(root, "quicker.json");
-        // EF 単独（Repository (QuickER) なし）でパッケージ参照モードにする
+        // EF Core 単独（QuickER 版 Repository なし）でパッケージ参照モードにする
         File.WriteAllText(
             configPath,
             """{ "GenerateRepositories": false, "GenerateEfCore": true }"""
@@ -529,9 +531,9 @@ public class CliAppTests
                 .Should()
                 .Contain(
                     "QuickER.Runtime.EntityFrameworkCore",
-                    "EF パッケージが PackageReference 案内に含まれる"
+                    "EF Core パッケージが PackageReference 案内に含まれる"
                 );
-            // EF 単独ではQuickER の方言パッケージ（SqlServer / Sqlite）は案内されない
+            // EF Core 単独ではQuickER の方言パッケージ（SqlServer / Sqlite）は案内されない
             stdout.Should().NotContain("QuickER.Runtime.SqlServer");
             stdout.Should().NotContain("QuickER.Runtime.Sqlite");
         }

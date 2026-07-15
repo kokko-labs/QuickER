@@ -15,9 +15,9 @@ ER 図を描く → データベースを作る → C# のデータアクセス�
 - **ビジュアル ER 設計** — crow's foot 記法、1対1 / 1対多 / 多対多、複合主キー、FK 参照アクション（Cascade / SetNull / NoAction）、包括的な Undo/Redo。ズーム・パン・エンティティ検索（Ctrl+F）・ミニマップ・関連ハイライト・複数選択＋一括操作・簡易表示（PK/FK のみ）で大規模図にも対応
 - **マルチ DB** — SQL Server / PostgreSQL / MySQL / Oracle / SQLite の 5 方言で、スキーマ取込・差分同期・DDL 生成をサポート。図ごとにターゲット DB を保持し、いつでも方言を切り替え可能（型は自動変換、変換不能な型は警告表示・Undo 可）
 - **C# コード生成** — Entity / EditModel / Mapper に加え、DB アクセス層を選んで生成:
-  - **Repository (QuickER)** — 依存最小の軽量 Repository（式木クエリ・Include・グラフ保存・楽観排他・生 SQL の逃げ道付き）
-  - **EF Core** — 既存 Entity をそのまま載せる DbContext ＋ 同一インターフェイスの EF 実装。**DI 登録 1 行の差し替え**で Repository (QuickER) と交換可能
-  - **名前付きクエリ** — 検索メソッドの定義（条件・並び順・ページング・射影）を図に保存し、型付きの Repository メソッド（例 `GetByCustomerAsync(int customerId, ...)`）として全実装（Repository (QuickER) / EF Core）へ自動生成。条件は簡易 DSL（`CustomerId = @customerId AND Memo LIKE @keyword` 等）で書き、GUI エディタが即時検証
+  - **QuickER 版 Repository** — 依存最小の軽量 Repository（式木クエリ・Include・グラフ保存・楽観排他・生 SQL の逃げ道付き）
+  - **EF Core** — 既存 Entity をそのまま載せる DbContext ＋ 同一インターフェイスの EF Core 版実装。**DI 登録 1 行の差し替え**で QuickER 版 Repository と交換可能
+  - **名前付きクエリ** — 検索メソッドの定義（条件・並び順・ページング・射影）を図に保存し、型付きの Repository メソッド（例 `GetByCustomerAsync(int customerId, ...)`）として全実装（QuickER 版 Repository / EF Core）へ自動生成。条件は簡易 DSL（`CustomerId = @customerId AND Memo LIKE @keyword` 等）で書き、GUI エディタが即時検証
   - **リモート対応インターフェイス（--remote-contracts）** — CRUD・保存・名前付きクエリ（＝Web サービス越しに提供できる操作）だけを持つ `I{Entity}RemoteRepository` を追加生成するオプション。`I{Entity}Repository` は全メソッドを持ったままこれを継承するため既存コードに影響はなく、アプリ本体をリモート面だけに依存させておけば、リモート実装への差し替えがコンパイル時に安全になる
   - **3 階層対応（--remote-services）** — リモート面を HTTP + JSON で提供するクライアント（`Http{Entity}RemoteRepository`・依存は BCL の HttpClient のみ）と ASP.NET Core Minimal API サーバー（`MapGeneratedRemoteEndpoints`）を生成。DI 登録 1 行の差し替えで DB 直結⇔Web サービス経由を切り替えられ、`SaveConflictException` などの例外も型ごと復元される（直結時と同じ catch が機能）
 - **AI チャット** — 対話で ER 図を生成・編集（OpenAI / Anthropic の API キー、Ollama、Codex、Claude Code に対応）。ER 図から Web モック画面（HTML）の生成も可能
@@ -126,10 +126,10 @@ quicker generate --schema diagram.json --out ./Generated --provider sqlserver
 | 選択肢 | 対象 DB | 特徴・向いている場面 |
 |---|---|---|
 | **なし**（既定） | — | Entity / EditModel / Mapper のみ。データアクセスは自前で書く |
-| **Repository (QuickER)** | SQL Server / SQLite | 依存最小（ADO のみ）の軽量 Repository。式木クエリ・`Include`/`ThenInclude`・グラフ保存・bulk・楽観排他（SQL Server rowversion）・生 SQL 実行を装備。射影・GroupBy・Join は式木未対応（生 SQL か EF Core で回避） |
-| **EF Core** | 5 方言 | 方言非依存の `QuickErDbContext` ＋ 同一 Repository インターフェイスの EF 実装。マイグレーションは範囲外（スキーマは DDL 生成の責務）で、既存スキーマへの接続専用 |
+| **QuickER 版 Repository** | SQL Server / SQLite | 依存最小（ADO のみ）の軽量 Repository。式木クエリ・`Include`/`ThenInclude`・グラフ保存・bulk・楽観排他（SQL Server rowversion）・生 SQL 実行を装備。射影・GroupBy・Join は式木未対応（生 SQL か EF Core で回避） |
+| **EF Core** | 5 方言 | 方言非依存の `QuickErDbContext` ＋ 同一 Repository インターフェイスの EF Core 版実装。マイグレーションは範囲外（スキーマは DDL 生成の責務）で、既存スキーマへの接続専用 |
 
-Repository (QuickER) と EF Core は**同じインターフェイス**を実装するため、DI 登録 1 行の差し替えで交換できます:
+QuickER 版 Repository と EF Core は**同じインターフェイス**を実装するため、DI 登録 1 行の差し替えで交換できます:
 
 ```csharp
 // Repository (QuickER・SQLite 実装)
@@ -187,7 +187,7 @@ QuickER が**生成したコード（インライン出力されるランタイ�
 ### AI 機能・コード生成の提供方針（将来の有償化に関する予告）
 
 - **現在はすべての機能を、商用利用を含め全員が無料で利用できます**
-- 将来、**AI 機能と DB アクセスコード生成（Repository (QuickER) / EF Core / マルチターゲット）について、商用利用のみ有償ライセンス化する可能性があります**
+- 将来、**AI 機能と DB アクセスコード生成（QuickER 版 Repository / EF Core / マルチターゲット）について、商用利用のみ有償ライセンス化する可能性があります**
 - その場合も、次を約束します：
   - **個人・非商用利用は永続無料**
   - **基本のコード生成（Entity / EditModel / Mapper）は商用利用を含め永続無料**

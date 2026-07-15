@@ -22,7 +22,7 @@ namespace QuickER.Tests.Integration;
 /// 経由で記述し、リポジトリ・エグゼキュータの生成方法だけを派生クラスが与える。
 /// </para>
 /// <para>
-/// これにより「AddGeneratedRepositories（QuickER の SQLite）と AddGeneratedEfCoreRepositories＋UseSqlite（EF）を
+/// これにより「AddGeneratedRepositories（QuickER の SQLite）と AddGeneratedEfCoreRepositories＋UseSqlite（EF Core）を
 /// 差し替えるだけで交換可能」という契約を、両バックエンドで同一アサーションにより証明する。Docker 不要のため
 /// CI でも常時実行される。スキーマは <see cref="SqliteDdlGenerator"/> が生成する DDL で用意する。
 /// </para>
@@ -30,7 +30,7 @@ namespace QuickER.Tests.Integration;
 /// EF Core Sqlite は <c>decimal</c> を TEXT として格納しサーバー側の <c>ORDER BY</c> / 比較 / 集計を直接は
 /// サポートしないため（"SQLite does not support expressions of type 'decimal'"）、両バックエンドで同一に走る
 /// シナリオは並び替え・ページングを <b>整数キー</b>で行う。decimal に依存する検証は少量データのクライアント評価
-/// （EF）で成立する範囲に限る。生 SQL の集計はQuickER／EF 双方で <c>ExecuteScalarSqlAsync&lt;decimal&gt;</c>
+/// （EF Core）で成立する範囲に限る。生 SQL の集計はQuickER／EF Core 双方で <c>ExecuteScalarSqlAsync&lt;decimal&gt;</c>
 /// （<c>Convert.ChangeType</c> 経路）を用いる。
 /// </para>
 /// </remarks>
@@ -48,7 +48,7 @@ public abstract class GeneratedSqliteRuntimeTestsBase : IDisposable
 
     // --- 派生クラスが与えるバックエンド固有のファクトリ ---
 
-    /// <summary>顧客リポジトリを生成する（QuickER = DI 直接 / EF = AddGeneratedEfCoreRepositories 経由）</summary>
+    /// <summary>顧客リポジトリを生成する（QuickER = DI 直接 / EF Core = AddGeneratedEfCoreRepositories 経由）</summary>
     protected abstract ICustomerRepository CreateCustomerRepository();
 
     /// <summary>注文リポジトリを生成する</summary>
@@ -64,7 +64,7 @@ public abstract class GeneratedSqliteRuntimeTestsBase : IDisposable
     protected static string Param(string name) => $"@{name}";
 
     /// <summary>スキーマを初期化し、SQLite の DdlGenerator が生成した DDL でテーブルを作成する</summary>
-    /// <remarks>子（orders）→ 親（customers）の順で DROP してから作り直す。EF Migrations は使わない。</remarks>
+    /// <remarks>子（orders）→ 親（customers）の順で DROP してから作り直す。EF Core Migrations は使わない。</remarks>
     protected async Task ResetAndCreateSchemaAsync()
     {
         await using (var conn = new SqliteConnection(ConnectionString))
@@ -315,7 +315,7 @@ public abstract class GeneratedSqliteRuntimeTestsBase : IDisposable
     /// QuickER の <c>IncludeLoader</c>（マルチクエリ）はサイクルを段階的なクエリで解決できるが、EF Core の
     /// no-tracking クエリは Include パス <c>Orders-&gt;Customer</c> のサイクルを拒否する
     /// （"Cycles are not allowed in no-tracking queries"）。そのため本テストはバックエンド別に置き、
-    /// EF 派生では非サイクルの等価経路（子を Include(Customer) で別ロード）へ置き換える
+    /// EF Core 派生では非サイクルの等価経路（子を Include(Customer) で別ロード）へ置き換える
     /// （<see cref="GeneratedSqliteEfCoreParityRuntimeTests"/> でオーバーライド）。
     /// </remarks>
     [Fact(

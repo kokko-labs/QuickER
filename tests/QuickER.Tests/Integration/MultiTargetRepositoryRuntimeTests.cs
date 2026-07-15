@@ -13,14 +13,14 @@ using Xunit;
 namespace QuickER.Tests.Integration;
 
 /// <summary>
-/// Repository (QuickER) のマルチターゲット構成（SQL Server / SQLite の 2 方言同時生成）を、同一プロセスの
+/// QuickER 版 Repository のマルチターゲット構成（SQL Server / SQLite の 2 方言同時生成）を、同一プロセスの
 /// 1 つの <see cref="ServiceCollection"/> へ keyed DI で登録し、実 DB（SQL Server=Testcontainers・
 /// SQLite=一時ファイル）へ書き分け・読み分けできることを結合検証する。
 /// </summary>
 /// <remarks>
 /// <para>
 /// 入力は第4の固定フィクスチャ（<see cref="MultiTargetPortableFixtureDefinition"/>・方言可搬な図を
-/// sqlserver / sqlite のRepository (QuickER)・EF なしで生成したもの）。契約型（<see cref="ICustomerRepository"/> /
+/// sqlserver / sqlite のQuickER 版 Repository・EF Core なしで生成したもの）。契約型（<see cref="ICustomerRepository"/> /
 /// <see cref="IOrderRepository"/> / <see cref="ISqlExecutor"/>）は単一で、方言別 namespace
 /// （<c>.Repositories.SqlServer</c> / <c>.Repositories.Sqlite</c>）が実装と DI 拡張を提供する。
 /// </para>

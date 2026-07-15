@@ -10,8 +10,8 @@ namespace QuickER.Tests.GeneratedQueryFixture;
 /// <para>
 /// 入力の ER 図は方言可搬フィクスチャ（<see cref="Tests.GeneratedPortableFixture.PortableFixtureDefinition"/>）と
 /// 同一の 2 エンティティ（customers / orders・VO 有効）に、<b>名前付きクエリ定義を追加</b>したもの。
-/// オプションは SQLite 方言のRepository (QuickER)＋EF Core 併存（<c>SqlitePortableFixture</c> と同プロファイル）で、
-/// 生成されたクエリメソッドを実ファイル DB（Docker 不要＝CI 常時実行）のQuickER・EF 両実装で意味検証できる。
+/// オプションは SQLite 方言のQuickER 版 Repository＋EF Core 併存（<c>SqlitePortableFixture</c> と同プロファイル）で、
+/// 生成されたクエリメソッドを実ファイル DB（Docker 不要＝CI 常時実行）のQuickER・EF Core 両実装で意味検証できる。
 /// </para>
 /// <para>
 /// クエリはミニ DSL の全戻り形（一覧・単一・件数・射影）・文字列一致・IN（VO 列×リストパラメータ）・
@@ -26,7 +26,7 @@ public static class QueryFixtureDefinition
     /// <summary>コミット済みフィクスチャファイル名</summary>
     public const string OutputFileName = "QueryFixture.g.cs";
 
-    /// <summary>フィクスチャ生成に用いる決定的なオプション（SQLite 方言・QuickER＋EF 併存・VO 有効）</summary>
+    /// <summary>フィクスチャ生成に用いる決定的なオプション（SQLite 方言・QuickER＋EF Core 併存・VO 有効）</summary>
     public static CodeGenerationOptions Options { get; } =
         new()
         {
@@ -169,7 +169,7 @@ public static class QueryFixtureDefinition
                     new QueryParameter { Name = "customerId", Type = "int32" },
                 },
                 // EF Core Sqlite の decimal 制約（サーバーサイド比較・並び替え非対応）に合わせ、条件・並び替えは整数キーで行う。
-                // decimal（amount）は射影フィールドとしての実体化のみに使う（それは EF でも可能）
+                // decimal（amount）は射影フィールドとしての実体化のみに使う（それは EF Core でも可能）
                 Condition = "customer_id = @customerId",
                 OrderBy =
                 {

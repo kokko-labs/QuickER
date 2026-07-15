@@ -7,7 +7,7 @@ using QuickER.Tests.GeneratedPortableFixture;
 namespace QuickER.Tests.Integration;
 
 /// <summary>
-/// 方言可搬な生成物（EF 版）を実 PostgreSQL（Testcontainers）で流す方言ランタイムテスト。
+/// 方言可搬な生成物（EF Core 版）を実 PostgreSQL（Testcontainers）で流す方言ランタイムテスト。
 /// スキーマは <see cref="PostgreSqlDdlGenerator"/> の DDL、接続は <c>UseNpgsql</c> で構成する。
 /// </summary>
 [Trait("Category", "Integration")]

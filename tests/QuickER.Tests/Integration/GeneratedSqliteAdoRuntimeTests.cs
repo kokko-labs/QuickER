@@ -12,7 +12,7 @@ namespace QuickER.Tests.Integration;
 /// <see cref="ServiceProvider"/> から解決）で取得する。接続は一時ファイル DB の書き込み可能接続文字列。
 /// </summary>
 /// <remarks>
-/// これは Phase T の「SQLite Repository (QuickER) の方言ランタイムテスト」に相当する。基底
+/// これは Phase T の「SQLite QuickER 版 Repository の方言ランタイムテスト」に相当する。基底
 /// <see cref="GeneratedSqliteRuntimeTestsBase"/> の全シナリオ（CRUD・式木・ページング・Include マルチクエリ・
 /// 生 SQL・グラフ保存・BulkInsert・削除カスケード）を、SQLite 固有の実行経路（プレーン SELECT＋DataReader・
 /// LIMIT/OFFSET・IncludeLoader・AddWithValue・1Tx INSERT ループ）で流す。

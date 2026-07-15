@@ -249,7 +249,7 @@ internal sealed class CSharpPropertyModel
 
     /// <summary>
     /// DB が値を生成する列（SQL Server の <c>rowversion</c> / <c>timestamp</c> 等）かどうか。オプション非依存で常にマーカー属性
-    /// [StoreGeneratedColumn] を付与する対象の識別に使う（判定はプロバイダの型マッパーの責務）。Repository (QuickER) の INSERT / UPDATE 対象から除外される。
+    /// [StoreGeneratedColumn] を付与する対象の識別に使う（判定はプロバイダの型マッパーの責務）。QuickER 版 Repository の INSERT / UPDATE 対象から除外される。
     /// </summary>
     public bool IsRowVersion { get; init; }
 
@@ -426,7 +426,7 @@ internal sealed class CSharpRepositoryModel
     public string QuerySharedImplBlock { get; init; } = string.Empty;
 
     /// <summary>
-    /// 名前付きクエリの実装メンバー群（Repository (QuickER) 用・方言名→整形済みテキスト）。
+    /// 名前付きクエリの実装メンバー群（QuickER 版 Repository 用・方言名→整形済みテキスト）。
     /// ミニ DSL 系（全方言共通）と自由 SQL 系（その方言の SQL があるもののみ）を定義順に含む。
     /// 全対応方言のキーを常に持つ（SQL が無い実装先は manual 扱い＝メンバーを含まない）
     /// </summary>
@@ -474,7 +474,7 @@ internal sealed class CSharpRepositoryModel
 
     /// <summary>
     /// 無制限バイナリ列の Stream アクセサの薄い実装メンバー群（固定 infra のエンジンへ委譲）。
-    /// Repository (QuickER) 2 方言の実装クラスとインメモリ実装クラスの双方へ同一テキストで挿入する（無ければ空文字）。
+    /// QuickER 版 Repository 2 方言の実装クラスとインメモリ実装クラスの双方へ同一テキストで挿入する（無ければ空文字）。
     /// </summary>
     public string BinaryStreamThinImplBlock { get; init; } = string.Empty;
 

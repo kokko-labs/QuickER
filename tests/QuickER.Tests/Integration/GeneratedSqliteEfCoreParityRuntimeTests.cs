@@ -15,7 +15,7 @@ namespace QuickER.Tests.Integration;
 /// <remarks>
 /// <para>
 /// 基底 <see cref="GeneratedSqliteRuntimeTestsBase"/> の全シナリオを EF Core Sqlite で流すことで、
-/// <b>「AddGeneratedRepositories（QuickER の SQLite）⇔ AddGeneratedEfCoreRepositories＋UseSqlite（EF）を差し替える
+/// <b>「AddGeneratedRepositories（QuickER の SQLite）⇔ AddGeneratedEfCoreRepositories＋UseSqlite（EF Core）を差し替える
 /// だけで交換可能」</b>という契約を、<see cref="GeneratedSqliteAdoRuntimeTests"/> と同一のアサーション集合で
 /// 証明する（＝SQLite AdoParity）。両派生が同じ基底シナリオを緑にすることが、同一 DB 状態への読み書き双方向で
 /// 両実装が同じ結果を返すことの証明になる。
@@ -28,7 +28,7 @@ namespace QuickER.Tests.Integration;
 /// </remarks>
 public sealed class GeneratedSqliteEfCoreParityRuntimeTests : GeneratedSqliteRuntimeTestsBase
 {
-    /// <summary>EF 版リポジトリ群を登録した DI コンテナ（UseSqlite・接続文字列は基底の一時 DB）</summary>
+    /// <summary>EF Core 版リポジトリ群を登録した DI コンテナ（UseSqlite・接続文字列は基底の一時 DB）</summary>
     private ServiceProvider? _provider;
 
     /// <summary>AddGeneratedEfCoreRepositories → UseSqlite の DI 経路でリポジトリ群を解決する</summary>
@@ -47,13 +47,13 @@ public sealed class GeneratedSqliteEfCoreParityRuntimeTests : GeneratedSqliteRun
         Provider().GetRequiredService<ISqlExecutor>();
 
     /// <summary>
-    /// 4b（EF 代替版）: ThenInclude 再帰は EF Core の no-tracking クエリがサイクル（<c>Orders-&gt;Customer</c>）を
+    /// 4b（EF Core 代替版）: ThenInclude 再帰は EF Core の no-tracking クエリがサイクル（<c>Orders-&gt;Customer</c>）を
     /// 拒否するため、QuickER 版と同一のシナリオは実行できない。等価な「子の親参照ロード」を非サイクル経路で検証する。
     /// </summary>
     /// <remarks>
     /// <b>基底との差分</b>: QuickER の <c>IncludeLoader</c> は親→子→親のサイクルをマルチクエリで解決できるが、
     /// EF Core（no-tracking）は Include パスのサイクルを実行時に拒否する（"Cycles are not allowed in
-    /// no-tracking queries"）。EF での等価検証として、各注文を <c>Include(o =&gt; o.Customer)</c> で個別にロードし、
+    /// no-tracking queries"）。EF Core での等価検証として、各注文を <c>Include(o =&gt; o.Customer)</c> で個別にロードし、
     /// 全注文が同じ親（CustomerId=1）を参照することを確認する。これはQuickER 版 4b が保証する「子の親参照が正しく
     /// 復元される」ことと同一の観測結果である（ロード経路のみ異なる）。
     /// </remarks>

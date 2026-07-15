@@ -54,7 +54,7 @@ public sealed class NullCheckNode : ConditionNode
 
 /// <summary>文字列一致述語（列 [NOT] LIKE / CONTAINS / STARTSWITH / ENDSWITH オペランド）</summary>
 /// <remarks>
-/// 生成ランタイムの翻訳器（ADO の SqlExpressionTranslator・EF の既定翻訳）は文字列の
+/// 生成ランタイムの翻訳器（ADO の SqlExpressionTranslator・EF Core の既定翻訳）は文字列の
 /// Contains / StartsWith / EndsWith を LIKE へ変換し、値のワイルドカードはエスケープする
 /// （インジェクション安全）。DSL の LIKE はこの意味論に写像する：リテラルパターンは
 /// <c>%</c> の位置で一致種別へ分解し、<c>LIKE @p</c> は部分一致（値はリテラル扱い）とする。

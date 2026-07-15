@@ -126,7 +126,7 @@ public enum QueryReturnShape
 /// <summary>名前付きクエリの実装方式</summary>
 public enum QueryImplementationKind
 {
-    /// <summary>ミニ DSL の条件から全実装先（方言 SQL・EF LINQ）へ自動生成する</summary>
+    /// <summary>ミニ DSL の条件から全実装先（方言 SQL・EF Core LINQ）へ自動生成する</summary>
     Dsl,
 
     /// <summary>方言別の自由 SQL（<see cref="QueryDefinition.Sql"/>）を埋め込む。辞書に無い実装先は manual 扱い</summary>

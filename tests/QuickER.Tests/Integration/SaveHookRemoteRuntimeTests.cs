@@ -240,7 +240,7 @@ public sealed class SaveHookRemoteRuntimeTests : IAsyncLifetime
     /// </summary>
     /// <remarks>
     /// この非対称（サーバーはスキップ・クライアントは Unchanged 確定）は設計上の既知の制限であり、将来 Save 応答へ
-    /// スキップキー集合を載せるプロトコル拡張で解消可能（tasks/todo.md のバックログ参照）。直結（ADO/EF/InMemory）では
+    /// スキップキー集合を載せるプロトコル拡張で解消可能（tasks/todo.md のバックログ参照）。直結（ADO/EF Core/InMemory）では
     /// スキップ行の RowState は据え置かれる（<see cref="SaveHookRuntimeTestsBase.Before_False_SkipsSingleEntity_OthersSaved"/>）。
     /// </remarks>
     [Fact(

@@ -9,7 +9,7 @@ namespace QuickER.Tests.GeneratedRemoteContractFixture;
 // 利用者がそうするのと同じ形（partial クラス）で実装する（クエリフィクスチャの見本と同一内容）。
 // リモート契約生成でも実装クラスは全機能面（I{Entity}Repository）を実装するため、manual 実装の書き味は変わらない。
 
-/// <summary>manual クエリ（SpecialLookup）のRepository (QuickER) 側実装</summary>
+/// <summary>manual クエリ（SpecialLookup）のQuickER 版 Repository 側実装</summary>
 public sealed partial class OrderRepository
 {
     /// <summary>顧客IDに紐づく注文のうち最初の 1 件を返す（manual 実装の見本）</summary>

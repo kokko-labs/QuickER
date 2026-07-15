@@ -159,8 +159,10 @@ public class RemoteContractGenerationTests
         content.Should().NotContain("GetRequiredService<IOrderRepository>");
     }
 
-    /// <summary>ON×EF Core: EF の DI にもリモート面の転送登録が増えることを検証する</summary>
-    [Fact(DisplayName = "ON×EF Core: EF 実装は従来どおり・リモート面の転送 DI が増える")]
+    /// <summary>ON×EF Core: EF Core の DI にもリモート面の転送登録が増えることを検証する</summary>
+    [Fact(
+        DisplayName = "ON×EF Core: EF Core 版 Repository は従来どおり・リモート面の転送 DI が増える"
+    )]
     public void Generate_RemoteContractsWithEfCore_AddsForwardingRegistration()
     {
         var result = Generate(
@@ -177,7 +179,7 @@ public class RemoteContractGenerationTests
         result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
         var content = AllContent(result);
 
-        // EF 実装・実装登録は従来どおり全機能面基準
+        // EF Core 版 Repository・実装登録は従来どおり全機能面基準
         content.Should().Contain("public sealed partial class EfCoreOrderRepository(");
         content.Should().Contain("services.AddScoped<IOrderRepository, EfCoreOrderRepository>();");
 
