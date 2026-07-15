@@ -363,7 +363,6 @@ internal sealed partial class CSharpGenerationModelBuilder
         var binaryStreamBlocks = BuildBinaryStreamBlocks(
             entity,
             entityClassName,
-            $"I{repositoryName}Repository",
             repositoryName,
             keyTypeName,
             options
@@ -389,6 +388,8 @@ internal sealed partial class CSharpGenerationModelBuilder
             BinaryStreamThinImplBlock = binaryStreamBlocks.ThinImplBlock,
             BinaryStreamEfImplBlock = binaryStreamBlocks.EfImplBlock,
             BinaryStreamFileExtensionsBlock = binaryStreamBlocks.FileExtensionsBlock,
+            BinaryStreamRemoteClientBlock = binaryStreamBlocks.RemoteClientBlock,
+            BinaryStreamRemoteServerBlock = binaryStreamBlocks.RemoteServerBlock,
         };
     }
 

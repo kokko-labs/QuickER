@@ -15,7 +15,9 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Linq.Expressions;
+using System.Net;
 using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Reflection;
 using System.Text.Json;
@@ -5781,6 +5783,98 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
                     )
                     .ToArray()
         );
+
+    /// <summary>主キーを URL クエリ（<c>?id=</c>）用の文字列へ直列化する（エンベロープと同一の JSON 規則＝VO は内包値・数値はそのまま・文字列/Guid は引用符付き）</summary>
+    /// <remarks>キー値の JSON 表現を URL エンコードして運ぶ。サーバーは同じ設定（<c>RemoteJson.Options</c>）で復元するため方言・VO によらず往復する</remarks>
+    protected string FormatKeyForQuery(TKey id) =>
+        Uri.EscapeDataString(JsonSerializer.Serialize(id, RemoteJson.Options));
+
+    /// <summary>
+    /// 無制限バイナリ列（除外列）をサーバーからストリーミングでダウンロードする（<c>GET {エンティティ}/{列名}?id=</c>）。
+    /// レスポンスヘッダのみ先読み（<see cref="HttpCompletionOption.ResponseHeadersRead"/>）し、本文を宛先へ O(チャンク) でコピーする
+    /// （blob 全量をメモリに載せない・Base64 不使用）。200＝データを書いた（<c>true</c>・空 blob も true）／404＝行なし または NULL
+    /// （<c>false</c>・宛先へ何も書かない）。それ以外の失敗は既存規則で例外復元する。
+    /// </summary>
+    protected async Task<bool> DownloadUnboundedBinaryColumnAsync(
+        string columnRoute,
+        TKey id,
+        Stream destination,
+        CancellationToken cancellationToken
+    )
+    {
+        ArgumentNullException.ThrowIfNull(destination);
+
+        var requestUri = $"{_entityRoute}/{columnRoute}?id={FormatKeyForQuery(id)}";
+        using var response = await _httpClient.GetAsync(
+            requestUri,
+            HttpCompletionOption.ResponseHeadersRead,
+            cancellationToken
+        );
+
+        if (response.StatusCode == HttpStatusCode.NotFound)
+        {
+            return false;
+        }
+
+        await EnsureSuccessAsync(response, cancellationToken);
+
+        await using var source = await response.Content.ReadAsStreamAsync(cancellationToken);
+        await source.CopyToAsync(destination, cancellationToken);
+        return true;
+    }
+
+    /// <summary>
+    /// 無制限バイナリ列（除外列）をサーバーへストリーミングでアップロードする。<paramref name="source"/> が <c>null</c> のときは
+    /// <c>DELETE</c>（列を NULL 化）、非 <c>null</c> のときは <c>PUT</c>（<see cref="StreamContent"/>＋Content-Length）を送る
+    /// （0 バイトの PUT＝空ボディと NULL 化＝DELETE は構造的に区別される）。送信前に長さ契約（<c>CanSeek</c> でない Stream は
+    /// <paramref name="length"/> 必須）を検証する。204＝成功（<c>true</c>）／404＝行なし（<c>false</c>）。それ以外は例外復元。
+    /// </summary>
+    protected async Task<bool> UploadUnboundedBinaryColumnAsync(
+        string columnRoute,
+        TKey id,
+        Stream? source,
+        long? length,
+        CancellationToken cancellationToken
+    )
+    {
+        var requestUri = $"{_entityRoute}/{columnRoute}?id={FormatKeyForQuery(id)}";
+
+        // source=null は列を NULL に設定する（DELETE）。0 バイトの PUT（空ボディ）とは意味が異なる
+        if (source is null)
+        {
+            using var deleteResponse = await _httpClient.DeleteAsync(requestUri, cancellationToken);
+
+            if (deleteResponse.StatusCode == HttpStatusCode.NotFound)
+            {
+                return false;
+            }
+
+            await EnsureSuccessAsync(deleteResponse, cancellationToken);
+            return true;
+        }
+
+        // 送信前に長さを確定する（CanSeek でない Stream は length 必須＝Content-Length と自然に整合。欠落は送信前に例外）
+        var payloadLength = UnboundedBinaryColumns.ResolveWriteLength(source, length);
+
+        using var content = new StreamContent(source);
+        content.Headers.ContentLength = payloadLength;
+        content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+
+        using var request = new HttpRequestMessage(HttpMethod.Put, requestUri) { Content = content };
+        using var response = await _httpClient.SendAsync(
+            request,
+            HttpCompletionOption.ResponseHeadersRead,
+            cancellationToken
+        );
+
+        if (response.StatusCode == HttpStatusCode.NotFound)
+        {
+            return false;
+        }
+
+        await EnsureSuccessAsync(response, cancellationToken);
+        return true;
+    }
 }
 
 /// <summary>エンティティ型の属性からテーブル・カラム情報、CRUD 用 SQL、カスケード子ナビゲーションを構築・保持し、行マッピングとパラメータ束縛を提供するメタデータ</summary>
@@ -6694,13 +6788,7 @@ public partial interface IDocumentRemoteRepository : IRemoteRepository<DocumentE
 
     /// <summary>本体バイナリ（payload）が存在する文書の件数を取得する</summary>
     Task<int> CountWithPayloadAsync(CancellationToken cancellationToken = default);
-}
 
-/// <summary>DocumentEntity 用リポジトリインターフェース（全機能面＝リモート面に式木クエリ・生 SQL・一括追加を追加）</summary>
-public partial interface IDocumentRepository
-    : IDocumentRemoteRepository,
-        IRepository<DocumentEntity, int>
-{
     /// <summary>payload を宛先ストリームへ読み出す（無制限バイナリ列・O(チャンク) のストリーミング。true=書き込んだ・false=行なし または NULL）</summary>
     Task<bool> ReadPayloadAsync(int id, Stream destination, CancellationToken cancellationToken = default);
 
@@ -6713,6 +6801,11 @@ public partial interface IDocumentRepository
     /// <summary>thumb をストリームから書き込む（無制限バイナリ列・O(チャンク) のストリーミング。source=null で NULL を設定・CanSeek でない Stream は length 指定が必須。true=更新した・false=行なし）</summary>
     Task<bool> WriteThumbAsync(int id, Stream? source, long? length = null, CancellationToken cancellationToken = default);
 }
+
+/// <summary>DocumentEntity 用リポジトリインターフェース（全機能面＝リモート面に式木クエリ・生 SQL・一括追加を追加）</summary>
+public partial interface IDocumentRepository
+    : IDocumentRemoteRepository,
+        IRepository<DocumentEntity, int> { }
 
 /// <summary>名前付きクエリ GetPayloads の射影 DTO（documents）</summary>
 public sealed partial class DocumentPayloadRow
@@ -6729,7 +6822,7 @@ public static class DocumentRepositoryBinaryStreamExtensions
 {
     /// <summary>payload をファイルへ読み出す（Stream 版へ委譲。true=書き込んだ・false=行なし または NULL）</summary>
     public static async Task<bool> ReadPayloadToFileAsync(
-        this IDocumentRepository repository,
+        this IDocumentRemoteRepository repository,
         int id,
         string path,
         CancellationToken cancellationToken = default
@@ -6742,7 +6835,7 @@ public static class DocumentRepositoryBinaryStreamExtensions
 
     /// <summary>payload をファイルから書き込む（Stream 版へ委譲。true=更新した・false=行なし）</summary>
     public static async Task<bool> WritePayloadFromFileAsync(
-        this IDocumentRepository repository,
+        this IDocumentRemoteRepository repository,
         int id,
         string path,
         CancellationToken cancellationToken = default
@@ -6755,7 +6848,7 @@ public static class DocumentRepositoryBinaryStreamExtensions
 
     /// <summary>thumb をファイルへ読み出す（Stream 版へ委譲。true=書き込んだ・false=行なし または NULL）</summary>
     public static async Task<bool> ReadThumbToFileAsync(
-        this IDocumentRepository repository,
+        this IDocumentRemoteRepository repository,
         int id,
         string path,
         CancellationToken cancellationToken = default
@@ -6768,7 +6861,7 @@ public static class DocumentRepositoryBinaryStreamExtensions
 
     /// <summary>thumb をファイルから書き込む（Stream 版へ委譲。true=更新した・false=行なし）</summary>
     public static async Task<bool> WriteThumbFromFileAsync(
-        this IDocumentRepository repository,
+        this IDocumentRemoteRepository repository,
         int id,
         string path,
         CancellationToken cancellationToken = default
@@ -6844,6 +6937,22 @@ public sealed partial class HttpDocumentRemoteRepository(HttpClient httpClient)
     /// <summary>本体バイナリ（payload）が存在する文書の件数を取得する</summary>
     public Task<int> CountWithPayloadAsync(CancellationToken cancellationToken = default) =>
         InvokeAsync<int>("CountWithPayload", null, cancellationToken);
+
+    /// <inheritdoc />
+    public Task<bool> ReadPayloadAsync(int id, Stream destination, CancellationToken cancellationToken = default) =>
+        DownloadUnboundedBinaryColumnAsync("Payload", id, destination, cancellationToken);
+
+    /// <inheritdoc />
+    public Task<bool> WritePayloadAsync(int id, Stream? source, long? length = null, CancellationToken cancellationToken = default) =>
+        UploadUnboundedBinaryColumnAsync("Payload", id, source, length, cancellationToken);
+
+    /// <inheritdoc />
+    public Task<bool> ReadThumbAsync(int id, Stream destination, CancellationToken cancellationToken = default) =>
+        DownloadUnboundedBinaryColumnAsync("Thumb", id, destination, cancellationToken);
+
+    /// <inheritdoc />
+    public Task<bool> WriteThumbAsync(int id, Stream? source, long? length = null, CancellationToken cancellationToken = default) =>
+        UploadUnboundedBinaryColumnAsync("Thumb", id, source, length, cancellationToken);
 }
 
 /// <summary>DocumentNoteEntity 用リモート面（IDocumentNoteRemoteRepository）の HTTP クライアント実装</summary>

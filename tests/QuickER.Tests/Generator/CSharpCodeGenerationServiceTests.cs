@@ -3698,11 +3698,14 @@ public class CSharpCodeGenerationServiceTests
     }
 
     /// <summary>
-    /// リモート契約生成時、Stream アクセサは全機能面（<c>I{Entity}Repository</c>）にのみ載り、
-    /// リモート面（<c>I{Entity}RemoteRepository</c>）には載らない（ネットワーク境界を越えるストリーミングは対象外）。
+    /// リモート契約生成時、Stream アクセサはリモート面（<c>I{Entity}RemoteRepository</c>）へ移設され、全機能面
+    /// （<c>I{Entity}Repository</c>）はリモート面を継承して見える（ネットワーク境界を越えられる操作の定義に合致）。
+    /// ファイル糖衣もリモート面を対象にする。
     /// </summary>
-    [Fact(DisplayName = "Stream アクセサ: リモート面には載らず全機能面にのみ載る")]
-    public void Generate_BinaryStreamAccessors_NotOnRemoteInterface()
+    [Fact(
+        DisplayName = "Stream アクセサ: リモート契約 ON でリモート面へ移設され全機能面から見える"
+    )]
+    public void Generate_BinaryStreamAccessors_OnRemoteInterface_WhenRemoteContracts()
     {
         var result = new CSharpCodeGenerationService().Generate(
             BinaryColumnDiagram(),
@@ -3717,9 +3720,46 @@ public class CSharpCodeGenerationServiceTests
         result.HasErrors.Should().BeFalse();
         var content = result.Files.Single(f => f.FileName.EndsWith(".g.cs")).Content;
 
-        // 全機能面には載る
-        content.Should().Contain("Task<bool> ReadPhotoAsync(int id, Stream destination");
-        // リモート面（インターフェイス宣言直後の本体）には載らない
-        content.Should().NotMatchRegex(@"interface IDocumentRemoteRepository[^}]*ReadPhotoAsync");
+        // リモート面（インターフェイス宣言直後の本体）に Read/Write が載る
+        content
+            .Should()
+            .MatchRegex(
+                @"(?s)interface IDocumentRemoteRepository[^{]*\{[^}]*Task<bool> ReadPhotoAsync\(int id, Stream destination"
+            );
+        // 全機能面はリモート面を継承する空本体（Read/Write を再宣言しない）
+        content
+            .Should()
+            .MatchRegex(@"interface IDocumentRepository\s*:\s*IDocumentRemoteRepository,");
+        // ファイル糖衣はリモート面を対象にする（全機能面でもリモート面経由でも呼べる）
+        content.Should().Contain("this IDocumentRemoteRepository repository");
+    }
+
+    /// <summary>
+    /// リモート契約 OFF（既定）のとき、Stream アクセサは従来どおり全機能面（<c>I{Entity}Repository</c>）へ直接載り、
+    /// ファイル糖衣も全機能面を対象にする（リモート面インターフェイス自体が生成されないため）。
+    /// </summary>
+    [Fact(DisplayName = "Stream アクセサ: リモート契約 OFF では全機能面へ直載せ")]
+    public void Generate_BinaryStreamAccessors_OnFullInterface_WhenNoRemoteContracts()
+    {
+        var result = new CSharpCodeGenerationService().Generate(
+            BinaryColumnDiagram(),
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                ExcludeUnboundedBinaryColumns = true,
+            }
+        );
+
+        result.HasErrors.Should().BeFalse();
+        var content = result.Files.Single(f => f.FileName.EndsWith(".g.cs")).Content;
+
+        // 全機能面（インターフェイス宣言直後の本体）へ直接載る
+        content
+            .Should()
+            .MatchRegex(
+                @"(?s)interface IDocumentRepository\s*:\s*IRepository<[^{]*\{[^}]*Task<bool> ReadPhotoAsync\(int id, Stream destination"
+            );
+        // ファイル糖衣は全機能面を対象にする
+        content.Should().Contain("this IDocumentRepository repository");
     }
 }

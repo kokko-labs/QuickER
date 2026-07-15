@@ -453,10 +453,24 @@ internal sealed class CSharpRepositoryModel
     public string QueryRemoteServerRecordsBlock { get; init; } = string.Empty;
 
     /// <summary>
-    /// 無制限バイナリ列の Stream アクセサの契約メンバー群（<c>I{Entity}Repository</c> 全機能面へ挿入・整形済み）。
-    /// <c>GenerateRepositories &amp;&amp; ExcludeUnboundedBinaryColumns</c> かつ除外列があるときのみ非空。リモート面には載せない。
+    /// 無制限バイナリ列の Stream アクセサの契約メンバー群（整形済み）。
+    /// <c>GenerateRepositories &amp;&amp; ExcludeUnboundedBinaryColumns</c> かつ除外列があるときのみ非空。
+    /// 挿入先はテンプレートがリモート契約の有無で出し分ける（リモート面 ON なら <c>I{Entity}RemoteRepository</c>・
+    /// OFF なら全機能面 <c>I{Entity}Repository</c>。ランタイム共通の基底 <c>IRemoteRepository</c> には載せない）。
     /// </summary>
     public string BinaryStreamContractBlock { get; init; } = string.Empty;
+
+    /// <summary>
+    /// 無制限バイナリ列の Stream アクセサの HTTP クライアント転送メソッド群（<c>Http{Entity}RemoteRepository</c> へ挿入・整形済み）。
+    /// GET/PUT/DELETE の専用エンドポイントへ委譲する。リモートサービス生成時のみテンプレートが参照する（無ければ空文字）。
+    /// </summary>
+    public string BinaryStreamRemoteClientBlock { get; init; } = string.Empty;
+
+    /// <summary>
+    /// 無制限バイナリ列の Stream アクセサのサーバー側バイナリエンドポイント群（<c>Map{Entity}Endpoints</c> 内へ挿入・整形済み）。
+    /// 除外列ごとに GET（ダウンロード）・PUT（アップロード・サイズ制限解除）・DELETE（NULL 化）の 3 動詞を出力する（無ければ空文字）。
+    /// </summary>
+    public string BinaryStreamRemoteServerBlock { get; init; } = string.Empty;
 
     /// <summary>
     /// 無制限バイナリ列の Stream アクセサの薄い実装メンバー群（固定 infra のエンジンへ委譲）。
