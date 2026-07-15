@@ -175,13 +175,11 @@ public class MockGenerationDialogViewModelTests
             new StubDiagramSource(diagram),
             new SyncUiDispatcher(),
             files: null,
-            codexSettingsStore: new CodexAppServerSettingsStore(folder),
+            // 設定・UI 状態・モデル履歴を集約した 1 ファイルを一時フォルダへ隔離する（実 %APPDATA% を保護）
+            settingsStore: new AiSettingsStore(folder),
             apiKeyEngineFactory: (_, toolHost) => engineBox[0] = new FakeChatEngine(toolHost),
             codexEngineFactory: null,
-            claudeCodeEngineFactory: null,
-            // Ollama モデル履歴を一時フォルダへ隔離する（成功ターンの記録が実 %APPDATA% に触れないようにする）
-            apiModelHistoryStore: new ApiModelHistoryStore(folder),
-            codexModelHistoryStore: new CodexModelHistoryStore(folder)
+            claudeCodeEngineFactory: null
         );
         vm.Connection.ApiProvider = AiProvider.Ollama; // 認証不要にして接続 OK 状態にする
         return (vm, engineBox, folder);
@@ -211,13 +209,12 @@ public class MockGenerationDialogViewModelTests
             new StubDiagramSource(diagram),
             new SyncUiDispatcher(),
             files: null,
-            codexSettingsStore: new CodexAppServerSettingsStore(folder),
+            // 設定・UI 状態・モデル履歴を集約した 1 ファイルを一時フォルダへ隔離する（実 %APPDATA% を保護）
+            settingsStore: new AiSettingsStore(folder),
             apiKeyEngineFactory: null,
             codexEngineFactory: null,
             claudeCodeEngineFactory: (_, toolHost) => engineBox[0] = new FakeChatEngine(toolHost),
-            mockProjectGenerator: generator,
-            apiModelHistoryStore: new ApiModelHistoryStore(folder),
-            codexModelHistoryStore: new CodexModelHistoryStore(folder)
+            mockProjectGenerator: generator
         );
 
         return (vm, engineBox, generator, folder);
@@ -249,18 +246,14 @@ public class MockGenerationDialogViewModelTests
 
         try
         {
-            var uiStore = new ChatUiSettingsStore("mock-generation-ui.json", folder);
             var vm = new MockGenerationDialogViewModel(
                 new StubDiagramSource(NonEmptyDiagram()),
                 new SyncUiDispatcher(),
                 files: null,
-                codexSettingsStore: new CodexAppServerSettingsStore(folder),
+                settingsStore: new AiSettingsStore(folder),
                 apiKeyEngineFactory: null,
                 codexEngineFactory: null,
-                claudeCodeEngineFactory: null,
-                uiSettingsStore: uiStore,
-                apiModelHistoryStore: new ApiModelHistoryStore(folder),
-                codexModelHistoryStore: new CodexModelHistoryStore(folder)
+                claudeCodeEngineFactory: null
             );
 
             // 保存が無い初回は API キータブが既定
@@ -273,13 +266,10 @@ public class MockGenerationDialogViewModelTests
                 new StubDiagramSource(NonEmptyDiagram()),
                 new SyncUiDispatcher(),
                 files: null,
-                codexSettingsStore: new CodexAppServerSettingsStore(folder),
+                settingsStore: new AiSettingsStore(folder),
                 apiKeyEngineFactory: null,
                 codexEngineFactory: null,
-                claudeCodeEngineFactory: null,
-                uiSettingsStore: uiStore,
-                apiModelHistoryStore: new ApiModelHistoryStore(folder),
-                codexModelHistoryStore: new CodexModelHistoryStore(folder)
+                claudeCodeEngineFactory: null
             );
 
             restored.Connection.InitialBackend.Should().Be(ErChatBackendKind.ClaudeCode);
@@ -497,12 +487,10 @@ public class MockGenerationDialogViewModelTests
             new StubDiagramSource(NonEmptyDiagram()),
             new SyncUiDispatcher(),
             files: files,
-            codexSettingsStore: new CodexAppServerSettingsStore(folder),
+            settingsStore: new AiSettingsStore(folder),
             apiKeyEngineFactory: (_, toolHost) => engineBox[0] = new FakeChatEngine(toolHost),
             codexEngineFactory: null,
-            claudeCodeEngineFactory: null,
-            apiModelHistoryStore: new ApiModelHistoryStore(folder),
-            codexModelHistoryStore: new CodexModelHistoryStore(folder)
+            claudeCodeEngineFactory: null
         );
         vm.Connection.ApiProvider = AiProvider.Ollama;
 
@@ -722,7 +710,7 @@ public class MockGenerationDialogViewModelTests
             // フェイクエンジンが成功 TurnCompleted を発火し、記録が走る
             vm.Connection.ApiModelCandidates.Select(c => c.Name).Should().Contain("qwen3.6:35b");
 
-            var reloaded = new ApiModelHistoryStore(folder).Load();
+            var reloaded = new AiSettingsStore(folder).Load().ApiModelHistory;
             reloaded.ModelsFor("ollama").Should().Contain("qwen3.6:35b");
         }
         finally

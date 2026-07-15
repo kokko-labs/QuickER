@@ -55,18 +55,16 @@ public class ModelHistoryComboBoxTests
             try
             {
                 // openai のカタログ外履歴を 1 件仕込んでおく（カタログの下に × 付きで並ぶ状態）
-                var store = new ApiModelHistoryStore(folder);
-                var seeded = new ProviderModelHistory();
-                seeded.Touch("openai", "custom-model");
+                var store = new AiSettingsStore(folder);
+                var seeded = store.Load();
+                seeded.ApiModelHistory.Touch("openai", "custom-model");
                 store.Save(seeded);
 
                 var vm = new AiChatDialogViewModel(
                     host: null,
                     dispatcher: new SyncUiDispatcher(),
-                    settingsStore: new CodexAppServerSettingsStore(folder),
-                    codexClient: new FakeCodexAppServerClient(),
-                    apiModelHistoryStore: store,
-                    codexModelHistoryStore: new CodexModelHistoryStore(folder)
+                    settingsStore: store,
+                    codexClient: new FakeCodexAppServerClient()
                 );
 
                 // 前提: 既定プロバイダ（OpenAI）の候補はカタログ（× なし）＋履歴（× あり）の 2 層
@@ -160,7 +158,7 @@ public class ModelHistoryComboBoxTests
                     vm.Connection.ApiModelCandidates.Select(c => c.Name)
                         .Should()
                         .Equal(AiModelCatalog.OpenAiModels);
-                    store.Load().ModelsFor("openai").Should().BeEmpty();
+                    store.Load().ApiModelHistory.ModelsFor("openai").Should().BeEmpty();
                 }
                 finally
                 {
@@ -205,32 +203,26 @@ public class ModelHistoryComboBoxTests
             try
             {
                 // 履歴に 2 件を仕込み、非 openai プロバイダの候補が履歴のみになる状態を作る
-                var codexStore = new CodexModelHistoryStore(folder);
-                codexStore.Save(
-                    new ProviderModelHistory
-                    {
-                        Providers =
-                        {
-                            ["test-provider"] = new List<string> { "hist-model", "hist-model-2" },
-                        },
-                    }
-                );
+                var codexStore = new AiSettingsStore(folder);
+                var seeded = codexStore.Load();
+                seeded.CodexModelHistory.Providers["test-provider"] = new List<string>
+                {
+                    "hist-model",
+                    "hist-model-2",
+                };
+                codexStore.Save(seeded);
 
                 // 候補を決定的にするため config.toml を seam で注入して Connection を単体構築する
                 var connection = new ChatConnectionSettingsViewModel(
-                    "ai-chat-ui.json",
-                    codexSettingsStore: new CodexAppServerSettingsStore(folder),
-                    uiSettingsStore: new ChatUiSettingsStore("ai-chat-ui.json", folder),
-                    claudeCodeSettingsStore: new ClaudeCodeSettingsStore(folder),
+                    AiDialogKind.AiChat,
+                    settingsStore: codexStore,
                     codexConfigReader: () =>
                         new CodexConfigToml
                         {
                             ProviderNames = new List<string> { "test-provider" },
                         },
                     apiKeyLoader: _ => string.Empty,
-                    apiKeySaver: (_, _) => { },
-                    apiModelHistoryStore: new ApiModelHistoryStore(folder),
-                    codexModelHistoryStore: codexStore
+                    apiKeySaver: (_, _) => { }
                 );
                 connection.LoadSettings();
                 connection.SelectedBackend = ErChatBackendKind.Codex;
@@ -248,10 +240,8 @@ public class ModelHistoryComboBoxTests
                 var dialogVm = new AiChatDialogViewModel(
                     host: null,
                     dispatcher: new SyncUiDispatcher(),
-                    settingsStore: new CodexAppServerSettingsStore(folder),
-                    codexClient: new FakeCodexAppServerClient(),
-                    apiModelHistoryStore: new ApiModelHistoryStore(folder),
-                    codexModelHistoryStore: new CodexModelHistoryStore(folder)
+                    settingsStore: new AiSettingsStore(folder),
+                    codexClient: new FakeCodexAppServerClient()
                 );
                 var dialog = WpfApplicationTestSupport.LoadXamlComponent(() =>
                     new AiChatDialog(dialogVm)
@@ -325,7 +315,11 @@ public class ModelHistoryComboBoxTests
                         .CodexModelCandidates.Select(c => c.Name)
                         .Should()
                         .Equal("hist-model-2");
-                    codexStore.Load().ModelsFor("test-provider").Should().Equal("hist-model-2");
+                    codexStore
+                        .Load()
+                        .CodexModelHistory.ModelsFor("test-provider")
+                        .Should()
+                        .Equal("hist-model-2");
 
                     // openai プロバイダへ切替: 静的カタログ候補（IsRemovable=false）の × は Collapsed
                     connection.CodexModelProvider = "openai";

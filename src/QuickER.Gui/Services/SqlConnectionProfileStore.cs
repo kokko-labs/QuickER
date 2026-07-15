@@ -7,6 +7,16 @@ using System.Text.Json;
 
 namespace QuickER.Services;
 
+/// <summary>connections.json のルート（登録プロファイル一覧＋前回接続）</summary>
+public sealed class SqlConnectionData
+{
+    /// <summary>登録済みの接続プロファイル一覧</summary>
+    public List<SqlConnectionProfile> Profiles { get; set; } = new();
+
+    /// <summary>前回使用した接続情報（未使用時は null）</summary>
+    public SqlConnectionProfile? LastUsed { get; set; }
+}
+
 /// <summary>SQL 接続プロファイルを JSON ファイルへ保存・読込するストア</summary>
 /// <remarks>
 /// パスワードはプロファイル本体とは分離し、Windows DPAPI（CurrentUser スコープ）で
@@ -27,14 +37,11 @@ public class SqlConnectionProfileStore
     /// <summary>パスワードを DPAPI で暗号化するかどうか（テストでは平文保存のため false）</summary>
     private readonly bool _useDpapi;
 
-    /// <summary>プロファイル一覧 JSON のファイルパス</summary>
-    public string ProfilesPath => Path.Combine(_folder, "connections.json");
+    /// <summary>接続情報 JSON（プロファイル一覧＋前回接続）のファイルパス</summary>
+    public string ConnectionsPath => Path.Combine(_folder, "connections.json");
 
     /// <summary>パスワード暗号ファイルの格納フォルダ</summary>
     public string SecretsFolder => Path.Combine(_folder, "connection-secrets");
-
-    /// <summary>前回接続情報 JSON のファイルパス</summary>
-    public string LastConnectionPath => Path.Combine(_folder, "last-connection.json");
 
     /// <summary>既定（<c>%AppData%\QuickER</c>・DPAPI 有効）のストアを生成する</summary>
     public SqlConnectionProfileStore()
@@ -55,74 +62,75 @@ public class SqlConnectionProfileStore
         _useDpapi = useDpapi;
     }
 
-    /// <summary>すべてのプロファイルを名前順で読み込む（読み取り失敗時は空一覧を返す）</summary>
-    public List<SqlConnectionProfile> LoadAll()
+    /// <summary>接続情報（プロファイル一覧＋前回接続）を読み込む</summary>
+    /// <remarks>
+    /// ファイル無し・解析失敗（旧配列形式など新形式として読めない JSON を含む）時は空の
+    /// <see cref="SqlConnectionData"/> へフォールバックする
+    /// </remarks>
+    private SqlConnectionData LoadData()
     {
-        if (!File.Exists(ProfilesPath))
+        if (!File.Exists(ConnectionsPath))
         {
-            return new List<SqlConnectionProfile>();
+            return new SqlConnectionData();
         }
 
         try
         {
-            var json = File.ReadAllText(ProfilesPath);
-            var list =
-                JsonSerializer.Deserialize<List<SqlConnectionProfile>>(json, JsonOpts)
-                ?? new List<SqlConnectionProfile>();
-            return list.OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase).ToList();
+            var json = File.ReadAllText(ConnectionsPath);
+            return JsonSerializer.Deserialize<SqlConnectionData>(json, JsonOpts)
+                ?? new SqlConnectionData();
         }
         catch
         {
-            // 破損 JSON 等で UI を妨げないよう空一覧へフォールバックする
-            return new List<SqlConnectionProfile>();
+            // 破損 JSON・旧配列形式等で UI を妨げないよう空データへフォールバックする
+            return new SqlConnectionData();
         }
     }
+
+    /// <summary>接続情報（プロファイル一覧＋前回接続）を保存する</summary>
+    private void SaveData(SqlConnectionData data)
+    {
+        Directory.CreateDirectory(_folder);
+        var json = JsonSerializer.Serialize(data, JsonOpts);
+        File.WriteAllText(ConnectionsPath, json);
+    }
+
+    /// <summary>すべてのプロファイルを名前順で読み込む（読み取り失敗時は空一覧を返す）</summary>
+    public List<SqlConnectionProfile> LoadAll() =>
+        LoadData().Profiles.OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase).ToList();
 
     /// <summary>前回使用した接続情報を読み込む</summary>
     /// <remarks>パスワードは <see cref="SqlConnectionProfile.SavePassword"/> が有効な場合のみ復号して返す</remarks>
     public (SqlConnectionProfile Profile, string Password)? LoadLastUsed()
     {
-        if (!File.Exists(LastConnectionPath))
+        var profile = LoadData().LastUsed;
+
+        if (profile is null)
         {
             return null;
         }
 
-        try
-        {
-            var json = File.ReadAllText(LastConnectionPath);
-            var profile = JsonSerializer.Deserialize<SqlConnectionProfile>(json, JsonOpts);
-
-            if (profile is null)
-            {
-                return null;
-            }
-
-            var password = profile.SavePassword
-                ? LoadSecret(LastConnectionSecretPath())
-                : string.Empty;
-            return (profile, password);
-        }
-        catch
-        {
-            return null;
-        }
+        var password = profile.SavePassword ? LoadSecret(LastConnectionSecretPath()) : string.Empty;
+        return (profile, password);
     }
 
-    /// <summary>すべてのプロファイルを保存する</summary>
+    /// <summary>すべてのプロファイルを保存する（前回接続情報は温存する）</summary>
     public void SaveAll(IEnumerable<SqlConnectionProfile> profiles)
     {
-        Directory.CreateDirectory(_folder);
-        var json = JsonSerializer.Serialize(profiles.ToList(), JsonOpts);
-        File.WriteAllText(ProfilesPath, json);
+        // read-modify-write で Profiles のみ差し替え、LastUsed を消さない
+        var data = LoadData();
+        data.Profiles = profiles.ToList();
+        SaveData(data);
     }
 
     /// <summary>前回使用した接続情報を保存する</summary>
-    /// <remarks>登録済みプロファイルとは別管理とし、次回ダイアログ表示時の初期値復元に用いる</remarks>
+    /// <remarks>登録済みプロファイル一覧とは別セクションで管理し、次回ダイアログ表示時の初期値復元に用いる</remarks>
     public void SaveLastUsed(SqlConnectionProfile profile, string password)
     {
-        Directory.CreateDirectory(_folder);
-        var json = JsonSerializer.Serialize(profile, JsonOpts);
-        File.WriteAllText(LastConnectionPath, json);
+        // read-modify-write で LastUsed のみ差し替え、Profiles を消さない
+        var data = LoadData();
+        data.LastUsed = profile;
+        SaveData(data);
 
         // パスワード保存が無効化された場合は残存する暗号ファイルを確実に削除する
         if (profile.SavePassword && !string.IsNullOrEmpty(password))

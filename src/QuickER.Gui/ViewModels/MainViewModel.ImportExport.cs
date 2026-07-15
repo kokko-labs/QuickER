@@ -77,12 +77,8 @@ public partial class MainViewModel
         "last_diagram.json"
     );
 
-    /// <summary>UI 表示状態の保存ファイルのパス</summary>
-    private static readonly string UiStatePath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-        "QuickER",
-        "ui_state.json"
-    );
+    /// <summary>GUI 全体設定（UI 表示状態を含む）を gui-settings.json へ永続化するストア</summary>
+    private readonly GuiAppSettingsStore _guiSettingsStore = new();
 
     /// <summary>現在のダイアグラムと UI 表示状態を自動保存ファイルへ書き出す</summary>
     public void AutoSave()
@@ -92,17 +88,17 @@ public partial class MainViewModel
             var dir = Path.GetDirectoryName(AutoSavePath)!;
             Directory.CreateDirectory(dir);
             JsonStorageService.Save(AutoSavePath, ToDocument());
-            File.WriteAllText(
-                UiStatePath,
-                System.Text.Json.JsonSerializer.Serialize(
-                    new UiState
-                    {
-                        ShowColumnDescriptionsInDiagram = ShowColumnDescriptionsInDiagram,
-                        ShowNullabilityInDiagram = ShowNullabilityInDiagram,
-                        IsCompactViewInDiagram = IsCompactViewInDiagram,
-                    }
-                )
-            );
+
+            // UI 表示状態は GUI 全体設定の 1 セクション。他のセクション（言語など）を消さないよう
+            // Load → 該当セクションのみ差し替え → Save の read-modify-write で書き込む
+            var settings = _guiSettingsStore.Load();
+            settings.DiagramView = new DiagramViewSettings
+            {
+                ShowColumnDescriptions = ShowColumnDescriptionsInDiagram,
+                ShowNullability = ShowNullabilityInDiagram,
+                IsCompactView = IsCompactViewInDiagram,
+            };
+            _guiSettingsStore.Save(settings);
         }
         catch
         {
@@ -113,26 +109,12 @@ public partial class MainViewModel
     /// <summary>起動時に前回の自動保存ファイルから UI 状態とダイアグラムを復元する</summary>
     private void RestoreLastDiagram()
     {
-        try
-        {
-            if (File.Exists(UiStatePath))
-            {
-                var uiState = System.Text.Json.JsonSerializer.Deserialize<UiState>(
-                    File.ReadAllText(UiStatePath)
-                );
-
-                if (uiState is not null)
-                {
-                    ShowColumnDescriptionsInDiagram = uiState.ShowColumnDescriptionsInDiagram;
-                    ShowNullabilityInDiagram = uiState.ShowNullabilityInDiagram;
-                    IsCompactViewInDiagram = uiState.IsCompactViewInDiagram;
-                }
-            }
-        }
-        catch
-        {
-            // UI 状態の復元失敗は致命的でないため無視する
-        }
+        // UI 表示状態を GUI 全体設定から反映する（ファイル無し・破損時は既定値が返り、
+        // その既定値は VM 側の初期値と一致するため常時反映しても挙動は変わらない）
+        var diagramView = _guiSettingsStore.Load().DiagramView;
+        ShowColumnDescriptionsInDiagram = diagramView.ShowColumnDescriptions;
+        ShowNullabilityInDiagram = diagramView.ShowNullability;
+        IsCompactViewInDiagram = diagramView.IsCompactView;
 
         if (!File.Exists(AutoSavePath))
         {
@@ -786,18 +768,5 @@ public partial class MainViewModel
 
         // ウィンドウタイトル・印刷ダイアログのタイトル初期値用。保存フォーマット・Undo には関与しない
         LastDocumentFileName = Path.GetFileNameWithoutExtension(picked.Path);
-    }
-
-    /// <summary>自動保存対象の UI 表示状態（ダイアグラム上の表示トグル）</summary>
-    private sealed class UiState
-    {
-        /// <summary>ダイアグラム上にカラム説明を表示するかどうか</summary>
-        public bool ShowColumnDescriptionsInDiagram { get; init; }
-
-        /// <summary>ダイアグラム上に NULL 許容を表示するかどうか</summary>
-        public bool ShowNullabilityInDiagram { get; init; } = true;
-
-        /// <summary>ダイアグラム上で簡易表示（PK/FK カラムのみ）を行うかどうか</summary>
-        public bool IsCompactViewInDiagram { get; init; }
     }
 }

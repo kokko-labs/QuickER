@@ -46,10 +46,8 @@ public class CodexProviderComboBoxTests
                 var vm = new AiChatDialogViewModel(
                     host: null,
                     dispatcher: new SyncUiDispatcher(),
-                    settingsStore: new CodexAppServerSettingsStore(folder),
-                    codexClient: new FakeCodexAppServerClient(),
-                    apiModelHistoryStore: new ApiModelHistoryStore(folder),
-                    codexModelHistoryStore: new CodexModelHistoryStore(folder)
+                    settingsStore: new AiSettingsStore(folder),
+                    codexClient: new FakeCodexAppServerClient()
                 );
 
                 // 実ダイアログのプロバイダー ComboBox から本物のテンプレートと入力方式を確認する

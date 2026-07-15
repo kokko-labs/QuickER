@@ -282,7 +282,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
             diagramSource,
             new WpfUiDispatcher(),
             files: null,
-            codexSettingsStore: null,
+            settingsStore: null,
             apiKeyEngineFactory: null,
             codexEngineFactory: null,
             claudeCodeEngineFactory: null,
@@ -293,7 +293,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     /// <param name="diagramSource">生成対象の ER 図の供給元</param>
     /// <param name="dispatcher">UI スレッドへのマーシャリング</param>
     /// <param name="files">HTML 保存ダイアログの供給元</param>
-    /// <param name="codexSettingsStore">Codex 設定ストア</param>
+    /// <param name="settingsStore">AI 設定ストア（Codex / Claude Code / UI 状態 / モデル履歴を集約）</param>
     /// <param name="apiKeyEngineFactory">API キーエンジンのファクトリ（プロファイル・ツールホスト受け取り）</param>
     /// <param name="codexEngineFactory">Codex エンジンのファクトリ</param>
     /// <param name="claudeCodeEngineFactory">Claude Code エンジンのファクトリ</param>
@@ -302,15 +302,12 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         IMockDiagramSource diagramSource,
         IUiDispatcher dispatcher,
         IFileDialogService? files,
-        CodexAppServerSettingsStore? codexSettingsStore,
+        AiSettingsStore? settingsStore,
         Func<ErChatProfile, IErDiagramToolHost, IErChatEngine>? apiKeyEngineFactory,
         Func<ErChatProfile, IErDiagramToolHost, IErChatEngine>? codexEngineFactory,
         Func<ErChatProfile, IErDiagramToolHost, IErChatEngine>? claudeCodeEngineFactory,
         IMockProjectGenerator? mockProjectGenerator = null,
-        ChatAttachmentFactory.ImageShrinker? imageShrinker = null,
-        ChatUiSettingsStore? uiSettingsStore = null,
-        ApiModelHistoryStore? apiModelHistoryStore = null,
-        CodexModelHistoryStore? codexModelHistoryStore = null
+        ChatAttachmentFactory.ImageShrinker? imageShrinker = null
     )
     {
         _diagramSource = diagramSource;
@@ -328,11 +325,8 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         // 接続方式タブの状態部品。エンジンのファクトリ既定ラムダより前に用意し、get-only プロパティを
         // ラムダから参照させる（PropertyChanged 購読と LoadSettings は下記の ctor 順序に従い後段で行う）。
         Connection = new ChatConnectionSettingsViewModel(
-            "mock-generation-ui.json",
-            codexSettingsStore,
-            uiSettingsStore,
-            apiModelHistoryStore: apiModelHistoryStore,
-            codexModelHistoryStore: codexModelHistoryStore
+            AiDialogKind.MockGeneration,
+            settingsStore
         );
 
         _apiKeyEngineFactory =

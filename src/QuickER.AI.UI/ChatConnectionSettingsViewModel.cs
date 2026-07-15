@@ -37,17 +37,14 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
 
     private const string OpenAiProviderName = "openai";
 
-    private readonly CodexAppServerSettingsStore _codexSettingsStore;
-    private readonly ClaudeCodeSettingsStore _claudeCodeSettingsStore;
+    /// <summary>このダイアログの種別（UI 状態セクション ChatUi / MockUi を選ぶキー）</summary>
+    private readonly AiDialogKind _dialogKind;
 
-    /// <summary>UI 状態（最後に使った接続タブ）の保存先</summary>
-    private readonly ChatUiSettingsStore _uiSettingsStore;
-
-    /// <summary>API キー接続のモデル名 MRU 履歴の保存先（プロバイダ別・両ダイアログ共有）</summary>
-    private readonly ApiModelHistoryStore _apiModelHistoryStore;
-
-    /// <summary>Codex 接続（非 openai プロバイダ）のモデル名 MRU 履歴の保存先（両ダイアログ共有）</summary>
-    private readonly CodexModelHistoryStore _codexModelHistoryStore;
+    /// <summary>
+    /// AI 設定（Codex / Claude Code / UI 状態 / モデル履歴）を 1 ファイルへ集約するストア。
+    /// 両ダイアログが共有するため、保存は必ず「Load → 該当セクションのみ変更 → Save」で行う。
+    /// </summary>
+    private readonly AiSettingsStore _settingsStore;
 
     /// <summary>config.toml 読込 seam（テスト隔離用。既定は <see cref="CodexConfigTomlReader.Read()"/>）</summary>
     private readonly Func<CodexConfigToml> _codexConfigReader;
@@ -67,35 +64,24 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
     public ErChatBackendKind InitialBackend { get; private set; } = ErChatBackendKind.ApiKey;
 
     /// <summary>依存を注入して生成する</summary>
-    /// <param name="uiSettingsFileName">UI 状態の保存ファイル名（例: <c>ai-chat-ui.json</c> / <c>mock-generation-ui.json</c>）</param>
-    /// <param name="codexSettingsStore">Codex 設定ストア（省略時は既定の保存先）</param>
-    /// <param name="uiSettingsStore">UI 状態ストア（省略時は <paramref name="uiSettingsFileName"/> で新規生成）</param>
-    /// <param name="claudeCodeSettingsStore">Claude Code 設定ストア（省略時は既定の保存先）</param>
+    /// <param name="dialogKind">このダイアログの種別（UI 状態セクション ChatUi / MockUi を選ぶキー）</param>
+    /// <param name="settingsStore">AI 設定ストア（省略時は既定の保存先＝<c>ai-settings.json</c>・両ダイアログ共有）</param>
     /// <param name="codexConfigReader">config.toml 読込 seam（省略時は既定パス読込）</param>
     /// <param name="apiKeyLoader">API キー読込 seam（省略時は <see cref="ApiKeyStore.Load(string)"/>）</param>
     /// <param name="apiKeySaver">API キー保存 seam（省略時は <see cref="ApiKeyStore.Save(string, string)"/>）</param>
-    /// <param name="apiModelHistoryStore">API キー接続のモデル履歴ストア（省略時は既定の保存先＝両ダイアログ共有）</param>
-    /// <param name="codexModelHistoryStore">Codex モデル履歴ストア（省略時は既定の保存先＝両ダイアログ共有）</param>
     public ChatConnectionSettingsViewModel(
-        string uiSettingsFileName,
-        CodexAppServerSettingsStore? codexSettingsStore = null,
-        ChatUiSettingsStore? uiSettingsStore = null,
-        ClaudeCodeSettingsStore? claudeCodeSettingsStore = null,
+        AiDialogKind dialogKind,
+        AiSettingsStore? settingsStore = null,
         Func<CodexConfigToml>? codexConfigReader = null,
         Func<string, string?>? apiKeyLoader = null,
-        Action<string, string>? apiKeySaver = null,
-        ApiModelHistoryStore? apiModelHistoryStore = null,
-        CodexModelHistoryStore? codexModelHistoryStore = null
+        Action<string, string>? apiKeySaver = null
     )
     {
-        _codexSettingsStore = codexSettingsStore ?? new CodexAppServerSettingsStore();
-        _uiSettingsStore = uiSettingsStore ?? new ChatUiSettingsStore(uiSettingsFileName);
-        _claudeCodeSettingsStore = claudeCodeSettingsStore ?? new ClaudeCodeSettingsStore();
+        _dialogKind = dialogKind;
+        _settingsStore = settingsStore ?? new AiSettingsStore();
         _codexConfigReader = codexConfigReader ?? CodexConfigTomlReader.Read;
         _apiKeyLoader = apiKeyLoader ?? ApiKeyStore.Load;
         _apiKeySaver = apiKeySaver ?? ApiKeyStore.Save;
-        _apiModelHistoryStore = apiModelHistoryStore ?? new ApiModelHistoryStore();
-        _codexModelHistoryStore = codexModelHistoryStore ?? new CodexModelHistoryStore();
     }
 
     // ── 接続方式の選択 ──
@@ -206,15 +192,17 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
     /// <summary>保存済み設定と config.toml の候補を読み込む（親が PropertyChanged 購読確立後に呼ぶ）</summary>
     public void LoadSettings()
     {
-        var settings = _codexSettingsStore.Load();
-        LoadCodexModelCandidates();
-        CodexModelProvider = ResolveCodexModelProvider(settings.ModelProvider);
-        CodexModel = string.IsNullOrWhiteSpace(settings.Model)
-            ? AiModelCatalog.DefaultOpenAiModel
-            : settings.Model;
+        // 共有ファイルを 1 回だけ読み、Codex / Claude Code / UI 状態を各セクションから取り出す
+        var settings = _settingsStore.Load();
 
-        ClaudeCodeModel = _claudeCodeSettingsStore.Load().Model;
-        InitialBackend = _uiSettingsStore.Load().ParseLastBackend() ?? ErChatBackendKind.ApiKey;
+        LoadCodexModelCandidates();
+        CodexModelProvider = ResolveCodexModelProvider(settings.CodexAppServer.ModelProvider);
+        CodexModel = string.IsNullOrWhiteSpace(settings.CodexAppServer.Model)
+            ? AiModelCatalog.DefaultOpenAiModel
+            : settings.CodexAppServer.Model;
+
+        ClaudeCodeModel = settings.ClaudeCode.Model;
+        InitialBackend = settings.UiFor(_dialogKind).ParseLastBackend() ?? ErChatBackendKind.ApiKey;
 
         RefreshApiModelCandidates();
     }
@@ -245,7 +233,7 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
             ApiModelCandidates.Add(new ModelCandidate(m, IsRemovable: false));
         }
 
-        foreach (var m in _apiModelHistoryStore.Load().ModelsFor(ApiProviderKey))
+        foreach (var m in _settingsStore.Load().ApiModelHistory.ModelsFor(ApiProviderKey))
         {
             // カタログと同名（大文字小文字問わず）の履歴は表示しない（カタログ側を優先。ファイル上の履歴には残る）
             if (
@@ -289,12 +277,13 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
             return;
         }
 
-        // 履歴ファイルは両ダイアログ共有のため、記録直前に最新を読み直してから Touch する
-        var history = _apiModelHistoryStore.Load();
+        // 共有ファイルは両ダイアログで書き換え合うため、記録直前に最新を読み直し、
+        // 該当セクションだけ変更して全体を書き戻す（他セクションを消さない）
+        var settings = _settingsStore.Load();
 
-        if (history.Touch(ApiProviderKey, model))
+        if (settings.ApiModelHistory.Touch(ApiProviderKey, model))
         {
-            _apiModelHistoryStore.Save(history);
+            _settingsStore.Save(settings);
         }
 
         RefreshApiModelCandidates();
@@ -313,11 +302,11 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
         // 選択中の項目を削除すると ComboBox が Text（＝双方向バインドの ApiModel）を消すため、退避して後で復元する
         var current = ApiModel;
 
-        var history = _apiModelHistoryStore.Load();
+        var settings = _settingsStore.Load();
 
-        if (history.Remove(ApiProviderKey, model))
+        if (settings.ApiModelHistory.Remove(ApiProviderKey, model))
         {
-            _apiModelHistoryStore.Save(history);
+            _settingsStore.Save(settings);
         }
 
         RefreshApiModelCandidates();
@@ -335,12 +324,13 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
             return;
         }
 
-        // 履歴ファイルは両ダイアログ共有のため、記録直前に最新を読み直してから Touch する
-        var history = _codexModelHistoryStore.Load();
+        // 共有ファイルは両ダイアログで書き換え合うため、記録直前に最新を読み直し、
+        // 該当セクションだけ変更して全体を書き戻す（他セクションを消さない）
+        var settings = _settingsStore.Load();
 
-        if (history.Touch(CodexModelProvider.Trim(), CodexModel.Trim()))
+        if (settings.CodexModelHistory.Touch(CodexModelProvider.Trim(), CodexModel.Trim()))
         {
-            _codexModelHistoryStore.Save(history);
+            _settingsStore.Save(settings);
         }
 
         RefreshCodexModelCandidates();
@@ -359,11 +349,11 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
         // 選択中の項目を削除すると ComboBox が Text（＝双方向バインドの CodexModel）を消すため、退避して後で復元する
         var current = CodexModel;
 
-        var history = _codexModelHistoryStore.Load();
+        var settings = _settingsStore.Load();
 
-        if (history.Remove(CodexModelProvider?.Trim() ?? string.Empty, model))
+        if (settings.CodexModelHistory.Remove(CodexModelProvider?.Trim() ?? string.Empty, model))
         {
-            _codexModelHistoryStore.Save(history);
+            _settingsStore.Save(settings);
         }
 
         RefreshCodexModelCandidates();
@@ -373,19 +363,24 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
     /// <summary>接続タブ関連の設定を保存する（親の SaveSettings から呼ぶ）</summary>
     public void SaveSettings()
     {
-        _codexSettingsStore.Save(
-            new CodexAppServerSettings
-            {
-                ModelProvider = CodexModelProvider?.Trim() ?? string.Empty,
-                Model = CodexModel?.Trim() ?? string.Empty,
-            }
-        );
+        // 両ダイアログが共有する 1 ファイルを Load → 該当セクションのみ変更 → Save で書き戻す
+        // （古いスナップショットの丸ごと書き戻しで他ダイアログのセクションを消さない）
+        var settings = _settingsStore.Load();
 
-        _claudeCodeSettingsStore.Save(
-            new ClaudeCodeSettings { Model = ClaudeCodeModel?.Trim() ?? string.Empty }
-        );
+        settings.CodexAppServer = new CodexAppServerSettings
+        {
+            ModelProvider = CodexModelProvider?.Trim() ?? string.Empty,
+            Model = CodexModel?.Trim() ?? string.Empty,
+        };
 
-        _uiSettingsStore.Save(new ChatUiSettings { LastBackend = SelectedBackend.ToString() });
+        settings.ClaudeCode = new ClaudeCodeSettings
+        {
+            Model = ClaudeCodeModel?.Trim() ?? string.Empty,
+        };
+
+        settings.UiFor(_dialogKind).LastBackend = SelectedBackend.ToString();
+
+        _settingsStore.Save(settings);
     }
 
     /// <summary>config.toml から Codex のプロバイダー・モデル候補を読み込む</summary>
@@ -442,7 +437,7 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
         }
 
         // 非 openai: MRU 履歴のみ。両ダイアログ共有ファイルの最新を反映するため都度 Load する
-        foreach (var m in _codexModelHistoryStore.Load().ModelsFor(CodexModelProvider))
+        foreach (var m in _settingsStore.Load().CodexModelHistory.ModelsFor(CodexModelProvider))
         {
             CodexModelCandidates.Add(new ModelCandidate(m, IsRemovable: true));
         }

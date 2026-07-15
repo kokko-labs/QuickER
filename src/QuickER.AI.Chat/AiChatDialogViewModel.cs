@@ -164,15 +164,12 @@ public partial class AiChatDialogViewModel : ObservableObject
     public AiChatDialogViewModel(
         IErDiagramChatHost? host,
         IUiDispatcher dispatcher,
-        CodexAppServerSettingsStore? settingsStore,
+        AiSettingsStore? settingsStore,
         ICodexAppServerClient? codexClient,
         IClaudeCodeClient? claudeCodeClient = null,
         IDialogService? dialogService = null,
         IFileDialogService? files = null,
-        ChatAttachmentFactory.ImageShrinker? imageShrinker = null,
-        ChatUiSettingsStore? uiSettingsStore = null,
-        ApiModelHistoryStore? apiModelHistoryStore = null,
-        CodexModelHistoryStore? codexModelHistoryStore = null
+        ChatAttachmentFactory.ImageShrinker? imageShrinker = null
     )
     {
         _host = host;
@@ -190,13 +187,7 @@ public partial class AiChatDialogViewModel : ObservableObject
 
         // 接続方式タブの状態部品。エンジン生成前に用意しておき、エンジンの入力ラムダから参照させる
         // （PropertyChanged 購読と LoadSettings は下記の ctor 順序に従い、エンジン確立後に行う）
-        Connection = new ChatConnectionSettingsViewModel(
-            "ai-chat-ui.json",
-            settingsStore,
-            uiSettingsStore,
-            apiModelHistoryStore: apiModelHistoryStore,
-            codexModelHistoryStore: codexModelHistoryStore
-        );
+        Connection = new ChatConnectionSettingsViewModel(AiDialogKind.AiChat, settingsStore);
 
         _apiKeyEngine = new ChatTurnEngine(
             new ProviderRoutingTurnDriver(

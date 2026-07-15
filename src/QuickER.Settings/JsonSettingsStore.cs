@@ -5,7 +5,7 @@ namespace QuickER.Settings;
 
 /// <summary>
 /// 設定を JSON ファイルへ保存・読込する汎用ストア。
-/// 各設定ストア（ChatUiSettingsStore 等）はこのクラスを継承し、ファイル名と設定型のみを指定する薄い派生クラスとなる。
+/// 各設定ストア（AiSettingsStore 等）はこのクラスを継承し、ファイル名と設定型のみを指定する薄い派生クラスとなる。
 /// </summary>
 /// <typeparam name="TSettings">JSON へシリアライズする設定の型（既定コンストラクタを持つクラス）</typeparam>
 public class JsonSettingsStore<TSettings>
@@ -25,7 +25,7 @@ public class JsonSettingsStore<TSettings>
     private readonly string _fileName;
 
     /// <summary>既定の保存先（%APPDATA%\QuickER）で設定ストアを生成する</summary>
-    /// <param name="fileName">設定ファイル名（例: <c>ai-chat-ui.json</c>）</param>
+    /// <param name="fileName">設定ファイル名（例: <c>ai-settings.json</c>）</param>
     public JsonSettingsStore(string fileName)
         : this(
             fileName,

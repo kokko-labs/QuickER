@@ -26,26 +26,22 @@ public class ChatConnectionSettingsViewModelTests
         public void Save(string slot, string value) => Saves.Add((slot, value));
     }
 
-    /// <summary>指定フォルダに隔離した UI/設定ストアで VM を生成する（ファイル副作用を隔離する）</summary>
+    /// <summary>指定フォルダに隔離した AI 設定ストアで VM を生成する（ファイル副作用を隔離する）</summary>
     private static ChatConnectionSettingsViewModel CreateVm(
         string folder,
-        string uiFileName = "ai-chat-ui.json",
+        AiDialogKind dialogKind = AiDialogKind.AiChat,
         Func<CodexConfigToml>? codexConfigReader = null,
         Func<string, string?>? apiKeyLoader = null,
         Action<string, string>? apiKeySaver = null
     ) =>
         new(
-            uiFileName,
-            codexSettingsStore: new CodexAppServerSettingsStore(folder),
-            uiSettingsStore: new ChatUiSettingsStore(uiFileName, folder),
-            claudeCodeSettingsStore: new ClaudeCodeSettingsStore(folder),
+            dialogKind,
+            // 設定・UI 状態・モデル履歴を集約した 1 ファイルを一時フォルダへ隔離する（実 %APPDATA% を保護）
+            settingsStore: new AiSettingsStore(folder),
             codexConfigReader: codexConfigReader ?? (() => new CodexConfigToml()),
             // 既定ではキーストアに触れないよう loader は空・saver は無操作にする
             apiKeyLoader: apiKeyLoader ?? (_ => string.Empty),
-            apiKeySaver: apiKeySaver ?? ((_, _) => { }),
-            // モデル履歴ファイル（API キー / Codex）を一時フォルダへ隔離する（実 %APPDATA% を保護）
-            apiModelHistoryStore: new ApiModelHistoryStore(folder),
-            codexModelHistoryStore: new CodexModelHistoryStore(folder)
+            apiKeySaver: apiKeySaver ?? ((_, _) => { })
         );
 
     private static string NewFolder() =>
@@ -318,9 +314,9 @@ public class ChatConnectionSettingsViewModelTests
             };
 
             // 履歴を仕込んでおき、プロバイダー切替で読み込まれることを確認する
-            var history = new ProviderModelHistory();
-            history.Touch("ollama-launch", "gemma4:31b-cloud");
-            new CodexModelHistoryStore(folder).Save(history);
+            var seeded = new AiSettingsStore(folder).Load();
+            seeded.CodexModelHistory.Touch("ollama-launch", "gemma4:31b-cloud");
+            new AiSettingsStore(folder).Save(seeded);
 
             var vm = CreateVm(folder, codexConfigReader: () => config);
             vm.LoadSettings();
@@ -408,9 +404,13 @@ public class ChatConnectionSettingsViewModelTests
         try
         {
             // config.toml から消えたプロバイダーが保存されている状況を作る
-            new CodexAppServerSettingsStore(folder).Save(
-                new CodexAppServerSettings { ModelProvider = "removed-provider", Model = "m" }
-            );
+            var seeded = new AiSettingsStore(folder).Load();
+            seeded.CodexAppServer = new CodexAppServerSettings
+            {
+                ModelProvider = "removed-provider",
+                Model = "m",
+            };
+            new AiSettingsStore(folder).Save(seeded);
 
             var vm = CreateVm(folder);
             vm.LoadSettings();
@@ -431,9 +431,13 @@ public class ChatConnectionSettingsViewModelTests
 
         try
         {
-            new CodexAppServerSettingsStore(folder).Save(
-                new CodexAppServerSettings { ModelProvider = "OLLAMA-LAUNCH", Model = "m" }
-            );
+            var seeded = new AiSettingsStore(folder).Load();
+            seeded.CodexAppServer = new CodexAppServerSettings
+            {
+                ModelProvider = "OLLAMA-LAUNCH",
+                Model = "m",
+            };
+            new AiSettingsStore(folder).Save(seeded);
 
             var config = new CodexConfigToml
             {
@@ -453,9 +457,8 @@ public class ChatConnectionSettingsViewModelTests
 
     // ── API キー接続のモデル MRU 履歴（プロバイダ別・カタログ外の手入力モデルのみ記録） ──
 
-    /// <summary>API キー接続のモデル履歴ファイルの絶対パス（存在確認・非作成の検証に使う）</summary>
-    private static string ApiHistoryPath(string folder) =>
-        new ApiModelHistoryStore(folder).SettingsPath;
+    /// <summary>AI 設定ファイルの絶対パス（履歴が書かれていない＝ファイル非作成の検証に使う）</summary>
+    private static string ApiHistoryPath(string folder) => new AiSettingsStore(folder).SettingsPath;
 
     /// <summary>候補のモデル名一覧（アサート簡略化用）</summary>
     private static IEnumerable<string> CandidateNames(ChatConnectionSettingsViewModel vm) =>
@@ -480,7 +483,7 @@ public class ChatConnectionSettingsViewModelTests
             vm.ApiModelCandidates[0].IsRemovable.Should().BeTrue();
 
             // 別インスタンスで読み戻して JSON 永続化を確認する（キーは "ollama"）
-            var reloaded = new ApiModelHistoryStore(folder).Load();
+            var reloaded = new AiSettingsStore(folder).Load().ApiModelHistory;
             reloaded.ModelsFor("ollama").Should().Equal("qwen3.6:35b");
         }
         finally
@@ -512,7 +515,7 @@ public class ChatConnectionSettingsViewModelTests
                 .OnlyContain(c => !c.IsRemovable);
 
             // JSON はプロバイダキー "openai" で永続化される
-            var reloaded = new ApiModelHistoryStore(folder).Load();
+            var reloaded = new AiSettingsStore(folder).Load().ApiModelHistory;
             reloaded.ModelsFor("openai").Should().Equal("my-custom-gpt");
         }
         finally
@@ -570,7 +573,7 @@ public class ChatConnectionSettingsViewModelTests
             CandidateNames(vm).Should().Equal([.. AiModelCatalog.ClaudeModels, "custom-claude"]);
 
             // JSON もプロバイダ別に分離される
-            var reloaded = new ApiModelHistoryStore(folder).Load();
+            var reloaded = new AiSettingsStore(folder).Load().ApiModelHistory;
             reloaded.ModelsFor("openai").Should().Equal("custom-openai");
             reloaded.ModelsFor("claude").Should().Equal("custom-claude");
         }
@@ -702,7 +705,7 @@ public class ChatConnectionSettingsViewModelTests
             CandidateNames(vm).Should().Equal(AiModelCatalog.OpenAiModels);
             vm.ApiModel.Should().Be(AiModelCatalog.DefaultOpenAiModel);
 
-            var reloaded = new ApiModelHistoryStore(folder).Load();
+            var reloaded = new AiSettingsStore(folder).Load().ApiModelHistory;
             reloaded.ModelsFor("openai").Should().BeEmpty();
         }
         finally
@@ -720,10 +723,13 @@ public class ChatConnectionSettingsViewModelTests
         try
         {
             // カタログ既定モデルと大文字小文字違いの履歴を直接仕込む
-            var seeded = new ProviderModelHistory();
-            seeded.Touch("openai", AiModelCatalog.DefaultOpenAiModel.ToUpperInvariant());
-            seeded.Touch("openai", "custom-openai");
-            new ApiModelHistoryStore(folder).Save(seeded);
+            var seeded = new AiSettingsStore(folder).Load();
+            seeded.ApiModelHistory.Touch(
+                "openai",
+                AiModelCatalog.DefaultOpenAiModel.ToUpperInvariant()
+            );
+            seeded.ApiModelHistory.Touch("openai", "custom-openai");
+            new AiSettingsStore(folder).Save(seeded);
 
             var vm = CreateVm(folder);
             vm.LoadSettings();
@@ -771,25 +777,43 @@ public class ChatConnectionSettingsViewModelTests
         }
     }
 
-    /// <summary>uiFileName の異なる 2 VM（chat/mock 相当）が同一フォルダで履歴を共有することを検証する</summary>
-    [Fact(DisplayName = "chat / mock の 2 VM が API モデル履歴を共有する")]
-    public void ApiHistory_SharedAcrossDialogs()
+    /// <summary>
+    /// chat / mock の 2 VM が同一ファイルの共有セクション（ApiModelHistory）を共有し、かつ各自の
+    /// SaveSettings が read-modify-write で互いの UI セクション（LastBackend）を消さないことを検証する。
+    /// </summary>
+    [Fact(DisplayName = "chat / mock は API モデル履歴を共有し互いの UI セクションを消さない")]
+    public void ApiHistory_SharedAcrossDialogs_AndSaveDoesNotClobberUiSection()
     {
         var folder = NewFolder();
 
         try
         {
-            var chat = CreateVm(folder, uiFileName: "ai-chat-ui.json");
+            // chat 側: 共有履歴へ記録し、接続タブ（ClaudeCode）を保存する
+            var chat = CreateVm(folder, dialogKind: AiDialogKind.AiChat);
+            chat.LoadSettings();
             chat.ApiProvider = AiProvider.Ollama;
             chat.ApiModel = "shared-model";
             chat.RecordSuccessfulModel();
+            chat.SelectedBackend = ErChatBackendKind.ClaudeCode;
+            chat.SaveSettings();
 
-            // 別ダイアログ相当（別 UI ファイル名）でも同じ履歴ファイルを共有する
-            var mock = CreateVm(folder, uiFileName: "mock-generation-ui.json");
+            // mock 側: 同じファイルの ApiModelHistory セクションを共有して履歴が見える
+            var mock = CreateVm(folder, dialogKind: AiDialogKind.MockGeneration);
             mock.LoadSettings();
             mock.ApiProvider = AiProvider.Ollama;
-
             CandidateNames(mock).Should().Contain("shared-model");
+
+            // mock 側の接続タブ（Codex）保存は、read-modify-write で chat 側セクションを消さない
+            mock.SelectedBackend = ErChatBackendKind.Codex;
+            mock.SaveSettings();
+
+            var restoredChat = CreateVm(folder, dialogKind: AiDialogKind.AiChat);
+            restoredChat.LoadSettings();
+            restoredChat.InitialBackend.Should().Be(ErChatBackendKind.ClaudeCode);
+
+            var restoredMock = CreateVm(folder, dialogKind: AiDialogKind.MockGeneration);
+            restoredMock.LoadSettings();
+            restoredMock.InitialBackend.Should().Be(ErChatBackendKind.Codex);
         }
         finally
         {
@@ -799,9 +823,9 @@ public class ChatConnectionSettingsViewModelTests
 
     // ── Codex モデル MRU 履歴（非 openai プロバイダ） ──
 
-    /// <summary>Codex モデルの履歴ファイルの絶対パス（存在確認・非作成の検証に使う）</summary>
+    /// <summary>AI 設定ファイルの絶対パス（履歴が書かれていない＝ファイル非作成の検証に使う）</summary>
     private static string CodexHistoryPath(string folder) =>
-        new CodexModelHistoryStore(folder).SettingsPath;
+        new AiSettingsStore(folder).SettingsPath;
 
     /// <summary>非 openai プロバイダ（ollama-launch）を含む config.toml のスタブ</summary>
     private static CodexConfigToml NonOpenAiConfig() =>
@@ -810,10 +834,10 @@ public class ChatConnectionSettingsViewModelTests
     /// <summary>非 openai プロバイダを選択済みの Codex バックエンド VM を用意する</summary>
     private static ChatConnectionSettingsViewModel CreateCodexVm(
         string folder,
-        string uiFileName = "ai-chat-ui.json"
+        AiDialogKind dialogKind = AiDialogKind.AiChat
     )
     {
-        var vm = CreateVm(folder, uiFileName, codexConfigReader: NonOpenAiConfig);
+        var vm = CreateVm(folder, dialogKind, codexConfigReader: NonOpenAiConfig);
         vm.LoadSettings();
         vm.SelectedBackend = ErChatBackendKind.Codex;
         vm.CodexModelProvider = "ollama-launch";
@@ -841,7 +865,7 @@ public class ChatConnectionSettingsViewModelTests
             vm.CodexModelCandidates[0].IsRemovable.Should().BeTrue();
 
             // 別インスタンスで読み戻して JSON 永続化を確認する
-            var reloaded = new CodexModelHistoryStore(folder).Load();
+            var reloaded = new AiSettingsStore(folder).Load().CodexModelHistory;
             reloaded.ModelsFor("ollama-launch").Should().Equal("qwen3.6:35b");
         }
         finally
@@ -961,7 +985,7 @@ public class ChatConnectionSettingsViewModelTests
             vm.CodexModelCandidates.Select(c => c.Name).Should().Equal("model-y");
             vm.CodexModel.Should().Be("model-y");
 
-            var reloaded = new CodexModelHistoryStore(folder).Load();
+            var reloaded = new AiSettingsStore(folder).Load().CodexModelHistory;
             reloaded.ModelsFor("ollama-launch").Should().Equal("model-y");
         }
         finally
@@ -970,22 +994,37 @@ public class ChatConnectionSettingsViewModelTests
         }
     }
 
-    /// <summary>uiFileName の異なる 2 VM（chat/mock 相当）が同一フォルダで Codex 履歴を共有することを検証する</summary>
-    [Fact(DisplayName = "chat / mock の 2 VM が Codex 履歴を共有する")]
-    public void CodexHistory_SharedAcrossDialogs()
+    /// <summary>
+    /// chat / mock の 2 VM が同一ファイルの共有セクション（CodexModelHistory）を共有し、かつ各自の
+    /// SaveSettings が read-modify-write で互いの UI セクション（LastBackend）を消さないことを検証する。
+    /// </summary>
+    [Fact(DisplayName = "chat / mock は Codex 履歴を共有し互いの UI セクションを消さない")]
+    public void CodexHistory_SharedAcrossDialogs_AndSaveDoesNotClobberUiSection()
     {
         var folder = NewFolder();
 
         try
         {
-            var chat = CreateCodexVm(folder, uiFileName: "ai-chat-ui.json");
+            // chat 側: 共有 Codex 履歴へ記録し、接続タブ（Codex）を保存する
+            var chat = CreateCodexVm(folder, dialogKind: AiDialogKind.AiChat);
             chat.CodexModel = "shared-codex-model";
             chat.RecordSuccessfulModel();
+            chat.SaveSettings();
 
-            // 別ダイアログ相当（別 UI ファイル名）でも同じ履歴ファイルを共有する
-            var mock = CreateCodexVm(folder, uiFileName: "mock-generation-ui.json");
-
+            // mock 側: 同じファイルの CodexModelHistory セクションを共有して履歴が見える
+            var mock = CreateCodexVm(folder, dialogKind: AiDialogKind.MockGeneration);
             mock.CodexModelCandidates.Select(c => c.Name).Should().Contain("shared-codex-model");
+
+            // mock 側の保存（既定 ClaudeCode 以外＝ここでは Codex）でも chat 側 UI セクションは残る
+            mock.SelectedBackend = ErChatBackendKind.ClaudeCode;
+            mock.SaveSettings();
+
+            var restoredChat = CreateCodexVm(folder, dialogKind: AiDialogKind.AiChat);
+            restoredChat.InitialBackend.Should().Be(ErChatBackendKind.Codex);
+
+            var restoredMock = CreateVm(folder, dialogKind: AiDialogKind.MockGeneration);
+            restoredMock.LoadSettings();
+            restoredMock.InitialBackend.Should().Be(ErChatBackendKind.ClaudeCode);
         }
         finally
         {

@@ -163,23 +163,102 @@ public class SqlConnectionProfileStoreTests : IDisposable
         store.LoadPassword(p.Id).Should().BeEmpty();
     }
 
-    /// <summary>Dbms フィールドを欠く旧形式 JSON を読み込むと sqlserver とみなされることを検証する</summary>
-    [Fact(DisplayName = "Dbms 欠落の旧形式プロファイルは sqlserver として読み込まれる")]
-    public void LoadAll_LegacyProfileWithoutDbms_DefaultsToSqlServer()
+    /// <summary>Dbms フィールドを欠くプロファイルを読み込むと sqlserver とみなされることを検証する</summary>
+    [Fact(DisplayName = "Dbms 欠落のプロファイルは sqlserver として読み込まれる")]
+    public void LoadAll_ProfileWithoutDbms_DefaultsToSqlServer()
     {
         var store = CreateStore();
-        // Dbms / Port / ServiceName を持たない旧形式 JSON を直接書き出す
-        var legacyJson =
-            "[{\"id\":\""
+        // Dbms / Port / ServiceName を持たないプロファイルを新形式（profiles 配列）で直接書き出す
+        var json =
+            "{\"profiles\":[{\"id\":\""
             + Guid.NewGuid().ToString()
-            + "\",\"name\":\"Legacy\",\"server\":\"srv\",\"database\":\"db\",\"authMode\":0,\"userId\":\"\",\"trustServerCertificate\":true,\"savePassword\":false}]";
-        File.WriteAllText(store.ProfilesPath, legacyJson);
+            + "\",\"name\":\"Legacy\",\"server\":\"srv\",\"database\":\"db\",\"authMode\":0,\"userId\":\"\",\"trustServerCertificate\":true,\"savePassword\":false}]}";
+        File.WriteAllText(store.ConnectionsPath, json);
 
         var list = store.LoadAll();
 
         list.Should().ContainSingle();
         list[0].Dbms.Should().Be("sqlserver");
         list[0].Port.Should().BeNull();
+    }
+
+    /// <summary>旧配列形式の connections.json は新形式として読めず空一覧へフォールバックすることを検証する</summary>
+    [Fact(DisplayName = "旧配列形式の connections.json は空一覧へフォールバックする")]
+    public void LoadAll_LegacyArrayFormat_FallsBackToEmpty()
+    {
+        var store = CreateStore();
+        // 旧構成のトップレベル配列形式（新形式のオブジェクトではない）を直接書き出す
+        var legacyArrayJson =
+            "[{\"id\":\""
+            + Guid.NewGuid().ToString()
+            + "\",\"name\":\"Legacy\",\"server\":\"srv\",\"database\":\"db\"}]";
+        File.WriteAllText(store.ConnectionsPath, legacyArrayJson);
+
+        store.LoadAll().Should().BeEmpty();
+    }
+
+    /// <summary>SaveAll が前回接続情報（LastUsed）を消さないことを検証する（read-modify-write の相互不干渉）</summary>
+    [Fact(DisplayName = "SaveAll は前回接続情報を消さない")]
+    public void SaveAll_PreservesLastUsed()
+    {
+        var store = CreateStore();
+        store.SaveLastUsed(
+            new SqlConnectionProfile
+            {
+                Name = "Last",
+                Server = "sql01",
+                Database = "db",
+            },
+            password: ""
+        );
+
+        // プロファイル一覧を保存しても前回接続情報は温存されるべき
+        store.SaveAll(
+            new[]
+            {
+                new SqlConnectionProfile
+                {
+                    Name = "P",
+                    Server = "s",
+                    Database = "d",
+                },
+            }
+        );
+
+        var lastUsed = store.LoadLastUsed();
+        lastUsed.Should().NotBeNull();
+        lastUsed!.Value.Profile.Server.Should().Be("sql01");
+    }
+
+    /// <summary>SaveLastUsed がプロファイル一覧（Profiles）を消さないことを検証する（read-modify-write の相互不干渉）</summary>
+    [Fact(DisplayName = "SaveLastUsed はプロファイル一覧を消さない")]
+    public void SaveLastUsed_PreservesProfiles()
+    {
+        var store = CreateStore();
+        store.Upsert(
+            new SqlConnectionProfile
+            {
+                Name = "P",
+                Server = "s",
+                Database = "d",
+            },
+            password: ""
+        );
+
+        // 前回接続情報を保存してもプロファイル一覧は温存されるべき
+        store.SaveLastUsed(
+            new SqlConnectionProfile
+            {
+                Name = "Last",
+                Server = "sql01",
+                Database = "db",
+            },
+            password: ""
+        );
+
+        var list = store.LoadAll();
+        list.Should().ContainSingle();
+        list[0].Name.Should().Be("P");
     }
 
     /// <summary>Dbms / Port / ServiceName を含めて往復保存・復元されることを検証する</summary>
