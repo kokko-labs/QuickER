@@ -155,7 +155,7 @@ var doc = await documents
 
 #### Stream アクセサ `Read/Write{Column}Async`
 
-除外オプションを有効（かつ Repository (QuickER) を生成）にすると、除外列ごとに **ストリーミング**の読み書きメソッドが `I{Entity}Repository`（全機能面）へ追加生成されます。`byte[]` の一括読み込みを避け、**O(チャンク)＝blob 全量をメモリに載せずに** DB⇔ストリーム（またはファイル）を転送できます。GB 級のバイナリを扱う唯一正しいメモリ特性を持つ手段です。
+除外オプションを有効（かつ Repository (QuickER) を生成）にすると、除外列ごとに **ストリーミング**の読み書きメソッドが追加生成されます（挿入先はリモート契約の有無で変わります。後述）。`byte[]` の一括読み込みを避け、**O(チャンク)＝blob 全量をメモリに載せずに** DB⇔ストリーム（またはファイル）を転送できます。GB 級のバイナリを扱う唯一正しいメモリ特性を持つ手段です。
 
 ```csharp
 // documents.payload（除外列）に対して生成される例
@@ -174,7 +174,7 @@ Task<bool> WritePayloadFromFileAsync(int id, string path, CancellationToken ct =
 - **楽観排他（rowversion 等）はスコープ外**です（生 SQL と同格の直接列操作）。
 - **INSERT 専用メソッドはありません**。新規行は「INSERT（blob は `null` または空）→ `Write{Column}Async` で本体を流し込む」の 2 段で書きます。
 - **EF Core モードでは使用できません**（`NotSupportedException`）。EF は方言非依存設計のため方言固有のストリーミングを持てません。Repository (QuickER) を使うか、`partial` クラスで実装してください（`GenerateEfCore` と Repository (QuickER) を併用する構成では、EF 版実装のみ例外になります）。
-- **リモート面（`I{Entity}RemoteRepository`）には載りません**（HTTP クライアント・サーバーも無変更）。ネットワーク境界を越えるストリーミングは将来対応です。
+- **挿入先**: リモート契約（`--remote-contracts` / `--remote-services`）が無効なら全機能面 `I{Entity}Repository` に直接載ります。有効な場合はリモート面 `I{Entity}RemoteRepository` へ移設されます（全機能面はリモート面を継承するので、どちらの構成でも利用コードは同じ・純粋に追加的）。ファイル糖衣もその対象インターフェイスに合わせます。リモートサービス（`--remote-services`）を有効にすると HTTP で転送できます（後述の「バイナリ転送エンドポイント」）。
 
 `WithUnboundedBinary()` との使い分け:
 
@@ -277,6 +277,22 @@ app.Run();
 - **グラフ保存（Save）成功後はローカルの RowState も確定**します（直結時と同じ挙動）
 - 認証・TLS はスコープ外です。クライアントは `AddGeneratedHttpRemoteRepositories(Func<IServiceProvider, HttpClient>)` で認証ハンドラ付きの HttpClient を構成し、サーバーは `MapGeneratedRemoteEndpoints()` の戻り値（`RouteGroupBuilder`）へ ASP.NET Core の認可を付与してください
 - サーバーファイルは ASP.NET Core の FrameworkReference（`Microsoft.AspNetCore.App`）が必要です（SDK が `Microsoft.NET.Sdk.Web` のプロジェクトなら追加設定不要）
+
+### バイナリ転送エンドポイント（無制限バイナリ列の Stream アクセサ）
+
+無制限バイナリ除外（`--exclude-unbounded-binary`）と併用すると、除外列の Stream アクセサ（`Read/Write{Column}Async`）が **HTTP でストリーミング転送**されます。JSON エンベロープ（`POST` + Base64）では巨大 blob のメモリ膨張を避けられないため、これらは意図的に **REST 風の第 2 形式**（動詞分離・生ボディ・`application/octet-stream`）を使います。除外列ごとに次の 3 エンドポイントが生成されます（`{列名}` は C# プロパティ名）:
+
+| 動詞・URL | 意味 | 応答 |
+|---|---|---|
+| `GET {prefix}/{エンティティ}/{列名}?id=` | ダウンロード（本文を宛先へストリーム） | 200＋`application/octet-stream`（空 blob も 200）／行なし・NULL は **404**（クライアントで `false`） |
+| `PUT {prefix}/{エンティティ}/{列名}?id=` | アップロード（生ボディ・`Content-Length` 必須） | 成功 **204**／行なし **404**（`false`）／`Content-Length` 欠落（chunked）は **411** |
+| `DELETE {prefix}/{エンティティ}/{列名}?id=` | 列を `NULL` へ（`Write(id, null)` 相当） | 成功 204／行なし 404 |
+
+- **キーは URL クエリ `?id=`** で運びます（本文は blob 本体に使うため）。VO キーは JSON エンベロープと同一規則（内包値）で直列化されます。
+- **0 バイトの PUT（空ボディ）と `NULL` 化（DELETE）は構造的に区別**されます（前者は `Read` が `true`＋空・後者は `false`）。
+- **バイナリ PUT だけリクエストサイズ制限が既定で解除**されます（`IRequestSizeLimitMetadata` メタデータ付与。JSON エンドポイントは既定 30MB のまま）。GB 級を追加設定なしで扱うためですが、**解除は DoS 面の懸念があるため認可（`MapGeneratedRemoteEndpoints().RequireAuthorization()`）との併用を強く推奨**します。上限へ戻す・別値にする場合は戻り値の `RouteGroupBuilder` でグループ全体を上書きしてください。
+- クライアント（`Http{Entity}RemoteRepository`）は `GET` を `ResponseHeadersRead` で受けて宛先へ O(チャンク) でコピーし、`PUT` は `StreamContent`（`Content-Length` 付き）で送ります。非シーク Stream で `length` を渡さない場合は**送信前**に `ArgumentException` になります（既存の長さ契約と同一）。
+- **`WithUnboundedBinary()` / `Query()` / 生 SQL のリモート化はスコープ外**です（従来どおり）。
 
 動く実例はリポジトリの [samples/ec-order-remote](../samples/ec-order-remote/README.ja.md) にあります（この推奨構成そのままの 3 プロジェクト＋実 2 プロセスで動かすサンプル。名前付きクエリのリモート転送・`SaveConflictException` の型復元も実演）。
 

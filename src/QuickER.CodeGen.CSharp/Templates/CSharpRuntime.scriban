@@ -5751,6 +5751,100 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
                     )
                     .ToArray()
         );
+{{~ if exclude_unbounded_binary || runtime_package_export ~}}
+
+    /// <summary>主キーを URL クエリ（<c>?id=</c>）用の文字列へ直列化する（エンベロープと同一の JSON 規則＝VO は内包値・数値はそのまま・文字列/Guid は引用符付き）</summary>
+    /// <remarks>キー値の JSON 表現を URL エンコードして運ぶ。サーバーは同じ設定（<c>RemoteJson.Options</c>）で復元するため方言・VO によらず往復する</remarks>
+    protected string FormatKeyForQuery(TKey id) =>
+        Uri.EscapeDataString(JsonSerializer.Serialize(id, RemoteJson.Options));
+
+    /// <summary>
+    /// 無制限バイナリ列（除外列）をサーバーからストリーミングでダウンロードする（<c>GET {エンティティ}/{列名}?id=</c>）。
+    /// レスポンスヘッダのみ先読み（<see cref="HttpCompletionOption.ResponseHeadersRead"/>）し、本文を宛先へ O(チャンク) でコピーする
+    /// （blob 全量をメモリに載せない・Base64 不使用）。200＝データを書いた（<c>true</c>・空 blob も true）／404＝行なし または NULL
+    /// （<c>false</c>・宛先へ何も書かない）。それ以外の失敗は既存規則で例外復元する。
+    /// </summary>
+    protected async Task<bool> DownloadUnboundedBinaryColumnAsync(
+        string columnRoute,
+        TKey id,
+        Stream destination,
+        CancellationToken cancellationToken
+    )
+    {
+        ArgumentNullException.ThrowIfNull(destination);
+
+        var requestUri = $"{_entityRoute}/{columnRoute}?id={FormatKeyForQuery(id)}";
+        using var response = await _httpClient.GetAsync(
+            requestUri,
+            HttpCompletionOption.ResponseHeadersRead,
+            cancellationToken
+        );
+
+        if (response.StatusCode == HttpStatusCode.NotFound)
+        {
+            return false;
+        }
+
+        await EnsureSuccessAsync(response, cancellationToken);
+
+        await using var source = await response.Content.ReadAsStreamAsync(cancellationToken);
+        await source.CopyToAsync(destination, cancellationToken);
+        return true;
+    }
+
+    /// <summary>
+    /// 無制限バイナリ列（除外列）をサーバーへストリーミングでアップロードする。<paramref name="source"/> が <c>null</c> のときは
+    /// <c>DELETE</c>（列を NULL 化）、非 <c>null</c> のときは <c>PUT</c>（<see cref="StreamContent"/>＋Content-Length）を送る
+    /// （0 バイトの PUT＝空ボディと NULL 化＝DELETE は構造的に区別される）。送信前に長さ契約（<c>CanSeek</c> でない Stream は
+    /// <paramref name="length"/> 必須）を検証する。204＝成功（<c>true</c>）／404＝行なし（<c>false</c>）。それ以外は例外復元。
+    /// </summary>
+    protected async Task<bool> UploadUnboundedBinaryColumnAsync(
+        string columnRoute,
+        TKey id,
+        Stream? source,
+        long? length,
+        CancellationToken cancellationToken
+    )
+    {
+        var requestUri = $"{_entityRoute}/{columnRoute}?id={FormatKeyForQuery(id)}";
+
+        // source=null は列を NULL に設定する（DELETE）。0 バイトの PUT（空ボディ）とは意味が異なる
+        if (source is null)
+        {
+            using var deleteResponse = await _httpClient.DeleteAsync(requestUri, cancellationToken);
+
+            if (deleteResponse.StatusCode == HttpStatusCode.NotFound)
+            {
+                return false;
+            }
+
+            await EnsureSuccessAsync(deleteResponse, cancellationToken);
+            return true;
+        }
+
+        // 送信前に長さを確定する（CanSeek でない Stream は length 必須＝Content-Length と自然に整合。欠落は送信前に例外）
+        var payloadLength = UnboundedBinaryColumns.ResolveWriteLength(source, length);
+
+        using var content = new StreamContent(source);
+        content.Headers.ContentLength = payloadLength;
+        content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+
+        using var request = new HttpRequestMessage(HttpMethod.Put, requestUri) { Content = content };
+        using var response = await _httpClient.SendAsync(
+            request,
+            HttpCompletionOption.ResponseHeadersRead,
+            cancellationToken
+        );
+
+        if (response.StatusCode == HttpStatusCode.NotFound)
+        {
+            return false;
+        }
+
+        await EnsureSuccessAsync(response, cancellationToken);
+        return true;
+    }
+{{~ end ~}}
 }
 {{~ end ~}}
 {{~ if (repositories || in_memory || (ef_core && render_contract) || (ef_core && render_ef_core && runtime_package_export)) && emit_shared_infra ~}}
@@ -6988,20 +7082,18 @@ public static class GeneratedRepositoryServiceCollectionExtensions
 {{~ for repository in repository_classes ~}}
 {{~ if render_contract ~}}
 {{~ if remote_contracts ~}}
+{{~ remote_interface_members = join_members repository.query_interface_block repository.binary_stream_contract_block ~}}
 {{ if !for.first }}
 {{ end }}/// <summary>{{ repository.entity_class_name }} 用リポジトリのリモート面（ネットワーク境界を越えられる CRUD・保存・名前付きクエリのみ。将来リモート実装へ差し替え可能）</summary>
-public partial interface {{ repository.remote_interface_name }} : IRemoteRepository<{{ repository.entity_class_name }}, {{ repository.key_type_name }}>{{ if repository.query_interface_block == "" }} { }{{ else }}
+public partial interface {{ repository.remote_interface_name }} : IRemoteRepository<{{ repository.entity_class_name }}, {{ repository.key_type_name }}>{{ if remote_interface_members == "" }} { }{{ else }}
 {
-{{ repository.query_interface_block }}
+{{ remote_interface_members }}
 }{{ end }}
 
 /// <summary>{{ repository.entity_class_name }} 用リポジトリインターフェース（全機能面＝リモート面に式木クエリ・生 SQL・一括追加を追加）</summary>
 public partial interface {{ repository.interface_name }}
     : {{ repository.remote_interface_name }},
-        IRepository<{{ repository.entity_class_name }}, {{ repository.key_type_name }}>{{ if repository.binary_stream_contract_block == "" }} { }{{ else }}
-{
-{{ repository.binary_stream_contract_block }}
-}{{ end }}
+        IRepository<{{ repository.entity_class_name }}, {{ repository.key_type_name }}> { }
 {{~ else ~}}
 {{~ non_remote_interface_members = join_members repository.query_interface_block repository.binary_stream_contract_block ~}}
 {{ if !for.first }}
@@ -7039,11 +7131,12 @@ public sealed partial class {{ repository.class_name }}(ISqlConnectionFactory co
 
 /// <summary>{{ repository.entity_class_name }} 用リモート面（{{ repository.remote_interface_name }}）の HTTP クライアント実装</summary>
 /// <remarks>サーバー側 <c>MapGeneratedRemoteEndpoints</c> のエンドポイントを呼び出す。HttpClient の BaseAddress は prefix（既定 /quicker/）まで含むこと</remarks>
+{{~ remote_client_members = join_members repository.query_remote_client_block repository.binary_stream_remote_client_block ~}}
 public sealed partial class {{ repository.remote_client_class_name }}(HttpClient httpClient)
     : HttpRemoteRepository<{{ repository.entity_class_name }}, {{ repository.key_type_name }}>(httpClient, "{{ repository.remote_route_name }}"),
-        {{ repository.remote_interface_name }}{{ if repository.query_remote_client_block == "" }} { }{{ else }}
+        {{ repository.remote_interface_name }}{{ if remote_client_members == "" }} { }{{ else }}
 {
-{{ repository.query_remote_client_block }}
+{{ remote_client_members }}
 }{{ end }}
 {{~ end ~}}
 
@@ -9716,6 +9809,198 @@ public static class GeneratedRemoteEndpoints
     /// <summary>DI からリモート面リポジトリを解決する</summary>
     private static TRepository Repository<TRepository>(HttpContext context)
         where TRepository : notnull => context.RequestServices.GetRequiredService<TRepository>();
+{{~ if exclude_unbounded_binary ~}}
+
+    /// <summary>URL クエリ（<c>?id=</c>）の主キーを復元する（クライアントの <c>FormatKeyForQuery</c> と同一の JSON 規則）</summary>
+    private static TKey ParseKeyFromQuery<TKey>(HttpContext context)
+    {
+        var raw = context.Request.Query["id"].ToString();
+
+        if (string.IsNullOrEmpty(raw))
+        {
+            throw new InvalidOperationException("クエリ文字列 id が指定されていません。");
+        }
+
+        return JsonSerializer.Deserialize<TKey>(raw, RemoteJson.Options)
+            ?? throw new InvalidOperationException("クエリ文字列 id を復元できませんでした。");
+    }
+
+    /// <summary>
+    /// 無制限バイナリ列のダウンロード（GET）を実行する。読み取り関数が <c>false</c>（行なし/NULL）のときは本文未送信のまま
+    /// 404 に確定し、<c>true</c>（空 blob も含む）のときは 200＋<c>application/octet-stream</c> を返す。応答を書き始めると
+    /// 404 へ切り替えられないため、応答開始を最初の書き込みまで遅延するラッパーストリームを渡す（存在判定と O(チャンク) を両立）。
+    /// 読み取り関数が本文を書き始める前に例外を投げた場合のみ 500＋<see cref="RemoteError"/> を返す。
+    /// </summary>
+    private static async Task ExecuteDownloadAsync(HttpContext context, Func<Stream, Task<bool>> read)
+    {
+        var deferred = new DeferredOctetStreamBody(context.Response);
+
+        try
+        {
+            var wrote = await read(deferred);
+
+            if (!wrote)
+            {
+                // 行なし/NULL: まだ本文を送っていないので 404 に確定できる
+                context.Response.StatusCode = StatusCodes.Status404NotFound;
+                return;
+            }
+
+            // 空 blob でも true。一度も書いていなければ 200＋ヘッダをここで確定する
+            deferred.EnsureStarted();
+        }
+        catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
+        {
+            // クライアント切断・キャンセル: 応答先が既に無いため何もしない
+        }
+        catch (Exception ex) when (!context.Response.HasStarted)
+        {
+            context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+            await context.Response.WriteAsJsonAsync(
+                new RemoteError { Type = "Error", Message = ex.Message },
+                RemoteJson.Options,
+                context.RequestAborted
+            );
+        }
+    }
+
+    /// <summary>
+    /// 無制限バイナリ列のアップロード（PUT）を実行する。Content-Length 欠落（chunked 転送）は 411（長さ必須契約の転送）、
+    /// 成功は 204、行なしは 404。<see cref="Microsoft.AspNetCore.Http.HttpRequest.Body"/>（非シーク）を長さ付きで書き込みへ渡す。
+    /// </summary>
+    private static async Task ExecuteUploadAsync(
+        HttpContext context,
+        Func<Stream, long, Task<bool>> write
+    )
+    {
+        try
+        {
+            var length = context.Request.ContentLength;
+
+            if (length is null)
+            {
+                // 長さ必須契約（SQLite の zeroblob 等）に反する chunked 転送は受け付けない
+                context.Response.StatusCode = StatusCodes.Status411LengthRequired;
+                return;
+            }
+
+            var updated = await write(context.Request.Body, length.Value);
+            context.Response.StatusCode = updated
+                ? StatusCodes.Status204NoContent
+                : StatusCodes.Status404NotFound;
+        }
+        catch (Exception ex) when (!context.Response.HasStarted)
+        {
+            context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+            await context.Response.WriteAsJsonAsync(
+                new RemoteError { Type = "Error", Message = ex.Message },
+                RemoteJson.Options,
+                context.RequestAborted
+            );
+        }
+    }
+
+    /// <summary>無制限バイナリ列の NULL 化（DELETE）を実行する。成功は 204、行なしは 404</summary>
+    private static async Task ExecuteDeleteAsync(HttpContext context, Func<Task<bool>> deleteToNull)
+    {
+        try
+        {
+            var updated = await deleteToNull();
+            context.Response.StatusCode = updated
+                ? StatusCodes.Status204NoContent
+                : StatusCodes.Status404NotFound;
+        }
+        catch (Exception ex) when (!context.Response.HasStarted)
+        {
+            context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+            await context.Response.WriteAsJsonAsync(
+                new RemoteError { Type = "Error", Message = ex.Message },
+                RemoteJson.Options,
+                context.RequestAborted
+            );
+        }
+    }
+
+    /// <summary>バイナリ PUT のリクエストサイズ制限を解除するエンドポイントメタデータ（GB 級アップロードを追加設定なしで許可する）</summary>
+    /// <remarks>
+    /// 解除は DoS 面の懸念があるため、認可（<c>MapGeneratedRemoteEndpoints().RequireAuthorization()</c>）との併用を推奨する。
+    /// 既定の上限へ戻す・別値にする場合は返り値の <see cref="RouteGroupBuilder"/> でグループ全体を上書きする。
+    /// </remarks>
+    private sealed class DisableRequestBodySizeLimit : IRequestSizeLimitMetadata
+    {
+        /// <summary>メタデータ付与用の共有インスタンス</summary>
+        public static readonly DisableRequestBodySizeLimit Instance = new();
+
+        /// <summary>上限なし（<c>null</c>）を表す</summary>
+        public long? MaxRequestBodySize => null;
+    }
+
+    /// <summary>
+    /// GET ダウンロードで応答開始（ステータス確定・ヘッダ送信）を最初の書き込みまで遅延するラッパーストリーム。
+    /// 書き込みが 1 度も起きなければ呼び出し側が 404 へ切り替えられる（Read 関数は false のとき何も書かない契約）。
+    /// </summary>
+    private sealed class DeferredOctetStreamBody(HttpResponse response) : Stream
+    {
+        private bool _started;
+
+        /// <summary>まだ開始していなければ Content-Type を確定する（実際のヘッダ送信は最初のボディ書き込み時）</summary>
+        public void EnsureStarted()
+        {
+            if (_started)
+            {
+                return;
+            }
+
+            _started = true;
+            response.ContentType = "application/octet-stream";
+        }
+
+        public override async ValueTask WriteAsync(
+            ReadOnlyMemory<byte> buffer,
+            CancellationToken cancellationToken = default
+        )
+        {
+            EnsureStarted();
+            await response.Body.WriteAsync(buffer, cancellationToken);
+        }
+
+        public override Task WriteAsync(
+            byte[] buffer,
+            int offset,
+            int count,
+            CancellationToken cancellationToken
+        ) => WriteAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
+
+        public override void Write(byte[] buffer, int offset, int count) =>
+            WriteAsync(buffer.AsMemory(offset, count)).AsTask().GetAwaiter().GetResult();
+
+        public override async Task FlushAsync(CancellationToken cancellationToken)
+        {
+            EnsureStarted();
+            await response.Body.FlushAsync(cancellationToken);
+        }
+
+        public override void Flush() { }
+
+        public override bool CanWrite => true;
+        public override bool CanRead => false;
+        public override bool CanSeek => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
+        public override int Read(byte[] buffer, int offset, int count) =>
+            throw new NotSupportedException();
+
+        public override long Seek(long offset, SeekOrigin origin) =>
+            throw new NotSupportedException();
+
+        public override void SetLength(long value) => throw new NotSupportedException();
+    }
+{{~ end ~}}
 
     /// <summary>共通 CRUD（GetById / GetAll / Insert / Update / Delete / Save / SaveMany）をマッピングする</summary>
     private static void MapCrud<TEntity, TKey, TRepository>(
@@ -9847,6 +10132,10 @@ public static class GeneratedRemoteEndpoints
 {{~ if repository.query_remote_server_block != "" ~}}
 
 {{ repository.query_remote_server_block }}
+{{~ end ~}}
+{{~ if repository.binary_stream_remote_server_block != "" ~}}
+
+{{ repository.binary_stream_remote_server_block }}
 {{~ end ~}}
     }
 {{~ if repository.query_remote_server_records_block != "" ~}}

@@ -278,6 +278,15 @@ internal static class GeneratedFileUsings
                     yield return "System.Text.Json";
                     yield return "System.Text.Json.Serialization";
                     yield return "Microsoft.Extensions.DependencyInjection";
+
+                    // 無制限バイナリ列のストリーミング転送（クライアントの GET/PUT/DELETE）は
+                    // ステータス判定（HttpStatusCode＝System.Net）と octet-stream の Content-Type
+                    // （MediaTypeHeaderValue＝System.Net.Http.Headers）を使う。System.IO は除外時に上で付与済み
+                    if (options.ExcludeUnboundedBinaryColumns)
+                    {
+                        yield return "System.Net";
+                        yield return "System.Net.Http.Headers";
+                    }
                 }
 
                 break;
@@ -324,6 +333,17 @@ internal static class GeneratedFileUsings
                 yield return "Microsoft.AspNetCore.Http";
                 yield return "Microsoft.AspNetCore.Routing";
                 yield return "Microsoft.Extensions.DependencyInjection";
+
+                // 無制限バイナリ列のバイナリエンドポイント: 応答遅延ストリーム（Stream＝System.IO）・
+                // キー復元（JsonSerializer＝System.Text.Json）・CancellationToken（System.Threading）・
+                // サイズ制限解除メタデータ（IRequestSizeLimitMetadata＝Microsoft.AspNetCore.Http.Metadata）を使う
+                if (options.ExcludeUnboundedBinaryColumns)
+                {
+                    yield return "System.IO";
+                    yield return "System.Text.Json";
+                    yield return "System.Threading";
+                    yield return "Microsoft.AspNetCore.Http.Metadata";
+                }
                 break;
         }
     }

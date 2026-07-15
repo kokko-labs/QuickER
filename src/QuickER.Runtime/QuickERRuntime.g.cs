@@ -17,7 +17,9 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Linq.Expressions;
+using System.Net;
 using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Reflection;
 using System.Text.Json;
@@ -2975,4 +2977,96 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
                     )
                     .ToArray()
         );
+
+    /// <summary>主キーを URL クエリ（<c>?id=</c>）用の文字列へ直列化する（エンベロープと同一の JSON 規則＝VO は内包値・数値はそのまま・文字列/Guid は引用符付き）</summary>
+    /// <remarks>キー値の JSON 表現を URL エンコードして運ぶ。サーバーは同じ設定（<c>RemoteJson.Options</c>）で復元するため方言・VO によらず往復する</remarks>
+    protected string FormatKeyForQuery(TKey id) =>
+        Uri.EscapeDataString(JsonSerializer.Serialize(id, RemoteJson.Options));
+
+    /// <summary>
+    /// 無制限バイナリ列（除外列）をサーバーからストリーミングでダウンロードする（<c>GET {エンティティ}/{列名}?id=</c>）。
+    /// レスポンスヘッダのみ先読み（<see cref="HttpCompletionOption.ResponseHeadersRead"/>）し、本文を宛先へ O(チャンク) でコピーする
+    /// （blob 全量をメモリに載せない・Base64 不使用）。200＝データを書いた（<c>true</c>・空 blob も true）／404＝行なし または NULL
+    /// （<c>false</c>・宛先へ何も書かない）。それ以外の失敗は既存規則で例外復元する。
+    /// </summary>
+    protected async Task<bool> DownloadUnboundedBinaryColumnAsync(
+        string columnRoute,
+        TKey id,
+        Stream destination,
+        CancellationToken cancellationToken
+    )
+    {
+        ArgumentNullException.ThrowIfNull(destination);
+
+        var requestUri = $"{_entityRoute}/{columnRoute}?id={FormatKeyForQuery(id)}";
+        using var response = await _httpClient.GetAsync(
+            requestUri,
+            HttpCompletionOption.ResponseHeadersRead,
+            cancellationToken
+        );
+
+        if (response.StatusCode == HttpStatusCode.NotFound)
+        {
+            return false;
+        }
+
+        await EnsureSuccessAsync(response, cancellationToken);
+
+        await using var source = await response.Content.ReadAsStreamAsync(cancellationToken);
+        await source.CopyToAsync(destination, cancellationToken);
+        return true;
+    }
+
+    /// <summary>
+    /// 無制限バイナリ列（除外列）をサーバーへストリーミングでアップロードする。<paramref name="source"/> が <c>null</c> のときは
+    /// <c>DELETE</c>（列を NULL 化）、非 <c>null</c> のときは <c>PUT</c>（<see cref="StreamContent"/>＋Content-Length）を送る
+    /// （0 バイトの PUT＝空ボディと NULL 化＝DELETE は構造的に区別される）。送信前に長さ契約（<c>CanSeek</c> でない Stream は
+    /// <paramref name="length"/> 必須）を検証する。204＝成功（<c>true</c>）／404＝行なし（<c>false</c>）。それ以外は例外復元。
+    /// </summary>
+    protected async Task<bool> UploadUnboundedBinaryColumnAsync(
+        string columnRoute,
+        TKey id,
+        Stream? source,
+        long? length,
+        CancellationToken cancellationToken
+    )
+    {
+        var requestUri = $"{_entityRoute}/{columnRoute}?id={FormatKeyForQuery(id)}";
+
+        // source=null は列を NULL に設定する（DELETE）。0 バイトの PUT（空ボディ）とは意味が異なる
+        if (source is null)
+        {
+            using var deleteResponse = await _httpClient.DeleteAsync(requestUri, cancellationToken);
+
+            if (deleteResponse.StatusCode == HttpStatusCode.NotFound)
+            {
+                return false;
+            }
+
+            await EnsureSuccessAsync(deleteResponse, cancellationToken);
+            return true;
+        }
+
+        // 送信前に長さを確定する（CanSeek でない Stream は length 必須＝Content-Length と自然に整合。欠落は送信前に例外）
+        var payloadLength = UnboundedBinaryColumns.ResolveWriteLength(source, length);
+
+        using var content = new StreamContent(source);
+        content.Headers.ContentLength = payloadLength;
+        content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+
+        using var request = new HttpRequestMessage(HttpMethod.Put, requestUri) { Content = content };
+        using var response = await _httpClient.SendAsync(
+            request,
+            HttpCompletionOption.ResponseHeadersRead,
+            cancellationToken
+        );
+
+        if (response.StatusCode == HttpStatusCode.NotFound)
+        {
+            return false;
+        }
+
+        await EnsureSuccessAsync(response, cancellationToken);
+        return true;
+    }
 }

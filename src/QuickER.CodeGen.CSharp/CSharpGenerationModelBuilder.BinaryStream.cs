@@ -15,10 +15,17 @@ namespace QuickER.CodeGen.CSharp;
 /// テンプレートは（名前付きクエリブロックと同様に）非空のときだけ出力する。
 /// </para>
 /// <para>
-/// 契約は全機能面（<c>I{Entity}Repository</c>）にのみ載せ、リモート面（<c>I{Entity}RemoteRepository</c>）には載せない
-/// （ネットワーク境界を越えるストリーミングは将来対応）。実装は Repository (QuickER) 2 方言・インメモリを固定 infra の
-/// エンジンへ委譲する薄いメソッドで賄い、EF Core は方言固有ストリーミングを持てないため <c>NotSupportedException</c> を投げる。
-/// ファイル糖衣（<c>Read/Write{Column}ToFile/FromFile</c>）は各実装クラスへ重複させず、契約面への拡張メソッド静的クラス 1 本にする。
+/// 契約はリモート契約生成（<c>GenerateRemoteContracts</c> または <c>GenerateRemoteServices</c>）の有無で挿入先が変わる
+/// （リモート面 ON なら <c>I{Entity}RemoteRepository</c>＝ネットワーク境界を越えられる操作・OFF なら全機能面 <c>I{Entity}Repository</c>。
+/// 全機能面はリモート面を継承するため、移設しても既存の実装クラス・利用コードはコンパイル無変更で通る）。実装は
+/// Repository (QuickER) 2 方言・インメモリを固定 infra のエンジンへ委譲する薄いメソッドで賄い、EF Core は方言固有ストリーミングを
+/// 持てないため <c>NotSupportedException</c> を投げる。ファイル糖衣（<c>Read/Write{Column}ToFile/FromFile</c>）は各実装クラスへ
+/// 重複させず、契約面（リモート面 ON ならリモート面）への拡張メソッド静的クラス 1 本にする。
+/// </para>
+/// <para>
+/// リモートサービス生成時は HTTP + JSON の専用エンドポイント（<c>GET/PUT/DELETE {prefix}/{エンティティ}/{列名}?id=</c>）で
+/// ストリーミング転送する。クライアント（<c>Http{Entity}RemoteRepository</c>）は固定 infra の共通ヘルパーへ委譲し、
+/// サーバー（<c>Map{Entity}Endpoints</c>）は除外列ごとに 3 動詞を出力する。
 /// </para>
 /// </remarks>
 internal sealed partial class CSharpGenerationModelBuilder
@@ -32,11 +39,15 @@ internal sealed partial class CSharpGenerationModelBuilder
         string ContractBlock,
         string ThinImplBlock,
         string EfImplBlock,
-        string FileExtensionsBlock
+        string FileExtensionsBlock,
+        string RemoteClientBlock,
+        string RemoteServerBlock
     );
 
     /// <summary>ブロックが空のときの既定値（除外列なし・オプション OFF・Repository 非生成）</summary>
     private static readonly BinaryStreamBlocks EmptyBinaryStreamBlocks = new(
+        string.Empty,
+        string.Empty,
         string.Empty,
         string.Empty,
         string.Empty,
@@ -47,7 +58,6 @@ internal sealed partial class CSharpGenerationModelBuilder
     private BinaryStreamBlocks BuildBinaryStreamBlocks(
         Entity entity,
         string entityClassName,
-        string interfaceName,
         string repositoryName,
         string keyTypeName,
         CodeGenerationOptions options
@@ -73,10 +83,19 @@ internal sealed partial class CSharpGenerationModelBuilder
             return EmptyBinaryStreamBlocks;
         }
 
+        // リモート契約が生成される構成では契約とファイル糖衣の対象をリモート面へ移す
+        // （リモート面 ON はネットワーク境界を越えられる操作の定義に合致。全機能面はリモート面を継承）。
+        var remoteContracts = options.GenerateRemoteContracts || options.GenerateRemoteServices;
+        var interfaceName = $"I{repositoryName}Repository";
+        var remoteInterfaceName = $"I{repositoryName}RemoteRepository";
+        var fileExtensionsTarget = remoteContracts ? remoteInterfaceName : interfaceName;
+
         var contractMembers = new List<string>();
         var thinMembers = new List<string>();
         var efMembers = new List<string>();
         var fileMethods = new List<string>();
+        var remoteClientMembers = new List<string>();
+        var remoteServerMembers = new List<string>();
 
         foreach (var (columnName, propertyName) in columns)
         {
@@ -88,7 +107,21 @@ internal sealed partial class CSharpGenerationModelBuilder
             );
             efMembers.Add(BuildBinaryStreamEfImplMember(propertyName, keyTypeName));
             fileMethods.Add(
-                BuildBinaryStreamFileMethods(columnName, propertyName, interfaceName, keyTypeName)
+                BuildBinaryStreamFileMethods(
+                    columnName,
+                    propertyName,
+                    fileExtensionsTarget,
+                    keyTypeName
+                )
+            );
+            remoteClientMembers.Add(BuildBinaryStreamRemoteClientMember(propertyName, keyTypeName));
+            remoteServerMembers.Add(
+                BuildBinaryStreamRemoteServerMember(
+                    propertyName,
+                    remoteInterfaceName,
+                    repositoryName,
+                    keyTypeName
+                )
             );
         }
 
@@ -96,7 +129,9 @@ internal sealed partial class CSharpGenerationModelBuilder
             string.Join("\n\n", contractMembers),
             string.Join("\n\n", thinMembers),
             string.Join("\n\n", efMembers),
-            BuildBinaryStreamFileExtensionsClass(entityClassName, repositoryName, fileMethods)
+            BuildBinaryStreamFileExtensionsClass(entityClassName, repositoryName, fileMethods),
+            string.Join("\n\n", remoteClientMembers),
+            string.Join("\n\n", remoteServerMembers)
         );
     }
 
@@ -252,6 +287,118 @@ internal sealed partial class CSharpGenerationModelBuilder
             .Append("        return await repository.Write")
             .Append(propertyName)
             .Append("Async(id, source, source.Length, cancellationToken);\n    }");
+        return builder.ToString();
+    }
+
+    /// <summary>Stream アクセサの HTTP クライアント転送メンバー（固定 infra の GET/PUT/DELETE ヘルパーへ委譲）を構築する</summary>
+    private static string BuildBinaryStreamRemoteClientMember(
+        string propertyName,
+        string keyTypeName
+    )
+    {
+        // 列名（プロパティ名）はサーバーの列ルートセグメントと同一文字列を使う（クライアント・サーバーで一致）
+        var builder = new StringBuilder();
+        builder
+            .Append("    /// <inheritdoc />\n")
+            .Append("    public Task<bool> Read")
+            .Append(propertyName)
+            .Append("Async(")
+            .Append(keyTypeName)
+            .Append(" id, Stream destination, CancellationToken cancellationToken = default) =>\n")
+            .Append("        DownloadUnboundedBinaryColumnAsync(\"")
+            .Append(propertyName)
+            .Append("\", id, destination, cancellationToken);\n\n");
+        builder
+            .Append("    /// <inheritdoc />\n")
+            .Append("    public Task<bool> Write")
+            .Append(propertyName)
+            .Append("Async(")
+            .Append(keyTypeName)
+            .Append(
+                " id, Stream? source, long? length = null, CancellationToken cancellationToken = default) =>\n"
+            )
+            .Append("        UploadUnboundedBinaryColumnAsync(\"")
+            .Append(propertyName)
+            .Append("\", id, source, length, cancellationToken);");
+        return builder.ToString();
+    }
+
+    /// <summary>Stream アクセサのサーバー側バイナリエンドポイント 3 動詞（GET/PUT/DELETE）を構築する</summary>
+    /// <remarks>インデントはサーバーテンプレートのメソッド本体（8 スペース起点）に合わせる。ルートは <c>{エンティティ}/{列名}</c></remarks>
+    private static string BuildBinaryStreamRemoteServerMember(
+        string propertyName,
+        string remoteInterfaceName,
+        string repositoryName,
+        string keyTypeName
+    )
+    {
+        var route = $"{repositoryName}/{propertyName}";
+        var resolve =
+            $"var repository = context.RequestServices.GetRequiredService<{remoteInterfaceName}>();";
+        var parseKey = $"ParseKeyFromQuery<{keyTypeName}>(context)";
+
+        var builder = new StringBuilder();
+
+        // GET: ダウンロード。読み取り関数が false（行なし/NULL）のときは本文未送信のまま 404 になる
+        builder
+            .Append("        group.MapGet(\n            \"")
+            .Append(route)
+            .Append("\",\n            (HttpContext context) =>\n")
+            .Append("                ExecuteDownloadAsync(\n                    context,\n")
+            .Append("                    destination =>\n                    {\n")
+            .Append("                        ")
+            .Append(resolve)
+            .Append("\n                        return repository.Read")
+            .Append(propertyName)
+            .Append("Async(\n                            ")
+            .Append(parseKey)
+            .Append(",\n                            destination,\n")
+            .Append(
+                "                            context.RequestAborted\n                        );\n"
+            )
+            .Append("                    }\n                )\n        );\n\n");
+
+        // PUT: アップロード。このエンドポイントのみリクエストサイズ制限を解除する（メタデータ付与）
+        builder
+            .Append("        group\n            .MapPut(\n                \"")
+            .Append(route)
+            .Append("\",\n                (HttpContext context) =>\n")
+            .Append("                    ExecuteUploadAsync(\n                        context,\n")
+            .Append("                        (body, length) =>\n                        {\n")
+            .Append("                            ")
+            .Append(resolve)
+            .Append("\n                            return repository.Write")
+            .Append(propertyName)
+            .Append("Async(\n                                ")
+            .Append(parseKey)
+            .Append(
+                ",\n                                body,\n                                length,\n"
+            )
+            .Append(
+                "                                context.RequestAborted\n                            );\n"
+            )
+            .Append("                        }\n                    )\n            )\n")
+            .Append("            .WithMetadata(DisableRequestBodySizeLimit.Instance);\n\n");
+
+        // DELETE: 列を NULL 化（source=null 相当）
+        builder
+            .Append("        group.MapDelete(\n            \"")
+            .Append(route)
+            .Append("\",\n            (HttpContext context) =>\n")
+            .Append("                ExecuteDeleteAsync(\n                    context,\n")
+            .Append("                    () =>\n                    {\n")
+            .Append("                        ")
+            .Append(resolve)
+            .Append("\n                        return repository.Write")
+            .Append(propertyName)
+            .Append("Async(\n                            ")
+            .Append(parseKey)
+            .Append(",\n                            null,\n                            null,\n")
+            .Append(
+                "                            context.RequestAborted\n                        );\n"
+            )
+            .Append("                    }\n                )\n        );");
+
         return builder.ToString();
     }
 

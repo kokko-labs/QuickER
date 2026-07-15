@@ -3,9 +3,13 @@
 
 using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Metadata;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -98,6 +102,196 @@ public static class GeneratedRemoteEndpoints
     /// <summary>DI からリモート面リポジトリを解決する</summary>
     private static TRepository Repository<TRepository>(HttpContext context)
         where TRepository : notnull => context.RequestServices.GetRequiredService<TRepository>();
+
+    /// <summary>URL クエリ（<c>?id=</c>）の主キーを復元する（クライアントの <c>FormatKeyForQuery</c> と同一の JSON 規則）</summary>
+    private static TKey ParseKeyFromQuery<TKey>(HttpContext context)
+    {
+        var raw = context.Request.Query["id"].ToString();
+
+        if (string.IsNullOrEmpty(raw))
+        {
+            throw new InvalidOperationException("クエリ文字列 id が指定されていません。");
+        }
+
+        return JsonSerializer.Deserialize<TKey>(raw, RemoteJson.Options)
+            ?? throw new InvalidOperationException("クエリ文字列 id を復元できませんでした。");
+    }
+
+    /// <summary>
+    /// 無制限バイナリ列のダウンロード（GET）を実行する。読み取り関数が <c>false</c>（行なし/NULL）のときは本文未送信のまま
+    /// 404 に確定し、<c>true</c>（空 blob も含む）のときは 200＋<c>application/octet-stream</c> を返す。応答を書き始めると
+    /// 404 へ切り替えられないため、応答開始を最初の書き込みまで遅延するラッパーストリームを渡す（存在判定と O(チャンク) を両立）。
+    /// 読み取り関数が本文を書き始める前に例外を投げた場合のみ 500＋<see cref="RemoteError"/> を返す。
+    /// </summary>
+    private static async Task ExecuteDownloadAsync(HttpContext context, Func<Stream, Task<bool>> read)
+    {
+        var deferred = new DeferredOctetStreamBody(context.Response);
+
+        try
+        {
+            var wrote = await read(deferred);
+
+            if (!wrote)
+            {
+                // 行なし/NULL: まだ本文を送っていないので 404 に確定できる
+                context.Response.StatusCode = StatusCodes.Status404NotFound;
+                return;
+            }
+
+            // 空 blob でも true。一度も書いていなければ 200＋ヘッダをここで確定する
+            deferred.EnsureStarted();
+        }
+        catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
+        {
+            // クライアント切断・キャンセル: 応答先が既に無いため何もしない
+        }
+        catch (Exception ex) when (!context.Response.HasStarted)
+        {
+            context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+            await context.Response.WriteAsJsonAsync(
+                new RemoteError { Type = "Error", Message = ex.Message },
+                RemoteJson.Options,
+                context.RequestAborted
+            );
+        }
+    }
+
+    /// <summary>
+    /// 無制限バイナリ列のアップロード（PUT）を実行する。Content-Length 欠落（chunked 転送）は 411（長さ必須契約の転送）、
+    /// 成功は 204、行なしは 404。<see cref="Microsoft.AspNetCore.Http.HttpRequest.Body"/>（非シーク）を長さ付きで書き込みへ渡す。
+    /// </summary>
+    private static async Task ExecuteUploadAsync(
+        HttpContext context,
+        Func<Stream, long, Task<bool>> write
+    )
+    {
+        try
+        {
+            var length = context.Request.ContentLength;
+
+            if (length is null)
+            {
+                // 長さ必須契約（SQLite の zeroblob 等）に反する chunked 転送は受け付けない
+                context.Response.StatusCode = StatusCodes.Status411LengthRequired;
+                return;
+            }
+
+            var updated = await write(context.Request.Body, length.Value);
+            context.Response.StatusCode = updated
+                ? StatusCodes.Status204NoContent
+                : StatusCodes.Status404NotFound;
+        }
+        catch (Exception ex) when (!context.Response.HasStarted)
+        {
+            context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+            await context.Response.WriteAsJsonAsync(
+                new RemoteError { Type = "Error", Message = ex.Message },
+                RemoteJson.Options,
+                context.RequestAborted
+            );
+        }
+    }
+
+    /// <summary>無制限バイナリ列の NULL 化（DELETE）を実行する。成功は 204、行なしは 404</summary>
+    private static async Task ExecuteDeleteAsync(HttpContext context, Func<Task<bool>> deleteToNull)
+    {
+        try
+        {
+            var updated = await deleteToNull();
+            context.Response.StatusCode = updated
+                ? StatusCodes.Status204NoContent
+                : StatusCodes.Status404NotFound;
+        }
+        catch (Exception ex) when (!context.Response.HasStarted)
+        {
+            context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+            await context.Response.WriteAsJsonAsync(
+                new RemoteError { Type = "Error", Message = ex.Message },
+                RemoteJson.Options,
+                context.RequestAborted
+            );
+        }
+    }
+
+    /// <summary>バイナリ PUT のリクエストサイズ制限を解除するエンドポイントメタデータ（GB 級アップロードを追加設定なしで許可する）</summary>
+    /// <remarks>
+    /// 解除は DoS 面の懸念があるため、認可（<c>MapGeneratedRemoteEndpoints().RequireAuthorization()</c>）との併用を推奨する。
+    /// 既定の上限へ戻す・別値にする場合は返り値の <see cref="RouteGroupBuilder"/> でグループ全体を上書きする。
+    /// </remarks>
+    private sealed class DisableRequestBodySizeLimit : IRequestSizeLimitMetadata
+    {
+        /// <summary>メタデータ付与用の共有インスタンス</summary>
+        public static readonly DisableRequestBodySizeLimit Instance = new();
+
+        /// <summary>上限なし（<c>null</c>）を表す</summary>
+        public long? MaxRequestBodySize => null;
+    }
+
+    /// <summary>
+    /// GET ダウンロードで応答開始（ステータス確定・ヘッダ送信）を最初の書き込みまで遅延するラッパーストリーム。
+    /// 書き込みが 1 度も起きなければ呼び出し側が 404 へ切り替えられる（Read 関数は false のとき何も書かない契約）。
+    /// </summary>
+    private sealed class DeferredOctetStreamBody(HttpResponse response) : Stream
+    {
+        private bool _started;
+
+        /// <summary>まだ開始していなければ Content-Type を確定する（実際のヘッダ送信は最初のボディ書き込み時）</summary>
+        public void EnsureStarted()
+        {
+            if (_started)
+            {
+                return;
+            }
+
+            _started = true;
+            response.ContentType = "application/octet-stream";
+        }
+
+        public override async ValueTask WriteAsync(
+            ReadOnlyMemory<byte> buffer,
+            CancellationToken cancellationToken = default
+        )
+        {
+            EnsureStarted();
+            await response.Body.WriteAsync(buffer, cancellationToken);
+        }
+
+        public override Task WriteAsync(
+            byte[] buffer,
+            int offset,
+            int count,
+            CancellationToken cancellationToken
+        ) => WriteAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
+
+        public override void Write(byte[] buffer, int offset, int count) =>
+            WriteAsync(buffer.AsMemory(offset, count)).AsTask().GetAwaiter().GetResult();
+
+        public override async Task FlushAsync(CancellationToken cancellationToken)
+        {
+            EnsureStarted();
+            await response.Body.FlushAsync(cancellationToken);
+        }
+
+        public override void Flush() { }
+
+        public override bool CanWrite => true;
+        public override bool CanRead => false;
+        public override bool CanSeek => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
+        public override int Read(byte[] buffer, int offset, int count) =>
+            throw new NotSupportedException();
+
+        public override long Seek(long offset, SeekOrigin origin) =>
+            throw new NotSupportedException();
+
+        public override void SetLength(long value) => throw new NotSupportedException();
+    }
 
     /// <summary>共通 CRUD（GetById / GetAll / Insert / Update / Delete / Save / SaveMany）をマッピングする</summary>
     private static void MapCrud<TEntity, TKey, TRepository>(
@@ -262,6 +456,116 @@ public static class GeneratedRemoteEndpoints
                     {
                         var repository = context.RequestServices.GetRequiredService<IDocumentRemoteRepository>();
                         return (object?)await repository.CountWithPayloadAsync(context.RequestAborted);
+                    }
+                )
+        );
+
+        group.MapGet(
+            "Document/Payload",
+            (HttpContext context) =>
+                ExecuteDownloadAsync(
+                    context,
+                    destination =>
+                    {
+                        var repository = context.RequestServices.GetRequiredService<IDocumentRemoteRepository>();
+                        return repository.ReadPayloadAsync(
+                            ParseKeyFromQuery<int>(context),
+                            destination,
+                            context.RequestAborted
+                        );
+                    }
+                )
+        );
+
+        group
+            .MapPut(
+                "Document/Payload",
+                (HttpContext context) =>
+                    ExecuteUploadAsync(
+                        context,
+                        (body, length) =>
+                        {
+                            var repository = context.RequestServices.GetRequiredService<IDocumentRemoteRepository>();
+                            return repository.WritePayloadAsync(
+                                ParseKeyFromQuery<int>(context),
+                                body,
+                                length,
+                                context.RequestAborted
+                            );
+                        }
+                    )
+            )
+            .WithMetadata(DisableRequestBodySizeLimit.Instance);
+
+        group.MapDelete(
+            "Document/Payload",
+            (HttpContext context) =>
+                ExecuteDeleteAsync(
+                    context,
+                    () =>
+                    {
+                        var repository = context.RequestServices.GetRequiredService<IDocumentRemoteRepository>();
+                        return repository.WritePayloadAsync(
+                            ParseKeyFromQuery<int>(context),
+                            null,
+                            null,
+                            context.RequestAborted
+                        );
+                    }
+                )
+        );
+
+        group.MapGet(
+            "Document/Thumb",
+            (HttpContext context) =>
+                ExecuteDownloadAsync(
+                    context,
+                    destination =>
+                    {
+                        var repository = context.RequestServices.GetRequiredService<IDocumentRemoteRepository>();
+                        return repository.ReadThumbAsync(
+                            ParseKeyFromQuery<int>(context),
+                            destination,
+                            context.RequestAborted
+                        );
+                    }
+                )
+        );
+
+        group
+            .MapPut(
+                "Document/Thumb",
+                (HttpContext context) =>
+                    ExecuteUploadAsync(
+                        context,
+                        (body, length) =>
+                        {
+                            var repository = context.RequestServices.GetRequiredService<IDocumentRemoteRepository>();
+                            return repository.WriteThumbAsync(
+                                ParseKeyFromQuery<int>(context),
+                                body,
+                                length,
+                                context.RequestAborted
+                            );
+                        }
+                    )
+            )
+            .WithMetadata(DisableRequestBodySizeLimit.Instance);
+
+        group.MapDelete(
+            "Document/Thumb",
+            (HttpContext context) =>
+                ExecuteDeleteAsync(
+                    context,
+                    () =>
+                    {
+                        var repository = context.RequestServices.GetRequiredService<IDocumentRemoteRepository>();
+                        return repository.WriteThumbAsync(
+                            ParseKeyFromQuery<int>(context),
+                            null,
+                            null,
+                            context.RequestAborted
+                        );
                     }
                 )
         );
