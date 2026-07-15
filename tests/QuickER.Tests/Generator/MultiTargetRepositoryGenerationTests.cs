@@ -432,8 +432,8 @@ public sealed class MultiTargetRepositoryGenerationTests
 
         // 各方言 namespace にエンティティ別 Repository 実装が出る（両方言に CustomerRepository）
         code.Should().Contain("class CustomerRepository");
-        code.Should().Contain(": SqlServerRepository<CustomerEntity, int>(connectionFactory),");
-        code.Should().Contain(": SqliteRepository<CustomerEntity, int>(connectionFactory),");
+        code.Should().Contain(": SqlServerRepository<CustomerEntity, int>(");
+        code.Should().Contain(": SqliteRepository<CustomerEntity, int>(");
 
         // 両実装とも共有契約 I{Entity}Repository を実装する（契約は契約 namespace 側の単一型）
         System

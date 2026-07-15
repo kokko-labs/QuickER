@@ -1877,6 +1877,252 @@ public partial interface ISqlExecutor
     );
 }
 
+/// <summary>グラフ保存（Save）で 1 エンティティに対して実行される DB 操作の種別</summary>
+public enum SaveOperation
+{
+    /// <summary>新規追加（INSERT）</summary>
+    Insert,
+
+    /// <summary>更新（UPDATE）</summary>
+    Update,
+
+    /// <summary>削除（DELETE）</summary>
+    Delete,
+}
+
+/// <summary>
+/// グラフ保存（<c>SaveAsync</c>）の前後に処理を差し込むフック。DI に 0..N 個登録でき、対象エンティティ型ごとに解決される。
+/// </summary>
+/// <remarks>
+/// <para>
+/// 両メソッドとも既定実装を持つため、必要な方だけを実装すればよい。<see cref="BeforeSaveAsync"/> は各エンティティの
+/// 操作（Insert/Update/Delete）の直前に呼ばれ、<c>false</c> を返すとその 1 件の操作だけをスキップする（他の行は続行）。
+/// <see cref="AfterSaveAsync"/> は操作の直後・コミット前に、同一トランザクションに参加する <see cref="ISaveHookContext"/> と
+/// ともに呼ばれる（例外を投げると Save 全体がロールバックされる）。
+/// </para>
+/// <para>
+/// フックが発火するのは <c>SaveAsync</c>（グラフ保存・2 形態とも）のみで、<c>InsertAsync</c> / <c>UpdateAsync</c> /
+/// <c>DeleteAsync</c> の直接呼び出し・<c>BulkInsertAsync</c> は対象外（素通り）。スキップ起因の整合（例: 新規親を止めるなら
+/// 新規子も止める）はフック実装者の責任で、矛盾は DB 制約エラー→全体ロールバックで安全側に倒れる。
+/// </para>
+/// </remarks>
+/// <typeparam name="TEntity">フック対象のエンティティ型</typeparam>
+public interface ISaveHook<TEntity>
+    where TEntity : EntityBase
+{
+    /// <summary>操作の直前に呼ばれる（<c>false</c> でその 1 件の操作をスキップ・既定はスキップしない）</summary>
+    /// <param name="entity">保存対象のエンティティ</param>
+    /// <param name="operation">これから行う操作（Insert/Update/Delete）</param>
+    /// <param name="cancellationToken">キャンセルトークン</param>
+    /// <returns>操作を続行するなら <c>true</c>、スキップするなら <c>false</c></returns>
+    Task<bool> BeforeSaveAsync(
+        TEntity entity,
+        SaveOperation operation,
+        CancellationToken cancellationToken = default
+    ) => Task.FromResult(true);
+
+    /// <summary>操作の直後・コミット前に呼ばれる（既定は何もしない。<paramref name="context"/> は同一トランザクションに参加する）</summary>
+    /// <param name="entity">保存されたエンティティ</param>
+    /// <param name="operation">実際に行われた操作（<c>insertWhenUpdateMissing</c> による切替時は Insert）</param>
+    /// <param name="context">同一トランザクションで DB 操作を行うためのコンテキスト</param>
+    /// <param name="cancellationToken">キャンセルトークン</param>
+    Task AfterSaveAsync(
+        TEntity entity,
+        SaveOperation operation,
+        ISaveHookContext context,
+        CancellationToken cancellationToken = default
+    ) => Task.CompletedTask;
+}
+
+/// <summary>
+/// <see cref="ISaveHook{TEntity}.AfterSaveAsync"/> に渡される、進行中の保存トランザクションに参加して DB 操作を行うコンテキスト。
+/// </summary>
+/// <remarks>
+/// <para>
+/// フック内から Repository の通常 API を呼ぶと別接続でロック競合するため、同一トランザクションで完結する操作をこの契約経由で提供する。
+/// 生ハンドル（接続・トランザクション）は公開せず、型付き操作（除外列バイナリの書き込み・生 SQL）だけを提供する（方言中立・誤用防止）。
+/// </para>
+/// <para>
+/// <see cref="WriteBinaryColumnAsync"/> は <c>ExcludeUnboundedBinaryColumns</c> を有効にした図でのみ機能する。
+/// 無効な図では <see cref="NotSupportedException"/> を投げる（生 SQL の <see cref="ExecuteSqlAsync"/> を使うか、オプションを有効化する）。
+/// </para>
+/// </remarks>
+public interface ISaveHookContext
+{
+    /// <summary>同一トランザクション内で生 SQL（任意 DML）を実行し、影響行数を返す</summary>
+    /// <remarks>
+    /// パラメータ束縛は Repository の生 SQL メソッドと同じ（匿名オブジェクトの public プロパティ名 <c>Foo</c> を <c>@Foo</c> として束縛）。
+    /// <b>値は必ずパラメータで渡すこと（文字列連結はインジェクションの危険がある）。</b>
+    /// </remarks>
+    /// <param name="sql">実行する DML 文</param>
+    /// <param name="parameters">@名 パラメータへ束縛する匿名オブジェクト（null でパラメータなし）</param>
+    /// <param name="cancellationToken">キャンセルトークン</param>
+    Task<int> ExecuteSqlAsync(
+        string sql,
+        object? parameters = null,
+        CancellationToken cancellationToken = default
+    );
+
+    /// <summary>
+    /// 同一トランザクション内で、無制限バイナリ（除外）列を主キー指定でストリームから書き込む（O(チャンク) のストリーミング）。
+    /// <paramref name="source"/> が <c>null</c> のとき列を NULL に設定する。更新した場合は <c>true</c>、該当行なしは <c>false</c>。
+    /// </summary>
+    /// <param name="propertyName">対象列の C# プロパティ名（<c>nameof</c> 指定）</param>
+    /// <param name="key">対象行の主キー値</param>
+    /// <param name="source">書き込むストリーム（<c>null</c> で SET NULL）</param>
+    /// <param name="length"><c>source.CanSeek</c> でないときに必須の長さ（欠落は <see cref="ArgumentException"/>）</param>
+    /// <param name="cancellationToken">キャンセルトークン</param>
+    Task<bool> WriteBinaryColumnAsync(
+        string propertyName,
+        object key,
+        Stream? source,
+        long? length = null,
+        CancellationToken cancellationToken = default
+    );
+
+    /// <summary>ファイルの内容を無制限バイナリ（除外）列へ書き込むファイル糖衣（<see cref="WriteBinaryColumnAsync"/> へ委譲）</summary>
+    /// <param name="propertyName">対象列の C# プロパティ名（<c>nameof</c> 指定）</param>
+    /// <param name="key">対象行の主キー値</param>
+    /// <param name="path">読み込むファイルパス</param>
+    /// <param name="cancellationToken">キャンセルトークン</param>
+    async Task<bool> WriteBinaryColumnFromFileAsync(
+        string propertyName,
+        object key,
+        string path,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(path);
+
+        await using var stream = File.OpenRead(path);
+        return await WriteBinaryColumnAsync(
+            propertyName,
+            key,
+            stream,
+            stream.Length,
+            cancellationToken
+        );
+    }
+}
+
+/// <summary>特定エンティティ型に対する Save フック群を、非ジェネリックに（グラフの混在型を跨いで）呼び出すための面</summary>
+/// <remarks>登録順に Before を呼び最初の <c>false</c> で短絡、After は登録順に順次呼ぶ。型ごとに 1 度だけ構築される</remarks>
+public interface ISaveHookInvoker
+{
+    /// <summary>登録順に Before を呼び、最初の <c>false</c> で短絡する（1 つでも false なら false を返す）</summary>
+    Task<bool> InvokeBeforeAsync(
+        EntityBase entity,
+        SaveOperation operation,
+        CancellationToken cancellationToken
+    );
+
+    /// <summary>登録順に After を順次呼ぶ</summary>
+    Task InvokeAfterAsync(
+        EntityBase entity,
+        SaveOperation operation,
+        ISaveHookContext context,
+        CancellationToken cancellationToken
+    );
+}
+
+/// <summary>エンティティ型から Save フックの呼び出し面（<see cref="ISaveHookInvoker"/>）を解決するレジストリ</summary>
+/// <remarks>フックが 1 つも無い型では <c>null</c> を返す（＝完全 no-op）。実装は解決結果をキャッシュする</remarks>
+public interface ISaveHookRegistry
+{
+    /// <summary>指定エンティティ型のフック呼び出し面を返す（フックなしは <c>null</c>）</summary>
+    ISaveHookInvoker? GetInvoker(Type entityType);
+}
+
+/// <summary>
+/// <see cref="IServiceProvider"/> から <c>IEnumerable&lt;ISaveHook&lt;TEntity&gt;&gt;</c> を解決して呼び出し面を構築する
+/// 既定の <see cref="ISaveHookRegistry"/> 実装（BCL の <see cref="IServiceProvider"/> のみに依存）。
+/// </summary>
+/// <remarks>
+/// 型 → 呼び出し面の対応を<b>このレジストリ（Scoped）単位で</b>キャッシュする（フックが Scoped サービスでありうるため
+/// プロセス静的にはしない）。呼び出し面は <see cref="SaveHookInvoker{TEntity}"/> を <see cref="Type.MakeGenericType"/> ＋
+/// <see cref="Activator"/> で 1 度だけ生成する（以降の呼び出しはリフレクションなし）。
+/// </remarks>
+public sealed class ServiceProviderSaveHookRegistry(IServiceProvider serviceProvider)
+    : ISaveHookRegistry
+{
+    private readonly IServiceProvider _serviceProvider = serviceProvider;
+    private readonly ConcurrentDictionary<Type, ISaveHookInvoker?> _invokers = new();
+
+    /// <summary>指定型の呼び出し面を解決してキャッシュする（フックなしは <c>null</c>）</summary>
+    public ISaveHookInvoker? GetInvoker(Type entityType) =>
+        _invokers.GetOrAdd(entityType, BuildInvoker);
+
+    /// <summary><c>IEnumerable&lt;ISaveHook&lt;entityType&gt;&gt;</c> を解決し、1 つ以上あれば呼び出し面を構築する（無ければ null）</summary>
+    private ISaveHookInvoker? BuildInvoker(Type entityType)
+    {
+        var hookType = typeof(ISaveHook<>).MakeGenericType(entityType);
+        var enumerableType = typeof(IEnumerable<>).MakeGenericType(hookType);
+        var resolved = (System.Collections.IEnumerable?)_serviceProvider.GetService(enumerableType);
+
+        if (resolved is null)
+        {
+            return null;
+        }
+
+        // 1 つも登録が無ければ null（＝レジストリありでも完全 no-op）。materialize して件数を確定する
+        var hooks = resolved.Cast<object>().ToList();
+
+        if (hooks.Count == 0)
+        {
+            return null;
+        }
+
+        var invokerType = typeof(SaveHookInvoker<>).MakeGenericType(entityType);
+        return (ISaveHookInvoker)Activator.CreateInstance(invokerType, resolved)!;
+    }
+}
+
+/// <summary><typeparamref name="TEntity"/> 用フック群を登録順に呼び出す型付き実装（<see cref="ISaveHookInvoker"/> の具象）</summary>
+/// <typeparam name="TEntity">フック対象のエンティティ型</typeparam>
+public sealed class SaveHookInvoker<TEntity>(IEnumerable<ISaveHook<TEntity>> hooks)
+    : ISaveHookInvoker
+    where TEntity : EntityBase
+{
+    private readonly IReadOnlyList<ISaveHook<TEntity>> _hooks =
+        hooks as IReadOnlyList<ISaveHook<TEntity>> ?? hooks.ToList();
+
+    /// <summary>登録順に Before を呼び、最初の <c>false</c> で短絡する</summary>
+    public async Task<bool> InvokeBeforeAsync(
+        EntityBase entity,
+        SaveOperation operation,
+        CancellationToken cancellationToken
+    )
+    {
+        var typed = (TEntity)entity;
+
+        foreach (var hook in _hooks)
+        {
+            if (!await hook.BeforeSaveAsync(typed, operation, cancellationToken))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>登録順に After を順次呼ぶ</summary>
+    public async Task InvokeAfterAsync(
+        EntityBase entity,
+        SaveOperation operation,
+        ISaveHookContext context,
+        CancellationToken cancellationToken
+    )
+    {
+        var typed = (TEntity)entity;
+
+        foreach (var hook in _hooks)
+        {
+            await hook.AfterSaveAsync(typed, operation, context, cancellationToken);
+        }
+    }
+}
+
 /// <summary>SQL パラメータへ渡す値を素の値へ開くヘルパー（値オブジェクトは内包値へ変換し、SqlClient が扱える型にする）</summary>
 public static class SqlParameterValue
 {

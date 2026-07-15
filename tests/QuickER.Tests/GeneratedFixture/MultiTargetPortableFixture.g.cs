@@ -12,6 +12,7 @@ using System.ComponentModel.DataAnnotations.Schema;
 using System.Data;
 using System.Data.Common;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Linq.Expressions;
 using System.Reflection;
@@ -24,6 +25,7 @@ using System.Threading.Tasks;
 using Microsoft.Data.SqlClient;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace QuickER.Tests.GeneratedMultiTargetFixture
 {
@@ -3680,6 +3682,252 @@ public partial interface ISqlExecutor
     );
 }
 
+/// <summary>グラフ保存（Save）で 1 エンティティに対して実行される DB 操作の種別</summary>
+public enum SaveOperation
+{
+    /// <summary>新規追加（INSERT）</summary>
+    Insert,
+
+    /// <summary>更新（UPDATE）</summary>
+    Update,
+
+    /// <summary>削除（DELETE）</summary>
+    Delete,
+}
+
+/// <summary>
+/// グラフ保存（<c>SaveAsync</c>）の前後に処理を差し込むフック。DI に 0..N 個登録でき、対象エンティティ型ごとに解決される。
+/// </summary>
+/// <remarks>
+/// <para>
+/// 両メソッドとも既定実装を持つため、必要な方だけを実装すればよい。<see cref="BeforeSaveAsync"/> は各エンティティの
+/// 操作（Insert/Update/Delete）の直前に呼ばれ、<c>false</c> を返すとその 1 件の操作だけをスキップする（他の行は続行）。
+/// <see cref="AfterSaveAsync"/> は操作の直後・コミット前に、同一トランザクションに参加する <see cref="ISaveHookContext"/> と
+/// ともに呼ばれる（例外を投げると Save 全体がロールバックされる）。
+/// </para>
+/// <para>
+/// フックが発火するのは <c>SaveAsync</c>（グラフ保存・2 形態とも）のみで、<c>InsertAsync</c> / <c>UpdateAsync</c> /
+/// <c>DeleteAsync</c> の直接呼び出し・<c>BulkInsertAsync</c> は対象外（素通り）。スキップ起因の整合（例: 新規親を止めるなら
+/// 新規子も止める）はフック実装者の責任で、矛盾は DB 制約エラー→全体ロールバックで安全側に倒れる。
+/// </para>
+/// </remarks>
+/// <typeparam name="TEntity">フック対象のエンティティ型</typeparam>
+public interface ISaveHook<TEntity>
+    where TEntity : EntityBase
+{
+    /// <summary>操作の直前に呼ばれる（<c>false</c> でその 1 件の操作をスキップ・既定はスキップしない）</summary>
+    /// <param name="entity">保存対象のエンティティ</param>
+    /// <param name="operation">これから行う操作（Insert/Update/Delete）</param>
+    /// <param name="cancellationToken">キャンセルトークン</param>
+    /// <returns>操作を続行するなら <c>true</c>、スキップするなら <c>false</c></returns>
+    Task<bool> BeforeSaveAsync(
+        TEntity entity,
+        SaveOperation operation,
+        CancellationToken cancellationToken = default
+    ) => Task.FromResult(true);
+
+    /// <summary>操作の直後・コミット前に呼ばれる（既定は何もしない。<paramref name="context"/> は同一トランザクションに参加する）</summary>
+    /// <param name="entity">保存されたエンティティ</param>
+    /// <param name="operation">実際に行われた操作（<c>insertWhenUpdateMissing</c> による切替時は Insert）</param>
+    /// <param name="context">同一トランザクションで DB 操作を行うためのコンテキスト</param>
+    /// <param name="cancellationToken">キャンセルトークン</param>
+    Task AfterSaveAsync(
+        TEntity entity,
+        SaveOperation operation,
+        ISaveHookContext context,
+        CancellationToken cancellationToken = default
+    ) => Task.CompletedTask;
+}
+
+/// <summary>
+/// <see cref="ISaveHook{TEntity}.AfterSaveAsync"/> に渡される、進行中の保存トランザクションに参加して DB 操作を行うコンテキスト。
+/// </summary>
+/// <remarks>
+/// <para>
+/// フック内から Repository の通常 API を呼ぶと別接続でロック競合するため、同一トランザクションで完結する操作をこの契約経由で提供する。
+/// 生ハンドル（接続・トランザクション）は公開せず、型付き操作（除外列バイナリの書き込み・生 SQL）だけを提供する（方言中立・誤用防止）。
+/// </para>
+/// <para>
+/// <see cref="WriteBinaryColumnAsync"/> は <c>ExcludeUnboundedBinaryColumns</c> を有効にした図でのみ機能する。
+/// 無効な図では <see cref="NotSupportedException"/> を投げる（生 SQL の <see cref="ExecuteSqlAsync"/> を使うか、オプションを有効化する）。
+/// </para>
+/// </remarks>
+public interface ISaveHookContext
+{
+    /// <summary>同一トランザクション内で生 SQL（任意 DML）を実行し、影響行数を返す</summary>
+    /// <remarks>
+    /// パラメータ束縛は Repository の生 SQL メソッドと同じ（匿名オブジェクトの public プロパティ名 <c>Foo</c> を <c>@Foo</c> として束縛）。
+    /// <b>値は必ずパラメータで渡すこと（文字列連結はインジェクションの危険がある）。</b>
+    /// </remarks>
+    /// <param name="sql">実行する DML 文</param>
+    /// <param name="parameters">@名 パラメータへ束縛する匿名オブジェクト（null でパラメータなし）</param>
+    /// <param name="cancellationToken">キャンセルトークン</param>
+    Task<int> ExecuteSqlAsync(
+        string sql,
+        object? parameters = null,
+        CancellationToken cancellationToken = default
+    );
+
+    /// <summary>
+    /// 同一トランザクション内で、無制限バイナリ（除外）列を主キー指定でストリームから書き込む（O(チャンク) のストリーミング）。
+    /// <paramref name="source"/> が <c>null</c> のとき列を NULL に設定する。更新した場合は <c>true</c>、該当行なしは <c>false</c>。
+    /// </summary>
+    /// <param name="propertyName">対象列の C# プロパティ名（<c>nameof</c> 指定）</param>
+    /// <param name="key">対象行の主キー値</param>
+    /// <param name="source">書き込むストリーム（<c>null</c> で SET NULL）</param>
+    /// <param name="length"><c>source.CanSeek</c> でないときに必須の長さ（欠落は <see cref="ArgumentException"/>）</param>
+    /// <param name="cancellationToken">キャンセルトークン</param>
+    Task<bool> WriteBinaryColumnAsync(
+        string propertyName,
+        object key,
+        Stream? source,
+        long? length = null,
+        CancellationToken cancellationToken = default
+    );
+
+    /// <summary>ファイルの内容を無制限バイナリ（除外）列へ書き込むファイル糖衣（<see cref="WriteBinaryColumnAsync"/> へ委譲）</summary>
+    /// <param name="propertyName">対象列の C# プロパティ名（<c>nameof</c> 指定）</param>
+    /// <param name="key">対象行の主キー値</param>
+    /// <param name="path">読み込むファイルパス</param>
+    /// <param name="cancellationToken">キャンセルトークン</param>
+    async Task<bool> WriteBinaryColumnFromFileAsync(
+        string propertyName,
+        object key,
+        string path,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(path);
+
+        await using var stream = File.OpenRead(path);
+        return await WriteBinaryColumnAsync(
+            propertyName,
+            key,
+            stream,
+            stream.Length,
+            cancellationToken
+        );
+    }
+}
+
+/// <summary>特定エンティティ型に対する Save フック群を、非ジェネリックに（グラフの混在型を跨いで）呼び出すための面</summary>
+/// <remarks>登録順に Before を呼び最初の <c>false</c> で短絡、After は登録順に順次呼ぶ。型ごとに 1 度だけ構築される</remarks>
+public interface ISaveHookInvoker
+{
+    /// <summary>登録順に Before を呼び、最初の <c>false</c> で短絡する（1 つでも false なら false を返す）</summary>
+    Task<bool> InvokeBeforeAsync(
+        EntityBase entity,
+        SaveOperation operation,
+        CancellationToken cancellationToken
+    );
+
+    /// <summary>登録順に After を順次呼ぶ</summary>
+    Task InvokeAfterAsync(
+        EntityBase entity,
+        SaveOperation operation,
+        ISaveHookContext context,
+        CancellationToken cancellationToken
+    );
+}
+
+/// <summary>エンティティ型から Save フックの呼び出し面（<see cref="ISaveHookInvoker"/>）を解決するレジストリ</summary>
+/// <remarks>フックが 1 つも無い型では <c>null</c> を返す（＝完全 no-op）。実装は解決結果をキャッシュする</remarks>
+public interface ISaveHookRegistry
+{
+    /// <summary>指定エンティティ型のフック呼び出し面を返す（フックなしは <c>null</c>）</summary>
+    ISaveHookInvoker? GetInvoker(Type entityType);
+}
+
+/// <summary>
+/// <see cref="IServiceProvider"/> から <c>IEnumerable&lt;ISaveHook&lt;TEntity&gt;&gt;</c> を解決して呼び出し面を構築する
+/// 既定の <see cref="ISaveHookRegistry"/> 実装（BCL の <see cref="IServiceProvider"/> のみに依存）。
+/// </summary>
+/// <remarks>
+/// 型 → 呼び出し面の対応を<b>このレジストリ（Scoped）単位で</b>キャッシュする（フックが Scoped サービスでありうるため
+/// プロセス静的にはしない）。呼び出し面は <see cref="SaveHookInvoker{TEntity}"/> を <see cref="Type.MakeGenericType"/> ＋
+/// <see cref="Activator"/> で 1 度だけ生成する（以降の呼び出しはリフレクションなし）。
+/// </remarks>
+internal sealed class ServiceProviderSaveHookRegistry(IServiceProvider serviceProvider)
+    : ISaveHookRegistry
+{
+    private readonly IServiceProvider _serviceProvider = serviceProvider;
+    private readonly ConcurrentDictionary<Type, ISaveHookInvoker?> _invokers = new();
+
+    /// <summary>指定型の呼び出し面を解決してキャッシュする（フックなしは <c>null</c>）</summary>
+    public ISaveHookInvoker? GetInvoker(Type entityType) =>
+        _invokers.GetOrAdd(entityType, BuildInvoker);
+
+    /// <summary><c>IEnumerable&lt;ISaveHook&lt;entityType&gt;&gt;</c> を解決し、1 つ以上あれば呼び出し面を構築する（無ければ null）</summary>
+    private ISaveHookInvoker? BuildInvoker(Type entityType)
+    {
+        var hookType = typeof(ISaveHook<>).MakeGenericType(entityType);
+        var enumerableType = typeof(IEnumerable<>).MakeGenericType(hookType);
+        var resolved = (System.Collections.IEnumerable?)_serviceProvider.GetService(enumerableType);
+
+        if (resolved is null)
+        {
+            return null;
+        }
+
+        // 1 つも登録が無ければ null（＝レジストリありでも完全 no-op）。materialize して件数を確定する
+        var hooks = resolved.Cast<object>().ToList();
+
+        if (hooks.Count == 0)
+        {
+            return null;
+        }
+
+        var invokerType = typeof(SaveHookInvoker<>).MakeGenericType(entityType);
+        return (ISaveHookInvoker)Activator.CreateInstance(invokerType, resolved)!;
+    }
+}
+
+/// <summary><typeparamref name="TEntity"/> 用フック群を登録順に呼び出す型付き実装（<see cref="ISaveHookInvoker"/> の具象）</summary>
+/// <typeparam name="TEntity">フック対象のエンティティ型</typeparam>
+internal sealed class SaveHookInvoker<TEntity>(IEnumerable<ISaveHook<TEntity>> hooks)
+    : ISaveHookInvoker
+    where TEntity : EntityBase
+{
+    private readonly IReadOnlyList<ISaveHook<TEntity>> _hooks =
+        hooks as IReadOnlyList<ISaveHook<TEntity>> ?? hooks.ToList();
+
+    /// <summary>登録順に Before を呼び、最初の <c>false</c> で短絡する</summary>
+    public async Task<bool> InvokeBeforeAsync(
+        EntityBase entity,
+        SaveOperation operation,
+        CancellationToken cancellationToken
+    )
+    {
+        var typed = (TEntity)entity;
+
+        foreach (var hook in _hooks)
+        {
+            if (!await hook.BeforeSaveAsync(typed, operation, cancellationToken))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>登録順に After を順次呼ぶ</summary>
+    public async Task InvokeAfterAsync(
+        EntityBase entity,
+        SaveOperation operation,
+        ISaveHookContext context,
+        CancellationToken cancellationToken
+    )
+    {
+        var typed = (TEntity)entity;
+
+        foreach (var hook in _hooks)
+        {
+            await hook.AfterSaveAsync(typed, operation, context, cancellationToken);
+        }
+    }
+}
+
 /// <summary>SQL パラメータへ渡す値を素の値へ開くヘルパー（値オブジェクトは内包値へ変換し、SqlClient が扱える型にする）</summary>
 internal static class SqlParameterValue
 {
@@ -4598,7 +4846,8 @@ public sealed partial class SqlExecutor(ISqlConnectionFactory connectionFactory)
 
 /// <summary>メタデータを用いて CRUD を実装する SQL Server 向けリポジトリ基底クラス</summary>
 public abstract partial class SqlServerRepository<TEntity, TKey>(
-    ISqlConnectionFactory connectionFactory
+    ISqlConnectionFactory connectionFactory,
+    ISaveHookRegistry? saveHooks = null
 ) : IRepository<TEntity, TKey>
     where TEntity : EntityBase, new()
 {
@@ -4610,6 +4859,9 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
 
     /// <summary>生 SQL メソッドの委譲先（束縛・マッピングを 1 系統に集約）</summary>
     private readonly ISqlExecutor _sqlExecutor = new SqlExecutor(connectionFactory);
+
+    /// <summary>Save フックのレジストリ（未指定＝null＝フックなしで完全 no-op）</summary>
+    private readonly ISaveHookRegistry? _saveHooks = saveHooks;
 
     /// <summary>主キーによる単一エンティティ取得（該当なしは null）</summary>
     public async Task<TEntity?> GetByIdAsync(TKey id, CancellationToken cancellationToken = default)
@@ -4756,6 +5008,15 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
         await using var transaction = (SqlTransaction)
             await connection.BeginTransactionAsync(cancellationToken);
 
+        // フック登録があれば、進行中の (connection, transaction) に参加する context を供給するセッションを組み立てる
+        var hooks =
+            _saveHooks is null
+                ? null
+                : new SaveHookSession(
+                    _saveHooks,
+                    e => new SqlSaveHookContext(connection, transaction, e.GetType())
+                );
+
         try
         {
             var rows = await EntityGraphSaver.SaveAsync(
@@ -4765,12 +5026,14 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
                 cascadeSave,
                 cascadeDelete,
                 insertWhenUpdateMissing,
-                cancellationToken
+                cancellationToken,
+                hooks
             );
             await transaction.CommitAsync(cancellationToken);
 
-            // コミット成功後に状態を確定（Added/Updated → Unchanged）し、再保存での二重処理を防ぐ
-            EntityGraphSaver.AcceptChanges(entity, cascadeSave);
+            // コミット成功後に状態を確定（Added/Updated → Unchanged）し、再保存での二重処理を防ぐ。
+            // スキップされた行（フックの Before が false）は据え置く
+            EntityGraphSaver.AcceptChanges(entity, cascadeSave, hooks?.Skipped);
             return rows;
         }
         catch
@@ -4807,6 +5070,15 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
         await using var transaction = (SqlTransaction)
             await connection.BeginTransactionAsync(cancellationToken);
 
+        // フック登録があれば、進行中の (connection, transaction) に参加する context を供給するセッションを組み立てる
+        var hooks =
+            _saveHooks is null
+                ? null
+                : new SaveHookSession(
+                    _saveHooks,
+                    e => new SqlSaveHookContext(connection, transaction, e.GetType())
+                );
+
         try
         {
             var rows = 0;
@@ -4819,16 +5091,18 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
                     cascadeSave,
                     cascadeDelete,
                     insertWhenUpdateMissing,
-                    cancellationToken
+                    cancellationToken,
+                    hooks
                 );
             }
 
             await transaction.CommitAsync(cancellationToken);
 
-            // コミット成功後に全グラフの状態を確定（Added/Updated → Unchanged）し、再保存での二重処理を防ぐ
+            // コミット成功後に全グラフの状態を確定（Added/Updated → Unchanged）し、再保存での二重処理を防ぐ。
+            // スキップされた行（フックの Before が false）は据え置く
             foreach (var entity in targets)
             {
-                EntityGraphSaver.AcceptChanges(entity, cascadeSave);
+                EntityGraphSaver.AcceptChanges(entity, cascadeSave, hooks?.Skipped);
             }
 
             return rows;
@@ -4892,6 +5166,46 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
         object? parameters = null,
         CancellationToken cancellationToken = default
     ) => _sqlExecutor.QueryProjectionBySqlAsync<TResult>(sql, parameters, cancellationToken);
+}
+
+/// <summary>Save フックの After に渡す、進行中の (connection, transaction) に参加する SQL Server コンテキスト</summary>
+/// <remarks>エンティティ型に束縛して生成する（<see cref="WriteBinaryColumnAsync"/> はその型の除外列を解決する）。生 SQL は <c>SqlExecutor.BindParameters</c> を流用する</remarks>
+internal sealed class SqlSaveHookContext(
+    SqlConnection connection,
+    SqlTransaction transaction,
+    Type entityType
+) : ISaveHookContext
+{
+    private readonly SqlConnection _connection = connection;
+    private readonly SqlTransaction _transaction = transaction;
+    private readonly EntitySaveMetadata _metadata = EntitySaveMetadata.For(entityType);
+
+    /// <summary>同一トランザクション内で生 SQL（任意 DML）を実行し、影響行数を返す（束縛は SqlExecutor と 1 系統）</summary>
+    public async Task<int> ExecuteSqlAsync(
+        string sql,
+        object? parameters = null,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(sql);
+
+        await using var command = new SqlCommand(sql, _connection, _transaction);
+        SqlExecutor.BindParameters(command, parameters);
+        return await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    /// <summary>同一トランザクション内で無制限バイナリ（除外）列をストリーム書き込みする（除外なしの図では非対応）</summary>
+    public Task<bool> WriteBinaryColumnAsync(
+        string propertyName,
+        object key,
+        Stream? source,
+        long? length = null,
+        CancellationToken cancellationToken = default
+    ) =>
+        throw new NotSupportedException(
+            "無制限バイナリ列の書き込みには ExcludeUnboundedBinaryColumns を有効にした生成が必要です。"
+                + "有効化するか、生 SQL（ExecuteSqlAsync）で列を更新してください。"
+        );
 }
 
 /// <summary>クエリ WHERE 句パラメータ（名前・値・対象カラム名）。カラム名は判明時のみ設定し、型明示化に使う</summary>
@@ -6576,6 +6890,58 @@ internal static class CascadeDeletePlanner
     }
 }
 
+/// <summary>1 回の Save 呼び出しの間だけ生きる Save フックのセッション（レジストリ・context ファクトリ・スキップ集合を持ち回る）</summary>
+/// <remarks>
+/// context ファクトリはバックエンド（QuickER 方言・EF・InMemory）が進行中のトランザクション文脈を閉じ込めて渡す。
+/// スキップ集合は参照等価（<see cref="ReferenceEqualityComparer"/>）で追跡し、コミット後の <c>AcceptChanges</c> で状態据え置きに使う。
+/// </remarks>
+internal sealed class SaveHookSession(
+    ISaveHookRegistry registry,
+    Func<EntityBase, ISaveHookContext> contextFactory
+)
+{
+    private readonly ISaveHookRegistry _registry = registry;
+    private readonly Func<EntityBase, ISaveHookContext> _contextFactory = contextFactory;
+    private readonly HashSet<EntityBase> _skipped = new(ReferenceEqualityComparer.Instance);
+
+    /// <summary>Before で <c>false</c>（スキップ）されたエンティティ集合（参照等価）。AcceptChanges の状態据え置きに使う</summary>
+    public IReadOnlySet<EntityBase> Skipped => _skipped;
+
+    /// <summary>エンティティをスキップ集合へ追加する</summary>
+    public void Skip(EntityBase entity) => _skipped.Add(entity);
+
+    /// <summary>登録順に Before を呼び最初の <c>false</c> で短絡する（フックが無い型は <c>true</c>）</summary>
+    public Task<bool> InvokeBeforeAsync(
+        EntityBase entity,
+        SaveOperation operation,
+        CancellationToken cancellationToken
+    )
+    {
+        var invoker = _registry.GetInvoker(entity.GetType());
+        return invoker is null
+            ? Task.FromResult(true)
+            : invoker.InvokeBeforeAsync(entity, operation, cancellationToken);
+    }
+
+    /// <summary>登録順に After を呼ぶ（フックが無い型は何もしない）。context はエンティティ型に束縛して生成する</summary>
+    public Task InvokeAfterAsync(
+        EntityBase entity,
+        SaveOperation operation,
+        CancellationToken cancellationToken
+    )
+    {
+        var invoker = _registry.GetInvoker(entity.GetType());
+        return invoker is null
+            ? Task.CompletedTask
+            : invoker.InvokeAfterAsync(
+                entity,
+                operation,
+                _contextFactory(entity),
+                cancellationToken
+            );
+    }
+}
+
 /// <summary>RowState に従ってエンティティのグラフを 1 トランザクションで保存する内部エンジン</summary>
 internal static class EntityGraphSaver
 {
@@ -6584,7 +6950,7 @@ internal static class EntityGraphSaver
         entity.HasChanges
         || (cascade && EnumerateCascadeChildren(entity).Any(child => HasChanges(child, true)));
 
-    /// <summary>グラフを保存し、保存したレコード数を返す</summary>
+    /// <summary>グラフを保存し、保存したレコード数を返す（<paramref name="hooks"/> 指定時は各操作の前後で Save フックを発火する）</summary>
     public static async Task<int> SaveAsync(
         EntityBase entity,
         SqlConnection connection,
@@ -6592,7 +6958,8 @@ internal static class EntityGraphSaver
         bool cascadeSave,
         bool cascadeDelete,
         bool insertWhenUpdateMissing,
-        CancellationToken cancellationToken
+        CancellationToken cancellationToken,
+        SaveHookSession? hooks = null
     )
     {
         if (!HasChanges(entity, cascadeSave))
@@ -6613,9 +6980,24 @@ internal static class EntityGraphSaver
                         child,
                         connection,
                         transaction,
-                        cancellationToken
+                        cancellationToken,
+                        hooks
                     );
                 }
+            }
+
+            // Before(Delete)。false ならこのノードの削除だけをスキップする（子は上で削除済み＝自身は残る）
+            if (
+                hooks is not null
+                && !await hooks.InvokeBeforeAsync(
+                    entity,
+                    SaveOperation.Delete,
+                    cancellationToken
+                )
+            )
+            {
+                hooks.Skip(entity);
+                return rows;
             }
 
             rows += await ExecuteAsync(
@@ -6626,30 +7008,70 @@ internal static class EntityGraphSaver
                 transaction,
                 cancellationToken
             );
+
+            // After(Delete) は DML の直後（コミット前）に発火する
+            if (hooks is not null)
+            {
+                await hooks.InvokeAfterAsync(entity, SaveOperation.Delete, cancellationToken);
+            }
+
             return rows;
         }
 
         // 追加・更新は自身を先に保存してから子へ進む（子 FK が親 PK を参照するため）
         if (entity.IsAdded)
         {
-            rows += await ExecuteAsync(
-                entity,
-                meta => meta.InsertSql,
-                static (meta, command, e) => meta.BindInsertParameters(command, e),
-                connection,
-                transaction,
-                cancellationToken
-            );
+            if (
+                hooks is null
+                || await hooks.InvokeBeforeAsync(entity, SaveOperation.Insert, cancellationToken)
+            )
+            {
+                rows += await ExecuteAsync(
+                    entity,
+                    meta => meta.InsertSql,
+                    static (meta, command, e) => meta.BindInsertParameters(command, e),
+                    connection,
+                    transaction,
+                    cancellationToken
+                );
+
+                if (hooks is not null)
+                {
+                    await hooks.InvokeAfterAsync(entity, SaveOperation.Insert, cancellationToken);
+                }
+            }
+            else
+            {
+                // Before が false＝この 1 件の挿入だけスキップ（子カスケードは続行する）
+                hooks.Skip(entity);
+            }
         }
         else if (entity.IsUpdated)
         {
-            rows += await UpdateAsync(
-                entity,
-                connection,
-                transaction,
-                insertWhenUpdateMissing,
-                cancellationToken
-            );
+            if (
+                hooks is null
+                || await hooks.InvokeBeforeAsync(entity, SaveOperation.Update, cancellationToken)
+            )
+            {
+                var (affected, performed) = await UpdateAsync(
+                    entity,
+                    connection,
+                    transaction,
+                    insertWhenUpdateMissing,
+                    cancellationToken
+                );
+                rows += affected;
+
+                // After は実際に行った操作で発火する（insertWhenUpdateMissing による切替時は Insert）
+                if (hooks is not null)
+                {
+                    await hooks.InvokeAfterAsync(entity, performed, cancellationToken);
+                }
+            }
+            else
+            {
+                hooks.Skip(entity);
+            }
         }
 
         if (cascadeSave)
@@ -6663,7 +7085,8 @@ internal static class EntityGraphSaver
                     cascadeSave,
                     cascadeDelete,
                     insertWhenUpdateMissing,
-                    cancellationToken
+                    cancellationToken,
+                    hooks
                 );
             }
         }
@@ -6672,37 +7095,63 @@ internal static class EntityGraphSaver
     }
 
     /// <summary>コミット後に保存済みエンティティを Unchanged に確定する</summary>
-    public static void AcceptChanges(EntityBase entity, bool cascade)
+    public static void AcceptChanges(EntityBase entity, bool cascade) =>
+        AcceptChanges(entity, cascade, null);
+
+    /// <summary>
+    /// コミット後に保存済みエンティティを Unchanged に確定する。<paramref name="skip"/> に含まれるエンティティ
+    /// （Save フックの Before が <c>false</c> を返してスキップされた行）は操作していないため状態を据え置く。
+    /// </summary>
+    public static void AcceptChanges(
+        EntityBase entity,
+        bool cascade,
+        IReadOnlySet<EntityBase>? skip
+    )
     {
         if (entity.IsRemoved)
         {
             return;
         }
 
-        entity.MarkUnchanged();
+        // スキップされたエンティティは INSERT / UPDATE を行っていないため RowState を据え置く
+        if (skip is null || !skip.Contains(entity))
+        {
+            entity.MarkUnchanged();
+        }
 
         if (cascade)
         {
             foreach (var child in EnumerateCascadeChildren(entity))
             {
-                AcceptChanges(child, true);
+                AcceptChanges(child, true, skip);
             }
         }
     }
 
-    /// <summary>サブツリーを子から順に削除する（状態に関わらず削除）</summary>
+    /// <summary>サブツリーを子から順に削除する（状態に関わらず削除。<paramref name="hooks"/> 指定時は子ごとに Before/After(Delete) を発火）</summary>
     private static async Task<int> DeleteGraphAsync(
         EntityBase entity,
         SqlConnection connection,
         SqlTransaction transaction,
-        CancellationToken cancellationToken
+        CancellationToken cancellationToken,
+        SaveHookSession? hooks = null
     )
     {
         var rows = 0;
 
         foreach (var child in EnumerateCascadeChildren(entity))
         {
-            rows += await DeleteGraphAsync(child, connection, transaction, cancellationToken);
+            rows += await DeleteGraphAsync(child, connection, transaction, cancellationToken, hooks);
+        }
+
+        // Before(Delete) は削除はサブツリーの子から順に発火する。false なら「子は消え自身は残る」（単独スキップの帰結）
+        if (
+            hooks is not null
+            && !await hooks.InvokeBeforeAsync(entity, SaveOperation.Delete, cancellationToken)
+        )
+        {
+            hooks.Skip(entity);
+            return rows;
         }
 
         rows += await ExecuteAsync(
@@ -6713,10 +7162,17 @@ internal static class EntityGraphSaver
             transaction,
             cancellationToken
         );
+
+        if (hooks is not null)
+        {
+            await hooks.InvokeAfterAsync(entity, SaveOperation.Delete, cancellationToken);
+        }
+
         return rows;
     }
 
-    private static async Task<int> UpdateAsync(
+    /// <summary>更新を実行し、影響行数と実際に行った操作（切替時は Insert）を返す</summary>
+    private static async Task<(int Rows, SaveOperation Performed)> UpdateAsync(
         EntityBase entity,
         SqlConnection connection,
         SqlTransaction transaction,
@@ -6735,13 +7191,13 @@ internal static class EntityGraphSaver
 
         if (affected != 0)
         {
-            return affected;
+            return (affected, SaveOperation.Update);
         }
 
         // 更新対象が存在しない（他ユーザーの削除等）。方針に応じて INSERT へ切替、または競合として通知する
         if (insertWhenUpdateMissing)
         {
-            return await ExecuteAsync(
+            var inserted = await ExecuteAsync(
                 entity,
                 meta => meta.InsertSql,
                 static (meta, command, e) => meta.BindInsertParameters(command, e),
@@ -6749,6 +7205,7 @@ internal static class EntityGraphSaver
                 transaction,
                 cancellationToken
             );
+            return (inserted, SaveOperation.Insert);
         }
 
         var metadata = EntitySaveMetadata.For(entity.GetType());
@@ -6827,6 +7284,11 @@ public static class GeneratedSqlServerRepositoryServiceCollectionExtensions
             connectionString
         ));
         services.AddSingleton<ISqlExecutor, SqlExecutor>();
+
+        // Save フックのレジストリを既定登録する（ISaveHook<T> の登録が無ければ完全 no-op）
+        services.TryAddScoped<ISaveHookRegistry>(provider => new ServiceProviderSaveHookRegistry(
+            provider
+        ));
         services.AddScoped<ICustomerRepository, CustomerRepository>();
         services.AddScoped<IOrderRepository, OrderRepository>();
 
@@ -6854,13 +7316,24 @@ public static class GeneratedSqlServerRepositoryServiceCollectionExtensions
             serviceKey,
             (_, _) => new SqlExecutor(connectionFactory)
         );
+
+        // Save フックのレジストリを既定登録する（非 keyed・ISaveHook<T> の登録が無ければ完全 no-op）
+        services.TryAddScoped<ISaveHookRegistry>(provider => new ServiceProviderSaveHookRegistry(
+            provider
+        ));
         services.AddKeyedScoped<ICustomerRepository>(
             serviceKey,
-            (_, _) => new CustomerRepository(connectionFactory)
+            (provider, _) => new CustomerRepository(
+                connectionFactory,
+                provider.GetService<ISaveHookRegistry>()
+            )
         );
         services.AddKeyedScoped<IOrderRepository>(
             serviceKey,
-            (_, _) => new OrderRepository(connectionFactory)
+            (provider, _) => new OrderRepository(
+                connectionFactory,
+                provider.GetService<ISaveHookRegistry>()
+            )
         );
 
         return services;
@@ -6868,13 +7341,25 @@ public static class GeneratedSqlServerRepositoryServiceCollectionExtensions
 }
 
 /// <summary>CustomerEntity 用リポジトリ実装</summary>
-public sealed partial class CustomerRepository(ISqlConnectionFactory connectionFactory)
-    : SqlServerRepository<CustomerEntity, CustomerIdValue>(connectionFactory),
+public sealed partial class CustomerRepository(
+    ISqlConnectionFactory connectionFactory,
+    ISaveHookRegistry? saveHooks = null
+)
+    : SqlServerRepository<CustomerEntity, CustomerIdValue>(
+        connectionFactory,
+        saveHooks
+    ),
         ICustomerRepository { }
 
 /// <summary>OrderEntity 用リポジトリ実装</summary>
-public sealed partial class OrderRepository(ISqlConnectionFactory connectionFactory)
-    : SqlServerRepository<OrderEntity, OrderIdValue>(connectionFactory),
+public sealed partial class OrderRepository(
+    ISqlConnectionFactory connectionFactory,
+    ISaveHookRegistry? saveHooks = null
+)
+    : SqlServerRepository<OrderEntity, OrderIdValue>(
+        connectionFactory,
+        saveHooks
+    ),
         IOrderRepository { }
 }
 
@@ -7022,7 +7507,8 @@ public sealed partial class SqlExecutor(ISqlConnectionFactory connectionFactory)
 
 /// <summary>メタデータを用いて CRUD を実装する SQLite 向けリポジトリ基底クラス</summary>
 public abstract partial class SqliteRepository<TEntity, TKey>(
-    ISqlConnectionFactory connectionFactory
+    ISqlConnectionFactory connectionFactory,
+    ISaveHookRegistry? saveHooks = null
 ) : IRepository<TEntity, TKey>
     where TEntity : EntityBase, new()
 {
@@ -7034,6 +7520,9 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
 
     /// <summary>生 SQL メソッドの委譲先（束縛・マッピングを 1 系統に集約）</summary>
     private readonly ISqlExecutor _sqlExecutor = new SqlExecutor(connectionFactory);
+
+    /// <summary>Save フックのレジストリ（未指定＝null＝フックなしで完全 no-op）</summary>
+    private readonly ISaveHookRegistry? _saveHooks = saveHooks;
 
     /// <summary>主キーによる単一エンティティ取得（該当なしは null）</summary>
     public async Task<TEntity?> GetByIdAsync(TKey id, CancellationToken cancellationToken = default)
@@ -7200,6 +7689,15 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
         await using var transaction = (SqliteTransaction)
             await connection.BeginTransactionAsync(cancellationToken);
 
+        // フック登録があれば、進行中の (connection, transaction) に参加する context を供給するセッションを組み立てる
+        var hooks =
+            _saveHooks is null
+                ? null
+                : new SaveHookSession(
+                    _saveHooks,
+                    e => new SqlSaveHookContext(connection, transaction, e.GetType())
+                );
+
         try
         {
             var rows = await EntityGraphSaver.SaveAsync(
@@ -7209,12 +7707,14 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
                 cascadeSave,
                 cascadeDelete,
                 insertWhenUpdateMissing,
-                cancellationToken
+                cancellationToken,
+                hooks
             );
             await transaction.CommitAsync(cancellationToken);
 
-            // コミット成功後に状態を確定（Added/Updated → Unchanged）し、再保存での二重処理を防ぐ
-            EntityGraphSaver.AcceptChanges(entity, cascadeSave);
+            // コミット成功後に状態を確定（Added/Updated → Unchanged）し、再保存での二重処理を防ぐ。
+            // スキップされた行（フックの Before が false）は据え置く
+            EntityGraphSaver.AcceptChanges(entity, cascadeSave, hooks?.Skipped);
             return rows;
         }
         catch
@@ -7251,6 +7751,15 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
         await using var transaction = (SqliteTransaction)
             await connection.BeginTransactionAsync(cancellationToken);
 
+        // フック登録があれば、進行中の (connection, transaction) に参加する context を供給するセッションを組み立てる
+        var hooks =
+            _saveHooks is null
+                ? null
+                : new SaveHookSession(
+                    _saveHooks,
+                    e => new SqlSaveHookContext(connection, transaction, e.GetType())
+                );
+
         try
         {
             var rows = 0;
@@ -7263,16 +7772,18 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
                     cascadeSave,
                     cascadeDelete,
                     insertWhenUpdateMissing,
-                    cancellationToken
+                    cancellationToken,
+                    hooks
                 );
             }
 
             await transaction.CommitAsync(cancellationToken);
 
-            // コミット成功後に全グラフの状態を確定（Added/Updated → Unchanged）し、再保存での二重処理を防ぐ
+            // コミット成功後に全グラフの状態を確定（Added/Updated → Unchanged）し、再保存での二重処理を防ぐ。
+            // スキップされた行（フックの Before が false）は据え置く
             foreach (var entity in targets)
             {
-                EntityGraphSaver.AcceptChanges(entity, cascadeSave);
+                EntityGraphSaver.AcceptChanges(entity, cascadeSave, hooks?.Skipped);
             }
 
             return rows;
@@ -7336,6 +7847,46 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
         object? parameters = null,
         CancellationToken cancellationToken = default
     ) => _sqlExecutor.QueryProjectionBySqlAsync<TResult>(sql, parameters, cancellationToken);
+}
+
+/// <summary>Save フックの After に渡す、進行中の (connection, transaction) に参加する SQLite コンテキスト</summary>
+/// <remarks>エンティティ型に束縛して生成する（<see cref="WriteBinaryColumnAsync"/> はその型の除外列を解決する）。生 SQL は <c>SqlExecutor.BindParameters</c> を流用する</remarks>
+internal sealed class SqlSaveHookContext(
+    SqliteConnection connection,
+    SqliteTransaction transaction,
+    Type entityType
+) : ISaveHookContext
+{
+    private readonly SqliteConnection _connection = connection;
+    private readonly SqliteTransaction _transaction = transaction;
+    private readonly EntitySaveMetadata _metadata = EntitySaveMetadata.For(entityType);
+
+    /// <summary>同一トランザクション内で生 SQL（任意 DML）を実行し、影響行数を返す（束縛は SqlExecutor と 1 系統）</summary>
+    public async Task<int> ExecuteSqlAsync(
+        string sql,
+        object? parameters = null,
+        CancellationToken cancellationToken = default
+    )
+    {
+        ArgumentNullException.ThrowIfNull(sql);
+
+        await using var command = new SqliteCommand(sql, _connection, _transaction);
+        SqlExecutor.BindParameters(command, parameters);
+        return await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    /// <summary>同一トランザクション内で無制限バイナリ（除外）列をストリーム書き込みする（除外なしの図では非対応）</summary>
+    public Task<bool> WriteBinaryColumnAsync(
+        string propertyName,
+        object key,
+        Stream? source,
+        long? length = null,
+        CancellationToken cancellationToken = default
+    ) =>
+        throw new NotSupportedException(
+            "無制限バイナリ列の書き込みには ExcludeUnboundedBinaryColumns を有効にした生成が必要です。"
+                + "有効化するか、生 SQL（ExecuteSqlAsync）で列を更新してください。"
+        );
 }
 
 /// <summary>クエリ WHERE 句パラメータ（名前・値・対象カラム名）。カラム名は判明時のみ設定し、型明示化に使う</summary>
@@ -9064,6 +9615,58 @@ internal static class CascadeDeletePlanner
     }
 }
 
+/// <summary>1 回の Save 呼び出しの間だけ生きる Save フックのセッション（レジストリ・context ファクトリ・スキップ集合を持ち回る）</summary>
+/// <remarks>
+/// context ファクトリはバックエンド（QuickER 方言・EF・InMemory）が進行中のトランザクション文脈を閉じ込めて渡す。
+/// スキップ集合は参照等価（<see cref="ReferenceEqualityComparer"/>）で追跡し、コミット後の <c>AcceptChanges</c> で状態据え置きに使う。
+/// </remarks>
+internal sealed class SaveHookSession(
+    ISaveHookRegistry registry,
+    Func<EntityBase, ISaveHookContext> contextFactory
+)
+{
+    private readonly ISaveHookRegistry _registry = registry;
+    private readonly Func<EntityBase, ISaveHookContext> _contextFactory = contextFactory;
+    private readonly HashSet<EntityBase> _skipped = new(ReferenceEqualityComparer.Instance);
+
+    /// <summary>Before で <c>false</c>（スキップ）されたエンティティ集合（参照等価）。AcceptChanges の状態据え置きに使う</summary>
+    public IReadOnlySet<EntityBase> Skipped => _skipped;
+
+    /// <summary>エンティティをスキップ集合へ追加する</summary>
+    public void Skip(EntityBase entity) => _skipped.Add(entity);
+
+    /// <summary>登録順に Before を呼び最初の <c>false</c> で短絡する（フックが無い型は <c>true</c>）</summary>
+    public Task<bool> InvokeBeforeAsync(
+        EntityBase entity,
+        SaveOperation operation,
+        CancellationToken cancellationToken
+    )
+    {
+        var invoker = _registry.GetInvoker(entity.GetType());
+        return invoker is null
+            ? Task.FromResult(true)
+            : invoker.InvokeBeforeAsync(entity, operation, cancellationToken);
+    }
+
+    /// <summary>登録順に After を呼ぶ（フックが無い型は何もしない）。context はエンティティ型に束縛して生成する</summary>
+    public Task InvokeAfterAsync(
+        EntityBase entity,
+        SaveOperation operation,
+        CancellationToken cancellationToken
+    )
+    {
+        var invoker = _registry.GetInvoker(entity.GetType());
+        return invoker is null
+            ? Task.CompletedTask
+            : invoker.InvokeAfterAsync(
+                entity,
+                operation,
+                _contextFactory(entity),
+                cancellationToken
+            );
+    }
+}
+
 /// <summary>RowState に従ってエンティティのグラフを 1 トランザクションで保存する内部エンジン</summary>
 internal static class EntityGraphSaver
 {
@@ -9072,7 +9675,7 @@ internal static class EntityGraphSaver
         entity.HasChanges
         || (cascade && EnumerateCascadeChildren(entity).Any(child => HasChanges(child, true)));
 
-    /// <summary>グラフを保存し、保存したレコード数を返す</summary>
+    /// <summary>グラフを保存し、保存したレコード数を返す（<paramref name="hooks"/> 指定時は各操作の前後で Save フックを発火する）</summary>
     public static async Task<int> SaveAsync(
         EntityBase entity,
         SqliteConnection connection,
@@ -9080,7 +9683,8 @@ internal static class EntityGraphSaver
         bool cascadeSave,
         bool cascadeDelete,
         bool insertWhenUpdateMissing,
-        CancellationToken cancellationToken
+        CancellationToken cancellationToken,
+        SaveHookSession? hooks = null
     )
     {
         if (!HasChanges(entity, cascadeSave))
@@ -9101,9 +9705,24 @@ internal static class EntityGraphSaver
                         child,
                         connection,
                         transaction,
-                        cancellationToken
+                        cancellationToken,
+                        hooks
                     );
                 }
+            }
+
+            // Before(Delete)。false ならこのノードの削除だけをスキップする（子は上で削除済み＝自身は残る）
+            if (
+                hooks is not null
+                && !await hooks.InvokeBeforeAsync(
+                    entity,
+                    SaveOperation.Delete,
+                    cancellationToken
+                )
+            )
+            {
+                hooks.Skip(entity);
+                return rows;
             }
 
             rows += await ExecuteAsync(
@@ -9114,30 +9733,70 @@ internal static class EntityGraphSaver
                 transaction,
                 cancellationToken
             );
+
+            // After(Delete) は DML の直後（コミット前）に発火する
+            if (hooks is not null)
+            {
+                await hooks.InvokeAfterAsync(entity, SaveOperation.Delete, cancellationToken);
+            }
+
             return rows;
         }
 
         // 追加・更新は自身を先に保存してから子へ進む（子 FK が親 PK を参照するため）
         if (entity.IsAdded)
         {
-            rows += await ExecuteAsync(
-                entity,
-                meta => meta.InsertSql,
-                static (meta, command, e) => meta.BindInsertParameters(command, e),
-                connection,
-                transaction,
-                cancellationToken
-            );
+            if (
+                hooks is null
+                || await hooks.InvokeBeforeAsync(entity, SaveOperation.Insert, cancellationToken)
+            )
+            {
+                rows += await ExecuteAsync(
+                    entity,
+                    meta => meta.InsertSql,
+                    static (meta, command, e) => meta.BindInsertParameters(command, e),
+                    connection,
+                    transaction,
+                    cancellationToken
+                );
+
+                if (hooks is not null)
+                {
+                    await hooks.InvokeAfterAsync(entity, SaveOperation.Insert, cancellationToken);
+                }
+            }
+            else
+            {
+                // Before が false＝この 1 件の挿入だけスキップ（子カスケードは続行する）
+                hooks.Skip(entity);
+            }
         }
         else if (entity.IsUpdated)
         {
-            rows += await UpdateAsync(
-                entity,
-                connection,
-                transaction,
-                insertWhenUpdateMissing,
-                cancellationToken
-            );
+            if (
+                hooks is null
+                || await hooks.InvokeBeforeAsync(entity, SaveOperation.Update, cancellationToken)
+            )
+            {
+                var (affected, performed) = await UpdateAsync(
+                    entity,
+                    connection,
+                    transaction,
+                    insertWhenUpdateMissing,
+                    cancellationToken
+                );
+                rows += affected;
+
+                // After は実際に行った操作で発火する（insertWhenUpdateMissing による切替時は Insert）
+                if (hooks is not null)
+                {
+                    await hooks.InvokeAfterAsync(entity, performed, cancellationToken);
+                }
+            }
+            else
+            {
+                hooks.Skip(entity);
+            }
         }
 
         if (cascadeSave)
@@ -9151,7 +9810,8 @@ internal static class EntityGraphSaver
                     cascadeSave,
                     cascadeDelete,
                     insertWhenUpdateMissing,
-                    cancellationToken
+                    cancellationToken,
+                    hooks
                 );
             }
         }
@@ -9160,37 +9820,63 @@ internal static class EntityGraphSaver
     }
 
     /// <summary>コミット後に保存済みエンティティを Unchanged に確定する</summary>
-    public static void AcceptChanges(EntityBase entity, bool cascade)
+    public static void AcceptChanges(EntityBase entity, bool cascade) =>
+        AcceptChanges(entity, cascade, null);
+
+    /// <summary>
+    /// コミット後に保存済みエンティティを Unchanged に確定する。<paramref name="skip"/> に含まれるエンティティ
+    /// （Save フックの Before が <c>false</c> を返してスキップされた行）は操作していないため状態を据え置く。
+    /// </summary>
+    public static void AcceptChanges(
+        EntityBase entity,
+        bool cascade,
+        IReadOnlySet<EntityBase>? skip
+    )
     {
         if (entity.IsRemoved)
         {
             return;
         }
 
-        entity.MarkUnchanged();
+        // スキップされたエンティティは INSERT / UPDATE を行っていないため RowState を据え置く
+        if (skip is null || !skip.Contains(entity))
+        {
+            entity.MarkUnchanged();
+        }
 
         if (cascade)
         {
             foreach (var child in EnumerateCascadeChildren(entity))
             {
-                AcceptChanges(child, true);
+                AcceptChanges(child, true, skip);
             }
         }
     }
 
-    /// <summary>サブツリーを子から順に削除する（状態に関わらず削除）</summary>
+    /// <summary>サブツリーを子から順に削除する（状態に関わらず削除。<paramref name="hooks"/> 指定時は子ごとに Before/After(Delete) を発火）</summary>
     private static async Task<int> DeleteGraphAsync(
         EntityBase entity,
         SqliteConnection connection,
         SqliteTransaction transaction,
-        CancellationToken cancellationToken
+        CancellationToken cancellationToken,
+        SaveHookSession? hooks = null
     )
     {
         var rows = 0;
 
         foreach (var child in EnumerateCascadeChildren(entity))
         {
-            rows += await DeleteGraphAsync(child, connection, transaction, cancellationToken);
+            rows += await DeleteGraphAsync(child, connection, transaction, cancellationToken, hooks);
+        }
+
+        // Before(Delete) は削除はサブツリーの子から順に発火する。false なら「子は消え自身は残る」（単独スキップの帰結）
+        if (
+            hooks is not null
+            && !await hooks.InvokeBeforeAsync(entity, SaveOperation.Delete, cancellationToken)
+        )
+        {
+            hooks.Skip(entity);
+            return rows;
         }
 
         rows += await ExecuteAsync(
@@ -9201,10 +9887,17 @@ internal static class EntityGraphSaver
             transaction,
             cancellationToken
         );
+
+        if (hooks is not null)
+        {
+            await hooks.InvokeAfterAsync(entity, SaveOperation.Delete, cancellationToken);
+        }
+
         return rows;
     }
 
-    private static async Task<int> UpdateAsync(
+    /// <summary>更新を実行し、影響行数と実際に行った操作（切替時は Insert）を返す</summary>
+    private static async Task<(int Rows, SaveOperation Performed)> UpdateAsync(
         EntityBase entity,
         SqliteConnection connection,
         SqliteTransaction transaction,
@@ -9223,13 +9916,13 @@ internal static class EntityGraphSaver
 
         if (affected != 0)
         {
-            return affected;
+            return (affected, SaveOperation.Update);
         }
 
         // 更新対象が存在しない（他ユーザーの削除等）。方針に応じて INSERT へ切替、または競合として通知する
         if (insertWhenUpdateMissing)
         {
-            return await ExecuteAsync(
+            var inserted = await ExecuteAsync(
                 entity,
                 meta => meta.InsertSql,
                 static (meta, command, e) => meta.BindInsertParameters(command, e),
@@ -9237,6 +9930,7 @@ internal static class EntityGraphSaver
                 transaction,
                 cancellationToken
             );
+            return (inserted, SaveOperation.Insert);
         }
 
         var metadata = EntitySaveMetadata.For(entity.GetType());
@@ -9315,6 +10009,11 @@ public static class GeneratedSqliteRepositoryServiceCollectionExtensions
             connectionString
         ));
         services.AddSingleton<ISqlExecutor, SqlExecutor>();
+
+        // Save フックのレジストリを既定登録する（ISaveHook<T> の登録が無ければ完全 no-op）
+        services.TryAddScoped<ISaveHookRegistry>(provider => new ServiceProviderSaveHookRegistry(
+            provider
+        ));
         services.AddScoped<ICustomerRepository, CustomerRepository>();
         services.AddScoped<IOrderRepository, OrderRepository>();
 
@@ -9342,13 +10041,24 @@ public static class GeneratedSqliteRepositoryServiceCollectionExtensions
             serviceKey,
             (_, _) => new SqlExecutor(connectionFactory)
         );
+
+        // Save フックのレジストリを既定登録する（非 keyed・ISaveHook<T> の登録が無ければ完全 no-op）
+        services.TryAddScoped<ISaveHookRegistry>(provider => new ServiceProviderSaveHookRegistry(
+            provider
+        ));
         services.AddKeyedScoped<ICustomerRepository>(
             serviceKey,
-            (_, _) => new CustomerRepository(connectionFactory)
+            (provider, _) => new CustomerRepository(
+                connectionFactory,
+                provider.GetService<ISaveHookRegistry>()
+            )
         );
         services.AddKeyedScoped<IOrderRepository>(
             serviceKey,
-            (_, _) => new OrderRepository(connectionFactory)
+            (provider, _) => new OrderRepository(
+                connectionFactory,
+                provider.GetService<ISaveHookRegistry>()
+            )
         );
 
         return services;
@@ -9356,12 +10066,24 @@ public static class GeneratedSqliteRepositoryServiceCollectionExtensions
 }
 
 /// <summary>CustomerEntity 用リポジトリ実装</summary>
-public sealed partial class CustomerRepository(ISqlConnectionFactory connectionFactory)
-    : SqliteRepository<CustomerEntity, CustomerIdValue>(connectionFactory),
+public sealed partial class CustomerRepository(
+    ISqlConnectionFactory connectionFactory,
+    ISaveHookRegistry? saveHooks = null
+)
+    : SqliteRepository<CustomerEntity, CustomerIdValue>(
+        connectionFactory,
+        saveHooks
+    ),
         ICustomerRepository { }
 
 /// <summary>OrderEntity 用リポジトリ実装</summary>
-public sealed partial class OrderRepository(ISqlConnectionFactory connectionFactory)
-    : SqliteRepository<OrderEntity, OrderIdValue>(connectionFactory),
+public sealed partial class OrderRepository(
+    ISqlConnectionFactory connectionFactory,
+    ISaveHookRegistry? saveHooks = null
+)
+    : SqliteRepository<OrderEntity, OrderIdValue>(
+        connectionFactory,
+        saveHooks
+    ),
         IOrderRepository { }
 }

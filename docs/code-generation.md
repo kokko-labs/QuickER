@@ -69,6 +69,79 @@ order.OrderLines.Add(line);
 var affected = await orders.SaveAsync(order);   // RowState に従い INSERT / UPDATE / DELETE を 1 トランザクションで実行
 ```
 
+### Save フック（ISaveHook）
+
+グラフ保存（`SaveAsync`）の各操作の**前後に処理を差し込む**仕組みです。前処理での状態チェックによる単独スキップと、後処理での**同一トランザクション内のファイルデータ登録**（Save と blob 書き込みのアトミック性）が主なユースケースです。フックは常時生成され、1 つも登録しなければ完全に no-op（従来どおりの挙動）です。
+
+`ISaveHook<TEntity>` を実装して DI に登録します。両メソッドとも既定実装を持つため、**必要な方だけ**書けます。
+
+```csharp
+public sealed class DocumentSaveHook : ISaveHook<DocumentEntity>
+{
+    // 操作の直前。false を返すとその 1 件だけをスキップする（既定はスキップしない）
+    public Task<bool> BeforeSaveAsync(
+        DocumentEntity entity, SaveOperation operation, CancellationToken ct = default)
+    {
+        // 例: 承認済みの文書だけ削除を許す（それ以外の削除はスキップ）
+        if (operation == SaveOperation.Delete && !entity.IsApproved)
+            return Task.FromResult(false);
+
+        return Task.FromResult(true);
+    }
+
+    // 操作の直後・コミット前。context は同一トランザクションに参加する
+    public async Task AfterSaveAsync(
+        DocumentEntity entity, SaveOperation operation, ISaveHookContext context,
+        CancellationToken ct = default)
+    {
+        if (operation == SaveOperation.Insert)
+        {
+            // 除外列（blob）へストリーミング書き込み（Save と同一トランザクション＝アトミック）
+            await context.WriteBinaryColumnFromFileAsync(
+                nameof(DocumentEntity.Payload), entity.DocumentId, "/tmp/upload.bin", ct);
+            // 生 SQL で監査行を残す（これも同一トランザクション）
+            await context.ExecuteSqlAsync(
+                "INSERT INTO audit (note) VALUES (@note)", new { note = $"created {entity.DocumentId}" }, ct);
+        }
+    }
+}
+```
+
+```csharp
+// DI 登録（Singleton / Scoped どちらでも可。フックが Scoped サービスを使うなら Scoped）
+services.AddSingleton<ISaveHook<DocumentEntity>, DocumentSaveHook>();
+```
+
+同じエンティティ型に複数のフックを登録できます。**Before は登録順**に呼ばれ、**最初に `false` を返した時点で短絡**します（残りの Before は呼ばれず、その行はスキップ）。**After も登録順**に呼ばれます。Before / After が投げた例外はそのまま伝播し、Save 全体がロールバックします。
+
+**対象は `SaveAsync`（単一・複数の両形態）だけ**です。低レベル API である `InsertAsync` / `UpdateAsync` / `DeleteAsync` の直接呼び出しと `BulkInsertAsync` は、フックを**素通り**します（発火しません）。
+
+#### Before とスキップの意味論
+
+`false` は**そのエンティティの操作 1 件のみ**をスキップします（他の行は続行）。スキップされた行は After が呼ばれず、`RowState` も据え置かれます（`AcceptChanges` の対象外）。
+
+スキップは単独であるため、整合性はフック実装者の責任です。とくに**削除は子から順に実行される**ため、**サブツリー削除で「root（親）だけ `false`」にすると、子は削除され root だけが残ります**。親を止めたいなら子のフックも `false` を返す必要があります。整合しないスキップ（例: 新規の親をスキップしつつ新規の子を保存）は FK 制約違反 → 例外 → **全体ロールバック**で安全側に倒れます。
+
+#### After とコンテキスト
+
+After は**操作の直後・コミット前**に、進行中のトランザクションに参加する `ISaveHookContext` を受け取ります。フック内から Repository の通常 API を呼ぶと別接続でロック競合するため、context 経由の操作を使います。After が例外を投げると Save ごとロールバックするため、「行はあるがファイル未登録」という中途半端な状態が構造的に生じません。
+
+context が提供する操作（生ハンドルは公開しません）:
+
+- `WriteBinaryColumnAsync(propertyName, key, stream, length?)` ／ ファイル糖衣 `WriteBinaryColumnFromFileAsync(propertyName, key, path)` — 除外列（`ExcludeUnboundedBinaryColumns` 有効時）へのストリーミング書き込み（`nameof` で列を指定）
+- `ExecuteSqlAsync(sql, parameters)` — 任意の DML（監査行・関連テーブルへの書き込みなど）
+
+`operation` には**実際に行われた操作**が渡ります。`insertWhenUpdateMissing: true` で更新対象が見つからず INSERT に切り替わった場合、Before は `Update` で 1 回呼ばれ、After は実操作の `Insert` で呼ばれます。
+
+#### 実装先ごとの差分
+
+| 実装先 | フック発火 | context の対応 |
+|---|---|---|
+| Repository (QuickER)（SQL Server / SQLite） | 完全対応（After は各操作の直後） | `WriteBinaryColumnAsync` / `ExecuteSqlAsync` とも対応 |
+| EF Core（`GenerateEfCore`） | 対応（After は `SaveChanges` 後に一括） | `ExecuteSqlAsync` は対応・`WriteBinaryColumnAsync` は `NotSupportedException` |
+| インメモリ（`GenerateInMemoryRepositories`） | 対応（擬似トランザクション） | `WriteBinaryColumnAsync` はストアへ・`ExecuteSqlAsync` は `NotSupportedException`。実トランザクションがないため**After が例外を投げてもストアの変更は残ります**（ベストエフォート） |
+| リモート（`--remote-services`） | **サーバー側の DI に登録したフックが発火**します | サーバー側の実体実装に準じます。**既知の制限**: Before でサーバーがスキップした行でも、クライアント側の `RowState` はスキップを反映せず `Unchanged` に確定します |
+
 ### 生 SQL の逃げ道
 
 式木で表現できないクエリはいつでも生 SQL に落とせます（パラメータは匿名オブジェクト）。
