@@ -17,6 +17,7 @@ ER 図を描く → データベースを作る → C# のデータアクセス�
 - **C# コード生成** — Entity / EditModel / Mapper に加え、DB アクセス層を選んで生成:
   - **QuickER 版 Repository** — 依存最小の軽量 Repository（式木クエリ・Include・グラフ保存・楽観排他・生 SQL の逃げ道付き）
   - **EF Core** — 既存 Entity をそのまま載せる DbContext ＋ 同一インターフェイスの EF Core 版実装。**DI 登録 1 行の差し替え**で QuickER 版 Repository と交換可能
+  - **値オブジェクト（GenerateValueObjects）** — 列ごとの値オブジェクト型（`CustomerIdValue` など）を生成するオプション。主キーと外部キーが同一型を共有して ID の取り違えがコンパイルエラーになり、列定義（最大長・decimal 桁数）の検証コードも自動生成。Repository・EF Core・JSON 転送は透過対応で、partial クラスによる検証・表示名の拡張点付き
   - **名前付きクエリ** — 検索メソッドの定義（条件・並び順・ページング・射影）を図に保存し、型付きの Repository メソッド（例 `GetByCustomerAsync(int customerId, ...)`）として全実装（QuickER 版 Repository / EF Core）へ自動生成。条件は簡易 DSL（`CustomerId = @customerId AND Memo LIKE @keyword` 等）で書き、GUI エディタが即時検証
   - **リモート対応インターフェイス（--remote-contracts）** — CRUD・保存・名前付きクエリ（＝Web サービス越しに提供できる操作）だけを持つ `I{Entity}RemoteRepository` を追加生成するオプション。`I{Entity}Repository` は全メソッドを持ったままこれを継承するため既存コードに影響はなく、アプリ本体をリモート面だけに依存させておけば、リモート実装への差し替えがコンパイル時に安全になる
   - **3 階層対応（--remote-services）** — リモート面を HTTP + JSON で提供するクライアント（`Http{Entity}RemoteRepository`・依存は BCL の HttpClient のみ）と ASP.NET Core Minimal API サーバー（`MapGeneratedRemoteEndpoints`）を生成。DI 登録 1 行の差し替えで DB 直結⇔Web サービス経由を切り替えられ、`SaveConflictException` などの例外も型ごと復元される（直結時と同じ catch が機能）
