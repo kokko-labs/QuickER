@@ -211,12 +211,9 @@ internal static class GeneratedFileUsings
                 yield return "System.Threading";
                 yield return "System.Threading.Tasks";
 
-                // 無制限バイナリ列の Stream アクセサ（契約の Stream 引数・エンジンの Stream/MemoryStream・
-                // ファイル糖衣の File）は System.IO を要求する
-                if (options.ExcludeUnboundedBinaryColumns)
-                {
-                    yield return "System.IO";
-                }
+                // Save フックの ISaveHookContext（WriteBinaryColumnAsync の Stream 引数・ファイル糖衣 DIM の File）は
+                // 契約に常に含まれるため System.IO を常時要求する（無制限バイナリの Stream アクセサ・エンジンも同じ System.IO）
+                yield return "System.IO";
 
                 if (options.IncludeDataAnnotations)
                 {
@@ -238,6 +235,8 @@ internal static class GeneratedFileUsings
                 if (options.GenerateRepositories && !spec.ContractOnly)
                 {
                     yield return "Microsoft.Extensions.DependencyInjection";
+                    // AddGenerated*Repositories の Save フックレジストリ既定登録（TryAddScoped）が Extensions 名前空間を使う
+                    yield return "Microsoft.Extensions.DependencyInjection.Extensions";
 
                     if (!options.UseRuntimePackages)
                     {
@@ -264,6 +263,8 @@ internal static class GeneratedFileUsings
                 if (spec.InMemory)
                 {
                     yield return "Microsoft.Extensions.DependencyInjection";
+                    // AddGeneratedInMemoryRepositories の Save フックレジストリ既定登録（TryAddScoped）が Extensions 名前空間を使う
+                    yield return "Microsoft.Extensions.DependencyInjection.Extensions";
                 }
 
                 // リモートサービス（クライアント側）: 固定 infra（RemoteJson・RemoteRepositoryException・
@@ -305,12 +306,12 @@ internal static class GeneratedFileUsings
                 yield return "System.Threading";
                 yield return "System.Threading.Tasks";
 
-                // EF Core 版の Stream アクセサ（NotSupportedException を投げるスタブ）の Stream 引数型
-                if (options.ExcludeUnboundedBinaryColumns)
-                {
-                    yield return "System.IO";
-                }
+                // Save フックの EF context（EfCoreSaveHookContext.WriteBinaryColumnAsync）と EF 版 Stream アクセサの
+                // Stream 引数型は常に System.IO を要求する（契約 ISaveHookContext が常に Stream を含むため、分割 EF ファイルでも必須）
+                yield return "System.IO";
                 yield return "Microsoft.EntityFrameworkCore";
+                // Save フックの EF 経路（TrackGraph の記録＝EntityEntry の保持・State 落とし込み）で使う
+                yield return "Microsoft.EntityFrameworkCore.ChangeTracking";
                 yield return "Microsoft.EntityFrameworkCore.Diagnostics";
                 yield return "Microsoft.EntityFrameworkCore.Infrastructure";
                 yield return "Microsoft.EntityFrameworkCore.Query";

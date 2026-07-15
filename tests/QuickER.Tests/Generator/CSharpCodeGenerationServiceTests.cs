@@ -1056,7 +1056,7 @@ public class CSharpCodeGenerationServiceTests
         content
             .Should()
             .Contain(
-                "public sealed partial class CustomerRepository(ISqlConnectionFactory connectionFactory)"
+                "public sealed partial class CustomerRepository(\r\n    ISqlConnectionFactory connectionFactory,\r\n    ISaveHookRegistry? saveHooks = null\r\n)"
             );
         content.Should().Contain("services.AddScoped<ICustomerRepository, CustomerRepository>();");
         // カラム一覧は columnList へ抽出して SELECT 系で共用する（無制限バイナリ列を除いた SELECT 用列集合）
@@ -2106,7 +2106,7 @@ public class CSharpCodeGenerationServiceTests
         content
             .Should()
             .Contain(
-                "public sealed partial class Table200Repository(ISqlConnectionFactory connectionFactory)"
+                "public sealed partial class Table200Repository(\r\n    ISqlConnectionFactory connectionFactory,\r\n    ISaveHookRegistry? saveHooks = null\r\n)"
             );
     }
 
@@ -3188,8 +3188,9 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("throw new SaveConflictException(");
         content.Should().Contain("entry.State = EntityState.Added;");
 
-        // 保存後の事後状態は既存版と同じ（AcceptChanges で Added/Updated → Unchanged）
-        content.Should().Contain("EntityGraphSaver.AcceptChanges(entity, cascadeSave);");
+        // 保存後の事後状態は既存版と同じ（AcceptChanges で Added/Updated → Unchanged）。
+        // Save フック対応で保存本体は SaveTrackedGraphAsync へ分離され、集約ルートは root 変数で確定する
+        content.Should().Contain("EntityGraphSaver.AcceptChanges(root, cascadeSave);");
     }
 
     /// <summary>EF 版 SqlExecutor が DbContext の接続上の ADO で既存版とマッピング・束縛を共有することを検証する</summary>

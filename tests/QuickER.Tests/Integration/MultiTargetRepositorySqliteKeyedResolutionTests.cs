@@ -1,3 +1,6 @@
+using System;
+using System.Threading;
+using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.Tests.GeneratedMultiTargetFixture;
@@ -92,5 +95,66 @@ public sealed class MultiTargetRepositorySqliteKeyedResolutionTests
             .GetType()
             .FullName.Should()
             .Be("QuickER.Tests.GeneratedMultiTargetFixture.Repositories.Sqlite.OrderRepository");
+    }
+
+    /// <summary>
+    /// keyed 登録でも Save フックのレジストリ（<see cref="ISaveHookRegistry"/>）が解決され、登録した
+    /// <see cref="ISaveHook{TEntity}"/> が呼び出し面（<see cref="ISaveHookInvoker"/>）として効くことを検証する。
+    /// </summary>
+    /// <remarks>
+    /// レジストリは方言別の keyed 拡張が <c>TryAddScoped</c> で非 keyed に既定登録し、生成リポジトリのファクトリが
+    /// <c>provider.GetService&lt;ISaveHookRegistry&gt;()</c> でコンストラクタへ配線する（生成コード参照）。実 DB を開かずに
+    /// レジストリ解決とフック発火（Before 短絡・After 呼び出し）だけを確認する＝Docker 不要で CI 常時実行。
+    /// </remarks>
+    [Fact(DisplayName = "[MultiTarget/CI] keyed 登録でも ISaveHookRegistry が解決されフックが効く")]
+    public async Task KeyedResolution_SaveHookRegistry_ResolvesAndFiresHook()
+    {
+        var services = new ServiceCollection();
+        services.AddGeneratedSqlServerRepositories("server", ServerConnectionString);
+        services.AddGeneratedSqliteRepositories("local", LocalConnectionString);
+
+        // フックは非 keyed の ISaveHook<TEntity> として登録する（レジストリは IServiceProvider から解決する）
+        var hook = new RecordingCustomerHook();
+        services.AddSingleton<ISaveHook<CustomerEntity>>(hook);
+
+        using var provider = services.BuildServiceProvider();
+
+        // レジストリは Scoped のためスコープ内で解決する（keyed 拡張が非 keyed に既定登録している）
+        using var scope = provider.CreateScope();
+        var registry = scope.ServiceProvider.GetService<ISaveHookRegistry>();
+        registry.Should().NotBeNull("keyed 拡張でも ISaveHookRegistry が既定登録される");
+
+        // 登録した ISaveHook<CustomerEntity> が呼び出し面として解決され、実際に発火する
+        var invoker = registry!.GetInvoker(typeof(CustomerEntity));
+        invoker.Should().NotBeNull("登録済みフックがあれば呼び出し面が解決される");
+
+        var entity = new CustomerEntity();
+        var proceed = await invoker!.InvokeBeforeAsync(
+            entity,
+            SaveOperation.Insert,
+            CancellationToken.None
+        );
+
+        proceed.Should().BeTrue();
+        hook.BeforeCalls.Should().Be(1, "Before フックが発火した");
+
+        // フック未登録の型は完全 no-op（呼び出し面は null）
+        registry.GetInvoker(typeof(OrderEntity)).Should().BeNull("未登録の型は no-op");
+    }
+
+    /// <summary>Before の発火回数を数えるテスト用フック</summary>
+    private sealed class RecordingCustomerHook : ISaveHook<CustomerEntity>
+    {
+        public int BeforeCalls { get; private set; }
+
+        public Task<bool> BeforeSaveAsync(
+            CustomerEntity entity,
+            SaveOperation operation,
+            CancellationToken cancellationToken = default
+        )
+        {
+            BeforeCalls++;
+            return Task.FromResult(true);
+        }
     }
 }

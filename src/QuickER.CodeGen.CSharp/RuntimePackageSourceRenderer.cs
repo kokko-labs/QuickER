@@ -46,7 +46,7 @@ public sealed class RuntimePackageSourceRenderer
         // 契約のみのため ADO（SqlClient / Sqlite）・DI は付かない。
         // リモートクライアントの固定 infra（HttpRemoteRepository 等）を含めるため includeRemoteServices を立てるが、
         // DI 登録拡張（AddGeneratedHttpRemoteRepositories）はスキーマ依存物でパッケージに入れないため、
-        // その using（Microsoft.Extensions.DependencyInjection）は除外して Core の依存ゼロを保つ
+        // その using（Microsoft.Extensions.DependencyInjection(.Extensions)）は除外して Core の依存ゼロを保つ
         // （方言エンジンパッケージの除外と同じ理由）。
         var usings = ResolveUsings(
                 options,
@@ -57,7 +57,9 @@ public sealed class RuntimePackageSourceRenderer
                 crossUsings: [],
                 includeRemoteServices: true
             )
-            .Where(u => u != "Microsoft.Extensions.DependencyInjection")
+            .Where(u =>
+                !u.StartsWith("Microsoft.Extensions.DependencyInjection", StringComparison.Ordinal)
+            )
             .ToList();
 
         var scope = BuildScope(
@@ -104,7 +106,9 @@ public sealed class RuntimePackageSourceRenderer
                 generateRepositories: true,
                 crossUsings: [RuntimePackages.Core]
             )
-            .Where(u => u != "Microsoft.Extensions.DependencyInjection")
+            .Where(u =>
+                !u.StartsWith("Microsoft.Extensions.DependencyInjection", StringComparison.Ordinal)
+            )
             .ToList();
 
         var scope = BuildScope(
