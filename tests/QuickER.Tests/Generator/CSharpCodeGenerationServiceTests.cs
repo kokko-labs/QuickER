@@ -2922,10 +2922,11 @@ public class CSharpCodeGenerationServiceTests
         );
 
         result.HasErrors.Should().BeFalse();
-        result.Files.Should().Contain(file => file.FileName == "EfCore.g.cs");
+        // EF Core 実装は方言別実装と同じ流儀で Repositories.EfCore.g.cs・{Repository}.EfCore へ出力される
+        result.Files.Should().Contain(file => file.FileName == "Repositories.EfCore.g.cs");
 
-        var efCore = Content(result, "EfCore.g.cs");
-        efCore.Should().Contain("namespace Sample.Domain.EfCore;");
+        var efCore = Content(result, "Repositories.EfCore.g.cs");
+        efCore.Should().Contain("namespace Sample.Domain.Repositories.EfCore;");
         efCore.Should().Contain("using Microsoft.EntityFrameworkCore;");
         efCore.Should().Contain("public partial class QuickErDbContext : DbContext");
 
@@ -3022,9 +3023,12 @@ public class CSharpCodeGenerationServiceTests
         repository.Should().NotContain("using Microsoft.Extensions.DependencyInjection;");
     }
 
-    /// <summary>EfCore カテゴリの名前空間を上書き指定できることを検証する</summary>
+    /// <summary>
+    /// 分割時、EF Core 実装は方言別実装と同じ流儀で Repositories.EfCore.g.cs へ出力され、
+    /// 名前空間が Repository 契約 namespace のサブ名前空間（{RepositoryNamespace}.EfCore）へ導出されることを検証する
+    /// </summary>
     [Fact]
-    public void Generate_EfCore_Split_ShouldHonorCustomNamespace()
+    public void Generate_EfCore_Split_ShouldDeriveNamespaceFromRepository()
     {
         var result = new CSharpCodeGenerationService().Generate(
             ValueObjectDiagram(),
@@ -3033,12 +3037,15 @@ public class CSharpCodeGenerationServiceTests
                 RootNamespace = "Sample.Domain",
                 SplitFilesByCategory = true,
                 GenerateEfCore = true,
-                EfCoreNamespace = "Acme.Persistence.EfCore",
+                // Repository 契約 namespace をカスタム指定 → EfCore はそのサブ名前空間へ導出される
+                RepositoryNamespace = "Acme.Persistence.Repos",
             }
         );
 
         result.HasErrors.Should().BeFalse();
-        Content(result, "EfCore.g.cs").Should().Contain("namespace Acme.Persistence.EfCore;");
+        Content(result, "Repositories.EfCore.g.cs")
+            .Should()
+            .Contain("namespace Acme.Persistence.Repos.EfCore;");
     }
 
     /// <summary>EF Core 単独出力（GenerateEfCore=true・GenerateRepositories=false）が合法で、エラーなく生成できることを検証する</summary>
@@ -3381,7 +3388,7 @@ public class CSharpCodeGenerationServiceTests
         );
 
         result.HasErrors.Should().BeFalse();
-        var efCore = Content(result, "EfCore.g.cs");
+        var efCore = Content(result, "Repositories.EfCore.g.cs");
 
         // EF Core 版コードは方言非依存（System.Data.Common の DbCommand/DbConnection/DbDataReader のみ使用）。
         // SqlBulkCopy は「性能特性が異なる」旨の XML コメントでのみ言及されるため、型使用（"SqlBulkCopy("）だけを禁止する

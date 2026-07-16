@@ -584,7 +584,6 @@ internal sealed class GenerationOptionSet
             "--value-object-namespace",
             Strings.Cli_Opt_ValueObjectNamespace
         );
-        AddString("EfCoreNamespace", "--ef-core-namespace", Strings.Cli_Opt_EfCoreNamespace);
 
         // 生成対象
         AddBool("GenerateEditModels", "--generate-edit-models", Strings.Cli_Opt_GenerateEditModels);

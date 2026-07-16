@@ -109,9 +109,6 @@
   <data name="Cli_Opt_ValueObjectNamespace" xml:space="preserve">
     <value>Namespace for value object classes when splitting by category (overrides the settings file)</value>
   </data>
-  <data name="Cli_Opt_EfCoreNamespace" xml:space="preserve">
-    <value>Namespace for EF Core (DbContext) classes when splitting by category (overrides the settings file)</value>
-  </data>
   <data name="Cli_Opt_GenerateEditModels" xml:space="preserve">
     <value>Generate EditModel classes (overrides the settings file)</value>
   </data>

@@ -211,9 +211,6 @@ public sealed class CodeGenerationOptions
     /// <summary>分割時の値オブジェクトクラスの名前空間。空なら <see cref="RootNamespace"/> へフォールバックする</summary>
     public string? ValueObjectNamespace { get; init; }
 
-    /// <summary>分割時の EfCore（DbContext・構成）クラスの名前空間。空なら <see cref="RootNamespace"/> へフォールバックする</summary>
-    public string? EfCoreNamespace { get; init; }
-
     /// <summary>
     /// スキーマ非依存の固定コード（ランタイム）を生成コードへ同梱せず、NuGet パッケージ <c>QuickER.Runtime.*</c> への参照で賄うかどうか（既定 false）。
     /// </summary>

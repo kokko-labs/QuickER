@@ -114,8 +114,8 @@ public static class GeneratedFilePlanner
             GenerationBucket.EditModel => options.EditModelNamespace,
             GenerationBucket.Mapper => options.MapperNamespace,
             GenerationBucket.Repository => options.RepositoryNamespace,
-            GenerationBucket.EfCore => options.EfCoreNamespace,
-            // RemoteServer に個別の名前空間オプションは設けない（既定 {root}.RemoteServer へフォールバック）
+            // EfCore に個別の名前空間オプションは設けない（分割時は {RepositoryNamespace}.EfCore へ導出専用。
+            // 方言別実装 {RepositoryNamespace}.SqlServer 等と同じ扱い）
             _ => null,
         };
 
@@ -293,6 +293,10 @@ public static class GeneratedFilePlanner
     /// 方言実装は <c>{RepositoryNamespace}.SqlServer</c> / <c>.Sqlite</c> の別 namespace へ出す（分割時は別ファイル、
     /// 非分割時は同一ファイルへ namespace ブロックとして連結）。
     /// </para>
+    /// <para>
+    /// EF Core 実装（<see cref="CodeGenerationOptions.GenerateEfCore"/>）は分割時、方言別実装と同じ流儀で
+    /// <c>Repositories.EfCore.g.cs</c>・<c>{RepositoryNamespace}.EfCore</c>（契約 namespace のサブ名前空間へ導出専用）へ出す。
+    /// </para>
     /// </remarks>
     public static IReadOnlyList<GeneratedFileSpec> Plan(CodeGenerationOptions options)
     {
@@ -392,6 +396,16 @@ public static class GeneratedFilePlanner
             bucket => bucket,
             bucket => ResolveNamespace(options, bucket)
         );
+
+        // EF Core 実装は方言別実装（{RepositoryNamespace}.SqlServer 等）と同じ扱いで、契約（Repository）namespace の
+        // サブ名前空間 {RepositoryNamespace}.EfCore へ導出する（専用の名前空間オプションは持たない）。
+        // EfCore バケットが有効なら Repository バケットも必ず有効（ActiveBuckets が保証）。
+        if (namespaceByBucket.ContainsKey(GenerationBucket.EfCore))
+        {
+            namespaceByBucket[GenerationBucket.EfCore] =
+                $"{namespaceByBucket[GenerationBucket.Repository]}.{DefaultSuffix(GenerationBucket.EfCore)}";
+        }
+
         var activeSet = emittedBuckets.ToHashSet();
 
         var splitSpecs = new List<GeneratedFileSpec>();
@@ -451,7 +465,11 @@ public static class GeneratedFilePlanner
             splitSpecs.Add(
                 new GeneratedFileSpec
                 {
-                    FileName = DefaultFileName(bucket),
+                    // EF Core 実装は方言別実装（Repositories.SqlServer.g.cs 等）と同じ流儀で Repositories.EfCore.g.cs へ出す
+                    FileName =
+                        bucket == GenerationBucket.EfCore
+                            ? EfCoreRepositoryFileName()
+                            : DefaultFileName(bucket),
                     NamespaceName = ownNamespace,
                     Buckets = [bucket],
                     CrossNamespaceUsings = crossUsings,
@@ -616,4 +634,8 @@ public static class GeneratedFilePlanner
     /// <summary>方言別実装の分割ファイル名（例: <c>Repositories.SqlServer.g.cs</c>）</summary>
     private static string DialectRepositoryFileName(string dialect) =>
         $"{DefaultSuffix(GenerationBucket.Repository)}.{DialectNamespaceSuffix(dialect)}.g.cs";
+
+    /// <summary>EF Core 実装の分割ファイル名（<c>Repositories.EfCore.g.cs</c>）＝方言別実装と同じ流儀</summary>
+    private static string EfCoreRepositoryFileName() =>
+        $"{DefaultSuffix(GenerationBucket.Repository)}.{DefaultSuffix(GenerationBucket.EfCore)}.g.cs";
 }

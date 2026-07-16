@@ -45,9 +45,6 @@ public class CSharpGenerationSettings
     /// <summary>分割時の ValueObject 名前空間。空なら {base}.ValueObjects にフォールバック</summary>
     public string ValueObjectNamespace { get; set; } = string.Empty;
 
-    /// <summary>分割時の EfCore 名前空間。空なら {base}.EfCore にフォールバック</summary>
-    public string EfCoreNamespace { get; set; } = string.Empty;
-
     // ===== 生成対象 =====
 
     /// <summary>EditModel クラスを生成するか（Entity は常時生成のためキーを持たない）</summary>

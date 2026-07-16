@@ -257,9 +257,6 @@
   <data name="CodeGen_NamespaceLabel_ValueObject" xml:space="preserve">
     <value>ValueObject の namespace</value>
   </data>
-  <data name="CodeGen_NamespaceLabel_EfCore" xml:space="preserve">
-    <value>EfCore の namespace</value>
-  </data>
   <data name="QueryDialog_WindowTitle" xml:space="preserve">
     <value>クエリ定義</value>
   </data>

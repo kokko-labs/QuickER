@@ -481,7 +481,6 @@
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
           </Grid.RowDefinitions>
 
           <TextBlock
@@ -552,7 +551,8 @@
             Visibility="{Binding ShowValueObjectNamespace, Converter={StaticResource BoolToVisibilityConverter}}"
           />
 
-          <!-- DB アクセス系は「生成内容」の並びに合わせて末尾。EF Core 選択時は契約（Repository）＋EfCore の 2 欄が並ぶ -->
+          <!-- DB アクセス系は「生成内容」の並びに合わせて末尾。EF Core 実装は Repository 契約 namespace の
+               サブ名前空間（{Repository}.EfCore）へ導出するため専用の欄は持たない -->
           <TextBlock
             Grid.Row="4"
             Grid.Column="0"
@@ -568,23 +568,6 @@
             Style="{StaticResource FormInput}"
             Text="{Binding RepositoryNamespace, UpdateSourceTrigger=PropertyChanged}"
             Visibility="{Binding ShowRepositoryNamespace, Converter={StaticResource BoolToVisibilityConverter}}"
-          />
-
-          <TextBlock
-            Grid.Row="5"
-            Grid.Column="0"
-            Margin="0,4"
-            Style="{StaticResource FieldLabel}"
-            Text="EF Core"
-            Visibility="{Binding ShowEfCoreNamespace, Converter={StaticResource BoolToVisibilityConverter}}"
-          />
-          <TextBox
-            Grid.Row="5"
-            Grid.Column="1"
-            Margin="0,4"
-            Style="{StaticResource FormInput}"
-            Text="{Binding EfCoreNamespace, UpdateSourceTrigger=PropertyChanged}"
-            Visibility="{Binding ShowEfCoreNamespace, Converter={StaticResource BoolToVisibilityConverter}}"
           />
         </Grid>
 

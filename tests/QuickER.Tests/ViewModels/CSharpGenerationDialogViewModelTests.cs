@@ -209,26 +209,32 @@ public class CSharpGenerationDialogViewModelTests
         }
     }
 
-    /// <summary>EF Core 選択＋分割モードで EfCore 名前空間欄が現れ、ベース変更へ追従することを検証する</summary>
-    [Fact(DisplayName = "EF Core 選択で EfCore 名前空間欄が連動する")]
-    public void EfCoreSelection_TogglesNamespaceField()
+    /// <summary>
+    /// EF Core 選択＋分割モードで Repository 契約名前空間欄が現れ、EF Core 実装ファイルは方言別実装と同じ流儀で
+    /// Repositories.EfCore.g.cs・{RepositoryNamespace}.EfCore へ導出される（専用の名前空間欄は持たない）ことを検証する
+    /// </summary>
+    [Fact(DisplayName = "EF Core 選択で EF Core 実装が {Repository}.EfCore へ導出される")]
+    public void EfCoreSelection_DerivesEfCoreNamespaceFromRepository()
     {
         var vm = CreateViewModel(out _);
         vm.RootNamespace = "Acme.App";
         vm.SplitFilesByCategory = true;
 
-        vm.ShowEfCoreNamespace.Should().BeFalse("EF Core 未選択では欄を出さない");
         vm.ShowRepositoryNamespace.Should().BeFalse("DB アクセス「なし」では契約も出力されない");
 
         vm.DbAccessEfCore = true;
 
-        vm.ShowEfCoreNamespace.Should().BeTrue();
         vm.ShowRepositoryNamespace.Should()
             .BeTrue("EF Core でも契約が Repository バケットに出力される");
-        vm.EfCoreNamespace.Should().Be("Acme.App.EfCore");
 
+        // EF Core 実装は Repository 契約名前空間のサブ名前空間へ導出される（専用欄なし）
+        vm.PreviewFiles.Should()
+            .Contain("Repositories.EfCore.g.cs  →  namespace Acme.App.Repositories.EfCore");
+
+        // ルート変更に伴い契約（Repositories）が追従すれば EF Core も自動的に追従する
         vm.RootNamespace = "Contoso.Sales";
-        vm.EfCoreNamespace.Should().Be("Contoso.Sales.EfCore");
+        vm.PreviewFiles.Should()
+            .Contain("Repositories.EfCore.g.cs  →  namespace Contoso.Sales.Repositories.EfCore");
     }
 
     /// <summary>
@@ -1027,7 +1033,7 @@ public class CSharpGenerationDialogViewModelTests
         vm.GenerateValueObjects.Should().BeFalse();
     }
 
-    /// <summary>EF Core の選択と EfCore 名前空間が保存・復元されることを検証する</summary>
+    /// <summary>EF Core の選択と Repository 契約名前空間が保存・復元されることを検証する</summary>
     [Fact(DisplayName = "EF Core の選択が次回起動時に復元される")]
     public void EfCoreSelection_IsPersistedAndRestored()
     {
@@ -1038,7 +1044,8 @@ public class CSharpGenerationDialogViewModelTests
             vm.RootNamespace = "Acme.App";
             vm.SplitFilesByCategory = true;
             vm.DbAccessEfCore = true;
-            vm.EfCoreNamespace = "Acme.App.Persistence";
+            // EF Core 実装は Repository 契約名前空間のサブ名前空間へ導出されるため、契約名前空間を保存・復元する
+            vm.RepositoryNamespace = "Acme.App.Persistence";
             vm.OutputPath = @"C:\out";
             vm.OkCommand.Execute(null);
 
@@ -1048,7 +1055,7 @@ public class CSharpGenerationDialogViewModelTests
 
             restored.DbAccessEfCore.Should().BeTrue();
             restored.GenerateRepositories.Should().BeFalse();
-            restored.EfCoreNamespace.Should().Be("Acme.App.Persistence");
+            restored.RepositoryNamespace.Should().Be("Acme.App.Persistence");
         }
         finally
         {
@@ -1160,7 +1167,7 @@ public class CSharpGenerationDialogViewModelTests
             {
                 SplitFilesByCategory = true,
                 RootNamespace = "Contoso.Loaded",
-                EfCoreNamespace = "Contoso.Loaded.Persistence",
+                RepositoryNamespace = "Contoso.Loaded.Persistence",
                 GenerateRepositories = true,
                 GenerateEfCore = true,
                 GenerateValueObjects = true,
@@ -1177,7 +1184,7 @@ public class CSharpGenerationDialogViewModelTests
 
             vm.RootNamespace.Should().Be("Contoso.Loaded");
             vm.SplitFilesByCategory.Should().BeTrue();
-            vm.EfCoreNamespace.Should().Be("Contoso.Loaded.Persistence");
+            vm.RepositoryNamespace.Should().Be("Contoso.Loaded.Persistence");
             vm.GenerateValueObjects.Should().BeTrue();
             // 排他規則: 両方 true の保存値は QuickER 版 Repository を優先し EF Core は外れる
             vm.GenerateRepositories.Should().BeTrue();

@@ -156,12 +156,6 @@ namespace QuickER.Cli.Resources {
             }
         }
 
-        public static string Cli_Opt_EfCoreNamespace {
-            get {
-                return ResourceManager.GetString("Cli_Opt_EfCoreNamespace", resourceCulture);
-            }
-        }
-
         public static string Cli_Opt_GenerateEditModels {
             get {
                 return ResourceManager.GetString("Cli_Opt_GenerateEditModels", resourceCulture);

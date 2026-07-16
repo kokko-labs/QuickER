@@ -450,12 +450,6 @@ namespace QuickER.CodeGen.UI.Resources {
             }
         }
 
-        public static string CodeGen_NamespaceLabel_EfCore {
-            get {
-                return ResourceManager.GetString("CodeGen_NamespaceLabel_EfCore", resourceCulture);
-            }
-        }
-
         public static string QueryDialog_WindowTitle {
             get {
                 return ResourceManager.GetString("QueryDialog_WindowTitle", resourceCulture);

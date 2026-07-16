@@ -368,7 +368,6 @@ public class RuntimePackageModeCompilationTests
             MapperNamespace = options.MapperNamespace,
             RepositoryNamespace = options.RepositoryNamespace,
             ValueObjectNamespace = options.ValueObjectNamespace,
-            EfCoreNamespace = options.EfCoreNamespace,
             GenerateRemoteContracts = options.GenerateRemoteContracts,
             UseRuntimePackages = true,
         };

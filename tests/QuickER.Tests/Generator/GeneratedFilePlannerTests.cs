@@ -142,7 +142,7 @@ public class GeneratedFilePlannerTests
 
         var plan = GeneratedFilePlanner.Plan(options);
 
-        // Entity は Runtime / ValueObjects のみ依存し、Repositories / EfCore / Mappers は using しない
+        // Entity は Runtime / ValueObjects のみ依存し、Repositories / Repositories.EfCore / Mappers は using しない
         var entity = plan.Single(spec => spec.FileName == "Entities.g.cs");
         entity
             .CrossNamespaceUsings.Should()
@@ -154,8 +154,10 @@ public class GeneratedFilePlannerTests
             .CrossNamespaceUsings.Should()
             .BeEquivalentTo("Acme.App.Entities", "Acme.App.EditModels", "Acme.App.Runtime");
 
-        // EfCore は Entity / Repositories / Runtime / ValueObjects に依存する
-        var efCore = plan.Single(spec => spec.FileName == "EfCore.g.cs");
+        // EF Core 実装は方言別実装と同じ流儀で Repositories.EfCore.g.cs・{Repository}.EfCore へ出し、
+        // Entity / Repositories（契約）/ Runtime / ValueObjects に依存する
+        var efCore = plan.Single(spec => spec.FileName == "Repositories.EfCore.g.cs");
+        efCore.NamespaceName.Should().Be("Acme.App.Repositories.EfCore");
         efCore
             .CrossNamespaceUsings.Should()
             .BeEquivalentTo(

@@ -257,9 +257,6 @@ You can pass this file directly to the CLI as --config.</value>
   <data name="CodeGen_NamespaceLabel_ValueObject" xml:space="preserve">
     <value>ValueObject namespace</value>
   </data>
-  <data name="CodeGen_NamespaceLabel_EfCore" xml:space="preserve">
-    <value>EfCore namespace</value>
-  </data>
   <data name="QueryDialog_WindowTitle" xml:space="preserve">
     <value>Query Definitions</value>
   </data>

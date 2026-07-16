@@ -119,10 +119,6 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     [ObservableProperty]
     private string _valueObjectNamespace = string.Empty;
 
-    /// <summary>EfCore 名前空間</summary>
-    [ObservableProperty]
-    private string _efCoreNamespace = string.Empty;
-
     // ===== 出力先 =====
 
     /// <summary>出力先パス（非分割時はファイルパス、分割時は出力フォルダパス）</summary>
@@ -381,9 +377,6 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     /// <summary>ValueObject 名前空間欄を表示するか</summary>
     public bool ShowValueObjectNamespace => SplitFilesByCategory && GenerateValueObjects;
 
-    /// <summary>EfCore 名前空間欄を表示するか</summary>
-    public bool ShowEfCoreNamespace => SplitFilesByCategory && GenerateEfCore;
-
     // ===== 変更フック =====
 
     partial void OnSplitFilesByCategoryChanged(bool value)
@@ -440,8 +433,6 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
 
     partial void OnValueObjectNamespaceChanged(string value) => RefreshPreview();
 
-    partial void OnEfCoreNamespaceChanged(string value) => RefreshPreview();
-
     partial void OnOutputPathChanged(string value) => RefreshPreview();
 
     /// <summary>ルート名前空間が変わったら、既定（{旧root}.{接尾辞}）のままの子名前空間を新ルートへ追従させる</summary>
@@ -466,7 +457,6 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
         OnPropertyChanged(nameof(ShowMapperNamespace));
         OnPropertyChanged(nameof(ShowRepositoryNamespace));
         OnPropertyChanged(nameof(ShowValueObjectNamespace));
-        OnPropertyChanged(nameof(ShowEfCoreNamespace));
         OnPropertyChanged(nameof(ShowRepositoryDialectTargets));
         OnPropertyChanged(nameof(ShowExcludeUnboundedBinary));
         RefreshPreview();
@@ -504,7 +494,6 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
                 newRoot,
                 GenerationBucket.ValueObject
             );
-            EfCoreNamespace = FollowOne(EfCoreNamespace, oldRoot, newRoot, GenerationBucket.EfCore);
         }
         finally
         {
@@ -547,7 +536,6 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
                 settings.ValueObjectNamespace,
                 GenerationBucket.ValueObject
             );
-            EfCoreNamespace = Prefill(settings.EfCoreNamespace, GenerationBucket.EfCore);
             GenerateEditModels = settings.GenerateEditModels;
             GenerateMappers = settings.GenerateMappers;
             // DB アクセスは排他選択。両方 true の保存値（手編集等）はQuickER 版 Repository を優先する
@@ -619,7 +607,6 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
             MapperNamespace = MapperNamespace.Trim(),
             RepositoryNamespace = RepositoryNamespace.Trim(),
             ValueObjectNamespace = ValueObjectNamespace.Trim(),
-            EfCoreNamespace = EfCoreNamespace.Trim(),
             GenerateEditModels = GenerateEditModels,
             GenerateMappers = GenerateMappers,
             GenerateRepositories = GenerateRepositories,
@@ -660,7 +647,6 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
             MapperNamespace = NullIfEmpty(MapperNamespace),
             RepositoryNamespace = NullIfEmpty(RepositoryNamespace),
             ValueObjectNamespace = NullIfEmpty(ValueObjectNamespace),
-            EfCoreNamespace = NullIfEmpty(EfCoreNamespace),
             GenerateEditModels = GenerateEditModels,
             GenerateMappers = GenerateMappers,
             GenerateRepositories = GenerateRepositories,
@@ -975,7 +961,6 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
                 ValueObjectNamespace,
                 Strings.CodeGen_NamespaceLabel_ValueObject
             ),
-            (ShowEfCoreNamespace, EfCoreNamespace, Strings.CodeGen_NamespaceLabel_EfCore),
         };
 
         foreach (var target in targets)
