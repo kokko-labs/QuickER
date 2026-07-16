@@ -182,7 +182,7 @@ internal sealed class ScribanCSharpRenderer
         // (2) 共通契約の EntitySaveMetadata / SqlQuery によるナビゲーション除外・Include 復元（リフレクション走査）で参照される。
         // リレーションが無くても契約（QuickER 版 Repository か EF Core のいずれか）を生成する場合は属性定義が必要なため、その条件も含める。
         var emitNavRefAttr =
-            (options.GenerateEntityClasses && model.EntityClasses.Any(c => c.Navigations.Count > 0))
+            model.EntityClasses.Any(c => c.Navigations.Count > 0)
             || options.GenerateRepositories
             || options.GenerateEfCore
             // インメモリ Repository はメタデータ（CascadeNavigations）・Include 復元で NavigationReference を参照する
@@ -216,12 +216,11 @@ internal sealed class ScribanCSharpRenderer
 
         // DB 定義メタ属性（[DbColumnMeta] / [DbTableMeta]）は、生成 Entity を「DB 定義の自己記述ドキュメント」に
         // するための方言中立メタ（型トークン・説明）を載せる。付与は対象 DB・Repository/EF Core 設定に依らず、
-        // データアノテーション付与（[Table]/[Column] と同列）かつ Entity 生成時のみ。canonical 由来のため
+        // データアノテーション付与（[Table]/[Column] と同列）のとき。Entity は常時生成されるため、canonical 由来で
         // 可搬図では方言によらず同一メタになる。刻む中身が 1 つでもある（トークン付き列 または 説明付きテーブル/列）
         // ときだけ属性定義・付与を出力し、実体のない属性クラスは出さない。
         var emitDbMetaAttr =
             options.IncludeDataAnnotations
-            && options.GenerateEntityClasses
             && model.EntityClasses.Any(c =>
                 !string.IsNullOrEmpty(c.Description)
                 || c.Properties.Any(p =>
@@ -232,23 +231,19 @@ internal sealed class ScribanCSharpRenderer
         // 無制限バイナリ列のマーカー属性 [UnboundedBinaryColumn] は (1) オプション ON 時に Entity プロパティへ付与し、
         // (2) 共通契約の EntitySaveMetadata が SELECT / UPDATE から除外する列の識別にリフレクションで参照する。
         // 付与のみでも属性型の定義が要るため、Repository / EF Core / InMemory を生成する場合（メタデータが読む）に加え、
-        // オプション ON かつ Entity 生成時（付与のみで契約が無い構成）でも定義を出す。emitNavRefAttr と同型の条件で、
+        // オプション ON でも定義を出す（付与のみで契約が無い構成。Entity は常時生成される）。emitNavRefAttr と同型の条件で、
         // scriban 側のゲートで || runtime_package_export を足し、パッケージ書き出し時も常に定義を出す（NavigationReference と対称）。
         var emitUnboundedBinaryAttr =
             options.GenerateRepositories
             || options.GenerateEfCore
             || options.GenerateInMemoryRepositories
-            || (options.ExcludeUnboundedBinaryColumns && options.GenerateEntityClasses);
+            || options.ExcludeUnboundedBinaryColumns;
 
         // store-generated 列のマーカー属性 [StoreGeneratedColumn] は (1) rowversion / timestamp 等の列へ生成オプションに依らず
         // 無条件で付与し、(2) 共通契約の EntitySaveMetadata が INSERT / UPDATE から除外する列の識別にリフレクションで参照する。
-        // 付与を読む固定 infra（Repository / EF Core / InMemory）に加え、付与のみが起きる Entity 単独生成でも定義を出す（emitUnboundedBinaryAttr
-        // と同型で、scriban 側のゲートで || runtime_package_export を足しパッケージ書き出し時も常に定義する）。
-        var emitStoreGeneratedAttr =
-            options.GenerateRepositories
-            || options.GenerateEfCore
-            || options.GenerateInMemoryRepositories
-            || options.GenerateEntityClasses;
+        // Entity は常時生成され、付与のみが起きる Entity 単独生成でも属性型の定義が要るため、定義は常に出力する
+        // （scriban 側のゲートで || runtime_package_export を足しパッケージ書き出し時も常に定義する）。
+        const bool emitStoreGeneratedAttr = true;
 
         // using は呼び出し側（GeneratedFileUsings）がバケット単位で解決済み。EF Core など外部依存の
         // 出し分けもそこで完結するため、レンダラーでは受け取った集合をそのまま流し込む

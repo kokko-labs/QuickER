@@ -381,12 +381,10 @@ public static class CliApp
     /// <remarks>
     /// <paramref name="repositoryDialects"/>（<c>--repository-dialects</c>）指定時は
     /// <see cref="CodeGenerationOptions.RepositoryDialects"/> へカンマ区切りの各方言を設定する。
-    /// 未指定時は <paramref name="provider"/> の名前を単一 <see cref="CodeGenerationOptions.RepositoryDialect"/>
-    /// として設定する（図の TargetDbms から導出される値のため、単一キーは CLI 引数を正として上書きする）。
-    /// ただし設定ファイル（GUI が保存した <c>--config</c>）に <see cref="CodeGenerationOptions.RepositoryDialects"/>
-    /// のリストが含まれる場合は、この単一キーを上書きしてもそのリストは温存され、
-    /// <see cref="CodeGenerationOptions.EffectiveRepositoryDialects"/> の優先規則（リスト優先）によって有効になる
-    /// （GUI で選んだ対象 DB がこの経路で CLI に伝わる）。
+    /// 未指定時は、設定ファイル（GUI が保存した <c>--config</c>）に <see cref="CodeGenerationOptions.RepositoryDialects"/>
+    /// の非空リストがあればそれを温存し（GUI で選んだ対象 DB がこの経路で CLI に伝わる）、無ければ
+    /// <paramref name="provider"/> の名前（図の TargetDbms から導出）を単一要素で
+    /// <see cref="CodeGenerationOptions.RepositoryDialects"/> に設定する。
     /// <paramref name="runtimePackages"/>（<c>--runtime-packages</c>）指定時は
     /// <see cref="CodeGenerationOptions.UseRuntimePackages"/> を true にする（未指定時は設定ファイルの値を使う）。
     /// <paramref name="apiDocs"/>（<c>--api-docs</c>）指定時は
@@ -461,9 +459,11 @@ public static class CliApp
                 dialects.Select(dialect => JsonValue.Create(dialect)).ToArray()
             );
         }
-        else
+        else if (node["RepositoryDialects"] is not JsonArray { Count: > 0 })
         {
-            node["RepositoryDialect"] = provider.Name;
+            // 設定ファイルに RepositoryDialects（非空）があればそれを温存し、無ければ図の方言（provider.Name）を
+            // 単一要素で設定する（GUI で選んだ対象 DB がこの経路で CLI に伝わる）。
+            node["RepositoryDialects"] = new JsonArray(JsonValue.Create(provider.Name));
         }
 
         var options =

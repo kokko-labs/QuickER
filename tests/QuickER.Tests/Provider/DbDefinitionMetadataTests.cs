@@ -160,7 +160,7 @@ public class DbDefinitionMetadataTests
             {
                 NamespaceName = "Sample.Domain",
                 GenerateRepositories = true,
-                RepositoryDialect = "sqlserver",
+                RepositoryDialects = ["sqlserver"],
             }
         );
 
@@ -171,7 +171,7 @@ public class DbDefinitionMetadataTests
             {
                 NamespaceName = "Sample.Domain",
                 GenerateRepositories = true,
-                RepositoryDialect = "sqlite",
+                RepositoryDialects = ["sqlite"],
             }
         );
 

@@ -78,21 +78,9 @@ namespace QuickER.CodeGen.CSharp.Resources {
             }
         }
 
-        public static string CodeGen_Error_NoGenerationTarget {
-            get {
-                return ResourceManager.GetString("CodeGen_Error_NoGenerationTarget", resourceCulture);
-            }
-        }
-
         public static string CodeGen_Error_MapperRequiresEntityAndEditModel {
             get {
                 return ResourceManager.GetString("CodeGen_Error_MapperRequiresEntityAndEditModel", resourceCulture);
-            }
-        }
-
-        public static string CodeGen_Error_RepositoryRequiresEntity {
-            get {
-                return ResourceManager.GetString("CodeGen_Error_RepositoryRequiresEntity", resourceCulture);
             }
         }
 

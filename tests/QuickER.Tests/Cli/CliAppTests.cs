@@ -250,7 +250,7 @@ public class CliAppTests
 
     /// <summary>
     /// 対応方言（sqlite）＋ GenerateRepositories=true では生成が成功し、
-    /// RepositoryDialect が --provider の値（sqlite）で確定していることを検証する
+    /// RepositoryDialects が --provider の値（sqlite）で確定していることを検証する
     /// </summary>
     [Fact(DisplayName = "対応方言（sqlite）＋GenerateRepositories は生成が成功する")]
     public async Task Generate_SupportedDialectWithRepositories_Succeeds()
@@ -556,6 +556,9 @@ public class CliAppTests
     public async Task Generate_WithRemoteContracts_EmitsRemoteRepositoryInterface()
     {
         var (schemaPath, outDir, root) = CreateSampleSchema();
+        // リモート面は Repository 契約が前提のため、DB アクセス（QuickER 版 Repository）を明示的に有効にする
+        var configPath = Path.Combine(root, "quicker.json");
+        File.WriteAllText(configPath, """{ "GenerateRepositories": true }""");
 
         try
         {
@@ -567,6 +570,8 @@ public class CliAppTests
                 outDir,
                 "--namespace",
                 "Test.Remote",
+                "--config",
+                configPath,
                 "--remote-contracts",
             ]);
 
@@ -672,6 +677,9 @@ public class CliAppTests
     public async Task Generate_WithRemoteServices_EmitsServerFileAndHttpClient()
     {
         var (schemaPath, outDir, root) = CreateSampleSchema();
+        // リモート面は Repository 契約が前提のため、DB アクセス（QuickER 版 Repository）を明示的に有効にする
+        var configPath = Path.Combine(root, "quicker.json");
+        File.WriteAllText(configPath, """{ "GenerateRepositories": true }""");
 
         try
         {
@@ -683,6 +691,8 @@ public class CliAppTests
                 outDir,
                 "--namespace",
                 "Test.RemoteServices",
+                "--config",
+                configPath,
                 "--remote-services",
             ]);
 

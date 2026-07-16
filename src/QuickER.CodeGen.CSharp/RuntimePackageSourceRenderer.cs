@@ -187,7 +187,6 @@ public sealed class RuntimePackageSourceRenderer
     private static CodeGenerationOptions BuildAllFeaturesOptions() =>
         new()
         {
-            GenerateEntityClasses = true,
             GenerateEditModels = true,
             GenerateMappers = true,
             GenerateRepositories = true,
@@ -233,7 +232,6 @@ public sealed class RuntimePackageSourceRenderer
         // パッケージごとに切り替える。
         var usingOptions = new CodeGenerationOptions
         {
-            GenerateEntityClasses = options.GenerateEntityClasses,
             GenerateEditModels = options.GenerateEditModels,
             GenerateMappers = options.GenerateMappers,
             GenerateRepositories = generateRepositories,

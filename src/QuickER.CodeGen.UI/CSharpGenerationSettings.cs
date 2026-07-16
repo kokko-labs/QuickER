@@ -5,15 +5,20 @@ namespace QuickER.CodeGen.UI;
 /// <summary>C# コード生成ダイアログの設定（次回起動時に復元する永続化対象）</summary>
 /// <remarks>
 /// このスキーマは CLI の quicker.json（<c>--config</c>）互換になるよう、CLI の
-/// <c>CodeGenerationOptions</c> とプロパティ名を揃えている（<see cref="NamespaceName"/> /
+/// <c>CodeGenerationOptions</c> とキー集合・意味・既定値を揃えている（<see cref="NamespaceName"/> /
 /// <see cref="RepositoryDialects"/> / <see cref="OutputFileName"/> 等）。JSON は camelCase で書き出すが、
 /// CLI は <c>PropertyNameCaseInsensitive</c> で読むため名前が一致すればそのまま解釈される。
-/// GUI 専用キー（<see cref="OutputFilePath"/> / <see cref="OutputFolderPath"/> 等）は CLI では未知キーとして無視される。
+/// GUI 専用キー（<see cref="OutputPath"/> や分割時のカテゴリ別名前空間等）は CLI では未知キーとして無視される。
+/// プロパティ宣言順＝JSON 出力順のため、カテゴリ順（出力モード→名前空間→生成対象→…→出力先）に並べている。
 /// </remarks>
 public class CSharpGenerationSettings
 {
+    // ===== 出力モード =====
+
     /// <summary>出力をカテゴリごとに別ファイル・別名前空間へ分割するか（false=1ファイルにまとめる）</summary>
     public bool SplitFilesByCategory { get; set; }
+
+    // ===== 名前空間 =====
 
     /// <summary>
     /// ベース（ルート）名前空間。分割時は各カテゴリ名前空間のフォールバック元になる
@@ -42,14 +47,23 @@ public class CSharpGenerationSettings
     /// <summary>分割時の EfCore 名前空間。空なら {base}.EfCore にフォールバック</summary>
     public string EfCoreNamespace { get; set; } = string.Empty;
 
-    /// <summary>Entity クラスを生成するか</summary>
-    public bool GenerateEntityClasses { get; set; } = true;
+    // ===== 生成対象 =====
 
-    /// <summary>EditModel クラスを生成するか</summary>
+    /// <summary>EditModel クラスを生成するか（Entity は常時生成のためキーを持たない）</summary>
     public bool GenerateEditModels { get; set; } = true;
 
     /// <summary>Mapper クラスを生成するか</summary>
     public bool GenerateMappers { get; set; } = true;
+
+    // ===== 値オブジェクト =====
+
+    /// <summary>全カラムを値オブジェクト化するか</summary>
+    public bool GenerateValueObjects { get; set; }
+
+    /// <summary>string 主キーを GuidKey 値オブジェクト化するか</summary>
+    public bool UseGuidKeyForStringPrimaryKey { get; set; }
+
+    // ===== DB アクセス =====
 
     /// <summary>QuickER 版 Repository を生成するか（DB アクセスの排他選択。既定は「なし」）</summary>
     public bool GenerateRepositories { get; set; }
@@ -59,20 +73,25 @@ public class CSharpGenerationSettings
     /// 小文字方言名（"sqlserver" / "sqlite"）で永続化する。空リストは未指定を表す
     /// </summary>
     /// <remarks>
-    /// CLI の <c>CodeGenerationOptions.RepositoryDialects</c> と同名キーとしても解釈される。CLI では
-    /// <c>--repository-dialects</c> 未指定時にこのリスト（非空）が単一 <c>RepositoryDialect</c> より優先され、
-    /// GUI で選んだ対象 DB がそのまま有効になる
+    /// CLI の <c>CodeGenerationOptions.RepositoryDialects</c> と同名キーとしても解釈され、CLI では
+    /// <c>--repository-dialects</c> 未指定時にこのリスト（非空）がそのまま有効になる
     /// </remarks>
     public List<string> RepositoryDialects { get; set; } = new();
+
+    /// <summary>
+    /// 無制限バイナリ列（varbinary(max) / BLOB 等）をQuickER 版 Repository の SELECT / UPDATE から除外するか（既定 false）
+    /// </summary>
+    public bool ExcludeUnboundedBinaryColumns { get; set; }
 
     /// <summary>EF Core 用コード（DbContext＋EF Core 版 Repository）を生成するか（DB アクセスの排他選択）</summary>
     public bool GenerateEfCore { get; set; }
 
     /// <summary>
-    /// ランタイム（固定コード）を生成物に含めず、NuGet パッケージ QuickER.Runtime.* への参照で賄うか
-    /// （既定 false。EF Core 生成とは併用不可のため EF Core 選択時は強制的に false になる）
+    /// DB 非依存のインメモリ Repository 群（テスト用）を生成するか（既定 false。パッケージ参照モードとは併用不可）
     /// </summary>
-    public bool UseRuntimePackages { get; set; }
+    public bool GenerateInMemoryRepositories { get; set; }
+
+    // ===== リモート対応 =====
 
     /// <summary>
     /// リモート操作用の Repository インターフェイス（<c>I{Entity}RemoteRepository</c>）を追加生成するか（既定 false）
@@ -85,35 +104,43 @@ public class CSharpGenerationSettings
     /// </summary>
     public bool GenerateRemoteServices { get; set; }
 
+    // ===== ランタイム・ドキュメント =====
+
+    /// <summary>
+    /// ランタイム（固定コード）を生成物に含めず、NuGet パッケージ QuickER.Runtime.* への参照で賄うか
+    /// （既定 false。EF Core とは併用可能だがインメモリ生成とは併用不可）
+    /// </summary>
+    public bool UseRuntimePackages { get; set; }
+
     /// <summary>API リファレンス Markdown（.g.md）を追加出力するか（既定 false）</summary>
     public bool GenerateApiDocs { get; set; }
 
+    // ===== 属性（UI 非表示。読込値を保持して生成へ反映する） =====
+
+    /// <summary>データアノテーション属性（[Table] / [Key] / [Column] / [Required] / [MaxLength] 等）を付与するか（既定 true）</summary>
+    public bool IncludeDataAnnotations { get; set; } = true;
+
+    /// <summary>親参照ナビゲーションへ [JsonIgnore] を付与するか（JSON シリアライズ時の循環参照対策。既定 true）</summary>
+    public bool IncludeJsonIgnoreOnParentNavigation { get; set; } = true;
+
+    // ===== 出力先 =====
+
     /// <summary>
-    /// 無制限バイナリ列（varbinary(max) / BLOB 等）をQuickER 版 Repository の SELECT / UPDATE から除外するか（既定 false）
-    /// </summary>
-    public bool ExcludeUnboundedBinaryColumns { get; set; }
-
-    /// <summary>全カラムを値オブジェクト化するか</summary>
-    public bool GenerateValueObjects { get; set; }
-
-    /// <summary>string 主キーを GuidKey 値オブジェクト化するか</summary>
-    public bool UseGuidKeyForStringPrimaryKey { get; set; }
-
-    /// <summary>
-    /// 非分割（モード①）時の出力ファイル名（パスを含まないファイル名のみ）。
+    /// 出力ファイル名（パスを含まないファイル名のみ）。
     /// CLI の <c>CodeGenerationOptions.OutputFileName</c> と同名＝<c>--config</c> でそのまま解釈される
     /// </summary>
     /// <remarks>
-    /// GUI では <see cref="OutputFilePath"/>（フルパス）が正で、保存時に <c>Path.GetFileName</c> でここへ導出する。
+    /// GUI では <see cref="OutputPath"/> が正で、保存時に非分割なら <c>Path.GetFileName</c> でここへ導出する。
     /// CLI は出力ファイル名のみを扱うため、この派生キーで GUI↔CLI のファイル名を橋渡しする
     /// </remarks>
     public string OutputFileName { get; set; } = string.Empty;
 
-    /// <summary>非分割（モード①）時の出力ファイルパス（GUI 専用。CLI では無視される）</summary>
-    public string OutputFilePath { get; set; } = DefaultOutputFilePath;
-
-    /// <summary>分割（モード②）時の出力フォルダパス（GUI 専用。CLI では無視される）</summary>
-    public string OutputFolderPath { get; set; } = string.Empty;
+    /// <summary>
+    /// 出力先パス（GUI 専用。CLI では無視される）。非分割時はファイルパス、分割時は出力フォルダパスを表す
+    /// （空は未指定。非分割時の既定ファイル名へのプリフィルは VM の ApplySettings が行う＝
+    /// 分割時に非分割用の既定ファイル名が混入して検証をすり抜けるのを防ぐ）
+    /// </summary>
+    public string OutputPath { get; set; } = string.Empty;
 
     /// <summary>ベース名前空間の工場出荷既定（分割時は {base}.Entities 等のフォールバック元になるため接尾辞なし）</summary>
     public const string DefaultBaseNamespace = "Generated";

@@ -208,10 +208,8 @@ public static class GeneratedFilePlanner
         ArgumentNullException.ThrowIfNull(options);
         var active = new List<GenerationBucket>();
 
-        if (options.GenerateEntityClasses)
-        {
-            active.Add(GenerationBucket.Entity);
-        }
+        // Entity は全カテゴリの前提のため常に生成する
+        active.Add(GenerationBucket.Entity);
 
         if (options.GenerateEditModels)
         {
@@ -246,18 +244,8 @@ public static class GeneratedFilePlanner
             active.Add(GenerationBucket.EfCore);
         }
 
-        var anyClass =
-            options.GenerateEntityClasses
-            || options.GenerateEditModels
-            || options.GenerateMappers
-            || options.GenerateRepositories
-            || options.GenerateEfCore
-            || options.GenerateInMemoryRepositories;
-
-        if (anyClass)
-        {
-            active.Add(GenerationBucket.Runtime);
-        }
+        // Entity を常に生成する＝何らかのクラスが必ず出力されるため、共有基盤（Runtime）は常に必要
+        active.Add(GenerationBucket.Runtime);
 
         return active;
     }
@@ -267,7 +255,7 @@ public static class GeneratedFilePlanner
     /// </summary>
     /// <remarks>
     /// 実効方言（<see cref="CodeGenerationOptions.EffectiveRepositoryDialects"/>）は未対応方言で例外を投げるが、
-    /// Plan はプレビューなどでも呼ばれ、Repository 非生成時には図の方言名（例 mysql）が <see cref="CodeGenerationOptions.RepositoryDialect"/> に
+    /// Plan はプレビューなどでも呼ばれ、Repository 非生成時には図の方言名（例 mysql）が <see cref="CodeGenerationOptions.RepositoryDialects"/> に
     /// 残ることがある。ここで例外にすると生成しない構成のプレビューまで壊れるため、非例外で単一方言（先頭）を採り、
     /// 未対応方言は <c>sqlserver</c> 相当へフォールバックさせる（実効方言の検証・診断は生成本体が担う）。
     /// </remarks>

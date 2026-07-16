@@ -34,7 +34,6 @@ public static class GeneratedFixtureDefinition
         {
             NamespaceName = NamespaceName,
             OutputFileName = "GeneratedFixture.g.cs",
-            GenerateEntityClasses = true,
             GenerateEditModels = true,
             GenerateMappers = true,
             GenerateRepositories = true,

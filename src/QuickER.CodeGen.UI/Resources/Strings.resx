@@ -79,9 +79,6 @@
   <data name="CodeGen_GenerationTarget" xml:space="preserve">
     <value>Targets</value>
   </data>
-  <data name="CodeGen_EntityTooltip" xml:space="preserve">
-    <value>Entity is a prerequisite for all categories, so it is always generated</value>
-  </data>
   <data name="CodeGen_ValueObject" xml:space="preserve">
     <value>Value Objects</value>
   </data>
@@ -102,6 +99,12 @@
   </data>
   <data name="CodeGen_TargetDb" xml:space="preserve">
     <value>Target DB</value>
+  </data>
+  <data name="CodeGen_GenerateInMemory" xml:space="preserve">
+    <value>Generate in-memory repositories (for testing)</value>
+  </data>
+  <data name="CodeGen_GenerateInMemoryToolTip" xml:space="preserve">
+    <value>Generates DB-independent in-memory repositories for prototyping and unit tests. Cannot be combined with the runtime NuGet package reference mode</value>
   </data>
   <data name="CodeGen_Runtime" xml:space="preserve">
     <value>Runtime</value>
@@ -195,6 +198,9 @@
   </data>
   <data name="CodeGen_Status_TargetDbRequired" xml:space="preserve">
     <value>Please select at least one target DB.</value>
+  </data>
+  <data name="CodeGen_Status_InMemoryRuntimePackagesConflict" xml:space="preserve">
+    <value>In-memory repositories cannot be combined with the runtime NuGet package reference mode.</value>
   </data>
   <data name="CodeGen_Status_NamespaceInvalidFormat" xml:space="preserve">
     <value>The {0} format is invalid.</value>

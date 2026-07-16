@@ -29,7 +29,7 @@ public class CSharpGenerationDialogViewModelTests
     {
         var vm = CreateViewModel(out _);
         vm.BaseNamespace = "Sample.Domain";
-        vm.OutputFilePath = @"C:\temp\Entities.g.cs";
+        vm.OutputPath = @"C:\temp\Entities.g.cs";
         bool? closed = null;
         vm.CloseAction = result => closed = result;
 
@@ -51,7 +51,7 @@ public class CSharpGenerationDialogViewModelTests
     {
         var vm = CreateViewModel(out _);
         vm.BaseNamespace = "Sample.Domain";
-        vm.OutputFilePath = @"C:\temp\Entities.g.cs";
+        vm.OutputPath = @"C:\temp\Entities.g.cs";
 
         vm.DbAccessNone.Should().BeTrue("既定は「なし」");
 
@@ -69,28 +69,6 @@ public class CSharpGenerationDialogViewModelTests
         vm.Result.Should().NotBeNull();
         vm.Result!.Options.GenerateEfCore.Should().BeTrue();
         vm.Result.Options.GenerateRepositories.Should().BeFalse();
-    }
-
-    /// <summary>Entity は保存値に依らず常に生成対象（強制 ON）であることを検証する</summary>
-    [Fact(DisplayName = "Entity は保存値に依らず常に生成対象になる")]
-    public void EntityGeneration_IsAlwaysForcedOn()
-    {
-        var folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
-        var store = new CSharpGenerationSettingsStore(folder);
-        var settings = CSharpGenerationSettings.CreateDefault();
-        settings.GenerateEntityClasses = false;
-        store.Save(settings);
-
-        try
-        {
-            var vm = new CSharpGenerationDialogViewModel(store);
-
-            vm.GenerateEntityClasses.Should().BeTrue();
-        }
-        finally
-        {
-            Directory.Delete(folder, recursive: true);
-        }
     }
 
     /// <summary>未対応方言のプロバイダでもQuickER 版 Repository ラジオは常時選択可であり、対象 DB チェックは両方 OFF から始まることを検証する</summary>
@@ -146,7 +124,7 @@ public class CSharpGenerationDialogViewModelTests
     {
         var vm = CreateViewModel(out _, currentProvider: new QuickER.Sqlite.SqliteProvider());
         vm.BaseNamespace = "Sample.Domain";
-        vm.OutputFilePath = @"C:\temp\Entities.g.cs";
+        vm.OutputPath = @"C:\temp\Entities.g.cs";
         vm.DbAccessRepository = true;
         vm.TargetSqlServer = true;
         vm.TargetSqlite = true;
@@ -166,7 +144,7 @@ public class CSharpGenerationDialogViewModelTests
             currentProvider: new QuickER.PostgreSql.PostgreSqlProvider()
         );
         vm.BaseNamespace = "Sample.Domain";
-        vm.OutputFilePath = @"C:\temp\Entities.g.cs";
+        vm.OutputPath = @"C:\temp\Entities.g.cs";
         vm.DbAccessRepository = true;
 
         vm.OkCommand.Execute(null);
@@ -205,7 +183,7 @@ public class CSharpGenerationDialogViewModelTests
         try
         {
             vm.BaseNamespace = "Acme.App";
-            vm.OutputFilePath = @"C:\temp\Entities.g.cs";
+            vm.OutputPath = @"C:\temp\Entities.g.cs";
             vm.DbAccessRepository = true;
             vm.TargetSqlServer = true;
             vm.TargetSqlite = true;
@@ -262,7 +240,7 @@ public class CSharpGenerationDialogViewModelTests
     {
         var vm = CreateViewModel(out _);
         vm.BaseNamespace = "Sample.Domain";
-        vm.OutputFilePath = @"C:\temp\Entities.g.cs";
+        vm.OutputPath = @"C:\temp\Entities.g.cs";
 
         vm.CanUseRuntimePackages.Should().BeTrue("既定は DB アクセス「なし」のため操作可能");
 
@@ -291,7 +269,7 @@ public class CSharpGenerationDialogViewModelTests
     {
         var vm = CreateViewModel(out _, currentProvider: new QuickER.SqlServer.SqlServerProvider());
         vm.BaseNamespace = "Sample.Domain";
-        vm.OutputFilePath = @"C:\temp\Entities.g.cs";
+        vm.OutputPath = @"C:\temp\Entities.g.cs";
         vm.DbAccessRepository = true;
 
         vm.CanUseRuntimePackages.Should().BeTrue();
@@ -327,7 +305,7 @@ public class CSharpGenerationDialogViewModelTests
     {
         var vm = CreateViewModel(out _);
         vm.BaseNamespace = "Sample.Domain";
-        vm.OutputFilePath = @"C:\temp\Entities.g.cs";
+        vm.OutputPath = @"C:\temp\Entities.g.cs";
 
         vm.GenerateApiDocs.Should().BeFalse("既定は OFF");
 
@@ -344,7 +322,7 @@ public class CSharpGenerationDialogViewModelTests
     {
         var vm = CreateViewModel(out _);
         vm.BaseNamespace = "Sample.Domain";
-        vm.OutputFilePath = @"C:\temp\Entities.g.cs";
+        vm.OutputPath = @"C:\temp\Entities.g.cs";
 
         vm.OkCommand.Execute(null);
 
@@ -361,7 +339,7 @@ public class CSharpGenerationDialogViewModelTests
         try
         {
             vm.BaseNamespace = "Acme.App";
-            vm.OutputFilePath = @"C:\temp\Entities.g.cs";
+            vm.OutputPath = @"C:\temp\Entities.g.cs";
             vm.GenerateApiDocs = true;
             vm.OkCommand.Execute(null);
 
@@ -391,7 +369,7 @@ public class CSharpGenerationDialogViewModelTests
     {
         var vm = CreateViewModel(out _, currentProvider: new QuickER.SqlServer.SqlServerProvider());
         vm.BaseNamespace = "Sample.Domain";
-        vm.OutputFilePath = @"C:\temp\Entities.g.cs";
+        vm.OutputPath = @"C:\temp\Entities.g.cs";
         vm.DbAccessRepository = true;
 
         // 既定（OFF）は false
@@ -437,7 +415,7 @@ public class CSharpGenerationDialogViewModelTests
         try
         {
             vm.BaseNamespace = "Acme.App";
-            vm.OutputFilePath = @"C:\temp\Entities.g.cs";
+            vm.OutputPath = @"C:\temp\Entities.g.cs";
             vm.DbAccessRepository = true;
             vm.ExcludeUnboundedBinaryColumns = true;
             vm.OkCommand.Execute(null);
@@ -468,7 +446,7 @@ public class CSharpGenerationDialogViewModelTests
     {
         var vm = CreateViewModel(out _, currentProvider: new QuickER.SqlServer.SqlServerProvider());
         vm.BaseNamespace = "Sample.Domain";
-        vm.OutputFilePath = @"C:\temp\Entities.g.cs";
+        vm.OutputPath = @"C:\temp\Entities.g.cs";
         vm.DbAccessRepository = true;
 
         // 既定（OFF）は false
@@ -513,7 +491,7 @@ public class CSharpGenerationDialogViewModelTests
         try
         {
             vm.BaseNamespace = "Acme.App";
-            vm.OutputFilePath = @"C:\temp\Entities.g.cs";
+            vm.OutputPath = @"C:\temp\Entities.g.cs";
             vm.DbAccessRepository = true;
             vm.GenerateRemoteContracts = true;
             vm.OkCommand.Execute(null);
@@ -544,7 +522,7 @@ public class CSharpGenerationDialogViewModelTests
     {
         var vm = CreateViewModel(out _, currentProvider: new QuickER.SqlServer.SqlServerProvider());
         vm.BaseNamespace = "Sample.Domain";
-        vm.OutputFilePath = @"C:\temp\Entities.g.cs";
+        vm.OutputPath = @"C:\temp\Entities.g.cs";
         vm.DbAccessRepository = true;
 
         // 既定（OFF）は両方 false
@@ -593,7 +571,7 @@ public class CSharpGenerationDialogViewModelTests
     {
         var vm = CreateViewModel(out _, currentProvider: new QuickER.SqlServer.SqlServerProvider());
         vm.BaseNamespace = "Sample.Domain";
-        vm.OutputFilePath = @"C:\temp\Shop.g.cs";
+        vm.OutputPath = @"C:\temp\Shop.g.cs";
         vm.DbAccessRepository = true;
 
         vm.PreviewFiles.Should()
@@ -628,7 +606,7 @@ public class CSharpGenerationDialogViewModelTests
         try
         {
             vm.BaseNamespace = "Acme.App";
-            vm.OutputFilePath = @"C:\temp\Entities.g.cs";
+            vm.OutputPath = @"C:\temp\Entities.g.cs";
             vm.DbAccessRepository = true;
             vm.GenerateRemoteServices = true;
             vm.OkCommand.Execute(null);
@@ -680,9 +658,9 @@ public class CSharpGenerationDialogViewModelTests
             files
         );
 
-        vm.BrowseOutputFileCommand.Execute(null);
+        vm.BrowseOutputCommand.Execute(null);
 
-        vm.OutputFilePath.Should().Be(@"C:\work\Generated\Entities.g.cs");
+        vm.OutputPath.Should().Be(@"C:\work\Generated\Entities.g.cs");
     }
 
     /// <summary>メッセージダイアログを表示せず、呼び出し（情報／エラー）を記録するスタブ</summary>
@@ -805,7 +783,7 @@ public class CSharpGenerationDialogViewModelTests
         var vm = CreateViewModel(out _);
         vm.BaseNamespace = "Acme.App";
         vm.SplitFilesByCategory = true;
-        vm.OutputFolderPath = string.Empty;
+        vm.OutputPath = string.Empty;
 
         vm.OkCommand.Execute(null);
 
@@ -824,7 +802,7 @@ public class CSharpGenerationDialogViewModelTests
             vm.BaseNamespace = "Acme.App";
             vm.SplitFilesByCategory = true;
             vm.GenerateValueObjects = true;
-            vm.OutputFolderPath = @"C:\out";
+            vm.OutputPath = @"C:\out";
             vm.OkCommand.Execute(null);
 
             var restored = new CSharpGenerationDialogViewModel(
@@ -834,7 +812,7 @@ public class CSharpGenerationDialogViewModelTests
             restored.BaseNamespace.Should().Be("Acme.App");
             restored.SplitFilesByCategory.Should().BeTrue();
             restored.GenerateValueObjects.Should().BeTrue();
-            restored.OutputFolderPath.Should().Be(@"C:\out");
+            restored.OutputPath.Should().Be(@"C:\out");
         }
         finally
         {
@@ -859,9 +837,8 @@ public class CSharpGenerationDialogViewModelTests
 
         vm.SplitFilesByCategory.Should().BeFalse();
         vm.BaseNamespace.Should().Be(CSharpGenerationSettings.DefaultBaseNamespace);
-        // 工場出荷既定は DB アクセス「なし」・Entity 常時 ON
+        // 工場出荷既定は DB アクセス「なし」
         vm.DbAccessNone.Should().BeTrue();
-        vm.GenerateEntityClasses.Should().BeTrue();
         vm.GenerateValueObjects.Should().BeFalse();
     }
 
@@ -877,7 +854,7 @@ public class CSharpGenerationDialogViewModelTests
             vm.SplitFilesByCategory = true;
             vm.DbAccessEfCore = true;
             vm.EfCoreNamespace = "Acme.App.Persistence";
-            vm.OutputFolderPath = @"C:\out";
+            vm.OutputPath = @"C:\out";
             vm.OkCommand.Execute(null);
 
             var restored = new CSharpGenerationDialogViewModel(
@@ -999,7 +976,6 @@ public class CSharpGenerationDialogViewModelTests
                 SplitFilesByCategory = true,
                 NamespaceName = "Contoso.Loaded",
                 EfCoreNamespace = "Contoso.Loaded.Persistence",
-                GenerateEntityClasses = false,
                 GenerateRepositories = true,
                 GenerateEfCore = true,
                 GenerateValueObjects = true,
@@ -1021,8 +997,6 @@ public class CSharpGenerationDialogViewModelTests
             // 排他規則: 両方 true の保存値は QuickER 版 Repository を優先し EF Core は外れる
             vm.GenerateRepositories.Should().BeTrue();
             vm.GenerateEfCore.Should().BeFalse();
-            // Entity は保存値に依らず常に ON
-            vm.GenerateEntityClasses.Should().BeTrue();
 
             // 読み込み成功は無通知（情報・エラーいずれのダイアログも出さない）
             dialogs.InformationMessages.Should().BeEmpty();
@@ -1134,6 +1108,118 @@ public class CSharpGenerationDialogViewModelTests
             loadVm.GenerateRepositories.Should().BeTrue();
             loadVm.TargetSqlServer.Should().BeFalse("保存値どおり SQL Server は OFF");
             loadVm.TargetSqlite.Should().BeTrue("保存値どおり SQLite は ON");
+        }
+        finally
+        {
+            if (Directory.Exists(folder))
+            {
+                Directory.Delete(folder, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>
+    /// インメモリ実装チェックは既定 OFF で、ON にすると ToOptions・結果オプションへ反映され、次回起動時に復元されることを検証する
+    /// </summary>
+    [Fact(DisplayName = "インメモリ実装チェックは既定 OFF・ON で結果へ反映され復元される")]
+    public void GenerateInMemory_IsReflectedInResult_AndPersisted()
+    {
+        var vm = CreateViewModel(out var folder);
+
+        try
+        {
+            vm.BaseNamespace = "Acme.App";
+            vm.OutputPath = @"C:\temp\Entities.g.cs";
+
+            vm.GenerateInMemoryRepositories.Should().BeFalse("既定は OFF");
+            vm.ToOptions().GenerateInMemoryRepositories.Should().BeFalse();
+
+            vm.GenerateInMemoryRepositories = true;
+            vm.OkCommand.Execute(null);
+
+            vm.Result.Should().NotBeNull();
+            vm.Result!.Options.GenerateInMemoryRepositories.Should().BeTrue();
+
+            var restored = new CSharpGenerationDialogViewModel(
+                new CSharpGenerationSettingsStore(folder)
+            );
+
+            restored.GenerateInMemoryRepositories.Should().BeTrue();
+        }
+        finally
+        {
+            if (Directory.Exists(folder))
+            {
+                Directory.Delete(folder, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>
+    /// インメモリ実装とパッケージ参照モードの併用は Ok で拒否され、専用のエラーメッセージが表示されることを検証する
+    /// </summary>
+    [Fact(DisplayName = "インメモリ実装＋パッケージ参照モードの併用は確定できない")]
+    public void Ok_InMemoryWithRuntimePackages_ShowsConflictError()
+    {
+        var vm = CreateViewModel(out _);
+        vm.BaseNamespace = "Acme.App";
+        vm.OutputPath = @"C:\temp\Entities.g.cs";
+        vm.GenerateInMemoryRepositories = true;
+        vm.UseRuntimePackages = true;
+
+        vm.OkCommand.Execute(null);
+
+        vm.Result.Should().BeNull();
+        vm.StatusMessage.Should().Be(CodeGenStrings.CodeGen_Status_InMemoryRuntimePackagesConflict);
+    }
+
+    /// <summary>
+    /// UI 非表示の属性系（IncludeDataAnnotations / IncludeJsonIgnoreOnParentNavigation）が、
+    /// 読み込んだ設定の値を保持したまま保存で書き戻され、生成オプション（ToOptions）へも反映されることを検証する
+    /// </summary>
+    [Fact(DisplayName = "UI 非表示の属性系は読込→保存で保持され ToOptions へ反映される")]
+    public void HiddenAttributes_ArePreservedAcrossLoadSave_AndReflectedInOptions()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
+        var presetPath = Path.Combine(folder, "preset.json");
+        var savedPath = Path.Combine(folder, "saved.json");
+        var store = new CSharpGenerationSettingsStore(folder);
+
+        // 既定 true の属性系を false に倒した設定ファイルを用意する（UI には出ないが値は保持されるべき）
+        store.SaveTo(
+            presetPath,
+            new CSharpGenerationSettings
+            {
+                NamespaceName = "Acme.Loaded",
+                IncludeDataAnnotations = false,
+                IncludeJsonIgnoreOnParentNavigation = false,
+            }
+        );
+
+        // 読込は presetPath・保存は savedPath を返すスタブ
+        var files = new StubFileDialogService
+        {
+            OpenResult = new FileDialogResult(presetPath, 1),
+            SaveResult = new FileDialogResult(savedPath, 1),
+        };
+        var vm = new CSharpGenerationDialogViewModel(store, files);
+
+        try
+        {
+            vm.LoadSettingsFromCommand.Execute(null);
+
+            // 読み込んだ属性値が生成オプションへ反映される
+            var options = vm.ToOptions();
+            options.IncludeDataAnnotations.Should().BeFalse();
+            options.IncludeJsonIgnoreOnParentNavigation.Should().BeFalse();
+
+            // 現在の表示状態を「名前を付けて保存」で書き出しても、属性値が失われず書き戻される
+            vm.SaveSettingsAsCommand.Execute(null);
+
+            var reloaded = store.TryLoadFrom(savedPath);
+            reloaded.Should().NotBeNull();
+            reloaded!.IncludeDataAnnotations.Should().BeFalse();
+            reloaded.IncludeJsonIgnoreOnParentNavigation.Should().BeFalse();
         }
         finally
         {

@@ -77,7 +77,6 @@ public class QueryGenerationTests
         new()
         {
             NamespaceName = "Test.Ns",
-            GenerateEntityClasses = true,
             GenerateRepositories = true,
             GenerateEfCore = true,
             IncludeDataAnnotations = true,
@@ -362,7 +361,6 @@ public class QueryGenerationTests
         var options = new CodeGenerationOptions
         {
             NamespaceName = "Test.Ns",
-            GenerateEntityClasses = true,
             GenerateRepositories = true,
             RepositoryDialects = ["sqlserver", "sqlite"],
             IncludeDataAnnotations = true,
@@ -423,7 +421,6 @@ public class QueryGenerationTests
         var options = new CodeGenerationOptions
         {
             NamespaceName = "Test.Ns",
-            GenerateEntityClasses = true,
             GenerateRepositories = true,
             GenerateEfCore = true,
             IncludeDataAnnotations = true,
@@ -463,7 +460,6 @@ public class QueryGenerationTests
         var voOptions = new CodeGenerationOptions
         {
             NamespaceName = "Test.Ns",
-            GenerateEntityClasses = true,
             GenerateRepositories = true,
             GenerateEfCore = true,
             IncludeDataAnnotations = true,

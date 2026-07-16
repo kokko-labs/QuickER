@@ -96,9 +96,15 @@ namespace QuickER.CodeGen.UI.Resources {
             }
         }
 
-        public static string CodeGen_EntityTooltip {
+        public static string CodeGen_GenerateInMemory {
             get {
-                return ResourceManager.GetString("CodeGen_EntityTooltip", resourceCulture);
+                return ResourceManager.GetString("CodeGen_GenerateInMemory", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_GenerateInMemoryToolTip {
+            get {
+                return ResourceManager.GetString("CodeGen_GenerateInMemoryToolTip", resourceCulture);
             }
         }
 
@@ -327,6 +333,12 @@ namespace QuickER.CodeGen.UI.Resources {
         public static string CodeGen_Status_TargetDbRequired {
             get {
                 return ResourceManager.GetString("CodeGen_Status_TargetDbRequired", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_Status_InMemoryRuntimePackagesConflict {
+            get {
+                return ResourceManager.GetString("CodeGen_Status_InMemoryRuntimePackagesConflict", resourceCulture);
             }
         }
 

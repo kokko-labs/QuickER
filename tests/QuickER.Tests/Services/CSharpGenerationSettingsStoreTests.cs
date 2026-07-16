@@ -30,8 +30,12 @@ public class CSharpGenerationSettingsStoreTests
                     NamespaceName = "Acme.App",
                     EntityNamespace = "Acme.App.Domain",
                     GenerateRepositories = false,
+                    GenerateInMemoryRepositories = true,
                     GenerateValueObjects = true,
-                    OutputFolderPath = @"C:\out",
+                    // UI 非表示の属性系も往復で保持されること（既定 true を false へ倒して検証）
+                    IncludeDataAnnotations = false,
+                    IncludeJsonIgnoreOnParentNavigation = false,
+                    OutputPath = @"C:\out",
                 }
             );
 
@@ -41,8 +45,11 @@ public class CSharpGenerationSettingsStoreTests
             loaded.NamespaceName.Should().Be("Acme.App");
             loaded.EntityNamespace.Should().Be("Acme.App.Domain");
             loaded.GenerateRepositories.Should().BeFalse();
+            loaded.GenerateInMemoryRepositories.Should().BeTrue();
             loaded.GenerateValueObjects.Should().BeTrue();
-            loaded.OutputFolderPath.Should().Be(@"C:\out");
+            loaded.IncludeDataAnnotations.Should().BeFalse();
+            loaded.IncludeJsonIgnoreOnParentNavigation.Should().BeFalse();
+            loaded.OutputPath.Should().Be(@"C:\out");
         }
         finally
         {
@@ -63,7 +70,13 @@ public class CSharpGenerationSettingsStoreTests
 
         loaded.SplitFilesByCategory.Should().BeFalse();
         loaded.NamespaceName.Should().Be(CSharpGenerationSettings.DefaultBaseNamespace);
-        loaded.GenerateEntityClasses.Should().BeTrue();
+        // 工場出荷既定: DB アクセスなし・インメモリなし・属性系は true
+        loaded.GenerateRepositories.Should().BeFalse();
+        loaded.GenerateInMemoryRepositories.Should().BeFalse();
+        loaded.IncludeDataAnnotations.Should().BeTrue();
+        loaded.IncludeJsonIgnoreOnParentNavigation.Should().BeTrue();
+        // 出力先パスの既定は空（非分割時の既定ファイル名へのプリフィルは VM の ApplySettings の責務）
+        loaded.OutputPath.Should().BeEmpty();
     }
 
     /// <summary>破損ファイルでも例外を投げず既定値へフォールバックすることを検証する</summary>
@@ -195,6 +208,8 @@ public class CSharpGenerationSettingsStoreTests
                     GenerateEfCore = true,
                     GenerateRepositories = true,
                     RepositoryDialects = new() { "sqlserver", "sqlite" },
+                    GenerateInMemoryRepositories = true,
+                    IncludeDataAnnotations = false,
                     OutputFileName = "Acme.g.cs",
                     GenerateValueObjects = true,
                 }
@@ -212,6 +227,8 @@ public class CSharpGenerationSettingsStoreTests
             options.GenerateEfCore.Should().BeTrue();
             options.GenerateRepositories.Should().BeTrue();
             options.RepositoryDialects.Should().Equal("sqlserver", "sqlite");
+            options.GenerateInMemoryRepositories.Should().BeTrue();
+            options.IncludeDataAnnotations.Should().BeFalse();
             options.OutputFileName.Should().Be("Acme.g.cs");
             options.GenerateValueObjects.Should().BeTrue();
             // GUI で選んだ対象 DB が EffectiveRepositoryDialects（リスト優先）でそのまま有効になる

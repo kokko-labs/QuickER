@@ -110,33 +110,25 @@ public sealed class MultiTargetRepositoryGenerationTests
 
     // ---- オプション後方互換・実効方言解決 ----
 
-    [Fact(DisplayName = "RepositoryDialect（単一）指定は実効方言 1 つへ解決される")]
-    public void EffectiveDialects_SingleLegacy_ResolvesToOne()
+    [Fact(DisplayName = "RepositoryDialects（単一要素）指定は実効方言 1 つへ解決される")]
+    public void EffectiveDialects_SingleElement_ResolvesToOne()
     {
-        var options = new CodeGenerationOptions { RepositoryDialect = "sqlite" };
+        var options = new CodeGenerationOptions { RepositoryDialects = ["sqlite"] };
         options.EffectiveRepositoryDialects.Should().Equal("sqlite");
     }
 
-    [Fact(DisplayName = "RepositoryDialects（リスト）は RepositoryDialect（単一）より優先される")]
-    public void EffectiveDialects_ListTakesPrecedence()
+    [Fact(DisplayName = "空リストは既定 sqlserver へフォールバックする")]
+    public void EffectiveDialects_EmptyListFallsBackToSqlServer()
     {
-        var options = new CodeGenerationOptions
-        {
-            RepositoryDialect = "sqlserver",
-            RepositoryDialects = ["sqlite"],
-        };
-        options.EffectiveRepositoryDialects.Should().Equal("sqlite");
+        var options = new CodeGenerationOptions { RepositoryDialects = [] };
+        options.EffectiveRepositoryDialects.Should().Equal("sqlserver");
     }
 
-    [Fact(DisplayName = "空/未指定のリストは単一 RepositoryDialect へフォールバックする")]
-    public void EffectiveDialects_EmptyListFallsBackToSingle()
+    [Fact(DisplayName = "未指定（null）は既定 sqlserver へフォールバックする")]
+    public void EffectiveDialects_NullFallsBackToSqlServer()
     {
-        var options = new CodeGenerationOptions
-        {
-            RepositoryDialect = "sqlite",
-            RepositoryDialects = [],
-        };
-        options.EffectiveRepositoryDialects.Should().Equal("sqlite");
+        var options = new CodeGenerationOptions();
+        options.EffectiveRepositoryDialects.Should().Equal("sqlserver");
     }
 
     [Fact(DisplayName = "実効方言は重複を大小無視で除去し順序を保つ")]
@@ -385,6 +377,7 @@ public sealed class MultiTargetRepositoryGenerationTests
         var options = new CodeGenerationOptions
         {
             NamespaceName = "Sample.Domain",
+            GenerateRepositories = true,
             RepositoryDialects = ["sqlserver", "sqlite"],
             SplitFilesByCategory = split,
         };
@@ -517,6 +510,7 @@ public sealed class MultiTargetRepositoryGenerationTests
         var options = new CodeGenerationOptions
         {
             NamespaceName = "Sample.Domain",
+            GenerateRepositories = true,
             RepositoryDialects = ["sqlserver", "sqlite"],
             GenerateEfCore = true,
         };

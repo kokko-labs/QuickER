@@ -1,4 +1,5 @@
 {
   "NamespaceName": "EcOrderSample.Generated",
+  "GenerateRepositories": true,
   "OutputFileName": "EcOrder.g.cs"
 }

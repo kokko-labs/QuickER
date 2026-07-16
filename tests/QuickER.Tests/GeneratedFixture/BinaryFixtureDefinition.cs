@@ -53,7 +53,6 @@ public static class BinaryFixtureDefinition
         {
             NamespaceName = NamespaceName,
             OutputFileName = OutputFileName,
-            GenerateEntityClasses = true,
             GenerateEditModels = true,
             GenerateMappers = true,
             GenerateRepositories = true,
@@ -61,7 +60,7 @@ public static class BinaryFixtureDefinition
             GenerateEfCore = true,
             GenerateInMemoryRepositories = true,
             GenerateRemoteServices = true,
-            RepositoryDialect = "sqlite",
+            RepositoryDialects = ["sqlite"],
             ExcludeUnboundedBinaryColumns = true,
             SplitFilesByCategory = false,
         };

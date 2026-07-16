@@ -125,7 +125,8 @@ public class RuntimePackageModeCompilationTests
             new CodeGenerationOptions
             {
                 NamespaceName = "Sample.Domain",
-                RepositoryDialect = "sqlite",
+                GenerateRepositories = true,
+                RepositoryDialects = ["sqlite"],
             }
         );
         var diagram = Diagram();
@@ -158,6 +159,7 @@ public class RuntimePackageModeCompilationTests
             new CodeGenerationOptions
             {
                 NamespaceName = "Sample.Domain",
+                GenerateRepositories = true,
                 RepositoryDialects = ["sqlserver", "sqlite"],
             }
         );
@@ -215,7 +217,11 @@ public class RuntimePackageModeCompilationTests
     public void BuildPackageReferenceLines_ProducesVersionedLines()
     {
         var options = WithPackageMode(
-            new CodeGenerationOptions { NamespaceName = "Sample.Domain" }
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                GenerateRepositories = true,
+            }
         );
 
         var lines = RuntimePackageReferenceGuidance.BuildPackageReferenceLines(options, "9.9.9");
@@ -263,7 +269,7 @@ public class RuntimePackageModeCompilationTests
                 {
                     NamespaceName = "Sample.Domain",
                     SplitFilesByCategory = split,
-                    RepositoryDialect = "sqlite",
+                    RepositoryDialects = ["sqlite"],
                 }
             );
             data.Add(
@@ -320,7 +326,7 @@ public class RuntimePackageModeCompilationTests
             new CodeGenerationOptions
             {
                 NamespaceName = "Sample.Domain",
-                RepositoryDialect = "sqlite",
+                RepositoryDialects = ["sqlite"],
                 GenerateEfCore = true,
                 GenerateRemoteContracts = true,
             }
@@ -346,11 +352,9 @@ public class RuntimePackageModeCompilationTests
         {
             NamespaceName = options.NamespaceName,
             OutputFileName = options.OutputFileName,
-            GenerateEntityClasses = options.GenerateEntityClasses,
             GenerateEditModels = options.GenerateEditModels,
             GenerateMappers = options.GenerateMappers,
             GenerateRepositories = options.GenerateRepositories,
-            RepositoryDialect = options.RepositoryDialect,
             RepositoryDialects = options.RepositoryDialects,
             GenerateEfCore = options.GenerateEfCore,
             IncludeDataAnnotations = options.IncludeDataAnnotations,

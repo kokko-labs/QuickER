@@ -42,12 +42,11 @@ public static class SqlServerBinaryFixtureDefinition
         {
             NamespaceName = NamespaceName,
             OutputFileName = OutputFileName,
-            GenerateEntityClasses = true,
             GenerateEditModels = true,
             GenerateMappers = true,
             GenerateRepositories = true,
             GenerateValueObjects = false,
-            RepositoryDialect = "sqlserver",
+            RepositoryDialects = ["sqlserver"],
             ExcludeUnboundedBinaryColumns = true,
             SplitFilesByCategory = false,
         };

@@ -585,8 +585,9 @@ public sealed class CSharpCodeGenerationService
     /// 生成前の入力検証を行い、問題を診断リストへ追加する
     /// </summary>
     /// <remarks>
-    /// エラー: 生成対象が一つもない、エンティティが存在しない、テーブル名が空、
-    /// 生成対象間の依存違反（Mapper は Entity+EditModel、Repository / EF Core は Entity と DataAnnotations が必要）。
+    /// エラー: エンティティが存在しない、テーブル名が空、生成対象間の依存違反
+    /// （Mapper は EditModel が必要、Repository / EF Core / インメモリは DataAnnotations が必要）。
+    /// Entity は常時生成されるため「生成対象なし」「Repository は Entity 必須」は起こらない。
     /// 警告: 複合主キー（[Key] 属性の生成が最小限になる）
     /// </remarks>
     private static void Validate(
@@ -595,37 +596,14 @@ public sealed class CSharpCodeGenerationService
         ICollection<GenerationDiagnostic> diagnostics
     )
     {
-        if (
-            !options.GenerateEntityClasses
-            && !options.GenerateEditModels
-            && !options.GenerateMappers
-            && !options.GenerateRepositories
-            && !options.GenerateEfCore
-            && !options.GenerateInMemoryRepositories
-        )
-        {
-            diagnostics.Add(Error(Strings.CodeGen_Error_NoGenerationTarget));
-        }
+        // Entity は常時生成されるため、生成対象が皆無になることはなく、Repository / EF Core / インメモリの
+        // 前提となる Entity 生成も常に満たされる（かつての「生成対象なし」「Repository は Entity 必須」検証は不要になった）。
 
-        // Mapper は Entity クラスと EditModel クラスの両方を参照するため、単独生成するとコンパイル不能になる
-        if (
-            options.GenerateMappers
-            && (!options.GenerateEntityClasses || !options.GenerateEditModels)
-        )
+        // Mapper は Entity クラスと EditModel クラスの両方を参照する。Entity は常時生成されるため、
+        // EditModel を出さないと単独生成になりコンパイル不能になる
+        if (options.GenerateMappers && !options.GenerateEditModels)
         {
             diagnostics.Add(Error(Strings.CodeGen_Error_MapperRequiresEntityAndEditModel));
-        }
-
-        // Repository・EF Core・インメモリ Repository はいずれも Entity クラス（および共通契約）を参照するため、Entity 生成が必須
-        if (
-            (
-                options.GenerateRepositories
-                || options.GenerateEfCore
-                || options.GenerateInMemoryRepositories
-            ) && !options.GenerateEntityClasses
-        )
-        {
-            diagnostics.Add(Error(Strings.CodeGen_Error_RepositoryRequiresEntity));
         }
 
         // Repository の SQL 組み立て・EF Core・インメモリのマッピング（EntitySaveMetadata）は [Table] / [Key] / [Column]

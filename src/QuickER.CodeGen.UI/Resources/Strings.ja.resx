@@ -79,9 +79,6 @@
   <data name="CodeGen_GenerationTarget" xml:space="preserve">
     <value>生成対象</value>
   </data>
-  <data name="CodeGen_EntityTooltip" xml:space="preserve">
-    <value>Entity は全カテゴリの前提のため常に生成されます</value>
-  </data>
   <data name="CodeGen_ValueObject" xml:space="preserve">
     <value>値オブジェクト</value>
   </data>
@@ -102,6 +99,12 @@
   </data>
   <data name="CodeGen_TargetDb" xml:space="preserve">
     <value>対象DB</value>
+  </data>
+  <data name="CodeGen_GenerateInMemory" xml:space="preserve">
+    <value>インメモリ実装 (テスト用) を生成する</value>
+  </data>
+  <data name="CodeGen_GenerateInMemoryToolTip" xml:space="preserve">
+    <value>DB 非依存のインメモリ Repository（プロトタイピング・単体テスト向け）を生成します。ランタイムの NuGet パッケージ参照モードとは併用できません</value>
   </data>
   <data name="CodeGen_Runtime" xml:space="preserve">
     <value>ランタイム</value>
@@ -195,6 +198,9 @@
   </data>
   <data name="CodeGen_Status_TargetDbRequired" xml:space="preserve">
     <value>対象 DB を 1 つ以上選択してください。</value>
+  </data>
+  <data name="CodeGen_Status_InMemoryRuntimePackagesConflict" xml:space="preserve">
+    <value>インメモリ実装はランタイムの NuGet パッケージ参照モードとは併用できません。</value>
   </data>
   <data name="CodeGen_Status_NamespaceInvalidFormat" xml:space="preserve">
     <value>{0} の形式が正しくありません。</value>

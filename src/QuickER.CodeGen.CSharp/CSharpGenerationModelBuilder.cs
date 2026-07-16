@@ -62,13 +62,12 @@ internal sealed partial class CSharpGenerationModelBuilder
             NamespaceName = string.IsNullOrWhiteSpace(options.NamespaceName)
                 ? "Generated"
                 : options.NamespaceName.Trim(),
-            EntityClasses = options.GenerateEntityClasses
-                ? diagram
-                    .Entities.Select(entity =>
-                        BuildEntityClass(entity, navigationsByEntity[entity.Id], diagnostics)
-                    )
-                    .ToList()
-                : [],
+            // Entity は全カテゴリの前提のため常に生成する
+            EntityClasses = diagram
+                .Entities.Select(entity =>
+                    BuildEntityClass(entity, navigationsByEntity[entity.Id], diagnostics)
+                )
+                .ToList(),
             EditModelClasses = options.GenerateEditModels
                 ? diagram
                     .Entities.Select(entity =>
