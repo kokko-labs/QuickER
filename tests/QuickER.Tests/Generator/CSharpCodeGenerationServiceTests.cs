@@ -972,7 +972,6 @@ public class CSharpCodeGenerationServiceTests
             new CodeGenerationOptions
             {
                 NamespaceName = "Sample.Domain",
-                GenerateEntityClasses = false,
                 GenerateMappers = false,
                 GenerateRepositories = false,
             }
@@ -1035,7 +1034,11 @@ public class CSharpCodeGenerationServiceTests
 
         var result = new CSharpCodeGenerationService().Generate(
             diagram,
-            new CodeGenerationOptions { NamespaceName = "Sample.Domain" }
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                GenerateRepositories = true,
+            }
         );
 
         result.HasErrors.Should().BeFalse();
@@ -1095,7 +1098,11 @@ public class CSharpCodeGenerationServiceTests
     {
         var result = new CSharpCodeGenerationService().Generate(
             SingleEntityDiagram(),
-            new CodeGenerationOptions { NamespaceName = "Sample.Domain" }
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                GenerateRepositories = true,
+            }
         );
 
         result.HasErrors.Should().BeFalse();
@@ -1166,7 +1173,11 @@ public class CSharpCodeGenerationServiceTests
     {
         var result = new CSharpCodeGenerationService().Generate(
             SingleEntityDiagram(),
-            new CodeGenerationOptions { NamespaceName = "Sample.Domain" }
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                GenerateRepositories = true,
+            }
         );
 
         result.HasErrors.Should().BeFalse();
@@ -1273,7 +1284,11 @@ public class CSharpCodeGenerationServiceTests
 
         var result = new CSharpCodeGenerationService().Generate(
             diagram,
-            new CodeGenerationOptions { NamespaceName = "Sample.Domain" }
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                GenerateRepositories = true,
+            }
         );
 
         result.HasErrors.Should().BeFalse();
@@ -1380,7 +1395,11 @@ public class CSharpCodeGenerationServiceTests
     {
         var result = new CSharpCodeGenerationService().Generate(
             SingleEntityDiagram(),
-            new CodeGenerationOptions { NamespaceName = "Sample.Domain" }
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                GenerateRepositories = true,
+            }
         );
 
         result.HasErrors.Should().BeFalse();
@@ -1427,7 +1446,11 @@ public class CSharpCodeGenerationServiceTests
     {
         var result = new CSharpCodeGenerationService().Generate(
             SingleEntityDiagram(),
-            new CodeGenerationOptions { NamespaceName = "Sample.Domain" }
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                GenerateRepositories = true,
+            }
         );
 
         result.HasErrors.Should().BeFalse();
@@ -1458,6 +1481,7 @@ public class CSharpCodeGenerationServiceTests
             {
                 NamespaceName = "Sample.Domain",
                 GenerateValueObjects = true,
+                GenerateRepositories = true,
             }
         );
 
@@ -1487,7 +1511,11 @@ public class CSharpCodeGenerationServiceTests
     {
         var result = new CSharpCodeGenerationService().Generate(
             SingleEntityDiagram(),
-            new CodeGenerationOptions { NamespaceName = "Sample.Domain" }
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                GenerateRepositories = true,
+            }
         );
 
         result.HasErrors.Should().BeFalse();
@@ -1533,7 +1561,11 @@ public class CSharpCodeGenerationServiceTests
     {
         var result = new CSharpCodeGenerationService().Generate(
             SingleEntityDiagram(),
-            new CodeGenerationOptions { NamespaceName = "Sample.Domain" }
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                GenerateRepositories = true,
+            }
         );
 
         result.HasErrors.Should().BeFalse();
@@ -1571,7 +1603,11 @@ public class CSharpCodeGenerationServiceTests
     {
         var result = new CSharpCodeGenerationService().Generate(
             SingleEntityDiagram(),
-            new CodeGenerationOptions { NamespaceName = "Sample.Domain" }
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                GenerateRepositories = true,
+            }
         );
 
         result.HasErrors.Should().BeFalse();
@@ -1674,7 +1710,11 @@ public class CSharpCodeGenerationServiceTests
 
         var result = new CSharpCodeGenerationService().Generate(
             diagram,
-            new CodeGenerationOptions { NamespaceName = "Sample.Domain" }
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                GenerateRepositories = true,
+            }
         );
 
         result.HasErrors.Should().BeFalse();
@@ -1737,7 +1777,11 @@ public class CSharpCodeGenerationServiceTests
 
         var result = new CSharpCodeGenerationService().Generate(
             diagram,
-            new CodeGenerationOptions { NamespaceName = "Sample.Domain" }
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                GenerateRepositories = true,
+            }
         );
 
         result.HasErrors.Should().BeFalse();
@@ -1801,7 +1845,6 @@ public class CSharpCodeGenerationServiceTests
         var options = new CodeGenerationOptions
         {
             NamespaceName = "Sample.Domain",
-            GenerateEntityClasses = true,
             GenerateEditModels = false,
             GenerateMappers = false,
         };
@@ -1886,7 +1929,6 @@ public class CSharpCodeGenerationServiceTests
         var options = new CodeGenerationOptions
         {
             NamespaceName = "Sample.Domain",
-            GenerateEntityClasses = true,
             GenerateEditModels = false,
             GenerateMappers = true,
             GenerateRepositories = false,
@@ -1900,31 +1942,6 @@ public class CSharpCodeGenerationServiceTests
             .Contain(diagnostic =>
                 diagnostic.Severity == GenerationDiagnosticSeverity.Error
                 && diagnostic.Message.Contains("Mapper")
-            );
-    }
-
-    /// <summary>Repository を Entity なしで生成しようとするとエラーになることを検証する</summary>
-    [Fact]
-    public void Generate_RepositoryWithoutEntity_ShouldFailWithError()
-    {
-        var diagram = SingleEntityDiagram();
-        var options = new CodeGenerationOptions
-        {
-            NamespaceName = "Sample.Domain",
-            GenerateEntityClasses = false,
-            GenerateEditModels = true,
-            GenerateMappers = false,
-            GenerateRepositories = true,
-        };
-
-        var result = new CSharpCodeGenerationService().Generate(diagram, options);
-
-        result.HasErrors.Should().BeTrue();
-        result
-            .Diagnostics.Should()
-            .Contain(diagnostic =>
-                diagnostic.Severity == GenerationDiagnosticSeverity.Error
-                && diagnostic.Message.Contains("Repository")
             );
     }
 
@@ -2093,7 +2110,11 @@ public class CSharpCodeGenerationServiceTests
 
         var result = new CSharpCodeGenerationService().Generate(
             new ErDiagram { Entities = entities },
-            new CodeGenerationOptions { NamespaceName = "Sample.Domain" }
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                GenerateRepositories = true,
+            }
         );
 
         result.HasErrors.Should().BeFalse();
@@ -2175,7 +2196,11 @@ public class CSharpCodeGenerationServiceTests
     {
         var result = new CSharpCodeGenerationService().Generate(
             SingleEntityDiagram(),
-            new CodeGenerationOptions { NamespaceName = "Sample.Domain" }
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                GenerateRepositories = true,
+            }
         );
 
         result.HasErrors.Should().BeFalse();
@@ -2644,6 +2669,7 @@ public class CSharpCodeGenerationServiceTests
                 NamespaceName = "Sample.Domain",
                 SplitFilesByCategory = true,
                 GenerateValueObjects = true,
+                GenerateRepositories = true,
             }
         );
 
@@ -2694,7 +2720,6 @@ public class CSharpCodeGenerationServiceTests
             {
                 NamespaceName = "Sample.Domain",
                 SplitFilesByCategory = true,
-                GenerateEntityClasses = true,
                 GenerateEditModels = true,
                 GenerateMappers = false,
                 GenerateRepositories = false,
@@ -3311,7 +3336,11 @@ public class CSharpCodeGenerationServiceTests
     {
         var result = new CSharpCodeGenerationService().Generate(
             ValueObjectDiagram(),
-            new CodeGenerationOptions { NamespaceName = "Sample.Domain" }
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                GenerateRepositories = true,
+            }
         );
 
         result.HasErrors.Should().BeFalse();
@@ -3545,7 +3574,11 @@ public class CSharpCodeGenerationServiceTests
     {
         var result = new CSharpCodeGenerationService().Generate(
             BinaryColumnDiagram(),
-            new CodeGenerationOptions { NamespaceName = "Sample.Domain" }
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                GenerateRepositories = true,
+            }
         );
 
         result.HasErrors.Should().BeFalse();
@@ -3572,7 +3605,11 @@ public class CSharpCodeGenerationServiceTests
     {
         var result = new CSharpCodeGenerationService().Generate(
             BinaryColumnDiagram(),
-            new CodeGenerationOptions { NamespaceName = "Sample.Domain" }
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                GenerateRepositories = true,
+            }
         );
 
         result.HasErrors.Should().BeFalse();
@@ -3633,6 +3670,7 @@ public class CSharpCodeGenerationServiceTests
             new CodeGenerationOptions
             {
                 NamespaceName = "Sample.Domain",
+                GenerateRepositories = true,
                 ExcludeUnboundedBinaryColumns = true,
             }
         );
@@ -3713,6 +3751,7 @@ public class CSharpCodeGenerationServiceTests
             new CodeGenerationOptions
             {
                 NamespaceName = "Sample.Domain",
+                GenerateRepositories = true,
                 ExcludeUnboundedBinaryColumns = true,
                 GenerateRemoteContracts = true,
             }
@@ -3747,6 +3786,7 @@ public class CSharpCodeGenerationServiceTests
             new CodeGenerationOptions
             {
                 NamespaceName = "Sample.Domain",
+                GenerateRepositories = true,
                 ExcludeUnboundedBinaryColumns = true,
             }
         );

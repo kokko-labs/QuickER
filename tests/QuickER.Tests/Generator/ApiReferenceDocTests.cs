@@ -184,7 +184,11 @@ public sealed class ApiReferenceDocTests
     )]
     public void SingleDialect_Content_ContainsSchemaAndDefaultDi()
     {
-        var options = new CodeGenerationOptions { GenerateApiDocs = true };
+        var options = new CodeGenerationOptions
+        {
+            GenerateApiDocs = true,
+            GenerateRepositories = true,
+        };
 
         // CanonicalTypeToken はプロバイダ層の後処理（CanonicalTypeTokenAttacher）で付加されるため、
         // 実生成と同じく DiagramCodeGenerator（型解決＋トークン付加）を経由して内容を検証する。
@@ -244,6 +248,7 @@ public sealed class ApiReferenceDocTests
         var options = new CodeGenerationOptions
         {
             GenerateApiDocs = true,
+            GenerateRepositories = true,
             RepositoryDialects = ["sqlserver", "sqlite"],
         };
 
@@ -269,7 +274,6 @@ public sealed class ApiReferenceDocTests
         var options = new CodeGenerationOptions
         {
             GenerateApiDocs = true,
-            GenerateEntityClasses = true,
             GenerateEditModels = false,
             GenerateMappers = false,
             GenerateRepositories = false,

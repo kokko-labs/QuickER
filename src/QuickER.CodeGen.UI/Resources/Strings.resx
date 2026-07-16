@@ -79,9 +79,6 @@
   <data name="CodeGen_GenerationTarget" xml:space="preserve">
     <value>Targets</value>
   </data>
-  <data name="CodeGen_EntityTooltip" xml:space="preserve">
-    <value>Entity is a prerequisite for all categories, so it is always generated</value>
-  </data>
   <data name="CodeGen_ValueObject" xml:space="preserve">
     <value>Value Objects</value>
   </data>
@@ -102,6 +99,12 @@
   </data>
   <data name="CodeGen_TargetDb" xml:space="preserve">
     <value>Target DB</value>
+  </data>
+  <data name="CodeGen_GenerateInMemory" xml:space="preserve">
+    <value>Generate in-memory repositories (for testing)</value>
+  </data>
+  <data name="CodeGen_GenerateInMemoryToolTip" xml:space="preserve">
+    <value>Generates DB-independent in-memory repositories for prototyping and unit tests. Cannot be combined with the runtime NuGet package reference mode</value>
   </data>
   <data name="CodeGen_Runtime" xml:space="preserve">
     <value>Runtime</value>
@@ -196,6 +199,9 @@
   <data name="CodeGen_Status_TargetDbRequired" xml:space="preserve">
     <value>Please select at least one target DB.</value>
   </data>
+  <data name="CodeGen_Status_InMemoryRuntimePackagesConflict" xml:space="preserve">
+    <value>In-memory repositories cannot be combined with the runtime NuGet package reference mode.</value>
+  </data>
   <data name="CodeGen_Status_NamespaceInvalidFormat" xml:space="preserve">
     <value>The {0} format is invalid.</value>
   </data>
@@ -204,6 +210,31 @@
   </data>
   <data name="CodeGen_Status_OutputFileRequired" xml:space="preserve">
     <value>Please specify an output file.</value>
+  </data>
+  <data name="CodeGen_LoadSettings" xml:space="preserve">
+    <value>Load Settings</value>
+  </data>
+  <data name="CodeGen_SaveSettings" xml:space="preserve">
+    <value>Save Settings</value>
+  </data>
+  <data name="CodeGen_LoadSettingsToolTip" xml:space="preserve">
+    <value>Loads a saved settings JSON file and applies it to this dialog (does not overwrite the default settings)</value>
+  </data>
+  <data name="CodeGen_SaveSettingsToolTip" xml:space="preserve">
+    <value>Saves the current settings to a JSON file of your choice as a reusable preset. The saved file can be passed directly to the CLI as --config.</value>
+  </data>
+  <data name="CodeGen_SettingsDialogTitle" xml:space="preserve">
+    <value>Code Generation Settings</value>
+  </data>
+  <data name="CodeGen_SettingsSavedMessage" xml:space="preserve">
+    <value>Settings saved to {0}.
+You can pass this file directly to the CLI as --config.</value>
+  </data>
+  <data name="CodeGen_SettingsSaveFailedMessage" xml:space="preserve">
+    <value>Failed to save settings to {0}.</value>
+  </data>
+  <data name="CodeGen_SettingsLoadFailedMessage" xml:space="preserve">
+    <value>Failed to load settings from {0}.</value>
   </data>
   <data name="CodeGen_NamespaceLabel_Runtime" xml:space="preserve">
     <value>Runtime namespace</value>

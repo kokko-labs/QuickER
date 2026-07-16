@@ -47,7 +47,6 @@ public static class MultiTargetPortableFixtureDefinition
         {
             NamespaceName = NamespaceName,
             OutputFileName = OutputFileName,
-            GenerateEntityClasses = true,
             GenerateEditModels = true,
             GenerateMappers = true,
             GenerateRepositories = true,

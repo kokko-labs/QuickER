@@ -90,7 +90,7 @@ dotnet run --project src/QuickER.Cli -- generate `
   --config samples/ec-order-remote/quicker.json
 ```
 
-`GenerateRemoteServices` は `quicker.json` 側で指定済みです（`--remote-services` フラグでも同等）。
+`GenerateRemoteServices` は `quicker.json` 側で指定済みです（`--generate-remote-services` フラグでも同等）。
 本体生成物とサーバー生成物の 2 ファイルが同じ `--out` へ出力されます。
 
 ### ドリフトテストの再生成モードで一括再生成する

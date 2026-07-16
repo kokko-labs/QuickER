@@ -103,7 +103,6 @@ public class GeneratedCodeCompilationTests
                 {
                     NamespaceName = "Sample.Domain",
                     SplitFilesByCategory = split,
-                    GenerateEntityClasses = true,
                     GenerateEditModels = false,
                     GenerateMappers = false,
                     GenerateRepositories = false,
@@ -115,7 +114,6 @@ public class GeneratedCodeCompilationTests
                 {
                     NamespaceName = "Sample.Domain",
                     SplitFilesByCategory = split,
-                    GenerateEntityClasses = true,
                     GenerateEditModels = true,
                     GenerateMappers = true,
                     GenerateRepositories = false,
@@ -127,7 +125,6 @@ public class GeneratedCodeCompilationTests
                 {
                     NamespaceName = "Sample.Domain",
                     SplitFilesByCategory = split,
-                    GenerateEntityClasses = true,
                     GenerateEditModels = false,
                     GenerateMappers = false,
                     GenerateRepositories = true,
@@ -151,7 +148,7 @@ public class GeneratedCodeCompilationTests
                     NamespaceName = "Sample.Domain",
                     SplitFilesByCategory = split,
                     GenerateValueObjects = vo,
-                    RepositoryDialect = "sqlite",
+                    RepositoryDialects = ["sqlite"],
                 }
             );
         }
@@ -162,7 +159,7 @@ public class GeneratedCodeCompilationTests
             new CodeGenerationOptions
             {
                 NamespaceName = "Sample.Domain",
-                RepositoryDialect = "sqlite",
+                RepositoryDialects = ["sqlite"],
                 GenerateEfCore = true,
             }
         );
@@ -209,7 +206,7 @@ public class GeneratedCodeCompilationTests
             {
                 NamespaceName = "Sample.Domain",
                 GenerateRepositories = true,
-                RepositoryDialect = "sqlserver",
+                RepositoryDialects = ["sqlserver"],
                 GenerateInMemoryRepositories = true,
             }
         );
@@ -266,7 +263,7 @@ public class GeneratedCodeCompilationTests
             new CodeGenerationOptions
             {
                 NamespaceName = "Sample.Domain",
-                RepositoryDialect = "sqlite",
+                RepositoryDialects = ["sqlite"],
                 GenerateEfCore = true,
                 GenerateRemoteContracts = true,
             }
@@ -444,7 +441,7 @@ public class GeneratedCodeCompilationTests
             new CodeGenerationOptions
             {
                 NamespaceName = "Sample.Domain",
-                RepositoryDialect = "sqlite",
+                RepositoryDialects = ["sqlite"],
                 GenerateEfCore = true,
                 GenerateRemoteServices = true,
             }

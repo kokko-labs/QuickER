@@ -6,7 +6,7 @@ QuickER（ER 図デザイナ）が生成する C# コードのランタイムの
 
 ## 使いどき
 
-既定では QuickER の生成コードはランタイム込みのインライン出力で自己完結するため、**本パッケージは不要**です。生成時に `--runtime-packages`（CLI）またはランタイムをパッケージ参照にするオプション（GUI）を指定し、EF Core 生成（GenerateEfCore）を有効にした場合に、`QuickER.Runtime` とあわせて参照します。必要な PackageReference は生成コードのヘッダと CLI 出力に案内されます。
+既定では QuickER の生成コードはランタイム込みのインライン出力で自己完結するため、**本パッケージは不要**です。生成時に `--use-runtime-packages`（CLI）またはランタイムをパッケージ参照にするオプション（GUI）を指定し、EF Core 生成（GenerateEfCore）を有効にした場合に、`QuickER.Runtime` とあわせて参照します。必要な PackageReference は生成コードのヘッダと CLI 出力に案内されます。
 
 具象 `QuickErDbContext`・Fluent 構成・エンティティ別 `EfCore{Entity}Repository`・DI 登録拡張（`AddGeneratedEfCoreRepositories`）はスキーマ依存物のため本パッケージには含まれず、常に生成コード側に出力されます。
 

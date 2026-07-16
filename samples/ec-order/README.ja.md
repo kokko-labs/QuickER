@@ -15,7 +15,7 @@ QuickER 版 Repository（`RepositoryDialect=sqlite`）による CRUD・グラフ
 | `EcOrder.sql` | 図から生成した SQLite DDL（チェックイン済み） |
 | `quicker.json` | CLI の生成オプション（名前空間・出力ファイル名のみの最小構成） |
 | `EcOrderSample/Generated/EcOrder.g.cs` | 図から生成した C# コード（チェックイン済み） |
-| `EcOrderSample/Generated/EcOrder.g.md` | 生成 API のリファレンス Markdown（`--api-docs` の同梱出力・チェックイン済み） |
+| `EcOrderSample/Generated/EcOrder.g.md` | 生成 API のリファレンス Markdown（`--generate-api-docs` の同梱出力・チェックイン済み） |
 | `EcOrderSample/Program.cs` | DDL で DB を作成し CRUD を実演するコンソールアプリ |
 
 コンソールアプリは QuickER 本体プロジェクトには一切参照せず、利用者のプロジェクトと同じく
@@ -47,10 +47,10 @@ dotnet run --project src/QuickER.Cli -- generate `
   --out samples/ec-order/EcOrderSample/Generated `
   --provider sqlite `
   --config samples/ec-order/quicker.json `
-  --api-docs
+  --generate-api-docs
 ```
 
-`--api-docs` を付けると `EcOrder.g.cs` と同じベース名で API リファレンス Markdown
+`--generate-api-docs` を付けると `EcOrder.g.cs` と同じベース名で API リファレンス Markdown
 `EcOrder.g.md` も出力されます（どちらもドリフトテストの検証対象）。
 
 ### ドリフトテストの再生成モードで一括再生成する

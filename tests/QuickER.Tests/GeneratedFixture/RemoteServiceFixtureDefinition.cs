@@ -35,13 +35,12 @@ public static class RemoteServiceFixtureDefinition
         {
             NamespaceName = NamespaceName,
             OutputFileName = OutputFileName,
-            GenerateEntityClasses = true,
             GenerateEditModels = true,
             GenerateMappers = true,
             GenerateRepositories = true,
             GenerateValueObjects = true,
             GenerateEfCore = true,
-            RepositoryDialect = "sqlite",
+            RepositoryDialects = ["sqlite"],
             GenerateRemoteServices = true,
             SplitFilesByCategory = false,
         };

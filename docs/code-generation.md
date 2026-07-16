@@ -220,7 +220,7 @@ context が提供する操作（生ハンドルは公開しません）:
 | QuickER 版 Repository（SQL Server / SQLite） | 完全対応（After は各操作の直後） | `WriteBinaryColumnAsync` / `ExecuteSqlAsync` とも対応 |
 | EF Core（`GenerateEfCore`） | 対応（After は `SaveChanges` 後に一括） | `ExecuteSqlAsync` は対応・`WriteBinaryColumnAsync` は `NotSupportedException` |
 | インメモリ（`GenerateInMemoryRepositories`） | 対応（擬似トランザクション） | `WriteBinaryColumnAsync` はストアへ・`ExecuteSqlAsync` は `NotSupportedException`。実トランザクションがないため**After が例外を投げてもストアの変更は残ります**（ベストエフォート） |
-| リモート（`--remote-services`） | **サーバー側の DI に登録したフックが発火**します | サーバー側の実体実装に準じます。**既知の制限**: Before でサーバーがスキップした行でも、クライアント側の `RowState` はスキップを反映せず `Unchanged` に確定します |
+| リモート（`--generate-remote-services`） | **サーバー側の DI に登録したフックが発火**します | サーバー側の実体実装に準じます。**既知の制限**: Before でサーバーがスキップした行でも、クライアント側の `RowState` はスキップを反映せず `Unchanged` に確定します |
 
 ### 生 SQL の逃げ道
 
@@ -251,7 +251,7 @@ DB が値を生成する列（SQL Server の `rowversion` / `timestamp` など�
 
 ### 無制限バイナリ列の除外（ExcludeUnboundedBinaryColumns）
 
-巨大な BLOB を一覧取得・更新のたびに往復させない（メモリを保護する）ためのオプションです（既定 OFF。CLI `--exclude-unbounded-binary` / GUI「無制限バイナリ列を取得しない」チェックボックス / quicker.json の `ExcludeUnboundedBinaryColumns`）。ON にすると、**サイズ上限のないバイナリ列**の Entity プロパティへマーカー属性 `[UnboundedBinaryColumn]` が付与され、QuickER 版 Repository の SELECT / UPDATE から当該列が除外されます。生成時には除外した列の一覧が Info 診断（CLI 出力・GUI の生成結果ダイアログ）で通知されます。
+巨大な BLOB を一覧取得・更新のたびに往復させない（メモリを保護する）ためのオプションです（既定 OFF。CLI `--exclude-unbounded-binary-columns` / GUI「無制限バイナリ列を取得しない」チェックボックス / quicker.json の `ExcludeUnboundedBinaryColumns`）。ON にすると、**サイズ上限のないバイナリ列**の Entity プロパティへマーカー属性 `[UnboundedBinaryColumn]` が付与され、QuickER 版 Repository の SELECT / UPDATE から当該列が除外されます。生成時には除外した列の一覧が Info 診断（CLI 出力・GUI の生成結果ダイアログ）で通知されます。
 
 判定は列の宣言型で行います（`rowversion` や `binary(n)` / `varbinary(n)` など長さ宣言のある型は対象外）:
 
@@ -327,7 +327,7 @@ Task<bool> WritePayloadFromFileAsync(int id, string path, CancellationToken ct =
 - **楽観排他（rowversion 等）はスコープ外**です（生 SQL と同格の直接列操作）。
 - **INSERT 専用メソッドはありません**。新規行は「INSERT（blob は `null` または空）→ `Write{Column}Async` で本体を流し込む」の 2 段で書きます。
 - **EF Core モードでは使用できません**（`NotSupportedException`）。EF Core は方言非依存設計のため方言固有のストリーミングを持てません。QuickER 版 Repository を使うか、`partial` クラスで実装してください（`GenerateEfCore` と QuickER 版 Repository を併用する構成では、EF Core 版実装のみ例外になります）。
-- **挿入先**: リモート契約（`--remote-contracts` / `--remote-services`）が無効なら全機能面 `I{Entity}Repository` に直接載ります。有効な場合はリモート面 `I{Entity}RemoteRepository` へ移設されます（全機能面はリモート面を継承するので、どちらの構成でも利用コードは同じ・純粋に追加的）。ファイル糖衣もその対象インターフェイスに合わせます。リモートサービス（`--remote-services`）を有効にすると HTTP で転送できます（後述の「バイナリ転送エンドポイント」）。
+- **挿入先**: リモート契約（`--generate-remote-contracts` / `--generate-remote-services`）が無効なら全機能面 `I{Entity}Repository` に直接載ります。有効な場合はリモート面 `I{Entity}RemoteRepository` へ移設されます（全機能面はリモート面を継承するので、どちらの構成でも利用コードは同じ・純粋に追加的）。ファイル糖衣もその対象インターフェイスに合わせます。リモートサービス（`--generate-remote-services`）を有効にすると HTTP で転送できます（後述の「バイナリ転送エンドポイント」）。
 
 `WithUnboundedBinary()` との使い分け:
 
@@ -367,9 +367,9 @@ var primary = provider.GetRequiredKeyedService<ICustomerRepository>("primary");
 var local   = provider.GetRequiredKeyedService<ICustomerRepository>("local");
 ```
 
-## リモート対応インターフェイス（--remote-contracts）
+## リモート対応インターフェイス（--generate-remote-contracts）
 
-`I{Entity}Repository` は CRUD・保存・名前付きクエリに加え、`Query()`（式木クエリ）・生 SQL・一括追加まで全メソッドを持つ全機能面です。`--remote-contracts`（quicker.json の `GenerateRemoteContracts`、GUI の「リモート対応」チェックボックス）を指定すると、リモート操作用のインターフェイスを**追加生成**します。
+`I{Entity}Repository` は CRUD・保存・名前付きクエリに加え、`Query()`（式木クエリ）・生 SQL・一括追加まで全メソッドを持つ全機能面です。`--generate-remote-contracts`（quicker.json の `GenerateRemoteContracts`、GUI の「リモート対応」チェックボックス）を指定すると、リモート操作用のインターフェイスを**追加生成**します。
 
 | 面 | インターフェイス | 含まれる操作 |
 |---|---|---|
@@ -396,9 +396,9 @@ public sealed class OrderMaintenance(IOrderRepository orders)
 
 このオプションは純粋に追加的です。ON にしても `I{Entity}Repository`・実装クラス・DI の実装登録は従来のまま変わらず、リモート面が同一インスタンスへの転送として DI に追加登録されるだけなので、既存コードを壊さずいつでも有効化できます（`AddGenerated*Repositories` でどちらの面も解決できます）。
 
-## リモートサービス（--remote-services）— 3 階層構成
+## リモートサービス（--generate-remote-services）— 3 階層構成
 
-`--remote-services`（quicker.json の `GenerateRemoteServices`、GUI の「リモート対応」2 つ目のチェックボックス）を指定すると、リモート面を **HTTP + JSON** でネットワーク越しに提供するクライアント／サーバー実装を生成します（リモート面 `--remote-contracts` は自動的に有効になります）。
+`--generate-remote-services`（quicker.json の `GenerateRemoteServices`、GUI の「リモート対応」2 つ目のチェックボックス）を指定すると、リモート面を **HTTP + JSON** でネットワーク越しに提供するクライアント／サーバー実装を生成します（リモート面 `--generate-remote-contracts` は自動的に有効になります）。
 
 | 生成物 | 置き場所 | 内容 |
 |---|---|---|
@@ -433,7 +433,7 @@ app.Run();
 
 ### バイナリ転送エンドポイント（無制限バイナリ列の Stream アクセサ）
 
-無制限バイナリ除外（`--exclude-unbounded-binary`）と併用すると、除外列の Stream アクセサ（`Read/Write{Column}Async`）が **HTTP でストリーミング転送**されます。JSON エンベロープ（`POST` + Base64）では巨大 blob のメモリ膨張を避けられないため、これらは意図的に **REST 風の第 2 形式**（動詞分離・生ボディ・`application/octet-stream`）を使います。除外列ごとに次の 3 エンドポイントが生成されます（`{列名}` は C# プロパティ名）:
+無制限バイナリ除外（`--exclude-unbounded-binary-columns`）と併用すると、除外列の Stream アクセサ（`Read/Write{Column}Async`）が **HTTP でストリーミング転送**されます。JSON エンベロープ（`POST` + Base64）では巨大 blob のメモリ膨張を避けられないため、これらは意図的に **REST 風の第 2 形式**（動詞分離・生ボディ・`application/octet-stream`）を使います。除外列ごとに次の 3 エンドポイントが生成されます（`{列名}` は C# プロパティ名）:
 
 | 動詞・URL | 意味 | 応答 |
 |---|---|---|
@@ -453,9 +453,9 @@ app.Run();
 
 DB なしでユニットテストするためのインメモリ実装を追加生成できます。同一契約を実装し、サポート外の操作は実 DB の Repository へ切り替える案内付きの `NotSupportedException` を送出します。
 
-## ランタイムパッケージ参照モード（--runtime-packages）
+## ランタイムパッケージ参照モード（--use-runtime-packages）
 
-既定では、生成コードはランタイム（スキーマ非依存の固定コード）込みのインライン出力で自己完結します。`--runtime-packages` を指定すると固定コードを出力せず、次の NuGet パッケージへの参照で賄います（生成ヘッダと CLI 出力に必要な PackageReference が案内されます。csproj には手動で追加してください）:
+既定では、生成コードはランタイム（スキーマ非依存の固定コード）込みのインライン出力で自己完結します。`--use-runtime-packages` を指定すると固定コードを出力せず、次の NuGet パッケージへの参照で賄います（生成ヘッダと CLI 出力に必要な PackageReference が案内されます。csproj には手動で追加してください）:
 
 | パッケージ | 内容 | 依存 |
 |---|---|---|
@@ -468,7 +468,7 @@ DB なしでユニットテストするためのインメモリ実装を追加�
 
 ## API リファレンス（.g.md）
 
-生成コードと同名ベースの API リファレンス Markdown を追加出力できます。GUI の生成ダイアログの「API リファレンス (.g.md) を出力する」チェック、または CLI の `--api-docs` フラグで有効化します（**既定 OFF**）。DB アクセスの選択（なし / QuickER 版 Repository / EF Core）とは独立して、常に選択できます。
+生成コードと同名ベースの API リファレンス Markdown を追加出力できます。GUI の生成ダイアログの「API リファレンス (.g.md) を出力する」チェック、または CLI の `--generate-api-docs` フラグで有効化します（**既定 OFF**）。DB アクセスの選択（なし / QuickER 版 Repository / EF Core）とは独立して、常に選択できます。
 
 有効化すると、`.g.cs` と同じベース名の `.g.md` が 1 つ出力されます（例: `EcOrder.g.cs` → `EcOrder.g.md`）。内容は次のとおりです。
 

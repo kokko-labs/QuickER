@@ -1,4 +1,5 @@
 using System.Windows;
+using QuickER.AI.UI;
 using QuickER.CodeGen.UI;
 using QuickER.Gui.Abstractions;
 using QuickER.Model;
@@ -86,7 +87,8 @@ public sealed class WpfAppDialogService : IAppDialogService
     {
         var viewModel = new CSharpGenerationDialogViewModel(
             files: _files,
-            currentProvider: currentProvider
+            currentProvider: currentProvider,
+            dialogs: new MessageBoxDialogService()
         );
         var dialog = new CSharpGenerationDialog(viewModel)
         {

@@ -10,7 +10,7 @@ namespace QuickER.Tests.GeneratedSqliteFixture;
 /// <para>
 /// 入力の ER 図は既存の方言可搬フィクスチャ（<see cref="Tests.GeneratedPortableFixture.PortableFixtureDefinition"/>）と
 /// <b>同一</b>（rowversion なし・2 エンティティ・1対多カスケード・int/string/decimal のみ）。
-/// 相違はオプションのみで、<see cref="CodeGenerationOptions.RepositoryDialect"/> = <c>"sqlite"</c>・
+/// 相違はオプションのみで、<see cref="CodeGenerationOptions.RepositoryDialects"/> = <c>["sqlite"]</c>・
 /// <c>GenerateRepositories=true</c>・<c>GenerateEfCore=true</c>（パリティ用に両方 ON。CLI/オプション直指定でのみ
 /// 許される組合せ）で生成する。これにより SQLite 方言ランタイム（<c>SqliteRepository</c>・プレーン SELECT＋
 /// DataReader 実体化・<c>IncludeLoader</c> マルチクエリ・LIMIT/OFFSET・strftime）と EF Core Sqlite の
@@ -38,13 +38,12 @@ public static class SqlitePortableFixtureDefinition
         {
             NamespaceName = NamespaceName,
             OutputFileName = OutputFileName,
-            GenerateEntityClasses = true,
             GenerateEditModels = true,
             GenerateMappers = true,
             GenerateRepositories = true,
             GenerateValueObjects = true,
             GenerateEfCore = true,
-            RepositoryDialect = "sqlite",
+            RepositoryDialects = ["sqlite"],
             SplitFilesByCategory = false,
         };
 

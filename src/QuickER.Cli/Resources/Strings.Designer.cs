@@ -108,15 +108,87 @@ namespace QuickER.Cli.Resources {
             }
         }
 
-        public static string Cli_Opt_Namespace {
+        public static string Cli_Opt_SplitFilesByCategory {
             get {
-                return ResourceManager.GetString("Cli_Opt_Namespace", resourceCulture);
+                return ResourceManager.GetString("Cli_Opt_SplitFilesByCategory", resourceCulture);
             }
         }
 
-        public static string Cli_Opt_Split {
+        public static string Cli_Opt_NamespaceName {
             get {
-                return ResourceManager.GetString("Cli_Opt_Split", resourceCulture);
+                return ResourceManager.GetString("Cli_Opt_NamespaceName", resourceCulture);
+            }
+        }
+
+        public static string Cli_Opt_RuntimeNamespace {
+            get {
+                return ResourceManager.GetString("Cli_Opt_RuntimeNamespace", resourceCulture);
+            }
+        }
+
+        public static string Cli_Opt_EntityNamespace {
+            get {
+                return ResourceManager.GetString("Cli_Opt_EntityNamespace", resourceCulture);
+            }
+        }
+
+        public static string Cli_Opt_EditModelNamespace {
+            get {
+                return ResourceManager.GetString("Cli_Opt_EditModelNamespace", resourceCulture);
+            }
+        }
+
+        public static string Cli_Opt_MapperNamespace {
+            get {
+                return ResourceManager.GetString("Cli_Opt_MapperNamespace", resourceCulture);
+            }
+        }
+
+        public static string Cli_Opt_RepositoryNamespace {
+            get {
+                return ResourceManager.GetString("Cli_Opt_RepositoryNamespace", resourceCulture);
+            }
+        }
+
+        public static string Cli_Opt_ValueObjectNamespace {
+            get {
+                return ResourceManager.GetString("Cli_Opt_ValueObjectNamespace", resourceCulture);
+            }
+        }
+
+        public static string Cli_Opt_EfCoreNamespace {
+            get {
+                return ResourceManager.GetString("Cli_Opt_EfCoreNamespace", resourceCulture);
+            }
+        }
+
+        public static string Cli_Opt_GenerateEditModels {
+            get {
+                return ResourceManager.GetString("Cli_Opt_GenerateEditModels", resourceCulture);
+            }
+        }
+
+        public static string Cli_Opt_GenerateMappers {
+            get {
+                return ResourceManager.GetString("Cli_Opt_GenerateMappers", resourceCulture);
+            }
+        }
+
+        public static string Cli_Opt_GenerateValueObjects {
+            get {
+                return ResourceManager.GetString("Cli_Opt_GenerateValueObjects", resourceCulture);
+            }
+        }
+
+        public static string Cli_Opt_UseGuidKeyForStringPrimaryKey {
+            get {
+                return ResourceManager.GetString("Cli_Opt_UseGuidKeyForStringPrimaryKey", resourceCulture);
+            }
+        }
+
+        public static string Cli_Opt_GenerateRepositories {
+            get {
+                return ResourceManager.GetString("Cli_Opt_GenerateRepositories", resourceCulture);
             }
         }
 
@@ -126,33 +198,69 @@ namespace QuickER.Cli.Resources {
             }
         }
 
-        public static string Cli_Opt_RuntimePackages {
+        public static string Cli_Opt_ExcludeUnboundedBinaryColumns {
             get {
-                return ResourceManager.GetString("Cli_Opt_RuntimePackages", resourceCulture);
+                return ResourceManager.GetString("Cli_Opt_ExcludeUnboundedBinaryColumns", resourceCulture);
             }
         }
 
-        public static string Cli_Opt_ApiDocs {
+        public static string Cli_Opt_GenerateEfCore {
             get {
-                return ResourceManager.GetString("Cli_Opt_ApiDocs", resourceCulture);
+                return ResourceManager.GetString("Cli_Opt_GenerateEfCore", resourceCulture);
             }
         }
 
-        public static string Cli_Opt_RemoteContracts {
+        public static string Cli_Opt_GenerateInMemoryRepositories {
             get {
-                return ResourceManager.GetString("Cli_Opt_RemoteContracts", resourceCulture);
+                return ResourceManager.GetString("Cli_Opt_GenerateInMemoryRepositories", resourceCulture);
             }
         }
 
-        public static string Cli_Opt_RemoteServices {
+        public static string Cli_Opt_GenerateRemoteContracts {
             get {
-                return ResourceManager.GetString("Cli_Opt_RemoteServices", resourceCulture);
+                return ResourceManager.GetString("Cli_Opt_GenerateRemoteContracts", resourceCulture);
             }
         }
 
-        public static string Cli_Opt_ExcludeUnboundedBinary {
+        public static string Cli_Opt_GenerateRemoteServices {
             get {
-                return ResourceManager.GetString("Cli_Opt_ExcludeUnboundedBinary", resourceCulture);
+                return ResourceManager.GetString("Cli_Opt_GenerateRemoteServices", resourceCulture);
+            }
+        }
+
+        public static string Cli_Opt_UseRuntimePackages {
+            get {
+                return ResourceManager.GetString("Cli_Opt_UseRuntimePackages", resourceCulture);
+            }
+        }
+
+        public static string Cli_Opt_GenerateApiDocs {
+            get {
+                return ResourceManager.GetString("Cli_Opt_GenerateApiDocs", resourceCulture);
+            }
+        }
+
+        public static string Cli_Opt_IncludeDataAnnotations {
+            get {
+                return ResourceManager.GetString("Cli_Opt_IncludeDataAnnotations", resourceCulture);
+            }
+        }
+
+        public static string Cli_Opt_IncludeJsonIgnoreOnParentNavigation {
+            get {
+                return ResourceManager.GetString("Cli_Opt_IncludeJsonIgnoreOnParentNavigation", resourceCulture);
+            }
+        }
+
+        public static string Cli_Opt_OutputPath {
+            get {
+                return ResourceManager.GetString("Cli_Opt_OutputPath", resourceCulture);
+            }
+        }
+
+        public static string Cli_InvalidBooleanFlag {
+            get {
+                return ResourceManager.GetString("Cli_InvalidBooleanFlag", resourceCulture);
             }
         }
 

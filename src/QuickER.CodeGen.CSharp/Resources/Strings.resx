@@ -70,14 +70,8 @@
   <data name="CodeGen_Error_TypeMismatch" xml:space="preserve">
     <value>Column '{1}' of table '{0}' resolves to different C# types across dialects ({2}: {3} / {4}: {5}). The shared Entity is a single type, so both dialects must resolve to the same C# type.</value>
   </data>
-  <data name="CodeGen_Error_NoGenerationTarget" xml:space="preserve">
-    <value>None of Entity / EditModel / Mapper / Repository / EF Core / in-memory Repository is selected for generation. Enable at least one.</value>
-  </data>
   <data name="CodeGen_Error_MapperRequiresEntityAndEditModel" xml:space="preserve">
     <value>Generating a Mapper requires both the Entity class and the EditModel class. Include both as generation targets.</value>
-  </data>
-  <data name="CodeGen_Error_RepositoryRequiresEntity" xml:space="preserve">
-    <value>Generating a Repository / EF Core / in-memory Repository requires the Entity class. Include Entity as a generation target.</value>
   </data>
   <data name="CodeGen_Error_RepositoryRequiresDataAnnotations" xml:space="preserve">
     <value>Repository / EF Core / in-memory Repository use the [Table] / [Key] / [Column] attributes, so data annotations must be applied. Enable data annotations.</value>

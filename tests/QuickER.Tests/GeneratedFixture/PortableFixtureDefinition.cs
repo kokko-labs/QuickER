@@ -58,7 +58,6 @@ public static class PortableFixtureDefinition
         {
             NamespaceName = NamespaceName,
             OutputFileName = OutputFileName,
-            GenerateEntityClasses = true,
             GenerateEditModels = true,
             GenerateMappers = true,
             GenerateRepositories = false,

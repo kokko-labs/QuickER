@@ -15,7 +15,7 @@ Repository (`RepositoryDialect=sqlite`).
 | `EcOrder.sql` | The SQLite DDL generated from the diagram (checked in) |
 | `quicker.json` | The CLI generation options (a minimal config with only the namespace and output file names) |
 | `EcOrderSample/Generated/EcOrder.g.cs` | The C# code generated from the diagram (checked in) |
-| `EcOrderSample/Generated/EcOrder.g.md` | The generated API reference Markdown (the bundled output of `--api-docs`, checked in) |
+| `EcOrderSample/Generated/EcOrder.g.md` | The generated API reference Markdown (the bundled output of `--generate-api-docs`, checked in) |
 | `EcOrderSample/Program.cs` | A console app that creates the DB from the DDL and demonstrates CRUD |
 
 The console app references none of the QuickER main projects at all; like a user's own project, it references
@@ -48,10 +48,10 @@ dotnet run --project src/QuickER.Cli -- generate `
   --out samples/ec-order/EcOrderSample/Generated `
   --provider sqlite `
   --config samples/ec-order/quicker.json `
-  --api-docs
+  --generate-api-docs
 ```
 
-Adding `--api-docs` also outputs the API reference Markdown `EcOrder.g.md` with the same base name as
+Adding `--generate-api-docs` also outputs the API reference Markdown `EcOrder.g.md` with the same base name as
 `EcOrder.g.cs` (both are subject to the drift tests).
 
 ### Regenerate everything at once with the drift tests' regeneration mode

@@ -32,13 +32,12 @@ public static class QueryFixtureDefinition
         {
             NamespaceName = NamespaceName,
             OutputFileName = OutputFileName,
-            GenerateEntityClasses = true,
             GenerateEditModels = true,
             GenerateMappers = true,
             GenerateRepositories = true,
             GenerateValueObjects = true,
             GenerateEfCore = true,
-            RepositoryDialect = "sqlite",
+            RepositoryDialects = ["sqlite"],
             SplitFilesByCategory = false,
         };
 

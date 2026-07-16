@@ -17,41 +17,28 @@ public sealed class CodeGenerationOptions
     /// <summary>出力ファイル名。".g.cs" で終わらない場合はサービス側で補正される</summary>
     public string OutputFileName { get; init; } = "QuickEREntities.g.cs";
 
-    /// <summary>エンティティクラスを生成するかどうか</summary>
-    public bool GenerateEntityClasses { get; init; } = true;
-
     /// <summary>WPF バインディング向けの EditModel クラスを生成するかどうか</summary>
     public bool GenerateEditModels { get; init; } = true;
 
     /// <summary>Entity と EditModel を相互変換する Mapper クラスを生成するかどうか</summary>
     public bool GenerateMappers { get; init; } = true;
 
-    /// <summary>QuickER の SQL Server 実装（<c>Microsoft.Data.SqlClient</c> 依存）の Repository クラス群を生成するかどうか</summary>
+    /// <summary>QuickER の SQL Server 実装（<c>Microsoft.Data.SqlClient</c> 依存）の Repository クラス群を生成するかどうか（既定 false）</summary>
     /// <remarks>
     /// SqlServerRepository 基底・各エンティティ実装・接続ファクトリ・SqlExecutor・SqlExpressionTranslator・
     /// <c>AddGeneratedRepositories</c> を生成する。共通契約（インターフェイス・SqlQuery・メタデータ等）は
-    /// <see cref="GenerateEfCore"/> と共有し、どちらか一方が ON なら生成される
+    /// <see cref="GenerateEfCore"/> と共有し、どちらか一方が ON なら生成される。
+    /// 既定では DB アクセスコードを生成しない（GUI の DB アクセス「なし」と同じ既定）
     /// </remarks>
-    public bool GenerateRepositories { get; init; } = true;
+    public bool GenerateRepositories { get; init; }
 
     /// <summary>
-    /// QuickER 版 Repository の生成方言（後方互換の単一指定。実効値は <see cref="EffectiveRepositoryDialects"/> が解決する）。
+    /// QuickER 版 Repository を生成する方言の一覧（複数指定で 1 回の生成に複数方言実装を同梱する）。
     /// </summary>
     /// <remarks>
-    /// 既定は <c>"sqlserver"</c>（現行の QuickER SQL Server 実装）。テンプレートはこの値で方言別の識別子クォート・
-    /// ADO 型・SQL 句を吐き分ける。複数方言を同時生成する場合は <see cref="RepositoryDialects"/> を使う。
-    /// 両者を指定した場合は <see cref="RepositoryDialects"/>（リスト）を優先する（設定ファイル・CLI 互換のため
-    /// 単一指定を残す）。対応方言は <see cref="SupportedRepositoryDialects"/> を参照（GUI / CLI 共通）。
-    /// </remarks>
-    public string RepositoryDialect { get; init; } = "sqlserver";
-
-    /// <summary>
-    /// QuickER 版 Repository を同時生成する方言の一覧（複数指定で 1 回の生成に複数方言実装を同梱する）。
-    /// </summary>
-    /// <remarks>
-    /// <c>null</c> または空のときは後方互換のため <see cref="RepositoryDialect"/>（単一）へフォールバックする。
-    /// 指定時はこちらを優先する。実効値の解決・正規化（重複排除・未対応方言の検証）は
-    /// <see cref="EffectiveRepositoryDialects"/> に 1 箇所へ集約する。
+    /// <c>null</c> または空のときは既定 <c>"sqlserver"</c> の単一へフォールバックする。実効値の解決・正規化
+    /// （重複排除・未対応方言の検証）は <see cref="EffectiveRepositoryDialects"/> に 1 箇所へ集約する。
+    /// 対応方言は <see cref="SupportedRepositoryDialects"/> を参照（GUI / CLI 共通）。
     /// </remarks>
     public IReadOnlyList<string>? RepositoryDialects { get; init; }
 
@@ -61,7 +48,7 @@ public sealed class CodeGenerationOptions
     /// <remarks>
     /// 解決規則:
     /// <list type="number">
-    ///   <item><see cref="RepositoryDialects"/> が非空ならそれを、空/未指定なら <see cref="RepositoryDialect"/> の単一を採る（リスト優先）</item>
+    ///   <item><see cref="RepositoryDialects"/> が非空ならそれを、空/未指定なら既定 <c>"sqlserver"</c> の単一を採る</item>
     ///   <item>各要素を Trim し、空要素は除去する</item>
     ///   <item>大文字小文字を無視して重複を除去する（初出の表記を保持し、指定順を維持する）</item>
     ///   <item>未対応方言（<see cref="SupportedRepositoryDialects"/> 外）が含まれる場合は <see cref="ArgumentException"/> を投げる</item>
@@ -72,9 +59,7 @@ public sealed class CodeGenerationOptions
     {
         get
         {
-            var source = RepositoryDialects is { Count: > 0 }
-                ? RepositoryDialects
-                : [RepositoryDialect];
+            var source = RepositoryDialects is { Count: > 0 } ? RepositoryDialects : ["sqlserver"];
 
             var resolved = new List<string>();
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);

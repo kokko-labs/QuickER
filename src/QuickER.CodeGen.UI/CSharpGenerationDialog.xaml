@@ -211,13 +211,6 @@
           <StackPanel Grid.Column="1" Orientation="Horizontal">
             <CheckBox
               Margin="0,0,18,0"
-              Content="Entity"
-              IsChecked="{Binding GenerateEntityClasses, Mode=OneWay}"
-              IsEnabled="False"
-              ToolTip="{x:Static res:Strings.CodeGen_EntityTooltip}"
-            />
-            <CheckBox
-              Margin="0,0,18,0"
               Content="EditModel"
               IsChecked="{Binding GenerateEditModels}"
             />
@@ -285,6 +278,20 @@
               ToolTip="{x:Static res:Strings.CodeGen_DbAccessEfCoreTooltip}"
             />
           </StackPanel>
+        </Grid>
+
+        <!-- インメモリ実装（テスト用。DB アクセス配下＝インデント表示。排他ラジオと独立に常時選択可） -->
+        <Grid Margin="12,10,0,0">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="84" />
+            <ColumnDefinition Width="*" />
+          </Grid.ColumnDefinitions>
+          <CheckBox
+            Grid.Column="1"
+            Content="{x:Static res:Strings.CodeGen_GenerateInMemory}"
+            IsChecked="{Binding GenerateInMemoryRepositories}"
+            ToolTip="{Binding GenerateInMemoryToolTip}"
+          />
         </Grid>
 
         <!-- Repository (QuickER) の対象 DB（DB アクセス配下＝インデント表示。Repository (QuickER) 選択時のみ表示。表示順固定: SQL Server → SQLite） -->
@@ -401,11 +408,8 @@
       </StackPanel>
     </Border>
 
-    <!-- モード①: 出力ファイル -->
-    <Border
-      Style="{StaticResource Card}"
-      Visibility="{Binding ShowSingleFileOutput, Converter={StaticResource BoolToVisibilityConverter}}"
-    >
+    <!-- 出力先（非分割時はファイル、分割時はフォルダ。ラベルはモードで出し分け。参照ボタンは 1 つ） -->
+    <Border Style="{StaticResource Card}">
       <StackPanel>
         <TextBlock
           Style="{StaticResource SectionHeader}"
@@ -417,28 +421,36 @@
             <ColumnDefinition Width="*" />
             <ColumnDefinition Width="Auto" />
           </Grid.ColumnDefinitions>
+          <!-- ラベルは 2 つ重ね、Visibility でモードごとに片方だけ表示する（非分割=ファイル / 分割=フォルダ） -->
           <TextBlock
             Grid.Column="0"
             Style="{StaticResource FieldLabel}"
             Text="{x:Static res:Strings.CodeGen_File}"
+            Visibility="{Binding ShowSingleFileOutput, Converter={StaticResource BoolToVisibilityConverter}}"
+          />
+          <TextBlock
+            Grid.Column="0"
+            Style="{StaticResource FieldLabel}"
+            Text="{x:Static res:Strings.CodeGen_Folder}"
+            Visibility="{Binding ShowSplitOptions, Converter={StaticResource BoolToVisibilityConverter}}"
           />
           <TextBox
             Grid.Column="1"
             Style="{StaticResource FormInput}"
-            Text="{Binding OutputFilePath, UpdateSourceTrigger=PropertyChanged}"
+            Text="{Binding OutputPath, UpdateSourceTrigger=PropertyChanged}"
           />
           <Button
             Grid.Column="2"
             Margin="8,0,0,0"
             Content="{x:Static res:Strings.CodeGen_Browse}"
             Style="{StaticResource SecondaryButton}"
-            Command="{Binding BrowseOutputFileCommand}"
+            Command="{Binding BrowseOutputCommand}"
           />
         </Grid>
       </StackPanel>
     </Border>
 
-    <!-- モード②: 分割設定 -->
+    <!-- モード②: 分割設定（カテゴリ別 namespace とプレビュー。出力先は上の共通行が担う） -->
     <Border
       Style="{StaticResource Card}"
       Visibility="{Binding ShowSplitOptions, Converter={StaticResource BoolToVisibilityConverter}}"
@@ -448,32 +460,6 @@
           Style="{StaticResource SectionHeader}"
           Text="{x:Static res:Strings.CodeGen_OutputAndSplit}"
         />
-
-        <!-- 出力フォルダ -->
-        <Grid Margin="0,0,0,14">
-          <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="96" />
-            <ColumnDefinition Width="*" />
-            <ColumnDefinition Width="Auto" />
-          </Grid.ColumnDefinitions>
-          <TextBlock
-            Grid.Column="0"
-            Style="{StaticResource FieldLabel}"
-            Text="{x:Static res:Strings.CodeGen_Folder}"
-          />
-          <TextBox
-            Grid.Column="1"
-            Style="{StaticResource FormInput}"
-            Text="{Binding OutputFolderPath, UpdateSourceTrigger=PropertyChanged}"
-          />
-          <Button
-            Grid.Column="2"
-            Margin="8,0,0,0"
-            Content="{x:Static res:Strings.CodeGen_Browse}"
-            Style="{StaticResource SecondaryButton}"
-            Command="{Binding BrowseOutputFolderCommand}"
-          />
-        </Grid>
 
         <!-- カテゴリ別 namespace -->
         <TextBlock
@@ -669,13 +655,22 @@
 
     <!-- フッタ -->
     <DockPanel Margin="0,10,0,0">
-      <TextBlock
-        DockPanel.Dock="Left"
-        VerticalAlignment="Center"
-        Foreground="#B91C1C"
-        TextWrapping="Wrap"
-        Text="{Binding StatusMessage}"
-      />
+      <!-- 左寄せ: 設定プリセットの読み込み・名前を付けて保存（右寄せの確定系ボタンとは用途が異なるため左に分ける） -->
+      <StackPanel DockPanel.Dock="Left" Orientation="Horizontal">
+        <Button
+          Margin="0,0,8,0"
+          Content="{x:Static res:Strings.CodeGen_LoadSettings}"
+          Style="{StaticResource SecondaryButton}"
+          Command="{Binding LoadSettingsFromCommand}"
+          ToolTip="{x:Static res:Strings.CodeGen_LoadSettingsToolTip}"
+        />
+        <Button
+          Content="{x:Static res:Strings.CodeGen_SaveSettings}"
+          Style="{StaticResource SecondaryButton}"
+          Command="{Binding SaveSettingsAsCommand}"
+          ToolTip="{x:Static res:Strings.CodeGen_SaveSettingsToolTip}"
+        />
+      </StackPanel>
       <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
         <Button
           Margin="0,0,8,0"
@@ -697,6 +692,14 @@
           Command="{Binding CancelCommand}"
         />
       </StackPanel>
+      <!-- 残り幅を占有する fill 要素として最後に置く（DockPanel の LastChildFill 既定に従う） -->
+      <TextBlock
+        Margin="12,0"
+        VerticalAlignment="Center"
+        Foreground="#B91C1C"
+        TextWrapping="Wrap"
+        Text="{Binding StatusMessage}"
+      />
     </DockPanel>
   </StackPanel>
 </Window>

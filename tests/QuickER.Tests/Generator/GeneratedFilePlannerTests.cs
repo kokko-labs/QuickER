@@ -76,6 +76,7 @@ public class GeneratedFilePlannerTests
             NamespaceName = "Acme.App",
             SplitFilesByCategory = true,
             GenerateValueObjects = true,
+            GenerateRepositories = true,
         };
 
         var plan = GeneratedFilePlanner.Plan(options);
@@ -109,6 +110,7 @@ public class GeneratedFilePlannerTests
         {
             NamespaceName = "Acme.App",
             SplitFilesByCategory = true,
+            GenerateRepositories = true,
             GenerateRemoteServices = true,
         };
 
@@ -197,7 +199,6 @@ public class GeneratedFilePlannerTests
     {
         var options = new CodeGenerationOptions
         {
-            GenerateEntityClasses = true,
             GenerateEditModels = false,
             GenerateMappers = false,
             GenerateRepositories = false,

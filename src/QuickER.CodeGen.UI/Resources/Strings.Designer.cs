@@ -96,9 +96,15 @@ namespace QuickER.CodeGen.UI.Resources {
             }
         }
 
-        public static string CodeGen_EntityTooltip {
+        public static string CodeGen_GenerateInMemory {
             get {
-                return ResourceManager.GetString("CodeGen_EntityTooltip", resourceCulture);
+                return ResourceManager.GetString("CodeGen_GenerateInMemory", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_GenerateInMemoryToolTip {
+            get {
+                return ResourceManager.GetString("CodeGen_GenerateInMemoryToolTip", resourceCulture);
             }
         }
 
@@ -330,6 +336,12 @@ namespace QuickER.CodeGen.UI.Resources {
             }
         }
 
+        public static string CodeGen_Status_InMemoryRuntimePackagesConflict {
+            get {
+                return ResourceManager.GetString("CodeGen_Status_InMemoryRuntimePackagesConflict", resourceCulture);
+            }
+        }
+
         public static string CodeGen_Status_NamespaceInvalidFormat {
             get {
                 return ResourceManager.GetString("CodeGen_Status_NamespaceInvalidFormat", resourceCulture);
@@ -345,6 +357,54 @@ namespace QuickER.CodeGen.UI.Resources {
         public static string CodeGen_Status_OutputFileRequired {
             get {
                 return ResourceManager.GetString("CodeGen_Status_OutputFileRequired", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_LoadSettings {
+            get {
+                return ResourceManager.GetString("CodeGen_LoadSettings", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_SaveSettings {
+            get {
+                return ResourceManager.GetString("CodeGen_SaveSettings", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_LoadSettingsToolTip {
+            get {
+                return ResourceManager.GetString("CodeGen_LoadSettingsToolTip", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_SaveSettingsToolTip {
+            get {
+                return ResourceManager.GetString("CodeGen_SaveSettingsToolTip", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_SettingsDialogTitle {
+            get {
+                return ResourceManager.GetString("CodeGen_SettingsDialogTitle", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_SettingsSavedMessage {
+            get {
+                return ResourceManager.GetString("CodeGen_SettingsSavedMessage", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_SettingsSaveFailedMessage {
+            get {
+                return ResourceManager.GetString("CodeGen_SettingsSaveFailedMessage", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_SettingsLoadFailedMessage {
+            get {
+                return ResourceManager.GetString("CodeGen_SettingsLoadFailedMessage", resourceCulture);
             }
         }
 

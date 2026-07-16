@@ -27,6 +27,9 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     /// <summary>出力先のファイル / フォルダ選択ダイアログの表示先</summary>
     private readonly IFileDialogService _files;
 
+    /// <summary>設定の保存／読込の結果（成功通知・失敗エラー）を表示するメッセージダイアログ</summary>
+    private readonly IDialogService _dialogs;
+
     /// <summary>ベース名前空間変更時の子名前空間追従更新を一時的に抑止するフラグ（設定適用中に使う）</summary>
     private bool _suppressNamespaceFollow;
 
@@ -45,11 +48,13 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     public CSharpGenerationDialogViewModel(
         CSharpGenerationSettingsStore? store = null,
         IFileDialogService? files = null,
-        IDatabaseProvider? currentProvider = null
+        IDatabaseProvider? currentProvider = null,
+        IDialogService? dialogs = null
     )
     {
         _store = store ?? new CSharpGenerationSettingsStore();
         _files = files ?? NullFileDialogService.Instance;
+        _dialogs = dialogs ?? NullDialogService.Instance;
 
         // 対象 DB チェックの初期値: 図の方言が対応方言（sqlserver/sqlite）ならその方言のみ ON、
         // 未対応方言（PostgreSQL 等）なら両方 OFF（ユーザーに明示的な選択を求める）。
@@ -120,19 +125,11 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
 
     // ===== 出力先 =====
 
-    /// <summary>非分割（モード①）時の出力ファイルパス</summary>
+    /// <summary>出力先パス（非分割時はファイルパス、分割時は出力フォルダパス）</summary>
     [ObservableProperty]
-    private string _outputFilePath = CSharpGenerationSettings.DefaultOutputFilePath;
-
-    /// <summary>分割（モード②）時の出力フォルダパス</summary>
-    [ObservableProperty]
-    private string _outputFolderPath = string.Empty;
+    private string _outputPath = CSharpGenerationSettings.DefaultOutputFilePath;
 
     // ===== 生成対象 =====
-
-    /// <summary>Entity クラスを生成するかどうか</summary>
-    [ObservableProperty]
-    private bool _generateEntityClasses = true;
 
     /// <summary>EditModel クラスを生成するかどうか</summary>
     [ObservableProperty]
@@ -150,9 +147,39 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     [ObservableProperty]
     private bool _generateEfCore;
 
+    /// <summary>
+    /// DB 非依存のインメモリ Repository 群（テスト用）を生成するかどうか（既定 OFF）。
+    /// </summary>
+    /// <remarks>
+    /// DB アクセスの排他ラジオとは独立に選べる（「なし」/ QuickER 版 Repository / EF Core のいずれとも併用可能）。
+    /// パッケージ参照モード（<see cref="UseRuntimePackages"/>）とは併用できず、<see cref="Ok"/> で併用をブロックする。
+    /// </remarks>
+    [ObservableProperty]
+    private bool _generateInMemoryRepositories;
+
+    /// <summary>インメモリ実装生成チェックボックスのツールチップ</summary>
+    public string GenerateInMemoryToolTip => Strings.CodeGen_GenerateInMemoryToolTip;
+
     /// <summary>API リファレンス Markdown（.g.md）を追加出力するかどうか（既定 OFF。DB アクセス選択とは独立）</summary>
     [ObservableProperty]
     private bool _generateApiDocs;
+
+    /// <summary>
+    /// データアノテーション属性（[Table] / [Key] / [Column] 等）を付与するかどうか（UI 非表示。既定 true）。
+    /// </summary>
+    /// <remarks>
+    /// UI には出さないが、読み込んだ設定ファイルの値を保持し、保存・生成の双方へ書き戻す（GUI 経由でも値が失われない）。
+    /// クリア／初回起動では既定 true に戻る。
+    /// </remarks>
+    private bool _includeDataAnnotations = true;
+
+    /// <summary>
+    /// 親参照ナビゲーションへ [JsonIgnore] を付与するかどうか（UI 非表示。既定 true）。
+    /// </summary>
+    /// <remarks>
+    /// <see cref="_includeDataAnnotations"/> と同じく UI 非表示で、読込値を保持して保存・生成へ書き戻す。
+    /// </remarks>
+    private bool _includeJsonIgnoreOnParentNavigation = true;
 
     /// <summary>
     /// 無制限バイナリ列（varbinary(max) / BLOB 等）をQuickER 版 Repository の SELECT / UPDATE から除外するかどうか（既定 OFF）
@@ -334,8 +361,8 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     /// <summary>Runtime 名前空間欄を表示するか（分割時は常に必要）</summary>
     public bool ShowRuntimeNamespace => SplitFilesByCategory;
 
-    /// <summary>Entity 名前空間欄を表示するか</summary>
-    public bool ShowEntityNamespace => SplitFilesByCategory && GenerateEntityClasses;
+    /// <summary>Entity 名前空間欄を表示するか（Entity は常時生成のため分割時は常に表示）</summary>
+    public bool ShowEntityNamespace => SplitFilesByCategory;
 
     /// <summary>EditModel 名前空間欄を表示するか</summary>
     public bool ShowEditModelNamespace => SplitFilesByCategory && GenerateEditModels;
@@ -344,11 +371,12 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     public bool ShowMapperNamespace => SplitFilesByCategory && GenerateMappers;
 
     /// <summary>
-    /// Repository 名前空間欄を表示するか。EF Core 選択時も Repository バケット（共通契約＋Repository
-    /// インターフェイス）は出力されるため、DB アクセスが「なし」以外なら表示する
+    /// Repository 名前空間欄を表示するか。EF Core・インメモリ選択時も Repository バケット（共通契約＋Repository
+    /// インターフェイス）は出力されるため、それらのいずれかが有効なら表示する
     /// </summary>
     public bool ShowRepositoryNamespace =>
-        SplitFilesByCategory && (GenerateRepositories || GenerateEfCore);
+        SplitFilesByCategory
+        && (GenerateRepositories || GenerateEfCore || GenerateInMemoryRepositories);
 
     /// <summary>ValueObject 名前空間欄を表示するか</summary>
     public bool ShowValueObjectNamespace => SplitFilesByCategory && GenerateValueObjects;
@@ -363,8 +391,6 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
         OnPropertyChanged(nameof(MergeIntoSingleFile));
         RaiseDerivedChanged();
     }
-
-    partial void OnGenerateEntityClassesChanged(bool value) => RaiseDerivedChanged();
 
     partial void OnGenerateEditModelsChanged(bool value) => RaiseDerivedChanged();
 
@@ -383,6 +409,9 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
         RaiseDbAccessChanged();
         RaiseDerivedChanged();
     }
+
+    // インメモリ実装の切替は Repository バケット（契約＋インメモリ実装）の有無を変えるため、表示制御・プレビューを追従させる
+    partial void OnGenerateInMemoryRepositoriesChanged(bool value) => RaiseDerivedChanged();
 
     partial void OnGenerateValueObjectsChanged(bool value) => RaiseDerivedChanged();
 
@@ -413,7 +442,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
 
     partial void OnEfCoreNamespaceChanged(string value) => RefreshPreview();
 
-    partial void OnOutputFilePathChanged(string value) => RefreshPreview();
+    partial void OnOutputPathChanged(string value) => RefreshPreview();
 
     /// <summary>ベース名前空間が変わったら、既定（{旧base}.{接尾辞}）のままの子名前空間を新ベースへ追従させる</summary>
     partial void OnBaseNamespaceChanged(string? oldValue, string newValue)
@@ -505,7 +534,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
         try
         {
             SplitFilesByCategory = settings.SplitFilesByCategory;
-            BaseNamespace = settings.BaseNamespace;
+            BaseNamespace = settings.NamespaceName;
             RuntimeNamespace = Prefill(settings.RuntimeNamespace, GenerationBucket.Runtime);
             EntityNamespace = Prefill(settings.EntityNamespace, GenerationBucket.Entity);
             EditModelNamespace = Prefill(settings.EditModelNamespace, GenerationBucket.EditModel);
@@ -519,14 +548,30 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
                 GenerationBucket.ValueObject
             );
             EfCoreNamespace = Prefill(settings.EfCoreNamespace, GenerationBucket.EfCore);
-            // Entity は全カテゴリの前提のため常に生成する（保存値に依らず ON。UI もチェック解除不可）
-            GenerateEntityClasses = true;
             GenerateEditModels = settings.GenerateEditModels;
             GenerateMappers = settings.GenerateMappers;
             // DB アクセスは排他選択。両方 true の保存値（手編集等）はQuickER 版 Repository を優先する
             // （Repository ラジオは常時選択可のため、方言による無効化は行わない）
             GenerateRepositories = settings.GenerateRepositories;
             GenerateEfCore = settings.GenerateEfCore && !GenerateRepositories;
+            // 対象 DB チェック（SQL Server / SQLite）は、保存値のリストが非空ならその内容で復元する。
+            // 空リスト（未指定＝旧設定 / クリア）のときは ctor で図の方言から導出した初期値を保つ。
+            if (settings.RepositoryDialects.Count > 0)
+            {
+                TargetSqlServer = settings.RepositoryDialects.Contains(
+                    SqlServerProvider.ProviderName,
+                    StringComparer.OrdinalIgnoreCase
+                );
+                TargetSqlite = settings.RepositoryDialects.Contains(
+                    SqliteProvider.ProviderName,
+                    StringComparer.OrdinalIgnoreCase
+                );
+            }
+            // インメモリ実装（テスト用）は排他ラジオと独立のため、保存値をそのまま復元する
+            GenerateInMemoryRepositories = settings.GenerateInMemoryRepositories;
+            // 属性系（UI 非表示）は読込値を保持し、ToSettings / ToOptions で書き戻す（GUI 経由でも値が失われない）
+            _includeDataAnnotations = settings.IncludeDataAnnotations;
+            _includeJsonIgnoreOnParentNavigation = settings.IncludeJsonIgnoreOnParentNavigation;
             // パッケージ参照モードは EF Core とも併用できるため、保存値をそのまま復元する
             UseRuntimePackages = settings.UseRuntimePackages;
             // リモート対応（リモート面の追加生成）は保存値をそのまま復元する（行の表示/非表示は UI 側で連動）
@@ -540,8 +585,12 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
             ExcludeUnboundedBinaryColumns = settings.ExcludeUnboundedBinaryColumns;
             GenerateValueObjects = settings.GenerateValueObjects;
             UseGuidKeyForStringPrimaryKey = settings.UseGuidKeyForStringPrimaryKey;
-            OutputFilePath = settings.OutputFilePath;
-            OutputFolderPath = settings.OutputFolderPath;
+            // 非分割時のみ、未指定の出力先を既定ファイル名でプリフィルする
+            // （分割時は空のまま＝Ok() の「出力フォルダを指定してください」検証を効かせる）
+            OutputPath =
+                string.IsNullOrWhiteSpace(settings.OutputPath) && !settings.SplitFilesByCategory
+                    ? CSharpGenerationSettings.DefaultOutputFilePath
+                    : settings.OutputPath;
         }
         finally
         {
@@ -563,7 +612,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
         new()
         {
             SplitFilesByCategory = SplitFilesByCategory,
-            BaseNamespace = BaseNamespace.Trim(),
+            NamespaceName = BaseNamespace.Trim(),
             RuntimeNamespace = RuntimeNamespace.Trim(),
             EntityNamespace = EntityNamespace.Trim(),
             EditModelNamespace = EditModelNamespace.Trim(),
@@ -571,11 +620,12 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
             RepositoryNamespace = RepositoryNamespace.Trim(),
             ValueObjectNamespace = ValueObjectNamespace.Trim(),
             EfCoreNamespace = EfCoreNamespace.Trim(),
-            GenerateEntityClasses = GenerateEntityClasses,
             GenerateEditModels = GenerateEditModels,
             GenerateMappers = GenerateMappers,
             GenerateRepositories = GenerateRepositories,
+            RepositoryDialects = SelectedRepositoryDialects(),
             GenerateEfCore = GenerateEfCore,
+            GenerateInMemoryRepositories = GenerateInMemoryRepositories,
             UseRuntimePackages = UseRuntimePackages,
             GenerateRemoteContracts = GenerateRemoteContracts,
             GenerateRemoteServices = GenerateRemoteServices,
@@ -583,21 +633,26 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
             ExcludeUnboundedBinaryColumns = ExcludeUnboundedBinaryColumns,
             GenerateValueObjects = GenerateValueObjects,
             UseGuidKeyForStringPrimaryKey = UseGuidKeyForStringPrimaryKey,
-            OutputFilePath = OutputFilePath.Trim(),
-            OutputFolderPath = OutputFolderPath.Trim(),
+            // UI 非表示の属性系は保持値をそのまま書き戻す（読込→保存で値が失われない）
+            IncludeDataAnnotations = _includeDataAnnotations,
+            IncludeJsonIgnoreOnParentNavigation = _includeJsonIgnoreOnParentNavigation,
+            // 出力先は OutputPath に一本化する。CLI（--config）は保存された OutputPath のファイル名部分のみを
+            // 出力ファイル名として使う（出力先ディレクトリは常に --out）。分割時はフォルダパスが入る
+            OutputPath = OutputPath.Trim(),
         };
 
     /// <summary>現在の設定値からコード生成オプションを組み立てる</summary>
     /// <remarks>
-    /// <see cref="CodeGenerationOptions.RepositoryDialects"/> はチェックされた対象 DB を
-    /// 固定順（sqlserver, sqlite）で設定する（リストが単一指定 <see cref="CodeGenerationOptions.RepositoryDialect"/>
-    /// より優先されるため、こちらのみ設定すれば足りる）
+    /// <see cref="CodeGenerationOptions.RepositoryDialects"/> はチェックされた対象 DB を固定順（sqlserver, sqlite）で
+    /// 設定する（唯一の指定手段）。分割時は planner がバケット別ファイル名を使うため出力ファイル名は inert＝既定名を渡す
     /// </remarks>
     public CodeGenerationOptions ToOptions() =>
         new()
         {
             NamespaceName = BaseNamespace.Trim(),
-            OutputFileName = Path.GetFileName(OutputFilePath.Trim()),
+            OutputFileName = SplitFilesByCategory
+                ? CSharpGenerationSettings.DefaultOutputFilePath
+                : Path.GetFileName(OutputPath.Trim()),
             SplitFilesByCategory = SplitFilesByCategory,
             RuntimeNamespace = NullIfEmpty(RuntimeNamespace),
             EntityNamespace = NullIfEmpty(EntityNamespace),
@@ -606,12 +661,12 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
             RepositoryNamespace = NullIfEmpty(RepositoryNamespace),
             ValueObjectNamespace = NullIfEmpty(ValueObjectNamespace),
             EfCoreNamespace = NullIfEmpty(EfCoreNamespace),
-            GenerateEntityClasses = GenerateEntityClasses,
             GenerateEditModels = GenerateEditModels,
             GenerateMappers = GenerateMappers,
             GenerateRepositories = GenerateRepositories,
             RepositoryDialects = SelectedRepositoryDialects(),
             GenerateEfCore = GenerateEfCore,
+            GenerateInMemoryRepositories = GenerateInMemoryRepositories,
             UseRuntimePackages = UseRuntimePackages,
             GenerateRemoteContracts = GenerateRemoteContracts,
             GenerateRemoteServices = GenerateRemoteServices,
@@ -619,6 +674,9 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
             ExcludeUnboundedBinaryColumns = ExcludeUnboundedBinaryColumns,
             GenerateValueObjects = GenerateValueObjects,
             UseGuidKeyForStringPrimaryKey = UseGuidKeyForStringPrimaryKey,
+            // UI 非表示の属性系も生成へ反映する（読込値を保持して効かせる）
+            IncludeDataAnnotations = _includeDataAnnotations,
+            IncludeJsonIgnoreOnParentNavigation = _includeJsonIgnoreOnParentNavigation,
         };
 
     /// <summary>チェックされた対象 DB を固定順（SQL Server → SQLite）で返す</summary>
@@ -659,16 +717,30 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
         }
     }
 
-    /// <summary>出力先ファイルを選択し、結果をパスへ反映する</summary>
+    /// <summary>出力先を選択し、結果をパスへ反映する（分割時はフォルダ、非分割時はファイルを選ぶ）</summary>
     [RelayCommand]
-    private void BrowseOutputFile()
+    private void BrowseOutput()
     {
-        var fileName = Path.GetFileName(OutputFilePath);
+        if (SplitFilesByCategory)
+        {
+            var selectedPath = _files.PickFolder(Strings.CodeGen_PickFolderTitle, OutputPath);
+
+            if (string.IsNullOrWhiteSpace(selectedPath))
+            {
+                return;
+            }
+
+            OutputPath = selectedPath;
+            StatusMessage = string.Empty;
+            return;
+        }
+
+        var fileName = Path.GetFileName(OutputPath);
         var result = _files.PickSaveFile(
             "C# Generated Code (*.g.cs)|*.g.cs",
             ".g.cs",
             string.IsNullOrWhiteSpace(fileName) ? "QuickEREntities.g.cs" : fileName,
-            Path.GetDirectoryName(OutputFilePath)
+            Path.GetDirectoryName(OutputPath)
         );
 
         if (result is null)
@@ -676,28 +748,101 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
             return;
         }
 
-        OutputFilePath = result.Path;
-        StatusMessage = string.Empty;
-    }
-
-    /// <summary>出力先フォルダを選択し、結果をパスへ反映する</summary>
-    [RelayCommand]
-    private void BrowseOutputFolder()
-    {
-        var selectedPath = _files.PickFolder(Strings.CodeGen_PickFolderTitle, OutputFolderPath);
-
-        if (string.IsNullOrWhiteSpace(selectedPath))
-        {
-            return;
-        }
-
-        OutputFolderPath = selectedPath;
+        OutputPath = result.Path;
         StatusMessage = string.Empty;
     }
 
     /// <summary>全設定を工場出荷既定へ戻す（ディスクへの反映は次の生成確定時）</summary>
     [RelayCommand]
     private void Clear() => ApplySettings(CSharpGenerationSettings.CreateDefault());
+
+    /// <summary>現在の設定一式を名前を付けて JSON ファイルへ保存する（プロジェクト別プリセットのエクスポート）</summary>
+    /// <remarks>
+    /// 対象 DB チェックを含む設定一式を、CLI の <c>--config</c> にそのまま渡せるスキーマで書き出す。
+    /// %APPDATA% の codegen-settings.json へは書き込まず、選択された任意ファイルへ書き出す
+    /// （永続化は生成確定時の <see cref="Ok"/> の責務）。成功時は情報ダイアログで通知し、
+    /// アクセス拒否・IO 失敗時はエラーダイアログを表示する（いずれも表示状態は変更しない）
+    /// </remarks>
+    [RelayCommand]
+    private void SaveSettingsAs()
+    {
+        var result = _files.PickSaveFile(
+            "QuickER CodeGen Settings (*.json)|*.json",
+            ".json",
+            "codegen-settings.json"
+        );
+
+        if (result is null)
+        {
+            // キャンセル時は何もしない（現在の表示状態は変更しない）
+            return;
+        }
+
+        try
+        {
+            _store.SaveTo(result.Path, ToSettings());
+            // 保存成功は情報ダイアログで通知する（CLI の --config へ渡せる旨も併記）
+            _dialogs.ShowInformation(
+                string.Format(Strings.CodeGen_SettingsSavedMessage, Path.GetFileName(result.Path)),
+                Strings.CodeGen_SettingsDialogTitle
+            );
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // アクセス拒否・IO 失敗はダイアログを落とさずエラーダイアログで通知する
+            _dialogs.ShowError(
+                string.Format(
+                    Strings.CodeGen_SettingsSaveFailedMessage,
+                    Path.GetFileName(result.Path)
+                ),
+                Strings.CodeGen_SettingsDialogTitle
+            );
+        }
+    }
+
+    /// <summary>保存済みの設定 JSON ファイルを読み込み、ダイアログの表示状態へ反映する（プリセットのインポート）</summary>
+    /// <remarks>
+    /// 反映のみ行い %APPDATA% の codegen-settings.json へは書き込まない。成功時は無通知（表示へ反映するのみ）。
+    /// 解析不能・不正・IO 失敗時はエラーダイアログを表示し、現在の表示状態は変更しない
+    /// </remarks>
+    [RelayCommand]
+    private void LoadSettingsFrom()
+    {
+        var result = _files.PickOpenFile("QuickER CodeGen Settings (*.json)|*.json");
+
+        if (result is null)
+        {
+            // キャンセル時は何もしない
+            return;
+        }
+
+        CSharpGenerationSettings? settings;
+
+        try
+        {
+            settings = _store.TryLoadFrom(result.Path);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // IO 失敗（アクセス拒否等）も解析失敗と同じくエラー表示にとどめ、表示状態は変更しない
+            settings = null;
+        }
+
+        if (settings is null)
+        {
+            _dialogs.ShowError(
+                string.Format(
+                    Strings.CodeGen_SettingsLoadFailedMessage,
+                    Path.GetFileName(result.Path)
+                ),
+                Strings.CodeGen_SettingsDialogTitle
+            );
+            return;
+        }
+
+        // 読み込み成功は無通知（表示状態へ反映するのみ）
+        ApplySettings(settings);
+    }
 
     /// <summary>入力内容を検証して確定し、設定を保存する（不正時はステータスにエラーを表示する）</summary>
     [RelayCommand]
@@ -721,6 +866,13 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
             return;
         }
 
+        // インメモリ実装（生成側の固定 infra を要する）とパッケージ参照モード（固定 infra を出力しない）は併用不可
+        if (GenerateInMemoryRepositories && UseRuntimePackages)
+        {
+            StatusMessage = Strings.CodeGen_Status_InMemoryRuntimePackagesConflict;
+            return;
+        }
+
         if (SplitFilesByCategory)
         {
             if (!ValidateSplitNamespaces(out var invalidName))
@@ -732,13 +884,13 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
                 return;
             }
 
-            if (string.IsNullOrWhiteSpace(OutputFolderPath))
+            if (string.IsNullOrWhiteSpace(OutputPath))
             {
                 StatusMessage = Strings.CodeGen_Status_OutputFolderRequired;
                 return;
             }
         }
-        else if (string.IsNullOrWhiteSpace(OutputFilePath))
+        else if (string.IsNullOrWhiteSpace(OutputPath))
         {
             StatusMessage = Strings.CodeGen_Status_OutputFileRequired;
             return;
@@ -747,8 +899,8 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
         _store.Save(ToSettings());
 
         var outputDirectory = SplitFilesByCategory
-            ? OutputFolderPath.Trim()
-            : Path.GetDirectoryName(OutputFilePath.Trim()) ?? string.Empty;
+            ? OutputPath.Trim()
+            : Path.GetDirectoryName(OutputPath.Trim()) ?? string.Empty;
 
         Result = new CSharpGenerationDialogResult(ToOptions(), outputDirectory);
         CloseAction?.Invoke(true);
@@ -844,4 +996,30 @@ file sealed class NullFileDialogService : IFileDialogService
 
     /// <inheritdoc />
     public string? PickFolder(string title, string? initialDirectory = null) => null;
+}
+
+/// <summary>何も表示しない <see cref="IDialogService"/>（未注入時＝テスト用の既定）</summary>
+/// <remarks>実 GUI 経路では合成側（WpfAppDialogService）が必ず実装を注入するため、この既定は使われない</remarks>
+file sealed class NullDialogService : IDialogService
+{
+    /// <summary>共有インスタンス（状態を持たないため単一でよい）</summary>
+    public static NullDialogService Instance { get; } = new();
+
+    /// <inheritdoc />
+    public bool Confirm(string message, string title) => false;
+
+    /// <inheritdoc />
+    public bool ConfirmWarning(string message, string title) => false;
+
+    /// <inheritdoc />
+    public void ShowInformation(string message, string title) { }
+
+    /// <inheritdoc />
+    public void ShowError(string message, string title) { }
+
+    /// <inheritdoc />
+    public void ShowInformationDetails(string message, string details, string title) { }
+
+    /// <inheritdoc />
+    public void ShowErrorDetails(string message, string details, string title) { }
 }

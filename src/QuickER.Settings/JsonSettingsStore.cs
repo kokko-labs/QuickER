@@ -74,4 +74,40 @@ public class JsonSettingsStore<TSettings>
         var json = JsonSerializer.Serialize(settings, JsonOptions);
         File.WriteAllText(SettingsPath, json);
     }
+
+    /// <summary>設定を任意のパスへ保存する（エクスポート用。親フォルダが無ければ作成する）</summary>
+    public void SaveTo(string path, TSettings settings)
+    {
+        var folder = Path.GetDirectoryName(path);
+
+        if (!string.IsNullOrEmpty(folder))
+        {
+            Directory.CreateDirectory(folder);
+        }
+
+        var json = JsonSerializer.Serialize(settings, JsonOptions);
+        File.WriteAllText(path, json);
+    }
+
+    /// <summary>任意のパスから設定を読み込む（インポート用）</summary>
+    /// <returns>読み込んだ設定。ファイルが無い・解析失敗時は null（呼び出し側がエラー表示を判断する）</returns>
+    public TSettings? TryLoadFrom(string path)
+    {
+        if (!File.Exists(path))
+        {
+            return null;
+        }
+
+        try
+        {
+            var json = File.ReadAllText(path);
+
+            // ユーザーの明示操作では失敗を可視化するため、既定値フォールバックはしない（Deserialize が null でも null を返す）
+            return JsonSerializer.Deserialize<TSettings>(json, JsonOptions);
+        }
+        catch
+        {
+            return null;
+        }
+    }
 }

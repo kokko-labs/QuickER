@@ -5,7 +5,7 @@ using QuickER.Model;
 namespace QuickER.Tests.Generator;
 
 /// <summary>
-/// QuickER 版 Repository の SQLite 方言生成（<see cref="CodeGenerationOptions.RepositoryDialect"/> = "sqlite"）が、
+/// QuickER 版 Repository の SQLite 方言生成（<see cref="CodeGenerationOptions.RepositoryDialects"/> = ["sqlite"]）が、
 /// SQLite 固有の実行経路（プレーン SELECT・LIMIT/OFFSET・マルチクエリ Include・SqliteXxx 型）を出力し、
 /// SQL Server 依存（Microsoft.Data.SqlClient / FOR JSON / SqlDbType / SqlServerRepository）を一切含まないことを検証する。
 /// </summary>
@@ -23,7 +23,8 @@ public class SqliteRepositoryDialectTests
             new CodeGenerationOptions
             {
                 NamespaceName = "Sample.Domain",
-                RepositoryDialect = "sqlite",
+                GenerateRepositories = true,
+                RepositoryDialects = ["sqlite"],
                 GenerateValueObjects = valueObjects,
             }
         );
@@ -98,7 +99,11 @@ public class SqliteRepositoryDialectTests
     {
         var result = new CSharpCodeGenerationService().Generate(
             SampleDiagram(),
-            new CodeGenerationOptions { NamespaceName = "Sample.Domain" }
+            new CodeGenerationOptions
+            {
+                NamespaceName = "Sample.Domain",
+                GenerateRepositories = true,
+            }
         );
         result.HasErrors.Should().BeFalse();
         var code = string.Join("\n", result.Files.Select(file => file.Content));

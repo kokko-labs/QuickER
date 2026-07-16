@@ -24,7 +24,7 @@ namespace QuickER.Tests.Samples;
 /// テスト1（生成コード）は、<c>quicker generate --provider sqlite --config quicker.json</c> と<b>同一の生成経路</b>を
 /// 厳密に模倣する（CLI の <c>LoadOptions</c> / <c>RunGenerate</c> と等価）。図 JSON を
 /// <see cref="JsonStorageService.Load"/> で読み、<c>quicker.json</c> を CLI と同じ流儀で読み（<see cref="JsonNode"/> →
-/// <c>RepositoryDialect="sqlite"</c> を上書き → <see cref="CodeGenerationOptions"/> へデシリアライズ。
+/// <c>RepositoryDialects=["sqlite"]</c> を補完 → <see cref="CodeGenerationOptions"/> へデシリアライズ。
 /// <c>GenerateRemoteServices=true</c> は quicker.json 由来）、<see cref="DiagramCodeGenerator.Generate"/>
 /// （SQLite プロバイダ）で生成した結果を照合する。リモートサービス生成は本体＋サーバーの 2 ファイル出力のため、
 /// <b>出力ファイル構成（ファイル名一覧・順序込み）そのものもドリフト対象</b>とする
@@ -175,7 +175,7 @@ public sealed class EcOrderRemoteSampleDriftTests
 
     /// <summary>
     /// <c>quicker.json</c> を CLI の <c>LoadOptions</c> と同じ流儀で読み、
-    /// <c>RepositoryDialect</c> をプロバイダ名で上書きしてオプションを構築する
+    /// <c>RepositoryDialects</c> をプロバイダ名で補ってオプションを構築する
     /// （<c>GenerateRemoteServices=true</c> は quicker.json 側の値をそのまま使う）。
     /// </summary>
     private static CodeGenerationOptions LoadSampleOptions(SqliteProvider provider)
@@ -183,8 +183,24 @@ public sealed class EcOrderRemoteSampleDriftTests
         var configPath = ResolveRepoRelativePath(SampleDir + "/quicker.json");
         var node = JsonNode.Parse(File.ReadAllText(configPath))?.AsObject() ?? new JsonObject();
 
-        // CLI は --repository-dialects 未指定時に provider.Name を単一 RepositoryDialect として設定する
-        node["RepositoryDialect"] = provider.Name;
+        // CLI は --repository-dialects 未指定時、設定ファイルに RepositoryDialects（非空）が無ければ
+        // provider.Name を単一要素の RepositoryDialects として設定する
+        if (node["RepositoryDialects"] is not JsonArray { Count: > 0 })
+        {
+            node["RepositoryDialects"] = new JsonArray(JsonValue.Create(provider.Name));
+        }
+
+        // CLI の LoadOptions と同じく OutputPath（ファイル名）→ OutputFileName を導出する
+        // （quicker.json は OutputPath="EcOrderRemote.g.cs" のみを持ち、OutputFileName は持たない）
+        if (
+            node["OutputFileName"] is null
+            && node["OutputPath"] is JsonValue outputPathValue
+            && outputPathValue.TryGetValue(out string? outputPath)
+            && !string.IsNullOrWhiteSpace(Path.GetFileName(outputPath))
+        )
+        {
+            node["OutputFileName"] = Path.GetFileName(outputPath);
+        }
 
         var jsonOptions = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
         return node.Deserialize<CodeGenerationOptions>(jsonOptions)

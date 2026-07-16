@@ -833,18 +833,18 @@
           <Button.ContextMenu>
             <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
               <MenuItem
-                Header="{x:Static resources:Strings.Language_Japanese}"
-                IsCheckable="True"
-                IsChecked="{Binding LanguageSwitch.IsJapaneseChecked, Mode=OneWay}"
-                Command="{Binding LanguageSwitch.SelectLanguageCommand}"
-                CommandParameter="ja"
-              />
-              <MenuItem
                 Header="{x:Static resources:Strings.Language_English}"
                 IsCheckable="True"
                 IsChecked="{Binding LanguageSwitch.IsEnglishChecked, Mode=OneWay}"
                 Command="{Binding LanguageSwitch.SelectLanguageCommand}"
                 CommandParameter="en"
+              />
+              <MenuItem
+                Header="{x:Static resources:Strings.Language_Japanese}"
+                IsCheckable="True"
+                IsChecked="{Binding LanguageSwitch.IsJapaneseChecked, Mode=OneWay}"
+                Command="{Binding LanguageSwitch.SelectLanguageCommand}"
+                CommandParameter="ja"
               />
             </ContextMenu>
           </Button.ContextMenu>

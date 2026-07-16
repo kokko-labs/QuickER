@@ -29,14 +29,8 @@ quicker generate --schema diagram.json --out ./Generated --provider sqlserver --
 | `--out <dir>` | ✅ | 生成コードの出力先フォルダ |
 | `--provider <name>` | | 対象データベースの種類。`sqlserver`（既定）/ `postgresql` / `mysql` / `oracle` / `sqlite` |
 | `--config <file>` | | 生成オプション設定ファイル（quicker.json）。下記参照 |
-| `--namespace <name>` | | 生成コードのルート名前空間（設定ファイルを上書き） |
-| `--split` | | カテゴリごとに別ファイル・別名前空間で出力する（設定ファイルを上書き） |
-| `--repository-dialects <list>` | | QuickER 版 Repository を同時生成する方言（カンマ区切り。例 `sqlserver,sqlite`）。未指定時は `--provider` から単一導出する |
-| `--runtime-packages` | | ランタイム（固定コード）を出力せず、NuGet パッケージ `QuickER.Runtime.*` への参照で賄う |
-| `--remote-contracts` | | リモート操作用インターフェイス `I{Entity}RemoteRepository`（CRUD・保存・名前付きクエリのみ）を追加生成する。`I{Entity}Repository` は全メソッドを持ったままこれを継承する（既定 OFF・設定ファイルを上書き） |
-| `--remote-services` | | リモート面の HTTP クライアント実装（`Http{Entity}RemoteRepository`）を本体へ同梱し、ASP.NET Core サーバー実装（`MapGeneratedRemoteEndpoints`）を `{ベース名}.RemoteServer.g.cs` へ追加出力する（`--remote-contracts` を自動的に含意。既定 OFF・設定ファイルを上書き。[生成コードの使い方](code-generation.md) 参照） |
-| `--api-docs` | | API リファレンス Markdown（`{ベース名}.g.md`）を 1 つ追加出力する（既定 OFF・設定ファイルを上書き） |
-| `--exclude-unbounded-binary` | | 無制限バイナリ列（`varbinary(max)`・長さ宣言なし BLOB）をQuickER 版 Repository の SELECT / UPDATE から除外する（INSERT は全列のまま。既定 OFF・設定ファイルを上書き。[生成コードの使い方](code-generation.md#無制限バイナリ列の除外excludeunboundedbinarycolumns) 参照） |
+
+これらに加えて、**設定ファイル（quicker.json）の全キーは同名の kebab-case フラグとして指定でき**、設定ファイルより優先されます（優先順位: **CLI フラグ ＞ 設定ファイル ＞ 既定値**）。フラグ名はキーの機械的な kebab-case 変換で、例えば `namespaceName` → `--namespace-name`、`generateRepositories` → `--generate-repositories`、`splitFilesByCategory` → `--split-files-by-category`、`outputPath` → `--output-path` です。bool キーは**三値**で、`--flag`（値なし）＝ `true`、`--flag false` ＝ `false`、未指定＝設定ファイルの値になります。各キーの意味は下記「設定ファイル」の表を参照してください（`--repository-dialects` はカンマ区切りの方言リストで、未指定時は `--provider` の方言から単一導出します）。
 
 ## quicker scaffold
 
@@ -50,47 +44,51 @@ quicker scaffold --connection "Server=.;Database=Shop;Integrated Security=true;T
 |---|:-:|---|
 | `--connection <string>` | ✅ | 接続文字列（形式は `--provider` の DBMS に従う） |
 
-そのほかのオプション（`--out` / `--config` / `--provider` / `--namespace` / `--split` / `--repository-dialects` / `--runtime-packages` / `--remote-contracts` / `--remote-services` / `--api-docs` / `--exclude-unbounded-binary`）は `generate` と同じです。
+そのほかのオプション（`--out` / `--config` / `--provider`、および設定キーと同名の kebab-case フラグ群）は `generate` と同じです。
 
 ## 設定ファイル（quicker.json）
 
-`--config` で渡す JSON で、生成オプションをまとめて指定できます。キー名は大文字小文字を区別しません。CLI フラグ（`--namespace` / `--split` / `--repository-dialects` / `--runtime-packages` / `--remote-contracts` / `--remote-services` / `--api-docs` / `--exclude-unbounded-binary`）は設定ファイルより優先されます。
+`--config` で渡す JSON で、生成オプションをまとめて指定できます。これは GUI の設定保存ファイル（`codegen-settings.json`）と**同一スキーマ**です（GUI は camelCase で書き出しますが、CLI は大文字小文字を区別せず解釈するためそのまま渡せます）。**下表の各キーは同名の kebab-case フラグとして CLI からも指定でき、設定ファイルより優先されます**（優先順位: CLI フラグ ＞ 設定ファイル ＞ 既定値。bool は `--flag` / `--flag false` の三値）。
+
+> **破壊的変更（v-next）**: `GenerateRepositories` の既定が `true` → `false` になりました。以前はキーを省略すると Repository が生成されましたが、**現在は DB アクセスコードを生成するには `GenerateRepositories: true`（または `GenerateEfCore: true`）の明示指定が必要**です（GUI の DB アクセス「なし」既定と揃えるため）。
+
+キーはカテゴリ順（出力モード → 名前空間 → 生成対象 → 値オブジェクト → DB アクセス → リモート対応 → ランタイム・ドキュメント → 属性 → 出力先）に並べています。
 
 ```json
 {
+  "SplitFilesByCategory": false,
   "NamespaceName": "MyApp.Generated",
-  "OutputFileName": "MyAppEntities.g.cs",
-  "GenerateEntityClasses": true,
   "GenerateEditModels": true,
   "GenerateMappers": true,
+  "GenerateValueObjects": false,
   "GenerateRepositories": true,
   "GenerateEfCore": false,
-  "GenerateValueObjects": false,
   "IncludeDataAnnotations": true,
-  "SplitFilesByCategory": false
+  "OutputPath": "MyAppEntities.g.cs"
 }
 ```
 
-主なキー（かっこ内は既定値）:
+主なキー（かっこ内は既定値・カテゴリ順）:
 
 | キー | 説明 |
 |---|---|
+| `SplitFilesByCategory`（`false`） | カテゴリごとに別ファイル・別名前空間で出力する。`EntityNamespace` / `RepositoryNamespace` などで名前空間を個別指定できる |
 | `NamespaceName`（`Generated`） | 生成コードのルート名前空間 |
-| `OutputFileName`（`QuickEREntities.g.cs`） | 単一ファイル出力時のファイル名 |
-| `GenerateEntityClasses` / `GenerateEditModels` / `GenerateMappers`（すべて `true`） | 各カテゴリの生成有無 |
-| `GenerateRepositories`（`true`） | QuickER 版 Repository（軽量ミニ ORM）を生成する |
-| `RepositoryDialects`（未指定） | QuickER 版 Repository のマルチターゲット方言リスト（例 `["sqlserver", "sqlite"]`）。通常は CLI の `--provider` / `--repository-dialects` から設定されるため、設定ファイルで指定する必要はない |
-| `GenerateEfCore`（`false`） | EF Core 用の `QuickErDbContext` ＋ EF Core 版 Repository 実装を生成する。マルチターゲット（実効方言 2 つ以上）とは併用不可 |
-| `GenerateInMemoryRepositories`（`false`） | テスト用のインメモリ Repository 実装を生成する（`--runtime-packages` とは併用不可） |
+| `GenerateEditModels` / `GenerateMappers`（ともに `true`） | 各カテゴリの生成有無。**Entity クラスは常時生成**され、専用キーはない |
 | `GenerateValueObjects`（`false`） | 列ごとの値オブジェクト型（`CustomerIdValue` など）を生成する（[生成コードの使い方](code-generation.md#値オブジェクトgeneratevalueobjects) 参照） |
 | `UseGuidKeyForStringPrimaryKey`（`false`） | string 主キーを GUID 値オブジェクトにする（`GenerateValueObjects` が有効な場合のみ） |
-| `IncludeDataAnnotations`（`true`） | `[Required]` / `[MaxLength]` 等の DataAnnotations と、DB 定義メタ属性（`[DbTableMeta]` / `[DbColumnMeta]`）を付与する |
-| `SplitFilesByCategory`（`false`） | カテゴリごとに別ファイル・別名前空間で出力する。`EntityNamespace` / `RepositoryNamespace` などで名前空間を個別指定できる |
+| `GenerateRepositories`（`false`） | QuickER 版 Repository（軽量ミニ ORM）を生成する。**既定では DB アクセスコードを生成しない**（GUI と同じ既定） |
+| `RepositoryDialects`（未指定） | QuickER 版 Repository のマルチターゲット方言リスト（例 `["sqlserver", "sqlite"]`）。未指定時は CLI の `--provider` / `--repository-dialects` から設定される |
+| `ExcludeUnboundedBinaryColumns`（`false`） | 無制限バイナリ列をQuickER 版 Repository の SELECT / UPDATE から除外する（CLI の `--exclude-unbounded-binary-columns` に対応。[生成コードの使い方](code-generation.md#無制限バイナリ列の除外excludeunboundedbinarycolumns) 参照） |
+| `GenerateEfCore`（`false`） | EF Core 用の `QuickErDbContext` ＋ EF Core 版 Repository 実装を生成する。マルチターゲット（実効方言 2 つ以上）とは併用不可 |
+| `GenerateInMemoryRepositories`（`false`） | テスト用のインメモリ Repository 実装を生成する（`UseRuntimePackages` とは併用不可） |
+| `GenerateRemoteContracts`（`false`） | リモート操作用インターフェイス `I{Entity}RemoteRepository` を追加生成する（CLI の `--generate-remote-contracts` に対応。Repository / EF Core 契約が前提。[生成コードの使い方](code-generation.md) 参照） |
+| `GenerateRemoteServices`（`false`） | リモート面の HTTP クライアント／サーバー実装を生成する（`GenerateRemoteContracts` を自動的に含意。CLI の `--generate-remote-services` に対応。[生成コードの使い方](code-generation.md) 参照） |
 | `UseRuntimePackages`（`false`） | ランタイム固定コードを出力せず NuGet パッケージ参照で賄う（[生成コードの使い方](code-generation.md) 参照） |
-| `GenerateRemoteContracts`（`false`） | リモート操作用インターフェイス `I{Entity}RemoteRepository` を追加生成する（CLI の `--remote-contracts` に対応。[生成コードの使い方](code-generation.md) 参照） |
-| `GenerateRemoteServices`（`false`） | リモート面の HTTP クライアント／サーバー実装を生成する（`GenerateRemoteContracts` を自動的に含意。CLI の `--remote-services` に対応。[生成コードの使い方](code-generation.md) 参照） |
-| `GenerateApiDocs`（`false`） | API リファレンス Markdown（`{ベース名}.g.md`）を追加出力する（CLI の `--api-docs` に対応。[生成コードの使い方](code-generation.md) 参照） |
-| `ExcludeUnboundedBinaryColumns`（`false`） | 無制限バイナリ列をQuickER 版 Repository の SELECT / UPDATE から除外する（CLI の `--exclude-unbounded-binary` に対応。[生成コードの使い方](code-generation.md#無制限バイナリ列の除外excludeunboundedbinarycolumns) 参照） |
+| `GenerateApiDocs`（`false`） | API リファレンス Markdown（`{ベース名}.g.md`）を追加出力する（CLI の `--generate-api-docs` に対応。[生成コードの使い方](code-generation.md) 参照） |
+| `IncludeDataAnnotations`（`true`） | `[Required]` / `[MaxLength]` 等の DataAnnotations と、DB 定義メタ属性（`[DbTableMeta]` / `[DbColumnMeta]`）を付与する |
+| `IncludeJsonIgnoreOnParentNavigation`（`true`） | 親参照ナビゲーションへ `[JsonIgnore]` を付与する（JSON シリアライズ時の循環参照対策） |
+| `OutputPath`（`QuickEREntities.g.cs` 相当） | 出力先パス。CLI（`--config` / `--output-path`）はそのファイル名部分のみを単一ファイル出力のファイル名として使う（出力先ディレクトリは常に `--out`）。GUI では出力先のフルパス（非分割時はファイル・分割時はフォルダ）が入ることがあるが、CLI は同じ規則で解釈する |
 
 ## 実行例 — リポジトリ同梱サンプルの再生成
 
@@ -100,10 +98,10 @@ dotnet run --project src/QuickER.Cli -- generate `
   --out samples/ec-order/EcOrderSample/Generated `
   --provider sqlite `
   --config samples/ec-order/quicker.json `
-  --api-docs
+  --generate-api-docs
 ```
 
-`--api-docs` により、生成コード `EcOrder.g.cs` と同じベース名の API リファレンス Markdown
+`--generate-api-docs` により、生成コード `EcOrder.g.cs` と同じベース名の API リファレンス Markdown
 `EcOrder.g.md` も同梱出力されます（いずれもチェックイン済み・ドリフト検知の対象）。
 
 ## ライセンス注記

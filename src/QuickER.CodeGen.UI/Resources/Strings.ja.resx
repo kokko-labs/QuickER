@@ -79,9 +79,6 @@
   <data name="CodeGen_GenerationTarget" xml:space="preserve">
     <value>生成対象</value>
   </data>
-  <data name="CodeGen_EntityTooltip" xml:space="preserve">
-    <value>Entity は全カテゴリの前提のため常に生成されます</value>
-  </data>
   <data name="CodeGen_ValueObject" xml:space="preserve">
     <value>値オブジェクト</value>
   </data>
@@ -102,6 +99,12 @@
   </data>
   <data name="CodeGen_TargetDb" xml:space="preserve">
     <value>対象DB</value>
+  </data>
+  <data name="CodeGen_GenerateInMemory" xml:space="preserve">
+    <value>インメモリ実装 (テスト用) を生成する</value>
+  </data>
+  <data name="CodeGen_GenerateInMemoryToolTip" xml:space="preserve">
+    <value>DB 非依存のインメモリ Repository（プロトタイピング・単体テスト向け）を生成します。ランタイムの NuGet パッケージ参照モードとは併用できません</value>
   </data>
   <data name="CodeGen_Runtime" xml:space="preserve">
     <value>ランタイム</value>
@@ -196,6 +199,9 @@
   <data name="CodeGen_Status_TargetDbRequired" xml:space="preserve">
     <value>対象 DB を 1 つ以上選択してください。</value>
   </data>
+  <data name="CodeGen_Status_InMemoryRuntimePackagesConflict" xml:space="preserve">
+    <value>インメモリ実装はランタイムの NuGet パッケージ参照モードとは併用できません。</value>
+  </data>
   <data name="CodeGen_Status_NamespaceInvalidFormat" xml:space="preserve">
     <value>{0} の形式が正しくありません。</value>
   </data>
@@ -204,6 +210,31 @@
   </data>
   <data name="CodeGen_Status_OutputFileRequired" xml:space="preserve">
     <value>出力先ファイルを指定してください。</value>
+  </data>
+  <data name="CodeGen_LoadSettings" xml:space="preserve">
+    <value>設定読込</value>
+  </data>
+  <data name="CodeGen_SaveSettings" xml:space="preserve">
+    <value>設定保存</value>
+  </data>
+  <data name="CodeGen_LoadSettingsToolTip" xml:space="preserve">
+    <value>保存済みの設定 JSON ファイルを読み込み、このダイアログへ反映します（既定設定は上書きしません）</value>
+  </data>
+  <data name="CodeGen_SaveSettingsToolTip" xml:space="preserve">
+    <value>現在の設定を、再利用できるプリセットとして任意の JSON ファイルへ保存します。保存したファイルは CLI の --config にそのまま指定できます。</value>
+  </data>
+  <data name="CodeGen_SettingsDialogTitle" xml:space="preserve">
+    <value>コード生成設定</value>
+  </data>
+  <data name="CodeGen_SettingsSavedMessage" xml:space="preserve">
+    <value>設定を {0} へ保存しました。
+このファイルは CLI の --config にそのまま指定できます。</value>
+  </data>
+  <data name="CodeGen_SettingsSaveFailedMessage" xml:space="preserve">
+    <value>設定を {0} へ保存できませんでした。</value>
+  </data>
+  <data name="CodeGen_SettingsLoadFailedMessage" xml:space="preserve">
+    <value>設定ファイル {0} を読み込めませんでした。</value>
   </data>
   <data name="CodeGen_NamespaceLabel_Runtime" xml:space="preserve">
     <value>Runtime の namespace</value>
