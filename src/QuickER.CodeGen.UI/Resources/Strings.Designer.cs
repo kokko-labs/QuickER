@@ -408,6 +408,12 @@ namespace QuickER.CodeGen.UI.Resources {
             }
         }
 
+        public static string CodeGen_ConfirmNamespaceFromFolder {
+            get {
+                return ResourceManager.GetString("CodeGen_ConfirmNamespaceFromFolder", resourceCulture);
+            }
+        }
+
         public static string CodeGen_NamespaceLabel_Runtime {
             get {
                 return ResourceManager.GetString("CodeGen_NamespaceLabel_Runtime", resourceCulture);

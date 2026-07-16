@@ -663,7 +663,182 @@ public class CSharpGenerationDialogViewModelTests
         vm.OutputPath.Should().Be(@"C:\work\Generated\Entities.g.cs");
     }
 
-    /// <summary>メッセージダイアログを表示せず、呼び出し（情報／エラー）を記録するスタブ</summary>
+    /// <summary>一時プロジェクトフォルダに csproj を書き出し、そのプロジェクトディレクトリを返す</summary>
+    private static string CreateProjectFolder(string csprojFileName, string rootNamespace)
+    {
+        var projectDir = Path.Combine(
+            Path.GetTempPath(),
+            "QuickERTests",
+            "NsBrowse",
+            Guid.NewGuid().ToString("N")
+        );
+        Directory.CreateDirectory(projectDir);
+        File.WriteAllText(
+            Path.Combine(projectDir, csprojFileName),
+            "<Project Sdk=\"Microsoft.NET.Sdk\">\n"
+                + "  <PropertyGroup>\n"
+                + $"    <RootNamespace>{rootNamespace}</RootNamespace>\n"
+                + "  </PropertyGroup>\n"
+                + "</Project>\n"
+        );
+        return projectDir;
+    }
+
+    /// <summary>
+    /// 分割モードでフォルダを選び確認を承諾すると、フォルダから導出した namespace へベースが書き換わり、
+    /// 既定パターンのままの子カテゴリ別 namespace も追従することを検証する
+    /// </summary>
+    [Fact(
+        DisplayName = "分割モードのフォルダ選択で承諾すると namespace が導出値へ書き換わり子 namespace が追従する"
+    )]
+    public void BrowseOutputFolder_ConfirmTrue_DerivesNamespace_AndFollowsChildren()
+    {
+        var settingsFolder = Path.Combine(
+            Path.GetTempPath(),
+            "QuickERTests",
+            Guid.NewGuid().ToString("N")
+        );
+        var projectDir = CreateProjectFolder("MyProject.csproj", "Contoso.Sales");
+        var target = Path.Combine(projectDir, "Data");
+        Directory.CreateDirectory(target);
+
+        var files = new StubFileDialogService { FolderResult = target };
+        var dialogs = new RecordingDialogService { ConfirmResult = true };
+        var vm = new CSharpGenerationDialogViewModel(
+            new CSharpGenerationSettingsStore(settingsFolder),
+            files,
+            dialogs: dialogs
+        );
+
+        try
+        {
+            vm.SplitFilesByCategory = true;
+
+            vm.BrowseOutputCommand.Execute(null);
+
+            // フォルダパスは反映され、確認は導出候補で 1 回だけ行われる
+            vm.OutputPath.Should().Be(target);
+            dialogs
+                .ConfirmMessages.Should()
+                .ContainSingle()
+                .Which.Should()
+                .Be(
+                    string.Format(
+                        CodeGenStrings.CodeGen_ConfirmNamespaceFromFolder,
+                        "Contoso.Sales.Data"
+                    )
+                );
+            // 承諾したのでベースが書き換わり、既定のままの子 namespace（Entity）も追従する
+            vm.BaseNamespace.Should().Be("Contoso.Sales.Data");
+            vm.EntityNamespace.Should().Be("Contoso.Sales.Data.Entities");
+        }
+        finally
+        {
+            Directory.Delete(projectDir, recursive: true);
+
+            if (Directory.Exists(settingsFolder))
+            {
+                Directory.Delete(settingsFolder, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>
+    /// 分割モードでフォルダを選んでも確認をキャンセルすると、namespace は一切変わらず
+    /// フォルダパスの反映だけが行われることを検証する
+    /// </summary>
+    [Fact(
+        DisplayName = "分割モードのフォルダ選択で確認をキャンセルすると namespace は不変・フォルダパスのみ反映"
+    )]
+    public void BrowseOutputFolder_ConfirmFalse_LeavesNamespaceUnchanged()
+    {
+        var settingsFolder = Path.Combine(
+            Path.GetTempPath(),
+            "QuickERTests",
+            Guid.NewGuid().ToString("N")
+        );
+        var projectDir = CreateProjectFolder("MyProject.csproj", "Contoso.Sales");
+        var target = Path.Combine(projectDir, "Data");
+        Directory.CreateDirectory(target);
+
+        var files = new StubFileDialogService { FolderResult = target };
+        var dialogs = new RecordingDialogService { ConfirmResult = false };
+        var vm = new CSharpGenerationDialogViewModel(
+            new CSharpGenerationSettingsStore(settingsFolder),
+            files,
+            dialogs: dialogs
+        );
+
+        try
+        {
+            vm.SplitFilesByCategory = true;
+
+            vm.BrowseOutputCommand.Execute(null);
+
+            // 確認は行われたが、キャンセルのため namespace は既定のまま・フォルダパスだけ反映される
+            dialogs.ConfirmMessages.Should().ContainSingle();
+            vm.OutputPath.Should().Be(target);
+            vm.BaseNamespace.Should().Be(CSharpGenerationSettings.DefaultBaseNamespace);
+            vm.EntityNamespace.Should()
+                .Be($"{CSharpGenerationSettings.DefaultBaseNamespace}.Entities");
+        }
+        finally
+        {
+            Directory.Delete(projectDir, recursive: true);
+
+            if (Directory.Exists(settingsFolder))
+            {
+                Directory.Delete(settingsFolder, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>
+    /// 導出した候補が現在のベース名前空間と同一なら、確認ダイアログを出さず namespace も触らないことを検証する
+    /// </summary>
+    [Fact(DisplayName = "導出候補が現在の namespace と同一なら確認しない")]
+    public void BrowseOutputFolder_SuggestionEqualsCurrent_DoesNotConfirm()
+    {
+        var settingsFolder = Path.Combine(
+            Path.GetTempPath(),
+            "QuickERTests",
+            Guid.NewGuid().ToString("N")
+        );
+        // プロジェクト直下（相対階層なし）を選ぶと導出候補はベース "Acme.App" のみになる
+        var projectDir = CreateProjectFolder("MyProject.csproj", "Acme.App");
+
+        var files = new StubFileDialogService { FolderResult = projectDir };
+        var dialogs = new RecordingDialogService { ConfirmResult = true };
+        var vm = new CSharpGenerationDialogViewModel(
+            new CSharpGenerationSettingsStore(settingsFolder),
+            files,
+            dialogs: dialogs
+        );
+
+        try
+        {
+            vm.SplitFilesByCategory = true;
+            vm.BaseNamespace = "Acme.App";
+
+            vm.BrowseOutputCommand.Execute(null);
+
+            // 候補が現在値と同一なので確認は呼ばれず、namespace も変わらない（フォルダパスは反映される）
+            dialogs.ConfirmMessages.Should().BeEmpty();
+            vm.BaseNamespace.Should().Be("Acme.App");
+            vm.OutputPath.Should().Be(projectDir);
+        }
+        finally
+        {
+            Directory.Delete(projectDir, recursive: true);
+
+            if (Directory.Exists(settingsFolder))
+            {
+                Directory.Delete(settingsFolder, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>メッセージダイアログを表示せず、呼び出し（確認／情報／エラー）を記録するスタブ</summary>
     private sealed class RecordingDialogService : IDialogService
     {
         /// <summary>ShowInformation に渡されたメッセージの記録</summary>
@@ -672,7 +847,17 @@ public class CSharpGenerationDialogViewModelTests
         /// <summary>ShowError に渡されたメッセージの記録</summary>
         public List<string> ErrorMessages { get; } = new();
 
-        public bool Confirm(string message, string title) => false;
+        /// <summary>Confirm に渡されたメッセージの記録</summary>
+        public List<string> ConfirmMessages { get; } = new();
+
+        /// <summary>Confirm の返り値（既定は false＝キャンセル扱い。既存挙動を壊さない）</summary>
+        public bool ConfirmResult { get; init; }
+
+        public bool Confirm(string message, string title)
+        {
+            ConfirmMessages.Add(message);
+            return ConfirmResult;
+        }
 
         public bool ConfirmWarning(string message, string title) => false;
 

@@ -236,6 +236,9 @@ You can pass this file directly to the CLI as --config.</value>
   <data name="CodeGen_SettingsLoadFailedMessage" xml:space="preserve">
     <value>Failed to load settings from {0}.</value>
   </data>
+  <data name="CodeGen_ConfirmNamespaceFromFolder" xml:space="preserve">
+    <value>Use namespace "{0}" derived from the output folder? The current namespace will be replaced.</value>
+  </data>
   <data name="CodeGen_NamespaceLabel_Runtime" xml:space="preserve">
     <value>Runtime namespace</value>
   </data>

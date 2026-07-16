@@ -236,6 +236,9 @@
   <data name="CodeGen_SettingsLoadFailedMessage" xml:space="preserve">
     <value>設定ファイル {0} を読み込めませんでした。</value>
   </data>
+  <data name="CodeGen_ConfirmNamespaceFromFolder" xml:space="preserve">
+    <value>出力先フォルダから取得した名前空間 "{0}" に書き換えますか？現在の namespace は置き換えられます。</value>
+  </data>
   <data name="CodeGen_NamespaceLabel_Runtime" xml:space="preserve">
     <value>Runtime の namespace</value>
   </data>

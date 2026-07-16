@@ -718,6 +718,12 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     }
 
     /// <summary>出力先を選択し、結果をパスへ反映する（分割時はフォルダ、非分割時はファイルを選ぶ）</summary>
+    /// <remarks>
+    /// 分割モードでフォルダを選んだときは、そのフォルダから名前空間の候補を導出し、確認ダイアログで
+    /// 承諾された場合のみ <see cref="BaseNamespace"/> を書き換える（既定パターンのままの子カテゴリ別
+    /// namespace は <see cref="FollowBaseNamespace"/> の連動で自動追従する）。
+    /// キャンセル・候補が現在値と同一・導出不能のいずれでも namespace は触らず、フォルダパスの反映のみ従来どおり行う
+    /// </remarks>
     [RelayCommand]
     private void BrowseOutput()
     {
@@ -732,6 +738,9 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
 
             OutputPath = selectedPath;
             StatusMessage = string.Empty;
+
+            // 選択フォルダから名前空間の候補を導出し、現在値と異なるときだけ確認して書き換える
+            MaybeSuggestNamespaceFromFolder(selectedPath);
             return;
         }
 
@@ -750,6 +759,39 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
 
         OutputPath = result.Path;
         StatusMessage = string.Empty;
+    }
+
+    /// <summary>
+    /// 選択された出力先フォルダから名前空間の候補を導出し、現在の <see cref="BaseNamespace"/> と異なる場合のみ
+    /// 確認ダイアログで承諾を得て書き換える
+    /// </summary>
+    /// <remarks>
+    /// 書き換えると、既定パターン（{旧base}.{接尾辞}）のままの子カテゴリ別 namespace は
+    /// <see cref="FollowBaseNamespace"/> の連動で自動的に新ベースへ追従する（手編集済みの子は保持）。
+    /// 導出不能（null）・現在値と同一・確認でキャンセルのいずれでも namespace は一切変更しない
+    /// </remarks>
+    private void MaybeSuggestNamespaceFromFolder(string folderPath)
+    {
+        var suggestion = OutputFolderNamespaceSuggester.TryDerive(folderPath);
+
+        // 導出できない、または現在のベース名前空間（前後空白を無視）と同一なら確認せず何もしない
+        if (
+            suggestion is null
+            || string.Equals(suggestion, BaseNamespace.Trim(), StringComparison.Ordinal)
+        )
+        {
+            return;
+        }
+
+        var confirmed = _dialogs.Confirm(
+            string.Format(Strings.CodeGen_ConfirmNamespaceFromFolder, suggestion),
+            Strings.CodeGen_SettingsDialogTitle
+        );
+
+        if (confirmed)
+        {
+            BaseNamespace = suggestion;
+        }
     }
 
     /// <summary>全設定を工場出荷既定へ戻す（ディスクへの反映は次の生成確定時）</summary>
