@@ -12,7 +12,7 @@ namespace QuickER.Tests.Integration;
 /// <c>options.UseSqlServer(connectionString)</c> により構成する。
 /// </summary>
 /// <remarks>
-/// これにより「AddGeneratedRepositories と AddGeneratedEfCoreRepositories を差し替えるだけで交換可能」
+/// これにより「AddGeneratedSqlServerRepositories と AddGeneratedEfCoreRepositories を差し替えるだけで交換可能」
 /// という DI 契約そのものを、全共通シナリオを DI 解決経路で流して証明する。
 /// </remarks>
 public sealed class GeneratedRuntimeEfCoreParityTests(SqlServerContainerFixture fixture)

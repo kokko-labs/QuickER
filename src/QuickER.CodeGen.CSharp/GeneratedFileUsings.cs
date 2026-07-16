@@ -33,11 +33,7 @@ internal static class GeneratedFileUsings
 
         // System を先頭、続いて System.* を序数順、最後に Microsoft.* 等を序数順で安定的に並べる。
         // その後にクロス名前空間 using（プランナが依存グラフから解決済み・昇順）を続ける。
-        var ordered = external
-            .OrderByDescending(ns => ns == "System")
-            .ThenByDescending(ns => ns.StartsWith("System", StringComparison.Ordinal))
-            .ThenBy(ns => ns, StringComparer.Ordinal)
-            .ToList();
+        var ordered = OrderExternalUsings(external);
 
         ordered.AddRange(spec.CrossNamespaceUsings);
 
@@ -57,6 +53,20 @@ internal static class GeneratedFileUsings
 
         return ordered;
     }
+
+    /// <summary>
+    /// 外部（System.* / Microsoft.*）using を安定順（System 最優先 → System.* → 通常）で並べ替える唯一の正。
+    /// </summary>
+    /// <remarks>
+    /// 生成物のバイト一致に直結する並び順規則。単一ファイル解決（<see cref="Resolve"/>）と連結ファイルの
+    /// using マージ（<c>CSharpCodeGenerationService.MergeUsings</c>）で同一規則を共有するため 1 箇所へ集約する。
+    /// </remarks>
+    internal static List<string> OrderExternalUsings(IEnumerable<string> namespaces) =>
+        namespaces
+            .OrderByDescending(ns => ns == "System")
+            .ThenByDescending(ns => ns.StartsWith("System", StringComparison.Ordinal))
+            .ThenBy(ns => ns, StringComparer.Ordinal)
+            .ToList();
 
     /// <summary>
     /// パッケージ参照モードで、指定ファイル（含有バケット・方言・生成対象）が参照すべき固定名前空間
@@ -221,7 +231,7 @@ internal static class GeneratedFileUsings
                     yield return "System.ComponentModel.DataAnnotations.Schema";
                 }
 
-                // QuickER 版 Repository 実装（SqlExecutor / 方言別 Repository 基底 / 接続ファクトリ / AddGeneratedRepositories）:
+                // QuickER 版 Repository 実装（SqlExecutor / 方言別 Repository 基底 / 接続ファクトリ / AddGenerated{方言}Repositories）:
                 //   ADO 型（方言依存: SQL Server=Microsoft.Data.SqlClient / SQLite=Microsoft.Data.Sqlite）、
                 //   DI 登録（Microsoft.Extensions.DependencyInjection）、さらに実装が使う
                 //   IStructuralEquatable（System.Collections）・DataTable 相当（System.Data）。
@@ -254,17 +264,6 @@ internal static class GeneratedFileUsings
                             yield return "Microsoft.Data.SqlClient";
                         }
                     }
-                }
-
-                // インメモリ Repository（InMemoryDataStore・InMemory{Entity}Repository・シーダー・
-                // AddGeneratedInMemoryRepositories）: DI 登録拡張のため DependencyInjection を付ける。
-                // 述語・並び順の式木 Compile（System.Linq.Expressions）・リフレクション（System.Reflection）・
-                // LINQ（System.Linq）は契約バケットで既に付与済み。ADO・EF Core 依存は一切出さない（方言非依存）。
-                if (spec.InMemory)
-                {
-                    yield return "Microsoft.Extensions.DependencyInjection";
-                    // AddGeneratedInMemoryRepositories の Save フックレジストリ既定登録（TryAddScoped）が Extensions 名前空間を使う
-                    yield return "Microsoft.Extensions.DependencyInjection.Extensions";
                 }
 
                 // リモートサービス（クライアント側）: 固定 infra（RemoteJson・RemoteRepositoryException・
@@ -319,6 +318,36 @@ internal static class GeneratedFileUsings
                 yield return "Microsoft.EntityFrameworkCore.Storage";
                 yield return "Microsoft.Extensions.DependencyInjection";
                 yield return "Microsoft.Extensions.DependencyInjection.Extensions";
+                break;
+
+            // InMemory: DB 非依存のインメモリ Repository 群（InMemoryDataStore・InMemory{Entity}Repository・シーダー・
+            //   AddGeneratedInMemoryRepositories）。自ファイルへ EntitySaveMetadata / SaveHookSession / EntityGraphSaver を
+            //   （in_memory ガードで）出力するため、契約バケットと同水準の共有 infra 用 using を要する。ADO・EF Core・
+            //   リモート依存は一切出さない（方言非依存）。中立契約（IRepository・SqlQuery・CascadeNavigation・
+            //   ISaveHookContext）は Repository 契約 namespace のクロス using で解決する。
+            case GenerationBucket.InMemory:
+                yield return "System";
+                yield return "System.Collections";
+                yield return "System.Collections.Concurrent";
+                yield return "System.Collections.Generic";
+                yield return "System.Data.Common";
+                yield return "System.Globalization";
+                yield return "System.IO";
+                yield return "System.Linq";
+                yield return "System.Linq.Expressions";
+                yield return "System.Reflection";
+                yield return "System.Threading";
+                yield return "System.Threading.Tasks";
+                yield return "Microsoft.Extensions.DependencyInjection";
+                // AddGeneratedInMemoryRepositories の Save フックレジストリ既定登録（TryAddScoped）が Extensions 名前空間を使う
+                yield return "Microsoft.Extensions.DependencyInjection.Extensions";
+
+                if (options.IncludeDataAnnotations)
+                {
+                    yield return "System.ComponentModel.DataAnnotations";
+                    yield return "System.ComponentModel.DataAnnotations.Schema";
+                }
+
                 break;
 
             // RemoteServer: ASP.NET Core Minimal API のエンドポイントマッピング。

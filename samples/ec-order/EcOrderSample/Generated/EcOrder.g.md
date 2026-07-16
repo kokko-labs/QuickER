@@ -112,10 +112,10 @@
 
 ### DI 登録
 
-QuickER 版 Repository を DI コンテナへ登録します。
+QuickER 版 Repository（Sqlite）を DI コンテナへ登録します。
 
 ```csharp
-services.AddGeneratedRepositories(connectionString);
+services.AddGeneratedSqliteRepositories(connectionString);
 ```
 
 ### CRUD とクエリ

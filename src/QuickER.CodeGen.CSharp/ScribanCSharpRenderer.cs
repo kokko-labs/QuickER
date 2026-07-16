@@ -51,7 +51,13 @@ internal sealed class RenderScope
     /// <summary>このスコープがレンダリングするQuickER 版 Repository の方言（"sqlserver" / "sqlite"）</summary>
     public required string Dialect { get; init; }
 
-    /// <summary>マルチ方言レイアウト（実効方言 2 つ以上）かどうか。DI 拡張の方言別名＋keyed 版の出し分けに使う</summary>
+    /// <summary>
+    /// 契約と方言別実装を別スペックへ分けるマルチ方言レイアウトかどうか（分割時は単一方言でも true）。
+    /// </summary>
+    /// <remarks>
+    /// 契約を 1 回だけ描画する判定（<c>ContractOnly || !MultiDialect</c>）に使う。DI 拡張名はエンジン別で統一されており、
+    /// このフラグには依存しない。
+    /// </remarks>
     public required bool MultiDialect { get; init; }
 
     /// <summary>名前空間をブロック形式（<c>namespace X { ... }</c>）で出力するか。非分割マルチ方言で同一ファイルへ複数 namespace を連結するときに true</summary>
@@ -181,12 +187,11 @@ internal sealed class ScribanCSharpRenderer
         // 独自属性 NavigationReference は (1) Entity のナビゲーションプロパティへの付与、
         // (2) 共通契約の EntitySaveMetadata / SqlQuery によるナビゲーション除外・Include 復元（リフレクション走査）で参照される。
         // リレーションが無くても契約（QuickER 版 Repository か EF Core のいずれか）を生成する場合は属性定義が必要なため、その条件も含める。
+        // 契約（QuickER 版 / EF Core / インメモリ）を生成する場合は、メタデータ（CascadeNavigations）・
+        // Include 復元のリフレクション走査で NavigationReference を参照するため、リレーションが無くても属性定義が必要。
         var emitNavRefAttr =
             model.EntityClasses.Any(c => c.Navigations.Count > 0)
-            || options.GenerateRepositories
-            || options.GenerateEfCore
-            // インメモリ Repository はメタデータ（CascadeNavigations）・Include 復元で NavigationReference を参照する
-            || options.GenerateInMemoryRepositories;
+            || options.GeneratesRepositoryContract;
 
         // QuickER 版 Repository の生成方言に応じた原始変数群。sqlserver のときは現行値（識別子クォート [ ]・
         // ADO 型 SqlXxx）そのままで、テンプレートは細粒度置換した箇所でこれらを参照する。方言リテラルを
@@ -234,10 +239,7 @@ internal sealed class ScribanCSharpRenderer
         // オプション ON でも定義を出す（付与のみで契約が無い構成。Entity は常時生成される）。emitNavRefAttr と同型の条件で、
         // scriban 側のゲートで || runtime_package_export を足し、パッケージ書き出し時も常に定義を出す（NavigationReference と対称）。
         var emitUnboundedBinaryAttr =
-            options.GenerateRepositories
-            || options.GenerateEfCore
-            || options.GenerateInMemoryRepositories
-            || options.ExcludeUnboundedBinaryColumns;
+            options.GeneratesRepositoryContract || options.ExcludeUnboundedBinaryColumns;
 
         // store-generated 列のマーカー属性 [StoreGeneratedColumn] は (1) rowversion / timestamp 等の列へ生成オプションに依らず
         // 無条件で付与し、(2) 共通契約の EntitySaveMetadata が INSERT / UPDATE から除外する列の識別にリフレクションで参照する。
@@ -257,8 +259,8 @@ internal sealed class ScribanCSharpRenderer
             // 各スペックを block namespace で包む。
             ["render_header"] = scope.RenderHeader,
             ["block_namespace"] = scope.BlockNamespace,
-            // マルチ方言レイアウトかどうかと、DI 拡張の方言別サフィックス（SqlServer / Sqlite）
-            ["multi_dialect"] = scope.MultiDialect,
+            // DI 拡張・方言別 namespace の方言別サフィックス（SqlServer / Sqlite）。DI 拡張名はエンジン別で
+            // 統一されているため、単一方言・マルチ方言とも同じ AddGenerated{ここ}Repositories を出す。
             ["dialect_di_suffix"] = GeneratedFilePlanner.DialectNamespaceSuffix(scope.Dialect),
             ["entity_classes"] = model.EntityClasses,
             ["edit_model_classes"] = model.EditModelClasses,

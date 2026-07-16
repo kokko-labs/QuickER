@@ -63,7 +63,7 @@ dotnet run --project samples/ec-order-remote/EcOrderRemote.Client -- http://127.
 ## 見どころ
 
 - **呼び出しコードが直結時と同一**: クライアントは `ICustomerRemoteRepository` などのインターフェイスへ普通に
-  CRUD・保存・クエリを呼ぶだけ。DI 登録を `AddGeneratedRepositories`（DB 直結）へ差し替えれば、同じコードが
+  CRUD・保存・クエリを呼ぶだけ。DI 登録を `AddGeneratedSqliteRepositories`（DB 直結）へ差し替えれば、同じコードが
   そのままローカル実行になります。
 - **名前付きクエリのリモート転送**: DSL 条件＋ページングの `GetByCustomerAsync` と、射影 DTO を返す
   `GetSummariesAsync` が HTTP 越しに同じ結果を返します（射影 `OrderSummaryRow` も JSON で往復）。

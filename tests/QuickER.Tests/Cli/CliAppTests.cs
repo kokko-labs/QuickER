@@ -53,7 +53,7 @@ public class CliAppTests
                 schemaPath,
                 "--out",
                 outDir,
-                "--namespace-name",
+                "--root-namespace",
                 "Test.Ns",
             ]);
 
@@ -106,7 +106,7 @@ public class CliAppTests
                 schemaPath,
                 "--out",
                 outDir,
-                "--namespace-name",
+                "--root-namespace",
                 "Test.Ns",
                 "--config",
                 configPath,
@@ -153,7 +153,7 @@ public class CliAppTests
                 schemaPath,
                 "--out",
                 outDir,
-                "--namespace-name",
+                "--root-namespace",
                 "Test.Ns",
             ]);
 
@@ -430,7 +430,7 @@ public class CliAppTests
                 schemaPath,
                 "--out",
                 outDir,
-                "--namespace-name",
+                "--root-namespace",
                 "Test.Pkg",
                 "--use-runtime-packages",
             ]);
@@ -473,7 +473,7 @@ public class CliAppTests
                 schemaPath,
                 "--out",
                 outDir,
-                "--namespace-name",
+                "--root-namespace",
                 "Test.Inline",
             ]);
 
@@ -570,7 +570,7 @@ public class CliAppTests
                 schemaPath,
                 "--out",
                 outDir,
-                "--namespace-name",
+                "--root-namespace",
                 "Test.Remote",
                 "--config",
                 configPath,
@@ -607,7 +607,7 @@ public class CliAppTests
                 schemaPath,
                 "--out",
                 outDir,
-                "--namespace-name",
+                "--root-namespace",
                 "Test.Full",
             ]);
 
@@ -648,7 +648,7 @@ public class CliAppTests
                 schemaPath,
                 "--out",
                 outDir,
-                "--namespace-name",
+                "--root-namespace",
                 "Test.RemoteConfig",
                 "--config",
                 configPath,
@@ -691,7 +691,7 @@ public class CliAppTests
                 schemaPath,
                 "--out",
                 outDir,
-                "--namespace-name",
+                "--root-namespace",
                 "Test.RemoteServices",
                 "--config",
                 configPath,
@@ -748,7 +748,7 @@ public class CliAppTests
                 schemaPath,
                 "--out",
                 outDir,
-                "--namespace-name",
+                "--root-namespace",
                 "Test.RemoteServicesConfig",
                 "--config",
                 configPath,
@@ -794,7 +794,7 @@ public class CliAppTests
                 schemaPath,
                 "--out",
                 outDir,
-                "--namespace-name",
+                "--root-namespace",
                 "Test.Docs",
                 "--generate-api-docs",
             ]);
@@ -828,7 +828,7 @@ public class CliAppTests
                 schemaPath,
                 "--out",
                 outDir,
-                "--namespace-name",
+                "--root-namespace",
                 "Test.NoDocs",
             ]);
 
@@ -936,7 +936,7 @@ public class CliAppTests
                 schemaPath,
                 "--out",
                 outDir,
-                "--namespace-name",
+                "--root-namespace",
                 "Test.ExcludeBinary",
                 "--exclude-unbounded-binary-columns",
             ]);
@@ -978,7 +978,7 @@ public class CliAppTests
                 schemaPath,
                 "--out",
                 outDir,
-                "--namespace-name",
+                "--root-namespace",
                 "Test.NoExcludeBinary",
             ]);
 
@@ -1084,14 +1084,14 @@ public class CliAppTests
     }
 
     /// <summary>
-    /// <c>--namespace-name</c> が設定ファイルの NamespaceName を上書きすることを検証する（CLI ＞ 設定ファイル）
+    /// <c>--root-namespace</c> が設定ファイルの RootNamespace を上書きすることを検証する（CLI ＞ 設定ファイル）
     /// </summary>
-    [Fact(DisplayName = "--namespace-name は設定ファイルの NamespaceName を上書きする")]
-    public async Task Generate_NamespaceNameFlag_OverridesConfig()
+    [Fact(DisplayName = "--root-namespace は設定ファイルの RootNamespace を上書きする")]
+    public async Task Generate_RootNamespaceFlag_OverridesConfig()
     {
         var (schemaPath, outDir, root) = CreateSampleSchema();
         var configPath = Path.Combine(root, "quicker.json");
-        File.WriteAllText(configPath, """{ "NamespaceName": "From.Config" }""");
+        File.WriteAllText(configPath, """{ "RootNamespace": "From.Config" }""");
 
         try
         {
@@ -1103,7 +1103,7 @@ public class CliAppTests
                 outDir,
                 "--config",
                 configPath,
-                "--namespace-name",
+                "--root-namespace",
                 "Override.Ns",
             ]);
 
@@ -1139,7 +1139,7 @@ public class CliAppTests
                 schemaPath,
                 "--out",
                 outDir,
-                "--namespace-name",
+                "--root-namespace",
                 "Test.OutputPath",
                 "--output-path",
                 "Custom.g.cs",

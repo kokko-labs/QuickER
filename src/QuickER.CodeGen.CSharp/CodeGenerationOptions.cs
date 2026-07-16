@@ -11,8 +11,8 @@ namespace QuickER.CodeGen.CSharp;
 /// </remarks>
 public sealed class CodeGenerationOptions
 {
-    /// <summary>生成コードを配置する名前空間名。空白の場合はビルダー側で既定値 "Generated" にフォールバックする</summary>
-    public string NamespaceName { get; init; } = "Generated";
+    /// <summary>生成コードを配置するルート名前空間。空白の場合はビルダー側で既定値 "Generated" にフォールバックする</summary>
+    public string RootNamespace { get; init; } = "Generated";
 
     /// <summary>出力ファイル名。".g.cs" で終わらない場合はサービス側で補正される</summary>
     public string OutputFileName { get; init; } = "QuickEREntities.g.cs";
@@ -26,7 +26,7 @@ public sealed class CodeGenerationOptions
     /// <summary>QuickER の SQL Server 実装（<c>Microsoft.Data.SqlClient</c> 依存）の Repository クラス群を生成するかどうか（既定 false）</summary>
     /// <remarks>
     /// SqlServerRepository 基底・各エンティティ実装・接続ファクトリ・SqlExecutor・SqlExpressionTranslator・
-    /// <c>AddGeneratedRepositories</c> を生成する。共通契約（インターフェイス・SqlQuery・メタデータ等）は
+    /// エンジン別 DI 拡張 <c>AddGenerated{方言}Repositories</c> を生成する。共通契約（インターフェイス・SqlQuery・メタデータ等）は
     /// <see cref="GenerateEfCore"/> と共有し、どちらか一方が ON なら生成される。
     /// 既定では DB アクセスコードを生成しない（GUI の DB アクセス「なし」と同じ既定）
     /// </remarks>
@@ -172,6 +172,10 @@ public sealed class CodeGenerationOptions
     /// </remarks>
     public bool GenerateInMemoryRepositories { get; init; }
 
+    /// <summary>Repository 契約（共通契約バケット）の生成が必要か（QuickER 版 / EF Core / インメモリのいずれかが有効）</summary>
+    public bool GeneratesRepositoryContract =>
+        GenerateRepositories || GenerateEfCore || GenerateInMemoryRepositories;
+
     /// <summary>[Table] [Key] [Column] [Required] [MaxLength] などのデータアノテーション属性を付与するかどうか</summary>
     public bool IncludeDataAnnotations { get; init; } = true;
 
@@ -188,31 +192,28 @@ public sealed class CodeGenerationOptions
     /// 出力をカテゴリ（Entity / EditModel / Mapper / Repository / ValueObject / Runtime）ごとに別ファイル・別名前空間へ分割するかどうか
     /// </summary>
     /// <remarks>
-    /// false（既定）: 全クラスを <see cref="NamespaceName"/> の単一ファイル（<see cref="OutputFileName"/>）へ出力する（従来動作）。
+    /// false（既定）: 全クラスを <see cref="RootNamespace"/> の単一ファイル（<see cref="OutputFileName"/>）へ出力する（従来動作）。
     /// true: 生成対象カテゴリと共有基盤（Runtime）をそれぞれ 1 カテゴリ 1 ファイルへ出力し、各ファイルに個別の名前空間を与える
     /// </remarks>
     public bool SplitFilesByCategory { get; init; }
 
-    /// <summary>分割時の共有基盤（基底クラス・属性・VO 基底・JSON コンバータ）の名前空間。空なら <c>{NamespaceName}.Runtime</c> へフォールバックする</summary>
+    /// <summary>分割時の共有基盤（基底クラス・属性・VO 基底・JSON コンバータ）の名前空間。空なら <c>{RootNamespace}.Runtime</c> へフォールバックする</summary>
     public string? RuntimeNamespace { get; init; }
 
-    /// <summary>分割時の Entity クラスの名前空間。空なら <see cref="NamespaceName"/> へフォールバックする</summary>
+    /// <summary>分割時の Entity クラスの名前空間。空なら <see cref="RootNamespace"/> へフォールバックする</summary>
     public string? EntityNamespace { get; init; }
 
-    /// <summary>分割時の EditModel クラスの名前空間。空なら <see cref="NamespaceName"/> へフォールバックする</summary>
+    /// <summary>分割時の EditModel クラスの名前空間。空なら <see cref="RootNamespace"/> へフォールバックする</summary>
     public string? EditModelNamespace { get; init; }
 
-    /// <summary>分割時の Mapper クラスの名前空間。空なら <see cref="NamespaceName"/> へフォールバックする</summary>
+    /// <summary>分割時の Mapper クラスの名前空間。空なら <see cref="RootNamespace"/> へフォールバックする</summary>
     public string? MapperNamespace { get; init; }
 
-    /// <summary>分割時の Repository クラス群の名前空間。空なら <see cref="NamespaceName"/> へフォールバックする</summary>
+    /// <summary>分割時の Repository クラス群の名前空間。空なら <see cref="RootNamespace"/> へフォールバックする</summary>
     public string? RepositoryNamespace { get; init; }
 
-    /// <summary>分割時の値オブジェクトクラスの名前空間。空なら <see cref="NamespaceName"/> へフォールバックする</summary>
+    /// <summary>分割時の値オブジェクトクラスの名前空間。空なら <see cref="RootNamespace"/> へフォールバックする</summary>
     public string? ValueObjectNamespace { get; init; }
-
-    /// <summary>分割時の EfCore（DbContext・構成）クラスの名前空間。空なら <see cref="NamespaceName"/> へフォールバックする</summary>
-    public string? EfCoreNamespace { get; init; }
 
     /// <summary>
     /// スキーマ非依存の固定コード（ランタイム）を生成コードへ同梱せず、NuGet パッケージ <c>QuickER.Runtime.*</c> への参照で賄うかどうか（既定 false）。

@@ -84,7 +84,7 @@ public class DbDefinitionMetadataTests
     private static CodeGenerationOptions DefaultOptions() =>
         new()
         {
-            NamespaceName = "Sample.Domain",
+            RootNamespace = "Sample.Domain",
             GenerateRepositories = false,
             GenerateEfCore = false,
         };
@@ -111,7 +111,7 @@ public class DbDefinitionMetadataTests
     {
         var options = new CodeGenerationOptions
         {
-            NamespaceName = "Sample.Domain",
+            RootNamespace = "Sample.Domain",
             GenerateRepositories = false,
             GenerateEfCore = false,
             IncludeDataAnnotations = false,
@@ -158,7 +158,7 @@ public class DbDefinitionMetadataTests
             diagram,
             new CodeGenerationOptions
             {
-                NamespaceName = "Sample.Domain",
+                RootNamespace = "Sample.Domain",
                 GenerateRepositories = true,
                 RepositoryDialects = ["sqlserver"],
             }
@@ -169,7 +169,7 @@ public class DbDefinitionMetadataTests
             diagram,
             new CodeGenerationOptions
             {
-                NamespaceName = "Sample.Domain",
+                RootNamespace = "Sample.Domain",
                 GenerateRepositories = true,
                 RepositoryDialects = ["sqlite"],
             }
@@ -180,7 +180,7 @@ public class DbDefinitionMetadataTests
             diagram,
             new CodeGenerationOptions
             {
-                NamespaceName = "Sample.Domain",
+                RootNamespace = "Sample.Domain",
                 GenerateRepositories = true,
                 RepositoryDialects = ["sqlserver", "sqlite"],
             }

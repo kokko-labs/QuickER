@@ -184,8 +184,8 @@ internal sealed class ApiReferenceDocRenderer
     /// </summary>
     /// <remarks>
     /// 出し分けはテンプレート <c>Templates/CSharpRuntime.scriban</c> の DI 登録リージョンと拡張メソッド名を一致させる:
-    /// マルチ方言 → <c>AddGeneratedSqlServerRepositories</c> / <c>AddGeneratedSqliteRepositories</c>（keyed 版あり）、
-    /// 単一方言 → <c>AddGeneratedRepositories</c>、EF Core → <c>AddGeneratedEfCoreRepositories</c>、
+    /// QuickER 版 Repository → エンジン別 <c>AddGeneratedSqlServerRepositories</c> / <c>AddGeneratedSqliteRepositories</c>
+    /// （単一方言・マルチ方言とも同名。マルチ方言は keyed 版あり）、EF Core → <c>AddGeneratedEfCoreRepositories</c>、
     /// インメモリ → <c>AddGeneratedInMemoryRepositories</c>。複数モードが同時に有効なら該当ぶんをすべて載せる。
     /// </remarks>
     private static List<ScriptObject> BuildDiRegistrations(CodeGenerationOptions options)
@@ -205,40 +205,32 @@ internal sealed class ApiReferenceDocRenderer
                 dialects = ["sqlserver"];
             }
 
-            // マルチ方言（実効方言 2 つ以上）: 方言別拡張＋keyed 解決。単一方言: 従来の AddGeneratedRepositories。
+            // QuickER 版 Repository の DI 登録はエンジン別（AddGenerated{方言}Repositories）で統一。
+            // 単一方言でも方言別名を使い、マルチ方言（実効方言 2 つ以上）では keyed 解決の例も添える。
+            foreach (var dialect in dialects)
+            {
+                var suffix = GeneratedFilePlanner.DialectNamespaceSuffix(dialect);
+                registrations.Add(
+                    Registration(
+                        $"QuickER 版 Repository（{suffix}）を DI コンテナへ登録します。",
+                        $"services.AddGenerated{suffix}Repositories(connectionString);"
+                    )
+                );
+            }
+
             if (dialects.Count >= 2)
             {
-                foreach (var dialect in dialects)
-                {
-                    var suffix = GeneratedFilePlanner.DialectNamespaceSuffix(dialect);
-                    registrations.Add(
-                        Registration(
-                            $"QuickER 版 Repository（{suffix}）を DI コンテナへ登録します。",
-                            $"services.AddGenerated{suffix}Repositories(connectionString);"
-                        )
-                    );
-                }
-
                 registrations.Add(
                     Registration(
                         "複数方言を同時に利用する場合は keyed DI を使い、`[FromKeyedServices(...)]` で方言別の実装を解決します。",
                         string.Join(
                             Environment.NewLine,
-                            options.EffectiveRepositoryDialects.Select(dialect =>
+                            dialects.Select(dialect =>
                             {
                                 var suffix = GeneratedFilePlanner.DialectNamespaceSuffix(dialect);
                                 return $"services.AddGenerated{suffix}Repositories(\"{suffix.ToLowerInvariant()}\", connectionString);";
                             })
                         )
-                    )
-                );
-            }
-            else
-            {
-                registrations.Add(
-                    Registration(
-                        "QuickER 版 Repository を DI コンテナへ登録します。",
-                        "services.AddGeneratedRepositories(connectionString);"
                     )
                 );
             }

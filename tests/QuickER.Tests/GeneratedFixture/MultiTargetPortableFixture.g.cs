@@ -7265,9 +7265,9 @@ internal static class EntityGraphSaver
 
 /// <summary>生成されたリポジトリ群（SQL Server 実装）を DI コンテナへ登録する拡張</summary>
 /// <remarks>
-/// マルチターゲット構成では方言ごとに拡張を分け、同一契約（I{Entity}Repository / ISqlExecutor）を方言別実装で登録する。
-/// 複数方言を同時利用する場合は <c>object? serviceKey</c> 付きオーバーロード（keyed DI）を使い、
-/// <c>[FromKeyedServices("...")]</c> で方言別の接続を解決する。
+/// DI 登録はエンジン別に <c>AddGeneratedSqlServerRepositories</c> という名前で提供し、同一契約
+/// （I{Entity}Repository / ISqlExecutor）を方言別実装で登録する。複数方言（マルチターゲット）を同一プロセスで併用する場合は
+/// <c>object? serviceKey</c> 付きオーバーロード（keyed DI）を使い、<c>[FromKeyedServices("...")]</c> で方言別の接続を解決する。
 /// </remarks>
 public static class GeneratedSqlServerRepositoryServiceCollectionExtensions
 {
@@ -9990,9 +9990,9 @@ internal static class EntityGraphSaver
 
 /// <summary>生成されたリポジトリ群（SQLite 実装）を DI コンテナへ登録する拡張</summary>
 /// <remarks>
-/// マルチターゲット構成では方言ごとに拡張を分け、同一契約（I{Entity}Repository / ISqlExecutor）を方言別実装で登録する。
-/// 複数方言を同時利用する場合は <c>object? serviceKey</c> 付きオーバーロード（keyed DI）を使い、
-/// <c>[FromKeyedServices("...")]</c> で方言別の接続を解決する。
+/// DI 登録はエンジン別に <c>AddGeneratedSqliteRepositories</c> という名前で提供し、同一契約
+/// （I{Entity}Repository / ISqlExecutor）を方言別実装で登録する。複数方言（マルチターゲット）を同一プロセスで併用する場合は
+/// <c>object? serviceKey</c> 付きオーバーロード（keyed DI）を使い、<c>[FromKeyedServices("...")]</c> で方言別の接続を解決する。
 /// </remarks>
 public static class GeneratedSqliteRepositoryServiceCollectionExtensions
 {

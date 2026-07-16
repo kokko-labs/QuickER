@@ -72,7 +72,7 @@ public sealed class SqlServerBinaryColumnRuntimeTests(SqlServerContainerFixture 
         );
 
         _provider = new ServiceCollection()
-            .AddGeneratedRepositories(_fixture.ConnectionString)
+            .AddGeneratedSqlServerRepositories(_fixture.ConnectionString)
             .BuildServiceProvider();
 
         // documents: 1="alpha"（payload あり・checksum あり）・2="beta"（payload なし）・3="gamma"（payload あり）

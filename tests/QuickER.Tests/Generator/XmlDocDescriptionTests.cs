@@ -50,7 +50,7 @@ public class XmlDocDescriptionTests
 
     /// <summary>既定オプション（Entity/EditModel/Mapper 生成）で生成し単一ファイルの中身を返す</summary>
     private static string Generate(ErDiagram diagram) =>
-        Generate(diagram, new CodeGenerationOptions { NamespaceName = "Sample.Domain" });
+        Generate(diagram, new CodeGenerationOptions { RootNamespace = "Sample.Domain" });
 
     /// <summary>指定オプションで生成し単一ファイルの中身を返す</summary>
     private static string Generate(ErDiagram diagram, CodeGenerationOptions options)
@@ -104,7 +104,7 @@ public class XmlDocDescriptionTests
     {
         var options = new CodeGenerationOptions
         {
-            NamespaceName = "Sample.Domain",
+            RootNamespace = "Sample.Domain",
             GenerateValueObjects = true,
         };
         var content = Generate(

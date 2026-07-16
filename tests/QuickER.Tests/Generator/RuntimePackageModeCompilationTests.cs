@@ -102,7 +102,7 @@ public class RuntimePackageModeCompilationTests
         var options = WithPackageMode(
             new CodeGenerationOptions
             {
-                NamespaceName = "Sample.Domain",
+                RootNamespace = "Sample.Domain",
                 GenerateEditModels = true,
                 GenerateMappers = true,
                 GenerateRepositories = false,
@@ -124,7 +124,7 @@ public class RuntimePackageModeCompilationTests
         var options = WithPackageMode(
             new CodeGenerationOptions
             {
-                NamespaceName = "Sample.Domain",
+                RootNamespace = "Sample.Domain",
                 GenerateRepositories = true,
                 RepositoryDialects = ["sqlite"],
             }
@@ -158,7 +158,7 @@ public class RuntimePackageModeCompilationTests
         var options = WithPackageMode(
             new CodeGenerationOptions
             {
-                NamespaceName = "Sample.Domain",
+                RootNamespace = "Sample.Domain",
                 GenerateRepositories = true,
                 RepositoryDialects = ["sqlserver", "sqlite"],
             }
@@ -177,7 +177,7 @@ public class RuntimePackageModeCompilationTests
         var options = WithPackageMode(
             new CodeGenerationOptions
             {
-                NamespaceName = "Sample.Domain",
+                RootNamespace = "Sample.Domain",
                 GenerateRepositories = false,
                 GenerateEfCore = true,
             }
@@ -196,7 +196,7 @@ public class RuntimePackageModeCompilationTests
         var options = WithPackageMode(
             new CodeGenerationOptions
             {
-                NamespaceName = "Sample.Domain",
+                RootNamespace = "Sample.Domain",
                 GenerateRepositories = true,
                 GenerateEfCore = true,
             }
@@ -219,7 +219,7 @@ public class RuntimePackageModeCompilationTests
         var options = WithPackageMode(
             new CodeGenerationOptions
             {
-                NamespaceName = "Sample.Domain",
+                RootNamespace = "Sample.Domain",
                 GenerateRepositories = true,
             }
         );
@@ -249,7 +249,7 @@ public class RuntimePackageModeCompilationTests
                 $"Entity+EditModel+Mapper+VO のみ Split={split}",
                 new CodeGenerationOptions
                 {
-                    NamespaceName = "Sample.Domain",
+                    RootNamespace = "Sample.Domain",
                     SplitFilesByCategory = split,
                     GenerateValueObjects = true,
                     GenerateRepositories = false,
@@ -259,7 +259,7 @@ public class RuntimePackageModeCompilationTests
                 $"QuickER sqlserver 単独 Split={split}",
                 new CodeGenerationOptions
                 {
-                    NamespaceName = "Sample.Domain",
+                    RootNamespace = "Sample.Domain",
                     SplitFilesByCategory = split,
                 }
             );
@@ -267,7 +267,7 @@ public class RuntimePackageModeCompilationTests
                 $"QuickER sqlite 単独 Split={split}",
                 new CodeGenerationOptions
                 {
-                    NamespaceName = "Sample.Domain",
+                    RootNamespace = "Sample.Domain",
                     SplitFilesByCategory = split,
                     RepositoryDialects = ["sqlite"],
                 }
@@ -276,7 +276,7 @@ public class RuntimePackageModeCompilationTests
                 $"マルチターゲット sqlserver+sqlite Split={split}",
                 new CodeGenerationOptions
                 {
-                    NamespaceName = "Sample.Domain",
+                    RootNamespace = "Sample.Domain",
                     SplitFilesByCategory = split,
                     RepositoryDialects = ["sqlserver", "sqlite"],
                 }
@@ -285,7 +285,7 @@ public class RuntimePackageModeCompilationTests
                 $"EF Core 単独 Split={split}",
                 new CodeGenerationOptions
                 {
-                    NamespaceName = "Sample.Domain",
+                    RootNamespace = "Sample.Domain",
                     SplitFilesByCategory = split,
                     GenerateRepositories = false,
                     GenerateEfCore = true,
@@ -295,7 +295,7 @@ public class RuntimePackageModeCompilationTests
                 $"QuickER sqlserver＋EF Core 併存 Split={split}",
                 new CodeGenerationOptions
                 {
-                    NamespaceName = "Sample.Domain",
+                    RootNamespace = "Sample.Domain",
                     SplitFilesByCategory = split,
                     GenerateRepositories = true,
                     GenerateEfCore = true,
@@ -308,7 +308,7 @@ public class RuntimePackageModeCompilationTests
             "remote QuickER sqlserver",
             new CodeGenerationOptions
             {
-                NamespaceName = "Sample.Domain",
+                RootNamespace = "Sample.Domain",
                 GenerateRemoteContracts = true,
             }
         );
@@ -316,7 +316,7 @@ public class RuntimePackageModeCompilationTests
             "remote マルチターゲット sqlserver+sqlite",
             new CodeGenerationOptions
             {
-                NamespaceName = "Sample.Domain",
+                RootNamespace = "Sample.Domain",
                 RepositoryDialects = ["sqlserver", "sqlite"],
                 GenerateRemoteContracts = true,
             }
@@ -325,7 +325,7 @@ public class RuntimePackageModeCompilationTests
             "remote QuickER sqlite＋EF Core 併存",
             new CodeGenerationOptions
             {
-                NamespaceName = "Sample.Domain",
+                RootNamespace = "Sample.Domain",
                 RepositoryDialects = ["sqlite"],
                 GenerateEfCore = true,
                 GenerateRemoteContracts = true,
@@ -339,7 +339,7 @@ public class RuntimePackageModeCompilationTests
             "remote-services QuickER sqlserver",
             new CodeGenerationOptions
             {
-                NamespaceName = "Sample.Domain",
+                RootNamespace = "Sample.Domain",
                 GenerateRemoteServices = true,
             }
         );
@@ -350,7 +350,7 @@ public class RuntimePackageModeCompilationTests
     private static CodeGenerationOptions WithPackageMode(CodeGenerationOptions options) =>
         new()
         {
-            NamespaceName = options.NamespaceName,
+            RootNamespace = options.RootNamespace,
             OutputFileName = options.OutputFileName,
             GenerateEditModels = options.GenerateEditModels,
             GenerateMappers = options.GenerateMappers,
@@ -368,7 +368,6 @@ public class RuntimePackageModeCompilationTests
             MapperNamespace = options.MapperNamespace,
             RepositoryNamespace = options.RepositoryNamespace,
             ValueObjectNamespace = options.ValueObjectNamespace,
-            EfCoreNamespace = options.EfCoreNamespace,
             GenerateRemoteContracts = options.GenerateRemoteContracts,
             UseRuntimePackages = true,
         };

@@ -39,7 +39,7 @@ Console.WriteLine();
 
 // 生成された DI 登録拡張で全リポジトリ（QuickER の SQLite 実装）を解決する
 using var provider = new ServiceCollection()
-    .AddGeneratedRepositories(connectionString)
+    .AddGeneratedSqliteRepositories(connectionString)
     .BuildServiceProvider();
 
 var customers = provider.GetRequiredService<ICustomerRepository>();

@@ -70,7 +70,9 @@ public sealed class SaveHookSqlServerRuntimeTests(SqlServerContainerFixture fixt
     /// <summary>指定した Save フックを登録した DI プロバイダを構築する</summary>
     private ServiceProvider BuildProvider(params object[] hooks)
     {
-        var services = new ServiceCollection().AddGeneratedRepositories(_fixture.ConnectionString);
+        var services = new ServiceCollection().AddGeneratedSqlServerRepositories(
+            _fixture.ConnectionString
+        );
 
         foreach (var hook in hooks)
         {

@@ -189,7 +189,7 @@ public sealed class MultiTargetRepositoryGenerationTests
     {
         var diagram = BuildDiagram();
         var primary = SqlServerCSharpTypeMapper.ResolveColumnTypes(diagram);
-        var options = new CodeGenerationOptions { NamespaceName = "Sample.Domain" };
+        var options = new CodeGenerationOptions { RootNamespace = "Sample.Domain" };
 
         var legacy = new CSharpCodeGenerationService().Generate(diagram, primary, options);
         var viaMulti = new CSharpCodeGenerationService().Generate(
@@ -232,7 +232,7 @@ public sealed class MultiTargetRepositoryGenerationTests
 
         var options = new CodeGenerationOptions
         {
-            NamespaceName = "Sample.Domain",
+            RootNamespace = "Sample.Domain",
             RepositoryDialects = ["sqlserver", "sqlite"],
         };
 
@@ -269,7 +269,7 @@ public sealed class MultiTargetRepositoryGenerationTests
         };
         var options = new CodeGenerationOptions
         {
-            NamespaceName = "Sample.Domain",
+            RootNamespace = "Sample.Domain",
             RepositoryDialects = ["sqlserver", "sqlite"],
         };
 
@@ -308,7 +308,7 @@ public sealed class MultiTargetRepositoryGenerationTests
 
         var options = new CodeGenerationOptions
         {
-            NamespaceName = "Sample.Domain",
+            RootNamespace = "Sample.Domain",
             RepositoryDialects = ["sqlite", "sqlserver"],
         };
 
@@ -340,7 +340,7 @@ public sealed class MultiTargetRepositoryGenerationTests
         };
         var options = new CodeGenerationOptions
         {
-            NamespaceName = "Sample.Domain",
+            RootNamespace = "Sample.Domain",
             RepositoryDialects = ["sqlite"],
         };
 
@@ -376,7 +376,7 @@ public sealed class MultiTargetRepositoryGenerationTests
         };
         var options = new CodeGenerationOptions
         {
-            NamespaceName = "Sample.Domain",
+            RootNamespace = "Sample.Domain",
             GenerateRepositories = true,
             RepositoryDialects = ["sqlserver", "sqlite"],
             SplitFilesByCategory = split,
@@ -440,13 +440,13 @@ public sealed class MultiTargetRepositoryGenerationTests
     {
         var code = GenerateMultiTarget().Files.Single().Content;
 
-        // 方言別名の DI 拡張クラス・メソッド（従来の AddGeneratedRepositories は出さない）
+        // 方言別名の DI 拡張クラス・メソッド（廃止した単一方言用 DI クラスは出さない）
         code.Should().Contain("AddGeneratedSqlServerRepositories");
         code.Should().Contain("AddGeneratedSqliteRepositories");
         code.Should()
             .NotContain(
-                "AddGeneratedRepositories(",
-                "マルチ方言では方言別名の DI 拡張のみを出す（従来名は出さない）"
+                "class GeneratedRepositoryServiceCollectionExtensions",
+                "DI 登録はエンジン別名で統一され、廃止した単一方言用 DI クラスは出さない"
             );
 
         // keyed 版（object? serviceKey 付き）と AddKeyedScoped/AddKeyedSingleton
@@ -509,7 +509,7 @@ public sealed class MultiTargetRepositoryGenerationTests
         };
         var options = new CodeGenerationOptions
         {
-            NamespaceName = "Sample.Domain",
+            RootNamespace = "Sample.Domain",
             GenerateRepositories = true,
             RepositoryDialects = ["sqlserver", "sqlite"],
             GenerateEfCore = true,

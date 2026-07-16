@@ -98,7 +98,7 @@ public class RemoteServiceGenerationTests
             CreateDiagram(),
             new CodeGenerationOptions
             {
-                NamespaceName = "Test.Ns",
+                RootNamespace = "Test.Ns",
                 OutputFileName = "Shop.g.cs",
                 GenerateRepositories = true,
                 GenerateRemoteServices = true,
@@ -151,7 +151,7 @@ public class RemoteServiceGenerationTests
             CreateDiagram(),
             new CodeGenerationOptions
             {
-                NamespaceName = "Test.Ns",
+                RootNamespace = "Test.Ns",
                 GenerateRepositories = true,
                 GenerateRemoteServices = true,
             }
@@ -196,7 +196,7 @@ public class RemoteServiceGenerationTests
     {
         var result = Generate(
             CreateDiagram(),
-            new CodeGenerationOptions { NamespaceName = "Test.Ns", GenerateRepositories = true }
+            new CodeGenerationOptions { RootNamespace = "Test.Ns", GenerateRepositories = true }
         );
 
         result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
@@ -216,7 +216,7 @@ public class RemoteServiceGenerationTests
             CreateDiagram(),
             new CodeGenerationOptions
             {
-                NamespaceName = "Acme",
+                RootNamespace = "Acme",
                 GenerateRepositories = true,
                 GenerateRemoteServices = true,
                 SplitFilesByCategory = true,
@@ -240,7 +240,7 @@ public class RemoteServiceGenerationTests
             CreateDiagram(),
             new CodeGenerationOptions
             {
-                NamespaceName = "Test.Ns",
+                RootNamespace = "Test.Ns",
                 GenerateRepositories = false,
                 GenerateEfCore = true,
                 GenerateRemoteServices = true,

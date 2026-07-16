@@ -155,8 +155,8 @@ public class MockProjectScaffoldServiceTests
                     .GetFiles(result.GeneratedDirectory, "*.g.cs", SearchOption.AllDirectories)
                     .Select(File.ReadAllText)
             );
-            // 単一方言生成では方言接尾辞なしの AddGeneratedRepositories を出す（マルチターゲット時のみ方言別）
-            allGenerated.Should().Contain("AddGeneratedRepositories");
+            // DI 登録はエンジン別（AddGenerated{方言}Repositories）で統一。sqlserver 生成では方言別名が出る
+            allGenerated.Should().Contain("AddGeneratedSqlServerRepositories");
         }
         finally
         {

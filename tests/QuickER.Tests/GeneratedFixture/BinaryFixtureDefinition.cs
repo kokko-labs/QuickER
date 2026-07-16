@@ -51,7 +51,7 @@ public static class BinaryFixtureDefinition
     public static CodeGenerationOptions Options { get; } =
         new()
         {
-            NamespaceName = NamespaceName,
+            RootNamespace = NamespaceName,
             OutputFileName = OutputFileName,
             GenerateEditModels = true,
             GenerateMappers = true,

@@ -102,10 +102,12 @@ var id = DocumentIdValue.Create();   // Guid.NewGuid() を文字列で内包し�
 
 依存最小（ADO のみ）の軽量 Repository です。対象方言は SQL Server（`FOR JSON` ベース）と SQLite（プレーン SELECT ＋ マルチクエリ）。
 
+DI 登録拡張はエンジン別の名前（`AddGeneratedSqlServerRepositories` / `AddGeneratedSqliteRepositories`）で生成されます。
+
 ```csharp
-// DI 登録（生成される拡張メソッド）
+// DI 登録（生成される拡張メソッド。方言に応じて SqlServer / Sqlite を選ぶ）
 var provider = new ServiceCollection()
-    .AddGeneratedRepositories(connectionString)
+    .AddGeneratedSqliteRepositories(connectionString)
     .BuildServiceProvider();
 
 var customers = provider.GetRequiredService<ICustomerRepository>();
@@ -410,14 +412,14 @@ public sealed class OrderMaintenance(IOrderRepository orders)
 ```csharp
 // ---- サーバー（ASP.NET Core・Microsoft.NET.Sdk.Web）----
 var builder = WebApplication.CreateBuilder(args);
-builder.Services.AddGeneratedRepositories(connectionString);   // 実体は QuickER 版 Repository でも EF Core でもよい
+builder.Services.AddGeneratedSqliteRepositories(connectionString);   // 実体は QuickER 版 Repository でも EF Core でもよい
 
 var app = builder.Build();
 app.MapGeneratedRemoteEndpoints();          // 認可を付けるなら .RequireAuthorization() を続ける
 app.Run();
 
 // ---- クライアントアプリ（DI 登録 1 行で直結⇔リモートを切り替え）----
-// 直結:    services.AddGeneratedRepositories(connectionString);
+// 直結:    services.AddGeneratedSqliteRepositories(connectionString);
 // リモート: services.AddGeneratedHttpRemoteRepositories("https://server:5001/quicker");
 // アプリ本体はどちらでも IOrderRemoteRepository を注入して使う（コード変更なし）
 ```

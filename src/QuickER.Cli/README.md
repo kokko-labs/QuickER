@@ -24,7 +24,7 @@ Main options:
 |---|---|
 | `--provider <name>` | Target DB. `sqlserver` (default) / `postgresql` / `mysql` / `oracle` / `sqlite` |
 | `--config <file>` | Generation option settings file (quicker.json) |
-| `--namespace-name <name>` / `--split-files-by-category` | Set the root namespace / split files by category |
+| `--root-namespace <name>` / `--split-files-by-category` | Set the root namespace / split files by category |
 | `--repository-dialects <list>` | Multi-target generation of the QuickER Repository (e.g. `sqlserver,sqlite`, keyed DI) |
 | `--use-runtime-packages` | Do not emit the fixed runtime code; provide it via `QuickER.Runtime.*` package references instead |
 | `--generate-api-docs` | Additionally output an API reference Markdown (`{base name}.g.md`) |

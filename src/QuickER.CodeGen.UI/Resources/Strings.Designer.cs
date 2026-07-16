@@ -240,9 +240,9 @@ namespace QuickER.CodeGen.UI.Resources {
             }
         }
 
-        public static string CodeGen_OutputAndSplit {
+        public static string CodeGen_NamespaceSection {
             get {
-                return ResourceManager.GetString("CodeGen_OutputAndSplit", resourceCulture);
+                return ResourceManager.GetString("CodeGen_NamespaceSection", resourceCulture);
             }
         }
 
@@ -255,6 +255,12 @@ namespace QuickER.CodeGen.UI.Resources {
         public static string CodeGen_CategoryNamespace {
             get {
                 return ResourceManager.GetString("CodeGen_CategoryNamespace", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_RootLabel {
+            get {
+                return ResourceManager.GetString("CodeGen_RootLabel", resourceCulture);
             }
         }
 
@@ -273,12 +279,6 @@ namespace QuickER.CodeGen.UI.Resources {
         public static string CodeGen_GeneratedFiles {
             get {
                 return ResourceManager.GetString("CodeGen_GeneratedFiles", resourceCulture);
-            }
-        }
-
-        public static string CodeGen_AutoGenNote {
-            get {
-                return ResourceManager.GetString("CodeGen_AutoGenNote", resourceCulture);
             }
         }
 
@@ -408,6 +408,12 @@ namespace QuickER.CodeGen.UI.Resources {
             }
         }
 
+        public static string CodeGen_ConfirmNamespaceFromFolder {
+            get {
+                return ResourceManager.GetString("CodeGen_ConfirmNamespaceFromFolder", resourceCulture);
+            }
+        }
+
         public static string CodeGen_NamespaceLabel_Runtime {
             get {
                 return ResourceManager.GetString("CodeGen_NamespaceLabel_Runtime", resourceCulture);
@@ -441,12 +447,6 @@ namespace QuickER.CodeGen.UI.Resources {
         public static string CodeGen_NamespaceLabel_ValueObject {
             get {
                 return ResourceManager.GetString("CodeGen_NamespaceLabel_ValueObject", resourceCulture);
-            }
-        }
-
-        public static string CodeGen_NamespaceLabel_EfCore {
-            get {
-                return ResourceManager.GetString("CodeGen_NamespaceLabel_EfCore", resourceCulture);
             }
         }
 

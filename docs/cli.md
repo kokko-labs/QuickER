@@ -30,7 +30,7 @@ quicker generate --schema diagram.json --out ./Generated --provider sqlserver --
 | `--provider <name>` | | 対象データベースの種類。`sqlserver`（既定）/ `postgresql` / `mysql` / `oracle` / `sqlite` |
 | `--config <file>` | | 生成オプション設定ファイル（quicker.json）。下記参照 |
 
-これらに加えて、**設定ファイル（quicker.json）の全キーは同名の kebab-case フラグとして指定でき**、設定ファイルより優先されます（優先順位: **CLI フラグ ＞ 設定ファイル ＞ 既定値**）。フラグ名はキーの機械的な kebab-case 変換で、例えば `namespaceName` → `--namespace-name`、`generateRepositories` → `--generate-repositories`、`splitFilesByCategory` → `--split-files-by-category`、`outputPath` → `--output-path` です。bool キーは**三値**で、`--flag`（値なし）＝ `true`、`--flag false` ＝ `false`、未指定＝設定ファイルの値になります。各キーの意味は下記「設定ファイル」の表を参照してください（`--repository-dialects` はカンマ区切りの方言リストで、未指定時は `--provider` の方言から単一導出します）。
+これらに加えて、**設定ファイル（quicker.json）の全キーは同名の kebab-case フラグとして指定でき**、設定ファイルより優先されます（優先順位: **CLI フラグ ＞ 設定ファイル ＞ 既定値**）。フラグ名はキーの機械的な kebab-case 変換で、例えば `rootNamespace` → `--root-namespace`、`generateRepositories` → `--generate-repositories`、`splitFilesByCategory` → `--split-files-by-category`、`outputPath` → `--output-path` です。bool キーは**三値**で、`--flag`（値なし）＝ `true`、`--flag false` ＝ `false`、未指定＝設定ファイルの値になります。各キーの意味は下記「設定ファイル」の表を参照してください（`--repository-dialects` はカンマ区切りの方言リストで、未指定時は `--provider` の方言から単一導出します）。
 
 ## quicker scaffold
 
@@ -57,7 +57,7 @@ quicker scaffold --connection "Server=.;Database=Shop;Integrated Security=true;T
 ```json
 {
   "SplitFilesByCategory": false,
-  "NamespaceName": "MyApp.Generated",
+  "RootNamespace": "MyApp.Generated",
   "GenerateEditModels": true,
   "GenerateMappers": true,
   "GenerateValueObjects": false,
@@ -73,7 +73,7 @@ quicker scaffold --connection "Server=.;Database=Shop;Integrated Security=true;T
 | キー | 説明 |
 |---|---|
 | `SplitFilesByCategory`（`false`） | カテゴリごとに別ファイル・別名前空間で出力する。`EntityNamespace` / `RepositoryNamespace` などで名前空間を個別指定できる |
-| `NamespaceName`（`Generated`） | 生成コードのルート名前空間 |
+| `RootNamespace`（`Generated`） | 生成コードのルート名前空間 |
 | `GenerateEditModels` / `GenerateMappers`（ともに `true`） | 各カテゴリの生成有無。**Entity クラスは常時生成**され、専用キーはない |
 | `GenerateValueObjects`（`false`） | 列ごとの値オブジェクト型（`CustomerIdValue` など）を生成する（[生成コードの使い方](code-generation.md#値オブジェクトgeneratevalueobjects) 参照） |
 | `UseGuidKeyForStringPrimaryKey`（`false`） | string 主キーを GUID 値オブジェクトにする（`GenerateValueObjects` が有効な場合のみ） |

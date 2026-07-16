@@ -88,7 +88,7 @@
   <data name="Cli_Opt_SplitFilesByCategory" xml:space="preserve">
     <value>カテゴリごとに別ファイル・別名前空間で出力する（設定ファイルを上書き）</value>
   </data>
-  <data name="Cli_Opt_NamespaceName" xml:space="preserve">
+  <data name="Cli_Opt_RootNamespace" xml:space="preserve">
     <value>生成コードのルート名前空間（設定ファイルを上書き）</value>
   </data>
   <data name="Cli_Opt_RuntimeNamespace" xml:space="preserve">
@@ -108,9 +108,6 @@
   </data>
   <data name="Cli_Opt_ValueObjectNamespace" xml:space="preserve">
     <value>分割出力時の値オブジェクトクラスの名前空間（設定ファイルを上書き）</value>
-  </data>
-  <data name="Cli_Opt_EfCoreNamespace" xml:space="preserve">
-    <value>分割出力時の EF Core（DbContext）クラスの名前空間（設定ファイルを上書き）</value>
   </data>
   <data name="Cli_Opt_GenerateEditModels" xml:space="preserve">
     <value>EditModel クラスを生成する（設定ファイルを上書き）</value>

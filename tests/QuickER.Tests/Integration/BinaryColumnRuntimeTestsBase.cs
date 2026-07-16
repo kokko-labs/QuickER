@@ -33,7 +33,7 @@ public abstract class BinaryColumnRuntimeTestsBase : IDisposable
     /// <summary>書き込み可能な接続文字列（バックエンドはこの実ファイルへ読み書きする）</summary>
     protected string ConnectionString => _db.ReadWriteCreateConnectionString;
 
-    /// <summary>文書リポジトリを生成する（QuickER = AddGeneratedRepositories / EF Core = AddGeneratedEfCoreRepositories）</summary>
+    /// <summary>文書リポジトリを生成する（QuickER 版 Repository = AddGenerated{方言}Repositories / EF Core = AddGeneratedEfCoreRepositories）</summary>
     protected abstract IDocumentRepository CreateDocumentRepository();
 
     /// <summary>文書メモ（子）リポジトリを生成する</summary>

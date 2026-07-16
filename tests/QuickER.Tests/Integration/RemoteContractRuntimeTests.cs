@@ -22,7 +22,7 @@ namespace QuickER.Tests.Integration;
 /// (3) リモート面の契約にローカル実行前提のメンバー（Query()・生 SQL・一括追加）が現れない（リフレクションで面の分割を証明）。
 /// </para>
 /// <para>
-/// QuickER（AddGeneratedRepositories）・EF Core（AddGeneratedEfCoreRepositories）の両 DI 経路で同じ検証を流す。
+/// QuickER（AddGeneratedSqliteRepositories）・EF Core（AddGeneratedEfCoreRepositories）の両 DI 経路で同じ検証を流す。
 /// </para>
 /// </remarks>
 [Trait("Category", "Integration")]
@@ -42,7 +42,7 @@ public sealed class RemoteContractRuntimeTests : IDisposable
     {
         await ApplySchemaAsync();
         var provider = new ServiceCollection()
-            .AddGeneratedRepositories(_db.ReadWriteCreateConnectionString)
+            .AddGeneratedSqliteRepositories(_db.ReadWriteCreateConnectionString)
             .BuildServiceProvider();
         _providers.Add(provider);
 

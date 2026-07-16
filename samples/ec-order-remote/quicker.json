@@ -1,5 +1,5 @@
 {
-  "NamespaceName": "EcOrderRemoteSample.Generated",
+  "RootNamespace": "EcOrderRemoteSample.Generated",
   "GenerateRepositories": true,
   "GenerateRemoteServices": true,
   "OutputPath": "EcOrderRemote.g.cs"

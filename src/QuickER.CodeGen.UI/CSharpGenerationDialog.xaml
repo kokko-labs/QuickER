@@ -183,19 +183,6 @@
           Text="{x:Static res:Strings.CodeGen_GenerationContent}"
         />
 
-        <Grid Margin="0,0,0,12">
-          <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="96" />
-            <ColumnDefinition Width="*" />
-          </Grid.ColumnDefinitions>
-          <TextBlock Grid.Column="0" Style="{StaticResource FieldLabel}" Text="namespace" />
-          <TextBox
-            Grid.Column="1"
-            Style="{StaticResource FormInput}"
-            Text="{Binding BaseNamespace, UpdateSourceTrigger=PropertyChanged}"
-          />
-        </Grid>
-
         <Grid Margin="0,0,0,10">
           <Grid.ColumnDefinitions>
             <ColumnDefinition Width="96" />
@@ -382,7 +369,6 @@
             Grid.Column="1"
             Content="{x:Static res:Strings.CodeGen_UseRuntimePackages}"
             IsChecked="{Binding UseRuntimePackages}"
-            IsEnabled="{Binding CanUseRuntimePackages}"
             ToolTip="{Binding UseRuntimePackagesToolTip}"
           />
         </Grid>
@@ -450,30 +436,45 @@
       </StackPanel>
     </Border>
 
-    <!-- モード②: 分割設定（カテゴリ別 namespace とプレビュー。出力先は上の共通行が担う） -->
-    <Border
-      Style="{StaticResource Card}"
-      Visibility="{Binding ShowSplitOptions, Converter={StaticResource BoolToVisibilityConverter}}"
-    >
+    <!-- 名前空間（ルートは出力モードに依らず常に表示。カテゴリ別・生成ファイルは分割モード時のみ） -->
+    <Border Style="{StaticResource Card}">
       <StackPanel>
         <TextBlock
           Style="{StaticResource SectionHeader}"
-          Text="{x:Static res:Strings.CodeGen_OutputAndSplit}"
+          Text="{x:Static res:Strings.CodeGen_NamespaceSection}"
         />
 
-        <!-- カテゴリ別 namespace -->
-        <TextBlock
-          Margin="0,0,0,6"
-          Foreground="{StaticResource MutedText}"
-          Text="{x:Static res:Strings.CodeGen_CategoryNamespace}"
-        />
+        <!-- ルート名前空間（出力モードに依らず常に表示） -->
         <Grid>
           <Grid.ColumnDefinitions>
             <ColumnDefinition Width="96" />
             <ColumnDefinition Width="*" />
           </Grid.ColumnDefinitions>
+          <TextBlock
+            Grid.Column="0"
+            Style="{StaticResource FieldLabel}"
+            Text="{x:Static res:Strings.CodeGen_RootLabel}"
+          />
+          <TextBox
+            Grid.Column="1"
+            Style="{StaticResource FormInput}"
+            Text="{Binding RootNamespace, UpdateSourceTrigger=PropertyChanged}"
+          />
+        </Grid>
+
+        <!-- カテゴリ別 namespace（分割モード時のみ表示） -->
+        <TextBlock
+          Margin="0,14,0,6"
+          Foreground="{StaticResource MutedText}"
+          Text="{x:Static res:Strings.CodeGen_CategoryNamespace}"
+          Visibility="{Binding ShowSplitOptions, Converter={StaticResource BoolToVisibilityConverter}}"
+        />
+        <Grid Visibility="{Binding ShowSplitOptions, Converter={StaticResource BoolToVisibilityConverter}}">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="96" />
+            <ColumnDefinition Width="*" />
+          </Grid.ColumnDefinitions>
           <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
@@ -549,7 +550,8 @@
             Visibility="{Binding ShowValueObjectNamespace, Converter={StaticResource BoolToVisibilityConverter}}"
           />
 
-          <!-- DB アクセス系は「生成内容」の並びに合わせて末尾。EF Core 選択時は契約（Repository）＋EfCore の 2 欄が並ぶ -->
+          <!-- DB アクセス系は「生成内容」の並びに合わせて末尾。EF Core 実装は Repository 契約 namespace の
+               サブ名前空間（{Repository}.EfCore）へ導出するため専用の欄は持たない -->
           <TextBlock
             Grid.Row="4"
             Grid.Column="0"
@@ -565,23 +567,6 @@
             Style="{StaticResource FormInput}"
             Text="{Binding RepositoryNamespace, UpdateSourceTrigger=PropertyChanged}"
             Visibility="{Binding ShowRepositoryNamespace, Converter={StaticResource BoolToVisibilityConverter}}"
-          />
-
-          <TextBlock
-            Grid.Row="5"
-            Grid.Column="0"
-            Margin="0,4"
-            Style="{StaticResource FieldLabel}"
-            Text="EF Core"
-            Visibility="{Binding ShowEfCoreNamespace, Converter={StaticResource BoolToVisibilityConverter}}"
-          />
-          <TextBox
-            Grid.Row="5"
-            Grid.Column="1"
-            Margin="0,4"
-            Style="{StaticResource FormInput}"
-            Text="{Binding EfCoreNamespace, UpdateSourceTrigger=PropertyChanged}"
-            Visibility="{Binding ShowEfCoreNamespace, Converter={StaticResource BoolToVisibilityConverter}}"
           />
         </Grid>
 
@@ -614,44 +599,39 @@
           />
         </Grid>
 
-        <!-- プレビュー -->
-        <TextBlock
-          Margin="0,14,0,6"
-          Foreground="{StaticResource MutedText}"
-          Text="{x:Static res:Strings.CodeGen_GeneratedFiles}"
-        />
-        <Border
-          Background="#F9FAFB"
-          BorderBrush="{StaticResource Divider}"
-          BorderThickness="1"
-          CornerRadius="8"
+        <!-- 生成されるファイル（分割モード時のみ・折り畳み可能。既定は折り畳み） -->
+        <Expander
+          Margin="0,14,0,0"
+          Header="{x:Static res:Strings.CodeGen_GeneratedFiles}"
+          IsExpanded="False"
+          Visibility="{Binding ShowSplitOptions, Converter={StaticResource BoolToVisibilityConverter}}"
         >
-          <ScrollViewer MaxHeight="150" VerticalScrollBarVisibility="Auto">
-            <ItemsControl Margin="12,10" ItemsSource="{Binding PreviewFiles}">
-              <ItemsControl.ItemTemplate>
-                <DataTemplate>
-                  <TextBlock
-                    Margin="0,2"
-                    FontFamily="Consolas, Cascadia Mono, monospace"
-                    FontSize="12"
-                    Foreground="{StaticResource HeaderText}"
-                    Text="{Binding}"
-                  />
-                </DataTemplate>
-              </ItemsControl.ItemTemplate>
-            </ItemsControl>
-          </ScrollViewer>
-        </Border>
+          <Border
+            Margin="0,8,0,0"
+            Background="#F9FAFB"
+            BorderBrush="{StaticResource Divider}"
+            BorderThickness="1"
+            CornerRadius="8"
+          >
+            <ScrollViewer MaxHeight="150" VerticalScrollBarVisibility="Auto">
+              <ItemsControl Margin="12,10" ItemsSource="{Binding PreviewFiles}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate>
+                    <TextBlock
+                      Margin="0,2"
+                      FontFamily="Consolas, Cascadia Mono, monospace"
+                      FontSize="12"
+                      Foreground="{StaticResource HeaderText}"
+                      Text="{Binding}"
+                    />
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </ScrollViewer>
+          </Border>
+        </Expander>
       </StackPanel>
     </Border>
-
-    <!-- 説明 -->
-    <TextBlock
-      Margin="2,0,2,4"
-      Foreground="{StaticResource MutedText}"
-      TextWrapping="Wrap"
-      Text="{x:Static res:Strings.CodeGen_AutoGenNote}"
-    />
 
     <!-- フッタ -->
     <DockPanel Margin="0,10,0,0">

@@ -114,9 +114,9 @@ namespace QuickER.Cli.Resources {
             }
         }
 
-        public static string Cli_Opt_NamespaceName {
+        public static string Cli_Opt_RootNamespace {
             get {
-                return ResourceManager.GetString("Cli_Opt_NamespaceName", resourceCulture);
+                return ResourceManager.GetString("Cli_Opt_RootNamespace", resourceCulture);
             }
         }
 
@@ -153,12 +153,6 @@ namespace QuickER.Cli.Resources {
         public static string Cli_Opt_ValueObjectNamespace {
             get {
                 return ResourceManager.GetString("Cli_Opt_ValueObjectNamespace", resourceCulture);
-            }
-        }
-
-        public static string Cli_Opt_EfCoreNamespace {
-            get {
-                return ResourceManager.GetString("Cli_Opt_EfCoreNamespace", resourceCulture);
             }
         }
 

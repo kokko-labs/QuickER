@@ -10,7 +10,7 @@ using Xunit;
 namespace QuickER.Tests.Integration;
 
 /// <summary>
-/// 無制限バイナリ列の除外を<b>QuickER の <c>SqliteRepository</c> 版</b>（<c>AddGeneratedRepositories</c>）で検証する派生。
+/// 無制限バイナリ列の除外を<b>QuickER の <c>SqliteRepository</c> 版</b>（<c>AddGeneratedSqliteRepositories</c>）で検証する派生。
 /// 除外が効く側＝SELECT / UPDATE から payload / thumb が外れ、INSERT / BulkInsert では DB に書かれることを確認する。
 /// </summary>
 public sealed class BinaryColumnAdoRuntimeTests : BinaryColumnRuntimeTestsBase
@@ -20,7 +20,7 @@ public sealed class BinaryColumnAdoRuntimeTests : BinaryColumnRuntimeTestsBase
 
     private ServiceProvider Provider() =>
         _provider ??= new ServiceCollection()
-            .AddGeneratedRepositories(ConnectionString)
+            .AddGeneratedSqliteRepositories(ConnectionString)
             .BuildServiceProvider();
 
     protected override IDocumentRepository CreateDocumentRepository() =>

@@ -1,3 +1,4 @@
+using QuickER.CodeGen.CSharp;
 using QuickER.Settings;
 
 namespace QuickER.CodeGen.UI;
@@ -5,7 +6,7 @@ namespace QuickER.CodeGen.UI;
 /// <summary>C# コード生成ダイアログの設定（次回起動時に復元する永続化対象）</summary>
 /// <remarks>
 /// このスキーマは CLI の quicker.json（<c>--config</c>）互換になるよう、CLI の
-/// <c>CodeGenerationOptions</c> とキー集合・意味・既定値を揃えている（<see cref="NamespaceName"/> /
+/// <c>CodeGenerationOptions</c> とキー集合・意味・既定値を揃えている（<see cref="RootNamespace"/> /
 /// <see cref="RepositoryDialects"/> / <see cref="OutputPath"/> 等）。JSON は camelCase で書き出すが、
 /// CLI は <c>PropertyNameCaseInsensitive</c> で読むため名前が一致すればそのまま解釈される。
 /// <see cref="OutputPath"/> は CLI でも解釈され、CLI はそのファイル名部分のみを出力ファイル名として使う
@@ -22,10 +23,10 @@ public class CSharpGenerationSettings
     // ===== 名前空間 =====
 
     /// <summary>
-    /// ベース（ルート）名前空間。分割時は各カテゴリ名前空間のフォールバック元になる
-    /// （CLI の <c>CodeGenerationOptions.NamespaceName</c> と同名＝<c>--config</c> でそのまま解釈される）
+    /// ルート名前空間。分割時は各カテゴリ名前空間のフォールバック元になる
+    /// （CLI の <c>CodeGenerationOptions.RootNamespace</c> と同名＝<c>--config</c> でそのまま解釈される）
     /// </summary>
-    public string NamespaceName { get; set; } = DefaultBaseNamespace;
+    public string RootNamespace { get; set; } = DefaultRootNamespace;
 
     /// <summary>分割時の共有基盤（Runtime）名前空間。空なら {base}.Runtime にフォールバック</summary>
     public string RuntimeNamespace { get; set; } = string.Empty;
@@ -44,9 +45,6 @@ public class CSharpGenerationSettings
 
     /// <summary>分割時の ValueObject 名前空間。空なら {base}.ValueObjects にフォールバック</summary>
     public string ValueObjectNamespace { get; set; } = string.Empty;
-
-    /// <summary>分割時の EfCore 名前空間。空なら {base}.EfCore にフォールバック</summary>
-    public string EfCoreNamespace { get; set; } = string.Empty;
 
     // ===== 生成対象 =====
 
@@ -137,14 +135,59 @@ public class CSharpGenerationSettings
     /// </remarks>
     public string OutputPath { get; set; } = string.Empty;
 
-    /// <summary>ベース名前空間の工場出荷既定（分割時は {base}.Entities 等のフォールバック元になるため接尾辞なし）</summary>
-    public const string DefaultBaseNamespace = "Generated";
+    /// <summary>ルート名前空間の工場出荷既定（分割時は {root}.Entities 等のフォールバック元になるため接尾辞なし）</summary>
+    public const string DefaultRootNamespace = "Generated";
 
     /// <summary>非分割時の出力ファイル名の工場出荷既定</summary>
     public const string DefaultOutputFilePath = "QuickEREntities.g.cs";
 
     /// <summary>工場出荷既定の設定を生成する（クリア／初回起動で使う）</summary>
     public static CSharpGenerationSettings CreateDefault() => new();
+
+    /// <summary>
+    /// この設定から <see cref="CodeGenerationOptions"/> を組み立てる（設定→生成オプション変換の唯一の正）。
+    /// </summary>
+    /// <param name="outputFileName">
+    /// 出力ファイル名。分割時は planner がバケット別ファイル名を使うため inert（既定名）、非分割時は出力先パスの
+    /// ファイル名部分を渡す（GUI 固有の分割/非分割の出し分けは呼び出し側が行う）。
+    /// </param>
+    /// <remarks>
+    /// 空白の子名前空間は null へ畳み、planner のフォールバック（<c>{root}.{接尾辞}</c>）を効かせる。
+    /// 対象 DB（<see cref="RepositoryDialects"/>）は保存時の固定順（sqlserver, sqlite）をそのまま採る。
+    /// UI 非表示の属性系（<see cref="IncludeDataAnnotations"/> 等）も保持値のまま生成へ反映する。
+    /// </remarks>
+    internal CodeGenerationOptions ToCodeGenerationOptions(string outputFileName) =>
+        new()
+        {
+            RootNamespace = RootNamespace.Trim(),
+            OutputFileName = outputFileName,
+            SplitFilesByCategory = SplitFilesByCategory,
+            RuntimeNamespace = NullIfEmpty(RuntimeNamespace),
+            EntityNamespace = NullIfEmpty(EntityNamespace),
+            EditModelNamespace = NullIfEmpty(EditModelNamespace),
+            MapperNamespace = NullIfEmpty(MapperNamespace),
+            RepositoryNamespace = NullIfEmpty(RepositoryNamespace),
+            ValueObjectNamespace = NullIfEmpty(ValueObjectNamespace),
+            GenerateEditModels = GenerateEditModels,
+            GenerateMappers = GenerateMappers,
+            GenerateRepositories = GenerateRepositories,
+            RepositoryDialects = RepositoryDialects,
+            GenerateEfCore = GenerateEfCore,
+            GenerateInMemoryRepositories = GenerateInMemoryRepositories,
+            UseRuntimePackages = UseRuntimePackages,
+            GenerateRemoteContracts = GenerateRemoteContracts,
+            GenerateRemoteServices = GenerateRemoteServices,
+            GenerateApiDocs = GenerateApiDocs,
+            ExcludeUnboundedBinaryColumns = ExcludeUnboundedBinaryColumns,
+            GenerateValueObjects = GenerateValueObjects,
+            UseGuidKeyForStringPrimaryKey = UseGuidKeyForStringPrimaryKey,
+            IncludeDataAnnotations = IncludeDataAnnotations,
+            IncludeJsonIgnoreOnParentNavigation = IncludeJsonIgnoreOnParentNavigation,
+        };
+
+    /// <summary>空白を null へ畳む（オプションのフォールバックを効かせるため）</summary>
+    private static string? NullIfEmpty(string value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 }
 
 /// <summary>C# コード生成ダイアログ設定を JSON ファイルへ保存・読込するストア</summary>
