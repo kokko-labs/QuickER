@@ -381,8 +381,12 @@ public static class CliApp
     /// <remarks>
     /// <paramref name="repositoryDialects"/>（<c>--repository-dialects</c>）指定時は
     /// <see cref="CodeGenerationOptions.RepositoryDialects"/> へカンマ区切りの各方言を設定する。
-    /// 未指定時は従来どおり <paramref name="provider"/> の名前を単一 <see cref="CodeGenerationOptions.RepositoryDialect"/>
-    /// として設定する（設定ファイルの値は無視する。図の TargetDbms から導出される値のため CLI 引数を単一の正とする）。
+    /// 未指定時は <paramref name="provider"/> の名前を単一 <see cref="CodeGenerationOptions.RepositoryDialect"/>
+    /// として設定する（図の TargetDbms から導出される値のため、単一キーは CLI 引数を正として上書きする）。
+    /// ただし設定ファイル（GUI が保存した <c>--config</c>）に <see cref="CodeGenerationOptions.RepositoryDialects"/>
+    /// のリストが含まれる場合は、この単一キーを上書きしてもそのリストは温存され、
+    /// <see cref="CodeGenerationOptions.EffectiveRepositoryDialects"/> の優先規則（リスト優先）によって有効になる
+    /// （GUI で選んだ対象 DB がこの経路で CLI に伝わる）。
     /// <paramref name="runtimePackages"/>（<c>--runtime-packages</c>）指定時は
     /// <see cref="CodeGenerationOptions.UseRuntimePackages"/> を true にする（未指定時は設定ファイルの値を使う）。
     /// <paramref name="apiDocs"/>（<c>--api-docs</c>）指定時は

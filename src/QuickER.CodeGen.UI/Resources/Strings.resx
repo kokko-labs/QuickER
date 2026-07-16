@@ -205,6 +205,31 @@
   <data name="CodeGen_Status_OutputFileRequired" xml:space="preserve">
     <value>Please specify an output file.</value>
   </data>
+  <data name="CodeGen_LoadSettings" xml:space="preserve">
+    <value>Load Settings</value>
+  </data>
+  <data name="CodeGen_SaveSettings" xml:space="preserve">
+    <value>Save Settings</value>
+  </data>
+  <data name="CodeGen_LoadSettingsToolTip" xml:space="preserve">
+    <value>Loads a saved settings JSON file and applies it to this dialog (does not overwrite the default settings)</value>
+  </data>
+  <data name="CodeGen_SaveSettingsToolTip" xml:space="preserve">
+    <value>Saves the current settings to a JSON file of your choice as a reusable preset. The saved file can be passed directly to the CLI as --config.</value>
+  </data>
+  <data name="CodeGen_SettingsDialogTitle" xml:space="preserve">
+    <value>Code Generation Settings</value>
+  </data>
+  <data name="CodeGen_SettingsSavedMessage" xml:space="preserve">
+    <value>Settings saved to {0}.
+You can pass this file directly to the CLI as --config.</value>
+  </data>
+  <data name="CodeGen_SettingsSaveFailedMessage" xml:space="preserve">
+    <value>Failed to save settings to {0}.</value>
+  </data>
+  <data name="CodeGen_SettingsLoadFailedMessage" xml:space="preserve">
+    <value>Failed to load settings from {0}.</value>
+  </data>
   <data name="CodeGen_NamespaceLabel_Runtime" xml:space="preserve">
     <value>Runtime namespace</value>
   </data>

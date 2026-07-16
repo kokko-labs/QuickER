@@ -669,13 +669,22 @@
 
     <!-- フッタ -->
     <DockPanel Margin="0,10,0,0">
-      <TextBlock
-        DockPanel.Dock="Left"
-        VerticalAlignment="Center"
-        Foreground="#B91C1C"
-        TextWrapping="Wrap"
-        Text="{Binding StatusMessage}"
-      />
+      <!-- 左寄せ: 設定プリセットの読み込み・名前を付けて保存（右寄せの確定系ボタンとは用途が異なるため左に分ける） -->
+      <StackPanel DockPanel.Dock="Left" Orientation="Horizontal">
+        <Button
+          Margin="0,0,8,0"
+          Content="{x:Static res:Strings.CodeGen_LoadSettings}"
+          Style="{StaticResource SecondaryButton}"
+          Command="{Binding LoadSettingsFromCommand}"
+          ToolTip="{x:Static res:Strings.CodeGen_LoadSettingsToolTip}"
+        />
+        <Button
+          Content="{x:Static res:Strings.CodeGen_SaveSettings}"
+          Style="{StaticResource SecondaryButton}"
+          Command="{Binding SaveSettingsAsCommand}"
+          ToolTip="{x:Static res:Strings.CodeGen_SaveSettingsToolTip}"
+        />
+      </StackPanel>
       <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
         <Button
           Margin="0,0,8,0"
@@ -697,6 +706,14 @@
           Command="{Binding CancelCommand}"
         />
       </StackPanel>
+      <!-- 残り幅を占有する fill 要素として最後に置く（DockPanel の LastChildFill 既定に従う） -->
+      <TextBlock
+        Margin="12,0"
+        VerticalAlignment="Center"
+        Foreground="#B91C1C"
+        TextWrapping="Wrap"
+        Text="{Binding StatusMessage}"
+      />
     </DockPanel>
   </StackPanel>
 </Window>

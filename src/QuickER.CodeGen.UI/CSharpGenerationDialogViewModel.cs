@@ -27,6 +27,9 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     /// <summary>出力先のファイル / フォルダ選択ダイアログの表示先</summary>
     private readonly IFileDialogService _files;
 
+    /// <summary>設定の保存／読込の結果（成功通知・失敗エラー）を表示するメッセージダイアログ</summary>
+    private readonly IDialogService _dialogs;
+
     /// <summary>ベース名前空間変更時の子名前空間追従更新を一時的に抑止するフラグ（設定適用中に使う）</summary>
     private bool _suppressNamespaceFollow;
 
@@ -45,11 +48,13 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     public CSharpGenerationDialogViewModel(
         CSharpGenerationSettingsStore? store = null,
         IFileDialogService? files = null,
-        IDatabaseProvider? currentProvider = null
+        IDatabaseProvider? currentProvider = null,
+        IDialogService? dialogs = null
     )
     {
         _store = store ?? new CSharpGenerationSettingsStore();
         _files = files ?? NullFileDialogService.Instance;
+        _dialogs = dialogs ?? NullDialogService.Instance;
 
         // 対象 DB チェックの初期値: 図の方言が対応方言（sqlserver/sqlite）ならその方言のみ ON、
         // 未対応方言（PostgreSQL 等）なら両方 OFF（ユーザーに明示的な選択を求める）。
@@ -505,7 +510,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
         try
         {
             SplitFilesByCategory = settings.SplitFilesByCategory;
-            BaseNamespace = settings.BaseNamespace;
+            BaseNamespace = settings.NamespaceName;
             RuntimeNamespace = Prefill(settings.RuntimeNamespace, GenerationBucket.Runtime);
             EntityNamespace = Prefill(settings.EntityNamespace, GenerationBucket.Entity);
             EditModelNamespace = Prefill(settings.EditModelNamespace, GenerationBucket.EditModel);
@@ -527,6 +532,19 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
             // （Repository ラジオは常時選択可のため、方言による無効化は行わない）
             GenerateRepositories = settings.GenerateRepositories;
             GenerateEfCore = settings.GenerateEfCore && !GenerateRepositories;
+            // 対象 DB チェック（SQL Server / SQLite）は、保存値のリストが非空ならその内容で復元する。
+            // 空リスト（未指定＝旧設定 / クリア）のときは ctor で図の方言から導出した初期値を保つ。
+            if (settings.RepositoryDialects.Count > 0)
+            {
+                TargetSqlServer = settings.RepositoryDialects.Contains(
+                    SqlServerProvider.ProviderName,
+                    StringComparer.OrdinalIgnoreCase
+                );
+                TargetSqlite = settings.RepositoryDialects.Contains(
+                    SqliteProvider.ProviderName,
+                    StringComparer.OrdinalIgnoreCase
+                );
+            }
             // パッケージ参照モードは EF Core とも併用できるため、保存値をそのまま復元する
             UseRuntimePackages = settings.UseRuntimePackages;
             // リモート対応（リモート面の追加生成）は保存値をそのまま復元する（行の表示/非表示は UI 側で連動）
@@ -563,7 +581,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
         new()
         {
             SplitFilesByCategory = SplitFilesByCategory,
-            BaseNamespace = BaseNamespace.Trim(),
+            NamespaceName = BaseNamespace.Trim(),
             RuntimeNamespace = RuntimeNamespace.Trim(),
             EntityNamespace = EntityNamespace.Trim(),
             EditModelNamespace = EditModelNamespace.Trim(),
@@ -575,6 +593,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
             GenerateEditModels = GenerateEditModels,
             GenerateMappers = GenerateMappers,
             GenerateRepositories = GenerateRepositories,
+            RepositoryDialects = SelectedRepositoryDialects(),
             GenerateEfCore = GenerateEfCore,
             UseRuntimePackages = UseRuntimePackages,
             GenerateRemoteContracts = GenerateRemoteContracts,
@@ -583,6 +602,8 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
             ExcludeUnboundedBinaryColumns = ExcludeUnboundedBinaryColumns,
             GenerateValueObjects = GenerateValueObjects,
             UseGuidKeyForStringPrimaryKey = UseGuidKeyForStringPrimaryKey,
+            // CLI（--config）は出力ファイル名のみを扱うため、フルパスからファイル名を導出して橋渡しする
+            OutputFileName = Path.GetFileName(OutputFilePath.Trim()),
             OutputFilePath = OutputFilePath.Trim(),
             OutputFolderPath = OutputFolderPath.Trim(),
         };
@@ -698,6 +719,94 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     /// <summary>全設定を工場出荷既定へ戻す（ディスクへの反映は次の生成確定時）</summary>
     [RelayCommand]
     private void Clear() => ApplySettings(CSharpGenerationSettings.CreateDefault());
+
+    /// <summary>現在の設定一式を名前を付けて JSON ファイルへ保存する（プロジェクト別プリセットのエクスポート）</summary>
+    /// <remarks>
+    /// 対象 DB チェックを含む設定一式を、CLI の <c>--config</c> にそのまま渡せるスキーマで書き出す。
+    /// %APPDATA% の codegen-settings.json へは書き込まず、選択された任意ファイルへ書き出す
+    /// （永続化は生成確定時の <see cref="Ok"/> の責務）。成功時は情報ダイアログで通知し、
+    /// アクセス拒否・IO 失敗時はエラーダイアログを表示する（いずれも表示状態は変更しない）
+    /// </remarks>
+    [RelayCommand]
+    private void SaveSettingsAs()
+    {
+        var result = _files.PickSaveFile(
+            "QuickER CodeGen Settings (*.json)|*.json",
+            ".json",
+            "codegen-settings.json"
+        );
+
+        if (result is null)
+        {
+            // キャンセル時は何もしない（現在の表示状態は変更しない）
+            return;
+        }
+
+        try
+        {
+            _store.SaveTo(result.Path, ToSettings());
+            // 保存成功は情報ダイアログで通知する（CLI の --config へ渡せる旨も併記）
+            _dialogs.ShowInformation(
+                string.Format(Strings.CodeGen_SettingsSavedMessage, Path.GetFileName(result.Path)),
+                Strings.CodeGen_SettingsDialogTitle
+            );
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // アクセス拒否・IO 失敗はダイアログを落とさずエラーダイアログで通知する
+            _dialogs.ShowError(
+                string.Format(
+                    Strings.CodeGen_SettingsSaveFailedMessage,
+                    Path.GetFileName(result.Path)
+                ),
+                Strings.CodeGen_SettingsDialogTitle
+            );
+        }
+    }
+
+    /// <summary>保存済みの設定 JSON ファイルを読み込み、ダイアログの表示状態へ反映する（プリセットのインポート）</summary>
+    /// <remarks>
+    /// 反映のみ行い %APPDATA% の codegen-settings.json へは書き込まない。成功時は無通知（表示へ反映するのみ）。
+    /// 解析不能・不正・IO 失敗時はエラーダイアログを表示し、現在の表示状態は変更しない
+    /// </remarks>
+    [RelayCommand]
+    private void LoadSettingsFrom()
+    {
+        var result = _files.PickOpenFile("QuickER CodeGen Settings (*.json)|*.json");
+
+        if (result is null)
+        {
+            // キャンセル時は何もしない
+            return;
+        }
+
+        CSharpGenerationSettings? settings;
+
+        try
+        {
+            settings = _store.TryLoadFrom(result.Path);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // IO 失敗（アクセス拒否等）も解析失敗と同じくエラー表示にとどめ、表示状態は変更しない
+            settings = null;
+        }
+
+        if (settings is null)
+        {
+            _dialogs.ShowError(
+                string.Format(
+                    Strings.CodeGen_SettingsLoadFailedMessage,
+                    Path.GetFileName(result.Path)
+                ),
+                Strings.CodeGen_SettingsDialogTitle
+            );
+            return;
+        }
+
+        // 読み込み成功は無通知（表示状態へ反映するのみ）
+        ApplySettings(settings);
+    }
 
     /// <summary>入力内容を検証して確定し、設定を保存する（不正時はステータスにエラーを表示する）</summary>
     [RelayCommand]
@@ -844,4 +953,30 @@ file sealed class NullFileDialogService : IFileDialogService
 
     /// <inheritdoc />
     public string? PickFolder(string title, string? initialDirectory = null) => null;
+}
+
+/// <summary>何も表示しない <see cref="IDialogService"/>（未注入時＝テスト用の既定）</summary>
+/// <remarks>実 GUI 経路では合成側（WpfAppDialogService）が必ず実装を注入するため、この既定は使われない</remarks>
+file sealed class NullDialogService : IDialogService
+{
+    /// <summary>共有インスタンス（状態を持たないため単一でよい）</summary>
+    public static NullDialogService Instance { get; } = new();
+
+    /// <inheritdoc />
+    public bool Confirm(string message, string title) => false;
+
+    /// <inheritdoc />
+    public bool ConfirmWarning(string message, string title) => false;
+
+    /// <inheritdoc />
+    public void ShowInformation(string message, string title) { }
+
+    /// <inheritdoc />
+    public void ShowError(string message, string title) { }
+
+    /// <inheritdoc />
+    public void ShowInformationDetails(string message, string details, string title) { }
+
+    /// <inheritdoc />
+    public void ShowErrorDetails(string message, string details, string title) { }
 }
