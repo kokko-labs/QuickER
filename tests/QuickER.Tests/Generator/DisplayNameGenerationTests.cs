@@ -70,7 +70,7 @@ public class DisplayNameGenerationTests
             diagram,
             new CodeGenerationOptions
             {
-                NamespaceName = "Sample.Domain",
+                RootNamespace = "Sample.Domain",
                 GenerateValueObjects = true,
             }
         );
@@ -101,7 +101,7 @@ public class DisplayNameGenerationTests
                     tableDescription: "顧客マスタ",
                     ("customer_id", "int", true, false, null)
                 ),
-                new CodeGenerationOptions { NamespaceName = "Sample.Domain" }
+                new CodeGenerationOptions { RootNamespace = "Sample.Domain" }
             )
             .Files[0]
             .Content;
@@ -116,7 +116,7 @@ public class DisplayNameGenerationTests
                     tableDescription: null,
                     ("customer_id", "int", true, false, null)
                 ),
-                new CodeGenerationOptions { NamespaceName = "Sample.Domain" }
+                new CodeGenerationOptions { RootNamespace = "Sample.Domain" }
             )
             .Files[0]
             .Content;
@@ -142,7 +142,7 @@ public class DisplayNameGenerationTests
         );
 
         var content = new CSharpCodeGenerationService()
-            .Generate(diagram, new CodeGenerationOptions { NamespaceName = "Sample.Domain" })
+            .Generate(diagram, new CodeGenerationOptions { RootNamespace = "Sample.Domain" })
             .Files[0]
             .Content;
 
@@ -226,7 +226,7 @@ public class DisplayNameGenerationTests
 
         var result = new CSharpCodeGenerationService().Generate(
             diagram,
-            new CodeGenerationOptions { NamespaceName = "Sample.Domain" }
+            new CodeGenerationOptions { RootNamespace = "Sample.Domain" }
         );
 
         result.HasErrors.Should().BeFalse("衝突は警告であり生成は完走する");
@@ -279,7 +279,7 @@ public class DisplayNameGenerationTests
             columnTypes,
             new CodeGenerationOptions
             {
-                NamespaceName = "Sample.Domain",
+                RootNamespace = "Sample.Domain",
                 GenerateValueObjects = true,
                 IncludeDataAnnotations = true,
             }

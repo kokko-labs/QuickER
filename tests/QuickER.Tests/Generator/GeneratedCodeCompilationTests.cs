@@ -27,7 +27,7 @@ public class GeneratedCodeCompilationTests
                 $"全カテゴリ Split={split} VO={vo}",
                 new CodeGenerationOptions
                 {
-                    NamespaceName = "Sample.Domain",
+                    RootNamespace = "Sample.Domain",
                     SplitFilesByCategory = split,
                     GenerateValueObjects = vo,
                 }
@@ -47,7 +47,7 @@ public class GeneratedCodeCompilationTests
                 $"EfCore Split={split} VO={vo}",
                 new CodeGenerationOptions
                 {
-                    NamespaceName = "Sample.Domain",
+                    RootNamespace = "Sample.Domain",
                     SplitFilesByCategory = split,
                     GenerateValueObjects = vo,
                     GenerateEfCore = true,
@@ -60,7 +60,7 @@ public class GeneratedCodeCompilationTests
             "EfCore + QuickER 版 Repository + ExcludeUnboundedBinaryColumns",
             new CodeGenerationOptions
             {
-                NamespaceName = "Sample.Domain",
+                RootNamespace = "Sample.Domain",
                 GenerateEfCore = true,
                 ExcludeUnboundedBinaryColumns = true,
             }
@@ -80,7 +80,7 @@ public class GeneratedCodeCompilationTests
                 $"EfCore 単独 Split={split} VO={vo}",
                 new CodeGenerationOptions
                 {
-                    NamespaceName = "Sample.Domain",
+                    RootNamespace = "Sample.Domain",
                     SplitFilesByCategory = split,
                     GenerateValueObjects = vo,
                     GenerateEfCore = true,
@@ -101,7 +101,7 @@ public class GeneratedCodeCompilationTests
                 $"Entity のみ Split={split}",
                 new CodeGenerationOptions
                 {
-                    NamespaceName = "Sample.Domain",
+                    RootNamespace = "Sample.Domain",
                     SplitFilesByCategory = split,
                     GenerateEditModels = false,
                     GenerateMappers = false,
@@ -112,7 +112,7 @@ public class GeneratedCodeCompilationTests
                 $"Entity+EditModel+Mapper Split={split}",
                 new CodeGenerationOptions
                 {
-                    NamespaceName = "Sample.Domain",
+                    RootNamespace = "Sample.Domain",
                     SplitFilesByCategory = split,
                     GenerateEditModels = true,
                     GenerateMappers = true,
@@ -123,7 +123,7 @@ public class GeneratedCodeCompilationTests
                 $"Entity+Repository（EditModel/Mapper 抜き） Split={split}",
                 new CodeGenerationOptions
                 {
-                    NamespaceName = "Sample.Domain",
+                    RootNamespace = "Sample.Domain",
                     SplitFilesByCategory = split,
                     GenerateEditModels = false,
                     GenerateMappers = false,
@@ -145,7 +145,7 @@ public class GeneratedCodeCompilationTests
                 $"SQLite Repository Split={split} VO={vo}",
                 new CodeGenerationOptions
                 {
-                    NamespaceName = "Sample.Domain",
+                    RootNamespace = "Sample.Domain",
                     SplitFilesByCategory = split,
                     GenerateValueObjects = vo,
                     RepositoryDialects = ["sqlite"],
@@ -158,7 +158,7 @@ public class GeneratedCodeCompilationTests
             "SQLite Repository + EF Core",
             new CodeGenerationOptions
             {
-                NamespaceName = "Sample.Domain",
+                RootNamespace = "Sample.Domain",
                 RepositoryDialects = ["sqlite"],
                 GenerateEfCore = true,
             }
@@ -177,7 +177,7 @@ public class GeneratedCodeCompilationTests
                 $"InMemory 単独 Split={split} VO={vo}",
                 new CodeGenerationOptions
                 {
-                    NamespaceName = "Sample.Domain",
+                    RootNamespace = "Sample.Domain",
                     SplitFilesByCategory = split,
                     GenerateValueObjects = vo,
                     GenerateRepositories = false,
@@ -192,7 +192,7 @@ public class GeneratedCodeCompilationTests
             "InMemory + EF Core",
             new CodeGenerationOptions
             {
-                NamespaceName = "Sample.Domain",
+                RootNamespace = "Sample.Domain",
                 GenerateRepositories = false,
                 GenerateEfCore = true,
                 GenerateInMemoryRepositories = true,
@@ -204,7 +204,7 @@ public class GeneratedCodeCompilationTests
             "InMemory + QuickER sqlserver Repository",
             new CodeGenerationOptions
             {
-                NamespaceName = "Sample.Domain",
+                RootNamespace = "Sample.Domain",
                 GenerateRepositories = true,
                 RepositoryDialects = ["sqlserver"],
                 GenerateInMemoryRepositories = true,
@@ -216,7 +216,7 @@ public class GeneratedCodeCompilationTests
             "InMemory + QuickER マルチターゲット(sqlserver/sqlite)",
             new CodeGenerationOptions
             {
-                NamespaceName = "Sample.Domain",
+                RootNamespace = "Sample.Domain",
                 GenerateRepositories = true,
                 RepositoryDialects = ["sqlserver", "sqlite"],
                 GenerateInMemoryRepositories = true,
@@ -237,7 +237,7 @@ public class GeneratedCodeCompilationTests
                 $"remote QuickER sqlserver Split={split} VO={vo}",
                 new CodeGenerationOptions
                 {
-                    NamespaceName = "Sample.Domain",
+                    RootNamespace = "Sample.Domain",
                     SplitFilesByCategory = split,
                     GenerateValueObjects = vo,
                     GenerateRemoteContracts = true,
@@ -250,7 +250,7 @@ public class GeneratedCodeCompilationTests
             "remote EF Core 単独",
             new CodeGenerationOptions
             {
-                NamespaceName = "Sample.Domain",
+                RootNamespace = "Sample.Domain",
                 GenerateRepositories = false,
                 GenerateEfCore = true,
                 GenerateRemoteContracts = true,
@@ -262,7 +262,7 @@ public class GeneratedCodeCompilationTests
             "remote SQLite + EF Core",
             new CodeGenerationOptions
             {
-                NamespaceName = "Sample.Domain",
+                RootNamespace = "Sample.Domain",
                 RepositoryDialects = ["sqlite"],
                 GenerateEfCore = true,
                 GenerateRemoteContracts = true,
@@ -274,7 +274,7 @@ public class GeneratedCodeCompilationTests
             "remote InMemory 単独",
             new CodeGenerationOptions
             {
-                NamespaceName = "Sample.Domain",
+                RootNamespace = "Sample.Domain",
                 GenerateRepositories = false,
                 GenerateInMemoryRepositories = true,
                 GenerateRemoteContracts = true,
@@ -286,7 +286,7 @@ public class GeneratedCodeCompilationTests
             "remote マルチターゲット(sqlserver/sqlite)",
             new CodeGenerationOptions
             {
-                NamespaceName = "Sample.Domain",
+                RootNamespace = "Sample.Domain",
                 RepositoryDialects = ["sqlserver", "sqlite"],
                 GenerateRemoteContracts = true,
             }
@@ -304,7 +304,7 @@ public class GeneratedCodeCompilationTests
                 "IncludeDataAnnotations=false（Repository 生成不可のため除外）",
                 new CodeGenerationOptions
                 {
-                    NamespaceName = "Sample.Domain",
+                    RootNamespace = "Sample.Domain",
                     IncludeDataAnnotations = false,
                     GenerateRepositories = false,
                 }
@@ -313,7 +313,7 @@ public class GeneratedCodeCompilationTests
                 "IncludeJsonIgnoreOnParentNavigation=false",
                 new CodeGenerationOptions
                 {
-                    NamespaceName = "Sample.Domain",
+                    RootNamespace = "Sample.Domain",
                     IncludeJsonIgnoreOnParentNavigation = false,
                 }
             },
@@ -321,7 +321,7 @@ public class GeneratedCodeCompilationTests
                 "UseGuidKeyForStringPrimaryKey=true（VO 有効時のみ適用）",
                 new CodeGenerationOptions
                 {
-                    NamespaceName = "Sample.Domain",
+                    RootNamespace = "Sample.Domain",
                     GenerateValueObjects = true,
                     UseGuidKeyForStringPrimaryKey = true,
                 }
@@ -330,19 +330,19 @@ public class GeneratedCodeCompilationTests
                 "ExcludeUnboundedBinaryColumns=true（varbinary(max) の photo 列にマーカー付与）",
                 new CodeGenerationOptions
                 {
-                    NamespaceName = "Sample.Domain",
+                    RootNamespace = "Sample.Domain",
                     ExcludeUnboundedBinaryColumns = true,
                 }
             },
             {
-                "Namespace 上書き（Split off・単一 NamespaceName）",
-                new CodeGenerationOptions { NamespaceName = "Acme.Custom.Domain" }
+                "Namespace 上書き（Split off・単一 RootNamespace）",
+                new CodeGenerationOptions { RootNamespace = "Acme.Custom.Domain" }
             },
             {
                 "Namespace 上書き（Split on・カテゴリ別名前空間）",
                 new CodeGenerationOptions
                 {
-                    NamespaceName = "Sample.Domain",
+                    RootNamespace = "Sample.Domain",
                     SplitFilesByCategory = true,
                     RuntimeNamespace = "Acme.Shared.Runtime",
                     EntityNamespace = "Acme.Domain.Entities",
@@ -429,7 +429,7 @@ public class GeneratedCodeCompilationTests
                 $"remote-services QuickER sqlserver VO={vo}",
                 new CodeGenerationOptions
                 {
-                    NamespaceName = "Sample.Domain",
+                    RootNamespace = "Sample.Domain",
                     GenerateValueObjects = vo,
                     GenerateRemoteServices = true,
                 }
@@ -440,7 +440,7 @@ public class GeneratedCodeCompilationTests
             "remote-services SQLite + EF Core",
             new CodeGenerationOptions
             {
-                NamespaceName = "Sample.Domain",
+                RootNamespace = "Sample.Domain",
                 RepositoryDialects = ["sqlite"],
                 GenerateEfCore = true,
                 GenerateRemoteServices = true,
@@ -450,7 +450,7 @@ public class GeneratedCodeCompilationTests
             "remote-services EF Core 単独",
             new CodeGenerationOptions
             {
-                NamespaceName = "Sample.Domain",
+                RootNamespace = "Sample.Domain",
                 GenerateRepositories = false,
                 GenerateEfCore = true,
                 GenerateRemoteServices = true,

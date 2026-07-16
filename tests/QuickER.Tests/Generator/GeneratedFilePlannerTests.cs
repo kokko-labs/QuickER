@@ -10,7 +10,7 @@ public class GeneratedFilePlannerTests
     [Fact]
     public void ResolveNamespace_WhenUnset_FallsBackToRootDotSuffix()
     {
-        var options = new CodeGenerationOptions { NamespaceName = "Acme.App" };
+        var options = new CodeGenerationOptions { RootNamespace = "Acme.App" };
 
         GeneratedFilePlanner
             .ResolveNamespace(options, GenerationBucket.Entity)
@@ -28,7 +28,7 @@ public class GeneratedFilePlannerTests
     {
         var options = new CodeGenerationOptions
         {
-            NamespaceName = "Acme.App",
+            RootNamespace = "Acme.App",
             EntityNamespace = "Acme.App.Domain.Models",
         };
 
@@ -43,7 +43,7 @@ public class GeneratedFilePlannerTests
     public void ResolveRootNamespace_WhenEmpty_FallsBackToGenerated()
     {
         GeneratedFilePlanner
-            .ResolveRootNamespace(new CodeGenerationOptions { NamespaceName = "  " })
+            .ResolveRootNamespace(new CodeGenerationOptions { RootNamespace = "  " })
             .Should()
             .Be("Generated");
     }
@@ -54,7 +54,7 @@ public class GeneratedFilePlannerTests
     {
         var options = new CodeGenerationOptions
         {
-            NamespaceName = "Acme.App",
+            RootNamespace = "Acme.App",
             OutputFileName = "All.g.cs",
         };
 
@@ -73,7 +73,7 @@ public class GeneratedFilePlannerTests
     {
         var options = new CodeGenerationOptions
         {
-            NamespaceName = "Acme.App",
+            RootNamespace = "Acme.App",
             SplitFilesByCategory = true,
             GenerateValueObjects = true,
             GenerateRepositories = true,
@@ -108,7 +108,7 @@ public class GeneratedFilePlannerTests
     {
         var options = new CodeGenerationOptions
         {
-            NamespaceName = "Acme.App",
+            RootNamespace = "Acme.App",
             SplitFilesByCategory = true,
             GenerateRepositories = true,
             GenerateRemoteServices = true,
@@ -134,7 +134,7 @@ public class GeneratedFilePlannerTests
     {
         var options = new CodeGenerationOptions
         {
-            NamespaceName = "Acme.App",
+            RootNamespace = "Acme.App",
             SplitFilesByCategory = true,
             GenerateValueObjects = true,
             GenerateEfCore = true,
@@ -176,7 +176,7 @@ public class GeneratedFilePlannerTests
     {
         var options = new CodeGenerationOptions
         {
-            NamespaceName = "Acme.App",
+            RootNamespace = "Acme.App",
             SplitFilesByCategory = true,
             GenerateMappers = false,
             GenerateRepositories = false,

@@ -88,7 +88,7 @@
   <data name="Cli_Opt_SplitFilesByCategory" xml:space="preserve">
     <value>Output each category in a separate file and namespace (overrides the settings file)</value>
   </data>
-  <data name="Cli_Opt_NamespaceName" xml:space="preserve">
+  <data name="Cli_Opt_RootNamespace" xml:space="preserve">
     <value>Root namespace of the generated code (overrides the settings file)</value>
   </data>
   <data name="Cli_Opt_RuntimeNamespace" xml:space="preserve">

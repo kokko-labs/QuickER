@@ -155,7 +155,7 @@ public sealed class MockProjectScaffoldService
     ) =>
         new()
         {
-            NamespaceName = generatedNamespace,
+            RootNamespace = generatedNamespace,
             GenerateEditModels = true,
             GenerateMappers = true,
             GenerateInMemoryRepositories = true,

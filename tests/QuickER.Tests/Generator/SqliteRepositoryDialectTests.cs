@@ -22,7 +22,7 @@ public class SqliteRepositoryDialectTests
             SampleDiagram(),
             new CodeGenerationOptions
             {
-                NamespaceName = "Sample.Domain",
+                RootNamespace = "Sample.Domain",
                 GenerateRepositories = true,
                 RepositoryDialects = ["sqlite"],
                 GenerateValueObjects = valueObjects,
@@ -101,7 +101,7 @@ public class SqliteRepositoryDialectTests
             SampleDiagram(),
             new CodeGenerationOptions
             {
-                NamespaceName = "Sample.Domain",
+                RootNamespace = "Sample.Domain",
                 GenerateRepositories = true,
             }
         );

@@ -94,7 +94,7 @@ public class PostgreSqlProviderTests
             provider.TypeMapper,
             provider.TypeCatalog,
             diagram,
-            new CodeGenerationOptions { NamespaceName = "Sample.Domain" }
+            new CodeGenerationOptions { RootNamespace = "Sample.Domain" }
         );
 
         result.HasErrors.Should().BeFalse();

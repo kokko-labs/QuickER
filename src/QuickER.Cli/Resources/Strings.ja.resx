@@ -88,7 +88,7 @@
   <data name="Cli_Opt_SplitFilesByCategory" xml:space="preserve">
     <value>カテゴリごとに別ファイル・別名前空間で出力する（設定ファイルを上書き）</value>
   </data>
-  <data name="Cli_Opt_NamespaceName" xml:space="preserve">
+  <data name="Cli_Opt_RootNamespace" xml:space="preserve">
     <value>生成コードのルート名前空間（設定ファイルを上書き）</value>
   </data>
   <data name="Cli_Opt_RuntimeNamespace" xml:space="preserve">

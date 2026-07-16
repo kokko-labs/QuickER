@@ -5,7 +5,7 @@ namespace QuickER.CodeGen.UI;
 /// <summary>C# コード生成ダイアログの設定（次回起動時に復元する永続化対象）</summary>
 /// <remarks>
 /// このスキーマは CLI の quicker.json（<c>--config</c>）互換になるよう、CLI の
-/// <c>CodeGenerationOptions</c> とキー集合・意味・既定値を揃えている（<see cref="NamespaceName"/> /
+/// <c>CodeGenerationOptions</c> とキー集合・意味・既定値を揃えている（<see cref="RootNamespace"/> /
 /// <see cref="RepositoryDialects"/> / <see cref="OutputPath"/> 等）。JSON は camelCase で書き出すが、
 /// CLI は <c>PropertyNameCaseInsensitive</c> で読むため名前が一致すればそのまま解釈される。
 /// <see cref="OutputPath"/> は CLI でも解釈され、CLI はそのファイル名部分のみを出力ファイル名として使う
@@ -22,10 +22,10 @@ public class CSharpGenerationSettings
     // ===== 名前空間 =====
 
     /// <summary>
-    /// ベース（ルート）名前空間。分割時は各カテゴリ名前空間のフォールバック元になる
-    /// （CLI の <c>CodeGenerationOptions.NamespaceName</c> と同名＝<c>--config</c> でそのまま解釈される）
+    /// ルート名前空間。分割時は各カテゴリ名前空間のフォールバック元になる
+    /// （CLI の <c>CodeGenerationOptions.RootNamespace</c> と同名＝<c>--config</c> でそのまま解釈される）
     /// </summary>
-    public string NamespaceName { get; set; } = DefaultBaseNamespace;
+    public string RootNamespace { get; set; } = DefaultRootNamespace;
 
     /// <summary>分割時の共有基盤（Runtime）名前空間。空なら {base}.Runtime にフォールバック</summary>
     public string RuntimeNamespace { get; set; } = string.Empty;
@@ -137,8 +137,8 @@ public class CSharpGenerationSettings
     /// </remarks>
     public string OutputPath { get; set; } = string.Empty;
 
-    /// <summary>ベース名前空間の工場出荷既定（分割時は {base}.Entities 等のフォールバック元になるため接尾辞なし）</summary>
-    public const string DefaultBaseNamespace = "Generated";
+    /// <summary>ルート名前空間の工場出荷既定（分割時は {root}.Entities 等のフォールバック元になるため接尾辞なし）</summary>
+    public const string DefaultRootNamespace = "Generated";
 
     /// <summary>非分割時の出力ファイル名の工場出荷既定</summary>
     public const string DefaultOutputFilePath = "QuickEREntities.g.cs";

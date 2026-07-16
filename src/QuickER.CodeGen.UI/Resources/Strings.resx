@@ -151,14 +151,17 @@
   <data name="CodeGen_Browse" xml:space="preserve">
     <value>Browse...</value>
   </data>
-  <data name="CodeGen_OutputAndSplit" xml:space="preserve">
-    <value>Output / Split Settings</value>
+  <data name="CodeGen_NamespaceSection" xml:space="preserve">
+    <value>Namespace</value>
   </data>
   <data name="CodeGen_Folder" xml:space="preserve">
     <value>Folder</value>
   </data>
   <data name="CodeGen_CategoryNamespace" xml:space="preserve">
-    <value>Namespace per Category</value>
+    <value>Per category</value>
+  </data>
+  <data name="CodeGen_RootLabel" xml:space="preserve">
+    <value>Root</value>
   </data>
   <data name="CodeGen_RuntimeBaseNote" xml:space="preserve">
     <value>(shared base)</value>
@@ -168,9 +171,6 @@
   </data>
   <data name="CodeGen_GeneratedFiles" xml:space="preserve">
     <value>Generated Files</value>
-  </data>
-  <data name="CodeGen_AutoGenNote" xml:space="preserve">
-    <value>The generated .g.cs are auto-generated files. They are overwritten on regeneration, so do not edit them directly; add implementations in a partial class in a separate file.</value>
   </data>
   <data name="CodeGen_RestoreDefaults" xml:space="preserve">
     <value>Restore Defaults</value>

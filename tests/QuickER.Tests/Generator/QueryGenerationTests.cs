@@ -76,7 +76,7 @@ public class QueryGenerationTests
     private static CodeGenerationOptions CreateOptions() =>
         new()
         {
-            NamespaceName = "Test.Ns",
+            RootNamespace = "Test.Ns",
             GenerateRepositories = true,
             GenerateEfCore = true,
             IncludeDataAnnotations = true,
@@ -360,7 +360,7 @@ public class QueryGenerationTests
 
         var options = new CodeGenerationOptions
         {
-            NamespaceName = "Test.Ns",
+            RootNamespace = "Test.Ns",
             GenerateRepositories = true,
             RepositoryDialects = ["sqlserver", "sqlite"],
             IncludeDataAnnotations = true,
@@ -420,7 +420,7 @@ public class QueryGenerationTests
 
         var options = new CodeGenerationOptions
         {
-            NamespaceName = "Test.Ns",
+            RootNamespace = "Test.Ns",
             GenerateRepositories = true,
             GenerateEfCore = true,
             IncludeDataAnnotations = true,
@@ -459,7 +459,7 @@ public class QueryGenerationTests
         // VO 有効: 引数が VO 型になり、条件は Create なしの直接比較
         var voOptions = new CodeGenerationOptions
         {
-            NamespaceName = "Test.Ns",
+            RootNamespace = "Test.Ns",
             GenerateRepositories = true,
             GenerateEfCore = true,
             IncludeDataAnnotations = true,

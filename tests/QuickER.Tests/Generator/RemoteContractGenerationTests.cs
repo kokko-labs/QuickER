@@ -94,7 +94,7 @@ public class RemoteContractGenerationTests
             CreateDiagram(),
             new CodeGenerationOptions
             {
-                NamespaceName = "Test.Ns",
+                RootNamespace = "Test.Ns",
                 GenerateRepositories = true,
                 GenerateRemoteContracts = true,
             }
@@ -134,7 +134,7 @@ public class RemoteContractGenerationTests
     {
         var result = Generate(
             CreateDiagram(),
-            new CodeGenerationOptions { NamespaceName = "Test.Ns", GenerateRepositories = true }
+            new CodeGenerationOptions { RootNamespace = "Test.Ns", GenerateRepositories = true }
         );
 
         result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
@@ -169,7 +169,7 @@ public class RemoteContractGenerationTests
             CreateDiagram(),
             new CodeGenerationOptions
             {
-                NamespaceName = "Test.Ns",
+                RootNamespace = "Test.Ns",
                 GenerateRepositories = false,
                 GenerateEfCore = true,
                 GenerateRemoteContracts = true,
@@ -195,7 +195,7 @@ public class RemoteContractGenerationTests
             CreateDiagram(),
             new CodeGenerationOptions
             {
-                NamespaceName = "Test.Ns",
+                RootNamespace = "Test.Ns",
                 GenerateRepositories = true,
                 GenerateInMemoryRepositories = true,
                 GenerateRemoteContracts = true,
@@ -222,7 +222,7 @@ public class RemoteContractGenerationTests
             CreateDiagram(),
             new CodeGenerationOptions
             {
-                NamespaceName = "Test.Ns",
+                RootNamespace = "Test.Ns",
                 GenerateRepositories = true,
                 RepositoryDialects = ["sqlserver", "sqlite"],
                 GenerateRemoteContracts = true,

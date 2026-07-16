@@ -28,7 +28,7 @@ public class CSharpGenerationDialogViewModelTests
     public void Ok_SetsResult()
     {
         var vm = CreateViewModel(out _);
-        vm.BaseNamespace = "Sample.Domain";
+        vm.RootNamespace = "Sample.Domain";
         vm.OutputPath = @"C:\temp\Entities.g.cs";
         bool? closed = null;
         vm.CloseAction = result => closed = result;
@@ -36,7 +36,7 @@ public class CSharpGenerationDialogViewModelTests
         vm.OkCommand.Execute(null);
 
         vm.Result.Should().NotBeNull();
-        vm.Result!.Options.NamespaceName.Should().Be("Sample.Domain");
+        vm.Result!.Options.RootNamespace.Should().Be("Sample.Domain");
         vm.Result.Options.SplitFilesByCategory.Should().BeFalse();
         vm.Result.OutputDirectory.Should().Be(@"C:\temp");
         // DB アクセスの既定は「なし」（QuickER 版 Repository も EF Core も生成しない）
@@ -50,7 +50,7 @@ public class CSharpGenerationDialogViewModelTests
     public void DbAccessRadios_AreExclusive_AndStoredInResult()
     {
         var vm = CreateViewModel(out _);
-        vm.BaseNamespace = "Sample.Domain";
+        vm.RootNamespace = "Sample.Domain";
         vm.OutputPath = @"C:\temp\Entities.g.cs";
 
         vm.DbAccessNone.Should().BeTrue("既定は「なし」");
@@ -123,7 +123,7 @@ public class CSharpGenerationDialogViewModelTests
     public void ToOptions_SetsRepositoryDialects_InFixedOrder()
     {
         var vm = CreateViewModel(out _, currentProvider: new QuickER.Sqlite.SqliteProvider());
-        vm.BaseNamespace = "Sample.Domain";
+        vm.RootNamespace = "Sample.Domain";
         vm.OutputPath = @"C:\temp\Entities.g.cs";
         vm.DbAccessRepository = true;
         vm.TargetSqlServer = true;
@@ -143,7 +143,7 @@ public class CSharpGenerationDialogViewModelTests
             out _,
             currentProvider: new QuickER.PostgreSql.PostgreSqlProvider()
         );
-        vm.BaseNamespace = "Sample.Domain";
+        vm.RootNamespace = "Sample.Domain";
         vm.OutputPath = @"C:\temp\Entities.g.cs";
         vm.DbAccessRepository = true;
 
@@ -182,7 +182,7 @@ public class CSharpGenerationDialogViewModelTests
 
         try
         {
-            vm.BaseNamespace = "Acme.App";
+            vm.RootNamespace = "Acme.App";
             vm.OutputPath = @"C:\temp\Entities.g.cs";
             vm.DbAccessRepository = true;
             vm.TargetSqlServer = true;
@@ -214,7 +214,7 @@ public class CSharpGenerationDialogViewModelTests
     public void EfCoreSelection_TogglesNamespaceField()
     {
         var vm = CreateViewModel(out _);
-        vm.BaseNamespace = "Acme.App";
+        vm.RootNamespace = "Acme.App";
         vm.SplitFilesByCategory = true;
 
         vm.ShowEfCoreNamespace.Should().BeFalse("EF Core 未選択では欄を出さない");
@@ -227,7 +227,7 @@ public class CSharpGenerationDialogViewModelTests
             .BeTrue("EF Core でも契約が Repository バケットに出力される");
         vm.EfCoreNamespace.Should().Be("Acme.App.EfCore");
 
-        vm.BaseNamespace = "Contoso.Sales";
+        vm.RootNamespace = "Contoso.Sales";
         vm.EfCoreNamespace.Should().Be("Contoso.Sales.EfCore");
     }
 
@@ -239,7 +239,7 @@ public class CSharpGenerationDialogViewModelTests
     public void UseRuntimePackages_StaysEnabled_AndCoexistsWithEfCore()
     {
         var vm = CreateViewModel(out _);
-        vm.BaseNamespace = "Sample.Domain";
+        vm.RootNamespace = "Sample.Domain";
         vm.OutputPath = @"C:\temp\Entities.g.cs";
 
         vm.CanUseRuntimePackages.Should().BeTrue("既定は DB アクセス「なし」のため操作可能");
@@ -268,7 +268,7 @@ public class CSharpGenerationDialogViewModelTests
     public void UseRuntimePackages_IsReflectedInResult_WhenRepositorySelected()
     {
         var vm = CreateViewModel(out _, currentProvider: new QuickER.SqlServer.SqlServerProvider());
-        vm.BaseNamespace = "Sample.Domain";
+        vm.RootNamespace = "Sample.Domain";
         vm.OutputPath = @"C:\temp\Entities.g.cs";
         vm.DbAccessRepository = true;
 
@@ -287,7 +287,7 @@ public class CSharpGenerationDialogViewModelTests
     public void UseRuntimePackages_IsAlwaysEnabled_AcrossDbAccessChoices()
     {
         var vm = CreateViewModel(out _);
-        vm.BaseNamespace = "Sample.Domain";
+        vm.RootNamespace = "Sample.Domain";
 
         vm.DbAccessEfCore = true;
         vm.CanUseRuntimePackages.Should().BeTrue("EF Core 選択でも操作可能");
@@ -304,7 +304,7 @@ public class CSharpGenerationDialogViewModelTests
     public void GenerateApiDocs_DefaultsOff_AndReflectedInResult()
     {
         var vm = CreateViewModel(out _);
-        vm.BaseNamespace = "Sample.Domain";
+        vm.RootNamespace = "Sample.Domain";
         vm.OutputPath = @"C:\temp\Entities.g.cs";
 
         vm.GenerateApiDocs.Should().BeFalse("既定は OFF");
@@ -321,7 +321,7 @@ public class CSharpGenerationDialogViewModelTests
     public void GenerateApiDocs_WhenUntouched_ResultIsFalse()
     {
         var vm = CreateViewModel(out _);
-        vm.BaseNamespace = "Sample.Domain";
+        vm.RootNamespace = "Sample.Domain";
         vm.OutputPath = @"C:\temp\Entities.g.cs";
 
         vm.OkCommand.Execute(null);
@@ -338,7 +338,7 @@ public class CSharpGenerationDialogViewModelTests
 
         try
         {
-            vm.BaseNamespace = "Acme.App";
+            vm.RootNamespace = "Acme.App";
             vm.OutputPath = @"C:\temp\Entities.g.cs";
             vm.GenerateApiDocs = true;
             vm.OkCommand.Execute(null);
@@ -368,7 +368,7 @@ public class CSharpGenerationDialogViewModelTests
     public void ExcludeUnboundedBinary_IsReflectedInResultOptions()
     {
         var vm = CreateViewModel(out _, currentProvider: new QuickER.SqlServer.SqlServerProvider());
-        vm.BaseNamespace = "Sample.Domain";
+        vm.RootNamespace = "Sample.Domain";
         vm.OutputPath = @"C:\temp\Entities.g.cs";
         vm.DbAccessRepository = true;
 
@@ -391,7 +391,7 @@ public class CSharpGenerationDialogViewModelTests
     public void ShowExcludeUnboundedBinary_TracksRepositorySelection()
     {
         var vm = CreateViewModel(out _, currentProvider: new QuickER.SqlServer.SqlServerProvider());
-        vm.BaseNamespace = "Sample.Domain";
+        vm.RootNamespace = "Sample.Domain";
 
         vm.ShowExcludeUnboundedBinary.Should().BeFalse("既定は DB アクセス「なし」のため非表示");
 
@@ -414,7 +414,7 @@ public class CSharpGenerationDialogViewModelTests
 
         try
         {
-            vm.BaseNamespace = "Acme.App";
+            vm.RootNamespace = "Acme.App";
             vm.OutputPath = @"C:\temp\Entities.g.cs";
             vm.DbAccessRepository = true;
             vm.ExcludeUnboundedBinaryColumns = true;
@@ -445,7 +445,7 @@ public class CSharpGenerationDialogViewModelTests
     public void GenerateRemoteContracts_IsReflectedInResultOptions()
     {
         var vm = CreateViewModel(out _, currentProvider: new QuickER.SqlServer.SqlServerProvider());
-        vm.BaseNamespace = "Sample.Domain";
+        vm.RootNamespace = "Sample.Domain";
         vm.OutputPath = @"C:\temp\Entities.g.cs";
         vm.DbAccessRepository = true;
 
@@ -468,7 +468,7 @@ public class CSharpGenerationDialogViewModelTests
     public void ShowRemoteContracts_TracksDbAccessSelection()
     {
         var vm = CreateViewModel(out _, currentProvider: new QuickER.SqlServer.SqlServerProvider());
-        vm.BaseNamespace = "Sample.Domain";
+        vm.RootNamespace = "Sample.Domain";
 
         vm.ShowRemoteContracts.Should().BeFalse("既定は DB アクセス「なし」のため非表示");
 
@@ -490,7 +490,7 @@ public class CSharpGenerationDialogViewModelTests
 
         try
         {
-            vm.BaseNamespace = "Acme.App";
+            vm.RootNamespace = "Acme.App";
             vm.OutputPath = @"C:\temp\Entities.g.cs";
             vm.DbAccessRepository = true;
             vm.GenerateRemoteContracts = true;
@@ -521,7 +521,7 @@ public class CSharpGenerationDialogViewModelTests
     public void GenerateRemoteServices_On_ImpliesRemoteContracts()
     {
         var vm = CreateViewModel(out _, currentProvider: new QuickER.SqlServer.SqlServerProvider());
-        vm.BaseNamespace = "Sample.Domain";
+        vm.RootNamespace = "Sample.Domain";
         vm.OutputPath = @"C:\temp\Entities.g.cs";
         vm.DbAccessRepository = true;
 
@@ -550,7 +550,7 @@ public class CSharpGenerationDialogViewModelTests
     public void GenerateRemoteContracts_Off_TurnsOffRemoteServices()
     {
         var vm = CreateViewModel(out _, currentProvider: new QuickER.SqlServer.SqlServerProvider());
-        vm.BaseNamespace = "Sample.Domain";
+        vm.RootNamespace = "Sample.Domain";
         vm.DbAccessRepository = true;
 
         // HTTP 実装を ON にすると親（リモート面）も ON
@@ -570,7 +570,7 @@ public class CSharpGenerationDialogViewModelTests
     public void GenerateRemoteServices_TogglesRemoteServerFileInPreview()
     {
         var vm = CreateViewModel(out _, currentProvider: new QuickER.SqlServer.SqlServerProvider());
-        vm.BaseNamespace = "Sample.Domain";
+        vm.RootNamespace = "Sample.Domain";
         vm.OutputPath = @"C:\temp\Shop.g.cs";
         vm.DbAccessRepository = true;
 
@@ -605,7 +605,7 @@ public class CSharpGenerationDialogViewModelTests
 
         try
         {
-            vm.BaseNamespace = "Acme.App";
+            vm.RootNamespace = "Acme.App";
             vm.OutputPath = @"C:\temp\Entities.g.cs";
             vm.DbAccessRepository = true;
             vm.GenerateRemoteServices = true;
@@ -633,7 +633,7 @@ public class CSharpGenerationDialogViewModelTests
     public void Ok_WithInvalidNamespace_ShowsError()
     {
         var vm = CreateViewModel(out _);
-        vm.BaseNamespace = "1Invalid.Namespace";
+        vm.RootNamespace = "1Invalid.Namespace";
         bool closed = false;
         vm.CloseAction = _ => closed = true;
 
@@ -729,7 +729,7 @@ public class CSharpGenerationDialogViewModelTests
                     )
                 );
             // 承諾したのでベースが書き換わり、既定のままの子 namespace（Entity）も追従する
-            vm.BaseNamespace.Should().Be("Contoso.Sales.Data");
+            vm.RootNamespace.Should().Be("Contoso.Sales.Data");
             vm.EntityNamespace.Should().Be("Contoso.Sales.Data.Entities");
         }
         finally
@@ -778,9 +778,9 @@ public class CSharpGenerationDialogViewModelTests
             // 確認は行われたが、キャンセルのため namespace は既定のまま・フォルダパスだけ反映される
             dialogs.ConfirmMessages.Should().ContainSingle();
             vm.OutputPath.Should().Be(target);
-            vm.BaseNamespace.Should().Be(CSharpGenerationSettings.DefaultBaseNamespace);
+            vm.RootNamespace.Should().Be(CSharpGenerationSettings.DefaultRootNamespace);
             vm.EntityNamespace.Should()
-                .Be($"{CSharpGenerationSettings.DefaultBaseNamespace}.Entities");
+                .Be($"{CSharpGenerationSettings.DefaultRootNamespace}.Entities");
         }
         finally
         {
@@ -818,13 +818,13 @@ public class CSharpGenerationDialogViewModelTests
         try
         {
             vm.SplitFilesByCategory = true;
-            vm.BaseNamespace = "Acme.App";
+            vm.RootNamespace = "Acme.App";
 
             vm.BrowseOutputCommand.Execute(null);
 
             // 候補が現在値と同一なので確認は呼ばれず、namespace も変わらない（フォルダパスは反映される）
             dialogs.ConfirmMessages.Should().BeEmpty();
-            vm.BaseNamespace.Should().Be("Acme.App");
+            vm.RootNamespace.Should().Be("Acme.App");
             vm.OutputPath.Should().Be(projectDir);
         }
         finally
@@ -897,7 +897,7 @@ public class CSharpGenerationDialogViewModelTests
     public void SplitMode_ShowsDetailsAndPreview()
     {
         var vm = CreateViewModel(out _);
-        vm.BaseNamespace = "Acme.App";
+        vm.RootNamespace = "Acme.App";
 
         vm.SplitFilesByCategory = true;
 
@@ -914,7 +914,7 @@ public class CSharpGenerationDialogViewModelTests
     public void UseRuntimePackages_TogglesRuntimeFileInPreview()
     {
         var vm = CreateViewModel(out _);
-        vm.BaseNamespace = "Acme.App";
+        vm.RootNamespace = "Acme.App";
         vm.SplitFilesByCategory = true;
 
         vm.UseRuntimePackages = true;
@@ -935,7 +935,7 @@ public class CSharpGenerationDialogViewModelTests
     public void GenerateFlag_TogglesFieldAndPreview()
     {
         var vm = CreateViewModel(out _);
-        vm.BaseNamespace = "Acme.App";
+        vm.RootNamespace = "Acme.App";
         vm.SplitFilesByCategory = true;
 
         vm.GenerateMappers = false;
@@ -946,15 +946,15 @@ public class CSharpGenerationDialogViewModelTests
 
     /// <summary>ベース名前空間を変えると、既定のままの子名前空間が追従し、手編集済みは保持されることを検証する</summary>
     [Fact(DisplayName = "ベース変更で既定の子 namespace が追従する")]
-    public void BaseNamespaceChange_FollowsDefaultChildren()
+    public void RootNamespaceChange_FollowsDefaultChildren()
     {
         var vm = CreateViewModel(out _);
-        vm.BaseNamespace = "Acme.App";
+        vm.RootNamespace = "Acme.App";
         vm.SplitFilesByCategory = true;
         // EditModel は手編集（追従対象外にする）
         vm.EditModelNamespace = "Custom.Edit";
 
-        vm.BaseNamespace = "Contoso.Sales";
+        vm.RootNamespace = "Contoso.Sales";
 
         vm.EntityNamespace.Should().Be("Contoso.Sales.Entities");
         vm.RuntimeNamespace.Should().Be("Contoso.Sales.Runtime");
@@ -966,7 +966,7 @@ public class CSharpGenerationDialogViewModelTests
     public void Ok_Split_WithoutFolder_ShowsError()
     {
         var vm = CreateViewModel(out _);
-        vm.BaseNamespace = "Acme.App";
+        vm.RootNamespace = "Acme.App";
         vm.SplitFilesByCategory = true;
         vm.OutputPath = string.Empty;
 
@@ -984,7 +984,7 @@ public class CSharpGenerationDialogViewModelTests
 
         try
         {
-            vm.BaseNamespace = "Acme.App";
+            vm.RootNamespace = "Acme.App";
             vm.SplitFilesByCategory = true;
             vm.GenerateValueObjects = true;
             vm.OutputPath = @"C:\out";
@@ -994,7 +994,7 @@ public class CSharpGenerationDialogViewModelTests
                 new CSharpGenerationSettingsStore(folder)
             );
 
-            restored.BaseNamespace.Should().Be("Acme.App");
+            restored.RootNamespace.Should().Be("Acme.App");
             restored.SplitFilesByCategory.Should().BeTrue();
             restored.GenerateValueObjects.Should().BeTrue();
             restored.OutputPath.Should().Be(@"C:\out");
@@ -1013,7 +1013,7 @@ public class CSharpGenerationDialogViewModelTests
     public void Clear_RestoresFactoryDefaults()
     {
         var vm = CreateViewModel(out _);
-        vm.BaseNamespace = "Acme.App";
+        vm.RootNamespace = "Acme.App";
         vm.SplitFilesByCategory = true;
         vm.DbAccessEfCore = true;
         vm.GenerateValueObjects = true;
@@ -1021,7 +1021,7 @@ public class CSharpGenerationDialogViewModelTests
         vm.ClearCommand.Execute(null);
 
         vm.SplitFilesByCategory.Should().BeFalse();
-        vm.BaseNamespace.Should().Be(CSharpGenerationSettings.DefaultBaseNamespace);
+        vm.RootNamespace.Should().Be(CSharpGenerationSettings.DefaultRootNamespace);
         // 工場出荷既定は DB アクセス「なし」
         vm.DbAccessNone.Should().BeTrue();
         vm.GenerateValueObjects.Should().BeFalse();
@@ -1035,7 +1035,7 @@ public class CSharpGenerationDialogViewModelTests
 
         try
         {
-            vm.BaseNamespace = "Acme.App";
+            vm.RootNamespace = "Acme.App";
             vm.SplitFilesByCategory = true;
             vm.DbAccessEfCore = true;
             vm.EfCoreNamespace = "Acme.App.Persistence";
@@ -1072,7 +1072,7 @@ public class CSharpGenerationDialogViewModelTests
 
         try
         {
-            vm.BaseNamespace = "Acme.Preset";
+            vm.RootNamespace = "Acme.Preset";
             vm.SplitFilesByCategory = true;
             vm.DbAccessEfCore = true;
             vm.GenerateValueObjects = true;
@@ -1096,7 +1096,7 @@ public class CSharpGenerationDialogViewModelTests
             // 保存されたファイルを読み戻すと、ToSettings 相当の代表値が一致する
             var loaded = store.TryLoadFrom(presetPath);
             loaded.Should().NotBeNull();
-            loaded!.NamespaceName.Should().Be("Acme.Preset");
+            loaded!.RootNamespace.Should().Be("Acme.Preset");
             loaded.SplitFilesByCategory.Should().BeTrue();
             loaded.GenerateEfCore.Should().BeTrue();
             loaded.GenerateValueObjects.Should().BeTrue();
@@ -1123,7 +1123,7 @@ public class CSharpGenerationDialogViewModelTests
 
         try
         {
-            vm.BaseNamespace = "Acme.Preset";
+            vm.RootNamespace = "Acme.Preset";
 
             vm.SaveSettingsAsCommand.Execute(null);
 
@@ -1159,7 +1159,7 @@ public class CSharpGenerationDialogViewModelTests
             new CSharpGenerationSettings
             {
                 SplitFilesByCategory = true,
-                NamespaceName = "Contoso.Loaded",
+                RootNamespace = "Contoso.Loaded",
                 EfCoreNamespace = "Contoso.Loaded.Persistence",
                 GenerateRepositories = true,
                 GenerateEfCore = true,
@@ -1175,7 +1175,7 @@ public class CSharpGenerationDialogViewModelTests
         {
             vm.LoadSettingsFromCommand.Execute(null);
 
-            vm.BaseNamespace.Should().Be("Contoso.Loaded");
+            vm.RootNamespace.Should().Be("Contoso.Loaded");
             vm.SplitFilesByCategory.Should().BeTrue();
             vm.EfCoreNamespace.Should().Be("Contoso.Loaded.Persistence");
             vm.GenerateValueObjects.Should().BeTrue();
@@ -1213,7 +1213,7 @@ public class CSharpGenerationDialogViewModelTests
         try
         {
             // 読み込み前の表示状態を作っておく
-            vm.BaseNamespace = "Acme.Untouched";
+            vm.RootNamespace = "Acme.Untouched";
             vm.SplitFilesByCategory = true;
             vm.GenerateValueObjects = true;
 
@@ -1232,7 +1232,7 @@ public class CSharpGenerationDialogViewModelTests
                 );
             dialogs.InformationMessages.Should().BeEmpty();
             // 表示状態は変更されない
-            vm.BaseNamespace.Should().Be("Acme.Untouched");
+            vm.RootNamespace.Should().Be("Acme.Untouched");
             vm.SplitFilesByCategory.Should().BeTrue();
             vm.GenerateValueObjects.Should().BeTrue();
         }
@@ -1268,7 +1268,7 @@ public class CSharpGenerationDialogViewModelTests
                 saveFiles,
                 currentProvider: new QuickER.SqlServer.SqlServerProvider()
             );
-            saveVm.BaseNamespace = "Acme.Roundtrip";
+            saveVm.RootNamespace = "Acme.Roundtrip";
             saveVm.DbAccessRepository = true;
             saveVm.TargetSqlServer = false;
             saveVm.TargetSqlite = true;
@@ -1289,7 +1289,7 @@ public class CSharpGenerationDialogViewModelTests
             loadVm.LoadSettingsFromCommand.Execute(null);
 
             // namespace と対象 DB チェックがファイル内容どおりに復元される
-            loadVm.BaseNamespace.Should().Be("Acme.Roundtrip");
+            loadVm.RootNamespace.Should().Be("Acme.Roundtrip");
             loadVm.GenerateRepositories.Should().BeTrue();
             loadVm.TargetSqlServer.Should().BeFalse("保存値どおり SQL Server は OFF");
             loadVm.TargetSqlite.Should().BeTrue("保存値どおり SQLite は ON");
@@ -1313,7 +1313,7 @@ public class CSharpGenerationDialogViewModelTests
 
         try
         {
-            vm.BaseNamespace = "Acme.App";
+            vm.RootNamespace = "Acme.App";
             vm.OutputPath = @"C:\temp\Entities.g.cs";
 
             vm.GenerateInMemoryRepositories.Should().BeFalse("既定は OFF");
@@ -1347,7 +1347,7 @@ public class CSharpGenerationDialogViewModelTests
     public void Ok_InMemoryWithRuntimePackages_ShowsConflictError()
     {
         var vm = CreateViewModel(out _);
-        vm.BaseNamespace = "Acme.App";
+        vm.RootNamespace = "Acme.App";
         vm.OutputPath = @"C:\temp\Entities.g.cs";
         vm.GenerateInMemoryRepositories = true;
         vm.UseRuntimePackages = true;
@@ -1375,7 +1375,7 @@ public class CSharpGenerationDialogViewModelTests
             presetPath,
             new CSharpGenerationSettings
             {
-                NamespaceName = "Acme.Loaded",
+                RootNamespace = "Acme.Loaded",
                 IncludeDataAnnotations = false,
                 IncludeJsonIgnoreOnParentNavigation = false,
             }

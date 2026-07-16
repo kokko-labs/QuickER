@@ -30,7 +30,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     /// <summary>設定の保存／読込の結果（成功通知・失敗エラー）を表示するメッセージダイアログ</summary>
     private readonly IDialogService _dialogs;
 
-    /// <summary>ベース名前空間変更時の子名前空間追従更新を一時的に抑止するフラグ（設定適用中に使う）</summary>
+    /// <summary>ルート名前空間変更時の子名前空間追従更新を一時的に抑止するフラグ（設定適用中に使う）</summary>
     private bool _suppressNamespaceFollow;
 
     /// <summary>確定結果（OK 確定まで null）</summary>
@@ -91,9 +91,9 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
 
     // ===== 名前空間 =====
 
-    /// <summary>ベース（ルート）名前空間</summary>
+    /// <summary>ルート名前空間</summary>
     [ObservableProperty]
-    private string _baseNamespace = CSharpGenerationSettings.DefaultBaseNamespace;
+    private string _rootNamespace = CSharpGenerationSettings.DefaultRootNamespace;
 
     /// <summary>共有基盤（Runtime）名前空間</summary>
     [ObservableProperty]
@@ -444,12 +444,12 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
 
     partial void OnOutputPathChanged(string value) => RefreshPreview();
 
-    /// <summary>ベース名前空間が変わったら、既定（{旧base}.{接尾辞}）のままの子名前空間を新ベースへ追従させる</summary>
-    partial void OnBaseNamespaceChanged(string? oldValue, string newValue)
+    /// <summary>ルート名前空間が変わったら、既定（{旧root}.{接尾辞}）のままの子名前空間を新ルートへ追従させる</summary>
+    partial void OnRootNamespaceChanged(string? oldValue, string newValue)
     {
         if (!_suppressNamespaceFollow && oldValue is not null)
         {
-            FollowBaseNamespace(oldValue, newValue);
+            FollowRootNamespace(oldValue, newValue);
         }
 
         RefreshPreview();
@@ -472,39 +472,39 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
         RefreshPreview();
     }
 
-    /// <summary>各子名前空間が「{旧base}.{接尾辞}」既定のままなら新ベースへ更新する（手編集済みは保持）</summary>
-    private void FollowBaseNamespace(string oldBase, string newBase)
+    /// <summary>各子名前空間が「{旧root}.{接尾辞}」既定のままなら新ルートへ更新する（手編集済みは保持）</summary>
+    private void FollowRootNamespace(string oldRoot, string newRoot)
     {
         _suppressNamespaceFollow = true;
         try
         {
             RuntimeNamespace = FollowOne(
                 RuntimeNamespace,
-                oldBase,
-                newBase,
+                oldRoot,
+                newRoot,
                 GenerationBucket.Runtime
             );
-            EntityNamespace = FollowOne(EntityNamespace, oldBase, newBase, GenerationBucket.Entity);
+            EntityNamespace = FollowOne(EntityNamespace, oldRoot, newRoot, GenerationBucket.Entity);
             EditModelNamespace = FollowOne(
                 EditModelNamespace,
-                oldBase,
-                newBase,
+                oldRoot,
+                newRoot,
                 GenerationBucket.EditModel
             );
-            MapperNamespace = FollowOne(MapperNamespace, oldBase, newBase, GenerationBucket.Mapper);
+            MapperNamespace = FollowOne(MapperNamespace, oldRoot, newRoot, GenerationBucket.Mapper);
             RepositoryNamespace = FollowOne(
                 RepositoryNamespace,
-                oldBase,
-                newBase,
+                oldRoot,
+                newRoot,
                 GenerationBucket.Repository
             );
             ValueObjectNamespace = FollowOne(
                 ValueObjectNamespace,
-                oldBase,
-                newBase,
+                oldRoot,
+                newRoot,
                 GenerationBucket.ValueObject
             );
-            EfCoreNamespace = FollowOne(EfCoreNamespace, oldBase, newBase, GenerationBucket.EfCore);
+            EfCoreNamespace = FollowOne(EfCoreNamespace, oldRoot, newRoot, GenerationBucket.EfCore);
         }
         finally
         {
@@ -515,26 +515,26 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     /// <summary>子名前空間が空または旧既定なら新既定へ、手編集済みならそのままにする</summary>
     private static string FollowOne(
         string current,
-        string oldBase,
-        string newBase,
+        string oldRoot,
+        string newRoot,
         GenerationBucket bucket
     )
     {
         var suffix = GeneratedFilePlanner.DefaultSuffix(bucket);
-        var oldDefault = $"{oldBase}.{suffix}";
+        var oldDefault = $"{oldRoot}.{suffix}";
         return string.IsNullOrWhiteSpace(current) || current == oldDefault
-            ? $"{newBase}.{suffix}"
+            ? $"{newRoot}.{suffix}"
             : current;
     }
 
-    /// <summary>設定値を各プロパティへ適用する（空の子名前空間は {base}.{接尾辞} でプリフィルする）</summary>
+    /// <summary>設定値を各プロパティへ適用する（空の子名前空間は {root}.{接尾辞} でプリフィルする）</summary>
     private void ApplySettings(CSharpGenerationSettings settings)
     {
         _suppressNamespaceFollow = true;
         try
         {
             SplitFilesByCategory = settings.SplitFilesByCategory;
-            BaseNamespace = settings.NamespaceName;
+            RootNamespace = settings.RootNamespace;
             RuntimeNamespace = Prefill(settings.RuntimeNamespace, GenerationBucket.Runtime);
             EntityNamespace = Prefill(settings.EntityNamespace, GenerationBucket.Entity);
             EditModelNamespace = Prefill(settings.EditModelNamespace, GenerationBucket.EditModel);
@@ -601,10 +601,10 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
         RaiseDerivedChanged();
     }
 
-    /// <summary>子名前空間が空なら {base}.{接尾辞} を返す（プリフィル）</summary>
+    /// <summary>子名前空間が空なら {root}.{接尾辞} を返す（プリフィル）</summary>
     private string Prefill(string value, GenerationBucket bucket) =>
         string.IsNullOrWhiteSpace(value)
-            ? $"{BaseNamespace}.{GeneratedFilePlanner.DefaultSuffix(bucket)}"
+            ? $"{RootNamespace}.{GeneratedFilePlanner.DefaultSuffix(bucket)}"
             : value;
 
     /// <summary>現在の設定値から設定オブジェクトを組み立てる（永続化用）</summary>
@@ -612,7 +612,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
         new()
         {
             SplitFilesByCategory = SplitFilesByCategory,
-            NamespaceName = BaseNamespace.Trim(),
+            RootNamespace = RootNamespace.Trim(),
             RuntimeNamespace = RuntimeNamespace.Trim(),
             EntityNamespace = EntityNamespace.Trim(),
             EditModelNamespace = EditModelNamespace.Trim(),
@@ -649,7 +649,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     public CodeGenerationOptions ToOptions() =>
         new()
         {
-            NamespaceName = BaseNamespace.Trim(),
+            RootNamespace = RootNamespace.Trim(),
             OutputFileName = SplitFilesByCategory
                 ? CSharpGenerationSettings.DefaultOutputFilePath
                 : Path.GetFileName(OutputPath.Trim()),
@@ -706,7 +706,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     {
         PreviewFiles.Clear();
 
-        if (string.IsNullOrWhiteSpace(BaseNamespace))
+        if (string.IsNullOrWhiteSpace(RootNamespace))
         {
             return;
         }
@@ -720,8 +720,8 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     /// <summary>出力先を選択し、結果をパスへ反映する（分割時はフォルダ、非分割時はファイルを選ぶ）</summary>
     /// <remarks>
     /// 分割モードでフォルダを選んだときは、そのフォルダから名前空間の候補を導出し、確認ダイアログで
-    /// 承諾された場合のみ <see cref="BaseNamespace"/> を書き換える（既定パターンのままの子カテゴリ別
-    /// namespace は <see cref="FollowBaseNamespace"/> の連動で自動追従する）。
+    /// 承諾された場合のみ <see cref="RootNamespace"/> を書き換える（既定パターンのままの子カテゴリ別
+    /// namespace は <see cref="FollowRootNamespace"/> の連動で自動追従する）。
     /// キャンセル・候補が現在値と同一・導出不能のいずれでも namespace は触らず、フォルダパスの反映のみ従来どおり行う
     /// </remarks>
     [RelayCommand]
@@ -762,22 +762,22 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     }
 
     /// <summary>
-    /// 選択された出力先フォルダから名前空間の候補を導出し、現在の <see cref="BaseNamespace"/> と異なる場合のみ
+    /// 選択された出力先フォルダから名前空間の候補を導出し、現在の <see cref="RootNamespace"/> と異なる場合のみ
     /// 確認ダイアログで承諾を得て書き換える
     /// </summary>
     /// <remarks>
-    /// 書き換えると、既定パターン（{旧base}.{接尾辞}）のままの子カテゴリ別 namespace は
-    /// <see cref="FollowBaseNamespace"/> の連動で自動的に新ベースへ追従する（手編集済みの子は保持）。
+    /// 書き換えると、既定パターン（{旧root}.{接尾辞}）のままの子カテゴリ別 namespace は
+    /// <see cref="FollowRootNamespace"/> の連動で自動的に新ルートへ追従する（手編集済みの子は保持）。
     /// 導出不能（null）・現在値と同一・確認でキャンセルのいずれでも namespace は一切変更しない
     /// </remarks>
     private void MaybeSuggestNamespaceFromFolder(string folderPath)
     {
         var suggestion = OutputFolderNamespaceSuggester.TryDerive(folderPath);
 
-        // 導出できない、または現在のベース名前空間（前後空白を無視）と同一なら確認せず何もしない
+        // 導出できない、または現在のルート名前空間（前後空白を無視）と同一なら確認せず何もしない
         if (
             suggestion is null
-            || string.Equals(suggestion, BaseNamespace.Trim(), StringComparison.Ordinal)
+            || string.Equals(suggestion, RootNamespace.Trim(), StringComparison.Ordinal)
         )
         {
             return;
@@ -790,7 +790,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
 
         if (confirmed)
         {
-            BaseNamespace = suggestion;
+            RootNamespace = suggestion;
         }
     }
 
@@ -890,13 +890,13 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     [RelayCommand]
     private void Ok()
     {
-        if (string.IsNullOrWhiteSpace(BaseNamespace))
+        if (string.IsNullOrWhiteSpace(RootNamespace))
         {
             StatusMessage = Strings.CodeGen_Status_NamespaceRequired;
             return;
         }
 
-        if (!IsValidNamespace(BaseNamespace))
+        if (!IsValidNamespace(RootNamespace))
         {
             StatusMessage = Strings.CodeGen_Status_NamespaceInvalid;
             return;

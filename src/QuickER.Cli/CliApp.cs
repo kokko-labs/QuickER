@@ -565,7 +565,7 @@ internal sealed class GenerationOptionSet
         );
 
         // 名前空間
-        AddString("NamespaceName", "--namespace-name", Strings.Cli_Opt_NamespaceName);
+        AddString("RootNamespace", "--root-namespace", Strings.Cli_Opt_RootNamespace);
         AddString("RuntimeNamespace", "--runtime-namespace", Strings.Cli_Opt_RuntimeNamespace);
         AddString("EntityNamespace", "--entity-namespace", Strings.Cli_Opt_EntityNamespace);
         AddString(

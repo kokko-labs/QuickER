@@ -27,7 +27,7 @@ public class CSharpGenerationSettingsStoreTests
                 new CSharpGenerationSettings
                 {
                     SplitFilesByCategory = true,
-                    NamespaceName = "Acme.App",
+                    RootNamespace = "Acme.App",
                     EntityNamespace = "Acme.App.Domain",
                     GenerateRepositories = false,
                     GenerateInMemoryRepositories = true,
@@ -42,7 +42,7 @@ public class CSharpGenerationSettingsStoreTests
             var loaded = store.Load();
 
             loaded.SplitFilesByCategory.Should().BeTrue();
-            loaded.NamespaceName.Should().Be("Acme.App");
+            loaded.RootNamespace.Should().Be("Acme.App");
             loaded.EntityNamespace.Should().Be("Acme.App.Domain");
             loaded.GenerateRepositories.Should().BeFalse();
             loaded.GenerateInMemoryRepositories.Should().BeTrue();
@@ -69,7 +69,7 @@ public class CSharpGenerationSettingsStoreTests
         var loaded = store.Load();
 
         loaded.SplitFilesByCategory.Should().BeFalse();
-        loaded.NamespaceName.Should().Be(CSharpGenerationSettings.DefaultBaseNamespace);
+        loaded.RootNamespace.Should().Be(CSharpGenerationSettings.DefaultRootNamespace);
         // 工場出荷既定: DB アクセスなし・インメモリなし・属性系は true
         loaded.GenerateRepositories.Should().BeFalse();
         loaded.GenerateInMemoryRepositories.Should().BeFalse();
@@ -93,7 +93,7 @@ public class CSharpGenerationSettingsStoreTests
 
             var loaded = store.Load();
 
-            loaded.NamespaceName.Should().Be(CSharpGenerationSettings.DefaultBaseNamespace);
+            loaded.RootNamespace.Should().Be(CSharpGenerationSettings.DefaultRootNamespace);
         }
         finally
         {
@@ -120,7 +120,7 @@ public class CSharpGenerationSettingsStoreTests
                 new CSharpGenerationSettings
                 {
                     SplitFilesByCategory = true,
-                    NamespaceName = "Acme.App",
+                    RootNamespace = "Acme.App",
                     GenerateEfCore = true,
                     GenerateValueObjects = true,
                 }
@@ -132,7 +132,7 @@ public class CSharpGenerationSettingsStoreTests
 
             loaded.Should().NotBeNull();
             loaded!.SplitFilesByCategory.Should().BeTrue();
-            loaded.NamespaceName.Should().Be("Acme.App");
+            loaded.RootNamespace.Should().Be("Acme.App");
             loaded.GenerateEfCore.Should().BeTrue();
             loaded.GenerateValueObjects.Should().BeTrue();
 
@@ -203,7 +203,7 @@ public class CSharpGenerationSettingsStoreTests
                 path,
                 new CSharpGenerationSettings
                 {
-                    NamespaceName = "Acme.Contracts",
+                    RootNamespace = "Acme.Contracts",
                     SplitFilesByCategory = true,
                     GenerateEfCore = true,
                     GenerateRepositories = true,
@@ -235,7 +235,7 @@ public class CSharpGenerationSettingsStoreTests
                 new JsonSerializerOptions { PropertyNameCaseInsensitive = true }
             )!;
 
-            options.NamespaceName.Should().Be("Acme.Contracts");
+            options.RootNamespace.Should().Be("Acme.Contracts");
             options.SplitFilesByCategory.Should().BeTrue();
             options.GenerateEfCore.Should().BeTrue();
             options.GenerateRepositories.Should().BeTrue();

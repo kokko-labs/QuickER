@@ -31,7 +31,7 @@ public class MainViewModelCSharpGenerationTests
         var appDialogs = new StubAppDialogService(
             new CodeGenerationOptions
             {
-                NamespaceName = "Sample.Domain",
+                RootNamespace = "Sample.Domain",
                 // 固定コードをパッケージ参照へ切り替えると、PackageReference 案内が「詳細」に載る
                 UseRuntimePackages = true,
             },
@@ -58,7 +58,7 @@ public class MainViewModelCSharpGenerationTests
         using var output = new TempOutputDirectory();
         var dialogs = new StubDialogService();
         var appDialogs = new StubAppDialogService(
-            new CodeGenerationOptions { NamespaceName = "Sample.Domain" },
+            new CodeGenerationOptions { RootNamespace = "Sample.Domain" },
             output.Path
         );
         var vm = new MainViewModel(dialogs, appDialogs);
@@ -82,7 +82,7 @@ public class MainViewModelCSharpGenerationTests
         using var output = new TempOutputDirectory();
         var dialogs = new StubDialogService();
         var appDialogs = new StubAppDialogService(
-            new CodeGenerationOptions { NamespaceName = "Sample.Domain" },
+            new CodeGenerationOptions { RootNamespace = "Sample.Domain" },
             output.Path
         );
         // エンティティを 1 つも追加しない＝空の図でエラー診断（NoEntities）を発生させる

@@ -59,9 +59,9 @@ internal sealed partial class CSharpGenerationModelBuilder
 
         return new CSharpGenerationModel
         {
-            NamespaceName = string.IsNullOrWhiteSpace(options.NamespaceName)
+            NamespaceName = string.IsNullOrWhiteSpace(options.RootNamespace)
                 ? "Generated"
-                : options.NamespaceName.Trim(),
+                : options.RootNamespace.Trim(),
             // Entity は全カテゴリの前提のため常に生成する
             EntityClasses = diagram
                 .Entities.Select(entity =>

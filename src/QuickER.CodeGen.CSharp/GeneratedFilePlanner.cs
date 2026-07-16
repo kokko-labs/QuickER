@@ -93,9 +93,9 @@ public static class GeneratedFilePlanner
     public static string ResolveRootNamespace(CodeGenerationOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
-        return string.IsNullOrWhiteSpace(options.NamespaceName)
+        return string.IsNullOrWhiteSpace(options.RootNamespace)
             ? DefaultRootNamespace
-            : options.NamespaceName.Trim();
+            : options.RootNamespace.Trim();
     }
 
     /// <summary>指定バケットの名前空間を解決する（個別指定が空なら <c>{root}.{サフィックス}</c> へフォールバック）</summary>

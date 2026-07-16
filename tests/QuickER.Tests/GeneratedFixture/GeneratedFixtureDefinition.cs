@@ -32,7 +32,7 @@ public static class GeneratedFixtureDefinition
     public static CodeGenerationOptions Options { get; } =
         new()
         {
-            NamespaceName = NamespaceName,
+            RootNamespace = NamespaceName,
             OutputFileName = "GeneratedFixture.g.cs",
             GenerateEditModels = true,
             GenerateMappers = true,
