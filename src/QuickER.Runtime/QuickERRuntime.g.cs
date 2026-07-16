@@ -634,6 +634,23 @@ public abstract partial class EntityBase
     /// <summary>変更（追加・更新・削除）があるかどうか</summary>
     public bool HasChanges => RowState != RowState.Unchanged;
 
+    /// <summary>このエンティティの表示名（画面ラベル等で使う）。既定は <see cref="DefaultDisplayName"/>、CustomizeDisplayName で上書き可能</summary>
+    public string DisplayName
+    {
+        get
+        {
+            var displayName = DefaultDisplayName;
+            CustomizeDisplayName(ref displayName);
+            return displayName;
+        }
+    }
+
+    /// <summary>表示名の既定値。既定は実行時のクラス名。テーブル説明を持つエンティティは派生クラスが override する</summary>
+    protected virtual string DefaultDisplayName => GetType().Name;
+
+    /// <summary>表示名を差し替える拡張ポイント（派生クラスの override で上書き。未上書きなら既定の表示名）</summary>
+    protected virtual void CustomizeDisplayName(ref string displayName) { }
+
     /// <summary>追加対象としてマークする（直接 new したエンティティを保存対象にする場合に使用）</summary>
     public void MarkAdded() => RowState = RowState.Added;
 
@@ -856,6 +873,28 @@ public abstract partial class EditModelBase
 
     /// <summary>確定値の変更で RowState を Updated へ昇格させるかどうか（既定 true。メタ情報など特定プロパティを除外したい場合に override）</summary>
     protected virtual bool ShouldMarkUpdated(string propertyName) => true;
+
+    /// <summary>画面入力文字列を正規化する（前後の空白・タブ・改行を除去。全角スペースも対象）</summary>
+    protected string NormalizeInput(string propertyName, string value)
+    {
+        // ComboBox 等のバインドは実行時に null を書き込み得るため許容する（null は未入力として変換分岐が処理する）
+        if (value is null)
+        {
+            return value!;
+        }
+
+        // 前後の空白のみ除去する（中間の空白・改行は保持）
+        var normalized = value.Trim();
+        CustomizeInputNormalization(propertyName, value, ref normalized);
+        return normalized;
+    }
+
+    /// <summary>入力正規化を列単位で調整する（トリムを無効化したい列で normalizedValue に rawValue を戻す等。override で処理を追加）</summary>
+    protected virtual void CustomizeInputNormalization(
+        string propertyName,
+        string rawValue,
+        ref string normalizedValue
+    ) { }
 
     /// <summary>この EditModel が所属するコレクション（兄弟ナビゲーション用。EditModelCollection が設定する）</summary>
     public IList? Owner { get; set; }

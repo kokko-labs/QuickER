@@ -48,6 +48,12 @@ public sealed class EntitySaveMetadata
     /// <summary>SELECT / UPDATE から除外する無制限バイナリ列（<see cref="UnboundedBinaryColumnAttribute"/> 付き）。除外列なしは空</summary>
     public required IReadOnlyList<PropertyInfo> ExcludedProperties { get; init; }
 
+    /// <summary>SELECT 対象列の (プロパティ, カラム名) をビルド時に確定した配列。行マッピングは列名解決を都度リフレクションせずこれを列挙する</summary>
+    public required IReadOnlyList<(PropertyInfo Property, string ColumnName)> SelectColumns { get; init; }
+
+    /// <summary>列プロパティ → カラム名の確定済み対応（射影・除外列など任意プロパティ列の列名解決に使う）</summary>
+    public required IReadOnlyDictionary<PropertyInfo, string> ColumnNameByProperty { get; init; }
+
     /// <summary>カラム名 → 列プロパティの対応（クエリ WHERE 句パラメータの型明示化で列型を引くのに使う）</summary>
     public required IReadOnlyDictionary<string, PropertyInfo> PropertyByColumn { get; init; }
 
@@ -59,6 +65,19 @@ public sealed class EntitySaveMetadata
 
     /// <summary>指定型のメタデータを取得する（型ごとに 1 度だけ構築しキャッシュ）</summary>
     public static EntitySaveMetadata For(Type entityType) => _cache.GetOrAdd(entityType, Build);
+
+    /// <summary>ナビゲーションプロパティ → <see cref="NavigationReferenceAttribute"/> の解決をプロパティ単位でキャッシュする</summary>
+    private static readonly ConcurrentDictionary<
+        PropertyInfo,
+        NavigationReferenceAttribute?
+    > _navigationAttributeCache = new();
+
+    /// <summary>ナビゲーションプロパティの <see cref="NavigationReferenceAttribute"/> を取得する（Include 解決で毎ノード反射しないようキャッシュ）</summary>
+    public static NavigationReferenceAttribute? NavigationAttribute(PropertyInfo property) =>
+        _navigationAttributeCache.GetOrAdd(
+            property,
+            static p => p.GetCustomAttribute<NavigationReferenceAttribute>()
+        );
 
     private static EntitySaveMetadata Build(Type entityType)
     {
@@ -125,6 +144,9 @@ public sealed class EntitySaveMetadata
             AllProperties = columns,
             SelectProperties = selectProperties,
             ExcludedProperties = excludedColumns,
+            // 行マッピングの列名解決をビルド時に確定させ、行ごとの [Column] リフレクションを排除する
+            SelectColumns = selectProperties.Select(property => (property, GetColumnName(property))).ToList(),
+            ColumnNameByProperty = columns.ToDictionary(property => property, GetColumnName),
             PropertyByColumn = columns.ToDictionary(
                 GetColumnName,
                 property => property,
@@ -141,26 +163,32 @@ public sealed class EntitySaveMetadata
     {
         var entity = new TEntity();
 
-        // 無制限バイナリ列は既定で SELECT 除外のため SelectProperties のみをマップする（除外列なしは全列と一致）
-        foreach (var property in SelectProperties)
+        // 無制限バイナリ列は既定で SELECT 除外のため SelectColumns（＝SelectProperties の確定済み対応）のみをマップする
+        foreach (var (property, columnName) in SelectColumns)
         {
-            var columnName = GetColumnName(property);
-            var value = reader[columnName];
-
-            if (value is DBNull)
-            {
-                property.SetValue(entity, null);
-            }
-            else
-            {
-                // 値オブジェクトは内包型へ変換して包み直す（Wrap 内で Convert.ChangeType 済み）
-                property.SetValue(entity, SqlValueObjectActivator.Wrap(value, property.PropertyType));
-            }
+            SetColumnValue(entity, property, reader[columnName]);
         }
 
         // DB から読み込んだ行は変更なし扱いにする（その後の編集で Updated に遷移）
         entity.RowState = RowState.Unchanged;
         return entity;
+    }
+
+    /// <summary>
+    /// 読み取った列値を対象プロパティへ設定する（行マッピングの共通処理）。<c>DBNull</c> は <c>null</c> を代入し、
+    /// それ以外は値オブジェクトの包み直し／SQLite の格納型寄せ／SQL Server の素通しを方言に応じて行う。
+    /// </summary>
+    private static void SetColumnValue(EntityBase entity, PropertyInfo property, object value)
+    {
+        if (value is DBNull)
+        {
+            property.SetValue(entity, null);
+        }
+        else
+        {
+            // 値オブジェクトは内包型へ変換して包み直す（Wrap 内で Convert.ChangeType 済み）
+            property.SetValue(entity, SqlValueObjectActivator.Wrap(value, property.PropertyType));
+        }
     }
 
     /// <summary>
@@ -195,23 +223,14 @@ public sealed class EntitySaveMetadata
 
             foreach (var property in ExcludedProperties)
             {
-                var columnName = GetColumnName(property);
+                var columnName = ColumnNameByProperty[property];
 
                 if (!present.Contains(columnName))
                 {
                     continue;
                 }
 
-                var value = reader[columnName];
-
-                if (value is DBNull)
-                {
-                    property.SetValue(entity, null);
-                }
-                else
-                {
-                    property.SetValue(entity, SqlValueObjectActivator.Wrap(value, property.PropertyType));
-                }
+                SetColumnValue(entity, property, reader[columnName]);
             }
 
             // opportunistic な代入で状態が動かないよう変更なしを再確定する（列プロパティは素の auto-property だが念のため）

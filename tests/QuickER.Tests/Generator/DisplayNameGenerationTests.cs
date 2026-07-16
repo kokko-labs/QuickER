@@ -106,8 +106,10 @@ public class DisplayNameGenerationTests
             .Files[0]
             .Content;
 
-        // Description あり: Entity.DisplayName 既定値は Description
-        withDescription.Should().Contain("var displayName = \"顧客マスタ\";");
+        // Description あり: Entity.DisplayName 既定値（DefaultDisplayName の override）は Description
+        withDescription
+            .Should()
+            .Contain("protected override string DefaultDisplayName => \"顧客マスタ\";");
 
         var withoutDescription = new CSharpCodeGenerationService()
             .Generate(
@@ -121,11 +123,15 @@ public class DisplayNameGenerationTests
             .Files[0]
             .Content;
 
-        // Description なし: Entity.DisplayName 既定値はクラス名（CustomerEntity）
-        withoutDescription.Should().Contain("var displayName = \"CustomerEntity\";");
+        // Description なし: Entity.DisplayName 既定値は基底のクラス名（GetType().Name）。派生側に override は出ない
         withoutDescription
             .Should()
-            .Contain("static partial void CustomizeDisplayName(ref string displayName);");
+            .Contain("protected virtual string DefaultDisplayName => GetType().Name;");
+        withoutDescription.Should().NotContain("protected override string DefaultDisplayName");
+        // 表示名の上書き拡張点は基底の virtual メソッドとして提供される
+        withoutDescription
+            .Should()
+            .Contain("protected virtual void CustomizeDisplayName(ref string displayName)");
     }
 
     // ===== VO 無効時の GetDisplayName 配線 =====
@@ -241,12 +247,19 @@ public class DisplayNameGenerationTests
                 && diagnostic.Message.Contains("DisplayName / CustomizeDisplayName")
             );
 
-        // 衝突エンティティは列プロパティ DisplayName を持ち、静的 DisplayName プロパティは持たない
-        content.Should().Contain("public string DisplayName { get; set; }");
-        content.Should().NotContain("var displayName = \"LabelEntity\";");
+        // 衝突エンティティは列プロパティ DisplayName を持ち、基底の DisplayName を new で隠す（表示名フックは出さない）
+        content.Should().Contain("public new string DisplayName { get; set; }");
+        content
+            .Should()
+            .NotContain("protected override string DefaultDisplayName => \"LabelEntity\";");
 
-        // 他エンティティ（customers）は静的 DisplayName を通常どおり生成する
-        content.Should().Contain("var displayName = \"CustomerEntity\";");
+        // 表示名の既定・拡張点は基底が提供し、衝突しない別エンティティ（customers）はそれをそのまま継承する
+        content.Should().Contain("protected virtual string DefaultDisplayName => GetType().Name;");
+        // 基底を隠す new DisplayName は衝突エンティティ 1 つだけ（customers は継承のみ）
+        System
+            .Text.RegularExpressions.Regex.Matches(content, "public new string DisplayName")
+            .Count.Should()
+            .Be(1);
     }
 
     // ===== C# リテラルエスケープ =====
@@ -288,8 +301,12 @@ public class DisplayNameGenerationTests
         result.HasErrors.Should().BeFalse();
         var content = result.Files[0].Content;
 
-        // Entity.DisplayName 既定値（テーブル Description）が C# リテラルへエスケープされる（改行は空白 1 つへ畳む）
-        content.Should().Contain("var displayName = \"行1 \\\"引用\\\"\\\\パス\";");
+        // Entity.DisplayName 既定値（テーブル Description の DefaultDisplayName override）が C# リテラルへエスケープされる（改行は空白 1 つへ畳む）
+        content
+            .Should()
+            .Contain(
+                "protected override string DefaultDisplayName => \"行1 \\\"引用\\\"\\\\パス\";"
+            );
         // VO.DisplayName 既定値（列 Description）も同様にエスケープされる
         content.Should().Contain("var displayName = \"列\\\"名\\\"\\\\end\";");
 
