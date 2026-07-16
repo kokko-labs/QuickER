@@ -210,7 +210,7 @@ public class CSharpGenerationSettingsStoreTests
                     RepositoryDialects = new() { "sqlserver", "sqlite" },
                     GenerateInMemoryRepositories = true,
                     IncludeDataAnnotations = false,
-                    OutputFileName = "Acme.g.cs",
+                    OutputPath = "Acme.g.cs",
                     GenerateValueObjects = true,
                 }
             );
@@ -218,6 +218,19 @@ public class CSharpGenerationSettingsStoreTests
             // CLI（CliApp.LoadOptions）と同じ読み方: JsonNode で解析し、大文字小文字を無視して
             // CodeGenerationOptions へデシリアライズする（camelCase の JSON が PascalCase のプロパティへ一致する）。
             var node = JsonNode.Parse(File.ReadAllText(path))!.AsObject();
+
+            // CLI の LoadOptions と同じく OutputPath（ファイル名）→ OutputFileName を導出する
+            // （GUI 設定は OutputPath のみを持ち、OutputFileName は持たない）。camelCase キーで書かれる点にも留意
+            if (
+                node["outputFileName"] is null
+                && node["outputPath"] is JsonValue outputPathValue
+                && outputPathValue.TryGetValue(out string? outputPath)
+                && !string.IsNullOrWhiteSpace(Path.GetFileName(outputPath))
+            )
+            {
+                node["OutputFileName"] = Path.GetFileName(outputPath);
+            }
+
             var options = node.Deserialize<CodeGenerationOptions>(
                 new JsonSerializerOptions { PropertyNameCaseInsensitive = true }
             )!;
@@ -229,6 +242,7 @@ public class CSharpGenerationSettingsStoreTests
             options.RepositoryDialects.Should().Equal("sqlserver", "sqlite");
             options.GenerateInMemoryRepositories.Should().BeTrue();
             options.IncludeDataAnnotations.Should().BeFalse();
+            // GUI が保存した OutputPath のファイル名部分が CLI 経路で OutputFileName へ導出される
             options.OutputFileName.Should().Be("Acme.g.cs");
             options.GenerateValueObjects.Should().BeTrue();
             // GUI で選んだ対象 DB が EffectiveRepositoryDialects（リスト優先）でそのまま有効になる

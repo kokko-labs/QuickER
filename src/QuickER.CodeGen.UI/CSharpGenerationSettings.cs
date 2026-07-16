@@ -6,9 +6,10 @@ namespace QuickER.CodeGen.UI;
 /// <remarks>
 /// このスキーマは CLI の quicker.json（<c>--config</c>）互換になるよう、CLI の
 /// <c>CodeGenerationOptions</c> とキー集合・意味・既定値を揃えている（<see cref="NamespaceName"/> /
-/// <see cref="RepositoryDialects"/> / <see cref="OutputFileName"/> 等）。JSON は camelCase で書き出すが、
+/// <see cref="RepositoryDialects"/> / <see cref="OutputPath"/> 等）。JSON は camelCase で書き出すが、
 /// CLI は <c>PropertyNameCaseInsensitive</c> で読むため名前が一致すればそのまま解釈される。
-/// GUI 専用キー（<see cref="OutputPath"/> や分割時のカテゴリ別名前空間等）は CLI では未知キーとして無視される。
+/// <see cref="OutputPath"/> は CLI でも解釈され、CLI はそのファイル名部分のみを出力ファイル名として使う
+/// （出力先ディレクトリは常に <c>--out</c> が正）。
 /// プロパティ宣言順＝JSON 出力順のため、カテゴリ順（出力モード→名前空間→生成対象→…→出力先）に並べている。
 /// </remarks>
 public class CSharpGenerationSettings
@@ -126,20 +127,14 @@ public class CSharpGenerationSettings
     // ===== 出力先 =====
 
     /// <summary>
-    /// 出力ファイル名（パスを含まないファイル名のみ）。
-    /// CLI の <c>CodeGenerationOptions.OutputFileName</c> と同名＝<c>--config</c> でそのまま解釈される
+    /// 出力先パス。GUI では非分割時はファイルパス、分割時は出力フォルダパスを表す
+    /// （空は未指定。非分割時の既定ファイル名へのプリフィルは VM の ApplySettings が行う＝
+    /// 分割時に非分割用の既定ファイル名が混入して検証をすり抜けるのを防ぐ）。
     /// </summary>
     /// <remarks>
-    /// GUI では <see cref="OutputPath"/> が正で、保存時に非分割なら <c>Path.GetFileName</c> でここへ導出する。
-    /// CLI は出力ファイル名のみを扱うため、この派生キーで GUI↔CLI のファイル名を橋渡しする
+    /// CLI（<c>--config</c> / <c>--output-path</c>）でも解釈され、<c>Path.GetFileName</c> でファイル名部分のみが
+    /// 使われる（出力先ディレクトリは常に <c>--out</c> が正）。名前のみの値（例 <c>EcOrder.g.cs</c>）も可。
     /// </remarks>
-    public string OutputFileName { get; set; } = string.Empty;
-
-    /// <summary>
-    /// 出力先パス（GUI 専用。CLI では無視される）。非分割時はファイルパス、分割時は出力フォルダパスを表す
-    /// （空は未指定。非分割時の既定ファイル名へのプリフィルは VM の ApplySettings が行う＝
-    /// 分割時に非分割用の既定ファイル名が混入して検証をすり抜けるのを防ぐ）
-    /// </summary>
     public string OutputPath { get; set; } = string.Empty;
 
     /// <summary>ベース名前空間の工場出荷既定（分割時は {base}.Entities 等のフォールバック元になるため接尾辞なし）</summary>

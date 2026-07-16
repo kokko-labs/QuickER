@@ -93,7 +93,7 @@ dotnet run --project src/QuickER.Cli -- generate `
   --config samples/ec-order-remote/quicker.json
 ```
 
-`GenerateRemoteServices` is already set in `quicker.json` (the `--remote-services` flag is equivalent). Both the
+`GenerateRemoteServices` is already set in `quicker.json` (the `--generate-remote-services` flag is equivalent). Both the
 main generated file and the server generated file are written to the same `--out`.
 
 ### Regenerate everything at once with the drift tests' regeneration mode

@@ -21,7 +21,7 @@ namespace QuickER.Tests.Samples;
 /// </summary>
 /// <remarks>
 /// <para>
-/// テスト1（生成コード）は、<c>quicker generate --provider sqlite --config quicker.json --api-docs</c> と<b>同一の生成経路</b>を
+/// テスト1（生成コード）は、<c>quicker generate --provider sqlite --config quicker.json --generate-api-docs</c> と<b>同一の生成経路</b>を
 /// 厳密に模倣する（CLI の <c>LoadOptions</c> / <c>RunGenerate</c> と等価）。図 JSON を
 /// <see cref="JsonStorageService.Load"/> で読み、<c>quicker.json</c> を CLI と同じ流儀で読み（<see cref="JsonNode"/> →
 /// <c>RepositoryDialects=["sqlite"]</c> を補完 ＋ <c>GenerateApiDocs=true</c> を上書き → <see cref="CodeGenerationOptions"/> へデシリアライズ）、
@@ -29,7 +29,7 @@ namespace QuickER.Tests.Samples;
 /// 「チェックイン済み <c>EcOrder.g.cs</c> は実 CLI が生成したものと同一」がテンプレート変更後も守られる。
 /// </para>
 /// <para>
-/// テスト1b（API リファレンス Markdown）は、同じ生成経路が <c>--api-docs</c> で追加出力する
+/// テスト1b（API リファレンス Markdown）は、同じ生成経路が <c>--generate-api-docs</c> で追加出力する
 /// <c>EcOrder.g.md</c>（<c>.g.cs</c> と同じベース名）を照合する。出力は決定的（生成日時を含まない）のため
 /// <c>.g.cs</c> と同じくバイト一致で検証する（<see cref="FixtureDriftHarness.VerifyOrRegeneratePackageSource"/>）。
 /// </para>
@@ -54,7 +54,7 @@ public sealed class EcOrderSampleDriftTests
     private const string GeneratedCodeRepoPath =
         SampleDir + "/EcOrderSample/Generated/EcOrder.g.cs";
 
-    /// <summary>チェックイン済み API リファレンス Markdown のリポジトリ相対パス（<c>--api-docs</c> 相当の同梱出力）</summary>
+    /// <summary>チェックイン済み API リファレンス Markdown のリポジトリ相対パス（<c>--generate-api-docs</c> 相当の同梱出力）</summary>
     private const string ApiDocsRepoPath = SampleDir + "/EcOrderSample/Generated/EcOrder.g.md";
 
     /// <summary>チェックイン済み DDL のリポジトリ相対パス</summary>
@@ -85,7 +85,7 @@ public sealed class EcOrderSampleDriftTests
     }
 
     /// <summary>
-    /// テスト1b: チェックイン済み <c>EcOrder.g.md</c>（<c>--api-docs</c> 同梱出力）が、CLI と同一経路で
+    /// テスト1b: チェックイン済み <c>EcOrder.g.md</c>（<c>--generate-api-docs</c> 同梱出力）が、CLI と同一経路で
     /// 再生成した API リファレンス Markdown と完全一致する。
     /// </summary>
     [Fact(
@@ -98,7 +98,7 @@ public sealed class EcOrderSampleDriftTests
         FixtureDriftHarness.VerifyOrRegeneratePackageSource(
             rendered,
             ApiDocsRepoPath,
-            "サンプル API ドキュメント EcOrder.g.md が現在のテンプレート出力（CLI と同一経路・--api-docs）と乖離しています。"
+            "サンプル API ドキュメント EcOrder.g.md が現在のテンプレート出力（CLI と同一経路・--generate-api-docs）と乖離しています。"
                 + "samples/ec-order の図・quicker.json から再生成が必要です。"
         );
     }
@@ -161,11 +161,11 @@ public sealed class EcOrderSampleDriftTests
     }
 
     /// <summary>
-    /// CLI（<c>quicker generate --provider sqlite --config quicker.json --api-docs</c>）と同一経路で
+    /// CLI（<c>quicker generate --provider sqlite --config quicker.json --generate-api-docs</c>）と同一経路で
     /// サンプルを再生成し、指定拡張子（<c>.g.cs</c> / <c>.g.md</c>）のファイル内容を返す。
     /// </summary>
     /// <remarks>
-    /// <c>--api-docs</c> 相当（<c>GenerateApiDocs=true</c>）で生成すると <c>.g.cs</c> と <c>.g.md</c> の
+    /// <c>--generate-api-docs</c> 相当（<c>GenerateApiDocs=true</c>）で生成すると <c>.g.cs</c> と <c>.g.md</c> の
     /// 2 ファイルが返る。呼び出し側が照合したい方の拡張子で 1 ファイルを取り出す。
     /// </remarks>
     private static string GenerateSampleFileContent(string extension)
@@ -197,7 +197,7 @@ public sealed class EcOrderSampleDriftTests
 
         Assert.False(result.HasErrors, "サンプル図の生成でエラーが出てはならない");
 
-        // --api-docs 相当のため .g.cs（コード 1 本）＋ .g.md（API ドキュメント 1 本）の 2 ファイルが返る
+        // --generate-api-docs 相当のため .g.cs（コード 1 本）＋ .g.md（API ドキュメント 1 本）の 2 ファイルが返る
         Assert.Equal(2, result.Files.Count);
 
         var file = result.Files.Single(f =>
@@ -208,7 +208,7 @@ public sealed class EcOrderSampleDriftTests
 
     /// <summary>
     /// <c>quicker.json</c> を CLI の <c>LoadOptions</c> と同じ流儀で読み、
-    /// <c>RepositoryDialects</c> をプロバイダ名で補い、<c>--api-docs</c> 相当の
+    /// <c>RepositoryDialects</c> をプロバイダ名で補い、<c>--generate-api-docs</c> 相当の
     /// <c>GenerateApiDocs=true</c> を立ててオプションを構築する。
     /// </summary>
     private static CodeGenerationOptions LoadSampleOptions(SqliteProvider provider)
@@ -223,8 +223,20 @@ public sealed class EcOrderSampleDriftTests
             node["RepositoryDialects"] = new JsonArray(JsonValue.Create(provider.Name));
         }
 
-        // CLI の --api-docs 相当（設定ファイル値を上書きして API リファレンス Markdown も同梱出力する）
+        // CLI の --generate-api-docs 相当（設定ファイル値を上書きして API リファレンス Markdown も同梱出力する）
         node["GenerateApiDocs"] = true;
+
+        // CLI の LoadOptions と同じく OutputPath（ファイル名）→ OutputFileName を導出する
+        // （quicker.json は OutputPath="EcOrder.g.cs" のみを持ち、OutputFileName は持たない）
+        if (
+            node["OutputFileName"] is null
+            && node["OutputPath"] is JsonValue outputPathValue
+            && outputPathValue.TryGetValue(out string? outputPath)
+            && !string.IsNullOrWhiteSpace(Path.GetFileName(outputPath))
+        )
+        {
+            node["OutputFileName"] = Path.GetFileName(outputPath);
+        }
 
         var jsonOptions = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
         return node.Deserialize<CodeGenerationOptions>(jsonOptions)

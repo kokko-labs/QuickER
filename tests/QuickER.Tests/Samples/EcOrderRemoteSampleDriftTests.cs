@@ -190,6 +190,18 @@ public sealed class EcOrderRemoteSampleDriftTests
             node["RepositoryDialects"] = new JsonArray(JsonValue.Create(provider.Name));
         }
 
+        // CLI の LoadOptions と同じく OutputPath（ファイル名）→ OutputFileName を導出する
+        // （quicker.json は OutputPath="EcOrderRemote.g.cs" のみを持ち、OutputFileName は持たない）
+        if (
+            node["OutputFileName"] is null
+            && node["OutputPath"] is JsonValue outputPathValue
+            && outputPathValue.TryGetValue(out string? outputPath)
+            && !string.IsNullOrWhiteSpace(Path.GetFileName(outputPath))
+        )
+        {
+            node["OutputFileName"] = Path.GetFileName(outputPath);
+        }
+
         var jsonOptions = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
         return node.Deserialize<CodeGenerationOptions>(jsonOptions)
             ?? throw new InvalidOperationException("quicker.json のデシリアライズに失敗しました。");

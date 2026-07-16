@@ -636,11 +636,8 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
             // UI 非表示の属性系は保持値をそのまま書き戻す（読込→保存で値が失われない）
             IncludeDataAnnotations = _includeDataAnnotations,
             IncludeJsonIgnoreOnParentNavigation = _includeJsonIgnoreOnParentNavigation,
-            // CLI（--config）は出力ファイル名のみを扱うため橋渡しする。分割時は planner がバケット別ファイル名を
-            // 使うため出力ファイル名は inert＝既定名を書く。非分割時はパスからファイル名を導出する
-            OutputFileName = SplitFilesByCategory
-                ? CSharpGenerationSettings.DefaultOutputFilePath
-                : Path.GetFileName(OutputPath.Trim()),
+            // 出力先は OutputPath に一本化する。CLI（--config）は保存された OutputPath のファイル名部分のみを
+            // 出力ファイル名として使う（出力先ディレクトリは常に --out）。分割時はフォルダパスが入る
             OutputPath = OutputPath.Trim(),
         };
 

@@ -26,10 +26,12 @@ quicker scaffold --connection "Server=.;Database=Shop;Integrated Security=true;T
 |---|---|
 | `--provider <name>` | 対象 DB。`sqlserver`（既定）/ `postgresql` / `mysql` / `oracle` / `sqlite` |
 | `--config <file>` | 生成オプション設定ファイル（quicker.json） |
-| `--namespace <name>` / `--split` | ルート名前空間の指定／カテゴリ別ファイル分割 |
+| `--namespace-name <name>` / `--split-files-by-category` | ルート名前空間の指定／カテゴリ別ファイル分割 |
 | `--repository-dialects <list>` | QuickER 版 Repository のマルチターゲット生成（例 `sqlserver,sqlite`・keyed DI） |
-| `--runtime-packages` | ランタイム固定コードを出力せず `QuickER.Runtime.*` パッケージ参照で賄う |
-| `--api-docs` | API リファレンス Markdown（`{ベース名}.g.md`）を追加出力 |
+| `--use-runtime-packages` | ランタイム固定コードを出力せず `QuickER.Runtime.*` パッケージ参照で賄う |
+| `--generate-api-docs` | API リファレンス Markdown（`{ベース名}.g.md`）を追加出力 |
+
+設定ファイルの各キーは同名の kebab-case フラグとしても指定でき、設定ファイルより優先されます（優先順位: CLI フラグ ＞ 設定ファイル ＞ 既定値。bool は `--flag` / `--flag false` の三値）。
 
 詳細な CLI リファレンス・生成コードの使い方・動くサンプルは、リポジトリのドキュメントを参照してください:
 
