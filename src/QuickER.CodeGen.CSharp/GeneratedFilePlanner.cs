@@ -235,11 +235,7 @@ public static class GeneratedFilePlanner
         // QuickER の SQL Server 実装を保持する。契約は EF Core 側・インメモリ側も参照するため、QuickER 版 Repository・EF Core・
         // インメモリのいずれかが有効なら出力する。EF Core/インメモリ単独出力時は Repository バケットに「契約のみ」＋
         // インメモリ実装が入る（QuickER の ADO 実装はテンプレート内で出し分ける）
-        if (
-            options.GenerateRepositories
-            || options.GenerateEfCore
-            || options.GenerateInMemoryRepositories
-        )
+        if (options.GeneratesRepositoryContract)
         {
             active.Add(GenerationBucket.Repository);
         }
@@ -326,18 +322,18 @@ public static class GeneratedFilePlanner
 
         // 非分割: マルチ方言（実効方言 2 つ以上）で Repository を生成するときだけ、契約 1 回＋方言別 namespace 実装へ
         // 展開する。単一方言・Repository 非生成時は従来どおり全バケットを 1 ファイル・1 namespace へまとめる（バイト不変）。
-        var multiDialectNonSplit =
+        var repositoryMultiDialectInlineLayout =
             options.GenerateRepositories && dialects.Count >= 2 && repositoryActive;
 
         // 分割: 単一方言でも「契約 1 回＋方言別実装ファイル」レイアウトへ統一する（実効方言が 1 つでも
         // マルチターゲットと同じ形＝Repositories.g.cs＋Repositories.{方言}.g.cs）。Repository を生成するときのみ。
-        var multiDialectSplit = options.GenerateRepositories && repositoryActive;
+        var repositorySplitLayout = options.GenerateRepositories && repositoryActive;
 
         if (!options.SplitFilesByCategory)
         {
             // 非分割: 全バケットを 1 ファイルへ。マルチ方言時は Repository を「契約スペック＋方言別実装スペック」へ
             // 展開し、同一ファイル名で連結する（RenderFiles が block namespace で連結・using を先頭へ集約）。
-            if (!multiDialectNonSplit)
+            if (!repositoryMultiDialectInlineLayout)
             {
                 var singleSpecs = new List<GeneratedFileSpec>
                 {
@@ -408,22 +404,16 @@ public static class GeneratedFilePlanner
             bucket => ResolveNamespace(options, bucket)
         );
 
-        // EF Core 実装は方言別実装（{RepositoryNamespace}.SqlServer 等）と同じ扱いで、契約（Repository）namespace の
-        // サブ名前空間 {RepositoryNamespace}.EfCore へ導出する（専用の名前空間オプションは持たない）。
-        // EfCore バケットが有効なら Repository バケットも必ず有効（ActiveBuckets が保証）。
-        if (namespaceByBucket.ContainsKey(GenerationBucket.EfCore))
+        // EF Core / インメモリ実装は方言別実装（{RepositoryNamespace}.SqlServer 等）と同じ扱いで、契約（Repository）
+        // namespace のサブ名前空間 {RepositoryNamespace}.{接尾辞} へ導出する（専用の名前空間オプションは持たない）。
+        // これらのバケットが有効なら Repository バケットも必ず有効（ActiveBuckets が保証）。
+        foreach (var bucket in DerivedRepositorySubBuckets)
         {
-            namespaceByBucket[GenerationBucket.EfCore] =
-                $"{namespaceByBucket[GenerationBucket.Repository]}.{DefaultSuffix(GenerationBucket.EfCore)}";
-        }
-
-        // インメモリ実装も EF Core 実装と同じ扱いで、契約（Repository）namespace のサブ名前空間
-        // {RepositoryNamespace}.InMemory へ導出する（専用の名前空間オプションは持たない）。
-        // InMemory バケットが有効なら Repository バケットも必ず有効（ActiveBuckets が保証）。
-        if (namespaceByBucket.ContainsKey(GenerationBucket.InMemory))
-        {
-            namespaceByBucket[GenerationBucket.InMemory] =
-                $"{namespaceByBucket[GenerationBucket.Repository]}.{DefaultSuffix(GenerationBucket.InMemory)}";
+            if (namespaceByBucket.ContainsKey(bucket))
+            {
+                namespaceByBucket[bucket] =
+                    $"{namespaceByBucket[GenerationBucket.Repository]}.{DefaultSuffix(bucket)}";
+            }
         }
 
         var activeSet = emittedBuckets.ToHashSet();
@@ -447,7 +437,7 @@ public static class GeneratedFilePlanner
 
             // 分割時の Repository バケットは契約のみを自 namespace へ出し、方言別実装は別ファイルへ分ける
             // （単一方言でも同レイアウト）。インメモリ実装は独立バケットとして別ファイルへ分かれる。
-            if (multiDialectSplit && bucket == GenerationBucket.Repository)
+            if (repositorySplitLayout && bucket == GenerationBucket.Repository)
             {
                 splitSpecs.Add(
                     new GeneratedFileSpec
@@ -486,12 +476,9 @@ public static class GeneratedFilePlanner
                 {
                     // EF Core 実装は Repositories.EfCore.g.cs、インメモリ実装は Repositories.InMemory.g.cs へ出す
                     // （いずれも方言別実装 Repositories.SqlServer.g.cs 等と同じ流儀）
-                    FileName = bucket switch
-                    {
-                        GenerationBucket.EfCore => EfCoreRepositoryFileName(),
-                        GenerationBucket.InMemory => InMemoryRepositoryFileName(),
-                        _ => DefaultFileName(bucket),
-                    },
+                    FileName = DerivedRepositorySubBuckets.Contains(bucket)
+                        ? DerivedRepositoryFileName(bucket)
+                        : DefaultFileName(bucket),
                     NamespaceName = ownNamespace,
                     Buckets = [bucket],
                     CrossNamespaceUsings = crossUsings,
@@ -507,16 +494,18 @@ public static class GeneratedFilePlanner
         return splitSpecs;
     }
 
-    /// <summary>非分割時のサーバー実装ファイル名（例: <c>MyApp.g.cs</c> → <c>MyApp.RemoteServer.g.cs</c>）</summary>
-    public static string RemoteServerFileName(string outputFileName)
-    {
-        const string suffix = ".g.cs";
-        var baseName = outputFileName.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)
-            ? outputFileName[..^suffix.Length]
-            : outputFileName;
+    /// <summary>生成 C# ファイルの拡張子サフィックス（<c>.g.cs</c>）</summary>
+    internal const string GeneratedCSharpSuffix = ".g.cs";
 
-        return $"{baseName}.RemoteServer{suffix}";
-    }
+    /// <summary>末尾の <c>.g.cs</c>（大文字小文字無視）を取り除いたベース名を返す（付いていなければそのまま返す）</summary>
+    internal static string StripGeneratedCSharpSuffix(string fileName) =>
+        fileName.EndsWith(GeneratedCSharpSuffix, StringComparison.OrdinalIgnoreCase)
+            ? fileName[..^GeneratedCSharpSuffix.Length]
+            : fileName;
+
+    /// <summary>非分割時のサーバー実装ファイル名（例: <c>MyApp.g.cs</c> → <c>MyApp.RemoteServer.g.cs</c>）</summary>
+    public static string RemoteServerFileName(string outputFileName) =>
+        $"{StripGeneratedCSharpSuffix(outputFileName)}.RemoteServer{GeneratedCSharpSuffix}";
 
     /// <summary>
     /// リモートサービス生成（<see cref="CodeGenerationOptions.GenerateRemoteServices"/>）時に、サーバー実装の
@@ -653,11 +642,20 @@ public static class GeneratedFilePlanner
     private static string DialectRepositoryFileName(string dialect) =>
         $"{DefaultSuffix(GenerationBucket.Repository)}.{DialectNamespaceSuffix(dialect)}.g.cs";
 
-    /// <summary>EF Core 実装の分割ファイル名（<c>Repositories.EfCore.g.cs</c>）＝方言別実装と同じ流儀</summary>
-    private static string EfCoreRepositoryFileName() =>
-        $"{DefaultSuffix(GenerationBucket.Repository)}.{DefaultSuffix(GenerationBucket.EfCore)}.g.cs";
+    /// <summary>
+    /// 分割時、契約（Repository）namespace のサブ名前空間・サブファイルへ導出するバケット（方言実装と同じ流儀の後付け特例）。
+    /// </summary>
+    /// <remarks>
+    /// これらは専用の名前空間オプションを持たず、namespace は <c>{RepositoryNamespace}.{接尾辞}</c>、
+    /// ファイル名は <c>Repositories.{接尾辞}.g.cs</c> へ一律に導出する（方言別実装 <c>Repositories.SqlServer.g.cs</c> 等と同型）。
+    /// </remarks>
+    private static readonly GenerationBucket[] DerivedRepositorySubBuckets =
+    [
+        GenerationBucket.EfCore,
+        GenerationBucket.InMemory,
+    ];
 
-    /// <summary>インメモリ実装の分割ファイル名（<c>Repositories.InMemory.g.cs</c>）＝方言別実装・EF Core 実装と同じ流儀</summary>
-    private static string InMemoryRepositoryFileName() =>
-        $"{DefaultSuffix(GenerationBucket.Repository)}.{DefaultSuffix(GenerationBucket.InMemory)}.g.cs";
+    /// <summary>導出サブバケットの分割ファイル名（例: <c>Repositories.EfCore.g.cs</c>）＝方言別実装と同じ流儀</summary>
+    private static string DerivedRepositoryFileName(GenerationBucket bucket) =>
+        $"{DefaultSuffix(GenerationBucket.Repository)}.{DefaultSuffix(bucket)}.g.cs";
 }

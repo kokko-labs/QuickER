@@ -369,7 +369,6 @@
             Grid.Column="1"
             Content="{x:Static res:Strings.CodeGen_UseRuntimePackages}"
             IsChecked="{Binding UseRuntimePackages}"
-            IsEnabled="{Binding CanUseRuntimePackages}"
             ToolTip="{Binding UseRuntimePackagesToolTip}"
           />
         </Grid>

@@ -248,14 +248,11 @@ public class CSharpGenerationDialogViewModelTests
         vm.RootNamespace = "Sample.Domain";
         vm.OutputPath = @"C:\temp\Entities.g.cs";
 
-        vm.CanUseRuntimePackages.Should().BeTrue("既定は DB アクセス「なし」のため操作可能");
-
         vm.UseRuntimePackages = true;
         vm.UseRuntimePackages.Should().BeTrue();
 
         vm.DbAccessEfCore = true;
 
-        vm.CanUseRuntimePackages.Should().BeTrue("EF Core とも併用できるため操作可能のまま");
         vm.UseRuntimePackages.Should().BeTrue("EF Core 選択でもチェックは解除されない");
 
         vm.OkCommand.Execute(null);
@@ -278,7 +275,6 @@ public class CSharpGenerationDialogViewModelTests
         vm.OutputPath = @"C:\temp\Entities.g.cs";
         vm.DbAccessRepository = true;
 
-        vm.CanUseRuntimePackages.Should().BeTrue();
         vm.UseRuntimePackages = true;
 
         vm.OkCommand.Execute(null);
@@ -286,23 +282,6 @@ public class CSharpGenerationDialogViewModelTests
         vm.Result.Should().NotBeNull();
         vm.Result!.Options.UseRuntimePackages.Should().BeTrue();
         vm.Result.Options.GenerateRepositories.Should().BeTrue();
-    }
-
-    /// <summary>DB アクセス選択（なし／QuickER 版 Repository／EF Core）に依らず、パッケージ参照モードは常に操作可能なことを検証する</summary>
-    [Fact(DisplayName = "パッケージ参照モードは DB アクセス選択に依らず常に操作可能")]
-    public void UseRuntimePackages_IsAlwaysEnabled_AcrossDbAccessChoices()
-    {
-        var vm = CreateViewModel(out _);
-        vm.RootNamespace = "Sample.Domain";
-
-        vm.DbAccessEfCore = true;
-        vm.CanUseRuntimePackages.Should().BeTrue("EF Core 選択でも操作可能");
-
-        vm.DbAccessNone = true;
-        vm.CanUseRuntimePackages.Should().BeTrue("DB アクセスなしでも操作可能");
-
-        vm.UseRuntimePackages = true;
-        vm.UseRuntimePackages.Should().BeTrue();
     }
 
     /// <summary>API リファレンス出力チェックの既定は OFF で、ON にすると結果オプションへ反映されることを検証する</summary>

@@ -86,18 +86,13 @@ internal sealed partial class CSharpGenerationModelBuilder
             // QuickER の SQL Server 実装（GenerateRepositories）・EF Core 実装（GenerateEfCore）・インメモリ実装
             // （GenerateInMemoryRepositories）のいずれかが有効なら必要になる。
             // EF Core・インメモリ単独出力でも各 Repository が I{Entity}Repository を実装するため、モデルを構築しておく
-            RepositoryClasses =
-                options.GenerateRepositories
-                || options.GenerateEfCore
-                || options.GenerateInMemoryRepositories
-                    ? diagram
-                        .Entities.Select(entity =>
-                            BuildRepositoryClass(entity, options, diagnostics)
-                        )
-                        .Where(model => model is not null)
-                        .Cast<CSharpRepositoryModel>()
-                        .ToList()
-                    : [],
+            RepositoryClasses = options.GeneratesRepositoryContract
+                ? diagram
+                    .Entities.Select(entity => BuildRepositoryClass(entity, options, diagnostics))
+                    .Where(model => model is not null)
+                    .Cast<CSharpRepositoryModel>()
+                    .ToList()
+                : [],
             ValueObjectClasses = _valueObjects
                 .Values.OrderBy(vo => vo.ClassName, StringComparer.Ordinal)
                 .ToList(),
@@ -593,11 +588,8 @@ internal sealed partial class CSharpGenerationModelBuilder
         var editModelIsNullable =
             column.IsNullable || !typeInfo.IsReferenceType || typeName == "string" || isBytes;
 
-        if (editModelIsNullable && !typeInfo.IsReferenceType)
-        {
-            typeName += "?";
-        }
-        else if (editModelIsNullable && typeInfo.IsReferenceType)
+        // 値型・参照型を問わず、EditModel が NULL 許容にする列は型名へ ? を付ける（入力途中の未確定値を保持するため）
+        if (editModelIsNullable)
         {
             typeName += "?";
         }
@@ -611,20 +603,9 @@ internal sealed partial class CSharpGenerationModelBuilder
         var needsParse = !typeInfo.IsReferenceType && !isBytes;
         var parseTypeName = needsParse ? typeName.TrimEnd('?') : string.Empty;
 
-        string fieldInitializer;
-
-        if (typeInfo.IsReferenceType)
-        {
-            fieldInitializer = string.Empty;
-        }
-        else if (editModelIsNullable)
-        {
-            fieldInitializer = string.Empty;
-        }
-        else
-        {
-            fieldInitializer = "default";
-        }
+        // 参照型・NULL 許容の値型は初期化子なし（null 始まり）、それ以外の非 NULL 値型のみ default で初期化する
+        var fieldInitializer =
+            typeInfo.IsReferenceType || editModelIsNullable ? string.Empty : "default";
 
         var bindingFieldInitializer = "string.Empty";
 

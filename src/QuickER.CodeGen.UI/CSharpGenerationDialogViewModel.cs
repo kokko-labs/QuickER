@@ -205,9 +205,6 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     [ObservableProperty]
     private bool _useRuntimePackages;
 
-    /// <summary>「ランタイムを NuGet パッケージ参照にする」チェックボックスを操作可能かどうか（常に可能）</summary>
-    public bool CanUseRuntimePackages => true;
-
     /// <summary>パッケージ参照モードのチェックボックスのツールチップ</summary>
     public string UseRuntimePackagesToolTip => Strings.CodeGen_UseRuntimePackagesToolTip;
 
@@ -462,38 +459,69 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
         RefreshPreview();
     }
 
+    /// <summary>
+    /// ルート追従（<see cref="FollowRootNamespace"/>）とプリフィル（<see cref="ApplySettings"/>）が対象にする
+    /// 6 つの子カテゴリ名前空間の入出力（現在値の取得・設定・対応バケット・設定オブジェクトからの取得）を 1 箇所へ集約する。
+    /// </summary>
+    /// <remarks>
+    /// 並び順は UI のカテゴリ別 namespace 欄・ApplySettings の代入順と一致させる（Runtime → Entity → EditModel →
+    /// Mapper → Repository → ValueObject）。追従・プリフィルの 6 バケット分の反復をこの表 1 つで回す。
+    /// </remarks>
+    private IReadOnlyList<(
+        Func<string> Get,
+        Action<string> Set,
+        GenerationBucket Bucket,
+        Func<CSharpGenerationSettings, string> FromSettings
+    )> ChildNamespaceAccessors =>
+        [
+            (
+                () => RuntimeNamespace,
+                value => RuntimeNamespace = value,
+                GenerationBucket.Runtime,
+                settings => settings.RuntimeNamespace
+            ),
+            (
+                () => EntityNamespace,
+                value => EntityNamespace = value,
+                GenerationBucket.Entity,
+                settings => settings.EntityNamespace
+            ),
+            (
+                () => EditModelNamespace,
+                value => EditModelNamespace = value,
+                GenerationBucket.EditModel,
+                settings => settings.EditModelNamespace
+            ),
+            (
+                () => MapperNamespace,
+                value => MapperNamespace = value,
+                GenerationBucket.Mapper,
+                settings => settings.MapperNamespace
+            ),
+            (
+                () => RepositoryNamespace,
+                value => RepositoryNamespace = value,
+                GenerationBucket.Repository,
+                settings => settings.RepositoryNamespace
+            ),
+            (
+                () => ValueObjectNamespace,
+                value => ValueObjectNamespace = value,
+                GenerationBucket.ValueObject,
+                settings => settings.ValueObjectNamespace
+            ),
+        ];
+
     /// <summary>各子名前空間が「{旧root}.{接尾辞}」既定のままなら新ルートへ更新する（手編集済みは保持）</summary>
     private void FollowRootNamespace(string oldRoot, string newRoot)
     {
         _suppressNamespaceFollow = true;
         try
         {
-            RuntimeNamespace = FollowOne(
-                RuntimeNamespace,
-                oldRoot,
-                newRoot,
-                GenerationBucket.Runtime
-            );
-            EntityNamespace = FollowOne(EntityNamespace, oldRoot, newRoot, GenerationBucket.Entity);
-            EditModelNamespace = FollowOne(
-                EditModelNamespace,
-                oldRoot,
-                newRoot,
-                GenerationBucket.EditModel
-            );
-            MapperNamespace = FollowOne(MapperNamespace, oldRoot, newRoot, GenerationBucket.Mapper);
-            RepositoryNamespace = FollowOne(
-                RepositoryNamespace,
-                oldRoot,
-                newRoot,
-                GenerationBucket.Repository
-            );
-            ValueObjectNamespace = FollowOne(
-                ValueObjectNamespace,
-                oldRoot,
-                newRoot,
-                GenerationBucket.ValueObject
-            );
+            foreach (var (get, set, bucket, _) in ChildNamespaceAccessors)
+            {
+                set(FollowOne(get(), oldRoot, newRoot, bucket));
+            }
         }
         finally
         {
@@ -524,18 +552,13 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
         {
             SplitFilesByCategory = settings.SplitFilesByCategory;
             RootNamespace = settings.RootNamespace;
-            RuntimeNamespace = Prefill(settings.RuntimeNamespace, GenerationBucket.Runtime);
-            EntityNamespace = Prefill(settings.EntityNamespace, GenerationBucket.Entity);
-            EditModelNamespace = Prefill(settings.EditModelNamespace, GenerationBucket.EditModel);
-            MapperNamespace = Prefill(settings.MapperNamespace, GenerationBucket.Mapper);
-            RepositoryNamespace = Prefill(
-                settings.RepositoryNamespace,
-                GenerationBucket.Repository
-            );
-            ValueObjectNamespace = Prefill(
-                settings.ValueObjectNamespace,
-                GenerationBucket.ValueObject
-            );
+
+            // 空の子名前空間は {root}.{接尾辞} でプリフィルする（6 バケット分を集約表で回す）
+            foreach (var (_, set, bucket, fromSettings) in ChildNamespaceAccessors)
+            {
+                set(Prefill(fromSettings(settings), bucket));
+            }
+
             GenerateEditModels = settings.GenerateEditModels;
             GenerateMappers = settings.GenerateMappers;
             // DB アクセスは排他選択。両方 true の保存値（手編集等）はQuickER 版 Repository を優先する
@@ -630,40 +653,17 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
 
     /// <summary>現在の設定値からコード生成オプションを組み立てる</summary>
     /// <remarks>
-    /// <see cref="CodeGenerationOptions.RepositoryDialects"/> はチェックされた対象 DB を固定順（sqlserver, sqlite）で
-    /// 設定する（唯一の指定手段）。分割時は planner がバケット別ファイル名を使うため出力ファイル名は inert＝既定名を渡す
+    /// 設定→生成オプションのマッピングは <see cref="CSharpGenerationSettings.ToCodeGenerationOptions"/> に集約し、
+    /// ここでは現在値から <see cref="ToSettings"/> を作り、GUI 固有の出力ファイル名（分割時は inert な既定名、
+    /// 非分割時は出力先パスのファイル名部分）だけを与えて委譲する（設定・生成・CLI 互換の変換を 1 箇所に保つ）。
     /// </remarks>
     public CodeGenerationOptions ToOptions() =>
-        new()
-        {
-            RootNamespace = RootNamespace.Trim(),
-            OutputFileName = SplitFilesByCategory
-                ? CSharpGenerationSettings.DefaultOutputFilePath
-                : Path.GetFileName(OutputPath.Trim()),
-            SplitFilesByCategory = SplitFilesByCategory,
-            RuntimeNamespace = NullIfEmpty(RuntimeNamespace),
-            EntityNamespace = NullIfEmpty(EntityNamespace),
-            EditModelNamespace = NullIfEmpty(EditModelNamespace),
-            MapperNamespace = NullIfEmpty(MapperNamespace),
-            RepositoryNamespace = NullIfEmpty(RepositoryNamespace),
-            ValueObjectNamespace = NullIfEmpty(ValueObjectNamespace),
-            GenerateEditModels = GenerateEditModels,
-            GenerateMappers = GenerateMappers,
-            GenerateRepositories = GenerateRepositories,
-            RepositoryDialects = SelectedRepositoryDialects(),
-            GenerateEfCore = GenerateEfCore,
-            GenerateInMemoryRepositories = GenerateInMemoryRepositories,
-            UseRuntimePackages = UseRuntimePackages,
-            GenerateRemoteContracts = GenerateRemoteContracts,
-            GenerateRemoteServices = GenerateRemoteServices,
-            GenerateApiDocs = GenerateApiDocs,
-            ExcludeUnboundedBinaryColumns = ExcludeUnboundedBinaryColumns,
-            GenerateValueObjects = GenerateValueObjects,
-            UseGuidKeyForStringPrimaryKey = UseGuidKeyForStringPrimaryKey,
-            // UI 非表示の属性系も生成へ反映する（読込値を保持して効かせる）
-            IncludeDataAnnotations = _includeDataAnnotations,
-            IncludeJsonIgnoreOnParentNavigation = _includeJsonIgnoreOnParentNavigation,
-        };
+        ToSettings()
+            .ToCodeGenerationOptions(
+                SplitFilesByCategory
+                    ? CSharpGenerationSettings.DefaultOutputFilePath
+                    : Path.GetFileName(OutputPath.Trim())
+            );
 
     /// <summary>チェックされた対象 DB を固定順（SQL Server → SQLite）で返す</summary>
     private List<string> SelectedRepositoryDialects()
@@ -682,10 +682,6 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
 
         return dialects;
     }
-
-    /// <summary>空白を null へ畳む（オプションのフォールバックを効かせるため）</summary>
-    private static string? NullIfEmpty(string value) =>
-        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     /// <summary>現在の設定で生成されるファイル一覧（「ファイル名 → namespace」）を再計算する</summary>
     private void RefreshPreview()

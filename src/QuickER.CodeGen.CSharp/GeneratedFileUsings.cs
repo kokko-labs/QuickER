@@ -33,11 +33,7 @@ internal static class GeneratedFileUsings
 
         // System を先頭、続いて System.* を序数順、最後に Microsoft.* 等を序数順で安定的に並べる。
         // その後にクロス名前空間 using（プランナが依存グラフから解決済み・昇順）を続ける。
-        var ordered = external
-            .OrderByDescending(ns => ns == "System")
-            .ThenByDescending(ns => ns.StartsWith("System", StringComparison.Ordinal))
-            .ThenBy(ns => ns, StringComparer.Ordinal)
-            .ToList();
+        var ordered = OrderExternalUsings(external);
 
         ordered.AddRange(spec.CrossNamespaceUsings);
 
@@ -57,6 +53,20 @@ internal static class GeneratedFileUsings
 
         return ordered;
     }
+
+    /// <summary>
+    /// 外部（System.* / Microsoft.*）using を安定順（System 最優先 → System.* → 通常）で並べ替える唯一の正。
+    /// </summary>
+    /// <remarks>
+    /// 生成物のバイト一致に直結する並び順規則。単一ファイル解決（<see cref="Resolve"/>）と連結ファイルの
+    /// using マージ（<c>CSharpCodeGenerationService.MergeUsings</c>）で同一規則を共有するため 1 箇所へ集約する。
+    /// </remarks>
+    internal static List<string> OrderExternalUsings(IEnumerable<string> namespaces) =>
+        namespaces
+            .OrderByDescending(ns => ns == "System")
+            .ThenByDescending(ns => ns.StartsWith("System", StringComparison.Ordinal))
+            .ThenBy(ns => ns, StringComparer.Ordinal)
+            .ToList();
 
     /// <summary>
     /// パッケージ参照モードで、指定ファイル（含有バケット・方言・生成対象）が参照すべき固定名前空間

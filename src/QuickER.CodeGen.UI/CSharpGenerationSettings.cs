@@ -1,3 +1,4 @@
+using QuickER.CodeGen.CSharp;
 using QuickER.Settings;
 
 namespace QuickER.CodeGen.UI;
@@ -142,6 +143,51 @@ public class CSharpGenerationSettings
 
     /// <summary>工場出荷既定の設定を生成する（クリア／初回起動で使う）</summary>
     public static CSharpGenerationSettings CreateDefault() => new();
+
+    /// <summary>
+    /// この設定から <see cref="CodeGenerationOptions"/> を組み立てる（設定→生成オプション変換の唯一の正）。
+    /// </summary>
+    /// <param name="outputFileName">
+    /// 出力ファイル名。分割時は planner がバケット別ファイル名を使うため inert（既定名）、非分割時は出力先パスの
+    /// ファイル名部分を渡す（GUI 固有の分割/非分割の出し分けは呼び出し側が行う）。
+    /// </param>
+    /// <remarks>
+    /// 空白の子名前空間は null へ畳み、planner のフォールバック（<c>{root}.{接尾辞}</c>）を効かせる。
+    /// 対象 DB（<see cref="RepositoryDialects"/>）は保存時の固定順（sqlserver, sqlite）をそのまま採る。
+    /// UI 非表示の属性系（<see cref="IncludeDataAnnotations"/> 等）も保持値のまま生成へ反映する。
+    /// </remarks>
+    internal CodeGenerationOptions ToCodeGenerationOptions(string outputFileName) =>
+        new()
+        {
+            RootNamespace = RootNamespace.Trim(),
+            OutputFileName = outputFileName,
+            SplitFilesByCategory = SplitFilesByCategory,
+            RuntimeNamespace = NullIfEmpty(RuntimeNamespace),
+            EntityNamespace = NullIfEmpty(EntityNamespace),
+            EditModelNamespace = NullIfEmpty(EditModelNamespace),
+            MapperNamespace = NullIfEmpty(MapperNamespace),
+            RepositoryNamespace = NullIfEmpty(RepositoryNamespace),
+            ValueObjectNamespace = NullIfEmpty(ValueObjectNamespace),
+            GenerateEditModels = GenerateEditModels,
+            GenerateMappers = GenerateMappers,
+            GenerateRepositories = GenerateRepositories,
+            RepositoryDialects = RepositoryDialects,
+            GenerateEfCore = GenerateEfCore,
+            GenerateInMemoryRepositories = GenerateInMemoryRepositories,
+            UseRuntimePackages = UseRuntimePackages,
+            GenerateRemoteContracts = GenerateRemoteContracts,
+            GenerateRemoteServices = GenerateRemoteServices,
+            GenerateApiDocs = GenerateApiDocs,
+            ExcludeUnboundedBinaryColumns = ExcludeUnboundedBinaryColumns,
+            GenerateValueObjects = GenerateValueObjects,
+            UseGuidKeyForStringPrimaryKey = UseGuidKeyForStringPrimaryKey,
+            IncludeDataAnnotations = IncludeDataAnnotations,
+            IncludeJsonIgnoreOnParentNavigation = IncludeJsonIgnoreOnParentNavigation,
+        };
+
+    /// <summary>空白を null へ畳む（オプションのフォールバックを効かせるため）</summary>
+    private static string? NullIfEmpty(string value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 }
 
 /// <summary>C# コード生成ダイアログ設定を JSON ファイルへ保存・読込するストア</summary>

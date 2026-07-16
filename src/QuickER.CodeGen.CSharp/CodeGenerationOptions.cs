@@ -172,6 +172,10 @@ public sealed class CodeGenerationOptions
     /// </remarks>
     public bool GenerateInMemoryRepositories { get; init; }
 
+    /// <summary>Repository 契約（共通契約バケット）の生成が必要か（QuickER 版 / EF Core / インメモリのいずれかが有効）</summary>
+    public bool GeneratesRepositoryContract =>
+        GenerateRepositories || GenerateEfCore || GenerateInMemoryRepositories;
+
     /// <summary>[Table] [Key] [Column] [Required] [MaxLength] などのデータアノテーション属性を付与するかどうか</summary>
     public bool IncludeDataAnnotations { get; init; } = true;
 
