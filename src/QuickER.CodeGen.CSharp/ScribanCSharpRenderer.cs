@@ -51,7 +51,13 @@ internal sealed class RenderScope
     /// <summary>このスコープがレンダリングするQuickER 版 Repository の方言（"sqlserver" / "sqlite"）</summary>
     public required string Dialect { get; init; }
 
-    /// <summary>マルチ方言レイアウト（実効方言 2 つ以上）かどうか。DI 拡張の方言別名＋keyed 版の出し分けに使う</summary>
+    /// <summary>
+    /// 契約と方言別実装を別スペックへ分けるマルチ方言レイアウトかどうか（分割時は単一方言でも true）。
+    /// </summary>
+    /// <remarks>
+    /// 契約を 1 回だけ描画する判定（<c>ContractOnly || !MultiDialect</c>）に使う。DI 拡張名はエンジン別で統一されており、
+    /// このフラグには依存しない。
+    /// </remarks>
     public required bool MultiDialect { get; init; }
 
     /// <summary>名前空間をブロック形式（<c>namespace X { ... }</c>）で出力するか。非分割マルチ方言で同一ファイルへ複数 namespace を連結するときに true</summary>
@@ -257,8 +263,8 @@ internal sealed class ScribanCSharpRenderer
             // 各スペックを block namespace で包む。
             ["render_header"] = scope.RenderHeader,
             ["block_namespace"] = scope.BlockNamespace,
-            // マルチ方言レイアウトかどうかと、DI 拡張の方言別サフィックス（SqlServer / Sqlite）
-            ["multi_dialect"] = scope.MultiDialect,
+            // DI 拡張・方言別 namespace の方言別サフィックス（SqlServer / Sqlite）。DI 拡張名はエンジン別で
+            // 統一されているため、単一方言・マルチ方言とも同じ AddGenerated{ここ}Repositories を出す。
             ["dialect_di_suffix"] = GeneratedFilePlanner.DialectNamespaceSuffix(scope.Dialect),
             ["entity_classes"] = model.EntityClasses,
             ["edit_model_classes"] = model.EditModelClasses,

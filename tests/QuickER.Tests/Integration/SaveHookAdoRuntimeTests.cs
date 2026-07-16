@@ -12,7 +12,7 @@ using Xunit;
 namespace QuickER.Tests.Integration;
 
 /// <summary>
-/// Save フック（<see cref="ISaveHook{TEntity}"/>）を<b>QuickER 版 Repository の SQLite 実装</b>（<c>AddGeneratedRepositories</c>）で
+/// Save フック（<see cref="ISaveHook{TEntity}"/>）を<b>QuickER 版 Repository の SQLite 実装</b>（<c>AddGeneratedSqliteRepositories</c>）で
 /// 実 SQLite（一時ファイル DB・Docker 不要＝CI 常時実行）に流して検証する。
 /// </summary>
 /// <remarks>
@@ -45,7 +45,7 @@ public sealed class SaveHookAdoRuntimeTests : SaveHookRuntimeTestsBase, IDisposa
     /// <summary>指定した Save フック群を登録した DI プロバイダを構築する（テスト終了時にまとめて破棄）</summary>
     private ServiceProvider BuildProvider(params object[] hooks)
     {
-        var services = new ServiceCollection().AddGeneratedRepositories(ConnectionString);
+        var services = new ServiceCollection().AddGeneratedSqliteRepositories(ConnectionString);
         RegisterHooks(services, hooks);
 
         var provider = services.BuildServiceProvider();

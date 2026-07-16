@@ -2674,6 +2674,7 @@ public class CSharpCodeGenerationServiceTests
         );
 
         result.HasErrors.Should().BeFalse();
+        // QuickER 版 Repository は単一方言でも契約（Repositories.g.cs）＋方言別実装（Repositories.SqlServer.g.cs）へ分ける
         result
             .Files.Select(file => file.FileName)
             .Should()
@@ -2684,6 +2685,7 @@ public class CSharpCodeGenerationServiceTests
                 "EditModels.g.cs",
                 "Mappers.g.cs",
                 "Repositories.g.cs",
+                "Repositories.SqlServer.g.cs",
             ]);
 
         Content(result, "Runtime.g.cs").Should().Contain("namespace Sample.Domain.Runtime;");
@@ -3078,7 +3080,9 @@ public class CSharpCodeGenerationServiceTests
         // QuickER の SQL Server 実装は出力されない
         content.Should().NotContain("public sealed partial class SqlExecutor(");
         content.Should().NotContain("public abstract partial class SqlServerRepository<");
-        content.Should().NotContain("public static IServiceCollection AddGeneratedRepositories(");
+        content
+            .Should()
+            .NotContain("public static IServiceCollection AddGeneratedSqlServerRepositories(");
     }
 
     /// <summary>EF Core 単独出力（VO 有無 × 分割有無の 4 通り）の生成物全ファイルに Microsoft.Data.SqlClient 依存が一切現れないことを検証する</summary>
@@ -3463,7 +3467,8 @@ public class CSharpCodeGenerationServiceTests
         content.Should().NotContain("Microsoft.Data.Sqlite");
         content.Should().NotContain("Microsoft.EntityFrameworkCore");
         content.Should().NotContain("class ItemRepository");
-        content.Should().NotContain("AddGeneratedRepositories");
+        content.Should().NotContain("AddGeneratedSqlServerRepositories");
+        content.Should().NotContain("AddGeneratedSqliteRepositories");
     }
 
     /// <summary>インメモリ Repository とランタイムパッケージ参照モードの併用が診断エラーになることを検証する</summary>

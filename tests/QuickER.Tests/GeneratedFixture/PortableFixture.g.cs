@@ -6616,8 +6616,8 @@ public static class GeneratedEfCoreRepositoryServiceCollectionExtensions
 {
     /// <summary>DbContext 構成とともに、生成された EF Core 版の全リポジトリを DI コンテナへ登録する</summary>
     /// <remarks>
-    /// 既存の <c>AddGeneratedRepositories</c> と同じインターフェイスへ EF Core 版実装を登録するため、
-    /// 呼び出しの差し替えだけでQuickER の SQL Server 実装 ⇔ EF Core（方言はアプリ側の構成で選択）を切り替えられる。
+    /// 既存の <c>AddGeneratedSqlServerRepositories</c> / <c>AddGeneratedSqliteRepositories</c> と同じインターフェイスへ
+    /// EF Core 版実装を登録するため、呼び出しの差し替えだけでQuickER 版 Repository ⇔ EF Core（方言はアプリ側の構成で選択）を切り替えられる。
     /// </remarks>
     /// <param name="services">登録先のサービスコレクション</param>
     /// <param name="configureDbContext">方言プロバイダ・接続文字列の構成（例: <c>options => options.UseSqlServer(...)</c>）</param>

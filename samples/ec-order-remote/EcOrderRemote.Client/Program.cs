@@ -21,7 +21,7 @@ catch (IOException)
 var baseUrl = args.FirstOrDefault() ?? "http://127.0.0.1:5210";
 
 // 生成された HTTP クライアント実装を DI へ登録する。baseAddress にはサーバーの prefix（/quicker）まで含める。
-// ここだけを AddGeneratedRepositories（DB 直結）へ差し替えれば、同じ呼び出しコードがローカル実行になる。
+// ここだけを AddGeneratedSqliteRepositories（DB 直結）へ差し替えれば、同じ呼び出しコードがローカル実行になる。
 using var provider = new ServiceCollection()
     .AddGeneratedHttpRemoteRepositories($"{baseUrl}/quicker")
     .BuildServiceProvider();

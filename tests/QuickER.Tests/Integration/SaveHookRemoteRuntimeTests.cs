@@ -18,7 +18,7 @@ namespace QuickER.Tests.Integration;
 /// <summary>
 /// Save フック（<see cref="ISaveHook{TEntity}"/>）が<b>リモート構成のサーバー側</b>で発火することを、実 HTTP
 /// （Kestrel を 127.0.0.1 の空きポートで in-process 起動）＋実 SQLite（一時ファイル DB・Docker 不要＝CI 常時実行）で
-/// end-to-end 検証する。サーバー実体はQuickER の <c>SqliteRepository</c>（<c>AddGeneratedRepositories</c>）で、
+/// end-to-end 検証する。サーバー実体はQuickER の <c>SqliteRepository</c>（<c>AddGeneratedSqliteRepositories</c>）で、
 /// フックは<b>サーバー側の DI</b>に登録する。クライアントは生成された HTTP リモート実装
 /// （<c>AddGeneratedHttpRemoteRepositories</c>）だけを使う＝利用者が組む 3 階層とまったく同じ経路で検証する。
 /// </summary>
@@ -59,7 +59,7 @@ public sealed class SaveHookRemoteRuntimeTests : IAsyncLifetime
         var builder = WebApplication.CreateBuilder();
         builder.Logging.ClearProviders();
         builder.WebHost.UseUrls("http://127.0.0.1:0");
-        builder.Services.AddGeneratedRepositories(_db.ReadWriteCreateConnectionString);
+        builder.Services.AddGeneratedSqliteRepositories(_db.ReadWriteCreateConnectionString);
 
         // フックはサーバー側の DI に登録する（in-process のため単一インスタンスの共有ログをテストから観測できる）
         foreach (var hook in hooks)

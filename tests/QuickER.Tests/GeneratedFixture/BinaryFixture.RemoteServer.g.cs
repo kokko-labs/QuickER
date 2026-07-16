@@ -22,7 +22,7 @@ namespace QuickER.Tests.GeneratedBinaryFixture;
 /// <para>
 /// このファイルは ASP.NET Core の FrameworkReference（<c>Microsoft.AspNetCore.App</c>）を持つプロジェクトに配置すること
 /// （SDK が <c>Microsoft.NET.Sdk.Web</c> なら追加設定は不要）。サーバー側 DI には実体のリポジトリ
-/// （<c>AddGeneratedRepositories</c> / <c>AddGeneratedEfCoreRepositories</c> 等）を登録しておく。
+/// （<c>AddGeneratedSqlServerRepositories</c> / <c>AddGeneratedEfCoreRepositories</c> 等）を登録しておく。
 /// </para>
 /// <para>
 /// 各操作は <c>POST {prefix}/{エンティティ}/{操作名}</c>（JSON 本文）で公開される。認可などの横断的関心事は

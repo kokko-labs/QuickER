@@ -135,8 +135,8 @@ The generation dialog (GUI) offers three data-access choices:
 Because Repository (QuickER) and EF Core implement **the same interfaces**, you can swap them by changing a single line of DI registration:
 
 ```csharp
-// Repository (QuickER — the SQLite implementation)
-services.AddGeneratedRepositories(connectionString);
+// Repository (QuickER — the SQLite implementation; the DI method name is engine-specific)
+services.AddGeneratedSqliteRepositories(connectionString);
 
 // EF Core implementation (resolves the same ICustomerRepository, etc.)
 services.AddGeneratedEfCoreRepositories(options => options.UseSqlite(connectionString));

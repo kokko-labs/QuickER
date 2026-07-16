@@ -4,7 +4,7 @@ using Microsoft.Data.Sqlite;
 
 // QuickER の「リモートサービス生成（GenerateRemoteServices）」で図から生成したサーバー実装を、
 // 実際の SQLite ファイル DB に対して HTTP + JSON で公開するサンプルサーバー。
-// リモート面（I{Entity}RemoteRepository）の実体は SQLite 方言の QuickER 版 Repository（AddGeneratedRepositories）で、
+// リモート面（I{Entity}RemoteRepository）の実体は SQLite 方言の QuickER 版 Repository（AddGeneratedSqliteRepositories）で、
 // 生成された MapGeneratedRemoteEndpoints が各操作を POST /quicker/{エンティティ}/{操作} として公開する。
 // クライアント（EcOrderRemote.Client）は HTTP 越しにこのサーバーを呼び出す。
 
@@ -46,7 +46,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.WebHost.UseUrls(url);
 
 // リモート面の実体として SQLite 方言の QuickER 版 Repository 群を登録する（エンドポイントがリモート面を解決して委譲する）
-builder.Services.AddGeneratedRepositories(connectionString);
+builder.Services.AddGeneratedSqliteRepositories(connectionString);
 
 var app = builder.Build();
 

@@ -7307,11 +7307,16 @@ internal static class EntityGraphSaver
     }
 }
 
-/// <summary>生成されたリポジトリ群を DI コンテナへ登録する拡張</summary>
-public static class GeneratedRepositoryServiceCollectionExtensions
+/// <summary>生成されたリポジトリ群（SQLite 実装）を DI コンテナへ登録する拡張</summary>
+/// <remarks>
+/// DI 登録はエンジン別に <c>AddGeneratedSqliteRepositories</c> という名前で提供し、同一契約
+/// （I{Entity}Repository / ISqlExecutor）を方言別実装で登録する。複数方言（マルチターゲット）を同一プロセスで併用する場合は
+/// <c>object? serviceKey</c> 付きオーバーロード（keyed DI）を使い、<c>[FromKeyedServices("...")]</c> で方言別の接続を解決する。
+/// </remarks>
+public static class GeneratedSqliteRepositoryServiceCollectionExtensions
 {
-    /// <summary>接続文字列とともに生成された全リポジトリを DI コンテナへ登録する</summary>
-    public static IServiceCollection AddGeneratedRepositories(
+    /// <summary>接続文字列とともに SQLite 版リポジトリ群を DI コンテナへ登録する（非 keyed・単独利用向け）</summary>
+    public static IServiceCollection AddGeneratedSqliteRepositories(
         this IServiceCollection services,
         string connectionString
     )
@@ -7335,6 +7340,58 @@ public static class GeneratedRepositoryServiceCollectionExtensions
         services.AddScoped<IDocumentNoteRepository, DocumentNoteRepository>();
         services.AddScoped<IDocumentNoteRemoteRepository>(provider =>
             provider.GetRequiredService<IDocumentNoteRepository>()
+        );
+
+        return services;
+    }
+
+    /// <summary>サービスキー付きで SQLite 版リポジトリ群を登録する（keyed DI・複数方言の同時利用向け）</summary>
+    /// <remarks>
+    /// I{Entity}Repository / ISqlExecutor を <paramref name="serviceKey"/> 付きで登録する。利用側は
+    /// <c>[FromKeyedServices(serviceKey)] ICustomerRepository</c> のように方言別の実装を解決する。
+    /// 接続ファクトリはキーごとにクロージャで閉じ込めるため非 keyed で登録衝突しない。
+    /// </remarks>
+    public static IServiceCollection AddGeneratedSqliteRepositories(
+        this IServiceCollection services,
+        object? serviceKey,
+        string connectionString
+    )
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
+
+        var connectionFactory = new SqlConnectionFactory(connectionString);
+        services.AddKeyedSingleton<ISqlConnectionFactory>(serviceKey, (_, _) => connectionFactory);
+        services.AddKeyedSingleton<ISqlExecutor>(
+            serviceKey,
+            (_, _) => new SqlExecutor(connectionFactory)
+        );
+
+        // Save フックのレジストリを既定登録する（非 keyed・ISaveHook<T> の登録が無ければ完全 no-op）
+        services.TryAddScoped<ISaveHookRegistry>(provider => new ServiceProviderSaveHookRegistry(
+            provider
+        ));
+        services.AddKeyedScoped<IDocumentRepository>(
+            serviceKey,
+            (provider, _) => new DocumentRepository(
+                connectionFactory,
+                provider.GetService<ISaveHookRegistry>()
+            )
+        );
+        services.AddKeyedScoped<IDocumentRemoteRepository>(
+            serviceKey,
+            (provider, key) => provider.GetRequiredKeyedService<IDocumentRepository>(key)
+        );
+        services.AddKeyedScoped<IDocumentNoteRepository>(
+            serviceKey,
+            (provider, _) => new DocumentNoteRepository(
+                connectionFactory,
+                provider.GetService<ISaveHookRegistry>()
+            )
+        );
+        services.AddKeyedScoped<IDocumentNoteRemoteRepository>(
+            serviceKey,
+            (provider, key) => provider.GetRequiredKeyedService<IDocumentNoteRepository>(key)
         );
 
         return services;
@@ -10218,8 +10275,8 @@ public static class GeneratedEfCoreRepositoryServiceCollectionExtensions
 {
     /// <summary>DbContext 構成とともに、生成された EF Core 版の全リポジトリを DI コンテナへ登録する</summary>
     /// <remarks>
-    /// 既存の <c>AddGeneratedRepositories</c> と同じインターフェイスへ EF Core 版実装を登録するため、
-    /// 呼び出しの差し替えだけでQuickER の SQL Server 実装 ⇔ EF Core（方言はアプリ側の構成で選択）を切り替えられる。
+    /// 既存の <c>AddGeneratedSqlServerRepositories</c> / <c>AddGeneratedSqliteRepositories</c> と同じインターフェイスへ
+    /// EF Core 版実装を登録するため、呼び出しの差し替えだけでQuickER 版 Repository ⇔ EF Core（方言はアプリ側の構成で選択）を切り替えられる。
     /// </remarks>
     /// <param name="services">登録先のサービスコレクション</param>
     /// <param name="configureDbContext">方言プロバイダ・接続文字列の構成（例: <c>options => options.UseSqlServer(...)</c>）</param>

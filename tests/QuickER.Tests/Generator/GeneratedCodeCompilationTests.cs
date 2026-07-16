@@ -211,6 +211,23 @@ public class GeneratedCodeCompilationTests
             }
         );
 
+        // インメモリ＋QuickER 単一方言 Repository を分割生成（契約 Repositories.g.cs・方言別実装 Repositories.{方言}.g.cs・
+        // インメモリ実装 Repositories.InMemory.g.cs が別ファイルへ分かれても契約が二重定義にならず、相互 using で解決すること）
+        foreach (var dialect in new[] { "sqlserver", "sqlite" })
+        {
+            data.Add(
+                $"InMemory + QuickER {dialect} Repository Split",
+                new CodeGenerationOptions
+                {
+                    RootNamespace = "Sample.Domain",
+                    SplitFilesByCategory = true,
+                    GenerateRepositories = true,
+                    RepositoryDialects = [dialect],
+                    GenerateInMemoryRepositories = true,
+                }
+            );
+        }
+
         // インメモリ＋QuickER マルチターゲット（sqlserver/sqlite）併存（方言非依存のインメモリはマルチと共存可）
         data.Add(
             "InMemory + QuickER マルチターゲット(sqlserver/sqlite)",

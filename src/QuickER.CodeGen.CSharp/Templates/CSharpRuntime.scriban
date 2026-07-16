@@ -2335,7 +2335,7 @@ public sealed partial class {{ mapper.class_name }}
 {{~ end ~}}
 {{~ end ~}}
 
-{{~ if (repository_classes.size > 0 || runtime_package_export) && (render_contract || repositories || (ef_core && render_ef_core && runtime_package_export)) ~}}
+{{~ if (repository_classes.size > 0 || runtime_package_export) && (render_contract || repositories || in_memory || (ef_core && render_ef_core && runtime_package_export)) ~}}
 {{~ if render_contract && emit_shared_infra ~}}
 /// <summary>ネットワーク境界を越えて提供できる操作に絞ったリポジトリ共通インターフェース（リモート面）</summary>
 /// <remarks>
@@ -7557,12 +7557,11 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
 {{~ end ~}}
 
 {{~ if repositories && !runtime_package_export ~}}
-{{~ if multi_dialect ~}}
 /// <summary>生成されたリポジトリ群（{{ if repository_dialect == "sqlserver" }}SQL Server{{ else }}SQLite{{ end }} 実装）を DI コンテナへ登録する拡張</summary>
 /// <remarks>
-/// マルチターゲット構成では方言ごとに拡張を分け、同一契約（I{Entity}Repository / ISqlExecutor）を方言別実装で登録する。
-/// 複数方言を同時利用する場合は <c>object? serviceKey</c> 付きオーバーロード（keyed DI）を使い、
-/// <c>[FromKeyedServices("...")]</c> で方言別の接続を解決する。
+/// DI 登録はエンジン別に <c>AddGenerated{{ dialect_di_suffix }}Repositories</c> という名前で提供し、同一契約
+/// （I{Entity}Repository / ISqlExecutor）を方言別実装で登録する。複数方言（マルチターゲット）を同一プロセスで併用する場合は
+/// <c>object? serviceKey</c> 付きオーバーロード（keyed DI）を使い、<c>[FromKeyedServices("...")]</c> で方言別の接続を解決する。
 /// </remarks>
 public static class Generated{{ dialect_di_suffix }}RepositoryServiceCollectionExtensions
 {
@@ -7633,37 +7632,6 @@ public static class Generated{{ dialect_di_suffix }}RepositoryServiceCollectionE
         return services;
     }
 }
-{{~ else ~}}
-/// <summary>生成されたリポジトリ群を DI コンテナへ登録する拡張</summary>
-public static class GeneratedRepositoryServiceCollectionExtensions
-{
-    /// <summary>接続文字列とともに生成された全リポジトリを DI コンテナへ登録する</summary>
-    public static IServiceCollection AddGeneratedRepositories(
-        this IServiceCollection services,
-        string connectionString
-    )
-    {
-        ArgumentNullException.ThrowIfNull(services);
-        ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
-
-        services.AddSingleton<ISqlConnectionFactory>(_ => new SqlConnectionFactory(
-            connectionString
-        ));
-        services.AddSingleton<ISqlExecutor, SqlExecutor>();
-
-        // Save フックのレジストリを既定登録する（ISaveHook<T> の登録が無ければ完全 no-op）
-        services.TryAddScoped<ISaveHookRegistry>(provider => new ServiceProviderSaveHookRegistry(
-            provider
-        ));
-{{ for repository in repository_classes }}        services.AddScoped<{{ repository.interface_name }}, {{ repository.class_name }}>();
-{{ if remote_contracts }}        services.AddScoped<{{ repository.remote_interface_name }}>(provider =>
-            provider.GetRequiredService<{{ repository.interface_name }}>()
-        );
-{{ end }}{{ end }}
-        return services;
-    }
-}
-{{~ end ~}}
 {{~ end ~}}
 
 {{~ for repository in repository_classes ~}}
@@ -10788,8 +10756,8 @@ public static class GeneratedEfCoreRepositoryServiceCollectionExtensions
 {
     /// <summary>DbContext 構成とともに、生成された EF Core 版の全リポジトリを DI コンテナへ登録する</summary>
     /// <remarks>
-    /// 既存の <c>AddGeneratedRepositories</c> と同じインターフェイスへ EF Core 版実装を登録するため、
-    /// 呼び出しの差し替えだけでQuickER の SQL Server 実装 ⇔ EF Core（方言はアプリ側の構成で選択）を切り替えられる。
+    /// 既存の <c>AddGeneratedSqlServerRepositories</c> / <c>AddGeneratedSqliteRepositories</c> と同じインターフェイスへ
+    /// EF Core 版実装を登録するため、呼び出しの差し替えだけでQuickER 版 Repository ⇔ EF Core（方言はアプリ側の構成で選択）を切り替えられる。
     /// </remarks>
     /// <param name="services">登録先のサービスコレクション</param>
     /// <param name="configureDbContext">方言プロバイダ・接続文字列の構成（例: <c>options => options.UseSqlServer(...)</c>）</param>
@@ -10841,7 +10809,7 @@ public sealed partial class EfCore{{ repository.class_name }}(
 /// <para>
 /// このファイルは ASP.NET Core の FrameworkReference（<c>Microsoft.AspNetCore.App</c>）を持つプロジェクトに配置すること
 /// （SDK が <c>Microsoft.NET.Sdk.Web</c> なら追加設定は不要）。サーバー側 DI には実体のリポジトリ
-/// （<c>AddGeneratedRepositories</c> / <c>AddGeneratedEfCoreRepositories</c> 等）を登録しておく。
+/// （<c>AddGeneratedSqlServerRepositories</c> / <c>AddGeneratedEfCoreRepositories</c> 等）を登録しておく。
 /// </para>
 /// <para>
 /// 各操作は <c>POST {prefix}/{エンティティ}/{操作名}</c>（JSON 本文）で公開される。認可などの横断的関心事は

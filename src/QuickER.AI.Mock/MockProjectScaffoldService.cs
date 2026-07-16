@@ -337,15 +337,15 @@ public sealed class MockProjectScaffoldService
         string? repositoryDialect
     )
     {
-        // 単一方言生成では方言接尾辞なしの AddGeneratedRepositories(接続文字列) を出す（マルチターゲット時のみ方言別）
+        // DI 登録はエンジン別（AddGenerated{方言}Repositories）で統一されているため、方言別名で案内する
         var dialectSwitchGuide = repositoryDialect switch
         {
             "sqlserver" =>
                 "3. 実 DB（SQL Server）へ切り替えるには、`AddGeneratedInMemoryRepositories()` を "
-                    + "`AddGeneratedRepositories(接続文字列)` に差し替えます。",
+                    + "`AddGeneratedSqlServerRepositories(接続文字列)` に差し替えます。",
             "sqlite" =>
                 "3. 実 DB（SQLite）へ切り替えるには、`AddGeneratedInMemoryRepositories()` を "
-                    + "`AddGeneratedRepositories(接続文字列)` に差し替えます。",
+                    + "`AddGeneratedSqliteRepositories(接続文字列)` に差し替えます。",
             _ =>
                 "3. 実 DB へ切り替える場合は、QuickER で対応方言（SQL Server / SQLite）のQuickER 版 Repository を"
                     + "生成し直し、`AddGeneratedInMemoryRepositories()` を対応する DI 登録へ差し替えます。",

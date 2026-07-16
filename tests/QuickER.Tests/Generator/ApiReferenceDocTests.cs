@@ -180,7 +180,7 @@ public sealed class ApiReferenceDocTests
     }
 
     [Fact(
-        DisplayName = "単一方言既定構成の内容: エンティティ名・プロパティ名・型トークン・AddGeneratedRepositories を含む"
+        DisplayName = "単一方言既定構成の内容: エンティティ名・プロパティ名・型トークン・AddGeneratedSqlServerRepositories を含む"
     )]
     public void SingleDialect_Content_ContainsSchemaAndDefaultDi()
     {
@@ -210,8 +210,8 @@ public sealed class ApiReferenceDocTests
         // CanonicalTypeToken（方言中立の型トークン）。int / decimal は方言に依らず同一トークン
         markdown.Should().Contain("int32");
         markdown.Should().Contain("decimal(10,2)");
-        // 単一方言既定は AddGeneratedRepositories
-        markdown.Should().Contain("AddGeneratedRepositories");
+        // 単一方言（sqlserver）既定はエンジン別名 AddGeneratedSqlServerRepositories
+        markdown.Should().Contain("AddGeneratedSqlServerRepositories");
         // docs/code-generation.md へのリンク
         markdown
             .Should()
@@ -231,7 +231,7 @@ public sealed class ApiReferenceDocTests
         var markdown = MarkdownFile(Generate(BuildDiagram(), options))!.Content;
 
         markdown.Should().Contain("AddGeneratedEfCoreRepositories");
-        markdown.Should().NotContain("AddGeneratedRepositories(");
+        markdown.Should().NotContain("AddGeneratedSqlServerRepositories(");
     }
 
     [Fact(DisplayName = "マルチ方言構成では方言別拡張名（SqlServer / Sqlite）を含む")]

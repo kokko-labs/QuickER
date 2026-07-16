@@ -26,7 +26,7 @@ public sealed class CodeGenerationOptions
     /// <summary>QuickER の SQL Server 実装（<c>Microsoft.Data.SqlClient</c> 依存）の Repository クラス群を生成するかどうか（既定 false）</summary>
     /// <remarks>
     /// SqlServerRepository 基底・各エンティティ実装・接続ファクトリ・SqlExecutor・SqlExpressionTranslator・
-    /// <c>AddGeneratedRepositories</c> を生成する。共通契約（インターフェイス・SqlQuery・メタデータ等）は
+    /// エンジン別 DI 拡張 <c>AddGenerated{方言}Repositories</c> を生成する。共通契約（インターフェイス・SqlQuery・メタデータ等）は
     /// <see cref="GenerateEfCore"/> と共有し、どちらか一方が ON なら生成される。
     /// 既定では DB アクセスコードを生成しない（GUI の DB アクセス「なし」と同じ既定）
     /// </remarks>

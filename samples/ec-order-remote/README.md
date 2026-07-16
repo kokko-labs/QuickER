@@ -65,7 +65,7 @@ dotnet run --project samples/ec-order-remote/EcOrderRemote.Client -- http://127.
 ## Highlights
 
 - **The calling code is identical to the DB-direct case**: the client just calls CRUD, save, and queries on
-  interfaces like `ICustomerRemoteRepository`. Swap the DI registration for `AddGeneratedRepositories` (DB-direct)
+  interfaces like `ICustomerRemoteRepository`. Swap the DI registration for `AddGeneratedSqliteRepositories` (DB-direct)
   and the same code runs locally instead.
 - **Remote transfer of named queries**: `GetByCustomerAsync` (a DSL condition plus paging) and `GetSummariesAsync`
   (returning a projection DTO) return the same results over HTTP (the projection `OrderSummaryRow` round-trips as

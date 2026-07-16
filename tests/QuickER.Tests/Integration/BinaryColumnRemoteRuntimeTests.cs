@@ -44,7 +44,7 @@ public sealed class BinaryColumnRemoteRuntimeTests : IAsyncLifetime
         var builder = WebApplication.CreateBuilder();
         builder.Logging.ClearProviders();
         builder.WebHost.UseUrls("http://127.0.0.1:0");
-        builder.Services.AddGeneratedRepositories(_db.ReadWriteCreateConnectionString);
+        builder.Services.AddGeneratedSqliteRepositories(_db.ReadWriteCreateConnectionString);
 
         _app = builder.Build();
         _app.MapGeneratedRemoteEndpoints();

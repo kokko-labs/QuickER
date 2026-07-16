@@ -43,7 +43,7 @@ public abstract class RemoteServiceRuntimeTestsBase : IAsyncLifetime
     /// <summary>HTTP クライアント実装を登録した DI コンテナ</summary>
     private ServiceProvider? _clientProvider;
 
-    /// <summary>サーバー側 DI へ実体リポジトリ群を登録する（QuickER = AddGeneratedRepositories / EF Core = AddGeneratedEfCoreRepositories）</summary>
+    /// <summary>サーバー側 DI へ実体リポジトリ群を登録する（QuickER = AddGeneratedSqliteRepositories / EF Core = AddGeneratedEfCoreRepositories）</summary>
     protected abstract void ConfigureServerRepositories(
         IServiceCollection services,
         string connectionString
@@ -258,7 +258,7 @@ public sealed class RemoteServiceAdoRuntimeTests : RemoteServiceRuntimeTestsBase
     protected override void ConfigureServerRepositories(
         IServiceCollection services,
         string connectionString
-    ) => services.AddGeneratedRepositories(connectionString);
+    ) => services.AddGeneratedSqliteRepositories(connectionString);
 }
 
 /// <summary>リモートサービスの e2e スイートを、サーバー実体＝EF Core Sqlite で実行する派生</summary>

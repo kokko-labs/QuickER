@@ -8,7 +8,7 @@ namespace QuickER.Tests.Integration;
 
 /// <summary>
 /// SQLite 方言ランタイムスイートを<b>QuickER の <c>SqliteRepository</c> 版</b>で実行する派生。
-/// リポジトリ・エグゼキュータは実運用と同じ DI 経路（<c>AddGeneratedRepositories(connectionString)</c> →
+/// リポジトリ・エグゼキュータは実運用と同じ DI 経路（<c>AddGeneratedSqliteRepositories(connectionString)</c> →
 /// <see cref="ServiceProvider"/> から解決）で取得する。接続は一時ファイル DB の書き込み可能接続文字列。
 /// </summary>
 /// <remarks>
@@ -22,10 +22,10 @@ public sealed class GeneratedSqliteAdoRuntimeTests : GeneratedSqliteRuntimeTests
     /// <summary>QuickER の SQLite リポジトリ群を登録した DI コンテナ（接続文字列は基底の一時 DB）</summary>
     private ServiceProvider? _provider;
 
-    /// <summary>AddGeneratedRepositories → QuickER の SqliteRepository の DI 経路でリポジトリ群を解決する</summary>
+    /// <summary>AddGeneratedSqliteRepositories → QuickER の SqliteRepository の DI 経路でリポジトリ群を解決する</summary>
     private ServiceProvider Provider() =>
         _provider ??= new ServiceCollection()
-            .AddGeneratedRepositories(ConnectionString)
+            .AddGeneratedSqliteRepositories(ConnectionString)
             .BuildServiceProvider();
 
     protected override ICustomerRepository CreateCustomerRepository() =>

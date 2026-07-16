@@ -22,7 +22,7 @@ namespace QuickER.Tests.Integration;
 /// 経由で記述し、リポジトリ・エグゼキュータの生成方法だけを派生クラスが与える。
 /// </para>
 /// <para>
-/// これにより「AddGeneratedRepositories（QuickER の SQLite）と AddGeneratedEfCoreRepositories＋UseSqlite（EF Core）を
+/// これにより「AddGeneratedSqliteRepositories（QuickER の SQLite）と AddGeneratedEfCoreRepositories＋UseSqlite（EF Core）を
 /// 差し替えるだけで交換可能」という契約を、両バックエンドで同一アサーションにより証明する。Docker 不要のため
 /// CI でも常時実行される。スキーマは <see cref="SqliteDdlGenerator"/> が生成する DDL で用意する。
 /// </para>

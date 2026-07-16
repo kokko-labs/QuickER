@@ -24,6 +24,9 @@ public enum GenerationBucket
     /// <summary>EF Core 用コード（DbContext と Fluent API 構成）</summary>
     EfCore,
 
+    /// <summary>DB 非依存のインメモリ Repository 群（InMemoryDataStore・InMemory{Entity}Repository・シーダー・DI）</summary>
+    InMemory,
+
     /// <summary>リモート面の ASP.NET Core サーバー実装（エンドポイントマッピング。常に別ファイル）</summary>
     RemoteServer,
 }
@@ -65,19 +68,11 @@ public sealed class GeneratedFileSpec
     /// <summary>
     /// マルチ方言レイアウト（実効方言 2 つ以上）かどうか。DI 拡張の方言別名＋keyed 版の出し分けに使う。
     /// </summary>
-    /// <remarks>false（単一方言）のとき DI は従来の <c>AddGeneratedRepositories</c>（バイト不変）。</remarks>
-    public required bool MultiDialect { get; init; }
-
-    /// <summary>
-    /// このスペックが DB 非依存のインメモリ Repository 群（<c>InMemory{Entity}Repository</c>・<c>InMemoryDataStore</c>・
-    /// <c>InMemorySampleData</c>・<c>AddGeneratedInMemoryRepositories</c>）を出力するか。
-    /// </summary>
     /// <remarks>
-    /// インメモリ実装は方言非依存のため、Repository バケットを含み契約を出すスペック（単一方言＝契約＋実装スペック、
-    /// マルチ方言＝契約スペック）で 1 度だけ出力する。方言実装スペック（ContractOnly=false かつ MultiDialect）では出さない。
-    /// 既定 false（未指定のスペックは常に false でバイト不変）。
+    /// false（単一方言）でも、分割時は方言別実装レイアウト（契約 1 回＋方言別実装ファイル）を使うため true になる。
+    /// DI 拡張の方言別名（<c>AddGenerated{方言}Repositories</c>）は本フラグに依らずエンジン別で統一される。
     /// </remarks>
-    public bool InMemory { get; init; }
+    public required bool MultiDialect { get; init; }
 }
 
 /// <summary>
@@ -138,6 +133,7 @@ public static class GeneratedFilePlanner
             GenerationBucket.Mapper => "Mappers",
             GenerationBucket.Repository => "Repositories",
             GenerationBucket.EfCore => "EfCore",
+            GenerationBucket.InMemory => "InMemory",
             GenerationBucket.RemoteServer => "RemoteServer",
             _ => "Generated",
         };
@@ -180,6 +176,15 @@ public static class GeneratedFilePlanner
                 GenerationBucket.ValueObject,
             ],
             GenerationBucket.EfCore =>
+            [
+                GenerationBucket.Entity,
+                GenerationBucket.Repository,
+                GenerationBucket.Runtime,
+                GenerationBucket.ValueObject,
+            ],
+            // インメモリ実装はエンティティ・中立契約（Repository バケット＝I{Entity}Repository / SqlQuery / EntityGraphSaver 等）・
+            // 共有基盤（EntityBase / RowState）・VO（主キー unwrap）を参照する
+            GenerationBucket.InMemory =>
             [
                 GenerationBucket.Entity,
                 GenerationBucket.Repository,
@@ -237,6 +242,13 @@ public static class GeneratedFilePlanner
         )
         {
             active.Add(GenerationBucket.Repository);
+        }
+
+        // インメモリ実装は方言非依存の独立バケット。分割時は Repositories.InMemory.g.cs へ単独出力し、
+        // 非分割時は他バケットと同一ファイルへ連結する（EfCore バケットと同じ流儀）。
+        if (options.GenerateInMemoryRepositories)
+        {
+            active.Add(GenerationBucket.InMemory);
         }
 
         if (options.GenerateEfCore)
@@ -310,18 +322,22 @@ public static class GeneratedFilePlanner
         var dialects = ResolvePlanningDialects(options);
         var primaryDialect = dialects[0];
 
-        // マルチ方言（実効方言 2 つ以上）で Repository を生成するときのみ、契約 1 回＋方言別 namespace 実装の
-        // 新レイアウトを使う。単一方言・Repository 非生成時は従来レイアウトを完全維持する（バイト不変）。
-        var multiDialect =
-            options.GenerateRepositories
-            && dialects.Count >= 2
-            && active.Contains(GenerationBucket.Repository);
+        var repositoryActive = active.Contains(GenerationBucket.Repository);
+
+        // 非分割: マルチ方言（実効方言 2 つ以上）で Repository を生成するときだけ、契約 1 回＋方言別 namespace 実装へ
+        // 展開する。単一方言・Repository 非生成時は従来どおり全バケットを 1 ファイル・1 namespace へまとめる（バイト不変）。
+        var multiDialectNonSplit =
+            options.GenerateRepositories && dialects.Count >= 2 && repositoryActive;
+
+        // 分割: 単一方言でも「契約 1 回＋方言別実装ファイル」レイアウトへ統一する（実効方言が 1 つでも
+        // マルチターゲットと同じ形＝Repositories.g.cs＋Repositories.{方言}.g.cs）。Repository を生成するときのみ。
+        var multiDialectSplit = options.GenerateRepositories && repositoryActive;
 
         if (!options.SplitFilesByCategory)
         {
             // 非分割: 全バケットを 1 ファイルへ。マルチ方言時は Repository を「契約スペック＋方言別実装スペック」へ
             // 展開し、同一ファイル名で連結する（RenderFiles が block namespace で連結・using を先頭へ集約）。
-            if (!multiDialect)
+            if (!multiDialectNonSplit)
             {
                 var singleSpecs = new List<GeneratedFileSpec>
                 {
@@ -334,9 +350,6 @@ public static class GeneratedFilePlanner
                         Dialect = primaryDialect,
                         ContractOnly = false,
                         MultiDialect = false,
-                        InMemory =
-                            options.GenerateInMemoryRepositories
-                            && active.Contains(GenerationBucket.Repository),
                     },
                 };
                 AddRemoteServerSpec(singleSpecs, options, active, primaryDialect);
@@ -360,8 +373,6 @@ public static class GeneratedFilePlanner
                     Dialect = primaryDialect,
                     ContractOnly = true,
                     MultiDialect = true,
-                    // インメモリ実装は方言非依存のため契約スペックへ 1 度だけ載せる（方言実装スペックには載せない）
-                    InMemory = options.GenerateInMemoryRepositories,
                 }
             );
 
@@ -406,6 +417,15 @@ public static class GeneratedFilePlanner
                 $"{namespaceByBucket[GenerationBucket.Repository]}.{DefaultSuffix(GenerationBucket.EfCore)}";
         }
 
+        // インメモリ実装も EF Core 実装と同じ扱いで、契約（Repository）namespace のサブ名前空間
+        // {RepositoryNamespace}.InMemory へ導出する（専用の名前空間オプションは持たない）。
+        // InMemory バケットが有効なら Repository バケットも必ず有効（ActiveBuckets が保証）。
+        if (namespaceByBucket.ContainsKey(GenerationBucket.InMemory))
+        {
+            namespaceByBucket[GenerationBucket.InMemory] =
+                $"{namespaceByBucket[GenerationBucket.Repository]}.{DefaultSuffix(GenerationBucket.InMemory)}";
+        }
+
         var activeSet = emittedBuckets.ToHashSet();
 
         var splitSpecs = new List<GeneratedFileSpec>();
@@ -425,8 +445,9 @@ public static class GeneratedFilePlanner
                 .OrderBy(ns => ns, StringComparer.Ordinal)
                 .ToList();
 
-            // マルチ方言時の Repository バケットは契約のみを自 namespace へ出し、方言別実装は別ファイルへ分ける。
-            if (multiDialect && bucket == GenerationBucket.Repository)
+            // 分割時の Repository バケットは契約のみを自 namespace へ出し、方言別実装は別ファイルへ分ける
+            // （単一方言でも同レイアウト）。インメモリ実装は独立バケットとして別ファイルへ分かれる。
+            if (multiDialectSplit && bucket == GenerationBucket.Repository)
             {
                 splitSpecs.Add(
                     new GeneratedFileSpec
@@ -438,8 +459,6 @@ public static class GeneratedFilePlanner
                         Dialect = primaryDialect,
                         ContractOnly = true,
                         MultiDialect = true,
-                        // インメモリ実装は方言非依存のため契約（Repository バケット）スペックへ 1 度だけ載せる
-                        InMemory = options.GenerateInMemoryRepositories,
                     }
                 );
 
@@ -465,21 +484,20 @@ public static class GeneratedFilePlanner
             splitSpecs.Add(
                 new GeneratedFileSpec
                 {
-                    // EF Core 実装は方言別実装（Repositories.SqlServer.g.cs 等）と同じ流儀で Repositories.EfCore.g.cs へ出す
-                    FileName =
-                        bucket == GenerationBucket.EfCore
-                            ? EfCoreRepositoryFileName()
-                            : DefaultFileName(bucket),
+                    // EF Core 実装は Repositories.EfCore.g.cs、インメモリ実装は Repositories.InMemory.g.cs へ出す
+                    // （いずれも方言別実装 Repositories.SqlServer.g.cs 等と同じ流儀）
+                    FileName = bucket switch
+                    {
+                        GenerationBucket.EfCore => EfCoreRepositoryFileName(),
+                        GenerationBucket.InMemory => InMemoryRepositoryFileName(),
+                        _ => DefaultFileName(bucket),
+                    },
                     NamespaceName = ownNamespace,
                     Buckets = [bucket],
                     CrossNamespaceUsings = crossUsings,
                     Dialect = primaryDialect,
                     ContractOnly = false,
                     MultiDialect = false,
-                    // 分割・単一方言時は Repository バケットのファイルへインメモリ実装を載せる
-                    InMemory =
-                        options.GenerateInMemoryRepositories
-                        && bucket == GenerationBucket.Repository,
                 }
             );
         }
@@ -638,4 +656,8 @@ public static class GeneratedFilePlanner
     /// <summary>EF Core 実装の分割ファイル名（<c>Repositories.EfCore.g.cs</c>）＝方言別実装と同じ流儀</summary>
     private static string EfCoreRepositoryFileName() =>
         $"{DefaultSuffix(GenerationBucket.Repository)}.{DefaultSuffix(GenerationBucket.EfCore)}.g.cs";
+
+    /// <summary>インメモリ実装の分割ファイル名（<c>Repositories.InMemory.g.cs</c>）＝方言別実装・EF Core 実装と同じ流儀</summary>
+    private static string InMemoryRepositoryFileName() =>
+        $"{DefaultSuffix(GenerationBucket.Repository)}.{DefaultSuffix(GenerationBucket.InMemory)}.g.cs";
 }

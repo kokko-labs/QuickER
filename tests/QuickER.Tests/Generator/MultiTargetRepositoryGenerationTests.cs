@@ -440,13 +440,13 @@ public sealed class MultiTargetRepositoryGenerationTests
     {
         var code = GenerateMultiTarget().Files.Single().Content;
 
-        // 方言別名の DI 拡張クラス・メソッド（従来の AddGeneratedRepositories は出さない）
+        // 方言別名の DI 拡張クラス・メソッド（廃止した単一方言用 DI クラスは出さない）
         code.Should().Contain("AddGeneratedSqlServerRepositories");
         code.Should().Contain("AddGeneratedSqliteRepositories");
         code.Should()
             .NotContain(
-                "AddGeneratedRepositories(",
-                "マルチ方言では方言別名の DI 拡張のみを出す（従来名は出さない）"
+                "class GeneratedRepositoryServiceCollectionExtensions",
+                "DI 登録はエンジン別名で統一され、廃止した単一方言用 DI クラスは出さない"
             );
 
         // keyed 版（object? serviceKey 付き）と AddKeyedScoped/AddKeyedSingleton

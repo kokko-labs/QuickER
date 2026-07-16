@@ -535,8 +535,9 @@ public sealed class CSharpCodeGenerationService
             RenderHeader = renderHeader,
             // 方言実装（ADO 依存）は Repository バケットを含み、契約のみでなく、GenerateRepositories が有効なときだけ出力する
             RepositoryImpl = options.GenerateRepositories && hasRepository && !spec.ContractOnly,
-            // DB 非依存のインメモリ実装は、計画（GeneratedFilePlanner）が契約を出すスペックへ 1 度だけ載せる（spec.InMemory）
-            InMemory = spec.InMemory,
+            // DB 非依存のインメモリ実装は独立バケット（InMemory）を含むスペックだけが出力する
+            // （分割時は Repositories.InMemory.g.cs・非分割時は他バケットと同一ファイルへ連結）
+            InMemory = spec.Buckets.Contains(GenerationBucket.InMemory),
             // リモート面のサーバー実装はサーバー専用スペック（{ベース名}.RemoteServer.g.cs）だけが出力する
             RemoteServer = spec.Buckets.Contains(GenerationBucket.RemoteServer),
             // パッケージ参照モードでは固定 infra（契約・方言エンジン・EntityBase/属性/VO 基底 等）を出力せず、
