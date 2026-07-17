@@ -242,7 +242,7 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("public void ExecuteLoad(Action action)");
         content.Should().Contain("editModel.ExecuteLoad(() =>");
         // 生成の定型（EditModel 反映・コレクション化）は共通基底 MapperBase が提供し、具象 Mapper はそれを継承する
-        content.Should().Contain("public abstract class MapperBase<TEntity, TEditModel>");
+        content.Should().Contain("public abstract partial class MapperBase<TEntity, TEditModel>");
         content.Should().Contain(": MapperBase<CustomerEntity, CustomerEditModel>");
         content.Should().Contain(": MapperBase<OrderEntity, OrderEditModel>");
         // 新規入力用ファクトリ（基底が提供）は Entity を基に生成し、具象の生成フックを呼ぶ
@@ -644,7 +644,7 @@ public class CSharpCodeGenerationServiceTests
         result
             .Files[0]
             .Content.Should()
-            .Contain("public abstract class MapperBase<TEntity, TEditModel>");
+            .Contain("public abstract partial class MapperBase<TEntity, TEditModel>");
         result.Files[0].Content.Should().Contain(": MapperBase<ProductEntity, ProductEditModel>");
         result
             .Files[0]

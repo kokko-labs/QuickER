@@ -2187,6 +2187,74 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
     }
 }
 
+/// <summary>Entity と EditModel の相互変換に共通する骨組み（生成の連鎖・コレクション化）を提供する基底クラス</summary>
+/// <remarks>
+/// エンティティ固有の列コピー（<see cref="ApplyToEntity"/>）と生成直後フックを含む単体生成（<see cref="CreateEntity()"/> /
+/// <see cref="CreateEditModel(TEntity)"/>）は派生クラスが実装し、それらを組み合わせた定型処理（編集モデルからの生成・
+/// コレクション変換）だけをここで一元化する。
+/// </remarks>
+public abstract partial class MapperBase<TEntity, TEditModel>
+    where TEntity : EntityBase
+    where TEditModel : EditModelBase
+{
+    /// <summary>初期値を設定した新しい TEntity を生成する（保存時に追加対象となる）</summary>
+    public abstract TEntity CreateEntity();
+
+    /// <summary>TEntity を基に新しい TEditModel を生成する</summary>
+    public abstract TEditModel CreateEditModel(TEntity entity);
+
+    /// <summary>TEditModel の確定値を既存の TEntity へ反映する（破壊的更新）。列コピーは派生が実装する</summary>
+    /// <param name="editModel">確定値の反映元となる編集モデル</param>
+    /// <param name="entity">反映先の既存 Entity</param>
+    /// <param name="includeRemoved">削除追跡分（Removed）も復元して反映するか（保存用は true、帳票表示用などは false）</param>
+    public abstract void ApplyToEntity(TEditModel editModel, TEntity entity, bool includeRemoved);
+
+    /// <summary>初期値を設定した新しい TEntity に TEditModel の確定値を反映して生成する</summary>
+    /// <param name="editModel">確定値の反映元となる編集モデル</param>
+    /// <param name="includeRemoved">削除追跡分（Removed）も復元して反映するか（保存用は true、帳票表示用などは false）</param>
+    public TEntity CreateEntity(TEditModel editModel, bool includeRemoved = false)
+    {
+        var entity = CreateEntity();
+        ApplyToEntity(editModel, entity, includeRemoved);
+        return entity;
+    }
+
+    /// <summary>TEditModel の EditModelCollection を基に TEntity のリストを生成する</summary>
+    /// <param name="editModels">生成元となる編集モデルのコレクション</param>
+    /// <param name="includeRemoved">削除追跡分（Removed）も復元して含めるか（保存用は true、帳票表示用などは false）</param>
+    public List<TEntity> CreateEntities(
+        EditModelCollection<TEditModel> editModels,
+        bool includeRemoved = false
+    )
+    {
+        var entities = editModels
+            .Select(editModel => CreateEntity(editModel, includeRemoved))
+            .ToList();
+
+        if (includeRemoved)
+        {
+            entities.AddRange(
+                editModels.RemovedItems.Select(removed => CreateEntity(removed, includeRemoved))
+            );
+        }
+
+        return entities;
+    }
+
+    /// <summary>新規入力用の TEditModel を生成する（追加対象の Entity を基に作る）</summary>
+    public TEditModel CreateEditModel()
+    {
+        var entity = CreateEntity();
+        var editModel = CreateEditModel(entity);
+        return editModel;
+    }
+
+    /// <summary>TEntity の列挙を基に TEditModel の EditModelCollection を生成する</summary>
+    public EditModelCollection<TEditModel> CreateEditModels(IEnumerable<TEntity> entities)
+    {
+        return new EditModelCollection<TEditModel>(entities.Select(entity => CreateEditModel(entity)));
+    }
+}
 /// <summary>customers テーブルの画面編集用モデル</summary>
 public partial class CustomerEditModel : EditModelBase
 {
@@ -3147,71 +3215,6 @@ public partial class OrderEditModel : EditModelBase
     /// <summary>所属コレクションの並び替え本体。型付きコレクションの Move を呼ぶ（MoveTo* から使用される）</summary>
     protected override void MoveCore(int oldIndex, int newIndex) =>
         ParentCollection?.Move(oldIndex, newIndex);
-}
-
-/// <summary>Entity と EditModel の相互変換に共通する骨組み（生成の連鎖・コレクション化）を提供する基底クラス</summary>
-/// <remarks>
-/// エンティティ固有の列コピー（<see cref="ApplyToEntity"/>）と生成直後フックを含む単体生成（<see cref="CreateEntity()"/> /
-/// <see cref="CreateEditModel(TEntity)"/>）は派生クラスが実装し、それらを組み合わせた定型処理（編集モデルからの生成・
-/// コレクション変換）だけをここで一元化する。
-/// </remarks>
-public abstract class MapperBase<TEntity, TEditModel>
-    where TEntity : EntityBase
-    where TEditModel : EditModelBase
-{
-    /// <summary>初期値を設定した新しい TEntity を生成する（保存時に追加対象となる）</summary>
-    public abstract TEntity CreateEntity();
-
-    /// <summary>TEntity を基に新しい TEditModel を生成する</summary>
-    public abstract TEditModel CreateEditModel(TEntity entity);
-
-    /// <summary>TEditModel の確定値を既存の TEntity へ反映する（破壊的更新）。列コピーは派生が実装する</summary>
-    /// <param name="includeRemoved">削除追跡分（Removed）も復元して反映するか（保存用は true、帳票表示用などは false）</param>
-    public abstract void ApplyToEntity(TEditModel editModel, TEntity entity, bool includeRemoved);
-
-    /// <summary>初期値を設定した新しい TEntity に TEditModel の確定値を反映して生成する</summary>
-    /// <param name="includeRemoved">削除追跡分（Removed）も復元して反映するか（保存用は true、帳票表示用などは false）</param>
-    public TEntity CreateEntity(TEditModel editModel, bool includeRemoved = false)
-    {
-        var entity = CreateEntity();
-        ApplyToEntity(editModel, entity, includeRemoved);
-        return entity;
-    }
-
-    /// <summary>TEditModel の EditModelCollection を基に TEntity のリストを生成する</summary>
-    /// <param name="includeRemoved">削除追跡分（Removed）も復元して含めるか（保存用は true、帳票表示用などは false）</param>
-    public List<TEntity> CreateEntities(
-        EditModelCollection<TEditModel> editModels,
-        bool includeRemoved = false
-    )
-    {
-        var entities = editModels
-            .Select(editModel => CreateEntity(editModel, includeRemoved))
-            .ToList();
-
-        if (includeRemoved)
-        {
-            entities.AddRange(
-                editModels.RemovedItems.Select(removed => CreateEntity(removed, includeRemoved))
-            );
-        }
-
-        return entities;
-    }
-
-    /// <summary>新規入力用の TEditModel を生成する（追加対象の Entity を基に作る）</summary>
-    public TEditModel CreateEditModel()
-    {
-        var entity = CreateEntity();
-        var editModel = CreateEditModel(entity);
-        return editModel;
-    }
-
-    /// <summary>TEntity の列挙を基に TEditModel の EditModelCollection を生成する</summary>
-    public EditModelCollection<TEditModel> CreateEditModels(IEnumerable<TEntity> entities)
-    {
-        return new EditModelCollection<TEditModel>(entities.Select(entity => CreateEditModel(entity)));
-    }
 }
 
 /// <summary>CustomerEntity と CustomerEditModel の相互変換</summary>
