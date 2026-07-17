@@ -96,6 +96,106 @@ internal sealed partial class CSharpGenerationModelBuilder
         string.Empty
     );
 
+    /// <summary>
+    /// 図の名前付きクエリ定義の Guid 参照整合性（エンティティ・列参照のダングリング）を検証し、
+    /// 有効な定義だけをエンティティ別（定義順）に分類して返す
+    /// </summary>
+    /// <remarks>
+    /// エンティティ・列は Guid 参照のためリネームには追従するが、参照先が図から削除されると
+    /// 定義が残骸（ダングリング）として残る。生成前のセーフティネットとしてここで一括検出し、
+    /// 該当クエリはローカライズ済みの警告診断を出してスキップする（他のクエリと生成全体は継続する）。
+    /// メソッド構築時の列不在エラーは多重防御としてそのまま残す。
+    /// </remarks>
+    private static Dictionary<Guid, List<QueryDefinition>> CollectValidQueries(
+        ErDiagram diagram,
+        ICollection<GenerationDiagnostic> diagnostics
+    )
+    {
+        var entitiesById = diagram.Entities.ToDictionary(entity => entity.Id);
+        var result = new Dictionary<Guid, List<QueryDefinition>>();
+
+        foreach (var query in diagram.Queries)
+        {
+            // 参照先エンティティが存在しないクエリ定義（削除済みエンティティの残骸等）
+            if (!entitiesById.TryGetValue(query.EntityId, out var entity))
+            {
+                diagnostics.Add(
+                    GenerationDiagnostic.Warning(
+                        string.Format(Strings.CodeGen_Query_UnknownEntity, query.Name)
+                    )
+                );
+                continue;
+            }
+
+            var columnIds = entity.Columns.Select(column => column.Id).ToHashSet();
+            var valid = true;
+
+            // 列参照型付けパラメータの参照先列（クエリが属するエンティティの列に限る）
+            foreach (var parameter in query.Parameters)
+            {
+                if (
+                    parameter.SourceColumnId is { } parameterColumnId
+                    && !columnIds.Contains(parameterColumnId)
+                )
+                {
+                    diagnostics.Add(
+                        GenerationDiagnostic.Warning(
+                            string.Format(
+                                Strings.CodeGen_Query_DanglingParameterColumn,
+                                query.Name,
+                                parameter.Name
+                            )
+                        )
+                    );
+                    valid = false;
+                }
+            }
+
+            // 射影フィールドの参照元列
+            foreach (var field in query.Fields)
+            {
+                if (field.SourceColumnId is { } fieldColumnId && !columnIds.Contains(fieldColumnId))
+                {
+                    diagnostics.Add(
+                        GenerationDiagnostic.Warning(
+                            string.Format(
+                                Strings.CodeGen_Query_DanglingFieldColumn,
+                                query.Name,
+                                field.Name
+                            )
+                        )
+                    );
+                    valid = false;
+                }
+            }
+
+            // 並び順の参照列
+            if (query.OrderBy.Any(ordering => !columnIds.Contains(ordering.ColumnId)))
+            {
+                diagnostics.Add(
+                    GenerationDiagnostic.Warning(
+                        string.Format(Strings.CodeGen_Query_DanglingOrderByColumn, query.Name)
+                    )
+                );
+                valid = false;
+            }
+
+            if (!valid)
+            {
+                continue;
+            }
+
+            if (!result.TryGetValue(query.EntityId, out var list))
+            {
+                result[query.EntityId] = list = new List<QueryDefinition>();
+            }
+
+            list.Add(query);
+        }
+
+        return result;
+    }
+
     /// <summary>エンティティの名前付きクエリからテンプレート用ブロックを構築する</summary>
     private QueryBlocks BuildQueryBlocks(
         Entity entity,
@@ -186,8 +286,44 @@ internal sealed partial class CSharpGenerationModelBuilder
         );
     }
 
+    /// <summary>
+    /// 1 クエリ分の検証済み生成計画（検証フェーズの成果物）。
+    /// テキスト組み立て（エミットフェーズ）に必要な素材だけを運ぶ
+    /// </summary>
+    private sealed record QueryMethodPlan(
+        string MethodName,
+        string EntityClassName,
+        string ResultTypeName,
+        string ReturnTypeName,
+        string ParameterList,
+        string Summary,
+        IReadOnlyList<string> ArgumentNames,
+        IReadOnlyList<QueryPayloadParameter> PayloadParameters,
+        QueryConditionCSharpEmitter.EmitResult? Condition,
+        IReadOnlyList<string> OrderCalls,
+        string? DtoClass,
+        string? ProjectionSelector
+    );
+
     /// <summary>1 クエリ定義から契約・実装・DTO のメンバーテキストを構築する（検証エラー時は null）</summary>
+    /// <remarks>
+    /// 「検証フェーズ（診断収集 → <see cref="QueryMethodPlan"/>）」と「エミットフェーズ（テキスト組み立て）」の
+    /// 2 相に分かれており、検証エラーは計画 null（＝このクエリをスキップ）として表す。
+    /// </remarks>
     private QueryMethodMembers? BuildQueryMethod(
+        Entity entity,
+        QueryDefinition query,
+        HashSet<string> usedMethodNames,
+        ICollection<GenerationDiagnostic> diagnostics
+    )
+    {
+        var plan = PlanQueryMethod(entity, query, usedMethodNames, diagnostics);
+
+        return plan is null ? null : EmitQueryMethod(query, plan, diagnostics);
+    }
+
+    /// <summary>検証フェーズ: クエリ定義を検証し、エミットに必要な素材（生成計画）を組み立てる（エラー時は null）</summary>
+    private QueryMethodPlan? PlanQueryMethod(
         Entity entity,
         QueryDefinition query,
         HashSet<string> usedMethodNames,
@@ -201,7 +337,11 @@ internal sealed partial class CSharpGenerationModelBuilder
 
         if (string.IsNullOrEmpty(baseName) || !IsValidIdentifier(baseName))
         {
-            diagnostics.Add(Error(string.Format(Strings.CodeGen_Query_InvalidName, query.Name)));
+            diagnostics.Add(
+                GenerationDiagnostic.Error(
+                    string.Format(Strings.CodeGen_Query_InvalidName, query.Name)
+                )
+            );
             return null;
         }
 
@@ -212,7 +352,7 @@ internal sealed partial class CSharpGenerationModelBuilder
         if (ReservedQueryMethodNames.Contains(methodName))
         {
             diagnostics.Add(
-                Error(
+                GenerationDiagnostic.Error(
                     string.Format(Strings.CodeGen_Query_ReservedMethodName, query.Name, methodName)
                 )
             );
@@ -222,7 +362,7 @@ internal sealed partial class CSharpGenerationModelBuilder
         if (!usedMethodNames.Add(methodName))
         {
             diagnostics.Add(
-                Error(
+                GenerationDiagnostic.Error(
                     string.Format(
                         Strings.CodeGen_Query_DuplicateMethodName,
                         query.Name,
@@ -240,7 +380,9 @@ internal sealed partial class CSharpGenerationModelBuilder
             if (string.IsNullOrWhiteSpace(query.ScalarType))
             {
                 diagnostics.Add(
-                    Error(string.Format(Strings.CodeGen_Query_ScalarRequiresType, query.Name))
+                    GenerationDiagnostic.Error(
+                        string.Format(Strings.CodeGen_Query_ScalarRequiresType, query.Name)
+                    )
                 );
                 hasError = true;
             }
@@ -248,7 +390,9 @@ internal sealed partial class CSharpGenerationModelBuilder
             if (query.Implementation == QueryImplementationKind.Dsl)
             {
                 diagnostics.Add(
-                    Error(string.Format(Strings.CodeGen_Query_ScalarDslUnsupported, query.Name))
+                    GenerationDiagnostic.Error(
+                        string.Format(Strings.CodeGen_Query_ScalarDslUnsupported, query.Name)
+                    )
                 );
                 hasError = true;
             }
@@ -260,7 +404,9 @@ internal sealed partial class CSharpGenerationModelBuilder
         if (query.HasPaging && !supportsOrderAndPaging)
         {
             diagnostics.Add(
-                Error(string.Format(Strings.CodeGen_Query_PagingRequiresList, query.Name))
+                GenerationDiagnostic.Error(
+                    string.Format(Strings.CodeGen_Query_PagingRequiresList, query.Name)
+                )
             );
             hasError = true;
         }
@@ -272,7 +418,9 @@ internal sealed partial class CSharpGenerationModelBuilder
         )
         {
             diagnostics.Add(
-                Error(string.Format(Strings.CodeGen_Query_OrderByRequiresList, query.Name))
+                GenerationDiagnostic.Error(
+                    string.Format(Strings.CodeGen_Query_OrderByRequiresList, query.Name)
+                )
             );
             hasError = true;
         }
@@ -305,7 +453,7 @@ internal sealed partial class CSharpGenerationModelBuilder
             if (!IsValidIdentifier(parameter.Name))
             {
                 diagnostics.Add(
-                    Error(
+                    GenerationDiagnostic.Error(
                         string.Format(
                             Strings.CodeGen_Query_InvalidParameterName,
                             query.Name,
@@ -320,7 +468,7 @@ internal sealed partial class CSharpGenerationModelBuilder
             if (!seenParameterNames.Add(parameter.Name))
             {
                 diagnostics.Add(
-                    Error(
+                    GenerationDiagnostic.Error(
                         string.Format(
                             Strings.CodeGen_Query_DuplicateParameterName,
                             query.Name,
@@ -340,7 +488,7 @@ internal sealed partial class CSharpGenerationModelBuilder
                 if (!columnBindings.TryGetValue(sourceColumnId, out var sourceBinding))
                 {
                     diagnostics.Add(
-                        Error(
+                        GenerationDiagnostic.Error(
                             string.Format(
                                 Strings.CodeGen_Query_ParameterColumnNotFound,
                                 query.Name,
@@ -403,7 +551,7 @@ internal sealed partial class CSharpGenerationModelBuilder
                 foreach (var diagnostic in parsed.Diagnostics)
                 {
                     diagnostics.Add(
-                        Error(
+                        GenerationDiagnostic.Error(
                             string.Format(
                                 Strings.CodeGen_Query_ConditionInvalid,
                                 query.Name,
@@ -434,7 +582,9 @@ internal sealed partial class CSharpGenerationModelBuilder
             if (!columnBindings.TryGetValue(ordering.ColumnId, out var binding))
             {
                 diagnostics.Add(
-                    Error(string.Format(Strings.CodeGen_Query_OrderByColumnNotFound, query.Name))
+                    GenerationDiagnostic.Error(
+                        string.Format(Strings.CodeGen_Query_OrderByColumnNotFound, query.Name)
+                    )
                 );
                 hasError = true;
                 continue;
@@ -454,7 +604,9 @@ internal sealed partial class CSharpGenerationModelBuilder
             if (query.Fields.Count == 0 || string.IsNullOrEmpty(resultTypeName))
             {
                 diagnostics.Add(
-                    Error(string.Format(Strings.CodeGen_Query_ProjectionRequiresFields, query.Name))
+                    GenerationDiagnostic.Error(
+                        string.Format(Strings.CodeGen_Query_ProjectionRequiresFields, query.Name)
+                    )
                 );
                 return null;
             }
@@ -462,7 +614,7 @@ internal sealed partial class CSharpGenerationModelBuilder
             if (!IsValidIdentifier(resultTypeName))
             {
                 diagnostics.Add(
-                    Error(
+                    GenerationDiagnostic.Error(
                         string.Format(
                             Strings.CodeGen_Query_InvalidResultTypeName,
                             query.Name,
@@ -476,7 +628,7 @@ internal sealed partial class CSharpGenerationModelBuilder
             if (!_queryDtoNames.Add(resultTypeName))
             {
                 diagnostics.Add(
-                    Error(
+                    GenerationDiagnostic.Error(
                         string.Format(
                             Strings.CodeGen_Query_DuplicateResultTypeName,
                             query.Name,
@@ -492,9 +644,13 @@ internal sealed partial class CSharpGenerationModelBuilder
                 query,
                 resultTypeName,
                 columnBindings,
-                diagnostics,
-                ref hasError
+                diagnostics
             );
+
+            if (dtoClass is null)
+            {
+                hasError = true;
+            }
 
             if (query.Implementation == QueryImplementationKind.Dsl)
             {
@@ -503,9 +659,13 @@ internal sealed partial class CSharpGenerationModelBuilder
                     resultTypeName,
                     columnBindings,
                     lambdaVar,
-                    diagnostics,
-                    ref hasError
+                    diagnostics
                 );
+
+                if (projectionSelector is null)
+                {
+                    hasError = true;
+                }
             }
         }
 
@@ -514,19 +674,18 @@ internal sealed partial class CSharpGenerationModelBuilder
             return null;
         }
 
-        // ---- テキスト組み立て ----
+        // ---- 戻り値型（スカラーのみ型トークン解決を伴うため表に載せず個別に解決する） ----
         var entityClassName = _nameConverter.ToEntityClassName(entity.TableName);
         var returnTypeName = query.Returns switch
         {
-            QueryReturnShape.List => $"Task<IReadOnlyList<{entityClassName}>>",
-            QueryReturnShape.Single => $"Task<{entityClassName}?>",
-            QueryReturnShape.Count => "Task<int>",
-            QueryReturnShape.Scalar => BuildScalarReturnType(query, diagnostics, ref hasError),
-            QueryReturnShape.Projection => $"Task<IReadOnlyList<{resultTypeName}>>",
-            _ => throw new InvalidOperationException($"未知の戻り形です: {query.Returns}"),
+            QueryReturnShape.Scalar => BuildScalarReturnType(query, diagnostics),
+            var shape => string.Format(
+                GetReturnShapeInfo(shape).ReturnTypeFormat,
+                shape == QueryReturnShape.Projection ? resultTypeName : entityClassName
+            ),
         };
 
-        if (hasError)
+        if (returnTypeName is null)
         {
             return null;
         }
@@ -536,29 +695,38 @@ internal sealed partial class CSharpGenerationModelBuilder
             ? $"名前付きクエリ {methodName}"
             : EscapeForXmlDocSummary(query.Description);
 
-        var interfaceMember = BuildInterfaceMember(
-            query,
-            summary,
-            returnTypeName,
+        return new QueryMethodPlan(
             methodName,
-            parameterList
+            entityClassName,
+            resultTypeName,
+            returnTypeName,
+            parameterList,
+            summary,
+            argumentNames,
+            payloadParameters,
+            condition,
+            orderCalls,
+            dtoClass,
+            projectionSelector
         );
+    }
+
+    /// <summary>エミットフェーズ: 検証済みの生成計画から契約・実装・DTO のメンバーテキストを組み立てる</summary>
+    /// <remarks>SQL 辞書の未知方言はここで警告してスキップする（検証エラーではなく縮退＝該当方言のみ manual 扱い）。</remarks>
+    private static QueryMethodMembers EmitQueryMethod(
+        QueryDefinition query,
+        QueryMethodPlan plan,
+        ICollection<GenerationDiagnostic> diagnostics
+    )
+    {
+        var interfaceMember = BuildInterfaceMember(query, plan);
 
         string? sharedImplMember = null;
         var dialectImplMembers = new Dictionary<string, string>(StringComparer.Ordinal);
 
         if (query.Implementation == QueryImplementationKind.Dsl)
         {
-            sharedImplMember = BuildDslImplMember(
-                query,
-                summary,
-                returnTypeName,
-                methodName,
-                parameterList,
-                condition,
-                orderCalls,
-                projectionSelector
-            );
+            sharedImplMember = BuildDslImplMember(query, plan);
         }
         else if (query.Implementation == QueryImplementationKind.Sql)
         {
@@ -572,7 +740,7 @@ internal sealed partial class CSharpGenerationModelBuilder
                 )
                 {
                     diagnostics.Add(
-                        Warning(
+                        GenerationDiagnostic.Warning(
                             string.Format(
                                 Strings.CodeGen_Query_UnknownSqlDialect,
                                 query.Name,
@@ -583,17 +751,7 @@ internal sealed partial class CSharpGenerationModelBuilder
                     continue;
                 }
 
-                dialectImplMembers[dialect] = BuildSqlImplMember(
-                    query,
-                    summary,
-                    returnTypeName,
-                    methodName,
-                    parameterList,
-                    entityClassName,
-                    resultTypeName,
-                    sql,
-                    argumentNames
-                );
+                dialectImplMembers[dialect] = BuildSqlImplMember(query, plan, sql);
             }
         }
 
@@ -601,53 +759,69 @@ internal sealed partial class CSharpGenerationModelBuilder
             interfaceMember,
             sharedImplMember,
             dialectImplMembers,
-            dtoClass,
+            plan.DtoClass,
             new QueryMethodShape(
-                methodName,
-                parameterList,
-                returnTypeName,
-                summary,
-                payloadParameters
+                plan.MethodName,
+                plan.ParameterList,
+                plan.ReturnTypeName,
+                plan.Summary,
+                plan.PayloadParameters
             )
         );
     }
 
-    /// <summary>スカラー戻り形の戻り値型（Task&lt;T?&gt;）を構築する</summary>
-    private string BuildScalarReturnType(
+    /// <summary>スカラー戻り形の戻り値型（Task&lt;T?&gt;）を構築する（トークン解決不能は null）</summary>
+    private string? BuildScalarReturnType(
         QueryDefinition query,
-        ICollection<GenerationDiagnostic> diagnostics,
-        ref bool hasError
-    )
-    {
-        if (
-            !TryResolveTokenType(query, query.ScalarType ?? string.Empty, diagnostics, out var type)
-        )
-        {
-            hasError = true;
-            return "Task<object?>";
-        }
+        ICollection<GenerationDiagnostic> diagnostics
+    ) =>
+        TryResolveTokenType(query, query.ScalarType, diagnostics, out var type)
+            ? $"Task<{type}?>"
+            : null;
 
-        return $"Task<{type}?>";
-    }
-
-    /// <summary>型トークンを C# 型名へ解決する（解決不能は診断エラー）</summary>
+    /// <summary>型トークンを C# 型名へ解決する（解決不能・トークン欠落は診断エラー）</summary>
     private bool TryResolveTokenType(
         QueryDefinition query,
-        string token,
+        string? token,
         ICollection<GenerationDiagnostic> diagnostics,
         out string typeName
     )
     {
-        if (_queryTokenTypes.TryGetValue(token, out var info))
+        if (TryResolveTokenInfo(query, token, diagnostics, out var info))
         {
             typeName = info.TypeName;
             return true;
         }
 
-        diagnostics.Add(
-            Error(string.Format(Strings.CodeGen_Query_UnresolvedTypeToken, query.Name, token))
-        );
         typeName = string.Empty;
+        return false;
+    }
+
+    /// <summary>型トークンを解決済み C# 型情報へ解決する（解決不能・トークン欠落は診断エラー）</summary>
+    /// <remarks>列参照でない（トークン型付けの）パラメータ・フィールドはトークンが必須で、null / 空白は解決不能として扱う。</remarks>
+    private bool TryResolveTokenInfo(
+        QueryDefinition query,
+        string? token,
+        ICollection<GenerationDiagnostic> diagnostics,
+        out CSharpTypeInfo typeInfo
+    )
+    {
+        if (!string.IsNullOrWhiteSpace(token) && _queryTokenTypes.TryGetValue(token, out var info))
+        {
+            typeInfo = info;
+            return true;
+        }
+
+        diagnostics.Add(
+            GenerationDiagnostic.Error(
+                string.Format(
+                    Strings.CodeGen_Query_UnresolvedTypeToken,
+                    query.Name,
+                    token ?? string.Empty
+                )
+            )
+        );
+        typeInfo = null!;
         return false;
     }
 
@@ -667,24 +841,85 @@ internal sealed partial class CSharpGenerationModelBuilder
                 _nameConverter.ToPropertyName(column.Name),
                 typeInfo.TypeName,
                 ResolveValueObject(column)?.ClassName,
-                column.IsNullable
+                column.IsNullable,
+                typeInfo.IsReferenceType
             );
         }
 
         return bindings;
     }
 
-    /// <summary>契約（インターフェイス）メンバーのテキストを構築する</summary>
-    private static string BuildInterfaceMember(
-        QueryDefinition query,
-        string summary,
+    /// <summary>
+    /// 戻り形ごとの表駆動部分（スカラー以外）。戻り値型は {0}＝要素型（エンティティまたは射影 DTO）、
+    /// DSL 終端呼び出しは {0}＝射影セレクタで埋める。スカラーは型トークン解決（診断あり）を伴うため
+    /// 表に載せない（<see cref="BuildScalarReturnType"/> が担当し、DSL とは組み合わせ不可）
+    /// </summary>
+    private static readonly IReadOnlyDictionary<
+        QueryReturnShape,
+        (string ReturnTypeFormat, string DslTerminalFormat)
+    > ReturnShapeTable = new Dictionary<
+        QueryReturnShape,
+        (string ReturnTypeFormat, string DslTerminalFormat)
+    >
+    {
+        [QueryReturnShape.List] = ("Task<IReadOnlyList<{0}>>", ".ToListAsync(cancellationToken)"),
+        [QueryReturnShape.Single] = ("Task<{0}?>", ".FirstOrDefaultAsync(cancellationToken)"),
+        [QueryReturnShape.Count] = ("Task<int>", ".CountAsync(cancellationToken)"),
+        [QueryReturnShape.Projection] = (
+            "Task<IReadOnlyList<{0}>>",
+            ".ToProjectionListAsync({0}, cancellationToken)"
+        ),
+    };
+
+    /// <summary>戻り形の表駆動部分を引く（表にない戻り形は未知として例外）</summary>
+    private static (string ReturnTypeFormat, string DslTerminalFormat) GetReturnShapeInfo(
+        QueryReturnShape returns
+    ) =>
+        ReturnShapeTable.TryGetValue(returns, out var info)
+            ? info
+            : throw new InvalidOperationException($"未知の戻り形です: {returns}");
+
+    /// <summary>XML doc の summary 行（インデント込み・改行付き）を追記する</summary>
+    private static StringBuilder AppendDocSummary(StringBuilder builder, string summary) =>
+        builder.Append("    /// <summary>").Append(summary).Append("</summary>\n");
+
+    /// <summary>メソッドヘッダ（インデント＋修飾子＋戻り値型＋メソッド名＋引数リスト＋閉じ括弧）を追記する</summary>
+    /// <param name="modifiers">アクセス修飾子等（例: <c>"public "</c> / <c>"public async "</c>。契約宣言は空文字列）</param>
+    private static StringBuilder AppendMethodHeader(
+        StringBuilder builder,
+        string modifiers,
         string returnTypeName,
         string methodName,
         string parameterList
-    )
+    ) =>
+        builder
+            .Append("    ")
+            .Append(modifiers)
+            .Append(returnTypeName)
+            .Append(' ')
+            .Append(methodName)
+            .Append('(')
+            .Append(parameterList)
+            .Append(')');
+
+    /// <summary>生成計画のシグネチャでメソッドヘッダを追記する（<see cref="AppendMethodHeader(StringBuilder, string, string, string, string)"/> の糖衣）</summary>
+    private static StringBuilder AppendMethodHeader(
+        StringBuilder builder,
+        string modifiers,
+        QueryMethodPlan plan
+    ) =>
+        AppendMethodHeader(
+            builder,
+            modifiers,
+            plan.ReturnTypeName,
+            plan.MethodName,
+            plan.ParameterList
+        );
+
+    /// <summary>契約（インターフェイス）メンバーのテキストを構築する</summary>
+    private static string BuildInterfaceMember(QueryDefinition query, QueryMethodPlan plan)
     {
-        var builder = new StringBuilder();
-        builder.Append("    /// <summary>").Append(summary).Append("</summary>\n");
+        var builder = AppendDocSummary(new StringBuilder(), plan.Summary);
 
         if (query.Implementation != QueryImplementationKind.Dsl)
         {
@@ -694,37 +929,20 @@ internal sealed partial class CSharpGenerationModelBuilder
             );
         }
 
-        builder
-            .Append("    ")
-            .Append(returnTypeName)
-            .Append(' ')
-            .Append(methodName)
-            .Append('(')
-            .Append(parameterList)
-            .Append(");");
-        return builder.ToString();
+        return AppendMethodHeader(builder, string.Empty, plan).Append(';').ToString();
     }
 
     /// <summary>ミニ DSL の共有実装メンバー（Query() パイプライン経由・全実装先共通）を構築する</summary>
-    private static string BuildDslImplMember(
-        QueryDefinition query,
-        string summary,
-        string returnTypeName,
-        string methodName,
-        string parameterList,
-        QueryConditionCSharpEmitter.EmitResult? condition,
-        IReadOnlyList<string> orderCalls,
-        string? projectionSelector
-    )
+    private static string BuildDslImplMember(QueryDefinition query, QueryMethodPlan plan)
     {
         var chain = new StringBuilder("Query()");
 
-        if (condition is not null)
+        if (plan.Condition is not null)
         {
-            chain.Append(".Where(").Append(condition.Lambda).Append(')');
+            chain.Append(".Where(").Append(plan.Condition.Lambda).Append(')');
         }
 
-        foreach (var orderCall in orderCalls)
+        foreach (var orderCall in plan.OrderCalls)
         {
             chain.Append(orderCall);
         }
@@ -735,32 +953,19 @@ internal sealed partial class CSharpGenerationModelBuilder
         }
 
         chain.Append(
-            query.Returns switch
-            {
-                QueryReturnShape.List => ".ToListAsync(cancellationToken)",
-                QueryReturnShape.Single => ".FirstOrDefaultAsync(cancellationToken)",
-                QueryReturnShape.Count => ".CountAsync(cancellationToken)",
-                QueryReturnShape.Projection =>
-                    $".ToProjectionListAsync({projectionSelector}, cancellationToken)",
-                _ => throw new InvalidOperationException($"未知の戻り形です: {query.Returns}"),
-            }
+            string.Format(
+                GetReturnShapeInfo(query.Returns).DslTerminalFormat,
+                plan.ProjectionSelector
+            )
         );
 
-        var builder = new StringBuilder();
-        builder.Append("    /// <summary>").Append(summary).Append("</summary>\n");
+        var builder = AppendDocSummary(new StringBuilder(), plan.Summary);
 
-        if (condition is { PreludeLines.Count: > 0 })
+        if (plan.Condition is { PreludeLines.Count: > 0 })
         {
-            builder
-                .Append("    public ")
-                .Append(returnTypeName)
-                .Append(' ')
-                .Append(methodName)
-                .Append('(')
-                .Append(parameterList)
-                .Append(")\n    {\n");
+            AppendMethodHeader(builder, "public ", plan).Append("\n    {\n");
 
-            foreach (var line in condition.PreludeLines)
+            foreach (var line in plan.Condition.PreludeLines)
             {
                 builder.Append("        ").Append(line).Append('\n');
             }
@@ -769,14 +974,8 @@ internal sealed partial class CSharpGenerationModelBuilder
         }
         else
         {
-            builder
-                .Append("    public ")
-                .Append(returnTypeName)
-                .Append(' ')
-                .Append(methodName)
-                .Append('(')
-                .Append(parameterList)
-                .Append(") =>\n        ")
+            AppendMethodHeader(builder, "public ", plan)
+                .Append(" =>\n        ")
                 .Append(chain)
                 .Append(';');
         }
@@ -787,14 +986,8 @@ internal sealed partial class CSharpGenerationModelBuilder
     /// <summary>自由 SQL の方言別実装メンバー（生 SQL API へ委譲）を構築する</summary>
     private static string BuildSqlImplMember(
         QueryDefinition query,
-        string summary,
-        string returnTypeName,
-        string methodName,
-        string parameterList,
-        string entityClassName,
-        string resultTypeName,
-        string sql,
-        IReadOnlyList<string> argumentNames
+        QueryMethodPlan plan,
+        string sql
     )
     {
         // SQL は逐語的文字列リテラルで埋め込む（改行を保持し、" は "" へエスケープ）
@@ -802,24 +995,17 @@ internal sealed partial class CSharpGenerationModelBuilder
 
         // 匿名オブジェクトの束縛引数（ページング有効時は take / skip も SQL から @take / @skip で参照できる）
         var boundNames = query.HasPaging
-            ? argumentNames.Concat(["take", "skip"]).ToList()
-            : argumentNames.ToList();
+            ? plan.ArgumentNames.Concat(["take", "skip"]).ToList()
+            : plan.ArgumentNames.ToList();
         var args = boundNames.Count == 0 ? "null" : $"new {{ {string.Join(", ", boundNames)} }}";
 
-        var builder = new StringBuilder();
-        builder.Append("    /// <summary>").Append(summary).Append("</summary>\n");
+        var builder = AppendDocSummary(new StringBuilder(), plan.Summary);
 
         switch (query.Returns)
         {
             case QueryReturnShape.List:
-                builder
-                    .Append("    public ")
-                    .Append(returnTypeName)
-                    .Append(' ')
-                    .Append(methodName)
-                    .Append('(')
-                    .Append(parameterList)
-                    .Append(") =>\n        QueryBySqlAsync(\n            ")
+                AppendMethodHeader(builder, "public ", plan)
+                    .Append(" =>\n        QueryBySqlAsync(\n            ")
                     .Append(sqlLiteral)
                     .Append(",\n            ")
                     .Append(args)
@@ -827,14 +1013,8 @@ internal sealed partial class CSharpGenerationModelBuilder
                 break;
 
             case QueryReturnShape.Single:
-                builder
-                    .Append("    public async ")
-                    .Append(returnTypeName)
-                    .Append(' ')
-                    .Append(methodName)
-                    .Append('(')
-                    .Append(parameterList)
-                    .Append(")\n    {\n        var items = await QueryBySqlAsync(\n            ")
+                AppendMethodHeader(builder, "public async ", plan)
+                    .Append("\n    {\n        var items = await QueryBySqlAsync(\n            ")
                     .Append(sqlLiteral)
                     .Append(",\n            ")
                     .Append(args)
@@ -844,14 +1024,8 @@ internal sealed partial class CSharpGenerationModelBuilder
                 break;
 
             case QueryReturnShape.Count:
-                builder
-                    .Append("    public async ")
-                    .Append(returnTypeName)
-                    .Append(' ')
-                    .Append(methodName)
-                    .Append('(')
-                    .Append(parameterList)
-                    .Append(") =>\n        await ExecuteScalarSqlAsync<int?>(\n            ")
+                AppendMethodHeader(builder, "public async ", plan)
+                    .Append(" =>\n        await ExecuteScalarSqlAsync<int?>(\n            ")
                     .Append(sqlLiteral)
                     .Append(",\n            ")
                     .Append(args)
@@ -859,16 +1033,10 @@ internal sealed partial class CSharpGenerationModelBuilder
                 break;
 
             case QueryReturnShape.Scalar:
-                builder
-                    .Append("    public ")
-                    .Append(returnTypeName)
-                    .Append(' ')
-                    .Append(methodName)
-                    .Append('(')
-                    .Append(parameterList)
-                    // 非制約ジェネリックの TResult? は値型に効かないため、Nullable 型を明示して Task<T?> に合わせる
-                    .Append(") =>\n        ExecuteScalarSqlAsync<")
-                    .Append(ScalarElementType(returnTypeName))
+                // 非制約ジェネリックの TResult? は値型に効かないため、Nullable 型を明示して Task<T?> に合わせる
+                AppendMethodHeader(builder, "public ", plan)
+                    .Append(" =>\n        ExecuteScalarSqlAsync<")
+                    .Append(ScalarElementType(plan.ReturnTypeName))
                     .Append("?>(\n            ")
                     .Append(sqlLiteral)
                     .Append(",\n            ")
@@ -877,15 +1045,9 @@ internal sealed partial class CSharpGenerationModelBuilder
                 break;
 
             case QueryReturnShape.Projection:
-                builder
-                    .Append("    public ")
-                    .Append(returnTypeName)
-                    .Append(' ')
-                    .Append(methodName)
-                    .Append('(')
-                    .Append(parameterList)
-                    .Append(") =>\n        QueryProjectionBySqlAsync<")
-                    .Append(resultTypeName)
+                AppendMethodHeader(builder, "public ", plan)
+                    .Append(" =>\n        QueryProjectionBySqlAsync<")
+                    .Append(plan.ResultTypeName)
                     .Append(">(\n            ")
                     .Append(sqlLiteral)
                     .Append(",\n            ")
@@ -900,20 +1062,23 @@ internal sealed partial class CSharpGenerationModelBuilder
         return builder.ToString();
     }
 
-    /// <summary>Task&lt;T?&gt; 形式の戻り値型からスカラー要素型 T を取り出す</summary>
+    /// <summary>Task&lt;T?&gt; 形式の戻り値型からスカラー要素型 T（末尾の NULL 許容 ? を除いた素の型）を取り出す</summary>
     private static string ScalarElementType(string returnTypeName) =>
-        returnTypeName["Task<".Length..^">".Length].TrimEnd('?');
+        StripTaskType(returnTypeName).TrimEnd('?');
 
-    /// <summary>射影 DTO クラスのテキストを構築する（寛容マッパー互換: 引数なしコンストラクタ＋settable プロパティ）</summary>
-    private string BuildProjectionDto(
+    /// <summary>
+    /// 射影 DTO クラスのテキストを構築する（寛容マッパー互換: 引数なしコンストラクタ＋settable プロパティ）。
+    /// フィールドに検証エラーがあれば全件を診断へ収集したうえで null を返す
+    /// </summary>
+    private string? BuildProjectionDto(
         Entity entity,
         QueryDefinition query,
         string resultTypeName,
         IReadOnlyDictionary<Guid, QueryColumnBinding> columnBindings,
-        ICollection<GenerationDiagnostic> diagnostics,
-        ref bool hasError
+        ICollection<GenerationDiagnostic> diagnostics
     )
     {
+        var hasError = false;
         var properties = new List<string>();
         var seenFieldNames = new HashSet<string>(StringComparer.Ordinal);
 
@@ -922,7 +1087,7 @@ internal sealed partial class CSharpGenerationModelBuilder
             if (!IsValidIdentifier(field.Name) || !seenFieldNames.Add(field.Name))
             {
                 diagnostics.Add(
-                    Error(
+                    GenerationDiagnostic.Error(
                         string.Format(
                             Strings.CodeGen_Query_InvalidFieldName,
                             query.Name,
@@ -935,13 +1100,15 @@ internal sealed partial class CSharpGenerationModelBuilder
             }
 
             string baseType;
+            bool isNullable;
+            bool isReferenceType;
 
             if (field.SourceColumnId is { } columnId)
             {
                 if (!columnBindings.TryGetValue(columnId, out var binding))
                 {
                     diagnostics.Add(
-                        Error(
+                        GenerationDiagnostic.Error(
                             string.Format(
                                 Strings.CodeGen_Query_FieldColumnNotFound,
                                 query.Name,
@@ -953,23 +1120,39 @@ internal sealed partial class CSharpGenerationModelBuilder
                     continue;
                 }
 
-                // 列由来フィールドは列の生成型（VO 含む）を使う
+                // 列由来フィールドは列の生成型（VO 含む）を使い、NULL 許容も列から引き当てる（明示指定があれば優先）
                 baseType = binding.ValueObjectClassName ?? binding.UnderlyingTypeName;
+                isNullable = field.IsNullable ?? binding.IsNullable;
+                isReferenceType =
+                    binding.ValueObjectClassName is not null || binding.IsUnderlyingReferenceType;
             }
             else
             {
-                if (!TryResolveTokenType(query, field.Type, diagnostics, out baseType))
+                if (!TryResolveTokenInfo(query, field.Type, diagnostics, out var tokenInfo))
                 {
                     hasError = true;
                     continue;
                 }
+
+                // 自由フィールド（自由 SQL 由来）は列の裏付けがないため、既定で NULL 許容にする
+                // （寛容マッパーの列欠落・集計 NULL を安全に受ける。明示指定があれば優先）
+                baseType = tokenInfo.TypeName;
+                isNullable = field.IsNullable ?? true;
+                isReferenceType = tokenInfo.IsReferenceType;
             }
 
-            // DTO プロパティは常に NULL 許容にする（寛容マッパーの列欠落・集計 NULL を安全に受ける）
+            // 非 NULL の参照型（VO 含む）は生成エンティティと同じく null! で初期化して警告を抑止する
+            var typeText = isNullable ? baseType + "?" : baseType;
+            var initializer = !isNullable && isReferenceType ? " = null!;" : string.Empty;
             properties.Add(
                 $"    /// <summary>{EscapeForXmlDocSummary(field.Name)}</summary>\n"
-                    + $"    public {baseType}? {field.Name} {{ get; set; }}"
+                    + $"    public {typeText} {field.Name} {{ get; set; }}{initializer}"
             );
+        }
+
+        if (hasError)
+        {
+            return null;
         }
 
         var builder = new StringBuilder();
@@ -987,14 +1170,13 @@ internal sealed partial class CSharpGenerationModelBuilder
         return builder.ToString();
     }
 
-    /// <summary>ミニ DSL 射影の選択式（{v} =&gt; new Dto { F = {v}.Prop, ... }）を構築する</summary>
+    /// <summary>ミニ DSL 射影の選択式（{v} =&gt; new Dto { F = {v}.Prop, ... }）を構築する（検証エラーは null）</summary>
     private static string? BuildProjectionSelector(
         QueryDefinition query,
         string resultTypeName,
         IReadOnlyDictionary<Guid, QueryColumnBinding> columnBindings,
         string lambdaVar,
-        ICollection<GenerationDiagnostic> diagnostics,
-        ref bool hasError
+        ICollection<GenerationDiagnostic> diagnostics
     )
     {
         var assignments = new List<string>();
@@ -1007,14 +1189,13 @@ internal sealed partial class CSharpGenerationModelBuilder
             )
             {
                 diagnostics.Add(
-                    Error(
+                    GenerationDiagnostic.Error(
                         string.Format(
                             Strings.CodeGen_Query_ProjectionDslRequiresColumns,
                             query.Name
                         )
                     )
                 );
-                hasError = true;
                 return null;
             }
 
@@ -1029,8 +1210,4 @@ internal sealed partial class CSharpGenerationModelBuilder
         !string.IsNullOrEmpty(name)
         && (char.IsLetter(name[0]) || name[0] == '_')
         && name.All(c => char.IsLetterOrDigit(c) || c == '_');
-
-    /// <summary>エラーレベルの診断情報を生成する</summary>
-    private static GenerationDiagnostic Error(string message) =>
-        new() { Severity = GenerationDiagnosticSeverity.Error, Message = message };
 }

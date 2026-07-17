@@ -9,7 +9,7 @@ namespace QuickER.Tests.GeneratedRemoteServiceFixture;
 /// <remarks>
 /// <para>
 /// 入力の ER 図はクエリフィクスチャ（<see cref="Tests.GeneratedQueryFixture.QueryFixtureDefinition"/>）と
-/// 同一（2 エンティティ＋名前付きクエリ 10 本・VO 有効）で、オプションに <c>GenerateRemoteServices = true</c> を
+/// 同一（2 エンティティ＋名前付きクエリ 13 本・VO 有効）で、オプションに <c>GenerateRemoteServices = true</c> を
 /// 加えたもの（リモート面は自動含意）。出力は本体（クライアント実装同梱）＋サーバー実装の 2 ファイルで、
 /// どちらもチェックインしてドリフト検知＋テストプロジェクトでの実コンパイル検証を兼ねる。
 /// </para>

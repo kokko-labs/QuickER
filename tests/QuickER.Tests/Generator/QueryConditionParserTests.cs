@@ -337,4 +337,94 @@ public class QueryConditionParserTests
         result.ColumnReferences[1].Position.Should().Be(text.IndexOf("Amount"));
         result.ColumnReferences[1].ResolvedName.Should().BeNull();
     }
+
+    // ---------------- 結合強度（NOT）・LIKE 退化パターン・意味検証（型整合） ----------------
+
+    /// <summary>NOT が AND より強く結合する（NOT は直後の述語のみに掛かる）ことを木構造で検証する</summary>
+    [Fact(DisplayName = "NOT は AND より強く結合する（直後の述語のみに掛かる）")]
+    public void Parse_NotBindsTighterThanAnd()
+    {
+        var result = ParseValid("NOT CustomerId = 1 AND Amount > 0");
+
+        result.Success.Should().BeTrue();
+        var root = result.Root.Should().BeOfType<LogicalNode>().Which;
+        root.Operator.Should().Be(LogicalOperator.And);
+        root.Left.Should().BeOfType<NotNode>().Which.Operand.Should().BeOfType<ComparisonNode>();
+        root.Right.Should().BeOfType<ComparisonNode>();
+    }
+
+    /// <summary>括弧付きの NOT は論理結合全体に掛かる（NOT が根になる）ことを検証する</summary>
+    [Fact(DisplayName = "NOT (A OR B) は論理結合全体を否定する")]
+    public void Parse_NotWithParentheses_NegatesWholeGroup()
+    {
+        var result = ParseValid("NOT (CustomerId = 1 OR Amount > 0)");
+
+        result.Success.Should().BeTrue();
+        var not = result.Root.Should().BeOfType<NotNode>().Which;
+        not.Operand.Should().BeOfType<LogicalNode>().Which.Operator.Should().Be(LogicalOperator.Or);
+    }
+
+    /// <summary>二重 NOT が入れ子の NotNode になることを検証する</summary>
+    [Fact(DisplayName = "NOT NOT は入れ子の否定になる")]
+    public void Parse_DoubleNot_Nests()
+    {
+        var result = ParseValid("NOT NOT CustomerId = 1");
+
+        result.Success.Should().BeTrue();
+        result
+            .Root.Should()
+            .BeOfType<NotNode>()
+            .Which.Operand.Should()
+            .BeOfType<NotNode>()
+            .Which.Operand.Should()
+            .BeOfType<ComparisonNode>();
+    }
+
+    /// <summary>空文字リテラルの LIKE（ワイルドカードなしの退化形）が等値比較になることを検証する</summary>
+    [Fact(DisplayName = "LIKE ''（空文字）は空文字との等値比較になる")]
+    public void Parse_LikeEmptyLiteral_BecomesEmptyEquality()
+    {
+        var result = ParseValid("Memo LIKE ''");
+
+        result.Success.Should().BeTrue();
+        var comparison = result.Root.Should().BeOfType<ComparisonNode>().Which;
+        comparison.Operator.Should().Be(ComparisonOperator.Equal);
+        comparison.Operand.Should().BeOfType<StringOperand>().Which.Value.Should().BeEmpty();
+    }
+
+    /// <summary>'%' のみの LIKE（全件一致の退化形）が空文字の Contains になることを検証する</summary>
+    [Fact(DisplayName = "LIKE '%'（ワイルドカードのみ）は空文字の Contains になる")]
+    public void Parse_LikeWildcardOnly_BecomesEmptyContains()
+    {
+        var result = ParseValid("Memo LIKE '%'");
+
+        result.Success.Should().BeTrue();
+        var match = result.Root.Should().BeOfType<StringMatchNode>().Which;
+        match.Kind.Should().Be(StringMatchKind.Contains);
+        match.Operand.Should().BeOfType<StringOperand>().Which.Value.Should().BeEmpty();
+    }
+
+    /// <summary>NULL 非許容列への IS NULL / IS NOT NULL が診断エラーになることを検証する</summary>
+    [Theory(DisplayName = "NULL 非許容列への IS [NOT] NULL は診断エラー")]
+    [InlineData("CustomerId IS NULL")]
+    [InlineData("CustomerId IS NOT NULL")]
+    public void Validate_NullCheckOnNonNullableColumn_Fails(string text)
+    {
+        var result = ParseValid(text);
+
+        result.Success.Should().BeFalse();
+        result.Diagnostics.Should().ContainSingle().Which.Message.Should().Contain("CustomerId");
+    }
+
+    /// <summary>文字列一致系（LIKE / CONTAINS）にリストパラメータを使うと診断エラーになることを検証する</summary>
+    [Theory(DisplayName = "文字列一致 × リストパラメータは診断エラー")]
+    [InlineData("Memo LIKE @statuses")]
+    [InlineData("Memo CONTAINS @statuses")]
+    public void Validate_StringMatchWithListParameter_Fails(string text)
+    {
+        var result = ParseValid(text);
+
+        result.Success.Should().BeFalse();
+        result.Diagnostics.Should().ContainSingle().Which.Message.Should().Contain("statuses");
+    }
 }

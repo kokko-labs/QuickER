@@ -38,10 +38,15 @@ public static class QueryParameterTypeResolver
 
         foreach (var query in diagram.Queries)
         {
-            // 列参照で型付けされるパラメータはトークンを使わない（列型辞書から解決される）
-            foreach (var parameter in query.Parameters.Where(p => p.SourceColumnId is null))
+            // 列参照で型付けされるパラメータ・フィールドはトークンを使わない（列型辞書から解決される）。
+            // トークン欠落（null / 空白）は生成サービス側が解決不能の診断エラーを出すためここでは収集しない
+            foreach (
+                var parameter in query.Parameters.Where(p =>
+                    p.SourceColumnId is null && !string.IsNullOrWhiteSpace(p.Type)
+                )
+            )
             {
-                tokens.Add(parameter.Type);
+                tokens.Add(parameter.Type!);
             }
 
             if (!string.IsNullOrWhiteSpace(query.ScalarType))
@@ -49,9 +54,13 @@ public static class QueryParameterTypeResolver
                 tokens.Add(query.ScalarType);
             }
 
-            foreach (var field in query.Fields.Where(f => f.SourceColumnId is null))
+            foreach (
+                var field in query.Fields.Where(f =>
+                    f.SourceColumnId is null && !string.IsNullOrWhiteSpace(f.Type)
+                )
+            )
             {
-                tokens.Add(field.Type);
+                tokens.Add(field.Type!);
             }
         }
 

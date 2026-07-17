@@ -134,6 +134,45 @@ public class QueryDefinitionDialogViewModelTests
         query.ToModel().Parameters[^1].SourceColumnId.Should().BeNull();
     }
 
+    /// <summary>
+    /// 列参照（SourceColumnId 非 null）のパラメータ・射影フィールドは、確定（ToModel）時に
+    /// 表示用の型トークンを保存しない（Type=null）ことを検証する。列由来で型が決まるため、
+    /// 列の宣言型（SQL ネイティブ型）が契約外の値として図ファイルへ漏れるのを防ぐ。
+    /// </summary>
+    [Fact(DisplayName = "列参照のパラメータ・射影フィールドは Type を保存しない")]
+    public void ToModel_ColumnReferencedTypeToken_IsNotPersisted()
+    {
+        var diagram = CreateDiagram(out _, out var customerColumnId, out var amountColumnId);
+        var vm = new QueryDefinitionDialogViewModel(diagram);
+        var query = vm.SelectedQuery!;
+
+        // 列参照パラメータ（表示は列由来の型トークンになるが保存はされない）
+        query.AddParameterCommand.Execute(null);
+        var typedParameter = query.Parameters[^1];
+        typedParameter.Name = "typedId";
+        typedParameter.SourceColumnId = customerColumnId;
+
+        // 射影フィールド（列参照と自由フィールドを 1 件ずつ）
+        query.ReturnsProjection = true;
+        query.ResultTypeName = "OrderRow";
+        query.AddFieldCommand.Execute(null);
+        var columnField = query.Fields[^1];
+        columnField.Name = "Amount";
+        columnField.SourceColumnId = amountColumnId;
+        query.AddFieldCommand.Execute(null);
+        var freeField = query.Fields[^1];
+        freeField.Name = "Total";
+        freeField.Type = "decimal(12,2)";
+
+        var model = query.ToModel();
+
+        // 列参照は Type=null・トークン型付けは Type を保持する
+        model.Parameters[^1].Type.Should().BeNull("列参照の型は列由来のため保存しない");
+        model.Parameters[0].Type.Should().Be("int32", "トークン型付けは従来どおり保存する");
+        model.Fields[0].Type.Should().BeNull();
+        model.Fields[1].Type.Should().Be("decimal(12,2)");
+    }
+
     /// <summary>既存クエリがロードされ、選択切替で対象が入れ替わることを検証する（要件 a）</summary>
     [Fact(DisplayName = "既存クエリのロードと選択切替")]
     public void LoadsExistingQueries_AndSwitchesSelection()

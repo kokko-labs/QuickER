@@ -60,7 +60,7 @@ internal static class MultiDialectTypeReconciler
                     )
                     {
                         diagnostics.Add(
-                            Error(
+                            GenerationDiagnostic.Error(
                                 string.Format(
                                     Strings.CodeGen_Error_TypeMismatch,
                                     entity.TableName,
@@ -135,8 +135,4 @@ internal static class MultiDialectTypeReconciler
 
         return result;
     }
-
-    /// <summary>エラー診断を作成する</summary>
-    private static GenerationDiagnostic Error(string message) =>
-        new() { Severity = GenerationDiagnosticSeverity.Error, Message = message };
 }

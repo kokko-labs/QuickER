@@ -169,6 +169,15 @@
   <data name="CodeGen_Query_UnknownEntity" xml:space="preserve">
     <value>Named query '{0}' was skipped because its target entity was not found.</value>
   </data>
+  <data name="CodeGen_Query_DanglingParameterColumn" xml:space="preserve">
+    <value>Named query '{0}' was skipped because the source column of parameter '{1}' was not found in the target entity.</value>
+  </data>
+  <data name="CodeGen_Query_DanglingFieldColumn" xml:space="preserve">
+    <value>Named query '{0}' was skipped because the source column of projection field '{1}' was not found in the target entity.</value>
+  </data>
+  <data name="CodeGen_Query_DanglingOrderByColumn" xml:space="preserve">
+    <value>Named query '{0}' was skipped because an ORDER BY column was not found in the target entity.</value>
+  </data>
   <data name="CodeGen_Query_InvalidName" xml:space="preserve">
     <value>Named query name '{0}' cannot be converted to a valid method name.</value>
   </data>

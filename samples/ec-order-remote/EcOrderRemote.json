@@ -212,11 +212,9 @@
         "Name": "GetByCustomer",
         "Description": "\u9867\u5BA2ID\u3067\u6CE8\u6587\u3092\u65B0\u3057\u3044\u9806\uFF08\u6CE8\u6587ID\u964D\u9806\uFF09\u306B\u691C\u7D22\u3059\u308B\uFF08\u30DA\u30FC\u30B8\u30F3\u30B0\u4ED8\u304D\uFF09",
         "Returns": "List",
-        "ScalarType": null,
         "Parameters": [
           {
             "Name": "customerId",
-            "Type": "int32",
             "IsList": false,
             "SourceColumnId": "e3333333-0000-0000-0000-000000000003"
           }
@@ -231,7 +229,6 @@
         "HasPaging": true,
         "Implementation": "Dsl",
         "Sql": {},
-        "ResultTypeName": null,
         "Fields": []
       },
       {
@@ -240,11 +237,9 @@
         "Name": "GetSummaries",
         "Description": "\u9867\u5BA2ID\u306E\u6CE8\u6587\u30B5\u30DE\u30EA\u30FC\uFF08\u6CE8\u6587ID\u30FB\u6CE8\u6587\u65E5\u6642\u30FB\u5099\u8003\uFF09\u3092\u65B0\u3057\u3044\u9806\u306B\u53D6\u5F97\u3059\u308B\uFF08\u5C04\u5F71 DTO\uFF09",
         "Returns": "Projection",
-        "ScalarType": null,
         "Parameters": [
           {
             "Name": "customerId",
-            "Type": "int32",
             "IsList": false,
             "SourceColumnId": "e3333333-0000-0000-0000-000000000003"
           }
@@ -263,17 +258,14 @@
         "Fields": [
           {
             "Name": "OrderId",
-            "Type": "int32",
             "SourceColumnId": "e3333333-0000-0000-0000-000000000002"
           },
           {
             "Name": "OrderedAt",
-            "Type": "datetime2",
             "SourceColumnId": "e3333333-0000-0000-0000-000000000004"
           },
           {
             "Name": "Memo",
-            "Type": "nvarchar(100)",
             "SourceColumnId": "e3333333-0000-0000-0000-000000000005"
           }
         ]

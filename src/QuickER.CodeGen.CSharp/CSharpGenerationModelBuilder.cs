@@ -39,20 +39,8 @@ internal sealed partial class CSharpGenerationModelBuilder
         _queryTokenTypes =
             queryParameterTypes
             ?? new Dictionary<string, CSharpTypeInfo>(StringComparer.OrdinalIgnoreCase);
-        _queriesByEntity = diagram
-            .Queries.GroupBy(query => query.EntityId)
-            .ToDictionary(group => group.Key, group => group.ToList());
+        _queriesByEntity = CollectValidQueries(diagram, diagnostics);
         _queryDtoNames.Clear();
-
-        // 参照先エンティティが存在しないクエリ定義（削除済みエンティティの残骸等）は警告してスキップする
-        var entityIds = diagram.Entities.Select(entity => entity.Id).ToHashSet();
-
-        foreach (var orphan in diagram.Queries.Where(query => !entityIds.Contains(query.EntityId)))
-        {
-            diagnostics.Add(
-                Warning(string.Format(Strings.CodeGen_Query_UnknownEntity, orphan.Name))
-            );
-        }
 
         var navigationsByEntity = ResolveAllNavigations(diagram, diagnostics);
         _valueObjects = BuildValueObjects(diagram, options, diagnostics);
@@ -119,7 +107,7 @@ internal sealed partial class CSharpGenerationModelBuilder
         if (hasDisplayNameCollision)
         {
             diagnostics.Add(
-                Warning(
+                GenerationDiagnostic.Warning(
                     string.Format(
                         Strings.CodeGen_Warning_EntityDisplayNameCollision,
                         className,
@@ -186,7 +174,7 @@ internal sealed partial class CSharpGenerationModelBuilder
         if (hasDisplayNameCollision)
         {
             diagnostics.Add(
-                Warning(
+                GenerationDiagnostic.Warning(
                     string.Format(
                         Strings.CodeGen_Warning_EditModelDisplayNameCollision,
                         className,
@@ -341,7 +329,7 @@ internal sealed partial class CSharpGenerationModelBuilder
         if (keyColumn.Count != 1)
         {
             diagnostics.Add(
-                Warning(
+                GenerationDiagnostic.Warning(
                     string.Format(Strings.CodeGen_Warning_RepositorySingleKeyOnly, entity.TableName)
                 )
             );
@@ -783,7 +771,7 @@ internal sealed partial class CSharpGenerationModelBuilder
             if (relationship.Type == RelationshipType.ManyToMany)
             {
                 diagnostics.Add(
-                    Warning(
+                    GenerationDiagnostic.Warning(
                         string.Format(Strings.CodeGen_Warning_ManyToManySkipped, relationship.Id)
                     )
                 );
@@ -800,7 +788,7 @@ internal sealed partial class CSharpGenerationModelBuilder
             if (source is null || target is null)
             {
                 diagnostics.Add(
-                    Warning(
+                    GenerationDiagnostic.Warning(
                         string.Format(
                             Strings.CodeGen_Warning_RelationshipTargetNotFound,
                             relationship.Id
@@ -829,7 +817,7 @@ internal sealed partial class CSharpGenerationModelBuilder
             if (principalColumn is null || dependentColumn is null)
             {
                 diagnostics.Add(
-                    Warning(
+                    GenerationDiagnostic.Warning(
                         string.Format(
                             Strings.CodeGen_Warning_RelationshipKeyUnknown,
                             relationship.Id
@@ -899,10 +887,6 @@ internal sealed partial class CSharpGenerationModelBuilder
         var stripped = propertyName.TrimStart('@');
         return "_" + char.ToLowerInvariant(stripped[0]) + stripped[1..];
     }
-
-    /// <summary>警告レベルの診断情報を生成する</summary>
-    private static GenerationDiagnostic Warning(string message) =>
-        new() { Severity = GenerationDiagnosticSeverity.Warning, Message = message };
 
     /// <summary>XML doc の summary へ説明文を安全に埋め込めるようエスケープする（&amp;/&lt;/&gt; エスケープ、改行は空白 1 つへ畳む）。空・空白のみは空文字列を返す</summary>
     private static string EscapeForXmlDocSummary(string? text)

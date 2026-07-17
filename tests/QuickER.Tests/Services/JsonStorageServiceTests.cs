@@ -179,6 +179,158 @@ public class JsonStorageServiceTests
         }
     }
 
+    /// <summary>
+    /// null のプロパティ（列参照パラメータの Type・未指定の ScalarType / ConstraintName 等）が
+    /// 保存 JSON からキーごと省略されることを検証する（WhenWritingNull＝図ファイルの正準形）。
+    /// </summary>
+    [Fact(DisplayName = "Save: null プロパティはキーごと省略される")]
+    public void Save_NullProperties_AreOmittedFromJson()
+    {
+        var entity = new Entity { TableName = "Order" };
+        var column = new Column { Name = "CustomerId", DataType = "int" };
+        entity.Columns.Add(column);
+
+        var document = new DiagramDocument();
+        document.Schema.Entities.Add(entity);
+        document.Schema.Relationships.Add(
+            new Relationship
+            {
+                SourceEntityId = entity.Id,
+                TargetEntityId = entity.Id,
+                // SourceColumnId / TargetColumnId / ConstraintName は未指定（null）
+            }
+        );
+        document.Schema.Queries.Add(
+            new QueryDefinition
+            {
+                EntityId = entity.Id,
+                Name = "GetByCustomer",
+                Parameters =
+                {
+                    // 列参照型付け＝Type は保存されない（null）
+                    new QueryParameter { Name = "customerId", SourceColumnId = column.Id },
+                },
+                Fields =
+                {
+                    new ProjectionField { Name = "CustomerId", SourceColumnId = column.Id },
+                },
+            }
+        );
+
+        var path = Path.Combine(Path.GetTempPath(), $"er-nulls-{Guid.NewGuid()}.json");
+
+        try
+        {
+            JsonStorageService.Save(path, document);
+            var json = File.ReadAllText(path);
+
+            json.Should().NotContain("\"ScalarType\"", "null プロパティはキーごと省略される");
+            json.Should().NotContain("\"Type\": null");
+            json.Should().NotContain("\"ConstraintName\"");
+            json.Should().NotContain("\"IsNullable\": null");
+
+            // 読み戻しでは省略されたキーが既定値（null）へ戻る
+            var loaded = JsonStorageService.Load(path);
+            var query = loaded.Schema.Queries.Should().ContainSingle().Which;
+            query.Parameters[0].Type.Should().BeNull();
+            query.Parameters[0].SourceColumnId.Should().Be(column.Id);
+            query.Fields[0].Type.Should().BeNull();
+            query.Fields[0].IsNullable.Should().BeNull();
+            loaded.Schema.Relationships[0].ConstraintName.Should().BeNull();
+        }
+        finally
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+    }
+
+    /// <summary>
+    /// null 省略形式（キー欠落）の JSON が、クエリ以外の図要素（Entity / Relationship / Layout）も含めて
+    /// プロパティ既定値で読み込めることを検証する（省略と既定値の相互可換性）。
+    /// </summary>
+    [Fact(DisplayName = "Load: キー欠落（null 省略形式）は既定値で吸収される")]
+    public void Load_OmittedKeys_FallBackToDefaults()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"er-omitted-{Guid.NewGuid()}.json");
+
+        try
+        {
+            File.WriteAllText(
+                path,
+                """
+                {
+                  "Version": 1,
+                  "Schema": {
+                    "Entities": [
+                      {
+                        "Id": "11111111-0000-0000-0000-000000000001",
+                        "TableName": "Customer",
+                        "Columns": [
+                          { "Id": "11111111-0000-0000-0000-000000000002", "Name": "CustomerId", "DataType": "int" }
+                        ]
+                      }
+                    ],
+                    "Relationships": [
+                      {
+                        "SourceEntityId": "11111111-0000-0000-0000-000000000001",
+                        "TargetEntityId": "11111111-0000-0000-0000-000000000001"
+                      }
+                    ],
+                    "Queries": [
+                      {
+                        "EntityId": "11111111-0000-0000-0000-000000000001",
+                        "Name": "GetById",
+                        "Parameters": [
+                          { "Name": "id", "SourceColumnId": "11111111-0000-0000-0000-000000000002" }
+                        ]
+                      }
+                    ]
+                  },
+                  "Layout": {
+                    "11111111-0000-0000-0000-000000000001": { "X": 10 }
+                  }
+                }
+                """
+            );
+
+            var loaded = JsonStorageService.Load(path);
+
+            // Entity / Relationship: 省略キーは既定値（Memo / Description は空文字・列参照 / 制約名は null）
+            var entity = loaded.Schema.Entities.Should().ContainSingle().Which;
+            entity.Memo.Should().BeEmpty();
+            entity.Description.Should().BeEmpty();
+            var relationship = loaded.Schema.Relationships.Should().ContainSingle().Which;
+            relationship.Type.Should().Be(RelationshipType.OneToMany);
+            relationship.SourceColumnId.Should().BeNull();
+            relationship.ConstraintName.Should().BeNull();
+
+            // Query: 省略キーは既定値（Type / Condition / ScalarType は null・コレクションは空）
+            var query = loaded.Schema.Queries.Should().ContainSingle().Which;
+            query.Returns.Should().Be(QueryReturnShape.List);
+            query.Parameters[0].Type.Should().BeNull();
+            query.Condition.Should().BeNull();
+            query.ScalarType.Should().BeNull();
+            query.OrderBy.Should().BeEmpty();
+            query.Fields.Should().BeEmpty();
+
+            // Layout: 省略キーは既定値（Width 200・既定タイトル色）
+            var layout = loaded.Layout[entity.Id];
+            layout.X.Should().Be(10);
+            layout.Width.Should().Be(200);
+            layout.TitleBackgroundColor.Should().Be(EntityLayout.DefaultTitleBackgroundColor);
+        }
+        finally
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+    }
+
     /// <summary>queries を持たない既存フォーマットの JSON が空のクエリ一覧で読み込めることを検証する（後方互換）</summary>
     [Fact(DisplayName = "Load: queries が無い既存 JSON は空のクエリ一覧になる")]
     public void Load_LegacyJsonWithoutQueries_YieldsEmptyQueries()

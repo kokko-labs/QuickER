@@ -19,6 +19,8 @@ namespace QuickER.Tests.GeneratedFixture;
 ///   <item>1対1: <c>customers</c> ↔ <c>customer_profiles</c></item>
 ///   <item>VO 対象カラム: <c>varchar(50)</c>（名前）・<c>decimal(10,2)</c>（金額）を含む</item>
 ///   <item>DB 照合順序の揺れを避けるため日本語識別子は使わない</item>
+///   <item>名前付きクエリ（ミニ DSL）: CONTAINS（LIKE エスケープ）・IS NULL・decimal 比較＝
+///     SQL Server 方言の DSL→SQL 翻訳の実 DB 検証用</item>
 /// </list>
 /// オプションは「全カテゴリ有効・VO 有効・Split 無効（1 ファイル）・専用 namespace」。
 /// </para>
@@ -64,6 +66,13 @@ public static class GeneratedFixtureDefinition
 
     private static readonly Guid RelCustomerOrders = new("44444444-0000-0000-0000-000000000001");
     private static readonly Guid RelCustomerProfile = new("44444444-0000-0000-0000-000000000002");
+
+    // 名前付きクエリの ID も決定的でなければならないため固定 GUID を用いる
+    private static readonly Guid QuerySearchMemoContains = new(
+        "55555555-0000-0000-0000-000000000001"
+    );
+    private static readonly Guid QueryGetMissingMemo = new("55555555-0000-0000-0000-000000000002");
+    private static readonly Guid QueryGetExpensive = new("55555555-0000-0000-0000-000000000003");
 
     /// <summary>
     /// 実行時テスト用の ER 図を決定的に構築する（要素 ID は固定 GUID・日本語識別子なし）。
@@ -179,7 +188,7 @@ public static class GeneratedFixtureDefinition
             },
         };
 
-        return new ErDiagram
+        var diagram = new ErDiagram
         {
             Entities = { customer, order, profile },
             Relationships =
@@ -212,5 +221,58 @@ public static class GeneratedFixtureDefinition
                 },
             },
         };
+
+        // 名前付きクエリ（ミニ DSL）: SQL Server 方言の DSL→SQL 翻訳
+        // （CONTAINS→LIKE エスケープ・IS NULL・decimal 比較＝VO 比較）を実 DB で検証するための定義。
+        // すべて DSL（共有本体）のため QuickER・EF Core 両実装へ同一テキストで出力され、manual 実装は不要
+        diagram.Queries.Add(
+            new QueryDefinition
+            {
+                Id = QuerySearchMemoContains,
+                EntityId = OrderId,
+                Name = "SearchMemoContains",
+                Description =
+                    "メモの部分一致（CONTAINS→LIKE。%・_ 等はリテラル扱い）で注文を検索する",
+                Returns = QueryReturnShape.List,
+                Parameters =
+                {
+                    new QueryParameter { Name = "keyword", Type = "string(50)" },
+                },
+                Condition = "memo CONTAINS @keyword",
+                OrderBy = { new QueryOrdering { ColumnId = OrderPkColId } },
+            }
+        );
+
+        diagram.Queries.Add(
+            new QueryDefinition
+            {
+                Id = QueryGetMissingMemo,
+                EntityId = OrderId,
+                Name = "GetMissingMemo",
+                Description = "メモ未設定（IS NULL）の注文を検索する",
+                Returns = QueryReturnShape.List,
+                Condition = "memo IS NULL",
+                OrderBy = { new QueryOrdering { ColumnId = OrderPkColId } },
+            }
+        );
+
+        diagram.Queries.Add(
+            new QueryDefinition
+            {
+                Id = QueryGetExpensive,
+                EntityId = OrderId,
+                Name = "GetExpensive",
+                Description = "金額（decimal・VO 列）が下限以上の注文を検索する",
+                Returns = QueryReturnShape.List,
+                Parameters =
+                {
+                    new QueryParameter { Name = "minAmount", Type = "decimal(10,2)" },
+                },
+                Condition = "amount >= @minAmount",
+                OrderBy = { new QueryOrdering { ColumnId = OrderPkColId } },
+            }
+        );
+
+        return diagram;
     }
 }

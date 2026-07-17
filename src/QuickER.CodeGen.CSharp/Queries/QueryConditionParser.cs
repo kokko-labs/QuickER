@@ -558,6 +558,28 @@ public static class QueryConditionParser
             );
         }
 
+        /// <summary>現在のトークン（Parameter 前提）を <see cref="ParameterOperand"/> として消費し、参照一覧へ登録する</summary>
+        private ParameterOperand ConsumeParameter()
+        {
+            var parameter = new ParameterOperand
+            {
+                Text = Current.Text,
+                Position = Current.Position,
+                Length = Current.Length,
+            };
+            result.ParameterReferences.Add(parameter);
+            _index++;
+            return parameter;
+        }
+
+        /// <summary>現在のトークン（String 前提）を <see cref="StringOperand"/> として消費する</summary>
+        private StringOperand ConsumeStringLiteral()
+        {
+            var literal = new StringOperand { Value = Current.Text };
+            _index++;
+            return literal;
+        }
+
         /// <summary>condition := or</summary>
         public ConditionNode? ParseCondition() => ParseOr();
 
@@ -880,14 +902,7 @@ public static class QueryConditionParser
                 return null;
             }
 
-            var parameter = new ParameterOperand
-            {
-                Text = Current.Text,
-                Position = Current.Position,
-                Length = Current.Length,
-            };
-            result.ParameterReferences.Add(parameter);
-            _index++;
+            var parameter = ConsumeParameter();
 
             return new InNode
             {
@@ -925,22 +940,12 @@ public static class QueryConditionParser
         {
             if (Current.Kind == TokenKind.Parameter)
             {
-                var parameter = new ParameterOperand
-                {
-                    Text = Current.Text,
-                    Position = Current.Position,
-                    Length = Current.Length,
-                };
-                result.ParameterReferences.Add(parameter);
-                _index++;
-                return parameter;
+                return ConsumeParameter();
             }
 
             if (Current.Kind == TokenKind.String)
             {
-                var literal = new StringOperand { Value = Current.Text };
-                _index++;
-                return literal;
+                return ConsumeStringLiteral();
             }
 
             result.Diagnostics.Add(
@@ -958,15 +963,7 @@ public static class QueryConditionParser
         {
             if (Current.Kind == TokenKind.Parameter)
             {
-                var parameter = new ParameterOperand
-                {
-                    Text = Current.Text,
-                    Position = Current.Position,
-                    Length = Current.Length,
-                };
-                result.ParameterReferences.Add(parameter);
-                _index++;
-                return parameter;
+                return ConsumeParameter();
             }
 
             if (Current.Kind == TokenKind.Minus)
@@ -999,9 +996,7 @@ public static class QueryConditionParser
 
             if (Current.Kind == TokenKind.String)
             {
-                var literal = new StringOperand { Value = Current.Text };
-                _index++;
-                return literal;
+                return ConsumeStringLiteral();
             }
 
             result.Diagnostics.Add(

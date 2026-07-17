@@ -66,12 +66,13 @@ public partial class QueryItemViewModel : ObservableObject
 
             foreach (var parameter in source.Parameters)
             {
+                // 列参照（Type は保存されない）の表示用型トークンは SourceColumnId 設定時に列から導出される
                 Parameters.Add(
                     Track(
                         new QueryParameterViewModel(DeriveFieldToken)
                         {
                             Name = parameter.Name,
-                            Type = parameter.Type,
+                            Type = parameter.Type ?? string.Empty,
                             IsList = parameter.IsList,
                             SourceColumnId = parameter.SourceColumnId,
                         }
@@ -94,13 +95,15 @@ public partial class QueryItemViewModel : ObservableObject
 
             foreach (var field in source.Fields)
             {
+                // 列参照（Type は保存されない）の表示用型トークンは SourceColumnId 設定時に列から導出される
                 Fields.Add(
                     Track(
                         new ProjectionFieldViewModel(DeriveFieldToken)
                         {
                             Name = field.Name,
-                            Type = field.Type,
+                            Type = field.Type ?? string.Empty,
                             SourceColumnId = field.SourceColumnId,
+                            IsNullable = field.IsNullable,
                         }
                     )
                 );
@@ -217,7 +220,17 @@ public partial class QueryItemViewModel : ObservableObject
     /// スカラーは生 SQL か手動実装でしか成立しない（DSL は列比較の条件式に閉じる）ため、
     /// DSL のときはラジオを無効化して選ばせない。既に選ばれている場合はフォーム検証が弾く。
     /// </remarks>
-    public bool CanSelectScalar => Implementation != QueryImplementationKind.Dsl;
+    public bool CanSelectScalar => !IsScalarDslConflict(QueryReturnShape.Scalar, Implementation);
+
+    /// <summary>スカラー戻り形×簡易 DSL の組み合わせが不正か（スカラーは生 SQL / 手動実装専用）</summary>
+    /// <remarks>
+    /// ラジオ無効化（<see cref="CanSelectScalar"/>）・実装方式切替時のリセット・ダイアログのフォーム検証の
+    /// 3 箇所の多重防御が、この単一述語を共有する（判定のドリフトを防ぐ）。
+    /// </remarks>
+    public static bool IsScalarDslConflict(
+        QueryReturnShape returns,
+        QueryImplementationKind implementation
+    ) => returns == QueryReturnShape.Scalar && implementation == QueryImplementationKind.Dsl;
 
     // ===== 戻り形ラジオ（bool プロキシ。既存ダイアログの流儀に合わせる） =====
 
@@ -413,7 +426,7 @@ public partial class QueryItemViewModel : ObservableObject
     {
         // 簡易 DSL はスカラー戻り値を持てないため、スカラー選択中に DSL へ切り替えたら既定（一覧）へ戻す。
         // 図の読み込み時はフィールド直接代入でここを通らないため、不正な既存定義はフォーム検証が防ぐ
-        if (value == QueryImplementationKind.Dsl && Returns == QueryReturnShape.Scalar)
+        if (IsScalarDslConflict(Returns, value))
         {
             Returns = QueryReturnShape.List;
         }
@@ -525,7 +538,8 @@ public partial class QueryItemViewModel : ObservableObject
                 .Select(p => new QueryParameter
                 {
                     Name = p.Name.Trim(),
-                    Type = p.Type.Trim(),
+                    // 列参照型付けは列由来で型が決まるため、表示用の型トークンは保存しない
+                    Type = p.SourceColumnId is null ? p.Type.Trim() : null,
                     IsList = p.IsList,
                     SourceColumnId = p.SourceColumnId,
                 })
@@ -548,8 +562,10 @@ public partial class QueryItemViewModel : ObservableObject
                 .Select(f => new ProjectionField
                 {
                     Name = f.Name.Trim(),
-                    Type = f.Type.Trim(),
+                    // 列参照は列由来で型が決まるため、表示用の型トークンは保存しない
+                    Type = f.SourceColumnId is null ? f.Type.Trim() : null,
                     SourceColumnId = f.SourceColumnId,
+                    IsNullable = f.IsNullable,
                 })
                 .ToList(),
         };
@@ -660,34 +676,35 @@ public partial class QueryItemViewModel : ObservableObject
                 _ => "Task",
             };
 
-            var arguments = new List<string>();
-
-            foreach (var parameter in Parameters)
-            {
-                // 列参照型付けは列の宣言型からの近似（VO 有効時の実際の型は生成時に確定する）
-                var type = QueryTypeTokenFormatter.ToCSharpType(
-                    parameter.SourceColumnId is { } sourceColumnId
-                        ? DeriveFieldToken(sourceColumnId) ?? parameter.Type
-                        : parameter.Type
-                );
-                var name = string.IsNullOrWhiteSpace(parameter.Name)
-                    ? "arg"
-                    : parameter.Name.Trim();
-                arguments.Add(
-                    parameter.IsList ? $"IReadOnlyList<{type}> {name}" : $"{type} {name}"
-                );
-            }
-
-            if (HasPaging)
-            {
-                arguments.Add("int take");
-                arguments.Add("int skip = 0");
-            }
-
-            arguments.Add("CancellationToken cancellationToken = default");
-
-            return $"{returnType} {methodName}({string.Join(", ", arguments)})";
+            return $"{returnType} {methodName}({string.Join(", ", BuildArgumentList())})";
         }
+    }
+
+    /// <summary>シグネチャプレビューの引数一覧（パラメータ・ページング・CancellationToken）を組み立てる</summary>
+    private List<string> BuildArgumentList()
+    {
+        var arguments = new List<string>();
+
+        foreach (var parameter in Parameters)
+        {
+            // 列参照型付けは列の宣言型からの近似（VO 有効時の実際の型は生成時に確定する）
+            var type = QueryTypeTokenFormatter.ToCSharpType(
+                parameter.SourceColumnId is { } sourceColumnId
+                    ? DeriveFieldToken(sourceColumnId) ?? parameter.Type
+                    : parameter.Type
+            );
+            var name = string.IsNullOrWhiteSpace(parameter.Name) ? "arg" : parameter.Name.Trim();
+            arguments.Add(parameter.IsList ? $"IReadOnlyList<{type}> {name}" : $"{type} {name}");
+        }
+
+        if (HasPaging)
+        {
+            arguments.Add("int take");
+            arguments.Add("int skip = 0");
+        }
+
+        arguments.Add("CancellationToken cancellationToken = default");
+        return arguments;
     }
 
     /// <summary>子行の PropertyChanged を購読し、シグネチャ・条件検証・OK 可否へ波及させる</summary>
@@ -725,113 +742,4 @@ public partial class QueryItemViewModel : ObservableObject
             _notifyParent?.Invoke();
         }
     }
-}
-
-/// <summary>クエリパラメータ 1 件の編集用 ViewModel</summary>
-public partial class QueryParameterViewModel : ObservableObject
-{
-    /// <summary>参照元列 ID から型トークン（列の宣言型）を導出する関数（表示補助。null 可）</summary>
-    private readonly Func<Guid?, string?>? _deriveToken;
-
-    /// <summary>型トークン導出なしで構築する（テスト用）</summary>
-    public QueryParameterViewModel() { }
-
-    /// <summary>型トークン導出関数を注入して構築する</summary>
-    /// <param name="deriveToken">参照元列 ID → 型トークンの導出関数</param>
-    public QueryParameterViewModel(Func<Guid?, string?> deriveToken)
-    {
-        _deriveToken = deriveToken;
-    }
-
-    /// <summary>パラメータ名</summary>
-    [ObservableProperty]
-    private string _name = "param";
-
-    /// <summary>型トークン（方言中立。例: <c>int32</c> / <c>string(50)</c>。列参照時は列由来・編集不可）</summary>
-    [ObservableProperty]
-    private string _type = "int32";
-
-    /// <summary>リスト型か（IN 条件用）</summary>
-    [ObservableProperty]
-    private bool _isList;
-
-    /// <summary>型付けの参照元列 ID（null＝型トークンで型付け）。列を選ぶと VO 有効の図では VO 型の引数になる</summary>
-    [ObservableProperty]
-    private Guid? _sourceColumnId;
-
-    /// <summary>型トークンを手入力できるか（列参照でないときのみ）</summary>
-    public bool IsTypeEditable => SourceColumnId is null;
-
-    partial void OnSourceColumnIdChanged(Guid? value)
-    {
-        // 参照元列を選ぶと型表示は列由来になる。「なし」へ戻したときは手入力値を保持する。
-        if (value is not null && _deriveToken?.Invoke(value) is { } token)
-        {
-            Type = token;
-        }
-
-        OnPropertyChanged(nameof(IsTypeEditable));
-    }
-}
-
-/// <summary>並び順 1 件の編集用 ViewModel</summary>
-public partial class QueryOrderingViewModel : ObservableObject
-{
-    /// <summary>並び替えキーの列 ID</summary>
-    [ObservableProperty]
-    private Guid _columnId;
-
-    /// <summary>降順か（既定は昇順）</summary>
-    [ObservableProperty]
-    private bool _descending;
-}
-
-/// <summary>射影フィールド 1 件の編集用 ViewModel</summary>
-public partial class ProjectionFieldViewModel : ObservableObject
-{
-    /// <summary>参照元列 ID から型トークン（列の宣言型）を導出する関数</summary>
-    private readonly Func<Guid?, string?> _deriveToken;
-
-    /// <summary>型トークン導出関数を注入して構築する</summary>
-    /// <param name="deriveToken">参照元列 ID → 型トークンの導出関数</param>
-    public ProjectionFieldViewModel(Func<Guid?, string?> deriveToken)
-    {
-        _deriveToken = deriveToken;
-    }
-
-    /// <summary>フィールド名（DTO のプロパティ名）</summary>
-    [ObservableProperty]
-    private string _name = "Field";
-
-    /// <summary>型トークン（参照元列があるときは列由来・編集不可）</summary>
-    [ObservableProperty]
-    private string _type = "int32";
-
-    /// <summary>参照元列 ID（null＝自由フィールド）</summary>
-    [ObservableProperty]
-    private Guid? _sourceColumnId;
-
-    /// <summary>型トークンを手入力できるか（自由フィールドのときのみ）</summary>
-    public bool IsTypeEditable => SourceColumnId is null;
-
-    partial void OnSourceColumnIdChanged(Guid? value)
-    {
-        // 参照元列を選ぶと型は列由来になる。「なし」へ戻したときは手入力値を保持する。
-        if (value is not null && _deriveToken(value) is { } token)
-        {
-            Type = token;
-        }
-
-        OnPropertyChanged(nameof(IsTypeEditable));
-    }
-}
-
-/// <summary>列ドロップダウンの選択肢（並び順・射影の参照元列）</summary>
-/// <param name="Id">列 ID（「なし＝自由フィールド」のときは null）</param>
-/// <param name="Name">表示名</param>
-public sealed record ColumnChoice(Guid? Id, string Name)
-{
-    /// <summary>「なし＝自由フィールド」を表す選択肢（表示名は呼び出し側で差し替える）</summary>
-    public static ColumnChoice None { get; } =
-        new(null, QuickER.CodeGen.UI.Resources.Strings.QueryDialog_FieldSourceNone);
 }

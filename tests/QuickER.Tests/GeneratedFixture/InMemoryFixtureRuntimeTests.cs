@@ -412,4 +412,71 @@ public sealed class InMemoryFixtureRuntimeTests
             .Should()
             .BeEmpty();
     }
+
+    // ===== 名前付きクエリ（ミニ DSL 共有本体がインメモリ実装にも出力されることの実行検証） =====
+
+    /// <summary>名前付きクエリ検証用のシード（顧客 2 件＋注文 4 件）を投入した注文リポジトリを作る</summary>
+    private async Task<IOrderRepository> SeedNamedQueryOrdersAsync()
+    {
+        var (_, customers, orders, _) = BuildFresh();
+        await customers.InsertAsync(NewCustomer(1, "Alice"), Ct);
+        await customers.InsertAsync(NewCustomer(2, "Bob"), Ct);
+        await orders.InsertAsync(NewOrder(10, 1, 100m), Ct);
+        await orders.InsertAsync(NewOrder(11, 1, 50m), Ct);
+        await orders.InsertAsync(NewOrder(12, 2, 200m), Ct);
+        await orders.InsertAsync(NewOrder(13, 1, 75m), Ct);
+        return orders;
+    }
+
+    [Fact(DisplayName = "名前付きクエリ: 一覧＋条件＋並び順＋ページングが正しい窓を返す")]
+    public async Task NamedQuery_List_WithPaging_ReturnsOrderedWindow()
+    {
+        var orders = await SeedNamedQueryOrdersAsync();
+
+        // 顧客 1 の注文は 13, 11, 10（注文ID降順）。skip=1, take=2 → 11, 10
+        var window = await orders.GetByCustomerAsync(1, take: 2, skip: 1, Ct);
+        window.Select(o => o.OrderId).Should().Equal(11, 10);
+
+        // skip 既定（0）
+        var top = await orders.GetByCustomerAsync(1, take: 2, cancellationToken: Ct);
+        top.Select(o => o.OrderId).Should().Equal(13, 11);
+    }
+
+    [Fact(DisplayName = "名前付きクエリ: 単一が並び順先頭の 1 件（空ストアは null）を返す")]
+    public async Task NamedQuery_Single_ReturnsFirstByOrdering()
+    {
+        var orders = await SeedNamedQueryOrdersAsync();
+
+        var top = await orders.FindTopAsync(Ct);
+        top.Should().NotBeNull();
+        top!.OrderId.Should().Be(13);
+
+        // 空ストアでは null
+        var (_, _, emptyOrders, _) = BuildFresh();
+        (await emptyOrders.FindTopAsync(Ct)).Should().BeNull();
+    }
+
+    [Fact(DisplayName = "名前付きクエリ: 件数が条件一致数を返す")]
+    public async Task NamedQuery_Count_ReturnsMatchingCount()
+    {
+        var orders = await SeedNamedQueryOrdersAsync();
+
+        (await orders.CountByCustomerAsync(1, Ct)).Should().Be(3);
+        (await orders.CountByCustomerAsync(2, Ct)).Should().Be(1);
+        (await orders.CountByCustomerAsync(999, Ct)).Should().Be(0);
+    }
+
+    [Fact(DisplayName = "名前付きクエリ: 射影が DTO 一覧を並び順込みで返す")]
+    public async Task NamedQuery_Projection_ReturnsDtoRows()
+    {
+        var orders = await SeedNamedQueryOrdersAsync();
+
+        // 顧客 1 の注文（10, 11, 13 の昇順）→ Amount は 100, 50, 75
+        var rows = await orders.GetSummariesAsync(1, Ct);
+        rows.Should().HaveCount(3);
+        rows.Select(r => r.CustomerId).Should().OnlyContain(v => v == 1);
+        rows.Select(r => r.Amount).Should().Equal(100m, 50m, 75m);
+
+        (await orders.GetSummariesAsync(999, Ct)).Should().BeEmpty();
+    }
 }

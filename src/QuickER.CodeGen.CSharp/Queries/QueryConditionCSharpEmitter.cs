@@ -8,11 +8,13 @@ namespace QuickER.CodeGen.CSharp.Queries;
 /// <param name="UnderlyingTypeName">素の C# 型名（値オブジェクトなら内包値の型。null 許容 <c>?</c> は含まない）</param>
 /// <param name="ValueObjectClassName">値オブジェクト列の VO クラス名（VO でなければ null）</param>
 /// <param name="IsNullable">NULL 許容列かどうか</param>
+/// <param name="IsUnderlyingReferenceType">素の C# 型が参照型か（射影 DTO の非 NULL プロパティ初期化子の要否判定用。条件エミットでは未使用）</param>
 public sealed record QueryColumnBinding(
     string PropertyName,
     string UnderlyingTypeName,
     string? ValueObjectClassName,
-    bool IsNullable
+    bool IsNullable,
+    bool IsUnderlyingReferenceType = false
 );
 
 /// <summary>

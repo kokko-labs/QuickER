@@ -311,12 +311,6 @@ You can pass this file directly to the CLI as --config.</value>
   <data name="QueryDialog_Parameters" xml:space="preserve">
     <value>Parameter definitions</value>
   </data>
-  <data name="QueryDialog_ParamName" xml:space="preserve">
-    <value>Name</value>
-  </data>
-  <data name="QueryDialog_ParamType" xml:space="preserve">
-    <value>Type token</value>
-  </data>
   <data name="QueryDialog_ParamIsList" xml:space="preserve">
     <value>List</value>
   </data>
@@ -359,17 +353,8 @@ You can pass this file directly to the CLI as --config.</value>
   <data name="QueryDialog_ResultTypeName" xml:space="preserve">
     <value>DTO type name</value>
   </data>
-  <data name="QueryDialog_FieldName" xml:space="preserve">
-    <value>Field name</value>
-  </data>
-  <data name="QueryDialog_FieldSource" xml:space="preserve">
-    <value>Source column</value>
-  </data>
   <data name="QueryDialog_FieldSourceNone" xml:space="preserve">
     <value>(none = free field)</value>
-  </data>
-  <data name="QueryDialog_FieldType" xml:space="preserve">
-    <value>Type token</value>
   </data>
   <data name="QueryDialog_SignaturePreview" xml:space="preserve">
     <value>Method definition preview</value>

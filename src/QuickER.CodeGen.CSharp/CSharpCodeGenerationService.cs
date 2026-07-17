@@ -120,7 +120,7 @@ public sealed class CSharpCodeGenerationService
         }
         catch (ArgumentException ex)
         {
-            diagnostics.Add(Error(ex.Message));
+            diagnostics.Add(GenerationDiagnostic.Error(ex.Message));
             return new CodeGenerationResult { Files = [], Diagnostics = diagnostics };
         }
 
@@ -132,7 +132,9 @@ public sealed class CSharpCodeGenerationService
         // GenerateRepositories の実効方言が 2 つ以上かつ GenerateEfCore のときは早期に診断エラーとする。
         if (options.GenerateRepositories && options.GenerateEfCore && effectiveDialects.Count >= 2)
         {
-            diagnostics.Add(Error(Strings.CodeGen_Error_MultiTargetEfCoreExclusive));
+            diagnostics.Add(
+                GenerationDiagnostic.Error(Strings.CodeGen_Error_MultiTargetEfCoreExclusive)
+            );
         }
 
         // インメモリ Repository はパッケージ参照モードと併用できない。インメモリ実行器（InMemoryQueryExecutor・
@@ -141,7 +143,9 @@ public sealed class CSharpCodeGenerationService
         // よって併用指定は早期に診断エラーとする（インメモリはインライン既定＝固定 infra 同梱でのみ成立する）。
         if (options.GenerateInMemoryRepositories && options.UseRuntimePackages)
         {
-            diagnostics.Add(Error(Strings.CodeGen_Error_InMemoryRuntimePackagesExclusive));
+            diagnostics.Add(
+                GenerationDiagnostic.Error(Strings.CodeGen_Error_InMemoryRuntimePackagesExclusive)
+            );
         }
 
         // ランタイムのパッケージ参照モードと EF Core 生成は併用できる（EF Core 固定 infra を TContext ジェネリック化した
@@ -215,7 +219,7 @@ public sealed class CSharpCodeGenerationService
                 excludedColumnLines.Select(line => "  " + line)
             );
             diagnostics.Add(
-                Info(
+                GenerationDiagnostic.Info(
                     string.Format(
                         Strings.CodeGen_Info_ExcludedUnboundedBinaryColumns,
                         Environment.NewLine + excludedColumnList
@@ -487,32 +491,38 @@ public sealed class CSharpCodeGenerationService
         // EditModel を出さないと単独生成になりコンパイル不能になる
         if (options.GenerateMappers && !options.GenerateEditModels)
         {
-            diagnostics.Add(Error(Strings.CodeGen_Error_MapperRequiresEntityAndEditModel));
+            diagnostics.Add(
+                GenerationDiagnostic.Error(Strings.CodeGen_Error_MapperRequiresEntityAndEditModel)
+            );
         }
 
         // Repository の SQL 組み立て・EF Core・インメモリのマッピング（EntitySaveMetadata）は [Table] / [Key] / [Column]
         // 属性をリフレクションで参照するため、DataAnnotations を無効にすると実行時に初期化例外となる。生成前に検出する
         if (options.GeneratesRepositoryContract && !options.IncludeDataAnnotations)
         {
-            diagnostics.Add(Error(Strings.CodeGen_Error_RepositoryRequiresDataAnnotations));
+            diagnostics.Add(
+                GenerationDiagnostic.Error(Strings.CodeGen_Error_RepositoryRequiresDataAnnotations)
+            );
         }
 
         if (diagram.Entities.Count == 0)
         {
-            diagnostics.Add(Error(Strings.CodeGen_Error_NoEntities));
+            diagnostics.Add(GenerationDiagnostic.Error(Strings.CodeGen_Error_NoEntities));
         }
 
         foreach (var entity in diagram.Entities)
         {
             if (string.IsNullOrWhiteSpace(entity.TableName))
             {
-                diagnostics.Add(Error(Strings.CodeGen_Error_EmptyTableName));
+                diagnostics.Add(GenerationDiagnostic.Error(Strings.CodeGen_Error_EmptyTableName));
             }
 
             if (entity.Columns.Count(column => column.IsPrimaryKey) > 1)
             {
                 diagnostics.Add(
-                    Warning(string.Format(Strings.CodeGen_Warning_CompositeKey, entity.TableName))
+                    GenerationDiagnostic.Warning(
+                        string.Format(Strings.CodeGen_Warning_CompositeKey, entity.TableName)
+                    )
                 );
             }
         }
@@ -567,16 +577,4 @@ public sealed class CSharpCodeGenerationService
                     )
             )
             .ToList();
-
-    /// <summary>エラー診断を作成する</summary>
-    private static GenerationDiagnostic Error(string message) =>
-        new() { Severity = GenerationDiagnosticSeverity.Error, Message = message };
-
-    /// <summary>警告診断を作成する</summary>
-    private static GenerationDiagnostic Warning(string message) =>
-        new() { Severity = GenerationDiagnosticSeverity.Warning, Message = message };
-
-    /// <summary>情報診断を作成する</summary>
-    private static GenerationDiagnostic Info(string message) =>
-        new() { Severity = GenerationDiagnosticSeverity.Info, Message = message };
 }

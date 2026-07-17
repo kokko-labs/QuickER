@@ -155,10 +155,7 @@ public partial class QueryDefinitionDialogViewModel : ObservableObject
 
             // スカラー戻り値は簡易 DSL では成立しない（生 SQL / 手動実装 専用）。
             // ラジオ無効化だけでは、選択済みで DSL へ切替・既存定義の読み込みで到達し得るため防御する。
-            if (
-                query.Returns == QueryReturnShape.Scalar
-                && query.Implementation == QueryImplementationKind.Dsl
-            )
+            if (QueryItemViewModel.IsScalarDslConflict(query.Returns, query.Implementation))
             {
                 return Strings.QueryDialog_ScalarRequiresSqlOrManual;
             }
