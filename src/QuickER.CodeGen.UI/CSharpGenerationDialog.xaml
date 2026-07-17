@@ -379,8 +379,11 @@
             <ColumnDefinition Width="96" />
             <ColumnDefinition Width="*" />
           </Grid.ColumnDefinitions>
+          <!-- 2 段チェックの行のため、ラベルは中央寄せ（FieldLabel 既定）でなく上段チェックと揃う上詰めにする -->
           <TextBlock
             Grid.Column="0"
+            VerticalAlignment="Top"
+            Margin="0,2,0,0"
             Style="{StaticResource FieldLabel}"
             Text="{x:Static res:Strings.CodeGen_Documentation}"
           />
@@ -390,7 +393,7 @@
               IsChecked="{Binding GenerateApiDocs}"
               ToolTip="{x:Static res:Strings.CodeGen_ApiDocsTooltip}"
             />
-            <!-- 日本語版 API ドキュメントの併産（API リファレンス出力の下位＝インデント＋GenerateApiDocs 連動） -->
+            <!-- 日本語版 API リファレンスの併産（API リファレンス出力の下位＝インデント＋GenerateApiDocs 連動） -->
             <CheckBox
               Margin="18,8,0,0"
               Content="{x:Static res:Strings.CodeGen_IncludeJapaneseApiDocs}"

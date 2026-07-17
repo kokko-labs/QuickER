@@ -479,7 +479,7 @@ DB なしでユニットテストするためのインメモリ実装を追加�
 - DI 登録・CRUD・クエリの使い方例
 - 生成ファイル構成表
 
-**英語が正本です。** 日本語版も併産したい場合は、GUI の下位チェック「日本語版 API ドキュメント (.ja.g.md) も出力」、または CLI の `--api-docs-ja` フラグ（設定キー `IncludeJapaneseApiDocs`）を有効化します（**既定 OFF**・`--generate-api-docs` が前提）。有効化すると、英語正本の `.g.md` に加えて `.ja.g.md` が併産されます（例: `EcOrder.g.cs` → `EcOrder.ja.g.md`）。
+**英語が正本です。** 日本語版も併産したい場合は、GUI の下位チェック「日本語版 API リファレンス (.ja.g.md) も出力する」、または CLI の `--api-docs-ja` フラグ（設定キー `IncludeJapaneseApiDocs`）を有効化します（**既定 OFF**・`--generate-api-docs` が前提）。有効化すると、英語正本の `.g.md` に加えて `.ja.g.md` が併産されます（例: `EcOrder.g.cs` → `EcOrder.ja.g.md`）。
 
 `.g.md` / `.ja.g.md` は自動生成ファイルです。再生成で上書きされるため、直接編集しないでください。
 
