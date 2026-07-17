@@ -164,6 +164,13 @@ public partial class QueryDefinitionDialogViewModel : ObservableObject
             {
                 return Strings.QueryDialog_Status_ConditionInvalid;
             }
+
+            // 生 SQL の未宣言パラメータは実行時に必ず失敗するため OK をブロックする
+            // （未使用・複文の警告はインライン表示のみで OK は通す）
+            if (!query.IsRawSqlValid)
+            {
+                return Strings.QueryDialog_Status_RawSqlInvalid;
+            }
         }
 
         // 同一エンティティ内でのメソッド名重複（大文字小文字を区別しない）

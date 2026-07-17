@@ -413,5 +413,29 @@ namespace QuickER.CodeGen.CSharp.Resources {
                 return ResourceManager.GetString("CodeGen_Query_DuplicateResultTypeName", resourceCulture);
             }
         }
+
+        public static string CodeGen_Query_RawSqlUndeclaredParameter {
+            get {
+                return ResourceManager.GetString("CodeGen_Query_RawSqlUndeclaredParameter", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_Query_RawSqlUnusedParameter {
+            get {
+                return ResourceManager.GetString("CodeGen_Query_RawSqlUnusedParameter", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_Query_RawSqlMultipleStatements {
+            get {
+                return ResourceManager.GetString("CodeGen_Query_RawSqlMultipleStatements", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_Query_RawSqlIssue {
+            get {
+                return ResourceManager.GetString("CodeGen_Query_RawSqlIssue", resourceCulture);
+            }
+        }
     }
 }

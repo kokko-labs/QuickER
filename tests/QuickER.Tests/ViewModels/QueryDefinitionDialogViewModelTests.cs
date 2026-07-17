@@ -380,6 +380,73 @@ public class QueryDefinitionDialogViewModelTests
         vm.StatusMessage.Should().BeEmpty();
     }
 
+    /// <summary>
+    /// 生 SQL の未宣言パラメータがインライン診断として表示され、OK をブロックすること・
+    /// パラメータを宣言すると解消することを検証する。
+    /// </summary>
+    [Fact(DisplayName = "生 SQL 未宣言パラメータはインライン表示され OK をブロックする")]
+    public void RawSql_UndeclaredParameter_ShowsInlineAndBlocksOk()
+    {
+        var diagram = CreateDiagram(out _, out _, out _);
+        var vm = new QueryDefinitionDialogViewModel(diagram);
+        var query = vm.SelectedQuery!;
+
+        // 既存の条件付き DSL クエリを生 SQL へ切り替え、宣言に無い @ghost を参照する
+        query.Implementation = QueryImplementationKind.Sql;
+        query.SqlServerSql = "SELECT * FROM [Order] WHERE [X] = @ghost";
+
+        query.IsRawSqlValid.Should().BeFalse();
+        query.SqlDiagnostics.Should().Contain(m => m.Contains("ghost"));
+        vm.OkCommand.CanExecute(null).Should().BeFalse();
+        vm.StatusMessage.Should()
+            .Be(QuickER.CodeGen.UI.Resources.Strings.QueryDialog_Status_RawSqlInvalid);
+
+        // @ghost を参照する SQL を、宣言済み @customerId を使うものに直すと解消する
+        query.SqlServerSql = "SELECT * FROM [Order] WHERE [CustomerId] = @customerId";
+        query.IsRawSqlValid.Should().BeTrue();
+        query.SqlDiagnostics.Should().BeEmpty();
+        vm.OkCommand.CanExecute(null).Should().BeTrue();
+        vm.StatusMessage.Should().BeEmpty();
+    }
+
+    /// <summary>生 SQL の未使用パラメータ・複文はインライン表示のみで OK をブロックしないことを検証する</summary>
+    [Fact(DisplayName = "生 SQL 未使用・複文はインライン表示のみで OK を通す")]
+    public void RawSql_UnusedAndMultiStatement_DoNotBlockOk()
+    {
+        var diagram = CreateDiagram(out _, out _, out _);
+        var vm = new QueryDefinitionDialogViewModel(diagram);
+        var query = vm.SelectedQuery!;
+
+        // 既存クエリは @customerId を宣言済み。使わない SQL ＋ 複文にする
+        query.Implementation = QueryImplementationKind.Sql;
+        query.SqlServerSql = "SELECT * FROM [Order]; SELECT 1";
+
+        // 未使用（customerId）と複文の 2 件がインライン表示される
+        query.SqlDiagnostics.Should().HaveCount(2);
+        // どちらも OK はブロックしない
+        query.IsRawSqlValid.Should().BeTrue();
+        vm.OkCommand.CanExecute(null).Should().BeTrue();
+        vm.StatusMessage.Should().BeEmpty();
+    }
+
+    /// <summary>実装方式を生 SQL 以外へ戻すと SQL 診断がクリアされ有効扱いになることを検証する</summary>
+    [Fact(DisplayName = "生 SQL 以外へ切り替えると SQL 診断はクリアされる")]
+    public void RawSql_SwitchingAwayFromSql_ClearsDiagnostics()
+    {
+        var diagram = CreateDiagram(out _, out _, out _);
+        var vm = new QueryDefinitionDialogViewModel(diagram);
+        var query = vm.SelectedQuery!;
+
+        query.Implementation = QueryImplementationKind.Sql;
+        query.SqlServerSql = "SELECT * FROM [Order] WHERE [X] = @ghost";
+        query.IsRawSqlValid.Should().BeFalse();
+
+        // 手動実装へ戻すと SQL 検証はスキップ（有効扱い）・診断はクリア
+        query.Implementation = QueryImplementationKind.Manual;
+        query.IsRawSqlValid.Should().BeTrue();
+        query.SqlDiagnostics.Should().BeEmpty();
+    }
+
     /// <summary>非表示になる項目（条件・並び順・SQL 本文）が実装方式の往復でクリアされず保持されることを検証する</summary>
     [Fact(DisplayName = "実装方式の往復で入力値が保持される")]
     public void SwitchingImplementation_RetainsInputs()

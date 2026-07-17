@@ -380,4 +380,7 @@
   <data name="QueryDialog_Status_DuplicateName" xml:space="preserve">
     <value>メソッド名 '{0}' が同一エンティティ内で重複しています。</value>
   </data>
+  <data name="QueryDialog_Status_RawSqlInvalid" xml:space="preserve">
+    <value>生 SQL に未宣言のパラメータがあります。</value>
+  </data>
 </root>

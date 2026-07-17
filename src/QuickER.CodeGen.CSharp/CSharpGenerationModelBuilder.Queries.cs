@@ -529,6 +529,12 @@ internal sealed partial class CSharpGenerationModelBuilder
 
         parameterDecls.Add("CancellationToken cancellationToken = default");
 
+        // ---- 自由 SQL の静的検証（レベル 1・方言非依存。未宣言＝スキップ・未使用/複文＝警告のみ） ----
+        if (!ValidateRawSql(query, argumentNames, diagnostics))
+        {
+            hasError = true;
+        }
+
         var lambdaNames = argumentNames.Concat(["take", "skip", "cancellationToken"]).ToList();
         var lambdaVar = QueryConditionCSharpEmitter.PickLambdaVariable(lambdaNames);
 
@@ -709,6 +715,59 @@ internal sealed partial class CSharpGenerationModelBuilder
             dtoClass,
             projectionSelector
         );
+    }
+
+    /// <summary>
+    /// 自由 SQL（<see cref="QueryImplementationKind.Sql"/>）の静的検証（レベル 1・方言非依存）を行い、
+    /// 方言別 SQL 辞書の各エントリを走査して未宣言パラメータ・未使用パラメータ・複文を診断する
+    /// </summary>
+    /// <remarks>
+    /// 未宣言パラメータは実行時に必ず失敗するため「警告＋該当クエリのみ生成スキップ」（Guid 参照検証と同じ方針）、
+    /// 未使用パラメータ・複文は「警告のみ・生成継続」。診断は方言名を含む（GUI / CLI 双方に効く）。
+    /// </remarks>
+    /// <param name="argumentNames">メソッド引数になるパラメータ名（ページング時は take / skip も SQL から参照できる）</param>
+    /// <returns>未宣言パラメータが 1 件でもあれば false（このクエリはスキップする）</returns>
+    private static bool ValidateRawSql(
+        QueryDefinition query,
+        IReadOnlyList<string> argumentNames,
+        ICollection<GenerationDiagnostic> diagnostics
+    )
+    {
+        if (query.Implementation != QueryImplementationKind.Sql || query.Sql.Count == 0)
+        {
+            return true;
+        }
+
+        // 生 SQL が参照できるパラメータ＝メソッド引数（＋ページング時の take / skip）
+        var declared = query.HasPaging
+            ? argumentNames.Concat(["take", "skip"]).ToList()
+            : argumentNames.ToList();
+
+        var ok = true;
+
+        foreach (var (dialect, sql) in query.Sql)
+        {
+            foreach (var finding in RawSqlAnalyzer.Analyze(sql, declared))
+            {
+                diagnostics.Add(
+                    GenerationDiagnostic.Warning(
+                        string.Format(
+                            Strings.CodeGen_Query_RawSqlIssue,
+                            query.Name,
+                            dialect,
+                            RawSqlAnalyzer.Describe(finding)
+                        )
+                    )
+                );
+
+                if (finding.Kind == RawSqlAnalyzer.RawSqlIssueKind.UndeclaredParameter)
+                {
+                    ok = false;
+                }
+            }
+        }
+
+        return ok;
     }
 
     /// <summary>エミットフェーズ: 検証済みの生成計画から契約・実装・DTO のメンバーテキストを組み立てる</summary>

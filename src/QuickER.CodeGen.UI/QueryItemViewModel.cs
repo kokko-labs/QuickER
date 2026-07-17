@@ -5,6 +5,7 @@ using System.Text;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using QuickER.CodeGen.CSharp.Queries;
+using QuickER.CodeGen.UI.Resources;
 using QuickER.Model;
 
 namespace QuickER.CodeGen.UI;
@@ -117,6 +118,7 @@ public partial class QueryItemViewModel : ObservableObject
         }
 
         ValidateCondition();
+        ValidateSql();
     }
 
     // ===== スカラー/基本プロパティ =====
@@ -190,6 +192,15 @@ public partial class QueryItemViewModel : ObservableObject
     /// <summary>条件式が有効か（診断なし。ミニ DSL 以外は常に有効）</summary>
     [ObservableProperty]
     private bool _isConditionValid = true;
+
+    // ===== 生 SQL 静的検証 =====
+
+    /// <summary>生 SQL の静的検証メッセージ一覧（方言名つき。空なら問題なし）</summary>
+    public ObservableCollection<string> SqlDiagnostics { get; } = new();
+
+    /// <summary>生 SQL に未宣言パラメータが無いか（未使用・複文の警告は OK をブロックしない）</summary>
+    [ObservableProperty]
+    private bool _isRawSqlValid = true;
 
     // ===== 表示制御（派生） =====
 
@@ -420,7 +431,17 @@ public partial class QueryItemViewModel : ObservableObject
 
     partial void OnConditionChanged(string value) => ValidateCondition();
 
-    partial void OnHasPagingChanged(bool value) => RaiseSignatureChanged();
+    partial void OnSqlServerSqlChanged(string value) => ValidateSql();
+
+    partial void OnSqliteSqlChanged(string value) => ValidateSql();
+
+    partial void OnHasPagingChanged(bool value)
+    {
+        RaiseSignatureChanged();
+
+        // ページングの有無で SQL から参照できる take / skip が変わるため生 SQL 検証をやり直す
+        ValidateSql();
+    }
 
     partial void OnImplementationChanged(QueryImplementationKind value)
     {
@@ -438,19 +459,25 @@ public partial class QueryItemViewModel : ObservableObject
         OnPropertyChanged(nameof(ShowSqlEditors));
         OnPropertyChanged(nameof(CanSelectScalar));
         ValidateCondition();
+        ValidateSql();
         _notifyParent?.Invoke();
     }
 
     partial void OnIsConditionValidChanged(bool value) => _notifyParent?.Invoke();
 
+    partial void OnIsRawSqlValidChanged(bool value) => _notifyParent?.Invoke();
+
     // ===== 子行の追加・削除コマンド =====
 
     /// <summary>パラメータ行を追加する</summary>
     [RelayCommand]
-    private void AddParameter() =>
+    private void AddParameter()
+    {
         Parameters.Add(
             Track(new QueryParameterViewModel(DeriveFieldToken) { Name = "param", Type = "int32" })
         );
+        ValidateSql();
+    }
 
     /// <summary>指定パラメータ行を削除する</summary>
     [RelayCommand]
@@ -460,6 +487,7 @@ public partial class QueryItemViewModel : ObservableObject
         {
             RaiseSignatureChanged();
             ValidateCondition();
+            ValidateSql();
             _notifyParent?.Invoke();
         }
     }
@@ -610,6 +638,54 @@ public partial class QueryItemViewModel : ObservableObject
         IsConditionValid = result.Success;
     }
 
+    /// <summary>生 SQL（方言別）を静的検証し、診断一覧・未宣言パラメータ有無を更新する</summary>
+    /// <remarks>
+    /// 生 SQL 以外のときは検証をスキップ（有効扱い）。未宣言パラメータがあれば OK をブロックし、
+    /// 未使用・複文はインライン表示のみ（OK は通す）。診断文言は解析器のローカライズ済みメッセージを再利用する。
+    /// </remarks>
+    private void ValidateSql()
+    {
+        SqlDiagnostics.Clear();
+
+        if (Implementation != QueryImplementationKind.Sql)
+        {
+            IsRawSqlValid = true;
+            return;
+        }
+
+        // 生 SQL が参照できるパラメータ＝パラメータ名（＋ページング時の take / skip）
+        var declared = Parameters
+            .Select(p => p.Name.Trim())
+            .Where(name => name.Length > 0)
+            .ToList();
+
+        if (HasPaging)
+        {
+            declared.Add("take");
+            declared.Add("skip");
+        }
+
+        var valid = true;
+
+        void Inspect(string sql, string dialectLabel)
+        {
+            foreach (var finding in RawSqlAnalyzer.Analyze(sql, declared))
+            {
+                SqlDiagnostics.Add($"{dialectLabel}: {RawSqlAnalyzer.Describe(finding)}");
+
+                if (finding.Kind == RawSqlAnalyzer.RawSqlIssueKind.UndeclaredParameter)
+                {
+                    valid = false;
+                }
+            }
+        }
+
+        Inspect(SqlServerSql, Strings.QueryDialog_SqlServerSql);
+        Inspect(SqliteSql, Strings.QueryDialog_SqliteSql);
+
+        IsRawSqlValid = valid;
+    }
+
     /// <summary>対象エンティティの列から、並び順・射影用の選択肢コレクションを作り直す</summary>
     private void RebuildAvailableColumns()
     {
@@ -735,6 +811,7 @@ public partial class QueryItemViewModel : ObservableObject
         {
             RaiseSignatureChanged();
             ValidateCondition();
+            ValidateSql();
             _notifyParent?.Invoke();
         }
         else if (sender is ProjectionFieldViewModel)

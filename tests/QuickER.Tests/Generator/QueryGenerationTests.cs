@@ -459,6 +459,114 @@ public class QueryGenerationTests
         efClass.Should().NotContain("QueryBySqlAsync").And.NotContain("SpecialLookupAsync");
     }
 
+    /// <summary>
+    /// 自由 SQL の静的検証: 未宣言パラメータのクエリは警告＋該当クエリのみスキップされ、
+    /// 有効なクエリは生成される（生成全体は成功する）ことを検証する。
+    /// </summary>
+    [Fact(DisplayName = "生 SQL 未宣言パラメータ: 警告＋該当クエリのみスキップ")]
+    public void Generate_RawSqlUndeclaredParameter_WarnsAndSkipsQuery()
+    {
+        var diagram = CreateDiagram(
+            new QueryDefinition
+            {
+                Name = "GetGood",
+                Returns = QueryReturnShape.List,
+                Implementation = QueryImplementationKind.Sql,
+                Parameters =
+                {
+                    new QueryParameter { Name = "customerId", Type = "int32" },
+                },
+                Sql = { ["sqlserver"] = "SELECT * FROM [Order] WHERE [CustomerId] = @customerId" },
+            },
+            new QueryDefinition
+            {
+                Name = "GetBad",
+                Returns = QueryReturnShape.List,
+                Implementation = QueryImplementationKind.Sql,
+                Parameters =
+                {
+                    new QueryParameter { Name = "customerId", Type = "int32" },
+                },
+                // @ghost は宣言に無い → 実行時に必ず失敗するため該当クエリをスキップ
+                Sql = { ["sqlserver"] = "SELECT * FROM [Order] WHERE [X] = @ghost" },
+            }
+        );
+
+        var result = Generate(diagram, CreateOptions());
+
+        // 警告のみ（エラーなし）で生成は成功する
+        result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
+        result
+            .Diagnostics.Should()
+            .Contain(d =>
+                d.Severity == GenerationDiagnosticSeverity.Warning
+                && d.Message.Contains("GetBad")
+                && d.Message.Contains("ghost")
+            );
+
+        var content = AllContent(result);
+        // 有効なクエリは生成され、未宣言パラメータのクエリだけがスキップされる
+        content.Should().Contain("GetGoodAsync(");
+        content.Should().NotContain("GetBadAsync(");
+    }
+
+    /// <summary>自由 SQL の静的検証: 未使用パラメータは警告のみで生成が継続することを検証する</summary>
+    [Fact(DisplayName = "生 SQL 未使用パラメータ: 警告のみで生成継続")]
+    public void Generate_RawSqlUnusedParameter_WarnsButGenerates()
+    {
+        var diagram = CreateDiagram(
+            new QueryDefinition
+            {
+                Name = "ListEverything",
+                Returns = QueryReturnShape.List,
+                Implementation = QueryImplementationKind.Sql,
+                Parameters =
+                {
+                    new QueryParameter { Name = "unused", Type = "int32" },
+                },
+                Sql = { ["sqlserver"] = "SELECT * FROM [Order]" },
+            }
+        );
+
+        var result = Generate(diagram, CreateOptions());
+
+        result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
+        result
+            .Diagnostics.Should()
+            .Contain(d =>
+                d.Severity == GenerationDiagnosticSeverity.Warning && d.Message.Contains("unused")
+            );
+
+        // 警告のみ＝クエリは生成される
+        AllContent(result).Should().Contain("ListEverythingAsync(");
+    }
+
+    /// <summary>自由 SQL の静的検証: 複文は警告のみで生成が継続することを検証する</summary>
+    [Fact(DisplayName = "生 SQL 複文: 警告のみで生成継続")]
+    public void Generate_RawSqlMultipleStatements_WarnsButGenerates()
+    {
+        var diagram = CreateDiagram(
+            new QueryDefinition
+            {
+                Name = "GetTwo",
+                Returns = QueryReturnShape.List,
+                Implementation = QueryImplementationKind.Sql,
+                Sql = { ["sqlserver"] = "SELECT * FROM [Order]; SELECT * FROM [Order]" },
+            }
+        );
+
+        var result = Generate(diagram, CreateOptions());
+
+        result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
+        result
+            .Diagnostics.Should()
+            .Contain(d =>
+                d.Severity == GenerationDiagnosticSeverity.Warning && d.Message.Contains("GetTwo")
+            );
+
+        AllContent(result).Should().Contain("GetTwoAsync(");
+    }
+
     /// <summary>マルチターゲット: 共有 DSL 本体は両方言に、方言 SQL は該当方言のみに出ることを検証する</summary>
     [Fact(DisplayName = "マルチターゲット: DSL は両方言・SQL は該当方言のみ")]
     public void Generate_MultiTarget_DispatchesByDialect()
