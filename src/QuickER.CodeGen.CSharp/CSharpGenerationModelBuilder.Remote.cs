@@ -112,7 +112,7 @@ internal sealed partial class CSharpGenerationModelBuilder
             shape.PayloadParameters.Select(p => $"{p.TypeName} {ToPascalCase(p.Name)}")
         );
 
-        return $"    /// <summary>{TrimAsyncSuffix(shape.MethodName)}（{repositoryName}）のリクエスト本文</summary>\n"
+        return $"    /// <summary>Request body for {TrimAsyncSuffix(shape.MethodName)} ({repositoryName}).</summary>\n"
             + $"    private sealed record {RequestRecordName(shape, repositoryName)}({properties});";
     }
 

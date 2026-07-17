@@ -30,32 +30,32 @@ namespace {{ namespace_name }};
 {{~ end ~}}
 
 {{~ if (emit_nav_ref_attr || runtime_package_export) && render_runtime && emit_shared_infra ~}}
-/// <summary>Entity ナビゲーションへ参照テーブル・カラム情報を付加する独自属性</summary>
+/// <summary>Custom attribute that annotates an entity navigation with the referenced table and column information.</summary>
 [AttributeUsage(AttributeTargets.Property, AllowMultiple = false)]
 public sealed class NavigationReferenceAttribute : Attribute
 {
-    /// <summary>参照される側（principal）のテーブル名</summary>
+    /// <summary>Gets the table name of the referenced (principal) side.</summary>
     public string PrincipalTable { get; }
 
-    /// <summary>参照される側（principal）のカラム名</summary>
+    /// <summary>Gets the column name of the referenced (principal) side.</summary>
     public string PrincipalColumn { get; }
 
-    /// <summary>外部キーを持つ側（dependent）のテーブル名</summary>
+    /// <summary>Gets the table name of the side that holds the foreign key (dependent).</summary>
     public string DependentTable { get; }
 
-    /// <summary>外部キーを持つ側（dependent）のカラム名</summary>
+    /// <summary>Gets the column name of the side that holds the foreign key (dependent).</summary>
     public string DependentColumn { get; }
 
-    /// <summary>コレクション（1 対多）ナビゲーションかどうか</summary>
+    /// <summary>Gets a value indicating whether this is a collection (one-to-many) navigation.</summary>
     public bool IsCollection { get; }
 
-    /// <summary>カスケード保存/削除の対象（子方向のナビゲーション）かどうか</summary>
+    /// <summary>Gets a value indicating whether this navigation is a target of cascade save/delete (a child-direction navigation).</summary>
     public bool Cascade { get; }
 
-    /// <summary>親（参照される側）への参照ナビゲーションかどうか</summary>
+    /// <summary>Gets a value indicating whether this is a reference navigation to the parent (referenced) side.</summary>
     public bool IsParentReference { get; }
 
-    /// <summary>参照テーブル・カラム情報を受け取り初期化する</summary>
+    /// <summary>Initializes a new instance with the referenced table and column information.</summary>
     public NavigationReferenceAttribute(
         string principalTable,
         string principalColumn,
@@ -78,70 +78,70 @@ public sealed class NavigationReferenceAttribute : Attribute
 {{ end }}
 {{~ if (emit_sql_column_type_attr || runtime_package_export) && render_runtime && emit_shared_infra ~}}
 /// <summary>
-/// Entity プロパティに DB 列のメタ情報（SqlDbType・Size・Precision・Scale）を付与する独自属性。
-/// ランタイム（EntitySaveMetadata）が明示 <c>SqlParameter</c> を組み立てるのに使うほか、
-/// 利用者コードが列のメタ情報（最大長・桁数）を参照する用途にも使える。
+/// Custom attribute that annotates an entity property with DB column metadata (SqlDbType, Size, Precision, Scale).
+/// It is used by the runtime (EntitySaveMetadata) to build an explicit <c>SqlParameter</c>, and can also be
+/// consumed by user code that needs the column metadata (maximum length, number of digits).
 /// </summary>
 [AttributeUsage(AttributeTargets.Property, AllowMultiple = false)]
 public sealed class SqlColumnTypeAttribute : Attribute
 {
-    /// <summary>DB 列の SqlDbType</summary>
+    /// <summary>Gets the SqlDbType of the DB column.</summary>
     public SqlDbType DbType { get; }
 
-    /// <summary>文字列/バイナリの宣言長。(max) は -1、指定なしは 0</summary>
+    /// <summary>Gets or sets the declared length for string/binary columns. (max) is -1, and unspecified is 0.</summary>
     public int Size { get; set; }
 
-    /// <summary>decimal 系の全体桁数 precision</summary>
+    /// <summary>Gets or sets the total number of digits (precision) for decimal types.</summary>
     public byte Precision { get; set; }
 
-    /// <summary>decimal 系の小数桁数 scale</summary>
+    /// <summary>Gets or sets the number of fractional digits (scale) for decimal types.</summary>
     public byte Scale { get; set; }
 
-    /// <summary>decimal 系の整数部桁数（Precision - Scale）。decimal 系以外は -1</summary>
+    /// <summary>Gets the number of integral digits (Precision - Scale) for decimal types; -1 for non-decimal types.</summary>
     public int IntegralDigits => Precision > 0 ? Precision - Scale : -1;
 
-    /// <summary>SqlDbType を受け取り初期化する</summary>
+    /// <summary>Initializes a new instance with the specified SqlDbType.</summary>
     public SqlColumnTypeAttribute(SqlDbType dbType) => DbType = dbType;
 }
 {{ end }}
 {{~ if (emit_db_meta_attr || runtime_package_export) && render_runtime && emit_shared_infra ~}}
 /// <summary>
-/// Entity プロパティに DB 列の定義メタ情報（方言中立の型トークン・説明）を付与する独自属性。
-/// 生成 Entity を「DB 定義の自己記述ドキュメント」にし、リフレクションで列定義を復元できるようにする。
+/// Custom attribute that annotates an entity property with DB column definition metadata (a dialect-neutral type token and description).
+/// It turns the generated entity into a self-describing document of the DB definition, allowing the column definition to be recovered via reflection.
 /// </summary>
 /// <remarks>
-/// <see cref="TypeToken"/> は方言に依存しない中立表記（例 <c>string(50)</c> / <c>decimal(10,2)</c> / <c>int32</c>）で、
-/// 任意方言のネイティブ型へ復元できる。実行時の SQL パラメータ型付けは <see cref="SqlColumnTypeAttribute"/> の責務で、本属性は定義用メタに徹する。
+/// <see cref="TypeToken"/> is a dialect-neutral notation (for example <c>string(50)</c> / <c>decimal(10,2)</c> / <c>int32</c>)
+/// that can be recovered into the native type of any dialect. Runtime SQL parameter typing is the responsibility of <see cref="SqlColumnTypeAttribute"/>; this attribute is dedicated purely to definition metadata.
 /// </remarks>
 [AttributeUsage(AttributeTargets.Property, AllowMultiple = false)]
 public sealed class DbColumnMetaAttribute : Attribute
 {
-    /// <summary>方言中立の型トークン（例 <c>string(50)</c>）</summary>
+    /// <summary>Gets the dialect-neutral type token (for example <c>string(50)</c>).</summary>
     public string TypeToken { get; }
 
-    /// <summary>列の説明（DB の拡張プロパティ等に由来）。未設定は空文字</summary>
+    /// <summary>Gets or sets the column description (derived from DB extended properties, etc.). Empty string when unset.</summary>
     public string Description { get; set; } = string.Empty;
 
-    /// <summary>方言中立の型トークンを受け取り初期化する</summary>
+    /// <summary>Initializes a new instance with the dialect-neutral type token.</summary>
     public DbColumnMetaAttribute(string typeToken) => TypeToken = typeToken;
 }
 
 /// <summary>
-/// Entity クラスにテーブルの定義メタ情報（説明）を付与する独自属性。
-/// 生成 Entity を「DB 定義の自己記述ドキュメント」にし、リフレクションでテーブル説明を復元できるようにする。
+/// Custom attribute that annotates an entity class with table definition metadata (a description).
+/// It turns the generated entity into a self-describing document of the DB definition, allowing the table description to be recovered via reflection.
 /// </summary>
 [AttributeUsage(AttributeTargets.Class, AllowMultiple = false)]
 public sealed class DbTableMetaAttribute : Attribute
 {
-    /// <summary>テーブルの説明（DB の拡張プロパティ等に由来）。未設定は空文字</summary>
+    /// <summary>Gets or sets the table description (derived from DB extended properties, etc.). Empty string when unset.</summary>
     public string Description { get; set; } = string.Empty;
 }
 {{ end }}
 {{~ if (emit_store_generated_attr || runtime_package_export) && render_runtime && emit_shared_infra ~}}
 /// <summary>
-/// DB が値を生成する列（SQL Server の <c>rowversion</c> / <c>timestamp</c> 等）のマーカー属性。
-/// これらの列は DB 側が採番するため、QuickER 版 Repository の INSERT / BulkInsert / UPDATE の対象から除外される（SELECT では取得される）。
-/// 付与は生成オプションに依らず、DB が値を生成する列であれば常に行う。
+/// Marker attribute for columns whose values are generated by the DB (such as SQL Server's <c>rowversion</c> / <c>timestamp</c>).
+/// Because the DB assigns these values, such columns are excluded from INSERT / BulkInsert / UPDATE in the QuickER Repository (they are still read by SELECT).
+/// It is always applied to any column whose value is generated by the DB, regardless of generation options.
 /// </summary>
 [AttributeUsage(AttributeTargets.Property, AllowMultiple = false)]
 public sealed class StoreGeneratedColumnAttribute : Attribute
@@ -150,8 +150,8 @@ public sealed class StoreGeneratedColumnAttribute : Attribute
 {{ end }}
 {{~ if (emit_unbounded_binary_attr || runtime_package_export) && render_runtime && emit_shared_infra ~}}
 /// <summary>
-/// 無制限バイナリ列（<c>varbinary(max)</c> / 長さ宣言なし BLOB 等）を SELECT / UPDATE 対象から除外するマーカー属性。
-/// INSERT / BulkInsert は全列のまま扱う。値を設定したままの更新は実行時例外になる（更新は生 SQL の <c>ExecuteSqlAsync</c> で行う）。
+/// Marker attribute that excludes an unbounded binary column (such as <c>varbinary(max)</c> or a BLOB with no declared length) from SELECT / UPDATE.
+/// INSERT / BulkInsert still handle all columns. Updating while a value remains assigned throws at runtime (perform such updates with raw SQL via <c>ExecuteSqlAsync</c>).
 /// </summary>
 [AttributeUsage(AttributeTargets.Property, AllowMultiple = false)]
 public sealed class UnboundedBinaryColumnAttribute : Attribute
@@ -159,23 +159,23 @@ public sealed class UnboundedBinaryColumnAttribute : Attribute
 }
 
 /// <summary>
-/// <see cref="UnboundedBinaryColumnAttribute"/> の付いた列プロパティ（無制限バイナリ列）を型ごとにリフレクションで解決し、
-/// 更新ガードと読み取り strip の実行時判定を提供する共有ヘルパー。
+/// Shared helper that resolves, per type via reflection, the column properties marked with <see cref="UnboundedBinaryColumnAttribute"/> (unbounded binary columns),
+/// and provides the runtime decisions for the update guard and read-time strip.
 /// </summary>
 /// <remarks>
-/// スキーマ非依存・属性駆動で、除外列名や列集合を焼き込まない。方言別パッケージのメタデータとコアパッケージの
-/// リモートクライアント基底の双方から参照するため、いずれのパッケージにも属さないようコアの共有 infra に独立した
-/// static クラスとして置く（型 → 除外プロパティをキャッシュする）。
+/// It is schema-independent and attribute-driven, and does not bake in excluded column names or column sets. Because it is referenced from both the
+/// dialect-specific package metadata and the core package's remote client base, it is placed as a standalone static class in the core shared infra so that it
+/// belongs to no single package (it caches type -> excluded properties).
 /// </remarks>
 {{ infra_visibility }} static class UnboundedBinaryColumns
 {
-    // 型 → 除外列プロパティ（UnboundedBinaryColumnAttribute 付き）。1 度だけ解決してキャッシュする
+    // Type -> excluded column properties (marked with UnboundedBinaryColumnAttribute). Resolved once and cached.
     private static readonly ConcurrentDictionary<Type, PropertyInfo[]> _excluded = new();
 
-    // 型 → 「未取得状態」の既定インスタンス（strip で除外列の初期値を写す元）。1 度だけ生成してキャッシュする
+    // Type -> the default instance in the "not-fetched" state (the source that strip copies excluded-column initial values from). Created once and cached.
     private static readonly ConcurrentDictionary<Type, object> _defaults = new();
 
-    /// <summary>指定型の無制限バイナリ列プロパティ（除外列）を取得する（属性なしは空配列）</summary>
+    /// <summary>Returns the unbounded binary column properties (excluded columns) of the specified type (an empty array when none are marked).</summary>
     public static PropertyInfo[] For(Type entityType) =>
         _excluded.GetOrAdd(
             entityType,
@@ -188,8 +188,8 @@ public sealed class UnboundedBinaryColumnAttribute : Attribute
         );
 
     /// <summary>
-    /// 除外列に「未取得状態」でない値（null でも空でもない blob）が入ったまま更新しようとしたら例外にする。
-    /// 無制限バイナリ列は Repository の UPDATE 対象外のため、値を保持したままの更新はサイレントに失われてしまう。
+    /// Throws if an update is attempted while an excluded column still holds a value that is not in the "not-fetched" state (a blob that is neither null nor empty).
+    /// Because unbounded binary columns are excluded from the Repository UPDATE, updating while such a value is retained would silently lose it.
     /// </summary>
     public static void ThrowIfExcludedAssigned(EntityBase entity)
     {
@@ -198,16 +198,16 @@ public sealed class UnboundedBinaryColumnAttribute : Attribute
             if (!IsUnset(property.GetValue(entity)))
             {
                 throw new InvalidOperationException(
-                    $"列 {property.Name} は無制限バイナリ列（UnboundedBinaryColumnAttribute）で Repository の UPDATE 対象外です。"
-                        + "挿入後は値を null（または空）に戻すか再取得してください。この列の更新は生 SQL（ExecuteSqlAsync）で行ってください。"
+                    $"Column {property.Name} is an unbounded binary column (UnboundedBinaryColumnAttribute) and is excluded from the Repository UPDATE. "
+                        + "After inserting, reset its value to null (or empty) or re-fetch the entity. Update this column with raw SQL (ExecuteSqlAsync)."
                 );
             }
         }
     }
 
     /// <summary>
-    /// 読み取り複製の除外列を「未取得状態」（既定インスタンスの初期値）へ落とす。実 DB 側の未取得
-    /// （MapEntity が SetValue しない＝コンストラクタ初期化子のまま。非 null byte[] は空配列・nullable は null）と揃える。
+    /// Resets the excluded columns of a read replica to the "not-fetched" state (the initial values of a default instance). This matches the not-fetched state on
+    /// the real DB side (MapEntity does not call SetValue, so the constructor initializer stands: a non-null byte[] is an empty array, and nullable is null).
     /// </summary>
     public static void StripExcluded(EntityBase entity)
     {
@@ -218,7 +218,7 @@ public sealed class UnboundedBinaryColumnAttribute : Attribute
             return;
         }
 
-        // 既定インスタンス（初期化子適用済み）から除外列の初期値を写す（型に依らず正確・型ごとに 1 度だけ生成）
+        // Copy the excluded-column initial values from a default instance (with initializers applied): accurate regardless of type, created once per type.
         var prototype = _defaults.GetOrAdd(
             entity.GetType(),
             static type => Activator.CreateInstance(type)!
@@ -230,6 +230,6 @@ public sealed class UnboundedBinaryColumnAttribute : Attribute
         }
     }
 
-    /// <summary>値が「未取得状態と同等（null / 空 byte[]{{ if generate_value_objects }} / 内包値が空の値オブジェクト{{ end }}）」かどうか</summary>
+    /// <summary>Gets a value indicating whether the value is equivalent to the "not-fetched" state (null / empty byte[]{{ if generate_value_objects }} / a value object with an empty wrapped value{{ end }}).</summary>
     private static bool IsUnset(object? value)
     {

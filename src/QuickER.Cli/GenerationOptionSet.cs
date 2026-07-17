@@ -105,6 +105,7 @@ internal sealed class GenerationOptionSet
         // ランタイム・ドキュメント
         AddBool("UseRuntimePackages", "--use-runtime-packages", Strings.Cli_Opt_UseRuntimePackages);
         AddBool("GenerateApiDocs", "--generate-api-docs", Strings.Cli_Opt_GenerateApiDocs);
+        AddBool("IncludeJapaneseApiDocs", "--api-docs-ja", Strings.Cli_Opt_IncludeJapaneseApiDocs);
 
         // 属性
         AddBool(

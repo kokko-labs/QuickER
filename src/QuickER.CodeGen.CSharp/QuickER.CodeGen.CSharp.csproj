@@ -18,6 +18,14 @@
   <ItemGroup>
     <EmbeddedResource Include="Templates\CSharpRuntime\*.scriban" />
     <EmbeddedResource Include="Templates\ApiReferenceDoc.scriban" />
+    <!--
+      ファイル名の ".ja." 中置きを MSBuild がサテライト（カルチャ別）リソースとみなすのを抑止する。
+      WithCulture=false で主アセンブリへ埋め込み、LogicalName で完全なリソース名（.ja を保持）を固定する。
+    -->
+    <EmbeddedResource Include="Templates\ApiReferenceDoc.ja.scriban">
+      <WithCulture>false</WithCulture>
+      <LogicalName>QuickER.CodeGen.CSharp.Templates.ApiReferenceDoc.ja.scriban</LogicalName>
+    </EmbeddedResource>
   </ItemGroup>
 
   <!--

@@ -1,29 +1,29 @@
 {{~ if (edit_model_classes.size > 0 || runtime_package_export) && render_runtime && emit_shared_infra ~}}
-/// <summary>EditModel 共通の変更通知・エラー管理・補助処理を提供する基底クラス</summary>
+/// <summary>Base class providing change notification, error management, and helper processing common to edit models.</summary>
 public abstract partial class EditModelBase
     : INotifyPropertyChanged,
         INotifyDataErrorInfo,
         IEditableObject
 {
-    /// <summary>プロパティ名ごとのエラーメッセージ一覧</summary>
+    /// <summary>Error messages keyed by property name.</summary>
     private readonly Dictionary<string, List<string>> _errors = new();
 
-    /// <summary>プロパティ値の変更通知</summary>
+    /// <summary>Raised when a property value changes.</summary>
     public event PropertyChangedEventHandler? PropertyChanged;
 
-    /// <summary>入力エラーの変更通知</summary>
+    /// <summary>Raised when the input errors change.</summary>
     public event EventHandler<DataErrorsChangedEventArgs>? ErrorsChanged;
 
-    /// <summary>入力エラーを保持しているかどうか</summary>
+    /// <summary>Gets a value indicating whether any input errors are present.</summary>
     public bool HasErrors => _errors.Count > 0;
 
-    /// <summary>リバート処理中かどうか</summary>
+    /// <summary>Gets a value indicating whether a revert operation is in progress.</summary>
     protected bool IsReverting { get; private set; }
 
-    /// <summary>ロード処理中かどうか（ロード中は確定値の変更で Updated へ昇格させない）</summary>
+    /// <summary>Gets a value indicating whether a load is in progress (confirmed-value changes do not promote the state to Updated while loading).</summary>
     protected bool IsLoading { get; private set; }
 
-    /// <summary>この EditModel の変更状態（生成元 Entity を基準とし、確定値の変更で Updated へ昇格する）</summary>
+    /// <summary>Gets or sets the change state of this edit model (based on the source entity; confirmed-value changes promote it to Updated).</summary>
     public RowState RowState
     {
         get => _rowState;
@@ -43,31 +43,31 @@ public abstract partial class EditModelBase
         }
     }
 
-    /// <summary>RowState のバッキングフィールド</summary>
+    /// <summary>Backing field for <see cref="RowState"/>.</summary>
     private RowState _rowState = RowState.Unchanged;
 
-    /// <summary>追加対象かどうか</summary>
+    /// <summary>Gets a value indicating whether this model is marked for insertion.</summary>
     public bool IsAdded => RowState == RowState.Added;
 
-    /// <summary>更新対象かどうか</summary>
+    /// <summary>Gets a value indicating whether this model is marked for update.</summary>
     public bool IsUpdated => RowState == RowState.Updated;
 
-    /// <summary>削除対象かどうか</summary>
+    /// <summary>Gets a value indicating whether this model is marked for deletion.</summary>
     public bool IsRemoved => RowState == RowState.Removed;
 
-    /// <summary>変更（追加・更新・削除）があるかどうか</summary>
+    /// <summary>Gets a value indicating whether there are any changes (insert, update, or delete).</summary>
     public bool HasChanges => RowState != RowState.Unchanged;
 
-    /// <summary>追加対象としてマークする（新規入力の EditModel を保存対象にする場合に使用）</summary>
+    /// <summary>Marks this model for insertion (used to include a newly entered edit model in a save).</summary>
     public void MarkAdded() => RowState = RowState.Added;
 
-    /// <summary>削除対象としてマークする（コレクションには残したまま Save で削除される）</summary>
+    /// <summary>Marks this model for deletion (it stays in the collection and is deleted on save).</summary>
     public void MarkRemoved() => RowState = RowState.Removed;
 
-    /// <summary>変更なし（保存済み）状態にする</summary>
+    /// <summary>Sets the state to unchanged (saved).</summary>
     public void MarkUnchanged() => RowState = RowState.Unchanged;
 
-    /// <summary>変更なしのときのみ更新対象としてマークする（確定値の変更時に呼ばれる）</summary>
+    /// <summary>Marks this model for update only when it is currently unchanged (called when a confirmed value changes).</summary>
     public void MarkUpdated()
     {
         if (RowState == RowState.Unchanged)
@@ -76,39 +76,39 @@ public abstract partial class EditModelBase
         }
     }
 
-    /// <summary>確定値プロパティが変更された後に呼ばれる横断的フック（ユーザー編集時のみ。ロード中は呼ばれない）。UpdatedAt の打刻などに使う</summary>
-    /// <remarks>このフック内で別の確定値プロパティを更新する場合、無限再帰を避けるため propertyName で対象を判定すること</remarks>
+    /// <summary>Cross-cutting hook invoked after a confirmed-value property changes (only on user edits; not called during load). Use it for stamping UpdatedAt and similar.</summary>
+    /// <remarks>When updating another confirmed-value property inside this hook, check <paramref name="propertyName"/> to avoid infinite recursion.</remarks>
     protected virtual void OnConfirmedValueChanged(string propertyName) { }
 
-    /// <summary>確定値の変更で RowState を Updated へ昇格させるかどうか（既定 true。メタ情報など特定プロパティを除外したい場合に override）</summary>
+    /// <summary>Gets a value indicating whether a confirmed-value change should promote <see cref="RowState"/> to Updated (default true; override to exclude specific properties such as metadata).</summary>
     protected virtual bool ShouldMarkUpdated(string propertyName) => true;
 
-    /// <summary>画面入力文字列を正規化する（前後の空白・タブ・改行を除去。全角スペースも対象）</summary>
+    /// <summary>Normalizes a UI input string (trims leading and trailing whitespace, tabs, and newlines, including full-width spaces).</summary>
     protected string NormalizeInput(string propertyName, string value)
     {
-        // ComboBox 等のバインドは実行時に null を書き込み得るため許容する（null は未入力として変換分岐が処理する）
+        // Bindings such as ComboBox may write null at runtime, so allow it (null is handled as empty input by the conversion branch).
         if (value is null)
         {
             return value!;
         }
 
-        // 前後の空白のみ除去する（中間の空白・改行は保持）
+        // Trim only leading and trailing whitespace (preserve interior whitespace and newlines).
         var normalized = value.Trim();
         CustomizeInputNormalization(propertyName, value, ref normalized);
         return normalized;
     }
 
-    /// <summary>入力正規化を列単位で調整する（トリムを無効化したい列で normalizedValue に rawValue を戻す等。override で処理を追加）</summary>
+    /// <summary>Adjusts input normalization per column (for example, restore <paramref name="rawValue"/> into <paramref name="normalizedValue"/> for a column where trimming should be disabled; override to add processing).</summary>
     protected virtual void CustomizeInputNormalization(
         string propertyName,
         string rawValue,
         ref string normalizedValue
     ) { }
 
-    /// <summary>この EditModel が所属するコレクション（兄弟ナビゲーション用。EditModelCollection が設定する）</summary>
+    /// <summary>Gets or sets the collection this edit model belongs to (for sibling navigation; set by <see cref="EditModelCollection{T}"/>).</summary>
     {{ infra_visibility }} IList? Owner { get; set; }
 
-    /// <summary>所属コレクション内で自身の次の要素を取得する（所属していない／末尾なら null）</summary>
+    /// <summary>Returns the next element after this one in its owning collection (null if not owned or at the end).</summary>
     public EditModelBase? GetNext()
     {
         if (Owner is null)
@@ -120,7 +120,7 @@ public abstract partial class EditModelBase
         return index >= 0 && index + 1 < Owner.Count ? (EditModelBase?)Owner[index + 1] : null;
     }
 
-    /// <summary>所属コレクション内で自身の前の要素を取得する（所属していない／先頭なら null）</summary>
+    /// <summary>Returns the previous element before this one in its owning collection (null if not owned or at the start).</summary>
     public EditModelBase? GetPrevious()
     {
         if (Owner is null)
@@ -132,13 +132,13 @@ public abstract partial class EditModelBase
         return index > 0 ? (EditModelBase?)Owner[index - 1] : null;
     }
 
-    /// <summary>所属コレクション内での自身の位置（所属していなければ -1）</summary>
+    /// <summary>Gets the position of this element within its owning collection (-1 if not owned).</summary>
     public int IndexInParent => Owner?.IndexOf(this) ?? -1;
 
-    /// <summary>所属コレクション内で自身が先頭要素かどうか（所属していなければ false）</summary>
+    /// <summary>Gets a value indicating whether this is the first element in its owning collection (false if not owned).</summary>
     public bool IsFirstInParent => IndexInParent == 0;
 
-    /// <summary>所属コレクション内で自身が末尾要素かどうか（所属していなければ false）</summary>
+    /// <summary>Gets a value indicating whether this is the last element in its owning collection (false if not owned).</summary>
     public bool IsLastInParent
     {
         get
@@ -148,7 +148,7 @@ public abstract partial class EditModelBase
         }
     }
 
-    /// <summary>自身を所属コレクションから取り除く（既存要素は Removed として削除追跡される）。取り除けたら true</summary>
+    /// <summary>Removes this element from its owning collection (existing elements are tracked as Removed). Returns true if removed.</summary>
     public bool RemoveFromParent()
     {
         if (Owner is null || !Owner.Contains(this))
@@ -160,27 +160,27 @@ public abstract partial class EditModelBase
         return true;
     }
 
-    /// <summary>自身を所属コレクションの先頭へ移動する（順序のみ変更し削除追跡しない）。移動したら true</summary>
+    /// <summary>Moves this element to the start of its owning collection (reorders only, no deletion tracking). Returns true if moved.</summary>
     public bool MoveToFirst() => MoveSelfTo(0);
 
-    /// <summary>自身を所属コレクションの末尾へ移動する。移動したら true</summary>
+    /// <summary>Moves this element to the end of its owning collection. Returns true if moved.</summary>
     public bool MoveToLast() => Owner is not null && MoveSelfTo(Owner.Count - 1);
 
-    /// <summary>自身を所属コレクション内で1つ後ろへ移動する。移動したら true</summary>
+    /// <summary>Moves this element one position later in its owning collection. Returns true if moved.</summary>
     public bool MoveToNext()
     {
         var index = IndexInParent;
         return index >= 0 && Owner is not null && index + 1 < Owner.Count && MoveSelfTo(index + 1);
     }
 
-    /// <summary>自身を所属コレクション内で1つ前へ移動する。移動したら true</summary>
+    /// <summary>Moves this element one position earlier in its owning collection. Returns true if moved.</summary>
     public bool MoveToPrevious()
     {
         var index = IndexInParent;
         return index > 0 && MoveSelfTo(index - 1);
     }
 
-    /// <summary>自身を所属コレクション内の指定位置へ移動する共通処理（ObservableCollection.Move 経由で削除追跡を起こさない）</summary>
+    /// <summary>Shared logic to move this element to the specified position in its owning collection (via ObservableCollection.Move so no deletion tracking occurs).</summary>
     private bool MoveSelfTo(int newIndex)
     {
         if (Owner is null)
@@ -198,10 +198,10 @@ public abstract partial class EditModelBase
         return true;
     }
 
-    /// <summary>所属コレクションの並び替え本体（具象クラスが型付きコレクションの Move を実装する）</summary>
+    /// <summary>Core reorder logic for the owning collection (concrete classes implement Move on the typed collection).</summary>
     protected virtual void MoveCore(int oldIndex, int newIndex) { }
 
-    /// <summary>位置プロパティ（IndexInParent / IsFirstInParent / IsLastInParent）の変更通知を発行する（コレクションの増減・並び替え時に呼ばれる）</summary>
+    /// <summary>Raises change notifications for the position properties (<see cref="IndexInParent"/> / <see cref="IsFirstInParent"/> / <see cref="IsLastInParent"/>), called when the collection changes or is reordered.</summary>
     internal void RaisePositionChanged()
     {
         OnPropertyChanged(nameof(IndexInParent));
@@ -209,17 +209,17 @@ public abstract partial class EditModelBase
         OnPropertyChanged(nameof(IsLastInParent));
     }
 
-    /// <summary>所属コレクション参照（ParentCollection）の変更通知を発行する（コレクションへの出入り時に呼ばれる。具象クラスの ParentCollection は常にこの名称で生成される）</summary>
+    /// <summary>Raises the change notification for the owning collection reference (ParentCollection), called when the element enters or leaves a collection (the concrete class's ParentCollection is always generated with this name).</summary>
     internal void RaiseParentCollectionChanged() => OnPropertyChanged("ParentCollection");
 
-    /// <summary>自身を子として保持する親モデル（カスケード親）。所有側のコレクション／単一参照が設定する。未所属・ルートは null</summary>
+    /// <summary>The parent model that holds this element as a child (cascade parent). Set by the owning collection or single reference; null when not owned or at the root.</summary>
     private EditModelBase? _parentModel;
 
-    /// <summary>自身を子として保持する親 EditModel（コレクション経由・単一参照のいずれでも設定される。未所属／ルートは null）</summary>
-    /// <remarks>親型が一意に定まる具象クラスでは、同名の型付き ParentModel が生成され本プロパティを隠す</remarks>
+    /// <summary>Gets the parent edit model that holds this element as a child (set via either a collection or a single reference; null when not owned or at the root).</summary>
+    /// <remarks>In concrete classes where the parent type is unambiguous, a typed ParentModel with the same name is generated and hides this property.</remarks>
     public EditModelBase? ParentModel => _parentModel;
 
-    /// <summary>親モデル参照を設定し、変化した場合のみ ParentModel の変更通知を発行する（所有側の setter／コレクションが呼ぶ）</summary>
+    /// <summary>Sets the parent model reference and raises the <see cref="ParentModel"/> change notification only when it changes (called by the owning setter or collection).</summary>
     {{ infra_visibility }} void SetParentModel(EditModelBase? parentModel)
     {
         if (ReferenceEquals(_parentModel, parentModel))
@@ -231,11 +231,11 @@ public abstract partial class EditModelBase
         OnPropertyChanged(nameof(ParentModel));
     }
 
-    /// <summary>指定プロパティの変更通知を発行する</summary>
+    /// <summary>Raises a change notification for the specified property.</summary>
     protected void OnPropertyChanged(string propertyName) =>
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 
-    /// <summary>値が変化した場合のみ代入し変更通知を発行する共通ヘルパー（具象クラスで override して挙動を拡張できる）</summary>
+    /// <summary>Shared helper that assigns and raises a change notification only when the value changes (concrete classes can override to extend the behavior).</summary>
     protected virtual bool SetProperty<T>(ref T field, T value, string propertyName)
     {
         if (EqualityComparer<T>.Default.Equals(field, value))
@@ -248,7 +248,7 @@ public abstract partial class EditModelBase
         return true;
     }
 
-    /// <summary>指定プロパティ（null で全件）のエラー一覧を取得する</summary>
+    /// <summary>Returns the errors for the specified property (all errors when null).</summary>
     public IEnumerable GetErrors(string? propertyName)
     {
         if (string.IsNullOrEmpty(propertyName))
@@ -259,12 +259,12 @@ public abstract partial class EditModelBase
         return _errors.TryGetValue(propertyName, out var list) ? list : Enumerable.Empty<string>();
     }
 
-    /// <summary>子要素のパスを連結する（ルートは空、以降は "." 区切り）</summary>
+    /// <summary>Combines a child element path (empty at the root, "."-separated below).</summary>
     protected static string CombineErrorPath(string path, string segment) =>
         path.Length == 0 ? segment : path + "." + segment;
 
-    /// <summary>必須項目の未入力と追加検証を確認しエラーを登録する（エラーが無ければ true）</summary>
-    /// <param name="includeChildren">true で子（カスケード）も連鎖検証、false で自身のみ検証</param>
+    /// <summary>Checks required fields for missing input, runs additional validation, and registers errors (returns true when there are no errors).</summary>
+    /// <param name="includeChildren">True to cascade validation to children as well, false to validate only this model.</param>
     public bool Validate(bool includeChildren = true)
     {
         ValidateSelf();
@@ -282,11 +282,11 @@ public abstract partial class EditModelBase
         return valid;
     }
 
-    /// <summary>このノード自身を検証する（具象クラスが必須チェック等を実装）</summary>
+    /// <summary>Validates this node itself (concrete classes implement required-field checks and similar).</summary>
     protected virtual void ValidateSelf() { }
 
-    /// <summary>検証エラーをノードのパス付きで収集する（事前に Validate を呼ぶ）</summary>
-    /// <param name="includeChildren">true で子（カスケード）も再帰収集、false で自身のエラーのみ</param>
+    /// <summary>Collects validation errors with each node's path (call Validate beforehand).</summary>
+    /// <param name="includeChildren">True to recursively collect from cascade children as well, false for this model's errors only.</param>
     public IEnumerable<EditModelError> CollectErrors(bool includeChildren = true)
     {
         var errors = new List<EditModelError>();
@@ -294,7 +294,7 @@ public abstract partial class EditModelBase
         return errors;
     }
 
-    /// <summary>パス付きで検証エラーを errors へ収集する内部実装（子の再帰呼び出しで使用）</summary>
+    /// <summary>Internal implementation that collects validation errors with paths into <paramref name="errors"/> (used by recursive child calls).</summary>
     internal void CollectErrors(string path, bool includeChildren, List<EditModelError> errors)
     {
         errors.AddRange(CollectOwnErrors(path));
@@ -310,7 +310,7 @@ public abstract partial class EditModelBase
         }
     }
 
-    /// <summary>この EditModel 自身のエラーを指定パス付きで列挙する（グラフ収集の部品）</summary>
+    /// <summary>Enumerates this edit model's own errors with the specified path (building block for graph collection).</summary>
     protected IEnumerable<EditModelError> CollectOwnErrors(string path)
     {
         foreach (var pair in _errors)
@@ -322,8 +322,8 @@ public abstract partial class EditModelBase
         }
     }
 
-    /// <summary>保存確定後にグラフを変更なし状態へ戻す（自身を Unchanged にし、子の削除追跡もクリアする）</summary>
-    /// <param name="includeChildren">true で子（カスケード）も再帰的に確定する</param>
+    /// <summary>Resets the graph to the unchanged state after a save is confirmed (marks this model Unchanged and also clears children's deletion tracking).</summary>
+    /// <param name="includeChildren">True to recursively accept changes on cascade children as well.</param>
     public void AcceptChanges(bool includeChildren = true)
     {
         MarkUnchanged();
@@ -337,8 +337,8 @@ public abstract partial class EditModelBase
         }
     }
 
-    /// <summary>自身または子（カスケード）に変更があるかどうかを返す（保存ボタンの活性判定などに使用）</summary>
-    /// <param name="includeChildren">true で子（カスケード）の変更も含めて判定する</param>
+    /// <summary>Returns whether this model or its cascade children have changes (used for enabling a save button and similar).</summary>
+    /// <param name="includeChildren">True to include changes on cascade children in the check.</param>
     public bool HasGraphChanges(bool includeChildren = true)
     {
         if (HasChanges)
@@ -362,13 +362,13 @@ public abstract partial class EditModelBase
         return false;
     }
 
-    /// <summary>カスケード子（既知ナビ＋partial 追加）のリンク。バッキングフィールド</summary>
+    /// <summary>Links to cascade children (known navigations plus partial additions). Backing field.</summary>
     private List<ChildLink>? _childLinks;
 
-    /// <summary>子の登録を1度だけ実行したかどうか</summary>
+    /// <summary>Whether child registration has been executed once.</summary>
     private bool _childrenRegistered;
 
-    /// <summary>カスケード子のリンク一覧。初回アクセスで RegisterChildren／RegisterExtraChildren を1度だけ呼ぶ</summary>
+    /// <summary>List of cascade child links. Calls RegisterChildren / RegisterExtraChildren exactly once on first access.</summary>
     private IReadOnlyList<ChildLink> ChildLinks
     {
         get
@@ -389,22 +389,22 @@ public abstract partial class EditModelBase
         }
     }
 
-    /// <summary>既知のカスケード子を登録する（カスケード子を持つ具象クラスのみ生成コードが override。手動実装しない）</summary>
+    /// <summary>Registers the known cascade children (only generated code of concrete classes with cascade children overrides this; do not implement manually).</summary>
     protected virtual void RegisterChildren() { }
 
-    /// <summary>partial クラスで追加した子を AddChild / AddChildren で登録する拡張ポイント。override すると検証・収集・確定・ダーティ判定すべてに参加する</summary>
+    /// <summary>Extension point to register children added in a partial class via AddChild / AddChildren. Overriding makes them participate in validation, error collection, accepting changes, and dirty checks.</summary>
     protected virtual void RegisterExtraChildren() { }
 
-    /// <summary>子（単一参照）をカスケードに登録する（参照は遅延取得で最新を反映）</summary>
+    /// <summary>Registers a single child reference into the cascade (the reference is resolved lazily so the latest value is used).</summary>
     protected void AddChild(string name, Func<EditModelBase?> accessor) =>
         (_childLinks ??= new()).Add(ChildLink.ForSingle(name, accessor));
 
-    /// <summary>子コレクションをカスケードに登録する</summary>
+    /// <summary>Registers a child collection into the cascade.</summary>
     protected void AddChildren<T>(string name, EditModelCollection<T> collection)
         where T : EditModelBase =>
         (_childLinks ??= new()).Add(ChildLink.ForCollection(name, collection));
 
-    /// <summary>追加の子（カスケード参加要素）のリンク。単一参照と子コレクションを一様に扱う</summary>
+    /// <summary>Link to a registered child (cascade participant). Treats single references and child collections uniformly.</summary>
     private sealed class ChildLink
     {
         private readonly string _name;
@@ -428,7 +428,7 @@ public abstract partial class EditModelBase
             _acceptRemoved = acceptRemoved;
         }
 
-        /// <summary>単一の子参照を登録するリンクを生成する</summary>
+        /// <summary>Creates a link that registers a single child reference.</summary>
         public static ChildLink ForSingle(string name, Func<EditModelBase?> accessor) =>
             new(
                 name,
@@ -439,12 +439,12 @@ public abstract partial class EditModelBase
                 () => { }
             );
 
-        /// <summary>子コレクションを登録するリンクを生成する</summary>
+        /// <summary>Creates a link that registers a child collection.</summary>
         public static ChildLink ForCollection<T>(string name, EditModelCollection<T> collection)
             where T : EditModelBase =>
             new(name, true, () => collection, _ => collection.HasChanges, collection.AcceptRemoved);
 
-        /// <summary>登録した子を検証し valid を更新する</summary>
+        /// <summary>Validates the registered children and updates <paramref name="valid"/>.</summary>
         public void Validate(bool includeChildren, ref bool valid)
         {
             foreach (var item in _items())
@@ -456,7 +456,7 @@ public abstract partial class EditModelBase
             }
         }
 
-        /// <summary>登録した子のエラーをパス付き（コレクションは name[i]、単一は name）で収集する</summary>
+        /// <summary>Collects the registered children's errors with paths (name[i] for collections, name for single references).</summary>
         public void CollectErrors(
             string parentPath,
             bool includeChildren,
@@ -473,7 +473,7 @@ public abstract partial class EditModelBase
             }
         }
 
-        /// <summary>登録した子を確定し、コレクションは削除追跡もクリアする</summary>
+        /// <summary>Accepts changes on the registered children; for collections, also clears deletion tracking.</summary>
         public void AcceptChanges(bool includeChildren)
         {
             foreach (var item in _items())
@@ -484,11 +484,11 @@ public abstract partial class EditModelBase
             _acceptRemoved();
         }
 
-        /// <summary>登録した子に変更があるかどうかを返す</summary>
+        /// <summary>Returns whether the registered children have changes.</summary>
         public bool HasChanges(bool includeChildren) => _hasChanges(includeChildren);
     }
 
-    /// <summary>指定プロパティのエラーを設定する（null 指定でクリア）</summary>
+    /// <summary>Sets the error for the specified property (pass null to clear).</summary>
     protected void SetError(string propertyName, string? error)
     {
         if (error is null)
@@ -501,7 +501,7 @@ public abstract partial class EditModelBase
         OnErrorsChanged(propertyName);
     }
 
-    /// <summary>指定プロパティのエラーをクリアする</summary>
+    /// <summary>Clears the errors for the specified property.</summary>
     protected void ClearErrors(string propertyName)
     {
         if (_errors.Remove(propertyName))
@@ -510,17 +510,17 @@ public abstract partial class EditModelBase
         }
     }
 
-    /// <summary>入力エラーの変更通知を発行する</summary>
+    /// <summary>Raises the input-errors change notification.</summary>
     protected void OnErrorsChanged(string propertyName) =>
         ErrorsChanged?.Invoke(this, new DataErrorsChangedEventArgs(propertyName));
 
-    /// <summary>確定値をバインディング用プロパティへ書き戻しエラーをクリアする</summary>
+    /// <summary>Writes the confirmed values back to the binding properties and clears errors.</summary>
     public void RevertInput() => ExecuteRevert(RevertCore);
 
-    /// <summary>RevertInput の本体（具象クラスが各プロパティの書き戻しを実装）</summary>
+    /// <summary>Core logic of RevertInput (concrete classes implement writing back each property).</summary>
     protected virtual void RevertCore() { }
 
-    /// <summary>リバート中フラグを立てたうえで処理を実行する</summary>
+    /// <summary>Executes an action with the reverting flag set.</summary>
     protected void ExecuteRevert(Action action)
     {
         IsReverting = true;
@@ -535,7 +535,7 @@ public abstract partial class EditModelBase
         }
     }
 
-    /// <summary>ロード中フラグを立てたうえで処理を実行する（Mapper のロードから呼ぶ。ロード中の確定値変更は Updated へ昇格しない）</summary>
+    /// <summary>Executes an action with the loading flag set (called from mapper loads; confirmed-value changes during load do not promote the state to Updated).</summary>
     public void ExecuteLoad(Action action)
     {
         IsLoading = true;
@@ -550,10 +550,10 @@ public abstract partial class EditModelBase
         }
     }
 
-    /// <summary>行編集中かどうか（IEditableObject。BeginEdit〜EndEdit/CancelEdit の間 true）</summary>
+    /// <summary>Whether a row edit is in progress (IEditableObject; true between BeginEdit and EndEdit/CancelEdit).</summary>
     private bool _editing;
 
-    /// <summary>行編集を開始し、現在の入力状態をスナップショットする（DataGrid 行編集の取り消しに対応）</summary>
+    /// <summary>Begins a row edit and snapshots the current input state (supports canceling DataGrid row edits).</summary>
     public void BeginEdit()
     {
         if (_editing)
@@ -565,7 +565,7 @@ public abstract partial class EditModelBase
         BeginEditCore();
     }
 
-    /// <summary>行編集を確定する。変更は即時反映済みのため編集中フラグの解除のみ行う</summary>
+    /// <summary>Commits the row edit. Changes are already applied immediately, so this only clears the editing flag.</summary>
     public void EndEdit()
     {
         if (!_editing)
@@ -577,7 +577,7 @@ public abstract partial class EditModelBase
         EndEditCore();
     }
 
-    /// <summary>行編集を取り消し、BeginEdit 時点の入力状態へ復元する</summary>
+    /// <summary>Cancels the row edit and restores the input state captured at BeginEdit.</summary>
     public void CancelEdit()
     {
         if (!_editing)
@@ -589,28 +589,28 @@ public abstract partial class EditModelBase
         CancelEditCore();
     }
 
-    /// <summary>BeginEdit の本体（具象クラスが入力状態のスナップショットを実装）</summary>
+    /// <summary>Core logic of BeginEdit (concrete classes implement snapshotting the input state).</summary>
     protected virtual void BeginEditCore() { }
 
-    /// <summary>EndEdit の本体（既定では何もしない。必要なら具象クラスで override）</summary>
+    /// <summary>Core logic of EndEdit (does nothing by default; override in a concrete class if needed).</summary>
     protected virtual void EndEditCore() { }
 
-    /// <summary>CancelEdit の本体（具象クラスがスナップショットからの復元を実装）</summary>
+    /// <summary>Core logic of CancelEdit (concrete classes implement restoring from the snapshot).</summary>
     protected virtual void CancelEditCore() { }
 
-    /// <summary>必須項目の未入力エラーメッセージを構築する（引数は表示名。派生クラスで override し方針を差し替え可能）</summary>
-    /// <remarks>表示名は変換エラー（'入力値' 表記）と揃え、.NET の識別子引用慣例に沿ってシングルクォートで囲む</remarks>
+    /// <summary>Builds the error message for a missing required field (the argument is the display name; override in a derived class to change the policy).</summary>
+    /// <remarks>The display name is quoted with single quotes, matching the conversion error style ('input value') and the .NET identifier-quoting convention.</remarks>
     protected virtual string BuildRequiredErrorMessage(string propertyName) =>
-        $"'{propertyName}' は必須です。";
+        $"'{propertyName}' is required.";
 
-    /// <summary>バインディング値の変換エラーメッセージを構築する（第 1 引数は表示名。派生クラスで override し方針を差し替え可能）</summary>
+    /// <summary>Builds the conversion error message for a binding value (the first argument is the display name; override in a derived class to change the policy).</summary>
     protected virtual string BuildParseErrorMessage(
         string propertyName,
         string inputValue,
         string typeName
-    ) => $"'{inputValue}' は {typeName} に変換できません。";
+    ) => $"'{inputValue}' cannot be converted to {typeName}.";
 
-    /// <summary>変換エラーメッセージを解決する（BuildParseErrorMessage の後に CustomizeParseErrorMessage で微調整）</summary>
+    /// <summary>Resolves the conversion error message (BuildParseErrorMessage first, then fine-tuned by CustomizeParseErrorMessage).</summary>
     protected string ResolveParseErrorMessage(
         string propertyName,
         string inputValue,
@@ -622,7 +622,7 @@ public abstract partial class EditModelBase
         return message;
     }
 
-    /// <summary>プロパティ単位のエラーメッセージ微調整用 partial メソッド（別ファイルの partial 実装で差し替え）</summary>
+    /// <summary>Partial method for fine-tuning error messages per property (replace via a partial implementation in another file).</summary>
     partial void CustomizeParseErrorMessage(
         string propertyName,
         string inputValue,
@@ -631,27 +631,27 @@ public abstract partial class EditModelBase
     );
 }
 
-/// <summary>EditModel グラフ上の 1 件の検証エラー</summary>
-/// <param name="Path">ルートからのノード位置（例: 空＝ルート、"SubHeaders[0]"、"SubHeaders[0].Records[2]"）</param>
-/// <param name="Property">エラーが付いたバインド用プロパティ名（例: BindingTitle）</param>
-/// <param name="Message">エラーメッセージ</param>
+/// <summary>A single validation error in an edit model graph.</summary>
+/// <param name="Path">Node position from the root (e.g. empty = root, "SubHeaders[0]", "SubHeaders[0].Records[2]").</param>
+/// <param name="Property">Name of the binding property the error is attached to (e.g. BindingTitle).</param>
+/// <param name="Message">The error message.</param>
 public sealed record EditModelError(string Path, string Property, string Message);
 
-/// <summary>EditModel のコレクション。Remove で外した既存要素を削除対象として追跡する</summary>
+/// <summary>Collection of edit models. Tracks existing elements removed via Remove as deletion targets.</summary>
 /// <remarks>
-/// Remove / RemoveAt で外した既存要素は Removed としてマークし退避する（新規＝Added 要素は DB に無いため退避しない）
-/// Clear は画面上の全消去とし削除追跡しない（退避もリセットする）。削除を保存したい場合は Remove を使う
+/// Existing elements removed via Remove / RemoveAt are marked Removed and set aside (new = Added elements are not set aside because they do not exist in the database).
+/// Clear is a full on-screen wipe with no deletion tracking (it also resets the set-aside items). Use Remove when the deletion should be saved.
 /// </remarks>
 public sealed partial class EditModelCollection<T> : ObservableCollection<T>
     where T : EditModelBase
 {
-    /// <summary>Remove で外した削除対象（Removed）の退避先</summary>
+    /// <summary>Holding list for deletion targets (Removed) removed via Remove.</summary>
     private readonly List<T> _removed = new();
 
-    /// <summary>このコレクションを子として保持する親モデルのバッキングフィールド</summary>
+    /// <summary>Backing field for the parent model that holds this collection as a child.</summary>
     private EditModelBase? _ownerModel;
 
-    /// <summary>このコレクションを子として保持する親モデル（所有側の EditModel が設定）。設定時に全要素の ParentModel へ伝播する</summary>
+    /// <summary>Gets or sets the parent model that holds this collection as a child (set by the owning edit model). Propagates to every element's ParentModel when set.</summary>
     {{ infra_visibility }} EditModelBase? OwnerModel
     {
         get => _ownerModel;
@@ -665,14 +665,14 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
         }
     }
 
-    /// <summary>空のコレクションを生成する</summary>
+    /// <summary>Creates an empty collection.</summary>
     public EditModelCollection() { }
 
-    /// <summary>既存の EditModel 群を初期要素として生成する（削除追跡はしない）</summary>
+    /// <summary>Creates the collection with the given edit models as initial elements (no deletion tracking).</summary>
     public EditModelCollection(IEnumerable<T> items)
         : base(items)
     {
-        // base(items) は InsertItem を経由せず内部リストへ直接追加するため、ここで所有者を設定する
+        // base(items) adds directly to the internal list without going through InsertItem, so set the owner here.
         foreach (var item in this)
         {
             item.Owner = this;
@@ -680,13 +680,13 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
         }
     }
 
-    /// <summary>Remove で外した削除対象（Removed）の一覧</summary>
+    /// <summary>Gets the deletion targets (Removed) taken out via Remove.</summary>
     public IReadOnlyList<T> RemovedItems => _removed;
 
-    /// <summary>いずれかの要素（およびそのカスケード子）に変更があるか、または削除追跡分が存在するか</summary>
+    /// <summary>Gets a value indicating whether any element (or its cascade children) has changes, or deletion-tracked items exist.</summary>
     public bool HasChanges => _removed.Count > 0 || this.Any(item => item.HasGraphChanges());
 
-    /// <summary>要素を追加する。追加要素に自身を所有者として設定し、位置プロパティの変更を通知する</summary>
+    /// <summary>Inserts an element. Sets this collection as the element's owner and raises position property change notifications.</summary>
     protected override void InsertItem(int index, T item)
     {
         item.Owner = this;
@@ -696,7 +696,7 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
         NotifyPositionsChanged();
     }
 
-    /// <summary>要素を外す（Remove / RemoveAt）。既存要素は Removed として退避し、新規要素は破棄する</summary>
+    /// <summary>Takes an element out (Remove / RemoveAt). Existing elements are set aside as Removed; new elements are discarded.</summary>
     protected override void RemoveItem(int index)
     {
         var removed = this[index];
@@ -709,7 +709,7 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
         NotifyPositionsChanged();
     }
 
-    /// <summary>インデクサ代入で要素を置き換える。置換前の既存要素は Removed として退避する</summary>
+    /// <summary>Replaces an element via indexer assignment. The existing element being replaced is set aside as Removed.</summary>
     protected override void SetItem(int index, T item)
     {
         var replaced = this[index];
@@ -725,15 +725,15 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
         NotifyPositionsChanged();
     }
 
-    /// <summary>要素を並び替える（順序のみ変更し削除追跡しない）。移動後に位置プロパティの変更を通知する</summary>
+    /// <summary>Moves an element (reorders only, no deletion tracking). Raises position property change notifications after the move.</summary>
     protected override void MoveItem(int oldIndex, int newIndex)
     {
-        // base.MoveItem は Collection&lt;T&gt; の非仮想 Remove/Insert を呼ぶため、当方の削除追跡オーバーライドを経由しない
+        // base.MoveItem calls the non-virtual Remove/Insert of Collection&lt;T&gt;, so it does not go through our deletion-tracking overrides.
         base.MoveItem(oldIndex, newIndex);
         NotifyPositionsChanged();
     }
 
-    /// <summary>画面上の全消去。削除追跡はせず、退避していた削除対象もリセットする</summary>
+    /// <summary>Full on-screen wipe. No deletion tracking; also resets the set-aside deletion targets.</summary>
     protected override void ClearItems()
     {
         var cleared = new List<T>(this);
@@ -754,11 +754,11 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
         }
     }
 
-    /// <summary>保存確定後に削除追跡をクリアする</summary>
+    /// <summary>Clears deletion tracking after a save is confirmed.</summary>
     public void AcceptRemoved() => _removed.Clear();
 
-    /// <summary>保存確定後に全要素（およびカスケード子）を変更なし状態へ戻し、削除追跡もクリアする</summary>
-    /// <param name="includeChildren">true で各要素の子（カスケード）も再帰的に確定する</param>
+    /// <summary>Resets all elements (and cascade children) to the unchanged state after a save is confirmed, and also clears deletion tracking.</summary>
+    /// <param name="includeChildren">True to recursively accept changes on each element's cascade children as well.</param>
     public void AcceptChanges(bool includeChildren = true)
     {
         foreach (var item in this)
@@ -769,15 +769,15 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
         AcceptRemoved();
     }
 
-    /// <summary>コレクション内の全要素（およびカスケード子）を検証する。全件検証し、すべて妥当なら true</summary>
-    /// <param name="includeChildren">true で各要素の子（カスケード）も連鎖検証する</param>
+    /// <summary>Validates all elements in the collection (and their cascade children). Validates every element and returns true only if all are valid.</summary>
+    /// <param name="includeChildren">True to cascade validation to each element's children as well.</param>
     public bool Validate(bool includeChildren = true)
     {
         var valid = true;
 
         foreach (var item in this)
         {
-            // 全件のエラーを登録するため短絡させない
+            // Do not short-circuit, so that errors are registered for every element.
             if (!item.Validate(includeChildren))
             {
                 valid = false;
@@ -787,8 +787,8 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
         return valid;
     }
 
-    /// <summary>コレクション内の全要素の検証エラーを位置（[i]）付きで収集する（事前に Validate を呼ぶ）</summary>
-    /// <param name="includeChildren">true で各要素の子（カスケード）も再帰収集する</param>
+    /// <summary>Collects validation errors of all elements in the collection, prefixed with their positions ([i]) (call Validate beforehand).</summary>
+    /// <param name="includeChildren">True to recursively collect from each element's cascade children as well.</param>
     public IEnumerable<EditModelError> CollectErrors(bool includeChildren = true)
     {
         var errors = new List<EditModelError>();
@@ -801,7 +801,7 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
         return errors;
     }
 
-    /// <summary>指定要素をコレクション内の指定位置へ移動する（順序のみ変更し削除追跡しない）。移動したら true</summary>
+    /// <summary>Moves the specified element to the specified position in the collection (reorders only, no deletion tracking). Returns true if moved.</summary>
     public bool MoveTo(T item, int newIndex)
     {
         var oldIndex = IndexOf(item);
@@ -814,7 +814,7 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
         return true;
     }
 
-    /// <summary>指定要素群を末尾へ追加する</summary>
+    /// <summary>Appends the specified elements to the end.</summary>
     public void AddRange(IEnumerable<T> items)
     {
         foreach (var item in items)
@@ -823,7 +823,7 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
         }
     }
 
-    /// <summary>指定要素群を指定位置へ挿入する</summary>
+    /// <summary>Inserts the specified elements at the specified position.</summary>
     public void InsertRange(int index, IEnumerable<T> items)
     {
         foreach (var item in items)
@@ -832,7 +832,7 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
         }
     }
 
-    /// <summary>全要素を取り除く（既存要素は Removed として削除追跡される）。追跡しない画面消去は Clear を使う</summary>
+    /// <summary>Removes all elements (existing elements are tracked as Removed). Use Clear for an untracked on-screen wipe.</summary>
     public void RemoveAll()
     {
         while (Count > 0)
@@ -841,14 +841,14 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
         }
     }
 
-    /// <summary>指定範囲の要素を取り除く（既存要素は Removed として削除追跡される）</summary>
+    /// <summary>Removes the elements in the specified range (existing elements are tracked as Removed).</summary>
     public void RemoveRange(int index, int count)
     {
         if (index < 0 || index > Count)
         {
             throw new ArgumentOutOfRangeException(
                 nameof(index),
-                "開始位置がコレクションの範囲外です。"
+                "The start position is outside the bounds of the collection."
             );
         }
 
@@ -856,7 +856,7 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
         {
             throw new ArgumentOutOfRangeException(
                 nameof(count),
-                "指定範囲がコレクションの範囲外です。"
+                "The specified range is outside the bounds of the collection."
             );
         }
 
@@ -866,7 +866,7 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
         }
     }
 
-    /// <summary>全要素へ位置プロパティ（IndexInParent / IsFirstInParent / IsLastInParent）の変更を通知する</summary>
+    /// <summary>Notifies all elements of position property changes (IndexInParent / IsFirstInParent / IsLastInParent).</summary>
     private void NotifyPositionsChanged()
     {
         foreach (var item in this)
@@ -875,7 +875,7 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
         }
     }
 
-    /// <summary>外した要素を削除対象として退避する（新規＝未保存の要素は退避しない）</summary>
+    /// <summary>Sets aside a removed element as a deletion target (new = unsaved elements are not set aside).</summary>
     private void TrackRemoval(T item)
     {
         if (item.IsAdded)
@@ -893,31 +893,31 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
 }
 {{ end }}
 {{~ if (mapper_classes.size > 0 || runtime_package_export) && render_runtime && emit_shared_infra ~}}
-/// <summary>Entity と EditModel の相互変換に共通する骨組み（生成の連鎖・コレクション化）を提供する基底クラス</summary>
+/// <summary>Base class providing the skeleton common to converting between entities and edit models (creation chaining and collection conversion).</summary>
 /// <remarks>
-/// エンティティ固有の列コピー（<see cref="ApplyToEntity"/>）と生成直後フックを含む単体生成（<see cref="CreateEntity()"/> /
-/// <see cref="CreateEditModel(TEntity)"/>）は派生クラスが実装し、それらを組み合わせた定型処理（編集モデルからの生成・
-/// コレクション変換）だけをここで一元化する。
+/// Derived classes implement the entity-specific column copying (<see cref="ApplyToEntity"/>) and single-object creation
+/// including the post-creation hooks (<see cref="CreateEntity()"/> / <see cref="CreateEditModel(TEntity)"/>); only the
+/// boilerplate that composes them (creation from an edit model, collection conversion) is centralized here.
 /// </remarks>
 public abstract partial class MapperBase<TEntity, TEditModel>
     where TEntity : EntityBase
     where TEditModel : EditModelBase
 {
-    /// <summary>初期値を設定した新しい TEntity を生成する（保存時に追加対象となる）</summary>
+    /// <summary>Creates a new TEntity with initial values set (it will be an insertion target on save).</summary>
     public abstract TEntity CreateEntity();
 
-    /// <summary>TEntity を基に新しい TEditModel を生成する</summary>
+    /// <summary>Creates a new TEditModel from a TEntity.</summary>
     public abstract TEditModel CreateEditModel(TEntity entity);
 
-    /// <summary>TEditModel の確定値を既存の TEntity へ反映する（破壊的更新）。列コピーは派生が実装する</summary>
-    /// <param name="editModel">確定値の反映元となる編集モデル</param>
-    /// <param name="entity">反映先の既存 Entity</param>
-    /// <param name="includeRemoved">削除追跡分（Removed）も復元して反映するか（保存用は true、帳票表示用などは false）</param>
+    /// <summary>Applies the TEditModel's confirmed values to an existing TEntity (destructive update). Column copying is implemented by derived classes.</summary>
+    /// <param name="editModel">The edit model whose confirmed values are applied.</param>
+    /// <param name="entity">The existing entity to apply the values to.</param>
+    /// <param name="includeRemoved">Whether to also restore and apply deletion-tracked (Removed) items (true for saving, false for report display and similar).</param>
     public abstract void ApplyToEntity(TEditModel editModel, TEntity entity, bool includeRemoved);
 
-    /// <summary>初期値を設定した新しい TEntity に TEditModel の確定値を反映して生成する</summary>
-    /// <param name="editModel">確定値の反映元となる編集モデル</param>
-    /// <param name="includeRemoved">削除追跡分（Removed）も復元して反映するか（保存用は true、帳票表示用などは false）</param>
+    /// <summary>Creates a new TEntity with initial values set and the TEditModel's confirmed values applied.</summary>
+    /// <param name="editModel">The edit model whose confirmed values are applied.</param>
+    /// <param name="includeRemoved">Whether to also restore and apply deletion-tracked (Removed) items (true for saving, false for report display and similar).</param>
     public TEntity CreateEntity(TEditModel editModel, bool includeRemoved = false)
     {
         var entity = CreateEntity();
@@ -925,9 +925,9 @@ public abstract partial class MapperBase<TEntity, TEditModel>
         return entity;
     }
 
-    /// <summary>TEditModel の EditModelCollection を基に TEntity のリストを生成する</summary>
-    /// <param name="editModels">生成元となる編集モデルのコレクション</param>
-    /// <param name="includeRemoved">削除追跡分（Removed）も復元して含めるか（保存用は true、帳票表示用などは false）</param>
+    /// <summary>Creates a list of TEntity from an EditModelCollection of TEditModel.</summary>
+    /// <param name="editModels">The collection of edit models to create from.</param>
+    /// <param name="includeRemoved">Whether to also restore and include deletion-tracked (Removed) items (true for saving, false for report display and similar).</param>
     public List<TEntity> CreateEntities(
         EditModelCollection<TEditModel> editModels,
         bool includeRemoved = false
@@ -947,7 +947,7 @@ public abstract partial class MapperBase<TEntity, TEditModel>
         return entities;
     }
 
-    /// <summary>新規入力用の TEditModel を生成する（追加対象の Entity を基に作る）</summary>
+    /// <summary>Creates a TEditModel for new input (built from an insertion-target entity).</summary>
     public TEditModel CreateEditModel()
     {
         var entity = CreateEntity();
@@ -955,7 +955,7 @@ public abstract partial class MapperBase<TEntity, TEditModel>
         return editModel;
     }
 
-    /// <summary>TEntity の列挙を基に TEditModel の EditModelCollection を生成する</summary>
+    /// <summary>Creates an EditModelCollection of TEditModel from a sequence of TEntity.</summary>
     public EditModelCollection<TEditModel> CreateEditModels(IEnumerable<TEntity> entities)
     {
         return new EditModelCollection<TEditModel>(entities.Select(entity => CreateEditModel(entity)));
@@ -965,29 +965,29 @@ public abstract partial class MapperBase<TEntity, TEditModel>
 {{~ if render_edit_models ~}}
 {{~ for item in edit_model_classes ~}}
 {{ if !for.first }}
-{{ end }}/// <summary>{{ if item.description_xml_doc != "" }}{{ item.description_xml_doc }}{{ else }}{{ item.table_name }} テーブルの画面編集用モデル{{ end }}</summary>
+{{ end }}/// <summary>{{ if item.description_xml_doc != "" }}{{ item.description_xml_doc }}{{ else }}Edit model for on-screen editing of the {{ item.table_name }} table.{{ end }}</summary>
 public partial class {{ item.class_name }} : EditModelBase
 {
-    // ===== 拡張ポイント（partial クラスで必要なものだけ実装。未実装の partial メソッドは消去され無コスト）=====
-    //   検証追加      : partial void OnValidate();
-    //   子の追加      : protected override void RegisterExtraChildren();  // 内部で AddChild/AddChildren で登録
-    //   変換ﾒｯｾｰｼﾞ調整  : partial void CustomizeParseErrorMessage(string propertyName, string inputValue, string typeName, ref string message);
-    //   入力正規化調整 : protected override void CustomizeInputNormalization(string propertyName, string rawValue, ref string normalizedValue);
-{{ if !item.has_display_name_collision && item.has_non_value_object_property }}    //   表示名調整    : partial void CustomizePropertyDisplayName(string propertyName, ref string displayName);  // 検証メッセージの表示名を上書き
-{{ end }}    //   行編集        : partial void OnBeginEdit();  partial void OnEndEdit();  partial void OnCancelEdit();
-    //   値変更通知    : partial void On{プロパティ}Changing(値) / Changed(値) / Changing(旧,新) / Changed(旧,新);  // 各プロパティに用意
+    // ===== Extension points (implement only what you need in a partial class; unimplemented partial methods are erased at no cost) =====
+    //   Extra validation        : partial void OnValidate();
+    //   Extra children          : protected override void RegisterExtraChildren();  // register via AddChild/AddChildren inside
+    //   Conversion msg tweak    : partial void CustomizeParseErrorMessage(string propertyName, string inputValue, string typeName, ref string message);
+    //   Input normalization     : protected override void CustomizeInputNormalization(string propertyName, string rawValue, ref string normalizedValue);
+{{ if !item.has_display_name_collision && item.has_non_value_object_property }}    //   Display name tweak      : partial void CustomizePropertyDisplayName(string propertyName, ref string displayName);  // override display names in validation messages
+{{ end }}    //   Row editing             : partial void OnBeginEdit();  partial void OnEndEdit();  partial void OnCancelEdit();
+    //   Value change hooks      : partial void On{Property}Changing(value) / Changed(value) / Changing(old,new) / Changed(old,new);  // provided per property
     // ====================================================================================================
 
-    // 各列につき「確定値」「画面入力文字列」の 2 種を保持する（変換エラーはエラーディクショナリが保持する）
-{{ for p in item.properties }}{{ if p.field_initializer != "" }}    /// <summary>{{ p.property_name }} の確定値</summary>
+    // Each column keeps two representations: the confirmed value and the on-screen input string (conversion errors are held by the error dictionary).
+{{ for p in item.properties }}{{ if p.field_initializer != "" }}    /// <summary>Confirmed value of {{ p.property_name }}.</summary>
     private {{ p.type_name }} {{ p.field_name }} = {{ p.field_initializer }};
-{{ else }}    /// <summary>{{ p.property_name }} の確定値</summary>
+{{ else }}    /// <summary>Confirmed value of {{ p.property_name }}.</summary>
     private {{ p.type_name }} {{ p.field_name }};
 {{ end }}
-    /// <summary>{{ if p.description_xml_doc != "" }}{{ p.description_xml_doc }}{{ else }}{{ p.property_name }} の画面入力文字列{{ end }}</summary>
+    /// <summary>{{ if p.description_xml_doc != "" }}{{ p.description_xml_doc }}{{ else }}On-screen input string for {{ p.property_name }}.{{ end }}</summary>
     private string {{ p.binding_field_name }} = {{ p.binding_field_initializer }};
 
-    /// <summary>{{ p.property_name }} の確定値（外部からは読み取り専用）</summary>
+    /// <summary>Confirmed value of {{ p.property_name }} (read-only from outside).</summary>
     public {{ p.type_name }} {{ p.property_name }}
     {
         get => {{ p.field_name }};
@@ -1006,7 +1006,7 @@ public partial class {{ item.class_name }} : EditModelBase
             On{{ p.property_name }}Changed(oldValue, value);
             OnPropertyChanged(nameof({{ p.property_name }}));
 
-            // 確定値が変化したら更新対象へ昇格（ロード中は昇格させず、状態は元 Entity の鏡のままにする）
+            // Promote to update target when the confirmed value changes (not during load, where the state stays a mirror of the source entity).
             if (!IsLoading)
             {
                 OnConfirmedValueChanged(nameof({{ p.property_name }}));
@@ -1019,25 +1019,25 @@ public partial class {{ item.class_name }} : EditModelBase
         }
     }
 
-    /// <summary>{{ p.property_name }} の確定値が変更される直前に呼ばれる（新値のみ。partial 実装で処理を追加）</summary>
+    /// <summary>Called just before the confirmed value of {{ p.property_name }} changes (new value only; add processing via a partial implementation).</summary>
     partial void On{{ p.property_name }}Changing({{ p.type_name }} value);
 
-    /// <summary>{{ p.property_name }} の確定値が変更される直前に呼ばれる（旧値・新値。partial 実装で処理を追加）</summary>
+    /// <summary>Called just before the confirmed value of {{ p.property_name }} changes (old and new values; add processing via a partial implementation).</summary>
     partial void On{{ p.property_name }}Changing({{ p.type_name }} oldValue, {{ p.type_name }} newValue);
 
-    /// <summary>{{ p.property_name }} の確定値が変更された直後に呼ばれる（新値のみ。partial 実装で処理を追加）</summary>
+    /// <summary>Called just after the confirmed value of {{ p.property_name }} changes (new value only; add processing via a partial implementation).</summary>
     partial void On{{ p.property_name }}Changed({{ p.type_name }} value);
 
-    /// <summary>{{ p.property_name }} の確定値が変更された直後に呼ばれる（旧値・新値。partial 実装で処理を追加）</summary>
+    /// <summary>Called just after the confirmed value of {{ p.property_name }} changes (old and new values; add processing via a partial implementation).</summary>
     partial void On{{ p.property_name }}Changed({{ p.type_name }} oldValue, {{ p.type_name }} newValue);
 
-    /// <summary>{{ if p.description_xml_doc != "" }}{{ p.description_xml_doc }}{{ else }}{{ p.property_name }} の画面入力用バインディング文字列（設定時に確定値へ変換）{{ end }}</summary>
+    /// <summary>{{ if p.description_xml_doc != "" }}{{ p.description_xml_doc }}{{ else }}On-screen input binding string for {{ p.property_name }} (converted to the confirmed value when set).{{ end }}</summary>
     public string {{ p.binding_property_name }}
     {
         get => {{ p.binding_field_name }};
         set
         {
-            // 入力由来の値のみ正規化（ロード・復元時は元 Entity の鏡像を保つため素通し）
+            // Normalize only values that come from input (pass through during load/revert to keep a mirror of the source entity).
             var normalized =
                 IsLoading || IsReverting
                     ? value
@@ -1045,7 +1045,7 @@ public partial class {{ item.class_name }} : EditModelBase
 
             if (!SetProperty(ref {{ p.binding_field_name }}, normalized, nameof({{ p.binding_property_name }})))
             {
-                // トリムで既存値と一致した場合、画面表示にだけ空白付き文字列が残るため表示を正規化値へ戻す
+                // When trimming makes the value equal to the existing one, only the on-screen display keeps the whitespace-padded string, so reset the display to the normalized value.
                 if (!string.Equals(value, normalized, StringComparison.Ordinal))
                 {
                     OnPropertyChanged(nameof({{ p.binding_property_name }}));
@@ -1166,10 +1166,10 @@ public partial class {{ item.class_name }} : EditModelBase
     }
 
 {{ end }}    // ---- navigation ----
-{{ for navigation in item.navigations }}{{ if navigation.cascade && navigation.is_collection }}    /// <summary>{{ navigation.property_name }} の子コレクションのバッキングフィールド</summary>
+{{ for navigation in item.navigations }}{{ if navigation.cascade && navigation.is_collection }}    /// <summary>Backing field for the {{ navigation.property_name }} child collection.</summary>
     private {{ navigation.display_type_name }} {{ navigation.field_name }}{{ navigation.initializer }}
 
-    /// <summary>{{ navigation.property_name }} ナビゲーションプロパティ（子コレクション。要素の ParentModel に自身が設定される）</summary>
+    /// <summary>{{ navigation.property_name }} navigation property (child collection; this model is set as each element's ParentModel).</summary>
     public {{ navigation.display_type_name }} {{ navigation.property_name }}
     {
         get
@@ -1190,10 +1190,10 @@ public partial class {{ item.class_name }} : EditModelBase
             OnPropertyChanged(nameof({{ navigation.property_name }}));
         }
     }
-{{ else if navigation.cascade }}    /// <summary>{{ navigation.property_name }} の単一の子のバッキングフィールド</summary>
+{{ else if navigation.cascade }}    /// <summary>Backing field for the single {{ navigation.property_name }} child.</summary>
     private {{ navigation.display_type_name }} {{ navigation.field_name }}{{ navigation.initializer }}
 
-    /// <summary>{{ navigation.property_name }} ナビゲーションプロパティ（単一の子。子の ParentModel に自身が設定される）</summary>
+    /// <summary>{{ navigation.property_name }} navigation property (single child; this model is set as the child's ParentModel).</summary>
     public {{ navigation.display_type_name }} {{ navigation.property_name }}
     {
         get => {{ navigation.field_name }};
@@ -1210,18 +1210,18 @@ public partial class {{ item.class_name }} : EditModelBase
             OnPropertyChanged(nameof({{ navigation.property_name }}));
         }
     }
-{{ else }}    /// <summary>{{ navigation.property_name }} ナビゲーションプロパティ</summary>
+{{ else }}    /// <summary>{{ navigation.property_name }} navigation property.</summary>
     public {{ navigation.display_type_name }} {{ navigation.property_name }} { get; set; }{{ navigation.initializer }}
 {{ end }}
 
-{{ end }}    /// <summary>確定値をバインディング用プロパティへ書き戻しエラーをクリアする（RevertInput から呼ばれる）</summary>
+{{ end }}    /// <summary>Writes the confirmed values back to the binding properties and clears errors (called from RevertInput).</summary>
     protected override void RevertCore()
     {
 {{ for p in item.properties }}        {{ p.binding_property_name }} = {{ p.revert_binding_expression }};
         SetError(nameof({{ p.binding_property_name }}), null);
 {{ end }}    }
 
-    /// <summary>このノード自身の検証（必須項目の未入力チェック＋追加検証フック）。Validate から呼ばれる</summary>
+    /// <summary>Validation of this node itself (missing-input checks for required fields plus the extra validation hook). Called from Validate.</summary>
     protected override void ValidateSelf()
     {
 {{ for p in item.properties }}{{ if p.is_required }}        if ({{ p.property_name }} is null)
@@ -1231,10 +1231,10 @@ public partial class {{ item.class_name }} : EditModelBase
 {{ end }}{{ end }}        OnValidate();
     }
 
-    /// <summary>追加の検証ルールを実装するフック（partial 実装で SetError によりエラー登録）</summary>
+    /// <summary>Hook for implementing additional validation rules (register errors via SetError in a partial implementation).</summary>
     partial void OnValidate();
 
-{{ if !item.has_display_name_collision && item.has_non_value_object_property }}    /// <summary>プロパティの表示名を解決する（既定＝列の説明・無指定はプロパティ名。CustomizePropertyDisplayName で上書き可能）。検証メッセージで使う</summary>
+{{ if !item.has_display_name_collision && item.has_non_value_object_property }}    /// <summary>Resolves the display name of a property (default = the column description, or the property name if unspecified; can be overridden via CustomizePropertyDisplayName). Used in validation messages.</summary>
     private static string GetDisplayName(string propertyName, string defaultDisplayName)
     {
         var displayName = defaultDisplayName;
@@ -1242,24 +1242,24 @@ public partial class {{ item.class_name }} : EditModelBase
         return displayName;
     }
 
-    /// <summary>プロパティの表示名を差し替える拡張ポイント（partial・未実装なら既定の表示名）</summary>
+    /// <summary>Extension point for replacing a property's display name (partial; the default display name is used if unimplemented).</summary>
     static partial void CustomizePropertyDisplayName(string propertyName, ref string displayName);
 
-{{ end }}{{ if item.has_cascade_navigations }}    /// <summary>既知のカスケード子をレジストリへ登録する（検証・収集・確定・ダーティ判定に参加。partial 追加の子は RegisterExtraChildren で登録）</summary>
+{{ end }}{{ if item.has_cascade_navigations }}    /// <summary>Registers the known cascade children into the registry (they participate in validation, error collection, accepting changes, and dirty checks; children added via partial classes are registered in RegisterExtraChildren).</summary>
     protected override void RegisterChildren()
     {
 {{ for nav in item.navigations }}{{ if nav.cascade }}{{ if nav.is_collection }}        AddChildren("{{ nav.property_name }}", {{ nav.property_name }});
 {{ else }}        AddChild("{{ nav.property_name }}", () => {{ nav.property_name }});
 {{ end }}{{ end }}{{ end }}    }
 
-{{ end }}    // ---- 行編集（IEditableObject）用スナップショット ----
-{{ for p in item.properties }}    /// <summary>{{ p.property_name }} の編集前スナップショット</summary>
+{{ end }}    // ---- Snapshots for row editing (IEditableObject) ----
+{{ for p in item.properties }}    /// <summary>Pre-edit snapshot of {{ p.property_name }}.</summary>
     private string {{ p.binding_field_name }}Snapshot = {{ p.binding_field_initializer }};
 
-{{ end }}    /// <summary>編集前の RowState スナップショット</summary>
+{{ end }}    /// <summary>Pre-edit snapshot of the RowState.</summary>
     private RowState _rowStateSnapshot;
 
-    /// <summary>BeginEdit の本体。各バインディング入力と RowState をスナップショットする</summary>
+    /// <summary>Core logic of BeginEdit. Snapshots each binding input and the RowState.</summary>
     protected override void BeginEditCore()
     {
 {{ for p in item.properties }}        {{ p.binding_field_name }}Snapshot = {{ p.binding_field_name }};
@@ -1267,16 +1267,16 @@ public partial class {{ item.class_name }} : EditModelBase
         OnBeginEdit();
     }
 
-    /// <summary>BeginEdit 時のフック。partial クラスで追加したフィールドの控えを取る</summary>
+    /// <summary>Hook invoked at BeginEdit. Take backups of fields added in a partial class.</summary>
     partial void OnBeginEdit();
 
-    /// <summary>EndEdit の本体。確定時のフックを呼ぶ（変更は即時反映済み）</summary>
+    /// <summary>Core logic of EndEdit. Calls the commit hook (changes are already applied immediately).</summary>
     protected override void EndEditCore() => OnEndEdit();
 
-    /// <summary>EndEdit（確定）時のフック</summary>
+    /// <summary>Hook invoked at EndEdit (commit).</summary>
     partial void OnEndEdit();
 
-    /// <summary>CancelEdit の本体。スナップショットへ復元する（確定値・エラーは再パースで再現し RowState を戻す）</summary>
+    /// <summary>Core logic of CancelEdit. Restores from the snapshot (confirmed values and errors are reproduced by re-parsing, and the RowState is restored).</summary>
     protected override void CancelEditCore()
     {
         ExecuteLoad(() =>
@@ -1288,26 +1288,26 @@ public partial class {{ item.class_name }} : EditModelBase
         RowState = _rowStateSnapshot;
     }
 
-    /// <summary>CancelEdit 時のフック。partial クラスで追加したフィールドを控えへ戻す（ExecuteLoad 中に呼ばれる）</summary>
+    /// <summary>Hook invoked at CancelEdit. Restore fields added in a partial class from their backups (called inside ExecuteLoad).</summary>
     partial void OnCancelEdit();
 
-    /// <summary>所属コレクション内で自身の次の要素を取得する（所属していない／末尾なら null）</summary>
+    /// <summary>Returns the next element after this one in its owning collection (null if not owned or at the end).</summary>
     public new {{ item.class_name }}? GetNext() => ({{ item.class_name }}?)base.GetNext();
 
-    /// <summary>所属コレクション内で自身の前の要素を取得する（所属していない／先頭なら null）</summary>
+    /// <summary>Returns the previous element before this one in its owning collection (null if not owned or at the start).</summary>
     public new {{ item.class_name }}? GetPrevious() => ({{ item.class_name }}?)base.GetPrevious();
 
-    /// <summary>自身が所属する親コレクション（所属していなければ null）</summary>
+    /// <summary>Gets the parent collection this element belongs to (null if not owned).</summary>
     public EditModelCollection<{{ item.class_name }}>? ParentCollection =>
         Owner as EditModelCollection<{{ item.class_name }}>;
 {{~ if item.typed_parent_model_type_name ~}}
 
-    /// <summary>自身を子として保持する親モデル（カスケード親。未所属／ルートは null）</summary>
+    /// <summary>Gets the parent model that holds this element as a child (cascade parent; null when not owned or at the root).</summary>
     public new {{ item.typed_parent_model_type_name }}? ParentModel =>
         base.ParentModel as {{ item.typed_parent_model_type_name }};
 {{~ end ~}}
 
-    /// <summary>所属コレクションの並び替え本体。型付きコレクションの Move を呼ぶ（MoveTo* から使用される）</summary>
+    /// <summary>Core reorder logic for the owning collection. Calls Move on the typed collection (used by the MoveTo* methods).</summary>
     protected override void MoveCore(int oldIndex, int newIndex) =>
         ParentCollection?.Move(oldIndex, newIndex);
 }
@@ -1317,11 +1317,11 @@ public partial class {{ item.class_name }} : EditModelBase
 {{~ if render_mappers ~}}
 {{~ for mapper in mapper_classes ~}}
 {{ if !for.first }}
-{{ end }}/// <summary>{{ mapper.entity_class_name }} と {{ mapper.edit_model_class_name }} の相互変換</summary>
+{{ end }}/// <summary>Converts between {{ mapper.entity_class_name }} and {{ mapper.edit_model_class_name }}.</summary>
 public sealed partial class {{ mapper.class_name }}
     : MapperBase<{{ mapper.entity_class_name }}, {{ mapper.edit_model_class_name }}>
 {
-    /// <summary>初期値を設定した新しい {{ mapper.entity_class_name }} を生成する（保存時に追加対象となる）</summary>
+    /// <summary>Creates a new {{ mapper.entity_class_name }} with initial values set (it will be an insertion target on save).</summary>
     public override {{ mapper.entity_class_name }} CreateEntity()
     {
         var entity = new {{ mapper.entity_class_name }}();
@@ -1330,10 +1330,10 @@ public sealed partial class {{ mapper.class_name }}
         return entity;
     }
 
-    /// <summary>新しい {{ mapper.entity_class_name }} の生成直後に呼ばれる（partial 実装で初期値を設定）</summary>
+    /// <summary>Called just after a new {{ mapper.entity_class_name }} is created (set initial values via a partial implementation).</summary>
     partial void OnEntityCreated({{ mapper.entity_class_name }} entity);
 
-    /// <summary>{{ mapper.entity_class_name }} を基に新しい {{ mapper.edit_model_class_name }} を生成する</summary>
+    /// <summary>Creates a new {{ mapper.edit_model_class_name }} from a {{ mapper.entity_class_name }}.</summary>
     public override {{ mapper.edit_model_class_name }} CreateEditModel({{ mapper.entity_class_name }} entity)
     {
         var editModel = new {{ mapper.edit_model_class_name }}();
@@ -1342,11 +1342,11 @@ public sealed partial class {{ mapper.class_name }}
         return editModel;
     }
 
-    /// <summary>新しい {{ mapper.edit_model_class_name }} の生成直後（ロード後）に呼ばれる（partial 実装で初期値を設定。新規のみは IsAdded で分岐）</summary>
+    /// <summary>Called just after a new {{ mapper.edit_model_class_name }} is created (after loading) (set initial values via a partial implementation; branch on IsAdded to target new models only).</summary>
     partial void OnEditModelCreated({{ mapper.edit_model_class_name }} editModel);
 
-    /// <summary>{{ mapper.edit_model_class_name }} の確定値を既存の {{ mapper.entity_class_name }} へ反映する（破壊的更新）</summary>
-    /// <param name="includeRemoved">削除追跡分（Removed）も復元して反映するか（保存用は true、帳票表示用などは false）</param>
+    /// <summary>Applies the {{ mapper.edit_model_class_name }}'s confirmed values to an existing {{ mapper.entity_class_name }} (destructive update).</summary>
+    /// <param name="includeRemoved">Whether to also restore and apply deletion-tracked (Removed) items (true for saving, false for report display and similar).</param>
     public override void ApplyToEntity(
         {{ mapper.edit_model_class_name }} editModel,
         {{ mapper.entity_class_name }} entity,
@@ -1354,9 +1354,9 @@ public sealed partial class {{ mapper.class_name }}
     )
     {
 {{ for prop in mapper.scalar_properties }}{{ if prop.edit_model_is_nullable && prop.entity_type_name != prop.edit_model_type_name }}        entity.{{ prop.property_name }} =
-            editModel.{{ prop.property_name }} ?? throw new InvalidOperationException("{{ prop.property_name }} が未入力です。");
+            editModel.{{ prop.property_name }} ?? throw new InvalidOperationException("{{ prop.property_name }} has no input value.");
 {{ else }}        entity.{{ prop.property_name }} = editModel.{{ prop.property_name }};
-{{ end }}{{ end }}        // 確定値の変更で EditModel 側に立った RowState をそのまま転写する（ここでは状態を作らない）
+{{ end }}{{ end }}        // Transfer the RowState raised on the edit model by confirmed-value changes as-is (no state is created here).
         entity.RowState = editModel.RowState;
 {{ for nav in mapper.navigation_properties }}{{ if nav.is_cascade }}{{ if nav.is_collection }}        entity.{{ nav.property_name }} = new {{ nav.mapper_class_name }}().CreateEntities(editModel.{{ nav.property_name }}, includeRemoved);
 {{ else if nav.is_nullable }}        entity.{{ nav.property_name }} = editModel.{{ nav.property_name }} is null ? null : new {{ nav.mapper_class_name }}().CreateEntity(editModel.{{ nav.property_name }}, includeRemoved);
@@ -1367,10 +1367,10 @@ public sealed partial class {{ mapper.class_name }}
 {{ end }}{{ end }}{{ end }}        OnEntityApplied(editModel, entity);
     }
 
-    /// <summary>{{ mapper.edit_model_class_name }} の確定値を {{ mapper.entity_class_name }} へ反映した後に呼ばれる（partial 実装で追加プロパティを保存）</summary>
+    /// <summary>Called after the {{ mapper.edit_model_class_name }}'s confirmed values are applied to the {{ mapper.entity_class_name }} (save additional properties via a partial implementation).</summary>
     partial void OnEntityApplied({{ mapper.edit_model_class_name }} editModel, {{ mapper.entity_class_name }} entity);
 
-    /// <summary>{{ mapper.entity_class_name }} の値を既存の {{ mapper.edit_model_class_name }} へ反映する（バインディング経由）</summary>
+    /// <summary>Applies the {{ mapper.entity_class_name }}'s values to an existing {{ mapper.edit_model_class_name }} (via the bindings).</summary>
     public void ApplyToEditModel({{ mapper.entity_class_name }} entity, {{ mapper.edit_model_class_name }} editModel)
     {
         editModel.ExecuteLoad(() =>
@@ -1386,11 +1386,11 @@ public sealed partial class {{ mapper.class_name }}
 {{ end }}{{ end }}{{ end }}            OnEditModelLoaded(entity, editModel);
         });
 
-        // EditModel の状態は生成元 Entity を基準にする（ロード=Unchanged、新規=Added）
+        // The edit model's state is based on the source entity (loaded = Unchanged, new = Added).
         editModel.RowState = entity.RowState;
     }
 
-    /// <summary>{{ mapper.edit_model_class_name }} への既定ロード後に呼ばれる（partial 実装で追加プロパティをロード）</summary>
+    /// <summary>Called after the default load into the {{ mapper.edit_model_class_name }} (load additional properties via a partial implementation).</summary>
     partial void OnEditModelLoaded({{ mapper.entity_class_name }} entity, {{ mapper.edit_model_class_name }} editModel);
 }
 {{~ end ~}}

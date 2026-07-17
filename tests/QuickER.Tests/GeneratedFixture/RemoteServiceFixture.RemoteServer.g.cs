@@ -12,27 +12,28 @@ using Microsoft.Extensions.DependencyInjection;
 namespace QuickER.Tests.GeneratedRemoteServiceFixture;
 
 /// <summary>
-/// 生成されたリモート面（I{Entity}RemoteRepository）を ASP.NET Core Minimal API として公開するエンドポイントマッピング。
+/// Endpoint mapping that exposes the generated remote surface (I{Entity}RemoteRepository) as an ASP.NET Core Minimal API.
 /// </summary>
 /// <remarks>
 /// <para>
-/// このファイルは ASP.NET Core の FrameworkReference（<c>Microsoft.AspNetCore.App</c>）を持つプロジェクトに配置すること
-/// （SDK が <c>Microsoft.NET.Sdk.Web</c> なら追加設定は不要）。サーバー側 DI には実体のリポジトリ
-/// （<c>AddGeneratedSqlServerRepositories</c> / <c>AddGeneratedEfCoreRepositories</c> 等）を登録しておく。
+/// Place this file in a project that has the ASP.NET Core FrameworkReference (<c>Microsoft.AspNetCore.App</c>);
+/// no extra configuration is needed when the SDK is <c>Microsoft.NET.Sdk.Web</c>. Register the concrete repositories
+/// (<c>AddGeneratedSqlServerRepositories</c> / <c>AddGeneratedEfCoreRepositories</c>, etc.) in the server-side DI container.
 /// </para>
 /// <para>
-/// 各操作は <c>POST {prefix}/{エンティティ}/{操作名}</c>（JSON 本文）で公開される。認可などの横断的関心事は
-/// 戻り値の <see cref="RouteGroupBuilder"/> へ付与する（例 <c>app.MapGeneratedRemoteEndpoints().RequireAuthorization()</c>）。
-/// 例外は <see cref="SaveConflictException"/>＝409・その他＝500 の構造化 JSON（RemoteError）へ変換され、
-/// クライアント（Http{Entity}RemoteRepository）が元の例外型を復元する。
+/// Each operation is exposed as <c>POST {prefix}/{entity}/{operation}</c> (JSON body). Apply cross-cutting concerns
+/// such as authorization to the returned <see cref="RouteGroupBuilder"/>
+/// (for example <c>app.MapGeneratedRemoteEndpoints().RequireAuthorization()</c>).
+/// Exceptions are converted to structured JSON (RemoteError): <see cref="SaveConflictException"/> maps to 409 and
+/// everything else to 500, and the client (Http{Entity}RemoteRepository) restores the original exception type.
 /// </para>
 /// </remarks>
 public static class GeneratedRemoteEndpoints
 {
-    /// <summary>リモート面の全エンドポイントを prefix（既定 /quicker）配下へマッピングする</summary>
-    /// <param name="endpoints">マッピング先（<c>WebApplication</c> 等）</param>
-    /// <param name="prefix">エンドポイント群のルートプレフィックス</param>
-    /// <returns>認可等を付与できるエンドポイントグループ</returns>
+    /// <summary>Maps every remote-surface endpoint under the given prefix (defaults to /quicker).</summary>
+    /// <param name="endpoints">The mapping target (for example a <c>WebApplication</c>).</param>
+    /// <param name="prefix">The route prefix for the endpoint group.</param>
+    /// <returns>The endpoint group, to which authorization and similar concerns can be applied.</returns>
     public static RouteGroupBuilder MapGeneratedRemoteEndpoints(
         this IEndpointRouteBuilder endpoints,
         string prefix = "/quicker"
@@ -47,7 +48,7 @@ public static class GeneratedRemoteEndpoints
         return group;
     }
 
-    /// <summary>ハンドラを実行し、結果 JSON の書き込みと例外→HTTP 応答の変換（409/500）を共通処理する</summary>
+    /// <summary>Runs a handler, writes the result as JSON, and maps exceptions to HTTP responses (409/500).</summary>
     private static async Task ExecuteAsync(HttpContext context, Func<Task<object?>> handler)
     {
         try
@@ -61,7 +62,7 @@ public static class GeneratedRemoteEndpoints
         }
         catch (SaveConflictException ex)
         {
-            // 楽観的競合はクライアント側で SaveConflictException として復元される（直結時と同じ catch が機能する）
+            // Optimistic-concurrency conflicts are restored on the client as SaveConflictException (the same catch works as with a direct call).
             context.Response.StatusCode = StatusCodes.Status409Conflict;
             await context.Response.WriteAsJsonAsync(
                 new RemoteError { Type = "SaveConflict", Message = ex.Message },
@@ -71,7 +72,7 @@ public static class GeneratedRemoteEndpoints
         }
         catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
         {
-            // クライアント切断・キャンセル: 応答先が既に無いため何もしない
+            // Client disconnected or cancelled: there is no longer a response target, so do nothing.
         }
         catch (Exception ex)
         {
@@ -84,7 +85,7 @@ public static class GeneratedRemoteEndpoints
         }
     }
 
-    /// <summary>リクエスト本文を JSON から復元する（空本文は例外＝500 経由でクライアントへ報告）</summary>
+    /// <summary>Restores the request body from JSON (an empty body throws, and the error is reported to the client via 500).</summary>
     private static async Task<TRequest> ReadRequestAsync<TRequest>(HttpContext context)
     {
         var request = await context.Request.ReadFromJsonAsync<TRequest>(
@@ -92,14 +93,14 @@ public static class GeneratedRemoteEndpoints
             context.RequestAborted
         );
 
-        return request ?? throw new InvalidOperationException("リクエスト本文が空です。");
+        return request ?? throw new InvalidOperationException("The request body is empty.");
     }
 
-    /// <summary>DI からリモート面リポジトリを解決する</summary>
+    /// <summary>Resolves the remote-surface repository from DI.</summary>
     private static TRepository Repository<TRepository>(HttpContext context)
         where TRepository : notnull => context.RequestServices.GetRequiredService<TRepository>();
 
-    /// <summary>共通 CRUD（GetById / GetAll / Insert / Update / Delete / Save / SaveMany）をマッピングする</summary>
+    /// <summary>Maps the common CRUD operations (GetById / GetAll / Insert / Update / Delete / Save / SaveMany).</summary>
     private static void MapCrud<TEntity, TKey, TRepository>(
         RouteGroupBuilder group,
         string entityRoute
@@ -218,7 +219,7 @@ public static class GeneratedRemoteEndpoints
         );
     }
 
-    /// <summary>CustomerEntity のリモート面エンドポイントをマッピングする</summary>
+    /// <summary>Maps the remote-surface endpoints for CustomerEntity.</summary>
     private static void MapCustomerEndpoints(RouteGroupBuilder group)
     {
         MapCrud<CustomerEntity, CustomerIdValue, ICustomerRemoteRepository>(
@@ -227,7 +228,7 @@ public static class GeneratedRemoteEndpoints
         );
     }
 
-    /// <summary>OrderEntity のリモート面エンドポイントをマッピングする</summary>
+    /// <summary>Maps the remote-surface endpoints for OrderEntity.</summary>
     private static void MapOrderEndpoints(RouteGroupBuilder group)
     {
         MapCrud<OrderEntity, OrderIdValue, IOrderRemoteRepository>(
@@ -416,36 +417,36 @@ public static class GeneratedRemoteEndpoints
         );
     }
 
-    /// <summary>GetByCustomer（Order）のリクエスト本文</summary>
+    /// <summary>Request body for GetByCustomer (Order).</summary>
     private sealed record OrderGetByCustomerRequest(int CustomerId, int Take, int Skip);
 
-    /// <summary>CountByCustomer（Order）のリクエスト本文</summary>
+    /// <summary>Request body for CountByCustomer (Order).</summary>
     private sealed record OrderCountByCustomerRequest(int CustomerId);
 
-    /// <summary>SearchMemo（Order）のリクエスト本文</summary>
+    /// <summary>Request body for SearchMemo (Order).</summary>
     private sealed record OrderSearchMemoRequest(string Keyword);
 
-    /// <summary>GetByIds（Order）のリクエスト本文</summary>
+    /// <summary>Request body for GetByIds (Order).</summary>
     private sealed record OrderGetByIdsRequest(IReadOnlyList<int> Ids);
 
-    /// <summary>GetSummaries（Order）のリクエスト本文</summary>
+    /// <summary>Request body for GetSummaries (Order).</summary>
     private sealed record OrderGetSummariesRequest(int CustomerId, int Take, int Skip);
 
-    /// <summary>SumAmounts（Order）のリクエスト本文</summary>
+    /// <summary>Request body for SumAmounts (Order).</summary>
     private sealed record OrderSumAmountsRequest(int CustomerId);
 
-    /// <summary>GetByIdsRaw（Order）のリクエスト本文</summary>
+    /// <summary>Request body for GetByIdsRaw (Order).</summary>
     private sealed record OrderGetByIdsRawRequest(IReadOnlyList<int> Ids);
 
-    /// <summary>CountByCustomerRaw（Order）のリクエスト本文</summary>
+    /// <summary>Request body for CountByCustomerRaw (Order).</summary>
     private sealed record OrderCountByCustomerRawRequest(int CustomerId);
 
-    /// <summary>GetMemoRowsRaw（Order）のリクエスト本文</summary>
+    /// <summary>Request body for GetMemoRowsRaw (Order).</summary>
     private sealed record OrderGetMemoRowsRawRequest(int CustomerId);
 
-    /// <summary>GetByCustomerTyped（Order）のリクエスト本文</summary>
+    /// <summary>Request body for GetByCustomerTyped (Order).</summary>
     private sealed record OrderGetByCustomerTypedRequest(CustomerIdValue CustomerId);
 
-    /// <summary>SpecialLookup（Order）のリクエスト本文</summary>
+    /// <summary>Request body for SpecialLookup (Order).</summary>
     private sealed record OrderSpecialLookupRequest(int CustomerId);
 }

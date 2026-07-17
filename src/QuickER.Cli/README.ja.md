@@ -29,7 +29,8 @@ quicker scaffold --connection "Server=.;Database=Shop;Integrated Security=true;T
 | `--root-namespace <name>` / `--split-files-by-category` | ルート名前空間の指定／カテゴリ別ファイル分割 |
 | `--repository-dialects <list>` | QuickER 版 Repository のマルチターゲット生成（例 `sqlserver,sqlite`・keyed DI） |
 | `--use-runtime-packages` | ランタイム固定コードを出力せず `QuickER.Runtime.*` パッケージ参照で賄う |
-| `--generate-api-docs` | API リファレンス Markdown（`{ベース名}.g.md`）を追加出力 |
+| `--generate-api-docs` | API リファレンス Markdown（`{ベース名}.g.md`・英語正本）を追加出力 |
+| `--api-docs-ja` | 日本語版 API リファレンス Markdown（`{ベース名}.ja.g.md`）も出力（`--generate-api-docs` が前提） |
 
 設定ファイルの各キーは同名の kebab-case フラグとしても指定でき、設定ファイルより優先されます（優先順位: CLI フラグ ＞ 設定ファイル ＞ 既定値。bool は `--flag` / `--flag false` の三値）。
 

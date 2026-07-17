@@ -32,7 +32,7 @@ internal sealed partial class CSharpGenerationModelBuilder
 {
     /// <summary>EF Core で Stream アクセサが使えないことを示す例外メッセージ（生成コードへ埋め込む）</summary>
     private const string EfCoreStreamNotSupportedMessage =
-        "EF Core モードでは Stream アクセサ（無制限バイナリ列の読み書き）は使用できません。QuickER 版 Repository を使うか、partial クラスで実装してください。";
+        "Stream accessors (reading/writing unbounded binary columns) are not supported in EF Core mode. Use the QuickER Repository, or implement them in a partial class.";
 
     /// <summary>1 エンティティ分の Stream アクセサブロック（テンプレートへ渡す整形済みテキスト群）</summary>
     private sealed record BinaryStreamBlocks(
@@ -144,10 +144,10 @@ internal sealed partial class CSharpGenerationModelBuilder
     {
         var builder = new StringBuilder();
         builder
-            .Append("    /// <summary>")
+            .Append("    /// <summary>Reads the ")
             .Append(columnName)
             .Append(
-                " を宛先ストリームへ読み出す（無制限バイナリ列・O(チャンク) のストリーミング。true=書き込んだ・false=行なし または NULL）</summary>\n"
+                " column into the destination stream (unbounded binary column, O(chunk) streaming; true = written, false = no row or NULL).</summary>\n"
             )
             .Append("    Task<bool> Read")
             .Append(propertyName)
@@ -155,10 +155,10 @@ internal sealed partial class CSharpGenerationModelBuilder
             .Append(keyTypeName)
             .Append(" id, Stream destination, CancellationToken cancellationToken = default);\n\n");
         builder
-            .Append("    /// <summary>")
+            .Append("    /// <summary>Writes the ")
             .Append(columnName)
             .Append(
-                " をストリームから書き込む（無制限バイナリ列・O(チャンク) のストリーミング。source=null で NULL を設定・CanSeek でない Stream は length 指定が必須。true=更新した・false=行なし）</summary>\n"
+                " column from a stream (unbounded binary column, O(chunk) streaming; source = null sets NULL, non-seekable streams require an explicit length; true = updated, false = no row).</summary>\n"
             )
             .Append("    Task<bool> Write")
             .Append(propertyName)
@@ -242,10 +242,10 @@ internal sealed partial class CSharpGenerationModelBuilder
     {
         var builder = new StringBuilder();
         builder
-            .Append("    /// <summary>")
+            .Append("    /// <summary>Reads the ")
             .Append(columnName)
             .Append(
-                " をファイルへ読み出す（Stream 版へ委譲。true=書き込んだ・false=行なし または NULL）</summary>\n"
+                " column into a file (delegates to the Stream overload; true = written, false = no row or NULL).</summary>\n"
             )
             .Append("    public static async Task<bool> Read")
             .Append(propertyName)
@@ -265,10 +265,10 @@ internal sealed partial class CSharpGenerationModelBuilder
             .Append(propertyName)
             .Append("Async(id, destination, cancellationToken);\n    }\n\n");
         builder
-            .Append("    /// <summary>")
+            .Append("    /// <summary>Writes the ")
             .Append(columnName)
             .Append(
-                " をファイルから書き込む（Stream 版へ委譲。true=更新した・false=行なし）</summary>\n"
+                " column from a file (delegates to the Stream overload; true = updated, false = no row).</summary>\n"
             )
             .Append("    public static async Task<bool> Write")
             .Append(propertyName)
@@ -411,10 +411,12 @@ internal sealed partial class CSharpGenerationModelBuilder
     {
         var builder = new StringBuilder();
         builder
-            .Append("/// <summary>")
+            .Append(
+                "/// <summary>File convenience methods for the unbounded binary column accessors of "
+            )
             .Append(entityClassName)
             .Append(
-                " の無制限バイナリ列アクセサのファイル糖衣（DB⇔ファイルの blob 転送を 1 呼び出しで行う・Stream 版へ委譲）</summary>\n"
+                " (transfer blobs between the database and files in a single call; delegates to the Stream overloads).</summary>\n"
             )
             .Append("public static class ")
             .Append(repositoryName)

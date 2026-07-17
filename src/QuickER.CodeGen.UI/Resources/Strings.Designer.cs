@@ -174,6 +174,12 @@ namespace QuickER.CodeGen.UI.Resources {
             }
         }
 
+        public static string CodeGen_IncludeJapaneseApiDocs {
+            get {
+                return ResourceManager.GetString("CodeGen_IncludeJapaneseApiDocs", resourceCulture);
+            }
+        }
+
         public static string CodeGen_ApiDocsTooltip {
             get {
                 return ResourceManager.GetString("CodeGen_ApiDocsTooltip", resourceCulture);

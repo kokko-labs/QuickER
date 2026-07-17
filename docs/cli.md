@@ -85,7 +85,8 @@ quicker scaffold --connection "Server=.;Database=Shop;Integrated Security=true;T
 | `GenerateRemoteContracts`（`false`） | リモート操作用インターフェイス `I{Entity}RemoteRepository` を追加生成する（CLI の `--generate-remote-contracts` に対応。Repository / EF Core 契約が前提。[生成コードの使い方](code-generation.md) 参照） |
 | `GenerateRemoteServices`（`false`） | リモート面の HTTP クライアント／サーバー実装を生成する（`GenerateRemoteContracts` を自動的に含意。CLI の `--generate-remote-services` に対応。[生成コードの使い方](code-generation.md) 参照） |
 | `UseRuntimePackages`（`false`） | ランタイム固定コードを出力せず NuGet パッケージ参照で賄う（[生成コードの使い方](code-generation.md) 参照） |
-| `GenerateApiDocs`（`false`） | API リファレンス Markdown（`{ベース名}.g.md`）を追加出力する（CLI の `--generate-api-docs` に対応。[生成コードの使い方](code-generation.md) 参照） |
+| `GenerateApiDocs`（`false`） | API リファレンス Markdown（`{ベース名}.g.md`・英語正本）を追加出力する（CLI の `--generate-api-docs` に対応。[生成コードの使い方](code-generation.md) 参照） |
+| `IncludeJapaneseApiDocs`（`false`） | 日本語版 API リファレンス Markdown（`{ベース名}.ja.g.md`）も併産する（`GenerateApiDocs` が前提。CLI の `--api-docs-ja` に対応） |
 | `IncludeDataAnnotations`（`true`） | `[Required]` / `[MaxLength]` 等の DataAnnotations と、DB 定義メタ属性（`[DbTableMeta]` / `[DbColumnMeta]`）を付与する |
 | `IncludeJsonIgnoreOnParentNavigation`（`true`） | 親参照ナビゲーションへ `[JsonIgnore]` を付与する（JSON シリアライズ時の循環参照対策） |
 | `OutputPath`（`QuickEREntities.g.cs` 相当） | 出力先パス。CLI（`--config` / `--output-path`）はそのファイル名部分のみを単一ファイル出力のファイル名として使う（出力先ディレクトリは常に `--out`）。GUI では出力先のフルパス（非分割時はファイル・分割時はフォルダ）が入ることがあるが、CLI は同じ規則で解釈する |
@@ -102,7 +103,9 @@ dotnet run --project src/QuickER.Cli -- generate `
 ```
 
 `--generate-api-docs` により、生成コード `EcOrder.g.cs` と同じベース名の API リファレンス Markdown
-`EcOrder.g.md` も同梱出力されます（いずれもチェックイン済み・ドリフト検知の対象）。
+`EcOrder.g.md`（英語正本）も同梱出力されます。日本語版 `EcOrder.ja.g.md` も欲しい場合は `--api-docs-ja`
+を追加します（`--generate-api-docs` が前提。ec-order サンプルは `quicker.json` で `IncludeJapaneseApiDocs`
+を指定済み）。いずれもチェックイン済み・ドリフト検知の対象です。
 
 ## ライセンス注記
 

@@ -1,4 +1,5 @@
 using System.CommandLine;
+using System.Globalization;
 using QuickER.Cli.Resources;
 using QuickER.CodeGen.CSharp;
 using QuickER.Model;
@@ -146,7 +147,8 @@ internal static class GenerationExecutor
             foreach (
                 var line in RuntimePackageReferenceGuidance.BuildGuidanceLines(
                     options,
-                    RuntimePackages.ResolveGuidanceVersion()
+                    RuntimePackages.ResolveGuidanceVersion(),
+                    CultureInfo.CurrentUICulture
                 )
             )
             {

@@ -437,5 +437,47 @@ namespace QuickER.CodeGen.CSharp.Resources {
                 return ResourceManager.GetString("CodeGen_Query_RawSqlIssue", resourceCulture);
             }
         }
+
+        public static string CodeGen_RuntimePackageGuidanceHeading {
+            get {
+                return ResourceManager.GetString("CodeGen_RuntimePackageGuidanceHeading", resourceCulture);
+            }
+        }
+
+        public static string ApiDoc_Navigation_ParentReference {
+            get {
+                return ResourceManager.GetString("ApiDoc_Navigation_ParentReference", resourceCulture);
+            }
+        }
+
+        public static string ApiDoc_Navigation_ChildCollection {
+            get {
+                return ResourceManager.GetString("ApiDoc_Navigation_ChildCollection", resourceCulture);
+            }
+        }
+
+        public static string ApiDoc_Di_QuickerRepository {
+            get {
+                return ResourceManager.GetString("ApiDoc_Di_QuickerRepository", resourceCulture);
+            }
+        }
+
+        public static string ApiDoc_Di_KeyedMultiDialect {
+            get {
+                return ResourceManager.GetString("ApiDoc_Di_KeyedMultiDialect", resourceCulture);
+            }
+        }
+
+        public static string ApiDoc_Di_EfCore {
+            get {
+                return ResourceManager.GetString("ApiDoc_Di_EfCore", resourceCulture);
+            }
+        }
+
+        public static string ApiDoc_Di_InMemory {
+            get {
+                return ResourceManager.GetString("ApiDoc_Di_InMemory", resourceCulture);
+            }
+        }
     }
 }

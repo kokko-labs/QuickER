@@ -1,24 +1,25 @@
 {{~ if render_contract && emit_shared_infra ~}}
 
-/// <summary>SqlQuery の 1 並び順（キー選択式と降順フラグ）。式木のまま捕捉し、実行器側で列名／SQL へ翻訳する</summary>
-/// <param name="KeySelector">キー選択のラムダ式（object? への boxing を含み得る。実行器側で剥がす）</param>
-/// <param name="Descending">降順かどうか</param>
+/// <summary>A single ordering for SqlQuery (a key selector and a descending flag). Captured as an expression tree and translated to a column name / SQL by the executor.</summary>
+/// <param name="KeySelector">The key-selecting lambda expression (may include boxing to object?; the executor strips it).</param>
+/// <param name="Descending">Whether the ordering is descending.</param>
 {{ infra_visibility }} readonly record struct SqlQueryOrdering(LambdaExpression KeySelector, bool Descending);
 
 /// <summary>
-/// SqlQuery が蓄積した内容（Where 式・並び順・Include ツリー・ページング）を
-/// 実行器へ引き渡すための方言中立なスナップショット（BCL 型のみで構成）。
+/// A dialect-neutral snapshot (composed only of BCL types) that hands what a SqlQuery has accumulated
+/// (Where expressions, orderings, Include tree, paging) to an executor.
 /// </summary>
 /// <remarks>
-/// 述語・並び順は式木のまま保持し、SQL への翻訳（識別子クォート・日付部品・LIKE 等の方言差）と実行は
-/// 各バックエンドの <see cref="ISqlQueryExecutor{TEntity}"/> 実装（ADO 方言別実行器・EF Core 実行器）の責務とする。
+/// Predicates and orderings are kept as expression trees; translation to SQL (dialect differences such as
+/// identifier quoting, date parts, and LIKE) and execution are the responsibility of each backend's
+/// <see cref="ISqlQueryExecutor{TEntity}"/> implementation (the per-dialect ADO executor and the EF Core executor).
 /// </remarks>
-/// <param name="Predicates">Where で捕捉した述語式（AND 結合）</param>
-/// <param name="Orderings">OrderBy / OrderByDescending で捕捉した並び順（指定順）</param>
-/// <param name="Includes">Include / ThenInclude のナビゲーションツリー</param>
-/// <param name="Take">取得件数の上限（未指定は null）</param>
-/// <param name="Skip">読み飛ばす件数（未指定は null）</param>
-/// <param name="WithUnboundedBinary">無制限バイナリ列を含めて取得するか（true で全列プレーン SELECT・Include とは併用不可）</param>
+/// <param name="Predicates">The predicate expressions captured by Where (combined with AND).</param>
+/// <param name="Orderings">The orderings captured by OrderBy / OrderByDescending (in the specified order).</param>
+/// <param name="Includes">The navigation tree from Include / ThenInclude.</param>
+/// <param name="Take">The maximum number of rows to fetch (null when unspecified).</param>
+/// <param name="Skip">The number of rows to skip (null when unspecified).</param>
+/// <param name="WithUnboundedBinary">Whether to fetch including unbounded binary columns (true means an all-column plain SELECT; cannot be combined with Include).</param>
 {{ infra_visibility }} sealed record SqlQueryPlan<TEntity>(
     IReadOnlyList<LambdaExpression> Predicates,
     IReadOnlyList<SqlQueryOrdering> Orderings,
@@ -29,39 +30,40 @@
 );
 
 /// <summary>
-/// SqlQuery の終端メソッドの実行を差し替える内部抽象。各バックエンド（ADO 方言別実行器・EF Core 版）が
-/// 実装し、SqlQuery へコンストラクタ経由で注入する。SqlQuery 自身は方言 SQL を持たず、捕捉した
-/// プラン（式木・Include・ページング）をこの実行器へ委譲する。
+/// The internal abstraction that swaps out execution of SqlQuery's terminal methods. Each backend
+/// (the per-dialect ADO executor and the EF Core variant) implements it and is injected into SqlQuery
+/// via the constructor. SqlQuery itself holds no dialect SQL and delegates the captured plan
+/// (expression trees, Include, paging) to this executor.
 /// </summary>
 {{ infra_visibility }} interface ISqlQueryExecutor<TEntity>
     where TEntity : class
 {
-    /// <summary>条件に一致するエンティティを（Include 指定分とともに）一覧取得する</summary>
+    /// <summary>Fetches the entities matching the conditions (together with the requested Includes) as a list.</summary>
     Task<IReadOnlyList<TEntity>> ToListAsync(
         SqlQueryPlan<TEntity> plan,
         CancellationToken cancellationToken
     );
 
-    /// <summary>条件に一致するエンティティを射影して取得する（実装先が可能ならサーバー側で列を刈り込む）</summary>
+    /// <summary>Fetches the entities matching the conditions with a projection (pruning columns server-side when the backend supports it).</summary>
     Task<IReadOnlyList<TResult>> ToProjectionListAsync<TResult>(
         SqlQueryPlan<TEntity> plan,
         Expression<Func<TEntity, TResult>> selector,
         CancellationToken cancellationToken
     );
 
-    /// <summary>条件に一致する先頭の 1 件を（Include 指定分とともに）取得する（該当なしは null）</summary>
+    /// <summary>Fetches the first entity matching the conditions (together with the requested Includes); returns null when there is no match.</summary>
     Task<TEntity?> FirstOrDefaultAsync(
         SqlQueryPlan<TEntity> plan,
         CancellationToken cancellationToken
     );
 
-    /// <summary>条件に一致する件数を取得する（並び順・ページング・Include は関与しない）</summary>
+    /// <summary>Returns the count of rows matching the conditions (orderings, paging, and Include are not involved).</summary>
     Task<int> CountAsync(SqlQueryPlan<TEntity> plan, CancellationToken cancellationToken);
 
-    /// <summary>条件に一致するレコードが存在するかを取得する（並び順・ページング・Include は関与しない）</summary>
+    /// <summary>Returns whether any record matching the conditions exists (orderings, paging, and Include are not involved).</summary>
     Task<bool> AnyAsync(SqlQueryPlan<TEntity> plan, CancellationToken cancellationToken);
 
-    /// <summary>条件に一致する行を一括削除する。cascadeDelete=true で子孫も FK 連鎖で削除する</summary>
+    /// <summary>Bulk-deletes the rows matching the conditions. When cascadeDelete=true, descendants are also deleted along FK chains.</summary>
     Task<int> ExecuteDeleteAsync(
         SqlQueryPlan<TEntity> plan,
         bool cascadeDelete,
@@ -70,16 +72,17 @@
 }
 
 /// <summary>
-/// 射影セレクタ（<c>v =&gt; new Dto { ... v.Prop ... }</c>）を走査し、「参照している列プロパティ名の集合」と
-/// 「その集合だけで射影を安全に再構成できるか（＝サーバー側列刈り込みが可能か）」を判定する式木ビジタ。
+/// An expression-tree visitor that walks a projection selector (<c>v =&gt; new Dto { ... v.Prop ... }</c>) and determines
+/// both "the set of referenced column property names" and "whether the projection can be safely reconstructed from that
+/// set alone (i.e. whether server-side column pruning is possible)".
 /// </summary>
 /// <remarks>
-/// ラムダパラメータ（対象エンティティ）が「直上メンバー参照（<c>v.Prop</c>）」以外の位置に現れたら抽出不能とする
-/// （<c>v</c> 丸ごと参照・エンティティを引数/レシーバに取るメソッド呼び出し・多段ナビゲーション参照など）。
-/// 収集する名前が実際に列プロパティかどうか（ナビゲーションでないか）の突き合わせは呼び出し側（各実行器）が
-/// <c>EntitySaveMetadata.ResolveProjectionColumns</c> で行う（本クラスのみ収載する構成では EntitySaveMetadata が
-/// 同居しないため cref にしない）。抽出不能なら実行器は従来経路
-/// （全列取得 → メモリ内で射影）へフォールバックする。
+/// If the lambda parameter (the target entity) appears anywhere other than a "direct member reference (<c>v.Prop</c>)",
+/// extraction is treated as impossible (referencing <c>v</c> as a whole, a method call that takes the entity as an argument
+/// or receiver, a multi-hop navigation reference, and so on). Whether each collected name is actually a column property
+/// (rather than a navigation) is reconciled by the caller (each executor) via <c>EntitySaveMetadata.ResolveProjectionColumns</c>
+/// (not referenced with cref because EntitySaveMetadata is not co-located in configurations that include only this class).
+/// When extraction is impossible, the executor falls back to the legacy path (fetch all columns, then project in memory).
 /// </remarks>
 {{ infra_visibility }} sealed class ProjectionColumnCollector : ExpressionVisitor
 {
@@ -90,15 +93,15 @@
     private ProjectionColumnCollector(ParameterExpression parameter) => _parameter = parameter;
 
     /// <summary>
-    /// セレクタが参照する直上メンバー名を収集する。列参照のみで安全に抽出できたら true＋参照名集合、
-    /// 抽出不能（丸ごと参照・メソッド呼び出し等）なら false を返す。
+    /// Collects the direct member names referenced by the selector. Returns true plus the set of referenced names when
+    /// extraction succeeded from column references alone, and false when extraction is impossible (whole reference, method call, etc.).
     /// </summary>
     public static bool TryCollect<TEntity, TResult>(
         Expression<Func<TEntity, TResult>> selector,
         out IReadOnlyCollection<string> referencedProperties
     )
     {
-        // 単一パラメータ（対象エンティティ 1 つ）のラムダのみ扱う
+        // Only handle lambdas with a single parameter (one target entity)
         if (selector.Parameters.Count != 1)
         {
             referencedProperties = Array.Empty<string>();
@@ -111,12 +114,12 @@
         return collector._extractable;
     }
 
-    /// <summary>メンバー参照を訪問する。レシーバがラムダパラメータ直上（<c>v.Prop</c>）なら名前を収集し、内側へは降りない</summary>
+    /// <summary>Visits a member reference. When the receiver is directly the lambda parameter (<c>v.Prop</c>), collects the name and does not descend inside.</summary>
     protected override Expression VisitMember(MemberExpression node)
     {
         if (node.Expression == _parameter && node.Member is PropertyInfo property)
         {
-            // v.Prop の形。列参照候補として名前だけ収集し、内側のパラメータ訪問（丸ごと参照扱い）は避ける
+            // The v.Prop shape. Collect only the name as a column-reference candidate and avoid visiting the inner parameter (which would count as a whole reference).
             _members.Add(property.Name);
             return node;
         }
@@ -124,7 +127,7 @@
         return base.VisitMember(node);
     }
 
-    /// <summary>ラムダパラメータの訪問。メンバー参照の直上以外で現れた＝丸ごと参照のため抽出不能とする</summary>
+    /// <summary>Visits the lambda parameter. Appearing anywhere other than directly above a member reference means a whole reference, so extraction is treated as impossible.</summary>
     protected override Expression VisitParameter(ParameterExpression node)
     {
         if (node == _parameter)
@@ -138,11 +141,11 @@
 {{~ end ~}}
 {{~ if render_contract && emit_shared_infra ~}}
 
-/// <summary>検索条件・並び順・Include をチェーンで構築し、終端メソッド（ToListAsync 等）で実行するクエリ</summary>
+/// <summary>A query built up by chaining conditions, orderings, and Includes, then executed by a terminal method (ToListAsync, etc.).</summary>
 /// <remarks>
-/// 述語・並び順・Include はラムダ式（式木）のまま捕捉し、SQL への翻訳・実行は注入された
-/// <see cref="ISqlQueryExecutor{TEntity}"/> 実装（ADO 方言別実行器 or EF Core 実行器）へ委譲する。
-/// SqlQuery 自身は方言 SQL を一切持たない（方言差は実行器側に閉じる）。
+/// Predicates, orderings, and Includes are captured as lambda expressions (expression trees); translation to SQL and
+/// execution are delegated to the injected <see cref="ISqlQueryExecutor{TEntity}"/> implementation (the per-dialect ADO
+/// executor or the EF Core executor). SqlQuery itself holds no dialect SQL at all (dialect differences stay inside the executor).
 /// </remarks>
 public sealed class SqlQuery<TEntity>
     where TEntity : class
@@ -151,52 +154,52 @@ public sealed class SqlQuery<TEntity>
     private int? _take;
     private int? _skip;
 
-    /// <summary>WithUnboundedBinary 指定フラグ（true で無制限バイナリ列を含めた全列取得＝Include とは併用不可）</summary>
+    /// <summary>The WithUnboundedBinary flag (true fetches all columns including unbounded binary columns; cannot be combined with Include).</summary>
     private bool _withUnboundedBinary;
 
-    /// <summary>終端メソッドの実行を担うバックエンド実行器（ADO 方言別 or EF Core）</summary>
+    /// <summary>The backend executor that runs the terminal methods (per-dialect ADO or EF Core).</summary>
     private readonly ISqlQueryExecutor<TEntity> _executor;
 
-    /// <summary>捕捉した Where 式（翻訳せず式木のまま保持し、実行器が SQL / LINQ へ翻訳する）</summary>
+    /// <summary>The captured Where expressions (kept as expression trees without translating; the executor translates them to SQL / LINQ).</summary>
     private readonly List<LambdaExpression> _predicates = new();
 
-    /// <summary>捕捉した並び順（キー選択式と降順フラグ）</summary>
+    /// <summary>The captured orderings (a key selector and a descending flag).</summary>
     private readonly List<SqlQueryOrdering> _orderSelectors = new();
 
-    /// <summary>バックエンド実行器を注入する内部コンストラクタ</summary>
+    /// <summary>Internal constructor that injects the backend executor.</summary>
     {{ infra_visibility }} SqlQuery(ISqlQueryExecutor<TEntity> executor) => _executor = executor;
 
-    /// <summary>検索条件を追加する（複数指定は AND 結合）</summary>
+    /// <summary>Adds a search condition (multiple conditions are combined with AND).</summary>
     public SqlQuery<TEntity> Where(Expression<Func<TEntity, bool>> predicate)
     {
         ArgumentNullException.ThrowIfNull(predicate);
-        // 式木のまま捕捉し、SQL / LINQ への翻訳は実行器に委ねる
+        // Capture as an expression tree and leave translation to SQL / LINQ to the executor
         _predicates.Add(predicate);
         return this;
     }
 
-    /// <summary>昇順の並び順を追加する</summary>
+    /// <summary>Adds an ascending ordering.</summary>
     public SqlQuery<TEntity> OrderBy(Expression<Func<TEntity, object?>> keySelector)
     {
         _orderSelectors.Add(new SqlQueryOrdering(keySelector, Descending: false));
         return this;
     }
 
-    /// <summary>降順の並び順を追加する</summary>
+    /// <summary>Adds a descending ordering.</summary>
     public SqlQuery<TEntity> OrderByDescending(Expression<Func<TEntity, object?>> keySelector)
     {
         _orderSelectors.Add(new SqlQueryOrdering(keySelector, Descending: true));
         return this;
     }
 
-    /// <summary>取得件数の上限を指定する</summary>
+    /// <summary>Sets the maximum number of rows to fetch.</summary>
     public SqlQuery<TEntity> Take(int count)
     {
         _take = count;
         return this;
     }
 
-    /// <summary>先頭から読み飛ばす件数を指定する</summary>
+    /// <summary>Sets the number of leading rows to skip.</summary>
     public SqlQuery<TEntity> Skip(int count)
     {
         _skip = count;
@@ -204,15 +207,15 @@ public sealed class SqlQuery<TEntity>
     }
 
     /// <summary>
-    /// 無制限バイナリ列（<c>UnboundedBinaryColumnAttribute</c> 付き）を含めてエンティティを取得する。ExcludeUnboundedBinaryColumns で
-    /// 既定 SELECT から外れている列を、この呼び出しに限り取得したいときに指定する（除外列がなければ何もしない no-op）。
+    /// Fetches entities including unbounded binary columns (those marked with <c>UnboundedBinaryColumnAttribute</c>). Use it when you want to
+    /// fetch, for this call only, the columns that ExcludeUnboundedBinaryColumns has dropped from the default SELECT (a no-op when there are no excluded columns).
     /// </summary>
     /// <remarks>
-    /// Include とは併用できない（終端メソッド実行時に <see cref="InvalidOperationException"/>）。無制限バイナリ列が
-    /// 必要な場合は Include なしの別クエリで取得すること。SQL Server では（既定の JSON 経由ではなく）プレーン SELECT になり、
-    /// 巨大 blob の Base64 膨張（ピークメモリ 5〜6 倍）を回避する。効果があるのは ToListAsync / FirstOrDefaultAsync のみ
-    /// （射影・件数・存在確認には影響しない）。取得したエンティティは通常取得と同等（RowState=Unchanged）だが、除外列が
-    /// UPDATE 対象外である点は変わらないため、そのまま UpdateAsync すると既存ガードで例外になる（更新は生 SQL で行う）。
+    /// Cannot be combined with Include (an <see cref="InvalidOperationException"/> is thrown when the terminal method runs). When unbounded binary
+    /// columns are needed, fetch them with a separate query that has no Include. On SQL Server this uses a plain SELECT (not the default JSON path),
+    /// avoiding the Base64 inflation of large blobs (5-6x peak memory). It takes effect only on ToListAsync / FirstOrDefaultAsync
+    /// (it does not affect projections, counts, or existence checks). The fetched entities are equivalent to a normal fetch (RowState=Unchanged), but
+    /// because excluded columns remain outside the UPDATE set, calling UpdateAsync on them as-is throws via the existing guard (perform updates with raw SQL).
     /// </remarks>
     public SqlQuery<TEntity> WithUnboundedBinary()
     {
@@ -220,7 +223,7 @@ public sealed class SqlQuery<TEntity>
         return this;
     }
 
-    /// <summary>単一参照ナビゲーションを同時取得する（ThenInclude で多階層指定可）</summary>
+    /// <summary>Eagerly fetches a single-reference navigation (ThenInclude allows specifying multiple levels).</summary>
     public IncludableSqlQuery<TEntity, TProperty> Include<TProperty>(
         Expression<Func<TEntity, TProperty>> navigationSelector
     )
@@ -230,7 +233,7 @@ public sealed class SqlQuery<TEntity>
         return new IncludableSqlQuery<TEntity, TProperty>(this, node);
     }
 
-    /// <summary>コレクションナビゲーションを同時取得する（ThenInclude で多階層指定可）</summary>
+    /// <summary>Eagerly fetches a collection navigation (ThenInclude allows specifying multiple levels).</summary>
     public IncludableSqlQuery<TEntity, TElement> Include<TElement>(
         Expression<Func<TEntity, ICollection<TElement>>> navigationSelector
     )
@@ -240,32 +243,32 @@ public sealed class SqlQuery<TEntity>
         return new IncludableSqlQuery<TEntity, TElement>(this, node);
     }
 
-    /// <summary>条件に一致するエンティティを（Include 指定分とともに）一覧取得する</summary>
+    /// <summary>Fetches the entities matching the conditions (together with the requested Includes) as a list.</summary>
     public async Task<IReadOnlyList<TEntity>> ToListAsync(
         CancellationToken cancellationToken = default
     ) => await _executor.ToListAsync(BuildPlan(), cancellationToken);
 
-    /// <summary>条件に一致する先頭の 1 件を（Include 指定分とともに）取得する（該当なしは null）</summary>
+    /// <summary>Fetches the first entity matching the conditions (together with the requested Includes); returns null when there is no match.</summary>
     public async Task<TEntity?> FirstOrDefaultAsync(CancellationToken cancellationToken = default) =>
         await _executor.FirstOrDefaultAsync(BuildPlan(), cancellationToken);
 
-    /// <summary>条件に一致する件数を取得する</summary>
+    /// <summary>Returns the count of rows matching the conditions.</summary>
     public async Task<int> CountAsync(CancellationToken cancellationToken = default) =>
         await _executor.CountAsync(BuildPlan(), cancellationToken);
 
-    /// <summary>条件に一致するレコードが存在するかを取得する</summary>
+    /// <summary>Returns whether any record matching the conditions exists.</summary>
     public async Task<bool> AnyAsync(CancellationToken cancellationToken = default) =>
         await _executor.AnyAsync(BuildPlan(), cancellationToken);
 
-    /// <summary>条件に一致するエンティティを取得し、指定の射影で変換して一覧を返す（名前付きクエリの射影用）</summary>
+    /// <summary>Fetches the entities matching the conditions and returns them as a list transformed by the given projection (for named-query projections).</summary>
     /// <remarks>
-    /// 条件・並び順・ページングはバックエンド（方言 SQL / EF Core / インメモリ）側で適用される。
-    /// 射影の列は、セレクタが列プロパティ参照のみ（Include なし）のとき実装先が可能ならサーバー側で刈り込む
-    /// （SELECT する列・EF Core の射影・インメモリ複製を参照列に絞る）。Include 併用時やセレクタから列参照を
-    /// 安全に抽出できない場合は、従来どおり全列を取得してからメモリ内で射影する。
+    /// Conditions, orderings, and paging are applied on the backend side (dialect SQL / EF Core / in-memory).
+    /// The projected columns are pruned server-side when the selector references only column properties (with no Include) and the backend supports it
+    /// (narrowing the SELECTed columns, the EF Core projection, and the in-memory copy to the referenced columns). When Include is combined or column
+    /// references cannot be safely extracted from the selector, all columns are fetched as before and the projection is applied in memory.
     /// </remarks>
-    /// <param name="selector">エンティティから射影 DTO への変換式</param>
-    /// <param name="cancellationToken">キャンセルトークン</param>
+    /// <param name="selector">The expression that transforms an entity into a projection DTO.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
     public async Task<IReadOnlyList<TResult>> ToProjectionListAsync<TResult>(
         Expression<Func<TEntity, TResult>> selector,
         CancellationToken cancellationToken = default
@@ -276,22 +279,22 @@ public sealed class SqlQuery<TEntity>
         return await _executor.ToProjectionListAsync(BuildPlan(), selector, cancellationToken);
     }
 
-    /// <summary>条件に一致する行を一括削除する。cascadeDelete=true で子孫も FK 連鎖で削除する</summary>
+    /// <summary>Bulk-deletes the rows matching the conditions. When cascadeDelete=true, descendants are also deleted along FK chains.</summary>
     public async Task<int> ExecuteDeleteAsync(
         bool cascadeDelete = false,
         CancellationToken cancellationToken = default
     ) => await _executor.ExecuteDeleteAsync(BuildPlan(), cascadeDelete, cancellationToken);
 
-    /// <summary>捕捉済みの式・Include ツリー・ページングを、実行器へ渡すスナップショットへ固める</summary>
+    /// <summary>Freezes the captured expressions, Include tree, and paging into a snapshot to pass to the executor.</summary>
     private SqlQueryPlan<TEntity> BuildPlan()
     {
-        // WithUnboundedBinary は Include と併用できない（Include→With / With→Include の両順序をここで検出する）。
-        // SQL Server の Include 経路は既定の JSON 経由（Base64）で巨大 blob のメモリ膨張を招くため、
-        // 「無制限バイナリ列を含める」目的と両立しない。終端の種別に依らず併用自体を常に拒否する。
+        // WithUnboundedBinary cannot be combined with Include (both orderings, Include->With and With->Include, are detected here).
+        // The SQL Server Include path goes through the default JSON (Base64), which inflates memory for large blobs, so it is
+        // incompatible with the goal of "including unbounded binary columns". The combination itself is always rejected regardless of the terminal method.
         if (_withUnboundedBinary && _includes.Count > 0)
         {
             throw new InvalidOperationException(
-                "WithUnboundedBinary は Include と併用できません。無制限バイナリ列が必要な場合は Include なしの別クエリで取得してください。"
+                "WithUnboundedBinary cannot be combined with Include. When unbounded binary columns are needed, fetch them with a separate query that has no Include."
             );
         }
 
@@ -299,19 +302,19 @@ public sealed class SqlQuery<TEntity>
     }
 }
 
-/// <summary>Include の対象ナビゲーションと、その配下（ThenInclude）の木構造</summary>
+/// <summary>The target navigation of an Include and the tree of its descendants (ThenInclude).</summary>
 {{ infra_visibility }} sealed class IncludeNode
 {
-    /// <summary>対象ナビゲーションプロパティを指定して Include ノードを生成する</summary>
+    /// <summary>Creates an Include node for the specified target navigation property.</summary>
     public IncludeNode(PropertyInfo property) => Property = property;
 
-    /// <summary>取得対象のナビゲーションプロパティ</summary>
+    /// <summary>The navigation property to fetch.</summary>
     public PropertyInfo Property { get; }
 
-    /// <summary>ThenInclude で指定された配下のナビゲーション</summary>
+    /// <summary>The descendant navigations specified via ThenInclude.</summary>
     public List<IncludeNode> Children { get; } = new();
 
-    /// <summary>ラムダ式（x => x.Nav）からナビゲーションプロパティを取り出す</summary>
+    /// <summary>Extracts the navigation property from a lambda expression (x => x.Nav).</summary>
     public static PropertyInfo GetProperty(LambdaExpression selector)
     {
         var expression = selector.Body;
@@ -331,12 +334,12 @@ public sealed class SqlQuery<TEntity>
         }
 
         throw new ArgumentException(
-            $"Include/ThenInclude にはナビゲーションプロパティを指定してください: {selector}"
+            $"Include/ThenInclude requires a navigation property: {selector}"
         );
     }
 }
 
-/// <summary>Include の続きに ThenInclude（配下の取得）を指定できるクエリ</summary>
+/// <summary>A query that lets you specify ThenInclude (fetching descendants) after an Include.</summary>
 public sealed class IncludableSqlQuery<TEntity, TProperty>
     where TEntity : class
 {
@@ -349,7 +352,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
         _node = node;
     }
 
-    /// <summary>直前に Include した単一参照ナビゲーションの配下をさらに取得する</summary>
+    /// <summary>Further fetches the descendants of the single-reference navigation Included just before.</summary>
     public IncludableSqlQuery<TEntity, TNext> ThenInclude<TNext>(
         Expression<Func<TProperty, TNext>> navigationSelector
     )
@@ -359,7 +362,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
         return new IncludableSqlQuery<TEntity, TNext>(_query, child);
     }
 
-    /// <summary>直前に Include したコレクションナビゲーションの配下をさらに取得する</summary>
+    /// <summary>Further fetches the descendants of the collection navigation Included just before.</summary>
     public IncludableSqlQuery<TEntity, TNext> ThenInclude<TNext>(
         Expression<Func<TProperty, ICollection<TNext>>> navigationSelector
     )
@@ -369,51 +372,51 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
         return new IncludableSqlQuery<TEntity, TNext>(_query, child);
     }
 
-    /// <summary>別のルートナビゲーションを追加で Include する</summary>
+    /// <summary>Additionally Includes another root navigation.</summary>
     public IncludableSqlQuery<TEntity, TNext> Include<TNext>(
         Expression<Func<TEntity, TNext>> navigationSelector
     ) => _query.Include(navigationSelector);
 
-    /// <summary>別のルートコレクションを追加で Include する</summary>
+    /// <summary>Additionally Includes another root collection.</summary>
     public IncludableSqlQuery<TEntity, TNext> Include<TNext>(
         Expression<Func<TEntity, ICollection<TNext>>> navigationSelector
     ) => _query.Include(navigationSelector);
 
-    /// <summary>検索条件を追加する</summary>
+    /// <summary>Adds a search condition.</summary>
     public SqlQuery<TEntity> Where(Expression<Func<TEntity, bool>> predicate) =>
         _query.Where(predicate);
 
-    /// <summary>昇順の並び順を追加する</summary>
+    /// <summary>Adds an ascending ordering.</summary>
     public SqlQuery<TEntity> OrderBy(Expression<Func<TEntity, object?>> keySelector) =>
         _query.OrderBy(keySelector);
 
-    /// <summary>降順の並び順を追加する</summary>
+    /// <summary>Adds a descending ordering.</summary>
     public SqlQuery<TEntity> OrderByDescending(Expression<Func<TEntity, object?>> keySelector) =>
         _query.OrderByDescending(keySelector);
 
-    /// <summary>取得件数の上限を指定する</summary>
+    /// <summary>Sets the maximum number of rows to fetch.</summary>
     public SqlQuery<TEntity> Take(int count) => _query.Take(count);
 
-    /// <summary>先頭から読み飛ばす件数を指定する</summary>
+    /// <summary>Sets the number of leading rows to skip.</summary>
     public SqlQuery<TEntity> Skip(int count) => _query.Skip(count);
 
-    /// <summary>無制限バイナリ列を含めて取得する（Include との併用は終端実行時に例外）</summary>
+    /// <summary>Fetches including unbounded binary columns (combining with Include throws when the terminal method runs).</summary>
     public SqlQuery<TEntity> WithUnboundedBinary() => _query.WithUnboundedBinary();
 
-    /// <summary>条件に一致するエンティティを一覧取得する</summary>
+    /// <summary>Fetches the entities matching the conditions as a list.</summary>
     public Task<IReadOnlyList<TEntity>> ToListAsync(
         CancellationToken cancellationToken = default
     ) => _query.ToListAsync(cancellationToken);
 
-    /// <summary>条件に一致する先頭の 1 件を取得する（該当なしは null）</summary>
+    /// <summary>Fetches the first entity matching the conditions (returns null when there is no match).</summary>
     public Task<TEntity?> FirstOrDefaultAsync(CancellationToken cancellationToken = default) =>
         _query.FirstOrDefaultAsync(cancellationToken);
 
-    /// <summary>条件に一致する件数を取得する</summary>
+    /// <summary>Returns the count of rows matching the conditions.</summary>
     public Task<int> CountAsync(CancellationToken cancellationToken = default) =>
         _query.CountAsync(cancellationToken);
 
-    /// <summary>条件に一致するレコードが存在するかを取得する</summary>
+    /// <summary>Returns whether any record matching the conditions exists.</summary>
     public Task<bool> AnyAsync(CancellationToken cancellationToken = default) =>
         _query.AnyAsync(cancellationToken);
 }
@@ -421,30 +424,30 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
 {{~ if repositories && emit_shared_infra ~}}
 
 /// <summary>
-/// <see cref="SqlQuery{TEntity}"/> の {{ dialect_display_name }} 向け ADO 実行器。
-/// プランの述語・並び順を <see cref="SqlExpressionTranslator"/> で SQL へ翻訳し、
+/// The {{ dialect_display_name }} ADO executor for <see cref="SqlQuery{TEntity}"/>.
+/// It translates the plan's predicates and orderings to SQL via <see cref="SqlExpressionTranslator"/>, and
 {{~ if repository_dialect == "sqlserver" ~}}
-/// FOR JSON でグラフを入れ子 JSON として 1 クエリ取得し、System.Text.Json で復元する。
+/// fetches the graph as nested JSON in a single query with FOR JSON, then restores it with System.Text.Json.
 {{~ else ~}}
-/// ルートをプレーン SELECT で実体化し、Include は親子を IN 句のマルチクエリで引いてメモリで組み立てる。
+/// materializes the roots with a plain SELECT and resolves Includes by pulling parents and children with an IN-clause multi-query, assembling them in memory.
 {{~ end ~}}
 /// </summary>
 /// <remarks>
-/// 方言 SQL（識別子クォート・SELECT 構文・ページング句）はこの実行器に閉じる。
-/// SqlQuery は方言中立の <see cref="SqlQueryPlan{TEntity}"/> を渡すだけで、方言差はここでのみ吸収する。
+/// Dialect SQL (identifier quoting, SELECT syntax, paging clauses) is confined to this executor.
+/// SqlQuery merely passes the dialect-neutral <see cref="SqlQueryPlan{TEntity}"/>, and dialect differences are absorbed only here.
 /// </remarks>
 {{ infra_visibility }} sealed class {{ sql_query_executor_class }}<TEntity>(ISqlConnectionFactory connectionFactory)
     : ISqlQueryExecutor<TEntity>
     where TEntity : EntityBase
 {
-    /// <summary>SQL 接続の生成元</summary>
+    /// <summary>The source that creates SQL connections.</summary>
     private readonly ISqlConnectionFactory _connectionFactory = connectionFactory;
 
     private static string TableName => EntitySaveMetadata.For(typeof(TEntity)).TableName;
 {{~ if repository_dialect == "sqlserver" ~}}
 
-    // ナビゲーションは [JsonIgnore]（親参照の循環対策）が付くことがあるが、Include でのロードでは
-    // それらも復元する必要があるため、解決子修飾でナビゲーションプロパティを読み取り対象に含める。
+    // Navigations may carry [JsonIgnore] (to break parent-reference cycles), but loading with Include
+    // needs to restore them too, so a resolver modifier adds navigation properties back to the read set.
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -457,7 +460,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
         {{~ end ~}}
     };
 
-    /// <summary>[JsonIgnore] 等で契約から外れたナビゲーションプロパティを、デシリアライズ対象として再登録する</summary>
+    /// <summary>Re-registers navigation properties dropped from the contract by [JsonIgnore] and the like as deserialization targets.</summary>
     private static void IncludeNavigationProperties(JsonTypeInfo typeInfo)
     {
         if (typeInfo.Kind != JsonTypeInfoKind.Object)
@@ -483,7 +486,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
             );
             if (existing is not null)
             {
-                // [JsonIgnore] で無効化（Get/Set が null）されている場合は復活させ、Include で読み込めるようにする
+                // When disabled by [JsonIgnore] (Get/Set are null), revive it so Include can read it in
                 existing.Get ??= property.GetValue;
                 existing.Set ??= property.SetValue;
             }
@@ -501,7 +504,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
     }
 {{~ end ~}}
 
-    /// <summary>条件に一致するエンティティを（Include 指定分とともに）一覧取得する</summary>
+    /// <summary>Fetches the entities matching the conditions (together with the requested Includes) as a list.</summary>
     public async Task<IReadOnlyList<TEntity>> ToListAsync(
         SqlQueryPlan<TEntity> plan,
         CancellationToken cancellationToken
@@ -512,7 +515,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
 
         if (plan.WithUnboundedBinary)
         {
-            // 無制限バイナリ列を含める指定: 方言に依らず全列プレーン SELECT で実体化する（Include なしは終端でガード済み）
+            // Unbounded binary columns requested: materialize with an all-column plain SELECT regardless of dialect (no-Include is already guarded at the terminal)
             return await MaterializeWithUnboundedBinaryAsync(
                 plan,
                 whereClause,
@@ -538,7 +541,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
 
-        // ルートをプレーン SELECT で実体化し、Include はメモリで親子を組み立てるマルチクエリで解決する
+        // Materialize the roots with a plain SELECT; Includes are resolved by a multi-query that assembles parents and children in memory
         var roots = await MaterializeRootsAsync(
             connection,
             plan,
@@ -555,11 +558,11 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
 {{~ end ~}}
     }
 
-    /// <summary>条件に一致するエンティティを射影して取得する（列参照のみ・Include なしのときは参照列だけをプレーン SELECT する）</summary>
+    /// <summary>Fetches the entities matching the conditions with a projection (when the selector references only columns and there is no Include, only the referenced columns are plain-SELECTed).</summary>
     /// <remarks>
-    /// Include があるか、セレクタから列参照のみを安全に抽出できない場合は、従来経路
-    /// （全列取得 → メモリ内で射影）へフォールバックする。刈り込み可能時は参照列だけを
-    /// プレーン SELECT（JSON 化しない）で発行し、部分実体化してから射影する。
+    /// When there is an Include, or column references cannot be safely extracted from the selector alone, falls back to
+    /// the legacy path (fetch all columns, then project in memory). When pruning is possible, only the referenced columns
+    /// are issued as a plain SELECT (no JSON), partially materialized, then projected.
     /// </remarks>
     public async Task<IReadOnlyList<TResult>> ToProjectionListAsync<TResult>(
         SqlQueryPlan<TEntity> plan,
@@ -569,7 +572,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
     {
         var metadata = EntitySaveMetadata.For(typeof(TEntity));
 
-        // Include なし、かつセレクタが列参照のみ（すべて列プロパティ）のときだけサーバー側で列を刈り込む
+        // Prune columns server-side only when there is no Include and the selector references columns only (all column properties)
         var projectionColumns =
             plan.Includes.Count == 0
             && ProjectionColumnCollector.TryCollect(selector, out var referenced)
@@ -580,12 +583,12 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
 
         if (projectionColumns is null)
         {
-            // フォールバック: 全列を実体化してからメモリ内で射影する
+            // Fallback: materialize all columns, then project in memory
             var entities = await ToListAsync(plan, cancellationToken);
             return entities.Select(project).ToList();
         }
 
-        // サーバー側列刈り込み: 参照列のみをプレーン SELECT し、部分実体化してから射影する
+        // Server-side column pruning: plain-SELECT only the referenced columns, partially materialize, then project
         var parameters = new List<SqlQueryParameter>();
         var whereClause = BuildWhereClause(plan, parameters);
         var sql =
@@ -597,14 +600,14 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
         await using var command = CreateCommand(connection, sql, parameters);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
 
-        // 列名→ordinal は結果セットに対して 1 度だけ解決する
+        // Column-name-to-ordinal mapping is resolved only once per result set
         var ordinals = metadata.ColumnOrdinals(reader, projectionColumns);
 
         var results = new List<TResult>();
 
         while (await reader.ReadAsync(cancellationToken))
         {
-            // 参照列のみを埋めた部分エンティティに射影を適用する（RowState は無関係＝射影後に捨てる）
+            // Apply the projection to a partial entity with only the referenced columns populated (RowState is irrelevant; the entity is discarded after projection)
             var entity = metadata.MapEntityColumns<TEntity>(reader, projectionColumns, ordinals);
             results.Add(project(entity));
         }
@@ -612,7 +615,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
         return results;
     }
 
-    /// <summary>条件に一致する先頭の 1 件を（Include 指定分とともに）取得する（該当なしは null）</summary>
+    /// <summary>Fetches the first entity matching the conditions (together with the requested Includes); returns null when there is no match.</summary>
     public async Task<TEntity?> FirstOrDefaultAsync(
         SqlQueryPlan<TEntity> plan,
         CancellationToken cancellationToken
@@ -623,7 +626,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
 
         if (plan.WithUnboundedBinary)
         {
-            // 無制限バイナリ列を含める指定: 先頭 1 件を全列プレーン SELECT で実体化する（Include なしは終端でガード済み）
+            // Unbounded binary columns requested: materialize the first row with an all-column plain SELECT (no-Include is already guarded at the terminal)
             var withBinary = await MaterializeWithUnboundedBinaryAsync(
                 plan,
                 whereClause,
@@ -651,7 +654,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
 
-        // 先頭 1 件だけ実体化し（LIMIT 1）、Include はその 1 件に対して解決する
+        // Materialize only the first row (LIMIT 1) and resolve Includes against that single row
         var roots = await MaterializeRootsAsync(
             connection,
             plan,
@@ -673,7 +676,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
 {{~ end ~}}
     }
 
-    /// <summary>条件に一致する件数を取得する（並び順・ページング・Include は関与しない）</summary>
+    /// <summary>Returns the count of rows matching the conditions (orderings, paging, and Include are not involved).</summary>
     public async Task<int> CountAsync(SqlQueryPlan<TEntity> plan, CancellationToken cancellationToken)
     {
         var parameters = new List<SqlQueryParameter>();
@@ -691,7 +694,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
         return Convert.ToInt32(result);
     }
 
-    /// <summary>条件に一致するレコードが存在するかを取得する（並び順・ページング・Include は関与しない）</summary>
+    /// <summary>Returns whether any record matching the conditions exists (orderings, paging, and Include are not involved).</summary>
     public async Task<bool> AnyAsync(SqlQueryPlan<TEntity> plan, CancellationToken cancellationToken)
     {
         var parameters = new List<SqlQueryParameter>();
@@ -709,7 +712,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
         return Convert.ToInt32(result) != 0;
     }
 
-    /// <summary>条件に一致する行を一括削除する。cascadeDelete=true で子孫も FK 連鎖で削除する</summary>
+    /// <summary>Bulk-deletes the rows matching the conditions. When cascadeDelete=true, descendants are also deleted along FK chains.</summary>
     public async Task<int> ExecuteDeleteAsync(
         SqlQueryPlan<TEntity> plan,
         bool cascadeDelete,
@@ -732,7 +735,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
             return await command.ExecuteNonQueryAsync(cancellationToken);
         }
 
-        // カスケード: 子孫→本体の順に並んだ DELETE 文群を 1 トランザクションで実行する
+        // Cascade: execute the DELETE statements ordered descendants-first, then the target, in a single transaction
         await using var transaction = ({{ sql_transaction_type }})
             await connection.BeginTransactionAsync(cancellationToken);
 
@@ -764,9 +767,9 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
     }
 
     /// <summary>
-    /// WithUnboundedBinary 指定時の実体化。Include を使わず全列（無制限バイナリ列を含む）を
-    /// プレーン SELECT し、RowState=Unchanged の正当なエンティティとして実体化する（方言共通）。
-    /// SQL Server では既定の JSON 経由（Base64）を避けメモリ膨張を防ぐ。Include なし限定（終端でガード済み）。
+    /// Materialization for WithUnboundedBinary. Plain-SELECTs all columns (including unbounded binary columns)
+    /// without Include, materializing legitimate entities with RowState=Unchanged (shared across dialects).
+    /// On SQL Server this avoids the default JSON path (Base64) and prevents memory inflation. No-Include only (guarded at the terminal).
     /// </summary>
     private async Task<IReadOnlyList<TEntity>> MaterializeWithUnboundedBinaryAsync(
         SqlQueryPlan<TEntity> plan,
@@ -778,7 +781,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
     )
     {
         var metadata = EntitySaveMetadata.For(typeof(TEntity));
-        // 全列（除外列＝無制限バイナリ列を含む）をプレーン SELECT する
+        // Plain-SELECT all columns (including the excluded ones, i.e. unbounded binary columns)
         var sql =
             $"SELECT {metadata.BuildColumnList(metadata.AllProperties)} FROM {TableName}{whereClause}{BuildOrderAndPaging(plan, take, skip)};";
 
@@ -788,14 +791,14 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
         await using var command = CreateCommand(connection, sql, parameters);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
 
-        // 列名→ordinal は結果セットに対して 1 度だけ解決する
+        // Column-name-to-ordinal mapping is resolved only once per result set
         var ordinals = metadata.ColumnOrdinals(reader, metadata.AllProperties);
 
         var results = new List<TEntity>();
 
         while (await reader.ReadAsync(cancellationToken))
         {
-            // 全列を束縛した正当なエンティティ（RowState=Unchanged）として実体化する
+            // Materialize as a legitimate entity (RowState=Unchanged) with all columns bound
             results.Add(
                 metadata.MapEntityColumns<TEntity>(
                     reader,
@@ -810,7 +813,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
     }
 {{~ if repository_dialect == "sqlserver" ~}}
 
-    /// <summary>FOR JSON の結果（約 2KB ごとに複数行で返る）を全行連結して 1 つの JSON 文字列にする</summary>
+    /// <summary>Concatenates the FOR JSON result (returned as multiple rows of roughly 2KB each) into a single JSON string.</summary>
     private async Task<string> ReadJsonAsync(
         string sql,
         IReadOnlyList<SqlQueryParameter> parameters,
@@ -832,7 +835,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
         return string.Concat(chunks);
     }
 
-    /// <summary>ルートの WHERE・並び順・ページングと Include ツリーから FOR JSON の SELECT 文を組み立てる</summary>
+    /// <summary>Builds the FOR JSON SELECT statement from the root's WHERE, ordering, paging, and the Include tree.</summary>
     private static string BuildJsonSelect(
         SqlQueryPlan<TEntity> plan,
         string whereClause,
@@ -846,7 +849,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
             plan.Includes
         );
 
-    /// <summary>ORDER BY / OFFSET・FETCH 句を組み立てる（take/skip 指定時は ORDER BY 必須のためダミー順序を補う）</summary>
+    /// <summary>Builds the ORDER BY / OFFSET-FETCH clauses (when take/skip is specified, a dummy ordering is supplied because ORDER BY is mandatory).</summary>
     private static string BuildOrderAndPaging(SqlQueryPlan<TEntity> plan, int? take, int? skip)
     {
         var orderings = BuildOrderings(plan);
@@ -866,7 +869,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
     }
 {{~ else ~}}
 
-    /// <summary>ルートをプレーン SELECT で取得し、DataReader で実体化する（Include 前のルート集合）</summary>
+    /// <summary>Fetches the roots with a plain SELECT and materializes them via a DataReader (the root set before Includes).</summary>
     private async Task<List<TEntity>> MaterializeRootsAsync(
         {{ sql_connection_type }} connection,
         SqlQueryPlan<TEntity> plan,
@@ -884,7 +887,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
         await using var command = CreateCommand(connection, sql, parameters);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
 
-        // 列名→ordinal は結果セットに対して 1 度だけ解決する
+        // Column-name-to-ordinal mapping is resolved only once per result set
         var ordinals = metadata.SelectOrdinals(reader);
 
         var roots = new List<TEntity>();
@@ -896,7 +899,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
         return roots;
     }
 
-    /// <summary>ORDER BY / LIMIT・OFFSET 句を組み立てる（SQLite はスキップのみの場合 LIMIT -1 で全件を許可する）</summary>
+    /// <summary>Builds the ORDER BY / LIMIT-OFFSET clauses (on SQLite, skip-only uses LIMIT -1 to allow all rows).</summary>
     private static string BuildOrderAndPaging(SqlQueryPlan<TEntity> plan, int? take, int? skip)
     {
         var orderings = BuildOrderings(plan);
@@ -915,7 +918,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
 
         if (skip.HasValue)
         {
-            // OFFSET には LIMIT が必須。全件を読み飛ばし以降取得するため上限なしの LIMIT -1 を添える
+            // OFFSET requires LIMIT. Attach an unbounded LIMIT -1 so the skip is applied and everything after it is fetched
             return $"{ordering} LIMIT -1 OFFSET {skip.Value}";
         }
 
@@ -923,7 +926,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
     }
 {{~ end ~}}
 
-    /// <summary>プランの並び順（式木）を SQL の ORDER BY 要素（"[col] ASC" 等）へ翻訳する</summary>
+    /// <summary>Translates the plan's orderings (expression trees) into SQL ORDER BY elements ("[col] ASC", etc.).</summary>
     private static List<string> BuildOrderings(SqlQueryPlan<TEntity> plan)
     {
         var orderings = new List<string>(plan.Orderings.Count);
@@ -938,7 +941,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
         return orderings;
     }
 
-    /// <summary>プランの述語（式木）を WHERE 句へ翻訳し、値パラメータを parameters へ蓄積する（条件なしは空文字）</summary>
+    /// <summary>Translates the plan's predicates (expression trees) into a WHERE clause, accumulating value parameters into parameters (empty string when there are no conditions).</summary>
     private static string BuildWhereClause(
         SqlQueryPlan<TEntity> plan,
         List<SqlQueryParameter> parameters
@@ -958,7 +961,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
         return " WHERE " + string.Join(" AND ", conditions);
     }
 
-    /// <summary>蓄積したパラメータを設定したコマンドを生成する</summary>
+    /// <summary>Creates a command with the accumulated parameters applied.</summary>
     private {{ sql_command_type }} CreateCommand(
         {{ sql_connection_type }} connection,
         string sql,
@@ -970,13 +973,14 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
         return command;
     }
 
-    /// <summary>翻訳済みの条件パラメータをコマンドへ設定する</summary>
+    /// <summary>Applies the translated condition parameters to the command.</summary>
     /// <remarks>
 {{~ if repository_dialect == "sqlserver" ~}}
-    /// 列名が判明しているパラメータは、その列の [SqlColumnType] を用いて明示 SqlParameter を構築する
-    /// （LOWER 越し比較など関数越しでも同型どうしのため無害）。列が特定できない場合は従来どおり AddWithValue。
+    /// Parameters whose column is known are built as explicit SqlParameters using that column's [SqlColumnType]
+    /// (harmless even through functions such as LOWER-wrapped comparisons, since both sides share the same type).
+    /// When the column cannot be identified, falls back to AddWithValue as before.
 {{~ else ~}}
-    /// SQLite は Microsoft.Data.Sqlite の既定変換に委ねるため、いずれも AddWithValue で束縛する。
+    /// SQLite defers to Microsoft.Data.Sqlite's default conversions, so all parameters are bound with AddWithValue.
 {{~ end ~}}
     /// </remarks>
     private static void AddParameters(
@@ -995,13 +999,13 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
 }
 {{~ if repository_dialect == "sqlserver" ~}}
 
-/// <summary>Include ツリーと FK メタデータから FOR JSON の SELECT 文を組み立てるプランナー（DB 非依存・純粋）</summary>
+/// <summary>A planner that builds the FOR JSON SELECT statement from the Include tree and FK metadata (database-independent and pure).</summary>
 {{ infra_visibility }} static class JsonQueryPlanner
 {
-    /// <summary>Include なしルートの列射影（ルート別名は常に a0 で型ごとに確定する純テキスト）をキャッシュする</summary>
+    /// <summary>Caches the root column projection for Include-less roots (pure text fixed per type, with the root alias always a0).</summary>
     private static readonly ConcurrentDictionary<Type, string> _rootProjectionCache = new();
 
-    /// <summary>ルート型・WHERE 句・並び順ページング句・Include ツリーから、入れ子 JSON を返す SELECT 文を組み立てる</summary>
+    /// <summary>Builds a SELECT statement returning nested JSON from the root type, WHERE clause, ordering/paging clause, and Include tree.</summary>
     public static string BuildSelect(
         Type rootType,
         string whereClause,
@@ -1011,8 +1015,8 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
     {
         var aliasCounter = new int[1];
         var rootAlias = NextAlias(aliasCounter);
-        // Include が無ければルート射影は「a0.[col] AS Prop, ...」の型で決まる純テキストなのでキャッシュから引く
-        // （ルート別名は NextAlias の初回で常に a0。Include ありは子別名が可変のため都度組み立てる）
+        // Without Include, the root projection is pure text determined by the type ("a0.[col] AS Prop, ..."), so pull it from the cache
+        // (the root alias is always a0 on the first NextAlias call; with Include, child aliases vary so it is rebuilt every time)
         var projection =
             includes.Count == 0
                 ? _rootProjectionCache.GetOrAdd(
@@ -1034,13 +1038,13 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
         var metadata = EntitySaveMetadata.For(type);
         var parts = new List<string>();
 
-        // 列はプロパティ名へ別名付け（[col] AS Prop）して、System.Text.Json でそのまま復元できるようにする
+        // Columns are aliased to property names ([col] AS Prop) so System.Text.Json can restore them directly
         foreach (var (propertyName, columnName) in metadata.Columns)
         {
             parts.Add($"{alias}.[{columnName}] AS {propertyName}");
         }
 
-        // Include した子は相関サブクエリ（FOR JSON）を埋め込む
+        // Included children are embedded as correlated subqueries (FOR JSON)
         foreach (var node in includes)
         {
             parts.Add(BuildIncludeProjection(node, alias, aliasCounter));
@@ -1058,7 +1062,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
         var attribute =
             EntitySaveMetadata.NavigationAttribute(node.Property)
             ?? throw new InvalidOperationException(
-                $"{node.Property.Name} は [NavigationReference] を持つナビゲーションではありません。"
+                $"{node.Property.Name} is not a navigation marked with [NavigationReference]."
             );
         var childType = attribute.IsCollection
             ? node.Property.PropertyType.GetGenericArguments()[0]
@@ -1066,15 +1070,15 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
         var childAlias = NextAlias(aliasCounter);
         var childTable = EntitySaveMetadata.For(childType).TableName;
 
-        // 相関条件: 子方向は 子.[Dependent] = 親.[Principal]、親参照は 親.[Principal] = 自.[Dependent]
+        // Correlation: child direction is child.[Dependent] = parent.[Principal]; parent reference is parent.[Principal] = self.[Dependent]
         var correlation = attribute.IsParentReference
             ? $"{childAlias}.[{attribute.PrincipalColumn}] = {parentAlias}.[{attribute.DependentColumn}]"
             : $"{childAlias}.[{attribute.DependentColumn}] = {parentAlias}.[{attribute.PrincipalColumn}]";
 
         var childProjection = BuildProjection(childType, childAlias, node.Children, aliasCounter);
 
-        // コレクションは配列、単一参照は WITHOUT_ARRAY_WRAPPER でオブジェクトとして出力する。
-        // ネストした FOR JSON の結果は外側で文字列にエスケープされるため、JSON_QUERY で包んで JSON のまま埋め込む。
+        // Collections are emitted as arrays; single references as objects via WITHOUT_ARRAY_WRAPPER.
+        // Nested FOR JSON results get string-escaped by the outer query, so wrap them in JSON_QUERY to embed them as raw JSON.
         var arrayMode = attribute.IsCollection ? string.Empty : ", WITHOUT_ARRAY_WRAPPER";
         return $"JSON_QUERY((SELECT {childProjection} FROM {childTable} AS {childAlias} WHERE {correlation} FOR JSON PATH{arrayMode})) AS {node.Property.Name}";
     }
@@ -1085,15 +1089,16 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
 {{~ if repository_dialect != "sqlserver" ~}}
 
 /// <summary>
-/// Include ツリーを「親クエリ → 子を IN 句で別クエリ → メモリで組み立て」のマルチクエリで解決する方言中立エンジン。
+/// A dialect-neutral engine that resolves the Include tree with a multi-query: "parent query, then children via an IN clause in a separate query, then assembly in memory".
 /// </summary>
 /// <remarks>
 /// <para>
-/// EF Core の Split Query と同発想。親集合の PK/FK 値を収集し、子テーブルを <c>WHERE fk IN (@p0..@pn)</c> で 1 回引き、
-/// IncludeNode ツリーに沿って再帰する。SQL テキストの方言依存は識別子クォートと IN 句のみに抑え、将来方言でも流用できる。
-/// FK メタデータは <see cref="NavigationReferenceAttribute"/>（プロパティ属性）と <see cref="EntitySaveMetadata"/> から引く。
+/// Same idea as EF Core's Split Query. It collects the parent set's PK/FK values, pulls the child table once with
+/// <c>WHERE fk IN (@p0..@pn)</c>, and recurses along the IncludeNode tree. Dialect dependence in the SQL text is limited
+/// to identifier quoting and the IN clause, so future dialects can reuse it. FK metadata comes from
+/// <see cref="NavigationReferenceAttribute"/> (a property attribute) and <see cref="EntitySaveMetadata"/>.
 /// </para>
-/// <para>型ごとに 1 度だけ構築しキャッシュする（<see cref="EntitySaveMetadata"/> と同じ思想）。</para>
+/// <para>Built once per type and cached (same philosophy as <see cref="EntitySaveMetadata"/>).</para>
 /// </remarks>
 {{ infra_visibility }} sealed class IncludeLoader
 {
@@ -1103,11 +1108,11 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
 
     private IncludeLoader(Type entityType) => _metadata = EntitySaveMetadata.For(entityType);
 
-    /// <summary>指定型の Include ローダを取得する（型ごとに 1 度だけ構築しキャッシュ）</summary>
+    /// <summary>Gets the Include loader for the specified type (built once per type and cached).</summary>
     public static IncludeLoader For(Type entityType) =>
         _cache.GetOrAdd(entityType, static t => new IncludeLoader(t));
 
-    /// <summary>親集合に対して Include ツリー分の子を読み込み、ナビゲーションプロパティへ結び付ける</summary>
+    /// <summary>Loads the children described by the Include tree for the parent set and binds them to navigation properties.</summary>
     public async Task LoadAsync(
         IReadOnlyList<object> parents,
         IReadOnlyList<IncludeNode> includes,
@@ -1126,7 +1131,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
         }
     }
 
-    /// <summary>1 つの Include ノード（と ThenInclude 配下）を読み込み、親へ結び付ける</summary>
+    /// <summary>Loads a single Include node (and its ThenInclude descendants) and binds them to the parents.</summary>
     private async Task LoadNodeAsync(
         IReadOnlyList<object> parents,
         IncludeNode node,
@@ -1137,14 +1142,14 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
         var attribute =
             EntitySaveMetadata.NavigationAttribute(node.Property)
             ?? throw new InvalidOperationException(
-                $"{node.Property.Name} は [NavigationReference] を持つナビゲーションではありません。"
+                $"{node.Property.Name} is not a navigation marked with [NavigationReference]."
             );
         var childType = attribute.IsCollection
             ? node.Property.PropertyType.GetGenericArguments()[0]
             : node.Property.PropertyType;
         var childMetadata = EntitySaveMetadata.For(childType);
 
-        // 相関: 親参照は 子.[Principal] = 親.[Dependent]、子方向は 子.[Dependent] = 親.[Principal]
+        // Correlation: parent reference is child.[Principal] = parent.[Dependent]; child direction is child.[Dependent] = parent.[Principal]
         var parentKeyColumn = attribute.IsParentReference
             ? attribute.DependentColumn
             : attribute.PrincipalColumn;
@@ -1152,7 +1157,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
             ? attribute.PrincipalColumn
             : attribute.DependentColumn;
 
-        // 親側キー値を（非 null で）収集する。空集合なら子問い合わせは行わない
+        // Collect the parent-side key values (non-null). When the set is empty, no child query is issued
         var parentKeys = new List<object>();
         foreach (var parent in parents)
         {
@@ -1177,7 +1182,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
             cancellationToken
         );
 
-        // 子を FK 値でグループ化し、親へ結び付ける
+        // Group the children by FK value and bind them to their parents
         var childrenByKey = new Dictionary<object, List<EntityBase>>();
         foreach (var child in children)
         {
@@ -1198,7 +1203,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
 
         AssignChildren(parents, node.Property, attribute, childType, childrenByKey, parentKeyColumn);
 
-        // ThenInclude（配下）を子を親として再帰的に読み込む
+        // Recursively load ThenInclude (descendants), treating the children as parents
         if (node.Children.Count > 0 && children.Count > 0)
         {
             await IncludeLoader
@@ -1208,12 +1213,12 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
     }
 
     /// <summary>
-    /// IN 句 1 回あたりのキー数上限。DB のバインド変数・IN リスト上限
-    /// （Oracle の 1000、SQL Server のパラメータ 2100、歴史的な SQLite の 999 等）に方言横断で収まる値にする。
+    /// The maximum number of keys per IN clause. Chosen to fit within database bind-variable / IN-list limits
+    /// across dialects (Oracle's 1000, SQL Server's 2100 parameters, SQLite's historical 999, etc.).
     /// </summary>
     private const int InClauseChunkSize = 500;
 
-    /// <summary>子テーブルを <c>WHERE fk IN (@i0..@in)</c> で引いて実体化する（キーは上限対策でチャンク分割する）</summary>
+    /// <summary>Pulls the child table with <c>WHERE fk IN (@i0..@in)</c> and materializes the rows (keys are chunked to stay within limits).</summary>
     private static async Task<List<EntityBase>> QueryChildrenAsync(
         EntitySaveMetadata childMetadata,
         string childKeyColumn,
@@ -1245,7 +1250,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
 
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
 
-            // 列名→ordinal は結果セット（チャンク）ごとに 1 度だけ解決する
+            // Column-name-to-ordinal mapping is resolved only once per result set (chunk)
             var ordinals = childMetadata.SelectOrdinals(reader);
 
             while (await reader.ReadAsync(cancellationToken))
@@ -1257,7 +1262,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
         return children;
     }
 
-    /// <summary>グループ化した子を各親のナビゲーションプロパティ（コレクション or 単一参照）へ設定する</summary>
+    /// <summary>Assigns the grouped children to each parent's navigation property (collection or single reference).</summary>
     private void AssignChildren(
         IReadOnlyList<object> parents,
         PropertyInfo navigation,
@@ -1277,7 +1282,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
 
             if (attribute.IsCollection)
             {
-                // ICollection<childType> の具象 List を生成して各要素を詰める
+                // Create a concrete List for ICollection<childType> and fill in each element
                 var listType = typeof(List<>).MakeGenericType(childType);
                 var list = (System.Collections.IList)Activator.CreateInstance(listType)!;
                 foreach (var child in matched)
@@ -1296,17 +1301,17 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
 }
 {{~ end ~}}
 
-/// <summary>ラムダ式（式木）を SQL の条件・列参照へ変換する</summary>
-/// <remarks>対応構文は比較（== != &lt; &lt;= &gt; &gt;=）・論理結合（&amp;&amp; ||）・否定・null 判定・bool 列・文字列の Contains/StartsWith/EndsWith に限定し、範囲外は例外とする</remarks>
+/// <summary>Translates lambda expressions (expression trees) into SQL conditions and column references.</summary>
+/// <remarks>Supported constructs are limited to comparisons (== != &lt; &lt;= &gt; &gt;=), logical combinations (&amp;&amp; ||), negation, null checks, bool columns, and string Contains/StartsWith/EndsWith; anything outside this set throws.</remarks>
 {{ infra_visibility }} static class SqlExpressionTranslator
 {
-    /// <summary>述語ラムダの本体を SQL 条件へ変換し、値はパラメータ化して parameters へ追加する</summary>
+    /// <summary>Translates the body of a predicate lambda into a SQL condition, parameterizing values and appending them to parameters.</summary>
     public static string ToCondition(
         Expression expression,
         List<SqlQueryParameter> parameters
     ) => Visit(expression, parameters);
 
-    /// <summary>キー選択ラムダから角括弧付きの列名を取り出す</summary>
+    /// <summary>Extracts the bracketed column name from a key-selecting lambda.</summary>
     public static string ToColumn(LambdaExpression keySelector)
     {
         var member = Unwrap(keySelector.Body) as MemberExpression;
@@ -1314,7 +1319,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
         if (member is null || !IsColumn(member))
         {
             throw new NotSupportedException(
-                $"並び順にはエンティティのプロパティのみ指定できます: {keySelector}"
+                $"Only entity properties can be specified as an ordering: {keySelector}"
             );
         }
 
@@ -1345,13 +1350,13 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
             case MethodCallExpression call
                 when TryGetLike(call, out var likeColumn, out var likeKind):
 
-                // 引数が列なら列同士の LIKE（パターンは SQL 側でエスケープして組み立てる。引数列が NULL の行は不一致）
+                // When the argument is a column, this is a column-to-column LIKE (the pattern is escaped and assembled on the SQL side; rows where the argument column is NULL do not match)
                 if (TryColumnName(call.Arguments[0]) is { } patternColumn)
                 {
                     return $"{likeColumn} LIKE {BuildLikePatternFromColumn(patternColumn, likeKind)} ESCAPE '\\'";
                 }
 
-                // 引数は string でも値オブジェクト（TSelf オーバーロード）でもよい。VO なら素値（string）へ開く
+                // The argument may be a string or a value object (the TSelf overload). Value objects are unwrapped to the raw value (string)
                 var raw =
                     {{ if generate_value_objects }}SqlParameterValue.Unwrap(Evaluate(call.Arguments[0])){{ else }}Evaluate(call.Arguments[0]){{ end }} as string ?? string.Empty;
                 var pattern = likeKind switch
@@ -1368,7 +1373,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
 
             case MethodCallExpression call
                 when TryGetNullOrEmpty(call, out var neColumn, out var neWhitespace):
-                // 空文字判定。IsNullOrWhiteSpace は前後空白も空扱いにする
+                // Empty-string check. IsNullOrWhiteSpace also treats surrounding whitespace as empty
                 return neWhitespace
                     ? $"({neColumn} IS NULL OR LTRIM(RTRIM({neColumn})) = '')"
                     : $"({neColumn} IS NULL OR {neColumn} = '')";
@@ -1376,7 +1381,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
             case MethodCallExpression call
                 when TryGetEquals(call, out var eqColumn, out var eqArg, out var eqIgnoreCase):
 
-                // 引数が列なら列同士の等値比較（IgnoreCase 系は両辺を LOWER で畳む＝値パスと同じ規則）
+                // When the argument is a column, this is a column-to-column equality (IgnoreCase variants fold both sides with LOWER, same rule as the value path)
                 if (TryColumnName(eqArg) is { } eqArgColumn)
                 {
                     return eqIgnoreCase
@@ -1384,9 +1389,9 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
                         : $"{eqColumn} = {eqArgColumn}";
                 }
 
-                // 値は AddParameters 側で素値へ開かれる（VO 対応）
+                // The value is unwrapped to the raw value on the AddParameters side (value-object support)
                 var eqParameter = AddParameter(Evaluate(eqArg), parameters, RawColumnName(eqColumn));
-                // 大文字小文字を無視する比較は両辺を LOWER で畳む
+                // Case-insensitive comparisons fold both sides with LOWER
                 return eqIgnoreCase
                     ? $"LOWER({eqColumn}) = LOWER({eqParameter})"
                     : $"{eqColumn} = {eqParameter}";
@@ -1395,7 +1400,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
                 return $"{ColumnName(member.Member)} = 1";
 
             default:
-                throw new NotSupportedException($"この式は SQL へ変換できません: {expression}");
+                throw new NotSupportedException($"This expression cannot be translated to SQL: {expression}");
         }
     }
 
@@ -1430,18 +1435,18 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
             ExpressionType.GreaterThanOrEqual => ">=",
             ExpressionType.LessThan => "<",
             ExpressionType.LessThanOrEqual => "<=",
-            _ => throw new NotSupportedException($"未対応の演算子です: {binary.NodeType}"),
+            _ => throw new NotSupportedException($"Unsupported operator: {binary.NodeType}"),
         };
 
-        // 一方が列で他方が値の比較では、値パラメータに対面の列名を添えて型明示化に使う（両辺が列/値なら添えない）
+        // In a column-versus-value comparison, the value parameter carries the opposing column name for explicit typing (omitted when both sides are columns or both are values)
         var leftColumnSql = TryColumnName(left);
         var rightColumnSql = TryColumnName(right);
         return $"{Operand(left, parameters, RawColumnName(rightColumnSql))} {op} {Operand(right, parameters, RawColumnName(leftColumnSql))}";
     }
 
-    /// <param name="expression">オペランドの式（列参照か定数値のいずれか）</param>
-    /// <param name="parameters">値オペランドをパラメータ化する際の追加先リスト</param>
-    /// <param name="counterpartColumn">値としてパラメータ化する場合に添える対面の列名（角括弧なし）。無ければ null</param>
+    /// <param name="expression">The operand expression (either a column reference or a constant value).</param>
+    /// <param name="parameters">The list that receives parameterized value operands.</param>
+    /// <param name="counterpartColumn">The opposing column name (without brackets) attached when parameterizing as a value; null when absent.</param>
     private static string Operand(
         Expression expression,
         List<SqlQueryParameter> parameters,
@@ -1499,8 +1504,8 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
         return true;
     }
 
-    /// <summary>コレクションの Contains（配列＝静的 Enumerable.Contains / List・HashSet＝インスタンス Contains）を IN 変換の対象として判定する</summary>
-    /// <remarks>列が引数側にあるものだけを対象にする（列が呼び出し対象側の string.Contains は LIKE 側で処理済み）</remarks>
+    /// <summary>Determines whether a collection Contains (arrays = static Enumerable.Contains; List/HashSet = instance Contains) is a target for IN translation.</summary>
+    /// <remarks>Only calls where the column is on the argument side are targeted (string.Contains with the column as the receiver is already handled by the LIKE path).</remarks>
     private static bool TryGetIn(
         MethodCallExpression call,
         out string column,
@@ -1515,7 +1520,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
             return false;
         }
 
-        // 配列など: 静的 Enumerable.Contains / MemoryExtensions.Contains(collection, item)（引数 2 個、呼び出し対象なし）
+        // Arrays etc.: static Enumerable.Contains / MemoryExtensions.Contains(collection, item) (two arguments, no receiver)
         if (call.Object is null && call.Arguments.Count == 2)
         {
             if (Unwrap(call.Arguments[1]) is MemberExpression staticItem && IsColumn(staticItem))
@@ -1528,8 +1533,8 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
             return false;
         }
 
-        // List<T> / HashSet<T> など: インスタンス Contains(item)（引数 1 個、呼び出し対象がコレクション）
-        // 配列は .NET のスパン版 Contains に解決され、呼び出し対象が op_Implicit(array) になる（UnwrapCollection で素の配列へ戻す）
+        // List<T> / HashSet<T> etc.: instance Contains(item) (one argument, the receiver is the collection)
+        // Arrays resolve to .NET's span-based Contains, where the receiver becomes op_Implicit(array) (UnwrapCollection restores the raw array)
         if (call.Object is not null && call.Arguments.Count == 1)
         {
             if (Unwrap(call.Arguments[0]) is MemberExpression instanceItem && IsColumn(instanceItem))
@@ -1543,7 +1548,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
         return false;
     }
 
-    /// <summary>コレクション式に付いた暗黙変換（配列→ReadOnlySpan などの op_Implicit / Convert）を剥がし、列挙可能な素のコレクション式へ戻す</summary>
+    /// <summary>Strips implicit conversions attached to a collection expression (op_Implicit / Convert such as array-to-ReadOnlySpan), restoring the raw enumerable collection expression.</summary>
     private static Expression UnwrapCollection(Expression expression)
     {
         while (true)
@@ -1567,18 +1572,18 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
         }
     }
 
-    /// <summary>コレクションの各要素をパラメータ化して IN 句を組み立てる。空・null コレクションは該当なし（恒偽条件）にする</summary>
+    /// <summary>Builds an IN clause by parameterizing each element of the collection. Empty or null collections become a no-match (always-false condition).</summary>
     private static string BuildInClause(
         string column,
         Expression collection,
         List<SqlQueryParameter> parameters
     )
     {
-        // 文字列自体も IEnumerable だが、列挙対象のコレクションとしては扱わない
+        // Strings are IEnumerable themselves but are not treated as enumerable collections here
         if (Evaluate(collection) is not IEnumerable enumerable || enumerable is string)
         {
             throw new NotSupportedException(
-                $"IN 検索には列挙可能なコレクション（配列・List など）を指定してください: {collection}"
+                $"IN searches require an enumerable collection (array, List, etc.): {collection}"
             );
         }
 
@@ -1589,14 +1594,14 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
             placeholders.Add(AddParameter(item, parameters, rawColumn));
         }
 
-        // IN () は不正な SQL のため、空コレクションは「該当なし」を表す恒偽条件にする
+        // IN () is invalid SQL, so an empty collection becomes an always-false condition meaning "no match"
         return placeholders.Count == 0
             ? "1 = 0"
             : $"{column} IN ({string.Join(", ", placeholders)})";
     }
 
-    /// <summary>x.Col.Equals(value) を等値比較の対象として判定する。第2引数が *IgnoreCase の StringComparison なら大文字小文字を無視する</summary>
-    /// <remarks>列は素の列でも値オブジェクトでもよい。文字列・数値など列の型を問わず等値へ変換できる</remarks>
+    /// <summary>Determines whether x.Col.Equals(value) is a target for equality translation. When the second argument is a *IgnoreCase StringComparison, case is ignored.</summary>
+    /// <remarks>The column may be a plain column or a value object. Any column type (string, numeric, etc.) can be translated to equality.</remarks>
     private static bool TryGetEquals(
         MethodCallExpression call,
         out string column,
@@ -1617,7 +1622,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
             return false;
         }
 
-        // Equals(value) / Equals(value, StringComparison) の 2 形式のみ対応する
+        // Only the two forms Equals(value) / Equals(value, StringComparison) are supported
         if (call.Arguments.Count == 1)
         {
             column = resolvedColumn;
@@ -1638,7 +1643,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
         return false;
     }
 
-    /// <summary>string.IsNullOrEmpty(x.Col) / IsNullOrWhiteSpace(x.Col) を判定する（列は素の列でも値オブジェクトの .Value でもよい）</summary>
+    /// <summary>Detects string.IsNullOrEmpty(x.Col) / IsNullOrWhiteSpace(x.Col) (the column may be a plain column or a value object's .Value).</summary>
     private static bool TryGetNullOrEmpty(
         MethodCallExpression call,
         out string column,
@@ -1664,13 +1669,13 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
     }
     {{~ if generate_value_objects ~}}
 
-    /// <summary>文字列値オブジェクト（ValueObjectStringBase 由来）の Contains/StartsWith/EndsWith かどうか</summary>
+    /// <summary>Whether the method is Contains/StartsWith/EndsWith of a string value object (derived from ValueObjectStringBase).</summary>
     private static bool IsValueObjectStringMethod(MethodInfo method) =>
         method.DeclaringType is { IsGenericType: true } declaring
         && declaring.GetGenericTypeDefinition() == typeof(ValueObjectStringBase<>);
     {{~ end ~}}
 
-    /// <summary>object へのボックス化などの Convert を取り除く</summary>
+    /// <summary>Removes Convert nodes such as boxing to object.</summary>
     private static Expression Unwrap(Expression expression)
     {
         while (
@@ -1687,14 +1692,14 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
         return expression;
     }
 
-    /// <summary>ラムダ引数のプロパティ参照（= 列）かどうか</summary>
+    /// <summary>Whether the member is a property reference on the lambda parameter (i.e. a column).</summary>
     private static bool IsColumn(MemberExpression member) =>
         member is { Expression: ParameterExpression, Member: PropertyInfo };
 
     private static bool IsNull(Expression expression) =>
         expression is ConstantExpression { Value: null };
 
-    /// <summary>メンバー → 角括弧付き列名の解決を型メンバー単位でキャッシュする（列参照ごとの [Column] 反射を避ける）</summary>
+    /// <summary>Caches member-to-bracketed-column-name resolution per type member (avoiding [Column] reflection for every column reference).</summary>
     private static readonly ConcurrentDictionary<MemberInfo, string> _columnNameCache = new();
 
     private static string ColumnName(MemberInfo member) =>
@@ -1703,7 +1708,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
             static m => $"{{ quote_open }}{m.GetCustomAttribute<ColumnAttribute>()?.Name ?? m.Name}{{ quote_close }}"
         );
 
-    /// <summary>列参照（素の列 x.Col、または値オブジェクトの x.Col.Value）から角括弧付き列名を取り出す。列でなければ null</summary>
+    /// <summary>Extracts the bracketed column name from a column reference (a plain column x.Col, or a value object's x.Col.Value). Returns null when it is not a column.</summary>
     private static string? TryColumnName(Expression expression)
     {
         if (Unwrap(expression) is not MemberExpression member)
@@ -1717,7 +1722,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
         }
         {{~ if generate_value_objects ~}}
 
-        // 値オブジェクトの .Value を剥がし、内側の列（[col]）へ解決する（x.Col.Value → [col]）
+        // Strip the value object's .Value and resolve to the inner column ([col]) (x.Col.Value -> [col])
         if (
             member.Member.Name == "Value"
             && typeof(IValueObject).IsAssignableFrom(member.Member.DeclaringType)
@@ -1733,7 +1738,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
         return null;
     }
 
-    /// <summary>DateTime 列の日付コンポーネント参照（x.Col.Year / x.Col.Value.Month など）を SQL の日付関数へ変換する</summary>
+    /// <summary>Translates date-component references on DateTime columns (x.Col.Year / x.Col.Value.Month, etc.) into SQL date functions.</summary>
     private static bool TryGetDatePart(Expression expression, out string sql)
     {
         sql = string.Empty;
@@ -1759,7 +1764,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
             "DayOfYear" => $"DATEPART(DAYOFYEAR, {column})",
             "Date" => $"CAST({column} AS date)",
 {{~ else ~}}
-            // SQLite は日時を ISO8601 TEXT で保持するため strftime で部品を取り出し INTEGER へ CAST する
+            // SQLite stores date-times as ISO8601 TEXT, so extract the part with strftime and CAST to INTEGER
             "Year" => $"CAST(strftime('%Y', {column}) AS INTEGER)",
             "Month" => $"CAST(strftime('%m', {column}) AS INTEGER)",
             "Day" => $"CAST(strftime('%d', {column}) AS INTEGER)",
@@ -1776,27 +1781,28 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
     }
 
     /// <summary>
-    /// 定数・クロージャ変数などを評価して実値を得る。大半は定数か、ローカル変数を捕捉したクロージャの
-    /// フィールド／プロパティ参照なので、式木コンパイル（重い）を避けて反射で直接読み取る。
-    /// メソッド呼び出し等それ以外の式のみ従来どおり <see cref="Expression.Lambda(Expression, ParameterExpression[])"/> で評価する。
+    /// Evaluates constants, closure variables, and the like to obtain the actual value. Most cases are constants or
+    /// field/property references on a closure capturing local variables, so they are read directly via reflection,
+    /// avoiding (expensive) expression-tree compilation. Only other expressions such as method calls are evaluated
+    /// with <see cref="Expression.Lambda(Expression, ParameterExpression[])"/> as before.
     /// </summary>
     private static object? Evaluate(Expression expression)
     {
-        // エンティティの列参照（ラムダパラメータ）は値として評価できない。式木コンパイルの内部エラーで落ちる前に明示的に弾く
+        // Entity column references (the lambda parameter) cannot be evaluated as values. Reject explicitly before expression-tree compilation fails with an internal error
         if (ReferencesLambdaParameter(expression))
         {
             throw new NotSupportedException(
-                $"この式は SQL へ変換できません（エンティティの列は値の位置に指定できません）: {expression}"
+                $"This expression cannot be translated to SQL (entity columns cannot appear in a value position): {expression}"
             );
         }
 
         switch (expression)
         {
-            // 定数はそのまま値を返す
+            // Constants return their value as-is
             case ConstantExpression constant:
                 return constant.Value;
 
-            // フィールド／プロパティ参照は、対象インスタンス（静的メンバーは null）を再帰評価してから反射で読む
+            // For field/property references, recursively evaluate the target instance (null for static members), then read via reflection
             case MemberExpression member:
                 var instance = member.Expression is null ? null : Evaluate(member.Expression);
 
@@ -1807,19 +1813,19 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
                     _ => CompileAndInvoke(expression),
                 };
 
-            // それ以外（メソッド呼び出し・演算等）は式木をコンパイルして評価する（互換性優先のフォールバック）
+            // Everything else (method calls, arithmetic, etc.) is evaluated by compiling the expression tree (compatibility-first fallback)
             default:
                 return CompileAndInvoke(expression);
         }
     }
 
-    /// <summary>任意の式木をラムダへ包んでコンパイル・実行し、実値を得る（反射で直読できない式のフォールバック）</summary>
+    /// <summary>Wraps an arbitrary expression tree in a lambda, compiles and invokes it to obtain the actual value (fallback for expressions that cannot be read directly via reflection).</summary>
     private static object? CompileAndInvoke(Expression expression) =>
         Expression.Lambda(expression).Compile().DynamicInvoke();
 
-    /// <param name="value">パラメータ化する実値（null 可）</param>
-    /// <param name="parameters">生成したパラメータの追加先リスト</param>
-    /// <param name="columnName">対象カラム名（角括弧なし）。列を特定できる場合のみ渡し、型明示化に使う</param>
+    /// <param name="value">The actual value to parameterize (may be null).</param>
+    /// <param name="parameters">The list that receives the generated parameter.</param>
+    /// <param name="columnName">The target column name (without brackets). Passed only when the column can be identified, and used for explicit typing.</param>
     private static string AddParameter(
         object? value,
         List<SqlQueryParameter> parameters,
@@ -1831,18 +1837,18 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
         return name;
     }
 
-    /// <summary>角括弧付き列名 "[col]" から素のカラム名を取り出す。null・関数越し等で単純列でなければ null</summary>
+    /// <summary>Extracts the raw column name from a bracketed column name "[col]". Returns null when it is not a simple column (null, wrapped in a function, etc.).</summary>
     private static string? RawColumnName(string? bracketedColumn) =>
         bracketedColumn is { Length: >= 2 } && bracketedColumn[0] == '{{ quote_open_char }}' && bracketedColumn[^1] == '{{ quote_close_char }}'
             ? bracketedColumn[1..^1]
             : null;
 
-    /// <summary>LIKE のワイルドカード（% _ [ \）をエスケープする</summary>
+    /// <summary>Escapes the LIKE wildcards (% _ [ \).</summary>
     private static string EscapeLike(string value) =>
         value.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_").Replace("[", "\\[");
 
-    /// <summary>列値をリテラル扱いする LIKE パターンを SQL 側で組み立てる（EscapeLike と同じ 4 文字を REPLACE でエスケープ）</summary>
-    /// <remarks>引数列が NULL の行は連結が NULL → LIKE NULL → 不一致になる（値引数の null→空文字＝全一致とは意味論が異なる）</remarks>
+    /// <summary>Builds, on the SQL side, a LIKE pattern that treats the column value as a literal (the same 4 characters as EscapeLike, escaped via REPLACE).</summary>
+    /// <remarks>Rows where the argument column is NULL yield a NULL concatenation, then LIKE NULL, and thus no match (semantics differ from a null value argument, which becomes an empty string and matches everything).</remarks>
     private static string BuildLikePatternFromColumn(string column, LikeKind kind)
     {
         var escaped =
@@ -1862,7 +1868,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
         };
     }
 
-    /// <summary>式木がラムダパラメータ（＝エンティティの列参照）を含むかどうかを走査する</summary>
+    /// <summary>Walks the expression tree to determine whether it contains a lambda parameter (i.e. an entity column reference).</summary>
     private static bool ReferencesLambdaParameter(Expression expression)
     {
         var finder = new LambdaParameterFinder();
@@ -1870,7 +1876,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
         return finder.Found;
     }
 
-    /// <summary>ラムダパラメータの参照を見つけたらフラグを立てるだけの軽量ビジター</summary>
+    /// <summary>A lightweight visitor that merely raises a flag when it finds a lambda-parameter reference.</summary>
     private sealed class LambdaParameterFinder : ExpressionVisitor
     {
         public bool Found { get; private set; }

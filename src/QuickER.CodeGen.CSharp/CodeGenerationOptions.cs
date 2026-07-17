@@ -238,14 +238,14 @@ public sealed class CodeGenerationOptions
     public bool UseRuntimePackages { get; init; }
 
     /// <summary>
-    /// 生成コード（.g.cs）と一緒に、その図のスキーマに即した API リファレンス Markdown（<c>.g.md</c>・日本語）を出力するかどうか（既定 false）。
+    /// 生成コード（.g.cs）と一緒に、その図のスキーマに即した API リファレンス Markdown（<c>.g.md</c>・英語）を出力するかどうか（既定 false）。
     /// </summary>
     /// <remarks>
     /// <para>
     /// <c>true</c> のとき、<see cref="OutputFileName"/> のベース名を <c>.g.md</c> に置換した Markdown ファイルを 1 つ追加出力する
-    /// （例: <c>EcOrder.g.cs</c> → <c>EcOrder.g.md</c>）。内容は「スキーマ依存部（Entity 一覧・各エンティティのプロパティ／
-    /// ナビゲーション・Repository 契約）＋その図のエンティティ名で具体化した使い方例」で、固定ランタイム API の詳細は
-    /// <c>docs/code-generation.md</c> へのリンクで済ませる（本文へ複製しない）。
+    /// （例: <c>EcOrder.g.cs</c> → <c>EcOrder.g.md</c>）。正本は英語。日本語版の併産は <see cref="IncludeJapaneseApiDocs"/> を参照。
+    /// 内容は「スキーマ依存部（Entity 一覧・各エンティティのプロパティ／ナビゲーション・Repository 契約）＋その図のエンティティ名で
+    /// 具体化した使い方例」で、固定ランタイム API の詳細は <c>docs/code-generation.md</c> へのリンクで済ませる（本文へ複製しない）。
     /// </para>
     /// <para>
     /// <see cref="SplitFilesByCategory"/>（カテゴリ別分割）でも Markdown は 1 ファイルのみ出力する。生成日時など非決定的な
@@ -253,6 +253,20 @@ public sealed class CodeGenerationOptions
     /// </para>
     /// </remarks>
     public bool GenerateApiDocs { get; init; }
+
+    /// <summary>
+    /// <see cref="GenerateApiDocs"/> が ON のとき、英語の <c>.g.md</c> に加えて日本語版 <c>{ベース名}.ja.g.md</c> を併産するかどうか（既定 false）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>true</c> のとき、英語版（例: <c>EcOrder.g.md</c>）に加えて日本語版（例: <c>EcOrder.ja.g.md</c>）を追加出力する。
+    /// 内容・構成は英語版と同一で、見出し・本文・C# 側で組み立てる文言（ナビゲーション種別・DI 登録説明）だけが日本語になる。
+    /// </para>
+    /// <para>
+    /// <see cref="GenerateApiDocs"/> が <c>false</c> のときは無効＝日本語版も含め Markdown を一切出さない。
+    /// </para>
+    /// </remarks>
+    public bool IncludeJapaneseApiDocs { get; init; }
 
     /// <summary>
     /// 無制限バイナリ列（<c>varbinary(max)</c> / <c>image</c> / 長さ宣言なし BLOB / <c>bytea</c> 等）を、生成 Entity のプロパティに

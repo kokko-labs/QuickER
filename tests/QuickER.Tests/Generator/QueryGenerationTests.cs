@@ -445,9 +445,7 @@ public class QueryGenerationTests
         content.Should().Contain("Task<IReadOnlyList<OrderEntity>> GetRecentAsync(");
         content.Should().Contain("Task<decimal?> SumAmountAsync(");
         content.Should().Contain("Task<OrderEntity?> SpecialLookupAsync(");
-        content
-            .Should()
-            .Contain("実装が生成されない実装先（EF Core・SQL 未定義の方言・インメモリ）");
+        content.Should().Contain("Implementation targets that do not get a generated body");
 
         // QuickER 版 Repository（sqlserver 方言）には SQL 入り本体が出る
         content.Should().Contain("QueryBySqlAsync(");

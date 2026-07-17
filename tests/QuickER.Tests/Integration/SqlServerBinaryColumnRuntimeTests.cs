@@ -225,7 +225,7 @@ public sealed class SqlServerBinaryColumnRuntimeTests(SqlServerContainerFixture 
             );
         (await withoutLength.Should().ThrowAsync<ArgumentException>())
             .Which.Message.Should()
-            .Contain("CanSeek");
+            .Contain("length");
 
         // length 指定 → 成功し、読み戻すと一致する
         (await documents.WritePayloadAsync(1, new NonSeekableStream(payload), payload.Length, Ct))

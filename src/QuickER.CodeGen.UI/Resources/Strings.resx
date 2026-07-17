@@ -118,6 +118,9 @@
   <data name="CodeGen_GenerateApiDocs" xml:space="preserve">
     <value>Output an API reference (.g.md)</value>
   </data>
+  <data name="CodeGen_IncludeJapaneseApiDocs" xml:space="preserve">
+    <value>Also output Japanese API docs (.ja.g.md)</value>
+  </data>
   <data name="CodeGen_ApiDocsTooltip" xml:space="preserve">
     <value>Additionally outputs one API reference Markdown ({baseName}.g.md) sharing the generated code's base name (overwritten on regeneration)</value>
   </data>

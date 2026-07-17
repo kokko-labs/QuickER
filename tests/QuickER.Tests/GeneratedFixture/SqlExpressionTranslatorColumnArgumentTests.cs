@@ -147,19 +147,25 @@ public sealed class SqlExpressionTranslatorColumnArgumentTests
     public void ToUpperInValuePosition_Throws()
     {
         var sqlServer = () => RunSqlServer(p => p.Name1.ToUpper() == "A");
-        sqlServer.Should().Throw<NotSupportedException>().WithMessage("*SQL へ変換できません*");
+        sqlServer
+            .Should()
+            .Throw<NotSupportedException>()
+            .WithMessage("*cannot be translated to SQL*");
 
         var sqlite = () => RunSqlite(p => p.Name1.ToUpper() == "A");
-        sqlite.Should().Throw<NotSupportedException>().WithMessage("*SQL へ変換できません*");
+        sqlite.Should().Throw<NotSupportedException>().WithMessage("*cannot be translated to SQL*");
     }
 
     [Fact(DisplayName = "ガード: 値の位置に列同士の算術式を置くと NotSupportedException（両方言）")]
     public void ColumnArithmeticInValuePosition_Throws()
     {
         var sqlServer = () => RunSqlServer(p => p.A + p.B > 5);
-        sqlServer.Should().Throw<NotSupportedException>().WithMessage("*SQL へ変換できません*");
+        sqlServer
+            .Should()
+            .Throw<NotSupportedException>()
+            .WithMessage("*cannot be translated to SQL*");
 
         var sqlite = () => RunSqlite(p => p.A + p.B > 5);
-        sqlite.Should().Throw<NotSupportedException>().WithMessage("*SQL へ変換できません*");
+        sqlite.Should().Throw<NotSupportedException>().WithMessage("*cannot be translated to SQL*");
     }
 }

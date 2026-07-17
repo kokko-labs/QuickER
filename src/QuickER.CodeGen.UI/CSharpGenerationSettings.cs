@@ -114,6 +114,12 @@ public class CSharpGenerationSettings
     /// <summary>API リファレンス Markdown（.g.md）を追加出力するか（既定 false）</summary>
     public bool GenerateApiDocs { get; set; }
 
+    /// <summary>
+    /// 日本語版 API リファレンス Markdown（.ja.g.md）も併産するか（既定 false）。
+    /// 実効は <see cref="GenerateApiDocs"/> が true のときに限る（正本は英語）
+    /// </summary>
+    public bool IncludeJapaneseApiDocs { get; set; }
+
     // ===== 属性（UI 非表示。読込値を保持して生成へ反映する） =====
 
     /// <summary>データアノテーション属性（[Table] / [Key] / [Column] / [Required] / [MaxLength] 等）を付与するか（既定 true）</summary>
@@ -178,6 +184,7 @@ public class CSharpGenerationSettings
             GenerateRemoteContracts = GenerateRemoteContracts,
             GenerateRemoteServices = GenerateRemoteServices,
             GenerateApiDocs = GenerateApiDocs,
+            IncludeJapaneseApiDocs = IncludeJapaneseApiDocs,
             ExcludeUnboundedBinaryColumns = ExcludeUnboundedBinaryColumns,
             GenerateValueObjects = GenerateValueObjects,
             UseGuidKeyForStringPrimaryKey = UseGuidKeyForStringPrimaryKey,

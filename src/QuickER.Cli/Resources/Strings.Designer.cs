@@ -234,6 +234,12 @@ namespace QuickER.Cli.Resources {
             }
         }
 
+        public static string Cli_Opt_IncludeJapaneseApiDocs {
+            get {
+                return ResourceManager.GetString("Cli_Opt_IncludeJapaneseApiDocs", resourceCulture);
+            }
+        }
+
         public static string Cli_Opt_IncludeDataAnnotations {
             get {
                 return ResourceManager.GetString("Cli_Opt_IncludeDataAnnotations", resourceCulture);

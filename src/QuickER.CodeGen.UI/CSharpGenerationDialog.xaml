@@ -384,12 +384,20 @@
             Style="{StaticResource FieldLabel}"
             Text="{x:Static res:Strings.CodeGen_Documentation}"
           />
-          <CheckBox
-            Grid.Column="1"
-            Content="{x:Static res:Strings.CodeGen_GenerateApiDocs}"
-            IsChecked="{Binding GenerateApiDocs}"
-            ToolTip="{x:Static res:Strings.CodeGen_ApiDocsTooltip}"
-          />
+          <StackPanel Grid.Column="1">
+            <CheckBox
+              Content="{x:Static res:Strings.CodeGen_GenerateApiDocs}"
+              IsChecked="{Binding GenerateApiDocs}"
+              ToolTip="{x:Static res:Strings.CodeGen_ApiDocsTooltip}"
+            />
+            <!-- 日本語版 API ドキュメントの併産（API リファレンス出力の下位＝インデント＋GenerateApiDocs 連動） -->
+            <CheckBox
+              Margin="18,8,0,0"
+              Content="{x:Static res:Strings.CodeGen_IncludeJapaneseApiDocs}"
+              IsChecked="{Binding IncludeJapaneseApiDocs}"
+              IsEnabled="{Binding GenerateApiDocs}"
+            />
+          </StackPanel>
         </Grid>
       </StackPanel>
     </Border>

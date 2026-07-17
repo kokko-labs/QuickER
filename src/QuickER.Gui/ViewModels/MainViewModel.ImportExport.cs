@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.IO;
 using System.Windows.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -320,7 +321,8 @@ public partial class MainViewModel
                         Environment.NewLine,
                         RuntimePackageReferenceGuidance.BuildGuidanceLines(
                             options,
-                            RuntimePackages.ResolveGuidanceVersion()
+                            RuntimePackages.ResolveGuidanceVersion(),
+                            CultureInfo.CurrentUICulture
                         )
                     )
                 );

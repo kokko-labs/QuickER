@@ -27,7 +27,8 @@ Main options:
 | `--root-namespace <name>` / `--split-files-by-category` | Set the root namespace / split files by category |
 | `--repository-dialects <list>` | Multi-target generation of the QuickER Repository (e.g. `sqlserver,sqlite`, keyed DI) |
 | `--use-runtime-packages` | Do not emit the fixed runtime code; provide it via `QuickER.Runtime.*` package references instead |
-| `--generate-api-docs` | Additionally output an API reference Markdown (`{base name}.g.md`) |
+| `--generate-api-docs` | Additionally output an API reference Markdown (`{base name}.g.md`, English canonical) |
+| `--api-docs-ja` | Also output the Japanese API reference Markdown (`{base name}.ja.g.md`; requires `--generate-api-docs`) |
 
 Every settings-file key is also available as a same-named kebab-case flag that overrides the settings file (priority: CLI flag &gt; settings file &gt; default; bool flags are three-valued: `--flag` / `--flag false`).
 

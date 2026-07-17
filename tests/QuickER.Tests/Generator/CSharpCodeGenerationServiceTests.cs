@@ -661,13 +661,13 @@ public class CSharpCodeGenerationServiceTests
             .Files[0]
             .Content.Should()
             .Contain(
-                "editModel.ProductId ?? throw new InvalidOperationException(\"ProductId が未入力です。\");"
+                "editModel.ProductId ?? throw new InvalidOperationException(\"ProductId has no input value.\");"
             );
         result
             .Files[0]
             .Content.Should()
             .Contain(
-                "editModel.Name ?? throw new InvalidOperationException(\"Name が未入力です。\");"
+                "editModel.Name ?? throw new InvalidOperationException(\"Name has no input value.\");"
             );
         // Entity → EditModel 反映は public な ApplyToEditModel で行い、バインディング用プロパティ経由でロードする
         result
@@ -815,7 +815,9 @@ public class CSharpCodeGenerationServiceTests
         // カスケードナビを持たないこの EditModel には RegisterChildren の override は生成されない
         content.Should().NotContain("protected override void RegisterChildren()");
         // ② 発見性：拡張ポイント一覧コメントを生成
-        content.Should().Contain("拡張ポイント（partial クラスで必要なものだけ実装");
+        content
+            .Should()
+            .Contain("Extension points (implement only what you need in a partial class");
         // ④ IEditableObject（DataGrid 行編集の取り消し対応）
         content.Should().Contain("IEditableObject");
         content.Should().Contain("public void BeginEdit()");
@@ -1164,7 +1166,7 @@ public class CSharpCodeGenerationServiceTests
             .Contain(
                 "catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentOutOfRangeException)"
             );
-        content.Should().Contain("の列（{ColumnList}）が必要です");
+        content.Should().Contain("columns ({ColumnList})");
         // スカラー・単一値変換は ChangeType(InvariantCulture) / 変換不能で例外
         content
             .Should()
@@ -1219,9 +1221,9 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("private static bool IsSingleValueType(Type type)");
         content.Should().Contain("actual == typeof(byte[])");
         // DTO モード: 引数なしコンストラクタ必須・位置指定 record 非対応の例外
-        content.Should().Contain("位置指定 record は非対応");
+        content.Should().Contain("positional records are not supported");
         // typo ガード: 1 列も一致しないと列名・プロパティ名を含む例外
-        content.Should().Contain("一致する列が結果セットにありません");
+        content.Should().Contain("No column in the result set matches");
         // 列⇔プロパティ解決子は ConcurrentDictionary でキャッシュ
         content
             .Should()
@@ -1640,7 +1642,7 @@ public class CSharpCodeGenerationServiceTests
                 "IN (SELECT [{navigation.PrincipalColumn}] FROM {parentTable}{parentScopeWhere})"
             );
         // 循環カスケードは未対応として明示的に例外
-        content.Should().Contain("循環するカスケード");
+        content.Should().Contain("Cyclic cascade");
         content.Should().Contain("CascadeNavigations");
     }
 

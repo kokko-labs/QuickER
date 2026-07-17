@@ -121,6 +121,19 @@ public sealed class ApiReferenceDocTests
             file.FileName.EndsWith(".g.md", StringComparison.OrdinalIgnoreCase)
         );
 
+    /// <summary>Files から英語版（.g.md だが .ja.g.md ではない）を 1 つだけ取り出す（無ければ null）</summary>
+    private static GeneratedFile? EnglishMarkdownFile(CodeGenerationResult result) =>
+        result.Files.SingleOrDefault(file =>
+            file.FileName.EndsWith(".g.md", StringComparison.OrdinalIgnoreCase)
+            && !file.FileName.EndsWith(".ja.g.md", StringComparison.OrdinalIgnoreCase)
+        );
+
+    /// <summary>Files から日本語版（.ja.g.md）を 1 つだけ取り出す（無ければ null）</summary>
+    private static GeneratedFile? JapaneseMarkdownFile(CodeGenerationResult result) =>
+        result.Files.SingleOrDefault(file =>
+            file.FileName.EndsWith(".ja.g.md", StringComparison.OrdinalIgnoreCase)
+        );
+
     [Fact(DisplayName = "既定（GenerateApiDocs=false）では .g.md を出力しない")]
     public void Default_DoesNotEmitMarkdown()
     {
@@ -286,10 +299,10 @@ public sealed class ApiReferenceDocTests
         result.HasErrors.Should().BeFalse();
         var markdown = MarkdownFile(result)!.Content;
 
-        // エンティティ一覧・プロパティ表は出るが、データアクセス・使い方の節は丸ごと省略される
+        // エンティティ一覧・プロパティ表は出るが、データアクセス・使い方の節は丸ごと省略される（英語正本）
         markdown.Should().Contain("CustomerEntity");
-        markdown.Should().NotContain("## データアクセス API");
-        markdown.Should().NotContain("## 使い方");
+        markdown.Should().NotContain("## Data access API");
+        markdown.Should().NotContain("## Usage");
         markdown.Should().NotContain("AddGenerated");
     }
 
@@ -368,5 +381,95 @@ public sealed class ApiReferenceDocTests
                 Directory.Delete(directory, recursive: true);
             }
         }
+    }
+
+    [Fact(DisplayName = "英語版（既定）は英語の見出しと DI 説明を含み、日本語見出しを含まない")]
+    public void EnglishDoc_ContainsEnglishHeadingsAndDi()
+    {
+        var options = new CodeGenerationOptions
+        {
+            GenerateApiDocs = true,
+            GenerateRepositories = true,
+        };
+
+        var markdown = EnglishMarkdownFile(Generate(BuildDiagram(), options))!.Content;
+
+        markdown.Should().Contain("## Data access API");
+        markdown.Should().Contain("## Usage");
+        markdown
+            .Should()
+            .Contain("Registers the QuickER Repository (SqlServer) with the DI container.");
+        // 英語正本には日本語の見出しは出ない
+        markdown.Should().NotContain("## データアクセス API");
+    }
+
+    [Fact(
+        DisplayName = "IncludeJapaneseApiDocs=true で英語 .g.md と日本語 .ja.g.md の 2 ファイルが出る"
+    )]
+    public void JapaneseOptIn_EmitsBothEnglishAndJapaneseFiles()
+    {
+        var options = new CodeGenerationOptions
+        {
+            OutputFileName = "EcOrder.g.cs",
+            GenerateApiDocs = true,
+            IncludeJapaneseApiDocs = true,
+            GenerateRepositories = true,
+        };
+
+        var result = Generate(BuildDiagram(), options);
+
+        result.HasErrors.Should().BeFalse();
+        result
+            .Files.Where(file =>
+                file.FileName.EndsWith(".g.md", StringComparison.OrdinalIgnoreCase)
+            )
+            .Select(file => file.FileName)
+            .Should()
+            .BeEquivalentTo(["EcOrder.g.md", "EcOrder.ja.g.md"]);
+    }
+
+    [Fact(DisplayName = "日本語版（.ja.g.md）は日本語の見出しと DI 説明を含む")]
+    public void JapaneseDoc_ContainsJapaneseHeadingsAndDi()
+    {
+        var options = new CodeGenerationOptions
+        {
+            GenerateApiDocs = true,
+            IncludeJapaneseApiDocs = true,
+            GenerateRepositories = true,
+        };
+
+        var result = Generate(BuildDiagram(), options);
+
+        result.HasErrors.Should().BeFalse();
+        var markdown = JapaneseMarkdownFile(result)!.Content;
+
+        markdown.Should().Contain("## データアクセス API");
+        markdown.Should().Contain("## 使い方");
+        markdown.Should().Contain("QuickER 版 Repository（SqlServer）を DI コンテナへ登録します。");
+        // 拡張メソッド名（コード）は言語非依存で共通に出る
+        markdown.Should().Contain("AddGeneratedSqlServerRepositories");
+        // 英語の見出しは日本語版には出ない
+        markdown.Should().NotContain("## Data access API");
+    }
+
+    [Fact(
+        DisplayName = "GenerateApiDocs=false のとき IncludeJapaneseApiDocs=true でも Markdown は一切出ない"
+    )]
+    public void JapaneseOptIn_WithoutApiDocs_EmitsNoMarkdown()
+    {
+        var options = new CodeGenerationOptions
+        {
+            GenerateApiDocs = false,
+            IncludeJapaneseApiDocs = true,
+        };
+
+        var result = Generate(BuildDiagram(), options);
+
+        result.HasErrors.Should().BeFalse();
+        result
+            .Files.Should()
+            .NotContain(file =>
+                file.FileName.EndsWith(".g.md", StringComparison.OrdinalIgnoreCase)
+            );
     }
 }

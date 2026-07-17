@@ -13,9 +13,10 @@ QuickER 版 Repository（`RepositoryDialect=sqlite`）による CRUD・グラフ
 |---|---|
 | `EcOrder.json` | ER 図（GUI の保存形式）。GUI で開いて編集できる |
 | `EcOrder.sql` | 図から生成した SQLite DDL（チェックイン済み） |
-| `quicker.json` | CLI の生成オプション（名前空間・出力ファイル名のみの最小構成） |
+| `quicker.json` | CLI の生成オプション（名前空間・出力ファイル名・`IncludeJapaneseApiDocs` を持つ最小構成） |
 | `EcOrderSample/Generated/EcOrder.g.cs` | 図から生成した C# コード（チェックイン済み） |
-| `EcOrderSample/Generated/EcOrder.g.md` | 生成 API のリファレンス Markdown（`--generate-api-docs` の同梱出力・チェックイン済み） |
+| `EcOrderSample/Generated/EcOrder.g.md` | 生成 API のリファレンス Markdown・英語正本（`--generate-api-docs` の同梱出力・チェックイン済み） |
+| `EcOrderSample/Generated/EcOrder.ja.g.md` | 日本語版 API リファレンス Markdown（`IncludeJapaneseApiDocs` 指定により併産・チェックイン済み） |
 | `EcOrderSample/Program.cs` | DDL で DB を作成し CRUD を実演するコンソールアプリ |
 
 コンソールアプリは QuickER 本体プロジェクトには一切参照せず、利用者のプロジェクトと同じく
@@ -51,7 +52,8 @@ dotnet run --project src/QuickER.Cli -- generate `
 ```
 
 `--generate-api-docs` を付けると `EcOrder.g.cs` と同じベース名で API リファレンス Markdown
-`EcOrder.g.md` も出力されます（どちらもドリフトテストの検証対象）。
+`EcOrder.g.md`（英語正本）も出力されます。`quicker.json` が `IncludeJapaneseApiDocs` を指定しているため、
+日本語版 `EcOrder.ja.g.md` も併産されます（いずれもドリフトテストの検証対象）。
 
 ### ドリフトテストの再生成モードで一括再生成する
 

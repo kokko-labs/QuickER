@@ -1,5 +1,5 @@
 {{~ if generate_value_objects ~}}
-        // 値オブジェクトは内包値を取り出して判定する
+        // Value objects are unwrapped to their underlying value before evaluation.
         if (value is IValueObject valueObject)
         {
             value = valueObject.UnderlyingValue;
@@ -14,13 +14,14 @@
     }
 {{~ if exclude_unbounded_binary || runtime_package_export ~}}
 
-    /// <summary>Stream アクセサのチャンクコピーで使う既定バッファサイズ（O(チャンク)＝blob 全量をメモリに載せない）</summary>
+    /// <summary>Default buffer size for the chunked copy used by the streaming accessors (O(chunk); never loads the whole blob into memory).</summary>
     public const int StreamCopyBufferSize = 81920;
 
     /// <summary>
-    /// 書き込み Stream の長さを決定する（方言に依らず契約を統一する共通検証）。<paramref name="source"/> が
-    /// <c>CanSeek</c> なら <c>Length - Position</c> を採用し、そうでなければ <paramref name="length"/> が必須
-    /// （欠落は <see cref="ArgumentException"/>）。SQLite の zeroblob は書き込み前に長さが確定している必要があるため。
+    /// Determines the length of the write stream (a shared check that keeps the contract uniform across dialects).
+    /// If <paramref name="source"/> is <c>CanSeek</c>, <c>Length - Position</c> is used; otherwise <paramref name="length"/>
+    /// is required (a missing value throws <see cref="ArgumentException"/>). SQLite's zeroblob requires the length to be
+    /// known before writing.
     /// </summary>
     public static long ResolveWriteLength(Stream source, long? length)
     {
@@ -32,7 +33,7 @@
         if (length is null)
         {
             throw new ArgumentException(
-                "CanSeek でない Stream は length 指定が必要です。",
+                "A non-seekable stream requires an explicit length.",
                 nameof(length)
             );
         }
@@ -43,94 +44,94 @@
 }
 {{ end }}
 {{~ if generate_value_objects && render_runtime && emit_shared_infra ~}}
-/// <summary>値オブジェクト（Value Object）の非ジェネリックマーカー。内包値の取り出し・型判定に使う</summary>
+/// <summary>Non-generic marker for a value object. Used to extract the underlying value and to test the type.</summary>
 public interface IValueObject
 {
-    /// <summary>内包する値を object として取得する（SQL パラメータ束縛などで素の値へ開くのに使う）</summary>
+    /// <summary>Gets the underlying value as an object (used to open the raw value for SQL parameter binding and similar).</summary>
     object? UnderlyingValue { get; }
 
-    /// <summary>画面表示用の文字列（既定は ToString()。具象 VO で override して書式を変えられる）</summary>
+    /// <summary>Gets the string used for display (defaults to ToString(); a concrete value object can override to change the format).</summary>
     string DisplayValue { get; }
 }
 
-/// <summary>値オブジェクトの汎用インターフェース。static ファクトリを型パラメータ経由で呼べるようにする</summary>
+/// <summary>Generic interface for a value object. Lets the static factory be called through a type parameter.</summary>
 public interface IValueObject<TSelf, TValue> : IValueObject
     where TSelf : IValueObject<TSelf, TValue>
 {
-    /// <summary>検証して生成する（違反時は ValueObjectValidationException）</summary>
+    /// <summary>Validates and creates the value object (throws ValueObjectValidationException on violation).</summary>
     static abstract TSelf Create(TValue value);
 
-    /// <summary>生成可なら true＋値オブジェクト、不可なら false＋エラー内容を返す</summary>
+    /// <summary>Returns true plus the value object when creation succeeds, or false plus the error details when it fails.</summary>
     static abstract bool TryCreate(
         TValue value,
         out TSelf? result,
         out IReadOnlyList<string> errors
     );
 
-    /// <summary>内包する値</summary>
+    /// <summary>Gets the underlying value.</summary>
     TValue Value { get; }
 }
 
-/// <summary>値オブジェクトの検証違反を表す例外</summary>
+/// <summary>Exception raised when a value object fails validation.</summary>
 public sealed class ValueObjectValidationException : Exception
 {
-    /// <summary>違反した値オブジェクトの型</summary>
+    /// <summary>Gets the type of the value object that failed validation.</summary>
     public Type ValueObjectType { get; }
 
-    /// <summary>検証エラーの一覧</summary>
+    /// <summary>Gets the list of validation errors.</summary>
     public IReadOnlyList<string> Errors { get; }
 
-    /// <summary>対象型と検証エラー一覧で初期化する</summary>
+    /// <summary>Initializes the exception with the target type and the list of validation errors.</summary>
     public ValueObjectValidationException(Type valueObjectType, IReadOnlyList<string> errors)
-        : base($"{valueObjectType.Name} の値が不正です: {string.Join(" / ", errors)}")
+        : base($"The value of {valueObjectType.Name} is invalid: {string.Join(" / ", errors)}")
     {
         ValueObjectType = valueObjectType;
         Errors = errors;
     }
 }
 
-/// <summary>値オブジェクト共通の基底。値の保持・等価・ToString・素値の取り出しを提供する（順序比較は派生で付与）</summary>
+/// <summary>Common base for value objects. Provides value storage, equality, ToString, and extraction of the raw value (ordered comparison is added by derived types).</summary>
 public abstract partial class ValueObjectBase<TSelf, TValue> : IValueObject
     where TSelf : ValueObjectBase<TSelf, TValue>
 {
-    /// <summary>内包する値（不変）</summary>
+    /// <summary>Gets the underlying value (immutable).</summary>
     public TValue Value { get; }
 
-    /// <summary>検証済みの値で初期化する（検証は具象の Create/TryCreate が事前に行う）</summary>
+    /// <summary>Initializes with an already-validated value (the concrete Create/TryCreate performs validation beforehand).</summary>
     protected ValueObjectBase(TValue value) => Value = value;
 
-    /// <summary>内包値を object として取得する（SQL 束縛などで素の値へ開く）</summary>
+    /// <summary>Gets the underlying value as an object (opens the raw value for SQL binding and similar).</summary>
     object? IValueObject.UnderlyingValue => Value;
 
-    /// <summary>画面表示用の文字列（既定は ToString()）。具象 VO の partial クラスで override して書式を変えられる</summary>
+    /// <summary>Gets the string used for display (defaults to ToString()). A concrete value object's partial class can override it to change the format.</summary>
     public virtual string DisplayValue => ToString();
 
-    /// <summary>値ベースの等価判定（byte[] などの配列は要素単位で比較する）</summary>
+    /// <summary>Value-based equality (arrays such as byte[] are compared element by element).</summary>
     public override bool Equals(object? obj) =>
         obj is ValueObjectBase<TSelf, TValue> other
         && StructuralComparisons.StructuralEqualityComparer.Equals(Value, other.Value);
 
-    /// <summary>値ベースのハッシュコード（配列は構造的に算出）</summary>
+    /// <summary>Value-based hash code (arrays are computed structurally).</summary>
     public override int GetHashCode() =>
         Value is null ? 0 : StructuralComparisons.StructuralEqualityComparer.GetHashCode(Value);
 
-    /// <summary>値ベースの等価演算子</summary>
+    /// <summary>Value-based equality operator.</summary>
     public static bool operator ==(
         ValueObjectBase<TSelf, TValue>? left,
         ValueObjectBase<TSelf, TValue>? right
     ) => left is null ? right is null : left.Equals(right);
 
-    /// <summary>値ベースの非等価演算子</summary>
+    /// <summary>Value-based inequality operator.</summary>
     public static bool operator !=(
         ValueObjectBase<TSelf, TValue>? left,
         ValueObjectBase<TSelf, TValue>? right
     ) => !(left == right);
 
-    /// <summary>内包値の文字列表現を返す</summary>
+    /// <summary>Returns the string representation of the underlying value.</summary>
     public override string ToString() => Value?.ToString() ?? string.Empty;
 }
 
-/// <summary>順序付け可能な値オブジェクトの基底（数値・日時系）。比較演算子と CompareTo を提供する</summary>
+/// <summary>Base for orderable value objects (numeric and date/time types). Provides comparison operators and CompareTo.</summary>
 public abstract partial class ValueObjectOrderedBase<TSelf, TValue>
     : ValueObjectBase<TSelf, TValue>,
         IComparable<TSelf>,
@@ -138,41 +139,41 @@ public abstract partial class ValueObjectOrderedBase<TSelf, TValue>
     where TSelf : ValueObjectOrderedBase<TSelf, TValue>
     where TValue : IComparable<TValue>
 {
-    /// <summary>検証済みの値で初期化する</summary>
+    /// <summary>Initializes with an already-validated value.</summary>
     protected ValueObjectOrderedBase(TValue value)
         : base(value) { }
 
-    /// <summary>内包値どうしを比較する</summary>
+    /// <summary>Compares the underlying values.</summary>
     public int CompareTo(TSelf? other) => other is null ? 1 : Value.CompareTo(other.Value);
 
-    /// <summary>非ジェネリック比較（型不一致は例外）</summary>
+    /// <summary>Non-generic comparison (a type mismatch throws).</summary>
     int IComparable.CompareTo(object? obj) =>
         obj is null ? 1
         : obj is TSelf other ? CompareTo(other)
         : throw new ArgumentException(
-            $"{obj.GetType().Name} は {typeof(TSelf).Name} と比較できません。",
+            $"{obj.GetType().Name} cannot be compared with {typeof(TSelf).Name}.",
             nameof(obj)
         );
 
-    /// <summary>未満</summary>
+    /// <summary>Less-than.</summary>
     public static bool operator <(
         ValueObjectOrderedBase<TSelf, TValue>? left,
         ValueObjectOrderedBase<TSelf, TValue>? right
     ) => Compare(left, right) < 0;
 
-    /// <summary>超過</summary>
+    /// <summary>Greater-than.</summary>
     public static bool operator >(
         ValueObjectOrderedBase<TSelf, TValue>? left,
         ValueObjectOrderedBase<TSelf, TValue>? right
     ) => Compare(left, right) > 0;
 
-    /// <summary>以下</summary>
+    /// <summary>Less-than-or-equal.</summary>
     public static bool operator <=(
         ValueObjectOrderedBase<TSelf, TValue>? left,
         ValueObjectOrderedBase<TSelf, TValue>? right
     ) => Compare(left, right) <= 0;
 
-    /// <summary>以上</summary>
+    /// <summary>Greater-than-or-equal.</summary>
     public static bool operator >=(
         ValueObjectOrderedBase<TSelf, TValue>? left,
         ValueObjectOrderedBase<TSelf, TValue>? right
@@ -187,135 +188,135 @@ public abstract partial class ValueObjectOrderedBase<TSelf, TValue>
         : left.Value.CompareTo(right.Value);
 }
 
-/// <summary>string 値オブジェクトの基底。部分一致系メソッドと序数比較を提供する（順序演算子は付けない）</summary>
+/// <summary>Base for string value objects. Provides substring-match methods and ordinal comparison (does not add ordering operators).</summary>
 public abstract partial class ValueObjectStringBase<TSelf>
     : ValueObjectBase<TSelf, string>,
         IComparable<TSelf>,
         IComparable
     where TSelf : ValueObjectStringBase<TSelf>
 {
-    /// <summary>検証済みの値で初期化する</summary>
+    /// <summary>Initializes with an already-validated value.</summary>
     protected ValueObjectStringBase(string value)
         : base(value) { }
 
-    /// <summary>指定文字列を含むか</summary>
+    /// <summary>Returns whether the value contains the specified string.</summary>
     public bool Contains(string? value) =>
         value is not null && Value.Contains(value, StringComparison.Ordinal);
 
-    /// <summary>指定文字列で始まるか</summary>
+    /// <summary>Returns whether the value starts with the specified string.</summary>
     public bool StartsWith(string? value) =>
         value is not null && Value.StartsWith(value, StringComparison.Ordinal);
 
-    /// <summary>指定文字列で終わるか</summary>
+    /// <summary>Returns whether the value ends with the specified string.</summary>
     public bool EndsWith(string? value) =>
         value is not null && Value.EndsWith(value, StringComparison.Ordinal);
 
-    /// <summary>他の値オブジェクトの値を含むか</summary>
+    /// <summary>Returns whether the value contains another value object's value.</summary>
     public bool Contains(TSelf? value) => value is not null && Contains(value.Value);
 
-    /// <summary>他の値オブジェクトの値で始まるか</summary>
+    /// <summary>Returns whether the value starts with another value object's value.</summary>
     public bool StartsWith(TSelf? value) => value is not null && StartsWith(value.Value);
 
-    /// <summary>他の値オブジェクトの値で終わるか</summary>
+    /// <summary>Returns whether the value ends with another value object's value.</summary>
     public bool EndsWith(TSelf? value) => value is not null && EndsWith(value.Value);
 
-    /// <summary>序数で比較する</summary>
+    /// <summary>Compares ordinally.</summary>
     public int CompareTo(TSelf? other) =>
         other is null ? 1 : string.CompareOrdinal(Value, other.Value);
 
-    /// <summary>非ジェネリック比較（型不一致は例外）</summary>
+    /// <summary>Non-generic comparison (a type mismatch throws).</summary>
     int IComparable.CompareTo(object? obj) =>
         obj is null ? 1
         : obj is TSelf other ? CompareTo(other)
         : throw new ArgumentException(
-            $"{obj.GetType().Name} は {typeof(TSelf).Name} と比較できません。",
+            $"{obj.GetType().Name} cannot be compared with {typeof(TSelf).Name}.",
             nameof(obj)
         );
 }
 
-/// <summary>bool 値オブジェクトの基底。True/False ファクトリと真偽判定を提供する（順序比較は持たない）</summary>
+/// <summary>Base for bool value objects. Provides True/False factories and truth checks (has no ordered comparison).</summary>
 public abstract partial class ValueObjectBooleanBase<TSelf> : ValueObjectBase<TSelf, bool>
     where TSelf : ValueObjectBooleanBase<TSelf>, IValueObject<TSelf, bool>
 {
-    /// <summary>検証済みの値で初期化する</summary>
+    /// <summary>Initializes with an already-validated value.</summary>
     protected ValueObjectBooleanBase(bool value)
         : base(value) { }
 
-    /// <summary>true 値で生成する</summary>
+    /// <summary>Creates the value object from the true value.</summary>
     public static TSelf True => TSelf.Create(true);
 
-    /// <summary>false 値で生成する</summary>
+    /// <summary>Creates the value object from the false value.</summary>
     public static TSelf False => TSelf.Create(false);
 
-    /// <summary>値が true かどうか</summary>
+    /// <summary>Gets whether the value is true.</summary>
     public bool IsTrue => Value;
 
-    /// <summary>値が false かどうか</summary>
+    /// <summary>Gets whether the value is false.</summary>
     public bool IsFalse => !Value;
 }
 
-/// <summary>DateTime 値オブジェクトの基底。Now/Today ファクトリを提供する</summary>
+/// <summary>Base for DateTime value objects. Provides Now/Today factories.</summary>
 public abstract partial class ValueObjectDateTimeBase<TSelf>
     : ValueObjectOrderedBase<TSelf, DateTime>
     where TSelf : ValueObjectDateTimeBase<TSelf>, IValueObject<TSelf, DateTime>
 {
-    /// <summary>検証済みの値で初期化する</summary>
+    /// <summary>Initializes with an already-validated value.</summary>
     protected ValueObjectDateTimeBase(DateTime value)
         : base(value) { }
 
-    /// <summary>現在日時で生成する</summary>
+    /// <summary>Creates the value object from the current date and time.</summary>
     public static TSelf Now => TSelf.Create(DateTime.Now);
 
-    /// <summary>本日（時刻 0:00）で生成する</summary>
+    /// <summary>Creates the value object from today (time 0:00).</summary>
     public static TSelf Today => TSelf.Create(DateTime.Today);
 }
 
-/// <summary>byte[] 値オブジェクトの基底。ToString は Base64 を返す（等価は基底の構造的比較）</summary>
+/// <summary>Base for byte[] value objects. ToString returns Base64 (equality uses the base's structural comparison).</summary>
 public abstract partial class ValueObjectBinaryBase<TSelf> : ValueObjectBase<TSelf, byte[]>
     where TSelf : ValueObjectBinaryBase<TSelf>
 {
-    /// <summary>検証済みの値で初期化する</summary>
+    /// <summary>Initializes with an already-validated value.</summary>
     protected ValueObjectBinaryBase(byte[] value)
         : base(value) { }
 
-    /// <summary>Base64 文字列として返す</summary>
+    /// <summary>Returns the value as a Base64 string.</summary>
     public override string ToString() =>
         Value is null ? string.Empty : Convert.ToBase64String(Value);
 }
 
-/// <summary>GUID を文字列で保持する主キー値オブジェクトの基底。無引数生成で GUID を自動採番する</summary>
+/// <summary>Base for a primary-key value object that holds a GUID as a string. The parameterless factory auto-generates a new GUID.</summary>
 public abstract partial class ValueObjectGuidKeyBase<TSelf>
     : ValueObjectBase<TSelf, string>,
         IComparable<TSelf>,
         IComparable
     where TSelf : ValueObjectGuidKeyBase<TSelf>, IValueObject<TSelf, string>
 {
-    /// <summary>検証済みの値で初期化する</summary>
+    /// <summary>Initializes with an already-validated value.</summary>
     protected ValueObjectGuidKeyBase(string value)
         : base(value) { }
 
-    /// <summary>新しい GUID を採番して生成する</summary>
+    /// <summary>Generates a new GUID and creates the value object.</summary>
     public static TSelf Create() => TSelf.Create(Guid.NewGuid().ToString());
 
-    /// <summary>序数で比較する</summary>
+    /// <summary>Compares ordinally.</summary>
     public int CompareTo(TSelf? other) =>
         other is null ? 1 : string.CompareOrdinal(Value, other.Value);
 
-    /// <summary>非ジェネリック比較（型不一致は例外）</summary>
+    /// <summary>Non-generic comparison (a type mismatch throws).</summary>
     int IComparable.CompareTo(object? obj) =>
         obj is null ? 1
         : obj is TSelf other ? CompareTo(other)
         : throw new ArgumentException(
-            $"{obj.GetType().Name} は {typeof(TSelf).Name} と比較できません。",
+            $"{obj.GetType().Name} cannot be compared with {typeof(TSelf).Name}.",
             nameof(obj)
         );
 }
 
-/// <summary>値オブジェクトを内包値（素の値）として JSON 入出力する変換器</summary>
+/// <summary>Converter that reads and writes a value object as its underlying (raw) value in JSON.</summary>
 public sealed class ValueObjectJsonConverter<TVo, TValue> : JsonConverter<TVo>
     where TVo : class, IValueObject<TVo, TValue>
 {
-    /// <summary>素の値を読み取り、Create で値オブジェクトを復元する</summary>
+    /// <summary>Reads the raw value and restores the value object via Create.</summary>
     public override TVo? Read(
         ref Utf8JsonReader reader,
         Type typeToConvert,
@@ -326,22 +327,22 @@ public sealed class ValueObjectJsonConverter<TVo, TValue> : JsonConverter<TVo>
         return value is null ? null : TVo.Create(value);
     }
 
-    /// <summary>内包値（素の値）として書き出す</summary>
+    /// <summary>Writes the underlying (raw) value.</summary>
     public override void Write(Utf8JsonWriter writer, TVo value, JsonSerializerOptions options) =>
         JsonSerializer.Serialize(writer, value.Value, options);
 }
 
-/// <summary>IValueObject&lt;,&gt; を実装する型に汎用変換器を適用するファクトリ</summary>
+/// <summary>Factory that applies the generic converter to types implementing IValueObject&lt;,&gt;.</summary>
 public sealed class ValueObjectJsonConverterFactory : JsonConverterFactory
 {
-    /// <summary>値オブジェクト型かどうか</summary>
+    /// <summary>Returns whether the type is a value object type.</summary>
     public override bool CanConvert(Type typeToConvert) =>
         Array.Exists(
             typeToConvert.GetInterfaces(),
             i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IValueObject<,>)
         );
 
-    /// <summary>対象型の TValue を解決して閉じた変換器を生成する</summary>
+    /// <summary>Resolves the target type's TValue and creates a closed converter.</summary>
     public override JsonConverter CreateConverter(Type typeToConvert, JsonSerializerOptions options)
     {
         var iface = Array.Find(
@@ -357,27 +358,27 @@ public sealed class ValueObjectJsonConverterFactory : JsonConverterFactory
     }
 }
 
-/// <summary>値オブジェクトの自動検証メッセージ（全 VO 共通の既定）。アプリ起動時に差し替えると全 VO に反映される</summary>
+/// <summary>Automatic validation messages for value objects (defaults shared by all VOs). Replacing them at app startup applies to every VO.</summary>
 public static class ValueObjectValidationMessages
 {
-    /// <summary>最大長超過メッセージ（引数: 最大長, 現在の文字数）</summary>
+    /// <summary>Message for exceeding the maximum length (arguments: maximum length, current character count).</summary>
     public static Func<int, int, string> MaxLengthExceeded { get; set; } =
         (maxLength, actualLength) =>
-            $"{maxLength} 文字以内で入力してください。（現在 {actualLength} 文字）";
+            $"Enter at most {maxLength} characters. (currently {actualLength} characters)";
 
-    /// <summary>小数部桁数超過メッセージ（引数: 許容スケール）</summary>
+    /// <summary>Message for exceeding the number of decimal places (argument: allowed scale).</summary>
     public static Func<int, string> ScaleExceeded { get; set; } =
-        scale => $"小数点以下は {scale} 桁以内で入力してください。";
+        scale => $"Enter at most {scale} digits after the decimal point.";
 
-    /// <summary>整数部桁数超過メッセージ（引数: 許容整数部桁数）</summary>
+    /// <summary>Message for exceeding the number of integer digits (argument: allowed integer digits).</summary>
     public static Func<int, string> PrecisionExceeded { get; set; } =
-        maxIntegralDigits => $"整数部は {maxIntegralDigits} 桁以内で入力してください。";
+        maxIntegralDigits => $"Enter at most {maxIntegralDigits} digits in the integer part.";
 }
 {{~ end ~}}
 {{~ if generate_value_objects && render_value_objects ~}}
 {{~ for vo in value_object_classes ~}}
 
-/// <summary>{{ if vo.description_xml_doc != "" }}{{ vo.description_xml_doc }}{{ else }}{{ vo.column_name }} 列に対応する値オブジェクト{{ end }}</summary>
+/// <summary>{{ if vo.description_xml_doc != "" }}{{ vo.description_xml_doc }}{{ else }}Value object for the {{ vo.column_name }} column{{ end }}</summary>
 public sealed partial class {{ vo.class_name }}
     : {{ vo.base_declaration }},
         {{ vo.interface_declaration }}
@@ -385,7 +386,7 @@ public sealed partial class {{ vo.class_name }}
     private {{ vo.class_name }}({{ vo.value_type_name }} value)
         : base(value) { }
 
-    /// <summary>検証して生成する（違反時は ValueObjectValidationException）</summary>
+    /// <summary>Validates and creates the value object (throws ValueObjectValidationException on violation).</summary>
     public static {{ vo.class_name }} Create({{ vo.value_type_name }} value)
     {
         var errors = new List<string>();
@@ -397,7 +398,7 @@ public sealed partial class {{ vo.class_name }}
         return new {{ vo.class_name }}(value);
     }
 
-    /// <summary>生成可なら true＋値オブジェクト、不可なら false＋エラー内容を返す</summary>
+    /// <summary>Returns true plus the value object when creation succeeds, or false plus the error details when it fails.</summary>
     public static bool TryCreate(
         {{ vo.value_type_name }} value,
         out {{ vo.class_name }}? result,
@@ -417,7 +418,7 @@ public sealed partial class {{ vo.class_name }}
         return true;
     }
 
-    /// <summary>自動生成された検証＋ユーザー拡張（OnValidate）。partial・自前コードからも呼べる</summary>
+    /// <summary>Auto-generated validation plus the user extension (OnValidate). Also callable from partial and custom code.</summary>
     internal static void Validate({{ vo.value_type_name }} value, ICollection<string> errors)
     {
         {{~ if vo.max_length ~}}
@@ -434,10 +435,10 @@ public sealed partial class {{ vo.class_name }}
         OnValidate(value, errors);
     }
 
-    /// <summary>ユーザー定義の追加検証（partial・未実装ならゼロコスト）</summary>
+    /// <summary>User-defined additional validation (partial; zero cost when not implemented).</summary>
     static partial void OnValidate({{ vo.value_type_name }} value, ICollection<string> errors);
 
-    /// <summary>この値オブジェクトの表示名（エラーメッセージ等で使う）。既定は列の説明、無指定はプロパティ名。CustomizeDisplayName で上書き可能</summary>
+    /// <summary>Gets the display name of this value object (used in error messages and similar). Defaults to the column description, or the property name when unset. Can be overridden via CustomizeDisplayName.</summary>
     public static string DisplayName
     {
         get
@@ -448,11 +449,11 @@ public sealed partial class {{ vo.class_name }}
         }
     }
 
-    /// <summary>表示名を差し替える拡張ポイント（partial・未実装なら既定の表示名）</summary>
+    /// <summary>Extension point for replacing the display name (partial; the default display name applies when not implemented).</summary>
     static partial void CustomizeDisplayName(ref string displayName);
     {{~ if vo.max_length ~}}
 
-    /// <summary>最大長エラーメッセージの差し替え（partial・未実装なら既定メッセージ）</summary>
+    /// <summary>Replaces the maximum-length error message (partial; the default message applies when not implemented).</summary>
     static partial void CustomizeMaxLengthErrorMessage(
         string value,
         int maxLength,
@@ -461,7 +462,7 @@ public sealed partial class {{ vo.class_name }}
     {{~ end ~}}
     {{~ if vo.precision ~}}
 
-    /// <summary>decimal の桁数検証（丸めない・超過は弾く）。末尾ゼロは scale に数える</summary>
+    /// <summary>Validates the digit counts of a decimal (does not round; rejects overflow). Trailing zeros count toward the scale.</summary>
     private static void ValidateDecimal(
         decimal value,
         int precision,
@@ -491,10 +492,10 @@ public sealed partial class {{ vo.class_name }}
         }
     }
 
-    /// <summary>小数部桁数エラーメッセージの差し替え（partial・未実装なら既定メッセージ）</summary>
+    /// <summary>Replaces the decimal-places error message (partial; the default message applies when not implemented).</summary>
     static partial void CustomizeScaleErrorMessage(decimal value, int scale, ref string message);
 
-    /// <summary>整数部桁数エラーメッセージの差し替え（partial・未実装なら既定メッセージ）</summary>
+    /// <summary>Replaces the integer-digits error message (partial; the default message applies when not implemented).</summary>
     static partial void CustomizePrecisionErrorMessage(
         decimal value,
         int maxIntegralDigits,
