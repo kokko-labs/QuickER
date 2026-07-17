@@ -105,4 +105,4 @@ $env:QUICKER_REGEN_FIXTURES=1; dotnet test tests/QuickER.Tests/QuickER.Tests.csp
 
 ## 詳細ドキュメント
 
-- リモートサービス生成を含むコード生成の詳細は [`docs/code-generation.md`](../../docs/code-generation.md) を参照してください。
+- リモートサービス生成を含むコード生成の詳細は [`docs/code-generation.ja.md`](../../docs/code-generation.ja.md) を参照してください。

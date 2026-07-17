@@ -118,7 +118,7 @@ quicker generate --schema diagram.json --out ./Generated --provider sqlserver
 
 ### ランタイムパッケージ（オプション）
 
-生成コードは既定で自己完結（ランタイム込みのインライン出力）です。固定コードを NuGet パッケージ参照に切り替える `--use-runtime-packages` モードでは、`QuickER.Runtime` / `QuickER.Runtime.SqlServer` / `QuickER.Runtime.Sqlite` / `QuickER.Runtime.EntityFrameworkCore` を参照します。詳細は [docs/code-generation.md](docs/code-generation.md) を参照してください。
+生成コードは既定で自己完結（ランタイム込みのインライン出力）です。固定コードを NuGet パッケージ参照に切り替える `--use-runtime-packages` モードでは、`QuickER.Runtime` / `QuickER.Runtime.SqlServer` / `QuickER.Runtime.Sqlite` / `QuickER.Runtime.EntityFrameworkCore` を参照します。詳細は [docs/code-generation.ja.md](docs/code-generation.ja.md) を参照してください。
 
 ## DB アクセス生成の選び方
 
@@ -140,7 +140,7 @@ services.AddGeneratedSqliteRepositories(connectionString);
 services.AddGeneratedEfCoreRepositories(options => options.UseSqlite(connectionString));
 ```
 
-SQL Server と SQLite へ同時対応するマルチターゲット生成（keyed DI）もあります。詳細は [docs/code-generation.md](docs/code-generation.md) を参照してください。
+SQL Server と SQLite へ同時対応するマルチターゲット生成（keyed DI）もあります。詳細は [docs/code-generation.ja.md](docs/code-generation.ja.md) を参照してください。
 
 ## AI チャット
 
@@ -149,7 +149,7 @@ SQL Server と SQLite へ同時対応するマルチターゲット生成（keye
 - **API キー** — OpenAI / Anthropic (Claude)。Ollama はローカル実行のためキー不要
 - **Codex / Claude Code** — 各 CLI のアカウント認証を利用
 
-設定方法は [docs/ai-chat.md](docs/ai-chat.md) を参照してください。
+設定方法は [docs/ai-chat.ja.md](docs/ai-chat.ja.md) を参照してください。
 
 ## 開発
 
@@ -162,9 +162,9 @@ dotnet test QuickER.slnx         # 全テスト（Docker があれば実 DB 統�
 
 ## ドキュメント
 
-- [CLI リファレンス（generate / scaffold・quicker.json）](docs/cli.md)
-- [生成コードの使い方（Repository API・EF Core・ランタイムパッケージ）](docs/code-generation.md)
-- [AI チャットの設定](docs/ai-chat.md)
+- [CLI リファレンス（generate / scaffold・quicker.json）](docs/cli.ja.md)
+- [生成コードの使い方（Repository API・EF Core・ランタイムパッケージ）](docs/code-generation.ja.md)
+- [AI チャットの設定](docs/ai-chat.ja.md)
 - [動くサンプル（EC 注文ドメイン）](samples/ec-order/README.ja.md)
 - [動くサンプル（3 階層構成 — クライアント → HTTP+JSON → サーバー → SQLite）](samples/ec-order-remote/README.ja.md)
 

@@ -106,7 +106,7 @@ Each generated repository implements `IRepository<TEntity, TKey>`. The main meth
 | `BulkInsertAsync(entities, ct)` | Inserts multiple entities at once (returns the number inserted). |
 | `Query()` | Builds queries such as filtering, ordering, and row limiting. |
 
-For the supported scope and details of `Query()`, see [docs/code-generation.md](https://github.com/kokko-labs/QuickER/blob/main/docs/code-generation.md) (documentation in Japanese).
+For the supported scope and details of `Query()`, see [docs/code-generation.md](https://github.com/kokko-labs/QuickER/blob/main/docs/code-generation.md).
 
 ## Usage
 

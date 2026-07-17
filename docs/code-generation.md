@@ -1,111 +1,113 @@
-# 生成コードの使い方
+# Using the Generated Code
 
-QuickER が生成する C# コードの構成と、データアクセス層（QuickER 版 Repository / EF Core）の使い方をまとめます。生成方法は [CLI リファレンス](cli.md)、動く実例は [samples/ec-order](../samples/ec-order) を参照してください。
+*[日本語](code-generation.ja.md) | English*
 
-## 生成されるもの
+This document describes the structure of the C# code QuickER generates and how to use its data-access layer (QuickER Repository / EF Core). For how to run generation, see the [CLI reference](cli.md); for a working example, see [samples/ec-order](../samples/ec-order).
 
-| カテゴリ | 内容 |
+## What gets generated
+
+| Category | Contents |
 |---|---|
-| Entity | テーブルに対応する POCO。UI フレームワーク非依存（CommunityToolkit 等に依存しない）。`RowState`（Unchanged / Added / Updated / Removed）と `MarkAdded()` などの状態遷移メソッド、ナビゲーションプロパティ（親参照・子コレクション）を持つ |
-| EditModel | 画面編集用のモデルと Entity との相互変換 |
-| Mapper | Entity ⇄ EditModel の変換器 |
-| 値オブジェクト（オプション） | 列名ごとの値オブジェクト型（`CustomerIdValue` など）。`GenerateValueObjects` 有効時のみ（[値オブジェクト](#値オブジェクトgeneratevalueobjects) 参照） |
-| Repository 共通契約 | `IRepository<TEntity, TKey>` と各エンティティのインターフェイス（`ICustomerRepository` など）。QuickER 版 Repository と EF Core 版 Repository が同じ契約を実装する |
-| QuickER 版 Repository 実装 | 方言別（SQL Server / SQLite）の軽量実装＋ DI 登録拡張 |
-| EF Core 版 Repository | `QuickErDbContext`（Fluent 構成込み）＋ EF Core 版 Repository ＋ DI 登録拡張 |
-| ランタイム | 上記が使う固定コード（既定でインライン出力。パッケージ参照モードあり） |
+| Entity | A POCO that corresponds to a table. UI-framework independent (no dependency on CommunityToolkit or the like). Carries `RowState` (Unchanged / Added / Updated / Removed), state-transition methods such as `MarkAdded()`, and navigation properties (parent reference / child collection). |
+| EditModel | A model for screen editing, plus conversion to and from the Entity. |
+| Mapper | A converter for Entity ⇄ EditModel. |
+| Value objects (optional) | A per-column value-object type (e.g. `CustomerIdValue`). Emitted only when `GenerateValueObjects` is enabled (see [Value objects](#value-objects-generatevalueobjects)). |
+| Repository shared contracts | `IRepository<TEntity, TKey>` and a per-entity interface (e.g. `ICustomerRepository`). Both the QuickER Repository and the EF Core repository implement the same contracts. |
+| QuickER Repository implementation | Lightweight per-dialect implementations (SQL Server / SQLite) plus DI-registration extensions. |
+| EF Core repository | `QuickErDbContext` (including the Fluent configuration) plus the EF Core repository plus DI-registration extensions. |
+| Runtime | The fixed code the above relies on (inlined into the output by default; a package-reference mode is also available). |
 
-Entity には既定で DataAnnotations と **DB 定義メタ属性**（`[DbTableMeta]` / `[DbColumnMeta]`）が付き、方言中立の型トークン（`string(50)` / `decimal(10,2)` など）と説明が刻まれます。生成コードは DB 定義の自己記述ドキュメントとしても機能します。
+By default, an Entity is decorated with DataAnnotations and **DB-definition metadata attributes** (`[DbTableMeta]` / `[DbColumnMeta]`) that record a dialect-neutral type token (`string(50)` / `decimal(10,2)`, etc.) and a description. The generated code therefore doubles as a self-describing document of the DB definition.
 
-> **前提**: Repository の生成は単一主キー・アプリ側採番が対象です（複合キー・DB 自動採番のテーブルは Entity / EditModel のみ利用できます）。
+> **Prerequisite**: Repository generation targets a single primary key with application-assigned keys (tables with a composite key or DB auto-numbering can only use the Entity / EditModel).
 
-## 値オブジェクト（GenerateValueObjects）
+## Value objects (GenerateValueObjects)
 
-列を素の型（`int` / `string` など）でなく、列ごとの**値オブジェクト型**（`CustomerIdValue` / `NameValue` など）として生成するオプションです（既定 OFF。quicker.json の `GenerateValueObjects` / GUI「値オブジェクト」行の「全カラムを値オブジェクト化」チェックボックス。専用の CLI フラグはなく `--config` で指定します）。DB アクセスの選択（なし / QuickER 版 Repository / EF Core）に依らず選択でき、マルチターゲット・インメモリ・リモートとも併用できます。
+This option generates columns as a **per-column value-object type** (`CustomerIdValue` / `NameValue`, etc.) instead of a raw type (`int` / `string`, etc.) (default OFF; `GenerateValueObjects` in quicker.json / the "Turn all columns into value objects" checkbox in the "Value Objects" row of the GUI. There is no dedicated CLI flag—specify it with `--config`). It can be chosen regardless of the DB-access selection (None / QuickER Repository / EF Core), and it combines with multi-target, in-memory, and remote.
 
-ON にすると、全テーブルの列を**列名で**グローバルにグルーピングし、列名ごとに 1 つの値オブジェクト型を生成します。主キーと同名の外部キー列は**同一の型を共有**するため、ID の取り違えがコンパイルエラーになります。Entity のプロパティと Repository のキー型も値オブジェクトになります:
+When ON, the columns of every table are grouped globally **by column name**, and one value-object type is generated per column name. A foreign-key column that shares a name with a primary key **shares the same type**, so mixing up IDs becomes a compile error. Entity properties and repository key types also become value objects:
 
 ```csharp
 // ICustomerRepository : IRepository<CustomerEntity, CustomerIdValue>
 var customer = await customers.GetByIdAsync(CustomerIdValue.Create(1));
 
-// orders.GetByIdAsync(customer.CustomerId) は OrderIdValue でないためコンパイルエラー
+// orders.GetByIdAsync(customer.CustomerId) is a compile error because it is not an OrderIdValue
 ```
 
-同名列の定義（型・長さ・精度）が食い違う場合は Warning 診断を出し、主キーの定義を優先（主キーが無ければ最も広い定義）して 1 つの型に揃えます。
+When same-named columns disagree on their definition (type, length, precision), a Warning diagnostic is emitted, and the definitions are unified into a single type by preferring the primary key's definition (or, if there is no primary key, the widest definition).
 
-### 生成される型と検証
+### Generated types and validation
 
-各値オブジェクトは `sealed partial class` で、コンストラクタは非公開・生成は静的ファクトリ経由のみです。図の列定義から検証コードが自動生成されます（文字列は最大長、`decimal` は精度・スケール＝丸めずに弾く）:
+Each value object is a `sealed partial class` whose constructor is private and which can only be created through a static factory. Validation code is generated automatically from the column definition in the diagram (maximum length for strings; precision and scale for `decimal`—out-of-range values are rejected rather than rounded):
 
 ```csharp
-var name = NameValue.Create("山田");   // 検証違反は ValueObjectValidationException
+var name = NameValue.Create("Alice");   // A validation violation throws ValueObjectValidationException
 
-if (NameValue.TryCreate(input, out var vo, out var errors))   // 例外なしで検証
+if (NameValue.TryCreate(input, out var vo, out var errors))   // Validate without throwing
 {
     entity.Name = vo!;
 }
 ```
 
-基底クラスは値の型に応じて選ばれ、値ベースの等価（`==` / `Equals`）に加えて、数値・日時系は比較演算子（`<` / `>=` など）、文字列は `Contains` / `StartsWith` / `EndsWith` を備えます。
+The base class is chosen according to the value type. In addition to value-based equality (`==` / `Equals`), numeric and date/time types get comparison operators (`<` / `>=`, etc.), and strings get `Contains` / `StartsWith` / `EndsWith`.
 
-### partial 拡張点
+### partial extension points
 
-生成される値オブジェクトは partial クラスで、自前コードから検証・表示を拡張できます:
+A generated value object is a partial class, so you can extend validation and display from your own code:
 
 ```csharp
 public sealed partial class NameValue
 {
-    // 追加の検証（自動生成の検証の後に呼ばれる）
+    // Additional validation (called after the auto-generated validation)
     static partial void OnValidate(string value, ICollection<string> errors)
     {
         if (value.Contains(' '))
         {
-            errors.Add("空白は使えません。");
+            errors.Add("Whitespace is not allowed.");
         }
     }
 
-    // 検証メッセージ等で使う表示名の差し替え（既定は列の説明・無指定はプロパティ名）
-    static partial void CustomizeDisplayName(ref string displayName) => displayName = "氏名";
+    // Replace the display name used in validation messages, etc. (default is the column description; if unspecified, the property name)
+    static partial void CustomizeDisplayName(ref string displayName) => displayName = "Full name";
 }
 ```
 
-このほか、最大長・桁数エラーの文言を型ごとに差し替える `Customize*ErrorMessage` の partial や、画面表示用文字列 `DisplayValue`（virtual）の override も使えます。既定文言を全値オブジェクトへ一括で差し替えるには、アプリ起動時に `ValueObjectValidationMessages` の static プロパティを設定します。
+Beyond this, there are `Customize*ErrorMessage` partials for overriding the max-length / precision error text per type, and you can override the display string `DisplayValue` (virtual). To replace the default text across all value objects at once, set the static properties of `ValueObjectValidationMessages` at application startup.
 
-### 各機能との統合（透過対応）
+### Integration with each feature (transparent support)
 
-値オブジェクトは生成コード全体で透過に扱えます。素の値へ手で開く必要はありません:
+Value objects can be handled transparently throughout the generated code. You never need to unwrap them to the raw value by hand:
 
-| 機能 | 挙動 |
+| Feature | Behavior |
 |---|---|
-| QuickER 版 Repository | SQL パラメータは内包値へ自動変換して束縛し、読み出しは `Create` で値オブジェクトへ復元する |
-| `Query()`（式木） | 値オブジェクトどうしの比較・文字列の `Contains` などをそのまま SQL へ翻訳する |
-| EF Core モード | Fluent 構成に値変換（`HasConversion`）と翻訳プラグイン（文字列メソッド・`.Value` 参照のサーバーサイド翻訳）を自動適用する |
-| 名前付きクエリ | メソッドのパラメータは素の型のまま。生成される条件式が値オブジェクト比較へ自動変換する（IN はリストを持ち上げ） |
-| EditModel | 確定値プロパティは `NameValue?` などの値オブジェクト。画面バインド用の `BindingXxx`（文字列）は `TryCreate` で検証し、エラーを `INotifyDataErrorInfo` へ載せる |
-| JSON（`ToJson` / `Clone` / リモート転送） | **内包値として**直列化する（`{"customerId": 1}`。値オブジェクトのラッパー構造は JSON に現れない） |
+| QuickER Repository | SQL parameters are automatically converted to the wrapped value before binding, and reads restore the value object via `Create`. |
+| `Query()` (expression tree) | Value-object comparisons, string `Contains`, and so on are translated directly to SQL. |
+| EF Core mode | The Fluent configuration automatically applies a value conversion (`HasConversion`) and a translation plugin (server-side translation of string methods and `.Value` references). |
+| Named query | Method parameters stay the raw type. The generated condition expression is converted to value-object comparisons automatically (IN lifts the list). |
+| EditModel | The committed-value property is a value object such as `NameValue?`. The screen-binding property `BindingXxx` (string) validates with `TryCreate` and surfaces errors through `INotifyDataErrorInfo`. |
+| JSON (`ToJson` / `Clone` / remote transfer) | Serialized **as the wrapped value** (`{"customerId": 1}`. The value object's wrapper structure does not appear in the JSON). |
 
-> **注意**: DB や JSON からの読み出しも `Create` 経由で検証されます。検証を通らない値が既存データに残っていると読み出し時に `ValueObjectValidationException` になるため、`OnValidate` で足す追加検証は既存データと整合させてください。
+> **Note**: Reads from the DB or from JSON are also validated through `Create`. If existing data holds a value that does not pass validation, the read throws `ValueObjectValidationException`, so keep the extra validation you add in `OnValidate` consistent with existing data.
 
-### string 主キーの GUID 化（UseGuidKeyForStringPrimaryKey）
+### GUID keys for string primary keys (UseGuidKeyForStringPrimaryKey)
 
-`GenerateValueObjects` と併せて `UseGuidKeyForStringPrimaryKey`（GUI「string 主キーを GuidKey 化」）を ON にすると、string 主キーの値オブジェクトが GUID 採番基底（`ValueObjectGuidKeyBase`）になり、引数なしの `Create()` で新しいキーを採番できます:
+Turning on `UseGuidKeyForStringPrimaryKey` (the GUI's "Use GuidKey for string primary keys") together with `GenerateValueObjects` makes the value object of a string primary key derive from a GUID-numbering base (`ValueObjectGuidKeyBase`), so a parameterless `Create()` mints a new key:
 
 ```csharp
-// document_id が string 主キーの場合
-var id = DocumentIdValue.Create();   // Guid.NewGuid() を文字列で内包した新キー
+// When document_id is a string primary key
+var id = DocumentIdValue.Create();   // A new key wrapping Guid.NewGuid() as a string
 ```
 
-「主キーはアプリ側採番」という Repository 生成の前提（上記）を、採番ロジックを書かずに満たせます。
+This lets you satisfy the "primary keys are application-assigned" prerequisite of repository generation (above) without writing any numbering logic.
 
-## QuickER 版 Repository
+## QuickER Repository
 
-依存最小（ADO のみ）の軽量 Repository です。対象方言は SQL Server（`FOR JSON` ベース）と SQLite（プレーン SELECT ＋ マルチクエリ）。
+A lightweight repository with minimal dependencies (ADO only). The supported dialects are SQL Server (`FOR JSON` based) and SQLite (plain SELECT plus multi-query).
 
-DI 登録拡張はエンジン別の名前（`AddGeneratedSqlServerRepositories` / `AddGeneratedSqliteRepositories`）で生成されます。
+The DI-registration extensions are generated with per-engine names (`AddGeneratedSqlServerRepositories` / `AddGeneratedSqliteRepositories`).
 
 ```csharp
-// DI 登録（生成される拡張メソッド。方言に応じて SqlServer / Sqlite を選ぶ）
+// DI registration (the generated extension method; choose SqlServer / Sqlite by dialect)
 var provider = new ServiceCollection()
     .AddGeneratedSqliteRepositories(connectionString)
     .BuildServiceProvider();
@@ -113,33 +115,33 @@ var provider = new ServiceCollection()
 var customers = provider.GetRequiredService<ICustomerRepository>();
 ```
 
-### 基本操作
+### Basic operations
 
 ```csharp
-await customers.InsertAsync(new CustomerEntity { CustomerId = 1, Name = "山田" });
+await customers.InsertAsync(new CustomerEntity { CustomerId = 1, Name = "Alice" });
 var one  = await customers.GetByIdAsync(1);
 var all  = await customers.GetAllAsync();
-one!.Name = "山田（改名）";
+one!.Name = "Alice (renamed)";
 await customers.UpdateAsync(one);
 await customers.DeleteAsync(1);
-await customers.BulkInsertAsync(manyCustomers);   // 一括挿入
+await customers.BulkInsertAsync(manyCustomers);   // bulk insert
 ```
 
-### クエリ（式木 → SQL 変換）
+### Queries (expression tree → SQL)
 
 ```csharp
 var result = await customers.Query()
-    .Where(c => c.Name.Contains("山田") && c.Balance >= 1000m)   // LIKE はワイルドカードを自動エスケープ
+    .Where(c => c.Name.Contains("Ali") && c.Balance >= 1000m)   // LIKE escapes wildcards automatically
     .OrderBy(c => c.CustomerId)
-    .Skip(20).Take(10)                                           // ページング
-    .Include(c => c.Orders)                                      // 親→子コレクション
-        .ThenInclude(o => o.OrderLines)                          // 再帰的にロード
+    .Skip(20).Take(10)                                          // paging
+    .Include(c => c.Orders)                                     // parent → child collection
+        .ThenInclude(o => o.OrderLines)                         // load recursively
     .ToListAsync();
 ```
 
-対応: 等値・比較・`&&`/`||`・`Contains`/`StartsWith`/`EndsWith`（LIKE）・リストの `Contains`（IN）・日付部品（`Year` など）・`string.IsNullOrEmpty`・値オブジェクト比較。**射影（Select）・GroupBy・Join・算術式は未対応**です（実行時例外。生 SQL か EF Core で回避してください）。
+Supported: equality, comparison, `&&`/`||`, `Contains`/`StartsWith`/`EndsWith` (LIKE), `Contains` on a list (IN), date parts (`Year`, etc.), `string.IsNullOrEmpty`, and value-object comparison. **Projection (Select), GroupBy, Join, and arithmetic expressions are not supported** (they throw at runtime; work around them with raw SQL or EF Core).
 
-### グラフ保存（親子まとめて 1 回で保存）
+### Graph save (save parent and children in one call)
 
 ```csharp
 var order = new OrderEntity { OrderId = 1000, CustomerId = 1 };
@@ -148,40 +150,40 @@ var line = new OrderLineEntity { OrderLineId = 5000, OrderId = 1000, ProductId =
 line.MarkAdded();
 order.OrderLines.Add(line);
 
-var affected = await orders.SaveAsync(order);   // RowState に従い INSERT / UPDATE / DELETE を 1 トランザクションで実行
+var affected = await orders.SaveAsync(order);   // Runs INSERT / UPDATE / DELETE per RowState in one transaction
 ```
 
-### Save フック（ISaveHook）
+### Save hooks (ISaveHook)
 
-グラフ保存（`SaveAsync`）の各操作の**前後に処理を差し込む**仕組みです。前処理での状態チェックによる単独スキップと、後処理での**同一トランザクション内のファイルデータ登録**（Save と blob 書き込みのアトミック性）が主なユースケースです。フックは常時生成され、1 つも登録しなければ完全に no-op（従来どおりの挙動）です。
+A mechanism that **inserts processing before and after each operation** of a graph save (`SaveAsync`). The main use cases are a single-row skip based on a state check in the before-step, and **registering file data within the same transaction** in the after-step (atomicity of the save and the blob write). Hooks are always generated; if none are registered they are a complete no-op (behavior is unchanged from before).
 
-`ISaveHook<TEntity>` を実装して DI に登録します。両メソッドとも既定実装を持つため、**必要な方だけ**書けます。
+Implement `ISaveHook<TEntity>` and register it in DI. Both methods have a default implementation, so you can write **only the one you need**.
 
 ```csharp
 public sealed class DocumentSaveHook : ISaveHook<DocumentEntity>
 {
-    // 操作の直前。false を返すとその 1 件だけをスキップする（既定はスキップしない）
+    // Just before the operation. Returning false skips that single row (default is not to skip)
     public Task<bool> BeforeSaveAsync(
         DocumentEntity entity, SaveOperation operation, CancellationToken ct = default)
     {
-        // 例: 承認済みの文書だけ削除を許す（それ以外の削除はスキップ）
+        // Example: allow deleting only approved documents (skip other deletes)
         if (operation == SaveOperation.Delete && !entity.IsApproved)
             return Task.FromResult(false);
 
         return Task.FromResult(true);
     }
 
-    // 操作の直後・コミット前。context は同一トランザクションに参加する
+    // Just after the operation, before commit. context joins the same transaction
     public async Task AfterSaveAsync(
         DocumentEntity entity, SaveOperation operation, ISaveHookContext context,
         CancellationToken ct = default)
     {
         if (operation == SaveOperation.Insert)
         {
-            // 除外列（blob）へストリーミング書き込み（Save と同一トランザクション＝アトミック）
+            // Stream-write to the excluded column (blob) within the same transaction as the save (atomic)
             await context.WriteBinaryColumnFromFileAsync(
                 nameof(DocumentEntity.Payload), entity.DocumentId, "/tmp/upload.bin", ct);
-            // 生 SQL で監査行を残す（これも同一トランザクション）
+            // Leave an audit row with raw SQL (also the same transaction)
             await context.ExecuteSqlAsync(
                 "INSERT INTO audit (note) VALUES (@note)", new { note = $"created {entity.DocumentId}" }, ct);
         }
@@ -190,110 +192,110 @@ public sealed class DocumentSaveHook : ISaveHook<DocumentEntity>
 ```
 
 ```csharp
-// DI 登録（Singleton / Scoped どちらでも可。フックが Scoped サービスを使うなら Scoped）
+// DI registration (Singleton or Scoped; use Scoped if the hook uses scoped services)
 services.AddSingleton<ISaveHook<DocumentEntity>, DocumentSaveHook>();
 ```
 
-同じエンティティ型に複数のフックを登録できます。**Before は登録順**に呼ばれ、**最初に `false` を返した時点で短絡**します（残りの Before は呼ばれず、その行はスキップ）。**After も登録順**に呼ばれます。Before / After が投げた例外はそのまま伝播し、Save 全体がロールバックします。
+You can register multiple hooks for the same entity type. **Before runs in registration order** and **short-circuits the moment one returns `false`** (the remaining Before hooks are not called, and that row is skipped). **After also runs in registration order.** An exception thrown by Before / After propagates as-is and rolls back the entire save.
 
-**対象は `SaveAsync`（単一・複数の両形態）だけ**です。低レベル API である `InsertAsync` / `UpdateAsync` / `DeleteAsync` の直接呼び出しと `BulkInsertAsync` は、フックを**素通り**します（発火しません）。
+**Only `SaveAsync` (both the single and the multiple form) is targeted.** Direct calls to the low-level APIs `InsertAsync` / `UpdateAsync` / `DeleteAsync`, and `BulkInsertAsync`, **bypass** the hooks (they do not fire).
 
-#### Before とスキップの意味論
+#### Before and skip semantics
 
-`false` は**そのエンティティの操作 1 件のみ**をスキップします（他の行は続行）。スキップされた行は After が呼ばれず、`RowState` も据え置かれます（`AcceptChanges` の対象外）。
+`false` skips **only that entity's single operation** (other rows proceed). A skipped row does not get an After call, and its `RowState` is left unchanged (it is excluded from `AcceptChanges`).
 
-スキップは単独であるため、整合性はフック実装者の責任です。とくに**削除は子から順に実行される**ため、**サブツリー削除で「root（親）だけ `false`」にすると、子は削除され root だけが残ります**。親を止めたいなら子のフックも `false` を返す必要があります。整合しないスキップ（例: 新規の親をスキップしつつ新規の子を保存）は FK 制約違反 → 例外 → **全体ロールバック**で安全側に倒れます。
+Because a skip is isolated, consistency is the hook author's responsibility. In particular, **deletes run children-first**, so **if you return `false` for only the root (parent) in a subtree delete, the children are deleted and only the root remains**. To stop the parent, the children's hooks must also return `false`. An inconsistent skip (for example, skipping a new parent while saving a new child) falls to the safe side via an FK constraint violation → exception → **full rollback**.
 
-#### After とコンテキスト
+#### After and the context
 
-After は**操作の直後・コミット前**に、進行中のトランザクションに参加する `ISaveHookContext` を受け取ります。フック内から Repository の通常 API を呼ぶと別接続でロック競合するため、context 経由の操作を使います。After が例外を投げると Save ごとロールバックするため、「行はあるがファイル未登録」という中途半端な状態が構造的に生じません。
+After receives, **just after the operation and before commit**, an `ISaveHookContext` that joins the in-flight transaction. Calling the repository's ordinary APIs from within the hook would contend for locks on a separate connection, so use the operations exposed through `context`. Because throwing from After rolls back the whole save, the half-finished state of "the row exists but the file is not registered" is structurally impossible.
 
-context が提供する操作（生ハンドルは公開しません）:
+Operations the context provides (it does not expose raw handles):
 
-- `WriteBinaryColumnAsync(propertyName, key, stream, length?)` ／ ファイル糖衣 `WriteBinaryColumnFromFileAsync(propertyName, key, path)` — 除外列（`ExcludeUnboundedBinaryColumns` 有効時）へのストリーミング書き込み（`nameof` で列を指定）
-- `ExecuteSqlAsync(sql, parameters)` — 任意の DML（監査行・関連テーブルへの書き込みなど）
+- `WriteBinaryColumnAsync(propertyName, key, stream, length?)` / the file convenience method `WriteBinaryColumnFromFileAsync(propertyName, key, path)` — stream-write to an excluded column (when `ExcludeUnboundedBinaryColumns` is enabled) (specify the column with `nameof`).
+- `ExecuteSqlAsync(sql, parameters)` — arbitrary DML (an audit row, a write to a related table, etc.).
 
-`operation` には**実際に行われた操作**が渡ります。`insertWhenUpdateMissing: true` で更新対象が見つからず INSERT に切り替わった場合、Before は `Update` で 1 回呼ばれ、After は実操作の `Insert` で呼ばれます。
+`operation` receives **the operation that actually happened**. If `insertWhenUpdateMissing: true` and no update target is found so it switches to INSERT, Before is called once with `Update` and After is called with the actual `Insert`.
 
-#### 実装先ごとの差分
+#### Differences by implementation target
 
-| 実装先 | フック発火 | context の対応 |
+| Target | Hook firing | Context support |
 |---|---|---|
-| QuickER 版 Repository（SQL Server / SQLite） | 完全対応（After は各操作の直後） | `WriteBinaryColumnAsync` / `ExecuteSqlAsync` とも対応 |
-| EF Core（`GenerateEfCore`） | 対応（After は `SaveChanges` 後に一括） | `ExecuteSqlAsync` は対応・`WriteBinaryColumnAsync` は `NotSupportedException` |
-| インメモリ（`GenerateInMemoryRepositories`） | 対応（擬似トランザクション） | `WriteBinaryColumnAsync` はストアへ・`ExecuteSqlAsync` は `NotSupportedException`。実トランザクションがないため**After が例外を投げてもストアの変更は残ります**（ベストエフォート） |
-| リモート（`--generate-remote-services`） | **サーバー側の DI に登録したフックが発火**します | サーバー側の実体実装に準じます。**既知の制限**: Before でサーバーがスキップした行でも、クライアント側の `RowState` はスキップを反映せず `Unchanged` に確定します |
+| QuickER Repository (SQL Server / SQLite) | Full support (After fires right after each operation) | Both `WriteBinaryColumnAsync` and `ExecuteSqlAsync` are supported |
+| EF Core (`GenerateEfCore`) | Supported (After fires in a batch after `SaveChanges`) | `ExecuteSqlAsync` supported; `WriteBinaryColumnAsync` throws `NotSupportedException` |
+| In-memory (`GenerateInMemoryRepositories`) | Supported (pseudo transaction) | `WriteBinaryColumnAsync` writes to the store; `ExecuteSqlAsync` throws `NotSupportedException`. Because there is no real transaction, **store changes remain even if After throws** (best effort) |
+| Remote (`--generate-remote-services`) | **A hook registered in the server-side DI fires** | Follows the server-side real implementation. **Known limitation**: even for a row the server skipped in Before, the client-side `RowState` does not reflect the skip and is committed to `Unchanged` |
 
-### 生 SQL の逃げ道
+### Raw SQL escape hatch
 
-式木で表現できないクエリはいつでも生 SQL に落とせます（パラメータは匿名オブジェクト）。
+A query that cannot be expressed with an expression tree can always drop down to raw SQL (parameters are an anonymous object).
 
 ```csharp
-// 厳密全列マップ（Entity へ復元）
+// Strict full-column mapping (restore into the Entity)
 var rows = await customers.QueryBySqlAsync(
     "SELECT * FROM customers WHERE balance >= @min", new { min = 1000m });
 
-// 射影・単一値（エンティティ非依存の ISqlExecutor でも可）
+// Projection / single value (also available on the entity-independent ISqlExecutor)
 var names = await executor.QueryProjectionBySqlAsync<string>("SELECT name FROM customers", null);
 var total = await orders.ExecuteScalarSqlAsync<decimal>(
     "SELECT SUM(quantity * unit_price) FROM order_lines WHERE order_id = @id", new { id = 1000 });
 
-// 更新系（影響行数を返す）
+// Mutations (return the affected row count)
 var affected = await customers.ExecuteSqlAsync("UPDATE customers SET balance = 0", null);
 ```
 
-### store-generated 列（rowversion / timestamp）
+### Store-generated columns (rowversion / timestamp)
 
-DB が値を生成する列（SQL Server の `rowversion` / `timestamp` など）は、生成 Entity のプロパティにマーカー属性 `[StoreGeneratedColumn]` が付与され、QuickER 版 Repository の **INSERT / BulkInsert / UPDATE の対象から自動的に除外**されます（付与は生成オプションに依らず、DB が値を生成する列であれば常に行われます）。
+A column whose value the DB generates (SQL Server's `rowversion` / `timestamp`, etc.) gets the marker attribute `[StoreGeneratedColumn]` on its generated Entity property and is **automatically excluded from INSERT / BulkInsert / UPDATE** in the QuickER Repository (the attribute is applied regardless of generation options, always, whenever the DB generates the column's value).
 
-- **書き込みでは触れない**: これらの列には DB が値を採番するため、Repository は明示的な値を書き込みません。明示挿入を試みると SQL Server は `Cannot insert an explicit value into a timestamp column.` を返しますが、除外によりこの実行時エラーを回避します。
-- **SELECT では取得する**: `GetByIdAsync` / `GetAllAsync` / `Query()` の結果に含まれ、値を読めます（並行性トークンとして参照できます）。
-- **EF Core モード**では Fluent 構成の `IsRowVersion()` が同じく store-generated として扱うため、この機構は適用されません。
-- **rowversion を使った楽観排他（UPDATE の WHERE でのバージョン比較）はスコープ外**です（将来対応）。なお、グラフ保存（`SaveAsync`）で更新対象行が見つからない（他ユーザーに削除された等）場合は `SaveConflictException` が送出されますが、これは影響行数 0 に基づく存在チェックで、rowversion の比較とは無関係です。
+- **Never written**: the DB assigns these columns' values, so the repository writes no explicit value. Attempting an explicit insert makes SQL Server return `Cannot insert an explicit value into a timestamp column.`, but the exclusion avoids this runtime error.
+- **Read on SELECT**: they are included in the results of `GetByIdAsync` / `GetAllAsync` / `Query()`, and you can read their values (they can be referenced as a concurrency token).
+- **In EF Core mode** the Fluent configuration's `IsRowVersion()` already treats them as store-generated, so this mechanism is not applied.
+- **Optimistic concurrency using rowversion (comparing the version in the UPDATE WHERE) is out of scope** (future work). Note that when a graph save (`SaveAsync`) cannot find the update target row (e.g. another user deleted it), `SaveConflictException` is thrown, but this is an existence check based on an affected-row count of 0 and is unrelated to rowversion comparison.
 
-### 無制限バイナリ列の除外（ExcludeUnboundedBinaryColumns）
+### Excluding unbounded binary columns (ExcludeUnboundedBinaryColumns)
 
-巨大な BLOB を一覧取得・更新のたびに往復させない（メモリを保護する）ためのオプションです（既定 OFF。CLI `--exclude-unbounded-binary-columns` / GUI「無制限バイナリ列を取得しない」チェックボックス / quicker.json の `ExcludeUnboundedBinaryColumns`）。ON にすると、**サイズ上限のないバイナリ列**の Entity プロパティへマーカー属性 `[UnboundedBinaryColumn]` が付与され、QuickER 版 Repository の SELECT / UPDATE から当該列が除外されます。生成時には除外した列の一覧が Info 診断（CLI 出力・GUI の生成結果ダイアログ）で通知されます。
+This option avoids round-tripping a huge BLOB on every list fetch or update (it protects memory) (default OFF; CLI `--exclude-unbounded-binary-columns` / the "Do not fetch unbounded binary columns (varbinary(max) / BLOB)" checkbox in the GUI / `ExcludeUnboundedBinaryColumns` in quicker.json). When ON, the marker attribute `[UnboundedBinaryColumn]` is applied to the Entity property of a **binary column with no size limit**, and that column is excluded from SELECT / UPDATE in the QuickER Repository. At generation time, the list of excluded columns is reported through an Info diagnostic (CLI output / the GUI's generation-result dialog).
 
-判定は列の宣言型で行います（`rowversion` や `binary(n)` / `varbinary(n)` など長さ宣言のある型は対象外）:
+The decision is made from the column's declared type (types with a declared length, such as `rowversion`, `binary(n)`, or `varbinary(n)`, are not targeted):
 
-| 方言 | 除外対象 | 対象外（有界） |
+| Dialect | Excluded | Not excluded (bounded) |
 |---|---|---|
 | SQL Server | `varbinary(max)` / `image` | `binary(n)` / `varbinary(n)` / `rowversion` |
-| SQLite | 長さ宣言なし `BLOB` | `BLOB(n)` |
+| SQLite | `BLOB` with no declared length | `BLOB(n)` |
 | PostgreSQL | `bytea` | — |
 | MySQL | `BLOB` / `MEDIUMBLOB` / `LONGBLOB` | `TINYBLOB` / `BINARY(n)` / `VARBINARY(n)` |
 | Oracle | `BLOB` / `LONG RAW` | `RAW(n)` |
 
-挙動の要点:
+Key behaviors:
 
-- **SELECT から除外**: `GetByIdAsync` / `GetAllAsync` / `Query()` の結果で除外列は常に `null`（DB から読み出さない）
-- **UPDATE から除外**: 更新 SQL の SET 句に除外列は含まれない。除外列に値を設定したまま `UpdateAsync` / `SaveAsync` を実行すると**実行時例外**になる（黙ってデータを取りこぼさない）
-- **INSERT / BulkInsert は全列のまま**: 初回書き込みは通常どおり値を渡せる
-- **名前付きクエリの射影**が除外列を参照する場合は取得される（射影は明示的な列選択のため）
-- **生 SQL** で明示的に SELECT すれば取得できる（下記の運用例）
-- **EF Core モード（`DbSet` 経由のクエリ / `SaveChanges`）には適用されない**（EF Core の列選択は EF Core の責務）
-- インメモリ Repository（`GenerateInMemoryRepositories`）は実 DB とパリティ（同じ除外挙動）
+- **Excluded from SELECT**: in the results of `GetByIdAsync` / `GetAllAsync` / `Query()`, an excluded column is always `null` (not read from the DB).
+- **Excluded from UPDATE**: an excluded column is not in the SET clause of the update SQL. Running `UpdateAsync` / `SaveAsync` while an excluded column still holds a value throws a **runtime exception** (it does not silently drop data).
+- **INSERT / BulkInsert keep all columns**: the first write can pass values as usual.
+- **A named-query projection** that references an excluded column does fetch it (a projection is an explicit column selection).
+- It can be fetched by explicitly SELECTing it in **raw SQL** (see the operational example below).
+- **Not applied in EF Core mode** (queries via `DbSet` / `SaveChanges`) (column selection in EF Core is EF Core's responsibility).
+- The in-memory repository (`GenerateInMemoryRepositories`) has parity with a real DB (the same exclusion behavior).
 
-除外列の読み書きは生 SQL で行います:
+Read and write an excluded column with raw SQL:
 
 ```csharp
-// 除外列（画像など）を明示的に読む
+// Read the excluded column (an image, etc.) explicitly
 var payload = await documents.QueryProjectionBySqlAsync<byte[]>(
     "SELECT payload FROM documents WHERE document_id = @id", new { id = 1 });
 
-// 除外列を更新する（UPDATE の SET 句には自動で含まれないため生 SQL で書く）
+// Update the excluded column (it is not included in the UPDATE SET clause automatically, so write it with raw SQL)
 await documents.ExecuteSqlAsync(
     "UPDATE documents SET payload = @payload WHERE document_id = @id",
     new { payload = bytes, id = 1 });
 ```
 
-#### 読み取りオプトイン `WithUnboundedBinary()`
+#### Read opt-in: `WithUnboundedBinary()`
 
-除外を有効にした図でも、**この呼び出しに限り**除外列を含めてエンティティを取得したい場合は、`Query()` チェーンに `WithUnboundedBinary()` を挟みます（除外列が無ければ何もしない no-op のため、API は常に存在します）。生 SQL の射影を書かずに、通常のエンティティ（`RowState = Unchanged`・除外列も実データでマップ済み）を取得できます。
+Even for a diagram where exclusion is enabled, when you want to fetch the entity including the excluded column **for this call only**, splice `WithUnboundedBinary()` into the `Query()` chain (the API always exists because it is a no-op when there are no excluded columns). It lets you fetch an ordinary entity (`RowState = Unchanged`, with the excluded column mapped to its real data) without writing a raw-SQL projection.
 
 ```csharp
-// GetById 相当を、除外列（payload / thumb）込みで取得する
+// Fetch the GetById equivalent, including the excluded columns (payload / thumb)
 var doc = await documents
     .Query()
     .Where(d => d.DocumentId == 1)
@@ -301,94 +303,94 @@ var doc = await documents
     .FirstOrDefaultAsync();
 ```
 
-制約と挙動:
+Constraints and behavior:
 
-- **`Include` とは併用できません**（終端メソッド実行時に `InvalidOperationException`）。無制限バイナリ列が必要な場合は `Include` なしの別クエリで取得してください。これは SQL Server の `Include` 経路が FOR JSON＝Base64 経由で巨大 BLOB のメモリ膨張（ピーク 5〜6 倍）を招くためで、「巨大 BLOB を扱う」目的に常に正しいメモリ特性を保証します（SQL Server では FOR JSON を使わず**プレーン SELECT** で取得します）。
-- 効果があるのは `ToListAsync` / `FirstOrDefaultAsync` のみです（件数・存在確認・射影 `ToProjectionListAsync` には影響しません）。
-- 取得したエンティティは正当なエンティティですが、除外列が UPDATE 対象外である点は変わりません。そのまま `UpdateAsync` すると既存ガードで例外になります（除外列の更新は上記の生 SQL `ExecuteSqlAsync` で行ってください）。
-- EF Core モードでは EF Core が元々全列を読むため no-op です（`Include` 併用エラーだけはパリティで同様に送出します）。
+- **Cannot be combined with `Include`** (`InvalidOperationException` when the terminal method runs). If you need the unbounded binary column, fetch it with a separate query that has no `Include`. This is because SQL Server's `Include` path goes through FOR JSON = Base64, which inflates memory for a huge BLOB (5–6× peak), so it always guarantees the correct memory profile for the "handle a huge BLOB" purpose (on SQL Server it fetches with a **plain SELECT** rather than FOR JSON).
+- The effect applies only to `ToListAsync` / `FirstOrDefaultAsync` (it does not affect count, existence check, or the projection `ToProjectionListAsync`).
+- The fetched entity is a legitimate entity, but the fact that the excluded column is out of scope for UPDATE does not change. Calling `UpdateAsync` on it as-is throws from the existing guard (update an excluded column with the raw SQL `ExecuteSqlAsync` above).
+- In EF Core mode it is a no-op because EF Core reads all columns to begin with (only the `Include`-combination error is thrown identically for parity).
 
-#### Stream アクセサ `Read/Write{Column}Async`
+#### Stream accessors: `Read/Write{Column}Async`
 
-除外オプションを有効（かつ QuickER 版 Repository を生成）にすると、除外列ごとに **ストリーミング**の読み書きメソッドが追加生成されます（挿入先はリモート契約の有無で変わります。後述）。`byte[]` の一括読み込みを避け、**O(チャンク)＝blob 全量をメモリに載せずに** DB⇔ストリーム（またはファイル）を転送できます。GB 級のバイナリを扱う唯一正しいメモリ特性を持つ手段です。
+When you enable the exclusion option (and generate the QuickER Repository), **streaming** read/write methods are additionally generated per excluded column (where they are placed depends on whether remote contracts exist; see below). They transfer between the DB and a stream (or file) **in O(chunks)—without loading the entire blob into memory**, avoiding a bulk `byte[]` read. This is the only means with a correct memory profile for handling GB-scale binaries.
 
 ```csharp
-// documents.payload（除外列）に対して生成される例
+// Example generated for documents.payload (an excluded column)
 Task<bool> ReadPayloadAsync(int id, Stream destination, CancellationToken ct = default);
 Task<bool> WritePayloadAsync(int id, Stream? source, long? length = null, CancellationToken ct = default);
-// ファイル糖衣（拡張メソッド・Stream 版へ委譲）
+// File convenience methods (extension methods; delegate to the Stream version)
 Task<bool> ReadPayloadToFileAsync(int id, string path, CancellationToken ct = default);
 Task<bool> WritePayloadFromFileAsync(int id, string path, CancellationToken ct = default);
 ```
 
-意味論:
+Semantics:
 
-- **戻り値**: `Read` は宛先へ書いたら `true`（空 blob も `true`）、行なし・列 NULL は `false`（宛先へ何も書きません）。`Write` は更新できたら `true`、行なしは `false`。既存の `UpdateAsync` の bool 規約に揃えています。
-- **`Write(id, null)`** は列を `NULL` に設定します（除外列を「未設定」へ戻す手段）。
-- **長さ**: `source` が `CanSeek` なら自動（`Length - Position`）、そうでなければ `length` 引数が必須です（欠落は `ArgumentException`）。SQLite の `zeroblob` が書き込み前に長さを要求するためで、契約は方言中立に統一しています。
-- **楽観排他（rowversion 等）はスコープ外**です（生 SQL と同格の直接列操作）。
-- **INSERT 専用メソッドはありません**。新規行は「INSERT（blob は `null` または空）→ `Write{Column}Async` で本体を流し込む」の 2 段で書きます。
-- **EF Core モードでは使用できません**（`NotSupportedException`）。EF Core は方言非依存設計のため方言固有のストリーミングを持てません。QuickER 版 Repository を使うか、`partial` クラスで実装してください（`GenerateEfCore` と QuickER 版 Repository を併用する構成では、EF Core 版実装のみ例外になります）。
-- **挿入先**: リモート契約（`--generate-remote-contracts` / `--generate-remote-services`）が無効なら全機能面 `I{Entity}Repository` に直接載ります。有効な場合はリモート面 `I{Entity}RemoteRepository` へ移設されます（全機能面はリモート面を継承するので、どちらの構成でも利用コードは同じ・純粋に追加的）。ファイル糖衣もその対象インターフェイスに合わせます。リモートサービス（`--generate-remote-services`）を有効にすると HTTP で転送できます（後述の「バイナリ転送エンドポイント」）。
+- **Return value**: `Read` returns `true` once it has written to the destination (an empty blob is also `true`); no row or a NULL column returns `false` (nothing is written to the destination). `Write` returns `true` if it could update, `false` if there is no row. This matches the bool convention of the existing `UpdateAsync`.
+- **`Write(id, null)`** sets the column to `NULL` (a way to reset an excluded column to "unset").
+- **Length**: automatic when `source` is `CanSeek` (`Length - Position`); otherwise the `length` argument is required (an omission throws `ArgumentException`). This is because SQLite's `zeroblob` requires the length before writing, and the contract is unified to be dialect-neutral.
+- **Optimistic concurrency (rowversion, etc.) is out of scope** (direct column manipulation on par with raw SQL).
+- **There is no INSERT-only method.** Write a new row in two steps: "INSERT (blob is `null` or empty) → stream in the body with `Write{Column}Async`".
+- **Cannot be used in EF Core mode** (`NotSupportedException`). Because EF Core is dialect-independent by design, it cannot have dialect-specific streaming. Use the QuickER Repository, or implement it in a `partial` class (in a configuration that combines `GenerateEfCore` with the QuickER Repository, only the EF Core implementation throws).
+- **Placement**: if remote contracts (`--generate-remote-contracts` / `--generate-remote-services`) are disabled, they sit directly on the full-featured repository interface `I{Entity}Repository`. If enabled, they move to the remote surface `I{Entity}RemoteRepository` (the full-featured interface inherits the remote surface, so calling code is the same in either configuration—purely additive). The file convenience methods follow the same target interface. Enabling remote services (`--generate-remote-services`) lets them transfer over HTTP (see "Binary transfer endpoints" below).
 
-`WithUnboundedBinary()` との使い分け:
+Choosing between it and `WithUnboundedBinary()`:
 
-| | `WithUnboundedBinary()` | Stream アクセサ |
+| | `WithUnboundedBinary()` | Stream accessor |
 |---|---|---|
-| 単位 | エンティティ形（複数列・複数行・Include なし） | 列 1 本の読み書き |
-| メモリ | 中規模（`byte[]` で一括） | 無制限（O(チャンク)） |
-| 用途 | 除外列込みのエンティティが一時的に欲しい | 巨大 blob を DB⇔ファイル/ストリームで転送 |
-| 書き込み | 不可（取得のみ・更新は生 SQL） | `Write{Column}Async` で列単位に書ける |
+| Unit | Entity shape (multiple columns, multiple rows, no Include) | Read/write of a single column |
+| Memory | Moderate (bulk `byte[]`) | Unbounded (O(chunks)) |
+| Use case | You temporarily want an entity including the excluded columns | Transfer a huge blob between the DB and a file/stream |
+| Write | Not possible (fetch only; update with raw SQL) | Can write per column with `Write{Column}Async` |
 
-## EF Core モード（GenerateEfCore）
+## EF Core mode (GenerateEfCore)
 
-既存 Entity をそのまま EF Core に載せる方言非依存の `QuickErDbContext` と、**同一 Repository インターフェイスの EF Core 版実装**を生成します。マイグレーションは範囲外で、スキーマ作成は DDL 生成の責務です（EF Core は既存スキーマへの接続専用）。
+Generates a dialect-independent `QuickErDbContext` that puts the existing Entity onto EF Core as-is, plus an **EF Core implementation of the same repository interfaces**. Migrations are out of scope, and schema creation remains the responsibility of DDL generation (EF Core connects only to an existing schema).
 
 ```csharp
-// DI 登録 1 行の差し替えで QuickER 版 Repository と交換できる
+// Swappable with the QuickER Repository by changing one DI-registration line
 services.AddGeneratedEfCoreRepositories(options => options.UseSqlServer(connectionString));
-// SQLite / PostgreSQL / MySQL / Oracle は対応する EF Core プロバイダの Use* を指定する
+// For SQLite / PostgreSQL / MySQL / Oracle, specify the corresponding EF Core provider's Use*
 ```
 
-- 保存は `TrackGraph` による切断グラフ保存（`RowState` を EF Core の状態へ変換）
-- 楽観排他の競合は EF Core の例外を `SaveConflictException` へ変換（契約を統一）
-- 生 SQL 系 API も完全パリティ
+- Save uses a disconnected-graph save via `TrackGraph` (converts `RowState` to EF Core's state).
+- An optimistic-concurrency conflict converts EF Core's exception to `SaveConflictException` (unifying the contract).
+- The raw-SQL APIs are at full parity.
 
-**QuickER 版 Repository との併用生成**（両方 ON）はパリティ検証用で、CLI / 設定ファイルでのみ指定できます。GUI は排他選択です。また EF Core とマルチターゲット Repository（下記）は併用できません（診断エラー）。
+**Combined generation with the QuickER Repository** (both ON) is for parity verification and can only be specified via the CLI / config file; the GUI is an exclusive choice. Also, EF Core and multi-target repositories (below) cannot be combined (a diagnostic error).
 
-## マルチターゲット Repository（sqlserver + sqlite）
+## Multi-target repositories (sqlserver + sqlite)
 
-`--repository-dialects sqlserver,sqlite` を指定すると、中立契約を 1 回・方言別実装を `.SqlServer` / `.Sqlite` サブ名前空間へ出力し、keyed DI で同一プロセスから複数 DB へ書き分けられます。
+Specifying `--repository-dialects sqlserver,sqlite` outputs the neutral contracts once and the per-dialect implementations into the `.SqlServer` / `.Sqlite` sub-namespaces, letting you write to multiple DBs from the same process with keyed DI.
 
 ```csharp
 services.AddGeneratedSqlServerRepositories(serviceKey: "primary", sqlServerConn);
 services.AddGeneratedSqliteRepositories(serviceKey: "local", sqliteConn);
 
-// 解決側は同一の契約型を keyed で選ぶ
+// The resolving side picks the same contract type by key
 var primary = provider.GetRequiredKeyedService<ICustomerRepository>("primary");
 var local   = provider.GetRequiredKeyedService<ICustomerRepository>("local");
 ```
 
-## リモート対応インターフェイス（--generate-remote-contracts）
+## Remote-capable interfaces (--generate-remote-contracts)
 
-`I{Entity}Repository` は CRUD・保存・名前付きクエリに加え、`Query()`（式木クエリ）・生 SQL・一括追加まで全メソッドを持つ全機能面です。`--generate-remote-contracts`（quicker.json の `GenerateRemoteContracts`、GUI の「リモート対応」チェックボックス）を指定すると、リモート操作用のインターフェイスを**追加生成**します。
+`I{Entity}Repository` is a full-featured interface that, in addition to CRUD, save, and named queries, has every method including `Query()` (expression-tree query), raw SQL, and bulk insert. Specifying `--generate-remote-contracts` (`GenerateRemoteContracts` in quicker.json, the "Remote" checkbox in the GUI) **additionally generates** an interface for remote operations.
 
-| 面 | インターフェイス | 含まれる操作 |
+| Surface | Interface | Operations included |
 |---|---|---|
-| リモート面（追加生成） | `I{Entity}RemoteRepository` | CRUD（GetById / GetAll / Insert / Update / Delete）・グラフ保存（Save）・名前付きクエリ |
-| 全機能面（従来どおり） | `I{Entity}Repository`（リモート面を継承） | 上記＋ `Query()`（式木）・生 SQL 3 種・一括追加 |
+| Remote surface (additionally generated) | `I{Entity}RemoteRepository` | CRUD (GetById / GetAll / Insert / Update / Delete), graph save (Save), named queries |
+| Full-featured surface (as before) | `I{Entity}Repository` (inherits the remote surface) | The above plus `Query()` (expression tree), the three raw-SQL variants, bulk insert |
 
-リモート面の全メソッドは引数・戻り値が純粋なデータ（エンティティ・主キー・件数）だけで構成され、原理的にネットワーク境界を越えられます。アプリ本体をリモート面だけに依存させておけば、将来 Repository の実体を Web サービス経由のリモート実装へ差し替えるときもコンパイル時に安全が保証されます。式木や生 SQL が必要な処理は従来どおり `I{Entity}Repository` を使えばよく、「ここは DB 直結が必要」なことが型で読み取れます。
+Every method of the remote surface has arguments and return values composed purely of data (entities, primary keys, counts), so it can in principle cross a network boundary. If you keep the application body dependent only on the remote surface, safety is guaranteed at compile time even when you later swap the repository's implementation for a web-service-backed remote one. Processing that needs an expression tree or raw SQL just uses `I{Entity}Repository` as before, so "this part needs a direct DB connection" is readable from the type.
 
 ```csharp
-// アプリ本体はリモート面だけに依存する（将来リモート実装へ差し替え可能な部分）
+// The application body depends only on the remote surface (the part that can later be swapped for a remote implementation)
 public sealed class OrderService(IOrderRemoteRepository orders)
 {
     public Task<IReadOnlyList<OrderEntity>> GetByCustomerAsync(int customerId, CancellationToken ct) =>
-        orders.GetByCustomerAsync(customerId, ct);   // 名前付きクエリはリモート面に載る
+        orders.GetByCustomerAsync(customerId, ct);   // A named query is on the remote surface
 }
 
-// 生 SQL・式木クエリが要る処理は従来どおり全機能面を要求する（DB 直結前提であることが型で明示される）
+// Processing that needs raw SQL or an expression-tree query requests the full-featured surface as before (the type makes the direct-DB requirement explicit)
 public sealed class OrderMaintenance(IOrderRepository orders)
 {
     public Task<int> ArchiveAsync(CancellationToken ct) =>
@@ -396,93 +398,93 @@ public sealed class OrderMaintenance(IOrderRepository orders)
 }
 ```
 
-このオプションは純粋に追加的です。ON にしても `I{Entity}Repository`・実装クラス・DI の実装登録は従来のまま変わらず、リモート面が同一インスタンスへの転送として DI に追加登録されるだけなので、既存コードを壊さずいつでも有効化できます（`AddGenerated*Repositories` でどちらの面も解決できます）。
+This option is purely additive. Turning it ON leaves `I{Entity}Repository`, the implementation classes, and the DI implementation registrations unchanged; the remote surface is merely added to DI as a forward to the same instance, so you can enable it at any time without breaking existing code (`AddGenerated*Repositories` resolves either surface).
 
-## リモートサービス（--generate-remote-services）— 3 階層構成
+## Remote services (--generate-remote-services) — three-tier layout
 
-`--generate-remote-services`（quicker.json の `GenerateRemoteServices`、GUI の「リモート対応」2 つ目のチェックボックス）を指定すると、リモート面を **HTTP + JSON** でネットワーク越しに提供するクライアント／サーバー実装を生成します（リモート面 `--generate-remote-contracts` は自動的に有効になります）。
+Specifying `--generate-remote-services` (`GenerateRemoteServices` in quicker.json, the second "Remote" checkbox in the GUI) generates a client and server implementation that provides the remote surface over the network using **HTTP + JSON** (the remote surface `--generate-remote-contracts` is enabled automatically).
 
-| 生成物 | 置き場所 | 内容 |
+| Output | Location | Contents |
 |---|---|---|
-| HTTP クライアント実装 | 本体生成物へ同梱（依存は BCL の `HttpClient` のみ） | `Http{Entity}RemoteRepository`（`I{Entity}RemoteRepository` 実装）＋ `AddGeneratedHttpRemoteRepositories` |
-| サーバー実装 | `{ベース名}.RemoteServer.g.cs`（別ファイル） | `MapGeneratedRemoteEndpoints`（Minimal API。`POST {prefix}/{エンティティ}/{操作}`・prefix 既定 `/quicker`） |
+| HTTP client implementation | Bundled into the main output (the only dependency is the BCL `HttpClient`) | `Http{Entity}RemoteRepository` (implements `I{Entity}RemoteRepository`) plus `AddGeneratedHttpRemoteRepositories` |
+| Server implementation | `{baseName}.RemoteServer.g.cs` (a separate file) | `MapGeneratedRemoteEndpoints` (Minimal API; `POST {prefix}/{entity}/{operation}`; prefix default `/quicker`) |
 
-推奨のプロジェクト構成は「**共有クラスライブラリ**（本体生成物＝エンティティ・契約・クライアント実装）を**サーバー**（ASP.NET Core）と**クライアントアプリ**（WPF 等）の両方が参照し、サーバーファイルだけをサーバープロジェクトへ置く」形です。
+The recommended project layout is: a **shared class library** (the main output—entities, contracts, client implementation) referenced by both the **server** (ASP.NET Core) and the **client app** (WPF, etc.), placing only the server file in the server project.
 
 ```csharp
-// ---- サーバー（ASP.NET Core・Microsoft.NET.Sdk.Web）----
+// ---- Server (ASP.NET Core, Microsoft.NET.Sdk.Web) ----
 var builder = WebApplication.CreateBuilder(args);
-builder.Services.AddGeneratedSqliteRepositories(connectionString);   // 実体は QuickER 版 Repository でも EF Core でもよい
+builder.Services.AddGeneratedSqliteRepositories(connectionString);   // The real implementation can be the QuickER Repository or EF Core
 
 var app = builder.Build();
-app.MapGeneratedRemoteEndpoints();          // 認可を付けるなら .RequireAuthorization() を続ける
+app.MapGeneratedRemoteEndpoints();          // To add authorization, chain .RequireAuthorization()
 app.Run();
 
-// ---- クライアントアプリ（DI 登録 1 行で直結⇔リモートを切り替え）----
-// 直結:    services.AddGeneratedSqliteRepositories(connectionString);
-// リモート: services.AddGeneratedHttpRemoteRepositories("https://server:5001/quicker");
-// アプリ本体はどちらでも IOrderRemoteRepository を注入して使う（コード変更なし）
+// ---- Client app (switch direct ⇔ remote with one DI-registration line) ----
+// Direct: services.AddGeneratedSqliteRepositories(connectionString);
+// Remote: services.AddGeneratedHttpRemoteRepositories("https://server:5001/quicker");
+// The application body injects and uses IOrderRemoteRepository either way (no code change)
 ```
 
-押さえておくポイント:
+Points to keep in mind:
 
-- **直列化**はエンティティの JSON 往復（`ToJson` / `Clone`）と同じ意味論（VO は内包値・RowState 込み・親参照ナビは循環しない）で、クライアント・サーバーが共有の `RemoteJson.Options` を使います
-- **名前付きクエリは実装方式（簡易 DSL／生 SQL／手動実装）に依らず全部**リモート面経由で呼び出せます（実装の実体はサーバー側のリポジトリ）
-- **例外は型が復元されます**: サーバーの `SaveConflictException` は HTTP 409 を介してクライアントでも `SaveConflictException` として送出され（直結時と同じ catch が機能）、その他のサーバー例外は `RemoteRepositoryException`（ステータスコード・メッセージ保持）になります
-- **グラフ保存（Save）成功後はローカルの RowState も確定**します（直結時と同じ挙動）
-- 認証・TLS はスコープ外です。クライアントは `AddGeneratedHttpRemoteRepositories(Func<IServiceProvider, HttpClient>)` で認証ハンドラ付きの HttpClient を構成し、サーバーは `MapGeneratedRemoteEndpoints()` の戻り値（`RouteGroupBuilder`）へ ASP.NET Core の認可を付与してください
-- サーバーファイルは ASP.NET Core の FrameworkReference（`Microsoft.AspNetCore.App`）が必要です（SDK が `Microsoft.NET.Sdk.Web` のプロジェクトなら追加設定不要）
+- **Serialization** uses the same semantics as the entity's JSON round trip (`ToJson` / `Clone`) (VO as the wrapped value, RowState included, parent-reference navigation does not cycle), and the client and server share `RemoteJson.Options`.
+- **Named queries can all be called through the remote surface regardless of implementation method** (simple DSL / raw SQL / manual implementation) (the real implementation lives in the server-side repository).
+- **Exception types are restored**: the server's `SaveConflictException` is thrown on the client as `SaveConflictException` too via HTTP 409 (the same catch as in the direct case works), and other server exceptions become `RemoteRepositoryException` (preserving the status code and message).
+- **After a successful graph save (Save), the local RowState is also committed** (the same behavior as the direct case).
+- Authentication and TLS are out of scope. Configure the client with an authentication-handler-equipped HttpClient via `AddGeneratedHttpRemoteRepositories(Func<IServiceProvider, HttpClient>)`, and add ASP.NET Core authorization to the return value (`RouteGroupBuilder`) of `MapGeneratedRemoteEndpoints()`.
+- The server file requires the ASP.NET Core FrameworkReference (`Microsoft.AspNetCore.App`) (no extra setup is needed if the project's SDK is `Microsoft.NET.Sdk.Web`).
 
-### バイナリ転送エンドポイント（無制限バイナリ列の Stream アクセサ）
+### Binary transfer endpoints (Stream accessors for unbounded binary columns)
 
-無制限バイナリ除外（`--exclude-unbounded-binary-columns`）と併用すると、除外列の Stream アクセサ（`Read/Write{Column}Async`）が **HTTP でストリーミング転送**されます。JSON エンベロープ（`POST` + Base64）では巨大 blob のメモリ膨張を避けられないため、これらは意図的に **REST 風の第 2 形式**（動詞分離・生ボディ・`application/octet-stream`）を使います。除外列ごとに次の 3 エンドポイントが生成されます（`{列名}` は C# プロパティ名）:
+When combined with unbounded-binary exclusion (`--exclude-unbounded-binary-columns`), the excluded column's Stream accessors (`Read/Write{Column}Async`) are **streamed over HTTP**. Because a JSON envelope (`POST` + Base64) cannot avoid the memory inflation of a huge blob, these intentionally use a **second, REST-style form** (verb separation, raw body, `application/octet-stream`). The following three endpoints are generated per excluded column (`{column}` is the C# property name):
 
-| 動詞・URL | 意味 | 応答 |
+| Verb / URL | Meaning | Response |
 |---|---|---|
-| `GET {prefix}/{エンティティ}/{列名}?id=` | ダウンロード（本文を宛先へストリーム） | 200＋`application/octet-stream`（空 blob も 200）／行なし・NULL は **404**（クライアントで `false`） |
-| `PUT {prefix}/{エンティティ}/{列名}?id=` | アップロード（生ボディ・`Content-Length` 必須） | 成功 **204**／行なし **404**（`false`）／`Content-Length` 欠落（chunked）は **411** |
-| `DELETE {prefix}/{エンティティ}/{列名}?id=` | 列を `NULL` へ（`Write(id, null)` 相当） | 成功 204／行なし 404 |
+| `GET {prefix}/{entity}/{column}?id=` | Download (stream the body to the destination) | 200 + `application/octet-stream` (an empty blob is also 200) / no row or NULL is **404** (`false` on the client) |
+| `PUT {prefix}/{entity}/{column}?id=` | Upload (raw body, `Content-Length` required) | Success **204** / no row **404** (`false`) / missing `Content-Length` (chunked) is **411** |
+| `DELETE {prefix}/{entity}/{column}?id=` | Set the column to `NULL` (equivalent to `Write(id, null)`) | Success 204 / no row 404 |
 
-- **キーは URL クエリ `?id=`** で運びます（本文は blob 本体に使うため）。VO キーは JSON エンベロープと同一規則（内包値）で直列化されます。
-- **0 バイトの PUT（空ボディ）と `NULL` 化（DELETE）は構造的に区別**されます（前者は `Read` が `true`＋空・後者は `false`）。
-- **バイナリ PUT だけリクエストサイズ制限が既定で解除**されます（`IRequestSizeLimitMetadata` メタデータ付与。JSON エンドポイントは既定 30MB のまま）。GB 級を追加設定なしで扱うためですが、**解除は DoS 面の懸念があるため認可（`MapGeneratedRemoteEndpoints().RequireAuthorization()`）との併用を強く推奨**します。上限へ戻す・別値にする場合は戻り値の `RouteGroupBuilder` でグループ全体を上書きしてください。
-- クライアント（`Http{Entity}RemoteRepository`）は `GET` を `ResponseHeadersRead` で受けて宛先へ O(チャンク) でコピーし、`PUT` は `StreamContent`（`Content-Length` 付き）で送ります。非シーク Stream で `length` を渡さない場合は**送信前**に `ArgumentException` になります（既存の長さ契約と同一）。
-- **`WithUnboundedBinary()` / `Query()` / 生 SQL のリモート化はスコープ外**です（従来どおり）。
+- **The key is carried in the URL query `?id=`** (the body is used for the blob itself). A VO key is serialized by the same rule as the JSON envelope (the wrapped value).
+- **A 0-byte PUT (empty body) and setting to `NULL` (DELETE) are structurally distinguished** (the former makes `Read` return `true` + empty; the latter `false`).
+- **Only binary PUT has its request-size limit lifted by default** (the `IRequestSizeLimitMetadata` metadata is applied; JSON endpoints stay at the default 30 MB). This is to handle GB-scale data with no extra setup, but **because lifting it raises DoS concerns, combining it with authorization (`MapGeneratedRemoteEndpoints().RequireAuthorization()`) is strongly recommended**. To restore the limit or set a different value, override the whole group via the returned `RouteGroupBuilder`.
+- The client (`Http{Entity}RemoteRepository`) receives `GET` with `ResponseHeadersRead` and copies to the destination in O(chunks), and sends `PUT` with `StreamContent` (with `Content-Length`). If you do not pass `length` for a non-seekable Stream, it throws `ArgumentException` **before sending** (the same length contract as existing).
+- **Making `WithUnboundedBinary()` / `Query()` / raw SQL remote is out of scope** (as before).
 
-動く実例はリポジトリの [samples/ec-order-remote](../samples/ec-order-remote/README.ja.md) にあります（この推奨構成そのままの 3 プロジェクト＋実 2 プロセスで動かすサンプル。名前付きクエリのリモート転送・`SaveConflictException` の型復元も実演）。
+A working example is in the repository at [samples/ec-order-remote](../samples/ec-order-remote/README.md) (a sample that runs exactly this recommended layout as three projects across two real processes; it also demonstrates remote transfer of named queries and type restoration of `SaveConflictException`).
 
-## テスト用インメモリ Repository（GenerateInMemoryRepositories）
+## In-memory repositories for tests (GenerateInMemoryRepositories)
 
-DB なしでユニットテストするためのインメモリ実装を追加生成できます。同一契約を実装し、サポート外の操作は実 DB の Repository へ切り替える案内付きの `NotSupportedException` を送出します。
+You can additionally generate an in-memory implementation for unit testing without a DB. It implements the same contract, and unsupported operations throw `NotSupportedException` with guidance to switch to the real-DB repository.
 
-## ランタイムパッケージ参照モード（--use-runtime-packages）
+## Runtime package reference mode (--use-runtime-packages)
 
-既定では、生成コードはランタイム（スキーマ非依存の固定コード）込みのインライン出力で自己完結します。`--use-runtime-packages` を指定すると固定コードを出力せず、次の NuGet パッケージへの参照で賄います（生成ヘッダと CLI 出力に必要な PackageReference が案内されます。csproj には手動で追加してください）:
+By default, the generated code is self-contained inline output that includes the runtime (the schema-independent fixed code). Specifying `--use-runtime-packages` omits the fixed code and relies instead on references to the following NuGet packages (the required PackageReference is described in the generation header and the CLI output; add it to the csproj by hand):
 
-| パッケージ | 内容 | 依存 |
+| Package | Contents | Dependencies |
 |---|---|---|
-| `QuickER.Runtime` | 共通基盤・方言中立の契約 | なし |
-| `QuickER.Runtime.SqlServer` | QuickER の SQL Server 方言エンジン | Microsoft.Data.SqlClient |
-| `QuickER.Runtime.Sqlite` | QuickER の SQLite 方言エンジン | Microsoft.Data.Sqlite |
-| `QuickER.Runtime.EntityFrameworkCore` | EF Core 共通部品 | Microsoft.EntityFrameworkCore.Relational |
+| `QuickER.Runtime` | Shared foundation and dialect-neutral contracts | None |
+| `QuickER.Runtime.SqlServer` | QuickER's SQL Server dialect engine | Microsoft.Data.SqlClient |
+| `QuickER.Runtime.Sqlite` | QuickER's SQLite dialect engine | Microsoft.Data.Sqlite |
+| `QuickER.Runtime.EntityFrameworkCore` | EF Core shared parts | Microsoft.EntityFrameworkCore.Relational |
 
-パッケージ版とツール版はロックステップ（同一バージョン）で公開され、同一メジャー内で互換です。DI 登録拡張・`QuickErDbContext`・エンティティ別実装などのスキーマ依存物は、本モードでも常に生成側に出力されます。
+The package version and the tool version are published in lockstep (the same version) and are compatible within the same major. Schema-dependent items such as the DI-registration extensions, `QuickErDbContext`, and per-entity implementations are always emitted on the generation side even in this mode.
 
-## API リファレンス（.g.md）
+## API reference (.g.md)
 
-生成コードと同名ベースの API リファレンス Markdown を追加出力できます。GUI の生成ダイアログの「API リファレンス (.g.md) を出力する」チェック、または CLI の `--generate-api-docs` フラグで有効化します（**既定 OFF**）。DB アクセスの選択（なし / QuickER 版 Repository / EF Core）とは独立して、常に選択できます。
+You can additionally output an API-reference Markdown that shares the base name of the generated code. Enable it with the "Output an API reference (.g.md)" checkbox in the GUI's generation dialog, or the CLI's `--generate-api-docs` flag (**default OFF**). It can always be chosen independently of the DB-access selection (None / QuickER Repository / EF Core).
 
-有効化すると、`.g.cs` と同じベース名の `.g.md` が 1 つ出力されます（例: `EcOrder.g.cs` → `EcOrder.g.md`）。カテゴリ別分割モードでは `Entities.g.cs` 等の固定名と同じ流儀の固定名 `ApiDocs.g.md`（日本語版は `ApiDocs.ja.g.md`）になります。内容は次のとおりです。
+When enabled, one `.g.md` with the same base name as the `.g.cs` is output (e.g. `EcOrder.g.cs` → `EcOrder.g.md`). In per-category split mode it becomes the fixed name `ApiDocs.g.md` (the Japanese version is `ApiDocs.ja.g.md`), in the same style as the fixed names such as `Entities.g.cs`. The contents are as follows.
 
-- エンティティ一覧と、各エンティティのプロパティ表（DB 型トークン込み。`string(50)` / `decimal(10,2)` など）
-- Repository 契約（`IRepository<TEntity, TKey>` と各エンティティのインターフェイス）
-- DI 登録・CRUD・クエリの使い方例
-- 生成ファイル構成表
+- A list of entities and, for each entity, a property table (including the DB type token, such as `string(50)` / `decimal(10,2)`).
+- The repository contracts (`IRepository<TEntity, TKey>` and the per-entity interfaces).
+- Usage examples of DI registration, CRUD, and queries.
+- A generated-file layout table.
 
-**英語が正本です。** 日本語版も併産したい場合は、GUI の下位チェック「日本語版 API リファレンス (.ja.g.md) も出力する」、または CLI の `--api-docs-ja` フラグ（設定キー `IncludeJapaneseApiDocs`）を有効化します（**既定 OFF**・`--generate-api-docs` が前提）。有効化すると、英語正本の `.g.md` に加えて `.ja.g.md` が併産されます（例: `EcOrder.g.cs` → `EcOrder.ja.g.md`）。
+**English is the canonical version.** If you also want a Japanese version, enable the GUI's sub-checkbox "Also output a Japanese API reference (.ja.g.md)", or the CLI's `--api-docs-ja` flag (config key `IncludeJapaneseApiDocs`) (**default OFF**; requires `--generate-api-docs`). When enabled, a `.ja.g.md` is produced alongside the canonical English `.g.md` (e.g. `EcOrder.g.cs` → `EcOrder.ja.g.md`).
 
-`.g.md` / `.ja.g.md` は自動生成ファイルです。再生成で上書きされるため、直接編集しないでください。
+`.g.md` / `.ja.g.md` are auto-generated files. They are overwritten on regeneration, so do not edit them directly.
 
-## ライセンス注記
+## License note
 
-コード生成エンジン（`QuickER.CodeGen.CSharp` / `CodeGen.UI` / `Cli`）には [PolyForm Noncommercial 1.0.0](../LICENSE-NC.md) が適用されます。**現在は商用利用を含め全員無料**です。将来の提供方針（DB アクセス生成＝Repository / EF Core / マルチターゲットについて商用利用のみ有償化の可能性・個人/非商用は永続無料・基本生成＝Entity / EditModel / Mapper は永続無料・有償化時は事前告知と移行期間）は [README の「ライセンス」節](../README.md#ライセンス)を参照してください。**生成されたコードとランタイムパッケージ（MIT）はあなたの成果物側**であり、ライセンスによる制限はありません。
+The code-generation engine (`QuickER.CodeGen.CSharp` / `CodeGen.UI` / `Cli`) is covered by [PolyForm Noncommercial 1.0.0](../LICENSE-NC.md). **It is currently free for everyone, including commercial use.** For the future provisioning policy (the possibility of charging only for commercial use of DB-access generation—Repository / EF Core / multi-target; permanently free for personal / non-commercial use; the basic generation—Entity / EditModel / Mapper—permanently free; advance notice and a transition period if it becomes paid), see [the "License" section of the README](../README.md#license). **The generated code and the runtime packages (MIT) are on your side of the deliverable**, with no license restrictions.

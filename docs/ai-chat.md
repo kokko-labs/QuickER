@@ -1,43 +1,45 @@
-# AI チャットの設定
+# Configuring AI chat
 
-ツールバーの「AI チャット」から、対話で ER 図を生成・編集できます（例:「EC サイトの注文管理に必要なテーブルを設計して」「orders に配送先住所を追加して」）。同じ接続設定で、現在の ER 図から Web モック画面（HTML)を生成する「AI モック生成」も利用できます。
+*[日本語](ai-chat.ja.md) | English*
 
-## 接続方式
+From "AI Chat" on the toolbar, you can generate and edit ER diagrams through conversation (e.g., "Design the tables needed for order management on an e-commerce site", "Add a shipping address to `orders`"). With the same connection settings you can also use "AI Mock Generation", which generates a web mockup screen (HTML) from the current ER diagram.
 
-チャット画面の接続タブで、次の 3 方式から選べます。
+## Connection methods
 
-### 1. API キー
+On the connection tab of the chat window, you can choose from the following three methods.
 
-| プロバイダー | 必要なもの |
+### 1. API key
+
+| Provider | What you need |
 |---|---|
-| OpenAI | OpenAI の API キー |
-| Claude (Anthropic) | Anthropic の API キー |
-| Ollama | ローカルの Ollama エンドポイント（API キー不要） |
+| OpenAI | An OpenAI API key |
+| Claude (Anthropic) | An Anthropic API key |
+| Ollama | A local Ollama endpoint (no API key required) |
 
-プロバイダーとモデルを選び、API キーを入力します。「API キーを保存」を有効にすると、キーは **Windows DPAPI（CurrentUser スコープ）で暗号化**されてユーザープロファイル配下に保存され、次回起動時に自動入力されます（平文では保存されません）。
+Select a provider and model, then enter the API key. When you enable the "Save" checkbox (for the API key), the key is **encrypted with Windows DPAPI (CurrentUser scope)** and stored under your user profile, and it is filled in automatically the next time you start (it is never stored in plain text).
 
 ### 2. Codex
 
-インストール済みの Codex CLI のアカウント認証を利用します（API キー不要）。`config.toml` に定義したプロバイダーも候補に表示されます。
+Uses the account authentication of an installed Codex CLI (no API key required). Providers defined in `config.toml` are also shown as candidates.
 
 ### 3. Claude Code
 
-インストール済みの Claude Code のアカウント認証を利用します（API キー不要）。モデルはエイリアス（sonnet など）から選択します。
+Uses the account authentication of an installed Claude Code (no API key required). The model is selected from an alias (such as `sonnet`).
 
-最後に使った接続タブは記憶され、次回起動時に自動選択されます。
+The connection tab you used last is remembered and selected automatically the next time you start.
 
-## できること
+## What you can do
 
-- **図の生成** — 要件を伝えるとテーブル・カラム・リレーションを作成
-- **図の編集** — 既存の図に対する追加・変更・削除（操作は Undo/Redo 履歴に乗るため、いつでも元に戻せます）
-- **添付** — ファイルを添付して、既存の設計資料などを文脈として渡せます
-- **AI モック生成** — 現在の ER 図から Web モック画面（HTML）を生成
+- **Generate a diagram** — describe your requirements and it creates tables, columns, and relationships
+- **Edit a diagram** — add to, change, or delete from an existing diagram (operations go onto the Undo/Redo history, so you can always revert)
+- **Attachments** — attach files to pass existing design materials and the like as context
+- **AI mock generation** — generate a web mockup screen (HTML) from the current ER diagram
 
-## 注意
+## Notes
 
-- API キー方式・Codex・Claude Code のいずれも、図の内容（テーブル定義など）が選択した AI プロバイダーへ送信されます。機密性の高いスキーマを扱う場合は、所属組織のポリシーに従ってください
-- AI 機能を使わない場合、API キー等の設定は一切不要です（ER 図デザイナ・コード生成は完全にオフラインで動作します）
+- With the API key method, Codex, and Claude Code alike, the diagram contents (table definitions, etc.) are sent to the AI provider you selected. When handling sensitive schemas, follow your organization's policy
+- If you do not use the AI features, no API key or other configuration is required at all (the ER diagram designer and code generation work completely offline)
 
-## ライセンス注記
+## License note
 
-AI 機能群（チャット・モック生成＝`QuickER.AI` / `AI.UI` / `AI.Chat` / `AI.Mock`）には [PolyForm Noncommercial 1.0.0](../LICENSE-NC.md) が適用されます。**現在は商用利用を含め全員無料**です。将来の提供方針（商用利用のみ有償化の可能性・個人/非商用は永続無料・有償化時は事前告知と移行期間）は [README の「ライセンス」節](../README.md#ライセンス)を参照してください。
+The AI feature set (chat and mock generation = `QuickER.AI` / `AI.UI` / `AI.Chat` / `AI.Mock`) is licensed under [PolyForm Noncommercial 1.0.0](../LICENSE-NC.md). **It is currently free for everyone, including commercial use.** For the future provisioning policy (the possibility of paid licensing for commercial use only, permanently free personal/non-commercial use, and advance notice and a transition period if paid licensing is introduced), see the ["License" section of the README](../README.md#license).

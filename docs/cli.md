@@ -1,15 +1,17 @@
-# CLI リファレンス（quicker）
+# CLI reference (quicker)
 
-QuickER の CLI は 2 つのサブコマンドを提供します。
+*[日本語](cli.ja.md) | English*
 
-| コマンド | 入力 | 出力 |
+The QuickER CLI provides two subcommands.
+
+| Command | Input | Output |
 |---|---|---|
-| `quicker generate` | ER 図 JSON（GUI の保存形式） | C# コード |
-| `quicker scaffold` | データベース接続文字列（スキーマを直接取込） | C# コード |
+| `quicker generate` | ER diagram JSON (the GUI save format) | C# code |
+| `quicker scaffold` | Database connection string (imports the schema directly) | C# code |
 
-CLI の表示言語は OS の言語設定に従います（日本語 / 英語）。
+The CLI display language follows the OS language setting (Japanese / English).
 
-NuGet 公開後は `dotnet tool install --global QuickER.Cli` でインストールできます。未公開の間はソースから実行してください:
+Once published to NuGet, you can install it with `dotnet tool install --global QuickER.Cli`. Until then, run it from source:
 
 ```powershell
 dotnet run --project src/QuickER.Cli -- generate --schema diagram.json --out ./Generated
@@ -17,42 +19,42 @@ dotnet run --project src/QuickER.Cli -- generate --schema diagram.json --out ./G
 
 ## quicker generate
 
-ER 図 JSON から C# コード（Entity / EditModel / Mapper / Repository など）を生成します。
+Generates C# code (Entity / EditModel / Mapper / Repository, and so on) from an ER diagram JSON.
 
 ```powershell
 quicker generate --schema diagram.json --out ./Generated --provider sqlserver --config quicker.json
 ```
 
-| オプション | 必須 | 説明 |
+| Option | Required | Description |
 |---|:-:|---|
-| `--schema <file>` | ✅ | 入力する ER 図 JSON ファイル（アプリの保存形式） |
-| `--out <dir>` | ✅ | 生成コードの出力先フォルダ |
-| `--provider <name>` | | 対象データベースの種類。`sqlserver`（既定）/ `postgresql` / `mysql` / `oracle` / `sqlite` |
-| `--config <file>` | | 生成オプション設定ファイル（quicker.json）。下記参照 |
+| `--schema <file>` | ✅ | The input ER diagram JSON file (the application's save format) |
+| `--out <dir>` | ✅ | The output folder for the generated code |
+| `--provider <name>` | | Target database type. `sqlserver` (default) / `postgresql` / `mysql` / `oracle` / `sqlite` |
+| `--config <file>` | | Generation option settings file (quicker.json). See below |
 
-これらに加えて、**設定ファイル（quicker.json）の全キーは同名の kebab-case フラグとして指定でき**、設定ファイルより優先されます（優先順位: **CLI フラグ ＞ 設定ファイル ＞ 既定値**）。フラグ名はキーの機械的な kebab-case 変換で、例えば `rootNamespace` → `--root-namespace`、`generateRepositories` → `--generate-repositories`、`splitFilesByCategory` → `--split-files-by-category`、`outputPath` → `--output-path` です。bool キーは**三値**で、`--flag`（値なし）＝ `true`、`--flag false` ＝ `false`、未指定＝設定ファイルの値になります。各キーの意味は下記「設定ファイル」の表を参照してください（`--repository-dialects` はカンマ区切りの方言リストで、未指定時は `--provider` の方言から単一導出します）。
+In addition to these, **every key in the settings file (quicker.json) can be specified as a same-named kebab-case flag**, and such flags take precedence over the settings file (priority: **CLI flag > settings file > default**). A flag name is the mechanical kebab-case conversion of the key; for example `rootNamespace` → `--root-namespace`, `generateRepositories` → `--generate-repositories`, `splitFilesByCategory` → `--split-files-by-category`, `outputPath` → `--output-path`. Bool keys are **three-valued**: `--flag` (no value) = `true`, `--flag false` = `false`, and omitting it = the value from the settings file. For the meaning of each key, see the "Settings file" table below (`--repository-dialects` is a comma-separated list of dialects; when omitted, a single dialect is derived from the `--provider` dialect).
 
 ## quicker scaffold
 
-データベースへ直接接続し、スキーマを取り込んでコードを生成します。オプションは `generate` と共通で、`--schema` の代わりに `--connection` を指定します。
+Connects directly to a database, imports the schema, and generates code. The options are shared with `generate`; instead of `--schema`, you specify `--connection`.
 
 ```powershell
 quicker scaffold --connection "Server=.;Database=Shop;Integrated Security=true;TrustServerCertificate=true" --out ./Generated --provider sqlserver
 ```
 
-| オプション | 必須 | 説明 |
+| Option | Required | Description |
 |---|:-:|---|
-| `--connection <string>` | ✅ | 接続文字列（形式は `--provider` の DBMS に従う） |
+| `--connection <string>` | ✅ | The connection string (the format follows the DBMS of `--provider`) |
 
-そのほかのオプション（`--out` / `--config` / `--provider`、および設定キーと同名の kebab-case フラグ群）は `generate` と同じです。
+The other options (`--out` / `--config` / `--provider`, and the kebab-case flags named after the settings keys) are the same as for `generate`.
 
-## 設定ファイル（quicker.json）
+## Settings file (quicker.json)
 
-`--config` で渡す JSON で、生成オプションをまとめて指定できます。これは GUI の設定保存ファイル（`codegen-settings.json`）と**同一スキーマ**です（GUI は camelCase で書き出しますが、CLI は大文字小文字を区別せず解釈するためそのまま渡せます）。**下表の各キーは同名の kebab-case フラグとして CLI からも指定でき、設定ファイルより優先されます**（優先順位: CLI フラグ ＞ 設定ファイル ＞ 既定値。bool は `--flag` / `--flag false` の三値）。
+The JSON passed via `--config` lets you specify generation options in bulk. It uses the **same schema** as the GUI's settings save file (`codegen-settings.json`) (the GUI writes it in camelCase, but the CLI interprets it case-insensitively, so you can pass it as is). **Each key in the table below can also be specified from the CLI as a same-named kebab-case flag, which takes precedence over the settings file** (priority: CLI flag > settings file > default; bool keys are three-valued: `--flag` / `--flag false`).
 
-> **破壊的変更（v-next）**: `GenerateRepositories` の既定が `true` → `false` になりました。以前はキーを省略すると Repository が生成されましたが、**現在は DB アクセスコードを生成するには `GenerateRepositories: true`（または `GenerateEfCore: true`）の明示指定が必要**です（GUI の DB アクセス「なし」既定と揃えるため）。
+> **Breaking change (v-next)**: the default of `GenerateRepositories` changed from `true` to `false`. Previously, omitting the key generated a Repository; **now, generating DB-access code requires explicitly specifying `GenerateRepositories: true` (or `GenerateEfCore: true`)** (to align with the GUI's DB-access "None" default).
 
-キーはカテゴリ順（出力モード → 名前空間 → 生成対象 → 値オブジェクト → DB アクセス → リモート対応 → ランタイム・ドキュメント → 属性 → 出力先）に並べています。
+The keys are ordered by category (output mode → namespaces → generation targets → value objects → DB access → remote support → runtime & documentation → attributes → output path).
 
 ```json
 {
@@ -68,30 +70,30 @@ quicker scaffold --connection "Server=.;Database=Shop;Integrated Security=true;T
 }
 ```
 
-主なキー（かっこ内は既定値・カテゴリ順）:
+Main keys (the default is in parentheses; category order):
 
-| キー | 説明 |
+| Key | Description |
 |---|---|
-| `SplitFilesByCategory`（`false`） | カテゴリごとに別ファイル・別名前空間で出力する。`EntityNamespace` / `RepositoryNamespace` などで名前空間を個別指定できる |
-| `RootNamespace`（`Generated`） | 生成コードのルート名前空間 |
-| `GenerateEditModels` / `GenerateMappers`（ともに `true`） | 各カテゴリの生成有無。**Entity クラスは常時生成**され、専用キーはない |
-| `GenerateValueObjects`（`false`） | 列ごとの値オブジェクト型（`CustomerIdValue` など）を生成する（[生成コードの使い方](code-generation.md#値オブジェクトgeneratevalueobjects) 参照） |
-| `UseGuidKeyForStringPrimaryKey`（`false`） | string 主キーを GUID 値オブジェクトにする（`GenerateValueObjects` が有効な場合のみ） |
-| `GenerateRepositories`（`false`） | QuickER 版 Repository（軽量ミニ ORM）を生成する。**既定では DB アクセスコードを生成しない**（GUI と同じ既定） |
-| `RepositoryDialects`（未指定） | QuickER 版 Repository のマルチターゲット方言リスト（例 `["sqlserver", "sqlite"]`）。未指定時は CLI の `--provider` / `--repository-dialects` から設定される |
-| `ExcludeUnboundedBinaryColumns`（`false`） | 無制限バイナリ列をQuickER 版 Repository の SELECT / UPDATE から除外する（CLI の `--exclude-unbounded-binary-columns` に対応。[生成コードの使い方](code-generation.md#無制限バイナリ列の除外excludeunboundedbinarycolumns) 参照） |
-| `GenerateEfCore`（`false`） | EF Core 用の `QuickErDbContext` ＋ EF Core 版 Repository 実装を生成する。マルチターゲット（実効方言 2 つ以上）とは併用不可 |
-| `GenerateInMemoryRepositories`（`false`） | テスト用のインメモリ Repository 実装を生成する（`UseRuntimePackages` とは併用不可） |
-| `GenerateRemoteContracts`（`false`） | リモート操作用インターフェイス `I{Entity}RemoteRepository` を追加生成する（CLI の `--generate-remote-contracts` に対応。Repository / EF Core 契約が前提。[生成コードの使い方](code-generation.md) 参照） |
-| `GenerateRemoteServices`（`false`） | リモート面の HTTP クライアント／サーバー実装を生成する（`GenerateRemoteContracts` を自動的に含意。CLI の `--generate-remote-services` に対応。[生成コードの使い方](code-generation.md) 参照） |
-| `UseRuntimePackages`（`false`） | ランタイム固定コードを出力せず NuGet パッケージ参照で賄う（[生成コードの使い方](code-generation.md) 参照） |
-| `GenerateApiDocs`（`false`） | API リファレンス Markdown（`{ベース名}.g.md`・英語正本）を追加出力する（CLI の `--generate-api-docs` に対応。[生成コードの使い方](code-generation.md) 参照） |
-| `IncludeJapaneseApiDocs`（`false`） | 日本語版 API リファレンス Markdown（`{ベース名}.ja.g.md`）も併産する（`GenerateApiDocs` が前提。CLI の `--api-docs-ja` に対応） |
-| `IncludeDataAnnotations`（`true`） | `[Required]` / `[MaxLength]` 等の DataAnnotations と、DB 定義メタ属性（`[DbTableMeta]` / `[DbColumnMeta]`）を付与する |
-| `IncludeJsonIgnoreOnParentNavigation`（`true`） | 親参照ナビゲーションへ `[JsonIgnore]` を付与する（JSON シリアライズ時の循環参照対策） |
-| `OutputPath`（`QuickEREntities.g.cs` 相当） | 出力先パス。CLI（`--config` / `--output-path`）はそのファイル名部分のみを単一ファイル出力のファイル名として使う（出力先ディレクトリは常に `--out`）。GUI では出力先のフルパス（非分割時はファイル・分割時はフォルダ）が入ることがあるが、CLI は同じ規則で解釈する |
+| `SplitFilesByCategory` (`false`) | Output each category in a separate file and namespace. You can specify namespaces individually with `EntityNamespace` / `RepositoryNamespace`, and so on |
+| `RootNamespace` (`Generated`) | The root namespace of the generated code |
+| `GenerateEditModels` / `GenerateMappers` (both `true`) | Whether to generate each category. **Entity classes are always generated**, and there is no dedicated key for them |
+| `GenerateValueObjects` (`false`) | Generate a per-column value object type (such as `CustomerIdValue`) (see [Using the generated code](code-generation.md#value-objects-generatevalueobjects)) |
+| `UseGuidKeyForStringPrimaryKey` (`false`) | Make a string primary key a GUID value object (only when `GenerateValueObjects` is enabled) |
+| `GenerateRepositories` (`false`) | Generate a QuickER Repository (a lightweight mini-ORM). **By default, no DB-access code is generated** (the same default as the GUI) |
+| `RepositoryDialects` (unspecified) | The multi-target dialect list for the QuickER Repository (e.g. `["sqlserver", "sqlite"]`). When unspecified, it is set from the CLI's `--provider` / `--repository-dialects` |
+| `ExcludeUnboundedBinaryColumns` (`false`) | Exclude unbounded binary columns from the QuickER Repository's SELECT / UPDATE (corresponds to the CLI's `--exclude-unbounded-binary-columns`; see [Using the generated code](code-generation.md#excluding-unbounded-binary-columns-excludeunboundedbinarycolumns)) |
+| `GenerateEfCore` (`false`) | Generate the `QuickErDbContext` for EF Core plus EF Core Repository implementations. Cannot be combined with multi-targeting (two or more effective dialects) |
+| `GenerateInMemoryRepositories` (`false`) | Generate an in-memory Repository implementation for testing (cannot be combined with `UseRuntimePackages`) |
+| `GenerateRemoteContracts` (`false`) | Additionally generate the remote-operation interface `I{Entity}RemoteRepository` (corresponds to the CLI's `--generate-remote-contracts`; requires a Repository / EF Core contract; see [Using the generated code](code-generation.md)) |
+| `GenerateRemoteServices` (`false`) | Generate HTTP client/server implementations for the remote surface (automatically implies `GenerateRemoteContracts`; corresponds to the CLI's `--generate-remote-services`; see [Using the generated code](code-generation.md)) |
+| `UseRuntimePackages` (`false`) | Do not emit the fixed runtime code; provide it via NuGet package references instead (see [Using the generated code](code-generation.md)) |
+| `GenerateApiDocs` (`false`) | Additionally output an API reference Markdown (`{base name}.g.md`, English canonical) (corresponds to the CLI's `--generate-api-docs`; see [Using the generated code](code-generation.md)) |
+| `IncludeJapaneseApiDocs` (`false`) | Also produce the Japanese API reference Markdown (`{base name}.ja.g.md`) (requires `GenerateApiDocs`; corresponds to the CLI's `--api-docs-ja`) |
+| `IncludeDataAnnotations` (`true`) | Apply DataAnnotations such as `[Required]` / `[MaxLength]`, and the DB-definition meta attributes (`[DbTableMeta]` / `[DbColumnMeta]`) |
+| `IncludeJsonIgnoreOnParentNavigation` (`true`) | Apply `[JsonIgnore]` to parent-reference navigations (to guard against circular references during JSON serialization) |
+| `OutputPath` (equivalent to `QuickEREntities.g.cs`) | The output path. The CLI (`--config` / `--output-path`) uses only its file-name part as the file name for single-file output (the output directory is always `--out`). In the GUI, this may hold the full output path (a file when not split, a folder when split), but the CLI interprets it by the same rule |
 
-## 実行例 — リポジトリ同梱サンプルの再生成
+## Example — regenerating the sample bundled with the repository
 
 ```powershell
 dotnet run --project src/QuickER.Cli -- generate `
@@ -102,11 +104,8 @@ dotnet run --project src/QuickER.Cli -- generate `
   --generate-api-docs
 ```
 
-`--generate-api-docs` により、生成コード `EcOrder.g.cs` と同じベース名の API リファレンス Markdown
-`EcOrder.g.md`（英語正本）も同梱出力されます。日本語版 `EcOrder.ja.g.md` も欲しい場合は `--api-docs-ja`
-を追加します（`--generate-api-docs` が前提。ec-order サンプルは `quicker.json` で `IncludeJapaneseApiDocs`
-を指定済み）。いずれもチェックイン済み・ドリフト検知の対象です。
+With `--generate-api-docs`, an API reference Markdown named `EcOrder.g.md` (English canonical) is also produced alongside the generated code `EcOrder.g.cs`, sharing the same base name. If you also want the Japanese version `EcOrder.ja.g.md`, add `--api-docs-ja` (which requires `--generate-api-docs`; the ec-order sample already specifies `IncludeJapaneseApiDocs` in its `quicker.json`). Both are checked in and subject to drift detection.
 
-## ライセンス注記
+## License note
 
-CLI（`QuickER.Cli`）とコード生成エンジンには [PolyForm Noncommercial 1.0.0](../LICENSE-NC.md) が適用されます。**現在は商用利用を含め全員無料**です。将来の提供方針（商用利用のみ有償化の可能性・個人/非商用は永続無料・基本生成は永続無料・有償化時は事前告知と移行期間）は [README の「ライセンス」節](../README.md#ライセンス)を参照してください。**生成されたコードはあなたの成果物**であり、ライセンスによる制限はありません。
+The CLI (`QuickER.Cli`) and the code generation engine are licensed under [PolyForm Noncommercial 1.0.0](../LICENSE-NC.md). **It is currently free for everyone, including commercial use.** For the future provisioning policy (the possibility that only commercial use becomes paid-licensed, that personal/non-commercial use remains permanently free, that basic generation remains permanently free, and that any move to paid licensing will come with advance notice and a transition period), see the [License section of the README](../README.md#license). **Code that is generated is your work product**, with no license restrictions.

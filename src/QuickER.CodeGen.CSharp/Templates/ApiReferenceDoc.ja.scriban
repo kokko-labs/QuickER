@@ -57,7 +57,7 @@
 | `BulkInsertAsync(entities, ct)` | 複数件をまとめて追加します（追加件数を返します）。 |
 | `Query()` | 絞り込み・並べ替え・件数制限などのクエリを組み立てます。 |
 
-`Query()` の対応範囲・詳細は [docs/code-generation.md](https://github.com/kokko-labs/QuickER/blob/main/docs/code-generation.md) を参照してください。
+`Query()` の対応範囲・詳細は [docs/code-generation.ja.md](https://github.com/kokko-labs/QuickER/blob/main/docs/code-generation.ja.md) を参照してください。
 
 ## 使い方
 
