@@ -32,7 +32,7 @@ namespace QuickER.Tests.Samples;
 /// </para>
 /// <para>
 /// テスト2（DDL）は同じ図から <see cref="SqliteDdlGenerator"/> の出力を照合する。DDL 先頭の
-/// <c>-- 生成日時:</c> 行は <see cref="DateTime.Now"/> 由来で非決定的なため、両者を正規化してから比較する
+/// <c>-- Generated at:</c> 行は <see cref="DateTime.Now"/> 由来で非決定的なため、両者を正規化してから比較する
 /// （この 1 行のみ除外。それ以外は完全一致）。名前付きクエリ定義は DDL に影響しない。
 /// </para>
 /// <para>
@@ -59,7 +59,7 @@ public sealed class EcOrderRemoteSampleDriftTests
 
     /// <summary>DDL 先頭の非決定的な生成日時コメント行（正規化して比較から除外する）</summary>
     private static readonly Regex GeneratedAtCommentLine = new(
-        @"^-- 生成日時: .*$",
+        @"^-- Generated at: .*$",
         RegexOptions.Multiline
     );
 
@@ -93,7 +93,7 @@ public sealed class EcOrderRemoteSampleDriftTests
     /// （非決定的な生成日時コメント行のみ正規化して除外）。
     /// </summary>
     /// <remarks>
-    /// DDL 先頭の <c>-- 生成日時:</c> 行は <see cref="DateTime.Now"/> 由来で毎回変わるため、
+    /// DDL 先頭の <c>-- Generated at:</c> 行は <see cref="DateTime.Now"/> 由来で毎回変わるため、
     /// <see cref="FixtureDriftHarness.VerifyOrRegeneratePackageSource"/>（厳密文字列一致）はそのまま使えない。
     /// 検証モードでは生成日時行だけを固定文言へ正規化して比較し、再生成モードでは<b>実質差分
     /// （生成日時行以外）があるときだけ</b>書き込む（EcOrderSampleDriftTests と同じ対称設計。
@@ -216,7 +216,7 @@ public sealed class EcOrderRemoteSampleDriftTests
 
     /// <summary>DDL の非決定的な生成日時行を固定文言へ正規化する（比較から実質除外する）</summary>
     private static string NormalizeGeneratedAt(string ddl) =>
-        GeneratedAtCommentLine.Replace(ddl, "-- 生成日時: (正規化)");
+        GeneratedAtCommentLine.Replace(ddl, "-- Generated at: (normalized)");
 
     /// <summary>
     /// リポジトリ直下（<c>QuickER.slnx</c> を目印）からの相対パスを絶対パスへ解決する。

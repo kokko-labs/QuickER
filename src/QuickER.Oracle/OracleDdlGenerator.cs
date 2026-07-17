@@ -42,7 +42,7 @@ public sealed class OracleDdlGenerator : DdlGeneratorBase
     {
         if (relationship.OnUpdate != ForeignKeyReferentialAction.NoAction)
         {
-            sb.AppendLine("-- 注: Oracle は ON UPDATE をサポートしないため無視");
+            sb.AppendLine("-- Note: Oracle does not support ON UPDATE; ignoring it");
         }
     }
 }

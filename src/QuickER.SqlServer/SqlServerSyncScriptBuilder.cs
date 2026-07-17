@@ -56,7 +56,7 @@ public sealed class SqlServerSyncScriptBuilder : ISyncScriptBuilder
             return;
         }
 
-        sb.AppendLine($"-- ===== {kind} ({subset.Count} 件) =====");
+        sb.AppendLine($"-- ===== {kind} ({subset.Count} items) =====");
 
         foreach (var item in subset)
         {
@@ -157,7 +157,7 @@ public sealed class SqlServerSyncScriptBuilder : ISyncScriptBuilder
             sb.AppendLine(
                 // スキップ理由の識別子は生成 SQL の決定性を保つため方言中立・カルチャ非依存にする
                 // （表示用の item.Description は UI 言語で変わるため使わない）
-                $"-- スキップ: 外部キー追加に必要な列が解決できませんでした。 ({SchemaDiffService.NormalizeTable(item.ChildEntity)} -> {SchemaDiffService.NormalizeTable(item.ParentEntity)})"
+                $"-- Skipped: could not resolve the column required to add the foreign key. ({SchemaDiffService.NormalizeTable(item.ChildEntity)} -> {SchemaDiffService.NormalizeTable(item.ParentEntity)})"
             );
             return;
         }

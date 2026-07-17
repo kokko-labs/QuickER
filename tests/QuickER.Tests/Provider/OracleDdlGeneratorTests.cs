@@ -139,7 +139,7 @@ public class OracleDdlGeneratorTests
         sql.Should().Contain("ON DELETE CASCADE");
         // 注意コメントには "ON UPDATE" が含まれるが、SQL の句としては出力しない
         sql.Should().NotContain("ON DELETE CASCADE ON UPDATE");
-        sql.Should().Contain("-- 注: Oracle は ON UPDATE をサポートしないため無視");
+        sql.Should().Contain("-- Note: Oracle does not support ON UPDATE; ignoring it");
     }
 
     /// <summary>ON DELETE SET NULL が句として出力されることを検証する</summary>
@@ -188,7 +188,7 @@ public class OracleDdlGeneratorTests
         var sql = new OracleDdlGenerator().Build(diagram);
 
         sql.Should().Contain("ON DELETE SET NULL");
-        sql.Should().NotContain("Oracle は ON UPDATE をサポートしない");
+        sql.Should().NotContain("Oracle does not support ON UPDATE");
     }
 
     /// <summary>ON DELETE NO ACTION は句を省略することを検証する（既定）</summary>

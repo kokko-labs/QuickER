@@ -184,7 +184,7 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
         {
             // スキップ理由の識別子は生成 SQL の決定性を保つため方言中立・カルチャ非依存にする
             // （表示用の item.Description は UI 言語で変わるため使わない）
-            return $"-- スキップ: 外部キー追加に必要な列が解決できませんでした。 ({SchemaDiffService.NormalizeTable(item.ChildEntity)} -> {SchemaDiffService.NormalizeTable(item.ParentEntity)})";
+            return $"-- Skipped: could not resolve the column required to add the foreign key. ({SchemaDiffService.NormalizeTable(item.ChildEntity)} -> {SchemaDiffService.NormalizeTable(item.ParentEntity)})";
         }
 
         var childTbl = SchemaDiffService.NormalizeTable(item.ChildEntity);
@@ -201,7 +201,7 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
             && item.Relationship.OnUpdate != ForeignKeyReferentialAction.NoAction
         )
         {
-            sb.AppendLine("-- 注: Oracle は ON UPDATE をサポートしないため無視");
+            sb.AppendLine("-- Note: Oracle does not support ON UPDATE; ignoring it");
         }
 
         var deleteClause = item.Relationship is null
