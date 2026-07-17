@@ -16,7 +16,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <EmbeddedResource Include="Templates\CSharpRuntime.scriban" />
+    <EmbeddedResource Include="Templates\CSharpRuntime\*.scriban" />
     <EmbeddedResource Include="Templates\ApiReferenceDoc.scriban" />
   </ItemGroup>
 

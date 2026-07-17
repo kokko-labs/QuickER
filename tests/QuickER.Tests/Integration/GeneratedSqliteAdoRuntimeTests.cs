@@ -45,7 +45,7 @@ public sealed class GeneratedSqliteAdoRuntimeTests : GeneratedSqliteRuntimeTests
     /// <b>制約と代替検証</b>: 第3フィクスチャの入力は方言可搬な図（<see cref="SqlitePortableFixtureDefinition"/>）で、
     /// DateTime 列を持たない。そのため式木クエリ API（<c>Where(x =&gt; x.Col.Year == ...)</c>）から翻訳器を通す
     /// 実データ検証ができない。翻訳器が DateTime 列参照に対して生成する SQL フラグメントそのもの
-    /// （<c>CAST(strftime('%Y', "col") AS INTEGER)</c> など。テンプレート <c>CSharpRuntime.scriban</c> の
+    /// （<c>CAST(strftime('%Y', "col") AS INTEGER)</c> など。テンプレート <c>CSharpRuntime/*.scriban</c> の
     /// <c>TryGetDatePart</c> と一致）を、DateTime 列を持つ一時テーブルへ ISO8601 TEXT を格納したうえで
     /// <c>ExecuteScalarSqlAsync&lt;int&gt;</c> で実行し、部品の実整数値を検証する。フラグメントの生成側（式木からの
     /// 吐き分け）は <c>SqliteRepositoryDialectTests</c>（生成テキストに <c>strftime(</c> が現れること）と

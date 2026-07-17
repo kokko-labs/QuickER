@@ -1,0 +1,227 @@
+{{~ if (entity_classes.size > 0 || edit_model_classes.size > 0 || runtime_package_export) && render_runtime && emit_shared_infra ~}}
+/// <summary>エンティティ・EditModel の変更状態</summary>
+public enum RowState
+{
+    /// <summary>追加対象（新規）</summary>
+    Added,
+
+    /// <summary>変更なし（保存済み）</summary>
+    Unchanged,
+
+    /// <summary>更新対象</summary>
+    Updated,
+
+    /// <summary>削除対象</summary>
+    Removed,
+}
+{{ end }}
+{{~ if (entity_classes.size > 0 || runtime_package_export) && render_runtime && emit_shared_infra ~}}
+/// <summary>エンティティの変更状態（RowState）を保持する基底クラス</summary>
+public abstract partial class EntityBase
+{
+    /// <summary>このエンティティの変更状態（既定は変更なし。DB/JSON からの復元はそのまま変更なし扱いになる）</summary>
+    public RowState RowState { get; set; } = RowState.Unchanged;
+
+    /// <summary>追加対象かどうか</summary>
+    public bool IsAdded => RowState == RowState.Added;
+
+    /// <summary>更新対象かどうか</summary>
+    public bool IsUpdated => RowState == RowState.Updated;
+
+    /// <summary>削除対象かどうか</summary>
+    public bool IsRemoved => RowState == RowState.Removed;
+
+    /// <summary>変更（追加・更新・削除）があるかどうか</summary>
+    public bool HasChanges => RowState != RowState.Unchanged;
+
+    /// <summary>このエンティティの表示名（画面ラベル等で使う）。既定は <see cref="DefaultDisplayName"/>、CustomizeDisplayName で上書き可能</summary>
+    public string DisplayName
+    {
+        get
+        {
+            var displayName = DefaultDisplayName;
+            CustomizeDisplayName(ref displayName);
+            return displayName;
+        }
+    }
+
+    /// <summary>表示名の既定値。既定は実行時のクラス名。テーブル説明を持つエンティティは派生クラスが override する</summary>
+    protected virtual string DefaultDisplayName => GetType().Name;
+
+    /// <summary>表示名を差し替える拡張ポイント（派生クラスの override で上書き。未上書きなら既定の表示名）</summary>
+    protected virtual void CustomizeDisplayName(ref string displayName) { }
+
+    /// <summary>追加対象としてマークする（直接 new したエンティティを保存対象にする場合に使用）</summary>
+    public void MarkAdded() => RowState = RowState.Added;
+
+    /// <summary>削除対象としてマークする（コレクションには残したまま Save で削除される）</summary>
+    public void MarkRemoved() => RowState = RowState.Removed;
+
+    /// <summary>変更なし（保存済み）状態にする</summary>
+    public void MarkUnchanged() => RowState = RowState.Unchanged;
+
+    /// <summary>変更なしのときのみ更新対象としてマークする</summary>
+    public void MarkUpdated()
+    {
+        if (RowState == RowState.Unchanged)
+        {
+            RowState = RowState.Updated;
+        }
+    }
+
+    // ---- 値の比較・ハッシュ・JSON 出力 ----
+
+    /// <summary>型ごとの「値プロパティ」（列に対応する get/set 可能な public プロパティ。ナビゲーションと RowState など基底プロパティを除く）をキャッシュする</summary>
+    private static readonly ConcurrentDictionary<Type, PropertyInfo[]> _valuePropertyCache = new();
+
+    /// <summary>指定型の値プロパティ一覧を取得する（ナビゲーションと基底プロパティは除外。型ごとに 1 度だけ走査しキャッシュ）</summary>
+    private static PropertyInfo[] GetValueProperties(Type type) =>
+        _valuePropertyCache.GetOrAdd(
+            type,
+            static resolvedType =>
+                resolvedType
+                    .GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                    .Where(property =>
+                        property.CanRead
+                        && property.CanWrite
+                        && property.DeclaringType != typeof(EntityBase)
+                        && !Attribute.IsDefined(property, typeof(NavigationReferenceAttribute))
+                    )
+                    .ToArray()
+        );
+
+    /// <summary>他のエンティティと列の値がすべて一致するかどうかを判定する（RowState・ナビゲーションは比較対象外）</summary>
+    public bool HasSameValues(EntityBase? other)
+    {
+        if (other is null)
+        {
+            return false;
+        }
+
+        if (ReferenceEquals(this, other))
+        {
+            return true;
+        }
+
+        var type = GetType();
+        if (other.GetType() != type)
+        {
+            return false;
+        }
+
+        foreach (var property in GetValueProperties(type))
+        {
+            // byte[] などの配列は構造的に（要素単位で）比較する
+            if (
+                !StructuralComparisons.StructuralEqualityComparer.Equals(
+                    property.GetValue(this),
+                    property.GetValue(other)
+                )
+            )
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>列の値から算出した値ベースのハッシュコードを取得する（RowState・ナビゲーションは対象外）</summary>
+    /// <remarks>HasSameValues が真となる 2 つのエンティティは必ず同じ値を返す。可変オブジェクトのため辞書キーに使う際は変更しないこと</remarks>
+    public int GetValueHashCode()
+    {
+        var type = GetType();
+        var hash = new HashCode();
+        hash.Add(type);
+        foreach (var property in GetValueProperties(type))
+        {
+            var value = property.GetValue(this);
+            // byte[] などの配列は構造的なハッシュを使う
+            hash.Add(
+                value is null
+                    ? 0
+                    : StructuralComparisons.StructuralEqualityComparer.GetHashCode(value)
+            );
+        }
+
+        return hash.ToHashCode();
+    }
+
+    /// <summary>JSON 出力（ToJson）とクローン（Clone）で共有するシリアライズ設定。型メタデータのキャッシュを効かせるため使い回す</summary>
+    /// <remarks>get/set 可能な public プロパティのみが対象。万一の循環参照は IgnoreCycles で null 化して例外を避ける（[JsonIgnore] 構成では循環自体が無く no-op）</remarks>
+    private static readonly JsonSerializerOptions _jsonOptions = new()
+    {
+        IgnoreReadOnlyProperties = true,
+        ReferenceHandler = ReferenceHandler.IgnoreCycles,
+        {{~ if generate_value_objects ~}}
+        Converters = { new ValueObjectJsonConverterFactory() },
+        {{~ end ~}}
+    };
+
+    /// <summary>整形出力（writeIndented=true）用の設定。WriteIndented は初回利用後に変更できないため別インスタンスにする</summary>
+    private static readonly JsonSerializerOptions _jsonOptionsIndented = new()
+    {
+        IgnoreReadOnlyProperties = true,
+        ReferenceHandler = ReferenceHandler.IgnoreCycles,
+        WriteIndented = true,
+        {{~ if generate_value_objects ~}}
+        Converters = { new ValueObjectJsonConverterFactory() },
+        {{~ end ~}}
+    };
+
+    /// <summary>このエンティティを JSON 文字列へシリアライズする（WebAPI へのデータ受け渡しなどに使用）</summary>
+    /// <remarks>
+    /// get/set 可能な public プロパティのみが対象（get-only の IsAdded などの派生フラグは出力されない。RowState は出力される）
+    /// 子ナビゲーションは含まれ、親参照ナビゲーションは [JsonIgnore] が付くため循環しない
+    /// </remarks>
+    public string ToJson(bool writeIndented = false) =>
+        JsonSerializer.Serialize(
+            this,
+            GetType(),
+            writeIndented ? _jsonOptionsIndented : _jsonOptions
+        );
+
+    /// <summary>このエンティティの深いクローン（ディープコピー）を生成する（JSON ラウンドトリップ）</summary>
+    /// <remarks>
+    /// 値・RowState・子ナビゲーションがコピーされる。親参照ナビゲーションは [JsonIgnore] のため復元されない（クローンは親を指さない）
+    /// 別レコードとして挿入する場合は、クローン後に主キーの振り直しや MarkAdded() を行うこと。戻り値の実体は元と同じ具象型
+    /// </remarks>
+    public EntityBase Clone()
+    {
+        var type = GetType();
+        var json = JsonSerializer.Serialize(this, type, _jsonOptions);
+        return (EntityBase)JsonSerializer.Deserialize(json, type, _jsonOptions)!;
+    }
+}
+{{ end }}
+{{~ if render_entities ~}}
+{{~ for item in entity_classes ~}}
+{{ if !for.first }}
+{{ end }}/// <summary>{{ if item.description_xml_doc != "" }}{{ item.description_xml_doc }}{{ else }}{{ item.table_name }} テーブルに対応するエンティティ{{ end }}</summary>
+{{ if include_data_annotations }}[Table("{{ item.table_name }}")]
+{{ end }}{{ if emit_db_meta_attr && item.description != "" }}[DbTableMeta(Description = "{{ item.description }}")]
+{{ end }}public partial class {{ item.class_name }} : EntityBase
+{
+{{ for property in item.properties }}{{ if !for.first }}
+{{ end }}    /// <summary>{{ if property.description_xml_doc != "" }}{{ property.description_xml_doc }}{{ else }}{{ property.column_name }} 列に対応するプロパティ{{ end }}</summary>
+{{ if include_data_annotations && property.is_primary_key }}    [Key]
+{{ end }}{{ if include_data_annotations }}    [Column("{{ property.column_name }}")]
+{{ end }}{{ if include_data_annotations && !property.is_nullable && property.is_reference_type }}    [Required]
+{{ end }}{{ if include_data_annotations && property.max_length }}    [MaxLength({{ property.max_length }})]
+{{ end }}{{ if emit_sql_column_type_attr && property.sql_db_type_name }}    [SqlColumnType(SqlDbType.{{ property.sql_db_type_name }}{{ if property.sql_declared_length != 0 }}, Size = {{ property.sql_declared_length }}{{ end }}{{ if property.facet_precision }}, Precision = {{ property.facet_precision }}, Scale = {{ property.facet_scale }}{{ end }})]
+{{ end }}{{ if emit_db_meta_attr && property.canonical_type_token }}    [DbColumnMeta("{{ property.canonical_type_token }}"{{ if property.description != "" }}, Description = "{{ property.description }}"{{ end }})]
+{{ end }}{{ if exclude_unbounded_binary && property.is_unbounded_binary }}    [UnboundedBinaryColumn]
+{{ end }}{{ if property.is_row_version }}    [StoreGeneratedColumn]
+{{ end }}    public {{ if property.property_name == "DisplayName" || property.property_name == "CustomizeDisplayName" }}new {{ end }}{{ property.type_name }} {{ property.property_name }} { get; set; }{{ property.initializer }}
+{{ end }}{{ for navigation in item.navigations }}
+    /// <summary>{{ navigation.property_name }} ナビゲーションプロパティ</summary>
+{{ if include_json_ignore_on_parent_navigation && navigation.is_parent_reference }}    [JsonIgnore]
+{{ end }}    [NavigationReference("{{ navigation.principal_table_name }}", "{{ navigation.principal_column_name }}", "{{ navigation.dependent_table_name }}", "{{ navigation.dependent_column_name }}", {{ navigation.is_collection }}, {{ navigation.cascade }}, {{ navigation.is_parent_reference }})]
+    public {{ navigation.display_type_name }} {{ navigation.property_name }} { get; set; }{{ navigation.initializer }}
+{{ end }}{{ if !item.has_display_name_collision && item.display_name != item.class_name }}
+    /// <summary>このエンティティの表示名の既定値（テーブル説明由来）。無指定なら基底のクラス名が使われる</summary>
+    protected override string DefaultDisplayName => "{{ item.display_name }}";
+{{ end }}}
+{{~ end ~}}
+{{~ end ~}}
+

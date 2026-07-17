@@ -10,7 +10,7 @@ namespace QuickER.Tests.GeneratedFixture;
 /// </summary>
 /// <remarks>
 /// <para>
-/// パッケージソースの正本は <c>Templates/CSharpRuntime.scriban</c>（既存フィクスチャと同一テンプレート）で、
+/// パッケージソースの正本は <c>Templates/CSharpRuntime/*.scriban</c>（既存フィクスチャと同一テンプレート）で、
 /// レンダラーが「空図＋全機能 ON＋固定名前空間＋public 化」で書き出す。テンプレートを変更すると
 /// チェックイン済みソースが古くなり得るため、このテストで乖離を検出する。
 /// </para>
@@ -35,7 +35,7 @@ public sealed class RuntimePackageSourceDriftTests
             Renderer.RenderCore(),
             "src/QuickER.Runtime/QuickERRuntime.g.cs",
             "コアパッケージのチェックイン済みソースが現在のテンプレート出力と乖離しています。"
-                + "テンプレート（QuickER.CodeGen.CSharp/Templates/CSharpRuntime.scriban 等）を変更した場合は再生成が必要です。"
+                + "テンプレート（QuickER.CodeGen.CSharp/Templates/CSharpRuntime/*.scriban 等）を変更した場合は再生成が必要です。"
         );
     }
 
@@ -49,7 +49,7 @@ public sealed class RuntimePackageSourceDriftTests
             Renderer.RenderSqlServer(),
             "src/QuickER.Runtime.SqlServer/QuickERRuntimeSqlServer.g.cs",
             "SqlServer パッケージのチェックイン済みソースが現在のテンプレート出力と乖離しています。"
-                + "テンプレート（QuickER.CodeGen.CSharp/Templates/CSharpRuntime.scriban 等）を変更した場合は再生成が必要です。"
+                + "テンプレート（QuickER.CodeGen.CSharp/Templates/CSharpRuntime/*.scriban 等）を変更した場合は再生成が必要です。"
         );
     }
 
@@ -63,7 +63,7 @@ public sealed class RuntimePackageSourceDriftTests
             Renderer.RenderSqlite(),
             "src/QuickER.Runtime.Sqlite/QuickERRuntimeSqlite.g.cs",
             "Sqlite パッケージのチェックイン済みソースが現在のテンプレート出力と乖離しています。"
-                + "テンプレート（QuickER.CodeGen.CSharp/Templates/CSharpRuntime.scriban 等）を変更した場合は再生成が必要です。"
+                + "テンプレート（QuickER.CodeGen.CSharp/Templates/CSharpRuntime/*.scriban 等）を変更した場合は再生成が必要です。"
         );
     }
 
@@ -77,7 +77,7 @@ public sealed class RuntimePackageSourceDriftTests
             Renderer.RenderEfCore(),
             "src/QuickER.Runtime.EntityFrameworkCore/QuickERRuntimeEntityFrameworkCore.g.cs",
             "EntityFrameworkCore パッケージのチェックイン済みソースが現在のテンプレート出力と乖離しています。"
-                + "テンプレート（QuickER.CodeGen.CSharp/Templates/CSharpRuntime.scriban 等）を変更した場合は再生成が必要です。"
+                + "テンプレート（QuickER.CodeGen.CSharp/Templates/CSharpRuntime/*.scriban 等）を変更した場合は再生成が必要です。"
         );
     }
 }

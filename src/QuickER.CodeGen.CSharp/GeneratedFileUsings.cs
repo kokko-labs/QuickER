@@ -7,7 +7,7 @@ namespace QuickER.CodeGen.CSharp;
 /// ファイルの using ＝そのファイルに含まれる全バケットが必要とする外部（System.* / Microsoft.*）using の和集合
 /// ＋ バケット依存グラフから導いた他ファイルの名前空間（クロス using）。
 /// これによりバケットを含まないファイルへ SqlClient / EntityFrameworkCore / DependencyInjection 等が漏れない。
-/// 各バケットの必要 using は <c>Templates/CSharpRuntime.scriban</c> の実際の型参照を根拠に確定している
+/// 各バケットの必要 using は <c>Templates/CSharpRuntime/*.scriban</c> の実際の型参照を根拠に確定している
 /// （オプションで出力が変わるバケットはその条件も反映する）。生成コードは <c>// &lt;auto-generated /&gt;</c> のため
 /// 未使用 using 警告は抑止され、和集合による軽微な過剰付与は無害。削りすぎ（＝コンパイルエラー）だけを避ける方針。
 /// </remarks>

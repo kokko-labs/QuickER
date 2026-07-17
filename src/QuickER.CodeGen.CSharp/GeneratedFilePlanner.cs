@@ -146,7 +146,7 @@ public static class GeneratedFilePlanner
     /// 分割時、あるバケットのファイルが using すべき「他バケットの名前空間」を決めるための依存グラフ。
     /// </summary>
     /// <remarks>
-    /// 根拠（<c>Templates/CSharpRuntime.scriban</c> の型参照から確定）:
+    /// 根拠（<c>Templates/CSharpRuntime/*.scriban</c> の型参照から確定）:
     ///   Entity   → Runtime（EntityBase / 独自属性 / RowState）, ValueObject（プロパティ型が VO）
     ///   EditModel→ Runtime（EditModelBase / EditModelCollection）, ValueObject（VO 由来のパース・検証）
     ///   Mapper   → Entity（{Entity}）, EditModel（{Entity}EditModel）, Runtime（基底・RowState）

@@ -5,7 +5,7 @@ namespace QuickER.CodeGen.CSharp;
 /// </summary>
 /// <remarks>
 /// <para>
-/// ソースの正本は <c>Templates/CSharpRuntime.scriban</c>（<see cref="ScribanCSharpRenderer"/> 経由）で、通常生成と同一。
+/// ソースの正本は <c>Templates/CSharpRuntime/*.scriban</c>（<see cref="ScribanCSharpRenderer"/> 経由）で、通常生成と同一。
 /// ここでは「空の ER 図＋全機能 ON＋<c>runtime_package_export=true</c>＋<c>infra_visibility="public"</c>」でレンダリングし、
 /// スキーマ依存物（Entity / EditModel / Mapper / I{Entity}Repository / DI 登録など）を一切含まない固定 infra だけを
 /// 4 パッケージ（<see cref="RuntimePackages"/>）のソースへ切り出す。
