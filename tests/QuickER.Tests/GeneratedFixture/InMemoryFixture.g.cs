@@ -3768,17 +3768,40 @@ internal static class RawSqlMapper
                 continue;
             }
 
-            var propertyType = property.PropertyType;
+            // ドライバーが返す素の型は方言で異なる（例: SQLite の INTEGER は long）ため、
+            // プロパティの基底型（Nullable は基底型）へ寄せてから設定する
+            var underlyingType =
+                Nullable.GetUnderlyingType(property.PropertyType) ?? property.PropertyType;
             setters[property.Name] = (target, raw) =>
                 property.SetValue(
                     target,
-                    raw is null
-                        ? null
-                        : raw
+                    raw is null ? null : CoerceProjectionValue(raw, underlyingType)
                 );
         }
 
         return new ProjectionAccessor(() => constructor.Invoke(null), setters);
+    }
+
+    /// <summary>射影 DTO のプロパティへ設定する値を基底型へ寄せる（スカラー変換 ConvertSingleValue と同じ意味論）</summary>
+    private static object CoerceProjectionValue(object raw, Type underlyingType)
+    {
+        if (underlyingType.IsInstanceOfType(raw))
+        {
+            return raw;
+        }
+
+        try
+        {
+            return Convert.ChangeType(raw, underlyingType, CultureInfo.InvariantCulture);
+        }
+        catch (Exception ex)
+            when (ex is InvalidCastException or FormatException or OverflowException)
+        {
+            throw new InvalidOperationException(
+                $"生 SQL の射影値（型 {raw.GetType().Name}）を {underlyingType.Name} へ変換できませんでした。",
+                ex
+            );
+        }
     }
 }
 
@@ -4502,7 +4525,30 @@ internal static class EntityGraphSaver
 public partial interface ICustomerRepository : IRepository<CustomerEntity, int> { }
 
 /// <summary>OrderEntity 用リポジトリインターフェース</summary>
-public partial interface IOrderRepository : IRepository<OrderEntity, int> { }
+public partial interface IOrderRepository : IRepository<OrderEntity, int>
+{
+    /// <summary>顧客IDで注文を新しい順（注文ID降順）に検索する（ページング付き）</summary>
+    Task<IReadOnlyList<OrderEntity>> GetByCustomerAsync(int customerId, int take, int skip = 0, CancellationToken cancellationToken = default);
+
+    /// <summary>最新（注文IDが最大）の注文を 1 件取得する</summary>
+    Task<OrderEntity?> FindTopAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>顧客IDに紐づく注文件数を取得する</summary>
+    Task<int> CountByCustomerAsync(int customerId, CancellationToken cancellationToken = default);
+
+    /// <summary>顧客IDに紐づく注文を射影（顧客ID・金額）で古い順に取得する</summary>
+    Task<IReadOnlyList<OrderSummaryRow>> GetSummariesAsync(int customerId, CancellationToken cancellationToken = default);
+}
+
+/// <summary>名前付きクエリ GetSummaries の射影 DTO（orders）</summary>
+public sealed partial class OrderSummaryRow
+{
+    /// <summary>CustomerId</summary>
+    public int CustomerId { get; set; }
+
+    /// <summary>Amount</summary>
+    public decimal Amount { get; set; }
+}
 
 /// <summary>CustomerProfileEntity 用リポジトリインターフェース</summary>
 public partial interface ICustomerProfileRepository : IRepository<CustomerProfileEntity, int> { }
@@ -5722,7 +5768,24 @@ public sealed partial class InMemoryOrderRepository(
         store,
         saveHooks
     ),
-        IOrderRepository { }
+        IOrderRepository
+{
+    /// <summary>顧客IDで注文を新しい順（注文ID降順）に検索する（ページング付き）</summary>
+    public Task<IReadOnlyList<OrderEntity>> GetByCustomerAsync(int customerId, int take, int skip = 0, CancellationToken cancellationToken = default) =>
+        Query().Where(e => e.CustomerId == customerId).OrderByDescending(e => e.OrderId).Skip(skip).Take(take).ToListAsync(cancellationToken);
+
+    /// <summary>最新（注文IDが最大）の注文を 1 件取得する</summary>
+    public Task<OrderEntity?> FindTopAsync(CancellationToken cancellationToken = default) =>
+        Query().OrderByDescending(e => e.OrderId).FirstOrDefaultAsync(cancellationToken);
+
+    /// <summary>顧客IDに紐づく注文件数を取得する</summary>
+    public Task<int> CountByCustomerAsync(int customerId, CancellationToken cancellationToken = default) =>
+        Query().Where(e => e.CustomerId == customerId).CountAsync(cancellationToken);
+
+    /// <summary>顧客IDに紐づく注文を射影（顧客ID・金額）で古い順に取得する</summary>
+    public Task<IReadOnlyList<OrderSummaryRow>> GetSummariesAsync(int customerId, CancellationToken cancellationToken = default) =>
+        Query().Where(e => e.CustomerId == customerId).OrderBy(e => e.OrderId).ToProjectionListAsync(e => new OrderSummaryRow { CustomerId = e.CustomerId, Amount = e.Amount }, cancellationToken);
+}
 
 /// <summary>CustomerProfileEntity 用リポジトリのインメモリ実装</summary>
 public sealed partial class InMemoryCustomerProfileRepository(

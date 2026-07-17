@@ -38,6 +38,18 @@ public sealed class GenerationDiagnostic
 
     /// <summary>利用者向けの診断メッセージ（日本語）</summary>
     public required string Message { get; init; }
+
+    /// <summary>エラー診断を作成する</summary>
+    public static GenerationDiagnostic Error(string message) =>
+        new() { Severity = GenerationDiagnosticSeverity.Error, Message = message };
+
+    /// <summary>警告診断を作成する</summary>
+    public static GenerationDiagnostic Warning(string message) =>
+        new() { Severity = GenerationDiagnosticSeverity.Warning, Message = message };
+
+    /// <summary>情報診断を作成する</summary>
+    public static GenerationDiagnostic Info(string message) =>
+        new() { Severity = GenerationDiagnosticSeverity.Info, Message = message };
 }
 
 /// <summary>

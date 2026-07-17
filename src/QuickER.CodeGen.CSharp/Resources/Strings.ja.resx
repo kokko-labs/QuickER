@@ -169,6 +169,15 @@
   <data name="CodeGen_Query_UnknownEntity" xml:space="preserve">
     <value>名前付きクエリ '{0}' は対象エンティティが見つからないためスキップしました。</value>
   </data>
+  <data name="CodeGen_Query_DanglingParameterColumn" xml:space="preserve">
+    <value>名前付きクエリ '{0}' はパラメータ '{1}' の参照元列が対象エンティティに見つからないためスキップしました。</value>
+  </data>
+  <data name="CodeGen_Query_DanglingFieldColumn" xml:space="preserve">
+    <value>名前付きクエリ '{0}' は射影フィールド '{1}' の参照元列が対象エンティティに見つからないためスキップしました。</value>
+  </data>
+  <data name="CodeGen_Query_DanglingOrderByColumn" xml:space="preserve">
+    <value>名前付きクエリ '{0}' は並び順の参照列が対象エンティティに見つからないためスキップしました。</value>
+  </data>
   <data name="CodeGen_Query_InvalidName" xml:space="preserve">
     <value>名前付きクエリ名 '{0}' から有効なメソッド名を作れません。</value>
   </data>

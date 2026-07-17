@@ -11,11 +11,17 @@ namespace QuickER.Documents;
 /// </remarks>
 public static class JsonStorageService
 {
-    /// <summary>可読性重視のシリアライズ設定（インデント付与・列挙体は名前で出力）</summary>
+    /// <summary>可読性重視のシリアライズ設定（インデント付与・列挙体は名前で出力・null プロパティは省略）</summary>
+    /// <remarks>
+    /// null の省略（<see cref="JsonIgnoreCondition.WhenWritingNull"/>）は「値なし」をキーごと出さない
+    /// 図ファイルの正準形。読み込み側はキー欠落をプロパティ既定値で吸収するため相互に可換で、
+    /// 古い形式（null を明記した図ファイル）もそのまま読める。
+    /// </remarks>
     private static readonly JsonSerializerOptions Options = new()
     {
         WriteIndented = true,
         Converters = { new JsonStringEnumConverter() },
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     };
 
     /// <summary>保存文書をファイルへ保存する（JSON は <c>{ version, schema, layout }</c> 形式）</summary>

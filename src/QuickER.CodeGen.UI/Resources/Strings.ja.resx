@@ -311,12 +311,6 @@
   <data name="QueryDialog_Parameters" xml:space="preserve">
     <value>パラメータ定義</value>
   </data>
-  <data name="QueryDialog_ParamName" xml:space="preserve">
-    <value>名前</value>
-  </data>
-  <data name="QueryDialog_ParamType" xml:space="preserve">
-    <value>型トークン</value>
-  </data>
   <data name="QueryDialog_ParamIsList" xml:space="preserve">
     <value>リスト</value>
   </data>
@@ -359,17 +353,8 @@
   <data name="QueryDialog_ResultTypeName" xml:space="preserve">
     <value>DTO 型名</value>
   </data>
-  <data name="QueryDialog_FieldName" xml:space="preserve">
-    <value>フィールド名</value>
-  </data>
-  <data name="QueryDialog_FieldSource" xml:space="preserve">
-    <value>参照元列</value>
-  </data>
   <data name="QueryDialog_FieldSourceNone" xml:space="preserve">
     <value>（なし＝自由フィールド）</value>
-  </data>
-  <data name="QueryDialog_FieldType" xml:space="preserve">
-    <value>型トークン</value>
   </data>
   <data name="QueryDialog_SignaturePreview" xml:space="preserve">
     <value>メソッド定義プレビュー</value>

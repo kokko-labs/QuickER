@@ -9,7 +9,7 @@ namespace QuickER.Tests.GeneratedRemoteContractFixture;
 /// <remarks>
 /// <para>
 /// 入力の ER 図はクエリフィクスチャ（<see cref="Tests.GeneratedQueryFixture.QueryFixtureDefinition"/>）と
-/// 同一（2 エンティティ＋名前付きクエリ 10 本・VO 有効）で、オプションだけに
+/// 同一（2 エンティティ＋名前付きクエリ 13 本・VO 有効）で、オプションだけに
 /// <c>GenerateRemoteContracts = true</c> を加えたもの。SQLite 方言のQuickER 版 Repository＋EF Core 併存のため、
 /// リモート面（I{Entity}RemoteRepository）・全機能面（I{Entity}Repository）・両面 DI 登録を
 /// QuickER・EF Core の両実装で実ファイル DB（Docker 不要＝CI 常時実行）検証できる。

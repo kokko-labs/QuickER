@@ -4173,17 +4173,46 @@ internal static class RawSqlMapper
                 continue;
             }
 
-            var propertyType = property.PropertyType;
+            // ドライバーが返す素の型は方言で異なる（例: SQLite の INTEGER は long）ため、
+            // プロパティの基底型（Nullable は基底型）へ寄せてから設定する
+            var underlyingType =
+                Nullable.GetUnderlyingType(property.PropertyType) ?? property.PropertyType;
             setters[property.Name] = (target, raw) =>
                 property.SetValue(
                     target,
-                    raw is null
-                        ? null
-                        : SqlValueObjectActivator.Wrap(raw, propertyType)
+                    raw is null ? null : CoerceProjectionValue(raw, underlyingType)
                 );
         }
 
         return new ProjectionAccessor(() => constructor.Invoke(null), setters);
+    }
+
+    /// <summary>射影 DTO のプロパティへ設定する値を基底型へ寄せる（スカラー変換 ConvertSingleValue と同じ意味論）</summary>
+    private static object CoerceProjectionValue(object raw, Type underlyingType)
+    {
+        // 値オブジェクトなら素の値を Create で包む
+        if (typeof(IValueObject).IsAssignableFrom(underlyingType))
+        {
+            return SqlValueObjectActivator.Wrap(raw, underlyingType)!;
+        }
+
+        if (underlyingType.IsInstanceOfType(raw))
+        {
+            return raw;
+        }
+
+        try
+        {
+            return Convert.ChangeType(raw, underlyingType, CultureInfo.InvariantCulture);
+        }
+        catch (Exception ex)
+            when (ex is InvalidCastException or FormatException or OverflowException)
+        {
+            throw new InvalidOperationException(
+                $"生 SQL の射影値（型 {raw.GetType().Name}）を {underlyingType.Name} へ変換できませんでした。",
+                ex
+            );
+        }
     }
 }
 
@@ -7604,6 +7633,18 @@ public partial interface IOrderRemoteRepository : IRemoteRepository<OrderEntity,
     /// <remarks>実装が生成されない実装先（EF Core・SQL 未定義の方言・インメモリ）では partial クラスでの実装が必要。</remarks>
     Task<IReadOnlyList<OrderEntity>> GetByIdsRawAsync(IReadOnlyList<int> ids, CancellationToken cancellationToken = default);
 
+    /// <summary>最新（注文IDが最大）の注文を 1 件取得する（自由 SQL・単一戻り形）</summary>
+    /// <remarks>実装が生成されない実装先（EF Core・SQL 未定義の方言・インメモリ）では partial クラスでの実装が必要。</remarks>
+    Task<OrderEntity?> FindTopRawAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>顧客IDに紐づく注文件数を取得する（自由 SQL・件数戻り形）</summary>
+    /// <remarks>実装が生成されない実装先（EF Core・SQL 未定義の方言・インメモリ）では partial クラスでの実装が必要。</remarks>
+    Task<int> CountByCustomerRawAsync(int customerId, CancellationToken cancellationToken = default);
+
+    /// <summary>顧客IDに紐づく注文のメモ一覧を取得する（自由 SQL・射影戻り形＝自由フィールドの型トークン解決）</summary>
+    /// <remarks>実装が生成されない実装先（EF Core・SQL 未定義の方言・インメモリ）では partial クラスでの実装が必要。</remarks>
+    Task<IReadOnlyList<OrderMemoRow>> GetMemoRowsRawAsync(int customerId, CancellationToken cancellationToken = default);
+
     /// <summary>顧客IDで注文を古い順に検索する（列参照型付け＝VO 有効時は VO 引数）</summary>
     Task<IReadOnlyList<OrderEntity>> GetByCustomerTypedAsync(CustomerIdValue customerId, CancellationToken cancellationToken = default);
 
@@ -7621,10 +7662,20 @@ public partial interface IOrderRepository
 public sealed partial class OrderSummaryRow
 {
     /// <summary>CustomerId</summary>
-    public CustomerIdValue? CustomerId { get; set; }
+    public CustomerIdValue CustomerId { get; set; } = null!;
 
     /// <summary>Amount</summary>
-    public AmountValue? Amount { get; set; }
+    public AmountValue Amount { get; set; } = null!;
+}
+
+/// <summary>名前付きクエリ GetMemoRowsRaw の射影 DTO（orders）</summary>
+public sealed partial class OrderMemoRow
+{
+    /// <summary>OrderId</summary>
+    public int? OrderId { get; set; }
+
+    /// <summary>Memo</summary>
+    public string? Memo { get; set; }
 }
 
 /// <summary>OrderEntity 用リポジトリ実装</summary>
@@ -7678,6 +7729,33 @@ public sealed partial class OrderRepository(
         QueryBySqlAsync(
             @"SELECT * FROM ""orders"" WHERE ""order_id"" IN (@ids) ORDER BY ""order_id""",
             new { ids },
+            cancellationToken
+        );
+
+    /// <summary>最新（注文IDが最大）の注文を 1 件取得する（自由 SQL・単一戻り形）</summary>
+    public async Task<OrderEntity?> FindTopRawAsync(CancellationToken cancellationToken = default)
+    {
+        var items = await QueryBySqlAsync(
+            @"SELECT * FROM ""orders"" ORDER BY ""order_id"" DESC LIMIT 1",
+            null,
+            cancellationToken
+        );
+        return items.Count > 0 ? items[0] : null;
+    }
+
+    /// <summary>顧客IDに紐づく注文件数を取得する（自由 SQL・件数戻り形）</summary>
+    public async Task<int> CountByCustomerRawAsync(int customerId, CancellationToken cancellationToken = default) =>
+        await ExecuteScalarSqlAsync<int?>(
+            @"SELECT COUNT(*) FROM ""orders"" WHERE ""customer_id"" = @customerId",
+            new { customerId },
+            cancellationToken
+        ) ?? 0;
+
+    /// <summary>顧客IDに紐づく注文のメモ一覧を取得する（自由 SQL・射影戻り形＝自由フィールドの型トークン解決）</summary>
+    public Task<IReadOnlyList<OrderMemoRow>> GetMemoRowsRawAsync(int customerId, CancellationToken cancellationToken = default) =>
+        QueryProjectionBySqlAsync<OrderMemoRow>(
+            @"SELECT ""order_id"" AS OrderId, ""memo"" AS Memo FROM ""orders"" WHERE ""customer_id"" = @customerId ORDER BY ""order_id""",
+            new { customerId },
             cancellationToken
         );
 

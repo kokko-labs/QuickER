@@ -558,18 +558,6 @@ namespace QuickER.CodeGen.UI.Resources {
             }
         }
 
-        public static string QueryDialog_ParamName {
-            get {
-                return ResourceManager.GetString("QueryDialog_ParamName", resourceCulture);
-            }
-        }
-
-        public static string QueryDialog_ParamType {
-            get {
-                return ResourceManager.GetString("QueryDialog_ParamType", resourceCulture);
-            }
-        }
-
         public static string QueryDialog_ParamIsList {
             get {
                 return ResourceManager.GetString("QueryDialog_ParamIsList", resourceCulture);
@@ -654,27 +642,9 @@ namespace QuickER.CodeGen.UI.Resources {
             }
         }
 
-        public static string QueryDialog_FieldName {
-            get {
-                return ResourceManager.GetString("QueryDialog_FieldName", resourceCulture);
-            }
-        }
-
-        public static string QueryDialog_FieldSource {
-            get {
-                return ResourceManager.GetString("QueryDialog_FieldSource", resourceCulture);
-            }
-        }
-
         public static string QueryDialog_FieldSourceNone {
             get {
                 return ResourceManager.GetString("QueryDialog_FieldSourceNone", resourceCulture);
-            }
-        }
-
-        public static string QueryDialog_FieldType {
-            get {
-                return ResourceManager.GetString("QueryDialog_FieldType", resourceCulture);
             }
         }
 

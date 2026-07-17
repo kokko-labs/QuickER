@@ -94,7 +94,7 @@ internal sealed partial class CSharpGenerationModelBuilder
                 )
             );
             diagnostics.Add(
-                Warning(
+                GenerationDiagnostic.Warning(
                     string.Format(
                         Strings.CodeGen_Warning_ValueObjectDefinitionMismatch,
                         className,

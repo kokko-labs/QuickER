@@ -347,6 +347,47 @@ public static class GeneratedRemoteEndpoints
         );
 
         group.MapPost(
+            "Order/FindTopRaw",
+            (HttpContext context) =>
+                ExecuteAsync(
+                    context,
+                    async () =>
+                    {
+                        var repository = context.RequestServices.GetRequiredService<IOrderRemoteRepository>();
+                        return (object?)await repository.FindTopRawAsync(context.RequestAborted);
+                    }
+                )
+        );
+
+        group.MapPost(
+            "Order/CountByCustomerRaw",
+            (HttpContext context) =>
+                ExecuteAsync(
+                    context,
+                    async () =>
+                    {
+                        var request = await ReadRequestAsync<OrderCountByCustomerRawRequest>(context);
+                        var repository = context.RequestServices.GetRequiredService<IOrderRemoteRepository>();
+                        return (object?)await repository.CountByCustomerRawAsync(request.CustomerId, context.RequestAborted);
+                    }
+                )
+        );
+
+        group.MapPost(
+            "Order/GetMemoRowsRaw",
+            (HttpContext context) =>
+                ExecuteAsync(
+                    context,
+                    async () =>
+                    {
+                        var request = await ReadRequestAsync<OrderGetMemoRowsRawRequest>(context);
+                        var repository = context.RequestServices.GetRequiredService<IOrderRemoteRepository>();
+                        return (object?)await repository.GetMemoRowsRawAsync(request.CustomerId, context.RequestAborted);
+                    }
+                )
+        );
+
+        group.MapPost(
             "Order/GetByCustomerTyped",
             (HttpContext context) =>
                 ExecuteAsync(
@@ -395,6 +436,12 @@ public static class GeneratedRemoteEndpoints
 
     /// <summary>GetByIdsRaw（Order）のリクエスト本文</summary>
     private sealed record OrderGetByIdsRawRequest(IReadOnlyList<int> Ids);
+
+    /// <summary>CountByCustomerRaw（Order）のリクエスト本文</summary>
+    private sealed record OrderCountByCustomerRawRequest(int CustomerId);
+
+    /// <summary>GetMemoRowsRaw（Order）のリクエスト本文</summary>
+    private sealed record OrderGetMemoRowsRawRequest(int CustomerId);
 
     /// <summary>GetByCustomerTyped（Order）のリクエスト本文</summary>
     private sealed record OrderGetByCustomerTypedRequest(CustomerIdValue CustomerId);

@@ -5083,17 +5083,46 @@ internal static class RawSqlMapper
                 continue;
             }
 
-            var propertyType = property.PropertyType;
+            // ドライバーが返す素の型は方言で異なる（例: SQLite の INTEGER は long）ため、
+            // プロパティの基底型（Nullable は基底型）へ寄せてから設定する
+            var underlyingType =
+                Nullable.GetUnderlyingType(property.PropertyType) ?? property.PropertyType;
             setters[property.Name] = (target, raw) =>
                 property.SetValue(
                     target,
-                    raw is null
-                        ? null
-                        : SqlValueObjectActivator.Wrap(raw, propertyType)
+                    raw is null ? null : CoerceProjectionValue(raw, underlyingType)
                 );
         }
 
         return new ProjectionAccessor(() => constructor.Invoke(null), setters);
+    }
+
+    /// <summary>射影 DTO のプロパティへ設定する値を基底型へ寄せる（スカラー変換 ConvertSingleValue と同じ意味論）</summary>
+    private static object CoerceProjectionValue(object raw, Type underlyingType)
+    {
+        // 値オブジェクトなら素の値を Create で包む
+        if (typeof(IValueObject).IsAssignableFrom(underlyingType))
+        {
+            return SqlValueObjectActivator.Wrap(raw, underlyingType)!;
+        }
+
+        if (underlyingType.IsInstanceOfType(raw))
+        {
+            return raw;
+        }
+
+        try
+        {
+            return Convert.ChangeType(raw, underlyingType, CultureInfo.InvariantCulture);
+        }
+        catch (Exception ex)
+            when (ex is InvalidCastException or FormatException or OverflowException)
+        {
+            throw new InvalidOperationException(
+                $"生 SQL の射影値（型 {raw.GetType().Name}）を {underlyingType.Name} へ変換できませんでした。",
+                ex
+            );
+        }
     }
 }
 
@@ -8411,7 +8440,17 @@ public sealed partial class CustomerRepository(
         ICustomerRepository { }
 
 /// <summary>OrderEntity 用リポジトリインターフェース</summary>
-public partial interface IOrderRepository : IRepository<OrderEntity, OrderIdValue> { }
+public partial interface IOrderRepository : IRepository<OrderEntity, OrderIdValue>
+{
+    /// <summary>メモの部分一致（CONTAINS→LIKE。%・_ 等はリテラル扱い）で注文を検索する</summary>
+    Task<IReadOnlyList<OrderEntity>> SearchMemoContainsAsync(string keyword, CancellationToken cancellationToken = default);
+
+    /// <summary>メモ未設定（IS NULL）の注文を検索する</summary>
+    Task<IReadOnlyList<OrderEntity>> GetMissingMemoAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>金額（decimal・VO 列）が下限以上の注文を検索する</summary>
+    Task<IReadOnlyList<OrderEntity>> GetExpensiveAsync(decimal minAmount, CancellationToken cancellationToken = default);
+}
 
 /// <summary>OrderEntity 用リポジトリ実装</summary>
 public sealed partial class OrderRepository(
@@ -8422,7 +8461,20 @@ public sealed partial class OrderRepository(
         connectionFactory,
         saveHooks
     ),
-        IOrderRepository { }
+        IOrderRepository
+{
+    /// <summary>メモの部分一致（CONTAINS→LIKE。%・_ 等はリテラル扱い）で注文を検索する</summary>
+    public Task<IReadOnlyList<OrderEntity>> SearchMemoContainsAsync(string keyword, CancellationToken cancellationToken = default) =>
+        Query().Where(e => e.Memo!.Contains(keyword)).OrderBy(e => e.OrderId).ToListAsync(cancellationToken);
+
+    /// <summary>メモ未設定（IS NULL）の注文を検索する</summary>
+    public Task<IReadOnlyList<OrderEntity>> GetMissingMemoAsync(CancellationToken cancellationToken = default) =>
+        Query().Where(e => e.Memo == null).OrderBy(e => e.OrderId).ToListAsync(cancellationToken);
+
+    /// <summary>金額（decimal・VO 列）が下限以上の注文を検索する</summary>
+    public Task<IReadOnlyList<OrderEntity>> GetExpensiveAsync(decimal minAmount, CancellationToken cancellationToken = default) =>
+        Query().Where(e => e.Amount >= AmountValue.Create(minAmount)).OrderBy(e => e.OrderId).ToListAsync(cancellationToken);
+}
 
 /// <summary>CustomerProfileEntity 用リポジトリインターフェース</summary>
 public partial interface ICustomerProfileRepository : IRepository<CustomerProfileEntity, ProfileIdValue> { }
@@ -10050,7 +10102,20 @@ public sealed partial class EfCoreOrderRepository(
         contextFactory,
         saveHooks
     ),
-        IOrderRepository { }
+        IOrderRepository
+{
+    /// <summary>メモの部分一致（CONTAINS→LIKE。%・_ 等はリテラル扱い）で注文を検索する</summary>
+    public Task<IReadOnlyList<OrderEntity>> SearchMemoContainsAsync(string keyword, CancellationToken cancellationToken = default) =>
+        Query().Where(e => e.Memo!.Contains(keyword)).OrderBy(e => e.OrderId).ToListAsync(cancellationToken);
+
+    /// <summary>メモ未設定（IS NULL）の注文を検索する</summary>
+    public Task<IReadOnlyList<OrderEntity>> GetMissingMemoAsync(CancellationToken cancellationToken = default) =>
+        Query().Where(e => e.Memo == null).OrderBy(e => e.OrderId).ToListAsync(cancellationToken);
+
+    /// <summary>金額（decimal・VO 列）が下限以上の注文を検索する</summary>
+    public Task<IReadOnlyList<OrderEntity>> GetExpensiveAsync(decimal minAmount, CancellationToken cancellationToken = default) =>
+        Query().Where(e => e.Amount >= AmountValue.Create(minAmount)).OrderBy(e => e.OrderId).ToListAsync(cancellationToken);
+}
 
 /// <summary>CustomerProfileEntity 用リポジトリの EF Core 版実装</summary>
 public sealed partial class EfCoreCustomerProfileRepository(

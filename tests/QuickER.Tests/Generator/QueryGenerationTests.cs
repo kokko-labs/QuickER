@@ -266,10 +266,10 @@ public class QueryGenerationTests
         result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
         var content = AllContent(result);
 
-        // DTO（全プロパティ NULL 許容・settable＝寛容マッパー互換）
+        // DTO（settable＝寛容マッパー互換。NULL 許容は列から引き当てる＝両列とも非 NULL）
         content.Should().Contain("public sealed partial class OrderSummaryRow");
-        content.Should().Contain("public int? CustomerId { get; set; }");
-        content.Should().Contain("public decimal? Amount { get; set; }");
+        content.Should().Contain("public int CustomerId { get; set; }");
+        content.Should().Contain("public decimal Amount { get; set; }");
 
         // 本体（選択式つき射影終端）
         content
@@ -277,6 +277,131 @@ public class QueryGenerationTests
             .Contain(
                 ".ToProjectionListAsync(e => new OrderSummaryRow { CustomerId = e.CustomerId, Amount = e.Amount }, cancellationToken)"
             );
+    }
+
+    /// <summary>
+    /// 射影 DTO の NULL 許容が「列参照＝列の NULL 許容・自由フィールド＝既定 NULL 許容・明示指定＝優先」で
+    /// 引き当てられ、非 NULL の参照型には null! 初期化子が付くことを検証する（C-2）。
+    /// </summary>
+    [Fact(DisplayName = "射影 DTO の NULL 許容は列参照・自由・明示指定で正しく引き当てる")]
+    public void Generate_ProjectionDto_DerivesNullabilityFromColumns()
+    {
+        var customerId = _order.Columns.First(c => c.Name == "CustomerId");
+        var memo = _order.Columns.First(c => c.Name == "Memo");
+        var diagram = CreateDiagram(
+            new QueryDefinition
+            {
+                Name = "GetRows",
+                Returns = QueryReturnShape.Projection,
+                ResultTypeName = "OrderRow",
+                Implementation = QueryImplementationKind.Sql,
+                Sql = { ["sqlserver"] = "SELECT ..." },
+                Fields =
+                {
+                    // 列参照×非 NULL 列 → 非 NULL の値型
+                    new ProjectionField { Name = "CustomerId", SourceColumnId = customerId.Id },
+                    // 列参照×NULL 許容列 → NULL 許容の参照型
+                    new ProjectionField { Name = "Memo", SourceColumnId = memo.Id },
+                    // 列参照×明示 IsNullable=true → 列が非 NULL でも NULL 許容へ上書き
+                    new ProjectionField
+                    {
+                        Name = "OptionalId",
+                        SourceColumnId = customerId.Id,
+                        IsNullable = true,
+                    },
+                    // 自由フィールド → 既定で NULL 許容（寛容マッパーの列欠落・集計 NULL を安全に受ける）
+                    new ProjectionField { Name = "Total", Type = "decimal(12,2)" },
+                    // 自由フィールド×明示 IsNullable=false → 非 NULL（参照型は null! 初期化）
+                    new ProjectionField
+                    {
+                        Name = "Label",
+                        Type = "string(50)",
+                        IsNullable = false,
+                    },
+                },
+            }
+        );
+
+        var result = Generate(diagram, CreateOptions());
+
+        result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
+        var content = AllContent(result);
+
+        content.Should().Contain("public int CustomerId { get; set; }");
+        content.Should().Contain("public string? Memo { get; set; }");
+        content.Should().Contain("public int? OptionalId { get; set; }");
+        content.Should().Contain("public decimal? Total { get; set; }");
+        content.Should().Contain("public string Label { get; set; } = null!;");
+    }
+
+    /// <summary>
+    /// ダングリング Guid 参照（存在しないエンティティ・列参照）のクエリ定義は、生成前の整合性検証で
+    /// ローカライズ済みの警告としてスキップされ、他のクエリと生成全体は継続することを検証する（C-5）。
+    /// </summary>
+    [Fact(DisplayName = "ダングリング Guid 参照のクエリは警告でスキップし生成は継続する")]
+    public void Generate_DanglingGuidReferences_WarnAndSkip()
+    {
+        var missingColumnId = Guid.NewGuid();
+        var diagram = CreateDiagram(
+            new QueryDefinition
+            {
+                Name = "ValidQuery",
+                Returns = QueryReturnShape.Count,
+                Condition = "Amount > 0",
+            },
+            new QueryDefinition
+            {
+                Name = "DanglingParameter",
+                Parameters =
+                {
+                    new QueryParameter { Name = "typedId", SourceColumnId = missingColumnId },
+                },
+            },
+            new QueryDefinition
+            {
+                Name = "DanglingField",
+                Returns = QueryReturnShape.Projection,
+                ResultTypeName = "DanglingRow",
+                Fields =
+                {
+                    new ProjectionField { Name = "Ghost", SourceColumnId = missingColumnId },
+                },
+            },
+            new QueryDefinition
+            {
+                Name = "DanglingOrderBy",
+                OrderBy = { new QueryOrdering { ColumnId = missingColumnId } },
+            }
+        );
+
+        // 存在しないエンティティを参照するクエリ（削除済みエンティティの残骸）
+        diagram.Queries.Add(new QueryDefinition { EntityId = Guid.NewGuid(), Name = "Orphan" });
+
+        var result = Generate(diagram, CreateOptions());
+
+        // すべて警告（エラーなし）でファイルは生成され、有効なクエリだけが出力される
+        result.HasErrors.Should().BeFalse(FormatDiagnostics(result));
+        result.Files.Should().NotBeEmpty();
+        result
+            .Diagnostics.Where(d => d.Severity == GenerationDiagnosticSeverity.Warning)
+            .Should()
+            .HaveCount(4);
+        result.Diagnostics.Select(d => d.Message).Should().Contain(m => m.Contains("typedId"));
+        result.Diagnostics.Select(d => d.Message).Should().Contain(m => m.Contains("Ghost"));
+        result
+            .Diagnostics.Select(d => d.Message)
+            .Should()
+            .Contain(m => m.Contains("DanglingOrderBy"));
+        result.Diagnostics.Select(d => d.Message).Should().Contain(m => m.Contains("Orphan"));
+
+        var content = AllContent(result);
+        content.Should().Contain("ValidQueryAsync(");
+        content
+            .Should()
+            .NotContain("DanglingParameterAsync(")
+            .And.NotContain("DanglingFieldAsync(")
+            .And.NotContain("DanglingOrderByAsync(")
+            .And.NotContain("OrphanAsync(");
     }
 
     /// <summary>自由 SQL: QuickER 版 Repository のみ実装され、EF Core 版 Repository は契約宣言のみ（manual 扱い）になることを検証する</summary>

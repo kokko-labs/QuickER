@@ -29,16 +29,15 @@ internal sealed partial class CSharpGenerationModelBuilder
                 ? "null"
                 : $"new {{ {string.Join(", ", shape.PayloadParameters.Select(p => p.Name))} }}";
 
-        var builder = new StringBuilder();
-        builder.Append("    /// <summary>").Append(shape.Summary).Append("</summary>\n");
-        builder
-            .Append("    public ")
-            .Append(shape.ReturnTypeName)
-            .Append(' ')
-            .Append(shape.MethodName)
-            .Append('(')
-            .Append(shape.ParameterList)
-            .Append(") =>\n        InvokeAsync<")
+        var builder = AppendDocSummary(new StringBuilder(), shape.Summary);
+        AppendMethodHeader(
+                builder,
+                "public ",
+                shape.ReturnTypeName,
+                shape.MethodName,
+                shape.ParameterList
+            )
+            .Append(" =>\n        InvokeAsync<")
             .Append(innerType)
             .Append(">(\"")
             .Append(operation)

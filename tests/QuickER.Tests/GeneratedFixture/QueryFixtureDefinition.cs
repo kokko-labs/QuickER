@@ -15,7 +15,8 @@ namespace QuickER.Tests.GeneratedQueryFixture;
 /// </para>
 /// <para>
 /// クエリはミニ DSL の全戻り形（一覧・単一・件数・射影）・文字列一致・IN（VO 列×リストパラメータ）・
-/// ページング・自由 SQL（リストパラメータの IN 展開込み）・manual を網羅する。
+/// ページング・自由 SQL の全戻り形（一覧・単一・件数・スカラー・射影。リストパラメータの IN 展開込み）・
+/// manual を網羅する。
 /// </para>
 /// </remarks>
 public static class QueryFixtureDefinition
@@ -54,6 +55,11 @@ public static class QueryFixtureDefinition
     private static readonly Guid QueryGetByCustomerTyped = new(
         "dddddddd-0000-0000-0000-000000000010"
     );
+    private static readonly Guid QueryFindTopRaw = new("dddddddd-0000-0000-0000-000000000011");
+    private static readonly Guid QueryCountByCustomerRaw = new(
+        "dddddddd-0000-0000-0000-000000000012"
+    );
+    private static readonly Guid QueryGetMemoRowsRaw = new("dddddddd-0000-0000-0000-000000000013");
 
     /// <summary>可搬フィクスチャの図（SQL Server 型表記）に名前付きクエリ定義を追加して返す</summary>
     public static ErDiagram Build()
@@ -237,6 +243,71 @@ public static class QueryFixtureDefinition
                         Type = "int32",
                         IsList = true,
                     },
+                },
+            }
+        );
+
+        diagram.Queries.Add(
+            new QueryDefinition
+            {
+                Id = QueryFindTopRaw,
+                EntityId = orders.Id,
+                Name = "FindTopRaw",
+                Description = "最新（注文IDが最大）の注文を 1 件取得する（自由 SQL・単一戻り形）",
+                Returns = QueryReturnShape.Single,
+                Implementation = QueryImplementationKind.Sql,
+                Sql =
+                {
+                    ["sqlite"] = "SELECT * FROM \"orders\" ORDER BY \"order_id\" DESC LIMIT 1",
+                },
+            }
+        );
+
+        diagram.Queries.Add(
+            new QueryDefinition
+            {
+                Id = QueryCountByCustomerRaw,
+                EntityId = orders.Id,
+                Name = "CountByCustomerRaw",
+                Description = "顧客IDに紐づく注文件数を取得する（自由 SQL・件数戻り形）",
+                Returns = QueryReturnShape.Count,
+                Implementation = QueryImplementationKind.Sql,
+                Sql =
+                {
+                    ["sqlite"] =
+                        "SELECT COUNT(*) FROM \"orders\" WHERE \"customer_id\" = @customerId",
+                },
+                Parameters =
+                {
+                    new QueryParameter { Name = "customerId", Type = "int32" },
+                },
+            }
+        );
+
+        diagram.Queries.Add(
+            new QueryDefinition
+            {
+                Id = QueryGetMemoRowsRaw,
+                EntityId = orders.Id,
+                Name = "GetMemoRowsRaw",
+                Description =
+                    "顧客IDに紐づく注文のメモ一覧を取得する（自由 SQL・射影戻り形＝自由フィールドの型トークン解決）",
+                Returns = QueryReturnShape.Projection,
+                ResultTypeName = "OrderMemoRow",
+                Implementation = QueryImplementationKind.Sql,
+                Sql =
+                {
+                    ["sqlite"] =
+                        "SELECT \"order_id\" AS OrderId, \"memo\" AS Memo FROM \"orders\" WHERE \"customer_id\" = @customerId ORDER BY \"order_id\"",
+                },
+                Parameters =
+                {
+                    new QueryParameter { Name = "customerId", Type = "int32" },
+                },
+                Fields =
+                {
+                    new ProjectionField { Name = "OrderId", Type = "int32" },
+                    new ProjectionField { Name = "Memo", Type = "string(50)" },
                 },
             }
         );

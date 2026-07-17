@@ -18,8 +18,8 @@ namespace QuickER.Tests.Integration;
 /// <para>
 /// 入力はクエリフィクスチャ（<see cref="QueryFixtureDefinition"/>）。ミニ DSL の全戻り形
 /// （一覧＋ページング・単一・件数・射影）・文字列一致（LIKE→Contains）・IN（VO 列×リストパラメータ）・
-/// 自由 SQL（スカラー集計・IN のリスト展開・空リスト）・manual（partial 実装）を、生成された
-/// <see cref="IOrderRepository"/> のメソッド呼び出しだけで検証する。
+/// 自由 SQL の全戻り形（一覧＝IN のリスト展開・空リスト・単一・件数・スカラー集計・射影）・
+/// manual（partial 実装）を、生成された <see cref="IOrderRepository"/> のメソッド呼び出しだけで検証する。
 /// </para>
 /// <para>
 /// EF Core Sqlite の decimal 制約（サーバーサイド比較・並び替え非対応）に合わせ、フィクスチャの
@@ -252,6 +252,50 @@ public abstract class NamedQueryRuntimeTestsBase : IDisposable
         var first = await orders.SpecialLookupAsync(1, Ct);
         first.Should().NotBeNull();
         first!.OrderId.Value.Should().Be(10);
+    }
+
+    /// <summary>12. 自由 SQL の単一戻り形（FindTopRaw）が 1 件を返す（行なしは null）</summary>
+    [Fact(DisplayName = "[NamedQuery] 12: 自由 SQL の単一戻り形が 1 件（行なしは null）を返す")]
+    public async Task SqlSingle_ReturnsFirstRowOrNull()
+    {
+        await ResetAndSeedAsync();
+        var orders = CreateOrderRepository();
+
+        var top = await orders.FindTopRawAsync(Ct);
+        top.Should().NotBeNull();
+        top!.OrderId.Value.Should().Be(13);
+        top.Memo.Should().BeNull("注文 13 のメモは NULL（VO 復元込みの行マップを確認）");
+
+        // 全行削除後は null
+        await orders.ExecuteSqlAsync("DELETE FROM \"orders\"", null, Ct);
+        (await orders.FindTopRawAsync(Ct)).Should().BeNull();
+    }
+
+    /// <summary>13. 自由 SQL の件数戻り形（CountByCustomerRaw）が条件一致数を返す</summary>
+    [Fact(DisplayName = "[NamedQuery] 13: 自由 SQL の件数戻り形が条件一致数を返す")]
+    public async Task SqlCount_ReturnsMatchingCount()
+    {
+        await ResetAndSeedAsync();
+        var orders = CreateOrderRepository();
+
+        (await orders.CountByCustomerRawAsync(1, Ct)).Should().Be(3);
+        (await orders.CountByCustomerRawAsync(2, Ct)).Should().Be(1);
+        (await orders.CountByCustomerRawAsync(999, Ct)).Should().Be(0);
+    }
+
+    /// <summary>14. 自由 SQL の射影戻り形（GetMemoRowsRaw）が列別名で DTO へマップされる（NULL 列含む）</summary>
+    [Fact(DisplayName = "[NamedQuery] 14: 自由 SQL の射影戻り形が DTO 一覧を返す（NULL 列含む）")]
+    public async Task SqlProjection_ReturnsDtoRows()
+    {
+        await ResetAndSeedAsync();
+        var orders = CreateOrderRepository();
+
+        // 顧客 1 の注文（10, 11, 13 の昇順）。13 のメモは NULL＝DTO の null 許容プロパティで受ける
+        var rows = await orders.GetMemoRowsRawAsync(1, Ct);
+        rows.Select(r => r.OrderId).Should().Equal(10, 11, 13);
+        rows.Select(r => r.Memo).Should().Equal("apple pie", "banana", null);
+
+        (await orders.GetMemoRowsRawAsync(999, Ct)).Should().BeEmpty();
     }
 
     /// <summary>使い終えた一時 DB を破棄する（派生の DI コンテナ破棄は派生側で行う）</summary>

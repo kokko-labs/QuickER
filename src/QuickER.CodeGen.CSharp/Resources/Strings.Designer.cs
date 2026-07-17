@@ -276,6 +276,24 @@ namespace QuickER.CodeGen.CSharp.Resources {
             }
         }
 
+        public static string CodeGen_Query_DanglingParameterColumn {
+            get {
+                return ResourceManager.GetString("CodeGen_Query_DanglingParameterColumn", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_Query_DanglingFieldColumn {
+            get {
+                return ResourceManager.GetString("CodeGen_Query_DanglingFieldColumn", resourceCulture);
+            }
+        }
+
+        public static string CodeGen_Query_DanglingOrderByColumn {
+            get {
+                return ResourceManager.GetString("CodeGen_Query_DanglingOrderByColumn", resourceCulture);
+            }
+        }
+
         public static string CodeGen_Query_InvalidName {
             get {
                 return ResourceManager.GetString("CodeGen_Query_InvalidName", resourceCulture);

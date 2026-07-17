@@ -24,9 +24,37 @@ public sealed partial class OrderRepository
             .FirstOrDefaultAsync(cancellationToken);
 }
 
-/// <summary>EF Core 実装で生成されないメンバー（自由 SQL 2 件＋manual 1 件）の partial 実装</summary>
+/// <summary>EF Core 実装で生成されないメンバー（自由 SQL 5 件＋manual 1 件）の partial 実装</summary>
 public sealed partial class EfCoreOrderRepository
 {
+    /// <summary>最新（注文IDが最大）の注文を 1 件取得する（QuickER 側の自由 SQL と同じ意味論）</summary>
+    public Task<OrderEntity?> FindTopRawAsync(CancellationToken cancellationToken = default) =>
+        Query().OrderByDescending(e => e.OrderId).FirstOrDefaultAsync(cancellationToken);
+
+    /// <summary>顧客IDに紐づく注文件数を取得する（QuickER 側の自由 SQL と同じ意味論）</summary>
+    public Task<int> CountByCustomerRawAsync(
+        int customerId,
+        CancellationToken cancellationToken = default
+    ) =>
+        Query()
+            .Where(e => e.CustomerId == CustomerIdValue.Create(customerId))
+            .CountAsync(cancellationToken);
+
+    /// <summary>顧客IDに紐づく注文のメモ一覧を取得する（QuickER 側の自由 SQL と同じ意味論）</summary>
+    public async Task<IReadOnlyList<OrderMemoRow>> GetMemoRowsRawAsync(
+        int customerId,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var items = await Query()
+            .Where(e => e.CustomerId == CustomerIdValue.Create(customerId))
+            .OrderBy(e => e.OrderId)
+            .ToListAsync(cancellationToken);
+        return items
+            .Select(e => new OrderMemoRow { OrderId = e.OrderId.Value, Memo = e.Memo?.Value })
+            .ToList();
+    }
+
     /// <summary>顧客IDに紐づく注文金額の合計（該当なしは null。QuickER 側の SUM と同じ意味論）</summary>
     public async Task<decimal?> SumAmountsAsync(
         int customerId,

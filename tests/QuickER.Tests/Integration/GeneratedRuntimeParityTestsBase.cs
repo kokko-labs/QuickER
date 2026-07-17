@@ -687,4 +687,82 @@ public abstract class GeneratedRuntimeParityTestsBase(SqlServerContainerFixture 
         );
         affected.Should().Be(1);
     }
+
+    /// <summary>名前付きクエリ検証用の共通シード（親 1 件＋メモ・金額のバリエーション 5 件）を投入する</summary>
+    /// <remarks>
+    /// memo は LIKE エスケープ検証のためワイルドカード文字（% / _ / [）をリテラルとして含む値を混ぜる。
+    /// </remarks>
+    private async Task<IOrderRepository> SeedNamedQueryOrdersAsync()
+    {
+        var customers = CreateCustomerRepository();
+        await customers.InsertAsync(NewCustomer(1, "Alice"), Ct);
+
+        var orders = CreateOrderRepository();
+        await orders.InsertAsync(NewOrder(10, 1, 100m, memo: "sale 100% off"), Ct);
+        await orders.InsertAsync(NewOrder(11, 1, 50.5m, memo: "sale 100x off"), Ct);
+        await orders.InsertAsync(NewOrder(12, 1, 200m, memo: "code_a"), Ct);
+        await orders.InsertAsync(NewOrder(13, 1, 75m, memo: "code[a]"), Ct);
+        await orders.InsertAsync(NewOrder(14, 1, 50.5m, memo: null), Ct);
+        return orders;
+    }
+
+    /// <summary>17a. 名前付きクエリ CONTAINS→LIKE: ワイルドカード文字（% / _ / [）がリテラル扱いでエスケープされる</summary>
+    [Fact(
+        DisplayName = "[Parity] 17a: 名前付きクエリの CONTAINS→LIKE がワイルドカードをエスケープする"
+    )]
+    public async Task NamedQuery_Contains_EscapesLikeWildcards()
+    {
+        await ResetAndCreateSchemaAsync();
+        var orders = await SeedNamedQueryOrdersAsync();
+
+        // "100%" は「100 で始まる任意列」ではなくリテラル一致（% エスケープ）＝10 のみ
+        var percent = await orders.SearchMemoContainsAsync("100%", Ct);
+        percent.Select(o => o.OrderId.Value).Should().Equal(10);
+
+        // "code_" は「code + 任意 1 文字」ではなくリテラル一致（_ エスケープ）＝12 のみ
+        var underscore = await orders.SearchMemoContainsAsync("code_", Ct);
+        underscore.Select(o => o.OrderId.Value).Should().Equal(12);
+
+        // "[a]" は文字クラスではなくリテラル一致（[ エスケープ。SQL Server 特有の角括弧）＝13 のみ
+        var bracket = await orders.SearchMemoContainsAsync("[a]", Ct);
+        bracket.Select(o => o.OrderId.Value).Should().Equal(13);
+
+        // 通常の部分一致（エスケープ対象なし）は該当全件を返す
+        var plain = await orders.SearchMemoContainsAsync("sale", Ct);
+        plain.Select(o => o.OrderId.Value).Should().Equal(10, 11);
+
+        // NULL メモの行は CONTAINS に一致しない（NULL 意味論）
+        (await orders.SearchMemoContainsAsync("off", Ct))
+            .Select(o => o.OrderId.Value)
+            .Should()
+            .Equal(10, 11);
+    }
+
+    /// <summary>17b. 名前付きクエリ IS NULL: NULL 許容列の未設定行のみ返す</summary>
+    [Fact(DisplayName = "[Parity] 17b: 名前付きクエリの IS NULL が NULL 行のみ返す")]
+    public async Task NamedQuery_IsNull_ReturnsNullRows()
+    {
+        await ResetAndCreateSchemaAsync();
+        var orders = await SeedNamedQueryOrdersAsync();
+
+        var missing = await orders.GetMissingMemoAsync(Ct);
+        missing.Select(o => o.OrderId.Value).Should().Equal(14);
+    }
+
+    /// <summary>17c. 名前付きクエリ decimal 比較（VO 列 &gt;= パラメータ）: 境界値込みで正しい行を返す</summary>
+    [Fact(DisplayName = "[Parity] 17c: 名前付きクエリの decimal 比較が正しい行を返す")]
+    public async Task NamedQuery_DecimalComparison_ReturnsCorrectRows()
+    {
+        await ResetAndCreateSchemaAsync();
+        var orders = await SeedNamedQueryOrdersAsync();
+
+        // 境界値（50.5）ちょうどを含む＝ >= の意味論と decimal スケールの往復を確認
+        var fromBoundary = await orders.GetExpensiveAsync(50.5m, Ct);
+        fromBoundary.Select(o => o.OrderId.Value).Should().Equal(10, 11, 12, 13, 14);
+
+        var expensive = await orders.GetExpensiveAsync(100m, Ct);
+        expensive.Select(o => o.OrderId.Value).Should().Equal(10, 12);
+
+        (await orders.GetExpensiveAsync(1000m, Ct)).Should().BeEmpty();
+    }
 }
