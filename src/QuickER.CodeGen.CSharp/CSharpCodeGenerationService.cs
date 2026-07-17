@@ -240,18 +240,18 @@ public sealed class CSharpCodeGenerationService
             files.Add(
                 new GeneratedFile
                 {
-                    FileName = ApiDocsFileName(options.OutputFileName),
+                    FileName = ApiDocsFileName(options),
                     Content = _apiDocRenderer.Render(model, options, ApiDocLanguage.English),
                 }
             );
 
-            // IncludeJapaneseApiDocs が ON のときだけ、日本語版 {ベース名}.ja.g.md を併産する。
+            // IncludeJapaneseApiDocs が ON のときだけ、日本語版（.ja.g.md）を併産する。
             if (options.IncludeJapaneseApiDocs)
             {
                 files.Add(
                     new GeneratedFile
                     {
-                        FileName = JapaneseApiDocsFileName(options.OutputFileName),
+                        FileName = JapaneseApiDocsFileName(options),
                         Content = _apiDocRenderer.Render(model, options, ApiDocLanguage.Japanese),
                     }
                 );
@@ -558,31 +558,50 @@ public sealed class CSharpCodeGenerationService
             : Path.GetFileNameWithoutExtension(value) + GeneratedFilePlanner.GeneratedCSharpSuffix;
     }
 
+    /// <summary>分割出力時の API リファレンス Markdown の固定ファイル名（カテゴリ別固定名の流儀に合わせる）</summary>
+    private const string SplitApiDocsFileName = "ApiDocs.g.md";
+
+    /// <summary>分割出力時の日本語版 API リファレンス Markdown の固定ファイル名</summary>
+    private const string SplitJapaneseApiDocsFileName = "ApiDocs.ja.g.md";
+
     /// <summary>
-    /// API リファレンス Markdown の出力ファイル名を、正規化済みの C# 出力ファイル名から導出する。
+    /// API リファレンス Markdown の出力ファイル名を導出する。
     /// </summary>
     /// <remarks>
-    /// <see cref="SanitizeFileName"/> で ".g.cs" に正規化した名前の末尾を ".g.md" に置換する
-    /// （例: <c>EcOrder.g.cs</c> → <c>EcOrder.g.md</c>＝生成コードと同じベース名・拡張子でドキュメントと判別する）。
-    /// <see cref="GeneratedFileWriter"/> は ".g.md" 末尾の書き出しを許可する（手書きファイルの保護は維持する）。
+    /// 非分割時は <see cref="SanitizeFileName"/> で ".g.cs" に正規化した <see cref="CodeGenerationOptions.OutputFileName"/> の
+    /// 末尾を ".g.md" に置換する（例: <c>EcOrder.g.cs</c> → <c>EcOrder.g.md</c>＝生成コードと同じベース名・拡張子で
+    /// ドキュメントと判別する）。分割時（<see cref="CodeGenerationOptions.SplitFilesByCategory"/>）は <c>Entities.g.cs</c> 等の
+    /// カテゴリ別固定名と同じ流儀の固定名 <c>ApiDocs.g.md</c> にする（分割時の OutputFileName は .cs / .md とも出力名に
+    /// 関与しない＝GUI / CLI で仕様が揃う）。<see cref="GeneratedFileWriter"/> は ".g.md" 末尾の書き出しを許可する
+    /// （手書きファイルの保護は維持する）。
     /// </remarks>
-    private static string ApiDocsFileName(string outputFileName)
+    private static string ApiDocsFileName(CodeGenerationOptions options)
     {
-        var normalized = SanitizeFileName(outputFileName);
+        if (options.SplitFilesByCategory)
+        {
+            return SplitApiDocsFileName;
+        }
+
+        var normalized = SanitizeFileName(options.OutputFileName);
         return GeneratedFilePlanner.StripGeneratedCSharpSuffix(normalized) + ".g.md";
     }
 
     /// <summary>
-    /// 日本語版 API リファレンス Markdown の出力ファイル名を、正規化済みの C# 出力ファイル名から導出する。
+    /// 日本語版 API リファレンス Markdown の出力ファイル名を導出する。
     /// </summary>
     /// <remarks>
     /// <see cref="ApiDocsFileName"/> の英語版（<c>.g.md</c>）に対し、日本語版は <c>.ja.g.md</c> を付す
-    /// （例: <c>EcOrder.g.cs</c> → <c>EcOrder.ja.g.md</c>）。<c>.g.md</c> で終わるため
-    /// <see cref="GeneratedFileWriter"/> の書き出しガードも従来どおり通る。
+    /// （非分割時の例: <c>EcOrder.g.cs</c> → <c>EcOrder.ja.g.md</c>・分割時は固定名 <c>ApiDocs.ja.g.md</c>）。
+    /// <c>.g.md</c> で終わるため <see cref="GeneratedFileWriter"/> の書き出しガードも従来どおり通る。
     /// </remarks>
-    private static string JapaneseApiDocsFileName(string outputFileName)
+    private static string JapaneseApiDocsFileName(CodeGenerationOptions options)
     {
-        var normalized = SanitizeFileName(outputFileName);
+        if (options.SplitFilesByCategory)
+        {
+            return SplitJapaneseApiDocsFileName;
+        }
+
+        var normalized = SanitizeFileName(options.OutputFileName);
         return GeneratedFilePlanner.StripGeneratedCSharpSuffix(normalized) + ".ja.g.md";
     }
 

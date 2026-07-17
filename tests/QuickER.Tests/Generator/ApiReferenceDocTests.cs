@@ -170,26 +170,25 @@ public sealed class ApiReferenceDocTests
         MarkdownFile(result)!.FileName.Should().Be("Foo.g.md");
     }
 
-    [Fact(DisplayName = "分割生成でも Markdown は 1 ファイルのみ出力される")]
-    public void SplitFiles_EmitsSingleMarkdown()
+    [Fact(
+        DisplayName = "分割生成では Markdown はカテゴリ別固定名と同じ流儀の固定名 ApiDocs.g.md / ApiDocs.ja.g.md になる"
+    )]
+    public void SplitFiles_EmitsSingleMarkdown_WithFixedName()
     {
+        // 分割時は OutputFileName が .cs / .md とも出力名に関与しない（固定名）ことを検証する
         var options = new CodeGenerationOptions
         {
             OutputFileName = "EcOrder.g.cs",
             GenerateApiDocs = true,
+            IncludeJapaneseApiDocs = true,
             SplitFilesByCategory = true,
         };
 
         var result = Generate(BuildDiagram(), options);
 
         result.HasErrors.Should().BeFalse();
-        result
-            .Files.Count(file =>
-                file.FileName.EndsWith(".g.md", StringComparison.OrdinalIgnoreCase)
-            )
-            .Should()
-            .Be(1);
-        MarkdownFile(result)!.FileName.Should().Be("EcOrder.g.md");
+        EnglishMarkdownFile(result)!.FileName.Should().Be("ApiDocs.g.md");
+        JapaneseMarkdownFile(result)!.FileName.Should().Be("ApiDocs.ja.g.md");
     }
 
     [Fact(

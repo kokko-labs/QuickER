@@ -248,8 +248,10 @@ public sealed class CodeGenerationOptions
     /// 具体化した使い方例」で、固定ランタイム API の詳細は <c>docs/code-generation.md</c> へのリンクで済ませる（本文へ複製しない）。
     /// </para>
     /// <para>
-    /// <see cref="SplitFilesByCategory"/>（カテゴリ別分割）でも Markdown は 1 ファイルのみ出力する。生成日時など非決定的な
-    /// 要素は一切含めないため、同一入力に対して常にバイト一致する。検証エラーで生成ファイルが空になる場合は Markdown も出さない。
+    /// <see cref="SplitFilesByCategory"/>（カテゴリ別分割）でも Markdown は 1 ファイルのみで、名前は <c>Entities.g.cs</c> 等の
+    /// カテゴリ別固定名と同じ流儀の固定名 <c>ApiDocs.g.md</c> になる（分割時は <see cref="OutputFileName"/> が
+    /// .cs / .md とも出力名に関与しない）。生成日時など非決定的な要素は一切含めないため、同一入力に対して常にバイト一致する。
+    /// 検証エラーで生成ファイルが空になる場合は Markdown も出さない。
     /// </para>
     /// </remarks>
     public bool GenerateApiDocs { get; init; }
@@ -259,7 +261,8 @@ public sealed class CodeGenerationOptions
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <c>true</c> のとき、英語版（例: <c>EcOrder.g.md</c>）に加えて日本語版（例: <c>EcOrder.ja.g.md</c>）を追加出力する。
+    /// <c>true</c> のとき、英語版（例: <c>EcOrder.g.md</c>）に加えて日本語版（例: <c>EcOrder.ja.g.md</c>・
+    /// 分割時は固定名 <c>ApiDocs.ja.g.md</c>）を追加出力する。
     /// 内容・構成は英語版と同一で、見出し・本文・C# 側で組み立てる文言（ナビゲーション種別・DI 登録説明）だけが日本語になる。
     /// </para>
     /// <para>

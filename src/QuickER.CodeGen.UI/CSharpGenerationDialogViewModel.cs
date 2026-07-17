@@ -669,6 +669,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     /// 設定→生成オプションのマッピングは <see cref="CSharpGenerationSettings.ToCodeGenerationOptions"/> に集約し、
     /// ここでは現在値から <see cref="ToSettings"/> を作り、GUI 固有の出力ファイル名（分割時は inert な既定名、
     /// 非分割時は出力先パスのファイル名部分）だけを与えて委譲する（設定・生成・CLI 互換の変換を 1 箇所に保つ）。
+    /// 分割時の OutputFileName は .cs（カテゴリ別固定名）・.md（固定名 ApiDocs.g.md）とも出力名に関与しない。
     /// </remarks>
     public CodeGenerationOptions ToOptions() =>
         ToSettings()
