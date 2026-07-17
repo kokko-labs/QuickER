@@ -238,4 +238,16 @@
   <data name="CodeGen_Query_DuplicateResultTypeName" xml:space="preserve">
     <value>名前付きクエリ '{0}': DTO 型名 '{1}' は別のクエリで使用済みです。DTO 型名は生成 namespace 内で一意にしてください。</value>
   </data>
+  <data name="CodeGen_Query_RawSqlUndeclaredParameter" xml:space="preserve">
+    <value>生 SQL 内で使用されているパラメータ '@{0}' が宣言されていません。</value>
+  </data>
+  <data name="CodeGen_Query_RawSqlUnusedParameter" xml:space="preserve">
+    <value>宣言済みパラメータ '@{0}' が生 SQL 内で使われていません。</value>
+  </data>
+  <data name="CodeGen_Query_RawSqlMultipleStatements" xml:space="preserve">
+    <value>生 SQL に複数のステートメントが含まれています（';' の後にさらにコードがあります）。</value>
+  </data>
+  <data name="CodeGen_Query_RawSqlIssue" xml:space="preserve">
+    <value>名前付きクエリ '{0}', 生 SQL ({1}): {2}</value>
+  </data>
 </root>

@@ -238,4 +238,16 @@
   <data name="CodeGen_Query_DuplicateResultTypeName" xml:space="preserve">
     <value>Named query '{0}': result type name '{1}' is already used by another query. Result type names must be unique within the generated namespace.</value>
   </data>
+  <data name="CodeGen_Query_RawSqlUndeclaredParameter" xml:space="preserve">
+    <value>The parameter '@{0}' is used in the raw SQL but is not declared.</value>
+  </data>
+  <data name="CodeGen_Query_RawSqlUnusedParameter" xml:space="preserve">
+    <value>The declared parameter '@{0}' is not used in the raw SQL.</value>
+  </data>
+  <data name="CodeGen_Query_RawSqlMultipleStatements" xml:space="preserve">
+    <value>The raw SQL contains multiple statements (a ';' is followed by more code).</value>
+  </data>
+  <data name="CodeGen_Query_RawSqlIssue" xml:space="preserve">
+    <value>Named query '{0}', raw SQL ({1}): {2}</value>
+  </data>
 </root>

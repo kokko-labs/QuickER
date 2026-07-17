@@ -695,5 +695,11 @@ namespace QuickER.CodeGen.UI.Resources {
                 return ResourceManager.GetString("QueryDialog_Status_DuplicateName", resourceCulture);
             }
         }
+
+        public static string QueryDialog_Status_RawSqlInvalid {
+            get {
+                return ResourceManager.GetString("QueryDialog_Status_RawSqlInvalid", resourceCulture);
+            }
+        }
     }
 }

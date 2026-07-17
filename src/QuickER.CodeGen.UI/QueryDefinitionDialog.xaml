@@ -757,6 +757,19 @@
                         FontFamily="Consolas, Cascadia Mono, monospace"
                         Text="{Binding SqliteSql, UpdateSourceTrigger=PropertyChanged}"
                       />
+                      <!-- 生 SQL の静的検証（未宣言＝OK ブロック・未使用/複文＝警告のみ） -->
+                      <ItemsControl ItemsSource="{Binding SqlDiagnostics}" Margin="0,8,0,0">
+                        <ItemsControl.ItemTemplate>
+                          <DataTemplate>
+                            <TextBlock
+                              Margin="0,2"
+                              Foreground="{StaticResource ErrorText}"
+                              TextWrapping="Wrap"
+                              Text="{Binding}"
+                            />
+                          </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                      </ItemsControl>
                     </StackPanel>
                   </Border>
 

@@ -380,4 +380,7 @@ You can pass this file directly to the CLI as --config.</value>
   <data name="QueryDialog_Status_DuplicateName" xml:space="preserve">
     <value>The method name '{0}' is duplicated within the same entity.</value>
   </data>
+  <data name="QueryDialog_Status_RawSqlInvalid" xml:space="preserve">
+    <value>The raw SQL references an undeclared parameter.</value>
+  </data>
 </root>
