@@ -21,7 +21,7 @@ namespace QuickER.Tests.GeneratedFixture;
 /// 「再生成の経路」が同一になり、両者がずれないことが構造上保証される。
 /// </para>
 /// <para>
-/// テンプレート（<c>CSharpRuntime.scriban</c> 等）を変更したら、次の 1 コマンドで
+/// テンプレート（<c>CSharpRuntime/*.scriban</c> 等）を変更したら、次の 1 コマンドで
 /// 両フィクスチャ（<c>GeneratedFixture.g.cs</c> / <c>PortableFixture.g.cs</c>）をまとめて再生成する
 /// （リポジトリ直下・PowerShell）:
 /// <code>

@@ -128,27 +128,59 @@ internal sealed class RenderScope
 /// <summary>生成モデルを Scriban テンプレートで C# ソースコードへレンダリングするレンダラー</summary>
 internal sealed class ScribanCSharpRenderer
 {
+    /// <summary>
+    /// テンプレート部品リソース名の固定連結順。番号順（＝元テンプレートの行順）で連結すると分割前の本文へバイト完全一致で復元される。
+    /// この配列の順序を崩すと生成コードが壊れるため、並べ替えてはならない。
+    /// </summary>
+    /// <remarks>
+    /// <see cref="TemplateText"/> の初期化子（<see cref="LoadTemplate"/>）から参照するため、静的フィールドの初期化順の都合で
+    /// <see cref="TemplateText"/> より前に宣言する（後ろに置くと初期化時にまだ null で NRE になる）。
+    /// </remarks>
+    private static readonly string[] TemplatePartResourceNames =
+    [
+        "QuickER.CodeGen.CSharp.Templates.CSharpRuntime._00_HeaderAttributes.scriban",
+        "QuickER.CodeGen.CSharp.Templates.CSharpRuntime._01_ValueObjects.scriban",
+        "QuickER.CodeGen.CSharp.Templates.CSharpRuntime._02_Entities.scriban",
+        "QuickER.CodeGen.CSharp.Templates.CSharpRuntime._03_EditModelsAndMappers.scriban",
+        "QuickER.CodeGen.CSharp.Templates.CSharpRuntime._04_RepositoryContractCore.scriban",
+        "QuickER.CodeGen.CSharp.Templates.CSharpRuntime._05_QueryPipeline.scriban",
+        "QuickER.CodeGen.CSharp.Templates.CSharpRuntime._06_RemoteSaveInfraAndDI.scriban",
+        "QuickER.CodeGen.CSharp.Templates.CSharpRuntime._07_InMemory.scriban",
+        "QuickER.CodeGen.CSharp.Templates.CSharpRuntime._08_EfCore.scriban",
+        "QuickER.CodeGen.CSharp.Templates.CSharpRuntime._09_RemoteServer.scriban",
+    ];
+
     /// <summary>Entity / EditModel / Mapper / Repository を一括出力する Scriban テンプレート本文</summary>
     /// <remarks>
-    /// テンプレート本文はソースに埋め込まず、埋め込みリソース（Templates/CSharpRuntime.scriban）として保持する。
-    /// インデントは半角スペース 4 つで統一する（タブは使用しない）。
+    /// テンプレート本文はソースに埋め込まず、埋め込みリソース（Templates/CSharpRuntime/*.scriban）として保持する。
+    /// 保守性のため単一の巨大テンプレートを機能単位の部品ファイルへ物理分割し、上記 <see cref="TemplatePartResourceNames"/>
+    /// の固定順で単純連結して 1 本のテンプレート本文へ復元する（Scriban の include は使わず、連結結果を 1 回だけ解析する）。
+    /// 各部品は元テンプレートの連続した行範囲そのもの（1 バイトも編集・並べ替えをしない）で、連結結果は分割前とバイト完全一致する
+    /// ＝生成コードのバイト一致という不変条件を維持する。インデントは半角スペース 4 つで統一する（タブは使用しない）。
     /// </remarks>
     private static readonly string TemplateText = LoadTemplate();
 
-    /// <summary>埋め込みリソースから Scriban テンプレート本文を読み込む</summary>
+    /// <summary>埋め込みリソースの各テンプレート部品を固定順で読み込み、単純連結して 1 本のテンプレート本文へ復元する</summary>
+    /// <remarks>連結時にセパレータを一切挿入しない（各部品は元テンプレートの位置にあった改行で終わる）ため、連結結果は分割前とバイト一致する</remarks>
     private static string LoadTemplate()
     {
-        const string resourceName = "QuickER.CodeGen.CSharp.Templates.CSharpRuntime.scriban";
         var assembly = typeof(ScribanCSharpRenderer).Assembly;
-        using var stream =
-            assembly.GetManifestResourceStream(resourceName)
-            ?? throw new InvalidOperationException(
-                $"埋め込みリソース '{resourceName}' が見つかりません。{Environment.NewLine}"
-                    + $"アセンブリ '{assembly.GetName().Name}' に Templates/CSharpRuntime.scriban が "
-                    + "EmbeddedResource として含まれているか確認してください。"
-            );
-        using var reader = new StreamReader(stream, Encoding.UTF8);
-        return reader.ReadToEnd();
+        var builder = new StringBuilder();
+
+        foreach (var resourceName in TemplatePartResourceNames)
+        {
+            using var stream =
+                assembly.GetManifestResourceStream(resourceName)
+                ?? throw new InvalidOperationException(
+                    $"埋め込みリソース '{resourceName}' が見つかりません。{Environment.NewLine}"
+                        + $"アセンブリ '{assembly.GetName().Name}' に Templates/CSharpRuntime/*.scriban が "
+                        + "EmbeddedResource として含まれているか確認してください。"
+                );
+            using var reader = new StreamReader(stream, Encoding.UTF8);
+            builder.Append(reader.ReadToEnd());
+        }
+
+        return builder.ToString();
     }
 
     /// <summary>テンプレートは固定なので一度だけ解析してキャッシュする（分割時は同じテンプレートを範囲を変えて複数回描画する）</summary>

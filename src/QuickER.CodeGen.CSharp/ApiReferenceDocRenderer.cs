@@ -183,7 +183,7 @@ internal sealed class ApiReferenceDocRenderer
     /// 実際の生成モードに追従した DI 登録例（説明＋コード）の一覧を組み立てる。
     /// </summary>
     /// <remarks>
-    /// 出し分けはテンプレート <c>Templates/CSharpRuntime.scriban</c> の DI 登録リージョンと拡張メソッド名を一致させる:
+    /// 出し分けはテンプレート <c>Templates/CSharpRuntime/*.scriban</c> の DI 登録リージョンと拡張メソッド名を一致させる:
     /// QuickER 版 Repository → エンジン別 <c>AddGeneratedSqlServerRepositories</c> / <c>AddGeneratedSqliteRepositories</c>
     /// （単一方言・マルチ方言とも同名。マルチ方言は keyed 版あり）、EF Core → <c>AddGeneratedEfCoreRepositories</c>、
     /// インメモリ → <c>AddGeneratedInMemoryRepositories</c>。複数モードが同時に有効なら該当ぶんをすべて載せる。

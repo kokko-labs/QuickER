@@ -22,7 +22,7 @@ QuickER is a solo-developed OSS project. Issues and pull requests are welcome, b
 - Comments and commit messages are written in Japanese
 - Run `csharpier format .` after code changes (global tool)
 - Make sure `dotnet test QuickER.slnx` is green
-- If you change the generation templates (`Templates/CSharpRuntime.scriban`), the checked-in fixtures etc. must be regenerated. The following script performs regenerate → verify → show diff:
+- If you change the generation templates (`Templates/CSharpRuntime/*.scriban`), the checked-in fixtures etc. must be regenerated. The following script performs regenerate → verify → show diff:
 
   ```powershell
   ./scripts/regen-fixtures.ps1

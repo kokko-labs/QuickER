@@ -1,0 +1,2154 @@
+{{~ if render_contract && emit_shared_infra ~}}
+
+/// <summary>更新対象のレコードが存在しなかった（他者削除等の競合）ことを表す例外</summary>
+public sealed class SaveConflictException : Exception
+{
+    /// <summary>メッセージを指定して初期化する</summary>
+    public SaveConflictException(string message)
+        : base(message) { }
+}
+
+/// <summary>カスケード対象の子ナビゲーション（プロパティ・コレクション種別・子型・FK 情報）</summary>
+{{ infra_visibility }} sealed record CascadeNavigation(
+    PropertyInfo Property,
+    bool IsCollection,
+    Type ChildType,
+    string PrincipalColumn,
+    string DependentColumn
+);
+{{~ end ~}}
+{{~ if render_contract && emit_shared_infra && remote_services ~}}
+
+/// <summary>リモート転送（HTTP + JSON）で使う共有シリアライズ設定</summary>
+/// <remarks>
+/// エンティティの JSON 往復（<see cref="EntityBase.ToJson"/> / <see cref="EntityBase.Clone"/>）と同じ意味論
+/// （get/set プロパティのみ・RowState 込み・親参照ナビゲーションは [JsonIgnore] で循環なし）に、
+/// 転送用の大文字小文字非依存読み取りを加えたもの。クライアント・サーバーの双方がこの設定を使うことでワイヤ表現が一致する。
+/// </remarks>
+public static class RemoteJson
+{
+    /// <summary>クライアント・サーバー共通の転送用 JSON 設定</summary>
+    /// <remarks>
+    /// IgnoreReadOnlyProperties は指定しない（クエリ転送のエンベロープに使う匿名型は get-only プロパティのため、
+    /// 指定すると本文が空 JSON になる）。エンティティの派生フラグ（IsAdded 等の get-only bool）は余分に
+    /// 出力されるが、読み取り時にセッターが無く無視されるため往復の意味論（RowState 込み）は変わらない。
+    /// </remarks>
+    public static JsonSerializerOptions Options { get; } =
+        new()
+        {
+            ReferenceHandler = ReferenceHandler.IgnoreCycles,
+            PropertyNameCaseInsensitive = true,
+{{~ if generate_value_objects ~}}
+            Converters = { new ValueObjectJsonConverterFactory() },
+{{~ end ~}}
+        };
+}
+
+/// <summary>リモート呼び出しがサーバー側エラーで失敗したことを表す例外（HTTP ステータスとサーバーのメッセージを保持）</summary>
+/// <remarks>楽観的競合（HTTP 409）は本例外ではなく <see cref="SaveConflictException"/> として復元される（直結時と同じ catch が機能する）</remarks>
+public sealed class RemoteRepositoryException : Exception
+{
+    /// <summary>HTTP ステータスコードとメッセージを指定して初期化する</summary>
+    public RemoteRepositoryException(int statusCode, string message)
+        : base(message)
+    {
+        StatusCode = statusCode;
+    }
+
+    /// <summary>サーバーが返した HTTP ステータスコード</summary>
+    public int StatusCode { get; }
+}
+
+/// <summary>転送エラーの構造化ペイロード（サーバー→クライアント。種別でクライアント側の例外型を復元する）</summary>
+public sealed class RemoteError
+{
+    /// <summary>エラー種別（"SaveConflict"＝楽観的競合 / "Error"＝その他）</summary>
+    public string Type { get; set; } = string.Empty;
+
+    /// <summary>サーバー側の例外メッセージ</summary>
+    public string Message { get; set; } = string.Empty;
+}
+
+/// <summary>主キー 1 つを運ぶリクエスト本文（GetById / Delete）</summary>
+public sealed record RemoteIdRequest<TKey>(TKey Id);
+
+/// <summary>エンティティ 1 件を運ぶリクエスト本文（Insert / Update）</summary>
+public sealed record RemoteEntityRequest<TEntity>(TEntity Entity);
+
+/// <summary>グラフ保存（単一ルート）のリクエスト本文</summary>
+public sealed record RemoteSaveRequest<TEntity>(
+    TEntity Entity,
+    bool CascadeSave,
+    bool CascadeDelete,
+    bool InsertWhenUpdateMissing
+);
+
+/// <summary>グラフ保存（複数ルート）のリクエスト本文</summary>
+public sealed record RemoteSaveManyRequest<TEntity>(
+    List<TEntity> Entities,
+    bool CascadeSave,
+    bool CascadeDelete,
+    bool InsertWhenUpdateMissing
+);
+
+/// <summary>
+/// リモート面（<see cref="IRemoteRepository{TEntity, TKey}"/>）を HTTP + JSON で呼び出すクライアント実装の共通基底。
+/// </summary>
+/// <remarks>
+/// <para>
+/// 各操作は <c>POST {BaseAddress}{エンティティルート}/{操作名}</c> へ JSON 本文を送り、結果 JSON を復元する。
+/// <see cref="HttpClient.BaseAddress"/> はサーバー側 <c>MapGeneratedRemoteEndpoints</c> の prefix（既定 <c>/quicker</c>）まで
+/// 含み、末尾 <c>/</c> で終わること（例 <c>https://server:5001/quicker/</c>）。認証・TLS 等は HttpClient の構成
+/// （DelegatingHandler・既定ヘッダー）に委ねる。
+/// </para>
+/// <para>
+/// グラフ保存（Save）成功後は直結時（<c>EntityGraphSaver.AcceptChanges</c>）と同じ意味論でローカルエンティティの
+/// RowState を確定させる（直結⇔リモートの差し替えで保存後の状態遷移が変わらない）。
+/// </para>
+/// </remarks>
+public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepository<TEntity, TKey>
+    where TEntity : EntityBase, new()
+{
+    private readonly HttpClient _httpClient;
+    private readonly string _entityRoute;
+
+    /// <summary>HTTP クライアントとエンティティルート（例 "Order"）を指定して初期化する</summary>
+    protected HttpRemoteRepository(HttpClient httpClient, string entityRoute)
+    {
+        ArgumentNullException.ThrowIfNull(httpClient);
+        ArgumentException.ThrowIfNullOrWhiteSpace(entityRoute);
+        _httpClient = httpClient;
+        _entityRoute = entityRoute;
+    }
+
+    /// <summary>操作を POST し、結果 JSON を <typeparamref name="TResult"/> へ復元する（生成される転送メソッドの共通経路）</summary>
+    /// <remarks>失敗応答は <see cref="RemoteError"/> を読み、409＋SaveConflict は <see cref="SaveConflictException"/>・それ以外は <see cref="RemoteRepositoryException"/> を送出する</remarks>
+    protected async Task<TResult> InvokeAsync<TResult>(
+        string operation,
+        object? payload,
+        CancellationToken cancellationToken
+    )
+    {
+        using var response = await _httpClient.PostAsJsonAsync(
+            $"{_entityRoute}/{operation}",
+            payload,
+            RemoteJson.Options,
+            cancellationToken
+        );
+
+        await EnsureSuccessAsync(response, cancellationToken);
+
+        var result = await response.Content.ReadFromJsonAsync<TResult>(
+            RemoteJson.Options,
+            cancellationToken
+        );
+        return result!;
+    }
+
+    /// <summary>失敗応答を例外へ変換する（既知の種別は元の例外型を復元する）</summary>
+    private static async Task EnsureSuccessAsync(
+        HttpResponseMessage response,
+        CancellationToken cancellationToken
+    )
+    {
+        if (response.IsSuccessStatusCode)
+        {
+            return;
+        }
+
+        RemoteError? error = null;
+
+        try
+        {
+            error = await response.Content.ReadFromJsonAsync<RemoteError>(
+                RemoteJson.Options,
+                cancellationToken
+            );
+        }
+        catch (JsonException)
+        {
+            // エラーペイロードが JSON でない（プロキシ・インフラ由来の応答など）場合はステータスのみで報告する
+        }
+
+        var statusCode = (int)response.StatusCode;
+        var message =
+            error?.Message ?? $"リモート呼び出しが失敗しました（HTTP {statusCode}）。";
+
+        if (statusCode == 409 && error?.Type == "SaveConflict")
+        {
+            throw new SaveConflictException(message);
+        }
+
+        throw new RemoteRepositoryException(statusCode, message);
+    }
+
+    /// <summary>主キーによる単一エンティティ取得（該当なしは null）</summary>
+    public Task<TEntity?> GetByIdAsync(TKey id, CancellationToken cancellationToken = default) =>
+        InvokeAsync<TEntity?>("GetById", new RemoteIdRequest<TKey>(id), cancellationToken);
+
+    /// <summary>全エンティティ取得</summary>
+    public Task<IReadOnlyList<TEntity>> GetAllAsync(CancellationToken cancellationToken = default) =>
+        InvokeAsync<IReadOnlyList<TEntity>>("GetAll", null, cancellationToken);
+
+    /// <summary>エンティティ追加</summary>
+    public async Task InsertAsync(TEntity entity, CancellationToken cancellationToken = default) =>
+        await InvokeAsync<bool>(
+            "Insert",
+            new RemoteEntityRequest<TEntity>(entity),
+            cancellationToken
+        );
+
+    /// <summary>エンティティ更新（更新対象ありで true）</summary>
+    public Task<bool> UpdateAsync(TEntity entity, CancellationToken cancellationToken = default)
+    {
+        // 無制限バイナリ列に値が残ったままの更新は送信前に弾く（サーバーの UPDATE 対象外でサイレントに失われるため）
+        UnboundedBinaryColumns.ThrowIfExcludedAssigned(entity);
+        return InvokeAsync<bool>(
+            "Update",
+            new RemoteEntityRequest<TEntity>(entity),
+            cancellationToken
+        );
+    }
+
+    /// <summary>主キーによるエンティティ削除（削除対象ありで true）</summary>
+    public Task<bool> DeleteAsync(TKey id, CancellationToken cancellationToken = default) =>
+        InvokeAsync<bool>("Delete", new RemoteIdRequest<TKey>(id), cancellationToken);
+
+    /// <summary>RowState に従って 1 トランザクションで追加・更新・削除を保存する（既定で子をカスケード）</summary>
+    public async Task<int> SaveAsync(
+        TEntity entity,
+        bool cascadeSave = true,
+        bool cascadeDelete = true,
+        bool insertWhenUpdateMissing = false,
+        CancellationToken cancellationToken = default
+    )
+    {
+        // 更新対象（RowState==Updated）に無制限バイナリ列の値が残っていれば送信前に弾く（カスケード対象も走査）
+        GuardUnboundedBinaryOnSave(entity, cascadeSave);
+
+        var affected = await InvokeAsync<int>(
+            "Save",
+            new RemoteSaveRequest<TEntity>(entity, cascadeSave, cascadeDelete, insertWhenUpdateMissing),
+            cancellationToken
+        );
+
+        // 直結時（EntityGraphSaver）と同じく、保存成功後にローカルの RowState を確定させる
+        AcceptChanges(entity, cascadeSave);
+        return affected;
+    }
+
+    /// <summary>複数の集約ルートを 1 トランザクションでまとめて保存する（全件成功か全件ロールバックの原子的処理）</summary>
+    public async Task<int> SaveAsync(
+        IEnumerable<TEntity> entities,
+        bool cascadeSave = true,
+        bool cascadeDelete = true,
+        bool insertWhenUpdateMissing = false,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var list = entities.ToList();
+
+        // 各集約ルート（カスケード対象含む）の更新エンティティに無制限バイナリ列の値が残っていれば送信前に弾く
+        foreach (var entity in list)
+        {
+            GuardUnboundedBinaryOnSave(entity, cascadeSave);
+        }
+
+        var affected = await InvokeAsync<int>(
+            "SaveMany",
+            new RemoteSaveManyRequest<TEntity>(list, cascadeSave, cascadeDelete, insertWhenUpdateMissing),
+            cancellationToken
+        );
+
+        foreach (var entity in list)
+        {
+            AcceptChanges(entity, cascadeSave);
+        }
+
+        return affected;
+    }
+
+    /// <summary>保存対象グラフのうち更新（Updated）エンティティに無制限バイナリ列の値が残っていないか検証する（AcceptChanges と同じ子方向走査）</summary>
+    private static void GuardUnboundedBinaryOnSave(EntityBase entity, bool cascade)
+    {
+        if (entity.IsUpdated)
+        {
+            UnboundedBinaryColumns.ThrowIfExcludedAssigned(entity);
+        }
+
+        if (!cascade)
+        {
+            return;
+        }
+
+        foreach (var property in CascadeNavigationProperties(entity.GetType()))
+        {
+            var value = property.GetValue(entity);
+
+            if (value is EntityBase child)
+            {
+                GuardUnboundedBinaryOnSave(child, true);
+            }
+            else if (value is IEnumerable<EntityBase> children)
+            {
+                foreach (var item in children)
+                {
+                    if (item is not null)
+                    {
+                        GuardUnboundedBinaryOnSave(item, true);
+                    }
+                }
+            }
+        }
+    }
+
+    /// <summary>型ごとのカスケード対象ナビゲーションプロパティ（[NavigationReference(Cascade=true)]）のキャッシュ</summary>
+    private static readonly ConcurrentDictionary<Type, PropertyInfo[]> _cascadeNavigations = new();
+
+    /// <summary>コミット後に保存済みエンティティを Unchanged に確定する（直結の EntityGraphSaver.AcceptChanges と同じ意味論）</summary>
+    /// <remarks>削除済み（Removed）は状態を保つ。カスケード時は [NavigationReference] の子方向ナビゲーションを再帰的に確定する</remarks>
+    private static void AcceptChanges(EntityBase entity, bool cascade)
+    {
+        if (entity.IsRemoved)
+        {
+            return;
+        }
+
+        entity.MarkUnchanged();
+
+        if (!cascade)
+        {
+            return;
+        }
+
+        foreach (var property in CascadeNavigationProperties(entity.GetType()))
+        {
+            var value = property.GetValue(entity);
+
+            if (value is EntityBase child)
+            {
+                AcceptChanges(child, true);
+            }
+            else if (value is IEnumerable<EntityBase> children)
+            {
+                foreach (var item in children)
+                {
+                    if (item is not null)
+                    {
+                        AcceptChanges(item, true);
+                    }
+                }
+            }
+        }
+    }
+
+    /// <summary>カスケード対象（子方向）のナビゲーションプロパティを列挙する</summary>
+    private static PropertyInfo[] CascadeNavigationProperties(Type entityType) =>
+        _cascadeNavigations.GetOrAdd(
+            entityType,
+            static type =>
+                type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                    .Where(property =>
+                        property.GetCustomAttribute<NavigationReferenceAttribute>()
+                            is { Cascade: true }
+                    )
+                    .ToArray()
+        );
+{{~ if exclude_unbounded_binary || runtime_package_export ~}}
+
+    /// <summary>主キーを URL クエリ（<c>?id=</c>）用の文字列へ直列化する（エンベロープと同一の JSON 規則＝VO は内包値・数値はそのまま・文字列/Guid は引用符付き）</summary>
+    /// <remarks>キー値の JSON 表現を URL エンコードして運ぶ。サーバーは同じ設定（<c>RemoteJson.Options</c>）で復元するため方言・VO によらず往復する</remarks>
+    protected string FormatKeyForQuery(TKey id) =>
+        Uri.EscapeDataString(JsonSerializer.Serialize(id, RemoteJson.Options));
+
+    /// <summary>
+    /// 無制限バイナリ列（除外列）をサーバーからストリーミングでダウンロードする（<c>GET {エンティティ}/{列名}?id=</c>）。
+    /// レスポンスヘッダのみ先読み（<see cref="HttpCompletionOption.ResponseHeadersRead"/>）し、本文を宛先へ O(チャンク) でコピーする
+    /// （blob 全量をメモリに載せない・Base64 不使用）。200＝データを書いた（<c>true</c>・空 blob も true）／404＝行なし または NULL
+    /// （<c>false</c>・宛先へ何も書かない）。それ以外の失敗は既存規則で例外復元する。
+    /// </summary>
+    protected async Task<bool> DownloadUnboundedBinaryColumnAsync(
+        string columnRoute,
+        TKey id,
+        Stream destination,
+        CancellationToken cancellationToken
+    )
+    {
+        ArgumentNullException.ThrowIfNull(destination);
+
+        var requestUri = $"{_entityRoute}/{columnRoute}?id={FormatKeyForQuery(id)}";
+        using var response = await _httpClient.GetAsync(
+            requestUri,
+            HttpCompletionOption.ResponseHeadersRead,
+            cancellationToken
+        );
+
+        if (response.StatusCode == HttpStatusCode.NotFound)
+        {
+            return false;
+        }
+
+        await EnsureSuccessAsync(response, cancellationToken);
+
+        await using var source = await response.Content.ReadAsStreamAsync(cancellationToken);
+        await source.CopyToAsync(destination, cancellationToken);
+        return true;
+    }
+
+    /// <summary>
+    /// 無制限バイナリ列（除外列）をサーバーへストリーミングでアップロードする。<paramref name="source"/> が <c>null</c> のときは
+    /// <c>DELETE</c>（列を NULL 化）、非 <c>null</c> のときは <c>PUT</c>（<see cref="StreamContent"/>＋Content-Length）を送る
+    /// （0 バイトの PUT＝空ボディと NULL 化＝DELETE は構造的に区別される）。送信前に長さ契約（<c>CanSeek</c> でない Stream は
+    /// <paramref name="length"/> 必須）を検証する。204＝成功（<c>true</c>）／404＝行なし（<c>false</c>）。それ以外は例外復元。
+    /// </summary>
+    protected async Task<bool> UploadUnboundedBinaryColumnAsync(
+        string columnRoute,
+        TKey id,
+        Stream? source,
+        long? length,
+        CancellationToken cancellationToken
+    )
+    {
+        var requestUri = $"{_entityRoute}/{columnRoute}?id={FormatKeyForQuery(id)}";
+
+        // source=null は列を NULL に設定する（DELETE）。0 バイトの PUT（空ボディ）とは意味が異なる
+        if (source is null)
+        {
+            using var deleteResponse = await _httpClient.DeleteAsync(requestUri, cancellationToken);
+
+            if (deleteResponse.StatusCode == HttpStatusCode.NotFound)
+            {
+                return false;
+            }
+
+            await EnsureSuccessAsync(deleteResponse, cancellationToken);
+            return true;
+        }
+
+        // 送信前に長さを確定する（CanSeek でない Stream は length 必須＝Content-Length と自然に整合。欠落は送信前に例外）
+        var payloadLength = UnboundedBinaryColumns.ResolveWriteLength(source, length);
+
+        using var content = new StreamContent(source);
+        content.Headers.ContentLength = payloadLength;
+        content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+
+        using var request = new HttpRequestMessage(HttpMethod.Put, requestUri) { Content = content };
+        using var response = await _httpClient.SendAsync(
+            request,
+            HttpCompletionOption.ResponseHeadersRead,
+            cancellationToken
+        );
+
+        if (response.StatusCode == HttpStatusCode.NotFound)
+        {
+            return false;
+        }
+
+        await EnsureSuccessAsync(response, cancellationToken);
+        return true;
+    }
+{{~ end ~}}
+}
+{{~ end ~}}
+{{~ if (repositories || in_memory || (ef_core && render_contract) || (ef_core && render_ef_core && runtime_package_export)) && emit_shared_infra ~}}
+
+/// <summary>エンティティ型の属性からテーブル・カラム情報、CRUD 用 SQL、カスケード子ナビゲーションを構築・保持し、行マッピングとパラメータ束縛を提供するメタデータ</summary>
+/// <remarks>型をキーに 1 度だけ構築しキャッシュする（リフレクションコスト削減）。Repository の CRUD・グラフ保存・JSON クエリプランナ・カスケード削除プランナが共用する</remarks>
+{{ infra_visibility }} sealed class EntitySaveMetadata
+{
+    private static readonly ConcurrentDictionary<Type, EntitySaveMetadata> _cache = new();
+
+{{~ if repository_dialect != "sqlserver" ~}}
+    /// <summary>このメタデータが対応するエンティティ型（マルチクエリ Include のエンティティ生成で使う）</summary>
+    public required Type EntityType { get; init; }
+{{~ end ~}}
+
+{{~ if repositories ~}}
+    /// <summary>角括弧で囲んだテーブル名</summary>
+    public required string TableName { get; init; }
+{{~ end ~}}
+
+{{~ if repositories && (exclude_unbounded_binary || runtime_package_export) ~}}
+    /// <summary>クォートなしの生テーブル名（無制限バイナリ列の Stream アクセサで SqliteBlob 等が要求する）</summary>
+    public required string RawTableName { get; init; }
+{{~ end ~}}
+
+    /// <summary>主キーに対応するプロパティ</summary>
+    public required PropertyInfo KeyProperty { get; init; }
+
+{{~ if repositories ~}}
+    /// <summary>主キーのカラム名</summary>
+    public required string KeyColumnName { get; init; }
+{{~ end ~}}
+
+    /// <summary>マッピング対象の全カラムプロパティ（ナビゲーション・基底プロパティ除く）。INSERT / BulkInsert は常にこれを使う</summary>
+    public required IReadOnlyList<PropertyInfo> AllProperties { get; init; }
+
+    /// <summary>SELECT / UPDATE 対象の列プロパティ（全列から無制限バイナリ列を除いたもの。除外列なしは全列と一致）。行マッピングで使う</summary>
+    public required IReadOnlyList<PropertyInfo> SelectProperties { get; init; }
+
+    /// <summary>SELECT / UPDATE から除外する無制限バイナリ列（<see cref="UnboundedBinaryColumnAttribute"/> 付き）。除外列なしは空</summary>
+    public required IReadOnlyList<PropertyInfo> ExcludedProperties { get; init; }
+
+{{~ if repositories || ef_core ~}}
+    /// <summary>SELECT 対象列の (プロパティ, カラム名) をビルド時に確定した配列。行マッピングは列名解決を都度リフレクションせずこれを列挙する</summary>
+    public required IReadOnlyList<(PropertyInfo Property, string ColumnName)> SelectColumns { get; init; }
+
+    /// <summary>列プロパティ → カラム名の確定済み対応（射影・除外列など任意プロパティ列の列名解決に使う）</summary>
+    public required IReadOnlyDictionary<PropertyInfo, string> ColumnNameByProperty { get; init; }
+{{~ end ~}}
+
+{{~ if repositories ~}}
+    /// <summary>INSERT / BulkInsert 対象の列プロパティ（全列から store-generated 列を除いたもの。store-generated 列なしは全列と一致）</summary>
+    public required IReadOnlyList<PropertyInfo> InsertProperties { get; init; }
+
+    /// <summary>主キーを除くカラムプロパティ</summary>
+    public required IReadOnlyList<PropertyInfo> NonKeyProperties { get; init; }
+
+    /// <summary>カラムの (プロパティ名, カラム名) 対応。JSON 射影の別名付け（[col] AS Prop）に使う</summary>
+    public required IReadOnlyList<(string PropertyName, string ColumnName)> Columns { get; init; }
+{{~ end ~}}
+
+    /// <summary>カラム名 → 列プロパティの対応（クエリ WHERE 句パラメータの型明示化で列型を引くのに使う）</summary>
+    public required IReadOnlyDictionary<string, PropertyInfo> PropertyByColumn { get; init; }
+
+    /// <summary>SELECT 用の角括弧付きカラム一覧（例: [id], [name]）</summary>
+    public required string ColumnList { get; init; }
+
+{{~ if repositories ~}}
+    /// <summary>全件取得 SELECT 文</summary>
+    public required string SelectAllSql { get; init; }
+
+    /// <summary>主キー指定取得 SELECT 文</summary>
+    public required string SelectByIdSql { get; init; }
+
+    /// <summary>INSERT 文</summary>
+    public required string InsertSql { get; init; }
+
+    /// <summary>UPDATE 文</summary>
+    public required string UpdateSql { get; init; }
+
+    /// <summary>DELETE 文</summary>
+    public required string DeleteSql { get; init; }
+{{~ end ~}}
+
+    /// <summary>カスケード対象の子ナビゲーション</summary>
+    public required IReadOnlyList<CascadeNavigation> CascadeNavigations { get; init; }
+
+    /// <summary>指定型のメタデータを取得する（型ごとに 1 度だけ構築しキャッシュ）</summary>
+    public static EntitySaveMetadata For(Type entityType) => _cache.GetOrAdd(entityType, Build);
+
+    /// <summary>ナビゲーションプロパティ → <see cref="NavigationReferenceAttribute"/> の解決をプロパティ単位でキャッシュする</summary>
+    private static readonly ConcurrentDictionary<
+        PropertyInfo,
+        NavigationReferenceAttribute?
+    > _navigationAttributeCache = new();
+
+    /// <summary>ナビゲーションプロパティの <see cref="NavigationReferenceAttribute"/> を取得する（Include 解決で毎ノード反射しないようキャッシュ）</summary>
+    public static NavigationReferenceAttribute? NavigationAttribute(PropertyInfo property) =>
+        _navigationAttributeCache.GetOrAdd(
+            property,
+            static p => p.GetCustomAttribute<NavigationReferenceAttribute>()
+        );
+
+    private static EntitySaveMetadata Build(Type entityType)
+    {
+        var tableAttribute =
+            entityType.GetCustomAttribute<TableAttribute>()
+            ?? throw new InvalidOperationException(
+                $"{entityType.Name} に [Table] 属性が必要です。"
+            );
+        var allProperties = entityType
+            .GetProperties(BindingFlags.Public | BindingFlags.Instance)
+            .ToList();
+        var columns = allProperties
+            .Where(property =>
+                property.CanRead
+                && property.CanWrite
+                && property.DeclaringType != typeof(EntityBase)
+                && property.GetCustomAttribute<NavigationReferenceAttribute>() is null
+            )
+            .ToList();
+        var keyProperties = columns
+            .Where(property => property.GetCustomAttribute<KeyAttribute>() is not null)
+            .ToList();
+        var keyProperty = keyProperties.Count switch
+        {
+            0 => throw new InvalidOperationException(
+                $"{entityType.Name} に [Key] 属性付きプロパティが必要です。"
+            ),
+            1 => keyProperties[0],
+            _ => throw new InvalidOperationException(
+                $"{entityType.Name} の [Key] 属性付きプロパティは 1 つのみ許可されます（複合キーは Repository 非対応。対象: {string.Join(", ", keyProperties.Select(property => property.Name))}）。"
+            ),
+        };
+        // 無制限バイナリ列（UnboundedBinaryColumnAttribute）を SELECT / UPDATE から外す。全列（AllProperties）は
+        // INSERT / BulkInsert のため保持し、SELECT 用列集合（selectProperties）だけを縮小する。除外列なしは全列と一致
+        var excludedColumns = columns
+            .Where(property =>
+                property.GetCustomAttribute<UnboundedBinaryColumnAttribute>() is not null
+            )
+            .ToList();
+        var selectProperties =
+            excludedColumns.Count == 0
+                ? columns
+                : columns.Where(property => !excludedColumns.Contains(property)).ToList();
+{{~ if repositories ~}}
+        // DB が値を生成する列（rowversion / timestamp 等・StoreGeneratedColumnAttribute）は INSERT / UPDATE の対象から外す。
+        // これらは DB が採番するため明示的な書き込みは実行時エラーになる（SQL Server の timestamp 列など）。SELECT では取得する
+        var storeGeneratedColumns = columns
+            .Where(property =>
+                property.GetCustomAttribute<StoreGeneratedColumnAttribute>() is not null
+            )
+            .ToList();
+        // INSERT / BulkInsert 対象は全列から store-generated 列を除いたもの（store-generated 列なしは全列と一致）
+        var insertProperties =
+            storeGeneratedColumns.Count == 0
+                ? columns
+                : columns.Where(property => !storeGeneratedColumns.Contains(property)).ToList();
+        var nonKeyProperties = selectProperties
+            .Where(property =>
+                property != keyProperty && !storeGeneratedColumns.Contains(property)
+            )
+            .ToList();
+        var tableName = $"{{ quote_open }}{tableAttribute.Name}{{ quote_close }}";
+        var keyColumnName = GetColumnName(keyProperty);
+{{~ end ~}}
+        var columnList = string.Join(", ", selectProperties.Select(property => $"{{ quote_open }}{GetColumnName(property)}{{ quote_close }}"));
+{{~ if repositories ~}}
+        var updateAssignments = nonKeyProperties.Select(property =>
+            $"{{ quote_open }}{GetColumnName(property)}{{ quote_close }} = @{property.Name}"
+        );
+{{~ end ~}}
+        var cascades = allProperties
+            .Select(property =>
+                (property, attribute: property.GetCustomAttribute<NavigationReferenceAttribute>())
+            )
+            .Where(pair => pair.attribute is { Cascade: true })
+            .Select(pair => new CascadeNavigation(
+                pair.property,
+                pair.attribute!.IsCollection,
+                pair.attribute.IsCollection
+                    ? pair.property.PropertyType.GetGenericArguments()[0]
+                    : pair.property.PropertyType,
+                pair.attribute.PrincipalColumn,
+                pair.attribute.DependentColumn
+            ))
+            .ToList();
+
+        return new EntitySaveMetadata
+        {
+{{~ if repository_dialect != "sqlserver" ~}}
+            EntityType = entityType,
+{{~ end ~}}
+{{~ if repositories ~}}
+            TableName = tableName,
+{{~ end ~}}
+{{~ if repositories && (exclude_unbounded_binary || runtime_package_export) ~}}
+            RawTableName = tableAttribute.Name,
+{{~ end ~}}
+            KeyProperty = keyProperty,
+{{~ if repositories ~}}
+            KeyColumnName = keyColumnName,
+{{~ end ~}}
+            AllProperties = columns,
+            SelectProperties = selectProperties,
+            ExcludedProperties = excludedColumns,
+{{~ if repositories || ef_core ~}}
+            // 行マッピングの列名解決をビルド時に確定させ、行ごとの [Column] リフレクションを排除する
+            SelectColumns = selectProperties.Select(property => (property, GetColumnName(property))).ToList(),
+            ColumnNameByProperty = columns.ToDictionary(property => property, GetColumnName),
+            // SelectColumns（固定 SELECT 集合）用の式木マテリアライザを型ごとに 1 度だけコンパイルする
+            SelectMaterializer = BuildSelectMaterializer(entityType, selectProperties),
+{{~ end ~}}
+{{~ if repositories ~}}
+            InsertProperties = insertProperties,
+            NonKeyProperties = nonKeyProperties,
+            Columns = selectProperties.Select(property => (property.Name, GetColumnName(property))).ToList(),
+{{~ end ~}}
+            PropertyByColumn = columns.ToDictionary(
+                GetColumnName,
+                property => property,
+                StringComparer.Ordinal
+            ),
+            ColumnList = columnList,
+{{~ if repositories ~}}
+            SelectAllSql = $"SELECT {columnList} FROM {tableName};",
+            SelectByIdSql = $"SELECT {columnList} FROM {tableName} WHERE {{ quote_open }}{keyColumnName}{{ quote_close }} = @id;",
+            InsertSql =
+                $"INSERT INTO {tableName} ({string.Join(", ", insertProperties.Select(property => $"{{ quote_open }}{GetColumnName(property)}{{ quote_close }}"))}) VALUES ({string.Join(", ", insertProperties.Select(property => $"@{property.Name}"))});",
+            UpdateSql =
+                $"UPDATE {tableName} SET {string.Join(", ", updateAssignments)} WHERE {{ quote_open }}{keyColumnName}{{ quote_close }} = @id;",
+            DeleteSql = $"DELETE FROM {tableName} WHERE {{ quote_open }}{keyColumnName}{{ quote_close }} = @id;",
+{{~ end ~}}
+            CascadeNavigations = cascades,
+        };
+    }
+
+{{~ if repositories || ef_core ~}}
+    // ===== 行マテリアライザ（式木コンパイル・ホットパスのリフレクション除去） =====
+{{~ if !generate_value_objects ~}}
+    /// <summary>ボクシングを避ける型特化リーダーアクセサ（<c>GetInt32</c> 等）。fast 対象の CLR 型のみ登録する</summary>
+    private static readonly IReadOnlyDictionary<Type, MethodInfo> _typedReaders = BuildTypedReaders();
+
+    /// <summary><see cref="DbDataReader.IsDBNull(int)"/> の解決済み <see cref="MethodInfo"/></summary>
+    private static readonly MethodInfo _isDbNullMethod = typeof(DbDataReader).GetMethod(
+        nameof(DbDataReader.IsDBNull),
+        new[] { typeof(int) }
+    )!;
+{{~ end ~}}
+
+    /// <summary><see cref="DbDataReader.GetValue(int)"/> の解決済み <see cref="MethodInfo"/>（型特化できない列のフォールバックで使う）</summary>
+    private static readonly MethodInfo _getValueMethod = typeof(DbDataReader).GetMethod(
+        nameof(DbDataReader.GetValue),
+        new[] { typeof(int) }
+    )!;
+
+    /// <summary><see cref="SetColumnValue"/> の解決済み <see cref="MethodInfo"/>（型特化できない列のフォールバックで呼ぶ）</summary>
+    private static readonly MethodInfo _setColumnValueMethod = typeof(EntitySaveMetadata).GetMethod(
+        nameof(SetColumnValue),
+        BindingFlags.NonPublic | BindingFlags.Static
+    )!;
+
+    /// <summary><see cref="EntityBase.RowState"/> の解決済み <see cref="PropertyInfo"/></summary>
+    private static readonly PropertyInfo _rowStateProperty = typeof(EntityBase).GetProperty(
+        nameof(EntityBase.RowState)
+    )!;
+
+    /// <summary>SelectColumns（固定 SELECT 集合）1 行分を式木コンパイル済みでマテリアライズするデリゲート（型ごとに 1 度構築しキャッシュ）</summary>
+    /// <remarks>引数は <c>(reader, ordinals)</c>。<c>ordinals</c> は SelectColumns と同順の列 ordinal で、行ループの前に 1 度だけ解決する。</remarks>
+    public required Func<DbDataReader, int[], EntityBase> SelectMaterializer { get; init; }
+{{~ if !generate_value_objects ~}}
+
+    /// <summary>型特化リーダーアクセサ表を構築する（各値は <c>int</c> を取り対応 CLR 型を返す <see cref="DbDataReader"/> のメソッド）</summary>
+    private static IReadOnlyDictionary<Type, MethodInfo> BuildTypedReaders()
+    {
+        static MethodInfo Getter(string name) =>
+            typeof(DbDataReader).GetMethod(name, new[] { typeof(int) })!;
+
+        // 生成 SELECT が返す宣言列型に対応する型特化アクセサ。SQLite は各 GetXxx が格納型寄せ（long→int・TEXT→DateTime 等）を
+        // 行い CoerceScalar と同値、SQL Server は列の CLR 型を素直に返し従来の素通しと同値。ここに無い型（byte[]・enum・
+        // DateTimeOffset・TimeSpan 等）はフォールバックで従来どおり変換する。
+        return new Dictionary<Type, MethodInfo>
+        {
+            [typeof(bool)] = Getter(nameof(DbDataReader.GetBoolean)),
+            [typeof(byte)] = Getter(nameof(DbDataReader.GetByte)),
+            [typeof(short)] = Getter(nameof(DbDataReader.GetInt16)),
+            [typeof(int)] = Getter(nameof(DbDataReader.GetInt32)),
+            [typeof(long)] = Getter(nameof(DbDataReader.GetInt64)),
+            [typeof(float)] = Getter(nameof(DbDataReader.GetFloat)),
+            [typeof(double)] = Getter(nameof(DbDataReader.GetDouble)),
+            [typeof(decimal)] = Getter(nameof(DbDataReader.GetDecimal)),
+            [typeof(string)] = Getter(nameof(DbDataReader.GetString)),
+            [typeof(DateTime)] = Getter(nameof(DbDataReader.GetDateTime)),
+            [typeof(Guid)] = Getter(nameof(DbDataReader.GetGuid)),
+        };
+    }
+{{~ end ~}}
+
+    /// <summary>
+    /// SelectColumns（固定 SELECT 集合）の 1 行を、事前解決した ordinal 配列を用いてエンティティへマテリアライズする
+    /// 式木コンパイル済みデリゲートを構築する（型ごとに 1 度）。
+    /// </summary>
+    /// <remarks>
+    /// 型特化アクセサを持つ列はボクシングなしで直接読み（<c>DBNull</c> は既定値＝従来の <c>SetValue(null)</c> と同値）、
+    /// それ以外の列は従来の <see cref="SetColumnValue"/>（方言別変換／値オブジェクト包み直し）へフォールバックする。
+    /// 生成される最終状態（<c>RowState = Unchanged</c>）は従来の行マッピングと一致する。
+    /// </remarks>
+    private static Func<DbDataReader, int[], EntityBase> BuildSelectMaterializer(
+        Type entityType,
+        IReadOnlyList<PropertyInfo> properties
+    )
+    {
+        var readerParam = Expression.Parameter(typeof(DbDataReader), "reader");
+        var ordinalsParam = Expression.Parameter(typeof(int[]), "ordinals");
+        var entityVar = Expression.Variable(entityType, "entity");
+
+        var body = new List<Expression>
+        {
+            Expression.Assign(entityVar, Expression.New(entityType)),
+        };
+
+        for (var i = 0; i < properties.Count; i++)
+        {
+            var ordinal = Expression.ArrayIndex(ordinalsParam, Expression.Constant(i));
+            body.Add(BuildColumnAssign(entityVar, readerParam, ordinal, properties[i]));
+        }
+
+        // DB から読み込んだ行は変更なし扱いにする（従来の行マッピングと同じ事後状態）
+        body.Add(
+            Expression.Assign(
+                Expression.Property(entityVar, _rowStateProperty),
+                Expression.Constant(RowState.Unchanged)
+            )
+        );
+        body.Add(Expression.Convert(entityVar, typeof(EntityBase)));
+
+        var block = Expression.Block(typeof(EntityBase), new[] { entityVar }, body);
+        return Expression
+            .Lambda<Func<DbDataReader, int[], EntityBase>>(block, readerParam, ordinalsParam)
+            .Compile();
+    }
+
+    /// <summary>1 列分の代入式を作る。型特化できる列はボクシングなしで直接読み、それ以外は <see cref="SetColumnValue"/> へフォールバックする</summary>
+    private static Expression BuildColumnAssign(
+        Expression entityExpr,
+        ParameterExpression readerParam,
+        Expression ordinal,
+        PropertyInfo property
+    )
+    {
+{{~ if !generate_value_objects ~}}
+        var propertyType = property.PropertyType;
+        var underlying = Nullable.GetUnderlyingType(propertyType) ?? propertyType;
+
+        // 型特化アクセサがある列はボクシングなしで直接読む（DBNull は既定値へ＝従来の SetValue(null) と同値）
+        if (_typedReaders.TryGetValue(underlying, out var getter))
+        {
+            Expression read = Expression.Call(readerParam, getter, ordinal);
+
+            if (getter.ReturnType != propertyType)
+            {
+                read = Expression.Convert(read, propertyType);
+            }
+
+            var value = Expression.Condition(
+                Expression.Call(readerParam, _isDbNullMethod, ordinal),
+                Expression.Default(propertyType),
+                read
+            );
+            return Expression.Assign(Expression.Property(entityExpr, property), value);
+        }
+{{~ end ~}}
+
+        // フォールバック: 従来の SetColumnValue（DBNull→null／方言別変換／値オブジェクト包み直し）を ordinal 経由で呼ぶ
+        return Expression.Call(
+            _setColumnValueMethod,
+            Expression.Convert(entityExpr, typeof(EntityBase)),
+            Expression.Constant(property, typeof(PropertyInfo)),
+            Expression.Call(readerParam, _getValueMethod, ordinal)
+        );
+    }
+
+    /// <summary>SelectColumns の各列名を、このリーダー上の ordinal へ 1 度だけ解決する（行ループの前に呼ぶ）</summary>
+    public int[] SelectOrdinals(DbDataReader reader)
+    {
+        var ordinals = new int[SelectColumns.Count];
+
+        for (var i = 0; i < ordinals.Length; i++)
+        {
+            ordinals[i] = reader.GetOrdinal(SelectColumns[i].ColumnName);
+        }
+
+        return ordinals;
+    }
+
+    /// <summary>データリーダーの 1 行をエンティティへマッピングする（ordinal 事前解決版・ホットループ用）</summary>
+    public TEntity MapEntity<TEntity>(
+        {{ if ef_core }}DbDataReader{{ else }}{{ sql_data_reader_type }}{{ end }} reader,
+        int[] ordinals
+    )
+        where TEntity : EntityBase => (TEntity)SelectMaterializer(reader, ordinals);
+
+    /// <summary>データリーダーの 1 行をエンティティへマッピングする（SelectColumns の ordinal を都度解決する単一行版）</summary>
+    public TEntity MapEntity<TEntity>({{ if ef_core }}DbDataReader{{ else }}{{ sql_data_reader_type }}{{ end }} reader)
+        where TEntity : EntityBase, new() => (TEntity)SelectMaterializer(reader, SelectOrdinals(reader));
+
+    /// <summary>
+    /// 生 SQL 用の厳密な行マッピング（列集合・列型が可変のため型特化せず、従来の寛容な <see cref="SetColumnValue"/> を使う）。
+    /// </summary>
+    private TEntity MapEntityStrict<TEntity>({{ if ef_core }}DbDataReader{{ else }}{{ sql_data_reader_type }}{{ end }} reader)
+        where TEntity : EntityBase, new()
+    {
+        var entity = new TEntity();
+
+        // 無制限バイナリ列は既定で SELECT 除外のため SelectColumns（＝SelectProperties の確定済み対応）のみをマップする
+        foreach (var (property, columnName) in SelectColumns)
+        {
+            SetColumnValue(entity, property, reader[columnName]);
+        }
+
+        // DB から読み込んだ行は変更なし扱いにする（その後の編集で Updated に遷移）
+        entity.RowState = RowState.Unchanged;
+        return entity;
+    }
+
+    /// <summary>
+    /// 読み取った列値を対象プロパティへ設定する（行マッピングの共通処理）。<c>DBNull</c> は <c>null</c> を代入し、
+    /// それ以外は値オブジェクトの包み直し／SQLite の格納型寄せ／SQL Server の素通しを方言に応じて行う。
+    /// </summary>
+    private static void SetColumnValue(EntityBase entity, PropertyInfo property, object value)
+    {
+        if (value is DBNull)
+        {
+            property.SetValue(entity, null);
+        }
+        else
+        {
+{{~ if generate_value_objects ~}}
+            // 値オブジェクトは内包型へ変換して包み直す（Wrap 内で Convert.ChangeType 済み）
+            property.SetValue(entity, SqlValueObjectActivator.Wrap(value, property.PropertyType));
+{{~ else if repositories && repository_dialect != "sqlserver" ~}}
+            // 素の列は SQLite の格納型（int→long・decimal/Guid/DateTime→TEXT 等）をプロパティ型へ寄せる
+            property.SetValue(entity, CoerceScalar(value, property.PropertyType));
+{{~ else ~}}
+            // SQL Server の ADO は列に対応する厳密な CLR 型を返すため素通しで代入する
+            property.SetValue(entity, value);
+{{~ end ~}}
+        }
+    }
+
+    /// <summary>
+    /// 生 SQL の結果行を {TEntity} へマップする。<see cref="MapEntityStrict"/> と同じ厳密マッピング（SELECT 対象列は必須）だが、
+    /// 列不足（部分 SELECT）で列が引けなかった場合は、必要な列を含む <see cref="InvalidOperationException"/> でラップして
+    /// 分かりやすくする。未知の列参照で投げられる例外はデータリーダーの実装で異なる
+    /// （<see cref="IndexOutOfRangeException"/> と <see cref="ArgumentOutOfRangeException"/>）ため両方を捕捉する。
+    /// 無制限バイナリ列は既定では取得しないが、生 SQL の SELECT に明示的に含まれていれば追加でマップする（ユーザーが意図して選んだ場合に取得できる）。
+    /// </summary>
+    public TEntity MapEntityFromRawSql<TEntity>({{ if ef_core }}DbDataReader{{ else }}{{ sql_data_reader_type }}{{ end }} reader)
+        where TEntity : EntityBase, new()
+    {
+        TEntity entity;
+
+        try
+        {
+            entity = MapEntityStrict<TEntity>(reader);
+        }
+        catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentOutOfRangeException)
+        {
+            throw new InvalidOperationException(
+                $"生 SQL の SELECT には {typeof(TEntity).Name} の列（{ColumnList}）が必要です（SELECT * または全列指定）。"
+                    + $"結果セットに不足している列があります: {ex.Message}",
+                ex
+            );
+        }
+
+        // 除外列（無制限バイナリ）が生 SQL の結果に含まれていれば opportunistic に取り込む
+        if (ExcludedProperties.Count > 0)
+        {
+            var present = RawReaderColumnNames(reader);
+
+            foreach (var property in ExcludedProperties)
+            {
+                var columnName = ColumnNameByProperty[property];
+
+                if (!present.Contains(columnName))
+                {
+                    continue;
+                }
+
+                SetColumnValue(entity, property, reader[columnName]);
+            }
+
+            // opportunistic な代入で状態が動かないよう変更なしを再確定する（列プロパティは素の auto-property だが念のため）
+            entity.RowState = RowState.Unchanged;
+        }
+
+        return entity;
+    }
+
+    /// <summary>データリーダーの列名集合を大文字小文字無視で 1 度だけ列挙する（生 SQL の除外列有無判定に使う）</summary>
+    private static HashSet<string> RawReaderColumnNames({{ if ef_core }}DbDataReader{{ else }}{{ sql_data_reader_type }}{{ end }} reader)
+    {
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        for (var i = 0; i < reader.FieldCount; i++)
+        {
+            names.Add(reader.GetName(i));
+        }
+
+        return names;
+    }
+{{~ end ~}}
+
+    /// <summary>
+    /// 射影セレクタが参照する列プロパティ名集合を、SELECT すべき列プロパティ（<see cref="PropertyInfo"/>）へ解決する。
+    /// 参照がすべて列プロパティ（無制限バイナリ列を含む）なら順序どおりの一覧を返し、1 つでもナビゲーション等の
+    /// 非列名が混じる、あるいは参照が 0 件なら <c>null</c>（＝サーバー側列刈り込み不可・従来経路へフォールバック）を返す。
+    /// </summary>
+    public IReadOnlyList<PropertyInfo>? ResolveProjectionColumns(
+        IReadOnlyCollection<string> propertyNames
+    )
+    {
+        // 参照列が 0 件だと SELECT する列が無くフォールバックが必要（例: 定数のみの射影）
+        if (propertyNames.Count == 0)
+        {
+            return null;
+        }
+
+        var resolved = new List<PropertyInfo>(propertyNames.Count);
+
+        foreach (var name in propertyNames)
+        {
+            // 全列（AllProperties）から名前一致で引く（除外＝無制限バイナリ列も射影が参照していれば取得対象にする）
+            var property = AllProperties.FirstOrDefault(candidate => candidate.Name == name);
+
+            if (property is null)
+            {
+                // 列でない（ナビゲーション等）が混じった＝安全に刈り込めない
+                return null;
+            }
+
+            resolved.Add(property);
+        }
+
+        return resolved;
+    }
+
+{{~ if repositories ~}}
+    /// <summary>指定した列プロパティ群を、角括弧付きカラム名の "," 連結（例: [id], [name]）にした SELECT 列リストを返す（射影刈り込み用）</summary>
+    public string BuildColumnList(IReadOnlyList<PropertyInfo> properties) =>
+        string.Join(
+            ", ",
+            properties.Select(property => $"{{ quote_open }}{GetColumnName(property)}{{ quote_close }}")
+        );
+
+    /// <summary>列プロパティごとの「reader+ordinal → エンティティへ設定」子（式木コンパイル済み・プロパティ単位でキャッシュ）</summary>
+    private static readonly ConcurrentDictionary<
+        PropertyInfo,
+        Action<EntityBase, DbDataReader, int>
+    > _columnBinderCache = new();
+
+    /// <summary>1 列分の型特化バインダを取得する（射影・全列取得の可変列集合を行ごとにリフレクションせず束縛するため）</summary>
+    private static Action<EntityBase, DbDataReader, int> ColumnBinder(PropertyInfo property) =>
+        _columnBinderCache.GetOrAdd(property, BuildColumnBinder);
+
+    /// <summary>1 列分の式木（<see cref="BuildColumnAssign"/>）を <c>Action&lt;EntityBase, DbDataReader, int&gt;</c> へコンパイルする</summary>
+    private static Action<EntityBase, DbDataReader, int> BuildColumnBinder(PropertyInfo property)
+    {
+        var entityParam = Expression.Parameter(typeof(EntityBase), "entity");
+        var readerParam = Expression.Parameter(typeof(DbDataReader), "reader");
+        var ordinalParam = Expression.Parameter(typeof(int), "ordinal");
+
+        // プロパティは派生エンティティ型で宣言されるため、EntityBase をその宣言型へ落としてからアクセスする
+        var assign = BuildColumnAssign(
+            Expression.Convert(entityParam, property.DeclaringType!),
+            readerParam,
+            ordinalParam,
+            property
+        );
+
+        return Expression
+            .Lambda<Action<EntityBase, DbDataReader, int>>(
+                assign,
+                entityParam,
+                readerParam,
+                ordinalParam
+            )
+            .Compile();
+    }
+
+    /// <summary>指定した列プロパティ群の列名を、このリーダー上の ordinal へ 1 度だけ解決する（射影・全列取得の行ループの前に呼ぶ）</summary>
+    public int[] ColumnOrdinals(DbDataReader reader, IReadOnlyList<PropertyInfo> properties)
+    {
+        var ordinals = new int[properties.Count];
+
+        for (var i = 0; i < ordinals.Length; i++)
+        {
+            ordinals[i] = reader.GetOrdinal(ColumnNameByProperty[properties[i]]);
+        }
+
+        return ordinals;
+    }
+
+    /// <summary>
+    /// データリーダーの 1 行を、指定した列プロパティのみマッピングした {TEntity} を返す（射影のサーバー側列刈り込み・WithUnboundedBinary の全列取得で共用）。
+    /// SELECT に含めた列だけを束縛し、それ以外の列は既定値のまま。射影用途（<paramref name="markUnchanged"/> = false・既定）は
+    /// セレクタ適用後に捨てるため RowState を設定しないが、WithUnboundedBinary の全列取得（<paramref name="markUnchanged"/> = true）は
+    /// 通常取得と同等の正当なエンティティを返すため RowState=Unchanged を確定する。<paramref name="ordinals"/> は
+    /// <see cref="ColumnOrdinals"/> で行ループ前に 1 度だけ解決した、<paramref name="properties"/> と同順の列 ordinal。
+    /// </summary>
+    public TEntity MapEntityColumns<TEntity>(
+        {{ sql_data_reader_type }} reader,
+        IReadOnlyList<PropertyInfo> properties,
+        int[] ordinals,
+        bool markUnchanged = false
+    )
+        where TEntity : EntityBase
+    {
+        // クエリ実行器の TEntity は new() 制約を持たないため Activator で生成する（エンティティは必ず引数なしコンストラクタを持つ）
+        var entity = (TEntity)Activator.CreateInstance(typeof(TEntity))!;
+
+        for (var i = 0; i < properties.Count; i++)
+        {
+            ColumnBinder(properties[i])(entity, reader, ordinals[i]);
+        }
+
+        if (markUnchanged)
+        {
+            // 全列を束縛した「正当なエンティティ」として返す場合は、DB 読み込み行として変更なしを確定する
+            entity.RowState = RowState.Unchanged;
+        }
+
+        return entity;
+    }
+{{~ end ~}}
+
+{{~ if repositories && repository_dialect != "sqlserver" ~}}
+    /// <summary>データリーダーの 1 行を（型引数なしで）エンティティへマッピングする（ordinal 事前解決版）。マルチクエリ Include の実体化で使う</summary>
+    /// <remarks>
+    /// <c>MapEntity</c> と同じ列→プロパティ束縛だが、Include ローダは実行時 <see cref="Type"/> を扱うため
+    /// ジェネリック制約を課さず生成する。<paramref name="ordinals"/> は <see cref="SelectOrdinals"/> で行ループ前に 1 度だけ解決する。
+    /// </remarks>
+{{~ if generate_value_objects ~}}
+    public EntityBase MapEntityObject(DbDataReader reader, int[] ordinals)
+    {
+        var entity = (EntityBase)Activator.CreateInstance(EntityType)!;
+
+        // 無制限バイナリ列は既定で SELECT 除外のため SelectColumns（＝SelectProperties の確定済み対応）のみをマップする
+        for (var i = 0; i < SelectColumns.Count; i++)
+        {
+            var property = SelectColumns[i].Property;
+            var value = reader.GetValue(ordinals[i]);
+
+            if (value is DBNull)
+            {
+                property.SetValue(entity, null);
+            }
+            else
+            {
+                // 値オブジェクトは内包型へ変換して包み直す（Wrap 内で Convert.ChangeType 済み）。
+                // 素の列は SQLite の格納型（int→long・decimal/Guid/DateTime→TEXT 等）をプロパティ型へ寄せる
+                var propertyType = property.PropertyType;
+                property.SetValue(
+                    entity,
+                    typeof(IValueObject).IsAssignableFrom(propertyType)
+                        ? SqlValueObjectActivator.Wrap(value, propertyType)
+                        : CoerceScalar(value, propertyType)
+                );
+            }
+        }
+
+        // DB から読み込んだ行は変更なし扱いにする（その後の編集で Updated に遷移）
+        entity.RowState = RowState.Unchanged;
+        return entity;
+    }
+{{~ else ~}}
+    // 値オブジェクトなしの素の列は SetColumnValue（＝CoerceScalar）と同値の式木マテリアライザで束縛する（型特化・リフレクションなし）
+    public EntityBase MapEntityObject(DbDataReader reader, int[] ordinals) =>
+        SelectMaterializer(reader, ordinals);
+{{~ end ~}}
+
+    /// <summary>データリーダーの 1 行を（型引数なしで）エンティティへマッピングする（SelectColumns の ordinal を都度解決する単一行版）</summary>
+    public EntityBase MapEntityObject(DbDataReader reader) =>
+        MapEntityObject(reader, SelectOrdinals(reader));
+
+    /// <summary>
+    /// SQLite が返す素の値（long / double / string / byte[]）を対象プロパティの CLR 型へ寄せる。
+    /// </summary>
+    /// <remarks>
+    /// SQLite の格納規約（EF Core Sqlite と同一: decimal/Guid/DateTime/DateTimeOffset/TimeSpan→TEXT・bool→INTEGER）に対応する。
+    /// 既に代入可能な型はそのまま返し、Nullable は基底型で判定する。変換できない場合は分かるメッセージの例外を投げる。
+    /// </remarks>
+    private static object CoerceScalar(object value, Type targetType)
+    {
+        var underlying = Nullable.GetUnderlyingType(targetType) ?? targetType;
+
+        if (underlying.IsInstanceOfType(value))
+        {
+            return value;
+        }
+
+        // enum は基底整数へ寄せてから変換する
+        if (underlying.IsEnum)
+        {
+            return Enum.ToObject(underlying, Convert.ChangeType(value, Enum.GetUnderlyingType(underlying), CultureInfo.InvariantCulture));
+        }
+
+        // TEXT 格納の型は文字列から復元する（ISO8601 / N 形式）
+        if (value is string text)
+        {
+            if (underlying == typeof(Guid))
+            {
+                return Guid.Parse(text);
+            }
+
+            if (underlying == typeof(DateTime))
+            {
+                return DateTime.Parse(text, CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.RoundtripKind);
+            }
+
+            if (underlying == typeof(DateTimeOffset))
+            {
+                return DateTimeOffset.Parse(text, CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.RoundtripKind);
+            }
+
+            if (underlying == typeof(TimeSpan))
+            {
+                return TimeSpan.Parse(text, CultureInfo.InvariantCulture);
+            }
+        }
+
+        // bool は INTEGER（0/1）で格納される
+        if (underlying == typeof(bool) && value is long boolLong)
+        {
+            return boolLong != 0;
+        }
+
+        try
+        {
+            // 数値の幅寄せ（long→int/short/byte、double→float/decimal 等）
+            return Convert.ChangeType(value, underlying, CultureInfo.InvariantCulture);
+        }
+        catch (Exception ex) when (ex is InvalidCastException or FormatException or OverflowException)
+        {
+            throw new InvalidOperationException(
+                $"SQLite から読み取った値（{value.GetType().Name}）を {underlying.Name} へ変換できませんでした。",
+                ex
+            );
+        }
+    }
+
+    /// <summary>指定カラムの値をエンティティから取り出す（値オブジェクトは素値へ開く）。Include の親子キー突き合わせで使う</summary>
+    public object? GetColumnValue(EntityBase entity, string columnName)
+    {
+        if (!PropertyByColumn.TryGetValue(columnName, out var property))
+        {
+            throw new InvalidOperationException(
+                $"{EntityType.Name} にカラム {columnName} に対応するプロパティがありません。"
+            );
+        }
+
+        var value = property.GetValue(entity);
+        return {{ if generate_value_objects }}SqlParameterValue.Unwrap(value){{ else }}value{{ end }};
+    }
+{{~ end ~}}
+{{~ if repositories ~}}
+    /// <summary>INSERT 用パラメータ（store-generated 列を除く挿入対象カラム）を設定する（追加・グラフ挿入で共用）</summary>
+    public void BindInsertParameters({{ sql_command_type }} command, EntityBase entity)
+    {
+        foreach (var property in InsertProperties)
+        {
+            AddColumnParameter(
+                command,
+                $"@{property.Name}",
+                property,
+                {{ if generate_value_objects }}SqlParameterValue.Unwrap(property.GetValue(entity)){{ else }}property.GetValue(entity){{ end }}
+            );
+        }
+    }
+
+    /// <summary>UPDATE 用パラメータ（非キー列＋主キー）を設定する（更新・グラフ更新で共用）</summary>
+    public void BindUpdateParameters({{ sql_command_type }} command, EntityBase entity)
+    {
+        // 無制限バイナリ列（UPDATE 対象外）に値が残ったままの更新はサイレントに失われるため事前に弾く。
+        // 直接 UpdateAsync とグラフのカスケード更新はどちらもここを通るため 1 箇所で被覆できる
+        UnboundedBinaryColumns.ThrowIfExcludedAssigned(entity);
+
+        foreach (var property in NonKeyProperties)
+        {
+            AddColumnParameter(
+                command,
+                $"@{property.Name}",
+                property,
+                {{ if generate_value_objects }}SqlParameterValue.Unwrap(property.GetValue(entity)){{ else }}property.GetValue(entity){{ end }}
+            );
+        }
+
+        AddColumnParameter(
+            command,
+            "@id",
+            KeyProperty,
+            {{ if generate_value_objects }}SqlParameterValue.Unwrap(KeyProperty.GetValue(entity)){{ else }}KeyProperty.GetValue(entity){{ end }}
+        );
+    }
+
+    /// <summary>エンティティの主キー値を @id パラメータへ設定する（グラフ削除で使用）</summary>
+    public void BindEntityKeyParameter({{ sql_command_type }} command, EntityBase entity)
+    {
+        AddColumnParameter(
+            command,
+            "@id",
+            KeyProperty,
+            {{ if generate_value_objects }}SqlParameterValue.Unwrap(KeyProperty.GetValue(entity)){{ else }}KeyProperty.GetValue(entity){{ end }}
+        );
+    }
+
+    /// <summary>外部から渡された主キー値を @id パラメータへ設定する（GetById/Delete で使用）</summary>
+    public void BindKeyParameter({{ sql_command_type }} command, object? id)
+    {
+        var value =
+            {{ if generate_value_objects }}SqlParameterValue.Unwrap(id){{ else }}id{{ end }}
+            ?? throw new InvalidOperationException("id は null にできません。");
+        AddColumnParameter(command, "@id", KeyProperty, value);
+    }
+{{~ if emit_sql_column_type_attr && repository_dialect == "sqlserver" ~}}
+
+    /// <summary>プロパティ単位の [SqlColumnType] 属性を 1 度だけ解決してキャッシュする（属性なしは null）</summary>
+    private static readonly ConcurrentDictionary<PropertyInfo, SqlColumnTypeAttribute?> _columnTypeCache =
+        new();
+
+    /// <summary>
+    /// 列プロパティの [SqlColumnType] 属性から明示 <see cref="{{ sql_parameter_type }}"/> を組み立てて追加する。
+    /// 属性が無い（手書きエンティティ・未知型）場合は従来どおり AddWithValue にフォールバックする。
+    /// </summary>
+    /// <param name="command">パラメータを追加する対象コマンド</param>
+    /// <param name="name">パラメータ名（@付き）</param>
+    /// <param name="property">対象列に対応するプロパティ（型付けの根拠）</param>
+    /// <param name="rawValue">値オブジェクトは既に素値へ開いた後の値。null は DBNull.Value として束縛する</param>
+    private static void AddColumnParameter(
+        {{ sql_command_type }} command,
+        string name,
+        PropertyInfo property,
+        object? rawValue
+    )
+    {
+        var attribute = _columnTypeCache.GetOrAdd(
+            property,
+            static p => p.GetCustomAttribute<SqlColumnTypeAttribute>()
+        );
+        if (attribute is null)
+        {
+            command.Parameters.AddWithValue(name, rawValue ?? DBNull.Value);
+            return;
+        }
+
+        var parameter = new {{ sql_parameter_type }}(name, attribute.DbType);
+        // 文字列/バイナリの Size 安全ガード: 宣言長が正で「値の長さ ≤ 宣言長」なら宣言長を、値が宣言長を
+        // 超える場合は値の長さを Size にする（ADO.NET は Size で入力値をクライアント側切り詰めするため、
+        // 固定 Size だとサーバー切り詰めエラーの代わりにサイレントなデータ破損が起きる。超過時はそのまま
+        // 送ってサーバー側エラーを温存する）。(max)=-1 は常に -1。
+        if (attribute.Size == -1)
+        {
+            parameter.Size = -1;
+        }
+        else if (attribute.Size > 0)
+        {
+            var valueLength = rawValue switch
+            {
+                string text => text.Length,
+                byte[] bytes => bytes.Length,
+                _ => 0,
+            };
+            parameter.Size = valueLength > attribute.Size ? valueLength : attribute.Size;
+        }
+
+        if (attribute.Precision > 0)
+        {
+            parameter.Precision = attribute.Precision;
+            parameter.Scale = attribute.Scale;
+        }
+
+        parameter.Value = rawValue ?? DBNull.Value;
+        command.Parameters.Add(parameter);
+    }
+{{~ else ~}}
+
+    /// <summary>[SqlColumnType] 属性が生成されない場合の束縛。従来どおり AddWithValue で追加する</summary>
+    /// <param name="command">パラメータを追加する対象コマンド</param>
+    /// <param name="name">パラメータ名（@付き）</param>
+    /// <param name="property">対象列に対応するプロパティ（この分岐では未使用）</param>
+    /// <param name="rawValue">値オブジェクトは既に素値へ開いた後の値。null は DBNull.Value として束縛する</param>
+    private static void AddColumnParameter(
+        {{ sql_command_type }} command,
+        string name,
+        PropertyInfo property,
+        object? rawValue
+    ) => command.Parameters.AddWithValue(name, rawValue ?? DBNull.Value);
+{{~ end ~}}
+
+    /// <summary>
+    /// クエリ WHERE 句パラメータを束縛する。列名が判明していてその列プロパティが見つかれば列型で明示構築し、
+    /// なければ AddWithValue にフォールバックする。
+    /// </summary>
+    /// <param name="command">パラメータを追加する対象コマンド</param>
+    /// <param name="name">パラメータ名（@付き）</param>
+    /// <param name="columnName">角括弧なしのカラム名。列が特定できない場合は null</param>
+    /// <param name="rawValue">値オブジェクトは既に素値へ開いた後の値。null は DBNull.Value として束縛する</param>
+    public void AddQueryParameter(
+        {{ sql_command_type }} command,
+        string name,
+        string? columnName,
+        object? rawValue
+    )
+    {
+        if (columnName is not null && PropertyByColumn.TryGetValue(columnName, out var property))
+        {
+            AddColumnParameter(command, name, property, rawValue);
+            return;
+        }
+
+        command.Parameters.AddWithValue(name, rawValue ?? DBNull.Value);
+    }
+
+{{~ if repository_dialect == "sqlserver" ~}}
+    /// <summary>エンティティのコレクションを 1 行ずつ読み出す SqlBulkCopy 用の IDataReader を生成する（store-generated 列は挿入対象外）</summary>
+    public IDataReader CreateDataReader(IEnumerable<EntityBase> entities) =>
+        new EntityDataReader(InsertProperties, entities);
+
+    /// <summary>エンティティ列を 1 行ずつ読み出して SqlBulkCopy へ流す IDataReader（DataTable を介さずメモリ効率を高める）</summary>
+    /// <remarks>SqlBulkCopy は Read・GetValue・FieldCount・GetName・GetOrdinal のみ使用するため、それ以外の型付き取得は未対応とする</remarks>
+    private sealed class EntityDataReader : IDataReader
+    {
+        private readonly IReadOnlyList<PropertyInfo> _properties;
+        private readonly string[] _columnNames;
+        private readonly IEnumerator<EntityBase> _enumerator;
+
+        public EntityDataReader(
+            IReadOnlyList<PropertyInfo> properties,
+            IEnumerable<EntityBase> entities
+        )
+        {
+            _properties = properties;
+            _columnNames = properties.Select(GetColumnName).ToArray();
+            _enumerator = entities.GetEnumerator();
+        }
+
+        public int FieldCount => _properties.Count;
+
+        public bool Read() => _enumerator.MoveNext();
+
+        public object GetValue(int i) =>
+            {{ if generate_value_objects }}SqlParameterValue.Unwrap(_properties[i].GetValue(_enumerator.Current)){{ else }}_properties[i].GetValue(_enumerator.Current){{ end }} ?? DBNull.Value;
+
+        public string GetName(int i) => _columnNames[i];
+
+        public int GetOrdinal(string name)
+        {
+            var index = Array.IndexOf(_columnNames, name);
+            return index >= 0
+                ? index
+                : throw new IndexOutOfRangeException($"列 {name} は存在しません。");
+        }
+
+        // Nullable<T> は基底型を返す（SqlBulkCopy の列型解決と整合させる）
+        public Type GetFieldType(int i) =>
+            Nullable.GetUnderlyingType(_properties[i].PropertyType) ?? _properties[i].PropertyType;
+
+        public bool IsDBNull(int i) => GetValue(i) is DBNull;
+
+        public object this[int i] => GetValue(i);
+
+        public object this[string name] => GetValue(GetOrdinal(name));
+
+        public int GetValues(object[] values)
+        {
+            var count = Math.Min(values.Length, FieldCount);
+            for (var i = 0; i < count; i++)
+            {
+                values[i] = GetValue(i);
+            }
+
+            return count;
+        }
+
+        public void Dispose() => _enumerator.Dispose();
+
+        public int Depth => 0;
+
+        public bool IsClosed => false;
+
+        public int RecordsAffected => -1;
+
+        public void Close() { }
+
+        public bool NextResult() => false;
+
+        public DataTable? GetSchemaTable() => null;
+
+        // 以降は SqlBulkCopy では呼ばれないため未対応とする
+        public bool GetBoolean(int i) => throw new NotSupportedException();
+
+        public byte GetByte(int i) => throw new NotSupportedException();
+
+        public long GetBytes(
+            int i,
+            long fieldOffset,
+            byte[]? buffer,
+            int bufferOffset,
+            int length
+        ) => throw new NotSupportedException();
+
+        public char GetChar(int i) => throw new NotSupportedException();
+
+        public long GetChars(
+            int i,
+            long fieldOffset,
+            char[]? buffer,
+            int bufferOffset,
+            int length
+        ) => throw new NotSupportedException();
+
+        public IDataReader GetData(int i) => throw new NotSupportedException();
+
+        public string GetDataTypeName(int i) => throw new NotSupportedException();
+
+        public DateTime GetDateTime(int i) => throw new NotSupportedException();
+
+        public decimal GetDecimal(int i) => throw new NotSupportedException();
+
+        public double GetDouble(int i) => throw new NotSupportedException();
+
+        public float GetFloat(int i) => throw new NotSupportedException();
+
+        public Guid GetGuid(int i) => throw new NotSupportedException();
+
+        public short GetInt16(int i) => throw new NotSupportedException();
+
+        public int GetInt32(int i) => throw new NotSupportedException();
+
+        public long GetInt64(int i) => throw new NotSupportedException();
+
+        public string GetString(int i) => throw new NotSupportedException();
+    }
+{{~ end ~}}
+{{~ end ~}}
+
+    private static string GetColumnName(PropertyInfo property) =>
+        property.GetCustomAttribute<ColumnAttribute>()?.Name ?? property.Name;
+{{~ if exclude_unbounded_binary || runtime_package_export ~}}
+
+    /// <summary>C# プロパティ名から対応する列プロパティを引く（無制限バイナリ列＝除外列を含む全列から探す）。Stream アクセサが Repository / インメモリ双方で使う</summary>
+    public PropertyInfo ColumnByPropertyName(string propertyName) =>
+        AllProperties.FirstOrDefault(property => property.Name == propertyName)
+        ?? throw new InvalidOperationException(
+            $"プロパティ {propertyName} は列として見つかりませんでした。"
+        );
+{{~ end ~}}
+{{~ if repositories && (exclude_unbounded_binary || runtime_package_export) ~}}
+
+    /// <summary>指定した列プロパティのクォート付きカラム名（例: {{ quote_open }}payload{{ quote_close }}）を返す（Stream アクセサの SQL 組み立て用）</summary>
+    public string QuotedColumnName(PropertyInfo property) =>
+        $"{{ quote_open }}{GetColumnName(property)}{{ quote_close }}";
+
+    /// <summary>指定した列プロパティのクォートなし生カラム名を返す（SqliteBlob 等が要求する）</summary>
+    public string RawColumnName(PropertyInfo property) => GetColumnName(property);
+{{~ end ~}}
+}
+{{~ end ~}}
+
+{{~ if repositories && emit_shared_infra ~}}
+/// <summary>カスケード削除の DELETE 文群を FK メタデータから組み立てるプランナー（DB 非依存・純粋）</summary>
+{{ infra_visibility }} static class CascadeDeletePlanner
+{
+    /// <summary>条件に一致する rootType の行と、その子孫を削除する DELETE 文を「子→親」の実行順で返す</summary>
+    /// <param name="rootType">削除の起点となるエンティティ型</param>
+    /// <param name="rootTable">角括弧付きのルートテーブル名</param>
+    /// <param name="whereClause">ルートの WHERE 句（" WHERE …" または空文字）</param>
+    public static IReadOnlyList<string> BuildDeleteStatements(
+        Type rootType,
+        string rootTable,
+        string whereClause
+    )
+    {
+        var statements = new List<string>();
+        AppendDescendantDeletes(
+            rootType,
+            rootTable,
+            whereClause,
+            new HashSet<Type> { rootType },
+            statements
+        );
+        statements.Add($"DELETE FROM {rootTable}{whereClause};");
+        return statements;
+    }
+
+    private static void AppendDescendantDeletes(
+        Type parentType,
+        string parentTable,
+        string parentScopeWhere,
+        HashSet<Type> visited,
+        List<string> statements
+    )
+    {
+        foreach (var navigation in EntitySaveMetadata.For(parentType).CascadeNavigations)
+        {
+            // 循環するカスケード（自己参照等）は固定ネストでは表現できないため未対応とする
+            if (!visited.Add(navigation.ChildType))
+            {
+                throw new NotSupportedException(
+                    $"循環するカスケード（{navigation.ChildType.Name}）は ExecuteDeleteAsync では未対応です。グラフをロードして SaveAsync を使うか、DB の ON DELETE CASCADE を利用してください。"
+                );
+            }
+
+            var childTable = EntitySaveMetadata.For(navigation.ChildType).TableName;
+            var childScopeWhere =
+                $" WHERE {{ quote_open }}{navigation.DependentColumn}{{ quote_close }} IN (SELECT {{ quote_open }}{navigation.PrincipalColumn}{{ quote_close }} FROM {parentTable}{parentScopeWhere})";
+
+            // 先に孫以下を削除してから子を削除する（FK 整合）
+            AppendDescendantDeletes(
+                navigation.ChildType,
+                childTable,
+                childScopeWhere,
+                visited,
+                statements
+            );
+            statements.Add($"DELETE FROM {childTable}{childScopeWhere};");
+
+            visited.Remove(navigation.ChildType);
+        }
+    }
+}
+{{~ end ~}}
+{{~ if (repositories || in_memory || (ef_core && render_contract) || (ef_core && render_ef_core && runtime_package_export)) && emit_shared_infra ~}}
+
+/// <summary>1 回の Save 呼び出しの間だけ生きる Save フックのセッション（レジストリ・context ファクトリ・スキップ集合を持ち回る）</summary>
+/// <remarks>
+/// context ファクトリはバックエンド（QuickER 方言・EF Core・InMemory）が進行中のトランザクション文脈を閉じ込めて渡す。
+/// スキップ集合は参照等価（<see cref="ReferenceEqualityComparer"/>）で追跡し、コミット後の <c>AcceptChanges</c> で状態据え置きに使う。
+/// </remarks>
+{{ infra_visibility }} sealed class SaveHookSession(
+    ISaveHookRegistry registry,
+    Func<EntityBase, ISaveHookContext> contextFactory
+)
+{
+    private readonly ISaveHookRegistry _registry = registry;
+    private readonly Func<EntityBase, ISaveHookContext> _contextFactory = contextFactory;
+    private readonly HashSet<EntityBase> _skipped = new(ReferenceEqualityComparer.Instance);
+
+    /// <summary>Before で <c>false</c>（スキップ）されたエンティティ集合（参照等価）。AcceptChanges の状態据え置きに使う</summary>
+    public IReadOnlySet<EntityBase> Skipped => _skipped;
+
+    /// <summary>エンティティをスキップ集合へ追加する</summary>
+    public void Skip(EntityBase entity) => _skipped.Add(entity);
+
+    /// <summary>登録順に Before を呼び最初の <c>false</c> で短絡する（フックが無い型は <c>true</c>）</summary>
+    public Task<bool> InvokeBeforeAsync(
+        EntityBase entity,
+        SaveOperation operation,
+        CancellationToken cancellationToken
+    )
+    {
+        var invoker = _registry.GetInvoker(entity.GetType());
+        return invoker is null
+            ? Task.FromResult(true)
+            : invoker.InvokeBeforeAsync(entity, operation, cancellationToken);
+    }
+
+    /// <summary>登録順に After を呼ぶ（フックが無い型は何もしない）。context はエンティティ型に束縛して生成する</summary>
+    public Task InvokeAfterAsync(
+        EntityBase entity,
+        SaveOperation operation,
+        CancellationToken cancellationToken
+    )
+    {
+        var invoker = _registry.GetInvoker(entity.GetType());
+        return invoker is null
+            ? Task.CompletedTask
+            : invoker.InvokeAfterAsync(
+                entity,
+                operation,
+                _contextFactory(entity),
+                cancellationToken
+            );
+    }
+}
+
+/// <summary>RowState に従ってエンティティのグラフを 1 トランザクションで保存する内部エンジン</summary>
+{{ infra_visibility }} static class EntityGraphSaver
+{
+    /// <summary>自身、または（cascade 時）子に変更があるか</summary>
+    public static bool HasChanges(EntityBase entity, bool cascade) =>
+        entity.HasChanges
+        || (cascade && EnumerateCascadeChildren(entity).Any(child => HasChanges(child, true)));
+{{~ if repositories ~}}
+
+    /// <summary>グラフを保存し、保存したレコード数を返す（<paramref name="hooks"/> 指定時は各操作の前後で Save フックを発火する）</summary>
+    /// <remarks>
+    /// <c>changesAlreadyVerified</c> が <c>true</c>（呼び出し側が <see cref="HasChanges"/> を確認済み＝変更ありと判明済み）の
+    /// ときは、冒頭の重複するグラフ走査（変更判定）を省く。子への再帰では既定 <c>false</c> のまま渡すため、各サブツリーの
+    /// 変更判定（クリーンな枝の枝刈り）は従来どおり行う。
+    /// </remarks>
+    public static async Task<int> SaveAsync(
+        EntityBase entity,
+        {{ sql_connection_type }} connection,
+        {{ sql_transaction_type }} transaction,
+        bool cascadeSave,
+        bool cascadeDelete,
+        bool insertWhenUpdateMissing,
+        CancellationToken cancellationToken,
+        SaveHookSession? hooks = null,
+        bool changesAlreadyVerified = false
+    )
+    {
+        if (!changesAlreadyVerified && !HasChanges(entity, cascadeSave))
+        {
+            return 0;
+        }
+
+        var rows = 0;
+
+        if (entity.IsRemoved)
+        {
+            // 削除は子（サブツリー）を先に削除してから自身を削除する（FK 整合）
+            if (cascadeDelete)
+            {
+                foreach (var child in EnumerateCascadeChildren(entity))
+                {
+                    rows += await DeleteGraphAsync(
+                        child,
+                        connection,
+                        transaction,
+                        cancellationToken,
+                        hooks
+                    );
+                }
+            }
+
+            // Before(Delete)。false ならこのノードの削除だけをスキップする（子は上で削除済み＝自身は残る）
+            if (
+                hooks is not null
+                && !await hooks.InvokeBeforeAsync(
+                    entity,
+                    SaveOperation.Delete,
+                    cancellationToken
+                )
+            )
+            {
+                hooks.Skip(entity);
+                return rows;
+            }
+
+            rows += await ExecuteAsync(
+                entity,
+                meta => meta.DeleteSql,
+                static (meta, command, e) => meta.BindEntityKeyParameter(command, e),
+                connection,
+                transaction,
+                cancellationToken
+            );
+
+            // After(Delete) は DML の直後（コミット前）に発火する
+            if (hooks is not null)
+            {
+                await hooks.InvokeAfterAsync(entity, SaveOperation.Delete, cancellationToken);
+            }
+
+            return rows;
+        }
+
+        // 追加・更新は自身を先に保存してから子へ進む（子 FK が親 PK を参照するため）
+        if (entity.IsAdded)
+        {
+            if (
+                hooks is null
+                || await hooks.InvokeBeforeAsync(entity, SaveOperation.Insert, cancellationToken)
+            )
+            {
+                rows += await ExecuteAsync(
+                    entity,
+                    meta => meta.InsertSql,
+                    static (meta, command, e) => meta.BindInsertParameters(command, e),
+                    connection,
+                    transaction,
+                    cancellationToken
+                );
+
+                if (hooks is not null)
+                {
+                    await hooks.InvokeAfterAsync(entity, SaveOperation.Insert, cancellationToken);
+                }
+            }
+            else
+            {
+                // Before が false＝この 1 件の挿入だけスキップ（子カスケードは続行する）
+                hooks.Skip(entity);
+            }
+        }
+        else if (entity.IsUpdated)
+        {
+            if (
+                hooks is null
+                || await hooks.InvokeBeforeAsync(entity, SaveOperation.Update, cancellationToken)
+            )
+            {
+                var (affected, performed) = await UpdateAsync(
+                    entity,
+                    connection,
+                    transaction,
+                    insertWhenUpdateMissing,
+                    cancellationToken
+                );
+                rows += affected;
+
+                // After は実際に行った操作で発火する（insertWhenUpdateMissing による切替時は Insert）
+                if (hooks is not null)
+                {
+                    await hooks.InvokeAfterAsync(entity, performed, cancellationToken);
+                }
+            }
+            else
+            {
+                hooks.Skip(entity);
+            }
+        }
+
+        if (cascadeSave)
+        {
+            foreach (var child in EnumerateCascadeChildren(entity))
+            {
+                rows += await SaveAsync(
+                    child,
+                    connection,
+                    transaction,
+                    cascadeSave,
+                    cascadeDelete,
+                    insertWhenUpdateMissing,
+                    cancellationToken,
+                    hooks
+                );
+            }
+        }
+
+        return rows;
+    }
+{{~ end ~}}
+
+    /// <summary>コミット後に保存済みエンティティを Unchanged に確定する</summary>
+    public static void AcceptChanges(EntityBase entity, bool cascade) =>
+        AcceptChanges(entity, cascade, null);
+
+    /// <summary>
+    /// コミット後に保存済みエンティティを Unchanged に確定する。<paramref name="skip"/> に含まれるエンティティ
+    /// （Save フックの Before が <c>false</c> を返してスキップされた行）は操作していないため状態を据え置く。
+    /// </summary>
+    public static void AcceptChanges(
+        EntityBase entity,
+        bool cascade,
+        IReadOnlySet<EntityBase>? skip
+    )
+    {
+        if (entity.IsRemoved)
+        {
+            return;
+        }
+
+        // スキップされたエンティティは INSERT / UPDATE を行っていないため RowState を据え置く
+        if (skip is null || !skip.Contains(entity))
+        {
+            entity.MarkUnchanged();
+        }
+
+        if (cascade)
+        {
+            foreach (var child in EnumerateCascadeChildren(entity))
+            {
+                AcceptChanges(child, true, skip);
+            }
+        }
+    }
+
+{{~ if repositories ~}}
+    /// <summary>サブツリーを子から順に削除する（状態に関わらず削除。<paramref name="hooks"/> 指定時は子ごとに Before/After(Delete) を発火）</summary>
+    private static async Task<int> DeleteGraphAsync(
+        EntityBase entity,
+        {{ sql_connection_type }} connection,
+        {{ sql_transaction_type }} transaction,
+        CancellationToken cancellationToken,
+        SaveHookSession? hooks = null
+    )
+    {
+        var rows = 0;
+
+        foreach (var child in EnumerateCascadeChildren(entity))
+        {
+            rows += await DeleteGraphAsync(child, connection, transaction, cancellationToken, hooks);
+        }
+
+        // Before(Delete) は削除はサブツリーの子から順に発火する。false なら「子は消え自身は残る」（単独スキップの帰結）
+        if (
+            hooks is not null
+            && !await hooks.InvokeBeforeAsync(entity, SaveOperation.Delete, cancellationToken)
+        )
+        {
+            hooks.Skip(entity);
+            return rows;
+        }
+
+        rows += await ExecuteAsync(
+            entity,
+            meta => meta.DeleteSql,
+            static (meta, command, e) => meta.BindEntityKeyParameter(command, e),
+            connection,
+            transaction,
+            cancellationToken
+        );
+
+        if (hooks is not null)
+        {
+            await hooks.InvokeAfterAsync(entity, SaveOperation.Delete, cancellationToken);
+        }
+
+        return rows;
+    }
+
+    /// <summary>更新を実行し、影響行数と実際に行った操作（切替時は Insert）を返す</summary>
+    private static async Task<(int Rows, SaveOperation Performed)> UpdateAsync(
+        EntityBase entity,
+        {{ sql_connection_type }} connection,
+        {{ sql_transaction_type }} transaction,
+        bool insertWhenUpdateMissing,
+        CancellationToken cancellationToken
+    )
+    {
+        var affected = await ExecuteAsync(
+            entity,
+            meta => meta.UpdateSql,
+            static (meta, command, e) => meta.BindUpdateParameters(command, e),
+            connection,
+            transaction,
+            cancellationToken
+        );
+
+        if (affected != 0)
+        {
+            return (affected, SaveOperation.Update);
+        }
+
+        // 更新対象が存在しない（他ユーザーの削除等）。方針に応じて INSERT へ切替、または競合として通知する
+        if (insertWhenUpdateMissing)
+        {
+            var inserted = await ExecuteAsync(
+                entity,
+                meta => meta.InsertSql,
+                static (meta, command, e) => meta.BindInsertParameters(command, e),
+                connection,
+                transaction,
+                cancellationToken
+            );
+            return (inserted, SaveOperation.Insert);
+        }
+
+        var metadata = EntitySaveMetadata.For(entity.GetType());
+        throw new SaveConflictException(
+            $"更新対象のレコードが見つかりませんでした（{entity.GetType().Name}、キー {metadata.KeyProperty.GetValue(entity)}）。他のユーザーに削除された可能性があります。"
+        );
+    }
+
+    private static async Task<int> ExecuteAsync(
+        EntityBase entity,
+        Func<EntitySaveMetadata, string> sqlSelector,
+        Action<EntitySaveMetadata, {{ sql_command_type }}, EntityBase> bind,
+        {{ sql_connection_type }} connection,
+        {{ sql_transaction_type }} transaction,
+        CancellationToken cancellationToken
+    )
+    {
+        var metadata = EntitySaveMetadata.For(entity.GetType());
+
+        await using var command = new {{ sql_command_type }}(sqlSelector(metadata), connection, transaction);
+        bind(metadata, command, entity);
+        return await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+{{~ end ~}}
+
+    /// <summary>カスケード対象の子エンティティを列挙する（null は除外）</summary>
+    private static IEnumerable<EntityBase> EnumerateCascadeChildren(EntityBase entity)
+    {
+        foreach (var navigation in EntitySaveMetadata.For(entity.GetType()).CascadeNavigations)
+        {
+            var value = navigation.Property.GetValue(entity);
+
+            if (value is null)
+            {
+                continue;
+            }
+
+            if (navigation.IsCollection)
+            {
+                if (value is IEnumerable<EntityBase> children)
+                {
+                    foreach (var child in children)
+                    {
+                        if (child is not null)
+                        {
+                            yield return child;
+                        }
+                    }
+                }
+            }
+            else if (value is EntityBase child)
+            {
+                yield return child;
+            }
+        }
+    }
+}
+{{~ end ~}}
+
+{{~ if repositories && !runtime_package_export ~}}
+/// <summary>生成されたリポジトリ群（{{ dialect_display_name }} 実装）を DI コンテナへ登録する拡張</summary>
+/// <remarks>
+/// DI 登録はエンジン別に <c>AddGenerated{{ dialect_di_suffix }}Repositories</c> という名前で提供し、同一契約
+/// （I{Entity}Repository / ISqlExecutor）を方言別実装で登録する。複数方言（マルチターゲット）を同一プロセスで併用する場合は
+/// <c>object? serviceKey</c> 付きオーバーロード（keyed DI）を使い、<c>[FromKeyedServices("...")]</c> で方言別の接続を解決する。
+/// </remarks>
+public static class Generated{{ dialect_di_suffix }}RepositoryServiceCollectionExtensions
+{
+    /// <summary>接続文字列とともに {{ dialect_display_name }} 版リポジトリ群を DI コンテナへ登録する（非 keyed・単独利用向け）</summary>
+    public static IServiceCollection AddGenerated{{ dialect_di_suffix }}Repositories(
+        this IServiceCollection services,
+        string connectionString
+    )
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
+
+        services.AddSingleton<ISqlConnectionFactory>(_ => new SqlConnectionFactory(
+            connectionString
+        ));
+        services.AddSingleton<ISqlExecutor, SqlExecutor>();
+
+        // Save フックのレジストリを既定登録する（ISaveHook<T> の登録が無ければ完全 no-op）
+        services.TryAddScoped<ISaveHookRegistry>(provider => new ServiceProviderSaveHookRegistry(
+            provider
+        ));
+{{ for repository in repository_classes }}        services.AddScoped<{{ repository.interface_name }}, {{ repository.class_name }}>();
+{{ if remote_contracts }}        services.AddScoped<{{ repository.remote_interface_name }}>(provider =>
+            provider.GetRequiredService<{{ repository.interface_name }}>()
+        );
+{{ end }}{{ end }}
+        return services;
+    }
+
+    /// <summary>サービスキー付きで {{ dialect_display_name }} 版リポジトリ群を登録する（keyed DI・複数方言の同時利用向け）</summary>
+    /// <remarks>
+    /// I{Entity}Repository / ISqlExecutor を <paramref name="serviceKey"/> 付きで登録する。利用側は
+    /// <c>[FromKeyedServices(serviceKey)] ICustomerRepository</c> のように方言別の実装を解決する。
+    /// 接続ファクトリはキーごとにクロージャで閉じ込めるため非 keyed で登録衝突しない。
+    /// </remarks>
+    public static IServiceCollection AddGenerated{{ dialect_di_suffix }}Repositories(
+        this IServiceCollection services,
+        object? serviceKey,
+        string connectionString
+    )
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
+
+        var connectionFactory = new SqlConnectionFactory(connectionString);
+        services.AddKeyedSingleton<ISqlConnectionFactory>(serviceKey, (_, _) => connectionFactory);
+        services.AddKeyedSingleton<ISqlExecutor>(
+            serviceKey,
+            (_, _) => new SqlExecutor(connectionFactory)
+        );
+
+        // Save フックのレジストリを既定登録する（非 keyed・ISaveHook<T> の登録が無ければ完全 no-op）
+        services.TryAddScoped<ISaveHookRegistry>(provider => new ServiceProviderSaveHookRegistry(
+            provider
+        ));
+{{ for repository in repository_classes }}        services.AddKeyedScoped<{{ repository.interface_name }}>(
+            serviceKey,
+            (provider, _) => new {{ repository.class_name }}(
+                connectionFactory,
+                provider.GetService<ISaveHookRegistry>()
+            )
+        );
+{{ if remote_contracts }}        services.AddKeyedScoped<{{ repository.remote_interface_name }}>(
+            serviceKey,
+            (provider, key) => provider.GetRequiredKeyedService<{{ repository.interface_name }}>(key)
+        );
+{{ end }}{{ end }}
+        return services;
+    }
+}
+{{~ end ~}}
+
+{{~ for repository in repository_classes ~}}
+{{~ if render_contract ~}}
+{{~ if remote_contracts ~}}
+{{~ remote_interface_members = join_members repository.query_interface_block repository.binary_stream_contract_block ~}}
+{{ if !for.first }}
+{{ end }}/// <summary>{{ repository.entity_class_name }} 用リポジトリのリモート面（ネットワーク境界を越えられる CRUD・保存・名前付きクエリのみ。将来リモート実装へ差し替え可能）</summary>
+public partial interface {{ repository.remote_interface_name }} : IRemoteRepository<{{ repository.entity_class_name }}, {{ repository.key_type_name }}>{{ if remote_interface_members == "" }} { }{{ else }}
+{
+{{ remote_interface_members }}
+}{{ end }}
+
+/// <summary>{{ repository.entity_class_name }} 用リポジトリインターフェース（全機能面＝リモート面に式木クエリ・生 SQL・一括追加を追加）</summary>
+public partial interface {{ repository.interface_name }}
+    : {{ repository.remote_interface_name }},
+        IRepository<{{ repository.entity_class_name }}, {{ repository.key_type_name }}> { }
+{{~ else ~}}
+{{~ non_remote_interface_members = join_members repository.query_interface_block repository.binary_stream_contract_block ~}}
+{{ if !for.first }}
+{{ end }}/// <summary>{{ repository.entity_class_name }} 用リポジトリインターフェース</summary>
+public partial interface {{ repository.interface_name }} : IRepository<{{ repository.entity_class_name }}, {{ repository.key_type_name }}>{{ if non_remote_interface_members == "" }} { }{{ else }}
+{
+{{ non_remote_interface_members }}
+}{{ end }}
+{{~ end ~}}
+{{~ if repository.query_dto_block != "" ~}}
+
+{{ repository.query_dto_block }}
+{{~ end ~}}
+{{~ if repository.binary_stream_file_extensions_block != "" ~}}
+
+{{ repository.binary_stream_file_extensions_block }}
+{{~ end ~}}
+{{~ end ~}}
+{{~ if repositories ~}}
+{{~ ado_query_impl_block = repository.query_impl_blocks_by_dialect[repository_dialect] ~}}
+{{~ ado_impl_members = join_members ado_query_impl_block repository.binary_stream_thin_impl_block ~}}
+
+/// <summary>{{ repository.entity_class_name }} 用リポジトリ実装</summary>
+public sealed partial class {{ repository.class_name }}(
+    ISqlConnectionFactory connectionFactory,
+    ISaveHookRegistry? saveHooks = null
+)
+    : {{ repository_base_class }}<{{ repository.entity_class_name }}, {{ repository.key_type_name }}>(
+        connectionFactory,
+        saveHooks
+    ),
+        {{ repository.interface_name }}{{ if ado_impl_members == "" }} { }{{ else }}
+{
+{{ ado_impl_members }}
+}{{ end }}
+{{~ end ~}}
+{{~ end ~}}
+{{~ end ~}}
+{{~ if remote_services && render_contract && !runtime_package_export ~}}
+{{~ for repository in repository_classes ~}}
+
+/// <summary>{{ repository.entity_class_name }} 用リモート面（{{ repository.remote_interface_name }}）の HTTP クライアント実装</summary>
+/// <remarks>サーバー側 <c>MapGeneratedRemoteEndpoints</c> のエンドポイントを呼び出す。HttpClient の BaseAddress は prefix（既定 /quicker/）まで含むこと</remarks>
+{{~ remote_client_members = join_members repository.query_remote_client_block repository.binary_stream_remote_client_block ~}}
+public sealed partial class {{ repository.remote_client_class_name }}(HttpClient httpClient)
+    : HttpRemoteRepository<{{ repository.entity_class_name }}, {{ repository.key_type_name }}>(httpClient, "{{ repository.remote_route_name }}"),
+        {{ repository.remote_interface_name }}{{ if remote_client_members == "" }} { }{{ else }}
+{
+{{ remote_client_members }}
+}{{ end }}
+{{~ end ~}}
+
+/// <summary>リモート面（I{Entity}RemoteRepository）の HTTP クライアント実装を DI コンテナへ登録する拡張</summary>
+public static class GeneratedHttpRemoteRepositoryServiceCollectionExtensions
+{
+    /// <summary>ベースアドレスを指定して HTTP クライアント実装を登録する（単純構成向け・HttpClient は共有シングルトン）</summary>
+    /// <param name="services">登録先のサービスコレクション</param>
+    /// <param name="baseAddress">サーバーの prefix まで含むベースアドレス（例 <c>https://server:5001/quicker</c>。末尾 / は自動補完）</param>
+    public static IServiceCollection AddGeneratedHttpRemoteRepositories(
+        this IServiceCollection services,
+        string baseAddress
+    )
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentException.ThrowIfNullOrWhiteSpace(baseAddress);
+
+        // 相対パス（"Order/GetById" 等）の解決に末尾 / が必須のため補完する
+        var normalized = baseAddress.EndsWith('/') ? baseAddress : baseAddress + "/";
+        var sharedClient = new HttpClient { BaseAddress = new Uri(normalized) };
+
+        return AddGeneratedHttpRemoteRepositories(services, _ => sharedClient);
+    }
+
+    /// <summary>HttpClient のファクトリを指定して HTTP クライアント実装を登録する（認証ハンドラ等を構成する場合）</summary>
+    /// <remarks>ファクトリが返す HttpClient の BaseAddress は prefix まで含み、末尾 / で終わること</remarks>
+    /// <param name="services">登録先のサービスコレクション</param>
+    /// <param name="httpClientFactory">リポジトリ生成時に使う HttpClient を返すファクトリ</param>
+    public static IServiceCollection AddGeneratedHttpRemoteRepositories(
+        this IServiceCollection services,
+        Func<IServiceProvider, HttpClient> httpClientFactory
+    )
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(httpClientFactory);
+
+{{ for repository in repository_classes }}        services.AddScoped<{{ repository.remote_interface_name }}>(provider => new {{ repository.remote_client_class_name }}(
+            httpClientFactory(provider)
+        ));
+{{ end }}
+        return services;
+    }
+}
+{{~ end ~}}

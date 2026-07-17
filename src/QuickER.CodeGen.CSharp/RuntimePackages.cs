@@ -8,7 +8,7 @@ namespace QuickER.CodeGen.CSharp;
 /// <remarks>
 /// <para>
 /// 生成コードのうちスキーマに依存しない固定部分（EntityBase・属性・VO 基底・JSON コンバータ・Repository 共通契約・
-/// 方言別エンジン・EF Core 共通部品）は <c>Templates/CSharpRuntime.scriban</c> から出力される。これを 4 分割の NuGet
+/// 方言別エンジン・EF Core 共通部品）は <c>Templates/CSharpRuntime/*.scriban</c> から出力される。これを 4 分割の NuGet
 /// パッケージ（コア＋QuickER の方言エンジン×方言数＋EF Core）として配布できるようにするための ID を集約する。
 /// </para>
 /// <para>
