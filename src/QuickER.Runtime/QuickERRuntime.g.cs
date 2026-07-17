@@ -634,6 +634,23 @@ public abstract partial class EntityBase
     /// <summary>変更（追加・更新・削除）があるかどうか</summary>
     public bool HasChanges => RowState != RowState.Unchanged;
 
+    /// <summary>このエンティティの表示名（画面ラベル等で使う）。既定は <see cref="DefaultDisplayName"/>、CustomizeDisplayName で上書き可能</summary>
+    public string DisplayName
+    {
+        get
+        {
+            var displayName = DefaultDisplayName;
+            CustomizeDisplayName(ref displayName);
+            return displayName;
+        }
+    }
+
+    /// <summary>表示名の既定値。既定は実行時のクラス名。テーブル説明を持つエンティティは派生クラスが override する</summary>
+    protected virtual string DefaultDisplayName => GetType().Name;
+
+    /// <summary>表示名を差し替える拡張ポイント（派生クラスの override で上書き。未上書きなら既定の表示名）</summary>
+    protected virtual void CustomizeDisplayName(ref string displayName) { }
+
     /// <summary>追加対象としてマークする（直接 new したエンティティを保存対象にする場合に使用）</summary>
     public void MarkAdded() => RowState = RowState.Added;
 
@@ -856,6 +873,28 @@ public abstract partial class EditModelBase
 
     /// <summary>確定値の変更で RowState を Updated へ昇格させるかどうか（既定 true。メタ情報など特定プロパティを除外したい場合に override）</summary>
     protected virtual bool ShouldMarkUpdated(string propertyName) => true;
+
+    /// <summary>画面入力文字列を正規化する（前後の空白・タブ・改行を除去。全角スペースも対象）</summary>
+    protected string NormalizeInput(string propertyName, string value)
+    {
+        // ComboBox 等のバインドは実行時に null を書き込み得るため許容する（null は未入力として変換分岐が処理する）
+        if (value is null)
+        {
+            return value!;
+        }
+
+        // 前後の空白のみ除去する（中間の空白・改行は保持）
+        var normalized = value.Trim();
+        CustomizeInputNormalization(propertyName, value, ref normalized);
+        return normalized;
+    }
+
+    /// <summary>入力正規化を列単位で調整する（トリムを無効化したい列で normalizedValue に rawValue を戻す等。override で処理を追加）</summary>
+    protected virtual void CustomizeInputNormalization(
+        string propertyName,
+        string rawValue,
+        ref string normalizedValue
+    ) { }
 
     /// <summary>この EditModel が所属するコレクション（兄弟ナビゲーション用。EditModelCollection が設定する）</summary>
     public IList? Owner { get; set; }
@@ -1641,6 +1680,75 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
         {
             _removed.Add(item);
         }
+    }
+}
+
+/// <summary>Entity と EditModel の相互変換に共通する骨組み（生成の連鎖・コレクション化）を提供する基底クラス</summary>
+/// <remarks>
+/// エンティティ固有の列コピー（<see cref="ApplyToEntity"/>）と生成直後フックを含む単体生成（<see cref="CreateEntity()"/> /
+/// <see cref="CreateEditModel(TEntity)"/>）は派生クラスが実装し、それらを組み合わせた定型処理（編集モデルからの生成・
+/// コレクション変換）だけをここで一元化する。
+/// </remarks>
+public abstract partial class MapperBase<TEntity, TEditModel>
+    where TEntity : EntityBase
+    where TEditModel : EditModelBase
+{
+    /// <summary>初期値を設定した新しい TEntity を生成する（保存時に追加対象となる）</summary>
+    public abstract TEntity CreateEntity();
+
+    /// <summary>TEntity を基に新しい TEditModel を生成する</summary>
+    public abstract TEditModel CreateEditModel(TEntity entity);
+
+    /// <summary>TEditModel の確定値を既存の TEntity へ反映する（破壊的更新）。列コピーは派生が実装する</summary>
+    /// <param name="editModel">確定値の反映元となる編集モデル</param>
+    /// <param name="entity">反映先の既存 Entity</param>
+    /// <param name="includeRemoved">削除追跡分（Removed）も復元して反映するか（保存用は true、帳票表示用などは false）</param>
+    public abstract void ApplyToEntity(TEditModel editModel, TEntity entity, bool includeRemoved);
+
+    /// <summary>初期値を設定した新しい TEntity に TEditModel の確定値を反映して生成する</summary>
+    /// <param name="editModel">確定値の反映元となる編集モデル</param>
+    /// <param name="includeRemoved">削除追跡分（Removed）も復元して反映するか（保存用は true、帳票表示用などは false）</param>
+    public TEntity CreateEntity(TEditModel editModel, bool includeRemoved = false)
+    {
+        var entity = CreateEntity();
+        ApplyToEntity(editModel, entity, includeRemoved);
+        return entity;
+    }
+
+    /// <summary>TEditModel の EditModelCollection を基に TEntity のリストを生成する</summary>
+    /// <param name="editModels">生成元となる編集モデルのコレクション</param>
+    /// <param name="includeRemoved">削除追跡分（Removed）も復元して含めるか（保存用は true、帳票表示用などは false）</param>
+    public List<TEntity> CreateEntities(
+        EditModelCollection<TEditModel> editModels,
+        bool includeRemoved = false
+    )
+    {
+        var entities = editModels
+            .Select(editModel => CreateEntity(editModel, includeRemoved))
+            .ToList();
+
+        if (includeRemoved)
+        {
+            entities.AddRange(
+                editModels.RemovedItems.Select(removed => CreateEntity(removed, includeRemoved))
+            );
+        }
+
+        return entities;
+    }
+
+    /// <summary>新規入力用の TEditModel を生成する（追加対象の Entity を基に作る）</summary>
+    public TEditModel CreateEditModel()
+    {
+        var entity = CreateEntity();
+        var editModel = CreateEditModel(entity);
+        return editModel;
+    }
+
+    /// <summary>TEntity の列挙を基に TEditModel の EditModelCollection を生成する</summary>
+    public EditModelCollection<TEditModel> CreateEditModels(IEnumerable<TEntity> entities)
+    {
+        return new EditModelCollection<TEditModel>(entities.Select(entity => CreateEditModel(entity)));
     }
 }
 

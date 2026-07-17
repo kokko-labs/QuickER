@@ -279,6 +279,23 @@ public abstract partial class EntityBase
     /// <summary>変更（追加・更新・削除）があるかどうか</summary>
     public bool HasChanges => RowState != RowState.Unchanged;
 
+    /// <summary>このエンティティの表示名（画面ラベル等で使う）。既定は <see cref="DefaultDisplayName"/>、CustomizeDisplayName で上書き可能</summary>
+    public string DisplayName
+    {
+        get
+        {
+            var displayName = DefaultDisplayName;
+            CustomizeDisplayName(ref displayName);
+            return displayName;
+        }
+    }
+
+    /// <summary>表示名の既定値。既定は実行時のクラス名。テーブル説明を持つエンティティは派生クラスが override する</summary>
+    protected virtual string DefaultDisplayName => GetType().Name;
+
+    /// <summary>表示名を差し替える拡張ポイント（派生クラスの override で上書き。未上書きなら既定の表示名）</summary>
+    protected virtual void CustomizeDisplayName(ref string displayName) { }
+
     /// <summary>追加対象としてマークする（直接 new したエンティティを保存対象にする場合に使用）</summary>
     public void MarkAdded() => RowState = RowState.Added;
 
@@ -459,20 +476,6 @@ public partial class DocumentEntity : EntityBase
     /// <summary>DocumentNotes ナビゲーションプロパティ</summary>
     [NavigationReference("documents", "document_id", "document_notes", "document_id", true, true, false)]
     public ICollection<DocumentNoteEntity> DocumentNotes { get; set; } = new List<DocumentNoteEntity>();
-
-    /// <summary>このエンティティの表示名（画面ラベル等で使う）。既定はテーブルの説明、無指定はクラス名。CustomizeDisplayName で上書き可能</summary>
-    public static string DisplayName
-    {
-        get
-        {
-            var displayName = "DocumentEntity";
-            CustomizeDisplayName(ref displayName);
-            return displayName;
-        }
-    }
-
-    /// <summary>表示名を差し替える拡張ポイント（partial・未実装なら既定の表示名）</summary>
-    static partial void CustomizeDisplayName(ref string displayName);
 }
 
 /// <summary>document_notes テーブルに対応するエンティティ</summary>
@@ -501,20 +504,6 @@ public partial class DocumentNoteEntity : EntityBase
     [JsonIgnore]
     [NavigationReference("documents", "document_id", "document_notes", "document_id", false, false, true)]
     public DocumentEntity Document { get; set; } = null!;
-
-    /// <summary>このエンティティの表示名（画面ラベル等で使う）。既定はテーブルの説明、無指定はクラス名。CustomizeDisplayName で上書き可能</summary>
-    public static string DisplayName
-    {
-        get
-        {
-            var displayName = "DocumentNoteEntity";
-            CustomizeDisplayName(ref displayName);
-            return displayName;
-        }
-    }
-
-    /// <summary>表示名を差し替える拡張ポイント（partial・未実装なら既定の表示名）</summary>
-    static partial void CustomizeDisplayName(ref string displayName);
 }
 
 /// <summary>EditModel 共通の変更通知・エラー管理・補助処理を提供する基底クラス</summary>
@@ -600,6 +589,28 @@ public abstract partial class EditModelBase
 
     /// <summary>確定値の変更で RowState を Updated へ昇格させるかどうか（既定 true。メタ情報など特定プロパティを除外したい場合に override）</summary>
     protected virtual bool ShouldMarkUpdated(string propertyName) => true;
+
+    /// <summary>画面入力文字列を正規化する（前後の空白・タブ・改行を除去。全角スペースも対象）</summary>
+    protected string NormalizeInput(string propertyName, string value)
+    {
+        // ComboBox 等のバインドは実行時に null を書き込み得るため許容する（null は未入力として変換分岐が処理する）
+        if (value is null)
+        {
+            return value!;
+        }
+
+        // 前後の空白のみ除去する（中間の空白・改行は保持）
+        var normalized = value.Trim();
+        CustomizeInputNormalization(propertyName, value, ref normalized);
+        return normalized;
+    }
+
+    /// <summary>入力正規化を列単位で調整する（トリムを無効化したい列で normalizedValue に rawValue を戻す等。override で処理を追加）</summary>
+    protected virtual void CustomizeInputNormalization(
+        string propertyName,
+        string rawValue,
+        ref string normalizedValue
+    ) { }
 
     /// <summary>この EditModel が所属するコレクション（兄弟ナビゲーション用。EditModelCollection が設定する）</summary>
     internal IList? Owner { get; set; }
@@ -1388,6 +1399,74 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
     }
 }
 
+/// <summary>Entity と EditModel の相互変換に共通する骨組み（生成の連鎖・コレクション化）を提供する基底クラス</summary>
+/// <remarks>
+/// エンティティ固有の列コピー（<see cref="ApplyToEntity"/>）と生成直後フックを含む単体生成（<see cref="CreateEntity()"/> /
+/// <see cref="CreateEditModel(TEntity)"/>）は派生クラスが実装し、それらを組み合わせた定型処理（編集モデルからの生成・
+/// コレクション変換）だけをここで一元化する。
+/// </remarks>
+public abstract partial class MapperBase<TEntity, TEditModel>
+    where TEntity : EntityBase
+    where TEditModel : EditModelBase
+{
+    /// <summary>初期値を設定した新しい TEntity を生成する（保存時に追加対象となる）</summary>
+    public abstract TEntity CreateEntity();
+
+    /// <summary>TEntity を基に新しい TEditModel を生成する</summary>
+    public abstract TEditModel CreateEditModel(TEntity entity);
+
+    /// <summary>TEditModel の確定値を既存の TEntity へ反映する（破壊的更新）。列コピーは派生が実装する</summary>
+    /// <param name="editModel">確定値の反映元となる編集モデル</param>
+    /// <param name="entity">反映先の既存 Entity</param>
+    /// <param name="includeRemoved">削除追跡分（Removed）も復元して反映するか（保存用は true、帳票表示用などは false）</param>
+    public abstract void ApplyToEntity(TEditModel editModel, TEntity entity, bool includeRemoved);
+
+    /// <summary>初期値を設定した新しい TEntity に TEditModel の確定値を反映して生成する</summary>
+    /// <param name="editModel">確定値の反映元となる編集モデル</param>
+    /// <param name="includeRemoved">削除追跡分（Removed）も復元して反映するか（保存用は true、帳票表示用などは false）</param>
+    public TEntity CreateEntity(TEditModel editModel, bool includeRemoved = false)
+    {
+        var entity = CreateEntity();
+        ApplyToEntity(editModel, entity, includeRemoved);
+        return entity;
+    }
+
+    /// <summary>TEditModel の EditModelCollection を基に TEntity のリストを生成する</summary>
+    /// <param name="editModels">生成元となる編集モデルのコレクション</param>
+    /// <param name="includeRemoved">削除追跡分（Removed）も復元して含めるか（保存用は true、帳票表示用などは false）</param>
+    public List<TEntity> CreateEntities(
+        EditModelCollection<TEditModel> editModels,
+        bool includeRemoved = false
+    )
+    {
+        var entities = editModels
+            .Select(editModel => CreateEntity(editModel, includeRemoved))
+            .ToList();
+
+        if (includeRemoved)
+        {
+            entities.AddRange(
+                editModels.RemovedItems.Select(removed => CreateEntity(removed, includeRemoved))
+            );
+        }
+
+        return entities;
+    }
+
+    /// <summary>新規入力用の TEditModel を生成する（追加対象の Entity を基に作る）</summary>
+    public TEditModel CreateEditModel()
+    {
+        var entity = CreateEntity();
+        var editModel = CreateEditModel(entity);
+        return editModel;
+    }
+
+    /// <summary>TEntity の列挙を基に TEditModel の EditModelCollection を生成する</summary>
+    public EditModelCollection<TEditModel> CreateEditModels(IEnumerable<TEntity> entities)
+    {
+        return new EditModelCollection<TEditModel>(entities.Select(entity => CreateEditModel(entity)));
+    }
+}
 /// <summary>documents テーブルの画面編集用モデル</summary>
 public partial class DocumentEditModel : EditModelBase
 {
@@ -1395,7 +1474,7 @@ public partial class DocumentEditModel : EditModelBase
     //   検証追加      : partial void OnValidate();
     //   子の追加      : protected override void RegisterExtraChildren();  // 内部で AddChild/AddChildren で登録
     //   変換ﾒｯｾｰｼﾞ調整  : partial void CustomizeParseErrorMessage(string propertyName, string inputValue, string typeName, ref string message);
-    //   入力正規化調整 : partial void CustomizeInputNormalization(string propertyName, string rawValue, ref string normalizedValue);
+    //   入力正規化調整 : protected override void CustomizeInputNormalization(string propertyName, string rawValue, ref string normalizedValue);
     //   表示名調整    : partial void CustomizePropertyDisplayName(string propertyName, ref string displayName);  // 検証メッセージの表示名を上書き
     //   行編集        : partial void OnBeginEdit();  partial void OnEndEdit();  partial void OnCancelEdit();
     //   値変更通知    : partial void On{プロパティ}Changing(値) / Changed(値) / Changing(旧,新) / Changed(旧,新);  // 各プロパティに用意
@@ -1978,28 +2057,6 @@ public partial class DocumentEditModel : EditModelBase
         }
     }
 
-    /// <summary>画面入力文字列を正規化する（前後の空白・タブ・改行を除去。全角スペースも対象）</summary>
-    private string NormalizeInput(string propertyName, string value)
-    {
-        // ComboBox 等のバインドは実行時に null を書き込み得るため許容する（null は未入力として変換分岐が処理する）
-        if (value is null)
-        {
-            return value!;
-        }
-
-        // 前後の空白のみ除去する（中間の空白・改行は保持）
-        var normalized = value.Trim();
-        CustomizeInputNormalization(propertyName, value, ref normalized);
-        return normalized;
-    }
-
-    /// <summary>入力正規化を列単位で調整する（トリムを無効化したい列で normalizedValue に rawValue を戻す等。partial 実装で処理を追加）</summary>
-    partial void CustomizeInputNormalization(
-        string propertyName,
-        string rawValue,
-        ref string normalizedValue
-    );
-
     // ---- navigation ----
     /// <summary>DocumentNotes の子コレクションのバッキングフィールド</summary>
     private EditModelCollection<DocumentNoteEditModel> _documentNotes = new EditModelCollection<DocumentNoteEditModel>();
@@ -2167,7 +2224,7 @@ public partial class DocumentNoteEditModel : EditModelBase
     //   検証追加      : partial void OnValidate();
     //   子の追加      : protected override void RegisterExtraChildren();  // 内部で AddChild/AddChildren で登録
     //   変換ﾒｯｾｰｼﾞ調整  : partial void CustomizeParseErrorMessage(string propertyName, string inputValue, string typeName, ref string message);
-    //   入力正規化調整 : partial void CustomizeInputNormalization(string propertyName, string rawValue, ref string normalizedValue);
+    //   入力正規化調整 : protected override void CustomizeInputNormalization(string propertyName, string rawValue, ref string normalizedValue);
     //   表示名調整    : partial void CustomizePropertyDisplayName(string propertyName, ref string displayName);  // 検証メッセージの表示名を上書き
     //   行編集        : partial void OnBeginEdit();  partial void OnEndEdit();  partial void OnCancelEdit();
     //   値変更通知    : partial void On{プロパティ}Changing(値) / Changed(値) / Changing(旧,新) / Changed(旧,新);  // 各プロパティに用意
@@ -2445,28 +2502,6 @@ public partial class DocumentNoteEditModel : EditModelBase
         }
     }
 
-    /// <summary>画面入力文字列を正規化する（前後の空白・タブ・改行を除去。全角スペースも対象）</summary>
-    private string NormalizeInput(string propertyName, string value)
-    {
-        // ComboBox 等のバインドは実行時に null を書き込み得るため許容する（null は未入力として変換分岐が処理する）
-        if (value is null)
-        {
-            return value!;
-        }
-
-        // 前後の空白のみ除去する（中間の空白・改行は保持）
-        var normalized = value.Trim();
-        CustomizeInputNormalization(propertyName, value, ref normalized);
-        return normalized;
-    }
-
-    /// <summary>入力正規化を列単位で調整する（トリムを無効化したい列で normalizedValue に rawValue を戻す等。partial 実装で処理を追加）</summary>
-    partial void CustomizeInputNormalization(
-        string propertyName,
-        string rawValue,
-        ref string normalizedValue
-    );
-
     // ---- navigation ----
     /// <summary>Document ナビゲーションプロパティ</summary>
     public DocumentEditModel Document { get; set; } = null!;
@@ -2584,9 +2619,10 @@ public partial class DocumentNoteEditModel : EditModelBase
 
 /// <summary>DocumentEntity と DocumentEditModel の相互変換</summary>
 public sealed partial class DocumentMapper
+    : MapperBase<DocumentEntity, DocumentEditModel>
 {
     /// <summary>初期値を設定した新しい DocumentEntity を生成する（保存時に追加対象となる）</summary>
-    public DocumentEntity CreateEntity()
+    public override DocumentEntity CreateEntity()
     {
         var entity = new DocumentEntity();
         entity.MarkAdded();
@@ -2594,49 +2630,11 @@ public sealed partial class DocumentMapper
         return entity;
     }
 
-    /// <summary>初期値を設定した新しい DocumentEntity に DocumentEditModel の確定値を反映して生成する</summary>
-    /// <param name="includeRemoved">削除追跡分（Removed）も復元して反映するか（保存用は true、帳票表示用などは false）</param>
-    public DocumentEntity CreateEntity(DocumentEditModel editModel, bool includeRemoved = false)
-    {
-        var entity = CreateEntity();
-        ApplyToEntity(editModel, entity, includeRemoved);
-        return entity;
-    }
-
-    /// <summary>DocumentEditModel の EditModelCollection を基に DocumentEntity のリストを生成する</summary>
-    /// <param name="includeRemoved">削除追跡分（Removed）も復元して含めるか（保存用は true、帳票表示用などは false）</param>
-    public List<DocumentEntity> CreateEntities(
-        EditModelCollection<DocumentEditModel> editModels,
-        bool includeRemoved = false
-    )
-    {
-        var entities = editModels
-            .Select(editModel => CreateEntity(editModel, includeRemoved))
-            .ToList();
-
-        if (includeRemoved)
-        {
-            entities.AddRange(
-                editModels.RemovedItems.Select(removed => CreateEntity(removed, includeRemoved))
-            );
-        }
-
-        return entities;
-    }
-
     /// <summary>新しい DocumentEntity の生成直後に呼ばれる（partial 実装で初期値を設定）</summary>
     partial void OnEntityCreated(DocumentEntity entity);
 
-    /// <summary>新規入力用の DocumentEditModel を生成する（追加対象の Entity を基に作る）</summary>
-    public DocumentEditModel CreateEditModel()
-    {
-        var entity = CreateEntity();
-        var editModel = CreateEditModel(entity);
-        return editModel;
-    }
-
     /// <summary>DocumentEntity を基に新しい DocumentEditModel を生成する</summary>
-    public DocumentEditModel CreateEditModel(DocumentEntity entity)
+    public override DocumentEditModel CreateEditModel(DocumentEntity entity)
     {
         var editModel = new DocumentEditModel();
         ApplyToEditModel(entity, editModel);
@@ -2644,22 +2642,12 @@ public sealed partial class DocumentMapper
         return editModel;
     }
 
-    /// <summary>DocumentEntity の列挙を基に DocumentEditModel の EditModelCollection を生成する</summary>
-    public EditModelCollection<DocumentEditModel> CreateEditModels(
-        IEnumerable<DocumentEntity> entities
-    )
-    {
-        return new EditModelCollection<DocumentEditModel>(
-            entities.Select(entity => CreateEditModel(entity))
-        );
-    }
-
     /// <summary>新しい DocumentEditModel の生成直後（ロード後）に呼ばれる（partial 実装で初期値を設定。新規のみは IsAdded で分岐）</summary>
     partial void OnEditModelCreated(DocumentEditModel editModel);
 
     /// <summary>DocumentEditModel の確定値を既存の DocumentEntity へ反映する（破壊的更新）</summary>
     /// <param name="includeRemoved">削除追跡分（Removed）も復元して反映するか（保存用は true、帳票表示用などは false）</param>
-    public void ApplyToEntity(
+    public override void ApplyToEntity(
         DocumentEditModel editModel,
         DocumentEntity entity,
         bool includeRemoved = false
@@ -2709,9 +2697,10 @@ public sealed partial class DocumentMapper
 
 /// <summary>DocumentNoteEntity と DocumentNoteEditModel の相互変換</summary>
 public sealed partial class DocumentNoteMapper
+    : MapperBase<DocumentNoteEntity, DocumentNoteEditModel>
 {
     /// <summary>初期値を設定した新しい DocumentNoteEntity を生成する（保存時に追加対象となる）</summary>
-    public DocumentNoteEntity CreateEntity()
+    public override DocumentNoteEntity CreateEntity()
     {
         var entity = new DocumentNoteEntity();
         entity.MarkAdded();
@@ -2719,49 +2708,11 @@ public sealed partial class DocumentNoteMapper
         return entity;
     }
 
-    /// <summary>初期値を設定した新しい DocumentNoteEntity に DocumentNoteEditModel の確定値を反映して生成する</summary>
-    /// <param name="includeRemoved">削除追跡分（Removed）も復元して反映するか（保存用は true、帳票表示用などは false）</param>
-    public DocumentNoteEntity CreateEntity(DocumentNoteEditModel editModel, bool includeRemoved = false)
-    {
-        var entity = CreateEntity();
-        ApplyToEntity(editModel, entity, includeRemoved);
-        return entity;
-    }
-
-    /// <summary>DocumentNoteEditModel の EditModelCollection を基に DocumentNoteEntity のリストを生成する</summary>
-    /// <param name="includeRemoved">削除追跡分（Removed）も復元して含めるか（保存用は true、帳票表示用などは false）</param>
-    public List<DocumentNoteEntity> CreateEntities(
-        EditModelCollection<DocumentNoteEditModel> editModels,
-        bool includeRemoved = false
-    )
-    {
-        var entities = editModels
-            .Select(editModel => CreateEntity(editModel, includeRemoved))
-            .ToList();
-
-        if (includeRemoved)
-        {
-            entities.AddRange(
-                editModels.RemovedItems.Select(removed => CreateEntity(removed, includeRemoved))
-            );
-        }
-
-        return entities;
-    }
-
     /// <summary>新しい DocumentNoteEntity の生成直後に呼ばれる（partial 実装で初期値を設定）</summary>
     partial void OnEntityCreated(DocumentNoteEntity entity);
 
-    /// <summary>新規入力用の DocumentNoteEditModel を生成する（追加対象の Entity を基に作る）</summary>
-    public DocumentNoteEditModel CreateEditModel()
-    {
-        var entity = CreateEntity();
-        var editModel = CreateEditModel(entity);
-        return editModel;
-    }
-
     /// <summary>DocumentNoteEntity を基に新しい DocumentNoteEditModel を生成する</summary>
-    public DocumentNoteEditModel CreateEditModel(DocumentNoteEntity entity)
+    public override DocumentNoteEditModel CreateEditModel(DocumentNoteEntity entity)
     {
         var editModel = new DocumentNoteEditModel();
         ApplyToEditModel(entity, editModel);
@@ -2769,22 +2720,12 @@ public sealed partial class DocumentNoteMapper
         return editModel;
     }
 
-    /// <summary>DocumentNoteEntity の列挙を基に DocumentNoteEditModel の EditModelCollection を生成する</summary>
-    public EditModelCollection<DocumentNoteEditModel> CreateEditModels(
-        IEnumerable<DocumentNoteEntity> entities
-    )
-    {
-        return new EditModelCollection<DocumentNoteEditModel>(
-            entities.Select(entity => CreateEditModel(entity))
-        );
-    }
-
     /// <summary>新しい DocumentNoteEditModel の生成直後（ロード後）に呼ばれる（partial 実装で初期値を設定。新規のみは IsAdded で分岐）</summary>
     partial void OnEditModelCreated(DocumentNoteEditModel editModel);
 
     /// <summary>DocumentNoteEditModel の確定値を既存の DocumentNoteEntity へ反映する（破壊的更新）</summary>
     /// <param name="includeRemoved">削除追跡分（Removed）も復元して反映するか（保存用は true、帳票表示用などは false）</param>
-    public void ApplyToEntity(
+    public override void ApplyToEntity(
         DocumentNoteEditModel editModel,
         DocumentNoteEntity entity,
         bool includeRemoved = false
@@ -3757,9 +3698,12 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
         await using var command = new SqliteCommand(_metadata.SelectAllSql, connection);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
 
+        // 列名→ordinal は行ごとに引かず、結果セットに対して 1 度だけ解決する
+        var ordinals = _metadata.SelectOrdinals(reader);
+
         while (await reader.ReadAsync(cancellationToken))
         {
-            items.Add(_metadata.MapEntity<TEntity>(reader));
+            items.Add(_metadata.MapEntity<TEntity>(reader, ordinals));
         }
 
         return items;
@@ -3961,6 +3905,7 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
 
         try
         {
+            // 呼び出し前に HasChanges を確認済みのため、内部の重複するグラフ走査を省く
             var rows = await EntityGraphSaver.SaveAsync(
                 entity,
                 connection,
@@ -3969,7 +3914,8 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
                 cascadeDelete,
                 insertWhenUpdateMissing,
                 cancellationToken,
-                hooks
+                hooks,
+                changesAlreadyVerified: true
             );
             await transaction.CommitAsync(cancellationToken);
 
@@ -4026,6 +3972,7 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
             var rows = 0;
             foreach (var entity in targets)
             {
+                // targets は HasChanges で絞り込み済みのため、内部の重複するグラフ走査を省く
                 rows += await EntityGraphSaver.SaveAsync(
                     entity,
                     connection,
@@ -4034,7 +3981,8 @@ public abstract partial class SqliteRepository<TEntity, TKey>(
                     cascadeDelete,
                     insertWhenUpdateMissing,
                     cancellationToken,
-                    hooks
+                    hooks,
+                    changesAlreadyVerified: true
                 );
             }
 
@@ -4878,12 +4826,15 @@ internal sealed class SqliteSqlQueryExecutor<TEntity>(ISqlConnectionFactory conn
         await using var command = CreateCommand(connection, sql, parameters);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
 
+        // 列名→ordinal は結果セットに対して 1 度だけ解決する
+        var ordinals = metadata.ColumnOrdinals(reader, projectionColumns);
+
         var results = new List<TResult>();
 
         while (await reader.ReadAsync(cancellationToken))
         {
             // 参照列のみを埋めた部分エンティティに射影を適用する（RowState は無関係＝射影後に捨てる）
-            var entity = metadata.MapEntityColumns<TEntity>(reader, projectionColumns);
+            var entity = metadata.MapEntityColumns<TEntity>(reader, projectionColumns, ordinals);
             results.Add(project(entity));
         }
 
@@ -5051,6 +5002,9 @@ internal sealed class SqliteSqlQueryExecutor<TEntity>(ISqlConnectionFactory conn
         await using var command = CreateCommand(connection, sql, parameters);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
 
+        // 列名→ordinal は結果セットに対して 1 度だけ解決する
+        var ordinals = metadata.ColumnOrdinals(reader, metadata.AllProperties);
+
         var results = new List<TEntity>();
 
         while (await reader.ReadAsync(cancellationToken))
@@ -5060,6 +5014,7 @@ internal sealed class SqliteSqlQueryExecutor<TEntity>(ISqlConnectionFactory conn
                 metadata.MapEntityColumns<TEntity>(
                     reader,
                     metadata.AllProperties,
+                    ordinals,
                     markUnchanged: true
                 )
             );
@@ -5086,10 +5041,13 @@ internal sealed class SqliteSqlQueryExecutor<TEntity>(ISqlConnectionFactory conn
         await using var command = CreateCommand(connection, sql, parameters);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
 
+        // 列名→ordinal は結果セットに対して 1 度だけ解決する
+        var ordinals = metadata.SelectOrdinals(reader);
+
         var roots = new List<TEntity>();
         while (await reader.ReadAsync(cancellationToken))
         {
-            roots.Add((TEntity)(object)metadata.MapEntityObject(reader));
+            roots.Add((TEntity)(object)metadata.MapEntityObject(reader, ordinals));
         }
 
         return roots;
@@ -5238,7 +5196,7 @@ internal sealed class IncludeLoader
     )
     {
         var attribute =
-            node.Property.GetCustomAttribute<NavigationReferenceAttribute>()
+            EntitySaveMetadata.NavigationAttribute(node.Property)
             ?? throw new InvalidOperationException(
                 $"{node.Property.Name} は [NavigationReference] を持つナビゲーションではありません。"
             );
@@ -5348,9 +5306,12 @@ internal sealed class IncludeLoader
 
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
 
+            // 列名→ordinal は結果セット（チャンク）ごとに 1 度だけ解決する
+            var ordinals = childMetadata.SelectOrdinals(reader);
+
             while (await reader.ReadAsync(cancellationToken))
             {
-                children.Add(childMetadata.MapEntityObject(reader));
+                children.Add(childMetadata.MapEntityObject(reader, ordinals));
             }
         }
 
@@ -5769,8 +5730,14 @@ internal static class SqlExpressionTranslator
     private static bool IsNull(Expression expression) =>
         expression is ConstantExpression { Value: null };
 
+    /// <summary>メンバー → 角括弧付き列名の解決を型メンバー単位でキャッシュする（列参照ごとの [Column] 反射を避ける）</summary>
+    private static readonly ConcurrentDictionary<MemberInfo, string> _columnNameCache = new();
+
     private static string ColumnName(MemberInfo member) =>
-        $"\"{member.GetCustomAttribute<ColumnAttribute>()?.Name ?? member.Name}\"";
+        _columnNameCache.GetOrAdd(
+            member,
+            static m => $"\"{m.GetCustomAttribute<ColumnAttribute>()?.Name ?? m.Name}\""
+        );
 
     /// <summary>列参照（素の列 x.Col、または値オブジェクトの x.Col.Value）から角括弧付き列名を取り出す。列でなければ null</summary>
     private static string? TryColumnName(Expression expression)
@@ -5819,11 +5786,39 @@ internal static class SqlExpressionTranslator
         return sql.Length != 0;
     }
 
-    /// <summary>定数・クロージャ変数などを評価して実値を得る</summary>
-    private static object? Evaluate(Expression expression) =>
-        expression is ConstantExpression constant
-            ? constant.Value
-            : Expression.Lambda(expression).Compile().DynamicInvoke();
+    /// <summary>
+    /// 定数・クロージャ変数などを評価して実値を得る。大半は定数か、ローカル変数を捕捉したクロージャの
+    /// フィールド／プロパティ参照なので、式木コンパイル（重い）を避けて反射で直接読み取る。
+    /// メソッド呼び出し等それ以外の式のみ従来どおり <see cref="Expression.Lambda(Expression, ParameterExpression[])"/> で評価する。
+    /// </summary>
+    private static object? Evaluate(Expression expression)
+    {
+        switch (expression)
+        {
+            // 定数はそのまま値を返す
+            case ConstantExpression constant:
+                return constant.Value;
+
+            // フィールド／プロパティ参照は、対象インスタンス（静的メンバーは null）を再帰評価してから反射で読む
+            case MemberExpression member:
+                var instance = member.Expression is null ? null : Evaluate(member.Expression);
+
+                return member.Member switch
+                {
+                    FieldInfo field => field.GetValue(instance),
+                    PropertyInfo property => property.GetValue(instance),
+                    _ => CompileAndInvoke(expression),
+                };
+
+            // それ以外（メソッド呼び出し・演算等）は式木をコンパイルして評価する（互換性優先のフォールバック）
+            default:
+                return CompileAndInvoke(expression);
+        }
+    }
+
+    /// <summary>任意の式木をラムダへ包んでコンパイル・実行し、実値を得る（反射で直読できない式のフォールバック）</summary>
+    private static object? CompileAndInvoke(Expression expression) =>
+        Expression.Lambda(expression).Compile().DynamicInvoke();
 
     /// <param name="value">パラメータ化する実値（null 可）</param>
     /// <param name="parameters">生成したパラメータの追加先リスト</param>
@@ -6323,6 +6318,12 @@ internal sealed class EntitySaveMetadata
     /// <summary>SELECT / UPDATE から除外する無制限バイナリ列（<see cref="UnboundedBinaryColumnAttribute"/> 付き）。除外列なしは空</summary>
     public required IReadOnlyList<PropertyInfo> ExcludedProperties { get; init; }
 
+    /// <summary>SELECT 対象列の (プロパティ, カラム名) をビルド時に確定した配列。行マッピングは列名解決を都度リフレクションせずこれを列挙する</summary>
+    public required IReadOnlyList<(PropertyInfo Property, string ColumnName)> SelectColumns { get; init; }
+
+    /// <summary>列プロパティ → カラム名の確定済み対応（射影・除外列など任意プロパティ列の列名解決に使う）</summary>
+    public required IReadOnlyDictionary<PropertyInfo, string> ColumnNameByProperty { get; init; }
+
     /// <summary>INSERT / BulkInsert 対象の列プロパティ（全列から store-generated 列を除いたもの。store-generated 列なしは全列と一致）</summary>
     public required IReadOnlyList<PropertyInfo> InsertProperties { get; init; }
 
@@ -6358,6 +6359,19 @@ internal sealed class EntitySaveMetadata
 
     /// <summary>指定型のメタデータを取得する（型ごとに 1 度だけ構築しキャッシュ）</summary>
     public static EntitySaveMetadata For(Type entityType) => _cache.GetOrAdd(entityType, Build);
+
+    /// <summary>ナビゲーションプロパティ → <see cref="NavigationReferenceAttribute"/> の解決をプロパティ単位でキャッシュする</summary>
+    private static readonly ConcurrentDictionary<
+        PropertyInfo,
+        NavigationReferenceAttribute?
+    > _navigationAttributeCache = new();
+
+    /// <summary>ナビゲーションプロパティの <see cref="NavigationReferenceAttribute"/> を取得する（Include 解決で毎ノード反射しないようキャッシュ）</summary>
+    public static NavigationReferenceAttribute? NavigationAttribute(PropertyInfo property) =>
+        _navigationAttributeCache.GetOrAdd(
+            property,
+            static p => p.GetCustomAttribute<NavigationReferenceAttribute>()
+        );
 
     private static EntitySaveMetadata Build(Type entityType)
     {
@@ -6450,6 +6464,11 @@ internal sealed class EntitySaveMetadata
             AllProperties = columns,
             SelectProperties = selectProperties,
             ExcludedProperties = excludedColumns,
+            // 行マッピングの列名解決をビルド時に確定させ、行ごとの [Column] リフレクションを排除する
+            SelectColumns = selectProperties.Select(property => (property, GetColumnName(property))).ToList(),
+            ColumnNameByProperty = columns.ToDictionary(property => property, GetColumnName),
+            // SelectColumns（固定 SELECT 集合）用の式木マテリアライザを型ごとに 1 度だけコンパイルする
+            SelectMaterializer = BuildSelectMaterializer(entityType, selectProperties),
             InsertProperties = insertProperties,
             NonKeyProperties = nonKeyProperties,
             Columns = selectProperties.Select(property => (property.Name, GetColumnName(property))).ToList(),
@@ -6470,27 +6489,180 @@ internal sealed class EntitySaveMetadata
         };
     }
 
-    /// <summary>データリーダーの 1 行をエンティティへマッピングする</summary>
+    // ===== 行マテリアライザ（式木コンパイル・ホットパスのリフレクション除去） =====
+    /// <summary>ボクシングを避ける型特化リーダーアクセサ（<c>GetInt32</c> 等）。fast 対象の CLR 型のみ登録する</summary>
+    private static readonly IReadOnlyDictionary<Type, MethodInfo> _typedReaders = BuildTypedReaders();
+
+    /// <summary><see cref="DbDataReader.IsDBNull(int)"/> の解決済み <see cref="MethodInfo"/></summary>
+    private static readonly MethodInfo _isDbNullMethod = typeof(DbDataReader).GetMethod(
+        nameof(DbDataReader.IsDBNull),
+        new[] { typeof(int) }
+    )!;
+
+    /// <summary><see cref="DbDataReader.GetValue(int)"/> の解決済み <see cref="MethodInfo"/>（型特化できない列のフォールバックで使う）</summary>
+    private static readonly MethodInfo _getValueMethod = typeof(DbDataReader).GetMethod(
+        nameof(DbDataReader.GetValue),
+        new[] { typeof(int) }
+    )!;
+
+    /// <summary><see cref="SetColumnValue"/> の解決済み <see cref="MethodInfo"/>（型特化できない列のフォールバックで呼ぶ）</summary>
+    private static readonly MethodInfo _setColumnValueMethod = typeof(EntitySaveMetadata).GetMethod(
+        nameof(SetColumnValue),
+        BindingFlags.NonPublic | BindingFlags.Static
+    )!;
+
+    /// <summary><see cref="EntityBase.RowState"/> の解決済み <see cref="PropertyInfo"/></summary>
+    private static readonly PropertyInfo _rowStateProperty = typeof(EntityBase).GetProperty(
+        nameof(EntityBase.RowState)
+    )!;
+
+    /// <summary>SelectColumns（固定 SELECT 集合）1 行分を式木コンパイル済みでマテリアライズするデリゲート（型ごとに 1 度構築しキャッシュ）</summary>
+    /// <remarks>引数は <c>(reader, ordinals)</c>。<c>ordinals</c> は SelectColumns と同順の列 ordinal で、行ループの前に 1 度だけ解決する。</remarks>
+    public required Func<DbDataReader, int[], EntityBase> SelectMaterializer { get; init; }
+
+    /// <summary>型特化リーダーアクセサ表を構築する（各値は <c>int</c> を取り対応 CLR 型を返す <see cref="DbDataReader"/> のメソッド）</summary>
+    private static IReadOnlyDictionary<Type, MethodInfo> BuildTypedReaders()
+    {
+        static MethodInfo Getter(string name) =>
+            typeof(DbDataReader).GetMethod(name, new[] { typeof(int) })!;
+
+        // 生成 SELECT が返す宣言列型に対応する型特化アクセサ。SQLite は各 GetXxx が格納型寄せ（long→int・TEXT→DateTime 等）を
+        // 行い CoerceScalar と同値、SQL Server は列の CLR 型を素直に返し従来の素通しと同値。ここに無い型（byte[]・enum・
+        // DateTimeOffset・TimeSpan 等）はフォールバックで従来どおり変換する。
+        return new Dictionary<Type, MethodInfo>
+        {
+            [typeof(bool)] = Getter(nameof(DbDataReader.GetBoolean)),
+            [typeof(byte)] = Getter(nameof(DbDataReader.GetByte)),
+            [typeof(short)] = Getter(nameof(DbDataReader.GetInt16)),
+            [typeof(int)] = Getter(nameof(DbDataReader.GetInt32)),
+            [typeof(long)] = Getter(nameof(DbDataReader.GetInt64)),
+            [typeof(float)] = Getter(nameof(DbDataReader.GetFloat)),
+            [typeof(double)] = Getter(nameof(DbDataReader.GetDouble)),
+            [typeof(decimal)] = Getter(nameof(DbDataReader.GetDecimal)),
+            [typeof(string)] = Getter(nameof(DbDataReader.GetString)),
+            [typeof(DateTime)] = Getter(nameof(DbDataReader.GetDateTime)),
+            [typeof(Guid)] = Getter(nameof(DbDataReader.GetGuid)),
+        };
+    }
+
+    /// <summary>
+    /// SelectColumns（固定 SELECT 集合）の 1 行を、事前解決した ordinal 配列を用いてエンティティへマテリアライズする
+    /// 式木コンパイル済みデリゲートを構築する（型ごとに 1 度）。
+    /// </summary>
+    /// <remarks>
+    /// 型特化アクセサを持つ列はボクシングなしで直接読み（<c>DBNull</c> は既定値＝従来の <c>SetValue(null)</c> と同値）、
+    /// それ以外の列は従来の <see cref="SetColumnValue"/>（方言別変換／値オブジェクト包み直し）へフォールバックする。
+    /// 生成される最終状態（<c>RowState = Unchanged</c>）は従来の行マッピングと一致する。
+    /// </remarks>
+    private static Func<DbDataReader, int[], EntityBase> BuildSelectMaterializer(
+        Type entityType,
+        IReadOnlyList<PropertyInfo> properties
+    )
+    {
+        var readerParam = Expression.Parameter(typeof(DbDataReader), "reader");
+        var ordinalsParam = Expression.Parameter(typeof(int[]), "ordinals");
+        var entityVar = Expression.Variable(entityType, "entity");
+
+        var body = new List<Expression>
+        {
+            Expression.Assign(entityVar, Expression.New(entityType)),
+        };
+
+        for (var i = 0; i < properties.Count; i++)
+        {
+            var ordinal = Expression.ArrayIndex(ordinalsParam, Expression.Constant(i));
+            body.Add(BuildColumnAssign(entityVar, readerParam, ordinal, properties[i]));
+        }
+
+        // DB から読み込んだ行は変更なし扱いにする（従来の行マッピングと同じ事後状態）
+        body.Add(
+            Expression.Assign(
+                Expression.Property(entityVar, _rowStateProperty),
+                Expression.Constant(RowState.Unchanged)
+            )
+        );
+        body.Add(Expression.Convert(entityVar, typeof(EntityBase)));
+
+        var block = Expression.Block(typeof(EntityBase), new[] { entityVar }, body);
+        return Expression
+            .Lambda<Func<DbDataReader, int[], EntityBase>>(block, readerParam, ordinalsParam)
+            .Compile();
+    }
+
+    /// <summary>1 列分の代入式を作る。型特化できる列はボクシングなしで直接読み、それ以外は <see cref="SetColumnValue"/> へフォールバックする</summary>
+    private static Expression BuildColumnAssign(
+        Expression entityExpr,
+        ParameterExpression readerParam,
+        Expression ordinal,
+        PropertyInfo property
+    )
+    {
+        var propertyType = property.PropertyType;
+        var underlying = Nullable.GetUnderlyingType(propertyType) ?? propertyType;
+
+        // 型特化アクセサがある列はボクシングなしで直接読む（DBNull は既定値へ＝従来の SetValue(null) と同値）
+        if (_typedReaders.TryGetValue(underlying, out var getter))
+        {
+            Expression read = Expression.Call(readerParam, getter, ordinal);
+
+            if (getter.ReturnType != propertyType)
+            {
+                read = Expression.Convert(read, propertyType);
+            }
+
+            var value = Expression.Condition(
+                Expression.Call(readerParam, _isDbNullMethod, ordinal),
+                Expression.Default(propertyType),
+                read
+            );
+            return Expression.Assign(Expression.Property(entityExpr, property), value);
+        }
+
+        // フォールバック: 従来の SetColumnValue（DBNull→null／方言別変換／値オブジェクト包み直し）を ordinal 経由で呼ぶ
+        return Expression.Call(
+            _setColumnValueMethod,
+            Expression.Convert(entityExpr, typeof(EntityBase)),
+            Expression.Constant(property, typeof(PropertyInfo)),
+            Expression.Call(readerParam, _getValueMethod, ordinal)
+        );
+    }
+
+    /// <summary>SelectColumns の各列名を、このリーダー上の ordinal へ 1 度だけ解決する（行ループの前に呼ぶ）</summary>
+    public int[] SelectOrdinals(DbDataReader reader)
+    {
+        var ordinals = new int[SelectColumns.Count];
+
+        for (var i = 0; i < ordinals.Length; i++)
+        {
+            ordinals[i] = reader.GetOrdinal(SelectColumns[i].ColumnName);
+        }
+
+        return ordinals;
+    }
+
+    /// <summary>データリーダーの 1 行をエンティティへマッピングする（ordinal 事前解決版・ホットループ用）</summary>
+    public TEntity MapEntity<TEntity>(
+        DbDataReader reader,
+        int[] ordinals
+    )
+        where TEntity : EntityBase => (TEntity)SelectMaterializer(reader, ordinals);
+
+    /// <summary>データリーダーの 1 行をエンティティへマッピングする（SelectColumns の ordinal を都度解決する単一行版）</summary>
     public TEntity MapEntity<TEntity>(DbDataReader reader)
+        where TEntity : EntityBase, new() => (TEntity)SelectMaterializer(reader, SelectOrdinals(reader));
+
+    /// <summary>
+    /// 生 SQL 用の厳密な行マッピング（列集合・列型が可変のため型特化せず、従来の寛容な <see cref="SetColumnValue"/> を使う）。
+    /// </summary>
+    private TEntity MapEntityStrict<TEntity>(DbDataReader reader)
         where TEntity : EntityBase, new()
     {
         var entity = new TEntity();
 
-        // 無制限バイナリ列は既定で SELECT 除外のため SelectProperties のみをマップする（除外列なしは全列と一致）
-        foreach (var property in SelectProperties)
+        // 無制限バイナリ列は既定で SELECT 除外のため SelectColumns（＝SelectProperties の確定済み対応）のみをマップする
+        foreach (var (property, columnName) in SelectColumns)
         {
-            var columnName = GetColumnName(property);
-            var value = reader[columnName];
-
-            if (value is DBNull)
-            {
-                property.SetValue(entity, null);
-            }
-            else
-            {
-                // 素の列は SQLite の格納型（int→long・decimal/Guid/DateTime→TEXT 等）をプロパティ型へ寄せる
-                property.SetValue(entity, CoerceScalar(value, property.PropertyType));
-            }
+            SetColumnValue(entity, property, reader[columnName]);
         }
 
         // DB から読み込んだ行は変更なし扱いにする（その後の編集で Updated に遷移）
@@ -6499,7 +6671,24 @@ internal sealed class EntitySaveMetadata
     }
 
     /// <summary>
-    /// 生 SQL の結果行を {TEntity} へマップする。<see cref="MapEntity"/> と同じ厳密マッピング（SELECT 対象列は必須）だが、
+    /// 読み取った列値を対象プロパティへ設定する（行マッピングの共通処理）。<c>DBNull</c> は <c>null</c> を代入し、
+    /// それ以外は値オブジェクトの包み直し／SQLite の格納型寄せ／SQL Server の素通しを方言に応じて行う。
+    /// </summary>
+    private static void SetColumnValue(EntityBase entity, PropertyInfo property, object value)
+    {
+        if (value is DBNull)
+        {
+            property.SetValue(entity, null);
+        }
+        else
+        {
+            // 素の列は SQLite の格納型（int→long・decimal/Guid/DateTime→TEXT 等）をプロパティ型へ寄せる
+            property.SetValue(entity, CoerceScalar(value, property.PropertyType));
+        }
+    }
+
+    /// <summary>
+    /// 生 SQL の結果行を {TEntity} へマップする。<see cref="MapEntityStrict"/> と同じ厳密マッピング（SELECT 対象列は必須）だが、
     /// 列不足（部分 SELECT）で列が引けなかった場合は、必要な列を含む <see cref="InvalidOperationException"/> でラップして
     /// 分かりやすくする。未知の列参照で投げられる例外はデータリーダーの実装で異なる
     /// （<see cref="IndexOutOfRangeException"/> と <see cref="ArgumentOutOfRangeException"/>）ため両方を捕捉する。
@@ -6512,7 +6701,7 @@ internal sealed class EntitySaveMetadata
 
         try
         {
-            entity = MapEntity<TEntity>(reader);
+            entity = MapEntityStrict<TEntity>(reader);
         }
         catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentOutOfRangeException)
         {
@@ -6530,23 +6719,14 @@ internal sealed class EntitySaveMetadata
 
             foreach (var property in ExcludedProperties)
             {
-                var columnName = GetColumnName(property);
+                var columnName = ColumnNameByProperty[property];
 
                 if (!present.Contains(columnName))
                 {
                     continue;
                 }
 
-                var value = reader[columnName];
-
-                if (value is DBNull)
-                {
-                    property.SetValue(entity, null);
-                }
-                else
-                {
-                    property.SetValue(entity, CoerceScalar(value, property.PropertyType));
-                }
+                SetColumnValue(entity, property, reader[columnName]);
             }
 
             // opportunistic な代入で状態が動かないよう変更なしを再確定する（列プロパティは素の auto-property だが念のため）
@@ -6610,15 +6790,65 @@ internal sealed class EntitySaveMetadata
             properties.Select(property => $"\"{GetColumnName(property)}\"")
         );
 
+    /// <summary>列プロパティごとの「reader+ordinal → エンティティへ設定」子（式木コンパイル済み・プロパティ単位でキャッシュ）</summary>
+    private static readonly ConcurrentDictionary<
+        PropertyInfo,
+        Action<EntityBase, DbDataReader, int>
+    > _columnBinderCache = new();
+
+    /// <summary>1 列分の型特化バインダを取得する（射影・全列取得の可変列集合を行ごとにリフレクションせず束縛するため）</summary>
+    private static Action<EntityBase, DbDataReader, int> ColumnBinder(PropertyInfo property) =>
+        _columnBinderCache.GetOrAdd(property, BuildColumnBinder);
+
+    /// <summary>1 列分の式木（<see cref="BuildColumnAssign"/>）を <c>Action&lt;EntityBase, DbDataReader, int&gt;</c> へコンパイルする</summary>
+    private static Action<EntityBase, DbDataReader, int> BuildColumnBinder(PropertyInfo property)
+    {
+        var entityParam = Expression.Parameter(typeof(EntityBase), "entity");
+        var readerParam = Expression.Parameter(typeof(DbDataReader), "reader");
+        var ordinalParam = Expression.Parameter(typeof(int), "ordinal");
+
+        // プロパティは派生エンティティ型で宣言されるため、EntityBase をその宣言型へ落としてからアクセスする
+        var assign = BuildColumnAssign(
+            Expression.Convert(entityParam, property.DeclaringType!),
+            readerParam,
+            ordinalParam,
+            property
+        );
+
+        return Expression
+            .Lambda<Action<EntityBase, DbDataReader, int>>(
+                assign,
+                entityParam,
+                readerParam,
+                ordinalParam
+            )
+            .Compile();
+    }
+
+    /// <summary>指定した列プロパティ群の列名を、このリーダー上の ordinal へ 1 度だけ解決する（射影・全列取得の行ループの前に呼ぶ）</summary>
+    public int[] ColumnOrdinals(DbDataReader reader, IReadOnlyList<PropertyInfo> properties)
+    {
+        var ordinals = new int[properties.Count];
+
+        for (var i = 0; i < ordinals.Length; i++)
+        {
+            ordinals[i] = reader.GetOrdinal(ColumnNameByProperty[properties[i]]);
+        }
+
+        return ordinals;
+    }
+
     /// <summary>
     /// データリーダーの 1 行を、指定した列プロパティのみマッピングした {TEntity} を返す（射影のサーバー側列刈り込み・WithUnboundedBinary の全列取得で共用）。
     /// SELECT に含めた列だけを束縛し、それ以外の列は既定値のまま。射影用途（<paramref name="markUnchanged"/> = false・既定）は
     /// セレクタ適用後に捨てるため RowState を設定しないが、WithUnboundedBinary の全列取得（<paramref name="markUnchanged"/> = true）は
-    /// 通常取得と同等の正当なエンティティを返すため RowState=Unchanged を確定する。
+    /// 通常取得と同等の正当なエンティティを返すため RowState=Unchanged を確定する。<paramref name="ordinals"/> は
+    /// <see cref="ColumnOrdinals"/> で行ループ前に 1 度だけ解決した、<paramref name="properties"/> と同順の列 ordinal。
     /// </summary>
     public TEntity MapEntityColumns<TEntity>(
         SqliteDataReader reader,
         IReadOnlyList<PropertyInfo> properties,
+        int[] ordinals,
         bool markUnchanged = false
     )
         where TEntity : EntityBase
@@ -6626,19 +6856,9 @@ internal sealed class EntitySaveMetadata
         // クエリ実行器の TEntity は new() 制約を持たないため Activator で生成する（エンティティは必ず引数なしコンストラクタを持つ）
         var entity = (TEntity)Activator.CreateInstance(typeof(TEntity))!;
 
-        foreach (var property in properties)
+        for (var i = 0; i < properties.Count; i++)
         {
-            var value = reader[GetColumnName(property)];
-
-            if (value is DBNull)
-            {
-                property.SetValue(entity, null);
-            }
-            else
-            {
-                // 素の列は SQLite の格納型（int→long・decimal/Guid/DateTime→TEXT 等）をプロパティ型へ寄せる
-                property.SetValue(entity, CoerceScalar(value, property.PropertyType));
-            }
+            ColumnBinder(properties[i])(entity, reader, ordinals[i]);
         }
 
         if (markUnchanged)
@@ -6650,35 +6870,18 @@ internal sealed class EntitySaveMetadata
         return entity;
     }
 
-    /// <summary>データリーダーの 1 行を（型引数なしで）エンティティへマッピングする。マルチクエリ Include の実体化で使う</summary>
+    /// <summary>データリーダーの 1 行を（型引数なしで）エンティティへマッピングする（ordinal 事前解決版）。マルチクエリ Include の実体化で使う</summary>
     /// <remarks>
-    /// <see cref="MapEntity"/> と同じ列→プロパティ束縛だが、Include ローダは実行時 <see cref="Type"/> を扱うため
-    /// ジェネリック制約を課さず <see cref="Activator"/> で生成する。エンティティは必ず引数なしコンストラクタを持つ。
+    /// <c>MapEntity</c> と同じ列→プロパティ束縛だが、Include ローダは実行時 <see cref="Type"/> を扱うため
+    /// ジェネリック制約を課さず生成する。<paramref name="ordinals"/> は <see cref="SelectOrdinals"/> で行ループ前に 1 度だけ解決する。
     /// </remarks>
-    public EntityBase MapEntityObject(DbDataReader reader)
-    {
-        var entity = (EntityBase)Activator.CreateInstance(EntityType)!;
+    // 値オブジェクトなしの素の列は SetColumnValue（＝CoerceScalar）と同値の式木マテリアライザで束縛する（型特化・リフレクションなし）
+    public EntityBase MapEntityObject(DbDataReader reader, int[] ordinals) =>
+        SelectMaterializer(reader, ordinals);
 
-        // 無制限バイナリ列は既定で SELECT 除外のため SelectProperties のみをマップする（除外列なしは全列と一致）
-        foreach (var property in SelectProperties)
-        {
-            var value = reader[GetColumnName(property)];
-
-            if (value is DBNull)
-            {
-                property.SetValue(entity, null);
-            }
-            else
-            {
-                // SQLite の格納型（int→long・decimal/Guid/DateTime→TEXT 等）をプロパティの CLR 型へ寄せる
-                property.SetValue(entity, CoerceScalar(value, property.PropertyType));
-            }
-        }
-
-        // DB から読み込んだ行は変更なし扱いにする（その後の編集で Updated に遷移）
-        entity.RowState = RowState.Unchanged;
-        return entity;
-    }
+    /// <summary>データリーダーの 1 行を（型引数なしで）エンティティへマッピングする（SelectColumns の ordinal を都度解決する単一行版）</summary>
+    public EntityBase MapEntityObject(DbDataReader reader) =>
+        MapEntityObject(reader, SelectOrdinals(reader));
 
     /// <summary>
     /// SQLite が返す素の値（long / double / string / byte[]）を対象プロパティの CLR 型へ寄せる。
@@ -6995,6 +7198,11 @@ internal static class EntityGraphSaver
         || (cascade && EnumerateCascadeChildren(entity).Any(child => HasChanges(child, true)));
 
     /// <summary>グラフを保存し、保存したレコード数を返す（<paramref name="hooks"/> 指定時は各操作の前後で Save フックを発火する）</summary>
+    /// <remarks>
+    /// <c>changesAlreadyVerified</c> が <c>true</c>（呼び出し側が <see cref="HasChanges"/> を確認済み＝変更ありと判明済み）の
+    /// ときは、冒頭の重複するグラフ走査（変更判定）を省く。子への再帰では既定 <c>false</c> のまま渡すため、各サブツリーの
+    /// 変更判定（クリーンな枝の枝刈り）は従来どおり行う。
+    /// </remarks>
     public static async Task<int> SaveAsync(
         EntityBase entity,
         SqliteConnection connection,
@@ -7003,10 +7211,11 @@ internal static class EntityGraphSaver
         bool cascadeDelete,
         bool insertWhenUpdateMissing,
         CancellationToken cancellationToken,
-        SaveHookSession? hooks = null
+        SaveHookSession? hooks = null,
+        bool changesAlreadyVerified = false
     )
     {
-        if (!HasChanges(entity, cascadeSave))
+        if (!changesAlreadyVerified && !HasChanges(entity, cascadeSave))
         {
             return 0;
         }
@@ -8257,10 +8466,12 @@ internal static class InMemoryCascade
         bool cascadeDelete,
         bool insertWhenUpdateMissing,
         SaveHookSession? hooks = null,
-        List<(EntityBase Entity, SaveOperation Operation)>? records = null
+        List<(EntityBase Entity, SaveOperation Operation)>? records = null,
+        bool changesAlreadyVerified = false
     )
     {
-        if (!EntityGraphSaver.HasChanges(entity, cascadeSave))
+        // 呼び出し側が HasChanges 確認済みなら冒頭の重複するグラフ走査を省く（子への再帰では既定 false のまま枝ごとに判定する）
+        if (!changesAlreadyVerified && !EntityGraphSaver.HasChanges(entity, cascadeSave))
         {
             return 0;
         }
@@ -8359,10 +8570,12 @@ internal static class InMemoryCascade
         SaveHookSession hooks,
         bool cascadeSave,
         bool cascadeDelete,
-        CancellationToken cancellationToken
+        CancellationToken cancellationToken,
+        bool changesAlreadyVerified = false
     )
     {
-        if (!EntityGraphSaver.HasChanges(entity, cascadeSave))
+        // 呼び出し側が HasChanges 確認済みなら冒頭の重複するグラフ走査を省く（子への再帰では既定 false のまま枝ごとに判定する）
+        if (!changesAlreadyVerified && !EntityGraphSaver.HasChanges(entity, cascadeSave))
         {
             return;
         }
@@ -8730,6 +8943,12 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
     {
         ArgumentNullException.ThrowIfNull(entity);
 
+        // グラフ全体に変更が無ければ何もしない（変更判定はここで 1 度だけ行い、以降のフェーズへ確認済みとして引き渡す）
+        if (!EntityGraphSaver.HasChanges(entity, cascadeSave))
+        {
+            return 0;
+        }
+
         // フック登録があれば、進行中のストア書き込みに参加する context を供給するセッションを組み立てる
         var hooks =
             _saveHooks is null
@@ -8747,7 +8966,8 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
                 hooks,
                 cascadeSave,
                 cascadeDelete,
-                cancellationToken
+                cancellationToken,
+                changesAlreadyVerified: true
             );
         }
 
@@ -8762,7 +8982,8 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
                 cascadeDelete,
                 insertWhenUpdateMissing,
                 hooks,
-                records
+                records,
+                changesAlreadyVerified: true
             )
         );
 
@@ -8791,7 +9012,15 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
     )
     {
         ArgumentNullException.ThrowIfNull(entities);
-        var roots = entities.Where(entity => entity is not null).ToList();
+        // 変更のあるグラフだけを対象にする（変更判定はここで 1 度だけ行い、以降のフェーズへ確認済みとして引き渡す）
+        var roots = entities
+            .Where(entity => entity is not null && EntityGraphSaver.HasChanges(entity, cascadeSave))
+            .ToList();
+
+        if (roots.Count == 0)
+        {
+            return 0;
+        }
 
         var hooks =
             _saveHooks is null
@@ -8811,7 +9040,8 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
                     hooks,
                     cascadeSave,
                     cascadeDelete,
-                    cancellationToken
+                    cancellationToken,
+                    changesAlreadyVerified: true
                 );
             }
         }
@@ -8832,7 +9062,8 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
                     cascadeDelete,
                     insertWhenUpdateMissing,
                     hooks,
-                    records
+                    records,
+                    changesAlreadyVerified: true
                 );
             }
 

@@ -176,7 +176,7 @@ public sealed class EditModelInputTrimTests
 public partial class CustomerProfileEditModel
 {
     /// <summary>BindingBio だけ正規化（トリム）を無効化し、生の入力値を保持する</summary>
-    partial void CustomizeInputNormalization(
+    protected override void CustomizeInputNormalization(
         string propertyName,
         string rawValue,
         ref string normalizedValue

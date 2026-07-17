@@ -323,6 +323,9 @@ internal sealed class ScribanCSharpRenderer
             ["connection_factory_impl_type"] = dialect.ConnectionFactoryImplType,
             ["repository_base_class"] = dialect.RepositoryBaseClass,
             ["sql_query_executor_class"] = dialect.SqlQueryExecutorClass,
+            // 方言の表示名（"SQL Server" / "SQLite"）。生成コードのコメント・DI 拡張の説明文で
+            // インライン三項（{{ if repository_dialect == "sqlserver" }}...{{ end }}）の重複を避けるための変数。
+            ["dialect_display_name"] = dialect.DisplayName,
             // ランタイムのパッケージ書き出しモードと固定 infra の可視性。通常生成では既定（false / "internal"）で
             // 供給し、出力はバイト不変。パッケージ書き出し時のみ RuntimePackageSourceRenderer が true / "public" を渡す。
             // 全既存経路へ必ず供給する（供給漏れがあると scriban が空文字を出しバイト不変が壊れるため）。
@@ -397,6 +400,7 @@ internal sealed class RepositoryDialectVariables
                 ConnectionFactoryImplType = "SqliteConnectionFactory";
                 RepositoryBaseClass = "SqliteRepository";
                 SqlQueryExecutorClass = "SqliteSqlQueryExecutor";
+                DisplayName = "SQLite";
                 break;
 
             default:
@@ -412,6 +416,7 @@ internal sealed class RepositoryDialectVariables
                 ConnectionFactoryImplType = "SqlConnectionFactory";
                 RepositoryBaseClass = "SqlServerRepository";
                 SqlQueryExecutorClass = "SqlServerSqlQueryExecutor";
+                DisplayName = "SQL Server";
                 break;
         }
     }
@@ -454,4 +459,7 @@ internal sealed class RepositoryDialectVariables
 
     /// <summary>SqlQuery の ADO 実行器クラス名（SQL Server: <c>SqlServerSqlQueryExecutor</c>、SQLite: <c>SqliteSqlQueryExecutor</c>）</summary>
     public string SqlQueryExecutorClass { get; }
+
+    /// <summary>方言の表示名（SQL Server: <c>SQL Server</c>、SQLite: <c>SQLite</c>）。生成コードのコメント・DI 拡張の説明文に用いる</summary>
+    public string DisplayName { get; }
 }

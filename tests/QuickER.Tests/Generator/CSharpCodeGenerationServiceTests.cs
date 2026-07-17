@@ -241,8 +241,12 @@ public class CSharpCodeGenerationServiceTests
             );
         content.Should().Contain("public void ExecuteLoad(Action action)");
         content.Should().Contain("editModel.ExecuteLoad(() =>");
-        // 新規入力用ファクトリは Entity を基に生成し、生成フックを呼ぶ
-        content.Should().Contain("public CustomerEditModel CreateEditModel()");
+        // 生成の定型（EditModel 反映・コレクション化）は共通基底 MapperBase が提供し、具象 Mapper はそれを継承する
+        content.Should().Contain("public abstract partial class MapperBase<TEntity, TEditModel>");
+        content.Should().Contain(": MapperBase<CustomerEntity, CustomerEditModel>");
+        content.Should().Contain(": MapperBase<OrderEntity, OrderEditModel>");
+        // 新規入力用ファクトリ（基底が提供）は Entity を基に生成し、具象の生成フックを呼ぶ
+        content.Should().Contain("public TEditModel CreateEditModel()");
         content.Should().Contain("OnEditModelCreated(editModel);");
         content.Should().Contain("partial void OnEditModelCreated(CustomerEditModel editModel);");
         // ApplyToEntity は MarkUpdated を撤廃し RowState を転写、子コレクションは CreateEntities で代入する
@@ -259,7 +263,7 @@ public class CSharpCodeGenerationServiceTests
             .Contain(
                 "public sealed partial class EditModelCollection<T> : ObservableCollection<T>"
             );
-        content.Should().Contain("public List<OrderEntity> CreateEntities(");
+        content.Should().Contain("public List<TEntity> CreateEntities(");
         content
             .Should()
             .Contain(
@@ -299,7 +303,7 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("public void RemoveRange(int index, int count)");
         // EditModel 列挙を受け取るコンストラクタと、Entity 列挙から生成する Mapper メソッド
         content.Should().Contain("public EditModelCollection(IEnumerable<T> items)");
-        content.Should().Contain("public EditModelCollection<OrderEditModel> CreateEditModels(");
+        content.Should().Contain("public EditModelCollection<TEditModel> CreateEditModels(");
         // 子コレクションナビはバッキングフィールド＋プロパティで生成され、要素の親モデルリンク（OwnerModel）を張る
         content
             .Should()
@@ -309,7 +313,7 @@ public class CSharpCodeGenerationServiceTests
         content.Should().Contain("public EditModelCollection<OrderEditModel> Orders");
         content.Should().Contain("_orders.OwnerModel ??= this;");
         content.Should().Contain("_orders.OwnerModel = this;");
-        content.Should().Contain("public void ApplyToEntity(");
+        content.Should().Contain("public override void ApplyToEntity(");
         // ApplyToEditModel は子コレクションを CreateEditModels で代入し、状態は生成元 Entity を基準にする
         content
             .Should()
@@ -634,13 +638,19 @@ public class CSharpCodeGenerationServiceTests
         // 旧 Commit 系の名前は残っていないこと
         result.Files[0].Content.Should().NotContain("CommitToEditModel");
         result.Files[0].Content.Should().NotContain("CommitToEntity");
-        // Entity ファクトリ（空生成・EditModel 反映）と初期値フックを生成する
-        result.Files[0].Content.Should().Contain("public ProductEntity CreateEntity()");
+        // 空生成ファクトリと初期値フックは具象 Mapper が override で提供する
+        result.Files[0].Content.Should().Contain("public override ProductEntity CreateEntity()");
+        // EditModel 反映を含む生成の定型は共通基底 MapperBase が提供し、具象はそれを継承する
+        result
+            .Files[0]
+            .Content.Should()
+            .Contain("public abstract partial class MapperBase<TEntity, TEditModel>");
+        result.Files[0].Content.Should().Contain(": MapperBase<ProductEntity, ProductEditModel>");
         result
             .Files[0]
             .Content.Should()
             .Contain(
-                "public ProductEntity CreateEntity(ProductEditModel editModel, bool includeRemoved = false)"
+                "public TEntity CreateEntity(TEditModel editModel, bool includeRemoved = false)"
             );
         result
             .Files[0]
