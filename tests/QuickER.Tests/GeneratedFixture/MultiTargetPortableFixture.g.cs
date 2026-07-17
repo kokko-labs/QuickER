@@ -5784,6 +5784,13 @@ internal static class SqlExpressionTranslator
 
             case MethodCallExpression call
                 when TryGetLike(call, out var likeColumn, out var likeKind):
+
+                // 引数が列なら列同士の LIKE（パターンは SQL 側でエスケープして組み立てる。引数列が NULL の行は不一致）
+                if (TryColumnName(call.Arguments[0]) is { } patternColumn)
+                {
+                    return $"{likeColumn} LIKE {BuildLikePatternFromColumn(patternColumn, likeKind)} ESCAPE '\\'";
+                }
+
                 // 引数は string でも値オブジェクト（TSelf オーバーロード）でもよい。VO なら素値（string）へ開く
                 var raw =
                     SqlParameterValue.Unwrap(Evaluate(call.Arguments[0])) as string ?? string.Empty;
@@ -5808,6 +5815,15 @@ internal static class SqlExpressionTranslator
 
             case MethodCallExpression call
                 when TryGetEquals(call, out var eqColumn, out var eqArg, out var eqIgnoreCase):
+
+                // 引数が列なら列同士の等値比較（IgnoreCase 系は両辺を LOWER で畳む＝値パスと同じ規則）
+                if (TryColumnName(eqArg) is { } eqArgColumn)
+                {
+                    return eqIgnoreCase
+                        ? $"LOWER({eqColumn}) = LOWER({eqArgColumn})"
+                        : $"{eqColumn} = {eqArgColumn}";
+                }
+
                 // 値は AddParameters 側で素値へ開かれる（VO 対応）
                 var eqParameter = AddParameter(Evaluate(eqArg), parameters, RawColumnName(eqColumn));
                 // 大文字小文字を無視する比較は両辺を LOWER で畳む
@@ -6190,6 +6206,14 @@ internal static class SqlExpressionTranslator
     /// </summary>
     private static object? Evaluate(Expression expression)
     {
+        // エンティティの列参照（ラムダパラメータ）は値として評価できない。式木コンパイルの内部エラーで落ちる前に明示的に弾く
+        if (ReferencesLambdaParameter(expression))
+        {
+            throw new NotSupportedException(
+                $"この式は SQL へ変換できません（エンティティの列は値の位置に指定できません）: {expression}"
+            );
+        }
+
         switch (expression)
         {
             // 定数はそのまま値を返す
@@ -6240,6 +6264,41 @@ internal static class SqlExpressionTranslator
     /// <summary>LIKE のワイルドカード（% _ [ \）をエスケープする</summary>
     private static string EscapeLike(string value) =>
         value.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_").Replace("[", "\\[");
+
+    /// <summary>列値をリテラル扱いする LIKE パターンを SQL 側で組み立てる（EscapeLike と同じ 4 文字を REPLACE でエスケープ）</summary>
+    /// <remarks>引数列が NULL の行は連結が NULL → LIKE NULL → 不一致になる（値引数の null→空文字＝全一致とは意味論が異なる）</remarks>
+    private static string BuildLikePatternFromColumn(string column, LikeKind kind)
+    {
+        var escaped =
+            $"REPLACE(REPLACE(REPLACE(REPLACE({column}, '\\', '\\\\'), '%', '\\%'), '_', '\\_'), '[', '\\[')";
+
+        return kind switch
+        {
+            LikeKind.Contains => $"'%' + {escaped} + '%'",
+            LikeKind.StartsWith => $"{escaped} + '%'",
+            _ => $"'%' + {escaped}",
+        };
+    }
+
+    /// <summary>式木がラムダパラメータ（＝エンティティの列参照）を含むかどうかを走査する</summary>
+    private static bool ReferencesLambdaParameter(Expression expression)
+    {
+        var finder = new LambdaParameterFinder();
+        finder.Visit(expression);
+        return finder.Found;
+    }
+
+    /// <summary>ラムダパラメータの参照を見つけたらフラグを立てるだけの軽量ビジター</summary>
+    private sealed class LambdaParameterFinder : ExpressionVisitor
+    {
+        public bool Found { get; private set; }
+
+        protected override Expression VisitParameter(ParameterExpression node)
+        {
+            Found = true;
+            return node;
+        }
+    }
 }
 
 /// <summary>エンティティ型の属性からテーブル・カラム情報、CRUD 用 SQL、カスケード子ナビゲーションを構築・保持し、行マッピングとパラメータ束縛を提供するメタデータ</summary>
@@ -8787,6 +8846,13 @@ internal static class SqlExpressionTranslator
 
             case MethodCallExpression call
                 when TryGetLike(call, out var likeColumn, out var likeKind):
+
+                // 引数が列なら列同士の LIKE（パターンは SQL 側でエスケープして組み立てる。引数列が NULL の行は不一致）
+                if (TryColumnName(call.Arguments[0]) is { } patternColumn)
+                {
+                    return $"{likeColumn} LIKE {BuildLikePatternFromColumn(patternColumn, likeKind)} ESCAPE '\\'";
+                }
+
                 // 引数は string でも値オブジェクト（TSelf オーバーロード）でもよい。VO なら素値（string）へ開く
                 var raw =
                     SqlParameterValue.Unwrap(Evaluate(call.Arguments[0])) as string ?? string.Empty;
@@ -8811,6 +8877,15 @@ internal static class SqlExpressionTranslator
 
             case MethodCallExpression call
                 when TryGetEquals(call, out var eqColumn, out var eqArg, out var eqIgnoreCase):
+
+                // 引数が列なら列同士の等値比較（IgnoreCase 系は両辺を LOWER で畳む＝値パスと同じ規則）
+                if (TryColumnName(eqArg) is { } eqArgColumn)
+                {
+                    return eqIgnoreCase
+                        ? $"LOWER({eqColumn}) = LOWER({eqArgColumn})"
+                        : $"{eqColumn} = {eqArgColumn}";
+                }
+
                 // 値は AddParameters 側で素値へ開かれる（VO 対応）
                 var eqParameter = AddParameter(Evaluate(eqArg), parameters, RawColumnName(eqColumn));
                 // 大文字小文字を無視する比較は両辺を LOWER で畳む
@@ -9194,6 +9269,14 @@ internal static class SqlExpressionTranslator
     /// </summary>
     private static object? Evaluate(Expression expression)
     {
+        // エンティティの列参照（ラムダパラメータ）は値として評価できない。式木コンパイルの内部エラーで落ちる前に明示的に弾く
+        if (ReferencesLambdaParameter(expression))
+        {
+            throw new NotSupportedException(
+                $"この式は SQL へ変換できません（エンティティの列は値の位置に指定できません）: {expression}"
+            );
+        }
+
         switch (expression)
         {
             // 定数はそのまま値を返す
@@ -9244,6 +9327,41 @@ internal static class SqlExpressionTranslator
     /// <summary>LIKE のワイルドカード（% _ [ \）をエスケープする</summary>
     private static string EscapeLike(string value) =>
         value.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_").Replace("[", "\\[");
+
+    /// <summary>列値をリテラル扱いする LIKE パターンを SQL 側で組み立てる（EscapeLike と同じ 4 文字を REPLACE でエスケープ）</summary>
+    /// <remarks>引数列が NULL の行は連結が NULL → LIKE NULL → 不一致になる（値引数の null→空文字＝全一致とは意味論が異なる）</remarks>
+    private static string BuildLikePatternFromColumn(string column, LikeKind kind)
+    {
+        var escaped =
+            $"REPLACE(REPLACE(REPLACE(REPLACE({column}, '\\', '\\\\'), '%', '\\%'), '_', '\\_'), '[', '\\[')";
+
+        return kind switch
+        {
+            LikeKind.Contains => $"'%' || {escaped} || '%'",
+            LikeKind.StartsWith => $"{escaped} || '%'",
+            _ => $"'%' || {escaped}",
+        };
+    }
+
+    /// <summary>式木がラムダパラメータ（＝エンティティの列参照）を含むかどうかを走査する</summary>
+    private static bool ReferencesLambdaParameter(Expression expression)
+    {
+        var finder = new LambdaParameterFinder();
+        finder.Visit(expression);
+        return finder.Found;
+    }
+
+    /// <summary>ラムダパラメータの参照を見つけたらフラグを立てるだけの軽量ビジター</summary>
+    private sealed class LambdaParameterFinder : ExpressionVisitor
+    {
+        public bool Found { get; private set; }
+
+        protected override Expression VisitParameter(ParameterExpression node)
+        {
+            Found = true;
+            return node;
+        }
+    }
 }
 
 /// <summary>エンティティ型の属性からテーブル・カラム情報、CRUD 用 SQL、カスケード子ナビゲーションを構築・保持し、行マッピングとパラメータ束縛を提供するメタデータ</summary>

@@ -1,3 +1,7 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Linq.Expressions;
 using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.Data.Sqlite;
@@ -89,6 +93,143 @@ public sealed class GeneratedSqliteAdoRuntimeTests : GeneratedSqliteRuntimeTests
         (await PartAsync("CAST(strftime('%j', \"occurred_at\") AS INTEGER)"))
             .Should()
             .Be(186);
+    }
+
+    /// <summary>列判定用のプローブ（プロパティ名 A/B がそのまま列名になる）</summary>
+    private sealed class ProbeRow
+    {
+        public string A { get; set; } = string.Empty;
+        public string B { get; set; } = string.Empty;
+    }
+
+    /// <summary>
+    /// 追加（QuickER の SQLite のみ）: 翻訳器が「値の位置に列参照」を置いた式へ生成する条件文字列
+    /// （列同士の LIKE 系・等値）が、実 SQLite に対して意図どおりの意味論（部分一致・ワイルドカードの
+    /// リテラル扱い・引数列 NULL は不一致・StartsWith/EndsWith/Equals/IgnoreCase）で判定されることを検証する。
+    /// </summary>
+    /// <remarks>
+    /// <see cref="DateParts_StrftimeFragments_ReturnCorrectIntegersOnRealData"/> と同型のアプローチで、
+    /// 2 文字列列（A/B）の一時テーブルを用意し、<b>翻訳器の <c>ToCondition</c> が実際に生成した条件文字列</b>を
+    /// <c>SELECT COUNT(*) FROM ... WHERE {condition}</c> に埋めて実行する。式は SQLite フィクスチャの
+    /// 翻訳器（二重引用符・<c>||</c> 連結）を通す。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[SQLite] 追加: 翻訳器が生成する列同士の LIKE 系・等値条件が実 DB で正しい意味論を返す"
+    )]
+    public async Task ColumnArgumentConditions_HaveCorrectSemanticsOnRealData()
+    {
+        await ResetAndCreateSchemaAsync();
+
+        // 2 文字列列（A/B。ProbeRow のプロパティ名と一致）を持つ検証専用テーブルを用意する
+        await using (var conn = new SqliteConnection(ConnectionString))
+        {
+            await conn.OpenAsync(Ct);
+            await using var create = conn.CreateCommand();
+            create.CommandText = "CREATE TABLE \"probe\" (\"A\" TEXT, \"B\" TEXT);";
+            await create.ExecuteNonQueryAsync(Ct);
+        }
+
+        var executor = CreateSqlExecutor();
+
+        // 翻訳器（SQLite 方言）が述語本体から生成する条件文字列を取り出す
+        static string Condition(Expression<Func<ProbeRow, bool>> predicate) =>
+            SqlExpressionTranslator.ToCondition(predicate.Body, new List<SqlQueryParameter>());
+
+        // 単一行を差し替え、条件に一致するかを COUNT で確かめる（引数列 B は NULL も渡せるよう分岐する）
+        async Task<int> MatchesAsync(string condition, string a, string? b)
+        {
+            await executor.ExecuteSqlAsync("DELETE FROM \"probe\"", null, Ct);
+
+            if (b is null)
+            {
+                await executor.ExecuteSqlAsync(
+                    "INSERT INTO \"probe\" (\"A\", \"B\") VALUES (@a, NULL)",
+                    new { a },
+                    Ct
+                );
+            }
+            else
+            {
+                await executor.ExecuteSqlAsync(
+                    "INSERT INTO \"probe\" (\"A\", \"B\") VALUES (@a, @b)",
+                    new { a, b },
+                    Ct
+                );
+            }
+
+            return await executor.ExecuteScalarSqlAsync<int>(
+                $"SELECT COUNT(*) FROM \"probe\" WHERE {condition}",
+                null,
+                Ct
+            );
+        }
+
+        // --- Contains（部分一致・ワイルドカードのリテラル扱い・引数列 NULL は不一致） ---
+        var contains = Condition(p => p.A.Contains(p.B));
+        (await MatchesAsync(contains, "foobar", "oob")).Should().Be(1, "B の値が A に含まれる");
+        (await MatchesAsync(contains, "x10%y", "10%"))
+            .Should()
+            .Be(1, "% はリテラル扱いなので A に含まれる");
+        (await MatchesAsync(contains, "10a", "10%"))
+            .Should()
+            .Be(0, "% がワイルドカードなら誤って一致してしまう");
+        (await MatchesAsync(contains, "xa_cy", "a_c"))
+            .Should()
+            .Be(1, "_ はリテラル扱いなので A に含まれる");
+        (await MatchesAsync(contains, "xabcy", "a_c"))
+            .Should()
+            .Be(0, "_ がワイルドカードなら誤って一致してしまう");
+        (await MatchesAsync(contains, "hello", null)).Should().Be(0, "引数列が NULL の行は不一致");
+
+        // --- StartsWith / EndsWith ---
+        var startsWith = Condition(p => p.A.StartsWith(p.B));
+        (await MatchesAsync(startsWith, "abcdef", "abc")).Should().Be(1);
+        (await MatchesAsync(startsWith, "xabc", "abc")).Should().Be(0);
+
+        var endsWith = Condition(p => p.A.EndsWith(p.B));
+        (await MatchesAsync(endsWith, "abcdef", "def")).Should().Be(1);
+        (await MatchesAsync(endsWith, "defx", "def")).Should().Be(0);
+
+        // --- Equals / Equals(IgnoreCase） ---
+        var equals = Condition(p => p.A.Equals(p.B));
+        (await MatchesAsync(equals, "same", "same")).Should().Be(1);
+        (await MatchesAsync(equals, "a", "b")).Should().Be(0);
+
+        var equalsIgnoreCase = Condition(p => p.A.Equals(p.B, StringComparison.OrdinalIgnoreCase));
+        (await MatchesAsync(equalsIgnoreCase, "ABC", "abc"))
+            .Should()
+            .Be(1, "IgnoreCase は両辺を LOWER で畳むため一致する");
+    }
+
+    /// <summary>
+    /// 追加（QuickER の SQLite のみ）: 自列参照の Equals（<c>o.Memo.Equals(o.Memo)</c>）が、QuickER 版の
+    /// SQL null 意味論（<c>[memo] = [memo]</c> ＝ NULL 行は不一致）で非 NULL 行のみ返すことを検証する。
+    /// </summary>
+    /// <remarks>
+    /// <b>ADO 専用の理由</b>: EF Core は <c>Equals</c> を C# の null 等価（両辺 NULL を等しいとみなす）で翻訳し、
+    /// <c>[memo] = [memo] OR ([memo] IS NULL AND [memo] IS NULL)</c> 相当を生成するため NULL 行も含めてしまう。
+    /// QuickER 版は素の <c>[memo] = [memo]</c>（<c>NULL = NULL</c> は NULL＝不一致）なので NULL 行を除外する。
+    /// この差は両バックエンドで観測結果が割れるため、パリティ基底ではなく ADO 専用テストとして置く
+    /// （自列 Contains は左辺列も NULL となり両者一致するため基底 <c>Where_SelfColumnContains_ReturnsNonNullRows</c> に置く）。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[SQLite] 追加: 自列参照の Equals は QuickER の SQL null 意味論で非 NULL 行のみ返す（ADO 専用）"
+    )]
+    public async Task SelfColumnEquals_ExcludesNullRows()
+    {
+        await ResetAndCreateSchemaAsync();
+
+        var customers = CreateCustomerRepository();
+        var orders = CreateOrderRepository();
+
+        await customers.InsertAsync(NewCustomer(1, "Alice"), Ct);
+        await orders.InsertAsync(NewOrder(10, 1, 10m, "abc"), Ct);
+        await orders.InsertAsync(NewOrder(11, 1, 20m, "xyz"), Ct);
+        await orders.InsertAsync(NewOrder(12, 1, 30m, memo: null), Ct); // memo が NULL の行
+
+        // 自列 Equals: [memo] = [memo] ＝ 非 NULL の全行が一致し、NULL 行（NULL = NULL）は不一致
+        var selfEquals = await orders.Query().Where(o => o.Memo!.Equals(o.Memo!)).ToListAsync(Ct);
+        selfEquals.Select(o => o.OrderId.Value).Should().BeEquivalentTo([10, 11]);
     }
 
     public override void Dispose()

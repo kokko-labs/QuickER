@@ -205,6 +205,42 @@ public abstract class GeneratedSqliteRuntimeTestsBase : IDisposable
         byValue.Select(c => c.CustomerId.Value).Should().BeEquivalentTo([2]);
     }
 
+    /// <summary>
+    /// 2c. 自列参照の Contains（値の位置にエンティティ列を置く LIKE 系）が、両バックエンドで同一に
+    /// 「引数列が NULL の行を除外して非 NULL 行のみ返す」ことを検証する。
+    /// </summary>
+    /// <remarks>
+    /// QuickER 版は列同士の LIKE を素の列参照（<c>[memo] LIKE '%'‖…‖'%'</c>）へ翻訳し、引数列が NULL の行は
+    /// 連結が NULL となり不一致になる。EF Core 版（<c>ValueObjectStringMethodTranslator</c>）は非定数引数を
+    /// <c>COALESCE(arg,'')</c>＋SQL 側 REPLACE で組むが、NULL 行は<b>左辺（対象列）</b>も NULL のため
+    /// <c>NULL LIKE …</c> で同じく不一致になる。したがって「非 NULL 行のみ返る」という観測結果は両バックエンドで
+    /// 一致する。自列 <c>Equals</c> は EF Core が C# の null 等価（両辺 NULL を等しいとみなす）で翻訳し NULL 行を
+    /// 含めるため両バックエンドで一致せず、QuickER 版の SQL null 意味論（NULL 除外）は ADO 専用テスト
+    /// <c>SelfColumnEquals_ExcludesNullRows</c> で検証する。
+    /// </remarks>
+    [Fact(
+        DisplayName = "[SQLite] 2c: 自列参照の Contains が非 NULL 行のみ返す（両バックエンド一致）"
+    )]
+    public async Task Where_SelfColumnContains_ReturnsNonNullRows()
+    {
+        await ResetAndCreateSchemaAsync();
+
+        var customers = CreateCustomerRepository();
+        var orders = CreateOrderRepository();
+
+        await customers.InsertAsync(NewCustomer(1, "Alice"), Ct);
+        await orders.InsertAsync(NewOrder(10, 1, 10m, "abc"), Ct);
+        await orders.InsertAsync(NewOrder(11, 1, 20m, "xyz"), Ct);
+        await orders.InsertAsync(NewOrder(12, 1, 30m, memo: null), Ct); // memo が NULL の行
+
+        // 自列 Contains: memo が自身を含む＝非 NULL の全行が一致し、NULL 行は不一致
+        var selfContains = await orders
+            .Query()
+            .Where(o => o.Memo!.Contains(o.Memo!))
+            .ToListAsync(Ct);
+        selfContains.Select(o => o.OrderId.Value).Should().BeEquivalentTo([10, 11]);
+    }
+
     /// <summary>3. OrderBy/ThenBy・Skip/Take（LIMIT/OFFSET）が整数キーで正しい順序・範囲を返す</summary>
     [Fact(
         DisplayName = "[SQLite] 3: OrderBy/ThenBy・Skip/Take（LIMIT/OFFSET）が正しい順序・範囲を返す"
