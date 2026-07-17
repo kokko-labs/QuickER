@@ -26,6 +26,7 @@ samples/ec-order/EcOrder.json text eol=crlf
 samples/ec-order/EcOrder.sql text eol=crlf
 samples/ec-order/EcOrderSample/Generated/EcOrder.g.cs text eol=crlf
 samples/ec-order/EcOrderSample/Generated/EcOrder.g.md text eol=crlf
+samples/ec-order/EcOrderSample/Generated/EcOrder.ja.g.md text eol=crlf
 
 ###############################################################################
 # samples/ec-order-remote（3 階層構成サンプル）のチェックイン済み生成物・図 JSON も

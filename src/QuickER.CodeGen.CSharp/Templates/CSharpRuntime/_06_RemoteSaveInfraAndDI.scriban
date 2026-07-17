@@ -1,14 +1,14 @@
 {{~ if render_contract && emit_shared_infra ~}}
 
-/// <summary>更新対象のレコードが存在しなかった（他者削除等の競合）ことを表す例外</summary>
+/// <summary>Represents an exception indicating that the record to update no longer existed (a conflict such as deletion by another party).</summary>
 public sealed class SaveConflictException : Exception
 {
-    /// <summary>メッセージを指定して初期化する</summary>
+    /// <summary>Initializes a new instance with the specified message.</summary>
     public SaveConflictException(string message)
         : base(message) { }
 }
 
-/// <summary>カスケード対象の子ナビゲーション（プロパティ・コレクション種別・子型・FK 情報）</summary>
+/// <summary>A child navigation targeted by cascading (property, collection kind, child type, and FK information).</summary>
 {{ infra_visibility }} sealed record CascadeNavigation(
     PropertyInfo Property,
     bool IsCollection,
@@ -19,19 +19,20 @@ public sealed class SaveConflictException : Exception
 {{~ end ~}}
 {{~ if render_contract && emit_shared_infra && remote_services ~}}
 
-/// <summary>リモート転送（HTTP + JSON）で使う共有シリアライズ設定</summary>
+/// <summary>Shared serialization settings used for remote transport (HTTP + JSON).</summary>
 /// <remarks>
-/// エンティティの JSON 往復（<see cref="EntityBase.ToJson"/> / <see cref="EntityBase.Clone"/>）と同じ意味論
-/// （get/set プロパティのみ・RowState 込み・親参照ナビゲーションは [JsonIgnore] で循環なし）に、
-/// 転送用の大文字小文字非依存読み取りを加えたもの。クライアント・サーバーの双方がこの設定を使うことでワイヤ表現が一致する。
+/// Uses the same semantics as entity JSON round-trips (<see cref="EntityBase.ToJson"/> / <see cref="EntityBase.Clone"/>)
+/// (get/set properties only, RowState included, no cycles because parent-reference navigations are [JsonIgnore]),
+/// plus case-insensitive reading for transport. Client and server both use these settings so the wire representation matches.
 /// </remarks>
 public static class RemoteJson
 {
-    /// <summary>クライアント・サーバー共通の転送用 JSON 設定</summary>
+    /// <summary>Transport JSON settings shared by client and server.</summary>
     /// <remarks>
-    /// IgnoreReadOnlyProperties は指定しない（クエリ転送のエンベロープに使う匿名型は get-only プロパティのため、
-    /// 指定すると本文が空 JSON になる）。エンティティの派生フラグ（IsAdded 等の get-only bool）は余分に
-    /// 出力されるが、読み取り時にセッターが無く無視されるため往復の意味論（RowState 込み）は変わらない。
+    /// IgnoreReadOnlyProperties is intentionally not set (the anonymous types used as query-transport envelopes have
+    /// get-only properties, so setting it would serialize an empty JSON body). Derived entity flags (get-only bools
+    /// such as IsAdded) are serialized redundantly, but they have no setter and are ignored on read, so the
+    /// round-trip semantics (RowState included) are unchanged.
     /// </remarks>
     public static JsonSerializerOptions Options { get; } =
         new()
@@ -44,38 +45,38 @@ public static class RemoteJson
         };
 }
 
-/// <summary>リモート呼び出しがサーバー側エラーで失敗したことを表す例外（HTTP ステータスとサーバーのメッセージを保持）</summary>
-/// <remarks>楽観的競合（HTTP 409）は本例外ではなく <see cref="SaveConflictException"/> として復元される（直結時と同じ catch が機能する）</remarks>
+/// <summary>Represents a remote call that failed with a server-side error (carries the HTTP status and the server's message).</summary>
+/// <remarks>An optimistic conflict (HTTP 409) is restored as <see cref="SaveConflictException"/> rather than this exception, so the same catch blocks work as with a direct connection.</remarks>
 public sealed class RemoteRepositoryException : Exception
 {
-    /// <summary>HTTP ステータスコードとメッセージを指定して初期化する</summary>
+    /// <summary>Initializes a new instance with the specified HTTP status code and message.</summary>
     public RemoteRepositoryException(int statusCode, string message)
         : base(message)
     {
         StatusCode = statusCode;
     }
 
-    /// <summary>サーバーが返した HTTP ステータスコード</summary>
+    /// <summary>Gets the HTTP status code returned by the server.</summary>
     public int StatusCode { get; }
 }
 
-/// <summary>転送エラーの構造化ペイロード（サーバー→クライアント。種別でクライアント側の例外型を復元する）</summary>
+/// <summary>Structured payload for transport errors (server to client; the type restores the exception type on the client side).</summary>
 public sealed class RemoteError
 {
-    /// <summary>エラー種別（"SaveConflict"＝楽観的競合 / "Error"＝その他）</summary>
+    /// <summary>Gets or sets the error kind ("SaveConflict" = optimistic conflict / "Error" = anything else).</summary>
     public string Type { get; set; } = string.Empty;
 
-    /// <summary>サーバー側の例外メッセージ</summary>
+    /// <summary>Gets or sets the server-side exception message.</summary>
     public string Message { get; set; } = string.Empty;
 }
 
-/// <summary>主キー 1 つを運ぶリクエスト本文（GetById / Delete）</summary>
+/// <summary>Request body carrying a single primary key (GetById / Delete).</summary>
 public sealed record RemoteIdRequest<TKey>(TKey Id);
 
-/// <summary>エンティティ 1 件を運ぶリクエスト本文（Insert / Update）</summary>
+/// <summary>Request body carrying a single entity (Insert / Update).</summary>
 public sealed record RemoteEntityRequest<TEntity>(TEntity Entity);
 
-/// <summary>グラフ保存（単一ルート）のリクエスト本文</summary>
+/// <summary>Request body for a graph save (single root).</summary>
 public sealed record RemoteSaveRequest<TEntity>(
     TEntity Entity,
     bool CascadeSave,
@@ -83,7 +84,7 @@ public sealed record RemoteSaveRequest<TEntity>(
     bool InsertWhenUpdateMissing
 );
 
-/// <summary>グラフ保存（複数ルート）のリクエスト本文</summary>
+/// <summary>Request body for a graph save (multiple roots).</summary>
 public sealed record RemoteSaveManyRequest<TEntity>(
     List<TEntity> Entities,
     bool CascadeSave,
@@ -92,18 +93,19 @@ public sealed record RemoteSaveManyRequest<TEntity>(
 );
 
 /// <summary>
-/// リモート面（<see cref="IRemoteRepository{TEntity, TKey}"/>）を HTTP + JSON で呼び出すクライアント実装の共通基底。
+/// Common base class for client implementations that call the remote surface (<see cref="IRemoteRepository{TEntity, TKey}"/>) over HTTP + JSON.
 /// </summary>
 /// <remarks>
 /// <para>
-/// 各操作は <c>POST {BaseAddress}{エンティティルート}/{操作名}</c> へ JSON 本文を送り、結果 JSON を復元する。
-/// <see cref="HttpClient.BaseAddress"/> はサーバー側 <c>MapGeneratedRemoteEndpoints</c> の prefix（既定 <c>/quicker</c>）まで
-/// 含み、末尾 <c>/</c> で終わること（例 <c>https://server:5001/quicker/</c>）。認証・TLS 等は HttpClient の構成
-/// （DelegatingHandler・既定ヘッダー）に委ねる。
+/// Each operation sends a JSON body to <c>POST {BaseAddress}{entity route}/{operation name}</c> and deserializes the result JSON.
+/// <see cref="HttpClient.BaseAddress"/> must include the server-side <c>MapGeneratedRemoteEndpoints</c> prefix (default <c>/quicker</c>)
+/// and end with a trailing <c>/</c> (for example <c>https://server:5001/quicker/</c>). Authentication, TLS, and similar concerns are
+/// delegated to the HttpClient configuration (DelegatingHandler, default headers).
 /// </para>
 /// <para>
-/// グラフ保存（Save）成功後は直結時（<c>EntityGraphSaver.AcceptChanges</c>）と同じ意味論でローカルエンティティの
-/// RowState を確定させる（直結⇔リモートの差し替えで保存後の状態遷移が変わらない）。
+/// After a successful graph save (Save), the local entities' RowState is finalized with the same semantics as a direct
+/// connection (<c>EntityGraphSaver.AcceptChanges</c>), so swapping direct and remote implementations does not change
+/// the post-save state transitions.
 /// </para>
 /// </remarks>
 public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepository<TEntity, TKey>
@@ -112,7 +114,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
     private readonly HttpClient _httpClient;
     private readonly string _entityRoute;
 
-    /// <summary>HTTP クライアントとエンティティルート（例 "Order"）を指定して初期化する</summary>
+    /// <summary>Initializes a new instance with the HTTP client and the entity route (for example "Order").</summary>
     protected HttpRemoteRepository(HttpClient httpClient, string entityRoute)
     {
         ArgumentNullException.ThrowIfNull(httpClient);
@@ -121,8 +123,8 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         _entityRoute = entityRoute;
     }
 
-    /// <summary>操作を POST し、結果 JSON を <typeparamref name="TResult"/> へ復元する（生成される転送メソッドの共通経路）</summary>
-    /// <remarks>失敗応答は <see cref="RemoteError"/> を読み、409＋SaveConflict は <see cref="SaveConflictException"/>・それ以外は <see cref="RemoteRepositoryException"/> を送出する</remarks>
+    /// <summary>Posts an operation and deserializes the result JSON into <typeparamref name="TResult"/> (the shared path for generated transport methods).</summary>
+    /// <remarks>On a failure response, reads the <see cref="RemoteError"/>; 409 with SaveConflict throws <see cref="SaveConflictException"/>, anything else throws <see cref="RemoteRepositoryException"/>.</remarks>
     protected async Task<TResult> InvokeAsync<TResult>(
         string operation,
         object? payload,
@@ -145,7 +147,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         return result!;
     }
 
-    /// <summary>失敗応答を例外へ変換する（既知の種別は元の例外型を復元する）</summary>
+    /// <summary>Converts a failure response into an exception (known kinds restore the original exception type).</summary>
     private static async Task EnsureSuccessAsync(
         HttpResponseMessage response,
         CancellationToken cancellationToken
@@ -167,12 +169,12 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         }
         catch (JsonException)
         {
-            // エラーペイロードが JSON でない（プロキシ・インフラ由来の応答など）場合はステータスのみで報告する
+            // If the error payload is not JSON (e.g. a response from a proxy or infrastructure), report the status only
         }
 
         var statusCode = (int)response.StatusCode;
         var message =
-            error?.Message ?? $"リモート呼び出しが失敗しました（HTTP {statusCode}）。";
+            error?.Message ?? $"The remote call failed (HTTP {statusCode}).";
 
         if (statusCode == 409 && error?.Type == "SaveConflict")
         {
@@ -182,15 +184,15 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         throw new RemoteRepositoryException(statusCode, message);
     }
 
-    /// <summary>主キーによる単一エンティティ取得（該当なしは null）</summary>
+    /// <summary>Gets a single entity by primary key (null when not found).</summary>
     public Task<TEntity?> GetByIdAsync(TKey id, CancellationToken cancellationToken = default) =>
         InvokeAsync<TEntity?>("GetById", new RemoteIdRequest<TKey>(id), cancellationToken);
 
-    /// <summary>全エンティティ取得</summary>
+    /// <summary>Gets all entities.</summary>
     public Task<IReadOnlyList<TEntity>> GetAllAsync(CancellationToken cancellationToken = default) =>
         InvokeAsync<IReadOnlyList<TEntity>>("GetAll", null, cancellationToken);
 
-    /// <summary>エンティティ追加</summary>
+    /// <summary>Inserts an entity.</summary>
     public async Task InsertAsync(TEntity entity, CancellationToken cancellationToken = default) =>
         await InvokeAsync<bool>(
             "Insert",
@@ -198,10 +200,11 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
             cancellationToken
         );
 
-    /// <summary>エンティティ更新（更新対象ありで true）</summary>
+    /// <summary>Updates an entity (returns true when a matching row was updated).</summary>
     public Task<bool> UpdateAsync(TEntity entity, CancellationToken cancellationToken = default)
     {
-        // 無制限バイナリ列に値が残ったままの更新は送信前に弾く（サーバーの UPDATE 対象外でサイレントに失われるため）
+        // Reject updates that still carry values in unbounded binary columns before sending
+        // (they are excluded from the server-side UPDATE and would be lost silently)
         UnboundedBinaryColumns.ThrowIfExcludedAssigned(entity);
         return InvokeAsync<bool>(
             "Update",
@@ -210,11 +213,11 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         );
     }
 
-    /// <summary>主キーによるエンティティ削除（削除対象ありで true）</summary>
+    /// <summary>Deletes an entity by primary key (returns true when a matching row was deleted).</summary>
     public Task<bool> DeleteAsync(TKey id, CancellationToken cancellationToken = default) =>
         InvokeAsync<bool>("Delete", new RemoteIdRequest<TKey>(id), cancellationToken);
 
-    /// <summary>RowState に従って 1 トランザクションで追加・更新・削除を保存する（既定で子をカスケード）</summary>
+    /// <summary>Saves inserts, updates, and deletes according to RowState in a single transaction (cascades to children by default).</summary>
     public async Task<int> SaveAsync(
         TEntity entity,
         bool cascadeSave = true,
@@ -223,7 +226,8 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         CancellationToken cancellationToken = default
     )
     {
-        // 更新対象（RowState==Updated）に無制限バイナリ列の値が残っていれば送信前に弾く（カスケード対象も走査）
+        // Reject before sending if any entity to update (RowState==Updated) still carries values
+        // in unbounded binary columns (cascade targets are traversed as well)
         GuardUnboundedBinaryOnSave(entity, cascadeSave);
 
         var affected = await InvokeAsync<int>(
@@ -232,12 +236,12 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
             cancellationToken
         );
 
-        // 直結時（EntityGraphSaver）と同じく、保存成功後にローカルの RowState を確定させる
+        // As with a direct connection (EntityGraphSaver), finalize the local RowState after a successful save
         AcceptChanges(entity, cascadeSave);
         return affected;
     }
 
-    /// <summary>複数の集約ルートを 1 トランザクションでまとめて保存する（全件成功か全件ロールバックの原子的処理）</summary>
+    /// <summary>Saves multiple aggregate roots together in a single transaction (atomic: all succeed or all roll back).</summary>
     public async Task<int> SaveAsync(
         IEnumerable<TEntity> entities,
         bool cascadeSave = true,
@@ -248,7 +252,8 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
     {
         var list = entities.ToList();
 
-        // 各集約ルート（カスケード対象含む）の更新エンティティに無制限バイナリ列の値が残っていれば送信前に弾く
+        // Reject before sending if any updated entity in each aggregate root (including cascade targets)
+        // still carries values in unbounded binary columns
         foreach (var entity in list)
         {
             GuardUnboundedBinaryOnSave(entity, cascadeSave);
@@ -268,7 +273,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         return affected;
     }
 
-    /// <summary>保存対象グラフのうち更新（Updated）エンティティに無制限バイナリ列の値が残っていないか検証する（AcceptChanges と同じ子方向走査）</summary>
+    /// <summary>Verifies that no updated (Updated) entity in the graph to save still carries values in unbounded binary columns (same child-direction traversal as AcceptChanges).</summary>
     private static void GuardUnboundedBinaryOnSave(EntityBase entity, bool cascade)
     {
         if (entity.IsUpdated)
@@ -302,11 +307,11 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         }
     }
 
-    /// <summary>型ごとのカスケード対象ナビゲーションプロパティ（[NavigationReference(Cascade=true)]）のキャッシュ</summary>
+    /// <summary>Per-type cache of cascade navigation properties ([NavigationReference(Cascade=true)]).</summary>
     private static readonly ConcurrentDictionary<Type, PropertyInfo[]> _cascadeNavigations = new();
 
-    /// <summary>コミット後に保存済みエンティティを Unchanged に確定する（直結の EntityGraphSaver.AcceptChanges と同じ意味論）</summary>
-    /// <remarks>削除済み（Removed）は状態を保つ。カスケード時は [NavigationReference] の子方向ナビゲーションを再帰的に確定する</remarks>
+    /// <summary>Finalizes saved entities to Unchanged after commit (same semantics as the direct-connection EntityGraphSaver.AcceptChanges).</summary>
+    /// <remarks>Deleted (Removed) entities keep their state. When cascading, the child-direction [NavigationReference] navigations are finalized recursively.</remarks>
     private static void AcceptChanges(EntityBase entity, bool cascade)
     {
         if (entity.IsRemoved)
@@ -342,7 +347,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         }
     }
 
-    /// <summary>カスケード対象（子方向）のナビゲーションプロパティを列挙する</summary>
+    /// <summary>Enumerates the cascade-target (child-direction) navigation properties.</summary>
     private static PropertyInfo[] CascadeNavigationProperties(Type entityType) =>
         _cascadeNavigations.GetOrAdd(
             entityType,
@@ -356,16 +361,17 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         );
 {{~ if exclude_unbounded_binary || runtime_package_export ~}}
 
-    /// <summary>主キーを URL クエリ（<c>?id=</c>）用の文字列へ直列化する（エンベロープと同一の JSON 規則＝VO は内包値・数値はそのまま・文字列/Guid は引用符付き）</summary>
-    /// <remarks>キー値の JSON 表現を URL エンコードして運ぶ。サーバーは同じ設定（<c>RemoteJson.Options</c>）で復元するため方言・VO によらず往復する</remarks>
+    /// <summary>Serializes the primary key into a string for the URL query (<c>?id=</c>) using the same JSON rules as the envelopes (value objects use their wrapped value, numbers as-is, strings/Guids quoted).</summary>
+    /// <remarks>Carries the URL-encoded JSON representation of the key value. The server restores it with the same settings (<c>RemoteJson.Options</c>), so it round-trips regardless of dialect or value objects.</remarks>
     protected string FormatKeyForQuery(TKey id) =>
         Uri.EscapeDataString(JsonSerializer.Serialize(id, RemoteJson.Options));
 
     /// <summary>
-    /// 無制限バイナリ列（除外列）をサーバーからストリーミングでダウンロードする（<c>GET {エンティティ}/{列名}?id=</c>）。
-    /// レスポンスヘッダのみ先読み（<see cref="HttpCompletionOption.ResponseHeadersRead"/>）し、本文を宛先へ O(チャンク) でコピーする
-    /// （blob 全量をメモリに載せない・Base64 不使用）。200＝データを書いた（<c>true</c>・空 blob も true）／404＝行なし または NULL
-    /// （<c>false</c>・宛先へ何も書かない）。それ以外の失敗は既存規則で例外復元する。
+    /// Streams an unbounded binary column (excluded column) down from the server (<c>GET {entity}/{column}?id=</c>).
+    /// Reads only the response headers up front (<see cref="HttpCompletionOption.ResponseHeadersRead"/>) and copies the body
+    /// to the destination in O(chunk) (the whole blob is never loaded into memory; no Base64). 200 = data was written
+    /// (<c>true</c>; an empty blob is also true) / 404 = no row or NULL (<c>false</c>; nothing is written to the destination).
+    /// Any other failure restores exceptions per the existing rules.
     /// </summary>
     protected async Task<bool> DownloadUnboundedBinaryColumnAsync(
         string columnRoute,
@@ -396,10 +402,11 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
     }
 
     /// <summary>
-    /// 無制限バイナリ列（除外列）をサーバーへストリーミングでアップロードする。<paramref name="source"/> が <c>null</c> のときは
-    /// <c>DELETE</c>（列を NULL 化）、非 <c>null</c> のときは <c>PUT</c>（<see cref="StreamContent"/>＋Content-Length）を送る
-    /// （0 バイトの PUT＝空ボディと NULL 化＝DELETE は構造的に区別される）。送信前に長さ契約（<c>CanSeek</c> でない Stream は
-    /// <paramref name="length"/> 必須）を検証する。204＝成功（<c>true</c>）／404＝行なし（<c>false</c>）。それ以外は例外復元。
+    /// Streams an unbounded binary column (excluded column) up to the server. When <paramref name="source"/> is <c>null</c>,
+    /// sends <c>DELETE</c> (sets the column to NULL); when non-<c>null</c>, sends <c>PUT</c> (<see cref="StreamContent"/> with
+    /// Content-Length). A zero-byte PUT (empty body) and setting NULL (DELETE) are structurally distinct. The length contract
+    /// is validated before sending (a non-<c>CanSeek</c> Stream requires <paramref name="length"/>). 204 = success (<c>true</c>) /
+    /// 404 = no row (<c>false</c>). Anything else restores exceptions.
     /// </summary>
     protected async Task<bool> UploadUnboundedBinaryColumnAsync(
         string columnRoute,
@@ -411,7 +418,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
     {
         var requestUri = $"{_entityRoute}/{columnRoute}?id={FormatKeyForQuery(id)}";
 
-        // source=null は列を NULL に設定する（DELETE）。0 バイトの PUT（空ボディ）とは意味が異なる
+        // source=null sets the column to NULL (DELETE); this differs in meaning from a zero-byte PUT (empty body)
         if (source is null)
         {
             using var deleteResponse = await _httpClient.DeleteAsync(requestUri, cancellationToken);
@@ -425,7 +432,8 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
             return true;
         }
 
-        // 送信前に長さを確定する（CanSeek でない Stream は length 必須＝Content-Length と自然に整合。欠落は送信前に例外）
+        // Determine the length before sending (a non-CanSeek Stream requires length, which naturally
+        // aligns with Content-Length; a missing length throws before sending)
         var payloadLength = UnboundedBinaryColumns.ResolveWriteLength(source, length);
 
         using var content = new StreamContent(source);
@@ -452,99 +460,99 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
 {{~ end ~}}
 {{~ if (repositories || in_memory || (ef_core && render_contract) || (ef_core && render_ef_core && runtime_package_export)) && emit_shared_infra ~}}
 
-/// <summary>エンティティ型の属性からテーブル・カラム情報、CRUD 用 SQL、カスケード子ナビゲーションを構築・保持し、行マッピングとパラメータ束縛を提供するメタデータ</summary>
-/// <remarks>型をキーに 1 度だけ構築しキャッシュする（リフレクションコスト削減）。Repository の CRUD・グラフ保存・JSON クエリプランナ・カスケード削除プランナが共用する</remarks>
+/// <summary>Metadata built from the entity type's attributes that holds table/column information, CRUD SQL, and cascade child navigations, and provides row mapping and parameter binding.</summary>
+/// <remarks>Built once per type and cached by type key (reduces reflection cost). Shared by the repository's CRUD, graph save, JSON query planner, and cascade delete planner.</remarks>
 {{ infra_visibility }} sealed class EntitySaveMetadata
 {
     private static readonly ConcurrentDictionary<Type, EntitySaveMetadata> _cache = new();
 
 {{~ if repository_dialect != "sqlserver" ~}}
-    /// <summary>このメタデータが対応するエンティティ型（マルチクエリ Include のエンティティ生成で使う）</summary>
+    /// <summary>Gets the entity type this metadata describes (used to instantiate entities for multi-query Include).</summary>
     public required Type EntityType { get; init; }
 {{~ end ~}}
 
 {{~ if repositories ~}}
-    /// <summary>角括弧で囲んだテーブル名</summary>
+    /// <summary>Gets the table name wrapped in quoting brackets.</summary>
     public required string TableName { get; init; }
 {{~ end ~}}
 
 {{~ if repositories && (exclude_unbounded_binary || runtime_package_export) ~}}
-    /// <summary>クォートなしの生テーブル名（無制限バイナリ列の Stream アクセサで SqliteBlob 等が要求する）</summary>
+    /// <summary>Gets the raw, unquoted table name (required by SqliteBlob and friends in the unbounded binary column Stream accessors).</summary>
     public required string RawTableName { get; init; }
 {{~ end ~}}
 
-    /// <summary>主キーに対応するプロパティ</summary>
+    /// <summary>Gets the property that corresponds to the primary key.</summary>
     public required PropertyInfo KeyProperty { get; init; }
 
 {{~ if repositories ~}}
-    /// <summary>主キーのカラム名</summary>
+    /// <summary>Gets the column name of the primary key.</summary>
     public required string KeyColumnName { get; init; }
 {{~ end ~}}
 
-    /// <summary>マッピング対象の全カラムプロパティ（ナビゲーション・基底プロパティ除く）。INSERT / BulkInsert は常にこれを使う</summary>
+    /// <summary>Gets all column properties subject to mapping (excluding navigations and base-class properties). INSERT / BulkInsert always use this.</summary>
     public required IReadOnlyList<PropertyInfo> AllProperties { get; init; }
 
-    /// <summary>SELECT / UPDATE 対象の列プロパティ（全列から無制限バイナリ列を除いたもの。除外列なしは全列と一致）。行マッピングで使う</summary>
+    /// <summary>Gets the column properties targeted by SELECT / UPDATE (all columns minus unbounded binary columns; identical to all columns when there are no excluded columns). Used by row mapping.</summary>
     public required IReadOnlyList<PropertyInfo> SelectProperties { get; init; }
 
-    /// <summary>SELECT / UPDATE から除外する無制限バイナリ列（<see cref="UnboundedBinaryColumnAttribute"/> 付き）。除外列なしは空</summary>
+    /// <summary>Gets the unbounded binary columns excluded from SELECT / UPDATE (marked with <see cref="UnboundedBinaryColumnAttribute"/>). Empty when there are no excluded columns.</summary>
     public required IReadOnlyList<PropertyInfo> ExcludedProperties { get; init; }
 
 {{~ if repositories || ef_core ~}}
-    /// <summary>SELECT 対象列の (プロパティ, カラム名) をビルド時に確定した配列。行マッピングは列名解決を都度リフレクションせずこれを列挙する</summary>
+    /// <summary>Gets the (property, column name) pairs of the SELECT columns, resolved at build time. Row mapping enumerates this instead of reflecting for column names per row.</summary>
     public required IReadOnlyList<(PropertyInfo Property, string ColumnName)> SelectColumns { get; init; }
 
-    /// <summary>列プロパティ → カラム名の確定済み対応（射影・除外列など任意プロパティ列の列名解決に使う）</summary>
+    /// <summary>Gets the pre-resolved column property to column name map (used to resolve column names for arbitrary property sets such as projections and excluded columns).</summary>
     public required IReadOnlyDictionary<PropertyInfo, string> ColumnNameByProperty { get; init; }
 {{~ end ~}}
 
 {{~ if repositories ~}}
-    /// <summary>INSERT / BulkInsert 対象の列プロパティ（全列から store-generated 列を除いたもの。store-generated 列なしは全列と一致）</summary>
+    /// <summary>Gets the column properties targeted by INSERT / BulkInsert (all columns minus store-generated columns; identical to all columns when there are no store-generated columns).</summary>
     public required IReadOnlyList<PropertyInfo> InsertProperties { get; init; }
 
-    /// <summary>主キーを除くカラムプロパティ</summary>
+    /// <summary>Gets the column properties excluding the primary key.</summary>
     public required IReadOnlyList<PropertyInfo> NonKeyProperties { get; init; }
 
-    /// <summary>カラムの (プロパティ名, カラム名) 対応。JSON 射影の別名付け（[col] AS Prop）に使う</summary>
+    /// <summary>Gets the (property name, column name) pairs of the columns. Used for aliasing in JSON projections ([col] AS Prop).</summary>
     public required IReadOnlyList<(string PropertyName, string ColumnName)> Columns { get; init; }
 {{~ end ~}}
 
-    /// <summary>カラム名 → 列プロパティの対応（クエリ WHERE 句パラメータの型明示化で列型を引くのに使う）</summary>
+    /// <summary>Gets the column name to column property map (used to look up column types when explicitly typing query WHERE-clause parameters).</summary>
     public required IReadOnlyDictionary<string, PropertyInfo> PropertyByColumn { get; init; }
 
-    /// <summary>SELECT 用の角括弧付きカラム一覧（例: [id], [name]）</summary>
+    /// <summary>Gets the quoted column list for SELECT (for example: [id], [name]).</summary>
     public required string ColumnList { get; init; }
 
 {{~ if repositories ~}}
-    /// <summary>全件取得 SELECT 文</summary>
+    /// <summary>Gets the SELECT statement that fetches all rows.</summary>
     public required string SelectAllSql { get; init; }
 
-    /// <summary>主キー指定取得 SELECT 文</summary>
+    /// <summary>Gets the SELECT statement that fetches a row by primary key.</summary>
     public required string SelectByIdSql { get; init; }
 
-    /// <summary>INSERT 文</summary>
+    /// <summary>Gets the INSERT statement.</summary>
     public required string InsertSql { get; init; }
 
-    /// <summary>UPDATE 文</summary>
+    /// <summary>Gets the UPDATE statement.</summary>
     public required string UpdateSql { get; init; }
 
-    /// <summary>DELETE 文</summary>
+    /// <summary>Gets the DELETE statement.</summary>
     public required string DeleteSql { get; init; }
 {{~ end ~}}
 
-    /// <summary>カスケード対象の子ナビゲーション</summary>
+    /// <summary>Gets the cascade-target child navigations.</summary>
     public required IReadOnlyList<CascadeNavigation> CascadeNavigations { get; init; }
 
-    /// <summary>指定型のメタデータを取得する（型ごとに 1 度だけ構築しキャッシュ）</summary>
+    /// <summary>Gets the metadata for the specified type (built once per type and cached).</summary>
     public static EntitySaveMetadata For(Type entityType) => _cache.GetOrAdd(entityType, Build);
 
-    /// <summary>ナビゲーションプロパティ → <see cref="NavigationReferenceAttribute"/> の解決をプロパティ単位でキャッシュする</summary>
+    /// <summary>Caches the navigation property to <see cref="NavigationReferenceAttribute"/> resolution per property.</summary>
     private static readonly ConcurrentDictionary<
         PropertyInfo,
         NavigationReferenceAttribute?
     > _navigationAttributeCache = new();
 
-    /// <summary>ナビゲーションプロパティの <see cref="NavigationReferenceAttribute"/> を取得する（Include 解決で毎ノード反射しないようキャッシュ）</summary>
+    /// <summary>Gets the <see cref="NavigationReferenceAttribute"/> of a navigation property (cached so Include resolution does not reflect per node).</summary>
     public static NavigationReferenceAttribute? NavigationAttribute(PropertyInfo property) =>
         _navigationAttributeCache.GetOrAdd(
             property,
@@ -556,7 +564,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         var tableAttribute =
             entityType.GetCustomAttribute<TableAttribute>()
             ?? throw new InvalidOperationException(
-                $"{entityType.Name} に [Table] 属性が必要です。"
+                $"{entityType.Name} requires a [Table] attribute."
             );
         var allProperties = entityType
             .GetProperties(BindingFlags.Public | BindingFlags.Instance)
@@ -575,15 +583,16 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         var keyProperty = keyProperties.Count switch
         {
             0 => throw new InvalidOperationException(
-                $"{entityType.Name} に [Key] 属性付きプロパティが必要です。"
+                $"{entityType.Name} requires a property with a [Key] attribute."
             ),
             1 => keyProperties[0],
             _ => throw new InvalidOperationException(
-                $"{entityType.Name} の [Key] 属性付きプロパティは 1 つのみ許可されます（複合キーは Repository 非対応。対象: {string.Join(", ", keyProperties.Select(property => property.Name))}）。"
+                $"{entityType.Name} may have only one property with a [Key] attribute (composite keys are not supported by the repository; found: {string.Join(", ", keyProperties.Select(property => property.Name))})."
             ),
         };
-        // 無制限バイナリ列（UnboundedBinaryColumnAttribute）を SELECT / UPDATE から外す。全列（AllProperties）は
-        // INSERT / BulkInsert のため保持し、SELECT 用列集合（selectProperties）だけを縮小する。除外列なしは全列と一致
+        // Exclude unbounded binary columns (UnboundedBinaryColumnAttribute) from SELECT / UPDATE. The full column set
+        // (AllProperties) is kept for INSERT / BulkInsert; only the SELECT column set (selectProperties) is reduced.
+        // With no excluded columns it matches the full set
         var excludedColumns = columns
             .Where(property =>
                 property.GetCustomAttribute<UnboundedBinaryColumnAttribute>() is not null
@@ -594,14 +603,15 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
                 ? columns
                 : columns.Where(property => !excludedColumns.Contains(property)).ToList();
 {{~ if repositories ~}}
-        // DB が値を生成する列（rowversion / timestamp 等・StoreGeneratedColumnAttribute）は INSERT / UPDATE の対象から外す。
-        // これらは DB が採番するため明示的な書き込みは実行時エラーになる（SQL Server の timestamp 列など）。SELECT では取得する
+        // Columns whose values are generated by the database (rowversion / timestamp etc., StoreGeneratedColumnAttribute)
+        // are excluded from INSERT / UPDATE. The database assigns them, so an explicit write fails at runtime
+        // (e.g. SQL Server timestamp columns). They are still fetched by SELECT
         var storeGeneratedColumns = columns
             .Where(property =>
                 property.GetCustomAttribute<StoreGeneratedColumnAttribute>() is not null
             )
             .ToList();
-        // INSERT / BulkInsert 対象は全列から store-generated 列を除いたもの（store-generated 列なしは全列と一致）
+        // INSERT / BulkInsert targets are all columns minus store-generated columns (identical to all columns when there are none)
         var insertProperties =
             storeGeneratedColumns.Count == 0
                 ? columns
@@ -655,10 +665,10 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
             SelectProperties = selectProperties,
             ExcludedProperties = excludedColumns,
 {{~ if repositories || ef_core ~}}
-            // 行マッピングの列名解決をビルド時に確定させ、行ごとの [Column] リフレクションを排除する
+            // Resolve column names for row mapping at build time to eliminate per-row [Column] reflection
             SelectColumns = selectProperties.Select(property => (property, GetColumnName(property))).ToList(),
             ColumnNameByProperty = columns.ToDictionary(property => property, GetColumnName),
-            // SelectColumns（固定 SELECT 集合）用の式木マテリアライザを型ごとに 1 度だけコンパイルする
+            // Compile the expression-tree materializer for SelectColumns (the fixed SELECT set) once per type
             SelectMaterializer = BuildSelectMaterializer(entityType, selectProperties),
 {{~ end ~}}
 {{~ if repositories ~}}
@@ -686,49 +696,50 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
     }
 
 {{~ if repositories || ef_core ~}}
-    // ===== 行マテリアライザ（式木コンパイル・ホットパスのリフレクション除去） =====
+    // ===== Row materializer (expression-tree compiled; removes reflection from the hot path) =====
 {{~ if !generate_value_objects ~}}
-    /// <summary>ボクシングを避ける型特化リーダーアクセサ（<c>GetInt32</c> 等）。fast 対象の CLR 型のみ登録する</summary>
+    /// <summary>Type-specialized reader accessors that avoid boxing (<c>GetInt32</c> etc.). Only the fast-path CLR types are registered.</summary>
     private static readonly IReadOnlyDictionary<Type, MethodInfo> _typedReaders = BuildTypedReaders();
 
-    /// <summary><see cref="DbDataReader.IsDBNull(int)"/> の解決済み <see cref="MethodInfo"/></summary>
+    /// <summary>Resolved <see cref="MethodInfo"/> of <see cref="DbDataReader.IsDBNull(int)"/>.</summary>
     private static readonly MethodInfo _isDbNullMethod = typeof(DbDataReader).GetMethod(
         nameof(DbDataReader.IsDBNull),
         new[] { typeof(int) }
     )!;
 {{~ end ~}}
 
-    /// <summary><see cref="DbDataReader.GetValue(int)"/> の解決済み <see cref="MethodInfo"/>（型特化できない列のフォールバックで使う）</summary>
+    /// <summary>Resolved <see cref="MethodInfo"/> of <see cref="DbDataReader.GetValue(int)"/> (used as the fallback for columns that cannot be type-specialized).</summary>
     private static readonly MethodInfo _getValueMethod = typeof(DbDataReader).GetMethod(
         nameof(DbDataReader.GetValue),
         new[] { typeof(int) }
     )!;
 
-    /// <summary><see cref="SetColumnValue"/> の解決済み <see cref="MethodInfo"/>（型特化できない列のフォールバックで呼ぶ）</summary>
+    /// <summary>Resolved <see cref="MethodInfo"/> of <see cref="SetColumnValue"/> (called as the fallback for columns that cannot be type-specialized).</summary>
     private static readonly MethodInfo _setColumnValueMethod = typeof(EntitySaveMetadata).GetMethod(
         nameof(SetColumnValue),
         BindingFlags.NonPublic | BindingFlags.Static
     )!;
 
-    /// <summary><see cref="EntityBase.RowState"/> の解決済み <see cref="PropertyInfo"/></summary>
+    /// <summary>Resolved <see cref="PropertyInfo"/> of <see cref="EntityBase.RowState"/>.</summary>
     private static readonly PropertyInfo _rowStateProperty = typeof(EntityBase).GetProperty(
         nameof(EntityBase.RowState)
     )!;
 
-    /// <summary>SelectColumns（固定 SELECT 集合）1 行分を式木コンパイル済みでマテリアライズするデリゲート（型ごとに 1 度構築しキャッシュ）</summary>
-    /// <remarks>引数は <c>(reader, ordinals)</c>。<c>ordinals</c> は SelectColumns と同順の列 ordinal で、行ループの前に 1 度だけ解決する。</remarks>
+    /// <summary>Gets the expression-tree-compiled delegate that materializes one row of SelectColumns (the fixed SELECT set) (built once per type and cached).</summary>
+    /// <remarks>The arguments are <c>(reader, ordinals)</c>. <c>ordinals</c> holds the column ordinals in SelectColumns order, resolved once before the row loop.</remarks>
     public required Func<DbDataReader, int[], EntityBase> SelectMaterializer { get; init; }
 {{~ if !generate_value_objects ~}}
 
-    /// <summary>型特化リーダーアクセサ表を構築する（各値は <c>int</c> を取り対応 CLR 型を返す <see cref="DbDataReader"/> のメソッド）</summary>
+    /// <summary>Builds the type-specialized reader accessor table (each value is a <see cref="DbDataReader"/> method taking an <c>int</c> and returning the corresponding CLR type).</summary>
     private static IReadOnlyDictionary<Type, MethodInfo> BuildTypedReaders()
     {
         static MethodInfo Getter(string name) =>
             typeof(DbDataReader).GetMethod(name, new[] { typeof(int) })!;
 
-        // 生成 SELECT が返す宣言列型に対応する型特化アクセサ。SQLite は各 GetXxx が格納型寄せ（long→int・TEXT→DateTime 等）を
-        // 行い CoerceScalar と同値、SQL Server は列の CLR 型を素直に返し従来の素通しと同値。ここに無い型（byte[]・enum・
-        // DateTimeOffset・TimeSpan 等）はフォールバックで従来どおり変換する。
+        // Type-specialized accessors for the declared column types the generated SELECT returns. On SQLite each GetXxx
+        // coerces the storage type (long to int, TEXT to DateTime, etc.), equivalent to CoerceScalar; on SQL Server each
+        // returns the column's CLR type directly, equivalent to the previous pass-through. Types not listed here
+        // (byte[], enums, DateTimeOffset, TimeSpan, etc.) are converted via the fallback as before.
         return new Dictionary<Type, MethodInfo>
         {
             [typeof(bool)] = Getter(nameof(DbDataReader.GetBoolean)),
@@ -747,13 +758,14 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
 {{~ end ~}}
 
     /// <summary>
-    /// SelectColumns（固定 SELECT 集合）の 1 行を、事前解決した ordinal 配列を用いてエンティティへマテリアライズする
-    /// 式木コンパイル済みデリゲートを構築する（型ごとに 1 度）。
+    /// Builds the expression-tree-compiled delegate that materializes one row of SelectColumns (the fixed SELECT set)
+    /// into an entity using a pre-resolved ordinal array (once per type).
     /// </summary>
     /// <remarks>
-    /// 型特化アクセサを持つ列はボクシングなしで直接読み（<c>DBNull</c> は既定値＝従来の <c>SetValue(null)</c> と同値）、
-    /// それ以外の列は従来の <see cref="SetColumnValue"/>（方言別変換／値オブジェクト包み直し）へフォールバックする。
-    /// 生成される最終状態（<c>RowState = Unchanged</c>）は従来の行マッピングと一致する。
+    /// Columns with a type-specialized accessor are read directly without boxing (<c>DBNull</c> becomes the default value,
+    /// equivalent to the previous <c>SetValue(null)</c>); all other columns fall back to the previous
+    /// <see cref="SetColumnValue"/> (dialect-specific conversion / value object re-wrapping).
+    /// The resulting final state (<c>RowState = Unchanged</c>) matches the previous row mapping.
     /// </remarks>
     private static Func<DbDataReader, int[], EntityBase> BuildSelectMaterializer(
         Type entityType,
@@ -775,7 +787,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
             body.Add(BuildColumnAssign(entityVar, readerParam, ordinal, properties[i]));
         }
 
-        // DB から読み込んだ行は変更なし扱いにする（従来の行マッピングと同じ事後状態）
+        // Rows read from the database are treated as unchanged (same post-state as the previous row mapping)
         body.Add(
             Expression.Assign(
                 Expression.Property(entityVar, _rowStateProperty),
@@ -790,7 +802,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
             .Compile();
     }
 
-    /// <summary>1 列分の代入式を作る。型特化できる列はボクシングなしで直接読み、それ以外は <see cref="SetColumnValue"/> へフォールバックする</summary>
+    /// <summary>Builds the assignment expression for one column. Type-specializable columns are read directly without boxing; anything else falls back to <see cref="SetColumnValue"/>.</summary>
     private static Expression BuildColumnAssign(
         Expression entityExpr,
         ParameterExpression readerParam,
@@ -802,7 +814,8 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         var propertyType = property.PropertyType;
         var underlying = Nullable.GetUnderlyingType(propertyType) ?? propertyType;
 
-        // 型特化アクセサがある列はボクシングなしで直接読む（DBNull は既定値へ＝従来の SetValue(null) と同値）
+        // Columns with a type-specialized accessor are read directly without boxing
+        // (DBNull becomes the default value, equivalent to the previous SetValue(null))
         if (_typedReaders.TryGetValue(underlying, out var getter))
         {
             Expression read = Expression.Call(readerParam, getter, ordinal);
@@ -821,7 +834,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         }
 {{~ end ~}}
 
-        // フォールバック: 従来の SetColumnValue（DBNull→null／方言別変換／値オブジェクト包み直し）を ordinal 経由で呼ぶ
+        // Fallback: call the previous SetColumnValue (DBNull to null / dialect-specific conversion / value object re-wrapping) via the ordinal
         return Expression.Call(
             _setColumnValueMethod,
             Expression.Convert(entityExpr, typeof(EntityBase)),
@@ -830,7 +843,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         );
     }
 
-    /// <summary>SelectColumns の各列名を、このリーダー上の ordinal へ 1 度だけ解決する（行ループの前に呼ぶ）</summary>
+    /// <summary>Resolves each SelectColumns column name to its ordinal on this reader once (call before the row loop).</summary>
     public int[] SelectOrdinals(DbDataReader reader)
     {
         var ordinals = new int[SelectColumns.Count];
@@ -843,39 +856,42 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         return ordinals;
     }
 
-    /// <summary>データリーダーの 1 行をエンティティへマッピングする（ordinal 事前解決版・ホットループ用）</summary>
+    /// <summary>Maps one data reader row to an entity (pre-resolved ordinal variant, for hot loops).</summary>
     public TEntity MapEntity<TEntity>(
         {{ if ef_core }}DbDataReader{{ else }}{{ sql_data_reader_type }}{{ end }} reader,
         int[] ordinals
     )
         where TEntity : EntityBase => (TEntity)SelectMaterializer(reader, ordinals);
 
-    /// <summary>データリーダーの 1 行をエンティティへマッピングする（SelectColumns の ordinal を都度解決する単一行版）</summary>
+    /// <summary>Maps one data reader row to an entity (single-row variant that resolves the SelectColumns ordinals on each call).</summary>
     public TEntity MapEntity<TEntity>({{ if ef_core }}DbDataReader{{ else }}{{ sql_data_reader_type }}{{ end }} reader)
         where TEntity : EntityBase, new() => (TEntity)SelectMaterializer(reader, SelectOrdinals(reader));
 
     /// <summary>
-    /// 生 SQL 用の厳密な行マッピング（列集合・列型が可変のため型特化せず、従来の寛容な <see cref="SetColumnValue"/> を使う）。
+    /// Strict row mapping for raw SQL (the column set and column types are variable, so no type specialization;
+    /// uses the previous lenient <see cref="SetColumnValue"/>).
     /// </summary>
     private TEntity MapEntityStrict<TEntity>({{ if ef_core }}DbDataReader{{ else }}{{ sql_data_reader_type }}{{ end }} reader)
         where TEntity : EntityBase, new()
     {
         var entity = new TEntity();
 
-        // 無制限バイナリ列は既定で SELECT 除外のため SelectColumns（＝SelectProperties の確定済み対応）のみをマップする
+        // Unbounded binary columns are excluded from SELECT by default, so only SelectColumns
+        // (the pre-resolved pairs of SelectProperties) are mapped
         foreach (var (property, columnName) in SelectColumns)
         {
             SetColumnValue(entity, property, reader[columnName]);
         }
 
-        // DB から読み込んだ行は変更なし扱いにする（その後の編集で Updated に遷移）
+        // Rows read from the database are treated as unchanged (later edits transition them to Updated)
         entity.RowState = RowState.Unchanged;
         return entity;
     }
 
     /// <summary>
-    /// 読み取った列値を対象プロパティへ設定する（行マッピングの共通処理）。<c>DBNull</c> は <c>null</c> を代入し、
-    /// それ以外は値オブジェクトの包み直し／SQLite の格納型寄せ／SQL Server の素通しを方言に応じて行う。
+    /// Sets a column value read from the reader onto the target property (the shared row-mapping step). <c>DBNull</c>
+    /// assigns <c>null</c>; otherwise the value is re-wrapped for value objects, coerced from the SQLite storage type,
+    /// or passed through for SQL Server, depending on the dialect.
     /// </summary>
     private static void SetColumnValue(EntityBase entity, PropertyInfo property, object value)
     {
@@ -886,24 +902,25 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         else
         {
 {{~ if generate_value_objects ~}}
-            // 値オブジェクトは内包型へ変換して包み直す（Wrap 内で Convert.ChangeType 済み）
+            // Value objects are converted to the wrapped type and re-wrapped (Wrap already applies Convert.ChangeType)
             property.SetValue(entity, SqlValueObjectActivator.Wrap(value, property.PropertyType));
 {{~ else if repositories && repository_dialect != "sqlserver" ~}}
-            // 素の列は SQLite の格納型（int→long・decimal/Guid/DateTime→TEXT 等）をプロパティ型へ寄せる
+            // Plain columns are coerced from the SQLite storage type (int stored as long, decimal/Guid/DateTime as TEXT, etc.) to the property type
             property.SetValue(entity, CoerceScalar(value, property.PropertyType));
 {{~ else ~}}
-            // SQL Server の ADO は列に対応する厳密な CLR 型を返すため素通しで代入する
+            // SQL Server ADO returns the exact CLR type for the column, so assign it as-is
             property.SetValue(entity, value);
 {{~ end ~}}
         }
     }
 
     /// <summary>
-    /// 生 SQL の結果行を {TEntity} へマップする。<see cref="MapEntityStrict"/> と同じ厳密マッピング（SELECT 対象列は必須）だが、
-    /// 列不足（部分 SELECT）で列が引けなかった場合は、必要な列を含む <see cref="InvalidOperationException"/> でラップして
-    /// 分かりやすくする。未知の列参照で投げられる例外はデータリーダーの実装で異なる
-    /// （<see cref="IndexOutOfRangeException"/> と <see cref="ArgumentOutOfRangeException"/>）ため両方を捕捉する。
-    /// 無制限バイナリ列は既定では取得しないが、生 SQL の SELECT に明示的に含まれていれば追加でマップする（ユーザーが意図して選んだ場合に取得できる）。
+    /// Maps a raw SQL result row to {TEntity}. Same strict mapping as <see cref="MapEntityStrict"/> (the SELECT columns are
+    /// required), but when a column cannot be found (a partial SELECT), the error is wrapped in an
+    /// <see cref="InvalidOperationException"/> that lists the required columns for clarity. The exception thrown for an
+    /// unknown column reference differs by data reader implementation (<see cref="IndexOutOfRangeException"/> vs
+    /// <see cref="ArgumentOutOfRangeException"/>), so both are caught.
+    /// Unbounded binary columns are not fetched by default, but if the raw SQL SELECT explicitly includes them they are mapped additionally (so a user who deliberately selected them gets the values).
     /// </summary>
     public TEntity MapEntityFromRawSql<TEntity>({{ if ef_core }}DbDataReader{{ else }}{{ sql_data_reader_type }}{{ end }} reader)
         where TEntity : EntityBase, new()
@@ -917,13 +934,13 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentOutOfRangeException)
         {
             throw new InvalidOperationException(
-                $"生 SQL の SELECT には {typeof(TEntity).Name} の列（{ColumnList}）が必要です（SELECT * または全列指定）。"
-                    + $"結果セットに不足している列があります: {ex.Message}",
+                $"The raw SQL SELECT must include the {typeof(TEntity).Name} columns ({ColumnList}); use SELECT * or list all columns. "
+                    + $"The result set is missing a column: {ex.Message}",
                 ex
             );
         }
 
-        // 除外列（無制限バイナリ）が生 SQL の結果に含まれていれば opportunistic に取り込む
+        // If excluded columns (unbounded binary) are present in the raw SQL result, take them opportunistically
         if (ExcludedProperties.Count > 0)
         {
             var present = RawReaderColumnNames(reader);
@@ -940,14 +957,15 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
                 SetColumnValue(entity, property, reader[columnName]);
             }
 
-            // opportunistic な代入で状態が動かないよう変更なしを再確定する（列プロパティは素の auto-property だが念のため）
+            // Re-finalize as unchanged so the opportunistic assignments do not shift state
+            // (the column properties are plain auto-properties, but just in case)
             entity.RowState = RowState.Unchanged;
         }
 
         return entity;
     }
 
-    /// <summary>データリーダーの列名集合を大文字小文字無視で 1 度だけ列挙する（生 SQL の除外列有無判定に使う）</summary>
+    /// <summary>Enumerates the data reader's column name set once, case-insensitively (used to detect excluded columns in raw SQL results).</summary>
     private static HashSet<string> RawReaderColumnNames({{ if ef_core }}DbDataReader{{ else }}{{ sql_data_reader_type }}{{ end }} reader)
     {
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -962,15 +980,16 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
 {{~ end ~}}
 
     /// <summary>
-    /// 射影セレクタが参照する列プロパティ名集合を、SELECT すべき列プロパティ（<see cref="PropertyInfo"/>）へ解決する。
-    /// 参照がすべて列プロパティ（無制限バイナリ列を含む）なら順序どおりの一覧を返し、1 つでもナビゲーション等の
-    /// 非列名が混じる、あるいは参照が 0 件なら <c>null</c>（＝サーバー側列刈り込み不可・従来経路へフォールバック）を返す。
+    /// Resolves the set of column property names referenced by a projection selector into the column properties
+    /// (<see cref="PropertyInfo"/>) to SELECT. When every reference is a column property (including unbounded binary
+    /// columns), returns the list in order; when even one non-column name (a navigation etc.) is present, or when there
+    /// are zero references, returns <c>null</c> (= server-side column pruning is not possible; fall back to the previous path).
     /// </summary>
     public IReadOnlyList<PropertyInfo>? ResolveProjectionColumns(
         IReadOnlyCollection<string> propertyNames
     )
     {
-        // 参照列が 0 件だと SELECT する列が無くフォールバックが必要（例: 定数のみの射影）
+        // With zero referenced columns there is nothing to SELECT, so a fallback is required (e.g. a constants-only projection)
         if (propertyNames.Count == 0)
         {
             return null;
@@ -980,12 +999,13 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
 
         foreach (var name in propertyNames)
         {
-            // 全列（AllProperties）から名前一致で引く（除外＝無制限バイナリ列も射影が参照していれば取得対象にする）
+            // Look up by name in the full column set (AllProperties); excluded (unbounded binary) columns
+            // are also fetched when the projection references them
             var property = AllProperties.FirstOrDefault(candidate => candidate.Name == name);
 
             if (property is null)
             {
-                // 列でない（ナビゲーション等）が混じった＝安全に刈り込めない
+                // A non-column (navigation etc.) is present = cannot prune safely
                 return null;
             }
 
@@ -996,31 +1016,31 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
     }
 
 {{~ if repositories ~}}
-    /// <summary>指定した列プロパティ群を、角括弧付きカラム名の "," 連結（例: [id], [name]）にした SELECT 列リストを返す（射影刈り込み用）</summary>
+    /// <summary>Returns a SELECT column list joining the specified column properties as quoted column names with "," (for example: [id], [name]) (for projection pruning).</summary>
     public string BuildColumnList(IReadOnlyList<PropertyInfo> properties) =>
         string.Join(
             ", ",
             properties.Select(property => $"{{ quote_open }}{GetColumnName(property)}{{ quote_close }}")
         );
 
-    /// <summary>列プロパティごとの「reader+ordinal → エンティティへ設定」子（式木コンパイル済み・プロパティ単位でキャッシュ）</summary>
+    /// <summary>Per-column-property "reader+ordinal, set onto entity" binders (expression-tree compiled, cached per property).</summary>
     private static readonly ConcurrentDictionary<
         PropertyInfo,
         Action<EntityBase, DbDataReader, int>
     > _columnBinderCache = new();
 
-    /// <summary>1 列分の型特化バインダを取得する（射影・全列取得の可変列集合を行ごとにリフレクションせず束縛するため）</summary>
+    /// <summary>Gets the type-specialized binder for one column (so the variable column sets of projections and full-column fetches bind without per-row reflection).</summary>
     private static Action<EntityBase, DbDataReader, int> ColumnBinder(PropertyInfo property) =>
         _columnBinderCache.GetOrAdd(property, BuildColumnBinder);
 
-    /// <summary>1 列分の式木（<see cref="BuildColumnAssign"/>）を <c>Action&lt;EntityBase, DbDataReader, int&gt;</c> へコンパイルする</summary>
+    /// <summary>Compiles the single-column expression tree (<see cref="BuildColumnAssign"/>) into an <c>Action&lt;EntityBase, DbDataReader, int&gt;</c>.</summary>
     private static Action<EntityBase, DbDataReader, int> BuildColumnBinder(PropertyInfo property)
     {
         var entityParam = Expression.Parameter(typeof(EntityBase), "entity");
         var readerParam = Expression.Parameter(typeof(DbDataReader), "reader");
         var ordinalParam = Expression.Parameter(typeof(int), "ordinal");
 
-        // プロパティは派生エンティティ型で宣言されるため、EntityBase をその宣言型へ落としてからアクセスする
+        // Properties are declared on the derived entity type, so downcast EntityBase to the declaring type before accessing
         var assign = BuildColumnAssign(
             Expression.Convert(entityParam, property.DeclaringType!),
             readerParam,
@@ -1038,7 +1058,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
             .Compile();
     }
 
-    /// <summary>指定した列プロパティ群の列名を、このリーダー上の ordinal へ 1 度だけ解決する（射影・全列取得の行ループの前に呼ぶ）</summary>
+    /// <summary>Resolves the column names of the specified column properties to their ordinals on this reader once (call before the row loop of projections and full-column fetches).</summary>
     public int[] ColumnOrdinals(DbDataReader reader, IReadOnlyList<PropertyInfo> properties)
     {
         var ordinals = new int[properties.Count];
@@ -1052,11 +1072,13 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
     }
 
     /// <summary>
-    /// データリーダーの 1 行を、指定した列プロパティのみマッピングした {TEntity} を返す（射影のサーバー側列刈り込み・WithUnboundedBinary の全列取得で共用）。
-    /// SELECT に含めた列だけを束縛し、それ以外の列は既定値のまま。射影用途（<paramref name="markUnchanged"/> = false・既定）は
-    /// セレクタ適用後に捨てるため RowState を設定しないが、WithUnboundedBinary の全列取得（<paramref name="markUnchanged"/> = true）は
-    /// 通常取得と同等の正当なエンティティを返すため RowState=Unchanged を確定する。<paramref name="ordinals"/> は
-    /// <see cref="ColumnOrdinals"/> で行ループ前に 1 度だけ解決した、<paramref name="properties"/> と同順の列 ordinal。
+    /// Returns a {TEntity} with only the specified column properties mapped from one data reader row (shared by
+    /// server-side column pruning for projections and the full-column fetch of WithUnboundedBinary).
+    /// Only the columns included in the SELECT are bound; all other columns keep their default values. Projection use
+    /// (<paramref name="markUnchanged"/> = false, the default) does not set RowState because the entity is discarded after
+    /// the selector is applied, whereas the full-column fetch of WithUnboundedBinary (<paramref name="markUnchanged"/> = true)
+    /// finalizes RowState=Unchanged because it returns a legitimate entity equivalent to a normal fetch. <paramref name="ordinals"/>
+    /// holds the column ordinals in <paramref name="properties"/> order, resolved once before the row loop via <see cref="ColumnOrdinals"/>.
     /// </summary>
     public TEntity MapEntityColumns<TEntity>(
         {{ sql_data_reader_type }} reader,
@@ -1066,7 +1088,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
     )
         where TEntity : EntityBase
     {
-        // クエリ実行器の TEntity は new() 制約を持たないため Activator で生成する（エンティティは必ず引数なしコンストラクタを持つ）
+        // The query executor's TEntity has no new() constraint, so create via Activator (entities always have a parameterless constructor)
         var entity = (TEntity)Activator.CreateInstance(typeof(TEntity))!;
 
         for (var i = 0; i < properties.Count; i++)
@@ -1076,7 +1098,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
 
         if (markUnchanged)
         {
-            // 全列を束縛した「正当なエンティティ」として返す場合は、DB 読み込み行として変更なしを確定する
+            // When returning a "legitimate entity" with all columns bound, finalize it as unchanged, like any row read from the database
             entity.RowState = RowState.Unchanged;
         }
 
@@ -1085,17 +1107,18 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
 {{~ end ~}}
 
 {{~ if repositories && repository_dialect != "sqlserver" ~}}
-    /// <summary>データリーダーの 1 行を（型引数なしで）エンティティへマッピングする（ordinal 事前解決版）。マルチクエリ Include の実体化で使う</summary>
+    /// <summary>Maps one data reader row to an entity (without a type argument) (pre-resolved ordinal variant). Used to materialize entities for multi-query Include.</summary>
     /// <remarks>
-    /// <c>MapEntity</c> と同じ列→プロパティ束縛だが、Include ローダは実行時 <see cref="Type"/> を扱うため
-    /// ジェネリック制約を課さず生成する。<paramref name="ordinals"/> は <see cref="SelectOrdinals"/> で行ループ前に 1 度だけ解決する。
+    /// Same column-to-property binding as <c>MapEntity</c>, but created without a generic constraint because the Include
+    /// loader works with runtime <see cref="Type"/> values. <paramref name="ordinals"/> is resolved once before the row loop via <see cref="SelectOrdinals"/>.
     /// </remarks>
 {{~ if generate_value_objects ~}}
     public EntityBase MapEntityObject(DbDataReader reader, int[] ordinals)
     {
         var entity = (EntityBase)Activator.CreateInstance(EntityType)!;
 
-        // 無制限バイナリ列は既定で SELECT 除外のため SelectColumns（＝SelectProperties の確定済み対応）のみをマップする
+        // Unbounded binary columns are excluded from SELECT by default, so only SelectColumns
+        // (the pre-resolved pairs of SelectProperties) are mapped
         for (var i = 0; i < SelectColumns.Count; i++)
         {
             var property = SelectColumns[i].Property;
@@ -1107,8 +1130,8 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
             }
             else
             {
-                // 値オブジェクトは内包型へ変換して包み直す（Wrap 内で Convert.ChangeType 済み）。
-                // 素の列は SQLite の格納型（int→long・decimal/Guid/DateTime→TEXT 等）をプロパティ型へ寄せる
+                // Value objects are converted to the wrapped type and re-wrapped (Wrap already applies Convert.ChangeType).
+                // Plain columns are coerced from the SQLite storage type (int stored as long, decimal/Guid/DateTime as TEXT, etc.) to the property type
                 var propertyType = property.PropertyType;
                 property.SetValue(
                     entity,
@@ -1119,26 +1142,27 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
             }
         }
 
-        // DB から読み込んだ行は変更なし扱いにする（その後の編集で Updated に遷移）
+        // Rows read from the database are treated as unchanged (later edits transition them to Updated)
         entity.RowState = RowState.Unchanged;
         return entity;
     }
 {{~ else ~}}
-    // 値オブジェクトなしの素の列は SetColumnValue（＝CoerceScalar）と同値の式木マテリアライザで束縛する（型特化・リフレクションなし）
+    // Without value objects, plain columns are bound by the expression-tree materializer, equivalent to SetColumnValue (= CoerceScalar) (type-specialized, no reflection)
     public EntityBase MapEntityObject(DbDataReader reader, int[] ordinals) =>
         SelectMaterializer(reader, ordinals);
 {{~ end ~}}
 
-    /// <summary>データリーダーの 1 行を（型引数なしで）エンティティへマッピングする（SelectColumns の ordinal を都度解決する単一行版）</summary>
+    /// <summary>Maps one data reader row to an entity (without a type argument) (single-row variant that resolves the SelectColumns ordinals on each call).</summary>
     public EntityBase MapEntityObject(DbDataReader reader) =>
         MapEntityObject(reader, SelectOrdinals(reader));
 
     /// <summary>
-    /// SQLite が返す素の値（long / double / string / byte[]）を対象プロパティの CLR 型へ寄せる。
+    /// Coerces the raw value SQLite returns (long / double / string / byte[]) to the target property's CLR type.
     /// </summary>
     /// <remarks>
-    /// SQLite の格納規約（EF Core Sqlite と同一: decimal/Guid/DateTime/DateTimeOffset/TimeSpan→TEXT・bool→INTEGER）に対応する。
-    /// 既に代入可能な型はそのまま返し、Nullable は基底型で判定する。変換できない場合は分かるメッセージの例外を投げる。
+    /// Handles the SQLite storage conventions (same as EF Core Sqlite: decimal/Guid/DateTime/DateTimeOffset/TimeSpan
+    /// stored as TEXT, bool as INTEGER). Values already assignable are returned as-is, and Nullable types are judged by
+    /// their underlying type. When conversion is impossible, throws an exception with a clear message.
     /// </remarks>
     private static object CoerceScalar(object value, Type targetType)
     {
@@ -1149,13 +1173,13 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
             return value;
         }
 
-        // enum は基底整数へ寄せてから変換する
+        // Enums are coerced to their underlying integer type first, then converted
         if (underlying.IsEnum)
         {
             return Enum.ToObject(underlying, Convert.ChangeType(value, Enum.GetUnderlyingType(underlying), CultureInfo.InvariantCulture));
         }
 
-        // TEXT 格納の型は文字列から復元する（ISO8601 / N 形式）
+        // Types stored as TEXT are restored from the string (ISO 8601 / "N" format)
         if (value is string text)
         {
             if (underlying == typeof(Guid))
@@ -1179,7 +1203,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
             }
         }
 
-        // bool は INTEGER（0/1）で格納される
+        // bool is stored as INTEGER (0/1)
         if (underlying == typeof(bool) && value is long boolLong)
         {
             return boolLong != 0;
@@ -1187,25 +1211,25 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
 
         try
         {
-            // 数値の幅寄せ（long→int/short/byte、double→float/decimal 等）
+            // Numeric narrowing (long to int/short/byte, double to float/decimal, etc.)
             return Convert.ChangeType(value, underlying, CultureInfo.InvariantCulture);
         }
         catch (Exception ex) when (ex is InvalidCastException or FormatException or OverflowException)
         {
             throw new InvalidOperationException(
-                $"SQLite から読み取った値（{value.GetType().Name}）を {underlying.Name} へ変換できませんでした。",
+                $"The value read from SQLite ({value.GetType().Name}) could not be converted to {underlying.Name}.",
                 ex
             );
         }
     }
 
-    /// <summary>指定カラムの値をエンティティから取り出す（値オブジェクトは素値へ開く）。Include の親子キー突き合わせで使う</summary>
+    /// <summary>Extracts the value of the specified column from an entity (value objects are unwrapped to their raw value). Used for parent/child key matching in Include.</summary>
     public object? GetColumnValue(EntityBase entity, string columnName)
     {
         if (!PropertyByColumn.TryGetValue(columnName, out var property))
         {
             throw new InvalidOperationException(
-                $"{EntityType.Name} にカラム {columnName} に対応するプロパティがありません。"
+                $"{EntityType.Name} has no property corresponding to column {columnName}."
             );
         }
 
@@ -1214,7 +1238,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
     }
 {{~ end ~}}
 {{~ if repositories ~}}
-    /// <summary>INSERT 用パラメータ（store-generated 列を除く挿入対象カラム）を設定する（追加・グラフ挿入で共用）</summary>
+    /// <summary>Binds the INSERT parameters (the insert-target columns excluding store-generated columns) (shared by insert and graph insert).</summary>
     public void BindInsertParameters({{ sql_command_type }} command, EntityBase entity)
     {
         foreach (var property in InsertProperties)
@@ -1228,11 +1252,12 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         }
     }
 
-    /// <summary>UPDATE 用パラメータ（非キー列＋主キー）を設定する（更新・グラフ更新で共用）</summary>
+    /// <summary>Binds the UPDATE parameters (non-key columns plus the primary key) (shared by update and graph update).</summary>
     public void BindUpdateParameters({{ sql_command_type }} command, EntityBase entity)
     {
-        // 無制限バイナリ列（UPDATE 対象外）に値が残ったままの更新はサイレントに失われるため事前に弾く。
-        // 直接 UpdateAsync とグラフのカスケード更新はどちらもここを通るため 1 箇所で被覆できる
+        // Updates that still carry values in unbounded binary columns (excluded from UPDATE) would lose them silently,
+        // so reject them up front. Both direct UpdateAsync and cascading graph updates pass through here,
+        // so this single spot covers both
         UnboundedBinaryColumns.ThrowIfExcludedAssigned(entity);
 
         foreach (var property in NonKeyProperties)
@@ -1253,7 +1278,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         );
     }
 
-    /// <summary>エンティティの主キー値を @id パラメータへ設定する（グラフ削除で使用）</summary>
+    /// <summary>Binds the entity's primary key value to the @id parameter (used by graph delete).</summary>
     public void BindEntityKeyParameter({{ sql_command_type }} command, EntityBase entity)
     {
         AddColumnParameter(
@@ -1264,28 +1289,29 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         );
     }
 
-    /// <summary>外部から渡された主キー値を @id パラメータへ設定する（GetById/Delete で使用）</summary>
+    /// <summary>Binds an externally supplied primary key value to the @id parameter (used by GetById/Delete).</summary>
     public void BindKeyParameter({{ sql_command_type }} command, object? id)
     {
         var value =
             {{ if generate_value_objects }}SqlParameterValue.Unwrap(id){{ else }}id{{ end }}
-            ?? throw new InvalidOperationException("id は null にできません。");
+            ?? throw new InvalidOperationException("id cannot be null.");
         AddColumnParameter(command, "@id", KeyProperty, value);
     }
 {{~ if emit_sql_column_type_attr && repository_dialect == "sqlserver" ~}}
 
-    /// <summary>プロパティ単位の [SqlColumnType] 属性を 1 度だけ解決してキャッシュする（属性なしは null）</summary>
+    /// <summary>Resolves the per-property [SqlColumnType] attribute once and caches it (null when absent).</summary>
     private static readonly ConcurrentDictionary<PropertyInfo, SqlColumnTypeAttribute?> _columnTypeCache =
         new();
 
     /// <summary>
-    /// 列プロパティの [SqlColumnType] 属性から明示 <see cref="{{ sql_parameter_type }}"/> を組み立てて追加する。
-    /// 属性が無い（手書きエンティティ・未知型）場合は従来どおり AddWithValue にフォールバックする。
+    /// Builds and adds an explicitly typed <see cref="{{ sql_parameter_type }}"/> from the column property's
+    /// [SqlColumnType] attribute. When the attribute is absent (hand-written entities, unknown types), falls back to
+    /// AddWithValue as before.
     /// </summary>
-    /// <param name="command">パラメータを追加する対象コマンド</param>
-    /// <param name="name">パラメータ名（@付き）</param>
-    /// <param name="property">対象列に対応するプロパティ（型付けの根拠）</param>
-    /// <param name="rawValue">値オブジェクトは既に素値へ開いた後の値。null は DBNull.Value として束縛する</param>
+    /// <param name="command">The command to add the parameter to</param>
+    /// <param name="name">The parameter name (with the @ prefix)</param>
+    /// <param name="property">The property corresponding to the target column (the basis for typing)</param>
+    /// <param name="rawValue">The value after value objects have already been unwrapped to their raw value; null is bound as DBNull.Value</param>
     private static void AddColumnParameter(
         {{ sql_command_type }} command,
         string name,
@@ -1304,10 +1330,11 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         }
 
         var parameter = new {{ sql_parameter_type }}(name, attribute.DbType);
-        // 文字列/バイナリの Size 安全ガード: 宣言長が正で「値の長さ ≤ 宣言長」なら宣言長を、値が宣言長を
-        // 超える場合は値の長さを Size にする（ADO.NET は Size で入力値をクライアント側切り詰めするため、
-        // 固定 Size だとサーバー切り詰めエラーの代わりにサイレントなデータ破損が起きる。超過時はそのまま
-        // 送ってサーバー側エラーを温存する）。(max)=-1 は常に -1。
+        // String/binary Size safety guard: when the declared length is positive and the value length is within it,
+        // use the declared length; when the value exceeds the declared length, use the value length as Size
+        // (ADO.NET truncates input values client-side by Size, so a fixed Size would cause silent data corruption
+        // instead of a server-side truncation error; sending the oversized value as-is preserves the server-side error).
+        // (max) = -1 always stays -1.
         if (attribute.Size == -1)
         {
             parameter.Size = -1;
@@ -1334,11 +1361,11 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
     }
 {{~ else ~}}
 
-    /// <summary>[SqlColumnType] 属性が生成されない場合の束縛。従来どおり AddWithValue で追加する</summary>
-    /// <param name="command">パラメータを追加する対象コマンド</param>
-    /// <param name="name">パラメータ名（@付き）</param>
-    /// <param name="property">対象列に対応するプロパティ（この分岐では未使用）</param>
-    /// <param name="rawValue">値オブジェクトは既に素値へ開いた後の値。null は DBNull.Value として束縛する</param>
+    /// <summary>Binding used when the [SqlColumnType] attribute is not generated. Adds via AddWithValue as before.</summary>
+    /// <param name="command">The command to add the parameter to</param>
+    /// <param name="name">The parameter name (with the @ prefix)</param>
+    /// <param name="property">The property corresponding to the target column (unused in this branch)</param>
+    /// <param name="rawValue">The value after value objects have already been unwrapped to their raw value; null is bound as DBNull.Value</param>
     private static void AddColumnParameter(
         {{ sql_command_type }} command,
         string name,
@@ -1348,13 +1375,13 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
 {{~ end ~}}
 
     /// <summary>
-    /// クエリ WHERE 句パラメータを束縛する。列名が判明していてその列プロパティが見つかれば列型で明示構築し、
-    /// なければ AddWithValue にフォールバックする。
+    /// Binds a query WHERE-clause parameter. When the column name is known and its column property is found, the
+    /// parameter is explicitly constructed with the column type; otherwise falls back to AddWithValue.
     /// </summary>
-    /// <param name="command">パラメータを追加する対象コマンド</param>
-    /// <param name="name">パラメータ名（@付き）</param>
-    /// <param name="columnName">角括弧なしのカラム名。列が特定できない場合は null</param>
-    /// <param name="rawValue">値オブジェクトは既に素値へ開いた後の値。null は DBNull.Value として束縛する</param>
+    /// <param name="command">The command to add the parameter to</param>
+    /// <param name="name">The parameter name (with the @ prefix)</param>
+    /// <param name="columnName">The unquoted column name; null when the column cannot be determined</param>
+    /// <param name="rawValue">The value after value objects have already been unwrapped to their raw value; null is bound as DBNull.Value</param>
     public void AddQueryParameter(
         {{ sql_command_type }} command,
         string name,
@@ -1372,12 +1399,12 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
     }
 
 {{~ if repository_dialect == "sqlserver" ~}}
-    /// <summary>エンティティのコレクションを 1 行ずつ読み出す SqlBulkCopy 用の IDataReader を生成する（store-generated 列は挿入対象外）</summary>
+    /// <summary>Creates an IDataReader for SqlBulkCopy that reads an entity collection one row at a time (store-generated columns are excluded from insertion).</summary>
     public IDataReader CreateDataReader(IEnumerable<EntityBase> entities) =>
         new EntityDataReader(InsertProperties, entities);
 
-    /// <summary>エンティティ列を 1 行ずつ読み出して SqlBulkCopy へ流す IDataReader（DataTable を介さずメモリ効率を高める）</summary>
-    /// <remarks>SqlBulkCopy は Read・GetValue・FieldCount・GetName・GetOrdinal のみ使用するため、それ以外の型付き取得は未対応とする</remarks>
+    /// <summary>An IDataReader that reads entity columns one row at a time and feeds them to SqlBulkCopy (memory-efficient, no intermediate DataTable).</summary>
+    /// <remarks>SqlBulkCopy uses only Read, GetValue, FieldCount, GetName, and GetOrdinal, so the other typed getters are left unsupported.</remarks>
     private sealed class EntityDataReader : IDataReader
     {
         private readonly IReadOnlyList<PropertyInfo> _properties;
@@ -1408,10 +1435,10 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
             var index = Array.IndexOf(_columnNames, name);
             return index >= 0
                 ? index
-                : throw new IndexOutOfRangeException($"列 {name} は存在しません。");
+                : throw new IndexOutOfRangeException($"Column {name} does not exist.");
         }
 
-        // Nullable<T> は基底型を返す（SqlBulkCopy の列型解決と整合させる）
+        // Nullable<T> returns the underlying type (to align with SqlBulkCopy's column type resolution)
         public Type GetFieldType(int i) =>
             Nullable.GetUnderlyingType(_properties[i].PropertyType) ?? _properties[i].PropertyType;
 
@@ -1446,7 +1473,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
 
         public DataTable? GetSchemaTable() => null;
 
-        // 以降は SqlBulkCopy では呼ばれないため未対応とする
+        // The members below are never called by SqlBulkCopy, so they are left unsupported
         public bool GetBoolean(int i) => throw new NotSupportedException();
 
         public byte GetByte(int i) => throw new NotSupportedException();
@@ -1498,33 +1525,33 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         property.GetCustomAttribute<ColumnAttribute>()?.Name ?? property.Name;
 {{~ if exclude_unbounded_binary || runtime_package_export ~}}
 
-    /// <summary>C# プロパティ名から対応する列プロパティを引く（無制限バイナリ列＝除外列を含む全列から探す）。Stream アクセサが Repository / インメモリ双方で使う</summary>
+    /// <summary>Looks up the column property for a C# property name (searched across all columns, including unbounded binary = excluded columns). Used by the Stream accessors in both the repository and the in-memory implementation.</summary>
     public PropertyInfo ColumnByPropertyName(string propertyName) =>
         AllProperties.FirstOrDefault(property => property.Name == propertyName)
         ?? throw new InvalidOperationException(
-            $"プロパティ {propertyName} は列として見つかりませんでした。"
+            $"Property {propertyName} was not found as a column."
         );
 {{~ end ~}}
 {{~ if repositories && (exclude_unbounded_binary || runtime_package_export) ~}}
 
-    /// <summary>指定した列プロパティのクォート付きカラム名（例: {{ quote_open }}payload{{ quote_close }}）を返す（Stream アクセサの SQL 組み立て用）</summary>
+    /// <summary>Returns the quoted column name of the specified column property (for example: {{ quote_open }}payload{{ quote_close }}) (for building SQL in the Stream accessors).</summary>
     public string QuotedColumnName(PropertyInfo property) =>
         $"{{ quote_open }}{GetColumnName(property)}{{ quote_close }}";
 
-    /// <summary>指定した列プロパティのクォートなし生カラム名を返す（SqliteBlob 等が要求する）</summary>
+    /// <summary>Returns the raw, unquoted column name of the specified column property (required by SqliteBlob and friends).</summary>
     public string RawColumnName(PropertyInfo property) => GetColumnName(property);
 {{~ end ~}}
 }
 {{~ end ~}}
 
 {{~ if repositories && emit_shared_infra ~}}
-/// <summary>カスケード削除の DELETE 文群を FK メタデータから組み立てるプランナー（DB 非依存・純粋）</summary>
+/// <summary>Planner that builds the cascade-delete DELETE statements from FK metadata (database-independent, pure).</summary>
 {{ infra_visibility }} static class CascadeDeletePlanner
 {
-    /// <summary>条件に一致する rootType の行と、その子孫を削除する DELETE 文を「子→親」の実行順で返す</summary>
-    /// <param name="rootType">削除の起点となるエンティティ型</param>
-    /// <param name="rootTable">角括弧付きのルートテーブル名</param>
-    /// <param name="whereClause">ルートの WHERE 句（" WHERE …" または空文字）</param>
+    /// <summary>Returns the DELETE statements that remove the rootType rows matching the condition and their descendants, in child-to-parent execution order.</summary>
+    /// <param name="rootType">The entity type at which the delete starts</param>
+    /// <param name="rootTable">The quoted root table name</param>
+    /// <param name="whereClause">The root WHERE clause (" WHERE ..." or an empty string)</param>
     public static IReadOnlyList<string> BuildDeleteStatements(
         Type rootType,
         string rootTable,
@@ -1553,11 +1580,11 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
     {
         foreach (var navigation in EntitySaveMetadata.For(parentType).CascadeNavigations)
         {
-            // 循環するカスケード（自己参照等）は固定ネストでは表現できないため未対応とする
+            // Cyclic cascades (self-references etc.) cannot be expressed with fixed nesting, so they are unsupported
             if (!visited.Add(navigation.ChildType))
             {
                 throw new NotSupportedException(
-                    $"循環するカスケード（{navigation.ChildType.Name}）は ExecuteDeleteAsync では未対応です。グラフをロードして SaveAsync を使うか、DB の ON DELETE CASCADE を利用してください。"
+                    $"Cyclic cascades ({navigation.ChildType.Name}) are not supported by ExecuteDeleteAsync. Load the graph and use SaveAsync, or use ON DELETE CASCADE in the database."
                 );
             }
 
@@ -1565,7 +1592,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
             var childScopeWhere =
                 $" WHERE {{ quote_open }}{navigation.DependentColumn}{{ quote_close }} IN (SELECT {{ quote_open }}{navigation.PrincipalColumn}{{ quote_close }} FROM {parentTable}{parentScopeWhere})";
 
-            // 先に孫以下を削除してから子を削除する（FK 整合）
+            // Delete grandchildren and below first, then the children (FK consistency)
             AppendDescendantDeletes(
                 navigation.ChildType,
                 childTable,
@@ -1582,10 +1609,11 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
 {{~ end ~}}
 {{~ if (repositories || in_memory || (ef_core && render_contract) || (ef_core && render_ef_core && runtime_package_export)) && emit_shared_infra ~}}
 
-/// <summary>1 回の Save 呼び出しの間だけ生きる Save フックのセッション（レジストリ・context ファクトリ・スキップ集合を持ち回る）</summary>
+/// <summary>A save hook session that lives only for the duration of a single Save call (carries the registry, context factory, and skip set).</summary>
 /// <remarks>
-/// context ファクトリはバックエンド（QuickER 方言・EF Core・InMemory）が進行中のトランザクション文脈を閉じ込めて渡す。
-/// スキップ集合は参照等価（<see cref="ReferenceEqualityComparer"/>）で追跡し、コミット後の <c>AcceptChanges</c> で状態据え置きに使う。
+/// The context factory is supplied by the backend (QuickER dialect, EF Core, InMemory) with the in-progress transaction
+/// context captured inside. The skip set is tracked by reference equality (<see cref="ReferenceEqualityComparer"/>) and
+/// used by the post-commit <c>AcceptChanges</c> to leave states untouched.
 /// </remarks>
 {{ infra_visibility }} sealed class SaveHookSession(
     ISaveHookRegistry registry,
@@ -1596,13 +1624,13 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
     private readonly Func<EntityBase, ISaveHookContext> _contextFactory = contextFactory;
     private readonly HashSet<EntityBase> _skipped = new(ReferenceEqualityComparer.Instance);
 
-    /// <summary>Before で <c>false</c>（スキップ）されたエンティティ集合（参照等価）。AcceptChanges の状態据え置きに使う</summary>
+    /// <summary>Gets the set of entities skipped by a Before returning <c>false</c> (reference equality). Used by AcceptChanges to leave states untouched.</summary>
     public IReadOnlySet<EntityBase> Skipped => _skipped;
 
-    /// <summary>エンティティをスキップ集合へ追加する</summary>
+    /// <summary>Adds an entity to the skip set.</summary>
     public void Skip(EntityBase entity) => _skipped.Add(entity);
 
-    /// <summary>登録順に Before を呼び最初の <c>false</c> で短絡する（フックが無い型は <c>true</c>）</summary>
+    /// <summary>Calls Before in registration order and short-circuits at the first <c>false</c> (types with no hooks yield <c>true</c>).</summary>
     public Task<bool> InvokeBeforeAsync(
         EntityBase entity,
         SaveOperation operation,
@@ -1615,7 +1643,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
             : invoker.InvokeBeforeAsync(entity, operation, cancellationToken);
     }
 
-    /// <summary>登録順に After を呼ぶ（フックが無い型は何もしない）。context はエンティティ型に束縛して生成する</summary>
+    /// <summary>Calls After in registration order (types with no hooks do nothing). The context is created bound to the entity type.</summary>
     public Task InvokeAfterAsync(
         EntityBase entity,
         SaveOperation operation,
@@ -1634,20 +1662,21 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
     }
 }
 
-/// <summary>RowState に従ってエンティティのグラフを 1 トランザクションで保存する内部エンジン</summary>
+/// <summary>Internal engine that saves an entity graph in a single transaction according to RowState.</summary>
 {{ infra_visibility }} static class EntityGraphSaver
 {
-    /// <summary>自身、または（cascade 時）子に変更があるか</summary>
+    /// <summary>Returns whether the entity itself, or (when cascading) any child, has changes.</summary>
     public static bool HasChanges(EntityBase entity, bool cascade) =>
         entity.HasChanges
         || (cascade && EnumerateCascadeChildren(entity).Any(child => HasChanges(child, true)));
 {{~ if repositories ~}}
 
-    /// <summary>グラフを保存し、保存したレコード数を返す（<paramref name="hooks"/> 指定時は各操作の前後で Save フックを発火する）</summary>
+    /// <summary>Saves the graph and returns the number of saved records (when <paramref name="hooks"/> is provided, fires the save hooks before and after each operation).</summary>
     /// <remarks>
-    /// <c>changesAlreadyVerified</c> が <c>true</c>（呼び出し側が <see cref="HasChanges"/> を確認済み＝変更ありと判明済み）の
-    /// ときは、冒頭の重複するグラフ走査（変更判定）を省く。子への再帰では既定 <c>false</c> のまま渡すため、各サブツリーの
-    /// 変更判定（クリーンな枝の枝刈り）は従来どおり行う。
+    /// When <c>changesAlreadyVerified</c> is <c>true</c> (the caller has already checked <see cref="HasChanges"/>, i.e.
+    /// changes are known to exist), the redundant graph traversal (change detection) at the start is skipped. Recursion
+    /// into children passes the default <c>false</c>, so per-subtree change detection (pruning clean branches) is still
+    /// performed as before.
     /// </remarks>
     public static async Task<int> SaveAsync(
         EntityBase entity,
@@ -1670,7 +1699,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
 
         if (entity.IsRemoved)
         {
-            // 削除は子（サブツリー）を先に削除してから自身を削除する（FK 整合）
+            // Deletion removes the children (subtree) first, then the entity itself (FK consistency)
             if (cascadeDelete)
             {
                 foreach (var child in EnumerateCascadeChildren(entity))
@@ -1685,7 +1714,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
                 }
             }
 
-            // Before(Delete)。false ならこのノードの削除だけをスキップする（子は上で削除済み＝自身は残る）
+            // Before(Delete). On false, only this node's deletion is skipped (the children were deleted above, so this node remains)
             if (
                 hooks is not null
                 && !await hooks.InvokeBeforeAsync(
@@ -1708,7 +1737,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
                 cancellationToken
             );
 
-            // After(Delete) は DML の直後（コミット前）に発火する
+            // After(Delete) fires immediately after the DML (before commit)
             if (hooks is not null)
             {
                 await hooks.InvokeAfterAsync(entity, SaveOperation.Delete, cancellationToken);
@@ -1717,7 +1746,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
             return rows;
         }
 
-        // 追加・更新は自身を先に保存してから子へ進む（子 FK が親 PK を参照するため）
+        // Inserts and updates save the entity itself first, then proceed to the children (child FKs reference the parent PK)
         if (entity.IsAdded)
         {
             if (
@@ -1741,7 +1770,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
             }
             else
             {
-                // Before が false＝この 1 件の挿入だけスキップ（子カスケードは続行する）
+                // Before returned false = only this one insert is skipped (the child cascade continues)
                 hooks.Skip(entity);
             }
         }
@@ -1761,7 +1790,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
                 );
                 rows += affected;
 
-                // After は実際に行った操作で発火する（insertWhenUpdateMissing による切替時は Insert）
+                // After fires with the operation actually performed (Insert when switched by insertWhenUpdateMissing)
                 if (hooks is not null)
                 {
                     await hooks.InvokeAfterAsync(entity, performed, cancellationToken);
@@ -1794,13 +1823,13 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
     }
 {{~ end ~}}
 
-    /// <summary>コミット後に保存済みエンティティを Unchanged に確定する</summary>
+    /// <summary>Finalizes saved entities to Unchanged after commit.</summary>
     public static void AcceptChanges(EntityBase entity, bool cascade) =>
         AcceptChanges(entity, cascade, null);
 
     /// <summary>
-    /// コミット後に保存済みエンティティを Unchanged に確定する。<paramref name="skip"/> に含まれるエンティティ
-    /// （Save フックの Before が <c>false</c> を返してスキップされた行）は操作していないため状態を据え置く。
+    /// Finalizes saved entities to Unchanged after commit. Entities contained in <paramref name="skip"/> (rows skipped
+    /// because a save hook's Before returned <c>false</c>) were not operated on, so their state is left untouched.
     /// </summary>
     public static void AcceptChanges(
         EntityBase entity,
@@ -1813,7 +1842,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
             return;
         }
 
-        // スキップされたエンティティは INSERT / UPDATE を行っていないため RowState を据え置く
+        // Skipped entities had no INSERT / UPDATE performed, so their RowState is left untouched
         if (skip is null || !skip.Contains(entity))
         {
             entity.MarkUnchanged();
@@ -1829,7 +1858,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
     }
 
 {{~ if repositories ~}}
-    /// <summary>サブツリーを子から順に削除する（状態に関わらず削除。<paramref name="hooks"/> 指定時は子ごとに Before/After(Delete) を発火）</summary>
+    /// <summary>Deletes the subtree starting from the children (deleted regardless of state; when <paramref name="hooks"/> is provided, fires Before/After(Delete) per child).</summary>
     private static async Task<int> DeleteGraphAsync(
         EntityBase entity,
         {{ sql_connection_type }} connection,
@@ -1845,7 +1874,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
             rows += await DeleteGraphAsync(child, connection, transaction, cancellationToken, hooks);
         }
 
-        // Before(Delete) は削除はサブツリーの子から順に発火する。false なら「子は消え自身は残る」（単独スキップの帰結）
+        // Before(Delete) fires from the subtree's children upward. On false, "the children are gone but this node remains" (the consequence of a standalone skip)
         if (
             hooks is not null
             && !await hooks.InvokeBeforeAsync(entity, SaveOperation.Delete, cancellationToken)
@@ -1872,7 +1901,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
         return rows;
     }
 
-    /// <summary>更新を実行し、影響行数と実際に行った操作（切替時は Insert）を返す</summary>
+    /// <summary>Executes the update and returns the affected row count and the operation actually performed (Insert when switched).</summary>
     private static async Task<(int Rows, SaveOperation Performed)> UpdateAsync(
         EntityBase entity,
         {{ sql_connection_type }} connection,
@@ -1895,7 +1924,8 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
             return (affected, SaveOperation.Update);
         }
 
-        // 更新対象が存在しない（他ユーザーの削除等）。方針に応じて INSERT へ切替、または競合として通知する
+        // The record to update does not exist (e.g. deleted by another user). Depending on the policy,
+        // switch to INSERT or report it as a conflict
         if (insertWhenUpdateMissing)
         {
             var inserted = await ExecuteAsync(
@@ -1911,7 +1941,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
 
         var metadata = EntitySaveMetadata.For(entity.GetType());
         throw new SaveConflictException(
-            $"更新対象のレコードが見つかりませんでした（{entity.GetType().Name}、キー {metadata.KeyProperty.GetValue(entity)}）。他のユーザーに削除された可能性があります。"
+            $"The record to update was not found ({entity.GetType().Name}, key {metadata.KeyProperty.GetValue(entity)}). It may have been deleted by another user."
         );
     }
 
@@ -1932,7 +1962,7 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
     }
 {{~ end ~}}
 
-    /// <summary>カスケード対象の子エンティティを列挙する（null は除外）</summary>
+    /// <summary>Enumerates the cascade-target child entities (nulls are excluded).</summary>
     private static IEnumerable<EntityBase> EnumerateCascadeChildren(EntityBase entity)
     {
         foreach (var navigation in EntitySaveMetadata.For(entity.GetType()).CascadeNavigations)
@@ -1967,15 +1997,16 @@ public abstract partial class HttpRemoteRepository<TEntity, TKey> : IRemoteRepos
 {{~ end ~}}
 
 {{~ if repositories && !runtime_package_export ~}}
-/// <summary>生成されたリポジトリ群（{{ dialect_display_name }} 実装）を DI コンテナへ登録する拡張</summary>
+/// <summary>Extensions that register the generated repositories ({{ dialect_display_name }} implementation) with the DI container.</summary>
 /// <remarks>
-/// DI 登録はエンジン別に <c>AddGenerated{{ dialect_di_suffix }}Repositories</c> という名前で提供し、同一契約
-/// （I{Entity}Repository / ISqlExecutor）を方言別実装で登録する。複数方言（マルチターゲット）を同一プロセスで併用する場合は
-/// <c>object? serviceKey</c> 付きオーバーロード（keyed DI）を使い、<c>[FromKeyedServices("...")]</c> で方言別の接続を解決する。
+/// DI registration is provided per engine under the name <c>AddGenerated{{ dialect_di_suffix }}Repositories</c>, registering
+/// the same contracts (I{Entity}Repository / ISqlExecutor) with dialect-specific implementations. To use multiple dialects
+/// (multi-targeting) in the same process, use the overloads with <c>object? serviceKey</c> (keyed DI) and resolve the
+/// dialect-specific connection via <c>[FromKeyedServices("...")]</c>.
 /// </remarks>
 public static class Generated{{ dialect_di_suffix }}RepositoryServiceCollectionExtensions
 {
-    /// <summary>接続文字列とともに {{ dialect_display_name }} 版リポジトリ群を DI コンテナへ登録する（非 keyed・単独利用向け）</summary>
+    /// <summary>Registers the {{ dialect_display_name }} repositories with the DI container using a connection string (non-keyed, for standalone use).</summary>
     public static IServiceCollection AddGenerated{{ dialect_di_suffix }}Repositories(
         this IServiceCollection services,
         string connectionString
@@ -1989,7 +2020,7 @@ public static class Generated{{ dialect_di_suffix }}RepositoryServiceCollectionE
         ));
         services.AddSingleton<ISqlExecutor, SqlExecutor>();
 
-        // Save フックのレジストリを既定登録する（ISaveHook<T> の登録が無ければ完全 no-op）
+        // Register the save hook registry by default (a complete no-op when no ISaveHook<T> is registered)
         services.TryAddScoped<ISaveHookRegistry>(provider => new ServiceProviderSaveHookRegistry(
             provider
         ));
@@ -2001,11 +2032,11 @@ public static class Generated{{ dialect_di_suffix }}RepositoryServiceCollectionE
         return services;
     }
 
-    /// <summary>サービスキー付きで {{ dialect_display_name }} 版リポジトリ群を登録する（keyed DI・複数方言の同時利用向け）</summary>
+    /// <summary>Registers the {{ dialect_display_name }} repositories with a service key (keyed DI, for using multiple dialects simultaneously).</summary>
     /// <remarks>
-    /// I{Entity}Repository / ISqlExecutor を <paramref name="serviceKey"/> 付きで登録する。利用側は
-    /// <c>[FromKeyedServices(serviceKey)] ICustomerRepository</c> のように方言別の実装を解決する。
-    /// 接続ファクトリはキーごとにクロージャで閉じ込めるため非 keyed で登録衝突しない。
+    /// Registers I{Entity}Repository / ISqlExecutor keyed by <paramref name="serviceKey"/>. Consumers resolve the
+    /// dialect-specific implementation like <c>[FromKeyedServices(serviceKey)] ICustomerRepository</c>.
+    /// The connection factory is captured per key in a closure, so it causes no non-keyed registration collisions.
     /// </remarks>
     public static IServiceCollection AddGenerated{{ dialect_di_suffix }}Repositories(
         this IServiceCollection services,
@@ -2023,7 +2054,7 @@ public static class Generated{{ dialect_di_suffix }}RepositoryServiceCollectionE
             (_, _) => new SqlExecutor(connectionFactory)
         );
 
-        // Save フックのレジストリを既定登録する（非 keyed・ISaveHook<T> の登録が無ければ完全 no-op）
+        // Register the save hook registry by default (non-keyed; a complete no-op when no ISaveHook<T> is registered)
         services.TryAddScoped<ISaveHookRegistry>(provider => new ServiceProviderSaveHookRegistry(
             provider
         ));
@@ -2049,20 +2080,20 @@ public static class Generated{{ dialect_di_suffix }}RepositoryServiceCollectionE
 {{~ if remote_contracts ~}}
 {{~ remote_interface_members = join_members repository.query_interface_block repository.binary_stream_contract_block ~}}
 {{ if !for.first }}
-{{ end }}/// <summary>{{ repository.entity_class_name }} 用リポジトリのリモート面（ネットワーク境界を越えられる CRUD・保存・名前付きクエリのみ。将来リモート実装へ差し替え可能）</summary>
+{{ end }}/// <summary>Remote surface of the {{ repository.entity_class_name }} repository (only CRUD, save, and named queries that can cross a network boundary; swappable for a remote implementation later).</summary>
 public partial interface {{ repository.remote_interface_name }} : IRemoteRepository<{{ repository.entity_class_name }}, {{ repository.key_type_name }}>{{ if remote_interface_members == "" }} { }{{ else }}
 {
 {{ remote_interface_members }}
 }{{ end }}
 
-/// <summary>{{ repository.entity_class_name }} 用リポジトリインターフェース（全機能面＝リモート面に式木クエリ・生 SQL・一括追加を追加）</summary>
+/// <summary>Repository interface for {{ repository.entity_class_name }} (the full-featured surface = the remote surface plus expression-tree queries, raw SQL, and bulk insert).</summary>
 public partial interface {{ repository.interface_name }}
     : {{ repository.remote_interface_name }},
         IRepository<{{ repository.entity_class_name }}, {{ repository.key_type_name }}> { }
 {{~ else ~}}
 {{~ non_remote_interface_members = join_members repository.query_interface_block repository.binary_stream_contract_block ~}}
 {{ if !for.first }}
-{{ end }}/// <summary>{{ repository.entity_class_name }} 用リポジトリインターフェース</summary>
+{{ end }}/// <summary>Repository interface for {{ repository.entity_class_name }}.</summary>
 public partial interface {{ repository.interface_name }} : IRepository<{{ repository.entity_class_name }}, {{ repository.key_type_name }}>{{ if non_remote_interface_members == "" }} { }{{ else }}
 {
 {{ non_remote_interface_members }}
@@ -2081,7 +2112,7 @@ public partial interface {{ repository.interface_name }} : IRepository<{{ reposi
 {{~ ado_query_impl_block = repository.query_impl_blocks_by_dialect[repository_dialect] ~}}
 {{~ ado_impl_members = join_members ado_query_impl_block repository.binary_stream_thin_impl_block ~}}
 
-/// <summary>{{ repository.entity_class_name }} 用リポジトリ実装</summary>
+/// <summary>Repository implementation for {{ repository.entity_class_name }}.</summary>
 public sealed partial class {{ repository.class_name }}(
     ISqlConnectionFactory connectionFactory,
     ISaveHookRegistry? saveHooks = null
@@ -2100,8 +2131,8 @@ public sealed partial class {{ repository.class_name }}(
 {{~ if remote_services && render_contract && !runtime_package_export ~}}
 {{~ for repository in repository_classes ~}}
 
-/// <summary>{{ repository.entity_class_name }} 用リモート面（{{ repository.remote_interface_name }}）の HTTP クライアント実装</summary>
-/// <remarks>サーバー側 <c>MapGeneratedRemoteEndpoints</c> のエンドポイントを呼び出す。HttpClient の BaseAddress は prefix（既定 /quicker/）まで含むこと</remarks>
+/// <summary>HTTP client implementation of the remote surface ({{ repository.remote_interface_name }}) for {{ repository.entity_class_name }}.</summary>
+/// <remarks>Calls the server-side <c>MapGeneratedRemoteEndpoints</c> endpoints. The HttpClient's BaseAddress must include the prefix (default /quicker/).</remarks>
 {{~ remote_client_members = join_members repository.query_remote_client_block repository.binary_stream_remote_client_block ~}}
 public sealed partial class {{ repository.remote_client_class_name }}(HttpClient httpClient)
     : HttpRemoteRepository<{{ repository.entity_class_name }}, {{ repository.key_type_name }}>(httpClient, "{{ repository.remote_route_name }}"),
@@ -2111,12 +2142,12 @@ public sealed partial class {{ repository.remote_client_class_name }}(HttpClient
 }{{ end }}
 {{~ end ~}}
 
-/// <summary>リモート面（I{Entity}RemoteRepository）の HTTP クライアント実装を DI コンテナへ登録する拡張</summary>
+/// <summary>Extensions that register the HTTP client implementations of the remote surface (I{Entity}RemoteRepository) with the DI container.</summary>
 public static class GeneratedHttpRemoteRepositoryServiceCollectionExtensions
 {
-    /// <summary>ベースアドレスを指定して HTTP クライアント実装を登録する（単純構成向け・HttpClient は共有シングルトン）</summary>
-    /// <param name="services">登録先のサービスコレクション</param>
-    /// <param name="baseAddress">サーバーの prefix まで含むベースアドレス（例 <c>https://server:5001/quicker</c>。末尾 / は自動補完）</param>
+    /// <summary>Registers the HTTP client implementations using a base address (for simple setups; the HttpClient is a shared singleton).</summary>
+    /// <param name="services">The service collection to register into</param>
+    /// <param name="baseAddress">The base address including the server prefix (for example <c>https://server:5001/quicker</c>; a trailing / is appended automatically)</param>
     public static IServiceCollection AddGeneratedHttpRemoteRepositories(
         this IServiceCollection services,
         string baseAddress
@@ -2125,17 +2156,17 @@ public static class GeneratedHttpRemoteRepositoryServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(services);
         ArgumentException.ThrowIfNullOrWhiteSpace(baseAddress);
 
-        // 相対パス（"Order/GetById" 等）の解決に末尾 / が必須のため補完する
+        // A trailing / is required to resolve relative paths ("Order/GetById" etc.), so append it
         var normalized = baseAddress.EndsWith('/') ? baseAddress : baseAddress + "/";
         var sharedClient = new HttpClient { BaseAddress = new Uri(normalized) };
 
         return AddGeneratedHttpRemoteRepositories(services, _ => sharedClient);
     }
 
-    /// <summary>HttpClient のファクトリを指定して HTTP クライアント実装を登録する（認証ハンドラ等を構成する場合）</summary>
-    /// <remarks>ファクトリが返す HttpClient の BaseAddress は prefix まで含み、末尾 / で終わること</remarks>
-    /// <param name="services">登録先のサービスコレクション</param>
-    /// <param name="httpClientFactory">リポジトリ生成時に使う HttpClient を返すファクトリ</param>
+    /// <summary>Registers the HTTP client implementations using an HttpClient factory (when configuring authentication handlers etc.).</summary>
+    /// <remarks>The HttpClient returned by the factory must have a BaseAddress that includes the prefix and ends with a trailing /.</remarks>
+    /// <param name="services">The service collection to register into</param>
+    /// <param name="httpClientFactory">A factory returning the HttpClient to use when creating a repository</param>
     public static IServiceCollection AddGeneratedHttpRemoteRepositories(
         this IServiceCollection services,
         Func<IServiceProvider, HttpClient> httpClientFactory

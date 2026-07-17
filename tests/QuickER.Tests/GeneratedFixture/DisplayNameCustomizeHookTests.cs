@@ -41,7 +41,7 @@ public class DisplayNameCustomizeHookTests
             .Should()
             .ContainSingle()
             .Which.Should()
-            .Be($"'{DisplayNameCustomizeHookConstants.OverriddenName}' は必須です。");
+            .Be($"'{DisplayNameCustomizeHookConstants.OverriddenName}' is required.");
     }
 }
 

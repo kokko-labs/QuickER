@@ -1,44 +1,45 @@
 {{~ if (repository_classes.size > 0 || runtime_package_export) && (render_contract || repositories || in_memory || (ef_core && render_ef_core && runtime_package_export)) ~}}
 {{~ if render_contract && emit_shared_infra ~}}
-/// <summary>ネットワーク境界を越えて提供できる操作に絞ったリポジトリ共通インターフェース（リモート面）</summary>
+/// <summary>Common repository interface limited to operations that can be provided across a network boundary (the remote surface).</summary>
 /// <remarks>
 /// <para>
-/// 単一エンティティ・エンティティグラフの CRUD と保存だけを持ち、式木（<see cref="IRepository{TEntity, TKey}.Query"/>）や
-/// 生 SQL のような「プロセス外へ運べない引数」を受け取るメンバーを含まない。全メンバーの引数・戻り値は
-/// 純粋なデータ（エンティティ・主キー・件数）のため、この面だけに依存するコードは、将来実体を
-/// リモート実装（Web サービス経由）へ差し替えてもコンパイル時に安全が保証される。
+/// Holds only CRUD and save operations for single entities and entity graphs; it excludes members that take arguments
+/// that cannot be carried out of process, such as expression trees (<see cref="IRepository{TEntity, TKey}.Query"/>) or
+/// raw SQL. Because every member's arguments and return values are pure data (entities, primary keys, counts), code that
+/// depends only on this surface stays compile-time safe even if the implementation is later swapped for a remote
+/// implementation (over a web service).
 /// </para>
 /// <para>
-/// <see cref="IRepository{TEntity, TKey}"/> が本インターフェースを継承して全メソッドを提供するため、
-/// 既存の利用コードは変わらない。リモート契約生成（GenerateRemoteContracts）では、この面（＋名前付きクエリ）だけを持つ
-/// I{Entity}RemoteRepository が追加生成され、I{Entity}Repository がそれを継承する。
+/// <see cref="IRepository{TEntity, TKey}"/> inherits this interface and provides all of its methods, so existing consuming
+/// code is unchanged. With remote contract generation (GenerateRemoteContracts), an I{Entity}RemoteRepository that has only
+/// this surface (plus the named queries) is additionally generated, and I{Entity}Repository inherits it.
 /// </para>
 /// </remarks>
 public partial interface IRemoteRepository<TEntity, TKey>
     where TEntity : EntityBase, new()
 {
-    /// <summary>主キーによる単一エンティティ取得（該当なしは null）</summary>
+    /// <summary>Gets a single entity by primary key (null when not found).</summary>
     Task<TEntity?> GetByIdAsync(TKey id, CancellationToken cancellationToken = default);
 
-    /// <summary>全エンティティ取得</summary>
+    /// <summary>Gets all entities.</summary>
     Task<IReadOnlyList<TEntity>> GetAllAsync(CancellationToken cancellationToken = default);
 
-    /// <summary>エンティティ追加</summary>
+    /// <summary>Inserts an entity.</summary>
     Task InsertAsync(TEntity entity, CancellationToken cancellationToken = default);
 
-    /// <summary>エンティティ更新（更新対象ありで true）</summary>
+    /// <summary>Updates an entity (true when a matching row was updated).</summary>
     Task<bool> UpdateAsync(TEntity entity, CancellationToken cancellationToken = default);
 
-    /// <summary>主キーによるエンティティ削除（削除対象ありで true）</summary>
+    /// <summary>Deletes an entity by primary key (true when a matching row was deleted).</summary>
     Task<bool> DeleteAsync(TKey id, CancellationToken cancellationToken = default);
 
-    /// <summary>RowState に従って 1 トランザクションで追加・更新・削除を保存する（既定で子をカスケード）</summary>
-    /// <param name="entity">保存対象（集約ルート）</param>
-    /// <param name="cascadeSave">子オブジェクトを連鎖的に保存するか</param>
-    /// <param name="cascadeDelete">削除時に子オブジェクトを連鎖削除するか</param>
-    /// <param name="insertWhenUpdateMissing">更新対象が存在しない場合に INSERT へ切り替えるか（既定は例外）</param>
-    /// <param name="cancellationToken">キャンセルトークン</param>
-    /// <returns>保存したレコード数</returns>
+    /// <summary>Saves inserts, updates, and deletes in a single transaction according to RowState (children cascade by default).</summary>
+    /// <param name="entity">The entity to save (the aggregate root).</param>
+    /// <param name="cascadeSave">Whether to cascade the save to child objects.</param>
+    /// <param name="cascadeDelete">Whether to cascade deletes to child objects.</param>
+    /// <param name="insertWhenUpdateMissing">Whether to switch to INSERT when no row exists to update (throws by default).</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The number of records saved.</returns>
     Task<int> SaveAsync(
         TEntity entity,
         bool cascadeSave = true,
@@ -47,13 +48,13 @@ public partial interface IRemoteRepository<TEntity, TKey>
         CancellationToken cancellationToken = default
     );
 
-    /// <summary>複数の集約ルートを 1 トランザクションでまとめて保存する（全件成功か全件ロールバックの原子的処理）</summary>
-    /// <param name="entities">保存対象（集約ルート）の一覧</param>
-    /// <param name="cascadeSave">子オブジェクトを連鎖的に保存するか</param>
-    /// <param name="cascadeDelete">削除時に子オブジェクトを連鎖削除するか</param>
-    /// <param name="insertWhenUpdateMissing">更新対象が存在しない場合に INSERT へ切り替えるか（既定は例外）</param>
-    /// <param name="cancellationToken">キャンセルトークン</param>
-    /// <returns>保存したレコード数</returns>
+    /// <summary>Saves multiple aggregate roots together in a single transaction (an atomic all-succeed-or-all-rollback operation).</summary>
+    /// <param name="entities">The list of entities to save (the aggregate roots).</param>
+    /// <param name="cascadeSave">Whether to cascade the save to child objects.</param>
+    /// <param name="cascadeDelete">Whether to cascade deletes to child objects.</param>
+    /// <param name="insertWhenUpdateMissing">Whether to switch to INSERT when no row exists to update (throws by default).</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The number of records saved.</returns>
     Task<int> SaveAsync(
         IEnumerable<TEntity> entities,
         bool cascadeSave = true,
@@ -63,84 +64,86 @@ public partial interface IRemoteRepository<TEntity, TKey>
     );
 }
 
-/// <summary>エンティティの CRUD 操作を提供するリポジトリ共通インターフェース</summary>
+/// <summary>Common repository interface that provides CRUD operations for entities.</summary>
 /// <remarks>
-/// リモート面（<see cref="IRemoteRepository{TEntity, TKey}"/>）に加え、ローカル実行（DB 直結）を前提とするメンバー
-/// （式木クエリ・生 SQL・一括追加）を持つ全機能面。I{Entity}Repository は常にこの全機能面を提供する。
+/// The full-featured surface that, in addition to the remote surface (<see cref="IRemoteRepository{TEntity, TKey}"/>), adds
+/// members that assume local execution (a direct DB connection): expression-tree queries, raw SQL, and bulk insert.
+/// I{Entity}Repository always provides this full-featured surface.
 /// </remarks>
 public partial interface IRepository<TEntity, TKey> : IRemoteRepository<TEntity, TKey>
     where TEntity : EntityBase, new()
 {
-    /// <summary>エンティティのコレクションを{{ if repository_dialect == "sqlserver" }} SqlBulkCopy で{{ end }}一括追加する</summary>
-    /// <param name="entities">追加対象の一覧</param>
-    /// <param name="cancellationToken">キャンセルトークン</param>
-    /// <returns>追加した件数</returns>
+    /// <summary>Bulk inserts a collection of entities{{ if repository_dialect == "sqlserver" }} using SqlBulkCopy{{ end }}.</summary>
+    /// <param name="entities">The list of entities to insert.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The number of rows inserted.</returns>
     Task<int> BulkInsertAsync(
         IEnumerable<TEntity> entities,
         CancellationToken cancellationToken = default
     );
 
-    /// <summary>検索条件・並び順・Include をチェーン指定して取得するクエリを開始する</summary>
+    /// <summary>Starts a query where filters, ordering, and Include can be specified via a fluent chain.</summary>
     SqlQuery<TEntity> Query();
 
-    /// <summary>生 SQL の SELECT を実行し、結果行を {TEntity} へマップして返す</summary>
+    /// <summary>Executes a raw SQL SELECT and maps the result rows to {TEntity}.</summary>
     /// <remarks>
     /// <para>
-    /// SELECT には {TEntity} の全列が必要（<c>SELECT *</c> または全列指定）。部分 SELECT（列不足）は不可で、
-    /// 欠けている列があればどの列が無いか分かる例外を投げる。
+    /// The SELECT must return all columns of {TEntity} (<c>SELECT *</c> or all columns listed). A partial SELECT (missing
+    /// columns) is not allowed; if any column is missing, an exception is thrown that names the missing column.
     /// </para>
     /// <para>
-    /// <paramref name="parameters"/> は匿名オブジェクト等の public インスタンスプロパティを列挙し、
-    /// プロパティ名 <c>Foo</c> を SQL パラメータ <c>@Foo</c> として束縛する（null 指定でパラメータなし）。
-    /// 生 SQL には列文脈が無いため型は明示せず <c>AddWithValue</c> で束縛する。
-    /// <b>値は必ずパラメータで渡すこと（SQL への文字列連結はインジェクションの危険がある）。</b>
+    /// <paramref name="parameters"/> enumerates the public instance properties of an anonymous object (or similar) and binds
+    /// property name <c>Foo</c> as SQL parameter <c>@Foo</c> (null means no parameters). Because raw SQL has no column context,
+    /// values are bound without an explicit type via <c>AddWithValue</c>.
+    /// <b>Always pass values as parameters (concatenating them into the SQL string risks injection).</b>
     /// </para>
     /// </remarks>
-    /// <param name="sql">全列を返す SELECT 文</param>
-    /// <param name="parameters">@名 パラメータへ束縛する匿名オブジェクト（null でパラメータなし）</param>
-    /// <param name="cancellationToken">キャンセルトークン</param>
+    /// <param name="sql">A SELECT statement that returns all columns.</param>
+    /// <param name="parameters">An anonymous object bound to @name parameters (null for no parameters).</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
     Task<IReadOnlyList<TEntity>> QueryBySqlAsync(
         string sql,
         object? parameters = null,
         CancellationToken cancellationToken = default
     );
 
-    /// <summary>生 SQL（UPDATE/DELETE/任意 DML）を実行し、影響行数を返す</summary>
+    /// <summary>Executes raw SQL (UPDATE/DELETE/any DML) and returns the number of affected rows.</summary>
     /// <remarks>
     /// <para>
-    /// <paramref name="parameters"/> の束縛は <see cref="QueryBySqlAsync"/> と同じ（プロパティ名 <c>Foo</c> → <c>@Foo</c>、
-    /// 型明示なしの <c>AddWithValue</c>、null でパラメータなし）。
-    /// <b>値は必ずパラメータで渡すこと（文字列連結はインジェクションの危険がある）。</b>
+    /// <paramref name="parameters"/> is bound the same way as <see cref="QueryBySqlAsync"/> (property name <c>Foo</c> → <c>@Foo</c>,
+    /// <c>AddWithValue</c> without an explicit type, null for no parameters).
+    /// <b>Always pass values as parameters (string concatenation risks injection).</b>
     /// </para>
     /// <para>
-    /// 呼び出しごとに接続を開閉する（トランザクション引数なし）。複数文をアトミックに実行したい場合は、
-    /// 1 回の <see cref="ExecuteSqlAsync"/> 内で <c>BEGIN TRAN ... COMMIT</c> を記述すること。
+    /// The connection is opened and closed per call (no transaction argument). To execute multiple statements atomically,
+    /// write <c>BEGIN TRAN ... COMMIT</c> inside a single <see cref="ExecuteSqlAsync"/> call.
     /// </para>
     /// </remarks>
-    /// <param name="sql">実行する DML 文</param>
-    /// <param name="parameters">@名 パラメータへ束縛する匿名オブジェクト（null でパラメータなし）</param>
-    /// <param name="cancellationToken">キャンセルトークン</param>
+    /// <param name="sql">The DML statement to execute.</param>
+    /// <param name="parameters">An anonymous object bound to @name parameters (null for no parameters).</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
     Task<int> ExecuteSqlAsync(
         string sql,
         object? parameters = null,
         CancellationToken cancellationToken = default
     );
 
-    /// <summary>生 SQL を実行し、単一のスカラー値を返す（該当なし・DBNull は <c>default</c>）</summary>
+    /// <summary>Executes raw SQL and returns a single scalar value (<c>default</c> when there is no match or DBNull).</summary>
     /// <remarks>
     /// <para>
-    /// <paramref name="parameters"/> の束縛は <see cref="QueryBySqlAsync"/> と同じ。
-    /// <b>値は必ずパラメータで渡すこと（文字列連結はインジェクションの危険がある）。</b>
+    /// <paramref name="parameters"/> is bound the same way as <see cref="QueryBySqlAsync"/>.
+    /// <b>Always pass values as parameters (string concatenation risks injection).</b>
     /// </para>
     /// <para>
-    /// 結果が <c>null</c> / <see cref="DBNull"/> のときは <c>default(TResult)</c> を返す。型が <typeparamref name="TResult"/> と
-    /// 一致しない場合は <see cref="System.Convert.ChangeType(object, System.Type, System.IFormatProvider)"/>
-    /// （<see cref="System.Globalization.CultureInfo.InvariantCulture"/>）でベストエフォート変換し、変換できない場合は分かる例外を投げる。
+    /// When the result is <c>null</c> / <see cref="DBNull"/>, returns <c>default(TResult)</c>. When the type does not match
+    /// <typeparamref name="TResult"/>, it performs a best-effort conversion with
+    /// <see cref="System.Convert.ChangeType(object, System.Type, System.IFormatProvider)"/>
+    /// (<see cref="System.Globalization.CultureInfo.InvariantCulture"/>), throwing a descriptive exception when it cannot convert.
     /// </para>
     /// </remarks>
-    /// <param name="sql">単一値を返す SELECT 文（例: <c>SELECT COUNT(*) ...</c>）</param>
-    /// <param name="parameters">@名 パラメータへ束縛する匿名オブジェクト（null でパラメータなし）</param>
-    /// <param name="cancellationToken">キャンセルトークン</param>
+    /// <param name="sql">A SELECT statement that returns a single value (for example, <c>SELECT COUNT(*) ...</c>).</param>
+    /// <param name="parameters">An anonymous object bound to @name parameters (null for no parameters).</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
     Task<TResult?> ExecuteScalarSqlAsync<TResult>(
         string sql,
         object? parameters = null,
@@ -148,28 +151,30 @@ public partial interface IRepository<TEntity, TKey> : IRemoteRepository<TEntity,
     );
 }
 
-/// <summary>特定エンティティに縛られない生 SQL 実行器（任意の SQL を実行し、エンティティ・射影 DTO・単一値へマップする）</summary>
+/// <summary>A raw SQL executor not bound to a specific entity (executes arbitrary SQL and maps to entities, projection DTOs, or single values).</summary>
 /// <remarks>
 /// <para>
-/// <see cref="IRepository{TEntity, TKey}"/> の生 SQL メソッドと違い、型は呼び出し側が型引数で指定するため、
-/// エンティティ横断の JOIN・集計クエリを任意の DTO へ射影できる。Repository の生 SQL メソッドは内部でこの実行器へ委譲する。
+/// Unlike the raw SQL methods on <see cref="IRepository{TEntity, TKey}"/>, the caller specifies the type via a type argument,
+/// so cross-entity JOIN and aggregate queries can be projected onto any DTO. The repository's raw SQL methods delegate to
+/// this executor internally.
 /// </para>
 /// <para>
-/// <c>parameters</c> の束縛は Repository の生 SQL メソッドと同じ（匿名オブジェクトの public プロパティ名 <c>Foo</c> を
-/// <c>@Foo</c> として型明示なしで束縛。null でパラメータなし）。
-/// <b>値は必ずパラメータで渡すこと（SQL への文字列連結はインジェクションの危険がある）。</b>
+/// <c>parameters</c> is bound the same way as the repository's raw SQL methods (property name <c>Foo</c> of an anonymous
+/// object is bound as <c>@Foo</c> without an explicit type; null for no parameters).
+/// <b>Always pass values as parameters (concatenating them into the SQL string risks injection).</b>
 /// </para>
 /// </remarks>
 public partial interface ISqlExecutor
 {
-    /// <summary>生 SQL の SELECT を実行し、結果行を {TEntity} へ厳密（全列必須）にマップして返す</summary>
+    /// <summary>Executes a raw SQL SELECT and maps the result rows strictly (all columns required) to {TEntity}.</summary>
     /// <remarks>
-    /// SELECT には {TEntity} の全列が必要（<c>SELECT *</c> または全列指定）。欠けている列があれば分かる例外を投げる。
-    /// マッピング・RowState=Unchanged 扱いは <see cref="IRepository{TEntity, TKey}.QueryBySqlAsync"/> と同一。
+    /// The SELECT must return all columns of {TEntity} (<c>SELECT *</c> or all columns listed); if any column is missing, a
+    /// descriptive exception is thrown. Mapping and the RowState=Unchanged treatment are identical to
+    /// <see cref="IRepository{TEntity, TKey}.QueryBySqlAsync"/>.
     /// </remarks>
-    /// <param name="sql">全列を返す SELECT 文</param>
-    /// <param name="parameters">@名 パラメータへ束縛する匿名オブジェクト（null でパラメータなし）</param>
-    /// <param name="cancellationToken">キャンセルトークン</param>
+    /// <param name="sql">A SELECT statement that returns all columns.</param>
+    /// <param name="parameters">An anonymous object bound to @name parameters (null for no parameters).</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
     Task<IReadOnlyList<TEntity>> QueryBySqlAsync<TEntity>(
         string sql,
         object? parameters = null,
@@ -177,55 +182,57 @@ public partial interface ISqlExecutor
     )
         where TEntity : EntityBase, new();
 
-    /// <summary>生 SQL の SELECT を実行し、結果行を任意の <typeparamref name="TResult"/> へ寛容に射影して返す</summary>
+    /// <summary>Executes a raw SQL SELECT and leniently projects the result rows onto an arbitrary <typeparamref name="TResult"/>.</summary>
     /// <remarks>
     /// <para>
-    /// <b>単一値モード</b>: <typeparamref name="TResult"/>（Nullable は基底型で判定）が primitive / enum / string / decimal /
-    /// DateTime / DateTimeOffset / TimeSpan / Guid / byte[]{{ if generate_value_objects }} / 値オブジェクト（IValueObject 実装）{{ end }} のときは、
-    /// 各行の<b>先頭列</b>を変換して返す（DBNull は <c>default</c>）。変換はスカラー系と同じく Nullable 対応の
-    /// <see cref="System.Convert.ChangeType(object, System.Type, System.IFormatProvider)"/> による。
+    /// <b>Single-value mode</b>: when <typeparamref name="TResult"/> (Nullable is judged by its underlying type) is primitive / enum /
+    /// string / decimal / DateTime / DateTimeOffset / TimeSpan / Guid / byte[]{{ if generate_value_objects }} / a value object (IValueObject implementation){{ end }},
+    /// the <b>first column</b> of each row is converted and returned (DBNull becomes <c>default</c>). Conversion uses the same
+    /// Nullable-aware <see cref="System.Convert.ChangeType(object, System.Type, System.IFormatProvider)"/> as the scalar methods.
     /// </para>
     /// <para>
-    /// <b>DTO モード</b>: 上記以外の型では public 引数なしコンストラクタが必要（位置指定 record は非対応）。結果セットの列名と
-    /// <typeparamref name="TResult"/> の書き込み可能プロパティ（set/init）を<b>大文字小文字無視</b>で突き合わせ、一致した列のみ設定する。
-    /// 余分な列は無視し、無い列は既定値のまま。1 列も一致しない場合は列名一覧・プロパティ名一覧を含む例外を投げる（typo ガード）。
+    /// <b>DTO mode</b>: any other type requires a public parameterless constructor (positional records are not supported). Result
+    /// set column names are matched <b>case-insensitively</b> against the writable properties (set/init) of
+    /// <typeparamref name="TResult"/>, and only matching columns are assigned. Extra columns are ignored and missing columns keep
+    /// their defaults. When no column matches at all, an exception listing the column names and property names is thrown (typo guard).
     /// </para>
     /// <para>
-    /// 射影 DTO は保存経路を持たず部分マップでもデータ破損リスクがないため、エンティティと違い<b>寛容</b>にマップする。
+    /// Projection DTOs have no save path, so a partial map carries no data-corruption risk; unlike entities, they are mapped <b>leniently</b>.
     /// </para>
     /// </remarks>
-    /// <param name="sql">射影する SELECT 文</param>
-    /// <param name="parameters">@名 パラメータへ束縛する匿名オブジェクト（null でパラメータなし）</param>
-    /// <param name="cancellationToken">キャンセルトークン</param>
+    /// <param name="sql">The SELECT statement to project.</param>
+    /// <param name="parameters">An anonymous object bound to @name parameters (null for no parameters).</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
     Task<IReadOnlyList<TResult>> QueryProjectionBySqlAsync<TResult>(
         string sql,
         object? parameters = null,
         CancellationToken cancellationToken = default
     );
 
-    /// <summary>生 SQL（UPDATE/DELETE/任意 DML）を実行し、影響行数を返す</summary>
+    /// <summary>Executes raw SQL (UPDATE/DELETE/any DML) and returns the number of affected rows.</summary>
     /// <remarks>
-    /// 呼び出しごとに接続を開閉する（トランザクション引数なし）。複数文をアトミックに実行したい場合は、
-    /// 1 回の呼び出し内で <c>BEGIN TRAN ... COMMIT</c> を SQL に記述すること。
+    /// The connection is opened and closed per call (no transaction argument). To execute multiple statements atomically,
+    /// write <c>BEGIN TRAN ... COMMIT</c> in the SQL within a single call.
     /// </remarks>
-    /// <param name="sql">実行する DML 文</param>
-    /// <param name="parameters">@名 パラメータへ束縛する匿名オブジェクト（null でパラメータなし）</param>
-    /// <param name="cancellationToken">キャンセルトークン</param>
+    /// <param name="sql">The DML statement to execute.</param>
+    /// <param name="parameters">An anonymous object bound to @name parameters (null for no parameters).</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
     Task<int> ExecuteSqlAsync(
         string sql,
         object? parameters = null,
         CancellationToken cancellationToken = default
     );
 
-    /// <summary>生 SQL を実行し、単一のスカラー値を返す（該当なし・DBNull は <c>default</c>）</summary>
+    /// <summary>Executes raw SQL and returns a single scalar value (<c>default</c> when there is no match or DBNull).</summary>
     /// <remarks>
-    /// 結果が <c>null</c> / <see cref="DBNull"/> なら <c>default(TResult)</c>。型が合わない場合は
-    /// <see cref="System.Convert.ChangeType(object, System.Type, System.IFormatProvider)"/>（<see cref="System.Globalization.CultureInfo.InvariantCulture"/>）で
-    /// ベストエフォート変換し、変換できない場合は分かる例外を投げる。
+    /// When the result is <c>null</c> / <see cref="DBNull"/>, returns <c>default(TResult)</c>. When the type does not match,
+    /// it performs a best-effort conversion with
+    /// <see cref="System.Convert.ChangeType(object, System.Type, System.IFormatProvider)"/> (<see cref="System.Globalization.CultureInfo.InvariantCulture"/>),
+    /// throwing a descriptive exception when it cannot convert.
     /// </remarks>
-    /// <param name="sql">単一値を返す SELECT 文（例: <c>SELECT COUNT(*) ...</c>）</param>
-    /// <param name="parameters">@名 パラメータへ束縛する匿名オブジェクト（null でパラメータなし）</param>
-    /// <param name="cancellationToken">キャンセルトークン</param>
+    /// <param name="sql">A SELECT statement that returns a single value (for example, <c>SELECT COUNT(*) ...</c>).</param>
+    /// <param name="parameters">An anonymous object bound to @name parameters (null for no parameters).</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
     Task<TResult?> ExecuteScalarSqlAsync<TResult>(
         string sql,
         object? parameters = null,
@@ -233,55 +240,58 @@ public partial interface ISqlExecutor
     );
 }
 
-/// <summary>グラフ保存（Save）で 1 エンティティに対して実行される DB 操作の種別</summary>
+/// <summary>The kind of DB operation performed for a single entity during a graph save (Save).</summary>
 public enum SaveOperation
 {
-    /// <summary>新規追加（INSERT）</summary>
+    /// <summary>Insert (INSERT).</summary>
     Insert,
 
-    /// <summary>更新（UPDATE）</summary>
+    /// <summary>Update (UPDATE).</summary>
     Update,
 
-    /// <summary>削除（DELETE）</summary>
+    /// <summary>Delete (DELETE).</summary>
     Delete,
 }
 
 /// <summary>
-/// グラフ保存（<c>SaveAsync</c>）の前後に処理を差し込むフック。DI に 0..N 個登録でき、対象エンティティ型ごとに解決される。
+/// A hook that injects logic before and after a graph save (<c>SaveAsync</c>). Zero or more can be registered in DI and are
+/// resolved per target entity type.
 /// </summary>
 /// <remarks>
 /// <para>
-/// 両メソッドとも既定実装を持つため、必要な方だけを実装すればよい。<see cref="BeforeSaveAsync"/> は各エンティティの
-/// 操作（Insert/Update/Delete）の直前に呼ばれ、<c>false</c> を返すとその 1 件の操作だけをスキップする（他の行は続行）。
-/// <see cref="AfterSaveAsync"/> は操作の直後・コミット前に、同一トランザクションに参加する <see cref="ISaveHookContext"/> と
-/// ともに呼ばれる（例外を投げると Save 全体がロールバックされる）。
+/// Both methods have default implementations, so implement only the one you need. <see cref="BeforeSaveAsync"/> is called
+/// immediately before each entity's operation (Insert/Update/Delete); returning <c>false</c> skips just that single
+/// operation (other rows continue). <see cref="AfterSaveAsync"/> is called immediately after the operation, before commit,
+/// together with an <see cref="ISaveHookContext"/> that participates in the same transaction (throwing an exception rolls
+/// back the entire save).
 /// </para>
 /// <para>
-/// フックが発火するのは <c>SaveAsync</c>（グラフ保存・2 形態とも）のみで、<c>InsertAsync</c> / <c>UpdateAsync</c> /
-/// <c>DeleteAsync</c> の直接呼び出し・<c>BulkInsertAsync</c> は対象外（素通り）。スキップ起因の整合（例: 新規親を止めるなら
-/// 新規子も止める）はフック実装者の責任で、矛盾は DB 制約エラー→全体ロールバックで安全側に倒れる。
+/// Hooks fire only for <c>SaveAsync</c> (graph save, both overloads); direct calls to <c>InsertAsync</c> / <c>UpdateAsync</c> /
+/// <c>DeleteAsync</c> and <c>BulkInsertAsync</c> are not covered (they pass through). Consistency across skips (for example,
+/// if you block a new parent, also block its new children) is the hook implementer's responsibility; contradictions fail
+/// safe via a DB constraint error followed by a full rollback.
 /// </para>
 /// </remarks>
-/// <typeparam name="TEntity">フック対象のエンティティ型</typeparam>
+/// <typeparam name="TEntity">The entity type the hook targets.</typeparam>
 public interface ISaveHook<TEntity>
     where TEntity : EntityBase
 {
-    /// <summary>操作の直前に呼ばれる（<c>false</c> でその 1 件の操作をスキップ・既定はスキップしない）</summary>
-    /// <param name="entity">保存対象のエンティティ</param>
-    /// <param name="operation">これから行う操作（Insert/Update/Delete）</param>
-    /// <param name="cancellationToken">キャンセルトークン</param>
-    /// <returns>操作を続行するなら <c>true</c>、スキップするなら <c>false</c></returns>
+    /// <summary>Called immediately before the operation (<c>false</c> skips that single operation; the default does not skip).</summary>
+    /// <param name="entity">The entity being saved.</param>
+    /// <param name="operation">The operation about to be performed (Insert/Update/Delete).</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns><c>true</c> to proceed with the operation, <c>false</c> to skip it.</returns>
     Task<bool> BeforeSaveAsync(
         TEntity entity,
         SaveOperation operation,
         CancellationToken cancellationToken = default
     ) => Task.FromResult(true);
 
-    /// <summary>操作の直後・コミット前に呼ばれる（既定は何もしない。<paramref name="context"/> は同一トランザクションに参加する）</summary>
-    /// <param name="entity">保存されたエンティティ</param>
-    /// <param name="operation">実際に行われた操作（<c>insertWhenUpdateMissing</c> による切替時は Insert）</param>
-    /// <param name="context">同一トランザクションで DB 操作を行うためのコンテキスト</param>
-    /// <param name="cancellationToken">キャンセルトークン</param>
+    /// <summary>Called immediately after the operation, before commit (the default does nothing; <paramref name="context"/> participates in the same transaction).</summary>
+    /// <param name="entity">The entity that was saved.</param>
+    /// <param name="operation">The operation actually performed (Insert when switched via <c>insertWhenUpdateMissing</c>).</param>
+    /// <param name="context">A context for performing DB operations within the same transaction.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
     Task AfterSaveAsync(
         TEntity entity,
         SaveOperation operation,
@@ -291,28 +301,32 @@ public interface ISaveHook<TEntity>
 }
 
 /// <summary>
-/// <see cref="ISaveHook{TEntity}.AfterSaveAsync"/> に渡される、進行中の保存トランザクションに参加して DB 操作を行うコンテキスト。
+/// The context passed to <see cref="ISaveHook{TEntity}.AfterSaveAsync"/> for performing DB operations while participating in
+/// the in-progress save transaction.
 /// </summary>
 /// <remarks>
 /// <para>
-/// フック内から Repository の通常 API を呼ぶと別接続でロック競合するため、同一トランザクションで完結する操作をこの契約経由で提供する。
-/// 生ハンドル（接続・トランザクション）は公開せず、型付き操作（除外列バイナリの書き込み・生 SQL）だけを提供する（方言中立・誤用防止）。
+/// Calling the repository's regular API from inside a hook would use a separate connection and contend for locks, so this
+/// contract provides operations that complete within the same transaction. Raw handles (connection, transaction) are not
+/// exposed; only typed operations (writing excluded binary columns and raw SQL) are provided (dialect-neutral, misuse-proof).
 /// </para>
 /// <para>
-/// <see cref="WriteBinaryColumnAsync"/> は <c>ExcludeUnboundedBinaryColumns</c> を有効にした図でのみ機能する。
-/// 無効な図では <see cref="NotSupportedException"/> を投げる（生 SQL の <see cref="ExecuteSqlAsync"/> を使うか、オプションを有効化する）。
+/// <see cref="WriteBinaryColumnAsync"/> works only for diagrams generated with <c>ExcludeUnboundedBinaryColumns</c> enabled.
+/// For diagrams without it, a <see cref="NotSupportedException"/> is thrown (use raw SQL via <see cref="ExecuteSqlAsync"/>,
+/// or enable the option).
 /// </para>
 /// </remarks>
 public interface ISaveHookContext
 {
-    /// <summary>同一トランザクション内で生 SQL（任意 DML）を実行し、影響行数を返す</summary>
+    /// <summary>Executes raw SQL (any DML) within the same transaction and returns the number of affected rows.</summary>
     /// <remarks>
-    /// パラメータ束縛は Repository の生 SQL メソッドと同じ（匿名オブジェクトの public プロパティ名 <c>Foo</c> を <c>@Foo</c> として束縛）。
-    /// <b>値は必ずパラメータで渡すこと（文字列連結はインジェクションの危険がある）。</b>
+    /// Parameter binding is the same as the repository's raw SQL methods (public property name <c>Foo</c> of an anonymous
+    /// object is bound as <c>@Foo</c>).
+    /// <b>Always pass values as parameters (string concatenation risks injection).</b>
     /// </remarks>
-    /// <param name="sql">実行する DML 文</param>
-    /// <param name="parameters">@名 パラメータへ束縛する匿名オブジェクト（null でパラメータなし）</param>
-    /// <param name="cancellationToken">キャンセルトークン</param>
+    /// <param name="sql">The DML statement to execute.</param>
+    /// <param name="parameters">An anonymous object bound to @name parameters (null for no parameters).</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
     Task<int> ExecuteSqlAsync(
         string sql,
         object? parameters = null,
@@ -320,14 +334,15 @@ public interface ISaveHookContext
     );
 
     /// <summary>
-    /// 同一トランザクション内で、無制限バイナリ（除外）列を主キー指定でストリームから書き込む（O(チャンク) のストリーミング）。
-    /// <paramref name="source"/> が <c>null</c> のとき列を NULL に設定する。更新した場合は <c>true</c>、該当行なしは <c>false</c>。
+    /// Writes an unbounded binary (excluded) column from a stream, addressed by primary key, within the same transaction
+    /// (O(chunk) streaming). When <paramref name="source"/> is <c>null</c>, sets the column to NULL. Returns <c>true</c>
+    /// when a row was updated, <c>false</c> when no row matched.
     /// </summary>
-    /// <param name="propertyName">対象列の C# プロパティ名（<c>nameof</c> 指定）</param>
-    /// <param name="key">対象行の主キー値</param>
-    /// <param name="source">書き込むストリーム（<c>null</c> で SET NULL）</param>
-    /// <param name="length"><c>source.CanSeek</c> でないときに必須の長さ（欠落は <see cref="ArgumentException"/>）</param>
-    /// <param name="cancellationToken">キャンセルトークン</param>
+    /// <param name="propertyName">The C# property name of the target column (use <c>nameof</c>).</param>
+    /// <param name="key">The primary key value of the target row.</param>
+    /// <param name="source">The stream to write (<c>null</c> for SET NULL).</param>
+    /// <param name="length">The length, required when <c>source.CanSeek</c> is false (omitting it throws <see cref="ArgumentException"/>).</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
     Task<bool> WriteBinaryColumnAsync(
         string propertyName,
         object key,
@@ -336,11 +351,11 @@ public interface ISaveHookContext
         CancellationToken cancellationToken = default
     );
 
-    /// <summary>ファイルの内容を無制限バイナリ（除外）列へ書き込むファイル糖衣（<see cref="WriteBinaryColumnAsync"/> へ委譲）</summary>
-    /// <param name="propertyName">対象列の C# プロパティ名（<c>nameof</c> 指定）</param>
-    /// <param name="key">対象行の主キー値</param>
-    /// <param name="path">読み込むファイルパス</param>
-    /// <param name="cancellationToken">キャンセルトークン</param>
+    /// <summary>File convenience method that writes a file's contents to an unbounded binary (excluded) column (delegates to <see cref="WriteBinaryColumnAsync"/>).</summary>
+    /// <param name="propertyName">The C# property name of the target column (use <c>nameof</c>).</param>
+    /// <param name="key">The primary key value of the target row.</param>
+    /// <param name="path">The path of the file to read.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
     async Task<bool> WriteBinaryColumnFromFileAsync(
         string propertyName,
         object key,
@@ -361,18 +376,18 @@ public interface ISaveHookContext
     }
 }
 
-/// <summary>特定エンティティ型に対する Save フック群を、非ジェネリックに（グラフの混在型を跨いで）呼び出すための面</summary>
-/// <remarks>登録順に Before を呼び最初の <c>false</c> で短絡、After は登録順に順次呼ぶ。型ごとに 1 度だけ構築される</remarks>
+/// <summary>A non-generic surface for invoking the save hooks of a specific entity type (across the mixed types of a graph).</summary>
+/// <remarks>Calls Before in registration order, short-circuiting on the first <c>false</c>; calls After sequentially in registration order. Built once per type.</remarks>
 public interface ISaveHookInvoker
 {
-    /// <summary>登録順に Before を呼び、最初の <c>false</c> で短絡する（1 つでも false なら false を返す）</summary>
+    /// <summary>Calls Before in registration order, short-circuiting on the first <c>false</c> (returns false when any hook returns false).</summary>
     Task<bool> InvokeBeforeAsync(
         EntityBase entity,
         SaveOperation operation,
         CancellationToken cancellationToken
     );
 
-    /// <summary>登録順に After を順次呼ぶ</summary>
+    /// <summary>Calls After sequentially in registration order.</summary>
     Task InvokeAfterAsync(
         EntityBase entity,
         SaveOperation operation,
@@ -381,22 +396,22 @@ public interface ISaveHookInvoker
     );
 }
 
-/// <summary>エンティティ型から Save フックの呼び出し面（<see cref="ISaveHookInvoker"/>）を解決するレジストリ</summary>
-/// <remarks>フックが 1 つも無い型では <c>null</c> を返す（＝完全 no-op）。実装は解決結果をキャッシュする</remarks>
+/// <summary>A registry that resolves the save hook invoker surface (<see cref="ISaveHookInvoker"/>) for an entity type.</summary>
+/// <remarks>Returns <c>null</c> for a type with no hooks at all (a complete no-op). Implementations cache resolution results.</remarks>
 public interface ISaveHookRegistry
 {
-    /// <summary>指定エンティティ型のフック呼び出し面を返す（フックなしは <c>null</c>）</summary>
+    /// <summary>Returns the hook invoker surface for the given entity type (<c>null</c> when there are no hooks).</summary>
     ISaveHookInvoker? GetInvoker(Type entityType);
 }
 
 /// <summary>
-/// <see cref="IServiceProvider"/> から <c>IEnumerable&lt;ISaveHook&lt;TEntity&gt;&gt;</c> を解決して呼び出し面を構築する
-/// 既定の <see cref="ISaveHookRegistry"/> 実装（BCL の <see cref="IServiceProvider"/> のみに依存）。
+/// The default <see cref="ISaveHookRegistry"/> implementation, which resolves <c>IEnumerable&lt;ISaveHook&lt;TEntity&gt;&gt;</c>
+/// from an <see cref="IServiceProvider"/> and builds the invoker surface (depends only on the BCL <see cref="IServiceProvider"/>).
 /// </summary>
 /// <remarks>
-/// 型 → 呼び出し面の対応を<b>このレジストリ（Scoped）単位で</b>キャッシュする（フックが Scoped サービスでありうるため
-/// プロセス静的にはしない）。呼び出し面は <see cref="SaveHookInvoker{TEntity}"/> を <see cref="Type.MakeGenericType"/> ＋
-/// <see cref="Activator"/> で 1 度だけ生成する（以降の呼び出しはリフレクションなし）。
+/// Caches the type-to-invoker mapping <b>per registry instance (Scoped)</b> — not process-static, because hooks may be
+/// Scoped services. The invoker surface is created exactly once via <see cref="Type.MakeGenericType"/> on
+/// <see cref="SaveHookInvoker{TEntity}"/> plus <see cref="Activator"/> (subsequent calls involve no reflection).
 /// </remarks>
 {{ infra_visibility }} sealed class ServiceProviderSaveHookRegistry(IServiceProvider serviceProvider)
     : ISaveHookRegistry
@@ -404,11 +419,11 @@ public interface ISaveHookRegistry
     private readonly IServiceProvider _serviceProvider = serviceProvider;
     private readonly ConcurrentDictionary<Type, ISaveHookInvoker?> _invokers = new();
 
-    /// <summary>指定型の呼び出し面を解決してキャッシュする（フックなしは <c>null</c>）</summary>
+    /// <summary>Resolves and caches the invoker surface for the given type (<c>null</c> when there are no hooks).</summary>
     public ISaveHookInvoker? GetInvoker(Type entityType) =>
         _invokers.GetOrAdd(entityType, BuildInvoker);
 
-    /// <summary><c>IEnumerable&lt;ISaveHook&lt;entityType&gt;&gt;</c> を解決し、1 つ以上あれば呼び出し面を構築する（無ければ null）</summary>
+    /// <summary>Resolves <c>IEnumerable&lt;ISaveHook&lt;entityType&gt;&gt;</c> and builds the invoker surface when at least one hook exists (null otherwise).</summary>
     private ISaveHookInvoker? BuildInvoker(Type entityType)
     {
         var hookType = typeof(ISaveHook<>).MakeGenericType(entityType);
@@ -420,7 +435,7 @@ public interface ISaveHookRegistry
             return null;
         }
 
-        // 1 つも登録が無ければ null（＝レジストリありでも完全 no-op）。materialize して件数を確定する
+        // Null when nothing is registered (a complete no-op even with a registry present). Materialize to fix the count
         var hooks = resolved.Cast<object>().ToList();
 
         if (hooks.Count == 0)
@@ -433,8 +448,8 @@ public interface ISaveHookRegistry
     }
 }
 
-/// <summary><typeparamref name="TEntity"/> 用フック群を登録順に呼び出す型付き実装（<see cref="ISaveHookInvoker"/> の具象）</summary>
-/// <typeparam name="TEntity">フック対象のエンティティ型</typeparam>
+/// <summary>Typed implementation that invokes the hooks for <typeparamref name="TEntity"/> in registration order (the concrete <see cref="ISaveHookInvoker"/>).</summary>
+/// <typeparam name="TEntity">The entity type the hooks target.</typeparam>
 {{ infra_visibility }} sealed class SaveHookInvoker<TEntity>(IEnumerable<ISaveHook<TEntity>> hooks)
     : ISaveHookInvoker
     where TEntity : EntityBase
@@ -442,7 +457,7 @@ public interface ISaveHookRegistry
     private readonly IReadOnlyList<ISaveHook<TEntity>> _hooks =
         hooks as IReadOnlyList<ISaveHook<TEntity>> ?? hooks.ToList();
 
-    /// <summary>登録順に Before を呼び、最初の <c>false</c> で短絡する</summary>
+    /// <summary>Calls Before in registration order, short-circuiting on the first <c>false</c>.</summary>
     public async Task<bool> InvokeBeforeAsync(
         EntityBase entity,
         SaveOperation operation,
@@ -462,7 +477,7 @@ public interface ISaveHookRegistry
         return true;
     }
 
-    /// <summary>登録順に After を順次呼ぶ</summary>
+    /// <summary>Calls After sequentially in registration order.</summary>
     public async Task InvokeAfterAsync(
         EntityBase entity,
         SaveOperation operation,
@@ -482,38 +497,38 @@ public interface ISaveHookRegistry
 
 {{~ if repositories && emit_shared_infra ~}}
 
-/// <summary>{{ dialect_display_name }} 接続を生成するファクトリ</summary>
+/// <summary>A factory that creates {{ dialect_display_name }} connections.</summary>
 public interface ISqlConnectionFactory
 {
-    /// <summary>新しい SQL 接続を生成する</summary>
+    /// <summary>Creates a new SQL connection.</summary>
     {{ sql_connection_type }} CreateConnection();
 }
 
-/// <summary>接続文字列から SQL 接続を生成する既定実装</summary>
+/// <summary>The default implementation that creates SQL connections from a connection string.</summary>
 public sealed class SqlConnectionFactory(string connectionString) : ISqlConnectionFactory
 {
-    /// <summary>新しい SQL 接続を生成する</summary>
+    /// <summary>Creates a new SQL connection.</summary>
     public {{ sql_connection_type }} CreateConnection() => new(connectionString);
 }
 {{~ end ~}}
 {{~ if render_contract && emit_shared_infra ~}}
 {{~ if generate_value_objects ~}}
 
-/// <summary>SQL パラメータへ渡す値を素の値へ開くヘルパー（値オブジェクトは内包値へ変換し、SqlClient が扱える型にする）</summary>
+/// <summary>Helper that unwraps values passed to SQL parameters into raw values (converts value objects to their underlying values, into types SqlClient can handle).</summary>
 {{ infra_visibility }} static class SqlParameterValue
 {
-    /// <summary>値オブジェクトなら内包値、それ以外はそのまま返す</summary>
+    /// <summary>Returns the underlying value for a value object; returns anything else as is.</summary>
     public static object? Unwrap(object? value) =>
         value is IValueObject valueObject ? valueObject.UnderlyingValue : value;
 }
 
-/// <summary>DB から読み取った素の値を、対象プロパティが値オブジェクト型なら Create で包み直す逆変換ヘルパー（Unwrap の対）</summary>
+/// <summary>Reverse-conversion helper that rewraps raw values read from the DB via Create when the target property is a value object type (the counterpart of Unwrap).</summary>
 {{ infra_visibility }} static class SqlValueObjectActivator
 {
-    /// <summary>プロパティ型ごとに解決した「素の値 → 値オブジェクト」変換子をキャッシュする（VO でない型は null）</summary>
+    /// <summary>Caches the raw-value-to-value-object converter resolved per property type (null for non-VO types).</summary>
     private static readonly ConcurrentDictionary<Type, Func<object, object>?> _factoryCache = new();
 
-    /// <summary>対象型が値オブジェクトなら素の値を Create で包み、それ以外はそのまま返す</summary>
+    /// <summary>Wraps the raw value via Create when the target type is a value object; returns anything else as is.</summary>
     public static object? Wrap(object? value, Type targetType)
     {
         if (value is null)
@@ -525,7 +540,7 @@ public sealed class SqlConnectionFactory(string connectionString) : ISqlConnecti
         return factory is null ? value : factory(value);
     }
 
-    /// <summary>対象型の IValueObject&lt;,&gt; から TValue と Create(TValue) を解決し変換子を組み立てる（VO でなければ null）</summary>
+    /// <summary>Resolves TValue and Create(TValue) from the target type's IValueObject&lt;,&gt; and builds the converter (null when not a VO).</summary>
     private static Func<object, object>? ResolveFactory(Type targetType)
     {
         var iface = Array.Find(
@@ -552,7 +567,7 @@ public sealed class SqlConnectionFactory(string connectionString) : ISqlConnecti
 
         return raw =>
         {
-            // DB から返る素の型が TValue と異なる場合のみ変換する（byte[]/Guid 等は IConvertible 非対応のため型一致時はそのまま）
+            // Convert only when the raw type returned by the DB differs from TValue (byte[]/Guid etc. do not implement IConvertible, so matching types pass through)
             var converted = valueType.IsInstanceOfType(raw)
                 ? raw
                 : Convert.ChangeType(raw, valueType, CultureInfo.InvariantCulture);
@@ -563,19 +578,21 @@ public sealed class SqlConnectionFactory(string connectionString) : ISqlConnecti
 {{~ end ~}}
 
 /// <summary>
-/// 生 SQL の束縛・スカラー変換・射影マッピングを担う共有ヘルパー（QuickER の SQL Server 実装と EF Core 版の実行器で 1 系統を共有）。
+/// Shared helper responsible for raw SQL binding, scalar conversion, and projection mapping (a single implementation shared
+/// by QuickER's SQL Server implementation and the EF Core executor).
 /// </summary>
 /// <remarks>
-/// プロバイダ非依存の <see cref="DbCommand"/> / <see cref="DbDataReader"/> のみを扱い、特定 DB クライアントには依存しない。
-/// EF Core 単独出力（QuickER の SQL Server 実装を含まない構成）でも共通契約としてこのクラスを出力し、EF Core 版実行器が呼び出す。
+/// Works only with the provider-agnostic <see cref="DbCommand"/> / <see cref="DbDataReader"/> and does not depend on any
+/// specific DB client. Even in EF Core-only output (configurations without QuickER's SQL Server implementation), this class
+/// is emitted as a shared contract and the EF Core executor calls it.
 /// </remarks>
 {{ infra_visibility }} static class RawSqlMapper
 {
-    /// <summary>生 SQL 用パラメータの反射プロパティを型ごとにキャッシュする（束縛の 1 系統）</summary>
+    /// <summary>Caches the reflected properties of raw SQL parameter objects per type (the single binding implementation).</summary>
     private static readonly ConcurrentDictionary<Type, PropertyInfo[]> _parameterPropertyCache =
         new();
 
-    /// <summary>匿名オブジェクト等の束縛対象プロパティ（public インスタンス・読み取り可・非インデクサ）を解決する（型ごとにキャッシュ）</summary>
+    /// <summary>Resolves the bindable properties (public instance, readable, non-indexer) of an anonymous object or similar (cached per type).</summary>
     {{ infra_visibility }} static PropertyInfo[] GetBindableProperties(Type type) =>
         _parameterPropertyCache.GetOrAdd(
             type,
@@ -586,8 +603,8 @@ public sealed class SqlConnectionFactory(string connectionString) : ISqlConnecti
         );
 
     /// <summary>
-    /// プロバイダ非依存の <see cref="DbCommand"/> 版パラメータ束縛。匿名オブジェクトの public プロパティ名 <c>Foo</c> を
-    /// SQL パラメータ <c>@Foo</c> として（生 SQL には列文脈が無いため）型明示なしで束縛する。null のときは何もしない。
+    /// Provider-agnostic <see cref="DbCommand"/> parameter binding. Binds public property name <c>Foo</c> of an anonymous
+    /// object as SQL parameter <c>@Foo</c> without an explicit type (raw SQL has no column context). Does nothing when null.
     /// </summary>
     {{ infra_visibility }} static void BindParameters(DbCommand command, object? parameters)
     {
@@ -601,7 +618,7 @@ public sealed class SqlConnectionFactory(string connectionString) : ISqlConnecti
             var value =
                 {{ if generate_value_objects }}SqlParameterValue.Unwrap(property.GetValue(parameters)){{ else }}property.GetValue(parameters){{ end }};
 
-            // コレクション値（IN 用）は @名0, @名1, ... へ展開して束縛する（SQL 側の @名 も書き換える）
+            // Collection values (for IN) are expanded and bound as @name0, @name1, ... (the @name in the SQL is rewritten too)
             if (IsCollectionParameter(value))
             {
                 BindCollectionParameter(command, property.Name, (System.Collections.IEnumerable)value!);
@@ -615,17 +632,17 @@ public sealed class SqlConnectionFactory(string connectionString) : ISqlConnecti
         }
     }
 
-    /// <summary>IN 展開の対象となるコレクション値かどうか（string / byte[] は単一値として扱う）</summary>
+    /// <summary>Whether the value is a collection subject to IN expansion (string / byte[] are treated as single values).</summary>
     {{ infra_visibility }} static bool IsCollectionParameter(object? value) =>
         value is System.Collections.IEnumerable && value is not string && value is not byte[];
 
     /// <summary>
-    /// コレクション値パラメータを IN 用に展開して束縛する。SQL 内の <c>@名</c> を要素ごとの
-    /// <c>@名0, @名1, ...</c> へ書き換え、各要素を個別パラメータとして追加する。
+    /// Expands and binds a collection-valued parameter for IN. Rewrites <c>@name</c> in the SQL to per-element
+    /// <c>@name0, @name1, ...</c> and adds each element as an individual parameter.
     /// </summary>
     /// <remarks>
-    /// SQL 側は <c>IN (@名)</c> のように括弧の中で参照すること。空コレクションは <c>NULL</c> 1 個へ
-    /// 展開され（<c>IN (NULL)</c>）、どの行にも一致しない（SQL の三値論理に従う）。
+    /// Reference it inside parentheses in the SQL, as in <c>IN (@name)</c>. An empty collection expands to a single
+    /// <c>NULL</c> (<c>IN (NULL)</c>) and matches no rows (following SQL's three-valued logic).
     /// </remarks>
     {{ infra_visibility }} static void BindCollectionParameter(
         DbCommand command,
@@ -645,7 +662,7 @@ public sealed class SqlConnectionFactory(string connectionString) : ISqlConnecti
             names.Add(parameter.ParameterName);
         }
 
-        // @名 の後に識別子文字が続く場合（@名0 や @名X）は別パラメータなので書き換えない
+        // When an identifier character follows @name (as in @name0 or @nameX) it is a different parameter, so do not rewrite it
         command.CommandText = Regex.Replace(
             command.CommandText,
             $"@{Regex.Escape(name)}(?![0-9A-Za-z_])",
@@ -654,8 +671,9 @@ public sealed class SqlConnectionFactory(string connectionString) : ISqlConnecti
     }
 
     /// <summary>
-    /// 結果セットを <typeparamref name="TResult"/> へ寛容に射影して読み切る（単一値モード・DTO モードの 1 系統）。
-    /// プロバイダ非依存の <see cref="DbDataReader"/> を受け取り、QuickER・EF Core 版実行器でマッピング実装を共有する。
+    /// Reads the full result set, leniently projecting it onto <typeparamref name="TResult"/> (the single implementation of
+    /// single-value mode and DTO mode). Takes a provider-agnostic <see cref="DbDataReader"/>, so the QuickER and EF Core
+    /// executors share the mapping implementation.
     /// </summary>
     {{ infra_visibility }} static async Task<IReadOnlyList<TResult>> ReadProjectionRowsAsync<TResult>(
         DbDataReader reader,
@@ -665,23 +683,23 @@ public sealed class SqlConnectionFactory(string connectionString) : ISqlConnecti
         var resultType = typeof(TResult);
         var items = new List<TResult>();
 
-        // 単一値モード（primitive/enum/string/decimal/日時/Guid/byte[]{{ if generate_value_objects }}/値オブジェクト{{ end }}）は各行の先頭列を変換して返す
+        // Single-value mode (primitive/enum/string/decimal/date-time/Guid/byte[]{{ if generate_value_objects }}/value object{{ end }}) converts and returns the first column of each row
         if (IsSingleValueType(resultType))
         {
             while (await reader.ReadAsync(cancellationToken))
             {
                 var raw = reader.IsDBNull(0) ? null : reader.GetValue(0);
-                // 単一値モードは DBNull → default を許容する（参照型では null になり得るが射影 DTO に破損リスクはない）
+                // Single-value mode allows DBNull → default (may be null for reference types, but projections carry no corruption risk)
                 items.Add(ConvertSingleValue<TResult>(raw)!);
             }
 
             return items;
         }
 
-        // DTO モード: 型に応じた「列名 → プロパティ設定子」の解決子をキャッシュし、結果セットごとに列名で突き合わせる
+        // DTO mode: cache the per-type resolver (column name → property setter) and match by column name per result set
         var accessor = _projectionAccessorCache.GetOrAdd(resultType, BuildProjectionAccessor);
 
-        // 結果セットの列名 → 設定子（一致したプロパティのみ）を突き合わせる。1 列も一致しなければ typo ガードで例外
+        // Match result set column names to setters (matching properties only). If no column matches, throw via the typo guard
         var setters = new Action<object, object?>?[reader.FieldCount];
         var matched = false;
         for (var i = 0; i < reader.FieldCount; i++)
@@ -702,10 +720,10 @@ public sealed class SqlConnectionFactory(string connectionString) : ISqlConnecti
             }
 
             throw new InvalidOperationException(
-                $"射影先 {resultType.Name} の書き込み可能プロパティと一致する列が結果セットにありません。"
-                    + $"結果セットの列: [{string.Join(", ", columnNames)}]。"
-                    + $"{resultType.Name} のプロパティ: [{string.Join(", ", accessor.SettersByColumn.Keys)}]。"
-                    + "SELECT の別名（AS）とプロパティ名の綴りを確認してください（突き合わせは大文字小文字を無視します）。"
+                $"No column in the result set matches a writable property of projection target {resultType.Name}. "
+                    + $"Result set columns: [{string.Join(", ", columnNames)}]. "
+                    + $"Properties of {resultType.Name}: [{string.Join(", ", accessor.SettersByColumn.Keys)}]. "
+                    + "Check the SELECT aliases (AS) and property name spellings (matching is case-insensitive)."
             );
         }
 
@@ -730,7 +748,7 @@ public sealed class SqlConnectionFactory(string connectionString) : ISqlConnecti
         return items;
     }
 
-    /// <summary>スカラー・単一値モード共通の値変換（DBNull/null は default、Nullable 対応の ChangeType でベストエフォート変換）</summary>
+    /// <summary>Value conversion shared by the scalar and single-value modes (DBNull/null becomes default; best-effort conversion via Nullable-aware ChangeType).</summary>
     {{ infra_visibility }} static TResult? ConvertSingleValue<TResult>(object? raw)
     {
         if (raw is null)
@@ -743,7 +761,7 @@ public sealed class SqlConnectionFactory(string connectionString) : ISqlConnecti
             return typed;
         }
 
-        // {{ if generate_value_objects }}値オブジェクトなら素の値を Create で包む。{{ end }}TResult が Nullable<T> なら基底型へ変換する（ChangeType は Nullable を直接扱えない）
+        // {{ if generate_value_objects }}Wrap the raw value via Create for value objects. {{ end }}When TResult is Nullable<T>, convert to the underlying type (ChangeType cannot handle Nullable directly)
         var targetType = Nullable.GetUnderlyingType(typeof(TResult)) ?? typeof(TResult);
         {{~ if generate_value_objects ~}}
         if (typeof(IValueObject).IsAssignableFrom(targetType))
@@ -760,13 +778,13 @@ public sealed class SqlConnectionFactory(string connectionString) : ISqlConnecti
             when (ex is InvalidCastException or FormatException or OverflowException)
         {
             throw new InvalidOperationException(
-                $"生 SQL の結果値（型 {raw.GetType().Name}）を {typeof(TResult).Name} へ変換できませんでした。",
+                $"Could not convert the raw SQL result value (of type {raw.GetType().Name}) to {typeof(TResult).Name}.",
                 ex
             );
         }
     }
 
-    /// <summary>単一値モードとして扱う型か（primitive/enum/string/decimal/日時/Guid/byte[]{{ if generate_value_objects }}/値オブジェクト{{ end }}。Nullable は基底型で判定）</summary>
+    /// <summary>Whether the type is handled in single-value mode (primitive/enum/string/decimal/date-time/Guid/byte[]{{ if generate_value_objects }}/value object{{ end }}; Nullable is judged by its underlying type).</summary>
     private static bool IsSingleValueType(Type type)
     {
         var actual = Nullable.GetUnderlyingType(type) ?? type;
@@ -788,29 +806,29 @@ public sealed class SqlConnectionFactory(string connectionString) : ISqlConnecti
             || actual == typeof(byte[]);
     }
 
-    /// <summary>射影 DTO の「生成関数」と「列名（大文字小文字無視）→ プロパティ設定子」を保持する解決子</summary>
+    /// <summary>Resolver holding a projection DTO's factory function and its column-name (case-insensitive) to property-setter map.</summary>
     private sealed record ProjectionAccessor(
         Func<object> Create,
         IReadOnlyDictionary<string, Action<object, object?>> SettersByColumn
     );
 
-    /// <summary>射影先の型ごとに解決子をキャッシュする（列⇔プロパティの突き合わせ自体は結果セットごとに行う）</summary>
+    /// <summary>Caches the resolver per projection target type (the column-to-property matching itself happens per result set).</summary>
     private static readonly ConcurrentDictionary<Type, ProjectionAccessor> _projectionAccessorCache =
         new();
 
-    /// <summary>射影先の型から生成関数と「プロパティ名 → 設定子」を構築する（引数なしコンストラクタ必須。書き込み可能プロパティのみ対象）</summary>
+    /// <summary>Builds the factory function and the property-name-to-setter map from the projection target type (parameterless constructor required; writable properties only).</summary>
     private static ProjectionAccessor BuildProjectionAccessor(Type resultType)
     {
         var constructor = resultType.GetConstructor(Type.EmptyTypes);
         if (constructor is null)
         {
             throw new InvalidOperationException(
-                $"射影先 {resultType.Name} は QueryProjectionBySqlAsync で使えません。"
-                    + "public な引数なしコンストラクタを持つ型を指定してください（位置指定 record は非対応）。"
+                $"Projection target {resultType.Name} cannot be used with QueryProjectionBySqlAsync. "
+                    + "Specify a type with a public parameterless constructor (positional records are not supported)."
             );
         }
 
-        // init 専用も PropertyInfo.SetValue で設定できるため、set/init を問わず SetMethod があれば対象にする
+        // Init-only properties can also be set via PropertyInfo.SetValue, so include any property with a SetMethod, whether set or init
         var setters = new Dictionary<string, Action<object, object?>>(StringComparer.OrdinalIgnoreCase);
         foreach (
             var property in resultType.GetProperties(BindingFlags.Public | BindingFlags.Instance)
@@ -824,8 +842,8 @@ public sealed class SqlConnectionFactory(string connectionString) : ISqlConnecti
                 continue;
             }
 
-            // ドライバーが返す素の型は方言で異なる（例: SQLite の INTEGER は long）ため、
-            // プロパティの基底型（Nullable は基底型）へ寄せてから設定する
+            // The raw type returned by the driver differs by dialect (e.g. SQLite's INTEGER is long),
+            // so coerce to the property's underlying type (Nullable uses its underlying type) before setting
             var underlyingType =
                 Nullable.GetUnderlyingType(property.PropertyType) ?? property.PropertyType;
             setters[property.Name] = (target, raw) =>
@@ -838,11 +856,11 @@ public sealed class SqlConnectionFactory(string connectionString) : ISqlConnecti
         return new ProjectionAccessor(() => constructor.Invoke(null), setters);
     }
 
-    /// <summary>射影 DTO のプロパティへ設定する値を基底型へ寄せる（スカラー変換 ConvertSingleValue と同じ意味論）</summary>
+    /// <summary>Coerces a value being assigned to a projection DTO property to the underlying type (same semantics as the scalar conversion ConvertSingleValue).</summary>
     private static object CoerceProjectionValue(object raw, Type underlyingType)
     {
         {{~ if generate_value_objects ~}}
-        // 値オブジェクトなら素の値を Create で包む
+        // Wrap the raw value via Create for value objects
         if (typeof(IValueObject).IsAssignableFrom(underlyingType))
         {
             return SqlValueObjectActivator.Wrap(raw, underlyingType)!;
@@ -862,7 +880,7 @@ public sealed class SqlConnectionFactory(string connectionString) : ISqlConnecti
             when (ex is InvalidCastException or FormatException or OverflowException)
         {
             throw new InvalidOperationException(
-                $"生 SQL の射影値（型 {raw.GetType().Name}）を {underlyingType.Name} へ変換できませんでした。",
+                $"Could not convert the raw SQL projection value (of type {raw.GetType().Name}) to {underlyingType.Name}.",
                 ex
             );
         }
@@ -871,14 +889,14 @@ public sealed class SqlConnectionFactory(string connectionString) : ISqlConnecti
 {{~ end ~}}
 {{~ if repositories && emit_shared_infra ~}}
 
-/// <summary>エンティティに縛られない生 SQL 実行器の既定実装（束縛・スカラー変換・射影マップの単一系統）</summary>
-/// <remarks>ステートレス（接続ファクトリのみ保持）のため DI では Singleton 登録できる。Repository の生 SQL メソッドはこの実装へ委譲する。</remarks>
+/// <summary>The default implementation of the entity-agnostic raw SQL executor (the single implementation of binding, scalar conversion, and projection mapping).</summary>
+/// <remarks>Stateless (holds only the connection factory), so it can be registered as a Singleton in DI. The repository's raw SQL methods delegate to this implementation.</remarks>
 public sealed partial class SqlExecutor(ISqlConnectionFactory connectionFactory) : ISqlExecutor
 {
-    /// <summary>SQL 接続の生成元</summary>
+    /// <summary>The source of SQL connections.</summary>
     private readonly ISqlConnectionFactory _connectionFactory = connectionFactory;
 
-    /// <summary>生 SQL の SELECT を実行し、結果行を {TEntity} へ厳密（全列必須）にマップして返す</summary>
+    /// <summary>Executes a raw SQL SELECT and maps the result rows strictly (all columns required) to {TEntity}.</summary>
     public async Task<IReadOnlyList<TEntity>> QueryBySqlAsync<TEntity>(
         string sql,
         object? parameters = null,
@@ -906,7 +924,7 @@ public sealed partial class SqlExecutor(ISqlConnectionFactory connectionFactory)
         return items;
     }
 
-    /// <summary>生 SQL の SELECT を実行し、結果行を任意の <typeparamref name="TResult"/> へ寛容に射影して返す</summary>
+    /// <summary>Executes a raw SQL SELECT and leniently projects the result rows onto an arbitrary <typeparamref name="TResult"/>.</summary>
     public async Task<IReadOnlyList<TResult>> QueryProjectionBySqlAsync<TResult>(
         string sql,
         object? parameters = null,
@@ -922,11 +940,11 @@ public sealed partial class SqlExecutor(ISqlConnectionFactory connectionFactory)
         BindParameters(command, parameters);
 
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        // 射影マッピング（単一値モード・DTO モード）は共有ヘルパーの 1 系統を使う
+        // Projection mapping (single-value mode and DTO mode) uses the shared helper's single implementation
         return await RawSqlMapper.ReadProjectionRowsAsync<TResult>(reader, cancellationToken);
     }
 
-    /// <summary>生 SQL（UPDATE/DELETE/任意 DML）を実行し、影響行数を返す</summary>
+    /// <summary>Executes raw SQL (UPDATE/DELETE/any DML) and returns the number of affected rows.</summary>
     public async Task<int> ExecuteSqlAsync(
         string sql,
         object? parameters = null,
@@ -944,7 +962,7 @@ public sealed partial class SqlExecutor(ISqlConnectionFactory connectionFactory)
         return await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
-    /// <summary>生 SQL を実行し、単一のスカラー値を返す（該当なし・DBNull は <c>default</c>）</summary>
+    /// <summary>Executes raw SQL and returns a single scalar value (<c>default</c> when there is no match or DBNull).</summary>
     public async Task<TResult?> ExecuteScalarSqlAsync<TResult>(
         string sql,
         object? parameters = null,
@@ -964,9 +982,10 @@ public sealed partial class SqlExecutor(ISqlConnectionFactory connectionFactory)
     }
 
     /// <summary>
-    /// 匿名オブジェクト等の public インスタンスプロパティを列挙し、プロパティ名 <c>Foo</c> を SQL パラメータ
-    /// <c>@Foo</c> として <c>AddWithValue</c> で束縛する（生 SQL には列文脈が無いため型は明示しない）。null のときは何もしない。
-    /// 束縛対象プロパティの解決は共有ヘルパー <see cref="RawSqlMapper.GetBindableProperties"/> と 1 系統を共有する。
+    /// Enumerates the public instance properties of an anonymous object (or similar) and binds property name <c>Foo</c> as
+    /// SQL parameter <c>@Foo</c> via <c>AddWithValue</c> (raw SQL has no column context, so no explicit type). Does nothing
+    /// when null. Bindable property resolution shares the single implementation in the shared helper
+    /// <see cref="RawSqlMapper.GetBindableProperties"/>.
     /// </summary>
     internal static void BindParameters({{ sql_command_type }} command, object? parameters)
     {
@@ -980,7 +999,7 @@ public sealed partial class SqlExecutor(ISqlConnectionFactory connectionFactory)
             var value =
                 {{ if generate_value_objects }}SqlParameterValue.Unwrap(property.GetValue(parameters)){{ else }}property.GetValue(parameters){{ end }};
 
-            // コレクション値（IN 用）は共有ヘルパーで @名0, @名1, ... へ展開する（SQL 側の @名 も書き換え）
+            // Collection values (for IN) are expanded via the shared helper into @name0, @name1, ... (the @name in the SQL is rewritten too)
             if (RawSqlMapper.IsCollectionParameter(value))
             {
                 RawSqlMapper.BindCollectionParameter(
@@ -998,26 +1017,26 @@ public sealed partial class SqlExecutor(ISqlConnectionFactory connectionFactory)
 {{~ end ~}}
 
 {{~ if repositories && emit_shared_infra ~}}
-/// <summary>メタデータを用いて CRUD を実装する {{ dialect_display_name }} 向けリポジトリ基底クラス</summary>
+/// <summary>Repository base class for {{ dialect_display_name }} that implements CRUD using metadata.</summary>
 public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
     ISqlConnectionFactory connectionFactory,
     ISaveHookRegistry? saveHooks = null
 ) : IRepository<TEntity, TKey>
     where TEntity : EntityBase, new()
 {
-    /// <summary>エンティティ型ごとに 1 度だけ構築されるメタデータ（静的フィールドで再利用）</summary>
+    /// <summary>Metadata built exactly once per entity type (reused via a static field).</summary>
     private static readonly EntitySaveMetadata _metadata = EntitySaveMetadata.For(typeof(TEntity));
 
-    /// <summary>SQL 接続の生成元</summary>
+    /// <summary>The source of SQL connections.</summary>
     private readonly ISqlConnectionFactory _connectionFactory = connectionFactory;
 
-    /// <summary>生 SQL メソッドの委譲先（束縛・マッピングを 1 系統に集約）</summary>
+    /// <summary>The delegate target of the raw SQL methods (consolidates binding and mapping into a single implementation).</summary>
     private readonly ISqlExecutor _sqlExecutor = new SqlExecutor(connectionFactory);
 
-    /// <summary>Save フックのレジストリ（未指定＝null＝フックなしで完全 no-op）</summary>
+    /// <summary>The save hook registry (unspecified = null = no hooks, a complete no-op).</summary>
     private readonly ISaveHookRegistry? _saveHooks = saveHooks;
 
-    /// <summary>主キーによる単一エンティティ取得（該当なしは null）</summary>
+    /// <summary>Gets a single entity by primary key (null when not found).</summary>
     public async Task<TEntity?> GetByIdAsync(TKey id, CancellationToken cancellationToken = default)
     {
         await using var connection = _connectionFactory.CreateConnection();
@@ -1036,7 +1055,7 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
         return _metadata.MapEntity<TEntity>(reader);
     }
 
-    /// <summary>全エンティティ取得</summary>
+    /// <summary>Gets all entities.</summary>
     public async Task<IReadOnlyList<TEntity>> GetAllAsync(
         CancellationToken cancellationToken = default
     )
@@ -1049,7 +1068,7 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
         await using var command = new {{ sql_command_type }}(_metadata.SelectAllSql, connection);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
 
-        // 列名→ordinal は行ごとに引かず、結果セットに対して 1 度だけ解決する
+        // Resolve column-name-to-ordinal once per result set instead of looking it up per row
         var ordinals = _metadata.SelectOrdinals(reader);
 
         while (await reader.ReadAsync(cancellationToken))
@@ -1060,7 +1079,7 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
         return items;
     }
 
-    /// <summary>エンティティ追加</summary>
+    /// <summary>Inserts an entity.</summary>
     public async Task InsertAsync(TEntity entity, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(entity);
@@ -1074,7 +1093,7 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
     }
 
 {{~ if repository_dialect == "sqlserver" ~}}
-    /// <summary>エンティティのコレクションを SqlBulkCopy で一括追加する</summary>
+    /// <summary>Bulk inserts a collection of entities using SqlBulkCopy.</summary>
     public async Task<int> BulkInsertAsync(
         IEnumerable<TEntity> entities,
         CancellationToken cancellationToken = default
@@ -1082,7 +1101,7 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
     {
         ArgumentNullException.ThrowIfNull(entities);
 
-        // 件数が確定しているコレクションが空なら接続を張らずに終了する
+        // If a collection with a known count is empty, return without opening a connection
         if (entities is ICollection<TEntity> { Count: 0 })
         {
             return 0;
@@ -1097,7 +1116,7 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
         };
         using var reader = _metadata.CreateDataReader(entities);
 
-        // 列名（DB カラム名）で明示マッピングし、列順への依存を避ける
+        // Map explicitly by column name (the DB column name) to avoid depending on column order
         for (var i = 0; i < reader.FieldCount; i++)
         {
             var columnName = reader.GetName(i);
@@ -1108,11 +1127,11 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
         return bulkCopy.RowsCopied;
     }
 {{~ else ~}}
-    /// <summary>エンティティのコレクションを 1 トランザクションの INSERT 群で一括追加する</summary>
+    /// <summary>Bulk inserts a collection of entities as a batch of INSERTs in a single transaction.</summary>
     /// <remarks>
-    /// SQLite には SqlBulkCopy 相当が無いため、1 接続・1 トランザクションで INSERT を繰り返す
-    /// （コマンドを 1 度だけ用意しパラメータ値を差し替えて再利用する）。SqlBulkCopy を使う SQL Server 版とは
-    /// 性能特性が異なり、大量件数では遅くなり得る。
+    /// SQLite has no SqlBulkCopy equivalent, so INSERTs are repeated over a single connection and transaction (the command
+    /// is prepared once and reused with swapped parameter values). The performance characteristics differ from the
+    /// SQL Server variant that uses SqlBulkCopy, and large row counts may be slow.
     /// </remarks>
     public async Task<int> BulkInsertAsync(
         IEnumerable<TEntity> entities,
@@ -1121,7 +1140,7 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
     {
         ArgumentNullException.ThrowIfNull(entities);
 
-        // 件数が確定しているコレクションが空なら接続を張らずに終了する
+        // If a collection with a known count is empty, return without opening a connection
         if (entities is ICollection<TEntity> { Count: 0 })
         {
             return 0;
@@ -1163,7 +1182,7 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
     }
 {{~ end ~}}
 
-    /// <summary>エンティティ更新（更新対象ありで true）</summary>
+    /// <summary>Updates an entity (true when a matching row was updated).</summary>
     public async Task<bool> UpdateAsync(
         TEntity entity,
         CancellationToken cancellationToken = default
@@ -1181,7 +1200,7 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
         return affected > 0;
     }
 
-    /// <summary>主キーによるエンティティ削除（削除対象ありで true）</summary>
+    /// <summary>Deletes an entity by primary key (true when a matching row was deleted).</summary>
     public async Task<bool> DeleteAsync(TKey id, CancellationToken cancellationToken = default)
     {
         await using var connection = _connectionFactory.CreateConnection();
@@ -1194,15 +1213,16 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
         return affected > 0;
     }
 
-    /// <summary>検索条件・並び順・Include をチェーン指定して取得するクエリを開始する</summary>
+    /// <summary>Starts a query where filters, ordering, and Include can be specified via a fluent chain.</summary>
     public SqlQuery<TEntity> Query() => new(new {{ sql_query_executor_class }}<TEntity>(_connectionFactory));
 {{~ if exclude_unbounded_binary || runtime_package_export ~}}
 
     /// <summary>
-    /// 無制限バイナリ列（除外列）を主キー指定で宛先ストリームへ読み出す（O(チャンク) のストリーミング＝blob 全量を
-    /// メモリに載せない）。<paramref name="propertyName"/> は対象列の C# プロパティ名。行なし・列 NULL は
-    /// <c>false</c>（宛先へ何も書かない）、データを書いた場合は <c>true</c>（空 blob も true）を返す。
-    /// 楽観排他（rowversion）はスコープ外＝生 SQL と同格の直接列操作。
+    /// Reads an unbounded binary (excluded) column, addressed by primary key, into the destination stream (O(chunk)
+    /// streaming — the full blob is never loaded into memory). <paramref name="propertyName"/> is the C# property name of
+    /// the target column. Returns <c>false</c> when the row is missing or the column is NULL (nothing is written to the
+    /// destination), <c>true</c> when data was written (an empty blob is also true).
+    /// Optimistic concurrency (rowversion) is out of scope — this is a direct column operation on par with raw SQL.
     /// </summary>
     protected async Task<bool> ReadUnboundedBinaryColumnAsync(
         string propertyName,
@@ -1216,7 +1236,7 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
 
-        // 単独モード（自前接続・トランザクションなし）でストリーミングエンジンへ委譲する
+        // Delegate to the streaming engine in standalone mode (own connection, no transaction)
         return await UnboundedBinaryColumnEngine.ReadAsync(
             _metadata,
             propertyName,
@@ -1229,10 +1249,11 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
     }
 
     /// <summary>
-    /// 無制限バイナリ列（除外列）を主キー指定でストリームから書き込む（O(チャンク) のストリーミング）。
-    /// <paramref name="source"/> が <c>null</c> のとき列を NULL に設定する。<c>CanSeek</c> でない Stream は
-    /// <paramref name="length"/> の指定が必須（欠落は <see cref="ArgumentException"/>）。更新した場合は <c>true</c>、
-    /// 該当行なしは <c>false</c> を返す。楽観排他（rowversion）はスコープ外＝生 SQL と同格の直接列操作。
+    /// Writes an unbounded binary (excluded) column from a stream, addressed by primary key (O(chunk) streaming).
+    /// When <paramref name="source"/> is <c>null</c>, sets the column to NULL. A Stream that is not <c>CanSeek</c> requires
+    /// <paramref name="length"/> (omitting it throws <see cref="ArgumentException"/>). Returns <c>true</c> when a row was
+    /// updated, <c>false</c> when no row matched.
+    /// Optimistic concurrency (rowversion) is out of scope — this is a direct column operation on par with raw SQL.
     /// </summary>
     protected async Task<bool> WriteUnboundedBinaryColumnAsync(
         string propertyName,
@@ -1245,7 +1266,7 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
 
-        // 単独モード（自前接続・自前トランザクション）でストリーミングエンジンへ委譲する
+        // Delegate to the streaming engine in standalone mode (own connection, own transaction)
         return await UnboundedBinaryColumnEngine.WriteAsync(
             _metadata,
             propertyName,
@@ -1259,7 +1280,7 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
     }
 {{~ end ~}}
 
-    /// <summary>RowState に従って 1 トランザクションで追加・更新・削除を保存する（既定で子をカスケード）</summary>
+    /// <summary>Saves inserts, updates, and deletes in a single transaction according to RowState (children cascade by default).</summary>
     public async Task<int> SaveAsync(
         TEntity entity,
         bool cascadeSave = true,
@@ -1270,7 +1291,7 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
     {
         ArgumentNullException.ThrowIfNull(entity);
 
-        // グラフ全体に変更が無ければ接続も張らずに終了する
+        // If the entire graph has no changes, return without even opening a connection
         if (!EntityGraphSaver.HasChanges(entity, cascadeSave))
         {
             return 0;
@@ -1279,11 +1300,11 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
 
-        // カスケードを含むグラフ全体を 1 接続・1 トランザクションで保存（MSDTC 昇格を避ける）
+        // Save the entire graph, cascades included, over a single connection and transaction (avoids MSDTC promotion)
         await using var transaction = ({{ sql_transaction_type }})
             await connection.BeginTransactionAsync(cancellationToken);
 
-        // フック登録があれば、進行中の (connection, transaction) に参加する context を供給するセッションを組み立てる
+        // If hooks are registered, build a session that supplies a context participating in the in-progress (connection, transaction)
         var hooks =
             _saveHooks is null
                 ? null
@@ -1294,7 +1315,7 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
 
         try
         {
-            // 呼び出し前に HasChanges を確認済みのため、内部の重複するグラフ走査を省く
+            // HasChanges was already checked before this call, so skip the redundant internal graph traversal
             var rows = await EntityGraphSaver.SaveAsync(
                 entity,
                 connection,
@@ -1308,8 +1329,8 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
             );
             await transaction.CommitAsync(cancellationToken);
 
-            // コミット成功後に状態を確定（Added/Updated → Unchanged）し、再保存での二重処理を防ぐ。
-            // スキップされた行（フックの Before が false）は据え置く
+            // After a successful commit, settle the state (Added/Updated → Unchanged) to prevent double-processing on a re-save.
+            // Skipped rows (where a hook's Before returned false) are left as they are
             EntityGraphSaver.AcceptChanges(entity, cascadeSave, hooks?.Skipped);
             return rows;
         }
@@ -1320,7 +1341,7 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
         }
     }
 
-    /// <summary>複数の集約ルートを 1 トランザクションでまとめて保存する（全件成功か全件ロールバックの原子的処理）</summary>
+    /// <summary>Saves multiple aggregate roots together in a single transaction (an atomic all-succeed-or-all-rollback operation).</summary>
     public async Task<int> SaveAsync(
         IEnumerable<TEntity> entities,
         bool cascadeSave = true,
@@ -1331,7 +1352,7 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
     {
         ArgumentNullException.ThrowIfNull(entities);
 
-        // 変更のあるグラフだけを対象にする（接続・トランザクションを張る前に絞り込む）
+        // Target only graphs with changes (filter before opening the connection and transaction)
         var targets = entities
             .Where(entity => entity is not null && EntityGraphSaver.HasChanges(entity, cascadeSave))
             .ToList();
@@ -1343,11 +1364,11 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
 
-        // 全エンティティのグラフを 1 接続・1 トランザクションで保存（途中失敗時は全体ロールバック）
+        // Save the graphs of all entities over a single connection and transaction (a mid-way failure rolls back everything)
         await using var transaction = ({{ sql_transaction_type }})
             await connection.BeginTransactionAsync(cancellationToken);
 
-        // フック登録があれば、進行中の (connection, transaction) に参加する context を供給するセッションを組み立てる
+        // If hooks are registered, build a session that supplies a context participating in the in-progress (connection, transaction)
         var hooks =
             _saveHooks is null
                 ? null
@@ -1361,7 +1382,7 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
             var rows = 0;
             foreach (var entity in targets)
             {
-                // targets は HasChanges で絞り込み済みのため、内部の重複するグラフ走査を省く
+                // targets is already filtered by HasChanges, so skip the redundant internal graph traversal
                 rows += await EntityGraphSaver.SaveAsync(
                     entity,
                     connection,
@@ -1377,8 +1398,8 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
 
             await transaction.CommitAsync(cancellationToken);
 
-            // コミット成功後に全グラフの状態を確定（Added/Updated → Unchanged）し、再保存での二重処理を防ぐ。
-            // スキップされた行（フックの Before が false）は据え置く
+            // After a successful commit, settle the state of every graph (Added/Updated → Unchanged) to prevent double-processing on a re-save.
+            // Skipped rows (where a hook's Before returned false) are left as they are
             foreach (var entity in targets)
             {
                 EntityGraphSaver.AcceptChanges(entity, cascadeSave, hooks?.Skipped);
@@ -1393,12 +1414,12 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
         }
     }
 
-    /// <summary>生 SQL の SELECT を実行し、結果行を {TEntity} へマップして返す</summary>
+    /// <summary>Executes a raw SQL SELECT and maps the result rows to {TEntity}.</summary>
     /// <remarks>
-    /// SELECT には {TEntity} の全列が必要（<c>SELECT *</c> または全列指定）。部分 SELECT（列不足）は不可。
-    /// パラメータは匿名オブジェクトの public プロパティ名を <c>@名</c> として型明示なしで束縛する
-    /// （<b>値は必ずパラメータで渡すこと。文字列連結はインジェクションの危険がある</b>）。
-    /// 実装は <see cref="ISqlExecutor"/> へ委譲する（束縛・マッピングの 1 系統化）。
+    /// The SELECT must return all columns of {TEntity} (<c>SELECT *</c> or all columns listed). A partial SELECT (missing
+    /// columns) is not allowed. Parameters bind the public property names of an anonymous object as <c>@name</c> without an
+    /// explicit type (<b>always pass values as parameters; string concatenation risks injection</b>).
+    /// The implementation delegates to <see cref="ISqlExecutor"/> (a single implementation of binding and mapping).
     /// </remarks>
     public Task<IReadOnlyList<TEntity>> QueryBySqlAsync(
         string sql,
@@ -1406,13 +1427,13 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
         CancellationToken cancellationToken = default
     ) => _sqlExecutor.QueryBySqlAsync<TEntity>(sql, parameters, cancellationToken);
 
-    /// <summary>生 SQL（UPDATE/DELETE/任意 DML）を実行し、影響行数を返す</summary>
+    /// <summary>Executes raw SQL (UPDATE/DELETE/any DML) and returns the number of affected rows.</summary>
     /// <remarks>
-    /// 呼び出しごとに接続を開閉する（トランザクション引数なし）。複数文をアトミックに実行したい場合は、
-    /// 1 回の呼び出し内で <c>BEGIN TRAN ... COMMIT</c> を SQL に記述すること。
-    /// パラメータ束縛は <see cref="QueryBySqlAsync"/> と同じ
-    /// （<b>値は必ずパラメータで渡すこと。文字列連結はインジェクションの危険がある</b>）。
-    /// 実装は <see cref="ISqlExecutor"/> へ委譲する。
+    /// The connection is opened and closed per call (no transaction argument). To execute multiple statements atomically,
+    /// write <c>BEGIN TRAN ... COMMIT</c> in the SQL within a single call.
+    /// Parameter binding is the same as <see cref="QueryBySqlAsync"/>
+    /// (<b>always pass values as parameters; string concatenation risks injection</b>).
+    /// The implementation delegates to <see cref="ISqlExecutor"/>.
     /// </remarks>
     public Task<int> ExecuteSqlAsync(
         string sql,
@@ -1420,13 +1441,13 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
         CancellationToken cancellationToken = default
     ) => _sqlExecutor.ExecuteSqlAsync(sql, parameters, cancellationToken);
 
-    /// <summary>生 SQL を実行し、単一のスカラー値を返す（該当なし・DBNull は <c>default</c>）</summary>
+    /// <summary>Executes raw SQL and returns a single scalar value (<c>default</c> when there is no match or DBNull).</summary>
     /// <remarks>
-    /// 結果が <c>null</c> / <see cref="DBNull"/> なら <c>default(TResult)</c>。型が合わない場合は
-    /// <see cref="Convert.ChangeType(object, Type, IFormatProvider)"/>（InvariantCulture）でベストエフォート変換し、
-    /// 変換できない場合は分かる例外を投げる。パラメータ束縛は <see cref="QueryBySqlAsync"/> と同じ
-    /// （<b>値は必ずパラメータで渡すこと。文字列連結はインジェクションの危険がある</b>）。
-    /// 実装は <see cref="ISqlExecutor"/> へ委譲する。
+    /// When the result is <c>null</c> / <see cref="DBNull"/>, returns <c>default(TResult)</c>. When the type does not match,
+    /// it performs a best-effort conversion with <see cref="Convert.ChangeType(object, Type, IFormatProvider)"/>
+    /// (InvariantCulture), throwing a descriptive exception when it cannot convert. Parameter binding is the same as
+    /// <see cref="QueryBySqlAsync"/> (<b>always pass values as parameters; string concatenation risks injection</b>).
+    /// The implementation delegates to <see cref="ISqlExecutor"/>.
     /// </remarks>
     public Task<TResult?> ExecuteScalarSqlAsync<TResult>(
         string sql,
@@ -1434,11 +1455,11 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
         CancellationToken cancellationToken = default
     ) => _sqlExecutor.ExecuteScalarSqlAsync<TResult>(sql, parameters, cancellationToken);
 
-    /// <summary>生 SQL の SELECT を実行し、結果行を任意の <typeparamref name="TResult"/> へ寛容に射影して返す（名前付きクエリの自由 SQL 射影用）</summary>
+    /// <summary>Executes a raw SQL SELECT and leniently projects the result rows onto an arbitrary <typeparamref name="TResult"/> (for raw SQL projections of named queries).</summary>
     /// <remarks>
-    /// パラメータ束縛は <see cref="QueryBySqlAsync"/> と同じ
-    /// （<b>値は必ずパラメータで渡すこと。文字列連結はインジェクションの危険がある</b>）。
-    /// 実装は <see cref="ISqlExecutor"/> へ委譲する。
+    /// Parameter binding is the same as <see cref="QueryBySqlAsync"/>
+    /// (<b>always pass values as parameters; string concatenation risks injection</b>).
+    /// The implementation delegates to <see cref="ISqlExecutor"/>.
     /// </remarks>
     protected Task<IReadOnlyList<TResult>> QueryProjectionBySqlAsync<TResult>(
         string sql,
@@ -1447,8 +1468,8 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
     ) => _sqlExecutor.QueryProjectionBySqlAsync<TResult>(sql, parameters, cancellationToken);
 }
 
-/// <summary>Save フックの After に渡す、進行中の (connection, transaction) に参加する {{ dialect_display_name }} コンテキスト</summary>
-/// <remarks>エンティティ型に束縛して生成する（<see cref="WriteBinaryColumnAsync"/> はその型の除外列を解決する）。生 SQL は <c>SqlExecutor.BindParameters</c> を流用する</remarks>
+/// <summary>The {{ dialect_display_name }} context passed to a save hook's After, participating in the in-progress (connection, transaction).</summary>
+/// <remarks>Created bound to an entity type (<see cref="WriteBinaryColumnAsync"/> resolves that type's excluded columns). Raw SQL reuses <c>SqlExecutor.BindParameters</c>.</remarks>
 {{ infra_visibility }} sealed class SqlSaveHookContext(
     {{ sql_connection_type }} connection,
     {{ sql_transaction_type }} transaction,
@@ -1459,7 +1480,7 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
     private readonly {{ sql_transaction_type }} _transaction = transaction;
     private readonly EntitySaveMetadata _metadata = EntitySaveMetadata.For(entityType);
 
-    /// <summary>同一トランザクション内で生 SQL（任意 DML）を実行し、影響行数を返す（束縛は SqlExecutor と 1 系統）</summary>
+    /// <summary>Executes raw SQL (any DML) within the same transaction and returns the number of affected rows (binding shares the single implementation with SqlExecutor).</summary>
     public async Task<int> ExecuteSqlAsync(
         string sql,
         object? parameters = null,
@@ -1473,7 +1494,7 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
         return await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
-    /// <summary>同一トランザクション内で無制限バイナリ（除外）列をストリーム書き込みする（除外なしの図では非対応）</summary>
+    /// <summary>Stream-writes an unbounded binary (excluded) column within the same transaction (unsupported for diagrams without exclusions).</summary>
     public Task<bool> WriteBinaryColumnAsync(
         string propertyName,
         object key,
@@ -1494,37 +1515,38 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
         );
 {{~ else ~}}
         throw new NotSupportedException(
-            "無制限バイナリ列の書き込みには ExcludeUnboundedBinaryColumns を有効にした生成が必要です。"
-                + "有効化するか、生 SQL（ExecuteSqlAsync）で列を更新してください。"
+            "Writing an unbounded binary column requires code generated with ExcludeUnboundedBinaryColumns enabled. "
+                + "Enable the option, or update the column with raw SQL (ExecuteSqlAsync)."
         );
 {{~ end ~}}
 }
 {{~ if exclude_unbounded_binary || runtime_package_export ~}}
 
 /// <summary>
-/// 無制限バイナリ（除外）列のストリーミング読み書きを、進行中の接続（＋任意でトランザクション）に対して行うエンジン。
+/// Engine that performs streaming reads and writes of unbounded binary (excluded) columns against an in-progress connection
+/// (plus, optionally, a transaction).
 /// </summary>
 /// <remarks>
 /// <para>
-/// Repository のストリーミングアクセサ（単独モード＝<c>transaction</c> なし）と、Save フックの
-/// <see cref="ISaveHookContext.WriteBinaryColumnAsync"/>（参加モード＝進行中のトランザクションに参加）から共用する。
+/// Shared by the repository's streaming accessors (standalone mode — no <c>transaction</c>) and the save hook's
+/// <see cref="ISaveHookContext.WriteBinaryColumnAsync"/> (enlisted mode — participating in the in-progress transaction).
 /// </para>
 /// <para>
-/// <b>SQLite の参加/単独の分岐に注意</b>: 書き込みは 1 トランザクション内で zeroblob 確保→rowid 解決→SqliteBlob コピーを行う。
-/// 単独モードでは自前でトランザクションを張って commit するが、参加モードでは進行中のトランザクションをそのまま使い
-/// commit しない（外側の Save が commit する）。取り違えると blob が消える。
+/// <b>Beware the enlisted/standalone split for SQLite</b>: a write allocates a zeroblob, resolves the rowid, and copies via
+/// SqliteBlob within one transaction. Standalone mode opens its own transaction and commits it, whereas enlisted mode uses
+/// the in-progress transaction as is and does not commit (the outer Save commits). Mixing these up loses the blob.
 /// </para>
 /// </remarks>
 {{ infra_visibility }} static class UnboundedBinaryColumnEngine
 {
-    /// <summary>指定接続（＋任意トランザクション）でコマンドを生成する</summary>
+    /// <summary>Creates a command on the given connection (plus an optional transaction).</summary>
     private static {{ sql_command_type }} CreateCommand(
         string sql,
         {{ sql_connection_type }} connection,
         {{ sql_transaction_type }}? transaction
     ) => transaction is null ? new(sql, connection) : new(sql, connection, transaction);
 
-    /// <summary>無制限バイナリ列を宛先ストリームへ読み出す（行なし・列 NULL は <c>false</c>）</summary>
+    /// <summary>Reads an unbounded binary column into the destination stream (<c>false</c> when the row is missing or the column is NULL).</summary>
     public static async Task<bool> ReadAsync(
         EntitySaveMetadata metadata,
         string propertyName,
@@ -1546,7 +1568,7 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
         );
         metadata.BindKeyParameter(command, key);
 
-        // SequentialAccess で列をストリームとして順次読む（巨大 blob を一括バッファしない）
+        // Read the column sequentially as a stream with SequentialAccess (avoids buffering a huge blob at once)
         await using var reader = await command.ExecuteReaderAsync(
             CommandBehavior.SequentialAccess,
             cancellationToken
@@ -1571,8 +1593,8 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
         return true;
 {{~ else ~}}
 
-        // rowid 解決＋NULL 判定を 1 度の SELECT で行う（SqliteBlob は rowid テーブル前提。QuickER の SQLite DDL は
-        // WITHOUT ROWID を生成しないため安全）。IS NULL は 1（真）を返す
+        // Resolve the rowid and test for NULL in a single SELECT (SqliteBlob requires a rowid table; safe because QuickER's
+        // SQLite DDL never generates WITHOUT ROWID). IS NULL yields 1 (true)
         long rowid;
 
         await using (
@@ -1615,7 +1637,7 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
 {{~ end ~}}
     }
 
-    /// <summary>無制限バイナリ列をストリームから書き込む（<paramref name="source"/>=null で SET NULL・行なしは <c>false</c>）</summary>
+    /// <summary>Writes an unbounded binary column from a stream (<paramref name="source"/>=null means SET NULL; <c>false</c> when no row matched).</summary>
     public static async Task<bool> WriteAsync(
         EntitySaveMetadata metadata,
         string propertyName,
@@ -1630,7 +1652,7 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
         var column = metadata.ColumnByPropertyName(propertyName);
         var quotedColumn = metadata.QuotedColumnName(column);
 
-        // source=null は列を NULL に設定する（除外列を「未設定」に戻す手段）
+        // source=null sets the column to NULL (the way to reset an excluded column to "unset")
         if (source is null)
         {
             await using var nullCommand = CreateCommand(
@@ -1642,10 +1664,10 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
             return await nullCommand.ExecuteNonQueryAsync(cancellationToken) > 0;
         }
 
-        // CanSeek/length の契約検証は方言に依らず統一する（SQLite の zeroblob は長さ確定が必須）
+        // The CanSeek/length contract is validated uniformly across dialects (SQLite's zeroblob requires a fixed length)
         var payloadLength = UnboundedBinaryColumns.ResolveWriteLength(source, length);
 {{~ if repository_dialect == "sqlserver" ~}}
-        // SqlClient は SqlDbType.VarBinary・Size=-1（max）で Value に Stream を渡すとストリーミング送信する
+        // SqlClient streams the upload when a Stream is passed as Value with SqlDbType.VarBinary and Size=-1 (max)
         _ = payloadLength;
 
         await using var command = CreateCommand(
@@ -1662,8 +1684,8 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
         return await command.ExecuteNonQueryAsync(cancellationToken) > 0;
 {{~ else ~}}
 
-        // 参加モード（transaction 指定あり）は外側のトランザクションを使い commit しない。
-        // 単独モード（transaction なし）は自前でトランザクションを張り、成功時に commit する
+        // Enlisted mode (transaction given) uses the outer transaction and does not commit.
+        // Standalone mode (no transaction) opens its own transaction and commits on success
         var ownsTransaction = transaction is null;
         var activeTransaction =
             transaction
@@ -1684,7 +1706,7 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
 
                 if (await allocate.ExecuteNonQueryAsync(cancellationToken) == 0)
                 {
-                    // 該当行なし（zeroblob を確保できなかった）。単独モードのみロールバックする（参加モードは外側に委ねる）
+                    // No matching row (the zeroblob could not be allocated). Roll back only in standalone mode (enlisted mode defers to the outer transaction)
                     if (ownsTransaction)
                     {
                         await activeTransaction.RollbackAsync(cancellationToken);
@@ -1725,7 +1747,7 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
                 );
             }
 
-            // 単独モードのみ commit する（参加モードは外側の Save が commit する＝ここで閉じない）
+            // Commit only in standalone mode (in enlisted mode the outer Save commits — do not close it here)
             if (ownsTransaction)
             {
                 await activeTransaction.CommitAsync(cancellationToken);
@@ -1754,9 +1776,9 @@ public abstract partial class {{ repository_base_class }}<TEntity, TKey>(
 }
 {{~ end ~}}
 
-/// <summary>クエリ WHERE 句パラメータ（名前・値・対象カラム名）。カラム名は判明時のみ設定し、型明示化に使う</summary>
-/// <param name="Name">パラメータ名（例: @p0）</param>
-/// <param name="Value">束縛する値（値オブジェクトを含み得る。素値化は束縛側で行う）</param>
-/// <param name="ColumnName">角括弧なしの対象カラム名。列を特定できない場合は null</param>
+/// <summary>A query WHERE clause parameter (name, value, target column name). The column name is set only when known and is used for explicit typing.</summary>
+/// <param name="Name">The parameter name (for example, @p0).</param>
+/// <param name="Value">The value to bind (may include a value object; unwrapping to the raw value happens on the binding side).</param>
+/// <param name="ColumnName">The target column name without brackets; null when the column cannot be identified.</param>
 {{ infra_visibility }} readonly record struct SqlQueryParameter(string Name, object? Value, string? ColumnName);
 {{~ end ~}}

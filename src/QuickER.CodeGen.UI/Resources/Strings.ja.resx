@@ -118,8 +118,11 @@
   <data name="CodeGen_GenerateApiDocs" xml:space="preserve">
     <value>API リファレンス (.g.md) を出力する</value>
   </data>
+  <data name="CodeGen_IncludeJapaneseApiDocs" xml:space="preserve">
+    <value>日本語版 API リファレンス (.ja.g.md) も出力する</value>
+  </data>
   <data name="CodeGen_ApiDocsTooltip" xml:space="preserve">
-    <value>生成コードと同名ベースの API リファレンス Markdown（{ベース名}.g.md）を 1 つ追加出力します（再生成で上書き）</value>
+    <value>スキーマに即した API リファレンス Markdown（英語）を 1 つ追加出力します。ファイル名は非分割時 {ベース名}.g.md・分割時 ApiDocs.g.md（再生成で上書き）</value>
   </data>
   <data name="CodeGen_ExcludeUnboundedBinary" xml:space="preserve">
     <value>無制限バイナリ列を取得しない (varbinary(max) / BLOB)</value>

@@ -1,3 +1,6 @@
+using System.Globalization;
+using QuickER.CodeGen.CSharp.Resources;
+
 namespace QuickER.CodeGen.CSharp;
 
 /// <summary>
@@ -93,19 +96,25 @@ public static class RuntimePackageReferenceGuidance
     /// </summary>
     /// <remarks>
     /// 各行は行頭にコメント接頭辞を付けずに返す（ヘッダへ埋め込む側が <c>// </c> を付ける）。空行は含めない。
+    /// 生成物（ヘッダ・.g.md）へ埋め込む経路はカルチャ省略＝英語固定（同一入力→バイト一致の決定性を保つ）。
+    /// GUI / CLI の画面表示は <see cref="CultureInfo.CurrentUICulture"/> を渡してローカライズする。
     /// </remarks>
     /// <param name="options">生成オプション</param>
     /// <param name="version">案内へ載せるパッケージバージョン</param>
+    /// <param name="culture">見出し行の言語。null（既定）は英語固定＝生成物へ埋め込む経路用</param>
     /// <returns>案内テキストの行一覧（見出し＋PackageReference 行）</returns>
     public static IReadOnlyList<string> BuildGuidanceLines(
         CodeGenerationOptions options,
-        string version
+        string version,
+        CultureInfo? culture = null
     )
     {
-        var lines = new List<string>
-        {
-            "このコードはランタイムを NuGet パッケージ参照で賄います。次の PackageReference を csproj に追加してください:",
-        };
+        var heading = Strings.ResourceManager.GetString(
+            nameof(Strings.CodeGen_RuntimePackageGuidanceHeading),
+            culture ?? CultureInfo.InvariantCulture
+        )!;
+
+        var lines = new List<string> { heading };
 
         lines.AddRange(BuildPackageReferenceLines(options, version));
         return lines;

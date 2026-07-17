@@ -16,27 +16,28 @@ using Microsoft.Extensions.DependencyInjection;
 namespace QuickER.Tests.GeneratedBinaryFixture;
 
 /// <summary>
-/// 生成されたリモート面（I{Entity}RemoteRepository）を ASP.NET Core Minimal API として公開するエンドポイントマッピング。
+/// Endpoint mapping that exposes the generated remote surface (I{Entity}RemoteRepository) as an ASP.NET Core Minimal API.
 /// </summary>
 /// <remarks>
 /// <para>
-/// このファイルは ASP.NET Core の FrameworkReference（<c>Microsoft.AspNetCore.App</c>）を持つプロジェクトに配置すること
-/// （SDK が <c>Microsoft.NET.Sdk.Web</c> なら追加設定は不要）。サーバー側 DI には実体のリポジトリ
-/// （<c>AddGeneratedSqlServerRepositories</c> / <c>AddGeneratedEfCoreRepositories</c> 等）を登録しておく。
+/// Place this file in a project that has the ASP.NET Core FrameworkReference (<c>Microsoft.AspNetCore.App</c>);
+/// no extra configuration is needed when the SDK is <c>Microsoft.NET.Sdk.Web</c>. Register the concrete repositories
+/// (<c>AddGeneratedSqlServerRepositories</c> / <c>AddGeneratedEfCoreRepositories</c>, etc.) in the server-side DI container.
 /// </para>
 /// <para>
-/// 各操作は <c>POST {prefix}/{エンティティ}/{操作名}</c>（JSON 本文）で公開される。認可などの横断的関心事は
-/// 戻り値の <see cref="RouteGroupBuilder"/> へ付与する（例 <c>app.MapGeneratedRemoteEndpoints().RequireAuthorization()</c>）。
-/// 例外は <see cref="SaveConflictException"/>＝409・その他＝500 の構造化 JSON（RemoteError）へ変換され、
-/// クライアント（Http{Entity}RemoteRepository）が元の例外型を復元する。
+/// Each operation is exposed as <c>POST {prefix}/{entity}/{operation}</c> (JSON body). Apply cross-cutting concerns
+/// such as authorization to the returned <see cref="RouteGroupBuilder"/>
+/// (for example <c>app.MapGeneratedRemoteEndpoints().RequireAuthorization()</c>).
+/// Exceptions are converted to structured JSON (RemoteError): <see cref="SaveConflictException"/> maps to 409 and
+/// everything else to 500, and the client (Http{Entity}RemoteRepository) restores the original exception type.
 /// </para>
 /// </remarks>
 public static class GeneratedRemoteEndpoints
 {
-    /// <summary>リモート面の全エンドポイントを prefix（既定 /quicker）配下へマッピングする</summary>
-    /// <param name="endpoints">マッピング先（<c>WebApplication</c> 等）</param>
-    /// <param name="prefix">エンドポイント群のルートプレフィックス</param>
-    /// <returns>認可等を付与できるエンドポイントグループ</returns>
+    /// <summary>Maps every remote-surface endpoint under the given prefix (defaults to /quicker).</summary>
+    /// <param name="endpoints">The mapping target (for example a <c>WebApplication</c>).</param>
+    /// <param name="prefix">The route prefix for the endpoint group.</param>
+    /// <returns>The endpoint group, to which authorization and similar concerns can be applied.</returns>
     public static RouteGroupBuilder MapGeneratedRemoteEndpoints(
         this IEndpointRouteBuilder endpoints,
         string prefix = "/quicker"
@@ -51,7 +52,7 @@ public static class GeneratedRemoteEndpoints
         return group;
     }
 
-    /// <summary>ハンドラを実行し、結果 JSON の書き込みと例外→HTTP 応答の変換（409/500）を共通処理する</summary>
+    /// <summary>Runs a handler, writes the result as JSON, and maps exceptions to HTTP responses (409/500).</summary>
     private static async Task ExecuteAsync(HttpContext context, Func<Task<object?>> handler)
     {
         try
@@ -65,7 +66,7 @@ public static class GeneratedRemoteEndpoints
         }
         catch (SaveConflictException ex)
         {
-            // 楽観的競合はクライアント側で SaveConflictException として復元される（直結時と同じ catch が機能する）
+            // Optimistic-concurrency conflicts are restored on the client as SaveConflictException (the same catch works as with a direct call).
             context.Response.StatusCode = StatusCodes.Status409Conflict;
             await context.Response.WriteAsJsonAsync(
                 new RemoteError { Type = "SaveConflict", Message = ex.Message },
@@ -75,7 +76,7 @@ public static class GeneratedRemoteEndpoints
         }
         catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
         {
-            // クライアント切断・キャンセル: 応答先が既に無いため何もしない
+            // Client disconnected or cancelled: there is no longer a response target, so do nothing.
         }
         catch (Exception ex)
         {
@@ -88,7 +89,7 @@ public static class GeneratedRemoteEndpoints
         }
     }
 
-    /// <summary>リクエスト本文を JSON から復元する（空本文は例外＝500 経由でクライアントへ報告）</summary>
+    /// <summary>Restores the request body from JSON (an empty body throws, and the error is reported to the client via 500).</summary>
     private static async Task<TRequest> ReadRequestAsync<TRequest>(HttpContext context)
     {
         var request = await context.Request.ReadFromJsonAsync<TRequest>(
@@ -96,32 +97,34 @@ public static class GeneratedRemoteEndpoints
             context.RequestAborted
         );
 
-        return request ?? throw new InvalidOperationException("リクエスト本文が空です。");
+        return request ?? throw new InvalidOperationException("The request body is empty.");
     }
 
-    /// <summary>DI からリモート面リポジトリを解決する</summary>
+    /// <summary>Resolves the remote-surface repository from DI.</summary>
     private static TRepository Repository<TRepository>(HttpContext context)
         where TRepository : notnull => context.RequestServices.GetRequiredService<TRepository>();
 
-    /// <summary>URL クエリ（<c>?id=</c>）の主キーを復元する（クライアントの <c>FormatKeyForQuery</c> と同一の JSON 規則）</summary>
+    /// <summary>Restores the primary key from the URL query (<c>?id=</c>) using the same JSON rules as the client's <c>FormatKeyForQuery</c>.</summary>
     private static TKey ParseKeyFromQuery<TKey>(HttpContext context)
     {
         var raw = context.Request.Query["id"].ToString();
 
         if (string.IsNullOrEmpty(raw))
         {
-            throw new InvalidOperationException("クエリ文字列 id が指定されていません。");
+            throw new InvalidOperationException("The 'id' query string was not supplied.");
         }
 
         return JsonSerializer.Deserialize<TKey>(raw, RemoteJson.Options)
-            ?? throw new InvalidOperationException("クエリ文字列 id を復元できませんでした。");
+            ?? throw new InvalidOperationException("The 'id' query string could not be restored.");
     }
 
     /// <summary>
-    /// 無制限バイナリ列のダウンロード（GET）を実行する。読み取り関数が <c>false</c>（行なし/NULL）のときは本文未送信のまま
-    /// 404 に確定し、<c>true</c>（空 blob も含む）のときは 200＋<c>application/octet-stream</c> を返す。応答を書き始めると
-    /// 404 へ切り替えられないため、応答開始を最初の書き込みまで遅延するラッパーストリームを渡す（存在判定と O(チャンク) を両立）。
-    /// 読み取り関数が本文を書き始める前に例外を投げた場合のみ 500＋<see cref="RemoteError"/> を返す。
+    /// Performs a download (GET) of an unbounded binary column. When the read function returns <c>false</c> (no row / NULL),
+    /// no body is sent and the response resolves to 404; when it returns <c>true</c> (including an empty blob), it returns
+    /// 200 with <c>application/octet-stream</c>. Because the response cannot be switched to 404 once writing has begun, a
+    /// wrapper stream that defers the response start until the first write is passed in (reconciling existence detection
+    /// with O(chunk) streaming). Only when the read function throws before writing any body is a 500 with
+    /// <see cref="RemoteError"/> returned.
     /// </summary>
     private static async Task ExecuteDownloadAsync(HttpContext context, Func<Stream, Task<bool>> read)
     {
@@ -133,17 +136,17 @@ public static class GeneratedRemoteEndpoints
 
             if (!wrote)
             {
-                // 行なし/NULL: まだ本文を送っていないので 404 に確定できる
+                // No row / NULL: no body has been sent yet, so the response can resolve to 404.
                 context.Response.StatusCode = StatusCodes.Status404NotFound;
                 return;
             }
 
-            // 空 blob でも true。一度も書いていなければ 200＋ヘッダをここで確定する
+            // True even for an empty blob. If nothing was ever written, resolve 200 plus headers here.
             deferred.EnsureStarted();
         }
         catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
         {
-            // クライアント切断・キャンセル: 応答先が既に無いため何もしない
+            // Client disconnected or cancelled: there is no longer a response target, so do nothing.
         }
         catch (Exception ex) when (!context.Response.HasStarted)
         {
@@ -157,8 +160,9 @@ public static class GeneratedRemoteEndpoints
     }
 
     /// <summary>
-    /// 無制限バイナリ列のアップロード（PUT）を実行する。Content-Length 欠落（chunked 転送）は 411（長さ必須契約の転送）、
-    /// 成功は 204、行なしは 404。<see cref="Microsoft.AspNetCore.Http.HttpRequest.Body"/>（非シーク）を長さ付きで書き込みへ渡す。
+    /// Performs an upload (PUT) of an unbounded binary column. A missing Content-Length (chunked transfer) yields 411
+    /// (the transfer contract requires a length), success yields 204, and a missing row yields 404. The
+    /// <see cref="Microsoft.AspNetCore.Http.HttpRequest.Body"/> (non-seekable) is passed to the write with its length.
     /// </summary>
     private static async Task ExecuteUploadAsync(
         HttpContext context,
@@ -171,7 +175,7 @@ public static class GeneratedRemoteEndpoints
 
             if (length is null)
             {
-                // 長さ必須契約（SQLite の zeroblob 等）に反する chunked 転送は受け付けない
+                // Reject chunked transfers, which violate the length-required contract (for example SQLite's zeroblob).
                 context.Response.StatusCode = StatusCodes.Status411LengthRequired;
                 return;
             }
@@ -192,7 +196,7 @@ public static class GeneratedRemoteEndpoints
         }
     }
 
-    /// <summary>無制限バイナリ列の NULL 化（DELETE）を実行する。成功は 204、行なしは 404</summary>
+    /// <summary>Performs a NULL-out (DELETE) of an unbounded binary column. Success yields 204, a missing row yields 404.</summary>
     private static async Task ExecuteDeleteAsync(HttpContext context, Func<Task<bool>> deleteToNull)
     {
         try
@@ -213,29 +217,31 @@ public static class GeneratedRemoteEndpoints
         }
     }
 
-    /// <summary>バイナリ PUT のリクエストサイズ制限を解除するエンドポイントメタデータ（GB 級アップロードを追加設定なしで許可する）</summary>
+    /// <summary>Endpoint metadata that lifts the request size limit for the binary PUT (allowing GB-scale uploads with no extra configuration).</summary>
     /// <remarks>
-    /// 解除は DoS 面の懸念があるため、認可（<c>MapGeneratedRemoteEndpoints().RequireAuthorization()</c>）との併用を推奨する。
-    /// 既定の上限へ戻す・別値にする場合は返り値の <see cref="RouteGroupBuilder"/> でグループ全体を上書きする。
+    /// Because lifting the limit raises DoS concerns, combining it with authorization
+    /// (<c>MapGeneratedRemoteEndpoints().RequireAuthorization()</c>) is recommended.
+    /// To restore the default limit or set a different value, override the whole group via the returned <see cref="RouteGroupBuilder"/>.
     /// </remarks>
     private sealed class DisableRequestBodySizeLimit : IRequestSizeLimitMetadata
     {
-        /// <summary>メタデータ付与用の共有インスタンス</summary>
+        /// <summary>Shared instance for attaching the metadata.</summary>
         public static readonly DisableRequestBodySizeLimit Instance = new();
 
-        /// <summary>上限なし（<c>null</c>）を表す</summary>
+        /// <summary>Represents no limit (<c>null</c>).</summary>
         public long? MaxRequestBodySize => null;
     }
 
     /// <summary>
-    /// GET ダウンロードで応答開始（ステータス確定・ヘッダ送信）を最初の書き込みまで遅延するラッパーストリーム。
-    /// 書き込みが 1 度も起きなければ呼び出し側が 404 へ切り替えられる（Read 関数は false のとき何も書かない契約）。
+    /// Wrapper stream that defers the response start (status resolution and header transmission) until the first write
+    /// during a GET download. If no write ever occurs, the caller can switch to 404 (the read function's contract is to
+    /// write nothing when it returns false).
     /// </summary>
     private sealed class DeferredOctetStreamBody(HttpResponse response) : Stream
     {
         private bool _started;
 
-        /// <summary>まだ開始していなければ Content-Type を確定する（実際のヘッダ送信は最初のボディ書き込み時）</summary>
+        /// <summary>Sets the Content-Type if the response has not started yet (the actual header transmission happens on the first body write).</summary>
         public void EnsureStarted()
         {
             if (_started)
@@ -293,7 +299,7 @@ public static class GeneratedRemoteEndpoints
         public override void SetLength(long value) => throw new NotSupportedException();
     }
 
-    /// <summary>共通 CRUD（GetById / GetAll / Insert / Update / Delete / Save / SaveMany）をマッピングする</summary>
+    /// <summary>Maps the common CRUD operations (GetById / GetAll / Insert / Update / Delete / Save / SaveMany).</summary>
     private static void MapCrud<TEntity, TKey, TRepository>(
         RouteGroupBuilder group,
         string entityRoute
@@ -412,7 +418,7 @@ public static class GeneratedRemoteEndpoints
         );
     }
 
-    /// <summary>DocumentEntity のリモート面エンドポイントをマッピングする</summary>
+    /// <summary>Maps the remote-surface endpoints for DocumentEntity.</summary>
     private static void MapDocumentEndpoints(RouteGroupBuilder group)
     {
         MapCrud<DocumentEntity, int, IDocumentRemoteRepository>(
@@ -571,10 +577,10 @@ public static class GeneratedRemoteEndpoints
         );
     }
 
-    /// <summary>GetByTitle（Document）のリクエスト本文</summary>
+    /// <summary>Request body for GetByTitle (Document).</summary>
     private sealed record DocumentGetByTitleRequest(string Title);
 
-    /// <summary>DocumentNoteEntity のリモート面エンドポイントをマッピングする</summary>
+    /// <summary>Maps the remote-surface endpoints for DocumentNoteEntity.</summary>
     private static void MapDocumentNoteEndpoints(RouteGroupBuilder group)
     {
         MapCrud<DocumentNoteEntity, int, IDocumentNoteRemoteRepository>(

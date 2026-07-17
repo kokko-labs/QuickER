@@ -69,9 +69,7 @@ public class XmlDocDescriptionTests
         );
 
         content.Should().Contain("/// <summary>顧客マスタ</summary>");
-        content
-            .Should()
-            .NotContain("/// <summary>customers テーブルに対応するエンティティ</summary>");
+        content.Should().NotContain("/// <summary>Entity for the customers table</summary>");
     }
 
     [Fact(DisplayName = "Entity クラス: 説明なしのテーブルは従来の定型文のまま")]
@@ -79,7 +77,7 @@ public class XmlDocDescriptionTests
     {
         var content = Generate(BuildDiagram(tableDescription: null, columnDescription: null));
 
-        content.Should().Contain("/// <summary>customers テーブルに対応するエンティティ</summary>");
+        content.Should().Contain("/// <summary>Entity for the customers table</summary>");
     }
 
     [Fact(DisplayName = "Entity プロパティ: 説明ありの列は summary が説明文へ置き換わる")]
@@ -88,7 +86,7 @@ public class XmlDocDescriptionTests
         var content = Generate(BuildDiagram(tableDescription: null, columnDescription: "顧客名"));
 
         content.Should().Contain("/// <summary>顧客名</summary>");
-        content.Should().NotContain("/// <summary>name 列に対応するプロパティ</summary>");
+        content.Should().NotContain("/// <summary>Property for the name column</summary>");
     }
 
     [Fact(DisplayName = "Entity プロパティ: 説明なしの列は従来の定型文のまま")]
@@ -96,7 +94,7 @@ public class XmlDocDescriptionTests
     {
         var content = Generate(BuildDiagram(tableDescription: null, columnDescription: null));
 
-        content.Should().Contain("/// <summary>name 列に対応するプロパティ</summary>");
+        content.Should().Contain("/// <summary>Property for the name column</summary>");
     }
 
     [Fact(DisplayName = "VO クラス: 説明ありの列は summary が説明文へ置き換わる")]
@@ -114,7 +112,7 @@ public class XmlDocDescriptionTests
 
         // name 列が VO 化され、その VO クラスの summary が説明文になる
         content.Should().Contain("/// <summary>顧客名</summary>");
-        content.Should().NotContain("/// <summary>name 列に対応する値オブジェクト</summary>");
+        content.Should().NotContain("/// <summary>Value object for the name column</summary>");
     }
 
     [Fact(DisplayName = "EditModel クラス: 説明ありのテーブルは summary が説明文へ置き換わる")]
@@ -125,7 +123,11 @@ public class XmlDocDescriptionTests
         );
 
         content.Should().Contain("/// <summary>顧客マスタ</summary>");
-        content.Should().NotContain("/// <summary>customers テーブルの画面編集用モデル</summary>");
+        content
+            .Should()
+            .NotContain(
+                "/// <summary>Edit model for on-screen editing of the customers table.</summary>"
+            );
     }
 
     [Fact(
@@ -137,15 +139,15 @@ public class XmlDocDescriptionTests
 
         // フィールドコメント・公開バインディングプロパティコメントの両方が説明文になる
         content.Should().Contain("/// <summary>顧客名</summary>");
-        content.Should().NotContain("/// <summary>Name の画面入力文字列</summary>");
+        content.Should().NotContain("/// <summary>On-screen input string for Name.</summary>");
         content
             .Should()
             .NotContain(
-                "/// <summary>Name の画面入力用バインディング文字列（設定時に確定値へ変換）</summary>"
+                "/// <summary>On-screen input binding string for Name (converted to the confirmed value when set).</summary>"
             );
 
         // 説明ありの列でも「確定値」コメント（対象外）は定型文のまま残る
-        content.Should().Contain("/// <summary>Name の確定値</summary>");
+        content.Should().Contain("/// <summary>Confirmed value of Name.</summary>");
     }
 
     [Fact(DisplayName = "XML 特殊文字（& < >）を含む説明は summary で正しくエスケープされる")]

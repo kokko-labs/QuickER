@@ -1,18 +1,32 @@
+using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
+using QuickER.CodeGen.CSharp.Resources;
 using Scriban;
 using Scriban.Runtime;
 
 namespace QuickER.CodeGen.CSharp;
 
+/// <summary>API リファレンス Markdown を描画する言語（英語＝正本 / 日本語＝併産）</summary>
+internal enum ApiDocLanguage
+{
+    /// <summary>英語（正本・既定）</summary>
+    English,
+
+    /// <summary>日本語（<see cref="CodeGenerationOptions.IncludeJapaneseApiDocs"/> 有効時の併産）</summary>
+    Japanese,
+}
+
 /// <summary>
-/// 生成モデルとオプションから、その図のスキーマに即した API リファレンス Markdown（日本語）を描画するレンダラー。
+/// 生成モデルとオプションから、その図のスキーマに即した API リファレンス Markdown を描画するレンダラー。
+/// 英語を正本（既定）とし、言語指定で日本語版も描画できる。
 /// </summary>
 /// <remarks>
 /// <para>
-/// テンプレート本文は埋め込みリソース（Templates/ApiReferenceDoc.scriban）として保持し、
-/// <see cref="ScribanCSharpRenderer"/> と同じ手順（読込 → <see cref="Template.Parse"/> を static キャッシュ →
-/// <see cref="ScriptObject"/> で変数供給 → Render）で描画する。
+/// テンプレート本文は埋め込みリソース（Templates/ApiReferenceDoc.scriban＝英語・ApiReferenceDoc.ja.scriban＝日本語）
+/// として保持し、<see cref="ScribanCSharpRenderer"/> と同じ手順（読込 → <see cref="Template.Parse"/> を static キャッシュ →
+/// <see cref="ScriptObject"/> で変数供給 → Render）で描画する。C# 側で組み立てる文言（ナビゲーション種別・DI 登録説明）は
+/// resx から <b>明示カルチャ</b>で解決する（<see cref="CultureInfo.CurrentUICulture"/> や静的 <c>Strings.Culture</c> には依存しない）。
 /// </para>
 /// <para>
 /// 出力に生成日時・環境依存値などの非決定的要素は一切含めない（後 Stage でバイト一致のドリフト検証を追加するため）。
@@ -21,32 +35,24 @@ namespace QuickER.CodeGen.CSharp;
 /// </remarks>
 internal sealed class ApiReferenceDocRenderer
 {
-    /// <summary>API リファレンス Markdown を出力する Scriban テンプレート本文（埋め込みリソース）</summary>
-    private static readonly string TemplateText = LoadTemplate();
+    /// <summary>英語（正本）テンプレートのリソース名</summary>
+    private const string EnglishResourceName =
+        "QuickER.CodeGen.CSharp.Templates.ApiReferenceDoc.scriban";
 
-    /// <summary>埋め込みリソースから Scriban テンプレート本文を読み込む</summary>
-    private static string LoadTemplate()
+    /// <summary>日本語（併産）テンプレートのリソース名</summary>
+    private const string JapaneseResourceName =
+        "QuickER.CodeGen.CSharp.Templates.ApiReferenceDoc.ja.scriban";
+
+    /// <summary>テンプレートは固定なので言語ごとに一度だけ解析してキャッシュする</summary>
+    private static readonly Template ParsedEnglishTemplate = ParseTemplate(EnglishResourceName);
+
+    /// <summary>日本語テンプレートも同様に解析してキャッシュする</summary>
+    private static readonly Template ParsedJapaneseTemplate = ParseTemplate(JapaneseResourceName);
+
+    /// <summary>指定リソースから Scriban テンプレート本文を読み込み、解析エラーがあれば例外を投げる</summary>
+    private static Template ParseTemplate(string resourceName)
     {
-        const string resourceName = "QuickER.CodeGen.CSharp.Templates.ApiReferenceDoc.scriban";
-        var assembly = typeof(ApiReferenceDocRenderer).Assembly;
-        using var stream =
-            assembly.GetManifestResourceStream(resourceName)
-            ?? throw new InvalidOperationException(
-                $"埋め込みリソース '{resourceName}' が見つかりません。{Environment.NewLine}"
-                    + $"アセンブリ '{assembly.GetName().Name}' に Templates/ApiReferenceDoc.scriban が "
-                    + "EmbeddedResource として含まれているか確認してください。"
-            );
-        using var reader = new StreamReader(stream, Encoding.UTF8);
-        return reader.ReadToEnd();
-    }
-
-    /// <summary>テンプレートは固定なので一度だけ解析してキャッシュする</summary>
-    private static readonly Template ParsedTemplate = ParseTemplate();
-
-    /// <summary>テンプレートを解析し、解析エラーがあれば例外を投げる</summary>
-    private static Template ParseTemplate()
-    {
-        var template = Template.Parse(TemplateText);
+        var template = Template.Parse(LoadTemplate(resourceName));
 
         if (template.HasErrors)
         {
@@ -56,18 +62,47 @@ internal sealed class ApiReferenceDocRenderer
             );
 
             throw new InvalidOperationException(
-                $"API リファレンステンプレートの解析に失敗しました。{Environment.NewLine}{message}"
+                $"API リファレンステンプレート '{resourceName}' の解析に失敗しました。{Environment.NewLine}{message}"
             );
         }
 
         return template;
     }
 
-    /// <summary>
-    /// 生成モデルとオプションから API リファレンス Markdown 文字列を描画する。
-    /// </summary>
-    public string Render(CSharpGenerationModel model, CodeGenerationOptions options)
+    /// <summary>埋め込みリソースから Scriban テンプレート本文を読み込む</summary>
+    private static string LoadTemplate(string resourceName)
     {
+        var assembly = typeof(ApiReferenceDocRenderer).Assembly;
+        using var stream =
+            assembly.GetManifestResourceStream(resourceName)
+            ?? throw new InvalidOperationException(
+                $"埋め込みリソース '{resourceName}' が見つかりません。{Environment.NewLine}"
+                    + $"アセンブリ '{assembly.GetName().Name}' に対応する .scriban が "
+                    + "EmbeddedResource として含まれているか確認してください。"
+            );
+        using var reader = new StreamReader(stream, Encoding.UTF8);
+        return reader.ReadToEnd();
+    }
+
+    /// <summary>
+    /// 生成モデルとオプションから API リファレンス Markdown 文字列を、指定言語（既定＝英語）で描画する。
+    /// </summary>
+    public string Render(
+        CSharpGenerationModel model,
+        CodeGenerationOptions options,
+        ApiDocLanguage language = ApiDocLanguage.English
+    )
+    {
+        // C# 側で組み立てる文言（ナビゲーション種別・DI 登録説明・パッケージ案内見出し）を解決する明示カルチャ。
+        // 英語（正本）は中立リソース＝不変カルチャ、日本語は ja サテライトを使う。CurrentUICulture には依存しない。
+        var culture =
+            language == ApiDocLanguage.Japanese
+                ? CultureInfo.GetCultureInfo("ja")
+                : CultureInfo.InvariantCulture;
+
+        var parsedTemplate =
+            language == ApiDocLanguage.Japanese ? ParsedJapaneseTemplate : ParsedEnglishTemplate;
+
         // 共通契約（Repository 契約・データアクセス API）が生成されるか。QuickER 版 Repository・EF Core・
         // インメモリのいずれかが有効なら契約が出るため、データアクセス節・使い方節を出力する。
         var hasContract =
@@ -84,7 +119,7 @@ internal sealed class ApiReferenceDocRenderer
 
         var entities = model
             .EntityClasses.Select(entity =>
-                BuildEntityView(entity, repositoryByEntity, hasContract)
+                BuildEntityView(entity, repositoryByEntity, hasContract, culture)
             )
             .ToList();
 
@@ -94,14 +129,20 @@ internal sealed class ApiReferenceDocRenderer
             ["entities"] = entities,
             ["has_contract"] = hasContract,
             // 実際の生成モードに追従した DI 登録例（単一方言 / マルチ方言 keyed / EF Core / インメモリ）。
-            ["di_registrations"] = hasContract ? BuildDiRegistrations(options) : new List<object>(),
+            ["di_registrations"] = hasContract
+                ? BuildDiRegistrations(options, culture)
+                : new List<object>(),
             // 図の実際の先頭エンティティで具体化した CRUD/クエリ例（契約が出るときのみ）。
             ["example"] = hasContract ? BuildExample(model, repositoryByEntity) : null,
             // パッケージ参照モードのときだけ必要な PackageReference 一覧を載せる（ガイダンスと同一文言）。
             ["package_guidance_lines"] =
                 hasContract && options.UseRuntimePackages
                     ? RuntimePackageReferenceGuidance
-                        .BuildGuidanceLines(options, RuntimePackages.ResolveGuidanceVersion())
+                        .BuildGuidanceLines(
+                            options,
+                            RuntimePackages.ResolveGuidanceVersion(),
+                            culture
+                        )
                         .Select(EscapeCell)
                         .ToList()
                     : new List<string>(),
@@ -115,7 +156,7 @@ internal sealed class ApiReferenceDocRenderer
         // ScribanCSharpRenderer に倣い、改行を環境改行へ正規化し末尾を単一改行に揃える。
         // さらに 3 行以上連続する空行（条件ブロックのスキップ由来）を 1 空行へ畳む。
         var rendered =
-            ParsedTemplate.Render(context).ReplaceLineEndings(Environment.NewLine).TrimEnd()
+            parsedTemplate.Render(context).ReplaceLineEndings(Environment.NewLine).TrimEnd()
             + Environment.NewLine;
 
         return Regex.Replace(
@@ -129,9 +170,20 @@ internal sealed class ApiReferenceDocRenderer
     private static ScriptObject BuildEntityView(
         CSharpClassModel entity,
         IReadOnlyDictionary<string, CSharpRepositoryModel> repositoryByEntity,
-        bool hasContract
+        bool hasContract,
+        CultureInfo culture
     )
     {
+        // ナビゲーション種別（親参照 / 子コレクション）の表示文言を明示カルチャで解決する。
+        var parentReferenceLabel = Localize(
+            nameof(Strings.ApiDoc_Navigation_ParentReference),
+            culture
+        );
+        var childCollectionLabel = Localize(
+            nameof(Strings.ApiDoc_Navigation_ChildCollection),
+            culture
+        );
+
         var properties = entity
             .Properties.Select(property => new ScriptObject
             {
@@ -149,8 +201,10 @@ internal sealed class ApiReferenceDocRenderer
             .Navigations.Select(navigation => new ScriptObject
             {
                 ["name"] = navigation.PropertyName,
-                // 親参照（FK 先の 1 側）か子コレクション（1 対多の多側）かを日本語で示す
-                ["kind"] = navigation.IsParentReference ? "親参照" : "子コレクション",
+                // 親参照（FK 先の 1 側）か子コレクション（1 対多の多側）かを言語別文言で示す
+                ["kind"] = navigation.IsParentReference
+                    ? parentReferenceLabel
+                    : childCollectionLabel,
                 ["target"] = navigation.TypeName,
             })
             .ToList();
@@ -188,7 +242,10 @@ internal sealed class ApiReferenceDocRenderer
     /// （単一方言・マルチ方言とも同名。マルチ方言は keyed 版あり）、EF Core → <c>AddGeneratedEfCoreRepositories</c>、
     /// インメモリ → <c>AddGeneratedInMemoryRepositories</c>。複数モードが同時に有効なら該当ぶんをすべて載せる。
     /// </remarks>
-    private static List<ScriptObject> BuildDiRegistrations(CodeGenerationOptions options)
+    private static List<ScriptObject> BuildDiRegistrations(
+        CodeGenerationOptions options,
+        CultureInfo culture
+    )
     {
         var registrations = new List<ScriptObject>();
 
@@ -212,7 +269,11 @@ internal sealed class ApiReferenceDocRenderer
                 var suffix = GeneratedFilePlanner.DialectNamespaceSuffix(dialect);
                 registrations.Add(
                     Registration(
-                        $"QuickER 版 Repository（{suffix}）を DI コンテナへ登録します。",
+                        string.Format(
+                            culture,
+                            Localize(nameof(Strings.ApiDoc_Di_QuickerRepository), culture),
+                            suffix
+                        ),
                         $"services.AddGenerated{suffix}Repositories(connectionString);"
                     )
                 );
@@ -222,7 +283,7 @@ internal sealed class ApiReferenceDocRenderer
             {
                 registrations.Add(
                     Registration(
-                        "複数方言を同時に利用する場合は keyed DI を使い、`[FromKeyedServices(...)]` で方言別の実装を解決します。",
+                        Localize(nameof(Strings.ApiDoc_Di_KeyedMultiDialect), culture),
                         string.Join(
                             Environment.NewLine,
                             dialects.Select(dialect =>
@@ -240,7 +301,7 @@ internal sealed class ApiReferenceDocRenderer
         {
             registrations.Add(
                 Registration(
-                    "EF Core 版 Repository を DI コンテナへ登録します（方言・接続文字列はアプリ側で構成します）。",
+                    Localize(nameof(Strings.ApiDoc_Di_EfCore), culture),
                     "services.AddGeneratedEfCoreRepositories(options => options.UseSqlServer(connectionString));"
                 )
             );
@@ -250,7 +311,7 @@ internal sealed class ApiReferenceDocRenderer
         {
             registrations.Add(
                 Registration(
-                    "インメモリ Repository を DI コンテナへ登録します（プロトタイピング・テスト向け）。",
+                    Localize(nameof(Strings.ApiDoc_Di_InMemory), culture),
                     "services.AddGeneratedInMemoryRepositories();"
                 )
             );
@@ -258,6 +319,13 @@ internal sealed class ApiReferenceDocRenderer
 
         return registrations;
     }
+
+    /// <summary>
+    /// resx リソースを明示カルチャで解決する。<see cref="CultureInfo.CurrentUICulture"/> や静的
+    /// <c>Strings.Culture</c> には依存しない（テストの並列実行でフレークさせないため）。
+    /// </summary>
+    private static string Localize(string key, CultureInfo culture) =>
+        Strings.ResourceManager.GetString(key, culture)!;
 
     /// <summary>DI 登録例（説明＋コード）の 1 項目を作る</summary>
     private static ScriptObject Registration(string description, string code) =>

@@ -28,32 +28,32 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace QuickER.Tests.GeneratedSqlServerBinaryFixture;
 
-/// <summary>Entity ナビゲーションへ参照テーブル・カラム情報を付加する独自属性</summary>
+/// <summary>Custom attribute that annotates an entity navigation with the referenced table and column information.</summary>
 [AttributeUsage(AttributeTargets.Property, AllowMultiple = false)]
 public sealed class NavigationReferenceAttribute : Attribute
 {
-    /// <summary>参照される側（principal）のテーブル名</summary>
+    /// <summary>Gets the table name of the referenced (principal) side.</summary>
     public string PrincipalTable { get; }
 
-    /// <summary>参照される側（principal）のカラム名</summary>
+    /// <summary>Gets the column name of the referenced (principal) side.</summary>
     public string PrincipalColumn { get; }
 
-    /// <summary>外部キーを持つ側（dependent）のテーブル名</summary>
+    /// <summary>Gets the table name of the side that holds the foreign key (dependent).</summary>
     public string DependentTable { get; }
 
-    /// <summary>外部キーを持つ側（dependent）のカラム名</summary>
+    /// <summary>Gets the column name of the side that holds the foreign key (dependent).</summary>
     public string DependentColumn { get; }
 
-    /// <summary>コレクション（1 対多）ナビゲーションかどうか</summary>
+    /// <summary>Gets a value indicating whether this is a collection (one-to-many) navigation.</summary>
     public bool IsCollection { get; }
 
-    /// <summary>カスケード保存/削除の対象（子方向のナビゲーション）かどうか</summary>
+    /// <summary>Gets a value indicating whether this navigation is a target of cascade save/delete (a child-direction navigation).</summary>
     public bool Cascade { get; }
 
-    /// <summary>親（参照される側）への参照ナビゲーションかどうか</summary>
+    /// <summary>Gets a value indicating whether this is a reference navigation to the parent (referenced) side.</summary>
     public bool IsParentReference { get; }
 
-    /// <summary>参照テーブル・カラム情報を受け取り初期化する</summary>
+    /// <summary>Initializes a new instance with the referenced table and column information.</summary>
     public NavigationReferenceAttribute(
         string principalTable,
         string principalColumn,
@@ -75,68 +75,68 @@ public sealed class NavigationReferenceAttribute : Attribute
 }
 
 /// <summary>
-/// Entity プロパティに DB 列のメタ情報（SqlDbType・Size・Precision・Scale）を付与する独自属性。
-/// ランタイム（EntitySaveMetadata）が明示 <c>SqlParameter</c> を組み立てるのに使うほか、
-/// 利用者コードが列のメタ情報（最大長・桁数）を参照する用途にも使える。
+/// Custom attribute that annotates an entity property with DB column metadata (SqlDbType, Size, Precision, Scale).
+/// It is used by the runtime (EntitySaveMetadata) to build an explicit <c>SqlParameter</c>, and can also be
+/// consumed by user code that needs the column metadata (maximum length, number of digits).
 /// </summary>
 [AttributeUsage(AttributeTargets.Property, AllowMultiple = false)]
 public sealed class SqlColumnTypeAttribute : Attribute
 {
-    /// <summary>DB 列の SqlDbType</summary>
+    /// <summary>Gets the SqlDbType of the DB column.</summary>
     public SqlDbType DbType { get; }
 
-    /// <summary>文字列/バイナリの宣言長。(max) は -1、指定なしは 0</summary>
+    /// <summary>Gets or sets the declared length for string/binary columns. (max) is -1, and unspecified is 0.</summary>
     public int Size { get; set; }
 
-    /// <summary>decimal 系の全体桁数 precision</summary>
+    /// <summary>Gets or sets the total number of digits (precision) for decimal types.</summary>
     public byte Precision { get; set; }
 
-    /// <summary>decimal 系の小数桁数 scale</summary>
+    /// <summary>Gets or sets the number of fractional digits (scale) for decimal types.</summary>
     public byte Scale { get; set; }
 
-    /// <summary>decimal 系の整数部桁数（Precision - Scale）。decimal 系以外は -1</summary>
+    /// <summary>Gets the number of integral digits (Precision - Scale) for decimal types; -1 for non-decimal types.</summary>
     public int IntegralDigits => Precision > 0 ? Precision - Scale : -1;
 
-    /// <summary>SqlDbType を受け取り初期化する</summary>
+    /// <summary>Initializes a new instance with the specified SqlDbType.</summary>
     public SqlColumnTypeAttribute(SqlDbType dbType) => DbType = dbType;
 }
 
 /// <summary>
-/// Entity プロパティに DB 列の定義メタ情報（方言中立の型トークン・説明）を付与する独自属性。
-/// 生成 Entity を「DB 定義の自己記述ドキュメント」にし、リフレクションで列定義を復元できるようにする。
+/// Custom attribute that annotates an entity property with DB column definition metadata (a dialect-neutral type token and description).
+/// It turns the generated entity into a self-describing document of the DB definition, allowing the column definition to be recovered via reflection.
 /// </summary>
 /// <remarks>
-/// <see cref="TypeToken"/> は方言に依存しない中立表記（例 <c>string(50)</c> / <c>decimal(10,2)</c> / <c>int32</c>）で、
-/// 任意方言のネイティブ型へ復元できる。実行時の SQL パラメータ型付けは <see cref="SqlColumnTypeAttribute"/> の責務で、本属性は定義用メタに徹する。
+/// <see cref="TypeToken"/> is a dialect-neutral notation (for example <c>string(50)</c> / <c>decimal(10,2)</c> / <c>int32</c>)
+/// that can be recovered into the native type of any dialect. Runtime SQL parameter typing is the responsibility of <see cref="SqlColumnTypeAttribute"/>; this attribute is dedicated purely to definition metadata.
 /// </remarks>
 [AttributeUsage(AttributeTargets.Property, AllowMultiple = false)]
 public sealed class DbColumnMetaAttribute : Attribute
 {
-    /// <summary>方言中立の型トークン（例 <c>string(50)</c>）</summary>
+    /// <summary>Gets the dialect-neutral type token (for example <c>string(50)</c>).</summary>
     public string TypeToken { get; }
 
-    /// <summary>列の説明（DB の拡張プロパティ等に由来）。未設定は空文字</summary>
+    /// <summary>Gets or sets the column description (derived from DB extended properties, etc.). Empty string when unset.</summary>
     public string Description { get; set; } = string.Empty;
 
-    /// <summary>方言中立の型トークンを受け取り初期化する</summary>
+    /// <summary>Initializes a new instance with the dialect-neutral type token.</summary>
     public DbColumnMetaAttribute(string typeToken) => TypeToken = typeToken;
 }
 
 /// <summary>
-/// Entity クラスにテーブルの定義メタ情報（説明）を付与する独自属性。
-/// 生成 Entity を「DB 定義の自己記述ドキュメント」にし、リフレクションでテーブル説明を復元できるようにする。
+/// Custom attribute that annotates an entity class with table definition metadata (a description).
+/// It turns the generated entity into a self-describing document of the DB definition, allowing the table description to be recovered via reflection.
 /// </summary>
 [AttributeUsage(AttributeTargets.Class, AllowMultiple = false)]
 public sealed class DbTableMetaAttribute : Attribute
 {
-    /// <summary>テーブルの説明（DB の拡張プロパティ等に由来）。未設定は空文字</summary>
+    /// <summary>Gets or sets the table description (derived from DB extended properties, etc.). Empty string when unset.</summary>
     public string Description { get; set; } = string.Empty;
 }
 
 /// <summary>
-/// DB が値を生成する列（SQL Server の <c>rowversion</c> / <c>timestamp</c> 等）のマーカー属性。
-/// これらの列は DB 側が採番するため、QuickER 版 Repository の INSERT / BulkInsert / UPDATE の対象から除外される（SELECT では取得される）。
-/// 付与は生成オプションに依らず、DB が値を生成する列であれば常に行う。
+/// Marker attribute for columns whose values are generated by the DB (such as SQL Server's <c>rowversion</c> / <c>timestamp</c>).
+/// Because the DB assigns these values, such columns are excluded from INSERT / BulkInsert / UPDATE in the QuickER Repository (they are still read by SELECT).
+/// It is always applied to any column whose value is generated by the DB, regardless of generation options.
 /// </summary>
 [AttributeUsage(AttributeTargets.Property, AllowMultiple = false)]
 public sealed class StoreGeneratedColumnAttribute : Attribute
@@ -144,8 +144,8 @@ public sealed class StoreGeneratedColumnAttribute : Attribute
 }
 
 /// <summary>
-/// 無制限バイナリ列（<c>varbinary(max)</c> / 長さ宣言なし BLOB 等）を SELECT / UPDATE 対象から除外するマーカー属性。
-/// INSERT / BulkInsert は全列のまま扱う。値を設定したままの更新は実行時例外になる（更新は生 SQL の <c>ExecuteSqlAsync</c> で行う）。
+/// Marker attribute that excludes an unbounded binary column (such as <c>varbinary(max)</c> or a BLOB with no declared length) from SELECT / UPDATE.
+/// INSERT / BulkInsert still handle all columns. Updating while a value remains assigned throws at runtime (perform such updates with raw SQL via <c>ExecuteSqlAsync</c>).
 /// </summary>
 [AttributeUsage(AttributeTargets.Property, AllowMultiple = false)]
 public sealed class UnboundedBinaryColumnAttribute : Attribute
@@ -153,23 +153,23 @@ public sealed class UnboundedBinaryColumnAttribute : Attribute
 }
 
 /// <summary>
-/// <see cref="UnboundedBinaryColumnAttribute"/> の付いた列プロパティ（無制限バイナリ列）を型ごとにリフレクションで解決し、
-/// 更新ガードと読み取り strip の実行時判定を提供する共有ヘルパー。
+/// Shared helper that resolves, per type via reflection, the column properties marked with <see cref="UnboundedBinaryColumnAttribute"/> (unbounded binary columns),
+/// and provides the runtime decisions for the update guard and read-time strip.
 /// </summary>
 /// <remarks>
-/// スキーマ非依存・属性駆動で、除外列名や列集合を焼き込まない。方言別パッケージのメタデータとコアパッケージの
-/// リモートクライアント基底の双方から参照するため、いずれのパッケージにも属さないようコアの共有 infra に独立した
-/// static クラスとして置く（型 → 除外プロパティをキャッシュする）。
+/// It is schema-independent and attribute-driven, and does not bake in excluded column names or column sets. Because it is referenced from both the
+/// dialect-specific package metadata and the core package's remote client base, it is placed as a standalone static class in the core shared infra so that it
+/// belongs to no single package (it caches type -> excluded properties).
 /// </remarks>
 internal static class UnboundedBinaryColumns
 {
-    // 型 → 除外列プロパティ（UnboundedBinaryColumnAttribute 付き）。1 度だけ解決してキャッシュする
+    // Type -> excluded column properties (marked with UnboundedBinaryColumnAttribute). Resolved once and cached.
     private static readonly ConcurrentDictionary<Type, PropertyInfo[]> _excluded = new();
 
-    // 型 → 「未取得状態」の既定インスタンス（strip で除外列の初期値を写す元）。1 度だけ生成してキャッシュする
+    // Type -> the default instance in the "not-fetched" state (the source that strip copies excluded-column initial values from). Created once and cached.
     private static readonly ConcurrentDictionary<Type, object> _defaults = new();
 
-    /// <summary>指定型の無制限バイナリ列プロパティ（除外列）を取得する（属性なしは空配列）</summary>
+    /// <summary>Returns the unbounded binary column properties (excluded columns) of the specified type (an empty array when none are marked).</summary>
     public static PropertyInfo[] For(Type entityType) =>
         _excluded.GetOrAdd(
             entityType,
@@ -182,8 +182,8 @@ internal static class UnboundedBinaryColumns
         );
 
     /// <summary>
-    /// 除外列に「未取得状態」でない値（null でも空でもない blob）が入ったまま更新しようとしたら例外にする。
-    /// 無制限バイナリ列は Repository の UPDATE 対象外のため、値を保持したままの更新はサイレントに失われてしまう。
+    /// Throws if an update is attempted while an excluded column still holds a value that is not in the "not-fetched" state (a blob that is neither null nor empty).
+    /// Because unbounded binary columns are excluded from the Repository UPDATE, updating while such a value is retained would silently lose it.
     /// </summary>
     public static void ThrowIfExcludedAssigned(EntityBase entity)
     {
@@ -192,16 +192,16 @@ internal static class UnboundedBinaryColumns
             if (!IsUnset(property.GetValue(entity)))
             {
                 throw new InvalidOperationException(
-                    $"列 {property.Name} は無制限バイナリ列（UnboundedBinaryColumnAttribute）で Repository の UPDATE 対象外です。"
-                        + "挿入後は値を null（または空）に戻すか再取得してください。この列の更新は生 SQL（ExecuteSqlAsync）で行ってください。"
+                    $"Column {property.Name} is an unbounded binary column (UnboundedBinaryColumnAttribute) and is excluded from the Repository UPDATE. "
+                        + "After inserting, reset its value to null (or empty) or re-fetch the entity. Update this column with raw SQL (ExecuteSqlAsync)."
                 );
             }
         }
     }
 
     /// <summary>
-    /// 読み取り複製の除外列を「未取得状態」（既定インスタンスの初期値）へ落とす。実 DB 側の未取得
-    /// （MapEntity が SetValue しない＝コンストラクタ初期化子のまま。非 null byte[] は空配列・nullable は null）と揃える。
+    /// Resets the excluded columns of a read replica to the "not-fetched" state (the initial values of a default instance). This matches the not-fetched state on
+    /// the real DB side (MapEntity does not call SetValue, so the constructor initializer stands: a non-null byte[] is an empty array, and nullable is null).
     /// </summary>
     public static void StripExcluded(EntityBase entity)
     {
@@ -212,7 +212,7 @@ internal static class UnboundedBinaryColumns
             return;
         }
 
-        // 既定インスタンス（初期化子適用済み）から除外列の初期値を写す（型に依らず正確・型ごとに 1 度だけ生成）
+        // Copy the excluded-column initial values from a default instance (with initializers applied): accurate regardless of type, created once per type.
         var prototype = _defaults.GetOrAdd(
             entity.GetType(),
             static type => Activator.CreateInstance(type)!
@@ -224,7 +224,7 @@ internal static class UnboundedBinaryColumns
         }
     }
 
-    /// <summary>値が「未取得状態と同等（null / 空 byte[]）」かどうか</summary>
+    /// <summary>Gets a value indicating whether the value is equivalent to the "not-fetched" state (null / empty byte[]).</summary>
     private static bool IsUnset(object? value)
     {
         return value switch
@@ -235,13 +235,14 @@ internal static class UnboundedBinaryColumns
         };
     }
 
-    /// <summary>Stream アクセサのチャンクコピーで使う既定バッファサイズ（O(チャンク)＝blob 全量をメモリに載せない）</summary>
+    /// <summary>Default buffer size for the chunked copy used by the streaming accessors (O(chunk); never loads the whole blob into memory).</summary>
     public const int StreamCopyBufferSize = 81920;
 
     /// <summary>
-    /// 書き込み Stream の長さを決定する（方言に依らず契約を統一する共通検証）。<paramref name="source"/> が
-    /// <c>CanSeek</c> なら <c>Length - Position</c> を採用し、そうでなければ <paramref name="length"/> が必須
-    /// （欠落は <see cref="ArgumentException"/>）。SQLite の zeroblob は書き込み前に長さが確定している必要があるため。
+    /// Determines the length of the write stream (a shared check that keeps the contract uniform across dialects).
+    /// If <paramref name="source"/> is <c>CanSeek</c>, <c>Length - Position</c> is used; otherwise <paramref name="length"/>
+    /// is required (a missing value throws <see cref="ArgumentException"/>). SQLite's zeroblob requires the length to be
+    /// known before writing.
     /// </summary>
     public static long ResolveWriteLength(Stream source, long? length)
     {
@@ -253,7 +254,7 @@ internal static class UnboundedBinaryColumns
         if (length is null)
         {
             throw new ArgumentException(
-                "CanSeek でない Stream は length 指定が必要です。",
+                "A non-seekable stream requires an explicit length.",
                 nameof(length)
             );
         }
@@ -262,41 +263,41 @@ internal static class UnboundedBinaryColumns
     }
 }
 
-/// <summary>エンティティ・EditModel の変更状態</summary>
+/// <summary>Change state of an entity or EditModel.</summary>
 public enum RowState
 {
-    /// <summary>追加対象（新規）</summary>
+    /// <summary>Marked for insert (new).</summary>
     Added,
 
-    /// <summary>変更なし（保存済み）</summary>
+    /// <summary>Unchanged (already persisted).</summary>
     Unchanged,
 
-    /// <summary>更新対象</summary>
+    /// <summary>Marked for update.</summary>
     Updated,
 
-    /// <summary>削除対象</summary>
+    /// <summary>Marked for removal.</summary>
     Removed,
 }
 
-/// <summary>エンティティの変更状態（RowState）を保持する基底クラス</summary>
+/// <summary>Base class that holds the change tracking state (RowState) of an entity.</summary>
 public abstract partial class EntityBase
 {
-    /// <summary>このエンティティの変更状態（既定は変更なし。DB/JSON からの復元はそのまま変更なし扱いになる）</summary>
+    /// <summary>Change tracking state of this entity. Defaults to Unchanged; restoring from the database or JSON keeps it Unchanged.</summary>
     public RowState RowState { get; set; } = RowState.Unchanged;
 
-    /// <summary>追加対象かどうか</summary>
+    /// <summary>Gets whether this entity is marked for insert.</summary>
     public bool IsAdded => RowState == RowState.Added;
 
-    /// <summary>更新対象かどうか</summary>
+    /// <summary>Gets whether this entity is marked for update.</summary>
     public bool IsUpdated => RowState == RowState.Updated;
 
-    /// <summary>削除対象かどうか</summary>
+    /// <summary>Gets whether this entity is marked for removal.</summary>
     public bool IsRemoved => RowState == RowState.Removed;
 
-    /// <summary>変更（追加・更新・削除）があるかどうか</summary>
+    /// <summary>Gets whether this entity has any change (insert, update, or removal).</summary>
     public bool HasChanges => RowState != RowState.Unchanged;
 
-    /// <summary>このエンティティの表示名（画面ラベル等で使う）。既定は <see cref="DefaultDisplayName"/>、CustomizeDisplayName で上書き可能</summary>
+    /// <summary>Display name of this entity (used for UI labels and so on). Defaults to <see cref="DefaultDisplayName"/> and can be overridden via CustomizeDisplayName.</summary>
     public string DisplayName
     {
         get
@@ -307,22 +308,22 @@ public abstract partial class EntityBase
         }
     }
 
-    /// <summary>表示名の既定値。既定は実行時のクラス名。テーブル説明を持つエンティティは派生クラスが override する</summary>
+    /// <summary>Default display name. Defaults to the runtime class name; entities that carry a table description override this in the derived class.</summary>
     protected virtual string DefaultDisplayName => GetType().Name;
 
-    /// <summary>表示名を差し替える拡張ポイント（派生クラスの override で上書き。未上書きなら既定の表示名）</summary>
+    /// <summary>Extension point for substituting the display name (override in a derived class; when not overridden the default display name is used).</summary>
     protected virtual void CustomizeDisplayName(ref string displayName) { }
 
-    /// <summary>追加対象としてマークする（直接 new したエンティティを保存対象にする場合に使用）</summary>
+    /// <summary>Marks this entity for insert (use when a directly constructed entity should be saved).</summary>
     public void MarkAdded() => RowState = RowState.Added;
 
-    /// <summary>削除対象としてマークする（コレクションには残したまま Save で削除される）</summary>
+    /// <summary>Marks this entity for removal (it stays in the collection but is deleted on save).</summary>
     public void MarkRemoved() => RowState = RowState.Removed;
 
-    /// <summary>変更なし（保存済み）状態にする</summary>
+    /// <summary>Marks this entity as Unchanged (already persisted).</summary>
     public void MarkUnchanged() => RowState = RowState.Unchanged;
 
-    /// <summary>変更なしのときのみ更新対象としてマークする</summary>
+    /// <summary>Marks this entity for update only when it is currently Unchanged.</summary>
     public void MarkUpdated()
     {
         if (RowState == RowState.Unchanged)
@@ -331,12 +332,12 @@ public abstract partial class EntityBase
         }
     }
 
-    // ---- 値の比較・ハッシュ・JSON 出力 ----
+    // ---- Value comparison, hashing, and JSON output ----
 
-    /// <summary>型ごとの「値プロパティ」（列に対応する get/set 可能な public プロパティ。ナビゲーションと RowState など基底プロパティを除く）をキャッシュする</summary>
+    /// <summary>Caches the "value properties" per type (public get/set properties that map to columns, excluding navigations and base properties such as RowState).</summary>
     private static readonly ConcurrentDictionary<Type, PropertyInfo[]> _valuePropertyCache = new();
 
-    /// <summary>指定型の値プロパティ一覧を取得する（ナビゲーションと基底プロパティは除外。型ごとに 1 度だけ走査しキャッシュ）</summary>
+    /// <summary>Returns the value properties of the given type (navigations and base properties excluded; scanned once per type and cached).</summary>
     private static PropertyInfo[] GetValueProperties(Type type) =>
         _valuePropertyCache.GetOrAdd(
             type,
@@ -352,7 +353,7 @@ public abstract partial class EntityBase
                     .ToArray()
         );
 
-    /// <summary>他のエンティティと列の値がすべて一致するかどうかを判定する（RowState・ナビゲーションは比較対象外）</summary>
+    /// <summary>Determines whether all column values match those of another entity (RowState and navigations are excluded from the comparison).</summary>
     public bool HasSameValues(EntityBase? other)
     {
         if (other is null)
@@ -373,7 +374,7 @@ public abstract partial class EntityBase
 
         foreach (var property in GetValueProperties(type))
         {
-            // byte[] などの配列は構造的に（要素単位で）比較する
+            // Compare arrays such as byte[] structurally (element by element).
             if (
                 !StructuralComparisons.StructuralEqualityComparer.Equals(
                     property.GetValue(this),
@@ -388,8 +389,8 @@ public abstract partial class EntityBase
         return true;
     }
 
-    /// <summary>列の値から算出した値ベースのハッシュコードを取得する（RowState・ナビゲーションは対象外）</summary>
-    /// <remarks>HasSameValues が真となる 2 つのエンティティは必ず同じ値を返す。可変オブジェクトのため辞書キーに使う際は変更しないこと</remarks>
+    /// <summary>Returns a value-based hash code computed from the column values (RowState and navigations are excluded).</summary>
+    /// <remarks>Two entities for which HasSameValues is true always return the same value. Since the object is mutable, do not modify it while using it as a dictionary key.</remarks>
     public int GetValueHashCode()
     {
         var type = GetType();
@@ -398,7 +399,7 @@ public abstract partial class EntityBase
         foreach (var property in GetValueProperties(type))
         {
             var value = property.GetValue(this);
-            // byte[] などの配列は構造的なハッシュを使う
+            // Use a structural hash for arrays such as byte[].
             hash.Add(
                 value is null
                     ? 0
@@ -409,15 +410,15 @@ public abstract partial class EntityBase
         return hash.ToHashCode();
     }
 
-    /// <summary>JSON 出力（ToJson）とクローン（Clone）で共有するシリアライズ設定。型メタデータのキャッシュを効かせるため使い回す</summary>
-    /// <remarks>get/set 可能な public プロパティのみが対象。万一の循環参照は IgnoreCycles で null 化して例外を避ける（[JsonIgnore] 構成では循環自体が無く no-op）</remarks>
+    /// <summary>Serialization options shared by JSON output (ToJson) and cloning (Clone). Reused so that type-metadata caching takes effect.</summary>
+    /// <remarks>Only public get/set properties are included. Any accidental cycle is nulled out via IgnoreCycles to avoid exceptions (with the [JsonIgnore] configuration there is no cycle, so this is a no-op).</remarks>
     private static readonly JsonSerializerOptions _jsonOptions = new()
     {
         IgnoreReadOnlyProperties = true,
         ReferenceHandler = ReferenceHandler.IgnoreCycles,
     };
 
-    /// <summary>整形出力（writeIndented=true）用の設定。WriteIndented は初回利用後に変更できないため別インスタンスにする</summary>
+    /// <summary>Options for indented output (writeIndented=true). Kept as a separate instance because WriteIndented cannot be changed after first use.</summary>
     private static readonly JsonSerializerOptions _jsonOptionsIndented = new()
     {
         IgnoreReadOnlyProperties = true,
@@ -425,10 +426,10 @@ public abstract partial class EntityBase
         WriteIndented = true,
     };
 
-    /// <summary>このエンティティを JSON 文字列へシリアライズする（WebAPI へのデータ受け渡しなどに使用）</summary>
+    /// <summary>Serializes this entity to a JSON string (used for passing data to a web API and so on).</summary>
     /// <remarks>
-    /// get/set 可能な public プロパティのみが対象（get-only の IsAdded などの派生フラグは出力されない。RowState は出力される）
-    /// 子ナビゲーションは含まれ、親参照ナビゲーションは [JsonIgnore] が付くため循環しない
+    /// Only public get/set properties are included (get-only derived flags such as IsAdded are not emitted; RowState is emitted).
+    /// Child navigations are included; parent-reference navigations carry [JsonIgnore] so no cycle occurs.
     /// </remarks>
     public string ToJson(bool writeIndented = false) =>
         JsonSerializer.Serialize(
@@ -437,10 +438,10 @@ public abstract partial class EntityBase
             writeIndented ? _jsonOptionsIndented : _jsonOptions
         );
 
-    /// <summary>このエンティティの深いクローン（ディープコピー）を生成する（JSON ラウンドトリップ）</summary>
+    /// <summary>Creates a deep clone of this entity (via a JSON round-trip).</summary>
     /// <remarks>
-    /// 値・RowState・子ナビゲーションがコピーされる。親参照ナビゲーションは [JsonIgnore] のため復元されない（クローンは親を指さない）
-    /// 別レコードとして挿入する場合は、クローン後に主キーの振り直しや MarkAdded() を行うこと。戻り値の実体は元と同じ具象型
+    /// Values, RowState, and child navigations are copied. Parent-reference navigations are not restored because of [JsonIgnore] (the clone does not point to a parent).
+    /// To insert it as a separate record, reassign the primary key or call MarkAdded() after cloning. The returned instance has the same concrete type as the original.
     /// </remarks>
     public EntityBase Clone()
     {
@@ -450,18 +451,18 @@ public abstract partial class EntityBase
     }
 }
 
-/// <summary>documents テーブルに対応するエンティティ</summary>
+/// <summary>Entity for the documents table</summary>
 [Table("documents")]
 public partial class DocumentEntity : EntityBase
 {
-    /// <summary>document_id 列に対応するプロパティ</summary>
+    /// <summary>Property for the document_id column</summary>
     [Key]
     [Column("document_id")]
     [SqlColumnType(SqlDbType.Int)]
     [DbColumnMeta("int32")]
     public int DocumentId { get; set; }
 
-    /// <summary>title 列に対応するプロパティ</summary>
+    /// <summary>Property for the title column</summary>
     [Column("title")]
     [Required]
     [MaxLength(50)]
@@ -469,14 +470,14 @@ public partial class DocumentEntity : EntityBase
     [DbColumnMeta("string(50)")]
     public string Title { get; set; } = string.Empty;
 
-    /// <summary>payload 列に対応するプロパティ</summary>
+    /// <summary>Property for the payload column</summary>
     [Column("payload")]
     [SqlColumnType(SqlDbType.VarBinary, Size = -1)]
     [DbColumnMeta("binary(max)")]
     [UnboundedBinaryColumn]
     public byte[]? Payload { get; set; }
 
-    /// <summary>thumb 列に対応するプロパティ</summary>
+    /// <summary>Property for the thumb column</summary>
     [Column("thumb")]
     [Required]
     [SqlColumnType(SqlDbType.VarBinary, Size = -1)]
@@ -484,41 +485,41 @@ public partial class DocumentEntity : EntityBase
     [UnboundedBinaryColumn]
     public byte[] Thumb { get; set; } = Array.Empty<byte>();
 
-    /// <summary>checksum 列に対応するプロパティ</summary>
+    /// <summary>Property for the checksum column</summary>
     [Column("checksum")]
     [SqlColumnType(SqlDbType.VarBinary, Size = 16)]
     [DbColumnMeta("binary(16)")]
     public byte[]? Checksum { get; set; }
 
-    /// <summary>row_ver 列に対応するプロパティ</summary>
+    /// <summary>Property for the row_ver column</summary>
     [Column("row_ver")]
     [SqlColumnType(SqlDbType.Timestamp)]
     [StoreGeneratedColumn]
     public byte[]? RowVer { get; set; }
 
-    /// <summary>DocumentNotes ナビゲーションプロパティ</summary>
+    /// <summary>DocumentNotes navigation property</summary>
     [NavigationReference("documents", "document_id", "document_notes", "document_id", true, true, false)]
     public ICollection<DocumentNoteEntity> DocumentNotes { get; set; } = new List<DocumentNoteEntity>();
 }
 
-/// <summary>document_notes テーブルに対応するエンティティ</summary>
+/// <summary>Entity for the document_notes table</summary>
 [Table("document_notes")]
 public partial class DocumentNoteEntity : EntityBase
 {
-    /// <summary>note_id 列に対応するプロパティ</summary>
+    /// <summary>Property for the note_id column</summary>
     [Key]
     [Column("note_id")]
     [SqlColumnType(SqlDbType.Int)]
     [DbColumnMeta("int32")]
     public int NoteId { get; set; }
 
-    /// <summary>document_id 列に対応するプロパティ</summary>
+    /// <summary>Property for the document_id column</summary>
     [Column("document_id")]
     [SqlColumnType(SqlDbType.Int)]
     [DbColumnMeta("int32")]
     public int DocumentId { get; set; }
 
-    /// <summary>note 列に対応するプロパティ</summary>
+    /// <summary>Property for the note column</summary>
     [Column("note")]
     [Required]
     [MaxLength(100)]
@@ -526,37 +527,37 @@ public partial class DocumentNoteEntity : EntityBase
     [DbColumnMeta("string(100)")]
     public string Note { get; set; } = string.Empty;
 
-    /// <summary>Document ナビゲーションプロパティ</summary>
+    /// <summary>Document navigation property</summary>
     [JsonIgnore]
     [NavigationReference("documents", "document_id", "document_notes", "document_id", false, false, true)]
     public DocumentEntity Document { get; set; } = null!;
 }
 
-/// <summary>EditModel 共通の変更通知・エラー管理・補助処理を提供する基底クラス</summary>
+/// <summary>Base class providing change notification, error management, and helper processing common to edit models.</summary>
 public abstract partial class EditModelBase
     : INotifyPropertyChanged,
         INotifyDataErrorInfo,
         IEditableObject
 {
-    /// <summary>プロパティ名ごとのエラーメッセージ一覧</summary>
+    /// <summary>Error messages keyed by property name.</summary>
     private readonly Dictionary<string, List<string>> _errors = new();
 
-    /// <summary>プロパティ値の変更通知</summary>
+    /// <summary>Raised when a property value changes.</summary>
     public event PropertyChangedEventHandler? PropertyChanged;
 
-    /// <summary>入力エラーの変更通知</summary>
+    /// <summary>Raised when the input errors change.</summary>
     public event EventHandler<DataErrorsChangedEventArgs>? ErrorsChanged;
 
-    /// <summary>入力エラーを保持しているかどうか</summary>
+    /// <summary>Gets a value indicating whether any input errors are present.</summary>
     public bool HasErrors => _errors.Count > 0;
 
-    /// <summary>リバート処理中かどうか</summary>
+    /// <summary>Gets a value indicating whether a revert operation is in progress.</summary>
     protected bool IsReverting { get; private set; }
 
-    /// <summary>ロード処理中かどうか（ロード中は確定値の変更で Updated へ昇格させない）</summary>
+    /// <summary>Gets a value indicating whether a load is in progress (confirmed-value changes do not promote the state to Updated while loading).</summary>
     protected bool IsLoading { get; private set; }
 
-    /// <summary>この EditModel の変更状態（生成元 Entity を基準とし、確定値の変更で Updated へ昇格する）</summary>
+    /// <summary>Gets or sets the change state of this edit model (based on the source entity; confirmed-value changes promote it to Updated).</summary>
     public RowState RowState
     {
         get => _rowState;
@@ -576,31 +577,31 @@ public abstract partial class EditModelBase
         }
     }
 
-    /// <summary>RowState のバッキングフィールド</summary>
+    /// <summary>Backing field for <see cref="RowState"/>.</summary>
     private RowState _rowState = RowState.Unchanged;
 
-    /// <summary>追加対象かどうか</summary>
+    /// <summary>Gets a value indicating whether this model is marked for insertion.</summary>
     public bool IsAdded => RowState == RowState.Added;
 
-    /// <summary>更新対象かどうか</summary>
+    /// <summary>Gets a value indicating whether this model is marked for update.</summary>
     public bool IsUpdated => RowState == RowState.Updated;
 
-    /// <summary>削除対象かどうか</summary>
+    /// <summary>Gets a value indicating whether this model is marked for deletion.</summary>
     public bool IsRemoved => RowState == RowState.Removed;
 
-    /// <summary>変更（追加・更新・削除）があるかどうか</summary>
+    /// <summary>Gets a value indicating whether there are any changes (insert, update, or delete).</summary>
     public bool HasChanges => RowState != RowState.Unchanged;
 
-    /// <summary>追加対象としてマークする（新規入力の EditModel を保存対象にする場合に使用）</summary>
+    /// <summary>Marks this model for insertion (used to include a newly entered edit model in a save).</summary>
     public void MarkAdded() => RowState = RowState.Added;
 
-    /// <summary>削除対象としてマークする（コレクションには残したまま Save で削除される）</summary>
+    /// <summary>Marks this model for deletion (it stays in the collection and is deleted on save).</summary>
     public void MarkRemoved() => RowState = RowState.Removed;
 
-    /// <summary>変更なし（保存済み）状態にする</summary>
+    /// <summary>Sets the state to unchanged (saved).</summary>
     public void MarkUnchanged() => RowState = RowState.Unchanged;
 
-    /// <summary>変更なしのときのみ更新対象としてマークする（確定値の変更時に呼ばれる）</summary>
+    /// <summary>Marks this model for update only when it is currently unchanged (called when a confirmed value changes).</summary>
     public void MarkUpdated()
     {
         if (RowState == RowState.Unchanged)
@@ -609,39 +610,39 @@ public abstract partial class EditModelBase
         }
     }
 
-    /// <summary>確定値プロパティが変更された後に呼ばれる横断的フック（ユーザー編集時のみ。ロード中は呼ばれない）。UpdatedAt の打刻などに使う</summary>
-    /// <remarks>このフック内で別の確定値プロパティを更新する場合、無限再帰を避けるため propertyName で対象を判定すること</remarks>
+    /// <summary>Cross-cutting hook invoked after a confirmed-value property changes (only on user edits; not called during load). Use it for stamping UpdatedAt and similar.</summary>
+    /// <remarks>When updating another confirmed-value property inside this hook, check <paramref name="propertyName"/> to avoid infinite recursion.</remarks>
     protected virtual void OnConfirmedValueChanged(string propertyName) { }
 
-    /// <summary>確定値の変更で RowState を Updated へ昇格させるかどうか（既定 true。メタ情報など特定プロパティを除外したい場合に override）</summary>
+    /// <summary>Gets a value indicating whether a confirmed-value change should promote <see cref="RowState"/> to Updated (default true; override to exclude specific properties such as metadata).</summary>
     protected virtual bool ShouldMarkUpdated(string propertyName) => true;
 
-    /// <summary>画面入力文字列を正規化する（前後の空白・タブ・改行を除去。全角スペースも対象）</summary>
+    /// <summary>Normalizes a UI input string (trims leading and trailing whitespace, tabs, and newlines, including full-width spaces).</summary>
     protected string NormalizeInput(string propertyName, string value)
     {
-        // ComboBox 等のバインドは実行時に null を書き込み得るため許容する（null は未入力として変換分岐が処理する）
+        // Bindings such as ComboBox may write null at runtime, so allow it (null is handled as empty input by the conversion branch).
         if (value is null)
         {
             return value!;
         }
 
-        // 前後の空白のみ除去する（中間の空白・改行は保持）
+        // Trim only leading and trailing whitespace (preserve interior whitespace and newlines).
         var normalized = value.Trim();
         CustomizeInputNormalization(propertyName, value, ref normalized);
         return normalized;
     }
 
-    /// <summary>入力正規化を列単位で調整する（トリムを無効化したい列で normalizedValue に rawValue を戻す等。override で処理を追加）</summary>
+    /// <summary>Adjusts input normalization per column (for example, restore <paramref name="rawValue"/> into <paramref name="normalizedValue"/> for a column where trimming should be disabled; override to add processing).</summary>
     protected virtual void CustomizeInputNormalization(
         string propertyName,
         string rawValue,
         ref string normalizedValue
     ) { }
 
-    /// <summary>この EditModel が所属するコレクション（兄弟ナビゲーション用。EditModelCollection が設定する）</summary>
+    /// <summary>Gets or sets the collection this edit model belongs to (for sibling navigation; set by <see cref="EditModelCollection{T}"/>).</summary>
     internal IList? Owner { get; set; }
 
-    /// <summary>所属コレクション内で自身の次の要素を取得する（所属していない／末尾なら null）</summary>
+    /// <summary>Returns the next element after this one in its owning collection (null if not owned or at the end).</summary>
     public EditModelBase? GetNext()
     {
         if (Owner is null)
@@ -653,7 +654,7 @@ public abstract partial class EditModelBase
         return index >= 0 && index + 1 < Owner.Count ? (EditModelBase?)Owner[index + 1] : null;
     }
 
-    /// <summary>所属コレクション内で自身の前の要素を取得する（所属していない／先頭なら null）</summary>
+    /// <summary>Returns the previous element before this one in its owning collection (null if not owned or at the start).</summary>
     public EditModelBase? GetPrevious()
     {
         if (Owner is null)
@@ -665,13 +666,13 @@ public abstract partial class EditModelBase
         return index > 0 ? (EditModelBase?)Owner[index - 1] : null;
     }
 
-    /// <summary>所属コレクション内での自身の位置（所属していなければ -1）</summary>
+    /// <summary>Gets the position of this element within its owning collection (-1 if not owned).</summary>
     public int IndexInParent => Owner?.IndexOf(this) ?? -1;
 
-    /// <summary>所属コレクション内で自身が先頭要素かどうか（所属していなければ false）</summary>
+    /// <summary>Gets a value indicating whether this is the first element in its owning collection (false if not owned).</summary>
     public bool IsFirstInParent => IndexInParent == 0;
 
-    /// <summary>所属コレクション内で自身が末尾要素かどうか（所属していなければ false）</summary>
+    /// <summary>Gets a value indicating whether this is the last element in its owning collection (false if not owned).</summary>
     public bool IsLastInParent
     {
         get
@@ -681,7 +682,7 @@ public abstract partial class EditModelBase
         }
     }
 
-    /// <summary>自身を所属コレクションから取り除く（既存要素は Removed として削除追跡される）。取り除けたら true</summary>
+    /// <summary>Removes this element from its owning collection (existing elements are tracked as Removed). Returns true if removed.</summary>
     public bool RemoveFromParent()
     {
         if (Owner is null || !Owner.Contains(this))
@@ -693,27 +694,27 @@ public abstract partial class EditModelBase
         return true;
     }
 
-    /// <summary>自身を所属コレクションの先頭へ移動する（順序のみ変更し削除追跡しない）。移動したら true</summary>
+    /// <summary>Moves this element to the start of its owning collection (reorders only, no deletion tracking). Returns true if moved.</summary>
     public bool MoveToFirst() => MoveSelfTo(0);
 
-    /// <summary>自身を所属コレクションの末尾へ移動する。移動したら true</summary>
+    /// <summary>Moves this element to the end of its owning collection. Returns true if moved.</summary>
     public bool MoveToLast() => Owner is not null && MoveSelfTo(Owner.Count - 1);
 
-    /// <summary>自身を所属コレクション内で1つ後ろへ移動する。移動したら true</summary>
+    /// <summary>Moves this element one position later in its owning collection. Returns true if moved.</summary>
     public bool MoveToNext()
     {
         var index = IndexInParent;
         return index >= 0 && Owner is not null && index + 1 < Owner.Count && MoveSelfTo(index + 1);
     }
 
-    /// <summary>自身を所属コレクション内で1つ前へ移動する。移動したら true</summary>
+    /// <summary>Moves this element one position earlier in its owning collection. Returns true if moved.</summary>
     public bool MoveToPrevious()
     {
         var index = IndexInParent;
         return index > 0 && MoveSelfTo(index - 1);
     }
 
-    /// <summary>自身を所属コレクション内の指定位置へ移動する共通処理（ObservableCollection.Move 経由で削除追跡を起こさない）</summary>
+    /// <summary>Shared logic to move this element to the specified position in its owning collection (via ObservableCollection.Move so no deletion tracking occurs).</summary>
     private bool MoveSelfTo(int newIndex)
     {
         if (Owner is null)
@@ -731,10 +732,10 @@ public abstract partial class EditModelBase
         return true;
     }
 
-    /// <summary>所属コレクションの並び替え本体（具象クラスが型付きコレクションの Move を実装する）</summary>
+    /// <summary>Core reorder logic for the owning collection (concrete classes implement Move on the typed collection).</summary>
     protected virtual void MoveCore(int oldIndex, int newIndex) { }
 
-    /// <summary>位置プロパティ（IndexInParent / IsFirstInParent / IsLastInParent）の変更通知を発行する（コレクションの増減・並び替え時に呼ばれる）</summary>
+    /// <summary>Raises change notifications for the position properties (<see cref="IndexInParent"/> / <see cref="IsFirstInParent"/> / <see cref="IsLastInParent"/>), called when the collection changes or is reordered.</summary>
     internal void RaisePositionChanged()
     {
         OnPropertyChanged(nameof(IndexInParent));
@@ -742,17 +743,17 @@ public abstract partial class EditModelBase
         OnPropertyChanged(nameof(IsLastInParent));
     }
 
-    /// <summary>所属コレクション参照（ParentCollection）の変更通知を発行する（コレクションへの出入り時に呼ばれる。具象クラスの ParentCollection は常にこの名称で生成される）</summary>
+    /// <summary>Raises the change notification for the owning collection reference (ParentCollection), called when the element enters or leaves a collection (the concrete class's ParentCollection is always generated with this name).</summary>
     internal void RaiseParentCollectionChanged() => OnPropertyChanged("ParentCollection");
 
-    /// <summary>自身を子として保持する親モデル（カスケード親）。所有側のコレクション／単一参照が設定する。未所属・ルートは null</summary>
+    /// <summary>The parent model that holds this element as a child (cascade parent). Set by the owning collection or single reference; null when not owned or at the root.</summary>
     private EditModelBase? _parentModel;
 
-    /// <summary>自身を子として保持する親 EditModel（コレクション経由・単一参照のいずれでも設定される。未所属／ルートは null）</summary>
-    /// <remarks>親型が一意に定まる具象クラスでは、同名の型付き ParentModel が生成され本プロパティを隠す</remarks>
+    /// <summary>Gets the parent edit model that holds this element as a child (set via either a collection or a single reference; null when not owned or at the root).</summary>
+    /// <remarks>In concrete classes where the parent type is unambiguous, a typed ParentModel with the same name is generated and hides this property.</remarks>
     public EditModelBase? ParentModel => _parentModel;
 
-    /// <summary>親モデル参照を設定し、変化した場合のみ ParentModel の変更通知を発行する（所有側の setter／コレクションが呼ぶ）</summary>
+    /// <summary>Sets the parent model reference and raises the <see cref="ParentModel"/> change notification only when it changes (called by the owning setter or collection).</summary>
     internal void SetParentModel(EditModelBase? parentModel)
     {
         if (ReferenceEquals(_parentModel, parentModel))
@@ -764,11 +765,11 @@ public abstract partial class EditModelBase
         OnPropertyChanged(nameof(ParentModel));
     }
 
-    /// <summary>指定プロパティの変更通知を発行する</summary>
+    /// <summary>Raises a change notification for the specified property.</summary>
     protected void OnPropertyChanged(string propertyName) =>
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 
-    /// <summary>値が変化した場合のみ代入し変更通知を発行する共通ヘルパー（具象クラスで override して挙動を拡張できる）</summary>
+    /// <summary>Shared helper that assigns and raises a change notification only when the value changes (concrete classes can override to extend the behavior).</summary>
     protected virtual bool SetProperty<T>(ref T field, T value, string propertyName)
     {
         if (EqualityComparer<T>.Default.Equals(field, value))
@@ -781,7 +782,7 @@ public abstract partial class EditModelBase
         return true;
     }
 
-    /// <summary>指定プロパティ（null で全件）のエラー一覧を取得する</summary>
+    /// <summary>Returns the errors for the specified property (all errors when null).</summary>
     public IEnumerable GetErrors(string? propertyName)
     {
         if (string.IsNullOrEmpty(propertyName))
@@ -792,12 +793,12 @@ public abstract partial class EditModelBase
         return _errors.TryGetValue(propertyName, out var list) ? list : Enumerable.Empty<string>();
     }
 
-    /// <summary>子要素のパスを連結する（ルートは空、以降は "." 区切り）</summary>
+    /// <summary>Combines a child element path (empty at the root, "."-separated below).</summary>
     protected static string CombineErrorPath(string path, string segment) =>
         path.Length == 0 ? segment : path + "." + segment;
 
-    /// <summary>必須項目の未入力と追加検証を確認しエラーを登録する（エラーが無ければ true）</summary>
-    /// <param name="includeChildren">true で子（カスケード）も連鎖検証、false で自身のみ検証</param>
+    /// <summary>Checks required fields for missing input, runs additional validation, and registers errors (returns true when there are no errors).</summary>
+    /// <param name="includeChildren">True to cascade validation to children as well, false to validate only this model.</param>
     public bool Validate(bool includeChildren = true)
     {
         ValidateSelf();
@@ -815,11 +816,11 @@ public abstract partial class EditModelBase
         return valid;
     }
 
-    /// <summary>このノード自身を検証する（具象クラスが必須チェック等を実装）</summary>
+    /// <summary>Validates this node itself (concrete classes implement required-field checks and similar).</summary>
     protected virtual void ValidateSelf() { }
 
-    /// <summary>検証エラーをノードのパス付きで収集する（事前に Validate を呼ぶ）</summary>
-    /// <param name="includeChildren">true で子（カスケード）も再帰収集、false で自身のエラーのみ</param>
+    /// <summary>Collects validation errors with each node's path (call Validate beforehand).</summary>
+    /// <param name="includeChildren">True to recursively collect from cascade children as well, false for this model's errors only.</param>
     public IEnumerable<EditModelError> CollectErrors(bool includeChildren = true)
     {
         var errors = new List<EditModelError>();
@@ -827,7 +828,7 @@ public abstract partial class EditModelBase
         return errors;
     }
 
-    /// <summary>パス付きで検証エラーを errors へ収集する内部実装（子の再帰呼び出しで使用）</summary>
+    /// <summary>Internal implementation that collects validation errors with paths into <paramref name="errors"/> (used by recursive child calls).</summary>
     internal void CollectErrors(string path, bool includeChildren, List<EditModelError> errors)
     {
         errors.AddRange(CollectOwnErrors(path));
@@ -843,7 +844,7 @@ public abstract partial class EditModelBase
         }
     }
 
-    /// <summary>この EditModel 自身のエラーを指定パス付きで列挙する（グラフ収集の部品）</summary>
+    /// <summary>Enumerates this edit model's own errors with the specified path (building block for graph collection).</summary>
     protected IEnumerable<EditModelError> CollectOwnErrors(string path)
     {
         foreach (var pair in _errors)
@@ -855,8 +856,8 @@ public abstract partial class EditModelBase
         }
     }
 
-    /// <summary>保存確定後にグラフを変更なし状態へ戻す（自身を Unchanged にし、子の削除追跡もクリアする）</summary>
-    /// <param name="includeChildren">true で子（カスケード）も再帰的に確定する</param>
+    /// <summary>Resets the graph to the unchanged state after a save is confirmed (marks this model Unchanged and also clears children's deletion tracking).</summary>
+    /// <param name="includeChildren">True to recursively accept changes on cascade children as well.</param>
     public void AcceptChanges(bool includeChildren = true)
     {
         MarkUnchanged();
@@ -870,8 +871,8 @@ public abstract partial class EditModelBase
         }
     }
 
-    /// <summary>自身または子（カスケード）に変更があるかどうかを返す（保存ボタンの活性判定などに使用）</summary>
-    /// <param name="includeChildren">true で子（カスケード）の変更も含めて判定する</param>
+    /// <summary>Returns whether this model or its cascade children have changes (used for enabling a save button and similar).</summary>
+    /// <param name="includeChildren">True to include changes on cascade children in the check.</param>
     public bool HasGraphChanges(bool includeChildren = true)
     {
         if (HasChanges)
@@ -895,13 +896,13 @@ public abstract partial class EditModelBase
         return false;
     }
 
-    /// <summary>カスケード子（既知ナビ＋partial 追加）のリンク。バッキングフィールド</summary>
+    /// <summary>Links to cascade children (known navigations plus partial additions). Backing field.</summary>
     private List<ChildLink>? _childLinks;
 
-    /// <summary>子の登録を1度だけ実行したかどうか</summary>
+    /// <summary>Whether child registration has been executed once.</summary>
     private bool _childrenRegistered;
 
-    /// <summary>カスケード子のリンク一覧。初回アクセスで RegisterChildren／RegisterExtraChildren を1度だけ呼ぶ</summary>
+    /// <summary>List of cascade child links. Calls RegisterChildren / RegisterExtraChildren exactly once on first access.</summary>
     private IReadOnlyList<ChildLink> ChildLinks
     {
         get
@@ -922,22 +923,22 @@ public abstract partial class EditModelBase
         }
     }
 
-    /// <summary>既知のカスケード子を登録する（カスケード子を持つ具象クラスのみ生成コードが override。手動実装しない）</summary>
+    /// <summary>Registers the known cascade children (only generated code of concrete classes with cascade children overrides this; do not implement manually).</summary>
     protected virtual void RegisterChildren() { }
 
-    /// <summary>partial クラスで追加した子を AddChild / AddChildren で登録する拡張ポイント。override すると検証・収集・確定・ダーティ判定すべてに参加する</summary>
+    /// <summary>Extension point to register children added in a partial class via AddChild / AddChildren. Overriding makes them participate in validation, error collection, accepting changes, and dirty checks.</summary>
     protected virtual void RegisterExtraChildren() { }
 
-    /// <summary>子（単一参照）をカスケードに登録する（参照は遅延取得で最新を反映）</summary>
+    /// <summary>Registers a single child reference into the cascade (the reference is resolved lazily so the latest value is used).</summary>
     protected void AddChild(string name, Func<EditModelBase?> accessor) =>
         (_childLinks ??= new()).Add(ChildLink.ForSingle(name, accessor));
 
-    /// <summary>子コレクションをカスケードに登録する</summary>
+    /// <summary>Registers a child collection into the cascade.</summary>
     protected void AddChildren<T>(string name, EditModelCollection<T> collection)
         where T : EditModelBase =>
         (_childLinks ??= new()).Add(ChildLink.ForCollection(name, collection));
 
-    /// <summary>追加の子（カスケード参加要素）のリンク。単一参照と子コレクションを一様に扱う</summary>
+    /// <summary>Link to a registered child (cascade participant). Treats single references and child collections uniformly.</summary>
     private sealed class ChildLink
     {
         private readonly string _name;
@@ -961,7 +962,7 @@ public abstract partial class EditModelBase
             _acceptRemoved = acceptRemoved;
         }
 
-        /// <summary>単一の子参照を登録するリンクを生成する</summary>
+        /// <summary>Creates a link that registers a single child reference.</summary>
         public static ChildLink ForSingle(string name, Func<EditModelBase?> accessor) =>
             new(
                 name,
@@ -972,12 +973,12 @@ public abstract partial class EditModelBase
                 () => { }
             );
 
-        /// <summary>子コレクションを登録するリンクを生成する</summary>
+        /// <summary>Creates a link that registers a child collection.</summary>
         public static ChildLink ForCollection<T>(string name, EditModelCollection<T> collection)
             where T : EditModelBase =>
             new(name, true, () => collection, _ => collection.HasChanges, collection.AcceptRemoved);
 
-        /// <summary>登録した子を検証し valid を更新する</summary>
+        /// <summary>Validates the registered children and updates <paramref name="valid"/>.</summary>
         public void Validate(bool includeChildren, ref bool valid)
         {
             foreach (var item in _items())
@@ -989,7 +990,7 @@ public abstract partial class EditModelBase
             }
         }
 
-        /// <summary>登録した子のエラーをパス付き（コレクションは name[i]、単一は name）で収集する</summary>
+        /// <summary>Collects the registered children's errors with paths (name[i] for collections, name for single references).</summary>
         public void CollectErrors(
             string parentPath,
             bool includeChildren,
@@ -1006,7 +1007,7 @@ public abstract partial class EditModelBase
             }
         }
 
-        /// <summary>登録した子を確定し、コレクションは削除追跡もクリアする</summary>
+        /// <summary>Accepts changes on the registered children; for collections, also clears deletion tracking.</summary>
         public void AcceptChanges(bool includeChildren)
         {
             foreach (var item in _items())
@@ -1017,11 +1018,11 @@ public abstract partial class EditModelBase
             _acceptRemoved();
         }
 
-        /// <summary>登録した子に変更があるかどうかを返す</summary>
+        /// <summary>Returns whether the registered children have changes.</summary>
         public bool HasChanges(bool includeChildren) => _hasChanges(includeChildren);
     }
 
-    /// <summary>指定プロパティのエラーを設定する（null 指定でクリア）</summary>
+    /// <summary>Sets the error for the specified property (pass null to clear).</summary>
     protected void SetError(string propertyName, string? error)
     {
         if (error is null)
@@ -1034,7 +1035,7 @@ public abstract partial class EditModelBase
         OnErrorsChanged(propertyName);
     }
 
-    /// <summary>指定プロパティのエラーをクリアする</summary>
+    /// <summary>Clears the errors for the specified property.</summary>
     protected void ClearErrors(string propertyName)
     {
         if (_errors.Remove(propertyName))
@@ -1043,17 +1044,17 @@ public abstract partial class EditModelBase
         }
     }
 
-    /// <summary>入力エラーの変更通知を発行する</summary>
+    /// <summary>Raises the input-errors change notification.</summary>
     protected void OnErrorsChanged(string propertyName) =>
         ErrorsChanged?.Invoke(this, new DataErrorsChangedEventArgs(propertyName));
 
-    /// <summary>確定値をバインディング用プロパティへ書き戻しエラーをクリアする</summary>
+    /// <summary>Writes the confirmed values back to the binding properties and clears errors.</summary>
     public void RevertInput() => ExecuteRevert(RevertCore);
 
-    /// <summary>RevertInput の本体（具象クラスが各プロパティの書き戻しを実装）</summary>
+    /// <summary>Core logic of RevertInput (concrete classes implement writing back each property).</summary>
     protected virtual void RevertCore() { }
 
-    /// <summary>リバート中フラグを立てたうえで処理を実行する</summary>
+    /// <summary>Executes an action with the reverting flag set.</summary>
     protected void ExecuteRevert(Action action)
     {
         IsReverting = true;
@@ -1068,7 +1069,7 @@ public abstract partial class EditModelBase
         }
     }
 
-    /// <summary>ロード中フラグを立てたうえで処理を実行する（Mapper のロードから呼ぶ。ロード中の確定値変更は Updated へ昇格しない）</summary>
+    /// <summary>Executes an action with the loading flag set (called from mapper loads; confirmed-value changes during load do not promote the state to Updated).</summary>
     public void ExecuteLoad(Action action)
     {
         IsLoading = true;
@@ -1083,10 +1084,10 @@ public abstract partial class EditModelBase
         }
     }
 
-    /// <summary>行編集中かどうか（IEditableObject。BeginEdit〜EndEdit/CancelEdit の間 true）</summary>
+    /// <summary>Whether a row edit is in progress (IEditableObject; true between BeginEdit and EndEdit/CancelEdit).</summary>
     private bool _editing;
 
-    /// <summary>行編集を開始し、現在の入力状態をスナップショットする（DataGrid 行編集の取り消しに対応）</summary>
+    /// <summary>Begins a row edit and snapshots the current input state (supports canceling DataGrid row edits).</summary>
     public void BeginEdit()
     {
         if (_editing)
@@ -1098,7 +1099,7 @@ public abstract partial class EditModelBase
         BeginEditCore();
     }
 
-    /// <summary>行編集を確定する。変更は即時反映済みのため編集中フラグの解除のみ行う</summary>
+    /// <summary>Commits the row edit. Changes are already applied immediately, so this only clears the editing flag.</summary>
     public void EndEdit()
     {
         if (!_editing)
@@ -1110,7 +1111,7 @@ public abstract partial class EditModelBase
         EndEditCore();
     }
 
-    /// <summary>行編集を取り消し、BeginEdit 時点の入力状態へ復元する</summary>
+    /// <summary>Cancels the row edit and restores the input state captured at BeginEdit.</summary>
     public void CancelEdit()
     {
         if (!_editing)
@@ -1122,28 +1123,28 @@ public abstract partial class EditModelBase
         CancelEditCore();
     }
 
-    /// <summary>BeginEdit の本体（具象クラスが入力状態のスナップショットを実装）</summary>
+    /// <summary>Core logic of BeginEdit (concrete classes implement snapshotting the input state).</summary>
     protected virtual void BeginEditCore() { }
 
-    /// <summary>EndEdit の本体（既定では何もしない。必要なら具象クラスで override）</summary>
+    /// <summary>Core logic of EndEdit (does nothing by default; override in a concrete class if needed).</summary>
     protected virtual void EndEditCore() { }
 
-    /// <summary>CancelEdit の本体（具象クラスがスナップショットからの復元を実装）</summary>
+    /// <summary>Core logic of CancelEdit (concrete classes implement restoring from the snapshot).</summary>
     protected virtual void CancelEditCore() { }
 
-    /// <summary>必須項目の未入力エラーメッセージを構築する（引数は表示名。派生クラスで override し方針を差し替え可能）</summary>
-    /// <remarks>表示名は変換エラー（'入力値' 表記）と揃え、.NET の識別子引用慣例に沿ってシングルクォートで囲む</remarks>
+    /// <summary>Builds the error message for a missing required field (the argument is the display name; override in a derived class to change the policy).</summary>
+    /// <remarks>The display name is quoted with single quotes, matching the conversion error style ('input value') and the .NET identifier-quoting convention.</remarks>
     protected virtual string BuildRequiredErrorMessage(string propertyName) =>
-        $"'{propertyName}' は必須です。";
+        $"'{propertyName}' is required.";
 
-    /// <summary>バインディング値の変換エラーメッセージを構築する（第 1 引数は表示名。派生クラスで override し方針を差し替え可能）</summary>
+    /// <summary>Builds the conversion error message for a binding value (the first argument is the display name; override in a derived class to change the policy).</summary>
     protected virtual string BuildParseErrorMessage(
         string propertyName,
         string inputValue,
         string typeName
-    ) => $"'{inputValue}' は {typeName} に変換できません。";
+    ) => $"'{inputValue}' cannot be converted to {typeName}.";
 
-    /// <summary>変換エラーメッセージを解決する（BuildParseErrorMessage の後に CustomizeParseErrorMessage で微調整）</summary>
+    /// <summary>Resolves the conversion error message (BuildParseErrorMessage first, then fine-tuned by CustomizeParseErrorMessage).</summary>
     protected string ResolveParseErrorMessage(
         string propertyName,
         string inputValue,
@@ -1155,7 +1156,7 @@ public abstract partial class EditModelBase
         return message;
     }
 
-    /// <summary>プロパティ単位のエラーメッセージ微調整用 partial メソッド（別ファイルの partial 実装で差し替え）</summary>
+    /// <summary>Partial method for fine-tuning error messages per property (replace via a partial implementation in another file).</summary>
     partial void CustomizeParseErrorMessage(
         string propertyName,
         string inputValue,
@@ -1164,27 +1165,27 @@ public abstract partial class EditModelBase
     );
 }
 
-/// <summary>EditModel グラフ上の 1 件の検証エラー</summary>
-/// <param name="Path">ルートからのノード位置（例: 空＝ルート、"SubHeaders[0]"、"SubHeaders[0].Records[2]"）</param>
-/// <param name="Property">エラーが付いたバインド用プロパティ名（例: BindingTitle）</param>
-/// <param name="Message">エラーメッセージ</param>
+/// <summary>A single validation error in an edit model graph.</summary>
+/// <param name="Path">Node position from the root (e.g. empty = root, "SubHeaders[0]", "SubHeaders[0].Records[2]").</param>
+/// <param name="Property">Name of the binding property the error is attached to (e.g. BindingTitle).</param>
+/// <param name="Message">The error message.</param>
 public sealed record EditModelError(string Path, string Property, string Message);
 
-/// <summary>EditModel のコレクション。Remove で外した既存要素を削除対象として追跡する</summary>
+/// <summary>Collection of edit models. Tracks existing elements removed via Remove as deletion targets.</summary>
 /// <remarks>
-/// Remove / RemoveAt で外した既存要素は Removed としてマークし退避する（新規＝Added 要素は DB に無いため退避しない）
-/// Clear は画面上の全消去とし削除追跡しない（退避もリセットする）。削除を保存したい場合は Remove を使う
+/// Existing elements removed via Remove / RemoveAt are marked Removed and set aside (new = Added elements are not set aside because they do not exist in the database).
+/// Clear is a full on-screen wipe with no deletion tracking (it also resets the set-aside items). Use Remove when the deletion should be saved.
 /// </remarks>
 public sealed partial class EditModelCollection<T> : ObservableCollection<T>
     where T : EditModelBase
 {
-    /// <summary>Remove で外した削除対象（Removed）の退避先</summary>
+    /// <summary>Holding list for deletion targets (Removed) removed via Remove.</summary>
     private readonly List<T> _removed = new();
 
-    /// <summary>このコレクションを子として保持する親モデルのバッキングフィールド</summary>
+    /// <summary>Backing field for the parent model that holds this collection as a child.</summary>
     private EditModelBase? _ownerModel;
 
-    /// <summary>このコレクションを子として保持する親モデル（所有側の EditModel が設定）。設定時に全要素の ParentModel へ伝播する</summary>
+    /// <summary>Gets or sets the parent model that holds this collection as a child (set by the owning edit model). Propagates to every element's ParentModel when set.</summary>
     internal EditModelBase? OwnerModel
     {
         get => _ownerModel;
@@ -1198,14 +1199,14 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
         }
     }
 
-    /// <summary>空のコレクションを生成する</summary>
+    /// <summary>Creates an empty collection.</summary>
     public EditModelCollection() { }
 
-    /// <summary>既存の EditModel 群を初期要素として生成する（削除追跡はしない）</summary>
+    /// <summary>Creates the collection with the given edit models as initial elements (no deletion tracking).</summary>
     public EditModelCollection(IEnumerable<T> items)
         : base(items)
     {
-        // base(items) は InsertItem を経由せず内部リストへ直接追加するため、ここで所有者を設定する
+        // base(items) adds directly to the internal list without going through InsertItem, so set the owner here.
         foreach (var item in this)
         {
             item.Owner = this;
@@ -1213,13 +1214,13 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
         }
     }
 
-    /// <summary>Remove で外した削除対象（Removed）の一覧</summary>
+    /// <summary>Gets the deletion targets (Removed) taken out via Remove.</summary>
     public IReadOnlyList<T> RemovedItems => _removed;
 
-    /// <summary>いずれかの要素（およびそのカスケード子）に変更があるか、または削除追跡分が存在するか</summary>
+    /// <summary>Gets a value indicating whether any element (or its cascade children) has changes, or deletion-tracked items exist.</summary>
     public bool HasChanges => _removed.Count > 0 || this.Any(item => item.HasGraphChanges());
 
-    /// <summary>要素を追加する。追加要素に自身を所有者として設定し、位置プロパティの変更を通知する</summary>
+    /// <summary>Inserts an element. Sets this collection as the element's owner and raises position property change notifications.</summary>
     protected override void InsertItem(int index, T item)
     {
         item.Owner = this;
@@ -1229,7 +1230,7 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
         NotifyPositionsChanged();
     }
 
-    /// <summary>要素を外す（Remove / RemoveAt）。既存要素は Removed として退避し、新規要素は破棄する</summary>
+    /// <summary>Takes an element out (Remove / RemoveAt). Existing elements are set aside as Removed; new elements are discarded.</summary>
     protected override void RemoveItem(int index)
     {
         var removed = this[index];
@@ -1242,7 +1243,7 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
         NotifyPositionsChanged();
     }
 
-    /// <summary>インデクサ代入で要素を置き換える。置換前の既存要素は Removed として退避する</summary>
+    /// <summary>Replaces an element via indexer assignment. The existing element being replaced is set aside as Removed.</summary>
     protected override void SetItem(int index, T item)
     {
         var replaced = this[index];
@@ -1258,15 +1259,15 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
         NotifyPositionsChanged();
     }
 
-    /// <summary>要素を並び替える（順序のみ変更し削除追跡しない）。移動後に位置プロパティの変更を通知する</summary>
+    /// <summary>Moves an element (reorders only, no deletion tracking). Raises position property change notifications after the move.</summary>
     protected override void MoveItem(int oldIndex, int newIndex)
     {
-        // base.MoveItem は Collection&lt;T&gt; の非仮想 Remove/Insert を呼ぶため、当方の削除追跡オーバーライドを経由しない
+        // base.MoveItem calls the non-virtual Remove/Insert of Collection&lt;T&gt;, so it does not go through our deletion-tracking overrides.
         base.MoveItem(oldIndex, newIndex);
         NotifyPositionsChanged();
     }
 
-    /// <summary>画面上の全消去。削除追跡はせず、退避していた削除対象もリセットする</summary>
+    /// <summary>Full on-screen wipe. No deletion tracking; also resets the set-aside deletion targets.</summary>
     protected override void ClearItems()
     {
         var cleared = new List<T>(this);
@@ -1287,11 +1288,11 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
         }
     }
 
-    /// <summary>保存確定後に削除追跡をクリアする</summary>
+    /// <summary>Clears deletion tracking after a save is confirmed.</summary>
     public void AcceptRemoved() => _removed.Clear();
 
-    /// <summary>保存確定後に全要素（およびカスケード子）を変更なし状態へ戻し、削除追跡もクリアする</summary>
-    /// <param name="includeChildren">true で各要素の子（カスケード）も再帰的に確定する</param>
+    /// <summary>Resets all elements (and cascade children) to the unchanged state after a save is confirmed, and also clears deletion tracking.</summary>
+    /// <param name="includeChildren">True to recursively accept changes on each element's cascade children as well.</param>
     public void AcceptChanges(bool includeChildren = true)
     {
         foreach (var item in this)
@@ -1302,15 +1303,15 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
         AcceptRemoved();
     }
 
-    /// <summary>コレクション内の全要素（およびカスケード子）を検証する。全件検証し、すべて妥当なら true</summary>
-    /// <param name="includeChildren">true で各要素の子（カスケード）も連鎖検証する</param>
+    /// <summary>Validates all elements in the collection (and their cascade children). Validates every element and returns true only if all are valid.</summary>
+    /// <param name="includeChildren">True to cascade validation to each element's children as well.</param>
     public bool Validate(bool includeChildren = true)
     {
         var valid = true;
 
         foreach (var item in this)
         {
-            // 全件のエラーを登録するため短絡させない
+            // Do not short-circuit, so that errors are registered for every element.
             if (!item.Validate(includeChildren))
             {
                 valid = false;
@@ -1320,8 +1321,8 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
         return valid;
     }
 
-    /// <summary>コレクション内の全要素の検証エラーを位置（[i]）付きで収集する（事前に Validate を呼ぶ）</summary>
-    /// <param name="includeChildren">true で各要素の子（カスケード）も再帰収集する</param>
+    /// <summary>Collects validation errors of all elements in the collection, prefixed with their positions ([i]) (call Validate beforehand).</summary>
+    /// <param name="includeChildren">True to recursively collect from each element's cascade children as well.</param>
     public IEnumerable<EditModelError> CollectErrors(bool includeChildren = true)
     {
         var errors = new List<EditModelError>();
@@ -1334,7 +1335,7 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
         return errors;
     }
 
-    /// <summary>指定要素をコレクション内の指定位置へ移動する（順序のみ変更し削除追跡しない）。移動したら true</summary>
+    /// <summary>Moves the specified element to the specified position in the collection (reorders only, no deletion tracking). Returns true if moved.</summary>
     public bool MoveTo(T item, int newIndex)
     {
         var oldIndex = IndexOf(item);
@@ -1347,7 +1348,7 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
         return true;
     }
 
-    /// <summary>指定要素群を末尾へ追加する</summary>
+    /// <summary>Appends the specified elements to the end.</summary>
     public void AddRange(IEnumerable<T> items)
     {
         foreach (var item in items)
@@ -1356,7 +1357,7 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
         }
     }
 
-    /// <summary>指定要素群を指定位置へ挿入する</summary>
+    /// <summary>Inserts the specified elements at the specified position.</summary>
     public void InsertRange(int index, IEnumerable<T> items)
     {
         foreach (var item in items)
@@ -1365,7 +1366,7 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
         }
     }
 
-    /// <summary>全要素を取り除く（既存要素は Removed として削除追跡される）。追跡しない画面消去は Clear を使う</summary>
+    /// <summary>Removes all elements (existing elements are tracked as Removed). Use Clear for an untracked on-screen wipe.</summary>
     public void RemoveAll()
     {
         while (Count > 0)
@@ -1374,14 +1375,14 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
         }
     }
 
-    /// <summary>指定範囲の要素を取り除く（既存要素は Removed として削除追跡される）</summary>
+    /// <summary>Removes the elements in the specified range (existing elements are tracked as Removed).</summary>
     public void RemoveRange(int index, int count)
     {
         if (index < 0 || index > Count)
         {
             throw new ArgumentOutOfRangeException(
                 nameof(index),
-                "開始位置がコレクションの範囲外です。"
+                "The start position is outside the bounds of the collection."
             );
         }
 
@@ -1389,7 +1390,7 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
         {
             throw new ArgumentOutOfRangeException(
                 nameof(count),
-                "指定範囲がコレクションの範囲外です。"
+                "The specified range is outside the bounds of the collection."
             );
         }
 
@@ -1399,7 +1400,7 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
         }
     }
 
-    /// <summary>全要素へ位置プロパティ（IndexInParent / IsFirstInParent / IsLastInParent）の変更を通知する</summary>
+    /// <summary>Notifies all elements of position property changes (IndexInParent / IsFirstInParent / IsLastInParent).</summary>
     private void NotifyPositionsChanged()
     {
         foreach (var item in this)
@@ -1408,7 +1409,7 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
         }
     }
 
-    /// <summary>外した要素を削除対象として退避する（新規＝未保存の要素は退避しない）</summary>
+    /// <summary>Sets aside a removed element as a deletion target (new = unsaved elements are not set aside).</summary>
     private void TrackRemoval(T item)
     {
         if (item.IsAdded)
@@ -1425,31 +1426,31 @@ public sealed partial class EditModelCollection<T> : ObservableCollection<T>
     }
 }
 
-/// <summary>Entity と EditModel の相互変換に共通する骨組み（生成の連鎖・コレクション化）を提供する基底クラス</summary>
+/// <summary>Base class providing the skeleton common to converting between entities and edit models (creation chaining and collection conversion).</summary>
 /// <remarks>
-/// エンティティ固有の列コピー（<see cref="ApplyToEntity"/>）と生成直後フックを含む単体生成（<see cref="CreateEntity()"/> /
-/// <see cref="CreateEditModel(TEntity)"/>）は派生クラスが実装し、それらを組み合わせた定型処理（編集モデルからの生成・
-/// コレクション変換）だけをここで一元化する。
+/// Derived classes implement the entity-specific column copying (<see cref="ApplyToEntity"/>) and single-object creation
+/// including the post-creation hooks (<see cref="CreateEntity()"/> / <see cref="CreateEditModel(TEntity)"/>); only the
+/// boilerplate that composes them (creation from an edit model, collection conversion) is centralized here.
 /// </remarks>
 public abstract partial class MapperBase<TEntity, TEditModel>
     where TEntity : EntityBase
     where TEditModel : EditModelBase
 {
-    /// <summary>初期値を設定した新しい TEntity を生成する（保存時に追加対象となる）</summary>
+    /// <summary>Creates a new TEntity with initial values set (it will be an insertion target on save).</summary>
     public abstract TEntity CreateEntity();
 
-    /// <summary>TEntity を基に新しい TEditModel を生成する</summary>
+    /// <summary>Creates a new TEditModel from a TEntity.</summary>
     public abstract TEditModel CreateEditModel(TEntity entity);
 
-    /// <summary>TEditModel の確定値を既存の TEntity へ反映する（破壊的更新）。列コピーは派生が実装する</summary>
-    /// <param name="editModel">確定値の反映元となる編集モデル</param>
-    /// <param name="entity">反映先の既存 Entity</param>
-    /// <param name="includeRemoved">削除追跡分（Removed）も復元して反映するか（保存用は true、帳票表示用などは false）</param>
+    /// <summary>Applies the TEditModel's confirmed values to an existing TEntity (destructive update). Column copying is implemented by derived classes.</summary>
+    /// <param name="editModel">The edit model whose confirmed values are applied.</param>
+    /// <param name="entity">The existing entity to apply the values to.</param>
+    /// <param name="includeRemoved">Whether to also restore and apply deletion-tracked (Removed) items (true for saving, false for report display and similar).</param>
     public abstract void ApplyToEntity(TEditModel editModel, TEntity entity, bool includeRemoved);
 
-    /// <summary>初期値を設定した新しい TEntity に TEditModel の確定値を反映して生成する</summary>
-    /// <param name="editModel">確定値の反映元となる編集モデル</param>
-    /// <param name="includeRemoved">削除追跡分（Removed）も復元して反映するか（保存用は true、帳票表示用などは false）</param>
+    /// <summary>Creates a new TEntity with initial values set and the TEditModel's confirmed values applied.</summary>
+    /// <param name="editModel">The edit model whose confirmed values are applied.</param>
+    /// <param name="includeRemoved">Whether to also restore and apply deletion-tracked (Removed) items (true for saving, false for report display and similar).</param>
     public TEntity CreateEntity(TEditModel editModel, bool includeRemoved = false)
     {
         var entity = CreateEntity();
@@ -1457,9 +1458,9 @@ public abstract partial class MapperBase<TEntity, TEditModel>
         return entity;
     }
 
-    /// <summary>TEditModel の EditModelCollection を基に TEntity のリストを生成する</summary>
-    /// <param name="editModels">生成元となる編集モデルのコレクション</param>
-    /// <param name="includeRemoved">削除追跡分（Removed）も復元して含めるか（保存用は true、帳票表示用などは false）</param>
+    /// <summary>Creates a list of TEntity from an EditModelCollection of TEditModel.</summary>
+    /// <param name="editModels">The collection of edit models to create from.</param>
+    /// <param name="includeRemoved">Whether to also restore and include deletion-tracked (Removed) items (true for saving, false for report display and similar).</param>
     public List<TEntity> CreateEntities(
         EditModelCollection<TEditModel> editModels,
         bool includeRemoved = false
@@ -1479,7 +1480,7 @@ public abstract partial class MapperBase<TEntity, TEditModel>
         return entities;
     }
 
-    /// <summary>新規入力用の TEditModel を生成する（追加対象の Entity を基に作る）</summary>
+    /// <summary>Creates a TEditModel for new input (built from an insertion-target entity).</summary>
     public TEditModel CreateEditModel()
     {
         var entity = CreateEntity();
@@ -1487,33 +1488,33 @@ public abstract partial class MapperBase<TEntity, TEditModel>
         return editModel;
     }
 
-    /// <summary>TEntity の列挙を基に TEditModel の EditModelCollection を生成する</summary>
+    /// <summary>Creates an EditModelCollection of TEditModel from a sequence of TEntity.</summary>
     public EditModelCollection<TEditModel> CreateEditModels(IEnumerable<TEntity> entities)
     {
         return new EditModelCollection<TEditModel>(entities.Select(entity => CreateEditModel(entity)));
     }
 }
-/// <summary>documents テーブルの画面編集用モデル</summary>
+/// <summary>Edit model for on-screen editing of the documents table.</summary>
 public partial class DocumentEditModel : EditModelBase
 {
-    // ===== 拡張ポイント（partial クラスで必要なものだけ実装。未実装の partial メソッドは消去され無コスト）=====
-    //   検証追加      : partial void OnValidate();
-    //   子の追加      : protected override void RegisterExtraChildren();  // 内部で AddChild/AddChildren で登録
-    //   変換ﾒｯｾｰｼﾞ調整  : partial void CustomizeParseErrorMessage(string propertyName, string inputValue, string typeName, ref string message);
-    //   入力正規化調整 : protected override void CustomizeInputNormalization(string propertyName, string rawValue, ref string normalizedValue);
-    //   表示名調整    : partial void CustomizePropertyDisplayName(string propertyName, ref string displayName);  // 検証メッセージの表示名を上書き
-    //   行編集        : partial void OnBeginEdit();  partial void OnEndEdit();  partial void OnCancelEdit();
-    //   値変更通知    : partial void On{プロパティ}Changing(値) / Changed(値) / Changing(旧,新) / Changed(旧,新);  // 各プロパティに用意
+    // ===== Extension points (implement only what you need in a partial class; unimplemented partial methods are erased at no cost) =====
+    //   Extra validation        : partial void OnValidate();
+    //   Extra children          : protected override void RegisterExtraChildren();  // register via AddChild/AddChildren inside
+    //   Conversion msg tweak    : partial void CustomizeParseErrorMessage(string propertyName, string inputValue, string typeName, ref string message);
+    //   Input normalization     : protected override void CustomizeInputNormalization(string propertyName, string rawValue, ref string normalizedValue);
+    //   Display name tweak      : partial void CustomizePropertyDisplayName(string propertyName, ref string displayName);  // override display names in validation messages
+    //   Row editing             : partial void OnBeginEdit();  partial void OnEndEdit();  partial void OnCancelEdit();
+    //   Value change hooks      : partial void On{Property}Changing(value) / Changed(value) / Changing(old,new) / Changed(old,new);  // provided per property
     // ====================================================================================================
 
-    // 各列につき「確定値」「画面入力文字列」の 2 種を保持する（変換エラーはエラーディクショナリが保持する）
-    /// <summary>DocumentId の確定値</summary>
+    // Each column keeps two representations: the confirmed value and the on-screen input string (conversion errors are held by the error dictionary).
+    /// <summary>Confirmed value of DocumentId.</summary>
     private int? _documentId;
 
-    /// <summary>DocumentId の画面入力文字列</summary>
+    /// <summary>On-screen input string for DocumentId.</summary>
     private string _bindingDocumentId = string.Empty;
 
-    /// <summary>DocumentId の確定値（外部からは読み取り専用）</summary>
+    /// <summary>Confirmed value of DocumentId (read-only from outside).</summary>
     public int? DocumentId
     {
         get => _documentId;
@@ -1532,7 +1533,7 @@ public partial class DocumentEditModel : EditModelBase
             OnDocumentIdChanged(oldValue, value);
             OnPropertyChanged(nameof(DocumentId));
 
-            // 確定値が変化したら更新対象へ昇格（ロード中は昇格させず、状態は元 Entity の鏡のままにする）
+            // Promote to update target when the confirmed value changes (not during load, where the state stays a mirror of the source entity).
             if (!IsLoading)
             {
                 OnConfirmedValueChanged(nameof(DocumentId));
@@ -1545,25 +1546,25 @@ public partial class DocumentEditModel : EditModelBase
         }
     }
 
-    /// <summary>DocumentId の確定値が変更される直前に呼ばれる（新値のみ。partial 実装で処理を追加）</summary>
+    /// <summary>Called just before the confirmed value of DocumentId changes (new value only; add processing via a partial implementation).</summary>
     partial void OnDocumentIdChanging(int? value);
 
-    /// <summary>DocumentId の確定値が変更される直前に呼ばれる（旧値・新値。partial 実装で処理を追加）</summary>
+    /// <summary>Called just before the confirmed value of DocumentId changes (old and new values; add processing via a partial implementation).</summary>
     partial void OnDocumentIdChanging(int? oldValue, int? newValue);
 
-    /// <summary>DocumentId の確定値が変更された直後に呼ばれる（新値のみ。partial 実装で処理を追加）</summary>
+    /// <summary>Called just after the confirmed value of DocumentId changes (new value only; add processing via a partial implementation).</summary>
     partial void OnDocumentIdChanged(int? value);
 
-    /// <summary>DocumentId の確定値が変更された直後に呼ばれる（旧値・新値。partial 実装で処理を追加）</summary>
+    /// <summary>Called just after the confirmed value of DocumentId changes (old and new values; add processing via a partial implementation).</summary>
     partial void OnDocumentIdChanged(int? oldValue, int? newValue);
 
-    /// <summary>DocumentId の画面入力用バインディング文字列（設定時に確定値へ変換）</summary>
+    /// <summary>On-screen input binding string for DocumentId (converted to the confirmed value when set).</summary>
     public string BindingDocumentId
     {
         get => _bindingDocumentId;
         set
         {
-            // 入力由来の値のみ正規化（ロード・復元時は元 Entity の鏡像を保つため素通し）
+            // Normalize only values that come from input (pass through during load/revert to keep a mirror of the source entity).
             var normalized =
                 IsLoading || IsReverting
                     ? value
@@ -1571,7 +1572,7 @@ public partial class DocumentEditModel : EditModelBase
 
             if (!SetProperty(ref _bindingDocumentId, normalized, nameof(BindingDocumentId)))
             {
-                // トリムで既存値と一致した場合、画面表示にだけ空白付き文字列が残るため表示を正規化値へ戻す
+                // When trimming makes the value equal to the existing one, only the on-screen display keeps the whitespace-padded string, so reset the display to the normalized value.
                 if (!string.Equals(value, normalized, StringComparison.Ordinal))
                 {
                     OnPropertyChanged(nameof(BindingDocumentId));
@@ -1598,13 +1599,13 @@ public partial class DocumentEditModel : EditModelBase
         }
     }
 
-    /// <summary>Title の確定値</summary>
+    /// <summary>Confirmed value of Title.</summary>
     private string? _title;
 
-    /// <summary>Title の画面入力文字列</summary>
+    /// <summary>On-screen input string for Title.</summary>
     private string _bindingTitle = string.Empty;
 
-    /// <summary>Title の確定値（外部からは読み取り専用）</summary>
+    /// <summary>Confirmed value of Title (read-only from outside).</summary>
     public string? Title
     {
         get => _title;
@@ -1623,7 +1624,7 @@ public partial class DocumentEditModel : EditModelBase
             OnTitleChanged(oldValue, value);
             OnPropertyChanged(nameof(Title));
 
-            // 確定値が変化したら更新対象へ昇格（ロード中は昇格させず、状態は元 Entity の鏡のままにする）
+            // Promote to update target when the confirmed value changes (not during load, where the state stays a mirror of the source entity).
             if (!IsLoading)
             {
                 OnConfirmedValueChanged(nameof(Title));
@@ -1636,25 +1637,25 @@ public partial class DocumentEditModel : EditModelBase
         }
     }
 
-    /// <summary>Title の確定値が変更される直前に呼ばれる（新値のみ。partial 実装で処理を追加）</summary>
+    /// <summary>Called just before the confirmed value of Title changes (new value only; add processing via a partial implementation).</summary>
     partial void OnTitleChanging(string? value);
 
-    /// <summary>Title の確定値が変更される直前に呼ばれる（旧値・新値。partial 実装で処理を追加）</summary>
+    /// <summary>Called just before the confirmed value of Title changes (old and new values; add processing via a partial implementation).</summary>
     partial void OnTitleChanging(string? oldValue, string? newValue);
 
-    /// <summary>Title の確定値が変更された直後に呼ばれる（新値のみ。partial 実装で処理を追加）</summary>
+    /// <summary>Called just after the confirmed value of Title changes (new value only; add processing via a partial implementation).</summary>
     partial void OnTitleChanged(string? value);
 
-    /// <summary>Title の確定値が変更された直後に呼ばれる（旧値・新値。partial 実装で処理を追加）</summary>
+    /// <summary>Called just after the confirmed value of Title changes (old and new values; add processing via a partial implementation).</summary>
     partial void OnTitleChanged(string? oldValue, string? newValue);
 
-    /// <summary>Title の画面入力用バインディング文字列（設定時に確定値へ変換）</summary>
+    /// <summary>On-screen input binding string for Title (converted to the confirmed value when set).</summary>
     public string BindingTitle
     {
         get => _bindingTitle;
         set
         {
-            // 入力由来の値のみ正規化（ロード・復元時は元 Entity の鏡像を保つため素通し）
+            // Normalize only values that come from input (pass through during load/revert to keep a mirror of the source entity).
             var normalized =
                 IsLoading || IsReverting
                     ? value
@@ -1662,7 +1663,7 @@ public partial class DocumentEditModel : EditModelBase
 
             if (!SetProperty(ref _bindingTitle, normalized, nameof(BindingTitle)))
             {
-                // トリムで既存値と一致した場合、画面表示にだけ空白付き文字列が残るため表示を正規化値へ戻す
+                // When trimming makes the value equal to the existing one, only the on-screen display keeps the whitespace-padded string, so reset the display to the normalized value.
                 if (!string.Equals(value, normalized, StringComparison.Ordinal))
                 {
                     OnPropertyChanged(nameof(BindingTitle));
@@ -1687,13 +1688,13 @@ public partial class DocumentEditModel : EditModelBase
         }
     }
 
-    /// <summary>Payload の確定値</summary>
+    /// <summary>Confirmed value of Payload.</summary>
     private byte[]? _payload;
 
-    /// <summary>Payload の画面入力文字列</summary>
+    /// <summary>On-screen input string for Payload.</summary>
     private string _bindingPayload = string.Empty;
 
-    /// <summary>Payload の確定値（外部からは読み取り専用）</summary>
+    /// <summary>Confirmed value of Payload (read-only from outside).</summary>
     public byte[]? Payload
     {
         get => _payload;
@@ -1712,7 +1713,7 @@ public partial class DocumentEditModel : EditModelBase
             OnPayloadChanged(oldValue, value);
             OnPropertyChanged(nameof(Payload));
 
-            // 確定値が変化したら更新対象へ昇格（ロード中は昇格させず、状態は元 Entity の鏡のままにする）
+            // Promote to update target when the confirmed value changes (not during load, where the state stays a mirror of the source entity).
             if (!IsLoading)
             {
                 OnConfirmedValueChanged(nameof(Payload));
@@ -1725,25 +1726,25 @@ public partial class DocumentEditModel : EditModelBase
         }
     }
 
-    /// <summary>Payload の確定値が変更される直前に呼ばれる（新値のみ。partial 実装で処理を追加）</summary>
+    /// <summary>Called just before the confirmed value of Payload changes (new value only; add processing via a partial implementation).</summary>
     partial void OnPayloadChanging(byte[]? value);
 
-    /// <summary>Payload の確定値が変更される直前に呼ばれる（旧値・新値。partial 実装で処理を追加）</summary>
+    /// <summary>Called just before the confirmed value of Payload changes (old and new values; add processing via a partial implementation).</summary>
     partial void OnPayloadChanging(byte[]? oldValue, byte[]? newValue);
 
-    /// <summary>Payload の確定値が変更された直後に呼ばれる（新値のみ。partial 実装で処理を追加）</summary>
+    /// <summary>Called just after the confirmed value of Payload changes (new value only; add processing via a partial implementation).</summary>
     partial void OnPayloadChanged(byte[]? value);
 
-    /// <summary>Payload の確定値が変更された直後に呼ばれる（旧値・新値。partial 実装で処理を追加）</summary>
+    /// <summary>Called just after the confirmed value of Payload changes (old and new values; add processing via a partial implementation).</summary>
     partial void OnPayloadChanged(byte[]? oldValue, byte[]? newValue);
 
-    /// <summary>Payload の画面入力用バインディング文字列（設定時に確定値へ変換）</summary>
+    /// <summary>On-screen input binding string for Payload (converted to the confirmed value when set).</summary>
     public string BindingPayload
     {
         get => _bindingPayload;
         set
         {
-            // 入力由来の値のみ正規化（ロード・復元時は元 Entity の鏡像を保つため素通し）
+            // Normalize only values that come from input (pass through during load/revert to keep a mirror of the source entity).
             var normalized =
                 IsLoading || IsReverting
                     ? value
@@ -1751,7 +1752,7 @@ public partial class DocumentEditModel : EditModelBase
 
             if (!SetProperty(ref _bindingPayload, normalized, nameof(BindingPayload)))
             {
-                // トリムで既存値と一致した場合、画面表示にだけ空白付き文字列が残るため表示を正規化値へ戻す
+                // When trimming makes the value equal to the existing one, only the on-screen display keeps the whitespace-padded string, so reset the display to the normalized value.
                 if (!string.Equals(value, normalized, StringComparison.Ordinal))
                 {
                     OnPropertyChanged(nameof(BindingPayload));
@@ -1786,13 +1787,13 @@ public partial class DocumentEditModel : EditModelBase
         }
     }
 
-    /// <summary>Thumb の確定値</summary>
+    /// <summary>Confirmed value of Thumb.</summary>
     private byte[]? _thumb;
 
-    /// <summary>Thumb の画面入力文字列</summary>
+    /// <summary>On-screen input string for Thumb.</summary>
     private string _bindingThumb = string.Empty;
 
-    /// <summary>Thumb の確定値（外部からは読み取り専用）</summary>
+    /// <summary>Confirmed value of Thumb (read-only from outside).</summary>
     public byte[]? Thumb
     {
         get => _thumb;
@@ -1811,7 +1812,7 @@ public partial class DocumentEditModel : EditModelBase
             OnThumbChanged(oldValue, value);
             OnPropertyChanged(nameof(Thumb));
 
-            // 確定値が変化したら更新対象へ昇格（ロード中は昇格させず、状態は元 Entity の鏡のままにする）
+            // Promote to update target when the confirmed value changes (not during load, where the state stays a mirror of the source entity).
             if (!IsLoading)
             {
                 OnConfirmedValueChanged(nameof(Thumb));
@@ -1824,25 +1825,25 @@ public partial class DocumentEditModel : EditModelBase
         }
     }
 
-    /// <summary>Thumb の確定値が変更される直前に呼ばれる（新値のみ。partial 実装で処理を追加）</summary>
+    /// <summary>Called just before the confirmed value of Thumb changes (new value only; add processing via a partial implementation).</summary>
     partial void OnThumbChanging(byte[]? value);
 
-    /// <summary>Thumb の確定値が変更される直前に呼ばれる（旧値・新値。partial 実装で処理を追加）</summary>
+    /// <summary>Called just before the confirmed value of Thumb changes (old and new values; add processing via a partial implementation).</summary>
     partial void OnThumbChanging(byte[]? oldValue, byte[]? newValue);
 
-    /// <summary>Thumb の確定値が変更された直後に呼ばれる（新値のみ。partial 実装で処理を追加）</summary>
+    /// <summary>Called just after the confirmed value of Thumb changes (new value only; add processing via a partial implementation).</summary>
     partial void OnThumbChanged(byte[]? value);
 
-    /// <summary>Thumb の確定値が変更された直後に呼ばれる（旧値・新値。partial 実装で処理を追加）</summary>
+    /// <summary>Called just after the confirmed value of Thumb changes (old and new values; add processing via a partial implementation).</summary>
     partial void OnThumbChanged(byte[]? oldValue, byte[]? newValue);
 
-    /// <summary>Thumb の画面入力用バインディング文字列（設定時に確定値へ変換）</summary>
+    /// <summary>On-screen input binding string for Thumb (converted to the confirmed value when set).</summary>
     public string BindingThumb
     {
         get => _bindingThumb;
         set
         {
-            // 入力由来の値のみ正規化（ロード・復元時は元 Entity の鏡像を保つため素通し）
+            // Normalize only values that come from input (pass through during load/revert to keep a mirror of the source entity).
             var normalized =
                 IsLoading || IsReverting
                     ? value
@@ -1850,7 +1851,7 @@ public partial class DocumentEditModel : EditModelBase
 
             if (!SetProperty(ref _bindingThumb, normalized, nameof(BindingThumb)))
             {
-                // トリムで既存値と一致した場合、画面表示にだけ空白付き文字列が残るため表示を正規化値へ戻す
+                // When trimming makes the value equal to the existing one, only the on-screen display keeps the whitespace-padded string, so reset the display to the normalized value.
                 if (!string.Equals(value, normalized, StringComparison.Ordinal))
                 {
                     OnPropertyChanged(nameof(BindingThumb));
@@ -1885,13 +1886,13 @@ public partial class DocumentEditModel : EditModelBase
         }
     }
 
-    /// <summary>Checksum の確定値</summary>
+    /// <summary>Confirmed value of Checksum.</summary>
     private byte[]? _checksum;
 
-    /// <summary>Checksum の画面入力文字列</summary>
+    /// <summary>On-screen input string for Checksum.</summary>
     private string _bindingChecksum = string.Empty;
 
-    /// <summary>Checksum の確定値（外部からは読み取り専用）</summary>
+    /// <summary>Confirmed value of Checksum (read-only from outside).</summary>
     public byte[]? Checksum
     {
         get => _checksum;
@@ -1910,7 +1911,7 @@ public partial class DocumentEditModel : EditModelBase
             OnChecksumChanged(oldValue, value);
             OnPropertyChanged(nameof(Checksum));
 
-            // 確定値が変化したら更新対象へ昇格（ロード中は昇格させず、状態は元 Entity の鏡のままにする）
+            // Promote to update target when the confirmed value changes (not during load, where the state stays a mirror of the source entity).
             if (!IsLoading)
             {
                 OnConfirmedValueChanged(nameof(Checksum));
@@ -1923,25 +1924,25 @@ public partial class DocumentEditModel : EditModelBase
         }
     }
 
-    /// <summary>Checksum の確定値が変更される直前に呼ばれる（新値のみ。partial 実装で処理を追加）</summary>
+    /// <summary>Called just before the confirmed value of Checksum changes (new value only; add processing via a partial implementation).</summary>
     partial void OnChecksumChanging(byte[]? value);
 
-    /// <summary>Checksum の確定値が変更される直前に呼ばれる（旧値・新値。partial 実装で処理を追加）</summary>
+    /// <summary>Called just before the confirmed value of Checksum changes (old and new values; add processing via a partial implementation).</summary>
     partial void OnChecksumChanging(byte[]? oldValue, byte[]? newValue);
 
-    /// <summary>Checksum の確定値が変更された直後に呼ばれる（新値のみ。partial 実装で処理を追加）</summary>
+    /// <summary>Called just after the confirmed value of Checksum changes (new value only; add processing via a partial implementation).</summary>
     partial void OnChecksumChanged(byte[]? value);
 
-    /// <summary>Checksum の確定値が変更された直後に呼ばれる（旧値・新値。partial 実装で処理を追加）</summary>
+    /// <summary>Called just after the confirmed value of Checksum changes (old and new values; add processing via a partial implementation).</summary>
     partial void OnChecksumChanged(byte[]? oldValue, byte[]? newValue);
 
-    /// <summary>Checksum の画面入力用バインディング文字列（設定時に確定値へ変換）</summary>
+    /// <summary>On-screen input binding string for Checksum (converted to the confirmed value when set).</summary>
     public string BindingChecksum
     {
         get => _bindingChecksum;
         set
         {
-            // 入力由来の値のみ正規化（ロード・復元時は元 Entity の鏡像を保つため素通し）
+            // Normalize only values that come from input (pass through during load/revert to keep a mirror of the source entity).
             var normalized =
                 IsLoading || IsReverting
                     ? value
@@ -1949,7 +1950,7 @@ public partial class DocumentEditModel : EditModelBase
 
             if (!SetProperty(ref _bindingChecksum, normalized, nameof(BindingChecksum)))
             {
-                // トリムで既存値と一致した場合、画面表示にだけ空白付き文字列が残るため表示を正規化値へ戻す
+                // When trimming makes the value equal to the existing one, only the on-screen display keeps the whitespace-padded string, so reset the display to the normalized value.
                 if (!string.Equals(value, normalized, StringComparison.Ordinal))
                 {
                     OnPropertyChanged(nameof(BindingChecksum));
@@ -1984,13 +1985,13 @@ public partial class DocumentEditModel : EditModelBase
         }
     }
 
-    /// <summary>RowVer の確定値</summary>
+    /// <summary>Confirmed value of RowVer.</summary>
     private byte[]? _rowVer;
 
-    /// <summary>RowVer の画面入力文字列</summary>
+    /// <summary>On-screen input string for RowVer.</summary>
     private string _bindingRowVer = string.Empty;
 
-    /// <summary>RowVer の確定値（外部からは読み取り専用）</summary>
+    /// <summary>Confirmed value of RowVer (read-only from outside).</summary>
     public byte[]? RowVer
     {
         get => _rowVer;
@@ -2009,7 +2010,7 @@ public partial class DocumentEditModel : EditModelBase
             OnRowVerChanged(oldValue, value);
             OnPropertyChanged(nameof(RowVer));
 
-            // 確定値が変化したら更新対象へ昇格（ロード中は昇格させず、状態は元 Entity の鏡のままにする）
+            // Promote to update target when the confirmed value changes (not during load, where the state stays a mirror of the source entity).
             if (!IsLoading)
             {
                 OnConfirmedValueChanged(nameof(RowVer));
@@ -2022,25 +2023,25 @@ public partial class DocumentEditModel : EditModelBase
         }
     }
 
-    /// <summary>RowVer の確定値が変更される直前に呼ばれる（新値のみ。partial 実装で処理を追加）</summary>
+    /// <summary>Called just before the confirmed value of RowVer changes (new value only; add processing via a partial implementation).</summary>
     partial void OnRowVerChanging(byte[]? value);
 
-    /// <summary>RowVer の確定値が変更される直前に呼ばれる（旧値・新値。partial 実装で処理を追加）</summary>
+    /// <summary>Called just before the confirmed value of RowVer changes (old and new values; add processing via a partial implementation).</summary>
     partial void OnRowVerChanging(byte[]? oldValue, byte[]? newValue);
 
-    /// <summary>RowVer の確定値が変更された直後に呼ばれる（新値のみ。partial 実装で処理を追加）</summary>
+    /// <summary>Called just after the confirmed value of RowVer changes (new value only; add processing via a partial implementation).</summary>
     partial void OnRowVerChanged(byte[]? value);
 
-    /// <summary>RowVer の確定値が変更された直後に呼ばれる（旧値・新値。partial 実装で処理を追加）</summary>
+    /// <summary>Called just after the confirmed value of RowVer changes (old and new values; add processing via a partial implementation).</summary>
     partial void OnRowVerChanged(byte[]? oldValue, byte[]? newValue);
 
-    /// <summary>RowVer の画面入力用バインディング文字列（設定時に確定値へ変換）</summary>
+    /// <summary>On-screen input binding string for RowVer (converted to the confirmed value when set).</summary>
     public string BindingRowVer
     {
         get => _bindingRowVer;
         set
         {
-            // 入力由来の値のみ正規化（ロード・復元時は元 Entity の鏡像を保つため素通し）
+            // Normalize only values that come from input (pass through during load/revert to keep a mirror of the source entity).
             var normalized =
                 IsLoading || IsReverting
                     ? value
@@ -2048,7 +2049,7 @@ public partial class DocumentEditModel : EditModelBase
 
             if (!SetProperty(ref _bindingRowVer, normalized, nameof(BindingRowVer)))
             {
-                // トリムで既存値と一致した場合、画面表示にだけ空白付き文字列が残るため表示を正規化値へ戻す
+                // When trimming makes the value equal to the existing one, only the on-screen display keeps the whitespace-padded string, so reset the display to the normalized value.
                 if (!string.Equals(value, normalized, StringComparison.Ordinal))
                 {
                     OnPropertyChanged(nameof(BindingRowVer));
@@ -2084,10 +2085,10 @@ public partial class DocumentEditModel : EditModelBase
     }
 
     // ---- navigation ----
-    /// <summary>DocumentNotes の子コレクションのバッキングフィールド</summary>
+    /// <summary>Backing field for the DocumentNotes child collection.</summary>
     private EditModelCollection<DocumentNoteEditModel> _documentNotes = new EditModelCollection<DocumentNoteEditModel>();
 
-    /// <summary>DocumentNotes ナビゲーションプロパティ（子コレクション。要素の ParentModel に自身が設定される）</summary>
+    /// <summary>DocumentNotes navigation property (child collection; this model is set as each element's ParentModel).</summary>
     public EditModelCollection<DocumentNoteEditModel> DocumentNotes
     {
         get
@@ -2109,7 +2110,7 @@ public partial class DocumentEditModel : EditModelBase
         }
     }
 
-    /// <summary>確定値をバインディング用プロパティへ書き戻しエラーをクリアする（RevertInput から呼ばれる）</summary>
+    /// <summary>Writes the confirmed values back to the binding properties and clears errors (called from RevertInput).</summary>
     protected override void RevertCore()
     {
         BindingDocumentId = DocumentId?.ToString() ?? string.Empty;
@@ -2126,7 +2127,7 @@ public partial class DocumentEditModel : EditModelBase
         SetError(nameof(BindingRowVer), null);
     }
 
-    /// <summary>このノード自身の検証（必須項目の未入力チェック＋追加検証フック）。Validate から呼ばれる</summary>
+    /// <summary>Validation of this node itself (missing-input checks for required fields plus the extra validation hook). Called from Validate.</summary>
     protected override void ValidateSelf()
     {
         if (DocumentId is null)
@@ -2144,10 +2145,10 @@ public partial class DocumentEditModel : EditModelBase
         OnValidate();
     }
 
-    /// <summary>追加の検証ルールを実装するフック（partial 実装で SetError によりエラー登録）</summary>
+    /// <summary>Hook for implementing additional validation rules (register errors via SetError in a partial implementation).</summary>
     partial void OnValidate();
 
-    /// <summary>プロパティの表示名を解決する（既定＝列の説明・無指定はプロパティ名。CustomizePropertyDisplayName で上書き可能）。検証メッセージで使う</summary>
+    /// <summary>Resolves the display name of a property (default = the column description, or the property name if unspecified; can be overridden via CustomizePropertyDisplayName). Used in validation messages.</summary>
     private static string GetDisplayName(string propertyName, string defaultDisplayName)
     {
         var displayName = defaultDisplayName;
@@ -2155,38 +2156,38 @@ public partial class DocumentEditModel : EditModelBase
         return displayName;
     }
 
-    /// <summary>プロパティの表示名を差し替える拡張ポイント（partial・未実装なら既定の表示名）</summary>
+    /// <summary>Extension point for replacing a property's display name (partial; the default display name is used if unimplemented).</summary>
     static partial void CustomizePropertyDisplayName(string propertyName, ref string displayName);
 
-    /// <summary>既知のカスケード子をレジストリへ登録する（検証・収集・確定・ダーティ判定に参加。partial 追加の子は RegisterExtraChildren で登録）</summary>
+    /// <summary>Registers the known cascade children into the registry (they participate in validation, error collection, accepting changes, and dirty checks; children added via partial classes are registered in RegisterExtraChildren).</summary>
     protected override void RegisterChildren()
     {
         AddChildren("DocumentNotes", DocumentNotes);
     }
 
-    // ---- 行編集（IEditableObject）用スナップショット ----
-    /// <summary>DocumentId の編集前スナップショット</summary>
+    // ---- Snapshots for row editing (IEditableObject) ----
+    /// <summary>Pre-edit snapshot of DocumentId.</summary>
     private string _bindingDocumentIdSnapshot = string.Empty;
 
-    /// <summary>Title の編集前スナップショット</summary>
+    /// <summary>Pre-edit snapshot of Title.</summary>
     private string _bindingTitleSnapshot = string.Empty;
 
-    /// <summary>Payload の編集前スナップショット</summary>
+    /// <summary>Pre-edit snapshot of Payload.</summary>
     private string _bindingPayloadSnapshot = string.Empty;
 
-    /// <summary>Thumb の編集前スナップショット</summary>
+    /// <summary>Pre-edit snapshot of Thumb.</summary>
     private string _bindingThumbSnapshot = string.Empty;
 
-    /// <summary>Checksum の編集前スナップショット</summary>
+    /// <summary>Pre-edit snapshot of Checksum.</summary>
     private string _bindingChecksumSnapshot = string.Empty;
 
-    /// <summary>RowVer の編集前スナップショット</summary>
+    /// <summary>Pre-edit snapshot of RowVer.</summary>
     private string _bindingRowVerSnapshot = string.Empty;
 
-    /// <summary>編集前の RowState スナップショット</summary>
+    /// <summary>Pre-edit snapshot of the RowState.</summary>
     private RowState _rowStateSnapshot;
 
-    /// <summary>BeginEdit の本体。各バインディング入力と RowState をスナップショットする</summary>
+    /// <summary>Core logic of BeginEdit. Snapshots each binding input and the RowState.</summary>
     protected override void BeginEditCore()
     {
         _bindingDocumentIdSnapshot = _bindingDocumentId;
@@ -2199,16 +2200,16 @@ public partial class DocumentEditModel : EditModelBase
         OnBeginEdit();
     }
 
-    /// <summary>BeginEdit 時のフック。partial クラスで追加したフィールドの控えを取る</summary>
+    /// <summary>Hook invoked at BeginEdit. Take backups of fields added in a partial class.</summary>
     partial void OnBeginEdit();
 
-    /// <summary>EndEdit の本体。確定時のフックを呼ぶ（変更は即時反映済み）</summary>
+    /// <summary>Core logic of EndEdit. Calls the commit hook (changes are already applied immediately).</summary>
     protected override void EndEditCore() => OnEndEdit();
 
-    /// <summary>EndEdit（確定）時のフック</summary>
+    /// <summary>Hook invoked at EndEdit (commit).</summary>
     partial void OnEndEdit();
 
-    /// <summary>CancelEdit の本体。スナップショットへ復元する（確定値・エラーは再パースで再現し RowState を戻す）</summary>
+    /// <summary>Core logic of CancelEdit. Restores from the snapshot (confirmed values and errors are reproduced by re-parsing, and the RowState is restored).</summary>
     protected override void CancelEditCore()
     {
         ExecuteLoad(() =>
@@ -2225,45 +2226,45 @@ public partial class DocumentEditModel : EditModelBase
         RowState = _rowStateSnapshot;
     }
 
-    /// <summary>CancelEdit 時のフック。partial クラスで追加したフィールドを控えへ戻す（ExecuteLoad 中に呼ばれる）</summary>
+    /// <summary>Hook invoked at CancelEdit. Restore fields added in a partial class from their backups (called inside ExecuteLoad).</summary>
     partial void OnCancelEdit();
 
-    /// <summary>所属コレクション内で自身の次の要素を取得する（所属していない／末尾なら null）</summary>
+    /// <summary>Returns the next element after this one in its owning collection (null if not owned or at the end).</summary>
     public new DocumentEditModel? GetNext() => (DocumentEditModel?)base.GetNext();
 
-    /// <summary>所属コレクション内で自身の前の要素を取得する（所属していない／先頭なら null）</summary>
+    /// <summary>Returns the previous element before this one in its owning collection (null if not owned or at the start).</summary>
     public new DocumentEditModel? GetPrevious() => (DocumentEditModel?)base.GetPrevious();
 
-    /// <summary>自身が所属する親コレクション（所属していなければ null）</summary>
+    /// <summary>Gets the parent collection this element belongs to (null if not owned).</summary>
     public EditModelCollection<DocumentEditModel>? ParentCollection =>
         Owner as EditModelCollection<DocumentEditModel>;
 
-    /// <summary>所属コレクションの並び替え本体。型付きコレクションの Move を呼ぶ（MoveTo* から使用される）</summary>
+    /// <summary>Core reorder logic for the owning collection. Calls Move on the typed collection (used by the MoveTo* methods).</summary>
     protected override void MoveCore(int oldIndex, int newIndex) =>
         ParentCollection?.Move(oldIndex, newIndex);
 }
 
-/// <summary>document_notes テーブルの画面編集用モデル</summary>
+/// <summary>Edit model for on-screen editing of the document_notes table.</summary>
 public partial class DocumentNoteEditModel : EditModelBase
 {
-    // ===== 拡張ポイント（partial クラスで必要なものだけ実装。未実装の partial メソッドは消去され無コスト）=====
-    //   検証追加      : partial void OnValidate();
-    //   子の追加      : protected override void RegisterExtraChildren();  // 内部で AddChild/AddChildren で登録
-    //   変換ﾒｯｾｰｼﾞ調整  : partial void CustomizeParseErrorMessage(string propertyName, string inputValue, string typeName, ref string message);
-    //   入力正規化調整 : protected override void CustomizeInputNormalization(string propertyName, string rawValue, ref string normalizedValue);
-    //   表示名調整    : partial void CustomizePropertyDisplayName(string propertyName, ref string displayName);  // 検証メッセージの表示名を上書き
-    //   行編集        : partial void OnBeginEdit();  partial void OnEndEdit();  partial void OnCancelEdit();
-    //   値変更通知    : partial void On{プロパティ}Changing(値) / Changed(値) / Changing(旧,新) / Changed(旧,新);  // 各プロパティに用意
+    // ===== Extension points (implement only what you need in a partial class; unimplemented partial methods are erased at no cost) =====
+    //   Extra validation        : partial void OnValidate();
+    //   Extra children          : protected override void RegisterExtraChildren();  // register via AddChild/AddChildren inside
+    //   Conversion msg tweak    : partial void CustomizeParseErrorMessage(string propertyName, string inputValue, string typeName, ref string message);
+    //   Input normalization     : protected override void CustomizeInputNormalization(string propertyName, string rawValue, ref string normalizedValue);
+    //   Display name tweak      : partial void CustomizePropertyDisplayName(string propertyName, ref string displayName);  // override display names in validation messages
+    //   Row editing             : partial void OnBeginEdit();  partial void OnEndEdit();  partial void OnCancelEdit();
+    //   Value change hooks      : partial void On{Property}Changing(value) / Changed(value) / Changing(old,new) / Changed(old,new);  // provided per property
     // ====================================================================================================
 
-    // 各列につき「確定値」「画面入力文字列」の 2 種を保持する（変換エラーはエラーディクショナリが保持する）
-    /// <summary>NoteId の確定値</summary>
+    // Each column keeps two representations: the confirmed value and the on-screen input string (conversion errors are held by the error dictionary).
+    /// <summary>Confirmed value of NoteId.</summary>
     private int? _noteId;
 
-    /// <summary>NoteId の画面入力文字列</summary>
+    /// <summary>On-screen input string for NoteId.</summary>
     private string _bindingNoteId = string.Empty;
 
-    /// <summary>NoteId の確定値（外部からは読み取り専用）</summary>
+    /// <summary>Confirmed value of NoteId (read-only from outside).</summary>
     public int? NoteId
     {
         get => _noteId;
@@ -2282,7 +2283,7 @@ public partial class DocumentNoteEditModel : EditModelBase
             OnNoteIdChanged(oldValue, value);
             OnPropertyChanged(nameof(NoteId));
 
-            // 確定値が変化したら更新対象へ昇格（ロード中は昇格させず、状態は元 Entity の鏡のままにする）
+            // Promote to update target when the confirmed value changes (not during load, where the state stays a mirror of the source entity).
             if (!IsLoading)
             {
                 OnConfirmedValueChanged(nameof(NoteId));
@@ -2295,25 +2296,25 @@ public partial class DocumentNoteEditModel : EditModelBase
         }
     }
 
-    /// <summary>NoteId の確定値が変更される直前に呼ばれる（新値のみ。partial 実装で処理を追加）</summary>
+    /// <summary>Called just before the confirmed value of NoteId changes (new value only; add processing via a partial implementation).</summary>
     partial void OnNoteIdChanging(int? value);
 
-    /// <summary>NoteId の確定値が変更される直前に呼ばれる（旧値・新値。partial 実装で処理を追加）</summary>
+    /// <summary>Called just before the confirmed value of NoteId changes (old and new values; add processing via a partial implementation).</summary>
     partial void OnNoteIdChanging(int? oldValue, int? newValue);
 
-    /// <summary>NoteId の確定値が変更された直後に呼ばれる（新値のみ。partial 実装で処理を追加）</summary>
+    /// <summary>Called just after the confirmed value of NoteId changes (new value only; add processing via a partial implementation).</summary>
     partial void OnNoteIdChanged(int? value);
 
-    /// <summary>NoteId の確定値が変更された直後に呼ばれる（旧値・新値。partial 実装で処理を追加）</summary>
+    /// <summary>Called just after the confirmed value of NoteId changes (old and new values; add processing via a partial implementation).</summary>
     partial void OnNoteIdChanged(int? oldValue, int? newValue);
 
-    /// <summary>NoteId の画面入力用バインディング文字列（設定時に確定値へ変換）</summary>
+    /// <summary>On-screen input binding string for NoteId (converted to the confirmed value when set).</summary>
     public string BindingNoteId
     {
         get => _bindingNoteId;
         set
         {
-            // 入力由来の値のみ正規化（ロード・復元時は元 Entity の鏡像を保つため素通し）
+            // Normalize only values that come from input (pass through during load/revert to keep a mirror of the source entity).
             var normalized =
                 IsLoading || IsReverting
                     ? value
@@ -2321,7 +2322,7 @@ public partial class DocumentNoteEditModel : EditModelBase
 
             if (!SetProperty(ref _bindingNoteId, normalized, nameof(BindingNoteId)))
             {
-                // トリムで既存値と一致した場合、画面表示にだけ空白付き文字列が残るため表示を正規化値へ戻す
+                // When trimming makes the value equal to the existing one, only the on-screen display keeps the whitespace-padded string, so reset the display to the normalized value.
                 if (!string.Equals(value, normalized, StringComparison.Ordinal))
                 {
                     OnPropertyChanged(nameof(BindingNoteId));
@@ -2348,13 +2349,13 @@ public partial class DocumentNoteEditModel : EditModelBase
         }
     }
 
-    /// <summary>DocumentId の確定値</summary>
+    /// <summary>Confirmed value of DocumentId.</summary>
     private int? _documentId;
 
-    /// <summary>DocumentId の画面入力文字列</summary>
+    /// <summary>On-screen input string for DocumentId.</summary>
     private string _bindingDocumentId = string.Empty;
 
-    /// <summary>DocumentId の確定値（外部からは読み取り専用）</summary>
+    /// <summary>Confirmed value of DocumentId (read-only from outside).</summary>
     public int? DocumentId
     {
         get => _documentId;
@@ -2373,7 +2374,7 @@ public partial class DocumentNoteEditModel : EditModelBase
             OnDocumentIdChanged(oldValue, value);
             OnPropertyChanged(nameof(DocumentId));
 
-            // 確定値が変化したら更新対象へ昇格（ロード中は昇格させず、状態は元 Entity の鏡のままにする）
+            // Promote to update target when the confirmed value changes (not during load, where the state stays a mirror of the source entity).
             if (!IsLoading)
             {
                 OnConfirmedValueChanged(nameof(DocumentId));
@@ -2386,25 +2387,25 @@ public partial class DocumentNoteEditModel : EditModelBase
         }
     }
 
-    /// <summary>DocumentId の確定値が変更される直前に呼ばれる（新値のみ。partial 実装で処理を追加）</summary>
+    /// <summary>Called just before the confirmed value of DocumentId changes (new value only; add processing via a partial implementation).</summary>
     partial void OnDocumentIdChanging(int? value);
 
-    /// <summary>DocumentId の確定値が変更される直前に呼ばれる（旧値・新値。partial 実装で処理を追加）</summary>
+    /// <summary>Called just before the confirmed value of DocumentId changes (old and new values; add processing via a partial implementation).</summary>
     partial void OnDocumentIdChanging(int? oldValue, int? newValue);
 
-    /// <summary>DocumentId の確定値が変更された直後に呼ばれる（新値のみ。partial 実装で処理を追加）</summary>
+    /// <summary>Called just after the confirmed value of DocumentId changes (new value only; add processing via a partial implementation).</summary>
     partial void OnDocumentIdChanged(int? value);
 
-    /// <summary>DocumentId の確定値が変更された直後に呼ばれる（旧値・新値。partial 実装で処理を追加）</summary>
+    /// <summary>Called just after the confirmed value of DocumentId changes (old and new values; add processing via a partial implementation).</summary>
     partial void OnDocumentIdChanged(int? oldValue, int? newValue);
 
-    /// <summary>DocumentId の画面入力用バインディング文字列（設定時に確定値へ変換）</summary>
+    /// <summary>On-screen input binding string for DocumentId (converted to the confirmed value when set).</summary>
     public string BindingDocumentId
     {
         get => _bindingDocumentId;
         set
         {
-            // 入力由来の値のみ正規化（ロード・復元時は元 Entity の鏡像を保つため素通し）
+            // Normalize only values that come from input (pass through during load/revert to keep a mirror of the source entity).
             var normalized =
                 IsLoading || IsReverting
                     ? value
@@ -2412,7 +2413,7 @@ public partial class DocumentNoteEditModel : EditModelBase
 
             if (!SetProperty(ref _bindingDocumentId, normalized, nameof(BindingDocumentId)))
             {
-                // トリムで既存値と一致した場合、画面表示にだけ空白付き文字列が残るため表示を正規化値へ戻す
+                // When trimming makes the value equal to the existing one, only the on-screen display keeps the whitespace-padded string, so reset the display to the normalized value.
                 if (!string.Equals(value, normalized, StringComparison.Ordinal))
                 {
                     OnPropertyChanged(nameof(BindingDocumentId));
@@ -2439,13 +2440,13 @@ public partial class DocumentNoteEditModel : EditModelBase
         }
     }
 
-    /// <summary>Note の確定値</summary>
+    /// <summary>Confirmed value of Note.</summary>
     private string? _note;
 
-    /// <summary>Note の画面入力文字列</summary>
+    /// <summary>On-screen input string for Note.</summary>
     private string _bindingNote = string.Empty;
 
-    /// <summary>Note の確定値（外部からは読み取り専用）</summary>
+    /// <summary>Confirmed value of Note (read-only from outside).</summary>
     public string? Note
     {
         get => _note;
@@ -2464,7 +2465,7 @@ public partial class DocumentNoteEditModel : EditModelBase
             OnNoteChanged(oldValue, value);
             OnPropertyChanged(nameof(Note));
 
-            // 確定値が変化したら更新対象へ昇格（ロード中は昇格させず、状態は元 Entity の鏡のままにする）
+            // Promote to update target when the confirmed value changes (not during load, where the state stays a mirror of the source entity).
             if (!IsLoading)
             {
                 OnConfirmedValueChanged(nameof(Note));
@@ -2477,25 +2478,25 @@ public partial class DocumentNoteEditModel : EditModelBase
         }
     }
 
-    /// <summary>Note の確定値が変更される直前に呼ばれる（新値のみ。partial 実装で処理を追加）</summary>
+    /// <summary>Called just before the confirmed value of Note changes (new value only; add processing via a partial implementation).</summary>
     partial void OnNoteChanging(string? value);
 
-    /// <summary>Note の確定値が変更される直前に呼ばれる（旧値・新値。partial 実装で処理を追加）</summary>
+    /// <summary>Called just before the confirmed value of Note changes (old and new values; add processing via a partial implementation).</summary>
     partial void OnNoteChanging(string? oldValue, string? newValue);
 
-    /// <summary>Note の確定値が変更された直後に呼ばれる（新値のみ。partial 実装で処理を追加）</summary>
+    /// <summary>Called just after the confirmed value of Note changes (new value only; add processing via a partial implementation).</summary>
     partial void OnNoteChanged(string? value);
 
-    /// <summary>Note の確定値が変更された直後に呼ばれる（旧値・新値。partial 実装で処理を追加）</summary>
+    /// <summary>Called just after the confirmed value of Note changes (old and new values; add processing via a partial implementation).</summary>
     partial void OnNoteChanged(string? oldValue, string? newValue);
 
-    /// <summary>Note の画面入力用バインディング文字列（設定時に確定値へ変換）</summary>
+    /// <summary>On-screen input binding string for Note (converted to the confirmed value when set).</summary>
     public string BindingNote
     {
         get => _bindingNote;
         set
         {
-            // 入力由来の値のみ正規化（ロード・復元時は元 Entity の鏡像を保つため素通し）
+            // Normalize only values that come from input (pass through during load/revert to keep a mirror of the source entity).
             var normalized =
                 IsLoading || IsReverting
                     ? value
@@ -2503,7 +2504,7 @@ public partial class DocumentNoteEditModel : EditModelBase
 
             if (!SetProperty(ref _bindingNote, normalized, nameof(BindingNote)))
             {
-                // トリムで既存値と一致した場合、画面表示にだけ空白付き文字列が残るため表示を正規化値へ戻す
+                // When trimming makes the value equal to the existing one, only the on-screen display keeps the whitespace-padded string, so reset the display to the normalized value.
                 if (!string.Equals(value, normalized, StringComparison.Ordinal))
                 {
                     OnPropertyChanged(nameof(BindingNote));
@@ -2529,10 +2530,10 @@ public partial class DocumentNoteEditModel : EditModelBase
     }
 
     // ---- navigation ----
-    /// <summary>Document ナビゲーションプロパティ</summary>
+    /// <summary>Document navigation property.</summary>
     public DocumentEditModel Document { get; set; } = null!;
 
-    /// <summary>確定値をバインディング用プロパティへ書き戻しエラーをクリアする（RevertInput から呼ばれる）</summary>
+    /// <summary>Writes the confirmed values back to the binding properties and clears errors (called from RevertInput).</summary>
     protected override void RevertCore()
     {
         BindingNoteId = NoteId?.ToString() ?? string.Empty;
@@ -2543,7 +2544,7 @@ public partial class DocumentNoteEditModel : EditModelBase
         SetError(nameof(BindingNote), null);
     }
 
-    /// <summary>このノード自身の検証（必須項目の未入力チェック＋追加検証フック）。Validate から呼ばれる</summary>
+    /// <summary>Validation of this node itself (missing-input checks for required fields plus the extra validation hook). Called from Validate.</summary>
     protected override void ValidateSelf()
     {
         if (NoteId is null)
@@ -2561,10 +2562,10 @@ public partial class DocumentNoteEditModel : EditModelBase
         OnValidate();
     }
 
-    /// <summary>追加の検証ルールを実装するフック（partial 実装で SetError によりエラー登録）</summary>
+    /// <summary>Hook for implementing additional validation rules (register errors via SetError in a partial implementation).</summary>
     partial void OnValidate();
 
-    /// <summary>プロパティの表示名を解決する（既定＝列の説明・無指定はプロパティ名。CustomizePropertyDisplayName で上書き可能）。検証メッセージで使う</summary>
+    /// <summary>Resolves the display name of a property (default = the column description, or the property name if unspecified; can be overridden via CustomizePropertyDisplayName). Used in validation messages.</summary>
     private static string GetDisplayName(string propertyName, string defaultDisplayName)
     {
         var displayName = defaultDisplayName;
@@ -2572,23 +2573,23 @@ public partial class DocumentNoteEditModel : EditModelBase
         return displayName;
     }
 
-    /// <summary>プロパティの表示名を差し替える拡張ポイント（partial・未実装なら既定の表示名）</summary>
+    /// <summary>Extension point for replacing a property's display name (partial; the default display name is used if unimplemented).</summary>
     static partial void CustomizePropertyDisplayName(string propertyName, ref string displayName);
 
-    // ---- 行編集（IEditableObject）用スナップショット ----
-    /// <summary>NoteId の編集前スナップショット</summary>
+    // ---- Snapshots for row editing (IEditableObject) ----
+    /// <summary>Pre-edit snapshot of NoteId.</summary>
     private string _bindingNoteIdSnapshot = string.Empty;
 
-    /// <summary>DocumentId の編集前スナップショット</summary>
+    /// <summary>Pre-edit snapshot of DocumentId.</summary>
     private string _bindingDocumentIdSnapshot = string.Empty;
 
-    /// <summary>Note の編集前スナップショット</summary>
+    /// <summary>Pre-edit snapshot of Note.</summary>
     private string _bindingNoteSnapshot = string.Empty;
 
-    /// <summary>編集前の RowState スナップショット</summary>
+    /// <summary>Pre-edit snapshot of the RowState.</summary>
     private RowState _rowStateSnapshot;
 
-    /// <summary>BeginEdit の本体。各バインディング入力と RowState をスナップショットする</summary>
+    /// <summary>Core logic of BeginEdit. Snapshots each binding input and the RowState.</summary>
     protected override void BeginEditCore()
     {
         _bindingNoteIdSnapshot = _bindingNoteId;
@@ -2598,16 +2599,16 @@ public partial class DocumentNoteEditModel : EditModelBase
         OnBeginEdit();
     }
 
-    /// <summary>BeginEdit 時のフック。partial クラスで追加したフィールドの控えを取る</summary>
+    /// <summary>Hook invoked at BeginEdit. Take backups of fields added in a partial class.</summary>
     partial void OnBeginEdit();
 
-    /// <summary>EndEdit の本体。確定時のフックを呼ぶ（変更は即時反映済み）</summary>
+    /// <summary>Core logic of EndEdit. Calls the commit hook (changes are already applied immediately).</summary>
     protected override void EndEditCore() => OnEndEdit();
 
-    /// <summary>EndEdit（確定）時のフック</summary>
+    /// <summary>Hook invoked at EndEdit (commit).</summary>
     partial void OnEndEdit();
 
-    /// <summary>CancelEdit の本体。スナップショットへ復元する（確定値・エラーは再パースで再現し RowState を戻す）</summary>
+    /// <summary>Core logic of CancelEdit. Restores from the snapshot (confirmed values and errors are reproduced by re-parsing, and the RowState is restored).</summary>
     protected override void CancelEditCore()
     {
         ExecuteLoad(() =>
@@ -2621,33 +2622,33 @@ public partial class DocumentNoteEditModel : EditModelBase
         RowState = _rowStateSnapshot;
     }
 
-    /// <summary>CancelEdit 時のフック。partial クラスで追加したフィールドを控えへ戻す（ExecuteLoad 中に呼ばれる）</summary>
+    /// <summary>Hook invoked at CancelEdit. Restore fields added in a partial class from their backups (called inside ExecuteLoad).</summary>
     partial void OnCancelEdit();
 
-    /// <summary>所属コレクション内で自身の次の要素を取得する（所属していない／末尾なら null）</summary>
+    /// <summary>Returns the next element after this one in its owning collection (null if not owned or at the end).</summary>
     public new DocumentNoteEditModel? GetNext() => (DocumentNoteEditModel?)base.GetNext();
 
-    /// <summary>所属コレクション内で自身の前の要素を取得する（所属していない／先頭なら null）</summary>
+    /// <summary>Returns the previous element before this one in its owning collection (null if not owned or at the start).</summary>
     public new DocumentNoteEditModel? GetPrevious() => (DocumentNoteEditModel?)base.GetPrevious();
 
-    /// <summary>自身が所属する親コレクション（所属していなければ null）</summary>
+    /// <summary>Gets the parent collection this element belongs to (null if not owned).</summary>
     public EditModelCollection<DocumentNoteEditModel>? ParentCollection =>
         Owner as EditModelCollection<DocumentNoteEditModel>;
 
-    /// <summary>自身を子として保持する親モデル（カスケード親。未所属／ルートは null）</summary>
+    /// <summary>Gets the parent model that holds this element as a child (cascade parent; null when not owned or at the root).</summary>
     public new DocumentEditModel? ParentModel =>
         base.ParentModel as DocumentEditModel;
 
-    /// <summary>所属コレクションの並び替え本体。型付きコレクションの Move を呼ぶ（MoveTo* から使用される）</summary>
+    /// <summary>Core reorder logic for the owning collection. Calls Move on the typed collection (used by the MoveTo* methods).</summary>
     protected override void MoveCore(int oldIndex, int newIndex) =>
         ParentCollection?.Move(oldIndex, newIndex);
 }
 
-/// <summary>DocumentEntity と DocumentEditModel の相互変換</summary>
+/// <summary>Converts between DocumentEntity and DocumentEditModel.</summary>
 public sealed partial class DocumentMapper
     : MapperBase<DocumentEntity, DocumentEditModel>
 {
-    /// <summary>初期値を設定した新しい DocumentEntity を生成する（保存時に追加対象となる）</summary>
+    /// <summary>Creates a new DocumentEntity with initial values set (it will be an insertion target on save).</summary>
     public override DocumentEntity CreateEntity()
     {
         var entity = new DocumentEntity();
@@ -2656,10 +2657,10 @@ public sealed partial class DocumentMapper
         return entity;
     }
 
-    /// <summary>新しい DocumentEntity の生成直後に呼ばれる（partial 実装で初期値を設定）</summary>
+    /// <summary>Called just after a new DocumentEntity is created (set initial values via a partial implementation).</summary>
     partial void OnEntityCreated(DocumentEntity entity);
 
-    /// <summary>DocumentEntity を基に新しい DocumentEditModel を生成する</summary>
+    /// <summary>Creates a new DocumentEditModel from a DocumentEntity.</summary>
     public override DocumentEditModel CreateEditModel(DocumentEntity entity)
     {
         var editModel = new DocumentEditModel();
@@ -2668,11 +2669,11 @@ public sealed partial class DocumentMapper
         return editModel;
     }
 
-    /// <summary>新しい DocumentEditModel の生成直後（ロード後）に呼ばれる（partial 実装で初期値を設定。新規のみは IsAdded で分岐）</summary>
+    /// <summary>Called just after a new DocumentEditModel is created (after loading) (set initial values via a partial implementation; branch on IsAdded to target new models only).</summary>
     partial void OnEditModelCreated(DocumentEditModel editModel);
 
-    /// <summary>DocumentEditModel の確定値を既存の DocumentEntity へ反映する（破壊的更新）</summary>
-    /// <param name="includeRemoved">削除追跡分（Removed）も復元して反映するか（保存用は true、帳票表示用などは false）</param>
+    /// <summary>Applies the DocumentEditModel's confirmed values to an existing DocumentEntity (destructive update).</summary>
+    /// <param name="includeRemoved">Whether to also restore and apply deletion-tracked (Removed) items (true for saving, false for report display and similar).</param>
     public override void ApplyToEntity(
         DocumentEditModel editModel,
         DocumentEntity entity,
@@ -2680,24 +2681,24 @@ public sealed partial class DocumentMapper
     )
     {
         entity.DocumentId =
-            editModel.DocumentId ?? throw new InvalidOperationException("DocumentId が未入力です。");
+            editModel.DocumentId ?? throw new InvalidOperationException("DocumentId has no input value.");
         entity.Title =
-            editModel.Title ?? throw new InvalidOperationException("Title が未入力です。");
+            editModel.Title ?? throw new InvalidOperationException("Title has no input value.");
         entity.Payload = editModel.Payload;
         entity.Thumb =
-            editModel.Thumb ?? throw new InvalidOperationException("Thumb が未入力です。");
+            editModel.Thumb ?? throw new InvalidOperationException("Thumb has no input value.");
         entity.Checksum = editModel.Checksum;
         entity.RowVer = editModel.RowVer;
-        // 確定値の変更で EditModel 側に立った RowState をそのまま転写する（ここでは状態を作らない）
+        // Transfer the RowState raised on the edit model by confirmed-value changes as-is (no state is created here).
         entity.RowState = editModel.RowState;
         entity.DocumentNotes = new DocumentNoteMapper().CreateEntities(editModel.DocumentNotes, includeRemoved);
         OnEntityApplied(editModel, entity);
     }
 
-    /// <summary>DocumentEditModel の確定値を DocumentEntity へ反映した後に呼ばれる（partial 実装で追加プロパティを保存）</summary>
+    /// <summary>Called after the DocumentEditModel's confirmed values are applied to the DocumentEntity (save additional properties via a partial implementation).</summary>
     partial void OnEntityApplied(DocumentEditModel editModel, DocumentEntity entity);
 
-    /// <summary>DocumentEntity の値を既存の DocumentEditModel へ反映する（バインディング経由）</summary>
+    /// <summary>Applies the DocumentEntity's values to an existing DocumentEditModel (via the bindings).</summary>
     public void ApplyToEditModel(DocumentEntity entity, DocumentEditModel editModel)
     {
         editModel.ExecuteLoad(() =>
@@ -2713,19 +2714,19 @@ public sealed partial class DocumentMapper
             OnEditModelLoaded(entity, editModel);
         });
 
-        // EditModel の状態は生成元 Entity を基準にする（ロード=Unchanged、新規=Added）
+        // The edit model's state is based on the source entity (loaded = Unchanged, new = Added).
         editModel.RowState = entity.RowState;
     }
 
-    /// <summary>DocumentEditModel への既定ロード後に呼ばれる（partial 実装で追加プロパティをロード）</summary>
+    /// <summary>Called after the default load into the DocumentEditModel (load additional properties via a partial implementation).</summary>
     partial void OnEditModelLoaded(DocumentEntity entity, DocumentEditModel editModel);
 }
 
-/// <summary>DocumentNoteEntity と DocumentNoteEditModel の相互変換</summary>
+/// <summary>Converts between DocumentNoteEntity and DocumentNoteEditModel.</summary>
 public sealed partial class DocumentNoteMapper
     : MapperBase<DocumentNoteEntity, DocumentNoteEditModel>
 {
-    /// <summary>初期値を設定した新しい DocumentNoteEntity を生成する（保存時に追加対象となる）</summary>
+    /// <summary>Creates a new DocumentNoteEntity with initial values set (it will be an insertion target on save).</summary>
     public override DocumentNoteEntity CreateEntity()
     {
         var entity = new DocumentNoteEntity();
@@ -2734,10 +2735,10 @@ public sealed partial class DocumentNoteMapper
         return entity;
     }
 
-    /// <summary>新しい DocumentNoteEntity の生成直後に呼ばれる（partial 実装で初期値を設定）</summary>
+    /// <summary>Called just after a new DocumentNoteEntity is created (set initial values via a partial implementation).</summary>
     partial void OnEntityCreated(DocumentNoteEntity entity);
 
-    /// <summary>DocumentNoteEntity を基に新しい DocumentNoteEditModel を生成する</summary>
+    /// <summary>Creates a new DocumentNoteEditModel from a DocumentNoteEntity.</summary>
     public override DocumentNoteEditModel CreateEditModel(DocumentNoteEntity entity)
     {
         var editModel = new DocumentNoteEditModel();
@@ -2746,11 +2747,11 @@ public sealed partial class DocumentNoteMapper
         return editModel;
     }
 
-    /// <summary>新しい DocumentNoteEditModel の生成直後（ロード後）に呼ばれる（partial 実装で初期値を設定。新規のみは IsAdded で分岐）</summary>
+    /// <summary>Called just after a new DocumentNoteEditModel is created (after loading) (set initial values via a partial implementation; branch on IsAdded to target new models only).</summary>
     partial void OnEditModelCreated(DocumentNoteEditModel editModel);
 
-    /// <summary>DocumentNoteEditModel の確定値を既存の DocumentNoteEntity へ反映する（破壊的更新）</summary>
-    /// <param name="includeRemoved">削除追跡分（Removed）も復元して反映するか（保存用は true、帳票表示用などは false）</param>
+    /// <summary>Applies the DocumentNoteEditModel's confirmed values to an existing DocumentNoteEntity (destructive update).</summary>
+    /// <param name="includeRemoved">Whether to also restore and apply deletion-tracked (Removed) items (true for saving, false for report display and similar).</param>
     public override void ApplyToEntity(
         DocumentNoteEditModel editModel,
         DocumentNoteEntity entity,
@@ -2758,20 +2759,20 @@ public sealed partial class DocumentNoteMapper
     )
     {
         entity.NoteId =
-            editModel.NoteId ?? throw new InvalidOperationException("NoteId が未入力です。");
+            editModel.NoteId ?? throw new InvalidOperationException("NoteId has no input value.");
         entity.DocumentId =
-            editModel.DocumentId ?? throw new InvalidOperationException("DocumentId が未入力です。");
+            editModel.DocumentId ?? throw new InvalidOperationException("DocumentId has no input value.");
         entity.Note =
-            editModel.Note ?? throw new InvalidOperationException("Note が未入力です。");
-        // 確定値の変更で EditModel 側に立った RowState をそのまま転写する（ここでは状態を作らない）
+            editModel.Note ?? throw new InvalidOperationException("Note has no input value.");
+        // Transfer the RowState raised on the edit model by confirmed-value changes as-is (no state is created here).
         entity.RowState = editModel.RowState;
         OnEntityApplied(editModel, entity);
     }
 
-    /// <summary>DocumentNoteEditModel の確定値を DocumentNoteEntity へ反映した後に呼ばれる（partial 実装で追加プロパティを保存）</summary>
+    /// <summary>Called after the DocumentNoteEditModel's confirmed values are applied to the DocumentNoteEntity (save additional properties via a partial implementation).</summary>
     partial void OnEntityApplied(DocumentNoteEditModel editModel, DocumentNoteEntity entity);
 
-    /// <summary>DocumentNoteEntity の値を既存の DocumentNoteEditModel へ反映する（バインディング経由）</summary>
+    /// <summary>Applies the DocumentNoteEntity's values to an existing DocumentNoteEditModel (via the bindings).</summary>
     public void ApplyToEditModel(DocumentNoteEntity entity, DocumentNoteEditModel editModel)
     {
         editModel.ExecuteLoad(() =>
@@ -2783,53 +2784,54 @@ public sealed partial class DocumentNoteMapper
             OnEditModelLoaded(entity, editModel);
         });
 
-        // EditModel の状態は生成元 Entity を基準にする（ロード=Unchanged、新規=Added）
+        // The edit model's state is based on the source entity (loaded = Unchanged, new = Added).
         editModel.RowState = entity.RowState;
     }
 
-    /// <summary>DocumentNoteEditModel への既定ロード後に呼ばれる（partial 実装で追加プロパティをロード）</summary>
+    /// <summary>Called after the default load into the DocumentNoteEditModel (load additional properties via a partial implementation).</summary>
     partial void OnEditModelLoaded(DocumentNoteEntity entity, DocumentNoteEditModel editModel);
 }
 
-/// <summary>ネットワーク境界を越えて提供できる操作に絞ったリポジトリ共通インターフェース（リモート面）</summary>
+/// <summary>Common repository interface limited to operations that can be provided across a network boundary (the remote surface).</summary>
 /// <remarks>
 /// <para>
-/// 単一エンティティ・エンティティグラフの CRUD と保存だけを持ち、式木（<see cref="IRepository{TEntity, TKey}.Query"/>）や
-/// 生 SQL のような「プロセス外へ運べない引数」を受け取るメンバーを含まない。全メンバーの引数・戻り値は
-/// 純粋なデータ（エンティティ・主キー・件数）のため、この面だけに依存するコードは、将来実体を
-/// リモート実装（Web サービス経由）へ差し替えてもコンパイル時に安全が保証される。
+/// Holds only CRUD and save operations for single entities and entity graphs; it excludes members that take arguments
+/// that cannot be carried out of process, such as expression trees (<see cref="IRepository{TEntity, TKey}.Query"/>) or
+/// raw SQL. Because every member's arguments and return values are pure data (entities, primary keys, counts), code that
+/// depends only on this surface stays compile-time safe even if the implementation is later swapped for a remote
+/// implementation (over a web service).
 /// </para>
 /// <para>
-/// <see cref="IRepository{TEntity, TKey}"/> が本インターフェースを継承して全メソッドを提供するため、
-/// 既存の利用コードは変わらない。リモート契約生成（GenerateRemoteContracts）では、この面（＋名前付きクエリ）だけを持つ
-/// I{Entity}RemoteRepository が追加生成され、I{Entity}Repository がそれを継承する。
+/// <see cref="IRepository{TEntity, TKey}"/> inherits this interface and provides all of its methods, so existing consuming
+/// code is unchanged. With remote contract generation (GenerateRemoteContracts), an I{Entity}RemoteRepository that has only
+/// this surface (plus the named queries) is additionally generated, and I{Entity}Repository inherits it.
 /// </para>
 /// </remarks>
 public partial interface IRemoteRepository<TEntity, TKey>
     where TEntity : EntityBase, new()
 {
-    /// <summary>主キーによる単一エンティティ取得（該当なしは null）</summary>
+    /// <summary>Gets a single entity by primary key (null when not found).</summary>
     Task<TEntity?> GetByIdAsync(TKey id, CancellationToken cancellationToken = default);
 
-    /// <summary>全エンティティ取得</summary>
+    /// <summary>Gets all entities.</summary>
     Task<IReadOnlyList<TEntity>> GetAllAsync(CancellationToken cancellationToken = default);
 
-    /// <summary>エンティティ追加</summary>
+    /// <summary>Inserts an entity.</summary>
     Task InsertAsync(TEntity entity, CancellationToken cancellationToken = default);
 
-    /// <summary>エンティティ更新（更新対象ありで true）</summary>
+    /// <summary>Updates an entity (true when a matching row was updated).</summary>
     Task<bool> UpdateAsync(TEntity entity, CancellationToken cancellationToken = default);
 
-    /// <summary>主キーによるエンティティ削除（削除対象ありで true）</summary>
+    /// <summary>Deletes an entity by primary key (true when a matching row was deleted).</summary>
     Task<bool> DeleteAsync(TKey id, CancellationToken cancellationToken = default);
 
-    /// <summary>RowState に従って 1 トランザクションで追加・更新・削除を保存する（既定で子をカスケード）</summary>
-    /// <param name="entity">保存対象（集約ルート）</param>
-    /// <param name="cascadeSave">子オブジェクトを連鎖的に保存するか</param>
-    /// <param name="cascadeDelete">削除時に子オブジェクトを連鎖削除するか</param>
-    /// <param name="insertWhenUpdateMissing">更新対象が存在しない場合に INSERT へ切り替えるか（既定は例外）</param>
-    /// <param name="cancellationToken">キャンセルトークン</param>
-    /// <returns>保存したレコード数</returns>
+    /// <summary>Saves inserts, updates, and deletes in a single transaction according to RowState (children cascade by default).</summary>
+    /// <param name="entity">The entity to save (the aggregate root).</param>
+    /// <param name="cascadeSave">Whether to cascade the save to child objects.</param>
+    /// <param name="cascadeDelete">Whether to cascade deletes to child objects.</param>
+    /// <param name="insertWhenUpdateMissing">Whether to switch to INSERT when no row exists to update (throws by default).</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The number of records saved.</returns>
     Task<int> SaveAsync(
         TEntity entity,
         bool cascadeSave = true,
@@ -2838,13 +2840,13 @@ public partial interface IRemoteRepository<TEntity, TKey>
         CancellationToken cancellationToken = default
     );
 
-    /// <summary>複数の集約ルートを 1 トランザクションでまとめて保存する（全件成功か全件ロールバックの原子的処理）</summary>
-    /// <param name="entities">保存対象（集約ルート）の一覧</param>
-    /// <param name="cascadeSave">子オブジェクトを連鎖的に保存するか</param>
-    /// <param name="cascadeDelete">削除時に子オブジェクトを連鎖削除するか</param>
-    /// <param name="insertWhenUpdateMissing">更新対象が存在しない場合に INSERT へ切り替えるか（既定は例外）</param>
-    /// <param name="cancellationToken">キャンセルトークン</param>
-    /// <returns>保存したレコード数</returns>
+    /// <summary>Saves multiple aggregate roots together in a single transaction (an atomic all-succeed-or-all-rollback operation).</summary>
+    /// <param name="entities">The list of entities to save (the aggregate roots).</param>
+    /// <param name="cascadeSave">Whether to cascade the save to child objects.</param>
+    /// <param name="cascadeDelete">Whether to cascade deletes to child objects.</param>
+    /// <param name="insertWhenUpdateMissing">Whether to switch to INSERT when no row exists to update (throws by default).</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The number of records saved.</returns>
     Task<int> SaveAsync(
         IEnumerable<TEntity> entities,
         bool cascadeSave = true,
@@ -2854,84 +2856,86 @@ public partial interface IRemoteRepository<TEntity, TKey>
     );
 }
 
-/// <summary>エンティティの CRUD 操作を提供するリポジトリ共通インターフェース</summary>
+/// <summary>Common repository interface that provides CRUD operations for entities.</summary>
 /// <remarks>
-/// リモート面（<see cref="IRemoteRepository{TEntity, TKey}"/>）に加え、ローカル実行（DB 直結）を前提とするメンバー
-/// （式木クエリ・生 SQL・一括追加）を持つ全機能面。I{Entity}Repository は常にこの全機能面を提供する。
+/// The full-featured surface that, in addition to the remote surface (<see cref="IRemoteRepository{TEntity, TKey}"/>), adds
+/// members that assume local execution (a direct DB connection): expression-tree queries, raw SQL, and bulk insert.
+/// I{Entity}Repository always provides this full-featured surface.
 /// </remarks>
 public partial interface IRepository<TEntity, TKey> : IRemoteRepository<TEntity, TKey>
     where TEntity : EntityBase, new()
 {
-    /// <summary>エンティティのコレクションを SqlBulkCopy で一括追加する</summary>
-    /// <param name="entities">追加対象の一覧</param>
-    /// <param name="cancellationToken">キャンセルトークン</param>
-    /// <returns>追加した件数</returns>
+    /// <summary>Bulk inserts a collection of entities using SqlBulkCopy.</summary>
+    /// <param name="entities">The list of entities to insert.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The number of rows inserted.</returns>
     Task<int> BulkInsertAsync(
         IEnumerable<TEntity> entities,
         CancellationToken cancellationToken = default
     );
 
-    /// <summary>検索条件・並び順・Include をチェーン指定して取得するクエリを開始する</summary>
+    /// <summary>Starts a query where filters, ordering, and Include can be specified via a fluent chain.</summary>
     SqlQuery<TEntity> Query();
 
-    /// <summary>生 SQL の SELECT を実行し、結果行を {TEntity} へマップして返す</summary>
+    /// <summary>Executes a raw SQL SELECT and maps the result rows to {TEntity}.</summary>
     /// <remarks>
     /// <para>
-    /// SELECT には {TEntity} の全列が必要（<c>SELECT *</c> または全列指定）。部分 SELECT（列不足）は不可で、
-    /// 欠けている列があればどの列が無いか分かる例外を投げる。
+    /// The SELECT must return all columns of {TEntity} (<c>SELECT *</c> or all columns listed). A partial SELECT (missing
+    /// columns) is not allowed; if any column is missing, an exception is thrown that names the missing column.
     /// </para>
     /// <para>
-    /// <paramref name="parameters"/> は匿名オブジェクト等の public インスタンスプロパティを列挙し、
-    /// プロパティ名 <c>Foo</c> を SQL パラメータ <c>@Foo</c> として束縛する（null 指定でパラメータなし）。
-    /// 生 SQL には列文脈が無いため型は明示せず <c>AddWithValue</c> で束縛する。
-    /// <b>値は必ずパラメータで渡すこと（SQL への文字列連結はインジェクションの危険がある）。</b>
+    /// <paramref name="parameters"/> enumerates the public instance properties of an anonymous object (or similar) and binds
+    /// property name <c>Foo</c> as SQL parameter <c>@Foo</c> (null means no parameters). Because raw SQL has no column context,
+    /// values are bound without an explicit type via <c>AddWithValue</c>.
+    /// <b>Always pass values as parameters (concatenating them into the SQL string risks injection).</b>
     /// </para>
     /// </remarks>
-    /// <param name="sql">全列を返す SELECT 文</param>
-    /// <param name="parameters">@名 パラメータへ束縛する匿名オブジェクト（null でパラメータなし）</param>
-    /// <param name="cancellationToken">キャンセルトークン</param>
+    /// <param name="sql">A SELECT statement that returns all columns.</param>
+    /// <param name="parameters">An anonymous object bound to @name parameters (null for no parameters).</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
     Task<IReadOnlyList<TEntity>> QueryBySqlAsync(
         string sql,
         object? parameters = null,
         CancellationToken cancellationToken = default
     );
 
-    /// <summary>生 SQL（UPDATE/DELETE/任意 DML）を実行し、影響行数を返す</summary>
+    /// <summary>Executes raw SQL (UPDATE/DELETE/any DML) and returns the number of affected rows.</summary>
     /// <remarks>
     /// <para>
-    /// <paramref name="parameters"/> の束縛は <see cref="QueryBySqlAsync"/> と同じ（プロパティ名 <c>Foo</c> → <c>@Foo</c>、
-    /// 型明示なしの <c>AddWithValue</c>、null でパラメータなし）。
-    /// <b>値は必ずパラメータで渡すこと（文字列連結はインジェクションの危険がある）。</b>
+    /// <paramref name="parameters"/> is bound the same way as <see cref="QueryBySqlAsync"/> (property name <c>Foo</c> → <c>@Foo</c>,
+    /// <c>AddWithValue</c> without an explicit type, null for no parameters).
+    /// <b>Always pass values as parameters (string concatenation risks injection).</b>
     /// </para>
     /// <para>
-    /// 呼び出しごとに接続を開閉する（トランザクション引数なし）。複数文をアトミックに実行したい場合は、
-    /// 1 回の <see cref="ExecuteSqlAsync"/> 内で <c>BEGIN TRAN ... COMMIT</c> を記述すること。
+    /// The connection is opened and closed per call (no transaction argument). To execute multiple statements atomically,
+    /// write <c>BEGIN TRAN ... COMMIT</c> inside a single <see cref="ExecuteSqlAsync"/> call.
     /// </para>
     /// </remarks>
-    /// <param name="sql">実行する DML 文</param>
-    /// <param name="parameters">@名 パラメータへ束縛する匿名オブジェクト（null でパラメータなし）</param>
-    /// <param name="cancellationToken">キャンセルトークン</param>
+    /// <param name="sql">The DML statement to execute.</param>
+    /// <param name="parameters">An anonymous object bound to @name parameters (null for no parameters).</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
     Task<int> ExecuteSqlAsync(
         string sql,
         object? parameters = null,
         CancellationToken cancellationToken = default
     );
 
-    /// <summary>生 SQL を実行し、単一のスカラー値を返す（該当なし・DBNull は <c>default</c>）</summary>
+    /// <summary>Executes raw SQL and returns a single scalar value (<c>default</c> when there is no match or DBNull).</summary>
     /// <remarks>
     /// <para>
-    /// <paramref name="parameters"/> の束縛は <see cref="QueryBySqlAsync"/> と同じ。
-    /// <b>値は必ずパラメータで渡すこと（文字列連結はインジェクションの危険がある）。</b>
+    /// <paramref name="parameters"/> is bound the same way as <see cref="QueryBySqlAsync"/>.
+    /// <b>Always pass values as parameters (string concatenation risks injection).</b>
     /// </para>
     /// <para>
-    /// 結果が <c>null</c> / <see cref="DBNull"/> のときは <c>default(TResult)</c> を返す。型が <typeparamref name="TResult"/> と
-    /// 一致しない場合は <see cref="System.Convert.ChangeType(object, System.Type, System.IFormatProvider)"/>
-    /// （<see cref="System.Globalization.CultureInfo.InvariantCulture"/>）でベストエフォート変換し、変換できない場合は分かる例外を投げる。
+    /// When the result is <c>null</c> / <see cref="DBNull"/>, returns <c>default(TResult)</c>. When the type does not match
+    /// <typeparamref name="TResult"/>, it performs a best-effort conversion with
+    /// <see cref="System.Convert.ChangeType(object, System.Type, System.IFormatProvider)"/>
+    /// (<see cref="System.Globalization.CultureInfo.InvariantCulture"/>), throwing a descriptive exception when it cannot convert.
     /// </para>
     /// </remarks>
-    /// <param name="sql">単一値を返す SELECT 文（例: <c>SELECT COUNT(*) ...</c>）</param>
-    /// <param name="parameters">@名 パラメータへ束縛する匿名オブジェクト（null でパラメータなし）</param>
-    /// <param name="cancellationToken">キャンセルトークン</param>
+    /// <param name="sql">A SELECT statement that returns a single value (for example, <c>SELECT COUNT(*) ...</c>).</param>
+    /// <param name="parameters">An anonymous object bound to @name parameters (null for no parameters).</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
     Task<TResult?> ExecuteScalarSqlAsync<TResult>(
         string sql,
         object? parameters = null,
@@ -2939,28 +2943,30 @@ public partial interface IRepository<TEntity, TKey> : IRemoteRepository<TEntity,
     );
 }
 
-/// <summary>特定エンティティに縛られない生 SQL 実行器（任意の SQL を実行し、エンティティ・射影 DTO・単一値へマップする）</summary>
+/// <summary>A raw SQL executor not bound to a specific entity (executes arbitrary SQL and maps to entities, projection DTOs, or single values).</summary>
 /// <remarks>
 /// <para>
-/// <see cref="IRepository{TEntity, TKey}"/> の生 SQL メソッドと違い、型は呼び出し側が型引数で指定するため、
-/// エンティティ横断の JOIN・集計クエリを任意の DTO へ射影できる。Repository の生 SQL メソッドは内部でこの実行器へ委譲する。
+/// Unlike the raw SQL methods on <see cref="IRepository{TEntity, TKey}"/>, the caller specifies the type via a type argument,
+/// so cross-entity JOIN and aggregate queries can be projected onto any DTO. The repository's raw SQL methods delegate to
+/// this executor internally.
 /// </para>
 /// <para>
-/// <c>parameters</c> の束縛は Repository の生 SQL メソッドと同じ（匿名オブジェクトの public プロパティ名 <c>Foo</c> を
-/// <c>@Foo</c> として型明示なしで束縛。null でパラメータなし）。
-/// <b>値は必ずパラメータで渡すこと（SQL への文字列連結はインジェクションの危険がある）。</b>
+/// <c>parameters</c> is bound the same way as the repository's raw SQL methods (property name <c>Foo</c> of an anonymous
+/// object is bound as <c>@Foo</c> without an explicit type; null for no parameters).
+/// <b>Always pass values as parameters (concatenating them into the SQL string risks injection).</b>
 /// </para>
 /// </remarks>
 public partial interface ISqlExecutor
 {
-    /// <summary>生 SQL の SELECT を実行し、結果行を {TEntity} へ厳密（全列必須）にマップして返す</summary>
+    /// <summary>Executes a raw SQL SELECT and maps the result rows strictly (all columns required) to {TEntity}.</summary>
     /// <remarks>
-    /// SELECT には {TEntity} の全列が必要（<c>SELECT *</c> または全列指定）。欠けている列があれば分かる例外を投げる。
-    /// マッピング・RowState=Unchanged 扱いは <see cref="IRepository{TEntity, TKey}.QueryBySqlAsync"/> と同一。
+    /// The SELECT must return all columns of {TEntity} (<c>SELECT *</c> or all columns listed); if any column is missing, a
+    /// descriptive exception is thrown. Mapping and the RowState=Unchanged treatment are identical to
+    /// <see cref="IRepository{TEntity, TKey}.QueryBySqlAsync"/>.
     /// </remarks>
-    /// <param name="sql">全列を返す SELECT 文</param>
-    /// <param name="parameters">@名 パラメータへ束縛する匿名オブジェクト（null でパラメータなし）</param>
-    /// <param name="cancellationToken">キャンセルトークン</param>
+    /// <param name="sql">A SELECT statement that returns all columns.</param>
+    /// <param name="parameters">An anonymous object bound to @name parameters (null for no parameters).</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
     Task<IReadOnlyList<TEntity>> QueryBySqlAsync<TEntity>(
         string sql,
         object? parameters = null,
@@ -2968,55 +2974,57 @@ public partial interface ISqlExecutor
     )
         where TEntity : EntityBase, new();
 
-    /// <summary>生 SQL の SELECT を実行し、結果行を任意の <typeparamref name="TResult"/> へ寛容に射影して返す</summary>
+    /// <summary>Executes a raw SQL SELECT and leniently projects the result rows onto an arbitrary <typeparamref name="TResult"/>.</summary>
     /// <remarks>
     /// <para>
-    /// <b>単一値モード</b>: <typeparamref name="TResult"/>（Nullable は基底型で判定）が primitive / enum / string / decimal /
-    /// DateTime / DateTimeOffset / TimeSpan / Guid / byte[] のときは、
-    /// 各行の<b>先頭列</b>を変換して返す（DBNull は <c>default</c>）。変換はスカラー系と同じく Nullable 対応の
-    /// <see cref="System.Convert.ChangeType(object, System.Type, System.IFormatProvider)"/> による。
+    /// <b>Single-value mode</b>: when <typeparamref name="TResult"/> (Nullable is judged by its underlying type) is primitive / enum /
+    /// string / decimal / DateTime / DateTimeOffset / TimeSpan / Guid / byte[],
+    /// the <b>first column</b> of each row is converted and returned (DBNull becomes <c>default</c>). Conversion uses the same
+    /// Nullable-aware <see cref="System.Convert.ChangeType(object, System.Type, System.IFormatProvider)"/> as the scalar methods.
     /// </para>
     /// <para>
-    /// <b>DTO モード</b>: 上記以外の型では public 引数なしコンストラクタが必要（位置指定 record は非対応）。結果セットの列名と
-    /// <typeparamref name="TResult"/> の書き込み可能プロパティ（set/init）を<b>大文字小文字無視</b>で突き合わせ、一致した列のみ設定する。
-    /// 余分な列は無視し、無い列は既定値のまま。1 列も一致しない場合は列名一覧・プロパティ名一覧を含む例外を投げる（typo ガード）。
+    /// <b>DTO mode</b>: any other type requires a public parameterless constructor (positional records are not supported). Result
+    /// set column names are matched <b>case-insensitively</b> against the writable properties (set/init) of
+    /// <typeparamref name="TResult"/>, and only matching columns are assigned. Extra columns are ignored and missing columns keep
+    /// their defaults. When no column matches at all, an exception listing the column names and property names is thrown (typo guard).
     /// </para>
     /// <para>
-    /// 射影 DTO は保存経路を持たず部分マップでもデータ破損リスクがないため、エンティティと違い<b>寛容</b>にマップする。
+    /// Projection DTOs have no save path, so a partial map carries no data-corruption risk; unlike entities, they are mapped <b>leniently</b>.
     /// </para>
     /// </remarks>
-    /// <param name="sql">射影する SELECT 文</param>
-    /// <param name="parameters">@名 パラメータへ束縛する匿名オブジェクト（null でパラメータなし）</param>
-    /// <param name="cancellationToken">キャンセルトークン</param>
+    /// <param name="sql">The SELECT statement to project.</param>
+    /// <param name="parameters">An anonymous object bound to @name parameters (null for no parameters).</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
     Task<IReadOnlyList<TResult>> QueryProjectionBySqlAsync<TResult>(
         string sql,
         object? parameters = null,
         CancellationToken cancellationToken = default
     );
 
-    /// <summary>生 SQL（UPDATE/DELETE/任意 DML）を実行し、影響行数を返す</summary>
+    /// <summary>Executes raw SQL (UPDATE/DELETE/any DML) and returns the number of affected rows.</summary>
     /// <remarks>
-    /// 呼び出しごとに接続を開閉する（トランザクション引数なし）。複数文をアトミックに実行したい場合は、
-    /// 1 回の呼び出し内で <c>BEGIN TRAN ... COMMIT</c> を SQL に記述すること。
+    /// The connection is opened and closed per call (no transaction argument). To execute multiple statements atomically,
+    /// write <c>BEGIN TRAN ... COMMIT</c> in the SQL within a single call.
     /// </remarks>
-    /// <param name="sql">実行する DML 文</param>
-    /// <param name="parameters">@名 パラメータへ束縛する匿名オブジェクト（null でパラメータなし）</param>
-    /// <param name="cancellationToken">キャンセルトークン</param>
+    /// <param name="sql">The DML statement to execute.</param>
+    /// <param name="parameters">An anonymous object bound to @name parameters (null for no parameters).</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
     Task<int> ExecuteSqlAsync(
         string sql,
         object? parameters = null,
         CancellationToken cancellationToken = default
     );
 
-    /// <summary>生 SQL を実行し、単一のスカラー値を返す（該当なし・DBNull は <c>default</c>）</summary>
+    /// <summary>Executes raw SQL and returns a single scalar value (<c>default</c> when there is no match or DBNull).</summary>
     /// <remarks>
-    /// 結果が <c>null</c> / <see cref="DBNull"/> なら <c>default(TResult)</c>。型が合わない場合は
-    /// <see cref="System.Convert.ChangeType(object, System.Type, System.IFormatProvider)"/>（<see cref="System.Globalization.CultureInfo.InvariantCulture"/>）で
-    /// ベストエフォート変換し、変換できない場合は分かる例外を投げる。
+    /// When the result is <c>null</c> / <see cref="DBNull"/>, returns <c>default(TResult)</c>. When the type does not match,
+    /// it performs a best-effort conversion with
+    /// <see cref="System.Convert.ChangeType(object, System.Type, System.IFormatProvider)"/> (<see cref="System.Globalization.CultureInfo.InvariantCulture"/>),
+    /// throwing a descriptive exception when it cannot convert.
     /// </remarks>
-    /// <param name="sql">単一値を返す SELECT 文（例: <c>SELECT COUNT(*) ...</c>）</param>
-    /// <param name="parameters">@名 パラメータへ束縛する匿名オブジェクト（null でパラメータなし）</param>
-    /// <param name="cancellationToken">キャンセルトークン</param>
+    /// <param name="sql">A SELECT statement that returns a single value (for example, <c>SELECT COUNT(*) ...</c>).</param>
+    /// <param name="parameters">An anonymous object bound to @name parameters (null for no parameters).</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
     Task<TResult?> ExecuteScalarSqlAsync<TResult>(
         string sql,
         object? parameters = null,
@@ -3024,55 +3032,58 @@ public partial interface ISqlExecutor
     );
 }
 
-/// <summary>グラフ保存（Save）で 1 エンティティに対して実行される DB 操作の種別</summary>
+/// <summary>The kind of DB operation performed for a single entity during a graph save (Save).</summary>
 public enum SaveOperation
 {
-    /// <summary>新規追加（INSERT）</summary>
+    /// <summary>Insert (INSERT).</summary>
     Insert,
 
-    /// <summary>更新（UPDATE）</summary>
+    /// <summary>Update (UPDATE).</summary>
     Update,
 
-    /// <summary>削除（DELETE）</summary>
+    /// <summary>Delete (DELETE).</summary>
     Delete,
 }
 
 /// <summary>
-/// グラフ保存（<c>SaveAsync</c>）の前後に処理を差し込むフック。DI に 0..N 個登録でき、対象エンティティ型ごとに解決される。
+/// A hook that injects logic before and after a graph save (<c>SaveAsync</c>). Zero or more can be registered in DI and are
+/// resolved per target entity type.
 /// </summary>
 /// <remarks>
 /// <para>
-/// 両メソッドとも既定実装を持つため、必要な方だけを実装すればよい。<see cref="BeforeSaveAsync"/> は各エンティティの
-/// 操作（Insert/Update/Delete）の直前に呼ばれ、<c>false</c> を返すとその 1 件の操作だけをスキップする（他の行は続行）。
-/// <see cref="AfterSaveAsync"/> は操作の直後・コミット前に、同一トランザクションに参加する <see cref="ISaveHookContext"/> と
-/// ともに呼ばれる（例外を投げると Save 全体がロールバックされる）。
+/// Both methods have default implementations, so implement only the one you need. <see cref="BeforeSaveAsync"/> is called
+/// immediately before each entity's operation (Insert/Update/Delete); returning <c>false</c> skips just that single
+/// operation (other rows continue). <see cref="AfterSaveAsync"/> is called immediately after the operation, before commit,
+/// together with an <see cref="ISaveHookContext"/> that participates in the same transaction (throwing an exception rolls
+/// back the entire save).
 /// </para>
 /// <para>
-/// フックが発火するのは <c>SaveAsync</c>（グラフ保存・2 形態とも）のみで、<c>InsertAsync</c> / <c>UpdateAsync</c> /
-/// <c>DeleteAsync</c> の直接呼び出し・<c>BulkInsertAsync</c> は対象外（素通り）。スキップ起因の整合（例: 新規親を止めるなら
-/// 新規子も止める）はフック実装者の責任で、矛盾は DB 制約エラー→全体ロールバックで安全側に倒れる。
+/// Hooks fire only for <c>SaveAsync</c> (graph save, both overloads); direct calls to <c>InsertAsync</c> / <c>UpdateAsync</c> /
+/// <c>DeleteAsync</c> and <c>BulkInsertAsync</c> are not covered (they pass through). Consistency across skips (for example,
+/// if you block a new parent, also block its new children) is the hook implementer's responsibility; contradictions fail
+/// safe via a DB constraint error followed by a full rollback.
 /// </para>
 /// </remarks>
-/// <typeparam name="TEntity">フック対象のエンティティ型</typeparam>
+/// <typeparam name="TEntity">The entity type the hook targets.</typeparam>
 public interface ISaveHook<TEntity>
     where TEntity : EntityBase
 {
-    /// <summary>操作の直前に呼ばれる（<c>false</c> でその 1 件の操作をスキップ・既定はスキップしない）</summary>
-    /// <param name="entity">保存対象のエンティティ</param>
-    /// <param name="operation">これから行う操作（Insert/Update/Delete）</param>
-    /// <param name="cancellationToken">キャンセルトークン</param>
-    /// <returns>操作を続行するなら <c>true</c>、スキップするなら <c>false</c></returns>
+    /// <summary>Called immediately before the operation (<c>false</c> skips that single operation; the default does not skip).</summary>
+    /// <param name="entity">The entity being saved.</param>
+    /// <param name="operation">The operation about to be performed (Insert/Update/Delete).</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns><c>true</c> to proceed with the operation, <c>false</c> to skip it.</returns>
     Task<bool> BeforeSaveAsync(
         TEntity entity,
         SaveOperation operation,
         CancellationToken cancellationToken = default
     ) => Task.FromResult(true);
 
-    /// <summary>操作の直後・コミット前に呼ばれる（既定は何もしない。<paramref name="context"/> は同一トランザクションに参加する）</summary>
-    /// <param name="entity">保存されたエンティティ</param>
-    /// <param name="operation">実際に行われた操作（<c>insertWhenUpdateMissing</c> による切替時は Insert）</param>
-    /// <param name="context">同一トランザクションで DB 操作を行うためのコンテキスト</param>
-    /// <param name="cancellationToken">キャンセルトークン</param>
+    /// <summary>Called immediately after the operation, before commit (the default does nothing; <paramref name="context"/> participates in the same transaction).</summary>
+    /// <param name="entity">The entity that was saved.</param>
+    /// <param name="operation">The operation actually performed (Insert when switched via <c>insertWhenUpdateMissing</c>).</param>
+    /// <param name="context">A context for performing DB operations within the same transaction.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
     Task AfterSaveAsync(
         TEntity entity,
         SaveOperation operation,
@@ -3082,28 +3093,32 @@ public interface ISaveHook<TEntity>
 }
 
 /// <summary>
-/// <see cref="ISaveHook{TEntity}.AfterSaveAsync"/> に渡される、進行中の保存トランザクションに参加して DB 操作を行うコンテキスト。
+/// The context passed to <see cref="ISaveHook{TEntity}.AfterSaveAsync"/> for performing DB operations while participating in
+/// the in-progress save transaction.
 /// </summary>
 /// <remarks>
 /// <para>
-/// フック内から Repository の通常 API を呼ぶと別接続でロック競合するため、同一トランザクションで完結する操作をこの契約経由で提供する。
-/// 生ハンドル（接続・トランザクション）は公開せず、型付き操作（除外列バイナリの書き込み・生 SQL）だけを提供する（方言中立・誤用防止）。
+/// Calling the repository's regular API from inside a hook would use a separate connection and contend for locks, so this
+/// contract provides operations that complete within the same transaction. Raw handles (connection, transaction) are not
+/// exposed; only typed operations (writing excluded binary columns and raw SQL) are provided (dialect-neutral, misuse-proof).
 /// </para>
 /// <para>
-/// <see cref="WriteBinaryColumnAsync"/> は <c>ExcludeUnboundedBinaryColumns</c> を有効にした図でのみ機能する。
-/// 無効な図では <see cref="NotSupportedException"/> を投げる（生 SQL の <see cref="ExecuteSqlAsync"/> を使うか、オプションを有効化する）。
+/// <see cref="WriteBinaryColumnAsync"/> works only for diagrams generated with <c>ExcludeUnboundedBinaryColumns</c> enabled.
+/// For diagrams without it, a <see cref="NotSupportedException"/> is thrown (use raw SQL via <see cref="ExecuteSqlAsync"/>,
+/// or enable the option).
 /// </para>
 /// </remarks>
 public interface ISaveHookContext
 {
-    /// <summary>同一トランザクション内で生 SQL（任意 DML）を実行し、影響行数を返す</summary>
+    /// <summary>Executes raw SQL (any DML) within the same transaction and returns the number of affected rows.</summary>
     /// <remarks>
-    /// パラメータ束縛は Repository の生 SQL メソッドと同じ（匿名オブジェクトの public プロパティ名 <c>Foo</c> を <c>@Foo</c> として束縛）。
-    /// <b>値は必ずパラメータで渡すこと（文字列連結はインジェクションの危険がある）。</b>
+    /// Parameter binding is the same as the repository's raw SQL methods (public property name <c>Foo</c> of an anonymous
+    /// object is bound as <c>@Foo</c>).
+    /// <b>Always pass values as parameters (string concatenation risks injection).</b>
     /// </remarks>
-    /// <param name="sql">実行する DML 文</param>
-    /// <param name="parameters">@名 パラメータへ束縛する匿名オブジェクト（null でパラメータなし）</param>
-    /// <param name="cancellationToken">キャンセルトークン</param>
+    /// <param name="sql">The DML statement to execute.</param>
+    /// <param name="parameters">An anonymous object bound to @name parameters (null for no parameters).</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
     Task<int> ExecuteSqlAsync(
         string sql,
         object? parameters = null,
@@ -3111,14 +3126,15 @@ public interface ISaveHookContext
     );
 
     /// <summary>
-    /// 同一トランザクション内で、無制限バイナリ（除外）列を主キー指定でストリームから書き込む（O(チャンク) のストリーミング）。
-    /// <paramref name="source"/> が <c>null</c> のとき列を NULL に設定する。更新した場合は <c>true</c>、該当行なしは <c>false</c>。
+    /// Writes an unbounded binary (excluded) column from a stream, addressed by primary key, within the same transaction
+    /// (O(chunk) streaming). When <paramref name="source"/> is <c>null</c>, sets the column to NULL. Returns <c>true</c>
+    /// when a row was updated, <c>false</c> when no row matched.
     /// </summary>
-    /// <param name="propertyName">対象列の C# プロパティ名（<c>nameof</c> 指定）</param>
-    /// <param name="key">対象行の主キー値</param>
-    /// <param name="source">書き込むストリーム（<c>null</c> で SET NULL）</param>
-    /// <param name="length"><c>source.CanSeek</c> でないときに必須の長さ（欠落は <see cref="ArgumentException"/>）</param>
-    /// <param name="cancellationToken">キャンセルトークン</param>
+    /// <param name="propertyName">The C# property name of the target column (use <c>nameof</c>).</param>
+    /// <param name="key">The primary key value of the target row.</param>
+    /// <param name="source">The stream to write (<c>null</c> for SET NULL).</param>
+    /// <param name="length">The length, required when <c>source.CanSeek</c> is false (omitting it throws <see cref="ArgumentException"/>).</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
     Task<bool> WriteBinaryColumnAsync(
         string propertyName,
         object key,
@@ -3127,11 +3143,11 @@ public interface ISaveHookContext
         CancellationToken cancellationToken = default
     );
 
-    /// <summary>ファイルの内容を無制限バイナリ（除外）列へ書き込むファイル糖衣（<see cref="WriteBinaryColumnAsync"/> へ委譲）</summary>
-    /// <param name="propertyName">対象列の C# プロパティ名（<c>nameof</c> 指定）</param>
-    /// <param name="key">対象行の主キー値</param>
-    /// <param name="path">読み込むファイルパス</param>
-    /// <param name="cancellationToken">キャンセルトークン</param>
+    /// <summary>File convenience method that writes a file's contents to an unbounded binary (excluded) column (delegates to <see cref="WriteBinaryColumnAsync"/>).</summary>
+    /// <param name="propertyName">The C# property name of the target column (use <c>nameof</c>).</param>
+    /// <param name="key">The primary key value of the target row.</param>
+    /// <param name="path">The path of the file to read.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
     async Task<bool> WriteBinaryColumnFromFileAsync(
         string propertyName,
         object key,
@@ -3152,18 +3168,18 @@ public interface ISaveHookContext
     }
 }
 
-/// <summary>特定エンティティ型に対する Save フック群を、非ジェネリックに（グラフの混在型を跨いで）呼び出すための面</summary>
-/// <remarks>登録順に Before を呼び最初の <c>false</c> で短絡、After は登録順に順次呼ぶ。型ごとに 1 度だけ構築される</remarks>
+/// <summary>A non-generic surface for invoking the save hooks of a specific entity type (across the mixed types of a graph).</summary>
+/// <remarks>Calls Before in registration order, short-circuiting on the first <c>false</c>; calls After sequentially in registration order. Built once per type.</remarks>
 public interface ISaveHookInvoker
 {
-    /// <summary>登録順に Before を呼び、最初の <c>false</c> で短絡する（1 つでも false なら false を返す）</summary>
+    /// <summary>Calls Before in registration order, short-circuiting on the first <c>false</c> (returns false when any hook returns false).</summary>
     Task<bool> InvokeBeforeAsync(
         EntityBase entity,
         SaveOperation operation,
         CancellationToken cancellationToken
     );
 
-    /// <summary>登録順に After を順次呼ぶ</summary>
+    /// <summary>Calls After sequentially in registration order.</summary>
     Task InvokeAfterAsync(
         EntityBase entity,
         SaveOperation operation,
@@ -3172,22 +3188,22 @@ public interface ISaveHookInvoker
     );
 }
 
-/// <summary>エンティティ型から Save フックの呼び出し面（<see cref="ISaveHookInvoker"/>）を解決するレジストリ</summary>
-/// <remarks>フックが 1 つも無い型では <c>null</c> を返す（＝完全 no-op）。実装は解決結果をキャッシュする</remarks>
+/// <summary>A registry that resolves the save hook invoker surface (<see cref="ISaveHookInvoker"/>) for an entity type.</summary>
+/// <remarks>Returns <c>null</c> for a type with no hooks at all (a complete no-op). Implementations cache resolution results.</remarks>
 public interface ISaveHookRegistry
 {
-    /// <summary>指定エンティティ型のフック呼び出し面を返す（フックなしは <c>null</c>）</summary>
+    /// <summary>Returns the hook invoker surface for the given entity type (<c>null</c> when there are no hooks).</summary>
     ISaveHookInvoker? GetInvoker(Type entityType);
 }
 
 /// <summary>
-/// <see cref="IServiceProvider"/> から <c>IEnumerable&lt;ISaveHook&lt;TEntity&gt;&gt;</c> を解決して呼び出し面を構築する
-/// 既定の <see cref="ISaveHookRegistry"/> 実装（BCL の <see cref="IServiceProvider"/> のみに依存）。
+/// The default <see cref="ISaveHookRegistry"/> implementation, which resolves <c>IEnumerable&lt;ISaveHook&lt;TEntity&gt;&gt;</c>
+/// from an <see cref="IServiceProvider"/> and builds the invoker surface (depends only on the BCL <see cref="IServiceProvider"/>).
 /// </summary>
 /// <remarks>
-/// 型 → 呼び出し面の対応を<b>このレジストリ（Scoped）単位で</b>キャッシュする（フックが Scoped サービスでありうるため
-/// プロセス静的にはしない）。呼び出し面は <see cref="SaveHookInvoker{TEntity}"/> を <see cref="Type.MakeGenericType"/> ＋
-/// <see cref="Activator"/> で 1 度だけ生成する（以降の呼び出しはリフレクションなし）。
+/// Caches the type-to-invoker mapping <b>per registry instance (Scoped)</b> — not process-static, because hooks may be
+/// Scoped services. The invoker surface is created exactly once via <see cref="Type.MakeGenericType"/> on
+/// <see cref="SaveHookInvoker{TEntity}"/> plus <see cref="Activator"/> (subsequent calls involve no reflection).
 /// </remarks>
 internal sealed class ServiceProviderSaveHookRegistry(IServiceProvider serviceProvider)
     : ISaveHookRegistry
@@ -3195,11 +3211,11 @@ internal sealed class ServiceProviderSaveHookRegistry(IServiceProvider servicePr
     private readonly IServiceProvider _serviceProvider = serviceProvider;
     private readonly ConcurrentDictionary<Type, ISaveHookInvoker?> _invokers = new();
 
-    /// <summary>指定型の呼び出し面を解決してキャッシュする（フックなしは <c>null</c>）</summary>
+    /// <summary>Resolves and caches the invoker surface for the given type (<c>null</c> when there are no hooks).</summary>
     public ISaveHookInvoker? GetInvoker(Type entityType) =>
         _invokers.GetOrAdd(entityType, BuildInvoker);
 
-    /// <summary><c>IEnumerable&lt;ISaveHook&lt;entityType&gt;&gt;</c> を解決し、1 つ以上あれば呼び出し面を構築する（無ければ null）</summary>
+    /// <summary>Resolves <c>IEnumerable&lt;ISaveHook&lt;entityType&gt;&gt;</c> and builds the invoker surface when at least one hook exists (null otherwise).</summary>
     private ISaveHookInvoker? BuildInvoker(Type entityType)
     {
         var hookType = typeof(ISaveHook<>).MakeGenericType(entityType);
@@ -3211,7 +3227,7 @@ internal sealed class ServiceProviderSaveHookRegistry(IServiceProvider servicePr
             return null;
         }
 
-        // 1 つも登録が無ければ null（＝レジストリありでも完全 no-op）。materialize して件数を確定する
+        // Null when nothing is registered (a complete no-op even with a registry present). Materialize to fix the count
         var hooks = resolved.Cast<object>().ToList();
 
         if (hooks.Count == 0)
@@ -3224,8 +3240,8 @@ internal sealed class ServiceProviderSaveHookRegistry(IServiceProvider servicePr
     }
 }
 
-/// <summary><typeparamref name="TEntity"/> 用フック群を登録順に呼び出す型付き実装（<see cref="ISaveHookInvoker"/> の具象）</summary>
-/// <typeparam name="TEntity">フック対象のエンティティ型</typeparam>
+/// <summary>Typed implementation that invokes the hooks for <typeparamref name="TEntity"/> in registration order (the concrete <see cref="ISaveHookInvoker"/>).</summary>
+/// <typeparam name="TEntity">The entity type the hooks target.</typeparam>
 internal sealed class SaveHookInvoker<TEntity>(IEnumerable<ISaveHook<TEntity>> hooks)
     : ISaveHookInvoker
     where TEntity : EntityBase
@@ -3233,7 +3249,7 @@ internal sealed class SaveHookInvoker<TEntity>(IEnumerable<ISaveHook<TEntity>> h
     private readonly IReadOnlyList<ISaveHook<TEntity>> _hooks =
         hooks as IReadOnlyList<ISaveHook<TEntity>> ?? hooks.ToList();
 
-    /// <summary>登録順に Before を呼び、最初の <c>false</c> で短絡する</summary>
+    /// <summary>Calls Before in registration order, short-circuiting on the first <c>false</c>.</summary>
     public async Task<bool> InvokeBeforeAsync(
         EntityBase entity,
         SaveOperation operation,
@@ -3253,7 +3269,7 @@ internal sealed class SaveHookInvoker<TEntity>(IEnumerable<ISaveHook<TEntity>> h
         return true;
     }
 
-    /// <summary>登録順に After を順次呼ぶ</summary>
+    /// <summary>Calls After sequentially in registration order.</summary>
     public async Task InvokeAfterAsync(
         EntityBase entity,
         SaveOperation operation,
@@ -3270,34 +3286,36 @@ internal sealed class SaveHookInvoker<TEntity>(IEnumerable<ISaveHook<TEntity>> h
     }
 }
 
-/// <summary>SQL Server 接続を生成するファクトリ</summary>
+/// <summary>A factory that creates SQL Server connections.</summary>
 public interface ISqlConnectionFactory
 {
-    /// <summary>新しい SQL 接続を生成する</summary>
+    /// <summary>Creates a new SQL connection.</summary>
     SqlConnection CreateConnection();
 }
 
-/// <summary>接続文字列から SQL 接続を生成する既定実装</summary>
+/// <summary>The default implementation that creates SQL connections from a connection string.</summary>
 public sealed class SqlConnectionFactory(string connectionString) : ISqlConnectionFactory
 {
-    /// <summary>新しい SQL 接続を生成する</summary>
+    /// <summary>Creates a new SQL connection.</summary>
     public SqlConnection CreateConnection() => new(connectionString);
 }
 
 /// <summary>
-/// 生 SQL の束縛・スカラー変換・射影マッピングを担う共有ヘルパー（QuickER の SQL Server 実装と EF Core 版の実行器で 1 系統を共有）。
+/// Shared helper responsible for raw SQL binding, scalar conversion, and projection mapping (a single implementation shared
+/// by QuickER's SQL Server implementation and the EF Core executor).
 /// </summary>
 /// <remarks>
-/// プロバイダ非依存の <see cref="DbCommand"/> / <see cref="DbDataReader"/> のみを扱い、特定 DB クライアントには依存しない。
-/// EF Core 単独出力（QuickER の SQL Server 実装を含まない構成）でも共通契約としてこのクラスを出力し、EF Core 版実行器が呼び出す。
+/// Works only with the provider-agnostic <see cref="DbCommand"/> / <see cref="DbDataReader"/> and does not depend on any
+/// specific DB client. Even in EF Core-only output (configurations without QuickER's SQL Server implementation), this class
+/// is emitted as a shared contract and the EF Core executor calls it.
 /// </remarks>
 internal static class RawSqlMapper
 {
-    /// <summary>生 SQL 用パラメータの反射プロパティを型ごとにキャッシュする（束縛の 1 系統）</summary>
+    /// <summary>Caches the reflected properties of raw SQL parameter objects per type (the single binding implementation).</summary>
     private static readonly ConcurrentDictionary<Type, PropertyInfo[]> _parameterPropertyCache =
         new();
 
-    /// <summary>匿名オブジェクト等の束縛対象プロパティ（public インスタンス・読み取り可・非インデクサ）を解決する（型ごとにキャッシュ）</summary>
+    /// <summary>Resolves the bindable properties (public instance, readable, non-indexer) of an anonymous object or similar (cached per type).</summary>
     internal static PropertyInfo[] GetBindableProperties(Type type) =>
         _parameterPropertyCache.GetOrAdd(
             type,
@@ -3308,8 +3326,8 @@ internal static class RawSqlMapper
         );
 
     /// <summary>
-    /// プロバイダ非依存の <see cref="DbCommand"/> 版パラメータ束縛。匿名オブジェクトの public プロパティ名 <c>Foo</c> を
-    /// SQL パラメータ <c>@Foo</c> として（生 SQL には列文脈が無いため）型明示なしで束縛する。null のときは何もしない。
+    /// Provider-agnostic <see cref="DbCommand"/> parameter binding. Binds public property name <c>Foo</c> of an anonymous
+    /// object as SQL parameter <c>@Foo</c> without an explicit type (raw SQL has no column context). Does nothing when null.
     /// </summary>
     internal static void BindParameters(DbCommand command, object? parameters)
     {
@@ -3323,7 +3341,7 @@ internal static class RawSqlMapper
             var value =
                 property.GetValue(parameters);
 
-            // コレクション値（IN 用）は @名0, @名1, ... へ展開して束縛する（SQL 側の @名 も書き換える）
+            // Collection values (for IN) are expanded and bound as @name0, @name1, ... (the @name in the SQL is rewritten too)
             if (IsCollectionParameter(value))
             {
                 BindCollectionParameter(command, property.Name, (System.Collections.IEnumerable)value!);
@@ -3337,17 +3355,17 @@ internal static class RawSqlMapper
         }
     }
 
-    /// <summary>IN 展開の対象となるコレクション値かどうか（string / byte[] は単一値として扱う）</summary>
+    /// <summary>Whether the value is a collection subject to IN expansion (string / byte[] are treated as single values).</summary>
     internal static bool IsCollectionParameter(object? value) =>
         value is System.Collections.IEnumerable && value is not string && value is not byte[];
 
     /// <summary>
-    /// コレクション値パラメータを IN 用に展開して束縛する。SQL 内の <c>@名</c> を要素ごとの
-    /// <c>@名0, @名1, ...</c> へ書き換え、各要素を個別パラメータとして追加する。
+    /// Expands and binds a collection-valued parameter for IN. Rewrites <c>@name</c> in the SQL to per-element
+    /// <c>@name0, @name1, ...</c> and adds each element as an individual parameter.
     /// </summary>
     /// <remarks>
-    /// SQL 側は <c>IN (@名)</c> のように括弧の中で参照すること。空コレクションは <c>NULL</c> 1 個へ
-    /// 展開され（<c>IN (NULL)</c>）、どの行にも一致しない（SQL の三値論理に従う）。
+    /// Reference it inside parentheses in the SQL, as in <c>IN (@name)</c>. An empty collection expands to a single
+    /// <c>NULL</c> (<c>IN (NULL)</c>) and matches no rows (following SQL's three-valued logic).
     /// </remarks>
     internal static void BindCollectionParameter(
         DbCommand command,
@@ -3367,7 +3385,7 @@ internal static class RawSqlMapper
             names.Add(parameter.ParameterName);
         }
 
-        // @名 の後に識別子文字が続く場合（@名0 や @名X）は別パラメータなので書き換えない
+        // When an identifier character follows @name (as in @name0 or @nameX) it is a different parameter, so do not rewrite it
         command.CommandText = Regex.Replace(
             command.CommandText,
             $"@{Regex.Escape(name)}(?![0-9A-Za-z_])",
@@ -3376,8 +3394,9 @@ internal static class RawSqlMapper
     }
 
     /// <summary>
-    /// 結果セットを <typeparamref name="TResult"/> へ寛容に射影して読み切る（単一値モード・DTO モードの 1 系統）。
-    /// プロバイダ非依存の <see cref="DbDataReader"/> を受け取り、QuickER・EF Core 版実行器でマッピング実装を共有する。
+    /// Reads the full result set, leniently projecting it onto <typeparamref name="TResult"/> (the single implementation of
+    /// single-value mode and DTO mode). Takes a provider-agnostic <see cref="DbDataReader"/>, so the QuickER and EF Core
+    /// executors share the mapping implementation.
     /// </summary>
     internal static async Task<IReadOnlyList<TResult>> ReadProjectionRowsAsync<TResult>(
         DbDataReader reader,
@@ -3387,23 +3406,23 @@ internal static class RawSqlMapper
         var resultType = typeof(TResult);
         var items = new List<TResult>();
 
-        // 単一値モード（primitive/enum/string/decimal/日時/Guid/byte[]）は各行の先頭列を変換して返す
+        // Single-value mode (primitive/enum/string/decimal/date-time/Guid/byte[]) converts and returns the first column of each row
         if (IsSingleValueType(resultType))
         {
             while (await reader.ReadAsync(cancellationToken))
             {
                 var raw = reader.IsDBNull(0) ? null : reader.GetValue(0);
-                // 単一値モードは DBNull → default を許容する（参照型では null になり得るが射影 DTO に破損リスクはない）
+                // Single-value mode allows DBNull → default (may be null for reference types, but projections carry no corruption risk)
                 items.Add(ConvertSingleValue<TResult>(raw)!);
             }
 
             return items;
         }
 
-        // DTO モード: 型に応じた「列名 → プロパティ設定子」の解決子をキャッシュし、結果セットごとに列名で突き合わせる
+        // DTO mode: cache the per-type resolver (column name → property setter) and match by column name per result set
         var accessor = _projectionAccessorCache.GetOrAdd(resultType, BuildProjectionAccessor);
 
-        // 結果セットの列名 → 設定子（一致したプロパティのみ）を突き合わせる。1 列も一致しなければ typo ガードで例外
+        // Match result set column names to setters (matching properties only). If no column matches, throw via the typo guard
         var setters = new Action<object, object?>?[reader.FieldCount];
         var matched = false;
         for (var i = 0; i < reader.FieldCount; i++)
@@ -3424,10 +3443,10 @@ internal static class RawSqlMapper
             }
 
             throw new InvalidOperationException(
-                $"射影先 {resultType.Name} の書き込み可能プロパティと一致する列が結果セットにありません。"
-                    + $"結果セットの列: [{string.Join(", ", columnNames)}]。"
-                    + $"{resultType.Name} のプロパティ: [{string.Join(", ", accessor.SettersByColumn.Keys)}]。"
-                    + "SELECT の別名（AS）とプロパティ名の綴りを確認してください（突き合わせは大文字小文字を無視します）。"
+                $"No column in the result set matches a writable property of projection target {resultType.Name}. "
+                    + $"Result set columns: [{string.Join(", ", columnNames)}]. "
+                    + $"Properties of {resultType.Name}: [{string.Join(", ", accessor.SettersByColumn.Keys)}]. "
+                    + "Check the SELECT aliases (AS) and property name spellings (matching is case-insensitive)."
             );
         }
 
@@ -3452,7 +3471,7 @@ internal static class RawSqlMapper
         return items;
     }
 
-    /// <summary>スカラー・単一値モード共通の値変換（DBNull/null は default、Nullable 対応の ChangeType でベストエフォート変換）</summary>
+    /// <summary>Value conversion shared by the scalar and single-value modes (DBNull/null becomes default; best-effort conversion via Nullable-aware ChangeType).</summary>
     internal static TResult? ConvertSingleValue<TResult>(object? raw)
     {
         if (raw is null)
@@ -3465,7 +3484,7 @@ internal static class RawSqlMapper
             return typed;
         }
 
-        // TResult が Nullable<T> なら基底型へ変換する（ChangeType は Nullable を直接扱えない）
+        // When TResult is Nullable<T>, convert to the underlying type (ChangeType cannot handle Nullable directly)
         var targetType = Nullable.GetUnderlyingType(typeof(TResult)) ?? typeof(TResult);
 
         try
@@ -3476,13 +3495,13 @@ internal static class RawSqlMapper
             when (ex is InvalidCastException or FormatException or OverflowException)
         {
             throw new InvalidOperationException(
-                $"生 SQL の結果値（型 {raw.GetType().Name}）を {typeof(TResult).Name} へ変換できませんでした。",
+                $"Could not convert the raw SQL result value (of type {raw.GetType().Name}) to {typeof(TResult).Name}.",
                 ex
             );
         }
     }
 
-    /// <summary>単一値モードとして扱う型か（primitive/enum/string/decimal/日時/Guid/byte[]。Nullable は基底型で判定）</summary>
+    /// <summary>Whether the type is handled in single-value mode (primitive/enum/string/decimal/date-time/Guid/byte[]; Nullable is judged by its underlying type).</summary>
     private static bool IsSingleValueType(Type type)
     {
         var actual = Nullable.GetUnderlyingType(type) ?? type;
@@ -3498,29 +3517,29 @@ internal static class RawSqlMapper
             || actual == typeof(byte[]);
     }
 
-    /// <summary>射影 DTO の「生成関数」と「列名（大文字小文字無視）→ プロパティ設定子」を保持する解決子</summary>
+    /// <summary>Resolver holding a projection DTO's factory function and its column-name (case-insensitive) to property-setter map.</summary>
     private sealed record ProjectionAccessor(
         Func<object> Create,
         IReadOnlyDictionary<string, Action<object, object?>> SettersByColumn
     );
 
-    /// <summary>射影先の型ごとに解決子をキャッシュする（列⇔プロパティの突き合わせ自体は結果セットごとに行う）</summary>
+    /// <summary>Caches the resolver per projection target type (the column-to-property matching itself happens per result set).</summary>
     private static readonly ConcurrentDictionary<Type, ProjectionAccessor> _projectionAccessorCache =
         new();
 
-    /// <summary>射影先の型から生成関数と「プロパティ名 → 設定子」を構築する（引数なしコンストラクタ必須。書き込み可能プロパティのみ対象）</summary>
+    /// <summary>Builds the factory function and the property-name-to-setter map from the projection target type (parameterless constructor required; writable properties only).</summary>
     private static ProjectionAccessor BuildProjectionAccessor(Type resultType)
     {
         var constructor = resultType.GetConstructor(Type.EmptyTypes);
         if (constructor is null)
         {
             throw new InvalidOperationException(
-                $"射影先 {resultType.Name} は QueryProjectionBySqlAsync で使えません。"
-                    + "public な引数なしコンストラクタを持つ型を指定してください（位置指定 record は非対応）。"
+                $"Projection target {resultType.Name} cannot be used with QueryProjectionBySqlAsync. "
+                    + "Specify a type with a public parameterless constructor (positional records are not supported)."
             );
         }
 
-        // init 専用も PropertyInfo.SetValue で設定できるため、set/init を問わず SetMethod があれば対象にする
+        // Init-only properties can also be set via PropertyInfo.SetValue, so include any property with a SetMethod, whether set or init
         var setters = new Dictionary<string, Action<object, object?>>(StringComparer.OrdinalIgnoreCase);
         foreach (
             var property in resultType.GetProperties(BindingFlags.Public | BindingFlags.Instance)
@@ -3534,8 +3553,8 @@ internal static class RawSqlMapper
                 continue;
             }
 
-            // ドライバーが返す素の型は方言で異なる（例: SQLite の INTEGER は long）ため、
-            // プロパティの基底型（Nullable は基底型）へ寄せてから設定する
+            // The raw type returned by the driver differs by dialect (e.g. SQLite's INTEGER is long),
+            // so coerce to the property's underlying type (Nullable uses its underlying type) before setting
             var underlyingType =
                 Nullable.GetUnderlyingType(property.PropertyType) ?? property.PropertyType;
             setters[property.Name] = (target, raw) =>
@@ -3548,7 +3567,7 @@ internal static class RawSqlMapper
         return new ProjectionAccessor(() => constructor.Invoke(null), setters);
     }
 
-    /// <summary>射影 DTO のプロパティへ設定する値を基底型へ寄せる（スカラー変換 ConvertSingleValue と同じ意味論）</summary>
+    /// <summary>Coerces a value being assigned to a projection DTO property to the underlying type (same semantics as the scalar conversion ConvertSingleValue).</summary>
     private static object CoerceProjectionValue(object raw, Type underlyingType)
     {
         if (underlyingType.IsInstanceOfType(raw))
@@ -3564,21 +3583,21 @@ internal static class RawSqlMapper
             when (ex is InvalidCastException or FormatException or OverflowException)
         {
             throw new InvalidOperationException(
-                $"生 SQL の射影値（型 {raw.GetType().Name}）を {underlyingType.Name} へ変換できませんでした。",
+                $"Could not convert the raw SQL projection value (of type {raw.GetType().Name}) to {underlyingType.Name}.",
                 ex
             );
         }
     }
 }
 
-/// <summary>エンティティに縛られない生 SQL 実行器の既定実装（束縛・スカラー変換・射影マップの単一系統）</summary>
-/// <remarks>ステートレス（接続ファクトリのみ保持）のため DI では Singleton 登録できる。Repository の生 SQL メソッドはこの実装へ委譲する。</remarks>
+/// <summary>The default implementation of the entity-agnostic raw SQL executor (the single implementation of binding, scalar conversion, and projection mapping).</summary>
+/// <remarks>Stateless (holds only the connection factory), so it can be registered as a Singleton in DI. The repository's raw SQL methods delegate to this implementation.</remarks>
 public sealed partial class SqlExecutor(ISqlConnectionFactory connectionFactory) : ISqlExecutor
 {
-    /// <summary>SQL 接続の生成元</summary>
+    /// <summary>The source of SQL connections.</summary>
     private readonly ISqlConnectionFactory _connectionFactory = connectionFactory;
 
-    /// <summary>生 SQL の SELECT を実行し、結果行を {TEntity} へ厳密（全列必須）にマップして返す</summary>
+    /// <summary>Executes a raw SQL SELECT and maps the result rows strictly (all columns required) to {TEntity}.</summary>
     public async Task<IReadOnlyList<TEntity>> QueryBySqlAsync<TEntity>(
         string sql,
         object? parameters = null,
@@ -3606,7 +3625,7 @@ public sealed partial class SqlExecutor(ISqlConnectionFactory connectionFactory)
         return items;
     }
 
-    /// <summary>生 SQL の SELECT を実行し、結果行を任意の <typeparamref name="TResult"/> へ寛容に射影して返す</summary>
+    /// <summary>Executes a raw SQL SELECT and leniently projects the result rows onto an arbitrary <typeparamref name="TResult"/>.</summary>
     public async Task<IReadOnlyList<TResult>> QueryProjectionBySqlAsync<TResult>(
         string sql,
         object? parameters = null,
@@ -3622,11 +3641,11 @@ public sealed partial class SqlExecutor(ISqlConnectionFactory connectionFactory)
         BindParameters(command, parameters);
 
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        // 射影マッピング（単一値モード・DTO モード）は共有ヘルパーの 1 系統を使う
+        // Projection mapping (single-value mode and DTO mode) uses the shared helper's single implementation
         return await RawSqlMapper.ReadProjectionRowsAsync<TResult>(reader, cancellationToken);
     }
 
-    /// <summary>生 SQL（UPDATE/DELETE/任意 DML）を実行し、影響行数を返す</summary>
+    /// <summary>Executes raw SQL (UPDATE/DELETE/any DML) and returns the number of affected rows.</summary>
     public async Task<int> ExecuteSqlAsync(
         string sql,
         object? parameters = null,
@@ -3644,7 +3663,7 @@ public sealed partial class SqlExecutor(ISqlConnectionFactory connectionFactory)
         return await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
-    /// <summary>生 SQL を実行し、単一のスカラー値を返す（該当なし・DBNull は <c>default</c>）</summary>
+    /// <summary>Executes raw SQL and returns a single scalar value (<c>default</c> when there is no match or DBNull).</summary>
     public async Task<TResult?> ExecuteScalarSqlAsync<TResult>(
         string sql,
         object? parameters = null,
@@ -3664,9 +3683,10 @@ public sealed partial class SqlExecutor(ISqlConnectionFactory connectionFactory)
     }
 
     /// <summary>
-    /// 匿名オブジェクト等の public インスタンスプロパティを列挙し、プロパティ名 <c>Foo</c> を SQL パラメータ
-    /// <c>@Foo</c> として <c>AddWithValue</c> で束縛する（生 SQL には列文脈が無いため型は明示しない）。null のときは何もしない。
-    /// 束縛対象プロパティの解決は共有ヘルパー <see cref="RawSqlMapper.GetBindableProperties"/> と 1 系統を共有する。
+    /// Enumerates the public instance properties of an anonymous object (or similar) and binds property name <c>Foo</c> as
+    /// SQL parameter <c>@Foo</c> via <c>AddWithValue</c> (raw SQL has no column context, so no explicit type). Does nothing
+    /// when null. Bindable property resolution shares the single implementation in the shared helper
+    /// <see cref="RawSqlMapper.GetBindableProperties"/>.
     /// </summary>
     internal static void BindParameters(SqlCommand command, object? parameters)
     {
@@ -3680,7 +3700,7 @@ public sealed partial class SqlExecutor(ISqlConnectionFactory connectionFactory)
             var value =
                 property.GetValue(parameters);
 
-            // コレクション値（IN 用）は共有ヘルパーで @名0, @名1, ... へ展開する（SQL 側の @名 も書き換え）
+            // Collection values (for IN) are expanded via the shared helper into @name0, @name1, ... (the @name in the SQL is rewritten too)
             if (RawSqlMapper.IsCollectionParameter(value))
             {
                 RawSqlMapper.BindCollectionParameter(
@@ -3696,26 +3716,26 @@ public sealed partial class SqlExecutor(ISqlConnectionFactory connectionFactory)
     }
 }
 
-/// <summary>メタデータを用いて CRUD を実装する SQL Server 向けリポジトリ基底クラス</summary>
+/// <summary>Repository base class for SQL Server that implements CRUD using metadata.</summary>
 public abstract partial class SqlServerRepository<TEntity, TKey>(
     ISqlConnectionFactory connectionFactory,
     ISaveHookRegistry? saveHooks = null
 ) : IRepository<TEntity, TKey>
     where TEntity : EntityBase, new()
 {
-    /// <summary>エンティティ型ごとに 1 度だけ構築されるメタデータ（静的フィールドで再利用）</summary>
+    /// <summary>Metadata built exactly once per entity type (reused via a static field).</summary>
     private static readonly EntitySaveMetadata _metadata = EntitySaveMetadata.For(typeof(TEntity));
 
-    /// <summary>SQL 接続の生成元</summary>
+    /// <summary>The source of SQL connections.</summary>
     private readonly ISqlConnectionFactory _connectionFactory = connectionFactory;
 
-    /// <summary>生 SQL メソッドの委譲先（束縛・マッピングを 1 系統に集約）</summary>
+    /// <summary>The delegate target of the raw SQL methods (consolidates binding and mapping into a single implementation).</summary>
     private readonly ISqlExecutor _sqlExecutor = new SqlExecutor(connectionFactory);
 
-    /// <summary>Save フックのレジストリ（未指定＝null＝フックなしで完全 no-op）</summary>
+    /// <summary>The save hook registry (unspecified = null = no hooks, a complete no-op).</summary>
     private readonly ISaveHookRegistry? _saveHooks = saveHooks;
 
-    /// <summary>主キーによる単一エンティティ取得（該当なしは null）</summary>
+    /// <summary>Gets a single entity by primary key (null when not found).</summary>
     public async Task<TEntity?> GetByIdAsync(TKey id, CancellationToken cancellationToken = default)
     {
         await using var connection = _connectionFactory.CreateConnection();
@@ -3734,7 +3754,7 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
         return _metadata.MapEntity<TEntity>(reader);
     }
 
-    /// <summary>全エンティティ取得</summary>
+    /// <summary>Gets all entities.</summary>
     public async Task<IReadOnlyList<TEntity>> GetAllAsync(
         CancellationToken cancellationToken = default
     )
@@ -3747,7 +3767,7 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
         await using var command = new SqlCommand(_metadata.SelectAllSql, connection);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
 
-        // 列名→ordinal は行ごとに引かず、結果セットに対して 1 度だけ解決する
+        // Resolve column-name-to-ordinal once per result set instead of looking it up per row
         var ordinals = _metadata.SelectOrdinals(reader);
 
         while (await reader.ReadAsync(cancellationToken))
@@ -3758,7 +3778,7 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
         return items;
     }
 
-    /// <summary>エンティティ追加</summary>
+    /// <summary>Inserts an entity.</summary>
     public async Task InsertAsync(TEntity entity, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(entity);
@@ -3771,7 +3791,7 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
-    /// <summary>エンティティのコレクションを SqlBulkCopy で一括追加する</summary>
+    /// <summary>Bulk inserts a collection of entities using SqlBulkCopy.</summary>
     public async Task<int> BulkInsertAsync(
         IEnumerable<TEntity> entities,
         CancellationToken cancellationToken = default
@@ -3779,7 +3799,7 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
     {
         ArgumentNullException.ThrowIfNull(entities);
 
-        // 件数が確定しているコレクションが空なら接続を張らずに終了する
+        // If a collection with a known count is empty, return without opening a connection
         if (entities is ICollection<TEntity> { Count: 0 })
         {
             return 0;
@@ -3794,7 +3814,7 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
         };
         using var reader = _metadata.CreateDataReader(entities);
 
-        // 列名（DB カラム名）で明示マッピングし、列順への依存を避ける
+        // Map explicitly by column name (the DB column name) to avoid depending on column order
         for (var i = 0; i < reader.FieldCount; i++)
         {
             var columnName = reader.GetName(i);
@@ -3805,7 +3825,7 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
         return bulkCopy.RowsCopied;
     }
 
-    /// <summary>エンティティ更新（更新対象ありで true）</summary>
+    /// <summary>Updates an entity (true when a matching row was updated).</summary>
     public async Task<bool> UpdateAsync(
         TEntity entity,
         CancellationToken cancellationToken = default
@@ -3823,7 +3843,7 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
         return affected > 0;
     }
 
-    /// <summary>主キーによるエンティティ削除（削除対象ありで true）</summary>
+    /// <summary>Deletes an entity by primary key (true when a matching row was deleted).</summary>
     public async Task<bool> DeleteAsync(TKey id, CancellationToken cancellationToken = default)
     {
         await using var connection = _connectionFactory.CreateConnection();
@@ -3836,14 +3856,15 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
         return affected > 0;
     }
 
-    /// <summary>検索条件・並び順・Include をチェーン指定して取得するクエリを開始する</summary>
+    /// <summary>Starts a query where filters, ordering, and Include can be specified via a fluent chain.</summary>
     public SqlQuery<TEntity> Query() => new(new SqlServerSqlQueryExecutor<TEntity>(_connectionFactory));
 
     /// <summary>
-    /// 無制限バイナリ列（除外列）を主キー指定で宛先ストリームへ読み出す（O(チャンク) のストリーミング＝blob 全量を
-    /// メモリに載せない）。<paramref name="propertyName"/> は対象列の C# プロパティ名。行なし・列 NULL は
-    /// <c>false</c>（宛先へ何も書かない）、データを書いた場合は <c>true</c>（空 blob も true）を返す。
-    /// 楽観排他（rowversion）はスコープ外＝生 SQL と同格の直接列操作。
+    /// Reads an unbounded binary (excluded) column, addressed by primary key, into the destination stream (O(chunk)
+    /// streaming — the full blob is never loaded into memory). <paramref name="propertyName"/> is the C# property name of
+    /// the target column. Returns <c>false</c> when the row is missing or the column is NULL (nothing is written to the
+    /// destination), <c>true</c> when data was written (an empty blob is also true).
+    /// Optimistic concurrency (rowversion) is out of scope — this is a direct column operation on par with raw SQL.
     /// </summary>
     protected async Task<bool> ReadUnboundedBinaryColumnAsync(
         string propertyName,
@@ -3857,7 +3878,7 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
 
-        // 単独モード（自前接続・トランザクションなし）でストリーミングエンジンへ委譲する
+        // Delegate to the streaming engine in standalone mode (own connection, no transaction)
         return await UnboundedBinaryColumnEngine.ReadAsync(
             _metadata,
             propertyName,
@@ -3870,10 +3891,11 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
     }
 
     /// <summary>
-    /// 無制限バイナリ列（除外列）を主キー指定でストリームから書き込む（O(チャンク) のストリーミング）。
-    /// <paramref name="source"/> が <c>null</c> のとき列を NULL に設定する。<c>CanSeek</c> でない Stream は
-    /// <paramref name="length"/> の指定が必須（欠落は <see cref="ArgumentException"/>）。更新した場合は <c>true</c>、
-    /// 該当行なしは <c>false</c> を返す。楽観排他（rowversion）はスコープ外＝生 SQL と同格の直接列操作。
+    /// Writes an unbounded binary (excluded) column from a stream, addressed by primary key (O(chunk) streaming).
+    /// When <paramref name="source"/> is <c>null</c>, sets the column to NULL. A Stream that is not <c>CanSeek</c> requires
+    /// <paramref name="length"/> (omitting it throws <see cref="ArgumentException"/>). Returns <c>true</c> when a row was
+    /// updated, <c>false</c> when no row matched.
+    /// Optimistic concurrency (rowversion) is out of scope — this is a direct column operation on par with raw SQL.
     /// </summary>
     protected async Task<bool> WriteUnboundedBinaryColumnAsync(
         string propertyName,
@@ -3886,7 +3908,7 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
 
-        // 単独モード（自前接続・自前トランザクション）でストリーミングエンジンへ委譲する
+        // Delegate to the streaming engine in standalone mode (own connection, own transaction)
         return await UnboundedBinaryColumnEngine.WriteAsync(
             _metadata,
             propertyName,
@@ -3899,7 +3921,7 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
         );
     }
 
-    /// <summary>RowState に従って 1 トランザクションで追加・更新・削除を保存する（既定で子をカスケード）</summary>
+    /// <summary>Saves inserts, updates, and deletes in a single transaction according to RowState (children cascade by default).</summary>
     public async Task<int> SaveAsync(
         TEntity entity,
         bool cascadeSave = true,
@@ -3910,7 +3932,7 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
     {
         ArgumentNullException.ThrowIfNull(entity);
 
-        // グラフ全体に変更が無ければ接続も張らずに終了する
+        // If the entire graph has no changes, return without even opening a connection
         if (!EntityGraphSaver.HasChanges(entity, cascadeSave))
         {
             return 0;
@@ -3919,11 +3941,11 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
 
-        // カスケードを含むグラフ全体を 1 接続・1 トランザクションで保存（MSDTC 昇格を避ける）
+        // Save the entire graph, cascades included, over a single connection and transaction (avoids MSDTC promotion)
         await using var transaction = (SqlTransaction)
             await connection.BeginTransactionAsync(cancellationToken);
 
-        // フック登録があれば、進行中の (connection, transaction) に参加する context を供給するセッションを組み立てる
+        // If hooks are registered, build a session that supplies a context participating in the in-progress (connection, transaction)
         var hooks =
             _saveHooks is null
                 ? null
@@ -3934,7 +3956,7 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
 
         try
         {
-            // 呼び出し前に HasChanges を確認済みのため、内部の重複するグラフ走査を省く
+            // HasChanges was already checked before this call, so skip the redundant internal graph traversal
             var rows = await EntityGraphSaver.SaveAsync(
                 entity,
                 connection,
@@ -3948,8 +3970,8 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
             );
             await transaction.CommitAsync(cancellationToken);
 
-            // コミット成功後に状態を確定（Added/Updated → Unchanged）し、再保存での二重処理を防ぐ。
-            // スキップされた行（フックの Before が false）は据え置く
+            // After a successful commit, settle the state (Added/Updated → Unchanged) to prevent double-processing on a re-save.
+            // Skipped rows (where a hook's Before returned false) are left as they are
             EntityGraphSaver.AcceptChanges(entity, cascadeSave, hooks?.Skipped);
             return rows;
         }
@@ -3960,7 +3982,7 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
         }
     }
 
-    /// <summary>複数の集約ルートを 1 トランザクションでまとめて保存する（全件成功か全件ロールバックの原子的処理）</summary>
+    /// <summary>Saves multiple aggregate roots together in a single transaction (an atomic all-succeed-or-all-rollback operation).</summary>
     public async Task<int> SaveAsync(
         IEnumerable<TEntity> entities,
         bool cascadeSave = true,
@@ -3971,7 +3993,7 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
     {
         ArgumentNullException.ThrowIfNull(entities);
 
-        // 変更のあるグラフだけを対象にする（接続・トランザクションを張る前に絞り込む）
+        // Target only graphs with changes (filter before opening the connection and transaction)
         var targets = entities
             .Where(entity => entity is not null && EntityGraphSaver.HasChanges(entity, cascadeSave))
             .ToList();
@@ -3983,11 +4005,11 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync(cancellationToken);
 
-        // 全エンティティのグラフを 1 接続・1 トランザクションで保存（途中失敗時は全体ロールバック）
+        // Save the graphs of all entities over a single connection and transaction (a mid-way failure rolls back everything)
         await using var transaction = (SqlTransaction)
             await connection.BeginTransactionAsync(cancellationToken);
 
-        // フック登録があれば、進行中の (connection, transaction) に参加する context を供給するセッションを組み立てる
+        // If hooks are registered, build a session that supplies a context participating in the in-progress (connection, transaction)
         var hooks =
             _saveHooks is null
                 ? null
@@ -4001,7 +4023,7 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
             var rows = 0;
             foreach (var entity in targets)
             {
-                // targets は HasChanges で絞り込み済みのため、内部の重複するグラフ走査を省く
+                // targets is already filtered by HasChanges, so skip the redundant internal graph traversal
                 rows += await EntityGraphSaver.SaveAsync(
                     entity,
                     connection,
@@ -4017,8 +4039,8 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
 
             await transaction.CommitAsync(cancellationToken);
 
-            // コミット成功後に全グラフの状態を確定（Added/Updated → Unchanged）し、再保存での二重処理を防ぐ。
-            // スキップされた行（フックの Before が false）は据え置く
+            // After a successful commit, settle the state of every graph (Added/Updated → Unchanged) to prevent double-processing on a re-save.
+            // Skipped rows (where a hook's Before returned false) are left as they are
             foreach (var entity in targets)
             {
                 EntityGraphSaver.AcceptChanges(entity, cascadeSave, hooks?.Skipped);
@@ -4033,12 +4055,12 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
         }
     }
 
-    /// <summary>生 SQL の SELECT を実行し、結果行を {TEntity} へマップして返す</summary>
+    /// <summary>Executes a raw SQL SELECT and maps the result rows to {TEntity}.</summary>
     /// <remarks>
-    /// SELECT には {TEntity} の全列が必要（<c>SELECT *</c> または全列指定）。部分 SELECT（列不足）は不可。
-    /// パラメータは匿名オブジェクトの public プロパティ名を <c>@名</c> として型明示なしで束縛する
-    /// （<b>値は必ずパラメータで渡すこと。文字列連結はインジェクションの危険がある</b>）。
-    /// 実装は <see cref="ISqlExecutor"/> へ委譲する（束縛・マッピングの 1 系統化）。
+    /// The SELECT must return all columns of {TEntity} (<c>SELECT *</c> or all columns listed). A partial SELECT (missing
+    /// columns) is not allowed. Parameters bind the public property names of an anonymous object as <c>@name</c> without an
+    /// explicit type (<b>always pass values as parameters; string concatenation risks injection</b>).
+    /// The implementation delegates to <see cref="ISqlExecutor"/> (a single implementation of binding and mapping).
     /// </remarks>
     public Task<IReadOnlyList<TEntity>> QueryBySqlAsync(
         string sql,
@@ -4046,13 +4068,13 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
         CancellationToken cancellationToken = default
     ) => _sqlExecutor.QueryBySqlAsync<TEntity>(sql, parameters, cancellationToken);
 
-    /// <summary>生 SQL（UPDATE/DELETE/任意 DML）を実行し、影響行数を返す</summary>
+    /// <summary>Executes raw SQL (UPDATE/DELETE/any DML) and returns the number of affected rows.</summary>
     /// <remarks>
-    /// 呼び出しごとに接続を開閉する（トランザクション引数なし）。複数文をアトミックに実行したい場合は、
-    /// 1 回の呼び出し内で <c>BEGIN TRAN ... COMMIT</c> を SQL に記述すること。
-    /// パラメータ束縛は <see cref="QueryBySqlAsync"/> と同じ
-    /// （<b>値は必ずパラメータで渡すこと。文字列連結はインジェクションの危険がある</b>）。
-    /// 実装は <see cref="ISqlExecutor"/> へ委譲する。
+    /// The connection is opened and closed per call (no transaction argument). To execute multiple statements atomically,
+    /// write <c>BEGIN TRAN ... COMMIT</c> in the SQL within a single call.
+    /// Parameter binding is the same as <see cref="QueryBySqlAsync"/>
+    /// (<b>always pass values as parameters; string concatenation risks injection</b>).
+    /// The implementation delegates to <see cref="ISqlExecutor"/>.
     /// </remarks>
     public Task<int> ExecuteSqlAsync(
         string sql,
@@ -4060,13 +4082,13 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
         CancellationToken cancellationToken = default
     ) => _sqlExecutor.ExecuteSqlAsync(sql, parameters, cancellationToken);
 
-    /// <summary>生 SQL を実行し、単一のスカラー値を返す（該当なし・DBNull は <c>default</c>）</summary>
+    /// <summary>Executes raw SQL and returns a single scalar value (<c>default</c> when there is no match or DBNull).</summary>
     /// <remarks>
-    /// 結果が <c>null</c> / <see cref="DBNull"/> なら <c>default(TResult)</c>。型が合わない場合は
-    /// <see cref="Convert.ChangeType(object, Type, IFormatProvider)"/>（InvariantCulture）でベストエフォート変換し、
-    /// 変換できない場合は分かる例外を投げる。パラメータ束縛は <see cref="QueryBySqlAsync"/> と同じ
-    /// （<b>値は必ずパラメータで渡すこと。文字列連結はインジェクションの危険がある</b>）。
-    /// 実装は <see cref="ISqlExecutor"/> へ委譲する。
+    /// When the result is <c>null</c> / <see cref="DBNull"/>, returns <c>default(TResult)</c>. When the type does not match,
+    /// it performs a best-effort conversion with <see cref="Convert.ChangeType(object, Type, IFormatProvider)"/>
+    /// (InvariantCulture), throwing a descriptive exception when it cannot convert. Parameter binding is the same as
+    /// <see cref="QueryBySqlAsync"/> (<b>always pass values as parameters; string concatenation risks injection</b>).
+    /// The implementation delegates to <see cref="ISqlExecutor"/>.
     /// </remarks>
     public Task<TResult?> ExecuteScalarSqlAsync<TResult>(
         string sql,
@@ -4074,11 +4096,11 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
         CancellationToken cancellationToken = default
     ) => _sqlExecutor.ExecuteScalarSqlAsync<TResult>(sql, parameters, cancellationToken);
 
-    /// <summary>生 SQL の SELECT を実行し、結果行を任意の <typeparamref name="TResult"/> へ寛容に射影して返す（名前付きクエリの自由 SQL 射影用）</summary>
+    /// <summary>Executes a raw SQL SELECT and leniently projects the result rows onto an arbitrary <typeparamref name="TResult"/> (for raw SQL projections of named queries).</summary>
     /// <remarks>
-    /// パラメータ束縛は <see cref="QueryBySqlAsync"/> と同じ
-    /// （<b>値は必ずパラメータで渡すこと。文字列連結はインジェクションの危険がある</b>）。
-    /// 実装は <see cref="ISqlExecutor"/> へ委譲する。
+    /// Parameter binding is the same as <see cref="QueryBySqlAsync"/>
+    /// (<b>always pass values as parameters; string concatenation risks injection</b>).
+    /// The implementation delegates to <see cref="ISqlExecutor"/>.
     /// </remarks>
     protected Task<IReadOnlyList<TResult>> QueryProjectionBySqlAsync<TResult>(
         string sql,
@@ -4087,8 +4109,8 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
     ) => _sqlExecutor.QueryProjectionBySqlAsync<TResult>(sql, parameters, cancellationToken);
 }
 
-/// <summary>Save フックの After に渡す、進行中の (connection, transaction) に参加する SQL Server コンテキスト</summary>
-/// <remarks>エンティティ型に束縛して生成する（<see cref="WriteBinaryColumnAsync"/> はその型の除外列を解決する）。生 SQL は <c>SqlExecutor.BindParameters</c> を流用する</remarks>
+/// <summary>The SQL Server context passed to a save hook's After, participating in the in-progress (connection, transaction).</summary>
+/// <remarks>Created bound to an entity type (<see cref="WriteBinaryColumnAsync"/> resolves that type's excluded columns). Raw SQL reuses <c>SqlExecutor.BindParameters</c>.</remarks>
 internal sealed class SqlSaveHookContext(
     SqlConnection connection,
     SqlTransaction transaction,
@@ -4099,7 +4121,7 @@ internal sealed class SqlSaveHookContext(
     private readonly SqlTransaction _transaction = transaction;
     private readonly EntitySaveMetadata _metadata = EntitySaveMetadata.For(entityType);
 
-    /// <summary>同一トランザクション内で生 SQL（任意 DML）を実行し、影響行数を返す（束縛は SqlExecutor と 1 系統）</summary>
+    /// <summary>Executes raw SQL (any DML) within the same transaction and returns the number of affected rows (binding shares the single implementation with SqlExecutor).</summary>
     public async Task<int> ExecuteSqlAsync(
         string sql,
         object? parameters = null,
@@ -4113,7 +4135,7 @@ internal sealed class SqlSaveHookContext(
         return await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
-    /// <summary>同一トランザクション内で無制限バイナリ（除外）列をストリーム書き込みする（除外なしの図では非対応）</summary>
+    /// <summary>Stream-writes an unbounded binary (excluded) column within the same transaction (unsupported for diagrams without exclusions).</summary>
     public Task<bool> WriteBinaryColumnAsync(
         string propertyName,
         object key,
@@ -4134,29 +4156,30 @@ internal sealed class SqlSaveHookContext(
 }
 
 /// <summary>
-/// 無制限バイナリ（除外）列のストリーミング読み書きを、進行中の接続（＋任意でトランザクション）に対して行うエンジン。
+/// Engine that performs streaming reads and writes of unbounded binary (excluded) columns against an in-progress connection
+/// (plus, optionally, a transaction).
 /// </summary>
 /// <remarks>
 /// <para>
-/// Repository のストリーミングアクセサ（単独モード＝<c>transaction</c> なし）と、Save フックの
-/// <see cref="ISaveHookContext.WriteBinaryColumnAsync"/>（参加モード＝進行中のトランザクションに参加）から共用する。
+/// Shared by the repository's streaming accessors (standalone mode — no <c>transaction</c>) and the save hook's
+/// <see cref="ISaveHookContext.WriteBinaryColumnAsync"/> (enlisted mode — participating in the in-progress transaction).
 /// </para>
 /// <para>
-/// <b>SQLite の参加/単独の分岐に注意</b>: 書き込みは 1 トランザクション内で zeroblob 確保→rowid 解決→SqliteBlob コピーを行う。
-/// 単独モードでは自前でトランザクションを張って commit するが、参加モードでは進行中のトランザクションをそのまま使い
-/// commit しない（外側の Save が commit する）。取り違えると blob が消える。
+/// <b>Beware the enlisted/standalone split for SQLite</b>: a write allocates a zeroblob, resolves the rowid, and copies via
+/// SqliteBlob within one transaction. Standalone mode opens its own transaction and commits it, whereas enlisted mode uses
+/// the in-progress transaction as is and does not commit (the outer Save commits). Mixing these up loses the blob.
 /// </para>
 /// </remarks>
 internal static class UnboundedBinaryColumnEngine
 {
-    /// <summary>指定接続（＋任意トランザクション）でコマンドを生成する</summary>
+    /// <summary>Creates a command on the given connection (plus an optional transaction).</summary>
     private static SqlCommand CreateCommand(
         string sql,
         SqlConnection connection,
         SqlTransaction? transaction
     ) => transaction is null ? new(sql, connection) : new(sql, connection, transaction);
 
-    /// <summary>無制限バイナリ列を宛先ストリームへ読み出す（行なし・列 NULL は <c>false</c>）</summary>
+    /// <summary>Reads an unbounded binary column into the destination stream (<c>false</c> when the row is missing or the column is NULL).</summary>
     public static async Task<bool> ReadAsync(
         EntitySaveMetadata metadata,
         string propertyName,
@@ -4177,7 +4200,7 @@ internal static class UnboundedBinaryColumnEngine
         );
         metadata.BindKeyParameter(command, key);
 
-        // SequentialAccess で列をストリームとして順次読む（巨大 blob を一括バッファしない）
+        // Read the column sequentially as a stream with SequentialAccess (avoids buffering a huge blob at once)
         await using var reader = await command.ExecuteReaderAsync(
             CommandBehavior.SequentialAccess,
             cancellationToken
@@ -4202,7 +4225,7 @@ internal static class UnboundedBinaryColumnEngine
         return true;
     }
 
-    /// <summary>無制限バイナリ列をストリームから書き込む（<paramref name="source"/>=null で SET NULL・行なしは <c>false</c>）</summary>
+    /// <summary>Writes an unbounded binary column from a stream (<paramref name="source"/>=null means SET NULL; <c>false</c> when no row matched).</summary>
     public static async Task<bool> WriteAsync(
         EntitySaveMetadata metadata,
         string propertyName,
@@ -4217,7 +4240,7 @@ internal static class UnboundedBinaryColumnEngine
         var column = metadata.ColumnByPropertyName(propertyName);
         var quotedColumn = metadata.QuotedColumnName(column);
 
-        // source=null は列を NULL に設定する（除外列を「未設定」に戻す手段）
+        // source=null sets the column to NULL (the way to reset an excluded column to "unset")
         if (source is null)
         {
             await using var nullCommand = CreateCommand(
@@ -4229,9 +4252,9 @@ internal static class UnboundedBinaryColumnEngine
             return await nullCommand.ExecuteNonQueryAsync(cancellationToken) > 0;
         }
 
-        // CanSeek/length の契約検証は方言に依らず統一する（SQLite の zeroblob は長さ確定が必須）
+        // The CanSeek/length contract is validated uniformly across dialects (SQLite's zeroblob requires a fixed length)
         var payloadLength = UnboundedBinaryColumns.ResolveWriteLength(source, length);
-        // SqlClient は SqlDbType.VarBinary・Size=-1（max）で Value に Stream を渡すとストリーミング送信する
+        // SqlClient streams the upload when a Stream is passed as Value with SqlDbType.VarBinary and Size=-1 (max)
         _ = payloadLength;
 
         await using var command = CreateCommand(
@@ -4249,31 +4272,32 @@ internal static class UnboundedBinaryColumnEngine
     }
 }
 
-/// <summary>クエリ WHERE 句パラメータ（名前・値・対象カラム名）。カラム名は判明時のみ設定し、型明示化に使う</summary>
-/// <param name="Name">パラメータ名（例: @p0）</param>
-/// <param name="Value">束縛する値（値オブジェクトを含み得る。素値化は束縛側で行う）</param>
-/// <param name="ColumnName">角括弧なしの対象カラム名。列を特定できない場合は null</param>
+/// <summary>A query WHERE clause parameter (name, value, target column name). The column name is set only when known and is used for explicit typing.</summary>
+/// <param name="Name">The parameter name (for example, @p0).</param>
+/// <param name="Value">The value to bind (may include a value object; unwrapping to the raw value happens on the binding side).</param>
+/// <param name="ColumnName">The target column name without brackets; null when the column cannot be identified.</param>
 internal readonly record struct SqlQueryParameter(string Name, object? Value, string? ColumnName);
 
-/// <summary>SqlQuery の 1 並び順（キー選択式と降順フラグ）。式木のまま捕捉し、実行器側で列名／SQL へ翻訳する</summary>
-/// <param name="KeySelector">キー選択のラムダ式（object? への boxing を含み得る。実行器側で剥がす）</param>
-/// <param name="Descending">降順かどうか</param>
+/// <summary>A single ordering for SqlQuery (a key selector and a descending flag). Captured as an expression tree and translated to a column name / SQL by the executor.</summary>
+/// <param name="KeySelector">The key-selecting lambda expression (may include boxing to object?; the executor strips it).</param>
+/// <param name="Descending">Whether the ordering is descending.</param>
 internal readonly record struct SqlQueryOrdering(LambdaExpression KeySelector, bool Descending);
 
 /// <summary>
-/// SqlQuery が蓄積した内容（Where 式・並び順・Include ツリー・ページング）を
-/// 実行器へ引き渡すための方言中立なスナップショット（BCL 型のみで構成）。
+/// A dialect-neutral snapshot (composed only of BCL types) that hands what a SqlQuery has accumulated
+/// (Where expressions, orderings, Include tree, paging) to an executor.
 /// </summary>
 /// <remarks>
-/// 述語・並び順は式木のまま保持し、SQL への翻訳（識別子クォート・日付部品・LIKE 等の方言差）と実行は
-/// 各バックエンドの <see cref="ISqlQueryExecutor{TEntity}"/> 実装（ADO 方言別実行器・EF Core 実行器）の責務とする。
+/// Predicates and orderings are kept as expression trees; translation to SQL (dialect differences such as
+/// identifier quoting, date parts, and LIKE) and execution are the responsibility of each backend's
+/// <see cref="ISqlQueryExecutor{TEntity}"/> implementation (the per-dialect ADO executor and the EF Core executor).
 /// </remarks>
-/// <param name="Predicates">Where で捕捉した述語式（AND 結合）</param>
-/// <param name="Orderings">OrderBy / OrderByDescending で捕捉した並び順（指定順）</param>
-/// <param name="Includes">Include / ThenInclude のナビゲーションツリー</param>
-/// <param name="Take">取得件数の上限（未指定は null）</param>
-/// <param name="Skip">読み飛ばす件数（未指定は null）</param>
-/// <param name="WithUnboundedBinary">無制限バイナリ列を含めて取得するか（true で全列プレーン SELECT・Include とは併用不可）</param>
+/// <param name="Predicates">The predicate expressions captured by Where (combined with AND).</param>
+/// <param name="Orderings">The orderings captured by OrderBy / OrderByDescending (in the specified order).</param>
+/// <param name="Includes">The navigation tree from Include / ThenInclude.</param>
+/// <param name="Take">The maximum number of rows to fetch (null when unspecified).</param>
+/// <param name="Skip">The number of rows to skip (null when unspecified).</param>
+/// <param name="WithUnboundedBinary">Whether to fetch including unbounded binary columns (true means an all-column plain SELECT; cannot be combined with Include).</param>
 internal sealed record SqlQueryPlan<TEntity>(
     IReadOnlyList<LambdaExpression> Predicates,
     IReadOnlyList<SqlQueryOrdering> Orderings,
@@ -4284,39 +4308,40 @@ internal sealed record SqlQueryPlan<TEntity>(
 );
 
 /// <summary>
-/// SqlQuery の終端メソッドの実行を差し替える内部抽象。各バックエンド（ADO 方言別実行器・EF Core 版）が
-/// 実装し、SqlQuery へコンストラクタ経由で注入する。SqlQuery 自身は方言 SQL を持たず、捕捉した
-/// プラン（式木・Include・ページング）をこの実行器へ委譲する。
+/// The internal abstraction that swaps out execution of SqlQuery's terminal methods. Each backend
+/// (the per-dialect ADO executor and the EF Core variant) implements it and is injected into SqlQuery
+/// via the constructor. SqlQuery itself holds no dialect SQL and delegates the captured plan
+/// (expression trees, Include, paging) to this executor.
 /// </summary>
 internal interface ISqlQueryExecutor<TEntity>
     where TEntity : class
 {
-    /// <summary>条件に一致するエンティティを（Include 指定分とともに）一覧取得する</summary>
+    /// <summary>Fetches the entities matching the conditions (together with the requested Includes) as a list.</summary>
     Task<IReadOnlyList<TEntity>> ToListAsync(
         SqlQueryPlan<TEntity> plan,
         CancellationToken cancellationToken
     );
 
-    /// <summary>条件に一致するエンティティを射影して取得する（実装先が可能ならサーバー側で列を刈り込む）</summary>
+    /// <summary>Fetches the entities matching the conditions with a projection (pruning columns server-side when the backend supports it).</summary>
     Task<IReadOnlyList<TResult>> ToProjectionListAsync<TResult>(
         SqlQueryPlan<TEntity> plan,
         Expression<Func<TEntity, TResult>> selector,
         CancellationToken cancellationToken
     );
 
-    /// <summary>条件に一致する先頭の 1 件を（Include 指定分とともに）取得する（該当なしは null）</summary>
+    /// <summary>Fetches the first entity matching the conditions (together with the requested Includes); returns null when there is no match.</summary>
     Task<TEntity?> FirstOrDefaultAsync(
         SqlQueryPlan<TEntity> plan,
         CancellationToken cancellationToken
     );
 
-    /// <summary>条件に一致する件数を取得する（並び順・ページング・Include は関与しない）</summary>
+    /// <summary>Returns the count of rows matching the conditions (orderings, paging, and Include are not involved).</summary>
     Task<int> CountAsync(SqlQueryPlan<TEntity> plan, CancellationToken cancellationToken);
 
-    /// <summary>条件に一致するレコードが存在するかを取得する（並び順・ページング・Include は関与しない）</summary>
+    /// <summary>Returns whether any record matching the conditions exists (orderings, paging, and Include are not involved).</summary>
     Task<bool> AnyAsync(SqlQueryPlan<TEntity> plan, CancellationToken cancellationToken);
 
-    /// <summary>条件に一致する行を一括削除する。cascadeDelete=true で子孫も FK 連鎖で削除する</summary>
+    /// <summary>Bulk-deletes the rows matching the conditions. When cascadeDelete=true, descendants are also deleted along FK chains.</summary>
     Task<int> ExecuteDeleteAsync(
         SqlQueryPlan<TEntity> plan,
         bool cascadeDelete,
@@ -4325,16 +4350,17 @@ internal interface ISqlQueryExecutor<TEntity>
 }
 
 /// <summary>
-/// 射影セレクタ（<c>v =&gt; new Dto { ... v.Prop ... }</c>）を走査し、「参照している列プロパティ名の集合」と
-/// 「その集合だけで射影を安全に再構成できるか（＝サーバー側列刈り込みが可能か）」を判定する式木ビジタ。
+/// An expression-tree visitor that walks a projection selector (<c>v =&gt; new Dto { ... v.Prop ... }</c>) and determines
+/// both "the set of referenced column property names" and "whether the projection can be safely reconstructed from that
+/// set alone (i.e. whether server-side column pruning is possible)".
 /// </summary>
 /// <remarks>
-/// ラムダパラメータ（対象エンティティ）が「直上メンバー参照（<c>v.Prop</c>）」以外の位置に現れたら抽出不能とする
-/// （<c>v</c> 丸ごと参照・エンティティを引数/レシーバに取るメソッド呼び出し・多段ナビゲーション参照など）。
-/// 収集する名前が実際に列プロパティかどうか（ナビゲーションでないか）の突き合わせは呼び出し側（各実行器）が
-/// <c>EntitySaveMetadata.ResolveProjectionColumns</c> で行う（本クラスのみ収載する構成では EntitySaveMetadata が
-/// 同居しないため cref にしない）。抽出不能なら実行器は従来経路
-/// （全列取得 → メモリ内で射影）へフォールバックする。
+/// If the lambda parameter (the target entity) appears anywhere other than a "direct member reference (<c>v.Prop</c>)",
+/// extraction is treated as impossible (referencing <c>v</c> as a whole, a method call that takes the entity as an argument
+/// or receiver, a multi-hop navigation reference, and so on). Whether each collected name is actually a column property
+/// (rather than a navigation) is reconciled by the caller (each executor) via <c>EntitySaveMetadata.ResolveProjectionColumns</c>
+/// (not referenced with cref because EntitySaveMetadata is not co-located in configurations that include only this class).
+/// When extraction is impossible, the executor falls back to the legacy path (fetch all columns, then project in memory).
 /// </remarks>
 internal sealed class ProjectionColumnCollector : ExpressionVisitor
 {
@@ -4345,15 +4371,15 @@ internal sealed class ProjectionColumnCollector : ExpressionVisitor
     private ProjectionColumnCollector(ParameterExpression parameter) => _parameter = parameter;
 
     /// <summary>
-    /// セレクタが参照する直上メンバー名を収集する。列参照のみで安全に抽出できたら true＋参照名集合、
-    /// 抽出不能（丸ごと参照・メソッド呼び出し等）なら false を返す。
+    /// Collects the direct member names referenced by the selector. Returns true plus the set of referenced names when
+    /// extraction succeeded from column references alone, and false when extraction is impossible (whole reference, method call, etc.).
     /// </summary>
     public static bool TryCollect<TEntity, TResult>(
         Expression<Func<TEntity, TResult>> selector,
         out IReadOnlyCollection<string> referencedProperties
     )
     {
-        // 単一パラメータ（対象エンティティ 1 つ）のラムダのみ扱う
+        // Only handle lambdas with a single parameter (one target entity)
         if (selector.Parameters.Count != 1)
         {
             referencedProperties = Array.Empty<string>();
@@ -4366,12 +4392,12 @@ internal sealed class ProjectionColumnCollector : ExpressionVisitor
         return collector._extractable;
     }
 
-    /// <summary>メンバー参照を訪問する。レシーバがラムダパラメータ直上（<c>v.Prop</c>）なら名前を収集し、内側へは降りない</summary>
+    /// <summary>Visits a member reference. When the receiver is directly the lambda parameter (<c>v.Prop</c>), collects the name and does not descend inside.</summary>
     protected override Expression VisitMember(MemberExpression node)
     {
         if (node.Expression == _parameter && node.Member is PropertyInfo property)
         {
-            // v.Prop の形。列参照候補として名前だけ収集し、内側のパラメータ訪問（丸ごと参照扱い）は避ける
+            // The v.Prop shape. Collect only the name as a column-reference candidate and avoid visiting the inner parameter (which would count as a whole reference).
             _members.Add(property.Name);
             return node;
         }
@@ -4379,7 +4405,7 @@ internal sealed class ProjectionColumnCollector : ExpressionVisitor
         return base.VisitMember(node);
     }
 
-    /// <summary>ラムダパラメータの訪問。メンバー参照の直上以外で現れた＝丸ごと参照のため抽出不能とする</summary>
+    /// <summary>Visits the lambda parameter. Appearing anywhere other than directly above a member reference means a whole reference, so extraction is treated as impossible.</summary>
     protected override Expression VisitParameter(ParameterExpression node)
     {
         if (node == _parameter)
@@ -4391,11 +4417,11 @@ internal sealed class ProjectionColumnCollector : ExpressionVisitor
     }
 }
 
-/// <summary>検索条件・並び順・Include をチェーンで構築し、終端メソッド（ToListAsync 等）で実行するクエリ</summary>
+/// <summary>A query built up by chaining conditions, orderings, and Includes, then executed by a terminal method (ToListAsync, etc.).</summary>
 /// <remarks>
-/// 述語・並び順・Include はラムダ式（式木）のまま捕捉し、SQL への翻訳・実行は注入された
-/// <see cref="ISqlQueryExecutor{TEntity}"/> 実装（ADO 方言別実行器 or EF Core 実行器）へ委譲する。
-/// SqlQuery 自身は方言 SQL を一切持たない（方言差は実行器側に閉じる）。
+/// Predicates, orderings, and Includes are captured as lambda expressions (expression trees); translation to SQL and
+/// execution are delegated to the injected <see cref="ISqlQueryExecutor{TEntity}"/> implementation (the per-dialect ADO
+/// executor or the EF Core executor). SqlQuery itself holds no dialect SQL at all (dialect differences stay inside the executor).
 /// </remarks>
 public sealed class SqlQuery<TEntity>
     where TEntity : class
@@ -4404,52 +4430,52 @@ public sealed class SqlQuery<TEntity>
     private int? _take;
     private int? _skip;
 
-    /// <summary>WithUnboundedBinary 指定フラグ（true で無制限バイナリ列を含めた全列取得＝Include とは併用不可）</summary>
+    /// <summary>The WithUnboundedBinary flag (true fetches all columns including unbounded binary columns; cannot be combined with Include).</summary>
     private bool _withUnboundedBinary;
 
-    /// <summary>終端メソッドの実行を担うバックエンド実行器（ADO 方言別 or EF Core）</summary>
+    /// <summary>The backend executor that runs the terminal methods (per-dialect ADO or EF Core).</summary>
     private readonly ISqlQueryExecutor<TEntity> _executor;
 
-    /// <summary>捕捉した Where 式（翻訳せず式木のまま保持し、実行器が SQL / LINQ へ翻訳する）</summary>
+    /// <summary>The captured Where expressions (kept as expression trees without translating; the executor translates them to SQL / LINQ).</summary>
     private readonly List<LambdaExpression> _predicates = new();
 
-    /// <summary>捕捉した並び順（キー選択式と降順フラグ）</summary>
+    /// <summary>The captured orderings (a key selector and a descending flag).</summary>
     private readonly List<SqlQueryOrdering> _orderSelectors = new();
 
-    /// <summary>バックエンド実行器を注入する内部コンストラクタ</summary>
+    /// <summary>Internal constructor that injects the backend executor.</summary>
     internal SqlQuery(ISqlQueryExecutor<TEntity> executor) => _executor = executor;
 
-    /// <summary>検索条件を追加する（複数指定は AND 結合）</summary>
+    /// <summary>Adds a search condition (multiple conditions are combined with AND).</summary>
     public SqlQuery<TEntity> Where(Expression<Func<TEntity, bool>> predicate)
     {
         ArgumentNullException.ThrowIfNull(predicate);
-        // 式木のまま捕捉し、SQL / LINQ への翻訳は実行器に委ねる
+        // Capture as an expression tree and leave translation to SQL / LINQ to the executor
         _predicates.Add(predicate);
         return this;
     }
 
-    /// <summary>昇順の並び順を追加する</summary>
+    /// <summary>Adds an ascending ordering.</summary>
     public SqlQuery<TEntity> OrderBy(Expression<Func<TEntity, object?>> keySelector)
     {
         _orderSelectors.Add(new SqlQueryOrdering(keySelector, Descending: false));
         return this;
     }
 
-    /// <summary>降順の並び順を追加する</summary>
+    /// <summary>Adds a descending ordering.</summary>
     public SqlQuery<TEntity> OrderByDescending(Expression<Func<TEntity, object?>> keySelector)
     {
         _orderSelectors.Add(new SqlQueryOrdering(keySelector, Descending: true));
         return this;
     }
 
-    /// <summary>取得件数の上限を指定する</summary>
+    /// <summary>Sets the maximum number of rows to fetch.</summary>
     public SqlQuery<TEntity> Take(int count)
     {
         _take = count;
         return this;
     }
 
-    /// <summary>先頭から読み飛ばす件数を指定する</summary>
+    /// <summary>Sets the number of leading rows to skip.</summary>
     public SqlQuery<TEntity> Skip(int count)
     {
         _skip = count;
@@ -4457,15 +4483,15 @@ public sealed class SqlQuery<TEntity>
     }
 
     /// <summary>
-    /// 無制限バイナリ列（<c>UnboundedBinaryColumnAttribute</c> 付き）を含めてエンティティを取得する。ExcludeUnboundedBinaryColumns で
-    /// 既定 SELECT から外れている列を、この呼び出しに限り取得したいときに指定する（除外列がなければ何もしない no-op）。
+    /// Fetches entities including unbounded binary columns (those marked with <c>UnboundedBinaryColumnAttribute</c>). Use it when you want to
+    /// fetch, for this call only, the columns that ExcludeUnboundedBinaryColumns has dropped from the default SELECT (a no-op when there are no excluded columns).
     /// </summary>
     /// <remarks>
-    /// Include とは併用できない（終端メソッド実行時に <see cref="InvalidOperationException"/>）。無制限バイナリ列が
-    /// 必要な場合は Include なしの別クエリで取得すること。SQL Server では（既定の JSON 経由ではなく）プレーン SELECT になり、
-    /// 巨大 blob の Base64 膨張（ピークメモリ 5〜6 倍）を回避する。効果があるのは ToListAsync / FirstOrDefaultAsync のみ
-    /// （射影・件数・存在確認には影響しない）。取得したエンティティは通常取得と同等（RowState=Unchanged）だが、除外列が
-    /// UPDATE 対象外である点は変わらないため、そのまま UpdateAsync すると既存ガードで例外になる（更新は生 SQL で行う）。
+    /// Cannot be combined with Include (an <see cref="InvalidOperationException"/> is thrown when the terminal method runs). When unbounded binary
+    /// columns are needed, fetch them with a separate query that has no Include. On SQL Server this uses a plain SELECT (not the default JSON path),
+    /// avoiding the Base64 inflation of large blobs (5-6x peak memory). It takes effect only on ToListAsync / FirstOrDefaultAsync
+    /// (it does not affect projections, counts, or existence checks). The fetched entities are equivalent to a normal fetch (RowState=Unchanged), but
+    /// because excluded columns remain outside the UPDATE set, calling UpdateAsync on them as-is throws via the existing guard (perform updates with raw SQL).
     /// </remarks>
     public SqlQuery<TEntity> WithUnboundedBinary()
     {
@@ -4473,7 +4499,7 @@ public sealed class SqlQuery<TEntity>
         return this;
     }
 
-    /// <summary>単一参照ナビゲーションを同時取得する（ThenInclude で多階層指定可）</summary>
+    /// <summary>Eagerly fetches a single-reference navigation (ThenInclude allows specifying multiple levels).</summary>
     public IncludableSqlQuery<TEntity, TProperty> Include<TProperty>(
         Expression<Func<TEntity, TProperty>> navigationSelector
     )
@@ -4483,7 +4509,7 @@ public sealed class SqlQuery<TEntity>
         return new IncludableSqlQuery<TEntity, TProperty>(this, node);
     }
 
-    /// <summary>コレクションナビゲーションを同時取得する（ThenInclude で多階層指定可）</summary>
+    /// <summary>Eagerly fetches a collection navigation (ThenInclude allows specifying multiple levels).</summary>
     public IncludableSqlQuery<TEntity, TElement> Include<TElement>(
         Expression<Func<TEntity, ICollection<TElement>>> navigationSelector
     )
@@ -4493,32 +4519,32 @@ public sealed class SqlQuery<TEntity>
         return new IncludableSqlQuery<TEntity, TElement>(this, node);
     }
 
-    /// <summary>条件に一致するエンティティを（Include 指定分とともに）一覧取得する</summary>
+    /// <summary>Fetches the entities matching the conditions (together with the requested Includes) as a list.</summary>
     public async Task<IReadOnlyList<TEntity>> ToListAsync(
         CancellationToken cancellationToken = default
     ) => await _executor.ToListAsync(BuildPlan(), cancellationToken);
 
-    /// <summary>条件に一致する先頭の 1 件を（Include 指定分とともに）取得する（該当なしは null）</summary>
+    /// <summary>Fetches the first entity matching the conditions (together with the requested Includes); returns null when there is no match.</summary>
     public async Task<TEntity?> FirstOrDefaultAsync(CancellationToken cancellationToken = default) =>
         await _executor.FirstOrDefaultAsync(BuildPlan(), cancellationToken);
 
-    /// <summary>条件に一致する件数を取得する</summary>
+    /// <summary>Returns the count of rows matching the conditions.</summary>
     public async Task<int> CountAsync(CancellationToken cancellationToken = default) =>
         await _executor.CountAsync(BuildPlan(), cancellationToken);
 
-    /// <summary>条件に一致するレコードが存在するかを取得する</summary>
+    /// <summary>Returns whether any record matching the conditions exists.</summary>
     public async Task<bool> AnyAsync(CancellationToken cancellationToken = default) =>
         await _executor.AnyAsync(BuildPlan(), cancellationToken);
 
-    /// <summary>条件に一致するエンティティを取得し、指定の射影で変換して一覧を返す（名前付きクエリの射影用）</summary>
+    /// <summary>Fetches the entities matching the conditions and returns them as a list transformed by the given projection (for named-query projections).</summary>
     /// <remarks>
-    /// 条件・並び順・ページングはバックエンド（方言 SQL / EF Core / インメモリ）側で適用される。
-    /// 射影の列は、セレクタが列プロパティ参照のみ（Include なし）のとき実装先が可能ならサーバー側で刈り込む
-    /// （SELECT する列・EF Core の射影・インメモリ複製を参照列に絞る）。Include 併用時やセレクタから列参照を
-    /// 安全に抽出できない場合は、従来どおり全列を取得してからメモリ内で射影する。
+    /// Conditions, orderings, and paging are applied on the backend side (dialect SQL / EF Core / in-memory).
+    /// The projected columns are pruned server-side when the selector references only column properties (with no Include) and the backend supports it
+    /// (narrowing the SELECTed columns, the EF Core projection, and the in-memory copy to the referenced columns). When Include is combined or column
+    /// references cannot be safely extracted from the selector, all columns are fetched as before and the projection is applied in memory.
     /// </remarks>
-    /// <param name="selector">エンティティから射影 DTO への変換式</param>
-    /// <param name="cancellationToken">キャンセルトークン</param>
+    /// <param name="selector">The expression that transforms an entity into a projection DTO.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
     public async Task<IReadOnlyList<TResult>> ToProjectionListAsync<TResult>(
         Expression<Func<TEntity, TResult>> selector,
         CancellationToken cancellationToken = default
@@ -4529,22 +4555,22 @@ public sealed class SqlQuery<TEntity>
         return await _executor.ToProjectionListAsync(BuildPlan(), selector, cancellationToken);
     }
 
-    /// <summary>条件に一致する行を一括削除する。cascadeDelete=true で子孫も FK 連鎖で削除する</summary>
+    /// <summary>Bulk-deletes the rows matching the conditions. When cascadeDelete=true, descendants are also deleted along FK chains.</summary>
     public async Task<int> ExecuteDeleteAsync(
         bool cascadeDelete = false,
         CancellationToken cancellationToken = default
     ) => await _executor.ExecuteDeleteAsync(BuildPlan(), cascadeDelete, cancellationToken);
 
-    /// <summary>捕捉済みの式・Include ツリー・ページングを、実行器へ渡すスナップショットへ固める</summary>
+    /// <summary>Freezes the captured expressions, Include tree, and paging into a snapshot to pass to the executor.</summary>
     private SqlQueryPlan<TEntity> BuildPlan()
     {
-        // WithUnboundedBinary は Include と併用できない（Include→With / With→Include の両順序をここで検出する）。
-        // SQL Server の Include 経路は既定の JSON 経由（Base64）で巨大 blob のメモリ膨張を招くため、
-        // 「無制限バイナリ列を含める」目的と両立しない。終端の種別に依らず併用自体を常に拒否する。
+        // WithUnboundedBinary cannot be combined with Include (both orderings, Include->With and With->Include, are detected here).
+        // The SQL Server Include path goes through the default JSON (Base64), which inflates memory for large blobs, so it is
+        // incompatible with the goal of "including unbounded binary columns". The combination itself is always rejected regardless of the terminal method.
         if (_withUnboundedBinary && _includes.Count > 0)
         {
             throw new InvalidOperationException(
-                "WithUnboundedBinary は Include と併用できません。無制限バイナリ列が必要な場合は Include なしの別クエリで取得してください。"
+                "WithUnboundedBinary cannot be combined with Include. When unbounded binary columns are needed, fetch them with a separate query that has no Include."
             );
         }
 
@@ -4552,19 +4578,19 @@ public sealed class SqlQuery<TEntity>
     }
 }
 
-/// <summary>Include の対象ナビゲーションと、その配下（ThenInclude）の木構造</summary>
+/// <summary>The target navigation of an Include and the tree of its descendants (ThenInclude).</summary>
 internal sealed class IncludeNode
 {
-    /// <summary>対象ナビゲーションプロパティを指定して Include ノードを生成する</summary>
+    /// <summary>Creates an Include node for the specified target navigation property.</summary>
     public IncludeNode(PropertyInfo property) => Property = property;
 
-    /// <summary>取得対象のナビゲーションプロパティ</summary>
+    /// <summary>The navigation property to fetch.</summary>
     public PropertyInfo Property { get; }
 
-    /// <summary>ThenInclude で指定された配下のナビゲーション</summary>
+    /// <summary>The descendant navigations specified via ThenInclude.</summary>
     public List<IncludeNode> Children { get; } = new();
 
-    /// <summary>ラムダ式（x => x.Nav）からナビゲーションプロパティを取り出す</summary>
+    /// <summary>Extracts the navigation property from a lambda expression (x => x.Nav).</summary>
     public static PropertyInfo GetProperty(LambdaExpression selector)
     {
         var expression = selector.Body;
@@ -4584,12 +4610,12 @@ internal sealed class IncludeNode
         }
 
         throw new ArgumentException(
-            $"Include/ThenInclude にはナビゲーションプロパティを指定してください: {selector}"
+            $"Include/ThenInclude requires a navigation property: {selector}"
         );
     }
 }
 
-/// <summary>Include の続きに ThenInclude（配下の取得）を指定できるクエリ</summary>
+/// <summary>A query that lets you specify ThenInclude (fetching descendants) after an Include.</summary>
 public sealed class IncludableSqlQuery<TEntity, TProperty>
     where TEntity : class
 {
@@ -4602,7 +4628,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
         _node = node;
     }
 
-    /// <summary>直前に Include した単一参照ナビゲーションの配下をさらに取得する</summary>
+    /// <summary>Further fetches the descendants of the single-reference navigation Included just before.</summary>
     public IncludableSqlQuery<TEntity, TNext> ThenInclude<TNext>(
         Expression<Func<TProperty, TNext>> navigationSelector
     )
@@ -4612,7 +4638,7 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
         return new IncludableSqlQuery<TEntity, TNext>(_query, child);
     }
 
-    /// <summary>直前に Include したコレクションナビゲーションの配下をさらに取得する</summary>
+    /// <summary>Further fetches the descendants of the collection navigation Included just before.</summary>
     public IncludableSqlQuery<TEntity, TNext> ThenInclude<TNext>(
         Expression<Func<TProperty, ICollection<TNext>>> navigationSelector
     )
@@ -4622,75 +4648,75 @@ public sealed class IncludableSqlQuery<TEntity, TProperty>
         return new IncludableSqlQuery<TEntity, TNext>(_query, child);
     }
 
-    /// <summary>別のルートナビゲーションを追加で Include する</summary>
+    /// <summary>Additionally Includes another root navigation.</summary>
     public IncludableSqlQuery<TEntity, TNext> Include<TNext>(
         Expression<Func<TEntity, TNext>> navigationSelector
     ) => _query.Include(navigationSelector);
 
-    /// <summary>別のルートコレクションを追加で Include する</summary>
+    /// <summary>Additionally Includes another root collection.</summary>
     public IncludableSqlQuery<TEntity, TNext> Include<TNext>(
         Expression<Func<TEntity, ICollection<TNext>>> navigationSelector
     ) => _query.Include(navigationSelector);
 
-    /// <summary>検索条件を追加する</summary>
+    /// <summary>Adds a search condition.</summary>
     public SqlQuery<TEntity> Where(Expression<Func<TEntity, bool>> predicate) =>
         _query.Where(predicate);
 
-    /// <summary>昇順の並び順を追加する</summary>
+    /// <summary>Adds an ascending ordering.</summary>
     public SqlQuery<TEntity> OrderBy(Expression<Func<TEntity, object?>> keySelector) =>
         _query.OrderBy(keySelector);
 
-    /// <summary>降順の並び順を追加する</summary>
+    /// <summary>Adds a descending ordering.</summary>
     public SqlQuery<TEntity> OrderByDescending(Expression<Func<TEntity, object?>> keySelector) =>
         _query.OrderByDescending(keySelector);
 
-    /// <summary>取得件数の上限を指定する</summary>
+    /// <summary>Sets the maximum number of rows to fetch.</summary>
     public SqlQuery<TEntity> Take(int count) => _query.Take(count);
 
-    /// <summary>先頭から読み飛ばす件数を指定する</summary>
+    /// <summary>Sets the number of leading rows to skip.</summary>
     public SqlQuery<TEntity> Skip(int count) => _query.Skip(count);
 
-    /// <summary>無制限バイナリ列を含めて取得する（Include との併用は終端実行時に例外）</summary>
+    /// <summary>Fetches including unbounded binary columns (combining with Include throws when the terminal method runs).</summary>
     public SqlQuery<TEntity> WithUnboundedBinary() => _query.WithUnboundedBinary();
 
-    /// <summary>条件に一致するエンティティを一覧取得する</summary>
+    /// <summary>Fetches the entities matching the conditions as a list.</summary>
     public Task<IReadOnlyList<TEntity>> ToListAsync(
         CancellationToken cancellationToken = default
     ) => _query.ToListAsync(cancellationToken);
 
-    /// <summary>条件に一致する先頭の 1 件を取得する（該当なしは null）</summary>
+    /// <summary>Fetches the first entity matching the conditions (returns null when there is no match).</summary>
     public Task<TEntity?> FirstOrDefaultAsync(CancellationToken cancellationToken = default) =>
         _query.FirstOrDefaultAsync(cancellationToken);
 
-    /// <summary>条件に一致する件数を取得する</summary>
+    /// <summary>Returns the count of rows matching the conditions.</summary>
     public Task<int> CountAsync(CancellationToken cancellationToken = default) =>
         _query.CountAsync(cancellationToken);
 
-    /// <summary>条件に一致するレコードが存在するかを取得する</summary>
+    /// <summary>Returns whether any record matching the conditions exists.</summary>
     public Task<bool> AnyAsync(CancellationToken cancellationToken = default) =>
         _query.AnyAsync(cancellationToken);
 }
 
 /// <summary>
-/// <see cref="SqlQuery{TEntity}"/> の SQL Server 向け ADO 実行器。
-/// プランの述語・並び順を <see cref="SqlExpressionTranslator"/> で SQL へ翻訳し、
-/// FOR JSON でグラフを入れ子 JSON として 1 クエリ取得し、System.Text.Json で復元する。
+/// The SQL Server ADO executor for <see cref="SqlQuery{TEntity}"/>.
+/// It translates the plan's predicates and orderings to SQL via <see cref="SqlExpressionTranslator"/>, and
+/// fetches the graph as nested JSON in a single query with FOR JSON, then restores it with System.Text.Json.
 /// </summary>
 /// <remarks>
-/// 方言 SQL（識別子クォート・SELECT 構文・ページング句）はこの実行器に閉じる。
-/// SqlQuery は方言中立の <see cref="SqlQueryPlan{TEntity}"/> を渡すだけで、方言差はここでのみ吸収する。
+/// Dialect SQL (identifier quoting, SELECT syntax, paging clauses) is confined to this executor.
+/// SqlQuery merely passes the dialect-neutral <see cref="SqlQueryPlan{TEntity}"/>, and dialect differences are absorbed only here.
 /// </remarks>
 internal sealed class SqlServerSqlQueryExecutor<TEntity>(ISqlConnectionFactory connectionFactory)
     : ISqlQueryExecutor<TEntity>
     where TEntity : EntityBase
 {
-    /// <summary>SQL 接続の生成元</summary>
+    /// <summary>The source that creates SQL connections.</summary>
     private readonly ISqlConnectionFactory _connectionFactory = connectionFactory;
 
     private static string TableName => EntitySaveMetadata.For(typeof(TEntity)).TableName;
 
-    // ナビゲーションは [JsonIgnore]（親参照の循環対策）が付くことがあるが、Include でのロードでは
-    // それらも復元する必要があるため、解決子修飾でナビゲーションプロパティを読み取り対象に含める。
+    // Navigations may carry [JsonIgnore] (to break parent-reference cycles), but loading with Include
+    // needs to restore them too, so a resolver modifier adds navigation properties back to the read set.
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -4700,7 +4726,7 @@ internal sealed class SqlServerSqlQueryExecutor<TEntity>(ISqlConnectionFactory c
         },
     };
 
-    /// <summary>[JsonIgnore] 等で契約から外れたナビゲーションプロパティを、デシリアライズ対象として再登録する</summary>
+    /// <summary>Re-registers navigation properties dropped from the contract by [JsonIgnore] and the like as deserialization targets.</summary>
     private static void IncludeNavigationProperties(JsonTypeInfo typeInfo)
     {
         if (typeInfo.Kind != JsonTypeInfoKind.Object)
@@ -4726,7 +4752,7 @@ internal sealed class SqlServerSqlQueryExecutor<TEntity>(ISqlConnectionFactory c
             );
             if (existing is not null)
             {
-                // [JsonIgnore] で無効化（Get/Set が null）されている場合は復活させ、Include で読み込めるようにする
+                // When disabled by [JsonIgnore] (Get/Set are null), revive it so Include can read it in
                 existing.Get ??= property.GetValue;
                 existing.Set ??= property.SetValue;
             }
@@ -4743,7 +4769,7 @@ internal sealed class SqlServerSqlQueryExecutor<TEntity>(ISqlConnectionFactory c
         }
     }
 
-    /// <summary>条件に一致するエンティティを（Include 指定分とともに）一覧取得する</summary>
+    /// <summary>Fetches the entities matching the conditions (together with the requested Includes) as a list.</summary>
     public async Task<IReadOnlyList<TEntity>> ToListAsync(
         SqlQueryPlan<TEntity> plan,
         CancellationToken cancellationToken
@@ -4754,7 +4780,7 @@ internal sealed class SqlServerSqlQueryExecutor<TEntity>(ISqlConnectionFactory c
 
         if (plan.WithUnboundedBinary)
         {
-            // 無制限バイナリ列を含める指定: 方言に依らず全列プレーン SELECT で実体化する（Include なしは終端でガード済み）
+            // Unbounded binary columns requested: materialize with an all-column plain SELECT regardless of dialect (no-Include is already guarded at the terminal)
             return await MaterializeWithUnboundedBinaryAsync(
                 plan,
                 whereClause,
@@ -4777,11 +4803,11 @@ internal sealed class SqlServerSqlQueryExecutor<TEntity>(ISqlConnectionFactory c
         return JsonSerializer.Deserialize<List<TEntity>>(json, JsonOptions) ?? new List<TEntity>();
     }
 
-    /// <summary>条件に一致するエンティティを射影して取得する（列参照のみ・Include なしのときは参照列だけをプレーン SELECT する）</summary>
+    /// <summary>Fetches the entities matching the conditions with a projection (when the selector references only columns and there is no Include, only the referenced columns are plain-SELECTed).</summary>
     /// <remarks>
-    /// Include があるか、セレクタから列参照のみを安全に抽出できない場合は、従来経路
-    /// （全列取得 → メモリ内で射影）へフォールバックする。刈り込み可能時は参照列だけを
-    /// プレーン SELECT（JSON 化しない）で発行し、部分実体化してから射影する。
+    /// When there is an Include, or column references cannot be safely extracted from the selector alone, falls back to
+    /// the legacy path (fetch all columns, then project in memory). When pruning is possible, only the referenced columns
+    /// are issued as a plain SELECT (no JSON), partially materialized, then projected.
     /// </remarks>
     public async Task<IReadOnlyList<TResult>> ToProjectionListAsync<TResult>(
         SqlQueryPlan<TEntity> plan,
@@ -4791,7 +4817,7 @@ internal sealed class SqlServerSqlQueryExecutor<TEntity>(ISqlConnectionFactory c
     {
         var metadata = EntitySaveMetadata.For(typeof(TEntity));
 
-        // Include なし、かつセレクタが列参照のみ（すべて列プロパティ）のときだけサーバー側で列を刈り込む
+        // Prune columns server-side only when there is no Include and the selector references columns only (all column properties)
         var projectionColumns =
             plan.Includes.Count == 0
             && ProjectionColumnCollector.TryCollect(selector, out var referenced)
@@ -4802,12 +4828,12 @@ internal sealed class SqlServerSqlQueryExecutor<TEntity>(ISqlConnectionFactory c
 
         if (projectionColumns is null)
         {
-            // フォールバック: 全列を実体化してからメモリ内で射影する
+            // Fallback: materialize all columns, then project in memory
             var entities = await ToListAsync(plan, cancellationToken);
             return entities.Select(project).ToList();
         }
 
-        // サーバー側列刈り込み: 参照列のみをプレーン SELECT し、部分実体化してから射影する
+        // Server-side column pruning: plain-SELECT only the referenced columns, partially materialize, then project
         var parameters = new List<SqlQueryParameter>();
         var whereClause = BuildWhereClause(plan, parameters);
         var sql =
@@ -4819,14 +4845,14 @@ internal sealed class SqlServerSqlQueryExecutor<TEntity>(ISqlConnectionFactory c
         await using var command = CreateCommand(connection, sql, parameters);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
 
-        // 列名→ordinal は結果セットに対して 1 度だけ解決する
+        // Column-name-to-ordinal mapping is resolved only once per result set
         var ordinals = metadata.ColumnOrdinals(reader, projectionColumns);
 
         var results = new List<TResult>();
 
         while (await reader.ReadAsync(cancellationToken))
         {
-            // 参照列のみを埋めた部分エンティティに射影を適用する（RowState は無関係＝射影後に捨てる）
+            // Apply the projection to a partial entity with only the referenced columns populated (RowState is irrelevant; the entity is discarded after projection)
             var entity = metadata.MapEntityColumns<TEntity>(reader, projectionColumns, ordinals);
             results.Add(project(entity));
         }
@@ -4834,7 +4860,7 @@ internal sealed class SqlServerSqlQueryExecutor<TEntity>(ISqlConnectionFactory c
         return results;
     }
 
-    /// <summary>条件に一致する先頭の 1 件を（Include 指定分とともに）取得する（該当なしは null）</summary>
+    /// <summary>Fetches the first entity matching the conditions (together with the requested Includes); returns null when there is no match.</summary>
     public async Task<TEntity?> FirstOrDefaultAsync(
         SqlQueryPlan<TEntity> plan,
         CancellationToken cancellationToken
@@ -4845,7 +4871,7 @@ internal sealed class SqlServerSqlQueryExecutor<TEntity>(ISqlConnectionFactory c
 
         if (plan.WithUnboundedBinary)
         {
-            // 無制限バイナリ列を含める指定: 先頭 1 件を全列プレーン SELECT で実体化する（Include なしは終端でガード済み）
+            // Unbounded binary columns requested: materialize the first row with an all-column plain SELECT (no-Include is already guarded at the terminal)
             var withBinary = await MaterializeWithUnboundedBinaryAsync(
                 plan,
                 whereClause,
@@ -4870,7 +4896,7 @@ internal sealed class SqlServerSqlQueryExecutor<TEntity>(ISqlConnectionFactory c
         return list is { Count: > 0 } ? list[0] : null;
     }
 
-    /// <summary>条件に一致する件数を取得する（並び順・ページング・Include は関与しない）</summary>
+    /// <summary>Returns the count of rows matching the conditions (orderings, paging, and Include are not involved).</summary>
     public async Task<int> CountAsync(SqlQueryPlan<TEntity> plan, CancellationToken cancellationToken)
     {
         var parameters = new List<SqlQueryParameter>();
@@ -4888,7 +4914,7 @@ internal sealed class SqlServerSqlQueryExecutor<TEntity>(ISqlConnectionFactory c
         return Convert.ToInt32(result);
     }
 
-    /// <summary>条件に一致するレコードが存在するかを取得する（並び順・ページング・Include は関与しない）</summary>
+    /// <summary>Returns whether any record matching the conditions exists (orderings, paging, and Include are not involved).</summary>
     public async Task<bool> AnyAsync(SqlQueryPlan<TEntity> plan, CancellationToken cancellationToken)
     {
         var parameters = new List<SqlQueryParameter>();
@@ -4906,7 +4932,7 @@ internal sealed class SqlServerSqlQueryExecutor<TEntity>(ISqlConnectionFactory c
         return Convert.ToInt32(result) != 0;
     }
 
-    /// <summary>条件に一致する行を一括削除する。cascadeDelete=true で子孫も FK 連鎖で削除する</summary>
+    /// <summary>Bulk-deletes the rows matching the conditions. When cascadeDelete=true, descendants are also deleted along FK chains.</summary>
     public async Task<int> ExecuteDeleteAsync(
         SqlQueryPlan<TEntity> plan,
         bool cascadeDelete,
@@ -4929,7 +4955,7 @@ internal sealed class SqlServerSqlQueryExecutor<TEntity>(ISqlConnectionFactory c
             return await command.ExecuteNonQueryAsync(cancellationToken);
         }
 
-        // カスケード: 子孫→本体の順に並んだ DELETE 文群を 1 トランザクションで実行する
+        // Cascade: execute the DELETE statements ordered descendants-first, then the target, in a single transaction
         await using var transaction = (SqlTransaction)
             await connection.BeginTransactionAsync(cancellationToken);
 
@@ -4961,9 +4987,9 @@ internal sealed class SqlServerSqlQueryExecutor<TEntity>(ISqlConnectionFactory c
     }
 
     /// <summary>
-    /// WithUnboundedBinary 指定時の実体化。Include を使わず全列（無制限バイナリ列を含む）を
-    /// プレーン SELECT し、RowState=Unchanged の正当なエンティティとして実体化する（方言共通）。
-    /// SQL Server では既定の JSON 経由（Base64）を避けメモリ膨張を防ぐ。Include なし限定（終端でガード済み）。
+    /// Materialization for WithUnboundedBinary. Plain-SELECTs all columns (including unbounded binary columns)
+    /// without Include, materializing legitimate entities with RowState=Unchanged (shared across dialects).
+    /// On SQL Server this avoids the default JSON path (Base64) and prevents memory inflation. No-Include only (guarded at the terminal).
     /// </summary>
     private async Task<IReadOnlyList<TEntity>> MaterializeWithUnboundedBinaryAsync(
         SqlQueryPlan<TEntity> plan,
@@ -4975,7 +5001,7 @@ internal sealed class SqlServerSqlQueryExecutor<TEntity>(ISqlConnectionFactory c
     )
     {
         var metadata = EntitySaveMetadata.For(typeof(TEntity));
-        // 全列（除外列＝無制限バイナリ列を含む）をプレーン SELECT する
+        // Plain-SELECT all columns (including the excluded ones, i.e. unbounded binary columns)
         var sql =
             $"SELECT {metadata.BuildColumnList(metadata.AllProperties)} FROM {TableName}{whereClause}{BuildOrderAndPaging(plan, take, skip)};";
 
@@ -4985,14 +5011,14 @@ internal sealed class SqlServerSqlQueryExecutor<TEntity>(ISqlConnectionFactory c
         await using var command = CreateCommand(connection, sql, parameters);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
 
-        // 列名→ordinal は結果セットに対して 1 度だけ解決する
+        // Column-name-to-ordinal mapping is resolved only once per result set
         var ordinals = metadata.ColumnOrdinals(reader, metadata.AllProperties);
 
         var results = new List<TEntity>();
 
         while (await reader.ReadAsync(cancellationToken))
         {
-            // 全列を束縛した正当なエンティティ（RowState=Unchanged）として実体化する
+            // Materialize as a legitimate entity (RowState=Unchanged) with all columns bound
             results.Add(
                 metadata.MapEntityColumns<TEntity>(
                     reader,
@@ -5006,7 +5032,7 @@ internal sealed class SqlServerSqlQueryExecutor<TEntity>(ISqlConnectionFactory c
         return results;
     }
 
-    /// <summary>FOR JSON の結果（約 2KB ごとに複数行で返る）を全行連結して 1 つの JSON 文字列にする</summary>
+    /// <summary>Concatenates the FOR JSON result (returned as multiple rows of roughly 2KB each) into a single JSON string.</summary>
     private async Task<string> ReadJsonAsync(
         string sql,
         IReadOnlyList<SqlQueryParameter> parameters,
@@ -5028,7 +5054,7 @@ internal sealed class SqlServerSqlQueryExecutor<TEntity>(ISqlConnectionFactory c
         return string.Concat(chunks);
     }
 
-    /// <summary>ルートの WHERE・並び順・ページングと Include ツリーから FOR JSON の SELECT 文を組み立てる</summary>
+    /// <summary>Builds the FOR JSON SELECT statement from the root's WHERE, ordering, paging, and the Include tree.</summary>
     private static string BuildJsonSelect(
         SqlQueryPlan<TEntity> plan,
         string whereClause,
@@ -5042,7 +5068,7 @@ internal sealed class SqlServerSqlQueryExecutor<TEntity>(ISqlConnectionFactory c
             plan.Includes
         );
 
-    /// <summary>ORDER BY / OFFSET・FETCH 句を組み立てる（take/skip 指定時は ORDER BY 必須のためダミー順序を補う）</summary>
+    /// <summary>Builds the ORDER BY / OFFSET-FETCH clauses (when take/skip is specified, a dummy ordering is supplied because ORDER BY is mandatory).</summary>
     private static string BuildOrderAndPaging(SqlQueryPlan<TEntity> plan, int? take, int? skip)
     {
         var orderings = BuildOrderings(plan);
@@ -5061,7 +5087,7 @@ internal sealed class SqlServerSqlQueryExecutor<TEntity>(ISqlConnectionFactory c
         return orderings.Count == 0 ? string.Empty : " ORDER BY " + string.Join(", ", orderings);
     }
 
-    /// <summary>プランの並び順（式木）を SQL の ORDER BY 要素（"[col] ASC" 等）へ翻訳する</summary>
+    /// <summary>Translates the plan's orderings (expression trees) into SQL ORDER BY elements ("[col] ASC", etc.).</summary>
     private static List<string> BuildOrderings(SqlQueryPlan<TEntity> plan)
     {
         var orderings = new List<string>(plan.Orderings.Count);
@@ -5076,7 +5102,7 @@ internal sealed class SqlServerSqlQueryExecutor<TEntity>(ISqlConnectionFactory c
         return orderings;
     }
 
-    /// <summary>プランの述語（式木）を WHERE 句へ翻訳し、値パラメータを parameters へ蓄積する（条件なしは空文字）</summary>
+    /// <summary>Translates the plan's predicates (expression trees) into a WHERE clause, accumulating value parameters into parameters (empty string when there are no conditions).</summary>
     private static string BuildWhereClause(
         SqlQueryPlan<TEntity> plan,
         List<SqlQueryParameter> parameters
@@ -5096,7 +5122,7 @@ internal sealed class SqlServerSqlQueryExecutor<TEntity>(ISqlConnectionFactory c
         return " WHERE " + string.Join(" AND ", conditions);
     }
 
-    /// <summary>蓄積したパラメータを設定したコマンドを生成する</summary>
+    /// <summary>Creates a command with the accumulated parameters applied.</summary>
     private SqlCommand CreateCommand(
         SqlConnection connection,
         string sql,
@@ -5108,10 +5134,11 @@ internal sealed class SqlServerSqlQueryExecutor<TEntity>(ISqlConnectionFactory c
         return command;
     }
 
-    /// <summary>翻訳済みの条件パラメータをコマンドへ設定する</summary>
+    /// <summary>Applies the translated condition parameters to the command.</summary>
     /// <remarks>
-    /// 列名が判明しているパラメータは、その列の [SqlColumnType] を用いて明示 SqlParameter を構築する
-    /// （LOWER 越し比較など関数越しでも同型どうしのため無害）。列が特定できない場合は従来どおり AddWithValue。
+    /// Parameters whose column is known are built as explicit SqlParameters using that column's [SqlColumnType]
+    /// (harmless even through functions such as LOWER-wrapped comparisons, since both sides share the same type).
+    /// When the column cannot be identified, falls back to AddWithValue as before.
     /// </remarks>
     private static void AddParameters(
         SqlCommand command,
@@ -5128,13 +5155,13 @@ internal sealed class SqlServerSqlQueryExecutor<TEntity>(ISqlConnectionFactory c
     }
 }
 
-/// <summary>Include ツリーと FK メタデータから FOR JSON の SELECT 文を組み立てるプランナー（DB 非依存・純粋）</summary>
+/// <summary>A planner that builds the FOR JSON SELECT statement from the Include tree and FK metadata (database-independent and pure).</summary>
 internal static class JsonQueryPlanner
 {
-    /// <summary>Include なしルートの列射影（ルート別名は常に a0 で型ごとに確定する純テキスト）をキャッシュする</summary>
+    /// <summary>Caches the root column projection for Include-less roots (pure text fixed per type, with the root alias always a0).</summary>
     private static readonly ConcurrentDictionary<Type, string> _rootProjectionCache = new();
 
-    /// <summary>ルート型・WHERE 句・並び順ページング句・Include ツリーから、入れ子 JSON を返す SELECT 文を組み立てる</summary>
+    /// <summary>Builds a SELECT statement returning nested JSON from the root type, WHERE clause, ordering/paging clause, and Include tree.</summary>
     public static string BuildSelect(
         Type rootType,
         string whereClause,
@@ -5144,8 +5171,8 @@ internal static class JsonQueryPlanner
     {
         var aliasCounter = new int[1];
         var rootAlias = NextAlias(aliasCounter);
-        // Include が無ければルート射影は「a0.[col] AS Prop, ...」の型で決まる純テキストなのでキャッシュから引く
-        // （ルート別名は NextAlias の初回で常に a0。Include ありは子別名が可変のため都度組み立てる）
+        // Without Include, the root projection is pure text determined by the type ("a0.[col] AS Prop, ..."), so pull it from the cache
+        // (the root alias is always a0 on the first NextAlias call; with Include, child aliases vary so it is rebuilt every time)
         var projection =
             includes.Count == 0
                 ? _rootProjectionCache.GetOrAdd(
@@ -5167,13 +5194,13 @@ internal static class JsonQueryPlanner
         var metadata = EntitySaveMetadata.For(type);
         var parts = new List<string>();
 
-        // 列はプロパティ名へ別名付け（[col] AS Prop）して、System.Text.Json でそのまま復元できるようにする
+        // Columns are aliased to property names ([col] AS Prop) so System.Text.Json can restore them directly
         foreach (var (propertyName, columnName) in metadata.Columns)
         {
             parts.Add($"{alias}.[{columnName}] AS {propertyName}");
         }
 
-        // Include した子は相関サブクエリ（FOR JSON）を埋め込む
+        // Included children are embedded as correlated subqueries (FOR JSON)
         foreach (var node in includes)
         {
             parts.Add(BuildIncludeProjection(node, alias, aliasCounter));
@@ -5191,7 +5218,7 @@ internal static class JsonQueryPlanner
         var attribute =
             EntitySaveMetadata.NavigationAttribute(node.Property)
             ?? throw new InvalidOperationException(
-                $"{node.Property.Name} は [NavigationReference] を持つナビゲーションではありません。"
+                $"{node.Property.Name} is not a navigation marked with [NavigationReference]."
             );
         var childType = attribute.IsCollection
             ? node.Property.PropertyType.GetGenericArguments()[0]
@@ -5199,15 +5226,15 @@ internal static class JsonQueryPlanner
         var childAlias = NextAlias(aliasCounter);
         var childTable = EntitySaveMetadata.For(childType).TableName;
 
-        // 相関条件: 子方向は 子.[Dependent] = 親.[Principal]、親参照は 親.[Principal] = 自.[Dependent]
+        // Correlation: child direction is child.[Dependent] = parent.[Principal]; parent reference is parent.[Principal] = self.[Dependent]
         var correlation = attribute.IsParentReference
             ? $"{childAlias}.[{attribute.PrincipalColumn}] = {parentAlias}.[{attribute.DependentColumn}]"
             : $"{childAlias}.[{attribute.DependentColumn}] = {parentAlias}.[{attribute.PrincipalColumn}]";
 
         var childProjection = BuildProjection(childType, childAlias, node.Children, aliasCounter);
 
-        // コレクションは配列、単一参照は WITHOUT_ARRAY_WRAPPER でオブジェクトとして出力する。
-        // ネストした FOR JSON の結果は外側で文字列にエスケープされるため、JSON_QUERY で包んで JSON のまま埋め込む。
+        // Collections are emitted as arrays; single references as objects via WITHOUT_ARRAY_WRAPPER.
+        // Nested FOR JSON results get string-escaped by the outer query, so wrap them in JSON_QUERY to embed them as raw JSON.
         var arrayMode = attribute.IsCollection ? string.Empty : ", WITHOUT_ARRAY_WRAPPER";
         return $"JSON_QUERY((SELECT {childProjection} FROM {childTable} AS {childAlias} WHERE {correlation} FOR JSON PATH{arrayMode})) AS {node.Property.Name}";
     }
@@ -5215,17 +5242,17 @@ internal static class JsonQueryPlanner
     private static string NextAlias(int[] aliasCounter) => "a" + aliasCounter[0]++;
 }
 
-/// <summary>ラムダ式（式木）を SQL の条件・列参照へ変換する</summary>
-/// <remarks>対応構文は比較（== != &lt; &lt;= &gt; &gt;=）・論理結合（&amp;&amp; ||）・否定・null 判定・bool 列・文字列の Contains/StartsWith/EndsWith に限定し、範囲外は例外とする</remarks>
+/// <summary>Translates lambda expressions (expression trees) into SQL conditions and column references.</summary>
+/// <remarks>Supported constructs are limited to comparisons (== != &lt; &lt;= &gt; &gt;=), logical combinations (&amp;&amp; ||), negation, null checks, bool columns, and string Contains/StartsWith/EndsWith; anything outside this set throws.</remarks>
 internal static class SqlExpressionTranslator
 {
-    /// <summary>述語ラムダの本体を SQL 条件へ変換し、値はパラメータ化して parameters へ追加する</summary>
+    /// <summary>Translates the body of a predicate lambda into a SQL condition, parameterizing values and appending them to parameters.</summary>
     public static string ToCondition(
         Expression expression,
         List<SqlQueryParameter> parameters
     ) => Visit(expression, parameters);
 
-    /// <summary>キー選択ラムダから角括弧付きの列名を取り出す</summary>
+    /// <summary>Extracts the bracketed column name from a key-selecting lambda.</summary>
     public static string ToColumn(LambdaExpression keySelector)
     {
         var member = Unwrap(keySelector.Body) as MemberExpression;
@@ -5233,7 +5260,7 @@ internal static class SqlExpressionTranslator
         if (member is null || !IsColumn(member))
         {
             throw new NotSupportedException(
-                $"並び順にはエンティティのプロパティのみ指定できます: {keySelector}"
+                $"Only entity properties can be specified as an ordering: {keySelector}"
             );
         }
 
@@ -5264,13 +5291,13 @@ internal static class SqlExpressionTranslator
             case MethodCallExpression call
                 when TryGetLike(call, out var likeColumn, out var likeKind):
 
-                // 引数が列なら列同士の LIKE（パターンは SQL 側でエスケープして組み立てる。引数列が NULL の行は不一致）
+                // When the argument is a column, this is a column-to-column LIKE (the pattern is escaped and assembled on the SQL side; rows where the argument column is NULL do not match)
                 if (TryColumnName(call.Arguments[0]) is { } patternColumn)
                 {
                     return $"{likeColumn} LIKE {BuildLikePatternFromColumn(patternColumn, likeKind)} ESCAPE '\\'";
                 }
 
-                // 引数は string でも値オブジェクト（TSelf オーバーロード）でもよい。VO なら素値（string）へ開く
+                // The argument may be a string or a value object (the TSelf overload). Value objects are unwrapped to the raw value (string)
                 var raw =
                     Evaluate(call.Arguments[0]) as string ?? string.Empty;
                 var pattern = likeKind switch
@@ -5287,7 +5314,7 @@ internal static class SqlExpressionTranslator
 
             case MethodCallExpression call
                 when TryGetNullOrEmpty(call, out var neColumn, out var neWhitespace):
-                // 空文字判定。IsNullOrWhiteSpace は前後空白も空扱いにする
+                // Empty-string check. IsNullOrWhiteSpace also treats surrounding whitespace as empty
                 return neWhitespace
                     ? $"({neColumn} IS NULL OR LTRIM(RTRIM({neColumn})) = '')"
                     : $"({neColumn} IS NULL OR {neColumn} = '')";
@@ -5295,7 +5322,7 @@ internal static class SqlExpressionTranslator
             case MethodCallExpression call
                 when TryGetEquals(call, out var eqColumn, out var eqArg, out var eqIgnoreCase):
 
-                // 引数が列なら列同士の等値比較（IgnoreCase 系は両辺を LOWER で畳む＝値パスと同じ規則）
+                // When the argument is a column, this is a column-to-column equality (IgnoreCase variants fold both sides with LOWER, same rule as the value path)
                 if (TryColumnName(eqArg) is { } eqArgColumn)
                 {
                     return eqIgnoreCase
@@ -5303,9 +5330,9 @@ internal static class SqlExpressionTranslator
                         : $"{eqColumn} = {eqArgColumn}";
                 }
 
-                // 値は AddParameters 側で素値へ開かれる（VO 対応）
+                // The value is unwrapped to the raw value on the AddParameters side (value-object support)
                 var eqParameter = AddParameter(Evaluate(eqArg), parameters, RawColumnName(eqColumn));
-                // 大文字小文字を無視する比較は両辺を LOWER で畳む
+                // Case-insensitive comparisons fold both sides with LOWER
                 return eqIgnoreCase
                     ? $"LOWER({eqColumn}) = LOWER({eqParameter})"
                     : $"{eqColumn} = {eqParameter}";
@@ -5314,7 +5341,7 @@ internal static class SqlExpressionTranslator
                 return $"{ColumnName(member.Member)} = 1";
 
             default:
-                throw new NotSupportedException($"この式は SQL へ変換できません: {expression}");
+                throw new NotSupportedException($"This expression cannot be translated to SQL: {expression}");
         }
     }
 
@@ -5349,18 +5376,18 @@ internal static class SqlExpressionTranslator
             ExpressionType.GreaterThanOrEqual => ">=",
             ExpressionType.LessThan => "<",
             ExpressionType.LessThanOrEqual => "<=",
-            _ => throw new NotSupportedException($"未対応の演算子です: {binary.NodeType}"),
+            _ => throw new NotSupportedException($"Unsupported operator: {binary.NodeType}"),
         };
 
-        // 一方が列で他方が値の比較では、値パラメータに対面の列名を添えて型明示化に使う（両辺が列/値なら添えない）
+        // In a column-versus-value comparison, the value parameter carries the opposing column name for explicit typing (omitted when both sides are columns or both are values)
         var leftColumnSql = TryColumnName(left);
         var rightColumnSql = TryColumnName(right);
         return $"{Operand(left, parameters, RawColumnName(rightColumnSql))} {op} {Operand(right, parameters, RawColumnName(leftColumnSql))}";
     }
 
-    /// <param name="expression">オペランドの式（列参照か定数値のいずれか）</param>
-    /// <param name="parameters">値オペランドをパラメータ化する際の追加先リスト</param>
-    /// <param name="counterpartColumn">値としてパラメータ化する場合に添える対面の列名（角括弧なし）。無ければ null</param>
+    /// <param name="expression">The operand expression (either a column reference or a constant value).</param>
+    /// <param name="parameters">The list that receives parameterized value operands.</param>
+    /// <param name="counterpartColumn">The opposing column name (without brackets) attached when parameterizing as a value; null when absent.</param>
     private static string Operand(
         Expression expression,
         List<SqlQueryParameter> parameters,
@@ -5417,8 +5444,8 @@ internal static class SqlExpressionTranslator
         return true;
     }
 
-    /// <summary>コレクションの Contains（配列＝静的 Enumerable.Contains / List・HashSet＝インスタンス Contains）を IN 変換の対象として判定する</summary>
-    /// <remarks>列が引数側にあるものだけを対象にする（列が呼び出し対象側の string.Contains は LIKE 側で処理済み）</remarks>
+    /// <summary>Determines whether a collection Contains (arrays = static Enumerable.Contains; List/HashSet = instance Contains) is a target for IN translation.</summary>
+    /// <remarks>Only calls where the column is on the argument side are targeted (string.Contains with the column as the receiver is already handled by the LIKE path).</remarks>
     private static bool TryGetIn(
         MethodCallExpression call,
         out string column,
@@ -5433,7 +5460,7 @@ internal static class SqlExpressionTranslator
             return false;
         }
 
-        // 配列など: 静的 Enumerable.Contains / MemoryExtensions.Contains(collection, item)（引数 2 個、呼び出し対象なし）
+        // Arrays etc.: static Enumerable.Contains / MemoryExtensions.Contains(collection, item) (two arguments, no receiver)
         if (call.Object is null && call.Arguments.Count == 2)
         {
             if (Unwrap(call.Arguments[1]) is MemberExpression staticItem && IsColumn(staticItem))
@@ -5446,8 +5473,8 @@ internal static class SqlExpressionTranslator
             return false;
         }
 
-        // List<T> / HashSet<T> など: インスタンス Contains(item)（引数 1 個、呼び出し対象がコレクション）
-        // 配列は .NET のスパン版 Contains に解決され、呼び出し対象が op_Implicit(array) になる（UnwrapCollection で素の配列へ戻す）
+        // List<T> / HashSet<T> etc.: instance Contains(item) (one argument, the receiver is the collection)
+        // Arrays resolve to .NET's span-based Contains, where the receiver becomes op_Implicit(array) (UnwrapCollection restores the raw array)
         if (call.Object is not null && call.Arguments.Count == 1)
         {
             if (Unwrap(call.Arguments[0]) is MemberExpression instanceItem && IsColumn(instanceItem))
@@ -5461,7 +5488,7 @@ internal static class SqlExpressionTranslator
         return false;
     }
 
-    /// <summary>コレクション式に付いた暗黙変換（配列→ReadOnlySpan などの op_Implicit / Convert）を剥がし、列挙可能な素のコレクション式へ戻す</summary>
+    /// <summary>Strips implicit conversions attached to a collection expression (op_Implicit / Convert such as array-to-ReadOnlySpan), restoring the raw enumerable collection expression.</summary>
     private static Expression UnwrapCollection(Expression expression)
     {
         while (true)
@@ -5485,18 +5512,18 @@ internal static class SqlExpressionTranslator
         }
     }
 
-    /// <summary>コレクションの各要素をパラメータ化して IN 句を組み立てる。空・null コレクションは該当なし（恒偽条件）にする</summary>
+    /// <summary>Builds an IN clause by parameterizing each element of the collection. Empty or null collections become a no-match (always-false condition).</summary>
     private static string BuildInClause(
         string column,
         Expression collection,
         List<SqlQueryParameter> parameters
     )
     {
-        // 文字列自体も IEnumerable だが、列挙対象のコレクションとしては扱わない
+        // Strings are IEnumerable themselves but are not treated as enumerable collections here
         if (Evaluate(collection) is not IEnumerable enumerable || enumerable is string)
         {
             throw new NotSupportedException(
-                $"IN 検索には列挙可能なコレクション（配列・List など）を指定してください: {collection}"
+                $"IN searches require an enumerable collection (array, List, etc.): {collection}"
             );
         }
 
@@ -5507,14 +5534,14 @@ internal static class SqlExpressionTranslator
             placeholders.Add(AddParameter(item, parameters, rawColumn));
         }
 
-        // IN () は不正な SQL のため、空コレクションは「該当なし」を表す恒偽条件にする
+        // IN () is invalid SQL, so an empty collection becomes an always-false condition meaning "no match"
         return placeholders.Count == 0
             ? "1 = 0"
             : $"{column} IN ({string.Join(", ", placeholders)})";
     }
 
-    /// <summary>x.Col.Equals(value) を等値比較の対象として判定する。第2引数が *IgnoreCase の StringComparison なら大文字小文字を無視する</summary>
-    /// <remarks>列は素の列でも値オブジェクトでもよい。文字列・数値など列の型を問わず等値へ変換できる</remarks>
+    /// <summary>Determines whether x.Col.Equals(value) is a target for equality translation. When the second argument is a *IgnoreCase StringComparison, case is ignored.</summary>
+    /// <remarks>The column may be a plain column or a value object. Any column type (string, numeric, etc.) can be translated to equality.</remarks>
     private static bool TryGetEquals(
         MethodCallExpression call,
         out string column,
@@ -5535,7 +5562,7 @@ internal static class SqlExpressionTranslator
             return false;
         }
 
-        // Equals(value) / Equals(value, StringComparison) の 2 形式のみ対応する
+        // Only the two forms Equals(value) / Equals(value, StringComparison) are supported
         if (call.Arguments.Count == 1)
         {
             column = resolvedColumn;
@@ -5556,7 +5583,7 @@ internal static class SqlExpressionTranslator
         return false;
     }
 
-    /// <summary>string.IsNullOrEmpty(x.Col) / IsNullOrWhiteSpace(x.Col) を判定する（列は素の列でも値オブジェクトの .Value でもよい）</summary>
+    /// <summary>Detects string.IsNullOrEmpty(x.Col) / IsNullOrWhiteSpace(x.Col) (the column may be a plain column or a value object's .Value).</summary>
     private static bool TryGetNullOrEmpty(
         MethodCallExpression call,
         out string column,
@@ -5581,7 +5608,7 @@ internal static class SqlExpressionTranslator
         return true;
     }
 
-    /// <summary>object へのボックス化などの Convert を取り除く</summary>
+    /// <summary>Removes Convert nodes such as boxing to object.</summary>
     private static Expression Unwrap(Expression expression)
     {
         while (
@@ -5598,14 +5625,14 @@ internal static class SqlExpressionTranslator
         return expression;
     }
 
-    /// <summary>ラムダ引数のプロパティ参照（= 列）かどうか</summary>
+    /// <summary>Whether the member is a property reference on the lambda parameter (i.e. a column).</summary>
     private static bool IsColumn(MemberExpression member) =>
         member is { Expression: ParameterExpression, Member: PropertyInfo };
 
     private static bool IsNull(Expression expression) =>
         expression is ConstantExpression { Value: null };
 
-    /// <summary>メンバー → 角括弧付き列名の解決を型メンバー単位でキャッシュする（列参照ごとの [Column] 反射を避ける）</summary>
+    /// <summary>Caches member-to-bracketed-column-name resolution per type member (avoiding [Column] reflection for every column reference).</summary>
     private static readonly ConcurrentDictionary<MemberInfo, string> _columnNameCache = new();
 
     private static string ColumnName(MemberInfo member) =>
@@ -5614,7 +5641,7 @@ internal static class SqlExpressionTranslator
             static m => $"[{m.GetCustomAttribute<ColumnAttribute>()?.Name ?? m.Name}]"
         );
 
-    /// <summary>列参照（素の列 x.Col、または値オブジェクトの x.Col.Value）から角括弧付き列名を取り出す。列でなければ null</summary>
+    /// <summary>Extracts the bracketed column name from a column reference (a plain column x.Col, or a value object's x.Col.Value). Returns null when it is not a column.</summary>
     private static string? TryColumnName(Expression expression)
     {
         if (Unwrap(expression) is not MemberExpression member)
@@ -5630,7 +5657,7 @@ internal static class SqlExpressionTranslator
         return null;
     }
 
-    /// <summary>DateTime 列の日付コンポーネント参照（x.Col.Year / x.Col.Value.Month など）を SQL の日付関数へ変換する</summary>
+    /// <summary>Translates date-component references on DateTime columns (x.Col.Year / x.Col.Value.Month, etc.) into SQL date functions.</summary>
     private static bool TryGetDatePart(Expression expression, out string sql)
     {
         sql = string.Empty;
@@ -5661,27 +5688,28 @@ internal static class SqlExpressionTranslator
     }
 
     /// <summary>
-    /// 定数・クロージャ変数などを評価して実値を得る。大半は定数か、ローカル変数を捕捉したクロージャの
-    /// フィールド／プロパティ参照なので、式木コンパイル（重い）を避けて反射で直接読み取る。
-    /// メソッド呼び出し等それ以外の式のみ従来どおり <see cref="Expression.Lambda(Expression, ParameterExpression[])"/> で評価する。
+    /// Evaluates constants, closure variables, and the like to obtain the actual value. Most cases are constants or
+    /// field/property references on a closure capturing local variables, so they are read directly via reflection,
+    /// avoiding (expensive) expression-tree compilation. Only other expressions such as method calls are evaluated
+    /// with <see cref="Expression.Lambda(Expression, ParameterExpression[])"/> as before.
     /// </summary>
     private static object? Evaluate(Expression expression)
     {
-        // エンティティの列参照（ラムダパラメータ）は値として評価できない。式木コンパイルの内部エラーで落ちる前に明示的に弾く
+        // Entity column references (the lambda parameter) cannot be evaluated as values. Reject explicitly before expression-tree compilation fails with an internal error
         if (ReferencesLambdaParameter(expression))
         {
             throw new NotSupportedException(
-                $"この式は SQL へ変換できません（エンティティの列は値の位置に指定できません）: {expression}"
+                $"This expression cannot be translated to SQL (entity columns cannot appear in a value position): {expression}"
             );
         }
 
         switch (expression)
         {
-            // 定数はそのまま値を返す
+            // Constants return their value as-is
             case ConstantExpression constant:
                 return constant.Value;
 
-            // フィールド／プロパティ参照は、対象インスタンス（静的メンバーは null）を再帰評価してから反射で読む
+            // For field/property references, recursively evaluate the target instance (null for static members), then read via reflection
             case MemberExpression member:
                 var instance = member.Expression is null ? null : Evaluate(member.Expression);
 
@@ -5692,19 +5720,19 @@ internal static class SqlExpressionTranslator
                     _ => CompileAndInvoke(expression),
                 };
 
-            // それ以外（メソッド呼び出し・演算等）は式木をコンパイルして評価する（互換性優先のフォールバック）
+            // Everything else (method calls, arithmetic, etc.) is evaluated by compiling the expression tree (compatibility-first fallback)
             default:
                 return CompileAndInvoke(expression);
         }
     }
 
-    /// <summary>任意の式木をラムダへ包んでコンパイル・実行し、実値を得る（反射で直読できない式のフォールバック）</summary>
+    /// <summary>Wraps an arbitrary expression tree in a lambda, compiles and invokes it to obtain the actual value (fallback for expressions that cannot be read directly via reflection).</summary>
     private static object? CompileAndInvoke(Expression expression) =>
         Expression.Lambda(expression).Compile().DynamicInvoke();
 
-    /// <param name="value">パラメータ化する実値（null 可）</param>
-    /// <param name="parameters">生成したパラメータの追加先リスト</param>
-    /// <param name="columnName">対象カラム名（角括弧なし）。列を特定できる場合のみ渡し、型明示化に使う</param>
+    /// <param name="value">The actual value to parameterize (may be null).</param>
+    /// <param name="parameters">The list that receives the generated parameter.</param>
+    /// <param name="columnName">The target column name (without brackets). Passed only when the column can be identified, and used for explicit typing.</param>
     private static string AddParameter(
         object? value,
         List<SqlQueryParameter> parameters,
@@ -5716,18 +5744,18 @@ internal static class SqlExpressionTranslator
         return name;
     }
 
-    /// <summary>角括弧付き列名 "[col]" から素のカラム名を取り出す。null・関数越し等で単純列でなければ null</summary>
+    /// <summary>Extracts the raw column name from a bracketed column name "[col]". Returns null when it is not a simple column (null, wrapped in a function, etc.).</summary>
     private static string? RawColumnName(string? bracketedColumn) =>
         bracketedColumn is { Length: >= 2 } && bracketedColumn[0] == '[' && bracketedColumn[^1] == ']'
             ? bracketedColumn[1..^1]
             : null;
 
-    /// <summary>LIKE のワイルドカード（% _ [ \）をエスケープする</summary>
+    /// <summary>Escapes the LIKE wildcards (% _ [ \).</summary>
     private static string EscapeLike(string value) =>
         value.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_").Replace("[", "\\[");
 
-    /// <summary>列値をリテラル扱いする LIKE パターンを SQL 側で組み立てる（EscapeLike と同じ 4 文字を REPLACE でエスケープ）</summary>
-    /// <remarks>引数列が NULL の行は連結が NULL → LIKE NULL → 不一致になる（値引数の null→空文字＝全一致とは意味論が異なる）</remarks>
+    /// <summary>Builds, on the SQL side, a LIKE pattern that treats the column value as a literal (the same 4 characters as EscapeLike, escaped via REPLACE).</summary>
+    /// <remarks>Rows where the argument column is NULL yield a NULL concatenation, then LIKE NULL, and thus no match (semantics differ from a null value argument, which becomes an empty string and matches everything).</remarks>
     private static string BuildLikePatternFromColumn(string column, LikeKind kind)
     {
         var escaped =
@@ -5741,7 +5769,7 @@ internal static class SqlExpressionTranslator
         };
     }
 
-    /// <summary>式木がラムダパラメータ（＝エンティティの列参照）を含むかどうかを走査する</summary>
+    /// <summary>Walks the expression tree to determine whether it contains a lambda parameter (i.e. an entity column reference).</summary>
     private static bool ReferencesLambdaParameter(Expression expression)
     {
         var finder = new LambdaParameterFinder();
@@ -5749,7 +5777,7 @@ internal static class SqlExpressionTranslator
         return finder.Found;
     }
 
-    /// <summary>ラムダパラメータの参照を見つけたらフラグを立てるだけの軽量ビジター</summary>
+    /// <summary>A lightweight visitor that merely raises a flag when it finds a lambda-parameter reference.</summary>
     private sealed class LambdaParameterFinder : ExpressionVisitor
     {
         public bool Found { get; private set; }
@@ -5762,15 +5790,15 @@ internal static class SqlExpressionTranslator
     }
 }
 
-/// <summary>更新対象のレコードが存在しなかった（他者削除等の競合）ことを表す例外</summary>
+/// <summary>Represents an exception indicating that the record to update no longer existed (a conflict such as deletion by another party).</summary>
 public sealed class SaveConflictException : Exception
 {
-    /// <summary>メッセージを指定して初期化する</summary>
+    /// <summary>Initializes a new instance with the specified message.</summary>
     public SaveConflictException(string message)
         : base(message) { }
 }
 
-/// <summary>カスケード対象の子ナビゲーション（プロパティ・コレクション種別・子型・FK 情報）</summary>
+/// <summary>A child navigation targeted by cascading (property, collection kind, child type, and FK information).</summary>
 internal sealed record CascadeNavigation(
     PropertyInfo Property,
     bool IsCollection,
@@ -5779,82 +5807,82 @@ internal sealed record CascadeNavigation(
     string DependentColumn
 );
 
-/// <summary>エンティティ型の属性からテーブル・カラム情報、CRUD 用 SQL、カスケード子ナビゲーションを構築・保持し、行マッピングとパラメータ束縛を提供するメタデータ</summary>
-/// <remarks>型をキーに 1 度だけ構築しキャッシュする（リフレクションコスト削減）。Repository の CRUD・グラフ保存・JSON クエリプランナ・カスケード削除プランナが共用する</remarks>
+/// <summary>Metadata built from the entity type's attributes that holds table/column information, CRUD SQL, and cascade child navigations, and provides row mapping and parameter binding.</summary>
+/// <remarks>Built once per type and cached by type key (reduces reflection cost). Shared by the repository's CRUD, graph save, JSON query planner, and cascade delete planner.</remarks>
 internal sealed class EntitySaveMetadata
 {
     private static readonly ConcurrentDictionary<Type, EntitySaveMetadata> _cache = new();
 
-    /// <summary>角括弧で囲んだテーブル名</summary>
+    /// <summary>Gets the table name wrapped in quoting brackets.</summary>
     public required string TableName { get; init; }
 
-    /// <summary>クォートなしの生テーブル名（無制限バイナリ列の Stream アクセサで SqliteBlob 等が要求する）</summary>
+    /// <summary>Gets the raw, unquoted table name (required by SqliteBlob and friends in the unbounded binary column Stream accessors).</summary>
     public required string RawTableName { get; init; }
 
-    /// <summary>主キーに対応するプロパティ</summary>
+    /// <summary>Gets the property that corresponds to the primary key.</summary>
     public required PropertyInfo KeyProperty { get; init; }
 
-    /// <summary>主キーのカラム名</summary>
+    /// <summary>Gets the column name of the primary key.</summary>
     public required string KeyColumnName { get; init; }
 
-    /// <summary>マッピング対象の全カラムプロパティ（ナビゲーション・基底プロパティ除く）。INSERT / BulkInsert は常にこれを使う</summary>
+    /// <summary>Gets all column properties subject to mapping (excluding navigations and base-class properties). INSERT / BulkInsert always use this.</summary>
     public required IReadOnlyList<PropertyInfo> AllProperties { get; init; }
 
-    /// <summary>SELECT / UPDATE 対象の列プロパティ（全列から無制限バイナリ列を除いたもの。除外列なしは全列と一致）。行マッピングで使う</summary>
+    /// <summary>Gets the column properties targeted by SELECT / UPDATE (all columns minus unbounded binary columns; identical to all columns when there are no excluded columns). Used by row mapping.</summary>
     public required IReadOnlyList<PropertyInfo> SelectProperties { get; init; }
 
-    /// <summary>SELECT / UPDATE から除外する無制限バイナリ列（<see cref="UnboundedBinaryColumnAttribute"/> 付き）。除外列なしは空</summary>
+    /// <summary>Gets the unbounded binary columns excluded from SELECT / UPDATE (marked with <see cref="UnboundedBinaryColumnAttribute"/>). Empty when there are no excluded columns.</summary>
     public required IReadOnlyList<PropertyInfo> ExcludedProperties { get; init; }
 
-    /// <summary>SELECT 対象列の (プロパティ, カラム名) をビルド時に確定した配列。行マッピングは列名解決を都度リフレクションせずこれを列挙する</summary>
+    /// <summary>Gets the (property, column name) pairs of the SELECT columns, resolved at build time. Row mapping enumerates this instead of reflecting for column names per row.</summary>
     public required IReadOnlyList<(PropertyInfo Property, string ColumnName)> SelectColumns { get; init; }
 
-    /// <summary>列プロパティ → カラム名の確定済み対応（射影・除外列など任意プロパティ列の列名解決に使う）</summary>
+    /// <summary>Gets the pre-resolved column property to column name map (used to resolve column names for arbitrary property sets such as projections and excluded columns).</summary>
     public required IReadOnlyDictionary<PropertyInfo, string> ColumnNameByProperty { get; init; }
 
-    /// <summary>INSERT / BulkInsert 対象の列プロパティ（全列から store-generated 列を除いたもの。store-generated 列なしは全列と一致）</summary>
+    /// <summary>Gets the column properties targeted by INSERT / BulkInsert (all columns minus store-generated columns; identical to all columns when there are no store-generated columns).</summary>
     public required IReadOnlyList<PropertyInfo> InsertProperties { get; init; }
 
-    /// <summary>主キーを除くカラムプロパティ</summary>
+    /// <summary>Gets the column properties excluding the primary key.</summary>
     public required IReadOnlyList<PropertyInfo> NonKeyProperties { get; init; }
 
-    /// <summary>カラムの (プロパティ名, カラム名) 対応。JSON 射影の別名付け（[col] AS Prop）に使う</summary>
+    /// <summary>Gets the (property name, column name) pairs of the columns. Used for aliasing in JSON projections ([col] AS Prop).</summary>
     public required IReadOnlyList<(string PropertyName, string ColumnName)> Columns { get; init; }
 
-    /// <summary>カラム名 → 列プロパティの対応（クエリ WHERE 句パラメータの型明示化で列型を引くのに使う）</summary>
+    /// <summary>Gets the column name to column property map (used to look up column types when explicitly typing query WHERE-clause parameters).</summary>
     public required IReadOnlyDictionary<string, PropertyInfo> PropertyByColumn { get; init; }
 
-    /// <summary>SELECT 用の角括弧付きカラム一覧（例: [id], [name]）</summary>
+    /// <summary>Gets the quoted column list for SELECT (for example: [id], [name]).</summary>
     public required string ColumnList { get; init; }
 
-    /// <summary>全件取得 SELECT 文</summary>
+    /// <summary>Gets the SELECT statement that fetches all rows.</summary>
     public required string SelectAllSql { get; init; }
 
-    /// <summary>主キー指定取得 SELECT 文</summary>
+    /// <summary>Gets the SELECT statement that fetches a row by primary key.</summary>
     public required string SelectByIdSql { get; init; }
 
-    /// <summary>INSERT 文</summary>
+    /// <summary>Gets the INSERT statement.</summary>
     public required string InsertSql { get; init; }
 
-    /// <summary>UPDATE 文</summary>
+    /// <summary>Gets the UPDATE statement.</summary>
     public required string UpdateSql { get; init; }
 
-    /// <summary>DELETE 文</summary>
+    /// <summary>Gets the DELETE statement.</summary>
     public required string DeleteSql { get; init; }
 
-    /// <summary>カスケード対象の子ナビゲーション</summary>
+    /// <summary>Gets the cascade-target child navigations.</summary>
     public required IReadOnlyList<CascadeNavigation> CascadeNavigations { get; init; }
 
-    /// <summary>指定型のメタデータを取得する（型ごとに 1 度だけ構築しキャッシュ）</summary>
+    /// <summary>Gets the metadata for the specified type (built once per type and cached).</summary>
     public static EntitySaveMetadata For(Type entityType) => _cache.GetOrAdd(entityType, Build);
 
-    /// <summary>ナビゲーションプロパティ → <see cref="NavigationReferenceAttribute"/> の解決をプロパティ単位でキャッシュする</summary>
+    /// <summary>Caches the navigation property to <see cref="NavigationReferenceAttribute"/> resolution per property.</summary>
     private static readonly ConcurrentDictionary<
         PropertyInfo,
         NavigationReferenceAttribute?
     > _navigationAttributeCache = new();
 
-    /// <summary>ナビゲーションプロパティの <see cref="NavigationReferenceAttribute"/> を取得する（Include 解決で毎ノード反射しないようキャッシュ）</summary>
+    /// <summary>Gets the <see cref="NavigationReferenceAttribute"/> of a navigation property (cached so Include resolution does not reflect per node).</summary>
     public static NavigationReferenceAttribute? NavigationAttribute(PropertyInfo property) =>
         _navigationAttributeCache.GetOrAdd(
             property,
@@ -5866,7 +5894,7 @@ internal sealed class EntitySaveMetadata
         var tableAttribute =
             entityType.GetCustomAttribute<TableAttribute>()
             ?? throw new InvalidOperationException(
-                $"{entityType.Name} に [Table] 属性が必要です。"
+                $"{entityType.Name} requires a [Table] attribute."
             );
         var allProperties = entityType
             .GetProperties(BindingFlags.Public | BindingFlags.Instance)
@@ -5885,15 +5913,16 @@ internal sealed class EntitySaveMetadata
         var keyProperty = keyProperties.Count switch
         {
             0 => throw new InvalidOperationException(
-                $"{entityType.Name} に [Key] 属性付きプロパティが必要です。"
+                $"{entityType.Name} requires a property with a [Key] attribute."
             ),
             1 => keyProperties[0],
             _ => throw new InvalidOperationException(
-                $"{entityType.Name} の [Key] 属性付きプロパティは 1 つのみ許可されます（複合キーは Repository 非対応。対象: {string.Join(", ", keyProperties.Select(property => property.Name))}）。"
+                $"{entityType.Name} may have only one property with a [Key] attribute (composite keys are not supported by the repository; found: {string.Join(", ", keyProperties.Select(property => property.Name))})."
             ),
         };
-        // 無制限バイナリ列（UnboundedBinaryColumnAttribute）を SELECT / UPDATE から外す。全列（AllProperties）は
-        // INSERT / BulkInsert のため保持し、SELECT 用列集合（selectProperties）だけを縮小する。除外列なしは全列と一致
+        // Exclude unbounded binary columns (UnboundedBinaryColumnAttribute) from SELECT / UPDATE. The full column set
+        // (AllProperties) is kept for INSERT / BulkInsert; only the SELECT column set (selectProperties) is reduced.
+        // With no excluded columns it matches the full set
         var excludedColumns = columns
             .Where(property =>
                 property.GetCustomAttribute<UnboundedBinaryColumnAttribute>() is not null
@@ -5903,14 +5932,15 @@ internal sealed class EntitySaveMetadata
             excludedColumns.Count == 0
                 ? columns
                 : columns.Where(property => !excludedColumns.Contains(property)).ToList();
-        // DB が値を生成する列（rowversion / timestamp 等・StoreGeneratedColumnAttribute）は INSERT / UPDATE の対象から外す。
-        // これらは DB が採番するため明示的な書き込みは実行時エラーになる（SQL Server の timestamp 列など）。SELECT では取得する
+        // Columns whose values are generated by the database (rowversion / timestamp etc., StoreGeneratedColumnAttribute)
+        // are excluded from INSERT / UPDATE. The database assigns them, so an explicit write fails at runtime
+        // (e.g. SQL Server timestamp columns). They are still fetched by SELECT
         var storeGeneratedColumns = columns
             .Where(property =>
                 property.GetCustomAttribute<StoreGeneratedColumnAttribute>() is not null
             )
             .ToList();
-        // INSERT / BulkInsert 対象は全列から store-generated 列を除いたもの（store-generated 列なしは全列と一致）
+        // INSERT / BulkInsert targets are all columns minus store-generated columns (identical to all columns when there are none)
         var insertProperties =
             storeGeneratedColumns.Count == 0
                 ? columns
@@ -5951,10 +5981,10 @@ internal sealed class EntitySaveMetadata
             AllProperties = columns,
             SelectProperties = selectProperties,
             ExcludedProperties = excludedColumns,
-            // 行マッピングの列名解決をビルド時に確定させ、行ごとの [Column] リフレクションを排除する
+            // Resolve column names for row mapping at build time to eliminate per-row [Column] reflection
             SelectColumns = selectProperties.Select(property => (property, GetColumnName(property))).ToList(),
             ColumnNameByProperty = columns.ToDictionary(property => property, GetColumnName),
-            // SelectColumns（固定 SELECT 集合）用の式木マテリアライザを型ごとに 1 度だけコンパイルする
+            // Compile the expression-tree materializer for SelectColumns (the fixed SELECT set) once per type
             SelectMaterializer = BuildSelectMaterializer(entityType, selectProperties),
             InsertProperties = insertProperties,
             NonKeyProperties = nonKeyProperties,
@@ -5976,46 +6006,47 @@ internal sealed class EntitySaveMetadata
         };
     }
 
-    // ===== 行マテリアライザ（式木コンパイル・ホットパスのリフレクション除去） =====
-    /// <summary>ボクシングを避ける型特化リーダーアクセサ（<c>GetInt32</c> 等）。fast 対象の CLR 型のみ登録する</summary>
+    // ===== Row materializer (expression-tree compiled; removes reflection from the hot path) =====
+    /// <summary>Type-specialized reader accessors that avoid boxing (<c>GetInt32</c> etc.). Only the fast-path CLR types are registered.</summary>
     private static readonly IReadOnlyDictionary<Type, MethodInfo> _typedReaders = BuildTypedReaders();
 
-    /// <summary><see cref="DbDataReader.IsDBNull(int)"/> の解決済み <see cref="MethodInfo"/></summary>
+    /// <summary>Resolved <see cref="MethodInfo"/> of <see cref="DbDataReader.IsDBNull(int)"/>.</summary>
     private static readonly MethodInfo _isDbNullMethod = typeof(DbDataReader).GetMethod(
         nameof(DbDataReader.IsDBNull),
         new[] { typeof(int) }
     )!;
 
-    /// <summary><see cref="DbDataReader.GetValue(int)"/> の解決済み <see cref="MethodInfo"/>（型特化できない列のフォールバックで使う）</summary>
+    /// <summary>Resolved <see cref="MethodInfo"/> of <see cref="DbDataReader.GetValue(int)"/> (used as the fallback for columns that cannot be type-specialized).</summary>
     private static readonly MethodInfo _getValueMethod = typeof(DbDataReader).GetMethod(
         nameof(DbDataReader.GetValue),
         new[] { typeof(int) }
     )!;
 
-    /// <summary><see cref="SetColumnValue"/> の解決済み <see cref="MethodInfo"/>（型特化できない列のフォールバックで呼ぶ）</summary>
+    /// <summary>Resolved <see cref="MethodInfo"/> of <see cref="SetColumnValue"/> (called as the fallback for columns that cannot be type-specialized).</summary>
     private static readonly MethodInfo _setColumnValueMethod = typeof(EntitySaveMetadata).GetMethod(
         nameof(SetColumnValue),
         BindingFlags.NonPublic | BindingFlags.Static
     )!;
 
-    /// <summary><see cref="EntityBase.RowState"/> の解決済み <see cref="PropertyInfo"/></summary>
+    /// <summary>Resolved <see cref="PropertyInfo"/> of <see cref="EntityBase.RowState"/>.</summary>
     private static readonly PropertyInfo _rowStateProperty = typeof(EntityBase).GetProperty(
         nameof(EntityBase.RowState)
     )!;
 
-    /// <summary>SelectColumns（固定 SELECT 集合）1 行分を式木コンパイル済みでマテリアライズするデリゲート（型ごとに 1 度構築しキャッシュ）</summary>
-    /// <remarks>引数は <c>(reader, ordinals)</c>。<c>ordinals</c> は SelectColumns と同順の列 ordinal で、行ループの前に 1 度だけ解決する。</remarks>
+    /// <summary>Gets the expression-tree-compiled delegate that materializes one row of SelectColumns (the fixed SELECT set) (built once per type and cached).</summary>
+    /// <remarks>The arguments are <c>(reader, ordinals)</c>. <c>ordinals</c> holds the column ordinals in SelectColumns order, resolved once before the row loop.</remarks>
     public required Func<DbDataReader, int[], EntityBase> SelectMaterializer { get; init; }
 
-    /// <summary>型特化リーダーアクセサ表を構築する（各値は <c>int</c> を取り対応 CLR 型を返す <see cref="DbDataReader"/> のメソッド）</summary>
+    /// <summary>Builds the type-specialized reader accessor table (each value is a <see cref="DbDataReader"/> method taking an <c>int</c> and returning the corresponding CLR type).</summary>
     private static IReadOnlyDictionary<Type, MethodInfo> BuildTypedReaders()
     {
         static MethodInfo Getter(string name) =>
             typeof(DbDataReader).GetMethod(name, new[] { typeof(int) })!;
 
-        // 生成 SELECT が返す宣言列型に対応する型特化アクセサ。SQLite は各 GetXxx が格納型寄せ（long→int・TEXT→DateTime 等）を
-        // 行い CoerceScalar と同値、SQL Server は列の CLR 型を素直に返し従来の素通しと同値。ここに無い型（byte[]・enum・
-        // DateTimeOffset・TimeSpan 等）はフォールバックで従来どおり変換する。
+        // Type-specialized accessors for the declared column types the generated SELECT returns. On SQLite each GetXxx
+        // coerces the storage type (long to int, TEXT to DateTime, etc.), equivalent to CoerceScalar; on SQL Server each
+        // returns the column's CLR type directly, equivalent to the previous pass-through. Types not listed here
+        // (byte[], enums, DateTimeOffset, TimeSpan, etc.) are converted via the fallback as before.
         return new Dictionary<Type, MethodInfo>
         {
             [typeof(bool)] = Getter(nameof(DbDataReader.GetBoolean)),
@@ -6033,13 +6064,14 @@ internal sealed class EntitySaveMetadata
     }
 
     /// <summary>
-    /// SelectColumns（固定 SELECT 集合）の 1 行を、事前解決した ordinal 配列を用いてエンティティへマテリアライズする
-    /// 式木コンパイル済みデリゲートを構築する（型ごとに 1 度）。
+    /// Builds the expression-tree-compiled delegate that materializes one row of SelectColumns (the fixed SELECT set)
+    /// into an entity using a pre-resolved ordinal array (once per type).
     /// </summary>
     /// <remarks>
-    /// 型特化アクセサを持つ列はボクシングなしで直接読み（<c>DBNull</c> は既定値＝従来の <c>SetValue(null)</c> と同値）、
-    /// それ以外の列は従来の <see cref="SetColumnValue"/>（方言別変換／値オブジェクト包み直し）へフォールバックする。
-    /// 生成される最終状態（<c>RowState = Unchanged</c>）は従来の行マッピングと一致する。
+    /// Columns with a type-specialized accessor are read directly without boxing (<c>DBNull</c> becomes the default value,
+    /// equivalent to the previous <c>SetValue(null)</c>); all other columns fall back to the previous
+    /// <see cref="SetColumnValue"/> (dialect-specific conversion / value object re-wrapping).
+    /// The resulting final state (<c>RowState = Unchanged</c>) matches the previous row mapping.
     /// </remarks>
     private static Func<DbDataReader, int[], EntityBase> BuildSelectMaterializer(
         Type entityType,
@@ -6061,7 +6093,7 @@ internal sealed class EntitySaveMetadata
             body.Add(BuildColumnAssign(entityVar, readerParam, ordinal, properties[i]));
         }
 
-        // DB から読み込んだ行は変更なし扱いにする（従来の行マッピングと同じ事後状態）
+        // Rows read from the database are treated as unchanged (same post-state as the previous row mapping)
         body.Add(
             Expression.Assign(
                 Expression.Property(entityVar, _rowStateProperty),
@@ -6076,7 +6108,7 @@ internal sealed class EntitySaveMetadata
             .Compile();
     }
 
-    /// <summary>1 列分の代入式を作る。型特化できる列はボクシングなしで直接読み、それ以外は <see cref="SetColumnValue"/> へフォールバックする</summary>
+    /// <summary>Builds the assignment expression for one column. Type-specializable columns are read directly without boxing; anything else falls back to <see cref="SetColumnValue"/>.</summary>
     private static Expression BuildColumnAssign(
         Expression entityExpr,
         ParameterExpression readerParam,
@@ -6087,7 +6119,8 @@ internal sealed class EntitySaveMetadata
         var propertyType = property.PropertyType;
         var underlying = Nullable.GetUnderlyingType(propertyType) ?? propertyType;
 
-        // 型特化アクセサがある列はボクシングなしで直接読む（DBNull は既定値へ＝従来の SetValue(null) と同値）
+        // Columns with a type-specialized accessor are read directly without boxing
+        // (DBNull becomes the default value, equivalent to the previous SetValue(null))
         if (_typedReaders.TryGetValue(underlying, out var getter))
         {
             Expression read = Expression.Call(readerParam, getter, ordinal);
@@ -6105,7 +6138,7 @@ internal sealed class EntitySaveMetadata
             return Expression.Assign(Expression.Property(entityExpr, property), value);
         }
 
-        // フォールバック: 従来の SetColumnValue（DBNull→null／方言別変換／値オブジェクト包み直し）を ordinal 経由で呼ぶ
+        // Fallback: call the previous SetColumnValue (DBNull to null / dialect-specific conversion / value object re-wrapping) via the ordinal
         return Expression.Call(
             _setColumnValueMethod,
             Expression.Convert(entityExpr, typeof(EntityBase)),
@@ -6114,7 +6147,7 @@ internal sealed class EntitySaveMetadata
         );
     }
 
-    /// <summary>SelectColumns の各列名を、このリーダー上の ordinal へ 1 度だけ解決する（行ループの前に呼ぶ）</summary>
+    /// <summary>Resolves each SelectColumns column name to its ordinal on this reader once (call before the row loop).</summary>
     public int[] SelectOrdinals(DbDataReader reader)
     {
         var ordinals = new int[SelectColumns.Count];
@@ -6127,39 +6160,42 @@ internal sealed class EntitySaveMetadata
         return ordinals;
     }
 
-    /// <summary>データリーダーの 1 行をエンティティへマッピングする（ordinal 事前解決版・ホットループ用）</summary>
+    /// <summary>Maps one data reader row to an entity (pre-resolved ordinal variant, for hot loops).</summary>
     public TEntity MapEntity<TEntity>(
         SqlDataReader reader,
         int[] ordinals
     )
         where TEntity : EntityBase => (TEntity)SelectMaterializer(reader, ordinals);
 
-    /// <summary>データリーダーの 1 行をエンティティへマッピングする（SelectColumns の ordinal を都度解決する単一行版）</summary>
+    /// <summary>Maps one data reader row to an entity (single-row variant that resolves the SelectColumns ordinals on each call).</summary>
     public TEntity MapEntity<TEntity>(SqlDataReader reader)
         where TEntity : EntityBase, new() => (TEntity)SelectMaterializer(reader, SelectOrdinals(reader));
 
     /// <summary>
-    /// 生 SQL 用の厳密な行マッピング（列集合・列型が可変のため型特化せず、従来の寛容な <see cref="SetColumnValue"/> を使う）。
+    /// Strict row mapping for raw SQL (the column set and column types are variable, so no type specialization;
+    /// uses the previous lenient <see cref="SetColumnValue"/>).
     /// </summary>
     private TEntity MapEntityStrict<TEntity>(SqlDataReader reader)
         where TEntity : EntityBase, new()
     {
         var entity = new TEntity();
 
-        // 無制限バイナリ列は既定で SELECT 除外のため SelectColumns（＝SelectProperties の確定済み対応）のみをマップする
+        // Unbounded binary columns are excluded from SELECT by default, so only SelectColumns
+        // (the pre-resolved pairs of SelectProperties) are mapped
         foreach (var (property, columnName) in SelectColumns)
         {
             SetColumnValue(entity, property, reader[columnName]);
         }
 
-        // DB から読み込んだ行は変更なし扱いにする（その後の編集で Updated に遷移）
+        // Rows read from the database are treated as unchanged (later edits transition them to Updated)
         entity.RowState = RowState.Unchanged;
         return entity;
     }
 
     /// <summary>
-    /// 読み取った列値を対象プロパティへ設定する（行マッピングの共通処理）。<c>DBNull</c> は <c>null</c> を代入し、
-    /// それ以外は値オブジェクトの包み直し／SQLite の格納型寄せ／SQL Server の素通しを方言に応じて行う。
+    /// Sets a column value read from the reader onto the target property (the shared row-mapping step). <c>DBNull</c>
+    /// assigns <c>null</c>; otherwise the value is re-wrapped for value objects, coerced from the SQLite storage type,
+    /// or passed through for SQL Server, depending on the dialect.
     /// </summary>
     private static void SetColumnValue(EntityBase entity, PropertyInfo property, object value)
     {
@@ -6169,17 +6205,18 @@ internal sealed class EntitySaveMetadata
         }
         else
         {
-            // SQL Server の ADO は列に対応する厳密な CLR 型を返すため素通しで代入する
+            // SQL Server ADO returns the exact CLR type for the column, so assign it as-is
             property.SetValue(entity, value);
         }
     }
 
     /// <summary>
-    /// 生 SQL の結果行を {TEntity} へマップする。<see cref="MapEntityStrict"/> と同じ厳密マッピング（SELECT 対象列は必須）だが、
-    /// 列不足（部分 SELECT）で列が引けなかった場合は、必要な列を含む <see cref="InvalidOperationException"/> でラップして
-    /// 分かりやすくする。未知の列参照で投げられる例外はデータリーダーの実装で異なる
-    /// （<see cref="IndexOutOfRangeException"/> と <see cref="ArgumentOutOfRangeException"/>）ため両方を捕捉する。
-    /// 無制限バイナリ列は既定では取得しないが、生 SQL の SELECT に明示的に含まれていれば追加でマップする（ユーザーが意図して選んだ場合に取得できる）。
+    /// Maps a raw SQL result row to {TEntity}. Same strict mapping as <see cref="MapEntityStrict"/> (the SELECT columns are
+    /// required), but when a column cannot be found (a partial SELECT), the error is wrapped in an
+    /// <see cref="InvalidOperationException"/> that lists the required columns for clarity. The exception thrown for an
+    /// unknown column reference differs by data reader implementation (<see cref="IndexOutOfRangeException"/> vs
+    /// <see cref="ArgumentOutOfRangeException"/>), so both are caught.
+    /// Unbounded binary columns are not fetched by default, but if the raw SQL SELECT explicitly includes them they are mapped additionally (so a user who deliberately selected them gets the values).
     /// </summary>
     public TEntity MapEntityFromRawSql<TEntity>(SqlDataReader reader)
         where TEntity : EntityBase, new()
@@ -6193,13 +6230,13 @@ internal sealed class EntitySaveMetadata
         catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentOutOfRangeException)
         {
             throw new InvalidOperationException(
-                $"生 SQL の SELECT には {typeof(TEntity).Name} の列（{ColumnList}）が必要です（SELECT * または全列指定）。"
-                    + $"結果セットに不足している列があります: {ex.Message}",
+                $"The raw SQL SELECT must include the {typeof(TEntity).Name} columns ({ColumnList}); use SELECT * or list all columns. "
+                    + $"The result set is missing a column: {ex.Message}",
                 ex
             );
         }
 
-        // 除外列（無制限バイナリ）が生 SQL の結果に含まれていれば opportunistic に取り込む
+        // If excluded columns (unbounded binary) are present in the raw SQL result, take them opportunistically
         if (ExcludedProperties.Count > 0)
         {
             var present = RawReaderColumnNames(reader);
@@ -6216,14 +6253,15 @@ internal sealed class EntitySaveMetadata
                 SetColumnValue(entity, property, reader[columnName]);
             }
 
-            // opportunistic な代入で状態が動かないよう変更なしを再確定する（列プロパティは素の auto-property だが念のため）
+            // Re-finalize as unchanged so the opportunistic assignments do not shift state
+            // (the column properties are plain auto-properties, but just in case)
             entity.RowState = RowState.Unchanged;
         }
 
         return entity;
     }
 
-    /// <summary>データリーダーの列名集合を大文字小文字無視で 1 度だけ列挙する（生 SQL の除外列有無判定に使う）</summary>
+    /// <summary>Enumerates the data reader's column name set once, case-insensitively (used to detect excluded columns in raw SQL results).</summary>
     private static HashSet<string> RawReaderColumnNames(SqlDataReader reader)
     {
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -6237,15 +6275,16 @@ internal sealed class EntitySaveMetadata
     }
 
     /// <summary>
-    /// 射影セレクタが参照する列プロパティ名集合を、SELECT すべき列プロパティ（<see cref="PropertyInfo"/>）へ解決する。
-    /// 参照がすべて列プロパティ（無制限バイナリ列を含む）なら順序どおりの一覧を返し、1 つでもナビゲーション等の
-    /// 非列名が混じる、あるいは参照が 0 件なら <c>null</c>（＝サーバー側列刈り込み不可・従来経路へフォールバック）を返す。
+    /// Resolves the set of column property names referenced by a projection selector into the column properties
+    /// (<see cref="PropertyInfo"/>) to SELECT. When every reference is a column property (including unbounded binary
+    /// columns), returns the list in order; when even one non-column name (a navigation etc.) is present, or when there
+    /// are zero references, returns <c>null</c> (= server-side column pruning is not possible; fall back to the previous path).
     /// </summary>
     public IReadOnlyList<PropertyInfo>? ResolveProjectionColumns(
         IReadOnlyCollection<string> propertyNames
     )
     {
-        // 参照列が 0 件だと SELECT する列が無くフォールバックが必要（例: 定数のみの射影）
+        // With zero referenced columns there is nothing to SELECT, so a fallback is required (e.g. a constants-only projection)
         if (propertyNames.Count == 0)
         {
             return null;
@@ -6255,12 +6294,13 @@ internal sealed class EntitySaveMetadata
 
         foreach (var name in propertyNames)
         {
-            // 全列（AllProperties）から名前一致で引く（除外＝無制限バイナリ列も射影が参照していれば取得対象にする）
+            // Look up by name in the full column set (AllProperties); excluded (unbounded binary) columns
+            // are also fetched when the projection references them
             var property = AllProperties.FirstOrDefault(candidate => candidate.Name == name);
 
             if (property is null)
             {
-                // 列でない（ナビゲーション等）が混じった＝安全に刈り込めない
+                // A non-column (navigation etc.) is present = cannot prune safely
                 return null;
             }
 
@@ -6270,31 +6310,31 @@ internal sealed class EntitySaveMetadata
         return resolved;
     }
 
-    /// <summary>指定した列プロパティ群を、角括弧付きカラム名の "," 連結（例: [id], [name]）にした SELECT 列リストを返す（射影刈り込み用）</summary>
+    /// <summary>Returns a SELECT column list joining the specified column properties as quoted column names with "," (for example: [id], [name]) (for projection pruning).</summary>
     public string BuildColumnList(IReadOnlyList<PropertyInfo> properties) =>
         string.Join(
             ", ",
             properties.Select(property => $"[{GetColumnName(property)}]")
         );
 
-    /// <summary>列プロパティごとの「reader+ordinal → エンティティへ設定」子（式木コンパイル済み・プロパティ単位でキャッシュ）</summary>
+    /// <summary>Per-column-property "reader+ordinal, set onto entity" binders (expression-tree compiled, cached per property).</summary>
     private static readonly ConcurrentDictionary<
         PropertyInfo,
         Action<EntityBase, DbDataReader, int>
     > _columnBinderCache = new();
 
-    /// <summary>1 列分の型特化バインダを取得する（射影・全列取得の可変列集合を行ごとにリフレクションせず束縛するため）</summary>
+    /// <summary>Gets the type-specialized binder for one column (so the variable column sets of projections and full-column fetches bind without per-row reflection).</summary>
     private static Action<EntityBase, DbDataReader, int> ColumnBinder(PropertyInfo property) =>
         _columnBinderCache.GetOrAdd(property, BuildColumnBinder);
 
-    /// <summary>1 列分の式木（<see cref="BuildColumnAssign"/>）を <c>Action&lt;EntityBase, DbDataReader, int&gt;</c> へコンパイルする</summary>
+    /// <summary>Compiles the single-column expression tree (<see cref="BuildColumnAssign"/>) into an <c>Action&lt;EntityBase, DbDataReader, int&gt;</c>.</summary>
     private static Action<EntityBase, DbDataReader, int> BuildColumnBinder(PropertyInfo property)
     {
         var entityParam = Expression.Parameter(typeof(EntityBase), "entity");
         var readerParam = Expression.Parameter(typeof(DbDataReader), "reader");
         var ordinalParam = Expression.Parameter(typeof(int), "ordinal");
 
-        // プロパティは派生エンティティ型で宣言されるため、EntityBase をその宣言型へ落としてからアクセスする
+        // Properties are declared on the derived entity type, so downcast EntityBase to the declaring type before accessing
         var assign = BuildColumnAssign(
             Expression.Convert(entityParam, property.DeclaringType!),
             readerParam,
@@ -6312,7 +6352,7 @@ internal sealed class EntitySaveMetadata
             .Compile();
     }
 
-    /// <summary>指定した列プロパティ群の列名を、このリーダー上の ordinal へ 1 度だけ解決する（射影・全列取得の行ループの前に呼ぶ）</summary>
+    /// <summary>Resolves the column names of the specified column properties to their ordinals on this reader once (call before the row loop of projections and full-column fetches).</summary>
     public int[] ColumnOrdinals(DbDataReader reader, IReadOnlyList<PropertyInfo> properties)
     {
         var ordinals = new int[properties.Count];
@@ -6326,11 +6366,13 @@ internal sealed class EntitySaveMetadata
     }
 
     /// <summary>
-    /// データリーダーの 1 行を、指定した列プロパティのみマッピングした {TEntity} を返す（射影のサーバー側列刈り込み・WithUnboundedBinary の全列取得で共用）。
-    /// SELECT に含めた列だけを束縛し、それ以外の列は既定値のまま。射影用途（<paramref name="markUnchanged"/> = false・既定）は
-    /// セレクタ適用後に捨てるため RowState を設定しないが、WithUnboundedBinary の全列取得（<paramref name="markUnchanged"/> = true）は
-    /// 通常取得と同等の正当なエンティティを返すため RowState=Unchanged を確定する。<paramref name="ordinals"/> は
-    /// <see cref="ColumnOrdinals"/> で行ループ前に 1 度だけ解決した、<paramref name="properties"/> と同順の列 ordinal。
+    /// Returns a {TEntity} with only the specified column properties mapped from one data reader row (shared by
+    /// server-side column pruning for projections and the full-column fetch of WithUnboundedBinary).
+    /// Only the columns included in the SELECT are bound; all other columns keep their default values. Projection use
+    /// (<paramref name="markUnchanged"/> = false, the default) does not set RowState because the entity is discarded after
+    /// the selector is applied, whereas the full-column fetch of WithUnboundedBinary (<paramref name="markUnchanged"/> = true)
+    /// finalizes RowState=Unchanged because it returns a legitimate entity equivalent to a normal fetch. <paramref name="ordinals"/>
+    /// holds the column ordinals in <paramref name="properties"/> order, resolved once before the row loop via <see cref="ColumnOrdinals"/>.
     /// </summary>
     public TEntity MapEntityColumns<TEntity>(
         SqlDataReader reader,
@@ -6340,7 +6382,7 @@ internal sealed class EntitySaveMetadata
     )
         where TEntity : EntityBase
     {
-        // クエリ実行器の TEntity は new() 制約を持たないため Activator で生成する（エンティティは必ず引数なしコンストラクタを持つ）
+        // The query executor's TEntity has no new() constraint, so create via Activator (entities always have a parameterless constructor)
         var entity = (TEntity)Activator.CreateInstance(typeof(TEntity))!;
 
         for (var i = 0; i < properties.Count; i++)
@@ -6350,14 +6392,14 @@ internal sealed class EntitySaveMetadata
 
         if (markUnchanged)
         {
-            // 全列を束縛した「正当なエンティティ」として返す場合は、DB 読み込み行として変更なしを確定する
+            // When returning a "legitimate entity" with all columns bound, finalize it as unchanged, like any row read from the database
             entity.RowState = RowState.Unchanged;
         }
 
         return entity;
     }
 
-    /// <summary>INSERT 用パラメータ（store-generated 列を除く挿入対象カラム）を設定する（追加・グラフ挿入で共用）</summary>
+    /// <summary>Binds the INSERT parameters (the insert-target columns excluding store-generated columns) (shared by insert and graph insert).</summary>
     public void BindInsertParameters(SqlCommand command, EntityBase entity)
     {
         foreach (var property in InsertProperties)
@@ -6371,11 +6413,12 @@ internal sealed class EntitySaveMetadata
         }
     }
 
-    /// <summary>UPDATE 用パラメータ（非キー列＋主キー）を設定する（更新・グラフ更新で共用）</summary>
+    /// <summary>Binds the UPDATE parameters (non-key columns plus the primary key) (shared by update and graph update).</summary>
     public void BindUpdateParameters(SqlCommand command, EntityBase entity)
     {
-        // 無制限バイナリ列（UPDATE 対象外）に値が残ったままの更新はサイレントに失われるため事前に弾く。
-        // 直接 UpdateAsync とグラフのカスケード更新はどちらもここを通るため 1 箇所で被覆できる
+        // Updates that still carry values in unbounded binary columns (excluded from UPDATE) would lose them silently,
+        // so reject them up front. Both direct UpdateAsync and cascading graph updates pass through here,
+        // so this single spot covers both
         UnboundedBinaryColumns.ThrowIfExcludedAssigned(entity);
 
         foreach (var property in NonKeyProperties)
@@ -6396,7 +6439,7 @@ internal sealed class EntitySaveMetadata
         );
     }
 
-    /// <summary>エンティティの主キー値を @id パラメータへ設定する（グラフ削除で使用）</summary>
+    /// <summary>Binds the entity's primary key value to the @id parameter (used by graph delete).</summary>
     public void BindEntityKeyParameter(SqlCommand command, EntityBase entity)
     {
         AddColumnParameter(
@@ -6407,27 +6450,28 @@ internal sealed class EntitySaveMetadata
         );
     }
 
-    /// <summary>外部から渡された主キー値を @id パラメータへ設定する（GetById/Delete で使用）</summary>
+    /// <summary>Binds an externally supplied primary key value to the @id parameter (used by GetById/Delete).</summary>
     public void BindKeyParameter(SqlCommand command, object? id)
     {
         var value =
             id
-            ?? throw new InvalidOperationException("id は null にできません。");
+            ?? throw new InvalidOperationException("id cannot be null.");
         AddColumnParameter(command, "@id", KeyProperty, value);
     }
 
-    /// <summary>プロパティ単位の [SqlColumnType] 属性を 1 度だけ解決してキャッシュする（属性なしは null）</summary>
+    /// <summary>Resolves the per-property [SqlColumnType] attribute once and caches it (null when absent).</summary>
     private static readonly ConcurrentDictionary<PropertyInfo, SqlColumnTypeAttribute?> _columnTypeCache =
         new();
 
     /// <summary>
-    /// 列プロパティの [SqlColumnType] 属性から明示 <see cref="SqlParameter"/> を組み立てて追加する。
-    /// 属性が無い（手書きエンティティ・未知型）場合は従来どおり AddWithValue にフォールバックする。
+    /// Builds and adds an explicitly typed <see cref="SqlParameter"/> from the column property's
+    /// [SqlColumnType] attribute. When the attribute is absent (hand-written entities, unknown types), falls back to
+    /// AddWithValue as before.
     /// </summary>
-    /// <param name="command">パラメータを追加する対象コマンド</param>
-    /// <param name="name">パラメータ名（@付き）</param>
-    /// <param name="property">対象列に対応するプロパティ（型付けの根拠）</param>
-    /// <param name="rawValue">値オブジェクトは既に素値へ開いた後の値。null は DBNull.Value として束縛する</param>
+    /// <param name="command">The command to add the parameter to</param>
+    /// <param name="name">The parameter name (with the @ prefix)</param>
+    /// <param name="property">The property corresponding to the target column (the basis for typing)</param>
+    /// <param name="rawValue">The value after value objects have already been unwrapped to their raw value; null is bound as DBNull.Value</param>
     private static void AddColumnParameter(
         SqlCommand command,
         string name,
@@ -6446,10 +6490,11 @@ internal sealed class EntitySaveMetadata
         }
 
         var parameter = new SqlParameter(name, attribute.DbType);
-        // 文字列/バイナリの Size 安全ガード: 宣言長が正で「値の長さ ≤ 宣言長」なら宣言長を、値が宣言長を
-        // 超える場合は値の長さを Size にする（ADO.NET は Size で入力値をクライアント側切り詰めするため、
-        // 固定 Size だとサーバー切り詰めエラーの代わりにサイレントなデータ破損が起きる。超過時はそのまま
-        // 送ってサーバー側エラーを温存する）。(max)=-1 は常に -1。
+        // String/binary Size safety guard: when the declared length is positive and the value length is within it,
+        // use the declared length; when the value exceeds the declared length, use the value length as Size
+        // (ADO.NET truncates input values client-side by Size, so a fixed Size would cause silent data corruption
+        // instead of a server-side truncation error; sending the oversized value as-is preserves the server-side error).
+        // (max) = -1 always stays -1.
         if (attribute.Size == -1)
         {
             parameter.Size = -1;
@@ -6476,13 +6521,13 @@ internal sealed class EntitySaveMetadata
     }
 
     /// <summary>
-    /// クエリ WHERE 句パラメータを束縛する。列名が判明していてその列プロパティが見つかれば列型で明示構築し、
-    /// なければ AddWithValue にフォールバックする。
+    /// Binds a query WHERE-clause parameter. When the column name is known and its column property is found, the
+    /// parameter is explicitly constructed with the column type; otherwise falls back to AddWithValue.
     /// </summary>
-    /// <param name="command">パラメータを追加する対象コマンド</param>
-    /// <param name="name">パラメータ名（@付き）</param>
-    /// <param name="columnName">角括弧なしのカラム名。列が特定できない場合は null</param>
-    /// <param name="rawValue">値オブジェクトは既に素値へ開いた後の値。null は DBNull.Value として束縛する</param>
+    /// <param name="command">The command to add the parameter to</param>
+    /// <param name="name">The parameter name (with the @ prefix)</param>
+    /// <param name="columnName">The unquoted column name; null when the column cannot be determined</param>
+    /// <param name="rawValue">The value after value objects have already been unwrapped to their raw value; null is bound as DBNull.Value</param>
     public void AddQueryParameter(
         SqlCommand command,
         string name,
@@ -6499,12 +6544,12 @@ internal sealed class EntitySaveMetadata
         command.Parameters.AddWithValue(name, rawValue ?? DBNull.Value);
     }
 
-    /// <summary>エンティティのコレクションを 1 行ずつ読み出す SqlBulkCopy 用の IDataReader を生成する（store-generated 列は挿入対象外）</summary>
+    /// <summary>Creates an IDataReader for SqlBulkCopy that reads an entity collection one row at a time (store-generated columns are excluded from insertion).</summary>
     public IDataReader CreateDataReader(IEnumerable<EntityBase> entities) =>
         new EntityDataReader(InsertProperties, entities);
 
-    /// <summary>エンティティ列を 1 行ずつ読み出して SqlBulkCopy へ流す IDataReader（DataTable を介さずメモリ効率を高める）</summary>
-    /// <remarks>SqlBulkCopy は Read・GetValue・FieldCount・GetName・GetOrdinal のみ使用するため、それ以外の型付き取得は未対応とする</remarks>
+    /// <summary>An IDataReader that reads entity columns one row at a time and feeds them to SqlBulkCopy (memory-efficient, no intermediate DataTable).</summary>
+    /// <remarks>SqlBulkCopy uses only Read, GetValue, FieldCount, GetName, and GetOrdinal, so the other typed getters are left unsupported.</remarks>
     private sealed class EntityDataReader : IDataReader
     {
         private readonly IReadOnlyList<PropertyInfo> _properties;
@@ -6535,10 +6580,10 @@ internal sealed class EntitySaveMetadata
             var index = Array.IndexOf(_columnNames, name);
             return index >= 0
                 ? index
-                : throw new IndexOutOfRangeException($"列 {name} は存在しません。");
+                : throw new IndexOutOfRangeException($"Column {name} does not exist.");
         }
 
-        // Nullable<T> は基底型を返す（SqlBulkCopy の列型解決と整合させる）
+        // Nullable<T> returns the underlying type (to align with SqlBulkCopy's column type resolution)
         public Type GetFieldType(int i) =>
             Nullable.GetUnderlyingType(_properties[i].PropertyType) ?? _properties[i].PropertyType;
 
@@ -6573,7 +6618,7 @@ internal sealed class EntitySaveMetadata
 
         public DataTable? GetSchemaTable() => null;
 
-        // 以降は SqlBulkCopy では呼ばれないため未対応とする
+        // The members below are never called by SqlBulkCopy, so they are left unsupported
         public bool GetBoolean(int i) => throw new NotSupportedException();
 
         public byte GetByte(int i) => throw new NotSupportedException();
@@ -6622,28 +6667,28 @@ internal sealed class EntitySaveMetadata
     private static string GetColumnName(PropertyInfo property) =>
         property.GetCustomAttribute<ColumnAttribute>()?.Name ?? property.Name;
 
-    /// <summary>C# プロパティ名から対応する列プロパティを引く（無制限バイナリ列＝除外列を含む全列から探す）。Stream アクセサが Repository / インメモリ双方で使う</summary>
+    /// <summary>Looks up the column property for a C# property name (searched across all columns, including unbounded binary = excluded columns). Used by the Stream accessors in both the repository and the in-memory implementation.</summary>
     public PropertyInfo ColumnByPropertyName(string propertyName) =>
         AllProperties.FirstOrDefault(property => property.Name == propertyName)
         ?? throw new InvalidOperationException(
-            $"プロパティ {propertyName} は列として見つかりませんでした。"
+            $"Property {propertyName} was not found as a column."
         );
 
-    /// <summary>指定した列プロパティのクォート付きカラム名（例: [payload]）を返す（Stream アクセサの SQL 組み立て用）</summary>
+    /// <summary>Returns the quoted column name of the specified column property (for example: [payload]) (for building SQL in the Stream accessors).</summary>
     public string QuotedColumnName(PropertyInfo property) =>
         $"[{GetColumnName(property)}]";
 
-    /// <summary>指定した列プロパティのクォートなし生カラム名を返す（SqliteBlob 等が要求する）</summary>
+    /// <summary>Returns the raw, unquoted column name of the specified column property (required by SqliteBlob and friends).</summary>
     public string RawColumnName(PropertyInfo property) => GetColumnName(property);
 }
 
-/// <summary>カスケード削除の DELETE 文群を FK メタデータから組み立てるプランナー（DB 非依存・純粋）</summary>
+/// <summary>Planner that builds the cascade-delete DELETE statements from FK metadata (database-independent, pure).</summary>
 internal static class CascadeDeletePlanner
 {
-    /// <summary>条件に一致する rootType の行と、その子孫を削除する DELETE 文を「子→親」の実行順で返す</summary>
-    /// <param name="rootType">削除の起点となるエンティティ型</param>
-    /// <param name="rootTable">角括弧付きのルートテーブル名</param>
-    /// <param name="whereClause">ルートの WHERE 句（" WHERE …" または空文字）</param>
+    /// <summary>Returns the DELETE statements that remove the rootType rows matching the condition and their descendants, in child-to-parent execution order.</summary>
+    /// <param name="rootType">The entity type at which the delete starts</param>
+    /// <param name="rootTable">The quoted root table name</param>
+    /// <param name="whereClause">The root WHERE clause (" WHERE ..." or an empty string)</param>
     public static IReadOnlyList<string> BuildDeleteStatements(
         Type rootType,
         string rootTable,
@@ -6672,11 +6717,11 @@ internal static class CascadeDeletePlanner
     {
         foreach (var navigation in EntitySaveMetadata.For(parentType).CascadeNavigations)
         {
-            // 循環するカスケード（自己参照等）は固定ネストでは表現できないため未対応とする
+            // Cyclic cascades (self-references etc.) cannot be expressed with fixed nesting, so they are unsupported
             if (!visited.Add(navigation.ChildType))
             {
                 throw new NotSupportedException(
-                    $"循環するカスケード（{navigation.ChildType.Name}）は ExecuteDeleteAsync では未対応です。グラフをロードして SaveAsync を使うか、DB の ON DELETE CASCADE を利用してください。"
+                    $"Cyclic cascades ({navigation.ChildType.Name}) are not supported by ExecuteDeleteAsync. Load the graph and use SaveAsync, or use ON DELETE CASCADE in the database."
                 );
             }
 
@@ -6684,7 +6729,7 @@ internal static class CascadeDeletePlanner
             var childScopeWhere =
                 $" WHERE [{navigation.DependentColumn}] IN (SELECT [{navigation.PrincipalColumn}] FROM {parentTable}{parentScopeWhere})";
 
-            // 先に孫以下を削除してから子を削除する（FK 整合）
+            // Delete grandchildren and below first, then the children (FK consistency)
             AppendDescendantDeletes(
                 navigation.ChildType,
                 childTable,
@@ -6699,10 +6744,11 @@ internal static class CascadeDeletePlanner
     }
 }
 
-/// <summary>1 回の Save 呼び出しの間だけ生きる Save フックのセッション（レジストリ・context ファクトリ・スキップ集合を持ち回る）</summary>
+/// <summary>A save hook session that lives only for the duration of a single Save call (carries the registry, context factory, and skip set).</summary>
 /// <remarks>
-/// context ファクトリはバックエンド（QuickER 方言・EF Core・InMemory）が進行中のトランザクション文脈を閉じ込めて渡す。
-/// スキップ集合は参照等価（<see cref="ReferenceEqualityComparer"/>）で追跡し、コミット後の <c>AcceptChanges</c> で状態据え置きに使う。
+/// The context factory is supplied by the backend (QuickER dialect, EF Core, InMemory) with the in-progress transaction
+/// context captured inside. The skip set is tracked by reference equality (<see cref="ReferenceEqualityComparer"/>) and
+/// used by the post-commit <c>AcceptChanges</c> to leave states untouched.
 /// </remarks>
 internal sealed class SaveHookSession(
     ISaveHookRegistry registry,
@@ -6713,13 +6759,13 @@ internal sealed class SaveHookSession(
     private readonly Func<EntityBase, ISaveHookContext> _contextFactory = contextFactory;
     private readonly HashSet<EntityBase> _skipped = new(ReferenceEqualityComparer.Instance);
 
-    /// <summary>Before で <c>false</c>（スキップ）されたエンティティ集合（参照等価）。AcceptChanges の状態据え置きに使う</summary>
+    /// <summary>Gets the set of entities skipped by a Before returning <c>false</c> (reference equality). Used by AcceptChanges to leave states untouched.</summary>
     public IReadOnlySet<EntityBase> Skipped => _skipped;
 
-    /// <summary>エンティティをスキップ集合へ追加する</summary>
+    /// <summary>Adds an entity to the skip set.</summary>
     public void Skip(EntityBase entity) => _skipped.Add(entity);
 
-    /// <summary>登録順に Before を呼び最初の <c>false</c> で短絡する（フックが無い型は <c>true</c>）</summary>
+    /// <summary>Calls Before in registration order and short-circuits at the first <c>false</c> (types with no hooks yield <c>true</c>).</summary>
     public Task<bool> InvokeBeforeAsync(
         EntityBase entity,
         SaveOperation operation,
@@ -6732,7 +6778,7 @@ internal sealed class SaveHookSession(
             : invoker.InvokeBeforeAsync(entity, operation, cancellationToken);
     }
 
-    /// <summary>登録順に After を呼ぶ（フックが無い型は何もしない）。context はエンティティ型に束縛して生成する</summary>
+    /// <summary>Calls After in registration order (types with no hooks do nothing). The context is created bound to the entity type.</summary>
     public Task InvokeAfterAsync(
         EntityBase entity,
         SaveOperation operation,
@@ -6751,19 +6797,20 @@ internal sealed class SaveHookSession(
     }
 }
 
-/// <summary>RowState に従ってエンティティのグラフを 1 トランザクションで保存する内部エンジン</summary>
+/// <summary>Internal engine that saves an entity graph in a single transaction according to RowState.</summary>
 internal static class EntityGraphSaver
 {
-    /// <summary>自身、または（cascade 時）子に変更があるか</summary>
+    /// <summary>Returns whether the entity itself, or (when cascading) any child, has changes.</summary>
     public static bool HasChanges(EntityBase entity, bool cascade) =>
         entity.HasChanges
         || (cascade && EnumerateCascadeChildren(entity).Any(child => HasChanges(child, true)));
 
-    /// <summary>グラフを保存し、保存したレコード数を返す（<paramref name="hooks"/> 指定時は各操作の前後で Save フックを発火する）</summary>
+    /// <summary>Saves the graph and returns the number of saved records (when <paramref name="hooks"/> is provided, fires the save hooks before and after each operation).</summary>
     /// <remarks>
-    /// <c>changesAlreadyVerified</c> が <c>true</c>（呼び出し側が <see cref="HasChanges"/> を確認済み＝変更ありと判明済み）の
-    /// ときは、冒頭の重複するグラフ走査（変更判定）を省く。子への再帰では既定 <c>false</c> のまま渡すため、各サブツリーの
-    /// 変更判定（クリーンな枝の枝刈り）は従来どおり行う。
+    /// When <c>changesAlreadyVerified</c> is <c>true</c> (the caller has already checked <see cref="HasChanges"/>, i.e.
+    /// changes are known to exist), the redundant graph traversal (change detection) at the start is skipped. Recursion
+    /// into children passes the default <c>false</c>, so per-subtree change detection (pruning clean branches) is still
+    /// performed as before.
     /// </remarks>
     public static async Task<int> SaveAsync(
         EntityBase entity,
@@ -6786,7 +6833,7 @@ internal static class EntityGraphSaver
 
         if (entity.IsRemoved)
         {
-            // 削除は子（サブツリー）を先に削除してから自身を削除する（FK 整合）
+            // Deletion removes the children (subtree) first, then the entity itself (FK consistency)
             if (cascadeDelete)
             {
                 foreach (var child in EnumerateCascadeChildren(entity))
@@ -6801,7 +6848,7 @@ internal static class EntityGraphSaver
                 }
             }
 
-            // Before(Delete)。false ならこのノードの削除だけをスキップする（子は上で削除済み＝自身は残る）
+            // Before(Delete). On false, only this node's deletion is skipped (the children were deleted above, so this node remains)
             if (
                 hooks is not null
                 && !await hooks.InvokeBeforeAsync(
@@ -6824,7 +6871,7 @@ internal static class EntityGraphSaver
                 cancellationToken
             );
 
-            // After(Delete) は DML の直後（コミット前）に発火する
+            // After(Delete) fires immediately after the DML (before commit)
             if (hooks is not null)
             {
                 await hooks.InvokeAfterAsync(entity, SaveOperation.Delete, cancellationToken);
@@ -6833,7 +6880,7 @@ internal static class EntityGraphSaver
             return rows;
         }
 
-        // 追加・更新は自身を先に保存してから子へ進む（子 FK が親 PK を参照するため）
+        // Inserts and updates save the entity itself first, then proceed to the children (child FKs reference the parent PK)
         if (entity.IsAdded)
         {
             if (
@@ -6857,7 +6904,7 @@ internal static class EntityGraphSaver
             }
             else
             {
-                // Before が false＝この 1 件の挿入だけスキップ（子カスケードは続行する）
+                // Before returned false = only this one insert is skipped (the child cascade continues)
                 hooks.Skip(entity);
             }
         }
@@ -6877,7 +6924,7 @@ internal static class EntityGraphSaver
                 );
                 rows += affected;
 
-                // After は実際に行った操作で発火する（insertWhenUpdateMissing による切替時は Insert）
+                // After fires with the operation actually performed (Insert when switched by insertWhenUpdateMissing)
                 if (hooks is not null)
                 {
                     await hooks.InvokeAfterAsync(entity, performed, cancellationToken);
@@ -6909,13 +6956,13 @@ internal static class EntityGraphSaver
         return rows;
     }
 
-    /// <summary>コミット後に保存済みエンティティを Unchanged に確定する</summary>
+    /// <summary>Finalizes saved entities to Unchanged after commit.</summary>
     public static void AcceptChanges(EntityBase entity, bool cascade) =>
         AcceptChanges(entity, cascade, null);
 
     /// <summary>
-    /// コミット後に保存済みエンティティを Unchanged に確定する。<paramref name="skip"/> に含まれるエンティティ
-    /// （Save フックの Before が <c>false</c> を返してスキップされた行）は操作していないため状態を据え置く。
+    /// Finalizes saved entities to Unchanged after commit. Entities contained in <paramref name="skip"/> (rows skipped
+    /// because a save hook's Before returned <c>false</c>) were not operated on, so their state is left untouched.
     /// </summary>
     public static void AcceptChanges(
         EntityBase entity,
@@ -6928,7 +6975,7 @@ internal static class EntityGraphSaver
             return;
         }
 
-        // スキップされたエンティティは INSERT / UPDATE を行っていないため RowState を据え置く
+        // Skipped entities had no INSERT / UPDATE performed, so their RowState is left untouched
         if (skip is null || !skip.Contains(entity))
         {
             entity.MarkUnchanged();
@@ -6943,7 +6990,7 @@ internal static class EntityGraphSaver
         }
     }
 
-    /// <summary>サブツリーを子から順に削除する（状態に関わらず削除。<paramref name="hooks"/> 指定時は子ごとに Before/After(Delete) を発火）</summary>
+    /// <summary>Deletes the subtree starting from the children (deleted regardless of state; when <paramref name="hooks"/> is provided, fires Before/After(Delete) per child).</summary>
     private static async Task<int> DeleteGraphAsync(
         EntityBase entity,
         SqlConnection connection,
@@ -6959,7 +7006,7 @@ internal static class EntityGraphSaver
             rows += await DeleteGraphAsync(child, connection, transaction, cancellationToken, hooks);
         }
 
-        // Before(Delete) は削除はサブツリーの子から順に発火する。false なら「子は消え自身は残る」（単独スキップの帰結）
+        // Before(Delete) fires from the subtree's children upward. On false, "the children are gone but this node remains" (the consequence of a standalone skip)
         if (
             hooks is not null
             && !await hooks.InvokeBeforeAsync(entity, SaveOperation.Delete, cancellationToken)
@@ -6986,7 +7033,7 @@ internal static class EntityGraphSaver
         return rows;
     }
 
-    /// <summary>更新を実行し、影響行数と実際に行った操作（切替時は Insert）を返す</summary>
+    /// <summary>Executes the update and returns the affected row count and the operation actually performed (Insert when switched).</summary>
     private static async Task<(int Rows, SaveOperation Performed)> UpdateAsync(
         EntityBase entity,
         SqlConnection connection,
@@ -7009,7 +7056,8 @@ internal static class EntityGraphSaver
             return (affected, SaveOperation.Update);
         }
 
-        // 更新対象が存在しない（他ユーザーの削除等）。方針に応じて INSERT へ切替、または競合として通知する
+        // The record to update does not exist (e.g. deleted by another user). Depending on the policy,
+        // switch to INSERT or report it as a conflict
         if (insertWhenUpdateMissing)
         {
             var inserted = await ExecuteAsync(
@@ -7025,7 +7073,7 @@ internal static class EntityGraphSaver
 
         var metadata = EntitySaveMetadata.For(entity.GetType());
         throw new SaveConflictException(
-            $"更新対象のレコードが見つかりませんでした（{entity.GetType().Name}、キー {metadata.KeyProperty.GetValue(entity)}）。他のユーザーに削除された可能性があります。"
+            $"The record to update was not found ({entity.GetType().Name}, key {metadata.KeyProperty.GetValue(entity)}). It may have been deleted by another user."
         );
     }
 
@@ -7045,7 +7093,7 @@ internal static class EntityGraphSaver
         return await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
-    /// <summary>カスケード対象の子エンティティを列挙する（null は除外）</summary>
+    /// <summary>Enumerates the cascade-target child entities (nulls are excluded).</summary>
     private static IEnumerable<EntityBase> EnumerateCascadeChildren(EntityBase entity)
     {
         foreach (var navigation in EntitySaveMetadata.For(entity.GetType()).CascadeNavigations)
@@ -7078,15 +7126,16 @@ internal static class EntityGraphSaver
     }
 }
 
-/// <summary>生成されたリポジトリ群（SQL Server 実装）を DI コンテナへ登録する拡張</summary>
+/// <summary>Extensions that register the generated repositories (SQL Server implementation) with the DI container.</summary>
 /// <remarks>
-/// DI 登録はエンジン別に <c>AddGeneratedSqlServerRepositories</c> という名前で提供し、同一契約
-/// （I{Entity}Repository / ISqlExecutor）を方言別実装で登録する。複数方言（マルチターゲット）を同一プロセスで併用する場合は
-/// <c>object? serviceKey</c> 付きオーバーロード（keyed DI）を使い、<c>[FromKeyedServices("...")]</c> で方言別の接続を解決する。
+/// DI registration is provided per engine under the name <c>AddGeneratedSqlServerRepositories</c>, registering
+/// the same contracts (I{Entity}Repository / ISqlExecutor) with dialect-specific implementations. To use multiple dialects
+/// (multi-targeting) in the same process, use the overloads with <c>object? serviceKey</c> (keyed DI) and resolve the
+/// dialect-specific connection via <c>[FromKeyedServices("...")]</c>.
 /// </remarks>
 public static class GeneratedSqlServerRepositoryServiceCollectionExtensions
 {
-    /// <summary>接続文字列とともに SQL Server 版リポジトリ群を DI コンテナへ登録する（非 keyed・単独利用向け）</summary>
+    /// <summary>Registers the SQL Server repositories with the DI container using a connection string (non-keyed, for standalone use).</summary>
     public static IServiceCollection AddGeneratedSqlServerRepositories(
         this IServiceCollection services,
         string connectionString
@@ -7100,7 +7149,7 @@ public static class GeneratedSqlServerRepositoryServiceCollectionExtensions
         ));
         services.AddSingleton<ISqlExecutor, SqlExecutor>();
 
-        // Save フックのレジストリを既定登録する（ISaveHook<T> の登録が無ければ完全 no-op）
+        // Register the save hook registry by default (a complete no-op when no ISaveHook<T> is registered)
         services.TryAddScoped<ISaveHookRegistry>(provider => new ServiceProviderSaveHookRegistry(
             provider
         ));
@@ -7110,11 +7159,11 @@ public static class GeneratedSqlServerRepositoryServiceCollectionExtensions
         return services;
     }
 
-    /// <summary>サービスキー付きで SQL Server 版リポジトリ群を登録する（keyed DI・複数方言の同時利用向け）</summary>
+    /// <summary>Registers the SQL Server repositories with a service key (keyed DI, for using multiple dialects simultaneously).</summary>
     /// <remarks>
-    /// I{Entity}Repository / ISqlExecutor を <paramref name="serviceKey"/> 付きで登録する。利用側は
-    /// <c>[FromKeyedServices(serviceKey)] ICustomerRepository</c> のように方言別の実装を解決する。
-    /// 接続ファクトリはキーごとにクロージャで閉じ込めるため非 keyed で登録衝突しない。
+    /// Registers I{Entity}Repository / ISqlExecutor keyed by <paramref name="serviceKey"/>. Consumers resolve the
+    /// dialect-specific implementation like <c>[FromKeyedServices(serviceKey)] ICustomerRepository</c>.
+    /// The connection factory is captured per key in a closure, so it causes no non-keyed registration collisions.
     /// </remarks>
     public static IServiceCollection AddGeneratedSqlServerRepositories(
         this IServiceCollection services,
@@ -7132,7 +7181,7 @@ public static class GeneratedSqlServerRepositoryServiceCollectionExtensions
             (_, _) => new SqlExecutor(connectionFactory)
         );
 
-        // Save フックのレジストリを既定登録する（非 keyed・ISaveHook<T> の登録が無ければ完全 no-op）
+        // Register the save hook registry by default (non-keyed; a complete no-op when no ISaveHook<T> is registered)
         services.TryAddScoped<ISaveHookRegistry>(provider => new ServiceProviderSaveHookRegistry(
             provider
         ));
@@ -7155,7 +7204,7 @@ public static class GeneratedSqlServerRepositoryServiceCollectionExtensions
     }
 }
 
-/// <summary>DocumentEntity 用リポジトリインターフェース</summary>
+/// <summary>Repository interface for DocumentEntity.</summary>
 public partial interface IDocumentRepository : IRepository<DocumentEntity, int>
 {
     /// <summary>文書 ID と本体バイナリ（除外列 payload）を射影で取得する（文書 ID 昇順）</summary>
@@ -7167,20 +7216,20 @@ public partial interface IDocumentRepository : IRepository<DocumentEntity, int>
     /// <summary>本体バイナリ（payload）が存在する文書の件数を取得する</summary>
     Task<int> CountWithPayloadAsync(CancellationToken cancellationToken = default);
 
-    /// <summary>payload を宛先ストリームへ読み出す（無制限バイナリ列・O(チャンク) のストリーミング。true=書き込んだ・false=行なし または NULL）</summary>
+    /// <summary>Reads the payload column into the destination stream (unbounded binary column, O(chunk) streaming; true = written, false = no row or NULL).</summary>
     Task<bool> ReadPayloadAsync(int id, Stream destination, CancellationToken cancellationToken = default);
 
-    /// <summary>payload をストリームから書き込む（無制限バイナリ列・O(チャンク) のストリーミング。source=null で NULL を設定・CanSeek でない Stream は length 指定が必須。true=更新した・false=行なし）</summary>
+    /// <summary>Writes the payload column from a stream (unbounded binary column, O(chunk) streaming; source = null sets NULL, non-seekable streams require an explicit length; true = updated, false = no row).</summary>
     Task<bool> WritePayloadAsync(int id, Stream? source, long? length = null, CancellationToken cancellationToken = default);
 
-    /// <summary>thumb を宛先ストリームへ読み出す（無制限バイナリ列・O(チャンク) のストリーミング。true=書き込んだ・false=行なし または NULL）</summary>
+    /// <summary>Reads the thumb column into the destination stream (unbounded binary column, O(chunk) streaming; true = written, false = no row or NULL).</summary>
     Task<bool> ReadThumbAsync(int id, Stream destination, CancellationToken cancellationToken = default);
 
-    /// <summary>thumb をストリームから書き込む（無制限バイナリ列・O(チャンク) のストリーミング。source=null で NULL を設定・CanSeek でない Stream は length 指定が必須。true=更新した・false=行なし）</summary>
+    /// <summary>Writes the thumb column from a stream (unbounded binary column, O(chunk) streaming; source = null sets NULL, non-seekable streams require an explicit length; true = updated, false = no row).</summary>
     Task<bool> WriteThumbAsync(int id, Stream? source, long? length = null, CancellationToken cancellationToken = default);
 }
 
-/// <summary>名前付きクエリ GetPayloads の射影 DTO（documents）</summary>
+/// <summary>Projection DTO for the named query GetPayloads (documents).</summary>
 public sealed partial class DocumentPayloadRow
 {
     /// <summary>DocumentId</summary>
@@ -7190,10 +7239,10 @@ public sealed partial class DocumentPayloadRow
     public byte[]? Payload { get; set; }
 }
 
-/// <summary>DocumentEntity の無制限バイナリ列アクセサのファイル糖衣（DB⇔ファイルの blob 転送を 1 呼び出しで行う・Stream 版へ委譲）</summary>
+/// <summary>File convenience methods for the unbounded binary column accessors of DocumentEntity (transfer blobs between the database and files in a single call; delegates to the Stream overloads).</summary>
 public static class DocumentRepositoryBinaryStreamExtensions
 {
-    /// <summary>payload をファイルへ読み出す（Stream 版へ委譲。true=書き込んだ・false=行なし または NULL）</summary>
+    /// <summary>Reads the payload column into a file (delegates to the Stream overload; true = written, false = no row or NULL).</summary>
     public static async Task<bool> ReadPayloadToFileAsync(
         this IDocumentRepository repository,
         int id,
@@ -7206,7 +7255,7 @@ public static class DocumentRepositoryBinaryStreamExtensions
         return await repository.ReadPayloadAsync(id, destination, cancellationToken);
     }
 
-    /// <summary>payload をファイルから書き込む（Stream 版へ委譲。true=更新した・false=行なし）</summary>
+    /// <summary>Writes the payload column from a file (delegates to the Stream overload; true = updated, false = no row).</summary>
     public static async Task<bool> WritePayloadFromFileAsync(
         this IDocumentRepository repository,
         int id,
@@ -7219,7 +7268,7 @@ public static class DocumentRepositoryBinaryStreamExtensions
         return await repository.WritePayloadAsync(id, source, source.Length, cancellationToken);
     }
 
-    /// <summary>thumb をファイルへ読み出す（Stream 版へ委譲。true=書き込んだ・false=行なし または NULL）</summary>
+    /// <summary>Reads the thumb column into a file (delegates to the Stream overload; true = written, false = no row or NULL).</summary>
     public static async Task<bool> ReadThumbToFileAsync(
         this IDocumentRepository repository,
         int id,
@@ -7232,7 +7281,7 @@ public static class DocumentRepositoryBinaryStreamExtensions
         return await repository.ReadThumbAsync(id, destination, cancellationToken);
     }
 
-    /// <summary>thumb をファイルから書き込む（Stream 版へ委譲。true=更新した・false=行なし）</summary>
+    /// <summary>Writes the thumb column from a file (delegates to the Stream overload; true = updated, false = no row).</summary>
     public static async Task<bool> WriteThumbFromFileAsync(
         this IDocumentRepository repository,
         int id,
@@ -7246,7 +7295,7 @@ public static class DocumentRepositoryBinaryStreamExtensions
     }
 }
 
-/// <summary>DocumentEntity 用リポジトリ実装</summary>
+/// <summary>Repository implementation for DocumentEntity.</summary>
 public sealed partial class DocumentRepository(
     ISqlConnectionFactory connectionFactory,
     ISaveHookRegistry? saveHooks = null
@@ -7286,10 +7335,10 @@ public sealed partial class DocumentRepository(
         WriteUnboundedBinaryColumnAsync(nameof(DocumentEntity.Thumb), id, source, length, cancellationToken);
 }
 
-/// <summary>DocumentNoteEntity 用リポジトリインターフェース</summary>
+/// <summary>Repository interface for DocumentNoteEntity.</summary>
 public partial interface IDocumentNoteRepository : IRepository<DocumentNoteEntity, int> { }
 
-/// <summary>DocumentNoteEntity 用リポジトリ実装</summary>
+/// <summary>Repository implementation for DocumentNoteEntity.</summary>
 public sealed partial class DocumentNoteRepository(
     ISqlConnectionFactory connectionFactory,
     ISaveHookRegistry? saveHooks = null

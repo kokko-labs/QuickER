@@ -219,7 +219,7 @@ public class OracleSyncScriptBuilderTests
         sql.Should().Contain("ON DELETE CASCADE");
         // 注意コメントには "ON UPDATE" が含まれるが、SQL の句としては出力しない
         sql.Should().NotContain("REFERENCES \"customer\" (\"id\") ON DELETE CASCADE ON UPDATE");
-        sql.Should().Contain("-- 注: Oracle は ON UPDATE をサポートしないため無視");
+        sql.Should().Contain("-- Note: Oracle does not support ON UPDATE; ignoring it");
     }
 
     /// <summary>DropForeignKey が制約名判明時に DROP CONSTRAINT を生成することを検証する</summary>

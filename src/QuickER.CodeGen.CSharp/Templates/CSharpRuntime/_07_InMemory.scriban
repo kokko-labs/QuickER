@@ -1,17 +1,18 @@
 {{~ if in_memory ~}}
 
 /// <summary>
-/// DB を使わずエンティティをメモリ上に保持するインメモリデータストア（DI で Singleton 共有）。
+/// In-memory data store that holds entities in memory without a database (shared as a DI singleton).
 /// </summary>
 /// <remarks>
 /// <para>
-/// エンティティ型ごとに「主キー → スナップショット複製」の辞書を持つ。書き込み（保存・削除）と読み取り（取得・クエリ）は
-/// 内部で常に <see cref="EntityBase.Clone"/> による複製を介するため、返却したエンティティを呼び出し側で変更しても
-/// ストアの内容は変化しない（実 DB の値渡し意味論に合わせる）。すべての操作は <c>lock</c> で直列化しスレッド安全にする。
+/// Keeps a "primary key -> snapshot clone" dictionary per entity type. Writes (save/delete) and reads (fetch/query)
+/// always go through a clone produced by <see cref="EntityBase.Clone"/>, so mutating a returned entity on the caller
+/// side never changes the store contents (matching the by-value semantics of a real database). All operations are
+/// serialized with a <c>lock</c> to be thread-safe.
 /// </para>
 /// <para>
-/// 主キーは <see cref="EntitySaveMetadata.KeyProperty"/> から取り出し、値オブジェクトは内包値へ開いて辞書キーにする
-/// （値等価で突き合わせるため）。
+/// The primary key is taken from <see cref="EntitySaveMetadata.KeyProperty"/>, and value objects are opened to their
+/// underlying value to form the dictionary key (so they match by value equality).
 /// </para>
 /// </remarks>
 public sealed class InMemoryDataStore
@@ -19,7 +20,7 @@ public sealed class InMemoryDataStore
     private readonly object _gate = new();
     private readonly Dictionary<Type, Dictionary<object, EntityBase>> _tables = new();
 
-    /// <summary>指定型のテーブル（主キー → スナップショット）を取得する（無ければ生成する）。呼び出しは lock 済みであること</summary>
+    /// <summary>Gets the table (primary key -> snapshot) for the given type, creating it if absent. The caller must already hold the lock.</summary>
     private Dictionary<object, EntityBase> Table(Type entityType)
     {
         if (!_tables.TryGetValue(entityType, out var table))
@@ -31,7 +32,7 @@ public sealed class InMemoryDataStore
         return table;
     }
 
-    /// <summary>エンティティの主キー値を辞書キーへ正規化する（値オブジェクトは内包値へ開く。null は不可）</summary>
+    /// <summary>Normalizes an entity's primary key value into a dictionary key (value objects are opened to their underlying value; null is not allowed).</summary>
     internal static object KeyOf(EntityBase entity)
     {
         var metadata = EntitySaveMetadata.For(entity.GetType());
@@ -42,12 +43,12 @@ public sealed class InMemoryDataStore
 
         return raw
             ?? throw new InvalidOperationException(
-                $"{entity.GetType().Name} の主キーが null です。インメモリ保存には主キー値が必要です。"
+                $"The primary key of {entity.GetType().Name} is null. In-memory persistence requires a primary key value."
             );
     }
 
-    /// <summary>指定型の全スナップショットを（複製して）取得する</summary>
-    /// <remarks>返却複製は無制限バイナリ列を「未取得状態」へ落とす（実 DB の SELECT 除外と揃える。ストアの実体は保持）</remarks>
+    /// <summary>Gets all snapshots of the given type (as clones).</summary>
+    /// <remarks>The returned clones drop unbounded binary columns to their "not fetched" state (matching the real database's SELECT exclusion; the store's actual data is preserved).</remarks>
     public IReadOnlyList<TEntity> Snapshot<TEntity>()
         where TEntity : EntityBase, new()
     {
@@ -64,8 +65,8 @@ public sealed class InMemoryDataStore
         }
     }
 
-    /// <summary>指定型・主キーのスナップショットを（複製して）取得する（該当なしは null）</summary>
-    /// <remarks>返却複製は無制限バイナリ列を「未取得状態」へ落とす（実 DB の SELECT 除外と揃える。ストアの実体は保持）</remarks>
+    /// <summary>Gets the snapshot for the given type and primary key (as a clone; null if not found).</summary>
+    /// <remarks>The returned clone drops unbounded binary columns to their "not fetched" state (matching the real database's SELECT exclusion; the store's actual data is preserved).</remarks>
     public TEntity? Find<TEntity>(object key)
         where TEntity : EntityBase, new()
     {
@@ -82,17 +83,17 @@ public sealed class InMemoryDataStore
         }
     }
 
-    /// <summary>指定型・主キーの生スナップショット（複製なし）を取得する。Include のキー突き合わせなど内部走査で使う。呼び出しは lock 済みであること</summary>
+    /// <summary>Gets the raw snapshot (no clone) for the given type and primary key. Used by internal traversals such as Include key matching. The caller must already hold the lock.</summary>
     private EntityBase? FindRaw(Type entityType, object key) =>
         Table(entityType).TryGetValue(key, out var entity) ? entity : null;
 
-    /// <summary>指定型の生スナップショット一覧（複製なし）を取得する。クエリ実行器の内部走査で使う。呼び出しは lock 済みであること</summary>
+    /// <summary>Gets the list of raw snapshots (no clones) for the given type. Used by the query executor's internal traversals. The caller must already hold the lock.</summary>
     private IReadOnlyList<EntityBase> RawAll(Type entityType) => Table(entityType).Values.ToList();
 
-    /// <summary>指定型の生スナップショット一覧（複製なし）を取得する。実行器へ複製前のスナップショットを渡すために lock 内で使う</summary>
+    /// <summary>Gets the list of raw snapshots (no clones) for the given type. Used inside the lock to hand pre-clone snapshots to the executor.</summary>
     internal IReadOnlyList<EntityBase> RawSnapshotUnlocked(Type entityType) => RawAll(entityType);
 
-    /// <summary>ストア全体で任意の読み取り走査を lock 下で実行する（Include のキー突き合わせで複数テーブルを横断するため）</summary>
+    /// <summary>Runs an arbitrary read traversal over the whole store under the lock (so Include key matching can span multiple tables).</summary>
     internal TResult Read<TResult>(Func<InMemoryReadScope, TResult> reader)
     {
         lock (_gate)
@@ -101,7 +102,7 @@ public sealed class InMemoryDataStore
         }
     }
 
-    /// <summary>スナップショット（複製）を格納する（追加・更新共通。既存キーは置換）</summary>
+    /// <summary>Stores a snapshot (clone) for both insert and update (an existing key is replaced).</summary>
     internal void Put(EntityBase entity)
     {
         lock (_gate)
@@ -112,7 +113,7 @@ public sealed class InMemoryDataStore
         }
     }
 
-    /// <summary>指定型・主キーのスナップショットを削除する（該当ありで true）</summary>
+    /// <summary>Removes the snapshot for the given type and primary key (true if one existed).</summary>
     internal bool Remove(Type entityType, object key)
     {
         lock (_gate)
@@ -123,8 +124,8 @@ public sealed class InMemoryDataStore
 {{~ if exclude_unbounded_binary || runtime_package_export ~}}
 
     /// <summary>
-    /// 指定型・主キーの列値を strip なしで読み取る（無制限バイナリ列の Stream アクセサ用）。
-    /// ストア実体の生の値を返す（読み取り複製の strip を経由しない＝除外列の実データが取れる）。
+    /// Reads a column value for the given type and primary key without stripping (used by the streaming accessors for unbounded binary columns).
+    /// Returns the store's raw value (without going through the read-clone strip, so the excluded column's actual data is available).
     /// </summary>
     internal object? ReadColumnValue(
         Type entityType,
@@ -142,8 +143,8 @@ public sealed class InMemoryDataStore
     }
 
     /// <summary>
-    /// 指定型・主キーの列値を書き換える（無制限バイナリ列の Stream アクセサ用・該当ありで true）。
-    /// ストア実体を直接書き換えず、複製を更新して差し戻す（既存の Clone/Put 意味論に従う）。
+    /// Rewrites a column value for the given type and primary key (used by the streaming accessors for unbounded binary columns; true if the row existed).
+    /// Does not mutate the store's actual entity directly; instead it updates a clone and writes it back (following the existing Clone/Put semantics).
     /// </summary>
     internal bool WriteColumnValue(Type entityType, object key, PropertyInfo column, object? value)
     {
@@ -165,7 +166,7 @@ public sealed class InMemoryDataStore
     }
 {{~ end ~}}
 
-    /// <summary>複数の書き込み（追加・更新・削除）を 1 つの lock 下でまとめて適用する（グラフ保存の原子性を保つ）</summary>
+    /// <summary>Applies multiple writes (insert/update/delete) together under a single lock (preserving the atomicity of a graph save).</summary>
     internal TResult Write<TResult>(Func<InMemoryWriteScope, TResult> writer)
     {
         lock (_gate)
@@ -174,7 +175,7 @@ public sealed class InMemoryDataStore
         }
     }
 
-    /// <summary>全テーブルを空にする（テストのリセット用）</summary>
+    /// <summary>Clears all tables (for resetting in tests).</summary>
     public void Clear()
     {
         lock (_gate)
@@ -183,20 +184,20 @@ public sealed class InMemoryDataStore
         }
     }
 
-    /// <summary>lock 下で複数テーブルを横断読み取りするためのスコープ（Include のキー突き合わせで使う）</summary>
+    /// <summary>Scope for reading across multiple tables under the lock (used for Include key matching).</summary>
     internal readonly struct InMemoryReadScope(InMemoryDataStore store)
     {
-        /// <summary>指定型の生スナップショット一覧（複製なし）</summary>
+        /// <summary>The list of raw snapshots (no clones) for the given type.</summary>
         public IReadOnlyList<EntityBase> All(Type entityType) => store.RawAll(entityType);
 
-        /// <summary>指定型・主キーの生スナップショット（複製なし。該当なしは null）</summary>
+        /// <summary>The raw snapshot (no clone) for the given type and primary key (null if not found).</summary>
         public EntityBase? Find(Type entityType, object key) => store.FindRaw(entityType, key);
     }
 
-    /// <summary>lock 下でグラフ全体の書き込みを適用するためのスコープ</summary>
+    /// <summary>Scope for applying writes across a whole graph under the lock.</summary>
     internal readonly struct InMemoryWriteScope(InMemoryDataStore store)
     {
-        /// <summary>スナップショットを格納する（追加・更新）。lock 済み前提のため内部辞書へ直接反映する</summary>
+        /// <summary>Stores a snapshot (insert/update). Assumes the lock is held, so it writes directly to the internal dictionary.</summary>
         public void Put(EntityBase entity)
         {
             var snapshot = entity.Clone();
@@ -204,25 +205,26 @@ public sealed class InMemoryDataStore
             store.Table(entity.GetType())[KeyOf(entity)] = snapshot;
         }
 
-        /// <summary>指定型・主キーのスナップショットを削除する（該当ありで true）</summary>
+        /// <summary>Removes the snapshot for the given type and primary key (true if one existed).</summary>
         public bool Remove(Type entityType, object key) => store.Table(entityType).Remove(key);
 
-        /// <summary>指定型・主キーのスナップショットが存在するか</summary>
+        /// <summary>Whether a snapshot exists for the given type and primary key.</summary>
         public bool Exists(Type entityType, object key) => store.Table(entityType).ContainsKey(key);
 
-        /// <summary>指定型の生スナップショット一覧（複製なし）。カスケード削除の子孫走査で使う</summary>
+        /// <summary>The list of raw snapshots (no clones) for the given type. Used by the descendant traversal for cascade delete.</summary>
         public IReadOnlyList<EntityBase> All(Type entityType) => store.RawAll(entityType);
     }
 }
 
 /// <summary>
-/// <see cref="ISqlQueryExecutor{TEntity}"/> のインメモリ実装。<see cref="SqlQueryPlan{TEntity}"/> の述語・並び順・
-/// ページングを LINQ-to-Objects で評価し、Include ツリーは FK メタデータからナビゲーションを復元して装着する。
+/// In-memory implementation of <see cref="ISqlQueryExecutor{TEntity}"/>. It evaluates the predicates, orderings, and
+/// paging of <see cref="SqlQueryPlan{TEntity}"/> with LINQ-to-Objects, and reconstructs the Include tree's navigations
+/// from FK metadata to attach them.
 /// </summary>
 /// <remarks>
-/// 述語（<see cref="LambdaExpression"/>）は <see cref="LambdaExpression.Compile"/> でデリゲート化して評価する
-/// （SQL 翻訳は行わない）。返却するエンティティは常にストアのスナップショットを複製したもので、Include で装着した
-/// ナビゲーションも複製済みの子/親を指す（呼び出し側の変更がストアへ波及しない）。
+/// Predicates (<see cref="LambdaExpression"/>) are turned into delegates with <see cref="LambdaExpression.Compile"/> and
+/// evaluated directly (no SQL translation). Returned entities are always clones of the store's snapshots, and the
+/// navigations attached by Include point to cloned children/parents as well (so caller-side changes do not propagate to the store).
 /// </remarks>
 {{ infra_visibility }} sealed class InMemoryQueryExecutor<TEntity>(InMemoryDataStore store)
     : ISqlQueryExecutor<TEntity>
@@ -230,7 +232,7 @@ public sealed class InMemoryDataStore
 {
     private readonly InMemoryDataStore _store = store;
 
-    /// <summary>述語（AND 結合）・並び順・Skip/Take を適用した結果を、Include 装着済み複製として返す</summary>
+    /// <summary>Returns the result after applying predicates (AND-combined), orderings, and Skip/Take as Include-attached clones.</summary>
     public Task<IReadOnlyList<TEntity>> ToListAsync(
         SqlQueryPlan<TEntity> plan,
         CancellationToken cancellationToken
@@ -239,8 +241,9 @@ public sealed class InMemoryDataStore
         var result = _store.Read(scope =>
         {
             var matched = ApplyOrderingAndPaging(FilterRaw(plan), plan);
-            // 複製してから Include を装着する（ストアの実体を書き換えないため）。返却複製は既定で無制限バイナリ列を未取得状態へ落とす
-            // （WithUnboundedBinary 指定時は strip せず完全クローンを返す＝除外列も取得できる。Include なしは終端でガード済み）
+            // Clone first, then attach Include (so the store's actual entities are not mutated). By default the returned clones drop
+            // unbounded binary columns to their not-fetched state (when WithUnboundedBinary is set they are returned as full clones
+            // without stripping, so excluded columns are also fetched; the Include-less case is already guarded at the terminal).
             var cloned = matched
                 .Select(entity =>
                 {
@@ -266,11 +269,12 @@ public sealed class InMemoryDataStore
         return Task.FromResult(result);
     }
 
-    /// <summary>述語・並び順・Skip/Take を適用した複製に射影を適用して一覧を返す（実 DB の列刈り込みと結果同値）</summary>
+    /// <summary>Applies the projection to clones after applying predicates, orderings, and Skip/Take, and returns the list (result-equivalent to the real database's column pruning).</summary>
     /// <remarks>
-    /// Include なし・列参照のみのセレクタなら「完全クローンから射影」する（無制限バイナリ列も参照可能＝実 DB が
-    /// 参照列を SELECT に含めるのと同じパリティ）。Include 併用時や列参照を抽出できない場合は、従来経路
-    /// （ToListAsync と同じく無制限バイナリ列を strip した複製）から射影する（実 DB のフォールバックと同じパリティ）。
+    /// For a selector with no Include and only column references, it projects "from a full clone" (so unbounded binary columns are
+    /// also referenceable, giving the same parity as the real database including the referenced columns in the SELECT). When Include
+    /// is used or column references cannot be extracted, it projects from the conventional path (a clone with unbounded binary columns
+    /// stripped, as in ToListAsync), giving the same parity as the real database's fallback.
     /// </remarks>
     public Task<IReadOnlyList<TResult>> ToProjectionListAsync<TResult>(
         SqlQueryPlan<TEntity> plan,
@@ -280,7 +284,7 @@ public sealed class InMemoryDataStore
     {
         var project = selector.Compile();
 
-        // Include なし・列参照のみなら完全クローンから射影（除外列も参照できる）。不能時は strip 済みから射影
+        // With no Include and only column references, project from a full clone (excluded columns are also referenceable). Otherwise project from a stripped clone.
         var prunable =
             plan.Includes.Count == 0
             && ProjectionColumnCollector.TryCollect(selector, out var referenced)
@@ -293,12 +297,12 @@ public sealed class InMemoryDataStore
 
             foreach (var entity in matched)
             {
-                // ストア実体と byte[] 等を共有しないよう必ず複製してから射影する
+                // Always clone before projecting so we do not share byte[] and the like with the store's actual entity.
                 var clone = (TEntity)entity.Clone();
 
                 if (!prunable)
                 {
-                    // 従来経路（ToListAsync）と同一パリティ: 無制限バイナリ列を strip し、Include を装着してから射影する
+                    // Same parity as the conventional path (ToListAsync): strip unbounded binary columns, attach Include, then project.
                     UnboundedBinaryColumns.StripExcluded(clone);
                     IncludeAttacher.Attach(clone, plan.Includes, scope);
                 }
@@ -312,7 +316,7 @@ public sealed class InMemoryDataStore
         return Task.FromResult(result);
     }
 
-    /// <summary>先頭 1 件を Include 装着済み複製として返す（該当なしは null）</summary>
+    /// <summary>Returns the first item as an Include-attached clone (null if none).</summary>
     public Task<TEntity?> FirstOrDefaultAsync(
         SqlQueryPlan<TEntity> plan,
         CancellationToken cancellationToken
@@ -329,7 +333,7 @@ public sealed class InMemoryDataStore
 
             var cloned = (TEntity)first.Clone();
 
-            // 既定は無制限バイナリ列を未取得状態へ落とす。WithUnboundedBinary 指定時は strip せず完全クローンを返す
+            // By default drop unbounded binary columns to their not-fetched state. When WithUnboundedBinary is set, return a full clone without stripping.
             if (!plan.WithUnboundedBinary)
             {
                 UnboundedBinaryColumns.StripExcluded(cloned);
@@ -342,15 +346,15 @@ public sealed class InMemoryDataStore
         return Task.FromResult(result);
     }
 
-    /// <summary>条件に一致する件数を返す（並び順・ページング・Include は関与しない）</summary>
+    /// <summary>Returns the count of rows matching the conditions (orderings, paging, and Include play no part).</summary>
     public Task<int> CountAsync(SqlQueryPlan<TEntity> plan, CancellationToken cancellationToken) =>
         Task.FromResult(_store.Read(_ => FilterRaw(plan).Count()));
 
-    /// <summary>条件に一致する行が存在するかを返す</summary>
+    /// <summary>Returns whether any row matches the conditions.</summary>
     public Task<bool> AnyAsync(SqlQueryPlan<TEntity> plan, CancellationToken cancellationToken) =>
         Task.FromResult(_store.Read(_ => FilterRaw(plan).Any()));
 
-    /// <summary>条件に一致する行を削除する。cascadeDelete=true で子孫も FK 連鎖で削除する</summary>
+    /// <summary>Deletes rows matching the conditions. With cascadeDelete=true, descendants are also deleted along the FK chain.</summary>
     public Task<int> ExecuteDeleteAsync(
         SqlQueryPlan<TEntity> plan,
         bool cascadeDelete,
@@ -359,7 +363,7 @@ public sealed class InMemoryDataStore
     {
         var rows = _store.Write(scope =>
         {
-            // 削除対象は評価時点のスナップショット（複製前）の主キーで確定する
+            // Determine the delete targets by the primary keys of the snapshots (pre-clone) as evaluated at this point.
             var targets = FilterRaw(plan).ToList();
             var removed = 0;
 
@@ -382,7 +386,7 @@ public sealed class InMemoryDataStore
         return Task.FromResult(rows);
     }
 
-    /// <summary>ストアの生スナップショットに述語（AND 結合）を適用して絞り込む（複製前・列挙のみ）</summary>
+    /// <summary>Filters the store's raw snapshots by applying the predicates (AND-combined) (pre-clone, enumeration only).</summary>
     private IEnumerable<EntityBase> FilterRaw(SqlQueryPlan<TEntity> plan)
     {
         IEnumerable<TEntity> query = _store.RawSnapshotUnlocked(typeof(TEntity)).Cast<TEntity>();
@@ -396,7 +400,7 @@ public sealed class InMemoryDataStore
         return query;
     }
 
-    /// <summary>並び順（指定順に安定ソート）と Skip/Take を適用する</summary>
+    /// <summary>Applies the orderings (stable sort in the specified order) and Skip/Take.</summary>
     private static IReadOnlyList<EntityBase> ApplyOrderingAndPaging(
         IEnumerable<EntityBase> source,
         SqlQueryPlan<TEntity> plan
@@ -439,10 +443,10 @@ public sealed class InMemoryDataStore
     }
 }
 
-/// <summary>Include ツリーに沿って FK メタデータからナビゲーション（子集合・親参照）を復元し、複製グラフへ装着する</summary>
+/// <summary>Reconstructs navigations (child collections, parent references) from FK metadata along the Include tree and attaches them to the cloned graph.</summary>
 {{ infra_visibility }} static class IncludeAttacher
 {
-    /// <summary>指定エンティティ（複製）へ Include ツリー分のナビゲーションを再帰的に装着する</summary>
+    /// <summary>Recursively attaches the navigations for the Include tree onto the given (cloned) entity.</summary>
     public static void Attach(
         EntityBase entity,
         IReadOnlyList<IncludeNode> includes,
@@ -454,7 +458,7 @@ public sealed class InMemoryDataStore
             var attribute =
                 node.Property.GetCustomAttribute<NavigationReferenceAttribute>()
                 ?? throw new InvalidOperationException(
-                    $"{node.Property.Name} は [NavigationReference] を持つナビゲーションではありません。"
+                    $"{node.Property.Name} is not a navigation that has [NavigationReference]."
                 );
 
             var metadata = EntitySaveMetadata.For(entity.GetType());
@@ -470,7 +474,7 @@ public sealed class InMemoryDataStore
         }
     }
 
-    /// <summary>コレクション/子方向の単一参照ナビゲーションを、FK が親キーへ一致する子で埋める</summary>
+    /// <summary>Fills a collection or child-direction single-reference navigation with the children whose FK matches the parent key.</summary>
     private static void AttachChildren(
         EntityBase parent,
         IncludeNode node,
@@ -502,7 +506,7 @@ public sealed class InMemoryDataStore
 
         if (attribute.IsCollection)
         {
-            // ICollection<childType> の具象 List を生成して詰める
+            // Create a concrete List for ICollection<childType> and fill it.
             var listType = typeof(List<>).MakeGenericType(childType);
             var list = (System.Collections.IList)Activator.CreateInstance(listType)!;
 
@@ -519,7 +523,7 @@ public sealed class InMemoryDataStore
         }
     }
 
-    /// <summary>親参照ナビゲーションを、自身の FK が指す親で埋める</summary>
+    /// <summary>Fills a parent-reference navigation with the parent that its own FK points to.</summary>
     private static void AttachParent(
         EntityBase dependent,
         IncludeNode node,
@@ -556,7 +560,7 @@ public sealed class InMemoryDataStore
         node.Property.SetValue(dependent, null);
     }
 
-    /// <summary>指定カラムの値をエンティティから取り出す（値オブジェクトは内包値へ開く）</summary>
+    /// <summary>Reads the value of the given column from an entity (value objects are opened to their underlying value).</summary>
     private static object? ColumnValue(
         EntityBase entity,
         string columnName,
@@ -566,7 +570,7 @@ public sealed class InMemoryDataStore
         if (!metadata.PropertyByColumn.TryGetValue(columnName, out var property))
         {
             throw new InvalidOperationException(
-                $"{entity.GetType().Name} にカラム {columnName} に対応するプロパティがありません。"
+                $"{entity.GetType().Name} has no property corresponding to column {columnName}."
             );
         }
 
@@ -579,10 +583,10 @@ public sealed class InMemoryDataStore
     }
 }
 
-/// <summary>インメモリ Repository のカスケード保存・削除（FK メタデータ由来の子ナビゲーション走査）</summary>
+/// <summary>Cascade save/delete for the in-memory repository (traversing child navigations derived from FK metadata).</summary>
 {{ infra_visibility }} static class InMemoryCascade
 {
-    /// <summary>カスケード対象の子エンティティを列挙する（null は除外）</summary>
+    /// <summary>Enumerates the child entities subject to cascade (null is excluded).</summary>
     public static IEnumerable<EntityBase> EnumerateChildren(EntityBase entity)
     {
         foreach (var navigation in EntitySaveMetadata.For(entity.GetType()).CascadeNavigations)
@@ -614,12 +618,13 @@ public sealed class InMemoryDataStore
         }
     }
 
-    /// <summary>RowState 駆動でグラフを保存し、書き込んだ件数を返す（QuickER の EntityGraphSaver と同じ意味論）</summary>
+    /// <summary>Saves the graph driven by RowState and returns the number of rows written (same semantics as QuickER's EntityGraphSaver).</summary>
     /// <remarks>
-    /// IsRemoved は子から削除し自身を削除、IsAdded は挿入、IsUpdated は更新（対象なしは
-    /// insertWhenUpdateMissing で挿入 or 競合例外）。追加・更新は自身を先に、削除は子を先に処理する。
-    /// <paramref name="hooks"/> 指定時は <see cref="SaveHookSession.Skipped"/> に含まれるノードの Put/Remove を抑止し、
-    /// 実際に実行した操作を <paramref name="records"/>（実行順）へ記録する（After の発火順・操作の確定に使う）。
+    /// IsRemoved deletes children first and then the entity itself, IsAdded inserts, and IsUpdated updates (when the target is
+    /// missing, insertWhenUpdateMissing either inserts or throws a conflict exception). Inserts/updates process the entity itself
+    /// first; deletes process the children first. When <paramref name="hooks"/> is provided, Put/Remove is suppressed for nodes
+    /// contained in <see cref="SaveHookSession.Skipped"/>, and the operations actually performed are recorded into
+    /// <paramref name="records"/> (in execution order), which is used to determine the After firing order and the actual operations.
     /// </remarks>
     public static int Save(
         EntityBase entity,
@@ -632,7 +637,7 @@ public sealed class InMemoryDataStore
         bool changesAlreadyVerified = false
     )
     {
-        // 呼び出し側が HasChanges 確認済みなら冒頭の重複するグラフ走査を省く（子への再帰では既定 false のまま枝ごとに判定する）
+        // If the caller already verified HasChanges, skip the redundant graph traversal here (recursion into children keeps the default false so each branch is checked).
         if (!changesAlreadyVerified && !EntityGraphSaver.HasChanges(entity, cascadeSave))
         {
             return 0;
@@ -652,7 +657,7 @@ public sealed class InMemoryDataStore
                 }
             }
 
-            // Before(Delete) が false（スキップ）なら自身の削除だけ行わない（子は上で削除済み＝自身は残る）
+            // If Before(Delete) returned false (skip), only the entity's own deletion is withheld (children were already deleted above, so the entity itself remains).
             if (hooks is not null && hooks.Skipped.Contains(entity))
             {
                 return rows;
@@ -669,7 +674,7 @@ public sealed class InMemoryDataStore
 
         if (entity.IsAdded)
         {
-            // スキップされていなければ挿入する（スキップ時も子カスケードは続行する）
+            // Insert unless skipped (even when skipped, the child cascade continues).
             if (hooks is null || !hooks.Skipped.Contains(entity))
             {
                 scope.Put(entity);
@@ -681,7 +686,7 @@ public sealed class InMemoryDataStore
         {
             if (hooks is null || !hooks.Skipped.Contains(entity))
             {
-                // 実 DB のグラフ更新と同じく、無制限バイナリ列に値が残ったままの更新は弾く
+                // As with graph updates against a real database, reject updates that still carry values in unbounded binary columns.
                 UnboundedBinaryColumns.ThrowIfExcludedAssigned(entity);
 
                 if (scope.Exists(entityType, key))
@@ -692,7 +697,7 @@ public sealed class InMemoryDataStore
                 }
                 else if (insertWhenUpdateMissing)
                 {
-                    // 更新対象がなく INSERT へ切り替えた＝After は実操作 Insert で発火する
+                    // The update target was missing and we switched to INSERT, so After fires with the actual operation Insert.
                     scope.Put(entity);
                     rows++;
                     records?.Add((entity, SaveOperation.Insert));
@@ -700,7 +705,7 @@ public sealed class InMemoryDataStore
                 else
                 {
                     throw new SaveConflictException(
-                        $"更新対象のレコードが見つかりませんでした（{entityType.Name}、キー {key}）。他のユーザーに削除された可能性があります。"
+                        $"The record to update was not found ({entityType.Name}, key {key}). It may have been deleted by another user."
                     );
                 }
             }
@@ -725,8 +730,8 @@ public sealed class InMemoryDataStore
         return rows;
     }
 
-    /// <summary>フェーズ 1: グラフを <see cref="Save"/> と同一順序で走査し、各操作の直前フック（Before）を発火してスキップ集合を作る（lock 外・async）</summary>
-    /// <remarks>Before は RowState 由来の操作で発火する（<c>insertWhenUpdateMissing</c> の Insert 切替でも Update で 1 回）。実操作の確定は保存フェーズが行う。</remarks>
+    /// <summary>Phase 1: traverses the graph in the same order as <see cref="Save"/>, fires the pre-operation hooks (Before), and builds the skip set (outside the lock, async).</summary>
+    /// <remarks>Before fires with the RowState-derived operation (even when <c>insertWhenUpdateMissing</c> switches to Insert, it fires once as Update). The actual operation is determined by the save phase.</remarks>
     public static async Task InvokeBeforeGraphAsync(
         EntityBase entity,
         SaveHookSession hooks,
@@ -736,7 +741,7 @@ public sealed class InMemoryDataStore
         bool changesAlreadyVerified = false
     )
     {
-        // 呼び出し側が HasChanges 確認済みなら冒頭の重複するグラフ走査を省く（子への再帰では既定 false のまま枝ごとに判定する）
+        // If the caller already verified HasChanges, skip the redundant graph traversal here (recursion into children keeps the default false so each branch is checked).
         if (!changesAlreadyVerified && !EntityGraphSaver.HasChanges(entity, cascadeSave))
         {
             return;
@@ -744,7 +749,7 @@ public sealed class InMemoryDataStore
 
         if (entity.IsRemoved)
         {
-            // 削除は子から順（Save / DeleteGraph と同一順序）に Before を発火する
+            // For deletes, fire Before starting from the children (same order as Save / DeleteGraph).
             if (cascadeDelete)
             {
                 foreach (var child in EnumerateChildren(entity))
@@ -791,7 +796,7 @@ public sealed class InMemoryDataStore
         }
     }
 
-    /// <summary>サブツリー削除の Before を子から順に発火する（<see cref="DeleteGraph"/> と同一順序）</summary>
+    /// <summary>Fires Before for a subtree delete starting from the children (same order as <see cref="DeleteGraph"/>).</summary>
     private static async Task InvokeBeforeDeleteGraphAsync(
         EntityBase entity,
         SaveHookSession hooks,
@@ -809,7 +814,7 @@ public sealed class InMemoryDataStore
         }
     }
 
-    /// <summary>サブツリーを子から順に削除する（状態に関わらず削除。<paramref name="hooks"/> 指定時はスキップ行を残し、実行した削除を <paramref name="records"/> へ記録）</summary>
+    /// <summary>Deletes a subtree starting from the children (deletes regardless of state; when <paramref name="hooks"/> is provided, skipped rows are left in place and the deletes actually performed are recorded into <paramref name="records"/>).</summary>
     private static int DeleteGraph(
         EntityBase entity,
         InMemoryDataStore.InMemoryWriteScope scope,
@@ -824,7 +829,7 @@ public sealed class InMemoryDataStore
             rows += DeleteGraph(child, scope, hooks, records);
         }
 
-        // Before(Delete) が false（スキップ）なら自身の削除を行わない（子は既に削除済み）
+        // If Before(Delete) returned false (skip), do not delete the entity itself (children are already deleted).
         if (hooks is not null && hooks.Skipped.Contains(entity))
         {
             return rows;
@@ -839,10 +844,11 @@ public sealed class InMemoryDataStore
         return rows;
     }
 
-    /// <summary>ロード済みグラフを持たない ExecuteDelete 用に、ストア上の子孫を FK 連鎖で削除する（子→孫を先に削除）</summary>
+    /// <summary>For ExecuteDelete, which has no loaded graph, deletes descendants in the store along the FK chain (grandchildren before children).</summary>
     /// <remarks>
-    /// カスケードナビゲーション（FK メタデータ）を辿り、DependentColumn が親の PrincipalColumn 値に一致する子を
-    /// ストアから探して削除する。循環するカスケード（自己参照等）は固定走査で表現できないため未対応とする。
+    /// Follows the cascade navigations (FK metadata) and finds and deletes children in the store whose DependentColumn matches the
+    /// parent's PrincipalColumn value. Cyclic cascades (self-references and the like) cannot be expressed by this fixed traversal
+    /// and are therefore unsupported.
     /// </remarks>
     public static int DeleteDescendants(
         EntityBase root,
@@ -863,14 +869,14 @@ public sealed class InMemoryDataStore
             if (!visited.Add(navigation.ChildType))
             {
                 throw new NotSupportedException(
-                    $"循環するカスケード（{navigation.ChildType.Name}）は ExecuteDeleteAsync では未対応です。グラフをロードして SaveAsync を使うか、ロード済みグラフに対して SaveAsync を使ってください。"
+                    $"A cyclic cascade ({navigation.ChildType.Name}) is not supported by ExecuteDeleteAsync. Load the graph and use SaveAsync, or use SaveAsync against an already loaded graph."
                 );
             }
 
             var childMetadata = EntitySaveMetadata.For(navigation.ChildType);
             var parentKey = ColumnValue(parent, navigation.PrincipalColumn, parentMetadata);
 
-            // 子スナップショットは削除中に列挙が壊れないよう先に確定してから削除する
+            // Materialize the child snapshots first so the enumeration is not broken while deleting.
             var children = scope
                 .All(navigation.ChildType)
                 .Where(child =>
@@ -884,7 +890,7 @@ public sealed class InMemoryDataStore
 
             foreach (var child in children)
             {
-                // 先に孫以下を削除してから子を削除する（FK 整合）
+                // Delete grandchildren and below first, then the child (FK consistency).
                 rows += DeleteDescendants(child, scope, visited);
 
                 if (scope.Remove(navigation.ChildType, InMemoryDataStore.KeyOf(child)))
@@ -899,7 +905,7 @@ public sealed class InMemoryDataStore
         return rows;
     }
 
-    /// <summary>指定カラムの値をエンティティから取り出す（値オブジェクトは内包値へ開く）</summary>
+    /// <summary>Reads the value of the given column from an entity (value objects are opened to their underlying value).</summary>
     private static object? ColumnValue(
         EntityBase entity,
         string columnName,
@@ -909,7 +915,7 @@ public sealed class InMemoryDataStore
         if (!metadata.PropertyByColumn.TryGetValue(columnName, out var property))
         {
             throw new InvalidOperationException(
-                $"{entity.GetType().Name} にカラム {columnName} に対応するプロパティがありません。"
+                $"{entity.GetType().Name} has no property corresponding to column {columnName}."
             );
         }
 
@@ -922,12 +928,12 @@ public sealed class InMemoryDataStore
     }
 }
 
-/// <summary>メモリ上のデータストアで CRUD を実装するインメモリ Repository 基底クラス（方言非依存・実 DB 不要）</summary>
+/// <summary>Base class for in-memory repositories implementing CRUD over the in-memory data store (dialect-independent, no real database required).</summary>
 /// <remarks>
 /// <para>
-/// 取得系（GetById/GetAll/Query）は常にストアのスナップショットを複製して返し、RowState=Unchanged にする
-/// （返却エンティティを変更してもストアは不変）。保存系（Insert/Update/Delete/Save）はスナップショットを差し替える。
-/// 生 SQL 系（QueryBySql/ExecuteSql/ExecuteScalarSql）はインメモリでは実行できないため <see cref="NotSupportedException"/> を投げる。
+/// Read operations (GetById/GetAll/Query) always return clones of the store's snapshots with RowState=Unchanged
+/// (mutating a returned entity leaves the store unchanged). Write operations (Insert/Update/Delete/Save) replace the snapshots.
+/// Raw SQL operations (QueryBySql/ExecuteSql/ExecuteScalarSql) cannot run in memory and throw <see cref="NotSupportedException"/>.
 /// </para>
 /// </remarks>
 public abstract partial class InMemoryRepository<TEntity, TKey>(
@@ -936,24 +942,24 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
 ) : IRepository<TEntity, TKey>
     where TEntity : EntityBase, new()
 {
-    /// <summary>スナップショットを保持するデータストア（DI で共有）</summary>
+    /// <summary>The data store holding the snapshots (shared via DI).</summary>
     protected InMemoryDataStore Store { get; } = store;
 
-    /// <summary>Save フックのレジストリ（未指定＝null＝フックなしで完全 no-op）</summary>
+    /// <summary>The save hook registry (unspecified = null = no hooks, a complete no-op).</summary>
     private readonly ISaveHookRegistry? _saveHooks = saveHooks;
 
     private const string RawSqlNotSupported =
-        "インメモリ Repository は生 SQL を実行できません。実 DB の Repository へ切り替えてください。";
+        "The in-memory repository cannot execute raw SQL. Switch to a real database repository.";
 
-    /// <summary>主キーによる単一エンティティ取得（該当なしは null）</summary>
+    /// <summary>Gets a single entity by primary key (null if not found).</summary>
     public Task<TEntity?> GetByIdAsync(TKey id, CancellationToken cancellationToken = default) =>
         Task.FromResult(Store.Find<TEntity>(NormalizeKey(id)));
 
-    /// <summary>全エンティティ取得</summary>
+    /// <summary>Gets all entities.</summary>
     public Task<IReadOnlyList<TEntity>> GetAllAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult(Store.Snapshot<TEntity>());
 
-    /// <summary>エンティティ追加</summary>
+    /// <summary>Inserts an entity.</summary>
     public Task InsertAsync(TEntity entity, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(entity);
@@ -962,7 +968,7 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
         return Task.CompletedTask;
     }
 
-    /// <summary>エンティティのコレクションを一括追加する</summary>
+    /// <summary>Bulk-inserts a collection of entities.</summary>
     public Task<int> BulkInsertAsync(
         IEnumerable<TEntity> entities,
         CancellationToken cancellationToken = default
@@ -986,12 +992,12 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
         return Task.FromResult(count);
     }
 
-    /// <summary>エンティティ更新（更新対象ありで true）</summary>
+    /// <summary>Updates an entity (true if the update target existed).</summary>
     public Task<bool> UpdateAsync(TEntity entity, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(entity);
 
-        // 実 DB と同じく、無制限バイナリ列に値が残ったままの更新は弾く（BindUpdateParameters を通らないため個別に）
+        // As with a real database, reject updates that still carry values in unbounded binary columns (checked here individually because this path does not go through BindUpdateParameters).
         UnboundedBinaryColumns.ThrowIfExcludedAssigned(entity);
 
         var updated = Store.Write(scope =>
@@ -1015,18 +1021,18 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
         return Task.FromResult(updated);
     }
 
-    /// <summary>主キーによるエンティティ削除（削除対象ありで true）</summary>
+    /// <summary>Deletes an entity by primary key (true if the delete target existed).</summary>
     public Task<bool> DeleteAsync(TKey id, CancellationToken cancellationToken = default) =>
         Task.FromResult(Store.Remove(typeof(TEntity), NormalizeKey(id)));
 
-    /// <summary>検索条件・並び順・Include をチェーン指定して取得するクエリを開始する</summary>
+    /// <summary>Starts a query that fetches entities with chained filter conditions, orderings, and Includes.</summary>
     public SqlQuery<TEntity> Query() => new(new InMemoryQueryExecutor<TEntity>(Store));
 {{~ if exclude_unbounded_binary || runtime_package_export ~}}
 
     /// <summary>
-    /// 無制限バイナリ列（除外列）を主キー指定で宛先ストリームへ読み出す（実 DB のストリーミングに対する
-    /// インメモリ・パリティ）。ストア実体の生の値（strip なし）を MemoryStream 経由で書き出す。
-    /// 行なし・列 NULL（未設定含む）は <c>false</c>、データを書いた場合は <c>true</c> を返す。
+    /// Reads an unbounded binary column (excluded column) by primary key into the destination stream (in-memory parity
+    /// with the real database's streaming). Writes out the store's raw value (no strip) via a MemoryStream.
+    /// Returns <c>false</c> when the row is missing or the column is NULL (including unset), and <c>true</c> when data was written.
     /// </summary>
     protected async Task<bool> ReadUnboundedBinaryColumnAsync(
         string propertyName,
@@ -1045,13 +1051,13 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
             return false;
         }
 {{~ if generate_value_objects ~}}
-        // 値オブジェクトは内包値へ開く（除外列が VO の場合）
+        // Open value objects to their underlying value (when the excluded column is a VO).
         value = value is IValueObject vo ? vo.UnderlyingValue : value;
 {{~ end ~}}
 
         if (value is not byte[] bytes)
         {
-            // 列 NULL（または未設定）は何も書かない
+            // Column NULL (or unset) writes nothing.
             return false;
         }
 
@@ -1060,9 +1066,10 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
     }
 
     /// <summary>
-    /// 無制限バイナリ列（除外列）を主キー指定でストリームから書き込む（インメモリ・パリティ）。<paramref name="source"/>
-    /// が <c>null</c> のとき列を NULL に設定する。<c>CanSeek</c> でない Stream は <paramref name="length"/> が必須。
-    /// ストア実体は直接書き換えず複製を差し戻す。更新した場合は <c>true</c>、該当行なしは <c>false</c> を返す。
+    /// Writes an unbounded binary column (excluded column) by primary key from a stream (in-memory parity). When
+    /// <paramref name="source"/> is <c>null</c>, the column is set to NULL. A stream that is not <c>CanSeek</c> requires
+    /// <paramref name="length"/>. The store's actual entity is not mutated directly; a clone is written back instead.
+    /// Returns <c>true</c> when updated and <c>false</c> when the row was not found.
     /// </summary>
     protected async Task<bool> WriteUnboundedBinaryColumnAsync(
         string propertyName,
@@ -1081,10 +1088,10 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
         }
         else
         {
-            // CanSeek/length の契約検証は実 DB と揃える（方言中立パリティ）
+            // The CanSeek/length contract validation matches the real database (dialect-neutral parity).
             _ = UnboundedBinaryColumns.ResolveWriteLength(source, length);
 
-            // インメモリは実 DB のストリーミングを持たないため全読みして byte[] 化する（契約・意味論は同一）
+            // In-memory has no real database streaming, so read everything into a byte[] (contract and semantics are identical).
             using var buffer = new MemoryStream();
             await source.CopyToAsync(
                 buffer,
@@ -1103,11 +1110,12 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
     }
 {{~ end ~}}
 
-    /// <summary>RowState に従ってグラフを保存する（既定で子をカスケード）</summary>
+    /// <summary>Saves the graph according to RowState (cascading to children by default).</summary>
     /// <remarks>
-    /// Save フック登録があるときは 3 フェーズで実行する: (1) lock 外でグラフを走査し Before を発火してスキップ集合を作る、
-    /// (2) lock 内でスキップを適用して保存し実行した (entity, 操作) を記録する、(3) lock 外で実行順に After を発火する。
-    /// After は「コミット前」を擬似する（インメモリは実トランザクションを持たないため、After が例外を投げてもストア変更は残る＝ベストエフォート）。
+    /// When save hooks are registered, this runs in 3 phases: (1) traverse the graph outside the lock, fire Before, and build the
+    /// skip set; (2) save inside the lock applying the skips and record the (entity, operation) pairs performed; (3) fire After
+    /// outside the lock in execution order. After emulates "before commit" (in-memory has no real transaction, so even if After
+    /// throws, the store changes remain = best effort).
     /// </remarks>
     public async Task<int> SaveAsync(
         TEntity entity,
@@ -1119,13 +1127,13 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
     {
         ArgumentNullException.ThrowIfNull(entity);
 
-        // グラフ全体に変更が無ければ何もしない（変更判定はここで 1 度だけ行い、以降のフェーズへ確認済みとして引き渡す）
+        // Do nothing if the whole graph has no changes (the change check happens exactly once here and is passed to later phases as already verified).
         if (!EntityGraphSaver.HasChanges(entity, cascadeSave))
         {
             return 0;
         }
 
-        // フック登録があれば、進行中のストア書き込みに参加する context を供給するセッションを組み立てる
+        // If hooks are registered, build a session that supplies a context participating in the in-progress store write.
         var hooks =
             _saveHooks is null
                 ? null
@@ -1134,7 +1142,7 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
                     e => new InMemorySaveHookContext(Store, e.GetType())
                 );
 
-        // フェーズ 1（lock 外）: グラフを Save と同一順序で走査し Before を発火してスキップ集合を作る
+        // Phase 1 (outside the lock): traverse the graph in the same order as Save, fire Before, and build the skip set.
         if (hooks is not null)
         {
             await InMemoryCascade.InvokeBeforeGraphAsync(
@@ -1147,7 +1155,7 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
             );
         }
 
-        // フェーズ 2（lock 内）: スキップ集合を適用して保存し、実行した (entity, 操作) を記録する
+        // Phase 2 (inside the lock): save applying the skip set and record the (entity, operation) pairs performed.
         var records =
             hooks is null ? null : new List<(EntityBase Entity, SaveOperation Operation)>();
         var rows = Store.Write(scope =>
@@ -1163,7 +1171,7 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
             )
         );
 
-        // フェーズ 3（lock 外）: 実行順に After を発火する
+        // Phase 3 (outside the lock): fire After in execution order.
         if (hooks is not null)
         {
             foreach (var (recordEntity, operation) in records!)
@@ -1172,13 +1180,13 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
             }
         }
 
-        // 保存済みグラフを Unchanged 確定する（スキップされた行は据え置き）
+        // Finalize the saved graph as Unchanged (skipped rows are left as they are).
         EntityGraphSaver.AcceptChanges(entity, cascadeSave, hooks?.Skipped);
         return rows;
     }
 
-    /// <summary>複数の集約ルートを 1 まとめで保存する（全件成功か全件ロールバックの原子的処理）</summary>
-    /// <remarks>フックの発火順序は単一版と同じく 3 フェーズ（Before プリパス → 保存 → After ポストパス）で、ルートは指定順に処理する。</remarks>
+    /// <summary>Saves multiple aggregate roots as one unit (atomic processing: all succeed or all roll back).</summary>
+    /// <remarks>The hook firing order is the same 3 phases as the single-root overload (Before pre-pass, save, After post-pass), and roots are processed in the specified order.</remarks>
     public async Task<int> SaveAsync(
         IEnumerable<TEntity> entities,
         bool cascadeSave = true,
@@ -1188,7 +1196,7 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
     )
     {
         ArgumentNullException.ThrowIfNull(entities);
-        // 変更のあるグラフだけを対象にする（変更判定はここで 1 度だけ行い、以降のフェーズへ確認済みとして引き渡す）
+        // Target only graphs with changes (the change check happens exactly once here and is passed to later phases as already verified).
         var roots = entities
             .Where(entity => entity is not null && EntityGraphSaver.HasChanges(entity, cascadeSave))
             .ToList();
@@ -1206,7 +1214,7 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
                     e => new InMemorySaveHookContext(Store, e.GetType())
                 );
 
-        // フェーズ 1（lock 外）: 全ルートのグラフを走査して Before を発火する
+        // Phase 1 (outside the lock): traverse the graphs of all roots and fire Before.
         if (hooks is not null)
         {
             foreach (var entity in roots)
@@ -1222,7 +1230,7 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
             }
         }
 
-        // フェーズ 2（lock 内）: スキップを適用して全ルートを保存し、実行した (entity, 操作) を記録する
+        // Phase 2 (inside the lock): save all roots applying the skips and record the (entity, operation) pairs performed.
         var records =
             hooks is null ? null : new List<(EntityBase Entity, SaveOperation Operation)>();
         var rows = Store.Write(scope =>
@@ -1246,7 +1254,7 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
             return total;
         });
 
-        // フェーズ 3（lock 外）: 実行順に After を発火する
+        // Phase 3 (outside the lock): fire After in execution order.
         if (hooks is not null)
         {
             foreach (var (recordEntity, operation) in records!)
@@ -1263,28 +1271,28 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
         return rows;
     }
 
-    /// <summary>生 SQL はインメモリでは実行できない</summary>
+    /// <summary>Raw SQL cannot run in memory.</summary>
     public Task<IReadOnlyList<TEntity>> QueryBySqlAsync(
         string sql,
         object? parameters = null,
         CancellationToken cancellationToken = default
     ) => throw new NotSupportedException(RawSqlNotSupported);
 
-    /// <summary>生 SQL はインメモリでは実行できない</summary>
+    /// <summary>Raw SQL cannot run in memory.</summary>
     public Task<int> ExecuteSqlAsync(
         string sql,
         object? parameters = null,
         CancellationToken cancellationToken = default
     ) => throw new NotSupportedException(RawSqlNotSupported);
 
-    /// <summary>生 SQL はインメモリでは実行できない</summary>
+    /// <summary>Raw SQL cannot run in memory.</summary>
     public Task<TResult?> ExecuteScalarSqlAsync<TResult>(
         string sql,
         object? parameters = null,
         CancellationToken cancellationToken = default
     ) => throw new NotSupportedException(RawSqlNotSupported);
 
-    /// <summary>主キー引数（TKey）を辞書キーへ正規化する（値オブジェクトは内包値へ開く）</summary>
+    /// <summary>Normalizes the primary key argument (TKey) into a dictionary key (value objects are opened to their underlying value).</summary>
     private static object NormalizeKey(TKey id)
     {
 {{~ if generate_value_objects ~}}
@@ -1294,16 +1302,16 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
 {{~ end ~}}
 
         return raw
-            ?? throw new ArgumentNullException(nameof(id), "主キーに null は指定できません。");
+            ?? throw new ArgumentNullException(nameof(id), "The primary key must not be null.");
     }
 }
 
-/// <summary>Save フックの After に渡す、進行中のストア書き込みに参加するインメモリコンテキスト（エンティティ型に束縛して生成する）</summary>
+/// <summary>In-memory context passed to a save hook's After that participates in the in-progress store write (created bound to an entity type).</summary>
 /// <remarks>
-/// 除外列バイナリの書き込みは既存のインメモリ Stream アクセサと同じ Stream→byte[] 変換でストアへ反映する
-/// （<c>ResolveWriteLength</c> の契約検証・クローン/Put 意味論を厳守）。生 SQL はインメモリでは実行できないため
-/// <see cref="NotSupportedException"/> を投げる。インメモリは実トランザクションを持たないため、After が例外を投げても
-/// ここで書き込んだストア変更は残る（ロールバックなし＝ベストエフォート）。
+/// Excluded-column binary writes are applied to the store with the same Stream-to-byte[] conversion as the existing in-memory
+/// stream accessors (strictly following the <c>ResolveWriteLength</c> contract validation and the clone/Put semantics). Raw SQL
+/// cannot run in memory and throws <see cref="NotSupportedException"/>. In-memory has no real transaction, so even if After
+/// throws, the store changes written here remain (no rollback = best effort).
 /// </remarks>
 {{ infra_visibility }} sealed class InMemorySaveHookContext(InMemoryDataStore store, Type entityType)
     : ISaveHookContext
@@ -1311,18 +1319,18 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
     private readonly InMemoryDataStore _store = store;
     private readonly Type _entityType = entityType;
 
-    /// <summary>インメモリでは生 SQL を実行できない（実 DB の Repository へ切り替えるか、フック外で処理する）</summary>
+    /// <summary>Raw SQL cannot run in memory (switch to a real database repository, or handle it outside the hook).</summary>
     public Task<int> ExecuteSqlAsync(
         string sql,
         object? parameters = null,
         CancellationToken cancellationToken = default
     ) =>
         throw new NotSupportedException(
-            "インメモリ Repository は生 SQL を実行できません。実 DB の Repository へ切り替えてください。"
+            "The in-memory repository cannot execute raw SQL. Switch to a real database repository."
         );
 {{~ if exclude_unbounded_binary || runtime_package_export ~}}
 
-    /// <summary>進行中のストア書き込みへ無制限バイナリ（除外）列をストリーム書き込みする（実 DB のストリーミングに対するパリティ）</summary>
+    /// <summary>Stream-writes an unbounded binary (excluded) column into the in-progress store write (parity with the real database's streaming).</summary>
     public async Task<bool> WriteBinaryColumnAsync(
         string propertyName,
         object key,
@@ -1340,10 +1348,10 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
         }
         else
         {
-            // CanSeek/length の契約検証は実 DB と揃える（方言中立パリティ）
+            // The CanSeek/length contract validation matches the real database (dialect-neutral parity).
             _ = UnboundedBinaryColumns.ResolveWriteLength(source, length);
 
-            // インメモリは実 DB のストリーミングを持たないため全読みして byte[] 化する（契約・意味論は同一）
+            // In-memory has no real database streaming, so read everything into a byte[] (contract and semantics are identical).
             using var buffer = new MemoryStream();
             await source.CopyToAsync(
                 buffer,
@@ -1361,7 +1369,7 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
         return _store.WriteColumnValue(_entityType, NormalizeKey(key), column, stored);
     }
 
-    /// <summary>主キー（object）を辞書キーへ正規化する（値オブジェクトは内包値へ開く）</summary>
+    /// <summary>Normalizes the primary key (object) into a dictionary key (value objects are opened to their underlying value).</summary>
     private static object NormalizeKey(object key)
     {
 {{~ if generate_value_objects ~}}
@@ -1371,11 +1379,11 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
 {{~ end ~}}
 
         return raw
-            ?? throw new ArgumentNullException(nameof(key), "主キーに null は指定できません。");
+            ?? throw new ArgumentNullException(nameof(key), "The primary key must not be null.");
     }
 {{~ else ~}}
 
-    /// <summary>除外なしの図では無制限バイナリ列の書き込みは非対応（ExcludeUnboundedBinaryColumns の有効化を案内）</summary>
+    /// <summary>In a diagram without exclusion, writing unbounded binary columns is unsupported (points to enabling ExcludeUnboundedBinaryColumns).</summary>
     public Task<bool> WriteBinaryColumnAsync(
         string propertyName,
         object key,
@@ -1384,8 +1392,8 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
         CancellationToken cancellationToken = default
     ) =>
         throw new NotSupportedException(
-            "無制限バイナリ列の書き込みには ExcludeUnboundedBinaryColumns を有効にした生成が必要です。"
-                + "有効化するか、生 SQL（ExecuteSqlAsync）で列を更新してください。"
+            "Writing unbounded binary columns requires code generated with ExcludeUnboundedBinaryColumns enabled. "
+                + "Enable it, or update the column with raw SQL (ExecuteSqlAsync)."
         );
 {{~ end ~}}
 }
@@ -1393,7 +1401,7 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
 {{~ for repository in repository_classes ~}}
 {{~ inmemory_impl_members = join_members repository.query_shared_impl_block repository.binary_stream_thin_impl_block ~}}
 
-/// <summary>{{ repository.entity_class_name }} 用リポジトリのインメモリ実装</summary>
+/// <summary>In-memory implementation of the repository for {{ repository.entity_class_name }}.</summary>
 public sealed partial class InMemory{{ repository.class_name }}(
     InMemoryDataStore store,
     ISaveHookRegistry? saveHooks = null
@@ -1408,18 +1416,19 @@ public sealed partial class InMemory{{ repository.class_name }}(
 }{{ end }}
 {{~ end ~}}
 
-/// <summary>決定的なサンプルデータをインメモリストアへ投入するシーダー（FK 依存順に 3 件/エンティティ）</summary>
+/// <summary>Seeder that loads deterministic sample data into the in-memory store (3 rows per entity, in FK dependency order).</summary>
 /// <remarks>
-/// 値は列メタから決定的に生成する（int キー=1,2,3・string キー="{TABLE}-00n"・Guid=固定シードから決定的・
-/// 文字列列="{列名} n"・数値/日付は型ベースの固定値・NULL 可列は 3 件中 1 件を null）。
-/// FK 列は親キーの実在値を参照するため、親→子の順で投入する。
+/// Values are generated deterministically from the column metadata (int keys = 1,2,3; string keys = "{TABLE}-00n";
+/// Guids are deterministic from a fixed seed; string columns = "{column name} n"; numbers/dates are type-based fixed
+/// values; nullable columns get null in 1 of the 3 rows). FK columns reference existing parent key values, so seeding
+/// runs parent-first, then children.
 /// </remarks>
 public static class InMemorySampleData
 {
-    /// <summary>1 エンティティあたりの投入件数</summary>
+    /// <summary>Number of rows seeded per entity.</summary>
     public const int RowsPerEntity = 3;
 
-    /// <summary>すべてのエンティティへサンプルデータを投入する（親→子の FK 依存順）</summary>
+    /// <summary>Seeds sample data for all entities (in parent-to-child FK dependency order).</summary>
     public static void Seed(InMemoryDataStore store)
     {
         ArgumentNullException.ThrowIfNull(store);
@@ -1428,7 +1437,7 @@ public static class InMemorySampleData
     }
 {{~ for entity in entity_classes ~}}
 
-    /// <summary>{{ entity.table_name }} のサンプルデータを投入する</summary>
+    /// <summary>Seeds sample data for {{ entity.table_name }}.</summary>
     private static void Seed{{ entity.class_name }}(InMemoryDataStore store)
     {
         for (var index = 1; index <= RowsPerEntity; index++)
@@ -1447,12 +1456,12 @@ public static class InMemorySampleData
 {{~ end ~}}
 }
 
-/// <summary>インメモリ Repository 群を DI コンテナへ登録する拡張</summary>
+/// <summary>Extensions that register the in-memory repositories with the DI container.</summary>
 public static class GeneratedInMemoryRepositoryServiceCollectionExtensions
 {
-    /// <summary>インメモリデータストア（Singleton）と各インメモリ Repository（Scoped）を登録する</summary>
-    /// <param name="services">登録先のサービスコレクション</param>
-    /// <param name="seedSampleData">true（既定）で <see cref="InMemorySampleData"/> の決定的サンプルデータを投入済みで登録する</param>
+    /// <summary>Registers the in-memory data store (singleton) and each in-memory repository (scoped).</summary>
+    /// <param name="services">The service collection to register into.</param>
+    /// <param name="seedSampleData">When true (the default), the store is registered already seeded with the deterministic sample data of <see cref="InMemorySampleData"/>.</param>
     public static IServiceCollection AddGeneratedInMemoryRepositories(
         this IServiceCollection services,
         bool seedSampleData = true
@@ -1469,7 +1478,7 @@ public static class GeneratedInMemoryRepositoryServiceCollectionExtensions
 
         services.AddSingleton(store);
 
-        // Save フックのレジストリを既定登録する（ISaveHook<T> の登録が無ければ完全 no-op）
+        // Register the save hook registry by default (a complete no-op if no ISaveHook<T> is registered).
         services.TryAddScoped<ISaveHookRegistry>(provider => new ServiceProviderSaveHookRegistry(
             provider
         ));

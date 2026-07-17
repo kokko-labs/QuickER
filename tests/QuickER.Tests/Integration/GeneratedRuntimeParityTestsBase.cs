@@ -437,7 +437,7 @@ public abstract class GeneratedRuntimeParityTestsBase(SqlServerContainerFixture 
 
         var ex = await act.Should().ThrowAsync<InvalidOperationException>();
         // 全列が必要である旨と、欠けた列名（name 等）がメッセージに含まれる
-        ex.Which.Message.Should().Contain("全列");
+        ex.Which.Message.Should().Contain("list all columns");
         ex.Which.Message.Should().Contain("name");
     }
 
@@ -648,7 +648,7 @@ public abstract class GeneratedRuntimeParityTestsBase(SqlServerContainerFixture 
             );
 
         var ex = await act.Should().ThrowAsync<InvalidOperationException>();
-        ex.Which.Message.Should().Contain("位置指定 record は非対応");
+        ex.Which.Message.Should().Contain("positional records are not supported");
     }
 
     /// <summary>16. Repository 経由の生 SQL 3 メソッドが従来どおり動く（委譲後リグレッション）</summary>

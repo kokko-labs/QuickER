@@ -698,7 +698,7 @@ internal sealed partial class CSharpGenerationModelBuilder
 
         var parameterList = string.Join(", ", parameterDecls);
         var summary = string.IsNullOrWhiteSpace(query.Description)
-            ? $"名前付きクエリ {methodName}"
+            ? $"Named query {methodName}."
             : EscapeForXmlDocSummary(query.Description);
 
         return new QueryMethodPlan(
@@ -984,7 +984,7 @@ internal sealed partial class CSharpGenerationModelBuilder
         {
             // manual／自由 SQL は「実装が生成されない実装先がある」ことを契約側に明示する
             builder.Append(
-                "    /// <remarks>実装が生成されない実装先（EF Core・SQL 未定義の方言・インメモリ）では partial クラスでの実装が必要。</remarks>\n"
+                "    /// <remarks>Implementation targets that do not get a generated body (EF Core, dialects without a SQL definition, and in-memory) require an implementation in a partial class.</remarks>\n"
             );
         }
 
@@ -1216,11 +1216,11 @@ internal sealed partial class CSharpGenerationModelBuilder
 
         var builder = new StringBuilder();
         builder
-            .Append("/// <summary>名前付きクエリ ")
+            .Append("/// <summary>Projection DTO for the named query ")
             .Append(EscapeForXmlDocSummary(query.Name))
-            .Append(" の射影 DTO（")
+            .Append(" (")
             .Append(EscapeForXmlDocSummary(entity.TableName))
-            .Append("）</summary>\n")
+            .Append(").</summary>\n")
             .Append("public sealed partial class ")
             .Append(resultTypeName)
             .Append("\n{\n")

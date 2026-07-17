@@ -16,7 +16,7 @@ using Xunit;
 namespace QuickER.Tests.Samples;
 
 /// <summary>
-/// samples/ec-order のチェックイン済み生成物（<c>EcOrder.g.cs</c> / <c>EcOrder.g.md</c> / <c>EcOrder.sql</c>）が、
+/// samples/ec-order のチェックイン済み生成物（<c>EcOrder.g.cs</c> / <c>EcOrder.g.md</c> / <c>EcOrder.ja.g.md</c> / <c>EcOrder.sql</c>）が、
 /// 現在のテンプレート・DDL 生成器から再生成した内容と一致することを検証するドリフト検知テスト。
 /// </summary>
 /// <remarks>
@@ -29,13 +29,17 @@ namespace QuickER.Tests.Samples;
 /// 「チェックイン済み <c>EcOrder.g.cs</c> は実 CLI が生成したものと同一」がテンプレート変更後も守られる。
 /// </para>
 /// <para>
-/// テスト1b（API リファレンス Markdown）は、同じ生成経路が <c>--generate-api-docs</c> で追加出力する
+/// テスト1b（API リファレンス Markdown・英語正本）は、同じ生成経路が <c>--generate-api-docs</c> で追加出力する
 /// <c>EcOrder.g.md</c>（<c>.g.cs</c> と同じベース名）を照合する。出力は決定的（生成日時を含まない）のため
 /// <c>.g.cs</c> と同じくバイト一致で検証する（<see cref="FixtureDriftHarness.VerifyOrRegeneratePackageSource"/>）。
 /// </para>
 /// <para>
+/// テスト1c（日本語版 API リファレンス Markdown）は、<c>quicker.json</c> の <c>IncludeJapaneseApiDocs=true</c> により
+/// 併産される <c>EcOrder.ja.g.md</c> を照合する。英語正本（テスト1b）と同じくバイト一致で検証する。
+/// </para>
+/// <para>
 /// テスト2（DDL）は同じ図から <see cref="SqliteDdlGenerator"/> の出力を照合する。DDL 先頭の
-/// <c>-- 生成日時:</c> 行は <see cref="DateTime.Now"/> 由来で非決定的なため、両者を正規化してから比較する
+/// <c>-- Generated at:</c> 行は <see cref="DateTime.Now"/> 由来で非決定的なため、両者を正規化してから比較する
 /// （この 1 行のみ除外。それ以外は完全一致）。
 /// </para>
 /// <para>
@@ -54,15 +58,19 @@ public sealed class EcOrderSampleDriftTests
     private const string GeneratedCodeRepoPath =
         SampleDir + "/EcOrderSample/Generated/EcOrder.g.cs";
 
-    /// <summary>チェックイン済み API リファレンス Markdown のリポジトリ相対パス（<c>--generate-api-docs</c> 相当の同梱出力）</summary>
+    /// <summary>チェックイン済み API リファレンス Markdown（英語正本）のリポジトリ相対パス（<c>--generate-api-docs</c> 相当の同梱出力）</summary>
     private const string ApiDocsRepoPath = SampleDir + "/EcOrderSample/Generated/EcOrder.g.md";
+
+    /// <summary>チェックイン済み 日本語版 API リファレンス Markdown のリポジトリ相対パス（<c>IncludeJapaneseApiDocs=true</c> の併産出力）</summary>
+    private const string JapaneseApiDocsRepoPath =
+        SampleDir + "/EcOrderSample/Generated/EcOrder.ja.g.md";
 
     /// <summary>チェックイン済み DDL のリポジトリ相対パス</summary>
     private const string DdlRepoPath = SampleDir + "/EcOrder.sql";
 
     /// <summary>DDL 先頭の非決定的な生成日時コメント行（正規化して比較から除外する）</summary>
     private static readonly Regex GeneratedAtCommentLine = new(
-        @"^-- 生成日時: .*$",
+        @"^-- Generated at: .*$",
         RegexOptions.Multiline
     );
 
@@ -74,7 +82,7 @@ public sealed class EcOrderSampleDriftTests
     )]
     public void CommittedSampleCode_MatchesRegeneratedOutput()
     {
-        var rendered = GenerateSampleFileContent(".g.cs");
+        var rendered = GenerateSampleFileContent("EcOrder.g.cs");
 
         FixtureDriftHarness.VerifyOrRegeneratePackageSource(
             rendered,
@@ -93,7 +101,7 @@ public sealed class EcOrderSampleDriftTests
     )]
     public void CommittedSampleApiDocs_MatchesRegeneratedOutput()
     {
-        var rendered = GenerateSampleFileContent(".g.md");
+        var rendered = GenerateSampleFileContent("EcOrder.g.md");
 
         FixtureDriftHarness.VerifyOrRegeneratePackageSource(
             rendered,
@@ -104,11 +112,30 @@ public sealed class EcOrderSampleDriftTests
     }
 
     /// <summary>
+    /// テスト1c: チェックイン済み <c>EcOrder.ja.g.md</c>（<c>IncludeJapaneseApiDocs=true</c> の併産出力）が、CLI と同一経路で
+    /// 再生成した日本語版 API リファレンス Markdown と完全一致する。
+    /// </summary>
+    [Fact(
+        DisplayName = "サンプル 日本語版 API ドキュメント EcOrder.ja.g.md が CLI と同一経路の再生成と完全一致する（ドリフト検知）"
+    )]
+    public void CommittedSampleJapaneseApiDocs_MatchesRegeneratedOutput()
+    {
+        var rendered = GenerateSampleFileContent("EcOrder.ja.g.md");
+
+        FixtureDriftHarness.VerifyOrRegeneratePackageSource(
+            rendered,
+            JapaneseApiDocsRepoPath,
+            "サンプル 日本語版 API ドキュメント EcOrder.ja.g.md が現在のテンプレート出力（CLI と同一経路・IncludeJapaneseApiDocs）と乖離しています。"
+                + "samples/ec-order の図・quicker.json から再生成が必要です。"
+        );
+    }
+
+    /// <summary>
     /// テスト2: チェックイン済み <c>EcOrder.sql</c> が、<see cref="SqliteDdlGenerator"/> の再生成出力と一致する
     /// （非決定的な生成日時コメント行のみ正規化して除外）。
     /// </summary>
     /// <remarks>
-    /// DDL 先頭の <c>-- 生成日時:</c> 行は <see cref="DateTime.Now"/> 由来で毎回変わるため、
+    /// DDL 先頭の <c>-- Generated at:</c> 行は <see cref="DateTime.Now"/> 由来で毎回変わるため、
     /// <see cref="FixtureDriftHarness.VerifyOrRegeneratePackageSource"/>（厳密文字列一致）はそのまま使えない。
     /// 検証モードでは生成日時行だけを固定文言へ正規化して比較する
     /// （既存フィクスチャと同じ環境変数 <see cref="FixtureDriftHarness.RegenEnvVar"/> に従う）。
@@ -162,13 +189,15 @@ public sealed class EcOrderSampleDriftTests
 
     /// <summary>
     /// CLI（<c>quicker generate --provider sqlite --config quicker.json --generate-api-docs</c>）と同一経路で
-    /// サンプルを再生成し、指定拡張子（<c>.g.cs</c> / <c>.g.md</c>）のファイル内容を返す。
+    /// サンプルを再生成し、指定ファイル名（<c>EcOrder.g.cs</c> / <c>EcOrder.g.md</c> / <c>EcOrder.ja.g.md</c>）の内容を返す。
     /// </summary>
     /// <remarks>
-    /// <c>--generate-api-docs</c> 相当（<c>GenerateApiDocs=true</c>）で生成すると <c>.g.cs</c> と <c>.g.md</c> の
-    /// 2 ファイルが返る。呼び出し側が照合したい方の拡張子で 1 ファイルを取り出す。
+    /// <c>--generate-api-docs</c> 相当（<c>GenerateApiDocs=true</c>）＋ <c>IncludeJapaneseApiDocs=true</c>（quicker.json）で
+    /// 生成すると <c>.g.cs</c>・<c>.g.md</c>（英語正本）・<c>.ja.g.md</c>（日本語版）の 3 ファイルが返る。
+    /// 呼び出し側が照合したいファイルを<b>ファイル名の完全一致</b>で取り出す（<c>.g.md</c> は <c>.ja.g.md</c> にも
+    /// 部分一致してしまうため、末尾一致ではなく完全一致で識別する）。
     /// </remarks>
-    private static string GenerateSampleFileContent(string extension)
+    private static string GenerateSampleFileContent(string fileName)
     {
         var document = LoadSampleDocument();
         var provider = new SqliteProvider();
@@ -197,11 +226,11 @@ public sealed class EcOrderSampleDriftTests
 
         Assert.False(result.HasErrors, "サンプル図の生成でエラーが出てはならない");
 
-        // --generate-api-docs 相当のため .g.cs（コード 1 本）＋ .g.md（API ドキュメント 1 本）の 2 ファイルが返る
-        Assert.Equal(2, result.Files.Count);
+        // --generate-api-docs 相当＋日本語併産のため .g.cs（コード）＋ .g.md（英語正本）＋ .ja.g.md（日本語版）の 3 ファイルが返る
+        Assert.Equal(3, result.Files.Count);
 
         var file = result.Files.Single(f =>
-            f.FileName.EndsWith(extension, StringComparison.OrdinalIgnoreCase)
+            string.Equals(f.FileName, fileName, StringComparison.OrdinalIgnoreCase)
         );
         return file.Content;
     }
@@ -252,7 +281,7 @@ public sealed class EcOrderSampleDriftTests
 
     /// <summary>DDL の非決定的な生成日時行を固定文言へ正規化する（比較から実質除外する）</summary>
     private static string NormalizeGeneratedAt(string ddl) =>
-        GeneratedAtCommentLine.Replace(ddl, "-- 生成日時: (正規化)");
+        GeneratedAtCommentLine.Replace(ddl, "-- Generated at: (normalized)");
 
     /// <summary>
     /// リポジトリ直下（<c>QuickER.slnx</c> を目印）からの相対パスを絶対パスへ解決する。

@@ -148,6 +148,9 @@
   <data name="Cli_Opt_GenerateApiDocs" xml:space="preserve">
     <value>Additionally output one API reference Markdown ({baseName}.g.md) (overrides the settings file)</value>
   </data>
+  <data name="Cli_Opt_IncludeJapaneseApiDocs" xml:space="preserve">
+    <value>Also output the Japanese API reference Markdown ({base}.ja.g.md; requires --generate-api-docs) (overrides the settings file)</value>
+  </data>
   <data name="Cli_Opt_IncludeDataAnnotations" xml:space="preserve">
     <value>Add DataAnnotations and DB-definition meta attributes ([Required], [MaxLength], [DbTableMeta], etc.) (overrides the settings file)</value>
   </data>

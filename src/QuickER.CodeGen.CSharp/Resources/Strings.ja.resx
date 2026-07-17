@@ -250,4 +250,25 @@
   <data name="CodeGen_Query_RawSqlIssue" xml:space="preserve">
     <value>名前付きクエリ '{0}', 生 SQL ({1}): {2}</value>
   </data>
+  <data name="CodeGen_RuntimePackageGuidanceHeading" xml:space="preserve">
+    <value>このコードはランタイムを NuGet パッケージ参照で賄います。次の PackageReference を csproj に追加してください:</value>
+  </data>
+  <data name="ApiDoc_Navigation_ParentReference" xml:space="preserve">
+    <value>親参照</value>
+  </data>
+  <data name="ApiDoc_Navigation_ChildCollection" xml:space="preserve">
+    <value>子コレクション</value>
+  </data>
+  <data name="ApiDoc_Di_QuickerRepository" xml:space="preserve">
+    <value>QuickER 版 Repository（{0}）を DI コンテナへ登録します。</value>
+  </data>
+  <data name="ApiDoc_Di_KeyedMultiDialect" xml:space="preserve">
+    <value>複数方言を同時に利用する場合は keyed DI を使い、`[FromKeyedServices(...)]` で方言別の実装を解決します。</value>
+  </data>
+  <data name="ApiDoc_Di_EfCore" xml:space="preserve">
+    <value>EF Core 版 Repository を DI コンテナへ登録します（方言・接続文字列はアプリ側で構成します）。</value>
+  </data>
+  <data name="ApiDoc_Di_InMemory" xml:space="preserve">
+    <value>インメモリ Repository を DI コンテナへ登録します（プロトタイピング・テスト向け）。</value>
+  </data>
 </root>

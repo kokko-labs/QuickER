@@ -250,4 +250,25 @@
   <data name="CodeGen_Query_RawSqlIssue" xml:space="preserve">
     <value>Named query '{0}', raw SQL ({1}): {2}</value>
   </data>
+  <data name="CodeGen_RuntimePackageGuidanceHeading" xml:space="preserve">
+    <value>This code relies on the QuickER runtime NuGet packages. Add the following PackageReference items to your csproj:</value>
+  </data>
+  <data name="ApiDoc_Navigation_ParentReference" xml:space="preserve">
+    <value>Parent reference</value>
+  </data>
+  <data name="ApiDoc_Navigation_ChildCollection" xml:space="preserve">
+    <value>Child collection</value>
+  </data>
+  <data name="ApiDoc_Di_QuickerRepository" xml:space="preserve">
+    <value>Registers the QuickER Repository ({0}) with the DI container.</value>
+  </data>
+  <data name="ApiDoc_Di_KeyedMultiDialect" xml:space="preserve">
+    <value>When using multiple dialects at once, use keyed DI and resolve the dialect-specific implementation with `[FromKeyedServices(...)]`.</value>
+  </data>
+  <data name="ApiDoc_Di_EfCore" xml:space="preserve">
+    <value>Registers the EF Core Repository with the DI container (the dialect and connection string are configured on the application side).</value>
+  </data>
+  <data name="ApiDoc_Di_InMemory" xml:space="preserve">
+    <value>Registers the in-memory Repository with the DI container (for prototyping and testing).</value>
+  </data>
 </root>

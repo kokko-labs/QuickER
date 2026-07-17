@@ -161,6 +161,16 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     private bool _generateApiDocs;
 
     /// <summary>
+    /// 日本語版 API リファレンス Markdown（.ja.g.md）も併産するかどうか（既定 OFF。正本は英語）。
+    /// </summary>
+    /// <remarks>
+    /// <see cref="GenerateApiDocs"/> の下位オプションで、実効は API リファレンス出力が ON のときに限る
+    /// （XAML 側で IsEnabled を <see cref="GenerateApiDocs"/> に連動させる）。OFF に戻しても値は保持する。
+    /// </remarks>
+    [ObservableProperty]
+    private bool _includeJapaneseApiDocs;
+
+    /// <summary>
     /// データアノテーション属性（[Table] / [Key] / [Column] 等）を付与するかどうか（UI 非表示。既定 true）。
     /// </summary>
     /// <remarks>
@@ -592,6 +602,8 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
             GenerateRemoteServices = settings.GenerateRemoteServices;
             // API リファレンス出力は DB アクセス選択とは独立のため、保存値をそのまま復元する
             GenerateApiDocs = settings.GenerateApiDocs;
+            // 日本語版 API リファレンスの併産も保存値をそのまま復元する（実効は GenerateApiDocs && この値）
+            IncludeJapaneseApiDocs = settings.IncludeJapaneseApiDocs;
             // 無制限バイナリ列の除外はQuickER 版 Repository 選択時のみ効くが、値は保存値のまま復元する（行の表示/非表示は UI 側で連動）
             ExcludeUnboundedBinaryColumns = settings.ExcludeUnboundedBinaryColumns;
             GenerateValueObjects = settings.GenerateValueObjects;
@@ -640,6 +652,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
             GenerateRemoteContracts = GenerateRemoteContracts,
             GenerateRemoteServices = GenerateRemoteServices,
             GenerateApiDocs = GenerateApiDocs,
+            IncludeJapaneseApiDocs = IncludeJapaneseApiDocs,
             ExcludeUnboundedBinaryColumns = ExcludeUnboundedBinaryColumns,
             GenerateValueObjects = GenerateValueObjects,
             UseGuidKeyForStringPrimaryKey = UseGuidKeyForStringPrimaryKey,
@@ -656,6 +669,7 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     /// 設定→生成オプションのマッピングは <see cref="CSharpGenerationSettings.ToCodeGenerationOptions"/> に集約し、
     /// ここでは現在値から <see cref="ToSettings"/> を作り、GUI 固有の出力ファイル名（分割時は inert な既定名、
     /// 非分割時は出力先パスのファイル名部分）だけを与えて委譲する（設定・生成・CLI 互換の変換を 1 箇所に保つ）。
+    /// 分割時の OutputFileName は .cs（カテゴリ別固定名）・.md（固定名 ApiDocs.g.md）とも出力名に関与しない。
     /// </remarks>
     public CodeGenerationOptions ToOptions() =>
         ToSettings()

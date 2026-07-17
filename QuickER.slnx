@@ -15,8 +15,11 @@
     <File Path="SECURITY.ja.md" />
   </Folder>
   <Folder Name="/docs/">
+    <File Path="docs/ai-chat.ja.md" />
     <File Path="docs/ai-chat.md" />
+    <File Path="docs/cli.ja.md" />
     <File Path="docs/cli.md" />
+    <File Path="docs/code-generation.ja.md" />
     <File Path="docs/code-generation.md" />
   </Folder>
   <Folder Name="/docs/images/">

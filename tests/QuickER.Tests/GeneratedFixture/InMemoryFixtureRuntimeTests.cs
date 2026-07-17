@@ -355,7 +355,7 @@ public sealed class InMemoryFixtureRuntimeTests
                 .ThrowAsync<NotSupportedException>()
         )
             .Which.Message.Should()
-            .Contain("インメモリ");
+            .Contain("in-memory repository");
         await FluentActions
             .Awaiting(() => customers.ExecuteSqlAsync("DELETE FROM x", null, Ct))
             .Should()

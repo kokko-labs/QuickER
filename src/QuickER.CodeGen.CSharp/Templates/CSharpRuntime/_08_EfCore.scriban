@@ -1,24 +1,25 @@
 {{~ if ef_core && render_ef_core && !runtime_package_export ~}}
 
 /// <summary>
-/// 既存スキーマへ接続する EF Core の DbContext。
+/// EF Core DbContext that connects to an existing schema.
 /// </summary>
 /// <remarks>
-/// スキーマ作成（Migrations / EnsureCreated）は範囲外で、既存 Entity を既存テーブルへマッピングして
-/// 読み書きするための構成のみを持つ。列の DB 型（HasColumnType）は焼き込まず、DDL 生成に委ねる
+/// Schema creation (Migrations / EnsureCreated) is out of scope. This context only holds the configuration
+/// needed to map existing entities to existing tables for reading and writing. Column database types
+/// (HasColumnType) are not baked in and are left to DDL generation.
 /// </remarks>
 public partial class QuickErDbContext : DbContext
 {
-    /// <summary>オプションを受け取り DbContext を初期化する</summary>
+    /// <summary>Initializes the DbContext with the given options.</summary>
     public QuickErDbContext(DbContextOptions<QuickErDbContext> options)
         : base(options) { }
 {{~ if generate_value_objects ~}}
 
-    /// <summary>値オブジェクト列の文字列メソッド（Contains/StartsWith/EndsWith・.Value）を SQL へ翻訳する拡張を追加する</summary>
+    /// <summary>Adds an extension that translates value object string methods (Contains/StartsWith/EndsWith and .Value) into SQL.</summary>
     /// <remarks>
-    /// 値オブジェクトはコンバータ（v =&gt; v.Value）で string 列へ射影されるが、EF Core 既定では
-    /// <c>ValueObjectStringBase&lt;T&gt;.Contains</c> 等が翻訳できずクエリが失敗する。
-    /// <see cref="ValueObjectTranslationDbContextOptionsExtension"/> を差し込み、これらを LIKE / 素の string 列へ翻訳させる。
+    /// Value objects are projected onto string columns by a converter (v =&gt; v.Value), but by default EF Core
+    /// cannot translate <c>ValueObjectStringBase&lt;T&gt;.Contains</c> and similar members, so the query fails.
+    /// <see cref="ValueObjectTranslationDbContextOptionsExtension"/> is plugged in to translate these into LIKE / plain string columns.
     /// </remarks>
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
     {
@@ -34,11 +35,11 @@ public partial class QuickErDbContext : DbContext
 {{~ end ~}}
 {{~ for db_set in ef_core.db_sets ~}}
 
-    /// <summary>{{ db_set.entity_class_name }} の DbSet</summary>
+    /// <summary>DbSet for {{ db_set.entity_class_name }}.</summary>
     public DbSet<{{ db_set.entity_class_name }}> {{ db_set.property_name }} => Set<{{ db_set.entity_class_name }}>();
 {{~ end ~}}
 
-    /// <summary>エンティティごとのテーブル・キー・列・リレーションを Fluent API で構成する</summary>
+    /// <summary>Configures the table, keys, columns, and relationships for each entity using the Fluent API.</summary>
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
 {{~ for cfg in ef_core.entities ~}}
@@ -78,7 +79,7 @@ public partial class QuickErDbContext : DbContext
         OnModelCreatingPartial(modelBuilder);
     }
 
-    /// <summary>利用者が追加構成を差し込むための拡張ポイント（partial・未実装ならゼロコスト）</summary>
+    /// <summary>Extension point for callers to inject additional configuration (partial; zero-cost when not implemented).</summary>
     partial void OnModelCreatingPartial(ModelBuilder modelBuilder);
 }
 {{~ end ~}}
@@ -86,18 +87,18 @@ public partial class QuickErDbContext : DbContext
 {{~ if generate_value_objects ~}}
 
 /// <summary>
-/// 文字列値オブジェクト（<see cref="ValueObjectStringBase{TSelf}"/> 由来）の Contains/StartsWith/EndsWith を
-/// SQL の LIKE へ翻訳する EF Core メソッド呼び出しトランスレータ。
+/// EF Core method call translator that translates Contains/StartsWith/EndsWith of string value objects
+/// (derived from <see cref="ValueObjectStringBase{TSelf}"/>) into SQL LIKE.
 /// </summary>
 /// <remarks>
 /// <para>
-/// 値オブジェクト列はコンバータで string 列へ射影されるが、EF Core 既定ではこれらのインスタンスメソッドを翻訳できない。
-/// QuickER の SQL Server 実装と同じ意味論（Ordinal 部分一致 → LIKE・ワイルドカード <c>\ % _ [</c> のエスケープ・
-/// <c>ESCAPE '\'</c>・null 引数は空文字扱い）に合わせて <c>ISqlExpressionFactory.Like</c> を生成する。
+/// Value object columns are projected onto string columns by a converter, but by default EF Core cannot translate these instance methods.
+/// It generates <c>ISqlExpressionFactory.Like</c> with the same semantics as the QuickER SQL Server implementation
+/// (ordinal substring match → LIKE, escaping of the wildcards <c>\ % _ [</c>, <c>ESCAPE '\'</c>, and treating a null argument as an empty string).
 /// </para>
 /// <para>
-/// 引数は string オーバーロードと TSelf（値オブジェクト）オーバーロードの両方を受け付ける。定数はクライアント側で
-/// エスケープし、パラメータは REPLACE の連鎖（方言非依存）で SQL 側エスケープする。
+/// The argument accepts both the string overload and the TSelf (value object) overload. Constants are escaped on the client side,
+/// while parameters are escaped on the SQL side with a chain of REPLACE calls (dialect-independent).
 /// </para>
 /// </remarks>
 {{ infra_visibility }} sealed class ValueObjectStringMethodTranslator(
@@ -111,17 +112,17 @@ public partial class QuickErDbContext : DbContext
     private readonly LikeEscapeBehavior _escapeBehavior = escapeBehavior;
 
     /// <summary>
-    /// REPLACE で順にエスケープする（元文字, 置換後）の組。エスケープ文字自身を最初に二重化する。
-    /// <c>[</c> は SQL Server のみ文字クラス開始のためエスケープ対象で、他方言（<c>[</c> はワイルドカードでない）では
-    /// エスケープしない。特に Oracle は非ワイルドカードのエスケープを ORA-01424 で拒否するため <c>[</c> を含めてはならない。
-    /// エスケープ文字は方言依存で、MySQL は文字列リテラルでバックスラッシュがクォート打ち消しとして
-    /// 誤解釈されるため <c>\</c> 以外（<see cref="LikeEscapeBehavior.EscapeChar"/>）を用いる。
+    /// The (original, replacement) pairs to escape in order with REPLACE. The escape character itself is doubled first.
+    /// <c>[</c> starts a character class only on SQL Server and is therefore escaped there; on other dialects (where <c>[</c> is not a wildcard)
+    /// it is not escaped. In particular, Oracle rejects escaping of a non-wildcard character with ORA-01424, so <c>[</c> must not be included.
+    /// The escape character is dialect-dependent: MySQL uses something other than <c>\</c> (<see cref="LikeEscapeBehavior.EscapeChar"/>)
+    /// because a backslash in a string literal is misinterpreted as a quote-cancelling escape.
     /// </summary>
     private IEnumerable<(string From, string To)> EscapePairs()
     {
         var e = _escapeBehavior.EscapeChar;
 
-        // エスケープ文字自身 → 二重化（必ず最初に処理する）
+        // The escape character itself → doubled (must be processed first).
         yield return (e, e + e);
         yield return ("%", e + "%");
         yield return ("_", e + "_");
@@ -132,7 +133,7 @@ public partial class QuickErDbContext : DbContext
         }
     }
 
-    /// <summary>対象メソッドなら LIKE 式を返し、そうでなければ null（他トランスレータに委ねる）</summary>
+    /// <summary>Returns a LIKE expression for a target method, or null otherwise (deferring to other translators).</summary>
     public SqlExpression? Translate(
         SqlExpression? instance,
         MethodInfo method,
@@ -140,7 +141,7 @@ public partial class QuickErDbContext : DbContext
         IDiagnosticsLogger<DbLoggerCategory.Query> logger
     )
     {
-        // 文字列値オブジェクトの単一引数 Contains / StartsWith / EndsWith のみを対象にする
+        // Only handle single-argument Contains / StartsWith / EndsWith of string value objects.
         if (
             instance is null
             || arguments.Count != 1
@@ -152,8 +153,8 @@ public partial class QuickErDbContext : DbContext
             return null;
         }
 
-        // 引数のマッピングを決める。string 引数は素の string、TSelf 引数は列と同じコンバータ付き
-        // マッピング（VO→素値変換）で束縛する
+        // Decide the argument mapping. A string argument binds to a plain string, while a TSelf argument binds with the
+        // same converter-backed mapping as the column (value object → raw value conversion).
         var parameterType = method.GetParameters()[0].ParameterType;
         SqlExpression argument;
 
@@ -170,13 +171,13 @@ public partial class QuickErDbContext : DbContext
             return null;
         }
 
-        // 列を素の string としてコアースし、コンバータ経由の再読込（string→VO の不正キャスト）を避ける
+        // Coerce the column to a plain string to avoid a converter-backed re-read (an invalid string→value object cast).
         var column = _sqlExpressionFactory.ApplyTypeMapping(instance, _stringTypeMapping);
         var pattern = BuildLikePattern(method.Name, argument);
 
-        // ESCAPE の明示は方言依存。既定エスケープ文字が既にバックスラッシュの PostgreSQL では明示しない。
-        // SQL Server / Oracle は既定にエスケープ文字を持たないため明示する。MySQL は文字列リテラルの
-        // バックスラッシュ誤解釈を避けるためエスケープ文字を \ 以外にしたうえで明示する。
+        // Whether to emit ESCAPE explicitly is dialect-dependent. PostgreSQL, whose default escape character is already a backslash, omits it.
+        // SQL Server / Oracle have no default escape character, so they emit it. MySQL emits it after choosing an escape character
+        // other than \ to avoid misinterpretation of the backslash in a string literal.
         var escapeChar = _escapeBehavior.EmitEscapeClause
             ? _sqlExpressionFactory.Constant(_escapeBehavior.EscapeChar, _stringTypeMapping)
             : null;
@@ -184,11 +185,11 @@ public partial class QuickErDbContext : DbContext
         return _sqlExpressionFactory.Like(column, pattern, escapeChar);
     }
 
-    /// <summary>メソッド名に応じた LIKE パターン式（'%'＋エスケープ済み引数＋'%' 等）を組み立てる</summary>
+    /// <summary>Builds the LIKE pattern expression for the given method name (e.g. '%' + escaped argument + '%').</summary>
     private SqlExpression BuildLikePattern(string methodName, SqlExpression argument)
     {
-        // 定数はクライアント側でエスケープして 1 つの定数パターンへ畳み込む（QuickER 版と同じ形）。
-        // TSelf オーバーロードの定数（EF Core が Create(...) を定数へ畳んだもの）は素値へ開いてから扱う
+        // Escape constants on the client side and fold them into a single constant pattern (the same shape as the QuickER version).
+        // A TSelf overload constant (which EF Core folded from Create(...) into a constant) is unwrapped to its raw value first.
         if (argument is SqlConstantExpression { Value: var constantValue })
         {
             var raw = SqlParameterValue.Unwrap(constantValue) as string ?? string.Empty;
@@ -202,7 +203,7 @@ public partial class QuickErDbContext : DbContext
             return _sqlExpressionFactory.Constant(constantPattern, _stringTypeMapping);
         }
 
-        // パラメータ等は SQL 側でエスケープする。null は QuickER 版（null→空文字）に合わせ COALESCE で空文字へ
+        // Parameters and the like are escaped on the SQL side. null is coalesced to an empty string, matching the QuickER version (null → empty string).
         SqlExpression escapedArgument = _sqlExpressionFactory.Coalesce(
             argument,
             _sqlExpressionFactory.Constant(string.Empty, _stringTypeMapping)
@@ -237,9 +238,9 @@ public partial class QuickErDbContext : DbContext
     }
 
     /// <summary>
-    /// LIKE のワイルドカードをエスケープする（定数パターン用）。エスケープ文字自身・<c>%</c>・<c>_</c> は全方言共通、
-    /// <c>[</c> は SQL Server のみ（<see cref="LikeEscapeBehavior.EscapeBracket"/>）対象にする。
-    /// エスケープ文字は方言依存（<see cref="LikeEscapeBehavior.EscapeChar"/>）。
+    /// Escapes LIKE wildcards (for constant patterns). The escape character itself, <c>%</c>, and <c>_</c> are common to all dialects,
+    /// while <c>[</c> is escaped only on SQL Server (<see cref="LikeEscapeBehavior.EscapeBracket"/>).
+    /// The escape character is dialect-dependent (<see cref="LikeEscapeBehavior.EscapeChar"/>).
     /// </summary>
     private string EscapeLikePattern(string value)
     {
@@ -250,14 +251,14 @@ public partial class QuickErDbContext : DbContext
 }
 
 /// <summary>
-/// 値オブジェクト（<see cref="ValueObjectBase{TSelf, TValue}"/> 由来）の <c>.Value</c> メンバ参照を、
-/// 素値の列として翻訳する EF Core メンバトランスレータ。
+/// EF Core member translator that translates a <c>.Value</c> member access of a value object
+/// (derived from <see cref="ValueObjectBase{TSelf, TValue}"/>) as a column of the raw value.
 /// </summary>
 /// <remarks>
-/// これにより <c>string.IsNullOrEmpty(x.Col.Value)</c> や <c>x.Col.Value &gt; 100</c> のような、素値を開いた
-/// 述語を EF Core が翻訳できるようになる（QuickER の SQL Server 実装の「列は素の列でも VO の .Value でもよい」と同じ扱い）。
-/// 列はコンバータで素値へ射影済みのため、CONVERT で素値型へ明示コアースし、後段の翻訳が
-/// コンバータ経由で再読込（不正キャスト）しないようにする。
+/// This lets EF Core translate predicates that unwrap the raw value, such as <c>string.IsNullOrEmpty(x.Col.Value)</c>
+/// or <c>x.Col.Value &gt; 100</c> (the same treatment as the QuickER SQL Server implementation's "a column may be a plain column or a value object's .Value").
+/// Since the column is already projected onto the raw value by a converter, it is explicitly coerced to the raw value type with CONVERT
+/// so that downstream translation does not re-read through the converter (an invalid cast).
 /// </remarks>
 {{ infra_visibility }} sealed class ValueObjectValueMemberTranslator(
     ISqlExpressionFactory sqlExpressionFactory,
@@ -267,7 +268,7 @@ public partial class QuickErDbContext : DbContext
     private readonly ISqlExpressionFactory _sqlExpressionFactory = sqlExpressionFactory;
     private readonly IRelationalTypeMappingSource _typeMappingSource = typeMappingSource;
 
-    /// <summary>値オブジェクトの .Value なら素値の列として返し、そうでなければ null</summary>
+    /// <summary>Returns a column of the raw value for a value object's .Value, or null otherwise.</summary>
     public SqlExpression? Translate(
         SqlExpression? instance,
         MemberInfo member,
@@ -285,7 +286,7 @@ public partial class QuickErDbContext : DbContext
             return null;
         }
 
-        // 素値型（string / int / decimal 等）の既定マッピングが得られない型は対象外（他トランスレータに委ねる）
+        // Skip types whose raw value type (string / int / decimal, etc.) has no default mapping (defer to other translators).
         if (_typeMappingSource.FindMapping(returnType) is not { } typeMapping)
         {
             return null;
@@ -296,15 +297,15 @@ public partial class QuickErDbContext : DbContext
 }
 
 /// <summary>
-/// LIKE 述語の方言差（エスケープ文字・<c>[</c> エスケープ・明示 ESCAPE 句）を吸収する挙動。
+/// Behavior that absorbs dialect differences in LIKE predicates (escape character, <c>[</c> escaping, explicit ESCAPE clause).
 /// </summary>
 /// <remarks>
 /// <list type="bullet">
-///   <item><see cref="EscapeChar"/>: LIKE のエスケープ文字。既定は <c>\</c>。ただし MySQL は文字列リテラルで
-///   バックスラッシュがクォート打ち消しとして誤解釈されるため <c>!</c> を用いる（リテラル・REPLACE・ESCAPE 句すべてで統一）。</item>
-///   <item><see cref="EscapeBracket"/>: <c>[</c> をエスケープするか。<c>[</c> が文字クラス開始となる SQL Server のみ true。</item>
-///   <item><see cref="EmitEscapeClause"/>: <c>ESCAPE</c> を明示するか。既定エスケープ文字を持たない
-///   SQL Server / Oracle / SQLite と、非既定文字を使う MySQL は true。既定が <c>\</c> の PostgreSQL は false（明示不要）。</item>
+///   <item><see cref="EscapeChar"/>: The LIKE escape character. The default is <c>\</c>. However, MySQL uses <c>!</c>
+///   because a backslash in a string literal is misinterpreted as a quote-cancelling escape (used consistently in literals, REPLACE, and the ESCAPE clause).</item>
+///   <item><see cref="EscapeBracket"/>: Whether to escape <c>[</c>. True only on SQL Server, where <c>[</c> starts a character class.</item>
+///   <item><see cref="EmitEscapeClause"/>: Whether to emit <c>ESCAPE</c> explicitly. True for SQL Server / Oracle / SQLite, which have no default
+///   escape character, and for MySQL, which uses a non-default character. False for PostgreSQL, whose default is <c>\</c> (no explicit clause needed).</item>
 /// </list>
 /// </remarks>
 {{ infra_visibility }} readonly record struct LikeEscapeBehavior(
@@ -313,48 +314,48 @@ public partial class QuickErDbContext : DbContext
     bool EmitEscapeClause
 )
 {
-    /// <summary>EF Core プロバイダ名から方言別の LIKE エスケープ挙動を決定する</summary>
+    /// <summary>Determines the dialect-specific LIKE escape behavior from the EF Core provider name.</summary>
     public static LikeEscapeBehavior FromProviderName(string? providerName)
     {
         var name = providerName ?? string.Empty;
 
-        // SQL Server: [ は文字クラス開始のためエスケープ必須。既定にエスケープ文字が無いため ESCAPE を明示。
+        // SQL Server: [ starts a character class and must be escaped. No default escape character, so ESCAPE is emitted.
         if (name.Contains("SqlServer", StringComparison.Ordinal))
         {
             return new LikeEscapeBehavior("\\", EscapeBracket: true, EmitEscapeClause: true);
         }
 
-        // Oracle: [ はワイルドカードでないためエスケープしない（ORA-01424 回避）。既定にエスケープ文字が無いため ESCAPE は明示。
+        // Oracle: [ is not a wildcard and is not escaped (avoids ORA-01424). No default escape character, so ESCAPE is emitted.
         if (name.Contains("Oracle", StringComparison.Ordinal))
         {
             return new LikeEscapeBehavior("\\", EscapeBracket: false, EmitEscapeClause: true);
         }
 
-        // MySQL: 文字列リテラルの \ 誤解釈を避けるためエスケープ文字を ! にし、ESCAPE '!' を明示する。
+        // MySQL: uses ! as the escape character to avoid misinterpretation of \ in a string literal, and emits ESCAPE '!'.
         if (name.Contains("MySql", StringComparison.OrdinalIgnoreCase))
         {
             return new LikeEscapeBehavior("!", EscapeBracket: false, EmitEscapeClause: true);
         }
 
-        // SQLite: LIKE は既定のエスケープ文字を持たないため ESCAPE を明示する。[ はワイルドカードでない。
+        // SQLite: LIKE has no default escape character, so ESCAPE is emitted. [ is not a wildcard.
         if (name.Contains("Sqlite", StringComparison.OrdinalIgnoreCase))
         {
             return new LikeEscapeBehavior("\\", EscapeBracket: false, EmitEscapeClause: true);
         }
 
-        // PostgreSQL 等: [ はワイルドカードでない。既定エスケープ文字が \ のため ESCAPE は明示しない。
+        // PostgreSQL and others: [ is not a wildcard. The default escape character is \, so ESCAPE is not emitted.
         return new LikeEscapeBehavior("\\", EscapeBracket: false, EmitEscapeClause: false);
     }
 }
 
-/// <summary>値オブジェクトの文字列翻訳トランスレータ（メソッド・メンバ）を束ねる EF Core プラグイン</summary>
+/// <summary>EF Core plugin that bundles the value object string translators (method and member).</summary>
 {{ infra_visibility }} sealed class ValueObjectTranslatorPlugin
     : IMethodCallTranslatorPlugin,
         IMemberTranslatorPlugin
 {
     private readonly IReadOnlyList<IMemberTranslator> _memberTranslators;
 
-    /// <summary>SQL 式ファクトリ・型マッピング源・方言プロバイダからトランスレータ群を構築する</summary>
+    /// <summary>Builds the translators from the SQL expression factory, type mapping source, and dialect provider.</summary>
     public ValueObjectTranslatorPlugin(
         ISqlExpressionFactory sqlExpressionFactory,
         IRelationalTypeMappingSource typeMappingSource,
@@ -377,28 +378,28 @@ public partial class QuickErDbContext : DbContext
         ];
     }
 
-    /// <summary>メソッド呼び出しトランスレータ群</summary>
+    /// <summary>The method call translators.</summary>
     public IEnumerable<IMethodCallTranslator> Translators { get; }
 
-    /// <summary>メンバトランスレータ群</summary>
+    /// <summary>The member translators.</summary>
     IEnumerable<IMemberTranslator> IMemberTranslatorPlugin.Translators => _memberTranslators;
 }
 
 /// <summary>
-/// 値オブジェクトの文字列翻訳プラグインを EF Core の内部サービスコンテナへ登録する DbContext オプション拡張。
+/// DbContext options extension that registers the value object string translation plugin into EF Core's internal service container.
 /// </summary>
 /// <remarks>
-/// <see cref="IMethodCallTranslatorPlugin"/> / <see cref="IMemberTranslatorPlugin"/> は EF Core が定義するサービスのため、
-/// プロバイダ固有サービスではなく <c>TryAddEnumerable</c> で（既存プラグインを潰さずに）追加する。
+/// Because <see cref="IMethodCallTranslatorPlugin"/> / <see cref="IMemberTranslatorPlugin"/> are services defined by EF Core,
+/// they are added with <c>TryAddEnumerable</c> (without clobbering existing plugins) rather than as provider-specific services.
 /// </remarks>
 {{ infra_visibility }} sealed class ValueObjectTranslationDbContextOptionsExtension : IDbContextOptionsExtension
 {
     private DbContextOptionsExtensionInfo? _info;
 
-    /// <summary>拡張の情報（ログ断片・サービスプロバイダキャッシュキーへの寄与）</summary>
+    /// <summary>The extension information (log fragment, contribution to the service provider cache key).</summary>
     public DbContextOptionsExtensionInfo Info => _info ??= new ExtensionInfo(this);
 
-    /// <summary>翻訳プラグインを EF Core の内部サービスコンテナへ登録する</summary>
+    /// <summary>Registers the translation plugin into EF Core's internal service container.</summary>
     public void ApplyServices(IServiceCollection services)
     {
         services.AddScoped<ValueObjectTranslatorPlugin>();
@@ -414,55 +415,56 @@ public partial class QuickErDbContext : DbContext
         );
     }
 
-    /// <summary>検証は不要（構成に依存する制約は持たない）</summary>
+    /// <summary>No validation is needed (there are no configuration-dependent constraints).</summary>
     public void Validate(IDbContextOptions options) { }
 
-    /// <summary>拡張のメタ情報。サービス構成を変えるが方言プロバイダではない</summary>
+    /// <summary>Metadata for the extension. It changes the service configuration but is not a dialect provider.</summary>
     private sealed class ExtensionInfo(IDbContextOptionsExtension extension)
         : DbContextOptionsExtensionInfo(extension)
     {
-        /// <summary>方言プロバイダ拡張ではない</summary>
+        /// <summary>This is not a database provider extension.</summary>
         public override bool IsDatabaseProvider => false;
 
-        /// <summary>ログに出す断片</summary>
+        /// <summary>The fragment to write to the log.</summary>
         public override string LogFragment => "using ValueObjectTranslation ";
 
-        /// <summary>サービスプロバイダのキャッシュキーへの寄与（一定なら同一構成とみなす）</summary>
+        /// <summary>Contribution to the service provider cache key (a constant means the configuration is considered identical).</summary>
         public override int GetServiceProviderHashCode() => 0;
 
-        /// <summary>同一サービス構成なら同じサービスプロバイダを再利用してよい</summary>
+        /// <summary>The same service provider may be reused for an identical service configuration.</summary>
         public override bool ShouldUseSameServiceProvider(DbContextOptionsExtensionInfo other) =>
             other is ExtensionInfo;
 
-        /// <summary>デバッグ情報へ有効化フラグを載せる</summary>
+        /// <summary>Adds the enabled flag to the debug information.</summary>
         public override void PopulateDebugInfo(IDictionary<string, string> debugInfo) =>
             debugInfo["ValueObjectTranslation"] = "1";
     }
 }
 {{~ end ~}}
 
-/// <summary>エンティティに縛られない生 SQL 実行器の EF Core 版（DbContext の接続上で ADO を直接実行する）</summary>
+/// <summary>EF Core version of the entity-agnostic raw SQL executor (runs ADO directly on the DbContext's connection).</summary>
 /// <remarks>
 /// <para>
-/// EF Core の FromSqlRaw / SqlQueryRaw はマッピング規則が既存 SQL Server 版（厳密全列必須・寛容射影・単一値モード）と
-/// 一致しないため、<typeparamref name="TContext"/> の <see cref="DbConnection"/> 上で <see cref="DbCommand"/> を
-/// 直接実行し、既存版とマッピング・束縛の実装を共有する（意味論は <see cref="ISqlExecutor"/> の定義どおり）。
+/// Because the mapping rules of EF Core's FromSqlRaw / SqlQueryRaw do not match the existing SQL Server version
+/// (strict all-columns-required, lenient projection, single-value mode), it executes a <see cref="DbCommand"/> directly
+/// on the <see cref="DbConnection"/> of <typeparamref name="TContext"/> and shares the mapping and binding implementation with the existing version
+/// (the semantics are as defined by <see cref="ISqlExecutor"/>).
 /// </para>
 /// <para>
-/// 具象 DbContext には依存せず <typeparamref name="TContext"/>（<see cref="DbContext"/> 派生）で受け取る。
-/// 具象型は生成側（DI 登録・エンティティ別実装）で閉じる。
+/// It does not depend on a concrete DbContext and takes <typeparamref name="TContext"/> (derived from <see cref="DbContext"/>).
+/// The concrete type is closed over on the generation side (DI registration, per-entity implementations).
 /// </para>
-/// <para>ステートレス（コンテキストファクトリのみ保持）のため DI では Singleton 登録できる。</para>
+/// <para>Because it is stateless (it holds only the context factory), it can be registered as a Singleton in DI.</para>
 /// </remarks>
-/// <typeparam name="TContext">接続を提供する DbContext の具象型</typeparam>
+/// <typeparam name="TContext">The concrete type of the DbContext that provides the connection.</typeparam>
 public sealed partial class EfCoreSqlExecutor<TContext>(IDbContextFactory<TContext> contextFactory)
     : ISqlExecutor
     where TContext : DbContext
 {
-    /// <summary>DbContext の生成元</summary>
+    /// <summary>The source that creates the DbContext.</summary>
     private readonly IDbContextFactory<TContext> _contextFactory = contextFactory;
 
-    /// <summary>生 SQL の SELECT を実行し、結果行を {TEntity} へ厳密（全列必須）にマップして返す</summary>
+    /// <summary>Executes a raw SQL SELECT and returns the result rows mapped strictly (all columns required) to {TEntity}.</summary>
     public async Task<IReadOnlyList<TEntity>> QueryBySqlAsync<TEntity>(
         string sql,
         object? parameters = null,
@@ -492,7 +494,7 @@ public sealed partial class EfCoreSqlExecutor<TContext>(IDbContextFactory<TConte
         return items;
     }
 
-    /// <summary>生 SQL の SELECT を実行し、結果行を任意の <typeparamref name="TResult"/> へ寛容に射影して返す</summary>
+    /// <summary>Executes a raw SQL SELECT and returns the result rows leniently projected onto an arbitrary <typeparamref name="TResult"/>.</summary>
     public async Task<IReadOnlyList<TResult>> QueryProjectionBySqlAsync<TResult>(
         string sql,
         object? parameters = null,
@@ -510,14 +512,14 @@ public sealed partial class EfCoreSqlExecutor<TContext>(IDbContextFactory<TConte
         );
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
 
-        // 射影マッピング（単一値モード・DTO モード）は共有ヘルパーの 1 系統を使う
+        // Projection mapping (single-value mode, DTO mode) uses the single shared helper path.
         return await RawSqlMapper.ReadProjectionRowsAsync<TResult>(reader, cancellationToken);
     }
 
-    /// <summary>生 SQL（UPDATE/DELETE/任意 DML）を実行し、影響行数を返す</summary>
+    /// <summary>Executes raw SQL (UPDATE/DELETE/any DML) and returns the number of affected rows.</summary>
     /// <remarks>
-    /// 呼び出しごとに DbContext（接続）を開閉する（トランザクション引数なし）。複数文をアトミックに
-    /// 実行したい場合は、1 回の呼び出し内に方言のトランザクション文（BEGIN ... COMMIT 等）を記述すること。
+    /// Opens and closes a DbContext (connection) per call (no transaction argument). To execute multiple statements atomically,
+    /// write the dialect's transaction statements (BEGIN ... COMMIT, etc.) within a single call.
     /// </remarks>
     public async Task<int> ExecuteSqlAsync(
         string sql,
@@ -538,7 +540,7 @@ public sealed partial class EfCoreSqlExecutor<TContext>(IDbContextFactory<TConte
         return await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
-    /// <summary>生 SQL を実行し、単一のスカラー値を返す（該当なし・DBNull は <c>default</c>）</summary>
+    /// <summary>Executes raw SQL and returns a single scalar value (no match / DBNull yields <c>default</c>).</summary>
     public async Task<TResult?> ExecuteScalarSqlAsync<TResult>(
         string sql,
         object? parameters = null,
@@ -559,7 +561,7 @@ public sealed partial class EfCoreSqlExecutor<TContext>(IDbContextFactory<TConte
         return RawSqlMapper.ConvertSingleValue<TResult>(scalar is DBNull ? null : scalar);
     }
 
-    /// <summary>接続を開き、SQL とパラメータを束縛した DbCommand を生成する（束縛規約は SQL Server 版と同一）</summary>
+    /// <summary>Opens the connection and creates a DbCommand with the SQL and parameters bound (the binding convention is identical to the SQL Server version).</summary>
     private static async Task<DbCommand> CreateCommandAsync(
         TContext context,
         string sql,
@@ -567,7 +569,7 @@ public sealed partial class EfCoreSqlExecutor<TContext>(IDbContextFactory<TConte
         CancellationToken cancellationToken
     )
     {
-        // 接続は DbContext が所有しており、DbContext の破棄で閉じられる
+        // The connection is owned by the DbContext and is closed when the DbContext is disposed.
         await context.Database.OpenConnectionAsync(cancellationToken);
 
         var command = context.Database.GetDbConnection().CreateCommand();
@@ -578,28 +580,28 @@ public sealed partial class EfCoreSqlExecutor<TContext>(IDbContextFactory<TConte
 }
 
 /// <summary>
-/// <see cref="SqlQuery{TEntity}"/> の EF Core 実行器。捕捉された式木を LINQ クエリへ合成し、
-/// 短命の <typeparamref name="TContext"/>（AsNoTracking）で実行する。
+/// EF Core executor for <see cref="SqlQuery{TEntity}"/>. Composes the captured expression trees into a LINQ query
+/// and executes it on a short-lived <typeparamref name="TContext"/> (AsNoTracking).
 /// </summary>
 /// <remarks>
-/// Where は捕捉済みの述語式をそのまま適用し、各方言への翻訳は EF Core プロバイダに委ねる。
-/// OrderBy は object? への boxing（Convert）を剥がして実キー型の OrderBy / ThenBy を合成する。
-/// Include は <see cref="IncludeNode"/> ツリーから "Orders.Details" 形式のドットパスを組み立てて適用する。
-/// 取得結果のグラフは既存 SQL Server 版のマッピングと同じく RowState=Unchanged に揃える。
-/// 具象 DbContext には依存せず <typeparamref name="TContext"/>（<see cref="DbContext"/> 派生）で受け取る。
+/// Where applies the captured predicate expressions as-is and leaves translation to each dialect to the EF Core provider.
+/// OrderBy strips the boxing to object? (Convert) and composes OrderBy / ThenBy with the actual key type.
+/// Include builds dot paths such as "Orders.Details" from the <see cref="IncludeNode"/> tree and applies them.
+/// The retrieved graph is normalized to RowState=Unchanged, the same as the existing SQL Server version's mapping.
+/// It does not depend on a concrete DbContext and takes <typeparamref name="TContext"/> (derived from <see cref="DbContext"/>).
 /// </remarks>
-/// <typeparam name="TEntity">クエリ対象のエンティティ型</typeparam>
-/// <typeparam name="TContext">クエリを実行する DbContext の具象型</typeparam>
+/// <typeparam name="TEntity">The entity type being queried.</typeparam>
+/// <typeparam name="TContext">The concrete type of the DbContext that executes the query.</typeparam>
 {{ infra_visibility }} sealed class EfCoreSqlQueryExecutor<TEntity, TContext>(
     IDbContextFactory<TContext> contextFactory
 ) : ISqlQueryExecutor<TEntity>
     where TEntity : EntityBase
     where TContext : DbContext
 {
-    /// <summary>DbContext の生成元</summary>
+    /// <summary>The source that creates the DbContext.</summary>
     private readonly IDbContextFactory<TContext> _contextFactory = contextFactory;
 
-    /// <summary>条件に一致するエンティティを（Include 指定分とともに）一覧取得する</summary>
+    /// <summary>Retrieves the list of entities matching the conditions (together with the specified Includes).</summary>
     public async Task<IReadOnlyList<TEntity>> ToListAsync(
         SqlQueryPlan<TEntity> plan,
         CancellationToken cancellationToken
@@ -621,11 +623,11 @@ public sealed partial class EfCoreSqlExecutor<TContext>(IDbContextFactory<TConte
         return items;
     }
 
-    /// <summary>条件に一致するエンティティを射影して取得する（列参照のみ・Include なしのときは EF Core にサーバー側射影させる）</summary>
+    /// <summary>Retrieves entities matching the conditions as a projection (when column references only and no Include, EF Core performs a server-side projection).</summary>
     /// <remarks>
-    /// Include があるか、セレクタから列参照のみを安全に抽出できない場合は、従来経路
-    /// （全列取得 → メモリ内で射影）へフォールバックする。刈り込み可能時は、フィルタ・並び順・ページングを
-    /// 適用した <see cref="IQueryable{T}"/> に <c>Select(selector)</c> を直適用し、EF Core に列を絞らせる。
+    /// If there are Includes, or column references cannot be safely extracted from the selector, it falls back to the
+    /// conventional path (fetch all columns → project in memory). When pruning is possible, <c>Select(selector)</c> is applied
+    /// directly to the <see cref="IQueryable{T}"/> with filters, orderings, and paging applied, letting EF Core narrow the columns.
     /// </remarks>
     public async Task<IReadOnlyList<TResult>> ToProjectionListAsync<TResult>(
         SqlQueryPlan<TEntity> plan,
@@ -633,7 +635,8 @@ public sealed partial class EfCoreSqlExecutor<TContext>(IDbContextFactory<TConte
         CancellationToken cancellationToken
     )
     {
-        // Include なし・列参照のみのときだけ EF Core の Select 直適用でサーバー側射影する（可否判定は ADO と同じ収集器）
+        // Server-side projection via direct EF Core Select applies only when there is no Include and the selector has column references only
+        // (feasibility is determined by the same collector as ADO).
         var prunable =
             plan.Includes.Count == 0
             && ProjectionColumnCollector.TryCollect(selector, out var referenced)
@@ -641,14 +644,14 @@ public sealed partial class EfCoreSqlExecutor<TContext>(IDbContextFactory<TConte
 
         if (!prunable)
         {
-            // フォールバック: 全列（Include 分含む）を取得してからメモリ内で射影する
+            // Fallback: fetch all columns (including Includes), then project in memory.
             var entities = await ToListAsync(plan, cancellationToken);
             return entities.Select(selector.Compile()).ToList();
         }
 
         await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
 
-        // Include は無い前提のため適用しない。並び順・ページングを適用してから Select を直適用する
+        // Includes are assumed absent, so none are applied. Apply orderings and paging, then apply Select directly.
         var query = ApplyPaging(
             ApplyOrderings(ApplyPredicates(context.Set<TEntity>().AsNoTracking(), plan), plan),
             plan
@@ -657,7 +660,7 @@ public sealed partial class EfCoreSqlExecutor<TContext>(IDbContextFactory<TConte
         return await query.Select(selector).ToListAsync(cancellationToken);
     }
 
-    /// <summary>条件に一致する先頭の 1 件を（Include 指定分とともに）取得する（該当なしは null）</summary>
+    /// <summary>Retrieves the first entity matching the conditions (together with the specified Includes), or null when there is no match.</summary>
     public async Task<TEntity?> FirstOrDefaultAsync(
         SqlQueryPlan<TEntity> plan,
         CancellationToken cancellationToken
@@ -670,7 +673,7 @@ public sealed partial class EfCoreSqlExecutor<TContext>(IDbContextFactory<TConte
             plan
         );
 
-        // 既存版と同じく Take は 1 に固定し、Skip のみ尊重する
+        // As in the existing version, Take is fixed at 1 and only Skip is honored.
         if (plan.Skip is int skip)
         {
             query = query.Skip(skip);
@@ -686,7 +689,7 @@ public sealed partial class EfCoreSqlExecutor<TContext>(IDbContextFactory<TConte
         return item;
     }
 
-    /// <summary>条件に一致する件数を取得する（既存版と同じく並び順・ページング・Include は関与しない）</summary>
+    /// <summary>Retrieves the number of matching records (as in the existing version, orderings, paging, and Includes are not involved).</summary>
     public async Task<int> CountAsync(
         SqlQueryPlan<TEntity> plan,
         CancellationToken cancellationToken
@@ -698,7 +701,7 @@ public sealed partial class EfCoreSqlExecutor<TContext>(IDbContextFactory<TConte
             .CountAsync(cancellationToken);
     }
 
-    /// <summary>条件に一致するレコードが存在するかを取得する（既存版と同じく並び順・ページング・Include は関与しない）</summary>
+    /// <summary>Retrieves whether any matching record exists (as in the existing version, orderings, paging, and Includes are not involved).</summary>
     public async Task<bool> AnyAsync(
         SqlQueryPlan<TEntity> plan,
         CancellationToken cancellationToken
@@ -710,7 +713,7 @@ public sealed partial class EfCoreSqlExecutor<TContext>(IDbContextFactory<TConte
             .AnyAsync(cancellationToken);
     }
 
-    /// <summary>条件に一致する行を一括削除する。cascadeDelete=true で子孫も FK 連鎖で削除する</summary>
+    /// <summary>Bulk-deletes the rows matching the conditions. When cascadeDelete=true, descendants are also deleted following the FK chain.</summary>
     public async Task<int> ExecuteDeleteAsync(
         SqlQueryPlan<TEntity> plan,
         bool cascadeDelete,
@@ -725,7 +728,7 @@ public sealed partial class EfCoreSqlExecutor<TContext>(IDbContextFactory<TConte
             return await roots.ExecuteDeleteAsync(cancellationToken);
         }
 
-        // カスケード: 子孫 → 本体の順の ExecuteDelete を 1 トランザクションで実行する（既存版の DELETE 文順序と同じ）
+        // Cascade: run ExecuteDelete in descendants → root order within a single transaction (same DELETE statement order as the existing version).
         await using var transaction = await context.Database.BeginTransactionAsync(
             cancellationToken
         );
@@ -739,12 +742,12 @@ public sealed partial class EfCoreSqlExecutor<TContext>(IDbContextFactory<TConte
         return rows;
     }
 
-    /// <summary>DeleteSubtreeAsync を実行時の子型でジェネリック展開するためのメソッド情報</summary>
+    /// <summary>Method info used to expand DeleteSubtreeAsync generically with the runtime child type.</summary>
     private static readonly MethodInfo _deleteSubtreeMethod = typeof(
         EfCoreSqlQueryExecutor<TEntity, TContext>
     ).GetMethod(nameof(DeleteSubtreeAsync), BindingFlags.NonPublic | BindingFlags.Static)!;
 
-    /// <summary>クエリに一致する行の子孫を末端（孫）から順に削除し、最後に自身を削除する（削除行数を返す）</summary>
+    /// <summary>Deletes the descendants of the rows matching the query starting from the leaves (grandchildren), then deletes the rows themselves (returns the number of deleted rows).</summary>
     private static async Task<int> DeleteSubtreeAsync<TCurrent>(
         TContext context,
         IQueryable<TCurrent> query,
@@ -760,11 +763,11 @@ public sealed partial class EfCoreSqlExecutor<TContext>(IDbContextFactory<TConte
             if (!visited.Add(navigation.ChildType))
             {
                 throw new NotSupportedException(
-                    $"循環するカスケード（{navigation.ChildType.Name}）は ExecuteDeleteAsync では未対応です。グラフをロードして SaveAsync を使うか、DB の ON DELETE CASCADE を利用してください。"
+                    $"Cyclic cascade ({navigation.ChildType.Name}) is not supported by ExecuteDeleteAsync. Load the graph and use SaveAsync, or rely on the database's ON DELETE CASCADE."
                 );
             }
 
-            // 子クエリ: child => 親クエリの主キー集合.Contains(child.FK)（EF Core が IN サブクエリへ翻訳する）
+            // Child query: child => parent query's primary key set.Contains(child.FK) (EF Core translates this into an IN subquery).
             var childQuery = BuildChildQuery(context, query, typeof(TCurrent), navigation);
             var subtreeTask = (Task<int>)
                 _deleteSubtreeMethod
@@ -779,13 +782,13 @@ public sealed partial class EfCoreSqlExecutor<TContext>(IDbContextFactory<TConte
         return rows;
     }
 
-    /// <summary>DbContext.Set&lt;T&gt;() を実行時型で呼び出すためのメソッド情報</summary>
+    /// <summary>Method info used to invoke DbContext.Set&lt;T&gt;() with a runtime type.</summary>
     private static readonly MethodInfo _setMethod = typeof(DbContext).GetMethod(
         nameof(DbContext.Set),
         Type.EmptyTypes
     )!;
 
-    /// <summary>親クエリの主キー集合を参照する子クエリ（child => parentKeys.Contains(child.FK)）を組み立てる</summary>
+    /// <summary>Builds the child query that references the parent query's primary key set (child => parentKeys.Contains(child.FK)).</summary>
     private static IQueryable BuildChildQuery(
         TContext context,
         IQueryable parentQuery,
@@ -816,7 +819,7 @@ public sealed partial class EfCoreSqlExecutor<TContext>(IDbContextFactory<TConte
             )
         );
 
-        // childSet.Where(child => parentKeys.Contains(child.FK))。FK が Nullable の場合はキー型へ変換して比較する
+        // childSet.Where(child => parentKeys.Contains(child.FK)). When the FK is nullable, it is converted to the key type for comparison.
         var childParameter = Expression.Parameter(navigation.ChildType, "child");
         var foreignKeyAccess = (Expression)
             Expression.Property(childParameter, childForeignKeyProperty);
@@ -853,7 +856,7 @@ public sealed partial class EfCoreSqlExecutor<TContext>(IDbContextFactory<TConte
         );
     }
 
-    /// <summary>捕捉済みの Where 式を適用する（AND 結合）</summary>
+    /// <summary>Applies the captured Where expressions (combined with AND).</summary>
     private static IQueryable<TEntity> ApplyPredicates(
         IQueryable<TEntity> query,
         SqlQueryPlan<TEntity> plan
@@ -867,7 +870,7 @@ public sealed partial class EfCoreSqlExecutor<TContext>(IDbContextFactory<TConte
         return query;
     }
 
-    /// <summary>捕捉済みの並び順を適用する（boxing を剥がし実キー型で OrderBy / ThenBy を合成する）</summary>
+    /// <summary>Applies the captured orderings (strips the boxing and composes OrderBy / ThenBy with the actual key type).</summary>
     private static IQueryable<TEntity> ApplyOrderings(
         IQueryable<TEntity> query,
         SqlQueryPlan<TEntity> plan
@@ -912,7 +915,7 @@ public sealed partial class EfCoreSqlExecutor<TContext>(IDbContextFactory<TConte
         return query;
     }
 
-    /// <summary>Include ツリーからドットパス（例: "Orders.Details"）を組み立てて適用する</summary>
+    /// <summary>Builds dot paths (e.g. "Orders.Details") from the Include tree and applies them.</summary>
     private static IQueryable<TEntity> ApplyIncludes(
         IQueryable<TEntity> query,
         SqlQueryPlan<TEntity> plan
@@ -929,7 +932,7 @@ public sealed partial class EfCoreSqlExecutor<TContext>(IDbContextFactory<TConte
         return query;
     }
 
-    /// <summary>Include ノードからルート→末端のドットパスを列挙する（子が無いノードはそのパス自身）</summary>
+    /// <summary>Enumerates root-to-leaf dot paths from an Include node (a node with no children yields its own path).</summary>
     private static IEnumerable<string> EnumerateIncludePaths(IncludeNode node, string path)
     {
         if (node.Children.Count == 0)
@@ -947,7 +950,7 @@ public sealed partial class EfCoreSqlExecutor<TContext>(IDbContextFactory<TConte
         }
     }
 
-    /// <summary>Skip / Take を適用する（既存版の OFFSET / FETCH と同じ意味）</summary>
+    /// <summary>Applies Skip / Take (the same meaning as the existing version's OFFSET / FETCH).</summary>
     private static IQueryable<TEntity> ApplyPaging(
         IQueryable<TEntity> query,
         SqlQueryPlan<TEntity> plan
@@ -966,7 +969,7 @@ public sealed partial class EfCoreSqlExecutor<TContext>(IDbContextFactory<TConte
         return query;
     }
 
-    /// <summary>取得したグラフ（ルート＋Include で読んだ範囲）を RowState=Unchanged に揃える（既存版のマッピング後状態と同じ）</summary>
+    /// <summary>Normalizes the retrieved graph (root plus what was read via Include) to RowState=Unchanged (the same post-mapping state as the existing version).</summary>
     private static void MarkGraphUnchanged(EntityBase entity, IReadOnlyList<IncludeNode> includes)
     {
         entity.MarkUnchanged();
@@ -998,22 +1001,22 @@ public sealed partial class EfCoreSqlExecutor<TContext>(IDbContextFactory<TConte
     }
 }
 
-/// <summary>メタデータと EF Core（<typeparamref name="TContext"/>）で CRUD を実装するリポジトリ基底クラス</summary>
+/// <summary>Repository base class that implements CRUD with metadata and EF Core (<typeparamref name="TContext"/>).</summary>
 /// <remarks>
 /// <para>
-/// QuickER の SQL Server 実装{{ if repositories }}（<see cref="{{ repository_base_class }}{TEntity, TKey}"/>）{{ end }}と同じ契約を DbContext ベースで
-/// 実装する。DbContext は呼び出し単位で短命に生成し（呼び出しごとに接続を開く単位と同じ）、
-/// 読み取りは AsNoTracking、保存は <c>ChangeTracker.TrackGraph</c> による RowState → EntityState 変換で行う。
+/// Implements the same contract as QuickER's SQL Server implementation{{ if repositories }} (<see cref="{{ repository_base_class }}{TEntity, TKey}"/>){{ end }} on top of a DbContext.
+/// The DbContext is created short-lived per call (the same unit as opening a connection per call);
+/// reads use AsNoTracking, and saves use a RowState → EntityState conversion via <c>ChangeTracker.TrackGraph</c>.
 /// </para>
 /// <para>
-/// 具象 DbContext には依存せず <typeparamref name="TContext"/>（<see cref="DbContext"/> 派生）で受け取る。
-/// 具象型（QuickErDbContext 等）は生成側（エンティティ別実装・DI 登録）で閉じる。
+/// It does not depend on a concrete DbContext and takes <typeparamref name="TContext"/> (derived from <see cref="DbContext"/>).
+/// The concrete type (QuickErDbContext, etc.) is closed over on the generation side (per-entity implementations, DI registration).
 /// </para>
-/// <para>UseSqlServer / UseNpgsql 等の方言選択はアプリ側の DbContextOptions 構成に委ねる（方言非依存）。</para>
+/// <para>Dialect selection such as UseSqlServer / UseNpgsql is left to the application's DbContextOptions configuration (dialect-independent).</para>
 /// </remarks>
-/// <typeparam name="TEntity">対象エンティティ型</typeparam>
-/// <typeparam name="TKey">主キー型</typeparam>
-/// <typeparam name="TContext">CRUD を実行する DbContext の具象型</typeparam>
+/// <typeparam name="TEntity">The target entity type.</typeparam>
+/// <typeparam name="TKey">The primary key type.</typeparam>
+/// <typeparam name="TContext">The concrete type of the DbContext that performs CRUD.</typeparam>
 public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
     IDbContextFactory<TContext> contextFactory,
     ISaveHookRegistry? saveHooks = null
@@ -1021,37 +1024,37 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
     where TEntity : EntityBase, new()
     where TContext : DbContext
 {
-    /// <summary>エンティティ型ごとに 1 度だけ構築されるメタデータ（静的フィールドで再利用）</summary>
+    /// <summary>Metadata built once per entity type (reused via a static field).</summary>
     private static readonly EntitySaveMetadata _metadata = EntitySaveMetadata.For(typeof(TEntity));
 
-    /// <summary>DbContext の生成元</summary>
+    /// <summary>The source that creates the DbContext.</summary>
     private readonly IDbContextFactory<TContext> _contextFactory = contextFactory;
 
-    /// <summary>生 SQL メソッドの委譲先（束縛・マッピングを 1 系統に集約）</summary>
+    /// <summary>Delegation target of the raw SQL methods (consolidates binding and mapping into a single path).</summary>
     private readonly ISqlExecutor _sqlExecutor = new EfCoreSqlExecutor<TContext>(contextFactory);
 
-    /// <summary>Save フックのレジストリ（未指定＝null＝フックなしで完全 no-op）</summary>
+    /// <summary>The save hook registry (unspecified = null = no hooks, a complete no-op).</summary>
     private readonly ISaveHookRegistry? _saveHooks = saveHooks;
 
-    /// <summary>TrackGraph で記録した「保存対象エンティティ・EF Core エントリ・実行操作」の 1 件（操作は再試行での切替で更新される）</summary>
+    /// <summary>One record of "entity to save, EF Core entry, operation to perform" recorded by TrackGraph (the operation is updated when switched by a retry).</summary>
     private sealed class TrackedOperation(
         EntityBase entity,
         EntityEntry entry,
         SaveOperation operation
     )
     {
-        /// <summary>保存対象エンティティ</summary>
+        /// <summary>The entity to save.</summary>
         public EntityBase Entity { get; } = entity;
 
-        /// <summary>対応する EF Core の追跡エントリ（State の落とし込み・再試行での型判定に使う）</summary>
+        /// <summary>The corresponding EF Core tracking entry (used for applying State and for type checks on retry).</summary>
         public EntityEntry Entry { get; } = entry;
 
-        /// <summary>実際に行う操作（<c>insertWhenUpdateMissing</c> の切替時に Update→Insert へ更新される）</summary>
+        /// <summary>The operation actually performed (updated from Update to Insert when <c>insertWhenUpdateMissing</c> switches it).</summary>
         public SaveOperation Operation { get; set; } = operation;
     }
 
-    /// <summary>主キーによる単一エンティティ取得（該当なしは null）</summary>
-    /// <remarks>既存版と同じく単一テーブルのみを読む（ナビゲーションのロードは <see cref="Query"/> の Include で行う）</remarks>
+    /// <summary>Retrieves a single entity by primary key (null when there is no match).</summary>
+    /// <remarks>As in the existing version, only the single table is read (navigations are loaded via Include on <see cref="Query"/>).</remarks>
     public async Task<TEntity?> GetByIdAsync(TKey id, CancellationToken cancellationToken = default)
     {
         await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
@@ -1060,12 +1063,12 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
             .Set<TEntity>()
             .AsNoTracking()
             .FirstOrDefaultAsync(BuildKeyPredicate(id), cancellationToken);
-        // DB から読み込んだ行は変更なし扱いにする（既存版 MapEntity と同じ事後状態）
+        // Rows read from the database are treated as unchanged (the same post-state as the existing version's MapEntity).
         entity?.MarkUnchanged();
         return entity;
     }
 
-    /// <summary>全エンティティ取得</summary>
+    /// <summary>Retrieves all entities.</summary>
     public async Task<IReadOnlyList<TEntity>> GetAllAsync(
         CancellationToken cancellationToken = default
     )
@@ -1082,23 +1085,23 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
         return items;
     }
 
-    /// <summary>エンティティ追加</summary>
+    /// <summary>Inserts an entity.</summary>
     public async Task InsertAsync(TEntity entity, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(entity);
 
         await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
 
-        // Add はナビゲーション先まで Added にするため、Entry.State 代入で対象 1 件のみを追加する（既存版の単発 INSERT と同じ範囲）
+        // Add marks navigation targets as Added too, so assign Entry.State to add only the single target (the same scope as the existing version's single INSERT).
         context.Entry(entity).State = EntityState.Added;
         await context.SaveChangesAsync(cancellationToken);
     }
 
-    /// <summary>エンティティのコレクションを一括追加する</summary>
+    /// <summary>Bulk-inserts a collection of entities.</summary>
     /// <remarks>
-    /// EF Core 版は全件を Added で追跡して 1 回の SaveChanges で保存する（バッチ化された INSERT 文）。
-    /// SqlBulkCopy を使う既存 SQL Server 版とは性能特性が異なり、大量件数では遅くなる可能性がある。
-    /// 挿入範囲は既存版と同じく渡されたエンティティのみで、ナビゲーション先はたどらない。
+    /// The EF Core version tracks all items as Added and saves them with a single SaveChanges (batched INSERT statements).
+    /// Its performance characteristics differ from the existing SQL Server version, which uses SqlBulkCopy, and it may be slower for large volumes.
+    /// As in the existing version, only the given entities are inserted; navigation targets are not traversed.
     /// </remarks>
     public async Task<int> BulkInsertAsync(
         IEnumerable<TEntity> entities,
@@ -1107,7 +1110,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
     {
         ArgumentNullException.ThrowIfNull(entities);
 
-        // 件数が確定しているコレクションが空なら DbContext を作らずに終了する
+        // If a collection with a known count is empty, return without creating a DbContext.
         if (entities is ICollection<TEntity> { Count: 0 })
         {
             return 0;
@@ -1117,14 +1120,14 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
 
         foreach (var entity in entities)
         {
-            // AddRange はナビゲーション先まで Added にするため、Entry.State 代入で対象のみを追加する
+            // AddRange marks navigation targets as Added too, so assign Entry.State to add only the targets.
             context.Entry(entity).State = EntityState.Added;
         }
 
         return await context.SaveChangesAsync(cancellationToken);
     }
 
-    /// <summary>エンティティ更新（更新対象ありで true）</summary>
+    /// <summary>Updates an entity (true when a target row was updated).</summary>
     public async Task<bool> UpdateAsync(
         TEntity entity,
         CancellationToken cancellationToken = default
@@ -1142,12 +1145,12 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
         }
         catch (DbUpdateConcurrencyException)
         {
-            // 更新対象が存在しない（既存版の「影響 0 行 → false」と同じ契約）
+            // No row to update exists (the same contract as the existing version's "0 affected rows → false").
             return false;
         }
     }
 
-    /// <summary>主キーによるエンティティ削除（削除対象ありで true）</summary>
+    /// <summary>Deletes an entity by primary key (true when a target row was deleted).</summary>
     public async Task<bool> DeleteAsync(TKey id, CancellationToken cancellationToken = default)
     {
         await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
@@ -1159,11 +1162,11 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
         return affected > 0;
     }
 
-    /// <summary>検索条件・並び順・Include をチェーン指定して取得するクエリを開始する（EF Core で実行）</summary>
+    /// <summary>Starts a query that retrieves entities with chained filters, orderings, and Includes (executed by EF Core).</summary>
     public SqlQuery<TEntity> Query() =>
         new(new EfCoreSqlQueryExecutor<TEntity, TContext>(_contextFactory));
 
-    /// <summary>RowState に従って 1 トランザクションで追加・更新・削除を保存する（既定で子をカスケード）</summary>
+    /// <summary>Saves inserts, updates, and deletes according to RowState within a single transaction (children are cascaded by default).</summary>
     public async Task<int> SaveAsync(
         TEntity entity,
         bool cascadeSave = true,
@@ -1174,7 +1177,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
     {
         ArgumentNullException.ThrowIfNull(entity);
 
-        // グラフ全体に変更が無ければ DbContext も作らずに終了する
+        // If there are no changes anywhere in the graph, return without even creating a DbContext.
         if (!EntityGraphSaver.HasChanges(entity, cascadeSave))
         {
             return 0;
@@ -1195,7 +1198,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
         );
     }
 
-    /// <summary>複数の集約ルートを 1 トランザクションでまとめて保存する（全件成功か全件ロールバックの原子的処理）</summary>
+    /// <summary>Saves multiple aggregate roots together within a single transaction (atomic: all succeed or all roll back).</summary>
     public async Task<int> SaveAsync(
         IEnumerable<TEntity> entities,
         bool cascadeSave = true,
@@ -1206,7 +1209,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
     {
         ArgumentNullException.ThrowIfNull(entities);
 
-        // 変更のあるグラフだけを対象にする（DbContext を作る前に絞り込む）
+        // Only graphs with changes are targeted (narrowed down before creating a DbContext).
         var targets = entities
             .Where(entity => entity is not null && EntityGraphSaver.HasChanges(entity, cascadeSave))
             .ToList();
@@ -1236,9 +1239,9 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
     }
 
     /// <summary>
-    /// 追跡済みグラフを保存する。記録された型のどれかに Save フックの登録があるときだけフック経路（明示トランザクション内で
-    /// Before → SaveChanges → After → Commit）に入り、1 つも無ければ<b>完全に既存経路</b>（明示トランザクションを張らず
-    /// SaveChanges を 1 回実行する＝意味的に従来と同一）で処理する。
+    /// Saves the tracked graph. It enters the hook path (Before → SaveChanges → After → Commit within an explicit transaction)
+    /// only when any of the recorded types has a save hook registration; when none do, it processes via <b>the entirely pre-existing path</b>
+    /// (executing SaveChanges once without an explicit transaction, semantically identical to before).
     /// </summary>
     private async Task<int> SaveTrackedGraphAsync(
         TContext context,
@@ -1249,14 +1252,14 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
         CancellationToken cancellationToken
     )
     {
-        // 記録された型のどれかにフック登録があるときだけフック経路に入る（1 つも無ければ既存経路）
+        // Enter the hook path only when any of the recorded types has a hook registration (when none do, use the pre-existing path).
         var hasHooks =
             _saveHooks is not null
             && tracked.Any(op => _saveHooks.GetInvoker(op.Entity.GetType()) is not null);
 
         if (!hasHooks)
         {
-            // 既存経路: 明示トランザクションなしで SaveChanges（内部で 1 トランザクションとして実行される）
+            // Pre-existing path: SaveChanges without an explicit transaction (executed internally as a single transaction).
             var rowsWithoutHooks = await SaveTrackedChangesAsync(
                 context,
                 tracked,
@@ -1272,10 +1275,10 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
             return rowsWithoutHooks;
         }
 
-        // フック経路: After に保存中 context（＋その CurrentTransaction）を閉じ込めた context を供給するセッション
+        // Hook path: a session that supplies After with a context enclosing the in-progress context (and its CurrentTransaction).
         var hooks = new SaveHookSession(_saveHooks!, _ => new EfCoreSaveHookContext(context));
 
-        // Before パス（SaveChanges 前）: 記録順に発火し、false は Entry を Unchanged に落として保存対象から除く
+        // Before pass (prior to SaveChanges): fires in recorded order; false demotes the Entry to Unchanged and removes it from the save targets.
         var survivors = new List<TrackedOperation>(tracked.Count);
 
         foreach (var op in tracked)
@@ -1291,7 +1294,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
             }
         }
 
-        // After を「操作後・コミット前」に発火するため、SaveChanges を明示トランザクション内で行う
+        // To fire After "post-operation, pre-commit", SaveChanges is performed within an explicit transaction.
         await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
 
         var rows = await SaveTrackedChangesAsync(
@@ -1301,7 +1304,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
             cancellationToken
         );
 
-        // After パス（コミット前）: 記録順に、実際に行った操作（切替時は Insert）で発火する
+        // After pass (pre-commit): fires in recorded order with the operation actually performed (Insert when switched).
         foreach (var op in survivors)
         {
             await hooks.InvokeAfterAsync(op.Entity, op.Operation, cancellationToken);
@@ -1309,7 +1312,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
 
         await transaction.CommitAsync(cancellationToken);
 
-        // 保存成功後に状態を確定（Added/Updated → Unchanged）し、スキップされた行は据え置く
+        // After a successful save, finalize the state (Added/Updated → Unchanged), leaving skipped rows as-is.
         foreach (var root in roots)
         {
             EntityGraphSaver.AcceptChanges(root, cascadeSave, hooks.Skipped);
@@ -1318,10 +1321,10 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
         return rows;
     }
 
-    /// <summary>生 SQL の SELECT を実行し、結果行を {TEntity} へマップして返す</summary>
+    /// <summary>Executes a raw SQL SELECT and returns the result rows mapped to {TEntity}.</summary>
     /// <remarks>
-    /// マッピング・束縛の意味論は既存 SQL Server 版と同一（全列必須・RowState=Unchanged）。
-    /// 実装は <see cref="ISqlExecutor"/>（EF Core 版）へ委譲する（束縛・マッピングの 1 系統化）。
+    /// The mapping and binding semantics are identical to the existing SQL Server version (all columns required, RowState=Unchanged).
+    /// The implementation delegates to <see cref="ISqlExecutor"/> (EF Core version), consolidating binding and mapping into a single path.
     /// </remarks>
     public Task<IReadOnlyList<TEntity>> QueryBySqlAsync(
         string sql,
@@ -1329,10 +1332,10 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
         CancellationToken cancellationToken = default
     ) => _sqlExecutor.QueryBySqlAsync<TEntity>(sql, parameters, cancellationToken);
 
-    /// <summary>生 SQL（UPDATE/DELETE/任意 DML）を実行し、影響行数を返す</summary>
+    /// <summary>Executes raw SQL (UPDATE/DELETE/any DML) and returns the number of affected rows.</summary>
     /// <remarks>
-    /// 呼び出しごとに DbContext（接続）を開閉する。複数文をアトミックに実行したい場合は、
-    /// 1 回の呼び出し内に方言のトランザクション文を記述すること。実装は <see cref="ISqlExecutor"/>（EF Core 版）へ委譲する。
+    /// Opens and closes a DbContext (connection) per call. To execute multiple statements atomically,
+    /// write the dialect's transaction statements within a single call. The implementation delegates to <see cref="ISqlExecutor"/> (EF Core version).
     /// </remarks>
     public Task<int> ExecuteSqlAsync(
         string sql,
@@ -1340,15 +1343,15 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
         CancellationToken cancellationToken = default
     ) => _sqlExecutor.ExecuteSqlAsync(sql, parameters, cancellationToken);
 
-    /// <summary>生 SQL を実行し、単一のスカラー値を返す（該当なし・DBNull は <c>default</c>）</summary>
-    /// <remarks>変換・束縛の意味論は既存 SQL Server 版と同一。実装は <see cref="ISqlExecutor"/>（EF Core 版）へ委譲する。</remarks>
+    /// <summary>Executes raw SQL and returns a single scalar value (no match / DBNull yields <c>default</c>).</summary>
+    /// <remarks>The conversion and binding semantics are identical to the existing SQL Server version. The implementation delegates to <see cref="ISqlExecutor"/> (EF Core version).</remarks>
     public Task<TResult?> ExecuteScalarSqlAsync<TResult>(
         string sql,
         object? parameters = null,
         CancellationToken cancellationToken = default
     ) => _sqlExecutor.ExecuteScalarSqlAsync<TResult>(sql, parameters, cancellationToken);
 
-    /// <summary>主キー等値の述語式（e => e.Key == id）をメタデータから組み立てる</summary>
+    /// <summary>Builds the primary key equality predicate (e => e.Key == id) from the metadata.</summary>
     private static Expression<Func<TEntity, bool>> BuildKeyPredicate(TKey id)
     {
         var parameter = Expression.Parameter(typeof(TEntity), "e");
@@ -1359,8 +1362,8 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
         return Expression.Lambda<Func<TEntity, bool>>(body, parameter);
     }
 
-    /// <summary>RowState → EntityState の変換でグラフを DbContext へ登録し、保存対象（非 Unchanged）を <paramref name="tracked"/> へ記録する（切断パターンの保存前処理）</summary>
-    /// <remarks>記録順はグラフの走査順（ルート→子）で、Save フックの Before/After はこの順で発火する。Deleted サブツリーの子も削除グループとして記録する。</remarks>
+    /// <summary>Registers the graph with the DbContext via RowState → EntityState conversion and records save targets (non-Unchanged) into <paramref name="tracked"/> (pre-save processing for the disconnected pattern).</summary>
+    /// <remarks>The recording order is the graph traversal order (root → children), and the save hooks' Before/After fire in this order. Children of a Deleted subtree are also recorded as a deletion group.</remarks>
     private static void TrackGraph(
         TContext context,
         TEntity entity,
@@ -1371,7 +1374,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
     {
         if (!cascadeSave)
         {
-            // 子をたどらず、ルート 1 件のみを保存対象にする
+            // Do not traverse children; only the single root is targeted for saving.
             var entry = context.Entry(entity);
             entry.State = ToEntityState(entity.RowState);
             RecordOperation(tracked, entity, entry);
@@ -1384,11 +1387,11 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
             {
                 var current = (EntityBase)node.Entry.Entity;
 
-                // 親が削除対象なら配下の扱いは cascadeDelete に従う（既存版の子孫先行 DELETE と同じ）
+                // When the parent is to be deleted, handling of descendants follows cascadeDelete (same as the existing version's descendants-first DELETE).
                 if (node.SourceEntry is { State: EntityState.Deleted })
                 {
-                    // cascadeDelete=false なら配下は対象外（Detached のままにすると配下の走査も止まる）。
-                    // Added（DB 未挿入）の子は削除対象が存在しないため対象外（既存版の DELETE 影響 0 行と同じ結果）
+                    // With cascadeDelete=false, descendants are excluded (leaving them Detached also stops traversal below them).
+                    // Added children (not yet inserted into the database) have no row to delete and are excluded (the same result as the existing version's DELETE affecting 0 rows).
                     if (cascadeDelete && !current.IsAdded)
                     {
                         node.Entry.State = EntityState.Deleted;
@@ -1398,14 +1401,14 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
                     return;
                 }
 
-                // Unchanged も追跡させ（EntityState.Unchanged）、配下の変更ノードまで走査を継続する
+                // Unchanged entities are also tracked (EntityState.Unchanged) so traversal continues down to changed nodes below them.
                 node.Entry.State = ToEntityState(current.RowState);
                 RecordOperation(tracked, current, node.Entry);
             }
         );
     }
 
-    /// <summary>EntityState が保存対象（Added/Modified/Deleted）ならフック発火用の記録を追加する（Unchanged は無視）</summary>
+    /// <summary>Adds a record for hook firing when the EntityState is a save target (Added/Modified/Deleted); Unchanged is ignored.</summary>
     private static void RecordOperation(
         List<TrackedOperation> tracked,
         EntityBase entity,
@@ -1426,7 +1429,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
         }
     }
 
-    /// <summary>RowState を EF Core の EntityState へ変換する</summary>
+    /// <summary>Converts a RowState into an EF Core EntityState.</summary>
     private static EntityState ToEntityState(RowState rowState) =>
         rowState switch
         {
@@ -1437,9 +1440,9 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
         };
 
     /// <summary>
-    /// SaveChanges を実行し、<see cref="DbUpdateConcurrencyException"/> を既存契約へ変換する
-    /// （insertWhenUpdateMissing=true なら更新対象なしの UPDATE を INSERT へ切り替えて再試行、
-    /// それ以外は <see cref="SaveConflictException"/>）。
+    /// Executes SaveChanges and converts a <see cref="DbUpdateConcurrencyException"/> into the existing contract
+    /// (with insertWhenUpdateMissing=true, an UPDATE with no target row is switched to an INSERT and retried;
+    /// otherwise a <see cref="SaveConflictException"/> is thrown).
     /// </summary>
     private static async Task<int> SaveTrackedChangesAsync(
         TContext context,
@@ -1456,7 +1459,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
             }
             catch (DbUpdateConcurrencyException ex)
             {
-                // 更新対象が存在しない（他ユーザーの削除等）。方針に応じて INSERT へ切替、または競合として通知する
+                // No row to update exists (deleted by another user, etc.). Depending on the policy, switch to INSERT or report as a conflict.
                 if (
                     insertWhenUpdateMissing
                     && ex.Entries.Count > 0
@@ -1467,7 +1470,7 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
                     {
                         entry.State = EntityState.Added;
 
-                        // 再試行で INSERT へ切り替えたノードは、After 発火時の操作も Insert に更新する（Before は Update で発火済み）
+                        // For nodes switched to INSERT on retry, the operation used when After fires is also updated to Insert (Before already fired as Update).
                         foreach (var op in tracked)
                         {
                             if (ReferenceEquals(op.Entry.Entity, entry.Entity))
@@ -1483,33 +1486,33 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
                 var conflict = ex.Entries.Count > 0 ? ex.Entries[0].Entity : null;
                 var description =
                     conflict is null
-                        ? "対象不明"
-                        : $"{conflict.GetType().Name}、キー {EntitySaveMetadata.For(conflict.GetType()).KeyProperty.GetValue(conflict)}";
+                        ? "unknown target"
+                        : $"{conflict.GetType().Name}, key {EntitySaveMetadata.For(conflict.GetType()).KeyProperty.GetValue(conflict)}";
                 throw new SaveConflictException(
-                    $"更新対象のレコードが見つかりませんでした（{description}）。他のユーザーに削除または変更された可能性があります。"
+                    $"The record to update was not found ({description}). It may have been deleted or modified by another user."
                 );
             }
         }
     }
 }
 
-/// <summary>Save フックの After に渡す、保存中の DbContext（＋その CurrentTransaction）に参加する EF Core コンテキスト</summary>
+/// <summary>EF Core context passed to save hook After callbacks that participates in the in-progress DbContext (and its CurrentTransaction).</summary>
 /// <remarks>
 /// <para>
-/// 生 SQL（<see cref="ExecuteSqlAsync"/>）は保存中 context の接続と現在のトランザクションで実行する
-/// （EfCoreSqlExecutor と同じ束縛ヘルパー <see cref="RawSqlMapper.BindParameters"/> を流用する）。別接続・別トランザクションは張らない。
+/// Raw SQL (<see cref="ExecuteSqlAsync"/>) executes on the in-progress context's connection and current transaction
+/// (reusing the same binding helper as EfCoreSqlExecutor, <see cref="RawSqlMapper.BindParameters"/>). No separate connection or transaction is opened.
 /// </para>
 /// <para>
-/// 除外列バイナリの書き込み（<see cref="WriteBinaryColumnAsync"/>）は、EF Core が方言固有のストリーミングを持てないため
-/// <see cref="NotSupportedException"/> を投げる（Stream アクセサの EF Core 方針と同じ）。同一トランザクションで列を更新したい場合は
-/// <see cref="ExecuteSqlAsync"/> を使うか、QuickER 版 Repository を利用する。
+/// Writing excluded binary columns (<see cref="WriteBinaryColumnAsync"/>) throws <see cref="NotSupportedException"/>
+/// because EF Core cannot host dialect-specific streaming (the same policy as the stream accessors for EF Core). To update the column
+/// within the same transaction, use <see cref="ExecuteSqlAsync"/> or the QuickER Repository.
 /// </para>
 /// </remarks>
 {{ infra_visibility }} sealed class EfCoreSaveHookContext(DbContext context) : ISaveHookContext
 {
     private readonly DbContext _context = context;
 
-    /// <summary>保存中トランザクション内で生 SQL（任意 DML）を実行し、影響行数を返す（束縛は RawSqlMapper と 1 系統）</summary>
+    /// <summary>Executes raw SQL (any DML) within the in-progress save transaction and returns the number of affected rows (binding shares the single RawSqlMapper path).</summary>
     public async Task<int> ExecuteSqlAsync(
         string sql,
         object? parameters = null,
@@ -1518,18 +1521,18 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
     {
         ArgumentNullException.ThrowIfNull(sql);
 
-        // 接続は保存中の DbContext が所有しており、既にトランザクションで開いている
+        // The connection is owned by the in-progress DbContext and is already open within the transaction.
         var connection = _context.Database.GetDbConnection();
 
         await using var command = connection.CreateCommand();
         command.CommandText = sql;
-        // 進行中の保存トランザクションに参加する（別接続・別トランザクションを張らない）
+        // Participate in the ongoing save transaction (no separate connection or transaction is opened).
         command.Transaction = _context.Database.CurrentTransaction?.GetDbTransaction();
         RawSqlMapper.BindParameters(command, parameters);
         return await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
-    /// <summary>EF Core モードでは除外列バイナリの書き込みは非対応（Stream アクセサと同方針＝生 SQL か QuickER 版 Repository を使う）</summary>
+    /// <summary>Writing excluded binary columns is not supported in EF Core mode (the same policy as the stream accessors: use raw SQL or the QuickER Repository).</summary>
     public Task<bool> WriteBinaryColumnAsync(
         string propertyName,
         object key,
@@ -1538,23 +1541,24 @@ public abstract partial class EfCoreRepository<TEntity, TKey, TContext>(
         CancellationToken cancellationToken = default
     ) =>
         throw new NotSupportedException(
-            "EF Core モードでは Save フックの除外列バイナリ書き込み（WriteBinaryColumnAsync）は使用できません。"
-                + "生 SQL（ExecuteSqlAsync）で更新するか、QuickER 版 Repository を使ってください。"
+            "Writing excluded binary columns from a save hook (WriteBinaryColumnAsync) is not available in EF Core mode. "
+                + "Update the column with raw SQL (ExecuteSqlAsync) or use the QuickER Repository."
         );
 }
 {{~ end ~}}
 {{~ if ef_core && render_ef_core && !runtime_package_export ~}}
 
-/// <summary>生成された EF Core 版リポジトリ群を DI コンテナへ登録する拡張</summary>
+/// <summary>Extensions that register the generated EF Core repositories into the DI container.</summary>
 public static class GeneratedEfCoreRepositoryServiceCollectionExtensions
 {
-    /// <summary>DbContext 構成とともに、生成された EF Core 版の全リポジトリを DI コンテナへ登録する</summary>
+    /// <summary>Registers all generated EF Core repositories into the DI container, together with the DbContext configuration.</summary>
     /// <remarks>
-    /// 既存の <c>AddGeneratedSqlServerRepositories</c> / <c>AddGeneratedSqliteRepositories</c> と同じインターフェイスへ
-    /// EF Core 版実装を登録するため、呼び出しの差し替えだけでQuickER 版 Repository ⇔ EF Core（方言はアプリ側の構成で選択）を切り替えられる。
+    /// Because the EF Core implementations are registered against the same interfaces as the existing
+    /// <c>AddGeneratedSqlServerRepositories</c> / <c>AddGeneratedSqliteRepositories</c>, swapping the call alone switches between
+    /// the QuickER Repository ⇔ EF Core (with the dialect chosen by the application's configuration).
     /// </remarks>
-    /// <param name="services">登録先のサービスコレクション</param>
-    /// <param name="configureDbContext">方言プロバイダ・接続文字列の構成（例: <c>options => options.UseSqlServer(...)</c>）</param>
+    /// <param name="services">The service collection to register into.</param>
+    /// <param name="configureDbContext">Configuration of the dialect provider and connection string (e.g. <c>options => options.UseSqlServer(...)</c>).</param>
     public static IServiceCollection AddGeneratedEfCoreRepositories(
         this IServiceCollection services,
         Action<DbContextOptionsBuilder> configureDbContext
@@ -1566,7 +1570,7 @@ public static class GeneratedEfCoreRepositoryServiceCollectionExtensions
         services.AddDbContextFactory<QuickErDbContext>(configureDbContext);
         services.AddSingleton<ISqlExecutor, EfCoreSqlExecutor<QuickErDbContext>>();
 
-        // Save フックのレジストリを既定登録する（ISaveHook<T> の登録が無ければ完全 no-op）
+        // Register the save hook registry by default (a complete no-op when there are no ISaveHook<T> registrations).
         services.TryAddScoped<ISaveHookRegistry>(provider => new ServiceProviderSaveHookRegistry(
             provider
         ));
@@ -1581,7 +1585,7 @@ public static class GeneratedEfCoreRepositoryServiceCollectionExtensions
 {{~ for repository in repository_classes ~}}
 {{~ efcore_impl_members = join_members repository.query_shared_impl_block repository.binary_stream_ef_impl_block ~}}
 
-/// <summary>{{ repository.entity_class_name }} 用リポジトリの EF Core 版実装</summary>
+/// <summary>EF Core implementation of the repository for {{ repository.entity_class_name }}.</summary>
 public sealed partial class EfCore{{ repository.class_name }}(
     IDbContextFactory<QuickErDbContext> contextFactory,
     ISaveHookRegistry? saveHooks = null
