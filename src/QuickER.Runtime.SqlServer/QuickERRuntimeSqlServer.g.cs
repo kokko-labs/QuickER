@@ -216,9 +216,12 @@ public abstract partial class SqlServerRepository<TEntity, TKey>(
         await using var command = new SqlCommand(_metadata.SelectAllSql, connection);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
 
+        // 列名→ordinal は行ごとに引かず、結果セットに対して 1 度だけ解決する
+        var ordinals = _metadata.SelectOrdinals(reader);
+
         while (await reader.ReadAsync(cancellationToken))
         {
-            items.Add(_metadata.MapEntity<TEntity>(reader));
+            items.Add(_metadata.MapEntity<TEntity>(reader, ordinals));
         }
 
         return items;
@@ -870,12 +873,15 @@ public sealed class SqlServerSqlQueryExecutor<TEntity>(ISqlConnectionFactory con
         await using var command = CreateCommand(connection, sql, parameters);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
 
+        // 列名→ordinal は結果セットに対して 1 度だけ解決する
+        var ordinals = metadata.ColumnOrdinals(reader, projectionColumns);
+
         var results = new List<TResult>();
 
         while (await reader.ReadAsync(cancellationToken))
         {
             // 参照列のみを埋めた部分エンティティに射影を適用する（RowState は無関係＝射影後に捨てる）
-            var entity = metadata.MapEntityColumns<TEntity>(reader, projectionColumns);
+            var entity = metadata.MapEntityColumns<TEntity>(reader, projectionColumns, ordinals);
             results.Add(project(entity));
         }
 
@@ -1033,6 +1039,9 @@ public sealed class SqlServerSqlQueryExecutor<TEntity>(ISqlConnectionFactory con
         await using var command = CreateCommand(connection, sql, parameters);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
 
+        // 列名→ordinal は結果セットに対して 1 度だけ解決する
+        var ordinals = metadata.ColumnOrdinals(reader, metadata.AllProperties);
+
         var results = new List<TEntity>();
 
         while (await reader.ReadAsync(cancellationToken))
@@ -1042,6 +1051,7 @@ public sealed class SqlServerSqlQueryExecutor<TEntity>(ISqlConnectionFactory con
                 metadata.MapEntityColumns<TEntity>(
                     reader,
                     metadata.AllProperties,
+                    ordinals,
                     markUnchanged: true
                 )
             );
@@ -1940,6 +1950,8 @@ public sealed class EntitySaveMetadata
             // 行マッピングの列名解決をビルド時に確定させ、行ごとの [Column] リフレクションを排除する
             SelectColumns = selectProperties.Select(property => (property, GetColumnName(property))).ToList(),
             ColumnNameByProperty = columns.ToDictionary(property => property, GetColumnName),
+            // SelectColumns（固定 SELECT 集合）用の式木マテリアライザを型ごとに 1 度だけコンパイルする
+            SelectMaterializer = BuildSelectMaterializer(entityType, selectProperties),
             InsertProperties = insertProperties,
             NonKeyProperties = nonKeyProperties,
             Columns = selectProperties.Select(property => (property.Name, GetColumnName(property))).ToList(),
@@ -1960,8 +1972,119 @@ public sealed class EntitySaveMetadata
         };
     }
 
-    /// <summary>データリーダーの 1 行をエンティティへマッピングする</summary>
+    // ===== 行マテリアライザ（式木コンパイル・ホットパスのリフレクション除去） =====
+
+    /// <summary><see cref="DbDataReader.GetValue(int)"/> の解決済み <see cref="MethodInfo"/>（型特化できない列のフォールバックで使う）</summary>
+    private static readonly MethodInfo _getValueMethod = typeof(DbDataReader).GetMethod(
+        nameof(DbDataReader.GetValue),
+        new[] { typeof(int) }
+    )!;
+
+    /// <summary><see cref="SetColumnValue"/> の解決済み <see cref="MethodInfo"/>（型特化できない列のフォールバックで呼ぶ）</summary>
+    private static readonly MethodInfo _setColumnValueMethod = typeof(EntitySaveMetadata).GetMethod(
+        nameof(SetColumnValue),
+        BindingFlags.NonPublic | BindingFlags.Static
+    )!;
+
+    /// <summary><see cref="EntityBase.RowState"/> の解決済み <see cref="PropertyInfo"/></summary>
+    private static readonly PropertyInfo _rowStateProperty = typeof(EntityBase).GetProperty(
+        nameof(EntityBase.RowState)
+    )!;
+
+    /// <summary>SelectColumns（固定 SELECT 集合）1 行分を式木コンパイル済みでマテリアライズするデリゲート（型ごとに 1 度構築しキャッシュ）</summary>
+    /// <remarks>引数は <c>(reader, ordinals)</c>。<c>ordinals</c> は SelectColumns と同順の列 ordinal で、行ループの前に 1 度だけ解決する。</remarks>
+    public required Func<DbDataReader, int[], EntityBase> SelectMaterializer { get; init; }
+
+    /// <summary>
+    /// SelectColumns（固定 SELECT 集合）の 1 行を、事前解決した ordinal 配列を用いてエンティティへマテリアライズする
+    /// 式木コンパイル済みデリゲートを構築する（型ごとに 1 度）。
+    /// </summary>
+    /// <remarks>
+    /// 型特化アクセサを持つ列はボクシングなしで直接読み（<c>DBNull</c> は既定値＝従来の <c>SetValue(null)</c> と同値）、
+    /// それ以外の列は従来の <see cref="SetColumnValue"/>（方言別変換／値オブジェクト包み直し）へフォールバックする。
+    /// 生成される最終状態（<c>RowState = Unchanged</c>）は従来の行マッピングと一致する。
+    /// </remarks>
+    private static Func<DbDataReader, int[], EntityBase> BuildSelectMaterializer(
+        Type entityType,
+        IReadOnlyList<PropertyInfo> properties
+    )
+    {
+        var readerParam = Expression.Parameter(typeof(DbDataReader), "reader");
+        var ordinalsParam = Expression.Parameter(typeof(int[]), "ordinals");
+        var entityVar = Expression.Variable(entityType, "entity");
+
+        var body = new List<Expression>
+        {
+            Expression.Assign(entityVar, Expression.New(entityType)),
+        };
+
+        for (var i = 0; i < properties.Count; i++)
+        {
+            var ordinal = Expression.ArrayIndex(ordinalsParam, Expression.Constant(i));
+            body.Add(BuildColumnAssign(entityVar, readerParam, ordinal, properties[i]));
+        }
+
+        // DB から読み込んだ行は変更なし扱いにする（従来の行マッピングと同じ事後状態）
+        body.Add(
+            Expression.Assign(
+                Expression.Property(entityVar, _rowStateProperty),
+                Expression.Constant(RowState.Unchanged)
+            )
+        );
+        body.Add(Expression.Convert(entityVar, typeof(EntityBase)));
+
+        var block = Expression.Block(typeof(EntityBase), new[] { entityVar }, body);
+        return Expression
+            .Lambda<Func<DbDataReader, int[], EntityBase>>(block, readerParam, ordinalsParam)
+            .Compile();
+    }
+
+    /// <summary>1 列分の代入式を作る。型特化できる列はボクシングなしで直接読み、それ以外は <see cref="SetColumnValue"/> へフォールバックする</summary>
+    private static Expression BuildColumnAssign(
+        Expression entityExpr,
+        ParameterExpression readerParam,
+        Expression ordinal,
+        PropertyInfo property
+    )
+    {
+
+        // フォールバック: 従来の SetColumnValue（DBNull→null／方言別変換／値オブジェクト包み直し）を ordinal 経由で呼ぶ
+        return Expression.Call(
+            _setColumnValueMethod,
+            Expression.Convert(entityExpr, typeof(EntityBase)),
+            Expression.Constant(property, typeof(PropertyInfo)),
+            Expression.Call(readerParam, _getValueMethod, ordinal)
+        );
+    }
+
+    /// <summary>SelectColumns の各列名を、このリーダー上の ordinal へ 1 度だけ解決する（行ループの前に呼ぶ）</summary>
+    public int[] SelectOrdinals(DbDataReader reader)
+    {
+        var ordinals = new int[SelectColumns.Count];
+
+        for (var i = 0; i < ordinals.Length; i++)
+        {
+            ordinals[i] = reader.GetOrdinal(SelectColumns[i].ColumnName);
+        }
+
+        return ordinals;
+    }
+
+    /// <summary>データリーダーの 1 行をエンティティへマッピングする（ordinal 事前解決版・ホットループ用）</summary>
+    public TEntity MapEntity<TEntity>(
+        SqlDataReader reader,
+        int[] ordinals
+    )
+        where TEntity : EntityBase => (TEntity)SelectMaterializer(reader, ordinals);
+
+    /// <summary>データリーダーの 1 行をエンティティへマッピングする（SelectColumns の ordinal を都度解決する単一行版）</summary>
     public TEntity MapEntity<TEntity>(SqlDataReader reader)
+        where TEntity : EntityBase, new() => (TEntity)SelectMaterializer(reader, SelectOrdinals(reader));
+
+    /// <summary>
+    /// 生 SQL 用の厳密な行マッピング（列集合・列型が可変のため型特化せず、従来の寛容な <see cref="SetColumnValue"/> を使う）。
+    /// </summary>
+    private TEntity MapEntityStrict<TEntity>(SqlDataReader reader)
         where TEntity : EntityBase, new()
     {
         var entity = new TEntity();
@@ -1995,7 +2118,7 @@ public sealed class EntitySaveMetadata
     }
 
     /// <summary>
-    /// 生 SQL の結果行を {TEntity} へマップする。<see cref="MapEntity"/> と同じ厳密マッピング（SELECT 対象列は必須）だが、
+    /// 生 SQL の結果行を {TEntity} へマップする。<see cref="MapEntityStrict"/> と同じ厳密マッピング（SELECT 対象列は必須）だが、
     /// 列不足（部分 SELECT）で列が引けなかった場合は、必要な列を含む <see cref="InvalidOperationException"/> でラップして
     /// 分かりやすくする。未知の列参照で投げられる例外はデータリーダーの実装で異なる
     /// （<see cref="IndexOutOfRangeException"/> と <see cref="ArgumentOutOfRangeException"/>）ため両方を捕捉する。
@@ -2008,7 +2131,7 @@ public sealed class EntitySaveMetadata
 
         try
         {
-            entity = MapEntity<TEntity>(reader);
+            entity = MapEntityStrict<TEntity>(reader);
         }
         catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentOutOfRangeException)
         {
@@ -2097,15 +2220,65 @@ public sealed class EntitySaveMetadata
             properties.Select(property => $"[{GetColumnName(property)}]")
         );
 
+    /// <summary>列プロパティごとの「reader+ordinal → エンティティへ設定」子（式木コンパイル済み・プロパティ単位でキャッシュ）</summary>
+    private static readonly ConcurrentDictionary<
+        PropertyInfo,
+        Action<EntityBase, DbDataReader, int>
+    > _columnBinderCache = new();
+
+    /// <summary>1 列分の型特化バインダを取得する（射影・全列取得の可変列集合を行ごとにリフレクションせず束縛するため）</summary>
+    private static Action<EntityBase, DbDataReader, int> ColumnBinder(PropertyInfo property) =>
+        _columnBinderCache.GetOrAdd(property, BuildColumnBinder);
+
+    /// <summary>1 列分の式木（<see cref="BuildColumnAssign"/>）を <c>Action&lt;EntityBase, DbDataReader, int&gt;</c> へコンパイルする</summary>
+    private static Action<EntityBase, DbDataReader, int> BuildColumnBinder(PropertyInfo property)
+    {
+        var entityParam = Expression.Parameter(typeof(EntityBase), "entity");
+        var readerParam = Expression.Parameter(typeof(DbDataReader), "reader");
+        var ordinalParam = Expression.Parameter(typeof(int), "ordinal");
+
+        // プロパティは派生エンティティ型で宣言されるため、EntityBase をその宣言型へ落としてからアクセスする
+        var assign = BuildColumnAssign(
+            Expression.Convert(entityParam, property.DeclaringType!),
+            readerParam,
+            ordinalParam,
+            property
+        );
+
+        return Expression
+            .Lambda<Action<EntityBase, DbDataReader, int>>(
+                assign,
+                entityParam,
+                readerParam,
+                ordinalParam
+            )
+            .Compile();
+    }
+
+    /// <summary>指定した列プロパティ群の列名を、このリーダー上の ordinal へ 1 度だけ解決する（射影・全列取得の行ループの前に呼ぶ）</summary>
+    public int[] ColumnOrdinals(DbDataReader reader, IReadOnlyList<PropertyInfo> properties)
+    {
+        var ordinals = new int[properties.Count];
+
+        for (var i = 0; i < ordinals.Length; i++)
+        {
+            ordinals[i] = reader.GetOrdinal(ColumnNameByProperty[properties[i]]);
+        }
+
+        return ordinals;
+    }
+
     /// <summary>
     /// データリーダーの 1 行を、指定した列プロパティのみマッピングした {TEntity} を返す（射影のサーバー側列刈り込み・WithUnboundedBinary の全列取得で共用）。
     /// SELECT に含めた列だけを束縛し、それ以外の列は既定値のまま。射影用途（<paramref name="markUnchanged"/> = false・既定）は
     /// セレクタ適用後に捨てるため RowState を設定しないが、WithUnboundedBinary の全列取得（<paramref name="markUnchanged"/> = true）は
-    /// 通常取得と同等の正当なエンティティを返すため RowState=Unchanged を確定する。
+    /// 通常取得と同等の正当なエンティティを返すため RowState=Unchanged を確定する。<paramref name="ordinals"/> は
+    /// <see cref="ColumnOrdinals"/> で行ループ前に 1 度だけ解決した、<paramref name="properties"/> と同順の列 ordinal。
     /// </summary>
     public TEntity MapEntityColumns<TEntity>(
         SqlDataReader reader,
         IReadOnlyList<PropertyInfo> properties,
+        int[] ordinals,
         bool markUnchanged = false
     )
         where TEntity : EntityBase
@@ -2113,9 +2286,9 @@ public sealed class EntitySaveMetadata
         // クエリ実行器の TEntity は new() 制約を持たないため Activator で生成する（エンティティは必ず引数なしコンストラクタを持つ）
         var entity = (TEntity)Activator.CreateInstance(typeof(TEntity))!;
 
-        foreach (var property in properties)
+        for (var i = 0; i < properties.Count; i++)
         {
-            SetColumnValue(entity, property, reader[ColumnNameByProperty[property]]);
+            ColumnBinder(properties[i])(entity, reader, ordinals[i]);
         }
 
         if (markUnchanged)
