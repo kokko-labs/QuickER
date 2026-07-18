@@ -1,8 +1,7 @@
 <Window
-  x:Class="QuickER.AI.UI.InformationDetailsDialog"
+  x:Class="QuickER.Gui.Common.InformationDetailsDialog"
   xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
   xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-  xmlns:res="clr-namespace:QuickER.AI.UI.Resources"
   Width="640"
   Height="420"
   MinWidth="520"
@@ -60,7 +59,7 @@
 
     <Button
       Grid.Row="2"
-      Content="{x:Static res:Strings.Common_OK}"
+      Content="OK"
       Width="88"
       HorizontalAlignment="Right"
       Margin="0,12,0,0"

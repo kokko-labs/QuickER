@@ -16,52 +16,13 @@ namespace QuickER.Tests.ViewModels;
 /// </summary>
 public class MainViewModelDependencyInjectionTests
 {
-    /// <summary>AI チャットを開くコマンドが、窓を直接 new せずランチャへ委譲することを検証する</summary>
-    [Fact(DisplayName = "OpenAiChatCommand は IAiChatLauncher.Open へ委譲する")]
-    public void OpenAiChatCommand_DelegatesToLauncher()
-    {
-        var launcher = new RecordingAiChatLauncher();
-        var vm = new MainViewModel(
-            new StubDialogService(),
-            new StubAppDialogService(),
-            new StubFileDialogService(),
-            launcher
-        );
-
-        vm.OpenAiChatCommand.Execute(null);
-
-        launcher.OpenedHost.Should().BeSameAs(vm);
-    }
-
-    /// <summary>終了時の AI チャット強制終了が、ランチャの Close へ委譲することを検証する</summary>
-    [Fact(DisplayName = "CloseAiChatDialog は IAiChatLauncher.Close へ委譲する")]
-    public void CloseAiChatDialog_DelegatesToLauncher()
-    {
-        var launcher = new RecordingAiChatLauncher();
-        var vm = new MainViewModel(
-            new StubDialogService(),
-            new StubAppDialogService(),
-            new StubFileDialogService(),
-            launcher
-        );
-
-        vm.CloseAiChatDialog();
-
-        launcher.CloseCount.Should().Be(1);
-    }
-
     /// <summary>保存コマンドが、ファイル選択スタブの返すパスへ実際にドキュメントを書き出すことを検証する</summary>
     [Fact(DisplayName = "SaveCommand はファイル選択結果のパスへ保存する")]
     public void SaveCommand_WritesDocumentToPickedPath()
     {
         var path = Path.Combine(Path.GetTempPath(), $"er-di-{Guid.NewGuid()}.json");
         var files = new StubFileDialogService { SaveResult = new FileDialogResult(path, 1) };
-        var vm = new MainViewModel(
-            new StubDialogService(),
-            new StubAppDialogService(),
-            files,
-            new RecordingAiChatLauncher()
-        );
+        var vm = new MainViewModel(new StubDialogService(), new StubAppDialogService(), files);
         vm.AddEntityCommand.Execute(null);
 
         try
@@ -84,12 +45,7 @@ public class MainViewModelDependencyInjectionTests
     public void SaveCommand_DoesNothing_WhenCancelled()
     {
         var files = new StubFileDialogService { SaveResult = null };
-        var vm = new MainViewModel(
-            new StubDialogService(),
-            new StubAppDialogService(),
-            files,
-            new RecordingAiChatLauncher()
-        );
+        var vm = new MainViewModel(new StubDialogService(), new StubAppDialogService(), files);
         vm.AddEntityCommand.Execute(null);
 
         var act = () => vm.SaveCommand.Execute(null);
@@ -159,17 +115,5 @@ public class MainViewModelDependencyInjectionTests
         ) => SaveResult;
 
         public string? PickFolder(string title, string? initialDirectory = null) => FolderResult;
-    }
-
-    /// <summary>AI チャットウィンドウを生成せず、呼び出しを記録するスタブ</summary>
-    private sealed class RecordingAiChatLauncher : IAiChatLauncher
-    {
-        public MainViewModel? OpenedHost { get; private set; }
-
-        public int CloseCount { get; private set; }
-
-        public void Open(MainViewModel host) => OpenedHost = host;
-
-        public void Close() => CloseCount++;
     }
 }

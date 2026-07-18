@@ -10,6 +10,7 @@ using QuickER.AI;
 using QuickER.AI.Mock.Resources;
 using QuickER.AI.UI;
 using QuickER.Gui.Abstractions;
+using QuickER.Gui.Common;
 using QuickER.Model;
 
 namespace QuickER.AI.Mock;

@@ -4,6 +4,7 @@
   xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
   xmlns:chat="clr-namespace:QuickER.AI;assembly=QuickER.AI"
   xmlns:ui="clr-namespace:QuickER.AI.UI;assembly=QuickER.AI.UI"
+  xmlns:common="clr-namespace:QuickER.Gui.Common;assembly=QuickER.Gui.Common"
   xmlns:local="clr-namespace:QuickER.AI.Mock"
   xmlns:res="clr-namespace:QuickER.AI.Mock.Resources"
   Title="{x:Static res:Strings.Mock_WindowTitle}"
@@ -413,7 +414,7 @@
                   Padding="4,5"
                   Margin="0,0,8,0"
                   ToolTip="{x:Static res:Strings.Mock_ApiKeyTooltip}"
-                  ui:PasswordBoxBehavior.BoundPassword="{Binding Connection.ApiKey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                  common:PasswordBoxBehavior.BoundPassword="{Binding Connection.ApiKey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                 />
                 <CheckBox
                   Grid.Column="2"

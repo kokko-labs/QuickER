@@ -713,22 +713,6 @@ public partial class MainViewModel
         );
     }
 
-    // ---------------- AI チャット ----------------
-
-    /// <summary>AI チャットウィンドウを開く（既存があれば再利用する）</summary>
-    [RelayCommand]
-    private void OpenAiChat() => _aiChat.Open(this);
-
-    /// <summary>アプリ終了時に AI チャット画面を強制終了する</summary>
-    public void CloseAiChatDialog() => _aiChat.Close();
-
-    /// <summary>AI モック生成ウィンドウを開く（既存があれば再利用する）</summary>
-    [RelayCommand]
-    private void OpenMockGeneration() => _mockGeneration.Open(this);
-
-    /// <summary>アプリ終了時に AI モック生成画面を強制終了する</summary>
-    public void CloseMockGenerationDialog() => _mockGeneration.Close();
-
     // ---------------- Save / Load ----------------
 
     /// <summary>保存ダイアログでパスを選び、現在のダイアグラムを JSON 形式で保存する</summary>

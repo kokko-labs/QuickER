@@ -301,4 +301,10 @@
   <data name="Mock_RemoveModelFromHistory" xml:space="preserve">
     <value>履歴から削除</value>
   </data>
+  <data name="Toolbar_MockGeneration" xml:space="preserve">
+    <value>AIモック</value>
+  </data>
+  <data name="Toolbar_MockGenerationTooltip" xml:space="preserve">
+    <value>現在の ER 図から AI で Web モック画面（HTML）を生成</value>
+  </data>
 </root>

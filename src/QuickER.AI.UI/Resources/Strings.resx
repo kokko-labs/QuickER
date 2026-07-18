@@ -130,7 +130,4 @@
   <data name="Attachment_ClipboardCaptureFailed" xml:space="preserve">
     <value>Could not capture the clipboard contents as an image.</value>
   </data>
-  <data name="Common_OK" xml:space="preserve">
-    <value>OK</value>
-  </data>
 </root>

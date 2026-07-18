@@ -1,7 +1,6 @@
 using Anthropic.Models.Messages;
 using FluentAssertions;
 using QuickER.AI;
-using QuickER.Services.Chat;
 
 namespace QuickER.Tests.Services.Chat;
 

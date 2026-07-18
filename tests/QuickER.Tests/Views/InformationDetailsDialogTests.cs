@@ -1,6 +1,6 @@
 using System.Windows.Controls;
 using FluentAssertions;
-using QuickER.AI.UI;
+using QuickER.Gui.Common;
 
 namespace QuickER.Tests.Views;
 

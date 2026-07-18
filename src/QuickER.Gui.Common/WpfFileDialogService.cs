@@ -2,7 +2,7 @@ using System.IO;
 using Microsoft.Win32;
 using QuickER.Gui.Abstractions;
 
-namespace QuickER.AI.UI;
+namespace QuickER.Gui.Common;
 
 /// <summary><see cref="Microsoft.Win32"/> のダイアログを用いた <see cref="IFileDialogService"/> の既定実装</summary>
 public sealed class WpfFileDialogService : IFileDialogService

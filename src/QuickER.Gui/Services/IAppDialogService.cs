@@ -1,7 +1,7 @@
 using System.Windows;
-using QuickER.AI.UI;
 using QuickER.CodeGen.UI;
 using QuickER.Gui.Abstractions;
+using QuickER.Gui.Common;
 using QuickER.Model;
 using QuickER.Provider;
 using QuickER.ViewModels;

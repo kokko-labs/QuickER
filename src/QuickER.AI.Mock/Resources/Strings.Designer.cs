@@ -521,5 +521,17 @@ namespace QuickER.AI.Mock.Resources {
                 return ResourceManager.GetString("Mock_RemoveModelFromHistory", resourceCulture);
             }
         }
+
+        public static string Toolbar_MockGeneration {
+            get {
+                return ResourceManager.GetString("Toolbar_MockGeneration", resourceCulture);
+            }
+        }
+
+        public static string Toolbar_MockGenerationTooltip {
+            get {
+                return ResourceManager.GetString("Toolbar_MockGenerationTooltip", resourceCulture);
+            }
+        }
     }
 }

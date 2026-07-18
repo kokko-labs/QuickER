@@ -1,7 +1,7 @@
 using System.Windows;
 using QuickER.Gui.Abstractions;
 
-namespace QuickER.AI.UI;
+namespace QuickER.Gui.Common;
 
 /// <summary><see cref="MessageBox"/> を用いた <see cref="IDialogService"/> の既定の実装</summary>
 public sealed class MessageBoxDialogService : IDialogService

@@ -388,30 +388,6 @@ namespace QuickER.Resources {
             }
         }
         
-        public static string Toolbar_OpenAiChat {
-            get {
-                return ResourceManager.GetString("Toolbar_OpenAiChat", resourceCulture);
-            }
-        }
-        
-        public static string Toolbar_OpenAiChatTooltip {
-            get {
-                return ResourceManager.GetString("Toolbar_OpenAiChatTooltip", resourceCulture);
-            }
-        }
-        
-        public static string Toolbar_MockGeneration {
-            get {
-                return ResourceManager.GetString("Toolbar_MockGeneration", resourceCulture);
-            }
-        }
-        
-        public static string Toolbar_MockGenerationTooltip {
-            get {
-                return ResourceManager.GetString("Toolbar_MockGenerationTooltip", resourceCulture);
-            }
-        }
-        
         public static string Toolbar_GenerateCSharp {
             get {
                 return ResourceManager.GetString("Toolbar_GenerateCSharp", resourceCulture);

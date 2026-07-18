@@ -301,4 +301,10 @@ An error occurred during generation: {0}
   <data name="Mock_RemoveModelFromHistory" xml:space="preserve">
     <value>Remove from history</value>
   </data>
+  <data name="Toolbar_MockGeneration" xml:space="preserve">
+    <value>AI Mock</value>
+  </data>
+  <data name="Toolbar_MockGenerationTooltip" xml:space="preserve">
+    <value>Generate a web mock screen (HTML) from the current ER diagram with AI</value>
+  </data>
 </root>

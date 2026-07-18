@@ -1,6 +1,5 @@
 using System.Text;
 using System.Text.Json;
-using QuickER.AI;
 using QuickER.Model;
 using QuickER.ViewModels;
 

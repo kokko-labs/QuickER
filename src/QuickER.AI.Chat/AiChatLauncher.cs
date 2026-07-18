@@ -1,36 +1,46 @@
-using QuickER.AI.Chat;
-using QuickER.Services.Chat;
-using QuickER.ViewModels;
+using QuickER.Extensibility;
 
-namespace QuickER.Services;
+namespace QuickER.AI.Chat;
 
 /// <summary>AI チャットウィンドウ（モードレス・シングルトン）の生存期間を管理するインターフェース</summary>
 /// <remarks>
-/// モーダルダイアログ（<see cref="IAppDialogService"/>）とは異なり、表示しっぱなしで再利用される
-/// 単一ウィンドウのライフサイクルをここに隔離し、ViewModel から <c>Views.AiChatDialog</c> 参照を除去する。
+/// モーダルダイアログとは異なり、表示しっぱなしで再利用される単一ウィンドウのライフサイクルをここに隔離する。
+/// 操作対象の ER 図は、コンストラクタ注入された <see cref="IErDiagramHost"/> 契約から得る
+/// （アプリ本体の具象 ViewModel には依存しない）。
 /// </remarks>
 public interface IAiChatLauncher
 {
     /// <summary>AI チャットウィンドウを開く（既存があれば再利用し、前面へ出す）</summary>
-    /// <param name="host">AI ツール操作の対象となる主 ViewModel</param>
-    void Open(MainViewModel host);
+    void Open();
 
     /// <summary>AI チャットウィンドウを実際に閉じる（アプリ終了時などに呼ぶ）</summary>
     void Close();
 }
 
 /// <summary><c>AiChatDialog</c> を保持・再利用する <see cref="IAiChatLauncher"/> の既定実装</summary>
+/// <remarks>
+/// 操作対象の ER 図能力は <see cref="IErDiagramHost"/> 契約から取り、
+/// <see cref="ErDiagramHostChatAdapter"/> でチャット固有の <see cref="IErDiagramChatHost"/> へ適合させる。
+/// </remarks>
 public sealed class AiChatLauncher : IAiChatLauncher
 {
+    private readonly IErDiagramHost _host;
+
     /// <summary>シングルトンの AI チャットウィンドウ（未生成時は null）</summary>
     private AiChatDialog? _dialog;
 
+    /// <summary>操作対象の ER 図能力を提供する <see cref="IErDiagramHost"/> を注入して生成する</summary>
+    public AiChatLauncher(IErDiagramHost host)
+    {
+        _host = host;
+    }
+
     /// <inheritdoc />
-    public void Open(MainViewModel host)
+    public void Open()
     {
         if (_dialog is null)
         {
-            var chatHost = new MainViewModelChatHost(host);
+            var chatHost = new ErDiagramHostChatAdapter(_host);
             var viewModel = new AiChatDialogViewModel(chatHost);
             _dialog = new AiChatDialog(viewModel);
         }

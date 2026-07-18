@@ -263,5 +263,17 @@ namespace QuickER.AI.Chat.Resources {
                 return ResourceManager.GetString("Chat_RemoveModelFromHistory", resourceCulture);
             }
         }
+
+        public static string Toolbar_OpenAiChat {
+            get {
+                return ResourceManager.GetString("Toolbar_OpenAiChat", resourceCulture);
+            }
+        }
+
+        public static string Toolbar_OpenAiChatTooltip {
+            get {
+                return ResourceManager.GetString("Toolbar_OpenAiChatTooltip", resourceCulture);
+            }
+        }
     }
 }

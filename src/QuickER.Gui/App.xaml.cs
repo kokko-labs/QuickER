@@ -2,8 +2,9 @@ using System.Globalization;
 using System.Threading;
 using System.Windows;
 using Microsoft.Extensions.DependencyInjection;
-using QuickER.AI.UI;
+using QuickER.Extensibility;
 using QuickER.Gui.Abstractions;
+using QuickER.Gui.Common;
 using QuickER.MySql;
 using QuickER.Oracle;
 using QuickER.PostgreSql;
@@ -39,8 +40,11 @@ namespace QuickER
             services.AddSingleton<IDialogService, MessageBoxDialogService>();
             services.AddSingleton<IAppDialogService, WpfAppDialogService>();
             services.AddSingleton<IFileDialogService, WpfFileDialogService>();
-            services.AddSingleton<IAiChatLauncher, AiChatLauncher>();
-            services.AddSingleton<IMockGenerationLauncher, MockGenerationLauncher>();
+
+            // フィーチャーモジュールへ ER 図操作能力を提供する契約実装（MainViewModel を包む）
+            services.AddSingleton<IErDiagramHost>(sp => new MainViewModelErDiagramHost(
+                sp.GetRequiredService<MainViewModel>()
+            ));
 
             // DB プロバイダを登録し、識別名で解決するレジストリをシングルトンで供給する
             // 新 DBMS 対応時は IDatabaseProvider 実装を追加登録するだけで済む
@@ -57,11 +61,17 @@ namespace QuickER
                 serviceProvider.GetRequiredService<IDialogService>(),
                 serviceProvider.GetRequiredService<IAppDialogService>(),
                 serviceProvider.GetRequiredService<IFileDialogService>(),
-                serviceProvider.GetRequiredService<IAiChatLauncher>(),
-                serviceProvider.GetRequiredService<IMockGenerationLauncher>(),
                 serviceProvider.GetRequiredService<DatabaseProviderRegistry>()
             ));
             services.AddTransient<MainWindow>();
+
+            // 同梱フィーチャーモジュールを列挙し、各モジュールが必要とするサービスを登録する
+            var modules = FeatureModuleCatalog.CreateModules();
+
+            foreach (var module in modules)
+            {
+                module.ConfigureServices(services);
+            }
 
             // 起動時更新チェックサービス。本番用ファクトリ（feed => Velopack 実装）と
             // 環境変数取得（Environment.GetEnvironmentVariable）を注入する。
@@ -73,7 +83,24 @@ namespace QuickER
 
             _provider = services.BuildServiceProvider();
 
-            _provider.GetRequiredService<MainWindow>().Show();
+            // 各モジュールのツールバー寄与を集約し、主 ViewModel へ流し込む
+            var mainViewModel = _provider.GetRequiredService<MainViewModel>();
+            mainViewModel.FeatureToolbarItems = modules
+                .SelectMany(module => module.CreateToolbarItems(_provider))
+                .ToList();
+
+            var window = _provider.GetRequiredService<MainWindow>();
+
+            // メインウィンドウ終了時に各モジュールへ後始末（モードレスウィンドウの強制終了など）を通知する
+            window.Closing += (_, _) =>
+            {
+                foreach (var module in modules)
+                {
+                    module.OnMainWindowClosing(_provider);
+                }
+            };
+
+            window.Show();
 
             // 起動を阻害しない fire-and-forget での更新チェック。
             // 例外・フィード未設定・非インストール実行はすべて UpdateService 内で処理済み。

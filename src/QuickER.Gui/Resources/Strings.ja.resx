@@ -222,18 +222,6 @@
   <data name="Toolbar_SyncToDb" xml:space="preserve">
     <value>DB同期</value>
   </data>
-  <data name="Toolbar_OpenAiChat" xml:space="preserve">
-    <value>AIチャット</value>
-  </data>
-  <data name="Toolbar_OpenAiChatTooltip" xml:space="preserve">
-    <value>AI チャットで ER 図を作成・編集（API キー / Codex 接続）</value>
-  </data>
-  <data name="Toolbar_MockGeneration" xml:space="preserve">
-    <value>AIモック</value>
-  </data>
-  <data name="Toolbar_MockGenerationTooltip" xml:space="preserve">
-    <value>現在の ER 図から AI で Web モック画面（HTML）を生成</value>
-  </data>
   <data name="Toolbar_GenerateCSharp" xml:space="preserve">
     <value>コード生成</value>
   </data>
