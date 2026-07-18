@@ -758,33 +758,43 @@
           </StackPanel>
         </Button>
         <Rectangle Style="{StaticResource ToolBarSeparator}" />
-        <Button
-          Style="{StaticResource ToolBarLabelButton}"
-          Command="{Binding OpenAiChatCommand}"
-          ToolTip="{x:Static resources:Strings.Toolbar_OpenAiChatTooltip}"
-        >
-          <StackPanel>
-            <TextBlock Style="{StaticResource ToolBarIcon}" Text="🤖" />
-            <TextBlock
-              Style="{StaticResource ToolBarCaption}"
-              Text="{x:Static resources:Strings.Toolbar_OpenAiChat}"
-            />
-          </StackPanel>
-        </Button>
-        <Button
-          Style="{StaticResource ToolBarLabelButton}"
-          Command="{Binding OpenMockGenerationCommand}"
-          ToolTip="{x:Static resources:Strings.Toolbar_MockGenerationTooltip}"
-        >
-          <StackPanel>
-            <TextBlock Style="{StaticResource ToolBarIcon}" Text="🖼" />
-            <TextBlock
-              Style="{StaticResource ToolBarCaption}"
-              Text="{x:Static resources:Strings.Toolbar_MockGeneration}"
-            />
-          </StackPanel>
-        </Button>
-        <Rectangle Style="{StaticResource ToolBarSeparator}" />
+        <!--
+          フィーチャーモジュールが寄与するツールバーボタン群（AI チャット・モック生成など）。
+          モジュール 0 個のときは何も描画されず、直後のセパレータも下の DataTrigger で畳まれる。
+        -->
+        <ItemsControl ItemsSource="{Binding FeatureToolbarItems}">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate>
+              <StackPanel Orientation="Horizontal" />
+            </ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
+          <ItemsControl.ItemTemplate>
+            <DataTemplate>
+              <Button
+                Style="{StaticResource ToolBarLabelButton}"
+                Command="{Binding Command}"
+                ToolTip="{Binding Tooltip}"
+              >
+                <StackPanel>
+                  <TextBlock Style="{StaticResource ToolBarIcon}" Text="{Binding Icon}" />
+                  <TextBlock Style="{StaticResource ToolBarCaption}" Text="{Binding Label}" />
+                </StackPanel>
+              </Button>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+        <!-- モジュールが 1 つも無いときはセパレータの二重表示を避けて畳む -->
+        <Rectangle>
+          <Rectangle.Style>
+            <Style TargetType="Rectangle" BasedOn="{StaticResource ToolBarSeparator}">
+              <Style.Triggers>
+                <DataTrigger Binding="{Binding FeatureToolbarItems.Count}" Value="0">
+                  <Setter Property="Visibility" Value="Collapsed" />
+                </DataTrigger>
+              </Style.Triggers>
+            </Style>
+          </Rectangle.Style>
+        </Rectangle>
         <Button
           Style="{StaticResource ToolBarLabelButton}"
           Command="{Binding GenerateCSharpCodeCommand}"

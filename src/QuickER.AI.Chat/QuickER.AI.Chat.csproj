@@ -15,7 +15,9 @@
   <ItemGroup>
     <ProjectReference Include="..\QuickER.AI\QuickER.AI.csproj" />
     <ProjectReference Include="..\QuickER.AI.UI\QuickER.AI.UI.csproj" />
+    <ProjectReference Include="..\QuickER.Extensibility\QuickER.Extensibility.csproj" />
     <ProjectReference Include="..\QuickER.Gui.Abstractions\QuickER.Gui.Abstractions.csproj" />
+    <ProjectReference Include="..\QuickER.Gui.Common\QuickER.Gui.Common.csproj" />
   </ItemGroup>
 
   <!--

@@ -60,14 +60,15 @@ public partial class MainWindow : Window
         }
     }
 
-    /// <summary>ウィンドウ終了時に自動保存と AI チャット画面の終了を行う</summary>
+    /// <summary>ウィンドウ終了時に自動保存を行う</summary>
+    /// <remarks>
+    /// フィーチャーモジュール（AI チャット・モック生成など）のモードレスウィンドウ後始末は、
+    /// 合成ルート（App）が購読する <c>Closing</c> 経由で各モジュールの
+    /// <see cref="Extensibility.IFeatureModule.OnMainWindowClosing"/> が担う。
+    /// </remarks>
     private void MainWindow_Closing(object? sender, CancelEventArgs e)
     {
         _viewModel.AutoSave();
-
-        // メイン画面終了時に AI チャット画面も強制終了する
-        _viewModel.CloseAiChatDialog();
-        _viewModel.CloseMockGenerationDialog();
     }
 
     /// <summary>fit-to-window 要求を受けてバウンディングボックスから倍率とスクロール位置を計算・適用する</summary>

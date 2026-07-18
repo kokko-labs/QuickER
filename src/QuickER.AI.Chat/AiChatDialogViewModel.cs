@@ -9,6 +9,7 @@ using QuickER.AI;
 using QuickER.AI.Chat.Resources;
 using QuickER.AI.UI;
 using QuickER.Gui.Abstractions;
+using QuickER.Gui.Common;
 
 namespace QuickER.AI.Chat;
 

@@ -1,7 +1,7 @@
 using System.Windows;
 using System.Windows.Controls;
 
-namespace QuickER.AI.UI;
+namespace QuickER.Gui.Common;
 
 /// <summary>
 /// <see cref="PasswordBox"/> の <c>Password</c> を ViewModel の string プロパティと双方向同期する添付ビヘイビア

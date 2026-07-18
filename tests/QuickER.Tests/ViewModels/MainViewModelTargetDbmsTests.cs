@@ -33,7 +33,6 @@ public class MainViewModelTargetDbmsTests
             dialogs,
             new NoopAppDialogService(),
             new NoopFileDialogService(),
-            new NoopAiChatLauncher(),
             providers: registry
         );
         return (vm, fake, dialogs);
@@ -106,7 +105,6 @@ public class MainViewModelTargetDbmsTests
             dialogs,
             new NoopAppDialogService(),
             new NoopFileDialogService(),
-            new NoopAiChatLauncher(),
             providers: registry
         );
 
@@ -128,7 +126,6 @@ public class MainViewModelTargetDbmsTests
             new StubDialogService(),
             new NoopAppDialogService(),
             new NoopFileDialogService(),
-            new NoopAiChatLauncher(),
             providers: registry
         );
 
@@ -292,12 +289,5 @@ public class MainViewModelTargetDbmsTests
         ) => null;
 
         public string? PickFolder(string title, string? initialDirectory = null) => null;
-    }
-
-    private sealed class NoopAiChatLauncher : IAiChatLauncher
-    {
-        public void Open(MainViewModel host) { }
-
-        public void Close() { }
     }
 }

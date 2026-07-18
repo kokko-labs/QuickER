@@ -4,7 +4,7 @@
   xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
   xmlns:vm="clr-namespace:QuickER.ViewModels"
   xmlns:local="clr-namespace:QuickER.Views"
-  xmlns:ui="clr-namespace:QuickER.AI.UI;assembly=QuickER.AI.UI"
+  xmlns:ui="clr-namespace:QuickER.Gui.Common;assembly=QuickER.Gui.Common"
   xmlns:prov="clr-namespace:QuickER.Provider;assembly=QuickER.Provider"
   xmlns:sys="clr-namespace:System;assembly=System.Runtime"
   xmlns:resources="clr-namespace:QuickER.Resources"

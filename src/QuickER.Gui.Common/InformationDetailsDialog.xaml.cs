@@ -1,6 +1,6 @@
 using System.Windows;
 
-namespace QuickER.AI.UI;
+namespace QuickER.Gui.Common;
 
 /// <summary>
 /// 要約メッセージと複数行の詳細（一覧）を、広い読み取り専用領域で提示するモーダルダイアログ。

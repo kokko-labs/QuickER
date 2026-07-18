@@ -163,4 +163,10 @@
   <data name="Chat_RemoveModelFromHistory" xml:space="preserve">
     <value>履歴から削除</value>
   </data>
+  <data name="Toolbar_OpenAiChat" xml:space="preserve">
+    <value>AIチャット</value>
+  </data>
+  <data name="Toolbar_OpenAiChatTooltip" xml:space="preserve">
+    <value>AI チャットで ER 図を作成・編集（API キー / Codex 接続）</value>
+  </data>
 </root>

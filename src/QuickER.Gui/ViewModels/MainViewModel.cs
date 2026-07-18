@@ -3,10 +3,11 @@ using System.Collections.Specialized;
 using System.ComponentModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using QuickER.AI.UI;
 using QuickER.CodeGen.CSharp.Queries;
 using QuickER.Documents;
+using QuickER.Extensibility;
 using QuickER.Gui.Abstractions;
+using QuickER.Gui.Common;
 using QuickER.Model;
 using QuickER.Provider;
 using QuickER.Resources;
@@ -37,6 +38,10 @@ public partial class MainViewModel : ObservableObject
 
     /// <summary>ツールバーの言語切替ボタン用の子 ViewModel（表示言語の選択・保存）</summary>
     public LanguageSwitchViewModel LanguageSwitch { get; }
+
+    /// <summary>フィーチャーモジュールがツールバーへ寄与するボタン群（起動時にホストが設定する）</summary>
+    [ObservableProperty]
+    private IReadOnlyList<FeatureToolbarItem> _featureToolbarItems = [];
 
     /// <summary>選択中エンティティを内部バッファへコピーするコマンド</summary>
     /// <remarks>ペースト側の実行可否が非バインド対象の内部バッファに依存するため、生成属性を使わず手動で構築する</remarks>
@@ -146,12 +151,6 @@ public partial class MainViewModel : ObservableObject
     /// <summary>ファイル選択ダイアログの表示先</summary>
     private readonly IFileDialogService _files;
 
-    /// <summary>AI チャットウィンドウのライフサイクル管理</summary>
-    private readonly IAiChatLauncher _aiChat;
-
-    /// <summary>AI モック生成ウィンドウのライフサイクル管理</summary>
-    private readonly IMockGenerationLauncher _mockGeneration;
-
     /// <summary>登録済み DB プロバイダのレジストリ（現在方言の解決に用いる）</summary>
     private readonly DatabaseProviderRegistry _providers;
 
@@ -203,8 +202,6 @@ public partial class MainViewModel : ObservableObject
         IDialogService? dialogService = null,
         IAppDialogService? appDialogs = null,
         IFileDialogService? files = null,
-        IAiChatLauncher? aiChat = null,
-        IMockGenerationLauncher? mockGeneration = null,
         DatabaseProviderRegistry? providers = null
     )
     {
@@ -214,8 +211,6 @@ public partial class MainViewModel : ObservableObject
         _dialogs = dialogService ?? new MessageBoxDialogService();
         _appDialogs = appDialogs ?? new WpfAppDialogService(resolvedFiles, resolvedProviders);
         _files = resolvedFiles;
-        _aiChat = aiChat ?? new AiChatLauncher();
-        _mockGeneration = mockGeneration ?? new MockGenerationLauncher();
         _providers = resolvedProviders;
         _currentProvider = ResolveProvider("sqlserver", warnOnFallback: false);
         _changeTracker = new DiagramChangeTracker(
