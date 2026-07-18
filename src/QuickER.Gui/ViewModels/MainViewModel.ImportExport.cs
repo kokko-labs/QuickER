@@ -512,11 +512,7 @@ public partial class MainViewModel
                 break;
 
             case DiagramExportFormat.Excel:
-                TableDefinitionDocumentExporter.SaveTo(
-                    ToDiagramModel(),
-                    path,
-                    ResolveDefinitionDocumentTitle(path)
-                );
+                TableDefinitionDocumentExporter.SaveTo(ToDiagramModel(), path);
                 break;
 
             case DiagramExportFormat.Html:

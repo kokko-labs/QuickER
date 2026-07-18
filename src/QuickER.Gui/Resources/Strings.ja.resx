@@ -837,9 +837,6 @@
   <data name="Mermaid_UnsupportedRelationshipSymbol" xml:space="preserve">
     <value>未対応のリレーション記号 '{0}' です。</value>
   </data>
-  <data name="TableDoc_SheetNotFound" xml:space="preserve">
-    <value>'{0}' シートが見つかりません。</value>
-  </data>
   <data name="TableDoc_SummaryDuplicateTable" xml:space="preserve">
     <value>テーブル一覧シートに重複したテーブル名 '{0}' があります。</value>
   </data>
@@ -850,16 +847,13 @@
     <value>テーブル一覧シートと詳細シートの件数が一致しません。</value>
   </data>
   <data name="TableDoc_DetailMissingTableName" xml:space="preserve">
-    <value>シート '{0}' の B{1} にテーブル名がありません。</value>
+    <value>シート '{0}' の A{1} にテーブル名がありません。</value>
   </data>
   <data name="TableDoc_DetailTableNotInSummary" xml:space="preserve">
     <value>詳細シート '{0}' のテーブル名 '{1}' がテーブル一覧シートに存在しません。</value>
   </data>
   <data name="TableDoc_DetailDuplicateTable" xml:space="preserve">
     <value>詳細シートに重複したテーブル名 '{0}' があります。</value>
-  </data>
-  <data name="TableDoc_DescriptionMismatch" xml:space="preserve">
-    <value>テーブル '{0}' の説明がテーブル一覧と詳細シートで一致しません。</value>
   </data>
   <data name="TableDoc_DetailSheetNotFound" xml:space="preserve">
     <value>テーブル '{0}' の詳細シートが見つかりません。</value>
@@ -900,12 +894,6 @@
   <data name="TableDoc_DocumentTitle" xml:space="preserve">
     <value>テーブル定義書</value>
   </data>
-  <data name="TableDoc_Sheet_Cover" xml:space="preserve">
-    <value>表紙</value>
-  </data>
-  <data name="TableDoc_Sheet_History" xml:space="preserve">
-    <value>改訂履歴</value>
-  </data>
   <data name="TableDoc_Sheet_Summary" xml:space="preserve">
     <value>テーブル一覧</value>
   </data>
@@ -918,9 +906,6 @@
   <data name="TableDoc_Cover_TargetDbms" xml:space="preserve">
     <value>対象 DBMS</value>
   </data>
-  <data name="TableDoc_Cover_Version" xml:space="preserve">
-    <value>版数</value>
-  </data>
   <data name="TableDoc_Cover_CreatedDate" xml:space="preserve">
     <value>作成日</value>
   </data>
@@ -930,26 +915,8 @@
   <data name="TableDoc_Cover_RelationshipCount" xml:space="preserve">
     <value>リレーション数</value>
   </data>
-  <data name="TableDoc_History_Version" xml:space="preserve">
-    <value>版数</value>
-  </data>
-  <data name="TableDoc_History_Date" xml:space="preserve">
-    <value>日付</value>
-  </data>
-  <data name="TableDoc_History_Content" xml:space="preserve">
-    <value>改訂内容</value>
-  </data>
-  <data name="TableDoc_History_Author" xml:space="preserve">
-    <value>作成者</value>
-  </data>
-  <data name="TableDoc_History_InitialEntry" xml:space="preserve">
-    <value>初版</value>
-  </data>
   <data name="TableDoc_Header_No" xml:space="preserve">
     <value>No.</value>
-  </data>
-  <data name="TableDoc_Header_Detail" xml:space="preserve">
-    <value>詳細</value>
   </data>
   <data name="TableDoc_Header_TableName" xml:space="preserve">
     <value>テーブル名</value>

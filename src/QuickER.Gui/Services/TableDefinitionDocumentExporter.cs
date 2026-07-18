@@ -7,7 +7,7 @@ namespace QuickER.Services;
 
 /// <summary>ER 図のテーブル定義から Excel 形式のテーブル定義書を新規生成するサービス</summary>
 /// <remarks>
-/// 表紙・改訂履歴・テーブル一覧・リレーション一覧・テーブルごとの詳細シートを相互リンク付きで出力する。
+/// テーブル一覧・リレーション一覧・テーブルごとの詳細シートを相互リンク付きで出力する。
 /// 固定文言は <see cref="CultureInfo"/> を明示指定して解決するため（画面表示は CurrentUICulture）、
 /// 役割シートの特定はシート名の文字列一致ではなく非表示の定義名タグで行う（取込側と対で参照する）。
 /// </remarks>
@@ -25,12 +25,6 @@ public static class TableDefinitionDocumentExporter
     /// <summary>シート見出しのフォントサイズ</summary>
     private const double SheetTitleFontSize = 14;
 
-    /// <summary>表紙の文書名のフォントサイズ</summary>
-    private const double CoverTitleFontSize = 20;
-
-    /// <summary>表紙のシステム名のフォントサイズ</summary>
-    private const double CoverSystemNameFontSize = 14;
-
     /// <summary>詳細シートの列数（No./カラム名/説明/データ型/必須/キー/参照先/備考）</summary>
     private const int DetailColumnCount = 8;
 
@@ -39,9 +33,6 @@ public static class TableDefinitionDocumentExporter
 
     /// <summary>見出し行の文字色（白）</summary>
     private static readonly XLColor HeaderFontColor = XLColor.White;
-
-    /// <summary>表紙・改訂履歴シートのタブ色（濃紺）</summary>
-    private static readonly XLColor CoverTabColor = XLColor.FromHtml("#1F4E79");
 
     /// <summary>一覧シートのタブ色（青）</summary>
     private static readonly XLColor ListTabColor = XLColor.FromHtml("#2E75B6");
@@ -52,30 +43,16 @@ public static class TableDefinitionDocumentExporter
     /// <summary>ハイパーリンクの文字色</summary>
     private static readonly XLColor HyperlinkFontColor = XLColor.Blue;
 
-    /// <summary>作成日セルの表示書式（カルチャ非依存）</summary>
-    private const string DateFormat = "yyyy-mm-dd";
-
     /// <summary>Excel シート名に使用できない文字</summary>
     private static readonly char[] InvalidWorksheetNameChars = [':', '\\', '/', '?', '*', '[', ']'];
 
     /// <summary>ER 図定義からテーブル定義書の Excel ブックを生成する</summary>
     /// <param name="diagram">対象の ER 図定義</param>
-    /// <param name="documentTitle">表紙・印刷ヘッダーに載せるシステム名（未指定は空欄）</param>
-    /// <param name="createdDate">作成日（未指定は当日。テストで決定的に注入するための入口）</param>
     /// <param name="culture">固定文言の言語（未指定は <see cref="CultureInfo.CurrentUICulture"/>）</param>
     /// <returns>生成済みの Excel ブック</returns>
-    public static XLWorkbook BuildWorkbook(
-        ErDiagram diagram,
-        string? documentTitle = null,
-        DateTime? createdDate = null,
-        CultureInfo? culture = null
-    )
+    public static XLWorkbook BuildWorkbook(ErDiagram diagram, CultureInfo? culture = null)
     {
-        var builder = new WorkbookBuilder(
-            culture ?? CultureInfo.CurrentUICulture,
-            createdDate ?? DateTime.Today,
-            documentTitle ?? string.Empty
-        );
+        var builder = new WorkbookBuilder(culture ?? CultureInfo.CurrentUICulture);
 
         return builder.Build(diagram);
     }
@@ -83,10 +60,9 @@ public static class TableDefinitionDocumentExporter
     /// <summary>テーブル定義書を Excel ファイルとして保存する</summary>
     /// <param name="diagram">対象の ER 図定義</param>
     /// <param name="path">出力先ファイルパス</param>
-    /// <param name="documentTitle">表紙・印刷ヘッダーに載せるシステム名</param>
-    public static void SaveTo(ErDiagram diagram, string path, string? documentTitle = null)
+    public static void SaveTo(ErDiagram diagram, string path)
     {
-        using var workbook = BuildWorkbook(diagram, documentTitle);
+        using var workbook = BuildWorkbook(diagram);
         workbook.SaveAs(path);
     }
 
@@ -134,10 +110,9 @@ public static class TableDefinitionDocumentExporter
     private static void ConfigureSummaryWorksheet(IXLWorksheet worksheet)
     {
         worksheet.Column(1).Width = 5;
-        worksheet.Column(2).Width = 6;
+        worksheet.Column(2).Width = 35;
         worksheet.Column(3).Width = 35;
-        worksheet.Column(4).Width = 35;
-        worksheet.Column(5).Width = 50;
+        worksheet.Column(4).Width = 50;
         ConfigureWorksheet(worksheet);
     }
 
@@ -271,13 +246,9 @@ public static class TableDefinitionDocumentExporter
     /// <summary>詳細シート生成に必要な番号・エンティティ・対応ワークシートを束ねる文脈情報</summary>
     private sealed record DetailSheetContext(int Number, Entity Entity, IXLWorksheet Worksheet);
 
-    /// <summary>1 回のブック生成で共有するカルチャ・作成日・システム名を保持しつつシートを組み立てるビルダー</summary>
+    /// <summary>1 回のブック生成で共有するカルチャを保持しつつシートを組み立てるビルダー</summary>
     /// <remarks>固定文言は <see cref="L"/> を通じて明示カルチャで解決する（静的プロパティ直読みは行わない）。</remarks>
-    private sealed class WorkbookBuilder(
-        CultureInfo culture,
-        DateTime createdDate,
-        string systemName
-    )
+    private sealed class WorkbookBuilder(CultureInfo culture)
     {
         /// <summary>固定文言を明示カルチャで解決する（未定義キーはキー名を返す）</summary>
         private string L(string key) => Strings.ResourceManager.GetString(key, culture) ?? key;
@@ -293,18 +264,6 @@ public static class TableDefinitionDocumentExporter
 
             // ローカライズ済みシート名も防御として sanitize と重複回避を通す
             var usedWorksheetNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            var coverSheet = workbook.Worksheets.Add(
-                CreateUniqueWorksheetName(
-                    L(nameof(Strings.TableDoc_Sheet_Cover)),
-                    usedWorksheetNames
-                )
-            );
-            var historySheet = workbook.Worksheets.Add(
-                CreateUniqueWorksheetName(
-                    L(nameof(Strings.TableDoc_Sheet_History)),
-                    usedWorksheetNames
-                )
-            );
             var summarySheet = workbook.Worksheets.Add(
                 CreateUniqueWorksheetName(
                     L(nameof(Strings.TableDoc_Sheet_Summary)),
@@ -333,8 +292,6 @@ public static class TableDefinitionDocumentExporter
                 detail => detail.Worksheet.Name
             );
 
-            BuildCoverWorksheet(coverSheet, diagram, entities.Count, diagram.Relationships.Count);
-            BuildHistoryWorksheet(historySheet);
             BuildSummaryWorksheet(summarySheet, detailSheets);
             BuildRelationshipWorksheet(relationshipSheet, diagram.Relationships, entitiesById);
 
@@ -350,7 +307,6 @@ public static class TableDefinitionDocumentExporter
                 BuildEntityWorksheet(
                     detailSheet.Worksheet,
                     detailSheet.Entity,
-                    detailSheet.Number,
                     relatedRelationships,
                     entitiesById,
                     entitySheetNames,
@@ -359,12 +315,6 @@ public static class TableDefinitionDocumentExporter
             }
 
             // 全シート構築後に役割タグ（非表示の定義名）と書式バージョンを刻む
-            AddRoleTag(workbook, TableDefinitionDocumentLayout.CoverDefinedName, coverSheet.Name);
-            AddRoleTag(
-                workbook,
-                TableDefinitionDocumentLayout.HistoryDefinedName,
-                historySheet.Name
-            );
             AddRoleTag(
                 workbook,
                 TableDefinitionDocumentLayout.SummaryDefinedName,
@@ -383,116 +333,7 @@ public static class TableDefinitionDocumentExporter
             return workbook;
         }
 
-        /// <summary>表紙シートを生成する（文書名・システム名・書誌情報を配置する）</summary>
-        private void BuildCoverWorksheet(
-            IXLWorksheet worksheet,
-            ErDiagram diagram,
-            int tableCount,
-            int relationshipCount
-        )
-        {
-            ConfigureWorksheet(worksheet);
-            worksheet.ShowGridLines = false;
-            worksheet.TabColor = CoverTabColor;
-            worksheet.Column(2).Width = 18;
-            worksheet.Column(3).Width = 40;
-
-            // 文書名（大見出し）
-            var titleRange = worksheet.Range("B4:F4").Merge();
-            titleRange.Value = L(nameof(Strings.TableDoc_DocumentTitle));
-            titleRange.Style.Font.FontSize = CoverTitleFontSize;
-            titleRange.Style.Font.Bold = true;
-            titleRange.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
-
-            // システム名（文書名の直下）
-            var systemRange = worksheet.Range("B6:F6").Merge();
-            systemRange.Value = systemName;
-            systemRange.Style.Font.FontSize = CoverSystemNameFontSize;
-            systemRange.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
-
-            // ラベル / 値の一覧（B9〜C13）
-            var infoStartRow = 9;
-            SetCoverLabel(worksheet, infoStartRow, L(nameof(Strings.TableDoc_Cover_TargetDbms)));
-            worksheet.Cell(infoStartRow, 3).Value = diagram.TargetDbms;
-
-            SetCoverLabel(worksheet, infoStartRow + 1, L(nameof(Strings.TableDoc_Cover_Version)));
-            worksheet.Cell(infoStartRow + 1, 3).Value = "1.0";
-
-            SetCoverLabel(
-                worksheet,
-                infoStartRow + 2,
-                L(nameof(Strings.TableDoc_Cover_CreatedDate))
-            );
-            var dateCell = worksheet.Cell(infoStartRow + 2, 3);
-            dateCell.Value = createdDate;
-            dateCell.Style.DateFormat.Format = DateFormat;
-
-            SetCoverLabel(
-                worksheet,
-                infoStartRow + 3,
-                L(nameof(Strings.TableDoc_Cover_TableCount))
-            );
-            worksheet.Cell(infoStartRow + 3, 3).Value = tableCount;
-
-            SetCoverLabel(
-                worksheet,
-                infoStartRow + 4,
-                L(nameof(Strings.TableDoc_Cover_RelationshipCount))
-            );
-            worksheet.Cell(infoStartRow + 4, 3).Value = relationshipCount;
-
-            ApplyCommonPageSetup(worksheet, 0);
-            UpdatePrintArea(worksheet, "A1:F14");
-        }
-
-        /// <summary>表紙の書誌ラベルセルを設定する（Bold）</summary>
-        private static void SetCoverLabel(IXLWorksheet worksheet, int row, string label)
-        {
-            var cell = worksheet.Cell(row, 2);
-            cell.Value = label;
-            cell.Style.Font.Bold = true;
-        }
-
-        /// <summary>改訂履歴シートを生成する（初版行を含む）</summary>
-        private void BuildHistoryWorksheet(IXLWorksheet worksheet)
-        {
-            ConfigureWorksheet(worksheet);
-            worksheet.TabColor = CoverTabColor;
-            worksheet.Column(1).Width = 8;
-            worksheet.Column(2).Width = 14;
-            worksheet.Column(3).Width = 60;
-            worksheet.Column(4).Width = 16;
-
-            SetSheetTitle(worksheet, L(nameof(Strings.TableDoc_Sheet_History)));
-
-            var headerRow = 3;
-            var headers = new[]
-            {
-                L(nameof(Strings.TableDoc_History_Version)),
-                L(nameof(Strings.TableDoc_History_Date)),
-                L(nameof(Strings.TableDoc_History_Content)),
-                L(nameof(Strings.TableDoc_History_Author)),
-            };
-            WriteHeaderRow(worksheet, headerRow, headers);
-
-            // 初版行（版数 1.0・作成日・初版・作成者は空欄）
-            var dataRow = 4;
-            ApplyDataRowStyle(worksheet.Range(dataRow, 1, dataRow, headers.Length));
-            worksheet.Row(dataRow).Height = DefaultRowHeight;
-            worksheet.Cell(dataRow, 1).Value = "1.0";
-            var dateCell = worksheet.Cell(dataRow, 2);
-            dateCell.Value = createdDate;
-            dateCell.Style.DateFormat.Format = DateFormat;
-            worksheet.Cell(dataRow, 3).Value = L(nameof(Strings.TableDoc_History_InitialEntry));
-
-            ApplyTableBorders(worksheet.Range(headerRow, 1, dataRow, headers.Length));
-
-            worksheet.SheetView.FreezeRows(3);
-            ApplyCommonPageSetup(worksheet, 0);
-            UpdatePrintArea(worksheet, $"A1:D{dataRow}");
-        }
-
-        /// <summary>テーブル一覧シートを生成する（各行に詳細シートへのリンクを付与する）</summary>
+        /// <summary>テーブル一覧シートを生成する（テーブル名セルに詳細シートへのリンクを付与する）</summary>
         private void BuildSummaryWorksheet(
             IXLWorksheet worksheet,
             IReadOnlyList<DetailSheetContext> detailSheets
@@ -505,11 +346,9 @@ public static class TableDefinitionDocumentExporter
 
             var headerRow = TableDefinitionDocumentLayout.SummaryHeaderRow;
             var dataStartRow = TableDefinitionDocumentLayout.SummaryDataStartRow;
-            var detailLabel = L(nameof(Strings.TableDoc_Header_Detail));
             var headers = new[]
             {
                 L(nameof(Strings.TableDoc_Header_No)),
-                detailLabel,
                 L(nameof(Strings.TableDoc_Header_TableName)),
                 L(nameof(Strings.TableDoc_Header_Description)),
                 L(nameof(Strings.TableDoc_Header_Memo)),
@@ -524,14 +363,18 @@ public static class TableDefinitionDocumentExporter
                 ApplyDataRowStyle(worksheet.Range(row, 1, row, headers.Length));
                 worksheet.Row(row).Height = DefaultRowHeight;
                 worksheet.Cell(row, 1).Value = detailSheet.Number;
-                worksheet.Cell(row, 2).Value = detailLabel;
-                worksheet.Cell(row, 3).Value = detailSheet.Entity.TableName;
-                worksheet.Cell(row, 4).Value = detailSheet.Entity.Description;
-                worksheet.Cell(row, 5).Value = detailSheet.Entity.Memo;
+                worksheet.Cell(row, TableDefinitionDocumentLayout.SummaryTableNameColumn).Value =
+                    detailSheet.Entity.TableName;
+                worksheet.Cell(row, TableDefinitionDocumentLayout.SummaryDescriptionColumn).Value =
+                    detailSheet.Entity.Description;
+                worksheet.Cell(row, TableDefinitionDocumentLayout.SummaryMemoColumn).Value =
+                    detailSheet.Entity.Memo;
+
+                // テーブル名セル自体を該当詳細シートへのリンクにする（左寄せ）
                 ApplyHyperlinkStyle(
-                    worksheet.Cell(row, 2),
+                    worksheet.Cell(row, TableDefinitionDocumentLayout.SummaryTableNameColumn),
                     detailSheet.Worksheet.Name,
-                    XLAlignmentHorizontalValues.Center
+                    XLAlignmentHorizontalValues.Left
                 );
             }
 
@@ -541,13 +384,19 @@ public static class TableDefinitionDocumentExporter
             // 説明・備考列は折り返し表示
             if (detailSheets.Count > 0)
             {
-                worksheet.Range(dataStartRow, 4, lastRow, 5).Style.Alignment.WrapText = true;
+                worksheet
+                    .Range(
+                        dataStartRow,
+                        TableDefinitionDocumentLayout.SummaryDescriptionColumn,
+                        lastRow,
+                        TableDefinitionDocumentLayout.SummaryMemoColumn
+                    )
+                    .Style.Alignment.WrapText = true;
             }
 
             worksheet.SheetView.FreezeRows(3);
-            worksheet.Range(headerRow, 1, lastRow, headers.Length).SetAutoFilter();
             ApplyCommonPageSetup(worksheet, headerRow);
-            UpdatePrintArea(worksheet, $"A1:E{lastRow}");
+            UpdatePrintArea(worksheet, $"A1:D{lastRow}");
         }
 
         /// <summary>リレーション一覧シートを生成する</summary>
@@ -628,7 +477,6 @@ public static class TableDefinitionDocumentExporter
             }
 
             worksheet.SheetView.FreezeRows(3);
-            worksheet.Range(headerRow, 1, lastRow, headers.Length).SetAutoFilter();
             ApplyCommonPageSetup(worksheet, headerRow);
             UpdatePrintArea(worksheet, $"A1:J{lastRow}");
         }
@@ -637,7 +485,6 @@ public static class TableDefinitionDocumentExporter
         private void BuildEntityWorksheet(
             IXLWorksheet worksheet,
             Entity entity,
-            int tableNumber,
             IReadOnlyList<Relationship> relationships,
             IReadOnlyDictionary<Guid, Entity> entitiesById,
             IReadOnlyDictionary<Guid, string> entitySheetNames,
@@ -654,31 +501,18 @@ public static class TableDefinitionDocumentExporter
 
             // 行1: A1 テーブル名タイトル ＋ 末尾列（H1）に一覧への戻りリンク（右寄せ）
             SetSheetTitle(worksheet, entity.TableName);
-            var backCell = worksheet.Cell(1, DetailColumnCount);
+            var backCell = worksheet.Cell(
+                TableDefinitionDocumentLayout.DetailTitleRow,
+                DetailColumnCount
+            );
             backCell.Value = L(nameof(Strings.TableDoc_BackToSummary));
             ApplyHyperlinkStyle(backCell, summarySheetName, XLAlignmentHorizontalValues.Right);
 
-            // テーブル情報（行3 ヘッダ・行4 データ）
-            var infoHeaderRow = 3;
-            var infoDataRow = TableDefinitionDocumentLayout.DetailTableInfoRow;
-            WriteHeaderRow(
-                worksheet,
-                infoHeaderRow,
-                new[]
-                {
-                    L(nameof(Strings.TableDoc_Header_No)),
-                    L(nameof(Strings.TableDoc_Header_TableName)),
-                    L(nameof(Strings.TableDoc_Header_Description)),
-                }
-            );
-            ApplyDataRowStyle(worksheet.Range(infoDataRow, 1, infoDataRow, 3));
-            worksheet.Row(infoDataRow).Height = DefaultRowHeight;
-            worksheet.Cell(infoDataRow, 1).Value = tableNumber;
-            worksheet.Cell(infoDataRow, 2).Value = entity.TableName;
-            worksheet.Cell(infoDataRow, 3).Value = entity.Description;
-            ApplyTableBorders(worksheet.Range(infoHeaderRow, 1, infoDataRow, 3));
+            // 行2: テーブル説明のプレーン表示（罫線なし・空なら空セル）
+            worksheet.Cell(TableDefinitionDocumentLayout.DetailDescriptionRow, 1).Value =
+                entity.Description;
 
-            // カラム見出し（行6）・カラムデータ（行7〜）
+            // カラム見出し（行3）・カラムデータ（行4〜）
             var columnHeaderRow = TableDefinitionDocumentLayout.DetailColumnHeaderRow;
             var headers = new[]
             {
@@ -751,7 +585,7 @@ public static class TableDefinitionDocumentExporter
                 worksheet.Range(dataStartRow, 8, lastRow, 8).Style.Alignment.WrapText = true;
             }
 
-            worksheet.SheetView.FreezeRows(6);
+            worksheet.SheetView.FreezeRows(3);
             ApplyCommonPageSetup(worksheet, columnHeaderRow);
             UpdatePrintArea(worksheet, $"A1:H{lastRow}");
         }
@@ -769,11 +603,11 @@ public static class TableDefinitionDocumentExporter
             pageSetup.Margins.Left = 0.5;
             pageSetup.Margins.Right = 0.5;
 
-            var docTitle = L(nameof(Strings.TableDoc_DocumentTitle));
-            var headerText = string.IsNullOrEmpty(systemName)
-                ? docTitle
-                : $"{systemName} - {docTitle}";
-            pageSetup.Header.Center.AddText(headerText, XLHFOccurrence.AllPages);
+            // ページヘッダー中央は文書名のみ（システム名は載せない）
+            pageSetup.Header.Center.AddText(
+                L(nameof(Strings.TableDoc_DocumentTitle)),
+                XLHFOccurrence.AllPages
+            );
 
             // フッター中央に「頁 / 総頁」を組み立てる（AddText は IXLRichString を返すため都度呼ぶ）
             var footer = pageSetup.Footer.Center;

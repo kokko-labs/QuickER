@@ -36,24 +36,8 @@ public static class TableDefinitionDocumentImporter
             ResolveRoleSheet(workbook, TableDefinitionDocumentLayout.RelationshipsDefinedName)
             ?? throw new InvalidDataException(Strings.TableDoc_MissingRoleTag);
 
-        // 表紙・改訂履歴は解決できたときだけ詳細シート除外集合へ（表紙削除済みでも取込可）
+        // 一覧 2 枚以外を詳細シートとみなす（参照比較）
         var roleSheets = new HashSet<IXLWorksheet> { summarySheet, relationshipSheet };
-        var coverSheet = ResolveRoleSheet(workbook, TableDefinitionDocumentLayout.CoverDefinedName);
-
-        if (coverSheet is not null)
-        {
-            roleSheets.Add(coverSheet);
-        }
-
-        var historySheet = ResolveRoleSheet(
-            workbook,
-            TableDefinitionDocumentLayout.HistoryDefinedName
-        );
-
-        if (historySheet is not null)
-        {
-            roleSheets.Add(historySheet);
-        }
 
         var summaries = ReadSummarySheet(summarySheet);
         var entities = ReadDetailSheets(workbook, summaries, roleSheets);
@@ -69,7 +53,11 @@ public static class TableDefinitionDocumentImporter
 
         for (var row = TableDefinitionDocumentLayout.SummaryDataStartRow; ; row++)
         {
-            var tableName = GetCellText(worksheet, row, 3);
+            var tableName = GetCellText(
+                worksheet,
+                row,
+                TableDefinitionDocumentLayout.SummaryTableNameColumn
+            );
 
             if (string.IsNullOrWhiteSpace(tableName))
             {
@@ -81,8 +69,12 @@ public static class TableDefinitionDocumentImporter
                     tableName,
                     new TableSummaryRow(
                         tableName,
-                        GetCellText(worksheet, row, 4),
-                        GetCellText(worksheet, row, 5)
+                        GetCellText(
+                            worksheet,
+                            row,
+                            TableDefinitionDocumentLayout.SummaryDescriptionColumn
+                        ),
+                        GetCellText(worksheet, row, TableDefinitionDocumentLayout.SummaryMemoColumn)
                     )
                 )
             )
@@ -101,7 +93,11 @@ public static class TableDefinitionDocumentImporter
         return summaries;
     }
 
-    /// <summary>詳細シート群からエンティティを復元する（一覧との件数・説明の整合性を検証する）</summary>
+    /// <summary>詳細シート群からエンティティを復元する（一覧との件数の整合性を検証する）</summary>
+    /// <remarks>
+    /// テーブル名は詳細シートの A1（タイトルセル）から読む（シート名は 31 文字切詰め・
+    /// 重複回避が入るため使わない）。説明・備考はテーブル一覧シートからのみ復元する。
+    /// </remarks>
     private static Dictionary<string, Entity> ReadDetailSheets(
         XLWorkbook workbook,
         IReadOnlyDictionary<string, TableSummaryRow> summaries,
@@ -109,7 +105,7 @@ public static class TableDefinitionDocumentImporter
     )
     {
         var entities = new Dictionary<string, Entity>(StringComparer.OrdinalIgnoreCase);
-        // 役割シート（一覧 2 枚＋解決できた表紙・履歴）以外を詳細シートとみなす（参照比較）
+        // 役割シート（一覧 2 枚）以外を詳細シートとみなす（参照比較）
         var detailSheets = workbook.Worksheets.Where(sheet => !roleSheets.Contains(sheet)).ToList();
 
         if (detailSheets.Count != summaries.Count)
@@ -119,7 +115,7 @@ public static class TableDefinitionDocumentImporter
 
         foreach (var sheet in detailSheets)
         {
-            var tableName = GetCellText(sheet, TableDefinitionDocumentLayout.DetailTableInfoRow, 2);
+            var tableName = GetCellText(sheet, TableDefinitionDocumentLayout.DetailTitleRow, 1);
 
             if (string.IsNullOrWhiteSpace(tableName))
             {
@@ -127,7 +123,7 @@ public static class TableDefinitionDocumentImporter
                     string.Format(
                         Strings.TableDoc_DetailMissingTableName,
                         sheet.Name,
-                        TableDefinitionDocumentLayout.DetailTableInfoRow
+                        TableDefinitionDocumentLayout.DetailTitleRow
                     )
                 );
             }
@@ -146,29 +142,10 @@ public static class TableDefinitionDocumentImporter
                 );
             }
 
-            var description = GetCellText(
-                sheet,
-                TableDefinitionDocumentLayout.DetailTableInfoRow,
-                3
-            );
-
-            if (
-                !string.IsNullOrWhiteSpace(summary.Description)
-                && !string.IsNullOrWhiteSpace(description)
-                && !string.Equals(summary.Description, description, StringComparison.Ordinal)
-            )
-            {
-                throw new InvalidDataException(
-                    string.Format(Strings.TableDoc_DescriptionMismatch, tableName)
-                );
-            }
-
             var entity = new Entity
             {
                 TableName = tableName,
-                Description = string.IsNullOrWhiteSpace(description)
-                    ? summary.Description
-                    : description,
+                Description = summary.Description,
                 Memo = summary.Memo,
             };
 

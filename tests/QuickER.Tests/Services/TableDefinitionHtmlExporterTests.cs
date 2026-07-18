@@ -134,7 +134,6 @@ public class TableDefinitionHtmlExporterTests
         // リレーション表・キー表記は Excel 版 BuildWorkbook の対応セルと同値
         using var workbook = TableDefinitionDocumentExporter.BuildWorkbook(
             diagram,
-            createdDate: FixedCreatedDate,
             culture: English
         );
         var relationshipSheet = workbook.Worksheet(
@@ -142,7 +141,8 @@ public class TableDefinitionHtmlExporterTests
         );
         var relationLabel = relationshipSheet.Cell(4, 7).GetString();
         var onDeleteLabel = relationshipSheet.Cell(4, 8).GetString();
-        var foreignKeyLabel = workbook.Worksheet("Order").Cell(8, 6).GetString();
+        // 詳細シートの新レイアウトでは UserId 列は行5（ヘッダ行3・データ行4〜）
+        var foreignKeyLabel = workbook.Worksheet("Order").Cell(5, 6).GetString();
 
         relationLabel.Should().Be("N:1");
         onDeleteLabel.Should().Be("CASCADE");

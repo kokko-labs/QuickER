@@ -1420,18 +1420,6 @@ namespace QuickER.Resources {
             }
         }
 
-        public static string TableDoc_Sheet_Cover {
-            get {
-                return ResourceManager.GetString("TableDoc_Sheet_Cover", resourceCulture);
-            }
-        }
-
-        public static string TableDoc_Sheet_History {
-            get {
-                return ResourceManager.GetString("TableDoc_Sheet_History", resourceCulture);
-            }
-        }
-
         public static string TableDoc_Sheet_Summary {
             get {
                 return ResourceManager.GetString("TableDoc_Sheet_Summary", resourceCulture);
@@ -1456,12 +1444,6 @@ namespace QuickER.Resources {
             }
         }
 
-        public static string TableDoc_Cover_Version {
-            get {
-                return ResourceManager.GetString("TableDoc_Cover_Version", resourceCulture);
-            }
-        }
-
         public static string TableDoc_Cover_CreatedDate {
             get {
                 return ResourceManager.GetString("TableDoc_Cover_CreatedDate", resourceCulture);
@@ -1480,45 +1462,9 @@ namespace QuickER.Resources {
             }
         }
 
-        public static string TableDoc_History_Version {
-            get {
-                return ResourceManager.GetString("TableDoc_History_Version", resourceCulture);
-            }
-        }
-
-        public static string TableDoc_History_Date {
-            get {
-                return ResourceManager.GetString("TableDoc_History_Date", resourceCulture);
-            }
-        }
-
-        public static string TableDoc_History_Content {
-            get {
-                return ResourceManager.GetString("TableDoc_History_Content", resourceCulture);
-            }
-        }
-
-        public static string TableDoc_History_Author {
-            get {
-                return ResourceManager.GetString("TableDoc_History_Author", resourceCulture);
-            }
-        }
-
-        public static string TableDoc_History_InitialEntry {
-            get {
-                return ResourceManager.GetString("TableDoc_History_InitialEntry", resourceCulture);
-            }
-        }
-
         public static string TableDoc_Header_No {
             get {
                 return ResourceManager.GetString("TableDoc_Header_No", resourceCulture);
-            }
-        }
-
-        public static string TableDoc_Header_Detail {
-            get {
-                return ResourceManager.GetString("TableDoc_Header_Detail", resourceCulture);
             }
         }
 
@@ -1834,12 +1780,6 @@ namespace QuickER.Resources {
             }
         }
         
-        public static string TableDoc_SheetNotFound {
-            get {
-                return ResourceManager.GetString("TableDoc_SheetNotFound", resourceCulture);
-            }
-        }
-        
         public static string TableDoc_SummaryDuplicateTable {
             get {
                 return ResourceManager.GetString("TableDoc_SummaryDuplicateTable", resourceCulture);
@@ -1873,12 +1813,6 @@ namespace QuickER.Resources {
         public static string TableDoc_DetailDuplicateTable {
             get {
                 return ResourceManager.GetString("TableDoc_DetailDuplicateTable", resourceCulture);
-            }
-        }
-        
-        public static string TableDoc_DescriptionMismatch {
-            get {
-                return ResourceManager.GetString("TableDoc_DescriptionMismatch", resourceCulture);
             }
         }
         

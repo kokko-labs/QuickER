@@ -182,24 +182,6 @@ public class TableDefinitionDocumentImporterTests
         AssertSampleDiagram(diagram);
     }
 
-    /// <summary>表紙・改訂履歴シートを削除したブックでも取込が成功することを検証する</summary>
-    [Fact(DisplayName = "表紙・改訂履歴シートを削除しても取込できる")]
-    public void Load_ImportsWhenCoverAndHistoryDeleted()
-    {
-        using var workbook = TableDefinitionDocumentExporter.BuildWorkbook(
-            BuildSampleDiagram(),
-            culture: new CultureInfo("en")
-        );
-
-        ResolveRoleSheet(workbook, TableDefinitionDocumentLayout.CoverDefinedName).Delete();
-        ResolveRoleSheet(workbook, TableDefinitionDocumentLayout.HistoryDefinedName).Delete();
-
-        var diagram = TableDefinitionDocumentImporter.Load(workbook);
-
-        // 表紙・履歴は詳細シートに数えないので件数不一致にならず往復一致する
-        AssertSampleDiagram(diagram);
-    }
-
     /// <summary>役割タグが無いブック（旧形式・他アプリ出力）を取込エラーにすることを検証する</summary>
     [Fact(DisplayName = "役割タグが無いと取り込みをエラーにする")]
     public void Load_ThrowsWhenRoleTagIsMissing()

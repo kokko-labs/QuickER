@@ -827,9 +827,6 @@
   <data name="Mermaid_UnsupportedRelationshipSymbol" xml:space="preserve">
     <value>Unsupported relationship symbol '{0}'.</value>
   </data>
-  <data name="TableDoc_SheetNotFound" xml:space="preserve">
-    <value>Sheet '{0}' was not found.</value>
-  </data>
   <data name="TableDoc_SummaryDuplicateTable" xml:space="preserve">
     <value>The Table List sheet contains a duplicate table name '{0}'.</value>
   </data>
@@ -840,16 +837,13 @@
     <value>The number of entries in the Table List sheet and the detail sheets do not match.</value>
   </data>
   <data name="TableDoc_DetailMissingTableName" xml:space="preserve">
-    <value>Sheet '{0}' has no table name in B{1}.</value>
+    <value>Sheet '{0}' has no table name in A{1}.</value>
   </data>
   <data name="TableDoc_DetailTableNotInSummary" xml:space="preserve">
     <value>Table name '{1}' in detail sheet '{0}' does not exist in the Table List sheet.</value>
   </data>
   <data name="TableDoc_DetailDuplicateTable" xml:space="preserve">
     <value>The detail sheets contain a duplicate table name '{0}'.</value>
-  </data>
-  <data name="TableDoc_DescriptionMismatch" xml:space="preserve">
-    <value>The description of table '{0}' does not match between the Table List and detail sheets.</value>
   </data>
   <data name="TableDoc_DetailSheetNotFound" xml:space="preserve">
     <value>The detail sheet for table '{0}' was not found.</value>
@@ -890,12 +884,6 @@
   <data name="TableDoc_DocumentTitle" xml:space="preserve">
     <value>Table Definition Document</value>
   </data>
-  <data name="TableDoc_Sheet_Cover" xml:space="preserve">
-    <value>Cover</value>
-  </data>
-  <data name="TableDoc_Sheet_History" xml:space="preserve">
-    <value>Revision History</value>
-  </data>
   <data name="TableDoc_Sheet_Summary" xml:space="preserve">
     <value>Table List</value>
   </data>
@@ -908,9 +896,6 @@
   <data name="TableDoc_Cover_TargetDbms" xml:space="preserve">
     <value>Target DBMS</value>
   </data>
-  <data name="TableDoc_Cover_Version" xml:space="preserve">
-    <value>Version</value>
-  </data>
   <data name="TableDoc_Cover_CreatedDate" xml:space="preserve">
     <value>Created Date</value>
   </data>
@@ -920,26 +905,8 @@
   <data name="TableDoc_Cover_RelationshipCount" xml:space="preserve">
     <value>Relationship Count</value>
   </data>
-  <data name="TableDoc_History_Version" xml:space="preserve">
-    <value>Version</value>
-  </data>
-  <data name="TableDoc_History_Date" xml:space="preserve">
-    <value>Date</value>
-  </data>
-  <data name="TableDoc_History_Content" xml:space="preserve">
-    <value>Revision Content</value>
-  </data>
-  <data name="TableDoc_History_Author" xml:space="preserve">
-    <value>Author</value>
-  </data>
-  <data name="TableDoc_History_InitialEntry" xml:space="preserve">
-    <value>First edition</value>
-  </data>
   <data name="TableDoc_Header_No" xml:space="preserve">
     <value>No.</value>
-  </data>
-  <data name="TableDoc_Header_Detail" xml:space="preserve">
-    <value>Detail</value>
   </data>
   <data name="TableDoc_Header_TableName" xml:space="preserve">
     <value>Table Name</value>
