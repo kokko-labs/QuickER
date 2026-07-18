@@ -32,6 +32,9 @@ internal enum DiagramExportFormat
 
     /// <summary>Excel テーブル定義書</summary>
     Excel,
+
+    /// <summary>HTML テーブル定義書</summary>
+    Html,
 }
 
 /// <summary>ER 図のインポート形式</summary>
@@ -149,7 +152,7 @@ public partial class MainViewModel
     private void ExportDiagram(object? visual)
     {
         var picked = _files.PickSaveFile(
-            "PNG Image (*.png)|*.png|SVG Image (*.svg)|*.svg|SQL Script (*.sql)|*.sql|Mermaid Diagram (*.mmd)|*.mmd|Mermaid Diagram (*.mermaid)|*.mermaid|DBML Diagram (*.dbml)|*.dbml|Excel Workbook (*.xlsx)|*.xlsx",
+            "PNG Image (*.png)|*.png|SVG Image (*.svg)|*.svg|SQL Script (*.sql)|*.sql|Mermaid Diagram (*.mmd)|*.mmd|Mermaid Diagram (*.mermaid)|*.mermaid|DBML Diagram (*.dbml)|*.dbml|Excel Workbook (*.xlsx)|*.xlsx|HTML Document (*.html)|*.html",
             ".png"
         );
 
@@ -473,6 +476,7 @@ public partial class MainViewModel
             DiagramExportFormat.Mermaid => "Mermaid",
             DiagramExportFormat.Dbml => "DBML",
             DiagramExportFormat.Excel => Strings.Format_DefinitionDocument,
+            DiagramExportFormat.Html => Strings.Format_DefinitionDocumentHtml,
             _ => Strings.Format_File,
         };
 
@@ -508,7 +512,19 @@ public partial class MainViewModel
                 break;
 
             case DiagramExportFormat.Excel:
-                TableDefinitionDocumentExporter.SaveTo(ToDiagramModel(), path);
+                TableDefinitionDocumentExporter.SaveTo(
+                    ToDiagramModel(),
+                    path,
+                    ResolveDefinitionDocumentTitle(path)
+                );
+                break;
+
+            case DiagramExportFormat.Html:
+                TableDefinitionHtmlExporter.SaveTo(
+                    ToDiagramModel(),
+                    path,
+                    ResolveDefinitionDocumentTitle(path)
+                );
                 break;
         }
 
@@ -555,9 +571,13 @@ public partial class MainViewModel
         );
     }
 
-    /// <summary>
-    /// 保存ファイル名またはフィルター選択から出力形式を判定します。
-    /// </summary>
+    /// <summary>テーブル定義書（Excel / HTML）の表紙・印刷ヘッダーに載せるシステム名を解決する</summary>
+    /// <remarks>印刷ダイアログのタイトル初期値と同じく最後に保存／読込したファイル名を優先し、未保存時は出力ファイル名（拡張子なし）へフォールバックする</remarks>
+    private string ResolveDefinitionDocumentTitle(string path) =>
+        string.IsNullOrEmpty(LastDocumentFileName)
+            ? Path.GetFileNameWithoutExtension(path)
+            : LastDocumentFileName;
+
     /// <summary>ファイル拡張子を優先し、無ければフィルター選択から出力形式を判定する</summary>
     private static DiagramExportFormat GetExportFormat(string path, int filterIndex)
     {
@@ -572,6 +592,8 @@ public partial class MainViewModel
             ".mermaid" => DiagramExportFormat.Mermaid,
             ".dbml" => DiagramExportFormat.Dbml,
             ".xlsx" => DiagramExportFormat.Excel,
+            ".html" => DiagramExportFormat.Html,
+            ".htm" => DiagramExportFormat.Html,
             _ => filterIndex switch
             {
                 1 => DiagramExportFormat.Png,
@@ -581,6 +603,7 @@ public partial class MainViewModel
                 5 => DiagramExportFormat.Mermaid,
                 6 => DiagramExportFormat.Dbml,
                 7 => DiagramExportFormat.Excel,
+                8 => DiagramExportFormat.Html,
                 _ => throw new InvalidOperationException(Strings.Export_FormatUndetermined),
             },
         };

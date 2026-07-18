@@ -894,4 +894,112 @@
   <data name="TableDoc_RelUnknownRelation" xml:space="preserve">
     <value>リレーション一覧シートの {0} 行目の関係 '{1}' を解釈できません。</value>
   </data>
+  <data name="TableDoc_MissingRoleTag" xml:space="preserve">
+    <value>旧形式または本アプリ以外の出力です。再エクスポートしてください。</value>
+  </data>
+  <data name="TableDoc_DocumentTitle" xml:space="preserve">
+    <value>テーブル定義書</value>
+  </data>
+  <data name="TableDoc_Sheet_Cover" xml:space="preserve">
+    <value>表紙</value>
+  </data>
+  <data name="TableDoc_Sheet_History" xml:space="preserve">
+    <value>改訂履歴</value>
+  </data>
+  <data name="TableDoc_Sheet_Summary" xml:space="preserve">
+    <value>テーブル一覧</value>
+  </data>
+  <data name="TableDoc_Sheet_Relationships" xml:space="preserve">
+    <value>リレーション一覧</value>
+  </data>
+  <data name="TableDoc_Cover_SystemName" xml:space="preserve">
+    <value>システム名</value>
+  </data>
+  <data name="TableDoc_Cover_TargetDbms" xml:space="preserve">
+    <value>対象 DBMS</value>
+  </data>
+  <data name="TableDoc_Cover_Version" xml:space="preserve">
+    <value>版数</value>
+  </data>
+  <data name="TableDoc_Cover_CreatedDate" xml:space="preserve">
+    <value>作成日</value>
+  </data>
+  <data name="TableDoc_Cover_TableCount" xml:space="preserve">
+    <value>テーブル数</value>
+  </data>
+  <data name="TableDoc_Cover_RelationshipCount" xml:space="preserve">
+    <value>リレーション数</value>
+  </data>
+  <data name="TableDoc_History_Version" xml:space="preserve">
+    <value>版数</value>
+  </data>
+  <data name="TableDoc_History_Date" xml:space="preserve">
+    <value>日付</value>
+  </data>
+  <data name="TableDoc_History_Content" xml:space="preserve">
+    <value>改訂内容</value>
+  </data>
+  <data name="TableDoc_History_Author" xml:space="preserve">
+    <value>作成者</value>
+  </data>
+  <data name="TableDoc_History_InitialEntry" xml:space="preserve">
+    <value>初版</value>
+  </data>
+  <data name="TableDoc_Header_No" xml:space="preserve">
+    <value>No.</value>
+  </data>
+  <data name="TableDoc_Header_Detail" xml:space="preserve">
+    <value>詳細</value>
+  </data>
+  <data name="TableDoc_Header_TableName" xml:space="preserve">
+    <value>テーブル名</value>
+  </data>
+  <data name="TableDoc_Header_Description" xml:space="preserve">
+    <value>説明</value>
+  </data>
+  <data name="TableDoc_Header_Memo" xml:space="preserve">
+    <value>備考</value>
+  </data>
+  <data name="TableDoc_Header_ConstraintName" xml:space="preserve">
+    <value>制約名</value>
+  </data>
+  <data name="TableDoc_Header_SourceTable" xml:space="preserve">
+    <value>参照元テーブル</value>
+  </data>
+  <data name="TableDoc_Header_SourceColumn" xml:space="preserve">
+    <value>参照元カラム</value>
+  </data>
+  <data name="TableDoc_Header_TargetTable" xml:space="preserve">
+    <value>参照先テーブル</value>
+  </data>
+  <data name="TableDoc_Header_TargetColumn" xml:space="preserve">
+    <value>参照先カラム</value>
+  </data>
+  <data name="TableDoc_Header_Relation" xml:space="preserve">
+    <value>関係</value>
+  </data>
+  <data name="TableDoc_Header_ColumnName" xml:space="preserve">
+    <value>カラム名</value>
+  </data>
+  <data name="TableDoc_Header_DataType" xml:space="preserve">
+    <value>データ型</value>
+  </data>
+  <data name="TableDoc_Header_Required" xml:space="preserve">
+    <value>必須</value>
+  </data>
+  <data name="TableDoc_Header_Key" xml:space="preserve">
+    <value>キー</value>
+  </data>
+  <data name="TableDoc_Header_Reference" xml:space="preserve">
+    <value>参照先</value>
+  </data>
+  <data name="TableDoc_RequiredMark" xml:space="preserve">
+    <value>〇</value>
+  </data>
+  <data name="TableDoc_BackToSummary" xml:space="preserve">
+    <value>テーブル一覧に戻る</value>
+  </data>
+  <data name="Format_DefinitionDocumentHtml" xml:space="preserve">
+    <value>定義書 (HTML)</value>
+  </data>
 </root>

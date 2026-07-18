@@ -22,7 +22,7 @@ ER 図を描く → データベースを作る → C# のデータアクセス�
   - **リモート対応インターフェイス（--generate-remote-contracts）** — CRUD・保存・名前付きクエリ（＝Web サービス越しに提供できる操作）だけを持つ `I{Entity}RemoteRepository` を追加生成するオプション。`I{Entity}Repository` は全メソッドを持ったままこれを継承するため既存コードに影響はなく、アプリ本体をリモート面だけに依存させておけば、リモート実装への差し替えがコンパイル時に安全になる
   - **3 階層対応（--generate-remote-services）** — リモート面を HTTP + JSON で提供するクライアント（`Http{Entity}RemoteRepository`・依存は BCL の HttpClient のみ）と ASP.NET Core Minimal API サーバー（`MapGeneratedRemoteEndpoints`）を生成。DI 登録 1 行の差し替えで DB 直結⇔Web サービス経由を切り替えられ、`SaveConflictException` などの例外も型ごと復元される（直結時と同じ catch が機能）
 - **AI チャット** — 対話で ER 図を生成・編集（OpenAI / Anthropic の API キー、Ollama、Codex、Claude Code に対応）。ER 図から Web モック画面（HTML）の生成も可能
-- **豊富な入出力** — 取込: DBML / Mermaid / Excel 定義書 / 実 DB（5 方言）。出力: PNG / SVG / SQL DDL / Mermaid / DBML / Excel 定義書 / ベクタ印刷（1 ページ縮小・原寸大 PDF）
+- **豊富な入出力** — 取込: DBML / Mermaid / Excel 定義書 / 実 DB（5 方言）。出力: PNG / SVG / SQL DDL / Mermaid / DBML / Excel 定義書 / HTML 定義書 / ベクタ印刷（1 ページ縮小・原寸大 PDF）
 - **git フレンドリーな保存形式** — 意味モデル（テーブル定義）と視覚情報（座標・色）を分離した JSON 1 ファイル
 - **CLI（dotnet tool）** — GUI なしでコード生成。`quicker generate`（ER 図 JSON → コード）/ `quicker scaffold`（DB 直結 → コード）
 
