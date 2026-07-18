@@ -73,19 +73,6 @@ public class MainViewModelDependencyInjectionTests
     /// <summary>アプリ固有ダイアログを表示せず常にキャンセル相当を返すスタブ</summary>
     private sealed class StubAppDialogService : IAppDialogService
     {
-        public DbConnectionDialogResult? ShowDbConnectionDialog(
-            DbConnectionDialogMode mode,
-            IDatabaseProvider? fixedProvider = null,
-            string? title = null
-        ) => null;
-
-        public void ShowSchemaSyncDialog(
-            IDatabaseProvider provider,
-            DbConnectionSettings settings,
-            IReadOnlyList<Entity> entities,
-            IReadOnlyList<Relationship> relationships
-        ) { }
-
         public PrintOptions? ShowPrintOptionsDialog(string? defaultTitle) => null;
     }
 

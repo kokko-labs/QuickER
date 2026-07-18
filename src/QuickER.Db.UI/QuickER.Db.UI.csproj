@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <!-- 中立（既定）リソースのカルチャ＝英語。日本語は Strings.ja.resx サテライトで賦与する -->
+    <NeutralResourcesLanguage>en</NeutralResourcesLanguage>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\QuickER.Extensibility\QuickER.Extensibility.csproj" />
+    <ProjectReference Include="..\QuickER.Gui.Abstractions\QuickER.Gui.Abstractions.csproj" />
+    <ProjectReference Include="..\QuickER.Gui.Common\QuickER.Gui.Common.csproj" />
+    <ProjectReference Include="..\QuickER.Provider\QuickER.Provider.csproj" />
+    <ProjectReference Include="..\QuickER.Sqlite\QuickER.Sqlite.csproj" />
+    <ProjectReference Include="..\QuickER.SqlServer\QuickER.SqlServer.csproj" />
+  </ItemGroup>
+
+  <!--
+    多言語リソース: Strings.resx（中立＝英語）と Strings.ja.resx（日本語サテライト）。
+    厳密型アクセサ（Strings.Designer.cs）は VS 以外でも確実に通るよう手書きでチェックイン済み。
+  -->
+  <ItemGroup>
+    <EmbeddedResource Update="Resources\Strings.resx">
+      <Generator>PublicResXFileCodeGenerator</Generator>
+      <LastGenOutput>Strings.Designer.cs</LastGenOutput>
+    </EmbeddedResource>
+    <Compile Update="Resources\Strings.Designer.cs">
+      <DesignTime>True</DesignTime>
+      <AutoGen>True</AutoGen>
+      <DependentUpon>Strings.resx</DependentUpon>
+    </Compile>
+  </ItemGroup>
+</Project>

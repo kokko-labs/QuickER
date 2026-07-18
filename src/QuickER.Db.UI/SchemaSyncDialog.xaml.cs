@@ -1,7 +1,6 @@
 ﻿using System.Windows;
-using QuickER.ViewModels;
 
-namespace QuickER.Views;
+namespace QuickER.Db.UI;
 
 /// <summary>DB スキーマ同期ダイアログのコードビハインド</summary>
 public partial class SchemaSyncDialog : Window

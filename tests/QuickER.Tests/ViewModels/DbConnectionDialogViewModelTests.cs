@@ -1,13 +1,12 @@
 using System.IO;
 using FluentAssertions;
+using QuickER.Db.UI;
+using QuickER.Db.UI.Resources;
 using QuickER.Gui.Abstractions;
 using QuickER.Provider;
-using QuickER.Resources;
-using QuickER.Services;
 using QuickER.Sqlite;
 using QuickER.SqlServer;
 using QuickER.Tests.TestDoubles;
-using QuickER.ViewModels;
 
 namespace QuickER.Tests.ViewModels;
 

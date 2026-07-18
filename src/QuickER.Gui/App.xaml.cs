@@ -95,12 +95,14 @@ namespace QuickER
                 .SelectMany(module => module.CreateToolbarItems(_provider))
                 .ToList();
 
-            // 集約後の先頭ボタンは BeginsGroup を必ず false にする。
-            // ItemsControl の直前には静的セパレータがあるため、先頭ボタンが区切りを持つと二重表示になる
-            // （AI モジュールを外した構成でコード生成モジュールが先頭へ来る場合に効く）。
+            // 集約後の全体先頭ボタンは BeginsGroup を必ず false にする。
+            // ItemsControl の直前は対象 DB 選択グループ（＋その手前の静的セパレータ）で、
+            // 従来は先頭の DB 取込ボタンがそこへ区切りなしで続いていた。先頭ボタンが区切りを持つと
+            // 二重の区切りになるため、各モジュールが自前で持つ先頭 BeginsGroup を全体先頭でだけ矯正する
+            // （DB ツールを外した構成で AI やコード生成モジュールが先頭へ来る場合にも効く）。
             if (toolbarItems.Count > 0)
             {
-                toolbarItems[0] = toolbarItems[0] with { BeginsGroup = false };
+                toolbarItems[0].BeginsGroup = false;
             }
 
             mainViewModel.FeatureToolbarItems = toolbarItems;

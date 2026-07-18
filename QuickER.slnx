@@ -57,6 +57,7 @@
     <Project Path="src/QuickER.Cli/QuickER.Cli.csproj" />
     <Project Path="src/QuickER.CodeGen.CSharp/QuickER.CodeGen.CSharp.csproj" />
     <Project Path="src/QuickER.CodeGen.UI/QuickER.CodeGen.UI.csproj" />
+    <Project Path="src/QuickER.Db.UI/QuickER.Db.UI.csproj" />
     <Project Path="src/QuickER.Document/QuickER.Document.csproj" />
     <Project Path="src/QuickER.Extensibility/QuickER.Extensibility.csproj" />
     <Project Path="src/QuickER.Gui.Abstractions/QuickER.Gui.Abstractions.csproj" />

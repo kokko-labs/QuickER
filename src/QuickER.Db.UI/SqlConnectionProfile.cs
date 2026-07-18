@@ -1,7 +1,7 @@
 using QuickER.Provider;
 using QuickER.SqlServer;
 
-namespace QuickER.Services;
+namespace QuickER.Db.UI;
 
 /// <summary>名前を付けて保存可能な DB 接続プロファイル（多 DBMS 対応）</summary>
 /// <remarks>

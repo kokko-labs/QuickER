@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using FluentAssertions;
 using QuickER.Extensibility;
 using QuickER.Model;
+using QuickER.PostgreSql;
 using QuickER.Provider;
 using QuickER.Services;
 using QuickER.SqlServer;
@@ -113,6 +114,60 @@ public class MainViewModelErDiagramHostTests
 
         vm.Queries.Should().ContainSingle();
         vm.Queries[0].Name.Should().Be("FromModule");
+    }
+
+    /// <summary>ReplaceDiagram が図の TargetDbms を採用し、エンティティを置換することを検証する</summary>
+    [Fact(DisplayName = "ReplaceDiagram は方言採用とエンティティ置換を行う")]
+    public void ReplaceDiagram_AdoptsDialectAndReplacesEntities()
+    {
+        var registry = new DatabaseProviderRegistry(
+            new IDatabaseProvider[] { new SqlServerProvider(), new PostgreSqlProvider() }
+        );
+        var vm = new MainViewModel(providers: registry);
+        var host = new MainViewModelErDiagramHost(vm);
+
+        var diagram = new ErDiagram
+        {
+            TargetDbms = "postgresql",
+            Entities = { new Entity { TableName = "Book" } },
+        };
+
+        host.ReplaceDiagram(diagram);
+
+        // 図の方言（postgresql）が現在方言として採用される
+        vm.CurrentProvider.Name.Should().Be("postgresql");
+        // エンティティが丸ごと差し替えられる
+        vm.Entities.Should().ContainSingle(entity => entity.TableName == "Book");
+    }
+
+    /// <summary>TargetDbms が現在プロバイダの名前を返すことを検証する</summary>
+    [Fact(DisplayName = "TargetDbms は CurrentProvider.Name を返す")]
+    public void TargetDbms_ReturnsCurrentProviderName()
+    {
+        var vm = new MainViewModel();
+        var host = new MainViewModelErDiagramHost(vm);
+
+        host.TargetDbms.Should().Be(vm.CurrentProvider.Name);
+        host.TargetDbms.Should().Be("sqlserver");
+    }
+
+    /// <summary>方言が切り替わったとき、host の TargetDbmsChanged が中継発火することを検証する</summary>
+    [Fact(DisplayName = "方言切替で host の TargetDbmsChanged が中継発火する")]
+    public void TargetDbmsChanged_RelaysOnDialectSwitch()
+    {
+        var registry = new DatabaseProviderRegistry(
+            new IDatabaseProvider[] { new SqlServerProvider(), new PostgreSqlProvider() }
+        );
+        var vm = new MainViewModel(providers: registry);
+        var host = new MainViewModelErDiagramHost(vm);
+
+        var raised = 0;
+        host.TargetDbmsChanged += (_, _) => raised++;
+
+        vm.SelectedProvider = registry.Get(PostgreSqlProvider.ProviderName);
+
+        raised.Should().BeGreaterThan(0);
+        host.TargetDbms.Should().Be("postgresql");
     }
 
     /// <summary>VM で列リネームが起きたとき、host の ColumnRenamed が正しい EntityId・新旧名で中継発火することを検証する</summary>

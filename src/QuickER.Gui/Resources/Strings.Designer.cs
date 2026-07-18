@@ -370,23 +370,8 @@ namespace QuickER.Resources {
             }
         }
         
-        public static string Toolbar_ImportFromDb {
-            get {
-                return ResourceManager.GetString("Toolbar_ImportFromDb", resourceCulture);
-            }
-        }
         
-        public static string Toolbar_ImportFromDbTooltip {
-            get {
-                return ResourceManager.GetString("Toolbar_ImportFromDbTooltip", resourceCulture);
-            }
-        }
         
-        public static string Toolbar_SyncToDb {
-            get {
-                return ResourceManager.GetString("Toolbar_SyncToDb", resourceCulture);
-            }
-        }
 
         public static string Status_Ready {
             get {
@@ -736,347 +721,62 @@ namespace QuickER.Resources {
             }
         }
         
-        public static string DbConnection_Title {
-            get {
-                return ResourceManager.GetString("DbConnection_Title", resourceCulture);
-            }
-        }
         
-        public static string DbConnection_SavedConnections {
-            get {
-                return ResourceManager.GetString("DbConnection_SavedConnections", resourceCulture);
-            }
-        }
         
-        public static string DbConnection_DeleteProfile {
-            get {
-                return ResourceManager.GetString("DbConnection_DeleteProfile", resourceCulture);
-            }
-        }
         
-        public static string DbConnection_DeleteProfileTooltip {
-            get {
-                return ResourceManager.GetString("DbConnection_DeleteProfileTooltip", resourceCulture);
-            }
-        }
         
-        public static string DbConnection_ProfileName {
-            get {
-                return ResourceManager.GetString("DbConnection_ProfileName", resourceCulture);
-            }
-        }
         
-        public static string DbConnection_SaveProfile {
-            get {
-                return ResourceManager.GetString("DbConnection_SaveProfile", resourceCulture);
-            }
-        }
         
-        public static string DbConnection_SaveProfileTooltip {
-            get {
-                return ResourceManager.GetString("DbConnection_SaveProfileTooltip", resourceCulture);
-            }
-        }
         
-        public static string DbConnection_TargetDb {
-            get {
-                return ResourceManager.GetString("DbConnection_TargetDb", resourceCulture);
-            }
-        }
         
-        public static string DbConnection_FilePath {
-            get {
-                return ResourceManager.GetString("DbConnection_FilePath", resourceCulture);
-            }
-        }
         
-        public static string DbConnection_Browse {
-            get {
-                return ResourceManager.GetString("DbConnection_Browse", resourceCulture);
-            }
-        }
         
-        public static string DbConnection_BrowseTooltip {
-            get {
-                return ResourceManager.GetString("DbConnection_BrowseTooltip", resourceCulture);
-            }
-        }
         
-        public static string DbConnection_Host {
-            get {
-                return ResourceManager.GetString("DbConnection_Host", resourceCulture);
-            }
-        }
         
-        public static string DbConnection_Port {
-            get {
-                return ResourceManager.GetString("DbConnection_Port", resourceCulture);
-            }
-        }
         
-        public static string DbConnection_PortTooltip {
-            get {
-                return ResourceManager.GetString("DbConnection_PortTooltip", resourceCulture);
-            }
-        }
         
-        public static string DbConnection_Database {
-            get {
-                return ResourceManager.GetString("DbConnection_Database", resourceCulture);
-            }
-        }
         
-        public static string DbConnection_AuthMethod {
-            get {
-                return ResourceManager.GetString("DbConnection_AuthMethod", resourceCulture);
-            }
-        }
         
-        public static string DbConnection_UserName {
-            get {
-                return ResourceManager.GetString("DbConnection_UserName", resourceCulture);
-            }
-        }
         
-        public static string DbConnection_Password {
-            get {
-                return ResourceManager.GetString("DbConnection_Password", resourceCulture);
-            }
-        }
         
-        public static string DbConnection_SavePassword {
-            get {
-                return ResourceManager.GetString("DbConnection_SavePassword", resourceCulture);
-            }
-        }
         
-        public static string DbConnection_SavePasswordTooltip {
-            get {
-                return ResourceManager.GetString("DbConnection_SavePasswordTooltip", resourceCulture);
-            }
-        }
         
-        public static string DbConnection_TrustServerCertificate {
-            get {
-                return ResourceManager.GetString("DbConnection_TrustServerCertificate", resourceCulture);
-            }
-        }
         
-        public static string DbConnection_TestConnection {
-            get {
-                return ResourceManager.GetString("DbConnection_TestConnection", resourceCulture);
-            }
-        }
         
-        public static string DbConnection_Restored {
-            get {
-                return ResourceManager.GetString("DbConnection_Restored", resourceCulture);
-            }
-        }
         
-        public static string DbConnection_ProfileDialectMismatch {
-            get {
-                return ResourceManager.GetString("DbConnection_ProfileDialectMismatch", resourceCulture);
-            }
-        }
         
-        public static string DbConnection_ProfileLoaded {
-            get {
-                return ResourceManager.GetString("DbConnection_ProfileLoaded", resourceCulture);
-            }
-        }
         
-        public static string DbConnection_Connecting {
-            get {
-                return ResourceManager.GetString("DbConnection_Connecting", resourceCulture);
-            }
-        }
         
-        public static string DbConnection_ConnectSucceeded {
-            get {
-                return ResourceManager.GetString("DbConnection_ConnectSucceeded", resourceCulture);
-            }
-        }
         
-        public static string DbConnection_ConnectFailed {
-            get {
-                return ResourceManager.GetString("DbConnection_ConnectFailed", resourceCulture);
-            }
-        }
         
-        public static string DbConnection_ProfileNameRequired {
-            get {
-                return ResourceManager.GetString("DbConnection_ProfileNameRequired", resourceCulture);
-            }
-        }
         
-        public static string DbConnection_ProfileSaved {
-            get {
-                return ResourceManager.GetString("DbConnection_ProfileSaved", resourceCulture);
-            }
-        }
         
-        public static string DbConnection_SelectProfileToDelete {
-            get {
-                return ResourceManager.GetString("DbConnection_SelectProfileToDelete", resourceCulture);
-            }
-        }
         
-        public static string DbConnection_DeleteProfileConfirm {
-            get {
-                return ResourceManager.GetString("DbConnection_DeleteProfileConfirm", resourceCulture);
-            }
-        }
         
-        public static string DbConnection_ProfileDeleted {
-            get {
-                return ResourceManager.GetString("DbConnection_ProfileDeleted", resourceCulture);
-            }
-        }
         
-        public static string DbConnection_SqliteFileFilter {
-            get {
-                return ResourceManager.GetString("DbConnection_SqliteFileFilter", resourceCulture);
-            }
-        }
         
-        public static string DbConnection_FilePathRequired {
-            get {
-                return ResourceManager.GetString("DbConnection_FilePathRequired", resourceCulture);
-            }
-        }
         
-        public static string DbConnection_FileNotFound {
-            get {
-                return ResourceManager.GetString("DbConnection_FileNotFound", resourceCulture);
-            }
-        }
         
-        public static string DbConnection_HostAndDatabaseRequired {
-            get {
-                return ResourceManager.GetString("DbConnection_HostAndDatabaseRequired", resourceCulture);
-            }
-        }
         
-        public static string SchemaSync_Title {
-            get {
-                return ResourceManager.GetString("SchemaSync_Title", resourceCulture);
-            }
-        }
         
-        public static string SchemaSync_Recalculate {
-            get {
-                return ResourceManager.GetString("SchemaSync_Recalculate", resourceCulture);
-            }
-        }
         
-        public static string SchemaSync_SelectAll {
-            get {
-                return ResourceManager.GetString("SchemaSync_SelectAll", resourceCulture);
-            }
-        }
         
-        public static string SchemaSync_DeselectAll {
-            get {
-                return ResourceManager.GetString("SchemaSync_DeselectAll", resourceCulture);
-            }
-        }
         
-        public static string SchemaSync_Execute {
-            get {
-                return ResourceManager.GetString("SchemaSync_Execute", resourceCulture);
-            }
-        }
         
-        public static string SchemaSync_DiffList {
-            get {
-                return ResourceManager.GetString("SchemaSync_DiffList", resourceCulture);
-            }
-        }
         
-        public static string SchemaSync_SqlPreview {
-            get {
-                return ResourceManager.GetString("SchemaSync_SqlPreview", resourceCulture);
-            }
-        }
         
-        public static string SchemaSync_Fetching {
-            get {
-                return ResourceManager.GetString("SchemaSync_Fetching", resourceCulture);
-            }
-        }
         
-        public static string SchemaSync_ColumnOrderNotSynced {
-            get {
-                return ResourceManager.GetString("SchemaSync_ColumnOrderNotSynced", resourceCulture);
-            }
-        }
         
-        public static string SchemaSync_DiffCount {
-            get {
-                return ResourceManager.GetString("SchemaSync_DiffCount", resourceCulture);
-            }
-        }
         
-        public static string SchemaSync_NoDiff {
-            get {
-                return ResourceManager.GetString("SchemaSync_NoDiff", resourceCulture);
-            }
-        }
         
-        public static string SchemaSync_DiffFailed {
-            get {
-                return ResourceManager.GetString("SchemaSync_DiffFailed", resourceCulture);
-            }
-        }
         
-        public static string SchemaSync_NoScript {
-            get {
-                return ResourceManager.GetString("SchemaSync_NoScript", resourceCulture);
-            }
-        }
         
-        public static string SchemaSync_ExecuteConfirmDestructive {
-            get {
-                return ResourceManager.GetString("SchemaSync_ExecuteConfirmDestructive", resourceCulture);
-            }
-        }
         
-        public static string SchemaSync_ExecuteConfirm {
-            get {
-                return ResourceManager.GetString("SchemaSync_ExecuteConfirm", resourceCulture);
-            }
-        }
         
-        public static string SchemaSync_Executing {
-            get {
-                return ResourceManager.GetString("SchemaSync_Executing", resourceCulture);
-            }
-        }
         
-        public static string SchemaSync_ExecuteSucceeded {
-            get {
-                return ResourceManager.GetString("SchemaSync_ExecuteSucceeded", resourceCulture);
-            }
-        }
         
-        public static string SchemaSync_ExecuteFailedStatus {
-            get {
-                return ResourceManager.GetString("SchemaSync_ExecuteFailedStatus", resourceCulture);
-            }
-        }
         
-        public static string SchemaSync_RollbackMessage {
-            get {
-                return ResourceManager.GetString("SchemaSync_RollbackMessage", resourceCulture);
-            }
-        }
         
-        public static string SchemaSync_ExecuteError {
-            get {
-                return ResourceManager.GetString("SchemaSync_ExecuteError", resourceCulture);
-            }
-        }
         
         public static string Color_Blue {
             get {
@@ -1504,41 +1204,11 @@ namespace QuickER.Resources {
             }
         }
         
-        public static string Db_ImportTitle {
-            get {
-                return ResourceManager.GetString("Db_ImportTitle", resourceCulture);
-            }
-        }
         
-        public static string Db_ImportReplaceConfirm {
-            get {
-                return ResourceManager.GetString("Db_ImportReplaceConfirm", resourceCulture);
-            }
-        }
         
-        public static string Db_ImportFailed {
-            get {
-                return ResourceManager.GetString("Db_ImportFailed", resourceCulture);
-            }
-        }
         
-        public static string Db_SyncSqliteUnsupported {
-            get {
-                return ResourceManager.GetString("Db_SyncSqliteUnsupported", resourceCulture);
-            }
-        }
         
-        public static string Db_SyncWriteBack {
-            get {
-                return ResourceManager.GetString("Db_SyncWriteBack", resourceCulture);
-            }
-        }
         
-        public static string Db_SyncTitle {
-            get {
-                return ResourceManager.GetString("Db_SyncTitle", resourceCulture);
-            }
-        }
         
         public static string Selection_CountText {
             get {

@@ -28,10 +28,16 @@ public sealed class MainViewModelErDiagramHost : IErDiagramHost
 
         // VM の列リネーム通知を、契約イベントとしてそのまま中継する（引数の変換はしない単純リレー）
         _viewModel.ColumnRenamed += (_, e) => ColumnRenamed?.Invoke(this, e);
+
+        // VM の方言切替通知も、契約イベントとしてそのまま中継する（ColumnRenamed と同じリレー方式）
+        _viewModel.TargetDbmsChanged += (_, e) => TargetDbmsChanged?.Invoke(this, e);
     }
 
     /// <inheritdoc />
     public event EventHandler<ColumnRenamedEventArgs>? ColumnRenamed;
+
+    /// <inheritdoc />
+    public event EventHandler? TargetDbmsChanged;
 
     /// <inheritdoc />
     public bool IsEmpty => _viewModel.Entities.Count == 0;
@@ -48,6 +54,12 @@ public sealed class MainViewModelErDiagramHost : IErDiagramHost
     /// <inheritdoc />
     public void ReplaceQueries(IReadOnlyList<QueryDefinition> queries) =>
         _viewModel.ReplaceQueries(queries);
+
+    /// <inheritdoc />
+    public void ReplaceDiagram(ErDiagram diagram) => _viewModel.ReplaceDiagramFromModule(diagram);
+
+    /// <inheritdoc />
+    public string TargetDbms => _viewModel.CurrentProvider.Name;
 
     /// <inheritdoc />
     /// <remarks>必ず UI スレッドで呼び出すこと（ObservableCollection を変更するため）</remarks>

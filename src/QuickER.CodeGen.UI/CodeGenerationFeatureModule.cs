@@ -47,18 +47,18 @@ public sealed class CodeGenerationFeatureModule : IFeatureModule
         return new[]
         {
             new FeatureToolbarItem(
-                Icon: "⌘",
-                Label: Strings.Toolbar_GenerateCSharp,
-                Tooltip: Strings.Toolbar_GenerateCSharpTooltip,
-                Command: new RelayCommand(generation.Run),
+                icon: "⌘",
+                label: Strings.Toolbar_GenerateCSharp,
+                tooltip: Strings.Toolbar_GenerateCSharpTooltip,
+                command: new RelayCommand(generation.Run),
                 // AI モジュール群との区切りとして、先頭ボタンの直前にセパレータを描画する
-                BeginsGroup: true
+                beginsGroup: true
             ),
             new FeatureToolbarItem(
-                Icon: "🔎",
-                Label: Strings.Toolbar_QueryDefinitions,
-                Tooltip: Strings.Toolbar_QueryDefinitionsTooltip,
-                Command: new RelayCommand(queries.Run)
+                icon: "🔎",
+                label: Strings.Toolbar_QueryDefinitions,
+                tooltip: Strings.Toolbar_QueryDefinitionsTooltip,
+                command: new RelayCommand(queries.Run)
             ),
         };
     }

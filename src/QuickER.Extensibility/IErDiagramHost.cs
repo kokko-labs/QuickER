@@ -47,4 +47,17 @@ public interface IErDiagramHost
     /// <summary>図の名前付きクエリ定義を丸ごと差し替える。差し替え後の自動保存はホスト実装の責務</summary>
     /// <param name="queries">差し替える名前付きクエリ定義の一覧</param>
     void ReplaceQueries(IReadOnlyList<QueryDefinition> queries);
+
+    /// <summary>図を丸ごと差し替える（DB 取込などの用途）。</summary>
+    /// <remarks>
+    /// <see cref="ErDiagram.TargetDbms"/> の方言採用・Undo 履歴のクリア・自動整列・画面フィット要求まで含めてホスト実装の責務。
+    /// </remarks>
+    /// <param name="diagram">差し替える図の意味モデル</param>
+    void ReplaceDiagram(ErDiagram diagram);
+
+    /// <summary>現在の対象 DBMS 識別子（<see cref="GetDiagram"/> の全材料化を避けた軽量読み取り）</summary>
+    string TargetDbms { get; }
+
+    /// <summary>対象 DBMS が切り替わったときに発火する（ツールバーボタンの活性・ツールチップ再評価などに使用）</summary>
+    event EventHandler? TargetDbmsChanged;
 }

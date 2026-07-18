@@ -1,0 +1,277 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <!--
+    中立（既定）リソース＝英語。日本語は Strings.ja.resx サテライトで賦与する（ResxKeyParityTests がキー集合の一致を検証する）。
+  -->
+  <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
+    <xsd:element name="root" msdata:IsDataSet="true">
+      <xsd:complexType>
+        <xsd:choice maxOccurs="unbounded">
+          <xsd:element name="metadata">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" />
+              </xsd:sequence>
+              <xsd:attribute name="name" use="required" type="xsd:string" />
+              <xsd:attribute name="type" type="xsd:string" />
+              <xsd:attribute name="mimetype" type="xsd:string" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="assembly">
+            <xsd:complexType>
+              <xsd:attribute name="alias" type="xsd:string" />
+              <xsd:attribute name="name" type="xsd:string" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="data">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+                <xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" msdata:Ordinal="1" />
+              <xsd:attribute name="type" type="xsd:string" msdata:Ordinal="3" />
+              <xsd:attribute name="mimetype" type="xsd:string" msdata:Ordinal="4" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="resheader">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" />
+            </xsd:complexType>
+          </xsd:element>
+        </xsd:choice>
+      </xsd:complexType>
+    </xsd:element>
+  </xsd:schema>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <data name="Common_Cancel" xml:space="preserve">
+    <value>Cancel</value>
+  </data>
+  <data name="Common_Close" xml:space="preserve">
+    <value>Close</value>
+  </data>
+  <data name="Common_Confirm" xml:space="preserve">
+    <value>Confirm</value>
+  </data>
+  <data name="Common_Error" xml:space="preserve">
+    <value>Error</value>
+  </data>
+  <data name="Common_Complete" xml:space="preserve">
+    <value>Done</value>
+  </data>
+  <data name="Toolbar_ImportFromDb" xml:space="preserve">
+    <value>DB Import</value>
+  </data>
+  <data name="Toolbar_ImportFromDbTooltip" xml:space="preserve">
+    <value>Import schema from a database</value>
+  </data>
+  <data name="Toolbar_SyncToDb" xml:space="preserve">
+    <value>DB Sync</value>
+  </data>
+  <data name="DbConnection_Title" xml:space="preserve">
+    <value>Connect to Database</value>
+  </data>
+  <data name="DbConnection_SavedConnections" xml:space="preserve">
+    <value>Saved Connections</value>
+  </data>
+  <data name="DbConnection_DeleteProfile" xml:space="preserve">
+    <value>🗑 Delete</value>
+  </data>
+  <data name="DbConnection_DeleteProfileTooltip" xml:space="preserve">
+    <value>Delete the selected profile</value>
+  </data>
+  <data name="DbConnection_ProfileName" xml:space="preserve">
+    <value>Profile Name</value>
+  </data>
+  <data name="DbConnection_SaveProfile" xml:space="preserve">
+    <value>💾 Save</value>
+  </data>
+  <data name="DbConnection_SaveProfileTooltip" xml:space="preserve">
+    <value>Save the current input under the profile name</value>
+  </data>
+  <data name="DbConnection_TargetDb" xml:space="preserve">
+    <value>Target DB</value>
+  </data>
+  <data name="DbConnection_FilePath" xml:space="preserve">
+    <value>File Path</value>
+  </data>
+  <data name="DbConnection_Browse" xml:space="preserve">
+    <value>Browse...</value>
+  </data>
+  <data name="DbConnection_BrowseTooltip" xml:space="preserve">
+    <value>Select an existing SQLite database file</value>
+  </data>
+  <data name="DbConnection_Host" xml:space="preserve">
+    <value>Host</value>
+  </data>
+  <data name="DbConnection_Port" xml:space="preserve">
+    <value>Port</value>
+  </data>
+  <data name="DbConnection_PortTooltip" xml:space="preserve">
+    <value>If left blank, the dialect's default port is used</value>
+  </data>
+  <data name="DbConnection_Database" xml:space="preserve">
+    <value>Database</value>
+  </data>
+  <data name="DbConnection_AuthMethod" xml:space="preserve">
+    <value>Authentication</value>
+  </data>
+  <data name="DbConnection_UserName" xml:space="preserve">
+    <value>User Name</value>
+  </data>
+  <data name="DbConnection_Password" xml:space="preserve">
+    <value>Password</value>
+  </data>
+  <data name="DbConnection_SavePassword" xml:space="preserve">
+    <value>Save</value>
+  </data>
+  <data name="DbConnection_SavePasswordTooltip" xml:space="preserve">
+    <value>Encrypt with Windows DPAPI and save together with the profile</value>
+  </data>
+  <data name="DbConnection_TrustServerCertificate" xml:space="preserve">
+    <value>Trust the server certificate (TrustServerCertificate)</value>
+  </data>
+  <data name="DbConnection_TestConnection" xml:space="preserve">
+    <value>Test Connection</value>
+  </data>
+  <data name="DbConnection_Restored" xml:space="preserve">
+    <value>Restored the previous connection settings.</value>
+  </data>
+  <data name="DbConnection_ProfileDialectMismatch" xml:space="preserve">
+    <value>Profile '{0}' cannot be selected because its dialect differs.</value>
+  </data>
+  <data name="DbConnection_ProfileLoaded" xml:space="preserve">
+    <value>Loaded profile '{0}'.</value>
+  </data>
+  <data name="DbConnection_Connecting" xml:space="preserve">
+    <value>Connecting...</value>
+  </data>
+  <data name="DbConnection_ConnectSucceeded" xml:space="preserve">
+    <value>Connected: detected {0} table(s).</value>
+  </data>
+  <data name="DbConnection_ConnectFailed" xml:space="preserve">
+    <value>Connection failed: {0}</value>
+  </data>
+  <data name="DbConnection_ProfileNameRequired" xml:space="preserve">
+    <value>Enter a profile name.</value>
+  </data>
+  <data name="DbConnection_ProfileSaved" xml:space="preserve">
+    <value>Saved profile '{0}'.</value>
+  </data>
+  <data name="DbConnection_SelectProfileToDelete" xml:space="preserve">
+    <value>Select a profile to delete.</value>
+  </data>
+  <data name="DbConnection_DeleteProfileConfirm" xml:space="preserve">
+    <value>Delete profile '{0}'. Are you sure?</value>
+  </data>
+  <data name="DbConnection_ProfileDeleted" xml:space="preserve">
+    <value>Deleted profile '{0}'.</value>
+  </data>
+  <data name="DbConnection_SqliteFileFilter" xml:space="preserve">
+    <value>SQLite Database (*.db;*.sqlite;*.sqlite3)|*.db;*.sqlite;*.sqlite3|All Files (*.*)|*.*</value>
+  </data>
+  <data name="DbConnection_FilePathRequired" xml:space="preserve">
+    <value>Enter the database file path.</value>
+  </data>
+  <data name="DbConnection_FileNotFound" xml:space="preserve">
+    <value>The specified database file was not found.</value>
+  </data>
+  <data name="DbConnection_HostAndDatabaseRequired" xml:space="preserve">
+    <value>Enter the host and database name.</value>
+  </data>
+  <data name="SchemaSync_Title" xml:space="preserve">
+    <value>DB Schema Sync (Apply Diff)</value>
+  </data>
+  <data name="SchemaSync_Recalculate" xml:space="preserve">
+    <value>🔄 Recalculate Diff</value>
+  </data>
+  <data name="SchemaSync_SelectAll" xml:space="preserve">
+    <value>✓ Select All</value>
+  </data>
+  <data name="SchemaSync_DeselectAll" xml:space="preserve">
+    <value>✗ Deselect All</value>
+  </data>
+  <data name="SchemaSync_Execute" xml:space="preserve">
+    <value>🛢 Execute</value>
+  </data>
+  <data name="SchemaSync_DiffList" xml:space="preserve">
+    <value>Diff List</value>
+  </data>
+  <data name="SchemaSync_SqlPreview" xml:space="preserve">
+    <value>Generated SQL Preview</value>
+  </data>
+  <data name="SchemaSync_Fetching" xml:space="preserve">
+    <value>Retrieving DB schema...</value>
+  </data>
+  <data name="SchemaSync_ColumnOrderNotSynced" xml:space="preserve">
+    <value>Column order changes are not synced to the DB: [{0}]</value>
+  </data>
+  <data name="SchemaSync_DiffCount" xml:space="preserve">
+    <value>{0} difference(s) found.</value>
+  </data>
+  <data name="SchemaSync_NoDiff" xml:space="preserve">
+    <value>No differences.</value>
+  </data>
+  <data name="SchemaSync_DiffFailed" xml:space="preserve">
+    <value>Failed to compute diff: {0}</value>
+  </data>
+  <data name="SchemaSync_NoScript" xml:space="preserve">
+    <value>There is no script to execute.</value>
+  </data>
+  <data name="SchemaSync_ExecuteConfirmDestructive" xml:space="preserve">
+    <value>This script contains destructive changes (drops/type changes) and will run against {0}. Are you sure?</value>
+  </data>
+  <data name="SchemaSync_ExecuteConfirm" xml:space="preserve">
+    <value>Run the script against {0}. Are you sure?</value>
+  </data>
+  <data name="SchemaSync_Executing" xml:space="preserve">
+    <value>Executing...</value>
+  </data>
+  <data name="SchemaSync_ExecuteSucceeded" xml:space="preserve">
+    <value>Success: executed {0} batch(es) and committed.</value>
+  </data>
+  <data name="SchemaSync_ExecuteFailedStatus" xml:space="preserve">
+    <value>Failed: {0}</value>
+  </data>
+  <data name="SchemaSync_RollbackMessage" xml:space="preserve">
+    <value>Execution failed and was rolled back:</value>
+  </data>
+  <data name="SchemaSync_ExecuteError" xml:space="preserve">
+    <value>Execution failed: {0}</value>
+  </data>
+  <data name="Db_ImportTitle" xml:space="preserve">
+    <value>Import from Database</value>
+  </data>
+  <data name="Db_ImportReplaceConfirm" xml:space="preserve">
+    <value>This will replace the current diagram with the retrieved result. Are you sure?</value>
+  </data>
+  <data name="Db_ImportFailed" xml:space="preserve">
+    <value>Failed to import: {0}</value>
+  </data>
+  <data name="Db_SyncSqliteUnsupported" xml:space="preserve">
+    <value>The SQLite provider does not support DB sync yet (planned for the future)</value>
+  </data>
+  <data name="Db_SyncWriteBack" xml:space="preserve">
+    <value>Write the current diagram back to the existing DB (apply diff ALTER)</value>
+  </data>
+  <data name="Db_SyncTitle" xml:space="preserve">
+    <value>Sync with Database</value>
+  </data>
+</root>
