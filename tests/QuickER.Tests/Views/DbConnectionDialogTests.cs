@@ -2,10 +2,9 @@ using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
 using FluentAssertions;
+using QuickER.Db.UI;
 using QuickER.Provider;
 using QuickER.SqlServer;
-using QuickER.ViewModels;
-using QuickER.Views;
 
 namespace QuickER.Tests.Views;
 

@@ -1,0 +1,277 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <!--
+    中立（既定）リソース＝英語。日本語は Strings.ja.resx サテライトで賦与する（ResxKeyParityTests がキー集合の一致を検証する）。
+  -->
+  <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
+    <xsd:element name="root" msdata:IsDataSet="true">
+      <xsd:complexType>
+        <xsd:choice maxOccurs="unbounded">
+          <xsd:element name="metadata">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" />
+              </xsd:sequence>
+              <xsd:attribute name="name" use="required" type="xsd:string" />
+              <xsd:attribute name="type" type="xsd:string" />
+              <xsd:attribute name="mimetype" type="xsd:string" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="assembly">
+            <xsd:complexType>
+              <xsd:attribute name="alias" type="xsd:string" />
+              <xsd:attribute name="name" type="xsd:string" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="data">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+                <xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" msdata:Ordinal="1" />
+              <xsd:attribute name="type" type="xsd:string" msdata:Ordinal="3" />
+              <xsd:attribute name="mimetype" type="xsd:string" msdata:Ordinal="4" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="resheader">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" />
+            </xsd:complexType>
+          </xsd:element>
+        </xsd:choice>
+      </xsd:complexType>
+    </xsd:element>
+  </xsd:schema>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <data name="Common_Cancel" xml:space="preserve">
+    <value>キャンセル</value>
+  </data>
+  <data name="Common_Close" xml:space="preserve">
+    <value>閉じる</value>
+  </data>
+  <data name="Common_Confirm" xml:space="preserve">
+    <value>確認</value>
+  </data>
+  <data name="Common_Error" xml:space="preserve">
+    <value>エラー</value>
+  </data>
+  <data name="Common_Complete" xml:space="preserve">
+    <value>完了</value>
+  </data>
+  <data name="Toolbar_ImportFromDb" xml:space="preserve">
+    <value>DB取込</value>
+  </data>
+  <data name="Toolbar_ImportFromDbTooltip" xml:space="preserve">
+    <value>データベースからスキーマを取り込み</value>
+  </data>
+  <data name="Toolbar_SyncToDb" xml:space="preserve">
+    <value>DB同期</value>
+  </data>
+  <data name="DbConnection_Title" xml:space="preserve">
+    <value>データベースに接続</value>
+  </data>
+  <data name="DbConnection_SavedConnections" xml:space="preserve">
+    <value>保存済み接続</value>
+  </data>
+  <data name="DbConnection_DeleteProfile" xml:space="preserve">
+    <value>🗑 削除</value>
+  </data>
+  <data name="DbConnection_DeleteProfileTooltip" xml:space="preserve">
+    <value>選択中のプロファイルを削除</value>
+  </data>
+  <data name="DbConnection_ProfileName" xml:space="preserve">
+    <value>保存名</value>
+  </data>
+  <data name="DbConnection_SaveProfile" xml:space="preserve">
+    <value>💾 保存</value>
+  </data>
+  <data name="DbConnection_SaveProfileTooltip" xml:space="preserve">
+    <value>現在の入力内容を保存名で保存</value>
+  </data>
+  <data name="DbConnection_TargetDb" xml:space="preserve">
+    <value>対象DB</value>
+  </data>
+  <data name="DbConnection_FilePath" xml:space="preserve">
+    <value>ファイルパス</value>
+  </data>
+  <data name="DbConnection_Browse" xml:space="preserve">
+    <value>参照...</value>
+  </data>
+  <data name="DbConnection_BrowseTooltip" xml:space="preserve">
+    <value>既存の SQLite データベースファイルを選択</value>
+  </data>
+  <data name="DbConnection_Host" xml:space="preserve">
+    <value>ホスト</value>
+  </data>
+  <data name="DbConnection_Port" xml:space="preserve">
+    <value>ポート</value>
+  </data>
+  <data name="DbConnection_PortTooltip" xml:space="preserve">
+    <value>空欄の場合は方言の既定ポートを使用します</value>
+  </data>
+  <data name="DbConnection_Database" xml:space="preserve">
+    <value>データベース</value>
+  </data>
+  <data name="DbConnection_AuthMethod" xml:space="preserve">
+    <value>認証方式</value>
+  </data>
+  <data name="DbConnection_UserName" xml:space="preserve">
+    <value>ユーザー名</value>
+  </data>
+  <data name="DbConnection_Password" xml:space="preserve">
+    <value>パスワード</value>
+  </data>
+  <data name="DbConnection_SavePassword" xml:space="preserve">
+    <value>保存</value>
+  </data>
+  <data name="DbConnection_SavePasswordTooltip" xml:space="preserve">
+    <value>Windows DPAPI で暗号化してプロファイルとともに保存</value>
+  </data>
+  <data name="DbConnection_TrustServerCertificate" xml:space="preserve">
+    <value>サーバー証明書を信頼する (TrustServerCertificate)</value>
+  </data>
+  <data name="DbConnection_TestConnection" xml:space="preserve">
+    <value>接続テスト</value>
+  </data>
+  <data name="DbConnection_Restored" xml:space="preserve">
+    <value>前回接続情報を復元しました。</value>
+  </data>
+  <data name="DbConnection_ProfileDialectMismatch" xml:space="preserve">
+    <value>プロファイル '{0}' は方言が異なるため選択できません。</value>
+  </data>
+  <data name="DbConnection_ProfileLoaded" xml:space="preserve">
+    <value>プロファイル '{0}' を読み込みました。</value>
+  </data>
+  <data name="DbConnection_Connecting" xml:space="preserve">
+    <value>接続中...</value>
+  </data>
+  <data name="DbConnection_ConnectSucceeded" xml:space="preserve">
+    <value>接続成功: {0} テーブルを検出しました。</value>
+  </data>
+  <data name="DbConnection_ConnectFailed" xml:space="preserve">
+    <value>接続失敗: {0}</value>
+  </data>
+  <data name="DbConnection_ProfileNameRequired" xml:space="preserve">
+    <value>保存名を入力してください。</value>
+  </data>
+  <data name="DbConnection_ProfileSaved" xml:space="preserve">
+    <value>プロファイル '{0}' を保存しました。</value>
+  </data>
+  <data name="DbConnection_SelectProfileToDelete" xml:space="preserve">
+    <value>削除するプロファイルを選択してください。</value>
+  </data>
+  <data name="DbConnection_DeleteProfileConfirm" xml:space="preserve">
+    <value>プロファイル '{0}' を削除します。よろしいですか？</value>
+  </data>
+  <data name="DbConnection_ProfileDeleted" xml:space="preserve">
+    <value>プロファイル '{0}' を削除しました。</value>
+  </data>
+  <data name="DbConnection_SqliteFileFilter" xml:space="preserve">
+    <value>SQLite データベース (*.db;*.sqlite;*.sqlite3)|*.db;*.sqlite;*.sqlite3|すべてのファイル (*.*)|*.*</value>
+  </data>
+  <data name="DbConnection_FilePathRequired" xml:space="preserve">
+    <value>データベースファイルのパスを入力してください。</value>
+  </data>
+  <data name="DbConnection_FileNotFound" xml:space="preserve">
+    <value>指定したデータベースファイルが見つかりません。</value>
+  </data>
+  <data name="DbConnection_HostAndDatabaseRequired" xml:space="preserve">
+    <value>ホストとデータベース名を入力してください。</value>
+  </data>
+  <data name="SchemaSync_Title" xml:space="preserve">
+    <value>DB スキーマ同期 (差分実行)</value>
+  </data>
+  <data name="SchemaSync_Recalculate" xml:space="preserve">
+    <value>🔄 差分を再計算</value>
+  </data>
+  <data name="SchemaSync_SelectAll" xml:space="preserve">
+    <value>✓ 全選択</value>
+  </data>
+  <data name="SchemaSync_DeselectAll" xml:space="preserve">
+    <value>✗ 全解除</value>
+  </data>
+  <data name="SchemaSync_Execute" xml:space="preserve">
+    <value>🛢 実行</value>
+  </data>
+  <data name="SchemaSync_DiffList" xml:space="preserve">
+    <value>差分一覧</value>
+  </data>
+  <data name="SchemaSync_SqlPreview" xml:space="preserve">
+    <value>生成 SQL プレビュー</value>
+  </data>
+  <data name="SchemaSync_Fetching" xml:space="preserve">
+    <value>DB スキーマを取得中...</value>
+  </data>
+  <data name="SchemaSync_ColumnOrderNotSynced" xml:space="preserve">
+    <value>列順変更は DB 同期しません: [{0}]</value>
+  </data>
+  <data name="SchemaSync_DiffCount" xml:space="preserve">
+    <value>{0} 件の差分があります。</value>
+  </data>
+  <data name="SchemaSync_NoDiff" xml:space="preserve">
+    <value>差分はありません。</value>
+  </data>
+  <data name="SchemaSync_DiffFailed" xml:space="preserve">
+    <value>差分計算に失敗しました: {0}</value>
+  </data>
+  <data name="SchemaSync_NoScript" xml:space="preserve">
+    <value>実行するスクリプトがありません。</value>
+  </data>
+  <data name="SchemaSync_ExecuteConfirmDestructive" xml:space="preserve">
+    <value>破壊的な変更 (削除/型変更) を含むスクリプトを {0} に実行します。よろしいですか？</value>
+  </data>
+  <data name="SchemaSync_ExecuteConfirm" xml:space="preserve">
+    <value>スクリプトを {0} に実行します。よろしいですか？</value>
+  </data>
+  <data name="SchemaSync_Executing" xml:space="preserve">
+    <value>実行中...</value>
+  </data>
+  <data name="SchemaSync_ExecuteSucceeded" xml:space="preserve">
+    <value>成功: {0} バッチを実行し COMMIT しました。</value>
+  </data>
+  <data name="SchemaSync_ExecuteFailedStatus" xml:space="preserve">
+    <value>失敗: {0}</value>
+  </data>
+  <data name="SchemaSync_RollbackMessage" xml:space="preserve">
+    <value>実行に失敗したため ROLLBACK されました:</value>
+  </data>
+  <data name="SchemaSync_ExecuteError" xml:space="preserve">
+    <value>実行に失敗しました: {0}</value>
+  </data>
+  <data name="Db_ImportTitle" xml:space="preserve">
+    <value>データベースから取込</value>
+  </data>
+  <data name="Db_ImportReplaceConfirm" xml:space="preserve">
+    <value>現在のダイアグラムを取得結果で置換します。よろしいですか？</value>
+  </data>
+  <data name="Db_ImportFailed" xml:space="preserve">
+    <value>取り込みに失敗しました: {0}</value>
+  </data>
+  <data name="Db_SyncSqliteUnsupported" xml:space="preserve">
+    <value>SQLite プロバイダは DB 同期に未対応です（将来対応予定）</value>
+  </data>
+  <data name="Db_SyncWriteBack" xml:space="preserve">
+    <value>現在のダイアグラムを既存 DB に書き戻し (差分 ALTER 実行)</value>
+  </data>
+  <data name="Db_SyncTitle" xml:space="preserve">
+    <value>データベースと同期</value>
+  </data>
+</root>

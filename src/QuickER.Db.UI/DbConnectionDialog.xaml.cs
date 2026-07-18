@@ -1,7 +1,6 @@
 using System.Windows;
-using QuickER.ViewModels;
 
-namespace QuickER.Views;
+namespace QuickER.Db.UI;
 
 /// <summary>DB 接続情報入力ダイアログのコードビハインド（多 DBMS 共通）</summary>
 /// <remarks>PasswordBox の双方向同期は <see cref="PasswordBoxBehavior"/> 添付ビヘイビアが担う</remarks>

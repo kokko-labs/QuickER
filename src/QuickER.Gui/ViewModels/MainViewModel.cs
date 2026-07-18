@@ -49,6 +49,9 @@ public partial class MainViewModel : ObservableObject
     /// </remarks>
     public event EventHandler<ColumnRenamedEventArgs>? ColumnRenamed;
 
+    /// <summary>対象 DBMS が切り替わったときに発火する（フィーチャーモジュールのツールバー活性・ツールチップ再評価などに使用）</summary>
+    public event EventHandler? TargetDbmsChanged;
+
     /// <summary>選択中エンティティを内部バッファへコピーするコマンド</summary>
     /// <remarks>ペースト側の実行可否が非バインド対象の内部バッファに依存するため、生成属性を使わず手動で構築する</remarks>
     public IRelayCommand CopySelectedEntityCommand { get; }
@@ -151,7 +154,7 @@ public partial class MainViewModel : ObservableObject
     /// <summary>確認・通知ダイアログの表示先（テストではスタブに差し替える）</summary>
     private readonly IDialogService _dialogs;
 
-    /// <summary>アプリ固有モーダルダイアログ（C# 生成・SQL 接続・スキーマ同期）の表示先</summary>
+    /// <summary>アプリ固有モーダルダイアログ（印刷オプション）の表示先</summary>
     private readonly IAppDialogService _appDialogs;
 
     /// <summary>ファイル選択ダイアログの表示先</summary>
@@ -201,8 +204,6 @@ public partial class MainViewModel : ObservableObject
     /// <remarks>
     /// 全パラメーターが省略可能な単一コンストラクターへ集約している
     /// 省略された引数は既定実装で解決する（テスト・既定合成点用）
-    /// <c>appDialogs</c> の既定実装 <see cref="WpfAppDialogService"/> は
-    /// <c>files</c>・<c>providers</c> に依存するため、両者を先に解決してから生成する
     /// </remarks>
     public MainViewModel(
         IDialogService? dialogService = null,
@@ -215,7 +216,7 @@ public partial class MainViewModel : ObservableObject
         var resolvedProviders = providers ?? CreateDefaultRegistry();
 
         _dialogs = dialogService ?? new MessageBoxDialogService();
-        _appDialogs = appDialogs ?? new WpfAppDialogService(resolvedFiles, resolvedProviders);
+        _appDialogs = appDialogs ?? new WpfAppDialogService();
         _files = resolvedFiles;
         _providers = resolvedProviders;
         _currentProvider = ResolveProvider("sqlserver", warnOnFallback: false);
@@ -411,6 +412,14 @@ public partial class MainViewModel : ObservableObject
         });
 
         ClearUndoRedoHistory();
+    }
+
+    /// <summary>図を丸ごと差し替える（DB 取込などフィーチャーモジュールからの置換入口）</summary>
+    /// <remarks>方言採用 → 履歴なし置換＋自動整列（内部で画面フィット要求まで発火）の順で、DB 取込の従来挙動と同一</remarks>
+    public void ReplaceDiagramFromModule(ErDiagram diagram)
+    {
+        SetCurrentProviderFromDbms(diagram.TargetDbms);
+        ReplaceDiagramWithoutHistory(diagram.Entities, diagram.Relationships, autoLayout: true);
     }
 
     /// <summary>「説明」表示の切替を全エンティティへ伝播し、キャンバスサイズを更新する</summary>
@@ -1321,9 +1330,8 @@ public partial class MainViewModel : ObservableObject
         OnPropertyChanged(nameof(SelectedProvider));
         OnPropertyChanged(nameof(AvailableDataTypes));
 
-        // 方言により DB 同期の可否が変わるため、コマンドの実行可否とツールチップを更新する
-        SyncToDatabaseCommand.NotifyCanExecuteChanged();
-        OnPropertyChanged(nameof(SyncToDatabaseTooltip));
+        // フィーチャーモジュール（DB 同期ボタンの活性・ツールチップ再評価など）へ方言切替を通知する
+        TargetDbmsChanged?.Invoke(this, EventArgs.Empty);
     }
 
     /// <summary>

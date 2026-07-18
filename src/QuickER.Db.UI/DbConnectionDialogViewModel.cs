@@ -4,14 +4,13 @@ using System.Linq;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using QuickER.Db.UI.Resources;
 using QuickER.Gui.Abstractions;
 using QuickER.Gui.Common;
 using QuickER.Provider;
-using QuickER.Resources;
-using QuickER.Services;
 using QuickER.Sqlite;
 
-namespace QuickER.ViewModels;
+namespace QuickER.Db.UI;
 
 /// <summary>接続ダイアログの用途（DBMS 選択の可否が変わる）</summary>
 public enum DbConnectionDialogMode

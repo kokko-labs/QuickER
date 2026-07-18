@@ -5,7 +5,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 
-namespace QuickER.Services;
+namespace QuickER.Db.UI;
 
 /// <summary>connections.json のルート（登録プロファイル一覧＋前回接続）</summary>
 public sealed class SqlConnectionData

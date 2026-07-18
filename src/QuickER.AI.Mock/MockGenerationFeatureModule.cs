@@ -31,10 +31,10 @@ public sealed class MockGenerationFeatureModule : IFeatureModule
         return new[]
         {
             new FeatureToolbarItem(
-                Icon: "🖼",
-                Label: Strings.Toolbar_MockGeneration,
-                Tooltip: Strings.Toolbar_MockGenerationTooltip,
-                Command: new RelayCommand(launcher.Open)
+                icon: "🖼",
+                label: Strings.Toolbar_MockGeneration,
+                tooltip: Strings.Toolbar_MockGenerationTooltip,
+                command: new RelayCommand(launcher.Open)
             ),
         };
     }

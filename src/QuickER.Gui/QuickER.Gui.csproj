@@ -36,6 +36,15 @@
     <IncludeCodeGenModules Condition="'$(IncludeCodeGenModules)' == ''">true</IncludeCodeGenModules>
     <DefineConstants Condition="'$(IncludeCodeGenModules)' == 'true'"
       >$(DefineConstants);QUICKER_CODEGEN_MODULES</DefineConstants>
+    <!--
+      DB 取込・DB 同期フィーチャーモジュールの同梱可否（他スイッチと独立に着脱できる）。
+      false にすると Db.UI（接続ダイアログ・同期ダイアログ・接続プロファイル）への参照ごと外れた
+      構成をビルドできる（FeatureModuleCatalog の QUICKER_DBTOOL_MODULES 定数と連動）。
+      スキーマ取込・差分・同期のエンジンはプロバイダ層在住（CLI の scaffold と共有）のため外れない。
+    -->
+    <IncludeDbToolModules Condition="'$(IncludeDbToolModules)' == ''">true</IncludeDbToolModules>
+    <DefineConstants Condition="'$(IncludeDbToolModules)' == 'true'"
+      >$(DefineConstants);QUICKER_DBTOOL_MODULES</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>
@@ -58,6 +67,10 @@
     <ProjectReference Include="..\QuickER.Extensibility\QuickER.Extensibility.csproj" />
     <ProjectReference Include="..\QuickER.Gui.Abstractions\QuickER.Gui.Abstractions.csproj" />
     <ProjectReference Include="..\QuickER.Gui.Common\QuickER.Gui.Common.csproj" />
+    <ProjectReference
+      Include="..\QuickER.Db.UI\QuickER.Db.UI.csproj"
+      Condition="'$(IncludeDbToolModules)' == 'true'"
+    />
     <ProjectReference Include="..\QuickER.Document\QuickER.Document.csproj" />
     <ProjectReference
       Include="..\QuickER.CodeGen.UI\QuickER.CodeGen.UI.csproj"

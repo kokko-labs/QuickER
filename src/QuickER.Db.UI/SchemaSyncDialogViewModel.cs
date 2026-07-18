@@ -4,14 +4,13 @@ using System.Linq;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using QuickER.Db.UI.Resources;
 using QuickER.Gui.Abstractions;
 using QuickER.Gui.Common;
 using QuickER.Model;
 using QuickER.Provider;
-using QuickER.Resources;
-using QuickER.Services;
 
-namespace QuickER.ViewModels;
+namespace QuickER.Db.UI;
 
 /// <summary>ダイアグラムを既存 DB と同期（差分 ALTER 実行）するためのダイアログ ViewModel</summary>
 public partial class SchemaSyncDialogViewModel : ObservableObject

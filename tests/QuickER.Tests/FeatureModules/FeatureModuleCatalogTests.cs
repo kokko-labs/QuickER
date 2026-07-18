@@ -2,6 +2,7 @@ using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.Extensibility;
 using QuickER.Gui.Abstractions;
+using QuickER.Provider;
 using QuickER.Tests.TestDoubles;
 
 namespace QuickER.Tests.FeatureModules;
@@ -17,18 +18,18 @@ namespace QuickER.Tests.FeatureModules;
 /// </remarks>
 public class FeatureModuleCatalogTests
 {
-    /// <summary>カタログが AI チャット・モック生成・コード生成の 3 モジュールをこの順で返すことを検証する</summary>
+    /// <summary>カタログが DB ツール・AI チャット・モック生成・コード生成の 4 モジュールをこの順で返すことを検証する</summary>
     [Fact(
-        DisplayName = "カタログは ai-chat / mock-generation / code-generation の 3 モジュールを返す"
+        DisplayName = "カタログは db-tools / ai-chat / mock-generation / code-generation の 4 モジュールを返す"
     )]
-    public void CreateModules_ReturnsAiChatMockAndCodeGeneration()
+    public void CreateModules_ReturnsDbToolsAiChatMockAndCodeGeneration()
     {
         var modules = FeatureModuleCatalog.CreateModules();
 
         modules
             .Select(module => module.Id)
             .Should()
-            .Equal("ai-chat", "mock-generation", "code-generation");
+            .Equal("db-tools", "ai-chat", "mock-generation", "code-generation");
     }
 
     /// <summary>合成ルートと同じライフサイクルを全モジュールで通しで実行できることを検証する</summary>
@@ -38,9 +39,11 @@ public class FeatureModuleCatalogTests
         var modules = FeatureModuleCatalog.CreateModules();
         var services = new ServiceCollection();
         services.AddSingleton<IErDiagramHost>(new StubErDiagramHost());
-        // コード生成モジュールのダイアログ提示シームが解決に必要とする依存
+        // コード生成・DB ツールモジュールのダイアログ提示シームが解決に必要とする依存
         services.AddSingleton<IDialogService>(new StubDialogService());
         services.AddSingleton<IFileDialogService>(new NullFileDialogService());
+        // DB 接続ダイアログ提示シーム（DbConnectionDialogPresenter）が要求するプロバイダレジストリ
+        services.AddSingleton(new DatabaseProviderRegistry(Array.Empty<IDatabaseProvider>()));
 
         foreach (var module in modules)
         {
@@ -49,11 +52,12 @@ public class FeatureModuleCatalogTests
 
         using var provider = services.BuildServiceProvider();
 
-        // App.xaml.cs と同じ集約でツールバー寄与を得る（AI チャット → モック生成 → コード生成 → クエリ定義の順）
+        // App.xaml.cs と同じ集約でツールバー寄与を得る
+        // （DB 取込 → DB 同期 → AI チャット → モック生成 → コード生成 → クエリ定義の順）
         var items = modules.SelectMany(module => module.CreateToolbarItems(provider)).ToList();
 
-        items.Should().HaveCount(4);
-        items.Select(item => item.Icon).Should().Equal("🤖", "🖼", "⌘", "🔎");
+        items.Should().HaveCount(6);
+        items.Select(item => item.Icon).Should().Equal("🛢", "⇪", "🤖", "🖼", "⌘", "🔎");
         items.Should().OnlyContain(item => item.Command != null && item.Command.CanExecute(null));
 
         var act = () =>

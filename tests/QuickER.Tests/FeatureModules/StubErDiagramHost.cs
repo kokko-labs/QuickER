@@ -38,8 +38,17 @@ internal sealed class StubErDiagramHost : IErDiagramHost
     /// <summary>直近の <see cref="ReplaceQueries"/> に渡されたクエリ一覧（未呼び出しなら null）</summary>
     public IReadOnlyList<QueryDefinition>? LastReplacedQueries { get; private set; }
 
+    /// <summary>直近の <see cref="ReplaceDiagram"/> に渡された図（未呼び出しなら null）</summary>
+    public ErDiagram? LastReplacedDiagram { get; private set; }
+
+    /// <summary><see cref="TargetDbms"/> が返す識別子（テストから方言切替を模すため set 可能）</summary>
+    public string TargetDbmsToReturn { get; set; } = "sqlserver";
+
     /// <inheritdoc />
     public event EventHandler<ColumnRenamedEventArgs>? ColumnRenamed;
+
+    /// <inheritdoc />
+    public event EventHandler? TargetDbmsChanged;
 
     /// <inheritdoc />
     public bool IsEmpty => IsEmptyToReturn;
@@ -66,7 +75,16 @@ internal sealed class StubErDiagramHost : IErDiagramHost
     public void ReplaceQueries(IReadOnlyList<QueryDefinition> queries) =>
         LastReplacedQueries = queries;
 
+    /// <inheritdoc />
+    public void ReplaceDiagram(ErDiagram diagram) => LastReplacedDiagram = diagram;
+
+    /// <inheritdoc />
+    public string TargetDbms => TargetDbmsToReturn;
+
     /// <summary>テストから <see cref="ColumnRenamed"/> を発火させるためのヘルパー</summary>
     public void RaiseColumnRenamed(Guid entityId, string oldName, string newName) =>
         ColumnRenamed?.Invoke(this, new ColumnRenamedEventArgs(entityId, oldName, newName));
+
+    /// <summary>テストから <see cref="TargetDbmsChanged"/> を発火させるためのヘルパー</summary>
+    public void RaiseTargetDbmsChanged() => TargetDbmsChanged?.Invoke(this, EventArgs.Empty);
 }

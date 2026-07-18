@@ -1,8 +1,8 @@
 <Window
-  x:Class="QuickER.Views.SchemaSyncDialog"
+  x:Class="QuickER.Db.UI.SchemaSyncDialog"
   xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
   xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-  xmlns:resources="clr-namespace:QuickER.Resources"
+  xmlns:resources="clr-namespace:QuickER.Db.UI.Resources"
   Title="{x:Static resources:Strings.SchemaSync_Title}"
   Width="900"
   Height="600"

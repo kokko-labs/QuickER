@@ -730,37 +730,11 @@
             ToolTip="{x:Static resources:Strings.Toolbar_TargetDbTooltip}"
           />
         </StackPanel>
-        <Button
-          Style="{StaticResource ToolBarLabelButton}"
-          Command="{Binding ImportFromDatabaseCommand}"
-          ToolTip="{x:Static resources:Strings.Toolbar_ImportFromDbTooltip}"
-        >
-          <StackPanel>
-            <TextBlock Style="{StaticResource ToolBarIcon}" Text="🛢" />
-            <TextBlock
-              Style="{StaticResource ToolBarCaption}"
-              Text="{x:Static resources:Strings.Toolbar_ImportFromDb}"
-            />
-          </StackPanel>
-        </Button>
-        <Button
-          Style="{StaticResource ToolBarLabelButton}"
-          Command="{Binding SyncToDatabaseCommand}"
-          ToolTip="{Binding SyncToDatabaseTooltip}"
-          ToolTipService.ShowOnDisabled="True"
-        >
-          <StackPanel>
-            <TextBlock Style="{StaticResource ToolBarIcon}" Text="⇪" />
-            <TextBlock
-              Style="{StaticResource ToolBarCaption}"
-              Text="{x:Static resources:Strings.Toolbar_SyncToDb}"
-            />
-          </StackPanel>
-        </Button>
-        <Rectangle Style="{StaticResource ToolBarSeparator}" />
         <!--
-          フィーチャーモジュールが寄与するツールバーボタン群（AI チャット・モック生成など）。
-          モジュール 0 個のときは何も描画されず、直後のセパレータも下の DataTrigger で畳まれる。
+          フィーチャーモジュールが寄与するツールバーボタン群（DB 取込・DB 同期・AI チャット・モック生成・
+          コード生成など）。各モジュールの先頭ボタンは BeginsGroup=true で自前のグループ区切りを描画する
+          （集約後の全体先頭のみ App が false へ矯正）。モジュール 0 個のときは何も描画されず、
+          直後のセパレータも下の DataTrigger で畳まれる。
         -->
         <ItemsControl ItemsSource="{Binding FeatureToolbarItems}">
           <ItemsControl.ItemsPanel>
@@ -791,6 +765,7 @@
                   Style="{StaticResource ToolBarLabelButton}"
                   Command="{Binding Command}"
                   ToolTip="{Binding Tooltip}"
+                  ToolTipService.ShowOnDisabled="True"
                 >
                   <StackPanel>
                     <TextBlock Style="{StaticResource ToolBarIcon}" Text="{Binding Icon}" />

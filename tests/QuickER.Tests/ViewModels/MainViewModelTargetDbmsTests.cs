@@ -113,34 +113,9 @@ public class MainViewModelTargetDbmsTests
         vm.CurrentProvider.Name.Should().Be("sqlserver");
     }
 
-    /// <summary>SQLite では DB 同期コマンドが実行不可・他方言では実行可となることを検証する</summary>
-    [Fact(DisplayName = "SQLite では DB 同期コマンドが実行不可・他方言では実行可")]
-    public void SyncToDatabase_DisabledForSqlite_EnabledForOthers()
-    {
-        var sqlite = new SqliteProvider();
-        var registry = new DatabaseProviderRegistry(
-            new IDatabaseProvider[] { new SqlServerProvider(), sqlite }
-        );
-        var vm = new MainViewModel(
-            new StubDialogService(),
-            new NoopAppDialogService(),
-            new NoopFileDialogService(),
-            providers: registry
-        );
-
-        // 既定は SQL Server：同期は実行可
-        vm.SyncToDatabaseCommand.CanExecute(null).Should().BeTrue();
-
-        // SQLite へ切替：同期は実行不可、ツールチップに理由が出る
-        vm.SelectedProvider = sqlite;
-        vm.SyncToDatabaseCommand.CanExecute(null).Should().BeFalse();
-        // 製品コードと同じ resx キーから期待値を導出し、カルチャに依らず完全一致で検証する
-        vm.SyncToDatabaseTooltip.Should().Be(GuiStrings.Db_SyncSqliteUnsupported);
-
-        // SQL Server へ戻すと再び実行可
-        vm.SelectedProvider = registry.Get("sqlserver");
-        vm.SyncToDatabaseCommand.CanExecute(null).Should().BeTrue();
-    }
+    // DB 同期コマンドの実行可否・ツールチップ切替の検証は、DB ツールが
+    // フィーチャーモジュール（QuickER.Db.UI）へ移設されたため
+    // DbSyncCommandServiceTests / DbToolsFeatureModuleTests へ移した。
 
     /// <summary>Undo 可能件数を数える（履歴に積まれたか判定用）</summary>
     private static int CountUndoable(MainViewModel vm)
@@ -254,19 +229,6 @@ public class MainViewModelTargetDbmsTests
 
     private sealed class NoopAppDialogService : IAppDialogService
     {
-        public DbConnectionDialogResult? ShowDbConnectionDialog(
-            DbConnectionDialogMode mode,
-            IDatabaseProvider? fixedProvider = null,
-            string? title = null
-        ) => null;
-
-        public void ShowSchemaSyncDialog(
-            IDatabaseProvider provider,
-            DbConnectionSettings settings,
-            IReadOnlyList<Entity> entities,
-            IReadOnlyList<Relationship> relationships
-        ) { }
-
         public PrintOptions? ShowPrintOptionsDialog(string? defaultTitle) => null;
     }
 

@@ -31,10 +31,12 @@ public sealed class AiChatFeatureModule : IFeatureModule
         return new[]
         {
             new FeatureToolbarItem(
-                Icon: "🤖",
-                Label: Strings.Toolbar_OpenAiChat,
-                Tooltip: Strings.Toolbar_OpenAiChatTooltip,
-                Command: new RelayCommand(launcher.Open)
+                icon: "🤖",
+                label: Strings.Toolbar_OpenAiChat,
+                tooltip: Strings.Toolbar_OpenAiChatTooltip,
+                command: new RelayCommand(launcher.Open),
+                // 前のグループ（DB 取込・DB 同期など）との区切りとして、先頭ボタンの直前にセパレータを描画する
+                beginsGroup: true
             ),
         };
     }
