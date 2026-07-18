@@ -35,6 +35,12 @@ internal sealed class StubErDiagramHost : IErDiagramHost
     /// <summary>直近の <see cref="ExecuteTool"/> に渡された引数 JSON</summary>
     public string? LastArgumentsJson { get; private set; }
 
+    /// <summary>直近の <see cref="ReplaceQueries"/> に渡されたクエリ一覧（未呼び出しなら null）</summary>
+    public IReadOnlyList<QueryDefinition>? LastReplacedQueries { get; private set; }
+
+    /// <inheritdoc />
+    public event EventHandler<ColumnRenamedEventArgs>? ColumnRenamed;
+
     /// <inheritdoc />
     public bool IsEmpty => IsEmptyToReturn;
 
@@ -55,4 +61,12 @@ internal sealed class StubErDiagramHost : IErDiagramHost
 
         return ToolResultToReturn;
     }
+
+    /// <inheritdoc />
+    public void ReplaceQueries(IReadOnlyList<QueryDefinition> queries) =>
+        LastReplacedQueries = queries;
+
+    /// <summary>テストから <see cref="ColumnRenamed"/> を発火させるためのヘルパー</summary>
+    public void RaiseColumnRenamed(Guid entityId, string oldName, string newName) =>
+        ColumnRenamed?.Invoke(this, new ColumnRenamedEventArgs(entityId, oldName, newName));
 }

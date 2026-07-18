@@ -83,11 +83,27 @@ namespace QuickER
 
             _provider = services.BuildServiceProvider();
 
+            // 各モジュールを初期化する（ホストイベント購読などの準備。ツールバー寄与の生成より前に行う）
+            foreach (var module in modules)
+            {
+                module.Initialize(_provider);
+            }
+
             // 各モジュールのツールバー寄与を集約し、主 ViewModel へ流し込む
             var mainViewModel = _provider.GetRequiredService<MainViewModel>();
-            mainViewModel.FeatureToolbarItems = modules
+            var toolbarItems = modules
                 .SelectMany(module => module.CreateToolbarItems(_provider))
                 .ToList();
+
+            // 集約後の先頭ボタンは BeginsGroup を必ず false にする。
+            // ItemsControl の直前には静的セパレータがあるため、先頭ボタンが区切りを持つと二重表示になる
+            // （AI モジュールを外した構成でコード生成モジュールが先頭へ来る場合に効く）。
+            if (toolbarItems.Count > 0)
+            {
+                toolbarItems[0] = toolbarItems[0] with { BeginsGroup = false };
+            }
+
+            mainViewModel.FeatureToolbarItems = toolbarItems;
 
             var window = _provider.GetRequiredService<MainWindow>();
 

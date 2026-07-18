@@ -387,30 +387,6 @@ namespace QuickER.Resources {
                 return ResourceManager.GetString("Toolbar_SyncToDb", resourceCulture);
             }
         }
-        
-        public static string Toolbar_GenerateCSharp {
-            get {
-                return ResourceManager.GetString("Toolbar_GenerateCSharp", resourceCulture);
-            }
-        }
-        
-        public static string Toolbar_GenerateCSharpTooltip {
-            get {
-                return ResourceManager.GetString("Toolbar_GenerateCSharpTooltip", resourceCulture);
-            }
-        }
-
-        public static string Toolbar_QueryDefinitions {
-            get {
-                return ResourceManager.GetString("Toolbar_QueryDefinitions", resourceCulture);
-            }
-        }
-
-        public static string Toolbar_QueryDefinitionsTooltip {
-            get {
-                return ResourceManager.GetString("Toolbar_QueryDefinitionsTooltip", resourceCulture);
-            }
-        }
 
         public static string Status_Ready {
             get {
@@ -1305,55 +1281,7 @@ namespace QuickER.Resources {
                 return ResourceManager.GetString("Print_Failed", resourceCulture);
             }
         }
-        
-        public static string Csharp_GenerationErrorTitle {
-            get {
-                return ResourceManager.GetString("Csharp_GenerationErrorTitle", resourceCulture);
-            }
-        }
 
-        public static string Csharp_GenerationFailedIntro {
-            get {
-                return ResourceManager.GetString("Csharp_GenerationFailedIntro", resourceCulture);
-            }
-        }
-
-        public static string Csharp_WarningLine {
-            get {
-                return ResourceManager.GetString("Csharp_WarningLine", resourceCulture);
-            }
-        }
-        
-        public static string Csharp_WarningIntro {
-            get {
-                return ResourceManager.GetString("Csharp_WarningIntro", resourceCulture);
-            }
-        }
-        
-        public static string Csharp_WarningPrompt {
-            get {
-                return ResourceManager.GetString("Csharp_WarningPrompt", resourceCulture);
-            }
-        }
-        
-        public static string Csharp_WarningTitle {
-            get {
-                return ResourceManager.GetString("Csharp_WarningTitle", resourceCulture);
-            }
-        }
-        
-        public static string Csharp_GeneratedSuccess {
-            get {
-                return ResourceManager.GetString("Csharp_GeneratedSuccess", resourceCulture);
-            }
-        }
-        
-        public static string Csharp_GenerationFailed {
-            get {
-                return ResourceManager.GetString("Csharp_GenerationFailed", resourceCulture);
-            }
-        }
-        
         public static string Import_Failed {
             get {
                 return ResourceManager.GetString("Import_Failed", resourceCulture);

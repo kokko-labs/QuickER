@@ -1,6 +1,5 @@
 using System.IO;
 using FluentAssertions;
-using QuickER.CodeGen.UI;
 using QuickER.Gui.Abstractions;
 using QuickER.Model;
 using QuickER.Provider;
@@ -74,12 +73,6 @@ public class MainViewModelDependencyInjectionTests
     /// <summary>アプリ固有ダイアログを表示せず常にキャンセル相当を返すスタブ</summary>
     private sealed class StubAppDialogService : IAppDialogService
     {
-        public CSharpGenerationDialogResult? ShowCSharpGenerationDialog(
-            IDatabaseProvider currentProvider
-        ) => null;
-
-        public List<QueryDefinition>? ShowQueryDefinitionDialog(ErDiagram diagram) => null;
-
         public DbConnectionDialogResult? ShowDbConnectionDialog(
             DbConnectionDialogMode mode,
             IDatabaseProvider? fixedProvider = null,

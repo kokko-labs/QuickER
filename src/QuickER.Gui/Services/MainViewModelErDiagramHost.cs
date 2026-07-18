@@ -25,7 +25,13 @@ public sealed class MainViewModelErDiagramHost : IErDiagramHost
     public MainViewModelErDiagramHost(MainViewModel viewModel)
     {
         _viewModel = viewModel;
+
+        // VM の列リネーム通知を、契約イベントとしてそのまま中継する（引数の変換はしない単純リレー）
+        _viewModel.ColumnRenamed += (_, e) => ColumnRenamed?.Invoke(this, e);
     }
+
+    /// <inheritdoc />
+    public event EventHandler<ColumnRenamedEventArgs>? ColumnRenamed;
 
     /// <inheritdoc />
     public bool IsEmpty => _viewModel.Entities.Count == 0;
@@ -38,6 +44,10 @@ public sealed class MainViewModelErDiagramHost : IErDiagramHost
 
     /// <inheritdoc />
     public void AutoArrangeNewDiagram() => _viewModel.AutoArrangeNewDiagram();
+
+    /// <inheritdoc />
+    public void ReplaceQueries(IReadOnlyList<QueryDefinition> queries) =>
+        _viewModel.ReplaceQueries(queries);
 
     /// <inheritdoc />
     /// <remarks>必ず UI スレッドで呼び出すこと（ObservableCollection を変更するため）</remarks>

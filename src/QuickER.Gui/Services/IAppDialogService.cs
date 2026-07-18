@@ -1,7 +1,5 @@
 using System.Windows;
-using QuickER.CodeGen.UI;
 using QuickER.Gui.Abstractions;
-using QuickER.Gui.Common;
 using QuickER.Model;
 using QuickER.Provider;
 using QuickER.ViewModels;
@@ -31,16 +29,6 @@ public sealed record PrintOptions(PrintSizeMode SizeMode, string Title, bool Inc
 /// </remarks>
 public interface IAppDialogService
 {
-    /// <summary>C# コード生成ダイアログを表示し、生成設定を返す（キャンセル時は null）</summary>
-    /// <param name="currentProvider">
-    /// アプリの現在のプロバイダ。QuickER 版 Repository（SQL Server 専用）の選択可否判定と DB 表示名の提示に使う
-    /// </param>
-    CSharpGenerationDialogResult? ShowCSharpGenerationDialog(IDatabaseProvider currentProvider);
-
-    /// <summary>名前付きクエリ定義エディタを表示し、確定した定義リストを返す（キャンセル時は null）</summary>
-    /// <param name="diagram">エンティティと既存クエリを含む現在の ER 図（この参照は変更しない）</param>
-    List<QueryDefinition>? ShowQueryDefinitionDialog(ErDiagram diagram);
-
     /// <summary>DB 接続ダイアログを表示し、接続設定と方言を返す（キャンセル時は null）</summary>
     /// <param name="mode">用途（取込は DBMS 選択可・同期は方言固定）</param>
     /// <param name="fixedProvider">同期時に固定する方言（取込では初期選択に用いる）</param>
@@ -78,36 +66,6 @@ public sealed class WpfAppDialogService : IAppDialogService
     {
         _files = files;
         _providers = providers;
-    }
-
-    /// <inheritdoc />
-    public CSharpGenerationDialogResult? ShowCSharpGenerationDialog(
-        IDatabaseProvider currentProvider
-    )
-    {
-        var viewModel = new CSharpGenerationDialogViewModel(
-            files: _files,
-            currentProvider: currentProvider,
-            dialogs: new MessageBoxDialogService()
-        );
-        var dialog = new CSharpGenerationDialog(viewModel)
-        {
-            Owner = Application.Current?.MainWindow,
-        };
-
-        return dialog.ShowDialog() == true ? dialog.ViewModel.Result : null;
-    }
-
-    /// <inheritdoc />
-    public List<QueryDefinition>? ShowQueryDefinitionDialog(ErDiagram diagram)
-    {
-        var viewModel = new QueryDefinitionDialogViewModel(diagram);
-        var dialog = new QueryDefinitionDialog(viewModel)
-        {
-            Owner = Application.Current?.MainWindow,
-        };
-
-        return dialog.ShowDialog() == true ? dialog.ViewModel.Result : null;
     }
 
     /// <inheritdoc />

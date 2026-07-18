@@ -707,5 +707,89 @@ namespace QuickER.CodeGen.UI.Resources {
                 return ResourceManager.GetString("QueryDialog_Status_RawSqlInvalid", resourceCulture);
             }
         }
+
+        public static string Common_Complete {
+            get {
+                return ResourceManager.GetString("Common_Complete", resourceCulture);
+            }
+        }
+
+        public static string Common_Error {
+            get {
+                return ResourceManager.GetString("Common_Error", resourceCulture);
+            }
+        }
+
+        public static string Toolbar_GenerateCSharp {
+            get {
+                return ResourceManager.GetString("Toolbar_GenerateCSharp", resourceCulture);
+            }
+        }
+
+        public static string Toolbar_GenerateCSharpTooltip {
+            get {
+                return ResourceManager.GetString("Toolbar_GenerateCSharpTooltip", resourceCulture);
+            }
+        }
+
+        public static string Toolbar_QueryDefinitions {
+            get {
+                return ResourceManager.GetString("Toolbar_QueryDefinitions", resourceCulture);
+            }
+        }
+
+        public static string Toolbar_QueryDefinitionsTooltip {
+            get {
+                return ResourceManager.GetString("Toolbar_QueryDefinitionsTooltip", resourceCulture);
+            }
+        }
+
+        public static string Csharp_GenerationErrorTitle {
+            get {
+                return ResourceManager.GetString("Csharp_GenerationErrorTitle", resourceCulture);
+            }
+        }
+
+        public static string Csharp_GenerationFailedIntro {
+            get {
+                return ResourceManager.GetString("Csharp_GenerationFailedIntro", resourceCulture);
+            }
+        }
+
+        public static string Csharp_WarningLine {
+            get {
+                return ResourceManager.GetString("Csharp_WarningLine", resourceCulture);
+            }
+        }
+
+        public static string Csharp_WarningIntro {
+            get {
+                return ResourceManager.GetString("Csharp_WarningIntro", resourceCulture);
+            }
+        }
+
+        public static string Csharp_WarningPrompt {
+            get {
+                return ResourceManager.GetString("Csharp_WarningPrompt", resourceCulture);
+            }
+        }
+
+        public static string Csharp_WarningTitle {
+            get {
+                return ResourceManager.GetString("Csharp_WarningTitle", resourceCulture);
+            }
+        }
+
+        public static string Csharp_GeneratedSuccess {
+            get {
+                return ResourceManager.GetString("Csharp_GeneratedSuccess", resourceCulture);
+            }
+        }
+
+        public static string Csharp_GenerationFailed {
+            get {
+                return ResourceManager.GetString("Csharp_GenerationFailed", resourceCulture);
+            }
+        }
     }
 }
