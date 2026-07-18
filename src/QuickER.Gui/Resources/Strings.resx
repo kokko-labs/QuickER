@@ -231,7 +231,7 @@
     <value>Generate C# Entity / BindingModel from the current ER diagram</value>
   </data>
   <data name="Toolbar_QueryDefinitions" xml:space="preserve">
-    <value>Query Definitions</value>
+    <value>Query</value>
   </data>
   <data name="Toolbar_QueryDefinitionsTooltip" xml:space="preserve">
     <value>Define named queries that are generated as Repository methods</value>
