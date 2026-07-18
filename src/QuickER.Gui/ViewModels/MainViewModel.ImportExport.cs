@@ -516,11 +516,7 @@ public partial class MainViewModel
                 break;
 
             case DiagramExportFormat.Html:
-                TableDefinitionHtmlExporter.SaveTo(
-                    ToDiagramModel(),
-                    path,
-                    ResolveDefinitionDocumentTitle(path)
-                );
+                TableDefinitionHtmlExporter.SaveTo(ToDiagramModel(), path);
                 break;
         }
 
@@ -566,13 +562,6 @@ public partial class MainViewModel
             Strings.Common_Complete
         );
     }
-
-    /// <summary>テーブル定義書（Excel / HTML）の表紙・印刷ヘッダーに載せるシステム名を解決する</summary>
-    /// <remarks>印刷ダイアログのタイトル初期値と同じく最後に保存／読込したファイル名を優先し、未保存時は出力ファイル名（拡張子なし）へフォールバックする</remarks>
-    private string ResolveDefinitionDocumentTitle(string path) =>
-        string.IsNullOrEmpty(LastDocumentFileName)
-            ? Path.GetFileNameWithoutExtension(path)
-            : LastDocumentFileName;
 
     /// <summary>ファイル拡張子を優先し、無ければフィルター選択から出力形式を判定する</summary>
     private static DiagramExportFormat GetExportFormat(string path, int filterIndex)

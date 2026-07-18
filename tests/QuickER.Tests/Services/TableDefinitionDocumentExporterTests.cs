@@ -232,6 +232,33 @@ public class TableDefinitionDocumentExporterTests
         relationships.AutoFilter.IsEnabled.Should().BeFalse();
     }
 
+    /// <summary>リレーション一覧の参照元・参照先テーブル名セルが該当詳細シートへリンク化され、文字列値は保たれることを検証する</summary>
+    [Fact(DisplayName = "BuildWorkbook: リレーション一覧のテーブル名セルが詳細シートへリンク化")]
+    public void BuildWorkbook_RelationshipTableCellsLinkToDetailSheets()
+    {
+        var (diagram, _, _) = BuildSampleDiagram();
+
+        using var workbook = TableDefinitionDocumentExporter.BuildWorkbook(
+            diagram,
+            culture: English
+        );
+        var relationships = workbook.Worksheet(En(nameof(GuiStrings.TableDoc_Sheet_Relationships)));
+
+        // データ行4：参照元（列3＝Order）・参照先（列5＝User）
+        var sourceCell = relationships.Cell(4, 3);
+        var targetCell = relationships.Cell(4, 5);
+
+        // 文字列値はテーブル名のまま（インポータの GetString 読みを壊さない）
+        sourceCell.GetString().Should().Be("Order");
+        targetCell.GetString().Should().Be("User");
+
+        // 各セルは該当詳細シートの A1 へのリンク（左寄せ）
+        sourceCell.GetHyperlink().InternalAddress.ToString().Should().Be("'Order'!A1");
+        sourceCell.Style.Alignment.Horizontal.Should().Be(XLAlignmentHorizontalValues.Left);
+        targetCell.GetHyperlink().InternalAddress.ToString().Should().Be("'User'!A1");
+        targetCell.Style.Alignment.Horizontal.Should().Be(XLAlignmentHorizontalValues.Left);
+    }
+
     /// <summary>詳細シートの新レイアウト（タイトル1/説明2/ヘッダ3/データ4）とリンク・キー・必須を検証する</summary>
     [Fact(DisplayName = "BuildWorkbook: 詳細シートの新行位置・戻りリンク・参照リンク・キー・必須")]
     public void BuildWorkbook_WritesDetailSheet()

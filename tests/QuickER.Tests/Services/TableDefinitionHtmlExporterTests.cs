@@ -23,9 +23,6 @@ public class TableDefinitionHtmlExporterTests
     /// <summary>日本語カルチャ</summary>
     private static readonly CultureInfo Japanese = new("ja");
 
-    /// <summary>作成日（決定的に注入する固定値）</summary>
-    private static readonly DateTime FixedCreatedDate = new(2026, 7, 18);
-
     /// <summary>指定カルチャで固定文言を解決する</summary>
     private static string L(string key, CultureInfo culture) =>
         GuiStrings.ResourceManager.GetString(key, culture)!;
@@ -109,12 +106,7 @@ public class TableDefinitionHtmlExporterTests
     {
         var diagram = BuildSampleDiagram();
 
-        var html = TableDefinitionHtmlExporter.Build(
-            diagram,
-            documentTitle: "受注管理システム",
-            createdDate: FixedCreatedDate,
-            culture: English
-        );
+        var html = TableDefinitionHtmlExporter.Build(diagram, culture: English);
 
         // 固定サイドバーと各テーブル詳細セクション（名前昇順 Order=1 / User=2）
         html.Should().Contain("<nav id=\"sidebar\">");
@@ -154,6 +146,55 @@ public class TableDefinitionHtmlExporterTests
 
         // 参照先セルは単一参照なので User 詳細セクション（#table-2）へリンク化
         html.Should().Contain("<a href=\"#table-2\">User.Id</a>");
+    }
+
+    /// <summary>タイトル・概要にシステム名・作成日を持たず（文書名のみ）、備考列・戻りリンクが無いことを検証する</summary>
+    [Fact(DisplayName = "Build: 文書名のみ・システム名/作成日/備考列/戻りリンクなし")]
+    public void Build_OmitsSystemNameCreatedDateMemoAndBackLink()
+    {
+        var diagram = BuildSampleDiagram();
+        var documentTitle = En(nameof(GuiStrings.TableDoc_DocumentTitle));
+
+        var html = TableDefinitionHtmlExporter.Build(diagram, culture: English);
+
+        // タイトルは文書名のみ（システム名の前置なし）
+        html.Should().Contain($"<title>{documentTitle}</title>");
+
+        // 概要（dl）にシステム名・作成日のラベルを持たない
+        var overview = ExtractSection(html, "<header id=\"overview\">", "</header>");
+        overview.Should().NotContain("System Name");
+        overview.Should().NotContain("Created Date");
+
+        // 各テーブル詳細に「テーブル一覧に戻る」リンクを持たない
+        html.Should().NotContain("class=\"back-link\"");
+        html.Should().NotContain(En(nameof(GuiStrings.TableDoc_BackToSummary)));
+
+        // リレーション一覧は 9 列（備考列なし）
+        var relationshipSection = ExtractSection(
+            html,
+            "<section id=\"relationship-list\">",
+            "</section>"
+        );
+        Regex.Matches(relationshipSection, "<th>").Count.Should().Be(9);
+
+        // 各テーブルのカラム表は 7 列（備考列なし）
+        var detailSection = ExtractSection(
+            html,
+            "<section class=\"table-detail\" id=\"table-1\">",
+            "</section>"
+        );
+        Regex.Matches(detailSection, "<th>").Count.Should().Be(7);
+    }
+
+    /// <summary>開始タグから直後の終了タグまでの区間を切り出す（セクションは入れ子にならない前提）</summary>
+    private static string ExtractSection(string html, string startTag, string endTag)
+    {
+        var start = html.IndexOf(startTag, StringComparison.Ordinal);
+        start.Should().BeGreaterThanOrEqualTo(0);
+        var end = html.IndexOf(endTag, start, StringComparison.Ordinal);
+        end.Should().BeGreaterThan(start);
+
+        return html.Substring(start, end - start + endTag.Length);
     }
 
     /// <summary>ユーザーデータがすべて HTML エスケープされ、生の危険文字列が現れないことを検証する</summary>
@@ -277,11 +318,11 @@ public class TableDefinitionHtmlExporterTests
 
         try
         {
-            TableDefinitionHtmlExporter.SaveTo(diagram, path, "受注管理システム");
+            TableDefinitionHtmlExporter.SaveTo(diagram, path);
 
             File.Exists(path).Should().BeTrue();
             var written = File.ReadAllText(path);
-            written.Should().Be(TableDefinitionHtmlExporter.Build(diagram, "受注管理システム"));
+            written.Should().Be(TableDefinitionHtmlExporter.Build(diagram));
             written.Should().Contain(GuiStrings.TableDoc_DocumentTitle);
         }
         finally

@@ -890,14 +890,8 @@
   <data name="TableDoc_Sheet_Relationships" xml:space="preserve">
     <value>Relationship List</value>
   </data>
-  <data name="TableDoc_Cover_SystemName" xml:space="preserve">
-    <value>System Name</value>
-  </data>
   <data name="TableDoc_Cover_TargetDbms" xml:space="preserve">
     <value>Target DBMS</value>
-  </data>
-  <data name="TableDoc_Cover_CreatedDate" xml:space="preserve">
-    <value>Created Date</value>
   </data>
   <data name="TableDoc_Cover_TableCount" xml:space="preserve">
     <value>Table Count</value>

@@ -900,14 +900,8 @@
   <data name="TableDoc_Sheet_Relationships" xml:space="preserve">
     <value>リレーション一覧</value>
   </data>
-  <data name="TableDoc_Cover_SystemName" xml:space="preserve">
-    <value>システム名</value>
-  </data>
   <data name="TableDoc_Cover_TargetDbms" xml:space="preserve">
     <value>対象 DBMS</value>
-  </data>
-  <data name="TableDoc_Cover_CreatedDate" xml:space="preserve">
-    <value>作成日</value>
   </data>
   <data name="TableDoc_Cover_TableCount" xml:space="preserve">
     <value>テーブル数</value>

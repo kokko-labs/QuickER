@@ -293,7 +293,12 @@ public static class TableDefinitionDocumentExporter
             );
 
             BuildSummaryWorksheet(summarySheet, detailSheets);
-            BuildRelationshipWorksheet(relationshipSheet, diagram.Relationships, entitiesById);
+            BuildRelationshipWorksheet(
+                relationshipSheet,
+                diagram.Relationships,
+                entitiesById,
+                entitySheetNames
+            );
 
             foreach (var detailSheet in detailSheets)
             {
@@ -399,11 +404,12 @@ public static class TableDefinitionDocumentExporter
             UpdatePrintArea(worksheet, $"A1:D{lastRow}");
         }
 
-        /// <summary>リレーション一覧シートを生成する</summary>
+        /// <summary>リレーション一覧シートを生成する（参照元・参照先テーブル名セルに詳細シートへのリンクを付与する）</summary>
         private void BuildRelationshipWorksheet(
             IXLWorksheet worksheet,
             IEnumerable<Relationship> relationships,
-            IReadOnlyDictionary<Guid, Entity> entitiesById
+            IReadOnlyDictionary<Guid, Entity> entitiesById,
+            IReadOnlyDictionary<Guid, string> entitySheetNames
         )
         {
             ConfigureRelationshipWorksheet(worksheet);
@@ -465,6 +471,19 @@ public static class TableDefinitionDocumentExporter
                     TableDefinitionContentBuilder.GetRelationshipTypeLabel(relationship.Type);
                 worksheet.Cell(row, 8).Value = relationship.OnDelete.ToDisplayText();
                 worksheet.Cell(row, 9).Value = relationship.OnUpdate.ToDisplayText();
+
+                // 参照元（列3＝TargetEntityId）・参照先（列5＝SourceEntityId）テーブル名を
+                // 該当詳細シートへリンク化する（左寄せ。対応シート未解決時はテキストのまま）
+                ApplyEntityLink(
+                    worksheet.Cell(row, 3),
+                    relationship.TargetEntityId,
+                    entitySheetNames
+                );
+                ApplyEntityLink(
+                    worksheet.Cell(row, 5),
+                    relationship.SourceEntityId,
+                    entitySheetNames
+                );
             }
 
             var lastRow = Math.Max(headerRow, dataStartRow + orderedRelationships.Count - 1);
@@ -588,6 +607,19 @@ public static class TableDefinitionDocumentExporter
             worksheet.SheetView.FreezeRows(3);
             ApplyCommonPageSetup(worksheet, columnHeaderRow);
             UpdatePrintArea(worksheet, $"A1:H{lastRow}");
+        }
+
+        /// <summary>テーブル名セルを該当詳細シートへのリンク（左寄せ）にする（対応シート未解決時はテキストのまま）</summary>
+        private static void ApplyEntityLink(
+            IXLCell cell,
+            Guid entityId,
+            IReadOnlyDictionary<Guid, string> entitySheetNames
+        )
+        {
+            if (entitySheetNames.TryGetValue(entityId, out var targetSheet))
+            {
+                ApplyHyperlinkStyle(cell, targetSheet, XLAlignmentHorizontalValues.Left);
+            }
         }
 
         /// <summary>各シート共通の印刷体裁（A4 横・1 ページ幅・余白・ヘッダー/フッター・繰り返し行）を適用する</summary>

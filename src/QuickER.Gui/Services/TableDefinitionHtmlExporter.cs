@@ -19,22 +19,11 @@ public static class TableDefinitionHtmlExporter
 {
     /// <summary>ER 図定義からテーブル定義書の HTML 文字列を生成する</summary>
     /// <param name="diagram">対象の ER 図定義</param>
-    /// <param name="documentTitle">タイトル・概要に載せるシステム名（未指定は空欄）</param>
-    /// <param name="createdDate">作成日（未指定は当日。テストで決定的に注入するための入口）</param>
     /// <param name="culture">固定文言の言語（未指定は <see cref="CultureInfo.CurrentUICulture"/>）</param>
     /// <returns>生成済みの HTML 文字列</returns>
-    public static string Build(
-        ErDiagram diagram,
-        string? documentTitle = null,
-        DateTime? createdDate = null,
-        CultureInfo? culture = null
-    )
+    public static string Build(ErDiagram diagram, CultureInfo? culture = null)
     {
-        var builder = new HtmlBuilder(
-            culture ?? CultureInfo.CurrentUICulture,
-            createdDate ?? DateTime.Today,
-            documentTitle ?? string.Empty
-        );
+        var builder = new HtmlBuilder(culture ?? CultureInfo.CurrentUICulture);
 
         return builder.Build(diagram);
     }
@@ -42,19 +31,15 @@ public static class TableDefinitionHtmlExporter
     /// <summary>テーブル定義書を HTML ファイル（UTF-8）として保存する</summary>
     /// <param name="diagram">対象の ER 図定義</param>
     /// <param name="path">出力先ファイルパス</param>
-    /// <param name="documentTitle">タイトル・概要に載せるシステム名</param>
-    public static void SaveTo(ErDiagram diagram, string path, string? documentTitle = null)
+    public static void SaveTo(ErDiagram diagram, string path)
     {
-        File.WriteAllText(path, Build(diagram, documentTitle), Encoding.UTF8);
+        File.WriteAllText(path, Build(diagram), Encoding.UTF8);
     }
 
-    /// <summary>1 回の HTML 生成で共有するカルチャ・作成日・システム名を保持しつつ組み立てるビルダー</summary>
+    /// <summary>1 回の HTML 生成で共有するカルチャを保持しつつ組み立てるビルダー</summary>
     /// <remarks>固定文言は <see cref="L"/> を通じて明示カルチャで解決する（静的プロパティ直読みは行わない）。</remarks>
-    private sealed class HtmlBuilder(CultureInfo culture, DateTime createdDate, string systemName)
+    private sealed class HtmlBuilder(CultureInfo culture)
     {
-        /// <summary>作成日の表示書式（カルチャ非依存）</summary>
-        private const string DateFormat = "yyyy-MM-dd";
-
         /// <summary>エンティティ ID からテーブル名を引くための辞書</summary>
         private IReadOnlyDictionary<Guid, Entity> _entitiesById = new Dictionary<Guid, Entity>();
 
@@ -82,11 +67,6 @@ public static class TableDefinitionHtmlExporter
             var langTag = culture.TwoLetterISOLanguageName;
             var documentTitle = L(nameof(Strings.TableDoc_DocumentTitle));
 
-            // タイトルはシステム名がある場合のみ前置する
-            var pageTitle = string.IsNullOrEmpty(systemName)
-                ? documentTitle
-                : $"{systemName} - {documentTitle}";
-
             builder.AppendLine("<!DOCTYPE html>");
             builder.AppendLine($"<html lang=\"{Encode(langTag)}\">");
             builder.AppendLine("<head>");
@@ -94,7 +74,7 @@ public static class TableDefinitionHtmlExporter
             builder.AppendLine(
                 "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
             );
-            builder.AppendLine($"<title>{Encode(pageTitle)}</title>");
+            builder.AppendLine($"<title>{Encode(documentTitle)}</title>");
             AppendStyle(builder);
             builder.AppendLine("</head>");
             builder.AppendLine("<body>");
@@ -180,8 +160,6 @@ public static class TableDefinitionHtmlExporter
                 td a, th a { color: #1F4E79; }
                 section.table-detail { margin-top: 32px; }
                 p.detail-note { margin: 4px 0; }
-                p.back-link { margin: 12px 0 0; }
-                p.back-link a { color: #1F4E79; }
                 @media print {
                     #sidebar { display: none; }
                     main { margin-left: 0; max-width: none; }
@@ -235,16 +213,10 @@ public static class TableDefinitionHtmlExporter
             builder.AppendLine("<header id=\"overview\">");
             builder.AppendLine($"<h1>{Encode(documentTitle)}</h1>");
             builder.AppendLine("<dl class=\"overview\">");
-            AppendDefinition(builder, L(nameof(Strings.TableDoc_Cover_SystemName)), systemName);
             AppendDefinition(
                 builder,
                 L(nameof(Strings.TableDoc_Cover_TargetDbms)),
                 diagram.TargetDbms
-            );
-            AppendDefinition(
-                builder,
-                L(nameof(Strings.TableDoc_Cover_CreatedDate)),
-                createdDate.ToString(DateFormat, CultureInfo.InvariantCulture)
             );
             AppendDefinition(
                 builder,
@@ -299,7 +271,7 @@ public static class TableDefinitionHtmlExporter
             builder.AppendLine("</section>");
         }
 
-        /// <summary>リレーション一覧セクション（Excel 版と同じ 10 列・同一順序）を出力する</summary>
+        /// <summary>リレーション一覧セクション（9 列・Excel 版と同一順序。備考列は常に空のため持たない）を出力する</summary>
         private void AppendRelationshipList(
             StringBuilder builder,
             IReadOnlyList<Relationship> relationships
@@ -327,8 +299,7 @@ public static class TableDefinitionHtmlExporter
                 L(nameof(Strings.TableDoc_Header_Relation)),
                 // ON DELETE / ON UPDATE は SQL 用語のためリテラル維持
                 "ON DELETE",
-                "ON UPDATE",
-                L(nameof(Strings.TableDoc_Header_Memo))
+                "ON UPDATE"
             );
             builder.AppendLine("<tbody>");
 
@@ -374,7 +345,6 @@ public static class TableDefinitionHtmlExporter
                 );
                 builder.AppendLine($"<td>{Encode(relationship.OnDelete.ToDisplayText())}</td>");
                 builder.AppendLine($"<td>{Encode(relationship.OnUpdate.ToDisplayText())}</td>");
-                builder.AppendLine("<td></td>");
                 builder.AppendLine("</tr>");
             }
 
@@ -397,7 +367,7 @@ public static class TableDefinitionHtmlExporter
             return Encode(tableName);
         }
 
-        /// <summary>テーブル単位の詳細セクション（説明・備考＋カラム表＋一覧への戻りリンク）を出力する</summary>
+        /// <summary>テーブル単位の詳細セクション（説明・備考＋カラム表）を出力する</summary>
         private void AppendEntityDetail(
             StringBuilder builder,
             Entity entity,
@@ -441,8 +411,7 @@ public static class TableDefinitionHtmlExporter
                 L(nameof(Strings.TableDoc_Header_DataType)),
                 L(nameof(Strings.TableDoc_Header_Required)),
                 L(nameof(Strings.TableDoc_Header_Key)),
-                L(nameof(Strings.TableDoc_Header_Reference)),
-                L(nameof(Strings.TableDoc_Header_Memo))
+                L(nameof(Strings.TableDoc_Header_Reference))
             );
             builder.AppendLine("<tbody>");
 
@@ -468,15 +437,11 @@ public static class TableDefinitionHtmlExporter
                 builder.AppendLine(
                     $"<td>{BuildReferenceCell(entity, column, relatedRelationships)}</td>"
                 );
-                builder.AppendLine("<td></td>");
                 builder.AppendLine("</tr>");
             }
 
             builder.AppendLine("</tbody>");
             builder.AppendLine("</table>");
-            builder.AppendLine(
-                $"<p class=\"back-link\"><a href=\"#table-list\">{Encode(L(nameof(Strings.TableDoc_BackToSummary)))}</a></p>"
-            );
             builder.AppendLine("</section>");
         }
 

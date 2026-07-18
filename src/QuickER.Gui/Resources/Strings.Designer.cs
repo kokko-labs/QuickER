@@ -1432,21 +1432,9 @@ namespace QuickER.Resources {
             }
         }
 
-        public static string TableDoc_Cover_SystemName {
-            get {
-                return ResourceManager.GetString("TableDoc_Cover_SystemName", resourceCulture);
-            }
-        }
-
         public static string TableDoc_Cover_TargetDbms {
             get {
                 return ResourceManager.GetString("TableDoc_Cover_TargetDbms", resourceCulture);
-            }
-        }
-
-        public static string TableDoc_Cover_CreatedDate {
-            get {
-                return ResourceManager.GetString("TableDoc_Cover_CreatedDate", resourceCulture);
             }
         }
 
