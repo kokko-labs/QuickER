@@ -231,7 +231,7 @@
     <value>Generate C# Entity / BindingModel from the current ER diagram</value>
   </data>
   <data name="Toolbar_QueryDefinitions" xml:space="preserve">
-    <value>Query Definitions</value>
+    <value>Query</value>
   </data>
   <data name="Toolbar_QueryDefinitionsTooltip" xml:space="preserve">
     <value>Define named queries that are generated as Repository methods</value>
@@ -827,9 +827,6 @@
   <data name="Mermaid_UnsupportedRelationshipSymbol" xml:space="preserve">
     <value>Unsupported relationship symbol '{0}'.</value>
   </data>
-  <data name="TableDoc_SheetNotFound" xml:space="preserve">
-    <value>Sheet '{0}' was not found.</value>
-  </data>
   <data name="TableDoc_SummaryDuplicateTable" xml:space="preserve">
     <value>The Table List sheet contains a duplicate table name '{0}'.</value>
   </data>
@@ -840,16 +837,13 @@
     <value>The number of entries in the Table List sheet and the detail sheets do not match.</value>
   </data>
   <data name="TableDoc_DetailMissingTableName" xml:space="preserve">
-    <value>Sheet '{0}' has no table name in B{1}.</value>
+    <value>Sheet '{0}' has no table name in A{1}.</value>
   </data>
   <data name="TableDoc_DetailTableNotInSummary" xml:space="preserve">
     <value>Table name '{1}' in detail sheet '{0}' does not exist in the Table List sheet.</value>
   </data>
   <data name="TableDoc_DetailDuplicateTable" xml:space="preserve">
     <value>The detail sheets contain a duplicate table name '{0}'.</value>
-  </data>
-  <data name="TableDoc_DescriptionMismatch" xml:space="preserve">
-    <value>The description of table '{0}' does not match between the Table List and detail sheets.</value>
   </data>
   <data name="TableDoc_DetailSheetNotFound" xml:space="preserve">
     <value>The detail sheet for table '{0}' was not found.</value>
@@ -883,5 +877,80 @@
   </data>
   <data name="TableDoc_RelUnknownRelation" xml:space="preserve">
     <value>Cannot interpret the relationship '{1}' in row {0} of the Relationship List sheet.</value>
+  </data>
+  <data name="TableDoc_MissingRoleTag" xml:space="preserve">
+    <value>This workbook is in an old format or was not produced by this application. Please export it again.</value>
+  </data>
+  <data name="TableDoc_DocumentTitle" xml:space="preserve">
+    <value>Table Definition Document</value>
+  </data>
+  <data name="TableDoc_Sheet_Summary" xml:space="preserve">
+    <value>Table List</value>
+  </data>
+  <data name="TableDoc_Sheet_Relationships" xml:space="preserve">
+    <value>Relationship List</value>
+  </data>
+  <data name="TableDoc_Cover_TargetDbms" xml:space="preserve">
+    <value>Target DBMS</value>
+  </data>
+  <data name="TableDoc_Cover_TableCount" xml:space="preserve">
+    <value>Table Count</value>
+  </data>
+  <data name="TableDoc_Cover_RelationshipCount" xml:space="preserve">
+    <value>Relationship Count</value>
+  </data>
+  <data name="TableDoc_Header_No" xml:space="preserve">
+    <value>No.</value>
+  </data>
+  <data name="TableDoc_Header_TableName" xml:space="preserve">
+    <value>Table Name</value>
+  </data>
+  <data name="TableDoc_Header_Description" xml:space="preserve">
+    <value>Description</value>
+  </data>
+  <data name="TableDoc_Header_Memo" xml:space="preserve">
+    <value>Memo</value>
+  </data>
+  <data name="TableDoc_Header_ConstraintName" xml:space="preserve">
+    <value>Constraint Name</value>
+  </data>
+  <data name="TableDoc_Header_SourceTable" xml:space="preserve">
+    <value>Source Table</value>
+  </data>
+  <data name="TableDoc_Header_SourceColumn" xml:space="preserve">
+    <value>Source Column</value>
+  </data>
+  <data name="TableDoc_Header_TargetTable" xml:space="preserve">
+    <value>Target Table</value>
+  </data>
+  <data name="TableDoc_Header_TargetColumn" xml:space="preserve">
+    <value>Target Column</value>
+  </data>
+  <data name="TableDoc_Header_Relation" xml:space="preserve">
+    <value>Relation</value>
+  </data>
+  <data name="TableDoc_Header_ColumnName" xml:space="preserve">
+    <value>Column Name</value>
+  </data>
+  <data name="TableDoc_Header_DataType" xml:space="preserve">
+    <value>Data Type</value>
+  </data>
+  <data name="TableDoc_Header_Required" xml:space="preserve">
+    <value>Required</value>
+  </data>
+  <data name="TableDoc_Header_Key" xml:space="preserve">
+    <value>Key</value>
+  </data>
+  <data name="TableDoc_Header_Reference" xml:space="preserve">
+    <value>Reference</value>
+  </data>
+  <data name="TableDoc_RequiredMark" xml:space="preserve">
+    <value>Yes</value>
+  </data>
+  <data name="TableDoc_BackToSummary" xml:space="preserve">
+    <value>Back to Table List</value>
+  </data>
+  <data name="Format_DefinitionDocumentHtml" xml:space="preserve">
+    <value>Definition Document (HTML)</value>
   </data>
 </root>

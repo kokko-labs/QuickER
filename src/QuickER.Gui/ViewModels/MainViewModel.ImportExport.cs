@@ -32,6 +32,9 @@ internal enum DiagramExportFormat
 
     /// <summary>Excel テーブル定義書</summary>
     Excel,
+
+    /// <summary>HTML テーブル定義書</summary>
+    Html,
 }
 
 /// <summary>ER 図のインポート形式</summary>
@@ -149,7 +152,7 @@ public partial class MainViewModel
     private void ExportDiagram(object? visual)
     {
         var picked = _files.PickSaveFile(
-            "PNG Image (*.png)|*.png|SVG Image (*.svg)|*.svg|SQL Script (*.sql)|*.sql|Mermaid Diagram (*.mmd)|*.mmd|Mermaid Diagram (*.mermaid)|*.mermaid|DBML Diagram (*.dbml)|*.dbml|Excel Workbook (*.xlsx)|*.xlsx",
+            "PNG Image (*.png)|*.png|SVG Image (*.svg)|*.svg|SQL Script (*.sql)|*.sql|Mermaid Diagram (*.mmd)|*.mmd|Mermaid Diagram (*.mermaid)|*.mermaid|DBML Diagram (*.dbml)|*.dbml|Excel Workbook (*.xlsx)|*.xlsx|HTML Document (*.html)|*.html",
             ".png"
         );
 
@@ -473,6 +476,7 @@ public partial class MainViewModel
             DiagramExportFormat.Mermaid => "Mermaid",
             DiagramExportFormat.Dbml => "DBML",
             DiagramExportFormat.Excel => Strings.Format_DefinitionDocument,
+            DiagramExportFormat.Html => Strings.Format_DefinitionDocumentHtml,
             _ => Strings.Format_File,
         };
 
@@ -509,6 +513,10 @@ public partial class MainViewModel
 
             case DiagramExportFormat.Excel:
                 TableDefinitionDocumentExporter.SaveTo(ToDiagramModel(), path);
+                break;
+
+            case DiagramExportFormat.Html:
+                TableDefinitionHtmlExporter.SaveTo(ToDiagramModel(), path);
                 break;
         }
 
@@ -548,6 +556,13 @@ public partial class MainViewModel
             return;
         }
 
+        // Excel 定義書は対象 DBMS を保持しているため方言も復元する
+        // （Mermaid / DBML は方言情報を持たないため現在のプロバイダを維持する）
+        if (format == DiagramImportFormat.Excel)
+        {
+            SetCurrentProviderFromDbms(diagram.TargetDbms);
+        }
+
         ReplaceDiagramWithoutHistory(diagram.Entities, diagram.Relationships, autoLayout: true);
         _dialogs.ShowInformation(
             string.Format(Strings.Import_Completed, displayName),
@@ -555,9 +570,6 @@ public partial class MainViewModel
         );
     }
 
-    /// <summary>
-    /// 保存ファイル名またはフィルター選択から出力形式を判定します。
-    /// </summary>
     /// <summary>ファイル拡張子を優先し、無ければフィルター選択から出力形式を判定する</summary>
     private static DiagramExportFormat GetExportFormat(string path, int filterIndex)
     {
@@ -572,6 +584,8 @@ public partial class MainViewModel
             ".mermaid" => DiagramExportFormat.Mermaid,
             ".dbml" => DiagramExportFormat.Dbml,
             ".xlsx" => DiagramExportFormat.Excel,
+            ".html" => DiagramExportFormat.Html,
+            ".htm" => DiagramExportFormat.Html,
             _ => filterIndex switch
             {
                 1 => DiagramExportFormat.Png,
@@ -581,6 +595,7 @@ public partial class MainViewModel
                 5 => DiagramExportFormat.Mermaid,
                 6 => DiagramExportFormat.Dbml,
                 7 => DiagramExportFormat.Excel,
+                8 => DiagramExportFormat.Html,
                 _ => throw new InvalidOperationException(Strings.Export_FormatUndetermined),
             },
         };

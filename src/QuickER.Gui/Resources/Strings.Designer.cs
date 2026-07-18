@@ -1401,7 +1401,157 @@ namespace QuickER.Resources {
                 return ResourceManager.GetString("Format_DefinitionDocument", resourceCulture);
             }
         }
-        
+
+        public static string Format_DefinitionDocumentHtml {
+            get {
+                return ResourceManager.GetString("Format_DefinitionDocumentHtml", resourceCulture);
+            }
+        }
+
+        public static string TableDoc_MissingRoleTag {
+            get {
+                return ResourceManager.GetString("TableDoc_MissingRoleTag", resourceCulture);
+            }
+        }
+
+        public static string TableDoc_DocumentTitle {
+            get {
+                return ResourceManager.GetString("TableDoc_DocumentTitle", resourceCulture);
+            }
+        }
+
+        public static string TableDoc_Sheet_Summary {
+            get {
+                return ResourceManager.GetString("TableDoc_Sheet_Summary", resourceCulture);
+            }
+        }
+
+        public static string TableDoc_Sheet_Relationships {
+            get {
+                return ResourceManager.GetString("TableDoc_Sheet_Relationships", resourceCulture);
+            }
+        }
+
+        public static string TableDoc_Cover_TargetDbms {
+            get {
+                return ResourceManager.GetString("TableDoc_Cover_TargetDbms", resourceCulture);
+            }
+        }
+
+        public static string TableDoc_Cover_TableCount {
+            get {
+                return ResourceManager.GetString("TableDoc_Cover_TableCount", resourceCulture);
+            }
+        }
+
+        public static string TableDoc_Cover_RelationshipCount {
+            get {
+                return ResourceManager.GetString("TableDoc_Cover_RelationshipCount", resourceCulture);
+            }
+        }
+
+        public static string TableDoc_Header_No {
+            get {
+                return ResourceManager.GetString("TableDoc_Header_No", resourceCulture);
+            }
+        }
+
+        public static string TableDoc_Header_TableName {
+            get {
+                return ResourceManager.GetString("TableDoc_Header_TableName", resourceCulture);
+            }
+        }
+
+        public static string TableDoc_Header_Description {
+            get {
+                return ResourceManager.GetString("TableDoc_Header_Description", resourceCulture);
+            }
+        }
+
+        public static string TableDoc_Header_Memo {
+            get {
+                return ResourceManager.GetString("TableDoc_Header_Memo", resourceCulture);
+            }
+        }
+
+        public static string TableDoc_Header_ConstraintName {
+            get {
+                return ResourceManager.GetString("TableDoc_Header_ConstraintName", resourceCulture);
+            }
+        }
+
+        public static string TableDoc_Header_SourceTable {
+            get {
+                return ResourceManager.GetString("TableDoc_Header_SourceTable", resourceCulture);
+            }
+        }
+
+        public static string TableDoc_Header_SourceColumn {
+            get {
+                return ResourceManager.GetString("TableDoc_Header_SourceColumn", resourceCulture);
+            }
+        }
+
+        public static string TableDoc_Header_TargetTable {
+            get {
+                return ResourceManager.GetString("TableDoc_Header_TargetTable", resourceCulture);
+            }
+        }
+
+        public static string TableDoc_Header_TargetColumn {
+            get {
+                return ResourceManager.GetString("TableDoc_Header_TargetColumn", resourceCulture);
+            }
+        }
+
+        public static string TableDoc_Header_Relation {
+            get {
+                return ResourceManager.GetString("TableDoc_Header_Relation", resourceCulture);
+            }
+        }
+
+        public static string TableDoc_Header_ColumnName {
+            get {
+                return ResourceManager.GetString("TableDoc_Header_ColumnName", resourceCulture);
+            }
+        }
+
+        public static string TableDoc_Header_DataType {
+            get {
+                return ResourceManager.GetString("TableDoc_Header_DataType", resourceCulture);
+            }
+        }
+
+        public static string TableDoc_Header_Required {
+            get {
+                return ResourceManager.GetString("TableDoc_Header_Required", resourceCulture);
+            }
+        }
+
+        public static string TableDoc_Header_Key {
+            get {
+                return ResourceManager.GetString("TableDoc_Header_Key", resourceCulture);
+            }
+        }
+
+        public static string TableDoc_Header_Reference {
+            get {
+                return ResourceManager.GetString("TableDoc_Header_Reference", resourceCulture);
+            }
+        }
+
+        public static string TableDoc_RequiredMark {
+            get {
+                return ResourceManager.GetString("TableDoc_RequiredMark", resourceCulture);
+            }
+        }
+
+        public static string TableDoc_BackToSummary {
+            get {
+                return ResourceManager.GetString("TableDoc_BackToSummary", resourceCulture);
+            }
+        }
+
         public static string Format_File {
             get {
                 return ResourceManager.GetString("Format_File", resourceCulture);
@@ -1618,12 +1768,6 @@ namespace QuickER.Resources {
             }
         }
         
-        public static string TableDoc_SheetNotFound {
-            get {
-                return ResourceManager.GetString("TableDoc_SheetNotFound", resourceCulture);
-            }
-        }
-        
         public static string TableDoc_SummaryDuplicateTable {
             get {
                 return ResourceManager.GetString("TableDoc_SummaryDuplicateTable", resourceCulture);
@@ -1657,12 +1801,6 @@ namespace QuickER.Resources {
         public static string TableDoc_DetailDuplicateTable {
             get {
                 return ResourceManager.GetString("TableDoc_DetailDuplicateTable", resourceCulture);
-            }
-        }
-        
-        public static string TableDoc_DescriptionMismatch {
-            get {
-                return ResourceManager.GetString("TableDoc_DescriptionMismatch", resourceCulture);
             }
         }
         

@@ -6,27 +6,13 @@ using QuickER.Resources;
 namespace QuickER.Services;
 
 /// <summary>本アプリが出力したテーブル定義書 Excel を読み込み ER 図モデルへ復元するサービス</summary>
-/// <remarks><see cref="TableDefinitionDocumentExporter"/> が出力するシート構成を前提とする</remarks>
+/// <remarks>
+/// <see cref="TableDefinitionDocumentExporter"/> が刻む非表示の定義名タグで役割シートを特定するため、
+/// シート名がローカライズされていても（ユーザーがリネームしても）取り込める。
+/// 行位置は <see cref="TableDefinitionDocumentLayout"/> をエクスポータと共有する。
+/// </remarks>
 public static class TableDefinitionDocumentImporter
 {
-    /// <summary>テーブル一覧シート名</summary>
-    private const string SummarySheetName = "テーブル一覧";
-
-    /// <summary>リレーション一覧シート名</summary>
-    private const string RelationshipSheetName = "リレーション一覧";
-
-    /// <summary>テーブル一覧シートのデータ開始行</summary>
-    private const int SummaryDataStartRow = 2;
-
-    /// <summary>リレーション一覧シートのデータ開始行</summary>
-    private const int RelationshipDataStartRow = 2;
-
-    /// <summary>詳細シートでテーブル基本情報を格納する行</summary>
-    private const int DetailTableInfoRow = 2;
-
-    /// <summary>詳細シートでカラム定義が始まる行</summary>
-    private const int DetailColumnDataStartRow = 5;
-
     /// <summary>テーブル定義書ファイルを読み込み <see cref="ErDiagram" /> として返す</summary>
     /// <param name="path">読み込む Excel ファイルパス</param>
     /// <returns>復元した ER 図</returns>
@@ -42,22 +28,43 @@ public static class TableDefinitionDocumentImporter
     /// <exception cref="InvalidDataException">必須シートの欠落や整合性不一致を検出した場合にスローする</exception>
     public static ErDiagram Load(XLWorkbook workbook)
     {
+        // テーブル一覧・リレーション一覧は必須（タグ欠落＝旧形式または他アプリ出力）
         var summarySheet =
-            FindWorksheet(workbook, SummarySheetName)
-            ?? throw new InvalidDataException(
-                string.Format(Strings.TableDoc_SheetNotFound, SummarySheetName)
-            );
+            ResolveRoleSheet(workbook, TableDefinitionDocumentLayout.SummaryDefinedName)
+            ?? throw new InvalidDataException(Strings.TableDoc_MissingRoleTag);
         var relationshipSheet =
-            FindWorksheet(workbook, RelationshipSheetName)
-            ?? throw new InvalidDataException(
-                string.Format(Strings.TableDoc_SheetNotFound, RelationshipSheetName)
-            );
+            ResolveRoleSheet(workbook, TableDefinitionDocumentLayout.RelationshipsDefinedName)
+            ?? throw new InvalidDataException(Strings.TableDoc_MissingRoleTag);
+
+        // 一覧 2 枚以外を詳細シートとみなす（参照比較）
+        var roleSheets = new HashSet<IXLWorksheet> { summarySheet, relationshipSheet };
 
         var summaries = ReadSummarySheet(summarySheet);
-        var entities = ReadDetailSheets(workbook, summaries);
+        var entities = ReadDetailSheets(workbook, summaries, roleSheets);
         var relationships = ReadRelationshipSheet(relationshipSheet, entities);
+        var diagram = new ErDiagram
+        {
+            Entities = entities.Values.ToList(),
+            Relationships = relationships,
+        };
 
-        return new ErDiagram { Entities = entities.Values.ToList(), Relationships = relationships };
+        // 対象 DBMS は言語非依存のカスタムプロパティから復元する（欠落・空値は既定値のまま＝寛容仕様）
+        var targetDbms = workbook
+            .CustomProperties.FirstOrDefault(property =>
+                string.Equals(
+                    property.Name,
+                    TableDefinitionDocumentLayout.TargetDbmsPropertyName,
+                    StringComparison.Ordinal
+                )
+            )
+            ?.Value?.ToString();
+
+        if (!string.IsNullOrWhiteSpace(targetDbms))
+        {
+            diagram.TargetDbms = targetDbms.Trim();
+        }
+
+        return diagram;
     }
 
     /// <summary>テーブル一覧シートからテーブル名・説明・備考を取得する</summary>
@@ -65,9 +72,13 @@ public static class TableDefinitionDocumentImporter
     {
         var summaries = new Dictionary<string, TableSummaryRow>(StringComparer.OrdinalIgnoreCase);
 
-        for (var row = SummaryDataStartRow; ; row++)
+        for (var row = TableDefinitionDocumentLayout.SummaryDataStartRow; ; row++)
         {
-            var tableName = GetCellText(worksheet, row, 3);
+            var tableName = GetCellText(
+                worksheet,
+                row,
+                TableDefinitionDocumentLayout.SummaryTableNameColumn
+            );
 
             if (string.IsNullOrWhiteSpace(tableName))
             {
@@ -79,8 +90,12 @@ public static class TableDefinitionDocumentImporter
                     tableName,
                     new TableSummaryRow(
                         tableName,
-                        GetCellText(worksheet, row, 4),
-                        GetCellText(worksheet, row, 5)
+                        GetCellText(
+                            worksheet,
+                            row,
+                            TableDefinitionDocumentLayout.SummaryDescriptionColumn
+                        ),
+                        GetCellText(worksheet, row, TableDefinitionDocumentLayout.SummaryMemoColumn)
                     )
                 )
             )
@@ -99,23 +114,20 @@ public static class TableDefinitionDocumentImporter
         return summaries;
     }
 
-    /// <summary>詳細シート群からエンティティを復元する（一覧との件数・説明の整合性を検証する）</summary>
+    /// <summary>詳細シート群からエンティティを復元する（一覧との件数の整合性を検証する）</summary>
+    /// <remarks>
+    /// テーブル名は詳細シートの A1（タイトルセル）から読む（シート名は 31 文字切詰め・
+    /// 重複回避が入るため使わない）。説明・備考はテーブル一覧シートからのみ復元する。
+    /// </remarks>
     private static Dictionary<string, Entity> ReadDetailSheets(
         XLWorkbook workbook,
-        IReadOnlyDictionary<string, TableSummaryRow> summaries
+        IReadOnlyDictionary<string, TableSummaryRow> summaries,
+        IReadOnlySet<IXLWorksheet> roleSheets
     )
     {
         var entities = new Dictionary<string, Entity>(StringComparer.OrdinalIgnoreCase);
-        var detailSheets = workbook
-            .Worksheets.Where(sheet =>
-                !string.Equals(sheet.Name, SummarySheetName, StringComparison.OrdinalIgnoreCase)
-                && !string.Equals(
-                    sheet.Name,
-                    RelationshipSheetName,
-                    StringComparison.OrdinalIgnoreCase
-                )
-            )
-            .ToList();
+        // 役割シート（一覧 2 枚）以外を詳細シートとみなす（参照比較）
+        var detailSheets = workbook.Worksheets.Where(sheet => !roleSheets.Contains(sheet)).ToList();
 
         if (detailSheets.Count != summaries.Count)
         {
@@ -124,7 +136,7 @@ public static class TableDefinitionDocumentImporter
 
         foreach (var sheet in detailSheets)
         {
-            var tableName = GetCellText(sheet, DetailTableInfoRow, 2);
+            var tableName = GetCellText(sheet, TableDefinitionDocumentLayout.DetailTitleRow, 1);
 
             if (string.IsNullOrWhiteSpace(tableName))
             {
@@ -132,7 +144,7 @@ public static class TableDefinitionDocumentImporter
                     string.Format(
                         Strings.TableDoc_DetailMissingTableName,
                         sheet.Name,
-                        DetailTableInfoRow
+                        TableDefinitionDocumentLayout.DetailTitleRow
                     )
                 );
             }
@@ -151,25 +163,10 @@ public static class TableDefinitionDocumentImporter
                 );
             }
 
-            var description = GetCellText(sheet, DetailTableInfoRow, 3);
-
-            if (
-                !string.IsNullOrWhiteSpace(summary.Description)
-                && !string.IsNullOrWhiteSpace(description)
-                && !string.Equals(summary.Description, description, StringComparison.Ordinal)
-            )
-            {
-                throw new InvalidDataException(
-                    string.Format(Strings.TableDoc_DescriptionMismatch, tableName)
-                );
-            }
-
             var entity = new Entity
             {
                 TableName = tableName,
-                Description = string.IsNullOrWhiteSpace(description)
-                    ? summary.Description
-                    : description,
+                Description = summary.Description,
                 Memo = summary.Memo,
             };
 
@@ -193,7 +190,7 @@ public static class TableDefinitionDocumentImporter
     /// <summary>詳細シートのカラム行を読み取り、キー表記から PK / FK を復元する</summary>
     private static void ReadColumns(IXLWorksheet worksheet, Entity entity)
     {
-        for (var row = DetailColumnDataStartRow; ; row++)
+        for (var row = TableDefinitionDocumentLayout.DetailColumnDataStartRow; ; row++)
         {
             var columnName = GetCellText(worksheet, row, 2);
 
@@ -249,7 +246,7 @@ public static class TableDefinitionDocumentImporter
             StringComparerOrdinalIgnoreCaseTupleComparer.Instance
         );
 
-        for (var row = RelationshipDataStartRow; ; row++)
+        for (var row = TableDefinitionDocumentLayout.RelationshipDataStartRow; ; row++)
         {
             var childTableName = GetCellText(worksheet, row, 3);
             var parentTableName = GetCellText(worksheet, row, 5);
@@ -377,12 +374,29 @@ public static class TableDefinitionDocumentImporter
     private static string GetCellText(IXLWorksheet worksheet, int row, int column) =>
         worksheet.Cell(row, column).GetString().Trim();
 
-    /// <summary>指定名のシートを大文字小文字無視で検索する</summary>
-    private static IXLWorksheet? FindWorksheet(XLWorkbook workbook, string name)
+    /// <summary>役割タグ（非表示の定義名）が指すシートを解決する（未定義・無効参照は null）</summary>
+    private static IXLWorksheet? ResolveRoleSheet(XLWorkbook workbook, string definedName)
     {
-        return workbook.Worksheets.FirstOrDefault(sheet =>
-            string.Equals(sheet.Name, name, StringComparison.OrdinalIgnoreCase)
-        );
+        if (!workbook.DefinedNames.TryGetValue(definedName, out var defined))
+        {
+            return null;
+        }
+
+        // 参照先シートが削除で無効化された場合は解決不能扱いとする
+        if (!defined.IsValid)
+        {
+            return null;
+        }
+
+        try
+        {
+            return defined.Ranges.FirstOrDefault()?.Worksheet;
+        }
+        catch (Exception)
+        {
+            // 無効参照（#REF!）評価中の例外も解決不能として扱う
+            return null;
+        }
     }
 
     /// <summary>空白文字列を null へ正規化する</summary>

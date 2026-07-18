@@ -12,7 +12,7 @@
   mc:Ignorable="d"
   Title="{Binding WindowTitle, FallbackValue=QuickER}"
   Height="1000"
-  Width="1800"
+  Width="1880"
   FontFamily="Segoe UI, Yu Gothic UI, Meiryo"
   FontSize="13"
   Background="#F5F7FA"
