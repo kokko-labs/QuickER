@@ -165,6 +165,33 @@ public class TableDefinitionDocumentExporterTests
         defined.Ranges.First().Worksheet.Name.Should().Be(expectedSheetName);
     }
 
+    /// <summary>対象 DBMS が一覧タイトル直下の表示とカスタムプロパティの両方へ出力されることを検証する</summary>
+    [Fact(
+        DisplayName = "BuildWorkbook: 対象 DBMS を一覧タイトル直下とカスタムプロパティへ出力する"
+    )]
+    public void BuildWorkbook_WritesTargetDbms()
+    {
+        var (diagram, _, _) = BuildSampleDiagram();
+        diagram.TargetDbms = "sqlite";
+
+        using var workbook = TableDefinitionDocumentExporter.BuildWorkbook(
+            diagram,
+            culture: English
+        );
+
+        var summary = workbook.Worksheet(En(nameof(GuiStrings.TableDoc_Sheet_Summary)));
+        summary
+            .Cell(TableDefinitionDocumentLayout.SummaryDbmsRow, 1)
+            .GetString()
+            .Should()
+            .Be($"{En(nameof(GuiStrings.TableDoc_Cover_TargetDbms))}: sqlite");
+        workbook
+            .CustomProperties.CustomProperty(TableDefinitionDocumentLayout.TargetDbmsPropertyName)
+            .GetValue<string>()
+            .Should()
+            .Be("sqlite");
+    }
+
     /// <summary>テーブル一覧シートの見出し・行位置・テーブル名リンク・凍結・印刷体裁を検証する</summary>
     [Fact(DisplayName = "BuildWorkbook: テーブル一覧の行位置・書式・リンク・印刷体裁")]
     public void BuildWorkbook_WritesSummarySheet()

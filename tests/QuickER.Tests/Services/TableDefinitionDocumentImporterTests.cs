@@ -182,6 +182,39 @@ public class TableDefinitionDocumentImporterTests
         AssertSampleDiagram(diagram);
     }
 
+    /// <summary>対象 DBMS がカスタムプロパティ経由で往復保持されることを検証する</summary>
+    [Fact(DisplayName = "対象 DBMS を往復取込で復元できる")]
+    public void Load_RestoresTargetDbms()
+    {
+        var source = BuildSampleDiagram();
+        source.TargetDbms = "sqlite";
+
+        using var workbook = TableDefinitionDocumentExporter.BuildWorkbook(
+            source,
+            culture: new CultureInfo("en")
+        );
+        var diagram = TableDefinitionDocumentImporter.Load(workbook);
+
+        diagram.TargetDbms.Should().Be("sqlite");
+    }
+
+    /// <summary>対象 DBMS プロパティが無いブックでも既定値のまま取込が成功する寛容仕様を検証する</summary>
+    [Fact(DisplayName = "対象 DBMS プロパティが無くても既定値で取込できる")]
+    public void Load_KeepsDefaultTargetDbmsWhenPropertyIsMissing()
+    {
+        using var workbook = TableDefinitionDocumentExporter.BuildWorkbook(
+            BuildSampleDiagram(),
+            culture: new CultureInfo("en")
+        );
+
+        // ユーザーがプロパティを削除した状況を再現（表示セルは残っていても取込は既定値へフォールバック）
+        workbook.CustomProperties.Delete(TableDefinitionDocumentLayout.TargetDbmsPropertyName);
+
+        var diagram = TableDefinitionDocumentImporter.Load(workbook);
+
+        diagram.TargetDbms.Should().Be(new ErDiagram().TargetDbms);
+    }
+
     /// <summary>役割タグが無いブック（旧形式・他アプリ出力）を取込エラーにすることを検証する</summary>
     [Fact(DisplayName = "役割タグが無いと取り込みをエラーにする")]
     public void Load_ThrowsWhenRoleTagIsMissing()

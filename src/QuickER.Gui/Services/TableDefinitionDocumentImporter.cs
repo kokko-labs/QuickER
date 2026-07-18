@@ -42,8 +42,29 @@ public static class TableDefinitionDocumentImporter
         var summaries = ReadSummarySheet(summarySheet);
         var entities = ReadDetailSheets(workbook, summaries, roleSheets);
         var relationships = ReadRelationshipSheet(relationshipSheet, entities);
+        var diagram = new ErDiagram
+        {
+            Entities = entities.Values.ToList(),
+            Relationships = relationships,
+        };
 
-        return new ErDiagram { Entities = entities.Values.ToList(), Relationships = relationships };
+        // 対象 DBMS は言語非依存のカスタムプロパティから復元する（欠落・空値は既定値のまま＝寛容仕様）
+        var targetDbms = workbook
+            .CustomProperties.FirstOrDefault(property =>
+                string.Equals(
+                    property.Name,
+                    TableDefinitionDocumentLayout.TargetDbmsPropertyName,
+                    StringComparison.Ordinal
+                )
+            )
+            ?.Value?.ToString();
+
+        if (!string.IsNullOrWhiteSpace(targetDbms))
+        {
+            diagram.TargetDbms = targetDbms.Trim();
+        }
+
+        return diagram;
     }
 
     /// <summary>テーブル一覧シートからテーブル名・説明・備考を取得する</summary>

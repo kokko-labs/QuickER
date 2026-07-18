@@ -47,9 +47,16 @@ internal static class TableDefinitionDocumentLayout
     /// <summary>リレーション一覧シートを指す非表示の定義名</summary>
     public const string RelationshipsDefinedName = "QuickER_TableDoc_Relationships";
 
+    /// <summary>テーブル一覧シートで対象 DBMS を表示する行（タイトルと見出しの間・表示専用）</summary>
+    public const int SummaryDbmsRow = 2;
+
     /// <summary>書式バージョンを保持するカスタムプロパティ名</summary>
     public const string FormatVersionPropertyName = "QuickER_TableDoc_FormatVersion";
 
     /// <summary>現在の書式バージョン値</summary>
     public const string FormatVersionValue = "1";
+
+    /// <summary>対象 DBMS（プロバイダ識別名）を保持するカスタムプロパティ名</summary>
+    /// <remarks>表示セルはローカライズされるため、取込はこのプロパティから言語非依存に復元する</remarks>
+    public const string TargetDbmsPropertyName = "QuickER_TableDoc_TargetDbms";
 }

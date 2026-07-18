@@ -292,7 +292,7 @@ public static class TableDefinitionDocumentExporter
                 detail => detail.Worksheet.Name
             );
 
-            BuildSummaryWorksheet(summarySheet, detailSheets);
+            BuildSummaryWorksheet(summarySheet, detailSheets, diagram.TargetDbms);
             BuildRelationshipWorksheet(
                 relationshipSheet,
                 diagram.Relationships,
@@ -334,6 +334,10 @@ public static class TableDefinitionDocumentExporter
                 TableDefinitionDocumentLayout.FormatVersionPropertyName,
                 TableDefinitionDocumentLayout.FormatVersionValue
             );
+            workbook.CustomProperties.Add(
+                TableDefinitionDocumentLayout.TargetDbmsPropertyName,
+                diagram.TargetDbms
+            );
 
             return workbook;
         }
@@ -341,13 +345,19 @@ public static class TableDefinitionDocumentExporter
         /// <summary>テーブル一覧シートを生成する（テーブル名セルに詳細シートへのリンクを付与する）</summary>
         private void BuildSummaryWorksheet(
             IXLWorksheet worksheet,
-            IReadOnlyList<DetailSheetContext> detailSheets
+            IReadOnlyList<DetailSheetContext> detailSheets,
+            string targetDbms
         )
         {
             ConfigureSummaryWorksheet(worksheet);
             worksheet.TabColor = ListTabColor;
 
             SetSheetTitle(worksheet, L(nameof(Strings.TableDoc_Sheet_Summary)));
+
+            // データ型列の解釈に直結する対象 DBMS をタイトル直下へ表示する（詳細シートの説明行と同じ流儀。
+            // 取込はこのセルではなく言語非依存のカスタムプロパティから復元する）
+            worksheet.Cell(TableDefinitionDocumentLayout.SummaryDbmsRow, 1).Value =
+                $"{L(nameof(Strings.TableDoc_Cover_TargetDbms))}: {targetDbms}";
 
             var headerRow = TableDefinitionDocumentLayout.SummaryHeaderRow;
             var dataStartRow = TableDefinitionDocumentLayout.SummaryDataStartRow;

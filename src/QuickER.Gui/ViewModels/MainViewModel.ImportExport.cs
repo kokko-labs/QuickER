@@ -556,6 +556,13 @@ public partial class MainViewModel
             return;
         }
 
+        // Excel 定義書は対象 DBMS を保持しているため方言も復元する
+        // （Mermaid / DBML は方言情報を持たないため現在のプロバイダを維持する）
+        if (format == DiagramImportFormat.Excel)
+        {
+            SetCurrentProviderFromDbms(diagram.TargetDbms);
+        }
+
         ReplaceDiagramWithoutHistory(diagram.Entities, diagram.Relationships, autoLayout: true);
         _dialogs.ShowInformation(
             string.Format(Strings.Import_Completed, displayName),
