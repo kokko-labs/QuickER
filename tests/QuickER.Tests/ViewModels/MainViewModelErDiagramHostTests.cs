@@ -1,4 +1,7 @@
+using System.Collections.Generic;
 using FluentAssertions;
+using QuickER.Extensibility;
+using QuickER.Model;
 using QuickER.Provider;
 using QuickER.Services;
 using QuickER.SqlServer;
@@ -96,5 +99,41 @@ public class MainViewModelErDiagramHostTests
 
         success.Should().BeTrue();
         vm.Entities.Should().ContainSingle(entity => entity.TableName == "Book");
+    }
+
+    /// <summary>ReplaceQueries が VM の名前付きクエリを差し替えることを検証する</summary>
+    [Fact(DisplayName = "ReplaceQueries は VM の Queries を差し替える")]
+    public void ReplaceQueries_ReplacesViewModelQueries()
+    {
+        var vm = new MainViewModel();
+        var host = new MainViewModelErDiagramHost(vm);
+        var replacement = new List<QueryDefinition> { new() { Name = "FromModule" } };
+
+        host.ReplaceQueries(replacement);
+
+        vm.Queries.Should().ContainSingle();
+        vm.Queries[0].Name.Should().Be("FromModule");
+    }
+
+    /// <summary>VM で列リネームが起きたとき、host の ColumnRenamed が正しい EntityId・新旧名で中継発火することを検証する</summary>
+    [Fact(DisplayName = "列リネームで host の ColumnRenamed が中継発火する")]
+    public void ColumnRenamed_RelaysFromViewModel()
+    {
+        var vm = new MainViewModel();
+        vm.AddEntityCommand.Execute(null);
+        var owner = vm.Entities[0];
+        var column = owner.Columns[0];
+        var oldName = column.Name;
+
+        var host = new MainViewModelErDiagramHost(vm);
+        ColumnRenamedEventArgs? received = null;
+        host.ColumnRenamed += (_, e) => received = e;
+
+        column.Name = "RenamedId";
+
+        received.Should().NotBeNull();
+        received!.EntityId.Should().Be(owner.Id);
+        received.OldName.Should().Be(oldName);
+        received.NewName.Should().Be("RenamedId");
     }
 }

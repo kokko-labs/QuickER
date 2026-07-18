@@ -19,6 +19,10 @@ public interface IFeatureModule
     /// <param name="services">登録先のサービスコレクション</param>
     void ConfigureServices(IServiceCollection services);
 
+    /// <summary>コンテナ構築直後（ツールバー寄与の生成前）に呼ばれる。ホストイベントの購読などの初期化に使う</summary>
+    /// <param name="services">構築済みのサービスプロバイダ</param>
+    void Initialize(IServiceProvider services) { }
+
     /// <summary>コンテナ構築後、ホストのツールバーへ寄与するボタン群を生成する</summary>
     /// <param name="services">構築済みのサービスプロバイダ</param>
     /// <returns>ツールバーへ並べるボタン記述子の一覧</returns>

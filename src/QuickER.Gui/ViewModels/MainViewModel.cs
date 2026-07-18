@@ -3,7 +3,6 @@ using System.Collections.Specialized;
 using System.ComponentModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using QuickER.CodeGen.CSharp.Queries;
 using QuickER.Documents;
 using QuickER.Extensibility;
 using QuickER.Gui.Abstractions;
@@ -42,6 +41,13 @@ public partial class MainViewModel : ObservableObject
     /// <summary>フィーチャーモジュールがツールバーへ寄与するボタン群（起動時にホストが設定する）</summary>
     [ObservableProperty]
     private IReadOnlyList<FeatureToolbarItem> _featureToolbarItems = [];
+
+    /// <summary>カラム名がユーザー編集で変更されたときに発火する（フィーチャーモジュールの条件式追従などに使用）</summary>
+    /// <remarks>
+    /// <see cref="OnColumnRenamed"/> から、列を保持するエンティティを解決できたときにのみ発火する。
+    /// Undo/Redo 再生中（追跡停止中）や一括置換では発火しない（<see cref="DiagramChangeTracker"/> がその経路を通らない）。
+    /// </remarks>
+    public event EventHandler<ColumnRenamedEventArgs>? ColumnRenamed;
 
     /// <summary>選択中エンティティを内部バッファへコピーするコマンド</summary>
     /// <remarks>ペースト側の実行可否が非バインド対象の内部バッファに依存するため、生成属性を使わず手動で構築する</remarks>
@@ -314,22 +320,18 @@ public partial class MainViewModel : ObservableObject
     }
 
     /// <summary>
-    /// カラム名がユーザー編集で変更されたとき、その列が属するエンティティの名前付きクエリの
-    /// 条件式（ミニ DSL）内の列参照を新名へ書き換える（<see cref="DiagramChangeTracker"/> から通知される）
+    /// カラム名がユーザー編集で変更されたとき、その列を保持するエンティティを解決して
+    /// <see cref="ColumnRenamed"/> を発火し、フィーチャーモジュールへ通知する
+    /// （<see cref="DiagramChangeTracker"/> から通知される）
     /// </summary>
     /// <remarks>
-    /// 適用はエンティティ単位（<see cref="QueryDefinition.EntityId"/> 一致）なので、他エンティティに
-    /// 同名の列があっても巻き込まない。書き換えは <see cref="QueryConditionRenamer"/> が列参照のスパンだけを
-    /// 置換するため、パラメータ名や文字列リテラル中の同名文字列には影響しない。
+    /// 通知するのはエンティティ単位（<see cref="ColumnRenamedEventArgs.EntityId"/>）で、名前付きクエリの
+    /// 条件式（ミニ DSL）の追従書き換えはコード生成フィーチャーモジュール側（QueryConditionRenameFollower）が担う。
+    /// この VM は列参照の書き換えロジックを持たない。
     /// </remarks>
     private void OnColumnRenamed(ColumnViewModel column, string oldName, string newName)
     {
-        if (Queries.Count == 0)
-        {
-            return;
-        }
-
-        // 列を保持するエンティティを特定し、そのエンティティのクエリだけを対象にする
+        // 列を保持するエンティティを特定する（他エンティティに同名列があっても巻き込まないための単位）
         var owner = Entities.FirstOrDefault(entity => entity.Columns.Contains(column));
 
         if (owner is null)
@@ -337,13 +339,16 @@ public partial class MainViewModel : ObservableObject
             return;
         }
 
-        foreach (var query in Queries.Where(query => query.EntityId == owner.Id))
-        {
-            if (query.Condition is { } condition)
-            {
-                query.Condition = QueryConditionRenamer.RenameColumn(condition, oldName, newName);
-            }
-        }
+        // フィーチャーモジュールへ通知する（名前付きクエリの条件式追従などに使用）
+        ColumnRenamed?.Invoke(this, new ColumnRenamedEventArgs(owner.Id, oldName, newName));
+    }
+
+    /// <summary>名前付きクエリ定義を丸ごと差し替え、自動保存へ反映する</summary>
+    /// <param name="queries">差し替える名前付きクエリ定義の一覧</param>
+    public void ReplaceQueries(IReadOnlyList<QueryDefinition> queries)
+    {
+        Queries = queries.ToList();
+        AutoSave();
     }
 
     /// <summary>全エンティティの現在位置を履歴登録用にスナップショットする</summary>

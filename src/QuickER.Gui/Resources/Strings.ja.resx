@@ -222,18 +222,6 @@
   <data name="Toolbar_SyncToDb" xml:space="preserve">
     <value>DB同期</value>
   </data>
-  <data name="Toolbar_GenerateCSharp" xml:space="preserve">
-    <value>コード生成</value>
-  </data>
-  <data name="Toolbar_GenerateCSharpTooltip" xml:space="preserve">
-    <value>現在の ER 図から C# Entity / BindingModel を生成</value>
-  </data>
-  <data name="Toolbar_QueryDefinitions" xml:space="preserve">
-    <value>クエリ定義</value>
-  </data>
-  <data name="Toolbar_QueryDefinitionsTooltip" xml:space="preserve">
-    <value>Repository メソッドになる名前付きクエリを定義</value>
-  </data>
   <data name="Status_Ready" xml:space="preserve">
     <value>準備完了</value>
   </data>
@@ -680,30 +668,6 @@
   </data>
   <data name="Print_Failed" xml:space="preserve">
     <value>印刷できませんでした。</value>
-  </data>
-  <data name="Csharp_GenerationErrorTitle" xml:space="preserve">
-    <value>C# 生成エラー</value>
-  </data>
-  <data name="Csharp_GenerationFailedIntro" xml:space="preserve">
-    <value>C# コードを生成できませんでした。以下の診断を確認してください。</value>
-  </data>
-  <data name="Csharp_WarningLine" xml:space="preserve">
-    <value>・{0}</value>
-  </data>
-  <data name="Csharp_WarningIntro" xml:space="preserve">
-    <value>次の警告があります。</value>
-  </data>
-  <data name="Csharp_WarningPrompt" xml:space="preserve">
-    <value>このまま生成しますか？（中止して ER 図の定義を修正することを推奨します）</value>
-  </data>
-  <data name="Csharp_WarningTitle" xml:space="preserve">
-    <value>C# 生成の警告</value>
-  </data>
-  <data name="Csharp_GeneratedSuccess" xml:space="preserve">
-    <value>C# コードの生成が完了しました。</value>
-  </data>
-  <data name="Csharp_GenerationFailed" xml:space="preserve">
-    <value>C# コードを生成できませんでした。</value>
   </data>
   <data name="Import_Failed" xml:space="preserve">
     <value>取り込めませんでした。</value>

@@ -26,6 +26,16 @@
     <IncludeAiModules Condition="'$(IncludeAiModules)' == ''">true</IncludeAiModules>
     <DefineConstants Condition="'$(IncludeAiModules)' == 'true'"
       >$(DefineConstants);QUICKER_AI_MODULES</DefineConstants>
+    <!--
+      コード生成・クエリ定義フィーチャーモジュールの同梱可否（AI とは独立に着脱できる）。
+      false にすると CodeGen.UI（ダイアログ層）への参照ごと外れた構成をビルドできる
+      （FeatureModuleCatalog の QUICKER_CODEGEN_MODULES 定数と連動）。
+      生成エンジン CodeGen.CSharp は型解決（CSharpTypeInfo）のためプロバイダ層が参照しており、
+      このスイッチでは外れない（外れるのは機能 UI のみ）。
+    -->
+    <IncludeCodeGenModules Condition="'$(IncludeCodeGenModules)' == ''">true</IncludeCodeGenModules>
+    <DefineConstants Condition="'$(IncludeCodeGenModules)' == 'true'"
+      >$(DefineConstants);QUICKER_CODEGEN_MODULES</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>
@@ -49,8 +59,10 @@
     <ProjectReference Include="..\QuickER.Gui.Abstractions\QuickER.Gui.Abstractions.csproj" />
     <ProjectReference Include="..\QuickER.Gui.Common\QuickER.Gui.Common.csproj" />
     <ProjectReference Include="..\QuickER.Document\QuickER.Document.csproj" />
-    <ProjectReference Include="..\QuickER.CodeGen.CSharp\QuickER.CodeGen.CSharp.csproj" />
-    <ProjectReference Include="..\QuickER.CodeGen.UI\QuickER.CodeGen.UI.csproj" />
+    <ProjectReference
+      Include="..\QuickER.CodeGen.UI\QuickER.CodeGen.UI.csproj"
+      Condition="'$(IncludeCodeGenModules)' == 'true'"
+    />
     <ProjectReference Include="..\QuickER.Model\QuickER.Model.csproj" />
     <ProjectReference Include="..\QuickER.MySql\QuickER.MySql.csproj" />
     <ProjectReference Include="..\QuickER.Oracle\QuickER.Oracle.csproj" />

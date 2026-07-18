@@ -14,9 +14,11 @@ namespace QuickER.Extensibility;
 /// <param name="Label">ボタンキャプション（ローカライズ済み文字列）</param>
 /// <param name="Tooltip">ツールチップ（<c>null</c> なら無し）</param>
 /// <param name="Command">押下時に実行するコマンド</param>
+/// <param name="BeginsGroup">true のときボタンの直前にツールバーのグループ区切り（セパレータ）を描画する</param>
 public sealed record FeatureToolbarItem(
     string Icon,
     string Label,
     string? Tooltip,
-    ICommand Command
+    ICommand Command,
+    bool BeginsGroup = false
 );

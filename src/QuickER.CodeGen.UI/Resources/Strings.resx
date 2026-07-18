@@ -386,4 +386,46 @@ You can pass this file directly to the CLI as --config.</value>
   <data name="QueryDialog_Status_RawSqlInvalid" xml:space="preserve">
     <value>The raw SQL references an undeclared parameter.</value>
   </data>
+  <data name="Common_Complete" xml:space="preserve">
+    <value>Done</value>
+  </data>
+  <data name="Common_Error" xml:space="preserve">
+    <value>Error</value>
+  </data>
+  <data name="Toolbar_GenerateCSharp" xml:space="preserve">
+    <value>Codegen</value>
+  </data>
+  <data name="Toolbar_GenerateCSharpTooltip" xml:space="preserve">
+    <value>Generate C# Entity / BindingModel from the current ER diagram</value>
+  </data>
+  <data name="Toolbar_QueryDefinitions" xml:space="preserve">
+    <value>Query</value>
+  </data>
+  <data name="Toolbar_QueryDefinitionsTooltip" xml:space="preserve">
+    <value>Define named queries that are generated as Repository methods</value>
+  </data>
+  <data name="Csharp_GenerationErrorTitle" xml:space="preserve">
+    <value>C# Generation Error</value>
+  </data>
+  <data name="Csharp_GenerationFailedIntro" xml:space="preserve">
+    <value>Could not generate C# code. Please review the diagnostics below.</value>
+  </data>
+  <data name="Csharp_WarningLine" xml:space="preserve">
+    <value>• {0}</value>
+  </data>
+  <data name="Csharp_WarningIntro" xml:space="preserve">
+    <value>The following warnings were found.</value>
+  </data>
+  <data name="Csharp_WarningPrompt" xml:space="preserve">
+    <value>Do you want to generate anyway? (We recommend canceling and fixing the ER diagram definitions.)</value>
+  </data>
+  <data name="Csharp_WarningTitle" xml:space="preserve">
+    <value>C# Generation Warning</value>
+  </data>
+  <data name="Csharp_GeneratedSuccess" xml:space="preserve">
+    <value>C# code generation completed.</value>
+  </data>
+  <data name="Csharp_GenerationFailed" xml:space="preserve">
+    <value>Failed to generate C# code.</value>
+  </data>
 </root>

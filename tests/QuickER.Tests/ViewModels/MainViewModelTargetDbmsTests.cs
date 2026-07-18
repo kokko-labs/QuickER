@@ -2,7 +2,6 @@ using System.Collections.Generic;
 using System.Linq;
 using FluentAssertions;
 using QuickER.CodeGen.CSharp;
-using QuickER.CodeGen.UI;
 using QuickER.Gui.Abstractions;
 using QuickER.Model;
 using QuickER.Provider;
@@ -255,12 +254,6 @@ public class MainViewModelTargetDbmsTests
 
     private sealed class NoopAppDialogService : IAppDialogService
     {
-        public CSharpGenerationDialogResult? ShowCSharpGenerationDialog(
-            IDatabaseProvider currentProvider
-        ) => null;
-
-        public List<QueryDefinition>? ShowQueryDefinitionDialog(ErDiagram diagram) => null;
-
         public DbConnectionDialogResult? ShowDbConnectionDialog(
             DbConnectionDialogMode mode,
             IDatabaseProvider? fixedProvider = null,

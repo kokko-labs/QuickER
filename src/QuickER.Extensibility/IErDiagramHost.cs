@@ -40,4 +40,11 @@ public interface IErDiagramHost
     /// <param name="argumentsJson">ツールへ渡す引数の JSON 文字列</param>
     /// <returns>結果テキストと、成功したかどうかのタプル</returns>
     (string Result, bool Success) ExecuteTool(string toolName, string argumentsJson);
+
+    /// <summary>カラム名がユーザー編集で変更されたときに発火する（名前付きクエリの条件式追従などに使用）</summary>
+    event EventHandler<ColumnRenamedEventArgs>? ColumnRenamed;
+
+    /// <summary>図の名前付きクエリ定義を丸ごと差し替える。差し替え後の自動保存はホスト実装の責務</summary>
+    /// <param name="queries">差し替える名前付きクエリ定義の一覧</param>
+    void ReplaceQueries(IReadOnlyList<QueryDefinition> queries);
 }
