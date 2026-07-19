@@ -599,6 +599,9 @@ public static class ValueObjectValidationMessages
     /// <summary>Message for exceeding the number of integer digits (argument: allowed integer digits).</summary>
     public static Func<int, string> PrecisionExceeded { get; set; } =
         maxIntegralDigits => $"Enter at most {maxIntegralDigits} digits in the integer part.";
+
+    /// <summary>Message for a null value passed to Create/TryCreate (a value object never wraps null; keep the property itself null for nullable columns).</summary>
+    public static Func<string> ValueRequired { get; set; } = () => "A value is required.";
 }
 
 /// <summary>Change state of an entity or EditModel.</summary>

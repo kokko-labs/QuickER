@@ -188,6 +188,41 @@ public sealed class ValueObjectValidationTests
         memo!.Value.Should().Be("ok");
     }
 
+    // ===== (4b) 参照型 VO への null 入力（Try パターンの契約） =====
+
+    [Fact(DisplayName = "TryCreate(null): 文字列 VO は throw せず false＋必須エラーを返す")]
+    public void 文字列VOのTryCreateはnullでfalse()
+    {
+        // VO は null を内包しない設計（nullable 列は VO プロパティ自体を null にする）。
+        // Try パターンの公開 API として null は NRE でなく false＋エラーで返す。
+        NameValue.TryCreate(null!, out var failed, out var errors).Should().BeFalse();
+        failed.Should().BeNull();
+        errors.Should().ContainSingle().Which.Should().Be("A value is required.");
+
+        MemoValue.TryCreate(null!, out var memo, out var memoErrors).Should().BeFalse();
+        memo.Should().BeNull();
+        memoErrors.Should().NotBeEmpty();
+
+        BioValue.TryCreate(null!, out var bio, out var bioErrors).Should().BeFalse();
+        bio.Should().BeNull();
+        bioErrors.Should().NotBeEmpty();
+    }
+
+    [Fact(
+        DisplayName = "Create(null): 文字列 VO は ValueObjectValidationException（TryCreate false と対称）"
+    )]
+    public void 文字列VOのCreateはnullでValidationException()
+    {
+        var act = () => NameValue.Create(null!);
+
+        act.Should()
+            .Throw<ValueObjectValidationException>()
+            .Which.Errors.Should()
+            .ContainSingle()
+            .Which.Should()
+            .Be("A value is required.");
+    }
+
     // ===== (5) ValueObjectOrderedBase の比較 =====
 
     [Fact(DisplayName = "順序付き VO（int）の < > <= >= と CompareTo が値順で機能する")]

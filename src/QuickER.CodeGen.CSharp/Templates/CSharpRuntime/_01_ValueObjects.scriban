@@ -373,6 +373,9 @@ public static class ValueObjectValidationMessages
     /// <summary>Message for exceeding the number of integer digits (argument: allowed integer digits).</summary>
     public static Func<int, string> PrecisionExceeded { get; set; } =
         maxIntegralDigits => $"Enter at most {maxIntegralDigits} digits in the integer part.";
+
+    /// <summary>Message for a null value passed to Create/TryCreate (a value object never wraps null; keep the property itself null for nullable columns).</summary>
+    public static Func<string> ValueRequired { get; set; } = () => "A value is required.";
 }
 {{~ end ~}}
 {{~ if generate_value_objects && render_value_objects ~}}
@@ -421,6 +424,16 @@ public sealed partial class {{ vo.class_name }}
     /// <summary>Auto-generated validation plus the user extension (OnValidate). Also callable from partial and custom code.</summary>
     internal static void Validate({{ vo.value_type_name }} value, ICollection<string> errors)
     {
+        {{~ if vo.value_type_name == "string" || vo.value_type_name == "byte[]" ~}}
+        // A value object never wraps null (a nullable column keeps the property itself null),
+        // so a null input is reported as a validation error instead of throwing from the checks below.
+        if (value is null)
+        {
+            errors.Add(ValueObjectValidationMessages.ValueRequired());
+            return;
+        }
+
+        {{~ end ~}}
         {{~ if vo.max_length ~}}
         if (value.Length > {{ vo.max_length }})
         {

@@ -551,6 +551,9 @@ public static class ValueObjectValidationMessages
     /// <summary>Message for exceeding the number of integer digits (argument: allowed integer digits).</summary>
     public static Func<int, string> PrecisionExceeded { get; set; } =
         maxIntegralDigits => $"Enter at most {maxIntegralDigits} digits in the integer part.";
+
+    /// <summary>Message for a null value passed to Create/TryCreate (a value object never wraps null; keep the property itself null for nullable columns).</summary>
+    public static Func<string> ValueRequired { get; set; } = () => "A value is required.";
 }
 
 /// <summary>Value object for the amount column</summary>
@@ -870,6 +873,14 @@ public sealed partial class MemoValue
     /// <summary>Auto-generated validation plus the user extension (OnValidate). Also callable from partial and custom code.</summary>
     internal static void Validate(string value, ICollection<string> errors)
     {
+        // A value object never wraps null (a nullable column keeps the property itself null),
+        // so a null input is reported as a validation error instead of throwing from the checks below.
+        if (value is null)
+        {
+            errors.Add(ValueObjectValidationMessages.ValueRequired());
+            return;
+        }
+
         if (value.Length > 50)
         {
             var message = ValueObjectValidationMessages.MaxLengthExceeded(50, value.Length);
@@ -947,6 +958,14 @@ public sealed partial class NameValue
     /// <summary>Auto-generated validation plus the user extension (OnValidate). Also callable from partial and custom code.</summary>
     internal static void Validate(string value, ICollection<string> errors)
     {
+        // A value object never wraps null (a nullable column keeps the property itself null),
+        // so a null input is reported as a validation error instead of throwing from the checks below.
+        if (value is null)
+        {
+            errors.Add(ValueObjectValidationMessages.ValueRequired());
+            return;
+        }
+
         if (value.Length > 50)
         {
             var message = ValueObjectValidationMessages.MaxLengthExceeded(50, value.Length);
