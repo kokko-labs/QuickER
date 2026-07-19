@@ -244,7 +244,7 @@
     <value>エンティティ</value>
   </data>
   <data name="Toolbox_AddEntity" xml:space="preserve">
-    <value>エンティティを追加</value>
+    <value>エンティティ追加</value>
   </data>
   <data name="Toolbox_AddEntityTooltip" xml:space="preserve">
     <value>新しいテーブルをキャンバスに追加します</value>
@@ -259,22 +259,22 @@
     <value>リレーションシップ</value>
   </data>
   <data name="Toolbox_OneToOne" xml:space="preserve">
-    <value>1対1</value>
+    <value>1 対 1</value>
   </data>
   <data name="Toolbox_OneToOneTooltip" xml:space="preserve">
-    <value>1対1 のリレーション作成モードに切り替えます</value>
+    <value>1 対 1 のリレーションを作成します</value>
   </data>
   <data name="Toolbox_OneToMany" xml:space="preserve">
-    <value>1対多</value>
+    <value>1 対 多</value>
   </data>
   <data name="Toolbox_OneToManyTooltip" xml:space="preserve">
-    <value>親子関係を表す 1対多 リレーションを作成できます</value>
+    <value>親子関係を表す 1 対 多 のリレーションを作成します</value>
   </data>
   <data name="Toolbox_ManyToMany" xml:space="preserve">
-    <value>多対多</value>
+    <value>多 対 多</value>
   </data>
   <data name="Toolbox_ManyToManyTooltip" xml:space="preserve">
-    <value>中間テーブルを想定した多対多リレーションを作成します</value>
+    <value>中間テーブルを想定した 多 対 多 のリレーションを作成します</value>
   </data>
   <data name="Toolbox_RemoveRelationship" xml:space="preserve">
     <value>リレーション削除</value>
