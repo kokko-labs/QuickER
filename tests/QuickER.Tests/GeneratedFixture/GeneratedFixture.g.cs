@@ -6831,9 +6831,20 @@ internal static class SqlExpressionTranslator
             return false;
         }
 
-        // Arrays etc.: static Enumerable.Contains / MemoryExtensions.Contains(collection, item) (two arguments, no receiver)
-        if (call.Object is null && call.Arguments.Count == 2)
+        // Arrays etc.: static Enumerable.Contains / MemoryExtensions.Contains(collection, item) (two arguments, no receiver).
+        // With C# 14 first-class spans, array.Contains(x) resolves to MemoryExtensions.Contains(span, item, comparer),
+        // so the three-argument form is also accepted when the comparer is null (= default equality, same IN semantics).
+        // A non-null comparer cannot be translated to SQL and falls through to the unsupported-expression error.
+        if (call.Object is null && call.Arguments.Count is 2 or 3)
         {
+            if (
+                call.Arguments.Count == 3
+                && Unwrap(call.Arguments[2]) is not ConstantExpression { Value: null }
+            )
+            {
+                return false;
+            }
+
             if (Unwrap(call.Arguments[1]) is MemberExpression staticItem && IsColumn(staticItem))
             {
                 column = ColumnName(staticItem.Member);

@@ -220,18 +220,25 @@ public sealed class SqlServerTranslatorOperatorRuntimeTests(SqlServerContainerFi
     }
 
     /// <summary>
-    /// 配列の <c>Enumerable.Contains</c>（静的 2 引数経路）が <c>[col] IN (...)</c> へ翻訳される。
-    /// List&lt;VO&gt; のインスタンス Contains 経路は既存検証済みで、ここは配列＝静的経路を突く。
+    /// 配列の Contains が <c>[col] IN (...)</c> へ翻訳される。自然な書き方（C# 14 以降は
+    /// <c>MemoryExtensions.Contains</c>＝Span 版・比較子 null の 3 引数形に解決）と、
+    /// 静的 <c>Enumerable.Contains</c>（2 引数）の両経路を検証する。
+    /// List&lt;VO&gt; のインスタンス Contains 経路は既存検証済み。
     /// </summary>
-    [Fact(DisplayName = "[SqlServer演算子] 配列 Contains（静的経路）が IN へ翻訳され対象行を返す")]
+    [Fact(
+        DisplayName = "[SqlServer演算子] 配列 Contains（Span 形・静的形の両方）が IN へ翻訳され対象行を返す"
+    )]
     public async Task ArrayContains_TranslatesToInClause()
     {
         await ResetAndCreateSchemaAsync();
         var repo = await SeedCustomersAsync();
 
-        // 配列は C# 14 以降 ids.Contains(x) が MemoryExtensions.Contains（Span 版）に解決され
-        // 翻訳器未対応の形になるため、検証対象の静的 Enumerable.Contains 経路を明示呼び出しで突く
+        // 自然な書き方（Span 版 3 引数形へ解決される）
         var ids = new[] { CustomerIdValue.Create(2), CustomerIdValue.Create(4) };
+        var spanList = await repo.Query().Where(c => ids.Contains(c.CustomerId)).ToListAsync(Ct);
+        spanList.Select(c => c.CustomerId.Value).Should().BeEquivalentTo([2, 4]);
+
+        // 静的 Enumerable.Contains（2 引数）経路も同一結果になる
         var inList = await repo.Query()
             .Where(c => Enumerable.Contains(ids, c.CustomerId))
             .ToListAsync(Ct);
@@ -249,9 +256,7 @@ public sealed class SqlServerTranslatorOperatorRuntimeTests(SqlServerContainerFi
         var repo = await SeedCustomersAsync();
 
         var empty = Array.Empty<CustomerIdValue>();
-        var none = await repo.Query()
-            .Where(c => Enumerable.Contains(empty, c.CustomerId))
-            .ToListAsync(Ct);
+        var none = await repo.Query().Where(c => empty.Contains(c.CustomerId)).ToListAsync(Ct);
         none.Should().BeEmpty();
     }
 
