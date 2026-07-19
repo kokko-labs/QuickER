@@ -11,7 +11,7 @@ namespace QuickER.CodeGen.CSharp;
 /// 命名変換規則:
 /// <list type="bullet">
 /// <item><description>クラス名: テーブル名を単数形化 → PascalCase 化 → 用途別サフィックス（Entity / EditModel / Mapper）を付与。既に同サフィックスで終わる場合は重複付与しない</description></item>
-/// <item><description>プロパティ名: カラム名を PascalCase 化。C# キーワードと一致する場合は <c>@</c> を前置する</description></item>
+/// <item><description>プロパティ名: カラム名を PascalCase 化する。生成識別子は先頭が必ず大文字（または <c>_</c>）になるため、小文字綴りしかない C# キーワードとは構造的に衝突せず、<c>@</c> エスケープ機構は持たない</description></item>
 /// <item><description>ナビゲーション名: コレクションは複数形、単一参照は単数形のテーブル名を PascalCase 化する</description></item>
 /// <item><description>PascalCase 化: 単語分割（区切り文字・大小文字境界・数字境界）後、各単語を先頭大文字化して連結。空になる場合は "Generated"、先頭が数字の場合は <c>_</c> を前置する</description></item>
 /// <item><description>単数形化・複数形化: 英語の簡易規則のみ対応（ies⇔y、末尾 s の増減）。不規則変化は対象外</description></item>
@@ -19,87 +19,10 @@ namespace QuickER.CodeGen.CSharp;
 /// </remarks>
 internal sealed partial class CSharpNameConverter
 {
-    /// <summary>C# の予約キーワード一覧。識別子衝突時の <c>@</c> エスケープ判定に使う</summary>
-    private static readonly HashSet<string> Keywords =
-    [
-        "abstract",
-        "as",
-        "base",
-        "bool",
-        "break",
-        "byte",
-        "case",
-        "catch",
-        "char",
-        "checked",
-        "class",
-        "const",
-        "continue",
-        "decimal",
-        "default",
-        "delegate",
-        "do",
-        "double",
-        "else",
-        "enum",
-        "event",
-        "explicit",
-        "extern",
-        "false",
-        "finally",
-        "fixed",
-        "float",
-        "for",
-        "foreach",
-        "goto",
-        "if",
-        "implicit",
-        "in",
-        "int",
-        "interface",
-        "internal",
-        "is",
-        "lock",
-        "long",
-        "namespace",
-        "new",
-        "null",
-        "object",
-        "operator",
-        "out",
-        "override",
-        "params",
-        "private",
-        "protected",
-        "public",
-        "readonly",
-        "ref",
-        "return",
-        "sbyte",
-        "sealed",
-        "short",
-        "sizeof",
-        "stackalloc",
-        "static",
-        "string",
-        "struct",
-        "switch",
-        "this",
-        "throw",
-        "true",
-        "try",
-        "typeof",
-        "uint",
-        "ulong",
-        "unchecked",
-        "unsafe",
-        "ushort",
-        "using",
-        "virtual",
-        "void",
-        "volatile",
-        "while",
-    ];
+    // C# キーワードの @ エスケープ判定は持たない。ToPascalCase の出力は先頭が必ず大文字
+    // （有効単語ゼロなら "Generated"、数字始まりなら "_" 前置）になる一方、C# キーワードは
+    // すべて小文字綴りのため、生成識別子がキーワードと一致することは構造的に起きない。
+    // 小文字のまま識別子を出す経路を将来追加する場合は、その経路側でエスケープを実装すること。
 
     /// <summary>テーブル名からエンティティクラス名を生成する（例: "order_items" → "OrderItemEntity"）</summary>
     public string ToEntityClassName(string tableName) =>
@@ -113,15 +36,8 @@ internal sealed partial class CSharpNameConverter
     public string ToMapperClassName(string tableName) =>
         EnsureSuffix(ToPascalCase(Singularize(tableName)), "Mapper");
 
-    /// <summary>
-    /// カラム名からプロパティ名を生成する（例: "customer_id" → "CustomerId"）
-    /// </summary>
-    /// <remarks>C# キーワードと一致する場合は <c>@</c> を前置して有効な識別子にする</remarks>
-    public string ToPropertyName(string columnName)
-    {
-        var propertyName = ToPascalCase(columnName);
-        return Keywords.Contains(propertyName) ? "@" + propertyName : propertyName;
-    }
+    /// <summary>カラム名からプロパティ名を生成する（例: "customer_id" → "CustomerId"）</summary>
+    public string ToPropertyName(string columnName) => ToPascalCase(columnName);
 
     /// <summary>
     /// カラム名から値オブジェクト（Value Object）のクラス名を生成する（例: "customer_id" → "CustomerIdValue"）
@@ -137,24 +53,17 @@ internal sealed partial class CSharpNameConverter
 
     /// <summary>テーブル名から DbContext の DbSet プロパティ名を生成する（例: "order_items" → "OrderItems"）</summary>
     /// <remarks>単数形化してから複数形化することで、テーブル名の表記ゆれ（単数/複数）に依らず一定の複数形にする</remarks>
-    public string ToDbSetName(string tableName)
-    {
-        var baseName = ToPascalCase(Pluralize(Singularize(tableName)));
-        return Keywords.Contains(baseName) ? "@" + baseName : baseName;
-    }
+    public string ToDbSetName(string tableName) => ToPascalCase(Pluralize(Singularize(tableName)));
 
     /// <summary>
     /// テーブル名からナビゲーションプロパティ名を生成する
     /// </summary>
     /// <param name="tableName">参照先のテーブル名</param>
     /// <param name="collection">コレクションナビゲーション（1対多の「多」側）かどうか。true なら複数形、false なら単数形にする</param>
-    public string ToNavigationName(string tableName, bool collection)
-    {
-        var baseName = collection
+    public string ToNavigationName(string tableName, bool collection) =>
+        collection
             ? ToPascalCase(Pluralize(Singularize(tableName)))
             : ToPascalCase(Singularize(tableName));
-        return Keywords.Contains(baseName) ? "@" + baseName : baseName;
-    }
 
     /// <summary>
     /// 文字列を PascalCase の識別子へ変換する

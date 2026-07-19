@@ -16,7 +16,9 @@ csharpier format .                                       # 整形（グローバ
 ```
 
 - テストは net10.0-windows / WPF 依存のため **Windows でのみ実行可能**（CI も windows-latest）
-- `tests/QuickER.Tests/Integration/` は実 DB テスト。SQL Server / PostgreSQL / MySQL / Oracle は Testcontainers の実コンテナを使い、**Docker 不在時は自動スキップ**される（フィクスチャが検出）。この開発機では Docker 稼働＝全件実行・スキップ 0 が正常値。CI では Linux コンテナが使えないため常にスキップされる。SQLite 系は実ファイル DB（SqliteTempDatabase）を使うため **Docker 不要＝CI でも常時実行**される
+- **テストのフォルダ構成は src のプロジェクト構成をミラー**する（`tests/QuickER.Tests/{Model|Document|Provider|SqlServer|PostgreSql|MySql|Oracle|Sqlite|CodeGen.CSharp|CodeGen.UI|Db.UI|AI|AI.UI|AI.Chat|AI.Mock|Extensibility|Gui|Gui.Common|Cli}/`＝SUT の所在プロジェクトに対応・namespace はフォルダ追従で `QuickER.Tests.{フォルダ}`。Gui/ 配下はさらに Services/ViewModels/Views/UndoRedo をミラー）。横断フォルダは `GeneratedFixture/`（ドリフト検知＝パス不動・regen スクリプトが参照）・`Integration/`・`Resources/`（resx パリティ）・`Samples/`・`TestDoubles/`（共有テストダブル）・`TestSupport/`（WPF/STA 起動ヘルパ）
+- `tests/QuickER.Tests/Integration/` は実 DB テストで 2 サブフォルダに分かれる: `Dialects/`＝アプリ自身の DB 面サービス検証（`*IntegrationTests` 接尾辞。CommentSync / ConnectionStringFactory / DdlRoundTrip / SchemaSync）・`GeneratedRuntime/`＝生成コードの実行時挙動検証（`*RuntimeTests` 接尾辞。SaveHook / NamedQuery / BinaryColumn / Remote / EF Core 方言等）。共有フィクスチャ（*ContainerFixture / SqliteTempDatabase）は Integration 直下。SQL Server / PostgreSQL / MySQL / Oracle は Testcontainers の実コンテナを使い、**Docker 不在時は自動スキップ**される（フィクスチャが検出）。この開発機では Docker 稼働＝全件実行・スキップ 0 が正常値。CI では Linux コンテナが使えないため常にスキップされる。SQLite 系は実ファイル DB（SqliteTempDatabase）を使うため **Docker 不要＝CI でも常時実行**される
+- Docker 必須テストには `[Trait("RequiresDocker", "true")]` が付与されており、`--filter "RequiresDocker=true"`（または `!=` で除外）で選別実行できる（例外: `Integration/Dialects/SqlServerSchemaSyncIntegrationTests` は localhost の実 SQL Server 接続＝Docker 不使用・接続不可時スキップの第 3 機構）
 - 生成コードの Roslyn コンパイル検証（GeneratedCodeCompilationTests）は Docker 不要で常時実行される
 
 ## アーキテクチャ
