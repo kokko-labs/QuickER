@@ -217,13 +217,12 @@ internal sealed class ScribanCSharpRenderer
         var template = ParsedTemplate;
 
         // 独自属性 NavigationReference は (1) Entity のナビゲーションプロパティへの付与、
-        // (2) 共通契約の EntitySaveMetadata / SqlQuery によるナビゲーション除外・Include 復元（リフレクション走査）で参照される。
-        // リレーションが無くても契約（QuickER 版 Repository か EF Core のいずれか）を生成する場合は属性定義が必要なため、その条件も含める。
-        // 契約（QuickER 版 / EF Core / インメモリ）を生成する場合は、メタデータ（CascadeNavigations）・
-        // Include 復元のリフレクション走査で NavigationReference を参照するため、リレーションが無くても属性定義が必要。
-        var emitNavRefAttr =
-            model.EntityClasses.Any(c => c.Navigations.Count > 0)
-            || options.GeneratesRepositoryContract;
+        // (2) 共通契約の EntitySaveMetadata / SqlQuery によるナビゲーション除外・Include 復元（リフレクション走査）、
+        // (3) EntityBase 自身（GetValueProperties のナビゲーション除外判定）の 3 箇所で参照される。
+        // (3) はエンティティ生成時に常に出力されるため、リレーション・契約の有無に依らず、
+        // エンティティを 1 つでも生成するなら属性定義が必要（リレーションなし・契約なしの最小構成で
+        // コンパイル不能になる不具合の修正。GuidKeyValueObjectExecutionTests が回帰を検知する）。
+        var emitNavRefAttr = model.EntityClasses.Count > 0 || options.GeneratesRepositoryContract;
 
         // QuickER 版 Repository の生成方言に応じた原始変数群。sqlserver のときは現行値（識別子クォート [ ]・
         // ADO 型 SqlXxx）そのままで、テンプレートは細粒度置換した箇所でこれらを参照する。方言リテラルを

@@ -217,7 +217,7 @@ public sealed class BinaryColumnAdoRuntimeTests : BinaryColumnRuntimeTestsBase
 
         // 縮小列（除外列を含まない必須列のみ）→ 成功・payload は null
         var shrunk = await documents.QueryBySqlAsync(
-            "SELECT document_id, title, checksum, row_ver FROM documents WHERE document_id = @id",
+            "SELECT document_id, title, is_published, checksum, row_ver FROM documents WHERE document_id = @id",
             new { id = 1 },
             Ct
         );

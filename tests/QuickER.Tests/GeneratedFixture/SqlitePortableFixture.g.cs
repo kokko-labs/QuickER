@@ -549,6 +549,9 @@ public static class ValueObjectValidationMessages
     /// <summary>Message for exceeding the number of integer digits (argument: allowed integer digits).</summary>
     public static Func<int, string> PrecisionExceeded { get; set; } =
         maxIntegralDigits => $"Enter at most {maxIntegralDigits} digits in the integer part.";
+
+    /// <summary>Message for a null value passed to Create/TryCreate (a value object never wraps null; keep the property itself null for nullable columns).</summary>
+    public static Func<string> ValueRequired { get; set; } = () => "A value is required.";
 }
 
 /// <summary>Value object for the amount column</summary>
@@ -868,6 +871,14 @@ public sealed partial class MemoValue
     /// <summary>Auto-generated validation plus the user extension (OnValidate). Also callable from partial and custom code.</summary>
     internal static void Validate(string value, ICollection<string> errors)
     {
+        // A value object never wraps null (a nullable column keeps the property itself null),
+        // so a null input is reported as a validation error instead of throwing from the checks below.
+        if (value is null)
+        {
+            errors.Add(ValueObjectValidationMessages.ValueRequired());
+            return;
+        }
+
         if (value.Length > 50)
         {
             var message = ValueObjectValidationMessages.MaxLengthExceeded(50, value.Length);
@@ -945,6 +956,14 @@ public sealed partial class NameValue
     /// <summary>Auto-generated validation plus the user extension (OnValidate). Also callable from partial and custom code.</summary>
     internal static void Validate(string value, ICollection<string> errors)
     {
+        // A value object never wraps null (a nullable column keeps the property itself null),
+        // so a null input is reported as a validation error instead of throwing from the checks below.
+        if (value is null)
+        {
+            errors.Add(ValueObjectValidationMessages.ValueRequired());
+            return;
+        }
+
         if (value.Length > 50)
         {
             var message = ValueObjectValidationMessages.MaxLengthExceeded(50, value.Length);
@@ -6026,9 +6045,20 @@ internal static class SqlExpressionTranslator
             return false;
         }
 
-        // Arrays etc.: static Enumerable.Contains / MemoryExtensions.Contains(collection, item) (two arguments, no receiver)
-        if (call.Object is null && call.Arguments.Count == 2)
+        // Arrays etc.: static Enumerable.Contains / MemoryExtensions.Contains(collection, item) (two arguments, no receiver).
+        // With C# 14 first-class spans, array.Contains(x) resolves to MemoryExtensions.Contains(span, item, comparer),
+        // so the three-argument form is also accepted when the comparer is null (= default equality, same IN semantics).
+        // A non-null comparer cannot be translated to SQL and falls through to the unsupported-expression error.
+        if (call.Object is null && call.Arguments.Count is 2 or 3)
         {
+            if (
+                call.Arguments.Count == 3
+                && Unwrap(call.Arguments[2]) is not ConstantExpression { Value: null }
+            )
+            {
+                return false;
+            }
+
             if (Unwrap(call.Arguments[1]) is MemberExpression staticItem && IsColumn(staticItem))
             {
                 column = ColumnName(staticItem.Member);
@@ -7688,7 +7718,17 @@ public sealed partial class CustomerRepository(
         ICustomerRepository { }
 
 /// <summary>Repository interface for OrderEntity.</summary>
-public partial interface IOrderRepository : IRepository<OrderEntity, OrderIdValue> { }
+public partial interface IOrderRepository : IRepository<OrderEntity, OrderIdValue>
+{
+    /// <summary>メモの部分一致（CONTAINS→LIKE。%・_ 等はリテラル扱い）で注文を検索する</summary>
+    Task<IReadOnlyList<OrderEntity>> SearchMemoContainsAsync(string keyword, CancellationToken cancellationToken = default);
+
+    /// <summary>メモ未設定（IS NULL）の注文を検索する</summary>
+    Task<IReadOnlyList<OrderEntity>> GetMissingMemoAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>金額（decimal・VO 列）が下限以上の注文を検索する</summary>
+    Task<IReadOnlyList<OrderEntity>> GetExpensiveAsync(decimal minAmount, CancellationToken cancellationToken = default);
+}
 
 /// <summary>Repository implementation for OrderEntity.</summary>
 public sealed partial class OrderRepository(
@@ -7699,7 +7739,20 @@ public sealed partial class OrderRepository(
         connectionFactory,
         saveHooks
     ),
-        IOrderRepository { }
+        IOrderRepository
+{
+    /// <summary>メモの部分一致（CONTAINS→LIKE。%・_ 等はリテラル扱い）で注文を検索する</summary>
+    public Task<IReadOnlyList<OrderEntity>> SearchMemoContainsAsync(string keyword, CancellationToken cancellationToken = default) =>
+        Query().Where(e => e.Memo!.Contains(keyword)).OrderBy(e => e.OrderId).ToListAsync(cancellationToken);
+
+    /// <summary>メモ未設定（IS NULL）の注文を検索する</summary>
+    public Task<IReadOnlyList<OrderEntity>> GetMissingMemoAsync(CancellationToken cancellationToken = default) =>
+        Query().Where(e => e.Memo == null).OrderBy(e => e.OrderId).ToListAsync(cancellationToken);
+
+    /// <summary>金額（decimal・VO 列）が下限以上の注文を検索する</summary>
+    public Task<IReadOnlyList<OrderEntity>> GetExpensiveAsync(decimal minAmount, CancellationToken cancellationToken = default) =>
+        Query().Where(e => e.Amount >= AmountValue.Create(minAmount)).OrderBy(e => e.OrderId).ToListAsync(cancellationToken);
+}
 
 /// <summary>
 /// EF Core DbContext that connects to an existing schema.
@@ -9293,4 +9346,17 @@ public sealed partial class EfCoreOrderRepository(
         contextFactory,
         saveHooks
     ),
-        IOrderRepository { }
+        IOrderRepository
+{
+    /// <summary>メモの部分一致（CONTAINS→LIKE。%・_ 等はリテラル扱い）で注文を検索する</summary>
+    public Task<IReadOnlyList<OrderEntity>> SearchMemoContainsAsync(string keyword, CancellationToken cancellationToken = default) =>
+        Query().Where(e => e.Memo!.Contains(keyword)).OrderBy(e => e.OrderId).ToListAsync(cancellationToken);
+
+    /// <summary>メモ未設定（IS NULL）の注文を検索する</summary>
+    public Task<IReadOnlyList<OrderEntity>> GetMissingMemoAsync(CancellationToken cancellationToken = default) =>
+        Query().Where(e => e.Memo == null).OrderBy(e => e.OrderId).ToListAsync(cancellationToken);
+
+    /// <summary>金額（decimal・VO 列）が下限以上の注文を検索する</summary>
+    public Task<IReadOnlyList<OrderEntity>> GetExpensiveAsync(decimal minAmount, CancellationToken cancellationToken = default) =>
+        Query().Where(e => e.Amount >= AmountValue.Create(minAmount)).OrderBy(e => e.OrderId).ToListAsync(cancellationToken);
+}

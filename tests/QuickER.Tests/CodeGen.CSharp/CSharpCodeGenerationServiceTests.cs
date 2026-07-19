@@ -1473,8 +1473,12 @@ public class CSharpCodeGenerationServiceTests
         // Visit に IN 変換のケースが組み込まれている
         content.Should().Contain("when TryGetIn(call, out var inColumn, out var inCollection):");
         content.Should().Contain("return BuildInClause(inColumn, inCollection, parameters);");
-        // 静的 Enumerable.Contains（配列）とインスタンス Contains（List/HashSet）の双方を判定
-        content.Should().Contain("if (call.Object is null && call.Arguments.Count == 2)");
+        // 静的 Enumerable.Contains（配列・2 引数）／C# 14 の Span 版 MemoryExtensions.Contains（3 引数・比較子 null）と、
+        // インスタンス Contains（List/HashSet）の双方を判定
+        content.Should().Contain("if (call.Object is null && call.Arguments.Count is 2 or 3)");
+        content
+            .Should()
+            .Contain("is not ConstantExpression { Value: null }", "非 null 比較子は翻訳対象外");
         content.Should().Contain("if (call.Object is not null && call.Arguments.Count == 1)");
         // 要素をパラメータ化して IN (...) を生成、空コレクションは恒偽条件
         content.Should().Contain("{column} IN ({string.Join(\", \", placeholders)})");

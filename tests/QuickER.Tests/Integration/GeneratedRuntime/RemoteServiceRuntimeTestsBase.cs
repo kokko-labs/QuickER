@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
@@ -237,6 +238,105 @@ public abstract class RemoteServiceRuntimeTestsBase : IAsyncLifetime
         var act = () => Orders.SaveAsync(missing, cancellationToken: Ct);
 
         await act.Should().ThrowAsync<SaveConflictException>();
+    }
+
+    /// <summary>
+    /// 7. SaveMany（複数集約の一括保存）が HTTP 越しに機能し、Added+Updated 混在でも保存後に各ローカル RowState が確定する。
+    /// 既存の単一 Save テスト（#2）の複数版で、サーバー側 SaveMany エンドポイントを経由する。
+    /// </summary>
+    [Fact(
+        DisplayName = "[RemoteService] 7: SaveMany（複数一括・Added+Updated 混在）が HTTP 越しに機能する"
+    )]
+    public async Task SaveMany_PersistsMixedStatesAndAcceptsLocalChanges()
+    {
+        await Customers.InsertAsync(NewCustomer(1, "Alice"), Ct);
+
+        // まず 2 件を一括 Added で保存する（IEnumerable 版の SaveAsync＝SaveMany エンドポイント経由）
+        var order10 = NewOrder(10, 1, 100m, "apple pie");
+        var order11 = NewOrder(11, 1, 50m, "banana");
+        order10.MarkAdded();
+        order11.MarkAdded();
+
+        (await Orders.SaveAsync([order10, order11], cancellationToken: Ct)).Should().Be(2);
+
+        // 直結（EntityGraphSaver.AcceptChanges）と同じく、保存成功後は各ローカル RowState が Unchanged に確定する
+        order10.IsAdded.Should().BeFalse();
+        order11.IsAdded.Should().BeFalse();
+        order10.HasChanges.Should().BeFalse();
+        order11.HasChanges.Should().BeFalse();
+
+        (await Orders.GetByIdAsync(OrderIdValue.Create(10), Ct)).Should().NotBeNull();
+        (await Orders.GetByIdAsync(OrderIdValue.Create(11), Ct)).Should().NotBeNull();
+
+        // Added（新規 12）＋ Updated（既存 10 の更新）を混在させた一括保存
+        order10.Memo = MemoValue.Create("apple tart");
+        order10.MarkUpdated();
+        var order12 = NewOrder(12, 1, 200m, "cherry");
+        order12.MarkAdded();
+
+        (await Orders.SaveAsync([order10, order12], cancellationToken: Ct)).Should().Be(2);
+
+        order10.HasChanges.Should().BeFalse();
+        order12.IsAdded.Should().BeFalse();
+
+        (await Orders.GetByIdAsync(OrderIdValue.Create(10), Ct))!
+            .Memo!.Value.Should()
+            .Be("apple tart");
+        (await Orders.GetByIdAsync(OrderIdValue.Create(12), Ct))!.Amount!.Value.Should().Be(200m);
+    }
+
+    /// <summary>
+    /// 8. 自由 SQL 名前付きクエリの 3 戻り形（単一・件数・射影）が HTTP 越しに正しい値を返す。
+    /// ローカル実行（NamedQuery 系）とは別に、リモート面のメソッドがサーバーへ転送され自由 SQL を実行することを確認する。
+    /// </summary>
+    [Fact(
+        DisplayName = "[RemoteService] 8: 自由 SQL クエリ（単一・件数・射影）が HTTP 越しに機能する"
+    )]
+    public async Task RawSqlQueries_WorkOverHttp()
+    {
+        await SeedAsync();
+
+        // 単一（自由 SQL・最大 order_id）: 注文 13 が最新
+        var top = await Orders.FindTopRawAsync(Ct);
+        top!.OrderId.Value.Should().Be(13);
+
+        // 件数（自由 SQL・SELECT COUNT）: 顧客 1 の注文は 3 件・存在しない顧客は 0
+        (await Orders.CountByCustomerRawAsync(1, Ct))
+            .Should()
+            .Be(3);
+        (await Orders.CountByCustomerRawAsync(999, Ct)).Should().Be(0);
+
+        // 射影（自由 SQL・OrderMemoRow）: 顧客 1 の注文を order_id 昇順（10, 11, 13）で返す
+        var rows = await Orders.GetMemoRowsRawAsync(1, Ct);
+        rows.Select(r => r.OrderId).Should().Equal(10, 11, 13);
+        rows.Select(r => r.Memo).Should().Equal("apple pie", "banana", null);
+    }
+
+    /// <summary>
+    /// 9. AddGeneratedHttpRemoteRepositories の HttpClient ファクトリ形オーバーロード
+    /// （<c>Func&lt;IServiceProvider, HttpClient&gt;</c> を直接渡す公開入口）でも解決でき、1 往復できる。
+    /// </summary>
+    [Fact(
+        DisplayName = "[RemoteService] 9: HttpClient ファクトリ形オーバーロードで解決し 1 往復できる"
+    )]
+    public async Task HttpClientFactoryOverload_ResolvesAndRoundTrips()
+    {
+        var baseUrl = _app!.Urls.First();
+
+        // ファクトリ版は「prefix を含み末尾スラッシュ付き」の BaseAddress を持つ HttpClient を供給する契約
+        using var provider = new ServiceCollection()
+            .AddGeneratedHttpRemoteRepositories(_ => new HttpClient
+            {
+                BaseAddress = new Uri($"{baseUrl}/quicker/"),
+            })
+            .BuildServiceProvider();
+
+        var customers = provider.GetRequiredService<ICustomerRemoteRepository>();
+
+        await customers.InsertAsync(NewCustomer(1, "Alice"), Ct);
+        (await customers.GetByIdAsync(CustomerIdValue.Create(1), Ct))!
+            .Name.Value.Should()
+            .Be("Alice");
     }
 
     /// <summary>使い終えたクライアント DI・サーバー・一時 DB を破棄する</summary>

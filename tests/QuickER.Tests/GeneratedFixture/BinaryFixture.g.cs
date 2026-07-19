@@ -451,6 +451,11 @@ public partial class DocumentEntity : EntityBase
     [DbColumnMeta("string(50)")]
     public string Title { get; set; } = string.Empty;
 
+    /// <summary>Property for the is_published column</summary>
+    [Column("is_published")]
+    [DbColumnMeta("boolean")]
+    public bool IsPublished { get; set; }
+
     /// <summary>Property for the payload column</summary>
     [Column("payload")]
     [DbColumnMeta("binary(max)")]
@@ -1662,6 +1667,97 @@ public partial class DocumentEditModel : EditModelBase
         }
     }
 
+    /// <summary>Confirmed value of IsPublished.</summary>
+    private bool? _isPublished;
+
+    /// <summary>On-screen input string for IsPublished.</summary>
+    private string _bindingIsPublished = string.Empty;
+
+    /// <summary>Confirmed value of IsPublished (read-only from outside).</summary>
+    public bool? IsPublished
+    {
+        get => _isPublished;
+        private set
+        {
+            if (EqualityComparer<bool?>.Default.Equals(_isPublished, value))
+            {
+                return;
+            }
+
+            var oldValue = _isPublished;
+            OnIsPublishedChanging(value);
+            OnIsPublishedChanging(oldValue, value);
+            _isPublished = value;
+            OnIsPublishedChanged(value);
+            OnIsPublishedChanged(oldValue, value);
+            OnPropertyChanged(nameof(IsPublished));
+
+            // Promote to update target when the confirmed value changes (not during load, where the state stays a mirror of the source entity).
+            if (!IsLoading)
+            {
+                OnConfirmedValueChanged(nameof(IsPublished));
+
+                if (ShouldMarkUpdated(nameof(IsPublished)))
+                {
+                    MarkUpdated();
+                }
+            }
+        }
+    }
+
+    /// <summary>Called just before the confirmed value of IsPublished changes (new value only; add processing via a partial implementation).</summary>
+    partial void OnIsPublishedChanging(bool? value);
+
+    /// <summary>Called just before the confirmed value of IsPublished changes (old and new values; add processing via a partial implementation).</summary>
+    partial void OnIsPublishedChanging(bool? oldValue, bool? newValue);
+
+    /// <summary>Called just after the confirmed value of IsPublished changes (new value only; add processing via a partial implementation).</summary>
+    partial void OnIsPublishedChanged(bool? value);
+
+    /// <summary>Called just after the confirmed value of IsPublished changes (old and new values; add processing via a partial implementation).</summary>
+    partial void OnIsPublishedChanged(bool? oldValue, bool? newValue);
+
+    /// <summary>On-screen input binding string for IsPublished (converted to the confirmed value when set).</summary>
+    public string BindingIsPublished
+    {
+        get => _bindingIsPublished;
+        set
+        {
+            // Normalize only values that come from input (pass through during load/revert to keep a mirror of the source entity).
+            var normalized =
+                IsLoading || IsReverting
+                    ? value
+                    : NormalizeInput(nameof(BindingIsPublished), value);
+
+            if (!SetProperty(ref _bindingIsPublished, normalized, nameof(BindingIsPublished)))
+            {
+                // When trimming makes the value equal to the existing one, only the on-screen display keeps the whitespace-padded string, so reset the display to the normalized value.
+                if (!string.Equals(value, normalized, StringComparison.Ordinal))
+                {
+                    OnPropertyChanged(nameof(BindingIsPublished));
+                }
+
+                return;
+            }
+
+            if (!IsReverting)
+            {
+                if (bool.TryParse(normalized, out var parsed))
+                {
+                    IsPublished = parsed;
+                    SetError(nameof(BindingIsPublished), null);
+                }
+                else
+                {
+                    SetError(
+                        nameof(BindingIsPublished),
+                        ResolveParseErrorMessage(GetDisplayName(nameof(IsPublished), "IsPublished"), normalized, "bool")
+                    );
+                }
+            }
+        }
+    }
+
     /// <summary>Confirmed value of Payload.</summary>
     private byte[]? _payload;
 
@@ -2091,6 +2187,8 @@ public partial class DocumentEditModel : EditModelBase
         SetError(nameof(BindingDocumentId), null);
         BindingTitle = Title?.ToString() ?? string.Empty;
         SetError(nameof(BindingTitle), null);
+        BindingIsPublished = IsPublished?.ToString() ?? string.Empty;
+        SetError(nameof(BindingIsPublished), null);
         BindingPayload = Payload is null ? string.Empty : Convert.ToBase64String(Payload);
         SetError(nameof(BindingPayload), null);
         BindingThumb = Thumb is null ? string.Empty : Convert.ToBase64String(Thumb);
@@ -2111,6 +2209,10 @@ public partial class DocumentEditModel : EditModelBase
         if (Title is null)
         {
             SetError(nameof(BindingTitle), BuildRequiredErrorMessage(GetDisplayName(nameof(Title), "Title")));
+        }
+        if (IsPublished is null)
+        {
+            SetError(nameof(BindingIsPublished), BuildRequiredErrorMessage(GetDisplayName(nameof(IsPublished), "IsPublished")));
         }
         if (Thumb is null)
         {
@@ -2146,6 +2248,9 @@ public partial class DocumentEditModel : EditModelBase
     /// <summary>Pre-edit snapshot of Title.</summary>
     private string _bindingTitleSnapshot = string.Empty;
 
+    /// <summary>Pre-edit snapshot of IsPublished.</summary>
+    private string _bindingIsPublishedSnapshot = string.Empty;
+
     /// <summary>Pre-edit snapshot of Payload.</summary>
     private string _bindingPayloadSnapshot = string.Empty;
 
@@ -2166,6 +2271,7 @@ public partial class DocumentEditModel : EditModelBase
     {
         _bindingDocumentIdSnapshot = _bindingDocumentId;
         _bindingTitleSnapshot = _bindingTitle;
+        _bindingIsPublishedSnapshot = _bindingIsPublished;
         _bindingPayloadSnapshot = _bindingPayload;
         _bindingThumbSnapshot = _bindingThumb;
         _bindingChecksumSnapshot = _bindingChecksum;
@@ -2190,6 +2296,7 @@ public partial class DocumentEditModel : EditModelBase
         {
             BindingDocumentId = _bindingDocumentIdSnapshot;
             BindingTitle = _bindingTitleSnapshot;
+            BindingIsPublished = _bindingIsPublishedSnapshot;
             BindingPayload = _bindingPayloadSnapshot;
             BindingThumb = _bindingThumbSnapshot;
             BindingChecksum = _bindingChecksumSnapshot;
@@ -2658,6 +2765,8 @@ public sealed partial class DocumentMapper
             editModel.DocumentId ?? throw new InvalidOperationException("DocumentId has no input value.");
         entity.Title =
             editModel.Title ?? throw new InvalidOperationException("Title has no input value.");
+        entity.IsPublished =
+            editModel.IsPublished ?? throw new InvalidOperationException("IsPublished has no input value.");
         entity.Payload = editModel.Payload;
         entity.Thumb =
             editModel.Thumb ?? throw new InvalidOperationException("Thumb has no input value.");
@@ -2680,6 +2789,7 @@ public sealed partial class DocumentMapper
             editModel.RevertInput();
             editModel.BindingDocumentId = entity.DocumentId.ToString() ?? string.Empty;
             editModel.BindingTitle = entity.Title.ToString() ?? string.Empty;
+            editModel.BindingIsPublished = entity.IsPublished.ToString() ?? string.Empty;
             editModel.BindingPayload = entity.Payload is null ? string.Empty : Convert.ToBase64String(entity.Payload);
             editModel.BindingThumb = entity.Thumb is null ? string.Empty : Convert.ToBase64String(entity.Thumb);
             editModel.BindingChecksum = entity.Checksum is null ? string.Empty : Convert.ToBase64String(entity.Checksum);
@@ -5624,9 +5734,20 @@ internal static class SqlExpressionTranslator
             return false;
         }
 
-        // Arrays etc.: static Enumerable.Contains / MemoryExtensions.Contains(collection, item) (two arguments, no receiver)
-        if (call.Object is null && call.Arguments.Count == 2)
+        // Arrays etc.: static Enumerable.Contains / MemoryExtensions.Contains(collection, item) (two arguments, no receiver).
+        // With C# 14 first-class spans, array.Contains(x) resolves to MemoryExtensions.Contains(span, item, comparer),
+        // so the three-argument form is also accepted when the comparer is null (= default equality, same IN semantics).
+        // A non-null comparer cannot be translated to SQL and falls through to the unsupported-expression error.
+        if (call.Object is null && call.Arguments.Count is 2 or 3)
         {
+            if (
+                call.Arguments.Count == 3
+                && Unwrap(call.Arguments[2]) is not ConstantExpression { Value: null }
+            )
+            {
+                return false;
+            }
+
             if (Unwrap(call.Arguments[1]) is MemberExpression staticItem && IsColumn(staticItem))
             {
                 column = ColumnName(staticItem.Member);
@@ -9413,6 +9534,7 @@ public static class InMemorySampleData
             {
                 DocumentId = index,
                 Title = ($"title {index}").Length > 50 ? ($"title {index}")[..50] : ($"title {index}"),
+                IsPublished = index % 2 == 1,
                 Payload = index == 3 ? null : new byte[] { (byte)index, (byte)(index + 1), (byte)(index + 2) },
                 Thumb = new byte[] { (byte)index, (byte)(index + 1), (byte)(index + 2) },
                 Checksum = index == 3 ? null : new byte[] { (byte)index, (byte)(index + 1), (byte)(index + 2) },
@@ -9515,6 +9637,7 @@ public partial class QuickErDbContext : DbContext
             entity.Ignore(e => e.HasChanges);
             entity.Property(e => e.DocumentId).HasColumnName("document_id").IsRequired();
             entity.Property(e => e.Title).HasColumnName("title").IsRequired().HasMaxLength(50);
+            entity.Property(e => e.IsPublished).HasColumnName("is_published").IsRequired();
             entity.Property(e => e.Payload).HasColumnName("payload");
             entity.Property(e => e.Thumb).HasColumnName("thumb").IsRequired();
             entity.Property(e => e.Checksum).HasColumnName("checksum");
