@@ -1,6 +1,9 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Net;
+using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
@@ -311,6 +314,109 @@ public sealed class BinaryColumnRemoteRuntimeTests : IAsyncLifetime
         (await Documents.ReadPayloadAsync(1, destination, Ct)).Should().BeTrue();
         destination.Length.Should().Be(payload.Length, "31MB が往復する");
         destination.ToArray()[^1].Should().Be(payload[^1], "末尾バイトまで転送される");
+    }
+
+    /// <summary>
+    /// 10. Thumb 列（第 2 の除外列）も HTTP 越しに Write→Read 往復し、再書き込みで全置換される。
+    /// Thumb は非 nullable 列（BinaryFixtureDefinition の設計）のため SET NULL（DELETE）は制約違反となる。
+    /// NULL 化系の検証は nullable な Payload 側のテストが担う。
+    /// </summary>
+    [Fact(DisplayName = "[Binary/Remote] 10: Thumb 列の Write→Read 往復と再書き込みによる全置換")]
+    public async Task Stream_Thumb_WriteReadOverwriteRoundTrips()
+    {
+        await SeedAsync(1, null, Doc1Thumb);
+
+        var data = new byte[64 * 1024];
+        new Random(20260719).NextBytes(data);
+
+        // Thumb 列（Payload とは別の除外列）へ Stream で書き込み、読み戻して一致する
+        (await Documents.WriteThumbAsync(1, new MemoryStream(data), cancellationToken: Ct))
+            .Should()
+            .BeTrue();
+
+        using var destination = new MemoryStream();
+        (await Documents.ReadThumbAsync(1, destination, Ct)).Should().BeTrue();
+        destination.ToArray().Should().Equal(data, "Thumb 列も HTTP 越しの Stream 往復で一致する");
+
+        // より小さいデータで再書き込み → 旧データが残らず全置換される
+        var smaller = new byte[1024];
+        new Random(20260720).NextBytes(smaller);
+        (await Documents.WriteThumbAsync(1, new MemoryStream(smaller), cancellationToken: Ct))
+            .Should()
+            .BeTrue();
+
+        using var after = new MemoryStream();
+        (await Documents.ReadThumbAsync(1, after, Ct)).Should().BeTrue();
+        after.ToArray().Should().Equal(smaller, "再書き込みは旧データを残さず全置換する");
+    }
+
+    /// <summary>11. バイナリ図の名前付きクエリ（GetByTitle・CountWithPayload）が HTTP 越しに機能する</summary>
+    [Fact(
+        DisplayName = "[Binary/Remote] 11: 名前付きクエリ（GetByTitle・CountWithPayload）が HTTP 越しに機能する"
+    )]
+    public async Task NamedQueries_WorkOverHttp()
+    {
+        await SeedAsync(1, Doc1Payload, Doc1Thumb); // payload あり
+        await SeedAsync(2, null, Doc1Thumb); // payload なし
+
+        // タイトル完全一致（除外列 payload はサーバー SELECT で外れる）
+        var byTitle = await Documents.GetByTitleAsync("doc-1", Ct);
+        byTitle.Should().ContainSingle();
+        byTitle[0].DocumentId.Should().Be(1);
+        byTitle[0]
+            .Payload.Should()
+            .BeNull("GetByTitle でも除外列 payload はサーバーの SELECT で外れる");
+
+        // payload が存在する文書の件数（WHERE は除外列を参照できる）＝ doc-1 のみ
+        (await Documents.CountWithPayloadAsync(Ct))
+            .Should()
+            .Be(1);
+    }
+
+    /// <summary>
+    /// 12. 生成サーバーのバイナリ PUT は Content-Length 欠落（chunked 転送）で 411 を返す。生成クライアントは送信前に弾く
+    /// （length 必須）ため、素の <see cref="HttpClient"/> で chunked PUT を直接送り、サーバー側の 411 分岐を観測する。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Binary/Remote] 12: chunked PUT（Content-Length 欠落）はサーバーが 411 を返す"
+    )]
+    public async Task Stream_ChunkedPut_ReturnsLengthRequired()
+    {
+        await SeedAsync(1, null, Doc1Thumb);
+
+        var baseUrl = _app!.Urls.First();
+
+        using var raw = new HttpClient();
+        using var content = new StreamContent(new NonSeekableStream([1, 2, 3]))
+        {
+            Headers = { ContentType = new MediaTypeHeaderValue("application/octet-stream") },
+        };
+
+        // 生成クライアント（Http{Entity}RemoteRepository）は非シーク＋length なしを送信前に弾くため、素の HttpClient で送る。
+        // TransferEncoding: chunked を明示し Content-Length を送らない＝サーバーの 411 分岐（length is null）を踏む
+        using var request = new HttpRequestMessage(
+            HttpMethod.Put,
+            $"{baseUrl}/quicker/Document/Payload?id=1"
+        )
+        {
+            Content = content,
+        };
+        request.Headers.TransferEncodingChunked = true;
+
+        using var response = await raw.SendAsync(request, Ct);
+
+        response
+            .StatusCode.Should()
+            .Be(
+                HttpStatusCode.LengthRequired,
+                "Content-Length 欠落（chunked）の PUT はサーバーが 411 を返す"
+            );
+
+        // 411 なので DB は変化せず、payload は依然 NULL（Read は false）
+        using var afterPut = new MemoryStream();
+        (await Documents.ReadPayloadAsync(1, afterPut, Ct))
+            .Should()
+            .BeFalse("411 で拒否されたため payload は書き込まれない");
     }
 
     /// <summary>CanSeek でない Stream（length を渡さないと長さ不明）＝クライアント側検証の再現用</summary>
