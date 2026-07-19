@@ -75,6 +75,9 @@ public static class BinaryFixtureDefinition
         "d0000000-0000-0000-0000-000000000006"
     );
     private static readonly Guid DocumentRowVerColId = new("d0000000-0000-0000-0000-000000000007");
+    private static readonly Guid DocumentIsPublishedColId = new(
+        "d0000000-0000-0000-0000-000000000008"
+    );
 
     private static readonly Guid NoteId = new("e0000000-0000-0000-0000-000000000001");
     private static readonly Guid NotePkColId = new("e0000000-0000-0000-0000-000000000002");
@@ -113,6 +116,16 @@ public static class BinaryFixtureDefinition
                     Id = DocumentTitleColId,
                     Name = "title",
                     DataType = "nvarchar(50)",
+                    IsNullable = false,
+                },
+                // 素の bool 列（bit・非 nullable）。翻訳器の bool 短縮分岐（[col]=1 / [col]=0）の実 DB 検証用。
+                // VO 化フィクスチャ（GeneratedFixture 等）では素の bool に構造的に到達できないため、
+                // raw 型で生成される本フィクスチャ（SQLite）と SqlServerBinaryFixture（SQL Server）が唯一の担い手
+                new Column
+                {
+                    Id = DocumentIsPublishedColId,
+                    Name = "is_published",
+                    DataType = "bit",
                     IsNullable = false,
                 },
                 // 無制限バイナリ（varbinary(max)・nullable）＝除外対象。nullable プロパティは未取得状態が null

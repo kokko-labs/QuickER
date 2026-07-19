@@ -7718,7 +7718,17 @@ public sealed partial class CustomerRepository(
         ICustomerRepository { }
 
 /// <summary>Repository interface for OrderEntity.</summary>
-public partial interface IOrderRepository : IRepository<OrderEntity, OrderIdValue> { }
+public partial interface IOrderRepository : IRepository<OrderEntity, OrderIdValue>
+{
+    /// <summary>メモの部分一致（CONTAINS→LIKE。%・_ 等はリテラル扱い）で注文を検索する</summary>
+    Task<IReadOnlyList<OrderEntity>> SearchMemoContainsAsync(string keyword, CancellationToken cancellationToken = default);
+
+    /// <summary>メモ未設定（IS NULL）の注文を検索する</summary>
+    Task<IReadOnlyList<OrderEntity>> GetMissingMemoAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>金額（decimal・VO 列）が下限以上の注文を検索する</summary>
+    Task<IReadOnlyList<OrderEntity>> GetExpensiveAsync(decimal minAmount, CancellationToken cancellationToken = default);
+}
 
 /// <summary>Repository implementation for OrderEntity.</summary>
 public sealed partial class OrderRepository(
@@ -7729,7 +7739,20 @@ public sealed partial class OrderRepository(
         connectionFactory,
         saveHooks
     ),
-        IOrderRepository { }
+        IOrderRepository
+{
+    /// <summary>メモの部分一致（CONTAINS→LIKE。%・_ 等はリテラル扱い）で注文を検索する</summary>
+    public Task<IReadOnlyList<OrderEntity>> SearchMemoContainsAsync(string keyword, CancellationToken cancellationToken = default) =>
+        Query().Where(e => e.Memo!.Contains(keyword)).OrderBy(e => e.OrderId).ToListAsync(cancellationToken);
+
+    /// <summary>メモ未設定（IS NULL）の注文を検索する</summary>
+    public Task<IReadOnlyList<OrderEntity>> GetMissingMemoAsync(CancellationToken cancellationToken = default) =>
+        Query().Where(e => e.Memo == null).OrderBy(e => e.OrderId).ToListAsync(cancellationToken);
+
+    /// <summary>金額（decimal・VO 列）が下限以上の注文を検索する</summary>
+    public Task<IReadOnlyList<OrderEntity>> GetExpensiveAsync(decimal minAmount, CancellationToken cancellationToken = default) =>
+        Query().Where(e => e.Amount >= AmountValue.Create(minAmount)).OrderBy(e => e.OrderId).ToListAsync(cancellationToken);
+}
 
 /// <summary>
 /// EF Core DbContext that connects to an existing schema.
@@ -9323,4 +9346,17 @@ public sealed partial class EfCoreOrderRepository(
         contextFactory,
         saveHooks
     ),
-        IOrderRepository { }
+        IOrderRepository
+{
+    /// <summary>メモの部分一致（CONTAINS→LIKE。%・_ 等はリテラル扱い）で注文を検索する</summary>
+    public Task<IReadOnlyList<OrderEntity>> SearchMemoContainsAsync(string keyword, CancellationToken cancellationToken = default) =>
+        Query().Where(e => e.Memo!.Contains(keyword)).OrderBy(e => e.OrderId).ToListAsync(cancellationToken);
+
+    /// <summary>メモ未設定（IS NULL）の注文を検索する</summary>
+    public Task<IReadOnlyList<OrderEntity>> GetMissingMemoAsync(CancellationToken cancellationToken = default) =>
+        Query().Where(e => e.Memo == null).OrderBy(e => e.OrderId).ToListAsync(cancellationToken);
+
+    /// <summary>金額（decimal・VO 列）が下限以上の注文を検索する</summary>
+    public Task<IReadOnlyList<OrderEntity>> GetExpensiveAsync(decimal minAmount, CancellationToken cancellationToken = default) =>
+        Query().Where(e => e.Amount >= AmountValue.Create(minAmount)).OrderBy(e => e.OrderId).ToListAsync(cancellationToken);
+}
