@@ -4,7 +4,7 @@ using System.Windows.Controls;
 using System.Windows.Data;
 using FluentAssertions;
 using Xunit;
-using static QuickER.Tests.Views.WpfApplicationTestSupport;
+using static QuickER.Tests.TestSupport.WpfApplicationTestSupport;
 
 namespace QuickER.Tests.GeneratedFixture;
 

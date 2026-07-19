@@ -8,7 +8,7 @@ namespace QuickER.Tests.GeneratedFixture;
 /// </summary>
 /// <remarks>
 /// <para>
-/// 実行時テスト (<c>GeneratedRuntimeIntegrationTests</c>) はコミット済みフィクスチャの生成型を直接呼ぶ。
+/// 実行時テスト (Integration/GeneratedRuntime 配下の <c>GeneratedRuntime*ParityTests</c> 等) はコミット済みフィクスチャの生成型を直接呼ぶ。
 /// テンプレートを変更するとフィクスチャが古くなり得るため、このテストで乖離を検出する。
 /// </para>
 /// <para>
