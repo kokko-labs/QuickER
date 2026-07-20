@@ -49,7 +49,7 @@ dotnet run --project samples/ec-order/EcOrderSample
 ```
 
 ```text
-[Setup] Created a SQLite file DB (ec-order.db) from the EcOrder.sql DDL.
+[Setup] Created the SQLite file DB (ec-order.db) from the EcOrder.sql DDL.
 
 [1] Registered 2 customers and 2 products.
 
@@ -62,8 +62,6 @@ dotnet run --project samples/ec-order/EcOrderSample
 ...
 All scenarios succeeded.
 ```
-
-> Note: the sample console output is emitted in Japanese by the sample program; the above is a translation for reference.
 
 What's in the sample:
 

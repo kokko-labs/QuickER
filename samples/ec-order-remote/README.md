@@ -56,7 +56,7 @@ Terminal 2 (client):
 dotnet run --project samples/ec-order-remote/EcOrderRemote.Client
 ```
 
-The client prints the result of each scenario in Japanese and exits with code 0 when they all succeed. If a value
+The client prints the result of each scenario and exits with code 0 when they all succeed. If a value
 differs from what is expected, it exits with an exception (a non-zero exit code). It retries automatically while
 waiting for the server to start.
 

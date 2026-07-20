@@ -8,22 +8,22 @@ This document summarizes the API of the code generated from this diagram (namesp
 
 | Class | Table | Description |
 | --- | --- | --- |
-| `CustomerEntity` | `customers` | 顧客。注文の発注元となる購入者マスタ |
-| `ProductEntity` | `products` | 商品マスタ。販売対象となる商品の定義 |
-| `OrderEntity` | `orders` | 注文ヘッダ。1 顧客の 1 回の注文を表す |
-| `OrderLineEntity` | `order_lines` | 注文明細。注文と商品を多対多で結ぶ明細行 |
+| `CustomerEntity` | `customers` | Customers. Master data of the purchasers who place orders |
+| `ProductEntity` | `products` | Product master. Defines the products available for sale |
+| `OrderEntity` | `orders` | Order header. Represents a single order placed by one customer |
+| `OrderLineEntity` | `order_lines` | Order lines. Detail rows linking orders and products many-to-many |
 
 ## Entity details
 
 ### CustomerEntity
 
-顧客。注文の発注元となる購入者マスタ
+Customers. Master data of the purchasers who place orders
 
 | Property | C# type | DB type | PK | Required | Description |
 | --- | --- | --- | --- | --- | --- |
-| `CustomerId` | `int` | `int32` | ✓ | ✓ | 顧客ID（主キー。アプリ側で採番） |
-| `Name` | `string` | `string(50)` |  | ✓ | 顧客名 |
-| `Email` | `string?` | `string(100)` |  |  | 連絡先メールアドレス（任意） |
+| `CustomerId` | `int` | `int32` | ✓ | ✓ | Customer ID (primary key; assigned by the application) |
+| `Name` | `string` | `string(50)` |  | ✓ | Customer name |
+| `Email` | `string?` | `string(100)` |  |  | Contact email address (optional) |
 
 Navigations:
 
@@ -35,13 +35,13 @@ Repository contract: `ICustomerRepository` (primary key type `int`) is generated
 
 ### ProductEntity
 
-商品マスタ。販売対象となる商品の定義
+Product master. Defines the products available for sale
 
 | Property | C# type | DB type | PK | Required | Description |
 | --- | --- | --- | --- | --- | --- |
-| `ProductId` | `int` | `int32` | ✓ | ✓ | 商品ID（主キー。アプリ側で採番） |
-| `Name` | `string` | `string(50)` |  | ✓ | 商品名 |
-| `UnitPrice` | `decimal` | `decimal(10,2)` |  | ✓ | 商品マスタ上の販売単価 |
+| `ProductId` | `int` | `int32` | ✓ | ✓ | Product ID (primary key; assigned by the application) |
+| `Name` | `string` | `string(50)` |  | ✓ | Product name |
+| `UnitPrice` | `decimal` | `decimal(10,2)` |  | ✓ | Unit sales price in the product master |
 
 Navigations:
 
@@ -53,14 +53,14 @@ Repository contract: `IProductRepository` (primary key type `int`) is generated.
 
 ### OrderEntity
 
-注文ヘッダ。1 顧客の 1 回の注文を表す
+Order header. Represents a single order placed by one customer
 
 | Property | C# type | DB type | PK | Required | Description |
 | --- | --- | --- | --- | --- | --- |
-| `OrderId` | `int` | `int32` | ✓ | ✓ | 注文ID（主キー。アプリ側で採番） |
-| `CustomerId` | `int` | `int32` |  | ✓ | 発注した顧客ID（customers への外部キー） |
-| `OrderedAt` | `DateTime` | `datetime` |  | ✓ | 注文日時 |
-| `Memo` | `string?` | `string(100)` |  |  | 注文に添える備考（任意） |
+| `OrderId` | `int` | `int32` | ✓ | ✓ | Order ID (primary key; assigned by the application) |
+| `CustomerId` | `int` | `int32` |  | ✓ | ID of the ordering customer (foreign key to customers) |
+| `OrderedAt` | `DateTime` | `datetime` |  | ✓ | Date and time the order was placed |
+| `Memo` | `string?` | `string(100)` |  |  | Memo attached to the order (optional) |
 
 Navigations:
 
@@ -73,15 +73,15 @@ Repository contract: `IOrderRepository` (primary key type `int`) is generated.
 
 ### OrderLineEntity
 
-注文明細。注文と商品を多対多で結ぶ明細行
+Order lines. Detail rows linking orders and products many-to-many
 
 | Property | C# type | DB type | PK | Required | Description |
 | --- | --- | --- | --- | --- | --- |
-| `OrderLineId` | `int` | `int32` | ✓ | ✓ | 注文明細ID（主キー。アプリ側で採番） |
-| `OrderId` | `int` | `int32` |  | ✓ | 所属する注文ID（orders への外部キー） |
-| `ProductId` | `int` | `int32` |  | ✓ | 対象の商品ID（products への外部キー） |
-| `Quantity` | `int` | `int32` |  | ✓ | 注文数量 |
-| `UnitPrice` | `decimal` | `decimal(10,2)` |  | ✓ | 注文時単価（商品マスタの改定に影響されないよう注文行に保持） |
+| `OrderLineId` | `int` | `int32` | ✓ | ✓ | Order line ID (primary key; assigned by the application) |
+| `OrderId` | `int` | `int32` |  | ✓ | ID of the parent order (foreign key to orders) |
+| `ProductId` | `int` | `int32` |  | ✓ | ID of the target product (foreign key to products) |
+| `Quantity` | `int` | `int32` |  | ✓ | Order quantity |
+| `UnitPrice` | `decimal` | `decimal(10,2)` |  | ✓ | Unit price at order time (kept on the order line so product-master price revisions do not affect it) |
 
 Navigations:
 

@@ -105,9 +105,8 @@ dotnet run --project src/QuickER.Cli -- generate `
 ```
 
 `--generate-api-docs` により、生成コード `EcOrder.g.cs` と同じベース名の API リファレンス Markdown
-`EcOrder.g.md`（英語正本）も同梱出力されます。日本語版 `EcOrder.ja.g.md` も欲しい場合は `--api-docs-ja`
-を追加します（`--generate-api-docs` が前提。ec-order サンプルは `quicker.json` で `IncludeJapaneseApiDocs`
-を指定済み）。いずれもチェックイン済み・ドリフト検知の対象です。
+`EcOrder.g.md`（英語正本）も同梱出力されます（チェックイン済み・ドリフト検知の対象）。日本語版
+`{ベース名}.ja.g.md` も欲しい場合は `--api-docs-ja` を追加します（`--generate-api-docs` が前提）。
 
 ## ライセンス注記
 

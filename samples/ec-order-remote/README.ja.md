@@ -52,7 +52,7 @@ dotnet run --project samples/ec-order-remote/EcOrderRemote.Server
 dotnet run --project samples/ec-order-remote/EcOrderRemote.Client
 ```
 
-クライアントは各シナリオの結果を日本語で表示し、すべて成功すると終了コード 0 で終わります。期待値と異なる場合は
+クライアントは各シナリオの結果を英語で表示し、すべて成功すると終了コード 0 で終わります。期待値と異なる場合は
 例外で終了（終了コード非 0）します。サーバーの起動待ちは自動でリトライします。
 
 ポートを変える場合は、サーバーとクライアントの両方に第 1 引数として同じベース URL を渡します

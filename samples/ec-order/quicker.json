@@ -1,6 +1,5 @@
 {
   "RootNamespace": "EcOrderSample.Generated",
   "GenerateRepositories": true,
-  "IncludeJapaneseApiDocs": true,
   "OutputPath": "EcOrder.g.cs"
 }

@@ -16,10 +16,9 @@ three-tier (HTTP + JSON) setup are covered separately by [ec-order-remote](../ec
 |---|---|
 | `EcOrder.json` | The ER diagram (the GUI save format). You can open and edit it in the GUI |
 | `EcOrder.sql` | The SQLite DDL generated from the diagram (checked in) |
-| `quicker.json` | The CLI generation options (a minimal config with the namespace, output file names, and `IncludeJapaneseApiDocs`) |
+| `quicker.json` | The CLI generation options (a minimal config with the namespace and output file names) |
 | `EcOrderSample/Generated/EcOrder.g.cs` | The C# code generated from the diagram (checked in) |
-| `EcOrderSample/Generated/EcOrder.g.md` | The generated API reference Markdown, English (the canonical version; the bundled output of `--generate-api-docs`, checked in) |
-| `EcOrderSample/Generated/EcOrder.ja.g.md` | The Japanese API reference Markdown (also output because `IncludeJapaneseApiDocs` is set, checked in) |
+| `EcOrderSample/Generated/EcOrder.g.md` | The generated API reference Markdown (the bundled output of `--generate-api-docs`, checked in) |
 | `EcOrderSample/Program.cs` | A console app that creates the DB from the DDL and demonstrates CRUD |
 
 The console app references none of the QuickER main projects at all; like a user's own project, it references
@@ -34,7 +33,7 @@ dotnet run --project samples/ec-order/EcOrderSample
 ```
 
 At startup it recreates a SQLite file DB (`ec-order.db`, created under the same `bin` folder as the executable)
-from the `EcOrder.sql` DDL and prints the result of each scenario in Japanese. If a value differs from what is
+from the `EcOrder.sql` DDL and prints the result of each scenario. If a value differs from what is
 expected, it exits with an exception (a non-zero exit code).
 
 ## Open the diagram in the GUI
@@ -55,9 +54,8 @@ dotnet run --project src/QuickER.Cli -- generate `
   --generate-api-docs
 ```
 
-Adding `--generate-api-docs` also outputs the API reference Markdown `EcOrder.g.md` (English, the canonical
-version) with the same base name as `EcOrder.g.cs`. Because `quicker.json` sets `IncludeJapaneseApiDocs`, the
-Japanese version `EcOrder.ja.g.md` is produced alongside it (all are subject to the drift tests).
+Adding `--generate-api-docs` also outputs the API reference Markdown `EcOrder.g.md` with the same base name
+as `EcOrder.g.cs` (subject to the drift tests).
 
 ### Regenerate everything at once with the drift tests' regeneration mode
 

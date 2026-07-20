@@ -398,28 +398,28 @@ public abstract partial class EntityBase
     }
 }
 
-/// <summary>顧客。注文の発注元となる購入者マスタ</summary>
+/// <summary>Customers. Master data of the purchasers who place orders</summary>
 [Table("customers")]
-[DbTableMeta(Description = "顧客。注文の発注元となる購入者マスタ")]
+[DbTableMeta(Description = "Customers. Master data of the purchasers who place orders")]
 public partial class CustomerEntity : EntityBase
 {
-    /// <summary>顧客ID（主キー。アプリ側で採番）</summary>
+    /// <summary>Customer ID (primary key; assigned by the application)</summary>
     [Key]
     [Column("customer_id")]
-    [DbColumnMeta("int32", Description = "顧客ID（主キー。アプリ側で採番）")]
+    [DbColumnMeta("int32", Description = "Customer ID (primary key; assigned by the application)")]
     public int CustomerId { get; set; }
 
-    /// <summary>顧客名</summary>
+    /// <summary>Customer name</summary>
     [Column("name")]
     [Required]
     [MaxLength(50)]
-    [DbColumnMeta("string(50)", Description = "顧客名")]
+    [DbColumnMeta("string(50)", Description = "Customer name")]
     public string Name { get; set; } = string.Empty;
 
-    /// <summary>連絡先メールアドレス（任意）</summary>
+    /// <summary>Contact email address (optional)</summary>
     [Column("email")]
     [MaxLength(100)]
-    [DbColumnMeta("string(100)", Description = "連絡先メールアドレス（任意）")]
+    [DbColumnMeta("string(100)", Description = "Contact email address (optional)")]
     public string? Email { get; set; }
 
     /// <summary>Orders navigation property</summary>
@@ -427,30 +427,30 @@ public partial class CustomerEntity : EntityBase
     public ICollection<OrderEntity> Orders { get; set; } = new List<OrderEntity>();
 
     /// <summary>Default display name of this entity (derived from the table description). When unspecified the base class name is used.</summary>
-    protected override string DefaultDisplayName => "顧客。注文の発注元となる購入者マスタ";
+    protected override string DefaultDisplayName => "Customers. Master data of the purchasers who place orders";
 }
 
-/// <summary>商品マスタ。販売対象となる商品の定義</summary>
+/// <summary>Product master. Defines the products available for sale</summary>
 [Table("products")]
-[DbTableMeta(Description = "商品マスタ。販売対象となる商品の定義")]
+[DbTableMeta(Description = "Product master. Defines the products available for sale")]
 public partial class ProductEntity : EntityBase
 {
-    /// <summary>商品ID（主キー。アプリ側で採番）</summary>
+    /// <summary>Product ID (primary key; assigned by the application)</summary>
     [Key]
     [Column("product_id")]
-    [DbColumnMeta("int32", Description = "商品ID（主キー。アプリ側で採番）")]
+    [DbColumnMeta("int32", Description = "Product ID (primary key; assigned by the application)")]
     public int ProductId { get; set; }
 
-    /// <summary>商品名</summary>
+    /// <summary>Product name</summary>
     [Column("name")]
     [Required]
     [MaxLength(50)]
-    [DbColumnMeta("string(50)", Description = "商品名")]
+    [DbColumnMeta("string(50)", Description = "Product name")]
     public string Name { get; set; } = string.Empty;
 
-    /// <summary>商品マスタ上の販売単価</summary>
+    /// <summary>Unit sales price in the product master</summary>
     [Column("unit_price")]
-    [DbColumnMeta("decimal(10,2)", Description = "商品マスタ上の販売単価")]
+    [DbColumnMeta("decimal(10,2)", Description = "Unit sales price in the product master")]
     public decimal UnitPrice { get; set; }
 
     /// <summary>OrderLines navigation property</summary>
@@ -458,34 +458,34 @@ public partial class ProductEntity : EntityBase
     public ICollection<OrderLineEntity> OrderLines { get; set; } = new List<OrderLineEntity>();
 
     /// <summary>Default display name of this entity (derived from the table description). When unspecified the base class name is used.</summary>
-    protected override string DefaultDisplayName => "商品マスタ。販売対象となる商品の定義";
+    protected override string DefaultDisplayName => "Product master. Defines the products available for sale";
 }
 
-/// <summary>注文ヘッダ。1 顧客の 1 回の注文を表す</summary>
+/// <summary>Order header. Represents a single order placed by one customer</summary>
 [Table("orders")]
-[DbTableMeta(Description = "注文ヘッダ。1 顧客の 1 回の注文を表す")]
+[DbTableMeta(Description = "Order header. Represents a single order placed by one customer")]
 public partial class OrderEntity : EntityBase
 {
-    /// <summary>注文ID（主キー。アプリ側で採番）</summary>
+    /// <summary>Order ID (primary key; assigned by the application)</summary>
     [Key]
     [Column("order_id")]
-    [DbColumnMeta("int32", Description = "注文ID（主キー。アプリ側で採番）")]
+    [DbColumnMeta("int32", Description = "Order ID (primary key; assigned by the application)")]
     public int OrderId { get; set; }
 
-    /// <summary>発注した顧客ID（customers への外部キー）</summary>
+    /// <summary>ID of the ordering customer (foreign key to customers)</summary>
     [Column("customer_id")]
-    [DbColumnMeta("int32", Description = "発注した顧客ID（customers への外部キー）")]
+    [DbColumnMeta("int32", Description = "ID of the ordering customer (foreign key to customers)")]
     public int CustomerId { get; set; }
 
-    /// <summary>注文日時</summary>
+    /// <summary>Date and time the order was placed</summary>
     [Column("ordered_at")]
-    [DbColumnMeta("datetime", Description = "注文日時")]
+    [DbColumnMeta("datetime", Description = "Date and time the order was placed")]
     public DateTime OrderedAt { get; set; }
 
-    /// <summary>注文に添える備考（任意）</summary>
+    /// <summary>Memo attached to the order (optional)</summary>
     [Column("memo")]
     [MaxLength(100)]
-    [DbColumnMeta("string(100)", Description = "注文に添える備考（任意）")]
+    [DbColumnMeta("string(100)", Description = "Memo attached to the order (optional)")]
     public string? Memo { get; set; }
 
     /// <summary>Customer navigation property</summary>
@@ -498,38 +498,38 @@ public partial class OrderEntity : EntityBase
     public ICollection<OrderLineEntity> OrderLines { get; set; } = new List<OrderLineEntity>();
 
     /// <summary>Default display name of this entity (derived from the table description). When unspecified the base class name is used.</summary>
-    protected override string DefaultDisplayName => "注文ヘッダ。1 顧客の 1 回の注文を表す";
+    protected override string DefaultDisplayName => "Order header. Represents a single order placed by one customer";
 }
 
-/// <summary>注文明細。注文と商品を多対多で結ぶ明細行</summary>
+/// <summary>Order lines. Detail rows linking orders and products many-to-many</summary>
 [Table("order_lines")]
-[DbTableMeta(Description = "注文明細。注文と商品を多対多で結ぶ明細行")]
+[DbTableMeta(Description = "Order lines. Detail rows linking orders and products many-to-many")]
 public partial class OrderLineEntity : EntityBase
 {
-    /// <summary>注文明細ID（主キー。アプリ側で採番）</summary>
+    /// <summary>Order line ID (primary key; assigned by the application)</summary>
     [Key]
     [Column("order_line_id")]
-    [DbColumnMeta("int32", Description = "注文明細ID（主キー。アプリ側で採番）")]
+    [DbColumnMeta("int32", Description = "Order line ID (primary key; assigned by the application)")]
     public int OrderLineId { get; set; }
 
-    /// <summary>所属する注文ID（orders への外部キー）</summary>
+    /// <summary>ID of the parent order (foreign key to orders)</summary>
     [Column("order_id")]
-    [DbColumnMeta("int32", Description = "所属する注文ID（orders への外部キー）")]
+    [DbColumnMeta("int32", Description = "ID of the parent order (foreign key to orders)")]
     public int OrderId { get; set; }
 
-    /// <summary>対象の商品ID（products への外部キー）</summary>
+    /// <summary>ID of the target product (foreign key to products)</summary>
     [Column("product_id")]
-    [DbColumnMeta("int32", Description = "対象の商品ID（products への外部キー）")]
+    [DbColumnMeta("int32", Description = "ID of the target product (foreign key to products)")]
     public int ProductId { get; set; }
 
-    /// <summary>注文数量</summary>
+    /// <summary>Order quantity</summary>
     [Column("quantity")]
-    [DbColumnMeta("int32", Description = "注文数量")]
+    [DbColumnMeta("int32", Description = "Order quantity")]
     public int Quantity { get; set; }
 
-    /// <summary>注文時単価（商品マスタの改定に影響されないよう注文行に保持）</summary>
+    /// <summary>Unit price at order time (kept on the order line so product-master price revisions do not affect it)</summary>
     [Column("unit_price")]
-    [DbColumnMeta("decimal(10,2)", Description = "注文時単価（商品マスタの改定に影響されないよう注文行に保持）")]
+    [DbColumnMeta("decimal(10,2)", Description = "Unit price at order time (kept on the order line so product-master price revisions do not affect it)")]
     public decimal UnitPrice { get; set; }
 
     /// <summary>Order navigation property</summary>
@@ -543,7 +543,7 @@ public partial class OrderLineEntity : EntityBase
     public ProductEntity Product { get; set; } = null!;
 
     /// <summary>Default display name of this entity (derived from the table description). When unspecified the base class name is used.</summary>
-    protected override string DefaultDisplayName => "注文明細。注文と商品を多対多で結ぶ明細行";
+    protected override string DefaultDisplayName => "Order lines. Detail rows linking orders and products many-to-many";
 }
 
 /// <summary>Base class providing change notification, error management, and helper processing common to edit models.</summary>
@@ -1507,7 +1507,7 @@ public abstract partial class MapperBase<TEntity, TEditModel>
         return new EditModelCollection<TEditModel>(entities.Select(entity => CreateEditModel(entity)));
     }
 }
-/// <summary>顧客。注文の発注元となる購入者マスタ</summary>
+/// <summary>Customers. Master data of the purchasers who place orders</summary>
 public partial class CustomerEditModel : EditModelBase
 {
     // ===== Extension points (implement only what you need in a partial class; unimplemented partial methods are erased at no cost) =====
@@ -1524,7 +1524,7 @@ public partial class CustomerEditModel : EditModelBase
     /// <summary>Confirmed value of CustomerId.</summary>
     private int? _customerId;
 
-    /// <summary>顧客ID（主キー。アプリ側で採番）</summary>
+    /// <summary>Customer ID (primary key; assigned by the application)</summary>
     private string _bindingCustomerId = string.Empty;
 
     /// <summary>Confirmed value of CustomerId (read-only from outside).</summary>
@@ -1571,7 +1571,7 @@ public partial class CustomerEditModel : EditModelBase
     /// <summary>Called just after the confirmed value of CustomerId changes (old and new values; add processing via a partial implementation).</summary>
     partial void OnCustomerIdChanged(int? oldValue, int? newValue);
 
-    /// <summary>顧客ID（主キー。アプリ側で採番）</summary>
+    /// <summary>Customer ID (primary key; assigned by the application)</summary>
     public string BindingCustomerId
     {
         get => _bindingCustomerId;
@@ -1605,7 +1605,7 @@ public partial class CustomerEditModel : EditModelBase
                 {
                     SetError(
                         nameof(BindingCustomerId),
-                        ResolveParseErrorMessage(GetDisplayName(nameof(CustomerId), "顧客ID（主キー。アプリ側で採番）"), normalized, "int")
+                        ResolveParseErrorMessage(GetDisplayName(nameof(CustomerId), "Customer ID (primary key; assigned by the application)"), normalized, "int")
                     );
                 }
             }
@@ -1615,7 +1615,7 @@ public partial class CustomerEditModel : EditModelBase
     /// <summary>Confirmed value of Name.</summary>
     private string? _name;
 
-    /// <summary>顧客名</summary>
+    /// <summary>Customer name</summary>
     private string _bindingName = string.Empty;
 
     /// <summary>Confirmed value of Name (read-only from outside).</summary>
@@ -1662,7 +1662,7 @@ public partial class CustomerEditModel : EditModelBase
     /// <summary>Called just after the confirmed value of Name changes (old and new values; add processing via a partial implementation).</summary>
     partial void OnNameChanged(string? oldValue, string? newValue);
 
-    /// <summary>顧客名</summary>
+    /// <summary>Customer name</summary>
     public string BindingName
     {
         get => _bindingName;
@@ -1704,7 +1704,7 @@ public partial class CustomerEditModel : EditModelBase
     /// <summary>Confirmed value of Email.</summary>
     private string? _email;
 
-    /// <summary>連絡先メールアドレス（任意）</summary>
+    /// <summary>Contact email address (optional)</summary>
     private string _bindingEmail = string.Empty;
 
     /// <summary>Confirmed value of Email (read-only from outside).</summary>
@@ -1751,7 +1751,7 @@ public partial class CustomerEditModel : EditModelBase
     /// <summary>Called just after the confirmed value of Email changes (old and new values; add processing via a partial implementation).</summary>
     partial void OnEmailChanged(string? oldValue, string? newValue);
 
-    /// <summary>連絡先メールアドレス（任意）</summary>
+    /// <summary>Contact email address (optional)</summary>
     public string BindingEmail
     {
         get => _bindingEmail;
@@ -1832,11 +1832,11 @@ public partial class CustomerEditModel : EditModelBase
     {
         if (CustomerId is null)
         {
-            SetError(nameof(BindingCustomerId), BuildRequiredErrorMessage(GetDisplayName(nameof(CustomerId), "顧客ID（主キー。アプリ側で採番）")));
+            SetError(nameof(BindingCustomerId), BuildRequiredErrorMessage(GetDisplayName(nameof(CustomerId), "Customer ID (primary key; assigned by the application)")));
         }
         if (Name is null)
         {
-            SetError(nameof(BindingName), BuildRequiredErrorMessage(GetDisplayName(nameof(Name), "顧客名")));
+            SetError(nameof(BindingName), BuildRequiredErrorMessage(GetDisplayName(nameof(Name), "Customer name")));
         }
         OnValidate();
     }
@@ -1925,7 +1925,7 @@ public partial class CustomerEditModel : EditModelBase
         ParentCollection?.Move(oldIndex, newIndex);
 }
 
-/// <summary>商品マスタ。販売対象となる商品の定義</summary>
+/// <summary>Product master. Defines the products available for sale</summary>
 public partial class ProductEditModel : EditModelBase
 {
     // ===== Extension points (implement only what you need in a partial class; unimplemented partial methods are erased at no cost) =====
@@ -1942,7 +1942,7 @@ public partial class ProductEditModel : EditModelBase
     /// <summary>Confirmed value of ProductId.</summary>
     private int? _productId;
 
-    /// <summary>商品ID（主キー。アプリ側で採番）</summary>
+    /// <summary>Product ID (primary key; assigned by the application)</summary>
     private string _bindingProductId = string.Empty;
 
     /// <summary>Confirmed value of ProductId (read-only from outside).</summary>
@@ -1989,7 +1989,7 @@ public partial class ProductEditModel : EditModelBase
     /// <summary>Called just after the confirmed value of ProductId changes (old and new values; add processing via a partial implementation).</summary>
     partial void OnProductIdChanged(int? oldValue, int? newValue);
 
-    /// <summary>商品ID（主キー。アプリ側で採番）</summary>
+    /// <summary>Product ID (primary key; assigned by the application)</summary>
     public string BindingProductId
     {
         get => _bindingProductId;
@@ -2023,7 +2023,7 @@ public partial class ProductEditModel : EditModelBase
                 {
                     SetError(
                         nameof(BindingProductId),
-                        ResolveParseErrorMessage(GetDisplayName(nameof(ProductId), "商品ID（主キー。アプリ側で採番）"), normalized, "int")
+                        ResolveParseErrorMessage(GetDisplayName(nameof(ProductId), "Product ID (primary key; assigned by the application)"), normalized, "int")
                     );
                 }
             }
@@ -2033,7 +2033,7 @@ public partial class ProductEditModel : EditModelBase
     /// <summary>Confirmed value of Name.</summary>
     private string? _name;
 
-    /// <summary>商品名</summary>
+    /// <summary>Product name</summary>
     private string _bindingName = string.Empty;
 
     /// <summary>Confirmed value of Name (read-only from outside).</summary>
@@ -2080,7 +2080,7 @@ public partial class ProductEditModel : EditModelBase
     /// <summary>Called just after the confirmed value of Name changes (old and new values; add processing via a partial implementation).</summary>
     partial void OnNameChanged(string? oldValue, string? newValue);
 
-    /// <summary>商品名</summary>
+    /// <summary>Product name</summary>
     public string BindingName
     {
         get => _bindingName;
@@ -2122,7 +2122,7 @@ public partial class ProductEditModel : EditModelBase
     /// <summary>Confirmed value of UnitPrice.</summary>
     private decimal? _unitPrice;
 
-    /// <summary>商品マスタ上の販売単価</summary>
+    /// <summary>Unit sales price in the product master</summary>
     private string _bindingUnitPrice = string.Empty;
 
     /// <summary>Confirmed value of UnitPrice (read-only from outside).</summary>
@@ -2169,7 +2169,7 @@ public partial class ProductEditModel : EditModelBase
     /// <summary>Called just after the confirmed value of UnitPrice changes (old and new values; add processing via a partial implementation).</summary>
     partial void OnUnitPriceChanged(decimal? oldValue, decimal? newValue);
 
-    /// <summary>商品マスタ上の販売単価</summary>
+    /// <summary>Unit sales price in the product master</summary>
     public string BindingUnitPrice
     {
         get => _bindingUnitPrice;
@@ -2203,7 +2203,7 @@ public partial class ProductEditModel : EditModelBase
                 {
                     SetError(
                         nameof(BindingUnitPrice),
-                        ResolveParseErrorMessage(GetDisplayName(nameof(UnitPrice), "商品マスタ上の販売単価"), normalized, "decimal")
+                        ResolveParseErrorMessage(GetDisplayName(nameof(UnitPrice), "Unit sales price in the product master"), normalized, "decimal")
                     );
                 }
             }
@@ -2252,15 +2252,15 @@ public partial class ProductEditModel : EditModelBase
     {
         if (ProductId is null)
         {
-            SetError(nameof(BindingProductId), BuildRequiredErrorMessage(GetDisplayName(nameof(ProductId), "商品ID（主キー。アプリ側で採番）")));
+            SetError(nameof(BindingProductId), BuildRequiredErrorMessage(GetDisplayName(nameof(ProductId), "Product ID (primary key; assigned by the application)")));
         }
         if (Name is null)
         {
-            SetError(nameof(BindingName), BuildRequiredErrorMessage(GetDisplayName(nameof(Name), "商品名")));
+            SetError(nameof(BindingName), BuildRequiredErrorMessage(GetDisplayName(nameof(Name), "Product name")));
         }
         if (UnitPrice is null)
         {
-            SetError(nameof(BindingUnitPrice), BuildRequiredErrorMessage(GetDisplayName(nameof(UnitPrice), "商品マスタ上の販売単価")));
+            SetError(nameof(BindingUnitPrice), BuildRequiredErrorMessage(GetDisplayName(nameof(UnitPrice), "Unit sales price in the product master")));
         }
         OnValidate();
     }
@@ -2349,7 +2349,7 @@ public partial class ProductEditModel : EditModelBase
         ParentCollection?.Move(oldIndex, newIndex);
 }
 
-/// <summary>注文ヘッダ。1 顧客の 1 回の注文を表す</summary>
+/// <summary>Order header. Represents a single order placed by one customer</summary>
 public partial class OrderEditModel : EditModelBase
 {
     // ===== Extension points (implement only what you need in a partial class; unimplemented partial methods are erased at no cost) =====
@@ -2366,7 +2366,7 @@ public partial class OrderEditModel : EditModelBase
     /// <summary>Confirmed value of OrderId.</summary>
     private int? _orderId;
 
-    /// <summary>注文ID（主キー。アプリ側で採番）</summary>
+    /// <summary>Order ID (primary key; assigned by the application)</summary>
     private string _bindingOrderId = string.Empty;
 
     /// <summary>Confirmed value of OrderId (read-only from outside).</summary>
@@ -2413,7 +2413,7 @@ public partial class OrderEditModel : EditModelBase
     /// <summary>Called just after the confirmed value of OrderId changes (old and new values; add processing via a partial implementation).</summary>
     partial void OnOrderIdChanged(int? oldValue, int? newValue);
 
-    /// <summary>注文ID（主キー。アプリ側で採番）</summary>
+    /// <summary>Order ID (primary key; assigned by the application)</summary>
     public string BindingOrderId
     {
         get => _bindingOrderId;
@@ -2447,7 +2447,7 @@ public partial class OrderEditModel : EditModelBase
                 {
                     SetError(
                         nameof(BindingOrderId),
-                        ResolveParseErrorMessage(GetDisplayName(nameof(OrderId), "注文ID（主キー。アプリ側で採番）"), normalized, "int")
+                        ResolveParseErrorMessage(GetDisplayName(nameof(OrderId), "Order ID (primary key; assigned by the application)"), normalized, "int")
                     );
                 }
             }
@@ -2457,7 +2457,7 @@ public partial class OrderEditModel : EditModelBase
     /// <summary>Confirmed value of CustomerId.</summary>
     private int? _customerId;
 
-    /// <summary>発注した顧客ID（customers への外部キー）</summary>
+    /// <summary>ID of the ordering customer (foreign key to customers)</summary>
     private string _bindingCustomerId = string.Empty;
 
     /// <summary>Confirmed value of CustomerId (read-only from outside).</summary>
@@ -2504,7 +2504,7 @@ public partial class OrderEditModel : EditModelBase
     /// <summary>Called just after the confirmed value of CustomerId changes (old and new values; add processing via a partial implementation).</summary>
     partial void OnCustomerIdChanged(int? oldValue, int? newValue);
 
-    /// <summary>発注した顧客ID（customers への外部キー）</summary>
+    /// <summary>ID of the ordering customer (foreign key to customers)</summary>
     public string BindingCustomerId
     {
         get => _bindingCustomerId;
@@ -2538,7 +2538,7 @@ public partial class OrderEditModel : EditModelBase
                 {
                     SetError(
                         nameof(BindingCustomerId),
-                        ResolveParseErrorMessage(GetDisplayName(nameof(CustomerId), "発注した顧客ID（customers への外部キー）"), normalized, "int")
+                        ResolveParseErrorMessage(GetDisplayName(nameof(CustomerId), "ID of the ordering customer (foreign key to customers)"), normalized, "int")
                     );
                 }
             }
@@ -2548,7 +2548,7 @@ public partial class OrderEditModel : EditModelBase
     /// <summary>Confirmed value of OrderedAt.</summary>
     private DateTime? _orderedAt;
 
-    /// <summary>注文日時</summary>
+    /// <summary>Date and time the order was placed</summary>
     private string _bindingOrderedAt = string.Empty;
 
     /// <summary>Confirmed value of OrderedAt (read-only from outside).</summary>
@@ -2595,7 +2595,7 @@ public partial class OrderEditModel : EditModelBase
     /// <summary>Called just after the confirmed value of OrderedAt changes (old and new values; add processing via a partial implementation).</summary>
     partial void OnOrderedAtChanged(DateTime? oldValue, DateTime? newValue);
 
-    /// <summary>注文日時</summary>
+    /// <summary>Date and time the order was placed</summary>
     public string BindingOrderedAt
     {
         get => _bindingOrderedAt;
@@ -2629,7 +2629,7 @@ public partial class OrderEditModel : EditModelBase
                 {
                     SetError(
                         nameof(BindingOrderedAt),
-                        ResolveParseErrorMessage(GetDisplayName(nameof(OrderedAt), "注文日時"), normalized, "DateTime")
+                        ResolveParseErrorMessage(GetDisplayName(nameof(OrderedAt), "Date and time the order was placed"), normalized, "DateTime")
                     );
                 }
             }
@@ -2639,7 +2639,7 @@ public partial class OrderEditModel : EditModelBase
     /// <summary>Confirmed value of Memo.</summary>
     private string? _memo;
 
-    /// <summary>注文に添える備考（任意）</summary>
+    /// <summary>Memo attached to the order (optional)</summary>
     private string _bindingMemo = string.Empty;
 
     /// <summary>Confirmed value of Memo (read-only from outside).</summary>
@@ -2686,7 +2686,7 @@ public partial class OrderEditModel : EditModelBase
     /// <summary>Called just after the confirmed value of Memo changes (old and new values; add processing via a partial implementation).</summary>
     partial void OnMemoChanged(string? oldValue, string? newValue);
 
-    /// <summary>注文に添える備考（任意）</summary>
+    /// <summary>Memo attached to the order (optional)</summary>
     public string BindingMemo
     {
         get => _bindingMemo;
@@ -2772,15 +2772,15 @@ public partial class OrderEditModel : EditModelBase
     {
         if (OrderId is null)
         {
-            SetError(nameof(BindingOrderId), BuildRequiredErrorMessage(GetDisplayName(nameof(OrderId), "注文ID（主キー。アプリ側で採番）")));
+            SetError(nameof(BindingOrderId), BuildRequiredErrorMessage(GetDisplayName(nameof(OrderId), "Order ID (primary key; assigned by the application)")));
         }
         if (CustomerId is null)
         {
-            SetError(nameof(BindingCustomerId), BuildRequiredErrorMessage(GetDisplayName(nameof(CustomerId), "発注した顧客ID（customers への外部キー）")));
+            SetError(nameof(BindingCustomerId), BuildRequiredErrorMessage(GetDisplayName(nameof(CustomerId), "ID of the ordering customer (foreign key to customers)")));
         }
         if (OrderedAt is null)
         {
-            SetError(nameof(BindingOrderedAt), BuildRequiredErrorMessage(GetDisplayName(nameof(OrderedAt), "注文日時")));
+            SetError(nameof(BindingOrderedAt), BuildRequiredErrorMessage(GetDisplayName(nameof(OrderedAt), "Date and time the order was placed")));
         }
         OnValidate();
     }
@@ -2878,7 +2878,7 @@ public partial class OrderEditModel : EditModelBase
         ParentCollection?.Move(oldIndex, newIndex);
 }
 
-/// <summary>注文明細。注文と商品を多対多で結ぶ明細行</summary>
+/// <summary>Order lines. Detail rows linking orders and products many-to-many</summary>
 public partial class OrderLineEditModel : EditModelBase
 {
     // ===== Extension points (implement only what you need in a partial class; unimplemented partial methods are erased at no cost) =====
@@ -2895,7 +2895,7 @@ public partial class OrderLineEditModel : EditModelBase
     /// <summary>Confirmed value of OrderLineId.</summary>
     private int? _orderLineId;
 
-    /// <summary>注文明細ID（主キー。アプリ側で採番）</summary>
+    /// <summary>Order line ID (primary key; assigned by the application)</summary>
     private string _bindingOrderLineId = string.Empty;
 
     /// <summary>Confirmed value of OrderLineId (read-only from outside).</summary>
@@ -2942,7 +2942,7 @@ public partial class OrderLineEditModel : EditModelBase
     /// <summary>Called just after the confirmed value of OrderLineId changes (old and new values; add processing via a partial implementation).</summary>
     partial void OnOrderLineIdChanged(int? oldValue, int? newValue);
 
-    /// <summary>注文明細ID（主キー。アプリ側で採番）</summary>
+    /// <summary>Order line ID (primary key; assigned by the application)</summary>
     public string BindingOrderLineId
     {
         get => _bindingOrderLineId;
@@ -2976,7 +2976,7 @@ public partial class OrderLineEditModel : EditModelBase
                 {
                     SetError(
                         nameof(BindingOrderLineId),
-                        ResolveParseErrorMessage(GetDisplayName(nameof(OrderLineId), "注文明細ID（主キー。アプリ側で採番）"), normalized, "int")
+                        ResolveParseErrorMessage(GetDisplayName(nameof(OrderLineId), "Order line ID (primary key; assigned by the application)"), normalized, "int")
                     );
                 }
             }
@@ -2986,7 +2986,7 @@ public partial class OrderLineEditModel : EditModelBase
     /// <summary>Confirmed value of OrderId.</summary>
     private int? _orderId;
 
-    /// <summary>所属する注文ID（orders への外部キー）</summary>
+    /// <summary>ID of the parent order (foreign key to orders)</summary>
     private string _bindingOrderId = string.Empty;
 
     /// <summary>Confirmed value of OrderId (read-only from outside).</summary>
@@ -3033,7 +3033,7 @@ public partial class OrderLineEditModel : EditModelBase
     /// <summary>Called just after the confirmed value of OrderId changes (old and new values; add processing via a partial implementation).</summary>
     partial void OnOrderIdChanged(int? oldValue, int? newValue);
 
-    /// <summary>所属する注文ID（orders への外部キー）</summary>
+    /// <summary>ID of the parent order (foreign key to orders)</summary>
     public string BindingOrderId
     {
         get => _bindingOrderId;
@@ -3067,7 +3067,7 @@ public partial class OrderLineEditModel : EditModelBase
                 {
                     SetError(
                         nameof(BindingOrderId),
-                        ResolveParseErrorMessage(GetDisplayName(nameof(OrderId), "所属する注文ID（orders への外部キー）"), normalized, "int")
+                        ResolveParseErrorMessage(GetDisplayName(nameof(OrderId), "ID of the parent order (foreign key to orders)"), normalized, "int")
                     );
                 }
             }
@@ -3077,7 +3077,7 @@ public partial class OrderLineEditModel : EditModelBase
     /// <summary>Confirmed value of ProductId.</summary>
     private int? _productId;
 
-    /// <summary>対象の商品ID（products への外部キー）</summary>
+    /// <summary>ID of the target product (foreign key to products)</summary>
     private string _bindingProductId = string.Empty;
 
     /// <summary>Confirmed value of ProductId (read-only from outside).</summary>
@@ -3124,7 +3124,7 @@ public partial class OrderLineEditModel : EditModelBase
     /// <summary>Called just after the confirmed value of ProductId changes (old and new values; add processing via a partial implementation).</summary>
     partial void OnProductIdChanged(int? oldValue, int? newValue);
 
-    /// <summary>対象の商品ID（products への外部キー）</summary>
+    /// <summary>ID of the target product (foreign key to products)</summary>
     public string BindingProductId
     {
         get => _bindingProductId;
@@ -3158,7 +3158,7 @@ public partial class OrderLineEditModel : EditModelBase
                 {
                     SetError(
                         nameof(BindingProductId),
-                        ResolveParseErrorMessage(GetDisplayName(nameof(ProductId), "対象の商品ID（products への外部キー）"), normalized, "int")
+                        ResolveParseErrorMessage(GetDisplayName(nameof(ProductId), "ID of the target product (foreign key to products)"), normalized, "int")
                     );
                 }
             }
@@ -3168,7 +3168,7 @@ public partial class OrderLineEditModel : EditModelBase
     /// <summary>Confirmed value of Quantity.</summary>
     private int? _quantity;
 
-    /// <summary>注文数量</summary>
+    /// <summary>Order quantity</summary>
     private string _bindingQuantity = string.Empty;
 
     /// <summary>Confirmed value of Quantity (read-only from outside).</summary>
@@ -3215,7 +3215,7 @@ public partial class OrderLineEditModel : EditModelBase
     /// <summary>Called just after the confirmed value of Quantity changes (old and new values; add processing via a partial implementation).</summary>
     partial void OnQuantityChanged(int? oldValue, int? newValue);
 
-    /// <summary>注文数量</summary>
+    /// <summary>Order quantity</summary>
     public string BindingQuantity
     {
         get => _bindingQuantity;
@@ -3249,7 +3249,7 @@ public partial class OrderLineEditModel : EditModelBase
                 {
                     SetError(
                         nameof(BindingQuantity),
-                        ResolveParseErrorMessage(GetDisplayName(nameof(Quantity), "注文数量"), normalized, "int")
+                        ResolveParseErrorMessage(GetDisplayName(nameof(Quantity), "Order quantity"), normalized, "int")
                     );
                 }
             }
@@ -3259,7 +3259,7 @@ public partial class OrderLineEditModel : EditModelBase
     /// <summary>Confirmed value of UnitPrice.</summary>
     private decimal? _unitPrice;
 
-    /// <summary>注文時単価（商品マスタの改定に影響されないよう注文行に保持）</summary>
+    /// <summary>Unit price at order time (kept on the order line so product-master price revisions do not affect it)</summary>
     private string _bindingUnitPrice = string.Empty;
 
     /// <summary>Confirmed value of UnitPrice (read-only from outside).</summary>
@@ -3306,7 +3306,7 @@ public partial class OrderLineEditModel : EditModelBase
     /// <summary>Called just after the confirmed value of UnitPrice changes (old and new values; add processing via a partial implementation).</summary>
     partial void OnUnitPriceChanged(decimal? oldValue, decimal? newValue);
 
-    /// <summary>注文時単価（商品マスタの改定に影響されないよう注文行に保持）</summary>
+    /// <summary>Unit price at order time (kept on the order line so product-master price revisions do not affect it)</summary>
     public string BindingUnitPrice
     {
         get => _bindingUnitPrice;
@@ -3340,7 +3340,7 @@ public partial class OrderLineEditModel : EditModelBase
                 {
                     SetError(
                         nameof(BindingUnitPrice),
-                        ResolveParseErrorMessage(GetDisplayName(nameof(UnitPrice), "注文時単価（商品マスタの改定に影響されないよう注文行に保持）"), normalized, "decimal")
+                        ResolveParseErrorMessage(GetDisplayName(nameof(UnitPrice), "Unit price at order time (kept on the order line so product-master price revisions do not affect it)"), normalized, "decimal")
                     );
                 }
             }
@@ -3374,23 +3374,23 @@ public partial class OrderLineEditModel : EditModelBase
     {
         if (OrderLineId is null)
         {
-            SetError(nameof(BindingOrderLineId), BuildRequiredErrorMessage(GetDisplayName(nameof(OrderLineId), "注文明細ID（主キー。アプリ側で採番）")));
+            SetError(nameof(BindingOrderLineId), BuildRequiredErrorMessage(GetDisplayName(nameof(OrderLineId), "Order line ID (primary key; assigned by the application)")));
         }
         if (OrderId is null)
         {
-            SetError(nameof(BindingOrderId), BuildRequiredErrorMessage(GetDisplayName(nameof(OrderId), "所属する注文ID（orders への外部キー）")));
+            SetError(nameof(BindingOrderId), BuildRequiredErrorMessage(GetDisplayName(nameof(OrderId), "ID of the parent order (foreign key to orders)")));
         }
         if (ProductId is null)
         {
-            SetError(nameof(BindingProductId), BuildRequiredErrorMessage(GetDisplayName(nameof(ProductId), "対象の商品ID（products への外部キー）")));
+            SetError(nameof(BindingProductId), BuildRequiredErrorMessage(GetDisplayName(nameof(ProductId), "ID of the target product (foreign key to products)")));
         }
         if (Quantity is null)
         {
-            SetError(nameof(BindingQuantity), BuildRequiredErrorMessage(GetDisplayName(nameof(Quantity), "注文数量")));
+            SetError(nameof(BindingQuantity), BuildRequiredErrorMessage(GetDisplayName(nameof(Quantity), "Order quantity")));
         }
         if (UnitPrice is null)
         {
-            SetError(nameof(BindingUnitPrice), BuildRequiredErrorMessage(GetDisplayName(nameof(UnitPrice), "注文時単価（商品マスタの改定に影響されないよう注文行に保持）")));
+            SetError(nameof(BindingUnitPrice), BuildRequiredErrorMessage(GetDisplayName(nameof(UnitPrice), "Unit price at order time (kept on the order line so product-master price revisions do not affect it)")));
         }
         OnValidate();
     }
@@ -8455,10 +8455,10 @@ public sealed partial class ProductRepository(
 /// <summary>Remote surface of the OrderEntity repository (only CRUD, save, and named queries that can cross a network boundary; swappable for a remote implementation later).</summary>
 public partial interface IOrderRemoteRepository : IRemoteRepository<OrderEntity, int>
 {
-    /// <summary>顧客IDで注文を新しい順（注文ID降順）に検索する（ページング付き）</summary>
+    /// <summary>Searches a customer's orders, newest first (order ID descending), with paging</summary>
     Task<IReadOnlyList<OrderEntity>> GetByCustomerAsync(int customerId, int take, int skip = 0, CancellationToken cancellationToken = default);
 
-    /// <summary>顧客IDの注文サマリー（注文ID・注文日時・備考）を新しい順に取得する（射影 DTO）</summary>
+    /// <summary>Gets a customer's order summaries (order ID, ordered-at, memo), newest first (projection DTO)</summary>
     Task<IReadOnlyList<OrderSummaryRow>> GetSummariesAsync(int customerId, CancellationToken cancellationToken = default);
 }
 
@@ -8491,11 +8491,11 @@ public sealed partial class OrderRepository(
     ),
         IOrderRepository
 {
-    /// <summary>顧客IDで注文を新しい順（注文ID降順）に検索する（ページング付き）</summary>
+    /// <summary>Searches a customer's orders, newest first (order ID descending), with paging</summary>
     public Task<IReadOnlyList<OrderEntity>> GetByCustomerAsync(int customerId, int take, int skip = 0, CancellationToken cancellationToken = default) =>
         Query().Where(e => e.CustomerId == customerId).OrderByDescending(e => e.OrderId).Skip(skip).Take(take).ToListAsync(cancellationToken);
 
-    /// <summary>顧客IDの注文サマリー（注文ID・注文日時・備考）を新しい順に取得する（射影 DTO）</summary>
+    /// <summary>Gets a customer's order summaries (order ID, ordered-at, memo), newest first (projection DTO)</summary>
     public Task<IReadOnlyList<OrderSummaryRow>> GetSummariesAsync(int customerId, CancellationToken cancellationToken = default) =>
         Query().Where(e => e.CustomerId == customerId).OrderByDescending(e => e.OrderId).ToProjectionListAsync(e => new OrderSummaryRow { OrderId = e.OrderId, OrderedAt = e.OrderedAt, Memo = e.Memo }, cancellationToken);
 }
@@ -8537,11 +8537,11 @@ public sealed partial class HttpOrderRemoteRepository(HttpClient httpClient)
     : HttpRemoteRepository<OrderEntity, int>(httpClient, "Order"),
         IOrderRemoteRepository
 {
-    /// <summary>顧客IDで注文を新しい順（注文ID降順）に検索する（ページング付き）</summary>
+    /// <summary>Searches a customer's orders, newest first (order ID descending), with paging</summary>
     public Task<IReadOnlyList<OrderEntity>> GetByCustomerAsync(int customerId, int take, int skip = 0, CancellationToken cancellationToken = default) =>
         InvokeAsync<IReadOnlyList<OrderEntity>>("GetByCustomer", new { customerId, take, skip }, cancellationToken);
 
-    /// <summary>顧客IDの注文サマリー（注文ID・注文日時・備考）を新しい順に取得する（射影 DTO）</summary>
+    /// <summary>Gets a customer's order summaries (order ID, ordered-at, memo), newest first (projection DTO)</summary>
     public Task<IReadOnlyList<OrderSummaryRow>> GetSummariesAsync(int customerId, CancellationToken cancellationToken = default) =>
         InvokeAsync<IReadOnlyList<OrderSummaryRow>>("GetSummaries", new { customerId }, cancellationToken);
 }

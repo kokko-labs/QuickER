@@ -1,29 +1,21 @@
-using System.Text;
 using EcOrderRemoteSample.Generated;
 using Microsoft.Extensions.DependencyInjection;
 
-// QuickER の「リモートサービス生成（GenerateRemoteServices）」で図から生成した HTTP クライアント実装だけを使い、
-// 別プロセスのサーバー（EcOrderRemote.Server）を HTTP + JSON 越しに呼び出すサンプルクライアント。
-// 呼び出しコードは DB 直結時とまったく同じインターフェイス（I{Entity}RemoteRepository）で書けており、
-// 違いは DI 登録が AddGeneratedHttpRemoteRepositories 1 行に変わっているだけ、という点が見どころ。
-// シナリオは「HTTP 越しであること」が意味を持つ 3 点（グラフ保存後の RowState 確定・射影 DTO の転送・
-// SaveConflictException の型復元）に絞っている。基本の CRUD・Include・生 SQL などの実演は samples/ec-order を参照。
+// A sample client that calls the server (EcOrderRemote.Server) in another process over HTTP + JSON, using only
+// the HTTP client implementations QuickER generated from the diagram with "remote service generation"
+// (GenerateRemoteServices).
+// The calling code is written against exactly the same interfaces (I{Entity}RemoteRepository) as the DB-direct
+// case; the only difference is that DI registration becomes a single AddGeneratedHttpRemoteRepositories line.
+// The scenarios are limited to the three points where going over HTTP actually matters (RowState settling
+// after a graph save, transfer of a projection DTO, and type restoration of SaveConflictException). See
+// samples/ec-order for the demonstrations of basic CRUD, Include, raw SQL, and so on.
 
-// 日本語出力の文字化けを避けるため標準出力を UTF-8 にする（リダイレクト時の失敗は無視）
-try
-{
-    Console.OutputEncoding = Encoding.UTF8;
-}
-catch (IOException)
-{
-    // 出力がリダイレクトされている場合などは設定できないが、致命的ではないため無視する
-}
-
-// サーバーのベース URL は第 1 引数で差し替え可能（サーバーと同じ値を渡すこと）。既定はサーバー側と同じ固定ポート。
+// The server base URL can be overridden with the first argument (pass the same value as the server).
+// The default is the same fixed port as the server.
 var baseUrl = args.FirstOrDefault() ?? "http://127.0.0.1:5210";
 
-// 生成された HTTP クライアント実装を DI へ登録する。baseAddress にはサーバーの prefix（/quicker）まで含める。
-// ここだけを AddGeneratedSqliteRepositories（DB 直結）へ差し替えれば、同じ呼び出しコードがローカル実行になる。
+// Register the generated HTTP client implementations with DI. baseAddress includes the server prefix (/quicker).
+// Swap just this line for AddGeneratedSqliteRepositories (DB-direct) and the same calling code runs locally.
 using var provider = new ServiceCollection()
     .AddGeneratedHttpRemoteRepositories($"{baseUrl}/quicker")
     .BuildServiceProvider();
@@ -32,16 +24,16 @@ var customers = provider.GetRequiredService<ICustomerRemoteRepository>();
 var products = provider.GetRequiredService<IProductRemoteRepository>();
 var orders = provider.GetRequiredService<IOrderRemoteRepository>();
 
-// サーバーの起動を待つ（別プロセスで立ち上がるため、接続確立まで数百 ms かかることがある）。
-// 最大 30 回×500ms リトライし、その間の接続失敗（HttpRequestException）は吸収する。
+// Wait for the server to come up (it starts in another process, so establishing a connection can take a few
+// hundred ms). Retry up to 30 times x 500ms, absorbing connection failures (HttpRequestException) meanwhile.
 await WaitForServerAsync(customers);
 
-// ---- 1. 事前データの登録（以降のシナリオが参照する顧客 1 件・商品 2 件） ----
+// ---- 1. Register the seed data the later scenarios refer to (1 customer, 2 products) ----
 await customers.InsertAsync(
     new CustomerEntity
     {
         CustomerId = 1,
-        Name = "山田 太郎",
+        Name = "Taro Yamada",
         Email = "taro@example.com",
     }
 );
@@ -50,7 +42,7 @@ await products.InsertAsync(
     new ProductEntity
     {
         ProductId = 100,
-        Name = "コーヒー豆 200g",
+        Name = "Coffee beans 200g",
         UnitPrice = 980m,
     }
 );
@@ -58,22 +50,22 @@ await products.InsertAsync(
     new ProductEntity
     {
         ProductId = 101,
-        Name = "マグカップ",
+        Name = "Mug",
         UnitPrice = 1500m,
     }
 );
 
-Console.WriteLine("[1] 事前データとして顧客 1 件・商品 2 件を HTTP 越しに登録しました。");
+Console.WriteLine("[1] Registered the seed data (1 customer, 2 products) over HTTP.");
 Console.WriteLine();
 
-// ---- 2. 注文グラフのまとめて保存（MarkAdded → SaveAsync）と、保存後の RowState 確定 ----
-// 注文 1000 は注文明細 2 行を持つグラフ、注文 1001 は明細なし。どちらも顧客 1 の注文。
+// ---- 2. Graph-save orders in one request (MarkAdded -> SaveAsync) and RowState settling after the save ----
+// Order 1000 is a graph with 2 order lines; order 1001 has no lines. Both belong to customer 1.
 var order1000 = new OrderEntity
 {
     OrderId = 1000,
     CustomerId = 1,
     OrderedAt = new DateTime(2026, 7, 7, 13, 47, 9, DateTimeKind.Unspecified),
-    Memo = "初回注文",
+    Memo = "First order",
 };
 order1000.MarkAdded();
 
@@ -105,54 +97,56 @@ var order1001 = new OrderEntity
     OrderId = 1001,
     CustomerId = 1,
     OrderedAt = new DateTime(2026, 7, 8, 9, 12, 0, DateTimeKind.Unspecified),
-    Memo = "明細なしの注文",
+    Memo = "Order without lines",
 };
 order1001.MarkAdded();
 
-// 複数の集約ルートを 1 度のリクエストでまとめて保存する（注文 1000＝3 レコード＋注文 1001＝1 レコード）
+// Save multiple aggregate roots in a single request (order 1000 = 3 records + order 1001 = 1 record).
 var savedCount = await orders.SaveAsync(new[] { order1000, order1001 });
 Console.WriteLine(
-    $"[2] 注文 2 件（うち 1 件は明細 2 行のグラフ）を HTTP 越しにまとめて保存しました（保存レコード数: {savedCount}）。"
+    $"[2] Graph-saved 2 orders (one with 2 order lines) over HTTP in one request (records saved: {savedCount})."
 );
-Check(savedCount, 4, "グラフ保存レコード数");
+Check(savedCount, 4, "graph-saved record count");
 
-// 直結（EntityGraphSaver.AcceptChanges）と同じく、保存成功後はローカルの RowState が Unchanged に確定する。
-// この確定が HTTP 越しでも成立するのが本サンプルの要点（呼び出し側の意味論が直結時と変わらない）。
-Check(order1000.HasChanges, false, "保存後の注文 1000 の RowState 確定");
-Check(order1001.HasChanges, false, "保存後の注文 1001 の RowState 確定");
+// Just like the DB-direct case (EntityGraphSaver.AcceptChanges), the local RowState settles to Unchanged once
+// the save succeeds. That this settling also holds over HTTP is the point of this sample (the caller-side
+// semantics do not change from the DB-direct case).
+Check(order1000.HasChanges, false, "RowState of order 1000 settled after save");
+Check(order1001.HasChanges, false, "RowState of order 1001 settled after save");
 Console.WriteLine();
 
-// ---- 3. 名前付きクエリ（射影 DTO）のリモート転送 ----
-// GetSummaries は注文サマリー（注文ID・注文日時・備考）を注文ID降順で返す射影クエリ。
-// 射影 DTO（OrderSummaryRow）が JSON でクライアントまで届くことを確認する。
+// ---- 3. Remote transfer of a named query (projection DTO) ----
+// GetSummaries is a projection query that returns order summaries (order ID, ordered-at, memo) in descending
+// order ID. Verify that the projection DTO (OrderSummaryRow) reaches the client as JSON.
 var summaries = await orders.GetSummariesAsync(1);
-Check(summaries.Count, 2, "注文サマリーの件数");
-Check(summaries[0].OrderId, 1001, "サマリー先頭の注文ID（降順）");
-Check(summaries[1].OrderId, 1000, "サマリー 2 件目の注文ID（降順）");
-Check(summaries[0].Memo, "明細なしの注文", "サマリー先頭の備考");
-Check(summaries[1].Memo, "初回注文", "サマリー 2 件目の備考");
+Check(summaries.Count, 2, "order summary count");
+Check(summaries[0].OrderId, 1001, "first summary order ID (descending)");
+Check(summaries[1].OrderId, 1000, "second summary order ID (descending)");
+Check(summaries[0].Memo, "Order without lines", "first summary memo");
+Check(summaries[1].Memo, "First order", "second summary memo");
 
-Console.WriteLine("[3] 名前付きクエリ（射影 DTO）を HTTP 越しに取得しました:");
+Console.WriteLine("[3] Fetched a named query (projection DTO) over HTTP:");
 
 foreach (var row in summaries)
 {
     Console.WriteLine(
-        $"    注文ID={row.OrderId} 注文日時={row.OrderedAt:yyyy-MM-dd HH:mm:ss} 備考={row.Memo}"
+        $"    OrderId={row.OrderId} OrderedAt={row.OrderedAt:yyyy-MM-dd HH:mm:ss} Memo={row.Memo}"
     );
 }
 
 Console.WriteLine();
 
-// ---- 4. SaveConflictException の HTTP 409 経由の型復元 ----
-// 存在しない注文を更新保存（insertWhenUpdateMissing=false）すると、サーバー側で楽観的競合となり
-// SaveConflictException が投げられる。これは HTTP 409＋構造化 JSON を経て、クライアント側でも
-// 同じ SaveConflictException として復元される＝直結時とまったく同じ catch が書ける、という実演。
+// ---- 4. Type restoration of SaveConflictException via HTTP 409 ----
+// An update-save of a non-existent order (insertWhenUpdateMissing=false) becomes an optimistic conflict on the
+// server, which throws SaveConflictException. Via an HTTP 409 plus structured JSON it is restored on the client
+// as the same SaveConflictException — demonstrating that you can write exactly the same catch as in the
+// DB-direct case.
 var missing = new OrderEntity
 {
     OrderId = 9999,
     CustomerId = 1,
     OrderedAt = new DateTime(2026, 7, 9, 0, 0, 0, DateTimeKind.Unspecified),
-    Memo = "存在しない注文の更新",
+    Memo = "Update of a non-existent order",
 };
 missing.MarkUpdated();
 
@@ -164,21 +158,21 @@ try
 }
 catch (SaveConflictException)
 {
-    // サーバー側の例外型が HTTP 越しに復元された（直結時と同じ catch）
+    // The server-side exception type was restored across HTTP (the same catch as the DB-direct case).
     conflictCaught = true;
 }
 
-Check(conflictCaught, true, "SaveConflictException の HTTP 409 経由の型復元");
+Check(conflictCaught, true, "type restoration of SaveConflictException via HTTP 409");
 Console.WriteLine(
-    "[4] 存在しない注文の更新保存で SaveConflictException を HTTP 越しに捕捉しました。"
+    "[4] Caught SaveConflictException over HTTP for an update-save of a non-existent order."
 );
 Console.WriteLine();
 
-Console.WriteLine("すべてのシナリオが成功しました。");
+Console.WriteLine("All scenarios succeeded.");
 return 0;
 
-// サーバーが応答するまで GetAllAsync を試行し、接続失敗（HttpRequestException）は吸収してリトライする。
-// 別プロセスのサーバー起動待ち（CI 含む）を想定した小さなヘルパー。
+// Try GetAllAsync until the server responds, absorbing connection failures (HttpRequestException) and
+// retrying. A small helper for waiting on the server started in another process (including CI).
 static async Task WaitForServerAsync(ICustomerRemoteRepository customers)
 {
     const int maxAttempts = 30;
@@ -192,23 +186,24 @@ static async Task WaitForServerAsync(ICustomerRemoteRepository customers)
         }
         catch (HttpRequestException)
         {
-            // まだサーバーが受け付けていない。少し待って再試行する
+            // The server is not accepting connections yet; wait a bit and retry.
             await Task.Delay(500);
         }
     }
 
     throw new InvalidOperationException(
-        $"サーバーへ接続できませんでした（{maxAttempts} 回試行）。サーバー（EcOrderRemote.Server）が起動しているか確認してください。"
+        $"Could not connect to the server ({maxAttempts} attempts). Check that the server (EcOrderRemote.Server) is running."
     );
 }
 
-// 期待値と実測値が一致しなければ例外を投げて終了コードを非 0 にする（CI で検知できるようにする）小さなヘルパー。
+// A small helper that throws when the actual value differs from the expected one, making the exit code
+// non-zero so CI can detect it.
 static void Check<T>(T actual, T expected, string label)
 {
     if (!EqualityComparer<T>.Default.Equals(actual, expected))
     {
         throw new InvalidOperationException(
-            $"検証失敗（{label}）: 期待値={expected} 実測値={actual}"
+            $"Verification failed ({label}): expected={expected} actual={actual}"
         );
     }
 }

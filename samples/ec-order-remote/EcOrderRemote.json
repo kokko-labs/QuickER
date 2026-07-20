@@ -6,7 +6,7 @@
         "Id": "e1111111-0000-0000-0000-000000000001",
         "TableName": "customers",
         "Memo": "",
-        "Description": "\u9867\u5BA2\u3002\u6CE8\u6587\u306E\u767A\u6CE8\u5143\u3068\u306A\u308B\u8CFC\u5165\u8005\u30DE\u30B9\u30BF",
+        "Description": "Customers. Master data of the purchasers who place orders",
         "Columns": [
           {
             "Id": "e1111111-0000-0000-0000-000000000002",
@@ -15,7 +15,7 @@
             "IsPrimaryKey": true,
             "IsForeignKey": false,
             "IsNullable": false,
-            "Description": "\u9867\u5BA2ID\uFF08\u4E3B\u30AD\u30FC\u3002\u30A2\u30D7\u30EA\u5074\u3067\u63A1\u756A\uFF09"
+            "Description": "Customer ID (primary key; assigned by the application)"
           },
           {
             "Id": "e1111111-0000-0000-0000-000000000003",
@@ -24,7 +24,7 @@
             "IsPrimaryKey": false,
             "IsForeignKey": false,
             "IsNullable": false,
-            "Description": "\u9867\u5BA2\u540D"
+            "Description": "Customer name"
           },
           {
             "Id": "e1111111-0000-0000-0000-000000000004",
@@ -33,7 +33,7 @@
             "IsPrimaryKey": false,
             "IsForeignKey": false,
             "IsNullable": true,
-            "Description": "\u9023\u7D61\u5148\u30E1\u30FC\u30EB\u30A2\u30C9\u30EC\u30B9\uFF08\u4EFB\u610F\uFF09"
+            "Description": "Contact email address (optional)"
           }
         ]
       },
@@ -41,7 +41,7 @@
         "Id": "e2222222-0000-0000-0000-000000000001",
         "TableName": "products",
         "Memo": "",
-        "Description": "\u5546\u54C1\u30DE\u30B9\u30BF\u3002\u8CA9\u58F2\u5BFE\u8C61\u3068\u306A\u308B\u5546\u54C1\u306E\u5B9A\u7FA9",
+        "Description": "Product master. Defines the products available for sale",
         "Columns": [
           {
             "Id": "e2222222-0000-0000-0000-000000000002",
@@ -50,7 +50,7 @@
             "IsPrimaryKey": true,
             "IsForeignKey": false,
             "IsNullable": false,
-            "Description": "\u5546\u54C1ID\uFF08\u4E3B\u30AD\u30FC\u3002\u30A2\u30D7\u30EA\u5074\u3067\u63A1\u756A\uFF09"
+            "Description": "Product ID (primary key; assigned by the application)"
           },
           {
             "Id": "e2222222-0000-0000-0000-000000000003",
@@ -59,7 +59,7 @@
             "IsPrimaryKey": false,
             "IsForeignKey": false,
             "IsNullable": false,
-            "Description": "\u5546\u54C1\u540D"
+            "Description": "Product name"
           },
           {
             "Id": "e2222222-0000-0000-0000-000000000004",
@@ -68,7 +68,7 @@
             "IsPrimaryKey": false,
             "IsForeignKey": false,
             "IsNullable": false,
-            "Description": "\u5546\u54C1\u30DE\u30B9\u30BF\u4E0A\u306E\u8CA9\u58F2\u5358\u4FA1"
+            "Description": "Unit sales price in the product master"
           }
         ]
       },
@@ -76,7 +76,7 @@
         "Id": "e3333333-0000-0000-0000-000000000001",
         "TableName": "orders",
         "Memo": "",
-        "Description": "\u6CE8\u6587\u30D8\u30C3\u30C0\u30021 \u9867\u5BA2\u306E 1 \u56DE\u306E\u6CE8\u6587\u3092\u8868\u3059",
+        "Description": "Order header. Represents a single order placed by one customer",
         "Columns": [
           {
             "Id": "e3333333-0000-0000-0000-000000000002",
@@ -85,7 +85,7 @@
             "IsPrimaryKey": true,
             "IsForeignKey": false,
             "IsNullable": false,
-            "Description": "\u6CE8\u6587ID\uFF08\u4E3B\u30AD\u30FC\u3002\u30A2\u30D7\u30EA\u5074\u3067\u63A1\u756A\uFF09"
+            "Description": "Order ID (primary key; assigned by the application)"
           },
           {
             "Id": "e3333333-0000-0000-0000-000000000003",
@@ -94,7 +94,7 @@
             "IsPrimaryKey": false,
             "IsForeignKey": true,
             "IsNullable": false,
-            "Description": "\u767A\u6CE8\u3057\u305F\u9867\u5BA2ID\uFF08customers \u3078\u306E\u5916\u90E8\u30AD\u30FC\uFF09"
+            "Description": "ID of the ordering customer (foreign key to customers)"
           },
           {
             "Id": "e3333333-0000-0000-0000-000000000004",
@@ -103,7 +103,7 @@
             "IsPrimaryKey": false,
             "IsForeignKey": false,
             "IsNullable": false,
-            "Description": "\u6CE8\u6587\u65E5\u6642"
+            "Description": "Date and time the order was placed"
           },
           {
             "Id": "e3333333-0000-0000-0000-000000000005",
@@ -112,7 +112,7 @@
             "IsPrimaryKey": false,
             "IsForeignKey": false,
             "IsNullable": true,
-            "Description": "\u6CE8\u6587\u306B\u6DFB\u3048\u308B\u5099\u8003\uFF08\u4EFB\u610F\uFF09"
+            "Description": "Memo attached to the order (optional)"
           }
         ]
       },
@@ -120,7 +120,7 @@
         "Id": "e4444444-0000-0000-0000-000000000001",
         "TableName": "order_lines",
         "Memo": "",
-        "Description": "\u6CE8\u6587\u660E\u7D30\u3002\u6CE8\u6587\u3068\u5546\u54C1\u3092\u591A\u5BFE\u591A\u3067\u7D50\u3076\u660E\u7D30\u884C",
+        "Description": "Order lines. Detail rows linking orders and products many-to-many",
         "Columns": [
           {
             "Id": "e4444444-0000-0000-0000-000000000002",
@@ -129,7 +129,7 @@
             "IsPrimaryKey": true,
             "IsForeignKey": false,
             "IsNullable": false,
-            "Description": "\u6CE8\u6587\u660E\u7D30ID\uFF08\u4E3B\u30AD\u30FC\u3002\u30A2\u30D7\u30EA\u5074\u3067\u63A1\u756A\uFF09"
+            "Description": "Order line ID (primary key; assigned by the application)"
           },
           {
             "Id": "e4444444-0000-0000-0000-000000000003",
@@ -138,7 +138,7 @@
             "IsPrimaryKey": false,
             "IsForeignKey": true,
             "IsNullable": false,
-            "Description": "\u6240\u5C5E\u3059\u308B\u6CE8\u6587ID\uFF08orders \u3078\u306E\u5916\u90E8\u30AD\u30FC\uFF09"
+            "Description": "ID of the parent order (foreign key to orders)"
           },
           {
             "Id": "e4444444-0000-0000-0000-000000000004",
@@ -147,7 +147,7 @@
             "IsPrimaryKey": false,
             "IsForeignKey": true,
             "IsNullable": false,
-            "Description": "\u5BFE\u8C61\u306E\u5546\u54C1ID\uFF08products \u3078\u306E\u5916\u90E8\u30AD\u30FC\uFF09"
+            "Description": "ID of the target product (foreign key to products)"
           },
           {
             "Id": "e4444444-0000-0000-0000-000000000005",
@@ -156,7 +156,7 @@
             "IsPrimaryKey": false,
             "IsForeignKey": false,
             "IsNullable": false,
-            "Description": "\u6CE8\u6587\u6570\u91CF"
+            "Description": "Order quantity"
           },
           {
             "Id": "e4444444-0000-0000-0000-000000000006",
@@ -165,7 +165,7 @@
             "IsPrimaryKey": false,
             "IsForeignKey": false,
             "IsNullable": false,
-            "Description": "\u6CE8\u6587\u6642\u5358\u4FA1\uFF08\u5546\u54C1\u30DE\u30B9\u30BF\u306E\u6539\u5B9A\u306B\u5F71\u97FF\u3055\u308C\u306A\u3044\u3088\u3046\u6CE8\u6587\u884C\u306B\u4FDD\u6301\uFF09"
+            "Description": "Unit price at order time (kept on the order line so product-master price revisions do not affect it)"
           }
         ]
       }
@@ -210,7 +210,7 @@
         "Id": "a5555555-0000-0000-0000-000000000001",
         "EntityId": "e3333333-0000-0000-0000-000000000001",
         "Name": "GetByCustomer",
-        "Description": "\u9867\u5BA2ID\u3067\u6CE8\u6587\u3092\u65B0\u3057\u3044\u9806\uFF08\u6CE8\u6587ID\u964D\u9806\uFF09\u306B\u691C\u7D22\u3059\u308B\uFF08\u30DA\u30FC\u30B8\u30F3\u30B0\u4ED8\u304D\uFF09",
+        "Description": "Searches a customer's orders, newest first (order ID descending), with paging",
         "Returns": "List",
         "Parameters": [
           {
@@ -235,7 +235,7 @@
         "Id": "a5555555-0000-0000-0000-000000000002",
         "EntityId": "e3333333-0000-0000-0000-000000000001",
         "Name": "GetSummaries",
-        "Description": "\u9867\u5BA2ID\u306E\u6CE8\u6587\u30B5\u30DE\u30EA\u30FC\uFF08\u6CE8\u6587ID\u30FB\u6CE8\u6587\u65E5\u6642\u30FB\u5099\u8003\uFF09\u3092\u65B0\u3057\u3044\u9806\u306B\u53D6\u5F97\u3059\u308B\uFF08\u5C04\u5F71 DTO\uFF09",
+        "Description": "Gets a customer's order summaries (order ID, ordered-at, memo), newest first (projection DTO)",
         "Returns": "Projection",
         "Parameters": [
           {

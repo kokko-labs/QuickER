@@ -38,13 +38,15 @@ dotnet run --project samples/ec-order/EcOrderSample
 .NET 10 SDK があれば、クローン直後にそのまま実行できます。
 
 ```text
-[準備] EcOrder.sql の DDL で SQLite ファイル DB（ec-order.db）を作成しました。
-[1] 顧客 2 件・商品 2 件を登録しました。
-[2] 注文 1 件＋注文明細 2 行をグラフ保存しました（保存レコード数: 3）。
-[3] Where 式木＋Include で注文を取得しました。
+[Setup] Created the SQLite file DB (ec-order.db) from the EcOrder.sql DDL.
+[1] Registered 2 customers and 2 products.
+[2] Graph-saved 1 order + 2 order lines (records saved: 3).
+[3] Fetched the order with a Where expression tree + Include:
 ...
-すべてのシナリオが成功しました。
+All scenarios succeeded.
 ```
+
+サンプルのコード・コメント・出力は英語です（生成コードの固定文が英語のため、それに合わせています）。
 
 サンプルには、次のファイルが含まれています。
 
