@@ -92,6 +92,20 @@ public class DbSyncCommandServiceTests
         sync.LastEntities.Should().ContainSingle().Which.TableName.Should().Be("Customer");
     }
 
+    /// <summary>同期では接続ダイアログに新規 SQLite ファイル作成を許可して開くことを検証する</summary>
+    [Fact(DisplayName = "同期では allowSqliteFileCreation=true・Sync モードで接続ダイアログを開く")]
+    public void Run_PassesAllowSqliteFileCreationTrue()
+    {
+        var host = new StubErDiagramHost { TargetDbmsToReturn = SqliteProvider.ProviderName };
+        var presenter = new FakeConnectionPresenter(null);
+        var service = new DbSyncCommandService(host, presenter, new RecordingSyncPresenter());
+
+        service.Run();
+
+        presenter.LastMode.Should().Be(DbConnectionDialogMode.Sync);
+        presenter.LastAllowSqliteFileCreation.Should().BeTrue();
+    }
+
     // FakeConnectionPresenter は共有版（QuickER.Tests.Db.UI.FakeConnectionPresenter）を使用する
 
     /// <summary>同期ダイアログ提示の呼び出し内容を記録するフェイク</summary>

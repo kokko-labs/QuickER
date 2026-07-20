@@ -138,6 +138,23 @@ public class DbImportCommandServiceTests
             .Be(string.Format(DbStrings.Db_ImportFailed, "boom"));
     }
 
+    /// <summary>取込では接続ダイアログに新規 SQLite ファイル作成を許可せず（取込では無意味）開くことを検証する</summary>
+    [Fact(
+        DisplayName = "取込では allowSqliteFileCreation=false・Import モードで接続ダイアログを開く"
+    )]
+    public async Task RunAsync_PassesAllowSqliteFileCreationFalse()
+    {
+        var host = new StubErDiagramHost { DiagramToReturn = new ErDiagram() };
+        var dialogs = new StubDialogService();
+        var presenter = new FakeConnectionPresenter(null);
+        var service = new DbImportCommandService(host, dialogs, presenter);
+
+        await service.RunAsync();
+
+        presenter.LastMode.Should().Be(DbConnectionDialogMode.Import);
+        presenter.LastAllowSqliteFileCreation.Should().BeFalse();
+    }
+
     // FakeConnectionPresenter は共有版（QuickER.Tests.Db.UI.FakeConnectionPresenter）を使用する
 
     /// <summary>スキーマ取込のみ実カに近く振る舞う擬似プロバイダ（成功結果または例外を返す）</summary>

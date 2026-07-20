@@ -1,3 +1,4 @@
+using System.IO;
 using FluentAssertions;
 using QuickER.CodeGen.CSharp;
 using QuickER.Model;
@@ -189,5 +190,115 @@ public class SqliteProviderTests
         registry.All.Should().HaveCount(2);
         registry.Get("sqlserver").Should().BeOfType<SqlServerProvider>();
         registry.Get("sqlite").Should().BeOfType<SqliteProvider>();
+    }
+
+    /// <summary>CreateEmpty が存在しないパスに有効な空 SQLite DB ファイルを作成することを検証する</summary>
+    [Fact(DisplayName = "SqliteDatabaseFile.CreateEmpty は空 DB ファイルを作成する")]
+    public void SqliteDatabaseFile_CreateEmpty_CreatesUsableFile()
+    {
+        var dir = Path.Combine(
+            Path.GetTempPath(),
+            "quicker-createempty-" + Guid.NewGuid().ToString("N")
+        );
+        Directory.CreateDirectory(dir);
+        var path = Path.Combine(dir, "new.db");
+
+        try
+        {
+            File.Exists(path).Should().BeFalse();
+
+            SqliteDatabaseFile.CreateEmpty(path);
+
+            File.Exists(path).Should().BeTrue();
+
+            // 作成された DB は取込専用（ReadOnly）で開けて、テーブルが 0 件であることを確認する
+            using var conn = new Microsoft.Data.Sqlite.SqliteConnection(
+                new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder
+                {
+                    DataSource = path,
+                    Mode = Microsoft.Data.Sqlite.SqliteOpenMode.ReadOnly,
+                }.ConnectionString
+            );
+            conn.Open();
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table';";
+            Convert.ToInt64(cmd.ExecuteScalar()).Should().Be(0);
+        }
+        finally
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+
+            try
+            {
+                Directory.Delete(dir, recursive: true);
+            }
+            catch (IOException)
+            {
+                // 後始末の失敗はテスト結果に影響させない
+            }
+        }
+    }
+
+    /// <summary>CreateEmpty が既存 DB ファイルの内容（テーブル）を破壊しないことを検証する</summary>
+    [Fact(DisplayName = "SqliteDatabaseFile.CreateEmpty は既存 DB を破壊しない")]
+    public void SqliteDatabaseFile_CreateEmpty_PreservesExistingDatabase()
+    {
+        var dir = Path.Combine(
+            Path.GetTempPath(),
+            "quicker-createempty-" + Guid.NewGuid().ToString("N")
+        );
+        Directory.CreateDirectory(dir);
+        var path = Path.Combine(dir, "existing.db");
+
+        try
+        {
+            // 事前にテーブルを 1 つ持つ DB を作る
+            using (
+                var seed = new Microsoft.Data.Sqlite.SqliteConnection(
+                    new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder
+                    {
+                        DataSource = path,
+                        Mode = Microsoft.Data.Sqlite.SqliteOpenMode.ReadWriteCreate,
+                    }.ConnectionString
+                )
+            )
+            {
+                seed.Open();
+                using var seedCmd = seed.CreateCommand();
+                seedCmd.CommandText = "CREATE TABLE keep_me (id INTEGER);";
+                seedCmd.ExecuteNonQuery();
+            }
+
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+
+            // 既存ファイルに対して CreateEmpty を呼んでも内容を消さない
+            SqliteDatabaseFile.CreateEmpty(path);
+
+            using var conn = new Microsoft.Data.Sqlite.SqliteConnection(
+                new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder
+                {
+                    DataSource = path,
+                    Mode = Microsoft.Data.Sqlite.SqliteOpenMode.ReadOnly,
+                }.ConnectionString
+            );
+            conn.Open();
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText =
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'keep_me';";
+            Convert.ToInt64(cmd.ExecuteScalar()).Should().Be(1);
+        }
+        finally
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+
+            try
+            {
+                Directory.Delete(dir, recursive: true);
+            }
+            catch (IOException)
+            {
+                // 後始末の失敗はテスト結果に影響させない
+            }
+        }
     }
 }

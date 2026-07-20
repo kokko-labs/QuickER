@@ -51,10 +51,12 @@ public sealed class DbSyncCommandService
             ? provider
             : null;
 
+        // 同期先が未作成の SQLite ファイルなら「新規作成」で空 DB を作って同期できるようにする（取込では出さない）
         var picked = _connectionPresenter.Show(
             DbConnectionDialogMode.Sync,
             fixedProvider: fixedProvider,
-            title: Strings.Db_SyncTitle
+            title: Strings.Db_SyncTitle,
+            allowSqliteFileCreation: true
         );
 
         if (picked is null)

@@ -174,6 +174,24 @@ namespace QuickER.Db.UI.Resources {
             }
         }
 
+        public static string DbConnection_CreateNewFile {
+            get {
+                return ResourceManager.GetString("DbConnection_CreateNewFile", resourceCulture);
+            }
+        }
+
+        public static string DbConnection_CreateNewFileTooltip {
+            get {
+                return ResourceManager.GetString("DbConnection_CreateNewFileTooltip", resourceCulture);
+            }
+        }
+
+        public static string DbConnection_CreateFileFailed {
+            get {
+                return ResourceManager.GetString("DbConnection_CreateFileFailed", resourceCulture);
+            }
+        }
+
         public static string DbConnection_Host {
             get {
                 return ResourceManager.GetString("DbConnection_Host", resourceCulture);

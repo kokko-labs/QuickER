@@ -344,6 +344,126 @@ public sealed class SqliteSchemaSyncIntegrationTests
             );
     }
 
+    /// <summary>
+    /// 未作成パス → 新規空 DB 作成 → 取込（テーブル 0）→ テーブル・FK ありの図との差分同期で、
+    /// 新規ファイルにスキーマが作られ行の挿入までできることを検証する（新規作成同期先のエンドツーエンド）。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] SQLite 同期: 未作成ファイルを新規作成し空 DB へスキーマを同期できる"
+    )]
+    public async Task CreateNewFile_ThenSyncSchema_BuildsSchemaAndAcceptsRows()
+    {
+        using var db = SqliteTempDatabase.Create();
+        var provider = new SqliteProvider();
+
+        // まだファイルは存在しない（取込・同期の既存ガードがブロックする状態）
+        System.IO.File.Exists(db.FilePath).Should().BeFalse();
+
+        // 明示的なユーザー操作（新規作成ボタン）相当で空 DB を作成する
+        SqliteDatabaseFile.CreateEmpty(db.FilePath);
+        System.IO.File.Exists(db.FilePath).Should().BeTrue();
+
+        // 取込するとテーブルは 0 件（空 DB）
+        var live = await ImportAsync(db, provider);
+        live.Entities.Should().BeEmpty();
+
+        // 目標: category と product（FK product.category_id -> category.id）を新規追加する
+        var (result, _) = await RunSyncAsync(
+            db,
+            provider,
+            (entities, relationships) =>
+            {
+                var category = new Entity
+                {
+                    TableName = "category",
+                    Columns =
+                    {
+                        new Column
+                        {
+                            Name = "id",
+                            DataType = "INTEGER",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                    },
+                };
+                var product = new Entity
+                {
+                    TableName = "product",
+                    Columns =
+                    {
+                        new Column
+                        {
+                            Name = "id",
+                            DataType = "INTEGER",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                        new Column
+                        {
+                            Name = "category_id",
+                            DataType = "INTEGER",
+                            IsNullable = false,
+                        },
+                        new Column
+                        {
+                            Name = "name",
+                            DataType = "TEXT",
+                            IsNullable = true,
+                        },
+                    },
+                };
+                entities.Add(category);
+                entities.Add(product);
+                relationships.Add(
+                    new Relationship
+                    {
+                        SourceEntityId = category.Id,
+                        TargetEntityId = product.Id,
+                        Type = RelationshipType.OneToMany,
+                        SourceColumnId = category.Columns.Single(c => c.Name == "id").Id,
+                        TargetColumnId = product.Columns.Single(c => c.Name == "category_id").Id,
+                    }
+                );
+                return (entities, relationships);
+            }
+        );
+
+        result.Committed.Should().BeTrue(result.Error);
+
+        // 新規ファイルに 2 テーブルが作られ、product に FK が張られている
+        var reimported = await ImportAsync(db, provider);
+        reimported
+            .Entities.Select(e => e.TableName)
+            .Should()
+            .BeEquivalentTo(new[] { "category", "product" });
+        (await QueryForeignKeyCountAsync(db, "product")).Should().Be(1);
+
+        // 行の挿入までできる（親→子の順で FK 整合）
+        await RunStatementsAsync(
+            db,
+            "INSERT INTO \"category\" (\"id\") VALUES (1);",
+            "INSERT INTO \"product\" (\"id\", \"category_id\", \"name\") VALUES (10, 1, 'apple');"
+        );
+
+        var inserted = await QueryScalarLongAsync(
+            db,
+            "SELECT \"id\" FROM \"product\" WHERE \"category_id\" = 1;"
+        );
+        inserted.Should().Be(10);
+    }
+
+    /// <summary>単一の long スカラーを取得する（新規作成同期の行挿入検証用）</summary>
+    private static async Task<long> QueryScalarLongAsync(SqliteTempDatabase db, string sql)
+    {
+        await using var conn = new SqliteConnection(NonPooledReadOnlyConnectionString(db));
+        await conn.OpenAsync(Ct).ConfigureAwait(false);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        var value = await cmd.ExecuteScalarAsync(Ct).ConfigureAwait(false);
+        return System.Convert.ToInt64(value);
+    }
+
     // ---------------- ヘルパー ----------------
 
     /// <summary>PRAGMA table_info でテーブルの列順（宣言順）を取得する</summary>

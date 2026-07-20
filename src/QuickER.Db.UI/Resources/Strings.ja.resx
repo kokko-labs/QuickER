@@ -113,10 +113,19 @@
     <value>ファイルパス</value>
   </data>
   <data name="DbConnection_Browse" xml:space="preserve">
-    <value>参照...</value>
+    <value>参照</value>
   </data>
   <data name="DbConnection_BrowseTooltip" xml:space="preserve">
     <value>既存の SQLite データベースファイルを選択</value>
+  </data>
+  <data name="DbConnection_CreateNewFile" xml:space="preserve">
+    <value>新規作成</value>
+  </data>
+  <data name="DbConnection_CreateNewFileTooltip" xml:space="preserve">
+    <value>新しい SQLite データベースファイルを作成して同期先にする</value>
+  </data>
+  <data name="DbConnection_CreateFileFailed" xml:space="preserve">
+    <value>データベースファイルの作成に失敗しました: {0}</value>
   </data>
   <data name="DbConnection_Host" xml:space="preserve">
     <value>ホスト</value>

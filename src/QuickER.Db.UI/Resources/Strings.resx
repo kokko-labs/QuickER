@@ -113,10 +113,19 @@
     <value>File Path</value>
   </data>
   <data name="DbConnection_Browse" xml:space="preserve">
-    <value>Browse...</value>
+    <value>Browse</value>
   </data>
   <data name="DbConnection_BrowseTooltip" xml:space="preserve">
     <value>Select an existing SQLite database file</value>
+  </data>
+  <data name="DbConnection_CreateNewFile" xml:space="preserve">
+    <value>Create new</value>
+  </data>
+  <data name="DbConnection_CreateNewFileTooltip" xml:space="preserve">
+    <value>Create a new SQLite database file and use it as the sync target</value>
+  </data>
+  <data name="DbConnection_CreateFileFailed" xml:space="preserve">
+    <value>Failed to create the database file: {0}</value>
   </data>
   <data name="DbConnection_Host" xml:space="preserve">
     <value>Host</value>
