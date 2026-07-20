@@ -69,13 +69,14 @@ public sealed class DdlOutputEnglishGuardTests
     public void SyncScriptBuilders_ProduceNoCjk()
     {
         var items = BuildAsciiDiffItems();
+        var plan = new SyncPlanner().BuildPlan(items, new SyncDialectCapabilities());
 
         var outputs = new (string Dialect, string Sql)[]
         {
-            ("SqlServer", new SqlServerSyncScriptBuilder().Build(items)),
-            ("PostgreSql", new PostgreSqlSyncScriptBuilder().Build(items)),
-            ("MySql", new MySqlSyncScriptBuilder().Build(items)),
-            ("Oracle", new OracleSyncScriptBuilder().Build(items)),
+            ("SqlServer", new SqlServerSyncScriptBuilder().Build(plan)),
+            ("PostgreSql", new PostgreSqlSyncScriptBuilder().Build(plan)),
+            ("MySql", new MySqlSyncScriptBuilder().Build(plan)),
+            ("Oracle", new OracleSyncScriptBuilder().Build(plan)),
         };
 
         AssertNoCjk(outputs);

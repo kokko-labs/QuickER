@@ -35,6 +35,21 @@ public sealed class SqliteProvider : IDatabaseProvider
     public ISyncScriptBuilder SyncScriptBuilder { get; } = new SqliteSyncScriptBuilder();
 
     /// <inheritdoc />
+    /// <remarks>
+    /// SQLite は逐次 DDL での列型変更・列削除・FK 変更が制限され、多くの変更はテーブル再構築が必要。
+    /// 制約名も永続化されない（合成名）ため、対応能力は最小に宣言する。
+    /// </remarks>
+    public SyncDialectCapabilities SyncCapabilities { get; } =
+        new()
+        {
+            SupportsAlterColumn = false,
+            SupportsForeignKeyAlter = false,
+            SupportsDescriptions = false,
+            PersistsForeignKeyConstraintNames = false,
+            ColumnReorder = ColumnReorderMode.Rebuild,
+        };
+
+    /// <inheritdoc />
     public ISchemaSyncExecutor SyncExecutor { get; } = new SqliteSchemaSyncExecutor();
 
     /// <inheritdoc />

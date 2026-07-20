@@ -1,0 +1,110 @@
+using System.Text;
+
+namespace QuickER.Provider;
+
+/// <summary>
+/// セクション見出し方式（<c>-- ===== {Kind} ({n} items) =====</c>）で同期スクリプトを組み立てる共通基底。
+/// </summary>
+/// <remarks>
+/// <para>
+/// SQL Server / PostgreSQL / MySQL は「種別ごとに見出しコメント → 各項目 → 空行」という同一の骨格を持つ。
+/// その連結処理をここへ集約し、各方言は種別ごとの DDL 生成（<c>Append*</c> オーバーライド）だけを実装する。
+/// </para>
+/// <para>
+/// 文の区切り規約が根本的に異なる Oracle（「/」のみの行で連結）はこの基底を継承せず、
+/// <see cref="ISyncScriptBuilder"/> を直接実装する。
+/// </para>
+/// </remarks>
+public abstract class SyncScriptBuilderBase : ISyncScriptBuilder
+{
+    /// <summary>実行計画のセクションを見出しコメント付きで連結し、同期スクリプトへ変換する</summary>
+    public string Build(SyncPlan plan)
+    {
+        var sb = new StringBuilder();
+
+        foreach (var section in plan.Sections)
+        {
+            sb.AppendLine($"-- ===== {section.Kind} ({section.Items.Count} items) =====");
+
+            foreach (var item in section.Items)
+            {
+                AppendItem(sb, section.Kind, item);
+            }
+
+            sb.AppendLine();
+        }
+
+        return sb.ToString();
+    }
+
+    /// <summary>1 差分項目を種別に応じた <c>Append*</c> へディスパッチする</summary>
+    /// <remarks>プランナーが除外済みのため、想定外の種別（RebuildTable など）は無視する</remarks>
+    private void AppendItem(StringBuilder sb, SchemaDiffKind kind, SchemaDiffItem item)
+    {
+        switch (kind)
+        {
+            case SchemaDiffKind.AddTable:
+                AppendCreateTable(sb, item);
+                break;
+
+            case SchemaDiffKind.AddColumn:
+                AppendAddColumn(sb, item);
+                break;
+
+            case SchemaDiffKind.AlterColumn:
+                AppendAlterColumn(sb, item);
+                break;
+
+            case SchemaDiffKind.DropForeignKey:
+                AppendDropForeignKey(sb, item);
+                break;
+
+            case SchemaDiffKind.DropColumn:
+                AppendDropColumn(sb, item);
+                break;
+
+            case SchemaDiffKind.DropTable:
+                AppendDropTable(sb, item);
+                break;
+
+            case SchemaDiffKind.AddForeignKey:
+                AppendAddForeignKey(sb, item);
+                break;
+
+            case SchemaDiffKind.SetTableDescription:
+                AppendSetTableDescription(sb, item);
+                break;
+
+            case SchemaDiffKind.SetColumnDescription:
+                AppendSetColumnDescription(sb, item);
+                break;
+        }
+    }
+
+    /// <summary>CREATE TABLE 文（主キー制約を含む）を書き出す</summary>
+    protected abstract void AppendCreateTable(StringBuilder sb, SchemaDiffItem item);
+
+    /// <summary>列追加文を書き出す</summary>
+    protected abstract void AppendAddColumn(StringBuilder sb, SchemaDiffItem item);
+
+    /// <summary>列定義変更文を書き出す</summary>
+    protected abstract void AppendAlterColumn(StringBuilder sb, SchemaDiffItem item);
+
+    /// <summary>外部キー削除文を書き出す</summary>
+    protected abstract void AppendDropForeignKey(StringBuilder sb, SchemaDiffItem item);
+
+    /// <summary>列削除文を書き出す</summary>
+    protected abstract void AppendDropColumn(StringBuilder sb, SchemaDiffItem item);
+
+    /// <summary>テーブル削除文を書き出す</summary>
+    protected abstract void AppendDropTable(StringBuilder sb, SchemaDiffItem item);
+
+    /// <summary>外部キー追加文を書き出す</summary>
+    protected abstract void AppendAddForeignKey(StringBuilder sb, SchemaDiffItem item);
+
+    /// <summary>テーブル説明の設定文を書き出す</summary>
+    protected abstract void AppendSetTableDescription(StringBuilder sb, SchemaDiffItem item);
+
+    /// <summary>列説明の設定文を書き出す</summary>
+    protected abstract void AppendSetColumnDescription(StringBuilder sb, SchemaDiffItem item);
+}

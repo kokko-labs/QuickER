@@ -20,56 +20,12 @@ namespace QuickER.SqlServer;
 ///   <item>SetTableDescription / SetColumnDescription（拡張プロパティ MS_Description）</item>
 /// </list>
 /// </remarks>
-public sealed class SqlServerSyncScriptBuilder : ISyncScriptBuilder
+public sealed class SqlServerSyncScriptBuilder : SyncScriptBuilderBase
 {
-    /// <summary>選択された差分項目のみを T-SQL へ変換する</summary>
-    public string Build(IEnumerable<SchemaDiffItem> items)
-    {
-        var sb = new StringBuilder();
-        var list = items.Where(i => i.IsSelected).ToList();
-
-        WriteSection(sb, list, SchemaDiffKind.AddTable, AppendCreateTable);
-        WriteSection(sb, list, SchemaDiffKind.AddColumn, AppendAddColumn);
-        WriteSection(sb, list, SchemaDiffKind.AlterColumn, AppendAlterColumn);
-        WriteSection(sb, list, SchemaDiffKind.DropForeignKey, AppendDropForeignKey);
-        WriteSection(sb, list, SchemaDiffKind.DropColumn, AppendDropColumn);
-        WriteSection(sb, list, SchemaDiffKind.DropTable, AppendDropTable);
-        WriteSection(sb, list, SchemaDiffKind.AddForeignKey, AppendAddForeignKey);
-        WriteSection(sb, list, SchemaDiffKind.SetTableDescription, AppendSetTableDescription);
-        WriteSection(sb, list, SchemaDiffKind.SetColumnDescription, AppendSetColumnDescription);
-
-        return sb.ToString();
-    }
-
-    /// <summary>指定種別の差分のみを抽出し、見出しコメント付きで 1 セクション分を書き出す</summary>
-    private static void WriteSection(
-        StringBuilder sb,
-        List<SchemaDiffItem> all,
-        SchemaDiffKind kind,
-        System.Action<StringBuilder, SchemaDiffItem> writer
-    )
-    {
-        var subset = all.Where(i => i.Kind == kind).ToList();
-
-        if (subset.Count == 0)
-        {
-            return;
-        }
-
-        sb.AppendLine($"-- ===== {kind} ({subset.Count} items) =====");
-
-        foreach (var item in subset)
-        {
-            writer(sb, item);
-        }
-
-        sb.AppendLine();
-    }
-
     // ---------------- 各種 DDL ----------------
 
     /// <summary>CREATE TABLE 文（主キー制約を含む）を生成する</summary>
-    private static void AppendCreateTable(StringBuilder sb, SchemaDiffItem item)
+    protected override void AppendCreateTable(StringBuilder sb, SchemaDiffItem item)
     {
         var e = item.Entity!;
         var pks = e.Columns.Where(c => c.IsPrimaryKey).ToList();
@@ -79,7 +35,7 @@ public sealed class SqlServerSyncScriptBuilder : ISyncScriptBuilder
         {
             var col = e.Columns[i];
             var line =
-                $"    {SqlIdentifier.BracketSimple(col.Name)} {col.DataType} {GetNullabilityClause(col)}";
+                $"    {SqlIdentifier.BracketSimple(col.Name)} {col.DataType} {SyncScriptBuilderHelper.GetNullabilityClause(col)}";
 
             // 後続のカラム行、または PRIMARY KEY 制約行が続く場合は区切りのカンマを付ける
             if (i < e.Columns.Count - 1 || pks.Count > 0)
@@ -103,29 +59,29 @@ public sealed class SqlServerSyncScriptBuilder : ISyncScriptBuilder
     }
 
     /// <summary>ALTER TABLE ... ADD（列追加）文を生成する</summary>
-    private static void AppendAddColumn(StringBuilder sb, SchemaDiffItem item)
+    protected override void AppendAddColumn(StringBuilder sb, SchemaDiffItem item)
     {
         var col = item.Column!;
         sb.AppendLine(
             $"ALTER TABLE {SqlIdentifier.Bracket(item.TableName)} "
-                + $"ADD {SqlIdentifier.BracketSimple(col.Name)} {col.DataType} {GetNullabilityClause(col)};"
+                + $"ADD {SqlIdentifier.BracketSimple(col.Name)} {col.DataType} {SyncScriptBuilderHelper.GetNullabilityClause(col)};"
         );
         sb.AppendLine("GO");
     }
 
     /// <summary>ALTER TABLE ... ALTER COLUMN（列定義変更）文を生成する</summary>
-    private static void AppendAlterColumn(StringBuilder sb, SchemaDiffItem item)
+    protected override void AppendAlterColumn(StringBuilder sb, SchemaDiffItem item)
     {
         var col = item.Column!;
         sb.AppendLine(
             $"ALTER TABLE {SqlIdentifier.Bracket(item.TableName)} "
-                + $"ALTER COLUMN {SqlIdentifier.BracketSimple(col.Name)} {col.DataType} {GetNullabilityClause(col)};"
+                + $"ALTER COLUMN {SqlIdentifier.BracketSimple(col.Name)} {col.DataType} {SyncScriptBuilderHelper.GetNullabilityClause(col)};"
         );
         sb.AppendLine("GO");
     }
 
     /// <summary>ALTER TABLE ... DROP COLUMN（列削除）文を生成する</summary>
-    private static void AppendDropColumn(StringBuilder sb, SchemaDiffItem item)
+    protected override void AppendDropColumn(StringBuilder sb, SchemaDiffItem item)
     {
         sb.AppendLine(
             $"ALTER TABLE {SqlIdentifier.Bracket(item.TableName)} "
@@ -135,21 +91,21 @@ public sealed class SqlServerSyncScriptBuilder : ISyncScriptBuilder
     }
 
     /// <summary>DROP TABLE（テーブル削除）文を生成する</summary>
-    private static void AppendDropTable(StringBuilder sb, SchemaDiffItem item)
+    protected override void AppendDropTable(StringBuilder sb, SchemaDiffItem item)
     {
         sb.AppendLine($"DROP TABLE {SqlIdentifier.Bracket(item.TableName)};");
         sb.AppendLine("GO");
     }
 
     /// <summary>外部キー制約を追加する ALTER TABLE 文を生成する</summary>
-    private static void AppendAddForeignKey(StringBuilder sb, SchemaDiffItem item)
+    protected override void AppendAddForeignKey(StringBuilder sb, SchemaDiffItem item)
     {
         if (item.ChildEntity is null || item.ParentEntity is null)
         {
             return;
         }
 
-        var pkCol = ResolveReferencedColumn(item);
+        var pkCol = SyncScriptBuilderHelper.ResolveReferencedColumn(item);
 
         // 参照先列が特定できない場合は不正な DDL を出さず、コメントでスキップを明示する
         if (pkCol is null || item.ColumnName is null)
@@ -167,7 +123,9 @@ public sealed class SqlServerSyncScriptBuilder : ISyncScriptBuilder
         var fkName = string.IsNullOrWhiteSpace(item.Relationship?.ConstraintName)
             ? $"FK_{SqlIdentifier.SafeName(childTbl)}_{SqlIdentifier.SafeName(parentTbl)}"
             : item.Relationship.ConstraintName!;
-        var referentialActions = BuildReferentialActionClause(item.Relationship);
+        var referentialActions = SyncScriptBuilderHelper.BuildReferentialActionClause(
+            item.Relationship
+        );
         sb.AppendLine(
             $"ALTER TABLE {SqlIdentifier.Bracket(childTbl)} ADD CONSTRAINT [{SqlIdentifier.Escape(fkName)}] "
                 + $"FOREIGN KEY ({SqlIdentifier.BracketSimple(item.ColumnName)}) "
@@ -181,7 +139,7 @@ public sealed class SqlServerSyncScriptBuilder : ISyncScriptBuilder
     /// 制約名が判明していれば存在チェック付きで直接 DROP する 不明な場合は親子テーブル名から
     /// sys.foreign_keys を逆引きし、動的 SQL で削除する
     /// </remarks>
-    private static void AppendDropForeignKey(StringBuilder sb, SchemaDiffItem item)
+    protected override void AppendDropForeignKey(StringBuilder sb, SchemaDiffItem item)
     {
         if (item.ChildEntity is null || item.ParentEntity is null)
         {
@@ -224,11 +182,11 @@ public sealed class SqlServerSyncScriptBuilder : ISyncScriptBuilder
     // ---------------- MS_Description (拡張プロパティ) ----------------
 
     /// <summary>テーブルの説明（MS_Description）設定文を生成する</summary>
-    private static void AppendSetTableDescription(StringBuilder sb, SchemaDiffItem item) =>
+    protected override void AppendSetTableDescription(StringBuilder sb, SchemaDiffItem item) =>
         AppendDescriptionStatement(sb, item, columnLevel: false);
 
     /// <summary>カラムの説明（MS_Description）設定文を生成する</summary>
-    private static void AppendSetColumnDescription(StringBuilder sb, SchemaDiffItem item) =>
+    protected override void AppendSetColumnDescription(StringBuilder sb, SchemaDiffItem item) =>
         AppendDescriptionStatement(sb, item, columnLevel: true);
 
     /// <summary>拡張プロパティ MS_Description の設定・更新・削除文を生成する</summary>
@@ -294,36 +252,4 @@ public sealed class SqlServerSyncScriptBuilder : ISyncScriptBuilder
 
         sb.AppendLine("GO");
     }
-
-    /// <summary>外部キーの参照先列を差分情報から解決する</summary>
-    /// <remarks>明示指定された列を優先し、無ければ親テーブルの主キー先頭列にフォールバックする</remarks>
-    private static Column? ResolveReferencedColumn(SchemaDiffItem item)
-    {
-        if (item.Relationship?.SourceColumnId is not null)
-        {
-            var byId = item.ParentEntity?.Columns.FirstOrDefault(c =>
-                c.Id == item.Relationship.SourceColumnId
-            );
-
-            if (byId is not null)
-            {
-                return byId;
-            }
-        }
-
-        return item.ParentEntity?.Columns.FirstOrDefault(c => c.IsPrimaryKey);
-    }
-
-    /// <summary>NULL 許容句を返す（主キーまたは非 NULL 許容なら NOT NULL）</summary>
-    private static string GetNullabilityClause(Column column) =>
-        column.IsPrimaryKey || !column.IsNullable ? "NOT NULL" : "NULL";
-
-    /// <summary>外部キーの ON DELETE / ON UPDATE 参照アクション句を生成する</summary>
-    private static string BuildReferentialActionClause(Relationship? relationship) =>
-        relationship is null
-            ? string.Empty
-            : ForeignKeyReferentialActionHelper.BuildReferentialActionClause(
-                relationship.OnDelete,
-                relationship.OnUpdate
-            );
 }

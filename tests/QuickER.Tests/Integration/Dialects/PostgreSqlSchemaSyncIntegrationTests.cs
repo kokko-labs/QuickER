@@ -253,7 +253,9 @@ public sealed class PostgreSqlSchemaSyncIntegrationTests(PostgreSqlContainerFixt
             IsSelected = true,
         };
 
-        var script = _builder.Build(new[] { invalidAlter });
+        var script = _builder.Build(
+            new SyncPlanner().BuildPlan(new[] { invalidAlter }, new SyncDialectCapabilities())
+        );
         var result = await _executor.ExecuteAsync(settings, script, Ct);
 
         result.Committed.Should().BeFalse("不正な型変換は失敗するはず");
@@ -297,7 +299,9 @@ public sealed class PostgreSqlSchemaSyncIntegrationTests(PostgreSqlContainerFixt
 
     private async Task ApplyAsync(DbConnectionSettings settings, IEnumerable<SchemaDiffItem> items)
     {
-        var script = _builder.Build(items);
+        var script = _builder.Build(
+            new SyncPlanner().BuildPlan(items, new SyncDialectCapabilities())
+        );
         var result = await _executor.ExecuteAsync(settings, script, Ct);
         result.Committed.Should().BeTrue($"同期に失敗: {result.Error}\nSQL:\n{script}");
     }

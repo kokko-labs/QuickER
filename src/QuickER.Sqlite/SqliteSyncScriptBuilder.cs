@@ -1,4 +1,3 @@
-using System.Collections.Generic;
 using QuickER.Provider;
 
 namespace QuickER.Sqlite;
@@ -18,7 +17,7 @@ namespace QuickER.Sqlite;
 public sealed class SqliteSyncScriptBuilder : ISyncScriptBuilder
 {
     /// <summary>常に <see cref="NotSupportedException"/> を投げる（SQLite の同期は未対応）</summary>
-    public string Build(IEnumerable<SchemaDiffItem> items) =>
+    public string Build(SyncPlan plan) =>
         throw new NotSupportedException(
             QuickER.Provider.Resources.Strings.Sync_Sqlite_NotSupported
         );

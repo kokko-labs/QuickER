@@ -30,6 +30,9 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
     /// <summary>確認・通知ダイアログの表示先（テストではスタブへ差し替える）</summary>
     private readonly IDialogService _dialogs;
 
+    /// <summary>差分から方言中立の実行計画を組み立てるプランナー</summary>
+    private readonly SyncPlanner _planner = new();
+
     /// <summary>差分項目一覧（UI のチェックボックスツリー用）</summary>
     public ObservableCollection<SchemaDiffItem> DiffItems { get; } = new();
 
@@ -147,10 +150,11 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
         }
     }
 
-    /// <summary>選択中の差分から T-SQL プレビューを再生成する（選択変更時に呼ぶ）</summary>
+    /// <summary>選択中の差分から実行計画を組み立て、T-SQL プレビューを再生成する（選択変更時に呼ぶ）</summary>
     public void UpdatePreview()
     {
-        ScriptPreview = _provider.SyncScriptBuilder.Build(DiffItems);
+        var plan = _planner.BuildPlan(DiffItems, _provider.SyncCapabilities);
+        ScriptPreview = _provider.SyncScriptBuilder.Build(plan);
     }
 
     /// <summary>選択可能なすべての差分を選択する</summary>

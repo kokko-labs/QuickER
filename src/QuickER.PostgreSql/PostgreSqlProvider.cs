@@ -30,6 +30,9 @@ public sealed class PostgreSqlProvider : IDatabaseProvider
     public ISyncScriptBuilder SyncScriptBuilder { get; } = new PostgreSqlSyncScriptBuilder();
 
     /// <inheritdoc />
+    public SyncDialectCapabilities SyncCapabilities { get; } = new();
+
+    /// <inheritdoc />
     public ISchemaSyncExecutor SyncExecutor { get; } = new PostgreSqlSchemaSyncExecutor();
 
     /// <inheritdoc />

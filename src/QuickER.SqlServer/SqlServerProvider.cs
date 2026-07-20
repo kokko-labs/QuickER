@@ -30,6 +30,9 @@ public sealed class SqlServerProvider : IDatabaseProvider
     public ISyncScriptBuilder SyncScriptBuilder { get; } = new SqlServerSyncScriptBuilder();
 
     /// <inheritdoc />
+    public SyncDialectCapabilities SyncCapabilities { get; } = new();
+
+    /// <inheritdoc />
     public ISchemaSyncExecutor SyncExecutor { get; } = new SqlServerSchemaSyncExecutor();
 
     /// <inheritdoc />

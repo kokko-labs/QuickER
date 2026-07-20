@@ -155,6 +155,8 @@ public class MainViewModelTargetDbmsTests
 
         public ISyncScriptBuilder SyncScriptBuilder { get; } = new NullSyncScriptBuilder();
 
+        public SyncDialectCapabilities SyncCapabilities { get; } = new();
+
         public ISchemaSyncExecutor SyncExecutor { get; } = new NullSyncExecutor();
 
         public IDdlGenerator DdlGenerator { get; } = new NullDdlGenerator();
@@ -210,7 +212,7 @@ public class MainViewModelTargetDbmsTests
 
     private sealed class NullSyncScriptBuilder : ISyncScriptBuilder
     {
-        public string Build(IEnumerable<SchemaDiffItem> items) => string.Empty;
+        public string Build(SyncPlan plan) => string.Empty;
     }
 
     private sealed class NullSyncExecutor : ISchemaSyncExecutor

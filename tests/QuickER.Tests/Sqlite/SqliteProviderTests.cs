@@ -125,7 +125,7 @@ public class SqliteProviderTests
     {
         var provider = new SqliteProvider();
 
-        var act = () => provider.SyncScriptBuilder.Build([]);
+        var act = () => provider.SyncScriptBuilder.Build(new SyncPlan());
 
         // 製品コードと同じ resx キーから期待値を導出し、カルチャに依らず完全一致で検証する
         act.Should()

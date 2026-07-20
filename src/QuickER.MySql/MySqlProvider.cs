@@ -30,6 +30,11 @@ public sealed class MySqlProvider : IDatabaseProvider
     public ISyncScriptBuilder SyncScriptBuilder { get; } = new MySqlSyncScriptBuilder();
 
     /// <inheritdoc />
+    /// <remarks>MySQL は <c>ALTER TABLE ... MODIFY ... AFTER</c> による列順のネイティブ変更が可能</remarks>
+    public SyncDialectCapabilities SyncCapabilities { get; } =
+        new() { ColumnReorder = ColumnReorderMode.Native };
+
+    /// <inheritdoc />
     public ISchemaSyncExecutor SyncExecutor { get; } = new MySqlSchemaSyncExecutor();
 
     /// <inheritdoc />

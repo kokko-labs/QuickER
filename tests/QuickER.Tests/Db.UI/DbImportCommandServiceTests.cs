@@ -165,6 +165,8 @@ public class DbImportCommandServiceTests
 
         public ISyncScriptBuilder SyncScriptBuilder => null!;
 
+        public SyncDialectCapabilities SyncCapabilities => null!;
+
         public ISchemaSyncExecutor SyncExecutor => null!;
 
         public IDdlGenerator DdlGenerator => null!;
