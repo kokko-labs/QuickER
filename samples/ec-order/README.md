@@ -4,8 +4,11 @@
 
 A minimal sample that lets you actually run the C# code QuickER generated from an ER diagram, with no external DB.
 The subject is an e-commerce order domain (customers, products, orders, order lines), and it demonstrates
-CRUD, graph save, Include, raw-SQL aggregation, and delete cascade against a SQLite file DB via the custom
-Repository (`RepositoryDialect=sqlite`).
+CRUD, graph save, Include, raw-SQL aggregation, and delete cascade against a SQLite file DB via the QuickER
+Repository (SQLite dialect).
+
+This sample owns the demonstrations of the generated code's core features; only the scenarios specific to the
+three-tier (HTTP + JSON) setup are covered separately by [ec-order-remote](../ec-order-remote/README.md).
 
 ## Structure
 

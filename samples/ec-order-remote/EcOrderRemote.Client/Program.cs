@@ -6,6 +6,8 @@ using Microsoft.Extensions.DependencyInjection;
 // 別プロセスのサーバー（EcOrderRemote.Server）を HTTP + JSON 越しに呼び出すサンプルクライアント。
 // 呼び出しコードは DB 直結時とまったく同じインターフェイス（I{Entity}RemoteRepository）で書けており、
 // 違いは DI 登録が AddGeneratedHttpRemoteRepositories 1 行に変わっているだけ、という点が見どころ。
+// シナリオは「HTTP 越しであること」が意味を持つ 3 点（グラフ保存後の RowState 確定・射影 DTO の転送・
+// SaveConflictException の型復元）に絞っている。基本の CRUD・Include・生 SQL などの実演は samples/ec-order を参照。
 
 // 日本語出力の文字化けを避けるため標準出力を UTF-8 にする（リダイレクト時の失敗は無視）
 try
@@ -34,21 +36,13 @@ var orders = provider.GetRequiredService<IOrderRemoteRepository>();
 // 最大 30 回×500ms リトライし、その間の接続失敗（HttpRequestException）は吸収する。
 await WaitForServerAsync(customers);
 
-// ---- 1. 顧客・商品のマスタ登録（InsertAsync が HTTP 越しに機能する） ----
+// ---- 1. 事前データの登録（以降のシナリオが参照する顧客 1 件・商品 2 件） ----
 await customers.InsertAsync(
     new CustomerEntity
     {
         CustomerId = 1,
         Name = "山田 太郎",
         Email = "taro@example.com",
-    }
-);
-await customers.InsertAsync(
-    new CustomerEntity
-    {
-        CustomerId = 2,
-        Name = "鈴木 花子",
-        Email = null,
     }
 );
 
@@ -69,9 +63,7 @@ await products.InsertAsync(
     }
 );
 
-Console.WriteLine("[1] 顧客 2 件・商品 2 件を HTTP 越しに登録しました。");
-Check((await customers.GetAllAsync()).Count, 2, "顧客件数");
-Check((await products.GetAllAsync()).Count, 2, "商品件数");
+Console.WriteLine("[1] 事前データとして顧客 1 件・商品 2 件を HTTP 越しに登録しました。");
 Console.WriteLine();
 
 // ---- 2. 注文グラフのまとめて保存（MarkAdded → SaveAsync）と、保存後の RowState 確定 ----
@@ -130,24 +122,7 @@ Check(order1000.HasChanges, false, "保存後の注文 1000 の RowState 確定"
 Check(order1001.HasChanges, false, "保存後の注文 1001 の RowState 確定");
 Console.WriteLine();
 
-// ---- 3. 名前付きクエリ（DSL 条件＋ページング）のリモート転送 ----
-// GetByCustomer は「顧客IDで注文を注文ID降順に検索（ページング付き）」の DSL クエリ。
-// 顧客 1 の注文は 1001, 1000（降順）。take:1, skip:0 → 先頭 1001、skip:1 → 2 件目 1000。
-var firstPage = await orders.GetByCustomerAsync(1, take: 1, skip: 0);
-Check(firstPage.Count, 1, "GetByCustomer(take:1, skip:0) の件数");
-Check(firstPage[0].OrderId, 1001, "注文ID降順の先頭");
-
-var secondPage = await orders.GetByCustomerAsync(1, take: 1, skip: 1);
-Check(secondPage.Count, 1, "GetByCustomer(take:1, skip:1) の件数");
-Check(secondPage[0].OrderId, 1000, "注文ID降順の 2 件目");
-
-Console.WriteLine("[3] 名前付きクエリ（DSL＋ページング）を HTTP 越しに実行しました:");
-Console.WriteLine(
-    $"    先頭ページ 注文ID={firstPage[0].OrderId} / 2 ページ目 注文ID={secondPage[0].OrderId}"
-);
-Console.WriteLine();
-
-// ---- 4. 名前付きクエリ（射影 DTO）のリモート転送 ----
+// ---- 3. 名前付きクエリ（射影 DTO）のリモート転送 ----
 // GetSummaries は注文サマリー（注文ID・注文日時・備考）を注文ID降順で返す射影クエリ。
 // 射影 DTO（OrderSummaryRow）が JSON でクライアントまで届くことを確認する。
 var summaries = await orders.GetSummariesAsync(1);
@@ -157,7 +132,7 @@ Check(summaries[1].OrderId, 1000, "サマリー 2 件目の注文ID（降順）"
 Check(summaries[0].Memo, "明細なしの注文", "サマリー先頭の備考");
 Check(summaries[1].Memo, "初回注文", "サマリー 2 件目の備考");
 
-Console.WriteLine("[4] 名前付きクエリ（射影 DTO）を HTTP 越しに取得しました:");
+Console.WriteLine("[3] 名前付きクエリ（射影 DTO）を HTTP 越しに取得しました:");
 
 foreach (var row in summaries)
 {
@@ -168,7 +143,7 @@ foreach (var row in summaries)
 
 Console.WriteLine();
 
-// ---- 5. SaveConflictException の HTTP 409 経由の型復元 ----
+// ---- 4. SaveConflictException の HTTP 409 経由の型復元 ----
 // 存在しない注文を更新保存（insertWhenUpdateMissing=false）すると、サーバー側で楽観的競合となり
 // SaveConflictException が投げられる。これは HTTP 409＋構造化 JSON を経て、クライアント側でも
 // 同じ SaveConflictException として復元される＝直結時とまったく同じ catch が書ける、という実演。
@@ -195,26 +170,8 @@ catch (SaveConflictException)
 
 Check(conflictCaught, true, "SaveConflictException の HTTP 409 経由の型復元");
 Console.WriteLine(
-    "[5] 存在しない注文の更新保存で SaveConflictException を HTTP 越しに捕捉しました。"
+    "[4] 存在しない注文の更新保存で SaveConflictException を HTTP 越しに捕捉しました。"
 );
-Console.WriteLine();
-
-// ---- 6. 更新（UpdateAsync）と削除（DeleteAsync）が HTTP 越しに機能する ----
-var toUpdate = await customers.GetByIdAsync(1);
-toUpdate!.Name = "山田 太郎（改名）";
-var updated = await customers.UpdateAsync(toUpdate);
-Check(updated, true, "顧客の更新");
-
-var reloaded = await customers.GetByIdAsync(1);
-Console.WriteLine($"[6-a] 顧客 1 を HTTP 越しに更新しました: {reloaded!.Name}");
-Check(reloaded.Name, "山田 太郎（改名）", "更新後の顧客名");
-
-// 注文を持たない顧客 2 を削除する（主キー指定の DeleteAsync）
-var deleted = await customers.DeleteAsync(2);
-Check(deleted, true, "顧客 2 の削除");
-
-Console.WriteLine("[6-b] 顧客 2 を HTTP 越しに削除しました。");
-Check((await customers.GetAllAsync()).Count, 1, "削除後の顧客件数");
 Console.WriteLine();
 
 Console.WriteLine("すべてのシナリオが成功しました。");

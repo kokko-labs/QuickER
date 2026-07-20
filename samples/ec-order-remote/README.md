@@ -2,34 +2,40 @@
 
 *[日本語](README.ja.md) | English*
 
-A sample that runs a three-tier setup (client → HTTP + JSON → server → SQLite) using only the code
+A minimal sample that runs a three-tier setup (client → HTTP + JSON → server → SQLite) using only the code
 QuickER generated from an ER diagram with "remote service generation" (`GenerateRemoteServices`).
-The subject is the same e-commerce order domain as [ec-order](../ec-order/README.md) (customers, products,
-orders, order lines), plus two named queries (search orders by customer, and a projected order summary).
+The subject is the same e-commerce order domain as [ec-order](../ec-order/README.md), which covers the
+demonstrations of basic CRUD, graph save, Include, raw SQL, and so on. This sample's scenarios are limited to
+the points where going over HTTP actually matters:
 
-The client's calling code is written against exactly the same interfaces (`I{Entity}RemoteRepository`) as the
-DB-direct case; the only difference is that DI registration becomes a single `AddGeneratedHttpRemoteRepositories`
-line. The generated `Http{Entity}RemoteRepository` (client) and `MapGeneratedRemoteEndpoints` (server) wire the
-two sides together over HTTP + JSON automatically.
+- **Switching with a single DI line** — the client's calling code stays on exactly the same interfaces
+  (`I{Entity}RemoteRepository`) as the DB-direct case; the only difference is that DI registration becomes a
+  single `AddGeneratedHttpRemoteRepositories` line
+- **RowState settles after save** — once a graph save succeeds, the local `HasChanges` settles on the client
+  too, with the same semantics as `EntityGraphSaver.AcceptChanges` in the DB-direct case
+- **Remote transfer of named queries** — a projection DTO (`OrderSummaryRow`) reaches the client as JSON
+- **Type restoration of `SaveConflictException`** — an optimistic conflict on the server is restored on the
+  client as the same exception type via an HTTP 409 plus structured JSON (you can write exactly the same
+  `catch` as in the DB-direct case)
 
 ## Structure
 
 | File | Role |
 |---|---|
-| `EcOrderRemote.json` | The ER diagram (the GUI save format). Includes two named queries. Open and edit it in the GUI |
-| `quicker.json` | The CLI generation options (namespace, output file name, and `GenerateRemoteServices=true`) |
+| `EcOrderRemote.json` | The ER diagram (includes two named queries). Open and edit it in the GUI |
+| `quicker.json` | The CLI generation options (`GenerateRemoteServices=true`, etc.) |
 | `EcOrderRemote.sql` | The SQLite DDL generated from the diagram (checked in) |
-| `Generated/EcOrderRemote.g.cs` | The main generated code (entities, custom SQLite repositories, remote contracts, HTTP client, DI extensions; checked in) |
-| `Generated/EcOrderRemote.RemoteServer.g.cs` | The server generated code (`MapGeneratedRemoteEndpoints`, Minimal API). A separate file requiring ASP.NET Core; checked in |
+| `Generated/EcOrderRemote.g.cs` | The main generated code (entities, repositories, remote contracts, HTTP client, DI extensions; checked in) |
+| `Generated/EcOrderRemote.RemoteServer.g.cs` | The server generated code (`MapGeneratedRemoteEndpoints`, Minimal API; checked in) |
 | `EcOrderRemote.Shared/` | A shared class library that links only the main generated code (the base for both client and server) |
 | `EcOrderRemote.Server/` | A web app (`Microsoft.NET.Sdk.Web`) that links the server generated code and listens over SQLite |
-| `EcOrderRemote.Client/` | A console app that uses only the HTTP client implementations and verifies each scenario |
+| `EcOrderRemote.Client/` | A console app that verifies the remote-specific scenarios using only the HTTP client implementations |
 
-None of the projects reference the QuickER main projects at all; like a user's own project, they reference only
-NuGet packages (`Microsoft.Data.Sqlite`, etc.) and the ASP.NET Core FrameworkReference (server only). Because the
-server generated code requires ASP.NET Core, of the two files the CLI writes to the same output directory only the
-main generated code is linked in Shared, while the server generated code is linked in the Server project (which
-uses the Web SDK).
+Because the server generated code requires ASP.NET Core, of the two files the CLI writes to the same output
+directory only the main generated code is linked in Shared, while the server generated code is linked in the
+Server project (which uses the Web SDK) — a useful reference for placing the two files in your own projects.
+None of the projects reference the QuickER main projects; they reference only NuGet packages and the ASP.NET Core
+FrameworkReference (server only).
 
 ## Run it
 
@@ -62,28 +68,7 @@ dotnet run --project samples/ec-order-remote/EcOrderRemote.Server -- http://127.
 dotnet run --project samples/ec-order-remote/EcOrderRemote.Client -- http://127.0.0.1:5299
 ```
 
-## Highlights
-
-- **The calling code is identical to the DB-direct case**: the client just calls CRUD, save, and queries on
-  interfaces like `ICustomerRemoteRepository`. Swap the DI registration for `AddGeneratedSqliteRepositories` (DB-direct)
-  and the same code runs locally instead.
-- **Remote transfer of named queries**: `GetByCustomerAsync` (a DSL condition plus paging) and `GetSummariesAsync`
-  (returning a projection DTO) return the same results over HTTP (the projection `OrderSummaryRow` round-trips as
-  JSON as well).
-- **Type restoration of `SaveConflictException`**: an update-save of a non-existent order becomes an optimistic
-  conflict on the server, and via an HTTP 409 plus structured JSON it is restored on the client as the same
-  `SaveConflictException` — so you can write exactly the same `catch` as in the DB-direct case.
-- **RowState settles after save**: once a graph save succeeds, the local `HasChanges` settles to `false` on the
-  client too (the same semantics as `EntityGraphSaver.AcceptChanges` in the DB-direct case).
-
-## Open the diagram in the GUI
-
-`EcOrderRemote.json` is exactly the save format of the GUI (QuickER.Gui). Launch the GUI and open
-`samples/ec-order-remote/EcOrderRemote.json` to view and edit the diagram (including its named queries).
-
 ## Regenerate the generated code / DDL
-
-### Regenerate with the real CLI
 
 ```powershell
 dotnet run --project src/QuickER.Cli -- generate `
@@ -93,20 +78,11 @@ dotnet run --project src/QuickER.Cli -- generate `
   --config samples/ec-order-remote/quicker.json
 ```
 
-`GenerateRemoteServices` is already set in `quicker.json` (the `--generate-remote-services` flag is equivalent). Both the
-main generated file and the server generated file are written to the same `--out`.
-
-### Regenerate everything at once with the drift tests' regeneration mode
-
-After changing a template or the like, you can regenerate them with the same single command as the existing
-fixtures.
-
-```powershell
-$env:QUICKER_REGEN_FIXTURES=1; dotnet test tests/QuickER.Tests/QuickER.Tests.csproj --filter "FullyQualifiedName~Drift"; $env:QUICKER_REGEN_FIXTURES=$null
-```
-
-After regenerating, run the same tests again without the environment variable and confirm they are green (no drift).
+`GenerateRemoteServices` is already set in `quicker.json`; both the main generated file and the server generated
+file are written to the same `--out`. The procedure for regenerating everything at once with the drift tests'
+regeneration mode is shared with [ec-order](../ec-order/README.md).
 
 ## Further documentation
 
-- For details on code generation, including remote service generation, see [`docs/code-generation.md`](../../docs/code-generation.md).
+For the specification of remote service generation, see the remote services section of
+[`docs/code-generation.md`](../../docs/code-generation.md).

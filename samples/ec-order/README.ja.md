@@ -4,8 +4,11 @@
 
 QuickER が ER 図から生成した C# コードを、外部 DB なしで実際に動かせる最小サンプルです。
 題材は EC の注文ドメイン（顧客・商品・注文・注文明細）で、SQLite ファイル DB に対して
-QuickER 版 Repository（`RepositoryDialect=sqlite`）による CRUD・グラフ保存・Include・生 SQL 集計・
+QuickER 版 Repository（SQLite 方言）による CRUD・グラフ保存・Include・生 SQL 集計・
 削除カスケードを実演します。
+
+生成コードの基本機能の実演はこのサンプルが担い、3 階層構成（HTTP + JSON）に固有のシナリオだけを
+[ec-order-remote](../ec-order-remote/README.ja.md) が別途担います。
 
 ## 構成
 
