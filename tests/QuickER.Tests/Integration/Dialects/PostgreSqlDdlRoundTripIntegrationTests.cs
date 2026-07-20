@@ -32,14 +32,15 @@ public sealed class PostgreSqlDdlRoundTripIntegrationTests(PostgreSqlContainerFi
         await fixture.ResetSchemaAsync(Ct);
 
         // ---------- 図の定義 ----------
-        // 親: 顧客（日本語テーブル名・日本語列名の 1 組）
-        var customer = new Entity { TableName = "顧客" };
+        // 親: 顧客（日本語テーブル名・日本語列名の 1 組・テーブル/列の説明つき。説明はシングルクォート込みで往復検証）
+        var customer = new Entity { TableName = "顧客", Description = "顧客マスタ（It's）" };
         var customerId = new Column
         {
             Name = "顧客ID",
             DataType = "integer",
             IsPrimaryKey = true,
             IsNullable = false,
+            Description = "顧客の識別子",
         };
         customer.Columns.Add(customerId);
         customer.Columns.Add(
@@ -48,6 +49,7 @@ public sealed class PostgreSqlDdlRoundTripIntegrationTests(PostgreSqlContainerFi
                 Name = "氏名",
                 DataType = "varchar(50)",
                 IsNullable = false,
+                Description = "氏名（フルネーム）",
             }
         );
         customer.Columns.Add(
@@ -164,6 +166,17 @@ public sealed class PostgreSqlDdlRoundTripIntegrationTests(PostgreSqlContainerFi
                     ("備考", "text", true, false),
                 }
             );
+
+        // テーブル・列の説明が DDL → 実行 → 取込で往復一致する（シングルクォート込み）
+        importedCustomer.Description.Should().Be("顧客マスタ（It's）");
+        importedCustomer
+            .Columns.Single(c => c.Name == "顧客ID")
+            .Description.Should()
+            .Be("顧客の識別子");
+        importedCustomer
+            .Columns.Single(c => c.Name == "氏名")
+            .Description.Should()
+            .Be("氏名（フルネーム）");
 
         // orders テーブル: numeric(10,2) の再現・FK 列フラグ
         var importedOrder = result.Entities.Single(e => e.TableName == "orders");

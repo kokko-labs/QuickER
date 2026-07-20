@@ -230,4 +230,97 @@ public class PostgreSqlDdlGeneratorTests
         sql.Should().Contain("CREATE TABLE \"wei\"\"rd\"");
         sql.Should().Contain("\"co\"\"l\" integer NOT NULL");
     }
+
+    /// <summary>テーブル・列の説明が全 CREATE / FK の後の COMMENT ON として出力されることを検証する</summary>
+    [Fact(DisplayName = "Build: テーブル・列の説明が COMMENT ON で出力される")]
+    public void Build_EmitsCommentOnStatements()
+    {
+        var diagram = new ErDiagram
+        {
+            Entities =
+            {
+                new Entity
+                {
+                    TableName = "User",
+                    Description = "利用者マスタ",
+                    Columns =
+                    {
+                        new Column
+                        {
+                            Name = "Id",
+                            DataType = "integer",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                        new Column
+                        {
+                            Name = "Name",
+                            DataType = "varchar(50)",
+                            Description = "氏名",
+                        },
+                    },
+                },
+            },
+        };
+
+        var sql = new PostgreSqlDdlGenerator().Build(diagram);
+
+        sql.Should().Contain("COMMENT ON TABLE \"User\" IS '利用者マスタ';");
+        sql.Should().Contain("COMMENT ON COLUMN \"User\".\"Name\" IS '氏名';");
+    }
+
+    /// <summary>説明に含まれるシングルクォートが二重化エスケープされることを検証する</summary>
+    [Fact(DisplayName = "Build: 説明のシングルクォートがエスケープされる")]
+    public void Build_EscapesQuotesInComments()
+    {
+        var diagram = new ErDiagram
+        {
+            Entities =
+            {
+                new Entity
+                {
+                    TableName = "T",
+                    Description = "It's a table",
+                    Columns =
+                    {
+                        new Column { Name = "C", DataType = "integer" },
+                    },
+                },
+            },
+        };
+
+        var sql = new PostgreSqlDdlGenerator().Build(diagram);
+
+        sql.Should().Contain("COMMENT ON TABLE \"T\" IS 'It''s a table';");
+    }
+
+    /// <summary>説明が無い図では COMMENT ON が一切出力されない（従来出力と不変）ことを検証する</summary>
+    [Fact(DisplayName = "Build: 説明なしの図では COMMENT ON を出力しない")]
+    public void Build_NoDescription_EmitsNoCommentOn()
+    {
+        var diagram = new ErDiagram
+        {
+            Entities =
+            {
+                new Entity
+                {
+                    TableName = "T",
+                    Columns =
+                    {
+                        new Column
+                        {
+                            Name = "Id",
+                            DataType = "integer",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                    },
+                },
+            },
+        };
+
+        var sql = new PostgreSqlDdlGenerator().Build(diagram);
+
+        sql.Should().NotContain("COMMENT ON");
+    }
 }

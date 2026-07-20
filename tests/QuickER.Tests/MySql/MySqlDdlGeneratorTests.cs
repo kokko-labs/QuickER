@@ -258,4 +258,108 @@ public class MySqlDdlGeneratorTests
         sql.Should().Contain("CREATE TABLE `wei``rd`");
         sql.Should().Contain("`co``l` int NOT NULL");
     }
+
+    /// <summary>テーブル説明が閉じ括弧後の COMMENT= 句、列説明が列定義インライン COMMENT で出力されることを検証する</summary>
+    [Fact(
+        DisplayName = "Build: テーブル説明は COMMENT= 句、列説明はインライン COMMENT で出力される"
+    )]
+    public void Build_EmitsTableAndColumnComments()
+    {
+        var diagram = new ErDiagram
+        {
+            Entities =
+            {
+                new Entity
+                {
+                    TableName = "User",
+                    Description = "利用者マスタ",
+                    Columns =
+                    {
+                        new Column
+                        {
+                            Name = "Id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                        new Column
+                        {
+                            Name = "Name",
+                            DataType = "varchar(50)",
+                            IsNullable = true,
+                            Description = "氏名",
+                        },
+                    },
+                },
+            },
+        };
+
+        var sql = new MySqlDdlGenerator().Build(diagram);
+
+        // 列説明は列定義インラインの COMMENT（区切りカンマの前）
+        sql.Should().Contain("`Name` varchar(50) NULL COMMENT '氏名',");
+        // テーブル説明は閉じ括弧後の COMMENT= 句
+        sql.Should().Contain(") COMMENT='利用者マスタ';");
+    }
+
+    /// <summary>説明に含まれるシングルクォートが二重化エスケープされることを検証する</summary>
+    [Fact(DisplayName = "Build: 説明のシングルクォートがエスケープされる")]
+    public void Build_EscapesQuotesInComments()
+    {
+        var diagram = new ErDiagram
+        {
+            Entities =
+            {
+                new Entity
+                {
+                    TableName = "T",
+                    Description = "It's a table",
+                    Columns =
+                    {
+                        new Column
+                        {
+                            Name = "C",
+                            DataType = "int",
+                            Description = "it's a column",
+                        },
+                    },
+                },
+            },
+        };
+
+        var sql = new MySqlDdlGenerator().Build(diagram);
+
+        sql.Should().Contain("COMMENT 'it''s a column'");
+        sql.Should().Contain(") COMMENT='It''s a table';");
+    }
+
+    /// <summary>説明が無い図では COMMENT が一切出力されない（従来出力と不変）ことを検証する</summary>
+    [Fact(DisplayName = "Build: 説明なしの図では COMMENT を出力しない")]
+    public void Build_NoDescription_EmitsNoComment()
+    {
+        var diagram = new ErDiagram
+        {
+            Entities =
+            {
+                new Entity
+                {
+                    TableName = "T",
+                    Columns =
+                    {
+                        new Column
+                        {
+                            Name = "Id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                    },
+                },
+            },
+        };
+
+        var sql = new MySqlDdlGenerator().Build(diagram);
+
+        sql.Should().NotContain("COMMENT");
+    }
 }
