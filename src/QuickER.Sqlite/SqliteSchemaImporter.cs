@@ -37,6 +37,7 @@ public class SqliteSchemaImporter : ISchemaImporter
         {
             Entities = result.Entities,
             Relationships = result.Relationships,
+            AuxiliaryObjects = result.AuxiliaryObjects,
         };
     }
 
@@ -48,6 +49,9 @@ public class SqliteSchemaImporter : ISchemaImporter
 
         /// <summary>取得したリレーション一覧</summary>
         public List<Relationship> Relationships { get; init; } = new();
+
+        /// <summary>取得した補助オブジェクト（インデックス・トリガー・テーブルレベル一意制約）</summary>
+        public List<SchemaAuxiliaryObject> AuxiliaryObjects { get; init; } = new();
     }
 
     /// <summary>既に開かれた接続でスキーマを取得する（テストや接続再利用向け）</summary>
@@ -67,11 +71,13 @@ public class SqliteSchemaImporter : ISchemaImporter
 
         var uniqueSets = await LoadUniqueColumnSetsAsync(conn, tables, ct).ConfigureAwait(false);
         var rels = await LoadForeignKeysAsync(conn, tables, uniqueSets, ct).ConfigureAwait(false);
+        var aux = await LoadAuxiliaryObjectsAsync(conn, tables, ct).ConfigureAwait(false);
 
         return new SchemaResult
         {
             Entities = tables.Values.Select(t => t.Entity).ToList(),
             Relationships = rels,
+            AuxiliaryObjects = aux,
         };
     }
 
@@ -261,6 +267,133 @@ ORDER BY name;";
         }
 
         return builder.Build(tables, uniqueSets);
+    }
+
+    /// <summary>
+    /// テーブルに付随する補助オブジェクト（インデックス・トリガー・テーブルレベル一意制約）を収集する。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// インデックス・トリガーは <c>sqlite_master</c> から <c>sql IS NOT NULL</c>（＝ユーザー定義の CREATE 文がある）
+    /// かつ <c>sqlite_</c> 接頭辞でないものを取り込み、CREATE SQL 全文を温存する（自動インデックス
+    /// <c>sqlite_autoindex_*</c> は <c>sql IS NULL</c> のため除外される）。
+    /// </para>
+    /// <para>
+    /// テーブルレベルの一意制約（<c>CREATE TABLE</c> 内の <c>UNIQUE (...)</c>）は単体の SQL を持たない自動インデックス
+    /// （<c>PRAGMA index_list</c> の <c>origin='u'</c>）として現れるため、<c>PRAGMA index_info</c> で構成列を取得し
+    /// 構造化して保持する（再構築時にテーブルレベル UNIQUE 句として再現する）。標準の <c>CREATE UNIQUE INDEX</c>
+    /// （<c>origin='c'</c>）は SQL を持つのでインデックス側で温存され、二重取得にならない。
+    /// </para>
+    /// </remarks>
+    private static async Task<List<SchemaAuxiliaryObject>> LoadAuxiliaryObjectsAsync(
+        SqliteConnection conn,
+        Dictionary<string, SchemaTableEntry> tables,
+        CancellationToken ct
+    )
+    {
+        var aux = new List<SchemaAuxiliaryObject>();
+
+        // ---- インデックス・トリガー（CREATE SQL 全文を温存する）----
+        await using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText =
+                @"
+SELECT type, name, tbl_name, sql
+FROM sqlite_master
+WHERE type IN ('index','trigger') AND sql IS NOT NULL AND name NOT LIKE 'sqlite\_%' ESCAPE '\'
+ORDER BY name;";
+            await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+
+            while (await reader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                var type = reader.GetString(0);
+                var name = reader.GetString(1);
+                var tableName = reader.GetString(2);
+                var sql = reader.GetString(3);
+
+                // 取込対象テーブルに紐づくものだけを収集する（ビュー等に対する定義は対象外）
+                if (!tables.ContainsKey(tableName))
+                {
+                    continue;
+                }
+
+                aux.Add(
+                    new SchemaAuxiliaryObject
+                    {
+                        TableName = tableName,
+                        Name = name,
+                        Kind = string.Equals(type, "trigger", StringComparison.OrdinalIgnoreCase)
+                            ? SchemaAuxiliaryObjectKind.Trigger
+                            : SchemaAuxiliaryObjectKind.Index,
+                        CreateSql = sql,
+                    }
+                );
+            }
+        }
+
+        // ---- テーブルレベル一意制約（origin='u'・構成列を構造化して保持する）----
+        foreach (var entry in tables.Values)
+        {
+            var uniqueIndexNames = new List<string>();
+
+            await using (var listCmd = conn.CreateCommand())
+            {
+                listCmd.CommandText = $"PRAGMA index_list({SqliteIdentifier.Quote(entry.Key)});";
+                await using var listReader = await listCmd
+                    .ExecuteReaderAsync(ct)
+                    .ConfigureAwait(false);
+
+                while (await listReader.ReadAsync(ct).ConfigureAwait(false))
+                {
+                    var indexName = listReader.GetString(1);
+                    var isUnique = listReader.GetInt64(2) != 0;
+                    var origin = listReader.IsDBNull(3) ? string.Empty : listReader.GetString(3);
+
+                    // origin='u'＝CREATE TABLE 内の UNIQUE 制約のみ（'c'＝CREATE UNIQUE INDEX は SQL 側で温存済み）
+                    if (isUnique && string.Equals(origin, "u", StringComparison.OrdinalIgnoreCase))
+                    {
+                        uniqueIndexNames.Add(indexName);
+                    }
+                }
+            }
+
+            foreach (var indexName in uniqueIndexNames)
+            {
+                var columns = new List<string>();
+
+                await using var infoCmd = conn.CreateCommand();
+                infoCmd.CommandText = $"PRAGMA index_info({SqliteIdentifier.Quote(indexName)});";
+                await using var infoReader = await infoCmd
+                    .ExecuteReaderAsync(ct)
+                    .ConfigureAwait(false);
+
+                while (await infoReader.ReadAsync(ct).ConfigureAwait(false))
+                {
+                    // index_info の列は seqno / cid / name（構成列名）。seqno 昇順で構成順を保つ
+                    if (!infoReader.IsDBNull(2))
+                    {
+                        columns.Add(infoReader.GetString(2));
+                    }
+                }
+
+                if (columns.Count == 0)
+                {
+                    continue;
+                }
+
+                aux.Add(
+                    new SchemaAuxiliaryObject
+                    {
+                        TableName = entry.Key,
+                        Name = indexName,
+                        Kind = SchemaAuxiliaryObjectKind.UniqueConstraint,
+                        Columns = columns,
+                    }
+                );
+            }
+        }
+
+        return aux;
     }
 
     /// <summary>参照先テーブルの主キー先頭列名を解決する（参照先列が省略された FK 用のフォールバック）</summary>

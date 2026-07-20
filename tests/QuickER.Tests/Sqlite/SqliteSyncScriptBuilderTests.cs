@@ -1,0 +1,333 @@
+using System.Collections.Generic;
+using FluentAssertions;
+using QuickER.Model;
+using QuickER.Provider;
+using QuickER.Sqlite;
+using Xunit;
+
+namespace QuickER.Tests.Sqlite;
+
+/// <summary>
+/// <see cref="SqliteSyncScriptBuilder"/> が実行計画（<see cref="SyncPlan"/>）から出力する SQLite 同期スクリプトの
+/// 構造（PRAGMA ラップ・再構築ブロックの文順・データ移送・FK インライン・補助オブジェクト再作成）を検証する。
+/// </summary>
+public class SqliteSyncScriptBuilderTests
+{
+    private static Column Pk(string name) =>
+        new()
+        {
+            Name = name,
+            DataType = "int",
+            IsPrimaryKey = true,
+            IsNullable = false,
+        };
+
+    private static Column Col(string name, string type) =>
+        new()
+        {
+            Name = name,
+            DataType = type,
+            IsNullable = true,
+        };
+
+    private static string Build(SyncPlan plan) => new SqliteSyncScriptBuilder().Build(plan);
+
+    /// <summary>空の計画は空文字列を返すことを検証する</summary>
+    [Fact(DisplayName = "空の計画は空文字列を返す")]
+    public void EmptyPlan_ReturnsEmptyString()
+    {
+        Build(new SyncPlan()).Should().BeEmpty();
+    }
+
+    /// <summary>スクリプトが PRAGMA ヘッダで始まり foreign_key_check → foreign_keys=ON で終わることを検証する</summary>
+    [Fact(DisplayName = "PRAGMA ヘッダ／フッタで包む")]
+    public void Script_IsWrappedWithPragmas()
+    {
+        var plan = new SyncPlan
+        {
+            Rebuilds =
+            [
+                new TableRebuildPlan
+                {
+                    TableName = "invoice",
+                    NewDefinition = new Entity { TableName = "invoice", Columns = { Pk("id") } },
+                    CreateOnly = true,
+                },
+            ],
+        };
+
+        var script = Build(plan);
+
+        script.Should().StartWith("PRAGMA foreign_keys=OFF;");
+        script.Should().Contain("PRAGMA foreign_key_check;");
+        script.Should().Contain("PRAGMA foreign_keys=ON;");
+        script
+            .IndexOf("PRAGMA foreign_key_check;", System.StringComparison.Ordinal)
+            .Should()
+            .BeLessThan(script.IndexOf("PRAGMA foreign_keys=ON;", System.StringComparison.Ordinal));
+    }
+
+    /// <summary>CreateOnly（新規テーブル）は FK 句インラインの CREATE TABLE のみで、移送・入替を伴わないことを検証する</summary>
+    [Fact(DisplayName = "CreateOnly は FK 句インラインの CREATE のみ")]
+    public void CreateOnly_EmitsInlineForeignKeyCreateWithoutMigration()
+    {
+        var plan = new SyncPlan
+        {
+            Rebuilds =
+            [
+                new TableRebuildPlan
+                {
+                    TableName = "invoice",
+                    NewDefinition = new Entity
+                    {
+                        TableName = "invoice",
+                        Columns = { Pk("id"), Col("orders_id", "int") },
+                    },
+                    ForeignKeys =
+                    [
+                        new TableRebuildForeignKey(
+                            "FK_invoice_orders",
+                            "orders_id",
+                            "orders",
+                            "id",
+                            ForeignKeyReferentialAction.NoAction,
+                            ForeignKeyReferentialAction.NoAction
+                        ),
+                    ],
+                    CreateOnly = true,
+                },
+            ],
+        };
+
+        var script = Build(plan);
+
+        script.Should().Contain("CREATE TABLE \"invoice\" (");
+        script.Should().Contain("FOREIGN KEY (\"orders_id\")");
+        script.Should().Contain("REFERENCES \"orders\" (\"id\")");
+        // 新規テーブルはデータ移送・一時テーブル入替を行わない
+        script.Should().NotContain("INSERT INTO");
+        script.Should().NotContain("_quicker_rebuild");
+    }
+
+    /// <summary>既存テーブル再構築ブロックが「CREATE 一時 → INSERT SELECT → DROP → RENAME → 補助再作成」の順であることを検証する</summary>
+    [Fact(DisplayName = "再構築ブロックの文順が正しい")]
+    public void RebuildBlock_HasExpectedStatementOrder()
+    {
+        var plan = new SyncPlan
+        {
+            Rebuilds =
+            [
+                new TableRebuildPlan
+                {
+                    TableName = "orders",
+                    NewDefinition = new Entity
+                    {
+                        TableName = "orders",
+                        Columns =
+                        {
+                            Pk("id"),
+                            Col("customer_id", "int"),
+                            Col("note", "varchar(100)"),
+                        },
+                    },
+                    ForeignKeys =
+                    [
+                        new TableRebuildForeignKey(
+                            "FK_orders_customer",
+                            "customer_id",
+                            "customer",
+                            "id",
+                            ForeignKeyReferentialAction.Cascade,
+                            ForeignKeyReferentialAction.NoAction
+                        ),
+                    ],
+                    CreateOnly = false,
+                    CopyColumns = ["id", "customer_id", "note"],
+                    AuxiliaryObjects =
+                    [
+                        new SchemaAuxiliaryObject
+                        {
+                            TableName = "orders",
+                            Name = "idx_orders_note",
+                            Kind = SchemaAuxiliaryObjectKind.Index,
+                            CreateSql = "CREATE INDEX \"idx_orders_note\" ON \"orders\" (\"note\")",
+                        },
+                        new SchemaAuxiliaryObject
+                        {
+                            TableName = "orders",
+                            Name = "uq_orders_note",
+                            Kind = SchemaAuxiliaryObjectKind.UniqueConstraint,
+                            Columns = ["note"],
+                        },
+                    ],
+                },
+            ],
+        };
+
+        var script = Build(plan);
+
+        // 見出し
+        script.Should().Contain("-- ===== RebuildTable: orders =====");
+
+        // FK インライン・一意制約のテーブルレベル UNIQUE 再現
+        script.Should().Contain("FOREIGN KEY (\"customer_id\")");
+        script.Should().Contain("REFERENCES \"customer\" (\"id\") ON DELETE CASCADE");
+        script.Should().Contain("UNIQUE (\"note\")");
+
+        // データ移送は交差列のみ
+        script
+            .Should()
+            .Contain(
+                "INSERT INTO \"orders_quicker_rebuild\" (\"id\", \"customer_id\", \"note\") "
+                    + "SELECT \"id\", \"customer_id\", \"note\" FROM \"orders\";"
+            );
+
+        // 文順: CREATE 一時 → INSERT → DROP → RENAME → 補助 CREATE INDEX
+        var iCreate = script.IndexOf(
+            "CREATE TABLE \"orders_quicker_rebuild\"",
+            System.StringComparison.Ordinal
+        );
+        var iInsert = script.IndexOf(
+            "INSERT INTO \"orders_quicker_rebuild\"",
+            System.StringComparison.Ordinal
+        );
+        var iDrop = script.IndexOf("DROP TABLE \"orders\";", System.StringComparison.Ordinal);
+        var iRename = script.IndexOf(
+            "ALTER TABLE \"orders_quicker_rebuild\" RENAME TO \"orders\";",
+            System.StringComparison.Ordinal
+        );
+        var iAux = script.IndexOf(
+            "CREATE INDEX \"idx_orders_note\"",
+            System.StringComparison.Ordinal
+        );
+
+        iCreate.Should().BeGreaterThan(-1);
+        iCreate.Should().BeLessThan(iInsert);
+        iInsert.Should().BeLessThan(iDrop);
+        iDrop.Should().BeLessThan(iRename);
+        iRename.Should().BeLessThan(iAux);
+
+        // sqlite_master の sql はセミコロン無しのため、補助文末にセミコロンを補う
+        script.Should().Contain("CREATE INDEX \"idx_orders_note\" ON \"orders\" (\"note\");");
+    }
+
+    /// <summary>構成列が削除された一意制約は再現せず、逆に残っている一意制約は UNIQUE 句へ復元することを検証する</summary>
+    [Fact(DisplayName = "削除列を含む一意制約は再現しない")]
+    public void UniqueConstraint_ReferencingRemovedColumn_IsDropped()
+    {
+        var plan = new SyncPlan
+        {
+            Rebuilds =
+            [
+                new TableRebuildPlan
+                {
+                    TableName = "t",
+                    // 合成後は id と keep のみ（gone は削除済み）
+                    NewDefinition = new Entity
+                    {
+                        TableName = "t",
+                        Columns = { Pk("id"), Col("keep", "int") },
+                    },
+                    CreateOnly = false,
+                    CopyColumns = ["id", "keep"],
+                    AuxiliaryObjects =
+                    [
+                        new SchemaAuxiliaryObject
+                        {
+                            TableName = "t",
+                            Name = "uq_keep",
+                            Kind = SchemaAuxiliaryObjectKind.UniqueConstraint,
+                            Columns = ["keep"],
+                        },
+                        new SchemaAuxiliaryObject
+                        {
+                            TableName = "t",
+                            Name = "uq_gone",
+                            Kind = SchemaAuxiliaryObjectKind.UniqueConstraint,
+                            Columns = ["gone"],
+                        },
+                    ],
+                },
+            ],
+        };
+
+        var script = Build(plan);
+
+        script.Should().Contain("UNIQUE (\"keep\")");
+        script.Should().NotContain("UNIQUE (\"gone\")");
+    }
+
+    /// <summary>列追加・テーブル削除は逐次セクション（ADD COLUMN / DROP TABLE）として出力されることを検証する</summary>
+    [Fact(DisplayName = "AddColumn / DropTable は逐次セクションになる")]
+    public void AddColumnAndDropTable_AreEmittedAsSections()
+    {
+        var plan = new SyncPlan
+        {
+            Sections =
+            [
+                new SyncPlanSection
+                {
+                    Kind = SchemaDiffKind.AddColumn,
+                    Items =
+                    [
+                        new SchemaDiffItem
+                        {
+                            Kind = SchemaDiffKind.AddColumn,
+                            TableName = "customer",
+                            ColumnName = "email",
+                            Column = Col("email", "text"),
+                            IsSelected = true,
+                        },
+                    ],
+                },
+                new SyncPlanSection
+                {
+                    Kind = SchemaDiffKind.DropTable,
+                    Items =
+                    [
+                        new SchemaDiffItem
+                        {
+                            Kind = SchemaDiffKind.DropTable,
+                            TableName = "legacy",
+                            IsSelected = true,
+                        },
+                    ],
+                },
+            ],
+        };
+
+        var script = Build(plan);
+
+        script.Should().Contain("ALTER TABLE \"customer\" ADD COLUMN \"email\" text NULL;");
+        script.Should().Contain("DROP TABLE \"legacy\";");
+    }
+
+    /// <summary>非数値引数の宣言型（NVARCHAR(MAX) 等）はダブルクォートで包まれることを検証する（DDL 生成と同一整形）</summary>
+    [Fact(DisplayName = "NVARCHAR(MAX) 等の宣言型はクォートされる")]
+    public void UnboundedType_IsQuotedInRebuild()
+    {
+        var plan = new SyncPlan
+        {
+            Rebuilds =
+            [
+                new TableRebuildPlan
+                {
+                    TableName = "orders",
+                    NewDefinition = new Entity
+                    {
+                        TableName = "orders",
+                        Columns = { Pk("id"), Col("payload", "NVARCHAR(MAX)") },
+                    },
+                    CreateOnly = false,
+                    CopyColumns = ["id"],
+                    AuxiliaryObjects = [],
+                },
+            ],
+        };
+
+        var script = Build(plan);
+
+        // 非数値引数の型は "NVARCHAR(MAX)" とクォートされ syntax error を避ける
+        script.Should().Contain("\"payload\" \"NVARCHAR(MAX)\"");
+    }
+}

@@ -112,10 +112,7 @@ public sealed partial class SqliteDdlGenerator : DdlGeneratorBase
 
         if (pks.Count > 0)
         {
-            var pkCols = string.Join(", ", pks.Select(p => SqliteIdentifier.QuoteSimple(p.Name)));
-            trailingConstraints.Add(
-                $"    CONSTRAINT \"PK_{SqliteIdentifier.SafeName(entity.TableName)}\" PRIMARY KEY ({pkCols})"
-            );
+            trailingConstraints.Add(BuildPrimaryKeyConstraintLine(entity.TableName, pks));
         }
 
         foreach (var fk in fks)
@@ -154,8 +151,20 @@ public sealed partial class SqliteDdlGenerator : DdlGeneratorBase
         sb.AppendLine(");");
     }
 
+    /// <summary>主キー制約行（<c>CONSTRAINT "PK_..." PRIMARY KEY (...)</c>）を組み立てる</summary>
+    /// <remarks>同期のテーブル再構築でも同じ形の PK 制約を出すため共有する（出力はここへ集約）</remarks>
+    internal static string BuildPrimaryKeyConstraintLine(
+        string tableName,
+        IReadOnlyList<Column> pks
+    )
+    {
+        var pkCols = string.Join(", ", pks.Select(p => SqliteIdentifier.QuoteSimple(p.Name)));
+        return $"    CONSTRAINT \"PK_{SqliteIdentifier.SafeName(tableName)}\" PRIMARY KEY ({pkCols})";
+    }
+
     /// <summary>1 列分の列定義を組み立てる（型・NULL 許容。宣言型は verbatim に維持する）</summary>
-    private static string BuildColumnDefinition(Column col)
+    /// <remarks>同期のテーブル再構築でも同じ列定義を出すため <c>internal</c> で共有する</remarks>
+    internal static string BuildColumnDefinition(Column col)
     {
         var nameAndType =
             $"    {SqliteIdentifier.QuoteSimple(col.Name)} {FormatDeclaredType(col.DataType)}";
@@ -198,16 +207,34 @@ public sealed partial class SqliteDdlGenerator : DdlGeneratorBase
     private static partial System.Text.RegularExpressions.Regex UnquotedDeclaredTypePattern();
 
     /// <summary>解決済み外部キー情報からインライン <c>FOREIGN KEY</c> 制約行を組み立てる</summary>
-    private static string BuildForeignKeyConstraint(ResolvedForeignKey fk)
-    {
-        var referentialActions = ForeignKeyReferentialActionHelper.BuildReferentialActionClause(
+    private static string BuildForeignKeyConstraint(ResolvedForeignKey fk) =>
+        BuildForeignKeyConstraintLine(
+            fk.ConstraintName,
+            fk.FkColumnName,
+            fk.ParentTableName,
+            fk.PkColumnName,
             fk.OnDelete,
             fk.OnUpdate
         );
 
-        return $"    CONSTRAINT \"{SqliteIdentifier.Escape(fk.ConstraintName)}\" "
-            + $"FOREIGN KEY ({SqliteIdentifier.QuoteSimple(fk.FkColumnName)}) "
-            + $"REFERENCES {SqliteIdentifier.Quote(fk.ParentTableName)} ({SqliteIdentifier.QuoteSimple(fk.PkColumnName)}){referentialActions}";
+    /// <summary>インライン <c>FOREIGN KEY</c> 制約行を各要素から組み立てる（DDL 生成と同期再構築で共有する）</summary>
+    internal static string BuildForeignKeyConstraintLine(
+        string constraintName,
+        string fkColumnName,
+        string parentTableName,
+        string pkColumnName,
+        ForeignKeyReferentialAction onDelete,
+        ForeignKeyReferentialAction onUpdate
+    )
+    {
+        var referentialActions = ForeignKeyReferentialActionHelper.BuildReferentialActionClause(
+            onDelete,
+            onUpdate
+        );
+
+        return $"    CONSTRAINT \"{SqliteIdentifier.Escape(constraintName)}\" "
+            + $"FOREIGN KEY ({SqliteIdentifier.QuoteSimple(fkColumnName)}) "
+            + $"REFERENCES {SqliteIdentifier.Quote(parentTableName)} ({SqliteIdentifier.QuoteSimple(pkColumnName)}){referentialActions}";
     }
 
     /// <summary>リレーション一覧を「子テーブル ID → その子が持つ FK 一覧」へ解決する</summary>

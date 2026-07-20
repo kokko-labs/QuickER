@@ -60,8 +60,8 @@ public sealed class DdlOutputEnglishGuardTests
 
     /// <summary>
     /// 各方言の <c>SyncScriptBuilder</c> が ASCII のみの差分から出力する同期スクリプトに CJK が含まれないことを検証する。
-    /// セクション見出し・FK スキップコメント・Oracle の ON UPDATE 注意コメント・MySQL の列スキップコメントを網羅する
-    /// （SQLite の同期は未対応で例外を投げるため対象外）。
+    /// セクション見出し・FK スキップコメント・Oracle の ON UPDATE 注意コメント・MySQL の列スキップコメントを網羅する。
+    /// SQLite はテーブル再構築（PRAGMA ヘッダ／フッタ・RebuildTable 見出し・補助オブジェクト再作成）を別途網羅する。
     /// </summary>
     [Fact(
         DisplayName = "各方言の同期スクリプト出力に日本語（CJK）が含まれない（ASCII のみの差分）"
@@ -77,9 +77,169 @@ public sealed class DdlOutputEnglishGuardTests
             ("PostgreSql", new PostgreSqlSyncScriptBuilder().Build(plan)),
             ("MySql", new MySqlSyncScriptBuilder().Build(plan)),
             ("Oracle", new OracleSyncScriptBuilder().Build(plan)),
+            ("Sqlite", BuildSqliteRebuildScript()),
         };
 
         AssertNoCjk(outputs);
+    }
+
+    /// <summary>
+    /// ASCII のみの再構築計画（CreateOnly＋FK・既存テーブル再構築＋補助オブジェクト・ADD COLUMN・DROP TABLE）から
+    /// SQLite の同期スクリプトを生成する。PRAGMA ヘッダ／フッタ・RebuildTable 見出しの固定文を出力経路で通す。
+    /// </summary>
+    private static string BuildSqliteRebuildScript()
+    {
+        var orders = new Entity
+        {
+            TableName = "orders",
+            Columns =
+            {
+                new Column
+                {
+                    Name = "id",
+                    DataType = "int",
+                    IsPrimaryKey = true,
+                },
+                new Column { Name = "note", DataType = "text" },
+                new Column { Name = "old_col", DataType = "int" },
+            },
+        };
+        var customer = new Entity
+        {
+            TableName = "customer",
+            Columns =
+            {
+                new Column
+                {
+                    Name = "id",
+                    DataType = "int",
+                    IsPrimaryKey = true,
+                },
+            },
+        };
+        var legacy = new Entity
+        {
+            TableName = "legacy",
+            Columns =
+            {
+                new Column
+                {
+                    Name = "id",
+                    DataType = "int",
+                    IsPrimaryKey = true,
+                },
+            },
+        };
+
+        // 新規テーブル invoice（orders への FK 付き）
+        var invoice = new Entity
+        {
+            TableName = "invoice",
+            Columns =
+            {
+                new Column
+                {
+                    Name = "id",
+                    DataType = "int",
+                    IsPrimaryKey = true,
+                },
+                new Column { Name = "orders_id", DataType = "int" },
+            },
+        };
+        var invoiceRel = new Relationship
+        {
+            SourceEntityId = orders.Id,
+            TargetEntityId = invoice.Id,
+            SourceColumnId = orders.Columns[0].Id,
+            TargetColumnId = invoice.Columns[1].Id,
+        };
+
+        var context = new SyncPlanContext
+        {
+            LiveEntities = [orders, customer, legacy],
+            LiveRelationships = [],
+            AuxiliaryObjects =
+            [
+                new SchemaAuxiliaryObject
+                {
+                    TableName = "orders",
+                    Name = "idx_orders_note",
+                    Kind = SchemaAuxiliaryObjectKind.Index,
+                    CreateSql = "CREATE INDEX \"idx_orders_note\" ON \"orders\" (\"note\")",
+                },
+                new SchemaAuxiliaryObject
+                {
+                    TableName = "orders",
+                    Name = "trg_orders",
+                    Kind = SchemaAuxiliaryObjectKind.Trigger,
+                    CreateSql =
+                        "CREATE TRIGGER \"trg_orders\" AFTER INSERT ON \"orders\" BEGIN SELECT 1; END",
+                },
+                new SchemaAuxiliaryObject
+                {
+                    TableName = "orders",
+                    Name = "sqlite_autoindex_orders_1",
+                    Kind = SchemaAuxiliaryObjectKind.UniqueConstraint,
+                    Columns = ["note"],
+                },
+            ],
+        };
+
+        var items = new List<SchemaDiffItem>
+        {
+            new()
+            {
+                Kind = SchemaDiffKind.AddTable,
+                TableName = "invoice",
+                Entity = invoice,
+                IsSelected = true,
+            },
+            new()
+            {
+                Kind = SchemaDiffKind.AddForeignKey,
+                TableName = "invoice",
+                ColumnName = "orders_id",
+                ParentEntity = orders,
+                ChildEntity = invoice,
+                Relationship = invoiceRel,
+                IsSelected = true,
+            },
+            new()
+            {
+                Kind = SchemaDiffKind.AlterColumn,
+                TableName = "orders",
+                ColumnName = "note",
+                Column = new Column { Name = "note", DataType = "varchar(100)" },
+                IsSelected = true,
+            },
+            new()
+            {
+                Kind = SchemaDiffKind.DropColumn,
+                TableName = "orders",
+                ColumnName = "old_col",
+                Column = new Column { Name = "old_col", DataType = "int" },
+                IsSelected = true,
+            },
+            new()
+            {
+                Kind = SchemaDiffKind.AddColumn,
+                TableName = "customer",
+                ColumnName = "email",
+                Column = new Column { Name = "email", DataType = "text" },
+                IsSelected = true,
+            },
+            new()
+            {
+                Kind = SchemaDiffKind.DropTable,
+                TableName = "legacy",
+                Entity = legacy,
+                IsSelected = true,
+            },
+        };
+
+        var capabilities = new SqliteProvider().SyncCapabilities;
+        var plan = new SyncPlanner().BuildPlan(items, capabilities, context);
+        return new SqliteSyncScriptBuilder().Build(plan);
     }
 
     /// <summary>

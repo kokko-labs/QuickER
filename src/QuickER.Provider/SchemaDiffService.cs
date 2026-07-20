@@ -14,14 +14,28 @@ public class SchemaDiffService
     /// <param name="liveRelationships">DB から取得した現在のリレーション</param>
     /// <param name="targetEntities">ダイアグラム上のエンティティ（期待状態）</param>
     /// <param name="targetRelationships">ダイアグラム上のリレーション</param>
+    /// <param name="capabilities">
+    /// 対象方言の同期ケーパビリティ。<c>null</c>（既定）なら従来どおり全差分を生成する。
+    /// <see cref="SyncDialectCapabilities.SupportsDescriptions"/> が <c>false</c> の方言（SQLite）では
+    /// 説明差分を生成しない（コメント機構が無く live 側が常に空＝恒常的な幻の差分になるため）。
+    /// <see cref="SyncDialectCapabilities.PersistsForeignKeyConstraintNames"/> が <c>false</c> の方言（SQLite）では
+    /// FK シグネチャから制約名を除いて比較する（合成名 live と無名 target で恒常的な Drop+Add 誤検出を避けるため）。
+    /// </param>
     public SchemaDiff Compute(
         IReadOnlyList<Entity> liveEntities,
         IReadOnlyList<Relationship> liveRelationships,
         IReadOnlyList<Entity> targetEntities,
-        IReadOnlyList<Relationship> targetRelationships
+        IReadOnlyList<Relationship> targetRelationships,
+        SyncDialectCapabilities? capabilities = null
     )
     {
         var diff = new SchemaDiff();
+
+        // 説明差分を出すか（SQLite などコメント機構が無い方言では出さない）
+        var emitDescriptions = capabilities?.SupportsDescriptions ?? true;
+
+        // FK 比較で制約名を含めるか（SQLite は合成名で永続化されないため名前を除いて比較する）
+        var includeFkConstraintName = capabilities?.PersistsForeignKeyConstraintNames ?? true;
 
         var liveByName = liveEntities.ToDictionary(
             NormalizeTable,
@@ -55,7 +69,7 @@ public class SchemaDiffService
                 // 新規テーブル: テーブル説明
                 var newTblDesc = target.Description ?? string.Empty;
 
-                if (!string.IsNullOrEmpty(newTblDesc))
+                if (emitDescriptions && !string.IsNullOrEmpty(newTblDesc))
                 {
                     diff.Items.Add(
                         new SchemaDiffItem
@@ -77,7 +91,7 @@ public class SchemaDiffService
                 // 新規テーブル: 各列の説明
                 foreach (var c in target.Columns)
                 {
-                    if (string.IsNullOrEmpty(c.Description))
+                    if (!emitDescriptions || string.IsNullOrEmpty(c.Description))
                     {
                         continue;
                     }
@@ -116,7 +130,10 @@ public class SchemaDiffService
             var targetTableDesc = target.Description ?? string.Empty;
             var liveTableDesc = live.Description ?? string.Empty;
 
-            if (!string.Equals(targetTableDesc, liveTableDesc, StringComparison.Ordinal))
+            if (
+                emitDescriptions
+                && !string.Equals(targetTableDesc, liveTableDesc, StringComparison.Ordinal)
+            )
             {
                 diff.Items.Add(
                     new SchemaDiffItem
@@ -159,7 +176,7 @@ public class SchemaDiffService
                     );
 
                     // 新規列に説明があれば、列追加と一緒に説明を設定する
-                    if (!string.IsNullOrEmpty(tcol.Description))
+                    if (emitDescriptions && !string.IsNullOrEmpty(tcol.Description))
                     {
                         diff.Items.Add(
                             new SchemaDiffItem
@@ -228,7 +245,10 @@ public class SchemaDiffService
                     var newColDesc = tcol.Description ?? string.Empty;
                     var oldColDesc = lcol.Description ?? string.Empty;
 
-                    if (!string.Equals(newColDesc, oldColDesc, StringComparison.Ordinal))
+                    if (
+                        emitDescriptions
+                        && !string.Equals(newColDesc, oldColDesc, StringComparison.Ordinal)
+                    )
                     {
                         diff.Items.Add(
                             new SchemaDiffItem
@@ -304,7 +324,7 @@ public class SchemaDiffService
         // 親・子・列・制約名などのシグネチャでキー化し、同一 FK の有無を集合比較で判定する
         var liveFkPairs = liveRelationships
             .Where(r => r.Type != RelationshipType.ManyToMany)
-            .Select(r => MakeForeignKeySignature(r, liveEntities))
+            .Select(r => MakeForeignKeySignature(r, liveEntities, includeFkConstraintName))
             .Where(p => p is not null)
             .Select(p => p!.Value)
             .ToHashSet();
@@ -316,7 +336,7 @@ public class SchemaDiffService
                 continue;
             }
 
-            var pair = MakeForeignKeySignature(rel, targetEntities);
+            var pair = MakeForeignKeySignature(rel, targetEntities, includeFkConstraintName);
 
             if (pair is null)
             {
@@ -376,7 +396,7 @@ public class SchemaDiffService
         // 取得側 Relationship には FK 名が無いため、ここでは「親→子ペアの消失」ケースのみ検出する
         var targetFkPairs = targetRelationships
             .Where(r => r.Type != RelationshipType.ManyToMany)
-            .Select(r => MakeForeignKeySignature(r, targetEntities))
+            .Select(r => MakeForeignKeySignature(r, targetEntities, includeFkConstraintName))
             .Where(p => p is not null)
             .Select(p => p!.Value)
             .ToHashSet();
@@ -388,7 +408,7 @@ public class SchemaDiffService
                 continue;
             }
 
-            var pair = MakeForeignKeySignature(rel, liveEntities);
+            var pair = MakeForeignKeySignature(rel, liveEntities, includeFkConstraintName);
 
             if (pair is null)
             {
@@ -469,6 +489,9 @@ public class SchemaDiffService
     }
 
     /// <summary>外部キーの同一性比較に使うシグネチャ（親子・列・制約名・参照アクション）を生成する</summary>
+    /// <param name="includeConstraintName">
+    /// 制約名を比較キーへ含めるか。<c>false</c>（SQLite）のときは制約名を空にして名前差を無視する。
+    /// </param>
     /// <returns>親子いずれかの参照先・参照列が解決できない場合は null</returns>
     private static (
         string Parent,
@@ -478,7 +501,11 @@ public class SchemaDiffService
         string ConstraintName,
         ForeignKeyReferentialAction OnDelete,
         ForeignKeyReferentialAction OnUpdate
-    )? MakeForeignKeySignature(Relationship rel, IReadOnlyList<Entity> entities)
+    )? MakeForeignKeySignature(
+        Relationship rel,
+        IReadOnlyList<Entity> entities,
+        bool includeConstraintName
+    )
     {
         var parent = entities.FirstOrDefault(e => e.Id == rel.SourceEntityId);
         var child = entities.FirstOrDefault(e => e.Id == rel.TargetEntityId);
@@ -507,7 +534,9 @@ public class SchemaDiffService
             parentColumn.Name.ToLowerInvariant(),
             NormalizeTable(child).ToLowerInvariant(),
             childColumnName.ToLowerInvariant(),
-            rel.ConstraintName?.Trim().ToLowerInvariant() ?? string.Empty,
+            includeConstraintName
+                ? rel.ConstraintName?.Trim().ToLowerInvariant() ?? string.Empty
+                : string.Empty,
             rel.OnDelete,
             rel.OnUpdate
         );
@@ -518,7 +547,7 @@ public class SchemaDiffService
     /// 明示指定列 → <c>&lt;ParentTable&gt;_&lt;PkCol&gt;</c> 命名列 → PK 列と同名の列 →
     /// <c>IsForeignKey</c> フラグの列、の優先順で探索する 該当なしなら null
     /// </remarks>
-    private static string? ResolveFkColumnName(
+    internal static string? ResolveFkColumnName(
         Relationship rel,
         Entity child,
         Entity parent,
@@ -560,7 +589,7 @@ public class SchemaDiffService
     }
 
     /// <summary>親テーブル側の参照先列を解決する（明示指定が無ければ主キーを採用する）</summary>
-    private static Column? ResolveReferencedColumn(Relationship rel, Entity parent)
+    internal static Column? ResolveReferencedColumn(Relationship rel, Entity parent)
     {
         if (rel.SourceColumnId is not null)
         {

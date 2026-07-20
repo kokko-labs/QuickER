@@ -5,8 +5,8 @@ namespace QuickER.Sqlite;
 /// <summary>SQLite 向けの <see cref="IDatabaseProvider"/> 実装（Microsoft.Data.Sqlite ベース）</summary>
 /// <remarks>
 /// SQLite はファイル型 DB のため既定ポートを持たない（<see cref="DefaultPort"/> は <c>null</c>）。
-/// DB 同期（<see cref="SyncScriptBuilder"/> / <see cref="SyncExecutor"/>）は初回スコープ外で、
-/// 明示的に <see cref="NotSupportedException"/> を投げるスタブを束ねる。
+/// DB 同期（<see cref="SyncScriptBuilder"/> / <see cref="SyncExecutor"/>）はテーブル再構築方式で対応する
+/// （<see cref="SyncCapabilities"/> が rebuild を宣言し、<see cref="SyncPlanner"/> が合成計画を組み立てる）。
 /// </remarks>
 public sealed class SqliteProvider : IDatabaseProvider
 {

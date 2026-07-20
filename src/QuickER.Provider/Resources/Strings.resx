@@ -124,7 +124,7 @@
   <data name="Sync_Error_OracleStatementFailed" xml:space="preserve">
     <value>{0} (Oracle DDL is implicitly committed, so the {1} statement(s) that succeeded beforehand are not rolled back and may be partially applied)</value>
   </data>
-  <data name="Sync_Sqlite_NotSupported" xml:space="preserve">
-    <value>The SQLite provider does not support DB synchronization yet. It is planned to be supported via a table-rebuild approach in the future.</value>
+  <data name="Sync_Error_SqliteForeignKeyViolation" xml:space="preserve">
+    <value>Foreign key constraint violations were detected after the table rebuild, so the transaction was rolled back. Affected table(s): {0}</value>
   </data>
 </root>

@@ -11,6 +11,14 @@ public sealed class SchemaImportResult
 
     /// <summary>取得したリレーション一覧</summary>
     public IReadOnlyList<Relationship> Relationships { get; init; } = [];
+
+    /// <summary>
+    /// 意味モデルでは表現しきれない補助オブジェクト（インデックス・トリガー・無名の一意制約）。
+    /// </summary>
+    /// <remarks>
+    /// 現状は SQLite のテーブル再構築同期のためだけに収集する。他方言は空のまま（後方互換）。
+    /// </remarks>
+    public IReadOnlyList<SchemaAuxiliaryObject> AuxiliaryObjects { get; init; } = [];
 }
 
 /// <summary>接続文字列から DB スキーマを取得して意味モデルへ変換するインポーター（DB 方言ごとに実装）</summary>

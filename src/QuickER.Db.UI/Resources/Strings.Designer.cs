@@ -420,6 +420,12 @@ namespace QuickER.Db.UI.Resources {
             }
         }
 
+        public static string SchemaSync_ExecuteConfirmRebuild {
+            get {
+                return ResourceManager.GetString("SchemaSync_ExecuteConfirmRebuild", resourceCulture);
+            }
+        }
+
         public static string SchemaSync_Executing {
             get {
                 return ResourceManager.GetString("SchemaSync_Executing", resourceCulture);
@@ -465,12 +471,6 @@ namespace QuickER.Db.UI.Resources {
         public static string Db_ImportFailed {
             get {
                 return ResourceManager.GetString("Db_ImportFailed", resourceCulture);
-            }
-        }
-
-        public static string Db_SyncSqliteUnsupported {
-            get {
-                return ResourceManager.GetString("Db_SyncSqliteUnsupported", resourceCulture);
             }
         }
 

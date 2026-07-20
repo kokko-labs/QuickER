@@ -186,9 +186,9 @@ namespace QuickER.Provider.Resources {
             }
         }
 
-        public static string Sync_Sqlite_NotSupported {
+        public static string Sync_Error_SqliteForeignKeyViolation {
             get {
-                return ResourceManager.GetString("Sync_Sqlite_NotSupported", resourceCulture);
+                return ResourceManager.GetString("Sync_Error_SqliteForeignKeyViolation", resourceCulture);
             }
         }
     }

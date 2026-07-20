@@ -241,6 +241,9 @@
   <data name="SchemaSync_ExecuteConfirm" xml:space="preserve">
     <value>スクリプトを {0} に実行します。よろしいですか？</value>
   </data>
+  <data name="SchemaSync_ExecuteConfirmRebuild" xml:space="preserve">
+    <value>次のテーブルは、テーブルを作り直して全行データを移し替える方法で同期されます: {1}。{0} に対して実行してよろしいですか？</value>
+  </data>
   <data name="SchemaSync_Executing" xml:space="preserve">
     <value>実行中...</value>
   </data>
@@ -264,9 +267,6 @@
   </data>
   <data name="Db_ImportFailed" xml:space="preserve">
     <value>取り込みに失敗しました: {0}</value>
-  </data>
-  <data name="Db_SyncSqliteUnsupported" xml:space="preserve">
-    <value>SQLite プロバイダは DB 同期に未対応です（将来対応予定）</value>
   </data>
   <data name="Db_SyncWriteBack" xml:space="preserve">
     <value>現在のダイアグラムを既存 DB に書き戻し (差分 ALTER 実行)</value>

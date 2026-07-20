@@ -4,7 +4,6 @@ using QuickER.Model;
 using QuickER.Provider;
 using QuickER.Sqlite;
 using QuickER.SqlServer;
-using ProviderStrings = QuickER.Provider.Resources.Strings;
 
 namespace QuickER.Tests.Sqlite;
 
@@ -119,32 +118,63 @@ public class SqliteProviderTests
         connStr.Should().Contain("Mode=ReadOnly");
     }
 
-    /// <summary>同期スクリプト生成スタブが NotSupportedException を投げることを検証する</summary>
-    [Fact(DisplayName = "SyncScriptBuilder は NotSupportedException を投げる")]
-    public void SyncScriptBuilder_Throws_NotSupported()
+    /// <summary>同期スクリプト生成が計画から SQLite スクリプト（PRAGMA ラップ・CREATE TABLE）を生成することを検証する</summary>
+    [Fact(DisplayName = "SyncScriptBuilder は計画から SQLite スクリプトを生成する")]
+    public void SyncScriptBuilder_ProducesScript()
     {
         var provider = new SqliteProvider();
 
-        var act = () => provider.SyncScriptBuilder.Build(new SyncPlan());
+        var entity = new Entity
+        {
+            TableName = "t",
+            Columns =
+            [
+                new Column
+                {
+                    Name = "id",
+                    DataType = "INT",
+                    IsPrimaryKey = true,
+                    IsNullable = false,
+                },
+            ],
+        };
 
-        // 製品コードと同じ resx キーから期待値を導出し、カルチャに依らず完全一致で検証する
-        act.Should()
-            .Throw<NotSupportedException>()
-            .WithMessage(ProviderStrings.Sync_Sqlite_NotSupported);
+        // 新規テーブル追加（CreateOnly）は live スキーマ不要のため空の context で計画できる
+        var plan = new SyncPlanner().BuildPlan(
+            [
+                new SchemaDiffItem
+                {
+                    Kind = SchemaDiffKind.AddTable,
+                    TableName = "t",
+                    Entity = entity,
+                    IsSelected = true,
+                },
+            ],
+            provider.SyncCapabilities,
+            new SyncPlanContext()
+        );
+
+        var script = provider.SyncScriptBuilder.Build(plan);
+
+        script.Should().Contain("PRAGMA foreign_keys=OFF;");
+        script.Should().Contain("CREATE TABLE \"t\"");
+        script.Should().Contain("PRAGMA foreign_key_check;");
     }
 
-    /// <summary>同期実行スタブが NotSupportedException を投げることを検証する</summary>
-    [Fact(DisplayName = "SyncExecutor は NotSupportedException を投げる")]
-    public async Task SyncExecutor_Throws_NotSupported()
+    /// <summary>空スクリプトの同期実行が例外を投げず、no-op として成功扱いになることを検証する</summary>
+    [Fact(DisplayName = "SyncExecutor は空スクリプトを no-op として成功扱いする")]
+    public async Task SyncExecutor_ExecutesEmptyScriptAsCommitted()
     {
         var provider = new SqliteProvider();
 
-        var act = () => provider.SyncExecutor.ExecuteAsync(new DbConnectionSettings(), "SELECT 1;");
+        var result = await provider.SyncExecutor.ExecuteAsync(
+            new DbConnectionSettings(),
+            "",
+            TestContext.Current.CancellationToken
+        );
 
-        // 製品コードと同じ resx キーから期待値を導出し、カルチャに依らず完全一致で検証する
-        await act.Should()
-            .ThrowAsync<NotSupportedException>()
-            .WithMessage(ProviderStrings.Sync_Sqlite_NotSupported);
+        result.Committed.Should().BeTrue();
+        result.Error.Should().BeNull();
     }
 
     /// <summary>レジストリに SQL Server と SQLite を登録し、両方が名前で解決できることを検証する</summary>

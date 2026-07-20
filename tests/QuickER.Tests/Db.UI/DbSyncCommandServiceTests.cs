@@ -18,9 +18,9 @@ namespace QuickER.Tests.Db.UI;
 /// </remarks>
 public class DbSyncCommandServiceTests
 {
-    /// <summary>SQLite では同期不可・ツールチップに未対応理由が出ることを検証する</summary>
-    [Fact(DisplayName = "SQLite では CanRun=false・ツールチップに未対応理由")]
-    public void Sqlite_CannotRun_ShowsUnsupportedTooltip()
+    /// <summary>SQLite でも同期可・ツールチップに通常の説明が出ることを検証する（テーブル再構築方式で対応）</summary>
+    [Fact(DisplayName = "SQLite では CanRun=true・ツールチップに通常説明")]
+    public void Sqlite_CanRun_ShowsWriteBackTooltip()
     {
         var host = new StubErDiagramHost { TargetDbmsToReturn = SqliteProvider.ProviderName };
         var service = new DbSyncCommandService(
@@ -29,8 +29,8 @@ public class DbSyncCommandServiceTests
             new RecordingSyncPresenter()
         );
 
-        service.CanRun.Should().BeFalse();
-        service.CurrentTooltip.Should().Be(DbStrings.Db_SyncSqliteUnsupported);
+        service.CanRun.Should().BeTrue();
+        service.CurrentTooltip.Should().Be(DbStrings.Db_SyncWriteBack);
     }
 
     /// <summary>SQL Server では同期可・ツールチップに通常の説明が出ることを検証する</summary>

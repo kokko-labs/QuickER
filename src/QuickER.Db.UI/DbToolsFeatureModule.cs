@@ -11,9 +11,10 @@ namespace QuickER.Db.UI;
 /// <remarks>
 /// DI へダイアログ提示シーム 2 種とコマンドサービス 2 種を登録し、
 /// ツールバーへ「DB 取込」「DB 同期」の 2 ボタンを寄与する。
-/// DB 同期ボタンの活性・ツールチップは対象 DBMS に依存するため、
-/// <see cref="CreateToolbarItems"/> 内で <see cref="IErDiagramHost.TargetDbmsChanged"/> を購読し、
-/// 方言切替のたびに実行可否とツールチップを再評価する。
+/// DB 同期ボタンの活性・ツールチップを対象 DBMS 切替へ追従させる機構として、
+/// <see cref="CreateToolbarItems"/> 内で <see cref="IErDiagramHost.TargetDbmsChanged"/> を購読し
+/// 方言切替のたびに実行可否とツールチップを再評価する（現在は全方言対応のため実質定数だが、
+/// 将来の方言差に備えて機構は維持する）。
 /// ダイアログはすべてモーダルで残存するモードレスウィンドウが無いため、終了時の後始末は不要（空実装）。
 /// </remarks>
 public sealed class DbToolsFeatureModule : IFeatureModule
@@ -49,7 +50,7 @@ public sealed class DbToolsFeatureModule : IFeatureModule
             beginsGroup: true
         );
 
-        // ②DB 同期: 実行可否とツールチップは対象 DBMS に依存する（SQLite は未対応）
+        // ②DB 同期: 実行可否とツールチップの再評価機構は将来の方言差に備えて維持する（現在は全方言対応で定数）
         var syncCommand = new RelayCommand(sync.Run, () => sync.CanRun);
         var syncItem = new FeatureToolbarItem(
             icon: "⇪",

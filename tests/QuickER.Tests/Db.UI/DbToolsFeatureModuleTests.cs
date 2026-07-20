@@ -84,9 +84,9 @@ public class DbToolsFeatureModuleTests
         sync.BeginsGroup.Should().BeFalse();
     }
 
-    /// <summary>対象 DBMS 切替の通知で、DB 同期ボタンのツールチップと実行可否が更新されることを検証する</summary>
-    [Fact(DisplayName = "TargetDbmsChanged で DB 同期の Tooltip と CanExecute が更新される")]
-    public void TargetDbmsChanged_UpdatesSyncTooltipAndCanExecute()
+    /// <summary>対象 DBMS を切り替えても DB 同期は全方言対応のまま（SQLite でも実行可・通常ツールチップ）であることを検証する</summary>
+    [Fact(DisplayName = "TargetDbmsChanged 後も DB 同期は全方言対応（SQLite でも実行可）")]
+    public void TargetDbmsChanged_KeepsSyncEnabledForAllDialects()
     {
         var host = new StubErDiagramHost { TargetDbmsToReturn = SqlServerProvider.ProviderName };
         var module = new DbToolsFeatureModule();
@@ -99,12 +99,12 @@ public class DbToolsFeatureModuleTests
         sync.Command.CanExecute(null).Should().BeTrue();
         sync.Tooltip.Should().Be(DbStrings.Db_SyncWriteBack);
 
-        // SQLite へ切替して通知すると、実行不可・未対応ツールチップへ更新される
+        // SQLite へ切替して通知しても、再評価機構は動くが実行可・通常ツールチップのまま（全方言対応）
         host.TargetDbmsToReturn = SqliteProvider.ProviderName;
         host.RaiseTargetDbmsChanged();
 
-        sync.Command.CanExecute(null).Should().BeFalse();
-        sync.Tooltip.Should().Be(DbStrings.Db_SyncSqliteUnsupported);
+        sync.Command.CanExecute(null).Should().BeTrue();
+        sync.Tooltip.Should().Be(DbStrings.Db_SyncWriteBack);
     }
 
     /// <summary>OnMainWindowClosing が例外なく完了することを検証する（後始末不要の空実装）</summary>

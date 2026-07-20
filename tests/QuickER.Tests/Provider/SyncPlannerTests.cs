@@ -1,5 +1,6 @@
 using System.Linq;
 using FluentAssertions;
+using QuickER.Model;
 using QuickER.Provider;
 using Xunit;
 
@@ -132,9 +133,11 @@ public class SyncPlannerTests
         plan.Sections.Should().BeEmpty();
     }
 
-    /// <summary>ケーパビリティが異なっても Phase 1 では計画結果に影響しない（スモーク）ことを検証する</summary>
-    [Fact(DisplayName = "ケーパビリティは Phase 1 では計画へ影響しない")]
-    public void Capabilities_DoNotAffectPlanInPhase1()
+    /// <summary>
+    /// 逐次 DDL 方言（ALTER・FK 変更が可能）ではケーパビリティ差が計画へ影響せず、再構築も生じないことを検証する。
+    /// </summary>
+    [Fact(DisplayName = "逐次 DDL 方言はケーパビリティ差で計画が変わらない")]
+    public void NonRebuildDialect_ProducesSameSectionsRegardlessOfOtherCapabilities()
     {
         SchemaDiffItem[] items =
         [
@@ -145,21 +148,440 @@ public class SyncPlannerTests
 
         var planner = new SyncPlanner();
         var defaultPlan = planner.BuildPlan(items, new SyncDialectCapabilities());
-        var restrictedPlan = planner.BuildPlan(
+
+        // SupportsDescriptions=false だけでは rebuild 方言にならない（ALTER・FK 変更は可能なまま）
+        var variantPlan = planner.BuildPlan(
             items,
-            new SyncDialectCapabilities
-            {
-                SupportsAlterColumn = false,
-                SupportsForeignKeyAlter = false,
-                SupportsDescriptions = false,
-                PersistsForeignKeyConstraintNames = false,
-                ColumnReorder = ColumnReorderMode.Rebuild,
-            }
+            new SyncDialectCapabilities { SupportsDescriptions = false }
         );
 
-        restrictedPlan
+        variantPlan
             .Sections.Select(s => s.Kind)
             .Should()
             .Equal(defaultPlan.Sections.Select(s => s.Kind));
+        variantPlan.Rebuilds.Should().BeEmpty();
+    }
+
+    // ---------------- テーブル再構築（rebuild）方言の集約 ----------------
+
+    /// <summary>ALTER COLUMN も FK の後付けもできない再構築方言のケーパビリティ</summary>
+    private static readonly SyncDialectCapabilities RebuildCaps = new()
+    {
+        SupportsAlterColumn = false,
+        SupportsForeignKeyAlter = false,
+        SupportsDescriptions = false,
+        PersistsForeignKeyConstraintNames = false,
+        ColumnReorder = ColumnReorderMode.Rebuild,
+    };
+
+    /// <summary>単純な非 NULL 主キー列 id を生成する</summary>
+    private static Column PkId() =>
+        new()
+        {
+            Name = "id",
+            DataType = "INT",
+            IsPrimaryKey = true,
+            IsNullable = false,
+        };
+
+    /// <summary>NULL 許容の通常列を生成する</summary>
+    private static Column Col(string name, string type) =>
+        new()
+        {
+            Name = name,
+            DataType = type,
+            IsNullable = true,
+        };
+
+    /// <summary>再構築方言で context を渡さないと InvalidOperationException になることを検証する</summary>
+    [Fact(DisplayName = "再構築方言で context 省略は例外")]
+    public void RebuildDialect_NullContext_Throws()
+    {
+        var act = () =>
+            new SyncPlanner().BuildPlan([Item(SchemaDiffKind.AlterColumn)], RebuildCaps);
+
+        act.Should().Throw<InvalidOperationException>();
+    }
+
+    /// <summary>AlterColumn が live 定義に選択差分のみを適用した合成テーブル再構築になることを検証する</summary>
+    [Fact(DisplayName = "AlterColumn は合成スキーマのテーブル再構築になる")]
+    public void AlterColumn_ProducesRebuildWithSynthesizedDefinition()
+    {
+        var liveNote = Col("note", "TEXT");
+        var live = new Entity { TableName = "orders", Columns = { PkId(), liveNote } };
+        var newNote = new Column
+        {
+            Name = "note",
+            DataType = "NVARCHAR(200)",
+            IsNullable = false,
+        };
+
+        var plan = new SyncPlanner().BuildPlan(
+            [
+                new SchemaDiffItem
+                {
+                    Kind = SchemaDiffKind.AlterColumn,
+                    TableName = "orders",
+                    ColumnName = "note",
+                    Column = newNote,
+                    OldColumn = liveNote,
+                    IsSelected = true,
+                },
+            ],
+            RebuildCaps,
+            new SyncPlanContext { LiveEntities = [live] }
+        );
+
+        plan.Sections.Should().BeEmpty();
+        var rb = plan.Rebuilds.Should().ContainSingle().Which;
+        rb.CreateOnly.Should().BeFalse();
+        rb.TableName.Should().Be("orders");
+        rb.NewDefinition.Columns.Should().HaveCount(2);
+        rb.NewDefinition.Columns.Single(c => c.Name == "note")
+            .DataType.Should()
+            .Be("NVARCHAR(200)");
+        // live と合成後の両方に存在する列のみが移送対象になる
+        rb.CopyColumns.Should().Equal("id", "note");
+    }
+
+    /// <summary>未選択の差分が合成スキーマへ紛れ込まない（選択された変更のみ適用される）ことを検証する</summary>
+    [Fact(DisplayName = "未選択の変更は合成スキーマへ紛れ込まない")]
+    public void Rebuild_UnselectedChangesDoNotLeakIntoSynthesis()
+    {
+        var live = new Entity
+        {
+            TableName = "t",
+            Columns = { PkId(), Col("a", "INT"), Col("b", "INT") },
+        };
+
+        var plan = new SyncPlanner().BuildPlan(
+            [
+                new SchemaDiffItem
+                {
+                    Kind = SchemaDiffKind.AlterColumn,
+                    TableName = "t",
+                    ColumnName = "a",
+                    Column = Col("a", "BIGINT"),
+                    IsSelected = true,
+                },
+                // b の削除は未選択 → 合成後も b が残る
+                new SchemaDiffItem
+                {
+                    Kind = SchemaDiffKind.DropColumn,
+                    TableName = "t",
+                    ColumnName = "b",
+                    Column = Col("b", "INT"),
+                    IsSelected = false,
+                },
+            ],
+            RebuildCaps,
+            new SyncPlanContext { LiveEntities = [live] }
+        );
+
+        var rb = plan.Rebuilds.Should().ContainSingle().Which;
+        rb.NewDefinition.Columns.Select(c => c.Name).Should().Equal("id", "a", "b");
+        rb.NewDefinition.Columns.Single(c => c.Name == "a").DataType.Should().Be("BIGINT");
+    }
+
+    /// <summary>再構築対象テーブルの選択済み AddColumn が末尾へ畳み込まれ、セクションに残らないことを検証する</summary>
+    [Fact(DisplayName = "再構築対象の AddColumn は末尾へ畳み込まれる")]
+    public void Rebuild_FoldsSelectedAddColumnOnRebuildTable()
+    {
+        var live = new Entity { TableName = "t", Columns = { PkId(), Col("a", "INT") } };
+
+        var plan = new SyncPlanner().BuildPlan(
+            [
+                new SchemaDiffItem
+                {
+                    Kind = SchemaDiffKind.AlterColumn,
+                    TableName = "t",
+                    ColumnName = "a",
+                    Column = Col("a", "BIGINT"),
+                    IsSelected = true,
+                },
+                new SchemaDiffItem
+                {
+                    Kind = SchemaDiffKind.AddColumn,
+                    TableName = "t",
+                    ColumnName = "c",
+                    Column = Col("c", "TEXT"),
+                    IsSelected = true,
+                },
+            ],
+            RebuildCaps,
+            new SyncPlanContext { LiveEntities = [live] }
+        );
+
+        plan.Sections.Should().BeEmpty();
+        var rb = plan.Rebuilds.Should().ContainSingle().Which;
+        rb.NewDefinition.Columns.Select(c => c.Name).Should().Equal("id", "a", "c");
+        // 新規列 c は live に無いため移送対象外
+        rb.CopyColumns.Should().Equal("id", "a");
+    }
+
+    /// <summary>再構築対象でないテーブルの AddColumn は通常のセクション（ADD COLUMN）に残ることを検証する</summary>
+    [Fact(DisplayName = "非再構築テーブルの AddColumn はセクションに残る")]
+    public void AddColumn_OnNonRebuildTable_StaysAsSection()
+    {
+        var plan = new SyncPlanner().BuildPlan(
+            [
+                new SchemaDiffItem
+                {
+                    Kind = SchemaDiffKind.AddColumn,
+                    TableName = "t",
+                    ColumnName = "c",
+                    Column = Col("c", "TEXT"),
+                    IsSelected = true,
+                },
+            ],
+            RebuildCaps,
+            new SyncPlanContext()
+        );
+
+        plan.Rebuilds.Should().BeEmpty();
+        plan.Sections.Should().ContainSingle();
+        plan.Sections[0].Kind.Should().Be(SchemaDiffKind.AddColumn);
+    }
+
+    /// <summary>新規テーブルへの FK が CreateOnly 再構築へインライン化され、セクションから外れることを検証する</summary>
+    [Fact(DisplayName = "新規テーブルへの FK は CreateOnly にインライン化される")]
+    public void AddTable_WithForeignKey_BecomesCreateOnlyWithInlineFk()
+    {
+        var parent = new Entity { TableName = "customer", Columns = { PkId() } };
+        var child = new Entity
+        {
+            TableName = "orders",
+            Columns = { PkId(), Col("customer_id", "INT") },
+        };
+        var rel = new Relationship
+        {
+            SourceEntityId = parent.Id,
+            TargetEntityId = child.Id,
+            SourceColumnId = parent.Columns[0].Id,
+            TargetColumnId = child.Columns[1].Id,
+        };
+
+        var plan = new SyncPlanner().BuildPlan(
+            [
+                new SchemaDiffItem
+                {
+                    Kind = SchemaDiffKind.AddTable,
+                    TableName = "orders",
+                    Entity = child,
+                    IsSelected = true,
+                },
+                new SchemaDiffItem
+                {
+                    Kind = SchemaDiffKind.AddForeignKey,
+                    TableName = "orders",
+                    ColumnName = "customer_id",
+                    ParentEntity = parent,
+                    ChildEntity = child,
+                    Relationship = rel,
+                    IsSelected = true,
+                },
+            ],
+            RebuildCaps,
+            new SyncPlanContext()
+        );
+
+        // AddTable も AddForeignKey もセクションには出ない（CreateOnly へ畳まれる）
+        plan.Sections.Should().BeEmpty();
+        var rb = plan.Rebuilds.Should().ContainSingle().Which;
+        rb.CreateOnly.Should().BeTrue();
+        rb.TableName.Should().Be("orders");
+        rb.CopyColumns.Should().BeEmpty();
+        var fk = rb.ForeignKeys.Should().ContainSingle().Which;
+        fk.ChildColumn.Should().Be("customer_id");
+        fk.ParentTable.Should().Be("customer");
+        fk.ParentColumn.Should().Be("id");
+    }
+
+    /// <summary>既存テーブルの FK 集合が「live − 選択 Drop ＋ 選択 Add」で合成されることを検証する</summary>
+    [Fact(DisplayName = "既存テーブルの FK 集合は live から Drop を除き Add を足す")]
+    public void ExistingTable_ForeignKeySetIsSynthesizedFromLiveMinusDropPlusAdd()
+    {
+        var customer = new Entity { TableName = "customer", Columns = { PkId() } };
+        var supplier = new Entity { TableName = "supplier", Columns = { PkId() } };
+        var refCol = Col("ref_id", "INT");
+        var orders = new Entity { TableName = "orders", Columns = { PkId(), refCol } };
+
+        // live FK: orders.ref_id -> customer.id
+        var liveRel = new Relationship
+        {
+            SourceEntityId = customer.Id,
+            TargetEntityId = orders.Id,
+            SourceColumnId = customer.Columns[0].Id,
+            TargetColumnId = refCol.Id,
+            ConstraintName = "FK_orders_customer_0",
+        };
+        var context = new SyncPlanContext
+        {
+            LiveEntities = [customer, supplier, orders],
+            LiveRelationships = [liveRel],
+        };
+
+        // 目標 FK: orders.ref_id -> supplier.id
+        var addRel = new Relationship
+        {
+            SourceEntityId = supplier.Id,
+            TargetEntityId = orders.Id,
+            SourceColumnId = supplier.Columns[0].Id,
+            TargetColumnId = refCol.Id,
+        };
+
+        var plan = new SyncPlanner().BuildPlan(
+            [
+                new SchemaDiffItem
+                {
+                    Kind = SchemaDiffKind.DropForeignKey,
+                    TableName = "orders",
+                    ParentEntity = customer,
+                    ChildEntity = orders,
+                    Relationship = liveRel,
+                    ForeignKeyName = "FK_orders_customer_0",
+                    IsSelected = true,
+                },
+                new SchemaDiffItem
+                {
+                    Kind = SchemaDiffKind.AddForeignKey,
+                    TableName = "orders",
+                    ColumnName = "ref_id",
+                    ParentEntity = supplier,
+                    ChildEntity = orders,
+                    Relationship = addRel,
+                    IsSelected = true,
+                },
+            ],
+            RebuildCaps,
+            context
+        );
+
+        plan.Sections.Should().BeEmpty();
+        var rb = plan.Rebuilds.Should().ContainSingle().Which;
+        // live の customer FK は削除され、supplier FK だけが残る
+        var fk = rb.ForeignKeys.Should().ContainSingle().Which;
+        fk.ChildColumn.Should().Be("ref_id");
+        fk.ParentTable.Should().Be("supplier");
+        fk.ParentColumn.Should().Be("id");
+    }
+
+    /// <summary>複数テーブルにまたがる再構築がテーブル単位でグループ化されることを検証する</summary>
+    [Fact(DisplayName = "再構築はテーブル単位でグループ化される")]
+    public void Rebuild_GroupsByTable()
+    {
+        var t1 = new Entity { TableName = "t1", Columns = { PkId(), Col("a", "INT") } };
+        var t2 = new Entity { TableName = "t2", Columns = { PkId(), Col("b", "INT") } };
+
+        var plan = new SyncPlanner().BuildPlan(
+            [
+                new SchemaDiffItem
+                {
+                    Kind = SchemaDiffKind.AlterColumn,
+                    TableName = "t1",
+                    ColumnName = "a",
+                    Column = Col("a", "BIGINT"),
+                    IsSelected = true,
+                },
+                new SchemaDiffItem
+                {
+                    Kind = SchemaDiffKind.DropColumn,
+                    TableName = "t2",
+                    ColumnName = "b",
+                    Column = Col("b", "INT"),
+                    IsSelected = true,
+                },
+            ],
+            RebuildCaps,
+            new SyncPlanContext { LiveEntities = [t1, t2] }
+        );
+
+        plan.Rebuilds.Select(r => r.TableName).Should().BeEquivalentTo("t1", "t2");
+        plan.Rebuilds.Single(r => r.TableName == "t2")
+            .NewDefinition.Columns.Select(c => c.Name)
+            .Should()
+            .Equal("id");
+    }
+
+    /// <summary>
+    /// 新規テーブルの AddTable が未選択のまま、そのテーブルへの AddForeignKey だけが選択された場合に、
+    /// 例外にせず（UI のチェック操作でクラッシュさせず）該当項目をセクションへ残すことを検証する。
+    /// live に存在しないテーブルは合成の土台が無いため再構築できず、レンダラーのスキップコメントに委ねる。
+    /// </summary>
+    [Fact(DisplayName = "AddTable 未選択の新規テーブルへの FK は例外にせずセクションへ残す")]
+    public void AddForeignKey_ToUnselectedNewTable_StaysInSectionsWithoutThrowing()
+    {
+        var parent = new Entity { TableName = "customers", Columns = { PkId() } };
+        var newChild = new Entity
+        {
+            TableName = "orders",
+            Columns = { PkId(), Col("customer_id", "INT") },
+        };
+
+        var fkItem = new SchemaDiffItem
+        {
+            Kind = SchemaDiffKind.AddForeignKey,
+            TableName = "orders",
+            ColumnName = "customer_id",
+            ParentEntity = parent,
+            ChildEntity = newChild,
+            IsSelected = true,
+        };
+
+        // orders は live に存在せず、AddTable も未選択（＝計画に含まれない）
+        var plan = new SyncPlanner().BuildPlan(
+            [Item(SchemaDiffKind.AddTable, selected: false, table: "orders"), fkItem],
+            RebuildCaps,
+            new SyncPlanContext { LiveEntities = [parent] }
+        );
+
+        plan.Rebuilds.Should().BeEmpty();
+        var section = plan.Sections.Should().ContainSingle().Which;
+        section.Kind.Should().Be(SchemaDiffKind.AddForeignKey);
+        section.Items.Should().Equal(fkItem);
+    }
+
+    /// <summary>
+    /// 新規テーブル（CreateOnly）への FK のうち解決できないもの（参照列不明）は畳み込まず、
+    /// セクションへ残してレンダラーのスキップコメントに委ねることを検証する。
+    /// </summary>
+    [Fact(DisplayName = "解決できない FK は CreateOnly へ畳まずセクションへ残す")]
+    public void UnresolvableForeignKey_OnNewTable_StaysInSections()
+    {
+        // 親に主キーが無く、FK 列も未指定 → 解決不能
+        var orphanParent = new Entity { TableName = "no_pk", Columns = { Col("code", "INT") } };
+        var newChild = new Entity { TableName = "orders", Columns = { PkId() } };
+
+        var addTable = new SchemaDiffItem
+        {
+            Kind = SchemaDiffKind.AddTable,
+            TableName = "orders",
+            Entity = newChild,
+            IsSelected = true,
+        };
+        var unresolvableFk = new SchemaDiffItem
+        {
+            Kind = SchemaDiffKind.AddForeignKey,
+            TableName = "orders",
+            ColumnName = null,
+            ParentEntity = orphanParent,
+            ChildEntity = newChild,
+            IsSelected = true,
+        };
+
+        var plan = new SyncPlanner().BuildPlan(
+            [addTable, unresolvableFk],
+            RebuildCaps,
+            new SyncPlanContext()
+        );
+
+        var rb = plan.Rebuilds.Should().ContainSingle().Which;
+        rb.CreateOnly.Should().BeTrue();
+        rb.ForeignKeys.Should().BeEmpty();
+        rb.SourceItems.Should().Equal(addTable);
+
+        var section = plan.Sections.Should().ContainSingle().Which;
+        section.Kind.Should().Be(SchemaDiffKind.AddForeignKey);
+        section.Items.Should().Equal(unresolvableFk);
     }
 }

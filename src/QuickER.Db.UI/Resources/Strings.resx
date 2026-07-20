@@ -241,6 +241,9 @@
   <data name="SchemaSync_ExecuteConfirm" xml:space="preserve">
     <value>Run the script against {0}. Are you sure?</value>
   </data>
+  <data name="SchemaSync_ExecuteConfirmRebuild" xml:space="preserve">
+    <value>The following tables will be synchronized by recreating the table and copying all rows: {1}. Do you want to run this against {0}?</value>
+  </data>
   <data name="SchemaSync_Executing" xml:space="preserve">
     <value>Executing...</value>
   </data>
@@ -264,9 +267,6 @@
   </data>
   <data name="Db_ImportFailed" xml:space="preserve">
     <value>Failed to import: {0}</value>
-  </data>
-  <data name="Db_SyncSqliteUnsupported" xml:space="preserve">
-    <value>The SQLite provider does not support DB sync yet (planned for the future)</value>
   </data>
   <data name="Db_SyncWriteBack" xml:space="preserve">
     <value>Write the current diagram back to the existing DB (apply diff ALTER)</value>

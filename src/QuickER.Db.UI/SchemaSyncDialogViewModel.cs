@@ -33,6 +33,18 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
     /// <summary>差分から方言中立の実行計画を組み立てるプランナー</summary>
     private readonly SyncPlanner _planner = new();
 
+    /// <summary>直近の取込で得た DB 現状のエンティティ（再構築計画の合成に用いる）</summary>
+    private IReadOnlyList<Entity> _liveEntities = [];
+
+    /// <summary>直近の取込で得た DB 現状のリレーション（既存 FK 集合の復元に用いる）</summary>
+    private IReadOnlyList<Relationship> _liveRelationships = [];
+
+    /// <summary>直近の取込で得た補助オブジェクト（再構築で温存するインデックス・トリガー・一意制約）</summary>
+    private IReadOnlyList<SchemaAuxiliaryObject> _liveAuxiliaryObjects = [];
+
+    /// <summary>直近の <see cref="UpdatePreview"/> で組み立てた実行計画（実行確認の文言分岐に用いる）</summary>
+    private SyncPlan _currentPlan = new();
+
     /// <summary>差分項目一覧（UI のチェックボックスツリー用）</summary>
     public ObservableCollection<SchemaDiffItem> DiffItems { get; } = new();
 
@@ -89,11 +101,20 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
             var live = await _provider
                 .SchemaImporter.ImportAsync(connectionString)
                 .ConfigureAwait(true);
+
+            // rebuild 方言（SQLite）の再構築計画は「DB 現状（live）＋選択差分のみ」を合成するため、
+            // 取込結果を保持して以降の UpdatePreview へ SyncPlanContext として渡せるようにする
+            _liveEntities = live.Entities;
+            _liveRelationships = live.Relationships;
+            _liveAuxiliaryObjects = live.AuxiliaryObjects;
+
+            // 対象方言のケーパビリティを渡す（SQLite は説明差分を抑止し FK 制約名を比較から除外する）
             var diff = new SchemaDiffService().Compute(
                 live.Entities,
                 live.Relationships,
                 _targetEntities,
-                _targetRelationships
+                _targetRelationships,
+                _provider.SyncCapabilities
             );
 
             // 列順差分は DB 同期対象外のため、検知時は選択不可の案内項目のみ追加する
@@ -150,11 +171,23 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
         }
     }
 
-    /// <summary>選択中の差分から実行計画を組み立て、T-SQL プレビューを再生成する（選択変更時に呼ぶ）</summary>
+    /// <summary>選択中の差分から実行計画を組み立て、スクリプトプレビューを再生成する（選択変更時に呼ぶ）</summary>
+    /// <remarks>
+    /// rebuild 方言（SQLite）は再構築の合成に DB 現状（live）が必須で、Refresh 前に呼ばれると
+    /// <see cref="SyncPlanner.BuildPlan"/> が <see cref="InvalidOperationException"/> を投げる。
+    /// 取込結果を <see cref="SyncPlanContext"/> として常に渡すことで、未取込時も空の live を土台に
+    /// 空プレビューへ落ち着かせる（DiffItems も Refresh 前は空のため実質何も生成しない）。
+    /// </remarks>
     public void UpdatePreview()
     {
-        var plan = _planner.BuildPlan(DiffItems, _provider.SyncCapabilities);
-        ScriptPreview = _provider.SyncScriptBuilder.Build(plan);
+        var context = new SyncPlanContext
+        {
+            LiveEntities = _liveEntities,
+            LiveRelationships = _liveRelationships,
+            AuxiliaryObjects = _liveAuxiliaryObjects,
+        };
+        _currentPlan = _planner.BuildPlan(DiffItems, _provider.SyncCapabilities, context);
+        ScriptPreview = _provider.SyncScriptBuilder.Build(_currentPlan);
     }
 
     /// <summary>選択可能なすべての差分を選択する</summary>
@@ -191,11 +224,37 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
             return;
         }
 
+        // テーブルを作り直して全行データを移し替える再構築（CreateOnly=false）を含む場合は、
+        // 対象テーブルを列挙した専用文言に切り替える。新規テーブル作成のみ（CreateOnly=true）は
+        // データ移し替えを伴わないため対象外とする
+        var rebuildTables = _currentPlan
+            .Rebuilds.Where(r => !r.CreateOnly)
+            .Select(r => r.TableName)
+            .ToList();
+
         // 削除・型変更など破壊的変更を含む場合は、確認文言を切り替えて誤実行を防ぐ
         var destructive = DiffItems.Any(i => i.IsSelected && i.IsDestructive);
-        var msg = destructive
-            ? string.Format(Strings.SchemaSync_ExecuteConfirmDestructive, _settings.Database)
-            : string.Format(Strings.SchemaSync_ExecuteConfirm, _settings.Database);
+
+        // 優先順位: 再構築あり ＞ 破壊的変更あり ＞ 通常
+        string msg;
+
+        if (rebuildTables.Count > 0)
+        {
+            msg = string.Format(
+                Strings.SchemaSync_ExecuteConfirmRebuild,
+                _settings.Database,
+                string.Join(", ", rebuildTables)
+            );
+        }
+        else if (destructive)
+        {
+            msg = string.Format(Strings.SchemaSync_ExecuteConfirmDestructive, _settings.Database);
+        }
+        else
+        {
+            msg = string.Format(Strings.SchemaSync_ExecuteConfirm, _settings.Database);
+        }
+
         if (!_dialogs.ConfirmWarning(msg, Strings.Common_Confirm))
         {
             return;

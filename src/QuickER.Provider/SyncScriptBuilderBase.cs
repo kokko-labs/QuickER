@@ -18,23 +18,35 @@ namespace QuickER.Provider;
 public abstract class SyncScriptBuilderBase : ISyncScriptBuilder
 {
     /// <summary>実行計画のセクションを見出しコメント付きで連結し、同期スクリプトへ変換する</summary>
-    public string Build(SyncPlan plan)
+    /// <remarks>
+    /// テーブル再構築を要する方言（SQLite）は本メソッドを上書きし、<see cref="AppendSection"/> でセクション単位の
+    /// レンダリングを再利用しつつ、再構築ブロックを織り交ぜる。逐次 DDL 方言はこの既定実装をそのまま用いる
+    /// （<see cref="SyncPlan.Rebuilds"/> は空のため参照しない＝出力は従来どおり）。
+    /// </remarks>
+    public virtual string Build(SyncPlan plan)
     {
         var sb = new StringBuilder();
 
         foreach (var section in plan.Sections)
         {
-            sb.AppendLine($"-- ===== {section.Kind} ({section.Items.Count} items) =====");
-
-            foreach (var item in section.Items)
-            {
-                AppendItem(sb, section.Kind, item);
-            }
-
-            sb.AppendLine();
+            AppendSection(sb, section);
         }
 
         return sb.ToString();
+    }
+
+    /// <summary>1 セクション分（見出しコメント → 各項目 → 空行）を書き出す</summary>
+    /// <remarks>逐次 DDL 方言の骨格そのもの。再構築方言が特定セクションだけ描画する際にも再利用する。</remarks>
+    protected void AppendSection(StringBuilder sb, SyncPlanSection section)
+    {
+        sb.AppendLine($"-- ===== {section.Kind} ({section.Items.Count} items) =====");
+
+        foreach (var item in section.Items)
+        {
+            AppendItem(sb, section.Kind, item);
+        }
+
+        sb.AppendLine();
     }
 
     /// <summary>1 差分項目を種別に応じた <c>Append*</c> へディスパッチする</summary>

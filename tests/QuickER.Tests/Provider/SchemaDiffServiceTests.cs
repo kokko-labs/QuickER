@@ -437,4 +437,137 @@ public class SchemaDiffServiceTests
                 && i.NewDescription == "顧客名"
             );
     }
+
+    // ---------------- ケーパビリティによる方言調整 ----------------
+
+    /// <summary>SupportsDescriptions=false の方言（SQLite）では説明差分を一切生成しないことを検証する</summary>
+    [Fact(DisplayName = "説明非対応方言では説明差分を生成しない")]
+    public void CapabilitiesWithoutDescriptions_SuppressesDescriptionDiffs()
+    {
+        // 既存テーブルの説明変更・列説明変更・新規テーブルの説明の 3 経路をまとめて確認する
+        var live = new List<Entity>
+        {
+            Tbl("Customer", ("Id", "int", true), ("Name", "nvarchar(50)", false)),
+        };
+        live[0].Description = "旧テーブル説明";
+        live[0].Columns[1].Description = "旧列説明";
+
+        var target = new List<Entity>
+        {
+            Tbl("Customer", ("Id", "int", true), ("Name", "nvarchar(50)", false)),
+            Tbl("Order", ("Id", "int", true)),
+        };
+        target[0].Description = "新テーブル説明";
+        target[0].Columns[1].Description = "新列説明";
+        target[1].Description = "新規テーブルの説明";
+
+        var capabilities = new SyncDialectCapabilities { SupportsDescriptions = false };
+
+        var diff = new SchemaDiffService().Compute(
+            live,
+            new List<Relationship>(),
+            target,
+            new List<Relationship>(),
+            capabilities
+        );
+
+        // 説明差分はゼロ・構造差分（新規テーブル Order）は従来どおり生成される
+        diff.Items.Should().NotContain(i => i.Kind == SchemaDiffKind.SetTableDescription);
+        diff.Items.Should().NotContain(i => i.Kind == SchemaDiffKind.SetColumnDescription);
+        diff.Items.Should()
+            .ContainSingle(i => i.Kind == SchemaDiffKind.AddTable && i.TableName == "Order");
+    }
+
+    /// <summary>
+    /// PersistsForeignKeyConstraintNames=false の方言（SQLite）では、制約名だけが異なる FK（合成名 live vs 無名 target）を
+    /// 同一とみなし、Drop+Add の誤検出を出さないことを検証する。
+    /// </summary>
+    [Fact(DisplayName = "FK 制約名を永続化しない方言では名前差だけの FK 差分は出ない")]
+    public void CapabilitiesWithoutFkConstraintNames_SuppressesNameOnlyForeignKeyDiff()
+    {
+        var parentLive = Tbl("Parent", ("Id", "int", true));
+        var childLive = Tbl("Child", ("Id", "int", true), ("ParentId", "int", false));
+        // live 側は取込時の合成制約名を持つ
+        var liveRel = new Relationship
+        {
+            SourceEntityId = parentLive.Id,
+            TargetEntityId = childLive.Id,
+            Type = RelationshipType.OneToMany,
+            SourceColumnId = parentLive.Columns[0].Id,
+            TargetColumnId = childLive.Columns[1].Id,
+            ConstraintName = "FK_Child_Parent_0",
+        };
+
+        var parentTarget = Tbl("Parent", ("Id", "int", true));
+        var childTarget = Tbl("Child", ("Id", "int", true), ("ParentId", "int", false));
+        // target 側は無名（手動作成のリレーション）
+        var targetRel = new Relationship
+        {
+            SourceEntityId = parentTarget.Id,
+            TargetEntityId = childTarget.Id,
+            Type = RelationshipType.OneToMany,
+            SourceColumnId = parentTarget.Columns[0].Id,
+            TargetColumnId = childTarget.Columns[1].Id,
+            ConstraintName = null,
+        };
+
+        var capabilities = new SyncDialectCapabilities
+        {
+            PersistsForeignKeyConstraintNames = false,
+        };
+
+        var diff = new SchemaDiffService().Compute(
+            new List<Entity> { parentLive, childLive },
+            new List<Relationship> { liveRel },
+            new List<Entity> { parentTarget, childTarget },
+            new List<Relationship> { targetRel },
+            capabilities
+        );
+
+        // 制約名以外は同一のため、名前差だけでは FK 差分を出さない
+        diff.Items.Should().NotContain(i => i.Kind == SchemaDiffKind.AddForeignKey);
+        diff.Items.Should().NotContain(i => i.Kind == SchemaDiffKind.DropForeignKey);
+    }
+
+    /// <summary>
+    /// 既定（capabilities なし）では制約名を含めて比較するため、名前差だけの FK でも Drop+Add が出る
+    /// （上のケーパビリティ抑止との対照）ことを検証する。
+    /// </summary>
+    [Fact(DisplayName = "既定では FK 制約名の差で Drop+Add が出る")]
+    public void DefaultCapabilities_EmitsFkDiffOnConstraintNameChange()
+    {
+        var parentLive = Tbl("Parent", ("Id", "int", true));
+        var childLive = Tbl("Child", ("Id", "int", true), ("ParentId", "int", false));
+        var liveRel = new Relationship
+        {
+            SourceEntityId = parentLive.Id,
+            TargetEntityId = childLive.Id,
+            Type = RelationshipType.OneToMany,
+            SourceColumnId = parentLive.Columns[0].Id,
+            TargetColumnId = childLive.Columns[1].Id,
+            ConstraintName = "FK_Old",
+        };
+
+        var parentTarget = Tbl("Parent", ("Id", "int", true));
+        var childTarget = Tbl("Child", ("Id", "int", true), ("ParentId", "int", false));
+        var targetRel = new Relationship
+        {
+            SourceEntityId = parentTarget.Id,
+            TargetEntityId = childTarget.Id,
+            Type = RelationshipType.OneToMany,
+            SourceColumnId = parentTarget.Columns[0].Id,
+            TargetColumnId = childTarget.Columns[1].Id,
+            ConstraintName = "FK_New",
+        };
+
+        var diff = new SchemaDiffService().Compute(
+            new List<Entity> { parentLive, childLive },
+            new List<Relationship> { liveRel },
+            new List<Entity> { parentTarget, childTarget },
+            new List<Relationship> { targetRel }
+        );
+
+        diff.Items.Should().Contain(i => i.Kind == SchemaDiffKind.DropForeignKey);
+        diff.Items.Should().Contain(i => i.Kind == SchemaDiffKind.AddForeignKey);
+    }
 }
