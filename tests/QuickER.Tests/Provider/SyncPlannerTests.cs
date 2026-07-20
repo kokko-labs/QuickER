@@ -584,4 +584,282 @@ public class SyncPlannerTests
         section.Kind.Should().Be(SchemaDiffKind.AddForeignKey);
         section.Items.Should().Equal(unresolvableFk);
     }
+
+    // ---------------- 列順変更（ReorderColumns） ----------------
+
+    /// <summary>ネイティブ列順変更方言（MySQL 相当）のケーパビリティ</summary>
+    private static readonly SyncDialectCapabilities NativeCaps = new()
+    {
+        ColumnReorder = ColumnReorderMode.Native,
+    };
+
+    /// <summary>指定名・順のエンティティを組み立てる（列は NULL 許容の通常列）</summary>
+    private static Entity Ent(string table, params string[] cols)
+    {
+        var e = new Entity { TableName = table };
+
+        foreach (var c in cols)
+        {
+            e.Columns.Add(Col(c, "INT"));
+        }
+
+        return e;
+    }
+
+    /// <summary>ReorderColumns 差分項目を生成する</summary>
+    private static SchemaDiffItem Reorder(string table, Entity target, bool selected = true) =>
+        new()
+        {
+            Kind = SchemaDiffKind.ReorderColumns,
+            TableName = table,
+            Entity = target,
+            IsSelected = selected,
+        };
+
+    // ---- rebuild 方言（SQLite） ----
+
+    /// <summary>SQLite で ReorderColumns 単独選択が CreateOnly=false のテーブル再構築になり、target 順へ並ぶことを検証する</summary>
+    [Fact(DisplayName = "SQLite: ReorderColumns 単独選択で target 順の再構築になる")]
+    public void Rebuild_ReorderColumns_ProducesTargetOrderedRebuild()
+    {
+        var live = new Entity
+        {
+            TableName = "t",
+            Columns = { PkId(), Col("a", "INT"), Col("b", "INT"), Col("c", "INT") },
+        };
+        var target = Ent("t", "id", "c", "a", "b");
+
+        var plan = new SyncPlanner().BuildPlan(
+            [Reorder("t", target)],
+            RebuildCaps,
+            new SyncPlanContext { LiveEntities = [live] }
+        );
+
+        plan.Sections.Should().BeEmpty();
+        plan.Reorders.Should().BeEmpty(); // rebuild 方言はネイティブ並べ替え計画を作らない
+        var rb = plan.Rebuilds.Should().ContainSingle().Which;
+        rb.CreateOnly.Should().BeFalse();
+        rb.NewDefinition.Columns.Select(c => c.Name).Should().Equal("id", "c", "a", "b");
+    }
+
+    /// <summary>SQLite で未選択 Drop の残存列が、並べ替え後の NewDefinition 末尾へ回ることを検証する</summary>
+    [Fact(DisplayName = "SQLite: 未選択 Drop の残存列は並べ替え後の末尾へ回る")]
+    public void Rebuild_ReorderColumns_LeftoverColumnGoesToEnd()
+    {
+        var live = new Entity
+        {
+            TableName = "t",
+            Columns = { PkId(), Col("a", "INT"), Col("b", "INT"), Col("leftover", "INT") },
+        };
+        // target には leftover が無い（＝その DropColumn は未選択のまま渡さない）
+        var target = Ent("t", "id", "b", "a");
+
+        var plan = new SyncPlanner().BuildPlan(
+            [Reorder("t", target)],
+            RebuildCaps,
+            new SyncPlanContext { LiveEntities = [live] }
+        );
+
+        var rb = plan.Rebuilds.Should().ContainSingle().Which;
+        // target 列（id,b,a）を目標順に並べ、target に無い leftover は元の相対順のまま末尾へ
+        rb.NewDefinition.Columns.Select(c => c.Name).Should().Equal("id", "b", "a", "leftover");
+    }
+
+    // ---- Native 方言（MySQL） ----
+
+    /// <summary>Native 方言で単純な入れ替えが最小 1 移動（LIS 不動）＋正しい AFTER になることを検証する</summary>
+    [Fact(DisplayName = "MySQL: 単純な並べ替えは最小 1 移動＋AFTER 指定になる")]
+    public void Native_Reorder_ProducesMinimalMovesWithAfter()
+    {
+        // live: id,a,b,c → target: id,c,a,b（c を id の直後へ 1 回動かせば済む＝LIS は id,a,b）
+        var live = Ent("t", "id", "a", "b", "c");
+        var target = Ent("t", "id", "c", "a", "b");
+
+        var plan = new SyncPlanner().BuildPlan(
+            [Reorder("t", target)],
+            NativeCaps,
+            new SyncPlanContext { LiveEntities = [live] }
+        );
+
+        plan.Rebuilds.Should().BeEmpty();
+        var reorder = plan.Reorders.Should().ContainSingle().Which;
+        reorder.TableName.Should().Be("t");
+        var move = reorder.Moves.Should().ContainSingle().Which;
+        move.Column.Name.Should().Be("c");
+        move.AfterColumn.Should().Be("id");
+    }
+
+    /// <summary>Native 方言で先頭へ動かす列は AfterColumn=null（FIRST）になることを検証する</summary>
+    [Fact(DisplayName = "MySQL: 先頭へ動かす列は FIRST（AfterColumn=null）")]
+    public void Native_Reorder_MoveToFront_ProducesFirst()
+    {
+        // live: a,b,c → target: c,a,b（c を先頭へ）
+        var live = Ent("t", "a", "b", "c");
+        var target = Ent("t", "c", "a", "b");
+
+        var plan = new SyncPlanner().BuildPlan(
+            [Reorder("t", target)],
+            NativeCaps,
+            new SyncPlanContext { LiveEntities = [live] }
+        );
+
+        var move = plan.Reorders.Single().Moves.Should().ContainSingle().Which;
+        move.Column.Name.Should().Be("c");
+        move.AfterColumn.Should().BeNull();
+    }
+
+    /// <summary>Native 方言で、移動列の定義は未選択 AlterColumn を無視し live 定義を用いることを検証する</summary>
+    [Fact(DisplayName = "MySQL: 移動列の定義は未選択 Alter を無視し live 定義になる")]
+    public void Native_Reorder_MovedColumnUsesLiveDefinitionWhenAlterUnselected()
+    {
+        // live: id(INT), a(INT), b(INT) → target: b, id, a（b を先頭へ動かす＝b が確実に移動列）。
+        // b の型変更 Alter は未選択
+        var live = new Entity
+        {
+            TableName = "t",
+            Columns = { Col("id", "INT"), Col("a", "INT"), Col("b", "INT") },
+        };
+        var target = Ent("t", "b", "id", "a");
+
+        var unselectedAlter = new SchemaDiffItem
+        {
+            Kind = SchemaDiffKind.AlterColumn,
+            TableName = "t",
+            ColumnName = "b",
+            Column = Col("b", "BIGINT"),
+            IsSelected = false,
+        };
+
+        var plan = new SyncPlanner().BuildPlan(
+            [Reorder("t", target), unselectedAlter],
+            NativeCaps,
+            new SyncPlanContext { LiveEntities = [live] }
+        );
+
+        var move = plan.Reorders.Single().Moves.Should().ContainSingle().Which;
+        move.Column.Name.Should().Be("b");
+        // 未選択の Alter（BIGINT）は反映されず live 定義（INT）で動かす
+        move.Column.DataType.Should().Be("INT");
+    }
+
+    /// <summary>Native 方言で、選択済み AlterColumn がある移動列は新定義を用いることを検証する</summary>
+    [Fact(DisplayName = "MySQL: 移動列の定義は選択済み Alter があれば新定義になる")]
+    public void Native_Reorder_MovedColumnUsesAlteredDefinitionWhenSelected()
+    {
+        // b を先頭へ動かす（＝b が確実に移動列）
+        var live = new Entity
+        {
+            TableName = "t",
+            Columns = { Col("id", "INT"), Col("a", "INT"), Col("b", "INT") },
+        };
+        var target = Ent("t", "b", "id", "a");
+
+        var selectedAlter = new SchemaDiffItem
+        {
+            Kind = SchemaDiffKind.AlterColumn,
+            TableName = "t",
+            ColumnName = "b",
+            Column = Col("b", "BIGINT"),
+            IsSelected = true,
+        };
+
+        var plan = new SyncPlanner().BuildPlan(
+            [Reorder("t", target), selectedAlter],
+            NativeCaps,
+            new SyncPlanContext { LiveEntities = [live] }
+        );
+
+        var move = plan.Reorders.Single().Moves.Should().ContainSingle().Which;
+        move.Column.Name.Should().Be("b");
+        move.AfterColumn.Should().BeNull();
+        move.Column.DataType.Should().Be("BIGINT");
+    }
+
+    /// <summary>Native 方言で、選択済み AddColumn の列も実効列順に含めて並べ替えられることを検証する</summary>
+    [Fact(DisplayName = "MySQL: 選択済み AddColumn の列も並べ替え対象になる")]
+    public void Native_Reorder_IncludesSelectedAddedColumn()
+    {
+        // live: id,a ＋ 追加 x → 実効: id,a,x。target: x,id,a（追加列 x を先頭へ動かす＝x が確実に移動列）
+        var live = new Entity { TableName = "t", Columns = { Col("id", "INT"), Col("a", "INT") } };
+        var target = Ent("t", "x", "id", "a");
+
+        var addX = new SchemaDiffItem
+        {
+            Kind = SchemaDiffKind.AddColumn,
+            TableName = "t",
+            ColumnName = "x",
+            Column = Col("x", "TEXT"),
+            IsSelected = true,
+        };
+
+        var plan = new SyncPlanner().BuildPlan(
+            [Reorder("t", target), addX],
+            NativeCaps,
+            new SyncPlanContext { LiveEntities = [live] }
+        );
+
+        var move = plan.Reorders.Single().Moves.Should().ContainSingle().Which;
+        move.Column.Name.Should().Be("x");
+        move.AfterColumn.Should().BeNull();
+        move.Column.DataType.Should().Be("TEXT"); // AddColumn の新定義で動かす
+    }
+
+    /// <summary>Native 方言で既に目標順なら移動が生じず並べ替え計画が空になることを検証する</summary>
+    [Fact(DisplayName = "MySQL: 既に目標順なら並べ替え計画は空")]
+    public void Native_Reorder_AlreadyOrdered_ProducesNoPlan()
+    {
+        var live = Ent("t", "id", "a", "b");
+        var target = Ent("t", "id", "a", "b");
+
+        var plan = new SyncPlanner().BuildPlan(
+            [Reorder("t", target)],
+            NativeCaps,
+            new SyncPlanContext { LiveEntities = [live] }
+        );
+
+        plan.Reorders.Should().BeEmpty();
+    }
+
+    /// <summary>Native 方言で live に無いテーブルの ReorderColumns は黙って落ちることを検証する</summary>
+    [Fact(DisplayName = "MySQL: live に無いテーブルの ReorderColumns は無視される")]
+    public void Native_Reorder_UnknownTable_IsDropped()
+    {
+        var target = Ent("ghost", "id", "b", "a");
+
+        var plan = new SyncPlanner().BuildPlan(
+            [Reorder("ghost", target)],
+            NativeCaps,
+            new SyncPlanContext { LiveEntities = [] }
+        );
+
+        plan.Reorders.Should().BeEmpty();
+        plan.IsEmpty.Should().BeTrue();
+    }
+
+    /// <summary>Native 方言で ReorderColumns が選択されており context=null なら例外になることを検証する</summary>
+    [Fact(DisplayName = "MySQL: ReorderColumns 選択かつ context 省略は例外")]
+    public void Native_Reorder_NullContext_Throws()
+    {
+        var target = Ent("t", "id", "b", "a");
+
+        var act = () => new SyncPlanner().BuildPlan([Reorder("t", target)], NativeCaps);
+
+        act.Should().Throw<InvalidOperationException>();
+    }
+
+    /// <summary>None 方言では ReorderColumns 項目が渡されても計画から自然に消えることを検証する</summary>
+    [Fact(DisplayName = "None 方言では ReorderColumns は計画から消える")]
+    public void NoneDialect_ReorderColumns_DisappearsFromPlan()
+    {
+        var target = Ent("t", "id", "b", "a");
+
+        var plan = new SyncPlanner().BuildPlan(
+            [Reorder("t", target)],
+            new SyncDialectCapabilities()
+        );
+
+        plan.Reorders.Should().BeEmpty();
+        plan.Sections.Should().BeEmpty();
+        plan.IsEmpty.Should().BeTrue();
+    }
 }

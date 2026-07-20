@@ -570,4 +570,106 @@ public class SchemaDiffServiceTests
         diff.Items.Should().Contain(i => i.Kind == SchemaDiffKind.DropForeignKey);
         diff.Items.Should().Contain(i => i.Kind == SchemaDiffKind.AddForeignKey);
     }
+
+    // ---------------- 列順変更（ReorderColumns）の生成 ----------------
+
+    /// <summary>列順のみ入れ替えた図（Native/Rebuild 方言）</summary>
+    private static (List<Entity> Live, List<Entity> Target) ReorderScenario()
+    {
+        var live = new List<Entity>
+        {
+            Tbl(
+                "Customer",
+                ("Id", "int", true),
+                ("Name", "nvarchar(50)", false),
+                ("Email", "nvarchar(50)", false)
+            ),
+        };
+        var target = new List<Entity>
+        {
+            Tbl(
+                "Customer",
+                ("Id", "int", true),
+                ("Email", "nvarchar(50)", false),
+                ("Name", "nvarchar(50)", false)
+            ),
+        };
+        return (live, target);
+    }
+
+    /// <summary>Native 方言では列順変更が選択可能な ReorderColumns 項目として生成され、既定で未選択であることを検証する</summary>
+    [Fact(DisplayName = "Native 方言では ReorderColumns が生成され既定で未選択")]
+    public void Reorder_NativeDialect_GeneratesUnselectedReorderItem()
+    {
+        var (live, target) = ReorderScenario();
+
+        var diff = new SchemaDiffService().Compute(
+            live,
+            new List<Relationship>(),
+            target,
+            new List<Relationship>(),
+            new SyncDialectCapabilities { ColumnReorder = ColumnReorderMode.Native }
+        );
+
+        var reorder = diff
+            .Items.Should()
+            .ContainSingle(i => i.Kind == SchemaDiffKind.ReorderColumns)
+            .Which;
+        reorder.TableName.Should().Be("Customer");
+        reorder.Entity.Should().BeSameAs(target[0]);
+        reorder.IsSelected.Should().BeFalse();
+        reorder.IsSelectable.Should().BeTrue();
+        reorder.IsDestructive.Should().BeFalse();
+    }
+
+    /// <summary>Rebuild 方言でも ReorderColumns 項目が生成されることを検証する</summary>
+    [Fact(DisplayName = "Rebuild 方言でも ReorderColumns が生成される")]
+    public void Reorder_RebuildDialect_GeneratesReorderItem()
+    {
+        var (live, target) = ReorderScenario();
+
+        var diff = new SchemaDiffService().Compute(
+            live,
+            new List<Relationship>(),
+            target,
+            new List<Relationship>(),
+            new SyncDialectCapabilities
+            {
+                SupportsAlterColumn = false,
+                SupportsForeignKeyAlter = false,
+                SupportsDescriptions = false,
+                PersistsForeignKeyConstraintNames = false,
+                ColumnReorder = ColumnReorderMode.Rebuild,
+            }
+        );
+
+        diff.Items.Should().Contain(i => i.Kind == SchemaDiffKind.ReorderColumns);
+    }
+
+    /// <summary>非対応方言（None）および capabilities 省略時は ReorderColumns を生成しないことを検証する</summary>
+    [Fact(DisplayName = "None 方言・capabilities 省略時は ReorderColumns を生成しない")]
+    public void Reorder_NoneDialectOrNoCapabilities_DoesNotGenerate()
+    {
+        var (live, target) = ReorderScenario();
+        var service = new SchemaDiffService();
+
+        // capabilities 省略（既定）
+        var diffDefault = service.Compute(
+            live,
+            new List<Relationship>(),
+            target,
+            new List<Relationship>()
+        );
+        diffDefault.Items.Should().NotContain(i => i.Kind == SchemaDiffKind.ReorderColumns);
+
+        // 明示的な None
+        var diffNone = service.Compute(
+            live,
+            new List<Relationship>(),
+            target,
+            new List<Relationship>(),
+            new SyncDialectCapabilities { ColumnReorder = ColumnReorderMode.None }
+        );
+        diffNone.Items.Should().NotContain(i => i.Kind == SchemaDiffKind.ReorderColumns);
+    }
 }

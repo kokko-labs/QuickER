@@ -86,8 +86,15 @@ public sealed class SyncPlanner
 
         if (!isRebuildDialect)
         {
-            // 逐次 DDL 方言: 全差分をそのままセクション化する（Phase 1 と完全同一）
-            return new SyncPlan { Sections = BuildSections(selected) };
+            // 逐次 DDL 方言: 全差分をそのままセクション化する。
+            // 列順変更（ReorderColumns）は SectionOrder に無いためセクションからは自然に外れ、
+            // Native 方言（MySQL）のときだけネイティブ MODIFY ... AFTER の並べ替え計画へ変換する
+            // （None 方言では Compute が ReorderColumns を生成しないため、渡されても計画から消える）。
+            var reorders =
+                capabilities.ColumnReorder == ColumnReorderMode.Native
+                    ? BuildReorderPlans(selected, context)
+                    : [];
+            return new SyncPlan { Sections = BuildSections(selected), Reorders = reorders };
         }
 
         if (context is null)
@@ -255,6 +262,9 @@ public sealed class SyncPlanner
             var newDef = live.Clone(preserveId: true);
             ApplySelectedColumnChanges(newDef, tableItems);
 
+            // 列順変更（ReorderColumns）が選択されていれば、合成後の列を target の列名順へ並べ替える
+            ApplySelectedReorder(newDef, tableItems);
+
             // FK 集合 = live の子側 FK − 選択済み DropForeignKey ＋ 選択済み AddForeignKey
             var foreignKeys = SynthesizeForeignKeys(table, tableItems, context);
 
@@ -315,6 +325,294 @@ public sealed class SyncPlanner
                 newDef.Columns.Add(add.Column.Clone(preserveId: true));
             }
         }
+    }
+
+    /// <summary>
+    /// 選択された ReorderColumns があれば、合成後の列を target（差分項目の Entity）の列名順へ並べ替える。
+    /// </summary>
+    /// <remarks>
+    /// target に存在する列を target の順序で先頭側へ並べ、target に無い列（未選択の削除で残った列）は
+    /// 元の相対順序を保ったまま末尾へ回す（安定ソート）。ReorderColumns が未選択なら何もしない。
+    /// </remarks>
+    private static void ApplySelectedReorder(
+        Entity newDef,
+        IReadOnlyList<SchemaDiffItem> tableItems
+    )
+    {
+        var reorder = tableItems.FirstOrDefault(i => i.Kind == SchemaDiffKind.ReorderColumns);
+
+        if (reorder?.Entity is null)
+        {
+            return;
+        }
+
+        // target 列名 → 目標順インデックス
+        var targetOrder = new Dictionary<string, int>(TableComparer);
+
+        for (var i = 0; i < reorder.Entity.Columns.Count; i++)
+        {
+            targetOrder.TryAdd(reorder.Entity.Columns[i].Name, i);
+        }
+
+        // target にある列は目標順、無い列は元の相対順を保って末尾へ（OrderBy は安定ソート）
+        var reordered = newDef
+            .Columns.Select((column, index) => (column, index))
+            .OrderBy(x => targetOrder.TryGetValue(x.column.Name, out var ti) ? ti : int.MaxValue)
+            .ThenBy(x => x.index)
+            .Select(x => x.column)
+            .ToList();
+
+        newDef.Columns.Clear();
+        newDef.Columns.AddRange(reordered);
+    }
+
+    // ---------------- ネイティブ列順変更（MySQL）の集約 ----------------
+
+    /// <summary>選択済み ReorderColumns をネイティブ並べ替え計画（<see cref="TableReorderPlan"/>）へ変換する</summary>
+    /// <remarks>
+    /// live スキーマから移動集合を計算するため context 必須（rebuild 方言と同じく、選択された ReorderColumns が
+    /// あるのに context が無ければ呼び出し側のバグとして例外にする）。live に無いテーブルの項目は、そのテーブル自体が
+    /// 同期対象外とみなして黙って落とす。
+    /// </remarks>
+    private static IReadOnlyList<TableReorderPlan> BuildReorderPlans(
+        List<SchemaDiffItem> selected,
+        SyncPlanContext? context
+    )
+    {
+        var reorderItems = selected.Where(i => i.Kind == SchemaDiffKind.ReorderColumns).ToList();
+
+        if (reorderItems.Count == 0)
+        {
+            return [];
+        }
+
+        if (context is null)
+        {
+            // ネイティブ並べ替えの移動集合計算には live スキーマが必須（合成定義も live 由来）
+            throw new InvalidOperationException(
+                "Native column-reorder dialects require a SyncPlanContext (live schema) to compute column moves."
+            );
+        }
+
+        var liveByName = new Dictionary<string, Entity>(TableComparer);
+
+        foreach (var live in context.LiveEntities)
+        {
+            liveByName.TryAdd(SchemaDiffService.NormalizeTable(live), live);
+        }
+
+        var plans = new List<TableReorderPlan>();
+
+        foreach (var item in reorderItems)
+        {
+            var table = item.TableName.Trim();
+
+            // live に無いテーブル（そのテーブル自体が同期対象外）・target 不明なら並べ替えられない
+            if (!liveByName.TryGetValue(table, out var live) || item.Entity is null)
+            {
+                continue;
+            }
+
+            var moves = ComputeColumnMoves(live, item.Entity, selected, table);
+
+            // 実質移動が無い（既に目標順）場合は計画に含めない
+            if (moves.Count == 0)
+            {
+                continue;
+            }
+
+            plans.Add(
+                new TableReorderPlan
+                {
+                    TableName = live.TableName,
+                    Moves = moves,
+                    SourceItems = [item],
+                }
+            );
+        }
+
+        return plans;
+    }
+
+    /// <summary>1 テーブル分の列移動集合を最小移動（LIS を不動とする）で計算する</summary>
+    /// <remarks>
+    /// <para>
+    /// 実効列順 = live の列順に「選択済み DropColumn を除外・選択済み AddColumn を末尾追加」した並び。
+    /// 目標順 = target の列順のうち実効列集合に含まれるもの。目標順にある列（tracked）を実効順で見たとき、
+    /// 最長増加部分列（LIS）に入る列は既に相対順が正しいため不動とし、それ以外だけを移動対象にする。
+    /// </para>
+    /// <para>
+    /// 移動は目標順に前から確定し、各移動列の <c>AFTER</c> は目標順で直前の列（先頭なら <c>FIRST</c>）にする。
+    /// 直前の列は目標順の左から順に確定済みになっているため、最終的な並びは目標順どおりになる。
+    /// 移動列の定義は合成スキーマ由来（選択済み AlterColumn / AddColumn があればその新定義、無ければ live 定義）。
+    /// </para>
+    /// </remarks>
+    private static IReadOnlyList<ColumnMove> ComputeColumnMoves(
+        Entity live,
+        Entity target,
+        List<SchemaDiffItem> selected,
+        string table
+    )
+    {
+        // このテーブルの選択済み Add / Drop / Alter を集める
+        var tableSelected = selected
+            .Where(i => TableComparer.Equals(i.TableName.Trim(), table))
+            .ToList();
+        var droppedNames = tableSelected
+            .Where(i => i.Kind == SchemaDiffKind.DropColumn && i.ColumnName is not null)
+            .Select(i => i.ColumnName!)
+            .ToHashSet(TableComparer);
+        var addedColumns = tableSelected
+            .Where(i => i.Kind == SchemaDiffKind.AddColumn && i.Column is not null)
+            .Select(i => i.Column!)
+            .ToList();
+
+        // 実効列順 = live − 選択 Drop ＋ 選択 Add（末尾）
+        var effective = new List<string>();
+
+        foreach (var column in live.Columns)
+        {
+            if (!droppedNames.Contains(column.Name))
+            {
+                effective.Add(column.Name);
+            }
+        }
+
+        effective.AddRange(addedColumns.Select(c => c.Name));
+
+        var effectiveSet = effective.ToHashSet(TableComparer);
+
+        // 目標順 = target の列順のうち実効列集合に含まれるもの（＝並べ替え対象になり得る列）
+        var targetOrder = target.Columns.Select(c => c.Name).Where(effectiveSet.Contains).ToList();
+        var targetIndex = new Dictionary<string, int>(TableComparer);
+
+        for (var i = 0; i < targetOrder.Count; i++)
+        {
+            targetIndex.TryAdd(targetOrder[i], i);
+        }
+
+        // 実効順に並ぶ tracked 列（目標順にある列）の目標インデックス列を作り、LIS を不動集合にする
+        var effectiveTrackedIndices = effective
+            .Where(targetIndex.ContainsKey)
+            .Select(name => targetIndex[name])
+            .ToList();
+        var fixedIndices = LongestIncreasingSubsequence(effectiveTrackedIndices);
+
+        var moves = new List<ColumnMove>();
+
+        for (var ti = 0; ti < targetOrder.Count; ti++)
+        {
+            if (fixedIndices.Contains(ti))
+            {
+                continue;
+            }
+
+            var name = targetOrder[ti];
+            var after = ti == 0 ? null : targetOrder[ti - 1];
+            moves.Add(
+                new ColumnMove(ResolveMovedColumnDefinition(name, tableSelected, live), after)
+            );
+        }
+
+        return moves;
+    }
+
+    /// <summary>移動する列の定義を合成スキーマ規則で解決する（選択 Add → 選択 Alter → live の順）</summary>
+    private static Column ResolveMovedColumnDefinition(
+        string name,
+        IReadOnlyList<SchemaDiffItem> tableSelected,
+        Entity live
+    )
+    {
+        // 選択済み AddColumn の新規列（live に無い）はその定義で移動する
+        var add = tableSelected.FirstOrDefault(i =>
+            i.Kind == SchemaDiffKind.AddColumn
+            && i.Column is not null
+            && TableComparer.Equals(i.Column.Name, name)
+        );
+
+        if (add?.Column is not null)
+        {
+            return add.Column;
+        }
+
+        // 選択済み AlterColumn があれば新定義で移動する（未選択の型変更は紛れ込ませないため live 定義）
+        var alter = tableSelected.FirstOrDefault(i =>
+            i.Kind == SchemaDiffKind.AlterColumn
+            && i.Column is not null
+            && TableComparer.Equals(i.Column.Name, name)
+        );
+
+        if (alter?.Column is not null)
+        {
+            return alter.Column;
+        }
+
+        return live.Columns.FirstOrDefault(c => TableComparer.Equals(c.Name, name))
+            ?? new Column { Name = name };
+    }
+
+    /// <summary>
+    /// 数列の最長増加部分列（厳密増加）に含まれる値の集合を返す（O(n log n)・パ―シェンスソート＋前駆復元）。
+    /// </summary>
+    /// <remarks>値は目標インデックス（distinct）。ここに残った値の列は移動不要（不動）とみなす。</remarks>
+    private static HashSet<int> LongestIncreasingSubsequence(IReadOnlyList<int> sequence)
+    {
+        var result = new HashSet<int>();
+        var count = sequence.Count;
+
+        if (count == 0)
+        {
+            return result;
+        }
+
+        // tails[k] = 長さ k+1 の増加部分列の末尾になり得る最小値の、sequence 内インデックス
+        var tails = new List<int>();
+        var predecessor = new int[count];
+
+        for (var i = 0; i < count; i++)
+        {
+            predecessor[i] = -1;
+            // 厳密増加のため sequence[i] 以上になる最初の位置（lower_bound）を二分探索する
+            var lo = 0;
+            var hi = tails.Count;
+
+            while (lo < hi)
+            {
+                var mid = (lo + hi) / 2;
+
+                if (sequence[tails[mid]] < sequence[i])
+                {
+                    lo = mid + 1;
+                }
+                else
+                {
+                    hi = mid;
+                }
+            }
+
+            if (lo > 0)
+            {
+                predecessor[i] = tails[lo - 1];
+            }
+
+            if (lo == tails.Count)
+            {
+                tails.Add(i);
+            }
+            else
+            {
+                tails[lo] = i;
+            }
+        }
+
+        // 末尾から前駆をたどって 1 本の LIS を復元する
+        for (var k = tails[^1]; k >= 0; k = predecessor[k])
+        {
+            result.Add(sequence[k]);
+        }
+
+        return result;
     }
 
     /// <summary>再構築後に張る FK 集合を合成する（live 集合から Drop を除き Add を足す）</summary>
@@ -482,13 +780,18 @@ public sealed class SyncPlanner
         return (childCol, SchemaDiffService.NormalizeTable(item.ParentEntity), parentCol.Name);
     }
 
-    /// <summary>この種別が既存テーブルの再構築を要求するか（列型変更・列削除・FK 変更）</summary>
+    /// <summary>この種別が既存テーブルの再構築を要求するか（列型変更・列削除・FK 変更・列順変更）</summary>
+    /// <remarks>
+    /// rebuild 方言（SQLite）では列順変更もテーブル再構築で実現するため、ReorderColumns も再構築トリガーに含める
+    /// （ReorderColumns だけが選択された場合も CreateOnly=false の再構築になる）。
+    /// </remarks>
     private static bool IsRebuildTriggerKind(SchemaDiffKind kind) =>
         kind
             is SchemaDiffKind.AlterColumn
                 or SchemaDiffKind.DropColumn
                 or SchemaDiffKind.DropForeignKey
-                or SchemaDiffKind.AddForeignKey;
+                or SchemaDiffKind.AddForeignKey
+                or SchemaDiffKind.ReorderColumns;
 
     /// <summary>制約名の安全化（"." と空白を "_" へ置換。<c>SqliteIdentifier.SafeName</c> と同一規則）</summary>
     private static string SafeName(string name) =>

@@ -244,6 +244,44 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
         );
     }
 
+    // ---------------- 列順変更 (MODIFY ... AFTER) ----------------
+
+    /// <summary>ネイティブ列順変更（<c>ALTER TABLE ... MODIFY COLUMN ... AFTER</c>）を生成する</summary>
+    /// <remarks>
+    /// <para>
+    /// テーブルごとに見出しコメントを付け、各列を「直前に置く列の直後（先頭なら <c>FIRST</c>）」へ移す
+    /// <c>MODIFY COLUMN</c> を出力する。列定義は <see cref="BuildColumnDefinition"/> で完全再指定する
+    /// （型・NULL 制約に加え、説明があれば <c>COMMENT</c> を含めて既存コメントの消失を防ぐ）。
+    /// </para>
+    /// <para>
+    /// MySQL の <c>MODIFY</c> による位置変更は内部的にテーブルコピー（メタデータのみの高速 DDL にはならない）
+    /// になり得る点に注意する。移動列数はプランナーが最長増加部分列で最小化している。
+    /// </para>
+    /// </remarks>
+    protected override void AppendReorders(StringBuilder sb, SyncPlan plan)
+    {
+        foreach (var reorder in plan.Reorders)
+        {
+            // 見出し（固定文は英語が正本）
+            sb.AppendLine($"-- ===== ReorderColumns: {reorder.TableName} =====");
+
+            foreach (var move in reorder.Moves)
+            {
+                // AfterColumn が null なら先頭（FIRST）、それ以外は指定列の直後（AFTER 列名）
+                var position = move.AfterColumn is null
+                    ? "FIRST"
+                    : $"AFTER {MySqlIdentifier.QuoteSimple(move.AfterColumn)}";
+                sb.AppendLine(
+                    $"ALTER TABLE {MySqlIdentifier.Quote(reorder.TableName)} "
+                        + $"MODIFY COLUMN {MySqlIdentifier.QuoteSimple(move.Column.Name)} "
+                        + $"{BuildColumnDefinition(move.Column)} {position};"
+                );
+            }
+
+            sb.AppendLine();
+        }
+    }
+
     /// <summary>列定義（型・NULL 制約・COMMENT）を組み立てる</summary>
     /// <remarks>
     /// MODIFY / ADD で列定義を完全再指定する際に用いる。説明が設定されていれば COMMENT を付与し、

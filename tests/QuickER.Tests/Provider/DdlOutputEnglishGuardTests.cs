@@ -78,9 +78,53 @@ public sealed class DdlOutputEnglishGuardTests
             ("MySql", new MySqlSyncScriptBuilder().Build(plan)),
             ("Oracle", new OracleSyncScriptBuilder().Build(plan)),
             ("Sqlite", BuildSqliteRebuildScript()),
+            ("MySqlReorder", BuildMySqlReorderScript()),
         };
 
         AssertNoCjk(outputs);
+    }
+
+    /// <summary>
+    /// ASCII のみの列順変更（MySQL Native）から同期スクリプトを生成する。
+    /// ReorderColumns 見出しと <c>MODIFY ... AFTER</c> / <c>FIRST</c> の固定文を出力経路で通す。
+    /// </summary>
+    private static string BuildMySqlReorderScript()
+    {
+        Entity Ent(string table, params string[] cols)
+        {
+            var e = new Entity { TableName = table };
+
+            foreach (var c in cols)
+            {
+                e.Columns.Add(
+                    new Column
+                    {
+                        Name = c,
+                        DataType = "int",
+                        IsNullable = true,
+                    }
+                );
+            }
+
+            return e;
+        }
+
+        // live: id,a,b,c → target: c,id,a,b（c を先頭へ＝FIRST 経路も通す）
+        var live = Ent("t", "id", "a", "b", "c");
+        var target = Ent("t", "c", "id", "a", "b");
+        var item = new SchemaDiffItem
+        {
+            Kind = SchemaDiffKind.ReorderColumns,
+            TableName = "t",
+            Entity = target,
+            IsSelected = true,
+        };
+        var plan = new SyncPlanner().BuildPlan(
+            [item],
+            new SyncDialectCapabilities { ColumnReorder = ColumnReorderMode.Native },
+            new SyncPlanContext { LiveEntities = [live] }
+        );
+        return new MySqlSyncScriptBuilder().Build(plan);
     }
 
     /// <summary>

@@ -168,6 +168,12 @@ namespace QuickER.Provider.Resources {
             }
         }
 
+        public static string Diff_ReorderColumns {
+            get {
+                return ResourceManager.GetString("Diff_ReorderColumns", resourceCulture);
+            }
+        }
+
         public static string Provider_UnsupportedProvider {
             get {
                 return ResourceManager.GetString("Provider_UnsupportedProvider", resourceCulture);

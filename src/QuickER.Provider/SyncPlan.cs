@@ -36,8 +36,14 @@ public sealed class SyncPlan
     /// </summary>
     public IReadOnlyList<TableRebuildPlan> Rebuilds { get; init; } = [];
 
-    /// <summary>生成対象のセクション・再構築が 1 件も無いか。</summary>
-    public bool IsEmpty => Sections.Count == 0 && Rebuilds.Count == 0;
+    /// <summary>
+    /// 列順をネイティブ DDL（<c>ALTER TABLE ... MODIFY ... AFTER</c>）で並べ替える計画
+    /// （Native 方言＝MySQL のみ・他方言は空。rebuild 方言では再構築へ畳むためここは常に空）。
+    /// </summary>
+    public IReadOnlyList<TableReorderPlan> Reorders { get; init; } = [];
+
+    /// <summary>生成対象のセクション・再構築・並べ替えが 1 件も無いか。</summary>
+    public bool IsEmpty => Sections.Count == 0 && Rebuilds.Count == 0 && Reorders.Count == 0;
 }
 
 /// <summary>
@@ -79,6 +85,37 @@ public sealed class TableRebuildPlan
     /// <summary>この再構築の由来となった差分項目（UI の確認表示用）。</summary>
     public IReadOnlyList<SchemaDiffItem> SourceItems { get; init; } = [];
 }
+
+/// <summary>
+/// ネイティブ列順変更（<c>ALTER TABLE ... MODIFY ... AFTER</c>）1 テーブル分の実行計画。
+/// </summary>
+/// <remarks>
+/// 逐次 DDL で列を並べ替えられる方言（MySQL）向け。<see cref="Moves"/> は「最小移動」に刈り込まれており
+/// （最長増加部分列を不動とし、それ以外の列だけを移動する）、各移動は目標順で前から確定する
+/// （<see cref="SyncPlanner"/> が合成する）。
+/// </remarks>
+public sealed class TableReorderPlan
+{
+    /// <summary>並べ替え対象のテーブル名。</summary>
+    public string TableName { get; init; } = string.Empty;
+
+    /// <summary>実行順に並んだ列移動一覧（各列を <see cref="ColumnMove.AfterColumn"/> の直後へ動かす）。</summary>
+    public IReadOnlyList<ColumnMove> Moves { get; init; } = [];
+
+    /// <summary>この並べ替えの由来となった差分項目（UI の確認表示用）。</summary>
+    public IReadOnlyList<SchemaDiffItem> SourceItems { get; init; } = [];
+}
+
+/// <summary>
+/// ネイティブ列順変更での 1 列分の移動。
+/// </summary>
+/// <param name="Column">
+/// 移動する列の完全定義（合成済み）。選択済み AlterColumn / AddColumn があればその新定義、無ければ live 定義。
+/// </param>
+/// <param name="AfterColumn">
+/// この列を直後へ置く列名。<c>null</c> のときは先頭（<c>FIRST</c>）へ移動する。
+/// </param>
+public sealed record ColumnMove(Column Column, string? AfterColumn);
 
 /// <summary>
 /// テーブル再構築の <c>CREATE TABLE</c> にインライン出力する、解決済みの外部キー 1 件。

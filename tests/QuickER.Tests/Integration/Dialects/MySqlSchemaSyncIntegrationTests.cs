@@ -308,7 +308,109 @@ public sealed class MySqlSchemaSyncIntegrationTests(MySqlContainerFixture fixtur
         live.Entities.Select(e => e.TableName).Should().NotContain("bad_table");
     }
 
+    /// <summary>
+    /// 列順変更（並び替え＋真ん中への列追加）がネイティブ MODIFY ... AFTER で実 DB へ反映され、
+    /// information_schema の ORDINAL_POSITION で列順が確認でき、データが温存されることを検証する。
+    /// </summary>
+    [Fact(
+        DisplayName = "[Integration] C: 列順変更（並び替え＋真ん中への列追加）が実 DB に反映される"
+    )]
+    public async Task SchemaSync_ColumnReorder_AppliesToRealDb()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        var settings = fixture.ToDbConnectionSettings();
+
+        await fixture.ExecuteAsync(
+            "CREATE TABLE `item` (`id` int NOT NULL, `a` int NULL, `b` int NULL, "
+                + "CONSTRAINT `PK_item` PRIMARY KEY (`id`));",
+            Ct
+        );
+        await fixture.ExecuteAsync("INSERT INTO `item` (`id`, `a`, `b`) VALUES (1, 10, 20);", Ct);
+
+        var live = await ImportAsync();
+        var liveItem = live.Entities.Single(e => e.TableName == "item");
+
+        // 目標列順: id, new_col（真ん中へ追加）, b, a（a と b を入れ替え）
+        var target = liveItem.Clone(preserveId: true);
+        var id = target.Columns.Single(c => c.Name == "id");
+        var a = target.Columns.Single(c => c.Name == "a");
+        var b = target.Columns.Single(c => c.Name == "b");
+        target.Columns.Clear();
+        target.Columns.Add(id);
+        target.Columns.Add(Col("new_col", "int", nullable: true));
+        target.Columns.Add(b);
+        target.Columns.Add(a);
+
+        var caps = new MySqlProvider().SyncCapabilities;
+        var diff = _diff.Compute(
+            live.Entities,
+            live.Relationships,
+            new[] { target },
+            new List<Relationship>(),
+            caps
+        );
+        diff.Items.Should().Contain(i => i.Kind == SchemaDiffKind.ReorderColumns);
+
+        // 列順変更は既定で未選択のため、全項目を選択して実行する
+        foreach (var it in diff.Items)
+        {
+            it.IsSelected = true;
+        }
+
+        var context = new SyncPlanContext
+        {
+            LiveEntities = live.Entities,
+            LiveRelationships = live.Relationships,
+        };
+        var script = _builder.Build(new SyncPlanner().BuildPlan(diff.Items, caps, context));
+        var result = await _executor.ExecuteAsync(settings, script, Ct);
+        result.Committed.Should().BeTrue($"同期に失敗: {result.Error}\nSQL:\n{script}");
+
+        // ORDINAL_POSITION で列順が id, new_col, b, a に反映される
+        var order = await QueryColumnOrderAsync("item");
+        order.Should().Equal("id", "new_col", "b", "a");
+
+        // データは温存される（a=10, b=20・追加列は NULL）
+        var (rowA, rowB, newIsNull) = await QueryItemRowAsync(1);
+        rowA.Should().Be(10);
+        rowB.Should().Be(20);
+        newIsNull.Should().BeTrue();
+    }
+
     // ---------------- ヘルパー ----------------
+
+    /// <summary>information_schema.COLUMNS から ORDINAL_POSITION 順の列名一覧を取得する</summary>
+    private async Task<List<string>> QueryColumnOrderAsync(string table)
+    {
+        var names = new List<string>();
+
+        await using var conn = await fixture.OpenConnectionAsync(Ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText =
+            "SELECT COLUMN_NAME FROM information_schema.COLUMNS "
+            + $"WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = '{table}' ORDER BY ORDINAL_POSITION;";
+        await using var reader = await cmd.ExecuteReaderAsync(Ct).ConfigureAwait(false);
+
+        while (await reader.ReadAsync(Ct).ConfigureAwait(false))
+        {
+            names.Add(reader.GetString(0));
+        }
+
+        return names;
+    }
+
+    /// <summary>item テーブルの 1 行から a / b の値と new_col が NULL かを取得する（検証用）</summary>
+    private async Task<(long A, long B, bool NewIsNull)> QueryItemRowAsync(long id)
+    {
+        await using var conn = await fixture.OpenConnectionAsync(Ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = $"SELECT `a`, `b`, `new_col` FROM `item` WHERE `id` = {id};";
+        await using var reader = await cmd.ExecuteReaderAsync(Ct).ConfigureAwait(false);
+        await reader.ReadAsync(Ct).ConfigureAwait(false);
+        return (reader.GetInt64(0), reader.GetInt64(1), reader.IsDBNull(2));
+    }
 
     private static Column Pk(string name) =>
         new()

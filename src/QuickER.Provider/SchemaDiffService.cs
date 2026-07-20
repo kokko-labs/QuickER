@@ -448,11 +448,40 @@ public class SchemaDiffService
             );
         }
 
+        // ---------- 列順の差分（対応方言のみ・既定では非選択） ----------
+        // 列順同期は SQLite（テーブル再構築）と MySQL（ネイティブ MODIFY ... AFTER）だけが実現できる。
+        // 非対応方言（ColumnReorder=None）では幻の差分を出さない（案内表示は UI 側が担う）。
+        if (capabilities is not null && capabilities.ColumnReorder != ColumnReorderMode.None)
+        {
+            foreach (var tableName in DetectColumnOrderChanges(liveEntities, targetEntities))
+            {
+                if (!targetByName.TryGetValue(tableName, out var target))
+                {
+                    continue;
+                }
+
+                diff.Items.Add(
+                    new SchemaDiffItem
+                    {
+                        Kind = SchemaDiffKind.ReorderColumns,
+                        TableName = tableName,
+                        Entity = target,
+                        IsSelected = false,
+                        Description = string.Format(Strings.Diff_ReorderColumns, tableName),
+                    }
+                );
+            }
+        }
+
         return diff;
     }
 
-    /// <summary>同一列集合のまま順序のみ異なるテーブル名の一覧を返す</summary>
-    /// <remarks>列の追加・削除を伴う場合は列順差分として扱わない（ALTER で表現できないため別管理とする）</remarks>
+    /// <summary>共通列（追加・削除を除いた双方に存在する列）の相対順序が異なるテーブル名の一覧を返す</summary>
+    /// <remarks>
+    /// 列の追加・削除は無視し、live と target の両方に存在する列だけを取り出してその相対順序を比較する。
+    /// これにより「真ん中への列追加」と「並び替え」が同時に起きても、共通列の順序変化として検知できる
+    /// （純粋な列追加のみ＝共通列の相対順序が変わらないケースは検知しない）。共通列が 2 列未満のときは検知しない。
+    /// </remarks>
     public static IReadOnlyList<string> DetectColumnOrderChanges(
         IReadOnlyList<Entity> liveEntities,
         IReadOnlyList<Entity> targetEntities
@@ -608,28 +637,29 @@ public class SchemaDiffService
     private static bool IsSameType(string a, string b) =>
         string.Equals((a ?? "").Trim(), (b ?? "").Trim(), StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>列集合が一致するテーブルで列順のみが変更されているかを判定する</summary>
+    /// <summary>共通列（双方に存在する列）の相対順序が変更されているかを判定する</summary>
     private static bool HasColumnOrderChanged(Entity live, Entity target)
     {
-        if (live.Columns.Count != target.Columns.Count)
-        {
-            return false;
-        }
-
         var liveNames = live.Columns.Select(c => c.Name).ToList();
         var targetNames = target.Columns.Select(c => c.Name).ToList();
 
         var liveSet = new HashSet<string>(liveNames, StringComparer.OrdinalIgnoreCase);
         var targetSet = new HashSet<string>(targetNames, StringComparer.OrdinalIgnoreCase);
 
-        if (!liveSet.SetEquals(targetSet))
+        // 追加・削除を除いた共通列を、それぞれの出現順で取り出す（両者は同一集合＝同数になる）
+        var liveCommon = liveNames.Where(targetSet.Contains).ToList();
+        var targetCommon = targetNames.Where(liveSet.Contains).ToList();
+
+        // 共通列が 2 列未満なら相対順序の概念が無いため並び替えとは扱わない
+        if (liveCommon.Count < 2)
         {
             return false;
         }
 
-        for (var i = 0; i < liveNames.Count; i++)
+        // 共通列の相対順序が 1 か所でも異なれば列順変更とみなす
+        for (var i = 0; i < liveCommon.Count; i++)
         {
-            if (!string.Equals(liveNames[i], targetNames[i], StringComparison.OrdinalIgnoreCase))
+            if (!string.Equals(liveCommon[i], targetCommon[i], StringComparison.OrdinalIgnoreCase))
             {
                 return true;
             }

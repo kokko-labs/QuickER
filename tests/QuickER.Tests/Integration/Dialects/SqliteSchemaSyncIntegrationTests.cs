@@ -287,7 +287,115 @@ public sealed class SqliteSchemaSyncIntegrationTests
         fkCount.Should().Be(0);
     }
 
+    /// <summary>並び替え＋真ん中への列追加を 1 回の同期で反映し、列順とデータが正しく保たれることを検証する</summary>
+    [Fact(
+        DisplayName = "[Integration] SQLite 同期: 並び替え＋真ん中への列追加を 1 回で反映し列順・データを保つ"
+    )]
+    public async Task Rebuild_ColumnReorderWithInsertion_AppliesInOneSync()
+    {
+        using var db = SqliteTempDatabase.Create();
+        var provider = new SqliteProvider();
+
+        await RunStatementsAsync(
+            db,
+            "CREATE TABLE \"item\" ("
+                + "\"id\" INTEGER NOT NULL, \"a\" INTEGER NULL, \"b\" INTEGER NULL, "
+                + "CONSTRAINT \"PK_item\" PRIMARY KEY (\"id\"));",
+            "INSERT INTO \"item\" (\"id\", \"a\", \"b\") VALUES (1, 10, 20);",
+            "INSERT INTO \"item\" (\"id\", \"a\", \"b\") VALUES (2, 30, 40);"
+        );
+
+        // 目標列順: id, new_col（真ん中へ追加）, b, a（a と b を入れ替え）
+        var (result, _) = await RunSyncAsync(
+            db,
+            provider,
+            (entities, relationships) =>
+            {
+                var item = entities.Single(e => e.TableName == "item");
+                var id = item.Columns.Single(c => c.Name == "id");
+                var a = item.Columns.Single(c => c.Name == "a");
+                var b = item.Columns.Single(c => c.Name == "b");
+                var newCol = new Column
+                {
+                    Name = "new_col",
+                    DataType = "TEXT",
+                    IsNullable = true,
+                };
+                item.Columns.Clear();
+                item.Columns.Add(id);
+                item.Columns.Add(newCol);
+                item.Columns.Add(b);
+                item.Columns.Add(a);
+                return (entities, relationships);
+            }
+        );
+
+        result.Committed.Should().BeTrue(result.Error);
+
+        // 列順が id, new_col, b, a に反映される
+        var order = await QueryColumnOrderAsync(db, "item");
+        order.Should().Equal("id", "new_col", "b", "a");
+
+        // データは温存され、追加列は NULL
+        var rows = await QueryItemRowsAsync(db);
+        rows.Should()
+            .BeEquivalentTo(
+                new (long, long, long, string?)[] { (1, 10, 20, null), (2, 30, 40, null) }
+            );
+    }
+
     // ---------------- ヘルパー ----------------
+
+    /// <summary>PRAGMA table_info でテーブルの列順（宣言順）を取得する</summary>
+    private static async Task<List<string>> QueryColumnOrderAsync(
+        SqliteTempDatabase db,
+        string table
+    )
+    {
+        var names = new List<string>();
+
+        await using var conn = new SqliteConnection(NonPooledReadOnlyConnectionString(db));
+        await conn.OpenAsync(Ct).ConfigureAwait(false);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = $"PRAGMA table_info(\"{table}\");";
+        await using var reader = await cmd.ExecuteReaderAsync(Ct).ConfigureAwait(false);
+
+        while (await reader.ReadAsync(Ct).ConfigureAwait(false))
+        {
+            // 列は cid / name / type / ...。name は 2 列目
+            names.Add(reader.GetString(1));
+        }
+
+        return names;
+    }
+
+    /// <summary>item テーブルの行（id, a, b, new_col）を取得する（検証用）</summary>
+    private static async Task<List<(long, long, long, string?)>> QueryItemRowsAsync(
+        SqliteTempDatabase db
+    )
+    {
+        var rows = new List<(long, long, long, string?)>();
+
+        await using var conn = new SqliteConnection(NonPooledReadOnlyConnectionString(db));
+        await conn.OpenAsync(Ct).ConfigureAwait(false);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT \"id\", \"a\", \"b\", \"new_col\" FROM \"item\" ORDER BY \"id\";";
+        await using var reader = await cmd.ExecuteReaderAsync(Ct).ConfigureAwait(false);
+
+        while (await reader.ReadAsync(Ct).ConfigureAwait(false))
+        {
+            rows.Add(
+                (
+                    reader.GetInt64(0),
+                    reader.GetInt64(1),
+                    reader.GetInt64(2),
+                    reader.IsDBNull(3) ? null : reader.GetString(3)
+                )
+            );
+        }
+
+        return rows;
+    }
 
     /// <summary>live DB を取り込み、目標スキーマを組み立て、差分計算→計画→スクリプト生成→実行までを通す</summary>
     private static async Task<(SchemaSyncResult Result, string Script)> RunSyncAsync(

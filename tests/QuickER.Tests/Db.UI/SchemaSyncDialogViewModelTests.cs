@@ -2,6 +2,7 @@
 using QuickER.Db.UI;
 using QuickER.Gui.Abstractions;
 using QuickER.Model;
+using QuickER.MySql;
 using QuickER.Provider;
 using QuickER.Sqlite;
 using QuickER.SqlServer;
@@ -275,6 +276,129 @@ public class SchemaSyncDialogViewModelTests
 
         vm.DiffItems.Should().BeEmpty();
         vm.HasDiff.Should().BeFalse();
+    }
+
+    // ---------------- 列順変更（ReorderColumns）の配線 ----------------
+
+    /// <summary>列順のみ入れ替えた live / target（Id は共通・Name↔Email を入れ替え）</summary>
+    private static (SchemaImportResult Live, Entity[] Target) ReorderScenario()
+    {
+        var live = new SchemaImportResult
+        {
+            Entities =
+            [
+                Table(
+                    "Customer",
+                    Col("Id", "INTEGER", pk: true),
+                    Col("Name", "TEXT"),
+                    Col("Email", "TEXT")
+                ),
+            ],
+        };
+        var target = new[]
+        {
+            Table(
+                "Customer",
+                Col("Id", "INTEGER", pk: true),
+                Col("Email", "TEXT"),
+                Col("Name", "TEXT")
+            ),
+        };
+        return (live, target);
+    }
+
+    /// <summary>Rebuild 方言（SQLite）では列順変更が選択可能な ReorderColumns 項目として並ぶことを検証する</summary>
+    [Fact(DisplayName = "Rebuild 方言: 列順変更は選択可能な ReorderColumns 項目になる")]
+    public async Task Refresh_RebuildDialect_ColumnReorder_YieldsSelectableItem()
+    {
+        var (live, target) = ReorderScenario();
+        var provider = new FakeProvider(new SqliteProvider(), new FakeSchemaImporter(live));
+        var vm = new SchemaSyncDialogViewModel(provider, new DbConnectionSettings(), target, []);
+
+        await vm.RefreshCommand.ExecuteAsync(null);
+
+        var reorder = vm
+            .DiffItems.Should()
+            .ContainSingle(i => i.Kind == SchemaDiffKind.ReorderColumns)
+            .Which;
+        reorder.IsSelectable.Should().BeTrue();
+        reorder.IsSelected.Should().BeFalse();
+        // 選択不可の案内項目（RebuildTable）は重複して出さない
+        vm.DiffItems.Should().NotContain(i => i.Kind == SchemaDiffKind.RebuildTable);
+    }
+
+    /// <summary>Native 方言（MySQL）でも列順変更が選択可能な ReorderColumns 項目として並ぶことを検証する</summary>
+    [Fact(DisplayName = "Native 方言: 列順変更は選択可能な ReorderColumns 項目になる")]
+    public async Task Refresh_NativeDialect_ColumnReorder_YieldsSelectableItem()
+    {
+        var (live, target) = ReorderScenario();
+        var provider = new FakeProvider(new MySqlProvider(), new FakeSchemaImporter(live));
+        var vm = new SchemaSyncDialogViewModel(provider, new DbConnectionSettings(), target, []);
+
+        await vm.RefreshCommand.ExecuteAsync(null);
+
+        var reorder = vm
+            .DiffItems.Should()
+            .ContainSingle(i => i.Kind == SchemaDiffKind.ReorderColumns)
+            .Which;
+        reorder.IsSelectable.Should().BeTrue();
+        reorder.IsSelected.Should().BeFalse();
+        vm.DiffItems.Should().NotContain(i => i.Kind == SchemaDiffKind.RebuildTable);
+    }
+
+    /// <summary>None 方言（SQL Server）では従来どおり選択不可の案内項目（RebuildTable）になることを検証する</summary>
+    [Fact(DisplayName = "None 方言: 列順変更は選択不可の案内項目のまま")]
+    public async Task Refresh_NoneDialect_ColumnReorder_YieldsInformationalItem()
+    {
+        var (live, target) = ReorderScenario();
+        var provider = new FakeProvider(new SqlServerProvider(), new FakeSchemaImporter(live));
+        var vm = new SchemaSyncDialogViewModel(provider, new DbConnectionSettings(), target, []);
+
+        await vm.RefreshCommand.ExecuteAsync(null);
+
+        var info = vm
+            .DiffItems.Should()
+            .ContainSingle(i => i.Kind == SchemaDiffKind.RebuildTable)
+            .Which;
+        info.IsSelectable.Should().BeFalse();
+        // 対応方言でないため選択可能な ReorderColumns 項目は生成されない
+        vm.DiffItems.Should().NotContain(i => i.Kind == SchemaDiffKind.ReorderColumns);
+    }
+
+    /// <summary>内部プロバイダへ委譲しつつ SchemaImporter だけを差し替える汎用フェイクプロバイダ（実接続しない）</summary>
+    private sealed class FakeProvider : IDatabaseProvider
+    {
+        private readonly IDatabaseProvider _inner;
+        private readonly ISchemaImporter _importer;
+
+        public FakeProvider(IDatabaseProvider inner, ISchemaImporter importer)
+        {
+            _inner = inner;
+            _importer = importer;
+        }
+
+        public string Name => _inner.Name;
+
+        public string DisplayName => _inner.DisplayName;
+
+        public int? DefaultPort => _inner.DefaultPort;
+
+        public ISchemaImporter SchemaImporter => _importer;
+
+        public IColumnTypeMapper TypeMapper => _inner.TypeMapper;
+
+        public ITypeCatalog TypeCatalog => _inner.TypeCatalog;
+
+        public ISyncScriptBuilder SyncScriptBuilder => _inner.SyncScriptBuilder;
+
+        public SyncDialectCapabilities SyncCapabilities => _inner.SyncCapabilities;
+
+        public ISchemaSyncExecutor SyncExecutor => _inner.SyncExecutor;
+
+        public IDdlGenerator DdlGenerator => _inner.DdlGenerator;
+
+        // 実接続はしない（フェイクインポーターが接続文字列を無視する）ため固定値を返す
+        public string BuildConnectionString(DbConnectionSettings settings) => "Fake";
     }
 
     /// <summary>SchemaImporter を差し替え可能にした SQLite 相当のフェイクプロバイダ（rebuild ケーパビリティ・実 SQLite レンダラー）</summary>

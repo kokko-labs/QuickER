@@ -32,8 +32,18 @@ public abstract class SyncScriptBuilderBase : ISyncScriptBuilder
             AppendSection(sb, section);
         }
 
+        // ネイティブ列順変更（MySQL のみ・既定 no-op）。Reorders が空である限り出力はセクションのみで不変。
+        AppendReorders(sb, plan);
+
         return sb.ToString();
     }
+
+    /// <summary>ネイティブ列順変更（<see cref="SyncPlan.Reorders"/>）を書き出す（既定は no-op）</summary>
+    /// <remarks>
+    /// ネイティブ並べ替えを持つ方言（MySQL）だけが上書きする。<see cref="SyncPlan.Reorders"/> は
+    /// Native 方言以外では常に空のため、既定 no-op により他方言の出力はセクションのみで従来どおり不変になる。
+    /// </remarks>
+    protected virtual void AppendReorders(StringBuilder sb, SyncPlan plan) { }
 
     /// <summary>1 セクション分（見出しコメント → 各項目 → 空行）を書き出す</summary>
     /// <remarks>逐次 DDL 方言の骨格そのもの。再構築方言が特定セクションだけ描画する際にも再利用する。</remarks>

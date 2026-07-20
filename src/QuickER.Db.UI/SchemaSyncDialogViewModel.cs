@@ -117,27 +117,33 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
                 _provider.SyncCapabilities
             );
 
-            // 列順差分は DB 同期対象外のため、検知時は選択不可の案内項目のみ追加する
-            var orderChangedTables = SchemaDiffService.DetectColumnOrderChanges(
-                live.Entities,
-                _targetEntities
-            );
-
-            foreach (var tableName in orderChangedTables)
+            // 列順変更の扱いは方言のケーパビリティで分岐する。
+            // 対応方言（MySQL=Native / SQLite=Rebuild）では Compute が選択可能な ReorderColumns 項目を生成するため、
+            // ここでは何もしない（重複案内を出さない）。非対応方言（None）でのみ、検知した列順差分を
+            // 選択不可の案内項目として追加する。
+            if (_provider.SyncCapabilities.ColumnReorder == ColumnReorderMode.None)
             {
-                diff.Items.Add(
-                    new SchemaDiffItem
-                    {
-                        Kind = SchemaDiffKind.RebuildTable,
-                        TableName = tableName,
-                        Description = string.Format(
-                            Strings.SchemaSync_ColumnOrderNotSynced,
-                            tableName
-                        ),
-                        IsSelected = false,
-                        IsSelectable = false,
-                    }
+                var orderChangedTables = SchemaDiffService.DetectColumnOrderChanges(
+                    live.Entities,
+                    _targetEntities
                 );
+
+                foreach (var tableName in orderChangedTables)
+                {
+                    diff.Items.Add(
+                        new SchemaDiffItem
+                        {
+                            Kind = SchemaDiffKind.RebuildTable,
+                            TableName = tableName,
+                            Description = string.Format(
+                                Strings.SchemaSync_ColumnOrderNotSynced,
+                                tableName
+                            ),
+                            IsSelected = false,
+                            IsSelectable = false,
+                        }
+                    );
+                }
             }
 
             DiffItems.Clear();

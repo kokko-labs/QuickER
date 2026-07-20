@@ -302,6 +302,42 @@ public class SqliteSyncScriptBuilderTests
         script.Should().Contain("DROP TABLE \"legacy\";");
     }
 
+    /// <summary>並べ替え済み NewDefinition の列順どおりに CREATE TABLE の列が並ぶことを検証する（再構築機構に乗るスモーク）</summary>
+    [Fact(DisplayName = "並べ替え済み NewDefinition の列順どおりに CREATE 列が並ぶ")]
+    public void ReorderedDefinition_EmitsColumnsInGivenOrder()
+    {
+        // プランナーが並べ替えた結果（id, c, a, b）を NewDefinition としてそのまま渡す
+        var plan = new SyncPlan
+        {
+            Rebuilds =
+            [
+                new TableRebuildPlan
+                {
+                    TableName = "t",
+                    NewDefinition = new Entity
+                    {
+                        TableName = "t",
+                        Columns = { Pk("id"), Col("c", "int"), Col("a", "int"), Col("b", "int") },
+                    },
+                    CreateOnly = false,
+                    CopyColumns = ["id", "c", "a", "b"],
+                    AuxiliaryObjects = [],
+                },
+            ],
+        };
+
+        var script = Build(plan);
+
+        // CREATE 内の列出現位置が id → c → a → b の順であること
+        var iId = script.IndexOf("\"id\"", System.StringComparison.Ordinal);
+        var iC = script.IndexOf("\"c\"", System.StringComparison.Ordinal);
+        var iA = script.IndexOf("\"a\"", System.StringComparison.Ordinal);
+        var iB = script.IndexOf("\"b\"", System.StringComparison.Ordinal);
+        iId.Should().BeLessThan(iC);
+        iC.Should().BeLessThan(iA);
+        iA.Should().BeLessThan(iB);
+    }
+
     /// <summary>非数値引数の宣言型（NVARCHAR(MAX) 等）はダブルクォートで包まれることを検証する（DDL 生成と同一整形）</summary>
     [Fact(DisplayName = "NVARCHAR(MAX) 等の宣言型はクォートされる")]
     public void UnboundedType_IsQuotedInRebuild()
