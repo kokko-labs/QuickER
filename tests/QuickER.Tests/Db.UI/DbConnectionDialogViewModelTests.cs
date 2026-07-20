@@ -245,19 +245,24 @@ public class DbConnectionDialogViewModelTests : IDisposable
 
     // ---------------- SQLite（ファイル型 DB）分岐 ----------------
 
-    /// <summary>SQLite を選択した取込モードの ViewModel を生成する</summary>
+    /// <summary>SQLite を選択した ViewModel を生成する（既定は取込モード・新規作成不可）</summary>
     private DbConnectionDialogViewModel CreateSqliteVm(
         SqlConnectionProfileStore store,
-        IFileDialogService? files = null
+        IFileDialogService? files = null,
+        bool allowFileCreation = false,
+        DbConnectionDialogMode mode = DbConnectionDialogMode.Import
     )
     {
         var vm = new DbConnectionDialogViewModel(
             RegistryWithSqlite,
-            DbConnectionDialogMode.Import,
-            fixedProvider: null,
+            mode,
+            fixedProvider: mode == DbConnectionDialogMode.Sync
+                ? RegistryWithSqlite.Get(SqliteProvider.ProviderName)
+                : null,
             store,
             dialogService: null,
-            fileDialogService: files ?? new StubFileDialogService()
+            fileDialogService: files ?? new StubFileDialogService(),
+            allowSqliteFileCreation: allowFileCreation
         )
         {
             SelectedProvider = RegistryWithSqlite.Get(SqliteProvider.ProviderName),
@@ -356,6 +361,124 @@ public class DbConnectionDialogViewModelTests : IDisposable
         reopened.SelectedProfileItem = saved;
 
         reopened.FilePath.Should().Be(dbPath);
+    }
+
+    // ---------------- SQLite 新規作成（DB 同期の文脈のみ） ----------------
+
+    /// <summary>新規作成が許可されていない既定では、新規作成ボタンが実行不可・非表示相当であることを検証する</summary>
+    [Fact(DisplayName = "SQLite: 新規作成が不許可なら BrowseNewFile は実行不可・非表示相当")]
+    public void Sqlite_CreationDisallowed_HidesAndDisablesCreateNew()
+    {
+        var vm = CreateSqliteVm(CreateStore(), allowFileCreation: false);
+
+        vm.ShowCreateNewFile.Should().BeFalse();
+        vm.BrowseNewFileCommand.CanExecute(null).Should().BeFalse();
+    }
+
+    /// <summary>新規作成が許可され SQLite 選択中なら、新規作成ボタンが表示・実行可であることを検証する</summary>
+    [Fact(DisplayName = "SQLite: 新規作成が許可されていれば BrowseNewFile は表示・実行可")]
+    public void Sqlite_CreationAllowed_ShowsAndEnablesCreateNew()
+    {
+        var vm = CreateSqliteVm(
+            CreateStore(),
+            allowFileCreation: true,
+            mode: DbConnectionDialogMode.Sync
+        );
+
+        vm.ShowCreateNewFile.Should().BeTrue();
+        vm.BrowseNewFileCommand.CanExecute(null).Should().BeTrue();
+    }
+
+    /// <summary>新規作成が許可されていても、手入力の存在しないパスは従来どおり拒否されることを検証する（回帰）</summary>
+    [Fact(DisplayName = "SQLite: 新規作成許可でも手入力の存在しないパスは拒否される")]
+    public void Sqlite_CreationAllowed_HandTypedMissingPath_RejectsOk()
+    {
+        var vm = CreateSqliteVm(
+            CreateStore(),
+            allowFileCreation: true,
+            mode: DbConnectionDialogMode.Sync
+        );
+        // 「新規作成」ボタンを経由せず、存在しないパスを手入力した場合
+        vm.FilePath = Path.Combine(_tempFolder, "typo-does-not-exist.db");
+
+        vm.OkCommand.Execute(null);
+
+        vm.Result.Should().BeNull();
+        vm.StatusMessage.Should().Be(Strings.DbConnection_FileNotFound);
+        File.Exists(vm.FilePath).Should().BeFalse();
+    }
+
+    /// <summary>新規作成ボタンで選んだパスは存在チェックを免除され、OK 確定時にファイルが実作成されることを検証する</summary>
+    [Fact(DisplayName = "SQLite: 新規作成で選んだパスは OK 確定時に空 DB が作成される")]
+    public void Sqlite_CreateNewFile_CreatesFileOnOk()
+    {
+        var newPath = Path.Combine(_tempFolder, "brand-new.db");
+        var files = new StubFileDialogService { SaveResult = new FileDialogResult(newPath, 1) };
+        var vm = CreateSqliteVm(
+            CreateStore(),
+            files,
+            allowFileCreation: true,
+            mode: DbConnectionDialogMode.Sync
+        );
+
+        vm.BrowseNewFileCommand.Execute(null);
+        vm.FilePath.Should().Be(newPath);
+        File.Exists(newPath).Should().BeFalse("OK 確定前はまだ作成されない");
+
+        vm.OkCommand.Execute(null);
+
+        vm.Result.Should().NotBeNull();
+        vm.Result!.FilePath.Should().Be(newPath);
+        File.Exists(newPath).Should().BeTrue("OK 確定時に空 DB が作成される");
+    }
+
+    /// <summary>新規作成で選択後に別パスへ手編集すると、存在チェックが復活してエラーになることを検証する</summary>
+    [Fact(DisplayName = "SQLite: 新規作成で選択後に別パスへ手編集すると存在チェックが復活する")]
+    public void Sqlite_CreateNewFile_ThenEditToDifferentPath_RejectsOk()
+    {
+        var newPath = Path.Combine(_tempFolder, "chosen.db");
+        var files = new StubFileDialogService { SaveResult = new FileDialogResult(newPath, 1) };
+        var vm = CreateSqliteVm(
+            CreateStore(),
+            files,
+            allowFileCreation: true,
+            mode: DbConnectionDialogMode.Sync
+        );
+
+        vm.BrowseNewFileCommand.Execute(null);
+        // 新規作成で選んだ後、別の存在しないパスへ手編集する（新規作成の意図ではなくなる）
+        vm.FilePath = Path.Combine(_tempFolder, "edited-elsewhere.db");
+
+        vm.OkCommand.Execute(null);
+
+        vm.Result.Should().BeNull();
+        vm.StatusMessage.Should().Be(Strings.DbConnection_FileNotFound);
+    }
+
+    /// <summary>新規作成のファイル作成に失敗したとき、エラー表示のうえダイアログを閉じないことを検証する</summary>
+    [Fact(DisplayName = "SQLite: 新規作成の作成失敗ではエラー表示しダイアログを閉じない")]
+    public void Sqlite_CreateNewFile_CreationFails_ShowsErrorAndStaysOpen()
+    {
+        // 親ディレクトリが存在しないパスは ReadWriteCreate でも開けず、作成が失敗する
+        var invalidPath = Path.Combine(_tempFolder, "no-such-dir", "x.db");
+        var files = new StubFileDialogService { SaveResult = new FileDialogResult(invalidPath, 1) };
+        var closed = new List<bool>();
+        var vm = CreateSqliteVm(
+            CreateStore(),
+            files,
+            allowFileCreation: true,
+            mode: DbConnectionDialogMode.Sync
+        );
+        vm.CloseAction = closed.Add;
+
+        vm.BrowseNewFileCommand.Execute(null);
+        vm.OkCommand.Execute(null);
+
+        // 失敗メッセージのプレフィックス（{0} 手前）で照合し、カルチャに依存しないようにする
+        var failurePrefix = Strings.DbConnection_CreateFileFailed.Split('{')[0];
+        vm.Result.Should().BeNull();
+        vm.StatusMessage.Should().StartWith(failurePrefix);
+        closed.Should().BeEmpty("作成失敗時はダイアログを閉じない");
     }
 
     /// <summary>SQL Server 選択時は従来どおりサーバー系フィールドを表示しファイルパスを隠すことを検証する</summary>

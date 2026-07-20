@@ -37,56 +37,12 @@ namespace QuickER.MySql;
 /// </list>
 /// </para>
 /// </remarks>
-public sealed class MySqlSyncScriptBuilder : ISyncScriptBuilder
+public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
 {
-    /// <summary>選択された差分項目のみを MySQL DDL へ変換する</summary>
-    public string Build(IEnumerable<SchemaDiffItem> items)
-    {
-        var sb = new StringBuilder();
-        var list = items.Where(i => i.IsSelected).ToList();
-
-        WriteSection(sb, list, SchemaDiffKind.AddTable, AppendCreateTable);
-        WriteSection(sb, list, SchemaDiffKind.AddColumn, AppendAddColumn);
-        WriteSection(sb, list, SchemaDiffKind.AlterColumn, AppendAlterColumn);
-        WriteSection(sb, list, SchemaDiffKind.DropForeignKey, AppendDropForeignKey);
-        WriteSection(sb, list, SchemaDiffKind.DropColumn, AppendDropColumn);
-        WriteSection(sb, list, SchemaDiffKind.DropTable, AppendDropTable);
-        WriteSection(sb, list, SchemaDiffKind.AddForeignKey, AppendAddForeignKey);
-        WriteSection(sb, list, SchemaDiffKind.SetTableDescription, AppendSetTableDescription);
-        WriteSection(sb, list, SchemaDiffKind.SetColumnDescription, AppendSetColumnDescription);
-
-        return sb.ToString();
-    }
-
-    /// <summary>指定種別の差分のみを抽出し、見出しコメント付きで 1 セクション分を書き出す</summary>
-    private static void WriteSection(
-        StringBuilder sb,
-        List<SchemaDiffItem> all,
-        SchemaDiffKind kind,
-        System.Action<StringBuilder, SchemaDiffItem> writer
-    )
-    {
-        var subset = all.Where(i => i.Kind == kind).ToList();
-
-        if (subset.Count == 0)
-        {
-            return;
-        }
-
-        sb.AppendLine($"-- ===== {kind} ({subset.Count} items) =====");
-
-        foreach (var item in subset)
-        {
-            writer(sb, item);
-        }
-
-        sb.AppendLine();
-    }
-
     // ---------------- 各種 DDL ----------------
 
     /// <summary>CREATE TABLE 文（主キー制約を含む）を生成する</summary>
-    private static void AppendCreateTable(StringBuilder sb, SchemaDiffItem item)
+    protected override void AppendCreateTable(StringBuilder sb, SchemaDiffItem item)
     {
         var e = item.Entity!;
         var pks = e.Columns.Where(c => c.IsPrimaryKey).ToList();
@@ -96,7 +52,7 @@ public sealed class MySqlSyncScriptBuilder : ISyncScriptBuilder
         {
             var col = e.Columns[i];
             var line =
-                $"    {MySqlIdentifier.QuoteSimple(col.Name)} {col.DataType} {GetNullabilityClause(col)}";
+                $"    {MySqlIdentifier.QuoteSimple(col.Name)} {col.DataType} {SyncScriptBuilderHelper.GetNullabilityClause(col)}";
 
             // 後続のカラム行、または PRIMARY KEY 制約行が続く場合は区切りのカンマを付ける
             if (i < e.Columns.Count - 1 || pks.Count > 0)
@@ -119,7 +75,7 @@ public sealed class MySqlSyncScriptBuilder : ISyncScriptBuilder
     }
 
     /// <summary>ALTER TABLE ... ADD COLUMN（列追加）文を生成する</summary>
-    private static void AppendAddColumn(StringBuilder sb, SchemaDiffItem item)
+    protected override void AppendAddColumn(StringBuilder sb, SchemaDiffItem item)
     {
         var col = item.Column!;
         sb.AppendLine(
@@ -133,7 +89,7 @@ public sealed class MySqlSyncScriptBuilder : ISyncScriptBuilder
     /// MySQL の MODIFY は列定義を完全に再指定するため、型・NULL 制約に加えて
     /// 対象列に説明があれば COMMENT も含める（含めないと既存コメントが消える）。
     /// </remarks>
-    private static void AppendAlterColumn(StringBuilder sb, SchemaDiffItem item)
+    protected override void AppendAlterColumn(StringBuilder sb, SchemaDiffItem item)
     {
         var col = item.Column!;
         sb.AppendLine(
@@ -143,7 +99,7 @@ public sealed class MySqlSyncScriptBuilder : ISyncScriptBuilder
     }
 
     /// <summary>ALTER TABLE ... DROP COLUMN（列削除）文を生成する</summary>
-    private static void AppendDropColumn(StringBuilder sb, SchemaDiffItem item)
+    protected override void AppendDropColumn(StringBuilder sb, SchemaDiffItem item)
     {
         sb.AppendLine(
             $"ALTER TABLE {MySqlIdentifier.Quote(item.TableName)} "
@@ -152,20 +108,20 @@ public sealed class MySqlSyncScriptBuilder : ISyncScriptBuilder
     }
 
     /// <summary>DROP TABLE（テーブル削除）文を生成する</summary>
-    private static void AppendDropTable(StringBuilder sb, SchemaDiffItem item)
+    protected override void AppendDropTable(StringBuilder sb, SchemaDiffItem item)
     {
         sb.AppendLine($"DROP TABLE {MySqlIdentifier.Quote(item.TableName)};");
     }
 
     /// <summary>外部キー制約を追加する ALTER TABLE 文を生成する</summary>
-    private static void AppendAddForeignKey(StringBuilder sb, SchemaDiffItem item)
+    protected override void AppendAddForeignKey(StringBuilder sb, SchemaDiffItem item)
     {
         if (item.ChildEntity is null || item.ParentEntity is null)
         {
             return;
         }
 
-        var pkCol = ResolveReferencedColumn(item);
+        var pkCol = SyncScriptBuilderHelper.ResolveReferencedColumn(item);
 
         // 参照先列が特定できない場合は不正な DDL を出さず、コメントでスキップを明示する
         if (pkCol is null || item.ColumnName is null)
@@ -183,7 +139,9 @@ public sealed class MySqlSyncScriptBuilder : ISyncScriptBuilder
         var fkName = string.IsNullOrWhiteSpace(item.Relationship?.ConstraintName)
             ? $"FK_{MySqlIdentifier.SafeName(childTbl)}_{MySqlIdentifier.SafeName(parentTbl)}"
             : item.Relationship.ConstraintName!;
-        var referentialActions = BuildReferentialActionClause(item.Relationship);
+        var referentialActions = SyncScriptBuilderHelper.BuildReferentialActionClause(
+            item.Relationship
+        );
         sb.AppendLine(
             $"ALTER TABLE {MySqlIdentifier.Quote(childTbl)} ADD CONSTRAINT `{MySqlIdentifier.Escape(fkName)}` "
                 + $"FOREIGN KEY ({MySqlIdentifier.QuoteSimple(item.ColumnName)}) "
@@ -197,7 +155,7 @@ public sealed class MySqlSyncScriptBuilder : ISyncScriptBuilder
     /// <c>information_schema.REFERENTIAL_CONSTRAINTS</c> から制約名を引いてプリペアド動的 SQL で削除する。
     /// FK が見つからない場合は <c>DO 0</c> を実行して無害に済ませる。
     /// </remarks>
-    private static void AppendDropForeignKey(StringBuilder sb, SchemaDiffItem item)
+    protected override void AppendDropForeignKey(StringBuilder sb, SchemaDiffItem item)
     {
         if (item.ChildEntity is null || item.ParentEntity is null)
         {
@@ -246,7 +204,7 @@ public sealed class MySqlSyncScriptBuilder : ISyncScriptBuilder
 
     /// <summary>テーブルの説明（ALTER TABLE ... COMMENT）設定文を生成する</summary>
     /// <remarks>新値が空なら空文字コメントを設定して説明を削除する</remarks>
-    private static void AppendSetTableDescription(StringBuilder sb, SchemaDiffItem item)
+    protected override void AppendSetTableDescription(StringBuilder sb, SchemaDiffItem item)
     {
         var newVal = item.NewDescription ?? string.Empty;
         sb.AppendLine(
@@ -260,7 +218,7 @@ public sealed class MySqlSyncScriptBuilder : ISyncScriptBuilder
     /// MODIFY は列定義を完全再指定するため、型・NULL 制約を <see cref="SchemaDiffItem.Entity"/> の
     /// 該当 Column から復元し、COMMENT には <see cref="SchemaDiffItem.NewDescription"/> を用いる。
     /// </remarks>
-    private static void AppendSetColumnDescription(StringBuilder sb, SchemaDiffItem item)
+    protected override void AppendSetColumnDescription(StringBuilder sb, SchemaDiffItem item)
     {
         var newVal = item.NewDescription ?? string.Empty;
 
@@ -279,11 +237,49 @@ public sealed class MySqlSyncScriptBuilder : ISyncScriptBuilder
         }
 
         var definition =
-            $"{col.DataType} {GetNullabilityClause(col)} COMMENT '{MySqlIdentifier.EscapeStringLiteral(newVal)}'";
+            $"{col.DataType} {SyncScriptBuilderHelper.GetNullabilityClause(col)} COMMENT '{MySqlIdentifier.EscapeStringLiteral(newVal)}'";
         sb.AppendLine(
             $"ALTER TABLE {MySqlIdentifier.Quote(item.TableName)} "
                 + $"MODIFY COLUMN {MySqlIdentifier.QuoteSimple(col.Name)} {definition};"
         );
+    }
+
+    // ---------------- 列順変更 (MODIFY ... AFTER) ----------------
+
+    /// <summary>ネイティブ列順変更（<c>ALTER TABLE ... MODIFY COLUMN ... AFTER</c>）を生成する</summary>
+    /// <remarks>
+    /// <para>
+    /// テーブルごとに見出しコメントを付け、各列を「直前に置く列の直後（先頭なら <c>FIRST</c>）」へ移す
+    /// <c>MODIFY COLUMN</c> を出力する。列定義は <see cref="BuildColumnDefinition"/> で完全再指定する
+    /// （型・NULL 制約に加え、説明があれば <c>COMMENT</c> を含めて既存コメントの消失を防ぐ）。
+    /// </para>
+    /// <para>
+    /// MySQL の <c>MODIFY</c> による位置変更は内部的にテーブルコピー（メタデータのみの高速 DDL にはならない）
+    /// になり得る点に注意する。移動列数はプランナーが最長増加部分列で最小化している。
+    /// </para>
+    /// </remarks>
+    protected override void AppendReorders(StringBuilder sb, SyncPlan plan)
+    {
+        foreach (var reorder in plan.Reorders)
+        {
+            // 見出し（固定文は英語が正本）
+            sb.AppendLine($"-- ===== ReorderColumns: {reorder.TableName} =====");
+
+            foreach (var move in reorder.Moves)
+            {
+                // AfterColumn が null なら先頭（FIRST）、それ以外は指定列の直後（AFTER 列名）
+                var position = move.AfterColumn is null
+                    ? "FIRST"
+                    : $"AFTER {MySqlIdentifier.QuoteSimple(move.AfterColumn)}";
+                sb.AppendLine(
+                    $"ALTER TABLE {MySqlIdentifier.Quote(reorder.TableName)} "
+                        + $"MODIFY COLUMN {MySqlIdentifier.QuoteSimple(move.Column.Name)} "
+                        + $"{BuildColumnDefinition(move.Column)} {position};"
+                );
+            }
+
+            sb.AppendLine();
+        }
     }
 
     /// <summary>列定義（型・NULL 制約・COMMENT）を組み立てる</summary>
@@ -296,7 +292,7 @@ public sealed class MySqlSyncScriptBuilder : ISyncScriptBuilder
         var sb = new StringBuilder();
         sb.Append(column.DataType);
         sb.Append(' ');
-        sb.Append(GetNullabilityClause(column));
+        sb.Append(SyncScriptBuilderHelper.GetNullabilityClause(column));
 
         if (!string.IsNullOrEmpty(column.Description))
         {
@@ -305,36 +301,4 @@ public sealed class MySqlSyncScriptBuilder : ISyncScriptBuilder
 
         return sb.ToString();
     }
-
-    /// <summary>外部キーの参照先列を差分情報から解決する</summary>
-    /// <remarks>明示指定された列を優先し、無ければ親テーブルの主キー先頭列にフォールバックする</remarks>
-    private static Column? ResolveReferencedColumn(SchemaDiffItem item)
-    {
-        if (item.Relationship?.SourceColumnId is not null)
-        {
-            var byId = item.ParentEntity?.Columns.FirstOrDefault(c =>
-                c.Id == item.Relationship.SourceColumnId
-            );
-
-            if (byId is not null)
-            {
-                return byId;
-            }
-        }
-
-        return item.ParentEntity?.Columns.FirstOrDefault(c => c.IsPrimaryKey);
-    }
-
-    /// <summary>NULL 許容句を返す（主キーまたは非 NULL 許容なら NOT NULL）</summary>
-    private static string GetNullabilityClause(Column column) =>
-        column.IsPrimaryKey || !column.IsNullable ? "NOT NULL" : "NULL";
-
-    /// <summary>外部キーの ON DELETE / ON UPDATE 参照アクション句を生成する</summary>
-    private static string BuildReferentialActionClause(Relationship? relationship) =>
-        relationship is null
-            ? string.Empty
-            : ForeignKeyReferentialActionHelper.BuildReferentialActionClause(
-                relationship.OnDelete,
-                relationship.OnUpdate
-            );
 }

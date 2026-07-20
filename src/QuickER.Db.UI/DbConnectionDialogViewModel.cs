@@ -89,6 +89,13 @@ public partial class DbConnectionDialogViewModel : ObservableObject
     [ObservableProperty]
     private string _filePath = string.Empty;
 
+    /// <summary>
+    /// 「新規作成」ボタンで選ばれた SQLite ファイルパス（未使用なら null）。
+    /// この 1 パスに <see cref="FilePath"/> が一致するときだけ、確定時の存在チェックを免除する
+    /// （タイプミスと新規作成の意図を区別するため。選択後に別パスへ手編集すると再び存在必須に戻る）。
+    /// </summary>
+    private string? _creationPath;
+
     /// <summary>パスワードも DPAPI で暗号化保存するかどうか</summary>
     [ObservableProperty]
     private bool _savePassword;
@@ -152,6 +159,12 @@ public partial class DbConnectionDialogViewModel : ObservableObject
     /// <summary>ファイルパス入力欄を表示するか（SQLite 固有。ファイル型 DB の接続に用いる）</summary>
     public bool ShowFilePath => SelectedProvider?.Name == SqliteProvider.ProviderName;
 
+    /// <summary>新規 SQLite ファイル作成を許可するか（DB 同期の文脈でのみ有効。取込では無意味なため既定 false）</summary>
+    public bool AllowSqliteFileCreation { get; }
+
+    /// <summary>「新規作成」ボタンを表示するか（SQLite 選択時かつ新規作成が許可されているとき）</summary>
+    public bool ShowCreateNewFile => ShowFilePath && AllowSqliteFileCreation;
+
     /// <summary>サーバー系フィールド（ホスト・ポート・DB 名・認証・証明書）を表示するか（SQLite では非表示）</summary>
     public bool ShowServerFields => !ShowFilePath;
 
@@ -162,19 +175,22 @@ public partial class DbConnectionDialogViewModel : ObservableObject
     /// <param name="store">プロファイル保存ストア（省略時は既定パスを使用）</param>
     /// <param name="dialogService">確認ダイアログの表示先（省略時は MessageBox、テストではスタブを注入）</param>
     /// <param name="fileDialogService">ファイル選択ダイアログの表示先（SQLite の参照ボタン用。省略時は WPF 実装、テストではスタブを注入）</param>
+    /// <param name="allowSqliteFileCreation">新規 SQLite ファイル作成を許可するか（DB 同期のみ true。取込では既定 false）</param>
     public DbConnectionDialogViewModel(
         DatabaseProviderRegistry providers,
         DbConnectionDialogMode mode = DbConnectionDialogMode.Import,
         IDatabaseProvider? fixedProvider = null,
         SqlConnectionProfileStore? store = null,
         IDialogService? dialogService = null,
-        IFileDialogService? fileDialogService = null
+        IFileDialogService? fileDialogService = null,
+        bool allowSqliteFileCreation = false
     )
     {
         _providers = providers;
         _store = store ?? new SqlConnectionProfileStore();
         _dialogs = dialogService ?? new MessageBoxDialogService();
         _files = fileDialogService ?? new WpfFileDialogService();
+        AllowSqliteFileCreation = allowSqliteFileCreation;
         Mode = mode;
 
         foreach (var provider in _providers.All)
@@ -210,7 +226,11 @@ public partial class DbConnectionDialogViewModel : ObservableObject
         OnPropertyChanged(nameof(ShowTrustServerCertificate));
         OnPropertyChanged(nameof(ShowServiceName));
         OnPropertyChanged(nameof(ShowFilePath));
+        OnPropertyChanged(nameof(ShowCreateNewFile));
         OnPropertyChanged(nameof(ShowServerFields));
+
+        // SQLite 以外へ切り替えると「新規作成」ボタンは実行不可になるため CanExecute を再評価する
+        BrowseNewFileCommand.NotifyCanExecuteChanged();
     }
 
     partial void OnModeChanged(DbConnectionDialogMode value)
@@ -290,6 +310,24 @@ public partial class DbConnectionDialogViewModel : ObservableObject
 
     /// <summary>ポート入力を数値へ解析する（空欄・不正値は null＝方言既定）</summary>
     private int? ParsePort() => int.TryParse(Port, out var value) && value > 0 ? value : null;
+
+    /// <summary>2 つのファイルパスが同一を指すか（Windows のため大文字小文字は無視・正規化して比較する）</summary>
+    private static bool IsSamePath(string a, string b)
+    {
+        try
+        {
+            return string.Equals(
+                Path.GetFullPath(a),
+                Path.GetFullPath(b),
+                StringComparison.OrdinalIgnoreCase
+            );
+        }
+        catch (Exception)
+        {
+            // 手編集で無効なパスになった場合は正規化できないため、素の文字列比較へフォールバックする
+            return string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
+        }
+    }
 
     /// <summary>一覧での表示名（DBMS を含める。例: [SQL Server] 本番DB）</summary>
     public string GetProfileDisplayName(SqlConnectionProfile profile)
@@ -448,6 +486,30 @@ public partial class DbConnectionDialogViewModel : ObservableObject
         FilePath = picked.Path;
     }
 
+    /// <summary>「新規作成」ボタンを実行できるか（SQLite 選択時かつ新規作成が許可されているとき）</summary>
+    private bool CanBrowseNewFile() => ShowCreateNewFile;
+
+    /// <summary>
+    /// 保存ダイアログで新規 SQLite ファイルのパスを指定し、<see cref="FilePath"/> へ反映する（DB 同期専用）。
+    /// </summary>
+    /// <remarks>
+    /// ここで選んだパスを「新規作成で選ばれたパス」として記憶し、確定時の存在チェックを免除する。
+    /// 実ファイルの作成は確定（OK）時に行う（検証通過後）。
+    /// </remarks>
+    [RelayCommand(CanExecute = nameof(CanBrowseNewFile))]
+    private void BrowseNewFile()
+    {
+        var picked = _files.PickSaveFile(Strings.DbConnection_SqliteFileFilter, "db");
+
+        if (picked is null)
+        {
+            return;
+        }
+
+        FilePath = picked.Path;
+        _creationPath = picked.Path;
+    }
+
     /// <summary>入力を検証して確定し、前回接続として保存したうえでダイアログを閉じる</summary>
     [RelayCommand]
     private void Ok()
@@ -461,11 +523,34 @@ public partial class DbConnectionDialogViewModel : ObservableObject
                 return;
             }
 
-            // 取込専用のため新規作成は許可せず、存在しないファイルは確定を拒否する
-            if (!File.Exists(FilePath))
+            // 「新規作成」ボタンで選ばれたパスと現在の入力が一致するときだけ、新規作成の意図として存在チェックを免除する
+            var isCreationPath =
+                AllowSqliteFileCreation
+                && _creationPath is not null
+                && IsSamePath(FilePath, _creationPath);
+
+            // 手入力・「参照」経由・選択後に別パスへ手編集した場合は、従来どおり存在しないファイルを拒否する
+            if (!isCreationPath && !File.Exists(FilePath))
             {
                 StatusMessage = Strings.DbConnection_FileNotFound;
                 return;
+            }
+
+            // 新規作成パスなら、確定直前に空 DB ファイルを実際に作成する（作成失敗時は閉じずにエラーを表示する）
+            if (isCreationPath)
+            {
+                try
+                {
+                    SqliteDatabaseFile.CreateEmpty(FilePath);
+                }
+                catch (Exception ex)
+                {
+                    StatusMessage = string.Format(
+                        Strings.DbConnection_CreateFileFailed,
+                        ex.Message
+                    );
+                    return;
+                }
             }
         }
         else if (string.IsNullOrWhiteSpace(Host) || string.IsNullOrWhiteSpace(Database))

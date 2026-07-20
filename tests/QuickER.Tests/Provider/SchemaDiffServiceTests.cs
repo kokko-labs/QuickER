@@ -437,4 +437,239 @@ public class SchemaDiffServiceTests
                 && i.NewDescription == "顧客名"
             );
     }
+
+    // ---------------- ケーパビリティによる方言調整 ----------------
+
+    /// <summary>SupportsDescriptions=false の方言（SQLite）では説明差分を一切生成しないことを検証する</summary>
+    [Fact(DisplayName = "説明非対応方言では説明差分を生成しない")]
+    public void CapabilitiesWithoutDescriptions_SuppressesDescriptionDiffs()
+    {
+        // 既存テーブルの説明変更・列説明変更・新規テーブルの説明の 3 経路をまとめて確認する
+        var live = new List<Entity>
+        {
+            Tbl("Customer", ("Id", "int", true), ("Name", "nvarchar(50)", false)),
+        };
+        live[0].Description = "旧テーブル説明";
+        live[0].Columns[1].Description = "旧列説明";
+
+        var target = new List<Entity>
+        {
+            Tbl("Customer", ("Id", "int", true), ("Name", "nvarchar(50)", false)),
+            Tbl("Order", ("Id", "int", true)),
+        };
+        target[0].Description = "新テーブル説明";
+        target[0].Columns[1].Description = "新列説明";
+        target[1].Description = "新規テーブルの説明";
+
+        var capabilities = new SyncDialectCapabilities { SupportsDescriptions = false };
+
+        var diff = new SchemaDiffService().Compute(
+            live,
+            new List<Relationship>(),
+            target,
+            new List<Relationship>(),
+            capabilities
+        );
+
+        // 説明差分はゼロ・構造差分（新規テーブル Order）は従来どおり生成される
+        diff.Items.Should().NotContain(i => i.Kind == SchemaDiffKind.SetTableDescription);
+        diff.Items.Should().NotContain(i => i.Kind == SchemaDiffKind.SetColumnDescription);
+        diff.Items.Should()
+            .ContainSingle(i => i.Kind == SchemaDiffKind.AddTable && i.TableName == "Order");
+    }
+
+    /// <summary>
+    /// PersistsForeignKeyConstraintNames=false の方言（SQLite）では、制約名だけが異なる FK（合成名 live vs 無名 target）を
+    /// 同一とみなし、Drop+Add の誤検出を出さないことを検証する。
+    /// </summary>
+    [Fact(DisplayName = "FK 制約名を永続化しない方言では名前差だけの FK 差分は出ない")]
+    public void CapabilitiesWithoutFkConstraintNames_SuppressesNameOnlyForeignKeyDiff()
+    {
+        var parentLive = Tbl("Parent", ("Id", "int", true));
+        var childLive = Tbl("Child", ("Id", "int", true), ("ParentId", "int", false));
+        // live 側は取込時の合成制約名を持つ
+        var liveRel = new Relationship
+        {
+            SourceEntityId = parentLive.Id,
+            TargetEntityId = childLive.Id,
+            Type = RelationshipType.OneToMany,
+            SourceColumnId = parentLive.Columns[0].Id,
+            TargetColumnId = childLive.Columns[1].Id,
+            ConstraintName = "FK_Child_Parent_0",
+        };
+
+        var parentTarget = Tbl("Parent", ("Id", "int", true));
+        var childTarget = Tbl("Child", ("Id", "int", true), ("ParentId", "int", false));
+        // target 側は無名（手動作成のリレーション）
+        var targetRel = new Relationship
+        {
+            SourceEntityId = parentTarget.Id,
+            TargetEntityId = childTarget.Id,
+            Type = RelationshipType.OneToMany,
+            SourceColumnId = parentTarget.Columns[0].Id,
+            TargetColumnId = childTarget.Columns[1].Id,
+            ConstraintName = null,
+        };
+
+        var capabilities = new SyncDialectCapabilities
+        {
+            PersistsForeignKeyConstraintNames = false,
+        };
+
+        var diff = new SchemaDiffService().Compute(
+            new List<Entity> { parentLive, childLive },
+            new List<Relationship> { liveRel },
+            new List<Entity> { parentTarget, childTarget },
+            new List<Relationship> { targetRel },
+            capabilities
+        );
+
+        // 制約名以外は同一のため、名前差だけでは FK 差分を出さない
+        diff.Items.Should().NotContain(i => i.Kind == SchemaDiffKind.AddForeignKey);
+        diff.Items.Should().NotContain(i => i.Kind == SchemaDiffKind.DropForeignKey);
+    }
+
+    /// <summary>
+    /// 既定（capabilities なし）では制約名を含めて比較するため、名前差だけの FK でも Drop+Add が出る
+    /// （上のケーパビリティ抑止との対照）ことを検証する。
+    /// </summary>
+    [Fact(DisplayName = "既定では FK 制約名の差で Drop+Add が出る")]
+    public void DefaultCapabilities_EmitsFkDiffOnConstraintNameChange()
+    {
+        var parentLive = Tbl("Parent", ("Id", "int", true));
+        var childLive = Tbl("Child", ("Id", "int", true), ("ParentId", "int", false));
+        var liveRel = new Relationship
+        {
+            SourceEntityId = parentLive.Id,
+            TargetEntityId = childLive.Id,
+            Type = RelationshipType.OneToMany,
+            SourceColumnId = parentLive.Columns[0].Id,
+            TargetColumnId = childLive.Columns[1].Id,
+            ConstraintName = "FK_Old",
+        };
+
+        var parentTarget = Tbl("Parent", ("Id", "int", true));
+        var childTarget = Tbl("Child", ("Id", "int", true), ("ParentId", "int", false));
+        var targetRel = new Relationship
+        {
+            SourceEntityId = parentTarget.Id,
+            TargetEntityId = childTarget.Id,
+            Type = RelationshipType.OneToMany,
+            SourceColumnId = parentTarget.Columns[0].Id,
+            TargetColumnId = childTarget.Columns[1].Id,
+            ConstraintName = "FK_New",
+        };
+
+        var diff = new SchemaDiffService().Compute(
+            new List<Entity> { parentLive, childLive },
+            new List<Relationship> { liveRel },
+            new List<Entity> { parentTarget, childTarget },
+            new List<Relationship> { targetRel }
+        );
+
+        diff.Items.Should().Contain(i => i.Kind == SchemaDiffKind.DropForeignKey);
+        diff.Items.Should().Contain(i => i.Kind == SchemaDiffKind.AddForeignKey);
+    }
+
+    // ---------------- 列順変更（ReorderColumns）の生成 ----------------
+
+    /// <summary>列順のみ入れ替えた図（Native/Rebuild 方言）</summary>
+    private static (List<Entity> Live, List<Entity> Target) ReorderScenario()
+    {
+        var live = new List<Entity>
+        {
+            Tbl(
+                "Customer",
+                ("Id", "int", true),
+                ("Name", "nvarchar(50)", false),
+                ("Email", "nvarchar(50)", false)
+            ),
+        };
+        var target = new List<Entity>
+        {
+            Tbl(
+                "Customer",
+                ("Id", "int", true),
+                ("Email", "nvarchar(50)", false),
+                ("Name", "nvarchar(50)", false)
+            ),
+        };
+        return (live, target);
+    }
+
+    /// <summary>Native 方言では列順変更が選択可能な ReorderColumns 項目として生成され、既定で未選択であることを検証する</summary>
+    [Fact(DisplayName = "Native 方言では ReorderColumns が生成され既定で未選択")]
+    public void Reorder_NativeDialect_GeneratesUnselectedReorderItem()
+    {
+        var (live, target) = ReorderScenario();
+
+        var diff = new SchemaDiffService().Compute(
+            live,
+            new List<Relationship>(),
+            target,
+            new List<Relationship>(),
+            new SyncDialectCapabilities { ColumnReorder = ColumnReorderMode.Native }
+        );
+
+        var reorder = diff
+            .Items.Should()
+            .ContainSingle(i => i.Kind == SchemaDiffKind.ReorderColumns)
+            .Which;
+        reorder.TableName.Should().Be("Customer");
+        reorder.Entity.Should().BeSameAs(target[0]);
+        reorder.IsSelected.Should().BeFalse();
+        reorder.IsSelectable.Should().BeTrue();
+        reorder.IsDestructive.Should().BeFalse();
+    }
+
+    /// <summary>Rebuild 方言でも ReorderColumns 項目が生成されることを検証する</summary>
+    [Fact(DisplayName = "Rebuild 方言でも ReorderColumns が生成される")]
+    public void Reorder_RebuildDialect_GeneratesReorderItem()
+    {
+        var (live, target) = ReorderScenario();
+
+        var diff = new SchemaDiffService().Compute(
+            live,
+            new List<Relationship>(),
+            target,
+            new List<Relationship>(),
+            new SyncDialectCapabilities
+            {
+                SupportsAlterColumn = false,
+                SupportsForeignKeyAlter = false,
+                SupportsDescriptions = false,
+                PersistsForeignKeyConstraintNames = false,
+                ColumnReorder = ColumnReorderMode.Rebuild,
+            }
+        );
+
+        diff.Items.Should().Contain(i => i.Kind == SchemaDiffKind.ReorderColumns);
+    }
+
+    /// <summary>非対応方言（None）および capabilities 省略時は ReorderColumns を生成しないことを検証する</summary>
+    [Fact(DisplayName = "None 方言・capabilities 省略時は ReorderColumns を生成しない")]
+    public void Reorder_NoneDialectOrNoCapabilities_DoesNotGenerate()
+    {
+        var (live, target) = ReorderScenario();
+        var service = new SchemaDiffService();
+
+        // capabilities 省略（既定）
+        var diffDefault = service.Compute(
+            live,
+            new List<Relationship>(),
+            target,
+            new List<Relationship>()
+        );
+        diffDefault.Items.Should().NotContain(i => i.Kind == SchemaDiffKind.ReorderColumns);
+
+        // 明示的な None
+        var diffNone = service.Compute(
+            live,
+            new List<Relationship>(),
+            target,
+            new List<Relationship>(),
+            new SyncDialectCapabilities { ColumnReorder = ColumnReorderMode.None }
+        );
+        diffNone.Items.Should().NotContain(i => i.Kind == SchemaDiffKind.ReorderColumns);
+    }
 }

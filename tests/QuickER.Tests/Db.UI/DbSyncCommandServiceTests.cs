@@ -18,9 +18,9 @@ namespace QuickER.Tests.Db.UI;
 /// </remarks>
 public class DbSyncCommandServiceTests
 {
-    /// <summary>SQLite では同期不可・ツールチップに未対応理由が出ることを検証する</summary>
-    [Fact(DisplayName = "SQLite では CanRun=false・ツールチップに未対応理由")]
-    public void Sqlite_CannotRun_ShowsUnsupportedTooltip()
+    /// <summary>SQLite でも同期可・ツールチップに通常の説明が出ることを検証する（テーブル再構築方式で対応）</summary>
+    [Fact(DisplayName = "SQLite では CanRun=true・ツールチップに通常説明")]
+    public void Sqlite_CanRun_ShowsWriteBackTooltip()
     {
         var host = new StubErDiagramHost { TargetDbmsToReturn = SqliteProvider.ProviderName };
         var service = new DbSyncCommandService(
@@ -29,8 +29,8 @@ public class DbSyncCommandServiceTests
             new RecordingSyncPresenter()
         );
 
-        service.CanRun.Should().BeFalse();
-        service.CurrentTooltip.Should().Be(DbStrings.Db_SyncSqliteUnsupported);
+        service.CanRun.Should().BeTrue();
+        service.CurrentTooltip.Should().Be(DbStrings.Db_SyncWriteBack);
     }
 
     /// <summary>SQL Server では同期可・ツールチップに通常の説明が出ることを検証する</summary>
@@ -90,6 +90,20 @@ public class DbSyncCommandServiceTests
         sync.LastProvider.Should().BeSameAs(provider);
         sync.LastSettings.Should().BeSameAs(settings);
         sync.LastEntities.Should().ContainSingle().Which.TableName.Should().Be("Customer");
+    }
+
+    /// <summary>同期では接続ダイアログに新規 SQLite ファイル作成を許可して開くことを検証する</summary>
+    [Fact(DisplayName = "同期では allowSqliteFileCreation=true・Sync モードで接続ダイアログを開く")]
+    public void Run_PassesAllowSqliteFileCreationTrue()
+    {
+        var host = new StubErDiagramHost { TargetDbmsToReturn = SqliteProvider.ProviderName };
+        var presenter = new FakeConnectionPresenter(null);
+        var service = new DbSyncCommandService(host, presenter, new RecordingSyncPresenter());
+
+        service.Run();
+
+        presenter.LastMode.Should().Be(DbConnectionDialogMode.Sync);
+        presenter.LastAllowSqliteFileCreation.Should().BeTrue();
     }
 
     // FakeConnectionPresenter は共有版（QuickER.Tests.Db.UI.FakeConnectionPresenter）を使用する

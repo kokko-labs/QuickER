@@ -30,6 +30,9 @@ public sealed class OracleProvider : IDatabaseProvider
     public ISyncScriptBuilder SyncScriptBuilder { get; } = new OracleSyncScriptBuilder();
 
     /// <inheritdoc />
+    public SyncDialectCapabilities SyncCapabilities { get; } = new();
+
+    /// <inheritdoc />
     public ISchemaSyncExecutor SyncExecutor { get; } = new OracleSchemaSyncExecutor();
 
     /// <inheritdoc />

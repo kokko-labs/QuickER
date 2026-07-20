@@ -1,3 +1,4 @@
+using System.Linq;
 using FluentAssertions;
 using QuickER.Model;
 using QuickER.MySql;
@@ -9,7 +10,9 @@ namespace QuickER.Tests.MySql;
 public class MySqlSyncScriptBuilderTests
 {
     private static string Build(params SchemaDiffItem[] items) =>
-        new MySqlSyncScriptBuilder().Build(items);
+        new MySqlSyncScriptBuilder().Build(
+            new SyncPlanner().BuildPlan(items, new SyncDialectCapabilities())
+        );
 
     /// <summary>AddTable が主キー制約を含む CREATE TABLE 文を生成することを検証する</summary>
     [Fact(DisplayName = "AddTable は CREATE TABLE と PK を含む")]
@@ -444,5 +447,89 @@ public class MySqlSyncScriptBuilderTests
         iCreate.Should().BeGreaterThan(-1);
         iAdd.Should().BeGreaterThan(iCreate);
         iFk.Should().BeGreaterThan(iAdd);
+    }
+
+    // ---------------- 列順変更 (MODIFY ... AFTER) ----------------
+
+    /// <summary>指定名・順の列（int NULL）を持つエンティティを組み立てる</summary>
+    private static Entity ReorderTable(string name, params string[] cols)
+    {
+        var e = new Entity { TableName = name };
+
+        foreach (var c in cols)
+        {
+            e.Columns.Add(
+                new Column
+                {
+                    Name = c,
+                    DataType = "int",
+                    IsNullable = true,
+                }
+            );
+        }
+
+        return e;
+    }
+
+    /// <summary>Native ケーパビリティ＋live 土台で ReorderColumns から MySQL スクリプトを生成する</summary>
+    private static string BuildReorder(params (Entity Live, Entity Target)[] tables)
+    {
+        var items = tables
+            .Select(t => new SchemaDiffItem
+            {
+                Kind = SchemaDiffKind.ReorderColumns,
+                TableName = t.Live.TableName,
+                Entity = t.Target,
+                IsSelected = true,
+            })
+            .ToArray();
+        var context = new SyncPlanContext { LiveEntities = tables.Select(t => t.Live).ToArray() };
+        var plan = new SyncPlanner().BuildPlan(
+            items,
+            new SyncDialectCapabilities { ColumnReorder = ColumnReorderMode.Native },
+            context
+        );
+        return new MySqlSyncScriptBuilder().Build(plan);
+    }
+
+    /// <summary>列順変更が見出しと MODIFY COLUMN ... AFTER を生成することを検証する</summary>
+    [Fact(DisplayName = "ReorderColumns は MODIFY COLUMN ... AFTER と見出しを生成する")]
+    public void Reorder_GeneratesModifyAfterWithHeading()
+    {
+        // live: id,a,b,c → target: id,c,a,b（c を id の直後へ）
+        var sql = BuildReorder(
+            (ReorderTable("t", "id", "a", "b", "c"), ReorderTable("t", "id", "c", "a", "b"))
+        );
+
+        sql.Should().Contain("-- ===== ReorderColumns: t =====");
+        sql.Should().Contain("ALTER TABLE `t` MODIFY COLUMN `c` int NULL AFTER `id`;");
+    }
+
+    /// <summary>先頭へ動かす列が FIRST を生成することを検証する</summary>
+    [Fact(DisplayName = "ReorderColumns は先頭移動で FIRST を生成する")]
+    public void Reorder_MoveToFront_GeneratesFirst()
+    {
+        // live: a,b,c → target: c,a,b（c を先頭へ）
+        var sql = BuildReorder(
+            (ReorderTable("t", "a", "b", "c"), ReorderTable("t", "c", "a", "b"))
+        );
+
+        sql.Should().Contain("ALTER TABLE `t` MODIFY COLUMN `c` int NULL FIRST;");
+        sql.Should().NotContain("AFTER");
+    }
+
+    /// <summary>複数テーブルの列順変更がテーブルごとの見出しで出力されることを検証する</summary>
+    [Fact(DisplayName = "ReorderColumns は複数テーブルをテーブルごとに出力する")]
+    public void Reorder_MultipleTables_EmitsPerTableHeadings()
+    {
+        var sql = BuildReorder(
+            (ReorderTable("t1", "id", "a", "b", "c"), ReorderTable("t1", "id", "c", "a", "b")),
+            (ReorderTable("t2", "x", "y", "z"), ReorderTable("t2", "z", "x", "y"))
+        );
+
+        sql.Should().Contain("-- ===== ReorderColumns: t1 =====");
+        sql.Should().Contain("-- ===== ReorderColumns: t2 =====");
+        sql.Should().Contain("ALTER TABLE `t1` MODIFY COLUMN `c` int NULL AFTER `id`;");
+        sql.Should().Contain("ALTER TABLE `t2` MODIFY COLUMN `z` int NULL FIRST;");
     }
 }

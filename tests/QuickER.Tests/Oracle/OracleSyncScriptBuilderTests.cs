@@ -10,7 +10,9 @@ namespace QuickER.Tests.Oracle;
 public class OracleSyncScriptBuilderTests
 {
     private static string Build(params SchemaDiffItem[] items) =>
-        new OracleSyncScriptBuilder().Build(items);
+        new OracleSyncScriptBuilder().Build(
+            new SyncPlanner().BuildPlan(items, new SyncDialectCapabilities())
+        );
 
     /// <summary>AddTable が主キー制約を含む CREATE TABLE 文を生成することを検証する</summary>
     [Fact(DisplayName = "AddTable は CREATE TABLE と PK を生成する")]

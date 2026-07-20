@@ -29,34 +29,20 @@ namespace QuickER.Oracle;
 /// </remarks>
 public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
 {
-    /// <summary>選択された差分項目のみを Oracle DDL へ変換する</summary>
-    public string Build(IEnumerable<SchemaDiffItem> items)
+    /// <summary>実行計画を Oracle DDL へ変換する</summary>
+    public string Build(SyncPlan plan)
     {
-        var list = items.Where(i => i.IsSelected).ToList();
         var sb = new StringBuilder();
 
         // 各文（末尾 ; を含む）を蓄積し、最後に「/」のみの行で連結する
         var statements = new List<string>();
 
-        WriteSection(statements, list, SchemaDiffKind.AddTable, AppendCreateTable);
-        WriteSection(statements, list, SchemaDiffKind.AddColumn, AppendAddColumn);
-        WriteSection(statements, list, SchemaDiffKind.AlterColumn, AppendAlterColumn);
-        WriteSection(statements, list, SchemaDiffKind.DropForeignKey, AppendDropForeignKey);
-        WriteSection(statements, list, SchemaDiffKind.DropColumn, AppendDropColumn);
-        WriteSection(statements, list, SchemaDiffKind.DropTable, AppendDropTable);
-        WriteSection(statements, list, SchemaDiffKind.AddForeignKey, AppendAddForeignKey);
-        WriteSection(
-            statements,
-            list,
-            SchemaDiffKind.SetTableDescription,
-            AppendSetTableDescription
-        );
-        WriteSection(
-            statements,
-            list,
-            SchemaDiffKind.SetColumnDescription,
-            AppendSetColumnDescription
-        );
+        // 計画は既に選択フィルタ済み・固定順序でセクション化されているため、
+        // 各セクションを順に平坦化して文へ変換する（見出しは付けない）
+        foreach (var section in plan.Sections)
+        {
+            AppendSection(statements, section);
+        }
 
         for (var i = 0; i < statements.Count; i++)
         {
@@ -74,17 +60,25 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
         return sb.ToString();
     }
 
-    /// <summary>指定種別の差分のみを抽出し、各文（末尾 ; 付き）を <paramref name="statements"/> へ追加する</summary>
-    private static void WriteSection(
-        List<string> statements,
-        List<SchemaDiffItem> all,
-        SchemaDiffKind kind,
-        System.Func<SchemaDiffItem, string?> writer
-    )
+    /// <summary>1 セクションの各項目を対応する DDL 文へ変換し、<paramref name="statements"/> へ追加する</summary>
+    /// <remarks>writer が null / 空白を返した項目（スキップ）は文を追加しない</remarks>
+    private static void AppendSection(List<string> statements, SyncPlanSection section)
     {
-        foreach (var item in all.Where(i => i.Kind == kind))
+        foreach (var item in section.Items)
         {
-            var stmt = writer(item);
+            var stmt = section.Kind switch
+            {
+                SchemaDiffKind.AddTable => AppendCreateTable(item),
+                SchemaDiffKind.AddColumn => AppendAddColumn(item),
+                SchemaDiffKind.AlterColumn => AppendAlterColumn(item),
+                SchemaDiffKind.DropForeignKey => AppendDropForeignKey(item),
+                SchemaDiffKind.DropColumn => AppendDropColumn(item),
+                SchemaDiffKind.DropTable => AppendDropTable(item),
+                SchemaDiffKind.AddForeignKey => AppendAddForeignKey(item),
+                SchemaDiffKind.SetTableDescription => AppendSetTableDescription(item),
+                SchemaDiffKind.SetColumnDescription => AppendSetColumnDescription(item),
+                _ => null,
+            };
 
             if (!string.IsNullOrWhiteSpace(stmt))
             {
@@ -107,7 +101,7 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
         {
             var col = e.Columns[i];
             var line =
-                $"    {OracleIdentifier.QuoteSimple(col.Name)} {col.DataType} {GetNullabilityClause(col)}";
+                $"    {OracleIdentifier.QuoteSimple(col.Name)} {col.DataType} {SyncScriptBuilderHelper.GetNullabilityClause(col)}";
 
             // 後続のカラム行、または PRIMARY KEY 制約行が続く場合は区切りのカンマを付ける
             if (i < e.Columns.Count - 1 || pks.Count > 0)
@@ -177,7 +171,7 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
             return null;
         }
 
-        var pkCol = ResolveReferencedColumn(item);
+        var pkCol = SyncScriptBuilderHelper.ResolveReferencedColumn(item);
 
         // 参照先列が特定できない場合は不正な DDL を出さず、コメントでスキップを明示する
         if (pkCol is null || item.ColumnName is null)
@@ -289,31 +283,8 @@ public sealed class OracleSyncScriptBuilder : ISyncScriptBuilder
         return $"COMMENT ON COLUMN {target} IS '{OracleIdentifier.EscapeStringLiteral(newVal)}';";
     }
 
-    /// <summary>外部キーの参照先列を差分情報から解決する</summary>
-    /// <remarks>明示指定された列を優先し、無ければ親テーブルの主キー先頭列にフォールバックする</remarks>
-    private static Column? ResolveReferencedColumn(SchemaDiffItem item)
-    {
-        if (item.Relationship?.SourceColumnId is not null)
-        {
-            var byId = item.ParentEntity?.Columns.FirstOrDefault(c =>
-                c.Id == item.Relationship.SourceColumnId
-            );
-
-            if (byId is not null)
-            {
-                return byId;
-            }
-        }
-
-        return item.ParentEntity?.Columns.FirstOrDefault(c => c.IsPrimaryKey);
-    }
-
     /// <summary>NULL 許容句を返す（主キーまたは非 NULL 許容なら NOT NULL、それ以外は空）</summary>
     /// <remarks>Oracle の ADD 句では NULL は既定のため明示しない</remarks>
     private static string GetNullabilityClauseForAdd(Column column) =>
         column.IsPrimaryKey || !column.IsNullable ? "NOT NULL" : string.Empty;
-
-    /// <summary>CREATE TABLE 内の NULL 許容句を返す（主キーまたは非 NULL 許容なら NOT NULL、それ以外は NULL）</summary>
-    private static string GetNullabilityClause(Column column) =>
-        column.IsPrimaryKey || !column.IsNullable ? "NOT NULL" : "NULL";
 }

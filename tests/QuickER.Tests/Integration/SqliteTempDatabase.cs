@@ -65,6 +65,14 @@ internal sealed class SqliteTempDatabase : IDisposable
             Mode = SqliteOpenMode.ReadOnly,
         }.ConnectionString;
 
+    /// <summary>同期実行用の書き込み可能（新規作成はしない）接続文字列（同期 Executor と同じモード）</summary>
+    public string ReadWriteConnectionString =>
+        new SqliteConnectionStringBuilder
+        {
+            DataSource = FilePath,
+            Mode = SqliteOpenMode.ReadWrite,
+        }.ConnectionString;
+
     /// <summary>
     /// DDL スクリプトを一時 DB に適用する。SQLite は 1 回の <c>ExecuteNonQuery</c> で複数文を実行できないため、
     /// ステートメントごとに分割して順に実行する（外部キー制約を含むため <c>foreign_keys</c> は明示 ON）。
@@ -185,6 +193,11 @@ internal sealed class SqliteTempDatabase : IDisposable
         using (var ro = new SqliteConnection(ReadOnlyConnectionString))
         {
             SqliteConnection.ClearPool(ro);
+        }
+
+        using (var rw = new SqliteConnection(ReadWriteConnectionString))
+        {
+            SqliteConnection.ClearPool(rw);
         }
 
         try

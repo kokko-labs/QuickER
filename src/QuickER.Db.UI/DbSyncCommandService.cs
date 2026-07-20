@@ -1,6 +1,5 @@
 using QuickER.Db.UI.Resources;
 using QuickER.Extensibility;
-using QuickER.Sqlite;
 
 namespace QuickER.Db.UI;
 
@@ -10,10 +9,9 @@ namespace QuickER.Db.UI;
 /// <remarks>
 /// アプリ本体 <c>MainViewModel</c> の <c>SyncToDatabase</c> / <c>CanSyncToDatabase</c> /
 /// <c>SyncToDatabaseTooltip</c> から移設したフィーチャーモジュール本体。
-/// SQLite は DB 同期未対応のため <see cref="CanRun"/> は false になり、
-/// <see cref="CurrentTooltip"/> は未対応理由を返す（対応方言では通常の説明を返す）。
-/// 対象 DBMS 切替に伴うボタン活性・ツールチップの再評価は、モジュール側が
-/// <see cref="IErDiagramHost.TargetDbmsChanged"/> を購読して行う。
+/// 現在は全方言が DB 同期に対応する（SQLite はテーブル再構築方式で対応）。
+/// 対象 DBMS 切替に伴うボタン活性・ツールチップの再評価機構は、将来の方言差に備えて
+/// モジュール側が <see cref="IErDiagramHost.TargetDbmsChanged"/> を購読して維持する。
 /// </remarks>
 public sealed class DbSyncCommandService
 {
@@ -38,12 +36,11 @@ public sealed class DbSyncCommandService
         _syncPresenter = syncPresenter;
     }
 
-    /// <summary>DB 同期を実行できるか（SQLite は同期未対応のため実行不可）</summary>
-    public bool CanRun => _host.TargetDbms != SqliteProvider.ProviderName;
+    /// <summary>DB 同期を実行できるか（全方言が対応するため常に true）</summary>
+    public bool CanRun => true;
 
-    /// <summary>DB 同期ボタンのツールチップ（未対応方言のときは理由、対応方言のときは通常の説明）</summary>
-    public string CurrentTooltip =>
-        CanRun ? Strings.Db_SyncWriteBack : Strings.Db_SyncSqliteUnsupported;
+    /// <summary>DB 同期ボタンのツールチップ（現在は全方言で共通の説明）</summary>
+    public string CurrentTooltip => Strings.Db_SyncWriteBack;
 
     /// <summary>データベースへ接続し、現在のダイアグラムとの差分同期ダイアログを開く（ツールバーボタンから実行）</summary>
     /// <remarks>同期先の方言は図の TargetDbms に固定する（接続ダイアログでは DBMS を選択できない）</remarks>
@@ -54,10 +51,12 @@ public sealed class DbSyncCommandService
             ? provider
             : null;
 
+        // 同期先が未作成の SQLite ファイルなら「新規作成」で空 DB を作って同期できるようにする（取込では出さない）
         var picked = _connectionPresenter.Show(
             DbConnectionDialogMode.Sync,
             fixedProvider: fixedProvider,
-            title: Strings.Db_SyncTitle
+            title: Strings.Db_SyncTitle,
+            allowSqliteFileCreation: true
         );
 
         if (picked is null)

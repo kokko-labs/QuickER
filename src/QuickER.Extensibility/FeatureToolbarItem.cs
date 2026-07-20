@@ -55,7 +55,7 @@ public sealed class FeatureToolbarItem : INotifyPropertyChanged
     /// <summary>押下時に実行するコマンド</summary>
     public ICommand Command { get; }
 
-    /// <summary>ツールチップ（<c>null</c> なら無し）。実行中に切り替え可能（例: DB 同期の「SQLite 未対応」文言）</summary>
+    /// <summary>ツールチップ（<c>null</c> なら無し）。実行中に切り替え可能（例: 対象 DBMS の切替に追従して文言を差し替える）</summary>
     public string? Tooltip
     {
         get => _tooltip;

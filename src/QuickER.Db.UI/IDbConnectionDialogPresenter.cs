@@ -17,10 +17,12 @@ public interface IDbConnectionDialogPresenter
     /// <param name="mode">用途（取込は DBMS 選択可・同期は方言固定）</param>
     /// <param name="fixedProvider">同期時に固定する方言（取込では初期選択に用いる）</param>
     /// <param name="title">ウィンドウタイトル（省略時は既定）</param>
+    /// <param name="allowSqliteFileCreation">新規 SQLite ファイル作成を許可するか（DB 同期のみ true。取込では既定 false）</param>
     DbConnectionDialogResult? Show(
         DbConnectionDialogMode mode,
         IDatabaseProvider? fixedProvider = null,
-        string? title = null
+        string? title = null,
+        bool allowSqliteFileCreation = false
     );
 }
 
@@ -44,14 +46,16 @@ public sealed class DbConnectionDialogPresenter : IDbConnectionDialogPresenter
     public DbConnectionDialogResult? Show(
         DbConnectionDialogMode mode,
         IDatabaseProvider? fixedProvider = null,
-        string? title = null
+        string? title = null,
+        bool allowSqliteFileCreation = false
     )
     {
         var viewModel = new DbConnectionDialogViewModel(
             _providers,
             mode,
             fixedProvider,
-            fileDialogService: _files
+            fileDialogService: _files,
+            allowSqliteFileCreation: allowSqliteFileCreation
         );
         var dialog = new DbConnectionDialog(viewModel) { Owner = Application.Current?.MainWindow };
 

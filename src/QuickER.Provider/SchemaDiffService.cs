@@ -14,14 +14,28 @@ public class SchemaDiffService
     /// <param name="liveRelationships">DB から取得した現在のリレーション</param>
     /// <param name="targetEntities">ダイアグラム上のエンティティ（期待状態）</param>
     /// <param name="targetRelationships">ダイアグラム上のリレーション</param>
+    /// <param name="capabilities">
+    /// 対象方言の同期ケーパビリティ。<c>null</c>（既定）なら従来どおり全差分を生成する。
+    /// <see cref="SyncDialectCapabilities.SupportsDescriptions"/> が <c>false</c> の方言（SQLite）では
+    /// 説明差分を生成しない（コメント機構が無く live 側が常に空＝恒常的な幻の差分になるため）。
+    /// <see cref="SyncDialectCapabilities.PersistsForeignKeyConstraintNames"/> が <c>false</c> の方言（SQLite）では
+    /// FK シグネチャから制約名を除いて比較する（合成名 live と無名 target で恒常的な Drop+Add 誤検出を避けるため）。
+    /// </param>
     public SchemaDiff Compute(
         IReadOnlyList<Entity> liveEntities,
         IReadOnlyList<Relationship> liveRelationships,
         IReadOnlyList<Entity> targetEntities,
-        IReadOnlyList<Relationship> targetRelationships
+        IReadOnlyList<Relationship> targetRelationships,
+        SyncDialectCapabilities? capabilities = null
     )
     {
         var diff = new SchemaDiff();
+
+        // 説明差分を出すか（SQLite などコメント機構が無い方言では出さない）
+        var emitDescriptions = capabilities?.SupportsDescriptions ?? true;
+
+        // FK 比較で制約名を含めるか（SQLite は合成名で永続化されないため名前を除いて比較する）
+        var includeFkConstraintName = capabilities?.PersistsForeignKeyConstraintNames ?? true;
 
         var liveByName = liveEntities.ToDictionary(
             NormalizeTable,
@@ -55,7 +69,7 @@ public class SchemaDiffService
                 // 新規テーブル: テーブル説明
                 var newTblDesc = target.Description ?? string.Empty;
 
-                if (!string.IsNullOrEmpty(newTblDesc))
+                if (emitDescriptions && !string.IsNullOrEmpty(newTblDesc))
                 {
                     diff.Items.Add(
                         new SchemaDiffItem
@@ -77,7 +91,7 @@ public class SchemaDiffService
                 // 新規テーブル: 各列の説明
                 foreach (var c in target.Columns)
                 {
-                    if (string.IsNullOrEmpty(c.Description))
+                    if (!emitDescriptions || string.IsNullOrEmpty(c.Description))
                     {
                         continue;
                     }
@@ -116,7 +130,10 @@ public class SchemaDiffService
             var targetTableDesc = target.Description ?? string.Empty;
             var liveTableDesc = live.Description ?? string.Empty;
 
-            if (!string.Equals(targetTableDesc, liveTableDesc, StringComparison.Ordinal))
+            if (
+                emitDescriptions
+                && !string.Equals(targetTableDesc, liveTableDesc, StringComparison.Ordinal)
+            )
             {
                 diff.Items.Add(
                     new SchemaDiffItem
@@ -159,7 +176,7 @@ public class SchemaDiffService
                     );
 
                     // 新規列に説明があれば、列追加と一緒に説明を設定する
-                    if (!string.IsNullOrEmpty(tcol.Description))
+                    if (emitDescriptions && !string.IsNullOrEmpty(tcol.Description))
                     {
                         diff.Items.Add(
                             new SchemaDiffItem
@@ -228,7 +245,10 @@ public class SchemaDiffService
                     var newColDesc = tcol.Description ?? string.Empty;
                     var oldColDesc = lcol.Description ?? string.Empty;
 
-                    if (!string.Equals(newColDesc, oldColDesc, StringComparison.Ordinal))
+                    if (
+                        emitDescriptions
+                        && !string.Equals(newColDesc, oldColDesc, StringComparison.Ordinal)
+                    )
                     {
                         diff.Items.Add(
                             new SchemaDiffItem
@@ -304,7 +324,7 @@ public class SchemaDiffService
         // 親・子・列・制約名などのシグネチャでキー化し、同一 FK の有無を集合比較で判定する
         var liveFkPairs = liveRelationships
             .Where(r => r.Type != RelationshipType.ManyToMany)
-            .Select(r => MakeForeignKeySignature(r, liveEntities))
+            .Select(r => MakeForeignKeySignature(r, liveEntities, includeFkConstraintName))
             .Where(p => p is not null)
             .Select(p => p!.Value)
             .ToHashSet();
@@ -316,7 +336,7 @@ public class SchemaDiffService
                 continue;
             }
 
-            var pair = MakeForeignKeySignature(rel, targetEntities);
+            var pair = MakeForeignKeySignature(rel, targetEntities, includeFkConstraintName);
 
             if (pair is null)
             {
@@ -376,7 +396,7 @@ public class SchemaDiffService
         // 取得側 Relationship には FK 名が無いため、ここでは「親→子ペアの消失」ケースのみ検出する
         var targetFkPairs = targetRelationships
             .Where(r => r.Type != RelationshipType.ManyToMany)
-            .Select(r => MakeForeignKeySignature(r, targetEntities))
+            .Select(r => MakeForeignKeySignature(r, targetEntities, includeFkConstraintName))
             .Where(p => p is not null)
             .Select(p => p!.Value)
             .ToHashSet();
@@ -388,7 +408,7 @@ public class SchemaDiffService
                 continue;
             }
 
-            var pair = MakeForeignKeySignature(rel, liveEntities);
+            var pair = MakeForeignKeySignature(rel, liveEntities, includeFkConstraintName);
 
             if (pair is null)
             {
@@ -428,11 +448,40 @@ public class SchemaDiffService
             );
         }
 
+        // ---------- 列順の差分（対応方言のみ・既定では非選択） ----------
+        // 列順同期は SQLite（テーブル再構築）と MySQL（ネイティブ MODIFY ... AFTER）だけが実現できる。
+        // 非対応方言（ColumnReorder=None）では幻の差分を出さない（案内表示は UI 側が担う）。
+        if (capabilities is not null && capabilities.ColumnReorder != ColumnReorderMode.None)
+        {
+            foreach (var tableName in DetectColumnOrderChanges(liveEntities, targetEntities))
+            {
+                if (!targetByName.TryGetValue(tableName, out var target))
+                {
+                    continue;
+                }
+
+                diff.Items.Add(
+                    new SchemaDiffItem
+                    {
+                        Kind = SchemaDiffKind.ReorderColumns,
+                        TableName = tableName,
+                        Entity = target,
+                        IsSelected = false,
+                        Description = string.Format(Strings.Diff_ReorderColumns, tableName),
+                    }
+                );
+            }
+        }
+
         return diff;
     }
 
-    /// <summary>同一列集合のまま順序のみ異なるテーブル名の一覧を返す</summary>
-    /// <remarks>列の追加・削除を伴う場合は列順差分として扱わない（ALTER で表現できないため別管理とする）</remarks>
+    /// <summary>共通列（追加・削除を除いた双方に存在する列）の相対順序が異なるテーブル名の一覧を返す</summary>
+    /// <remarks>
+    /// 列の追加・削除は無視し、live と target の両方に存在する列だけを取り出してその相対順序を比較する。
+    /// これにより「真ん中への列追加」と「並び替え」が同時に起きても、共通列の順序変化として検知できる
+    /// （純粋な列追加のみ＝共通列の相対順序が変わらないケースは検知しない）。共通列が 2 列未満のときは検知しない。
+    /// </remarks>
     public static IReadOnlyList<string> DetectColumnOrderChanges(
         IReadOnlyList<Entity> liveEntities,
         IReadOnlyList<Entity> targetEntities
@@ -469,6 +518,9 @@ public class SchemaDiffService
     }
 
     /// <summary>外部キーの同一性比較に使うシグネチャ（親子・列・制約名・参照アクション）を生成する</summary>
+    /// <param name="includeConstraintName">
+    /// 制約名を比較キーへ含めるか。<c>false</c>（SQLite）のときは制約名を空にして名前差を無視する。
+    /// </param>
     /// <returns>親子いずれかの参照先・参照列が解決できない場合は null</returns>
     private static (
         string Parent,
@@ -478,7 +530,11 @@ public class SchemaDiffService
         string ConstraintName,
         ForeignKeyReferentialAction OnDelete,
         ForeignKeyReferentialAction OnUpdate
-    )? MakeForeignKeySignature(Relationship rel, IReadOnlyList<Entity> entities)
+    )? MakeForeignKeySignature(
+        Relationship rel,
+        IReadOnlyList<Entity> entities,
+        bool includeConstraintName
+    )
     {
         var parent = entities.FirstOrDefault(e => e.Id == rel.SourceEntityId);
         var child = entities.FirstOrDefault(e => e.Id == rel.TargetEntityId);
@@ -507,7 +563,9 @@ public class SchemaDiffService
             parentColumn.Name.ToLowerInvariant(),
             NormalizeTable(child).ToLowerInvariant(),
             childColumnName.ToLowerInvariant(),
-            rel.ConstraintName?.Trim().ToLowerInvariant() ?? string.Empty,
+            includeConstraintName
+                ? rel.ConstraintName?.Trim().ToLowerInvariant() ?? string.Empty
+                : string.Empty,
             rel.OnDelete,
             rel.OnUpdate
         );
@@ -518,7 +576,7 @@ public class SchemaDiffService
     /// 明示指定列 → <c>&lt;ParentTable&gt;_&lt;PkCol&gt;</c> 命名列 → PK 列と同名の列 →
     /// <c>IsForeignKey</c> フラグの列、の優先順で探索する 該当なしなら null
     /// </remarks>
-    private static string? ResolveFkColumnName(
+    internal static string? ResolveFkColumnName(
         Relationship rel,
         Entity child,
         Entity parent,
@@ -560,7 +618,7 @@ public class SchemaDiffService
     }
 
     /// <summary>親テーブル側の参照先列を解決する（明示指定が無ければ主キーを採用する）</summary>
-    private static Column? ResolveReferencedColumn(Relationship rel, Entity parent)
+    internal static Column? ResolveReferencedColumn(Relationship rel, Entity parent)
     {
         if (rel.SourceColumnId is not null)
         {
@@ -579,28 +637,29 @@ public class SchemaDiffService
     private static bool IsSameType(string a, string b) =>
         string.Equals((a ?? "").Trim(), (b ?? "").Trim(), StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>列集合が一致するテーブルで列順のみが変更されているかを判定する</summary>
+    /// <summary>共通列（双方に存在する列）の相対順序が変更されているかを判定する</summary>
     private static bool HasColumnOrderChanged(Entity live, Entity target)
     {
-        if (live.Columns.Count != target.Columns.Count)
-        {
-            return false;
-        }
-
         var liveNames = live.Columns.Select(c => c.Name).ToList();
         var targetNames = target.Columns.Select(c => c.Name).ToList();
 
         var liveSet = new HashSet<string>(liveNames, StringComparer.OrdinalIgnoreCase);
         var targetSet = new HashSet<string>(targetNames, StringComparer.OrdinalIgnoreCase);
 
-        if (!liveSet.SetEquals(targetSet))
+        // 追加・削除を除いた共通列を、それぞれの出現順で取り出す（両者は同一集合＝同数になる）
+        var liveCommon = liveNames.Where(targetSet.Contains).ToList();
+        var targetCommon = targetNames.Where(liveSet.Contains).ToList();
+
+        // 共通列が 2 列未満なら相対順序の概念が無いため並び替えとは扱わない
+        if (liveCommon.Count < 2)
         {
             return false;
         }
 
-        for (var i = 0; i < liveNames.Count; i++)
+        // 共通列の相対順序が 1 か所でも異なれば列順変更とみなす
+        for (var i = 0; i < liveCommon.Count; i++)
         {
-            if (!string.Equals(liveNames[i], targetNames[i], StringComparison.OrdinalIgnoreCase))
+            if (!string.Equals(liveCommon[i], targetCommon[i], StringComparison.OrdinalIgnoreCase))
             {
                 return true;
             }

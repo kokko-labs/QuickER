@@ -198,7 +198,9 @@ public sealed class MySqlCommentSyncIntegrationTests(MySqlContainerFixture fixtu
         IEnumerable<SchemaDiffItem> items
     )
     {
-        var script = builder.Build(items);
+        var script = builder.Build(
+            new SyncPlanner().BuildPlan(items, new SyncDialectCapabilities())
+        );
         var result = await executor.ExecuteAsync(settings, script, Ct);
         result.Committed.Should().BeTrue($"COMMENT 同期に失敗: {result.Error}\nSQL:\n{script}");
     }

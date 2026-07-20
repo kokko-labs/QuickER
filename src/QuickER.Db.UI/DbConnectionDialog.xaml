@@ -133,6 +133,7 @@
       <Grid.ColumnDefinitions>
         <ColumnDefinition Width="*" />
         <ColumnDefinition Width="Auto" />
+        <ColumnDefinition Width="Auto" />
       </Grid.ColumnDefinitions>
       <TextBox Text="{Binding FilePath, UpdateSourceTrigger=PropertyChanged}" />
       <Button
@@ -142,6 +143,16 @@
         Content="{x:Static resources:Strings.DbConnection_Browse}"
         Command="{Binding BrowseFileCommand}"
         ToolTip="{x:Static resources:Strings.DbConnection_BrowseTooltip}"
+      />
+      <!-- 新規作成: DB 同期の文脈でのみ表示（新しい SQLite ファイルを作って同期先にする） -->
+      <Button
+        Grid.Column="2"
+        Margin="6,0,0,0"
+        Width="70"
+        Content="{x:Static resources:Strings.DbConnection_CreateNewFile}"
+        Command="{Binding BrowseNewFileCommand}"
+        ToolTip="{x:Static resources:Strings.DbConnection_CreateNewFileTooltip}"
+        Visibility="{Binding ShowCreateNewFile, Converter={StaticResource BoolToVisibilityConverter}}"
       />
     </Grid>
 

@@ -149,7 +149,9 @@ IF OBJECT_ID(N'{ParentTable}', N'U') IS NOT NULL DROP TABLE [{ParentTable}];";
         diff1.Items.Should().Contain(i => i.Kind == SchemaDiffKind.AddForeignKey);
 
         // ---------- 3) 実行 ----------
-        var script1 = new SqlServerSyncScriptBuilder().Build(diff1.Items);
+        var script1 = new SqlServerSyncScriptBuilder().Build(
+            new SyncPlanner().BuildPlan(diff1.Items, new SyncDialectCapabilities())
+        );
         var exec = new SqlServerSchemaSyncExecutor();
         var result1 = await exec.ExecuteAsync(
             Settings.ToDbConnectionSettings(),
@@ -190,7 +192,10 @@ IF OBJECT_ID(N'{ParentTable}', N'U') IS NOT NULL DROP TABLE [{ParentTable}];";
             .Contain(i => i.Kind == SchemaDiffKind.AddColumn && i.ColumnName == "AddedLater");
 
         var script3 = new SqlServerSyncScriptBuilder().Build(
-            diff3.Items.Where(i => i.Kind == SchemaDiffKind.AddColumn)
+            new SyncPlanner().BuildPlan(
+                diff3.Items.Where(i => i.Kind == SchemaDiffKind.AddColumn),
+                new SyncDialectCapabilities()
+            )
         );
         var result3 = await exec.ExecuteAsync(
             Settings.ToDbConnectionSettings(),
@@ -278,7 +283,9 @@ CREATE TABLE [{ChildTable}] (
             item.IsSelected = true;
         }
 
-        var script = new SqlServerSyncScriptBuilder().Build(diff.Items);
+        var script = new SqlServerSyncScriptBuilder().Build(
+            new SyncPlanner().BuildPlan(diff.Items, new SyncDialectCapabilities())
+        );
         var exec = new SqlServerSchemaSyncExecutor();
         var result = await exec.ExecuteAsync(
             Settings.ToDbConnectionSettings(),
@@ -376,7 +383,9 @@ CREATE TABLE [{ChildTable}] (
                 && i.NewDescription == "名前カラム"
             );
 
-        var script = new SqlServerSyncScriptBuilder().Build(diff1.Items);
+        var script = new SqlServerSyncScriptBuilder().Build(
+            new SyncPlanner().BuildPlan(diff1.Items, new SyncDialectCapabilities())
+        );
         var exec = new SqlServerSchemaSyncExecutor();
         var result = await exec.ExecuteAsync(
             Settings.ToDbConnectionSettings(),
@@ -438,7 +447,9 @@ CREATE TABLE [{ChildTable}] (
                 && i.NewDescription == "顧客名(更新後)"
             );
 
-        var script2 = new SqlServerSyncScriptBuilder().Build(diff2.Items);
+        var script2 = new SqlServerSyncScriptBuilder().Build(
+            new SyncPlanner().BuildPlan(diff2.Items, new SyncDialectCapabilities())
+        );
         var result2 = await exec.ExecuteAsync(
             Settings.ToDbConnectionSettings(),
             script2,

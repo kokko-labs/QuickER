@@ -39,6 +39,9 @@ public enum SchemaDiffKind
 
     /// <summary>列順変更などテーブル再作成が必要なことを知らせる情報専用項目（SQL 生成対象外）</summary>
     RebuildTable,
+
+    /// <summary>列の並び順をダイアグラムに合わせて変更する（対応方言のみ・既定では非選択）</summary>
+    ReorderColumns,
 }
 
 /// <summary>
