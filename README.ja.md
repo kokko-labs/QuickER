@@ -53,7 +53,7 @@ dotnet run --project samples/ec-order/EcOrderSample
 - [EcOrder.g.cs](samples/ec-order/EcOrderSample/Generated/EcOrder.g.cs) — 生成された C# コード
 - [Program.cs](samples/ec-order/EcOrderSample/Program.cs) — CRUD、グラフ保存、Include、生 SQL、削除カスケードの実行例
 
-詳しくは [EC 注文サンプル](samples/ec-order/README.ja.md) を参照してください。
+詳しくは [EC 注文サンプル](samples/ec-order/README.ja.md) を参照してください。図の編集からコード生成までを手を動かして一巡するには、[チュートリアル](docs/getting-started.ja.md)へ進んでください。
 
 ## ER モデルを視覚的に設計する
 
@@ -69,6 +69,8 @@ crow's foot 記法を使用して、テーブル、列、主キー、外部キ�
 - 複数選択と一括操作
 - PK / FK のみを表示する簡易表示
 
+詳しくは [ER 図の編集](docs/er-editor.ja.md) を参照してください。
+
 <!-- TODO(GIF): エンティティ追加 → 関連線を引く → Undo の編集操作 GIF をここへ追加する -->
 
 ## 実データベースと往復する
@@ -82,9 +84,13 @@ ER モデルとデータベースの差分を検出し、同期用 SQL を生成
 | PostgreSQL | ✅      | ✅    | ✅      | ✅    |
 | MySQL      | ✅      | ✅    | ✅      | ✅    |
 | Oracle     | ✅      | ✅    | ✅      | ✅    |
-| SQLite     | ✅      | ✅    | ✅      | ✅    |
+| SQLite     | ✅      | —    | ✅      | ✅    |
+
+SQLite の差分同期は未対応です（将来対応予定）。
 
 図ごとに対象 DBMS を保持し、途中で別の方言へ切り替えることもできます。型は可能な範囲で自動変換され、変換できない型は警告されます。
+
+詳しくは [データベース連携](docs/database.ja.md) を参照してください。
 
 <!-- TODO(画像): 差分同期ダイアログのスクリーンショットをここへ追加する -->
 
@@ -249,6 +255,8 @@ ER モデルから Web 画面のモックアップを HTML として生成する
 
 ER モデルを修正してから定義書を再出力することで、設計とドキュメントの不一致を防げます。
 
+各形式の対応範囲は [インポートとエクスポート](docs/import-export.ja.md) を参照してください。
+
 ## git で管理できる保存形式
 
 QuickER の ER モデルは、1 つの JSON ファイルとして保存されます。
@@ -319,6 +327,10 @@ QuickER は、ER モデルをデータベース、コード、ドキュメント
 ## ドキュメント
 
 - [QuickER の設計思想](docs/overview.ja.md)
+- [チュートリアル（設計から実行まで）](docs/getting-started.ja.md)
+- [ER 図の編集](docs/er-editor.ja.md)
+- [データベース連携](docs/database.ja.md)
+- [インポートとエクスポート](docs/import-export.ja.md)
 - [CLI リファレンス](docs/cli.ja.md)
 - [生成コードの使い方](docs/code-generation.ja.md)
 - [AI チャットの設定](docs/ai-chat.ja.md)
