@@ -1,0 +1,231 @@
+<ResourceDictionary
+  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+>
+  <!--
+    ダイアログ共通テーマ。従来は AiChatDialog / MockGenerationDialog / QueryDefinitionDialog /
+    CSharpGenerationDialog の各 XAML へインラインでコピペされていた配色・スタイルを 1 本化したもの。
+    実装派閥が分かれていた汎用コンバータ（App 実行時リソース依存・ローカル BooleanToVisibilityConverter・
+    AI.UI 版）もここへ集約し、辞書参照へ統一する。
+    ここに置くのはキー付きリソースのみ（暗黙スタイルは置かない）。マージしただけで見た目が変わらないよう、
+    各コントロールは Style="{StaticResource ...}" で明示的にオプトインする方式にしている。
+  -->
+
+  <!-- ── 汎用コンバータ（3 派閥を辞書参照へ統一） ── -->
+  <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter" />
+
+  <!-- ── 配色パレット ── -->
+  <SolidColorBrush x:Key="Accent" Color="#1A73E8" />
+  <SolidColorBrush x:Key="AccentHover" Color="#1769D6" />
+  <SolidColorBrush x:Key="CardBg" Color="#FFFFFF" />
+  <SolidColorBrush x:Key="Divider" Color="#E5E7EB" />
+  <SolidColorBrush x:Key="HeaderText" Color="#374151" />
+  <SolidColorBrush x:Key="MutedText" Color="#6B7280" />
+  <SolidColorBrush x:Key="FieldBorder" Color="#D1D5DB" />
+  <SolidColorBrush x:Key="ErrorText" Color="#B91C1C" />
+  <SolidColorBrush x:Key="OkText" Color="#15803D" />
+  <!-- ウィンドウ背景（従来は各ダイアログで Background="#F5F7FA" とインライン指定していた色） -->
+  <SolidColorBrush x:Key="WindowBackground" Color="#F5F7FA" />
+
+  <!-- ── カード（角丸 10 の白カード） ── -->
+  <Style x:Key="Card" TargetType="Border">
+    <Setter Property="Background" Value="{StaticResource CardBg}" />
+    <Setter Property="BorderBrush" Value="{StaticResource Divider}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="10" />
+    <Setter Property="Padding" Value="16" />
+    <Setter Property="Margin" Value="0,0,0,12" />
+  </Style>
+
+  <!-- ── セクション見出し ── -->
+  <Style x:Key="SectionHeader" TargetType="TextBlock">
+    <Setter Property="Foreground" Value="{StaticResource HeaderText}" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="Margin" Value="0,0,0,10" />
+  </Style>
+
+  <!-- ── 項目ラベル ── -->
+  <Style x:Key="FieldLabel" TargetType="TextBlock">
+    <Setter Property="Foreground" Value="{StaticResource MutedText}" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+    <Setter Property="Margin" Value="0,0,8,0" />
+  </Style>
+
+  <!-- ── 入力欄（角丸 8・フォーカスでアクセント枠・無効時はグレー背景） ── -->
+  <Style x:Key="FormInput" TargetType="TextBox">
+    <Setter Property="Background" Value="White" />
+    <Setter Property="BorderBrush" Value="{StaticResource FieldBorder}" />
+    <Setter Property="Foreground" Value="#1F2937" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="TextBox">
+          <Border
+            x:Name="Bd"
+            Background="{TemplateBinding Background}"
+            BorderBrush="{TemplateBinding BorderBrush}"
+            BorderThickness="1"
+            CornerRadius="8"
+            Padding="10,7"
+          >
+            <ScrollViewer x:Name="PART_ContentHost" VerticalScrollBarVisibility="Hidden" />
+          </Border>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsKeyboardFocusWithin" Value="True">
+              <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource Accent}" />
+            </Trigger>
+            <Trigger Property="IsEnabled" Value="False">
+              <Setter TargetName="Bd" Property="Background" Value="#F3F4F6" />
+              <Setter Property="Foreground" Value="{StaticResource MutedText}" />
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <!-- ── 複数行入力欄 ── -->
+  <Style x:Key="MultilineInput" TargetType="TextBox" BasedOn="{StaticResource FormInput}">
+    <Setter Property="AcceptsReturn" Value="True" />
+    <Setter Property="TextWrapping" Value="Wrap" />
+    <Setter Property="VerticalContentAlignment" Value="Top" />
+    <Setter Property="MinHeight" Value="56" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="TextBox">
+          <Border
+            x:Name="Bd"
+            Background="{TemplateBinding Background}"
+            BorderBrush="{TemplateBinding BorderBrush}"
+            BorderThickness="1"
+            CornerRadius="8"
+            Padding="10,7"
+          >
+            <ScrollViewer x:Name="PART_ContentHost" VerticalScrollBarVisibility="Auto" />
+          </Border>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsKeyboardFocusWithin" Value="True">
+              <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource Accent}" />
+            </Trigger>
+            <Trigger Property="IsEnabled" Value="False">
+              <Setter TargetName="Bd" Property="Background" Value="#F3F4F6" />
+              <Setter Property="Foreground" Value="{StaticResource MutedText}" />
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <!--
+    ── フォーム内コンボボックス / パスワード欄（FormInput と縦サイズを揃える） ──
+    FormInput の実測高さ（フォント 13px＋Padding 10,7＋枠 1px ≒ 34px）に MinHeight を合わせ、
+    同じフォーム内で入力欄と並んだときの高さの不揃いを防ぐ。外観の再テンプレート（角丸化）までは行わない
+    （既定クロームのまま高さのみ統一する最小適用）。
+  -->
+  <Style x:Key="FormComboBox" TargetType="ComboBox">
+    <Setter Property="MinHeight" Value="34" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+  </Style>
+
+  <!--
+    PasswordBox は TextBox と別のコントロール型のため FormInput を適用できない。
+    同じ構造（角丸 Border＋PART_ContentHost＋フォーカスでアクセント枠）のテンプレートを持たせ、
+    見た目を FormInput と一致させる（マスク表示・入力挙動・PasswordBoxBehavior には影響しない）。
+  -->
+  <Style x:Key="FormPasswordBox" TargetType="PasswordBox">
+    <Setter Property="MinHeight" Value="34" />
+    <Setter Property="Background" Value="White" />
+    <Setter Property="BorderBrush" Value="{StaticResource FieldBorder}" />
+    <Setter Property="Foreground" Value="#1F2937" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="PasswordBox">
+          <Border
+            x:Name="Bd"
+            Background="{TemplateBinding Background}"
+            BorderBrush="{TemplateBinding BorderBrush}"
+            BorderThickness="1"
+            CornerRadius="8"
+            Padding="10,7"
+          >
+            <ScrollViewer x:Name="PART_ContentHost" VerticalScrollBarVisibility="Hidden" />
+          </Border>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsKeyboardFocusWithin" Value="True">
+              <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource Accent}" />
+            </Trigger>
+            <Trigger Property="IsEnabled" Value="False">
+              <Setter TargetName="Bd" Property="Background" Value="#F3F4F6" />
+              <Setter Property="Foreground" Value="{StaticResource MutedText}" />
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <!-- ── 主要ボタン（アクセント・角丸 8） ── -->
+  <Style x:Key="PrimaryButton" TargetType="Button">
+    <Setter Property="Foreground" Value="White" />
+    <Setter Property="Background" Value="{StaticResource Accent}" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="Cursor" Value="Hand" />
+    <Setter Property="Padding" Value="20,8" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="Button">
+          <Border
+            x:Name="Bd"
+            Background="{TemplateBinding Background}"
+            CornerRadius="8"
+            Padding="{TemplateBinding Padding}"
+          >
+            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+          </Border>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+              <Setter TargetName="Bd" Property="Background" Value="{StaticResource AccentHover}" />
+            </Trigger>
+            <Trigger Property="IsEnabled" Value="False">
+              <Setter Property="Opacity" Value="0.4" />
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <!-- ── 副ボタン（白・枠線・角丸 8） ── -->
+  <Style x:Key="SecondaryButton" TargetType="Button">
+    <Setter Property="Foreground" Value="{StaticResource HeaderText}" />
+    <Setter Property="Background" Value="White" />
+    <Setter Property="Cursor" Value="Hand" />
+    <Setter Property="Padding" Value="14,7" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="Button">
+          <Border
+            x:Name="Bd"
+            Background="{TemplateBinding Background}"
+            BorderBrush="{StaticResource FieldBorder}"
+            BorderThickness="1"
+            CornerRadius="8"
+            Padding="{TemplateBinding Padding}"
+          >
+            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+          </Border>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+              <Setter TargetName="Bd" Property="Background" Value="#EEF2F7" />
+            </Trigger>
+            <Trigger Property="IsEnabled" Value="False">
+              <Setter Property="Opacity" Value="0.4" />
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+</ResourceDictionary>

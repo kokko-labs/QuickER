@@ -10,10 +10,19 @@
   WindowStartupLocation="CenterOwner"
   FontFamily="Segoe UI, Yu Gothic UI, Meiryo"
   FontSize="13"
+  Background="{DynamicResource WindowBackground}"
 >
+  <Window.Resources>
+    <ResourceDictionary>
+      <ResourceDictionary.MergedDictionaries>
+        <!-- 配色・ボタン・入力欄の共通スタイルは共有テーマ辞書から取り込む -->
+        <ResourceDictionary Source="pack://application:,,,/QuickER.Gui.Common;component/Themes/DialogTheme.xaml" />
+      </ResourceDictionary.MergedDictionaries>
+    </ResourceDictionary>
+  </Window.Resources>
   <StackPanel Margin="14">
     <TextBlock Text="{x:Static resources:Strings.Print_DiagramTitle}" Margin="0,0,0,4" />
-    <TextBox x:Name="TitleTextBox" Padding="4,3" />
+    <TextBox x:Name="TitleTextBox" Style="{StaticResource FormInput}" />
 
     <TextBlock
       Text="{x:Static resources:Strings.Print_SizeSection}"
@@ -32,8 +41,20 @@
     </CheckBox>
 
     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
-      <Button Content="OK" Width="80" Margin="0,0,8,0" IsDefault="True" Click="OnOkClick" />
-      <Button Content="{x:Static resources:Strings.Common_Cancel}" Width="80" IsCancel="True" />
+      <Button
+        Content="OK"
+        MinWidth="80"
+        Margin="0,0,8,0"
+        IsDefault="True"
+        Style="{StaticResource PrimaryButton}"
+        Click="OnOkClick"
+      />
+      <Button
+        Content="{x:Static resources:Strings.Common_Cancel}"
+        MinWidth="80"
+        IsCancel="True"
+        Style="{StaticResource SecondaryButton}"
+      />
     </StackPanel>
   </StackPanel>
 </Window>

@@ -11,7 +11,16 @@
   ShowInTaskbar="False"
   FontFamily="Segoe UI, Yu Gothic UI, Meiryo"
   FontSize="13"
+  Background="{DynamicResource WindowBackground}"
 >
+  <Window.Resources>
+    <ResourceDictionary>
+      <ResourceDictionary.MergedDictionaries>
+        <!-- 配色・ボタンの共通スタイルは共有テーマ辞書から取り込む（同一アセンブリ内） -->
+        <ResourceDictionary Source="pack://application:,,,/QuickER.Gui.Common;component/Themes/DialogTheme.xaml" />
+      </ResourceDictionary.MergedDictionaries>
+    </ResourceDictionary>
+  </Window.Resources>
   <Grid Margin="14">
     <Grid.RowDefinitions>
       <RowDefinition Height="Auto" />
@@ -41,7 +50,12 @@
     </Grid>
 
     <!-- 詳細: 読み取り専用・選択可能な一覧領域（横幅を広く取りコピー可能にする） -->
-    <Border Grid.Row="1" BorderBrush="#D1D5DB" BorderThickness="1" Background="#FAFAFA">
+    <Border
+      Grid.Row="1"
+      BorderBrush="{StaticResource FieldBorder}"
+      BorderThickness="1"
+      Background="#FAFAFA"
+    >
       <TextBox
         x:Name="DetailsText"
         IsReadOnly="True"
@@ -60,11 +74,12 @@
     <Button
       Grid.Row="2"
       Content="OK"
-      Width="88"
+      MinWidth="88"
       HorizontalAlignment="Right"
       Margin="0,12,0,0"
       IsDefault="True"
       IsCancel="True"
+      Style="{StaticResource PrimaryButton}"
       Click="OnOkClick"
     />
   </Grid>
