@@ -1,3 +1,5 @@
+using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using QuickER.Model;
@@ -41,9 +43,10 @@ public abstract class DdlGeneratorBase : IDdlGenerator
             for (var i = 0; i < entity.Columns.Count; i++)
             {
                 var col = entity.Columns[i];
-                // PK 列は IsNullable の設定値に関わらず NOT NULL を強制する
+                // PK 列は IsNullable の設定値に関わらず NOT NULL を強制する。
+                // 列定義の末尾には方言固有の句（MySQL のインライン COMMENT 等）を付ける
                 var line =
-                    $"    {QuoteSimpleName(col.Name)} {col.DataType} {(col.IsPrimaryKey || !col.IsNullable ? "NOT NULL" : "NULL")}";
+                    $"    {QuoteSimpleName(col.Name)} {col.DataType} {(col.IsPrimaryKey || !col.IsNullable ? "NOT NULL" : "NULL")}{BuildColumnDefinitionSuffix(col)}";
 
                 // 後続のカラム行、または PRIMARY KEY 制約行が続く場合は区切りのカンマを付ける
                 if (i < entity.Columns.Count - 1 || pks.Count > 0)
@@ -63,7 +66,8 @@ public abstract class DdlGeneratorBase : IDdlGenerator
                 );
             }
 
-            sb.AppendLine(");");
+            // 閉じ括弧の直後・文末セミコロンの前に方言固有のテーブルオプション（MySQL の COMMENT= 句等）を付ける
+            sb.AppendLine($"){BuildTableOptionsSuffix(entity)};");
             sb.AppendLine();
         }
 
@@ -128,6 +132,10 @@ public abstract class DdlGeneratorBase : IDdlGenerator
             );
         }
 
+        // 全 CREATE TABLE / FK の後に、テーブル・列の説明を方言別の構文で出力する
+        // （説明を持つ図でのみ出力＝説明が無い図では 1 行も出さずバイト不変）
+        AppendDescriptions(sb, diagram);
+
         return sb.ToString();
     }
 
@@ -157,4 +165,71 @@ public abstract class DdlGeneratorBase : IDdlGenerator
         StringBuilder sb,
         Relationship relationship
     ) { }
+
+    /// <summary>列定義行の末尾（NULL 許容句の後）に付与する方言固有の句を返す（既定は空）</summary>
+    /// <remarks>MySQL のインライン列 <c>COMMENT '…'</c> のように、列定義の一部として説明を書く方言で用いる</remarks>
+    protected virtual string BuildColumnDefinitionSuffix(Column column) => string.Empty;
+
+    /// <summary><c>CREATE TABLE</c> の閉じ括弧の直後・文末セミコロンの前に付与する方言固有の句を返す（既定は空）</summary>
+    /// <remarks>MySQL のテーブル <c>COMMENT='…'</c> 句のように、テーブル定義の一部として説明を書く方言で用いる</remarks>
+    protected virtual string BuildTableOptionsSuffix(Entity entity) => string.Empty;
+
+    /// <summary>全 <c>CREATE TABLE</c> / FK の後に、テーブル・列の説明を後続の文として出力するフック（既定は何もしない）</summary>
+    /// <remarks>
+    /// SQL Server（拡張プロパティ）・PostgreSQL / Oracle（<c>COMMENT ON</c>）のように、説明を独立した文で表現する方言が上書きする。
+    /// MySQL は列定義インラインの <c>COMMENT</c> で表現するため本フックは使わず、<see cref="BuildColumnDefinitionSuffix"/> /
+    /// <see cref="BuildTableOptionsSuffix"/> を用いる
+    /// </remarks>
+    protected virtual void AppendDescriptions(StringBuilder sb, ErDiagram diagram) { }
+
+    /// <summary>説明を独立した文で出力する方言向けの共通ループ（SQL Server / PostgreSQL / Oracle が共有する）</summary>
+    /// <remarks>
+    /// テーブルとその列を順に走査し、空白でない説明を持つものだけ <paramref name="tableStatement"/> /
+    /// <paramref name="columnStatement"/> で文へ変換して出力する。1 文でも出力する場合のみ、
+    /// 直前の CREATE / FK ブロックと視覚的に区切るための空行を 1 行だけ前置する
+    /// （説明を持つ図でのみ出力＝説明が無ければ本メソッドは何も書かずバイト不変を保つ）。
+    /// </remarks>
+    /// <param name="sb">出力先</param>
+    /// <param name="diagram">対象の ER 図定義</param>
+    /// <param name="tableStatement">テーブルの説明文を組み立てるデリゲート</param>
+    /// <param name="columnStatement">カラムの説明文を組み立てるデリゲート（テーブル・列を受け取る）</param>
+    protected static void AppendDescriptionStatements(
+        StringBuilder sb,
+        ErDiagram diagram,
+        Func<Entity, string> tableStatement,
+        Func<Entity, Column, string> columnStatement
+    )
+    {
+        // 先に全説明文を収集し、1 件も無ければ何も出力しない（バイト不変のため）
+        var statements = new List<string>();
+
+        foreach (var entity in diagram.Entities)
+        {
+            if (!string.IsNullOrWhiteSpace(entity.Description))
+            {
+                statements.Add(tableStatement(entity));
+            }
+
+            foreach (var col in entity.Columns)
+            {
+                if (!string.IsNullOrWhiteSpace(col.Description))
+                {
+                    statements.Add(columnStatement(entity, col));
+                }
+            }
+        }
+
+        if (statements.Count == 0)
+        {
+            return;
+        }
+
+        // 直前のブロックと区切る空行（出力がある場合のみ）
+        sb.AppendLine();
+
+        foreach (var statement in statements)
+        {
+            sb.AppendLine(statement);
+        }
+    }
 }

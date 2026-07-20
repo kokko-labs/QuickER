@@ -50,4 +50,17 @@ public static class MySqlIdentifier
     /// </summary>
     public static string EscapeStringLiteral(string s) =>
         (s ?? string.Empty).Replace("\\", "\\\\").Replace("'", "''");
+
+    /// <summary>
+    /// 列定義に付与するインライン <c>COMMENT</c> 句（前置スペース込み）を組み立てる。
+    /// 説明が空・空白のみなら空文字を返す（句を出力しない）。
+    /// </summary>
+    /// <remarks>
+    /// DDL 生成（<c>MySqlDdlGenerator</c>）の列定義末尾と同期スクリプト（<c>MySqlSyncScriptBuilder</c> の
+    /// 列定義再指定）で同じインライン COMMENT 表記を共有し、二重定義を避ける。
+    /// </remarks>
+    public static string ColumnCommentClause(string? description) =>
+        string.IsNullOrWhiteSpace(description)
+            ? string.Empty
+            : $" COMMENT '{EscapeStringLiteral(description)}'";
 }

@@ -316,4 +316,112 @@ public class SqlServerDdlGeneratorTests
         sql.Should().Contain("ALTER TABLE [dbo].[C] ADD CONSTRAINT [FK_dbo_C_dbo_P]");
         sql.Should().Contain("FOREIGN KEY ([ParentId]) REFERENCES [dbo].[P] ([Id])");
     }
+
+    /// <summary>テーブル・列の説明が拡張プロパティ MS_Description の追加文（GO なし・スキーマ分解）で出力されることを検証する</summary>
+    [Fact(
+        DisplayName = "Build: テーブル・列の説明が sp_addextendedproperty で出力される（GO なし）"
+    )]
+    public void Build_EmitsExtendedPropertyDescriptions()
+    {
+        var diagram = new ErDiagram
+        {
+            Entities =
+            {
+                new Entity
+                {
+                    TableName = "dbo.User",
+                    Description = "利用者マスタ",
+                    Columns =
+                    {
+                        new Column
+                        {
+                            Name = "Id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                        new Column
+                        {
+                            Name = "Name",
+                            DataType = "nvarchar(50)",
+                            Description = "氏名",
+                        },
+                    },
+                },
+            },
+        };
+
+        var sql = new SqlServerDdlGenerator().Build(diagram);
+
+        // テーブルレベル（@level2 を含まない）
+        sql.Should()
+            .Contain(
+                "EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'利用者マスタ', "
+                    + "@level0type=N'SCHEMA', @level0name=N'dbo', @level1type=N'TABLE',  @level1name=N'User';"
+            );
+        // カラムレベル（@level2 を含む）
+        sql.Should()
+            .Contain(
+                "EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'氏名', "
+                    + "@level0type=N'SCHEMA', @level0name=N'dbo', @level1type=N'TABLE',  @level1name=N'User', "
+                    + "@level2type=N'COLUMN', @level2name=N'Name';"
+            );
+        // DDL の他文（CREATE / ALTER）に合わせ GO は出力しない
+        sql.Should().NotContain("GO");
+    }
+
+    /// <summary>説明に含まれるシングルクォートが N リテラルの規則で二重化エスケープされることを検証する</summary>
+    [Fact(DisplayName = "Build: 説明のシングルクォートがエスケープされる")]
+    public void Build_EscapesQuotesInDescriptions()
+    {
+        var diagram = new ErDiagram
+        {
+            Entities =
+            {
+                new Entity
+                {
+                    TableName = "T",
+                    Description = "It's a table",
+                    Columns =
+                    {
+                        new Column { Name = "C", DataType = "int" },
+                    },
+                },
+            },
+        };
+
+        var sql = new SqlServerDdlGenerator().Build(diagram);
+
+        sql.Should().Contain("@value=N'It''s a table'");
+    }
+
+    /// <summary>説明が無い図では拡張プロパティが一切出力されない（従来出力と不変）ことを検証する</summary>
+    [Fact(DisplayName = "Build: 説明なしの図では拡張プロパティを出力しない")]
+    public void Build_NoDescription_EmitsNoExtendedProperty()
+    {
+        var diagram = new ErDiagram
+        {
+            Entities =
+            {
+                new Entity
+                {
+                    TableName = "T",
+                    Columns =
+                    {
+                        new Column
+                        {
+                            Name = "Id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                    },
+                },
+            },
+        };
+
+        var sql = new SqlServerDdlGenerator().Build(diagram);
+
+        sql.Should().NotContain("sp_addextendedproperty");
+    }
 }

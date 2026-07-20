@@ -293,12 +293,8 @@ public sealed class MySqlSyncScriptBuilder : SyncScriptBuilderBase
         sb.Append(column.DataType);
         sb.Append(' ');
         sb.Append(SyncScriptBuilderHelper.GetNullabilityClause(column));
-
-        if (!string.IsNullOrEmpty(column.Description))
-        {
-            sb.Append($" COMMENT '{MySqlIdentifier.EscapeStringLiteral(column.Description)}'");
-        }
-
+        // インライン COMMENT 句は DDL 生成と同じ表記を共有する（説明が空なら付かない）
+        sb.Append(MySqlIdentifier.ColumnCommentClause(column.Description));
         return sb.ToString();
     }
 }
