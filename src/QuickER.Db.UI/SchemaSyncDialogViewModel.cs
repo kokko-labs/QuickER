@@ -246,10 +246,12 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
 
         if (rebuildTables.Count > 0)
         {
+            // 対象テーブルは 1 行 1 テーブルの箇条書きで列挙する（横並びだと多テーブル時に読みづらいため）
+            var tableList = string.Join(Environment.NewLine, rebuildTables.Select(t => "  • " + t));
             msg = string.Format(
                 Strings.SchemaSync_ExecuteConfirmRebuild,
                 _settings.Database,
-                string.Join(", ", rebuildTables)
+                tableList
             );
         }
         else if (destructive)
@@ -284,6 +286,13 @@ public partial class SchemaSyncDialogViewModel : ObservableObject
                 _dialogs.ShowInformation(StatusMessage, Strings.Common_Complete);
                 // 適用後の最新状態を反映するため差分を再計算する
                 await RefreshAsync().ConfigureAwait(true);
+
+                // 差分が完全に無くなった（案内項目すら残らない＝図と DB が一致した）ときは、
+                // 役目を終えたダイアログを自動で閉じる
+                if (DiffItems.Count == 0)
+                {
+                    CloseAction?.Invoke(true);
+                }
             }
             else
             {
