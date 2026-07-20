@@ -21,6 +21,11 @@
     <File Path="docs/cli.md" />
     <File Path="docs/code-generation.ja.md" />
     <File Path="docs/code-generation.md" />
+    <File Path="docs/database.ja.md" />
+    <File Path="docs/er-editor.ja.md" />
+    <File Path="docs/getting-started.ja.md" />
+    <File Path="docs/import-export.ja.md" />
+    <File Path="docs/overview.ja.md" />
   </Folder>
   <Folder Name="/docs/images/">
     <File Path="docs/images/sample-ec-order.png" />
