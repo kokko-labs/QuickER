@@ -9,7 +9,16 @@
   WindowStartupLocation="CenterOwner"
   FontFamily="Segoe UI, Yu Gothic UI, Meiryo"
   FontSize="13"
+  Background="{DynamicResource WindowBackground}"
 >
+  <Window.Resources>
+    <ResourceDictionary>
+      <ResourceDictionary.MergedDictionaries>
+        <!-- 配色・ボタン等の共通スタイルは共有テーマ辞書から取り込む -->
+        <ResourceDictionary Source="pack://application:,,,/QuickER.Gui.Common;component/Themes/DialogTheme.xaml" />
+      </ResourceDictionary.MergedDictionaries>
+    </ResourceDictionary>
+  </Window.Resources>
   <DockPanel Margin="10">
     <!-- 上部ツールバー -->
     <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,8">
@@ -17,25 +26,28 @@
         Content="{x:Static resources:Strings.SchemaSync_Recalculate}"
         Margin="0,0,8,0"
         Padding="8,3"
+        Style="{StaticResource SecondaryButton}"
         Command="{Binding RefreshCommand}"
       />
       <Button
         Content="{x:Static resources:Strings.SchemaSync_SelectAll}"
         Margin="0,0,4,0"
         Padding="8,3"
+        Style="{StaticResource SecondaryButton}"
         Command="{Binding SelectAllCommand}"
       />
       <Button
         Content="{x:Static resources:Strings.SchemaSync_DeselectAll}"
         Margin="0,0,16,0"
         Padding="8,3"
+        Style="{StaticResource SecondaryButton}"
         Command="{Binding DeselectAllCommand}"
       />
+      <!-- 実行は肯定アクション＝アクセント（旧: 緑背景 #DCFCE7 直書き）。テーマの PrimaryButton へ統一 -->
       <Button
         Content="{x:Static resources:Strings.SchemaSync_Execute}"
         Padding="14,3"
-        Background="#DCFCE7"
-        FontWeight="Bold"
+        Style="{StaticResource PrimaryButton}"
         Command="{Binding ExecuteCommand}"
       />
     </StackPanel>
@@ -43,7 +55,7 @@
     <!-- 下部ステータス -->
     <Border
       DockPanel.Dock="Bottom"
-      BorderBrush="#E5E7EB"
+      BorderBrush="{StaticResource Divider}"
       BorderThickness="0,1,0,0"
       Padding="0,6,0,0"
       Margin="0,8,0,0"
@@ -52,13 +64,14 @@
         <Button
           DockPanel.Dock="Right"
           Content="{x:Static resources:Strings.Common_Close}"
-          Width="80"
+          MinWidth="80"
+          Style="{StaticResource SecondaryButton}"
           Command="{Binding CloseCommand}"
           IsCancel="True"
         />
         <TextBlock
           Text="{Binding StatusMessage}"
-          Foreground="#374151"
+          Foreground="{StaticResource HeaderText}"
           VerticalAlignment="Center"
           TextWrapping="Wrap"
         />
@@ -94,7 +107,7 @@
                 <TextBlock
                   Text="{Binding Kind}"
                   Width="110"
-                  Foreground="#6B7280"
+                  Foreground="{StaticResource MutedText}"
                   VerticalAlignment="Center"
                 />
                 <TextBlock

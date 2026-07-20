@@ -19,274 +19,202 @@
   Background="#F5F7FA"
 >
   <Window.Resources>
-    <ui:BoolToVisibilityConverter x:Key="BoolToVisibilityConverter" />
-    <ui:CodexProviderDisplayNameConverter x:Key="CodexProviderDisplayNameConverter" />
+    <ResourceDictionary>
+      <ResourceDictionary.MergedDictionaries>
+        <!-- 配色・ボタン・入力欄等の共通スタイルは共有テーマ辞書から取り込む -->
+        <ResourceDictionary Source="pack://application:,,,/QuickER.Gui.Common;component/Themes/DialogTheme.xaml" />
+      </ResourceDictionary.MergedDictionaries>
 
-    <!-- ── 配色 ── -->
-    <SolidColorBrush x:Key="Accent" Color="#1A73E8" />
-    <SolidColorBrush x:Key="AccentHover" Color="#1769D6" />
-    <SolidColorBrush x:Key="CardBg" Color="#FFFFFF" />
-    <SolidColorBrush x:Key="Divider" Color="#E5E7EB" />
-    <SolidColorBrush x:Key="HeaderText" Color="#374151" />
-    <SolidColorBrush x:Key="MutedText" Color="#6B7280" />
-    <SolidColorBrush x:Key="FieldBorder" Color="#D1D5DB" />
+      <!-- Codex プロバイダー表示名コンバータ（AI 固有） -->
+      <ui:CodexProviderDisplayNameConverter x:Key="CodexProviderDisplayNameConverter" />
 
-    <Style x:Key="PrimaryButton" TargetType="Button">
-      <Setter Property="Foreground" Value="White" />
-      <Setter Property="Background" Value="{StaticResource Accent}" />
-      <Setter Property="FontWeight" Value="SemiBold" />
-      <Setter Property="Cursor" Value="Hand" />
-      <Setter Property="Padding" Value="16,8" />
-      <Setter Property="Template">
-        <Setter.Value>
-          <ControlTemplate TargetType="Button">
-            <Border
-              x:Name="Bd"
-              Background="{TemplateBinding Background}"
-              CornerRadius="8"
-              Padding="{TemplateBinding Padding}"
-            >
-              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
-            </Border>
-            <ControlTemplate.Triggers>
-              <Trigger Property="IsMouseOver" Value="True">
-                <Setter
-                  TargetName="Bd"
-                  Property="Background"
-                  Value="{StaticResource AccentHover}"
-                />
-              </Trigger>
-              <Trigger Property="IsEnabled" Value="False">
-                <Setter Property="Opacity" Value="0.4" />
-              </Trigger>
-            </ControlTemplate.Triggers>
-          </ControlTemplate>
-        </Setter.Value>
-      </Setter>
-    </Style>
-
-    <Style x:Key="SecondaryButton" TargetType="Button">
-      <Setter Property="Foreground" Value="{StaticResource HeaderText}" />
-      <Setter Property="Background" Value="White" />
-      <Setter Property="Cursor" Value="Hand" />
-      <Setter Property="Padding" Value="12,6" />
-      <Setter Property="Template">
-        <Setter.Value>
-          <ControlTemplate TargetType="Button">
-            <Border
-              x:Name="Bd"
-              Background="{TemplateBinding Background}"
-              BorderBrush="{StaticResource FieldBorder}"
-              BorderThickness="1"
-              CornerRadius="8"
-              Padding="{TemplateBinding Padding}"
-            >
-              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
-            </Border>
-            <ControlTemplate.Triggers>
-              <Trigger Property="IsMouseOver" Value="True">
-                <Setter TargetName="Bd" Property="Background" Value="#EEF2F7" />
-              </Trigger>
-              <Trigger Property="IsEnabled" Value="False">
-                <Setter Property="Opacity" Value="0.4" />
-              </Trigger>
-            </ControlTemplate.Triggers>
-          </ControlTemplate>
-        </Setter.Value>
-      </Setter>
-    </Style>
-
-    <Style x:Key="ChatInputBox" TargetType="TextBox">
-      <Setter Property="Background" Value="White" />
-      <Setter Property="BorderBrush" Value="{StaticResource FieldBorder}" />
-      <Setter Property="Foreground" Value="#1F2937" />
-      <Setter Property="VerticalContentAlignment" Value="Center" />
-      <Setter Property="Template">
-        <Setter.Value>
-          <ControlTemplate TargetType="TextBox">
-            <Border
-              x:Name="Bd"
-              Background="{TemplateBinding Background}"
-              BorderBrush="{TemplateBinding BorderBrush}"
-              BorderThickness="1"
-              CornerRadius="12"
-              Padding="12,9"
-            >
-              <ScrollViewer x:Name="PART_ContentHost" VerticalScrollBarVisibility="Auto" />
-            </Border>
-            <ControlTemplate.Triggers>
-              <Trigger Property="IsKeyboardFocusWithin" Value="True">
-                <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource Accent}" />
-              </Trigger>
-              <Trigger Property="IsEnabled" Value="False">
-                <Setter TargetName="Bd" Property="Background" Value="#F3F4F6" />
-              </Trigger>
-            </ControlTemplate.Triggers>
-          </ControlTemplate>
-        </Setter.Value>
-      </Setter>
-    </Style>
-
-    <Style TargetType="TabItem">
-      <Setter Property="Foreground" Value="{StaticResource MutedText}" />
-      <Setter Property="Template">
-        <Setter.Value>
-          <ControlTemplate TargetType="TabItem">
-            <Border
-              x:Name="Bd"
-              Background="Transparent"
-              CornerRadius="8"
-              Padding="14,7"
-              Margin="0,0,6,0"
-            >
-              <ContentPresenter
-                ContentSource="Header"
-                HorizontalAlignment="Center"
-                VerticalAlignment="Center"
-              />
-            </Border>
-            <ControlTemplate.Triggers>
-              <Trigger Property="IsSelected" Value="True">
-                <Setter TargetName="Bd" Property="Background" Value="#E8F0FE" />
-                <Setter Property="Foreground" Value="{StaticResource Accent}" />
-                <Setter Property="FontWeight" Value="SemiBold" />
-              </Trigger>
-              <MultiTrigger>
-                <MultiTrigger.Conditions>
-                  <Condition Property="IsSelected" Value="False" />
-                  <Condition Property="IsMouseOver" Value="True" />
-                </MultiTrigger.Conditions>
-                <Setter TargetName="Bd" Property="Background" Value="#EEF2F7" />
-              </MultiTrigger>
-            </ControlTemplate.Triggers>
-          </ControlTemplate>
-        </Setter.Value>
-      </Setter>
-    </Style>
-
-    <Style x:Key="SettingsTabs" TargetType="TabControl">
-      <Setter Property="Background" Value="Transparent" />
-      <Setter Property="BorderThickness" Value="0" />
-      <Setter Property="Template">
-        <Setter.Value>
-          <ControlTemplate TargetType="TabControl">
-            <Grid>
-              <Grid.RowDefinitions>
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="*" />
-              </Grid.RowDefinitions>
-              <TabPanel
-                Grid.Row="0"
-                IsItemsHost="True"
-                Margin="0,0,0,8"
-                HorizontalAlignment="Left"
-              />
+      <!-- ── 入力欄（チャット用でこのダイアログ固有） ── -->
+      <Style x:Key="ChatInputBox" TargetType="TextBox">
+        <Setter Property="Background" Value="White" />
+        <Setter Property="BorderBrush" Value="{StaticResource FieldBorder}" />
+        <Setter Property="Foreground" Value="#1F2937" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="Template">
+          <Setter.Value>
+            <ControlTemplate TargetType="TextBox">
               <Border
-                Grid.Row="1"
-                Background="{StaticResource CardBg}"
-                BorderBrush="{StaticResource Divider}"
+                x:Name="Bd"
+                Background="{TemplateBinding Background}"
+                BorderBrush="{TemplateBinding BorderBrush}"
                 BorderThickness="1"
-                CornerRadius="10"
+                CornerRadius="12"
+                Padding="12,9"
               >
-                <ContentPresenter ContentSource="SelectedContent" />
+                <ScrollViewer x:Name="PART_ContentHost" VerticalScrollBarVisibility="Auto" />
               </Border>
-            </Grid>
-          </ControlTemplate>
-        </Setter.Value>
-      </Setter>
-    </Style>
+              <ControlTemplate.Triggers>
+                <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                  <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource Accent}" />
+                </Trigger>
+                <Trigger Property="IsEnabled" Value="False">
+                  <Setter TargetName="Bd" Property="Background" Value="#F3F4F6" />
+                </Trigger>
+              </ControlTemplate.Triggers>
+            </ControlTemplate>
+          </Setter.Value>
+        </Setter>
+      </Style>
 
-    <Style x:Key="FieldLabel" TargetType="TextBlock">
-      <Setter Property="Foreground" Value="{StaticResource MutedText}" />
-      <Setter Property="VerticalAlignment" Value="Center" />
-      <Setter Property="Margin" Value="0,0,8,0" />
-    </Style>
+      <Style TargetType="TabItem">
+        <Setter Property="Foreground" Value="{StaticResource MutedText}" />
+        <Setter Property="Template">
+          <Setter.Value>
+            <ControlTemplate TargetType="TabItem">
+              <Border
+                x:Name="Bd"
+                Background="Transparent"
+                CornerRadius="8"
+                Padding="14,7"
+                Margin="0,0,6,0"
+              >
+                <ContentPresenter
+                  ContentSource="Header"
+                  HorizontalAlignment="Center"
+                  VerticalAlignment="Center"
+                />
+              </Border>
+              <ControlTemplate.Triggers>
+                <Trigger Property="IsSelected" Value="True">
+                  <Setter TargetName="Bd" Property="Background" Value="#E8F0FE" />
+                  <Setter Property="Foreground" Value="{StaticResource Accent}" />
+                  <Setter Property="FontWeight" Value="SemiBold" />
+                </Trigger>
+                <MultiTrigger>
+                  <MultiTrigger.Conditions>
+                    <Condition Property="IsSelected" Value="False" />
+                    <Condition Property="IsMouseOver" Value="True" />
+                  </MultiTrigger.Conditions>
+                  <Setter TargetName="Bd" Property="Background" Value="#EEF2F7" />
+                </MultiTrigger>
+              </ControlTemplate.Triggers>
+            </ControlTemplate>
+          </Setter.Value>
+        </Setter>
+      </Style>
 
-    <!-- ── チャット吹き出しテンプレート ── -->
-    <DataTemplate x:Key="UserMessageTemplate" DataType="{x:Type chat:ErChatMessage}">
-      <Border
-        Margin="50,5,2,5"
-        Padding="13,9"
-        Background="{StaticResource Accent}"
-        CornerRadius="16,16,4,16"
-        HorizontalAlignment="Right"
-        MaxWidth="440"
-      >
-        <StackPanel>
+      <Style x:Key="SettingsTabs" TargetType="TabControl">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="Template">
+          <Setter.Value>
+            <ControlTemplate TargetType="TabControl">
+              <Grid>
+                <Grid.RowDefinitions>
+                  <RowDefinition Height="Auto" />
+                  <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <TabPanel
+                  Grid.Row="0"
+                  IsItemsHost="True"
+                  Margin="0,0,0,8"
+                  HorizontalAlignment="Left"
+                />
+                <Border
+                  Grid.Row="1"
+                  Background="{StaticResource CardBg}"
+                  BorderBrush="{StaticResource Divider}"
+                  BorderThickness="1"
+                  CornerRadius="10"
+                >
+                  <ContentPresenter ContentSource="SelectedContent" />
+                </Border>
+              </Grid>
+            </ControlTemplate>
+          </Setter.Value>
+        </Setter>
+      </Style>
+
+      <!-- ── チャット吹き出しテンプレート ── -->
+      <DataTemplate x:Key="UserMessageTemplate" DataType="{x:Type chat:ErChatMessage}">
+        <Border
+          Margin="50,5,2,5"
+          Padding="13,9"
+          Background="{StaticResource Accent}"
+          CornerRadius="16,16,4,16"
+          HorizontalAlignment="Right"
+          MaxWidth="440"
+        >
+          <StackPanel>
+            <TextBox
+              Text="{Binding Content, Mode=OneWay}"
+              TextWrapping="Wrap"
+              IsReadOnly="True"
+              BorderThickness="0"
+              Background="Transparent"
+              Foreground="White"
+              FontSize="13"
+            />
+            <!-- 添付要約（📎 name。添付ありのメッセージのみ表示） -->
+            <TextBlock
+              Margin="0,6,0,0"
+              Text="{Binding AttachmentSummary}"
+              TextWrapping="Wrap"
+              Foreground="#DCE9FF"
+              FontSize="12"
+              Visibility="{Binding HasAttachments, Converter={StaticResource BoolToVisibilityConverter}}"
+            />
+          </StackPanel>
+        </Border>
+      </DataTemplate>
+
+      <DataTemplate x:Key="AssistantMessageTemplate" DataType="{x:Type chat:ErChatMessage}">
+        <Border
+          Margin="2,5,50,5"
+          Padding="13,9"
+          Background="{StaticResource CardBg}"
+          BorderBrush="{StaticResource Divider}"
+          BorderThickness="1"
+          CornerRadius="16,16,16,4"
+          HorizontalAlignment="Left"
+          MaxWidth="440"
+        >
           <TextBox
             Text="{Binding Content, Mode=OneWay}"
             TextWrapping="Wrap"
             IsReadOnly="True"
             BorderThickness="0"
             Background="Transparent"
-            Foreground="White"
+            Foreground="#1F2937"
             FontSize="13"
           />
-          <!-- 添付要約（📎 name。添付ありのメッセージのみ表示） -->
-          <TextBlock
-            Margin="0,6,0,0"
-            Text="{Binding AttachmentSummary}"
+        </Border>
+      </DataTemplate>
+
+      <DataTemplate x:Key="SystemMessageTemplate" DataType="{x:Type chat:ErChatMessage}">
+        <Border
+          Margin="20,6"
+          Padding="12,5"
+          Background="#EEF2F7"
+          CornerRadius="12"
+          HorizontalAlignment="Center"
+          MaxWidth="460"
+        >
+          <TextBox
+            Text="{Binding Content, Mode=OneWay}"
             TextWrapping="Wrap"
-            Foreground="#DCE9FF"
+            IsReadOnly="True"
+            BorderThickness="0"
+            Background="Transparent"
+            Foreground="{StaticResource MutedText}"
             FontSize="12"
-            Visibility="{Binding HasAttachments, Converter={StaticResource BoolToVisibilityConverter}}"
+            TextAlignment="Center"
           />
-        </StackPanel>
-      </Border>
-    </DataTemplate>
+        </Border>
+      </DataTemplate>
 
-    <DataTemplate x:Key="AssistantMessageTemplate" DataType="{x:Type chat:ErChatMessage}">
-      <Border
-        Margin="2,5,50,5"
-        Padding="13,9"
-        Background="{StaticResource CardBg}"
-        BorderBrush="{StaticResource Divider}"
-        BorderThickness="1"
-        CornerRadius="16,16,16,4"
-        HorizontalAlignment="Left"
-        MaxWidth="440"
-      >
-        <TextBox
-          Text="{Binding Content, Mode=OneWay}"
-          TextWrapping="Wrap"
-          IsReadOnly="True"
-          BorderThickness="0"
-          Background="Transparent"
-          Foreground="#1F2937"
-          FontSize="13"
-        />
-      </Border>
-    </DataTemplate>
-
-    <DataTemplate x:Key="SystemMessageTemplate" DataType="{x:Type chat:ErChatMessage}">
-      <Border
-        Margin="20,6"
-        Padding="12,5"
-        Background="#EEF2F7"
-        CornerRadius="12"
-        HorizontalAlignment="Center"
-        MaxWidth="460"
-      >
-        <TextBox
-          Text="{Binding Content, Mode=OneWay}"
-          TextWrapping="Wrap"
-          IsReadOnly="True"
-          BorderThickness="0"
-          Background="Transparent"
-          Foreground="{StaticResource MutedText}"
-          FontSize="12"
-          TextAlignment="Center"
-        />
-      </Border>
-    </DataTemplate>
-
-    <ui:ChatMessageTemplateSelector
-      x:Key="ChatMessageTemplateSelector"
-      UserTemplate="{StaticResource UserMessageTemplate}"
-      AssistantTemplate="{StaticResource AssistantMessageTemplate}"
-      SystemTemplate="{StaticResource SystemMessageTemplate}"
-      ToolCallTemplate="{StaticResource SystemMessageTemplate}"
-    />
+      <ui:ChatMessageTemplateSelector
+        x:Key="ChatMessageTemplateSelector"
+        UserTemplate="{StaticResource UserMessageTemplate}"
+        AssistantTemplate="{StaticResource AssistantMessageTemplate}"
+        SystemTemplate="{StaticResource SystemMessageTemplate}"
+        ToolCallTemplate="{StaticResource SystemMessageTemplate}"
+      />
+    </ResourceDictionary>
   </Window.Resources>
 
   <Grid Margin="16">

@@ -16,6 +16,7 @@
     <ProjectReference Include="..\QuickER.CodeGen.CSharp\QuickER.CodeGen.CSharp.csproj" />
     <ProjectReference Include="..\QuickER.Extensibility\QuickER.Extensibility.csproj" />
     <ProjectReference Include="..\QuickER.Gui.Abstractions\QuickER.Gui.Abstractions.csproj" />
+    <ProjectReference Include="..\QuickER.Gui.Common\QuickER.Gui.Common.csproj" />
     <ProjectReference Include="..\QuickER.Provider\QuickER.Provider.csproj" />
     <ProjectReference Include="..\QuickER.Settings\QuickER.Settings.csproj" />
     <ProjectReference Include="..\QuickER.Sqlite\QuickER.Sqlite.csproj" />

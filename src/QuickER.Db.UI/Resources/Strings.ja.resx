@@ -251,7 +251,11 @@
     <value>スクリプトを {0} に実行します。よろしいですか？</value>
   </data>
   <data name="SchemaSync_ExecuteConfirmRebuild" xml:space="preserve">
-    <value>次のテーブルは、テーブルを作り直して全行データを移し替える方法で同期されます: {1}。{0} に対して実行してよろしいですか？</value>
+    <value>次のテーブルは、テーブルを作り直して全行データを移し替える方法で同期されます:
+
+{1}
+
+{0} に対して実行してよろしいですか？</value>
   </data>
   <data name="SchemaSync_Executing" xml:space="preserve">
     <value>実行中...</value>

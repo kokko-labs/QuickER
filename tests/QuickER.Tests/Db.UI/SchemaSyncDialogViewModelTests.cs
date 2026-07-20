@@ -213,13 +213,14 @@ public class SchemaSyncDialogViewModelTests
         await vm.ExecuteCommand.ExecuteAsync(null);
 
         var message = dialogs.WarningConfirmMessages.Should().ContainSingle().Subject;
+        // 対象テーブルは 1 行 1 テーブルの箇条書きで列挙される
         message
             .Should()
             .Be(
                 string.Format(
                     DbStrings.SchemaSync_ExecuteConfirmRebuild,
                     settings.Database,
-                    "Customer"
+                    "  • Customer"
                 )
             );
     }
@@ -250,6 +251,83 @@ public class SchemaSyncDialogViewModelTests
 
         var message = dialogs.WarningConfirmMessages.Should().ContainSingle().Subject;
         message.Should().Be(string.Format(DbStrings.SchemaSync_ExecuteConfirm, settings.Database));
+    }
+
+    /// <summary>実行成功後の再計算で差分が 0 になったとき、ダイアログが自動で閉じることを検証する</summary>
+    [Fact(DisplayName = "Execute: 成功後に差分 0 ならダイアログを自動で閉じる")]
+    public async Task Execute_Success_NoRemainingDiff_ClosesDialog()
+    {
+        // live: Customer(Id) / target: Name を追加。実行成功後の再取込では target と同一の live を返し、
+        // 差分 0（自動クローズ条件）を再現する
+        var importer = new FakeSchemaImporter(
+            new SchemaImportResult
+            {
+                Entities = [Table("Customer", Col("Id", "INTEGER", pk: true))],
+            }
+        );
+        var provider = new FakeSqliteProvider(importer, new FakeSuccessExecutor());
+        var target = new[]
+        {
+            Table("Customer", Col("Id", "INTEGER", pk: true), Col("Name", "TEXT")),
+        };
+        var dialogs = new StubDialogService { ConfirmResult = true };
+        var vm = new SchemaSyncDialogViewModel(
+            provider,
+            new DbConnectionSettings { Database = "shop.db" },
+            target,
+            [],
+            dialogs
+        );
+        var closed = false;
+        vm.CloseAction = _ => closed = true;
+
+        await vm.RefreshCommand.ExecuteAsync(null);
+        vm.DiffItems.Should().NotBeEmpty();
+
+        // 実行後の再取込は「適用済み＝target と同一」の live を返す
+        importer.Result = new SchemaImportResult
+        {
+            Entities = [Table("Customer", Col("Id", "INTEGER", pk: true), Col("Name", "TEXT"))],
+        };
+
+        await vm.ExecuteCommand.ExecuteAsync(null);
+
+        vm.DiffItems.Should().BeEmpty();
+        closed.Should().BeTrue();
+    }
+
+    /// <summary>実行成功後も差分が残る場合は、ダイアログを閉じないことを検証する</summary>
+    [Fact(DisplayName = "Execute: 成功後も差分が残ればダイアログは開いたまま")]
+    public async Task Execute_Success_RemainingDiff_KeepsDialogOpen()
+    {
+        // 再取込でも Name が未反映の live を返し続ける＝差分が残るケース
+        var importer = new FakeSchemaImporter(
+            new SchemaImportResult
+            {
+                Entities = [Table("Customer", Col("Id", "INTEGER", pk: true))],
+            }
+        );
+        var provider = new FakeSqliteProvider(importer, new FakeSuccessExecutor());
+        var target = new[]
+        {
+            Table("Customer", Col("Id", "INTEGER", pk: true), Col("Name", "TEXT")),
+        };
+        var dialogs = new StubDialogService { ConfirmResult = true };
+        var vm = new SchemaSyncDialogViewModel(
+            provider,
+            new DbConnectionSettings { Database = "shop.db" },
+            target,
+            [],
+            dialogs
+        );
+        var closed = false;
+        vm.CloseAction = _ => closed = true;
+
+        await vm.RefreshCommand.ExecuteAsync(null);
+        await vm.ExecuteCommand.ExecuteAsync(null);
+
+        vm.DiffItems.Should().NotBeEmpty();
+        closed.Should().BeFalse();
     }
 
     /// <summary>Compute へ SQLite ケーパビリティが渡り、説明のみの差分が抑止されることを検証する</summary>
@@ -409,7 +487,13 @@ public class SchemaSyncDialogViewModelTests
 
         private readonly ISchemaImporter _importer;
 
-        public FakeSqliteProvider(ISchemaImporter importer) => _importer = importer;
+        private readonly ISchemaSyncExecutor? _executor;
+
+        public FakeSqliteProvider(ISchemaImporter importer, ISchemaSyncExecutor? executor = null)
+        {
+            _importer = importer;
+            _executor = executor;
+        }
 
         public string Name => _inner.Name;
 
@@ -427,7 +511,7 @@ public class SchemaSyncDialogViewModelTests
 
         public SyncDialectCapabilities SyncCapabilities => _inner.SyncCapabilities;
 
-        public ISchemaSyncExecutor SyncExecutor => _inner.SyncExecutor;
+        public ISchemaSyncExecutor SyncExecutor => _executor ?? _inner.SyncExecutor;
 
         public IDdlGenerator DdlGenerator => _inner.DdlGenerator;
 
@@ -436,16 +520,27 @@ public class SchemaSyncDialogViewModelTests
             "Data Source=:memory:";
     }
 
-    /// <summary>固定の取込結果を返すフェイクインポーター（接続文字列は無視する）</summary>
+    /// <summary>固定の取込結果を返すフェイクインポーター（接続文字列は無視する・結果は差し替え可能）</summary>
     private sealed class FakeSchemaImporter : ISchemaImporter
     {
-        private readonly SchemaImportResult _result;
+        public FakeSchemaImporter(SchemaImportResult result) => Result = result;
 
-        public FakeSchemaImporter(SchemaImportResult result) => _result = result;
+        /// <summary>次回の取込で返す結果（同期実行後の「適用済み live」を再現するために差し替える）</summary>
+        public SchemaImportResult Result { get; set; }
 
         public Task<SchemaImportResult> ImportAsync(
             string connectionString,
             CancellationToken cancellationToken = default
-        ) => Task.FromResult(_result);
+        ) => Task.FromResult(Result);
+    }
+
+    /// <summary>常に成功（COMMIT）を返すフェイク実行器（実 DB へ接続しない）</summary>
+    private sealed class FakeSuccessExecutor : ISchemaSyncExecutor
+    {
+        public Task<SchemaSyncResult> ExecuteAsync(
+            DbConnectionSettings settings,
+            string script,
+            CancellationToken ct = default
+        ) => Task.FromResult(new SchemaSyncResult { Committed = true });
     }
 }
