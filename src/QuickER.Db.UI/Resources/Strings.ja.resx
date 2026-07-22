@@ -278,6 +278,10 @@
   <data name="Db_ImportReplaceConfirm" xml:space="preserve">
     <value>現在のダイアグラムを取得結果で置換します。よろしいですか？</value>
   </data>
+  <data name="Db_ImportBrokenQueriesWarning" xml:space="preserve">
+    <value>次の名前付きクエリは参照先のテーブル・列が失われるため削除されます:
+{0}</value>
+  </data>
   <data name="Db_ImportFailed" xml:space="preserve">
     <value>取り込みに失敗しました: {0}</value>
   </data>

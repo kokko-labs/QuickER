@@ -417,11 +417,59 @@ public partial class MainViewModel : ObservableObject
     }
 
     /// <summary>図を丸ごと差し替える（DB 取込などフィーチャーモジュールからの置換入口）</summary>
-    /// <remarks>方言採用 → 履歴なし置換＋自動整列（内部で画面フィット要求まで発火）の順で、DB 取込の従来挙動と同一</remarks>
+    /// <remarks>
+    /// <para>方言採用の後、マージ取込（Guid 引継）に対応したレイアウト・クエリ透過ロジックで置換する。</para>
+    /// <list type="bullet">
+    /// <item>新図と現在図に同一 Id のエンティティが 1 件以上あれば（＝マージ取込）: 一致分の現在レイアウト
+    /// （位置・色・幅）を引き継ぎ自動整列しない。新規エンティティのみ幅を自動調整する（一致分の保存幅は尊重）。
+    /// クエリ（<see cref="ErDiagram.Queries"/>）はそのまま引き継ぐ</item>
+    /// <item>一致が 1 件も無ければ（＝AI 生成・全新規取込）: 従来どおり全体を自動整列する。クエリは空でも
+    /// 与えられていれば引き継ぐ（新規 Guid のみの経路では通常空）</item>
+    /// </list>
+    /// いずれも画面フィット要求までを含む。マージ照合（Id 書換え）自体は呼び出し側（DB 取込・Excel 取込）の責務。
+    /// </remarks>
     public void ReplaceDiagramFromModule(ErDiagram diagram)
     {
         SetCurrentProviderFromDbms(diagram.TargetDbms);
-        ReplaceDiagramWithoutHistory(diagram.Entities, diagram.Relationships, autoLayout: true);
+
+        // 新図のエンティティ Id と現在図の Id の積集合＝マージで現在図へ寄った一致エンティティ
+        var currentIds = Entities.Select(entity => entity.Id).ToHashSet();
+        var matchedIds = diagram
+            .Entities.Select(entity => entity.Id)
+            .Where(currentIds.Contains)
+            .ToHashSet();
+
+        // 一致が 1 件も無ければ従来どおり全体自動整列（AI 生成・全新規取込の互換維持）
+        if (matchedIds.Count == 0)
+        {
+            ReplaceDiagramWithoutHistory(
+                diagram.Entities,
+                diagram.Relationships,
+                autoLayout: true,
+                diagram.Queries
+            );
+            return;
+        }
+
+        // 一致エンティティの現在レイアウト（位置・幅・色）を採取して引き継ぐ（＝自動整列しない）
+        var layout = Entities
+            .Where(entity => matchedIds.Contains(entity.Id))
+            .ToDictionary(entity => entity.Id, entity => entity.ToLayout());
+
+        ReplaceDiagram(
+            diagram.Entities,
+            diagram.Relationships,
+            clearUndoHistory: true,
+            layout,
+            diagram.Queries
+        );
+
+        // 新規エンティティ（レイアウト未継承）のみ幅を自動調整する。一致分の保存幅は尊重する
+        _changeTracker.RunWithoutTracking(() =>
+        {
+            AutoFitEntityWidths(Entities.Where(entity => !matchedIds.Contains(entity.Id)));
+            RefreshCanvasSize();
+        });
     }
 
     /// <summary>「説明」表示の切替を全エンティティへ伝播し、キャンバスサイズを更新する</summary>

@@ -67,25 +67,31 @@ public sealed class DbImportCommandService
                 .Provider.SchemaImporter.ImportAsync(connectionString)
                 .ConfigureAwait(true);
 
-            // 構造差分がある場合のみ置換確認を行う
-            if (
-                !ConfirmDiagramReplacement(
-                    result.Entities,
-                    result.Relationships,
-                    Strings.Db_ImportReplaceConfirm
-                )
-            )
+            // Guid 引継マージ: 取込結果の Id を現在図の Guid へ寄せ、クエリ定義・レイアウトを温存できるようにする。
+            // DB には Memo に対応する情報がないため、一致エンティティの Memo は現在図の値を温存する。
+            // 署名比較は「マージ後」に行う（新規 Guid のままだとリレーションのある図で署名が常に不一致になるため）。
+            var merged = DiagramMergeReconciler.Reconcile(
+                _host.GetDiagram(),
+                result.Entities,
+                result.Relationships,
+                preserveExistingMemo: true
+            );
+
+            // 構造差分がある場合のみ置換確認を行う（壊れクエリがあれば削除対象名を確認メッセージへ付加する）
+            if (!ConfirmDiagramReplacement(merged, Strings.Db_ImportReplaceConfirm))
             {
                 return;
             }
 
             // 取込結果を意味モデルへ束ね、取込先の方言を TargetDbms として採用して図を丸ごと差し替える
-            // （方言採用・Undo なし置換・自動整列はホスト実装 ReplaceDiagram の責務）。
+            // （方言採用・Undo なし置換・レイアウト引継はホスト実装 ReplaceDiagram の責務）。
+            // 生存クエリのみを引き継ぐ（壊れクエリは確認のうえ削除済み）。
             var diagram = new ErDiagram
             {
-                Entities = result.Entities.ToList(),
-                Relationships = result.Relationships.ToList(),
+                Entities = merged.Entities.ToList(),
+                Relationships = merged.Relationships.ToList(),
                 TargetDbms = picked.Provider.Name,
+                Queries = merged.SurvivingQueries.ToList(),
             };
             _host.ReplaceDiagram(diagram);
         }
@@ -98,27 +104,44 @@ public sealed class DbImportCommandService
         }
     }
 
-    /// <summary>構造変更を伴う置換の場合のみ確認ダイアログを表示する</summary>
+    /// <summary>構造変更を伴う置換、または壊れクエリの削除を伴う場合のみ確認ダイアログを表示する</summary>
     /// <remarks>
-    /// 空の図、または構造が同一の場合は確認なしで続行する。
-    /// ファイル取込で使う <c>MainViewModel.ConfirmDiagramReplacement</c> と同一ロジック（現在図はホスト契約から取得）。
+    /// 空の図、または構造が同一（かつ壊れクエリなし）の場合は確認なしで続行する。
+    /// 壊れクエリがある場合は削除対象のクエリ名一覧を確認メッセージへ付加する。
     /// </remarks>
     /// <returns>置換を続行してよい場合 true</returns>
-    private bool ConfirmDiagramReplacement(
-        IReadOnlyList<Entity> entities,
-        IReadOnlyList<Relationship> relationships,
-        string message
-    )
+    private bool ConfirmDiagramReplacement(DiagramMergeResult merged, string message)
     {
         var current = _host.GetDiagram();
 
-        if (current.Entities.Count == 0 || HasSameStructure(current, entities, relationships))
+        var structurallySame =
+            current.Entities.Count == 0
+            || HasSameStructure(current, merged.Entities, merged.Relationships);
+
+        // 構造同一かつ壊れクエリなしなら従来どおり無確認で続行する
+        if (structurallySame && merged.BrokenQueries.Count == 0)
         {
             return true;
         }
 
-        return _dialogs.Confirm(message, Strings.Common_Confirm);
+        // 壊れクエリがあれば削除対象のクエリ名を確認メッセージへ付加する（キャンセルで取込中止）
+        var fullMessage =
+            merged.BrokenQueries.Count > 0
+                ? message
+                    + Environment.NewLine
+                    + Environment.NewLine
+                    + string.Format(
+                        Strings.Db_ImportBrokenQueriesWarning,
+                        FormatQueryNames(merged.BrokenQueries)
+                    )
+                : message;
+
+        return _dialogs.Confirm(fullMessage, Strings.Common_Confirm);
     }
+
+    /// <summary>壊れクエリの名前を 1 行 1 件で列挙した文字列へ整形する</summary>
+    private static string FormatQueryNames(IReadOnlyList<QueryDefinition> queries) =>
+        string.Join(Environment.NewLine, queries.Select(query => "- " + query.Name));
 
     /// <summary>指定スキーマが現在のダイアグラムと構造的に同一かを署名比較で判定する</summary>
     /// <remarks>ファイル取込で使う <c>MainViewModel.HasSameStructure</c> と同一の <see cref="SchemaSignature"/> 比較</remarks>

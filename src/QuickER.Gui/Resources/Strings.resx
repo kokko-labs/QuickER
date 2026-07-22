@@ -506,6 +506,10 @@
   <data name="Import_ReplaceConfirm" xml:space="preserve">
     <value>This will replace the current diagram with the contents of {0}. Are you sure?</value>
   </data>
+  <data name="Import_BrokenQueriesWarning" xml:space="preserve">
+    <value>The following named queries reference tables or columns that no longer exist and will be deleted:
+{0}</value>
+  </data>
   <data name="Import_Completed" xml:space="preserve">
     <value>Imported {0}.</value>
   </data>

@@ -516,6 +516,10 @@
   <data name="Import_ReplaceConfirm" xml:space="preserve">
     <value>現在のダイアグラムを{0}の内容で置換します。よろしいですか？</value>
   </data>
+  <data name="Import_BrokenQueriesWarning" xml:space="preserve">
+    <value>次の名前付きクエリは参照先のテーブル・列が失われるため削除されます:
+{0}</value>
+  </data>
   <data name="Import_Completed" xml:space="preserve">
     <value>{0}の取り込みが完了しました。</value>
   </data>

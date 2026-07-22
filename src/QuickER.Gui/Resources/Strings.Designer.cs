@@ -1185,7 +1185,13 @@ namespace QuickER.Resources {
                 return ResourceManager.GetString("Import_ReplaceConfirm", resourceCulture);
             }
         }
-        
+
+        public static string Import_BrokenQueriesWarning {
+            get {
+                return ResourceManager.GetString("Import_BrokenQueriesWarning", resourceCulture);
+            }
+        }
+
         public static string Import_Completed {
             get {
                 return ResourceManager.GetString("Import_Completed", resourceCulture);

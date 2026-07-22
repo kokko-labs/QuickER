@@ -155,6 +155,202 @@ public class DbImportCommandServiceTests
         presenter.LastAllowSqliteFileCreation.Should().BeFalse();
     }
 
+    /// <summary>構造同一の再取込は無確認で続行し、生存クエリが差替え図へ引き継がれる</summary>
+    [Fact(DisplayName = "構造同一の再取込は無確認で、生存クエリが引き継がれる")]
+    public async Task RunAsync_SameStructure_NoConfirm_SurvivesQuery()
+    {
+        var entityId = Guid.NewGuid();
+        var columnId = Guid.NewGuid();
+        var current = new ErDiagram
+        {
+            Entities =
+            {
+                new Entity
+                {
+                    Id = entityId,
+                    TableName = "Customer",
+                    Columns =
+                    {
+                        new Column
+                        {
+                            Id = columnId,
+                            Name = "Id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                    },
+                },
+            },
+            Queries =
+            {
+                new QueryDefinition { Name = "GetAll", EntityId = entityId },
+            },
+        };
+        var host = new StubErDiagramHost { DiagramToReturn = current };
+        var dialogs = new StubDialogService();
+        // 取込結果は同一構造（同名テーブル・同名列・同型 PK）だが Id は新規
+        var provider = new FakeImportProvider(ImportedEntities("Customer"));
+        var service = new DbImportCommandService(
+            host,
+            dialogs,
+            new FakeConnectionPresenter(
+                new DbConnectionDialogResult(new DbConnectionSettings(), provider)
+            )
+        );
+
+        await service.RunAsync();
+
+        // マージ後に署名一致するため確認は出ない
+        dialogs.ConfirmMessages.Should().BeEmpty();
+        host.LastReplacedDiagram.Should().NotBeNull();
+        host.LastReplacedDiagram!.Queries.Should().ContainSingle().Which.Name.Should().Be("GetAll");
+    }
+
+    /// <summary>列追加で構造差分がある再取込でも、参照が保たれるクエリは生存する（確認は承認）</summary>
+    [Fact(DisplayName = "再取込でクエリが生存する（列追加で構造差分・確認を承認）")]
+    public async Task RunAsync_Reimport_QuerySurvives()
+    {
+        var entityId = Guid.NewGuid();
+        var columnId = Guid.NewGuid();
+        var current = new ErDiagram
+        {
+            Entities =
+            {
+                new Entity
+                {
+                    Id = entityId,
+                    TableName = "Customer",
+                    Columns =
+                    {
+                        new Column
+                        {
+                            Id = columnId,
+                            Name = "Id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                    },
+                },
+            },
+            Queries =
+            {
+                new QueryDefinition
+                {
+                    Name = "GetById",
+                    EntityId = entityId,
+                    Parameters =
+                    {
+                        new QueryParameter { Name = "id", SourceColumnId = columnId },
+                    },
+                },
+            },
+        };
+        var host = new StubErDiagramHost { DiagramToReturn = current };
+        var dialogs = new StubDialogService { ConfirmResult = true };
+        // 取込結果は Id 列に加え Name 列が追加されている（構造差分）
+        var importedEntity = new Entity
+        {
+            TableName = "Customer",
+            Columns =
+            {
+                new Column
+                {
+                    Name = "Id",
+                    DataType = "int",
+                    IsPrimaryKey = true,
+                    IsNullable = false,
+                },
+                new Column { Name = "Name", DataType = "nvarchar(50)" },
+            },
+        };
+        var provider = new FakeImportProvider(new[] { importedEntity });
+        var service = new DbImportCommandService(
+            host,
+            dialogs,
+            new FakeConnectionPresenter(
+                new DbConnectionDialogResult(new DbConnectionSettings(), provider)
+            )
+        );
+
+        await service.RunAsync();
+
+        // 構造差分（列追加）で確認は出るが、壊れクエリはないため文言は基本メッセージのまま・承認済み
+        dialogs
+            .ConfirmMessages.Should()
+            .ContainSingle()
+            .Which.Should()
+            .Be(DbStrings.Db_ImportReplaceConfirm);
+        host.LastReplacedDiagram.Should().NotBeNull();
+        host.LastReplacedDiagram!.Queries.Should()
+            .ContainSingle()
+            .Which.Name.Should()
+            .Be("GetById");
+        host.LastReplacedDiagram.Entities.Should().Contain(entity => entity.Id == entityId);
+    }
+
+    /// <summary>壊れクエリがあると確認メッセージに名前が列挙され、キャンセルで図を差し替えない</summary>
+    [Fact(DisplayName = "壊れクエリありは確認メッセージに名前を含み、キャンセルで差し替えない")]
+    public async Task RunAsync_BrokenQuery_ListsNameAndCancels()
+    {
+        var entityId = Guid.NewGuid();
+        var columnId = Guid.NewGuid();
+        var current = new ErDiagram
+        {
+            Entities =
+            {
+                new Entity
+                {
+                    Id = entityId,
+                    TableName = "Customer",
+                    Columns =
+                    {
+                        new Column
+                        {
+                            Id = columnId,
+                            Name = "OldCol",
+                            DataType = "int",
+                        },
+                    },
+                },
+            },
+            Queries =
+            {
+                new QueryDefinition
+                {
+                    Name = "UsesOldCol",
+                    EntityId = entityId,
+                    OrderBy = { new QueryOrdering { ColumnId = columnId } },
+                },
+            },
+        };
+        var host = new StubErDiagramHost { DiagramToReturn = current };
+        var dialogs = new StubDialogService { ConfirmResult = false };
+        // 取込結果は同名テーブルだが参照列がリネームされている → クエリが壊れる
+        var importedEntity = new Entity
+        {
+            TableName = "Customer",
+            Columns =
+            {
+                new Column { Name = "NewCol", DataType = "int" },
+            },
+        };
+        var provider = new FakeImportProvider(new[] { importedEntity });
+        var service = new DbImportCommandService(
+            host,
+            dialogs,
+            new FakeConnectionPresenter(
+                new DbConnectionDialogResult(new DbConnectionSettings(), provider)
+            )
+        );
+
+        await service.RunAsync();
+
+        dialogs.ConfirmMessages.Should().ContainSingle().Which.Should().Contain("UsesOldCol");
+        host.LastReplacedDiagram.Should().BeNull();
+    }
+
     // FakeConnectionPresenter は共有版（QuickER.Tests.Db.UI.FakeConnectionPresenter）を使用する
 
     /// <summary>スキーマ取込のみ実カに近く振る舞う擬似プロバイダ（成功結果または例外を返す）</summary>
