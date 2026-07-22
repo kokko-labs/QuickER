@@ -146,8 +146,11 @@ public partial class MainViewModel
     [RelayCommand]
     private void ExportDiagram(object? visual)
     {
+        // 並び順は「画像 → DB 構築 → スキーマ交換（可逆な Schema JSON を先頭）→ 定義書」の用途グループ。
+        // 標準ダイアログのフィルタは見出し行を持てないため、接頭辞（Image/Database/Schema/Document）で
+        // グループを可視化する。先頭＝既定形式（PNG）は従来どおり
         var picked = _files.PickSaveFile(
-            "PNG Image (*.png)|*.png|SVG Image (*.svg)|*.svg|SQL Script (*.sql)|*.sql|Mermaid Diagram (*.mmd)|*.mmd|Mermaid Diagram (*.mermaid)|*.mermaid|DBML Diagram (*.dbml)|*.dbml|Excel Workbook (*.xlsx)|*.xlsx|HTML Document (*.html)|*.html|Schema JSON (*.json)|*.json",
+            "Image - PNG (*.png)|*.png|Image - SVG (*.svg)|*.svg|Database - SQL Script (*.sql)|*.sql|Schema - JSON (*.json)|*.json|Schema - Mermaid (*.mmd)|*.mmd|Schema - Mermaid (*.mermaid)|*.mermaid|Schema - DBML (*.dbml)|*.dbml|Document - Excel Workbook (*.xlsx)|*.xlsx|Document - HTML (*.html)|*.html",
             ".png"
         );
 
@@ -422,12 +425,12 @@ public partial class MainViewModel
                 1 => DiagramExportFormat.Png,
                 2 => DiagramExportFormat.Svg,
                 3 => DiagramExportFormat.Sql,
-                4 => DiagramExportFormat.Mermaid,
+                4 => DiagramExportFormat.SchemaJson,
                 5 => DiagramExportFormat.Mermaid,
-                6 => DiagramExportFormat.Dbml,
-                7 => DiagramExportFormat.Excel,
-                8 => DiagramExportFormat.Html,
-                9 => DiagramExportFormat.SchemaJson,
+                6 => DiagramExportFormat.Mermaid,
+                7 => DiagramExportFormat.Dbml,
+                8 => DiagramExportFormat.Excel,
+                9 => DiagramExportFormat.Html,
                 _ => throw new InvalidOperationException(Strings.Export_FormatUndetermined),
             },
         };

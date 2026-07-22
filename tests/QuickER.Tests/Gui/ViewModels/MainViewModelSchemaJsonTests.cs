@@ -29,7 +29,7 @@ public class MainViewModelSchemaJsonTests
             // 3 エンティティ＋2 リレーション（親 a → 子 b / c）の図を組み、スキーマのみ形式で書き出す
             var source = new MainViewModel(
                 new StubDialogService(),
-                files: new StubFileDialogService { SaveResult = new FileDialogResult(path, 9) }
+                files: new StubFileDialogService { SaveResult = new FileDialogResult(path, 4) }
             );
             source.AddEntityCommand.Execute(null);
             source.AddEntityCommand.Execute(null);
