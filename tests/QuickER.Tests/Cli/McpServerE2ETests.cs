@@ -62,7 +62,7 @@ public class McpServerE2ETests
         }
     }
 
-    [Fact(DisplayName = "quicker mcp は stdio で往復し 15 ツールを公開する")]
+    [Fact(DisplayName = "quicker mcp は stdio で往復し 16 ツールを公開する")]
     public async Task McpServer_RoundTripsOverStdio()
     {
         File.Exists(CliDllPath)
@@ -99,7 +99,7 @@ public class McpServerE2ETests
 
         try
         {
-            // --- ListTools: 15 ツール（ER 9 ＋ create_diagram ＋ クエリ定義 3 ＋ generate_csharp ＋ generate_ddl）、全ツールに file パラメータ ---
+            // --- ListTools: 16 ツール（ER 9 ＋ create_diagram ＋ クエリ定義 3 ＋ generate_csharp ＋ generate_ddl ＋ get_generation_config_schema） ---
             var tools = await client.ListToolsAsync(cancellationToken: cts.Token);
             var toolNames = tools.Select(t => t.Name).ToHashSet();
 
@@ -123,20 +123,41 @@ public class McpServerE2ETests
                         "remove_query",
                         "generate_csharp",
                         "generate_ddl",
+                        "get_generation_config_schema",
                     },
                     Diagnostics(stderrLines)
                 );
+
+            // 情報系ツール get_generation_config_schema だけは file 引数を取らず、他 15 ツールは file 必須
+            const string schemaTool = "get_generation_config_schema";
 
             foreach (var tool in tools)
             {
                 tool.JsonSchema.TryGetProperty("properties", out var props)
                     .Should()
                     .BeTrue($"tool '{tool.Name}' has a properties object");
-                props
-                    .TryGetProperty("file", out _)
-                    .Should()
-                    .BeTrue($"tool '{tool.Name}' exposes a 'file' parameter");
+
+                if (tool.Name == schemaTool)
+                {
+                    props
+                        .TryGetProperty("file", out _)
+                        .Should()
+                        .BeFalse($"tool '{tool.Name}' must not expose a 'file' parameter");
+                }
+                else
+                {
+                    props
+                        .TryGetProperty("file", out _)
+                        .Should()
+                        .BeTrue($"tool '{tool.Name}' exposes a 'file' parameter");
+                }
             }
+
+            // --- get_generation_config_schema: file 引数なしで呼べ、keys を含む JSON を返す ---
+            var schema = await CallAsync(client, schemaTool, new(), cts.Token);
+            schema.isError.Should().BeFalse(Diagnostics(stderrLines) + " schema: " + schema.text);
+            schema.text.Should().Contain("\"keys\"");
+            schema.text.Should().Contain("GenerateRepositories");
 
             // --- create_diagram ---
             var create = await CallAsync(

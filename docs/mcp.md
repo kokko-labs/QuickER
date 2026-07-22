@@ -35,7 +35,7 @@ Any MCP client that supports the stdio transport can use the server. Configure i
 
 ## Tools
 
-The server exposes 15 tools: 10 for ER diagram editing, 3 for named queries, and 2 for code generation. **Every tool requires a `file` argument** (the path to the diagram JSON, i.e. the GUI save format / `DiagramDocument`); the tables below list the other arguments. Required arguments are marked ✅.
+The server exposes 16 tools: 10 for ER diagram editing, 3 for named queries, and 3 for code generation. **Every tool requires a `file` argument** (the path to the diagram JSON, i.e. the GUI save format / `DiagramDocument`) — except `get_generation_config_schema`, the one information-only tool, which takes no arguments at all. The tables below list the other arguments. Required arguments are marked ✅.
 
 ### ER diagram editing
 
@@ -78,10 +78,11 @@ Validation is strict about anything that would fail at runtime and lenient about
 
 | Tool | Arguments | Description |
 |---|---|---|
-| `generate_csharp` | `out_dir` ✅, `config`, `provider` | Generate C# code (Entity / EditModel / Mapper / Repository, etc.) into an output directory, using the same pipeline as `quicker generate`. `config` is a generation settings JSON (same semantics as `quicker generate --config`; see [CLI reference](cli.md#settings-file-quickerjson)) |
+| `generate_csharp` | `out_dir` ✅, `config`, `provider` | Generate C# code (Entity / EditModel / Mapper / Repository, etc.) into an output directory, using the same pipeline as `quicker generate`. `config` is a generation settings JSON (same semantics as `quicker generate --config`; see [CLI reference](cli.md#settings-file-quickerjson)). Call `get_generation_config_schema` for the full list of `config` keys |
 | `generate_ddl` | `out_file` ✅, `provider` | Generate a DDL (CREATE TABLE / foreign key) SQL script and write it to a `.sql` file |
+| `get_generation_config_schema` | *(none)* | Return a machine-readable JSON catalog of every key valid in the settings JSON (`quicker.json`) that `generate_csharp`'s `config` accepts: each key's name, type, default, category, allowed values, and description, plus cross-key rules and an example. Lets an agent write a config without external docs. This is the only tool that takes no `file` argument |
 
-For both generation tools, `provider` is optional: when omitted it defaults to the diagram's target DBMS (or `sqlserver` if the diagram has none). Its accepted values are the same five dialects as `create_diagram`'s `target_dbms`.
+For the two file-based generation tools (`generate_csharp` / `generate_ddl`), `provider` is optional: when omitted it defaults to the diagram's target DBMS (or `sqlserver` if the diagram has none). Its accepted values are the same five dialects as `create_diagram`'s `target_dbms`.
 
 ## Typical flow
 
@@ -93,7 +94,7 @@ A diagram is built up one file-level call at a time. For example, to design a cu
 4. `add_relationship` — `source_table` = `customers`, `target_table` = `orders`, `relationship_type` = `OneToMany`, `source_column` = `customer_id`, `target_column` = `customer_id`
 5. `generate_ddl` — `out_file` = `shop.sql`, and/or `generate_csharp` — `out_dir` = `./Generated`
 
-Call `get_diagram_summary` at any point to read back the current tables and relationships.
+Call `get_diagram_summary` at any point to read back the current tables and relationships. Before writing a `config` for `generate_csharp`, call `get_generation_config_schema` to discover the available keys and their defaults.
 
 ## Notes
 

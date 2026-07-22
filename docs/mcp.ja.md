@@ -35,7 +35,7 @@ stdio トランスポートに対応した MCP クライアントであれば利
 
 ## ツール
 
-サーバは 15 個のツールを公開します。ER 図編集の 10 個・名前付きクエリの 3 個・コード生成の 2 個です。**すべてのツールに `file` 引数が必要**です（図 JSON のパス。GUI の保存形式＝`DiagramDocument`）。下表にはそれ以外の引数を挙げます。必須の引数には ✅ を付けています。
+サーバは 16 個のツールを公開します。ER 図編集の 10 個・名前付きクエリの 3 個・コード生成の 3 個です。**`file` 引数はすべてのツールに必要**です（図 JSON のパス。GUI の保存形式＝`DiagramDocument`）。ただし唯一の情報系ツール `get_generation_config_schema` は例外で、引数を一切取りません。下表にはそれ以外の引数を挙げます。必須の引数には ✅ を付けています。
 
 ### ER 図編集
 
@@ -78,10 +78,11 @@ stdio トランスポートに対応した MCP クライアントであれば利
 
 | ツール | 引数 | 説明 |
 |---|---|---|
-| `generate_csharp` | `out_dir` ✅, `config`, `provider` | `quicker generate` と同一の経路で C# コード（Entity / EditModel / Mapper / Repository など）を出力先ディレクトリへ生成する。`config` は生成設定 JSON（`quicker generate --config` と同じ意味。[CLI リファレンス](cli.ja.md#設定ファイルquickerjson)を参照） |
+| `generate_csharp` | `out_dir` ✅, `config`, `provider` | `quicker generate` と同一の経路で C# コード（Entity / EditModel / Mapper / Repository など）を出力先ディレクトリへ生成する。`config` は生成設定 JSON（`quicker generate --config` と同じ意味。[CLI リファレンス](cli.ja.md#設定ファイルquickerjson)を参照）。`config` の全キーは `get_generation_config_schema` で取得できる |
 | `generate_ddl` | `out_file` ✅, `provider` | DDL（CREATE TABLE / 外部キー）の SQL スクリプトを生成し、`.sql` ファイルへ書き出す |
+| `get_generation_config_schema` | *(なし)* | 設定 JSON（`quicker.json`＝`generate_csharp` の `config`）で有効な全キーを機械可読 JSON で返す。各キーの名前・型・既定値・分類・取り得る値・説明に加え、キー間のルールと例を含む。docs を参照せずに config を書けるようにするためのツール。`file` 引数を取らない唯一のツール |
 
-どちらの生成ツールでも `provider` は省略可能です。省略時は図の対象 DBMS（図に無ければ `sqlserver`）を使用します。指定できる値は `create_diagram` の `target_dbms` と同じ 5 方言です。
+ファイルを対象にする 2 つの生成ツール（`generate_csharp` / `generate_ddl`）では `provider` は省略可能です。省略時は図の対象 DBMS（図に無ければ `sqlserver`）を使用します。指定できる値は `create_diagram` の `target_dbms` と同じ 5 方言です。
 
 ## 典型フロー
 
@@ -93,7 +94,7 @@ stdio トランスポートに対応した MCP クライアントであれば利
 4. `add_relationship` — `source_table` = `customers`、`target_table` = `orders`、`relationship_type` = `OneToMany`、`source_column` = `customer_id`、`target_column` = `customer_id`
 5. `generate_ddl` — `out_file` = `shop.sql`、あるいは `generate_csharp` — `out_dir` = `./Generated`
 
-途中で現在のテーブル・リレーションを読み返したいときは、`get_diagram_summary` を呼びます。
+途中で現在のテーブル・リレーションを読み返したいときは、`get_diagram_summary` を呼びます。`generate_csharp` の `config` を書く前には、`get_generation_config_schema` を呼んで利用可能なキーと既定値を確認できます。
 
 ## 注意
 

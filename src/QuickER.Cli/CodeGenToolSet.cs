@@ -44,7 +44,7 @@ public static class CodeGenToolSet
                     config = new
                     {
                         type = "string",
-                        description = "Path to an existing generation settings JSON file (optional; same semantics as `quicker generate --config`).",
+                        description = "Path to an existing generation settings JSON file (optional; same semantics as `quicker generate --config`). Call get_generation_config_schema for the full list of keys.",
                     },
                     provider = new
                     {
@@ -86,12 +86,34 @@ public static class CodeGenToolSet
             },
         };
 
+    /// <summary>
+    /// コード生成設定 JSON（quicker.json）の全キーを機械可読 JSON で返す <c>get_generation_config_schema</c> ツールの定義（英語）。
+    /// </summary>
+    /// <remarks>
+    /// docs にアクセスできない外部エージェントが config を自己発見的に書けるようにするための情報系ツール。
+    /// 唯一 <c>file</c> 引数を取らない（<see cref="Create"/> で <see cref="FileParameterInjector"/> の対象外にする）。
+    /// </remarks>
+    public static ToolDefinition GetGenerationConfigSchemaDefinition { get; } =
+        new()
+        {
+            Name = "get_generation_config_schema",
+            Description =
+                "Returns a machine-readable JSON catalog of every key valid in the code generation settings JSON (quicker.json), which is passed as generate_csharp's `config` argument: each key's name, type, default, category, allowed values, and description, plus cross-key rules and an example. Use it to write a config without external docs. Unlike every other tool, this one takes no arguments (in particular, no `file`).",
+            DeferLoading = false,
+            InputSchema = new { type = "object", properties = new { } },
+        };
+
     /// <summary>ファイルベースのコード生成ツールセットを生成する</summary>
-    /// <returns>公開ツール定義（<c>file</c> 注入済み）と実行デリゲートを対にした <see cref="McpToolSet"/></returns>
+    /// <returns>公開ツール定義と実行デリゲートを対にした <see cref="McpToolSet"/></returns>
+    /// <remarks>
+    /// <c>file</c> の注入はツールごとに行う＝図を対象にするツール（<c>generate_csharp</c> / <c>generate_ddl</c>）だけへ
+    /// <see cref="FileParameterInjector"/> を適用し、引数不要の情報系ツール <c>get_generation_config_schema</c> は除外する。
+    /// </remarks>
     public static McpToolSet Create()
     {
         var definitions = new[] { GenerateCSharpDefinition, GenerateDdlDefinition }
             .Select(FileParameterInjector.Inject)
+            .Append(GetGenerationConfigSchemaDefinition)
             .ToList();
 
         return new McpToolSet(definitions, Dispatch);
@@ -100,6 +122,12 @@ public static class CodeGenToolSet
     /// <summary>ツール名・引数 JSON を受け取り、<c>file</c> を取り出してツールを実行する</summary>
     private static (string Result, bool Success) Dispatch(string toolName, string argumentsJson)
     {
+        // 引数不要の情報系ツールは file 検証より前に処理する（引数 JSON は参照しない）
+        if (toolName == "get_generation_config_schema")
+        {
+            return (GenerationConfigSchema.BuildJson(), true);
+        }
+
         JsonElement args;
 
         try
