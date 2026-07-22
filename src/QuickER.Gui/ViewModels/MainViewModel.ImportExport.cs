@@ -33,6 +33,9 @@ internal enum DiagramExportFormat
 
     /// <summary>HTML テーブル定義書</summary>
     Html,
+
+    /// <summary>スキーマのみ JSON（配置情報なし・再取込可能）</summary>
+    SchemaJson,
 }
 
 /// <summary>ER 図のインポート形式</summary>
@@ -128,13 +131,7 @@ public partial class MainViewModel
             var document = JsonStorageService.Load(AutoSavePath);
 
             SetCurrentProviderFromDbms(document.Schema.TargetDbms);
-            ReplaceDiagram(
-                document.Schema.Entities,
-                document.Schema.Relationships,
-                clearUndoHistory: true,
-                document.Layout,
-                document.Schema.Queries
-            );
+            LoadDocumentIntoDiagram(document);
         }
         catch
         {
@@ -149,8 +146,11 @@ public partial class MainViewModel
     [RelayCommand]
     private void ExportDiagram(object? visual)
     {
+        // 並び順は「画像 → DB 構築 → スキーマ交換（可逆な Schema JSON を先頭）→ 定義書」の用途グループ。
+        // 標準ダイアログのフィルタは見出し行を持てないため、接頭辞（Image/Database/Schema/Document）で
+        // グループを可視化する。先頭＝既定形式（PNG）は従来どおり
         var picked = _files.PickSaveFile(
-            "PNG Image (*.png)|*.png|SVG Image (*.svg)|*.svg|SQL Script (*.sql)|*.sql|Mermaid Diagram (*.mmd)|*.mmd|Mermaid Diagram (*.mermaid)|*.mermaid|DBML Diagram (*.dbml)|*.dbml|Excel Workbook (*.xlsx)|*.xlsx|HTML Document (*.html)|*.html",
+            "Image - PNG (*.png)|*.png|Image - SVG (*.svg)|*.svg|Database - SQL Script (*.sql)|*.sql|Schema - JSON (*.json)|*.json|Schema - Mermaid (*.mmd)|*.mmd|Schema - Mermaid (*.mermaid)|*.mermaid|Schema - DBML (*.dbml)|*.dbml|Document - Excel Workbook (*.xlsx)|*.xlsx|Document - HTML (*.html)|*.html",
             ".png"
         );
 
@@ -300,6 +300,7 @@ public partial class MainViewModel
             DiagramExportFormat.Dbml => "DBML",
             DiagramExportFormat.Excel => Strings.Format_DefinitionDocument,
             DiagramExportFormat.Html => Strings.Format_DefinitionDocumentHtml,
+            DiagramExportFormat.SchemaJson => "Schema JSON",
             _ => Strings.Format_File,
         };
 
@@ -340,6 +341,15 @@ public partial class MainViewModel
 
             case DiagramExportFormat.Html:
                 TableDefinitionHtmlExporter.SaveTo(ToDiagramModel(), path);
+                break;
+
+            case DiagramExportFormat.SchemaJson:
+                // 配置情報（layout）を持たないスキーマのみ文書。Layout = null で保存すると
+                // layout キー自体が出力されず、読込時に自動整列される可逆形式になる
+                JsonStorageService.Save(
+                    path,
+                    new DiagramDocument { Schema = ToDiagramModel(), Layout = null }
+                );
                 break;
         }
 
@@ -409,16 +419,18 @@ public partial class MainViewModel
             ".xlsx" => DiagramExportFormat.Excel,
             ".html" => DiagramExportFormat.Html,
             ".htm" => DiagramExportFormat.Html,
+            ".json" => DiagramExportFormat.SchemaJson,
             _ => filterIndex switch
             {
                 1 => DiagramExportFormat.Png,
                 2 => DiagramExportFormat.Svg,
                 3 => DiagramExportFormat.Sql,
-                4 => DiagramExportFormat.Mermaid,
+                4 => DiagramExportFormat.SchemaJson,
                 5 => DiagramExportFormat.Mermaid,
-                6 => DiagramExportFormat.Dbml,
-                7 => DiagramExportFormat.Excel,
-                8 => DiagramExportFormat.Html,
+                6 => DiagramExportFormat.Mermaid,
+                7 => DiagramExportFormat.Dbml,
+                8 => DiagramExportFormat.Excel,
+                9 => DiagramExportFormat.Html,
                 _ => throw new InvalidOperationException(Strings.Export_FormatUndetermined),
             },
         };
@@ -491,6 +503,32 @@ public partial class MainViewModel
         }
 
         SetCurrentProviderFromDbms(document.Schema.TargetDbms);
+        LoadDocumentIntoDiagram(document);
+
+        // ウィンドウタイトル・印刷ダイアログのタイトル初期値用。保存フォーマット・Undo には関与しない
+        LastDocumentFileName = Path.GetFileNameWithoutExtension(picked.Path);
+    }
+
+    /// <summary>読み込んだ文書を現在の図へ反映する（配置なし文書は全体を自動整列する）</summary>
+    /// <remarks>
+    /// 保存された配置（layout）があればそれを復元し、layout が欠落または空（スキーマのみ JSON
+    /// ＝配置なしエクスポート／レガシー空 layout）のときはエンティティが 1 件以上あれば全体を
+    /// 自動整列する。これによりスキーマのみ形式でエクスポートしたファイルもそのまま開ける（可逆）。
+    /// 部分欠落（一部エンティティのみ layout がない）は自動整列せず、欠落分は既定位置（原点）のまま。
+    /// </remarks>
+    private void LoadDocumentIntoDiagram(DiagramDocument document)
+    {
+        if (HasNoLayout(document) && document.Schema.Entities.Count > 0)
+        {
+            ReplaceDiagramWithoutHistory(
+                document.Schema.Entities,
+                document.Schema.Relationships,
+                autoLayout: true,
+                document.Schema.Queries
+            );
+            return;
+        }
+
         ReplaceDiagram(
             document.Schema.Entities,
             document.Schema.Relationships,
@@ -498,8 +536,9 @@ public partial class MainViewModel
             document.Layout,
             document.Schema.Queries
         );
-
-        // ウィンドウタイトル・印刷ダイアログのタイトル初期値用。保存フォーマット・Undo には関与しない
-        LastDocumentFileName = Path.GetFileNameWithoutExtension(picked.Path);
     }
+
+    /// <summary>文書が配置情報（layout）を持たない（null または空）かどうかを判定する</summary>
+    private static bool HasNoLayout(DiagramDocument document) =>
+        document.Layout is null or { Count: 0 };
 }

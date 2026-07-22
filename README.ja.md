@@ -249,6 +249,7 @@ ER モデルから Web 画面のモックアップを HTML として生成する
 - Mermaid
 - Excel テーブル定義書
 - HTML テーブル定義書
+- スキーマ JSON（配置情報なし・再取込可能）
 - PNG
 - SVG
 - 印刷 / PDF
