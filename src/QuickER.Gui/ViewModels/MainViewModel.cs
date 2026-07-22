@@ -30,7 +30,7 @@ namespace QuickER.ViewModels;
 /// <see cref="DiagramChangeTracker.RunWithoutTracking"/> で追跡を抑止し、履歴の二重登録を防ぐ
 /// 入出力（保存・取込・各種生成）の責務は <c>MainViewModel.ImportExport.cs</c> 側の partial に分離する
 /// </remarks>
-public partial class MainViewModel : ObservableObject
+public partial class MainViewModel : ObservableObject, IDisposable
 {
     /// <summary>Undo/Redo 履歴を管理するスタック</summary>
     public UndoRedoManager UndoRedo { get; } = new();
@@ -279,12 +279,21 @@ public partial class MainViewModel : ObservableObject
         PasteCopiedEntityCommand = new RelayCommand(PasteCopiedEntity, CanPasteCopiedEntity);
         Entities.CollectionChanged += OnEntitiesCollectionChanged;
         Relationships.CollectionChanged += OnRelationshipsCollectionChanged;
+
+        // Undo 世代の変化（＝編集の発生）を購読し、ダーティ判定とウィンドウタイトルの * 表示へ反映する
+        UndoRedo.PropertyChanged += OnUndoRedoStateChanged;
+
+        // 外部変更監視サービスの購読・期待ハッシュ供給を結線する（監視の開始は現在パス設定に追従する）
+        InitializeFileWatcher();
     }
 
     /// <summary>前回の自動保存ファイルを復元する。アプリ起動時に 1 回だけ呼び出すこと</summary>
     public void Initialize()
     {
         RestoreLastDiagram();
+
+        // 復元後、現ファイルが最終既知ハッシュと乖離していれば外部変更として同じ規則で反映する
+        CheckExternalChangeOnStartup();
     }
 
     /// <summary>キャンバスサイズを再計算して変更通知を発行する。エンティティの移動・サイズ変更後に呼び出す</summary>
@@ -598,8 +607,11 @@ public partial class MainViewModel : ObservableObject
 
         ReplaceDiagram(Array.Empty<Entity>(), Array.Empty<Relationship>(), clearUndoHistory: true);
 
-        // 新規図はどのファイルにも紐付かないため、ウィンドウタイトルを既定（QuickER）へ戻す
-        LastDocumentFileName = null;
+        // 新規図はどのファイルにも紐付かないため、現在パス・内容ハッシュをクリアし、
+        // 空の新規文書としてクリーン状態にする（ウィンドウタイトルは既定の QuickER へ戻る）
+        CurrentFilePath = null;
+        _lastKnownFileHash = null;
+        MarkClean();
     }
 
     /// <summary>PK カラム付きの新規エンティティを追加して選択する（Undo 可能）</summary>

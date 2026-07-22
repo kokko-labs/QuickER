@@ -1,4 +1,6 @@
+using System.ComponentModel;
 using System.IO;
+using System.Threading;
 using System.Windows.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -60,41 +62,407 @@ public partial class MainViewModel
 {
     // ---------------- Auto-save / restore ----------------
 
-    /// <summary>最後に保存／読込した JSON のファイル名（拡張子なし）</summary>
+    /// <summary>現在編集中のダイアグラムに紐付くファイルのフルパス（無題＝未保存のときは null）</summary>
     /// <remarks>
-    /// ウィンドウタイトルと印刷ダイアログのタイトル入力欄の初期値に使用する。
-    /// 保存フォーマット・Undo 履歴には一切関与しない（未保存のときは null）
+    /// <see cref="Open"/> と「名前を付けて保存」（上書き保存を含む初回保存）でのみ設定・変更する。
+    /// インポート・図の置換・DB 取込・AI 生成ではパスを維持し（無題化しない）、新規作成でのみ null へ戻す。
+    /// 保存コマンドの分岐（無ダイアログ上書き／保存ダイアログ）と外部変更検知（ステージ B）の基準になる。
     /// </remarks>
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(WindowTitle))]
-    private string? _lastDocumentFileName;
+    private string? _currentFilePath;
 
-    /// <summary>ウィンドウタイトル（読込／保存済みなら「ファイル名 - QuickER」、未保存なら「QuickER」）</summary>
+    /// <summary>最後に読込／上書き保存した時点のファイル内容の SHA-256（16 進・未保存時は null）</summary>
+    /// <remarks>自動保存メタへ書き出し、外部変更検知（ステージ B）で現ファイルとの一致判定に用いる</remarks>
+    private string? _lastKnownFileHash;
+
+    /// <summary>最終読込／上書き保存時点の Undo 世代（この値と現在世代が異なればダーティ）</summary>
+    private int _savedChangeGeneration;
+
+    /// <summary>復元時に「未保存の変更あり」状態だったことを引き継ぐフラグ（世代比較に依らずダーティ扱いにする）</summary>
+    private bool _restoredDirty;
+
+    // ---------------- External change detection (Stage B) ----------------
+
+    /// <summary>現在パスに紐付くファイルの外部変更を監視するサービス（無題のときは監視しない）</summary>
+    private readonly DocumentFileWatcher _fileWatcher = new();
+
+    /// <summary>
+    /// 監視イベント（スレッドプール発火）を UI スレッドへマーシャリングするデリゲート。
+    /// 既定は同期実行（ヘッドレステスト向け）。本番は <see cref="SetUiPost"/> で Dispatcher 実装へ差し替える。
+    /// </summary>
+    private Action<Action> _uiPost = action => action();
+
+    /// <summary>
+    /// ダーティ時に「このまま続行」を選んだ外部バージョンの内容ハッシュ。
+    /// 同一内容での再確認を抑止する（次の別内容変更では null に戻り再確認する）。
+    /// </summary>
+    private string? _ignoredExternalHash;
+
+    /// <summary>再読込経路で View への fit-to-window 要求を抑止するフラグ（ビューポート維持のため）</summary>
+    private bool _suppressFitToWindow;
+
+    /// <summary>テスト専用: 実 FileSystemWatcher の起動を止めるフラグ（外部変更は注入で検証するため）</summary>
+    private bool _fileWatchingDisabled;
+
+    /// <summary>ステータスバー左端に表示する一時通知のバッキングフィールド（既定は「準備完了」）</summary>
+    private string _statusMessage = Strings.Status_Ready;
+
+    /// <summary>直近の一時通知を既定表示へ戻すためのシングルショットタイマ</summary>
+    private Timer? _statusRevertTimer;
+
+    /// <summary>ステータスバー左端に表示するメッセージ（外部変更の控えめ通知に使う。既定は「準備完了」）</summary>
+    public string StatusMessage
+    {
+        get => _statusMessage;
+        private set => SetProperty(ref _statusMessage, value);
+    }
+
+    /// <summary>監視イベントを UI スレッドへ載せるデリゲートを差し替える（本番合成点＝View 側から設定する）</summary>
+    /// <param name="uiPost">UI スレッドで指定処理を実行するデリゲート（Dispatcher.BeginInvoke 相当）</param>
+    public void SetUiPost(Action<Action> uiPost)
+    {
+        _uiPost = uiPost ?? (action => action());
+    }
+
+    /// <summary>監視サービスの購読と期待ハッシュ供給を結線する（コンストラクタから 1 回だけ呼ぶ）</summary>
+    private void InitializeFileWatcher()
+    {
+        // 発火時の内容ハッシュ比較に使う「最終既知ハッシュ」を都度供給する（自己書き込み抑制の第 1 段）
+        _fileWatcher.ExpectedHashProvider = () => _lastKnownFileHash;
+        _fileWatcher.FileChanged += OnDocumentFileChanged;
+    }
+
+    /// <summary>ステータスバーへ一時通知を表示し、数秒後に既定表示（準備完了）へ戻す</summary>
+    private void NotifyStatus(string message)
+    {
+        StatusMessage = message;
+
+        _statusRevertTimer?.Dispose();
+        _statusRevertTimer = new Timer(
+            _ => _uiPost(() => StatusMessage = Strings.Status_Ready),
+            null,
+            5000,
+            Timeout.Infinite
+        );
+    }
+
+    /// <summary>監視スレッドからの外部変更通知を UI スレッドへ載せ替えて処理する</summary>
+    private void OnDocumentFileChanged(object? sender, DocumentFileChangedEventArgs e)
+    {
+        _uiPost(() => HandleDocumentFileChanged(e));
+    }
+
+    /// <summary>テスト専用: 外部変更イベントを注入し、UI ハンドラを（既定の同期 _uiPost で）実行する</summary>
+    /// <param name="kind">変更種別</param>
+    /// <param name="contentHash">内容ハッシュ（Modified のときのみ意味を持つ）</param>
+    /// <param name="path">対象パス（省略時は現在パス）。パス突合ロジックの検証に用いる</param>
+    internal void RaiseExternalChangeForTests(
+        DocumentFileChangeKind kind,
+        string? contentHash,
+        string? path = null
+    )
+    {
+        OnDocumentFileChanged(
+            this,
+            new DocumentFileChangedEventArgs(
+                kind,
+                path ?? CurrentFilePath ?? string.Empty,
+                contentHash
+            )
+        );
+    }
+
+    /// <summary>外部変更を種別ごとに処理する（UI スレッド上で実行される）</summary>
+    private void HandleDocumentFileChanged(DocumentFileChangedEventArgs e)
+    {
+        // パスがクリア／別ファイルへ変わった後に届いた遅延イベントは無視する
+        if (
+            string.IsNullOrEmpty(CurrentFilePath)
+            || !string.Equals(e.Path, CurrentFilePath, StringComparison.OrdinalIgnoreCase)
+        )
+        {
+            return;
+        }
+
+        switch (e.Kind)
+        {
+            case DocumentFileChangeKind.Deleted:
+                // 削除は現状維持し通知のみ（監視は継続。次の再作成・Ctrl+S で復帰する）
+                NotifyStatus(Strings.Status_ExternalFileDeleted);
+                break;
+
+            case DocumentFileChangeKind.Renamed:
+                // 別名へのリネームも現状維持し通知のみ
+                NotifyStatus(Strings.Status_ExternalFileRenamed);
+                break;
+
+            case DocumentFileChangeKind.Modified:
+                HandleExternalModification(e.ContentHash);
+                break;
+        }
+    }
+
+    /// <summary>外部での内容変更を処理する（クリーンなら無確認再読込・ダーティなら確認）</summary>
+    private void HandleExternalModification(string? contentHash)
+    {
+        if (!IsDirty)
+        {
+            // クリーン（未保存変更なし）＝無確認で再読込し、控えめに通知する
+            if (ReloadFromDisk())
+            {
+                NotifyStatus(Strings.Status_ExternalReloaded);
+            }
+
+            return;
+        }
+
+        // 同一内容で既に「続行」を選んでいれば再確認しない（次の別内容変更では再確認する）
+        if (contentHash is not null && contentHash == _ignoredExternalHash)
+        {
+            return;
+        }
+
+        // ダーティ＝未保存変更があるため、破棄再読込か続行かをユーザーへ確認する
+        if (_dialogs.ConfirmWarning(Strings.Confirm_ExternalChangeReload, Strings.Common_Confirm))
+        {
+            ReloadFromDisk();
+        }
+        else
+        {
+            // このバージョン（内容ハッシュ）は無視して編集を続行する
+            _ignoredExternalHash = contentHash;
+        }
+    }
+
+    /// <summary>現在パスのファイルを読み直し、履歴クリアで反映する（ビューポートは維持）</summary>
+    /// <returns>再読込に成功した場合 true。破損・非文書・新フォーマットなどで現状維持した場合 false</returns>
+    /// <remarks>
+    /// 既存の読込フロー（<see cref="LoadDocumentIntoDiagram"/>）を流用するが、fit-to-window 要求を
+    /// <see cref="_suppressFitToWindow"/> で抑止してズーム・スクロール位置を保つ。Guid 一致エンティティの
+    /// レイアウトはファイル値を尊重し、欠落分のみ追記配置される（既存機構がそのまま効く）。
+    /// </remarks>
+    private bool ReloadFromDisk()
+    {
+        if (string.IsNullOrEmpty(CurrentFilePath))
+        {
+            return false;
+        }
+
+        // 破損（不正 JSON）・非 DiagramDocument は現状維持し、次の変更イベントで再試行する
+        if (!TryLoadDiagramDocument(CurrentFilePath, out var document) || document is null)
+        {
+            NotifyStatus(Strings.Status_ExternalReloadFailed);
+            return false;
+        }
+
+        // 新フォーマット文書は未対応データを失う恐れがあるため自動反映しない（Open と同じ安全策）
+        if (document.IsNewerFormat)
+        {
+            NotifyStatus(Strings.Status_ExternalReloadFailed);
+            return false;
+        }
+
+        _suppressFitToWindow = true;
+
+        try
+        {
+            SetCurrentProviderFromDbms(document.Schema.TargetDbms);
+            LoadDocumentIntoDiagram(document);
+        }
+        finally
+        {
+            _suppressFitToWindow = false;
+        }
+
+        // 読み直した内容を最終既知として記録し、クリーン状態へ戻す
+        UpdateDocumentIdentity(CurrentFilePath);
+        _ignoredExternalHash = null;
+        return true;
+    }
+
+    /// <summary>ファイルを DiagramDocument として妥当か検証したうえで読み込む（破損・非文書は false）</summary>
+    /// <remarks>
+    /// <see cref="JsonStorageService.Load"/> は無関係な JSON も「空図」として読めてしまうため、
+    /// ルートが JSON オブジェクトで <c>Version</c>・<c>Schema</c> キーを持つことを検証してから読み込む
+    /// （<see cref="JsonStorageService"/> の読込仕様に合わせ大文字小文字を区別する）。
+    /// </remarks>
+    private static bool TryLoadDiagramDocument(string path, out DiagramDocument? document)
+    {
+        document = null;
+
+        try
+        {
+            var text = File.ReadAllText(path);
+            var root = System.Text.Json.Nodes.JsonNode.Parse(text);
+
+            if (
+                root is not System.Text.Json.Nodes.JsonObject obj
+                || obj["Version"] is null
+                || obj["Schema"] is not System.Text.Json.Nodes.JsonObject
+            )
+            {
+                return false;
+            }
+
+            document = JsonStorageService.Load(path);
+            return true;
+        }
+        catch
+        {
+            // IO エラー・不正 JSON は現状維持（呼び出し側が通知する）
+            return false;
+        }
+    }
+
+    /// <summary>起動復元の直後に、現ファイルの内容が最終既知ハッシュと異なれば外部変更として扱う</summary>
+    /// <remarks>
+    /// 復元した作業状態（last_diagram.json）が現ファイルと乖離しているかを、記録済みハッシュと
+    /// 現ファイルのハッシュ比較で判定する。相違があれば通常の変更検知と同じ規則
+    /// （復元がクリーン→自動再読込・ダーティ→確認）を適用する。監視サービス起動前でも一度検査する。
+    /// </remarks>
+    private void CheckExternalChangeOnStartup()
+    {
+        if (string.IsNullOrEmpty(CurrentFilePath) || !File.Exists(CurrentFilePath))
+        {
+            return;
+        }
+
+        var currentHash = DocumentContentHash.TryCompute(CurrentFilePath);
+
+        // 算出不能（IO エラー）や一致（変更なし）は何もしない
+        if (
+            currentHash is null
+            || string.Equals(currentHash, _lastKnownFileHash, StringComparison.Ordinal)
+        )
+        {
+            return;
+        }
+
+        HandleExternalModification(currentHash);
+    }
+
+    /// <summary>最後に保存／読込した JSON のファイル名（拡張子なし。現在パスから導出する）</summary>
+    /// <remarks>
+    /// ウィンドウタイトルと印刷ダイアログのタイトル入力欄の初期値に使用する。
+    /// 保存フォーマット・Undo 履歴には一切関与しない（無題のときは null）
+    /// </remarks>
+    public string? LastDocumentFileName =>
+        string.IsNullOrEmpty(CurrentFilePath)
+            ? null
+            : Path.GetFileNameWithoutExtension(CurrentFilePath);
+
+    /// <summary>
+    /// 最終読込／上書き保存以降に未保存の変更があるか（読込直後・保存直後はクリーン）
+    /// </summary>
+    /// <remarks>
+    /// Undo 世代の比較で判定する。Undo で保存時点の内容へ戻しても世代は進むため「変更あり」扱いになる
+    /// （安全側）。復元時に未保存だった状態も引き継ぐ（<see cref="_restoredDirty"/>）。
+    /// </remarks>
+    public bool IsDirty => _restoredDirty || UndoRedo.ChangeGeneration != _savedChangeGeneration;
+
+    /// <summary>ウィンドウタイトル（無題は「QuickER」、ファイル紐付きは「ファイル名 - QuickER」・ダーティ時は * 付き）</summary>
+    /// <remarks>無題（パスなし）のダーティは * を付けず「QuickER」のままにする（保存先が無く * が意味を持たないため）</remarks>
     public string WindowTitle =>
         string.IsNullOrEmpty(LastDocumentFileName)
             ? "QuickER"
-            : $"{LastDocumentFileName} - QuickER";
+            : $"{LastDocumentFileName}{(IsDirty ? "*" : string.Empty)} - QuickER";
 
-    /// <summary>ダイアグラム自動保存ファイルのパス</summary>
-    private static readonly string AutoSavePath = Path.Combine(
+    /// <summary>ダイアグラム自動保存ファイルの既定パス（%APPDATA%\QuickER\last_diagram.json）</summary>
+    private static readonly string DefaultAutoSavePath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
         "QuickER",
         "last_diagram.json"
     );
 
-    /// <summary>GUI 全体設定（UI 表示状態を含む）を gui-settings.json へ永続化するストア</summary>
-    private readonly GuiAppSettingsStore _guiSettingsStore = new();
+    /// <summary>ダイアグラム自動保存ファイルのパス（テストでは差し替える）</summary>
+    private string _autoSavePath = DefaultAutoSavePath;
 
-    /// <summary>現在のダイアグラムと UI 表示状態を自動保存ファイルへ書き出す</summary>
+    /// <summary>GUI 全体設定（UI 表示状態・文書メタを含む）を gui-settings.json へ永続化するストア</summary>
+    private GuiAppSettingsStore _guiSettingsStore = new();
+
+    /// <summary>永続化先（設定ストア・自動保存ファイル）を差し替える（テスト専用。Initialize/AutoSave 前に呼ぶこと）</summary>
+    internal void UsePersistenceForTests(GuiAppSettingsStore settingsStore, string autoSavePath)
+    {
+        _guiSettingsStore = settingsStore;
+        _autoSavePath = autoSavePath;
+    }
+
+    /// <summary>現在パスが変わったら、そこから導出するタイトル関連プロパティと外部変更監視へ反映する</summary>
+    partial void OnCurrentFilePathChanged(string? value)
+    {
+        OnPropertyChanged(nameof(LastDocumentFileName));
+        OnPropertyChanged(nameof(WindowTitle));
+
+        // 別文書へ切り替わったので、直前の「続行」による再確認抑止はリセットする
+        _ignoredExternalHash = null;
+
+        // テストでは実 FileSystemWatcher を起動しない（外部変更は注入で検証する）
+        if (_fileWatchingDisabled)
+        {
+            return;
+        }
+
+        // 無題（パスなし）は監視しない。ファイルに紐付いたらそのファイルを監視する
+        if (string.IsNullOrEmpty(value))
+        {
+            _fileWatcher.Stop();
+        }
+        else
+        {
+            _fileWatcher.Watch(value);
+        }
+    }
+
+    /// <summary>テスト専用: 実 FileSystemWatcher の起動を止める（外部変更は <see cref="RaiseExternalChangeForTests"/> で注入する）</summary>
+    internal void DisableFileWatchingForTests()
+    {
+        _fileWatchingDisabled = true;
+        _fileWatcher.Stop();
+    }
+
+    /// <summary>Undo 世代が動いたらダーティ／タイトルを再評価する（コンストラクタで購読する）</summary>
+    private void OnUndoRedoStateChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(UndoRedo.ChangeGeneration))
+        {
+            OnPropertyChanged(nameof(IsDirty));
+            OnPropertyChanged(nameof(WindowTitle));
+        }
+    }
+
+    /// <summary>現在の Undo 世代をクリーン基準として記録し、ダーティ／タイトルを更新する</summary>
+    private void MarkClean()
+    {
+        _restoredDirty = false;
+        _savedChangeGeneration = UndoRedo.ChangeGeneration;
+        OnPropertyChanged(nameof(IsDirty));
+        OnPropertyChanged(nameof(WindowTitle));
+    }
+
+    /// <summary>読込／保存の成功時に現在パス・内容ハッシュを更新し、クリーン状態にする共通ヘルパ</summary>
+    /// <param name="path">紐付けるファイルのフルパス（読込元／保存先）</param>
+    private void UpdateDocumentIdentity(string path)
+    {
+        CurrentFilePath = path;
+        _lastKnownFileHash = TryComputeContentHash(path);
+        MarkClean();
+    }
+
+    /// <summary>ファイル内容の SHA-256（16 進）を計算する（IO エラー時は null）</summary>
+    /// <remarks>監視サービスと同じ算出規則を共有するため <see cref="DocumentContentHash"/> へ委譲する</remarks>
+    private static string? TryComputeContentHash(string path) =>
+        DocumentContentHash.TryCompute(path);
+
+    /// <summary>現在のダイアグラムと UI 表示状態・文書メタを自動保存ファイルへ書き出す</summary>
     public void AutoSave()
     {
         try
         {
-            var dir = Path.GetDirectoryName(AutoSavePath)!;
+            var dir = Path.GetDirectoryName(_autoSavePath)!;
             Directory.CreateDirectory(dir);
-            JsonStorageService.Save(AutoSavePath, ToDocument());
+            JsonStorageService.Save(_autoSavePath, ToDocument());
 
-            // UI 表示状態は GUI 全体設定の 1 セクション。他のセクション（言語など）を消さないよう
+            // UI 表示状態・文書メタは GUI 全体設定の各セクション。他のセクション（言語など）を消さないよう
             // Load → 該当セクションのみ差し替え → Save の read-modify-write で書き込む
             var settings = _guiSettingsStore.Load();
             settings.DiagramView = new DiagramViewSettings
@@ -102,6 +470,12 @@ public partial class MainViewModel
                 ShowColumnDescriptions = ShowColumnDescriptionsInDiagram,
                 ShowNullability = ShowNullabilityInDiagram,
                 IsCompactView = IsCompactViewInDiagram,
+            };
+            settings.CurrentDocument = new CurrentDocumentSettings
+            {
+                FilePath = CurrentFilePath,
+                LastKnownHash = _lastKnownFileHash,
+                IsDirty = IsDirty,
             };
             _guiSettingsStore.Save(settings);
         }
@@ -111,27 +485,44 @@ public partial class MainViewModel
         }
     }
 
-    /// <summary>起動時に前回の自動保存ファイルから UI 状態とダイアグラムを復元する</summary>
+    /// <summary>起動時に前回の自動保存ファイルから UI 状態・ダイアグラム・文書メタを復元する</summary>
     private void RestoreLastDiagram()
     {
         // UI 表示状態を GUI 全体設定から反映する（ファイル無し・破損時は既定値が返り、
         // その既定値は VM 側の初期値と一致するため常時反映しても挙動は変わらない）
-        var diagramView = _guiSettingsStore.Load().DiagramView;
+        var settings = _guiSettingsStore.Load();
+        var diagramView = settings.DiagramView;
         ShowColumnDescriptionsInDiagram = diagramView.ShowColumnDescriptions;
         ShowNullabilityInDiagram = diagramView.ShowNullability;
         IsCompactViewInDiagram = diagramView.IsCompactView;
 
-        if (!File.Exists(AutoSavePath))
+        if (!File.Exists(_autoSavePath))
         {
             return;
         }
 
         try
         {
-            var document = JsonStorageService.Load(AutoSavePath);
+            var document = JsonStorageService.Load(_autoSavePath);
 
             SetCurrentProviderFromDbms(document.Schema.TargetDbms);
             LoadDocumentIntoDiagram(document);
+
+            // 文書メタ（紐付くファイルパス・最終既知ハッシュ・ダーティ）を復元する。
+            // 作業状態は自動保存ファイルが正のため、ハッシュは再計算せず記録値をそのまま引き継ぐ
+            // （ステージ B の外部変更判定で現ファイルと比較するのは復元したこの値）。
+            var meta = settings.CurrentDocument;
+            CurrentFilePath = meta.FilePath;
+            _lastKnownFileHash = meta.LastKnownHash;
+            MarkClean();
+
+            // 前回終了時に未保存だった場合はダーティ状態を引き継ぐ（タイトルへ * を再現する）
+            if (meta.IsDirty)
+            {
+                _restoredDirty = true;
+                OnPropertyChanged(nameof(IsDirty));
+                OnPropertyChanged(nameof(WindowTitle));
+            }
         }
         catch
         {
@@ -533,18 +924,59 @@ public partial class MainViewModel
 
     // ---------------- Save / Load ----------------
 
-    /// <summary>保存ダイアログでパスを選び、現在のダイアグラムを JSON 形式で保存する</summary>
+    /// <summary>現在パスがあれば無ダイアログで上書き保存し、無ければ保存ダイアログを表示する</summary>
     [RelayCommand]
     private void Save()
     {
-        var picked = _files.PickSaveFile("ER Diagram (*.json)|*.json", ".json");
-
-        if (picked is not null)
+        // ファイルに紐付いていれば、確認・ダイアログなしでその場所へ上書き保存する
+        if (!string.IsNullOrEmpty(CurrentFilePath))
         {
-            JsonStorageService.Save(picked.Path, ToDocument());
+            SaveToPath(CurrentFilePath);
+            return;
+        }
 
-            // ウィンドウタイトル・印刷ダイアログのタイトル初期値用。保存フォーマット・Undo には関与しない
-            LastDocumentFileName = Path.GetFileNameWithoutExtension(picked.Path);
+        // 無題（未保存）なら従来どおり保存ダイアログで保存先を選ばせる
+        SaveWithDialog();
+    }
+
+    /// <summary>保存ダイアログで保存先を選び、常に別名として保存する（現在パスを更新する）</summary>
+    [RelayCommand]
+    private void SaveAs() => SaveWithDialog();
+
+    /// <summary>保存ダイアログでパスを選び、現在のダイアグラムを JSON 形式で保存して現在パスを更新する</summary>
+    private void SaveWithDialog()
+    {
+        var picked = _files.PickSaveFile(
+            "ER Diagram (*.json)|*.json",
+            ".json",
+            LastDocumentFileName
+        );
+
+        if (picked is null)
+        {
+            return;
+        }
+
+        SaveToPath(picked.Path);
+    }
+
+    /// <summary>指定パスへ現在の文書を保存し、内容ハッシュ更新までを自己書き込み抑止の下で行う</summary>
+    /// <remarks>
+    /// 書き込み前後で監視を一時停止し、自分の保存が外部変更として跳ね返らないようにする
+    /// （<see cref="DocumentFileWatcher.ExpectedHashProvider"/> のハッシュ比較と二重の抑止）。
+    /// </remarks>
+    private void SaveToPath(string path)
+    {
+        _fileWatcher.Suspend();
+
+        try
+        {
+            JsonStorageService.Save(path, ToDocument());
+            UpdateDocumentIdentity(path);
+        }
+        finally
+        {
+            _fileWatcher.Resume();
         }
     }
 
@@ -579,8 +1011,8 @@ public partial class MainViewModel
         SetCurrentProviderFromDbms(document.Schema.TargetDbms);
         LoadDocumentIntoDiagram(document);
 
-        // ウィンドウタイトル・印刷ダイアログのタイトル初期値用。保存フォーマット・Undo には関与しない
-        LastDocumentFileName = Path.GetFileNameWithoutExtension(picked.Path);
+        // 読込したファイルを現在パスとして紐付け、内容ハッシュを記録してクリーン状態にする
+        UpdateDocumentIdentity(picked.Path);
     }
 
     /// <summary>読み込んだ文書を現在の図へ反映する（配置なし文書は全体を自動整列する）</summary>
@@ -651,4 +1083,14 @@ public partial class MainViewModel
     /// <summary>文書が配置情報（layout）を持たない（null または空）かどうかを判定する</summary>
     private static bool HasNoLayout(DiagramDocument document) =>
         document.Layout is null or { Count: 0 };
+
+    /// <summary>外部変更監視サービスと一時通知タイマを破棄する</summary>
+    /// <remarks>DI シングルトンとして生成されるため、コンテナ破棄時に呼ばれる（FileSystemWatcher の解放）</remarks>
+    public void Dispose()
+    {
+        _fileWatcher.FileChanged -= OnDocumentFileChanged;
+        _fileWatcher.Dispose();
+        _statusRevertTimer?.Dispose();
+        _statusRevertTimer = null;
+    }
 }

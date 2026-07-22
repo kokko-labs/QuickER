@@ -32,6 +32,10 @@ public partial class MainWindow : Window
         _viewModel = viewModel;
         DataContext = viewModel;
 
+        // 外部変更監視（スレッドプール発火）を UI スレッドへ載せ替えるデリゲートを供給する。
+        // Initialize 前に設定し、起動時チェックの一時通知・再読込も UI スレッドで処理させる。
+        _viewModel.SetUiPost(action => Dispatcher.BeginInvoke(action));
+
         // fit-to-window 要求（読込・取込・整列・AI 生成の後）を購読して実行する
         _viewModel.FitToWindowRequested += OnFitToWindowRequested;
 

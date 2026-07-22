@@ -26,6 +26,23 @@ public partial class UndoRedoManager : ObservableObject
     /// <summary>Redo 可能なコマンドの有無</summary>
     public bool CanRedo => _redo.Count > 0;
 
+    /// <summary>状態変更（Execute / Push / Undo / Redo / Clear）ごとに増加する世代カウンタ</summary>
+    /// <remarks>
+    /// 「読込／保存以降に変更があったか」（ダーティ判定）に用いる。値が変わったかどうかだけが意味を持ち、
+    /// 具体的な数値そのものに意味はない。Undo で保存時点へ戻っても世代は進むため、ダーティ判定は安全側
+    /// （変更あり扱い）になる。単調増加のため状態変化の検知にそのまま使える。
+    /// </remarks>
+    public int ChangeGeneration { get; private set; }
+
+    /// <summary>世代カウンタを 1 進め、Undo/Redo の可否と併せて変更通知を発行する</summary>
+    private void NotifyStateChanged()
+    {
+        ChangeGeneration++;
+        OnPropertyChanged(nameof(CanUndo));
+        OnPropertyChanged(nameof(CanRedo));
+        OnPropertyChanged(nameof(ChangeGeneration));
+    }
+
     /// <summary>コマンドを実行し Undo スタックへ積む（Redo スタックは破棄する）</summary>
     /// <param name="command">実行するコマンド</param>
     public void Execute(IUndoableCommand command)
@@ -33,8 +50,7 @@ public partial class UndoRedoManager : ObservableObject
         command.Execute();
         _undo.Push(command);
         _redo.Clear();
-        OnPropertyChanged(nameof(CanUndo));
-        OnPropertyChanged(nameof(CanRedo));
+        NotifyStateChanged();
     }
 
     /// <summary>適用済みコマンドを Undo スタックへ登録する（ドラッグ終了時など）</summary>
@@ -53,8 +69,7 @@ public partial class UndoRedoManager : ObservableObject
             {
                 composite.Upsert(propertyChange);
                 _redo.Clear();
-                OnPropertyChanged(nameof(CanUndo));
-                OnPropertyChanged(nameof(CanRedo));
+                NotifyStateChanged();
                 return;
             }
 
@@ -65,15 +80,13 @@ public partial class UndoRedoManager : ObservableObject
             grouped.Upsert(propertyChange);
             _undo.Push(grouped);
             _redo.Clear();
-            OnPropertyChanged(nameof(CanUndo));
-            OnPropertyChanged(nameof(CanRedo));
+            NotifyStateChanged();
             return;
         }
 
         _undo.Push(command);
         _redo.Clear();
-        OnPropertyChanged(nameof(CanUndo));
-        OnPropertyChanged(nameof(CanRedo));
+        NotifyStateChanged();
     }
 
     /// <summary>直近の操作を元に戻す</summary>
@@ -87,8 +100,7 @@ public partial class UndoRedoManager : ObservableObject
         var c = _undo.Pop();
         c.Undo();
         _redo.Push(c);
-        OnPropertyChanged(nameof(CanUndo));
-        OnPropertyChanged(nameof(CanRedo));
+        NotifyStateChanged();
     }
 
     /// <summary>直前に Undo した操作をやり直す</summary>
@@ -102,8 +114,7 @@ public partial class UndoRedoManager : ObservableObject
         var c = _redo.Pop();
         c.Execute();
         _undo.Push(c);
-        OnPropertyChanged(nameof(CanUndo));
-        OnPropertyChanged(nameof(CanRedo));
+        NotifyStateChanged();
     }
 
     /// <summary>Undo / Redo スタックをすべてクリアする</summary>
@@ -111,8 +122,7 @@ public partial class UndoRedoManager : ObservableObject
     {
         _undo.Clear();
         _redo.Clear();
-        OnPropertyChanged(nameof(CanUndo));
-        OnPropertyChanged(nameof(CanRedo));
+        NotifyStateChanged();
     }
 
     /// <summary>同時に発生した複数のプロパティ変更を 1 履歴として扱う複合コマンド</summary>

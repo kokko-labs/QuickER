@@ -97,7 +97,7 @@ Call `get_diagram_summary` at any point to read back the current tables and rela
 
 ## Notes
 
-- **Do not edit a diagram over MCP while it is open in the GUI.** The GUI and the server each save the whole file, so concurrent edits overwrite each other. Keeping diagram files under git is recommended so changes stay reviewable.
+- **The GUI follows external changes.** When the server writes a diagram that is open in the GUI, the GUI notices and keeps up: if the GUI has no unsaved edits it reloads the file automatically (zoom and scroll position are preserved) and shows a brief status note. A conflict only arises when the GUI itself has unsaved changes and something else writes the file; in that single case the GUI asks whether to reload (discarding your unsaved edits) or keep editing. Keeping diagram files under git is still recommended so changes stay reviewable.
 - **DiagramDocument validation.** The editing tools refuse a file that does not exist, JSON that is not a `DiagramDocument` (an object with `Version` and `Schema`), and documents saved in a newer format version than this tool supports (to avoid discarding unknown data). `get_diagram_summary` still reads a newer-format document, with a warning.
 - **Layout is not written by the server.** A newly created file contains schema only (no coordinates), so opening it in the GUI auto-arranges all tables. Columns and tables added to an existing file are placed in free space the next time it is opened in the GUI.
 

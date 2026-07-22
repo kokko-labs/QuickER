@@ -129,6 +129,12 @@
   <data name="Toolbar_SaveTooltip" xml:space="preserve">
     <value>保存 (Ctrl+S)</value>
   </data>
+  <data name="Toolbar_SaveAs" xml:space="preserve">
+    <value>名前を付けて保存</value>
+  </data>
+  <data name="Toolbar_SaveAsTooltip" xml:space="preserve">
+    <value>名前を付けて保存 (Ctrl+Shift+S)</value>
+  </data>
   <data name="Toolbar_Undo" xml:space="preserve">
     <value>元に戻す</value>
   </data>
@@ -236,6 +242,18 @@
   </data>
   <data name="Status_FitTooltip" xml:space="preserve">
     <value>全体を表示 (Ctrl+Shift+0)</value>
+  </data>
+  <data name="Status_ExternalReloaded" xml:space="preserve">
+    <value>外部プログラムによる変更を検知し、再読込しました。</value>
+  </data>
+  <data name="Status_ExternalFileDeleted" xml:space="preserve">
+    <value>ファイルが外部で削除されました（監視は継続。保存で再作成されます）。</value>
+  </data>
+  <data name="Status_ExternalFileRenamed" xml:space="preserve">
+    <value>ファイルが外部でリネームされました（監視は継続。保存で再作成されます）。</value>
+  </data>
+  <data name="Status_ExternalReloadFailed" xml:space="preserve">
+    <value>外部変更されたファイルを再読込できませんでした（現在の図を維持します）。</value>
   </data>
   <data name="Toolbox_Title" xml:space="preserve">
     <value>ツールボックス</value>
@@ -458,6 +476,9 @@
   </data>
   <data name="Confirm_NewerDocumentFormat" xml:space="preserve">
     <value>このファイルはこのバージョンの QuickER が対応するより新しいフォーマット（v{0}。対応は v{1} まで）で保存されています。続行すると未対応のデータが失われる可能性があります。開きますか？</value>
+  </data>
+  <data name="Confirm_ExternalChangeReload" xml:space="preserve">
+    <value>ファイルが外部のプログラムで変更されました。再読込しますか？（再読込すると未保存の変更は破棄されます。）</value>
   </data>
   <data name="Relationship_DuplicateMessage" xml:space="preserve">
     <value>同じ関係のリレーションはすでに存在します。既存のリレーションを編集してください。</value>

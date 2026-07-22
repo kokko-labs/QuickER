@@ -115,6 +115,18 @@ public partial class MainViewModel
     private void FitToWindow() => RequestFitToWindow();
 
     /// <summary><see cref="FitToWindowRequested"/> を発火して View へ fit を要求する</summary>
-    /// <remarks>ファイル読込・取込・自動整列・AI 生成の直後にも共通で呼び出す</remarks>
-    private void RequestFitToWindow() => FitToWindowRequested?.Invoke(this, EventArgs.Empty);
+    /// <remarks>
+    /// ファイル読込・取込・自動整列・AI 生成の直後にも共通で呼び出す。
+    /// 外部変更の再読込経路（ステージ B）ではビューポート（ズーム・スクロール）を維持するため、
+    /// <see cref="_suppressFitToWindow"/> が立っている間は要求を発火しない。
+    /// </remarks>
+    private void RequestFitToWindow()
+    {
+        if (_suppressFitToWindow)
+        {
+            return;
+        }
+
+        FitToWindowRequested?.Invoke(this, EventArgs.Empty);
+    }
 }

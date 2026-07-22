@@ -201,7 +201,19 @@ namespace QuickER.Resources {
                 return ResourceManager.GetString("Toolbar_SaveTooltip", resourceCulture);
             }
         }
-        
+
+        public static string Toolbar_SaveAs {
+            get {
+                return ResourceManager.GetString("Toolbar_SaveAs", resourceCulture);
+            }
+        }
+
+        public static string Toolbar_SaveAsTooltip {
+            get {
+                return ResourceManager.GetString("Toolbar_SaveAsTooltip", resourceCulture);
+            }
+        }
+
         public static string Toolbar_Undo {
             get {
                 return ResourceManager.GetString("Toolbar_Undo", resourceCulture);
@@ -420,7 +432,31 @@ namespace QuickER.Resources {
                 return ResourceManager.GetString("Status_FitTooltip", resourceCulture);
             }
         }
-        
+
+        public static string Status_ExternalReloaded {
+            get {
+                return ResourceManager.GetString("Status_ExternalReloaded", resourceCulture);
+            }
+        }
+
+        public static string Status_ExternalFileDeleted {
+            get {
+                return ResourceManager.GetString("Status_ExternalFileDeleted", resourceCulture);
+            }
+        }
+
+        public static string Status_ExternalFileRenamed {
+            get {
+                return ResourceManager.GetString("Status_ExternalFileRenamed", resourceCulture);
+            }
+        }
+
+        public static string Status_ExternalReloadFailed {
+            get {
+                return ResourceManager.GetString("Status_ExternalReloadFailed", resourceCulture);
+            }
+        }
+
         public static string Toolbox_Title {
             get {
                 return ResourceManager.GetString("Toolbox_Title", resourceCulture);
@@ -919,6 +955,12 @@ namespace QuickER.Resources {
         public static string Confirm_NewerDocumentFormat {
             get {
                 return ResourceManager.GetString("Confirm_NewerDocumentFormat", resourceCulture);
+            }
+        }
+
+        public static string Confirm_ExternalChangeReload {
+            get {
+                return ResourceManager.GetString("Confirm_ExternalChangeReload", resourceCulture);
             }
         }
 
