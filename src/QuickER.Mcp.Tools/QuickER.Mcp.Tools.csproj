@@ -16,5 +16,7 @@
     <ProjectReference Include="..\QuickER.Model\QuickER.Model.csproj" />
     <ProjectReference Include="..\QuickER.Document\QuickER.Document.csproj" />
     <ProjectReference Include="..\QuickER.Mcp\QuickER.Mcp.csproj" />
+    <!-- 名前付きクエリ定義ツールの検証（DSL パーサ・生 SQL 静的検証）に使う。DB 非依存の Model のみ依存。 -->
+    <ProjectReference Include="..\QuickER.CodeGen.CSharp\QuickER.CodeGen.CSharp.csproj" />
   </ItemGroup>
 </Project>

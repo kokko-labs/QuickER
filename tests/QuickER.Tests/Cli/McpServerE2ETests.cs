@@ -62,7 +62,7 @@ public class McpServerE2ETests
         }
     }
 
-    [Fact(DisplayName = "quicker mcp は stdio で往復し 12 ツールを公開する")]
+    [Fact(DisplayName = "quicker mcp は stdio で往復し 15 ツールを公開する")]
     public async Task McpServer_RoundTripsOverStdio()
     {
         File.Exists(CliDllPath)
@@ -99,7 +99,7 @@ public class McpServerE2ETests
 
         try
         {
-            // --- ListTools: 12 ツール（ER 9 ＋ create_diagram ＋ generate_csharp ＋ generate_ddl）、全ツールに file パラメータ ---
+            // --- ListTools: 15 ツール（ER 9 ＋ create_diagram ＋ クエリ定義 3 ＋ generate_csharp ＋ generate_ddl）、全ツールに file パラメータ ---
             var tools = await client.ListToolsAsync(cancellationToken: cts.Token);
             var toolNames = tools.Select(t => t.Name).ToHashSet();
 
@@ -118,6 +118,9 @@ public class McpServerE2ETests
                         "add_relationship",
                         "remove_relationship",
                         "create_diagram",
+                        "set_query",
+                        "list_queries",
+                        "remove_query",
                         "generate_csharp",
                         "generate_ddl",
                     },
@@ -184,6 +187,37 @@ public class McpServerE2ETests
             summary.text.Should().Contain("Customer");
             summary.text.Should().Contain("Id");
             summary.text.Should().Contain("PK");
+
+            // --- set_query: 名前付きクエリ定義（DSL・件数・パラメータ付き） ---
+            var setQuery = await CallAsync(
+                client,
+                "set_query",
+                new()
+                {
+                    ["file"] = diagramFile,
+                    ["table_name"] = "Customer",
+                    ["query_name"] = "CountById",
+                    ["returns"] = "count",
+                    ["condition"] = "Id = @id",
+                    ["parameters"] = new object[]
+                    {
+                        new Dictionary<string, object?> { ["name"] = "id", ["type"] = "int32" },
+                    },
+                },
+                cts.Token
+            );
+            setQuery.isError.Should().BeFalse(setQuery.text);
+
+            // --- list_queries: 定義したクエリが一覧に出る ---
+            var listQueries = await CallAsync(
+                client,
+                "list_queries",
+                new() { ["file"] = diagramFile },
+                cts.Token
+            );
+            listQueries.isError.Should().BeFalse(listQueries.text);
+            listQueries.text.Should().Contain("CountById");
+            listQueries.text.Should().Contain("Customer");
 
             // --- generate_ddl: SQL ファイル生成確認 ---
             var ddl = await CallAsync(

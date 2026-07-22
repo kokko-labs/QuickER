@@ -34,7 +34,9 @@ public sealed class DocumentErDiagramToolSetTests : IDisposable
         }
     }
 
-    [Fact(DisplayName = "Create はカタログ 9 ツール＋create_diagram を公開する")]
+    [Fact(
+        DisplayName = "Create はカタログ 9 ツール＋create_diagram＋クエリ定義 3 ツールを公開する"
+    )]
     public void Create_ExposesAllTools()
     {
         var toolSet = DocumentErDiagramToolSet.Create();
@@ -43,6 +45,9 @@ public sealed class DocumentErDiagramToolSetTests : IDisposable
             .GetDefinitions()
             .Select(d => d.Name)
             .Append(DocumentErDiagramToolHost.CreateDiagramToolName)
+            .Append(DocumentErDiagramToolHost.SetQueryToolName)
+            .Append(DocumentErDiagramToolHost.ListQueriesToolName)
+            .Append(DocumentErDiagramToolHost.RemoveQueryToolName)
             .ToList();
 
         toolSet.Tools.Select(t => t.Name).Should().BeEquivalentTo(expected);

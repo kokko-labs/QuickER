@@ -35,7 +35,7 @@ stdio トランスポートに対応した MCP クライアントであれば利
 
 ## ツール
 
-サーバは 12 個のツールを公開します。ER 図編集の 10 個と、コード生成の 2 個です。**すべてのツールに `file` 引数が必要**です（図 JSON のパス。GUI の保存形式＝`DiagramDocument`）。下表にはそれ以外の引数を挙げます。必須の引数には ✅ を付けています。
+サーバは 15 個のツールを公開します。ER 図編集の 10 個・名前付きクエリの 3 個・コード生成の 2 個です。**すべてのツールに `file` 引数が必要**です（図 JSON のパス。GUI の保存形式＝`DiagramDocument`）。下表にはそれ以外の引数を挙げます。必須の引数には ✅ を付けています。
 
 ### ER 図編集
 
@@ -51,6 +51,28 @@ stdio トランスポートに対応した MCP クライアントであれば利
 | `set_column_property` | `table_name` ✅, `column_name` ✅, `description`, `data_type`, `is_nullable` | カラムの説明・データ型・NULL 許容を変更する（いずれか 1 つ以上を指定） |
 | `add_relationship` | `source_table` ✅, `target_table` ✅, `relationship_type` ✅（`OneToOne` / `OneToMany` / `ManyToMany`）, `source_column`, `target_column` | 2 テーブル間に外部キーを追加する。リレーションは 1 列を 1 列で参照する（複合外部キーは非対応） |
 | `remove_relationship` | `source_table` ✅, `target_table` ✅ | 2 テーブル間のリレーションを削除する |
+
+### 名前付きクエリ
+
+名前付きクエリは図に保存され、C# コード生成で Repository メソッドになります（[生成コードの使い方](code-generation.ja.md)を参照）。エンティティ・列は名前で指定し、ツール実行時に解決します。
+
+| ツール | 引数 | 説明 |
+|---|---|---|
+| `set_query` | `table_name` ✅, `query_name` ✅, `returns` ✅（`list` / `single` / `count` / `scalar` / `projection`）, `description`, `scalar_type`, `implementation`（`dsl` / `sql` / `manual`・既定 `dsl`）, `condition`, `sql`, `parameters`, `order_by`, `paging`, `result_type_name`, `fields` | テーブルにクエリを定義／置換（upsert）する。(`table_name`, `query_name`) で照合し、既存があれば丸ごと置換（Id は温存）、なければ追加する。保存前に検証し、エラー時はファイルを変更しない |
+| `list_queries` | — | 図のクエリをテーブル別に一覧する（戻り形・実装方式・条件／SQL の要約・パラメータ付き） |
+| `remove_query` | `table_name` ✅, `query_name` ✅ | クエリを 1 件削除する。不在の場合は失敗する |
+
+`set_query` のネスト引数:
+
+- `scalar_type` — `returns` = `scalar` のとき必須。方言中立の型トークン（例: `decimal(12,2)`）。
+- `condition` — 簡易 DSL の検索条件（比較・`AND`/`OR`/`NOT`・括弧・`IS [NOT] NULL`・`[NOT] LIKE`・`[NOT] IN`・`CONTAINS`/`STARTSWITH`/`ENDSWITH`）。`implementation` = `dsl` のとき使用（省略は無条件）。列名はテーブルの列を、`@名前` は宣言済みパラメータを指す。
+- `sql` — 方言名（`sqlserver` / `postgresql` / `mysql` / `oracle` / `sqlite`）→ 生 SQL 文字列の辞書。`implementation` = `sql` のとき使用。
+- `parameters` — `{ name` ✅ `, type, source_column, is_list }` の配列。`type`（方言中立トークン）と `source_column`（このテーブルの列。その生成型を使う）のどちらか一方を指定する。
+- `order_by` — `{ column` ✅ `, descending }` の配列（`returns` が `list` / `single` / `projection` のときのみ有効。`single` では並び替えて先頭 1 件を取得する）。
+- `paging` — 真偽値。真のとき `take` / `skip` 引数が追加される。
+- `result_type_name` / `fields` — `returns` = `projection` のとき必須。`fields` は `{ name` ✅ `, type, source_column, is_nullable }` の配列（`type` / `source_column` はどちらか一方）。
+
+検証は「実行時に必ず失敗するもの」には厳格・「衛生上の警告」には寛容です。簡易 DSL の構文エラー・未知の列や未宣言の `@パラメータ`・生 SQL の未宣言パラメータ・構造の不整合（`scalar_type` / `fields` の欠落、パラメータの `type` / `source_column` の両方指定または両方欠落、`order_by` の誤用、未知の SQL 方言）は保存を拒否します。未使用パラメータや複文の SQL は警告として報告し、保存は続行します。型トークンの内容はここでは検証せず、生成時に検証します。
 
 ### コード生成
 

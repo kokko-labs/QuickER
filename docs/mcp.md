@@ -35,7 +35,7 @@ Any MCP client that supports the stdio transport can use the server. Configure i
 
 ## Tools
 
-The server exposes 12 tools: 10 for ER diagram editing and 2 for code generation. **Every tool requires a `file` argument** (the path to the diagram JSON, i.e. the GUI save format / `DiagramDocument`); the tables below list the other arguments. Required arguments are marked ✅.
+The server exposes 15 tools: 10 for ER diagram editing, 3 for named queries, and 2 for code generation. **Every tool requires a `file` argument** (the path to the diagram JSON, i.e. the GUI save format / `DiagramDocument`); the tables below list the other arguments. Required arguments are marked ✅.
 
 ### ER diagram editing
 
@@ -51,6 +51,28 @@ The server exposes 12 tools: 10 for ER diagram editing and 2 for code generation
 | `set_column_property` | `table_name` ✅, `column_name` ✅, `description`, `data_type`, `is_nullable` | Change a column's description, data type, or nullability (specify at least one) |
 | `add_relationship` | `source_table` ✅, `target_table` ✅, `relationship_type` ✅ (`OneToOne` / `OneToMany` / `ManyToMany`), `source_column`, `target_column` | Add a foreign key between two tables. A relationship references exactly one column to one column (composite FKs are not supported) |
 | `remove_relationship` | `source_table` ✅, `target_table` ✅ | Remove the relationship between two tables |
+
+### Named queries
+
+Named queries are stored on the diagram and become repository methods when C# code is generated (see [using the generated code](code-generation.md)). Entities and columns are referenced by name and resolved when the tool runs.
+
+| Tool | Arguments | Description |
+|---|---|---|
+| `set_query` | `table_name` ✅, `query_name` ✅, `returns` ✅ (`list` / `single` / `count` / `scalar` / `projection`), `description`, `scalar_type`, `implementation` (`dsl` / `sql` / `manual`, default `dsl`), `condition`, `sql`, `parameters`, `order_by`, `paging`, `result_type_name`, `fields` | Define or replace (upsert) a query on a table. Matched by (`table_name`, `query_name`): an existing query is replaced wholesale (its id is preserved), otherwise a new one is added. The definition is validated before saving; on any error the file is left unchanged |
+| `list_queries` | — | List the queries in the diagram, grouped by table, with each query's return shape, implementation, condition/SQL summary, and parameters |
+| `remove_query` | `table_name` ✅, `query_name` ✅ | Remove a single query. Fails if no such query exists |
+
+`set_query`'s nested arguments:
+
+- `scalar_type` — required when `returns` = `scalar`; a dialect-neutral type token (e.g. `decimal(12,2)`).
+- `condition` — a mini-DSL search condition (comparisons, `AND`/`OR`/`NOT`, parentheses, `IS [NOT] NULL`, `[NOT] LIKE`, `[NOT] IN`, `CONTAINS`/`STARTSWITH`/`ENDSWITH`), used when `implementation` = `dsl` (omit for no filter). Column names refer to the table's columns; `@name` refers to a declared parameter.
+- `sql` — an object mapping a dialect name (`sqlserver` / `postgresql` / `mysql` / `oracle` / `sqlite`) to a raw SQL string, used when `implementation` = `sql`.
+- `parameters` — an array of `{ name` ✅ `, type, source_column, is_list }`. Give exactly one of `type` (a dialect-neutral token) or `source_column` (a column of this table, whose generated type is used).
+- `order_by` — an array of `{ column` ✅ `, descending }` (valid only when `returns` is `list`, `single`, or `projection`; with `single` it selects the first row).
+- `paging` — a boolean; when true, `take`/`skip` parameters are added.
+- `result_type_name` / `fields` — required when `returns` = `projection`. `fields` is an array of `{ name` ✅ `, type, source_column, is_nullable }` (again, exactly one of `type` or `source_column`).
+
+Validation is strict about anything that would fail at runtime and lenient about hygiene warnings: a mini-DSL syntax error, an unknown column or undeclared `@parameter`, an undeclared parameter in raw SQL, or a structural mismatch (missing `scalar_type`/`fields`, both or neither of a parameter's `type`/`source_column`, misused `order_by`, an unknown SQL dialect) refuses the save; an unused parameter or a multi-statement SQL is reported as a warning and the save proceeds. Type-token contents are not checked here — they are validated at generation time.
 
 ### Code generation
 

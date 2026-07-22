@@ -18,7 +18,7 @@ namespace QuickER.Mcp.Tools;
 /// <see cref="Relationship"/>（意味モデル）。Undo/Redo は概念ごと持たない。結果テキストはすべて英語。
 /// レイアウト（<see cref="DiagramDocument.Layout"/>）は原則温存し、削除エンティティの孤児レイアウトのみ除去する。
 /// </remarks>
-public static class DocumentErDiagramToolHost
+public static partial class DocumentErDiagramToolHost
 {
     /// <summary>作成専用ツール（既存ファイルを変更しない）の名前</summary>
     public const string CreateDiagramToolName = "create_diagram";
@@ -53,6 +53,9 @@ public static class DocumentErDiagramToolHost
             {
                 CreateDiagramToolName => CreateDiagram(file, arguments),
                 GetSummaryToolName => GetDiagramSummary(file),
+                ListQueriesToolName => ListQueries(file),
+                SetQueryToolName => Mutate(file, doc => SetQuery(doc, arguments)),
+                RemoveQueryToolName => Mutate(file, doc => RemoveQuery(doc, arguments)),
                 "add_entity" => Mutate(file, doc => AddEntity(doc, arguments)),
                 "remove_entity" => Mutate(file, doc => RemoveEntity(doc, arguments)),
                 "add_column" => Mutate(file, doc => AddColumn(doc, arguments)),
