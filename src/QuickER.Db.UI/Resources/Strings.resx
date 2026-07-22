@@ -278,6 +278,10 @@ Do you want to run this against {0}?</value>
   <data name="Db_ImportReplaceConfirm" xml:space="preserve">
     <value>This will replace the current diagram with the retrieved result. Are you sure?</value>
   </data>
+  <data name="Db_ImportBrokenQueriesWarning" xml:space="preserve">
+    <value>The following named queries reference tables or columns that no longer exist and will be deleted:
+{0}</value>
+  </data>
   <data name="Db_ImportFailed" xml:space="preserve">
     <value>Failed to import: {0}</value>
   </data>

@@ -378,6 +378,14 @@ public partial class MainViewModel
             _ => Strings.Format_File,
         };
 
+        // Excel 定義書は再取込のマージ（Guid 引継＝クエリ定義・手配置レイアウトの温存）に対応する。
+        // Mermaid / DBML は方言情報を持たず定義書用途でもないため、従来どおり丸ごと置換（クエリ消滅・全体整列）。
+        if (format == DiagramImportFormat.Excel)
+        {
+            ImportExcelMerging(diagram, displayName);
+            return;
+        }
+
         if (
             !ConfirmDiagramReplacement(
                 diagram.Entities,
@@ -389,18 +397,84 @@ public partial class MainViewModel
             return;
         }
 
-        // Excel 定義書は対象 DBMS を保持しているため方言も復元する
-        // （Mermaid / DBML は方言情報を持たないため現在のプロバイダを維持する）
-        if (format == DiagramImportFormat.Excel)
-        {
-            SetCurrentProviderFromDbms(diagram.TargetDbms);
-        }
-
         ReplaceDiagramWithoutHistory(diagram.Entities, diagram.Relationships, autoLayout: true);
         _dialogs.ShowInformation(
             string.Format(Strings.Import_Completed, displayName),
             Strings.Common_Complete
         );
+    }
+
+    /// <summary>Excel 定義書をマージ取込する（Guid 引継でクエリ定義・レイアウトを温存する）</summary>
+    /// <remarks>
+    /// 取込結果の Id を現在図へ寄せ、生存クエリ・レイアウト引継を <see cref="ReplaceDiagramFromModule"/> の
+    /// マージ経路に委ねる。Excel 定義書は Memo を保持するため、一致エンティティの Memo は取込値を正とする
+    /// （<c>preserveExistingMemo: false</c>）。壊れクエリがあれば確認メッセージへ削除対象名を付加する。
+    /// </remarks>
+    private void ImportExcelMerging(ErDiagram diagram, string displayName)
+    {
+        var merged = DiagramMergeReconciler.Reconcile(
+            ToDiagramModel(),
+            diagram.Entities,
+            diagram.Relationships,
+            preserveExistingMemo: false
+        );
+
+        if (
+            !ConfirmMergedReplacement(
+                merged,
+                string.Format(Strings.Import_ReplaceConfirm, displayName)
+            )
+        )
+        {
+            return;
+        }
+
+        // Excel 定義書は対象 DBMS を保持しているため方言も復元する（ReplaceDiagramFromModule 内で採用）。
+        // 生存クエリのみを引き継ぐ（壊れクエリは確認のうえ削除済み）。
+        var mergedDiagram = new ErDiagram
+        {
+            Entities = merged.Entities.ToList(),
+            Relationships = merged.Relationships.ToList(),
+            TargetDbms = diagram.TargetDbms,
+            Queries = merged.SurvivingQueries.ToList(),
+        };
+        ReplaceDiagramFromModule(mergedDiagram);
+
+        _dialogs.ShowInformation(
+            string.Format(Strings.Import_Completed, displayName),
+            Strings.Common_Complete
+        );
+    }
+
+    /// <summary>マージ取込用の置換確認（構造同一かつ壊れクエリなしなら無確認・壊れクエリは削除対象名を付加する）</summary>
+    /// <returns>置換を続行してよい場合 true</returns>
+    private bool ConfirmMergedReplacement(DiagramMergeResult merged, string message)
+    {
+        var structurallySame =
+            Entities.Count == 0 || HasSameStructure(merged.Entities, merged.Relationships);
+
+        // 構造同一かつ壊れクエリなしなら従来どおり無確認で続行する
+        if (structurallySame && merged.BrokenQueries.Count == 0)
+        {
+            return true;
+        }
+
+        // 壊れクエリがあれば削除対象のクエリ名を確認メッセージへ付加する（キャンセルで取込中止）
+        var fullMessage =
+            merged.BrokenQueries.Count > 0
+                ? message
+                    + Environment.NewLine
+                    + Environment.NewLine
+                    + string.Format(
+                        Strings.Import_BrokenQueriesWarning,
+                        string.Join(
+                            Environment.NewLine,
+                            merged.BrokenQueries.Select(query => "- " + query.Name)
+                        )
+                    )
+                : message;
+
+        return _dialogs.Confirm(fullMessage, Strings.Common_Confirm);
     }
 
     /// <summary>ファイル拡張子を優先し、無ければフィルター選択から出力形式を判定する</summary>
