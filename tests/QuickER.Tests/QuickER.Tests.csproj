@@ -17,6 +17,8 @@
     <ProjectReference Include="..\..\src\QuickER.PostgreSql\QuickER.PostgreSql.csproj" />
     <ProjectReference Include="..\..\src\QuickER.Provider\QuickER.Provider.csproj" />
     <ProjectReference Include="..\..\src\QuickER.Sqlite\QuickER.Sqlite.csproj" />
+    <ProjectReference Include="..\..\src\QuickER.Mcp\QuickER.Mcp.csproj" />
+    <ProjectReference Include="..\..\src\QuickER.Mcp.Tools\QuickER.Mcp.Tools.csproj" />
     <ProjectReference Include="..\..\src\QuickER.Gui\QuickER.Gui.csproj" />
   </ItemGroup>
 

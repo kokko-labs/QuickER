@@ -25,6 +25,7 @@ Draw an ER diagram → create a database → generate C# data-access code and ru
 - **Rich import/export** — import: DBML / Mermaid / Excel definition sheets / live DBs (5 dialects) / C# code (a file generated with IncludeDataAnnotations ON). Export: PNG / SVG / SQL DDL / Mermaid / DBML / Excel definition sheets / HTML definition documents / Schema JSON (layout-free, re-importable) / vector printing (scale-to-one-page and actual-size PDF)
 - **git-friendly save format** — a single JSON file that separates the semantic model (table definitions) from the visual information (coordinates and colors)
 - **CLI (dotnet tool)** — generate code without the GUI. `quicker generate` (ER diagram JSON → code) / `quicker scaffold` (direct DB → code) / `quicker reverse` (generated C# → ER diagram JSON)
+- **MCP server (for AI agents)** — `quicker mcp` runs a stdio MCP server so an external AI agent (Claude Code, Codex, and so on) can create and edit ER diagrams and generate code as part of its own workflow. See [docs/mcp.md](docs/mcp.md)
 
 ## Supported DBMS
 
@@ -167,6 +168,7 @@ dotnet test QuickER.slnx         # all tests (real-DB integration tests also run
 - [CLI reference (generate / scaffold, quicker.json)](docs/cli.md)
 - [Using the generated code (Repository API, EF Core, runtime packages)](docs/code-generation.md)
 - [Configuring AI chat](docs/ai-chat.md)
+- [MCP server for AI agents (quicker mcp)](docs/mcp.md)
 - [The working sample (EC order domain)](samples/ec-order/README.md)
 - [The working sample (3-tier — client → HTTP+JSON → server → SQLite)](samples/ec-order-remote/README.md)
 

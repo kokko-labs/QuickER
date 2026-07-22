@@ -48,19 +48,45 @@ internal static class GenerationConfigLoader
         GenerationOptionSet generation
     )
     {
-        var node = config is { Exists: true }
-            ? JsonNode.Parse(File.ReadAllText(config.FullName))?.AsObject() ?? new JsonObject()
-            : new JsonObject();
+        var node = LoadConfigNode(config);
 
         // 表駆動: CLI で指定された各フラグ（null でないもの・OutputPath 含む）だけを設定 JSON の該当キーへ上書きする
         generation.ApplyOverrides(parseResult, node);
 
-        // 後処理1: RepositoryDialects の特例（フラグ・設定ファイルとも未指定なら図の方言で単一導出する）
-        var repositoryDialects = parseResult.GetValue(generation.RepositoryDialects);
+        return BuildOptions(node, provider, parseResult.GetValue(generation.RepositoryDialects));
+    }
 
-        if (!string.IsNullOrWhiteSpace(repositoryDialects))
+    /// <summary>
+    /// ParseResult 非依存で、設定ファイル（<paramref name="config"/>）＋既定値のみから生成オプションを構築する。
+    /// CLI の <see cref="ParseResult"/> を経由しない経路（MCP の generate_csharp ツール等）が使う。
+    /// CLI フラグによる上書きはなく、<c>--repository-dialects</c> は未指定扱い（設定ファイルに無ければ
+    /// <paramref name="provider"/> の方言で単一導出する）。
+    /// </summary>
+    public static CodeGenerationOptions LoadOptions(FileInfo? config, IDatabaseProvider provider) =>
+        BuildOptions(LoadConfigNode(config), provider, repositoryDialectsFlag: null);
+
+    /// <summary>設定ファイル（quicker.json）を JsonObject として読み込む（無指定・不在なら空オブジェクト）</summary>
+    private static JsonObject LoadConfigNode(FileInfo? config) =>
+        config is { Exists: true }
+            ? JsonNode.Parse(File.ReadAllText(config.FullName))?.AsObject() ?? new JsonObject()
+            : new JsonObject();
+
+    /// <summary>
+    /// 設定 JSON ノードから <see cref="CodeGenerationOptions"/> を組み立てる共通後処理。
+    /// (1) RepositoryDialects の特例（<paramref name="repositoryDialectsFlag"/> 指定時はそれを採用・
+    /// 未指定かつ設定ファイルにも無ければ <paramref name="provider"/> の方言で単一導出）、(2) OutputPath →
+    /// OutputFileName の導出、(3) デシリアライズ、(4) 対応方言の検証を行う。
+    /// </summary>
+    private static CodeGenerationOptions BuildOptions(
+        JsonObject node,
+        IDatabaseProvider provider,
+        string? repositoryDialectsFlag
+    )
+    {
+        // 後処理1: RepositoryDialects の特例（フラグ・設定ファイルとも未指定なら図の方言で単一導出する）
+        if (!string.IsNullOrWhiteSpace(repositoryDialectsFlag))
         {
-            var dialects = repositoryDialects
+            var dialects = repositoryDialectsFlag
                 .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                 .ToList();
             SetNodeValue(

@@ -468,7 +468,8 @@ public partial class MainViewModel : ObservableObject
     /// <para>方言採用の後、マージ取込（Guid 引継）に対応したレイアウト・クエリ透過ロジックで置換する。</para>
     /// <list type="bullet">
     /// <item>新図と現在図に同一 Id のエンティティが 1 件以上あれば（＝マージ取込）: 一致分の現在レイアウト
-    /// （位置・色・幅）を引き継ぎ自動整列しない。新規エンティティのみ幅を自動調整する（一致分の保存幅は尊重）。
+    /// （位置・色・幅）を引き継ぎ自動整列しない。新規エンティティは幅を自動調整したうえで、一致分を固定群として
+    /// 空き領域へ追記配置する（<see cref="AutoLayoutService.LayoutAppend"/>＝一致分は不動・新規のみ配置）。
     /// クエリ（<see cref="ErDiagram.Queries"/>）はそのまま引き継ぐ</item>
     /// <item>一致が 1 件も無ければ（＝AI 生成・全新規取込）: 従来どおり全体を自動整列する。クエリは空でも
     /// 与えられていれば引き継ぐ（新規 Guid のみの経路では通常空）</item>
@@ -511,10 +512,19 @@ public partial class MainViewModel : ObservableObject
             diagram.Queries
         );
 
-        // 新規エンティティ（レイアウト未継承）のみ幅を自動調整する。一致分の保存幅は尊重する
+        // 新規エンティティ（レイアウト未継承）のみ幅を自動調整し、一致分を固定群として空き領域へ追記配置する
+        // （一致分の保存幅・位置は尊重し不動。新規は原点に積まず既存の隣接領域へ格子配置する）
         _changeTracker.RunWithoutTracking(() =>
         {
-            AutoFitEntityWidths(Entities.Where(entity => !matchedIds.Contains(entity.Id)));
+            var newEntities = Entities.Where(entity => !matchedIds.Contains(entity.Id)).ToList();
+            AutoFitEntityWidths(newEntities);
+
+            if (newEntities.Count > 0)
+            {
+                var placed = Entities.Where(entity => matchedIds.Contains(entity.Id)).ToList();
+                AutoLayoutService.LayoutAppend(placed, newEntities, Relationships);
+            }
+
             RefreshCanvasSize();
         });
     }

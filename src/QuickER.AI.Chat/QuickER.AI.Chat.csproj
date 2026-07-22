@@ -18,6 +18,7 @@
     <ProjectReference Include="..\QuickER.Extensibility\QuickER.Extensibility.csproj" />
     <ProjectReference Include="..\QuickER.Gui.Abstractions\QuickER.Gui.Abstractions.csproj" />
     <ProjectReference Include="..\QuickER.Gui.Common\QuickER.Gui.Common.csproj" />
+    <ProjectReference Include="..\QuickER.Mcp\QuickER.Mcp.csproj" />
   </ItemGroup>
 
   <!--

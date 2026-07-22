@@ -2,11 +2,12 @@ using System.Text.Json;
 using Anthropic.Models.Messages;
 using FluentAssertions;
 using QuickER.AI;
+using QuickER.Mcp;
 
 namespace QuickER.Tests.AI;
 
 /// <summary>
-/// <see cref="ChatToolConverter"/> の中立ツール定義（<see cref="CodexDynamicToolDefinition"/>）→
+/// <see cref="ChatToolConverter"/> の中立ツール定義（<see cref="ToolDefinition"/>）→
 /// 各 LLM SDK 形式（OpenAI <see cref="OpenAI.Chat.ChatTool"/> / Anthropic <see cref="Tool"/>）変換を
 /// 検証するテストクラス。変換結果の構造（名前・説明・パラメータスキーマの JSON 形）を直接確認する。
 /// </summary>
@@ -21,7 +22,7 @@ public class ChatToolConverterTests
     /// System.Text.Json は「ルート値の実行時型」で直列化するため、匿名型ツリーは全プロパティが正しく出力される
     /// （途中の object 化を避けるため入れ子も匿名型で構築している）。
     /// </summary>
-    private static CodexDynamicToolDefinition MakeDefinition() =>
+    private static ToolDefinition MakeDefinition() =>
         new()
         {
             Name = "add_entity",
@@ -42,7 +43,7 @@ public class ChatToolConverterTests
     [Fact(DisplayName = "ToOpenAiTools は name/description/パラメータスキーマを写す")]
     public void ToOpenAiTools_MapsNameDescriptionAndParameters()
     {
-        var definitions = new List<CodexDynamicToolDefinition> { MakeDefinition() };
+        var definitions = new List<ToolDefinition> { MakeDefinition() };
 
         var tools = ChatToolConverter.ToOpenAiTools(definitions);
 
@@ -74,7 +75,7 @@ public class ChatToolConverterTests
     [Fact(DisplayName = "ToOpenAiTools は複数定義を順序保持で変換する")]
     public void ToOpenAiTools_PreservesOrderAndCount()
     {
-        var definitions = new List<CodexDynamicToolDefinition>
+        var definitions = new List<ToolDefinition>
         {
             new()
             {
@@ -99,7 +100,7 @@ public class ChatToolConverterTests
     [Fact(DisplayName = "ToAnthropicTools は name/description と properties/required を写す")]
     public void ToAnthropicTools_MapsNameDescriptionAndSchema()
     {
-        var definitions = new List<CodexDynamicToolDefinition> { MakeDefinition() };
+        var definitions = new List<ToolDefinition> { MakeDefinition() };
 
         var tools = ChatToolConverter.ToAnthropicTools(definitions);
 
@@ -129,7 +130,7 @@ public class ChatToolConverterTests
     [Fact(DisplayName = "ToAnthropicTools はスキーマ欠落時に空 properties/required を生成する")]
     public void ToAnthropicTools_MissingPropertiesAndRequired_ProducesEmpty()
     {
-        var definitions = new List<CodexDynamicToolDefinition>
+        var definitions = new List<ToolDefinition>
         {
             new()
             {
@@ -150,7 +151,7 @@ public class ChatToolConverterTests
     [Fact(DisplayName = "空の定義一覧は空のツール一覧になる")]
     public void EmptyDefinitions_ProduceEmptyToolLists()
     {
-        var empty = new List<CodexDynamicToolDefinition>();
+        var empty = new List<ToolDefinition>();
 
         ChatToolConverter.ToOpenAiTools(empty).Should().BeEmpty();
         ChatToolConverter.ToAnthropicTools(empty).Should().BeEmpty();

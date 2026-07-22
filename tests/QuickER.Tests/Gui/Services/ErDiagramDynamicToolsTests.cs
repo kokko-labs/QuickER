@@ -416,7 +416,7 @@ public class ErDiagramDynamicToolsTests
         relationship.TargetColumnId.Should().Be(originalTargetColumnId);
     }
 
-    /// <summary>ツール説明文に複合キー禁止の設計ルールが含まれることを検証する（AI への指示はツール説明文経由のため）</summary>
+    /// <summary>ツール説明文（英語）に複合キー禁止の設計ルールが含まれることを検証する（AI への指示はツール説明文経由のため）</summary>
     [Fact(DisplayName = "ツール説明文に複合PK・複合FKの禁止ルールが含まれる")]
     public void GetDefinitions_DescriptionsContainCompositeKeyProhibition()
     {
@@ -425,15 +425,15 @@ public class ErDiagramDynamicToolsTests
         definitions
             .Single(d => d.Name == "add_column")
             .Description.Should()
-            .Contain(ErDesignRules.SinglePrimaryKeyRule);
+            .Contain("composite primary keys are not allowed");
         definitions
             .Single(d => d.Name == "add_relationship")
             .Description.Should()
-            .Contain(ErDesignRules.SingleColumnForeignKeyRule);
+            .Contain("composite foreign keys are not allowed");
         definitions
             .Single(d => d.Name == "add_entity")
             .Description.Should()
-            .Contain("主キー列を 1 列だけ");
+            .Contain("exactly one primary key column");
     }
 
     /// <summary>OpenAI Function Calling 用の ChatTool 変換が、全ツールを名前付きで生成することを検証する</summary>

@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
+using QuickER.Mcp;
 
 namespace QuickER.AI;
 
@@ -92,22 +93,6 @@ public sealed class CodexJsonRpcNotification
     public JsonElement? Params { get; init; }
 }
 
-/// <summary>Codex App Server へ登録する動的ツール定義</summary>
-public sealed class CodexDynamicToolDefinition
-{
-    /// <summary>ツール名</summary>
-    public required string Name { get; init; }
-
-    /// <summary>ツールの説明</summary>
-    public required string Description { get; init; }
-
-    /// <summary>遅延ロードするかどうか</summary>
-    public bool DeferLoading { get; init; } = true;
-
-    /// <summary>入力 JSON Schema</summary>
-    public required object InputSchema { get; init; }
-}
-
 /// <summary>スレッド開始時の設定</summary>
 public sealed class CodexThreadStartOptions
 {
@@ -127,7 +112,7 @@ public sealed class CodexThreadStartOptions
     public string? Sandbox { get; init; }
 
     /// <summary>動的ツール定義</summary>
-    public IReadOnlyList<CodexDynamicToolDefinition>? DynamicTools { get; init; }
+    public IReadOnlyList<ToolDefinition>? DynamicTools { get; init; }
 
     /// <summary>開発者指示（Codex の基本プロンプトへ追加されるアプリ固有の指示。null なら送らない）</summary>
     public string? DeveloperInstructions { get; init; }

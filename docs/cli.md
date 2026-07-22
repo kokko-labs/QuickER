@@ -2,12 +2,13 @@
 
 *[日本語](cli.ja.md) | English*
 
-The QuickER CLI provides two subcommands.
+The QuickER CLI provides subcommands for generating code (`generate` / `scaffold`), reverse-engineering a diagram from generated C# (`reverse`), and running an MCP server for AI agents (`mcp`, see [MCP server](mcp.md)).
 
 | Command | Input | Output |
 |---|---|---|
 | `quicker generate` | ER diagram JSON (the GUI save format) | C# code |
 | `quicker scaffold` | Database connection string (imports the schema directly) | C# code |
+| `quicker reverse` | Generated C# source (`.g.cs`) | Schema-only ER diagram JSON |
 
 The CLI display language follows the OS language setting (Japanese / English).
 
@@ -47,6 +48,16 @@ quicker scaffold --connection "Server=.;Database=Shop;Integrated Security=true;T
 | `--connection <string>` | ✅ | The connection string (the format follows the DBMS of `--provider`) |
 
 The other options (`--out` / `--config` / `--provider`, and the kebab-case flags named after the settings keys) are the same as for `generate`.
+
+## quicker mcp
+
+Starts a stdio MCP (Model Context Protocol) server that exposes ER diagram editing and code generation tools to AI agents (Claude Code, Codex, and so on). It takes no options and is stateless: each tool takes the target diagram file as its `file` argument.
+
+```powershell
+quicker mcp
+```
+
+The agent launches this as a child process and communicates over stdin/stdout (JSON-RPC). For the full tool list, client setup, and notes, see [MCP server](mcp.md).
 
 ## Settings file (quicker.json)
 

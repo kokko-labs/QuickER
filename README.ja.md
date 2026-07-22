@@ -18,6 +18,7 @@ QuickER は、ER モデルの設計、実データベースとの取込・差分
 - Entity / EditModel / Mapper / Repository / EF Core コードを生成
 - 実データベースからのスキーマ取込と差分同期
 - AI チャットによる ER モデルの生成・編集
+- MCP サーバによる AI エージェント（Claude Code・Codex 等）連携
 - DBML / Mermaid / Excel 定義書との入出力
 - git で差分を管理できる JSON 保存形式
 - GUI と CLI の両方から利用可能
@@ -345,6 +346,7 @@ QuickER は、ER モデルをデータベース、コード、ドキュメント
 - [CLI リファレンス](docs/cli.ja.md)
 - [生成コードの使い方](docs/code-generation.ja.md)
 - [AI チャットの設定](docs/ai-chat.ja.md)
+- [MCP サーバ（quicker mcp）](docs/mcp.ja.md)
 - [EC 注文サンプル](samples/ec-order/README.ja.md)
 - [3 階層構成サンプル](samples/ec-order-remote/README.ja.md)
 - [変更履歴](CHANGELOG.ja.md)

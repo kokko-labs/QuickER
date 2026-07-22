@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- 中立（既定）リソースのカルチャ＝英語（他プロジェクトに倣う） -->
+    <NeutralResourcesLanguage>en</NeutralResourcesLanguage>
+  </PropertyGroup>
+
+  <!--
+    MCP サーバ基盤。stdio トランスポートのホスティングに Microsoft.Extensions.Hosting、
+    MCP プロトコル実装に ModelContextProtocol（AspNetCore は使わず基底パッケージ）を用いる。
+    ツール定義は純粋なスキーマ POCO のため Model にも依存しない。
+  -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.7" />
+    <PackageReference Include="ModelContextProtocol" Version="1.4.0" />
+  </ItemGroup>
+</Project>

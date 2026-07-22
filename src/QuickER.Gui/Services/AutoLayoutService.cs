@@ -274,6 +274,213 @@ public static class AutoLayoutService
         PlaceAtCenters(entities, centers);
     }
 
+    /// <summary>既存配置を一切動かさず、レイアウトの無い新規エンティティのみを空き領域へ格子状に追記配置する</summary>
+    /// <remarks>
+    /// 外部ツール（MCP サーバ等）がエンティティだけを追記し視覚情報を書かない文書や、再取込マージで新規テーブルが
+    /// 加わった場合に、既存エンティティの位置を保ったまま欠落分だけを配置するために使う。
+    /// <list type="number">
+    ///   <item>固定群の外接矩形の下または右のうち、合成後の占有面積が小さくなる側を選ぶ</item>
+    ///   <item>選んだ側の起点から <see cref="GapX"/>/<see cref="GapY"/> 準拠の格子で新規を並べる
+    ///   （新規を固定の外接矩形の外側の領域へ限定するため、新規同士・新規と固定の矩形重なりはゼロになる）</item>
+    ///   <item>固定エンティティと接続する新規は、接続先の座標（下配置なら X・右配置なら Y）で並べ替え、
+    ///   接続先に近い列/行へ寄せる（バリセンタ寄せ）</item>
+    /// </list>
+    /// 既存メソッド（Grid/Tree/ForceDirected）と異なり固定群の座標は読むだけで書き換えない 乱数を使わないため決定的
+    /// </remarks>
+    /// <param name="fixedEntities">座標を変更してはならない既存エンティティ（読み取りのみ）</param>
+    /// <param name="newEntities">空き領域へ配置する新規エンティティ（これらの X/Y のみ書き換える）</param>
+    /// <param name="relationships">リレーション一覧（新規↔固定の接続でバリセンタ寄せに使う。無向として扱う）</param>
+    public static void LayoutAppend(
+        IList<EntityViewModel> fixedEntities,
+        IList<EntityViewModel> newEntities,
+        IList<RelationshipViewModel> relationships
+    )
+    {
+        if (newEntities.Count == 0)
+        {
+            return;
+        }
+
+        // 固定群が無ければ追記先の基準が無いため、新規を左上から格子配置する（全欠落フォールバック相当）
+        if (fixedEntities.Count == 0)
+        {
+            PlaceInGrid(newEntities, ResolveColumns(newEntities.Count, 0));
+            return;
+        }
+
+        // 固定群の外接矩形 この矩形の外側にだけ新規を置けば固定との重なりは起きない
+        var fx0 = fixedEntities.Min(e => e.X);
+        var fy0 = fixedEntities.Min(e => e.Y);
+        var fx1 = fixedEntities.Max(e => e.X + e.Width);
+        var fy1 = fixedEntities.Max(e => e.Y + e.DisplayHeight);
+        var fixedW = fx1 - fx0;
+        var fixedH = fy1 - fy0;
+
+        // 新規ブロックの区画数（列 or 行）は要素数の平方根で正方形に近づける
+        var lanes = ResolveColumns(newEntities.Count, 0);
+
+        // 下配置（rowMajor: lanes 列）・右配置（colMajor: lanes 行）それぞれのブロック寸法を見積もる
+        var (belowW, belowH) = LayoutGridBlock(
+            newEntities,
+            lanes,
+            rowMajor: true,
+            0,
+            0,
+            apply: false
+        );
+        var (rightW, rightH) = LayoutGridBlock(
+            newEntities,
+            lanes,
+            rowMajor: false,
+            0,
+            0,
+            apply: false
+        );
+
+        // 合成後の占有面積が小さくなる側へ寄せる（同点は下＝縦方向の成長を優先）
+        var belowArea = Math.Max(fixedW, belowW) * (fixedH + GapY + belowH);
+        var rightArea = (fixedW + GapX + rightW) * Math.Max(fixedH, rightH);
+        var placeBelow = belowArea <= rightArea;
+
+        // 固定と接続する新規を接続先座標（下配置=X 基準・右配置=Y 基準）で並べ替え、接続先に近い列/行へ寄せる
+        var ordered = OrderByFixedBarycenter(
+            fixedEntities,
+            newEntities,
+            relationships,
+            useX: placeBelow
+        );
+
+        if (placeBelow)
+        {
+            LayoutGridBlock(ordered, lanes, rowMajor: true, fx0, fy1 + GapY, apply: true);
+        }
+        else
+        {
+            LayoutGridBlock(ordered, lanes, rowMajor: false, fx1 + GapX, fy0, apply: true);
+        }
+    }
+
+    /// <summary>格子ブロックの列幅・行高を求め、必要なら原点基準で各エンティティの左上座標を設定する</summary>
+    /// <remarks>
+    /// <paramref name="rowMajor"/> が真: 番号 i を col=i%lanes, row=i/lanes（lanes=列数）へ。
+    /// 偽: row=i%lanes, col=i/lanes（lanes=行数）へ。列幅・行高は <see cref="PlaceInGrid"/> と同じく
+    /// 該当セルの最大サイズ＋ギャップで求めるため、可変サイズでも重ならない。
+    /// 返り値は末尾のギャップを除いたブロックの実占有幅・高さ。
+    /// </remarks>
+    private static (double Width, double Height) LayoutGridBlock(
+        IList<EntityViewModel> ordered,
+        int lanes,
+        bool rowMajor,
+        double originX,
+        double originY,
+        bool apply
+    )
+    {
+        var count = ordered.Count;
+        var otherLanes = (int)Math.Ceiling((double)count / lanes);
+        var cols = rowMajor ? lanes : otherLanes;
+        var rows = rowMajor ? otherLanes : lanes;
+        var colWidths = new double[cols];
+        var rowHeights = new double[rows];
+
+        for (var i = 0; i < count; i++)
+        {
+            var (c, r) = CellOf(i, lanes, rowMajor);
+            colWidths[c] = Math.Max(colWidths[c], ordered[i].Width + GapX);
+            rowHeights[r] = Math.Max(rowHeights[r], ordered[i].DisplayHeight + GapY);
+        }
+
+        if (apply)
+        {
+            for (var i = 0; i < count; i++)
+            {
+                var (c, r) = CellOf(i, lanes, rowMajor);
+                var x = originX;
+
+                for (var ci = 0; ci < c; ci++)
+                {
+                    x += colWidths[ci];
+                }
+
+                var y = originY;
+
+                for (var ri = 0; ri < r; ri++)
+                {
+                    y += rowHeights[ri];
+                }
+
+                ordered[i].X = x;
+                ordered[i].Y = y;
+            }
+        }
+
+        // ブロック外寸は末尾セルのギャップを除いた実占有幅・高さ
+        var width = colWidths.Sum() - (cols > 0 ? GapX : 0);
+        var height = rowHeights.Sum() - (rows > 0 ? GapY : 0);
+        return (width, height);
+    }
+
+    /// <summary>格子番号を列・行へ変換する（rowMajor は列が先に進み、colMajor は行が先に進む）</summary>
+    private static (int Col, int Row) CellOf(int i, int lanes, bool rowMajor) =>
+        rowMajor ? (i % lanes, i / lanes) : (i / lanes, i % lanes);
+
+    /// <summary>固定エンティティと接続する新規を接続先座標で並べ替える（接続先に近い列/行へ寄せるバリセンタ）</summary>
+    /// <remarks>
+    /// 固定と接続する新規は接続先中心の平均（<paramref name="useX"/>: X 座標・偽なら Y 座標）で昇順、
+    /// 固定と接続しない新規は元の順序のまま後段へ置く（LINQ の安定ソート）。新規同士の接続は寄せ対象にしない。
+    /// </remarks>
+    private static List<EntityViewModel> OrderByFixedBarycenter(
+        IList<EntityViewModel> fixedEntities,
+        IList<EntityViewModel> newEntities,
+        IList<RelationshipViewModel> relationships,
+        bool useX
+    )
+    {
+        var fixedSet = new HashSet<EntityViewModel>(fixedEntities);
+        var newSet = new HashSet<EntityViewModel>(newEntities);
+
+        // 新規 → 接続する固定エンティティの座標和・件数（平均＝バリセンタ算出用）
+        var sum = new Dictionary<EntityViewModel, double>();
+        var cnt = new Dictionary<EntityViewModel, int>();
+
+        foreach (var r in relationships)
+        {
+            EntityViewModel? newEnd = null;
+            EntityViewModel? fixedEnd = null;
+
+            if (newSet.Contains(r.Source) && fixedSet.Contains(r.Target))
+            {
+                newEnd = r.Source;
+                fixedEnd = r.Target;
+            }
+            else if (newSet.Contains(r.Target) && fixedSet.Contains(r.Source))
+            {
+                newEnd = r.Target;
+                fixedEnd = r.Source;
+            }
+
+            if (newEnd is null || fixedEnd is null)
+            {
+                continue;
+            }
+
+            var center = useX
+                ? fixedEnd.X + fixedEnd.Width / 2
+                : fixedEnd.Y + fixedEnd.DisplayHeight / 2;
+            sum[newEnd] = (sum.TryGetValue(newEnd, out var s) ? s : 0) + center;
+            cnt[newEnd] = (cnt.TryGetValue(newEnd, out var c) ? c : 0) + 1;
+        }
+
+        // 接続あり（バリセンタ昇順）を先、接続なし（元順）を後 いずれも安定・決定的
+        return newEntities
+            .Select((e, i) => (Entity: e, Index: i))
+            .OrderBy(t => cnt.ContainsKey(t.Entity) ? 0 : 1)
+            .ThenBy(t => cnt.TryGetValue(t.Entity, out var c) ? sum[t.Entity] / c : 0.0)
+            .ThenBy(t => t.Index)
+            .Select(t => t.Entity)
+            .ToList();
+    }
+
     /// <summary>力学モデルのシミュレーションを実行し全エンティティの中心座標を返す</summary>
     /// <remarks>
     /// サイズ計算 → 円環状の初期配置 → 反発・引力・重力の力学反復 → 重心寄せコンパクション → 辺の軸整列 → 矩形重なり解消までを担い、

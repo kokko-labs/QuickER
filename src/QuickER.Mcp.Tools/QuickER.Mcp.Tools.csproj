@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- 中立（既定）リソースのカルチャ＝英語（他プロジェクトに倣う） -->
+    <NeutralResourcesLanguage>en</NeutralResourcesLanguage>
+  </PropertyGroup>
+
+  <!--
+    ファイルベースの ER 図ツール実行ホスト。ステートレスな MCP サーバ用に、各ツール呼び出しを
+    「図 JSON の読込 → 意味モデル変更 → 保存」で完結させる。ツール定義の正本は QuickER.Mcp が持ち、
+    実行対象は VM ではなく QuickER.Model / QuickER.Document（DiagramDocument）。
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\QuickER.Model\QuickER.Model.csproj" />
+    <ProjectReference Include="..\QuickER.Document\QuickER.Document.csproj" />
+    <ProjectReference Include="..\QuickER.Mcp\QuickER.Mcp.csproj" />
+  </ItemGroup>
+</Project>

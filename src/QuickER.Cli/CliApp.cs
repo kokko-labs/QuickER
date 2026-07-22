@@ -2,6 +2,8 @@ using System.CommandLine;
 using QuickER.Cli.Resources;
 using QuickER.CodeReverse.CSharp;
 using QuickER.Documents;
+using QuickER.Mcp;
+using QuickER.Mcp.Tools;
 using QuickER.Model;
 using QuickER.Provider;
 using QuickER.SqlServer;
@@ -9,8 +11,8 @@ using QuickER.SqlServer;
 namespace QuickER.Cli;
 
 /// <summary>
-/// quicker CLI のエントリポイント。<c>generate</c>（ER図JSON→コード）と
-/// <c>scaffold</c>（DB直結→コード）の 2 サブコマンドを提供する。
+/// quicker CLI のエントリポイント。<c>generate</c>（ER図JSON→コード）・<c>scaffold</c>（DB直結→コード）・
+/// <c>reverse</c>（C#→ER図）・<c>mcp</c>（stdio MCP サーバ）のサブコマンドを提供する。
 /// </summary>
 public static class CliApp
 {
@@ -23,6 +25,7 @@ public static class CliApp
         root.Subcommands.Add(BuildGenerateCommand());
         root.Subcommands.Add(BuildScaffoldCommand());
         root.Subcommands.Add(BuildReverseCommand());
+        root.Subcommands.Add(BuildMcpCommand());
         return root.Parse(args).InvokeAsync();
     }
 
@@ -317,6 +320,43 @@ public static class CliApp
         JsonStorageService.Save(output.FullName, document);
 
         Console.WriteLine(string.Format(Strings.Cli_ReverseWritten, output.FullName));
+
+        return 0;
+    }
+
+    // ---------------- mcp ----------------
+
+    private static Command BuildMcpCommand()
+    {
+        // オプションなし（ステートレス設計。対象ファイルは各ツール呼び出しの file 引数で受ける）
+        var command = new Command("mcp", Strings.Cli_Cmd_Mcp);
+
+        command.SetAction((_, cancellationToken) => RunMcpAsync(cancellationToken));
+
+        return command;
+    }
+
+    /// <summary>
+    /// ER 図操作ツール（<see cref="DocumentErDiagramToolSet"/>）とコード生成ツール（<see cref="CodeGenToolSet"/>）を
+    /// 合成した stdio MCP サーバを起動し、終了まで待機する。
+    /// </summary>
+    /// <remarks>
+    /// stdio MCP サーバでは標準出力が JSON-RPC プロトコル専用チャネルになる。想定外の <c>Console.Write</c> が
+    /// プロトコルへ混入するのを防ぐため、起動時に <see cref="Console.Out"/> を標準エラーへ退避する。
+    /// stdio トランスポート自体は <see cref="Console.OpenStandardOutput"/> で生ストリームを直接取得するため、
+    /// この退避の影響を受けない（プロトコル純度は stdio E2E テストが最終検証する）。
+    /// </remarks>
+    private static async Task<int> RunMcpAsync(CancellationToken cancellationToken)
+    {
+        Console.SetOut(Console.Error);
+
+        var toolSets = new List<McpToolSet>
+        {
+            DocumentErDiagramToolSet.Create(),
+            CodeGenToolSet.Create(),
+        };
+
+        await StdioMcpServerHost.RunAsync(toolSets, cancellationToken).ConfigureAwait(false);
 
         return 0;
     }

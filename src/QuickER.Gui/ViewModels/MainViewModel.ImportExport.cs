@@ -588,7 +588,8 @@ public partial class MainViewModel
     /// 保存された配置（layout）があればそれを復元し、layout が欠落または空（スキーマのみ JSON
     /// ＝配置なしエクスポート／レガシー空 layout）のときはエンティティが 1 件以上あれば全体を
     /// 自動整列する。これによりスキーマのみ形式でエクスポートしたファイルもそのまま開ける（可逆）。
-    /// 部分欠落（一部エンティティのみ layout がない）は自動整列せず、欠落分は既定位置（原点）のまま。
+    /// 部分欠落（一部エンティティのみ layout がない＝外部ツールがエンティティだけ追記した文書など）は、
+    /// layout を持つ既存エンティティを一切動かさず、欠落分のみを空き領域へ追記配置する（<see cref="AutoLayoutService.LayoutAppend"/>）。
     /// </remarks>
     private void LoadDocumentIntoDiagram(DiagramDocument document)
     {
@@ -610,6 +611,41 @@ public partial class MainViewModel
             document.Layout,
             document.Schema.Queries
         );
+
+        // 部分欠落: layout を持たないエンティティのみ、既存配置を保ったまま空き領域へ追記配置する
+        ArrangeEntitiesMissingLayout(document.Layout);
+    }
+
+    /// <summary>layout に含まれないエンティティのみを空き領域へ追記配置する（既存＝layout 保有分は不動）</summary>
+    /// <remarks>
+    /// 欠落分は <see cref="ReplaceDiagram"/> で既定レイアウト（原点・既定幅）が割り当てられているため、
+    /// まず幅を内容に合わせて自動調整してから、layout 保有分を固定群として <see cref="AutoLayoutService.LayoutAppend"/>
+    /// で空き領域へ格子配置する。全欠落は呼び出し側で自動整列済みのためここには来ない。
+    /// </remarks>
+    private void ArrangeEntitiesMissingLayout(IReadOnlyDictionary<Guid, EntityLayout>? layout)
+    {
+        // layout が null（全欠落）は上流で処理済み。ここは部分欠落のみを扱う
+        if (layout is null)
+        {
+            return;
+        }
+
+        var missing = Entities.Where(entity => !layout.ContainsKey(entity.Id)).ToList();
+
+        if (missing.Count == 0)
+        {
+            return;
+        }
+
+        var placed = Entities.Where(entity => layout.ContainsKey(entity.Id)).ToList();
+
+        // 追記配置は Undo 対象外（読込直後の初期配置）。位置変更が履歴へ積まれないよう追跡を抑止する
+        _changeTracker.RunWithoutTracking(() =>
+        {
+            AutoFitEntityWidths(missing);
+            AutoLayoutService.LayoutAppend(placed, missing, Relationships);
+            RefreshCanvasSize();
+        });
     }
 
     /// <summary>文書が配置情報（layout）を持たない（null または空）かどうかを判定する</summary>

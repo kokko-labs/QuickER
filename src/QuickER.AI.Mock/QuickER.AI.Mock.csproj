@@ -21,6 +21,7 @@
     <ProjectReference Include="..\QuickER.Gui.Common\QuickER.Gui.Common.csproj" />
     <ProjectReference Include="..\QuickER.CodeGen.CSharp\QuickER.CodeGen.CSharp.csproj" />
     <ProjectReference Include="..\QuickER.Provider\QuickER.Provider.csproj" />
+    <ProjectReference Include="..\QuickER.Mcp\QuickER.Mcp.csproj" />
   </ItemGroup>
 
   <!--

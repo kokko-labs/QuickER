@@ -1,4 +1,4 @@
-using QuickER.AI;
+using QuickER.Mcp;
 
 namespace QuickER.AI.Mock;
 
@@ -12,11 +12,11 @@ public static class MockDesignTools
     public const string SaveMockHtmlToolName = "save_mock_html";
 
     /// <summary>モック生成チャットで公開するツール定義一覧を返す</summary>
-    public static IReadOnlyList<CodexDynamicToolDefinition> GetDefinitions()
+    public static IReadOnlyList<ToolDefinition> GetDefinitions()
     {
         return
         [
-            new CodexDynamicToolDefinition
+            new ToolDefinition
             {
                 Name = SaveMockHtmlToolName,
                 Description =

@@ -25,6 +25,8 @@
     <File Path="docs/er-editor.ja.md" />
     <File Path="docs/getting-started.ja.md" />
     <File Path="docs/import-export.ja.md" />
+    <File Path="docs/mcp.ja.md" />
+    <File Path="docs/mcp.md" />
     <File Path="docs/overview.ja.md" />
   </Folder>
   <Folder Name="/docs/images/">
@@ -69,6 +71,8 @@
     <Project Path="src/QuickER.Gui.Abstractions/QuickER.Gui.Abstractions.csproj" />
     <Project Path="src/QuickER.Gui.Common/QuickER.Gui.Common.csproj" />
     <Project Path="src/QuickER.Gui/QuickER.Gui.csproj" />
+    <Project Path="src/QuickER.Mcp/QuickER.Mcp.csproj" />
+    <Project Path="src/QuickER.Mcp.Tools/QuickER.Mcp.Tools.csproj" />
     <Project Path="src/QuickER.Model/QuickER.Model.csproj" />
     <Project Path="src/QuickER.MySql/QuickER.MySql.csproj" />
     <Project Path="src/QuickER.Oracle/QuickER.Oracle.csproj" />

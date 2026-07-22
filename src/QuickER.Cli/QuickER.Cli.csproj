@@ -48,6 +48,8 @@
     <ProjectReference Include="..\QuickER.Document\QuickER.Document.csproj" />
     <ProjectReference Include="..\QuickER.CodeGen.CSharp\QuickER.CodeGen.CSharp.csproj" />
     <ProjectReference Include="..\QuickER.CodeReverse.CSharp\QuickER.CodeReverse.CSharp.csproj" />
+    <ProjectReference Include="..\QuickER.Mcp\QuickER.Mcp.csproj" />
+    <ProjectReference Include="..\QuickER.Mcp.Tools\QuickER.Mcp.Tools.csproj" />
     <ProjectReference Include="..\QuickER.Model\QuickER.Model.csproj" />
     <ProjectReference Include="..\QuickER.MySql\QuickER.MySql.csproj" />
     <ProjectReference Include="..\QuickER.Oracle\QuickER.Oracle.csproj" />
