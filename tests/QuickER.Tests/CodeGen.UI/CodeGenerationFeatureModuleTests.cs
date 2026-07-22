@@ -49,12 +49,13 @@ public class CodeGenerationFeatureModuleTests
         provider.GetService<IQueryDefinitionDialogPresenter>().Should().NotBeNull();
         provider.GetService<CSharpGenerationCommandService>().Should().NotBeNull();
         provider.GetService<QueryDefinitionCommandService>().Should().NotBeNull();
+        provider.GetService<CodeReverseCommandService>().Should().NotBeNull();
         provider.GetService<QueryConditionRenameFollower>().Should().NotBeNull();
     }
 
-    /// <summary>CreateToolbarItems が resx 一致の 2 件（コード生成・クエリ定義）を返すことを検証する</summary>
-    [Fact(DisplayName = "CreateToolbarItems は resx 一致の 2 件を返す")]
-    public void CreateToolbarItems_ReturnsTwoLocalizedItems()
+    /// <summary>CreateToolbarItems が resx 一致の 3 件（コード生成・クエリ定義・コード取込）を返すことを検証する</summary>
+    [Fact(DisplayName = "CreateToolbarItems は resx 一致の 3 件を返す")]
+    public void CreateToolbarItems_ReturnsThreeLocalizedItems()
     {
         var module = new CodeGenerationFeatureModule();
         var services = BuildServices(new StubErDiagramHost());
@@ -63,7 +64,7 @@ public class CodeGenerationFeatureModuleTests
         using var provider = services.BuildServiceProvider();
         var items = module.CreateToolbarItems(provider);
 
-        items.Should().HaveCount(2);
+        items.Should().HaveCount(3);
 
         // ①コード生成: AI グループとの区切りとして BeginsGroup=true
         var generate = items[0];
@@ -73,8 +74,16 @@ public class CodeGenerationFeatureModuleTests
         generate.Command.Should().NotBeNull();
         generate.BeginsGroup.Should().BeTrue();
 
-        // ②クエリ定義: 区切りなし
-        var query = items[1];
+        // ②コード取込: コード生成の対（図→コード / コード→図）として右隣に置く・区切りなし
+        var reverse = items[1];
+        reverse.Icon.Should().Be("📥");
+        reverse.Label.Should().Be(CodeGenStrings.Toolbar_ReverseFromCode);
+        reverse.Tooltip.Should().Be(CodeGenStrings.Toolbar_ReverseFromCodeTooltip);
+        reverse.Command.Should().NotBeNull();
+        reverse.BeginsGroup.Should().BeFalse();
+
+        // ③クエリ定義: 区切りなし
+        var query = items[2];
         query.Icon.Should().Be("🔎");
         query.Label.Should().Be(CodeGenStrings.Toolbar_QueryDefinitions);
         query.Tooltip.Should().Be(CodeGenStrings.Toolbar_QueryDefinitionsTooltip);

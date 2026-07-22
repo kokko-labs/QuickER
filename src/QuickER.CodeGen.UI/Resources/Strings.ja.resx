@@ -392,6 +392,28 @@
   <data name="Common_Error" xml:space="preserve">
     <value>エラー</value>
   </data>
+  <data name="Common_Confirm" xml:space="preserve">
+    <value>確認</value>
+  </data>
+  <data name="Toolbar_ReverseFromCode" xml:space="preserve">
+    <value>コード取込</value>
+  </data>
+  <data name="Toolbar_ReverseFromCodeTooltip" xml:space="preserve">
+    <value>IncludeDataAnnotations ON で生成した C# ファイルを現在の図へ取り込む</value>
+  </data>
+  <data name="Reverse_FileFilter" xml:space="preserve">
+    <value>C# ソース (*.cs)|*.cs|すべてのファイル (*.*)|*.*</value>
+  </data>
+  <data name="Reverse_ReplaceConfirm" xml:space="preserve">
+    <value>C# ファイルを現在の図へマージして置き換えます。よろしいですか？</value>
+  </data>
+  <data name="Reverse_BrokenQueriesWarning" xml:space="preserve">
+    <value>次の名前付きクエリは存在しないテーブル・列を参照しているため削除されます:
+{0}</value>
+  </data>
+  <data name="Reverse_Failed" xml:space="preserve">
+    <value>コードからの取込に失敗しました: {0}</value>
+  </data>
   <data name="Toolbar_GenerateCSharp" xml:space="preserve">
     <value>コード生成</value>
   </data>

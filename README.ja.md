@@ -241,6 +241,7 @@ ER モデルから Web 画面のモックアップを HTML として生成する
 - DBML
 - Mermaid
 - Excel テーブル定義書
+- C# コード（IncludeDataAnnotations ON で生成した本体 .g.cs）
 
 ### エクスポート
 
@@ -310,6 +311,15 @@ quicker scaffold `
   --provider sqlserver `
   --connection "..." `
   --out ./Generated
+```
+
+生成済み C# コードから ER 図 JSON（スキーマのみ・layout キーなし）を復元する例:
+
+```powershell
+quicker reverse `
+  --source ./Generated/Model.g.cs `
+  --out diagram.json `
+  --provider sqlserver
 ```
 
 未公開の間は、ソースコードから実行してください。

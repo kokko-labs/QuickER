@@ -2,7 +2,7 @@
 
 *[English](README.md) | 日本語*
 
-QuickER（AI 支援のビジュアル ER 設計 × マルチ DB 往復 × C# コード生成を一気通貫でつなぐ Windows 用 ER 図デザイナ）のコマンドライン ツールです。GUI なしで、ER 図 JSON からの C# コード生成（`generate`）と、データベース直結のスキャフォールド（`scaffold`）を実行できます。
+QuickER（AI 支援のビジュアル ER 設計 × マルチ DB 往復 × C# コード生成を一気通貫でつなぐ Windows 用 ER 図デザイナ）のコマンドライン ツールです。GUI なしで、ER 図 JSON からの C# コード生成（`generate`）、データベース直結のスキャフォールド（`scaffold`）、生成済み C# ファイルから ER 図 JSON への逆生成（`reverse`）を実行できます。
 
 ## インストール
 
@@ -18,7 +18,12 @@ quicker generate --schema diagram.json --out ./Generated --provider sqlserver
 
 # 実 DB へ直接接続してスキーマを取込 → C# コード
 quicker scaffold --connection "Server=.;Database=Shop;Integrated Security=true;TrustServerCertificate=true" --out ./Generated --provider sqlserver
+
+# IncludeDataAnnotations ON で生成した C# ファイル → スキーマのみの ER 図 JSON（layout キーなし）
+quicker reverse --source ./Generated/Model.g.cs --out diagram.json --provider sqlserver
 ```
+
+`reverse` は `IncludeDataAnnotations` ON で生成した本体 `.g.cs` を Roslyn の構文解析のみ（コンパイルなし）で解析し、`[Table]` / `[Column]` / `[Key]` / `[Required]` / `[DbColumnMeta]` / `[DbTableMeta]` / `[NavigationReference]` 属性から ER 図を復元します。列型は方言中立トークンから `--provider` の方言のネイティブ型へ展開します。多対多リレーション・`ON DELETE` / `ON UPDATE`・FK 制約名はコードに存在しないため、新規図では既定値になります（GUI の既存図へのマージ取込ではこれらを温存します）。
 
 主なオプション:
 

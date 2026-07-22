@@ -184,4 +184,19 @@
   <data name="Cli_GeneratedCount" xml:space="preserve">
     <value>{0} 個のファイルを生成しました。</value>
   </data>
+  <data name="Cli_Cmd_Reverse" xml:space="preserve">
+    <value>IncludeDataAnnotations ON で生成した C# ファイルからスキーマのみの ER 図 JSON を復元する</value>
+  </data>
+  <data name="Cli_Opt_ReverseSource" xml:space="preserve">
+    <value>入力 C# ソースファイル（IncludeDataAnnotations ON で生成した本体 .g.cs）</value>
+  </data>
+  <data name="Cli_Opt_ReverseOut" xml:space="preserve">
+    <value>出力 ER 図 JSON ファイル（スキーマのみ・layout キーなし）</value>
+  </data>
+  <data name="Cli_ReverseSourceFileNotFound" xml:space="preserve">
+    <value>ソースファイルが見つかりません: {0}</value>
+  </data>
+  <data name="Cli_ReverseWritten" xml:space="preserve">
+    <value>ER 図を書き出しました: {0}</value>
+  </data>
 </root>

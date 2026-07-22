@@ -791,5 +791,47 @@ namespace QuickER.CodeGen.UI.Resources {
                 return ResourceManager.GetString("Csharp_GenerationFailed", resourceCulture);
             }
         }
+
+        public static string Common_Confirm {
+            get {
+                return ResourceManager.GetString("Common_Confirm", resourceCulture);
+            }
+        }
+
+        public static string Toolbar_ReverseFromCode {
+            get {
+                return ResourceManager.GetString("Toolbar_ReverseFromCode", resourceCulture);
+            }
+        }
+
+        public static string Toolbar_ReverseFromCodeTooltip {
+            get {
+                return ResourceManager.GetString("Toolbar_ReverseFromCodeTooltip", resourceCulture);
+            }
+        }
+
+        public static string Reverse_FileFilter {
+            get {
+                return ResourceManager.GetString("Reverse_FileFilter", resourceCulture);
+            }
+        }
+
+        public static string Reverse_ReplaceConfirm {
+            get {
+                return ResourceManager.GetString("Reverse_ReplaceConfirm", resourceCulture);
+            }
+        }
+
+        public static string Reverse_BrokenQueriesWarning {
+            get {
+                return ResourceManager.GetString("Reverse_BrokenQueriesWarning", resourceCulture);
+            }
+        }
+
+        public static string Reverse_Failed {
+            get {
+                return ResourceManager.GetString("Reverse_Failed", resourceCulture);
+            }
+        }
     }
 }

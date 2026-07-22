@@ -1,6 +1,6 @@
 # QuickER.Cli
 
-The command-line tool for QuickER (a Windows ER diagram designer that connects AI-assisted visual ER design × multi-DB round-tripping × C# code generation end to end). Without the GUI, it can generate C# code from an ER diagram JSON (`generate`) and scaffold directly from a database (`scaffold`).
+The command-line tool for QuickER (a Windows ER diagram designer that connects AI-assisted visual ER design × multi-DB round-tripping × C# code generation end to end). Without the GUI, it can generate C# code from an ER diagram JSON (`generate`), scaffold directly from a database (`scaffold`), and reverse a generated C# file back into an ER diagram JSON (`reverse`).
 
 ## Install
 
@@ -16,7 +16,12 @@ quicker generate --schema diagram.json --out ./Generated --provider sqlserver
 
 # Connect directly to a live DB and import the schema → C# code
 quicker scaffold --connection "Server=.;Database=Shop;Integrated Security=true;TrustServerCertificate=true" --out ./Generated --provider sqlserver
+
+# A C# file generated with IncludeDataAnnotations ON → a schema-only ER diagram JSON (no layout key)
+quicker reverse --source ./Generated/Model.g.cs --out diagram.json --provider sqlserver
 ```
+
+`reverse` parses a main `.g.cs` generated with `IncludeDataAnnotations` ON with Roslyn (syntax only; no compilation) and restores the ER diagram from the `[Table]` / `[Column]` / `[Key]` / `[Required]` / `[DbColumnMeta]` / `[DbTableMeta]` / `[NavigationReference]` attributes. Column types are expanded from the dialect-neutral type token into the `--provider` dialect's native type. Many-to-many relationships, `ON DELETE` / `ON UPDATE` actions, and FK constraint names are not present in the code, so a fresh diagram uses the defaults (import into an existing diagram in the GUI preserves them).
 
 Main options:
 

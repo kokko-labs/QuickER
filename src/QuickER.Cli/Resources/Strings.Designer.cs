@@ -305,5 +305,35 @@ namespace QuickER.Cli.Resources {
                 return ResourceManager.GetString("Cli_GeneratedCount", resourceCulture);
             }
         }
+
+        public static string Cli_Cmd_Reverse {
+            get {
+                return ResourceManager.GetString("Cli_Cmd_Reverse", resourceCulture);
+            }
+        }
+
+        public static string Cli_Opt_ReverseSource {
+            get {
+                return ResourceManager.GetString("Cli_Opt_ReverseSource", resourceCulture);
+            }
+        }
+
+        public static string Cli_Opt_ReverseOut {
+            get {
+                return ResourceManager.GetString("Cli_Opt_ReverseOut", resourceCulture);
+            }
+        }
+
+        public static string Cli_ReverseSourceFileNotFound {
+            get {
+                return ResourceManager.GetString("Cli_ReverseSourceFileNotFound", resourceCulture);
+            }
+        }
+
+        public static string Cli_ReverseWritten {
+            get {
+                return ResourceManager.GetString("Cli_ReverseWritten", resourceCulture);
+            }
+        }
     }
 }
