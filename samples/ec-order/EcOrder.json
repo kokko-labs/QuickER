@@ -1,6 +1,7 @@
 {
   "Version": 1,
   "Schema": {
+    "TargetDbms": "sqlite",
     "Entities": [
       {
         "Id": "e1111111-0000-0000-0000-000000000001",
@@ -204,8 +205,7 @@
         "OnDelete": "NoAction",
         "OnUpdate": "NoAction"
       }
-    ],
-    "TargetDbms": "sqlite"
+    ]
   },
   "Layout": {
     "e1111111-0000-0000-0000-000000000001": {
