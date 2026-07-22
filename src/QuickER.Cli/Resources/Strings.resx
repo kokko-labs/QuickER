@@ -184,4 +184,19 @@
   <data name="Cli_GeneratedCount" xml:space="preserve">
     <value>Generated {0} file(s).</value>
   </data>
+  <data name="Cli_Cmd_Reverse" xml:space="preserve">
+    <value>Reverse a C# file generated with IncludeDataAnnotations ON into a schema-only ER diagram JSON</value>
+  </data>
+  <data name="Cli_Opt_ReverseSource" xml:space="preserve">
+    <value>Input C# source file (a main .g.cs generated with IncludeDataAnnotations ON)</value>
+  </data>
+  <data name="Cli_Opt_ReverseOut" xml:space="preserve">
+    <value>Output ER diagram JSON file (schema only; no layout key)</value>
+  </data>
+  <data name="Cli_ReverseSourceFileNotFound" xml:space="preserve">
+    <value>Source file not found: {0}</value>
+  </data>
+  <data name="Cli_ReverseWritten" xml:space="preserve">
+    <value>Wrote the ER diagram: {0}</value>
+  </data>
 </root>

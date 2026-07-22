@@ -152,6 +152,7 @@ public class ResxKeyParityTests
             typeof(QuickER.AI.Chat.Resources.Strings).Assembly,
             typeof(QuickER.AI.Mock.Resources.Strings).Assembly,
             typeof(QuickER.CodeGen.UI.Resources.Strings).Assembly,
+            typeof(QuickER.CodeReverse.CSharp.Resources.Strings).Assembly,
             typeof(QuickER.Db.UI.Resources.Strings).Assembly,
             typeof(QuickER.AI.Resources.Strings).Assembly,
             typeof(QuickER.CodeGen.CSharp.Resources.Strings).Assembly,

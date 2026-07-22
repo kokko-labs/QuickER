@@ -1,5 +1,6 @@
 using System.CommandLine;
 using QuickER.Cli.Resources;
+using QuickER.CodeReverse.CSharp;
 using QuickER.Documents;
 using QuickER.Model;
 using QuickER.Provider;
@@ -21,6 +22,7 @@ public static class CliApp
         var root = new RootCommand(Strings.Cli_RootDescription);
         root.Subcommands.Add(BuildGenerateCommand());
         root.Subcommands.Add(BuildScaffoldCommand());
+        root.Subcommands.Add(BuildReverseCommand());
         return root.Parse(args).InvokeAsync();
     }
 
@@ -226,6 +228,97 @@ public static class CliApp
             Entities = imported.Entities.ToList(),
             Relationships = imported.Relationships.ToList(),
         };
+    }
+
+    // ---------------- reverse ----------------
+
+    private static Command BuildReverseCommand()
+    {
+        var source = new Option<FileInfo>("--source")
+        {
+            Description = Strings.Cli_Opt_ReverseSource,
+            Required = true,
+        };
+        var output = new Option<FileInfo>("--out")
+        {
+            Description = Strings.Cli_Opt_ReverseOut,
+            Required = true,
+        };
+        var provider = ProviderOption();
+
+        var command = new Command("reverse", Strings.Cli_Cmd_Reverse) { source, output, provider };
+
+        command.SetAction(parseResult =>
+            RunReverse(
+                parseResult.GetValue(source)!,
+                parseResult.GetValue(output)!,
+                parseResult.GetValue(provider)!
+            )
+        );
+
+        return command;
+    }
+
+    /// <summary>C# ソースをリバース解析し、スキーマのみの ER 図 JSON（layout キーなし）を書き出す</summary>
+    private static int RunReverse(FileInfo sourceFile, FileInfo output, string providerName)
+    {
+        // ソース存在チェックはプロバイダ解決より前に行う（generate の検証順序に揃える）
+        if (!sourceFile.Exists)
+        {
+            Console.Error.WriteLine(
+                string.Format(Strings.Cli_ReverseSourceFileNotFound, sourceFile.FullName)
+            );
+
+            return 1;
+        }
+
+        IDatabaseProvider provider;
+        try
+        {
+            provider = GenerationExecutor.ResolveProvider(providerName);
+        }
+        catch (ArgumentException ex)
+        {
+            Console.Error.WriteLine(ex.Message);
+
+            return 1;
+        }
+
+        CodeReverseResult result;
+        try
+        {
+            var sourceText = File.ReadAllText(sourceFile.FullName);
+            result = new CSharpReverseParser().Parse(sourceText, provider.TypeCatalog);
+        }
+        catch (CodeReverseException ex)
+        {
+            // 解析対象クラス 0 件などの致命的な問題（メッセージはローカライズ済み・案内込み）
+            Console.Error.WriteLine(ex.Message);
+
+            return 1;
+        }
+
+        // 非致命の警告は標準エラーへ出す（generate の診断出力と同じ流儀）
+        foreach (var warning in result.Warnings)
+        {
+            Console.Error.WriteLine(warning);
+        }
+
+        // マージなしの新規図。--provider の方言で型を展開済み、TargetDbms も同方言を採用する
+        var diagram = new ErDiagram
+        {
+            Entities = result.Entities.ToList(),
+            Relationships = result.Relationships.ToList(),
+            TargetDbms = provider.Name,
+        };
+
+        // Layout=null＝スキーマのみ文書（layout キーが JSON へ出力されない）として保存する
+        var document = new DiagramDocument { Schema = diagram, Layout = null };
+        JsonStorageService.Save(output.FullName, document);
+
+        Console.WriteLine(string.Format(Strings.Cli_ReverseWritten, output.FullName));
+
+        return 0;
     }
 
     // ---------------- 共有 ----------------

@@ -28,6 +28,7 @@ public sealed class CodeGenerationFeatureModule : IFeatureModule
         // コマンドサービスと列リネーム追従フォロワー
         services.AddSingleton<CSharpGenerationCommandService>();
         services.AddSingleton<QueryDefinitionCommandService>();
+        services.AddSingleton<CodeReverseCommandService>();
         services.AddSingleton<QueryConditionRenameFollower>();
     }
 
@@ -43,6 +44,7 @@ public sealed class CodeGenerationFeatureModule : IFeatureModule
     {
         var generation = services.GetRequiredService<CSharpGenerationCommandService>();
         var queries = services.GetRequiredService<QueryDefinitionCommandService>();
+        var reverse = services.GetRequiredService<CodeReverseCommandService>();
 
         return new[]
         {
@@ -53,6 +55,13 @@ public sealed class CodeGenerationFeatureModule : IFeatureModule
                 command: new RelayCommand(generation.Run),
                 // AI モジュール群との区切りとして、先頭ボタンの直前にセパレータを描画する
                 beginsGroup: true
+            ),
+            // コード生成の対（図→コード / コード→図）なので、コード生成の右隣に置く
+            new FeatureToolbarItem(
+                icon: "📥",
+                label: Strings.Toolbar_ReverseFromCode,
+                tooltip: Strings.Toolbar_ReverseFromCodeTooltip,
+                command: new RelayCommand(reverse.Run)
             ),
             new FeatureToolbarItem(
                 icon: "🔎",

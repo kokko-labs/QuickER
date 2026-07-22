@@ -53,11 +53,11 @@ public class FeatureModuleCatalogTests
         using var provider = services.BuildServiceProvider();
 
         // App.xaml.cs と同じ集約でツールバー寄与を得る
-        // （DB 取込 → DB 同期 → AI チャット → モック生成 → コード生成 → クエリ定義の順）
+        // （DB 取込 → DB 同期 → AI チャット → モック生成 → コード生成 → コード取込 → クエリ定義の順）
         var items = modules.SelectMany(module => module.CreateToolbarItems(provider)).ToList();
 
-        items.Should().HaveCount(6);
-        items.Select(item => item.Icon).Should().Equal("🛢", "⇪", "🤖", "🖼", "⌘", "🔎");
+        items.Should().HaveCount(7);
+        items.Select(item => item.Icon).Should().Equal("🛢", "⇪", "🤖", "🖼", "⌘", "📥", "🔎");
         items.Should().OnlyContain(item => item.Command != null && item.Command.CanExecute(null));
 
         var act = () =>

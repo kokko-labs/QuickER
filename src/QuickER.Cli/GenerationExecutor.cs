@@ -27,6 +27,11 @@ internal static class GenerationExecutor
         new SqliteProvider(),
     ]);
 
+    /// <summary>プロバイダ名を共有レジストリで解決する（未対応名は登録済み名を列挙した例外）</summary>
+    /// <remarks>reverse コマンドなど、生成パイプラインを経由しないコマンドが型カタログを得るために使う</remarks>
+    internal static IDatabaseProvider ResolveProvider(string providerName) =>
+        Providers.Get(providerName);
+
     /// <summary>
     /// 生成の共通パイプラインを実行する。図の取得（<paramref name="resolveDiagram"/>）だけがコマンド固有で、
     /// 失敗時は <c>null</c>（エラー表示済み）を返して終了コード 1 で中断する。
