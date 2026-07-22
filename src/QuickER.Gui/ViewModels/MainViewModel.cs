@@ -42,6 +42,53 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty]
     private IReadOnlyList<FeatureToolbarItem> _featureToolbarItems = [];
 
+    /// <summary>ツールバーの折返し単位となる、グループ区切り（BeginsGroup）ごとのボタン群</summary>
+    /// <remarks>
+    /// WrapPanel 上で「DB 系」「AI 系」「コード生成系」のくくりを崩さず折り返すため、
+    /// <see cref="FeatureToolbarItems"/> を BeginsGroup=true の直前で分割した形で公開する
+    /// （View はグループごとに 1 つの ItemsControl を並べる＝1 グループが 1 つの折返し単位になる）。
+    /// </remarks>
+    public IReadOnlyList<IReadOnlyList<FeatureToolbarItem>> FeatureToolbarItemGroups
+    {
+        get;
+        private set;
+    } = [];
+
+    /// <summary>ボタン群の設定時に、折返し単位のグループ分割を再計算する</summary>
+    partial void OnFeatureToolbarItemsChanged(IReadOnlyList<FeatureToolbarItem> value)
+    {
+        FeatureToolbarItemGroups = SplitToolbarGroups(value);
+        OnPropertyChanged(nameof(FeatureToolbarItemGroups));
+    }
+
+    /// <summary>ボタン列を BeginsGroup=true の直前で分割し、グループ区切り単位の入れ子リストへ変換する</summary>
+    /// <remarks>先頭要素は BeginsGroup に依らず最初のグループを開始する（全体先頭は App が false へ矯正済み）</remarks>
+    internal static IReadOnlyList<IReadOnlyList<FeatureToolbarItem>> SplitToolbarGroups(
+        IReadOnlyList<FeatureToolbarItem> items
+    )
+    {
+        var groups = new List<IReadOnlyList<FeatureToolbarItem>>();
+        var currentGroup = new List<FeatureToolbarItem>();
+
+        foreach (var item in items)
+        {
+            if (item.BeginsGroup && currentGroup.Count > 0)
+            {
+                groups.Add(currentGroup);
+                currentGroup = new List<FeatureToolbarItem>();
+            }
+
+            currentGroup.Add(item);
+        }
+
+        if (currentGroup.Count > 0)
+        {
+            groups.Add(currentGroup);
+        }
+
+        return groups;
+    }
+
     /// <summary>カラム名がユーザー編集で変更されたときに発火する（フィーチャーモジュールの条件式追従などに使用）</summary>
     /// <remarks>
     /// <see cref="OnColumnRenamed"/> から、列を保持するエンティティを解決できたときにのみ発火する。

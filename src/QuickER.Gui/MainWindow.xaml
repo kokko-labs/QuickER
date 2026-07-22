@@ -481,6 +481,44 @@
         </Path>
       </Grid>
     </DataTemplate>
+    <!--
+      フィーチャーモジュールのツールバーボタン 1 個分のテンプレート。
+      BeginsGroup=true のときだけ、ボタンの直前にグループ区切り（セパレータ）を描画する。
+      既定は Collapsed（レイアウトを占有しない）なので、false のボタンは従来と 1px も変わらない。
+      コードビハインドがグループごとの ItemsControl を生成する際に参照する（くくり単位の折返し）。
+    -->
+    <DataTemplate x:Key="FeatureToolbarItemTemplate">
+      <StackPanel Orientation="Horizontal">
+        <Rectangle>
+          <Rectangle.Style>
+            <Style TargetType="Rectangle" BasedOn="{StaticResource ToolBarSeparator}">
+              <Setter Property="Visibility" Value="Collapsed" />
+              <Style.Triggers>
+                <DataTrigger Binding="{Binding BeginsGroup}" Value="True">
+                  <Setter Property="Visibility" Value="Visible" />
+                </DataTrigger>
+              </Style.Triggers>
+            </Style>
+          </Rectangle.Style>
+        </Rectangle>
+        <Button
+          Style="{StaticResource ToolBarLabelButton}"
+          Command="{Binding Command}"
+          ToolTip="{Binding Tooltip}"
+          ToolTipService.ShowOnDisabled="True"
+        >
+          <StackPanel>
+            <TextBlock Style="{StaticResource ToolBarIcon}" Text="{Binding Icon}" />
+            <TextBlock Style="{StaticResource ToolBarCaption}" Text="{Binding Label}" />
+          </StackPanel>
+        </Button>
+      </StackPanel>
+    </DataTemplate>
+
+    <!-- グループ内のボタンは折り返さず横一列に並べる（折返しはグループ単位＝親 WrapPanel の担当） -->
+    <ItemsPanelTemplate x:Key="FeatureToolbarGroupPanel">
+      <StackPanel Orientation="Horizontal" />
+    </ItemsPanelTemplate>
   </Window.Resources>
 
   <DockPanel>
@@ -491,7 +529,11 @@
       BorderBrush="{StaticResource DividerBrush}"
       BorderThickness="0,0,0,1"
     >
-      <StackPanel Orientation="Horizontal" Margin="6,4">
+      <!--
+        WrapPanel: 英語などキャプションが長い言語やモジュール全部入り構成でウィンドウ幅に収まらないとき、
+        ボタンを切らずに 2 段目へ折り返す（収まる幅では従来どおり 1 段のまま）。
+      -->
+      <WrapPanel x:Name="ToolbarWrapPanel" Orientation="Horizontal" Margin="6,4">
         <Button
           Style="{StaticResource ToolBarLabelButton}"
           Command="{Binding NewDiagramCommand}"
@@ -732,50 +774,13 @@
         </StackPanel>
         <!--
           フィーチャーモジュールが寄与するツールバーボタン群（DB 取込・DB 同期・AI チャット・モック生成・
-          コード生成など）。各モジュールの先頭ボタンは BeginsGroup=true で自前のグループ区切りを描画する
-          （集約後の全体先頭のみ App が false へ矯正）。モジュール 0 個のときは何も描画されず、
-          直後のセパレータも下の DataTrigger で畳まれる。
+          コード生成など）の挿入位置アンカー。1 つの ItemsControl は WrapPanel 内で 1 塊として折り返される
+          ため、グループ区切り（BeginsGroup）のくくりを崩さず折り返せるよう、コードビハインドが
+          MainViewModel.FeatureToolbarItemGroups のグループごとに ItemsControl を生成し、この直後へ挿入する。
+          各グループの先頭ボタンは BeginsGroup=true で自前の区切りを描画する（全体先頭のみ App が false へ矯正）。
+          モジュール 0 個のときは何も描画されず、直後のセパレータも下の DataTrigger で畳まれる。
         -->
-        <ItemsControl ItemsSource="{Binding FeatureToolbarItems}">
-          <ItemsControl.ItemsPanel>
-            <ItemsPanelTemplate>
-              <StackPanel Orientation="Horizontal" />
-            </ItemsPanelTemplate>
-          </ItemsControl.ItemsPanel>
-          <ItemsControl.ItemTemplate>
-            <DataTemplate>
-              <StackPanel Orientation="Horizontal">
-                <!--
-                  BeginsGroup=true のときだけ、ボタンの直前にグループ区切り（セパレータ）を描画する。
-                  既定は Collapsed（レイアウトを占有しない）なので、false のボタンは従来と 1px も変わらない。
-                -->
-                <Rectangle>
-                  <Rectangle.Style>
-                    <Style TargetType="Rectangle" BasedOn="{StaticResource ToolBarSeparator}">
-                      <Setter Property="Visibility" Value="Collapsed" />
-                      <Style.Triggers>
-                        <DataTrigger Binding="{Binding BeginsGroup}" Value="True">
-                          <Setter Property="Visibility" Value="Visible" />
-                        </DataTrigger>
-                      </Style.Triggers>
-                    </Style>
-                  </Rectangle.Style>
-                </Rectangle>
-                <Button
-                  Style="{StaticResource ToolBarLabelButton}"
-                  Command="{Binding Command}"
-                  ToolTip="{Binding Tooltip}"
-                  ToolTipService.ShowOnDisabled="True"
-                >
-                  <StackPanel>
-                    <TextBlock Style="{StaticResource ToolBarIcon}" Text="{Binding Icon}" />
-                    <TextBlock Style="{StaticResource ToolBarCaption}" Text="{Binding Label}" />
-                  </StackPanel>
-                </Button>
-              </StackPanel>
-            </DataTemplate>
-          </ItemsControl.ItemTemplate>
-        </ItemsControl>
+        <ContentControl x:Name="FeatureToolbarGroupsAnchor" Visibility="Collapsed" />
         <!-- モジュールが 1 つも無いときはセパレータの二重表示を避けて畳む -->
         <Rectangle>
           <Rectangle.Style>
@@ -825,7 +830,7 @@
             </ContextMenu>
           </Button.ContextMenu>
         </Button>
-      </StackPanel>
+      </WrapPanel>
     </Border>
 
     <!-- 下部: ステータスバー -->

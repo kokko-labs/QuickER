@@ -44,6 +44,39 @@ public partial class MainWindow : Window
 
         viewModel.Initialize();
         Closing += MainWindow_Closing;
+
+        // フィーチャーモジュールのツールバーボタンを、グループ区切り単位の折返しで表示する
+        BuildFeatureToolbarGroupHosts();
+    }
+
+    /// <summary>
+    /// フィーチャーモジュールのツールバーボタン群を、グループ区切り（BeginsGroup）のくくりごとに
+    /// 1 つの ItemsControl として生成し、ツールバー WrapPanel のアンカー位置へ挿入する。
+    /// </summary>
+    /// <remarks>
+    /// WrapPanel は 1 つの子要素を 1 塊として折り返すため、全ボタンを単一の ItemsControl に入れると
+    /// モジュール群全体（7 ボタン）が丸ごと折り返されてしまう。グループごとに ItemsControl を分けて
+    /// WrapPanel の直接の子にすることで、「DB 系」「AI 系」「コード生成系」のくくりを崩さず、
+    /// 収まらないくくりだけが次の段へ折り返される。モジュール構成は App が起動時に一度だけ設定するため、
+    /// ウィンドウ生成時の一回構築でよい（動的な再構成は不要）。
+    /// </remarks>
+    private void BuildFeatureToolbarGroupHosts()
+    {
+        var itemTemplate = (DataTemplate)FindResource("FeatureToolbarItemTemplate");
+        var groupPanel = (ItemsPanelTemplate)FindResource("FeatureToolbarGroupPanel");
+        var anchorIndex = ToolbarWrapPanel.Children.IndexOf(FeatureToolbarGroupsAnchor);
+
+        for (var i = 0; i < _viewModel.FeatureToolbarItemGroups.Count; i++)
+        {
+            var host = new ItemsControl
+            {
+                ItemsSource = _viewModel.FeatureToolbarItemGroups[i],
+                ItemTemplate = itemTemplate,
+                ItemsPanel = groupPanel,
+            };
+
+            ToolbarWrapPanel.Children.Insert(anchorIndex + 1 + i, host);
+        }
     }
 
     /// <summary>言語切替ボタン押下で、その場に言語選択の ContextMenu を開く</summary>

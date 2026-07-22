@@ -156,19 +156,19 @@
     <value>Compact view showing only PK/FK columns in the ER diagram</value>
   </data>
   <data name="Toolbar_ArrangeGrid" xml:space="preserve">
-    <value>Arrange (Grid)</value>
+    <value>Grid</value>
   </data>
   <data name="Toolbar_ArrangeGridTooltip" xml:space="preserve">
     <value>Auto-arrange in a grid</value>
   </data>
   <data name="Toolbar_ArrangeTree" xml:space="preserve">
-    <value>Arrange (Tree)</value>
+    <value>Tree</value>
   </data>
   <data name="Toolbar_ArrangeTreeTooltip" xml:space="preserve">
     <value>Auto-arrange as a tree</value>
   </data>
   <data name="Toolbar_ArrangeForce" xml:space="preserve">
-    <value>Arrange (Force)</value>
+    <value>Free</value>
   </data>
   <data name="Toolbar_ArrangeForceTooltip" xml:space="preserve">
     <value>Roughly place by relationship connections, then align to a grid</value>

@@ -396,7 +396,7 @@ You can pass this file directly to the CLI as --config.</value>
     <value>Confirm</value>
   </data>
   <data name="Toolbar_ReverseFromCode" xml:space="preserve">
-    <value>Code Import</value>
+    <value>Import Code</value>
   </data>
   <data name="Toolbar_ReverseFromCodeTooltip" xml:space="preserve">
     <value>Import a C# file generated with IncludeDataAnnotations ON into the current diagram</value>
@@ -415,7 +415,7 @@ You can pass this file directly to the CLI as --config.</value>
     <value>Failed to import from code: {0}</value>
   </data>
   <data name="Toolbar_GenerateCSharp" xml:space="preserve">
-    <value>Codegen</value>
+    <value>Generate Code</value>
   </data>
   <data name="Toolbar_GenerateCSharpTooltip" xml:space="preserve">
     <value>Generate C# Entity / BindingModel from the current ER diagram</value>
