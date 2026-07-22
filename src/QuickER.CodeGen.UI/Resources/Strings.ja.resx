@@ -119,7 +119,7 @@
     <value>API リファレンス (.g.md) を出力する</value>
   </data>
   <data name="CodeGen_IncludeJapaneseApiDocs" xml:space="preserve">
-    <value>日本語版 API リファレンス (.ja.g.md) も出力する</value>
+    <value>日本語版を出力する</value>
   </data>
   <data name="CodeGen_ApiDocsTooltip" xml:space="preserve">
     <value>スキーマに即した API リファレンス Markdown（英語）を 1 つ追加出力します。ファイル名は非分割時 {ベース名}.g.md・分割時 ApiDocs.g.md（再生成で上書き）</value>

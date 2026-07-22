@@ -76,6 +76,8 @@
             Text="{x:Static res:Strings.CodeGen_GenerationTarget}"
           />
           <StackPanel Grid.Column="1" Orientation="Horizontal">
+            <!-- Entity は常に生成対象（表示専用の固定チェック。処理判定には使わない） -->
+            <CheckBox Margin="0,0,18,0" Content="Entity" IsChecked="True" IsEnabled="False" />
             <CheckBox
               Margin="0,0,18,0"
               Content="EditModel"

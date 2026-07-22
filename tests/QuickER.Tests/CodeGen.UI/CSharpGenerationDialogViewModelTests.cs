@@ -345,6 +345,57 @@ public class CSharpGenerationDialogViewModelTests
     }
 
     /// <summary>
+    /// API リファレンス出力（GenerateApiDocs）を OFF にすると、下位の日本語版併産
+    /// （IncludeJapaneseApiDocs）も OFF に連動することを検証する（無効化＋チェック残りの見かけ矛盾を防ぐ）
+    /// </summary>
+    [Fact(DisplayName = "API リファレンス出力 OFF で日本語版併産も OFF に連動する")]
+    public void GenerateApiDocs_Off_TurnsOffJapaneseApiDocs()
+    {
+        var vm = CreateViewModel(out _);
+
+        vm.GenerateApiDocs = true;
+        vm.IncludeJapaneseApiDocs = true;
+
+        // 親を OFF にすると子（日本語版併産）も OFF に戻る
+        vm.GenerateApiDocs = false;
+        vm.IncludeJapaneseApiDocs.Should().BeFalse("親 OFF で子も OFF に連動する");
+    }
+
+    /// <summary>
+    /// 外部編集された設定ファイルが「親 OFF＋子 ON」の組み合わせでも、復元時に
+    /// 「親 OFF なら子も OFF」の UI 不変条件へクランプされることを検証する
+    /// </summary>
+    [Fact(DisplayName = "設定復元時は親 OFF なら日本語版併産もクランプして OFF になる")]
+    public void IncludeJapaneseApiDocs_RestoreClampsToGenerateApiDocs()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
+
+        try
+        {
+            var store = new CSharpGenerationSettingsStore(folder);
+            store.Save(
+                new CSharpGenerationSettings
+                {
+                    GenerateApiDocs = false,
+                    IncludeJapaneseApiDocs = true,
+                }
+            );
+
+            var vm = new CSharpGenerationDialogViewModel(store);
+
+            vm.GenerateApiDocs.Should().BeFalse();
+            vm.IncludeJapaneseApiDocs.Should().BeFalse("親 OFF の保存値は子もクランプして復元する");
+        }
+        finally
+        {
+            if (Directory.Exists(folder))
+            {
+                Directory.Delete(folder, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>
     /// 無制限バイナリ列の除外チェックを ON にすると、結果オプションの ExcludeUnboundedBinaryColumns が true になり、
     /// OFF（既定）では false になることを検証する
     /// </summary>

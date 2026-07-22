@@ -119,7 +119,7 @@
     <value>Output an API reference (.g.md)</value>
   </data>
   <data name="CodeGen_IncludeJapaneseApiDocs" xml:space="preserve">
-    <value>Also output a Japanese API reference (.ja.g.md)</value>
+    <value>Also output a Japanese version</value>
   </data>
   <data name="CodeGen_ApiDocsTooltip" xml:space="preserve">
     <value>Additionally outputs one API reference Markdown (in English) for the diagram's schema. The file is named {baseName}.g.md, or ApiDocs.g.md in split mode (overwritten on regeneration)</value>

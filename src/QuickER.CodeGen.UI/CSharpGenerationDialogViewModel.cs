@@ -160,12 +160,21 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
     [ObservableProperty]
     private bool _generateApiDocs;
 
+    /// <summary>API リファレンス出力を OFF にしたら、下位の日本語版併産チェックも OFF に連動させる（無効化＋残チェックの見かけ矛盾を防ぐ）</summary>
+    partial void OnGenerateApiDocsChanged(bool value)
+    {
+        if (!value)
+        {
+            IncludeJapaneseApiDocs = false;
+        }
+    }
+
     /// <summary>
     /// 日本語版 API リファレンス Markdown（.ja.g.md）も併産するかどうか（既定 OFF。正本は英語）。
     /// </summary>
     /// <remarks>
-    /// <see cref="GenerateApiDocs"/> の下位オプションで、実効は API リファレンス出力が ON のときに限る
-    /// （XAML 側で IsEnabled を <see cref="GenerateApiDocs"/> に連動させる）。OFF に戻しても値は保持する。
+    /// <see cref="GenerateApiDocs"/> の下位オプションで、API リファレンス出力が ON のときのみ選べる
+    /// （XAML 側で IsEnabled を <see cref="GenerateApiDocs"/> に連動・親を OFF にするとこの値も OFF に戻る）。
     /// </remarks>
     [ObservableProperty]
     private bool _includeJapaneseApiDocs;
@@ -602,8 +611,9 @@ public partial class CSharpGenerationDialogViewModel : ObservableObject
             GenerateRemoteServices = settings.GenerateRemoteServices;
             // API リファレンス出力は DB アクセス選択とは独立のため、保存値をそのまま復元する
             GenerateApiDocs = settings.GenerateApiDocs;
-            // 日本語版 API リファレンスの併産も保存値をそのまま復元する（実効は GenerateApiDocs && この値）
-            IncludeJapaneseApiDocs = settings.IncludeJapaneseApiDocs;
+            // 日本語版 API リファレンスの併産は「親 OFF なら子も OFF」の UI 不変条件に合わせてクランプして復元する
+            // （外部編集された設定ファイルの親 OFF＋子 ON の組み合わせで、無効なのにチェック済みの表示になるのを防ぐ）
+            IncludeJapaneseApiDocs = settings.GenerateApiDocs && settings.IncludeJapaneseApiDocs;
             // 無制限バイナリ列の除外はQuickER 版 Repository 選択時のみ効くが、値は保存値のまま復元する（行の表示/非表示は UI 側で連動）
             ExcludeUnboundedBinaryColumns = settings.ExcludeUnboundedBinaryColumns;
             GenerateValueObjects = settings.GenerateValueObjects;
