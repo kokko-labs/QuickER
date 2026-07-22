@@ -59,7 +59,7 @@ public class JsonStorageServiceTests
             var ea = loaded.Schema.Entities.First(e => e.Id == a.Id);
             ea.TableName.Should().Be("Customer");
 
-            var la = loaded.Layout[a.Id];
+            var la = loaded.Layout!.Should().ContainKey(a.Id).WhoseValue;
             la.X.Should().Be(100);
             la.Y.Should().Be(50);
             la.TitleBackgroundColor.Should().Be("#FFF0BF");
@@ -317,7 +317,7 @@ public class JsonStorageServiceTests
             query.Fields.Should().BeEmpty();
 
             // Layout: 省略キーは既定値（Width 200・既定タイトル色）
-            var layout = loaded.Layout[entity.Id];
+            var layout = loaded.Layout!.Should().ContainKey(entity.Id).WhoseValue;
             layout.X.Should().Be(10);
             layout.Width.Should().Be(200);
             layout.TitleBackgroundColor.Should().Be(EntityLayout.DefaultTitleBackgroundColor);
@@ -358,6 +358,79 @@ public class JsonStorageServiceTests
 
             loaded.Schema.Entities.Should().ContainSingle();
             loaded.Schema.Queries.Should().BeEmpty();
+        }
+        finally
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+    }
+
+    /// <summary>
+    /// スキーマのみ文書（<c>Layout = null</c>）を保存すると layout キーがキーごと省略され、
+    /// version / schema / queries は出力されることを検証する（スキーマのみ JSON の正準形）。
+    /// </summary>
+    [Fact(DisplayName = "Save: スキーマのみ文書（Layout = null）は layout キーを省略する")]
+    public void Save_SchemaOnlyDocument_OmitsLayoutKey()
+    {
+        var entity = new Entity { TableName = "Order" };
+        var document = new DiagramDocument
+        {
+            Schema = new ErDiagram { Entities = { entity } },
+            Layout = null,
+        };
+        document.Schema.Queries.Add(new QueryDefinition { EntityId = entity.Id, Name = "GetAll" });
+
+        var path = Path.Combine(Path.GetTempPath(), $"er-schema-only-{Guid.NewGuid()}.json");
+
+        try
+        {
+            JsonStorageService.Save(path, document);
+            var json = File.ReadAllText(path);
+
+            json.Should().NotContain("\"Layout\"", "スキーマのみ文書は layout キーを出力しない");
+            json.Should().Contain("\"Version\"");
+            json.Should().Contain("\"Schema\"");
+            json.Should().Contain("\"Queries\"");
+            json.Should().Contain("GetAll", "クエリ定義は schema 内に出力される");
+        }
+        finally
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+    }
+
+    /// <summary>layout キーを持たない JSON が例外なく読め、Layout が null または空になることを検証する</summary>
+    [Fact(DisplayName = "Load: layout キーの無い JSON は null または空 layout として読める")]
+    public void Load_MissingLayoutKey_YieldsNullOrEmptyLayout()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"er-no-layout-{Guid.NewGuid()}.json");
+
+        try
+        {
+            File.WriteAllText(
+                path,
+                """
+                {
+                  "Version": 1,
+                  "Schema": {
+                    "Entities": [ { "TableName": "Customer" } ],
+                    "Relationships": [],
+                    "TargetDbms": "sqlserver"
+                  }
+                }
+                """
+            );
+
+            var loaded = JsonStorageService.Load(path);
+
+            loaded.Schema.Entities.Should().ContainSingle();
+            (loaded.Layout is null or { Count: 0 }).Should().BeTrue();
         }
         finally
         {

@@ -391,13 +391,15 @@ public partial class MainViewModel : ObservableObject
 
     /// <summary>履歴対象外でダイアグラムを置換し、幅自動調整と必要に応じた自動レイアウトをまとめて適用する</summary>
     /// <param name="autoLayout"><c>true</c> の場合はリレーション階層に基づくツリー整列を適用する</param>
+    /// <param name="queries">復元する名前付きクエリ定義（省略時は空。配置なし JSON の受け入れで引き継ぐ）</param>
     private void ReplaceDiagramWithoutHistory(
         IEnumerable<Entity> entities,
         IEnumerable<Relationship> relationships,
-        bool autoLayout
+        bool autoLayout,
+        IReadOnlyList<QueryDefinition>? queries = null
     )
     {
-        ReplaceDiagram(entities, relationships, clearUndoHistory: true);
+        ReplaceDiagram(entities, relationships, clearUndoHistory: true, queries: queries);
 
         _changeTracker.RunWithoutTracking(() =>
         {
