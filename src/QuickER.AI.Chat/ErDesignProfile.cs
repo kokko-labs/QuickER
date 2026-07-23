@@ -1,4 +1,5 @@
 using QuickER.AI;
+using QuickER.Mcp;
 
 namespace QuickER.AI.Chat;
 
@@ -18,7 +19,7 @@ public static class ErDesignProfile
         new(
             ErDesignRules.BuildChatSystemPrompt,
             ErDesignRules.BuildCodexDeveloperInstructions,
-            ErDiagramToolDefinitions.GetDefinitions(),
+            ErDiagramToolCatalog.GetDefinitions(),
             ErDiagramMcpServer.ServerName
         );
 }

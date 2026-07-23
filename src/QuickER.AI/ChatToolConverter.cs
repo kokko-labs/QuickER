@@ -1,11 +1,12 @@
 using System.Text.Json;
 using Anthropic.Models.Messages;
 using OpenAI.Chat;
+using QuickER.Mcp;
 
 namespace QuickER.AI;
 
 /// <summary>
-/// 中立なツール定義（<see cref="CodexDynamicToolDefinition"/>）を各 LLM SDK の形式へ変換する変換ヘルパー。
+/// 中立なツール定義（<see cref="ToolDefinition"/>）を各 LLM SDK の形式へ変換する変換ヘルパー。
 /// </summary>
 /// <remarks>
 /// 用途に依存しない純粋な形式変換のみを担う（ER 図操作ツールの具体定義は機能側 QuickER.AI.Chat が持つ）。
@@ -14,9 +15,7 @@ namespace QuickER.AI;
 public static class ChatToolConverter
 {
     /// <summary>任意のツール定義一覧を OpenAI SDK の <see cref="ChatTool"/> 一覧へ変換する（Function Calling 用）</summary>
-    public static IReadOnlyList<ChatTool> ToOpenAiTools(
-        IReadOnlyList<CodexDynamicToolDefinition> definitions
-    )
+    public static IReadOnlyList<ChatTool> ToOpenAiTools(IReadOnlyList<ToolDefinition> definitions)
     {
         return definitions
             .Select(definition =>
@@ -32,15 +31,13 @@ public static class ChatToolConverter
     }
 
     /// <summary>任意のツール定義一覧を Anthropic SDK の <see cref="Tool"/> 一覧へ変換する（Claude の Tool Use 用）</summary>
-    public static IReadOnlyList<Tool> ToAnthropicTools(
-        IReadOnlyList<CodexDynamicToolDefinition> definitions
-    )
+    public static IReadOnlyList<Tool> ToAnthropicTools(IReadOnlyList<ToolDefinition> definitions)
     {
         return definitions.Select(ToAnthropicTool).ToList();
     }
 
     /// <summary>1 つの dynamicTool 定義を Anthropic の <see cref="Tool"/> へ変換する</summary>
-    private static Tool ToAnthropicTool(CodexDynamicToolDefinition definition)
+    private static Tool ToAnthropicTool(ToolDefinition definition)
     {
         var schema = JsonSerializer.SerializeToElement(definition.InputSchema);
 

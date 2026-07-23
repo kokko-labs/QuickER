@@ -13,6 +13,30 @@ public class GuiAppSettings
 
     /// <summary>ダイアグラム上の表示トグル（自動保存で書き込まれ、次回起動時に復元する）</summary>
     public DiagramViewSettings DiagramView { get; set; } = new();
+
+    /// <summary>
+    /// 現在編集中の文書メタ（紐付くファイルパス・最終既知ファイルハッシュ・ダーティ状態）。
+    /// 自動保存の作業状態（last_diagram.json）とは別に、どのファイルに紐付いているかを記録する。
+    /// </summary>
+    public CurrentDocumentSettings CurrentDocument { get; set; } = new();
+}
+
+/// <summary>現在編集中の文書がどのファイルに紐付いているかを表す復元メタ（自動保存対象）</summary>
+/// <remarks>
+/// 作業状態そのもの（意味モデル＋レイアウト）は last_diagram.json 側が持つ。ここはファイルとの
+/// 対応関係のみを保持する。<see cref="LastKnownHash"/> は最後に読込／上書き保存した時点のファイル内容の
+/// SHA-256（16 進文字列）で、外部変更検知（ステージ B）で現ファイルとの一致判定に用いる。
+/// </remarks>
+public class CurrentDocumentSettings
+{
+    /// <summary>紐付くファイルのフルパス（未保存＝無題のときは null）</summary>
+    public string? FilePath { get; set; }
+
+    /// <summary>最後に読込／上書き保存した時点のファイル内容の SHA-256（16 進・未保存時は null）</summary>
+    public string? LastKnownHash { get; set; }
+
+    /// <summary>最終読込／上書き保存以降に未保存の変更があるか（次回起動時にタイトルの * 表示へ反映する）</summary>
+    public bool IsDirty { get; set; }
 }
 
 /// <summary>ダイアグラム上の表示トグル（次回起動時に復元する自動保存対象）</summary>

@@ -22,6 +22,7 @@
     <KeyBinding Key="Z" Modifiers="Control" Command="{Binding UndoCommand}" />
     <KeyBinding Key="Y" Modifiers="Control" Command="{Binding RedoCommand}" />
     <KeyBinding Key="S" Modifiers="Control" Command="{Binding SaveCommand}" />
+    <KeyBinding Key="S" Modifiers="Control+Shift" Command="{Binding SaveAsCommand}" />
     <KeyBinding Key="N" Modifiers="Control" Command="{Binding NewDiagramCommand}" />
     <KeyBinding Key="O" Modifiers="Control" Command="{Binding OpenCommand}" />
     <KeyBinding Key="C" Modifiers="Control" Command="{Binding CopySelectedEntityCommand}" />
@@ -573,6 +574,19 @@
             />
           </StackPanel>
         </Button>
+        <Button
+          Style="{StaticResource ToolBarLabelButton}"
+          Command="{Binding SaveAsCommand}"
+          ToolTip="{x:Static resources:Strings.Toolbar_SaveAsTooltip}"
+        >
+          <StackPanel>
+            <TextBlock Style="{StaticResource ToolBarIcon}" Text="🖫" />
+            <TextBlock
+              Style="{StaticResource ToolBarCaption}"
+              Text="{x:Static resources:Strings.Toolbar_SaveAs}"
+            />
+          </StackPanel>
+        </Button>
         <Rectangle Style="{StaticResource ToolBarSeparator}" />
         <Button
           Style="{StaticResource ToolBarLabelButton}"
@@ -844,7 +858,7 @@
       <DockPanel>
         <TextBlock
           DockPanel.Dock="Left"
-          Text="{x:Static resources:Strings.Status_Ready}"
+          Text="{Binding StatusMessage}"
           Foreground="{StaticResource MutedText}"
         />
 

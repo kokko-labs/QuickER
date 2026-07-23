@@ -19,8 +19,8 @@ namespace QuickER.Tests.Gui.ViewModels;
 /// </remarks>
 public class MainViewModelMergeImportTests
 {
-    /// <summary>一致エンティティのレイアウト・クエリが維持され、新規エンティティは原点に置かれる</summary>
-    [Fact(DisplayName = "マージ置換で一致分のレイアウト・クエリが維持され新規は原点")]
+    /// <summary>一致エンティティのレイアウト・クエリが維持され、新規は既存と重ならない空き領域へ追記配置される</summary>
+    [Fact(DisplayName = "マージ置換で一致分のレイアウト・クエリが維持され新規は重ならず追記配置")]
     public void ReplaceDiagramFromModule_WithMatch_PreservesLayoutAndQueries()
     {
         var vm = new MainViewModel(new StubDialogService());
@@ -72,16 +72,24 @@ public class MainViewModelMergeImportTests
 
         vm.ReplaceDiagramFromModule(diagram);
 
-        // 一致エンティティは保存レイアウト（位置・幅）を引き継ぐ
+        // 一致エンティティは保存レイアウト（位置・幅）を 1px も動かさず引き継ぐ
         var mergedExisting = vm.Entities.First(entity => entity.Id == existingId);
         mergedExisting.X.Should().Be(400);
         mergedExisting.Y.Should().Be(250);
         mergedExisting.Width.Should().Be(321);
 
-        // 新規エンティティは原点（既定レイアウト）。幅は自動調整で 0 以外になる
+        // 新規エンティティは原点に積まれず、既存エンティティと矩形が重ならない空き領域へ追記配置される
         var mergedNew = vm.Entities.First(entity => entity.Id == added.Id);
-        mergedNew.X.Should().Be(0);
-        mergedNew.Y.Should().Be(0);
+        (mergedNew.X == 0 && mergedNew.Y == 0)
+            .Should()
+            .BeFalse("新規は原点へ積まず空き領域へ配置される");
+
+        var overlap =
+            mergedExisting.X < mergedNew.X + mergedNew.Width
+            && mergedNew.X < mergedExisting.X + mergedExisting.Width
+            && mergedExisting.Y < mergedNew.Y + mergedNew.DisplayHeight
+            && mergedNew.Y < mergedExisting.Y + mergedExisting.DisplayHeight;
+        overlap.Should().BeFalse("新規と一致分の矩形は重ならない");
 
         // クエリはそのまま透過する
         vm.Queries.Should().ContainSingle().Which.Name.Should().Be("KeptQuery");

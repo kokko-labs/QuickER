@@ -1,7 +1,7 @@
 using System.Text.Json;
 using FluentAssertions;
 using QuickER.AI;
-using QuickER.AI.Chat;
+using QuickER.Mcp;
 using QuickER.Services;
 using QuickER.ViewModels;
 
@@ -416,32 +416,32 @@ public class ErDiagramDynamicToolsTests
         relationship.TargetColumnId.Should().Be(originalTargetColumnId);
     }
 
-    /// <summary>ツール説明文に複合キー禁止の設計ルールが含まれることを検証する（AI への指示はツール説明文経由のため）</summary>
+    /// <summary>ツール説明文（英語）に複合キー禁止の設計ルールが含まれることを検証する（AI への指示はツール説明文経由のため）</summary>
     [Fact(DisplayName = "ツール説明文に複合PK・複合FKの禁止ルールが含まれる")]
     public void GetDefinitions_DescriptionsContainCompositeKeyProhibition()
     {
-        var definitions = ErDiagramToolDefinitions.GetDefinitions();
+        var definitions = ErDiagramToolCatalog.GetDefinitions();
 
         definitions
             .Single(d => d.Name == "add_column")
             .Description.Should()
-            .Contain(ErDesignRules.SinglePrimaryKeyRule);
+            .Contain("composite primary keys are not allowed");
         definitions
             .Single(d => d.Name == "add_relationship")
             .Description.Should()
-            .Contain(ErDesignRules.SingleColumnForeignKeyRule);
+            .Contain("composite foreign keys are not allowed");
         definitions
             .Single(d => d.Name == "add_entity")
             .Description.Should()
-            .Contain("主キー列を 1 列だけ");
+            .Contain("exactly one primary key column");
     }
 
     /// <summary>OpenAI Function Calling 用の ChatTool 変換が、全ツールを名前付きで生成することを検証する</summary>
     [Fact(DisplayName = "ToOpenAiTools は全ツール定義を ChatTool へ変換する")]
     public void ToOpenAiTools_ConvertsAllDefinitions()
     {
-        var definitions = ErDiagramToolDefinitions.GetDefinitions();
-        var tools = ErDiagramToolDefinitions.ToOpenAiTools();
+        var definitions = ErDiagramToolCatalog.GetDefinitions();
+        var tools = ChatToolConverter.ToOpenAiTools(definitions);
 
         tools.Should().HaveCount(definitions.Count);
         tools.Select(t => t.FunctionName).Should().BeEquivalentTo(definitions.Select(d => d.Name));
@@ -451,8 +451,8 @@ public class ErDiagramDynamicToolsTests
     [Fact(DisplayName = "ToAnthropicTools は全ツール定義を Anthropic Tool へ変換する")]
     public void ToAnthropicTools_ConvertsAllDefinitions()
     {
-        var definitions = ErDiagramToolDefinitions.GetDefinitions();
-        var tools = ErDiagramToolDefinitions.ToAnthropicTools();
+        var definitions = ErDiagramToolCatalog.GetDefinitions();
+        var tools = ChatToolConverter.ToAnthropicTools(definitions);
 
         tools.Should().HaveCount(definitions.Count);
         tools.Select(t => t.Name).Should().BeEquivalentTo(definitions.Select(d => d.Name));

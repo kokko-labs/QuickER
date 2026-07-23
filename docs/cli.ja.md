@@ -2,12 +2,13 @@
 
 *日本語 | [English](cli.md)*
 
-QuickER の CLI は 2 つのサブコマンドを提供します。
+QuickER の CLI は、コード生成用のサブコマンド（`generate` / `scaffold`）、生成 C# コードから図を復元する `reverse`、AI エージェント向けの MCP サーバを起動する `mcp`（[MCP サーバ](mcp.ja.md)を参照）を提供します。
 
 | コマンド | 入力 | 出力 |
 |---|---|---|
 | `quicker generate` | ER 図 JSON（GUI の保存形式） | C# コード |
 | `quicker scaffold` | データベース接続文字列（スキーマを直接取込） | C# コード |
+| `quicker reverse` | 生成 C# ソース（`.g.cs`） | スキーマのみの ER 図 JSON |
 
 CLI の表示言語は OS の言語設定に従います（日本語 / 英語）。
 
@@ -47,6 +48,16 @@ quicker scaffold --connection "Server=.;Database=Shop;Integrated Security=true;T
 | `--connection <string>` | ✅ | 接続文字列（形式は `--provider` の DBMS に従う） |
 
 そのほかのオプション（`--out` / `--config` / `--provider`、および設定キーと同名の kebab-case フラグ群）は `generate` と同じです。
+
+## quicker mcp
+
+ER 図編集・コード生成ツールを AI エージェント（Claude Code・Codex など）へ公開する stdio MCP（Model Context Protocol）サーバを起動します。オプションはなく、ステートレスです。各ツールは対象の図ファイルを `file` 引数で受け取ります。
+
+```powershell
+quicker mcp
+```
+
+エージェントはこれを子プロセスとして起動し、標準入出力（JSON-RPC）で通信します。ツールの全一覧・クライアント設定・注意事項は [MCP サーバ](mcp.ja.md)を参照してください。
 
 ## 設定ファイル（quicker.json）
 

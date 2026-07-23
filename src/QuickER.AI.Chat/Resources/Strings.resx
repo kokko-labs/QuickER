@@ -169,4 +169,198 @@
   <data name="Toolbar_OpenAiChatTooltip" xml:space="preserve">
     <value>Create and edit ER diagrams via AI chat (API key / Codex connection)</value>
   </data>
+  <data name="ErDesign_CommonDesignPrinciples" xml:space="preserve">
+    <value>- Design tables with the third normal form in mind.
+- Table and column names use only alphanumerics and underscores.
+- Give every table a description and every column a description.
+- Each table has exactly one primary key column; composite primary keys (a primary key over multiple columns) are prohibited. Even a many-to-many junction table uses a single surrogate key (e.g. OrderItemId int) as its primary key, and columns that reference parent tables are defined as foreign keys (not primary keys).
+- A foreign key consists of exactly one referencing column per relationship (foreign-key constraint). Composite foreign keys that express one reference with a group of columns are prohibited.
+- A foreign-key column must not also be a primary key. A column that carries the referenced table's primary key is a foreign key (non-primary, NOT NULL).
+- Multiple foreign keys with different roles (e.g. ShippingAddressId and BillingAddressId both referencing the same table) are legitimate; define each as its own relationship.
+- Always set nullability. Primary keys are NOT NULL; required fields and ordinary foreign keys are also NOT NULL; only optional fields are nullable.
+- Use SQL Server data types (e.g. int, bigint, nvarchar(50), datetime2, decimal(10,2), bit).</value>
+  </data>
+  <data name="ErDesign_SinglePrimaryKeyRule" xml:space="preserve">
+    <value>Each table has exactly one primary key column (composite primary keys are prohibited).</value>
+  </data>
+  <data name="ErDesign_SingleColumnForeignKeyRule" xml:space="preserve">
+    <value>A relationship references exactly one column to one column (composite foreign keys are prohibited).</value>
+  </data>
+  <data name="ErDesign_FunctionToolLabel" xml:space="preserve">
+    <value>function tools</value>
+  </data>
+  <data name="ErDesign_ChatInstructionsTemplate" xml:space="preserve">
+    <value>You are a DB design assistant embedded in an ER diagram designer app.
+Always create and modify ER diagrams with the provided tools ({0}). Do not use files or the shell.
+Respond in the same language as the user's most recent message.
+
+# Design principles
+{1}
+
+# Tool workflow
+- Before touching an existing ER diagram, always check its current state with get_diagram_summary.
+- Create a table with add_entity, then add_column, adding exactly one primary key column first with is_primary_key=true. {2}
+- Add a foreign key column with add_column as is_primary_key=false (usually is_nullable=false), then define the reference with add_relationship.
+- In add_relationship, always specify source_column (the parent's primary key column) and target_column (the child's foreign key column). {3}
+- If a tool returns an error, follow the error message to fix the input and retry.
+
+# Named query workflow
+- Named queries become repository methods when C# code is generated. Use list_queries to review the queries currently defined on the diagram (the query-side counterpart of get_diagram_summary).
+- set_query is an upsert: matched by (table_name, query_name), it replaces an existing query wholesale (keeping its id) or adds a new one. Validation is all-or-nothing; on any error the diagram is left unchanged.
+- Remove a single query with remove_query (identified by table_name and query_name).
+
+# Naming
+- If the existing ER diagram already has tables, follow their naming convention (PascalCase/snake_case) and singular/plural policy.
+- For a new ER diagram, default to PascalCase and singular (e.g. Customer, OrderItem).</value>
+  </data>
+  <data name="ErDesign_NamingSnakeCase" xml:space="preserve">
+    <value>- Table and column names must be snake_case (e.g. customer_order, customer_id).</value>
+  </data>
+  <data name="ErDesign_NamingPascalCase" xml:space="preserve">
+    <value>- Table and column names must be PascalCase (e.g. CustomerOrder, CustomerId).</value>
+  </data>
+  <data name="ErDesign_TableNamePlural" xml:space="preserve">
+    <value>- Table names must be plural (e.g. Customers, Orders).</value>
+  </data>
+  <data name="ErDesign_TableNameSingular" xml:space="preserve">
+    <value>- Table names must be singular (e.g. Customer, Order).</value>
+  </data>
+  <data name="QueryTool_SetSuccessUpdated" xml:space="preserve">
+    <value>Updated query '{0}' on table '{1}' (returns {2}, {3}).</value>
+  </data>
+  <data name="QueryTool_SetSuccessAdded" xml:space="preserve">
+    <value>Added query '{0}' on table '{1}' (returns {2}, {3}).</value>
+  </data>
+  <data name="QueryTool_Warning" xml:space="preserve">
+    <value>Warning: {0}</value>
+  </data>
+  <data name="QueryTool_SetValidationFailed" xml:space="preserve">
+    <value>Cannot set query '{0}': validation failed. The diagram was not modified.</value>
+  </data>
+  <data name="QueryTool_RemoveSuccess" xml:space="preserve">
+    <value>Removed query '{0}' from table '{1}'.</value>
+  </data>
+  <data name="QueryTool_QueryNotFound" xml:space="preserve">
+    <value>Query '{0}' not found on table '{1}'.</value>
+  </data>
+  <data name="QueryTool_ListHeader" xml:space="preserve">
+    <value>Queries: {0}</value>
+  </data>
+  <data name="QueryTool_UnknownEntity" xml:space="preserve">
+    <value>(unknown entity)</value>
+  </data>
+  <data name="QueryTool_MissingArgument" xml:space="preserve">
+    <value>table_name and query_name are required.</value>
+  </data>
+  <data name="QueryTool_InvalidReturns" xml:space="preserve">
+    <value>Invalid or missing 'returns' (must be one of: list, single, count, scalar, projection).</value>
+  </data>
+  <data name="QueryTool_InvalidImplementation" xml:space="preserve">
+    <value>Invalid 'implementation' (must be one of: dsl, sql, manual).</value>
+  </data>
+  <data name="QueryTool_TableNotFound" xml:space="preserve">
+    <value>Table '{0}' not found.</value>
+  </data>
+  <data name="QueryTool_UnexpectedStatus" xml:space="preserve">
+    <value>Unexpected query tool status: {0}</value>
+  </data>
+  <data name="QueryTool_ListDescription" xml:space="preserve">
+    <value>description: {0}</value>
+  </data>
+  <data name="QueryTool_ListScalarType" xml:space="preserve">
+    <value>scalar type: {0}</value>
+  </data>
+  <data name="QueryTool_ListCondition" xml:space="preserve">
+    <value>condition: {0}</value>
+  </data>
+  <data name="QueryTool_ListSqlDialects" xml:space="preserve">
+    <value>sql dialects: {0}</value>
+  </data>
+  <data name="QueryTool_ListParameters" xml:space="preserve">
+    <value>parameters: {0}</value>
+  </data>
+  <data name="QueryTool_ListOrderBy" xml:space="preserve">
+    <value>order by: {0}</value>
+  </data>
+  <data name="QueryTool_ListPaging" xml:space="preserve">
+    <value>paging: yes</value>
+  </data>
+  <data name="QueryTool_ListResultType" xml:space="preserve">
+    <value>result type: {0}</value>
+  </data>
+  <data name="QueryTool_ListFields" xml:space="preserve">
+    <value>fields: {0}</value>
+  </data>
+  <data name="QueryTool_ColumnRef" xml:space="preserve">
+    <value>column {0}</value>
+  </data>
+  <data name="QueryTool_Untyped" xml:space="preserve">
+    <value>(untyped)</value>
+  </data>
+  <data name="QueryTool_ListSuffix" xml:space="preserve">
+    <value> (list)</value>
+  </data>
+  <data name="QueryTool_Unknown" xml:space="preserve">
+    <value>(unknown)</value>
+  </data>
+  <data name="QueryTool_OrderDesc" xml:space="preserve">
+    <value>{0} desc</value>
+  </data>
+  <data name="QueryTool_Diag_ParameterMissingName" xml:space="preserve">
+    <value>A parameter is missing its required 'name'.</value>
+  </data>
+  <data name="QueryTool_Diag_ParameterTypeSourceExclusive" xml:space="preserve">
+    <value>Parameter '{0}' must specify exactly one of 'type' or 'source_column'.</value>
+  </data>
+  <data name="QueryTool_Diag_ParameterSourceColumnNotFound" xml:space="preserve">
+    <value>Parameter '{0}': source_column '{1}' not found in table '{2}'.</value>
+  </data>
+  <data name="QueryTool_Diag_ScalarRequiresScalarType" xml:space="preserve">
+    <value>returns=scalar requires 'scalar_type'.</value>
+  </data>
+  <data name="QueryTool_Diag_ProjectionRequiresResultTypeName" xml:space="preserve">
+    <value>returns=projection requires 'result_type_name'.</value>
+  </data>
+  <data name="QueryTool_Diag_ProjectionRequiresFields" xml:space="preserve">
+    <value>returns=projection requires at least one entry in 'fields'.</value>
+  </data>
+  <data name="QueryTool_Diag_OrderByInvalidForReturnShape" xml:space="preserve">
+    <value>order_by is only valid when returns is 'list', 'single', or 'projection' (got '{0}').</value>
+  </data>
+  <data name="QueryTool_Diag_OrderByMissingColumn" xml:space="preserve">
+    <value>An order_by entry is missing its required 'column'.</value>
+  </data>
+  <data name="QueryTool_Diag_OrderByColumnNotFound" xml:space="preserve">
+    <value>order_by column '{0}' not found in table '{1}'.</value>
+  </data>
+  <data name="QueryTool_Diag_ProjectionFieldMissingName" xml:space="preserve">
+    <value>A projection field is missing its required 'name'.</value>
+  </data>
+  <data name="QueryTool_Diag_ProjectionFieldTypeSourceExclusive" xml:space="preserve">
+    <value>Projection field '{0}' must specify exactly one of 'type' or 'source_column'.</value>
+  </data>
+  <data name="QueryTool_Diag_ProjectionFieldSourceColumnNotFound" xml:space="preserve">
+    <value>Projection field '{0}': source_column '{1}' not found in table '{2}'.</value>
+  </data>
+  <data name="QueryTool_Diag_UnknownSqlDialect" xml:space="preserve">
+    <value>Unknown SQL dialect '{0}' (must be one of: {1}).</value>
+  </data>
+  <data name="QueryTool_Diag_SqlDialectNotString" xml:space="preserve">
+    <value>SQL for dialect '{0}' must be a string.</value>
+  </data>
+  <data name="QueryTool_Diag_Condition" xml:space="preserve">
+    <value>Condition: {0}</value>
+  </data>
+  <data name="QueryTool_Diag_RawSql" xml:space="preserve">
+    <value>{0}: {1}</value>
+  </data>
+  <data name="QueryTool_Diag_ParameterUnusedInCondition" xml:space="preserve">
+    <value>Parameter '{0}' is declared but not used in the condition.</value>
+  </data>
+  <data name="QueryTool_Diag_Unexpected" xml:space="preserve">
+    <value>Unexpected diagnostic: {0}</value>
+  </data>
+  <data name="QueryTool_InvalidArgumentsJson" xml:space="preserve">
+    <value>Could not parse the arguments JSON for tool '{0}'.</value>
+  </data>
 </root>

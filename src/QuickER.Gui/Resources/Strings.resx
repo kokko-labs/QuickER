@@ -119,6 +119,12 @@
   <data name="Toolbar_SaveTooltip" xml:space="preserve">
     <value>Save (Ctrl+S)</value>
   </data>
+  <data name="Toolbar_SaveAs" xml:space="preserve">
+    <value>Save As</value>
+  </data>
+  <data name="Toolbar_SaveAsTooltip" xml:space="preserve">
+    <value>Save As (Ctrl+Shift+S)</value>
+  </data>
   <data name="Toolbar_Undo" xml:space="preserve">
     <value>Undo</value>
   </data>
@@ -226,6 +232,18 @@
   </data>
   <data name="Status_FitTooltip" xml:space="preserve">
     <value>Fit to window (Ctrl+Shift+0)</value>
+  </data>
+  <data name="Status_ExternalReloaded" xml:space="preserve">
+    <value>Reloaded: the file was changed by another program.</value>
+  </data>
+  <data name="Status_ExternalFileDeleted" xml:space="preserve">
+    <value>The file was deleted externally (still tracked; save to recreate it).</value>
+  </data>
+  <data name="Status_ExternalFileRenamed" xml:space="preserve">
+    <value>The file was renamed externally (still tracked; save to recreate it).</value>
+  </data>
+  <data name="Status_ExternalReloadFailed" xml:space="preserve">
+    <value>Could not reload the externally changed file; keeping the current diagram.</value>
   </data>
   <data name="Toolbox_Title" xml:space="preserve">
     <value>Toolbox</value>
@@ -448,6 +466,9 @@
   </data>
   <data name="Confirm_NewerDocumentFormat" xml:space="preserve">
     <value>This file was saved in a newer format (v{0}) than this version of QuickER supports (up to v{1}). Unsupported data may be lost if you continue. Open anyway?</value>
+  </data>
+  <data name="Confirm_ExternalChangeReload" xml:space="preserve">
+    <value>The file was changed by another program. Reload it? (Reloading discards your unsaved changes.)</value>
   </data>
   <data name="Relationship_DuplicateMessage" xml:space="preserve">
     <value>A relationship with the same association already exists. Please edit the existing relationship.</value>
@@ -710,5 +731,95 @@
   </data>
   <data name="Format_DefinitionDocumentHtml" xml:space="preserve">
     <value>Definition Document (HTML)</value>
+  </data>
+  <data name="Tool_Unsupported" xml:space="preserve">
+    <value>Unsupported tool: {0}</value>
+  </data>
+  <data name="Tool_Error" xml:space="preserve">
+    <value>Error: {0}</value>
+  </data>
+  <data name="Tool_InvalidArgumentsJson" xml:space="preserve">
+    <value>Could not parse the arguments JSON for tool '{0}'.</value>
+  </data>
+  <data name="Tool_Summary_TableCount" xml:space="preserve">
+    <value>Tables: {0}</value>
+  </data>
+  <data name="Tool_Summary_RelationshipCount" xml:space="preserve">
+    <value>Relationships: {0}</value>
+  </data>
+  <data name="Tool_Summary_EntityDescription" xml:space="preserve">
+    <value>description: {0}</value>
+  </data>
+  <data name="Tool_Summary_RelationshipsHeader" xml:space="preserve">
+    <value>Relationships:</value>
+  </data>
+  <data name="Tool_EntityAdded" xml:space="preserve">
+    <value>Added table '{0}'.</value>
+  </data>
+  <data name="Tool_TableNameRequired" xml:space="preserve">
+    <value>table_name is required.</value>
+  </data>
+  <data name="Tool_TableNotFound" xml:space="preserve">
+    <value>Table '{0}' not found.</value>
+  </data>
+  <data name="Tool_EntityRemoved" xml:space="preserve">
+    <value>Removed table '{0}'.</value>
+  </data>
+  <data name="Tool_TableAndColumnNameRequired" xml:space="preserve">
+    <value>table_name and column_name are required.</value>
+  </data>
+  <data name="Tool_ColumnAdded" xml:space="preserve">
+    <value>Added column '{1}' to table '{0}'.</value>
+  </data>
+  <data name="Tool_ColumnNotFound" xml:space="preserve">
+    <value>Column '{0}' not found.</value>
+  </data>
+  <data name="Tool_ColumnRemoved" xml:space="preserve">
+    <value>Removed column '{1}' from table '{0}'.</value>
+  </data>
+  <data name="Tool_Field_TableName" xml:space="preserve">
+    <value>table name</value>
+  </data>
+  <data name="Tool_Field_Memo" xml:space="preserve">
+    <value>memo</value>
+  </data>
+  <data name="Tool_Field_Description" xml:space="preserve">
+    <value>description</value>
+  </data>
+  <data name="Tool_Field_DataType" xml:space="preserve">
+    <value>data type</value>
+  </data>
+  <data name="Tool_Field_Nullable" xml:space="preserve">
+    <value>nullability</value>
+  </data>
+  <data name="Tool_NoPropertiesToChange" xml:space="preserve">
+    <value>No properties to change were specified.</value>
+  </data>
+  <data name="Tool_EntityUpdated" xml:space="preserve">
+    <value>Updated {1} of table '{0}'.</value>
+  </data>
+  <data name="Tool_NoColumnPropertiesToChange" xml:space="preserve">
+    <value>No properties to change were specified. Specify at least one of description, data_type, or is_nullable.</value>
+  </data>
+  <data name="Tool_ColumnUpdated" xml:space="preserve">
+    <value>Updated {2} of column '{1}' in table '{0}'.</value>
+  </data>
+  <data name="Tool_SourceAndTargetTableRequired" xml:space="preserve">
+    <value>source_table and target_table are required.</value>
+  </data>
+  <data name="Tool_ColumnNotFoundInTable" xml:space="preserve">
+    <value>Column '{1}' not found in table '{0}'.</value>
+  </data>
+  <data name="Tool_RelationshipAdded" xml:space="preserve">
+    <value>Added relationship '{0}' → '{1}'.</value>
+  </data>
+  <data name="Tool_RelationshipNotFound" xml:space="preserve">
+    <value>Relationship '{0}' → '{1}' not found.</value>
+  </data>
+  <data name="Tool_RelationshipRemoved" xml:space="preserve">
+    <value>Removed relationship '{0}' → '{1}'.</value>
+  </data>
+  <data name="Tool_ListSeparator" xml:space="preserve">
+    <value>, </value>
   </data>
 </root>

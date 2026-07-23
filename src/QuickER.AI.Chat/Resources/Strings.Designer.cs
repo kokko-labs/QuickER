@@ -275,5 +275,335 @@ namespace QuickER.AI.Chat.Resources {
                 return ResourceManager.GetString("Toolbar_OpenAiChatTooltip", resourceCulture);
             }
         }
+        public static string ErDesign_CommonDesignPrinciples {
+            get {
+                return ResourceManager.GetString("ErDesign_CommonDesignPrinciples", resourceCulture);
+            }
+        }
+
+        public static string ErDesign_SinglePrimaryKeyRule {
+            get {
+                return ResourceManager.GetString("ErDesign_SinglePrimaryKeyRule", resourceCulture);
+            }
+        }
+
+        public static string ErDesign_SingleColumnForeignKeyRule {
+            get {
+                return ResourceManager.GetString("ErDesign_SingleColumnForeignKeyRule", resourceCulture);
+            }
+        }
+
+        public static string ErDesign_FunctionToolLabel {
+            get {
+                return ResourceManager.GetString("ErDesign_FunctionToolLabel", resourceCulture);
+            }
+        }
+
+        public static string ErDesign_ChatInstructionsTemplate {
+            get {
+                return ResourceManager.GetString("ErDesign_ChatInstructionsTemplate", resourceCulture);
+            }
+        }
+
+        public static string ErDesign_NamingSnakeCase {
+            get {
+                return ResourceManager.GetString("ErDesign_NamingSnakeCase", resourceCulture);
+            }
+        }
+
+        public static string ErDesign_NamingPascalCase {
+            get {
+                return ResourceManager.GetString("ErDesign_NamingPascalCase", resourceCulture);
+            }
+        }
+
+        public static string ErDesign_TableNamePlural {
+            get {
+                return ResourceManager.GetString("ErDesign_TableNamePlural", resourceCulture);
+            }
+        }
+
+        public static string ErDesign_TableNameSingular {
+            get {
+                return ResourceManager.GetString("ErDesign_TableNameSingular", resourceCulture);
+            }
+        }
+
+        public static string QueryTool_SetSuccessUpdated {
+            get {
+                return ResourceManager.GetString("QueryTool_SetSuccessUpdated", resourceCulture);
+            }
+        }
+
+        public static string QueryTool_SetSuccessAdded {
+            get {
+                return ResourceManager.GetString("QueryTool_SetSuccessAdded", resourceCulture);
+            }
+        }
+
+        public static string QueryTool_Warning {
+            get {
+                return ResourceManager.GetString("QueryTool_Warning", resourceCulture);
+            }
+        }
+
+        public static string QueryTool_SetValidationFailed {
+            get {
+                return ResourceManager.GetString("QueryTool_SetValidationFailed", resourceCulture);
+            }
+        }
+
+        public static string QueryTool_RemoveSuccess {
+            get {
+                return ResourceManager.GetString("QueryTool_RemoveSuccess", resourceCulture);
+            }
+        }
+
+        public static string QueryTool_QueryNotFound {
+            get {
+                return ResourceManager.GetString("QueryTool_QueryNotFound", resourceCulture);
+            }
+        }
+
+        public static string QueryTool_ListHeader {
+            get {
+                return ResourceManager.GetString("QueryTool_ListHeader", resourceCulture);
+            }
+        }
+
+        public static string QueryTool_UnknownEntity {
+            get {
+                return ResourceManager.GetString("QueryTool_UnknownEntity", resourceCulture);
+            }
+        }
+
+        public static string QueryTool_MissingArgument {
+            get {
+                return ResourceManager.GetString("QueryTool_MissingArgument", resourceCulture);
+            }
+        }
+
+        public static string QueryTool_InvalidReturns {
+            get {
+                return ResourceManager.GetString("QueryTool_InvalidReturns", resourceCulture);
+            }
+        }
+
+        public static string QueryTool_InvalidImplementation {
+            get {
+                return ResourceManager.GetString("QueryTool_InvalidImplementation", resourceCulture);
+            }
+        }
+
+        public static string QueryTool_TableNotFound {
+            get {
+                return ResourceManager.GetString("QueryTool_TableNotFound", resourceCulture);
+            }
+        }
+
+        public static string QueryTool_UnexpectedStatus {
+            get {
+                return ResourceManager.GetString("QueryTool_UnexpectedStatus", resourceCulture);
+            }
+        }
+
+        public static string QueryTool_ListDescription {
+            get {
+                return ResourceManager.GetString("QueryTool_ListDescription", resourceCulture);
+            }
+        }
+
+        public static string QueryTool_ListScalarType {
+            get {
+                return ResourceManager.GetString("QueryTool_ListScalarType", resourceCulture);
+            }
+        }
+
+        public static string QueryTool_ListCondition {
+            get {
+                return ResourceManager.GetString("QueryTool_ListCondition", resourceCulture);
+            }
+        }
+
+        public static string QueryTool_ListSqlDialects {
+            get {
+                return ResourceManager.GetString("QueryTool_ListSqlDialects", resourceCulture);
+            }
+        }
+
+        public static string QueryTool_ListParameters {
+            get {
+                return ResourceManager.GetString("QueryTool_ListParameters", resourceCulture);
+            }
+        }
+
+        public static string QueryTool_ListOrderBy {
+            get {
+                return ResourceManager.GetString("QueryTool_ListOrderBy", resourceCulture);
+            }
+        }
+
+        public static string QueryTool_ListPaging {
+            get {
+                return ResourceManager.GetString("QueryTool_ListPaging", resourceCulture);
+            }
+        }
+
+        public static string QueryTool_ListResultType {
+            get {
+                return ResourceManager.GetString("QueryTool_ListResultType", resourceCulture);
+            }
+        }
+
+        public static string QueryTool_ListFields {
+            get {
+                return ResourceManager.GetString("QueryTool_ListFields", resourceCulture);
+            }
+        }
+
+        public static string QueryTool_ColumnRef {
+            get {
+                return ResourceManager.GetString("QueryTool_ColumnRef", resourceCulture);
+            }
+        }
+
+        public static string QueryTool_Untyped {
+            get {
+                return ResourceManager.GetString("QueryTool_Untyped", resourceCulture);
+            }
+        }
+
+        public static string QueryTool_ListSuffix {
+            get {
+                return ResourceManager.GetString("QueryTool_ListSuffix", resourceCulture);
+            }
+        }
+
+        public static string QueryTool_Unknown {
+            get {
+                return ResourceManager.GetString("QueryTool_Unknown", resourceCulture);
+            }
+        }
+
+        public static string QueryTool_OrderDesc {
+            get {
+                return ResourceManager.GetString("QueryTool_OrderDesc", resourceCulture);
+            }
+        }
+
+        public static string QueryTool_Diag_ParameterMissingName {
+            get {
+                return ResourceManager.GetString("QueryTool_Diag_ParameterMissingName", resourceCulture);
+            }
+        }
+
+        public static string QueryTool_Diag_ParameterTypeSourceExclusive {
+            get {
+                return ResourceManager.GetString("QueryTool_Diag_ParameterTypeSourceExclusive", resourceCulture);
+            }
+        }
+
+        public static string QueryTool_Diag_ParameterSourceColumnNotFound {
+            get {
+                return ResourceManager.GetString("QueryTool_Diag_ParameterSourceColumnNotFound", resourceCulture);
+            }
+        }
+
+        public static string QueryTool_Diag_ScalarRequiresScalarType {
+            get {
+                return ResourceManager.GetString("QueryTool_Diag_ScalarRequiresScalarType", resourceCulture);
+            }
+        }
+
+        public static string QueryTool_Diag_ProjectionRequiresResultTypeName {
+            get {
+                return ResourceManager.GetString("QueryTool_Diag_ProjectionRequiresResultTypeName", resourceCulture);
+            }
+        }
+
+        public static string QueryTool_Diag_ProjectionRequiresFields {
+            get {
+                return ResourceManager.GetString("QueryTool_Diag_ProjectionRequiresFields", resourceCulture);
+            }
+        }
+
+        public static string QueryTool_Diag_OrderByInvalidForReturnShape {
+            get {
+                return ResourceManager.GetString("QueryTool_Diag_OrderByInvalidForReturnShape", resourceCulture);
+            }
+        }
+
+        public static string QueryTool_Diag_OrderByMissingColumn {
+            get {
+                return ResourceManager.GetString("QueryTool_Diag_OrderByMissingColumn", resourceCulture);
+            }
+        }
+
+        public static string QueryTool_Diag_OrderByColumnNotFound {
+            get {
+                return ResourceManager.GetString("QueryTool_Diag_OrderByColumnNotFound", resourceCulture);
+            }
+        }
+
+        public static string QueryTool_Diag_ProjectionFieldMissingName {
+            get {
+                return ResourceManager.GetString("QueryTool_Diag_ProjectionFieldMissingName", resourceCulture);
+            }
+        }
+
+        public static string QueryTool_Diag_ProjectionFieldTypeSourceExclusive {
+            get {
+                return ResourceManager.GetString("QueryTool_Diag_ProjectionFieldTypeSourceExclusive", resourceCulture);
+            }
+        }
+
+        public static string QueryTool_Diag_ProjectionFieldSourceColumnNotFound {
+            get {
+                return ResourceManager.GetString("QueryTool_Diag_ProjectionFieldSourceColumnNotFound", resourceCulture);
+            }
+        }
+
+        public static string QueryTool_Diag_UnknownSqlDialect {
+            get {
+                return ResourceManager.GetString("QueryTool_Diag_UnknownSqlDialect", resourceCulture);
+            }
+        }
+
+        public static string QueryTool_Diag_SqlDialectNotString {
+            get {
+                return ResourceManager.GetString("QueryTool_Diag_SqlDialectNotString", resourceCulture);
+            }
+        }
+
+        public static string QueryTool_Diag_Condition {
+            get {
+                return ResourceManager.GetString("QueryTool_Diag_Condition", resourceCulture);
+            }
+        }
+
+        public static string QueryTool_Diag_RawSql {
+            get {
+                return ResourceManager.GetString("QueryTool_Diag_RawSql", resourceCulture);
+            }
+        }
+
+        public static string QueryTool_Diag_ParameterUnusedInCondition {
+            get {
+                return ResourceManager.GetString("QueryTool_Diag_ParameterUnusedInCondition", resourceCulture);
+            }
+        }
+
+        public static string QueryTool_Diag_Unexpected {
+            get {
+                return ResourceManager.GetString("QueryTool_Diag_Unexpected", resourceCulture);
+            }
+        }
+
+        public static string QueryTool_InvalidArgumentsJson {
+            get {
+                return ResourceManager.GetString("QueryTool_InvalidArgumentsJson", resourceCulture);
+            }
+        }
+
     }
 }

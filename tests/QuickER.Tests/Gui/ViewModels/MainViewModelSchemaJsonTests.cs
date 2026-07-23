@@ -77,11 +77,14 @@ public class MainViewModelSchemaJsonTests
     }
 
     /// <summary>
-    /// 一部エンティティのみ layout を持つ文書を開くと、保存座標のあるものはそのまま・
-    /// ないものは原点のままで、自動整列が発動しない（部分欠落の現状挙動）ことを検証する。
+    /// 一部エンティティのみ layout を持つ文書（外部ツールがエンティティだけ追記した文書など）を開くと、
+    /// layout を持つ既存エンティティは 1px も動かず、layout の無い欠落分のみが空き領域へ追記配置され
+    /// （原点への積み重ねが起きず既存と重ならない）ことを検証する。
     /// </summary>
-    [Fact(DisplayName = "Open: 一部のみ layout を持つ文書は自動整列せず欠落分だけ原点になる")]
-    public void Open_PartialLayout_KeepsSavedAndDefaultsMissingToOrigin()
+    [Fact(
+        DisplayName = "Open: 一部のみ layout を持つ文書は既存を動かさず欠落分を空き領域へ追記配置する"
+    )]
+    public void Open_PartialLayout_KeepsSavedAndAppendsMissingWithoutOverlap()
     {
         var e1 = new Entity { TableName = "A" };
         var e2 = new Entity { TableName = "B" };
@@ -109,13 +112,22 @@ public class MainViewModelSchemaJsonTests
             var loaded1 = vm.Entities.First(e => e.Id == e1.Id);
             var loaded2 = vm.Entities.First(e => e.Id == e2.Id);
 
-            // layout があるエンティティは保存座標のまま
+            // layout があるエンティティは保存座標を 1px も動かさない
             loaded1.X.Should().Be(300);
             loaded1.Y.Should().Be(150);
 
-            // layout がないエンティティは既定位置（原点）のまま＝自動整列は発動しない
-            loaded2.X.Should().Be(0);
-            loaded2.Y.Should().Be(0);
+            // layout がない欠落エンティティは原点に積まれず空き領域へ追記配置される
+            (loaded2.X == 0 && loaded2.Y == 0)
+                .Should()
+                .BeFalse("欠落分は原点へ積まず空き領域へ配置される");
+
+            // 既存と欠落分の矩形は重ならない
+            var overlap =
+                loaded1.X < loaded2.X + loaded2.Width
+                && loaded2.X < loaded1.X + loaded1.Width
+                && loaded1.Y < loaded2.Y + loaded2.DisplayHeight
+                && loaded2.Y < loaded1.Y + loaded1.DisplayHeight;
+            overlap.Should().BeFalse("既存と欠落分の矩形は重ならない");
         }
         finally
         {

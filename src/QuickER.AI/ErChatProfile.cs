@@ -1,3 +1,5 @@
+using QuickER.Mcp;
+
 namespace QuickER.AI;
 
 /// <summary>
@@ -21,6 +23,6 @@ namespace QuickER.AI;
 public sealed record ErChatProfile(
     Func<string> BuildSystemPrompt,
     Func<string> BuildCodexDeveloperInstructions,
-    IReadOnlyList<CodexDynamicToolDefinition> Tools,
+    IReadOnlyList<ToolDefinition> Tools,
     string McpServerName
 );

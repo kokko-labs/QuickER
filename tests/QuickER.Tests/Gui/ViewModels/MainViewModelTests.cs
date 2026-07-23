@@ -794,11 +794,11 @@ public class MainViewModelTests
         vm.UndoRedo.CanRedo.Should().BeFalse();
     }
 
-    /// <summary>ウィンドウタイトルが文書ファイル名に連動して変化することを検証する</summary>
+    /// <summary>ウィンドウタイトルが現在ファイルパスに連動して変化することを検証する</summary>
     [Fact(
         DisplayName = "WindowTitle: 未保存は「QuickER」、ファイル名設定で「ファイル名 - QuickER」になる"
     )]
-    public void WindowTitle_FollowsLastDocumentFileName()
+    public void WindowTitle_FollowsCurrentFilePath()
     {
         var vm = new MainViewModel();
         var raised = new List<string?>();
@@ -806,8 +806,9 @@ public class MainViewModelTests
 
         vm.WindowTitle.Should().Be("QuickER");
 
-        vm.LastDocumentFileName = "Sample";
+        vm.CurrentFilePath = @"C:\docs\Sample.json";
 
+        vm.LastDocumentFileName.Should().Be("Sample");
         vm.WindowTitle.Should().Be("Sample - QuickER");
         raised.Should().Contain(nameof(MainViewModel.WindowTitle));
     }
@@ -817,10 +818,11 @@ public class MainViewModelTests
     public void NewDiagram_ResetsWindowTitle()
     {
         var vm = new MainViewModel(new StubDialogService());
-        vm.LastDocumentFileName = "Sample";
+        vm.CurrentFilePath = @"C:\docs\Sample.json";
 
         vm.NewDiagramCommand.Execute(null);
 
+        vm.CurrentFilePath.Should().BeNull();
         vm.WindowTitle.Should().Be("QuickER");
     }
 

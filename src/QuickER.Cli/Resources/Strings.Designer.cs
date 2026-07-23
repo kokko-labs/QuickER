@@ -335,5 +335,11 @@ namespace QuickER.Cli.Resources {
                 return ResourceManager.GetString("Cli_ReverseWritten", resourceCulture);
             }
         }
+
+        public static string Cli_Cmd_Mcp {
+            get {
+                return ResourceManager.GetString("Cli_Cmd_Mcp", resourceCulture);
+            }
+        }
     }
 }

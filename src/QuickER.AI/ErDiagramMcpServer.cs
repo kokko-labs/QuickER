@@ -4,18 +4,18 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
+using QuickER.Mcp;
 
 namespace QuickER.AI;
 
 /// <summary>
 /// ER 図操作ツールを Claude Code へ公開する、プロセス内 HTTP/SSE MCP サーバー。
 /// 127.0.0.1 のエフェメラルポートで Kestrel を起動し、bearer トークンで保護する。
-/// ツール定義は生成時に注入されたセット（機能側 QuickER.AI.Chat の ErDiagramToolDefinitions が単一ソース）を用い、
+/// ツール定義は生成時に注入されたセット（正本は QuickER.Mcp の ErDiagramToolCatalog）を用い、
 /// 呼び出しは注入された実行コールバック（UI スレッドへのマーシャリングは呼び出し側の責務）へ委譲する。
 /// </summary>
 public sealed class ErDiagramMcpServer : IAsyncDisposable
@@ -24,7 +24,7 @@ public sealed class ErDiagramMcpServer : IAsyncDisposable
     public const string ServerName = "erdesigner";
 
     private readonly Func<string, string, (string Result, bool Success)> _execute;
-    private readonly IReadOnlyList<CodexDynamicToolDefinition> _tools;
+    private readonly IReadOnlyList<ToolDefinition> _tools;
     private WebApplication? _app;
 
     /// <summary>解決済みのサーバー URL（例: <c>http://127.0.0.1:54321</c>）。未起動なら null</summary>
@@ -38,7 +38,7 @@ public sealed class ErDiagramMcpServer : IAsyncDisposable
     /// <param name="tools">公開するツール定義セット（合成ルート／エンジンが明示的に指定する）</param>
     public ErDiagramMcpServer(
         Func<string, string, (string Result, bool Success)> execute,
-        IReadOnlyList<CodexDynamicToolDefinition> tools
+        IReadOnlyList<ToolDefinition> tools
     )
     {
         _execute = execute;
@@ -102,10 +102,10 @@ public sealed class ErDiagramMcpServer : IAsyncDisposable
     private IReadOnlyList<McpServerTool> BuildTools() => _tools.Select(CreateTool).ToList();
 
     /// <summary>1 つの dynamicTool 定義を、固定スキーマと実行委譲を持つ MCP ツールへ変換する</summary>
-    private McpServerTool CreateTool(CodexDynamicToolDefinition definition)
+    private McpServerTool CreateTool(ToolDefinition definition)
     {
         var schema = JsonSerializer.SerializeToElement(definition.InputSchema);
-        var function = new ErToolFunction(
+        var function = new DelegatingToolFunction(
             definition.Name,
             definition.Description,
             schema,
@@ -122,39 +122,6 @@ public sealed class ErDiagramMcpServer : IAsyncDisposable
             await _app.StopAsync().ConfigureAwait(false);
             await _app.DisposeAsync().ConfigureAwait(false);
             _app = null;
-        }
-    }
-
-    /// <summary>固定の入力スキーマを持ち、実行を外部コールバックへ委譲する <see cref="AIFunction"/></summary>
-    private sealed class ErToolFunction : AIFunction
-    {
-        private readonly Func<string, string, (string Result, bool Success)> _execute;
-
-        public override string Name { get; }
-        public override string Description { get; }
-        public override JsonElement JsonSchema { get; }
-
-        public ErToolFunction(
-            string name,
-            string description,
-            JsonElement jsonSchema,
-            Func<string, string, (string Result, bool Success)> execute
-        )
-        {
-            Name = name;
-            Description = description;
-            JsonSchema = jsonSchema;
-            _execute = execute;
-        }
-
-        protected override ValueTask<object?> InvokeCoreAsync(
-            AIFunctionArguments arguments,
-            CancellationToken cancellationToken
-        )
-        {
-            var argumentsJson = JsonSerializer.Serialize(arguments);
-            var (result, _) = _execute(Name, argumentsJson);
-            return ValueTask.FromResult<object?>(result);
         }
     }
 }

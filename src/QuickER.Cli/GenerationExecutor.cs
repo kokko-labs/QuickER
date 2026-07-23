@@ -80,6 +80,38 @@ internal static class GenerationExecutor
             return 1;
         }
 
+        return GenerateWithResolvedOptions(provider, diagram, options, output);
+    }
+
+    /// <summary>
+    /// ParseResult 非依存で「設定ファイル（<paramref name="config"/>）＋既定値」からオプションを解決し、
+    /// 図（<paramref name="diagram"/>）を <paramref name="output"/> へ生成する。CLI の <see cref="ParseResult"/> を
+    /// 経由しない経路（MCP の generate_csharp ツール等）が使う。
+    /// </summary>
+    /// <remarks>
+    /// 診断（標準エラー）と生成ファイル一覧（標準出力）は <see cref="WriteResult"/> が Console へ出力するため、
+    /// 捕捉が必要な呼び出し側は事前に <see cref="Console.SetOut"/> / <see cref="Console.SetError"/> を差し替えること。
+    /// 設定検証エラー（<see cref="RepositoryDialectUnsupportedException"/>）やその他の例外は呼び出し側へ伝播する。
+    /// </remarks>
+    public static int GenerateFromConfig(
+        IDatabaseProvider provider,
+        ErDiagram diagram,
+        FileInfo? config,
+        DirectoryInfo output
+    )
+    {
+        var options = GenerationConfigLoader.LoadOptions(config, provider);
+        return GenerateWithResolvedOptions(provider, diagram, options, output);
+    }
+
+    /// <summary>解決済みオプションで方言別マッパを解決し、生成・書き出しを行う共通コア</summary>
+    private static int GenerateWithResolvedOptions(
+        IDatabaseProvider provider,
+        ErDiagram diagram,
+        CodeGenerationOptions options,
+        DirectoryInfo output
+    )
+    {
         var dialectMappers = ResolveDialectTypeMappers(options);
         var result = DiagramCodeGenerator.Generate(
             provider.TypeMapper,

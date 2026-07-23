@@ -199,4 +199,7 @@
   <data name="Cli_ReverseWritten" xml:space="preserve">
     <value>Wrote the ER diagram: {0}</value>
   </data>
+  <data name="Cli_Cmd_Mcp" xml:space="preserve">
+    <value>Start a stdio MCP server that exposes ER diagram editing and code generation tools for AI agents (communicates over stdin/stdout using JSON-RPC; each tool takes the target diagram file as its 'file' argument)</value>
+  </data>
 </root>

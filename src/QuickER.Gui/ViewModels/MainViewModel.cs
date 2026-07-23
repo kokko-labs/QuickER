@@ -30,7 +30,7 @@ namespace QuickER.ViewModels;
 /// <see cref="DiagramChangeTracker.RunWithoutTracking"/> で追跡を抑止し、履歴の二重登録を防ぐ
 /// 入出力（保存・取込・各種生成）の責務は <c>MainViewModel.ImportExport.cs</c> 側の partial に分離する
 /// </remarks>
-public partial class MainViewModel : ObservableObject
+public partial class MainViewModel : ObservableObject, IDisposable
 {
     /// <summary>Undo/Redo 履歴を管理するスタック</summary>
     public UndoRedoManager UndoRedo { get; } = new();
@@ -279,12 +279,21 @@ public partial class MainViewModel : ObservableObject
         PasteCopiedEntityCommand = new RelayCommand(PasteCopiedEntity, CanPasteCopiedEntity);
         Entities.CollectionChanged += OnEntitiesCollectionChanged;
         Relationships.CollectionChanged += OnRelationshipsCollectionChanged;
+
+        // Undo 世代の変化（＝編集の発生）を購読し、ダーティ判定とウィンドウタイトルの * 表示へ反映する
+        UndoRedo.PropertyChanged += OnUndoRedoStateChanged;
+
+        // 外部変更監視サービスの購読・期待ハッシュ供給を結線する（監視の開始は現在パス設定に追従する）
+        InitializeFileWatcher();
     }
 
     /// <summary>前回の自動保存ファイルを復元する。アプリ起動時に 1 回だけ呼び出すこと</summary>
     public void Initialize()
     {
         RestoreLastDiagram();
+
+        // 復元後、現ファイルが最終既知ハッシュと乖離していれば外部変更として同じ規則で反映する
+        CheckExternalChangeOnStartup();
     }
 
     /// <summary>キャンバスサイズを再計算して変更通知を発行する。エンティティの移動・サイズ変更後に呼び出す</summary>
@@ -468,7 +477,8 @@ public partial class MainViewModel : ObservableObject
     /// <para>方言採用の後、マージ取込（Guid 引継）に対応したレイアウト・クエリ透過ロジックで置換する。</para>
     /// <list type="bullet">
     /// <item>新図と現在図に同一 Id のエンティティが 1 件以上あれば（＝マージ取込）: 一致分の現在レイアウト
-    /// （位置・色・幅）を引き継ぎ自動整列しない。新規エンティティのみ幅を自動調整する（一致分の保存幅は尊重）。
+    /// （位置・色・幅）を引き継ぎ自動整列しない。新規エンティティは幅を自動調整したうえで、一致分を固定群として
+    /// 空き領域へ追記配置する（<see cref="AutoLayoutService.LayoutAppend"/>＝一致分は不動・新規のみ配置）。
     /// クエリ（<see cref="ErDiagram.Queries"/>）はそのまま引き継ぐ</item>
     /// <item>一致が 1 件も無ければ（＝AI 生成・全新規取込）: 従来どおり全体を自動整列する。クエリは空でも
     /// 与えられていれば引き継ぐ（新規 Guid のみの経路では通常空）</item>
@@ -511,10 +521,19 @@ public partial class MainViewModel : ObservableObject
             diagram.Queries
         );
 
-        // 新規エンティティ（レイアウト未継承）のみ幅を自動調整する。一致分の保存幅は尊重する
+        // 新規エンティティ（レイアウト未継承）のみ幅を自動調整し、一致分を固定群として空き領域へ追記配置する
+        // （一致分の保存幅・位置は尊重し不動。新規は原点に積まず既存の隣接領域へ格子配置する）
         _changeTracker.RunWithoutTracking(() =>
         {
-            AutoFitEntityWidths(Entities.Where(entity => !matchedIds.Contains(entity.Id)));
+            var newEntities = Entities.Where(entity => !matchedIds.Contains(entity.Id)).ToList();
+            AutoFitEntityWidths(newEntities);
+
+            if (newEntities.Count > 0)
+            {
+                var placed = Entities.Where(entity => matchedIds.Contains(entity.Id)).ToList();
+                AutoLayoutService.LayoutAppend(placed, newEntities, Relationships);
+            }
+
             RefreshCanvasSize();
         });
     }
@@ -588,8 +607,11 @@ public partial class MainViewModel : ObservableObject
 
         ReplaceDiagram(Array.Empty<Entity>(), Array.Empty<Relationship>(), clearUndoHistory: true);
 
-        // 新規図はどのファイルにも紐付かないため、ウィンドウタイトルを既定（QuickER）へ戻す
-        LastDocumentFileName = null;
+        // 新規図はどのファイルにも紐付かないため、現在パス・内容ハッシュをクリアし、
+        // 空の新規文書としてクリーン状態にする（ウィンドウタイトルは既定の QuickER へ戻る）
+        CurrentFilePath = null;
+        _lastKnownFileHash = null;
+        MarkClean();
     }
 
     /// <summary>PK カラム付きの新規エンティティを追加して選択する（Undo 可能）</summary>
