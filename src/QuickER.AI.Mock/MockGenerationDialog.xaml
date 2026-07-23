@@ -589,6 +589,13 @@
                     Content="{x:Static res:Strings.Mock_NewConversation}"
                     Command="{Binding StartConversationCommand}"
                   />
+                  <!-- 画面全体の初期化（確認後に会話・フォルダ選択・第2ステップ入力をクリア） -->
+                  <Button
+                    Style="{StaticResource SecondaryButton}"
+                    Margin="8,0,0,0"
+                    Content="{x:Static res:Strings.Mock_Clear}"
+                    Command="{Binding ClearCommand}"
+                  />
                 </StackPanel>
               </Grid>
             </Border>
@@ -773,7 +780,16 @@
               </Grid>
             </Border>
 
-            <local:MockPreviewPanel x:Name="Preview" Grid.Column="1" Margin="1" />
+            <!-- プレビュー領域: 周囲より一段強い枠線（FieldBorder）で表示範囲を明示する -->
+            <Border
+              Grid.Column="1"
+              Margin="8"
+              Background="White"
+              BorderBrush="{StaticResource FieldBorder}"
+              BorderThickness="1"
+            >
+              <local:MockPreviewPanel x:Name="Preview" />
+            </Border>
           </Grid>
         </Grid>
       </Border>
@@ -788,7 +804,8 @@
       BorderThickness="1"
       CornerRadius="10"
     >
-      <Expander Padding="14,10" IsExpanded="True">
+      <!-- 初期表示は閉じた状態（第1ステップに集中させ、必要になったら開く） -->
+      <Expander Padding="14,10" IsExpanded="False">
         <Expander.Header>
           <TextBlock
             FontWeight="SemiBold"

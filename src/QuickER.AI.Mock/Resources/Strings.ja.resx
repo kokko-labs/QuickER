@@ -209,6 +209,17 @@
   <data name="Mock_HtmlSaveFailedFormat" xml:space="preserve">
     <value>HTML を保存できませんでした: {0}</value>
   </data>
+  <data name="Mock_HtmlSavedMessageFormat" xml:space="preserve">
+    <value>単一 HTML を保存しました:
+{0}</value>
+  </data>
+  <data name="Mock_Clear" xml:space="preserve">
+    <value>クリア</value>
+  </data>
+  <data name="Mock_ClearConfirm" xml:space="preserve">
+    <value>画面を初期化しますか？
+会話・モックフォルダの選択・WPF モック生成の入力をクリアします。ディスク上のモックフォルダは削除されません。</value>
+  </data>
   <data name="Mock_PickOutputFolderTitle" xml:space="preserve">
     <value>WPF モックプロジェクトの出力先フォルダを選択</value>
   </data>

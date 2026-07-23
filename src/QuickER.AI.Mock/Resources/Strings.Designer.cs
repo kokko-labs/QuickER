@@ -354,6 +354,24 @@ namespace QuickER.AI.Mock.Resources {
             }
         }
 
+        public static string Mock_HtmlSavedMessageFormat {
+            get {
+                return ResourceManager.GetString("Mock_HtmlSavedMessageFormat", resourceCulture);
+            }
+        }
+
+        public static string Mock_Clear {
+            get {
+                return ResourceManager.GetString("Mock_Clear", resourceCulture);
+            }
+        }
+
+        public static string Mock_ClearConfirm {
+            get {
+                return ResourceManager.GetString("Mock_ClearConfirm", resourceCulture);
+            }
+        }
+
         public static string Mock_PickOutputFolderTitle {
             get {
                 return ResourceManager.GetString("Mock_PickOutputFolderTitle", resourceCulture);

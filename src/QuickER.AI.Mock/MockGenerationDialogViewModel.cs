@@ -47,6 +47,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     private readonly IMockDiagramSource _diagramSource;
     private readonly IUiDispatcher _dispatcher;
     private readonly IFileDialogService _files;
+    private readonly IDialogService _dialogs;
     private readonly IMockProjectGenerator _mockProjectGenerator;
     private readonly Func<ErChatProfile, IErDiagramToolHost, IErChatEngine> _apiKeyEngineFactory;
     private readonly Func<ErChatProfile, IErDiagramToolHost, IErChatEngine> _codexEngineFactory;
@@ -136,6 +137,8 @@ public partial class MockGenerationDialogViewModel : ObservableObject
                 SendMessageCommand.NotifyCanExecuteChanged();
                 InterruptCommand.NotifyCanExecuteChanged();
                 OnPropertyChanged(nameof(CanEditInput));
+                OnPropertyChanged(nameof(CanClear));
+                ClearCommand.NotifyCanExecuteChanged();
                 // ターン実行中は添付操作も禁止する
                 Attachments.IsTurnInProgress = value;
                 NotifyMockGenChanged();
@@ -189,9 +192,12 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     [ObservableProperty]
     private string _outputFolder = string.Empty;
 
+    /// <summary>プロジェクト名の既定値</summary>
+    private const string DefaultProjectName = "MockApp";
+
     /// <summary>生成するプロジェクト名（既定は図名由来の PascalCase）</summary>
     [ObservableProperty]
-    private string _projectName = "MockApp";
+    private string _projectName = DefaultProjectName;
 
     /// <summary>WPF 実装に対する追加指示（任意・複数行。Claude Code へ渡すプロンプト末尾に連結される）</summary>
     [ObservableProperty]
@@ -356,6 +362,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     /// <param name="codexEngineFactory">Codex エンジンのファクトリ</param>
     /// <param name="claudeCodeEngineFactory">Claude Code エンジンのファクトリ</param>
     /// <param name="mockProjectGenerator">WPF モックプロジェクト生成器（省略時は図の供給元のプロバイダから構築）</param>
+    /// <param name="dialogService">確認・通知ダイアログ（省略時は MessageBox 実装）</param>
     public MockGenerationDialogViewModel(
         IMockDiagramSource diagramSource,
         IUiDispatcher dispatcher,
@@ -365,12 +372,14 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         Func<ErChatProfile, IErDiagramToolHost, IErChatEngine>? codexEngineFactory,
         Func<ErChatProfile, IErDiagramToolHost, IErChatEngine>? claudeCodeEngineFactory,
         IMockProjectGenerator? mockProjectGenerator = null,
-        ChatAttachmentFactory.ImageShrinker? imageShrinker = null
+        ChatAttachmentFactory.ImageShrinker? imageShrinker = null,
+        IDialogService? dialogService = null
     )
     {
         _diagramSource = diagramSource;
         _dispatcher = dispatcher;
         _files = files ?? new WpfFileDialogService();
+        _dialogs = dialogService ?? new MessageBoxDialogService();
 
         // 添付部品は本番では WPF の画像縮小を差し込む（テストでは注入された縮小・null）
         Attachments = new AttachmentListViewModel(
@@ -819,11 +828,52 @@ public partial class MockGenerationDialogViewModel : ObservableObject
                 new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)
             );
             StatusMessage = Strings.Mock_HtmlSaved;
+            // 保存先パス付きの完了メッセージを明示する（ステータスバーだけでは見落としやすいため）
+            _dialogs.ShowInformation(
+                string.Format(Strings.Mock_HtmlSavedMessageFormat, picked.Path),
+                Strings.Mock_WindowTitle
+            );
         }
         catch (Exception ex)
         {
             StatusMessage = string.Format(Strings.Mock_HtmlSaveFailedFormat, ex.Message);
         }
+    }
+
+    /// <summary>画面全体を初期状態へ戻せるか（モックフォルダ未選択・ターン／WPF モック生成の実行中は不可）</summary>
+    public bool CanClear =>
+        !string.IsNullOrWhiteSpace(MockFolder) && !IsTurnInProgress && !IsMockGenInProgress;
+
+    /// <summary>
+    /// 画面全体を初期状態へ戻す（確認後）。会話・入力・添付・モックフォルダの選択・第 2 ステップの入力と
+    /// 結果表示をクリアする。ディスク上のモックフォルダには触れない。
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanClear))]
+    private void Clear()
+    {
+        if (!_dialogs.Confirm(Strings.Mock_ClearConfirm, Strings.Mock_WindowTitle))
+        {
+            return;
+        }
+
+        // 会話・入力・添付
+        ResetConversation();
+        UserInput = string.Empty;
+        Attachments.Clear();
+
+        // モックフォルダの選択解除（OnMockFolderChanged がストア・サイドバー・プレビューも初期化する。
+        // 既に空なら関連状態も初期状態のため変更通知は不要）
+        MockFolder = string.Empty;
+
+        // 第 2 ステップの入力と結果表示
+        OutputFolder = string.Empty;
+        ProjectName = DefaultProjectName;
+        MockGenInstructions = string.Empty;
+        MockGenLog = string.Empty;
+        MockGenCompleted = false;
+        MockGenSucceeded = false;
+
+        StatusMessage = string.Empty;
     }
 
     // ── 第2ステップ: WPF モックプロジェクト生成 ──
@@ -961,8 +1011,10 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         OnPropertyChanged(nameof(CanGenerateMockProject));
         OnPropertyChanged(nameof(MockGenDisabledReason));
         OnPropertyChanged(nameof(CanEditMockGenInput));
+        OnPropertyChanged(nameof(CanClear));
         GenerateMockProjectCommand.NotifyCanExecuteChanged();
         InterruptMockGenCommand.NotifyCanExecuteChanged();
+        ClearCommand.NotifyCanExecuteChanged();
     }
 
     /// <summary>選択中バックエンドのエンジンファクトリ（プロファイル・ツールホスト受け取り）を返す</summary>

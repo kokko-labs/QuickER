@@ -6,6 +6,7 @@ using QuickER.AI;
 using QuickER.AI.Mock;
 using QuickER.Gui.Abstractions;
 using QuickER.Model;
+using QuickER.Tests.TestDoubles;
 using MockStrings = QuickER.AI.Mock.Resources.Strings;
 
 namespace QuickER.Tests.AI.Mock;
@@ -128,7 +129,7 @@ public class MockGenerationDialogViewModelTests
         FakeChatEngine[] engineBox,
         string baseFolder,
         string mockFolder
-    ) CreateVm(ErDiagram diagram, bool setMockFolder = true)
+    ) CreateVm(ErDiagram diagram, bool setMockFolder = true, StubDialogService? dialogs = null)
     {
         var baseFolder = Path.Combine(
             Path.GetTempPath(),
@@ -146,7 +147,8 @@ public class MockGenerationDialogViewModelTests
             settingsStore: new AiSettingsStore(Path.Combine(baseFolder, "settings")),
             apiKeyEngineFactory: (_, toolHost) => engineBox[0] = new FakeChatEngine(toolHost),
             codexEngineFactory: null,
-            claudeCodeEngineFactory: null
+            claudeCodeEngineFactory: null,
+            dialogService: dialogs ?? new StubDialogService()
         );
         vm.Connection.ApiProvider = AiProvider.Ollama; // 認証不要にして接続 OK 状態にする
 
@@ -184,7 +186,8 @@ public class MockGenerationDialogViewModelTests
             apiKeyEngineFactory: null,
             codexEngineFactory: null,
             claudeCodeEngineFactory: (_, toolHost) => engineBox[0] = new FakeChatEngine(toolHost),
-            mockProjectGenerator: generator
+            mockProjectGenerator: generator,
+            dialogService: new StubDialogService()
         );
 
         return (vm, engineBox, generator, baseFolder, mockFolder);
@@ -566,6 +569,7 @@ public class MockGenerationDialogViewModelTests
         SeedMockFolder(mockFolder);
 
         var files = new RecordingFileDialogService(new FileDialogResult(outPath, 1));
+        var dialogs = new StubDialogService();
 
         var vm = new MockGenerationDialogViewModel(
             new StubDiagramSource(NonEmptyDiagram()),
@@ -574,7 +578,8 @@ public class MockGenerationDialogViewModelTests
             settingsStore: new AiSettingsStore(Path.Combine(baseFolder, "settings")),
             apiKeyEngineFactory: null,
             codexEngineFactory: null,
-            claudeCodeEngineFactory: null
+            claudeCodeEngineFactory: null,
+            dialogService: dialogs
         );
         vm.Connection.ApiProvider = AiProvider.Ollama;
 
@@ -592,6 +597,121 @@ public class MockGenerationDialogViewModelTests
             // 結合結果は画面本文を含む自己完結 HTML
             written.Should().Contain("顧客一覧");
             written.Should().Contain("data-screen");
+
+            // 保存先パス付きの完了メッセージが通知される
+            dialogs.InformationMessages.Should().ContainSingle().Which.Should().Contain(outPath);
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
+    /// <summary>クリア（確認 OK）で会話・フォルダ選択・第2ステップ入力が初期状態へ戻ることを検証する</summary>
+    [Fact(DisplayName = "クリアは確認後に画面全体を初期状態へ戻す")]
+    public void Clear_ResetsEverything_WhenConfirmed()
+    {
+        var dialogs = new StubDialogService { ConfirmResult = true };
+        var (vm, _, baseFolder, mockFolder) = CreateVm(
+            NonEmptyDiagram(),
+            setMockFolder: false,
+            dialogs
+        );
+        SeedMockFolder(mockFolder);
+
+        try
+        {
+            vm.MockFolder = mockFolder;
+            vm.Screens.Should().NotBeEmpty();
+            vm.UserInput = "入力途中のテキスト";
+            vm.OutputFolder = Path.Combine(baseFolder, "out");
+            vm.ProjectName = "ShopMock";
+            vm.MockGenInstructions = "ダークテーマで";
+
+            vm.ClearCommand.Execute(null);
+
+            // 確認メッセージが表示されている
+            dialogs.ConfirmMessages.Should().ContainSingle();
+
+            // 会話まわり・フォルダ選択・サイドバー
+            vm.MockFolder.Should().BeEmpty();
+            vm.Screens.Should().BeEmpty();
+            vm.HasScreens.Should().BeFalse();
+            vm.Messages.Should().BeEmpty();
+            vm.UserInput.Should().BeEmpty();
+
+            // 第2ステップの入力
+            vm.OutputFolder.Should().BeEmpty();
+            vm.ProjectName.Should().Be("MockApp");
+            vm.MockGenInstructions.Should().BeEmpty();
+
+            // ディスク上のモックフォルダは削除されない
+            MockFolderStore.IsMockFolder(mockFolder).Should().BeTrue();
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
+    /// <summary>モックフォルダ未選択のときはクリアできないことを検証する</summary>
+    [Fact(DisplayName = "モックフォルダ未選択ではクリア不可")]
+    public void Clear_DisabledWithoutMockFolder()
+    {
+        var dialogs = new StubDialogService();
+        var (vm, _, baseFolder, mockFolder) = CreateVm(
+            NonEmptyDiagram(),
+            setMockFolder: false,
+            dialogs
+        );
+
+        try
+        {
+            // 未選択では押せない
+            vm.CanClear.Should().BeFalse();
+            vm.ClearCommand.CanExecute(null).Should().BeFalse();
+
+            // フォルダを選択すると押せるようになる
+            vm.MockFolder = mockFolder;
+            vm.CanClear.Should().BeTrue();
+            vm.ClearCommand.CanExecute(null).Should().BeTrue();
+
+            // クリアで未選択へ戻ると再び押せなくなる
+            vm.ClearCommand.Execute(null);
+            vm.CanClear.Should().BeFalse();
+            vm.ClearCommand.CanExecute(null).Should().BeFalse();
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
+    /// <summary>クリアの確認をキャンセルすると何も変わらないことを検証する</summary>
+    [Fact(DisplayName = "クリアの確認キャンセルでは何も変わらない")]
+    public void Clear_DoesNothing_WhenCancelled()
+    {
+        var dialogs = new StubDialogService { ConfirmResult = false };
+        var (vm, _, baseFolder, mockFolder) = CreateVm(
+            NonEmptyDiagram(),
+            setMockFolder: false,
+            dialogs
+        );
+        SeedMockFolder(mockFolder);
+
+        try
+        {
+            vm.MockFolder = mockFolder;
+            vm.UserInput = "入力途中のテキスト";
+            vm.ProjectName = "ShopMock";
+
+            vm.ClearCommand.Execute(null);
+
+            dialogs.ConfirmMessages.Should().ContainSingle();
+            vm.MockFolder.Should().Be(mockFolder);
+            vm.Screens.Should().NotBeEmpty();
+            vm.UserInput.Should().Be("入力途中のテキスト");
+            vm.ProjectName.Should().Be("ShopMock");
         }
         finally
         {

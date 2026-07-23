@@ -209,6 +209,17 @@ Start "+ New Conversation" in the chat on the left and send your requests for th
   <data name="Mock_HtmlSaveFailedFormat" xml:space="preserve">
     <value>Could not save the HTML: {0}</value>
   </data>
+  <data name="Mock_HtmlSavedMessageFormat" xml:space="preserve">
+    <value>Saved the single-file HTML mock:
+{0}</value>
+  </data>
+  <data name="Mock_Clear" xml:space="preserve">
+    <value>Clear</value>
+  </data>
+  <data name="Mock_ClearConfirm" xml:space="preserve">
+    <value>Reset this window?
+The conversation, the mock folder selection, and the WPF mock generation inputs will be cleared. Files in the mock folder on disk are not deleted.</value>
+  </data>
   <data name="Mock_PickOutputFolderTitle" xml:space="preserve">
     <value>Select the output folder for the WPF mock project</value>
   </data>
