@@ -1,12 +1,13 @@
 namespace QuickER.Mcp;
 
 /// <summary>
-/// ER 図操作ツールの定義（スキーマ）の正本。エンティティ・カラム・リレーションの追加／削除／変更と
-/// 図の要約取得を提供する 9 ツールを、外部 AI エージェント向けの中立言語（英語）で記述する。
+/// ER 図操作ツールの定義（スキーマ）の正本。エンティティ・カラム・リレーションの追加／削除／変更・
+/// 図の要約取得（9 ツール）に加え、名前付きクエリの定義／一覧／削除（set_query / list_queries /
+/// remove_query）を含む 12 ツールを、外部 AI エージェント向けの中立言語（英語）で記述する。
 /// </summary>
 /// <remarks>
 /// 実行（VM 操作）は app 側が担う。各 LLM SDK 形式（OpenAI / Anthropic）への変換は
-/// 機能側 <c>QuickER.AI.Chat.ErDiagramToolDefinitions</c> が本カタログの定義を用いて行う。
+/// AI 層の <c>QuickER.AI.ChatToolConverter</c> が本カタログの定義を用いて行う。
 /// </remarks>
 public static class ErDiagramToolCatalog
 {
@@ -259,6 +260,180 @@ public static class ErDiagramToolCatalog
                         },
                     },
                     required = new[] { "source_table", "target_table" },
+                },
+            },
+            new ToolDefinition
+            {
+                Name = "set_query",
+                Description =
+                    "Defines or replaces (upsert) a named query on a table. Queries become repository methods when C# code is generated. Matched by (table_name, query_name): if one already exists it is replaced wholesale (its id is preserved), otherwise it is added. Before saving, the definition is validated (structure, mini-DSL condition syntax and references, and raw-SQL static checks); on any error the file is left unchanged. An undeclared @parameter in raw SQL is an error (save refused); an unused or multi-statement SQL, or an unused DSL parameter, is a warning (save proceeds).",
+                DeferLoading = false,
+                InputSchema = new
+                {
+                    type = "object",
+                    properties = new
+                    {
+                        table_name = new
+                        {
+                            type = "string",
+                            description = "Name of the table the query belongs to.",
+                        },
+                        query_name = new
+                        {
+                            type = "string",
+                            description = "The meaningful part of the method name (e.g. GetByCustomer); an Async suffix is added at generation time.",
+                        },
+                        description = new
+                        {
+                            type = "string",
+                            description = "Description of the query (emitted as the method's XML doc summary).",
+                        },
+                        returns = new
+                        {
+                            type = "string",
+                            @enum = new[] { "list", "single", "count", "scalar", "projection" },
+                            description = "Return shape: list of entities, single entity, row count, a scalar value, or a projection DTO list.",
+                        },
+                        scalar_type = new
+                        {
+                            type = "string",
+                            description = "Required when returns=scalar. Dialect-neutral type token (e.g. decimal(12,2), int32).",
+                        },
+                        implementation = new
+                        {
+                            type = "string",
+                            @enum = new[] { "dsl", "sql", "manual" },
+                            description = "Implementation kind (default dsl): mini-DSL condition, raw per-dialect SQL, or manual (contract only; you write the body in a partial class).",
+                        },
+                        condition = new
+                        {
+                            type = "string",
+                            description = "Mini-DSL search condition (used when implementation=dsl; omit for no filter). Supports comparisons, AND/OR/NOT, parentheses, IS [NOT] NULL, [NOT] LIKE, [NOT] IN @param, and CONTAINS/STARTSWITH/ENDSWITH; column names refer to the table's columns and @names refer to declared parameters.",
+                        },
+                        sql = new
+                        {
+                            type = "object",
+                            description = "Per-dialect raw SQL (used when implementation=sql). Keys must be dialect names: sqlserver, postgresql, mysql, oracle, sqlite.",
+                            additionalProperties = new { type = "string" },
+                        },
+                        parameters = new
+                        {
+                            type = "array",
+                            description = "Method parameters. Each has a name, exactly one of type (a dialect-neutral token) or source_column (a column of this table, whose generated type is used), and optional is_list (IN parameter).",
+                            items = new
+                            {
+                                type = "object",
+                                properties = new
+                                {
+                                    name = new { type = "string" },
+                                    type = new
+                                    {
+                                        type = "string",
+                                        description = "Dialect-neutral type token (e.g. int32). Mutually exclusive with source_column.",
+                                    },
+                                    source_column = new
+                                    {
+                                        type = "string",
+                                        description = "Column of this table to derive the parameter type from. Mutually exclusive with type.",
+                                    },
+                                    is_list = new
+                                    {
+                                        type = "boolean",
+                                        description = "Whether the parameter is a list (for IN conditions).",
+                                    },
+                                },
+                                required = new[] { "name" },
+                            },
+                        },
+                        order_by = new
+                        {
+                            type = "array",
+                            description = "Ordering (valid only when returns is list, single, or projection; with single it selects the first row). Each entry has a column (a column of this table) and optional descending.",
+                            items = new
+                            {
+                                type = "object",
+                                properties = new
+                                {
+                                    column = new { type = "string" },
+                                    descending = new { type = "boolean" },
+                                },
+                                required = new[] { "column" },
+                            },
+                        },
+                        paging = new
+                        {
+                            type = "boolean",
+                            description = "Enable paging (adds take/skip parameters). Applies to list/projection.",
+                        },
+                        result_type_name = new
+                        {
+                            type = "string",
+                            description = "DTO type name for the projection (required when returns=projection).",
+                        },
+                        fields = new
+                        {
+                            type = "array",
+                            description = "Projection output fields (required when returns=projection). Each has a name, exactly one of type or source_column, and optional is_nullable.",
+                            items = new
+                            {
+                                type = "object",
+                                properties = new
+                                {
+                                    name = new { type = "string" },
+                                    type = new
+                                    {
+                                        type = "string",
+                                        description = "Dialect-neutral type token. Mutually exclusive with source_column.",
+                                    },
+                                    source_column = new
+                                    {
+                                        type = "string",
+                                        description = "Column of this table to project. Mutually exclusive with type.",
+                                    },
+                                    is_nullable = new
+                                    {
+                                        type = "boolean",
+                                        description = "Override nullability of the generated DTO property (omit for automatic).",
+                                    },
+                                },
+                                required = new[] { "name" },
+                            },
+                        },
+                    },
+                    required = new[] { "table_name", "query_name", "returns" },
+                },
+            },
+            new ToolDefinition
+            {
+                Name = "list_queries",
+                Description =
+                    "Lists the named queries in the diagram, grouped by table, with each query's return shape, implementation kind, condition/SQL summary, and parameters.",
+                DeferLoading = false,
+                InputSchema = new { type = "object", properties = new { } },
+            },
+            new ToolDefinition
+            {
+                Name = "remove_query",
+                Description =
+                    "Removes a single named query identified by table_name and query_name. Fails if no such query exists.",
+                DeferLoading = false,
+                InputSchema = new
+                {
+                    type = "object",
+                    properties = new
+                    {
+                        table_name = new
+                        {
+                            type = "string",
+                            description = "Name of the table the query belongs to.",
+                        },
+                        query_name = new
+                        {
+                            type = "string",
+                            description = "Name of the query to remove.",
+                        },
+                    },
+                    required = new[] { "table_name", "query_name" },
                 },
             },
         ];

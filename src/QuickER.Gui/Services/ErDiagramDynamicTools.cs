@@ -1,12 +1,13 @@
 using System.Text;
 using System.Text.Json;
 using QuickER.Model;
+using QuickER.Resources;
 using QuickER.ViewModels;
 
 namespace QuickER.Services;
 
-/// <summary>ER 図操作ツールの実行（VM 操作）を担うクラス。ツール定義は QuickER.AI.ErDiagramToolDefinitions が持つ</summary>
-/// <remarks>各ツールの操作は Undo / Redo マネージャー経由で実行し、取り消し可能とする</remarks>
+/// <summary>ER 図操作ツールの実行（VM 操作）を担うクラス。ツール定義の正本は QuickER.Mcp.ErDiagramToolCatalog が持つ</summary>
+/// <remarks>各ツールの操作は Undo / Redo マネージャー経由で実行し、取り消し可能とする。結果文言は resx（表示言語に追従）で解決する</remarks>
 public static class ErDiagramDynamicTools
 {
     /// <summary>dynamicTool 呼び出しを受け取り、ツール名でディスパッチして ER 図を操作する</summary>
@@ -33,13 +34,13 @@ public static class ErDiagramDynamicTools
                 "add_relationship" => AddRelationship(arguments, viewModel),
                 "remove_relationship" => RemoveRelationship(arguments, viewModel),
                 "set_column_property" => SetColumnProperty(arguments, viewModel),
-                _ => ($"未対応のツール: {toolName}", false),
+                _ => (string.Format(Strings.Tool_Unsupported, toolName), false),
             };
         }
         catch (Exception ex)
         {
             // ツール実行中の例外は AI 側へエラーテキストとして返し、アプリを落とさない
-            return ($"エラー: {ex.Message}", false);
+            return (string.Format(Strings.Tool_Error, ex.Message), false);
         }
     }
 
@@ -47,8 +48,10 @@ public static class ErDiagramDynamicTools
     private static string BuildDiagramSummary(MainViewModel vm)
     {
         var sb = new StringBuilder();
-        sb.AppendLine($"テーブル数: {vm.Entities.Count}");
-        sb.AppendLine($"リレーション数: {vm.Relationships.Count}");
+        sb.AppendLine(string.Format(Strings.Tool_Summary_TableCount, vm.Entities.Count));
+        sb.AppendLine(
+            string.Format(Strings.Tool_Summary_RelationshipCount, vm.Relationships.Count)
+        );
         sb.AppendLine();
 
         foreach (var entity in vm.Entities)
@@ -57,7 +60,9 @@ public static class ErDiagramDynamicTools
 
             if (!string.IsNullOrWhiteSpace(entity.Description))
             {
-                sb.AppendLine($"  説明: {entity.Description}");
+                sb.AppendLine(
+                    $"  {string.Format(Strings.Tool_Summary_EntityDescription, entity.Description)}"
+                );
             }
 
             foreach (var col in entity.Columns)
@@ -90,7 +95,7 @@ public static class ErDiagramDynamicTools
         if (vm.Relationships.Count > 0)
         {
             sb.AppendLine();
-            sb.AppendLine("リレーション:");
+            sb.AppendLine(Strings.Tool_Summary_RelationshipsHeader);
 
             foreach (var rel in vm.Relationships)
             {
@@ -114,7 +119,7 @@ public static class ErDiagramDynamicTools
         };
         var vmEntity = new EntityViewModel(model, layout);
         vm.UndoRedo.Execute(new UndoRedo.AddEntityCommand(vm, vmEntity));
-        return ($"テーブル '{tableName}' を追加しました。", true);
+        return (string.Format(Strings.Tool_EntityAdded, tableName), true);
     }
 
     /// <summary>指定テーブル名のエンティティを削除する</summary>
@@ -124,7 +129,7 @@ public static class ErDiagramDynamicTools
 
         if (string.IsNullOrWhiteSpace(tableName))
         {
-            return ("table_name が指定されていません。", false);
+            return (Strings.Tool_TableNameRequired, false);
         }
 
         var entity = vm.Entities.FirstOrDefault(e =>
@@ -133,11 +138,11 @@ public static class ErDiagramDynamicTools
 
         if (entity is null)
         {
-            return ($"テーブル '{tableName}' が見つかりません。", false);
+            return (string.Format(Strings.Tool_TableNotFound, tableName), false);
         }
 
         vm.UndoRedo.Execute(new UndoRedo.RemoveEntityCommand(vm, entity));
-        return ($"テーブル '{tableName}' を削除しました。", true);
+        return (string.Format(Strings.Tool_EntityRemoved, tableName), true);
     }
 
     /// <summary>指定テーブルへカラムを追加する</summary>
@@ -149,7 +154,7 @@ public static class ErDiagramDynamicTools
 
         if (string.IsNullOrWhiteSpace(tableName) || string.IsNullOrWhiteSpace(columnName))
         {
-            return ("table_name と column_name は必須です。", false);
+            return (Strings.Tool_TableAndColumnNameRequired, false);
         }
 
         var entity = vm.Entities.FirstOrDefault(e =>
@@ -158,7 +163,7 @@ public static class ErDiagramDynamicTools
 
         if (entity is null)
         {
-            return ($"テーブル '{tableName}' が見つかりません。", false);
+            return (string.Format(Strings.Tool_TableNotFound, tableName), false);
         }
 
         var isPk =
@@ -180,7 +185,7 @@ public static class ErDiagramDynamicTools
             }
         );
         vm.UndoRedo.Execute(new UndoRedo.AddColumnCommand(entity.Columns, column));
-        return ($"テーブル '{tableName}' にカラム '{columnName}' を追加しました。", true);
+        return (string.Format(Strings.Tool_ColumnAdded, tableName, columnName), true);
     }
 
     /// <summary>指定テーブルからカラムを削除し、外部キー列ルールを再適用する</summary>
@@ -191,7 +196,7 @@ public static class ErDiagramDynamicTools
 
         if (string.IsNullOrWhiteSpace(tableName) || string.IsNullOrWhiteSpace(columnName))
         {
-            return ("table_name と column_name は必須です。", false);
+            return (Strings.Tool_TableAndColumnNameRequired, false);
         }
 
         var entity = vm.Entities.FirstOrDefault(e =>
@@ -200,7 +205,7 @@ public static class ErDiagramDynamicTools
 
         if (entity is null)
         {
-            return ($"テーブル '{tableName}' が見つかりません。", false);
+            return (string.Format(Strings.Tool_TableNotFound, tableName), false);
         }
 
         var column = entity.Columns.FirstOrDefault(c =>
@@ -209,7 +214,7 @@ public static class ErDiagramDynamicTools
 
         if (column is null)
         {
-            return ($"カラム '{columnName}' が見つかりません。", false);
+            return (string.Format(Strings.Tool_ColumnNotFound, columnName), false);
         }
 
         // 削除カラムを参照する FK リレーションを収集し、Undo 時に参照を復元できるようコマンドへ渡す
@@ -222,7 +227,7 @@ public static class ErDiagramDynamicTools
                 () => vm.ApplyRelationshipColumnRules()
             )
         );
-        return ($"テーブル '{tableName}' からカラム '{columnName}' を削除しました。", true);
+        return (string.Format(Strings.Tool_ColumnRemoved, tableName, columnName), true);
     }
 
     /// <summary>エンティティのテーブル名・メモ・説明のうち、指定されたものを更新する</summary>
@@ -232,7 +237,7 @@ public static class ErDiagramDynamicTools
 
         if (string.IsNullOrWhiteSpace(tableName))
         {
-            return ("table_name は必須です。", false);
+            return (Strings.Tool_TableNameRequired, false);
         }
 
         var entity = vm.Entities.FirstOrDefault(e =>
@@ -241,7 +246,7 @@ public static class ErDiagramDynamicTools
 
         if (entity is null)
         {
-            return ($"テーブル '{tableName}' が見つかりません。", false);
+            return (string.Format(Strings.Tool_TableNotFound, tableName), false);
         }
 
         var changed = new List<string>();
@@ -252,13 +257,13 @@ public static class ErDiagramDynamicTools
         )
         {
             entity.TableName = newNameEl.GetString()!;
-            changed.Add("テーブル名");
+            changed.Add(Strings.Tool_Field_TableName);
         }
 
         if (args.TryGetProperty("memo", out var memoEl) && memoEl.ValueKind == JsonValueKind.String)
         {
             entity.Memo = memoEl.GetString()!;
-            changed.Add("メモ");
+            changed.Add(Strings.Tool_Field_Memo);
         }
 
         if (
@@ -267,15 +272,22 @@ public static class ErDiagramDynamicTools
         )
         {
             entity.Description = descEl.GetString()!;
-            changed.Add("説明");
+            changed.Add(Strings.Tool_Field_Description);
         }
 
         if (changed.Count == 0)
         {
-            return ("変更するプロパティが指定されていません。", false);
+            return (Strings.Tool_NoPropertiesToChange, false);
         }
 
-        return ($"テーブル '{tableName}' の {string.Join("、", changed)} を更新しました。", true);
+        return (
+            string.Format(
+                Strings.Tool_EntityUpdated,
+                tableName,
+                string.Join(Strings.Tool_ListSeparator, changed)
+            ),
+            true
+        );
     }
 
     /// <summary>カラムの説明・データ型・NULL 許容のうち、指定されたものを更新する</summary>
@@ -286,7 +298,7 @@ public static class ErDiagramDynamicTools
 
         if (string.IsNullOrWhiteSpace(tableName) || string.IsNullOrWhiteSpace(columnName))
         {
-            return ("table_name と column_name は必須です。", false);
+            return (Strings.Tool_TableAndColumnNameRequired, false);
         }
 
         var entity = vm.Entities.FirstOrDefault(e =>
@@ -295,7 +307,7 @@ public static class ErDiagramDynamicTools
 
         if (entity is null)
         {
-            return ($"テーブル '{tableName}' が見つかりません。", false);
+            return (string.Format(Strings.Tool_TableNotFound, tableName), false);
         }
 
         var column = entity.Columns.FirstOrDefault(c =>
@@ -304,7 +316,7 @@ public static class ErDiagramDynamicTools
 
         if (column is null)
         {
-            return ($"カラム '{columnName}' が見つかりません。", false);
+            return (string.Format(Strings.Tool_ColumnNotFound, columnName), false);
         }
 
         var changed = new List<string>();
@@ -315,7 +327,7 @@ public static class ErDiagramDynamicTools
         )
         {
             column.Description = descEl.GetString()!;
-            changed.Add("説明");
+            changed.Add(Strings.Tool_Field_Description);
         }
 
         if (
@@ -324,7 +336,7 @@ public static class ErDiagramDynamicTools
         )
         {
             column.DataType = dataTypeEl.GetString()!;
-            changed.Add("データ型");
+            changed.Add(Strings.Tool_Field_DataType);
         }
 
         if (
@@ -333,19 +345,21 @@ public static class ErDiagramDynamicTools
         )
         {
             column.IsNullable = isNullEl.GetBoolean();
-            changed.Add("NULL 許容");
+            changed.Add(Strings.Tool_Field_Nullable);
         }
 
         if (changed.Count == 0)
         {
-            return (
-                "変更するプロパティが指定されていません。description / data_type / is_nullable のいずれか 1 つ以上を指定してください。",
-                false
-            );
+            return (Strings.Tool_NoColumnPropertiesToChange, false);
         }
 
         return (
-            $"テーブル '{tableName}' のカラム '{columnName}' の {string.Join("、", changed)} を更新しました。",
+            string.Format(
+                Strings.Tool_ColumnUpdated,
+                tableName,
+                columnName,
+                string.Join(Strings.Tool_ListSeparator, changed)
+            ),
             true
         );
     }
@@ -360,7 +374,7 @@ public static class ErDiagramDynamicTools
 
         if (string.IsNullOrWhiteSpace(sourceTable) || string.IsNullOrWhiteSpace(targetTable))
         {
-            return ("source_table と target_table は必須です。", false);
+            return (Strings.Tool_SourceAndTargetTableRequired, false);
         }
 
         var source = vm.Entities.FirstOrDefault(e =>
@@ -372,12 +386,12 @@ public static class ErDiagramDynamicTools
 
         if (source is null)
         {
-            return ($"テーブル '{sourceTable}' が見つかりません。", false);
+            return (string.Format(Strings.Tool_TableNotFound, sourceTable), false);
         }
 
         if (target is null)
         {
-            return ($"テーブル '{targetTable}' が見つかりません。", false);
+            return (string.Format(Strings.Tool_TableNotFound, targetTable), false);
         }
 
         var relType = typeStr switch
@@ -400,7 +414,11 @@ public static class ErDiagramDynamicTools
             if (sourcePk is null)
             {
                 return (
-                    $"テーブル '{sourceTable}' にカラム '{sourceColumnName}' が見つかりません。",
+                    string.Format(
+                        Strings.Tool_ColumnNotFoundInTable,
+                        sourceTable,
+                        sourceColumnName
+                    ),
                     false
                 );
             }
@@ -422,7 +440,11 @@ public static class ErDiagramDynamicTools
             if (targetColumn is null)
             {
                 return (
-                    $"テーブル '{targetTable}' にカラム '{targetColumnName}' が見つかりません。",
+                    string.Format(
+                        Strings.Tool_ColumnNotFoundInTable,
+                        targetTable,
+                        targetColumnName
+                    ),
                     false
                 );
             }
@@ -451,7 +473,7 @@ public static class ErDiagramDynamicTools
             target
         );
         vm.UndoRedo.Execute(new UndoRedo.AddRelationshipCommand(vm, rel));
-        return ($"'{sourceTable}' → '{targetTable}' のリレーションを追加しました。", true);
+        return (string.Format(Strings.Tool_RelationshipAdded, sourceTable, targetTable), true);
     }
 
     /// <summary>指定した参照元・参照先テーブル間のリレーションを削除する</summary>
@@ -462,7 +484,7 @@ public static class ErDiagramDynamicTools
 
         if (string.IsNullOrWhiteSpace(sourceTable) || string.IsNullOrWhiteSpace(targetTable))
         {
-            return ("source_table と target_table は必須です。", false);
+            return (Strings.Tool_SourceAndTargetTableRequired, false);
         }
 
         var rel = vm.Relationships.FirstOrDefault(r =>
@@ -472,11 +494,14 @@ public static class ErDiagramDynamicTools
 
         if (rel is null)
         {
-            return ($"'{sourceTable}' → '{targetTable}' のリレーションが見つかりません。", false);
+            return (
+                string.Format(Strings.Tool_RelationshipNotFound, sourceTable, targetTable),
+                false
+            );
         }
 
         vm.UndoRedo.Execute(new UndoRedo.RemoveRelationshipCommand(vm, rel));
-        return ($"'{sourceTable}' → '{targetTable}' のリレーションを削除しました。", true);
+        return (string.Format(Strings.Tool_RelationshipRemoved, sourceTable, targetTable), true);
     }
 
     /// <summary>JSON 引数から文字列プロパティを取得する（無い・型不一致なら null）</summary>

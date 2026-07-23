@@ -1491,5 +1491,185 @@ namespace QuickER.Resources {
                 return ResourceManager.GetString("TableDoc_RelUnknownRelation", resourceCulture);
             }
         }
+        public static string Tool_Unsupported {
+            get {
+                return ResourceManager.GetString("Tool_Unsupported", resourceCulture);
+            }
+        }
+
+        public static string Tool_Error {
+            get {
+                return ResourceManager.GetString("Tool_Error", resourceCulture);
+            }
+        }
+
+        public static string Tool_InvalidArgumentsJson {
+            get {
+                return ResourceManager.GetString("Tool_InvalidArgumentsJson", resourceCulture);
+            }
+        }
+
+        public static string Tool_Summary_TableCount {
+            get {
+                return ResourceManager.GetString("Tool_Summary_TableCount", resourceCulture);
+            }
+        }
+
+        public static string Tool_Summary_RelationshipCount {
+            get {
+                return ResourceManager.GetString("Tool_Summary_RelationshipCount", resourceCulture);
+            }
+        }
+
+        public static string Tool_Summary_EntityDescription {
+            get {
+                return ResourceManager.GetString("Tool_Summary_EntityDescription", resourceCulture);
+            }
+        }
+
+        public static string Tool_Summary_RelationshipsHeader {
+            get {
+                return ResourceManager.GetString("Tool_Summary_RelationshipsHeader", resourceCulture);
+            }
+        }
+
+        public static string Tool_EntityAdded {
+            get {
+                return ResourceManager.GetString("Tool_EntityAdded", resourceCulture);
+            }
+        }
+
+        public static string Tool_TableNameRequired {
+            get {
+                return ResourceManager.GetString("Tool_TableNameRequired", resourceCulture);
+            }
+        }
+
+        public static string Tool_TableNotFound {
+            get {
+                return ResourceManager.GetString("Tool_TableNotFound", resourceCulture);
+            }
+        }
+
+        public static string Tool_EntityRemoved {
+            get {
+                return ResourceManager.GetString("Tool_EntityRemoved", resourceCulture);
+            }
+        }
+
+        public static string Tool_TableAndColumnNameRequired {
+            get {
+                return ResourceManager.GetString("Tool_TableAndColumnNameRequired", resourceCulture);
+            }
+        }
+
+        public static string Tool_ColumnAdded {
+            get {
+                return ResourceManager.GetString("Tool_ColumnAdded", resourceCulture);
+            }
+        }
+
+        public static string Tool_ColumnNotFound {
+            get {
+                return ResourceManager.GetString("Tool_ColumnNotFound", resourceCulture);
+            }
+        }
+
+        public static string Tool_ColumnRemoved {
+            get {
+                return ResourceManager.GetString("Tool_ColumnRemoved", resourceCulture);
+            }
+        }
+
+        public static string Tool_Field_TableName {
+            get {
+                return ResourceManager.GetString("Tool_Field_TableName", resourceCulture);
+            }
+        }
+
+        public static string Tool_Field_Memo {
+            get {
+                return ResourceManager.GetString("Tool_Field_Memo", resourceCulture);
+            }
+        }
+
+        public static string Tool_Field_Description {
+            get {
+                return ResourceManager.GetString("Tool_Field_Description", resourceCulture);
+            }
+        }
+
+        public static string Tool_Field_DataType {
+            get {
+                return ResourceManager.GetString("Tool_Field_DataType", resourceCulture);
+            }
+        }
+
+        public static string Tool_Field_Nullable {
+            get {
+                return ResourceManager.GetString("Tool_Field_Nullable", resourceCulture);
+            }
+        }
+
+        public static string Tool_NoPropertiesToChange {
+            get {
+                return ResourceManager.GetString("Tool_NoPropertiesToChange", resourceCulture);
+            }
+        }
+
+        public static string Tool_EntityUpdated {
+            get {
+                return ResourceManager.GetString("Tool_EntityUpdated", resourceCulture);
+            }
+        }
+
+        public static string Tool_NoColumnPropertiesToChange {
+            get {
+                return ResourceManager.GetString("Tool_NoColumnPropertiesToChange", resourceCulture);
+            }
+        }
+
+        public static string Tool_ColumnUpdated {
+            get {
+                return ResourceManager.GetString("Tool_ColumnUpdated", resourceCulture);
+            }
+        }
+
+        public static string Tool_SourceAndTargetTableRequired {
+            get {
+                return ResourceManager.GetString("Tool_SourceAndTargetTableRequired", resourceCulture);
+            }
+        }
+
+        public static string Tool_ColumnNotFoundInTable {
+            get {
+                return ResourceManager.GetString("Tool_ColumnNotFoundInTable", resourceCulture);
+            }
+        }
+
+        public static string Tool_RelationshipAdded {
+            get {
+                return ResourceManager.GetString("Tool_RelationshipAdded", resourceCulture);
+            }
+        }
+
+        public static string Tool_RelationshipNotFound {
+            get {
+                return ResourceManager.GetString("Tool_RelationshipNotFound", resourceCulture);
+            }
+        }
+
+        public static string Tool_RelationshipRemoved {
+            get {
+                return ResourceManager.GetString("Tool_RelationshipRemoved", resourceCulture);
+            }
+        }
+
+        public static string Tool_ListSeparator {
+            get {
+                return ResourceManager.GetString("Tool_ListSeparator", resourceCulture);
+            }
+        }
+
     }
 }

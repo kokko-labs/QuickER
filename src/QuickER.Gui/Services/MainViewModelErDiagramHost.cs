@@ -76,7 +76,10 @@ public sealed class MainViewModelErDiagramHost : IErDiagramHost
         }
         catch (JsonException)
         {
-            return ($"ツール '{toolName}' の引数 JSON を解釈できませんでした。", false);
+            return (
+                string.Format(QuickER.Resources.Strings.Tool_InvalidArgumentsJson, toolName),
+                false
+            );
         }
 
         var (result, success) = ErDiagramDynamicTools.Execute(toolName, arguments, _viewModel);

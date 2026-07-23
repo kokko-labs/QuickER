@@ -26,15 +26,11 @@ public static partial class DocumentErDiagramToolHost
     /// <summary>読み取り系ツール（新しいフォーマットでも警告付きで続行する）の名前</summary>
     private const string GetSummaryToolName = "get_diagram_summary";
 
-    /// <summary><c>target_dbms</c> に指定できるプロバイダ識別名（tool 定義の enum と一致させる）</summary>
-    private static readonly string[] SupportedDbms =
-    [
-        "sqlserver",
-        "postgresql",
-        "mysql",
-        "oracle",
-        "sqlite",
-    ];
+    /// <summary>
+    /// <c>target_dbms</c> に指定できるプロバイダ識別名（tool 定義の enum と一致させる）。
+    /// 正本は <see cref="QueryToolCore.SupportedDbms"/>（クエリツールの SQL 方言キーと同一集合）。
+    /// </summary>
+    private static string[] SupportedDbms => QueryToolCore.SupportedDbms;
 
     /// <summary>ツール名でディスパッチし、対象ファイルに対してツールを実行する</summary>
     /// <param name="toolName">ツール名</param>

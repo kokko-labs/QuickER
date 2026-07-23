@@ -169,4 +169,198 @@
   <data name="Toolbar_OpenAiChatTooltip" xml:space="preserve">
     <value>AI チャットで ER 図を作成・編集（API キー / Codex 接続）</value>
   </data>
+  <data name="ErDesign_CommonDesignPrinciples" xml:space="preserve">
+    <value>- 第3正規形を意識したテーブル設計を行う。
+- テーブル名・カラム名は英数字とアンダースコアのみ。
+- 各テーブルに説明 (description)、各カラムに説明 (description) を必ず付ける。
+- 主キーは各テーブルに必ず『ちょうど 1 列』設ける。複合主キー（複数列の主キー）は禁止。多対多の中間テーブルでも単独のサロゲートキー（例: OrderItemId int）を主キーとし、親テーブルへの参照列は外部キー（主キーではない）として定義する。
+- 外部キーは 1 つのリレーション（外部キー制約）につき必ず 1 列の参照で構成する。複数列の組で 1 つの参照を表す複合外部キーは禁止。
+- 外部キー列を同時に主キーにしてはならない。参照元テーブルの主キーを引き継ぐ列は外部キー（非主キー・NOT NULL）にする。
+- 役割が異なる複数の外部キー（例: ShippingAddressId と BillingAddressId が同じテーブルを参照）は正当であり、それぞれ別のリレーションとして定義する。
+- NULL 許容は必ず設定する。主キーは NOT NULL、必須項目や通常の外部キーも NOT NULL、任意入力の項目だけ NULL 許容にする。
+- データ型は SQL Server の型 (例: int, bigint, nvarchar(50), datetime2, decimal(10,2), bit) を使用する。</value>
+  </data>
+  <data name="ErDesign_SinglePrimaryKeyRule" xml:space="preserve">
+    <value>主キーは各テーブル 1 列のみ（複合主キー禁止）。</value>
+  </data>
+  <data name="ErDesign_SingleColumnForeignKeyRule" xml:space="preserve">
+    <value>リレーションは 1 列対 1 列の参照のみ（複合外部キー禁止）。</value>
+  </data>
+  <data name="ErDesign_FunctionToolLabel" xml:space="preserve">
+    <value>関数ツール</value>
+  </data>
+  <data name="ErDesign_ChatInstructionsTemplate" xml:space="preserve">
+    <value>あなたは ER 図デザイナーアプリに組み込まれた DB 設計アシスタントです。
+ER 図の作成・変更は必ず提供されたツール（{0}）で行ってください。ファイルやシェルは使用しません。
+応答は必ずユーザーの直近のメッセージと同じ言語で行ってください。
+
+# 設計原則
+{1}
+
+# ツール運用手順
+- 既存の ER 図に触れる前に、必ず get_diagram_summary で現在の状態を確認する。
+- テーブル作成は add_entity → add_column の順で行い、最初に主キー列を 1 列だけ is_primary_key=true で追加する。{2}
+- 外部キー列は add_column で is_primary_key=false（通常は is_nullable=false）として追加し、その後 add_relationship で参照を定義する。
+- add_relationship では source_column（親の主キー列）と target_column（子の外部キー列）を必ず明示する。{3}
+- ツールがエラーを返した場合は、エラーメッセージの指示に従って修正し再実行する。
+
+# 名前付きクエリの運用手順
+- 名前付きクエリは C# コード生成時に Repository メソッドになる。図に定義済みのクエリは list_queries で確認する（get_diagram_summary のクエリ版）。
+- set_query は upsert であり、(table_name, query_name) で照合して既存を丸ごと置換（Id は温存）するか、新規に追加する。検証は全か無かで、エラー時は図を変更しない。
+- 単一のクエリ削除は remove_query（table_name と query_name で指定）で行う。
+
+# 命名規則
+- 既存の ER 図にテーブルがある場合は、その命名規則（パスカルケース/スネークケース）と単数形・複数形の方針に合わせる。
+- 新規の ER 図ではパスカルケース・単数形（例: Customer, OrderItem）を既定とする。</value>
+  </data>
+  <data name="ErDesign_NamingSnakeCase" xml:space="preserve">
+    <value>- テーブル名・カラム名は必ずスネークケース (例: customer_order, customer_id) にする。</value>
+  </data>
+  <data name="ErDesign_NamingPascalCase" xml:space="preserve">
+    <value>- テーブル名・カラム名は必ずパスカルケース (例: CustomerOrder, CustomerId) にする。</value>
+  </data>
+  <data name="ErDesign_TableNamePlural" xml:space="preserve">
+    <value>- テーブル名は必ず複数形 (例: Customers, Orders) にする。</value>
+  </data>
+  <data name="ErDesign_TableNameSingular" xml:space="preserve">
+    <value>- テーブル名は必ず単数形 (例: Customer, Order) にする。</value>
+  </data>
+  <data name="QueryTool_SetSuccessUpdated" xml:space="preserve">
+    <value>テーブル '{1}' のクエリ '{0}' を更新しました（戻り形 {2}、{3}）。</value>
+  </data>
+  <data name="QueryTool_SetSuccessAdded" xml:space="preserve">
+    <value>テーブル '{1}' にクエリ '{0}' を追加しました（戻り形 {2}、{3}）。</value>
+  </data>
+  <data name="QueryTool_Warning" xml:space="preserve">
+    <value>警告: {0}</value>
+  </data>
+  <data name="QueryTool_SetValidationFailed" xml:space="preserve">
+    <value>クエリ '{0}' を設定できません: 検証に失敗しました。図は変更していません。</value>
+  </data>
+  <data name="QueryTool_RemoveSuccess" xml:space="preserve">
+    <value>テーブル '{1}' からクエリ '{0}' を削除しました。</value>
+  </data>
+  <data name="QueryTool_QueryNotFound" xml:space="preserve">
+    <value>テーブル '{1}' にクエリ '{0}' が見つかりません。</value>
+  </data>
+  <data name="QueryTool_ListHeader" xml:space="preserve">
+    <value>クエリ数: {0}</value>
+  </data>
+  <data name="QueryTool_UnknownEntity" xml:space="preserve">
+    <value>(不明なエンティティ)</value>
+  </data>
+  <data name="QueryTool_MissingArgument" xml:space="preserve">
+    <value>table_name と query_name は必須です。</value>
+  </data>
+  <data name="QueryTool_InvalidReturns" xml:space="preserve">
+    <value>'returns' の指定が無いか不正です（list / single / count / scalar / projection のいずれか）。</value>
+  </data>
+  <data name="QueryTool_InvalidImplementation" xml:space="preserve">
+    <value>'implementation' の指定が不正です（dsl / sql / manual のいずれか）。</value>
+  </data>
+  <data name="QueryTool_TableNotFound" xml:space="preserve">
+    <value>テーブル '{0}' が見つかりません。</value>
+  </data>
+  <data name="QueryTool_UnexpectedStatus" xml:space="preserve">
+    <value>想定外のクエリツール状態です: {0}</value>
+  </data>
+  <data name="QueryTool_ListDescription" xml:space="preserve">
+    <value>説明: {0}</value>
+  </data>
+  <data name="QueryTool_ListScalarType" xml:space="preserve">
+    <value>スカラー型: {0}</value>
+  </data>
+  <data name="QueryTool_ListCondition" xml:space="preserve">
+    <value>条件: {0}</value>
+  </data>
+  <data name="QueryTool_ListSqlDialects" xml:space="preserve">
+    <value>SQL 方言: {0}</value>
+  </data>
+  <data name="QueryTool_ListParameters" xml:space="preserve">
+    <value>パラメータ: {0}</value>
+  </data>
+  <data name="QueryTool_ListOrderBy" xml:space="preserve">
+    <value>並び順: {0}</value>
+  </data>
+  <data name="QueryTool_ListPaging" xml:space="preserve">
+    <value>ページング: あり</value>
+  </data>
+  <data name="QueryTool_ListResultType" xml:space="preserve">
+    <value>結果型: {0}</value>
+  </data>
+  <data name="QueryTool_ListFields" xml:space="preserve">
+    <value>フィールド: {0}</value>
+  </data>
+  <data name="QueryTool_ColumnRef" xml:space="preserve">
+    <value>列 {0}</value>
+  </data>
+  <data name="QueryTool_Untyped" xml:space="preserve">
+    <value>(型未指定)</value>
+  </data>
+  <data name="QueryTool_ListSuffix" xml:space="preserve">
+    <value> (リスト)</value>
+  </data>
+  <data name="QueryTool_Unknown" xml:space="preserve">
+    <value>(不明)</value>
+  </data>
+  <data name="QueryTool_OrderDesc" xml:space="preserve">
+    <value>{0} 降順</value>
+  </data>
+  <data name="QueryTool_Diag_ParameterMissingName" xml:space="preserve">
+    <value>パラメータに必須の 'name' がありません。</value>
+  </data>
+  <data name="QueryTool_Diag_ParameterTypeSourceExclusive" xml:space="preserve">
+    <value>パラメータ '{0}' は 'type' か 'source_column' のちょうど一方を指定してください。</value>
+  </data>
+  <data name="QueryTool_Diag_ParameterSourceColumnNotFound" xml:space="preserve">
+    <value>パラメータ '{0}': source_column '{1}' がテーブル '{2}' に見つかりません。</value>
+  </data>
+  <data name="QueryTool_Diag_ScalarRequiresScalarType" xml:space="preserve">
+    <value>returns=scalar には 'scalar_type' が必要です。</value>
+  </data>
+  <data name="QueryTool_Diag_ProjectionRequiresResultTypeName" xml:space="preserve">
+    <value>returns=projection には 'result_type_name' が必要です。</value>
+  </data>
+  <data name="QueryTool_Diag_ProjectionRequiresFields" xml:space="preserve">
+    <value>returns=projection には 'fields' が 1 件以上必要です。</value>
+  </data>
+  <data name="QueryTool_Diag_OrderByInvalidForReturnShape" xml:space="preserve">
+    <value>order_by は returns が 'list' / 'single' / 'projection' のときのみ有効です（指定値 '{0}'）。</value>
+  </data>
+  <data name="QueryTool_Diag_OrderByMissingColumn" xml:space="preserve">
+    <value>order_by エントリに必須の 'column' がありません。</value>
+  </data>
+  <data name="QueryTool_Diag_OrderByColumnNotFound" xml:space="preserve">
+    <value>order_by の列 '{0}' がテーブル '{1}' に見つかりません。</value>
+  </data>
+  <data name="QueryTool_Diag_ProjectionFieldMissingName" xml:space="preserve">
+    <value>射影フィールドに必須の 'name' がありません。</value>
+  </data>
+  <data name="QueryTool_Diag_ProjectionFieldTypeSourceExclusive" xml:space="preserve">
+    <value>射影フィールド '{0}' は 'type' か 'source_column' のちょうど一方を指定してください。</value>
+  </data>
+  <data name="QueryTool_Diag_ProjectionFieldSourceColumnNotFound" xml:space="preserve">
+    <value>射影フィールド '{0}': source_column '{1}' がテーブル '{2}' に見つかりません。</value>
+  </data>
+  <data name="QueryTool_Diag_UnknownSqlDialect" xml:space="preserve">
+    <value>未知の SQL 方言 '{0}' です（{1} のいずれか）。</value>
+  </data>
+  <data name="QueryTool_Diag_SqlDialectNotString" xml:space="preserve">
+    <value>方言 '{0}' の SQL は文字列である必要があります。</value>
+  </data>
+  <data name="QueryTool_Diag_Condition" xml:space="preserve">
+    <value>条件: {0}</value>
+  </data>
+  <data name="QueryTool_Diag_RawSql" xml:space="preserve">
+    <value>{0}: {1}</value>
+  </data>
+  <data name="QueryTool_Diag_ParameterUnusedInCondition" xml:space="preserve">
+    <value>パラメータ '{0}' は宣言されていますが条件で使用されていません。</value>
+  </data>
+  <data name="QueryTool_Diag_Unexpected" xml:space="preserve">
+    <value>想定外の診断です: {0}</value>
+  </data>
+  <data name="QueryTool_InvalidArgumentsJson" xml:space="preserve">
+    <value>ツール '{0}' の引数 JSON を解釈できませんでした。</value>
+  </data>
 </root>

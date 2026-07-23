@@ -533,5 +533,17 @@ namespace QuickER.AI.Mock.Resources {
                 return ResourceManager.GetString("Toolbar_MockGenerationTooltip", resourceCulture);
             }
         }
+        public static string Mock_DesignInstructionsTemplate {
+            get {
+                return ResourceManager.GetString("Mock_DesignInstructionsTemplate", resourceCulture);
+            }
+        }
+
+        public static string Mock_FunctionToolLabel {
+            get {
+                return ResourceManager.GetString("Mock_FunctionToolLabel", resourceCulture);
+            }
+        }
+
     }
 }

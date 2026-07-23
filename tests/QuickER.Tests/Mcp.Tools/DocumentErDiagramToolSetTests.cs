@@ -35,22 +35,34 @@ public sealed class DocumentErDiagramToolSetTests : IDisposable
     }
 
     [Fact(
-        DisplayName = "Create はカタログ 9 ツール＋create_diagram＋クエリ定義 3 ツールを公開する"
+        DisplayName = "Create はカタログ 12 ツール（クエリ定義 3 含む）＋create_diagram を公開する"
     )]
     public void Create_ExposesAllTools()
     {
         var toolSet = DocumentErDiagramToolSet.Create();
 
+        // 名前付きクエリ 3 ツール（set_query / list_queries / remove_query）はカタログへ統合済みのため、
+        // 公開集合はカタログ全体＋ファイルモード専用の create_diagram で構成される。
         var expected = ErDiagramToolCatalog
             .GetDefinitions()
             .Select(d => d.Name)
             .Append(DocumentErDiagramToolHost.CreateDiagramToolName)
-            .Append(DocumentErDiagramToolHost.SetQueryToolName)
-            .Append(DocumentErDiagramToolHost.ListQueriesToolName)
-            .Append(DocumentErDiagramToolHost.RemoveQueryToolName)
             .ToList();
 
         toolSet.Tools.Select(t => t.Name).Should().BeEquivalentTo(expected);
+
+        // クエリ定義 3 ツールがカタログ経由で公開されていることを明示的に確認する
+        toolSet
+            .Tools.Select(t => t.Name)
+            .Should()
+            .Contain(
+                new[]
+                {
+                    DocumentErDiagramToolHost.SetQueryToolName,
+                    DocumentErDiagramToolHost.ListQueriesToolName,
+                    DocumentErDiagramToolHost.RemoveQueryToolName,
+                }
+            );
     }
 
     [Fact(DisplayName = "全ツール定義に file パラメータが注入されている")]

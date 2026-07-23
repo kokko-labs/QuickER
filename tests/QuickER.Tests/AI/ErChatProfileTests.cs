@@ -2,12 +2,13 @@ using FluentAssertions;
 using QuickER.AI;
 using QuickER.AI.Chat;
 using QuickER.AI.Mock;
+using QuickER.Mcp;
 
 namespace QuickER.Tests.AI;
 
 /// <summary>
 /// 用途プロファイル化後も、既定（ER 図設計）プロファイルの内容が
-/// 従来のハードコード（<see cref="ErDesignRules"/> / <see cref="ErDiagramToolDefinitions"/>）と一致することを検証する。
+/// 従来のハードコード（<see cref="ErDesignRules"/> / <see cref="ErDiagramToolCatalog"/>）と一致することを検証する。
 /// </summary>
 public class ErChatProfileTests
 {
@@ -35,7 +36,7 @@ public class ErChatProfileTests
     [Fact(DisplayName = "既定プロファイルのツール定義は従来の ER 図操作ツール定義と一致する")]
     public void ErDesign_Tools_MatchesErDiagramToolDefinitions()
     {
-        var expected = ErDiagramToolDefinitions.GetDefinitions();
+        var expected = ErDiagramToolCatalog.GetDefinitions();
         var actual = ErDesignProfile.ErDesign.Tools;
 
         actual.Select(tool => tool.Name).Should().Equal(expected.Select(tool => tool.Name));
@@ -52,34 +53,30 @@ public class ErChatProfileTests
         ErDesignProfile.ErDesign.McpServerName.Should().Be(ErDiagramMcpServer.ServerName);
     }
 
-    /// <summary>ツール形式変換の一般化オーバーロードが従来の無引数版とバイト不変であることを検証する（OpenAI）</summary>
-    [Fact(DisplayName = "ToOpenAiTools は既定ツールで従来と同一結果を返す")]
-    public void ToOpenAiTools_WithDefaultTools_IsUnchanged()
+    /// <summary>既定プロファイルのツールを OpenAI 形式へ変換すると、全ツールが名前付きで生成されることを検証する</summary>
+    [Fact(DisplayName = "ToOpenAiTools は既定プロファイルの全ツールを変換する")]
+    public void ToOpenAiTools_WithProfileTools_ConvertsAll()
     {
-        var withDefinitions = ErDiagramToolDefinitions.ToOpenAiTools(
-            ErDiagramToolDefinitions.GetDefinitions()
-        );
-        var parameterless = ErDiagramToolDefinitions.ToOpenAiTools();
+        var definitions = ErDesignProfile.ErDesign.Tools;
+        var tools = ChatToolConverter.ToOpenAiTools(definitions);
 
-        withDefinitions
+        tools
             .Select(tool => tool.FunctionName)
             .Should()
-            .Equal(parameterless.Select(tool => tool.FunctionName));
+            .Equal(definitions.Select(definition => definition.Name));
     }
 
-    /// <summary>ツール形式変換の一般化オーバーロードが従来の無引数版とバイト不変であることを検証する（Anthropic）</summary>
-    [Fact(DisplayName = "ToAnthropicTools は既定ツールで従来と同一結果を返す")]
-    public void ToAnthropicTools_WithDefaultTools_IsUnchanged()
+    /// <summary>既定プロファイルのツールを Anthropic 形式へ変換すると、全ツールが名前付きで生成されることを検証する</summary>
+    [Fact(DisplayName = "ToAnthropicTools は既定プロファイルの全ツールを変換する")]
+    public void ToAnthropicTools_WithProfileTools_ConvertsAll()
     {
-        var withDefinitions = ErDiagramToolDefinitions.ToAnthropicTools(
-            ErDiagramToolDefinitions.GetDefinitions()
-        );
-        var parameterless = ErDiagramToolDefinitions.ToAnthropicTools();
+        var definitions = ErDesignProfile.ErDesign.Tools;
+        var tools = ChatToolConverter.ToAnthropicTools(definitions);
 
-        withDefinitions
+        tools
             .Select(tool => tool.Name)
             .Should()
-            .Equal(parameterless.Select(tool => tool.Name));
+            .Equal(definitions.Select(definition => definition.Name));
     }
 
     /// <summary>モック生成プロファイルが save_mock_html ツールを 1 つだけ持つことを検証する</summary>

@@ -610,7 +610,10 @@ public partial class MainViewModel
             Entities = Entities.Select(entity => entity.ToModel()).ToList(),
             Relationships = Relationships.Select(relationship => relationship.ToModel()).ToList(),
             TargetDbms = CurrentProvider.Name,
-            Queries = Queries,
+            // クエリ一覧は独立コピー（新リスト）として渡す。フィーチャーモジュール（AI チャットのクエリツール）は
+            // 取得した図の Queries を直接 add/remove/置換して更新し、成功時のみ ReplaceQueries で VM へ書き戻す。
+            // 同一参照を返すと検証途中の破壊的変更が VM の実体へ漏れる（QueryDefinition 自体は不変運用のため浅いコピーで十分）。
+            Queries = Queries.ToList(),
         };
 
     /// <summary>現在の ER 図を保存文書（意味モデル＋レイアウトサイドカー）へ変換する</summary>

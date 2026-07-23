@@ -15,7 +15,7 @@ namespace QuickER.AI;
 /// <summary>
 /// ER 図操作ツールを Claude Code へ公開する、プロセス内 HTTP/SSE MCP サーバー。
 /// 127.0.0.1 のエフェメラルポートで Kestrel を起動し、bearer トークンで保護する。
-/// ツール定義は生成時に注入されたセット（機能側 QuickER.AI.Chat の ErDiagramToolDefinitions が単一ソース）を用い、
+/// ツール定義は生成時に注入されたセット（正本は QuickER.Mcp の ErDiagramToolCatalog）を用い、
 /// 呼び出しは注入された実行コールバック（UI スレッドへのマーシャリングは呼び出し側の責務）へ委譲する。
 /// </summary>
 public sealed class ErDiagramMcpServer : IAsyncDisposable

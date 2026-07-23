@@ -742,4 +742,94 @@
   <data name="Format_DefinitionDocumentHtml" xml:space="preserve">
     <value>定義書 (HTML)</value>
   </data>
+  <data name="Tool_Unsupported" xml:space="preserve">
+    <value>未対応のツール: {0}</value>
+  </data>
+  <data name="Tool_Error" xml:space="preserve">
+    <value>エラー: {0}</value>
+  </data>
+  <data name="Tool_InvalidArgumentsJson" xml:space="preserve">
+    <value>ツール '{0}' の引数 JSON を解釈できませんでした。</value>
+  </data>
+  <data name="Tool_Summary_TableCount" xml:space="preserve">
+    <value>テーブル数: {0}</value>
+  </data>
+  <data name="Tool_Summary_RelationshipCount" xml:space="preserve">
+    <value>リレーション数: {0}</value>
+  </data>
+  <data name="Tool_Summary_EntityDescription" xml:space="preserve">
+    <value>説明: {0}</value>
+  </data>
+  <data name="Tool_Summary_RelationshipsHeader" xml:space="preserve">
+    <value>リレーション:</value>
+  </data>
+  <data name="Tool_EntityAdded" xml:space="preserve">
+    <value>テーブル '{0}' を追加しました。</value>
+  </data>
+  <data name="Tool_TableNameRequired" xml:space="preserve">
+    <value>table_name は必須です。</value>
+  </data>
+  <data name="Tool_TableNotFound" xml:space="preserve">
+    <value>テーブル '{0}' が見つかりません。</value>
+  </data>
+  <data name="Tool_EntityRemoved" xml:space="preserve">
+    <value>テーブル '{0}' を削除しました。</value>
+  </data>
+  <data name="Tool_TableAndColumnNameRequired" xml:space="preserve">
+    <value>table_name と column_name は必須です。</value>
+  </data>
+  <data name="Tool_ColumnAdded" xml:space="preserve">
+    <value>テーブル '{0}' にカラム '{1}' を追加しました。</value>
+  </data>
+  <data name="Tool_ColumnNotFound" xml:space="preserve">
+    <value>カラム '{0}' が見つかりません。</value>
+  </data>
+  <data name="Tool_ColumnRemoved" xml:space="preserve">
+    <value>テーブル '{0}' からカラム '{1}' を削除しました。</value>
+  </data>
+  <data name="Tool_Field_TableName" xml:space="preserve">
+    <value>テーブル名</value>
+  </data>
+  <data name="Tool_Field_Memo" xml:space="preserve">
+    <value>メモ</value>
+  </data>
+  <data name="Tool_Field_Description" xml:space="preserve">
+    <value>説明</value>
+  </data>
+  <data name="Tool_Field_DataType" xml:space="preserve">
+    <value>データ型</value>
+  </data>
+  <data name="Tool_Field_Nullable" xml:space="preserve">
+    <value>NULL 許容</value>
+  </data>
+  <data name="Tool_NoPropertiesToChange" xml:space="preserve">
+    <value>変更するプロパティが指定されていません。</value>
+  </data>
+  <data name="Tool_EntityUpdated" xml:space="preserve">
+    <value>テーブル '{0}' の {1} を更新しました。</value>
+  </data>
+  <data name="Tool_NoColumnPropertiesToChange" xml:space="preserve">
+    <value>変更するプロパティが指定されていません。description / data_type / is_nullable のいずれか 1 つ以上を指定してください。</value>
+  </data>
+  <data name="Tool_ColumnUpdated" xml:space="preserve">
+    <value>テーブル '{0}' のカラム '{1}' の {2} を更新しました。</value>
+  </data>
+  <data name="Tool_SourceAndTargetTableRequired" xml:space="preserve">
+    <value>source_table と target_table は必須です。</value>
+  </data>
+  <data name="Tool_ColumnNotFoundInTable" xml:space="preserve">
+    <value>テーブル '{0}' にカラム '{1}' が見つかりません。</value>
+  </data>
+  <data name="Tool_RelationshipAdded" xml:space="preserve">
+    <value>'{0}' → '{1}' のリレーションを追加しました。</value>
+  </data>
+  <data name="Tool_RelationshipNotFound" xml:space="preserve">
+    <value>'{0}' → '{1}' のリレーションが見つかりません。</value>
+  </data>
+  <data name="Tool_RelationshipRemoved" xml:space="preserve">
+    <value>'{0}' → '{1}' のリレーションを削除しました。</value>
+  </data>
+  <data name="Tool_ListSeparator" xml:space="preserve">
+    <value>、</value>
+  </data>
 </root>
