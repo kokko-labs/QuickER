@@ -1,13 +1,12 @@
 using System.IO;
 using System.Text;
-using QuickER.AI;
 using QuickER.AI.Mock.Resources;
 
 namespace QuickER.AI.Mock;
 
 /// <summary>ヘッドレスで <c>dotnet build</c> を実行し、その成否と出力を返すビルド検証器の抽象</summary>
 /// <remarks>
-/// クライアント（Claude Code）の自己申告だけを信じず、最終ビルドを独立に検証するために使う。
+/// エージェント（Claude Code 等）の自己申告だけを信じず、最終ビルドを独立に検証するために使う。
 /// 実処理は <see cref="DotnetBuildRunner"/> が担い、単体テストではフェイクへ差し替える。
 /// </remarks>
 public interface IBuildRunner
@@ -30,8 +29,8 @@ public interface IBuildRunner
 public readonly record struct BuildRunResult(bool Success, string Output);
 
 /// <summary>WPF モックプロジェクト生成の実行結果</summary>
-/// <param name="Success">全体として成功したか（クライアント成功・成果物存在・最終ビルド成功のすべてを満たす）</param>
-/// <param name="ClientSucceeded">Claude Code の実行が成功で完了したか</param>
+/// <param name="Success">全体として成功したか（エージェント成功・成果物存在・最終ビルド成功のすべてを満たす）</param>
+/// <param name="ClientSucceeded">エージェント（バックエンド）の実行が成功で完了したか</param>
 /// <param name="ArtifactsPresent">出力フォルダに csproj と xaml が存在するか（軽い成果物検証）</param>
 /// <param name="BuildSucceeded">独立に実行した最終 <c>dotnet build</c> が成功したか</param>
 /// <param name="TimedOut">全体タイムアウトで打ち切られたか</param>
@@ -50,19 +49,23 @@ public sealed record MockProjectAgentResult(
 );
 
 /// <summary>
-/// 確定 HTML・決定的スキャフォールドが用意された出力フォルダに対し、Claude Code CLI をヘッドレス実行して
-/// WPF の UI 層を書かせ、<c>dotnet build</c> 成功まで自己修正させるオーケストレーター。
+/// スキャフォールド済みの出力フォルダに対し、<see cref="IMockProjectAgent"/>（バックエンド）へ UI 層生成を依頼し、
+/// 全体タイムアウト・成果物検証・独立ビルド・ログ保全・結果メッセージ生成をバックエンド非依存に束ねる
+/// 共有オーケストレーター。
 /// </summary>
 /// <remarks>
 /// <para>
-/// データ層（Entity/EditModel/Mapper/InMemory 等）はスキャフォールドが決定的に生成済みで、AI には書かせない。
-/// AI には design/mock.html をデザイン仕様として、README-QuickER.md の規約に従い CommunityToolkit.Mvvm の
-/// MVVM で UI 層を作らせる。MCP サーバー（ER ツール）は使わせず、ファイル編集・コマンド実行のみを許可する。
+/// データ層（Entity/EditModel/Mapper/InMemory 等）はスキャフォールドが決定的に生成済みで、エージェントには
+/// 書かせない。エージェントの UI 層生成が終わったら、その自己申告を信じずに成果物（csproj/xaml）の存在と
+/// 最終 <c>dotnet build</c>（<see cref="IBuildRunner"/>）で独立に検証する。
 /// </para>
 /// <para>
 /// 進捗テキストは <c>onProgress</c> で逐次転送し、全体タイムアウト（<see cref="DefaultTimeout"/>）と
 /// 明示的な中断（<see cref="InterruptAsync"/>）に対応する。実行ログ全文は成功・失敗を問わず
-/// <c>quickr-mock-generation.log</c> へ書き出す。最終ビルドは <see cref="IBuildRunner"/> で独立に検証する。
+/// <c>quickr-mock-generation.log</c> へ書き出す。
+/// </para>
+/// <para>
+/// バックエンドの差異（Claude Code / Codex / API キー等）は <see cref="IMockProjectAgent"/> の実装が吸収する。
 /// </para>
 /// </remarks>
 public sealed class MockProjectAgentRunner
@@ -70,19 +73,10 @@ public sealed class MockProjectAgentRunner
     /// <summary>ログファイル名（出力フォルダ直下）</summary>
     public const string LogFileName = "quickr-mock-generation.log";
 
-    /// <summary>デザイン仕様のモックフォルダの相対パス（スキャフォールドが同梱する）</summary>
-    public const string DesignFolderRelativePath = "design/mock";
-
-    /// <summary>規約ドキュメントのファイル名</summary>
-    public const string ReadmeFileName = "README-QuickER.md";
-
     /// <summary>全体タイムアウトの既定（30 分）</summary>
     public static readonly TimeSpan DefaultTimeout = TimeSpan.FromMinutes(30);
 
-    /// <summary>ヘッドレスで許可する追加ツール（ファイル編集・コマンド実行）</summary>
-    private static readonly string[] HeadlessAllowedTools = ["Edit", "Write", "MultiEdit", "Bash"];
-
-    private readonly IClaudeCodeClient _client;
+    private readonly IMockProjectAgent _agent;
     private readonly IBuildRunner _buildRunner;
     private readonly TimeSpan _timeout;
 
@@ -90,34 +84,63 @@ public sealed class MockProjectAgentRunner
     private CancellationTokenSource? _runCts;
 
     /// <summary>依存を注入して生成する</summary>
-    /// <param name="client">Claude Code クライアント</param>
+    /// <param name="agent">UI 層を書くエージェント（バックエンド）</param>
     /// <param name="buildRunner">最終ビルド検証器</param>
     /// <param name="timeout">全体タイムアウト（省略時は <see cref="DefaultTimeout"/>）</param>
     public MockProjectAgentRunner(
-        IClaudeCodeClient client,
+        IMockProjectAgent agent,
         IBuildRunner buildRunner,
         TimeSpan? timeout = null
     )
     {
-        _client = client;
+        _agent = agent;
         _buildRunner = buildRunner;
         _timeout = timeout ?? DefaultTimeout;
     }
 
-    /// <summary>claude CLI が利用可能か</summary>
-    public bool IsClaudeAvailable() => _client.IsAvailable();
+    /// <summary>エージェント（バックエンド）が利用可能か（Claude Code なら claude CLI の解決可否）</summary>
+    public bool IsClaudeAvailable() => _agent.IsAvailable();
 
     /// <summary>dotnet SDK が利用可能か</summary>
     public Task<bool> IsDotnetAvailableAsync(CancellationToken cancellationToken = default) =>
         _buildRunner.IsDotnetAvailableAsync(cancellationToken);
 
     /// <summary>
-    /// 出力フォルダに対して Claude Code をヘッドレス実行し、UI 層を生成させて最終ビルドを検証する。
+    /// 出力フォルダに対してエージェントを実行し、UI 層を生成させて最終ビルドを検証する。
     /// </summary>
     /// <param name="outputDirectory">スキャフォールド済みの出力フォルダ（cwd になる）</param>
     /// <param name="projectName">プロジェクト名（プロンプトの案内に使う）</param>
     /// <param name="additionalInstructions">実装に対する追加指示（空／null なら付与しない）</param>
-    /// <param name="model">Claude Code モデルエイリアス（空なら既定）</param>
+    /// <param name="model">モデルエイリアス（空なら既定）</param>
+    /// <param name="onProgress">進捗テキストの逐次転送先</param>
+    /// <param name="cancellationToken">外部キャンセルトークン</param>
+    /// <remarks>モデルプロバイダー指定なし（既定＝空）で <see cref="RunAsync(string, string, string?, string, string, Action{string}, CancellationToken)"/> へ委譲する。</remarks>
+    public Task<MockProjectAgentResult> RunAsync(
+        string outputDirectory,
+        string projectName,
+        string? additionalInstructions,
+        string model,
+        Action<string> onProgress,
+        CancellationToken cancellationToken = default
+    ) =>
+        RunAsync(
+            outputDirectory,
+            projectName,
+            additionalInstructions,
+            model,
+            modelProvider: string.Empty,
+            onProgress,
+            cancellationToken
+        );
+
+    /// <summary>
+    /// 出力フォルダに対してエージェントを実行し、UI 層を生成させて最終ビルドを検証する（モデルプロバイダー指定あり）。
+    /// </summary>
+    /// <param name="outputDirectory">スキャフォールド済みの出力フォルダ（cwd になる）</param>
+    /// <param name="projectName">プロジェクト名（プロンプトの案内に使う）</param>
+    /// <param name="additionalInstructions">実装に対する追加指示（空／null なら付与しない）</param>
+    /// <param name="model">モデルエイリアス（空なら既定）</param>
+    /// <param name="modelProvider">モデルプロバイダー（Codex 用。空なら既定。Claude Code バックエンドは無視する）</param>
     /// <param name="onProgress">進捗テキストの逐次転送先</param>
     /// <param name="cancellationToken">外部キャンセルトークン</param>
     public async Task<MockProjectAgentResult> RunAsync(
@@ -125,6 +148,7 @@ public sealed class MockProjectAgentRunner
         string projectName,
         string? additionalInstructions,
         string model,
+        string modelProvider,
         Action<string> onProgress,
         CancellationToken cancellationToken = default
     )
@@ -152,29 +176,32 @@ public sealed class MockProjectAgentRunner
         EmitLine(string.Format(Strings.Mock_Run_OutputFolderFormat, outputDirectory));
         EmitLine(string.Format(Strings.Mock_Run_ProjectNameFormat, projectName));
 
-        var options = BuildLaunchOptions(model, outputDirectory, projectName);
-        var prompt = BuildPrompt(projectName, additionalInstructions);
+        var request = new MockProjectAgentRequest(
+            WorkingDirectory: outputDirectory,
+            ProjectName: projectName,
+            AdditionalInstructions: additionalInstructions,
+            Model: model,
+            ModelProvider: modelProvider
+        );
 
         _runCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _runCts.CancelAfter(_timeout);
         var token = _runCts.Token;
 
-        ClaudeCodeTurnOutcome outcome;
+        MockProjectAgentOutcome outcome;
         var timedOut = false;
         var canceled = false;
 
         try
         {
-            outcome = await _client
-                .RunTurnAsync(prompt, resumeSessionId: null, options, Emit, token)
-                .ConfigureAwait(false);
+            outcome = await _agent.RunAsync(request, Emit, token).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
             // 外部キャンセルとタイムアウトを区別する（外部トークンが立っていなければタイムアウト）
             timedOut = !cancellationToken.IsCancellationRequested;
             canceled = cancellationToken.IsCancellationRequested;
-            outcome = new ClaudeCodeTurnOutcome(false, null, null, false);
+            outcome = new MockProjectAgentOutcome(false, null, false);
         }
         finally
         {
@@ -218,7 +245,7 @@ public sealed class MockProjectAgentRunner
             );
         }
 
-        // 最終ビルドを独立に実行して検証する（クライアントの自己申告を信じない）。
+        // 最終ビルドを独立に実行して検証する（エージェントの自己申告を信じない）。
         // タイムアウト・中断時、または成果物が無いときはビルドを試みない。
         var buildSucceeded = false;
 
@@ -277,89 +304,10 @@ public sealed class MockProjectAgentRunner
     }
 
     /// <summary>実行中のターンを中断する</summary>
-    public Task InterruptAsync()
+    public async Task InterruptAsync()
     {
-        _client.Interrupt();
+        await _agent.InterruptAsync().ConfigureAwait(false);
         _runCts?.Cancel();
-        return Task.CompletedTask;
-    }
-
-    /// <summary>ヘッドレス（ファイル編集・コマンド実行許可）の起動オプションを組み立てる</summary>
-    /// <remarks>
-    /// MCP は使わない（ER ツール不要）。<c>--permission-mode acceptEdits</c> と Edit/Write/Bash の許可で、
-    /// 作業フォルダ内のファイル作成・編集と dotnet build 等のコマンド実行をヘッドレスで通す。
-    /// </remarks>
-    internal static ClaudeCodeLaunchOptions BuildLaunchOptions(
-        string model,
-        string workingDirectory,
-        string projectName
-    ) =>
-        new(
-            Model: model ?? string.Empty,
-            SystemPrompt: BuildSystemPrompt(projectName),
-            McpConfigPath: string.Empty,
-            AllowedTool: string.Empty,
-            WorkingDirectory: workingDirectory
-        )
-        {
-            PermissionMode = "acceptEdits",
-            AdditionalAllowedTools = HeadlessAllowedTools,
-        };
-
-    /// <summary>ヘッドレス実行のシステムプロンプト（規約・制約）を組み立てる</summary>
-    /// <remarks>
-    /// 出力は Visual Studio 標準構成（cwd 直下に <c>{ProjectName}.sln</c>、プロジェクト一式は <c>{ProjectName}/</c> 配下）。
-    /// パス案内はプロジェクトフォルダ配下を指し、ビルドは cwd で <c>dotnet build</c>（sln を拾う）を指示する。
-    /// </remarks>
-    internal static string BuildSystemPrompt(string projectName) =>
-        $@"あなたは WPF (.NET) の熟練エンジニアで、既存のプロジェクトに GUI（UI 層）を実装します。
-このフォルダは Visual Studio 標準構成で、直下にソリューション {projectName}.sln があり、プロジェクト一式は {projectName}/ フォルダ配下に、QuickER が生成した WPF プロジェクトの雛形とデータ層のコードが既に用意されています。
-
-# 守るべき規約
-- 作業を始める前に、必ず {projectName}/{ReadmeFileName} を読み、その規約に従ってください。
-- {projectName}/{DesignFolderRelativePath}/ がデザイン仕様のモックフォルダです。まず {projectName}/{DesignFolderRelativePath}/mock.json を読んで画面一覧（screens）と画面遷移（transitions）を把握し、各画面の *.html（1 ファイル＝1 画面のデザイン仕様）と共有デザインシステム style.css を確認してください。各画面の画面構成・項目を WPF で忠実に再現し、マニフェストの遷移をナビゲーションとして実装します（HTML をそのまま埋め込むのではなく、WPF のネイティブ UI で作り直します）。
-- {projectName}/Generated/ 配下（データ層の自動生成コード）は読み取り専用です。絶対に編集・削除しないでください。UI からは I{{Entity}}Repository を DI 経由で使います。
-- UI は CommunityToolkit.Mvvm を用いた MVVM（ObservableObject / RelayCommand / ObservableProperty）で実装してください。
-- 起動時の DI 登録は AddGeneratedInMemoryRepositories()（サンプルデータ入り）を使ってください（実 DB 接続は不要）。
-
-# 進め方
-- App.xaml / App.xaml.cs 等の UI 層のソースは {projectName}/ フォルダ配下（csproj と同じ場所）に追加します。
-- App.xaml / App.xaml.cs で DI を構成し、MainWindow とビュー・ビューモデルを実装します。
-- {projectName}/{DesignFolderRelativePath}/mock.json の各画面（一覧・登録／編集等）を WPF のウィンドウ／ページ／ユーザーコントロールとして再現し、transitions で宣言された画面遷移をナビゲーションとして実装します。
-- 実装が一段落したら、このフォルダ（ソリューション直下）で `dotnet build` を実行し、警告なし・エラーなしで通るまで修正を繰り返してください。
-- 最後に、ビルドがエラー・警告なしで成功したことを確認した旨を報告してください。";
-
-    /// <summary>初回プロンプト（実装の起点となる具体指示）を組み立てる</summary>
-    /// <param name="projectName">プロジェクト名</param>
-    /// <param name="additionalInstructions">実装に対する追加指示（空／null なら付与しない）</param>
-    internal static string BuildPrompt(string projectName, string? additionalInstructions)
-    {
-        var prompt =
-            $@"プロジェクト『{projectName}』の WPF UI 層を実装してください。
-
-このフォルダは Visual Studio 標準構成です。直下にソリューション {projectName}.sln があり、プロジェクト一式は {projectName}/ フォルダ配下にあります。UI 層のソースは {projectName}/ フォルダ配下（csproj と同じ場所）に追加してください。
-
-手順:
-1. まず {projectName}/{ReadmeFileName} を読み、プロジェクト構成と規約を把握する。
-2. {projectName}/{DesignFolderRelativePath}/mock.json を読んで画面一覧（screens）と画面遷移（transitions）を把握し、各画面の *.html と共有 style.css を読んで、再現すべき画面構成・項目・遷移を把握する。
-3. {projectName}/Generated/ 配下のデータ層（Entity / I{{Entity}}Repository / AddGeneratedInMemoryRepositories 等）を確認し、UI から利用する。
-4. App.xaml(.cs)・MainWindow・各ビュー／ビューモデルを CommunityToolkit.Mvvm の MVVM で実装する。各画面を WPF のウィンドウ／ページ／ユーザーコントロールとして再現し、mock.json の遷移をナビゲーションとして実装する。DI には AddGeneratedInMemoryRepositories() を使う。
-5. このフォルダ（ソリューション直下）で `dotnet build` を実行し、エラー・警告なしで通るまで自己修正する。
-6. ビルドが成功したことを確認して報告する。
-
-{projectName}/Generated/ 配下は読み取り専用です。編集しないでください。";
-
-        // 追加指示があれば末尾へ「# 追加指示」として連結する（見出しは resx から解決＝表示言語追従）
-        if (!string.IsNullOrWhiteSpace(additionalInstructions))
-        {
-            prompt +=
-                "\n\n"
-                + Strings.Mock_PromptUserInstructionsHeading
-                + "\n"
-                + additionalInstructions.Trim();
-        }
-
-        return prompt;
     }
 
     /// <summary>出力フォルダに csproj と xaml が存在するかを軽く検証する</summary>
@@ -385,7 +333,7 @@ public sealed class MockProjectAgentRunner
         bool success,
         bool timedOut,
         bool canceled,
-        ClaudeCodeTurnOutcome outcome,
+        MockProjectAgentOutcome outcome,
         bool artifactsPresent,
         bool buildSucceeded
     )

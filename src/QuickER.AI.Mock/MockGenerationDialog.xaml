@@ -795,7 +795,7 @@
       </Border>
     </Grid>
 
-    <!-- ── 第2ステップ: WPF モックプロジェクト生成（Claude Code 限定） ── -->
+    <!-- ── 第2ステップ: WPF モックプロジェクト生成（Claude Code / Codex / API キー） ── -->
     <Border
       Grid.Row="1"
       Margin="0,12,0,0"
@@ -815,6 +815,16 @@
         </Expander.Header>
 
         <StackPanel Margin="4,10,4,4">
+          <!-- API キー方式のときだけ出す注記（一発生成＝自己修正なしのため失敗し得る） -->
+          <TextBlock
+            Margin="0,0,0,10"
+            Foreground="#B45309"
+            FontSize="12"
+            TextWrapping="Wrap"
+            Text="{x:Static res:Strings.Mock_ApiKeyOneShotNote}"
+            Visibility="{Binding IsApiKeyMockGenBackend, Converter={StaticResource BoolToVisibilityConverter}}"
+          />
+
           <!-- 出力フォルダ -->
           <Grid>
             <Grid.ColumnDefinitions>

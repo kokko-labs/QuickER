@@ -152,9 +152,13 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         {
             ErChatBackendKind.Codex => _codexReady,
             ErChatBackendKind.ClaudeCode => _claudeCodeReady,
-            _ => Connection.ApiProvider == AiProvider.Ollama
-                || !string.IsNullOrWhiteSpace(Connection.ApiKey),
+            _ => IsApiKeyConnectionReady,
         };
+
+    /// <summary>API キー接続が送信可能か（Ollama はキー不要・それ以外はキー入力が必須）</summary>
+    private bool IsApiKeyConnectionReady =>
+        Connection.ApiProvider == AiProvider.Ollama
+        || !string.IsNullOrWhiteSpace(Connection.ApiKey);
 
     /// <summary>図が空（エンティティ 0）か（会話開始の可否に使う）</summary>
     public bool IsDiagramEmpty => _diagramSource.IsEmpty;
@@ -186,7 +190,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     /// <summary>単一 HTML を出力できるか（モックフォルダに画面が 1 つ以上あるか）</summary>
     public bool CanExportBundle => HasScreens;
 
-    // ── 第2ステップ: WPF モックプロジェクト生成（Claude Code 限定） ──
+    // ── 第2ステップ: WPF モックプロジェクト生成（Claude Code / Codex） ──
 
     /// <summary>生成先の出力フォルダ</summary>
     [ObservableProperty]
@@ -268,18 +272,33 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     public bool CanEditMockGenInput => !IsMockGenInProgress;
 
     /// <summary>
-    /// WPF モック生成を開始できるか（画面あり・Claude Code バックエンド・claude CLI 検出・
-    /// dotnet SDK 検出・出力フォルダ／プロジェクト名あり・非実行中）。
+    /// WPF モック生成を開始できるか（画面あり・選択バックエンドが ready・dotnet SDK 検出・
+    /// 出力フォルダ／プロジェクト名あり・非実行中）。3 バックエンド（Claude Code / Codex / API キー）すべて可。
     /// </summary>
     public bool CanGenerateMockProject =>
         HasScreens
-        && Connection.SelectedBackend == ErChatBackendKind.ClaudeCode
-        && IsClaudeCliAvailable
+        && IsSelectedBackendReadyForMockGen
         && IsDotnetAvailable
         && !string.IsNullOrWhiteSpace(OutputFolder)
         && !string.IsNullOrWhiteSpace(ProjectName)
         && !IsMockGenInProgress
         && !IsTurnInProgress;
+
+    /// <summary>選択中バックエンドが API キー方式か（一発生成の注記表示に使う）</summary>
+    public bool IsApiKeyMockGenBackend => Connection.SelectedBackend == ErChatBackendKind.ApiKey;
+
+    /// <summary>
+    /// 選択中バックエンドが WPF モック生成の実行条件（CLI 検出／認証／API キー）を満たすか。
+    /// Claude Code＝claude CLI 検出・Codex＝認証プローブ結果（<see cref="ApplyCodexReadiness"/>）・
+    /// API キー＝キー入力あり（Ollama はキー不要）。
+    /// </summary>
+    private bool IsSelectedBackendReadyForMockGen =>
+        Connection.SelectedBackend switch
+        {
+            ErChatBackendKind.ClaudeCode => IsClaudeCliAvailable,
+            ErChatBackendKind.Codex => _codexReady,
+            _ => IsApiKeyConnectionReady,
+        };
 
     /// <summary>WPF モック生成が無効な場合の理由（ツールチップ／案内文用）</summary>
     public string MockGenDisabledReason
@@ -296,14 +315,19 @@ public partial class MockGenerationDialogViewModel : ObservableObject
                 return Strings.Mock_DisabledReason_NoScreens;
             }
 
-            if (Connection.SelectedBackend != ErChatBackendKind.ClaudeCode)
-            {
-                return Strings.Mock_DisabledReason_ClaudeCodeOnly;
-            }
-
-            if (!IsClaudeCliAvailable)
+            if (Connection.SelectedBackend == ErChatBackendKind.ClaudeCode && !IsClaudeCliAvailable)
             {
                 return Strings.Mock_DisabledReason_ClaudeCli;
+            }
+
+            if (Connection.SelectedBackend == ErChatBackendKind.Codex && !_codexReady)
+            {
+                return Strings.Mock_DisabledReason_CodexNotReady;
+            }
+
+            if (Connection.SelectedBackend == ErChatBackendKind.ApiKey && !IsApiKeyConnectionReady)
+            {
+                return Strings.Mock_DisabledReason_ApiKeyNotReady;
             }
 
             if (!IsDotnetAvailable)
@@ -386,9 +410,6 @@ public partial class MockGenerationDialogViewModel : ObservableObject
             reportStatus: message => StatusMessage = message,
             shrinker: imageShrinker ?? WpfImageShrinker.Shrink
         );
-        _mockProjectGenerator =
-            mockProjectGenerator ?? new MockProjectGenerator(diagramSource.Providers);
-
         // 接続方式タブの状態部品。エンジンのファクトリ既定ラムダより前に用意し、get-only プロパティを
         // ラムダから参照させる（PropertyChanged 購読と LoadSettings は下記の ctor 順序に従い後段で行う）。
         Connection = new ChatConnectionSettingsViewModel(
@@ -398,6 +419,13 @@ public partial class MockGenerationDialogViewModel : ObservableObject
 
         _apiKeyEngineFactory =
             apiKeyEngineFactory ?? ((profile, toolHost) => BuildApiKeyEngine(profile, toolHost));
+
+        // API キー方式の WPF モック生成は、チャットと同じ API キーエンジンを使う。生成時点の Connection 状態
+        // （モデル・キー・エンドポイント）を閉包へ閉じ込めるため、確定済みの _apiKeyEngineFactory を渡す
+        // （実行は生成時＝Connection ロード後）。
+        _mockProjectGenerator =
+            mockProjectGenerator
+            ?? new MockProjectGenerator(diagramSource.Providers, _apiKeyEngineFactory);
         _codexEngineFactory =
             codexEngineFactory
             ?? (
@@ -890,7 +918,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         }
     }
 
-    /// <summary>スキャフォールド＋Claude Code で WPF モックプロジェクトを生成する</summary>
+    /// <summary>スキャフォールド＋選択バックエンド（Claude Code / Codex）で WPF モックプロジェクトを生成する</summary>
     [RelayCommand(CanExecute = nameof(CanGenerateMockProject))]
     private async Task GenerateMockProjectAsync()
     {
@@ -919,6 +947,18 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         var diagram = _diagramSource.GetDiagram();
         var projectName = ProjectName.Trim();
 
+        // 選択バックエンド別にモデル・プロバイダーを選ぶ（Codex のみプロバイダーを渡す。
+        // API キーはエンジンファクトリがモデル・キーを閉じ込めるため、ここで渡す値はログ表示用）
+        var backend = Connection.SelectedBackend;
+        var model = backend switch
+        {
+            ErChatBackendKind.Codex => Connection.CodexModel,
+            ErChatBackendKind.ClaudeCode => Connection.ClaudeCodeModel,
+            _ => Connection.ApiModel,
+        };
+        var modelProvider =
+            backend == ErChatBackendKind.Codex ? Connection.CodexModelProvider : string.Empty;
+
         MockGenLog = string.Empty;
         MockGenCompleted = false;
         MockGenSucceeded = false;
@@ -936,7 +976,9 @@ public partial class MockGenerationDialogViewModel : ObservableObject
                     instructions,
                     outputFolder,
                     projectName,
-                    Connection.ClaudeCodeModel,
+                    backend,
+                    model,
+                    modelProvider,
                     delta => RunOnUi(() => AppendMockGenLog(delta)),
                     _mockGenCts.Token
                 )
@@ -944,6 +986,37 @@ public partial class MockGenerationDialogViewModel : ObservableObject
 
             MockGenSucceeded = result.Success;
             StatusMessage = result.Message;
+
+            // 完了を明示する（ステータスバーだけでは見落としやすいため）。
+            // ただしユーザー自身の中断による終了時はダイアログを出さない。
+            if (!result.Interrupted)
+            {
+                if (result.Success)
+                {
+                    _dialogs.ShowInformation(
+                        string.Format(
+                            Strings.Mock_GenResultSuccessBodyFormat,
+                            result.Message,
+                            result.OutputDirectory
+                        ),
+                        Strings.Mock_WindowTitle
+                    );
+                }
+                else
+                {
+                    // 失敗はログパス（無ければ出力フォルダ）を添えて詳細確認へ誘導する
+                    _dialogs.ShowError(
+                        string.Format(
+                            Strings.Mock_GenResultFailureBodyFormat,
+                            result.Message,
+                            string.IsNullOrWhiteSpace(result.LogPath)
+                                ? result.OutputDirectory
+                                : result.LogPath
+                        ),
+                        Strings.Mock_WindowTitle
+                    );
+                }
+            }
         }
         catch (Exception ex)
         {
@@ -989,7 +1062,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     /// <summary>claude CLI・dotnet SDK の検出状態を取得して第2ステップの有効条件へ反映する</summary>
     public async Task RefreshMockGenAvailabilityAsync()
     {
-        IsClaudeCliAvailable = _mockProjectGenerator.IsClaudeAvailable();
+        IsClaudeCliAvailable = _mockProjectGenerator.IsAgentAvailable(ErChatBackendKind.ClaudeCode);
 
         try
         {
@@ -1010,6 +1083,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     {
         OnPropertyChanged(nameof(CanGenerateMockProject));
         OnPropertyChanged(nameof(MockGenDisabledReason));
+        OnPropertyChanged(nameof(IsApiKeyMockGenBackend));
         OnPropertyChanged(nameof(CanEditMockGenInput));
         OnPropertyChanged(nameof(CanClear));
         GenerateMockProjectCommand.NotifyCanExecuteChanged();

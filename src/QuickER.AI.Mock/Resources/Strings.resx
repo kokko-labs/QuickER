@@ -116,7 +116,7 @@
     <value>Export HTML</value>
   </data>
   <data name="Mock_Step2Header" xml:space="preserve">
-    <value>Generate WPF Mock Project (Claude Code)</value>
+    <value>Generate WPF Mock Project</value>
   </data>
   <data name="Mock_OutputFolder" xml:space="preserve">
     <value>Output Folder</value>
@@ -179,11 +179,14 @@ Start "+ New Conversation" in the chat on the left and send your requests for th
   <data name="Mock_DisabledReason_NoScreens" xml:space="preserve">
     <value>Add at least one screen to the mock folder first.</value>
   </data>
-  <data name="Mock_DisabledReason_ClaudeCodeOnly" xml:space="preserve">
-    <value>WPF mock generation is available only when the backend is Claude Code.</value>
-  </data>
   <data name="Mock_DisabledReason_ClaudeCli" xml:space="preserve">
     <value>claude CLI not found. Install Claude Code and add it to your PATH.</value>
+  </data>
+  <data name="Mock_DisabledReason_ApiKeyNotReady" xml:space="preserve">
+    <value>Enter an API key (or select the Ollama provider) on the API Key tab.</value>
+  </data>
+  <data name="Mock_DisabledReason_CodexNotReady" xml:space="preserve">
+    <value>Codex is not ready. Connect and sign in on the Codex tab.</value>
   </data>
   <data name="Mock_DisabledReason_Dotnet" xml:space="preserve">
     <value>.NET SDK (dotnet) not found. Please install the .NET SDK.</value>
@@ -237,6 +240,23 @@ An error occurred during generation: {0}
   </data>
   <data name="Mock_GenerationFailedFormat" xml:space="preserve">
     <value>WPF mock generation failed: {0}</value>
+  </data>
+  <data name="Mock_Codex_AutoContinueNotice" xml:space="preserve">
+    <value>
+(Detected a pending approval: continuing automatically.)
+</value>
+  </data>
+  <data name="Mock_GenResultSuccessBodyFormat" xml:space="preserve">
+    <value>{0}
+
+Output folder:
+{1}</value>
+  </data>
+  <data name="Mock_GenResultFailureBodyFormat" xml:space="preserve">
+    <value>{0}
+
+See the log for details:
+{1}</value>
   </data>
   <data name="Mock_MockUpdated" xml:space="preserve">
     <value>Updated the mock.</value>
@@ -316,7 +336,10 @@ An error occurred during generation: {0}
     <value>Generation canceled. Progress and the log remain in the output folder.</value>
   </data>
   <data name="Mock_Result_NotLoggedIn" xml:space="preserve">
-    <value>Claude Code is not logged in. Launch `claude` in a terminal and log in with /login.</value>
+    <value>The selected AI backend is not logged in. Sign in to Claude Code (`claude` then /login) or Codex and try again.</value>
+  </data>
+  <data name="Mock_CodexNotLoggedIn" xml:space="preserve">
+    <value>Codex is not logged in.</value>
   </data>
   <data name="Mock_Result_ClientFailedFormat" xml:space="preserve">
     <value>Claude Code execution failed: {0}. Please check the log.</value>
@@ -435,5 +458,44 @@ Respond in the same language as the user's most recent message.
   </data>
   <data name="Mock_ResumePromptGetScreenNote" xml:space="preserve">
     <value>Before modifying an existing screen, always fetch its current HTML with get_screen first.</value>
+  </data>
+  <data name="Mock_ApiKeyOneShotNote" xml:space="preserve">
+    <value>Note: API-key generation is a single pass (no self-correction), so it can fail.</value>
+  </data>
+  <data name="Mock_ApiRun_CommonPart" xml:space="preserve">
+    <value>[{0}/{1}] Generating shared parts (App / MainWindow / navigation)...</value>
+  </data>
+  <data name="Mock_ApiRun_Screen" xml:space="preserve">
+    <value>[{0}/{1}] Generating screen '{2}'...</value>
+  </data>
+  <data name="Mock_ApiRun_Emit" xml:space="preserve">
+    <value>emit: {0}</value>
+  </data>
+  <data name="Mock_ApiRun_EmitRejectedFormat" xml:space="preserve">
+    <value>emit rejected: {0}</value>
+  </data>
+  <data name="Mock_ApiRun_NoEmit" xml:space="preserve">
+    <value>(No file was submitted this turn.)</value>
+  </data>
+  <data name="Mock_ApiRun_Build" xml:space="preserve">
+    <value>== Verifying the intermediate build (dotnet build) ==</value>
+  </data>
+  <data name="Mock_ApiRun_BuildOk" xml:space="preserve">
+    <value>Build: succeeded.</value>
+  </data>
+  <data name="Mock_ApiRun_BuildFailedFixing" xml:space="preserve">
+    <value>Intermediate build: failed. Requesting one fix turn...</value>
+  </data>
+  <data name="Mock_ApiRun_Rebuild" xml:space="preserve">
+    <value>== Re-verifying the build after the fix ==</value>
+  </data>
+  <data name="Mock_ApiRun_BuildFail" xml:space="preserve">
+    <value>Build: still failed after the fix.</value>
+  </data>
+  <data name="Mock_ApiRun_ErrorBuildFailed" xml:space="preserve">
+    <value>The build still failed after the fix turn.</value>
+  </data>
+  <data name="Mock_ApiRun_ErrorTurnFailedFormat" xml:space="preserve">
+    <value>A generation turn failed: {0}</value>
   </data>
 </root>

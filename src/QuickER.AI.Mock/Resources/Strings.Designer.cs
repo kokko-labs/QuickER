@@ -294,15 +294,21 @@ namespace QuickER.AI.Mock.Resources {
             }
         }
 
-        public static string Mock_DisabledReason_ClaudeCodeOnly {
-            get {
-                return ResourceManager.GetString("Mock_DisabledReason_ClaudeCodeOnly", resourceCulture);
-            }
-        }
-
         public static string Mock_DisabledReason_ClaudeCli {
             get {
                 return ResourceManager.GetString("Mock_DisabledReason_ClaudeCli", resourceCulture);
+            }
+        }
+
+        public static string Mock_DisabledReason_ApiKeyNotReady {
+            get {
+                return ResourceManager.GetString("Mock_DisabledReason_ApiKeyNotReady", resourceCulture);
+            }
+        }
+
+        public static string Mock_DisabledReason_CodexNotReady {
+            get {
+                return ResourceManager.GetString("Mock_DisabledReason_CodexNotReady", resourceCulture);
             }
         }
 
@@ -399,6 +405,24 @@ namespace QuickER.AI.Mock.Resources {
         public static string Mock_GenerationFailedFormat {
             get {
                 return ResourceManager.GetString("Mock_GenerationFailedFormat", resourceCulture);
+            }
+        }
+
+        public static string Mock_Codex_AutoContinueNotice {
+            get {
+                return ResourceManager.GetString("Mock_Codex_AutoContinueNotice", resourceCulture);
+            }
+        }
+
+        public static string Mock_GenResultSuccessBodyFormat {
+            get {
+                return ResourceManager.GetString("Mock_GenResultSuccessBodyFormat", resourceCulture);
+            }
+        }
+
+        public static string Mock_GenResultFailureBodyFormat {
+            get {
+                return ResourceManager.GetString("Mock_GenResultFailureBodyFormat", resourceCulture);
             }
         }
 
@@ -549,6 +573,12 @@ namespace QuickER.AI.Mock.Resources {
         public static string Mock_Result_NotLoggedIn {
             get {
                 return ResourceManager.GetString("Mock_Result_NotLoggedIn", resourceCulture);
+            }
+        }
+
+        public static string Mock_CodexNotLoggedIn {
+            get {
+                return ResourceManager.GetString("Mock_CodexNotLoggedIn", resourceCulture);
             }
         }
 
@@ -740,6 +770,84 @@ namespace QuickER.AI.Mock.Resources {
         public static string Mock_ResumePromptGetScreenNote {
             get {
                 return ResourceManager.GetString("Mock_ResumePromptGetScreenNote", resourceCulture);
+            }
+        }
+
+        public static string Mock_ApiKeyOneShotNote {
+            get {
+                return ResourceManager.GetString("Mock_ApiKeyOneShotNote", resourceCulture);
+            }
+        }
+
+        public static string Mock_ApiRun_CommonPart {
+            get {
+                return ResourceManager.GetString("Mock_ApiRun_CommonPart", resourceCulture);
+            }
+        }
+
+        public static string Mock_ApiRun_Screen {
+            get {
+                return ResourceManager.GetString("Mock_ApiRun_Screen", resourceCulture);
+            }
+        }
+
+        public static string Mock_ApiRun_Emit {
+            get {
+                return ResourceManager.GetString("Mock_ApiRun_Emit", resourceCulture);
+            }
+        }
+
+        public static string Mock_ApiRun_EmitRejectedFormat {
+            get {
+                return ResourceManager.GetString("Mock_ApiRun_EmitRejectedFormat", resourceCulture);
+            }
+        }
+
+        public static string Mock_ApiRun_NoEmit {
+            get {
+                return ResourceManager.GetString("Mock_ApiRun_NoEmit", resourceCulture);
+            }
+        }
+
+        public static string Mock_ApiRun_Build {
+            get {
+                return ResourceManager.GetString("Mock_ApiRun_Build", resourceCulture);
+            }
+        }
+
+        public static string Mock_ApiRun_BuildOk {
+            get {
+                return ResourceManager.GetString("Mock_ApiRun_BuildOk", resourceCulture);
+            }
+        }
+
+        public static string Mock_ApiRun_BuildFailedFixing {
+            get {
+                return ResourceManager.GetString("Mock_ApiRun_BuildFailedFixing", resourceCulture);
+            }
+        }
+
+        public static string Mock_ApiRun_Rebuild {
+            get {
+                return ResourceManager.GetString("Mock_ApiRun_Rebuild", resourceCulture);
+            }
+        }
+
+        public static string Mock_ApiRun_BuildFail {
+            get {
+                return ResourceManager.GetString("Mock_ApiRun_BuildFail", resourceCulture);
+            }
+        }
+
+        public static string Mock_ApiRun_ErrorBuildFailed {
+            get {
+                return ResourceManager.GetString("Mock_ApiRun_ErrorBuildFailed", resourceCulture);
+            }
+        }
+
+        public static string Mock_ApiRun_ErrorTurnFailedFormat {
+            get {
+                return ResourceManager.GetString("Mock_ApiRun_ErrorTurnFailedFormat", resourceCulture);
             }
         }
 

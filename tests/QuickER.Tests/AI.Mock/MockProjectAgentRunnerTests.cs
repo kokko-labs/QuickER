@@ -1,50 +1,43 @@
 using System.IO;
 using FluentAssertions;
-using QuickER.AI;
 using QuickER.AI.Mock;
 
 namespace QuickER.Tests.AI.Mock;
 
 /// <summary>
-/// <see cref="MockProjectAgentRunner"/> のオーケストレーション（プロンプト・ログ保全・成果物検証・
-/// 最終ビルド分岐・タイムアウト・中断）を、フェイクの Claude Code クライアント／ビルド検証器で検証するテストクラス。
+/// <see cref="MockProjectAgentRunner"/> のバックエンド非依存なオーケストレーション（ログ保全・成果物検証・
+/// 最終ビルド分岐・タイムアウト・中断・エージェント成否の合成）を、フェイクのエージェント／ビルド検証器で
+/// 検証するテストクラス。プロンプト・起動オプションはエージェント側（<see cref="ClaudeCodeMockProjectAgent"/>）で検証する。
 /// </summary>
 public class MockProjectAgentRunnerTests
 {
-    // 注: ClaudeCodeChatEngineTests の同名フェイクとは挙動が本質的に異なるため共有化せず個別に残す。
-    // こちらは固定テキスト送出・単一アウトカム・OnRun 副作用/例外・プロンプト/オプション捕捉が主眼で、
-    // あちらはストリーミング（ScriptedText）・アウトカムのキュー再生・resume/probe の記録が主眼（統合すると既定挙動が変わる）。
-    /// <summary>スクリプト化した挙動を返すフェイク Claude Code クライアント</summary>
-    private sealed class FakeClaudeCodeClient : IClaudeCodeClient
+    /// <summary>スクリプト化した挙動を返すフェイクのモックプロジェクトエージェント</summary>
+    private sealed class FakeMockProjectAgent : IMockProjectAgent
     {
-        /// <summary>RunTurnAsync 実行時に走らせる副作用（成果物生成のシミュレーション等）</summary>
+        /// <summary>RunAsync 実行時に走らせる副作用（成果物生成のシミュレーション等）</summary>
         public Action<string>? OnRun { get; set; }
 
-        /// <summary>返すターン結果</summary>
-        public ClaudeCodeTurnOutcome Outcome { get; set; } = new(true, null, "s1", false);
+        /// <summary>返すエージェント結果</summary>
+        public MockProjectAgentOutcome Outcome { get; set; } = new(true, null, false);
 
-        /// <summary>RunTurnAsync でスローする例外（タイムアウト・中断のシミュレーション）</summary>
+        /// <summary>RunAsync でスローする例外（タイムアウト・中断のシミュレーション）</summary>
         public Exception? ThrowOnRun { get; set; }
 
-        public ClaudeCodeLaunchOptions? CapturedOptions { get; private set; }
-        public string? CapturedPrompt { get; private set; }
+        public MockProjectAgentRequest? CapturedRequest { get; private set; }
         public bool Interrupted { get; private set; }
         public bool Available { get; set; } = true;
 
         public bool IsAvailable() => Available;
 
-        public Task<ClaudeCodeTurnOutcome> RunTurnAsync(
-            string prompt,
-            string? resumeSessionId,
-            ClaudeCodeLaunchOptions options,
-            Action<string> onAssistantText,
+        public Task<MockProjectAgentOutcome> RunAsync(
+            MockProjectAgentRequest request,
+            Action<string> onProgress,
             CancellationToken cancellationToken
         )
         {
-            CapturedPrompt = prompt;
-            CapturedOptions = options;
-            onAssistantText("作業を開始します。\n");
-            OnRun?.Invoke(options.WorkingDirectory);
+            CapturedRequest = request;
+            onProgress("作業を開始します。\n");
+            OnRun?.Invoke(request.WorkingDirectory);
 
             if (ThrowOnRun is not null)
             {
@@ -54,12 +47,11 @@ public class MockProjectAgentRunnerTests
             return Task.FromResult(Outcome);
         }
 
-        public Task<ClaudeLoginProbeResult> ProbeLoginAsync(CancellationToken cancellationToken) =>
-            Task.FromResult(ClaudeLoginProbeResult.LoggedIn);
-
-        public void Interrupt() => Interrupted = true;
-
-        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+        public Task InterruptAsync()
+        {
+            Interrupted = true;
+            return Task.CompletedTask;
+        }
     }
 
     /// <summary>スクリプト化したビルド結果を返すフェイクビルド検証器</summary>
@@ -105,14 +97,14 @@ public class MockProjectAgentRunnerTests
             File.WriteAllText(Path.Combine(dir, "MainWindow.xaml"), "<Window/>");
         };
 
-    /// <summary>成功パス: 成果物あり・ビルド成功で全体成功し、ログが書き出されることを検証する</summary>
+    /// <summary>成功パス: 成果物あり・ビルド成功で全体成功し、進捗・ログが保全されることを検証する</summary>
     [Fact(DisplayName = "成果物あり・ビルド成功で全体成功しログを保全する")]
     public async Task RunAsync_SuccessPath()
     {
         var folder = NewTempFolder();
-        var client = new FakeClaudeCodeClient { OnRun = WriteArtifacts() };
+        var agent = new FakeMockProjectAgent { OnRun = WriteArtifacts() };
         var build = new FakeBuildRunner { BuildSuccess = true };
-        var runner = new MockProjectAgentRunner(client, build);
+        var runner = new MockProjectAgentRunner(agent, build);
         var progress = new List<string>();
 
         try
@@ -131,6 +123,11 @@ public class MockProjectAgentRunnerTests
             result.BuildSucceeded.Should().BeTrue();
             build.BuildCallCount.Should().Be(1);
 
+            // 要求はそのままエージェントへ渡る
+            agent.CapturedRequest!.WorkingDirectory.Should().Be(folder);
+            agent.CapturedRequest!.ProjectName.Should().Be("AcmeMock");
+            agent.CapturedRequest!.Model.Should().Be("sonnet");
+
             // ログが出力フォルダへ書き出される
             File.Exists(result.LogPath).Should().BeTrue();
             result.LogPath.Should().EndWith(MockProjectAgentRunner.LogFileName);
@@ -146,103 +143,15 @@ public class MockProjectAgentRunnerTests
         }
     }
 
-    /// <summary>プロンプト・起動オプションにヘッドレス許可と規約が含まれることを検証する</summary>
-    [Fact(DisplayName = "起動オプションはヘッドレス許可・規約プロンプトを含む")]
-    public async Task RunAsync_PromptAndOptions()
-    {
-        var folder = NewTempFolder();
-        var client = new FakeClaudeCodeClient { OnRun = WriteArtifacts() };
-        var runner = new MockProjectAgentRunner(client, new FakeBuildRunner());
-
-        try
-        {
-            await runner.RunAsync(
-                folder,
-                "AcmeMock",
-                additionalInstructions: null,
-                "sonnet",
-                _ => { },
-                TestContext.Current.CancellationToken
-            );
-
-            var options = client.CapturedOptions!;
-            options.PermissionMode.Should().Be("acceptEdits");
-            options.AdditionalAllowedTools.Should().Contain("Edit");
-            options.AdditionalAllowedTools.Should().Contain("Write");
-            options.AdditionalAllowedTools.Should().Contain("Bash");
-            // MCP（ER ツール）は使わせない
-            options.McpConfigPath.Should().BeEmpty();
-            options.WorkingDirectory.Should().Be(folder);
-
-            // プロンプトはモックフォルダのマニフェスト・README 規約・読み取り専用を案内する（VS 標準構成のプロジェクトフォルダ配下パス）
-            client.CapturedPrompt.Should().Contain("AcmeMock/design/mock/mock.json");
-            client.CapturedPrompt.Should().Contain("AcmeMock/README-QuickER.md");
-            client.CapturedPrompt.Should().Contain("AcmeMock/Generated/");
-            // ソリューション直下でビルドする案内が入る
-            client.CapturedPrompt.Should().Contain("AcmeMock.sln");
-
-            // システムプロンプトも VS 標準構成（sln・プロジェクトフォルダ）とモックフォルダのマニフェストを案内する
-            options.SystemPrompt.Should().Contain("AcmeMock.sln");
-            options.SystemPrompt.Should().Contain("AcmeMock/Generated/");
-            options.SystemPrompt.Should().Contain("AcmeMock/design/mock/mock.json");
-        }
-        finally
-        {
-            Cleanup(folder);
-        }
-    }
-
-    /// <summary>追加指示が非空ならプロンプト末尾へ「# 追加指示」見出し付きで連結され、空なら付かないことを検証する</summary>
-    [Fact(DisplayName = "追加指示は非空なら末尾へ連結・空なら付かない")]
-    public async Task RunAsync_AppendsAdditionalInstructions()
-    {
-        var folder = NewTempFolder();
-        var client = new FakeClaudeCodeClient { OnRun = WriteArtifacts() };
-        var runner = new MockProjectAgentRunner(client, new FakeBuildRunner());
-
-        try
-        {
-            // 追加指示ありのとき、見出し（resx）と本文がプロンプト末尾に連結される
-            await runner.RunAsync(
-                folder,
-                "AcmeMock",
-                "ダークテーマで実装して",
-                "sonnet",
-                _ => { },
-                TestContext.Current.CancellationToken
-            );
-
-            var heading = QuickER.AI.Mock.Resources.Strings.Mock_PromptUserInstructionsHeading;
-            client.CapturedPrompt.Should().Contain(heading);
-            client.CapturedPrompt.Should().Contain("ダークテーマで実装して");
-
-            // 追加指示なしのとき、見出しは付かない
-            await runner.RunAsync(
-                folder,
-                "AcmeMock",
-                additionalInstructions: null,
-                "sonnet",
-                _ => { },
-                TestContext.Current.CancellationToken
-            );
-
-            client.CapturedPrompt.Should().NotContain(heading);
-        }
-        finally
-        {
-            Cleanup(folder);
-        }
-    }
-
-    /// <summary>クライアント成功でも成果物が無ければビルドを試みず失敗になることを検証する</summary>
+    /// <summary>エージェント成功でも成果物が無ければビルドを試みず失敗になることを検証する</summary>
     [Fact(DisplayName = "成果物が無ければビルドせず失敗")]
     public async Task RunAsync_NoArtifacts_Fails()
     {
         var folder = NewTempFolder();
         // OnRun を設定しない = 成果物を作らない
-        var client = new FakeClaudeCodeClient();
+        var agent = new FakeMockProjectAgent();
         var build = new FakeBuildRunner();
-        var runner = new MockProjectAgentRunner(client, build);
+        var runner = new MockProjectAgentRunner(agent, build);
 
         try
         {
@@ -270,9 +179,9 @@ public class MockProjectAgentRunnerTests
     public async Task RunAsync_BuildFails_Fails()
     {
         var folder = NewTempFolder();
-        var client = new FakeClaudeCodeClient { OnRun = WriteArtifacts() };
+        var agent = new FakeMockProjectAgent { OnRun = WriteArtifacts() };
         var build = new FakeBuildRunner { BuildSuccess = false };
-        var runner = new MockProjectAgentRunner(client, build);
+        var runner = new MockProjectAgentRunner(agent, build);
 
         try
         {
@@ -296,15 +205,51 @@ public class MockProjectAgentRunnerTests
         }
     }
 
+    /// <summary>エージェントが失敗を自己申告したら、成果物があってもビルドを試みず全体失敗になることを検証する</summary>
+    [Fact(DisplayName = "エージェント失敗申告なら成果物ありでも失敗")]
+    public async Task RunAsync_AgentReportsFailure_Fails()
+    {
+        var folder = NewTempFolder();
+        var agent = new FakeMockProjectAgent
+        {
+            OnRun = WriteArtifacts(),
+            Outcome = new MockProjectAgentOutcome(false, "エージェントが失敗しました", false),
+        };
+        var build = new FakeBuildRunner();
+        var runner = new MockProjectAgentRunner(agent, build);
+
+        try
+        {
+            var result = await runner.RunAsync(
+                folder,
+                "AcmeMock",
+                additionalInstructions: null,
+                string.Empty,
+                _ => { },
+                TestContext.Current.CancellationToken
+            );
+
+            result.ClientSucceeded.Should().BeFalse();
+            result.Success.Should().BeFalse();
+            // 成果物があればビルド検証自体は走るが（既存挙動）、自己申告失敗のため全体は失敗確定
+            build.BuildCallCount.Should().Be(1);
+            result.Message.Should().Contain("エージェントが失敗しました");
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
     /// <summary>全体タイムアウトで打ち切られたとき、タイムアウト扱い・ビルド未実行・ログ保全になることを検証する</summary>
     [Fact(DisplayName = "タイムアウトで打ち切り・ビルド未実行")]
     public async Task RunAsync_Timeout()
     {
         var folder = NewTempFolder();
         // 例外を投げてキャンセル状態をシミュレート。外部トークンは未キャンセルなのでタイムアウト扱いになる。
-        var client = new FakeClaudeCodeClient { ThrowOnRun = new OperationCanceledException() };
+        var agent = new FakeMockProjectAgent { ThrowOnRun = new OperationCanceledException() };
         var build = new FakeBuildRunner();
-        var runner = new MockProjectAgentRunner(client, build, timeout: TimeSpan.FromMinutes(30));
+        var runner = new MockProjectAgentRunner(agent, build, timeout: TimeSpan.FromMinutes(30));
 
         try
         {
@@ -336,9 +281,9 @@ public class MockProjectAgentRunnerTests
         using var cts = new CancellationTokenSource();
         cts.Cancel();
 
-        var client = new FakeClaudeCodeClient { ThrowOnRun = new OperationCanceledException() };
+        var agent = new FakeMockProjectAgent { ThrowOnRun = new OperationCanceledException() };
         var build = new FakeBuildRunner();
-        var runner = new MockProjectAgentRunner(client, build);
+        var runner = new MockProjectAgentRunner(agent, build);
 
         try
         {
@@ -362,15 +307,37 @@ public class MockProjectAgentRunnerTests
         }
     }
 
-    /// <summary>中断要求がクライアントの Interrupt を呼ぶことを検証する</summary>
-    [Fact(DisplayName = "中断はクライアントの Interrupt を呼ぶ")]
-    public async Task InterruptAsync_CallsClientInterrupt()
+    /// <summary>中断要求がエージェントの InterruptAsync へ転送されることを検証する</summary>
+    [Fact(DisplayName = "中断はエージェントの InterruptAsync を呼ぶ")]
+    public async Task InterruptAsync_ForwardsToAgent()
     {
-        var client = new FakeClaudeCodeClient();
-        var runner = new MockProjectAgentRunner(client, new FakeBuildRunner());
+        var agent = new FakeMockProjectAgent();
+        var runner = new MockProjectAgentRunner(agent, new FakeBuildRunner());
 
         await runner.InterruptAsync();
 
-        client.Interrupted.Should().BeTrue();
+        agent.Interrupted.Should().BeTrue();
+    }
+
+    /// <summary>可用性判定がエージェント／ビルド検証器へ委譲されることを検証する</summary>
+    [Fact(DisplayName = "可用性判定はエージェント・ビルド検証器へ委譲する")]
+    public async Task Availability_DelegatesToDependencies()
+    {
+        var agent = new FakeMockProjectAgent { Available = false };
+        var build = new FakeBuildRunner { DotnetAvailable = false };
+        var runner = new MockProjectAgentRunner(agent, build);
+
+        runner.IsClaudeAvailable().Should().BeFalse();
+        (await runner.IsDotnetAvailableAsync(TestContext.Current.CancellationToken))
+            .Should()
+            .BeFalse();
+
+        agent.Available = true;
+        build.DotnetAvailable = true;
+
+        runner.IsClaudeAvailable().Should().BeTrue();
+        (await runner.IsDotnetAvailableAsync(TestContext.Current.CancellationToken))
+            .Should()
+            .BeTrue();
     }
 }
