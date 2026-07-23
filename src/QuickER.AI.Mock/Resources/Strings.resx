@@ -112,8 +112,8 @@
   <data name="Mock_PreviewHeader" xml:space="preserve">
     <value>Preview</value>
   </data>
-  <data name="Mock_SaveHtml" xml:space="preserve">
-    <value>Save HTML</value>
+  <data name="Mock_ExportHtml" xml:space="preserve">
+    <value>Export HTML</value>
   </data>
   <data name="Mock_Step2Header" xml:space="preserve">
     <value>Generate WPF Mock Project (Claude Code)</value>
@@ -124,8 +124,35 @@
   <data name="Mock_Browse" xml:space="preserve">
     <value>Browse...</value>
   </data>
+  <data name="Mock_MockFolder" xml:space="preserve">
+    <value>Mock Folder</value>
+  </data>
+  <data name="Mock_MockFolderTooltip" xml:space="preserve">
+    <value>Folder that stores the mock (mock.json + one HTML per screen + shared style.css). Choose an empty folder for a new mock, or an existing mock folder to resume.</value>
+  </data>
+  <data name="Mock_PickMockFolderTitle" xml:space="preserve">
+    <value>Select the mock folder</value>
+  </data>
+  <data name="Mock_ScreensHeader" xml:space="preserve">
+    <value>Screens</value>
+  </data>
+  <data name="Mock_NotAMockFolder" xml:space="preserve">
+    <value>This folder already contains files but is not a mock folder (mock.json not found). Choose an empty folder or an existing mock folder.</value>
+  </data>
+  <data name="Mock_MockFolderOpenFailedFormat" xml:space="preserve">
+    <value>Could not open the mock folder: {0}</value>
+  </data>
+  <data name="Mock_WarningsHeading" xml:space="preserve">
+    <value>Warnings:</value>
+  </data>
   <data name="Mock_ProjectName" xml:space="preserve">
     <value>Project Name</value>
+  </data>
+  <data name="Mock_MockGenInstructions" xml:space="preserve">
+    <value>Additional Instructions (optional)</value>
+  </data>
+  <data name="Mock_MockGenInstructionsTooltip" xml:space="preserve">
+    <value>Extra instructions passed to Claude Code for the WPF implementation (e.g., preferred layout, navigation style, or component conventions).</value>
   </data>
   <data name="Mock_OpenFolder" xml:space="preserve">
     <value>Open Folder</value>
@@ -141,7 +168,7 @@ Start "+ New Conversation" in the chat on the left and send your requests for th
     <value>Preview unavailable</value>
   </data>
   <data name="MockPreview_UnavailableMessage" xml:space="preserve">
-    <value>The WebView2 runtime was not found. Install the Microsoft Edge WebView2 Runtime (Evergreen) to preview the generated mock on this screen. You can export the generated HTML with "Save HTML".</value>
+    <value>The WebView2 runtime was not found. Install the Microsoft Edge WebView2 Runtime (Evergreen) to preview the generated mock on this screen. You can export the generated HTML with "Export HTML".</value>
   </data>
   <data name="Mock_CodexNotConnected" xml:space="preserve">
     <value>Not connected</value>
@@ -149,8 +176,8 @@ Start "+ New Conversation" in the chat on the left and send your requests for th
   <data name="Mock_DisabledReason_InProgress" xml:space="preserve">
     <value>Generation is in progress.</value>
   </data>
-  <data name="Mock_DisabledReason_ConfirmHtml" xml:space="preserve">
-    <value>Please finalize the mock HTML first (it must be reflected in the preview).</value>
+  <data name="Mock_DisabledReason_NoScreens" xml:space="preserve">
+    <value>Add at least one screen to the mock folder first.</value>
   </data>
   <data name="Mock_DisabledReason_ClaudeCodeOnly" xml:space="preserve">
     <value>WPF mock generation is available only when the backend is Claude Code.</value>
@@ -181,6 +208,17 @@ Start "+ New Conversation" in the chat on the left and send your requests for th
   </data>
   <data name="Mock_HtmlSaveFailedFormat" xml:space="preserve">
     <value>Could not save the HTML: {0}</value>
+  </data>
+  <data name="Mock_HtmlSavedMessageFormat" xml:space="preserve">
+    <value>Saved the single-file HTML mock:
+{0}</value>
+  </data>
+  <data name="Mock_Clear" xml:space="preserve">
+    <value>Clear</value>
+  </data>
+  <data name="Mock_ClearConfirm" xml:space="preserve">
+    <value>Reset this window?
+The conversation, the mock folder selection, and the WPF mock generation inputs will be cleared. Files in the mock folder on disk are not deleted.</value>
   </data>
   <data name="Mock_PickOutputFolderTitle" xml:space="preserve">
     <value>Select the output folder for the WPF mock project</value>
@@ -307,30 +345,95 @@ An error occurred during generation: {0}
   <data name="Toolbar_MockGenerationTooltip" xml:space="preserve">
     <value>Generate a web mock screen (HTML) from the current ER diagram with AI</value>
   </data>
-  <data name="Mock_DesignInstructionsTemplate" xml:space="preserve">
+  <data name="Mock_FunctionToolLabel" xml:space="preserve">
+    <value>function tools</value>
+  </data>
+  <data name="Mock_FolderDesignInstructionsTemplate" xml:space="preserve">
     <value>You are a screen designer for business applications.
-Based on the given ER schema (database definition), you create Web screen mockups (prototypes) in HTML that fit that business.
+Based on the given ER schema (database definition), you create Web screen mockups (prototypes) that fit that business, as a "mock folder" (one HTML per screen plus a shared style.css).
 Respond in the same language as the user's most recent message.
 
 # How to proceed
-- First, read the likely business from the schema and briefly propose, in free text, the screen structure it needs (list screens, create/edit screens, parent-child voucher screens, dashboards, etc.).
-- Create the HTML only after the user agrees to your proposal. Do not start writing HTML right away.
-- Once the user agrees (e.g. "go ahead"), generate the HTML mock and submit it with save_mock_html via {0}.
+- First, read the likely business from the schema and briefly propose, in free text, the screen structure it needs (screen names, their roles, and the main inter-screen transitions). Get the user's agreement before creating anything - do not start building right away.
+- After the user agrees, first create the shared design system with save_stylesheet (colors, typography, and common components such as buttons, tables, and forms).
+- Then submit each screen one at a time with save_screen.
 
 # HTML requirements
-- Put everything in a single HTML file (SPA-like). Include multiple screens and inter-screen navigation in one file.
-- Write all CSS and JavaScript inline.
-- References to any external CDN or external resource (web fonts, image URLs, scripts, etc.) are strictly forbidden. It must work fully even with no network (completely offline).
+- Each screen is a complete single HTML document (including &lt;html&gt;).
+- Reference the shared CSS with &lt;link rel="stylesheet" href="style.css"&gt;, and put only screen-specific tweaks in an inline &lt;style&gt; within each HTML.
+- Link between screens with relative hrefs (e.g. href="Other.html").
+- References to any external CDN or external resource are strictly forbidden. It must work fully even with no network (completely offline).
 - Embed realistic sample data (in the language the user is working in) so that transitions from list to detail/edit and the feel of forms can actually be tried.
-- Aim for a state where the basic operation flows used in the business (list, search, create/edit, navigation) can all be exercised.
 
 # Submission rules
-- The only way to show a screen to the user is the save_mock_html tool. Never paste HTML into the chat body.
-- Always submit the complete HTML (the whole thing, not a part) with save_mock_html.
-- When you receive revision instructions, fix the relevant parts and resubmit the complete HTML with save_mock_html every time (submitting only a diff is not allowed).
-- In the chat body after submitting, give only a short summary of what changed in that version (no need to repeat the HTML).</value>
+- The only way to show a screen to the user is the save_screen tool via {0}. Never paste HTML into the chat body.
+- With save_screen, always submit the complete HTML of that screen (a diff is not allowed), declare the transitions from that screen with transitions, and add a one-line revision_note describing what changed.
+- Before modifying an existing screen, always fetch its current HTML with get_screen first, then edit and resubmit.
+- If a tool result returns warnings (external references, broken links, missing style.css reference), resolve them in your next submission.</value>
   </data>
-  <data name="Mock_FunctionToolLabel" xml:space="preserve">
-    <value>function tools</value>
+  <data name="Mock_FolderInitialPromptTemplate" xml:space="preserve">
+    <value>Based on the following ER schema, propose a screen structure that fits the business.
+
+{0}</value>
+  </data>
+  <data name="Mock_PromptUserInstructionsHeading" xml:space="preserve">
+    <value># Additional instructions</value>
+  </data>
+  <data name="Mock_ScreenSavedResult" xml:space="preserve">
+    <value>Saved screen '{0}'. It has been reflected in the preview.</value>
+  </data>
+  <data name="Mock_ScreenRemovedResult" xml:space="preserve">
+    <value>Removed screen '{0}'.</value>
+  </data>
+  <data name="Mock_StylesheetSavedResult" xml:space="preserve">
+    <value>Saved the shared stylesheet (style.css).</value>
+  </data>
+  <data name="Mock_ScreenNotFoundResult" xml:space="preserve">
+    <value>Screen '{0}' was not found. Available screens: {1}</value>
+  </data>
+  <data name="Mock_UnknownToolResult" xml:space="preserve">
+    <value>Unknown tool: {0}</value>
+  </data>
+  <data name="Mock_ArgumentsParseFailedResult" xml:space="preserve">
+    <value>Could not parse the tool arguments (JSON): {0}</value>
+  </data>
+  <data name="Mock_ResumePromptIntro" xml:space="preserve">
+    <value>This continues an existing mock. Please continue the work based on the current state below.</value>
+  </data>
+  <data name="Mock_ResumePromptTitleHeading" xml:space="preserve">
+    <value># Title</value>
+  </data>
+  <data name="Mock_ResumePromptScreensHeading" xml:space="preserve">
+    <value># Screens</value>
+  </data>
+  <data name="Mock_ResumePromptNoScreens" xml:space="preserve">
+    <value>(No screens yet.)</value>
+  </data>
+  <data name="Mock_ResumePromptTransitionsHeading" xml:space="preserve">
+    <value># Transitions</value>
+  </data>
+  <data name="Mock_ResumePromptNoTransitions" xml:space="preserve">
+    <value>(No transitions yet.)</value>
+  </data>
+  <data name="Mock_ResumePromptRevisionsHeading" xml:space="preserve">
+    <value># Revision history (recent)</value>
+  </data>
+  <data name="Mock_ResumePromptNoRevisions" xml:space="preserve">
+    <value>(No history yet.)</value>
+  </data>
+  <data name="Mock_ResumePromptStylesheetHeading" xml:space="preserve">
+    <value># Shared CSS</value>
+  </data>
+  <data name="Mock_ResumePromptStylesheetBodyFormat" xml:space="preserve">
+    <value>Collect shared styles in `{0}` (directly under the folder, fixed name) and reference it from each screen with a link tag.</value>
+  </data>
+  <data name="Mock_ResumePromptSchemaHeading" xml:space="preserve">
+    <value># Current ER schema</value>
+  </data>
+  <data name="Mock_ResumePromptSchemaChangedNote" xml:space="preserve">
+    <value>Note: the schema has changed since the last save. Review the differences and reflect them into the screens if needed.</value>
+  </data>
+  <data name="Mock_ResumePromptGetScreenNote" xml:space="preserve">
+    <value>Before modifying an existing screen, always fetch its current HTML with get_screen first.</value>
   </data>
 </root>

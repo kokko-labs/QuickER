@@ -10,15 +10,42 @@ namespace QuickER.Tests.AI.Mock;
 
 /// <summary>
 /// <see cref="MockProjectScaffoldService"/> の決定的スキャフォールド（Generated/ 生成コード・csproj・
-/// README・design/mock.html の書き出し）と、図の方言に応じたQuickER 版 Repository 出力を検証するテストクラス。
+/// README・design/mock/ 同梱）と、図の方言に応じたQuickER 版 Repository 出力を検証するテストクラス。
 /// </summary>
 public class MockProjectScaffoldServiceTests
 {
-    private const string DesignHtml =
-        "<!DOCTYPE html><html lang=\"ja\"><body><h1>顧客一覧</h1></body></html>";
+    private const string ScreenHtml =
+        "<!DOCTYPE html><html lang=\"ja\"><head><link rel=\"stylesheet\" href=\"style.css\"></head>"
+        + "<body><h1>顧客一覧</h1></body></html>";
 
     private static DatabaseProviderRegistry BuildRegistry() =>
         new([new SqlServerProvider(), new SqliteProvider()]);
+
+    /// <summary>mock.json＋画面 2 枚＋共有 style.css を持つモックフォルダを作って返す（同梱元）</summary>
+    private static string SeedMockFolder()
+    {
+        var folder = NewTempFolder();
+        var store = MockFolderStore.CreateNew(folder, "AcmeMock", "# schema");
+        store.SaveStylesheet("body { font-family: sans-serif; }", "初版");
+        store.SaveScreen(
+            "CustomerList.html",
+            "顧客一覧",
+            "顧客の一覧",
+            ScreenHtml,
+            Array.Empty<MockTransition>(),
+            "初版"
+        );
+        store.SaveScreen(
+            "CustomerEdit.html",
+            "顧客編集",
+            "顧客の編集",
+            ScreenHtml,
+            Array.Empty<MockTransition>(),
+            "初版"
+        );
+
+        return folder;
+    }
 
     /// <summary>単一 PK を持つ顧客テーブル 1 つの図を、指定方言で作る</summary>
     private static ErDiagram BuildDiagram(string targetDbms) =>
@@ -64,11 +91,12 @@ public class MockProjectScaffoldServiceTests
         }
     }
 
-    /// <summary>スキャフォールドが sln・Generated/・csproj・README・design/mock.html を VS 標準構成で出力することを検証する</summary>
+    /// <summary>スキャフォールドが sln・Generated/・csproj・README・design/mock/ を VS 標準構成で出力することを検証する</summary>
     [Fact(DisplayName = "スキャフォールドは土台一式を VS 標準構成で書き出す")]
     public void Scaffold_WritesFullSkeleton()
     {
         var folder = NewTempFolder();
+        var mockFolder = SeedMockFolder();
         var service = new MockProjectScaffoldService(BuildRegistry());
 
         try
@@ -77,7 +105,7 @@ public class MockProjectScaffoldServiceTests
                 BuildDiagram(SqlServerProvider.ProviderName),
                 folder,
                 "AcmeMock",
-                DesignHtml
+                mockFolder
             );
 
             // VS 標準構成: sln は出力フォルダ直下、プロジェクト一式はプロジェクトフォルダ配下
@@ -89,7 +117,7 @@ public class MockProjectScaffoldServiceTests
             // csproj・README・design・Generated はプロジェクトフォルダ配下にある
             result.ProjectFilePath.Should().StartWith(projectDirectory);
             result.ReadmePath.Should().StartWith(projectDirectory);
-            result.DesignHtmlPath.Should().StartWith(projectDirectory);
+            result.DesignFolderPath.Should().StartWith(projectDirectory);
             result.GeneratedDirectory.Should().StartWith(projectDirectory);
 
             // csproj は WPF・net10.0-windows・MVVM 依存を持つ
@@ -100,16 +128,32 @@ public class MockProjectScaffoldServiceTests
             csproj.Should().Contain("CommunityToolkit.Mvvm");
             csproj.Should().Contain("Microsoft.Extensions.DependencyInjection");
 
-            // README はデータ層読み取り専用・InMemory DI 登録・実 DB 切替を案内する
+            // README はデータ層読み取り専用・InMemory DI 登録・実 DB 切替と、design/mock/ の複数画面前提を案内する
             File.Exists(result.ReadmePath).Should().BeTrue();
             var readme = File.ReadAllText(result.ReadmePath);
             readme.Should().Contain("Generated/");
             readme.Should().Contain("AddGeneratedInMemoryRepositories");
             readme.Should().Contain("I{Entity}Repository");
+            readme.Should().Contain("design/mock/mock.json");
+            readme.Should().Contain("style.css");
 
-            // design/mock.html に確定 HTML がそのまま入る
-            File.Exists(result.DesignHtmlPath).Should().BeTrue();
-            File.ReadAllText(result.DesignHtmlPath).Should().Be(DesignHtml);
+            // design/mock/ にモックフォルダの内容（mock.json・複数 HTML・style.css）がフラットに同梱される
+            Directory.Exists(result.DesignFolderPath).Should().BeTrue();
+            File.Exists(Path.Combine(result.DesignFolderPath, MockManifest.ManifestFileName))
+                .Should()
+                .BeTrue();
+            File.Exists(Path.Combine(result.DesignFolderPath, MockManifest.StylesheetFileName))
+                .Should()
+                .BeTrue();
+            File.Exists(Path.Combine(result.DesignFolderPath, "CustomerList.html"))
+                .Should()
+                .BeTrue();
+            File.Exists(Path.Combine(result.DesignFolderPath, "CustomerEdit.html"))
+                .Should()
+                .BeTrue();
+            File.ReadAllText(Path.Combine(result.DesignFolderPath, "CustomerList.html"))
+                .Should()
+                .Be(ScreenHtml);
 
             // Generated/ 配下にデータ層コードが分割出力される
             Directory.Exists(result.GeneratedDirectory).Should().BeTrue();
@@ -128,6 +172,7 @@ public class MockProjectScaffoldServiceTests
         finally
         {
             Cleanup(folder);
+            Cleanup(mockFolder);
         }
     }
 
@@ -136,6 +181,7 @@ public class MockProjectScaffoldServiceTests
     public void Scaffold_SqlServer_EmitsRepositoryAndAdoPackage()
     {
         var folder = NewTempFolder();
+        var mockFolder = SeedMockFolder();
         var service = new MockProjectScaffoldService(BuildRegistry());
 
         try
@@ -144,7 +190,7 @@ public class MockProjectScaffoldServiceTests
                 BuildDiagram(SqlServerProvider.ProviderName),
                 folder,
                 "AcmeMock",
-                DesignHtml
+                mockFolder
             );
 
             result.RepositoryDialect.Should().Be("sqlserver");
@@ -161,6 +207,7 @@ public class MockProjectScaffoldServiceTests
         finally
         {
             Cleanup(folder);
+            Cleanup(mockFolder);
         }
     }
 
@@ -169,6 +216,7 @@ public class MockProjectScaffoldServiceTests
     public void Scaffold_Sqlite_EmitsRepositoryAndAdoPackage()
     {
         var folder = NewTempFolder();
+        var mockFolder = SeedMockFolder();
         var service = new MockProjectScaffoldService(BuildRegistry());
 
         try
@@ -177,7 +225,7 @@ public class MockProjectScaffoldServiceTests
                 BuildDiagram(SqliteProvider.ProviderName),
                 folder,
                 "AcmeMock",
-                DesignHtml
+                mockFolder
             );
 
             result.RepositoryDialect.Should().Be("sqlite");
@@ -186,6 +234,7 @@ public class MockProjectScaffoldServiceTests
         finally
         {
             Cleanup(folder);
+            Cleanup(mockFolder);
         }
     }
 
@@ -194,6 +243,7 @@ public class MockProjectScaffoldServiceTests
     public void Scaffold_UnsupportedDialect_OmitsRepository()
     {
         var folder = NewTempFolder();
+        var mockFolder = SeedMockFolder();
         var service = new MockProjectScaffoldService(BuildRegistry());
 
         try
@@ -202,7 +252,7 @@ public class MockProjectScaffoldServiceTests
                 BuildDiagram("postgresql"),
                 folder,
                 "AcmeMock",
-                DesignHtml
+                mockFolder
             );
 
             result.RepositoryDialect.Should().BeNull();
@@ -221,6 +271,7 @@ public class MockProjectScaffoldServiceTests
         finally
         {
             Cleanup(folder);
+            Cleanup(mockFolder);
         }
     }
 
@@ -229,6 +280,7 @@ public class MockProjectScaffoldServiceTests
     public void Scaffold_SolutionHasValidSyntax()
     {
         var folder = NewTempFolder();
+        var mockFolder = SeedMockFolder();
         var service = new MockProjectScaffoldService(BuildRegistry());
 
         try
@@ -237,7 +289,7 @@ public class MockProjectScaffoldServiceTests
                 BuildDiagram(SqlServerProvider.ProviderName),
                 folder,
                 "AcmeMock",
-                DesignHtml
+                mockFolder
             );
 
             var sln = File.ReadAllText(result.SolutionFilePath);
@@ -266,6 +318,7 @@ public class MockProjectScaffoldServiceTests
         finally
         {
             Cleanup(folder);
+            Cleanup(mockFolder);
         }
     }
 
@@ -276,6 +329,7 @@ public class MockProjectScaffoldServiceTests
         var folder1 = NewTempFolder();
         var folder2 = NewTempFolder();
         var folder3 = NewTempFolder();
+        var mockFolder = SeedMockFolder();
         var service = new MockProjectScaffoldService(BuildRegistry());
 
         try
@@ -284,19 +338,19 @@ public class MockProjectScaffoldServiceTests
                 BuildDiagram(SqlServerProvider.ProviderName),
                 folder1,
                 "AcmeMock",
-                DesignHtml
+                mockFolder
             );
             var same2 = service.Scaffold(
                 BuildDiagram(SqlServerProvider.ProviderName),
                 folder2,
                 "AcmeMock",
-                DesignHtml
+                mockFolder
             );
             var other = service.Scaffold(
                 BuildDiagram(SqlServerProvider.ProviderName),
                 folder3,
                 "OtherMock",
-                DesignHtml
+                mockFolder
             );
 
             var guid1 = ExtractProjectGuid(File.ReadAllText(same1.SolutionFilePath));
@@ -313,6 +367,7 @@ public class MockProjectScaffoldServiceTests
             Cleanup(folder1);
             Cleanup(folder2);
             Cleanup(folder3);
+            Cleanup(mockFolder);
         }
     }
 

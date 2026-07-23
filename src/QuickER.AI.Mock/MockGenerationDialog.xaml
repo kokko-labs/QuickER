@@ -244,14 +244,43 @@
       >
         <Grid.RowDefinitions>
           <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
           <RowDefinition Height="*" />
           <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
+        <!-- モックフォルダ（会話開始前に指定する動線・テキストボックス＋参照ボタン） -->
+        <Grid Grid.Row="0" Margin="0,0,0,12">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="Auto" />
+          </Grid.ColumnDefinitions>
+          <TextBlock
+            Grid.Column="0"
+            Style="{StaticResource FieldLabel}"
+            Text="{x:Static res:Strings.Mock_MockFolder}"
+          />
+          <TextBox
+            Grid.Column="1"
+            Padding="6,4"
+            Margin="0,0,8,0"
+            VerticalContentAlignment="Center"
+            Text="{Binding MockFolder, UpdateSourceTrigger=PropertyChanged}"
+            ToolTip="{x:Static res:Strings.Mock_MockFolderTooltip}"
+          />
+          <Button
+            Grid.Column="2"
+            Style="{StaticResource SecondaryButton}"
+            Content="{x:Static res:Strings.Mock_Browse}"
+            Command="{Binding BrowseMockFolderCommand}"
+          />
+        </Grid>
+
         <!-- 接続方式タブ + 設定カード -->
         <TabControl
           x:Name="BackendTabs"
-          Grid.Row="0"
+          Grid.Row="1"
           Style="{StaticResource SettingsTabs}"
           SelectionChanged="BackendTabs_SelectionChanged"
         >
@@ -499,7 +528,7 @@
 
         <!-- チャットカード -->
         <Border
-          Grid.Row="1"
+          Grid.Row="2"
           Margin="0,12,0,0"
           Background="{StaticResource CardBg}"
           BorderBrush="{StaticResource Divider}"
@@ -560,6 +589,13 @@
                     Content="{x:Static res:Strings.Mock_NewConversation}"
                     Command="{Binding StartConversationCommand}"
                   />
+                  <!-- 画面全体の初期化（確認後に会話・フォルダ選択・第2ステップ入力をクリア） -->
+                  <Button
+                    Style="{StaticResource SecondaryButton}"
+                    Margin="8,0,0,0"
+                    Content="{x:Static res:Strings.Mock_Clear}"
+                    Command="{Binding ClearCommand}"
+                  />
                 </StackPanel>
               </Grid>
             </Border>
@@ -586,7 +622,7 @@
         </Border>
 
         <!-- 入力エリア（添付チップ列＋クリップ + 入力欄 + 送信） -->
-        <Grid Grid.Row="2" Margin="0,12,0,0">
+        <Grid Grid.Row="3" Margin="0,12,0,0">
           <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
@@ -685,12 +721,76 @@
               <Button
                 Grid.Column="2"
                 Style="{StaticResource SecondaryButton}"
-                Content="{x:Static res:Strings.Mock_SaveHtml}"
-                Command="{Binding SaveHtmlCommand}"
+                Content="{x:Static res:Strings.Mock_ExportHtml}"
+                Command="{Binding ExportBundleCommand}"
               />
             </Grid>
           </Border>
-          <local:MockPreviewPanel x:Name="Preview" Grid.Row="1" Margin="1" />
+
+          <!-- 画面一覧サイドバー + プレビュー -->
+          <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="190" MinWidth="120" />
+              <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <Border
+              Grid.Column="0"
+              BorderBrush="{StaticResource Divider}"
+              BorderThickness="0,0,1,0"
+            >
+              <Grid>
+                <Grid.RowDefinitions>
+                  <RowDefinition Height="Auto" />
+                  <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <TextBlock
+                  Grid.Row="0"
+                  Margin="8,6"
+                  FontWeight="SemiBold"
+                  FontSize="12"
+                  Foreground="{StaticResource MutedText}"
+                  Text="{x:Static res:Strings.Mock_ScreensHeader}"
+                />
+                <!-- 画面一覧: 表示は Name・ツールチップに File/Description -->
+                <ListBox
+                  Grid.Row="1"
+                  BorderThickness="0"
+                  Background="Transparent"
+                  ItemsSource="{Binding Screens}"
+                  SelectedItem="{Binding SelectedScreen, Mode=TwoWay}"
+                  ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                >
+                  <ListBox.ItemContainerStyle>
+                    <Style TargetType="ListBoxItem">
+                      <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                      <Setter Property="ToolTip" Value="{Binding Tooltip}" />
+                    </Style>
+                  </ListBox.ItemContainerStyle>
+                  <ListBox.ItemTemplate>
+                    <DataTemplate>
+                      <TextBlock
+                        Padding="4,3"
+                        Text="{Binding Name}"
+                        TextTrimming="CharacterEllipsis"
+                      />
+                    </DataTemplate>
+                  </ListBox.ItemTemplate>
+                </ListBox>
+              </Grid>
+            </Border>
+
+            <!-- プレビュー領域: 周囲より一段強い枠線（FieldBorder）で表示範囲を明示する -->
+            <Border
+              Grid.Column="1"
+              Margin="8"
+              Background="White"
+              BorderBrush="{StaticResource FieldBorder}"
+              BorderThickness="1"
+            >
+              <local:MockPreviewPanel x:Name="Preview" />
+            </Border>
+          </Grid>
         </Grid>
       </Border>
     </Grid>
@@ -704,7 +804,8 @@
       BorderThickness="1"
       CornerRadius="10"
     >
-      <Expander Padding="14,10" IsExpanded="True">
+      <!-- 初期表示は閉じた状態（第1ステップに集中させ、必要になったら開く） -->
+      <Expander Padding="14,10" IsExpanded="False">
         <Expander.Header>
           <TextBlock
             FontWeight="SemiBold"
@@ -758,6 +859,34 @@
               Padding="6,4"
               VerticalContentAlignment="Center"
               Text="{Binding ProjectName, UpdateSourceTrigger=PropertyChanged}"
+              IsEnabled="{Binding CanEditMockGenInput}"
+            />
+          </Grid>
+
+          <!-- 追加指示（任意・複数行。Claude Code へのプロンプト末尾に連結される） -->
+          <Grid Margin="0,10,0,0">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <TextBlock
+              Grid.Column="0"
+              Style="{StaticResource FieldLabel}"
+              VerticalAlignment="Top"
+              Margin="0,4,0,0"
+              Text="{x:Static res:Strings.Mock_MockGenInstructions}"
+            />
+            <TextBox
+              Grid.Column="1"
+              Padding="6,4"
+              MinHeight="48"
+              MaxHeight="120"
+              TextWrapping="Wrap"
+              AcceptsReturn="True"
+              VerticalScrollBarVisibility="Auto"
+              Text="{Binding MockGenInstructions, UpdateSourceTrigger=PropertyChanged}"
+              IsEnabled="{Binding CanEditMockGenInput}"
+              ToolTip="{x:Static res:Strings.Mock_MockGenInstructionsTooltip}"
             />
           </Grid>
 

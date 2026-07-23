@@ -1,17 +1,20 @@
-using System.ComponentModel;
+using System.Collections.Generic;
 using System.IO;
+using System.Text.Json;
 using FluentAssertions;
 using QuickER.AI;
 using QuickER.AI.Mock;
 using QuickER.Gui.Abstractions;
 using QuickER.Model;
+using QuickER.Tests.TestDoubles;
 using MockStrings = QuickER.AI.Mock.Resources.Strings;
 
 namespace QuickER.Tests.AI.Mock;
 
 /// <summary>
-/// <see cref="MockGenerationDialogViewModel"/> の生成可否・HTML 提出通知・ターン中の入力禁止・
-/// フィードバック送信・HTML 保存を、フェイクエンジン／セッションで検証するテストクラス。
+/// モックフォルダ方式の <see cref="MockGenerationDialogViewModel"/> の会話開始（新規／再開）・会話前ビュー・
+/// 画面保存によるサイドバー更新／プレビュー要求・単一 HTML 出力・第2ステップ可否を、
+/// フェイクエンジン／セッションで検証するテストクラス。
 /// </summary>
 public class MockGenerationDialogViewModelTests
 {
@@ -32,6 +35,10 @@ public class MockGenerationDialogViewModelTests
         public int GenerateCallCount { get; private set; }
         public string? CapturedOutputFolder { get; private set; }
         public string? CapturedProjectName { get; private set; }
+        public string? CapturedMockFolder { get; private set; }
+        public string? CapturedInstructions { get; private set; }
+
+        public MockProjectTarget Target => MockProjectTarget.Wpf;
 
         public bool IsClaudeAvailable() => ClaudeAvailable;
 
@@ -40,7 +47,8 @@ public class MockGenerationDialogViewModelTests
 
         public Task<MockProjectGenerationResult> GenerateAsync(
             ErDiagram diagram,
-            string designHtml,
+            string mockFolder,
+            string? additionalInstructions,
             string outputDirectory,
             string projectName,
             string model,
@@ -51,6 +59,8 @@ public class MockGenerationDialogViewModelTests
             GenerateCallCount++;
             CapturedOutputFolder = outputDirectory;
             CapturedProjectName = projectName;
+            CapturedMockFolder = mockFolder;
+            CapturedInstructions = additionalInstructions;
             onProgress("進捗: 生成中...\n");
 
             return Task.FromResult(
@@ -71,8 +81,8 @@ public class MockGenerationDialogViewModelTests
     }
 
     private const string ValidHtml =
-        "<!DOCTYPE html><html lang=\"ja\"><head><style>body{}</style></head>"
-        + "<body><h1>顧客一覧</h1></body></html>";
+        "<!DOCTYPE html><html lang=\"ja\"><head><link rel=\"stylesheet\" href=\"style.css\">"
+        + "<style>body{}</style></head><body><h1>顧客一覧</h1></body></html>";
 
     /// <summary>顧客テーブル 1 つを持つ非空の図を返す</summary>
     private static ErDiagram NonEmptyDiagram() =>
@@ -84,14 +94,49 @@ public class MockGenerationDialogViewModelTests
             },
         };
 
-    /// <summary>フェイクエンジンを注入して ViewModel を生成する（settings は一時フォルダへ隔離）</summary>
+    /// <summary>save_screen ツール引数の JSON を組み立てる</summary>
+    private static string SaveScreenArgs(
+        string file = "OrderList.html",
+        string name = "注文一覧",
+        string html = ValidHtml
+    ) =>
+        JsonSerializer.Serialize(
+            new Dictionary<string, object?>
+            {
+                ["file"] = file,
+                ["name"] = name,
+                ["html"] = html,
+            }
+        );
+
+    /// <summary>既存モックフォルダを作成し、画面を 1 つ入れておく（会話前ビュー・再開の前提）</summary>
+    private static void SeedMockFolder(string mockFolder, string screenFile = "OrderList.html")
+    {
+        var store = MockFolderStore.CreateNew(mockFolder, "受注管理", "# schema");
+        store.SaveScreen(
+            screenFile,
+            "注文一覧",
+            "注文の一覧",
+            ValidHtml,
+            Array.Empty<MockTransition>(),
+            "初版"
+        );
+    }
+
+    /// <summary>フェイク（API キー）エンジンを注入して VM を生成する（settings は一時フォルダへ隔離）</summary>
     private static (
         MockGenerationDialogViewModel vm,
         FakeChatEngine[] engineBox,
-        string folder
-    ) CreateVm(ErDiagram diagram)
+        string baseFolder,
+        string mockFolder
+    ) CreateVm(ErDiagram diagram, bool setMockFolder = true, StubDialogService? dialogs = null)
     {
-        var folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
+        var baseFolder = Path.Combine(
+            Path.GetTempPath(),
+            "QuickERTests",
+            Guid.NewGuid().ToString("N")
+        );
+        var mockFolder = Path.Combine(baseFolder, "mock");
         var engineBox = new FakeChatEngine[1];
 
         var vm = new MockGenerationDialogViewModel(
@@ -99,13 +144,53 @@ public class MockGenerationDialogViewModelTests
             new SyncUiDispatcher(),
             files: null,
             // 設定・UI 状態・モデル履歴を集約した 1 ファイルを一時フォルダへ隔離する（実 %APPDATA% を保護）
-            settingsStore: new AiSettingsStore(folder),
+            settingsStore: new AiSettingsStore(Path.Combine(baseFolder, "settings")),
             apiKeyEngineFactory: (_, toolHost) => engineBox[0] = new FakeChatEngine(toolHost),
             codexEngineFactory: null,
-            claudeCodeEngineFactory: null
+            claudeCodeEngineFactory: null,
+            dialogService: dialogs ?? new StubDialogService()
         );
         vm.Connection.ApiProvider = AiProvider.Ollama; // 認証不要にして接続 OK 状態にする
-        return (vm, engineBox, folder);
+
+        if (setMockFolder)
+        {
+            vm.MockFolder = mockFolder;
+        }
+
+        return (vm, engineBox, baseFolder, mockFolder);
+    }
+
+    /// <summary>フェイク（Claude Code）エンジンとフェイク生成器を注入して VM を生成する（第2ステップ検証用）</summary>
+    private static (
+        MockGenerationDialogViewModel vm,
+        FakeChatEngine[] engineBox,
+        FakeMockProjectGenerator generator,
+        string baseFolder,
+        string mockFolder
+    ) CreateVmWithGenerator(ErDiagram diagram)
+    {
+        var baseFolder = Path.Combine(
+            Path.GetTempPath(),
+            "QuickERTests",
+            Guid.NewGuid().ToString("N")
+        );
+        var mockFolder = Path.Combine(baseFolder, "mock");
+        var engineBox = new FakeChatEngine[1];
+        var generator = new FakeMockProjectGenerator();
+
+        var vm = new MockGenerationDialogViewModel(
+            new StubDiagramSource(diagram),
+            new SyncUiDispatcher(),
+            files: null,
+            settingsStore: new AiSettingsStore(Path.Combine(baseFolder, "settings")),
+            apiKeyEngineFactory: null,
+            codexEngineFactory: null,
+            claudeCodeEngineFactory: (_, toolHost) => engineBox[0] = new FakeChatEngine(toolHost),
+            mockProjectGenerator: generator,
+            dialogService: new StubDialogService()
+        );
+
+        return (vm, engineBox, generator, baseFolder, mockFolder);
     }
 
     private static void Cleanup(string folder)
@@ -116,47 +201,24 @@ public class MockGenerationDialogViewModelTests
         }
     }
 
-    /// <summary>フェイク生成器を注入して VM を生成する（第2ステップ検証用）</summary>
-    private static (
+    /// <summary>Claude Code バックエンドで新規モックフォルダに会話開始→初回送信で 1 画面を保存し、第2ステップの前提を整える</summary>
+    private static async Task SaveScreenOnClaudeCode(
         MockGenerationDialogViewModel vm,
         FakeChatEngine[] engineBox,
-        FakeMockProjectGenerator generator,
-        string folder
-    ) CreateVmWithGenerator(ErDiagram diagram)
-    {
-        var folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
-        var engineBox = new FakeChatEngine[1];
-        var generator = new FakeMockProjectGenerator();
-
-        var vm = new MockGenerationDialogViewModel(
-            new StubDiagramSource(diagram),
-            new SyncUiDispatcher(),
-            files: null,
-            // 設定・UI 状態・モデル履歴を集約した 1 ファイルを一時フォルダへ隔離する（実 %APPDATA% を保護）
-            settingsStore: new AiSettingsStore(folder),
-            apiKeyEngineFactory: null,
-            codexEngineFactory: null,
-            claudeCodeEngineFactory: (_, toolHost) => engineBox[0] = new FakeChatEngine(toolHost),
-            mockProjectGenerator: generator
-        );
-
-        return (vm, engineBox, generator, folder);
-    }
-
-    /// <summary>Claude Code バックエンドで会話開始→初回送信で HTML 提出まで進め、第2ステップの前提を整える</summary>
-    private static async Task SubmitHtmlOnClaudeCode(
-        MockGenerationDialogViewModel vm,
-        FakeChatEngine[] engineBox
+        string mockFolder
     )
     {
         vm.Connection.SelectedBackend = ErChatBackendKind.ClaudeCode;
         // Claude Code バックエンドは接続 OK を外部から反映する
         vm.ApplyClaudeCodeReadiness(true, "ログイン済み", ConnectionHealth.Ready, string.Empty);
+        vm.MockFolder = mockFolder;
 
-        // 「＋新しい会話」でセッションを用意すると、その中でエンジンが構築され engineBox に入る
+        // 「新しい会話」でセッションを用意すると、その中でエンジンが構築され engineBox に入る
         vm.StartConversationCommand.Execute(null);
-        var args = $"{{\"html\":{System.Text.Json.JsonSerializer.Serialize(ValidHtml)}}}";
-        engineBox[0].ScriptedToolCall = (MockDesignTools.SaveMockHtmlToolName, args);
+        engineBox[0].ScriptedToolCall = (
+            MockFolderDesignTools.SaveScreenToolName,
+            SaveScreenArgs()
+        );
         vm.UserInput = "提出";
         await vm.SendMessageCommand.ExecuteAsync(null);
     }
@@ -203,11 +265,33 @@ public class MockGenerationDialogViewModelTests
         }
     }
 
-    /// <summary>空の図では「＋新しい会話」が無効、非空なら有効になることを検証する</summary>
-    [Fact(DisplayName = "空図では新しい会話不可・非空なら可能")]
+    /// <summary>モックフォルダ未指定では会話開始不可、指定（空フォルダ）で有効になることを検証する</summary>
+    [Fact(DisplayName = "フォルダ未指定では会話開始不可・指定で可能")]
+    public void CanStartConversation_RequiresMockFolder()
+    {
+        var (vm, _, baseFolder, mockFolder) = CreateVm(NonEmptyDiagram(), setMockFolder: false);
+
+        try
+        {
+            // フォルダ未指定では開始不可
+            vm.CanStartConversation.Should().BeFalse();
+            vm.StartConversationCommand.CanExecute(null).Should().BeFalse();
+
+            // 空フォルダを指定すると開始可能
+            vm.MockFolder = mockFolder;
+            vm.CanStartConversation.Should().BeTrue();
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
+    /// <summary>空図では会話開始不可、非空なら可能（フォルダ指定済み）であることを検証する</summary>
+    [Fact(DisplayName = "空図では会話開始不可・非空なら可能")]
     public void CanStartConversation_DependsOnDiagramEmptiness()
     {
-        var (emptyVm, _, emptyFolder) = CreateVm(new ErDiagram());
+        var (emptyVm, _, emptyBase, _) = CreateVm(new ErDiagram());
 
         try
         {
@@ -216,10 +300,10 @@ public class MockGenerationDialogViewModelTests
         }
         finally
         {
-            Cleanup(emptyFolder);
+            Cleanup(emptyBase);
         }
 
-        var (vm, _, folder) = CreateVm(NonEmptyDiagram());
+        var (vm, _, baseFolder, _) = CreateVm(NonEmptyDiagram());
 
         try
         {
@@ -228,7 +312,76 @@ public class MockGenerationDialogViewModelTests
         }
         finally
         {
-            Cleanup(folder);
+            Cleanup(baseFolder);
+        }
+    }
+
+    /// <summary>既存モックフォルダを指定するだけで（会話前でも）サイドバーに画面が並ぶことを検証する</summary>
+    [Fact(DisplayName = "既存モックフォルダ指定だけでサイドバーに画面が並ぶ")]
+    public void SettingExistingMockFolder_PopulatesSidebar()
+    {
+        var (vm, _, baseFolder, mockFolder) = CreateVm(NonEmptyDiagram(), setMockFolder: false);
+
+        try
+        {
+            SeedMockFolder(mockFolder);
+
+            vm.MockFolder = mockFolder;
+
+            vm.Screens.Should().ContainSingle();
+            vm.Screens[0].File.Should().Be("OrderList.html");
+            vm.Screens[0].Name.Should().Be("注文一覧");
+            vm.HasScreens.Should().BeTrue();
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
+    /// <summary>モックフォルダでない既存フォルダの指定では会話開始を抑止し、案内を出すことを検証する</summary>
+    [Fact(DisplayName = "モックフォルダでない既存フォルダは開始抑止")]
+    public void SettingNonMockFolderWithFiles_BlocksStart()
+    {
+        var (vm, _, baseFolder, mockFolder) = CreateVm(NonEmptyDiagram(), setMockFolder: false);
+
+        try
+        {
+            // mock.json は無いが HTML がある既存フォルダ
+            Directory.CreateDirectory(mockFolder);
+            File.WriteAllText(Path.Combine(mockFolder, "index.html"), "<html></html>");
+
+            vm.MockFolder = mockFolder;
+
+            vm.CanStartConversation.Should().BeFalse();
+            vm.StatusMessage.Should().Be(MockStrings.Mock_NotAMockFolder);
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
+    /// <summary>破損した mock.json のフォルダ指定では、ステータスにエラーを出し会話開始を抑止することを検証する</summary>
+    [Fact(DisplayName = "破損 mock.json ではステータスにエラー")]
+    public void SettingCorruptMockFolder_ShowsErrorStatus()
+    {
+        var (vm, _, baseFolder, mockFolder) = CreateVm(NonEmptyDiagram(), setMockFolder: false);
+
+        try
+        {
+            Directory.CreateDirectory(mockFolder);
+            File.WriteAllText(Path.Combine(mockFolder, MockManifest.ManifestFileName), "{ broken");
+
+            vm.MockFolder = mockFolder;
+
+            vm.CanStartConversation.Should().BeFalse();
+            vm.StatusMessage.Should().NotBeEmpty();
+            vm.Screens.Should().BeEmpty();
+        }
+        finally
+        {
+            Cleanup(baseFolder);
         }
     }
 
@@ -236,7 +389,7 @@ public class MockGenerationDialogViewModelTests
     [Fact(DisplayName = "会話開始前は送信不可・開始後は入力ありで可能")]
     public void CanSendMessage_RequiresStartedConversationAndInput()
     {
-        var (vm, _, folder) = CreateVm(NonEmptyDiagram());
+        var (vm, _, baseFolder, _) = CreateVm(NonEmptyDiagram());
 
         try
         {
@@ -254,20 +407,23 @@ public class MockGenerationDialogViewModelTests
         }
         finally
         {
-            Cleanup(folder);
+            Cleanup(baseFolder);
         }
     }
 
-    /// <summary>初回送信でスキーマ（テーブル名）＋要望が送られることを検証する</summary>
-    [Fact(DisplayName = "初回送信で図＋要望がエンジンへ送られる")]
-    public async Task FirstSend_SendsSchemaWithUserRequest()
+    /// <summary>新規フォルダで開始→初回送信で mock.json が作られ、初回プロンプトにスキーマ＋要望が含まれることを検証する</summary>
+    [Fact(DisplayName = "新規フォルダ開始で mock.json 生成・初回プロンプトにスキーマ含有")]
+    public async Task StartNew_CreatesManifest_AndFirstPromptHasSchema()
     {
-        var (vm, engineBox, folder) = CreateVm(NonEmptyDiagram());
+        var (vm, engineBox, baseFolder, mockFolder) = CreateVm(NonEmptyDiagram());
 
         try
         {
             vm.StartConversationCommand.Execute(null);
             engineBox[0].Should().NotBeNull();
+
+            // 会話開始（CreateNew）で mock.json が生成される
+            File.Exists(Path.Combine(mockFolder, MockManifest.ManifestFileName)).Should().BeTrue();
 
             vm.UserInput = "モダンな配色にして";
             await vm.SendMessageCommand.ExecuteAsync(null);
@@ -275,12 +431,40 @@ public class MockGenerationDialogViewModelTests
             engineBox[0].SentPrompts.Should().ContainSingle();
             engineBox[0].SentPrompts[0].Should().Contain("Customer");
             engineBox[0].SentPrompts[0].Should().Contain("モダンな配色にして");
-            // 送信後は入力欄がクリアされる
             vm.UserInput.Should().BeEmpty();
         }
         finally
         {
-            Cleanup(folder);
+            Cleanup(baseFolder);
+        }
+    }
+
+    /// <summary>既存モックフォルダで開始→初回送信が再開プロンプト（画面一覧を含む）になることを検証する</summary>
+    [Fact(DisplayName = "既存モックフォルダ開始で再開プロンプト（画面一覧）")]
+    public async Task StartResume_FirstPromptHasScreenList()
+    {
+        var (vm, engineBox, baseFolder, mockFolder) = CreateVm(
+            NonEmptyDiagram(),
+            setMockFolder: false
+        );
+
+        try
+        {
+            SeedMockFolder(mockFolder);
+            vm.MockFolder = mockFolder;
+
+            vm.StartConversationCommand.Execute(null);
+
+            vm.UserInput = "続きをお願い";
+            await vm.SendMessageCommand.ExecuteAsync(null);
+
+            engineBox[0].SentPrompts.Should().ContainSingle();
+            engineBox[0].SentPrompts[0].Should().Contain("OrderList.html");
+            engineBox[0].SentPrompts[0].Should().Contain("続きをお願い");
+        }
+        finally
+        {
+            Cleanup(baseFolder);
         }
     }
 
@@ -288,7 +472,7 @@ public class MockGenerationDialogViewModelTests
     [Fact(DisplayName = "2 回目の送信はフィードバックとして送られる")]
     public async Task SecondSend_SendsFeedbackWithoutSchema()
     {
-        var (vm, engineBox, folder) = CreateVm(NonEmptyDiagram());
+        var (vm, engineBox, baseFolder, _) = CreateVm(NonEmptyDiagram());
 
         try
         {
@@ -307,7 +491,7 @@ public class MockGenerationDialogViewModelTests
         }
         finally
         {
-            Cleanup(folder);
+            Cleanup(baseFolder);
         }
     }
 
@@ -315,7 +499,7 @@ public class MockGenerationDialogViewModelTests
     [Fact(DisplayName = "ターン実行中は送信不可")]
     public void CanSendMessage_FalseDuringTurn()
     {
-        var (vm, _, folder) = CreateVm(NonEmptyDiagram());
+        var (vm, _, baseFolder, _) = CreateVm(NonEmptyDiagram());
 
         try
         {
@@ -328,123 +512,239 @@ public class MockGenerationDialogViewModelTests
         }
         finally
         {
-            Cleanup(folder);
+            Cleanup(baseFolder);
         }
     }
 
-    /// <summary>HTML 提出で HtmlUpdated が発火し、保存コマンドが有効化されることを検証する</summary>
-    [Fact(DisplayName = "HTML 提出で HtmlUpdated 発火・保存コマンド有効化")]
-    public async Task HtmlUpdated_RaisesEventAndEnablesSave()
+    /// <summary>画面保存でサイドバーが更新され、プレビュー要求（実ファイルパス）が飛ぶことを検証する</summary>
+    [Fact(DisplayName = "画面保存でサイドバー更新＋プレビュー要求")]
+    public async Task ScreenSaved_UpdatesSidebar_AndRequestsPreview()
     {
-        var (vm, engineBox, folder) = CreateVm(NonEmptyDiagram());
+        var (vm, engineBox, baseFolder, mockFolder) = CreateVm(NonEmptyDiagram());
 
         try
         {
-            MockHtmlUpdate? received = null;
-            vm.HtmlUpdated += (_, u) => received = u;
+            MockPreviewRequest? request = null;
+            vm.PreviewRequested += (_, r) => request = r;
 
-            var args =
-                $"{{\"html\":{System.Text.Json.JsonSerializer.Serialize(ValidHtml)},\"revision_note\":\"初版\"}}";
-
-            // 「＋新しい会話」でエンジンが構築されるので、その直後にツール呼び出しを仕込み、
-            // 初回送信（StartAsync 経由の SendAsync）でツールが再生されるようにする。
             vm.StartConversationCommand.Execute(null);
-            engineBox[0].ScriptedToolCall = (MockDesignTools.SaveMockHtmlToolName, args);
+            engineBox[0].ScriptedToolCall = (
+                MockFolderDesignTools.SaveScreenToolName,
+                SaveScreenArgs()
+            );
 
-            vm.CanSaveHtml.Should().BeFalse();
-            vm.SaveHtmlCommand.CanExecute(null).Should().BeFalse();
-
-            vm.UserInput = "HTML を提出して";
+            vm.UserInput = "OrderList を作って";
             await vm.SendMessageCommand.ExecuteAsync(null);
 
-            received.Should().NotBeNull();
-            received!.Value.Html.Should().Be(ValidHtml);
-            vm.CanSaveHtml.Should().BeTrue();
-            vm.SaveHtmlCommand.CanExecute(null).Should().BeTrue();
+            // サイドバーに画面が並ぶ
+            vm.Screens.Should().ContainSingle();
+            vm.Screens[0].File.Should().Be("OrderList.html");
+            vm.SelectedScreen.Should().NotBeNull();
+
+            // プレビュー要求はモックフォルダ内の実ファイルを指す
+            request.Should().NotBeNull();
+            request!.FilePath.Should().Be(Path.Combine(mockFolder, "OrderList.html"));
+            request.Folder.Should().Be(mockFolder);
+
+            // 実ファイルが書き出されている
+            File.Exists(Path.Combine(mockFolder, "OrderList.html")).Should().BeTrue();
         }
         finally
         {
-            Cleanup(folder);
+            Cleanup(baseFolder);
         }
     }
 
-    /// <summary>HTML 提出後に「＋新しい会話」でリセットしても保存が有効なまま（VM が確定 HTML を保持）を検証する</summary>
-    [Fact(DisplayName = "新しい会話後も保存が有効のまま")]
-    public async Task StartConversation_KeepsSaveEnabledAfterReset()
+    /// <summary>単一 HTML 出力コマンドが、モックフォルダを結合したファイルを選択パスへ書き出すことを検証する</summary>
+    [Fact(DisplayName = "単一 HTML 出力は選択パスへ結合 HTML を書き出す")]
+    public void ExportBundle_WritesCombinedHtmlToPickedPath()
     {
-        var (vm, engineBox, folder) = CreateVm(NonEmptyDiagram());
+        var baseFolder = Path.Combine(
+            Path.GetTempPath(),
+            "QuickERTests",
+            Guid.NewGuid().ToString("N")
+        );
+        var mockFolder = Path.Combine(baseFolder, "mock");
+        var outPath = Path.Combine(baseFolder, "out.html");
+        SeedMockFolder(mockFolder);
 
-        try
-        {
-            var args = $"{{\"html\":{System.Text.Json.JsonSerializer.Serialize(ValidHtml)}}}";
-
-            vm.StartConversationCommand.Execute(null);
-            engineBox[0].ScriptedToolCall = (MockDesignTools.SaveMockHtmlToolName, args);
-            vm.UserInput = "提出";
-            await vm.SendMessageCommand.ExecuteAsync(null);
-
-            vm.CanSaveHtml.Should().BeTrue();
-
-            // 新しい会話でセッションを破棄しても、確定 HTML は VM に残り保存は有効のまま
-            vm.StartConversationCommand.Execute(null);
-            vm.CanSaveHtml.Should().BeTrue();
-            vm.SaveHtmlCommand.CanExecute(null).Should().BeTrue();
-        }
-        finally
-        {
-            Cleanup(folder);
-        }
-    }
-
-    /// <summary>提出済み HTML が保存ダイアログのパスへ書き出されることを検証する</summary>
-    [Fact(DisplayName = "HTML 保存は選択パスへ書き出す")]
-    public async Task SaveHtml_WritesToPickedPath()
-    {
-        var folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
-        var path = Path.Combine(folder, "out.html");
-        Directory.CreateDirectory(folder);
-        var files = new RecordingFileDialogService(new FileDialogResult(path, 1));
-        var engineBox = new FakeChatEngine[1];
+        var files = new RecordingFileDialogService(new FileDialogResult(outPath, 1));
+        var dialogs = new StubDialogService();
 
         var vm = new MockGenerationDialogViewModel(
             new StubDiagramSource(NonEmptyDiagram()),
             new SyncUiDispatcher(),
             files: files,
-            settingsStore: new AiSettingsStore(folder),
-            apiKeyEngineFactory: (_, toolHost) => engineBox[0] = new FakeChatEngine(toolHost),
+            settingsStore: new AiSettingsStore(Path.Combine(baseFolder, "settings")),
+            apiKeyEngineFactory: null,
             codexEngineFactory: null,
-            claudeCodeEngineFactory: null
+            claudeCodeEngineFactory: null,
+            dialogService: dialogs
         );
         vm.Connection.ApiProvider = AiProvider.Ollama;
 
         try
         {
-            vm.StartConversationCommand.Execute(null);
-            var args = $"{{\"html\":{System.Text.Json.JsonSerializer.Serialize(ValidHtml)}}}";
-            engineBox[0].ScriptedToolCall = (MockDesignTools.SaveMockHtmlToolName, args);
-            vm.UserInput = "提出";
-            await vm.SendMessageCommand.ExecuteAsync(null);
+            // 既存モックフォルダを開くだけで画面が並び、出力が有効になる（会話不要）
+            vm.MockFolder = mockFolder;
+            vm.CanExportBundle.Should().BeTrue();
 
-            vm.SaveHtmlCommand.Execute(null);
+            vm.ExportBundleCommand.Execute(null);
 
-            File.Exists(path).Should().BeTrue();
-            File.ReadAllText(path).Should().Be(ValidHtml);
+            files.LastInitialFileName.Should().Be("mock.html");
+            File.Exists(outPath).Should().BeTrue();
+            var written = File.ReadAllText(outPath);
+            // 結合結果は画面本文を含む自己完結 HTML
+            written.Should().Contain("顧客一覧");
+            written.Should().Contain("data-screen");
+
+            // 保存先パス付きの完了メッセージが通知される
+            dialogs.InformationMessages.Should().ContainSingle().Which.Should().Contain(outPath);
         }
         finally
         {
-            Cleanup(folder);
+            Cleanup(baseFolder);
+        }
+    }
+
+    /// <summary>クリア（確認 OK）で会話・フォルダ選択・第2ステップ入力が初期状態へ戻ることを検証する</summary>
+    [Fact(DisplayName = "クリアは確認後に画面全体を初期状態へ戻す")]
+    public void Clear_ResetsEverything_WhenConfirmed()
+    {
+        var dialogs = new StubDialogService { ConfirmResult = true };
+        var (vm, _, baseFolder, mockFolder) = CreateVm(
+            NonEmptyDiagram(),
+            setMockFolder: false,
+            dialogs
+        );
+        SeedMockFolder(mockFolder);
+
+        try
+        {
+            vm.MockFolder = mockFolder;
+            vm.Screens.Should().NotBeEmpty();
+            vm.UserInput = "入力途中のテキスト";
+            vm.OutputFolder = Path.Combine(baseFolder, "out");
+            vm.ProjectName = "ShopMock";
+            vm.MockGenInstructions = "ダークテーマで";
+
+            vm.ClearCommand.Execute(null);
+
+            // 確認メッセージが表示されている
+            dialogs.ConfirmMessages.Should().ContainSingle();
+
+            // 会話まわり・フォルダ選択・サイドバー
+            vm.MockFolder.Should().BeEmpty();
+            vm.Screens.Should().BeEmpty();
+            vm.HasScreens.Should().BeFalse();
+            vm.Messages.Should().BeEmpty();
+            vm.UserInput.Should().BeEmpty();
+
+            // 第2ステップの入力
+            vm.OutputFolder.Should().BeEmpty();
+            vm.ProjectName.Should().Be("MockApp");
+            vm.MockGenInstructions.Should().BeEmpty();
+
+            // ディスク上のモックフォルダは削除されない
+            MockFolderStore.IsMockFolder(mockFolder).Should().BeTrue();
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
+    /// <summary>モックフォルダ未選択のときはクリアできないことを検証する</summary>
+    [Fact(DisplayName = "モックフォルダ未選択ではクリア不可")]
+    public void Clear_DisabledWithoutMockFolder()
+    {
+        var dialogs = new StubDialogService();
+        var (vm, _, baseFolder, mockFolder) = CreateVm(
+            NonEmptyDiagram(),
+            setMockFolder: false,
+            dialogs
+        );
+
+        try
+        {
+            // 未選択では押せない
+            vm.CanClear.Should().BeFalse();
+            vm.ClearCommand.CanExecute(null).Should().BeFalse();
+
+            // フォルダを選択すると押せるようになる
+            vm.MockFolder = mockFolder;
+            vm.CanClear.Should().BeTrue();
+            vm.ClearCommand.CanExecute(null).Should().BeTrue();
+
+            // クリアで未選択へ戻ると再び押せなくなる
+            vm.ClearCommand.Execute(null);
+            vm.CanClear.Should().BeFalse();
+            vm.ClearCommand.CanExecute(null).Should().BeFalse();
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
+    /// <summary>クリアの確認をキャンセルすると何も変わらないことを検証する</summary>
+    [Fact(DisplayName = "クリアの確認キャンセルでは何も変わらない")]
+    public void Clear_DoesNothing_WhenCancelled()
+    {
+        var dialogs = new StubDialogService { ConfirmResult = false };
+        var (vm, _, baseFolder, mockFolder) = CreateVm(
+            NonEmptyDiagram(),
+            setMockFolder: false,
+            dialogs
+        );
+        SeedMockFolder(mockFolder);
+
+        try
+        {
+            vm.MockFolder = mockFolder;
+            vm.UserInput = "入力途中のテキスト";
+            vm.ProjectName = "ShopMock";
+
+            vm.ClearCommand.Execute(null);
+
+            dialogs.ConfirmMessages.Should().ContainSingle();
+            vm.MockFolder.Should().Be(mockFolder);
+            vm.Screens.Should().NotBeEmpty();
+            vm.UserInput.Should().Be("入力途中のテキスト");
+            vm.ProjectName.Should().Be("ShopMock");
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
+    /// <summary>単一 HTML 出力は画面が無いと不可であることを検証する</summary>
+    [Fact(DisplayName = "画面が無いと単一 HTML 出力は不可")]
+    public void CanExportBundle_FalseWithoutScreens()
+    {
+        var (vm, _, baseFolder, _) = CreateVm(NonEmptyDiagram());
+
+        try
+        {
+            vm.HasScreens.Should().BeFalse();
+            vm.CanExportBundle.Should().BeFalse();
+            vm.ExportBundleCommand.CanExecute(null).Should().BeFalse();
+        }
+        finally
+        {
+            Cleanup(baseFolder);
         }
     }
 
     /// <summary>
     /// 子 <see cref="ChatConnectionSettingsViewModel.ApiProvider"/> の変更で、親の
-    /// <see cref="MockGenerationDialogViewModel.IsBackendReady"/> の PropertyChanged が発火することを検証する
-    /// （Connection.PropertyChanged → 親ハンドラ → NotifyReadinessChanged の連鎖の取りこぼしを恒久検知する）。
+    /// <see cref="MockGenerationDialogViewModel.IsBackendReady"/> の PropertyChanged が発火することを検証する。
     /// </summary>
     [Fact(DisplayName = "Connection.ApiProvider 変更で親の IsBackendReady が通知される")]
     public void ConnectionApiProviderChange_RaisesIsBackendReadyOnParent()
     {
-        var (vm, _, folder) = CreateVm(NonEmptyDiagram());
+        var (vm, _, baseFolder, _) = CreateVm(NonEmptyDiagram());
 
         try
         {
@@ -466,17 +766,19 @@ public class MockGenerationDialogViewModelTests
         }
         finally
         {
-            Cleanup(folder);
+            Cleanup(baseFolder);
         }
     }
 
     // ── 第2ステップ: WPF モックプロジェクト生成 ──
 
-    /// <summary>確定 HTML・接続・claude/dotnet 検出・入力が揃うと生成可能になることを検証する</summary>
+    /// <summary>画面あり・接続・claude/dotnet 検出・入力が揃うと生成可能になることを検証する</summary>
     [Fact(DisplayName = "第2ステップの有効条件がすべて揃うと生成可能")]
     public async Task CanGenerateMockProject_RequiresAllConditions()
     {
-        var (vm, engineBox, generator, folder) = CreateVmWithGenerator(NonEmptyDiagram());
+        var (vm, engineBox, generator, baseFolder, mockFolder) = CreateVmWithGenerator(
+            NonEmptyDiagram()
+        );
 
         try
         {
@@ -484,11 +786,12 @@ public class MockGenerationDialogViewModelTests
             generator.DotnetAvailable = true;
             await vm.RefreshMockGenAvailabilityAsync();
 
-            // HTML 未提出では不可
+            // 画面が無い状態では不可・理由は「画面を追加」
             vm.CanGenerateMockProject.Should().BeFalse();
+            vm.MockGenDisabledReason.Should().Be(MockStrings.Mock_DisabledReason_NoScreens);
 
-            await SubmitHtmlOnClaudeCode(vm, engineBox);
-            vm.OutputFolder = folder;
+            await SaveScreenOnClaudeCode(vm, engineBox, mockFolder);
+            vm.OutputFolder = Path.Combine(baseFolder, "out");
             vm.ProjectName = "AcmeMock";
 
             // ここまでで全条件が揃う
@@ -501,7 +804,7 @@ public class MockGenerationDialogViewModelTests
         }
         finally
         {
-            Cleanup(folder);
+            Cleanup(baseFolder);
         }
     }
 
@@ -509,7 +812,9 @@ public class MockGenerationDialogViewModelTests
     [Fact(DisplayName = "claude 未検出では生成不可")]
     public async Task CanGenerateMockProject_FalseWhenClaudeMissing()
     {
-        var (vm, engineBox, generator, folder) = CreateVmWithGenerator(NonEmptyDiagram());
+        var (vm, engineBox, generator, baseFolder, mockFolder) = CreateVmWithGenerator(
+            NonEmptyDiagram()
+        );
 
         try
         {
@@ -517,8 +822,8 @@ public class MockGenerationDialogViewModelTests
             generator.DotnetAvailable = true;
             await vm.RefreshMockGenAvailabilityAsync();
 
-            await SubmitHtmlOnClaudeCode(vm, engineBox);
-            vm.OutputFolder = folder;
+            await SaveScreenOnClaudeCode(vm, engineBox, mockFolder);
+            vm.OutputFolder = Path.Combine(baseFolder, "out");
             vm.ProjectName = "AcmeMock";
 
             vm.CanGenerateMockProject.Should().BeFalse();
@@ -526,7 +831,7 @@ public class MockGenerationDialogViewModelTests
         }
         finally
         {
-            Cleanup(folder);
+            Cleanup(baseFolder);
         }
     }
 
@@ -534,21 +839,29 @@ public class MockGenerationDialogViewModelTests
     [Fact(DisplayName = "生成実行で進捗転送・成功でフォルダ表示")]
     public async Task GenerateMockProject_TransitionsAndForwardsProgress()
     {
-        var (vm, engineBox, generator, folder) = CreateVmWithGenerator(NonEmptyDiagram());
+        var (vm, engineBox, generator, baseFolder, mockFolder) = CreateVmWithGenerator(
+            NonEmptyDiagram()
+        );
 
         try
         {
             generator.ResultSuccess = true;
             await vm.RefreshMockGenAvailabilityAsync();
-            await SubmitHtmlOnClaudeCode(vm, engineBox);
-            vm.OutputFolder = folder;
+            await SaveScreenOnClaudeCode(vm, engineBox, mockFolder);
+            var outFolder = Path.Combine(baseFolder, "out");
+            vm.OutputFolder = outFolder;
             vm.ProjectName = "AcmeMock";
+            vm.MockGenInstructions = "ダークテーマで実装して";
 
             await vm.GenerateMockProjectCommand.ExecuteAsync(null);
 
             generator.GenerateCallCount.Should().Be(1);
-            generator.CapturedOutputFolder.Should().Be(folder);
+            generator.CapturedOutputFolder.Should().Be(outFolder);
             generator.CapturedProjectName.Should().Be("AcmeMock");
+            // デザイン仕様としてモックフォルダのパスがそのまま渡る
+            generator.CapturedMockFolder.Should().Be(mockFolder);
+            // 追加指示が生成器へ渡る
+            generator.CapturedInstructions.Should().Be("ダークテーマで実装して");
             vm.MockGenLog.Should().Contain("進捗: 生成中");
             vm.IsMockGenInProgress.Should().BeFalse();
             vm.MockGenCompleted.Should().BeTrue();
@@ -557,7 +870,7 @@ public class MockGenerationDialogViewModelTests
         }
         finally
         {
-            Cleanup(folder);
+            Cleanup(baseFolder);
         }
     }
 
@@ -565,14 +878,16 @@ public class MockGenerationDialogViewModelTests
     [Fact(DisplayName = "生成失敗ではフォルダを開くボタンを出さない")]
     public async Task GenerateMockProject_FailureHidesOpenFolder()
     {
-        var (vm, engineBox, generator, folder) = CreateVmWithGenerator(NonEmptyDiagram());
+        var (vm, engineBox, generator, baseFolder, mockFolder) = CreateVmWithGenerator(
+            NonEmptyDiagram()
+        );
 
         try
         {
             generator.ResultSuccess = false;
             await vm.RefreshMockGenAvailabilityAsync();
-            await SubmitHtmlOnClaudeCode(vm, engineBox);
-            vm.OutputFolder = folder;
+            await SaveScreenOnClaudeCode(vm, engineBox, mockFolder);
+            vm.OutputFolder = Path.Combine(baseFolder, "out");
             vm.ProjectName = "AcmeMock";
 
             await vm.GenerateMockProjectCommand.ExecuteAsync(null);
@@ -580,10 +895,12 @@ public class MockGenerationDialogViewModelTests
             vm.MockGenCompleted.Should().BeTrue();
             vm.MockGenSucceeded.Should().BeFalse();
             vm.ShowOpenFolder.Should().BeFalse();
+            // 追加指示が空のときは null が渡る（空白→null の正規化）
+            generator.CapturedInstructions.Should().BeNull();
         }
         finally
         {
-            Cleanup(folder);
+            Cleanup(baseFolder);
         }
     }
 
@@ -591,24 +908,26 @@ public class MockGenerationDialogViewModelTests
     [Fact(DisplayName = "API キー接続では第2ステップ無効")]
     public async Task CanGenerateMockProject_FalseOnNonClaudeBackend()
     {
-        var (vm, engineBox, generator, folder) = CreateVmWithGenerator(NonEmptyDiagram());
+        var (vm, engineBox, generator, baseFolder, mockFolder) = CreateVmWithGenerator(
+            NonEmptyDiagram()
+        );
 
         try
         {
             await vm.RefreshMockGenAvailabilityAsync();
-            await SubmitHtmlOnClaudeCode(vm, engineBox);
-            vm.OutputFolder = folder;
+            await SaveScreenOnClaudeCode(vm, engineBox, mockFolder);
+            vm.OutputFolder = Path.Combine(baseFolder, "out");
             vm.ProjectName = "AcmeMock";
             vm.CanGenerateMockProject.Should().BeTrue();
 
-            // バックエンドを API キーへ切り替えると無効になる
+            // バックエンドを API キーへ切り替えると無効になる（画面・フォルダは維持）
             vm.Connection.SelectedBackend = ErChatBackendKind.ApiKey;
             vm.CanGenerateMockProject.Should().BeFalse();
             vm.MockGenDisabledReason.Should().Contain("Claude Code");
         }
         finally
         {
-            Cleanup(folder);
+            Cleanup(baseFolder);
         }
     }
 
@@ -619,7 +938,7 @@ public class MockGenerationDialogViewModelTests
     [Fact(DisplayName = "Ollama 成功ターンで使用モデルが候補・履歴へ記録される")]
     public async Task SuccessfulOllamaTurn_RecordsModelToHistory()
     {
-        var (vm, _, folder) = CreateVm(NonEmptyDiagram());
+        var (vm, _, baseFolder, _) = CreateVm(NonEmptyDiagram());
 
         try
         {
@@ -633,12 +952,14 @@ public class MockGenerationDialogViewModelTests
             // フェイクエンジンが成功 TurnCompleted を発火し、記録が走る
             vm.Connection.ApiModelCandidates.Select(c => c.Name).Should().Contain("qwen3.6:35b");
 
-            var reloaded = new AiSettingsStore(folder).Load().ApiModelHistory;
+            var reloaded = new AiSettingsStore(Path.Combine(baseFolder, "settings"))
+                .Load()
+                .ApiModelHistory;
             reloaded.ModelsFor("ollama").Should().Contain("qwen3.6:35b");
         }
         finally
         {
-            Cleanup(folder);
+            Cleanup(baseFolder);
         }
     }
 
@@ -655,7 +976,7 @@ public class MockGenerationDialogViewModelTests
     [Fact(DisplayName = "Claude Code では添付範囲が全種別")]
     public void AttachmentSupport_ClaudeCode_IsAllKinds()
     {
-        var (vm, _, folder) = CreateVm(NonEmptyDiagram());
+        var (vm, _, baseFolder, _) = CreateVm(NonEmptyDiagram());
 
         try
         {
@@ -674,7 +995,7 @@ public class MockGenerationDialogViewModelTests
         }
         finally
         {
-            Cleanup(folder);
+            Cleanup(baseFolder);
         }
     }
 
@@ -683,12 +1004,13 @@ public class MockGenerationDialogViewModelTests
     public async Task SendWithAttachment_PassesToEngine_AndClears()
     {
         // Claude Code バックエンドのエンジンをフェイクへ差し替える（engineBox で捕捉する）
-        var (vm, engineBox, _, folder) = CreateVmWithGenerator(NonEmptyDiagram());
+        var (vm, engineBox, _, baseFolder, mockFolder) = CreateVmWithGenerator(NonEmptyDiagram());
 
         try
         {
             vm.Connection.SelectedBackend = ErChatBackendKind.ClaudeCode;
             vm.ApplyClaudeCodeReadiness(true, "ログイン済み", ConnectionHealth.Ready, string.Empty);
+            vm.MockFolder = mockFolder;
             vm.StartConversationCommand.Execute(null);
 
             vm.Attachments.AddClipboardImage(PngBytes(), DateTime.Now);
@@ -710,7 +1032,7 @@ public class MockGenerationDialogViewModelTests
         }
         finally
         {
-            Cleanup(folder);
+            Cleanup(baseFolder);
         }
     }
 
@@ -718,7 +1040,7 @@ public class MockGenerationDialogViewModelTests
     [Fact(DisplayName = "非対応バックエンドへ切替で添付をクリア")]
     public void SwitchToUnsupportedBackend_ClearsAttachments()
     {
-        var (vm, _, folder) = CreateVm(NonEmptyDiagram());
+        var (vm, _, baseFolder, _) = CreateVm(NonEmptyDiagram());
 
         try
         {
@@ -732,7 +1054,7 @@ public class MockGenerationDialogViewModelTests
         }
         finally
         {
-            Cleanup(folder);
+            Cleanup(baseFolder);
         }
     }
 

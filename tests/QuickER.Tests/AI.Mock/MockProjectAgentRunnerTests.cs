@@ -120,6 +120,7 @@ public class MockProjectAgentRunnerTests
             var result = await runner.RunAsync(
                 folder,
                 "AcmeMock",
+                additionalInstructions: null,
                 "sonnet",
                 progress.Add,
                 TestContext.Current.CancellationToken
@@ -158,6 +159,7 @@ public class MockProjectAgentRunnerTests
             await runner.RunAsync(
                 folder,
                 "AcmeMock",
+                additionalInstructions: null,
                 "sonnet",
                 _ => { },
                 TestContext.Current.CancellationToken
@@ -172,16 +174,59 @@ public class MockProjectAgentRunnerTests
             options.McpConfigPath.Should().BeEmpty();
             options.WorkingDirectory.Should().Be(folder);
 
-            // プロンプトはデザイン仕様・README 規約・読み取り専用を案内する（VS 標準構成のプロジェクトフォルダ配下パス）
-            client.CapturedPrompt.Should().Contain("AcmeMock/design/mock.html");
+            // プロンプトはモックフォルダのマニフェスト・README 規約・読み取り専用を案内する（VS 標準構成のプロジェクトフォルダ配下パス）
+            client.CapturedPrompt.Should().Contain("AcmeMock/design/mock/mock.json");
             client.CapturedPrompt.Should().Contain("AcmeMock/README-QuickER.md");
             client.CapturedPrompt.Should().Contain("AcmeMock/Generated/");
             // ソリューション直下でビルドする案内が入る
             client.CapturedPrompt.Should().Contain("AcmeMock.sln");
 
-            // システムプロンプトも VS 標準構成（sln・プロジェクトフォルダ）を案内する
+            // システムプロンプトも VS 標準構成（sln・プロジェクトフォルダ）とモックフォルダのマニフェストを案内する
             options.SystemPrompt.Should().Contain("AcmeMock.sln");
             options.SystemPrompt.Should().Contain("AcmeMock/Generated/");
+            options.SystemPrompt.Should().Contain("AcmeMock/design/mock/mock.json");
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>追加指示が非空ならプロンプト末尾へ「# 追加指示」見出し付きで連結され、空なら付かないことを検証する</summary>
+    [Fact(DisplayName = "追加指示は非空なら末尾へ連結・空なら付かない")]
+    public async Task RunAsync_AppendsAdditionalInstructions()
+    {
+        var folder = NewTempFolder();
+        var client = new FakeClaudeCodeClient { OnRun = WriteArtifacts() };
+        var runner = new MockProjectAgentRunner(client, new FakeBuildRunner());
+
+        try
+        {
+            // 追加指示ありのとき、見出し（resx）と本文がプロンプト末尾に連結される
+            await runner.RunAsync(
+                folder,
+                "AcmeMock",
+                "ダークテーマで実装して",
+                "sonnet",
+                _ => { },
+                TestContext.Current.CancellationToken
+            );
+
+            var heading = QuickER.AI.Mock.Resources.Strings.Mock_PromptUserInstructionsHeading;
+            client.CapturedPrompt.Should().Contain(heading);
+            client.CapturedPrompt.Should().Contain("ダークテーマで実装して");
+
+            // 追加指示なしのとき、見出しは付かない
+            await runner.RunAsync(
+                folder,
+                "AcmeMock",
+                additionalInstructions: null,
+                "sonnet",
+                _ => { },
+                TestContext.Current.CancellationToken
+            );
+
+            client.CapturedPrompt.Should().NotContain(heading);
         }
         finally
         {
@@ -204,6 +249,7 @@ public class MockProjectAgentRunnerTests
             var result = await runner.RunAsync(
                 folder,
                 "AcmeMock",
+                additionalInstructions: null,
                 string.Empty,
                 _ => { },
                 TestContext.Current.CancellationToken
@@ -233,6 +279,7 @@ public class MockProjectAgentRunnerTests
             var result = await runner.RunAsync(
                 folder,
                 "AcmeMock",
+                additionalInstructions: null,
                 string.Empty,
                 _ => { },
                 TestContext.Current.CancellationToken
@@ -264,6 +311,7 @@ public class MockProjectAgentRunnerTests
             var result = await runner.RunAsync(
                 folder,
                 "AcmeMock",
+                additionalInstructions: null,
                 string.Empty,
                 _ => { },
                 TestContext.Current.CancellationToken
@@ -297,6 +345,7 @@ public class MockProjectAgentRunnerTests
             var result = await runner.RunAsync(
                 folder,
                 "AcmeMock",
+                additionalInstructions: null,
                 string.Empty,
                 _ => { },
                 cts.Token

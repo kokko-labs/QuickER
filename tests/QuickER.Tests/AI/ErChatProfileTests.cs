@@ -79,14 +79,18 @@ public class ErChatProfileTests
             .Equal(definitions.Select(definition => definition.Name));
     }
 
-    /// <summary>モック生成プロファイルが save_mock_html ツールを 1 つだけ持つことを検証する</summary>
-    [Fact(DisplayName = "モック生成プロファイルは save_mock_html ツールを 1 つ持つ")]
-    public void MockDesign_HasSingleSaveMockHtmlTool()
+    /// <summary>モックフォルダ生成プロファイルが 4 つのフォルダツールを持つことを検証する</summary>
+    [Fact(DisplayName = "モックフォルダ生成プロファイルは save_screen 等の 4 ツールを持つ")]
+    public void FolderMockDesign_HasFolderTools()
     {
         MockDesignProfile
-            .MockDesign.Tools.Should()
-            .ContainSingle()
-            .Which.Name.Should()
-            .Be(MockDesignTools.SaveMockHtmlToolName);
+            .FolderMockDesign.Tools.Select(tool => tool.Name)
+            .Should()
+            .BeEquivalentTo(
+                MockFolderDesignTools.SaveScreenToolName,
+                MockFolderDesignTools.RemoveScreenToolName,
+                MockFolderDesignTools.SaveStylesheetToolName,
+                MockFolderDesignTools.GetScreenToolName
+            );
     }
 }

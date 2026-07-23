@@ -2,23 +2,23 @@ using QuickER.AI;
 
 namespace QuickER.AI.Mock;
 
-/// <summary>ER 図から Web モック HTML を生成するチャットの用途プロファイル（<see cref="ErChatProfile"/>）を提供する静的クラス</summary>
+/// <summary>ER 図から Web モックを生成するチャットの用途プロファイル（<see cref="ErChatProfile"/>）を提供する静的クラス</summary>
 /// <remarks>
-/// システムプロンプト・Codex 指示は <see cref="MockDesignPrompts"/>、ツールは <see cref="MockDesignTools"/>。
-/// 以前は <c>ErChatProfile.MockDesign</c> として Core（QuickER.AI）に置かれていたが、
-/// モック生成固有のプロンプト・ツールが機能側（QuickER.AI.Mock）へ移ったため、ここへ移設した。
+/// モック生成固有のプロンプト・ツールは機能側（QuickER.AI.Mock）に置く。
+/// 現行はモックフォルダ方式（<see cref="FolderMockDesign"/>）のみ。
 /// </remarks>
 public static class MockDesignProfile
 {
     /// <summary>
-    /// ER 図から Web モック HTML を生成するチャットのプロファイル。
-    /// システムプロンプト・Codex 指示・ツール定義・MCP サーバー名のいずれも従来のハードコード内容と一致する。
+    /// ER 図から「モックフォルダ」（画面ごとの HTML＋共有 style.css）を生成するチャットのプロファイル。
+    /// システムプロンプト・Codex 指示は <see cref="MockFolderDesignPrompts"/>、ツールは
+    /// <see cref="MockFolderDesignTools"/>（save_screen / save_stylesheet / get_screen / remove_screen）。
     /// </summary>
-    public static ErChatProfile MockDesign { get; } =
+    public static ErChatProfile FolderMockDesign { get; } =
         new(
-            MockDesignPrompts.BuildSystemPrompt,
-            MockDesignPrompts.BuildCodexDeveloperInstructions,
-            MockDesignTools.GetDefinitions(),
+            MockFolderDesignPrompts.BuildSystemPrompt,
+            MockFolderDesignPrompts.BuildCodexDeveloperInstructions,
+            MockFolderDesignTools.GetDefinitions(),
             "erdesigner_mock"
         );
 }

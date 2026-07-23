@@ -162,9 +162,9 @@ namespace QuickER.AI.Mock.Resources {
             }
         }
 
-        public static string Mock_SaveHtml {
+        public static string Mock_ExportHtml {
             get {
-                return ResourceManager.GetString("Mock_SaveHtml", resourceCulture);
+                return ResourceManager.GetString("Mock_ExportHtml", resourceCulture);
             }
         }
 
@@ -186,9 +186,63 @@ namespace QuickER.AI.Mock.Resources {
             }
         }
 
+        public static string Mock_MockFolder {
+            get {
+                return ResourceManager.GetString("Mock_MockFolder", resourceCulture);
+            }
+        }
+
+        public static string Mock_MockFolderTooltip {
+            get {
+                return ResourceManager.GetString("Mock_MockFolderTooltip", resourceCulture);
+            }
+        }
+
+        public static string Mock_PickMockFolderTitle {
+            get {
+                return ResourceManager.GetString("Mock_PickMockFolderTitle", resourceCulture);
+            }
+        }
+
+        public static string Mock_ScreensHeader {
+            get {
+                return ResourceManager.GetString("Mock_ScreensHeader", resourceCulture);
+            }
+        }
+
+        public static string Mock_NotAMockFolder {
+            get {
+                return ResourceManager.GetString("Mock_NotAMockFolder", resourceCulture);
+            }
+        }
+
+        public static string Mock_MockFolderOpenFailedFormat {
+            get {
+                return ResourceManager.GetString("Mock_MockFolderOpenFailedFormat", resourceCulture);
+            }
+        }
+
+        public static string Mock_WarningsHeading {
+            get {
+                return ResourceManager.GetString("Mock_WarningsHeading", resourceCulture);
+            }
+        }
+
         public static string Mock_ProjectName {
             get {
                 return ResourceManager.GetString("Mock_ProjectName", resourceCulture);
+            }
+        }
+
+        public static string Mock_MockGenInstructions {
+            get {
+                return ResourceManager.GetString("Mock_MockGenInstructions", resourceCulture);
+            }
+        }
+
+        public static string Mock_MockGenInstructionsTooltip {
+            get {
+                return ResourceManager.GetString("Mock_MockGenInstructionsTooltip", resourceCulture);
             }
         }
 
@@ -234,9 +288,9 @@ namespace QuickER.AI.Mock.Resources {
             }
         }
 
-        public static string Mock_DisabledReason_ConfirmHtml {
+        public static string Mock_DisabledReason_NoScreens {
             get {
-                return ResourceManager.GetString("Mock_DisabledReason_ConfirmHtml", resourceCulture);
+                return ResourceManager.GetString("Mock_DisabledReason_NoScreens", resourceCulture);
             }
         }
 
@@ -297,6 +351,24 @@ namespace QuickER.AI.Mock.Resources {
         public static string Mock_HtmlSaveFailedFormat {
             get {
                 return ResourceManager.GetString("Mock_HtmlSaveFailedFormat", resourceCulture);
+            }
+        }
+
+        public static string Mock_HtmlSavedMessageFormat {
+            get {
+                return ResourceManager.GetString("Mock_HtmlSavedMessageFormat", resourceCulture);
+            }
+        }
+
+        public static string Mock_Clear {
+            get {
+                return ResourceManager.GetString("Mock_Clear", resourceCulture);
+            }
+        }
+
+        public static string Mock_ClearConfirm {
+            get {
+                return ResourceManager.GetString("Mock_ClearConfirm", resourceCulture);
             }
         }
 
@@ -533,15 +605,141 @@ namespace QuickER.AI.Mock.Resources {
                 return ResourceManager.GetString("Toolbar_MockGenerationTooltip", resourceCulture);
             }
         }
-        public static string Mock_DesignInstructionsTemplate {
-            get {
-                return ResourceManager.GetString("Mock_DesignInstructionsTemplate", resourceCulture);
-            }
-        }
-
         public static string Mock_FunctionToolLabel {
             get {
                 return ResourceManager.GetString("Mock_FunctionToolLabel", resourceCulture);
+            }
+        }
+
+        public static string Mock_FolderDesignInstructionsTemplate {
+            get {
+                return ResourceManager.GetString("Mock_FolderDesignInstructionsTemplate", resourceCulture);
+            }
+        }
+
+        public static string Mock_FolderInitialPromptTemplate {
+            get {
+                return ResourceManager.GetString("Mock_FolderInitialPromptTemplate", resourceCulture);
+            }
+        }
+
+        public static string Mock_PromptUserInstructionsHeading {
+            get {
+                return ResourceManager.GetString("Mock_PromptUserInstructionsHeading", resourceCulture);
+            }
+        }
+
+        public static string Mock_ScreenSavedResult {
+            get {
+                return ResourceManager.GetString("Mock_ScreenSavedResult", resourceCulture);
+            }
+        }
+
+        public static string Mock_ScreenRemovedResult {
+            get {
+                return ResourceManager.GetString("Mock_ScreenRemovedResult", resourceCulture);
+            }
+        }
+
+        public static string Mock_StylesheetSavedResult {
+            get {
+                return ResourceManager.GetString("Mock_StylesheetSavedResult", resourceCulture);
+            }
+        }
+
+        public static string Mock_ScreenNotFoundResult {
+            get {
+                return ResourceManager.GetString("Mock_ScreenNotFoundResult", resourceCulture);
+            }
+        }
+
+        public static string Mock_UnknownToolResult {
+            get {
+                return ResourceManager.GetString("Mock_UnknownToolResult", resourceCulture);
+            }
+        }
+
+        public static string Mock_ArgumentsParseFailedResult {
+            get {
+                return ResourceManager.GetString("Mock_ArgumentsParseFailedResult", resourceCulture);
+            }
+        }
+
+        public static string Mock_ResumePromptIntro {
+            get {
+                return ResourceManager.GetString("Mock_ResumePromptIntro", resourceCulture);
+            }
+        }
+
+        public static string Mock_ResumePromptTitleHeading {
+            get {
+                return ResourceManager.GetString("Mock_ResumePromptTitleHeading", resourceCulture);
+            }
+        }
+
+        public static string Mock_ResumePromptScreensHeading {
+            get {
+                return ResourceManager.GetString("Mock_ResumePromptScreensHeading", resourceCulture);
+            }
+        }
+
+        public static string Mock_ResumePromptNoScreens {
+            get {
+                return ResourceManager.GetString("Mock_ResumePromptNoScreens", resourceCulture);
+            }
+        }
+
+        public static string Mock_ResumePromptTransitionsHeading {
+            get {
+                return ResourceManager.GetString("Mock_ResumePromptTransitionsHeading", resourceCulture);
+            }
+        }
+
+        public static string Mock_ResumePromptNoTransitions {
+            get {
+                return ResourceManager.GetString("Mock_ResumePromptNoTransitions", resourceCulture);
+            }
+        }
+
+        public static string Mock_ResumePromptRevisionsHeading {
+            get {
+                return ResourceManager.GetString("Mock_ResumePromptRevisionsHeading", resourceCulture);
+            }
+        }
+
+        public static string Mock_ResumePromptNoRevisions {
+            get {
+                return ResourceManager.GetString("Mock_ResumePromptNoRevisions", resourceCulture);
+            }
+        }
+
+        public static string Mock_ResumePromptStylesheetHeading {
+            get {
+                return ResourceManager.GetString("Mock_ResumePromptStylesheetHeading", resourceCulture);
+            }
+        }
+
+        public static string Mock_ResumePromptStylesheetBodyFormat {
+            get {
+                return ResourceManager.GetString("Mock_ResumePromptStylesheetBodyFormat", resourceCulture);
+            }
+        }
+
+        public static string Mock_ResumePromptSchemaHeading {
+            get {
+                return ResourceManager.GetString("Mock_ResumePromptSchemaHeading", resourceCulture);
+            }
+        }
+
+        public static string Mock_ResumePromptSchemaChangedNote {
+            get {
+                return ResourceManager.GetString("Mock_ResumePromptSchemaChangedNote", resourceCulture);
+            }
+        }
+
+        public static string Mock_ResumePromptGetScreenNote {
+            get {
+                return ResourceManager.GetString("Mock_ResumePromptGetScreenNote", resourceCulture);
             }
         }
 

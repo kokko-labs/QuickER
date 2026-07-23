@@ -13,7 +13,7 @@ namespace QuickER.AI.Mock;
 /// <param name="ProjectDirectory">プロジェクトフォルダ（<c>{出力フォルダ}/{ProjectName}/</c>）の絶対パス</param>
 /// <param name="ProjectFilePath">生成した csproj の絶対パス（プロジェクトフォルダ配下）</param>
 /// <param name="GeneratedDirectory">データ層コードを書き出した <c>Generated/</c> の絶対パス</param>
-/// <param name="DesignHtmlPath">デザイン仕様 HTML（<c>design/mock.html</c>）の絶対パス</param>
+/// <param name="DesignFolderPath">デザイン仕様のモックフォルダ（<c>design/mock/</c>）の絶対パス</param>
 /// <param name="ReadmePath">規約ドキュメント（<c>README-QuickER.md</c>）の絶対パス</param>
 /// <param name="RepositoryDialect">QuickER 版 Repository を出力した方言（未出力なら null）</param>
 /// <param name="WrittenFiles">書き出した全ファイルの絶対パス</param>
@@ -22,20 +22,20 @@ public sealed record MockProjectScaffoldResult(
     string ProjectDirectory,
     string ProjectFilePath,
     string GeneratedDirectory,
-    string DesignHtmlPath,
+    string DesignFolderPath,
     string ReadmePath,
     string? RepositoryDialect,
     IReadOnlyList<string> WrittenFiles
 );
 
 /// <summary>
-/// 確定 HTML をデザイン仕様として、WPF モックプロジェクトの「決定的な土台」を出力フォルダへ書き出すサービス。
+/// モックフォルダをデザイン仕様として、WPF モックプロジェクトの「決定的な土台」を出力フォルダへ書き出すサービス。
 /// </summary>
 /// <remarks>
 /// <para>
 /// 出力構成は Visual Studio 標準（ソリューション＋プロジェクトフォルダ）とする。ソリューションファイル
 /// <c>{ProjectName}.sln</c> を出力フォルダ直下に、プロジェクト一式（csproj スケルトン・<c>README-QuickER.md</c>・
-/// <c>design/mock.html</c>・データ層コード <c>Generated/</c>）を <c>{出力フォルダ}/{ProjectName}/</c> 配下へ書き出す。
+/// デザイン仕様のモックフォルダ <c>design/mock/</c>・データ層コード <c>Generated/</c>）を <c>{出力フォルダ}/{ProjectName}/</c> 配下へ書き出す。
 /// データ層コードは Entity/EditModel/Mapper/InMemory＋図の方言が対応方言ならQuickER 版 Repository を Split 出力する。
 /// UI 層（App/MainWindow/ビュー・ビューモデル）は AI（Claude Code）に書かせるため、ここでは生成しない。
 /// </para>
@@ -49,8 +49,8 @@ public sealed class MockProjectScaffoldService
     /// <summary>データ層コードを配置するサブフォルダ名（読み取り専用の自動生成コード）</summary>
     public const string GeneratedFolderName = "Generated";
 
-    /// <summary>デザイン仕様 HTML の相対パス</summary>
-    public const string DesignHtmlRelativePath = "design/mock.html";
+    /// <summary>デザイン仕様のモックフォルダの相対パス（<c>design/mock/</c> にモックフォルダの内容を同梱する）</summary>
+    public const string DesignFolderRelativePath = "design/mock";
 
     /// <summary>規約ドキュメントのファイル名</summary>
     public const string ReadmeFileName = "README-QuickER.md";
@@ -73,19 +73,19 @@ public sealed class MockProjectScaffoldService
     /// <param name="diagram">生成元の ER 図（意味モデル）</param>
     /// <param name="outputDirectory">出力フォルダ</param>
     /// <param name="projectName">プロジェクト名（csproj 名・ルート名前空間の由来）</param>
-    /// <param name="designHtml">デザイン仕様として同梱する確定 HTML</param>
+    /// <param name="mockFolder">デザイン仕様として同梱するモックフォルダのパス（mock.json＋画面 HTML＋共有 style.css）</param>
     /// <exception cref="InvalidOperationException">コード生成にエラーがある場合</exception>
     public MockProjectScaffoldResult Scaffold(
         ErDiagram diagram,
         string outputDirectory,
         string projectName,
-        string designHtml
+        string mockFolder
     )
     {
         ArgumentNullException.ThrowIfNull(diagram);
         ArgumentException.ThrowIfNullOrWhiteSpace(outputDirectory);
         ArgumentException.ThrowIfNullOrWhiteSpace(projectName);
-        ArgumentNullException.ThrowIfNull(designHtml);
+        ArgumentException.ThrowIfNullOrWhiteSpace(mockFolder);
 
         Directory.CreateDirectory(outputDirectory);
         var written = new List<string>();
@@ -111,11 +111,12 @@ public sealed class MockProjectScaffoldService
         var readmePath = Path.Combine(projectDirectory, ReadmeFileName);
         WriteText(readmePath, BuildReadme(projectName, rootNamespace, repositoryDialect), written);
 
-        var designHtmlPath = Path.Combine(
+        // モックフォルダの内容（mock.json・画面 HTML・共有 style.css）を design/mock/ へフラットに同梱する
+        var designFolderPath = Path.Combine(
             projectDirectory,
-            DesignHtmlRelativePath.Replace('/', Path.DirectorySeparatorChar)
+            DesignFolderRelativePath.Replace('/', Path.DirectorySeparatorChar)
         );
-        WriteText(designHtmlPath, designHtml, written);
+        CopyMockFolder(mockFolder, designFolderPath, written);
 
         // ソリューションはプロジェクトを 1 つ参照する最小構成で出力フォルダ直下へ出す（GUID は名前から決定的に導出）
         var solutionFilePath = Path.Combine(outputDirectory, $"{projectName}.sln");
@@ -126,7 +127,7 @@ public sealed class MockProjectScaffoldService
             ProjectDirectory: projectDirectory,
             ProjectFilePath: projectFilePath,
             GeneratedDirectory: generatedDirectory,
-            DesignHtmlPath: designHtmlPath,
+            DesignFolderPath: designFolderPath,
             ReadmePath: readmePath,
             RepositoryDialect: repositoryDialect,
             WrittenFiles: written
@@ -353,9 +354,9 @@ public sealed class MockProjectScaffoldService
 
         return $@"# {projectName}
 
-QuickER が確定 HTML モックから生成した WPF モックプロジェクトです。
+QuickER がモックフォルダから生成した WPF モックプロジェクトです。
 データ層（`Generated/` 配下）は QuickER が決定的に生成しており、UI 層（App / MainWindow / ビュー・ビューモデル）は
-`design/mock.html` のデザイン仕様に沿って実装します。
+`design/mock/` のデザイン仕様（複数画面）に沿って実装します。
 
 ## プロジェクト構成
 
@@ -366,7 +367,10 @@ QuickER が確定 HTML モックから生成した WPF モックプロジェク�
 - `{projectName}/{projectName}.csproj` … WPF（net10.0-windows）のプロジェクトファイル。
 - `{projectName}/Generated/` … QuickER が生成したデータ層（Entity / EditModel / Mapper / Repository 契約・実装 / インメモリ実装）。
   **このフォルダは自動生成コードのため、手で編集・削除しないでください（再生成で上書きされます）。**
-- `{projectName}/design/mock.html` … 再現すべき画面のデザイン仕様（画面構成・項目・遷移）。
+- `{projectName}/design/mock/` … 再現すべき画面のデザイン仕様（モックフォルダ）。
+  - `design/mock/mock.json` … 画面一覧・画面遷移・改訂履歴のマニフェスト。まずこれを読んで全体像を把握します。
+  - `design/mock/*.html` … 1 ファイル＝1 画面のデザイン仕様（画面構成・項目）。
+  - `design/mock/style.css` … 全画面が共有するデザインシステム（共有 CSS）。
 - App / MainWindow / ビュー・ビューモデル等の UI 層は `{projectName}/` フォルダ配下に追加してください。
 
 ## 実装の規約
@@ -374,8 +378,9 @@ QuickER が確定 HTML モックから生成した WPF モックプロジェク�
 - UI は **CommunityToolkit.Mvvm** を用いた MVVM（`ObservableObject` / `RelayCommand` / `[ObservableProperty]`）で実装します。
 - データアクセスは `Generated/` の **`I{{Entity}}Repository`** を DI 経由で受け取って使います
   （リポジトリの具象を直接 `new` しないでください）。
-- 画面は `design/mock.html` の構成・項目・遷移を WPF のネイティブ UI で忠実に再現します
-  （HTML をそのまま埋め込むのではなく、WPF のウィンドウ／ページ／ユーザーコントロールへ作り直します）。
+- まず `design/mock/mock.json` で画面一覧と画面遷移（transitions）を把握し、各 `*.html` の構成・項目を WPF の
+  ネイティブ UI で忠実に再現します（HTML をそのまま埋め込むのではなく、WPF のウィンドウ／ページ／ユーザーコントロール
+  へ作り直し、マニフェストの遷移をナビゲーションとして実装します）。
 
 ## 起動時の DI 登録
 
@@ -438,6 +443,25 @@ var provider = services.BuildServiceProvider();
             .Select(segment => char.IsDigit(segment[0]) ? "_" + segment : segment);
 
         return string.Join('.', segments);
+    }
+
+    /// <summary>
+    /// モックフォルダ直下のファイル（mock.json・画面 HTML・共有 style.css 等）を同梱先へフラットにコピーする。
+    /// </summary>
+    /// <remarks>
+    /// モックフォルダはフラット構成（サブフォルダなし）が前提のため、直下のファイルのみを対象にする。
+    /// 同名ファイルは上書きし、コピーしたパスを書き出し記録へ加える。
+    /// </remarks>
+    private static void CopyMockFolder(string mockFolder, string designFolder, List<string> written)
+    {
+        Directory.CreateDirectory(designFolder);
+
+        foreach (var source in Directory.EnumerateFiles(mockFolder))
+        {
+            var destination = Path.Combine(designFolder, Path.GetFileName(source));
+            File.Copy(source, destination, overwrite: true);
+            written.Add(destination);
+        }
     }
 
     /// <summary>テキストをフォルダ作成込みで BOM なし UTF-8 で書き出し、書き出しパスを記録する</summary>
