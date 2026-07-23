@@ -26,9 +26,27 @@ internal sealed class FakeCodexAppServerClient : ICodexAppServerClient
 
     public string? LastTurnPrompt { get; private set; }
 
+    /// <summary>StartTurnAsync に渡されたプロンプトを送信順に記録する（多ターンの検証用）</summary>
+    public List<string> TurnPrompts { get; } = new();
+
+    /// <summary>StartTurnAsync が呼ばれた回数（ナッジによる追加ターンの検証用）</summary>
+    public int StartTurnCount { get; private set; }
+
+    /// <summary>
+    /// 非空なら StartTurnAsync がターン開始と同時に completed/failed 通知を自動発火する（先頭から 1 件ずつ消費）。
+    /// 多ターンをレース無く駆動するためのフック（空なら従来どおりテストが手動で RaiseTurnCompleted する）。
+    /// </summary>
+    public Queue<(string Status, string? Error)> AutoTurnCompletions { get; } = new();
+
     public int RespondToolCount { get; private set; }
 
     public string? LastToolResult { get; private set; }
+
+    public int InterruptTurnCount { get; private set; }
+
+    public string? LastInterruptThreadId { get; private set; }
+
+    public string? LastInterruptTurnId { get; private set; }
 
     public Task StartAsync(
         CodexAppServerSettings settings,
@@ -95,14 +113,32 @@ internal sealed class FakeCodexAppServerClient : ICodexAppServerClient
     )
     {
         LastTurnPrompt = prompt;
-        return Task.FromResult(new CodexTurnInfo { Id = "turn_test", Status = "inProgress" });
+        TurnPrompts.Add(prompt);
+        StartTurnCount++;
+
+        var info = new CodexTurnInfo { Id = "turn_test", Status = "inProgress" };
+
+        // スクリプト化された完了があれば、ターン開始と同時に完了通知を自動発火する
+        if (AutoTurnCompletions.Count > 0)
+        {
+            var (status, error) = AutoTurnCompletions.Dequeue();
+            RaiseTurnCompleted(status, error);
+        }
+
+        return Task.FromResult(info);
     }
 
     public Task InterruptTurnAsync(
         string threadId,
         string turnId,
         CancellationToken cancellationToken = default
-    ) => Task.CompletedTask;
+    )
+    {
+        InterruptTurnCount++;
+        LastInterruptThreadId = threadId;
+        LastInterruptTurnId = turnId;
+        return Task.CompletedTask;
+    }
 
     public Task RespondToDynamicToolCallAsync(
         int requestId,

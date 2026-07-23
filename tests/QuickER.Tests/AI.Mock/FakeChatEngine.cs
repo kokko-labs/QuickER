@@ -20,6 +20,13 @@ internal sealed class FakeChatEngine : IErChatEngine
     /// <summary>次の SendAsync で再生するツール呼び出し（ツール名・引数 JSON）</summary>
     public (string Tool, string Args)? ScriptedToolCall { get; set; }
 
+    /// <summary>
+    /// SendAsync ごとに 1 バッチずつ再生するツール呼び出し列（固定パイプライン検証用）。
+    /// 各 SendAsync でキューから 1 バッチを取り出し、その中のツール呼び出しを順に実行する
+    /// （空になったターンはツール呼び出しなし＝emit なしターンを再現する）。
+    /// </summary>
+    public Queue<IReadOnlyList<(string Tool, string Args)>> ScriptedTurns { get; } = new();
+
     /// <summary>直近のツール実行結果（テストからの検証用）</summary>
     public (string Result, bool Success)? LastToolResult { get; private set; }
 
@@ -61,6 +68,20 @@ internal sealed class FakeChatEngine : IErChatEngine
                 new ErChatToolActivity(call.Tool, result.Result, result.Success)
             );
             ScriptedToolCall = null;
+        }
+
+        // 固定パイプライン検証: このターン分のバッチを取り出し、含まれるツール呼び出しを順に実行する
+        if (ScriptedTurns.Count > 0)
+        {
+            foreach (var (tool, args) in ScriptedTurns.Dequeue())
+            {
+                var result = _toolHost.Execute(tool, args);
+                LastToolResult = result;
+                ToolActivityReceived?.Invoke(
+                    this,
+                    new ErChatToolActivity(tool, result.Result, result.Success)
+                );
+            }
         }
 
         TurnCompleted?.Invoke(this, new ErChatTurnResult(true, null));

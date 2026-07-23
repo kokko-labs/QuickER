@@ -116,7 +116,7 @@
     <value>単一 HTML 出力</value>
   </data>
   <data name="Mock_Step2Header" xml:space="preserve">
-    <value>WPF モックプロジェクトを生成（Claude Code）</value>
+    <value>WPF モックプロジェクトを生成</value>
   </data>
   <data name="Mock_OutputFolder" xml:space="preserve">
     <value>出力フォルダ</value>
@@ -179,11 +179,14 @@
   <data name="Mock_DisabledReason_NoScreens" xml:space="preserve">
     <value>先にモックフォルダへ画面を 1 つ以上追加してください。</value>
   </data>
-  <data name="Mock_DisabledReason_ClaudeCodeOnly" xml:space="preserve">
-    <value>WPF モック生成はバックエンドが Claude Code のときのみ利用できます。</value>
-  </data>
   <data name="Mock_DisabledReason_ClaudeCli" xml:space="preserve">
     <value>claude CLI が見つかりません。Claude Code をインストールし PATH を通してください。</value>
+  </data>
+  <data name="Mock_DisabledReason_ApiKeyNotReady" xml:space="preserve">
+    <value>API キータブで API キーを入力してください（または Ollama プロバイダーを選択）。</value>
+  </data>
+  <data name="Mock_DisabledReason_CodexNotReady" xml:space="preserve">
+    <value>Codex が利用可能ではありません。Codex タブで接続・ログインしてください。</value>
   </data>
   <data name="Mock_DisabledReason_Dotnet" xml:space="preserve">
     <value>.NET SDK（dotnet）が見つかりません。.NET SDK をインストールしてください。</value>
@@ -237,6 +240,23 @@
   </data>
   <data name="Mock_GenerationFailedFormat" xml:space="preserve">
     <value>WPF モック生成に失敗しました: {0}</value>
+  </data>
+  <data name="Mock_Codex_AutoContinueNotice" xml:space="preserve">
+    <value>
+（承認待ちを検知：自動続行します）
+</value>
+  </data>
+  <data name="Mock_GenResultSuccessBodyFormat" xml:space="preserve">
+    <value>{0}
+
+出力フォルダ:
+{1}</value>
+  </data>
+  <data name="Mock_GenResultFailureBodyFormat" xml:space="preserve">
+    <value>{0}
+
+詳細はログを確認してください:
+{1}</value>
   </data>
   <data name="Mock_MockUpdated" xml:space="preserve">
     <value>モックを更新しました。</value>
@@ -316,7 +336,10 @@
     <value>生成を中断しました。途中経過とログは出力フォルダに残っています。</value>
   </data>
   <data name="Mock_Result_NotLoggedIn" xml:space="preserve">
-    <value>Claude Code が未ログインです。ターミナルで `claude` を起動し /login でログインしてください。</value>
+    <value>選択中の AI バックエンドが未ログインです。Claude Code（`claude` 起動→/login）または Codex にログインしてやり直してください。</value>
+  </data>
+  <data name="Mock_CodexNotLoggedIn" xml:space="preserve">
+    <value>Codex が未ログインです。</value>
   </data>
   <data name="Mock_Result_ClientFailedFormat" xml:space="preserve">
     <value>Claude Code の実行に失敗しました: {0}。ログを確認してください。</value>
@@ -435,5 +458,44 @@
   </data>
   <data name="Mock_ResumePromptGetScreenNote" xml:space="preserve">
     <value>既存画面を修正する前に、必ず get_screen で現状の HTML を取得してから編集してください。</value>
+  </data>
+  <data name="Mock_ApiKeyOneShotNote" xml:space="preserve">
+    <value>※ API キー方式は一発生成（自己修正なし）のため失敗することがあります。</value>
+  </data>
+  <data name="Mock_ApiRun_CommonPart" xml:space="preserve">
+    <value>[{0}/{1}] 共通部（App / MainWindow / ナビゲーション）を生成中...</value>
+  </data>
+  <data name="Mock_ApiRun_Screen" xml:space="preserve">
+    <value>[{0}/{1}] 画面 '{2}' を生成中...</value>
+  </data>
+  <data name="Mock_ApiRun_Emit" xml:space="preserve">
+    <value>emit: {0}</value>
+  </data>
+  <data name="Mock_ApiRun_EmitRejectedFormat" xml:space="preserve">
+    <value>emit を拒否: {0}</value>
+  </data>
+  <data name="Mock_ApiRun_NoEmit" xml:space="preserve">
+    <value>（このターンではファイルが提出されませんでした）</value>
+  </data>
+  <data name="Mock_ApiRun_Build" xml:space="preserve">
+    <value>== 中間ビルドを検証します（dotnet build） ==</value>
+  </data>
+  <data name="Mock_ApiRun_BuildOk" xml:space="preserve">
+    <value>ビルド: 成功しました。</value>
+  </data>
+  <data name="Mock_ApiRun_BuildFailedFixing" xml:space="preserve">
+    <value>中間ビルド: 失敗しました。修正ターンを 1 回要求します...</value>
+  </data>
+  <data name="Mock_ApiRun_Rebuild" xml:space="preserve">
+    <value>== 修正後のビルドを再検証します ==</value>
+  </data>
+  <data name="Mock_ApiRun_BuildFail" xml:space="preserve">
+    <value>ビルド: 修正後も失敗しました。</value>
+  </data>
+  <data name="Mock_ApiRun_ErrorBuildFailed" xml:space="preserve">
+    <value>修正ターン後もビルドが失敗しました。</value>
+  </data>
+  <data name="Mock_ApiRun_ErrorTurnFailedFormat" xml:space="preserve">
+    <value>生成ターンが失敗しました: {0}</value>
   </data>
 </root>

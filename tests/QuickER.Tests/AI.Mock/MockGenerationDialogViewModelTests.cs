@@ -29,18 +29,27 @@ public class MockGenerationDialogViewModelTests
     private sealed class FakeMockProjectGenerator : IMockProjectGenerator
     {
         public bool ClaudeAvailable { get; set; } = true;
+        public bool CodexAvailable { get; set; } = true;
         public bool DotnetAvailable { get; set; } = true;
         public bool ResultSuccess { get; set; } = true;
+
+        /// <summary>返す結果の中断フラグ（true でユーザー中断＝VM は完了ダイアログを出さない）</summary>
+        public bool ResultInterrupted { get; set; }
+
         public bool Interrupted { get; private set; }
         public int GenerateCallCount { get; private set; }
         public string? CapturedOutputFolder { get; private set; }
         public string? CapturedProjectName { get; private set; }
         public string? CapturedMockFolder { get; private set; }
         public string? CapturedInstructions { get; private set; }
+        public ErChatBackendKind? CapturedBackend { get; private set; }
+        public string? CapturedModel { get; private set; }
+        public string? CapturedModelProvider { get; private set; }
 
         public MockProjectTarget Target => MockProjectTarget.Wpf;
 
-        public bool IsClaudeAvailable() => ClaudeAvailable;
+        public bool IsAgentAvailable(ErChatBackendKind backend) =>
+            backend == ErChatBackendKind.Codex ? CodexAvailable : ClaudeAvailable;
 
         public Task<bool> IsDotnetAvailableAsync(CancellationToken cancellationToken = default) =>
             Task.FromResult(DotnetAvailable);
@@ -51,7 +60,9 @@ public class MockGenerationDialogViewModelTests
             string? additionalInstructions,
             string outputDirectory,
             string projectName,
+            ErChatBackendKind backend,
             string model,
+            string modelProvider,
             Action<string> onProgress,
             CancellationToken cancellationToken = default
         )
@@ -61,6 +72,9 @@ public class MockGenerationDialogViewModelTests
             CapturedProjectName = projectName;
             CapturedMockFolder = mockFolder;
             CapturedInstructions = additionalInstructions;
+            CapturedBackend = backend;
+            CapturedModel = model;
+            CapturedModelProvider = modelProvider;
             onProgress("進捗: 生成中...\n");
 
             return Task.FromResult(
@@ -68,7 +82,8 @@ public class MockGenerationDialogViewModelTests
                     ResultSuccess,
                     ResultSuccess ? "完了しました。" : "失敗しました。",
                     outputDirectory,
-                    Path.Combine(outputDirectory, "quickr-mock-generation.log")
+                    Path.Combine(outputDirectory, "quickr-mock-generation.log"),
+                    ResultInterrupted
                 )
             );
         }
@@ -167,7 +182,7 @@ public class MockGenerationDialogViewModelTests
         FakeMockProjectGenerator generator,
         string baseFolder,
         string mockFolder
-    ) CreateVmWithGenerator(ErDiagram diagram)
+    ) CreateVmWithGenerator(ErDiagram diagram, StubDialogService? dialogs = null)
     {
         var baseFolder = Path.Combine(
             Path.GetTempPath(),
@@ -187,7 +202,7 @@ public class MockGenerationDialogViewModelTests
             codexEngineFactory: null,
             claudeCodeEngineFactory: (_, toolHost) => engineBox[0] = new FakeChatEngine(toolHost),
             mockProjectGenerator: generator,
-            dialogService: new StubDialogService()
+            dialogService: dialogs ?? new StubDialogService()
         );
 
         return (vm, engineBox, generator, baseFolder, mockFolder);
@@ -904,9 +919,105 @@ public class MockGenerationDialogViewModelTests
         }
     }
 
-    /// <summary>API キー接続では第2ステップが無効（Claude Code 限定）であることを検証する</summary>
-    [Fact(DisplayName = "API キー接続では第2ステップ無効")]
-    public async Task CanGenerateMockProject_FalseOnNonClaudeBackend()
+    /// <summary>生成成功時は完了を情報ダイアログで明示する（出力フォルダ入り）ことを検証する</summary>
+    [Fact(DisplayName = "生成成功で完了情報ダイアログを出す")]
+    public async Task GenerateMockProject_Success_ShowsInformationDialog()
+    {
+        var dialogs = new StubDialogService();
+        var (vm, engineBox, generator, baseFolder, mockFolder) = CreateVmWithGenerator(
+            NonEmptyDiagram(),
+            dialogs
+        );
+
+        try
+        {
+            generator.ResultSuccess = true;
+            await vm.RefreshMockGenAvailabilityAsync();
+            await SaveScreenOnClaudeCode(vm, engineBox, mockFolder);
+            var outFolder = Path.Combine(baseFolder, "out");
+            vm.OutputFolder = outFolder;
+            vm.ProjectName = "AcmeMock";
+
+            await vm.GenerateMockProjectCommand.ExecuteAsync(null);
+
+            // 成功は ShowInformation を 1 回・出力フォルダを含む・エラーは出ない
+            dialogs.InformationMessages.Should().ContainSingle().Which.Should().Contain(outFolder);
+            dialogs.ErrorMessages.Should().BeEmpty();
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
+    /// <summary>生成失敗時はエラーダイアログでログパスを添えて詳細確認へ誘導することを検証する</summary>
+    [Fact(DisplayName = "生成失敗でエラーダイアログ（ログパス含む）を出す")]
+    public async Task GenerateMockProject_Failure_ShowsErrorDialogWithLogPath()
+    {
+        var dialogs = new StubDialogService();
+        var (vm, engineBox, generator, baseFolder, mockFolder) = CreateVmWithGenerator(
+            NonEmptyDiagram(),
+            dialogs
+        );
+
+        try
+        {
+            generator.ResultSuccess = false;
+            await vm.RefreshMockGenAvailabilityAsync();
+            await SaveScreenOnClaudeCode(vm, engineBox, mockFolder);
+            vm.OutputFolder = Path.Combine(baseFolder, "out");
+            vm.ProjectName = "AcmeMock";
+
+            await vm.GenerateMockProjectCommand.ExecuteAsync(null);
+
+            // 失敗は ShowError を 1 回・ログパスを含む・情報ダイアログは出ない
+            dialogs
+                .ErrorMessages.Should()
+                .ContainSingle()
+                .Which.Should()
+                .Contain("quickr-mock-generation.log");
+            dialogs.InformationMessages.Should().BeEmpty();
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
+    /// <summary>ユーザー自身の中断による終了時は、情報・エラーいずれのダイアログも出さないことを検証する</summary>
+    [Fact(DisplayName = "中断による終了ではダイアログを出さない")]
+    public async Task GenerateMockProject_Interrupted_ShowsNoDialog()
+    {
+        var dialogs = new StubDialogService();
+        var (vm, engineBox, generator, baseFolder, mockFolder) = CreateVmWithGenerator(
+            NonEmptyDiagram(),
+            dialogs
+        );
+
+        try
+        {
+            generator.ResultSuccess = false;
+            generator.ResultInterrupted = true;
+            await vm.RefreshMockGenAvailabilityAsync();
+            await SaveScreenOnClaudeCode(vm, engineBox, mockFolder);
+            vm.OutputFolder = Path.Combine(baseFolder, "out");
+            vm.ProjectName = "AcmeMock";
+
+            await vm.GenerateMockProjectCommand.ExecuteAsync(null);
+
+            // 中断ではどちらのダイアログも出ない
+            dialogs.InformationMessages.Should().BeEmpty();
+            dialogs.ErrorMessages.Should().BeEmpty();
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
+    /// <summary>API キー接続では、キー未入力なら無効（理由＝ApiKeyNotReady・注記フラグが立つ）／キー不要の Ollama なら有効になることを検証する</summary>
+    [Fact(DisplayName = "API キー接続はキー未入力で無効・Ollama で有効")]
+    public async Task CanGenerateMockProject_ApiKeyBackend_NeedsKeyThenAllows()
     {
         var (vm, engineBox, generator, baseFolder, mockFolder) = CreateVmWithGenerator(
             NonEmptyDiagram()
@@ -920,10 +1031,118 @@ public class MockGenerationDialogViewModelTests
             vm.ProjectName = "AcmeMock";
             vm.CanGenerateMockProject.Should().BeTrue();
 
-            // バックエンドを API キーへ切り替えると無効になる（画面・フォルダは維持）
+            // API キーへ切替（既定プロバイダ=OpenAI・キー未入力）→ 無効・理由は ApiKeyNotReady・注記フラグが立つ
             vm.Connection.SelectedBackend = ErChatBackendKind.ApiKey;
+            vm.IsApiKeyMockGenBackend.Should().BeTrue();
             vm.CanGenerateMockProject.Should().BeFalse();
-            vm.MockGenDisabledReason.Should().Contain("Claude Code");
+            vm.MockGenDisabledReason.Should().Be(MockStrings.Mock_DisabledReason_ApiKeyNotReady);
+
+            // Ollama（キー不要）にすると生成可能になる
+            vm.Connection.ApiProvider = AiProvider.Ollama;
+            vm.CanGenerateMockProject.Should().BeTrue();
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
+    /// <summary>API キーバックエンドで生成を実行すると、backend=ApiKey とモデルが生成器へ渡ることを検証する</summary>
+    [Fact(DisplayName = "API キーバックエンドで生成すると backend=ApiKey が渡る")]
+    public async Task GenerateMockProject_ApiKeyBackend_PassesBackend()
+    {
+        var (vm, engineBox, generator, baseFolder, mockFolder) = CreateVmWithGenerator(
+            NonEmptyDiagram()
+        );
+
+        try
+        {
+            generator.DotnetAvailable = true;
+            await vm.RefreshMockGenAvailabilityAsync();
+            await SaveScreenOnClaudeCode(vm, engineBox, mockFolder);
+
+            // API キー（Ollama＝キー不要）へ切替
+            vm.Connection.SelectedBackend = ErChatBackendKind.ApiKey;
+            vm.Connection.ApiProvider = AiProvider.Ollama;
+            vm.Connection.ApiModel = "llama3";
+            vm.OutputFolder = Path.Combine(baseFolder, "out");
+            vm.ProjectName = "AcmeMock";
+            vm.CanGenerateMockProject.Should().BeTrue();
+
+            await vm.GenerateMockProjectCommand.ExecuteAsync(null);
+
+            generator.CapturedBackend.Should().Be(ErChatBackendKind.ApiKey);
+            generator.CapturedModel.Should().Be("llama3");
+            // API キーはプロバイダーを渡さない（エンジンファクトリが閉じ込める）
+            generator.CapturedModelProvider.Should().BeEmpty();
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
+    /// <summary>Codex バックエンドで認証プローブ結果（_codexReady）が立つと生成可能になり、Codex のモデル／プロバイダが渡ることを検証する</summary>
+    [Fact(
+        DisplayName = "Codex バックエンドで readiness が立つと生成可能・Codex のモデル/プロバイダが渡る"
+    )]
+    public async Task CanGenerateMockProject_CodexBackend_ReadyAndPassesModel()
+    {
+        var (vm, engineBox, generator, baseFolder, mockFolder) = CreateVmWithGenerator(
+            NonEmptyDiagram()
+        );
+
+        try
+        {
+            generator.DotnetAvailable = true;
+            await vm.RefreshMockGenAvailabilityAsync();
+
+            // まず画面を 1 つ用意する（Claude Code 経由で保存）
+            await SaveScreenOnClaudeCode(vm, engineBox, mockFolder);
+
+            // Codex へ切替＋認証プローブ結果（ready）を外部から反映する
+            vm.Connection.SelectedBackend = ErChatBackendKind.Codex;
+            vm.ApplyCodexReadiness(true, "ログイン済み", ConnectionHealth.Ready);
+            vm.Connection.CodexModelProvider = "openai";
+            vm.Connection.CodexModel = "gpt-5-codex";
+            vm.OutputFolder = Path.Combine(baseFolder, "out");
+            vm.ProjectName = "AcmeMock";
+
+            vm.CanGenerateMockProject.Should().BeTrue();
+
+            await vm.GenerateMockProjectCommand.ExecuteAsync(null);
+
+            // Codex のバックエンド・モデル・プロバイダが生成器へ渡る
+            generator.CapturedBackend.Should().Be(ErChatBackendKind.Codex);
+            generator.CapturedModel.Should().Be("gpt-5-codex");
+            generator.CapturedModelProvider.Should().Be("openai");
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
+    /// <summary>Codex バックエンドで認証プローブ未成立のときは生成不可・理由が「Codex 未接続」になることを検証する</summary>
+    [Fact(DisplayName = "Codex 未接続では生成不可・理由が Codex 未接続")]
+    public async Task CanGenerateMockProject_CodexNotReady_ShowsReason()
+    {
+        var (vm, engineBox, generator, baseFolder, mockFolder) = CreateVmWithGenerator(
+            NonEmptyDiagram()
+        );
+
+        try
+        {
+            await vm.RefreshMockGenAvailabilityAsync();
+            await SaveScreenOnClaudeCode(vm, engineBox, mockFolder);
+            vm.OutputFolder = Path.Combine(baseFolder, "out");
+            vm.ProjectName = "AcmeMock";
+
+            // Codex へ切替（_codexReady は未成立のまま）
+            vm.Connection.SelectedBackend = ErChatBackendKind.Codex;
+
+            vm.CanGenerateMockProject.Should().BeFalse();
+            vm.MockGenDisabledReason.Should().Be(MockStrings.Mock_DisabledReason_CodexNotReady);
         }
         finally
         {
