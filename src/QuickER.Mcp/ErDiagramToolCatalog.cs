@@ -11,6 +11,23 @@ namespace QuickER.Mcp;
 /// </remarks>
 public static class ErDiagramToolCatalog
 {
+    /// <summary>
+    /// stdio MCP サーバが初期化時にクライアントへ返す使用指針（MCP の instructions フィールド・英語）。
+    /// 外部エージェントが「特に指示がない限りの既定ルール」（命名規則・単一 PK・FK 手順など）を知る正式経路。
+    /// あくまで誘導であり強制はしない（ルール外の図もツール上は表現できる＝ユーザー指示への柔軟性を残す）。
+    /// </summary>
+    public const string ServerInstructions =
+        "QuickER ER-diagram MCP server. The tools edit a diagram JSON file (DiagramDocument format) and generate SQL DDL / C# code from it.\n"
+        + "\n"
+        + "Design guidelines (defaults - follow the user's explicit instructions when they differ):\n"
+        + "- Before modifying an existing diagram, call get_diagram_summary to see its current state (and list_queries when working with named queries).\n"
+        + "- Naming: unless the user requests a different convention, use PascalCase singular table names (e.g., Customer, OrderItem). When the diagram already has tables, match their existing naming style (casing and singular/plural) instead.\n"
+        + "- Give each table exactly one primary key column, added first with add_column is_primary_key=true (composite primary keys are not supported by the code generator).\n"
+        + "- Add foreign key columns with is_primary_key=false (usually is_nullable=false), then define the reference with add_relationship, giving source_column and target_column explicitly. One relationship references exactly one column pair; add multiple foreign keys as separate relationships.\n"
+        + "- Named queries: set_query is an upsert keyed by (table_name, query_name); definitions are validated before saving.\n"
+        + "- Before writing a generation config for generate_csharp, call get_generation_config_schema to discover the available keys.\n"
+        + "- When a tool returns an error, follow the message to correct the call and retry.";
+
     /// <summary>全 ER 図操作ツールの定義一覧を返す</summary>
     public static IReadOnlyList<ToolDefinition> GetDefinitions()
     {
@@ -33,7 +50,7 @@ public static class ErDiagramToolCatalog
             {
                 Name = "add_entity",
                 Description =
-                    "Adds a new entity (table) to the ER diagram. No columns are created, so after adding, first define exactly one primary key column with add_column, then define the remaining columns.",
+                    "Adds a new entity (table) to the ER diagram. No columns are created, so after adding, first define exactly one primary key column with add_column, then define the remaining columns. Unless the user requests a different convention, use PascalCase singular table names (e.g., Customer, OrderItem); if the diagram already has tables, match their existing naming style.",
                 DeferLoading = false,
                 InputSchema = new
                 {

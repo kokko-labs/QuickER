@@ -46,4 +46,25 @@ public sealed class ErDiagramToolCatalogEnglishGuardTests
                     + "上記のツールに日本語が混入しています（src/QuickER.Mcp/ErDiagramToolCatalog.cs を確認してください）"
             );
     }
+
+    /// <summary>サーバ使用指針（MCP instructions）に日本語（CJK）が含まれないことを検証する</summary>
+    [Fact(DisplayName = "サーバ使用指針（instructions）に日本語（CJK）が含まれない")]
+    public void ServerInstructions_ContainsNoCjk()
+    {
+        CjkPattern
+            .IsMatch(ErDiagramToolCatalog.ServerInstructions)
+            .Should()
+            .BeFalse(
+                "サーバ使用指針（ServerInstructions）は外部エージェント向けの英語正本です"
+                    + "（src/QuickER.Mcp/ErDiagramToolCatalog.cs を確認してください）"
+            );
+    }
+
+    /// <summary>サーバ使用指針が既定の設計指針（命名規則・単一主キー）を含むことを検証する</summary>
+    [Fact(DisplayName = "サーバ使用指針が命名規則・単一主キーの指針を含む")]
+    public void ServerInstructions_ContainsDesignGuidelines()
+    {
+        ErDiagramToolCatalog.ServerInstructions.Should().Contain("PascalCase");
+        ErDiagramToolCatalog.ServerInstructions.Should().Contain("exactly one primary key column");
+    }
 }

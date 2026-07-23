@@ -99,6 +99,11 @@ public class McpServerE2ETests
 
         try
         {
+            // --- 初期化: サーバ使用指針（instructions）が届いていること ---
+            client
+                .ServerInstructions.Should()
+                .Contain("PascalCase", "初期化時にサーバ使用指針（設計既定ルール）が返される");
+
             // --- ListTools: 16 ツール（ER 9 ＋ create_diagram ＋ クエリ定義 3 ＋ generate_csharp ＋ generate_ddl ＋ get_generation_config_schema） ---
             var tools = await client.ListToolsAsync(cancellationToken: cts.Token);
             var toolNames = tools.Select(t => t.Name).ToHashSet();

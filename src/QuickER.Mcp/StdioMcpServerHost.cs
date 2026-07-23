@@ -16,9 +16,14 @@ public static class StdioMcpServerHost
     /// 与えられたツールセット群を stdio トランスポートの MCP サーバとして起動し、終了まで待機する。
     /// </summary>
     /// <param name="toolSets">公開するツールセット群</param>
+    /// <param name="instructions">
+    /// 初期化時にクライアントへ返すサーバ使用指針（MCP の instructions フィールド）。null なら送らない。
+    /// 対応クライアント（Claude Code 等）はこれをエージェントのコンテキストへ取り込む
+    /// </param>
     /// <param name="cancellationToken">停止トークン</param>
     public static async Task RunAsync(
         IReadOnlyList<McpToolSet> toolSets,
+        string? instructions = null,
         CancellationToken cancellationToken = default
     )
     {
@@ -28,7 +33,10 @@ public static class StdioMcpServerHost
         // （ログが JSON-RPC ストリームへ混入するとプロトコルが壊れる）
         builder.Logging.ClearProviders();
 
-        builder.Services.AddMcpServer().WithStdioServerTransport().WithTools(BuildTools(toolSets));
+        builder
+            .Services.AddMcpServer(options => options.ServerInstructions = instructions)
+            .WithStdioServerTransport()
+            .WithTools(BuildTools(toolSets));
 
         var host = builder.Build();
         await host.RunAsync(cancellationToken).ConfigureAwait(false);

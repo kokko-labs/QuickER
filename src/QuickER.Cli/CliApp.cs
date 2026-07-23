@@ -356,7 +356,9 @@ public static class CliApp
             CodeGenToolSet.Create(),
         };
 
-        await StdioMcpServerHost.RunAsync(toolSets, cancellationToken).ConfigureAwait(false);
+        await StdioMcpServerHost
+            .RunAsync(toolSets, ErDiagramToolCatalog.ServerInstructions, cancellationToken)
+            .ConfigureAwait(false);
 
         return 0;
     }
