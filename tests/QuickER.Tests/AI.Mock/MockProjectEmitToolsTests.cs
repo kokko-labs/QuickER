@@ -98,6 +98,8 @@ public class MockProjectEmitToolsTests
     [InlineData("MockApp/README-QuickER.md")]
     [InlineData("MockApp/MockApp.csproj")]
     [InlineData("MockApp.sln")]
+    [InlineData("NuGet.Config")]
+    [InlineData("MockApp/nuget.config")]
     public void ResolveEmitPath_RejectsScaffoldOwnedPaths(string path)
     {
         var result = MockProjectEmitTools.ResolveEmitPath(Work, path);

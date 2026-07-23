@@ -33,7 +33,7 @@ public static class MockProjectEmitTools
                     + "Always submit the entire file content (a diff is not allowed). "
                     + "Re-submitting the same path overwrites the previous content. "
                     + "You cannot read files or run a build; produce complete, compilable files from the information you are given. "
-                    + "Do not write to Generated/ (data layer), design/ (design spec), README-QuickER.md, or the .sln/.csproj files - those are owned by the scaffold and such submissions are rejected.",
+                    + "Do not write to Generated/ (data layer), design/ (design spec), README-QuickER.md, the .sln/.csproj files, or NuGet.Config - those are owned by the scaffold or forbidden, and such submissions are rejected.",
                 DeferLoading = false,
                 InputSchema = new
                 {
@@ -78,7 +78,8 @@ public static class MockProjectEmitTools
     /// <remarks>
     /// 拒否条件（いずれも英語メッセージで失敗を返す）:
     /// 空パス／絶対パス・ドライブ文字・先頭スラッシュ／<c>".."</c>／<c>Generated</c> または <c>design</c> セグメント配下／
-    /// <c>README-QuickER.md</c>／拡張子 <c>.sln</c>・<c>.csproj</c>（スキャフォールドが作成済みのため上書き不可）。
+    /// <c>README-QuickER.md</c>／<c>NuGet.Config</c>（パッケージソース設定の追加禁止）／
+    /// 拡張子 <c>.sln</c>・<c>.csproj</c>（スキャフォールドが作成済みのため上書き不可）。
     /// 新規の UI 層ファイル（App.xaml・Views/・ViewModels/ 等）はプロジェクト配下なら自由に追加できる。
     /// </remarks>
     public static EmitPathResult ResolveEmitPath(string workingDirectory, string? path)
@@ -157,6 +158,17 @@ public static class MockProjectEmitTools
                 string.Empty,
                 string.Empty,
                 $"path is not writable (scaffold-owned {MockProjectScaffoldService.ReadmeFileName}): {path}"
+            );
+        }
+
+        // パッケージソース設定の追加は禁止（復元先のすり替え・オフライン固定化を防ぐ）
+        if (string.Equals(fileName, "NuGet.Config", StringComparison.OrdinalIgnoreCase))
+        {
+            return new EmitPathResult(
+                false,
+                string.Empty,
+                string.Empty,
+                $"path is not writable (package source configuration is not allowed): {path}"
             );
         }
 

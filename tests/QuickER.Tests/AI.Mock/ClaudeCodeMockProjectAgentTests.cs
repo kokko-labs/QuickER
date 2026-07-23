@@ -103,6 +103,11 @@ public class ClaudeCodeMockProjectAgentTests
         options.SystemPrompt.Should().Contain("XAML の View");
         options.SystemPrompt.Should().Contain("禁止");
         options.SystemPrompt.Should().Contain("ハードコードされたリストで代用してはいけません");
+
+        // 主キーのアプリ側採番（GuidKey の例外込み）とパッケージソース設定の禁止が入る
+        options.SystemPrompt.Should().Contain("アプリ側で採番");
+        options.SystemPrompt.Should().Contain("GuidKey");
+        options.SystemPrompt.Should().Contain("NuGet.Config");
         // 初回プロンプトの完了条件チェックリスト
         client.CapturedPrompt.Should().Contain("完了条件");
         client.CapturedPrompt.Should().Contain("Repository 経由");

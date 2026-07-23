@@ -46,6 +46,8 @@ internal static class MockProjectPromptBuilder
 - 各画面は必ず XAML の View（Window / Page / UserControl の .xaml ＋コードビハインド）として定義してください。C# コードだけでコントロールツリーを組み立てる実装（new したコントロールをコードで並べる方式）は禁止です。
 - 画面のデータ表示・登録・更新・削除は、必ず {projectName}/Generated/ の生成コード（Entity / EditModel / Mapper / I{{Entity}}Repository）を使って実装してください。独自のデータクラスや ViewModel 内のハードコードされたリストで代用してはいけません（一覧・詳細は Repository から取得し、登録・更新・削除は Repository へ保存します）。
 - 起動時の DI 登録は AddGeneratedInMemoryRepositories()（サンプルデータ入り）を使ってください（実 DB 接続は不要）。
+- 新規作成（Insert）時の主キーは必ずアプリ側で採番してください（QuickER の Repository は DB 自動採番を使いません。未採番のままでは EditModel の検証や保存が失敗します）。主キーが値オブジェクト（GuidKey）の場合は無引数の Create() で新しいキーを生成できます。数値キーの場合は既存データの最大値＋1 等で採番します。
+- NuGet.Config 等のパッケージソース設定ファイルを追加・変更しないでください（パッケージ参照は csproj の既存設定のまま復元します）。
 
 # 進め方
 - App.xaml / App.xaml.cs 等の UI 層のソースは {projectName}/ フォルダ配下（csproj と同じ場所）に追加します。
@@ -75,6 +77,7 @@ internal static class MockProjectPromptBuilder
 完了条件（すべて満たすこと）:
 - 各画面が XAML の View（.xaml）として存在し、対応する ViewModel（CommunityToolkit.Mvvm）と組になっている。
 - 一覧・詳細・登録／編集のデータ操作がすべて I{{Entity}}Repository 経由である（独自データクラスやハードコードのリストで代用していない）。
+- 新規登録（Insert）が主キーの採番込みで実際に保存できる。
 - mock.json の transitions が画面遷移として動作する。
 - `dotnet build` がエラー・警告なしで成功している。
 
@@ -115,6 +118,8 @@ internal static class MockProjectPromptBuilder
 - 各画面は必ず XAML の View（Window / Page / UserControl の .xaml ＋コードビハインド）として定義してください。C# コードだけでコントロールツリーを組み立てる実装（new したコントロールをコードで並べる方式）は禁止です。
 - 起動時の DI 登録は AddGeneratedInMemoryRepositories()（サンプルデータ入り）を使ってください（実 DB 接続は不要）。
 - データアクセスは I{{Entity}}Repository を DI 経由で受け取って使い、具象を直接 new しないでください。画面のデータ表示・登録・更新・削除は必ず Repository 経由とし、独自のデータクラスや ViewModel 内のハードコードされたリストで代用してはいけません。
+- 新規作成（Insert）時の主キーは必ずアプリ側で採番してください（QuickER の Repository は DB 自動採番を使いません。未採番のままでは EditModel の検証や保存が失敗します）。主キーが値オブジェクト（GuidKey）の場合は無引数の Create() で新しいキーを生成できます。数値キーの場合は既存データの最大値＋1 等で採番します。
+- NuGet.Config 等のパッケージソース設定ファイルを提出しないでください（提出しても拒否されます）。
 - 各画面はデザイン仕様（HTML）を WPF のネイティブ UI で忠実に再現し、宣言された画面遷移をナビゲーションとして実装してください（HTML をそのまま埋め込まない）。
 - {projectName}/{MockProjectScaffoldService.GeneratedFolderName}/ 配下（データ層）・design/ 配下（デザイン仕様）・{ReadmeFileName}・.sln/.csproj は変更しないでください（提出しても拒否されます）。UI 層のソースだけを追加・更新します。
 

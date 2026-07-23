@@ -214,6 +214,11 @@ public class ApiKeyMockProjectAgentTests
                 .BuildSystemPrompt()
                 .Should()
                 .Contain("ハードコードされたリストで代用してはいけません");
+
+            // 主キーのアプリ側採番（GuidKey の例外込み）とパッケージソース設定の禁止が入る
+            profileBox[0].BuildSystemPrompt().Should().Contain("アプリ側で採番");
+            profileBox[0].BuildSystemPrompt().Should().Contain("GuidKey");
+            profileBox[0].BuildSystemPrompt().Should().Contain("NuGet.Config");
         }
         finally
         {
