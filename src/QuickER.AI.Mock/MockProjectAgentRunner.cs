@@ -70,8 +70,8 @@ public sealed class MockProjectAgentRunner
     /// <summary>ログファイル名（出力フォルダ直下）</summary>
     public const string LogFileName = "quickr-mock-generation.log";
 
-    /// <summary>デザイン仕様 HTML の相対パス（スキャフォールドが配置する）</summary>
-    public const string DesignHtmlRelativePath = "design/mock.html";
+    /// <summary>デザイン仕様のモックフォルダの相対パス（スキャフォールドが同梱する）</summary>
+    public const string DesignFolderRelativePath = "design/mock";
 
     /// <summary>規約ドキュメントのファイル名</summary>
     public const string ReadmeFileName = "README-QuickER.md";
@@ -116,12 +116,14 @@ public sealed class MockProjectAgentRunner
     /// </summary>
     /// <param name="outputDirectory">スキャフォールド済みの出力フォルダ（cwd になる）</param>
     /// <param name="projectName">プロジェクト名（プロンプトの案内に使う）</param>
+    /// <param name="additionalInstructions">実装に対する追加指示（空／null なら付与しない）</param>
     /// <param name="model">Claude Code モデルエイリアス（空なら既定）</param>
     /// <param name="onProgress">進捗テキストの逐次転送先</param>
     /// <param name="cancellationToken">外部キャンセルトークン</param>
     public async Task<MockProjectAgentResult> RunAsync(
         string outputDirectory,
         string projectName,
+        string? additionalInstructions,
         string model,
         Action<string> onProgress,
         CancellationToken cancellationToken = default
@@ -151,7 +153,7 @@ public sealed class MockProjectAgentRunner
         EmitLine(string.Format(Strings.Mock_Run_ProjectNameFormat, projectName));
 
         var options = BuildLaunchOptions(model, outputDirectory, projectName);
-        var prompt = BuildPrompt(projectName);
+        var prompt = BuildPrompt(projectName, additionalInstructions);
 
         _runCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _runCts.CancelAfter(_timeout);
@@ -315,7 +317,7 @@ public sealed class MockProjectAgentRunner
 
 # 守るべき規約
 - 作業を始める前に、必ず {projectName}/{ReadmeFileName} を読み、その規約に従ってください。
-- {projectName}/{DesignHtmlRelativePath} がデザイン仕様です。この HTML の画面構成・項目・画面遷移を WPF で忠実に再現してください（HTML をそのまま埋め込むのではなく、WPF のネイティブ UI で作り直します）。
+- {projectName}/{DesignFolderRelativePath}/ がデザイン仕様のモックフォルダです。まず {projectName}/{DesignFolderRelativePath}/mock.json を読んで画面一覧（screens）と画面遷移（transitions）を把握し、各画面の *.html（1 ファイル＝1 画面のデザイン仕様）と共有デザインシステム style.css を確認してください。各画面の画面構成・項目を WPF で忠実に再現し、マニフェストの遷移をナビゲーションとして実装します（HTML をそのまま埋め込むのではなく、WPF のネイティブ UI で作り直します）。
 - {projectName}/Generated/ 配下（データ層の自動生成コード）は読み取り専用です。絶対に編集・削除しないでください。UI からは I{{Entity}}Repository を DI 経由で使います。
 - UI は CommunityToolkit.Mvvm を用いた MVVM（ObservableObject / RelayCommand / ObservableProperty）で実装してください。
 - 起動時の DI 登録は AddGeneratedInMemoryRepositories()（サンプルデータ入り）を使ってください（実 DB 接続は不要）。
@@ -323,25 +325,42 @@ public sealed class MockProjectAgentRunner
 # 進め方
 - App.xaml / App.xaml.cs 等の UI 層のソースは {projectName}/ フォルダ配下（csproj と同じ場所）に追加します。
 - App.xaml / App.xaml.cs で DI を構成し、MainWindow とビュー・ビューモデルを実装します。
-- {projectName}/design/mock.html の各画面（一覧・登録／編集・遷移等）を WPF のウィンドウ／ページ／ユーザーコントロールとして再現します。
+- {projectName}/{DesignFolderRelativePath}/mock.json の各画面（一覧・登録／編集等）を WPF のウィンドウ／ページ／ユーザーコントロールとして再現し、transitions で宣言された画面遷移をナビゲーションとして実装します。
 - 実装が一段落したら、このフォルダ（ソリューション直下）で `dotnet build` を実行し、警告なし・エラーなしで通るまで修正を繰り返してください。
 - 最後に、ビルドがエラー・警告なしで成功したことを確認した旨を報告してください。";
 
     /// <summary>初回プロンプト（実装の起点となる具体指示）を組み立てる</summary>
-    internal static string BuildPrompt(string projectName) =>
-        $@"プロジェクト『{projectName}』の WPF UI 層を実装してください。
+    /// <param name="projectName">プロジェクト名</param>
+    /// <param name="additionalInstructions">実装に対する追加指示（空／null なら付与しない）</param>
+    internal static string BuildPrompt(string projectName, string? additionalInstructions)
+    {
+        var prompt =
+            $@"プロジェクト『{projectName}』の WPF UI 層を実装してください。
 
 このフォルダは Visual Studio 標準構成です。直下にソリューション {projectName}.sln があり、プロジェクト一式は {projectName}/ フォルダ配下にあります。UI 層のソースは {projectName}/ フォルダ配下（csproj と同じ場所）に追加してください。
 
 手順:
 1. まず {projectName}/{ReadmeFileName} を読み、プロジェクト構成と規約を把握する。
-2. {projectName}/{DesignHtmlRelativePath} を読み、再現すべき画面構成・項目・遷移を把握する。
+2. {projectName}/{DesignFolderRelativePath}/mock.json を読んで画面一覧（screens）と画面遷移（transitions）を把握し、各画面の *.html と共有 style.css を読んで、再現すべき画面構成・項目・遷移を把握する。
 3. {projectName}/Generated/ 配下のデータ層（Entity / I{{Entity}}Repository / AddGeneratedInMemoryRepositories 等）を確認し、UI から利用する。
-4. App.xaml(.cs)・MainWindow・各ビュー／ビューモデルを CommunityToolkit.Mvvm の MVVM で実装する。DI には AddGeneratedInMemoryRepositories() を使う。
+4. App.xaml(.cs)・MainWindow・各ビュー／ビューモデルを CommunityToolkit.Mvvm の MVVM で実装する。各画面を WPF のウィンドウ／ページ／ユーザーコントロールとして再現し、mock.json の遷移をナビゲーションとして実装する。DI には AddGeneratedInMemoryRepositories() を使う。
 5. このフォルダ（ソリューション直下）で `dotnet build` を実行し、エラー・警告なしで通るまで自己修正する。
 6. ビルドが成功したことを確認して報告する。
 
 {projectName}/Generated/ 配下は読み取り専用です。編集しないでください。";
+
+        // 追加指示があれば末尾へ「# 追加指示」として連結する（見出しは resx から解決＝表示言語追従）
+        if (!string.IsNullOrWhiteSpace(additionalInstructions))
+        {
+            prompt +=
+                "\n\n"
+                + Strings.Mock_PromptUserInstructionsHeading
+                + "\n"
+                + additionalInstructions.Trim();
+        }
+
+        return prompt;
+    }
 
     /// <summary>出力フォルダに csproj と xaml が存在するかを軽く検証する</summary>
     private static bool HasArtifacts(string outputDirectory)

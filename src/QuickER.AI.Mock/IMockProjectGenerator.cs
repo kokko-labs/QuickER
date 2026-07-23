@@ -18,11 +18,36 @@ public sealed record MockProjectGenerationResult(
 );
 
 /// <summary>
+/// 第2ステップ（モックプロジェクト生成）の生成ターゲット（プラットフォーム）。現状は WPF の 1 種のみ。
+/// </summary>
+/// <param name="Id">内部識別子（安定した機械可読キー）</param>
+/// <param name="DisplayName">UI に出す表示名</param>
+/// <remarks>
+/// <para>
+/// 将来 Blazor 等のターゲットを追加する場合は、この型のインスタンスを増やし、UI でメニュー化して選ばせる
+/// （現状は 1 種のみのため UI にターゲット選択は出さない）。ターゲット追加はスキャフォールドの csproj／
+/// README とランナーのプロンプトを分岐させる形で実現し、<see cref="IMockProjectGenerator"/> の口は変えない。
+/// </para>
+/// <para>
+/// バックエンド拡張（Codex / API キー等）は、<see cref="MockProjectAgentRunner"/> が握る
+/// <see cref="IClaudeCodeClient"/> seam を別クライアント実装へ差し替える形で実現する（生成の骨格は共有する）。
+/// </para>
+/// </remarks>
+public sealed record MockProjectTarget(string Id, string DisplayName)
+{
+    /// <summary>WPF (.NET) ターゲット（現状の唯一のターゲット）</summary>
+    public static readonly MockProjectTarget Wpf = new("wpf", "WPF (.NET)");
+}
+
+/// <summary>
 /// 「確定 HTML → 決定的スキャフォールド → Claude Code による UI 層生成 → 最終ビルド検証」を
 /// 一括で担う第2ステップの抽象。ViewModel はこの 1 つの seam に依存し、単体テストでフェイクへ差し替える。
 /// </summary>
 public interface IMockProjectGenerator
 {
+    /// <summary>この生成器の対象ターゲット（現状は常に <see cref="MockProjectTarget.Wpf"/>）</summary>
+    MockProjectTarget Target { get; }
+
     /// <summary>claude CLI が利用可能か</summary>
     bool IsClaudeAvailable();
 
@@ -33,7 +58,8 @@ public interface IMockProjectGenerator
     /// スキャフォールドを書き出し、Claude Code をヘッドレス実行して WPF モックプロジェクトを生成する。
     /// </summary>
     /// <param name="diagram">生成元の ER 図</param>
-    /// <param name="designHtml">デザイン仕様として同梱する確定 HTML</param>
+    /// <param name="mockFolder">デザイン仕様として同梱するモックフォルダのパス（mock.json＋画面 HTML＋共有 style.css）</param>
+    /// <param name="additionalInstructions">実装に対する追加指示（空／null なら付与しない）</param>
     /// <param name="outputDirectory">出力フォルダ</param>
     /// <param name="projectName">プロジェクト名</param>
     /// <param name="model">Claude Code モデルエイリアス（空なら既定）</param>
@@ -41,7 +67,8 @@ public interface IMockProjectGenerator
     /// <param name="cancellationToken">キャンセルトークン</param>
     Task<MockProjectGenerationResult> GenerateAsync(
         ErDiagram diagram,
-        string designHtml,
+        string mockFolder,
+        string? additionalInstructions,
         string outputDirectory,
         string projectName,
         string model,
@@ -78,6 +105,9 @@ public sealed class MockProjectGenerator : IMockProjectGenerator
     }
 
     /// <inheritdoc />
+    public MockProjectTarget Target => MockProjectTarget.Wpf;
+
+    /// <inheritdoc />
     public bool IsClaudeAvailable() => _runner.IsClaudeAvailable();
 
     /// <inheritdoc />
@@ -87,7 +117,8 @@ public sealed class MockProjectGenerator : IMockProjectGenerator
     /// <inheritdoc />
     public async Task<MockProjectGenerationResult> GenerateAsync(
         ErDiagram diagram,
-        string designHtml,
+        string mockFolder,
+        string? additionalInstructions,
         string outputDirectory,
         string projectName,
         string model,
@@ -95,10 +126,10 @@ public sealed class MockProjectGenerator : IMockProjectGenerator
         CancellationToken cancellationToken = default
     )
     {
-        // 1) 決定的スキャフォールド（データ層コード＋csproj＋README＋design/mock.html）を書き出す
+        // 1) 決定的スキャフォールド（データ層コード＋csproj＋README＋design/mock/ 同梱）を書き出す
         try
         {
-            _scaffold.Scaffold(diagram, outputDirectory, projectName, designHtml);
+            _scaffold.Scaffold(diagram, outputDirectory, projectName, mockFolder);
         }
         catch (Exception ex)
         {
@@ -112,7 +143,14 @@ public sealed class MockProjectGenerator : IMockProjectGenerator
 
         // 2) Claude Code をヘッドレス実行して UI 層を生成させ、最終ビルドを検証する
         var result = await _runner
-            .RunAsync(outputDirectory, projectName, model, onProgress, cancellationToken)
+            .RunAsync(
+                outputDirectory,
+                projectName,
+                additionalInstructions,
+                model,
+                onProgress,
+                cancellationToken
+            )
             .ConfigureAwait(false);
 
         return new MockProjectGenerationResult(

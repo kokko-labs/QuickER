@@ -112,8 +112,8 @@
   <data name="Mock_PreviewHeader" xml:space="preserve">
     <value>プレビュー</value>
   </data>
-  <data name="Mock_SaveHtml" xml:space="preserve">
-    <value>HTML を保存</value>
+  <data name="Mock_ExportHtml" xml:space="preserve">
+    <value>単一 HTML 出力</value>
   </data>
   <data name="Mock_Step2Header" xml:space="preserve">
     <value>WPF モックプロジェクトを生成（Claude Code）</value>
@@ -124,8 +124,35 @@
   <data name="Mock_Browse" xml:space="preserve">
     <value>参照...</value>
   </data>
+  <data name="Mock_MockFolder" xml:space="preserve">
+    <value>モックフォルダ</value>
+  </data>
+  <data name="Mock_MockFolderTooltip" xml:space="preserve">
+    <value>モックを保存するフォルダ（mock.json＋画面ごとの HTML＋共有 style.css）。新規なら空フォルダ、続きから作るなら既存のモックフォルダを選んでください。</value>
+  </data>
+  <data name="Mock_PickMockFolderTitle" xml:space="preserve">
+    <value>モックフォルダを選択</value>
+  </data>
+  <data name="Mock_ScreensHeader" xml:space="preserve">
+    <value>画面一覧</value>
+  </data>
+  <data name="Mock_NotAMockFolder" xml:space="preserve">
+    <value>このフォルダには既にファイルがありますが、モックフォルダではありません（mock.json が見つかりません）。空フォルダか既存のモックフォルダを選んでください。</value>
+  </data>
+  <data name="Mock_MockFolderOpenFailedFormat" xml:space="preserve">
+    <value>モックフォルダを開けませんでした: {0}</value>
+  </data>
+  <data name="Mock_WarningsHeading" xml:space="preserve">
+    <value>警告:</value>
+  </data>
   <data name="Mock_ProjectName" xml:space="preserve">
     <value>プロジェクト名</value>
+  </data>
+  <data name="Mock_MockGenInstructions" xml:space="preserve">
+    <value>追加指示（任意）</value>
+  </data>
+  <data name="Mock_MockGenInstructionsTooltip" xml:space="preserve">
+    <value>WPF 実装のために Claude Code へ渡す追加指示（例: 好みのレイアウト・画面遷移の作法・コンポーネントの規約など）。</value>
   </data>
   <data name="Mock_OpenFolder" xml:space="preserve">
     <value>フォルダを開く</value>
@@ -141,7 +168,7 @@
     <value>プレビューを表示できません</value>
   </data>
   <data name="MockPreview_UnavailableMessage" xml:space="preserve">
-    <value>WebView2 ランタイムが見つかりませんでした。Microsoft Edge WebView2 Runtime（Evergreen）をインストールすると、生成したモックをこの画面でプレビューできます。生成された HTML は「HTML を保存」から書き出せます。</value>
+    <value>WebView2 ランタイムが見つかりませんでした。Microsoft Edge WebView2 Runtime（Evergreen）をインストールすると、生成したモックをこの画面でプレビューできます。生成された HTML は「単一 HTML 出力」から書き出せます。</value>
   </data>
   <data name="Mock_CodexNotConnected" xml:space="preserve">
     <value>未接続</value>
@@ -149,8 +176,8 @@
   <data name="Mock_DisabledReason_InProgress" xml:space="preserve">
     <value>生成を実行中です。</value>
   </data>
-  <data name="Mock_DisabledReason_ConfirmHtml" xml:space="preserve">
-    <value>先にモック HTML を確定してください（プレビューに反映された状態が必要です）。</value>
+  <data name="Mock_DisabledReason_NoScreens" xml:space="preserve">
+    <value>先にモックフォルダへ画面を 1 つ以上追加してください。</value>
   </data>
   <data name="Mock_DisabledReason_ClaudeCodeOnly" xml:space="preserve">
     <value>WPF モック生成はバックエンドが Claude Code のときのみ利用できます。</value>
@@ -307,30 +334,95 @@
   <data name="Toolbar_MockGenerationTooltip" xml:space="preserve">
     <value>現在の ER 図から AI で Web モック画面（HTML）を生成</value>
   </data>
-  <data name="Mock_DesignInstructionsTemplate" xml:space="preserve">
+  <data name="Mock_FunctionToolLabel" xml:space="preserve">
+    <value>関数ツール</value>
+  </data>
+  <data name="Mock_FolderDesignInstructionsTemplate" xml:space="preserve">
     <value>あなたは業務アプリケーションの画面設計者です。
-与えられた ER スキーマ（データベース定義）をもとに、その業務に即した Web 画面のモック（試作）を HTML で作成します。
+与えられた ER スキーマ（データベース定義）をもとに、その業務に即した Web 画面のモック（試作）を「モックフォルダ」（画面ごとの HTML＋共有 style.css）として作成します。
 応答は必ずユーザーの直近のメッセージと同じ言語で行ってください。
 
 # 進め方
-- まず、スキーマから想定される業務を読み取り、必要な画面構成（一覧画面・登録／編集画面・親子伝票画面・ダッシュボード等）を自由テキストで簡潔に提案してください。
-- 提案に対してユーザーの合意を得てから HTML を作成します。いきなり HTML を作り始めないでください。
-- ユーザーが「作って」等と合意したら、HTML モックを生成し {0} の save_mock_html で提出します。
+- まず、スキーマから想定される業務を読み取り、必要な画面構成（画面名・役割・主要な画面間遷移）を自由テキストで簡潔に提案してください。いきなり作り始めず、ユーザーの合意を得てから作成します。
+- 合意が得られたら、まず save_stylesheet で共有デザインシステム（配色・タイポグラフィ・ボタン／テーブル／フォーム等の共通部品）を作成します。
+- 続いて、各画面を save_screen で 1 画面ずつ提出します。
 
 # HTML の要件
-- 単一の HTML ファイルにすべてを収めます（SPA 風）。複数画面と画面間ナビゲーションを 1 ファイルに内包してください。
-- CSS・JavaScript はすべてインラインで記述します。
-- 外部 CDN・外部リソース（Web フォント・画像 URL・スクリプト等）への参照は一切禁止です。ネットワークが無くても完全に動作すること（オフライン完結）。
-- 現実的な日本語のサンプルデータを埋め込み、一覧→詳細／編集への遷移や、フォームの操作感が実際に確認できるようにしてください。
-- 一覧・検索・登録／編集・遷移など、業務で使う基本的な操作フローが一通り触れる状態を目指します。
+- 各画面は完全な単一 HTML ドキュメントです（&lt;html&gt; を含む）。
+- 共有 CSS は &lt;link rel="stylesheet" href="style.css"&gt; で参照し、画面固有の微調整のみ各 HTML 内の &lt;style&gt; に記述します。
+- 画面間リンクは相対 href（例 href="Other.html"）を用います。
+- 外部 CDN・外部リソースへの参照は一切禁止です。ネットワークが無くても完全に動作すること（オフライン完結）。
+- 現実的なサンプルデータ（ユーザーの作業言語）を埋め込み、一覧→詳細／編集の遷移やフォームの操作感が実際に確認できるようにしてください。
 
 # 提出のルール
-- 画面をユーザーへ見せる唯一の手段は save_mock_html ツールです。チャット本文に HTML を貼り付けてはいけません。
-- 必ず完全な HTML 全体（部分ではなく全画面分）を save_mock_html で提出してください。
-- 修正指示を受けたら、該当箇所を直したうえで毎回 save_mock_html で完全な HTML を再提出します（差分だけの提出は不可）。
-- 提出後のチャット本文では、その版で何を変えたかの要約だけを短く述べてください（HTML の再掲は不要）。</value>
+- 画面をユーザーへ見せる唯一の手段は {0} の save_screen ツールです。チャット本文に HTML を貼り付けてはいけません。
+- save_screen では必ずその画面の完全な HTML を提出（差分不可）し、transitions でその画面からの遷移を宣言し、revision_note に変更点を 1 行添えてください。
+- 既存画面を修正するときは、必ず get_screen で現状の HTML を取得してから編集して再提出します。
+- ツール結果に警告（外部参照・リンク不整合・style.css 未参照）が返ったら、次の提出で解消してください。</value>
   </data>
-  <data name="Mock_FunctionToolLabel" xml:space="preserve">
-    <value>関数ツール</value>
+  <data name="Mock_FolderInitialPromptTemplate" xml:space="preserve">
+    <value>次の ER スキーマをもとに、業務に即した画面構成を提案してください。
+
+{0}</value>
+  </data>
+  <data name="Mock_PromptUserInstructionsHeading" xml:space="preserve">
+    <value># 補足指示</value>
+  </data>
+  <data name="Mock_ScreenSavedResult" xml:space="preserve">
+    <value>画面 '{0}' を保存しました。プレビューへ反映済みです。</value>
+  </data>
+  <data name="Mock_ScreenRemovedResult" xml:space="preserve">
+    <value>画面 '{0}' を削除しました。</value>
+  </data>
+  <data name="Mock_StylesheetSavedResult" xml:space="preserve">
+    <value>共有スタイルシート（style.css）を保存しました。</value>
+  </data>
+  <data name="Mock_ScreenNotFoundResult" xml:space="preserve">
+    <value>画面 '{0}' が見つかりません。利用可能な画面: {1}</value>
+  </data>
+  <data name="Mock_UnknownToolResult" xml:space="preserve">
+    <value>未知のツールです: {0}</value>
+  </data>
+  <data name="Mock_ArgumentsParseFailedResult" xml:space="preserve">
+    <value>引数の JSON を解釈できませんでした: {0}</value>
+  </data>
+  <data name="Mock_ResumePromptIntro" xml:space="preserve">
+    <value>これは既存モックの続きです。以下の現状を踏まえて作業を続けてください。</value>
+  </data>
+  <data name="Mock_ResumePromptTitleHeading" xml:space="preserve">
+    <value># タイトル</value>
+  </data>
+  <data name="Mock_ResumePromptScreensHeading" xml:space="preserve">
+    <value># 画面一覧</value>
+  </data>
+  <data name="Mock_ResumePromptNoScreens" xml:space="preserve">
+    <value>（画面はまだありません）</value>
+  </data>
+  <data name="Mock_ResumePromptTransitionsHeading" xml:space="preserve">
+    <value># 遷移一覧</value>
+  </data>
+  <data name="Mock_ResumePromptNoTransitions" xml:space="preserve">
+    <value>（遷移はまだありません）</value>
+  </data>
+  <data name="Mock_ResumePromptRevisionsHeading" xml:space="preserve">
+    <value># 改訂履歴（直近）</value>
+  </data>
+  <data name="Mock_ResumePromptNoRevisions" xml:space="preserve">
+    <value>（履歴はまだありません）</value>
+  </data>
+  <data name="Mock_ResumePromptStylesheetHeading" xml:space="preserve">
+    <value># 共有 CSS</value>
+  </data>
+  <data name="Mock_ResumePromptStylesheetBodyFormat" xml:space="preserve">
+    <value>共有スタイルは `{0}`（フォルダ直下・固定名）にまとめ、各画面から link 参照します。</value>
+  </data>
+  <data name="Mock_ResumePromptSchemaHeading" xml:space="preserve">
+    <value># 現在の ER スキーマ</value>
+  </data>
+  <data name="Mock_ResumePromptSchemaChangedNote" xml:space="preserve">
+    <value>注意: 前回保存時からスキーマが変更されています。差異を確認し、必要なら画面へ反映してください。</value>
+  </data>
+  <data name="Mock_ResumePromptGetScreenNote" xml:space="preserve">
+    <value>既存画面を修正する前に、必ず get_screen で現状の HTML を取得してから編集してください。</value>
   </data>
 </root>

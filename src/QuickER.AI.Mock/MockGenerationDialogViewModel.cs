@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -15,15 +16,31 @@ using QuickER.Model;
 
 namespace QuickER.AI.Mock;
 
+/// <summary>サイドバーに並べる 1 画面の項目（マニフェストの画面宣言のスナップショット）</summary>
+/// <param name="File">画面ファイル名（フォルダ直下・<c>.html</c>）</param>
+/// <param name="Name">画面の表示名</param>
+/// <param name="Description">画面の役割説明</param>
+public sealed record MockScreenListItem(string File, string Name, string Description)
+{
+    /// <summary>ListBox のツールチップに出す「ファイル名 + 説明」</summary>
+    public string Tooltip =>
+        string.IsNullOrWhiteSpace(Description) ? File : $"{File}\n{Description}";
+}
+
+/// <summary>プレビュー要求（表示する画面の実ファイルパスと、遷移を許可するルートフォルダ）</summary>
+/// <param name="FilePath">表示する画面 HTML のフルパス</param>
+/// <param name="Folder">画面間リンク遷移を許可するモックフォルダのフルパス</param>
+public sealed record MockPreviewRequest(string FilePath, string Folder);
+
 /// <summary>
-/// AI モック生成ダイアログ（左チャット／右 HTML プレビュー）の ViewModel。
+/// AI モック生成ダイアログ（左チャット／右「画面一覧サイドバー＋プレビュー」）の ViewModel。
 /// </summary>
 /// <remarks>
 /// 接続方式（API キー / Codex / Claude）の選択・接続状態は <see cref="AiChatDialogViewModel"/> と
-/// 同じ構造を踏襲する。会話は「＋新しい会話」で <see cref="MockDesignSession"/> を用意し、初回送信で
-/// 現在の ER 図＋要望を、2 回目以降はフィードバックを送信して、
-/// 提出された HTML を <see cref="HtmlUpdated"/> で通知する。プレビューへの反映（一時ファイル書き出し）は
-/// ダイアログ側が受け取り、WebView2 へ Navigate する。
+/// 同じ構造を踏襲する。会話は「モックフォルダ」（<see cref="MockFolderStore"/>）に対して行い、画面ごとの HTML と
+/// 共有 style.css を <see cref="MockFolderDesignSession"/> のツール（save_screen / save_stylesheet /
+/// get_screen / remove_screen）で作成・更新する。プレビューはフォルダ内の実ファイルを直接表示し、
+/// 単一 HTML 出力は <see cref="MockBundleExporter"/> で結合して書き出す。
 /// </remarks>
 public partial class MockGenerationDialogViewModel : ObservableObject
 {
@@ -43,20 +60,31 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     public ChatConnectionSettingsViewModel Connection { get; }
 
     /// <summary>現在の生成セッション（会話開始前は null）</summary>
-    private MockDesignSession? _session;
-
-    /// <summary>会話が開始済みか（「＋新しい会話」で true、バックエンド切替でリセット）</summary>
-    private bool _conversationStarted;
-
-    /// <summary>この会話で初回送信を済ませたか（初回=StartAsync／2 回目以降=SendFeedbackAsync の分岐に使う）</summary>
-    private bool _firstMessageSent;
+    private MockFolderDesignSession? _session;
 
     /// <summary>
-    /// 直近に確定した（提出された）モック HTML。
-    /// セッション破棄（「＋新しい会話」）後もプレビュー・保存・第2ステップの有効性を維持するため、
-    /// <see cref="MockDesignSession.CurrentHtml"/> ではなく VM 側で保持する。
+    /// 現在のモックフォルダのストア（フォルダを開いた／作成したときに設定される）。
+    /// 会話開始前でもサイドバー・プレビュー・単一 HTML 出力・第2ステップの土台になる。
     /// </summary>
-    private string? _lastHtml;
+    private MockFolderStore? _store;
+
+    /// <summary>
+    /// 現在のフォルダが「モックフォルダではない既存フォルダ」（HTML 等はあるが mock.json なし）か、
+    /// または破損／新フォーマットで開けなかったか。true の間は会話開始を抑止する。
+    /// </summary>
+    private bool _folderBlocked;
+
+    /// <summary>会話が開始済みか（「新しい会話」で true、バックエンド切替・フォルダ変更でリセット）</summary>
+    private bool _conversationStarted;
+
+    /// <summary>この会話で初回送信を済ませたか（初回=StartNew/Resume／2 回目以降=SendFeedback の分岐に使う）</summary>
+    private bool _firstMessageSent;
+
+    /// <summary>現在の会話が「再開」フローか（既存モックフォルダを開いて始めたか）</summary>
+    private bool _resumeMode;
+
+    /// <summary>プレビュー要求の再入抑止（プレビュー内リンク遷移→選択同期→再ナビゲートのループを断つ）</summary>
+    private bool _suppressPreviewRequest;
 
     /// <summary>ブラウザで URL を開く処理（テスト時に差し替え可能）</summary>
     internal Action<string> OpenBrowser { get; set; } =
@@ -69,8 +97,14 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     /// <summary>チャットメッセージ一覧</summary>
     public ObservableCollection<ErChatMessage> Messages { get; } = new();
 
-    /// <summary>モック HTML が更新されたときにダイアログへ通知する（プレビュー反映用）</summary>
-    public event EventHandler<MockHtmlUpdate>? HtmlUpdated;
+    /// <summary>画面一覧サイドバーの項目（マニフェストから再構築する）</summary>
+    public ObservableCollection<MockScreenListItem> Screens { get; } = new();
+
+    /// <summary>プレビューへ「この画面をこのフォルダの許可のもとで表示せよ」と要求する（ダイアログが受けて Navigate）</summary>
+    public event EventHandler<MockPreviewRequest>? PreviewRequested;
+
+    /// <summary>プレビューを空表示へ戻すよう要求する（フォルダ未指定・全画面削除時）</summary>
+    public event EventHandler? PreviewClearRequested;
 
     // ── 共通のチャット状態 ──
 
@@ -79,6 +113,14 @@ public partial class MockGenerationDialogViewModel : ObservableObject
 
     [ObservableProperty]
     private string _statusMessage = string.Empty;
+
+    /// <summary>モックフォルダのフルパス（会話開始前に指定する動線。開けば即サイドバー・プレビューへ反映）</summary>
+    [ObservableProperty]
+    private string _mockFolder = string.Empty;
+
+    /// <summary>サイドバーで選択中の画面（選択でプレビューへ遷移する）</summary>
+    [ObservableProperty]
+    private MockScreenListItem? _selectedScreen;
 
     private bool _isTurnInProgress;
 
@@ -114,8 +156,16 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     /// <summary>図が空（エンティティ 0）か（会話開始の可否に使う）</summary>
     public bool IsDiagramEmpty => _diagramSource.IsEmpty;
 
-    /// <summary>新しい会話を開始できるか（接続 OK・図が空でない・ターン非実行中）</summary>
-    public bool CanStartConversation => IsBackendReady && !IsDiagramEmpty && !IsTurnInProgress;
+    /// <summary>
+    /// 新しい会話を開始できるか（接続 OK・図が空でない・ターン非実行中・モックフォルダ指定あり・
+    /// そのフォルダが会話に使える＝モックフォルダでない既存フォルダや破損でない）。
+    /// </summary>
+    public bool CanStartConversation =>
+        IsBackendReady
+        && !IsDiagramEmpty
+        && !IsTurnInProgress
+        && !string.IsNullOrWhiteSpace(MockFolder)
+        && !_folderBlocked;
 
     /// <summary>メッセージを送信できるか（会話開始済み・接続 OK・入力あり・ターン非実行中）</summary>
     public bool CanSendMessage =>
@@ -127,8 +177,11 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     /// <summary>入力欄を編集できるか（ターン実行中は禁止）</summary>
     public bool CanEditInput => !IsTurnInProgress;
 
-    /// <summary>HTML を保存できるか（1 度でもモックが提出されているか）</summary>
-    public bool CanSaveHtml => !string.IsNullOrEmpty(_lastHtml);
+    /// <summary>モックフォルダに画面が 1 つ以上あるか（単一 HTML 出力・第2ステップの前提）</summary>
+    public bool HasScreens => _store is not null && Screens.Count > 0;
+
+    /// <summary>単一 HTML を出力できるか（モックフォルダに画面が 1 つ以上あるか）</summary>
+    public bool CanExportBundle => HasScreens;
 
     // ── 第2ステップ: WPF モックプロジェクト生成（Claude Code 限定） ──
 
@@ -139,6 +192,10 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     /// <summary>生成するプロジェクト名（既定は図名由来の PascalCase）</summary>
     [ObservableProperty]
     private string _projectName = "MockApp";
+
+    /// <summary>WPF 実装に対する追加指示（任意・複数行。Claude Code へ渡すプロンプト末尾に連結される）</summary>
+    [ObservableProperty]
+    private string _mockGenInstructions = string.Empty;
 
     /// <summary>WPF モック生成の進捗ログ（追記式・自動スクロール表示）</summary>
     [ObservableProperty]
@@ -205,11 +262,11 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     public bool CanEditMockGenInput => !IsMockGenInProgress;
 
     /// <summary>
-    /// WPF モック生成を開始できるか（確定 HTML あり・Claude Code バックエンド・claude CLI 検出・
+    /// WPF モック生成を開始できるか（画面あり・Claude Code バックエンド・claude CLI 検出・
     /// dotnet SDK 検出・出力フォルダ／プロジェクト名あり・非実行中）。
     /// </summary>
     public bool CanGenerateMockProject =>
-        CanSaveHtml
+        HasScreens
         && Connection.SelectedBackend == ErChatBackendKind.ClaudeCode
         && IsClaudeCliAvailable
         && IsDotnetAvailable
@@ -228,9 +285,9 @@ public partial class MockGenerationDialogViewModel : ObservableObject
                 return Strings.Mock_DisabledReason_InProgress;
             }
 
-            if (!CanSaveHtml)
+            if (!HasScreens)
             {
-                return Strings.Mock_DisabledReason_ConfirmHtml;
+                return Strings.Mock_DisabledReason_NoScreens;
             }
 
             if (Connection.SelectedBackend != ErChatBackendKind.ClaudeCode)
@@ -293,7 +350,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     /// <summary>依存を注入して生成する（テスト用）</summary>
     /// <param name="diagramSource">生成対象の ER 図の供給元</param>
     /// <param name="dispatcher">UI スレッドへのマーシャリング</param>
-    /// <param name="files">HTML 保存ダイアログの供給元</param>
+    /// <param name="files">フォルダ選択・HTML 出力ダイアログの供給元</param>
     /// <param name="settingsStore">AI 設定ストア（Codex / Claude Code / UI 状態 / モデル履歴を集約）</param>
     /// <param name="apiKeyEngineFactory">API キーエンジンのファクトリ（プロファイル・ツールホスト受け取り）</param>
     /// <param name="codexEngineFactory">Codex エンジンのファクトリ</param>
@@ -430,19 +487,217 @@ public partial class MockGenerationDialogViewModel : ObservableObject
                 AttachmentSupportResolver.ForApiKeyProvider(Connection.ApiProvider)
         );
 
-    /// <summary>新しい会話を開始する（履歴クリア・新セッション用意・案内表示）</summary>
+    // ── モックフォルダ ──
+
+    /// <summary>モックフォルダを選択する</summary>
+    [RelayCommand]
+    private void BrowseMockFolder()
+    {
+        var picked = _files.PickFolder(Strings.Mock_PickMockFolderTitle, MockFolder);
+
+        if (!string.IsNullOrWhiteSpace(picked))
+        {
+            MockFolder = picked;
+        }
+    }
+
+    /// <summary>
+    /// モックフォルダの指定が変わったら、会話をリセットし、フォルダの種別を判定して
+    /// サイドバー・プレビューへ即反映する（既存モックフォルダなら開いて眺められる）。
+    /// </summary>
+    partial void OnMockFolderChanged(string value)
+    {
+        // フォルダを変えたら会話・状態は仕切り直す
+        ResetConversation();
+        _store = null;
+        _folderBlocked = false;
+        Screens.Clear();
+        SelectedScreen = null;
+        PreviewClearRequested?.Invoke(this, EventArgs.Empty);
+
+        var folder = value?.Trim() ?? string.Empty;
+
+        if (string.IsNullOrEmpty(folder))
+        {
+            NotifyFolderStateChanged();
+            return;
+        }
+
+        if (MockFolderStore.IsMockFolder(folder))
+        {
+            // 既存モックフォルダ: 開いて即サイドバー・プレビューへ反映する
+            try
+            {
+                _store = MockFolderStore.Open(folder);
+            }
+            catch (Exception ex)
+            {
+                // 破損／新フォーマットはメッセージをそのまま出し、会話開始を抑止する
+                _store = null;
+                _folderBlocked = true;
+                StatusMessage = string.Format(Strings.Mock_MockFolderOpenFailedFormat, ex.Message);
+                NotifyFolderStateChanged();
+                return;
+            }
+
+            RebuildScreens();
+
+            if (Screens.Count > 0)
+            {
+                // 先頭画面を選択するとプレビュー要求が飛ぶ
+                SelectedScreen = Screens[0];
+            }
+        }
+        else if (Directory.Exists(folder) && Directory.EnumerateFileSystemEntries(folder).Any())
+        {
+            // HTML 等はあるが mock.json が無い既存フォルダ: モックフォルダではないので開始を抑止する
+            _folderBlocked = true;
+            StatusMessage = Strings.Mock_NotAMockFolder;
+        }
+
+        // 空フォルダ・未存在フォルダは新規として扱う（会話開始時に CreateNew する）
+
+        NotifyFolderStateChanged();
+    }
+
+    /// <summary>フォルダ種別が変わったときの可否・派生表示をまとめて通知する</summary>
+    private void NotifyFolderStateChanged()
+    {
+        OnPropertyChanged(nameof(HasScreens));
+        OnPropertyChanged(nameof(CanExportBundle));
+        ExportBundleCommand.NotifyCanExecuteChanged();
+        NotifyReadinessChanged();
+        NotifyMockGenChanged();
+    }
+
+    /// <summary>マニフェスト宣言の画面群からサイドバー項目を再構築する</summary>
+    private void RebuildScreens()
+    {
+        Screens.Clear();
+
+        if (_store is not null)
+        {
+            foreach (var screen in _store.Manifest.Screens)
+            {
+                Screens.Add(new MockScreenListItem(screen.File, screen.Name, screen.Description));
+            }
+        }
+
+        OnPropertyChanged(nameof(HasScreens));
+        OnPropertyChanged(nameof(CanExportBundle));
+        ExportBundleCommand.NotifyCanExecuteChanged();
+        NotifyMockGenChanged();
+    }
+
+    /// <summary>指定ファイルの画面をサイドバーで選択する（見つかればプレビュー要求が飛ぶ）</summary>
+    private void SelectScreenByFile(string file)
+    {
+        var item = Screens.FirstOrDefault(s =>
+            string.Equals(s.File, file, StringComparison.OrdinalIgnoreCase)
+        );
+
+        if (item is not null)
+        {
+            SelectedScreen = item;
+        }
+    }
+
+    /// <summary>プレビューへ「この画面を表示せよ」と要求する（許可フォルダ付き）</summary>
+    private void RaisePreview(string file)
+    {
+        if (_store is null || string.IsNullOrWhiteSpace(file))
+        {
+            return;
+        }
+
+        var path = Path.Combine(_store.Folder, file);
+        PreviewRequested?.Invoke(this, new MockPreviewRequest(path, _store.Folder));
+    }
+
+    /// <summary>サイドバーの選択が変わったらプレビューへ反映する（再入時は抑止する）</summary>
+    partial void OnSelectedScreenChanged(MockScreenListItem? value)
+    {
+        if (_suppressPreviewRequest)
+        {
+            return;
+        }
+
+        if (value is not null)
+        {
+            RaisePreview(value.File);
+        }
+    }
+
+    /// <summary>
+    /// プレビュー内リンクで別画面へ遷移したとき、サイドバーの選択を追従させる（プレビュー再要求は起こさない）。
+    /// </summary>
+    /// <param name="file">プレビューが現在表示している画面ファイル名</param>
+    public void SyncSelectionFromPreview(string file)
+    {
+        var item = Screens.FirstOrDefault(s =>
+            string.Equals(s.File, file, StringComparison.OrdinalIgnoreCase)
+        );
+
+        if (item is null || ReferenceEquals(item, SelectedScreen))
+        {
+            return;
+        }
+
+        _suppressPreviewRequest = true;
+
+        try
+        {
+            SelectedScreen = item;
+        }
+        finally
+        {
+            _suppressPreviewRequest = false;
+        }
+    }
+
+    /// <summary>新しい会話を開始する（フォルダを確定・新セッション用意・案内表示）</summary>
     /// <remarks>
-    /// 選択中バックエンドで新しい <see cref="MockDesignSession"/> を用意し、旧セッションのイベント購読は解除する。
-    /// 確定 HTML（<see cref="_lastHtml"/>）は保持したままにし、プレビュー・保存・第2ステップの有効性を失わない。
+    /// 既存モックフォルダを開いていれば再開フロー、空／未存在フォルダなら新規作成フローで始める。
+    /// 画面・サイドバー・プレビューはフォルダのライブ状態に紐づくため、会話をリセットしても維持される。
     /// </remarks>
     [RelayCommand(CanExecute = nameof(CanStartConversation))]
     private void StartConversation()
     {
-        // 選択中バックエンドのエンジンを、モック生成プロファイル注入・セッション自身をツールホストにして生成する。
-        // エンジン⇔セッションの相互依存は MockDesignSession のファクトリコンストラクタが解く。
+        // 会話開始時にフォルダをストアとして確定する
+        if (_store is null)
+        {
+            // 空／未存在フォルダ: 新規モックフォルダとして作成する
+            var folder = MockFolder.Trim();
+
+            try
+            {
+                _store = MockFolderStore.CreateNew(
+                    folder,
+                    DeriveTitle(folder),
+                    sourceSchema: string.Empty
+                );
+            }
+            catch (Exception ex)
+            {
+                StatusMessage = string.Format(Strings.Mock_MockFolderOpenFailedFormat, ex.Message);
+                return;
+            }
+
+            _resumeMode = false;
+            RebuildScreens();
+        }
+        else
+        {
+            // 既存モックフォルダ: 再開フロー
+            _resumeMode = true;
+        }
+
+        // 選択中バックエンドのエンジンを、モックフォルダ方式プロファイル注入・セッション自身をツールホストにして生成する。
+        // エンジン⇔セッションの相互依存は MockFolderDesignSession のファクトリコンストラクタが解く。
         var factory = SelectedFactory();
-        var session = new MockDesignSession(toolHost =>
-            factory(MockDesignProfile.MockDesign, toolHost)
+        var session = new MockFolderDesignSession(
+            toolHost => factory(MockDesignProfile.FolderMockDesign, toolHost),
+            _store
         );
         AttachSession(session);
 
@@ -454,7 +709,16 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         SendMessageCommand.NotifyCanExecuteChanged();
     }
 
-    /// <summary>ユーザー入力を 1 ターンとして送信する（初回はスキーマ添付＋要望、2 回目以降はフィードバック）</summary>
+    /// <summary>フォルダ名からモックの表題を導く（末尾区切りを除いたフォルダ名・空なら "Mock"）</summary>
+    private static string DeriveTitle(string folder)
+    {
+        var trimmed = folder.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var name = Path.GetFileName(trimmed);
+
+        return string.IsNullOrWhiteSpace(name) ? "Mock" : name;
+    }
+
+    /// <summary>ユーザー入力を 1 ターンとして送信する（初回はスキーマ／再開情報、2 回目以降はフィードバック）</summary>
     [RelayCommand(CanExecute = nameof(CanSendMessage))]
     private async Task SendMessageAsync()
     {
@@ -482,10 +746,22 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         {
             if (!_firstMessageSent)
             {
-                // 初回送信はスキーマ自動添付＋要望で会話を開始する（添付をデザイン参考として同梱）
+                // 初回送信は新規（スキーマ）／再開（画面一覧＋差異）のいずれかで会話を開始する
                 _firstMessageSent = true;
                 var diagram = _diagramSource.GetDiagram();
-                await _session.StartAsync(diagram, message, attachments).ConfigureAwait(true);
+
+                if (_resumeMode)
+                {
+                    await _session
+                        .StartResumeAsync(diagram, message, attachments)
+                        .ConfigureAwait(true);
+                }
+                else
+                {
+                    await _session
+                        .StartNewAsync(diagram, message, attachments)
+                        .ConfigureAwait(true);
+                }
             }
             else
             {
@@ -513,16 +789,16 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         }
     }
 
-    /// <summary>現在のモック HTML をファイルへ保存する</summary>
-    [RelayCommand(CanExecute = nameof(CanSaveHtml))]
-    private void SaveHtml()
+    /// <summary>モックフォルダの内容を単一 HTML へ結合してファイルへ書き出す</summary>
+    [RelayCommand(CanExecute = nameof(CanExportBundle))]
+    private void ExportBundle()
     {
-        var html = _lastHtml;
-
-        if (string.IsNullOrEmpty(html))
+        if (_store is null || Screens.Count == 0)
         {
             return;
         }
+
+        var html = MockBundleExporter.Export(_store);
 
         var picked = _files.PickSaveFile(
             Strings.Mock_HtmlFileFilter,
@@ -537,10 +813,10 @@ public partial class MockGenerationDialogViewModel : ObservableObject
 
         try
         {
-            System.IO.File.WriteAllText(
+            File.WriteAllText(
                 picked.Path,
                 html,
-                new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false)
+                new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)
             );
             StatusMessage = Strings.Mock_HtmlSaved;
         }
@@ -568,12 +844,16 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanGenerateMockProject))]
     private async Task GenerateMockProjectAsync()
     {
-        var html = _lastHtml;
-
-        if (string.IsNullOrEmpty(html))
+        if (_store is null || Screens.Count == 0)
         {
             return;
         }
+
+        // デザイン仕様はモックフォルダそのものを同梱する（スキャフォールドが design/mock/ へコピーする）
+        var mockFolder = _store.Folder;
+        var instructions = string.IsNullOrWhiteSpace(MockGenInstructions)
+            ? null
+            : MockGenInstructions.Trim();
 
         var outputFolder = OutputFolder.Trim();
 
@@ -602,7 +882,8 @@ public partial class MockGenerationDialogViewModel : ObservableObject
             var result = await _mockProjectGenerator
                 .GenerateAsync(
                     diagram,
-                    html,
+                    mockFolder,
+                    instructions,
                     outputFolder,
                     projectName,
                     Connection.ClaudeCodeModel,
@@ -694,16 +975,17 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         };
 
     /// <summary>新しいセッションを結び付け、イベントを購読する（旧セッションは購読解除して破棄する）</summary>
-    private void AttachSession(MockDesignSession session)
+    private void AttachSession(MockFolderDesignSession session)
     {
         DetachSession();
 
         _session = session;
         session.AssistantDeltaReceived += OnAssistantDelta;
-        session.HtmlUpdated += OnHtmlUpdated;
+        session.ScreenSaved += OnScreenSaved;
+        session.ScreenRemoved += OnScreenRemoved;
+        session.StylesheetSaved += OnStylesheetSaved;
         session.TurnCompleted += OnTurnCompleted;
         session.StatusChanged += OnStatus;
-        SaveHtmlCommand.NotifyCanExecuteChanged();
         SendMessageCommand.NotifyCanExecuteChanged();
     }
 
@@ -716,7 +998,9 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         }
 
         _session.AssistantDeltaReceived -= OnAssistantDelta;
-        _session.HtmlUpdated -= OnHtmlUpdated;
+        _session.ScreenSaved -= OnScreenSaved;
+        _session.ScreenRemoved -= OnScreenRemoved;
+        _session.StylesheetSaved -= OnStylesheetSaved;
         _session.TurnCompleted -= OnTurnCompleted;
         _session.StatusChanged -= OnStatus;
         _session = null;
@@ -727,8 +1011,14 @@ public partial class MockGenerationDialogViewModel : ObservableObject
 
     private void OnAssistantDelta(object? sender, string delta) => RunOnUi(() => ApplyDelta(delta));
 
-    private void OnHtmlUpdated(object? sender, MockHtmlUpdate update) =>
-        RunOnUi(() => ApplyHtmlUpdated(update));
+    private void OnScreenSaved(object? sender, MockScreenSavedEventArgs e) =>
+        RunOnUi(() => ApplyScreenSaved(e));
+
+    private void OnScreenRemoved(object? sender, string file) =>
+        RunOnUi(() => ApplyScreenRemoved(file));
+
+    private void OnStylesheetSaved(object? sender, MockStylesheetSavedEventArgs e) =>
+        RunOnUi(() => ApplyStylesheetSaved(e));
 
     private void OnTurnCompleted(object? sender, ErChatTurnResult result) =>
         RunOnUi(() => ApplyTurnCompleted(result));
@@ -753,24 +1043,74 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         }
     }
 
-    /// <summary>提出された HTML をプレビュー通知し、チャットへ更新メモを表示、保存可否を更新する</summary>
-    private void ApplyHtmlUpdated(MockHtmlUpdate update)
+    /// <summary>画面保存で、サイドバー再読込＋その画面をプレビュー表示し、変更点・警告をチャットへ通知する</summary>
+    private void ApplyScreenSaved(MockScreenSavedEventArgs e)
     {
         // 次のアシスタント発話は新しい吹き出しにする
         _currentAssistantMessage = null;
 
-        // 確定 HTML は VM 側で保持する（「＋新しい会話」でセッションを破棄しても保存・第2ステップを維持するため）
-        _lastHtml = update.Html;
+        RebuildScreens();
+        // 保存された画面を選択するとプレビュー要求が飛ぶ（同名再保存でも新インスタンスなので反映される）
+        SelectScreenByFile(e.File);
 
-        var note = string.IsNullOrWhiteSpace(update.RevisionNote)
+        AddSystemMessage(BuildScreenSavedNote(e.RevisionNote, e.Warnings));
+    }
+
+    /// <summary>画面保存のシステムメッセージ（変更点＋警告）を組み立てる</summary>
+    private static string BuildScreenSavedNote(string revisionNote, IReadOnlyList<string> warnings)
+    {
+        var note = string.IsNullOrWhiteSpace(revisionNote)
             ? Strings.Mock_MockUpdated
-            : string.Format(Strings.Mock_UpdateNoteFormat, update.RevisionNote);
-        AddSystemMessage(note);
+            : string.Format(Strings.Mock_UpdateNoteFormat, revisionNote);
 
-        HtmlUpdated?.Invoke(this, update);
-        SaveHtmlCommand.NotifyCanExecuteChanged();
-        // 確定 HTML ができたので第2ステップ（WPF モック生成）の可否を更新する
-        NotifyMockGenChanged();
+        if (warnings.Count > 0)
+        {
+            note += "\n" + Strings.Mock_WarningsHeading + " " + string.Join("; ", warnings);
+        }
+
+        return note;
+    }
+
+    /// <summary>画面削除で、サイドバー再読込・表示中画面が消えたら先頭画面（なければ空）へ切り替える</summary>
+    private void ApplyScreenRemoved(string file)
+    {
+        _currentAssistantMessage = null;
+
+        var wasShowingRemoved =
+            SelectedScreen is not null
+            && string.Equals(SelectedScreen.File, file, StringComparison.OrdinalIgnoreCase);
+
+        RebuildScreens();
+
+        // 削除で選択が実体を失ったら先頭画面（なければ空表示）へ
+        if (wasShowingRemoved || SelectedScreen is null || !Screens.Contains(SelectedScreen))
+        {
+            if (Screens.Count > 0)
+            {
+                SelectedScreen = Screens[0];
+            }
+            else
+            {
+                SelectedScreen = null;
+                PreviewClearRequested?.Invoke(this, EventArgs.Empty);
+            }
+        }
+
+        AddSystemMessage(string.Format(Strings.Mock_ScreenRemovedResult, file));
+    }
+
+    /// <summary>共有スタイルシート保存で、表示中の画面をリロードする（CSS 変更を反映）</summary>
+    private void ApplyStylesheetSaved(MockStylesheetSavedEventArgs e)
+    {
+        _currentAssistantMessage = null;
+
+        // 表示中の画面を同一ファイルとして再要求する（プレビューは Reload で最新化する）
+        if (SelectedScreen is not null)
+        {
+            RaisePreview(SelectedScreen.File);
+        }
+
+        AddSystemMessage(BuildScreenSavedNote(e.RevisionNote, e.Warnings));
     }
 
     /// <summary>ターン完了で進行状態を解除し、結果に応じてステータスを更新する</summary>
@@ -831,7 +1171,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         {
             case nameof(ChatConnectionSettingsViewModel.SelectedBackend):
                 // バックエンドを切り替えたら会話はリセットする（旧セッションのエンジンは選択前のバックエンドのため）。
-                // 確定 HTML（_lastHtml）は保持し、プレビュー・保存・第2ステップの有効性は失わない。
+                // モックフォルダ・サイドバー・プレビューは維持し、単一 HTML 出力・第2ステップの有効性は失わない。
                 ResetConversation();
                 // バックエンド切替で添付範囲を再評価する（非対応になったら添付部品側で Pending をクリア・通知する）
                 RefreshAttachmentSupport();
@@ -856,7 +1196,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         }
     }
 
-    /// <summary>会話を未開始状態へ戻す（セッション購読解除・履歴クリア・可否更新）。確定 HTML は保持する</summary>
+    /// <summary>会話を未開始状態へ戻す（セッション購読解除・履歴クリア・可否更新）。フォルダ・画面・プレビューは保持する</summary>
     private void ResetConversation()
     {
         DetachSession();
@@ -901,18 +1241,18 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         NotifyReadinessChanged();
     }
 
-    /// <summary>会話開始・送信・保存の可否変更をまとめて通知する</summary>
+    /// <summary>会話開始・送信・出力の可否変更をまとめて通知する</summary>
     private void NotifyReadinessChanged()
     {
         OnPropertyChanged(nameof(IsBackendReady));
         OnPropertyChanged(nameof(IsDiagramEmpty));
         OnPropertyChanged(nameof(CanStartConversation));
         OnPropertyChanged(nameof(CanSendMessage));
-        OnPropertyChanged(nameof(CanSaveHtml));
+        OnPropertyChanged(nameof(CanExportBundle));
         StartConversationCommand.NotifyCanExecuteChanged();
         SendMessageCommand.NotifyCanExecuteChanged();
-        SaveHtmlCommand.NotifyCanExecuteChanged();
-        // 第2ステップの可否は確定 HTML の有無・接続状態にも依存するため合わせて更新する
+        ExportBundleCommand.NotifyCanExecuteChanged();
+        // 第2ステップの可否は画面の有無・接続状態にも依存するため合わせて更新する
         NotifyMockGenChanged();
     }
 

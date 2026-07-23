@@ -2,7 +2,7 @@
 
 *[日本語](ai-chat.ja.md) | English*
 
-From "AI Chat" on the toolbar, you can generate and edit ER diagrams through conversation (e.g., "Design the tables needed for order management on an e-commerce site", "Add a shipping address to `orders`"). With the same connection settings you can also use "AI Mock Generation", which generates a web mockup screen (HTML) from the current ER diagram.
+From "AI Chat" on the toolbar, you can generate and edit ER diagrams through conversation (e.g., "Design the tables needed for order management on an e-commerce site", "Add a shipping address to `orders`"). With the same connection settings you can also use "AI Mock Generation", which generates web mockup screens from the current ER diagram (see [AI mock generation](#ai-mock-generation) below).
 
 This in-app chat edits the diagram currently open in the GUI. To instead let an external AI agent (Claude Code, Codex, and so on) drive QuickER as part of its own workflow, use the [MCP server](mcp.md).
 
@@ -35,7 +35,13 @@ The connection tab you used last is remembered and selected automatically the ne
 - **Generate a diagram** — describe your requirements and it creates tables, columns, and relationships
 - **Edit a diagram** — add to, change, or delete from an existing diagram (operations go onto the Undo/Redo history, so you can always revert)
 - **Attachments** — attach files to pass existing design materials and the like as context
-- **AI mock generation** — generate a web mockup screen (HTML) from the current ER diagram
+- **AI mock generation** — generate web mockup screens from the current ER diagram, saved as a mock folder (see below)
+
+## AI mock generation
+
+"AI Mock Generation" turns the current ER diagram into web mockup screens. The result is saved as a **mock folder** — a `mock.json` manifest plus one HTML file per screen and a shared `style.css` — and it is written live as you converse. Point the tool at an empty folder to start fresh, or at an existing mock folder to resume (the conversation starts anew, and resuming works regardless of which backend you use, since it restores from the folder contents rather than a chat log). The screen-list sidebar lets you click through the screens, and the preview follows the links between them. You can export the whole mock as a single self-contained HTML file.
+
+As an optional second step (Claude Code only), you can generate a runnable **WPF mock project** from the mock folder: the mock folder is bundled under `design/mock/`, and Claude Code implements the WPF UI from it. An additional-instructions field lets you pass extra guidance for that implementation.
 
 ## Notes
 

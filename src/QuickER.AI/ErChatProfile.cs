@@ -10,7 +10,7 @@ namespace QuickER.AI;
 /// これにより「ER 図設計チャット」以外の用途（例: Web モック HTML 生成）を、
 /// エンジン実装を変更せずにプロファイル差し替えだけで載せられる。
 /// 具体プロファイルは機能側が提供する（ER 設計＝<c>QuickER.AI.Chat.ErDesignProfile.ErDesign</c>、
-/// モック生成＝<c>QuickER.AI.Mock.MockDesignProfile.MockDesign</c>）。
+/// モック生成＝<c>QuickER.AI.Mock.MockDesignProfile.FolderMockDesign</c>）。
 /// </remarks>
 /// <param name="BuildSystemPrompt">
 /// API キー接続チャット（OpenAI/Anthropic）用のシステムプロンプトを生成する関数

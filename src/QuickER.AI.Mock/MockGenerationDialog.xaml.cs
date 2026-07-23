@@ -14,15 +14,13 @@ namespace QuickER.AI.Mock;
 /// <remarks>
 /// 接続方式ごとの認証状態プローブ（Codex / Claude）はここで軽量エンジンを保持して確認し、
 /// 結果を ViewModel へ反映する。生成に使うエンジンは ViewModel が生成開始時に別途構築する。
-/// HtmlUpdated 通知を受けて一時ファイルへ書き出し、WebView2 プレビューへ Navigate する。
+/// ViewModel のプレビュー要求（現在画面のファイルパス）を受けて、モックフォルダ内の実ファイルを
+/// 直接 WebView2 プレビューへ Navigate する（一時ファイルは使わない）。
 /// </remarks>
 public partial class MockGenerationDialog : Window
 {
     /// <summary>このウィンドウの ViewModel</summary>
     public MockGenerationDialogViewModel ViewModel { get; }
-
-    /// <summary>プレビュー用一時ファイルストア</summary>
-    private readonly MockPreviewFileStore _previewStore = new();
 
     /// <summary>Codex 認証状態のプローブ用エンジン（ツールホスト無し）</summary>
     private readonly CodexChatEngine? _codexProbe;
@@ -51,21 +49,24 @@ public partial class MockGenerationDialog : Window
             new CodexAppServerClient(),
             toolHost: null,
             dispatcher,
-            MockDesignProfile.MockDesign
+            MockDesignProfile.FolderMockDesign
         );
         _codexProbe.AuthStateChanged += OnCodexAuthStateChanged;
         _claudeCodeProbe = new ClaudeCodeChatEngine(
             new ClaudeCodeProcessClient(),
             toolHost: null,
             dispatcher,
-            MockDesignProfile.MockDesign
+            MockDesignProfile.FolderMockDesign
         );
         _claudeCodeProbe.StatusSummaryChanged += OnClaudeCodeStatusChanged;
 
         CodexRefreshCommand = new AsyncRelayCommand(RefreshCodexAsync);
         ClaudeCodeRefreshCommand = new AsyncRelayCommand(RefreshClaudeCodeAsync);
 
-        ViewModel.HtmlUpdated += OnHtmlUpdated;
+        // ViewModel のプレビュー要求／クリア要求と、プレビュー内リンク遷移をサイドバー選択へ橋渡しする
+        ViewModel.PreviewRequested += OnPreviewRequested;
+        ViewModel.PreviewClearRequested += OnPreviewClearRequested;
+        Preview.CurrentFileChanged += OnPreviewCurrentFileChanged;
         ViewModel.Messages.CollectionChanged += (_, _) => ScrollToBottom();
         ViewModel.PropertyChanged += OnViewModelPropertyChanged;
         Loaded += OnLoaded;
@@ -135,13 +136,12 @@ public partial class MockGenerationDialog : Window
         Close();
     }
 
-    /// <summary>HTML 更新を受けて一時ファイルへ書き出し、プレビューへ反映する</summary>
-    private void OnHtmlUpdated(object? sender, MockHtmlUpdate update)
+    /// <summary>プレビュー要求を受けて、モックフォルダ内の実ファイルをプレビューへ Navigate する</summary>
+    private void OnPreviewRequested(object? sender, MockPreviewRequest request)
     {
         try
         {
-            var uri = _previewStore.Write(update.Html);
-            Preview.Navigate(uri);
+            Preview.Navigate(new Uri(request.FilePath), request.Folder);
         }
         catch (Exception ex)
         {
@@ -151,6 +151,13 @@ public partial class MockGenerationDialog : Window
             );
         }
     }
+
+    /// <summary>プレビューのクリア要求を受けて、空表示へ戻す</summary>
+    private void OnPreviewClearRequested(object? sender, EventArgs e) => Preview.ShowEmpty();
+
+    /// <summary>プレビュー内リンクで表示画面が変わったら、サイドバーの選択を追従させる</summary>
+    private void OnPreviewCurrentFileChanged(object? sender, string file) =>
+        ViewModel.SyncSelectionFromPreview(file);
 
     /// <summary>チャット表示を最下部へスクロールする</summary>
     private void ScrollToBottom()
