@@ -757,6 +757,220 @@ public class MockGenerationDialogViewModelTests
         }
     }
 
+    // ── 設計書出力（README.md）とその自動追従 ──
+
+    /// <summary>save_screen ツールを 1 回再生する（会話開始済み前提）</summary>
+    private static async Task SaveScreenViaEngine(
+        MockGenerationDialogViewModel vm,
+        FakeChatEngine engine,
+        string file,
+        string name
+    )
+    {
+        engine.ScriptedToolCall = (
+            MockFolderDesignTools.SaveScreenToolName,
+            SaveScreenArgs(file, name)
+        );
+        vm.UserInput = "追加";
+        await vm.SendMessageCommand.ExecuteAsync(null);
+    }
+
+    /// <summary>指定ツールを引数ディクショナリで 1 回再生する（会話開始済み前提）</summary>
+    private static async Task RunToolViaEngine(
+        MockGenerationDialogViewModel vm,
+        FakeChatEngine engine,
+        string toolName,
+        Dictionary<string, object?> args
+    )
+    {
+        engine.ScriptedToolCall = (toolName, JsonSerializer.Serialize(args));
+        vm.UserInput = "実行";
+        await vm.SendMessageCommand.ExecuteAsync(null);
+    }
+
+    private const string DesignDocSentinel = "SENTINEL-DESIGN-DOC";
+
+    /// <summary>設計書出力ボタンで README.md をモックフォルダへ書き出し、内容が一致し情報ダイアログが出ることを検証する</summary>
+    [Fact(DisplayName = "設計書出力ボタンで README.md を書き出し情報ダイアログを出す")]
+    public void ExportDesignDoc_WritesReadme_AndShowsDialog()
+    {
+        var dialogs = new StubDialogService();
+        var (vm, _, baseFolder, mockFolder) = CreateVm(
+            NonEmptyDiagram(),
+            setMockFolder: false,
+            dialogs
+        );
+        SeedMockFolder(mockFolder);
+
+        try
+        {
+            vm.MockFolder = mockFolder;
+            // 単一 HTML 出力と同じ可否条件（画面が 1 つ以上）
+            vm.ExportDesignDocCommand.CanExecute(null).Should().BeTrue();
+
+            vm.ExportDesignDocCommand.Execute(null);
+
+            var readmePath = Path.Combine(mockFolder, MockDesignDocExporter.FileName);
+            File.Exists(readmePath).Should().BeTrue();
+
+            // 内容は決定的エクスポータの出力（同フォルダを開き直しても同一）と一致する
+            var expected = MockDesignDocExporter.Export(MockFolderStore.Open(mockFolder));
+            File.ReadAllText(readmePath).Should().Be(expected);
+
+            // 保存先パス付きの完了情報ダイアログが出る
+            dialogs
+                .InformationMessages.Should()
+                .ContainSingle()
+                .Which.Should()
+                .Contain(readmePath);
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
+    /// <summary>画面が無いと設計書出力ボタンが押せないことを検証する（単一 HTML 出力と同条件）</summary>
+    [Fact(DisplayName = "画面が無いと設計書出力は不可")]
+    public void CanExportDesignDoc_FalseWithoutScreens()
+    {
+        var (vm, _, baseFolder, _) = CreateVm(NonEmptyDiagram());
+
+        try
+        {
+            vm.HasScreens.Should().BeFalse();
+            vm.ExportDesignDocCommand.CanExecute(null).Should().BeFalse();
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
+    /// <summary>README.md がある状態で画面保存すると、無音（ダイアログなし）で新しい画面を含む内容へ再生成されることを検証する</summary>
+    [Fact(DisplayName = "README.md ありで画面保存すると無音で追従再生成される")]
+    public async Task ScreenSaved_WithReadmePresent_RegeneratesSilently()
+    {
+        var dialogs = new StubDialogService();
+        var (vm, engineBox, _, baseFolder, mockFolder) = CreateVmWithGenerator(
+            NonEmptyDiagram(),
+            dialogs
+        );
+
+        try
+        {
+            await SaveScreenOnClaudeCode(vm, engineBox, mockFolder);
+
+            // 設計書を出力済みの状態を作る（センチネルを書いて、再生成で置き換わることを検出可能にする）
+            var readmePath = Path.Combine(mockFolder, MockDesignDocExporter.FileName);
+            File.WriteAllText(readmePath, DesignDocSentinel);
+            var dialogsBefore = dialogs.InformationMessages.Count;
+
+            // 新しい画面を保存する
+            await SaveScreenViaEngine(vm, engineBox[0], "Detail.html", "注文詳細");
+
+            // README は再生成され、センチネルが消え新しい画面名を含む
+            var content = File.ReadAllText(readmePath);
+            content.Should().NotContain(DesignDocSentinel);
+            content.Should().Contain("注文詳細");
+
+            // 無音＝情報ダイアログは増えない
+            dialogs.InformationMessages.Count.Should().Be(dialogsBefore);
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
+    /// <summary>README.md が無い状態で画面保存しても README.md が作られない（オプトイン維持）ことを検証する</summary>
+    [Fact(DisplayName = "README.md が無ければ画面保存で作られない")]
+    public async Task ScreenSaved_WithoutReadme_DoesNotCreateReadme()
+    {
+        var (vm, engineBox, _, baseFolder, mockFolder) = CreateVmWithGenerator(NonEmptyDiagram());
+
+        try
+        {
+            await SaveScreenOnClaudeCode(vm, engineBox, mockFolder);
+
+            // 設計書を出力していないので README は無いまま
+            var readmePath = Path.Combine(mockFolder, MockDesignDocExporter.FileName);
+            File.Exists(readmePath).Should().BeFalse();
+
+            await SaveScreenViaEngine(vm, engineBox[0], "Detail.html", "注文詳細");
+
+            // 追従は起きず README は作られない
+            File.Exists(readmePath).Should().BeFalse();
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
+    /// <summary>README.md がある状態で画面削除すると追従再生成されることを検証する</summary>
+    [Fact(DisplayName = "README.md ありで画面削除すると追従再生成される")]
+    public async Task ScreenRemoved_WithReadmePresent_Regenerates()
+    {
+        var (vm, engineBox, _, baseFolder, mockFolder) = CreateVmWithGenerator(NonEmptyDiagram());
+
+        try
+        {
+            await SaveScreenOnClaudeCode(vm, engineBox, mockFolder);
+            await SaveScreenViaEngine(vm, engineBox[0], "Detail.html", "注文詳細");
+
+            var readmePath = Path.Combine(mockFolder, MockDesignDocExporter.FileName);
+            File.WriteAllText(readmePath, DesignDocSentinel);
+
+            // 画面を 1 つ削除する
+            await RunToolViaEngine(
+                vm,
+                engineBox[0],
+                MockFolderDesignTools.RemoveScreenToolName,
+                new Dictionary<string, object?> { ["file"] = "Detail.html" }
+            );
+
+            // README は再生成され、削除画面（注文詳細）を含まない
+            var content = File.ReadAllText(readmePath);
+            content.Should().NotContain(DesignDocSentinel);
+            content.Should().NotContain("注文詳細");
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
+    /// <summary>共有スタイルシート保存では README.md を再生成しない（設計書の内容に影響しないため）ことを検証する</summary>
+    [Fact(DisplayName = "save_stylesheet では README.md を再生成しない")]
+    public async Task StylesheetSaved_WithReadmePresent_DoesNotRegenerate()
+    {
+        var (vm, engineBox, _, baseFolder, mockFolder) = CreateVmWithGenerator(NonEmptyDiagram());
+
+        try
+        {
+            await SaveScreenOnClaudeCode(vm, engineBox, mockFolder);
+
+            var readmePath = Path.Combine(mockFolder, MockDesignDocExporter.FileName);
+            File.WriteAllText(readmePath, DesignDocSentinel);
+
+            // 共有スタイルシートを保存する
+            await RunToolViaEngine(
+                vm,
+                engineBox[0],
+                MockFolderDesignTools.SaveStylesheetToolName,
+                new Dictionary<string, object?> { ["css"] = "body{}", ["revision_note"] = "配色" }
+            );
+
+            // README は再生成されず、センチネルのまま
+            File.ReadAllText(readmePath).Should().Be(DesignDocSentinel);
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
     /// <summary>
     /// 子 <see cref="ChatConnectionSettingsViewModel.ApiProvider"/> の変更で、親の
     /// <see cref="MockGenerationDialogViewModel.IsBackendReady"/> の PropertyChanged が発火することを検証する。

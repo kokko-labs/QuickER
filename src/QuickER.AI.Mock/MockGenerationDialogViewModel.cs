@@ -613,6 +613,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         OnPropertyChanged(nameof(HasScreens));
         OnPropertyChanged(nameof(CanExportBundle));
         ExportBundleCommand.NotifyCanExecuteChanged();
+        ExportDesignDocCommand.NotifyCanExecuteChanged();
         NotifyReadinessChanged();
         NotifyMockGenChanged();
     }
@@ -633,6 +634,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         OnPropertyChanged(nameof(HasScreens));
         OnPropertyChanged(nameof(CanExportBundle));
         ExportBundleCommand.NotifyCanExecuteChanged();
+        ExportDesignDocCommand.NotifyCanExecuteChanged();
         NotifyMockGenChanged();
     }
 
@@ -875,6 +877,81 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         catch (Exception ex)
         {
             StatusMessage = string.Format(Strings.Mock_HtmlSaveFailedFormat, ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// モックフォルダの内容から画面設計書（README.md）を決定的に生成し、フォルダ直下へ書き出す（初回オプトイン）。
+    /// </summary>
+    /// <remarks>
+    /// 生成は <see cref="MockDesignDocExporter"/>（AI 不使用・決定的）。一度書き出せば以降は画面の保存・削除に
+    /// <see cref="RegenerateDesignDocIfPresent"/> が自動追従する。BOM なし UTF-8・改行はエクスポータ既定（LF）。
+    /// </remarks>
+    [RelayCommand(CanExecute = nameof(CanExportBundle))]
+    private void ExportDesignDoc()
+    {
+        if (_store is null || Screens.Count == 0)
+        {
+            return;
+        }
+
+        var markdown = MockDesignDocExporter.Export(_store);
+        var path = Path.Combine(_store.Folder, MockDesignDocExporter.FileName);
+
+        try
+        {
+            File.WriteAllText(
+                path,
+                markdown,
+                new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)
+            );
+            StatusMessage = Strings.Mock_DesignDocSaved;
+            // 保存先パス付きの完了メッセージを明示する（ステータスバーだけでは見落としやすいため）
+            _dialogs.ShowInformation(
+                string.Format(Strings.Mock_DesignDocSavedMessageFormat, path),
+                Strings.Mock_WindowTitle
+            );
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = string.Format(Strings.Mock_DesignDocSaveFailedFormat, ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// モックフォルダ直下に設計書（README.md）が既にあれば、現在の内容で無音再生成して上書きする。
+    /// </summary>
+    /// <remarks>
+    /// 設計書出力ボタンで一度書き出したフォルダにだけ追従する（README.md が無いフォルダには何も書かない＝オプトイン維持）。
+    /// 画面の保存・削除で呼ぶ（共有 CSS 保存・スキーマ更新は設計書の内容に影響しないため呼ばない）。
+    /// 成功時は無音（ステータス・ダイアログを出さない）・書き込み失敗のみステータスへ通知する。
+    /// </remarks>
+    private void RegenerateDesignDocIfPresent()
+    {
+        if (_store is null)
+        {
+            return;
+        }
+
+        var path = Path.Combine(_store.Folder, MockDesignDocExporter.FileName);
+
+        if (!File.Exists(path))
+        {
+            return;
+        }
+
+        try
+        {
+            var markdown = MockDesignDocExporter.Export(_store);
+            File.WriteAllText(
+                path,
+                markdown,
+                new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)
+            );
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = string.Format(Strings.Mock_DesignDocSaveFailedFormat, ex.Message);
         }
     }
 
@@ -1192,6 +1269,9 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         // 保存された画面を選択するとプレビュー要求が飛ぶ（同名再保存でも新インスタンスなので反映される）
         SelectScreenByFile(e.File);
 
+        // 設計書（README.md）を出力済みなら、画面変更に無音で追従して再生成する
+        RegenerateDesignDocIfPresent();
+
         AddSystemMessage(BuildScreenSavedNote(e.RevisionNote, e.Warnings));
     }
 
@@ -1234,6 +1314,9 @@ public partial class MockGenerationDialogViewModel : ObservableObject
                 PreviewClearRequested?.Invoke(this, EventArgs.Empty);
             }
         }
+
+        // 設計書（README.md）を出力済みなら、画面削除に無音で追従して再生成する
+        RegenerateDesignDocIfPresent();
 
         AddSystemMessage(string.Format(Strings.Mock_ScreenRemovedResult, file));
     }
@@ -1391,6 +1474,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         StartConversationCommand.NotifyCanExecuteChanged();
         SendMessageCommand.NotifyCanExecuteChanged();
         ExportBundleCommand.NotifyCanExecuteChanged();
+        ExportDesignDocCommand.NotifyCanExecuteChanged();
         // 第2ステップの可否は画面の有無・接続状態にも依存するため合わせて更新する
         NotifyMockGenChanged();
     }

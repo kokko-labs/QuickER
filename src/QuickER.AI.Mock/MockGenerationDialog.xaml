@@ -718,12 +718,19 @@
                 Foreground="{StaticResource HeaderText}"
                 Text="{x:Static res:Strings.Mock_PreviewHeader}"
               />
-              <Button
-                Grid.Column="2"
-                Style="{StaticResource SecondaryButton}"
-                Content="{x:Static res:Strings.Mock_ExportHtml}"
-                Command="{Binding ExportBundleCommand}"
-              />
+              <StackPanel Grid.Column="2" Orientation="Horizontal">
+                <Button
+                  Style="{StaticResource SecondaryButton}"
+                  Content="{x:Static res:Strings.Mock_ExportDesignDoc}"
+                  Command="{Binding ExportDesignDocCommand}"
+                />
+                <Button
+                  Margin="8,0,0,0"
+                  Style="{StaticResource SecondaryButton}"
+                  Content="{x:Static res:Strings.Mock_ExportHtml}"
+                  Command="{Binding ExportBundleCommand}"
+                />
+              </StackPanel>
             </Grid>
           </Border>
 

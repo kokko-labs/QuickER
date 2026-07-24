@@ -219,6 +219,19 @@
     <value>単一 HTML を保存しました:
 {0}</value>
   </data>
+  <data name="Mock_ExportDesignDoc" xml:space="preserve">
+    <value>設計書出力</value>
+  </data>
+  <data name="Mock_DesignDocSaved" xml:space="preserve">
+    <value>設計書を保存しました。</value>
+  </data>
+  <data name="Mock_DesignDocSavedMessageFormat" xml:space="preserve">
+    <value>画面設計書を保存しました:
+{0}</value>
+  </data>
+  <data name="Mock_DesignDocSaveFailedFormat" xml:space="preserve">
+    <value>設計書を保存できませんでした: {0}</value>
+  </data>
   <data name="Mock_Clear" xml:space="preserve">
     <value>クリア</value>
   </data>
@@ -500,5 +513,68 @@
   </data>
   <data name="Mock_ApiRun_ErrorTurnFailedFormat" xml:space="preserve">
     <value>生成ターンが失敗しました: {0}</value>
+  </data>
+  <data name="MockDoc_DefaultTitle" xml:space="preserve">
+    <value>モック画面設計書</value>
+  </data>
+  <data name="MockDoc_ScreenListHeading" xml:space="preserve">
+    <value>画面一覧</value>
+  </data>
+  <data name="MockDoc_TransitionDiagramHeading" xml:space="preserve">
+    <value>画面遷移図</value>
+  </data>
+  <data name="MockDoc_ColScreen" xml:space="preserve">
+    <value>画面</value>
+  </data>
+  <data name="MockDoc_ColDescription" xml:space="preserve">
+    <value>説明</value>
+  </data>
+  <data name="MockDoc_ColKind" xml:space="preserve">
+    <value>種別</value>
+  </data>
+  <data name="MockDoc_ColItem" xml:space="preserve">
+    <value>項目</value>
+  </data>
+  <data name="MockDoc_ColNote" xml:space="preserve">
+    <value>備考</value>
+  </data>
+  <data name="MockDoc_TransitionFrom" xml:space="preserve">
+    <value>遷移元</value>
+  </data>
+  <data name="MockDoc_TransitionTo" xml:space="preserve">
+    <value>遷移先</value>
+  </data>
+  <data name="MockDoc_TriggerFormat" xml:space="preserve">
+    <value>（{0}）</value>
+  </data>
+  <data name="MockDoc_KindInput" xml:space="preserve">
+    <value>入力</value>
+  </data>
+  <data name="MockDoc_KindChoice" xml:space="preserve">
+    <value>選択</value>
+  </data>
+  <data name="MockDoc_KindButton" xml:space="preserve">
+    <value>ボタン</value>
+  </data>
+  <data name="MockDoc_KindTableColumn" xml:space="preserve">
+    <value>テーブル列</value>
+  </data>
+  <data name="MockDoc_NoteMultiline" xml:space="preserve">
+    <value>複数行</value>
+  </data>
+  <data name="MockDoc_NoteRequired" xml:space="preserve">
+    <value>必須</value>
+  </data>
+  <data name="MockDoc_NoteRadio" xml:space="preserve">
+    <value>ラジオ</value>
+  </data>
+  <data name="MockDoc_NoteCheckbox" xml:space="preserve">
+    <value>チェックボックス</value>
+  </data>
+  <data name="MockDoc_NoteOptionCountFormat" xml:space="preserve">
+    <value>{0} 択</value>
+  </data>
+  <data name="MockDoc_ItemTableFormat" xml:space="preserve">
+    <value>テーブル {0}</value>
   </data>
 </root>
