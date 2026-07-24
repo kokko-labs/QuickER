@@ -116,7 +116,10 @@
     <value>Export HTML</value>
   </data>
   <data name="Mock_Step2Header" xml:space="preserve">
-    <value>Generate WPF Mock Project</value>
+    <value>Generate Mock Project</value>
+  </data>
+  <data name="Mock_TargetLabel" xml:space="preserve">
+    <value>Target</value>
   </data>
   <data name="Mock_OutputFolder" xml:space="preserve">
     <value>Output Folder</value>
@@ -152,13 +155,13 @@
     <value>Additional Instructions (optional)</value>
   </data>
   <data name="Mock_MockGenInstructionsTooltip" xml:space="preserve">
-    <value>Extra instructions passed to Claude Code for the WPF implementation (e.g., preferred layout, navigation style, or component conventions).</value>
+    <value>Extra instructions the selected backend uses when implementing the mock (e.g., preferred layout, navigation style, or component conventions).</value>
   </data>
   <data name="Mock_OpenFolder" xml:space="preserve">
     <value>Open Folder</value>
   </data>
-  <data name="Mock_GenerateWpf" xml:space="preserve">
-    <value>Generate WPF Mock</value>
+  <data name="Mock_GenerateProject" xml:space="preserve">
+    <value>Generate Mock</value>
   </data>
   <data name="MockPreview_EmptyText" xml:space="preserve">
     <value>The generated mock screen will appear here.
@@ -221,17 +224,17 @@ Start "+ New Conversation" in the chat on the left and send your requests for th
   </data>
   <data name="Mock_ClearConfirm" xml:space="preserve">
     <value>Reset this window?
-The conversation, the mock folder selection, and the WPF mock generation inputs will be cleared. Files in the mock folder on disk are not deleted.</value>
+The conversation, the mock folder selection, and the mock project generation inputs will be cleared. Files in the mock folder on disk are not deleted.</value>
   </data>
   <data name="Mock_PickOutputFolderTitle" xml:space="preserve">
-    <value>Select the output folder for the WPF mock project</value>
+    <value>Select the output folder for the mock project</value>
   </data>
   <data name="Mock_OutputFolderNotEmpty" xml:space="preserve">
     <value>Note: The output folder is not empty. Existing files are kept and generated files are added.
 </value>
   </data>
   <data name="Mock_GeneratingProject" xml:space="preserve">
-    <value>Generating the WPF mock project...</value>
+    <value>Generating the mock project...</value>
   </data>
   <data name="Mock_GenerationErrorLogFormat" xml:space="preserve">
     <value>
@@ -239,7 +242,7 @@ An error occurred during generation: {0}
 </value>
   </data>
   <data name="Mock_GenerationFailedFormat" xml:space="preserve">
-    <value>WPF mock generation failed: {0}</value>
+    <value>Mock project generation failed: {0}</value>
   </data>
   <data name="Mock_Codex_AutoContinueNotice" xml:space="preserve">
     <value>
@@ -283,7 +286,7 @@ See the log for details:
     <value>Unknown details</value>
   </data>
   <data name="Mock_Run_Start" xml:space="preserve">
-    <value>== Starting WPF mock generation ==</value>
+    <value>== Starting mock project generation ==</value>
   </data>
   <data name="Mock_Run_OutputFolderFormat" xml:space="preserve">
     <value>Output folder: {0}</value>
@@ -327,7 +330,7 @@ See the log for details:
     <value>Final build verification was canceled.</value>
   </data>
   <data name="Mock_Result_Success" xml:space="preserve">
-    <value>WPF mock generation completed (build success confirmed).</value>
+    <value>Mock project generation completed (build success confirmed).</value>
   </data>
   <data name="Mock_Result_TimedOut" xml:space="preserve">
     <value>Aborted due to timeout. Partial files and the log remain in the output folder.</value>

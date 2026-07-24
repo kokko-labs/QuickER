@@ -74,18 +74,21 @@ public sealed class MockProjectScaffoldService
     /// <param name="outputDirectory">出力フォルダ</param>
     /// <param name="projectName">プロジェクト名（csproj 名・ルート名前空間の由来）</param>
     /// <param name="mockFolder">デザイン仕様として同梱するモックフォルダのパス（mock.json＋画面 HTML＋共有 style.css）</param>
+    /// <param name="profile">生成ターゲットのプロファイル（csproj／README のターゲット差分の正本）</param>
     /// <exception cref="InvalidOperationException">コード生成にエラーがある場合</exception>
     public MockProjectScaffoldResult Scaffold(
         ErDiagram diagram,
         string outputDirectory,
         string projectName,
-        string mockFolder
+        string mockFolder,
+        MockProjectTargetProfile profile
     )
     {
         ArgumentNullException.ThrowIfNull(diagram);
         ArgumentException.ThrowIfNullOrWhiteSpace(outputDirectory);
         ArgumentException.ThrowIfNullOrWhiteSpace(projectName);
         ArgumentException.ThrowIfNullOrWhiteSpace(mockFolder);
+        ArgumentNullException.ThrowIfNull(profile);
 
         Directory.CreateDirectory(outputDirectory);
         var written = new List<string>();
@@ -106,10 +109,14 @@ public sealed class MockProjectScaffoldService
         WriteGeneratedCode(diagram, options, repositoryDialect, generatedDirectory, written);
 
         var projectFilePath = Path.Combine(projectDirectory, $"{projectName}.csproj");
-        WriteText(projectFilePath, BuildCsproj(rootNamespace, repositoryDialect), written);
+        WriteText(projectFilePath, profile.BuildCsproj(rootNamespace, repositoryDialect), written);
 
         var readmePath = Path.Combine(projectDirectory, ReadmeFileName);
-        WriteText(readmePath, BuildReadme(projectName, rootNamespace, repositoryDialect), written);
+        WriteText(
+            readmePath,
+            profile.BuildReadme(projectName, rootNamespace, repositoryDialect),
+            written
+        );
 
         // モックフォルダの内容（mock.json・画面 HTML・共有 style.css）を design/mock/ へフラットに同梱する
         var designFolderPath = Path.Combine(
@@ -246,38 +253,6 @@ public sealed class MockProjectScaffoldService
         return _providers.Get("sqlserver");
     }
 
-    /// <summary>csproj スケルトンを組み立てる（WPF・net10.0-windows・必要な PackageReference）</summary>
-    private static string BuildCsproj(string rootNamespace, string? repositoryDialect)
-    {
-        var adoPackage = repositoryDialect switch
-        {
-            "sqlserver" =>
-                "    <PackageReference Include=\"Microsoft.Data.SqlClient\" Version=\"7.0.1\" />\n",
-            "sqlite" =>
-                "    <PackageReference Include=\"Microsoft.Data.Sqlite\" Version=\"10.0.0\" />\n",
-            _ => string.Empty,
-        };
-
-        return $@"<Project Sdk=""Microsoft.NET.Sdk"">
-
-  <PropertyGroup>
-    <OutputType>WinExe</OutputType>
-    <TargetFramework>net10.0-windows</TargetFramework>
-    <Nullable>enable</Nullable>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <UseWPF>true</UseWPF>
-    <RootNamespace>{rootNamespace}</RootNamespace>
-  </PropertyGroup>
-
-  <ItemGroup>
-    <PackageReference Include=""CommunityToolkit.Mvvm"" Version=""8.4.2"" />
-    <PackageReference Include=""Microsoft.Extensions.DependencyInjection"" Version=""10.0.0"" />
-{adoPackage}  </ItemGroup>
-
-</Project>
-";
-    }
-
     /// <summary>
     /// プロジェクトを 1 つ参照する最小のソリューションテキスト（Format Version 12.00）を組み立てる。
     /// </summary>
@@ -329,77 +304,6 @@ public sealed class MockProjectScaffoldService
     {
         var hash = MD5.HashData(Encoding.UTF8.GetBytes(projectName));
         return new Guid(hash);
-    }
-
-    /// <summary>AI・人間の双方向けの規約ドキュメントを組み立てる</summary>
-    private static string BuildReadme(
-        string projectName,
-        string rootNamespace,
-        string? repositoryDialect
-    )
-    {
-        // DI 登録はエンジン別（AddGenerated{方言}Repositories）で統一されているため、方言別名で案内する
-        var dialectSwitchGuide = repositoryDialect switch
-        {
-            "sqlserver" =>
-                "3. 実 DB（SQL Server）へ切り替えるには、`AddGeneratedInMemoryRepositories()` を "
-                    + "`AddGeneratedSqlServerRepositories(接続文字列)` に差し替えます。",
-            "sqlite" =>
-                "3. 実 DB（SQLite）へ切り替えるには、`AddGeneratedInMemoryRepositories()` を "
-                    + "`AddGeneratedSqliteRepositories(接続文字列)` に差し替えます。",
-            _ =>
-                "3. 実 DB へ切り替える場合は、QuickER で対応方言（SQL Server / SQLite）のQuickER 版 Repository を"
-                    + "生成し直し、`AddGeneratedInMemoryRepositories()` を対応する DI 登録へ差し替えます。",
-        };
-
-        return $@"# {projectName}
-
-QuickER がモックフォルダから生成した WPF モックプロジェクトです。
-データ層（`Generated/` 配下）は QuickER が決定的に生成しており、UI 層（App / MainWindow / ビュー・ビューモデル）は
-`design/mock/` のデザイン仕様（複数画面）に沿って実装します。
-
-## プロジェクト構成
-
-このフォルダは Visual Studio 標準構成です。出力フォルダ直下に `{projectName}.sln`（ソリューション）があり、
-プロジェクト一式は `{projectName}/` フォルダ配下にあります。
-
-- `{projectName}.sln` … ソリューションファイル（出力フォルダ直下）。`dotnet build` はこの場所で実行すれば sln を拾います。
-- `{projectName}/{projectName}.csproj` … WPF（net10.0-windows）のプロジェクトファイル。
-- `{projectName}/Generated/` … QuickER が生成したデータ層（Entity / EditModel / Mapper / Repository 契約・実装 / インメモリ実装）。
-  **このフォルダは自動生成コードのため、手で編集・削除しないでください（再生成で上書きされます）。**
-- `{projectName}/design/mock/` … 再現すべき画面のデザイン仕様（モックフォルダ）。
-  - `design/mock/mock.json` … 画面一覧・画面遷移・改訂履歴のマニフェスト。まずこれを読んで全体像を把握します。
-  - `design/mock/*.html` … 1 ファイル＝1 画面のデザイン仕様（画面構成・項目）。
-  - `design/mock/style.css` … 全画面が共有するデザインシステム（共有 CSS）。
-- App / MainWindow / ビュー・ビューモデル等の UI 層は `{projectName}/` フォルダ配下に追加してください。
-
-## 実装の規約
-
-- UI は **CommunityToolkit.Mvvm** を用いた MVVM（`ObservableObject` / `RelayCommand` / `[ObservableProperty]`）で実装します。
-- データアクセスは `Generated/` の **`I{{Entity}}Repository`** を DI 経由で受け取って使います
-  （リポジトリの具象を直接 `new` しないでください）。
-- まず `design/mock/mock.json` で画面一覧と画面遷移（transitions）を把握し、各 `*.html` の構成・項目を WPF の
-  ネイティブ UI で忠実に再現します（HTML をそのまま埋め込むのではなく、WPF のウィンドウ／ページ／ユーザーコントロール
-  へ作り直し、マニフェストの遷移をナビゲーションとして実装します）。
-
-## 起動時の DI 登録
-
-`App` の起動で `Microsoft.Extensions.DependencyInjection` のコンテナを構成し、`{rootNamespace}.Generated` の
-**`AddGeneratedInMemoryRepositories()`** を呼びます（サンプルデータ入りのインメモリ実装が登録され、実 DB なしで動作します）。
-
-```csharp
-var services = new ServiceCollection();
-services.AddGeneratedInMemoryRepositories(seedSampleData: true);
-// ビュー・ビューモデルを登録
-var provider = services.BuildServiceProvider();
-```
-
-## 実 DB への切り替え手順
-
-1. QuickER の DDL 生成機能で対象 DB のスキーマ（DDL）を出力し、DB に適用します。
-2. 接続文字列を用意します。
-{dialectSwitchGuide}
-";
     }
 
     /// <summary>プロジェクト名を C# 名前空間として妥当な形へ正規化する（識別子でない文字を除去・数字始まりを回避）</summary>

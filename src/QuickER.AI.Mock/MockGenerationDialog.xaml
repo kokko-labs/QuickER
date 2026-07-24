@@ -795,7 +795,7 @@
       </Border>
     </Grid>
 
-    <!-- ── 第2ステップ: WPF モックプロジェクト生成（Claude Code / Codex / API キー） ── -->
+    <!-- ── 第2ステップ: モックプロジェクト生成（Claude Code / Codex / API キー） ── -->
     <Border
       Grid.Row="1"
       Margin="0,12,0,0"
@@ -824,6 +824,27 @@
             Text="{x:Static res:Strings.Mock_ApiKeyOneShotNote}"
             Visibility="{Binding IsApiKeyMockGenBackend, Converter={StaticResource BoolToVisibilityConverter}}"
           />
+
+          <!-- ターゲット（生成プラットフォーム: WPF / Blazor Web App） -->
+          <Grid Margin="0,0,0,10">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <TextBlock
+              Grid.Column="0"
+              Style="{StaticResource FieldLabel}"
+              Text="{x:Static res:Strings.Mock_TargetLabel}"
+            />
+            <ComboBox
+              Grid.Column="1"
+              Padding="6,4"
+              ItemsSource="{Binding MockProjectTargets}"
+              SelectedItem="{Binding SelectedMockProjectTarget}"
+              DisplayMemberPath="DisplayName"
+              IsEnabled="{Binding CanEditMockGenInput}"
+            />
+          </Grid>
 
           <!-- 出力フォルダ -->
           <Grid>
@@ -873,7 +894,7 @@
             />
           </Grid>
 
-          <!-- 追加指示（任意・複数行。Claude Code へのプロンプト末尾に連結される） -->
+          <!-- 追加指示（任意・複数行。選択中バックエンドへのプロンプト末尾に連結される） -->
           <Grid Margin="0,10,0,0">
             <Grid.ColumnDefinitions>
               <ColumnDefinition Width="Auto" />
@@ -934,7 +955,7 @@
               <Button
                 Style="{StaticResource PrimaryButton}"
                 Width="150"
-                Content="{x:Static res:Strings.Mock_GenerateWpf}"
+                Content="{x:Static res:Strings.Mock_GenerateProject}"
                 Command="{Binding GenerateMockProjectCommand}"
                 ToolTip="{Binding MockGenDisabledReason}"
               />

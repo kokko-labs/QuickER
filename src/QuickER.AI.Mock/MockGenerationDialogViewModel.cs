@@ -190,7 +190,14 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     /// <summary>単一 HTML を出力できるか（モックフォルダに画面が 1 つ以上あるか）</summary>
     public bool CanExportBundle => HasScreens;
 
-    // ── 第2ステップ: WPF モックプロジェクト生成（Claude Code / Codex） ──
+    // ── 第2ステップ: モックプロジェクト生成（Claude Code / Codex / API キー） ──
+
+    /// <summary>選択可能な生成ターゲット一覧（WPF / Blazor。生成器が公開する Targets）</summary>
+    public IReadOnlyList<MockProjectTarget> MockProjectTargets { get; }
+
+    /// <summary>選択中の生成ターゲット（既定は先頭＝Blazor Web App）</summary>
+    [ObservableProperty]
+    private MockProjectTarget _selectedMockProjectTarget;
 
     /// <summary>生成先の出力フォルダ</summary>
     [ObservableProperty]
@@ -203,11 +210,11 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     [ObservableProperty]
     private string _projectName = DefaultProjectName;
 
-    /// <summary>WPF 実装に対する追加指示（任意・複数行。Claude Code へ渡すプロンプト末尾に連結される）</summary>
+    /// <summary>実装に対する追加指示（任意・複数行。選択中バックエンドへ渡すプロンプト末尾に連結される）</summary>
     [ObservableProperty]
     private string _mockGenInstructions = string.Empty;
 
-    /// <summary>WPF モック生成の進捗ログ（追記式・自動スクロール表示）</summary>
+    /// <summary>モックプロジェクト生成の進捗ログ（追記式・自動スクロール表示）</summary>
     [ObservableProperty]
     private string _mockGenLog = string.Empty;
 
@@ -221,7 +228,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
 
     private bool _isMockGenInProgress;
 
-    /// <summary>WPF モック生成が実行中か（生成・中断ボタンの可否に連動）</summary>
+    /// <summary>モックプロジェクト生成が実行中か（生成・中断ボタンの可否に連動）</summary>
     public bool IsMockGenInProgress
     {
         get => _isMockGenInProgress;
@@ -236,7 +243,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
 
     private bool _mockGenCompleted;
 
-    /// <summary>直近の WPF モック生成が完了したか（成功・失敗を問わず。フォルダを開く／ログ案内の表示制御）</summary>
+    /// <summary>直近のモックプロジェクト生成が完了したか（成功・失敗を問わず。フォルダを開く／ログ案内の表示制御）</summary>
     public bool MockGenCompleted
     {
         get => _mockGenCompleted;
@@ -252,7 +259,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
 
     private bool _mockGenSucceeded;
 
-    /// <summary>直近の WPF モック生成が成功したか（フォルダを開くボタンの表示制御）</summary>
+    /// <summary>直近のモックプロジェクト生成が成功したか（フォルダを開くボタンの表示制御）</summary>
     public bool MockGenSucceeded
     {
         get => _mockGenSucceeded;
@@ -272,7 +279,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     public bool CanEditMockGenInput => !IsMockGenInProgress;
 
     /// <summary>
-    /// WPF モック生成を開始できるか（画面あり・選択バックエンドが ready・dotnet SDK 検出・
+    /// モックプロジェクト生成を開始できるか（画面あり・選択バックエンドが ready・dotnet SDK 検出・
     /// 出力フォルダ／プロジェクト名あり・非実行中）。3 バックエンド（Claude Code / Codex / API キー）すべて可。
     /// </summary>
     public bool CanGenerateMockProject =>
@@ -288,7 +295,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     public bool IsApiKeyMockGenBackend => Connection.SelectedBackend == ErChatBackendKind.ApiKey;
 
     /// <summary>
-    /// 選択中バックエンドが WPF モック生成の実行条件（CLI 検出／認証／API キー）を満たすか。
+    /// 選択中バックエンドがモックプロジェクト生成の実行条件（CLI 検出／認証／API キー）を満たすか。
     /// Claude Code＝claude CLI 検出・Codex＝認証プローブ結果（<see cref="ApplyCodexReadiness"/>）・
     /// API キー＝キー入力あり（Ollama はキー不要）。
     /// </summary>
@@ -300,7 +307,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
             _ => IsApiKeyConnectionReady,
         };
 
-    /// <summary>WPF モック生成が無効な場合の理由（ツールチップ／案内文用）</summary>
+    /// <summary>モックプロジェクト生成が無効な場合の理由（ツールチップ／案内文用）</summary>
     public string MockGenDisabledReason
     {
         get
@@ -385,7 +392,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     /// <param name="apiKeyEngineFactory">API キーエンジンのファクトリ（プロファイル・ツールホスト受け取り）</param>
     /// <param name="codexEngineFactory">Codex エンジンのファクトリ</param>
     /// <param name="claudeCodeEngineFactory">Claude Code エンジンのファクトリ</param>
-    /// <param name="mockProjectGenerator">WPF モックプロジェクト生成器（省略時は図の供給元のプロバイダから構築）</param>
+    /// <param name="mockProjectGenerator">モックプロジェクト生成器（省略時は図の供給元のプロバイダから構築）</param>
     /// <param name="dialogService">確認・通知ダイアログ（省略時は MessageBox 実装）</param>
     public MockGenerationDialogViewModel(
         IMockDiagramSource diagramSource,
@@ -420,12 +427,15 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         _apiKeyEngineFactory =
             apiKeyEngineFactory ?? ((profile, toolHost) => BuildApiKeyEngine(profile, toolHost));
 
-        // API キー方式の WPF モック生成は、チャットと同じ API キーエンジンを使う。生成時点の Connection 状態
+        // API キー方式のモックプロジェクト生成は、チャットと同じ API キーエンジンを使う。生成時点の Connection 状態
         // （モデル・キー・エンドポイント）を閉包へ閉じ込めるため、確定済みの _apiKeyEngineFactory を渡す
         // （実行は生成時＝Connection ロード後）。
         _mockProjectGenerator =
             mockProjectGenerator
             ?? new MockProjectGenerator(diagramSource.Providers, _apiKeyEngineFactory);
+        // 生成ターゲット一覧を取り込み、既定を先頭（Blazor Web App）にする（第 2 ステップの ComboBox が選ばせる）
+        MockProjectTargets = _mockProjectGenerator.Targets;
+        _selectedMockProjectTarget = MockProjectTargets[0];
         _codexEngineFactory =
             codexEngineFactory
             ?? (
@@ -502,7 +512,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         Connection.Initialize();
         NotifyReadinessChanged();
 
-        // 第2ステップ（WPF モック生成）の有効条件（claude CLI・dotnet SDK 検出）を非同期に確認する
+        // 第2ステップ（モックプロジェクト生成）の有効条件（claude CLI・dotnet SDK 検出）を非同期に確認する
         _ = RefreshMockGenAvailabilityAsync();
     }
 
@@ -868,7 +878,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         }
     }
 
-    /// <summary>画面全体を初期状態へ戻せるか（モックフォルダ未選択・ターン／WPF モック生成の実行中は不可）</summary>
+    /// <summary>画面全体を初期状態へ戻せるか（モックフォルダ未選択・ターン／モックプロジェクト生成の実行中は不可）</summary>
     public bool CanClear =>
         !string.IsNullOrWhiteSpace(MockFolder) && !IsTurnInProgress && !IsMockGenInProgress;
 
@@ -894,6 +904,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         MockFolder = string.Empty;
 
         // 第 2 ステップの入力と結果表示
+        SelectedMockProjectTarget = MockProjectTargets[0];
         OutputFolder = string.Empty;
         ProjectName = DefaultProjectName;
         MockGenInstructions = string.Empty;
@@ -904,7 +915,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         StatusMessage = string.Empty;
     }
 
-    // ── 第2ステップ: WPF モックプロジェクト生成 ──
+    // ── 第2ステップ: モックプロジェクト生成 ──
 
     /// <summary>出力フォルダを選択する</summary>
     [RelayCommand]
@@ -918,7 +929,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         }
     }
 
-    /// <summary>スキャフォールド＋選択バックエンド（Claude Code / Codex）で WPF モックプロジェクトを生成する</summary>
+    /// <summary>スキャフォールド＋選択バックエンド（Claude Code / Codex / API キー）でモックプロジェクトを生成する</summary>
     [RelayCommand(CanExecute = nameof(CanGenerateMockProject))]
     private async Task GenerateMockProjectAsync()
     {
@@ -976,6 +987,8 @@ public partial class MockGenerationDialogViewModel : ObservableObject
                     instructions,
                     outputFolder,
                     projectName,
+                    // 第 2 ステップの ComboBox で選択中の生成ターゲット（WPF / Blazor）
+                    SelectedMockProjectTarget,
                     backend,
                     model,
                     modelProvider,
@@ -1033,10 +1046,10 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         }
     }
 
-    /// <summary>WPF モック生成の中断起点</summary>
+    /// <summary>モックプロジェクト生成の中断起点</summary>
     private CancellationTokenSource? _mockGenCts;
 
-    /// <summary>実行中の WPF モック生成を中断する</summary>
+    /// <summary>実行中のモックプロジェクト生成を中断する</summary>
     [RelayCommand(CanExecute = nameof(IsMockGenInProgress))]
     private async Task InterruptMockGenAsync()
     {

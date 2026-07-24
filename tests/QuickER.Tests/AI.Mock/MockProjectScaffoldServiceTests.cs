@@ -105,7 +105,8 @@ public class MockProjectScaffoldServiceTests
                 BuildDiagram(SqlServerProvider.ProviderName),
                 folder,
                 "AcmeMock",
-                mockFolder
+                mockFolder,
+                MockProjectTargetProfile.Wpf
             );
 
             // VS 標準構成: sln は出力フォルダ直下、プロジェクト一式はプロジェクトフォルダ配下
@@ -190,7 +191,8 @@ public class MockProjectScaffoldServiceTests
                 BuildDiagram(SqlServerProvider.ProviderName),
                 folder,
                 "AcmeMock",
-                mockFolder
+                mockFolder,
+                MockProjectTargetProfile.Wpf
             );
 
             result.RepositoryDialect.Should().Be("sqlserver");
@@ -225,7 +227,8 @@ public class MockProjectScaffoldServiceTests
                 BuildDiagram(SqliteProvider.ProviderName),
                 folder,
                 "AcmeMock",
-                mockFolder
+                mockFolder,
+                MockProjectTargetProfile.Wpf
             );
 
             result.RepositoryDialect.Should().Be("sqlite");
@@ -252,7 +255,8 @@ public class MockProjectScaffoldServiceTests
                 BuildDiagram("postgresql"),
                 folder,
                 "AcmeMock",
-                mockFolder
+                mockFolder,
+                MockProjectTargetProfile.Wpf
             );
 
             result.RepositoryDialect.Should().BeNull();
@@ -275,6 +279,164 @@ public class MockProjectScaffoldServiceTests
         }
     }
 
+    /// <summary>Blazor プロファイルでは Blazor Web App の csproj（Microsoft.NET.Sdk.Web・net10.0）と規約 README を出すことを検証する</summary>
+    [Fact(DisplayName = "Blazor は Web App csproj と Blazor 規約 README を出す")]
+    public void Scaffold_Blazor_WritesBlazorCsprojAndReadme()
+    {
+        var folder = NewTempFolder();
+        var mockFolder = SeedMockFolder();
+        var service = new MockProjectScaffoldService(BuildRegistry());
+
+        try
+        {
+            var result = service.Scaffold(
+                BuildDiagram(SqliteProvider.ProviderName),
+                folder,
+                "AcmeMock",
+                mockFolder,
+                MockProjectTargetProfile.Blazor
+            );
+
+            // csproj は Blazor Web App（Microsoft.NET.Sdk.Web・net10.0）で、WPF 固有の依存は持たない
+            var csproj = File.ReadAllText(result.ProjectFilePath);
+            csproj.Should().Contain("Microsoft.NET.Sdk.Web");
+            csproj.Should().Contain("<TargetFramework>net10.0</TargetFramework>");
+            csproj.Should().NotContain("UseWPF");
+            csproj.Should().NotContain("CommunityToolkit.Mvvm");
+            csproj.Should().NotContain("Microsoft.Extensions.DependencyInjection");
+            // sqlite 方言なので ADO パッケージは入る
+            csproj.Should().Contain("Microsoft.Data.Sqlite");
+
+            // README は Blazor の実装規約（@page／InteractiveServer／wwwroot/style.css／dotnet run）を案内する
+            var readme = File.ReadAllText(result.ReadmePath);
+            readme.Should().Contain("Blazor Web App");
+            readme.Should().Contain("@page");
+            readme.Should().Contain("InteractiveServer");
+            readme.Should().Contain("wwwroot/style.css");
+            readme.Should().Contain("dotnet run");
+            readme.Should().Contain("AddGeneratedInMemoryRepositories");
+        }
+        finally
+        {
+            Cleanup(folder);
+            Cleanup(mockFolder);
+        }
+    }
+
+    /// <summary>Blazor で非対応方言の場合、ADO パッケージも空の ItemGroup 要素も出さないことを検証する</summary>
+    [Fact(DisplayName = "Blazor・非対応方言は ItemGroup ごと省略する")]
+    public void Scaffold_Blazor_UnsupportedDialect_OmitsItemGroup()
+    {
+        var folder = NewTempFolder();
+        var mockFolder = SeedMockFolder();
+        var service = new MockProjectScaffoldService(BuildRegistry());
+
+        try
+        {
+            var result = service.Scaffold(
+                BuildDiagram("postgresql"),
+                folder,
+                "AcmeMock",
+                mockFolder,
+                MockProjectTargetProfile.Blazor
+            );
+
+            result.RepositoryDialect.Should().BeNull();
+            var csproj = File.ReadAllText(result.ProjectFilePath);
+            csproj.Should().Contain("Microsoft.NET.Sdk.Web");
+            csproj.Should().NotContain("Microsoft.Data.SqlClient");
+            csproj.Should().NotContain("Microsoft.Data.Sqlite");
+            // 方言 ADO が無いので ItemGroup 自体を出さない（空要素を作らない）
+            csproj.Should().NotContain("<ItemGroup>");
+        }
+        finally
+        {
+            Cleanup(folder);
+            Cleanup(mockFolder);
+        }
+    }
+
+    /// <summary>Blazor 方言の図でもQuickER 版 Repository と ADO 依存の分岐は WPF と同様に効くことを検証する</summary>
+    [Fact(DisplayName = "Blazor・SQL Server 方言でもQuickER 版 Repository を出す")]
+    public void Scaffold_Blazor_SqlServer_EmitsRepositoryAndAdoPackage()
+    {
+        var folder = NewTempFolder();
+        var mockFolder = SeedMockFolder();
+        var service = new MockProjectScaffoldService(BuildRegistry());
+
+        try
+        {
+            var result = service.Scaffold(
+                BuildDiagram(SqlServerProvider.ProviderName),
+                folder,
+                "AcmeMock",
+                mockFolder,
+                MockProjectTargetProfile.Blazor
+            );
+
+            result.RepositoryDialect.Should().Be("sqlserver");
+            File.ReadAllText(result.ProjectFilePath).Should().Contain("Microsoft.Data.SqlClient");
+
+            var allGenerated = string.Concat(
+                Directory
+                    .GetFiles(result.GeneratedDirectory, "*.g.cs", SearchOption.AllDirectories)
+                    .Select(File.ReadAllText)
+            );
+            allGenerated.Should().Contain("AddGeneratedSqlServerRepositories");
+        }
+        finally
+        {
+            Cleanup(folder);
+            Cleanup(mockFolder);
+        }
+    }
+
+    /// <summary>Generated/（データ層コード）はターゲットに依らず同一（WPF と Blazor で一致）であることを検証する</summary>
+    [Fact(DisplayName = "Generated/ は WPF と Blazor で同一")]
+    public void Scaffold_GeneratedIsIdenticalAcrossTargets()
+    {
+        var wpfFolder = NewTempFolder();
+        var blazorFolder = NewTempFolder();
+        var mockFolder = SeedMockFolder();
+        var service = new MockProjectScaffoldService(BuildRegistry());
+
+        try
+        {
+            var wpf = service.Scaffold(
+                BuildDiagram(SqliteProvider.ProviderName),
+                wpfFolder,
+                "AcmeMock",
+                mockFolder,
+                MockProjectTargetProfile.Wpf
+            );
+            var blazor = service.Scaffold(
+                BuildDiagram(SqliteProvider.ProviderName),
+                blazorFolder,
+                "AcmeMock",
+                mockFolder,
+                MockProjectTargetProfile.Blazor
+            );
+
+            // 相対パス→内容のマップを両ターゲットで作り、完全一致を検証する
+            var wpfGenerated = ReadGeneratedRelative(wpf.GeneratedDirectory);
+            var blazorGenerated = ReadGeneratedRelative(blazor.GeneratedDirectory);
+
+            blazorGenerated.Should().BeEquivalentTo(wpfGenerated);
+        }
+        finally
+        {
+            Cleanup(wpfFolder);
+            Cleanup(blazorFolder);
+            Cleanup(mockFolder);
+        }
+    }
+
+    /// <summary>Generated/ 配下の *.g.cs を「相対パス→内容」の辞書として読み出す（ターゲット間の同一性比較用）</summary>
+    private static Dictionary<string, string> ReadGeneratedRelative(string generatedDirectory) =>
+        Directory
+            .GetFiles(generatedDirectory, "*.g.cs", SearchOption.AllDirectories)
+            .ToDictionary(path => Path.GetRelativePath(generatedDirectory, path), File.ReadAllText);
+
     /// <summary>生成した .sln の構文（Format Version・Project/EndProject・構成セクション・プロジェクト参照）を検証する</summary>
     [Fact(DisplayName = "sln は VS 標準の構文とプロジェクト参照を含む")]
     public void Scaffold_SolutionHasValidSyntax()
@@ -289,7 +451,8 @@ public class MockProjectScaffoldServiceTests
                 BuildDiagram(SqlServerProvider.ProviderName),
                 folder,
                 "AcmeMock",
-                mockFolder
+                mockFolder,
+                MockProjectTargetProfile.Wpf
             );
 
             var sln = File.ReadAllText(result.SolutionFilePath);
@@ -338,19 +501,22 @@ public class MockProjectScaffoldServiceTests
                 BuildDiagram(SqlServerProvider.ProviderName),
                 folder1,
                 "AcmeMock",
-                mockFolder
+                mockFolder,
+                MockProjectTargetProfile.Wpf
             );
             var same2 = service.Scaffold(
                 BuildDiagram(SqlServerProvider.ProviderName),
                 folder2,
                 "AcmeMock",
-                mockFolder
+                mockFolder,
+                MockProjectTargetProfile.Wpf
             );
             var other = service.Scaffold(
                 BuildDiagram(SqlServerProvider.ProviderName),
                 folder3,
                 "OtherMock",
-                mockFolder
+                mockFolder,
+                MockProjectTargetProfile.Wpf
             );
 
             var guid1 = ExtractProjectGuid(File.ReadAllText(same1.SolutionFilePath));

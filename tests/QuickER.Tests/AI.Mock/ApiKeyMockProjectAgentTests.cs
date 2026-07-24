@@ -110,7 +110,17 @@ public class ApiKeyMockProjectAgentTests
             WorkingDirectory: work,
             ProjectName: Project,
             AdditionalInstructions: null,
-            Model: "gpt-4o"
+            Model: "gpt-4o",
+            Profile: MockProjectTargetProfile.Wpf
+        );
+
+    private static MockProjectAgentRequest BlazorRequest(string work) =>
+        new(
+            WorkingDirectory: work,
+            ProjectName: Project,
+            AdditionalInstructions: null,
+            Model: "gpt-4o",
+            Profile: MockProjectTargetProfile.Blazor
         );
 
     /// <summary>
@@ -219,6 +229,60 @@ public class ApiKeyMockProjectAgentTests
             profileBox[0].BuildSystemPrompt().Should().Contain("アプリ側で採番");
             profileBox[0].BuildSystemPrompt().Should().Contain("GuidKey");
             profileBox[0].BuildSystemPrompt().Should().Contain("NuGet.Config");
+        }
+        finally
+        {
+            Cleanup(work);
+        }
+    }
+
+    /// <summary>Blazor プロファイルでは API キー用システムプロンプトに Blazor 固有規約と共有規約が入ることを検証する</summary>
+    [Fact(DisplayName = "Blazor はシステムプロンプトに Blazor 規約と共有規約を含む")]
+    public async Task RunAsync_BlazorProfile_SystemPromptFragments()
+    {
+        var work = NewWork();
+        SetupScaffold(work, ("OrderList.html", "Order List", "MARKER_S1"));
+
+        var (factory, engineBox, profileBox) = BuildFactory(
+            new IReadOnlyList<(string, string)>[]
+            {
+                new[] { Emit("MockApp/Program.cs"), Emit("MockApp/Components/App.razor") },
+                new[] { Emit("MockApp/Components/Pages/OrderList.razor") },
+            }
+        );
+        var build = new QueueBuildRunner();
+        build.Results.Enqueue(true);
+
+        var agent = new ApiKeyMockProjectAgent(factory, build);
+
+        try
+        {
+            var outcome = await agent.RunAsync(
+                BlazorRequest(work),
+                _ => { },
+                TestContext.Current.CancellationToken
+            );
+
+            outcome.Success.Should().BeTrue();
+
+            var system = profileBox[0].BuildSystemPrompt();
+            system.Should().Contain(".razor");
+            system.Should().Contain("@page");
+            system.Should().Contain("InteractiveServer");
+            system.Should().Contain("style.css");
+
+            // 共有規約（Blazor でも変わらず入る）
+            system.Should().Contain("アプリ側で採番");
+            system.Should().Contain("NuGet.Config");
+
+            // Blazor プロファイルなので WPF 固有の MVVM 依存語彙・XAML パス例は出ない
+            // （emit_file のパス例もプロファイル供給＝ApiKeyEmitPathExamples）
+            system.Should().NotContain("CommunityToolkit");
+            system.Should().NotContain(".xaml");
+            system.Should().Contain("Components/Pages/OrderList.razor");
+
+            // 共通部プロンプトにも Blazor 固有の提出ファイル案内が入る
+            engineBox[0].SentPrompts[0].Should().Contain("Components/App.razor");
         }
         finally
         {

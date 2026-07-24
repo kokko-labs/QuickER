@@ -252,9 +252,15 @@ namespace QuickER.AI.Mock.Resources {
             }
         }
 
-        public static string Mock_GenerateWpf {
+        public static string Mock_GenerateProject {
             get {
-                return ResourceManager.GetString("Mock_GenerateWpf", resourceCulture);
+                return ResourceManager.GetString("Mock_GenerateProject", resourceCulture);
+            }
+        }
+
+        public static string Mock_TargetLabel {
+            get {
+                return ResourceManager.GetString("Mock_TargetLabel", resourceCulture);
             }
         }
 

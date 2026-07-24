@@ -79,6 +79,7 @@ public sealed class MockProjectAgentRunner
     private readonly IMockProjectAgent _agent;
     private readonly IBuildRunner _buildRunner;
     private readonly TimeSpan _timeout;
+    private readonly MockProjectTargetProfile _profile;
 
     /// <summary>実行中ターンのキャンセル起点（中断・タイムアウトで発火）</summary>
     private CancellationTokenSource? _runCts;
@@ -87,15 +88,18 @@ public sealed class MockProjectAgentRunner
     /// <param name="agent">UI 層を書くエージェント（バックエンド）</param>
     /// <param name="buildRunner">最終ビルド検証器</param>
     /// <param name="timeout">全体タイムアウト（省略時は <see cref="DefaultTimeout"/>）</param>
+    /// <param name="profile">生成ターゲットのプロファイル（要求へ添える・UI 成果物の検索パターン。省略時は WPF）</param>
     public MockProjectAgentRunner(
         IMockProjectAgent agent,
         IBuildRunner buildRunner,
-        TimeSpan? timeout = null
+        TimeSpan? timeout = null,
+        MockProjectTargetProfile? profile = null
     )
     {
         _agent = agent;
         _buildRunner = buildRunner;
         _timeout = timeout ?? DefaultTimeout;
+        _profile = profile ?? MockProjectTargetProfile.Wpf;
     }
 
     /// <summary>エージェント（バックエンド）が利用可能か（Claude Code なら claude CLI の解決可否）</summary>
@@ -181,6 +185,7 @@ public sealed class MockProjectAgentRunner
             ProjectName: projectName,
             AdditionalInstructions: additionalInstructions,
             Model: model,
+            Profile: _profile,
             ModelProvider: modelProvider
         );
 
@@ -233,8 +238,9 @@ public sealed class MockProjectAgentRunner
             );
         }
 
-        // 成果物の軽い検証（csproj と xaml が存在するか）
-        var artifactsPresent = !timedOut && !canceled && HasArtifacts(outputDirectory);
+        // 成果物の軽い検証（csproj と UI 成果物が存在するか）
+        var artifactsPresent =
+            !timedOut && !canceled && HasArtifacts(outputDirectory, _profile.UiFileSearchPattern);
 
         if (!timedOut && !canceled)
         {
@@ -310,8 +316,8 @@ public sealed class MockProjectAgentRunner
         _runCts?.Cancel();
     }
 
-    /// <summary>出力フォルダに csproj と xaml が存在するかを軽く検証する</summary>
-    private static bool HasArtifacts(string outputDirectory)
+    /// <summary>出力フォルダに csproj と UI 成果物（ターゲットの検索パターン）が存在するかを軽く検証する</summary>
+    private static bool HasArtifacts(string outputDirectory, string uiFileSearchPattern)
     {
         if (!Directory.Exists(outputDirectory))
         {
@@ -321,11 +327,11 @@ public sealed class MockProjectAgentRunner
         var hasCsproj = Directory
             .EnumerateFiles(outputDirectory, "*.csproj", SearchOption.AllDirectories)
             .Any();
-        var hasXaml = Directory
-            .EnumerateFiles(outputDirectory, "*.xaml", SearchOption.AllDirectories)
+        var hasUiFile = Directory
+            .EnumerateFiles(outputDirectory, uiFileSearchPattern, SearchOption.AllDirectories)
             .Any();
 
-        return hasCsproj && hasXaml;
+        return hasCsproj && hasUiFile;
     }
 
     /// <summary>結果メッセージを組み立てる</summary>

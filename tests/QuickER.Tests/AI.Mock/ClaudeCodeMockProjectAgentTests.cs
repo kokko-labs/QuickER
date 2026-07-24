@@ -50,7 +50,17 @@ public class ClaudeCodeMockProjectAgentTests
             WorkingDirectory: @"C:\work\AcmeMock",
             ProjectName: "AcmeMock",
             AdditionalInstructions: additionalInstructions,
-            Model: "sonnet"
+            Model: "sonnet",
+            Profile: MockProjectTargetProfile.Wpf
+        );
+
+    private static MockProjectAgentRequest BlazorRequest() =>
+        new(
+            WorkingDirectory: @"C:\work\AcmeMock",
+            ProjectName: "AcmeMock",
+            AdditionalInstructions: null,
+            Model: "sonnet",
+            Profile: MockProjectTargetProfile.Blazor
         );
 
     /// <summary>起動オプションにヘッドレス許可（acceptEdits・Edit/Write/Bash・MCP なし）が入り、プロンプトが規約を案内することを検証する</summary>
@@ -111,6 +121,31 @@ public class ClaudeCodeMockProjectAgentTests
         // 初回プロンプトの完了条件チェックリスト
         client.CapturedPrompt.Should().Contain("完了条件");
         client.CapturedPrompt.Should().Contain("Repository 経由");
+    }
+
+    /// <summary>Blazor プロファイルではプロンプトに Blazor 固有規約（.razor／@page／InteractiveServer／style.css 移植）と共有規約が入ることを検証する</summary>
+    [Fact(DisplayName = "Blazor はプロンプトに Blazor 規約と共有規約を含む")]
+    public async Task RunAsync_BlazorProfile_PromptFragments()
+    {
+        var client = new FakeClaudeCodeClient();
+        var agent = new ClaudeCodeMockProjectAgent(client);
+
+        await agent.RunAsync(BlazorRequest(), _ => { }, TestContext.Current.CancellationToken);
+
+        // システムプロンプト＋初回プロンプトを併せて Blazor 固有の語彙を確認する
+        var combined = client.CapturedOptions!.SystemPrompt + "\n" + client.CapturedPrompt;
+        combined.Should().Contain(".razor");
+        combined.Should().Contain("@page");
+        combined.Should().Contain("InteractiveServer");
+        combined.Should().Contain("style.css");
+
+        // 共有規約（Blazor でも変わらず入る）
+        combined.Should().Contain("アプリ側で採番");
+        combined.Should().Contain("NuGet.Config");
+
+        // WPF 固有の語彙は出ない
+        combined.Should().NotContain("CommunityToolkit");
+        combined.Should().NotContain(".xaml");
     }
 
     /// <summary>追加指示が非空ならプロンプト末尾へ「# 追加指示」見出し付きで連結され、空なら付かないことを検証する</summary>

@@ -161,15 +161,19 @@ public sealed class CodexMockProjectAgent : IMockProjectAgent
             // 4) 初回プロンプトを送信し、完了通知を待つ（Claude Code 版と同一本文を共有）。
             //    キャンセルは登録済みハンドラが OCE を伝播させる
             var prompt = MockProjectPromptBuilder.BuildPrompt(
+                request.Profile,
                 request.ProjectName,
                 request.AdditionalInstructions
             );
             var outcome = await RunTurnAndWaitAsync(thread.Id, prompt).ConfigureAwait(false);
 
-            // 5) 保険: ターンが成功で完了したのに UI 層（*.xaml）が 1 つも無いときは、承認待ちで止まった
+            // 5) 保険: ターンが成功で完了したのに UI 層（*.xaml 等）が 1 つも無いときは、承認待ちで止まった
             //    （計画提示だけで終わった）疑いが濃いため、同一スレッドへ 1 回だけ続行を促す。
             //    無限ループを避けるため 2 回目以降は促さない（失敗ターン・キャンセルでもここへは来ない）。
-            if (outcome.Success && !HasAnyXaml(request.WorkingDirectory))
+            if (
+                outcome.Success
+                && !HasAnyUiFile(request.WorkingDirectory, request.Profile.UiFileSearchPattern)
+            )
             {
                 onProgress(Strings.Mock_Codex_AutoContinueNotice);
                 outcome = await RunTurnAndWaitAsync(
@@ -236,7 +240,10 @@ public sealed class CodexMockProjectAgent : IMockProjectAgent
             Sandbox = SandboxWorkspaceWrite,
             ModelProvider = NormalizeOptional(request.ModelProvider),
             Model = NormalizeOptional(request.Model),
-            DeveloperInstructions = MockProjectPromptBuilder.BuildSystemPrompt(request.ProjectName),
+            DeveloperInstructions = MockProjectPromptBuilder.BuildSystemPrompt(
+                request.Profile,
+                request.ProjectName
+            ),
         };
 
     /// <summary>プロバイダー・モデルから App Server 起動設定を組み立てる</summary>
@@ -264,12 +271,13 @@ public sealed class CodexMockProjectAgent : IMockProjectAgent
         return account.RequiresOpenAiAuth && !account.IsLoggedIn;
     }
 
-    /// <summary>作業フォルダ配下に *.xaml が 1 つでも存在するかを判定する（承認待ちで止まった兆候の検出用）</summary>
+    /// <summary>作業フォルダ配下に UI 成果物ファイルが 1 つでも存在するかを判定する（承認待ちで止まった兆候の検出用）</summary>
     /// <remarks>
-    /// スキャフォールドはデータ層のみ（UI 層＝*.xaml は生成しない）ため、成功ターン後に *.xaml が皆無なら
-    /// 「計画提示だけで終わった（実装未着手）」疑いが濃い。design/mock/ 配下は HTML なので誤検知しない。
+    /// スキャフォールドはデータ層のみ（UI 層は生成しない）ため、成功ターン後に UI 成果物（WPF なら *.xaml）が
+    /// 皆無なら「計画提示だけで終わった（実装未着手）」疑いが濃い。検索パターンはターゲットのプロファイルが与える
+    /// （design/mock/ 配下は HTML なので WPF の *.xaml では誤検知しない）。
     /// </remarks>
-    private static bool HasAnyXaml(string workingDirectory)
+    private static bool HasAnyUiFile(string workingDirectory, string uiFileSearchPattern)
     {
         if (string.IsNullOrWhiteSpace(workingDirectory) || !Directory.Exists(workingDirectory))
         {
@@ -277,7 +285,7 @@ public sealed class CodexMockProjectAgent : IMockProjectAgent
         }
 
         return Directory
-            .EnumerateFiles(workingDirectory, "*.xaml", SearchOption.AllDirectories)
+            .EnumerateFiles(workingDirectory, uiFileSearchPattern, SearchOption.AllDirectories)
             .Any();
     }
 

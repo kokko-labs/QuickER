@@ -27,8 +27,10 @@ public sealed record MockProjectGenerationResult(
 /// <remarks>
 /// <para>
 /// 将来 Blazor 等のターゲットを追加する場合は、この型のインスタンスを増やし、UI でメニュー化して選ばせる
-/// （現状は 1 種のみのため UI にターゲット選択は出さない）。ターゲット追加はスキャフォールドの csproj／
-/// README とランナーのプロンプトを分岐させる形で実現し、<see cref="IMockProjectGenerator"/> の口は変えない。
+/// （現状は 1 種のみのため UI にターゲット選択は出さない）。ターゲット差分（スキャフォールドの csproj／README・
+/// ランナーのプロンプト・UI 成果物の検索パターン）は <see cref="MockProjectTargetProfile"/> が一手に束ねており、
+/// <see cref="MockProjectTargetProfile.Resolve"/> でターゲットからプロファイルを解決する
+/// （<see cref="IMockProjectGenerator"/> の口は変えない）。
 /// </para>
 /// <para>
 /// バックエンド拡張（Codex / API キー等）は、共有オーケストレーター <see cref="MockProjectAgentRunner"/> が
@@ -38,8 +40,11 @@ public sealed record MockProjectGenerationResult(
 /// </remarks>
 public sealed record MockProjectTarget(string Id, string DisplayName)
 {
-    /// <summary>WPF (.NET) ターゲット（現状の唯一のターゲット）</summary>
+    /// <summary>WPF (.NET) ターゲット</summary>
     public static readonly MockProjectTarget Wpf = new("wpf", "WPF (.NET)");
+
+    /// <summary>Blazor Web App (.NET) ターゲット</summary>
+    public static readonly MockProjectTarget Blazor = new("blazor", "Blazor Web App");
 }
 
 /// <summary>
@@ -48,8 +53,8 @@ public sealed record MockProjectTarget(string Id, string DisplayName)
 /// </summary>
 public interface IMockProjectGenerator
 {
-    /// <summary>この生成器の対象ターゲット（現状は常に <see cref="MockProjectTarget.Wpf"/>）</summary>
-    MockProjectTarget Target { get; }
+    /// <summary>この生成器が対応する生成ターゲット一覧（<see cref="MockProjectTarget.Blazor"/> / <see cref="MockProjectTarget.Wpf"/>。先頭が UI の既定選択）</summary>
+    IReadOnlyList<MockProjectTarget> Targets { get; }
 
     /// <summary>指定バックエンド（Claude Code / Codex）の実行器（CLI）が利用可能か</summary>
     bool IsAgentAvailable(ErChatBackendKind backend);
@@ -59,13 +64,14 @@ public interface IMockProjectGenerator
 
     /// <summary>
     /// スキャフォールドを書き出し、選択バックエンド（Claude Code / Codex）をヘッドレス実行して
-    /// WPF モックプロジェクトを生成する。
+    /// モックプロジェクトを生成する。
     /// </summary>
     /// <param name="diagram">生成元の ER 図</param>
     /// <param name="mockFolder">デザイン仕様として同梱するモックフォルダのパス（mock.json＋画面 HTML＋共有 style.css）</param>
     /// <param name="additionalInstructions">実装に対する追加指示（空／null なら付与しない）</param>
     /// <param name="outputDirectory">出力フォルダ</param>
     /// <param name="projectName">プロジェクト名</param>
+    /// <param name="target">生成ターゲット（<see cref="Targets"/> のいずれか）</param>
     /// <param name="backend">実行バックエンド（Claude Code / Codex）</param>
     /// <param name="model">モデルエイリアス（空なら既定）</param>
     /// <param name="modelProvider">モデルプロバイダー（Codex 用。空なら既定。Claude Code は無視する）</param>
@@ -77,6 +83,7 @@ public interface IMockProjectGenerator
         string? additionalInstructions,
         string outputDirectory,
         string projectName,
+        MockProjectTarget target,
         ErChatBackendKind backend,
         string model,
         string modelProvider,
@@ -164,7 +171,9 @@ public sealed class MockProjectGenerator : IMockProjectGenerator
         };
 
     /// <inheritdoc />
-    public MockProjectTarget Target => MockProjectTarget.Wpf;
+    // 先頭が UI の既定選択（Web モックとの親和性が高い Blazor を既定にする）
+    public IReadOnlyList<MockProjectTarget> Targets { get; } =
+    [MockProjectTarget.Blazor, MockProjectTarget.Wpf];
 
     /// <inheritdoc />
     public bool IsAgentAvailable(ErChatBackendKind backend) => _agentFactory(backend).IsAvailable();
@@ -180,6 +189,7 @@ public sealed class MockProjectGenerator : IMockProjectGenerator
         string? additionalInstructions,
         string outputDirectory,
         string projectName,
+        MockProjectTarget target,
         ErChatBackendKind backend,
         string model,
         string modelProvider,
@@ -187,10 +197,13 @@ public sealed class MockProjectGenerator : IMockProjectGenerator
         CancellationToken cancellationToken = default
     )
     {
+        // 生成ターゲット→プロファイル（csproj／README・プロンプト・成果物検索パターンの正本）を解決する
+        var profile = MockProjectTargetProfile.Resolve(target);
+
         // 1) 決定的スキャフォールド（データ層コード＋csproj＋README＋design/mock/ 同梱）を書き出す
         try
         {
-            _scaffold.Scaffold(diagram, outputDirectory, projectName, mockFolder);
+            _scaffold.Scaffold(diagram, outputDirectory, projectName, mockFolder, profile);
         }
         catch (Exception ex)
         {
@@ -203,7 +216,12 @@ public sealed class MockProjectGenerator : IMockProjectGenerator
         }
 
         // 2) 選択バックエンドの実行器で 1 回分のオーケストレーションを行い、最終ビルドを検証する
-        var runner = new MockProjectAgentRunner(_agentFactory(backend), _buildRunner, _timeout);
+        var runner = new MockProjectAgentRunner(
+            _agentFactory(backend),
+            _buildRunner,
+            _timeout,
+            profile
+        );
         _activeRunner = runner;
 
         try

@@ -116,7 +116,10 @@
     <value>単一 HTML 出力</value>
   </data>
   <data name="Mock_Step2Header" xml:space="preserve">
-    <value>WPF モックプロジェクトを生成</value>
+    <value>モックプロジェクトを生成</value>
+  </data>
+  <data name="Mock_TargetLabel" xml:space="preserve">
+    <value>ターゲット</value>
   </data>
   <data name="Mock_OutputFolder" xml:space="preserve">
     <value>出力フォルダ</value>
@@ -152,13 +155,13 @@
     <value>追加指示（任意）</value>
   </data>
   <data name="Mock_MockGenInstructionsTooltip" xml:space="preserve">
-    <value>WPF 実装のために Claude Code へ渡す追加指示（例: 好みのレイアウト・画面遷移の作法・コンポーネントの規約など）。</value>
+    <value>選択中のバックエンドがモックの実装に使う追加指示（例: 好みのレイアウト・画面遷移の作法・コンポーネントの規約など）。</value>
   </data>
   <data name="Mock_OpenFolder" xml:space="preserve">
     <value>フォルダを開く</value>
   </data>
-  <data name="Mock_GenerateWpf" xml:space="preserve">
-    <value>WPF モックを生成</value>
+  <data name="Mock_GenerateProject" xml:space="preserve">
+    <value>モックを生成</value>
   </data>
   <data name="MockPreview_EmptyText" xml:space="preserve">
     <value>ここに生成されたモック画面が表示されます。
@@ -221,17 +224,17 @@
   </data>
   <data name="Mock_ClearConfirm" xml:space="preserve">
     <value>画面を初期化しますか？
-会話・モックフォルダの選択・WPF モック生成の入力をクリアします。ディスク上のモックフォルダは削除されません。</value>
+会話・モックフォルダの選択・モックプロジェクト生成の入力をクリアします。ディスク上のモックフォルダは削除されません。</value>
   </data>
   <data name="Mock_PickOutputFolderTitle" xml:space="preserve">
-    <value>WPF モックプロジェクトの出力先フォルダを選択</value>
+    <value>モックプロジェクトの出力先フォルダを選択</value>
   </data>
   <data name="Mock_OutputFolderNotEmpty" xml:space="preserve">
     <value>※ 出力フォルダは空ではありません。既存ファイルは残したまま生成物を追加します。
 </value>
   </data>
   <data name="Mock_GeneratingProject" xml:space="preserve">
-    <value>WPF モックプロジェクトを生成しています...</value>
+    <value>モックプロジェクトを生成しています...</value>
   </data>
   <data name="Mock_GenerationErrorLogFormat" xml:space="preserve">
     <value>
@@ -239,7 +242,7 @@
 </value>
   </data>
   <data name="Mock_GenerationFailedFormat" xml:space="preserve">
-    <value>WPF モック生成に失敗しました: {0}</value>
+    <value>モックプロジェクト生成に失敗しました: {0}</value>
   </data>
   <data name="Mock_Codex_AutoContinueNotice" xml:space="preserve">
     <value>
@@ -283,7 +286,7 @@
     <value>詳細不明</value>
   </data>
   <data name="Mock_Run_Start" xml:space="preserve">
-    <value>== WPF モック生成を開始します ==</value>
+    <value>== モックプロジェクト生成を開始します ==</value>
   </data>
   <data name="Mock_Run_OutputFolderFormat" xml:space="preserve">
     <value>出力フォルダ: {0}</value>
@@ -327,7 +330,7 @@
     <value>最終ビルドの検証が中断されました。</value>
   </data>
   <data name="Mock_Result_Success" xml:space="preserve">
-    <value>WPF モックの生成が完了しました（ビルド成功を確認）。</value>
+    <value>モックプロジェクトの生成が完了しました（ビルド成功を確認）。</value>
   </data>
   <data name="Mock_Result_TimedOut" xml:space="preserve">
     <value>タイムアウトにより打ち切りました。生成途中のファイルとログは出力フォルダに残っています。</value>

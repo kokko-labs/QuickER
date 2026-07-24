@@ -1,16 +1,18 @@
 namespace QuickER.AI.Mock;
 
-/// <summary>WPF モックプロジェクトの UI 層生成をエージェント（バックエンド）へ依頼する要求</summary>
+/// <summary>モックプロジェクトの UI 層生成をエージェント（バックエンド）へ依頼する要求</summary>
 /// <param name="WorkingDirectory">スキャフォールド済みの出力フォルダ（cwd になる）</param>
 /// <param name="ProjectName">プロジェクト名（プロンプトの案内に使う）</param>
 /// <param name="AdditionalInstructions">実装に対する追加指示（空／null なら付与しない）</param>
 /// <param name="Model">モデルエイリアス（空なら既定）</param>
+/// <param name="Profile">生成ターゲットのプロファイル（プロンプト文面・UI 成果物の検索パターンの正本）</param>
 /// <param name="ModelProvider">モデルプロバイダー（Codex 用。空なら既定。Claude Code バックエンドは無視する）</param>
 public sealed record MockProjectAgentRequest(
     string WorkingDirectory,
     string ProjectName,
     string? AdditionalInstructions,
     string Model,
+    MockProjectTargetProfile Profile,
     string ModelProvider = ""
 );
 
