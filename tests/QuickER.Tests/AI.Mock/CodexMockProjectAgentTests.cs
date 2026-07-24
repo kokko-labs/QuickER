@@ -29,17 +29,27 @@ public class CodexMockProjectAgentTests
         return folder;
     }
 
+    /// <summary>*.razor を 1 つ含む一時フォルダを作って返す（Blazor の UI 成果物あり判定用）</summary>
+    private static string CreateFolderWithRazor()
+    {
+        var folder = NewTempFolder();
+        File.WriteAllText(Path.Combine(folder, "Home.razor"), "@page \"/\"");
+        return folder;
+    }
+
     private static MockProjectAgentRequest Request(
         string? additionalInstructions = null,
         string model = "gpt-5-codex",
         string modelProvider = "openai",
-        string? workingDirectory = null
+        string? workingDirectory = null,
+        MockProjectTargetProfile? profile = null
     ) =>
         new(
             WorkingDirectory: workingDirectory ?? DefaultWorkingDirectory,
             ProjectName: "AcmeMock",
             AdditionalInstructions: additionalInstructions,
             Model: model,
+            Profile: profile ?? MockProjectTargetProfile.Wpf,
             ModelProvider: modelProvider
         );
 
@@ -89,9 +99,15 @@ public class CodexMockProjectAgentTests
         // システムプロンプト相当は developer instructions として渡す（Claude Code 版と同一本文＝共有ヘルパ由来）
         options
             .DeveloperInstructions.Should()
-            .Be(MockProjectPromptBuilder.BuildSystemPrompt("AcmeMock"));
+            .Be(
+                MockProjectPromptBuilder.BuildSystemPrompt(MockProjectTargetProfile.Wpf, "AcmeMock")
+            );
         // 初回プロンプトも共有ヘルパ由来で Claude Code 版と同一本文
-        client.LastTurnPrompt.Should().Be(MockProjectPromptBuilder.BuildPrompt("AcmeMock", null));
+        client
+            .LastTurnPrompt.Should()
+            .Be(
+                MockProjectPromptBuilder.BuildPrompt(MockProjectTargetProfile.Wpf, "AcmeMock", null)
+            );
 
         // 非対話・確認禁止の明示（ヘッドレスで承認待ちに陥らないための保険）が入る
         options.DeveloperInstructions.Should().Contain("非対話");
@@ -119,7 +135,13 @@ public class CodexMockProjectAgentTests
         client.LastTurnPrompt.Should().Contain("ダークテーマで実装して");
         client
             .LastTurnPrompt.Should()
-            .Be(MockProjectPromptBuilder.BuildPrompt("AcmeMock", "ダークテーマで実装して"));
+            .Be(
+                MockProjectPromptBuilder.BuildPrompt(
+                    MockProjectTargetProfile.Wpf,
+                    "AcmeMock",
+                    "ダークテーマで実装して"
+                )
+            );
     }
 
     /// <summary>ターン完了の成否（completed / failed）が結果へ写ることを検証する</summary>
@@ -260,7 +282,12 @@ public class CodexMockProjectAgentTests
 
         // ちょうど 2 ターン（初回＋ナッジ 1 回だけ）送られる（2 回目以降はナッジしない）
         client.StartTurnCount.Should().Be(2);
-        client.TurnPrompts[0].Should().Be(MockProjectPromptBuilder.BuildPrompt("AcmeMock", null));
+        client
+            .TurnPrompts[0]
+            .Should()
+            .Be(
+                MockProjectPromptBuilder.BuildPrompt(MockProjectTargetProfile.Wpf, "AcmeMock", null)
+            );
         client.TurnPrompts[1].Should().Be(MockProjectPromptBuilder.CodexContinuationNudge);
 
         // 承認待ち検知の一行が進捗へ流れる
@@ -289,6 +316,110 @@ public class CodexMockProjectAgentTests
 
             outcome.Success.Should().BeTrue();
             // xaml があるためナッジせず 1 ターンのみ
+            client.StartTurnCount.Should().Be(1);
+            string.Concat(progress)
+                .Should()
+                .NotContain(MockStrings.Mock_Codex_AutoContinueNotice.Trim());
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>Blazor プロファイルでは developer instructions・初回プロンプトに Blazor 固有規約と共有規約が入ることを検証する</summary>
+    [Fact(DisplayName = "Blazor はプロンプトに Blazor 規約と共有規約を含む")]
+    public async Task RunAsync_BlazorProfile_PromptFragments()
+    {
+        var folder = CreateFolderWithRazor();
+        var client = new FakeCodexAppServerClient();
+        var agent = new CodexMockProjectAgent(client);
+
+        try
+        {
+            var task = agent.RunAsync(
+                Request(workingDirectory: folder, profile: MockProjectTargetProfile.Blazor),
+                _ => { },
+                TestContext.Current.CancellationToken
+            );
+            client.RaiseTurnCompleted("completed");
+            await task;
+
+            // developer instructions（system 相当）＋初回プロンプトを併せて Blazor 固有の語彙を確認する
+            var combined =
+                client.LastThreadStartOptions!.DeveloperInstructions + "\n" + client.LastTurnPrompt;
+            combined.Should().Contain(".razor");
+            combined.Should().Contain("@page");
+            combined.Should().Contain("InteractiveServer");
+            combined.Should().Contain("style.css");
+
+            // 共有規約（Blazor でも変わらず入る）
+            combined.Should().Contain("アプリ側で採番");
+            combined.Should().Contain("NuGet.Config");
+
+            // 共有ヘルパ由来で Blazor プロファイル版と一致する
+            client
+                .LastThreadStartOptions!.DeveloperInstructions.Should()
+                .Be(
+                    MockProjectPromptBuilder.BuildSystemPrompt(
+                        MockProjectTargetProfile.Blazor,
+                        "AcmeMock"
+                    )
+                );
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>Blazor ターゲットで *.razor が無いとき、自動続行ナッジを 1 回だけ送ることを検証する（xaml テストと対称）</summary>
+    [Fact(DisplayName = "Blazor・razor なしなら自動続行ナッジを 1 回送る")]
+    public async Task RunAsync_Blazor_NoRazor_SendsSingleContinuationNudge()
+    {
+        var client = new FakeCodexAppServerClient();
+        client.AutoTurnCompletions.Enqueue(("completed", null));
+        client.AutoTurnCompletions.Enqueue(("completed", null));
+        var agent = new CodexMockProjectAgent(client);
+        var progress = new List<string>();
+
+        // 存在しない（＝razor なし）作業フォルダでナッジを発火させる
+        var outcome = await agent.RunAsync(
+            Request(
+                workingDirectory: @"C:\work\NoRazorHere",
+                profile: MockProjectTargetProfile.Blazor
+            ),
+            progress.Add,
+            TestContext.Current.CancellationToken
+        );
+
+        outcome.Success.Should().BeTrue();
+        // 初回＋ナッジ 1 回だけ
+        client.StartTurnCount.Should().Be(2);
+        client.TurnPrompts[1].Should().Be(MockProjectPromptBuilder.CodexContinuationNudge);
+        string.Concat(progress).Should().Contain(MockStrings.Mock_Codex_AutoContinueNotice.Trim());
+    }
+
+    /// <summary>Blazor ターゲットで *.razor があれば自動続行ナッジを送らないことを検証する（xaml テストと対称）</summary>
+    [Fact(DisplayName = "Blazor・razor があれば自動続行ナッジを送らない")]
+    public async Task RunAsync_Blazor_RazorPresent_DoesNotNudge()
+    {
+        var folder = CreateFolderWithRazor();
+        var client = new FakeCodexAppServerClient();
+        client.AutoTurnCompletions.Enqueue(("completed", null));
+        var agent = new CodexMockProjectAgent(client);
+        var progress = new List<string>();
+
+        try
+        {
+            var outcome = await agent.RunAsync(
+                Request(workingDirectory: folder, profile: MockProjectTargetProfile.Blazor),
+                progress.Add,
+                TestContext.Current.CancellationToken
+            );
+
+            outcome.Success.Should().BeTrue();
+            // razor があるためナッジせず 1 ターンのみ
             client.StartTurnCount.Should().Be(1);
             string.Concat(progress)
                 .Should()

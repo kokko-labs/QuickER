@@ -46,7 +46,10 @@ public class MockGenerationDialogViewModelTests
         public string? CapturedModel { get; private set; }
         public string? CapturedModelProvider { get; private set; }
 
-        public MockProjectTarget Target => MockProjectTarget.Wpf;
+        public IReadOnlyList<MockProjectTarget> Targets { get; } =
+        [MockProjectTarget.Blazor, MockProjectTarget.Wpf];
+
+        public MockProjectTarget? CapturedTarget { get; private set; }
 
         public bool IsAgentAvailable(ErChatBackendKind backend) =>
             backend == ErChatBackendKind.Codex ? CodexAvailable : ClaudeAvailable;
@@ -60,6 +63,7 @@ public class MockGenerationDialogViewModelTests
             string? additionalInstructions,
             string outputDirectory,
             string projectName,
+            MockProjectTarget target,
             ErChatBackendKind backend,
             string model,
             string modelProvider,
@@ -70,6 +74,7 @@ public class MockGenerationDialogViewModelTests
             GenerateCallCount++;
             CapturedOutputFolder = outputDirectory;
             CapturedProjectName = projectName;
+            CapturedTarget = target;
             CapturedMockFolder = mockFolder;
             CapturedInstructions = additionalInstructions;
             CapturedBackend = backend;
@@ -1143,6 +1148,77 @@ public class MockGenerationDialogViewModelTests
 
             vm.CanGenerateMockProject.Should().BeFalse();
             vm.MockGenDisabledReason.Should().Be(MockStrings.Mock_DisabledReason_CodexNotReady);
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
+    /// <summary>既定で MockProjectTargets が 2 件（Blazor, WPF）・SelectedMockProjectTarget が Blazor であることを検証する</summary>
+    [Fact(DisplayName = "既定のターゲットは Blazor・候補は Blazor/WPF の 2 件")]
+    public void MockProjectTargets_DefaultsToBlazor_WithTwoCandidates()
+    {
+        var (vm, _, _, baseFolder, _) = CreateVmWithGenerator(NonEmptyDiagram());
+
+        try
+        {
+            vm.MockProjectTargets.Should().Equal(MockProjectTarget.Blazor, MockProjectTarget.Wpf);
+            vm.SelectedMockProjectTarget.Should().Be(MockProjectTarget.Blazor);
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
+    /// <summary>選択中のターゲットが生成器へ渡ることを検証する（既定の Blazor と、選択後の WPF）</summary>
+    [Fact(DisplayName = "選択したターゲットが生成器へ渡る（既定 Blazor・選択後 WPF）")]
+    public async Task GenerateMockProject_PassesSelectedTarget()
+    {
+        var (vm, engineBox, generator, baseFolder, mockFolder) = CreateVmWithGenerator(
+            NonEmptyDiagram()
+        );
+
+        try
+        {
+            generator.ResultSuccess = true;
+            await vm.RefreshMockGenAvailabilityAsync();
+            await SaveScreenOnClaudeCode(vm, engineBox, mockFolder);
+            vm.OutputFolder = Path.Combine(baseFolder, "out");
+            vm.ProjectName = "AcmeMock";
+
+            // 既定（Blazor）のまま生成すると Blazor が渡る
+            await vm.GenerateMockProjectCommand.ExecuteAsync(null);
+            generator.CapturedTarget.Should().Be(MockProjectTarget.Blazor);
+
+            // WPF を選択して再生成すると WPF が渡る
+            vm.SelectedMockProjectTarget = MockProjectTarget.Wpf;
+            await vm.GenerateMockProjectCommand.ExecuteAsync(null);
+            generator.CapturedTarget.Should().Be(MockProjectTarget.Wpf);
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
+    /// <summary>クリア（確認 OK）で SelectedMockProjectTarget が既定（Blazor）へ戻ることを検証する</summary>
+    [Fact(DisplayName = "クリアでターゲットが既定（Blazor）へ戻る")]
+    public void Clear_ResetsSelectedTargetToBlazor()
+    {
+        var dialogs = new StubDialogService { ConfirmResult = true };
+        var (vm, _, _, baseFolder, mockFolder) = CreateVmWithGenerator(NonEmptyDiagram(), dialogs);
+        SeedMockFolder(mockFolder);
+
+        try
+        {
+            vm.MockFolder = mockFolder;
+            vm.SelectedMockProjectTarget = MockProjectTarget.Wpf;
+
+            vm.ClearCommand.Execute(null);
+
+            vm.SelectedMockProjectTarget.Should().Be(MockProjectTarget.Blazor);
         }
         finally
         {

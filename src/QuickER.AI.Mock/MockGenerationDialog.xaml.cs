@@ -317,7 +317,7 @@ public partial class MockGenerationDialog : Window
         await _claudeCodeProbe.InitializeAsync();
         ApplyClaudeCodeState();
 
-        // Claude Code タブへ切り替えたら、第2ステップ（WPF モック生成）の有効条件も取り直す
+        // Claude Code タブへ切り替えたら、第2ステップ（モックプロジェクト生成）の有効条件も取り直す
         await ViewModel.RefreshMockGenAvailabilityAsync();
     }
 

@@ -48,9 +48,11 @@ public sealed class ClaudeCodeMockProjectAgent : IMockProjectAgent
         var options = BuildLaunchOptions(
             request.Model,
             request.WorkingDirectory,
-            request.ProjectName
+            request.ProjectName,
+            request.Profile
         );
         var prompt = MockProjectPromptBuilder.BuildPrompt(
+            request.Profile,
             request.ProjectName,
             request.AdditionalInstructions
         );
@@ -78,11 +80,12 @@ public sealed class ClaudeCodeMockProjectAgent : IMockProjectAgent
     internal static ClaudeCodeLaunchOptions BuildLaunchOptions(
         string model,
         string workingDirectory,
-        string projectName
+        string projectName,
+        MockProjectTargetProfile profile
     ) =>
         new(
             Model: model ?? string.Empty,
-            SystemPrompt: MockProjectPromptBuilder.BuildSystemPrompt(projectName),
+            SystemPrompt: MockProjectPromptBuilder.BuildSystemPrompt(profile, projectName),
             McpConfigPath: string.Empty,
             AllowedTool: string.Empty,
             WorkingDirectory: workingDirectory

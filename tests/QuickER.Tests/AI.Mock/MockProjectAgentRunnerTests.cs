@@ -143,6 +143,50 @@ public class MockProjectAgentRunnerTests
         }
     }
 
+    /// <summary>Blazor プロファイルでは成果物検証が csproj＋.razor で成立する（xaml 不要）ことを検証する</summary>
+    [Fact(DisplayName = "Blazor は csproj＋.razor で成果物検証が成立する")]
+    public async Task RunAsync_BlazorArtifacts_CsprojAndRazor()
+    {
+        var folder = NewTempFolder();
+        // Blazor の成果物は csproj と .razor（xaml は無い）
+        var agent = new FakeMockProjectAgent
+        {
+            OnRun = dir =>
+            {
+                File.WriteAllText(Path.Combine(dir, "App.csproj"), "<Project/>");
+                File.WriteAllText(Path.Combine(dir, "Home.razor"), "@page \"/\"");
+            },
+        };
+        var build = new FakeBuildRunner { BuildSuccess = true };
+        var runner = new MockProjectAgentRunner(
+            agent,
+            build,
+            timeout: null,
+            profile: MockProjectTargetProfile.Blazor
+        );
+
+        try
+        {
+            var result = await runner.RunAsync(
+                folder,
+                "AcmeMock",
+                additionalInstructions: null,
+                "sonnet",
+                _ => { },
+                TestContext.Current.CancellationToken
+            );
+
+            result.Success.Should().BeTrue();
+            result.ArtifactsPresent.Should().BeTrue();
+            result.BuildSucceeded.Should().BeTrue();
+            build.BuildCallCount.Should().Be(1);
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
     /// <summary>エージェント成功でも成果物が無ければビルドを試みず失敗になることを検証する</summary>
     [Fact(DisplayName = "成果物が無ければビルドせず失敗")]
     public async Task RunAsync_NoArtifacts_Fails()

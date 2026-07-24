@@ -94,9 +94,20 @@ public sealed class ApiKeyMockProjectAgent : IMockProjectAgent, IErDiagramToolHo
         // スキャフォールド済みフォルダから素材（README/mock.json/画面 HTML/style.css/契約要約）を読む
         var materials = ReadMaterials(request);
 
+        // 生成ターゲットのプロファイル（プロンプト文面のターゲット差分の正本）
+        var targetProfile = request.Profile;
+
         var profile = new ErChatProfile(
-            () => MockProjectPromptBuilder.BuildApiKeySystemPrompt(request.ProjectName),
-            () => MockProjectPromptBuilder.BuildApiKeySystemPrompt(request.ProjectName),
+            () =>
+                MockProjectPromptBuilder.BuildApiKeySystemPrompt(
+                    targetProfile,
+                    request.ProjectName
+                ),
+            () =>
+                MockProjectPromptBuilder.BuildApiKeySystemPrompt(
+                    targetProfile,
+                    request.ProjectName
+                ),
             MockProjectEmitTools.GetDefinitions(),
             ProfileServerName
         );
@@ -118,6 +129,7 @@ public sealed class ApiKeyMockProjectAgent : IMockProjectAgent, IErDiagramToolHo
             EmitLine(string.Format(Strings.Mock_ApiRun_CommonPart, 1, total));
             var commonFailure = await SendTurnAsync(
                     MockProjectPromptBuilder.BuildApiKeyCommonPrompt(
+                        targetProfile,
                         request.ProjectName,
                         materials.Schema,
                         materials.ScreensOverview,
@@ -153,6 +165,7 @@ public sealed class ApiKeyMockProjectAgent : IMockProjectAgent, IErDiagramToolHo
 
                 var screenFailure = await SendTurnAsync(
                         MockProjectPromptBuilder.BuildApiKeyScreenPrompt(
+                            targetProfile,
                             request.ProjectName,
                             screen,
                             screenHtml,
