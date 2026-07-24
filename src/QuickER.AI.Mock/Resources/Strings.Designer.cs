@@ -168,6 +168,30 @@ namespace QuickER.AI.Mock.Resources {
             }
         }
 
+        public static string Mock_ExportDesignDoc {
+            get {
+                return ResourceManager.GetString("Mock_ExportDesignDoc", resourceCulture);
+            }
+        }
+
+        public static string Mock_DesignDocSaved {
+            get {
+                return ResourceManager.GetString("Mock_DesignDocSaved", resourceCulture);
+            }
+        }
+
+        public static string Mock_DesignDocSavedMessageFormat {
+            get {
+                return ResourceManager.GetString("Mock_DesignDocSavedMessageFormat", resourceCulture);
+            }
+        }
+
+        public static string Mock_DesignDocSaveFailedFormat {
+            get {
+                return ResourceManager.GetString("Mock_DesignDocSaveFailedFormat", resourceCulture);
+            }
+        }
+
         public static string Mock_Step2Header {
             get {
                 return ResourceManager.GetString("Mock_Step2Header", resourceCulture);
@@ -854,6 +878,132 @@ namespace QuickER.AI.Mock.Resources {
         public static string Mock_ApiRun_ErrorTurnFailedFormat {
             get {
                 return ResourceManager.GetString("Mock_ApiRun_ErrorTurnFailedFormat", resourceCulture);
+            }
+        }
+
+        public static string MockDoc_DefaultTitle {
+            get {
+                return ResourceManager.GetString("MockDoc_DefaultTitle", resourceCulture);
+            }
+        }
+
+        public static string MockDoc_ScreenListHeading {
+            get {
+                return ResourceManager.GetString("MockDoc_ScreenListHeading", resourceCulture);
+            }
+        }
+
+        public static string MockDoc_TransitionDiagramHeading {
+            get {
+                return ResourceManager.GetString("MockDoc_TransitionDiagramHeading", resourceCulture);
+            }
+        }
+
+        public static string MockDoc_ColScreen {
+            get {
+                return ResourceManager.GetString("MockDoc_ColScreen", resourceCulture);
+            }
+        }
+
+        public static string MockDoc_ColDescription {
+            get {
+                return ResourceManager.GetString("MockDoc_ColDescription", resourceCulture);
+            }
+        }
+
+        public static string MockDoc_ColKind {
+            get {
+                return ResourceManager.GetString("MockDoc_ColKind", resourceCulture);
+            }
+        }
+
+        public static string MockDoc_ColItem {
+            get {
+                return ResourceManager.GetString("MockDoc_ColItem", resourceCulture);
+            }
+        }
+
+        public static string MockDoc_ColNote {
+            get {
+                return ResourceManager.GetString("MockDoc_ColNote", resourceCulture);
+            }
+        }
+
+        public static string MockDoc_TransitionFrom {
+            get {
+                return ResourceManager.GetString("MockDoc_TransitionFrom", resourceCulture);
+            }
+        }
+
+        public static string MockDoc_TransitionTo {
+            get {
+                return ResourceManager.GetString("MockDoc_TransitionTo", resourceCulture);
+            }
+        }
+
+        public static string MockDoc_TriggerFormat {
+            get {
+                return ResourceManager.GetString("MockDoc_TriggerFormat", resourceCulture);
+            }
+        }
+
+        public static string MockDoc_KindInput {
+            get {
+                return ResourceManager.GetString("MockDoc_KindInput", resourceCulture);
+            }
+        }
+
+        public static string MockDoc_KindChoice {
+            get {
+                return ResourceManager.GetString("MockDoc_KindChoice", resourceCulture);
+            }
+        }
+
+        public static string MockDoc_KindButton {
+            get {
+                return ResourceManager.GetString("MockDoc_KindButton", resourceCulture);
+            }
+        }
+
+        public static string MockDoc_KindTableColumn {
+            get {
+                return ResourceManager.GetString("MockDoc_KindTableColumn", resourceCulture);
+            }
+        }
+
+        public static string MockDoc_NoteMultiline {
+            get {
+                return ResourceManager.GetString("MockDoc_NoteMultiline", resourceCulture);
+            }
+        }
+
+        public static string MockDoc_NoteRequired {
+            get {
+                return ResourceManager.GetString("MockDoc_NoteRequired", resourceCulture);
+            }
+        }
+
+        public static string MockDoc_NoteRadio {
+            get {
+                return ResourceManager.GetString("MockDoc_NoteRadio", resourceCulture);
+            }
+        }
+
+        public static string MockDoc_NoteCheckbox {
+            get {
+                return ResourceManager.GetString("MockDoc_NoteCheckbox", resourceCulture);
+            }
+        }
+
+        public static string MockDoc_NoteOptionCountFormat {
+            get {
+                return ResourceManager.GetString("MockDoc_NoteOptionCountFormat", resourceCulture);
+            }
+        }
+
+        public static string MockDoc_ItemTableFormat {
+            get {
+                return ResourceManager.GetString("MockDoc_ItemTableFormat", resourceCulture);
             }
         }
 
