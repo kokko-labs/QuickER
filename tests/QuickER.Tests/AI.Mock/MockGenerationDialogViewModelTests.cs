@@ -170,7 +170,7 @@ public class MockGenerationDialogViewModelTests
             claudeCodeEngineFactory: null,
             dialogService: dialogs ?? new StubDialogService()
         );
-        vm.Connection.ApiProvider = AiProvider.Ollama; // 認証不要にして接続 OK 状態にする
+        vm.Connection.ApiProvider = AiProvider.LocalLlm; // キー任意にして接続 OK 状態にする
 
         if (setMockFolder)
         {
@@ -601,7 +601,7 @@ public class MockGenerationDialogViewModelTests
             claudeCodeEngineFactory: null,
             dialogService: dialogs
         );
-        vm.Connection.ApiProvider = AiProvider.Ollama;
+        vm.Connection.ApiProvider = AiProvider.LocalLlm;
 
         try
         {
@@ -982,7 +982,7 @@ public class MockGenerationDialogViewModelTests
 
         try
         {
-            // 既定は Ollama（CreateVm）。一旦 OpenAI へ寄せてから Ollama へ戻して変化を作る
+            // 既定は Local LLM（CreateVm）。一旦 OpenAI へ寄せてから Local LLM へ戻して変化を作る
             vm.Connection.ApiProvider = AiProvider.OpenAI;
 
             var raised = new List<string>();
@@ -994,7 +994,7 @@ public class MockGenerationDialogViewModelTests
                 }
             };
 
-            vm.Connection.ApiProvider = AiProvider.Ollama;
+            vm.Connection.ApiProvider = AiProvider.LocalLlm;
 
             raised.Should().Contain(nameof(MockGenerationDialogViewModel.IsBackendReady));
         }
@@ -1234,8 +1234,67 @@ public class MockGenerationDialogViewModelTests
         }
     }
 
-    /// <summary>API キー接続では、キー未入力なら無効（理由＝ApiKeyNotReady・注記フラグが立つ）／キー不要の Ollama なら有効になることを検証する</summary>
-    [Fact(DisplayName = "API キー接続はキー未入力で無効・Ollama で有効")]
+    /// <summary>
+    /// 接続組み立てで、エンドポイント上書きがローカル LLM のときだけ渡ることを検証する。
+    /// 欄が非表示のまま残った URL が OpenAI 接続へ紛れ込む事故（回帰）を防ぐ。
+    /// </summary>
+    [Fact(DisplayName = "接続のエンドポイント上書きは Local LLM のときだけ渡る")]
+    public void BuildOpenAiConnection_AppliesEndpointOnlyForLocalLlm()
+    {
+        var (vm, _, baseFolder, _) = CreateVm(NonEmptyDiagram());
+
+        try
+        {
+            vm.Connection.ApiProvider = AiProvider.LocalLlm;
+            vm.Connection.EndpointOverride = "http://127.0.0.1:1234/v1";
+
+            var local = vm.BuildOpenAiConnection();
+            local.Provider.Should().Be(AiProvider.LocalLlm);
+            local.EndpointOverride.Should().Be("http://127.0.0.1:1234/v1");
+
+            // 欄は非表示になるが値は残る。それでも OpenAI 接続には渡さない
+            vm.Connection.ApiProvider = AiProvider.OpenAI;
+            vm.Connection.EndpointOverride.Should().Be("http://127.0.0.1:1234/v1");
+
+            var openAi = vm.BuildOpenAiConnection();
+            openAi.EndpointOverride.Should().BeNull();
+            openAi.ResolveEndpoint().Should().Be("https://api.openai.com/v1");
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
+    /// <summary>ローカル LLM のキーは、入力すればそのまま接続へ渡り、未入力ならダミーになることを検証する</summary>
+    [Fact(DisplayName = "Local LLM のキーは入力時そのまま・未入力でダミー")]
+    public void BuildOpenAiConnection_LocalLlmApiKey_IsOptional()
+    {
+        var (vm, _, baseFolder, _) = CreateVm(NonEmptyDiagram());
+
+        try
+        {
+            vm.Connection.ApiProvider = AiProvider.LocalLlm;
+
+            vm.Connection.ApiKey = "local-secret";
+            var withKey = vm.BuildOpenAiConnection();
+            withKey.ApiKey.Should().Be("local-secret");
+            withKey.ResolveApiKey().Should().Be("local-secret");
+
+            vm.Connection.ApiKey = string.Empty;
+            vm.BuildOpenAiConnection()
+                .ResolveApiKey()
+                .Should()
+                .Be(LocalLlmDefaults.PlaceholderApiKey);
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
+    /// <summary>API キー接続では、キー未入力なら無効（理由＝ApiKeyNotReady・注記フラグが立つ）／キー任意の Local LLM なら有効になることを検証する</summary>
+    [Fact(DisplayName = "API キー接続はキー未入力で無効・Local LLM で有効")]
     public async Task CanGenerateMockProject_ApiKeyBackend_NeedsKeyThenAllows()
     {
         var (vm, engineBox, generator, baseFolder, mockFolder) = CreateVmWithGenerator(
@@ -1256,8 +1315,8 @@ public class MockGenerationDialogViewModelTests
             vm.CanGenerateMockProject.Should().BeFalse();
             vm.MockGenDisabledReason.Should().Be(MockStrings.Mock_DisabledReason_ApiKeyNotReady);
 
-            // Ollama（キー不要）にすると生成可能になる
-            vm.Connection.ApiProvider = AiProvider.Ollama;
+            // Local LLM（キー任意）にすると生成可能になる
+            vm.Connection.ApiProvider = AiProvider.LocalLlm;
             vm.CanGenerateMockProject.Should().BeTrue();
         }
         finally
@@ -1280,9 +1339,9 @@ public class MockGenerationDialogViewModelTests
             await vm.RefreshMockGenAvailabilityAsync();
             await SaveScreenOnClaudeCode(vm, engineBox, mockFolder);
 
-            // API キー（Ollama＝キー不要）へ切替
+            // API キー（Local LLM＝キー任意）へ切替
             vm.Connection.SelectedBackend = ErChatBackendKind.ApiKey;
-            vm.Connection.ApiProvider = AiProvider.Ollama;
+            vm.Connection.ApiProvider = AiProvider.LocalLlm;
             vm.Connection.ApiModel = "llama3";
             vm.OutputFolder = Path.Combine(baseFolder, "out");
             vm.ProjectName = "AcmeMock";
@@ -1441,17 +1500,17 @@ public class MockGenerationDialogViewModelTests
     }
 
     /// <summary>
-    /// Ollama＋モデル設定で成功ターンが完了すると、使用モデルが候補・JSON 履歴へ記録されることを
+    /// Local LLM＋モデル設定で成功ターンが完了すると、使用モデルが候補・JSON 履歴へ記録されることを
     /// エンドツーエンド（フェイクエンジンの成功 TurnCompleted 経由）で検証する。
     /// </summary>
-    [Fact(DisplayName = "Ollama 成功ターンで使用モデルが候補・履歴へ記録される")]
-    public async Task SuccessfulOllamaTurn_RecordsModelToHistory()
+    [Fact(DisplayName = "Local LLM 成功ターンで使用モデルが候補・履歴へ記録される")]
+    public async Task SuccessfulLocalLlmTurn_RecordsModelToHistory()
     {
         var (vm, _, baseFolder, _) = CreateVm(NonEmptyDiagram());
 
         try
         {
-            // CreateVm で ApiProvider=Ollama・バックエンドは既定の API キー
+            // CreateVm で ApiProvider=LocalLlm・バックエンドは既定の API キー
             vm.Connection.ApiModel = "qwen3.6:35b";
 
             vm.StartConversationCommand.Execute(null);
@@ -1464,7 +1523,7 @@ public class MockGenerationDialogViewModelTests
             var reloaded = new AiSettingsStore(Path.Combine(baseFolder, "settings"))
                 .Load()
                 .ApiModelHistory;
-            reloaded.ModelsFor("ollama").Should().Contain("qwen3.6:35b");
+            reloaded.ModelsFor("localllm").Should().Contain("qwen3.6:35b");
         }
         finally
         {

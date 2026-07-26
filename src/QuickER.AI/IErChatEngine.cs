@@ -3,7 +3,7 @@ namespace QuickER.AI;
 /// <summary>AI チャットのバックエンド種別（接続方式）</summary>
 public enum ErChatBackendKind
 {
-    /// <summary>API キー接続（OpenAI/Ollama を自前のチャット制御で利用）</summary>
+    /// <summary>API キー接続（OpenAI/Claude/ローカル LLM を自前のチャット制御で利用）</summary>
     ApiKey,
 
     /// <summary>Codex 接続（Codex App Server を利用）</summary>

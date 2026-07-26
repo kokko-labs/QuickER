@@ -11,8 +11,25 @@ public enum AiProvider
     /// <summary>Anthropic Claude 公式 API (api.anthropic.com)</summary>
     Claude,
 
-    /// <summary>ローカル Ollama (OpenAI 互換 API)</summary>
-    Ollama,
+    /// <summary>OpenAI 互換 API のローカル LLM (Ollama / LM Studio / llama.cpp / vLLM 等)</summary>
+    LocalLlm,
+}
+
+/// <summary>
+/// ローカル LLM プロバイダ (<see cref="AiProvider.LocalLlm"/>) の既定値。
+/// UI・ドライバ・設定の 3 箇所で同じ値を使うため、ここを唯一の正本とする。
+/// </summary>
+public static class LocalLlmDefaults
+{
+    /// <summary>既定のエンドポイント URL (Ollama の既定ポート。他の実装は UI のエンドポイント欄で上書きする)</summary>
+    public const string Endpoint = "http://localhost:11434/v1";
+
+    /// <summary>
+    /// API キー未入力時に送る代替キー。認証を要求しないローカルサーバーでも
+    /// OpenAI SDK が空キーを拒否するため、無害なダミー文字列を送る
+    /// (値は Ollama 時代からの互換のため変更しない。受け側は認証不要なので内容に意味はない)。
+    /// </summary>
+    public const string PlaceholderApiKey = "ollama";
 }
 
 /// <summary>AI が生成する識別子名の命名規則</summary>
@@ -51,7 +68,7 @@ public class AiGenerationSettings
     /// <summary>使用する AI プロバイダ</summary>
     public AiProvider Provider { get; set; } = AiProvider.OpenAI;
 
-    /// <summary>API キー (Ollama では未使用)</summary>
+    /// <summary>API キー (ローカル LLM では任意。空なら認証不要サーバー向けのダミーが送られる)</summary>
     public string ApiKey { get; set; } = string.Empty;
 
     /// <summary>モデル名 (例: <c>gpt-5.4-mini</c>, <c>llama3.1</c>)</summary>
@@ -84,7 +101,8 @@ public class AiGenerationSettings
             ? EndpointOverride!
             : Provider switch
             {
-                AiProvider.Ollama => "http://localhost:11434/v1",
+                // ローカル LLM の既定は Ollama の既定ポート（他の実装は UI のエンドポイント欄で上書きする）
+                AiProvider.LocalLlm => LocalLlmDefaults.Endpoint,
                 _ => "https://api.openai.com/v1",
             };
 }

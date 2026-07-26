@@ -224,7 +224,7 @@ EC サイトの受注管理に必要なテーブルを設計して
 
 - OpenAI API
 - Anthropic API
-- Ollama
+- ローカル LLM（OpenAI 互換 API：Ollama・LM Studio・vLLM など）
 - Codex
 - Claude Code
 

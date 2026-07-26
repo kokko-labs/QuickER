@@ -78,6 +78,12 @@ namespace QuickER.AI.Chat.Resources {
             }
         }
 
+        public static string Chat_ProviderTooltip {
+            get {
+                return ResourceManager.GetString("Chat_ProviderTooltip", resourceCulture);
+            }
+        }
+
         public static string Chat_ModelName {
             get {
                 return ResourceManager.GetString("Chat_ModelName", resourceCulture);
@@ -93,6 +99,12 @@ namespace QuickER.AI.Chat.Resources {
         public static string Chat_ApiKeyTooltip {
             get {
                 return ResourceManager.GetString("Chat_ApiKeyTooltip", resourceCulture);
+            }
+        }
+
+        public static string Chat_ApiKeyOptionalNote {
+            get {
+                return ResourceManager.GetString("Chat_ApiKeyOptionalNote", resourceCulture);
             }
         }
 

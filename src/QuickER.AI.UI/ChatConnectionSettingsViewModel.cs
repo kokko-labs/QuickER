@@ -35,6 +35,9 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
     /// <summary>Anthropic (Claude) API キーの保存名</summary>
     private const string ClaudeApiKeyStoreName = "ClaudeApiKey";
 
+    /// <summary>ローカル LLM API キーの保存名（認証を課すローカルサーバー向け。空なら保存されない）</summary>
+    private const string LocalLlmApiKeyStoreName = "LocalLlmApiKey";
+
     private const string OpenAiProviderName = "openai";
 
     /// <summary>このダイアログの種別（UI 状態セクション ChatUi / MockUi を選ぶキー）</summary>
@@ -117,20 +120,38 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
 
     /// <summary>API キー接続で利用可能なプロバイダー一覧</summary>
     public IReadOnlyList<AiProvider> ApiProviders { get; } =
-    [AiProvider.OpenAI, AiProvider.Claude, AiProvider.Ollama];
+    [AiProvider.OpenAI, AiProvider.Claude, AiProvider.LocalLlm];
 
     /// <summary>
     /// 現在の API プロバイダーに応じたモデル候補。OpenAI / Claude は静的カタログ（削除不可）を上に固定し、
-    /// その下へカタログ外の手入力モデルの MRU 履歴（× で削除可能）を並べる。Ollama はカタログが無いため
-    /// 履歴のみ。履歴はチャットのターン成功時に <see cref="RecordSuccessfulModel"/> で追加される。
+    /// その下へカタログ外の手入力モデルの MRU 履歴（× で削除可能）を並べる。ローカル LLM は
+    /// 手元のサーバーが持つモデル次第でカタログを持てないため履歴のみ。
+    /// 履歴はチャットのターン成功時に <see cref="RecordSuccessfulModel"/> で追加される。
     /// </summary>
     public ObservableCollection<ModelCandidate> ApiModelCandidates { get; } = new();
 
-    /// <summary>API キー欄を表示するか（API キーが必要な OpenAI / Claude 選択時のみ）</summary>
-    public bool ShowApiKey => ApiProvider is AiProvider.OpenAI or AiProvider.Claude;
+    /// <summary>現在のプロバイダーがローカル LLM か（キー任意・エンドポイント欄の表示条件）</summary>
+    public bool IsLocalLlmProvider => ApiProvider == AiProvider.LocalLlm;
 
-    /// <summary>エンドポイント欄を表示するか（Ollama 選択時のみ）</summary>
-    public bool ShowEndpoint => ApiProvider == AiProvider.Ollama;
+    /// <summary>
+    /// API キー欄を表示するか。全プロバイダーで表示する（ローカル LLM も認証を課すサーバーがあるためキーを受け付ける）。
+    /// 将来プロバイダーごとに出し分ける可能性を残すため、XAML の可視性バインド先としてプロパティのまま置く。
+    /// </summary>
+    public bool ShowApiKey => true;
+
+    /// <summary>エンドポイント欄を表示するか（ローカル LLM 選択時のみ）</summary>
+    public bool ShowEndpoint => IsLocalLlmProvider;
+
+    /// <summary>
+    /// 実際に接続へ渡すエンドポイント上書き値。ローカル LLM 以外では常に null を返す。
+    /// エンドポイント欄はローカル LLM のときだけ表示されるため、値を入れたまま OpenAI へ切り替えると
+    /// 見えない欄の値が OpenAI 接続へ紛れ込む。その事故を防ぐ規則をここに一本化する
+    /// （チャット／モックの両ダイアログが本プロパティを介して接続を組み立てる）。
+    /// </summary>
+    public string? EffectiveEndpointOverride =>
+        IsLocalLlmProvider && !string.IsNullOrWhiteSpace(EndpointOverride)
+            ? EndpointOverride
+            : null;
 
     // ── Codex 接続タブ ──
 
@@ -166,12 +187,13 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
     public IReadOnlyList<string> ClaudeCodeModelCandidates { get; } =
         AiModelCatalog.ClaudeCodeModels;
 
-    /// <summary>現在のプロバイダーに対応する API キー保存名（API キー不要のプロバイダーは null）</summary>
+    /// <summary>現在のプロバイダーに対応する API キー保存名（プロバイダーごとに別スロットで保持する）</summary>
     private string? CurrentApiKeyStoreName =>
         ApiProvider switch
         {
             AiProvider.OpenAI => OpenAiApiKeyStoreName,
             AiProvider.Claude => ClaudeApiKeyStoreName,
+            AiProvider.LocalLlm => LocalLlmApiKeyStoreName,
             _ => null,
         };
 
@@ -202,7 +224,19 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
             : settings.CodexAppServer.Model;
 
         ClaudeCodeModel = settings.ClaudeCode.Model;
-        InitialBackend = settings.UiFor(_dialogKind).ParseLastBackend() ?? ErChatBackendKind.ApiKey;
+
+        var ui = settings.UiFor(_dialogKind);
+        InitialBackend = ui.ParseLastBackend() ?? ErChatBackendKind.ApiKey;
+
+        // プロバイダー → エンドポイントの順で復元する。プロバイダー変更フックは
+        // 「ローカル LLM かつエンドポイント空」なら既定 URL を補完するため、保存値がある場合だけ後から上書きする
+        // （保存が無いローカル LLM は既定 URL・保存がある場合はその URL、という復元になる）
+        ApiProvider = ui.ParseApiProvider() ?? AiProvider.OpenAI;
+
+        if (!string.IsNullOrWhiteSpace(ui.EndpointOverride))
+        {
+            EndpointOverride = ui.EndpointOverride;
+        }
 
         RefreshApiModelCandidates();
     }
@@ -210,7 +244,7 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
     /// <summary>現在の API プロバイダーの履歴キー（<see cref="AiProvider"/> の小文字名）</summary>
     private string ApiProviderKey => ApiProvider.ToString().ToLowerInvariant();
 
-    /// <summary>現在の API プロバイダーの静的カタログ（Ollama はカタログ無し＝空）</summary>
+    /// <summary>現在の API プロバイダーの静的カタログ（ローカル LLM はカタログ無し＝空）</summary>
     private IReadOnlyList<string> CurrentApiCatalog =>
         ApiProvider switch
         {
@@ -378,7 +412,13 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
             Model = ClaudeCodeModel?.Trim() ?? string.Empty,
         };
 
-        settings.UiFor(_dialogKind).LastBackend = SelectedBackend.ToString();
+        var ui = settings.UiFor(_dialogKind);
+        ui.LastBackend = SelectedBackend.ToString();
+
+        // API キー接続の選択（プロバイダー・エンドポイント）も次回起動へ引き継ぐ。
+        // API キー本体はここ（平文 JSON）へは入れず、従来どおり DPAPI ストアだけが持つ
+        ui.ApiProvider = ApiProvider.ToString();
+        ui.EndpointOverride = EndpointOverride?.Trim() ?? string.Empty;
 
         _settingsStore.Save(settings);
     }
@@ -455,18 +495,20 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
 
     partial void OnApiProviderChanged(AiProvider value)
     {
+        OnPropertyChanged(nameof(IsLocalLlmProvider));
         OnPropertyChanged(nameof(ShowApiKey));
         OnPropertyChanged(nameof(ShowEndpoint));
+        OnPropertyChanged(nameof(EffectiveEndpointOverride));
 
         RefreshApiModelCandidates();
 
-        // 候補が空（Ollama で履歴なし）でも落ちないよう先頭を選ぶ
-        // （OpenAI / Claude はカタログ先頭＝既定・Ollama は MRU 先頭または空）。
+        // 候補が空（ローカル LLM で履歴なし）でも落ちないよう先頭を選ぶ
+        // （OpenAI / Claude はカタログ先頭＝既定・ローカル LLM は MRU 先頭または空）。
         ApiModel = ApiModelCandidates.FirstOrDefault()?.Name ?? string.Empty;
 
-        if (value == AiProvider.Ollama && string.IsNullOrWhiteSpace(EndpointOverride))
+        if (value == AiProvider.LocalLlm && string.IsNullOrWhiteSpace(EndpointOverride))
         {
-            EndpointOverride = "http://localhost:11434/v1";
+            EndpointOverride = LocalLlmDefaults.Endpoint;
         }
 
         // プロバイダーごとに別の API キーを保持するため、切替時に保存済みキーを読み直す
@@ -478,6 +520,9 @@ public partial class ChatConnectionSettingsViewModel : ObservableObject
             : string.Empty;
         _isInitializing = wasInitializing;
     }
+
+    partial void OnEndpointOverrideChanged(string value) =>
+        OnPropertyChanged(nameof(EffectiveEndpointOverride));
 
     partial void OnApiKeyChanged(string value) => PersistApiKey();
 

@@ -6,8 +6,8 @@ using OpenAI.Chat;
 namespace QuickER.AI;
 
 /// <summary>OpenAI チャット接続設定（プロバイダ・キー・モデル・エンドポイント）</summary>
-/// <param name="Provider">プロバイダ（OpenAI / Ollama）</param>
-/// <param name="ApiKey">API キー（Ollama では未使用）</param>
+/// <param name="Provider">プロバイダ（OpenAI / ローカル LLM）</param>
+/// <param name="ApiKey">API キー（ローカル LLM では任意。空ならダミーを送る）</param>
 /// <param name="Model">モデル名</param>
 /// <param name="EndpointOverride">エンドポイント上書き（未指定はプロバイダ既定）</param>
 public sealed record OpenAiChatConnection(
@@ -23,9 +23,18 @@ public sealed record OpenAiChatConnection(
             ? EndpointOverride!
             : Provider switch
             {
-                AiProvider.Ollama => "http://localhost:11434/v1",
+                // ローカル LLM の既定は Ollama の既定ポート（他の実装はエンドポイント上書きで指す）
+                AiProvider.LocalLlm => LocalLlmDefaults.Endpoint,
                 _ => "https://api.openai.com/v1",
             };
+
+    /// <summary>
+    /// 実際に送る API キーを解決する。ローカル LLM はキーが任意（認証不要なサーバーがある）だが、
+    /// OpenAI SDK は空キーを受け付けないため、未入力ならダミーへ置き換える
+    /// （入力があれば、認証を課すローカルサーバー向けにその値をそのまま送る）。
+    /// </summary>
+    public string ResolveApiKey() =>
+        string.IsNullOrEmpty(ApiKey) ? LocalLlmDefaults.PlaceholderApiKey : ApiKey;
 }
 
 /// <summary>
@@ -114,15 +123,14 @@ public sealed class OpenAiTurnDriver : IChatTurnDriver
         return new ChatAssistantTurn(textBuilder.ToString(), calls);
     }
 
-    /// <summary>接続設定から ChatClient を生成する（Ollama は API キー不要のためダミーを渡す）</summary>
+    /// <summary>接続設定から ChatClient を生成する</summary>
     private ChatClient CreateClient()
     {
         var connection = _connectionProvider();
         var endpoint = new Uri(connection.ResolveEndpoint());
-        var key = string.IsNullOrEmpty(connection.ApiKey) ? "ollama" : connection.ApiKey;
         return new ChatClient(
             model: connection.Model,
-            credential: new ApiKeyCredential(key),
+            credential: new ApiKeyCredential(connection.ResolveApiKey()),
             options: new OpenAIClientOptions { Endpoint = endpoint }
         );
     }

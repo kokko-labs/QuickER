@@ -27,6 +27,9 @@
       <!-- Codex プロバイダー表示名コンバータ（AI 固有） -->
       <ui:CodexProviderDisplayNameConverter x:Key="CodexProviderDisplayNameConverter" />
 
+      <!-- API キー接続プロバイダー表示名コンバータ（enum 名 LocalLlm を "Local LLM" と見せる） -->
+      <ui:AiProviderDisplayNameConverter x:Key="AiProviderDisplayNameConverter" />
+
       <!-- ── 入力欄（角丸・フォーカスでアクセント。チャット用でこのダイアログ固有） ── -->
       <Style x:Key="ChatInputBox" TargetType="TextBox">
         <Setter Property="Background" Value="White" />
@@ -299,7 +302,14 @@
               Padding="6,4"
               ItemsSource="{Binding Connection.ApiProviders}"
               SelectedItem="{Binding Connection.ApiProvider}"
-            />
+              ToolTip="{x:Static res:Strings.Chat_ProviderTooltip}"
+            >
+              <ComboBox.ItemTemplate>
+                <DataTemplate>
+                  <TextBlock Text="{Binding Converter={StaticResource AiProviderDisplayNameConverter}}" />
+                </DataTemplate>
+              </ComboBox.ItemTemplate>
+            </ComboBox>
             <TextBlock
               Grid.Column="2"
               Style="{StaticResource FieldLabel}"
@@ -373,6 +383,15 @@
               IsChecked="{Binding Connection.SaveApiKey}"
             />
           </Grid>
+
+          <!-- ローカル LLM はキーが任意なので、その旨を欄の直下に注記する -->
+          <TextBlock
+            Margin="0,4,0,0"
+            TextWrapping="Wrap"
+            Foreground="{StaticResource MutedText}"
+            Text="{x:Static res:Strings.Chat_ApiKeyOptionalNote}"
+            Visibility="{Binding Connection.IsLocalLlmProvider, Converter={StaticResource BoolToVisibilityConverter}}"
+          />
 
           <Grid
             Margin="0,12,0,0"

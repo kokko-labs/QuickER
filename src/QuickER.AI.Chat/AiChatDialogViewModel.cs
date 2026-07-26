@@ -199,7 +199,7 @@ public partial class AiChatDialogViewModel : ObservableObject
             toolHost ?? new NullToolHost(),
             dispatcher,
             () =>
-                Connection.ApiProvider == AiProvider.Ollama
+                Connection.ApiProvider == AiProvider.LocalLlm
                 || !string.IsNullOrWhiteSpace(Connection.ApiKey),
             ErDesignProfile.ErDesign,
             attachmentSupport: () =>
@@ -437,14 +437,16 @@ public partial class AiChatDialogViewModel : ObservableObject
     public void SaveSettings() => Connection.SaveSettings();
 
     /// <summary>OpenAI 接続設定を現在の入力から組み立てる</summary>
-    private OpenAiChatConnection BuildOpenAiConnection() =>
+    /// <remarks>
+    /// エンドポイント上書きは <see cref="ChatConnectionSettingsViewModel.EffectiveEndpointOverride"/> から取る
+    /// （ローカル LLM 以外では null＝欄が非表示のまま残った値が OpenAI 接続へ紛れ込まない）。
+    /// </remarks>
+    internal OpenAiChatConnection BuildOpenAiConnection() =>
         new(
             Connection.ApiProvider,
             Connection.ApiKey,
             Connection.ApiModel,
-            string.IsNullOrWhiteSpace(Connection.EndpointOverride)
-                ? null
-                : Connection.EndpointOverride
+            Connection.EffectiveEndpointOverride
         );
 
     /// <summary>Anthropic (Claude) 接続設定を現在の入力から組み立てる</summary>
@@ -531,7 +533,7 @@ public partial class AiChatDialogViewModel : ObservableObject
                 break;
 
             case nameof(ChatConnectionSettingsViewModel.ApiProvider):
-                // API キー接続はプロバイダーで添付範囲が変わる（OpenAI=画像・Claude=画像＋PDF・Ollama=なし）
+                // API キー接続はプロバイダーで添付範囲が変わる（OpenAI／ローカル LLM=画像・Claude=画像＋PDF）
                 if (Connection.IsApiKeyBackend)
                 {
                     RefreshAttachmentSupport();
@@ -666,7 +668,7 @@ public partial class AiChatDialogViewModel : ObservableObject
 
         if (result.Success)
         {
-            // 成功したターンで使ったモデルを MRU 履歴へ記録する（Ollama / Codex のガードは子 VM 側）
+            // 成功したターンで使ったモデルを MRU 履歴へ記録する（ローカル LLM / Codex のガードは子 VM 側）
             Connection.RecordSuccessfulModel();
             ArrangeNewDiagramIfCreated();
             StatusMessage = Strings.Chat_ResponseCompleted;

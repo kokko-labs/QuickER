@@ -6,7 +6,7 @@ namespace QuickER.Tests.AI;
 
 /// <summary>
 /// 各エンジンが公開する <see cref="AttachmentSupport"/>（[Flags]）の判定マトリクスを検証するテストクラス。
-/// Anthropic=画像＋PDF＋テキスト・OpenAI=画像＋テキスト・Ollama=なし・Codex=なし・Claude Code=全種別。
+/// Anthropic=画像＋PDF＋テキスト・OpenAI／ローカル LLM=画像＋テキスト・Codex=なし・Claude Code=全種別。
 /// </summary>
 public class AttachmentSupportMatrixTests
 {
@@ -14,7 +14,7 @@ public class AttachmentSupportMatrixTests
     private const AttachmentSupport ClaudeApiSupport =
         AttachmentSupport.Images | AttachmentSupport.Pdf | AttachmentSupport.Text;
 
-    /// <summary>OpenAI が受け付ける種別集合</summary>
+    /// <summary>OpenAI・ローカル LLM が受け付ける種別集合（ローカル LLM は OpenAI 互換 API のため同一）</summary>
     private const AttachmentSupport OpenAiSupport =
         AttachmentSupport.Images | AttachmentSupport.Text;
 
@@ -52,13 +52,13 @@ public class AttachmentSupportMatrixTests
     [Theory(DisplayName = "API キー接続の添付範囲はプロバイダー依存")]
     [InlineData(AiProvider.Claude)]
     [InlineData(AiProvider.OpenAI)]
-    [InlineData(AiProvider.Ollama)]
+    [InlineData(AiProvider.LocalLlm)]
     public void Resolver_ForApiKeyProvider_ReturnsExpectedFlags(AiProvider provider)
     {
         var expected = provider switch
         {
             AiProvider.Claude => ClaudeApiSupport,
-            AiProvider.OpenAI => OpenAiSupport,
+            AiProvider.OpenAI or AiProvider.LocalLlm => OpenAiSupport,
             _ => AttachmentSupport.None,
         };
 

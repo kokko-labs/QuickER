@@ -8,7 +8,7 @@ using QuickER.AI.Mock.Resources;
 namespace QuickER.AI.Mock;
 
 /// <summary>
-/// API キー方式（OpenAI / Claude / Ollama＝<see cref="ChatTurnEngine"/> 系）で WPF の UI 層を書かせる
+/// API キー方式（OpenAI / Claude / ローカル LLM＝<see cref="ChatTurnEngine"/> 系）で WPF の UI 層を書かせる
 /// <see cref="IMockProjectAgent"/> の実装。
 /// </summary>
 /// <remarks>

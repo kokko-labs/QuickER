@@ -2,7 +2,7 @@ namespace QuickER.AI;
 
 /// <summary>
 /// 「API キー接続」バックエンド内のプロバイダ選択に応じて、毎ターン
-/// OpenAI/Ollama ドライバと Anthropic (Claude) ドライバへ振り分ける <see cref="IChatTurnDriver"/>。
+/// OpenAI／ローカル LLM ドライバと Anthropic (Claude) ドライバへ振り分ける <see cref="IChatTurnDriver"/>。
 /// これにより <see cref="ChatTurnEngine"/> を変更せずに Claude を同一バックエンドへ追加できる。
 /// </summary>
 public sealed class ProviderRoutingTurnDriver : IChatTurnDriver
@@ -13,7 +13,7 @@ public sealed class ProviderRoutingTurnDriver : IChatTurnDriver
 
     /// <summary>プロバイダ選択関数と各プロバイダ向けドライバからルーターを生成する</summary>
     /// <param name="providerSelector">現在の API プロバイダを返す関数（毎ターン評価する）</param>
-    /// <param name="openAiDriver">OpenAI / Ollama 向けドライバ</param>
+    /// <param name="openAiDriver">OpenAI / ローカル LLM 向けドライバ</param>
     /// <param name="anthropicDriver">Anthropic (Claude) 向けドライバ</param>
     public ProviderRoutingTurnDriver(
         Func<AiProvider> providerSelector,

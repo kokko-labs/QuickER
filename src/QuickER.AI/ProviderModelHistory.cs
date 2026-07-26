@@ -3,7 +3,7 @@ namespace QuickER.AI;
 /// <summary>
 /// プロバイダ別のモデル名 MRU（最近使った順）履歴。AI チャット／AI モックの両ダイアログで共有し、
 /// チャットのターンが成功したときに使用モデルを記録して、次回からドロップダウン候補に出す。
-/// API キー接続（キーは "openai" / "claude" / "ollama"）と Codex 接続（キーは config.toml の
+/// API キー接続（キーは "openai" / "claude" / "localllm"）と Codex 接続（キーは config.toml の
 /// プロバイダ名）が、<see cref="AiSettings"/> の別セクション（<see cref="AiSettings.ApiModelHistory"/> /
 /// <see cref="AiSettings.CodexModelHistory"/>）で同じ形式を使う。
 /// </summary>

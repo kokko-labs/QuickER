@@ -21,7 +21,7 @@ Draw an ER diagram → create a database → generate C# data-access code and ru
   - **Named queries** — store search-method definitions (condition, ordering, paging, projection) in the diagram and generate them as typed Repository methods (e.g. `GetByCustomerAsync(int customerId, ...)`) for every implementation (Repository (QuickER) / EF Core). Conditions are written in a simple DSL (`CustomerId = @customerId AND Memo LIKE @keyword`, etc.) with live validation in the GUI editor
   - **Remote-capable interfaces (--generate-remote-contracts)** — an option that additionally generates `I{Entity}RemoteRepository` with only the operations that can be served over a web service (CRUD, save, and named queries). `I{Entity}Repository` keeps all methods and inherits it, so existing code is unaffected; keep your application code dependent only on the remote surface and a switch to a remote implementation stays compile-time safe
   - **Three-tier support (--generate-remote-services)** — generates an HTTP + JSON client (`Http{Entity}RemoteRepository`, depending only on the BCL `HttpClient`) and an ASP.NET Core Minimal API server (`MapGeneratedRemoteEndpoints`) for the remote surface. Switch between direct DB access and going through a web service by swapping a single DI registration line; exceptions such as `SaveConflictException` are restored with their original type (the same catch works as with a direct connection)
-- **AI chat** — generate and edit ER diagrams through conversation (supports OpenAI / Anthropic API keys, Ollama, Codex, and Claude Code). It can also generate web mockup screens (HTML) from an ER diagram
+- **AI chat** — generate and edit ER diagrams through conversation (supports OpenAI / Anthropic API keys, local LLMs such as Ollama, Codex, and Claude Code). It can also generate web mockup screens (HTML) from an ER diagram
 - **Rich import/export** — import: DBML / Mermaid / Excel definition sheets / live DBs (5 dialects) / C# code (a file generated with IncludeDataAnnotations ON). Export: PNG / SVG / SQL DDL / Mermaid / DBML / Excel definition sheets / HTML definition documents / Schema JSON (layout-free, re-importable) / vector printing (scale-to-one-page and actual-size PDF)
 - **git-friendly save format** — a single JSON file that separates the semantic model (table definitions) from the visual information (coordinates and colors)
 - **CLI (dotnet tool)** — generate code without the GUI. `quicker generate` (ER diagram JSON → code) / `quicker scaffold` (direct DB → code) / `quicker reverse` (generated C# → ER diagram JSON)
@@ -147,7 +147,7 @@ There is also multi-target generation (keyed DI) that supports SQL Server and SQ
 
 From "AI Chat" on the toolbar, you can generate and edit ER diagrams through conversation (e.g., "Design the tables for order management on an e-commerce site"). Connection methods:
 
-- **API key** — OpenAI / Anthropic (Claude). Ollama runs locally and needs no key
+- **API key** — OpenAI / Anthropic (Claude) / a local LLM with an OpenAI-compatible API (Ollama, LM Studio, vLLM, etc.; no key required)
 - **Codex / Claude Code** — use each CLI's account authentication
 
 See [docs/ai-chat.md](docs/ai-chat.md) for how to configure it.

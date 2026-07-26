@@ -155,9 +155,9 @@ public partial class MockGenerationDialogViewModel : ObservableObject
             _ => IsApiKeyConnectionReady,
         };
 
-    /// <summary>API キー接続が送信可能か（Ollama はキー不要・それ以外はキー入力が必須）</summary>
+    /// <summary>API キー接続が送信可能か（ローカル LLM はキー任意・それ以外はキー入力が必須）</summary>
     private bool IsApiKeyConnectionReady =>
-        Connection.ApiProvider == AiProvider.Ollama
+        Connection.ApiProvider == AiProvider.LocalLlm
         || !string.IsNullOrWhiteSpace(Connection.ApiKey);
 
     /// <summary>図が空（エンティティ 0）か（会話開始の可否に使う）</summary>
@@ -297,7 +297,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     /// <summary>
     /// 選択中バックエンドがモックプロジェクト生成の実行条件（CLI 検出／認証／API キー）を満たすか。
     /// Claude Code＝claude CLI 検出・Codex＝認証プローブ結果（<see cref="ApplyCodexReadiness"/>）・
-    /// API キー＝キー入力あり（Ollama はキー不要）。
+    /// API キー＝キー入力あり（ローカル LLM はキー任意）。
     /// </summary>
     private bool IsSelectedBackendReadyForMockGen =>
         Connection.SelectedBackend switch
@@ -527,7 +527,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
             toolHost,
             _dispatcher,
             () =>
-                Connection.ApiProvider == AiProvider.Ollama
+                Connection.ApiProvider == AiProvider.LocalLlm
                 || !string.IsNullOrWhiteSpace(Connection.ApiKey),
             profile,
             attachmentSupport: () =>
@@ -1344,7 +1344,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
 
         if (result.Success)
         {
-            // 成功したターンで使ったモデルを MRU 履歴へ記録する（Ollama / Codex のガードは子 VM 側）
+            // 成功したターンで使ったモデルを MRU 履歴へ記録する（ローカル LLM / Codex のガードは子 VM 側）
             Connection.RecordSuccessfulModel();
             StatusMessage = Strings.Mock_ResponseCompleted;
         }
@@ -1360,14 +1360,16 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     }
 
     /// <summary>OpenAI 接続設定を現在の入力から組み立てる</summary>
-    private OpenAiChatConnection BuildOpenAiConnection() =>
+    /// <remarks>
+    /// エンドポイント上書きは <see cref="ChatConnectionSettingsViewModel.EffectiveEndpointOverride"/> から取る
+    /// （ローカル LLM 以外では null＝欄が非表示のまま残った値が OpenAI 接続へ紛れ込まない）。
+    /// </remarks>
+    internal OpenAiChatConnection BuildOpenAiConnection() =>
         new(
             Connection.ApiProvider,
             Connection.ApiKey,
             Connection.ApiModel,
-            string.IsNullOrWhiteSpace(Connection.EndpointOverride)
-                ? null
-                : Connection.EndpointOverride
+            Connection.EffectiveEndpointOverride
         );
 
     /// <summary>Anthropic (Claude) 接続設定を現在の入力から組み立てる</summary>
@@ -1402,7 +1404,7 @@ public partial class MockGenerationDialogViewModel : ObservableObject
                 break;
 
             case nameof(ChatConnectionSettingsViewModel.ApiProvider):
-                // API キー接続はプロバイダーで添付範囲が変わる（OpenAI=画像・Claude=画像＋PDF・Ollama=なし）
+                // API キー接続はプロバイダーで添付範囲が変わる（OpenAI／ローカル LLM=画像・Claude=画像＋PDF）
                 if (Connection.IsApiKeyBackend)
                 {
                     RefreshAttachmentSupport();

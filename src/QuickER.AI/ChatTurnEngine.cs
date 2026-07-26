@@ -48,7 +48,7 @@ public sealed record ChatAssistantTurn(string Text, IReadOnlyList<ChatToolCallRe
 
 /// <summary>会話履歴を入力に LLM を 1 回呼び出し、アシスタント応答を返す抽象（LLM 呼び出しの seam）</summary>
 /// <remarks>
-/// 本番は各プロバイダ向けドライバ（OpenAI/Ollama・Anthropic など）が呼ぶ。
+/// 本番は各プロバイダ向けドライバ（OpenAI/ローカル LLM・Anthropic など）が呼ぶ。
 /// テストではスクリプト化した応答を返すフェイクに差し替える。
 /// </remarks>
 public interface IChatTurnDriver
@@ -104,7 +104,7 @@ public sealed class ChatTurnEngine : IErChatEngine
     /// <param name="profile">用途プロファイル（システムプロンプト等。合成ルートが明示的に指定する）</param>
     /// <param name="attachmentSupport">
     /// 添付対応範囲を返す関数（省略時は添付非対応）。API キー接続はプロバイダー依存
-    /// （Anthropic=画像＋PDF・OpenAI=画像・Ollama=なし）のため、合成ルートから注入する
+    /// （Anthropic=画像＋PDF・OpenAI／ローカル LLM=画像）のため、合成ルートから注入する
     /// </param>
     public ChatTurnEngine(
         IChatTurnDriver driver,

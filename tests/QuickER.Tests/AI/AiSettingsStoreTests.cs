@@ -6,7 +6,8 @@ namespace QuickER.Tests.AI;
 
 /// <summary>
 /// <see cref="AiSettingsStore"/> の保存・読込（各セクションの往復・欠損/破損時の既定フォールバック・
-/// ダイアログ別 UI 状態の分離）と、<see cref="ChatUiSettings.ParseLastBackend"/> の解釈を検証するテストクラス。
+/// ダイアログ別 UI 状態の分離）と、<see cref="ChatUiSettings.ParseLastBackend"/> /
+/// <see cref="ChatUiSettings.ParseApiProvider"/> の解釈を検証するテストクラス。
 /// </summary>
 /// <remarks>
 /// 旧構成（ChatUi / Codex / Claude Code / モデル履歴を別ファイルの個別ストアで持つ）を
@@ -172,5 +173,57 @@ public class AiSettingsStoreTests
             .ParseLastBackend()
             .Should()
             .BeNull();
+    }
+
+    [Theory(DisplayName = "ParseApiProvider は名前を大文字小文字を無視して解釈する")]
+    [InlineData("OpenAI", AiProvider.OpenAI)]
+    [InlineData("claude", AiProvider.Claude)]
+    [InlineData("LOCALLLM", AiProvider.LocalLlm)]
+    public void ParseApiProvider_ParsesKnownNames(string value, AiProvider expected)
+    {
+        new ChatUiSettings { ApiProvider = value }
+            .ParseApiProvider()
+            .Should()
+            .Be(expected);
+    }
+
+    /// <summary>空・未知の名前・定義外の数値文字列がいずれも null（＝呼び出し側で既定へフォールバック）になることを検証する</summary>
+    [Theory(DisplayName = "ParseApiProvider は空・不正値・定義外の数値を null にする")]
+    [InlineData("")]
+    [InlineData("Gemini")]
+    [InlineData("99")]
+    public void ParseApiProvider_ReturnsNull_ForInvalidValues(string value)
+    {
+        new ChatUiSettings { ApiProvider = value }
+            .ParseApiProvider()
+            .Should()
+            .BeNull();
+    }
+
+    /// <summary>API キー接続の選択（プロバイダー・エンドポイント）がダイアログ別セクションで往復することを検証する</summary>
+    [Fact(DisplayName = "プロバイダー・エンドポイントはダイアログ別に往復する")]
+    public void SaveLoad_ApiProviderAndEndpoint_RoundTripPerDialog()
+    {
+        var (store, folder) = CreateStore();
+
+        try
+        {
+            var settings = store.Load();
+            settings.ChatUi.ApiProvider = nameof(AiProvider.LocalLlm);
+            settings.ChatUi.EndpointOverride = "http://127.0.0.1:1234/v1";
+            settings.MockUi.ApiProvider = nameof(AiProvider.Claude);
+            store.Save(settings);
+
+            var actual = new AiSettingsStore(folder).Load();
+
+            actual.ChatUi.ParseApiProvider().Should().Be(AiProvider.LocalLlm);
+            actual.ChatUi.EndpointOverride.Should().Be("http://127.0.0.1:1234/v1");
+            actual.MockUi.ParseApiProvider().Should().Be(AiProvider.Claude);
+            actual.MockUi.EndpointOverride.Should().BeEmpty();
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
     }
 }
