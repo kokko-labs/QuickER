@@ -117,7 +117,13 @@ public sealed class OpenAiTurnDriver : IChatTurnDriver
 
         var calls = toolCalls
             .Values.Where(acc => !string.IsNullOrEmpty(acc.Id) && !string.IsNullOrEmpty(acc.Name))
-            .Select(acc => new ChatToolCallRequest(acc.Id!, acc.Name!, acc.Arguments.ToString()))
+            .Select(acc => new ChatToolCallRequest(
+                acc.Id!,
+                acc.Name!,
+                // 小型モデルは壊れた引数 JSON を出すことがあるため、直せる壊れ方はここで修復して
+                // ツールホストへ渡す（修復不能なら原文のまま＝ホストが解析エラーを返しリトライさせる）
+                ToolArgumentJson.NormalizeForExecution(acc.Arguments.ToString())
+            ))
             .ToList();
 
         return new ChatAssistantTurn(textBuilder.ToString(), calls);
@@ -190,7 +196,7 @@ public sealed class OpenAiTurnDriver : IChatTurnDriver
     }
 
     /// <summary>アシスタント履歴項目を、ツール呼び出し・テキストを保持した AssistantChatMessage へ変換する</summary>
-    private static AssistantChatMessage ToAssistantMessage(ChatHistoryItem item)
+    internal static AssistantChatMessage ToAssistantMessage(ChatHistoryItem item)
     {
         if (item.ToolCalls is not { Count: > 0 })
         {
@@ -201,9 +207,10 @@ public sealed class OpenAiTurnDriver : IChatTurnDriver
             ChatToolCall.CreateFunctionToolCall(
                 tc.Id,
                 tc.Name,
-                BinaryData.FromString(
-                    string.IsNullOrWhiteSpace(tc.ArgumentsJson) ? "{}" : tc.ArgumentsJson
-                )
+                // 履歴へは有効な JSON だけを積む。壊れた引数をそのまま再送すると、履歴を検証する
+                // プロバイダー（Ollama の OpenAI 互換層等）が以後の全要求を HTTP 400 で拒否し、
+                // 会話が恒久的に使用不能になる（解析エラーはツール結果として既にモデルへ伝わっている）
+                BinaryData.FromString(ToolArgumentJson.SanitizeForHistory(tc.ArgumentsJson))
             )
         );
 
