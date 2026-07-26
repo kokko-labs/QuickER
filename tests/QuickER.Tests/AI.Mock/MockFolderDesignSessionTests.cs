@@ -65,7 +65,8 @@ public class MockFolderDesignSessionTests : IDisposable
         string html,
         string? description = null,
         object[]? transitions = null,
-        string? revisionNote = null
+        string? revisionNote = null,
+        object[]? entities = null
     )
     {
         var payload = new Dictionary<string, object?>
@@ -88,6 +89,11 @@ public class MockFolderDesignSessionTests : IDisposable
         if (revisionNote is not null)
         {
             payload["revision_note"] = revisionNote;
+        }
+
+        if (entities is not null)
+        {
+            payload["entities"] = entities;
         }
 
         return JsonSerializer.Serialize(payload);
@@ -268,6 +274,163 @@ public class MockFolderDesignSessionTests : IDisposable
         t.From.Should().Be("OrderList.html");
         t.To.Should().Be("OrderDetail.html");
         t.Trigger.Should().Be("行クリック");
+    }
+
+    // --- save_screen entities（画面×エンティティ CRUD） -----------------
+
+    /// <summary>entities 引数がストアへ届き、正規化されてマニフェストに記録されることを検証する</summary>
+    [Fact(DisplayName = "save_screen の entities は正規化されて記録される")]
+    public void Execute_SaveScreen_EntitiesRecorded_Normalized()
+    {
+        var store = CreateStore();
+        var (session, _) = CreateSession(store);
+
+        var entities = new object[]
+        {
+            new { name = "Order", operations = "urc" },
+            new { name = "Customer", operations = "r" },
+        };
+        var args = SaveScreenArgs(
+            "OrderList.html",
+            "注文一覧",
+            ScreenHtml("<h1>一覧</h1>"),
+            entities: entities
+        );
+
+        var (_, success) = session.Execute(MockFolderDesignTools.SaveScreenToolName, args);
+
+        success.Should().BeTrue();
+
+        var reopened = MockFolderStore.Open(_folder);
+        var recorded =
+            reopened.Manifest.Screens.Single(s => s.File == "OrderList.html").Entities
+            ?? new List<MockScreenEntity>();
+        recorded
+            .Select(e => (e.Name, e.Operations))
+            .Should()
+            .BeEquivalentTo(new[] { ("Order", "CRU"), ("Customer", "R") });
+    }
+
+    /// <summary>entities 省略で既存宣言が維持されることを検証する</summary>
+    [Fact(DisplayName = "save_screen の entities 省略で既存宣言を維持")]
+    public void Execute_SaveScreen_OmittedEntities_KeepsExisting()
+    {
+        var store = CreateStore();
+        var (session, _) = CreateSession(store);
+
+        // 初回で宣言してから、entities を省略して再保存する
+        session.Execute(
+            MockFolderDesignTools.SaveScreenToolName,
+            SaveScreenArgs(
+                "OrderList.html",
+                "注文一覧",
+                ScreenHtml("<h1>v1</h1>"),
+                entities: new object[] { new { name = "Order", operations = "CRUD" } }
+            )
+        );
+        session.Execute(
+            MockFolderDesignTools.SaveScreenToolName,
+            SaveScreenArgs("OrderList.html", "注文一覧", ScreenHtml("<h1>v2</h1>"))
+        );
+
+        var reopened = MockFolderStore.Open(_folder);
+        var recorded =
+            reopened.Manifest.Screens.Single(s => s.File == "OrderList.html").Entities
+            ?? new List<MockScreenEntity>();
+        recorded.Should().ContainSingle();
+        recorded[0].Name.Should().Be("Order");
+        recorded[0].Operations.Should().Be("CRUD");
+    }
+
+    /// <summary>正規化で操作が空になった宣言が警告されることを検証する</summary>
+    [Fact(DisplayName = "save_screen 正規化空エントリで警告")]
+    public void Execute_SaveScreen_DiscardedEntity_Warns()
+    {
+        var store = CreateStore();
+        var (session, _) = CreateSession(store);
+
+        MockScreenSavedEventArgs? saved = null;
+        session.ScreenSaved += (_, e) => saved = e;
+
+        var args = SaveScreenArgs(
+            "OrderList.html",
+            "注文一覧",
+            ScreenHtml("<h1>一覧</h1>"),
+            entities: new object[] { new { name = "Junk", operations = "zzz" } }
+        );
+
+        var (result, success) = session.Execute(MockFolderDesignTools.SaveScreenToolName, args);
+
+        success.Should().BeTrue();
+        result.Should().Contain("Warnings:");
+        saved!.Warnings.Should().Contain(w => w.Contains("Junk") && w.Contains("CRUD"));
+    }
+
+    /// <summary>会話開始後、図に存在しないエンティティ名の宣言が警告されることを検証する</summary>
+    [Fact(DisplayName = "save_screen 図に無いエンティティ名で警告")]
+    public async Task Execute_SaveScreen_UnknownEntity_Warns()
+    {
+        var store = CreateStore(schema: string.Empty);
+        var (session, _) = CreateSession(store);
+
+        MockScreenSavedEventArgs? saved = null;
+        session.ScreenSaved += (_, e) => saved = e;
+
+        // 図に Order だけがある状態で会話開始（照合用の名前集合を取り込む）
+        var diagram = new ErDiagram { Entities = { new Entity { TableName = "Order" } } };
+        await session.StartNewAsync(diagram, null, null, TestContext.Current.CancellationToken);
+
+        var args = SaveScreenArgs(
+            "OrderList.html",
+            "注文一覧",
+            ScreenHtml("<h1>一覧</h1>"),
+            entities: new object[]
+            {
+                new { name = "Order", operations = "r" },
+                new { name = "Ghost", operations = "r" },
+            }
+        );
+
+        var (_, success) = session.Execute(MockFolderDesignTools.SaveScreenToolName, args);
+
+        success.Should().BeTrue();
+        // Order は図に在る＝警告なし・Ghost は図に無い＝警告
+        saved!.Warnings.Should().Contain(w => w.Contains("Ghost"));
+        saved.Warnings.Should().NotContain(w => w.Contains("'Order'"));
+    }
+
+    /// <summary>名前が空の壊れた宣言要素が読み飛ばされ警告されることを検証する</summary>
+    [Fact(DisplayName = "save_screen 名前空の壊れた宣言で警告し読み飛ばす")]
+    public void Execute_SaveScreen_BrokenEntity_WarnsAndSkips()
+    {
+        var store = CreateStore();
+        var (session, _) = CreateSession(store);
+
+        MockScreenSavedEventArgs? saved = null;
+        session.ScreenSaved += (_, e) => saved = e;
+
+        var args = SaveScreenArgs(
+            "OrderList.html",
+            "注文一覧",
+            ScreenHtml("<h1>一覧</h1>"),
+            entities: new object[]
+            {
+                new { name = "", operations = "cr" },
+                new { name = "Order", operations = "r" },
+            }
+        );
+
+        session.Execute(MockFolderDesignTools.SaveScreenToolName, args);
+
+        saved!.Warnings.Should().Contain(w => w.Contains("name") && w.Contains("empty"));
+
+        var reopened = MockFolderStore.Open(_folder);
+        var recorded =
+            reopened.Manifest.Screens.Single(s => s.File == "OrderList.html").Entities
+            ?? new List<MockScreenEntity>();
+        // 壊れた要素は除外され Order だけ残る
+        recorded.Should().ContainSingle();
+        recorded[0].Name.Should().Be("Order");
     }
 
     // --- remove_screen ---------------------------------------------------

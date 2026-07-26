@@ -1,5 +1,6 @@
 using System.Text.Encodings.Web;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace QuickER.AI.Mock;
 
@@ -63,6 +64,31 @@ public sealed class MockScreen
 
     /// <summary>画面の役割説明</summary>
     public string Description { get; set; } = string.Empty;
+
+    /// <summary>
+    /// この画面が扱うエンティティ（テーブル）と CRUD 操作の宣言一覧（画面×エンティティ連携）。
+    /// </summary>
+    /// <remarks>
+    /// 追加的フィールド（フォーマット版は上げない）。宣言のない画面（古い <c>mock.json</c> を含む）は
+    /// null＝<c>entities</c> キーを書き出さない（<see cref="JsonIgnoreAttribute"/>＝WhenWritingNull）。
+    /// AI しか知らない「画面ごとの CRUD の使い方」を save_screen の申告で記録する布石で、
+    /// 設計書の CRUD 表レンダリングは後段（ステージ 2）で機械的に行う。
+    /// </remarks>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<MockScreenEntity>? Entities { get; set; }
+}
+
+/// <summary>画面が扱う 1 エンティティ（テーブル）とその CRUD 操作の宣言</summary>
+public sealed class MockScreenEntity
+{
+    /// <summary>エンティティ（テーブル）名。ER 図のテーブル名と照合する（大文字小文字無視）</summary>
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>
+    /// この画面がエンティティに対して行う CRUD 操作。C/R/U/D の部分集合を C→R→U→D の正順で並べた文字列
+    /// （例 <c>"CRU"</c>）。正規化は <see cref="MockFolderStore.NormalizeOperations"/> が担う。
+    /// </summary>
+    public string Operations { get; set; } = string.Empty;
 }
 
 /// <summary>画面から画面への遷移</summary>

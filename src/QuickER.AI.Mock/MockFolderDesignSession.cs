@@ -37,9 +37,27 @@ public sealed record MockStylesheetSavedEventArgs(
 /// </remarks>
 public sealed class MockFolderDesignSession : IErDiagramToolHost
 {
+    /// <summary>壊れたエンティティ宣言（名前が空）を読み飛ばした旨の警告（英語・機械検証と同列）</summary>
+    private const string EntityNameEmptyWarning =
+        "An entity declaration was ignored because its 'name' was empty.";
+
+    /// <summary>正規化で有効な CRUD 操作が無くなり宣言を破棄した旨の警告フォーマット（英語）</summary>
+    private const string EntityOperationsInvalidWarningFormat =
+        "Entity declaration '{0}' was dropped because it has no valid CRUD operations (only C/R/U/D are allowed).";
+
+    /// <summary>宣言されたエンティティが現在の ER 図に存在しない旨の警告フォーマット（英語）</summary>
+    private const string EntityNotInSchemaWarningFormat =
+        "Declared entity '{0}' does not exist in the current ER diagram.";
+
     private readonly IErChatEngine _engine;
 
     private readonly MockFolderStore _store;
+
+    /// <summary>
+    /// 直近の会話開始（新規／再開）時点の ER 図のエンティティ名集合（大文字小文字無視・宣言照合用）。
+    /// 会話が未開始（Start 前）なら <c>null</c> で、その場合は図照合を行わない。
+    /// </summary>
+    private HashSet<string>? _schemaEntityNames;
 
     /// <summary>UI（サイドバー・プレビュー）が参照するモックフォルダのストア</summary>
     public MockFolderStore Store => _store;
@@ -125,6 +143,8 @@ public sealed class MockFolderDesignSession : IErDiagramToolHost
         CancellationToken cancellationToken = default
     )
     {
+        CaptureSchemaEntities(diagram);
+
         var schema = MockSchemaSerializer.Serialize(diagram);
 
         // スキーマスナップショットが空（新規作成直後）なら、現在スキーマを保存しておく
@@ -156,6 +176,8 @@ public sealed class MockFolderDesignSession : IErDiagramToolHost
         CancellationToken cancellationToken = default
     )
     {
+        CaptureSchemaEntities(diagram);
+
         var schema = MockSchemaSerializer.Serialize(diagram);
         var manifest = _store.Manifest;
         var changed = MockResumePrompt.IsSchemaChanged(schema, manifest);
@@ -255,17 +277,35 @@ public sealed class MockFolderDesignSession : IErDiagramToolHost
         var revisionNote = GetString(root, "revision_note");
         var transitions = ParseTransitions(root, file);
 
-        IReadOnlyList<string> warnings;
+        // エンティティ宣言をパースし、宣言由来の警告（壊れた要素・正規化破棄・図に無い名前）を先に集める
+        var entityWarnings = new List<string>();
+        var entities = ParseEntities(root, entityWarnings);
+
+        IReadOnlyList<string> validatorWarnings;
 
         try
         {
-            warnings = _store.SaveScreen(file, name, description, html, transitions, revisionNote);
+            validatorWarnings = _store.SaveScreen(
+                file,
+                name,
+                description,
+                html,
+                transitions,
+                revisionNote,
+                entities
+            );
         }
         catch (ArgumentException ex)
         {
             // file 不正・html 空/非 HTML などは失敗結果として返す（例外は外へ漏らさない）
             return (ex.Message, false);
         }
+
+        // 宣言由来の警告と機械検証の警告を 1 つの一覧へまとめる
+        var warnings =
+            entityWarnings.Count == 0
+                ? validatorWarnings
+                : entityWarnings.Concat(validatorWarnings).ToList();
 
         ScreenSaved?.Invoke(this, new MockScreenSavedEventArgs(file, revisionNote, warnings));
 
@@ -352,6 +392,91 @@ public sealed class MockFolderDesignSession : IErDiagramToolHost
             .ToList();
 
         return files.Count == 0 ? "(none)" : string.Join(", ", files);
+    }
+
+    /// <summary>会話開始時の ER 図から、宣言照合用のエンティティ名集合（大文字小文字無視）を取り込む</summary>
+    private void CaptureSchemaEntities(ErDiagram diagram)
+    {
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var entity in diagram.Entities)
+        {
+            if (!string.IsNullOrWhiteSpace(entity.TableName))
+            {
+                names.Add(entity.TableName.Trim());
+            }
+        }
+
+        _schemaEntityNames = names;
+    }
+
+    /// <summary>
+    /// save_screen 引数の entities 配列を <see cref="MockScreenEntity"/> の一覧へ変換する。
+    /// entities 未指定（プロパティ不在）なら <c>null</c>（＝既存宣言を維持）を返す。
+    /// 名前が空の壊れた要素は読み飛ばし、正規化での破棄・図に無い名前は <paramref name="warnings"/> へ積む。
+    /// </summary>
+    /// <param name="root">save_screen 引数の JSON ルート</param>
+    /// <param name="warnings">宣言由来の警告の集約先（英語）</param>
+    /// <returns>宣言一覧（空配列＝消去）／未指定なら null</returns>
+    private IReadOnlyList<MockScreenEntity>? ParseEntities(JsonElement root, List<string> warnings)
+    {
+        if (
+            !root.TryGetProperty("entities", out var entitiesElement)
+            || entitiesElement.ValueKind != JsonValueKind.Array
+        )
+        {
+            // 省略（または非配列）＝未指定として扱い、既存宣言を維持する
+            return null;
+        }
+
+        var parsed = new List<MockScreenEntity>();
+
+        foreach (var element in entitiesElement.EnumerateArray())
+        {
+            if (element.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            var entityName = GetString(element, "name").Trim();
+
+            // 名前が無い壊れた要素は警告して読み飛ばす
+            if (string.IsNullOrEmpty(entityName))
+            {
+                warnings.Add(EntityNameEmptyWarning);
+                continue;
+            }
+
+            parsed.Add(
+                new MockScreenEntity
+                {
+                    Name = entityName,
+                    Operations = GetString(element, "operations"),
+                }
+            );
+        }
+
+        // ストアと同一の正規化を適用し、破棄された宣言・図に無い名前を警告する
+        var normalization = MockFolderStore.NormalizeEntities(parsed);
+
+        foreach (var discarded in normalization.DiscardedNames)
+        {
+            warnings.Add(string.Format(EntityOperationsInvalidWarningFormat, discarded));
+        }
+
+        // 図のエンティティ名が取れているときのみ実在チェックを行う（未開始なら照合しない）
+        if (_schemaEntityNames is not null)
+        {
+            foreach (var entity in normalization.Entities)
+            {
+                if (!_schemaEntityNames.Contains(entity.Name))
+                {
+                    warnings.Add(string.Format(EntityNotInSchemaWarningFormat, entity.Name));
+                }
+            }
+        }
+
+        return parsed;
     }
 
     /// <summary>save_screen 引数の transitions 配列を <see cref="MockTransition"/>（From＝当該画面）へ変換する</summary>

@@ -389,4 +389,157 @@ public class MockFolderStoreTests : IDisposable
 
         warnings.Should().Contain(w => w.Contains("style.css"));
     }
+
+    // --- エンティティ宣言（画面×エンティティ CRUD） --------------------
+
+    private static MockScreenEntity Entity(string name, string operations) =>
+        new() { Name = name, Operations = operations };
+
+    private MockFolderStore SaveWithEntities(IReadOnlyList<MockScreenEntity>? entities) =>
+        SaveWithEntities(CreateNew(), entities);
+
+    private static MockFolderStore SaveWithEntities(
+        MockFolderStore store,
+        IReadOnlyList<MockScreenEntity>? entities
+    )
+    {
+        store.SaveScreen(
+            "OrderList.html",
+            "注文一覧",
+            "注文の一覧",
+            ScreenHtml("<h1>一覧</h1>"),
+            Array.Empty<MockTransition>(),
+            "note",
+            entities
+        );
+
+        return store;
+    }
+
+    private static IReadOnlyList<MockScreenEntity> EntitiesOf(MockFolderStore store) =>
+        store.Manifest.Screens.Single(s => s.File == "OrderList.html").Entities
+        ?? new List<MockScreenEntity>();
+
+    [Fact(DisplayName = "NormalizeOperations は大文字化・無効文字除去・重複除去・正順化する")]
+    public void NormalizeOperations_UppercasesFiltersDedupsOrders()
+    {
+        MockFolderStore.NormalizeOperations("urc").Should().Be("CRU");
+        MockFolderStore.NormalizeOperations("dcru").Should().Be("CRUD");
+        MockFolderStore.NormalizeOperations("CCRr").Should().Be("CR");
+        MockFolderStore.NormalizeOperations("xyz").Should().BeEmpty();
+        MockFolderStore.NormalizeOperations("").Should().BeEmpty();
+        MockFolderStore.NormalizeOperations(null).Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "NormalizeEntities は空操作エントリを破棄し名前を控える")]
+    public void NormalizeEntities_DropsEmptyOperationEntries_AndTrimsNames()
+    {
+        var result = MockFolderStore.NormalizeEntities(
+            new[] { Entity("  Product ", "ur"), Entity("Junk", "zzz"), Entity("   ", "cru") }
+        );
+
+        result.Entities.Should().ContainSingle();
+        result.Entities[0].Name.Should().Be("Product");
+        result.Entities[0].Operations.Should().Be("RU");
+        // 操作が空になった 'Junk' は破棄・名前を控える。名前空のエントリは黙って除外
+        result.DiscardedNames.Should().BeEquivalentTo(new[] { "Junk" });
+    }
+
+    [Fact(DisplayName = "SaveScreen は entities 省略(null)で既存宣言を維持する")]
+    public void SaveScreen_NullEntities_KeepsExistingDeclarations()
+    {
+        var store = SaveWithEntities(new[] { Entity("Order", "CRUD") });
+
+        // entities を渡さずに再保存（省略＝維持）
+        store.SaveScreen(
+            "OrderList.html",
+            "注文一覧",
+            "説明変更",
+            ScreenHtml("<h1>v2</h1>"),
+            Array.Empty<MockTransition>(),
+            "v2"
+        );
+
+        var entities = EntitiesOf(store);
+        entities.Should().ContainSingle();
+        entities[0].Name.Should().Be("Order");
+        entities[0].Operations.Should().Be("CRUD");
+    }
+
+    [Fact(DisplayName = "SaveScreen は entities 空配列で宣言を消去する")]
+    public void SaveScreen_EmptyEntities_ClearsDeclarations()
+    {
+        var store = SaveWithEntities(new[] { Entity("Order", "CRUD") });
+
+        SaveWithEntities(store, Array.Empty<MockScreenEntity>());
+
+        EntitiesOf(store).Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "SaveScreen は非空 entities で全置換し正規化する")]
+    public void SaveScreen_NonEmptyEntities_ReplacesAndNormalizes()
+    {
+        var store = SaveWithEntities(new[] { Entity("Order", "CRUD") });
+
+        SaveWithEntities(store, new[] { Entity("Customer", "urc"), Entity("Product", "r") });
+
+        var entities = EntitiesOf(store);
+        entities.Should().HaveCount(2);
+        entities
+            .Select(e => (e.Name, e.Operations))
+            .Should()
+            .BeEquivalentTo(new[] { ("Customer", "CRU"), ("Product", "R") });
+    }
+
+    [Fact(DisplayName = "SaveScreen は entities 往復（保存→Open で復元）できる")]
+    public void SaveScreen_Entities_RoundTripThroughManifest()
+    {
+        SaveWithEntities(new[] { Entity("Order", "cr"), Entity("Customer", "r") });
+
+        var reopened = MockFolderStore.Open(_folder);
+        var entities =
+            reopened.Manifest.Screens.Single(s => s.File == "OrderList.html").Entities
+            ?? new List<MockScreenEntity>();
+
+        entities
+            .Select(e => (e.Name, e.Operations))
+            .Should()
+            .BeEquivalentTo(new[] { ("Order", "CR"), ("Customer", "R") });
+    }
+
+    [Fact(DisplayName = "mock.json は宣言なし画面に entities キーを書かない")]
+    public void Manifest_OmitsEntitiesKey_WhenNoDeclarations()
+    {
+        var store = CreateNew();
+        store.SaveScreen(
+            "OrderList.html",
+            "注文一覧",
+            "注文の一覧",
+            ScreenHtml("<h1>一覧</h1>"),
+            Array.Empty<MockTransition>(),
+            "note"
+        );
+
+        File.ReadAllText(Path.Combine(_folder, "mock.json")).Should().NotContain("entities");
+    }
+
+    [Fact(DisplayName = "entities なしの既存 mock.json を読める")]
+    public void Open_LegacyManifestWithoutEntities_Works()
+    {
+        Directory.CreateDirectory(_folder);
+        // entities フィールドを持たない旧フォーマットの mock.json
+        File.WriteAllText(
+            Path.Combine(_folder, "mock.json"),
+            "{ \"version\": 1, \"title\": \"旧\", \"screens\": [ { \"file\": \"A.html\", \"name\": \"A\" } ] }"
+        );
+
+        var store = MockFolderStore.Open(_folder);
+
+        var screen = store.Manifest.Screens.Single();
+        screen.File.Should().Be("A.html");
+        // 宣言なしの既存画面は null のまま（例外にならない）
+        (screen.Entities is null || screen.Entities.Count == 0)
+            .Should()
+            .BeTrue();
+    }
 }

@@ -408,6 +408,7 @@
 - 画面をユーザーへ見せる唯一の手段は {0} の save_screen ツールです。チャット本文に HTML を貼り付けてはいけません。
 - save_screen では必ずその画面の完全な HTML を提出（差分不可）し、transitions でその画面からの遷移を宣言し、revision_note に変更点を 1 行添えてください。
 - 既存画面を修正するときは、必ず get_screen で現状の HTML を取得してから編集して再提出します。
+- save_screen では、その画面が扱うエンティティ（テーブル）と CRUD 操作を entities 引数で宣言してください（各要素は name と operations を持ち、operations は C/R/U/D の部分集合です。例: name "Product"・operations "CRU"）。再保存時に entities を省略すれば既存の宣言は維持され、空配列を渡すと宣言を消去します。
 - ツール結果に警告（外部参照・リンク不整合・style.css 未参照）が返ったら、次の提出で解消してください。</value>
   </data>
   <data name="Mock_FolderInitialPromptTemplate" xml:space="preserve">
@@ -447,6 +448,12 @@
   </data>
   <data name="Mock_ResumePromptNoScreens" xml:space="preserve">
     <value>（画面はまだありません）</value>
+  </data>
+  <data name="Mock_ResumePromptEntitiesLabelFormat" xml:space="preserve">
+    <value>エンティティ: {0}</value>
+  </data>
+  <data name="Mock_ResumePromptEntitiesNone" xml:space="preserve">
+    <value>エンティティ: （未宣言）</value>
   </data>
   <data name="Mock_ResumePromptTransitionsHeading" xml:space="preserve">
     <value># 遷移一覧</value>
@@ -522,6 +529,9 @@
   </data>
   <data name="MockDoc_TransitionDiagramHeading" xml:space="preserve">
     <value>画面遷移図</value>
+  </data>
+  <data name="MockDoc_CrudHeading" xml:space="preserve">
+    <value>画面×エンティティ（CRUD）</value>
   </data>
   <data name="MockDoc_ColScreen" xml:space="preserve">
     <value>画面</value>

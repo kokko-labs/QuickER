@@ -749,6 +749,18 @@ namespace QuickER.AI.Mock.Resources {
             }
         }
 
+        public static string Mock_ResumePromptEntitiesLabelFormat {
+            get {
+                return ResourceManager.GetString("Mock_ResumePromptEntitiesLabelFormat", resourceCulture);
+            }
+        }
+
+        public static string Mock_ResumePromptEntitiesNone {
+            get {
+                return ResourceManager.GetString("Mock_ResumePromptEntitiesNone", resourceCulture);
+            }
+        }
+
         public static string Mock_ResumePromptTransitionsHeading {
             get {
                 return ResourceManager.GetString("Mock_ResumePromptTransitionsHeading", resourceCulture);
@@ -896,6 +908,12 @@ namespace QuickER.AI.Mock.Resources {
         public static string MockDoc_TransitionDiagramHeading {
             get {
                 return ResourceManager.GetString("MockDoc_TransitionDiagramHeading", resourceCulture);
+            }
+        }
+
+        public static string MockDoc_CrudHeading {
+            get {
+                return ResourceManager.GetString("MockDoc_CrudHeading", resourceCulture);
             }
         }
 

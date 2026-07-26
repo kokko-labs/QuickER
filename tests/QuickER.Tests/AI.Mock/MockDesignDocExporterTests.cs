@@ -222,6 +222,7 @@ public class MockDesignDocExporterTests : IDisposable
             + "<label>男<input type=\"radio\" name=\"gender\"></label>"
             + "<label>女<input type=\"radio\" name=\"gender\"></label>"
             + "<button>登録</button>"
+            + "<button>&laquo; 前へ</button>"
             + "<input type=\"submit\" value=\"検索\">"
             + "<a class=\"btn btn-primary\" href=\"Next.html\">次へ</a>"
             + "<a href=\"Plain.html\">素のリンク</a>"
@@ -268,8 +269,10 @@ public class MockDesignDocExporterTests : IDisposable
             + string.Format(CultureInfo.InvariantCulture, Strings.MockDoc_NoteOptionCountFormat, 2);
         doc.Should().Contain($"| {Strings.MockDoc_KindChoice} | gender | {radioNote} |");
 
-        // ボタン（<button> / submit / a.btn）
+        // ボタン（<button> / submit / a.btn）。named エンティティ（&laquo; 等）は文字へデコードされる
         doc.Should().Contain($"| {Strings.MockDoc_KindButton} | 登録 |  |");
+        doc.Should().Contain($"| {Strings.MockDoc_KindButton} | « 前へ |  |");
+        doc.Should().NotContain("&laquo;");
         doc.Should().Contain($"| {Strings.MockDoc_KindButton} | 検索 |  |");
         doc.Should().Contain($"| {Strings.MockDoc_KindButton} | 次へ |  |");
 
@@ -358,6 +361,114 @@ public class MockDesignDocExporterTests : IDisposable
             .NotContain(
                 $"| {Strings.MockDoc_ColKind} | {Strings.MockDoc_ColItem} | {Strings.MockDoc_ColNote} |"
             );
+    }
+
+    [Fact(
+        DisplayName = "エンティティ宣言があると画面×エンティティ（CRUD）表が遷移図の後・最初の画面セクションの前に出る"
+    )]
+    public void Export_RendersCrudTable()
+    {
+        var store = MockFolderStore.CreateNew(_folder, "受注管理", "schema");
+        store.SaveStylesheet("body{}", "css");
+
+        // 一覧画面は Order を R、詳細画面は Order を CRU・Customer を R 宣言する
+        store.SaveScreen(
+            "OrderList.html",
+            "注文一覧",
+            "",
+            Screen("<h1>一覧</h1>"),
+            Array.Empty<MockTransition>(),
+            "v1",
+            entities: new[]
+            {
+                new MockScreenEntity { Name = "Order", Operations = "R" },
+            }
+        );
+        store.SaveScreen(
+            "OrderDetail.html",
+            "注文詳細",
+            "",
+            Screen("<h1>詳細</h1>"),
+            Array.Empty<MockTransition>(),
+            "v2",
+            entities: new[]
+            {
+                new MockScreenEntity { Name = "Order", Operations = "urc" },
+                new MockScreenEntity { Name = "Customer", Operations = "R" },
+            }
+        );
+        // 3 画面目は宣言なし（未宣言画面）
+        store.SaveScreen(
+            "Help.html",
+            "ヘルプ",
+            "",
+            Screen("<h1>help</h1>"),
+            Array.Empty<MockTransition>(),
+            "v3"
+        );
+
+        var doc = MockDesignDocExporter.Export(store);
+
+        // 見出し
+        doc.Should().Contain("## " + Strings.MockDoc_CrudHeading);
+
+        // 列順は初出順（Order → Customer）。先頭列は画面列見出しを再利用
+        doc.Should()
+            .Contain($"| {Strings.MockDoc_ColScreen} | Order | Customer |")
+            .And.Contain("| --- | --- | --- |");
+
+        // 宣言画面のセル値（操作は正規化済み＝urc→CRU）
+        doc.Should().Contain("| [注文一覧](OrderList.html) | R |  |");
+        doc.Should().Contain("| [注文詳細](OrderDetail.html) | CRU | R |");
+
+        // 未宣言画面は空セル行として現れる（未宣言が見える）
+        doc.Should().Contain("| [ヘルプ](Help.html) |  |  |");
+
+        // 位置: 遷移図の後・最初の画面セクション（## 注文一覧）の前
+        var crudIndex = doc.IndexOf("## " + Strings.MockDoc_CrudHeading, StringComparison.Ordinal);
+        var diagramIndex = doc.IndexOf(
+            "## " + Strings.MockDoc_TransitionDiagramHeading,
+            StringComparison.Ordinal
+        );
+        var firstSectionIndex = doc.IndexOf("## 注文一覧", StringComparison.Ordinal);
+
+        crudIndex.Should().BeGreaterThan(diagramIndex);
+        crudIndex.Should().BeLessThan(firstSectionIndex);
+    }
+
+    [Fact(DisplayName = "エンティティ宣言があっても 2 回とも同一の Markdown を返す（決定的）")]
+    public void Export_WithCrud_IsDeterministic()
+    {
+        var store = MockFolderStore.CreateNew(_folder, "t", "s");
+        store.SaveStylesheet("body{}", "css");
+        store.SaveScreen(
+            "A.html",
+            "A",
+            "",
+            Screen("<h1>a</h1>"),
+            Array.Empty<MockTransition>(),
+            "v1",
+            entities: new[]
+            {
+                new MockScreenEntity { Name = "Order", Operations = "CRUD" },
+                new MockScreenEntity { Name = "Item", Operations = "R" },
+            }
+        );
+
+        var first = MockDesignDocExporter.Export(store);
+        var second = MockDesignDocExporter.Export(store);
+
+        second.Should().Be(first);
+    }
+
+    [Fact(DisplayName = "エンティティ宣言がゼロなら CRUD 表の見出しは出ない")]
+    public void Export_OmitsCrudTableWhenNoEntities()
+    {
+        var store = BuildTwoScreenMock();
+
+        var doc = MockDesignDocExporter.Export(store);
+
+        doc.Should().NotContain("## " + Strings.MockDoc_CrudHeading);
     }
 
     [Fact(DisplayName = "説明に含まれるパイプは表セルでエスケープされる")]

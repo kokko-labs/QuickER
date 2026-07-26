@@ -408,6 +408,7 @@ Respond in the same language as the user's most recent message.
 - The only way to show a screen to the user is the save_screen tool via {0}. Never paste HTML into the chat body.
 - With save_screen, always submit the complete HTML of that screen (a diff is not allowed), declare the transitions from that screen with transitions, and add a one-line revision_note describing what changed.
 - Before modifying an existing screen, always fetch its current HTML with get_screen first, then edit and resubmit.
+- With save_screen, use the entities argument to declare which entities (tables) the screen uses and how (each item has a name and operations, where operations is a subset of C/R/U/D - for example name "Product" with operations "CRU"). Omitting entities when re-saving keeps the existing declarations; passing an empty array clears them.
 - If a tool result returns warnings (external references, broken links, missing style.css reference), resolve them in your next submission.</value>
   </data>
   <data name="Mock_FolderInitialPromptTemplate" xml:space="preserve">
@@ -447,6 +448,12 @@ Respond in the same language as the user's most recent message.
   </data>
   <data name="Mock_ResumePromptNoScreens" xml:space="preserve">
     <value>(No screens yet.)</value>
+  </data>
+  <data name="Mock_ResumePromptEntitiesLabelFormat" xml:space="preserve">
+    <value>Entities: {0}</value>
+  </data>
+  <data name="Mock_ResumePromptEntitiesNone" xml:space="preserve">
+    <value>Entities: (not declared)</value>
   </data>
   <data name="Mock_ResumePromptTransitionsHeading" xml:space="preserve">
     <value># Transitions</value>
@@ -522,6 +529,9 @@ Respond in the same language as the user's most recent message.
   </data>
   <data name="MockDoc_TransitionDiagramHeading" xml:space="preserve">
     <value>Screen Transition Diagram</value>
+  </data>
+  <data name="MockDoc_CrudHeading" xml:space="preserve">
+    <value>Screen × Entity (CRUD)</value>
   </data>
   <data name="MockDoc_ColScreen" xml:space="preserve">
     <value>Screen</value>

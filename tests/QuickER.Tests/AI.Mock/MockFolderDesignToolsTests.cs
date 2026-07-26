@@ -85,6 +85,45 @@ public class MockFolderDesignToolsTests
         itemProps.TryGetProperty("trigger", out _).Should().BeTrue();
     }
 
+    /// <summary>save_screen の entities 引数（任意・配列・要素は name/operations）を検証する</summary>
+    [Fact(DisplayName = "save_screen の entities スキーマ形状（任意・name/operations）")]
+    public void SaveScreen_EntitiesSchemaShape_IsCorrect()
+    {
+        var tool = Tool(MockFolderDesignTools.SaveScreenToolName);
+
+        using var doc = JsonDocument.Parse(SchemaJson(tool));
+        var root = doc.RootElement;
+
+        // entities は任意（required には入らない）
+        var required = root.GetProperty("required")
+            .EnumerateArray()
+            .Select(e => e.GetString())
+            .ToList();
+        required.Should().BeEquivalentTo(new[] { "file", "name", "html" });
+        required.Should().NotContain("entities");
+
+        var entities = root.GetProperty("properties").GetProperty("entities");
+        entities.GetProperty("type").GetString().Should().Be("array");
+
+        var itemProps = entities.GetProperty("items").GetProperty("properties");
+        itemProps.TryGetProperty("name", out _).Should().BeTrue();
+        itemProps.TryGetProperty("operations", out _).Should().BeTrue();
+
+        // entities 要素の必須は name のみ
+        entities
+            .GetProperty("items")
+            .GetProperty("required")
+            .EnumerateArray()
+            .Select(e => e.GetString())
+            .Should()
+            .BeEquivalentTo(new[] { "name" });
+
+        // upsert 意味論が英語で説明されている（omitted=維持 / empty=消去 / non-empty=置換）
+        var entitiesDescription = entities.GetProperty("description").GetString();
+        entitiesDescription.Should().NotBeNullOrWhiteSpace();
+        entitiesDescription!.ToLowerInvariant().Should().ContainAll("omit", "empty", "replace");
+    }
+
     /// <summary>save_stylesheet / get_screen / remove_screen の必須項目を検証する</summary>
     [Fact(DisplayName = "各ツールの必須項目が正しい")]
     public void OtherTools_RequiredFields_AreCorrect()
