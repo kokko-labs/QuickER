@@ -580,7 +580,7 @@
           ToolTip="{x:Static resources:Strings.Toolbar_SaveAsTooltip}"
         >
           <StackPanel>
-            <TextBlock Style="{StaticResource ToolBarIcon}" Text="🖫" />
+            <TextBlock Style="{StaticResource ToolBarIcon}" Text="💾" />
             <TextBlock
               Style="{StaticResource ToolBarCaption}"
               Text="{x:Static resources:Strings.Toolbar_SaveAs}"

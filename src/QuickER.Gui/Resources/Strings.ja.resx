@@ -124,13 +124,13 @@
     <value>開く (Ctrl+O)</value>
   </data>
   <data name="Toolbar_Save" xml:space="preserve">
-    <value>保存</value>
+    <value>上書保存</value>
   </data>
   <data name="Toolbar_SaveTooltip" xml:space="preserve">
-    <value>保存 (Ctrl+S)</value>
+    <value>上書き保存 (Ctrl+S)</value>
   </data>
   <data name="Toolbar_SaveAs" xml:space="preserve">
-    <value>名前を付けて保存</value>
+    <value>別名保存</value>
   </data>
   <data name="Toolbar_SaveAsTooltip" xml:space="preserve">
     <value>名前を付けて保存 (Ctrl+Shift+S)</value>
