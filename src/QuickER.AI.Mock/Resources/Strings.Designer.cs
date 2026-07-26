@@ -78,6 +78,12 @@ namespace QuickER.AI.Mock.Resources {
             }
         }
 
+        public static string Mock_ProviderTooltip {
+            get {
+                return ResourceManager.GetString("Mock_ProviderTooltip", resourceCulture);
+            }
+        }
+
         public static string Mock_ModelName {
             get {
                 return ResourceManager.GetString("Mock_ModelName", resourceCulture);
@@ -93,6 +99,12 @@ namespace QuickER.AI.Mock.Resources {
         public static string Mock_ApiKeyTooltip {
             get {
                 return ResourceManager.GetString("Mock_ApiKeyTooltip", resourceCulture);
+            }
+        }
+
+        public static string Mock_ApiKeyOptionalNote {
+            get {
+                return ResourceManager.GetString("Mock_ApiKeyOptionalNote", resourceCulture);
             }
         }
 

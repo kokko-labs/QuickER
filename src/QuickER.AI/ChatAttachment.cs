@@ -84,8 +84,10 @@ public static class AttachmentSupportResolver
 {
     /// <summary>
     /// API キー接続のプロバイダー選択に応じた添付範囲を返す。
-    /// Claude=画像＋PDF＋テキスト・OpenAI=画像＋テキスト・その他（Ollama 等）=なし。
-    /// テキストはコンテンツ型に依らず本文へインライン展開できるため、画像対応の両プロバイダーで許可する。
+    /// Claude=画像＋PDF＋テキスト・OpenAI／ローカル LLM=画像＋テキスト。
+    /// テキストはコンテンツ型に依らず本文へインライン展開できるため、画像対応のプロバイダーで許可する。
+    /// ローカル LLM は OpenAI 互換 API（同じ image コンテンツパート形式）を使うため OpenAI と同等に扱う
+    /// （実際に画像を解釈できるかはモデル次第で、非対応モデルではモデル側のエラーになる）。
     /// バイナリは API キー接続では扱えない（Claude Code の Read 経路のみ）。
     /// </summary>
     public static AttachmentSupport ForApiKeyProvider(AiProvider provider) =>
@@ -94,7 +96,8 @@ public static class AttachmentSupportResolver
             AiProvider.Claude => AttachmentSupport.Images
                 | AttachmentSupport.Pdf
                 | AttachmentSupport.Text,
-            AiProvider.OpenAI => AttachmentSupport.Images | AttachmentSupport.Text,
+            AiProvider.OpenAI or AiProvider.LocalLlm => AttachmentSupport.Images
+                | AttachmentSupport.Text,
             _ => AttachmentSupport.None,
         };
 }

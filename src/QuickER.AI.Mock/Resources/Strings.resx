@@ -70,6 +70,9 @@
   <data name="Mock_Provider" xml:space="preserve">
     <value>Provider</value>
   </data>
+  <data name="Mock_ProviderTooltip" xml:space="preserve">
+    <value>Local LLM talks to an OpenAI-compatible API served locally (Ollama / LM Studio / llama.cpp / vLLM, etc.).</value>
+  </data>
   <data name="Mock_ModelName" xml:space="preserve">
     <value>Model Name</value>
   </data>
@@ -79,6 +82,9 @@
   <data name="Mock_ApiKeyTooltip" xml:space="preserve">
     <value>API key (OpenAI: sk-... / Claude: sk-ant-...)</value>
   </data>
+  <data name="Mock_ApiKeyOptionalNote" xml:space="preserve">
+    <value>The API key is optional for Local LLM. Leave it blank for servers that require no authentication.</value>
+  </data>
   <data name="Mock_Save" xml:space="preserve">
     <value>Save</value>
   </data>
@@ -86,7 +92,7 @@
     <value>Endpoint</value>
   </data>
   <data name="Mock_EndpointTooltip" xml:space="preserve">
-    <value>OpenAI-compatible endpoint (Ollama, etc.)</value>
+    <value>OpenAI-compatible endpoint (Ollama / LM Studio / vLLM, etc.)</value>
   </data>
   <data name="Mock_Model" xml:space="preserve">
     <value>Model</value>
@@ -186,7 +192,7 @@ Start "+ New Conversation" in the chat on the left and send your requests for th
     <value>claude CLI not found. Install Claude Code and add it to your PATH.</value>
   </data>
   <data name="Mock_DisabledReason_ApiKeyNotReady" xml:space="preserve">
-    <value>Enter an API key (or select the Ollama provider) on the API Key tab.</value>
+    <value>Enter an API key (or select the Local LLM provider) on the API Key tab.</value>
   </data>
   <data name="Mock_DisabledReason_CodexNotReady" xml:space="preserve">
     <value>Codex is not ready. Connect and sign in on the Codex tab.</value>

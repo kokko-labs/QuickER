@@ -113,9 +113,9 @@ public class ChatConnectionSettingsViewModelTests
         }
     }
 
-    /// <summary>ApiProvider 切替で候補・Show* 通知・ApiModel リセット・Ollama エンドポイント補完が起きることを検証する</summary>
+    /// <summary>ApiProvider 切替で候補・Show* 通知・ApiModel リセット・ローカル LLM エンドポイント補完が起きることを検証する</summary>
     [Fact(
-        DisplayName = "ApiProvider を Ollama へ切替で候補・Show*・ApiModel リセット・エンドポイント補完"
+        DisplayName = "ApiProvider を Local LLM へ切替で候補・Show*・ApiModel リセット・エンドポイント補完"
     )]
     public void ApiProviderChanged_ResetsModel_NotifiesAndFillsEndpoint()
     {
@@ -126,19 +126,20 @@ public class ChatConnectionSettingsViewModelTests
             var vm = CreateVm(folder);
             var changed = RecordChanges(vm);
 
-            vm.ApiProvider = AiProvider.Ollama;
+            vm.ApiProvider = AiProvider.LocalLlm;
 
             changed.Should().Contain(nameof(vm.ShowApiKey));
             changed.Should().Contain(nameof(vm.ShowEndpoint));
 
-            // Ollama は履歴が初期空のため、モデルは空・候補も空（IndexOutOfRange を起こさない）
+            // ローカル LLM は履歴が初期空のため、モデルは空・候補も空（IndexOutOfRange を起こさない）
             vm.ApiModel.Should().BeEmpty();
             vm.ApiModelCandidates.Should().BeEmpty();
 
-            // Ollama はキー欄非表示・エンドポイント欄表示・エンドポイント自動補完
-            vm.ShowApiKey.Should().BeFalse();
+            // ローカル LLM はキー欄表示（キーは任意）・エンドポイント欄表示・エンドポイント自動補完
+            vm.IsLocalLlmProvider.Should().BeTrue();
+            vm.ShowApiKey.Should().BeTrue();
             vm.ShowEndpoint.Should().BeTrue();
-            vm.EndpointOverride.Should().Be("http://localhost:11434/v1");
+            vm.EndpointOverride.Should().Be(LocalLlmDefaults.Endpoint);
         }
         finally
         {
@@ -242,9 +243,69 @@ public class ChatConnectionSettingsViewModelTests
         }
     }
 
-    /// <summary>API キー不要のプロバイダー（Ollama）ではキーを保存しないことを検証する</summary>
-    [Fact(DisplayName = "Ollama ではキーを永続化しない")]
-    public void OllamaProvider_DoesNotPersistKey()
+    /// <summary>
+    /// エンドポイント上書きがローカル LLM のときだけ有効になることを検証する。
+    /// エンドポイント欄はローカル LLM 選択時のみ表示されるため、値を入れたまま OpenAI へ切り替えると
+    /// 「見えない欄に残った URL が OpenAI 接続に使われる」事故になる。その回帰を防ぐ。
+    /// </summary>
+    [Fact(DisplayName = "エンドポイント上書きは Local LLM のときだけ有効")]
+    public void EffectiveEndpointOverride_AppliesOnlyToLocalLlm()
+    {
+        var folder = NewFolder();
+
+        try
+        {
+            var vm = CreateVm(folder);
+
+            // ローカル LLM で URL を入力する（切替時の自動補完も同じ値になる）
+            vm.ApiProvider = AiProvider.LocalLlm;
+            vm.EndpointOverride = "http://127.0.0.1:1234/v1";
+            vm.EffectiveEndpointOverride.Should().Be("http://127.0.0.1:1234/v1");
+
+            // OpenAI / Claude へ切り替えると、欄に値が残っていても無視される
+            vm.ApiProvider = AiProvider.OpenAI;
+            vm.EndpointOverride.Should().Be("http://127.0.0.1:1234/v1");
+            vm.EffectiveEndpointOverride.Should().BeNull();
+
+            vm.ApiProvider = AiProvider.Claude;
+            vm.EffectiveEndpointOverride.Should().BeNull();
+
+            // ローカル LLM へ戻すと再び有効になる
+            vm.ApiProvider = AiProvider.LocalLlm;
+            vm.EffectiveEndpointOverride.Should().Be("http://127.0.0.1:1234/v1");
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>ローカル LLM でもエンドポイント欄が空白のみなら上書きなし（プロバイダ既定）になることを検証する</summary>
+    [Fact(DisplayName = "空白のみのエンドポイントは上書きとして扱わない")]
+    public void EffectiveEndpointOverride_BlankIsIgnored()
+    {
+        var folder = NewFolder();
+
+        try
+        {
+            var vm = CreateVm(folder);
+            vm.ApiProvider = AiProvider.LocalLlm;
+            vm.EndpointOverride = "   ";
+
+            vm.EffectiveEndpointOverride.Should().BeNull();
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>
+    /// ローカル LLM でもキーは（任意ながら）専用スロット "LocalLlmApiKey" へ永続化されることを検証する。
+    /// 認証を課すローカルサーバー向けにキーを保持できる必要があるため、OpenAI / Claude と同じ機構に乗せる。
+    /// </summary>
+    [Fact(DisplayName = "Local LLM のキーは専用スロットへ永続化される")]
+    public void LocalLlmProvider_PersistsKeyToOwnSlot()
     {
         var folder = NewFolder();
 
@@ -252,13 +313,14 @@ public class ChatConnectionSettingsViewModelTests
         {
             var spy = new KeySaverSpy();
             var vm = CreateVm(folder, apiKeySaver: spy.Save);
-            vm.ApiProvider = AiProvider.Ollama;
+            vm.ApiProvider = AiProvider.LocalLlm;
             spy.Saves.Clear();
 
-            // Ollama は CurrentApiKeyStoreName が null のため保存 seam を呼ばない
-            vm.ApiKey = "ignored";
+            vm.ApiKey = "local-secret";
 
-            spy.Saves.Should().BeEmpty();
+            spy.Saves.Should().ContainSingle();
+            spy.Saves[0].Slot.Should().Be("LocalLlmApiKey");
+            spy.Saves[0].Value.Should().Be("local-secret");
         }
         finally
         {
@@ -395,6 +457,210 @@ public class ChatConnectionSettingsViewModelTests
         }
     }
 
+    // ── API キー接続の選択（プロバイダー・エンドポイント）の永続化 ──
+
+    /// <summary>プロバイダーとエンドポイントが設定ストア（UI セクション）へ保存されることを検証する</summary>
+    [Fact(DisplayName = "SaveSettings でプロバイダーとエンドポイントが保存される")]
+    public void SaveSettings_PersistsApiProviderAndEndpoint()
+    {
+        var folder = NewFolder();
+
+        try
+        {
+            var vm = CreateVm(folder);
+            vm.LoadSettings();
+            vm.ApiProvider = AiProvider.LocalLlm;
+            vm.EndpointOverride = "  http://127.0.0.1:1234/v1  ";
+
+            vm.SaveSettings();
+
+            var ui = new AiSettingsStore(folder).Load().UiFor(AiDialogKind.AiChat);
+            ui.ApiProvider.Should().Be(nameof(AiProvider.LocalLlm));
+            // 前後の空白は落として保存する（復元時にそのまま URL として使えるようにする）
+            ui.EndpointOverride.Should().Be("http://127.0.0.1:1234/v1");
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>保存済みのプロバイダー・エンドポイントが LoadSettings で復元され、実効値として効くことを検証する</summary>
+    [Fact(DisplayName = "LoadSettings でプロバイダーとエンドポイントが復元される")]
+    public void LoadSettings_RestoresApiProviderAndEndpoint()
+    {
+        var folder = NewFolder();
+
+        try
+        {
+            var vm = CreateVm(folder);
+            vm.LoadSettings();
+            vm.ApiProvider = AiProvider.LocalLlm;
+            vm.EndpointOverride = "http://127.0.0.1:1234/v1";
+            vm.SaveSettings();
+
+            var restored = CreateVm(folder);
+            restored.LoadSettings();
+
+            restored.ApiProvider.Should().Be(AiProvider.LocalLlm);
+            restored.EndpointOverride.Should().Be("http://127.0.0.1:1234/v1");
+            restored.EffectiveEndpointOverride.Should().Be("http://127.0.0.1:1234/v1");
+            restored.ShowEndpoint.Should().BeTrue();
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>
+    /// エンドポイント未保存のローカル LLM を復元すると、プロバイダー変更フックの既定 URL 補完が効くことを検証する
+    /// （保存値がある場合だけ後から上書きする、という復元順序の回帰を防ぐ）。
+    /// </summary>
+    [Fact(DisplayName = "エンドポイント未保存の Local LLM 復元では既定 URL が補完される")]
+    public void LoadSettings_LocalLlmWithoutEndpoint_FillsDefaultEndpoint()
+    {
+        var folder = NewFolder();
+
+        try
+        {
+            var seeded = new AiSettingsStore(folder).Load();
+            seeded.ChatUi.ApiProvider = nameof(AiProvider.LocalLlm);
+            new AiSettingsStore(folder).Save(seeded);
+
+            var vm = CreateVm(folder);
+            vm.LoadSettings();
+
+            vm.ApiProvider.Should().Be(AiProvider.LocalLlm);
+            vm.EndpointOverride.Should().Be(LocalLlmDefaults.Endpoint);
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>解釈できない保存値（未知の名前・定義外の数値）は既定プロバイダー（OpenAI）へフォールバックすることを検証する</summary>
+    [Theory(DisplayName = "未知の保存プロバイダーは OpenAI へフォールバック")]
+    [InlineData("gemini")]
+    [InlineData("99")]
+    [InlineData("")]
+    public void LoadSettings_UnknownApiProvider_FallsBackToOpenAi(string saved)
+    {
+        var folder = NewFolder();
+
+        try
+        {
+            var seeded = new AiSettingsStore(folder).Load();
+            seeded.ChatUi.ApiProvider = saved;
+            new AiSettingsStore(folder).Save(seeded);
+
+            var vm = CreateVm(folder);
+            vm.LoadSettings();
+
+            vm.ApiProvider.Should().Be(AiProvider.OpenAI);
+            vm.EndpointOverride.Should().BeEmpty();
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>新キーを持たない旧 JSON でも読めて既定値（OpenAI・上書きなし）になることを検証する（後方互換）</summary>
+    [Fact(DisplayName = "新キーなしの旧 JSON は既定値で読める")]
+    public void LoadSettings_LegacyJsonWithoutNewKeys_UsesDefaults()
+    {
+        var folder = NewFolder();
+
+        try
+        {
+            // apiProvider / endpointOverride を持たない旧世代のファイルを直接書く
+            Directory.CreateDirectory(folder);
+            File.WriteAllText(
+                new AiSettingsStore(folder).SettingsPath,
+                """
+                {
+                  "chatUi": { "lastBackend": "ClaudeCode" }
+                }
+                """
+            );
+
+            var vm = CreateVm(folder);
+            vm.LoadSettings();
+
+            vm.InitialBackend.Should().Be(ErChatBackendKind.ClaudeCode);
+            vm.ApiProvider.Should().Be(AiProvider.OpenAI);
+            vm.EndpointOverride.Should().BeEmpty();
+            vm.EffectiveEndpointOverride.Should().BeNull();
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>プロバイダー・エンドポイントは LastBackend と同じ粒度（ダイアログ別セクション）で保存されることを検証する</summary>
+    [Fact(DisplayName = "プロバイダーとエンドポイントは chat / mock で独立する")]
+    public void SaveSettings_ApiProviderAndEndpoint_IsolatedPerDialog()
+    {
+        var folder = NewFolder();
+
+        try
+        {
+            var chat = CreateVm(folder, dialogKind: AiDialogKind.AiChat);
+            chat.LoadSettings();
+            chat.ApiProvider = AiProvider.LocalLlm;
+            chat.EndpointOverride = "http://127.0.0.1:1234/v1";
+            chat.SaveSettings();
+
+            var mock = CreateVm(folder, dialogKind: AiDialogKind.MockGeneration);
+            mock.LoadSettings();
+            mock.ApiProvider = AiProvider.Claude;
+            mock.SaveSettings();
+
+            var restoredChat = CreateVm(folder, dialogKind: AiDialogKind.AiChat);
+            restoredChat.LoadSettings();
+            restoredChat.ApiProvider.Should().Be(AiProvider.LocalLlm);
+            restoredChat.EndpointOverride.Should().Be("http://127.0.0.1:1234/v1");
+
+            var restoredMock = CreateVm(folder, dialogKind: AiDialogKind.MockGeneration);
+            restoredMock.LoadSettings();
+            restoredMock.ApiProvider.Should().Be(AiProvider.Claude);
+            restoredMock.EndpointOverride.Should().BeEmpty();
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>ローカル LLM を復元したとき、モデルは MRU 履歴の先頭が選ばれることを検証する（カタログ無しプロバイダーの既定選択）</summary>
+    [Fact(DisplayName = "Local LLM 復元でモデルは MRU 先頭が選ばれる")]
+    public void LoadSettings_LocalLlm_SelectsHistoryHeadModel()
+    {
+        var folder = NewFolder();
+
+        try
+        {
+            var vm = CreateVm(folder);
+            vm.ApiProvider = AiProvider.LocalLlm;
+            vm.ApiModel = "qwen3.6:35b";
+            vm.RecordSuccessfulModel();
+            vm.SaveSettings();
+
+            var restored = CreateVm(folder);
+            restored.LoadSettings();
+
+            restored.ApiProvider.Should().Be(AiProvider.LocalLlm);
+            restored.ApiModel.Should().Be("qwen3.6:35b");
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
     /// <summary>候補リストに無い保存済みプロバイダーは openai へフォールバックすることを検証する（リスト選択のみのため）</summary>
     [Fact(DisplayName = "候補に無い保存済み Codex プロバイダーは openai へフォールバック")]
     public void LoadSettings_UnknownCodexProvider_FallsBackToOpenAi()
@@ -464,27 +730,27 @@ public class ChatConnectionSettingsViewModelTests
     private static IEnumerable<string> CandidateNames(ChatConnectionSettingsViewModel vm) =>
         vm.ApiModelCandidates.Select(c => c.Name);
 
-    /// <summary>Ollama（カタログ無し）の成功記録で候補先頭へ入り、JSON へ往復することを検証する</summary>
-    [Fact(DisplayName = "Ollama 記録で候補先頭に入り JSON へ往復する")]
-    public void RecordSuccessfulModel_Ollama_AddsToCandidates_AndPersists()
+    /// <summary>ローカル LLM（カタログ無し）の成功記録で候補先頭へ入り、JSON へ往復することを検証する</summary>
+    [Fact(DisplayName = "Local LLM 記録で候補先頭に入り JSON へ往復する")]
+    public void RecordSuccessfulModel_LocalLlm_AddsToCandidates_AndPersists()
     {
         var folder = NewFolder();
 
         try
         {
             var vm = CreateVm(folder);
-            vm.ApiProvider = AiProvider.Ollama;
+            vm.ApiProvider = AiProvider.LocalLlm;
             vm.ApiModel = "qwen3.6:35b";
 
             vm.RecordSuccessfulModel();
 
-            // Ollama はカタログが無いため候補は履歴のみ（× 付き）
+            // ローカル LLM はカタログが無いため候補は履歴のみ（× 付き）
             CandidateNames(vm).Should().Equal("qwen3.6:35b");
             vm.ApiModelCandidates[0].IsRemovable.Should().BeTrue();
 
-            // 別インスタンスで読み戻して JSON 永続化を確認する（キーは "ollama"）
+            // 別インスタンスで読み戻して JSON 永続化を確認する（キーは enum 名の小文字＝"localllm"）
             var reloaded = new AiSettingsStore(folder).Load().ApiModelHistory;
-            reloaded.ModelsFor("ollama").Should().Equal("qwen3.6:35b");
+            reloaded.ModelsFor("localllm").Should().Equal("qwen3.6:35b");
         }
         finally
         {
@@ -592,7 +858,7 @@ public class ChatConnectionSettingsViewModelTests
         try
         {
             var vm = CreateVm(folder);
-            vm.ApiProvider = AiProvider.Ollama;
+            vm.ApiProvider = AiProvider.LocalLlm;
 
             vm.ApiModel = "a";
             vm.RecordSuccessfulModel();
@@ -618,7 +884,7 @@ public class ChatConnectionSettingsViewModelTests
         try
         {
             var vm = CreateVm(folder);
-            vm.ApiProvider = AiProvider.Ollama;
+            vm.ApiProvider = AiProvider.LocalLlm;
 
             // model-0 .. model-20 の 21 件を古い順に記録する
             for (var i = 0; i <= 20; i++)
@@ -647,7 +913,7 @@ public class ChatConnectionSettingsViewModelTests
         try
         {
             var vm = CreateVm(folder);
-            vm.ApiProvider = AiProvider.Ollama;
+            vm.ApiProvider = AiProvider.LocalLlm;
             vm.ApiModel = "qwen3.6:35b";
             vm.SelectedBackend = ErChatBackendKind.Codex;
 
@@ -670,7 +936,7 @@ public class ChatConnectionSettingsViewModelTests
         try
         {
             var vm = CreateVm(folder);
-            vm.ApiProvider = AiProvider.Ollama;
+            vm.ApiProvider = AiProvider.LocalLlm;
             vm.ApiModel = "   ";
 
             vm.RecordSuccessfulModel();
@@ -743,7 +1009,7 @@ public class ChatConnectionSettingsViewModelTests
         }
     }
 
-    /// <summary>プロバイダ切替で ApiModel がカタログ先頭（OpenAI/Claude）／履歴先頭（Ollama）になることを検証する</summary>
+    /// <summary>プロバイダ切替で ApiModel がカタログ先頭（OpenAI/Claude）／履歴先頭（ローカル LLM）になることを検証する</summary>
     [Fact(DisplayName = "プロバイダ切替で ApiModel がカタログ先頭または履歴先頭になる")]
     public void ApiProviderChanged_SelectsCatalogOrHistoryFirst()
     {
@@ -754,8 +1020,8 @@ public class ChatConnectionSettingsViewModelTests
             var vm = CreateVm(folder);
             vm.LoadSettings();
 
-            // Ollama で履歴を作っておく
-            vm.ApiProvider = AiProvider.Ollama;
+            // ローカル LLM で履歴を作っておく
+            vm.ApiProvider = AiProvider.LocalLlm;
             vm.ApiModel = "hist-model";
             vm.RecordSuccessfulModel();
 
@@ -767,8 +1033,8 @@ public class ChatConnectionSettingsViewModelTests
             vm.ApiProvider = AiProvider.OpenAI;
             vm.ApiModel.Should().Be(AiModelCatalog.DefaultOpenAiModel);
 
-            // Ollama へ戻すと MRU 先頭が自動選択される
-            vm.ApiProvider = AiProvider.Ollama;
+            // ローカル LLM へ戻すと MRU 先頭が自動選択される
+            vm.ApiProvider = AiProvider.LocalLlm;
             vm.ApiModel.Should().Be("hist-model");
         }
         finally
@@ -791,7 +1057,7 @@ public class ChatConnectionSettingsViewModelTests
             // chat 側: 共有履歴へ記録し、接続タブ（ClaudeCode）を保存する
             var chat = CreateVm(folder, dialogKind: AiDialogKind.AiChat);
             chat.LoadSettings();
-            chat.ApiProvider = AiProvider.Ollama;
+            chat.ApiProvider = AiProvider.LocalLlm;
             chat.ApiModel = "shared-model";
             chat.RecordSuccessfulModel();
             chat.SelectedBackend = ErChatBackendKind.ClaudeCode;
@@ -800,7 +1066,7 @@ public class ChatConnectionSettingsViewModelTests
             // mock 側: 同じファイルの ApiModelHistory セクションを共有して履歴が見える
             var mock = CreateVm(folder, dialogKind: AiDialogKind.MockGeneration);
             mock.LoadSettings();
-            mock.ApiProvider = AiProvider.Ollama;
+            mock.ApiProvider = AiProvider.LocalLlm;
             CandidateNames(mock).Should().Contain("shared-model");
 
             // mock 側の接続タブ（Codex）保存は、read-modify-write で chat 側セクションを消さない

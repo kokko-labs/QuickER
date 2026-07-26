@@ -6,7 +6,7 @@ using QuickER.AI.Resources;
 namespace QuickER.AI;
 
 /// <summary>
-/// AI 呼び出し (OpenAI / Ollama 等) で発生した例外を、表示言語のユーザー向けメッセージへ変換するヘルパー
+/// AI 呼び出し (OpenAI / ローカル LLM 等) で発生した例外を、表示言語のユーザー向けメッセージへ変換するヘルパー
 /// </summary>
 public static class AiErrorMessageLocalizer
 {

@@ -176,18 +176,20 @@ public class AiChatDialogViewModelTests
         }
     }
 
-    /// <summary>API キー接続(Ollama)では認証不要で会話開始可能になることを検証する</summary>
-    [Fact(DisplayName = "Ollama 接続は API キー不要で会話開始可能")]
-    public void ApiKeyBackend_Ollama_NeedsNoKey()
+    /// <summary>API キー接続(Local LLM)ではキー未入力でも会話開始可能になることを検証する</summary>
+    [Fact(DisplayName = "Local LLM 接続は API キー未入力でも会話開始可能")]
+    public void ApiKeyBackend_LocalLlm_NeedsNoKey()
     {
         var (vm, _, folder) = CreateVm();
 
         try
         {
-            vm.Connection.ApiProvider = AiProvider.Ollama;
+            vm.Connection.ApiProvider = AiProvider.LocalLlm;
             vm.CanStartConversation.Should().BeTrue();
             vm.Connection.ShowEndpoint.Should().BeTrue();
-            vm.Connection.ShowApiKey.Should().BeFalse();
+
+            // キー欄は表示される（ローカル LLM でもキーは任意で受け付ける）
+            vm.Connection.ShowApiKey.Should().BeTrue();
         }
         finally
         {
@@ -203,7 +205,7 @@ public class AiChatDialogViewModelTests
 
         try
         {
-            vm.Connection.ApiProvider = AiProvider.Ollama;
+            vm.Connection.ApiProvider = AiProvider.LocalLlm;
             vm.UserInput = "本のテーブルを作って";
 
             // 会話未開始のうちは送信不可
@@ -408,9 +410,9 @@ public class AiChatDialogViewModelTests
 
         try
         {
-            // Ollama＋モデルを設定してからバックエンドを Codex へ切り替える
+            // ローカル LLM＋モデルを設定してからバックエンドを Codex へ切り替える
             // （ガードが無ければ記録されうる状態を作り、ガードが効くことを確かめる）
-            vm.Connection.ApiProvider = AiProvider.Ollama;
+            vm.Connection.ApiProvider = AiProvider.LocalLlm;
             vm.Connection.ApiModel = "qwen3.6:35b";
             vm.Connection.SelectedBackend = ErChatBackendKind.Codex;
 
@@ -469,6 +471,65 @@ public class AiChatDialogViewModelTests
         return data;
     }
 
+    /// <summary>
+    /// 接続組み立てで、エンドポイント上書きがローカル LLM のときだけ渡ることを検証する。
+    /// 欄が非表示のまま残った URL が OpenAI 接続へ紛れ込む事故（回帰）を防ぐ。
+    /// </summary>
+    [Fact(DisplayName = "接続のエンドポイント上書きは Local LLM のときだけ渡る")]
+    public void BuildOpenAiConnection_AppliesEndpointOnlyForLocalLlm()
+    {
+        var (vm, _, folder) = CreateVm();
+
+        try
+        {
+            vm.Connection.ApiProvider = AiProvider.LocalLlm;
+            vm.Connection.EndpointOverride = "http://127.0.0.1:1234/v1";
+
+            var local = vm.BuildOpenAiConnection();
+            local.Provider.Should().Be(AiProvider.LocalLlm);
+            local.EndpointOverride.Should().Be("http://127.0.0.1:1234/v1");
+
+            // 欄は非表示になるが値は残る。それでも OpenAI 接続には渡さない
+            vm.Connection.ApiProvider = AiProvider.OpenAI;
+            vm.Connection.EndpointOverride.Should().Be("http://127.0.0.1:1234/v1");
+
+            var openAi = vm.BuildOpenAiConnection();
+            openAi.EndpointOverride.Should().BeNull();
+            openAi.ResolveEndpoint().Should().Be("https://api.openai.com/v1");
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>ローカル LLM のキーは、入力すればそのまま接続へ渡り、未入力ならダミーになることを検証する</summary>
+    [Fact(DisplayName = "Local LLM のキーは入力時そのまま・未入力でダミー")]
+    public void BuildOpenAiConnection_LocalLlmApiKey_IsOptional()
+    {
+        var (vm, _, folder) = CreateVm();
+
+        try
+        {
+            vm.Connection.ApiProvider = AiProvider.LocalLlm;
+
+            vm.Connection.ApiKey = "local-secret";
+            var withKey = vm.BuildOpenAiConnection();
+            withKey.ApiKey.Should().Be("local-secret");
+            withKey.ResolveApiKey().Should().Be("local-secret");
+
+            vm.Connection.ApiKey = string.Empty;
+            vm.BuildOpenAiConnection()
+                .ResolveApiKey()
+                .Should()
+                .Be(LocalLlmDefaults.PlaceholderApiKey);
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
     /// <summary>API キー接続の添付範囲がプロバイダー選択に追従することを検証する</summary>
     [Fact(DisplayName = "添付範囲はプロバイダーに追従する")]
     public void AttachmentSupport_TracksApiProvider()
@@ -484,8 +545,9 @@ public class AiChatDialogViewModelTests
             vm.Attachments.Support.Should()
                 .Be(AttachmentSupport.Images | AttachmentSupport.Pdf | AttachmentSupport.Text);
 
-            vm.Connection.ApiProvider = AiProvider.Ollama;
-            vm.Attachments.Support.Should().Be(AttachmentSupport.None);
+            // ローカル LLM は OpenAI 互換 API のため OpenAI と同じ範囲
+            vm.Connection.ApiProvider = AiProvider.LocalLlm;
+            vm.Attachments.Support.Should().Be(AttachmentSupport.Images | AttachmentSupport.Text);
         }
         finally
         {
@@ -516,19 +578,26 @@ public class AiChatDialogViewModelTests
         }
     }
 
-    /// <summary>添付非対応のプロバイダー（Ollama）へ切り替えると Pending がクリアされることを検証する</summary>
-    [Fact(DisplayName = "非対応プロバイダーへ切替で添付をクリア")]
-    public void SwitchToUnsupportedProvider_ClearsAttachments()
+    /// <summary>
+    /// 添付範囲が狭いプロバイダーへ切り替えると、対応外になった Pending がクリアされることを検証する。
+    /// Claude（PDF 可）で積んだ PDF は、PDF 非対応の Local LLM へ切り替えると消える。
+    /// </summary>
+    [Fact(DisplayName = "添付範囲が狭いプロバイダーへ切替で対応外の添付をクリア")]
+    public void SwitchToNarrowerProvider_ClearsUnsupportedAttachments()
     {
         var (vm, _, folder) = CreateVm();
 
         try
         {
+            Directory.CreateDirectory(folder);
+            var pdfPath = Path.Combine(folder, "spec.pdf");
+            File.WriteAllBytes(pdfPath, PdfBytes());
+
             vm.Connection.ApiProvider = AiProvider.Claude;
-            vm.Attachments.AddClipboardImage(PngBytes(), DateTime.Now);
+            vm.Attachments.AddFiles(new[] { pdfPath });
             vm.Attachments.Items.Should().HaveCount(1);
 
-            vm.Connection.ApiProvider = AiProvider.Ollama;
+            vm.Connection.ApiProvider = AiProvider.LocalLlm;
 
             vm.Attachments.Items.Should().BeEmpty();
         }
@@ -536,5 +605,13 @@ public class AiChatDialogViewModelTests
         {
             Cleanup(folder);
         }
+    }
+
+    /// <summary>PDF として判定される最小バイト列（先頭シグネチャのみ意味を持つ）</summary>
+    private static byte[] PdfBytes()
+    {
+        var bytes = new byte[16];
+        "%PDF-1.7"u8.CopyTo(bytes);
+        return bytes;
     }
 }

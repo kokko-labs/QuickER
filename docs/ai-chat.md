@@ -16,9 +16,11 @@ On the connection tab of the chat window, you can choose from the following thre
 |---|---|
 | OpenAI | An OpenAI API key |
 | Claude (Anthropic) | An Anthropic API key |
-| Ollama | A local Ollama endpoint (no API key required) |
+| Local LLM | An OpenAI-compatible local LLM (Ollama, LM Studio, llama.cpp, vLLM, and so on) |
 
 Select a provider and model, then enter the API key. When you enable the "Save" checkbox (for the API key), the key is **encrypted with Windows DPAPI (CurrentUser scope)** and stored under your user profile, and it is filled in automatically the next time you start (it is never stored in plain text).
+
+For "Local LLM", give the endpoint URL of your server in the endpoint field (including the `/v1` part — the default is Ollama's `http://localhost:11434/v1`). The API key is optional there: leave it empty for a server that requires no authentication, or enter one for a server that does. The provider and endpoint you chose are remembered and restored the next time you start.
 
 ### 2. Codex
 

@@ -70,6 +70,9 @@
   <data name="Mock_Provider" xml:space="preserve">
     <value>プロバイダー</value>
   </data>
+  <data name="Mock_ProviderTooltip" xml:space="preserve">
+    <value>Local LLM はローカルで動く OpenAI 互換 API に接続します（Ollama / LM Studio / llama.cpp / vLLM 等）。</value>
+  </data>
   <data name="Mock_ModelName" xml:space="preserve">
     <value>モデル名</value>
   </data>
@@ -79,6 +82,9 @@
   <data name="Mock_ApiKeyTooltip" xml:space="preserve">
     <value>API キー（OpenAI: sk-... / Claude: sk-ant-...）</value>
   </data>
+  <data name="Mock_ApiKeyOptionalNote" xml:space="preserve">
+    <value>Local LLM では API キーは任意です。認証不要なサーバーでは空のままで構いません。</value>
+  </data>
   <data name="Mock_Save" xml:space="preserve">
     <value>保存</value>
   </data>
@@ -86,7 +92,7 @@
     <value>エンドポイント</value>
   </data>
   <data name="Mock_EndpointTooltip" xml:space="preserve">
-    <value>OpenAI 互換エンドポイント（Ollama 等）</value>
+    <value>OpenAI 互換エンドポイント（Ollama / LM Studio / vLLM 等）</value>
   </data>
   <data name="Mock_Model" xml:space="preserve">
     <value>モデル</value>
@@ -186,7 +192,7 @@
     <value>claude CLI が見つかりません。Claude Code をインストールし PATH を通してください。</value>
   </data>
   <data name="Mock_DisabledReason_ApiKeyNotReady" xml:space="preserve">
-    <value>API キータブで API キーを入力してください（または Ollama プロバイダーを選択）。</value>
+    <value>API キータブで API キーを入力してください（または Local LLM プロバイダーを選択）。</value>
   </data>
   <data name="Mock_DisabledReason_CodexNotReady" xml:space="preserve">
     <value>Codex が利用可能ではありません。Codex タブで接続・ログインしてください。</value>

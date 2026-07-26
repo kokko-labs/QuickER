@@ -16,9 +16,11 @@
 |---|---|
 | OpenAI | OpenAI の API キー |
 | Claude (Anthropic) | Anthropic の API キー |
-| Ollama | ローカルの Ollama エンドポイント（API キー不要） |
+| Local LLM | OpenAI 互換 API のローカル LLM（Ollama・LM Studio・llama.cpp・vLLM など） |
 
 プロバイダーとモデルを選び、API キーを入力します。「API キーを保存」を有効にすると、キーは **Windows DPAPI（CurrentUser スコープ）で暗号化**されてユーザープロファイル配下に保存され、次回起動時に自動入力されます（平文では保存されません）。
+
+「Local LLM」では、エンドポイント欄にサーバーの URL を指定します（`/v1` まで含めます。既定は Ollama の `http://localhost:11434/v1`）。API キーは任意で、認証不要のサーバーなら空のまま、認証を課すサーバーなら入力します。選んだプロバイダーとエンドポイントは記憶され、次回起動時に復元されます。
 
 ### 2. Codex
 

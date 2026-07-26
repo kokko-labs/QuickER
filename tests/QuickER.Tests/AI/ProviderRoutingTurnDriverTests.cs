@@ -5,7 +5,7 @@ namespace QuickER.Tests.AI;
 
 /// <summary>
 /// <see cref="ProviderRoutingTurnDriver"/> のプロバイダ種別 → 委譲先ドライバ選択（ルーティング）を
-/// 全分岐で検証するテストクラス。Claude のみ Anthropic ドライバ・それ以外（OpenAI/Ollama/未知）は
+/// 全分岐で検証するテストクラス。Claude のみ Anthropic ドライバ・それ以外（OpenAI/ローカル LLM/未知）は
 /// OpenAI ドライバへ振り分けられること、選択関数が毎ターン評価されることを確認する。
 /// </summary>
 public class ProviderRoutingTurnDriverTests
@@ -87,11 +87,11 @@ public class ProviderRoutingTurnDriverTests
         anthropic.CallCount.Should().Be(0);
     }
 
-    /// <summary>Ollama プロバイダは（非 Claude なので）OpenAI ドライバへ振り分けられることを検証する</summary>
-    [Fact(DisplayName = "Ollama は OpenAI ドライバへ振り分ける")]
-    public async Task Ollama_RoutesToOpenAiDriver()
+    /// <summary>ローカル LLM プロバイダは（非 Claude なので）OpenAI ドライバへ振り分けられることを検証する</summary>
+    [Fact(DisplayName = "ローカル LLM は OpenAI ドライバへ振り分ける")]
+    public async Task LocalLlm_RoutesToOpenAiDriver()
     {
-        var (router, openAi, anthropic) = BuildRouter(AiProvider.Ollama);
+        var (router, openAi, anthropic) = BuildRouter(AiProvider.LocalLlm);
 
         var turn = await router.RunAsync(History, _ => { }, CancellationToken.None);
 

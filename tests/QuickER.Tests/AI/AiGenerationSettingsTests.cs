@@ -15,11 +15,11 @@ public class AiGenerationSettingsTests
         s.ResolveEndpoint().Should().Be("https://api.openai.com/v1");
     }
 
-    /// <summary>Ollama プロバイダーでローカルの既定エンドポイントを返すことを検証する</summary>
-    [Fact(DisplayName = "Ollama 既定エンドポイントを返す")]
-    public void Default_Ollama()
+    /// <summary>ローカル LLM プロバイダーでローカルの既定エンドポイントを返すことを検証する</summary>
+    [Fact(DisplayName = "ローカル LLM の既定エンドポイントを返す")]
+    public void Default_LocalLlm()
     {
-        var s = new AiGenerationSettings { Provider = AiProvider.Ollama };
+        var s = new AiGenerationSettings { Provider = AiProvider.LocalLlm };
         s.ResolveEndpoint().Should().Be("http://localhost:11434/v1");
     }
 
