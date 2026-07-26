@@ -87,6 +87,28 @@ public class MockResumePromptTests
         prompt.Should().Contain("get_screen");
     }
 
+    [Fact(DisplayName = "宣言済み画面はエンティティ＋CRUD・未宣言は未宣言と注入する")]
+    public void Build_InjectsEntityDeclarationState()
+    {
+        var manifest = SampleManifest();
+        // OrderList は宣言あり・OrderDetail は宣言なし（未宣言）
+        manifest.Screens[0].Entities = new()
+        {
+            new MockScreenEntity { Name = "Order", Operations = "CRU" },
+            new MockScreenEntity { Name = "Customer", Operations = "R" },
+        };
+
+        var prompt = WithCulture(
+            "ja",
+            () => MockResumePrompt.Build("# 現在スキーマ", manifest, schemaChanged: false)
+        );
+
+        // 宣言済み: エンティティ＋CRUD が Name(OPS) 形式で入る
+        prompt.Should().Contain("エンティティ: Order(CRU), Customer(R)");
+        // 未宣言画面には未宣言の注記が入る
+        prompt.Should().Contain("（未宣言）");
+    }
+
     [Fact(DisplayName = "schemaChanged=true で差異注記を含む")]
     public void Build_WithSchemaChanged_IncludesNote()
     {

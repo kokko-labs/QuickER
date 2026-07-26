@@ -148,6 +148,10 @@ public sealed class MockFolderStore
     /// <param name="html">画面 HTML 全体（空・<c>&lt;html</c> を含まない場合は拒否）</param>
     /// <param name="transitions">この画面を起点とする遷移（既存の同起点遷移を差し替える）</param>
     /// <param name="revisionNote">改訂メモ</param>
+    /// <param name="entities">
+    /// この画面が扱うエンティティと CRUD 操作の宣言。<c>null</c>＝既存宣言を維持・空リスト＝宣言を消去・
+    /// 非空＝正規化して全置換（transitions の毎回全置換とは意図的に非対称。付け忘れで宣言が剝がれるのを防ぐ）。
+    /// </param>
     /// <returns>機械検証の警告一覧（保存は拒否しない）</returns>
     public IReadOnlyList<string> SaveScreen(
         string file,
@@ -155,7 +159,8 @@ public sealed class MockFolderStore
         string description,
         string html,
         IReadOnlyList<MockTransition> transitions,
-        string revisionNote
+        string revisionNote,
+        IReadOnlyList<MockScreenEntity>? entities = null
     )
     {
         ValidateScreenFileName(file);
@@ -189,20 +194,23 @@ public sealed class MockFolderStore
 
         if (existing is null)
         {
-            _manifest.Screens.Add(
-                new MockScreen
-                {
-                    File = file,
-                    Name = name ?? string.Empty,
-                    Description = description ?? string.Empty,
-                }
-            );
+            var added = new MockScreen
+            {
+                File = file,
+                Name = name ?? string.Empty,
+                Description = description ?? string.Empty,
+            };
+            // 新規画面は entities 省略（null）なら宣言なし・指定ありなら正規化して設定する
+            added.Entities = ResolveEntities(added.Entities, entities);
+            _manifest.Screens.Add(added);
         }
         else
         {
             existing.File = file;
             existing.Name = name ?? string.Empty;
             existing.Description = description ?? string.Empty;
+            // upsert 意味論: null=既存維持・空=消去・非空=正規化して全置換
+            existing.Entities = ResolveEntities(existing.Entities, entities);
         }
 
         // この画面を起点（From）とする遷移を差し替える
@@ -344,6 +352,112 @@ public sealed class MockFolderStore
         return known;
     }
 
+    /// <summary>
+    /// upsert 意味論に従って画面の entities を解決する。
+    /// <paramref name="incoming"/> が <c>null</c> なら現状（<paramref name="current"/>）を維持し、
+    /// 空なら消去（<c>null</c>）・非空なら正規化した結果で置換する（全置換で空になる場合も <c>null</c>）。
+    /// </summary>
+    /// <param name="current">画面が現在保持している宣言</param>
+    /// <param name="incoming">保存呼び出しで渡された宣言（null＝未指定）</param>
+    private static List<MockScreenEntity>? ResolveEntities(
+        List<MockScreenEntity>? current,
+        IReadOnlyList<MockScreenEntity>? incoming
+    )
+    {
+        if (incoming is null)
+        {
+            return current;
+        }
+
+        var normalized = NormalizeEntities(incoming).Entities;
+
+        // 宣言が無くなった（消去・全破棄）ときは null で保持し、mock.json に entities キーを残さない
+        return normalized.Count == 0 ? null : normalized.ToList();
+    }
+
+    /// <summary>
+    /// CRUD 操作文字列を正規化する。大文字化し、C/R/U/D 以外を除去・重複除去して C→R→U→D の正順へ並べ替える。
+    /// </summary>
+    /// <param name="operations">生の操作文字列（例 <c>"urc"</c>・<c>"CRUDX"</c>）</param>
+    /// <returns>正規化済み文字列（例 <c>"CRU"</c>）。有効文字が無ければ空文字</returns>
+    public static string NormalizeOperations(string? operations)
+    {
+        if (string.IsNullOrEmpty(operations))
+        {
+            return string.Empty;
+        }
+
+        // 正順の並び。含まれるかを固定順で走査するため位置索引として使う
+        const string order = "CRUD";
+        var present = new bool[order.Length];
+
+        foreach (var ch in operations)
+        {
+            var index = order.IndexOf(char.ToUpperInvariant(ch));
+
+            if (index >= 0)
+            {
+                present[index] = true;
+            }
+        }
+
+        var builder = new StringBuilder(order.Length);
+
+        for (var i = 0; i < order.Length; i++)
+        {
+            if (present[i])
+            {
+                builder.Append(order[i]);
+            }
+        }
+
+        return builder.ToString();
+    }
+
+    /// <summary>
+    /// エンティティ宣言一覧を正規化する。各エントリの名前を Trim し、名前が空のものは黙って除外、
+    /// 操作を <see cref="NormalizeOperations"/> で正規化する。正規化後に操作が空になったエントリは
+    /// 破棄し、その名前を <see cref="MockScreenEntityNormalization.DiscardedNames"/> に残す。
+    /// </summary>
+    /// <param name="entities">正規化対象の宣言一覧（null は空として扱う）</param>
+    /// <returns>正規化済みの宣言一覧と、操作が空で破棄された名前の一覧</returns>
+    public static MockScreenEntityNormalization NormalizeEntities(
+        IReadOnlyList<MockScreenEntity>? entities
+    )
+    {
+        var normalized = new List<MockScreenEntity>();
+        var discarded = new List<string>();
+
+        if (entities is null)
+        {
+            return new MockScreenEntityNormalization(normalized, discarded);
+        }
+
+        foreach (var entity in entities)
+        {
+            var entityName = entity?.Name?.Trim() ?? string.Empty;
+
+            // 名前が無いものは同定できないため黙って除外する（壊れた要素の警告は呼び出し側の責務）
+            if (string.IsNullOrEmpty(entityName))
+            {
+                continue;
+            }
+
+            var operations = NormalizeOperations(entity!.Operations);
+
+            // 有効な CRUD 文字が 1 つも無いエントリは破棄して名前を控える（警告用）
+            if (operations.Length == 0)
+            {
+                discarded.Add(entityName);
+                continue;
+            }
+
+            normalized.Add(new MockScreenEntity { Name = entityName, Operations = operations });
+        }
+
+        return new MockScreenEntityNormalization(normalized, discarded);
+    }
+
     /// <summary>改訂履歴へ 1 件追記する</summary>
     private void AppendRevision(string note)
     {
@@ -405,3 +519,14 @@ public sealed class MockFolderStore
         }
     }
 }
+
+/// <summary>
+/// <see cref="MockFolderStore.NormalizeEntities"/> の結果。正規化済みの宣言一覧と、
+/// 操作が空で破棄された名前の一覧（警告文言の材料）を持つ。
+/// </summary>
+/// <param name="Entities">正規化済みのエンティティ宣言一覧</param>
+/// <param name="DiscardedNames">正規化で操作が空になり破棄されたエンティティ名の一覧</param>
+public sealed record MockScreenEntityNormalization(
+    IReadOnlyList<MockScreenEntity> Entities,
+    IReadOnlyList<string> DiscardedNames
+);

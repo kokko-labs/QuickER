@@ -47,6 +47,9 @@ public class MockFolderDesignPromptsTests
         // ツール機構ラベルの差し替え（{0}）が解決されていること
         prompt.Should().Contain("function tools");
         prompt.Should().NotContain("{0}");
+        // エンティティ宣言（画面×エンティティ CRUD）の規約が含まれること
+        prompt.Should().Contain("entities");
+        prompt.Should().Contain("operations");
     }
 
     /// <summary>日本語プロンプトに核心キーワードが含まれることを検証する</summary>
@@ -62,6 +65,9 @@ public class MockFolderDesignPromptsTests
         prompt.Should().Contain("合意");
         prompt.Should().Contain("関数ツール");
         prompt.Should().NotContain("{0}");
+        // エンティティ宣言（画面×エンティティ CRUD）の規約が含まれること
+        prompt.Should().Contain("entities");
+        prompt.Should().Contain("エンティティ");
     }
 
     /// <summary>Codex 指示は dynamicTools ラベルへ差し替えられ、本文はシステムプロンプトと同旨であることを検証する</summary>

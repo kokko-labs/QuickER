@@ -103,9 +103,33 @@ public static class MockResumePrompt
             }
 
             builder.AppendLine(line);
+            // 各画面の宣言状態（宣言済み: エンティティ＋CRUD／未宣言）をサブ行で注入する
+            builder.AppendLine($"  - {DescribeScreenEntities(screen)}");
         }
 
         builder.AppendLine();
+    }
+
+    /// <summary>画面のエンティティ宣言状態を 1 行の説明文にする（宣言済みは <c>Name(CRU)</c> 形式・未宣言は専用文言）</summary>
+    private static string DescribeScreenEntities(MockScreen screen)
+    {
+        var entities = screen.Entities;
+
+        if (entities is null || entities.Count == 0)
+        {
+            return Strings.Mock_ResumePromptEntitiesNone;
+        }
+
+        var parts = entities.Select(entity =>
+            string.IsNullOrEmpty(entity.Operations)
+                ? entity.Name
+                : $"{entity.Name}({entity.Operations})"
+        );
+
+        return string.Format(
+            Strings.Mock_ResumePromptEntitiesLabelFormat,
+            string.Join(", ", parts)
+        );
     }
 
     /// <summary>遷移一覧を書き出す</summary>

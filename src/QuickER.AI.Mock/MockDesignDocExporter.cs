@@ -12,7 +12,8 @@ namespace QuickER.AI.Mock;
 /// タイムスタンプや実行環境に依存する要素を一切含めないため、同じ入力からは常にバイト同一の
 /// Markdown を返す（改行は <c>\n</c> 固定）。画面 HTML からの項目抽出は正規表現ヒューリスティックで、
 /// HTML パーサは導入しない（取れない要素は黙って漏れてよい設計）。
-/// 出力構成はタイトル・画面一覧・画面遷移図（mermaid）・画面ごとのセクションの順で、これのみ。
+/// 出力構成はタイトル・画面一覧・画面遷移図（mermaid）・画面×エンティティ（CRUD）表
+/// （宣言があるときのみ）・画面ごとのセクションの順で、これのみ。
 /// </remarks>
 public static class MockDesignDocExporter
 {
@@ -153,7 +154,10 @@ public static class MockDesignDocExporter
         // 3. 画面遷移図（mermaid）
         AppendTransitionDiagram(sb, screens, transitions, screenByFile, nodeIds);
 
-        // 4. 画面ごとのセクション
+        // 4. 画面×エンティティ（CRUD）表（宣言が 1 件でもあれば。無ければセクションごと省略）
+        AppendCrudTable(sb, screens);
+
+        // 5. 画面ごとのセクション
         foreach (var screen in screens)
         {
             AppendScreenSection(sb, store, screen, transitions, screenByFile);
@@ -234,6 +238,104 @@ public static class MockDesignDocExporter
         }
 
         sb.Append("```\n");
+    }
+
+    /// <summary>
+    /// 画面×エンティティ（CRUD）表を追記する。行＝全画面（マニフェスト順）・列＝宣言されたエンティティ名
+    /// （マニフェスト順に画面を走査した初出順）・セルは正規化済み操作文字列（例 <c>CRU</c>）。
+    /// </summary>
+    /// <remarks>
+    /// 宣言（<see cref="MockScreen.Entities"/>）が 1 件も無ければセクションごと省略する
+    /// （既存フォルダの設計書に空表を出さない）。宣言のない画面も空セル行として出し、未宣言が見えるようにする。
+    /// </remarks>
+    private static void AppendCrudTable(StringBuilder sb, IReadOnlyList<MockScreen> screens)
+    {
+        // 列見出し＝宣言されたエンティティ名。マニフェスト順に画面を走査した初出順で決定的に並べる
+        var columns = new List<string>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var screen in screens)
+        {
+            if (screen.Entities is null)
+            {
+                continue;
+            }
+
+            foreach (var entity in screen.Entities)
+            {
+                var name = entity?.Name ?? string.Empty;
+
+                if (!string.IsNullOrWhiteSpace(name) && seen.Add(name))
+                {
+                    columns.Add(name);
+                }
+            }
+        }
+
+        // 宣言が 1 件も無ければ表を出さない
+        if (columns.Count == 0)
+        {
+            return;
+        }
+
+        sb.Append('\n');
+        sb.Append("## ").Append(Strings.MockDoc_CrudHeading).Append('\n');
+        sb.Append('\n');
+
+        // ヘッダ行（先頭列は画面・以降は各エンティティ名）
+        sb.Append("| ").Append(Strings.MockDoc_ColScreen);
+
+        foreach (var column in columns)
+        {
+            sb.Append(" | ").Append(EscapeCell(column));
+        }
+
+        sb.Append(" |\n");
+
+        // 区切り行（列数＝1＋エンティティ数）
+        sb.Append("| ---");
+
+        for (var i = 0; i < columns.Count; i++)
+        {
+            sb.Append(" | ---");
+        }
+
+        sb.Append(" |\n");
+
+        // 本体行（全画面。宣言のない画面も空セル行として出す）
+        foreach (var screen in screens)
+        {
+            sb.Append("| ").Append(ScreenLink(screen));
+
+            foreach (var column in columns)
+            {
+                sb.Append(" | ").Append(EscapeCell(FindEntityOperations(screen, column)));
+            }
+
+            sb.Append(" |\n");
+        }
+    }
+
+    /// <summary>画面の指定エンティティ列に対する正規化済み操作文字列を返す（該当宣言が無ければ空文字）</summary>
+    private static string FindEntityOperations(MockScreen screen, string entityName)
+    {
+        if (screen.Entities is null)
+        {
+            return string.Empty;
+        }
+
+        foreach (var entity in screen.Entities)
+        {
+            if (
+                entity is not null
+                && string.Equals(entity.Name, entityName, StringComparison.Ordinal)
+            )
+            {
+                return entity.Operations ?? string.Empty;
+            }
+        }
+
+        return string.Empty;
     }
 
     /// <summary>1 画面分のセクション（説明・遷移元／先・画面項目表）を追記する</summary>
@@ -803,7 +905,7 @@ public static class MockDesignDocExporter
         return "[" + text + "](" + screen.File + ")";
     }
 
-    /// <summary>HTML 断片をプレーンテキスト化する（タグ除去・主要エンティティのデコード・空白正規化）</summary>
+    /// <summary>HTML 断片をプレーンテキスト化する（タグ除去・エンティティのデコード・空白正規化）</summary>
     private static string Clean(string html)
     {
         var withoutTags = AnyTag.Replace(html, string.Empty);
@@ -820,15 +922,12 @@ public static class MockDesignDocExporter
         return Whitespace.Replace(decoded, " ").Trim();
     }
 
-    /// <summary>主要 HTML エンティティをデコードする（&amp;amp; は取りこぼしを避けるため最後に解く）</summary>
-    private static string DecodeEntities(string value) =>
-        value
-            .Replace("&#39;", "'")
-            .Replace("&quot;", "\"")
-            .Replace("&nbsp;", " ")
-            .Replace("&lt;", "<")
-            .Replace("&gt;", ">")
-            .Replace("&amp;", "&");
+    /// <summary>
+    /// HTML エンティティをデコードする。BCL の <see cref="System.Net.WebUtility.HtmlDecode(string)"/> に委譲し、
+    /// named（&amp;laquo; 等）・数値（&amp;#39; / &amp;#x27;）の全参照を網羅する（決定的・依存追加なし。
+    /// &amp;nbsp; は U+00A0 になるが、後段の空白正規化（\s+）が通常スペースへ畳む）。
+    /// </summary>
+    private static string DecodeEntities(string value) => System.Net.WebUtility.HtmlDecode(value);
 
     /// <summary>Markdown 表セル向けのエスケープ（改行を空白へ・パイプをエスケープ）</summary>
     private static string EscapeCell(string value)

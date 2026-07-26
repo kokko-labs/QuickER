@@ -39,7 +39,9 @@ public static class MockFolderDesignTools
                     + "Always submit the whole HTML of the screen (not a diff). "
                     + "Before modifying an existing screen, call get_screen to fetch its current HTML first. "
                     + "Reference the shared stylesheet with <link rel=\"stylesheet\" href=\"style.css\">, "
-                    + "link between screens with relative hrefs (e.g. href=\"Other.html\"), and never reference external resources.",
+                    + "link between screens with relative hrefs (e.g. href=\"Other.html\"), and never reference external resources. "
+                    + "Use the optional entities argument to declare which entities (tables) this screen uses and how (its CRUD footprint): "
+                    + "omitting entities keeps the screen's existing declarations, an empty array clears them, and a non-empty array replaces them.",
                 DeferLoading = false,
                 InputSchema = new
                 {
@@ -85,6 +87,33 @@ public static class MockFolderDesignTools
                                     },
                                 },
                                 required = new[] { "to" },
+                            },
+                        },
+                        entities = new
+                        {
+                            type = "array",
+                            description = "Optional. Declares which entities (tables) this screen uses and how (its CRUD footprint). "
+                                + "Upsert semantics: omitting entities keeps the screen's existing declarations, "
+                                + "an empty array clears them, and a non-empty array replaces them (transitions, by contrast, are always fully replaced). "
+                                + "Only C/R/U/D operations are meaningful; declarations with no valid operations are dropped with a warning.",
+                            items = new
+                            {
+                                type = "object",
+                                properties = new
+                                {
+                                    name = new
+                                    {
+                                        type = "string",
+                                        description = "Entity (table) name as defined in the ER diagram (matched case-insensitively).",
+                                    },
+                                    operations = new
+                                    {
+                                        type = "string",
+                                        description = "The CRUD operations this screen performs on the entity, as a subset of \"CRUD\" (e.g. \"CRU\"). "
+                                            + "Case-insensitive; characters outside C/R/U/D are ignored, duplicates removed, and the result ordered C, R, U, D.",
+                                    },
+                                },
+                                required = new[] { "name" },
                             },
                         },
                         revision_note = new
