@@ -286,6 +286,18 @@ namespace QuickER.Resources {
             }
         }
         
+        public static string Toolbar_ArrangeGroup {
+            get {
+                return ResourceManager.GetString("Toolbar_ArrangeGroup", resourceCulture);
+            }
+        }
+
+        public static string Toolbar_ArrangeGroupTooltip {
+            get {
+                return ResourceManager.GetString("Toolbar_ArrangeGroupTooltip", resourceCulture);
+            }
+        }
+
         public static string Toolbar_ArrangeGrid {
             get {
                 return ResourceManager.GetString("Toolbar_ArrangeGrid", resourceCulture);

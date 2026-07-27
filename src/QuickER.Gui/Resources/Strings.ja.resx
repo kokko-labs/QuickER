@@ -171,6 +171,12 @@
   <data name="Toolbar_CompactViewTooltip" xml:space="preserve">
     <value>ER 図のカラム行を PK/FK のみに絞って簡易表示</value>
   </data>
+  <data name="Toolbar_ArrangeGroup" xml:space="preserve">
+    <value>整列</value>
+  </data>
+  <data name="Toolbar_ArrangeGroupTooltip" xml:space="preserve">
+    <value>整列・幅自動</value>
+  </data>
   <data name="Toolbar_ArrangeGrid" xml:space="preserve">
     <value>整列(格子)</value>
   </data>
