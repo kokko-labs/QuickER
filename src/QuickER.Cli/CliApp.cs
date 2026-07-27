@@ -16,15 +16,29 @@ namespace QuickER.Cli;
 /// </summary>
 public static class CliApp
 {
-    /// <summary>引数を解析してコマンドを実行する</summary>
+    /// <summary>引数を解析してコマンドを実行する（実コンソールへ出力する既定経路）</summary>
+    /// <remarks>
+    /// <see cref="TrySetUtf8Output"/> は <see cref="Console.Out"/> を作り直すため、writer の捕捉は必ずその後に行う。
+    /// </remarks>
     public static Task<int> InvokeAsync(string[] args)
     {
         TrySetUtf8Output();
 
+        return InvokeAsync(args, Console.Out, Console.Error);
+    }
+
+    /// <summary>出力先を注入して引数を解析・実行する</summary>
+    /// <remarks>
+    /// テストがプロセスグローバルなコンソール出力先を差し替えずに（＝並列実行中の他テストと競合せずに）
+    /// 出力を捕捉するための注入版。既定版（<see cref="InvokeAsync(string[])"/>）は実コンソールへ出力する。
+    /// こちらはコンソールの状態（出力エンコーディング）に一切触れない。
+    /// </remarks>
+    public static Task<int> InvokeAsync(string[] args, TextWriter stdout, TextWriter stderr)
+    {
         var root = new RootCommand(Strings.Cli_RootDescription);
-        root.Subcommands.Add(BuildGenerateCommand());
-        root.Subcommands.Add(BuildScaffoldCommand());
-        root.Subcommands.Add(BuildReverseCommand());
+        root.Subcommands.Add(BuildGenerateCommand(stdout, stderr));
+        root.Subcommands.Add(BuildScaffoldCommand(stdout, stderr));
+        root.Subcommands.Add(BuildReverseCommand(stdout, stderr));
         root.Subcommands.Add(BuildMcpCommand());
         return root.Parse(args).InvokeAsync();
     }
@@ -44,7 +58,7 @@ public static class CliApp
 
     // ---------------- generate ----------------
 
-    private static Command BuildGenerateCommand()
+    private static Command BuildGenerateCommand(TextWriter stdout, TextWriter stderr)
     {
         var schema = new Option<FileInfo>("--schema")
         {
@@ -82,6 +96,8 @@ public static class CliApp
                     parseResult.GetValue(provider)!,
                     parseResult,
                     generation,
+                    stdout,
+                    stderr,
                     cancellationToken
                 )
         );
@@ -96,15 +112,15 @@ public static class CliApp
         string providerName,
         ParseResult parseResult,
         GenerationOptionSet generation,
+        TextWriter stdout,
+        TextWriter stderr,
         CancellationToken cancellationToken
     )
     {
         // schema 存在チェックはプロバイダ解決より前に行う（現状の検証順序を保存する）
         if (!schemaFile.Exists)
         {
-            Console.Error.WriteLine(
-                string.Format(Strings.Cli_SchemaFileNotFound, schemaFile.FullName)
-            );
+            stderr.WriteLine(string.Format(Strings.Cli_SchemaFileNotFound, schemaFile.FullName));
             return Task.FromResult(1);
         }
 
@@ -114,21 +130,23 @@ public static class CliApp
             config,
             parseResult,
             generation,
+            stdout,
+            stderr,
             // generate の図取得は同期（JSON 読込）。プロバイダは使わないため受け取るだけ
-            (_, _) => Task.FromResult<ErDiagram?>(LoadSchemaDiagram(schemaFile)),
+            (_, _) => Task.FromResult<ErDiagram?>(LoadSchemaDiagram(schemaFile, stderr)),
             cancellationToken
         );
     }
 
     /// <summary>保存形式の ER 図 JSON を読み込み、意味モデル（<see cref="ErDiagram"/>）を返す</summary>
     /// <remarks>新しいフォーマットの文書は未知のプロパティを黙って無視するため、警告してから続行する</remarks>
-    private static ErDiagram LoadSchemaDiagram(FileInfo schemaFile)
+    private static ErDiagram LoadSchemaDiagram(FileInfo schemaFile, TextWriter stderr)
     {
         var document = JsonStorageService.Load(schemaFile.FullName);
 
         if (document.IsNewerFormat)
         {
-            Console.Error.WriteLine(
+            stderr.WriteLine(
                 string.Format(
                     Strings.Cli_SchemaNewerFormatWarning,
                     document.Version,
@@ -142,7 +160,7 @@ public static class CliApp
 
     // ---------------- scaffold ----------------
 
-    private static Command BuildScaffoldCommand()
+    private static Command BuildScaffoldCommand(TextWriter stdout, TextWriter stderr)
     {
         var connection = new Option<string>("--connection")
         {
@@ -180,6 +198,8 @@ public static class CliApp
                     parseResult.GetValue(provider)!,
                     parseResult,
                     generation,
+                    stdout,
+                    stderr,
                     cancellationToken
                 )
         );
@@ -194,6 +214,8 @@ public static class CliApp
         string providerName,
         ParseResult parseResult,
         GenerationOptionSet generation,
+        TextWriter stdout,
+        TextWriter stderr,
         CancellationToken cancellationToken
     ) =>
         GenerationExecutor.RunAsync(
@@ -202,7 +224,9 @@ public static class CliApp
             config,
             parseResult,
             generation,
-            (provider, ct) => ImportDiagramAsync(provider, connectionString, ct),
+            stdout,
+            stderr,
+            (provider, ct) => ImportDiagramAsync(provider, connectionString, stderr, ct),
             cancellationToken
         );
 
@@ -210,6 +234,7 @@ public static class CliApp
     private static async Task<ErDiagram?> ImportDiagramAsync(
         IDatabaseProvider provider,
         string connectionString,
+        TextWriter stderr,
         CancellationToken cancellationToken
     )
     {
@@ -222,7 +247,7 @@ public static class CliApp
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine(string.Format(Strings.Cli_SchemaImportFailed, ex.Message));
+            stderr.WriteLine(string.Format(Strings.Cli_SchemaImportFailed, ex.Message));
             return null;
         }
 
@@ -235,7 +260,7 @@ public static class CliApp
 
     // ---------------- reverse ----------------
 
-    private static Command BuildReverseCommand()
+    private static Command BuildReverseCommand(TextWriter stdout, TextWriter stderr)
     {
         var source = new Option<FileInfo>("--source")
         {
@@ -255,7 +280,9 @@ public static class CliApp
             RunReverse(
                 parseResult.GetValue(source)!,
                 parseResult.GetValue(output)!,
-                parseResult.GetValue(provider)!
+                parseResult.GetValue(provider)!,
+                stdout,
+                stderr
             )
         );
 
@@ -263,12 +290,18 @@ public static class CliApp
     }
 
     /// <summary>C# ソースをリバース解析し、スキーマのみの ER 図 JSON（layout キーなし）を書き出す</summary>
-    private static int RunReverse(FileInfo sourceFile, FileInfo output, string providerName)
+    private static int RunReverse(
+        FileInfo sourceFile,
+        FileInfo output,
+        string providerName,
+        TextWriter stdout,
+        TextWriter stderr
+    )
     {
         // ソース存在チェックはプロバイダ解決より前に行う（generate の検証順序に揃える）
         if (!sourceFile.Exists)
         {
-            Console.Error.WriteLine(
+            stderr.WriteLine(
                 string.Format(Strings.Cli_ReverseSourceFileNotFound, sourceFile.FullName)
             );
 
@@ -282,7 +315,7 @@ public static class CliApp
         }
         catch (ArgumentException ex)
         {
-            Console.Error.WriteLine(ex.Message);
+            stderr.WriteLine(ex.Message);
 
             return 1;
         }
@@ -296,7 +329,7 @@ public static class CliApp
         catch (CodeReverseException ex)
         {
             // 解析対象クラス 0 件などの致命的な問題（メッセージはローカライズ済み・案内込み）
-            Console.Error.WriteLine(ex.Message);
+            stderr.WriteLine(ex.Message);
 
             return 1;
         }
@@ -304,7 +337,7 @@ public static class CliApp
         // 非致命の警告は標準エラーへ出す（generate の診断出力と同じ流儀）
         foreach (var warning in result.Warnings)
         {
-            Console.Error.WriteLine(warning);
+            stderr.WriteLine(warning);
         }
 
         // マージなしの新規図。--provider の方言で型を展開済み、TargetDbms も同方言を採用する
@@ -319,7 +352,7 @@ public static class CliApp
         var document = new DiagramDocument { Schema = diagram, Layout = null };
         JsonStorageService.Save(output.FullName, document);
 
-        Console.WriteLine(string.Format(Strings.Cli_ReverseWritten, output.FullName));
+        stdout.WriteLine(string.Format(Strings.Cli_ReverseWritten, output.FullName));
 
         return 0;
     }

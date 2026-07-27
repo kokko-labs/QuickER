@@ -209,32 +209,26 @@ public static class CodeGenToolSet
             config = new FileInfo(configPath);
         }
 
-        // 生成コアの診断（Console.Error）と生成ファイル一覧（Console.Out）を捕捉してツール結果へ含める
+        // 生成コアの診断（stderr）と生成ファイル一覧（stdout）を StringWriter で直接受け取る
+        // （Console を差し替えない＝並列実行中の他テスト・他ツールと競合しない）
         var buffer = new StringWriter();
-        var originalOut = Console.Out;
-        var originalError = Console.Error;
         int exitCode;
 
         try
         {
-            Console.SetOut(buffer);
-            Console.SetError(buffer);
             exitCode = GenerationExecutor.GenerateFromConfig(
                 provider,
                 document.Schema,
                 config,
-                new DirectoryInfo(outDir)
+                new DirectoryInfo(outDir),
+                buffer,
+                buffer
             );
         }
         catch (RepositoryDialectUnsupportedException ex)
         {
             // 設定検証エラー（生成前）は捕捉バッファへ乗らないため、メッセージを明示的に付す
             return (Combine(buffer.ToString(), $"C# code generation failed: {ex.Message}"), false);
-        }
-        finally
-        {
-            Console.SetOut(originalOut);
-            Console.SetError(originalError);
         }
 
         var diagnostics = buffer.ToString();

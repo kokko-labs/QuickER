@@ -141,21 +141,25 @@ public class CliAppTests
         document.Version = DiagramDocument.CurrentVersion + 1;
         JsonStorageService.Save(schemaPath, document);
 
-        var originalError = Console.Error;
+        // 出力は注入版オーバーロードで捕捉する（Console を差し替えるとクラス並列実行で競合するため）
+        var stdout = new StringWriter();
         var stderr = new StringWriter();
-        Console.SetError(stderr);
 
         try
         {
-            var exit = await CliApp.InvokeAsync([
-                "generate",
-                "--schema",
-                schemaPath,
-                "--out",
-                outDir,
-                "--root-namespace",
-                "Test.Ns",
-            ]);
+            var exit = await CliApp.InvokeAsync(
+                [
+                    "generate",
+                    "--schema",
+                    schemaPath,
+                    "--out",
+                    outDir,
+                    "--root-namespace",
+                    "Test.Ns",
+                ],
+                stdout,
+                stderr
+            );
 
             exit.Should().Be(0);
             Directory.GetFiles(outDir, "*.g.cs").Should().NotBeEmpty();
@@ -167,8 +171,6 @@ public class CliAppTests
         }
         finally
         {
-            Console.SetError(originalError);
-
             if (Directory.Exists(root))
             {
                 Directory.Delete(root, recursive: true);
@@ -418,22 +420,26 @@ public class CliAppTests
     public async Task Generate_WithRuntimePackages_OmitsRuntimeAndPrintsGuidance()
     {
         var (schemaPath, outDir, root) = CreateSampleSchema();
-        var originalOut = Console.Out;
+        // 出力は注入版オーバーロードで捕捉する（Console を差し替えるとクラス並列実行で競合するため）
         var writer = new StringWriter();
-        Console.SetOut(writer);
+        var stderrWriter = new StringWriter();
 
         try
         {
-            var exit = await CliApp.InvokeAsync([
-                "generate",
-                "--schema",
-                schemaPath,
-                "--out",
-                outDir,
-                "--root-namespace",
-                "Test.Pkg",
-                "--use-runtime-packages",
-            ]);
+            var exit = await CliApp.InvokeAsync(
+                [
+                    "generate",
+                    "--schema",
+                    schemaPath,
+                    "--out",
+                    outDir,
+                    "--root-namespace",
+                    "Test.Pkg",
+                    "--use-runtime-packages",
+                ],
+                writer,
+                stderrWriter
+            );
 
             exit.Should().Be(0);
             var files = Directory.GetFiles(outDir, "*.g.cs");
@@ -447,8 +453,6 @@ public class CliAppTests
         }
         finally
         {
-            Console.SetOut(originalOut);
-
             if (Directory.Exists(root))
             {
                 Directory.Delete(root, recursive: true);
@@ -507,22 +511,26 @@ public class CliAppTests
             configPath,
             """{ "GenerateRepositories": false, "GenerateEfCore": true }"""
         );
-        var originalOut = Console.Out;
+        // 出力は注入版オーバーロードで捕捉する（Console を差し替えるとクラス並列実行で競合するため）
         var outWriter = new StringWriter();
-        Console.SetOut(outWriter);
+        var errWriter = new StringWriter();
 
         try
         {
-            var exit = await CliApp.InvokeAsync([
-                "generate",
-                "--schema",
-                schemaPath,
-                "--out",
-                outDir,
-                "--config",
-                configPath,
-                "--use-runtime-packages",
-            ]);
+            var exit = await CliApp.InvokeAsync(
+                [
+                    "generate",
+                    "--schema",
+                    schemaPath,
+                    "--out",
+                    outDir,
+                    "--config",
+                    configPath,
+                    "--use-runtime-packages",
+                ],
+                outWriter,
+                errWriter
+            );
 
             exit.Should().Be(0);
             Directory.Exists(outDir).Should().BeTrue("生成成功のため出力が作られる");
@@ -539,8 +547,6 @@ public class CliAppTests
         }
         finally
         {
-            Console.SetOut(originalOut);
-
             if (Directory.Exists(root))
             {
                 Directory.Delete(root, recursive: true);
