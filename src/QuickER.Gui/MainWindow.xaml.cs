@@ -97,6 +97,17 @@ public partial class MainWindow : Window
         }
     }
 
+    /// <summary>整列ポップアップ内の項目クリック。コマンド実行に続けてポップアップを閉じる</summary>
+    /// <remarks>
+    /// 展開中にトグル自身を再クリックすると「自動クローズ→同じクリックで再トグル→即再展開」となるが
+    /// （StaysOpen=False の既知挙動）、実質「開いたまま」で違和感が小さく、閉じる手段は外側クリック・
+    /// Esc・項目クリックで足りるため、タイミング依存の抑止ガードは意図的に設けない（シンプル優先）。
+    /// </remarks>
+    private void ArrangePopupItem_Click(object sender, RoutedEventArgs e)
+    {
+        ArrangeGroupToggle.IsChecked = false;
+    }
+
     /// <summary>ウィンドウ終了時に自動保存を行う</summary>
     /// <remarks>
     /// フィーチャーモジュール（AI チャット・モック生成など）のモードレスウィンドウ後始末は、

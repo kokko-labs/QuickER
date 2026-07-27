@@ -124,13 +124,13 @@
     <value>開く (Ctrl+O)</value>
   </data>
   <data name="Toolbar_Save" xml:space="preserve">
-    <value>保存</value>
+    <value>上書保存</value>
   </data>
   <data name="Toolbar_SaveTooltip" xml:space="preserve">
-    <value>保存 (Ctrl+S)</value>
+    <value>上書き保存 (Ctrl+S)</value>
   </data>
   <data name="Toolbar_SaveAs" xml:space="preserve">
-    <value>名前を付けて保存</value>
+    <value>別名保存</value>
   </data>
   <data name="Toolbar_SaveAsTooltip" xml:space="preserve">
     <value>名前を付けて保存 (Ctrl+Shift+S)</value>
@@ -170,6 +170,12 @@
   </data>
   <data name="Toolbar_CompactViewTooltip" xml:space="preserve">
     <value>ER 図のカラム行を PK/FK のみに絞って簡易表示</value>
+  </data>
+  <data name="Toolbar_ArrangeGroup" xml:space="preserve">
+    <value>整列</value>
+  </data>
+  <data name="Toolbar_ArrangeGroupTooltip" xml:space="preserve">
+    <value>整列・幅自動</value>
   </data>
   <data name="Toolbar_ArrangeGrid" xml:space="preserve">
     <value>整列(格子)</value>

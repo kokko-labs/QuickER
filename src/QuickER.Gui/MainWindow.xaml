@@ -580,7 +580,7 @@
           ToolTip="{x:Static resources:Strings.Toolbar_SaveAsTooltip}"
         >
           <StackPanel>
-            <TextBlock Style="{StaticResource ToolBarIcon}" Text="🖫" />
+            <TextBlock Style="{StaticResource ToolBarIcon}" Text="💾" />
             <TextBlock
               Style="{StaticResource ToolBarCaption}"
               Text="{x:Static resources:Strings.Toolbar_SaveAs}"
@@ -671,58 +671,95 @@
           </StackPanel>
         </ToggleButton>
         <Rectangle Style="{StaticResource ToolBarSeparator}" />
-        <Button
-          Style="{StaticResource ToolBarLabelButton}"
-          Command="{Binding AutoLayoutGridCommand}"
-          ToolTip="{x:Static resources:Strings.Toolbar_ArrangeGridTooltip}"
+        <!-- 整列グループ: 整列 3 種＋幅自動を 1 ボタンへ集約し、クリックで直下のポップアップに展開する（ツールバー幅の節約） -->
+        <ToggleButton
+          x:Name="ArrangeGroupToggle"
+          Style="{StaticResource ToolBarLabelToggleButton}"
+          MinWidth="54"
+          ToolTip="{x:Static resources:Strings.Toolbar_ArrangeGroupTooltip}"
         >
           <StackPanel>
             <TextBlock Style="{StaticResource ToolBarIcon}" Text="▦" />
-            <TextBlock
-              Style="{StaticResource ToolBarCaption}"
-              Text="{x:Static resources:Strings.Toolbar_ArrangeGrid}"
-            />
+            <TextBlock Style="{StaticResource ToolBarCaption}">
+              <Run Text="{x:Static resources:Strings.Toolbar_ArrangeGroup}" />
+              <Run Text=" ▾" />
+            </TextBlock>
           </StackPanel>
-        </Button>
-        <Button
-          Style="{StaticResource ToolBarLabelButton}"
-          Command="{Binding AutoLayoutTreeCommand}"
-          ToolTip="{x:Static resources:Strings.Toolbar_ArrangeTreeTooltip}"
+        </ToggleButton>
+        <Popup
+          x:Name="ArrangePopup"
+          IsOpen="{Binding IsChecked, ElementName=ArrangeGroupToggle, Mode=TwoWay}"
+          PlacementTarget="{Binding ElementName=ArrangeGroupToggle}"
+          Placement="Bottom"
+          StaysOpen="False"
         >
-          <StackPanel>
-            <TextBlock Style="{StaticResource ToolBarIcon}" Text="⌬" />
-            <TextBlock
-              Style="{StaticResource ToolBarCaption}"
-              Text="{x:Static resources:Strings.Toolbar_ArrangeTree}"
-            />
-          </StackPanel>
-        </Button>
-        <Button
-          Style="{StaticResource ToolBarLabelButton}"
-          Command="{Binding AutoLayoutForceCommand}"
-          ToolTip="{x:Static resources:Strings.Toolbar_ArrangeForceTooltip}"
-        >
-          <StackPanel>
-            <TextBlock Style="{StaticResource ToolBarIcon}" Text="✺" />
-            <TextBlock
-              Style="{StaticResource ToolBarCaption}"
-              Text="{x:Static resources:Strings.Toolbar_ArrangeForce}"
-            />
-          </StackPanel>
-        </Button>
-        <Button
-          Style="{StaticResource ToolBarLabelButton}"
-          Command="{Binding AutoFitEntityWidthsCommand}"
-          ToolTip="{x:Static resources:Strings.Toolbar_AutoWidthTooltip}"
-        >
-          <StackPanel>
-            <TextBlock Style="{StaticResource ToolBarIcon}" Text="↔" />
-            <TextBlock
-              Style="{StaticResource ToolBarCaption}"
-              Text="{x:Static resources:Strings.Toolbar_AutoWidth}"
-            />
-          </StackPanel>
-        </Button>
+          <Border
+            Background="White"
+            BorderBrush="#D1D5DB"
+            BorderThickness="1"
+            CornerRadius="4"
+            Padding="2"
+          >
+            <StackPanel Orientation="Horizontal">
+              <Button
+                Style="{StaticResource ToolBarLabelButton}"
+                Command="{Binding AutoLayoutGridCommand}"
+                Click="ArrangePopupItem_Click"
+                ToolTip="{x:Static resources:Strings.Toolbar_ArrangeGridTooltip}"
+              >
+                <StackPanel>
+                  <TextBlock Style="{StaticResource ToolBarIcon}" Text="▦" />
+                  <TextBlock
+                    Style="{StaticResource ToolBarCaption}"
+                    Text="{x:Static resources:Strings.Toolbar_ArrangeGrid}"
+                  />
+                </StackPanel>
+              </Button>
+              <Button
+                Style="{StaticResource ToolBarLabelButton}"
+                Command="{Binding AutoLayoutTreeCommand}"
+                Click="ArrangePopupItem_Click"
+                ToolTip="{x:Static resources:Strings.Toolbar_ArrangeTreeTooltip}"
+              >
+                <StackPanel>
+                  <TextBlock Style="{StaticResource ToolBarIcon}" Text="⌬" />
+                  <TextBlock
+                    Style="{StaticResource ToolBarCaption}"
+                    Text="{x:Static resources:Strings.Toolbar_ArrangeTree}"
+                  />
+                </StackPanel>
+              </Button>
+              <Button
+                Style="{StaticResource ToolBarLabelButton}"
+                Command="{Binding AutoLayoutForceCommand}"
+                Click="ArrangePopupItem_Click"
+                ToolTip="{x:Static resources:Strings.Toolbar_ArrangeForceTooltip}"
+              >
+                <StackPanel>
+                  <TextBlock Style="{StaticResource ToolBarIcon}" Text="✺" />
+                  <TextBlock
+                    Style="{StaticResource ToolBarCaption}"
+                    Text="{x:Static resources:Strings.Toolbar_ArrangeForce}"
+                  />
+                </StackPanel>
+              </Button>
+              <Button
+                Style="{StaticResource ToolBarLabelButton}"
+                Command="{Binding AutoFitEntityWidthsCommand}"
+                Click="ArrangePopupItem_Click"
+                ToolTip="{x:Static resources:Strings.Toolbar_AutoWidthTooltip}"
+              >
+                <StackPanel>
+                  <TextBlock Style="{StaticResource ToolBarIcon}" Text="↔" />
+                  <TextBlock
+                    Style="{StaticResource ToolBarCaption}"
+                    Text="{x:Static resources:Strings.Toolbar_AutoWidth}"
+                  />
+                </StackPanel>
+              </Button>
+            </StackPanel>
+          </Border>
+        </Popup>
         <Rectangle Style="{StaticResource ToolBarSeparator}" />
         <Button
           Style="{StaticResource ToolBarLabelButton}"

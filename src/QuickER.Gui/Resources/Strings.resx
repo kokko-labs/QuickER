@@ -161,6 +161,12 @@
   <data name="Toolbar_CompactViewTooltip" xml:space="preserve">
     <value>Compact view showing only PK/FK columns in the ER diagram</value>
   </data>
+  <data name="Toolbar_ArrangeGroup" xml:space="preserve">
+    <value>Arrange</value>
+  </data>
+  <data name="Toolbar_ArrangeGroupTooltip" xml:space="preserve">
+    <value>Arrange / auto width</value>
+  </data>
   <data name="Toolbar_ArrangeGrid" xml:space="preserve">
     <value>Grid</value>
   </data>
