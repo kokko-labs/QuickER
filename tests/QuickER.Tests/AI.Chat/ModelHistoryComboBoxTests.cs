@@ -8,6 +8,7 @@ using QuickER.AI;
 using QuickER.AI.Chat;
 using QuickER.AI.UI;
 using QuickER.Tests.AI;
+using QuickER.Tests.TestDoubles;
 using QuickER.Tests.TestSupport;
 using ChatStrings = QuickER.AI.Chat.Resources.Strings;
 
@@ -61,11 +62,15 @@ public class ModelHistoryComboBoxTests
                 seeded.ApiModelHistory.Touch("openai", "custom-model");
                 store.Save(seeded);
 
+                // API キーは実 %APPDATA% の ApiKeyStore ではなくメモリ上のストアへ隔離する
+                var keyStore = new InMemoryApiKeyStore();
                 var vm = new AiChatDialogViewModel(
                     host: null,
                     dispatcher: new SyncUiDispatcher(),
                     settingsStore: store,
-                    codexClient: new FakeCodexAppServerClient()
+                    codexClient: new FakeCodexAppServerClient(),
+                    apiKeyLoader: keyStore.Load,
+                    apiKeySaver: keyStore.Save
                 );
 
                 // 前提: 既定プロバイダ（OpenAI）の候補はカタログ（× なし）＋履歴（× あり）の 2 層
@@ -238,11 +243,14 @@ public class ModelHistoryComboBoxTests
                 // 実ダイアログの Codex モデル ComboBox から本物の ItemTemplate / ItemContainerStyle を取り出す
                 // （ダイアログ構築用 VM は隔離ストアで生成。テンプレート抽出にのみ使う。
                 // 　BAML ロードは並列テストと競合しないよう直列化する）
+                var keyStore = new InMemoryApiKeyStore();
                 var dialogVm = new AiChatDialogViewModel(
                     host: null,
                     dispatcher: new SyncUiDispatcher(),
                     settingsStore: new AiSettingsStore(folder),
-                    codexClient: new FakeCodexAppServerClient()
+                    codexClient: new FakeCodexAppServerClient(),
+                    apiKeyLoader: keyStore.Load,
+                    apiKeySaver: keyStore.Save
                 );
                 var dialog = WpfApplicationTestSupport.LoadXamlComponent(() =>
                     new AiChatDialog(dialogVm)

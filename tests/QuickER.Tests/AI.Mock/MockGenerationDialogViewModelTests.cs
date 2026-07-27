@@ -159,6 +159,8 @@ public class MockGenerationDialogViewModelTests
         );
         var mockFolder = Path.Combine(baseFolder, "mock");
         var engineBox = new FakeChatEngine[1];
+        // API キーは実 %APPDATA% の ApiKeyStore ではなくメモリ上のストアへ隔離する（並列テストの IO 競合を避ける）
+        var keyStore = new InMemoryApiKeyStore();
 
         var vm = new MockGenerationDialogViewModel(
             new StubDiagramSource(diagram),
@@ -169,7 +171,9 @@ public class MockGenerationDialogViewModelTests
             apiKeyEngineFactory: (_, toolHost) => engineBox[0] = new FakeChatEngine(toolHost),
             codexEngineFactory: null,
             claudeCodeEngineFactory: null,
-            dialogService: dialogs ?? new StubDialogService()
+            dialogService: dialogs ?? new StubDialogService(),
+            apiKeyLoader: keyStore.Load,
+            apiKeySaver: keyStore.Save
         );
         vm.Connection.ApiProvider = AiProvider.LocalLlm; // キー任意にして接続 OK 状態にする
 
@@ -198,6 +202,7 @@ public class MockGenerationDialogViewModelTests
         var mockFolder = Path.Combine(baseFolder, "mock");
         var engineBox = new FakeChatEngine[1];
         var generator = new FakeMockProjectGenerator();
+        var keyStore = new InMemoryApiKeyStore();
 
         var vm = new MockGenerationDialogViewModel(
             new StubDiagramSource(diagram),
@@ -208,7 +213,9 @@ public class MockGenerationDialogViewModelTests
             codexEngineFactory: null,
             claudeCodeEngineFactory: (_, toolHost) => engineBox[0] = new FakeChatEngine(toolHost),
             mockProjectGenerator: generator,
-            dialogService: dialogs ?? new StubDialogService()
+            dialogService: dialogs ?? new StubDialogService(),
+            apiKeyLoader: keyStore.Load,
+            apiKeySaver: keyStore.Save
         );
 
         return (vm, engineBox, generator, baseFolder, mockFolder);
@@ -249,6 +256,7 @@ public class MockGenerationDialogViewModelTests
     public void SaveSettings_PersistsSelectedBackend_AndRestoresOnNextLoad()
     {
         var folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
+        var keyStore = new InMemoryApiKeyStore();
 
         try
         {
@@ -259,7 +267,9 @@ public class MockGenerationDialogViewModelTests
                 settingsStore: new AiSettingsStore(folder),
                 apiKeyEngineFactory: null,
                 codexEngineFactory: null,
-                claudeCodeEngineFactory: null
+                claudeCodeEngineFactory: null,
+                apiKeyLoader: keyStore.Load,
+                apiKeySaver: keyStore.Save
             );
 
             // 保存が無い初回は API キータブが既定
@@ -275,7 +285,9 @@ public class MockGenerationDialogViewModelTests
                 settingsStore: new AiSettingsStore(folder),
                 apiKeyEngineFactory: null,
                 codexEngineFactory: null,
-                claudeCodeEngineFactory: null
+                claudeCodeEngineFactory: null,
+                apiKeyLoader: keyStore.Load,
+                apiKeySaver: keyStore.Save
             );
 
             restored.Connection.InitialBackend.Should().Be(ErChatBackendKind.ClaudeCode);
@@ -591,6 +603,7 @@ public class MockGenerationDialogViewModelTests
 
         var files = new RecordingFileDialogService(new FileDialogResult(outPath, 1));
         var dialogs = new StubDialogService();
+        var keyStore = new InMemoryApiKeyStore();
 
         var vm = new MockGenerationDialogViewModel(
             new StubDiagramSource(NonEmptyDiagram()),
@@ -600,7 +613,9 @@ public class MockGenerationDialogViewModelTests
             apiKeyEngineFactory: null,
             codexEngineFactory: null,
             claudeCodeEngineFactory: null,
-            dialogService: dialogs
+            dialogService: dialogs,
+            apiKeyLoader: keyStore.Load,
+            apiKeySaver: keyStore.Save
         );
         vm.Connection.ApiProvider = AiProvider.LocalLlm;
 

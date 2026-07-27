@@ -39,6 +39,8 @@ internal static class GenerationExecutor
     /// <remarks>
     /// 検証順序は「プロバイダ解決 → 図の取得 → 設定読解（LoadOptions）」。generate の schema 存在チェックのように
     /// プロバイダ解決より前に済ませるべき検証は、このメソッドを呼ぶ前にコマンド側で行うこと。
+    /// 診断（標準エラー相当）と生成ファイル一覧（標準出力相当）は、引数の
+    /// <paramref name="stdout"/> / <paramref name="stderr"/> へ書き出す。
     /// </remarks>
     public static async Task<int> RunAsync(
         string providerName,
@@ -46,6 +48,8 @@ internal static class GenerationExecutor
         FileInfo? config,
         ParseResult parseResult,
         GenerationOptionSet generation,
+        TextWriter stdout,
+        TextWriter stderr,
         Func<IDatabaseProvider, CancellationToken, Task<ErDiagram?>> resolveDiagram,
         CancellationToken cancellationToken
     )
@@ -57,7 +61,7 @@ internal static class GenerationExecutor
         }
         catch (ArgumentException ex)
         {
-            Console.Error.WriteLine(ex.Message);
+            stderr.WriteLine(ex.Message);
             return 1;
         }
 
@@ -76,11 +80,11 @@ internal static class GenerationExecutor
         }
         catch (RepositoryDialectUnsupportedException ex)
         {
-            Console.Error.WriteLine(ex.Message);
+            stderr.WriteLine(ex.Message);
             return 1;
         }
 
-        return GenerateWithResolvedOptions(provider, diagram, options, output);
+        return GenerateWithResolvedOptions(provider, diagram, options, output, stdout, stderr);
     }
 
     /// <summary>
@@ -89,19 +93,21 @@ internal static class GenerationExecutor
     /// 経由しない経路（MCP の generate_csharp ツール等）が使う。
     /// </summary>
     /// <remarks>
-    /// 診断（標準エラー）と生成ファイル一覧（標準出力）は <see cref="WriteResult"/> が Console へ出力するため、
-    /// 捕捉が必要な呼び出し側は事前に <see cref="Console.SetOut"/> / <see cref="Console.SetError"/> を差し替えること。
+    /// 診断（stderr）と生成ファイル一覧（stdout）は、引数の <paramref name="stdout"/> / <paramref name="stderr"/>
+    /// へ書き出す（呼び出し側は <see cref="StringWriter"/> を渡せばそのまま捕捉できる）。
     /// 設定検証エラー（<see cref="RepositoryDialectUnsupportedException"/>）やその他の例外は呼び出し側へ伝播する。
     /// </remarks>
     public static int GenerateFromConfig(
         IDatabaseProvider provider,
         ErDiagram diagram,
         FileInfo? config,
-        DirectoryInfo output
+        DirectoryInfo output,
+        TextWriter stdout,
+        TextWriter stderr
     )
     {
         var options = GenerationConfigLoader.LoadOptions(config, provider);
-        return GenerateWithResolvedOptions(provider, diagram, options, output);
+        return GenerateWithResolvedOptions(provider, diagram, options, output, stdout, stderr);
     }
 
     /// <summary>解決済みオプションで方言別マッパを解決し、生成・書き出しを行う共通コア</summary>
@@ -109,7 +115,9 @@ internal static class GenerationExecutor
         IDatabaseProvider provider,
         ErDiagram diagram,
         CodeGenerationOptions options,
-        DirectoryInfo output
+        DirectoryInfo output,
+        TextWriter stdout,
+        TextWriter stderr
     )
     {
         var dialectMappers = ResolveDialectTypeMappers(options);
@@ -120,7 +128,7 @@ internal static class GenerationExecutor
             diagram,
             options
         );
-        return WriteResult(result, output, options);
+        return WriteResult(result, output, options, stdout, stderr);
     }
 
     /// <summary>
@@ -153,17 +161,19 @@ internal static class GenerationExecutor
     private static int WriteResult(
         CodeGenerationResult result,
         DirectoryInfo output,
-        CodeGenerationOptions options
+        CodeGenerationOptions options,
+        TextWriter stdout,
+        TextWriter stderr
     )
     {
         foreach (var diagnostic in result.Diagnostics)
         {
-            Console.Error.WriteLine($"[{diagnostic.Severity}] {diagnostic.Message}");
+            stderr.WriteLine($"[{diagnostic.Severity}] {diagnostic.Message}");
         }
 
         if (result.HasErrors)
         {
-            Console.Error.WriteLine(Strings.Cli_GenerationAborted);
+            stderr.WriteLine(Strings.Cli_GenerationAborted);
             return 1;
         }
 
@@ -172,14 +182,14 @@ internal static class GenerationExecutor
 
         foreach (var file in written)
         {
-            Console.WriteLine(string.Format(Strings.Cli_GeneratedFile, file));
+            stdout.WriteLine(string.Format(Strings.Cli_GeneratedFile, file));
         }
 
-        Console.WriteLine(string.Format(Strings.Cli_GeneratedCount, written.Count));
+        stdout.WriteLine(string.Format(Strings.Cli_GeneratedCount, written.Count));
 
         if (options.UseRuntimePackages)
         {
-            Console.WriteLine();
+            stdout.WriteLine();
 
             foreach (
                 var line in RuntimePackageReferenceGuidance.BuildGuidanceLines(
@@ -189,7 +199,7 @@ internal static class GenerationExecutor
                 )
             )
             {
-                Console.WriteLine(line);
+                stdout.WriteLine(line);
             }
         }
 

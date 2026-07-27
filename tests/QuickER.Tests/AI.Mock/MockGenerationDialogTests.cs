@@ -4,6 +4,7 @@ using FluentAssertions;
 using QuickER.AI;
 using QuickER.AI.Mock;
 using QuickER.Model;
+using QuickER.Tests.TestDoubles;
 using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.AI.Mock;
@@ -40,6 +41,8 @@ public class MockGenerationDialogTests
                     "QuickERTests",
                     Guid.NewGuid().ToString("N")
                 );
+                // API キーは実 %APPDATA% の ApiKeyStore ではなくメモリ上のストアへ隔離する
+                var keyStore = new InMemoryApiKeyStore();
                 var viewModel = new MockGenerationDialogViewModel(
                     new StubDiagramSource(new ErDiagram()),
                     new SyncUiDispatcher(),
@@ -47,7 +50,9 @@ public class MockGenerationDialogTests
                     settingsStore: new AiSettingsStore(settingsFolder),
                     apiKeyEngineFactory: null,
                     codexEngineFactory: null,
-                    claudeCodeEngineFactory: null
+                    claudeCodeEngineFactory: null,
+                    apiKeyLoader: keyStore.Load,
+                    apiKeySaver: keyStore.Save
                 );
 
                 // InitializeComponent がここで実行される。WebView2 を含む XAML の
