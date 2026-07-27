@@ -187,6 +187,12 @@
   <data name="Codex_NotConnected" xml:space="preserve">
     <value>未接続</value>
   </data>
+  <data name="Codex_Status_NotFound" xml:space="preserve">
+    <value>Codex が見つかりません</value>
+  </data>
+  <data name="Codex_Guidance_Install" xml:space="preserve">
+    <value>Codex CLI をインストールし、PATH を通してください。</value>
+  </data>
   <data name="Codex_ConnectFailed" xml:space="preserve">
     <value>接続に失敗しました: {0}</value>
   </data>

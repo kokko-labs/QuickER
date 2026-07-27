@@ -20,6 +20,12 @@ internal sealed class FakeCodexAppServerClient : ICodexAppServerClient
 
     public bool IsStarted { get; private set; }
 
+    /// <summary>codex CLI を検出できたことにするか（false なら未検出＝存在検出のフェイク）</summary>
+    public bool IsCliAvailable { get; set; } = true;
+
+    /// <summary>StartAsync が呼ばれた回数（未検出時にプロセス起動を試みないことの検証用）</summary>
+    public int StartCount { get; private set; }
+
     public CodexAccountInfo NextAccountInfo { get; set; } = new();
 
     public CodexThreadStartOptions? LastThreadStartOptions { get; private set; }
@@ -48,6 +54,11 @@ internal sealed class FakeCodexAppServerClient : ICodexAppServerClient
 
     public string? LastInterruptTurnId { get; private set; }
 
+    public bool IsAvailable() => IsCliAvailable;
+
+    /// <summary>StartAsync で投げる例外（非 null なら起動失敗を模擬する）</summary>
+    public Exception? StartException { get; set; }
+
     public Task StartAsync(
         CodexAppServerSettings settings,
         string clientName,
@@ -56,6 +67,13 @@ internal sealed class FakeCodexAppServerClient : ICodexAppServerClient
         CancellationToken cancellationToken = default
     )
     {
+        StartCount++;
+
+        if (StartException is not null)
+        {
+            throw StartException;
+        }
+
         IsStarted = true;
         return Task.CompletedTask;
     }

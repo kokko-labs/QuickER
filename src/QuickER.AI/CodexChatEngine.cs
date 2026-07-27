@@ -3,16 +3,20 @@ using QuickER.AI.Resources;
 
 namespace QuickER.AI;
 
-/// <summary>Codex のアカウント認証状態のスナップショット（UI 表示用）</summary>
+/// <summary>Codex の接続・アカウント認証状態のスナップショット（UI 表示用）</summary>
 /// <param name="IsStarted">App Server へ接続済みか</param>
 /// <param name="RequiresOpenAiAuth">OpenAI 認証が必要か</param>
 /// <param name="AuthMode">認証モード</param>
 /// <param name="AccountSummary">アカウント概要文言</param>
+/// <param name="IsCliMissing">codex CLI が PATH で見つからないか（真なら接続は試行されていない）</param>
+/// <param name="Guidance">状態依存の案内文（未検出＝インストール案内・接続失敗＝理由。正常時は空）</param>
 public readonly record struct CodexAuthState(
     bool IsStarted,
     bool RequiresOpenAiAuth,
     CodexAuthMode AuthMode,
-    string AccountSummary
+    string AccountSummary,
+    bool IsCliMissing = false,
+    string Guidance = ""
 );
 
 /// <summary>
@@ -54,6 +58,15 @@ public sealed class CodexChatEngine : IErChatEngine
 
     /// <summary>アカウント概要の表示文言</summary>
     public string AccountSummary { get; private set; } = Strings.Codex_NotConnected;
+
+    /// <summary>codex CLI が PATH で見つからないか（真なら接続は試行していない）</summary>
+    public bool IsCliMissing { get; private set; }
+
+    /// <summary>
+    /// 下段に表示する状態依存の案内文（未検出＝インストール案内・接続失敗＝その理由。正常時は空）。
+    /// Claude Code 側の <see cref="ClaudeCodeChatEngine.Guidance"/> と同じ役割。
+    /// </summary>
+    public string Guidance { get; private set; } = string.Empty;
 
     /// <summary>現在のプロバイダーが openai か（openai のみ認証が必要）</summary>
     public bool IsOpenAiProvider =>
@@ -117,8 +130,18 @@ public sealed class CodexChatEngine : IErChatEngine
     }
 
     /// <summary>App Server を起動・接続し、アカウント状態を復元する</summary>
+    /// <remarks>
+    /// codex CLI が PATH に無いときはプロセス起動を試みず、未検出（赤・インストール案内）として返す。
+    /// 起動を試みると Win32Exception になり「接続に失敗しました」という的外れな理由しか出せないため。
+    /// </remarks>
     public async Task ConnectAsync(CancellationToken cancellationToken = default)
     {
+        if (!EnsureCliAvailable())
+        {
+            RaiseAuthStateChanged();
+            return;
+        }
+
         try
         {
             await _client
@@ -130,30 +153,73 @@ public sealed class CodexChatEngine : IErChatEngine
                     cancellationToken
                 )
                 .ConfigureAwait(false);
-            IsStarted = _client.IsStarted;
-            await RefreshAccountStateAsync(cancellationToken).ConfigureAwait(false);
+            Guidance = string.Empty;
         }
         catch (Exception ex)
         {
-            StatusChanged?.Invoke(this, string.Format(Strings.Codex_ConnectFailed, ex.Message));
+            // 検出はできたが起動に失敗した場合は、従来の通知に加えて案内文にも理由を残す
+            Guidance = string.Format(Strings.Codex_ConnectFailed, ex.Message);
+            StatusChanged?.Invoke(this, Guidance);
+        }
+
+        IsStarted = _client.IsStarted;
+
+        if (IsStarted)
+        {
+            await ReadAccountStateAsync(cancellationToken).ConfigureAwait(false);
         }
 
         RaiseAuthStateChanged();
     }
 
-    /// <summary>アカウント状態を再取得して反映する</summary>
+    /// <summary>アカウント状態を再取得して反映する（未接続ならまず接続からやり直す）</summary>
+    /// <remarks>
+    /// 「再確認」ボタンの入口。未接続のまま未接続表示へリセットするだけでは復帰手段が無いため、
+    /// 先に <see cref="ConnectAsync"/> を試みる（未検出ならその中で案内へ落ちる）。
+    /// </remarks>
     public async Task RefreshAccountStateAsync(CancellationToken cancellationToken = default)
     {
         if (!_client.IsStarted)
         {
-            IsStarted = false;
-            AuthMode = CodexAuthMode.None;
-            AccountSummary = Strings.Codex_NotConnected;
-            RequiresOpenAiAuth = true;
-            RaiseAuthStateChanged();
+            await ConnectAsync(cancellationToken).ConfigureAwait(false);
             return;
         }
 
+        await ReadAccountStateAsync(cancellationToken).ConfigureAwait(false);
+        RaiseAuthStateChanged();
+    }
+
+    /// <summary>
+    /// codex CLI の存在を確認し、未検出なら未検出状態（赤・インストール案内）へ落として false を返す。
+    /// 検出できていれば、直前の未検出表示を解除して true を返す。
+    /// </summary>
+    private bool EnsureCliAvailable()
+    {
+        if (_client.IsAvailable())
+        {
+            if (IsCliMissing)
+            {
+                // 未検出から復帰したので、案内文とサマリーを未接続の初期状態へ戻す
+                IsCliMissing = false;
+                Guidance = string.Empty;
+                AccountSummary = Strings.Codex_NotConnected;
+            }
+
+            return true;
+        }
+
+        IsCliMissing = true;
+        IsStarted = false;
+        AuthMode = CodexAuthMode.None;
+        RequiresOpenAiAuth = true;
+        AccountSummary = Strings.Codex_Status_NotFound;
+        Guidance = Strings.Codex_Guidance_Install;
+        return false;
+    }
+
+    /// <summary>アカウント状態を取得して反映する（接続済み前提・状態通知は呼び出し側の責務）</summary>
+    private async Task ReadAccountStateAsync(CancellationToken cancellationToken)
+    {
         try
         {
             var account = await _client
@@ -168,8 +234,6 @@ public sealed class CodexChatEngine : IErChatEngine
                 string.Format(Strings.Codex_AccountStateFailed, ex.Message)
             );
         }
-
-        RaiseAuthStateChanged();
     }
 
     /// <summary>ChatGPT ブラウザログインを開始し、認証 URL を返す（URL を開く処理は呼び出し側）</summary>
@@ -428,7 +492,14 @@ public sealed class CodexChatEngine : IErChatEngine
     private void RaiseAuthStateChanged() =>
         AuthStateChanged?.Invoke(
             this,
-            new CodexAuthState(IsStarted, RequiresOpenAiAuth, AuthMode, AccountSummary)
+            new CodexAuthState(
+                IsStarted,
+                RequiresOpenAiAuth,
+                AuthMode,
+                AccountSummary,
+                IsCliMissing,
+                Guidance
+            )
         );
 
     /// <summary>ストリーミング差分を UI スレッドで共通イベントへ変換する</summary>

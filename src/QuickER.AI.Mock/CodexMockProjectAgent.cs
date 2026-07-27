@@ -49,8 +49,11 @@ public sealed class CodexMockProjectAgent : IMockProjectAgent
     }
 
     /// <inheritdoc />
-    /// <remarks>codex CLI が PATH で解決できるかで判定する（App Server は起動しない）。</remarks>
-    public bool IsAvailable() => ResolveCodexExecutablePath() is not null;
+    /// <remarks>
+    /// codex CLI が PATH で解決できるかで判定する（App Server は起動しない）。
+    /// 走査は共有ロケーター <see cref="CodexCliLocator"/>（チャット側の存在検出と同一）へ委譲する。
+    /// </remarks>
+    public bool IsAvailable() => CodexCliLocator.IsAvailable();
 
     /// <inheritdoc />
     public async Task<MockProjectAgentOutcome> RunAsync(
@@ -306,48 +309,4 @@ public sealed class CodexMockProjectAgent : IMockProjectAgent
     /// <summary>空白を null へ正規化する（未指定なら codex の既定に委ねる）</summary>
     private static string? NormalizeOptional(string? text) =>
         string.IsNullOrWhiteSpace(text) ? null : text.Trim();
-
-    /// <summary>PATH から codex 実行ファイルを解決する（見つからなければ null）</summary>
-    private static string? ResolveCodexExecutablePath()
-    {
-        var pathValue = Environment.GetEnvironmentVariable("PATH");
-
-        if (string.IsNullOrEmpty(pathValue))
-        {
-            return null;
-        }
-
-        string[] candidates = OperatingSystem.IsWindows()
-            ? ["codex.exe", "codex.cmd", "codex.bat", "codex"]
-            : ["codex"];
-
-        foreach (var directory in pathValue.Split(Path.PathSeparator))
-        {
-            if (string.IsNullOrWhiteSpace(directory))
-            {
-                continue;
-            }
-
-            foreach (var candidate in candidates)
-            {
-                string fullPath;
-
-                try
-                {
-                    fullPath = Path.Combine(directory.Trim(), candidate);
-                }
-                catch (ArgumentException)
-                {
-                    continue;
-                }
-
-                if (File.Exists(fullPath))
-                {
-                    return fullPath;
-                }
-            }
-        }
-
-        return null;
-    }
 }

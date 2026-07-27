@@ -364,7 +364,7 @@ See the log for details:
     <value>Codex is not logged in.</value>
   </data>
   <data name="Mock_Result_ClientFailedFormat" xml:space="preserve">
-    <value>Claude Code execution failed: {0}. Please check the log.</value>
+    <value>The AI backend failed: {0}. Check the log for details.</value>
   </data>
   <data name="Mock_Result_ArtifactsMissing" xml:space="preserve">
     <value>Could not verify the generated files (csproj / xaml). Please check the log.</value>

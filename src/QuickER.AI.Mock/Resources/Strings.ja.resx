@@ -364,7 +364,7 @@
     <value>Codex が未ログインです。</value>
   </data>
   <data name="Mock_Result_ClientFailedFormat" xml:space="preserve">
-    <value>Claude Code の実行に失敗しました: {0}。ログを確認してください。</value>
+    <value>AI バックエンドの実行に失敗しました: {0}。ログを確認してください。</value>
   </data>
   <data name="Mock_Result_ArtifactsMissing" xml:space="preserve">
     <value>生成物（csproj / xaml）を確認できませんでした。ログを確認してください。</value>

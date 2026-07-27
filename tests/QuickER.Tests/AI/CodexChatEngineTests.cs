@@ -116,6 +116,108 @@ public class CodexChatEngineTests
         engine.IsReady.Should().BeTrue();
     }
 
+    /// <summary>
+    /// codex CLI が未検出のとき、プロセス起動を試みず未検出状態（赤・インストール案内）になることを検証する。
+    /// </summary>
+    [Fact(DisplayName = "codex 未検出なら起動せず未検出状態になる")]
+    public async Task Connect_CliMissing_DoesNotStartAndReportsNotFound()
+    {
+        var client = new FakeCodexAppServerClient { IsCliAvailable = false };
+        var engine = new CodexChatEngine(
+            client,
+            new RecordingToolHost(),
+            new SyncUiDispatcher(),
+            ErDesignProfile.ErDesign
+        );
+        CodexAuthState? state = null;
+        engine.AuthStateChanged += (_, s) => state = s;
+
+        await engine.InitializeAsync(TestContext.Current.CancellationToken);
+
+        client.StartCount.Should().Be(0, "未検出ならプロセス起動を試みない");
+        engine.IsCliMissing.Should().BeTrue();
+        engine.IsStarted.Should().BeFalse();
+        engine.IsReady.Should().BeFalse();
+        engine.AccountSummary.Should().Be(QuickER.AI.Resources.Strings.Codex_Status_NotFound);
+        engine.Guidance.Should().Be(QuickER.AI.Resources.Strings.Codex_Guidance_Install);
+        state.Should().NotBeNull();
+        state!.Value.IsCliMissing.Should().BeTrue();
+        state.Value.Guidance.Should().Be(QuickER.AI.Resources.Strings.Codex_Guidance_Install);
+    }
+
+    /// <summary>検出済みで起動に失敗した場合は、未検出ではなく接続失敗として理由が案内されることを検証する</summary>
+    [Fact(DisplayName = "検出済みで起動失敗なら接続失敗の理由を案内する")]
+    public async Task Connect_StartFails_ReportsConnectFailure()
+    {
+        var client = new FakeCodexAppServerClient
+        {
+            StartException = new InvalidOperationException("起動できません"),
+        };
+        var engine = new CodexChatEngine(
+            client,
+            new RecordingToolHost(),
+            new SyncUiDispatcher(),
+            ErDesignProfile.ErDesign
+        );
+        var statuses = new List<string>();
+        engine.StatusChanged += (_, m) => statuses.Add(m);
+
+        await engine.InitializeAsync(TestContext.Current.CancellationToken);
+
+        client.StartCount.Should().Be(1);
+        engine.IsCliMissing.Should().BeFalse();
+        engine.IsStarted.Should().BeFalse();
+        engine.Guidance.Should().Contain("起動できません");
+        statuses.Should().ContainSingle().Which.Should().Contain("起動できません");
+    }
+
+    /// <summary>未検出から検出可能へ変わったら、「再確認」で未検出表示が解除され接続されることを検証する</summary>
+    [Fact(DisplayName = "未検出から復帰したら再確認で接続できる")]
+    public async Task Refresh_AfterCliBecomesAvailable_Connects()
+    {
+        var client = new FakeCodexAppServerClient { IsCliAvailable = false };
+        var engine = new CodexChatEngine(
+            client,
+            new RecordingToolHost(),
+            new SyncUiDispatcher(),
+            ErDesignProfile.ErDesign
+        )
+        {
+            ModelProvider = "ollama-launch",
+        };
+
+        await engine.InitializeAsync(TestContext.Current.CancellationToken);
+        client.IsCliAvailable = true;
+        await engine.RefreshAccountStateAsync(TestContext.Current.CancellationToken);
+
+        client.StartCount.Should().Be(1);
+        engine.IsCliMissing.Should().BeFalse();
+        engine.IsStarted.Should().BeTrue();
+        engine.Guidance.Should().BeEmpty();
+    }
+
+    /// <summary>「再確認」は未接続のまま諦めず、接続からやり直すことを検証する</summary>
+    [Fact(DisplayName = "再確認は未接続なら接続を試行する")]
+    public async Task Refresh_WhenNotStarted_AttemptsConnect()
+    {
+        var client = new FakeCodexAppServerClient();
+        var engine = new CodexChatEngine(
+            client,
+            new RecordingToolHost(),
+            new SyncUiDispatcher(),
+            ErDesignProfile.ErDesign
+        )
+        {
+            ModelProvider = "ollama-launch",
+        };
+
+        await engine.RefreshAccountStateAsync(TestContext.Current.CancellationToken);
+
+        client.StartCount.Should().Be(1, "未接続なら接続からやり直す");
+        engine.IsStarted.Should().BeTrue();
+        engine.IsReady.Should().BeTrue();
+    }
+
     /// <summary>Codex は添付非対応（AttachmentSupport=None）であることを検証する</summary>
     [Fact(DisplayName = "Codex の AttachmentSupport は None")]
     public void AttachmentSupport_IsNone()

@@ -278,6 +278,8 @@ public class MockProjectAgentRunnerTests
             // 成果物があればビルド検証自体は走るが（既存挙動）、自己申告失敗のため全体は失敗確定
             build.BuildCallCount.Should().Be(1);
             result.Message.Should().Contain("エージェントが失敗しました");
+            // 失敗文言はバックエンド中立（Codex / API キー実行でも「Claude Code」と出さない）
+            result.Message.Should().NotContain("Claude Code");
         }
         finally
         {
