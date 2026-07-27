@@ -108,6 +108,62 @@ public class AiChatDialogViewModelTests
         }
     }
 
+    /// <summary>
+    /// codex CLI 未検出のとき、赤ドット・未検出サマリー・インストール案内になり、
+    /// 的外れな ChatGPT ログインパネルを出さず、プロセス起動も試みないことを検証する。
+    /// </summary>
+    [Fact(DisplayName = "codex 未検出なら赤・インストール案内・ログインパネル非表示")]
+    public void CodexCliMissing_ShowsInstallGuidance_AndHidesLoginPanel()
+    {
+        var (vm, client, folder) = CreateVm();
+
+        try
+        {
+            client.IsCliAvailable = false;
+
+            vm.Connection.SelectedBackend = ErChatBackendKind.Codex;
+
+            client.StartCount.Should().Be(0, "未検出ならプロセス起動を試みない");
+            vm.CodexStatusLevel.Should().Be(ConnectionHealth.NeedsAction);
+            vm.CodexAccountSummary.Should().Be(QuickER.AI.Resources.Strings.Codex_Status_NotFound);
+            vm.CodexGuidance.Should().Be(QuickER.AI.Resources.Strings.Codex_Guidance_Install);
+            vm.ShowCodexGuidance.Should().BeTrue();
+            vm.ShowCodexLoginPanel.Should().BeFalse("未検出ではログインしても解決しない");
+            vm.CanStartConversation.Should().BeFalse();
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
+    /// <summary>
+    /// 検出済み・未ログインでは従来どおり ChatGPT ログインパネルが出て、案内文は出ないことを検証する
+    /// （未検出時の抑止が未ログインの案内まで巻き込んでいないことの対照）。
+    /// </summary>
+    [Fact(DisplayName = "codex 検出済み・未ログインならログインパネルを出す")]
+    public void CodexDetectedButNotLoggedIn_ShowsLoginPanel()
+    {
+        var (vm, client, folder) = CreateVm();
+
+        try
+        {
+            client.NextAccountInfo = new CodexAccountInfo { RequiresOpenAiAuth = true };
+
+            vm.Connection.SelectedBackend = ErChatBackendKind.Codex;
+
+            client.StartCount.Should().Be(1);
+            vm.ShowCodexLoginPanel.Should().BeTrue();
+            vm.CodexGuidance.Should().BeEmpty();
+            vm.ShowCodexGuidance.Should().BeFalse();
+            vm.CodexStatusLevel.Should().Be(ConnectionHealth.NeedsAction);
+        }
+        finally
+        {
+            Cleanup(folder);
+        }
+    }
+
     /// <summary>チャットホストのスタブ（呼び出しを記録し、MainViewModel への依存を排除する）</summary>
     private sealed class RecordingChatHost : IErDiagramChatHost
     {

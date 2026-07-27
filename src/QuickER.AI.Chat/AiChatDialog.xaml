@@ -497,6 +497,14 @@
           >
             <ui:ConnectionStatusPanel.Body>
               <StackPanel>
+                <!-- 状態依存の案内（CLI 未検出時のインストール案内・接続失敗理由）。空なら行ごと隠す -->
+                <TextBlock
+                  Margin="0,10,0,0"
+                  Foreground="{StaticResource MutedText}"
+                  TextWrapping="Wrap"
+                  Text="{Binding CodexGuidance}"
+                  Visibility="{Binding ShowCodexGuidance, Converter={StaticResource BoolToVisibilityConverter}}"
+                />
                 <!-- 未ログイン: 案内 + ChatGPT ログイン -->
                 <StackPanel
                   Margin="0,10,0,0"

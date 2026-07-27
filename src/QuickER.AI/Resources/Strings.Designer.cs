@@ -312,6 +312,18 @@ namespace QuickER.AI.Resources {
             }
         }
 
+        public static string Codex_Status_NotFound {
+            get {
+                return ResourceManager.GetString("Codex_Status_NotFound", resourceCulture);
+            }
+        }
+
+        public static string Codex_Guidance_Install {
+            get {
+                return ResourceManager.GetString("Codex_Guidance_Install", resourceCulture);
+            }
+        }
+
         public static string Codex_ConnectFailed {
             get {
                 return ResourceManager.GetString("Codex_ConnectFailed", resourceCulture);

@@ -501,7 +501,18 @@
                 StatusLevel="{Binding CodexStatusLevel}"
                 SummaryText="{Binding CodexAccountSummary}"
                 RefreshCommand="{Binding CodexRefreshCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-              />
+              >
+                <ui:ConnectionStatusPanel.Body>
+                  <!-- 状態依存の案内（CLI 未検出時のインストール案内・接続失敗理由）。空なら行ごと隠す -->
+                  <TextBlock
+                    Margin="0,10,0,0"
+                    Foreground="{StaticResource MutedText}"
+                    TextWrapping="Wrap"
+                    Text="{Binding CodexGuidance}"
+                    Visibility="{Binding ShowCodexGuidance, Converter={StaticResource BoolToVisibilityConverter}}"
+                  />
+                </ui:ConnectionStatusPanel.Body>
+              </ui:ConnectionStatusPanel>
             </StackPanel>
           </TabItem>
 

@@ -52,6 +52,8 @@ public partial class MockGenerationDialog : Window
             MockDesignProfile.FolderMockDesign
         );
         _codexProbe.AuthStateChanged += OnCodexAuthStateChanged;
+        // 接続失敗・アカウント取得失敗の理由はステータス通知にしか出ないため、こちらも購読して VM へ流す
+        _codexProbe.StatusChanged += OnCodexStatusChanged;
         _claudeCodeProbe = new ClaudeCodeChatEngine(
             new ClaudeCodeProcessClient(),
             toolHost: null,
@@ -303,12 +305,19 @@ public partial class MockGenerationDialog : Window
         }
 
         var ready = _codexProbe.IsReady;
+        // CLI 未検出はユーザー操作（インストール）が要るため、未接続の灰ではなく赤で出す
         var level =
             ready ? ConnectionHealth.Ready
-            : state.IsStarted ? ConnectionHealth.NeedsAction
+            : state.IsCliMissing || state.IsStarted ? ConnectionHealth.NeedsAction
             : ConnectionHealth.Pending;
-        Dispatcher.Invoke(() => ViewModel.ApplyCodexReadiness(ready, state.AccountSummary, level));
+        Dispatcher.Invoke(() =>
+            ViewModel.ApplyCodexReadiness(ready, state.AccountSummary, level, state.Guidance)
+        );
     }
+
+    /// <summary>Codex プローブのステータス通知（接続失敗など）を ViewModel へ反映する</summary>
+    private void OnCodexStatusChanged(object? sender, string message) =>
+        Dispatcher.Invoke(() => ViewModel.ApplyCodexStatusMessage(message));
 
     /// <summary>Claude Code を初期化し、状態を ViewModel へ反映する</summary>
     private async Task EnsureClaudeCodeInitializedAsync()

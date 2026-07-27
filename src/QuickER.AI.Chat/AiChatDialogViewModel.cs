@@ -105,23 +105,41 @@ public partial class AiChatDialogViewModel : ObservableObject
     /// <summary>Codex 認証セクションを表示するか（openai プロバイダー時のみ）</summary>
     public bool ShowCodexAuthSection => _codexEngine?.IsOpenAiProvider ?? false;
 
-    /// <summary>Codex ログインパネルを表示するか（openai・認証必要・未ログイン、かつ接続解決済みのときのみ）</summary>
+    /// <summary>
+    /// Codex ログインパネルを表示するか（openai・認証必要・未ログイン、かつ接続解決済みのときのみ）。
+    /// codex CLI 未検出のときは表示しない（ログインを促しても解決しないため。案内は
+    /// <see cref="CodexGuidance"/> のインストール案内が担う）。
+    /// </summary>
     public bool ShowCodexLoginPanel =>
         !_codexConnecting
+        && !_codexAuth.IsCliMissing
         && (_codexEngine?.IsOpenAiProvider ?? false)
         && _codexAuth.RequiresOpenAiAuth
         && _codexAuth.AuthMode == CodexAuthMode.None;
+
+    /// <summary>Codex の状態依存の案内文（未検出＝インストール案内・接続失敗＝理由。正常時は空）</summary>
+    [ObservableProperty]
+    private string _codexGuidance = string.Empty;
+
+    /// <summary>Codex の案内文を表示するか（空なら行ごと隠す）</summary>
+    public bool ShowCodexGuidance => !string.IsNullOrWhiteSpace(CodexGuidance);
 
     /// <summary>Codex ログアウト可能か</summary>
     public bool CanCodexLogout =>
         _codexAuth.IsStarted
         && (_codexAuth.AuthMode != CodexAuthMode.None || !_codexAuth.RequiresOpenAiAuth);
 
-    /// <summary>Codex の状態ドット健全度（接続中/未開始=灰・未ログイン=赤・他=緑）</summary>
+    /// <summary>Codex の状態ドット健全度（CLI 未検出/未ログイン=赤・接続中/未開始=灰・他=緑）</summary>
     public ConnectionHealth CodexStatusLevel
     {
         get
         {
+            // CLI 未検出はユーザー操作（インストール）が要るため、接続解決中でも赤で確定させる
+            if (_codexAuth.IsCliMissing)
+            {
+                return ConnectionHealth.NeedsAction;
+            }
+
             if (_codexConnecting || !_codexAuth.IsStarted)
             {
                 return ConnectionHealth.Pending;
@@ -574,6 +592,9 @@ public partial class AiChatDialogViewModel : ObservableObject
 
     partial void OnUserInputChanged(string value) => SendMessageCommand.NotifyCanExecuteChanged();
 
+    partial void OnCodexGuidanceChanged(string value) =>
+        OnPropertyChanged(nameof(ShowCodexGuidance));
+
     // ── エンジンイベント ──
 
     /// <summary>アクティブエンジンのイベントを購読する</summary>
@@ -689,6 +710,7 @@ public partial class AiChatDialogViewModel : ObservableObject
     {
         _codexAuth = state;
         CodexAccountSummary = state.AccountSummary;
+        CodexGuidance = state.Guidance;
         OnPropertyChanged(nameof(ShowCodexAuthSection));
         OnPropertyChanged(nameof(ShowCodexLoginPanel));
         OnPropertyChanged(nameof(CanCodexLogout));

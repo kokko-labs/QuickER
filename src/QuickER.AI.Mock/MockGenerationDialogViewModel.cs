@@ -364,6 +364,13 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     [ObservableProperty]
     private ConnectionHealth _codexStatusLevel = ConnectionHealth.Pending;
 
+    /// <summary>Codex の状態依存の案内文（未検出＝インストール案内・接続失敗＝理由。正常時は空）</summary>
+    [ObservableProperty]
+    private string _codexGuidance = string.Empty;
+
+    /// <summary>Codex の案内文を表示するか（空なら行ごと隠す）</summary>
+    public bool ShowCodexGuidance => !string.IsNullOrWhiteSpace(CodexGuidance);
+
     private bool _codexReady;
 
     private bool _claudeCodeReady;
@@ -1433,6 +1440,9 @@ public partial class MockGenerationDialogViewModel : ObservableObject
 
     partial void OnUserInputChanged(string value) => SendMessageCommand.NotifyCanExecuteChanged();
 
+    partial void OnCodexGuidanceChanged(string value) =>
+        OnPropertyChanged(nameof(ShowCodexGuidance));
+
     partial void OnOutputFolderChanged(string value) => NotifyMockGenChanged();
 
     partial void OnProjectNameChanged(string value) => NotifyMockGenChanged();
@@ -1442,12 +1452,37 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     partial void OnIsDotnetAvailableChanged(bool value) => NotifyMockGenChanged();
 
     /// <summary>Codex 接続状態を外部（ダイアログのコードビハインド）から反映する</summary>
-    public void ApplyCodexReadiness(bool ready, string summary, ConnectionHealth level)
+    /// <param name="ready">送信可能な状態か</param>
+    /// <param name="summary">状態サマリー（未接続・未ログイン・未検出など）</param>
+    /// <param name="level">状態ドットの健全度</param>
+    /// <param name="guidance">状態依存の案内文（未検出＝インストール案内・接続失敗＝理由。正常時は空）</param>
+    public void ApplyCodexReadiness(
+        bool ready,
+        string summary,
+        ConnectionHealth level,
+        string guidance = ""
+    )
     {
         _codexReady = ready;
         CodexAccountSummary = summary;
         CodexStatusLevel = level;
+        CodexGuidance = guidance;
         NotifyReadinessChanged();
+    }
+
+    /// <summary>
+    /// Codex プローブのステータス通知（接続失敗・アカウント取得失敗など）を反映する。
+    /// プローブエンジンは会話用エンジンではないため、通知経路をここで明示的にステータスバーへ繋ぐ。
+    /// </summary>
+    /// <param name="message">通知メッセージ</param>
+    public void ApplyCodexStatusMessage(string message)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            return;
+        }
+
+        StatusMessage = message;
     }
 
     /// <summary>Claude Code 接続状態を外部から反映する</summary>

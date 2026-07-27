@@ -440,4 +440,16 @@ public class CodexMockProjectAgentTests
         // 値は PATH 依存のため問わない。App Server を起動せず PATH 走査のみで判定できることを確認する
         agent.Invoking(a => a.IsAvailable()).Should().NotThrow();
     }
+
+    /// <summary>
+    /// 可用性判定が共有ロケーター（<see cref="CodexCliLocator"/>）と同じ結果になることを検証する。
+    /// モック側だけ独自走査を持つと、チャット側の未検出表示と食い違うため委譲を固定する。
+    /// </summary>
+    [Fact(DisplayName = "可用性判定は共有ロケーターと同じ結果になる")]
+    public void IsAvailable_MatchesSharedLocator()
+    {
+        var agent = new CodexMockProjectAgent(new FakeCodexAppServerClient());
+
+        agent.IsAvailable().Should().Be(CodexCliLocator.IsAvailable());
+    }
 }

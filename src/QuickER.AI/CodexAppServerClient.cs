@@ -35,6 +35,13 @@ public interface ICodexAppServerClient : IAsyncDisposable
     /// <summary>Codex App Server プロセスが起動済みで通信可能かどうかを示す</summary>
     bool IsStarted { get; }
 
+    /// <summary>codex CLI が利用可能か（PATH 解決できるか）</summary>
+    /// <remarks>
+    /// <see cref="IClaudeCodeClient.IsAvailable"/> と同じ役割。未検出のまま
+    /// <see cref="StartAsync"/> を呼ぶと Win32Exception になるため、UI 側は本判定で先に案内する。
+    /// </remarks>
+    bool IsAvailable();
+
     /// <summary>Codex App Server プロセスを起動し、initialize ハンドシェイクを完了する</summary>
     /// <remarks>既に起動済みの場合は何もしない</remarks>
     Task StartAsync(
@@ -206,6 +213,10 @@ public sealed class CodexAppServerClient : ICodexAppServerClient
 
     /// <inheritdoc />
     public bool IsStarted => _process is { HasExited: false } && _stdin is not null;
+
+    /// <inheritdoc />
+    /// <remarks>共有ロケーターへ委譲する（結果はキャッシュせず、呼ぶたびに PATH を走査する）。</remarks>
+    public bool IsAvailable() => CodexCliLocator.IsAvailable();
 
     /// <inheritdoc />
     public async Task StartAsync(

@@ -7,6 +7,7 @@ using QuickER.AI.Mock;
 using QuickER.Gui.Abstractions;
 using QuickER.Model;
 using QuickER.Tests.TestDoubles;
+using AiStrings = QuickER.AI.Resources.Strings;
 using MockStrings = QuickER.AI.Mock.Resources.Strings;
 
 namespace QuickER.Tests.AI.Mock;
@@ -1619,6 +1620,77 @@ public class MockGenerationDialogViewModelTests
             vm.Connection.SelectedBackend = ErChatBackendKind.Codex;
 
             vm.Attachments.Items.Should().BeEmpty();
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
+    /// <summary>
+    /// Codex プローブの未検出状態（サマリー・赤ドット・インストール案内）が VM へ届き、
+    /// 案内表示フラグが立つことを検証する（ダイアログの AuthStateChanged 購読が渡す値と同じ形）。
+    /// </summary>
+    [Fact(DisplayName = "Codex 未検出の案内が VM へ反映される")]
+    public void ApplyCodexReadiness_CliMissing_SetsGuidance()
+    {
+        var (vm, _, baseFolder, _) = CreateVm(NonEmptyDiagram());
+
+        try
+        {
+            vm.ShowCodexGuidance.Should().BeFalse("初期状態では案内行を出さない");
+
+            vm.ApplyCodexReadiness(
+                ready: false,
+                AiStrings.Codex_Status_NotFound,
+                ConnectionHealth.NeedsAction,
+                AiStrings.Codex_Guidance_Install
+            );
+
+            vm.CodexAccountSummary.Should().Be(AiStrings.Codex_Status_NotFound);
+            vm.CodexStatusLevel.Should().Be(ConnectionHealth.NeedsAction);
+            vm.CodexGuidance.Should().Be(AiStrings.Codex_Guidance_Install);
+            vm.ShowCodexGuidance.Should().BeTrue();
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
+    /// <summary>
+    /// Codex プローブのステータス通知（接続失敗理由）が VM のステータスへ届くことを検証する
+    /// （ダイアログが StatusChanged を購読して流す経路。従来は理由が一切表示されなかった）。
+    /// </summary>
+    [Fact(DisplayName = "Codex のステータス通知が VM へ届く")]
+    public void ApplyCodexStatusMessage_UpdatesStatusMessage()
+    {
+        var (vm, _, baseFolder, _) = CreateVm(NonEmptyDiagram());
+
+        try
+        {
+            vm.ApplyCodexStatusMessage("接続に失敗しました: boom");
+
+            vm.StatusMessage.Should().Be("接続に失敗しました: boom");
+        }
+        finally
+        {
+            Cleanup(baseFolder);
+        }
+    }
+
+    /// <summary>空メッセージではステータスを上書きしないことを検証する（無意味な空表示を避ける）</summary>
+    [Fact(DisplayName = "Codex の空ステータス通知はステータスを上書きしない")]
+    public void ApplyCodexStatusMessage_Empty_KeepsStatus()
+    {
+        var (vm, _, baseFolder, _) = CreateVm(NonEmptyDiagram());
+
+        try
+        {
+            vm.ApplyCodexStatusMessage("先の通知");
+            vm.ApplyCodexStatusMessage("   ");
+
+            vm.StatusMessage.Should().Be("先の通知");
         }
         finally
         {
