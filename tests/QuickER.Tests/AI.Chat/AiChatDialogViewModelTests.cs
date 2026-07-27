@@ -28,12 +28,16 @@ public class AiChatDialogViewModelTests
         // 設定・UI 状態・モデル履歴を集約した 1 ファイルを一時フォルダへ隔離する（実 %APPDATA% を保護）
         var settingsStore = new AiSettingsStore(folder);
         var client = new FakeCodexAppServerClient();
+        // API キーは実 %APPDATA% の ApiKeyStore ではなくメモリ上のストアへ隔離する（並列テストの IO 競合を避ける）
+        var keyStore = new InMemoryApiKeyStore();
         var vm = new AiChatDialogViewModel(
             host: null,
             dispatcher: new SyncUiDispatcher(),
             settingsStore: settingsStore,
             codexClient: client,
-            dialogService: dialogService
+            dialogService: dialogService,
+            apiKeyLoader: keyStore.Load,
+            apiKeySaver: keyStore.Save
         );
         return (vm, client, folder);
     }
@@ -51,6 +55,7 @@ public class AiChatDialogViewModelTests
     public void SaveSettings_PersistsSelectedBackend_AndRestoresOnNextLoad()
     {
         var folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
+        var keyStore = new InMemoryApiKeyStore();
 
         try
         {
@@ -58,7 +63,9 @@ public class AiChatDialogViewModelTests
                 host: null,
                 dispatcher: new SyncUiDispatcher(),
                 settingsStore: new AiSettingsStore(folder),
-                codexClient: new FakeCodexAppServerClient()
+                codexClient: new FakeCodexAppServerClient(),
+                apiKeyLoader: keyStore.Load,
+                apiKeySaver: keyStore.Save
             );
 
             // 保存が無い初回は API キータブが既定
@@ -71,7 +78,9 @@ public class AiChatDialogViewModelTests
                 host: null,
                 dispatcher: new SyncUiDispatcher(),
                 settingsStore: new AiSettingsStore(folder),
-                codexClient: new FakeCodexAppServerClient()
+                codexClient: new FakeCodexAppServerClient(),
+                apiKeyLoader: keyStore.Load,
+                apiKeySaver: keyStore.Save
             );
 
             restored.Connection.InitialBackend.Should().Be(ErChatBackendKind.ClaudeCode);
@@ -88,6 +97,7 @@ public class AiChatDialogViewModelTests
     {
         var folder = Path.Combine(Path.GetTempPath(), "QuickERTests", Guid.NewGuid().ToString("N"));
         var host = new RecordingChatHost();
+        var keyStore = new InMemoryApiKeyStore();
 
         try
         {
@@ -95,7 +105,9 @@ public class AiChatDialogViewModelTests
                 host: host,
                 dispatcher: new SyncUiDispatcher(),
                 settingsStore: new AiSettingsStore(folder),
-                codexClient: new FakeCodexAppServerClient()
+                codexClient: new FakeCodexAppServerClient(),
+                apiKeyLoader: keyStore.Load,
+                apiKeySaver: keyStore.Save
             );
 
             // ツール実行 seam は host 抽象から取得され、MainViewModel 具象には依存しない
@@ -226,8 +238,6 @@ public class AiChatDialogViewModelTests
         }
         finally
         {
-            vm.Connection.SaveApiKey = false;
-            ApiKeyStore.Save("OpenAiApiKey", string.Empty);
             Cleanup(folder);
         }
     }
@@ -446,8 +456,6 @@ public class AiChatDialogViewModelTests
         }
         finally
         {
-            vm.Connection.SaveApiKey = false;
-            ApiKeyStore.Save("OpenAiApiKey", string.Empty);
             Cleanup(folder);
         }
     }

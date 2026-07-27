@@ -8,6 +8,7 @@ using QuickER.AI;
 using QuickER.AI.Chat;
 using QuickER.AI.UI;
 using QuickER.Tests.AI;
+using QuickER.Tests.TestDoubles;
 using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.AI.UI;
@@ -44,11 +45,15 @@ public class CodexProviderComboBoxTests
 
             try
             {
+                // API キーは実 %APPDATA% の ApiKeyStore ではなくメモリ上のストアへ隔離する
+                var keyStore = new InMemoryApiKeyStore();
                 var vm = new AiChatDialogViewModel(
                     host: null,
                     dispatcher: new SyncUiDispatcher(),
                     settingsStore: new AiSettingsStore(folder),
-                    codexClient: new FakeCodexAppServerClient()
+                    codexClient: new FakeCodexAppServerClient(),
+                    apiKeyLoader: keyStore.Load,
+                    apiKeySaver: keyStore.Save
                 );
 
                 // 実ダイアログのプロバイダー ComboBox から本物のテンプレートと入力方式を確認する

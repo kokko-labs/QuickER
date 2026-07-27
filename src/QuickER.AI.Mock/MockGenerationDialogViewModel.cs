@@ -401,6 +401,12 @@ public partial class MockGenerationDialogViewModel : ObservableObject
     /// <param name="claudeCodeEngineFactory">Claude Code エンジンのファクトリ</param>
     /// <param name="mockProjectGenerator">モックプロジェクト生成器（省略時は図の供給元のプロバイダから構築）</param>
     /// <param name="dialogService">確認・通知ダイアログ（省略時は MessageBox 実装）</param>
+    /// <param name="apiKeyLoader">
+    /// API キー読込 seam（省略時は <see cref="ApiKeyStore.Load(string)"/>）。<see cref="Connection"/> へ透過する
+    /// </param>
+    /// <param name="apiKeySaver">
+    /// API キー保存 seam（省略時は <see cref="ApiKeyStore.Save(string, string)"/>）。<see cref="Connection"/> へ透過する
+    /// </param>
     public MockGenerationDialogViewModel(
         IMockDiagramSource diagramSource,
         IUiDispatcher dispatcher,
@@ -411,7 +417,9 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         Func<ErChatProfile, IErDiagramToolHost, IErChatEngine>? claudeCodeEngineFactory,
         IMockProjectGenerator? mockProjectGenerator = null,
         ChatAttachmentFactory.ImageShrinker? imageShrinker = null,
-        IDialogService? dialogService = null
+        IDialogService? dialogService = null,
+        Func<string, string?>? apiKeyLoader = null,
+        Action<string, string>? apiKeySaver = null
     )
     {
         _diagramSource = diagramSource;
@@ -428,7 +436,9 @@ public partial class MockGenerationDialogViewModel : ObservableObject
         // ラムダから参照させる（PropertyChanged 購読と LoadSettings は下記の ctor 順序に従い後段で行う）。
         Connection = new ChatConnectionSettingsViewModel(
             AiDialogKind.MockGeneration,
-            settingsStore
+            settingsStore,
+            apiKeyLoader: apiKeyLoader,
+            apiKeySaver: apiKeySaver
         );
 
         _apiKeyEngineFactory =

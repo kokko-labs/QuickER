@@ -180,6 +180,12 @@ public partial class AiChatDialogViewModel : ObservableObject
         ) { }
 
     /// <summary>依存を注入して生成する（テスト用）</summary>
+    /// <param name="apiKeyLoader">
+    /// API キー読込 seam（省略時は <see cref="ApiKeyStore.Load(string)"/>）。<see cref="Connection"/> へ透過する
+    /// </param>
+    /// <param name="apiKeySaver">
+    /// API キー保存 seam（省略時は <see cref="ApiKeyStore.Save(string, string)"/>）。<see cref="Connection"/> へ透過する
+    /// </param>
     public AiChatDialogViewModel(
         IErDiagramChatHost? host,
         IUiDispatcher dispatcher,
@@ -188,7 +194,9 @@ public partial class AiChatDialogViewModel : ObservableObject
         IClaudeCodeClient? claudeCodeClient = null,
         IDialogService? dialogService = null,
         IFileDialogService? files = null,
-        ChatAttachmentFactory.ImageShrinker? imageShrinker = null
+        ChatAttachmentFactory.ImageShrinker? imageShrinker = null,
+        Func<string, string?>? apiKeyLoader = null,
+        Action<string, string>? apiKeySaver = null
     )
     {
         _host = host;
@@ -206,7 +214,12 @@ public partial class AiChatDialogViewModel : ObservableObject
 
         // 接続方式タブの状態部品。エンジン生成前に用意しておき、エンジンの入力ラムダから参照させる
         // （PropertyChanged 購読と LoadSettings は下記の ctor 順序に従い、エンジン確立後に行う）
-        Connection = new ChatConnectionSettingsViewModel(AiDialogKind.AiChat, settingsStore);
+        Connection = new ChatConnectionSettingsViewModel(
+            AiDialogKind.AiChat,
+            settingsStore,
+            apiKeyLoader: apiKeyLoader,
+            apiKeySaver: apiKeySaver
+        );
 
         _apiKeyEngine = new ChatTurnEngine(
             new ProviderRoutingTurnDriver(
