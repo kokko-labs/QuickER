@@ -207,4 +207,44 @@ public sealed class SqlServerDdlRoundTripIntegrationTests(SqlServerContainerFixt
         profileRel.Type.Should().Be(RelationshipType.OneToOne);
         profileRel.OnDelete.Should().Be(ForeignKeyReferentialAction.SetNull);
     }
+
+    /// <summary>
+    /// SSMS のダイアグラム機能等が作るツール用テーブル（拡張プロパティ
+    /// <c>microsoft_database_tools_support</c> 付き）が取込対象から除外されることを検証する。
+    /// </summary>
+    [Fact(DisplayName = "[Integration] A: sysdiagrams 等のツール用テーブルは取込から除外される")]
+    public async Task Import_ExcludesDatabaseToolsSupportTables()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        // ユーザーテーブル 1 つと、実物の sysdiagrams と同じ構造・同じ拡張プロパティを持つテーブルを作る
+        // （SSMS はこの拡張プロパティでオブジェクトエクスプローラーの表示からも除外している）
+        const string ddl = """
+            CREATE TABLE [dbo].[Customer] (
+                [Id] int NOT NULL PRIMARY KEY,
+                [Name] nvarchar(50) NOT NULL
+            );
+
+            CREATE TABLE [dbo].[sysdiagrams] (
+                [name] sysname NOT NULL,
+                [principal_id] int NOT NULL,
+                [diagram_id] int IDENTITY(1,1) NOT NULL PRIMARY KEY,
+                [version] int NULL,
+                [definition] varbinary(max) NULL
+            );
+
+            EXEC sys.sp_addextendedproperty
+                @name = N'microsoft_database_tools_support', @value = 1,
+                @level0type = N'SCHEMA', @level0name = N'dbo',
+                @level1type = N'TABLE',  @level1name = N'sysdiagrams';
+            """;
+
+        await fixture.ExecuteAsync(ddl, Ct);
+
+        await using var conn = await fixture.OpenConnectionAsync(Ct);
+        var result = await new SqlServerSchemaImporter().ImportAsync(conn, Ct);
+
+        result.Entities.Select(e => e.TableName).Should().BeEquivalentTo("Customer");
+    }
 }

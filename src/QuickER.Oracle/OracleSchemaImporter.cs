@@ -73,8 +73,19 @@ public class OracleSchemaImporter : ISchemaImporter
     // ---------------- 内部実装 ----------------
 
     /// <summary>自スキーマの通常テーブル一覧を取得するクエリ</summary>
-    /// <remarks>USER_ ビューは所有オブジェクトのみを返すため、ALL_ ビューと違い owner での絞り込みが不要</remarks>
-    private const string TablesSql = "SELECT table_name FROM user_tables ORDER BY table_name";
+    /// <remarks>
+    /// USER_ ビューは所有オブジェクトのみを返すため、ALL_ ビューと違い owner での絞り込みが不要。
+    /// ユーザー定義テーブルに限定するため、ごみ箱の <c>BIN$...</c>（<c>dropped = 'YES'</c>）・
+    /// ドメインインデックス等の二次オブジェクト（<c>secondary = 'Y'</c>）・ネステッドテーブル・
+    /// IOT オーバーフローセグメント（<c>SYS_IOT_OVER_...</c>）は除外する
+    /// </remarks>
+    private const string TablesSql =
+        @"SELECT table_name FROM user_tables
+WHERE dropped = 'NO'
+  AND secondary = 'N'
+  AND nested = 'NO'
+  AND (iot_type IS NULL OR iot_type = 'IOT')
+ORDER BY table_name";
 
     /// <summary>自スキーマ全テーブルのカラム定義を序数順に取得するクエリ</summary>
     /// <remarks>
