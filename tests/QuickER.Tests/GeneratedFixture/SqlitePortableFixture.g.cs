@@ -7710,12 +7710,7 @@ public partial interface ICustomerRepository : IRepository<CustomerEntity, Custo
 public sealed partial class CustomerRepository(
     ISqlConnectionFactory connectionFactory,
     ISaveHookRegistry? saveHooks = null
-)
-    : SqliteRepository<CustomerEntity, CustomerIdValue>(
-        connectionFactory,
-        saveHooks
-    ),
-        ICustomerRepository { }
+) : SqliteRepository<CustomerEntity, CustomerIdValue>(connectionFactory, saveHooks), ICustomerRepository { }
 
 /// <summary>Repository interface for OrderEntity.</summary>
 public partial interface IOrderRepository : IRepository<OrderEntity, OrderIdValue>
@@ -7734,12 +7729,7 @@ public partial interface IOrderRepository : IRepository<OrderEntity, OrderIdValu
 public sealed partial class OrderRepository(
     ISqlConnectionFactory connectionFactory,
     ISaveHookRegistry? saveHooks = null
-)
-    : SqliteRepository<OrderEntity, OrderIdValue>(
-        connectionFactory,
-        saveHooks
-    ),
-        IOrderRepository
+) : SqliteRepository<OrderEntity, OrderIdValue>(connectionFactory, saveHooks), IOrderRepository
 {
     /// <summary>メモの部分一致（CONTAINS→LIKE。%・_ 等はリテラル扱い）で注文を検索する</summary>
     public Task<IReadOnlyList<OrderEntity>> SearchMemoContainsAsync(string keyword, CancellationToken cancellationToken = default) =>
@@ -9332,21 +9322,13 @@ public static class GeneratedEfCoreRepositoryServiceCollectionExtensions
 public sealed partial class EfCoreCustomerRepository(
     IDbContextFactory<QuickErDbContext> contextFactory,
     ISaveHookRegistry? saveHooks = null
-) : EfCoreRepository<CustomerEntity, CustomerIdValue, QuickErDbContext>(
-        contextFactory,
-        saveHooks
-    ),
-        ICustomerRepository { }
+) : EfCoreRepository<CustomerEntity, CustomerIdValue, QuickErDbContext>(contextFactory, saveHooks), ICustomerRepository { }
 
 /// <summary>EF Core implementation of the repository for OrderEntity.</summary>
 public sealed partial class EfCoreOrderRepository(
     IDbContextFactory<QuickErDbContext> contextFactory,
     ISaveHookRegistry? saveHooks = null
-) : EfCoreRepository<OrderEntity, OrderIdValue, QuickErDbContext>(
-        contextFactory,
-        saveHooks
-    ),
-        IOrderRepository
+) : EfCoreRepository<OrderEntity, OrderIdValue, QuickErDbContext>(contextFactory, saveHooks), IOrderRepository
 {
     /// <summary>メモの部分一致（CONTAINS→LIKE。%・_ 等はリテラル扱い）で注文を検索する</summary>
     public Task<IReadOnlyList<OrderEntity>> SearchMemoContainsAsync(string keyword, CancellationToken cancellationToken = default) =>

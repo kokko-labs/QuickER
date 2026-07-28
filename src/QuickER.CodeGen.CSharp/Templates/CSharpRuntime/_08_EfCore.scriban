@@ -1589,11 +1589,7 @@ public static class GeneratedEfCoreRepositoryServiceCollectionExtensions
 public sealed partial class EfCore{{ repository.class_name }}(
     IDbContextFactory<QuickErDbContext> contextFactory,
     ISaveHookRegistry? saveHooks = null
-) : EfCoreRepository<{{ repository.entity_class_name }}, {{ repository.key_type_name }}, QuickErDbContext>(
-        contextFactory,
-        saveHooks
-    ),
-        {{ repository.interface_name }}{{ if efcore_impl_members == "" }} { }{{ else }}
+) : EfCoreRepository<{{ repository.entity_class_name }}, {{ repository.key_type_name }}, QuickErDbContext>(contextFactory, saveHooks), {{ repository.interface_name }}{{ if efcore_impl_members == "" }} { }{{ else }}
 {
 {{ efcore_impl_members }}
 }{{ end }}

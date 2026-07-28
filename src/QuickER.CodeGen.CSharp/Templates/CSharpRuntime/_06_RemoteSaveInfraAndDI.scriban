@@ -2116,12 +2116,7 @@ public partial interface {{ repository.interface_name }} : IRepository<{{ reposi
 public sealed partial class {{ repository.class_name }}(
     ISqlConnectionFactory connectionFactory,
     ISaveHookRegistry? saveHooks = null
-)
-    : {{ repository_base_class }}<{{ repository.entity_class_name }}, {{ repository.key_type_name }}>(
-        connectionFactory,
-        saveHooks
-    ),
-        {{ repository.interface_name }}{{ if ado_impl_members == "" }} { }{{ else }}
+) : {{ repository_base_class }}<{{ repository.entity_class_name }}, {{ repository.key_type_name }}>(connectionFactory, saveHooks), {{ repository.interface_name }}{{ if ado_impl_members == "" }} { }{{ else }}
 {
 {{ ado_impl_members }}
 }{{ end }}
@@ -2135,8 +2130,7 @@ public sealed partial class {{ repository.class_name }}(
 /// <remarks>Calls the server-side <c>MapGeneratedRemoteEndpoints</c> endpoints. The HttpClient's BaseAddress must include the prefix (default /quicker/).</remarks>
 {{~ remote_client_members = join_members repository.query_remote_client_block repository.binary_stream_remote_client_block ~}}
 public sealed partial class {{ repository.remote_client_class_name }}(HttpClient httpClient)
-    : HttpRemoteRepository<{{ repository.entity_class_name }}, {{ repository.key_type_name }}>(httpClient, "{{ repository.remote_route_name }}"),
-        {{ repository.remote_interface_name }}{{ if remote_client_members == "" }} { }{{ else }}
+    : HttpRemoteRepository<{{ repository.entity_class_name }}, {{ repository.key_type_name }}>(httpClient, "{{ repository.remote_route_name }}"), {{ repository.remote_interface_name }}{{ if remote_client_members == "" }} { }{{ else }}
 {
 {{ remote_client_members }}
 }{{ end }}

@@ -7710,12 +7710,7 @@ public partial interface ICustomerRepository : IRepository<CustomerEntity, Custo
 public sealed partial class CustomerRepository(
     ISqlConnectionFactory connectionFactory,
     ISaveHookRegistry? saveHooks = null
-)
-    : SqliteRepository<CustomerEntity, CustomerIdValue>(
-        connectionFactory,
-        saveHooks
-    ),
-        ICustomerRepository { }
+) : SqliteRepository<CustomerEntity, CustomerIdValue>(connectionFactory, saveHooks), ICustomerRepository { }
 
 /// <summary>Repository interface for OrderEntity.</summary>
 public partial interface IOrderRepository : IRepository<OrderEntity, OrderIdValue>
@@ -7790,12 +7785,7 @@ public sealed partial class OrderMemoRow
 public sealed partial class OrderRepository(
     ISqlConnectionFactory connectionFactory,
     ISaveHookRegistry? saveHooks = null
-)
-    : SqliteRepository<OrderEntity, OrderIdValue>(
-        connectionFactory,
-        saveHooks
-    ),
-        IOrderRepository
+) : SqliteRepository<OrderEntity, OrderIdValue>(connectionFactory, saveHooks), IOrderRepository
 {
     /// <summary>顧客IDで注文を新しい順（注文ID降順）に検索する（ページング付き）</summary>
     public Task<IReadOnlyList<OrderEntity>> GetByCustomerAsync(int customerId, int take, int skip = 0, CancellationToken cancellationToken = default) =>
@@ -9450,21 +9440,13 @@ public static class GeneratedEfCoreRepositoryServiceCollectionExtensions
 public sealed partial class EfCoreCustomerRepository(
     IDbContextFactory<QuickErDbContext> contextFactory,
     ISaveHookRegistry? saveHooks = null
-) : EfCoreRepository<CustomerEntity, CustomerIdValue, QuickErDbContext>(
-        contextFactory,
-        saveHooks
-    ),
-        ICustomerRepository { }
+) : EfCoreRepository<CustomerEntity, CustomerIdValue, QuickErDbContext>(contextFactory, saveHooks), ICustomerRepository { }
 
 /// <summary>EF Core implementation of the repository for OrderEntity.</summary>
 public sealed partial class EfCoreOrderRepository(
     IDbContextFactory<QuickErDbContext> contextFactory,
     ISaveHookRegistry? saveHooks = null
-) : EfCoreRepository<OrderEntity, OrderIdValue, QuickErDbContext>(
-        contextFactory,
-        saveHooks
-    ),
-        IOrderRepository
+) : EfCoreRepository<OrderEntity, OrderIdValue, QuickErDbContext>(contextFactory, saveHooks), IOrderRepository
 {
     /// <summary>顧客IDで注文を新しい順（注文ID降順）に検索する（ページング付き）</summary>
     public Task<IReadOnlyList<OrderEntity>> GetByCustomerAsync(int customerId, int take, int skip = 0, CancellationToken cancellationToken = default) =>

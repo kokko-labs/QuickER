@@ -5784,23 +5784,13 @@ internal sealed class InMemorySaveHookContext(InMemoryDataStore store, Type enti
 public sealed partial class InMemoryCustomerRepository(
     InMemoryDataStore store,
     ISaveHookRegistry? saveHooks = null
-)
-    : InMemoryRepository<CustomerEntity, int>(
-        store,
-        saveHooks
-    ),
-        ICustomerRepository { }
+) : InMemoryRepository<CustomerEntity, int>(store, saveHooks), ICustomerRepository { }
 
 /// <summary>In-memory implementation of the repository for OrderEntity.</summary>
 public sealed partial class InMemoryOrderRepository(
     InMemoryDataStore store,
     ISaveHookRegistry? saveHooks = null
-)
-    : InMemoryRepository<OrderEntity, int>(
-        store,
-        saveHooks
-    ),
-        IOrderRepository
+) : InMemoryRepository<OrderEntity, int>(store, saveHooks), IOrderRepository
 {
     /// <summary>顧客IDで注文を新しい順（注文ID降順）に検索する（ページング付き）</summary>
     public Task<IReadOnlyList<OrderEntity>> GetByCustomerAsync(int customerId, int take, int skip = 0, CancellationToken cancellationToken = default) =>
@@ -5823,12 +5813,7 @@ public sealed partial class InMemoryOrderRepository(
 public sealed partial class InMemoryCustomerProfileRepository(
     InMemoryDataStore store,
     ISaveHookRegistry? saveHooks = null
-)
-    : InMemoryRepository<CustomerProfileEntity, int>(
-        store,
-        saveHooks
-    ),
-        ICustomerProfileRepository { }
+) : InMemoryRepository<CustomerProfileEntity, int>(store, saveHooks), ICustomerProfileRepository { }
 
 /// <summary>Seeder that loads deterministic sample data into the in-memory store (3 rows per entity, in FK dependency order).</summary>
 /// <remarks>
