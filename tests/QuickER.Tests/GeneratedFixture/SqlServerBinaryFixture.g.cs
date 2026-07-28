@@ -7421,12 +7421,7 @@ public static class DocumentRepositoryBinaryStreamExtensions
 public sealed partial class DocumentRepository(
     ISqlConnectionFactory connectionFactory,
     ISaveHookRegistry? saveHooks = null
-)
-    : SqlServerRepository<DocumentEntity, int>(
-        connectionFactory,
-        saveHooks
-    ),
-        IDocumentRepository
+) : SqlServerRepository<DocumentEntity, int>(connectionFactory, saveHooks), IDocumentRepository
 {
     /// <summary>文書 ID と本体バイナリ（除外列 payload）を射影で取得する（文書 ID 昇順）</summary>
     public Task<IReadOnlyList<DocumentPayloadRow>> GetPayloadsAsync(CancellationToken cancellationToken = default) =>
@@ -7464,9 +7459,4 @@ public partial interface IDocumentNoteRepository : IRepository<DocumentNoteEntit
 public sealed partial class DocumentNoteRepository(
     ISqlConnectionFactory connectionFactory,
     ISaveHookRegistry? saveHooks = null
-)
-    : SqlServerRepository<DocumentNoteEntity, int>(
-        connectionFactory,
-        saveHooks
-    ),
-        IDocumentNoteRepository { }
+) : SqlServerRepository<DocumentNoteEntity, int>(connectionFactory, saveHooks), IDocumentNoteRepository { }

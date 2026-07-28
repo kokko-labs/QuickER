@@ -7683,23 +7683,13 @@ public static class GeneratedSqlServerRepositoryServiceCollectionExtensions
 public sealed partial class CustomerRepository(
     ISqlConnectionFactory connectionFactory,
     ISaveHookRegistry? saveHooks = null
-)
-    : SqlServerRepository<CustomerEntity, CustomerIdValue>(
-        connectionFactory,
-        saveHooks
-    ),
-        ICustomerRepository { }
+) : SqlServerRepository<CustomerEntity, CustomerIdValue>(connectionFactory, saveHooks), ICustomerRepository { }
 
 /// <summary>Repository implementation for OrderEntity.</summary>
 public sealed partial class OrderRepository(
     ISqlConnectionFactory connectionFactory,
     ISaveHookRegistry? saveHooks = null
-)
-    : SqlServerRepository<OrderEntity, OrderIdValue>(
-        connectionFactory,
-        saveHooks
-    ),
-        IOrderRepository { }
+) : SqlServerRepository<OrderEntity, OrderIdValue>(connectionFactory, saveHooks), IOrderRepository { }
 }
 
 namespace QuickER.Tests.GeneratedMultiTargetFixture.Repositories.Sqlite
@@ -10737,21 +10727,11 @@ public static class GeneratedSqliteRepositoryServiceCollectionExtensions
 public sealed partial class CustomerRepository(
     ISqlConnectionFactory connectionFactory,
     ISaveHookRegistry? saveHooks = null
-)
-    : SqliteRepository<CustomerEntity, CustomerIdValue>(
-        connectionFactory,
-        saveHooks
-    ),
-        ICustomerRepository { }
+) : SqliteRepository<CustomerEntity, CustomerIdValue>(connectionFactory, saveHooks), ICustomerRepository { }
 
 /// <summary>Repository implementation for OrderEntity.</summary>
 public sealed partial class OrderRepository(
     ISqlConnectionFactory connectionFactory,
     ISaveHookRegistry? saveHooks = null
-)
-    : SqliteRepository<OrderEntity, OrderIdValue>(
-        connectionFactory,
-        saveHooks
-    ),
-        IOrderRepository { }
+) : SqliteRepository<OrderEntity, OrderIdValue>(connectionFactory, saveHooks), IOrderRepository { }
 }

@@ -8052,12 +8052,7 @@ public partial interface ICustomerRepository : IRepository<CustomerEntity, int> 
 public sealed partial class CustomerRepository(
     ISqlConnectionFactory connectionFactory,
     ISaveHookRegistry? saveHooks = null
-)
-    : SqliteRepository<CustomerEntity, int>(
-        connectionFactory,
-        saveHooks
-    ),
-        ICustomerRepository { }
+) : SqliteRepository<CustomerEntity, int>(connectionFactory, saveHooks), ICustomerRepository { }
 
 /// <summary>Repository interface for ProductEntity.</summary>
 public partial interface IProductRepository : IRepository<ProductEntity, int> { }
@@ -8066,12 +8061,7 @@ public partial interface IProductRepository : IRepository<ProductEntity, int> { 
 public sealed partial class ProductRepository(
     ISqlConnectionFactory connectionFactory,
     ISaveHookRegistry? saveHooks = null
-)
-    : SqliteRepository<ProductEntity, int>(
-        connectionFactory,
-        saveHooks
-    ),
-        IProductRepository { }
+) : SqliteRepository<ProductEntity, int>(connectionFactory, saveHooks), IProductRepository { }
 
 /// <summary>Repository interface for OrderEntity.</summary>
 public partial interface IOrderRepository : IRepository<OrderEntity, int> { }
@@ -8080,12 +8070,7 @@ public partial interface IOrderRepository : IRepository<OrderEntity, int> { }
 public sealed partial class OrderRepository(
     ISqlConnectionFactory connectionFactory,
     ISaveHookRegistry? saveHooks = null
-)
-    : SqliteRepository<OrderEntity, int>(
-        connectionFactory,
-        saveHooks
-    ),
-        IOrderRepository { }
+) : SqliteRepository<OrderEntity, int>(connectionFactory, saveHooks), IOrderRepository { }
 
 /// <summary>Repository interface for OrderLineEntity.</summary>
 public partial interface IOrderLineRepository : IRepository<OrderLineEntity, int> { }
@@ -8094,9 +8079,4 @@ public partial interface IOrderLineRepository : IRepository<OrderLineEntity, int
 public sealed partial class OrderLineRepository(
     ISqlConnectionFactory connectionFactory,
     ISaveHookRegistry? saveHooks = null
-)
-    : SqliteRepository<OrderLineEntity, int>(
-        connectionFactory,
-        saveHooks
-    ),
-        IOrderLineRepository { }
+) : SqliteRepository<OrderLineEntity, int>(connectionFactory, saveHooks), IOrderLineRepository { }

@@ -3205,8 +3205,11 @@ public class CSharpCodeGenerationServiceTests
 
         // エンティティ別実装: 生成側で TContext=QuickErDbContext を閉じ、既存の I{Entity}Repository を実装する
         content.Should().Contain("public sealed partial class EfCoreCustomerRepository(");
-        content.Should().Contain(") : EfCoreRepository<CustomerEntity, int, QuickErDbContext>(");
-        content.Should().Contain("        ICustomerRepository { }");
+        content
+            .Should()
+            .Contain(
+                ") : EfCoreRepository<CustomerEntity, int, QuickErDbContext>(contextFactory, saveHooks), ICustomerRepository { }"
+            );
 
         // 読み取りは AsNoTracking（切断パターン）、事後状態は既存版と同じ Unchanged
         content.Should().Contain(".AsNoTracking()");

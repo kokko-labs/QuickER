@@ -7966,12 +7966,7 @@ public static class DocumentRepositoryBinaryStreamExtensions
 public sealed partial class DocumentRepository(
     ISqlConnectionFactory connectionFactory,
     ISaveHookRegistry? saveHooks = null
-)
-    : SqliteRepository<DocumentEntity, int>(
-        connectionFactory,
-        saveHooks
-    ),
-        IDocumentRepository
+) : SqliteRepository<DocumentEntity, int>(connectionFactory, saveHooks), IDocumentRepository
 {
     /// <summary>文書 ID と本体バイナリ（除外列 payload）を射影で取得する（文書 ID 昇順）</summary>
     public Task<IReadOnlyList<DocumentPayloadRow>> GetPayloadsAsync(CancellationToken cancellationToken = default) =>
@@ -8014,18 +8009,12 @@ public partial interface IDocumentNoteRepository
 public sealed partial class DocumentNoteRepository(
     ISqlConnectionFactory connectionFactory,
     ISaveHookRegistry? saveHooks = null
-)
-    : SqliteRepository<DocumentNoteEntity, int>(
-        connectionFactory,
-        saveHooks
-    ),
-        IDocumentNoteRepository { }
+) : SqliteRepository<DocumentNoteEntity, int>(connectionFactory, saveHooks), IDocumentNoteRepository { }
 
 /// <summary>HTTP client implementation of the remote surface (IDocumentRemoteRepository) for DocumentEntity.</summary>
 /// <remarks>Calls the server-side <c>MapGeneratedRemoteEndpoints</c> endpoints. The HttpClient's BaseAddress must include the prefix (default /quicker/).</remarks>
 public sealed partial class HttpDocumentRemoteRepository(HttpClient httpClient)
-    : HttpRemoteRepository<DocumentEntity, int>(httpClient, "Document"),
-        IDocumentRemoteRepository
+    : HttpRemoteRepository<DocumentEntity, int>(httpClient, "Document"), IDocumentRemoteRepository
 {
     /// <summary>文書 ID と本体バイナリ（除外列 payload）を射影で取得する（文書 ID 昇順）</summary>
     public Task<IReadOnlyList<DocumentPayloadRow>> GetPayloadsAsync(CancellationToken cancellationToken = default) =>
@@ -8059,8 +8048,7 @@ public sealed partial class HttpDocumentRemoteRepository(HttpClient httpClient)
 /// <summary>HTTP client implementation of the remote surface (IDocumentNoteRemoteRepository) for DocumentNoteEntity.</summary>
 /// <remarks>Calls the server-side <c>MapGeneratedRemoteEndpoints</c> endpoints. The HttpClient's BaseAddress must include the prefix (default /quicker/).</remarks>
 public sealed partial class HttpDocumentNoteRemoteRepository(HttpClient httpClient)
-    : HttpRemoteRepository<DocumentNoteEntity, int>(httpClient, "DocumentNote"),
-        IDocumentNoteRemoteRepository { }
+    : HttpRemoteRepository<DocumentNoteEntity, int>(httpClient, "DocumentNote"), IDocumentNoteRemoteRepository { }
 
 /// <summary>Extensions that register the HTTP client implementations of the remote surface (I{Entity}RemoteRepository) with the DI container.</summary>
 public static class GeneratedHttpRemoteRepositoryServiceCollectionExtensions
@@ -9457,12 +9445,7 @@ internal sealed class InMemorySaveHookContext(InMemoryDataStore store, Type enti
 public sealed partial class InMemoryDocumentRepository(
     InMemoryDataStore store,
     ISaveHookRegistry? saveHooks = null
-)
-    : InMemoryRepository<DocumentEntity, int>(
-        store,
-        saveHooks
-    ),
-        IDocumentRepository
+) : InMemoryRepository<DocumentEntity, int>(store, saveHooks), IDocumentRepository
 {
     /// <summary>文書 ID と本体バイナリ（除外列 payload）を射影で取得する（文書 ID 昇順）</summary>
     public Task<IReadOnlyList<DocumentPayloadRow>> GetPayloadsAsync(CancellationToken cancellationToken = default) =>
@@ -9497,12 +9480,7 @@ public sealed partial class InMemoryDocumentRepository(
 public sealed partial class InMemoryDocumentNoteRepository(
     InMemoryDataStore store,
     ISaveHookRegistry? saveHooks = null
-)
-    : InMemoryRepository<DocumentNoteEntity, int>(
-        store,
-        saveHooks
-    ),
-        IDocumentNoteRepository { }
+) : InMemoryRepository<DocumentNoteEntity, int>(store, saveHooks), IDocumentNoteRepository { }
 
 /// <summary>Seeder that loads deterministic sample data into the in-memory store (3 rows per entity, in FK dependency order).</summary>
 /// <remarks>
@@ -10817,11 +10795,7 @@ public static class GeneratedEfCoreRepositoryServiceCollectionExtensions
 public sealed partial class EfCoreDocumentRepository(
     IDbContextFactory<QuickErDbContext> contextFactory,
     ISaveHookRegistry? saveHooks = null
-) : EfCoreRepository<DocumentEntity, int, QuickErDbContext>(
-        contextFactory,
-        saveHooks
-    ),
-        IDocumentRepository
+) : EfCoreRepository<DocumentEntity, int, QuickErDbContext>(contextFactory, saveHooks), IDocumentRepository
 {
     /// <summary>文書 ID と本体バイナリ（除外列 payload）を射影で取得する（文書 ID 昇順）</summary>
     public Task<IReadOnlyList<DocumentPayloadRow>> GetPayloadsAsync(CancellationToken cancellationToken = default) =>
@@ -10864,8 +10838,4 @@ public sealed partial class EfCoreDocumentRepository(
 public sealed partial class EfCoreDocumentNoteRepository(
     IDbContextFactory<QuickErDbContext> contextFactory,
     ISaveHookRegistry? saveHooks = null
-) : EfCoreRepository<DocumentNoteEntity, int, QuickErDbContext>(
-        contextFactory,
-        saveHooks
-    ),
-        IDocumentNoteRepository { }
+) : EfCoreRepository<DocumentNoteEntity, int, QuickErDbContext>(contextFactory, saveHooks), IDocumentNoteRepository { }

@@ -6803,18 +6803,10 @@ public static class GeneratedEfCoreRepositoryServiceCollectionExtensions
 public sealed partial class EfCoreCustomerRepository(
     IDbContextFactory<QuickErDbContext> contextFactory,
     ISaveHookRegistry? saveHooks = null
-) : EfCoreRepository<CustomerEntity, CustomerIdValue, QuickErDbContext>(
-        contextFactory,
-        saveHooks
-    ),
-        ICustomerRepository { }
+) : EfCoreRepository<CustomerEntity, CustomerIdValue, QuickErDbContext>(contextFactory, saveHooks), ICustomerRepository { }
 
 /// <summary>EF Core implementation of the repository for OrderEntity.</summary>
 public sealed partial class EfCoreOrderRepository(
     IDbContextFactory<QuickErDbContext> contextFactory,
     ISaveHookRegistry? saveHooks = null
-) : EfCoreRepository<OrderEntity, OrderIdValue, QuickErDbContext>(
-        contextFactory,
-        saveHooks
-    ),
-        IOrderRepository { }
+) : EfCoreRepository<OrderEntity, OrderIdValue, QuickErDbContext>(contextFactory, saveHooks), IOrderRepository { }

@@ -1405,12 +1405,7 @@ public abstract partial class InMemoryRepository<TEntity, TKey>(
 public sealed partial class InMemory{{ repository.class_name }}(
     InMemoryDataStore store,
     ISaveHookRegistry? saveHooks = null
-)
-    : InMemoryRepository<{{ repository.entity_class_name }}, {{ repository.key_type_name }}>(
-        store,
-        saveHooks
-    ),
-        {{ repository.interface_name }}{{ if inmemory_impl_members == "" }} { }{{ else }}
+) : InMemoryRepository<{{ repository.entity_class_name }}, {{ repository.key_type_name }}>(store, saveHooks), {{ repository.interface_name }}{{ if inmemory_impl_members == "" }} { }{{ else }}
 {
 {{ inmemory_impl_members }}
 }{{ end }}

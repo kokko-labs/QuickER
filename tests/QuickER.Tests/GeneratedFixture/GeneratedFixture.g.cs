@@ -8572,12 +8572,7 @@ public partial interface ICustomerRepository : IRepository<CustomerEntity, Custo
 public sealed partial class CustomerRepository(
     ISqlConnectionFactory connectionFactory,
     ISaveHookRegistry? saveHooks = null
-)
-    : SqlServerRepository<CustomerEntity, CustomerIdValue>(
-        connectionFactory,
-        saveHooks
-    ),
-        ICustomerRepository { }
+) : SqlServerRepository<CustomerEntity, CustomerIdValue>(connectionFactory, saveHooks), ICustomerRepository { }
 
 /// <summary>Repository interface for OrderEntity.</summary>
 public partial interface IOrderRepository : IRepository<OrderEntity, OrderIdValue>
@@ -8596,12 +8591,7 @@ public partial interface IOrderRepository : IRepository<OrderEntity, OrderIdValu
 public sealed partial class OrderRepository(
     ISqlConnectionFactory connectionFactory,
     ISaveHookRegistry? saveHooks = null
-)
-    : SqlServerRepository<OrderEntity, OrderIdValue>(
-        connectionFactory,
-        saveHooks
-    ),
-        IOrderRepository
+) : SqlServerRepository<OrderEntity, OrderIdValue>(connectionFactory, saveHooks), IOrderRepository
 {
     /// <summary>メモの部分一致（CONTAINS→LIKE。%・_ 等はリテラル扱い）で注文を検索する</summary>
     public Task<IReadOnlyList<OrderEntity>> SearchMemoContainsAsync(string keyword, CancellationToken cancellationToken = default) =>
@@ -8623,12 +8613,7 @@ public partial interface ICustomerProfileRepository : IRepository<CustomerProfil
 public sealed partial class CustomerProfileRepository(
     ISqlConnectionFactory connectionFactory,
     ISaveHookRegistry? saveHooks = null
-)
-    : SqlServerRepository<CustomerProfileEntity, ProfileIdValue>(
-        connectionFactory,
-        saveHooks
-    ),
-        ICustomerProfileRepository { }
+) : SqlServerRepository<CustomerProfileEntity, ProfileIdValue>(connectionFactory, saveHooks), ICustomerProfileRepository { }
 
 /// <summary>
 /// EF Core DbContext that connects to an existing schema.
@@ -10232,21 +10217,13 @@ public static class GeneratedEfCoreRepositoryServiceCollectionExtensions
 public sealed partial class EfCoreCustomerRepository(
     IDbContextFactory<QuickErDbContext> contextFactory,
     ISaveHookRegistry? saveHooks = null
-) : EfCoreRepository<CustomerEntity, CustomerIdValue, QuickErDbContext>(
-        contextFactory,
-        saveHooks
-    ),
-        ICustomerRepository { }
+) : EfCoreRepository<CustomerEntity, CustomerIdValue, QuickErDbContext>(contextFactory, saveHooks), ICustomerRepository { }
 
 /// <summary>EF Core implementation of the repository for OrderEntity.</summary>
 public sealed partial class EfCoreOrderRepository(
     IDbContextFactory<QuickErDbContext> contextFactory,
     ISaveHookRegistry? saveHooks = null
-) : EfCoreRepository<OrderEntity, OrderIdValue, QuickErDbContext>(
-        contextFactory,
-        saveHooks
-    ),
-        IOrderRepository
+) : EfCoreRepository<OrderEntity, OrderIdValue, QuickErDbContext>(contextFactory, saveHooks), IOrderRepository
 {
     /// <summary>メモの部分一致（CONTAINS→LIKE。%・_ 等はリテラル扱い）で注文を検索する</summary>
     public Task<IReadOnlyList<OrderEntity>> SearchMemoContainsAsync(string keyword, CancellationToken cancellationToken = default) =>
@@ -10265,8 +10242,4 @@ public sealed partial class EfCoreOrderRepository(
 public sealed partial class EfCoreCustomerProfileRepository(
     IDbContextFactory<QuickErDbContext> contextFactory,
     ISaveHookRegistry? saveHooks = null
-) : EfCoreRepository<CustomerProfileEntity, ProfileIdValue, QuickErDbContext>(
-        contextFactory,
-        saveHooks
-    ),
-        ICustomerProfileRepository { }
+) : EfCoreRepository<CustomerProfileEntity, ProfileIdValue, QuickErDbContext>(contextFactory, saveHooks), ICustomerProfileRepository { }

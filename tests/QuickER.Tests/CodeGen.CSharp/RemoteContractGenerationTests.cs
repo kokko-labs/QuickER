@@ -120,7 +120,7 @@ public class RemoteContractGenerationTests
         content.Should().Contain("IRepository<OrderEntity, int> { }");
 
         // 実装クラス・DI 実装登録は従来どおり（全機能面を実装・登録）
-        content.Should().Contain("        IOrderRepository");
+        content.Should().Contain("(connectionFactory, saveHooks), IOrderRepository");
         content.Should().Contain("services.AddScoped<IOrderRepository, OrderRepository>();");
 
         // リモート面は同一インスタンスへの転送として追加登録される

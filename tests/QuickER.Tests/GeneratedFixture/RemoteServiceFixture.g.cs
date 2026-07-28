@@ -8071,12 +8071,7 @@ public partial interface ICustomerRepository
 public sealed partial class CustomerRepository(
     ISqlConnectionFactory connectionFactory,
     ISaveHookRegistry? saveHooks = null
-)
-    : SqliteRepository<CustomerEntity, CustomerIdValue>(
-        connectionFactory,
-        saveHooks
-    ),
-        ICustomerRepository { }
+) : SqliteRepository<CustomerEntity, CustomerIdValue>(connectionFactory, saveHooks), ICustomerRepository { }
 
 /// <summary>Remote surface of the OrderEntity repository (only CRUD, save, and named queries that can cross a network boundary; swappable for a remote implementation later).</summary>
 public partial interface IOrderRemoteRepository : IRemoteRepository<OrderEntity, OrderIdValue>
@@ -8156,12 +8151,7 @@ public sealed partial class OrderMemoRow
 public sealed partial class OrderRepository(
     ISqlConnectionFactory connectionFactory,
     ISaveHookRegistry? saveHooks = null
-)
-    : SqliteRepository<OrderEntity, OrderIdValue>(
-        connectionFactory,
-        saveHooks
-    ),
-        IOrderRepository
+) : SqliteRepository<OrderEntity, OrderIdValue>(connectionFactory, saveHooks), IOrderRepository
 {
     /// <summary>顧客IDで注文を新しい順（注文ID降順）に検索する（ページング付き）</summary>
     public Task<IReadOnlyList<OrderEntity>> GetByCustomerAsync(int customerId, int take, int skip = 0, CancellationToken cancellationToken = default) =>
@@ -8241,14 +8231,12 @@ public sealed partial class OrderRepository(
 /// <summary>HTTP client implementation of the remote surface (ICustomerRemoteRepository) for CustomerEntity.</summary>
 /// <remarks>Calls the server-side <c>MapGeneratedRemoteEndpoints</c> endpoints. The HttpClient's BaseAddress must include the prefix (default /quicker/).</remarks>
 public sealed partial class HttpCustomerRemoteRepository(HttpClient httpClient)
-    : HttpRemoteRepository<CustomerEntity, CustomerIdValue>(httpClient, "Customer"),
-        ICustomerRemoteRepository { }
+    : HttpRemoteRepository<CustomerEntity, CustomerIdValue>(httpClient, "Customer"), ICustomerRemoteRepository { }
 
 /// <summary>HTTP client implementation of the remote surface (IOrderRemoteRepository) for OrderEntity.</summary>
 /// <remarks>Calls the server-side <c>MapGeneratedRemoteEndpoints</c> endpoints. The HttpClient's BaseAddress must include the prefix (default /quicker/).</remarks>
 public sealed partial class HttpOrderRemoteRepository(HttpClient httpClient)
-    : HttpRemoteRepository<OrderEntity, OrderIdValue>(httpClient, "Order"),
-        IOrderRemoteRepository
+    : HttpRemoteRepository<OrderEntity, OrderIdValue>(httpClient, "Order"), IOrderRemoteRepository
 {
     /// <summary>顧客IDで注文を新しい順（注文ID降順）に検索する（ページング付き）</summary>
     public Task<IReadOnlyList<OrderEntity>> GetByCustomerAsync(int customerId, int take, int skip = 0, CancellationToken cancellationToken = default) =>
@@ -9931,21 +9919,13 @@ public static class GeneratedEfCoreRepositoryServiceCollectionExtensions
 public sealed partial class EfCoreCustomerRepository(
     IDbContextFactory<QuickErDbContext> contextFactory,
     ISaveHookRegistry? saveHooks = null
-) : EfCoreRepository<CustomerEntity, CustomerIdValue, QuickErDbContext>(
-        contextFactory,
-        saveHooks
-    ),
-        ICustomerRepository { }
+) : EfCoreRepository<CustomerEntity, CustomerIdValue, QuickErDbContext>(contextFactory, saveHooks), ICustomerRepository { }
 
 /// <summary>EF Core implementation of the repository for OrderEntity.</summary>
 public sealed partial class EfCoreOrderRepository(
     IDbContextFactory<QuickErDbContext> contextFactory,
     ISaveHookRegistry? saveHooks = null
-) : EfCoreRepository<OrderEntity, OrderIdValue, QuickErDbContext>(
-        contextFactory,
-        saveHooks
-    ),
-        IOrderRepository
+) : EfCoreRepository<OrderEntity, OrderIdValue, QuickErDbContext>(contextFactory, saveHooks), IOrderRepository
 {
     /// <summary>顧客IDで注文を新しい順（注文ID降順）に検索する（ページング付き）</summary>
     public Task<IReadOnlyList<OrderEntity>> GetByCustomerAsync(int customerId, int take, int skip = 0, CancellationToken cancellationToken = default) =>

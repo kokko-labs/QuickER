@@ -8426,12 +8426,7 @@ public partial interface ICustomerRepository
 public sealed partial class CustomerRepository(
     ISqlConnectionFactory connectionFactory,
     ISaveHookRegistry? saveHooks = null
-)
-    : SqliteRepository<CustomerEntity, int>(
-        connectionFactory,
-        saveHooks
-    ),
-        ICustomerRepository { }
+) : SqliteRepository<CustomerEntity, int>(connectionFactory, saveHooks), ICustomerRepository { }
 
 /// <summary>Remote surface of the ProductEntity repository (only CRUD, save, and named queries that can cross a network boundary; swappable for a remote implementation later).</summary>
 public partial interface IProductRemoteRepository : IRemoteRepository<ProductEntity, int> { }
@@ -8445,12 +8440,7 @@ public partial interface IProductRepository
 public sealed partial class ProductRepository(
     ISqlConnectionFactory connectionFactory,
     ISaveHookRegistry? saveHooks = null
-)
-    : SqliteRepository<ProductEntity, int>(
-        connectionFactory,
-        saveHooks
-    ),
-        IProductRepository { }
+) : SqliteRepository<ProductEntity, int>(connectionFactory, saveHooks), IProductRepository { }
 
 /// <summary>Remote surface of the OrderEntity repository (only CRUD, save, and named queries that can cross a network boundary; swappable for a remote implementation later).</summary>
 public partial interface IOrderRemoteRepository : IRemoteRepository<OrderEntity, int>
@@ -8484,12 +8474,7 @@ public sealed partial class OrderSummaryRow
 public sealed partial class OrderRepository(
     ISqlConnectionFactory connectionFactory,
     ISaveHookRegistry? saveHooks = null
-)
-    : SqliteRepository<OrderEntity, int>(
-        connectionFactory,
-        saveHooks
-    ),
-        IOrderRepository
+) : SqliteRepository<OrderEntity, int>(connectionFactory, saveHooks), IOrderRepository
 {
     /// <summary>Searches a customer's orders, newest first (order ID descending), with paging</summary>
     public Task<IReadOnlyList<OrderEntity>> GetByCustomerAsync(int customerId, int take, int skip = 0, CancellationToken cancellationToken = default) =>
@@ -8512,30 +8497,22 @@ public partial interface IOrderLineRepository
 public sealed partial class OrderLineRepository(
     ISqlConnectionFactory connectionFactory,
     ISaveHookRegistry? saveHooks = null
-)
-    : SqliteRepository<OrderLineEntity, int>(
-        connectionFactory,
-        saveHooks
-    ),
-        IOrderLineRepository { }
+) : SqliteRepository<OrderLineEntity, int>(connectionFactory, saveHooks), IOrderLineRepository { }
 
 /// <summary>HTTP client implementation of the remote surface (ICustomerRemoteRepository) for CustomerEntity.</summary>
 /// <remarks>Calls the server-side <c>MapGeneratedRemoteEndpoints</c> endpoints. The HttpClient's BaseAddress must include the prefix (default /quicker/).</remarks>
 public sealed partial class HttpCustomerRemoteRepository(HttpClient httpClient)
-    : HttpRemoteRepository<CustomerEntity, int>(httpClient, "Customer"),
-        ICustomerRemoteRepository { }
+    : HttpRemoteRepository<CustomerEntity, int>(httpClient, "Customer"), ICustomerRemoteRepository { }
 
 /// <summary>HTTP client implementation of the remote surface (IProductRemoteRepository) for ProductEntity.</summary>
 /// <remarks>Calls the server-side <c>MapGeneratedRemoteEndpoints</c> endpoints. The HttpClient's BaseAddress must include the prefix (default /quicker/).</remarks>
 public sealed partial class HttpProductRemoteRepository(HttpClient httpClient)
-    : HttpRemoteRepository<ProductEntity, int>(httpClient, "Product"),
-        IProductRemoteRepository { }
+    : HttpRemoteRepository<ProductEntity, int>(httpClient, "Product"), IProductRemoteRepository { }
 
 /// <summary>HTTP client implementation of the remote surface (IOrderRemoteRepository) for OrderEntity.</summary>
 /// <remarks>Calls the server-side <c>MapGeneratedRemoteEndpoints</c> endpoints. The HttpClient's BaseAddress must include the prefix (default /quicker/).</remarks>
 public sealed partial class HttpOrderRemoteRepository(HttpClient httpClient)
-    : HttpRemoteRepository<OrderEntity, int>(httpClient, "Order"),
-        IOrderRemoteRepository
+    : HttpRemoteRepository<OrderEntity, int>(httpClient, "Order"), IOrderRemoteRepository
 {
     /// <summary>Searches a customer's orders, newest first (order ID descending), with paging</summary>
     public Task<IReadOnlyList<OrderEntity>> GetByCustomerAsync(int customerId, int take, int skip = 0, CancellationToken cancellationToken = default) =>
@@ -8549,8 +8526,7 @@ public sealed partial class HttpOrderRemoteRepository(HttpClient httpClient)
 /// <summary>HTTP client implementation of the remote surface (IOrderLineRemoteRepository) for OrderLineEntity.</summary>
 /// <remarks>Calls the server-side <c>MapGeneratedRemoteEndpoints</c> endpoints. The HttpClient's BaseAddress must include the prefix (default /quicker/).</remarks>
 public sealed partial class HttpOrderLineRemoteRepository(HttpClient httpClient)
-    : HttpRemoteRepository<OrderLineEntity, int>(httpClient, "OrderLine"),
-        IOrderLineRemoteRepository { }
+    : HttpRemoteRepository<OrderLineEntity, int>(httpClient, "OrderLine"), IOrderLineRemoteRepository { }
 
 /// <summary>Extensions that register the HTTP client implementations of the remote surface (I{Entity}RemoteRepository) with the DI container.</summary>
 public static class GeneratedHttpRemoteRepositoryServiceCollectionExtensions
