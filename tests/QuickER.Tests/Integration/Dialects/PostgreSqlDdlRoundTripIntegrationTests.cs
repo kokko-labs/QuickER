@@ -260,4 +260,38 @@ public sealed class PostgreSqlDdlRoundTripIntegrationTests(PostgreSqlContainerFi
                 .BeTrue($"取込型 '{col.DataType}'（列 {columnName}）は TryParse 可能であること");
         }
     }
+
+    /// <summary>
+    /// 拡張が所有するテーブル（PostGIS の <c>spatial_ref_sys</c> 等）が取込対象から除外されることを検証する。
+    /// </summary>
+    [Fact(DisplayName = "[Integration] A: 拡張が所有するテーブルは取込から除外される")]
+    public async Task Import_ExcludesExtensionOwnedTables()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        // ユーザーテーブルと、既定で入っている plpgsql 拡張のメンバーにしたテーブルを作る
+        // （PostGIS の spatial_ref_sys 等と同じ pg_depend の deptype = 'e' の状態を再現する）
+        await fixture.ExecuteAsync(
+            """
+            CREATE TABLE customer (id integer PRIMARY KEY);
+            CREATE TABLE ext_owned (id integer PRIMARY KEY);
+            ALTER EXTENSION plpgsql ADD TABLE ext_owned;
+            """,
+            Ct
+        );
+
+        try
+        {
+            await using var conn = await fixture.OpenConnectionAsync(Ct);
+            var result = await new PostgreSqlSchemaImporter().ImportAsync(conn, Ct);
+
+            result.Entities.Select(e => e.TableName).Should().BeEquivalentTo("customer");
+        }
+        finally
+        {
+            // 拡張メンバーのままだと後続テストの DROP SCHEMA public CASCADE が失敗するため所属を解除する
+            await fixture.ExecuteAsync("ALTER EXTENSION plpgsql DROP TABLE ext_owned;", Ct);
+        }
+    }
 }

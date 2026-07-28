@@ -91,11 +91,13 @@ public sealed class OracleContainerFixture : IAsyncLifetime
     /// <remarks>データベースは使い回し、スキーマ（自ユーザーの全オブジェクト）のみ初期化する方式でテスト間の独立性を確保する</remarks>
     public async Task ResetSchemaAsync(CancellationToken ct = default)
     {
+        // ごみ箱の BIN$ テーブル（dropped = 'YES'）は DROP できないため除外し、最後にごみ箱を空にする
         const string ResetBlock = """
             BEGIN
-                FOR t IN (SELECT table_name FROM user_tables) LOOP
+                FOR t IN (SELECT table_name FROM user_tables WHERE dropped = 'NO') LOOP
                     EXECUTE IMMEDIATE 'DROP TABLE "' || t.table_name || '" CASCADE CONSTRAINTS PURGE';
                 END LOOP;
+                EXECUTE IMMEDIATE 'PURGE RECYCLEBIN';
             END;
             """;
 

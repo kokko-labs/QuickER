@@ -65,13 +65,25 @@ public class PostgreSqlSchemaImporter : ISchemaImporter
     // ---------------- 内部実装 ----------------
 
     /// <summary>public スキーマの通常テーブル一覧を取得するクエリ</summary>
-    /// <remarks>information_schema ではなく pg_catalog を直接引くのは relkind = 'r'（通常テーブル）で絞るため</remarks>
+    /// <remarks>
+    /// information_schema ではなく pg_catalog を直接引くのは relkind = 'r'（通常テーブル）で絞るため。
+    /// 拡張が所有するテーブル（PostGIS の <c>spatial_ref_sys</c> 等・<c>pg_depend</c> の
+    /// <c>deptype = 'e'</c>）はユーザー定義でないため除外する
+    /// </remarks>
     private const string TablesSql =
         @"
 SELECT c.relname AS table_name
 FROM pg_catalog.pg_class c
 JOIN pg_catalog.pg_namespace n ON c.relnamespace = n.oid
 WHERE n.nspname = 'public' AND c.relkind = 'r'
+  AND NOT EXISTS (
+      SELECT 1
+      FROM pg_catalog.pg_depend d
+      WHERE d.classid = 'pg_catalog.pg_class'::regclass
+        AND d.objid = c.oid
+        AND d.refclassid = 'pg_catalog.pg_extension'::regclass
+        AND d.deptype = 'e'
+  )
 ORDER BY c.relname;";
 
     /// <summary>public スキーマ全テーブルのカラム定義を序数順に取得するクエリ</summary>

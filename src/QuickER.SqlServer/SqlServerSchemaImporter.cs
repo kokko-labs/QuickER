@@ -11,7 +11,8 @@ namespace QuickER.SqlServer;
 
 /// <summary>SQL Server のテーブル定義を取得し <see cref="Entity"/> / <see cref="Relationship"/> へ変換するインポーター</summary>
 /// <remarks>
-/// <c>INFORMATION_SCHEMA</c> 系と <c>sys.foreign_keys</c> を用い、BASE TABLE のみ対象とする
+/// <c>sys.tables</c> / <c>INFORMATION_SCHEMA</c> 系と <c>sys.foreign_keys</c> を用い、ユーザー定義テーブルのみ対象とする
+/// （<c>is_ms_shipped</c> と拡張プロパティ <c>microsoft_database_tools_support</c> で sysdiagrams 等のツール用テーブルを除外）
 /// 複合主キーは順序を保持する 多対多は中間テーブルとして 1 対多 × 2 の形で表現する
 /// </remarks>
 public class SqlServerSchemaImporter : ISchemaImporter
@@ -76,13 +77,27 @@ public class SqlServerSchemaImporter : ISchemaImporter
     /// <summary>スキーマ・テーブル名からテーブルキー（<c>[schema].[name]</c> 形式）を組み立てる</summary>
     private static string TableKey(string schema, string name) => $"[{schema}].[{name}]";
 
-    /// <summary>BASE TABLE 一覧を取得するクエリ</summary>
+    /// <summary>ユーザー定義テーブル一覧を取得するクエリ</summary>
+    /// <remarks>
+    /// SSMS のオブジェクトエクスプローラーと同じ基準でシステム由来のテーブルを除外する:
+    /// <c>is_ms_shipped = 1</c>（Microsoft 出荷物）と、拡張プロパティ
+    /// <c>microsoft_database_tools_support</c> が付いたツール用テーブル（sysdiagrams 等）
+    /// </remarks>
     private const string TablesSql =
         @"
-SELECT TABLE_SCHEMA, TABLE_NAME
-FROM INFORMATION_SCHEMA.TABLES
-WHERE TABLE_TYPE = 'BASE TABLE'
-ORDER BY TABLE_SCHEMA, TABLE_NAME;";
+SELECT s.name AS TABLE_SCHEMA, t.name AS TABLE_NAME
+FROM sys.tables t
+JOIN sys.schemas s ON t.schema_id = s.schema_id
+WHERE t.is_ms_shipped = 0
+  AND NOT EXISTS (
+      SELECT 1
+      FROM sys.extended_properties ep
+      WHERE ep.class = 1
+        AND ep.major_id = t.object_id
+        AND ep.minor_id = 0
+        AND ep.name = N'microsoft_database_tools_support'
+  )
+ORDER BY s.name, t.name;";
 
     /// <summary>全テーブルのカラム定義を序数順に取得するクエリ</summary>
     private const string ColumnsSql =

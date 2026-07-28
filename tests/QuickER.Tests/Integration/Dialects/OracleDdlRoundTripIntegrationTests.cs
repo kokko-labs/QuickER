@@ -266,4 +266,31 @@ public sealed class OracleDdlRoundTripIntegrationTests(OracleContainerFixture fi
                 .BeTrue($"取込型 '{col.DataType}'（列 {columnName}）は TryParse 可能であること");
         }
     }
+
+    /// <summary>
+    /// DROP したテーブルがごみ箱（リサイクルビン）に残す <c>BIN$...</c> テーブルが
+    /// 取込対象から除外されることを検証する。
+    /// </summary>
+    [Fact(DisplayName = "[Integration] A: ごみ箱（BIN$）のテーブルは取込から除外される")]
+    public async Task Import_ExcludesRecycleBinTables()
+    {
+        Assert.SkipUnless(fixture.IsAvailable, fixture.UnavailableReason);
+        await fixture.ResetSchemaAsync(Ct);
+
+        // ユーザーテーブル 1 つと、DROP でごみ箱行きになるテーブルを作る
+        // （PURGE なしの DROP は BIN$ 名（dropped = 'YES'）で user_tables に残る）
+        await fixture.ExecuteAsync(
+            """
+            CREATE TABLE "CUSTOMER" ("ID" NUMBER(10) NOT NULL PRIMARY KEY);
+            CREATE TABLE "TRASH" ("ID" NUMBER(10));
+            DROP TABLE "TRASH";
+            """,
+            Ct
+        );
+
+        await using var conn = await fixture.OpenConnectionAsync(Ct);
+        var result = await new OracleSchemaImporter().ImportAsync(conn, Ct);
+
+        result.Entities.Select(e => e.TableName).Should().BeEquivalentTo("CUSTOMER");
+    }
 }
