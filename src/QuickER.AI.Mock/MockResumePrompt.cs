@@ -95,7 +95,8 @@ public static class MockResumePrompt
         foreach (var screen in manifest.Screens)
         {
             var name = string.IsNullOrWhiteSpace(screen.Name) ? screen.File : screen.Name.Trim();
-            var line = $"- {screen.File}（{name}）";
+            // 括弧は構造リテラル（言語非依存）のため半角で固定する。文言そのものは resx 側が UI 言語に追従する
+            var line = $"- {screen.File} ({name})";
 
             if (!string.IsNullOrWhiteSpace(screen.Description))
             {
@@ -147,9 +148,10 @@ public static class MockResumePrompt
 
         foreach (var transition in manifest.Transitions)
         {
+            // 括弧は構造リテラル（言語非依存）のため半角で固定する
             var trigger = string.IsNullOrWhiteSpace(transition.Trigger)
                 ? string.Empty
-                : $"（{transition.Trigger.Trim()}）";
+                : $" ({transition.Trigger.Trim()})";
             builder.AppendLine($"- {transition.From} → {transition.To}{trigger}");
         }
 

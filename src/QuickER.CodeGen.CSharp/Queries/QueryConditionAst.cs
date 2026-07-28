@@ -186,11 +186,18 @@ public enum ComparisonOperator
     GreaterOrEqual,
 }
 
-/// <summary>条件式の診断 1 件（ローカライズ済みメッセージ＋原文内の位置）</summary>
-/// <param name="Message">ローカライズ済みの診断メッセージ</param>
+/// <summary>条件式の診断 1 件（描画前の診断文言＋原文内の位置）</summary>
+/// <param name="Text">
+/// 資源キー＋書式引数のまま保持する診断文言。面ごとに言語が異なる（GUI・内蔵チャット＝UI 言語追従／
+/// 外部 MCP サーバ＝英語固定）ため、文字列化はフォーマッタがカルチャを明示して行う。
+/// </param>
 /// <param name="Position">原文内の開始位置（0 始まり。全体に関わる診断は 0）</param>
 /// <param name="Length">原文内の長さ（特定できない場合は 0）</param>
-public sealed record ConditionDiagnostic(string Message, int Position, int Length);
+public sealed record ConditionDiagnostic(QueryDiagnosticText Text, int Position, int Length)
+{
+    /// <summary>現在の UI 言語で描画した診断メッセージ（GUI 表示・生成診断など UI 言語追従の面が使う）</summary>
+    public string Message => Text.Format(null);
+}
 
 /// <summary>条件式のパース結果（構文木＋診断＋列参照一覧）</summary>
 public sealed class ConditionParseResult

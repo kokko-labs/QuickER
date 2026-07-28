@@ -475,7 +475,7 @@ public sealed class ApiKeyMockProjectAgent : IMockProjectAgent, IErDiagramToolHo
 
         if (screens.Count == 0)
         {
-            builder.AppendLine("(画面はまだありません)");
+            builder.AppendLine("(no screens yet)");
         }
         else
         {
@@ -501,7 +501,7 @@ public sealed class ApiKeyMockProjectAgent : IMockProjectAgent, IErDiagramToolHo
 
         if (transitions.Count > 0)
         {
-            builder.AppendLine("遷移:");
+            builder.AppendLine("Transitions:");
 
             foreach (var transition in transitions)
             {
@@ -568,7 +568,7 @@ public sealed class ApiKeyMockProjectAgent : IMockProjectAgent, IErDiagramToolHo
     {
         if (!Directory.Exists(generatedDir))
         {
-            return "(データ層は見つかりませんでした)";
+            return "(the data layer could not be found)";
         }
 
         var files = Directory
@@ -578,11 +578,11 @@ public sealed class ApiKeyMockProjectAgent : IMockProjectAgent, IErDiagramToolHo
 
         if (files.Count == 0)
         {
-            return "(データ層のファイルは見つかりませんでした)";
+            return "(no data-layer files could be found)";
         }
 
         var builder = new StringBuilder();
-        builder.AppendLine("生成ファイル:");
+        builder.AppendLine("Generated files:");
 
         foreach (var file in files)
         {
@@ -641,13 +641,13 @@ public sealed class ApiKeyMockProjectAgent : IMockProjectAgent, IErDiagramToolHo
         if (publicTypes.Count > 0)
         {
             builder.AppendLine();
-            builder.Append("公開型: ").AppendLine(string.Join(", ", publicTypes));
+            builder.Append("Public types: ").AppendLine(string.Join(", ", publicTypes));
         }
 
         if (repositoryContracts.Count > 0)
         {
             builder.AppendLine();
-            builder.AppendLine("リポジトリ契約（DI で使う）:");
+            builder.AppendLine("Repository contracts (consumed through dependency injection):");
             builder.AppendLine(string.Join("\n", repositoryContracts));
         }
 
@@ -658,7 +658,7 @@ public sealed class ApiKeyMockProjectAgent : IMockProjectAgent, IErDiagramToolHo
         {
             summary =
                 summary[..GeneratedSummaryMaxChars]
-                + "\n... (要約は上限で切り詰めました。詳細は Generated/ 配下を参照)";
+                + "\n... (the summary was truncated at its size limit; see the files under Generated/ for the details)";
         }
 
         return summary;

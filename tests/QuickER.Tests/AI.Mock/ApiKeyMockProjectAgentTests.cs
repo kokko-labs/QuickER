@@ -219,14 +219,14 @@ public class ApiKeyMockProjectAgentTests
             profileBox[0].Tools.Should().ContainSingle(t => t.Name == "emit_file");
 
             // 生成コードの必須使用・XAML View 必須（コード組み立て禁止）の規約が入る
-            profileBox[0].BuildSystemPrompt().Should().Contain("XAML の View");
+            profileBox[0].BuildSystemPrompt().Should().Contain("XAML view");
+            profileBox[0].BuildSystemPrompt().Should().Contain("hard-coded list");
+
+            // 主キーのアプリ側採番（GuidKey の例外込み）とパッケージソース設定の禁止が入る
             profileBox[0]
                 .BuildSystemPrompt()
                 .Should()
-                .Contain("ハードコードされたリストで代用してはいけません");
-
-            // 主キーのアプリ側採番（GuidKey の例外込み）とパッケージソース設定の禁止が入る
-            profileBox[0].BuildSystemPrompt().Should().Contain("アプリ側で採番");
+                .Contain("assign the primary key in the application");
             profileBox[0].BuildSystemPrompt().Should().Contain("GuidKey");
             profileBox[0].BuildSystemPrompt().Should().Contain("NuGet.Config");
         }
@@ -272,7 +272,7 @@ public class ApiKeyMockProjectAgentTests
             system.Should().Contain("style.css");
 
             // 共有規約（Blazor でも変わらず入る）
-            system.Should().Contain("アプリ側で採番");
+            system.Should().Contain("assign the primary key in the application");
             system.Should().Contain("NuGet.Config");
 
             // Blazor プロファイルなので WPF 固有の MVVM 依存語彙・XAML パス例は出ない

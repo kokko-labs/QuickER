@@ -110,10 +110,10 @@ public class MockSchemaSerializerTests
         text.Should().Contain("nvarchar(50)");
         text.Should().Contain("顧客名");
 
-        // 制約表記
-        text.Should().Contain("主キー");
-        text.Should().Contain("外部キー");
-        text.Should().Contain("必須");
+        // 制約表記（英語正本）
+        text.Should().Contain("primary key");
+        text.Should().Contain("foreign key");
+        text.Should().Contain("required");
     }
 
     /// <summary>直列化結果にリレーション（親→子・参照列・多重度）が含まれることを検証する</summary>
@@ -122,9 +122,9 @@ public class MockSchemaSerializerTests
     {
         var text = MockSchemaSerializer.Serialize(BuildSampleDiagram());
 
-        text.Should().Contain("リレーション");
+        text.Should().Contain("## Relationships");
         text.Should().Contain("Customer.CustomerId → Order.CustomerId");
-        text.Should().Contain("1 対 多");
+        text.Should().Contain("one-to-many");
     }
 
     /// <summary>空の ER 図でも例外なく「テーブル未定義」の記述を返すことを検証する</summary>
@@ -133,6 +133,6 @@ public class MockSchemaSerializerTests
     {
         var text = MockSchemaSerializer.Serialize(new ErDiagram());
 
-        text.Should().Contain("テーブルは定義されていません");
+        text.Should().Contain("No tables are defined.");
     }
 }

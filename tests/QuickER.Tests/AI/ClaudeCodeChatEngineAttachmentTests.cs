@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using FluentAssertions;
 using QuickER.AI;
 using QuickER.AI.Chat;
@@ -118,7 +118,7 @@ public class ClaudeCodeChatEngineAttachmentTests
 
         // プロンプトへ添付パスが付記される
         client.Prompts.Should().ContainSingle();
-        client.Prompts[0].Should().Contain("添付ファイル（Read ツールで読むこと）");
+        client.Prompts[0].Should().Contain("Attached files (read them with the Read tool)");
         client.Prompts[0].Should().Contain("attachments");
 
         // 付記された絶対パスにファイルが実在し、attachments/ 配下である
@@ -150,7 +150,7 @@ public class ClaudeCodeChatEngineAttachmentTests
         await engine.SendAsync("やあ", TestContext.Current.CancellationToken);
 
         client.Options[0].AdditionalAllowedTools.Should().BeEmpty();
-        client.Prompts[0].Should().NotContain("添付ファイル");
+        client.Prompts[0].Should().NotContain("Attached file");
 
         await engine.DisposeAsync();
     }
@@ -244,8 +244,8 @@ public class ClaudeCodeChatEngineAttachmentTests
             TestContext.Current.CancellationToken
         );
 
-        client.Prompts[0].Should().Contain("Read で読めない形式");
-        client.Prompts[0].Should().Contain("代替案");
+        client.Prompts[0].Should().Contain("the Read tool cannot open");
+        client.Prompts[0].Should().Contain("suggest an alternative");
 
         await engine.DisposeAsync();
     }
@@ -270,7 +270,7 @@ public class ClaudeCodeChatEngineAttachmentTests
             TestContext.Current.CancellationToken
         );
 
-        client.Prompts[0].Should().NotContain("Read で読めない形式");
+        client.Prompts[0].Should().NotContain("the Read tool cannot open");
 
         await engine.DisposeAsync();
     }

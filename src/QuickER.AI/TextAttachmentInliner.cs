@@ -32,10 +32,11 @@ public static class TextAttachmentInliner
                 continue;
             }
 
+            // 見出しは LLM へ渡す機械向けの構造ラベルのため英語で固定する（UI 表示ではない）
             builder
-                .Append("\n\n【添付ファイル: ")
+                .Append("\n\nAttached file: ")
                 .Append(attachment.FileName)
-                .Append("】\n```\n")
+                .Append("\n```\n")
                 .Append(DecodeText(attachment.Data))
                 .Append("\n```");
         }

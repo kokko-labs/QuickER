@@ -1,4 +1,4 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using OpenAI.Chat;
 using QuickER.AI;
 
@@ -86,7 +86,7 @@ public class OpenAiTurnDriverTests
         message.Content.Should().ContainSingle();
         message.Content[0].Kind.Should().Be(ChatMessageContentPartKind.Text);
         message.Content[0].Text.Should().Contain("このデータを見て");
-        message.Content[0].Text.Should().Contain("【添付ファイル: data.csv】");
+        message.Content[0].Text.Should().Contain("Attached file: data.csv");
         message.Content[0].Text.Should().Contain("col1,col2");
     }
 
@@ -111,7 +111,7 @@ public class OpenAiTurnDriverTests
         message.Content.Should().HaveCount(2);
         message.Content[0].Kind.Should().Be(ChatMessageContentPartKind.Image);
         message.Content[1].Kind.Should().Be(ChatMessageContentPartKind.Text);
-        message.Content[1].Text.Should().Contain("【添付ファイル: m.txt】");
+        message.Content[1].Text.Should().Contain("Attached file: m.txt");
         message.Content[1].Text.Should().Contain("メモ本文");
     }
 }

@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.Json;
 using FluentAssertions;
 using QuickER.AI.Chat;
 using QuickER.Mcp.Tools;
@@ -209,5 +210,48 @@ public class QueryToolLocalizedFormatterTests
         ja.Should().Contain("GetById");
         ja.Should().Contain("条件: OrderId == @id");
         ja.Should().Contain("パラメータ: id: int32");
+    }
+
+    /// <summary>
+    /// DSL パーサ由来の診断（描画前の <c>DetailText</c>）が、内蔵チャット面では UI 言語に追従して
+    /// 描画されることを検証する（MCP 面は同じ診断を英語固定で描画する）。
+    /// </summary>
+    [Fact(DisplayName = "DSL 条件の診断は UI 言語に追従して整形される")]
+    public void FormatSetQuery_ConditionDiagnostic_FollowsUiLanguage()
+    {
+        var diagram = new ErDiagram();
+        var entity = new Entity { TableName = "orders" };
+        entity.Columns.Add(
+            new Column
+            {
+                Name = "customer_id",
+                DataType = "int",
+                IsPrimaryKey = true,
+            }
+        );
+        diagram.Entities.Add(entity);
+
+        var args = JsonSerializer.Deserialize<JsonElement>(
+            JsonSerializer.Serialize(
+                new
+                {
+                    table_name = "orders",
+                    query_name = "Broken",
+                    returns = "list",
+                    condition = "no_such_column = 1",
+                }
+            )
+        );
+        var outcome = QueryToolCore.SetQuery(diagram, args);
+
+        WithCulture("en", () => QueryToolLocalizedFormatter.FormatSetQuery(outcome))
+            .Should()
+            .Contain("The condition references column 'no_such_column', which does not exist");
+
+        WithCulture("ja", () => QueryToolLocalizedFormatter.FormatSetQuery(outcome))
+            .Should()
+            .Contain(
+                "条件式が参照する列 'no_such_column' はエンティティ 'orders' に存在しません。"
+            );
     }
 }

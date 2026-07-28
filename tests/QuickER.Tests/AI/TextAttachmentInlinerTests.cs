@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using FluentAssertions;
 using QuickER.AI;
 
@@ -31,7 +31,7 @@ public class TextAttachmentInlinerTests
             new[] { Text("a.txt", "hello") }
         );
 
-        result.Should().Be("これを見て\n\n【添付ファイル: a.txt】\n```\nhello\n```");
+        result.Should().Be("これを見て\n\nAttached file: a.txt\n```\nhello\n```");
     }
 
     /// <summary>複数テキストは順に連結されることを検証する</summary>
@@ -43,9 +43,9 @@ public class TextAttachmentInlinerTests
             new[] { Text("1.txt", "one"), Text("2.txt", "two") }
         );
 
-        result.Should().Contain("【添付ファイル: 1.txt】");
+        result.Should().Contain("Attached file: 1.txt");
         result.Should().Contain("one");
-        result.Should().Contain("【添付ファイル: 2.txt】");
+        result.Should().Contain("Attached file: 2.txt");
         result.Should().Contain("two");
         result.IndexOf("1.txt").Should().BeLessThan(result.IndexOf("2.txt"));
     }

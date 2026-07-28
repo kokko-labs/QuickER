@@ -16,8 +16,9 @@ namespace QuickER.AI.Chat;
 /// 構造（インデント・戻り形／実装方式の小文字トークン）は言語非依存のためコード側にリテラルで残す。
 /// </para>
 /// <para>
-/// DSL パーサ・生 SQL アナライザの診断（<see cref="QueryToolDiagnostic.Detail"/>）は既にローカライズ済みの
-/// 文字列なので、そのまま「データとして」埋め込む。
+/// DSL パーサ・生 SQL アナライザの診断（<see cref="QueryToolDiagnostic.DetailText"/>）は描画前の
+/// 資源キー＋書式引数で届くため、本フォーマッタは UI 言語（カルチャ未指定＝現在の UI 言語）で描画する。
+/// 同じ診断を MCP 面は英語固定で描画する。
 /// </para>
 /// </remarks>
 public static class QueryToolLocalizedFormatter
@@ -179,14 +180,15 @@ public static class QueryToolLocalizedFormatter
                 Strings.QueryTool_Diag_SqlDialectNotString,
                 d.Dialect
             ),
+            // DSL パーサ・生 SQL アナライザの診断は、内蔵チャット面では UI 言語に追従して描画する
             QueryToolDiagnosticCode.ConditionDiagnostic => string.Format(
                 Strings.QueryTool_Diag_Condition,
-                d.Detail
+                d.DetailText?.Format(null)
             ),
             QueryToolDiagnosticCode.RawSqlDiagnostic => string.Format(
                 Strings.QueryTool_Diag_RawSql,
                 d.Dialect,
-                d.Detail
+                d.DetailText?.Format(null)
             ),
             QueryToolDiagnosticCode.ParameterUnusedInCondition => string.Format(
                 Strings.QueryTool_Diag_ParameterUnusedInCondition,

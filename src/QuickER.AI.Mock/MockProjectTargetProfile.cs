@@ -83,7 +83,7 @@ public abstract class MockProjectTargetProfile
     /// <summary>API キー型 画面リクエストの実装指示（「〜で忠実に再現し、View と ViewModel を提出…」の一文）</summary>
     internal abstract string ApiKeyScreenInstruction(string projectName);
 
-    /// <summary>API キー型 system プロンプトの emit_file パス例（「・」区切りのターゲット代表例 2 つ）</summary>
+    /// <summary>API キー型 system プロンプトの emit_file パス例（英語の "and" で連ねたターゲット代表例 2 つ）</summary>
     internal abstract string ApiKeyEmitPathExamples(string projectName);
 
     /// <summary>ターゲットから対応するプロファイルを解決する（未知のターゲットは例外）</summary>

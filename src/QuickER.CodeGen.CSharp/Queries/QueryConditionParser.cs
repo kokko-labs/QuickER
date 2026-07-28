@@ -87,8 +87,8 @@ public static class QueryConditionParser
             {
                 result.Diagnostics.Add(
                     new ConditionDiagnostic(
-                        string.Format(
-                            Strings.CodeGen_Query_UnknownColumn,
+                        new QueryDiagnosticText(
+                            nameof(Strings.CodeGen_Query_UnknownColumn),
                             column.Text,
                             entity.TableName
                         ),
@@ -115,7 +115,10 @@ public static class QueryConditionParser
             {
                 result.Diagnostics.Add(
                     new ConditionDiagnostic(
-                        string.Format(Strings.CodeGen_Query_UnknownParameter, parameter.Text),
+                        new QueryDiagnosticText(
+                            nameof(Strings.CodeGen_Query_UnknownParameter),
+                            parameter.Text
+                        ),
                         parameter.Position,
                         parameter.Length
                     )
@@ -161,8 +164,8 @@ public static class QueryConditionParser
                 {
                     diagnostics.Add(
                         new ConditionDiagnostic(
-                            string.Format(
-                                Strings.CodeGen_Query_NullCheckOnNonNullableColumn,
+                            new QueryDiagnosticText(
+                                nameof(Strings.CodeGen_Query_NullCheckOnNonNullableColumn),
                                 nullCheck.Column.ResolvedName
                             ),
                             nullCheck.Column.Position,
@@ -222,7 +225,10 @@ public static class QueryConditionParser
         {
             diagnostics.Add(
                 new ConditionDiagnostic(
-                    string.Format(Strings.CodeGen_Query_InRequiresListParameter, operand.Text),
+                    new QueryDiagnosticText(
+                        nameof(Strings.CodeGen_Query_InRequiresListParameter),
+                        operand.Text
+                    ),
                     operand.Position,
                     operand.Length
                 )
@@ -232,7 +238,10 @@ public static class QueryConditionParser
         {
             diagnostics.Add(
                 new ConditionDiagnostic(
-                    string.Format(Strings.CodeGen_Query_ListParameterOnlyWithIn, operand.Text),
+                    new QueryDiagnosticText(
+                        nameof(Strings.CodeGen_Query_ListParameterOnlyWithIn),
+                        operand.Text
+                    ),
                     operand.Position,
                     operand.Length
                 )
@@ -396,7 +405,10 @@ public static class QueryConditionParser
 
                 diagnostics.Add(
                     new ConditionDiagnostic(
-                        string.Format(Strings.CodeGen_Query_UnexpectedCharacter, c),
+                        new QueryDiagnosticText(
+                            nameof(Strings.CodeGen_Query_UnexpectedCharacter),
+                            c
+                        ),
                         i,
                         1
                     )
@@ -419,7 +431,10 @@ public static class QueryConditionParser
                 {
                     diagnostics.Add(
                         new ConditionDiagnostic(
-                            string.Format(Strings.CodeGen_Query_UnexpectedCharacter, c),
+                            new QueryDiagnosticText(
+                                nameof(Strings.CodeGen_Query_UnexpectedCharacter),
+                                c
+                            ),
                             start,
                             1
                         )
@@ -463,7 +478,9 @@ public static class QueryConditionParser
                 {
                     diagnostics.Add(
                         new ConditionDiagnostic(
-                            Strings.CodeGen_Query_UnterminatedString,
+                            new QueryDiagnosticText(
+                                nameof(Strings.CodeGen_Query_UnterminatedString)
+                            ),
                             start,
                             text.Length - start
                         )
@@ -522,7 +539,7 @@ public static class QueryConditionParser
 
             diagnostics.Add(
                 new ConditionDiagnostic(
-                    string.Format(Strings.CodeGen_Query_UnexpectedCharacter, c),
+                    new QueryDiagnosticText(nameof(Strings.CodeGen_Query_UnexpectedCharacter), c),
                     i,
                     1
                 )
@@ -551,8 +568,11 @@ public static class QueryConditionParser
         public void ReportUnexpectedToken()
         {
             var message = IsAtEnd
-                ? Strings.CodeGen_Query_UnexpectedEnd
-                : string.Format(Strings.CodeGen_Query_UnexpectedToken, Current.Text);
+                ? new QueryDiagnosticText(nameof(Strings.CodeGen_Query_UnexpectedEnd))
+                : new QueryDiagnosticText(
+                    nameof(Strings.CodeGen_Query_UnexpectedToken),
+                    Current.Text
+                );
             result.Diagnostics.Add(
                 new ConditionDiagnostic(message, Current.Position, Current.Length)
             );
@@ -675,9 +695,14 @@ public static class QueryConditionParser
             {
                 result.Diagnostics.Add(
                     new ConditionDiagnostic(
-                        string.Format(
-                            Strings.CodeGen_Query_ExpectedColumnOrParen,
-                            IsAtEnd ? Strings.CodeGen_Query_EndOfInput : Current.Text
+                        new QueryDiagnosticText(
+                            nameof(Strings.CodeGen_Query_ExpectedColumnOrParen),
+                            IsAtEnd
+                                ? (object)
+                                    new QueryDiagnosticText(
+                                        nameof(Strings.CodeGen_Query_EndOfInput)
+                                    )
+                                : Current.Text
                         ),
                         Current.Position,
                         Current.Length
@@ -747,7 +772,9 @@ public static class QueryConditionParser
                 {
                     result.Diagnostics.Add(
                         new ConditionDiagnostic(
-                            Strings.CodeGen_Query_ExpectedNullAfterIs,
+                            new QueryDiagnosticText(
+                                nameof(Strings.CodeGen_Query_ExpectedNullAfterIs)
+                            ),
                             Current.Position,
                             Current.Length
                         )
@@ -793,7 +820,10 @@ public static class QueryConditionParser
                 default:
                     result.Diagnostics.Add(
                         new ConditionDiagnostic(
-                            string.Format(Strings.CodeGen_Query_ExpectedComparison, column.Text),
+                            new QueryDiagnosticText(
+                                nameof(Strings.CodeGen_Query_ExpectedComparison),
+                                column.Text
+                            ),
                             Current.Position,
                             Current.Length
                         )
@@ -834,7 +864,10 @@ public static class QueryConditionParser
             {
                 result.Diagnostics.Add(
                     new ConditionDiagnostic(
-                        string.Format(Strings.CodeGen_Query_UnsupportedLikePattern, pattern),
+                        new QueryDiagnosticText(
+                            nameof(Strings.CodeGen_Query_UnsupportedLikePattern),
+                            pattern
+                        ),
                         column.Position,
                         column.Length
                     )
@@ -894,7 +927,7 @@ public static class QueryConditionParser
             {
                 result.Diagnostics.Add(
                     new ConditionDiagnostic(
-                        Strings.CodeGen_Query_ExpectedInParameter,
+                        new QueryDiagnosticText(nameof(Strings.CodeGen_Query_ExpectedInParameter)),
                         Current.Position,
                         Current.Length
                     )
@@ -950,7 +983,7 @@ public static class QueryConditionParser
 
             result.Diagnostics.Add(
                 new ConditionDiagnostic(
-                    Strings.CodeGen_Query_StringMatchRequiresText,
+                    new QueryDiagnosticText(nameof(Strings.CodeGen_Query_StringMatchRequiresText)),
                     Current.Position,
                     Current.Length
                 )
@@ -974,7 +1007,7 @@ public static class QueryConditionParser
                 {
                     result.Diagnostics.Add(
                         new ConditionDiagnostic(
-                            Strings.CodeGen_Query_ExpectedOperand,
+                            new QueryDiagnosticText(nameof(Strings.CodeGen_Query_ExpectedOperand)),
                             Current.Position,
                             Current.Length
                         )
@@ -1001,7 +1034,7 @@ public static class QueryConditionParser
 
             result.Diagnostics.Add(
                 new ConditionDiagnostic(
-                    Strings.CodeGen_Query_ExpectedOperand,
+                    new QueryDiagnosticText(nameof(Strings.CodeGen_Query_ExpectedOperand)),
                     Current.Position,
                     Current.Length
                 )

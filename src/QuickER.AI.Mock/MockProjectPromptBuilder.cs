@@ -8,6 +8,8 @@ namespace QuickER.AI.Mock;
 /// <see cref="ClaudeCodeMockProjectAgent"/> と <see cref="CodexMockProjectAgent"/> の双方がここを参照する
 /// （プロンプト本文の重複コピーを避ける正本）。各バックエンドは、ここで得たシステムプロンプトを
 /// それぞれの流儀（Claude Code＝<c>--append-system-prompt</c>／Codex＝developer instructions）で渡す。
+/// 本文はすべて英語固定（ヘッドレス実行の機械向け指示は UI 言語に追従させない＝回答言語が意図せず
+/// 引きずられるのを避ける方針。CJK 混入は英語ガードテストが検知する）。
 /// </remarks>
 internal static class MockProjectPromptBuilder
 {
@@ -17,6 +19,9 @@ internal static class MockProjectPromptBuilder
     /// <summary>規約ドキュメントのファイル名</summary>
     public const string ReadmeFileName = "README-QuickER.md";
 
+    /// <summary>追加指示を連結するときの見出し（英語固定＝機械向け指示のため UI 言語に追従させない）</summary>
+    internal const string AdditionalInstructionsHeading = "# Additional instructions";
+
     /// <summary>
     /// Codex 保険用の自動続行ナッジ（承認待ちで止まったターンを 1 回だけ後押しする固定文）。
     /// </summary>
@@ -25,7 +30,7 @@ internal static class MockProjectPromptBuilder
     /// <see cref="CodexMockProjectAgent"/> が同一スレッドへ 1 回だけ送る続行指示。
     /// </remarks>
     internal const string CodexContinuationNudge =
-        "確認は不要です。承認を求めず、そのまま実装から dotnet build の検証まで完遂してください。";
+        "No confirmation is needed. Do not ask for approval: continue on your own and finish the work, from the implementation through verification with dotnet build.";
 
     /// <summary>ヘッドレス実行のシステムプロンプト（規約・制約）を組み立てる</summary>
     /// <remarks>
@@ -38,25 +43,25 @@ internal static class MockProjectPromptBuilder
         MockProjectTargetProfile profile,
         string projectName
     ) =>
-        $@"あなたは {profile.Target.DisplayName} の熟練エンジニアで、既存のプロジェクトに GUI（UI 層）を実装します。
-このフォルダは Visual Studio 標準構成で、直下にソリューション {projectName}.sln があり、プロジェクト一式は {projectName}/ フォルダ配下に、QuickER が生成した {profile.SystemScaffoldNoun}が既に用意されています。
+        $@"You are an expert {profile.Target.DisplayName} engineer, and you implement the GUI (the UI layer) of an existing project.
+This folder uses the standard Visual Studio layout: the solution {projectName}.sln sits at the root and the project itself lives under the {projectName}/ folder, where QuickER has already generated {profile.SystemScaffoldNoun}.
 
-これは非対話の自動実行（ヘッドレス）です。応答するユーザーはいません。計画の提示・確認・承認を求める質問は一切せず、このターン内で実装から `dotnet build` の検証まで完遂してください。
+This is a non-interactive, headless run. There is no user to answer you. Never present a plan, ask a clarifying question, or wait for approval: complete everything within this turn, from the implementation through verification with `dotnet build`.
 
-# 守るべき規約
-- 作業を始める前に、必ず {projectName}/{ReadmeFileName} を読み、その規約に従ってください。
-- {projectName}/{DesignFolderRelativePath}/ がデザイン仕様のモックフォルダです。まず {projectName}/{DesignFolderRelativePath}/mock.json を読んで画面一覧（screens）と画面遷移（transitions）を把握し、各画面の *.html（1 ファイル＝1 画面のデザイン仕様）と共有デザインシステム style.css を確認してください。{profile.SystemScreenReproductionRule}
-- {projectName}/Generated/ 配下（データ層の自動生成コード）は読み取り専用です。絶対に編集・削除しないでください。UI からは I{{Entity}}Repository を DI 経由で使います。
+# Rules you must follow
+- Before you start working, read {projectName}/{ReadmeFileName} and follow the rules it states.
+- {projectName}/{DesignFolderRelativePath}/ is the mock folder that holds the design specification. Start by reading {projectName}/{DesignFolderRelativePath}/mock.json to learn the screen list (screens) and the screen transitions (transitions), then review every screen's *.html (one file is the design specification of one screen) and the shared design system style.css. {profile.SystemScreenReproductionRule}
+- Everything under {projectName}/Generated/ (the auto-generated data-layer code) is read-only. Never edit or delete it. From the UI, use I{{Entity}}Repository through dependency injection.
 {profile.SystemUiFrameworkRules}
-- 画面のデータ表示・登録・更新・削除は、必ず {projectName}/Generated/ の生成コード（Entity / EditModel / Mapper / I{{Entity}}Repository）を使って実装してください。独自のデータクラスや ViewModel 内のハードコードされたリストで代用してはいけません（一覧・詳細は Repository から取得し、登録・更新・削除は Repository へ保存します）。
-- 起動時の DI 登録は AddGeneratedInMemoryRepositories()（サンプルデータ入り）を使ってください（実 DB 接続は不要）。
-- 新規作成（Insert）時の主キーは必ずアプリ側で採番してください（QuickER の Repository は DB 自動採番を使いません。未採番のままでは EditModel の検証や保存が失敗します）。主キーが値オブジェクト（GuidKey）の場合は無引数の Create() で新しいキーを生成できます。数値キーの場合は既存データの最大値＋1 等で採番します。
-- NuGet.Config 等のパッケージソース設定ファイルを追加・変更しないでください（パッケージ参照は csproj の既存設定のまま復元します）。
+- Implement every screen's data display, insert, update and delete with the generated code under {projectName}/Generated/ (Entity / EditModel / Mapper / I{{Entity}}Repository). You must not substitute your own data classes or a hard-coded list inside a ViewModel (read lists and details from the repository, and save inserts, updates and deletes through the repository).
+- Register the dependencies at startup with AddGeneratedInMemoryRepositories() (it seeds sample data), so no real database connection is needed.
+- When inserting a new record, always assign the primary key in the application (QuickER repositories do not rely on database-generated keys; if the key is left unassigned, EditModel validation or saving fails). When the primary key is a value object (GuidKey), the parameterless Create() generates a new key. For a numeric key, assign for example the largest existing value plus one.
+- Do not add or modify NuGet.Config or any other package source configuration file (packages are restored with the settings already present in the csproj).
 
-# 進め方
+# How to proceed
 {profile.SystemWorkflowSteps(projectName)}
-- 実装が一段落したら、このフォルダ（ソリューション直下）で `dotnet build` を実行し、警告なし・エラーなしで通るまで修正を繰り返してください。
-- 最後に、ビルドがエラー・警告なしで成功したことを確認した旨を報告してください。";
+- Once the implementation is in place, run `dotnet build` in this folder (the solution root) and keep fixing until it succeeds with no errors and no warnings.
+- Finally, report that you confirmed the build succeeded with no errors and no warnings.";
 
     /// <summary>初回プロンプト（実装の起点となる具体指示）を組み立てる</summary>
     /// <param name="profile">ターゲット差分（UI 層の呼称・実装手順・完了条件のビュー項目）</param>
@@ -69,37 +74,33 @@ internal static class MockProjectPromptBuilder
     )
     {
         var prompt =
-            $@"プロジェクト『{projectName}』の {profile.UiLayerName}を実装してください。
+            $@"Implement the {profile.UiLayerName} of the project '{projectName}'.
 
-このフォルダは Visual Studio 標準構成です。直下にソリューション {projectName}.sln があり、プロジェクト一式は {projectName}/ フォルダ配下にあります。UI 層のソースは {projectName}/ フォルダ配下（csproj と同じ場所）に追加してください。
+This folder uses the standard Visual Studio layout: the solution {projectName}.sln sits at the root and the project itself lives under the {projectName}/ folder. Add the UI-layer sources under the {projectName}/ folder (the same place as the csproj).
 
-手順:
-1. まず {projectName}/{ReadmeFileName} を読み、プロジェクト構成と規約を把握する。
-2. {projectName}/{DesignFolderRelativePath}/mock.json を読んで画面一覧（screens）と画面遷移（transitions）を把握し、各画面の *.html と共有 style.css を読んで、再現すべき画面構成・項目・遷移を把握する。
-3. {projectName}/Generated/ 配下のデータ層（Entity / I{{Entity}}Repository / AddGeneratedInMemoryRepositories 等）を確認し、UI から利用する。
-4. {profile.PromptImplementStep}DI には AddGeneratedInMemoryRepositories() を使う。
-5. このフォルダ（ソリューション直下）で `dotnet build` を実行し、エラー・警告なしで通るまで自己修正する。
-6. ビルドが成功したことを確認して報告する。
+Steps:
+1. First read {projectName}/{ReadmeFileName} to learn the project layout and the rules.
+2. Read {projectName}/{DesignFolderRelativePath}/mock.json to learn the screen list (screens) and the screen transitions (transitions), then read every screen's *.html and the shared style.css to learn the screen structure, the fields and the transitions you must reproduce.
+3. Review the data layer under {projectName}/Generated/ (Entity / I{{Entity}}Repository / AddGeneratedInMemoryRepositories and so on) and use it from the UI.
+4. {profile.PromptImplementStep}Use AddGeneratedInMemoryRepositories() for dependency injection.
+5. Run `dotnet build` in this folder (the solution root) and fix your own code until it succeeds with no errors and no warnings.
+6. Confirm that the build succeeded and report it.
 
-完了条件（すべて満たすこと）:
+Completion criteria (all of them must hold):
 - {profile.PromptViewCriterion}
-- 一覧・詳細・登録／編集のデータ操作がすべて I{{Entity}}Repository 経由である（独自データクラスやハードコードのリストで代用していない）。
-- 新規登録（Insert）が主キーの採番込みで実際に保存できる。
-- mock.json の transitions が画面遷移として動作する。
-- `dotnet build` がエラー・警告なしで成功している。
+- Every data operation for lists, details and insert/edit goes through I{{Entity}}Repository (no substitution with your own data classes or hard-coded lists).
+- A new record (insert) can actually be saved, including the assignment of its primary key.
+- The transitions declared in mock.json work as screen navigation.
+- `dotnet build` succeeds with no errors and no warnings.
 
-{projectName}/Generated/ 配下は読み取り専用です。編集しないでください。
+Everything under {projectName}/Generated/ is read-only. Do not edit it.
 
-確認や承認を求めず、この指示だけで最後まで完遂してください。";
+Do not ask for confirmation or approval: finish the whole task from these instructions alone.";
 
-        // 追加指示があれば末尾へ「# 追加指示」として連結する（見出しは resx から解決＝表示言語追従）
+        // 追加指示があれば末尾へ「# Additional instructions」として連結する（見出しも英語固定）
         if (!string.IsNullOrWhiteSpace(additionalInstructions))
         {
-            prompt +=
-                "\n\n"
-                + Resources.Strings.Mock_PromptUserInstructionsHeading
-                + "\n"
-                + additionalInstructions.Trim();
+            prompt += "\n\n" + AdditionalInstructionsHeading + "\n" + additionalInstructions.Trim();
         }
 
         return prompt;
@@ -121,24 +122,24 @@ internal static class MockProjectPromptBuilder
         MockProjectTargetProfile profile,
         string projectName
     ) =>
-        $@"あなたは {profile.Target.DisplayName} の熟練エンジニアで、既存プロジェクトの UI 層（画面）を実装します。
-データ層（Entity / EditModel / Mapper / I{{Entity}}Repository / インメモリ実装など）は QuickER が {projectName}/{MockProjectScaffoldService.GeneratedFolderName}/ 配下に生成済みで、あなたはそれを DI 経由で使う UI 層だけを書きます。
+        $@"You are an expert {profile.Target.DisplayName} engineer, and you implement the UI layer (the screens) of an existing project.
+QuickER has already generated the data layer (Entity / EditModel / Mapper / I{{Entity}}Repository / the in-memory implementation and so on) under {projectName}/{MockProjectScaffoldService.GeneratedFolderName}/, and you write only the UI layer that consumes it through dependency injection.
 
-# 実装の規約
+# Implementation rules
 {profile.ApiKeyUiFrameworkRules}
-- 起動時の DI 登録は AddGeneratedInMemoryRepositories()（サンプルデータ入り）を使ってください（実 DB 接続は不要）。
-- データアクセスは I{{Entity}}Repository を DI 経由で受け取って使い、具象を直接 new しないでください。画面のデータ表示・登録・更新・削除は必ず Repository 経由とし、独自のデータクラスや ViewModel 内のハードコードされたリストで代用してはいけません。
-- 新規作成（Insert）時の主キーは必ずアプリ側で採番してください（QuickER の Repository は DB 自動採番を使いません。未採番のままでは EditModel の検証や保存が失敗します）。主キーが値オブジェクト（GuidKey）の場合は無引数の Create() で新しいキーを生成できます。数値キーの場合は既存データの最大値＋1 等で採番します。
-- NuGet.Config 等のパッケージソース設定ファイルを提出しないでください（提出しても拒否されます）。
+- Register the dependencies at startup with AddGeneratedInMemoryRepositories() (it seeds sample data), so no real database connection is needed.
+- Receive I{{Entity}}Repository through dependency injection instead of newing up a concrete implementation directly. Every screen's data display, insert, update and delete must go through the repository; you must not substitute your own data classes or a hard-coded list inside a ViewModel.
+- When inserting a new record, always assign the primary key in the application (QuickER repositories do not rely on database-generated keys; if the key is left unassigned, EditModel validation or saving fails). When the primary key is a value object (GuidKey), the parameterless Create() generates a new key. For a numeric key, assign for example the largest existing value plus one.
+- Do not submit NuGet.Config or any other package source configuration file (such a submission is rejected).
 - {profile.ApiKeyScreenReproductionRule}
-- {projectName}/{MockProjectScaffoldService.GeneratedFolderName}/ 配下（データ層）・design/ 配下（デザイン仕様）・{ReadmeFileName}・.sln/.csproj は変更しないでください（提出しても拒否されます）。UI 層のソースだけを追加・更新します。
+- Do not change anything under {projectName}/{MockProjectScaffoldService.GeneratedFolderName}/ (the data layer), anything under design/ (the design specification), {ReadmeFileName}, or the .sln/.csproj files (such a submission is rejected). You only add and update UI-layer sources.
 
-# ファイルの提出方法（重要）
-- 実装ファイルを提出する唯一の手段は emit_file ツールです。チャット本文にコードを書いても反映されません。
-- emit_file には、そのファイルの完全な内容（差分ではなく全文）を渡してください。同じ path への再提出は上書きです。
-- path は出力プロジェクト配下の相対パスです（例 {profile.ApiKeyEmitPathExamples(projectName)}）。
-- あなたはファイルの読み取りや dotnet build の実行はできません。与えられた情報だけを根拠に、コンパイルが通る完全なファイルを提出してください（存在が確認できないメンバーを憶測で呼ばない）。
-- 各ターンで求められたファイル一式を、そのターン内で emit_file を使って必ず提出してください。";
+# How to submit files (important)
+- The emit_file tool is the only way to submit an implementation file. Code written in the chat body has no effect.
+- Pass the complete content of the file to emit_file (the whole file, not a diff). Submitting the same path again overwrites it.
+- path is a relative path under the output project (for example {profile.ApiKeyEmitPathExamples(projectName)}).
+- You cannot read files or run dotnet build. Using only the information you are given, submit complete files that compile (never guess at a member whose existence you cannot confirm).
+- In every turn, submit the whole set of files requested for that turn, using emit_file within that same turn.";
 
     /// <summary>固定パイプラインの第 1 リクエスト（共通部＝App/MainWindow/ナビゲーション骨格/DI）のプロンプトを組み立てる</summary>
     /// <param name="projectName">プロジェクト名</param>
@@ -155,22 +156,22 @@ internal static class MockProjectPromptBuilder
         string stylesheet,
         string generatedSummary
     ) =>
-        $@"プロジェクト『{projectName}』の {profile.UiLayerName}を、共通部から実装します。
+        $@"Implement the {profile.UiLayerName} of the project '{projectName}', starting with the shared parts.
 
-このターンでは次を emit_file で提出してください（UI 層のソースは {projectName}/ フォルダ配下へ置きます）:
+In this turn, submit the following with emit_file (UI-layer sources go under the {projectName}/ folder):
 {profile.ApiKeyCommonEmitInstructions(projectName)}
 
-# データ層（DI で使う契約の要約）
+# Data layer (summary of the contracts you consume through dependency injection)
 {generatedSummary}
 
-# 画面一覧（mock.json）と遷移
+# Screen list (mock.json) and transitions
 {screensOverview}
 
-# 共有デザインシステム（style.css）
+# Shared design system (style.css)
 {DescribeStylesheetForPrompt(stylesheet)}
 
-# 元の ER スキーマ
-{DescribeOrPlaceholder(schema, "(スキーマ情報はありません)")}";
+# Source ER schema
+{DescribeOrPlaceholder(schema, "(no schema information is available)")}";
 
     /// <summary>固定パイプラインの第 2 以降のリクエスト（1 画面＝1 リクエスト）のプロンプトを組み立てる</summary>
     /// <param name="projectName">プロジェクト名</param>
@@ -187,20 +188,20 @@ internal static class MockProjectPromptBuilder
         string transitions,
         IReadOnlyList<string> emittedFiles
     ) =>
-        $@"画面『{DescribeOrPlaceholder(screen.Name, screen.File)}』（{screen.File}）を実装してください。
+        $@"Implement the screen '{DescribeOrPlaceholder(screen.Name, screen.File)}' ({screen.File}).
 
 {profile.ApiKeyScreenInstruction(projectName)}
 
-# 画面の役割
-{DescribeOrPlaceholder(screen.Description, "(説明はありません)")}
+# Role of this screen
+{DescribeOrPlaceholder(screen.Description, "(no description is available)")}
 
-# デザイン仕様（{screen.File}）
-{DescribeOrPlaceholder(screenHtml, "(この画面の HTML は取得できませんでした。画面名・役割・遷移から実装してください。)")}
+# Design specification ({screen.File})
+{DescribeOrPlaceholder(screenHtml, "(the HTML of this screen could not be read; implement it from the screen name, its role and its transitions)")}
 
-# 遷移（この画面から）
-{DescribeOrPlaceholder(transitions, "(この画面からの遷移はありません)")}
+# Transitions (from this screen)
+{DescribeOrPlaceholder(transitions, "(there is no transition from this screen)")}
 
-# これまでに提出済みのファイル（命名やナビゲーション結線の整合を保つため参照）
+# Files submitted so far (refer to them so that naming and navigation wiring stay consistent)
 {DescribeEmittedFiles(emittedFiles)}";
 
     /// <summary>ビルド失敗時の修正リクエスト（固定 1 回）のプロンプトを組み立てる</summary>
@@ -210,12 +211,12 @@ internal static class MockProjectPromptBuilder
         string buildOutput,
         IReadOnlyList<string> emittedFiles
     ) =>
-        $@"提出されたコードで dotnet build がエラーになりました。以下のビルド出力を読み、原因のファイルを修正した完全版を emit_file で再提出してください（差分ではなく全文・同じ path で上書き）。修正の機会はこの 1 回だけです。
+        $@"dotnet build failed on the code you submitted. Read the build output below, then resubmit the complete corrected version of the offending files with emit_file (the whole file, not a diff, under the same path so that it overwrites). This is your only chance to correct them.
 
-# ビルド出力（全文）
-{DescribeOrPlaceholder(buildOutput, "(ビルド出力は取得できませんでした)")}
+# Build output (full)
+{DescribeOrPlaceholder(buildOutput, "(the build output could not be read)")}
 
-# これまでに提出済みのファイル
+# Files submitted so far
 {DescribeEmittedFiles(emittedFiles)}";
 
     /// <summary>提出済みファイル一覧を箇条書きテキストへ整形する（無ければその旨）</summary>
@@ -223,7 +224,7 @@ internal static class MockProjectPromptBuilder
     {
         if (emittedFiles is not { Count: > 0 })
         {
-            return "(まだありません)";
+            return "(none yet)";
         }
 
         return string.Join("\n", emittedFiles.Select(path => "- " + path));
@@ -232,7 +233,7 @@ internal static class MockProjectPromptBuilder
     /// <summary>共有スタイルシートをプロンプト用に案内する（空なら未作成の旨）</summary>
     private static string DescribeStylesheetForPrompt(string stylesheet) =>
         string.IsNullOrWhiteSpace(stylesheet)
-            ? "(共有スタイルシートはありません。デザインは各画面 HTML から読み取ってください。)"
+            ? "(there is no shared stylesheet; read the design from each screen's HTML)"
             : stylesheet.Trim();
 
     /// <summary>値が空なら代替テキストを返す（プロンプトの空欄化を避ける小ヘルパ）</summary>

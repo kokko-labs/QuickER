@@ -145,7 +145,7 @@ public static class QueryToolCore
                     errors.Add(
                         new QueryToolDiagnostic(
                             QueryToolDiagnosticCode.ConditionDiagnostic,
-                            Detail: diagnostic.Message
+                            DetailText: diagnostic.Text
                         )
                     );
                 }
@@ -192,7 +192,7 @@ public static class QueryToolCore
                     var diagnostic = new QueryToolDiagnostic(
                         QueryToolDiagnosticCode.RawSqlDiagnostic,
                         Dialect: dialect,
-                        Detail: RawSqlAnalyzer.Describe(finding)
+                        DetailText: RawSqlAnalyzer.DescribeText(finding)
                     );
 
                     if (finding.Kind == RawSqlAnalyzer.RawSqlIssueKind.UndeclaredParameter)

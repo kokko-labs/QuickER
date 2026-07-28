@@ -109,10 +109,10 @@ public class CodexMockProjectAgentTests
                 MockProjectPromptBuilder.BuildPrompt(MockProjectTargetProfile.Wpf, "AcmeMock", null)
             );
 
-        // 非対話・確認禁止の明示（ヘッドレスで承認待ちに陥らないための保険）が入る
-        options.DeveloperInstructions.Should().Contain("非対話");
-        options.DeveloperInstructions.Should().Contain("承認");
-        client.LastTurnPrompt.Should().Contain("確認や承認を求めず");
+        // 非対話・確認禁止の明示（ヘッドレスで承認待ちに陥らないための保険）が入る＝英語正本
+        options.DeveloperInstructions.Should().Contain("non-interactive, headless run");
+        options.DeveloperInstructions.Should().Contain("wait for approval");
+        client.LastTurnPrompt.Should().Contain("Do not ask for confirmation or approval");
     }
 
     /// <summary>追加指示が非空ならプロンプト末尾へ見出し付きで連結されることを検証する（共有ヘルパと一致）</summary>
@@ -130,7 +130,7 @@ public class CodexMockProjectAgentTests
         client.RaiseTurnCompleted("completed");
         await task;
 
-        var heading = QuickER.AI.Mock.Resources.Strings.Mock_PromptUserInstructionsHeading;
+        var heading = MockProjectPromptBuilder.AdditionalInstructionsHeading;
         client.LastTurnPrompt.Should().Contain(heading);
         client.LastTurnPrompt.Should().Contain("ダークテーマで実装して");
         client
@@ -354,7 +354,7 @@ public class CodexMockProjectAgentTests
             combined.Should().Contain("style.css");
 
             // 共有規約（Blazor でも変わらず入る）
-            combined.Should().Contain("アプリ側で採番");
+            combined.Should().Contain("assign the primary key in the application");
             combined.Should().Contain("NuGet.Config");
 
             // 共有ヘルパ由来で Blazor プロファイル版と一致する
