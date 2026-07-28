@@ -307,8 +307,9 @@ public sealed class ClaudeCodeChatEngine : IErChatEngine
     /// <summary>MCP からのツール呼び出しを UI スレッドで実行し、活動を通知して結果を返す</summary>
     private (string Result, bool Success) ExecuteTool(string toolName, string argumentsJson)
     {
+        // ツール結果は AI へ返る機械向け文言のため英語で固定する
         var (result, success) = _toolHost is null
-            ? ("ツールは利用できません。", false)
+            ? ("Tools are not available.", false)
             : _dispatcher.Invoke(() => _toolHost.Execute(toolName, argumentsJson));
 
         ToolActivityReceived?.Invoke(this, new ErChatToolActivity(toolName, result, success));
@@ -376,12 +377,13 @@ public sealed class ClaudeCodeChatEngine : IErChatEngine
         }
 
         var list = string.Join("\n", paths.Select(path => $"- {path}"));
-        var appended = $"{prompt}\n\n添付ファイル（Read ツールで読むこと）:\n{list}";
+        // ヘッドレス実行の CLI へ渡す機械向け指示のため、UI 言語に依らず英語で固定する
+        var appended = $"{prompt}\n\nAttached files (read them with the Read tool):\n{list}";
 
         if (hasBinary)
         {
             appended +=
-                "\n\n注: Read で読めない形式のファイルがある場合は、その旨と代替案をユーザーへ伝えること。";
+                "\n\nNote: if any file is in a format the Read tool cannot open, tell the user so and suggest an alternative.";
         }
 
         return appended;

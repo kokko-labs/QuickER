@@ -1,4 +1,4 @@
-using Anthropic.Models.Messages;
+﻿using Anthropic.Models.Messages;
 using FluentAssertions;
 using QuickER.AI;
 
@@ -149,7 +149,7 @@ public class AnthropicChatTurnDriverTests
 
         var text = param.Content.Value.Should().BeOfType<string>().Subject;
         text.Should().Contain("この要件で");
-        text.Should().Contain("【添付ファイル: req.md】");
+        text.Should().Contain("Attached file: req.md");
         text.Should().Contain("要件A");
     }
 
@@ -178,7 +178,7 @@ public class AnthropicChatTurnDriverTests
 
         var textBlock = (TextBlockParam)blocks[1].Value!;
         textBlock.Text.Should().Contain("両方参照");
-        textBlock.Text.Should().Contain("【添付ファイル: n.txt】");
+        textBlock.Text.Should().Contain("Attached file: n.txt");
         textBlock.Text.Should().Contain("補足メモ");
     }
 

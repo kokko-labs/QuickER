@@ -1,3 +1,4 @@
+using QuickER.CodeGen.CSharp.Queries;
 using QuickER.Model;
 
 namespace QuickER.Mcp.Tools;
@@ -12,8 +13,9 @@ namespace QuickER.Mcp.Tools;
 /// 文字列化（英語 / 日本語）は面側のフォーマッタ（<see cref="QueryToolEnglishFormatter"/> 等）の責務。
 /// </para>
 /// <para>
-/// DSL パーサ・生 SQL アナライザの診断メッセージは既にローカライズ済みの文字列なので、
-/// <see cref="QueryToolDiagnostic.Detail"/> に「データとして」載せてそのまま面へ渡す。
+/// DSL パーサ・生 SQL アナライザの診断も文字列化せず、描画前の <see cref="QueryDiagnosticText"/>（資源キー＋
+/// 書式引数）のまま <see cref="QueryToolDiagnostic.DetailText"/> に載せて面へ渡す。MCP 面は英語固定・
+/// 内蔵チャット面は UI 言語追従で描画するため、コアの時点では言語を決められない。
 /// </para>
 /// </remarks>
 public sealed class QueryToolOutcome
@@ -84,9 +86,10 @@ public enum QueryToolStatus
 /// <param name="Column">対象列名（source_column / order_by 列など。該当時）</param>
 /// <param name="Table">対象テーブル名（該当時）</param>
 /// <param name="Dialect">対象 SQL 方言名（該当時）</param>
-/// <param name="Detail">
-/// ローカライズ済み診断メッセージ等の付随文字列（DSL パーサ / 生 SQL アナライザの診断、または order_by 誤用時の
-/// 入力 returns 値）。既に各言語化された「データ」として面へそのまま渡す。
+/// <param name="Detail">言語に依らない付随文字列（order_by 誤用時の入力 returns 値など、入力そのまま）</param>
+/// <param name="DetailText">
+/// DSL パーサ / 生 SQL アナライザの診断文言。描画前（資源キー＋書式引数）のまま持ち回り、
+/// 面ごとにカルチャを明示して文字列化する（MCP＝英語固定 / 内蔵チャット＝UI 言語追従）。
 /// </param>
 public sealed record QueryToolDiagnostic(
     QueryToolDiagnosticCode Code,
@@ -94,7 +97,8 @@ public sealed record QueryToolDiagnostic(
     string? Column = null,
     string? Table = null,
     string? Dialect = null,
-    string? Detail = null
+    string? Detail = null,
+    QueryDiagnosticText? DetailText = null
 );
 
 /// <summary>名前付きクエリ検証の診断種別</summary>
@@ -142,10 +146,10 @@ public enum QueryToolDiagnosticCode
     /// <summary>SQL 方言の値が文字列でない</summary>
     SqlDialectNotString,
 
-    /// <summary>DSL 条件の診断（<see cref="QueryToolDiagnostic.Detail"/>＝ローカライズ済みメッセージ）</summary>
+    /// <summary>DSL 条件の診断（<see cref="QueryToolDiagnostic.DetailText"/>＝描画前の診断文言）</summary>
     ConditionDiagnostic,
 
-    /// <summary>生 SQL の診断（<see cref="QueryToolDiagnostic.Dialect"/>＋<see cref="QueryToolDiagnostic.Detail"/>＝ローカライズ済みメッセージ）</summary>
+    /// <summary>生 SQL の診断（<see cref="QueryToolDiagnostic.Dialect"/>＋<see cref="QueryToolDiagnostic.DetailText"/>＝描画前の診断文言）</summary>
     RawSqlDiagnostic,
 
     /// <summary>DSL 条件で宣言済みパラメータが未使用（警告）</summary>

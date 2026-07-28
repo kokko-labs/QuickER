@@ -16,14 +16,14 @@ public static class MockSchemaSerializer
     {
         var builder = new StringBuilder();
 
-        builder.AppendLine("# データベーススキーマ");
+        builder.AppendLine("# Database Schema");
         builder.AppendLine();
-        builder.AppendLine($"対象 DBMS: {diagram.TargetDbms}");
+        builder.AppendLine($"Target DBMS: {diagram.TargetDbms}");
         builder.AppendLine();
 
         if (diagram.Entities.Count == 0)
         {
-            builder.AppendLine("（テーブルは定義されていません）");
+            builder.AppendLine("(No tables are defined.)");
             return builder.ToString().TrimEnd();
         }
 
@@ -36,7 +36,7 @@ public static class MockSchemaSerializer
     /// <summary>各エンティティ（テーブル）と列を箇条書きで書き出す</summary>
     private static void AppendEntities(StringBuilder builder, ErDiagram diagram)
     {
-        builder.AppendLine("## テーブル");
+        builder.AppendLine("## Tables");
         builder.AppendLine();
 
         foreach (var entity in diagram.Entities)
@@ -46,19 +46,19 @@ public static class MockSchemaSerializer
             var heading =
                 displayName == entity.TableName
                     ? $"### {entity.TableName}"
-                    : $"### {entity.TableName}（{displayName}）";
+                    : $"### {entity.TableName} ({displayName})";
             builder.AppendLine(heading);
 
             if (!string.IsNullOrWhiteSpace(entity.Description))
             {
-                builder.AppendLine($"説明: {entity.Description}");
+                builder.AppendLine($"Description: {entity.Description}");
             }
 
             builder.AppendLine();
 
             if (entity.Columns.Count == 0)
             {
-                builder.AppendLine("- （列は定義されていません）");
+                builder.AppendLine("- (no columns are defined)");
                 builder.AppendLine();
                 continue;
             }
@@ -79,19 +79,19 @@ public static class MockSchemaSerializer
 
         if (column.IsPrimaryKey)
         {
-            attributes.Add("主キー");
+            attributes.Add("primary key");
         }
 
         if (column.IsForeignKey)
         {
-            attributes.Add("外部キー");
+            attributes.Add("foreign key");
         }
 
         // NULL 許容/必須を明示する（主キーは常に NOT NULL 前提だが列単位の設定をそのまま反映する）
-        attributes.Add(column.IsNullable ? "NULL可" : "必須");
+        attributes.Add(column.IsNullable ? "nullable" : "required");
 
         var displayName = ResolveDisplayName(column.Name, column.Description);
-        var namePart = displayName == column.Name ? column.Name : $"{column.Name}（{displayName}）";
+        var namePart = displayName == column.Name ? column.Name : $"{column.Name} ({displayName})";
 
         var line = $"- {namePart}: {string.Join(", ", attributes)}";
 
@@ -111,7 +111,7 @@ public static class MockSchemaSerializer
             return;
         }
 
-        builder.AppendLine("## リレーション");
+        builder.AppendLine("## Relationships");
         builder.AppendLine();
 
         // ID から名前へ引くための索引を組む
@@ -137,12 +137,12 @@ public static class MockSchemaSerializer
         var sourceColumn = ResolveColumnName(source, relationship.SourceColumnId);
         var targetColumn = ResolveColumnName(target, relationship.TargetColumnId);
 
-        var sourceName = source?.TableName ?? "(不明)";
-        var targetName = target?.TableName ?? "(不明)";
+        var sourceName = source?.TableName ?? "(unknown)";
+        var targetName = target?.TableName ?? "(unknown)";
 
         var reference =
             sourceColumn is not null && targetColumn is not null
-                ? $"（{sourceName}.{sourceColumn} → {targetName}.{targetColumn}）"
+                ? $" ({sourceName}.{sourceColumn} → {targetName}.{targetColumn})"
                 : string.Empty;
 
         var multiplicity = FormatMultiplicity(relationship.Type);
@@ -150,13 +150,13 @@ public static class MockSchemaSerializer
         return $"- {sourceName} → {targetName}{reference}: {multiplicity}";
     }
 
-    /// <summary>多重度を日本語表記へ変換する</summary>
+    /// <summary>多重度を英語表記へ変換する（プロンプト本文は英語正本）</summary>
     private static string FormatMultiplicity(RelationshipType type) =>
         type switch
         {
-            RelationshipType.OneToOne => "1 対 1",
-            RelationshipType.OneToMany => "1 対 多",
-            RelationshipType.ManyToMany => "多 対 多",
+            RelationshipType.OneToOne => "one-to-one",
+            RelationshipType.OneToMany => "one-to-many",
+            RelationshipType.ManyToMany => "many-to-many",
             _ => type.ToString(),
         };
 

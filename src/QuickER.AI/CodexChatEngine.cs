@@ -539,8 +539,8 @@ public sealed class CodexChatEngine : IErChatEngine
 
         if (_toolHost is null)
         {
-            resultText =
-                $"ツールホストが利用できないため '{request.Tool}' を実行できませんでした。";
+            // ツール結果は AI へ返る機械向け文言のため英語で固定する
+            resultText = $"Could not run '{request.Tool}' because the tool host is not available.";
             success = false;
         }
         else

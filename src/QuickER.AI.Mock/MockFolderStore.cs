@@ -142,6 +142,10 @@ public sealed class MockFolderStore
     /// <summary>
     /// 画面 HTML を書き出し、マニフェストの画面・遷移・改訂を更新して保存する。
     /// </summary>
+    /// <remarks>
+    /// 検証エラーの例外文言は<b>英語で固定</b>する。<c>save_screen</c> ツールの失敗結果として
+    /// そのまま AI へ返る機械向けメッセージであり、UI 表示文言ではないため（言語方針＝機械向け診断は英語固定）。
+    /// </remarks>
     /// <param name="file">画面ファイル名（フォルダ直下・<c>.html</c>・パス区切りや <c>".."</c> 不可）</param>
     /// <param name="name">画面の表示名</param>
     /// <param name="description">画面の役割説明</param>
@@ -168,7 +172,7 @@ public sealed class MockFolderStore
         if (string.IsNullOrWhiteSpace(html))
         {
             throw new ArgumentException(
-                "html が空です。完全な HTML 全体を指定してください。",
+                "html is empty. Provide the complete HTML document.",
                 nameof(html)
             );
         }
@@ -176,7 +180,7 @@ public sealed class MockFolderStore
         if (!html.Contains("<html", StringComparison.OrdinalIgnoreCase))
         {
             throw new ArgumentException(
-                "HTML として不完全です。<html> を含む単一ファイルの完全な HTML を指定してください。",
+                "html is not a complete HTML document. Provide a single self-contained HTML document that includes <html>.",
                 nameof(html)
             );
         }
@@ -483,11 +487,12 @@ public sealed class MockFolderStore
     }
 
     /// <summary>画面ファイル名の妥当性を検証する（フォルダ直下・<c>.html</c>・パス区切りや <c>".."</c> 不可）</summary>
+    /// <remarks>例外文言はツール結果として AI へ返る機械向けメッセージのため英語で固定する。</remarks>
     private static void ValidateScreenFileName(string file)
     {
         if (string.IsNullOrWhiteSpace(file))
         {
-            throw new ArgumentException("画面ファイル名が空です。", nameof(file));
+            throw new ArgumentException("The screen file name is empty.", nameof(file));
         }
 
         if (
@@ -497,7 +502,7 @@ public sealed class MockFolderStore
         )
         {
             throw new ArgumentException(
-                $"画面ファイル名にパス区切りや '..' を含めることはできません: {file}",
+                $"The screen file name must not contain path separators or '..': {file}",
                 nameof(file)
             );
         }
@@ -505,7 +510,7 @@ public sealed class MockFolderStore
         if (file.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
         {
             throw new ArgumentException(
-                $"画面ファイル名に使用できない文字が含まれます: {file}",
+                $"The screen file name contains characters that cannot be used: {file}",
                 nameof(file)
             );
         }
@@ -513,7 +518,7 @@ public sealed class MockFolderStore
         if (!file.EndsWith(".html", StringComparison.OrdinalIgnoreCase))
         {
             throw new ArgumentException(
-                $"画面ファイル名は .html で終わる必要があります: {file}",
+                $"The screen file name must end with .html: {file}",
                 nameof(file)
             );
         }

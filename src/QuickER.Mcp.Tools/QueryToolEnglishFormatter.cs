@@ -7,8 +7,11 @@ namespace QuickER.Mcp.Tools;
 /// 名前付きクエリツールの構造化結果（<see cref="QueryToolOutcome"/>）を英語テキストへ整形する MCP 面フォーマッタ。
 /// </summary>
 /// <remarks>
-/// 外部 AI エージェント向け MCP サーバの応答は中立言語（英語）が正本。次ステージで内蔵チャット用の日本語版
-/// フォーマッタを対で用意する。本クラスの出力は分離前の <c>DocumentErDiagramToolHost.Queries</c> と
+/// 外部 AI エージェント向け MCP サーバの応答は中立言語（英語）が正本＝ヘッドレス実行の応答は UI 言語に
+/// 依らず英語で固定する（DSL パーサ・生 SQL アナライザ由来の診断も
+/// <see cref="QuickER.CodeGen.CSharp.Queries.QueryDiagnosticText.FormatEnglish"/> で英語描画する）。
+/// 内蔵チャット面は対の日本語版フォーマッタ（<c>QueryToolLocalizedFormatter</c>）が UI 言語追従で描画する。
+/// 本クラスの出力は分離前の <c>DocumentErDiagramToolHost.Queries</c> と
 /// バイト等価（既存テストが文言をアサートしている）。<c>list_queries</c> のファイル由来の前置き
 /// （新フォーマット警告）はファイル IO 層の責務のため、ホスト側が本体へ前置する。
 /// </remarks>
@@ -131,8 +134,11 @@ public static class QueryToolEnglishFormatter
                 $"Unknown SQL dialect '{d.Dialect}' (must be one of: {string.Join(", ", QueryToolCore.SupportedDbms)}).",
             QueryToolDiagnosticCode.SqlDialectNotString =>
                 $"SQL for dialect '{d.Dialect}' must be a string.",
-            QueryToolDiagnosticCode.ConditionDiagnostic => $"Condition: {d.Detail}",
-            QueryToolDiagnosticCode.RawSqlDiagnostic => $"{d.Dialect}: {d.Detail}",
+            // DSL パーサ・生 SQL アナライザの診断は、UI 言語に依らず中立言語（英語）で描画する
+            QueryToolDiagnosticCode.ConditionDiagnostic =>
+                $"Condition: {d.DetailText?.FormatEnglish()}",
+            QueryToolDiagnosticCode.RawSqlDiagnostic =>
+                $"{d.Dialect}: {d.DetailText?.FormatEnglish()}",
             QueryToolDiagnosticCode.ParameterUnusedInCondition =>
                 $"Parameter '{d.Name}' is declared but not used in the condition.",
             _ => $"Unexpected diagnostic: {d.Code}",

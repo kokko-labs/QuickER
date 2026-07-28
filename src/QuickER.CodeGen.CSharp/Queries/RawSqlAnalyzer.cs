@@ -289,23 +289,37 @@ public static class RawSqlAnalyzer
         return findings;
     }
 
-    /// <summary>検出結果 1 件をローカライズ済みの単文メッセージへ整形する（ダイアログ・生成診断で共用）</summary>
-    public static string Describe(RawSqlFinding finding)
+    /// <summary>
+    /// 検出結果 1 件を現在の UI 言語の単文メッセージへ整形する（ダイアログ・生成診断で共用）。
+    /// </summary>
+    /// <remarks>
+    /// 英語固定で描画したい面（外部 AI エージェント向け MCP サーバ）は
+    /// <see cref="DescribeText"/> を使い、<see cref="QueryDiagnosticText.FormatEnglish"/> で描画する。
+    /// </remarks>
+    public static string Describe(RawSqlFinding finding) => DescribeText(finding).Format(null);
+
+    /// <summary>
+    /// 検出結果 1 件を「資源キー＋書式引数」のまま返す（描画時に面ごとのカルチャを明示できる）。
+    /// </summary>
+    public static QueryDiagnosticText DescribeText(RawSqlFinding finding)
     {
         ArgumentNullException.ThrowIfNull(finding);
 
         return finding.Kind switch
         {
-            RawSqlIssueKind.UndeclaredParameter => string.Format(
-                Strings.CodeGen_Query_RawSqlUndeclaredParameter,
+            RawSqlIssueKind.UndeclaredParameter => new QueryDiagnosticText(
+                nameof(Strings.CodeGen_Query_RawSqlUndeclaredParameter),
                 finding.ParameterName
             ),
-            RawSqlIssueKind.UnusedParameter => string.Format(
-                Strings.CodeGen_Query_RawSqlUnusedParameter,
+            RawSqlIssueKind.UnusedParameter => new QueryDiagnosticText(
+                nameof(Strings.CodeGen_Query_RawSqlUnusedParameter),
                 finding.ParameterName
             ),
-            RawSqlIssueKind.MultipleStatements => Strings.CodeGen_Query_RawSqlMultipleStatements,
-            _ => string.Empty,
+            RawSqlIssueKind.MultipleStatements => new QueryDiagnosticText(
+                nameof(Strings.CodeGen_Query_RawSqlMultipleStatements)
+            ),
+            // 想定外の種別は空文言（キーが解決できないので ResourceKey＝空文字がそのまま返る）
+            _ => new QueryDiagnosticText(string.Empty),
         };
     }
 }

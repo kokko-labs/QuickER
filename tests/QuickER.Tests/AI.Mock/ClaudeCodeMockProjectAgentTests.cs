@@ -104,23 +104,23 @@ public class ClaudeCodeMockProjectAgentTests
         options.SystemPrompt.Should().Contain("AcmeMock/Generated/");
         options.SystemPrompt.Should().Contain("AcmeMock/design/mock/mock.json");
 
-        // 非対話・確認禁止の明示（ヘッドレスで承認待ちに陥らないための保険）が入る
-        options.SystemPrompt.Should().Contain("非対話");
-        options.SystemPrompt.Should().Contain("承認");
-        client.CapturedPrompt.Should().Contain("確認や承認を求めず");
+        // 非対話・確認禁止の明示（ヘッドレスで承認待ちに陥らないための保険）が入る＝英語正本
+        options.SystemPrompt.Should().Contain("non-interactive, headless run");
+        options.SystemPrompt.Should().Contain("wait for approval");
+        client.CapturedPrompt.Should().Contain("Do not ask for confirmation or approval");
 
         // 生成コードの必須使用・XAML View 必須（コード組み立て禁止）の規約が入る
-        options.SystemPrompt.Should().Contain("XAML の View");
-        options.SystemPrompt.Should().Contain("禁止");
-        options.SystemPrompt.Should().Contain("ハードコードされたリストで代用してはいけません");
+        options.SystemPrompt.Should().Contain("XAML view");
+        options.SystemPrompt.Should().Contain("forbidden");
+        options.SystemPrompt.Should().Contain("hard-coded list");
 
         // 主キーのアプリ側採番（GuidKey の例外込み）とパッケージソース設定の禁止が入る
-        options.SystemPrompt.Should().Contain("アプリ側で採番");
+        options.SystemPrompt.Should().Contain("assign the primary key in the application");
         options.SystemPrompt.Should().Contain("GuidKey");
         options.SystemPrompt.Should().Contain("NuGet.Config");
         // 初回プロンプトの完了条件チェックリスト
-        client.CapturedPrompt.Should().Contain("完了条件");
-        client.CapturedPrompt.Should().Contain("Repository 経由");
+        client.CapturedPrompt.Should().Contain("Completion criteria");
+        client.CapturedPrompt.Should().Contain("through I{Entity}Repository");
     }
 
     /// <summary>Blazor プロファイルではプロンプトに Blazor 固有規約（.razor／@page／InteractiveServer／style.css 移植）と共有規約が入ることを検証する</summary>
@@ -140,7 +140,7 @@ public class ClaudeCodeMockProjectAgentTests
         combined.Should().Contain("style.css");
 
         // 共有規約（Blazor でも変わらず入る）
-        combined.Should().Contain("アプリ側で採番");
+        combined.Should().Contain("assign the primary key in the application");
         combined.Should().Contain("NuGet.Config");
 
         // WPF 固有の語彙は出ない
@@ -148,21 +148,21 @@ public class ClaudeCodeMockProjectAgentTests
         combined.Should().NotContain(".xaml");
     }
 
-    /// <summary>追加指示が非空ならプロンプト末尾へ「# 追加指示」見出し付きで連結され、空なら付かないことを検証する</summary>
+    /// <summary>追加指示が非空ならプロンプト末尾へ「# Additional instructions」見出し付きで連結され、空なら付かないことを検証する</summary>
     [Fact(DisplayName = "追加指示は非空なら末尾へ連結・空なら付かない")]
     public async Task RunAsync_AppendsAdditionalInstructions()
     {
         var client = new FakeClaudeCodeClient();
         var agent = new ClaudeCodeMockProjectAgent(client);
 
-        // 追加指示ありのとき、見出し（resx）と本文がプロンプト末尾に連結される
+        // 追加指示ありのとき、見出し（英語固定）と本文がプロンプト末尾に連結される
         await agent.RunAsync(
             Request("ダークテーマで実装して"),
             _ => { },
             TestContext.Current.CancellationToken
         );
 
-        var heading = QuickER.AI.Mock.Resources.Strings.Mock_PromptUserInstructionsHeading;
+        var heading = MockProjectPromptBuilder.AdditionalInstructionsHeading;
         client.CapturedPrompt.Should().Contain(heading);
         client.CapturedPrompt.Should().Contain("ダークテーマで実装して");
 

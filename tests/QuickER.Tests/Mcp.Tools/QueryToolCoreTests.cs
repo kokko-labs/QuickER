@@ -196,7 +196,9 @@ public sealed class QueryToolCoreTests
         var warning = outcome.Warnings.Should().ContainSingle().Subject;
         warning.Code.Should().Be(QueryToolDiagnosticCode.RawSqlDiagnostic);
         warning.Dialect.Should().Be("sqlite");
-        warning.Detail.Should().NotBeNullOrWhiteSpace();
+        // 診断は描画前（資源キー＋書式引数）で届く。面ごとにカルチャを明示して文字列化する
+        warning.DetailText.Should().NotBeNull();
+        warning.DetailText!.FormatEnglish().Should().NotBeNullOrWhiteSpace();
     }
 
     // ---------------- 早期失敗（単一状態） ----------------

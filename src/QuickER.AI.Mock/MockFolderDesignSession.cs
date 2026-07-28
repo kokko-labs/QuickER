@@ -391,6 +391,7 @@ public sealed class MockFolderDesignSession : IErDiagramToolHost
             .Where(f => !string.IsNullOrWhiteSpace(f))
             .ToList();
 
+        // "(none)" は英語で固定する（ツール結果として AI へ返る機械向けの構造トークンであり UI 表示ではない）
         return files.Count == 0 ? "(none)" : string.Join(", ", files);
     }
 
@@ -513,6 +514,11 @@ public sealed class MockFolderDesignSession : IErDiagramToolHost
     }
 
     /// <summary>受領文言へ、警告があれば「Warnings:」見出しで英語警告を改行連結する</summary>
+    /// <remarks>
+    /// 見出しは<b>英語で固定</b>する。警告本体（<see cref="MockContentValidator"/>）が英語正本であり、
+    /// ここはツール結果として AI へ返る機械向けの見出しのため（resx <c>Mock_WarningsHeading</c> は
+    /// VM 側の UI 表示用に別途残る）。
+    /// </remarks>
     private static string AppendWarnings(string baseText, IReadOnlyList<string> warnings)
     {
         if (warnings.Count == 0)
