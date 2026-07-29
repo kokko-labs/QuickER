@@ -54,7 +54,7 @@ All scenarios succeeded.
 - [EcOrder.json](samples/ec-order/EcOrder.json) — GUI で編集できる ER モデル
 - [EcOrder.sql](samples/ec-order/EcOrder.sql) — ER モデルから生成した SQLite DDL
 - [EcOrder.g.cs](samples/ec-order/EcOrderSample/Generated/EcOrder.g.cs) — 生成された C# コード
-- [Program.cs](samples/ec-order/EcOrderSample/Program.cs) — CRUD、グラフ保存、Include、生 SQL、削除カスケードの実行例
+- [Program.cs](samples/ec-order/EcOrderSample/Program.cs) — CRUD、グラフ保存、Include、EditModel / Mapper による編集、生 SQL、削除カスケードの実行例
 
 詳しくは [EC 注文サンプル](samples/ec-order/README.ja.md) を参照してください。図の編集からコード生成までを手を動かして一巡するには、[チュートリアル](docs/getting-started.ja.md)へ進んでください。
 
@@ -117,6 +117,7 @@ ER モデルから、アプリケーション開発に必要な C# コードを�
 - ASP.NET Core Minimal API サーバー
 
 生成コードは特定の UI フレームワークに依存しません。WPF、Blazor、ASP.NET Core など、任意の .NET アプリケーションから利用できます。
+EditModel と Mapper の動きは、同梱サンプルの [Program.cs](samples/ec-order/EcOrderSample/Program.cs) を実行して確認できます。
 
 詳しくは [生成コードの使い方](docs/code-generation.ja.md) を参照してください。
 

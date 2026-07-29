@@ -172,14 +172,45 @@ Console.WriteLine(
 Check(totalAmount, 3460m, "order total amount");
 Console.WriteLine();
 
-// ---- 6. Update (UpdateAsync) and cascade delete (ExecuteDeleteAsync(cascadeDelete: true)) ----
+// ---- 6. Edit through the EditModel + Mapper (screen-input simulation) ----
+// The EditModel is the generated binding model for screens: Binding{Property} holds the on-screen input
+// string, the confirmed typed value and RowState track the change state, and conversion errors surface via
+// INotifyDataErrorInfo. The Mapper converts between the entity and the edit model.
+var productEntity = await products.GetByIdAsync(101);
+var productMapper = new ProductMapper();
+var editModel = productMapper.CreateEditModel(productEntity!);
+Check(editModel.HasChanges, false, "edit model state right after load");
+
+// Invalid input (as if typed into a TextBox bound to BindingUnitPrice): the conversion error is held
+// per property, and the confirmed value stays untouched.
+editModel.BindingUnitPrice = "abc";
+Check(editModel.HasErrors, true, "conversion error detected for invalid input");
+
+// Correct the input: the error clears, the confirmed value updates, and the model is promoted to Updated.
+editModel.BindingUnitPrice = "1650";
+Check(editModel.HasErrors, false, "error cleared after correcting the input");
+Check(editModel.UnitPrice, 1650m, "confirmed value after input");
+Check(editModel.HasChanges, true, "promoted to update target by the confirmed-value change");
+
+// Apply the edit model back to the entity and save it with the repository.
+productMapper.ApplyToEntity(editModel, productEntity!);
+await products.UpdateAsync(productEntity!);
+
+var reloadedProduct = await products.GetByIdAsync(101);
+Console.WriteLine(
+    $"[6] Edited the product through the EditModel + Mapper: UnitPrice={reloadedProduct!.UnitPrice:0.##}"
+);
+Check(reloadedProduct.UnitPrice, 1650m, "unit price after the edit-model round trip");
+Console.WriteLine();
+
+// ---- 7. Update (UpdateAsync) and cascade delete (ExecuteDeleteAsync(cascadeDelete: true)) ----
 var toUpdate = await customers.GetByIdAsync(1);
 toUpdate!.Name = "Taro Yamada (renamed)";
 var updated = await customers.UpdateAsync(toUpdate);
 Check(updated, true, "customer update");
 
 var reloaded = await customers.GetByIdAsync(1);
-Console.WriteLine($"[6-a] Updated the customer: {reloaded!.Name}");
+Console.WriteLine($"[7-a] Updated the customer: {reloaded!.Name}");
 Check(reloaded.Name, "Taro Yamada (renamed)", "customer name after update");
 
 // Delete customer 1 together with its children (orders and order lines) — an explicit cascade delete on the
@@ -189,7 +220,7 @@ var deletedCount = await customers
     .Where(c => c.CustomerId == 1)
     .ExecuteDeleteAsync(cascadeDelete: true);
 Console.WriteLine(
-    $"[6-b] Deleted customer 1 together with its children (records deleted: {deletedCount})."
+    $"[7-b] Deleted customer 1 together with its children (records deleted: {deletedCount})."
 );
 
 // 1 customer + 1 order + 2 order lines = 4

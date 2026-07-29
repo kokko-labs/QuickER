@@ -69,7 +69,7 @@ What's in the sample:
 - [EcOrder.json](samples/ec-order/EcOrder.json) — the ER diagram you can open in the GUI (the exact diagram in the screenshot above)
 - [EcOrder.sql](samples/ec-order/EcOrder.sql) — the SQLite DDL generated from the diagram
 - [EcOrder.g.cs](samples/ec-order/EcOrderSample/Generated/EcOrder.g.cs) — the C# code generated from the diagram (Entity / EditModel / Mapper / Repository)
-- [Program.cs](samples/ec-order/EcOrderSample/Program.cs) — demonstrates CRUD, graph save, Include, raw-SQL aggregation, and delete cascade with the generated code
+- [Program.cs](samples/ec-order/EcOrderSample/Program.cs) — demonstrates CRUD, graph save, Include, editing through the EditModel / Mapper, raw-SQL aggregation, and delete cascade with the generated code
 
 ### Round-trip it yourself
 
