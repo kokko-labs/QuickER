@@ -5,6 +5,7 @@ using System.Windows.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using QuickER.Documents;
+using QuickER.Gui.Abstractions;
 using QuickER.Model;
 using QuickER.Provider;
 using QuickER.Resources;
@@ -651,7 +652,8 @@ public partial class MainViewModel
             return true;
         }
 
-        return _dialogs.Confirm(message, Strings.Common_Confirm);
+        // 未保存変更があるときは置換で編集内容が失われるため警告水準（Warning）で確認する
+        return _dialogs.ConfirmDiscard(IsDirty, message, Strings.Common_Confirm);
     }
 
     /// <summary>ファイル選択ダイアログで選択したファイルの形式に応じて ER 図を取り込む</summary>
@@ -868,7 +870,8 @@ public partial class MainViewModel
                     )
                 : message;
 
-        return _dialogs.Confirm(fullMessage, Strings.Common_Confirm);
+        // 未保存変更があるときは置換で編集内容が失われるため警告水準（Warning）で確認する
+        return _dialogs.ConfirmDiscard(IsDirty, fullMessage, Strings.Common_Confirm);
     }
 
     /// <summary>ファイル拡張子を優先し、無ければフィルター選択から出力形式を判定する</summary>

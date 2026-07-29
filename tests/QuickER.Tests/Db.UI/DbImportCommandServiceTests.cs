@@ -86,6 +86,38 @@ public class DbImportCommandServiceTests
         host.LastReplacedDiagram.Should().BeNull();
     }
 
+    /// <summary>ホストに未保存変更があるときの置換確認は、警告水準（ConfirmWarning）で表示される</summary>
+    [Fact(DisplayName = "ダーティ時の置換確認は警告水準（Warning）になる")]
+    public async Task RunAsync_DirtyHost_UsesWarningConfirmation()
+    {
+        // 現在図は非空・構造が異なり、ホストは未保存変更あり（IsDirty=true）
+        var host = new StubErDiagramHost
+        {
+            DiagramToReturn = DiagramWith("Existing"),
+            IsDirtyToReturn = true,
+        };
+        var dialogs = new StubDialogService { ConfirmResult = false };
+        var provider = new FakeImportProvider(ImportedEntities("Imported"));
+        var service = new DbImportCommandService(
+            host,
+            dialogs,
+            new FakeConnectionPresenter(
+                new DbConnectionDialogResult(new DbConnectionSettings(), provider)
+            )
+        );
+
+        await service.RunAsync();
+
+        // 未保存変更が失われる置換のため、警告水準の確認になる（通常確認は使わない）
+        dialogs
+            .WarningConfirmMessages.Should()
+            .ContainSingle()
+            .Which.Should()
+            .Be(DbStrings.Db_ImportReplaceConfirm);
+        dialogs.ConfirmMessages.Should().BeEmpty();
+        host.LastReplacedDiagram.Should().BeNull();
+    }
+
     /// <summary>成功時は取込先方言込みの図が host.ReplaceDiagram へ渡る（空の現在図は確認なし）</summary>
     [Fact(DisplayName = "成功時は TargetDbms 込みの図が ReplaceDiagram へ渡る")]
     public async Task RunAsync_Success_ReplacesDiagramWithTargetDbms()

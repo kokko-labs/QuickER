@@ -19,6 +19,9 @@ internal sealed class StubErDiagramHost : IErDiagramHost
     /// <summary><see cref="IsEmpty"/> が返す値</summary>
     public bool IsEmptyToReturn { get; init; }
 
+    /// <summary><see cref="IsDirty"/> が返す値（既定はクリーン＝false）</summary>
+    public bool IsDirtyToReturn { get; init; }
+
     /// <summary><see cref="ExecuteTool"/> が返す結果テキストと成否</summary>
     public (string Result, bool Success) ToolResultToReturn { get; init; } = ("ok", true);
 
@@ -52,6 +55,9 @@ internal sealed class StubErDiagramHost : IErDiagramHost
 
     /// <inheritdoc />
     public bool IsEmpty => IsEmptyToReturn;
+
+    /// <inheritdoc />
+    public bool IsDirty => IsDirtyToReturn;
 
     /// <inheritdoc />
     public DatabaseProviderRegistry Providers => ProvidersToReturn;

@@ -958,8 +958,10 @@ public class MainViewModelTests
 
     // ---------------- ダイアログサービス (IDialogService) ----------------
 
-    /// <summary>新規作成の確認でキャンセルすると現在のダイアグラムが保持されることを検証する</summary>
-    [Fact(DisplayName = "NewDiagram: 確認でキャンセルするとダイアグラムは保持される")]
+    /// <summary>新規作成の確認でキャンセルすると現在のダイアグラムが保持されることを検証する（未保存編集ありのため警告水準の確認）</summary>
+    [Fact(
+        DisplayName = "NewDiagram: ダーティ時は警告確認になりキャンセルでダイアグラムは保持される"
+    )]
     public void NewDiagram_ConfirmDeclined_KeepsDiagram()
     {
         var dialogs = new StubDialogService { ConfirmResult = false };
@@ -970,14 +972,17 @@ public class MainViewModelTests
 
         vm.Entities.Should().HaveCount(1);
         dialogs
-            .ConfirmMessages.Should()
+            .WarningConfirmMessages.Should()
             .ContainSingle()
             .Which.Should()
             .Be(Strings.Confirm_ClearDiagram);
+        dialogs
+            .ConfirmMessages.Should()
+            .BeEmpty("未保存編集がある間の確認は警告水準（Warning）を使う");
     }
 
-    /// <summary>新規作成の確認で OK するとダイアグラムがクリアされることを検証する</summary>
-    [Fact(DisplayName = "NewDiagram: 確認で OK するとダイアグラムがクリアされる")]
+    /// <summary>新規作成の確認で OK するとダイアグラムがクリアされることを検証する（未保存編集ありのため警告水準の確認）</summary>
+    [Fact(DisplayName = "NewDiagram: ダーティ時は警告確認になり OK でダイアグラムがクリアされる")]
     public void NewDiagram_ConfirmAccepted_ClearsDiagram()
     {
         var dialogs = new StubDialogService { ConfirmResult = true };
@@ -987,7 +992,8 @@ public class MainViewModelTests
         vm.NewDiagramCommand.Execute(null);
 
         vm.Entities.Should().BeEmpty();
-        dialogs.ConfirmMessages.Should().HaveCount(1);
+        dialogs.WarningConfirmMessages.Should().HaveCount(1);
+        dialogs.ConfirmMessages.Should().BeEmpty();
     }
 
     /// <summary>重複リレーション作成時に情報ダイアログが表示され、追加されないことを検証する</summary>
