@@ -1,6 +1,6 @@
 # MCP サーバ（quicker mcp）
 
-*日本語 | [English](mcp.md)*
+*[English](mcp.md) | 日本語*
 
 `quicker mcp` は、stdio トランスポート（標準入出力・JSON-RPC）の [Model Context Protocol](https://modelcontextprotocol.io) サーバを起動します。ER 図を編集し、コードを生成するツールを公開するため、外部の AI エージェント（Claude Code・Codex など）が自身のワークフローの一部として QuickER の図を構築・発展させられます。エージェントは `quicker mcp` を子プロセスとして起動し、標準入出力で通信します。
 

@@ -1,6 +1,6 @@
 # CLI reference (quicker)
 
-*[日本語](cli.ja.md) | English*
+*English | [日本語](cli.ja.md)*
 
 The QuickER CLI provides subcommands for generating code (`generate` / `scaffold`), reverse-engineering a diagram from generated C# (`reverse`), and running an MCP server for AI agents (`mcp`, see [MCP server](mcp.md)).
 

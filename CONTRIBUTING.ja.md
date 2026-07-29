@@ -1,6 +1,6 @@
 # QuickER への貢献ガイド
 
-*日本語 | [English](CONTRIBUTING.md)*
+*[English](CONTRIBUTING.md) | 日本語*
 
 QuickER は個人開発の OSS です。Issue・Pull Request を歓迎しますが、対応は**ベストエフォート**（対応期限の約束なし）で、**サポート対象は最新版のみ**です。
 

@@ -1,6 +1,6 @@
 # EC order sample (ec-order)
 
-*[日本語](README.ja.md) | English*
+*English | [日本語](README.ja.md)*
 
 A minimal sample that lets you actually run the C# code QuickER generated from an ER diagram, with no external DB.
 The subject is an e-commerce order domain (customers, products, orders, order lines), and it demonstrates

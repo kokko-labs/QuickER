@@ -1,6 +1,6 @@
 # Configuring AI chat
 
-*[日本語](ai-chat.ja.md) | English*
+*English | [日本語](ai-chat.ja.md)*
 
 From "AI Chat" on the toolbar, you can generate and edit ER diagrams through conversation (e.g., "Design the tables needed for order management on an e-commerce site", "Add a shipping address to `orders`"). With the same connection settings you can also use "AI Mock Generation", which generates web mockup screens from the current ER diagram (see [AI mock generation](#ai-mock-generation) below).
 

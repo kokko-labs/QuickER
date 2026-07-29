@@ -1,6 +1,6 @@
 # EC 注文リモートサンプル（ec-order-remote）
 
-*日本語 | [English](README.md)*
+*[English](README.md) | 日本語*
 
 QuickER の「リモートサービス生成（GenerateRemoteServices）」で ER 図から生成したコードだけで、
 3 階層（クライアント → HTTP + JSON → サーバー → SQLite）を構成して動かす最小サンプルです。

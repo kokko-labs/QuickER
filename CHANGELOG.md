@@ -1,6 +1,6 @@
 # Changelog
 
-*[日本語](CHANGELOG.ja.md) | English*
+*English | [日本語](CHANGELOG.ja.md)*
 
 This file records changes that affect QuickER users. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/) (see [CONTRIBUTING.md](CONTRIBUTING.md) for the versioning rules during 0.x and the release procedure).
 

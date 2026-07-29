@@ -1,6 +1,6 @@
 # CLI リファレンス（quicker）
 
-*日本語 | [English](cli.md)*
+*[English](cli.md) | 日本語*
 
 QuickER の CLI は、コード生成用のサブコマンド（`generate` / `scaffold`）、生成 C# コードから図を復元する `reverse`、AI エージェント向けの MCP サーバを起動する `mcp`（[MCP サーバ](mcp.ja.md)を参照）を提供します。
 

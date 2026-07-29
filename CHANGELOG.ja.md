@@ -1,6 +1,6 @@
 # 変更履歴（Changelog）
 
-*日本語 | [English](CHANGELOG.md)*
+*[English](CHANGELOG.md) | 日本語*
 
 QuickER の利用者に影響する変更を記録します。形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、バージョンは [Semantic Versioning](https://semver.org/lang/ja/) に従います（0.x の間の版上げルールとリリース手順は [CONTRIBUTING.ja.md](CONTRIBUTING.ja.md) を参照）。
 

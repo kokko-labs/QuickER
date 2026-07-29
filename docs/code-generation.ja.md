@@ -1,6 +1,6 @@
 # 生成コードの使い方
 
-*日本語 | [English](code-generation.md)*
+*[English](code-generation.md) | 日本語*
 
 QuickER が生成する C# コードの構成と、データアクセス層（QuickER 版 Repository / EF Core）の使い方をまとめます。生成方法は [CLI リファレンス](cli.ja.md)、動く実例は [samples/ec-order](../samples/ec-order) を参照してください。
 

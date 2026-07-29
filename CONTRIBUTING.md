@@ -1,6 +1,6 @@
 # Contributing to QuickER
 
-*[日本語](CONTRIBUTING.ja.md) | English*
+*English | [日本語](CONTRIBUTING.ja.md)*
 
 QuickER is a solo-developed OSS project. Issues and pull requests are welcome, but support is **best-effort** (no promised response times) and covers **the latest version only**.
 

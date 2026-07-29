@@ -1,6 +1,6 @@
 # QuickER
 
-*[日本語](README.ja.md) | English*
+*English | [日本語](README.ja.md)*
 
 *License: [MIT](LICENSE) (core) + [PolyForm NC](LICENSE-NC.md) (AI features and code generation — currently free for everyone, including commercial use). See [License](#license) for details.*
 

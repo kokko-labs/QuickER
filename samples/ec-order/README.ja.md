@@ -1,6 +1,6 @@
 # EC 注文サンプル（ec-order）
 
-*日本語 | [English](README.md)*
+*[English](README.md) | 日本語*
 
 QuickER が ER 図から生成した C# コードを、外部 DB なしで実際に動かせる最小サンプルです。
 題材は EC の注文ドメイン（顧客・商品・注文・注文明細）で、SQLite ファイル DB に対して

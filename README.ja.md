@@ -1,6 +1,6 @@
 # QuickER
 
-*日本語 | [English](README.md)*
+*[English](README.md) | 日本語*
 
 <!-- TODO(バッジ): 公開時に CI / Release / License バッジをここへ追加する（.github/workflows/ci.yml が存在するため CI バッジは即設置可能） -->
 

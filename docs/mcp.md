@@ -1,6 +1,6 @@
 # MCP server (quicker mcp)
 
-*[日本語](mcp.ja.md) | English*
+*English | [日本語](mcp.ja.md)*
 
 `quicker mcp` starts a [Model Context Protocol](https://modelcontextprotocol.io) server over the stdio transport (stdin/stdout, JSON-RPC). It exposes tools for editing ER diagrams and generating code, so an external AI agent (Claude Code, Codex, and so on) can build and evolve a QuickER diagram as part of its own workflow. The agent launches `quicker mcp` as a child process and talks to it over stdin/stdout.
 

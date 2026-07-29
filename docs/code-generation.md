@@ -1,6 +1,6 @@
 # Using the Generated Code
 
-*[日本語](code-generation.ja.md) | English*
+*English | [日本語](code-generation.ja.md)*
 
 This document describes the structure of the C# code QuickER generates and how to use its data-access layer (QuickER Repository / EF Core). For how to run generation, see the [CLI reference](cli.md); for a working example, see [samples/ec-order](../samples/ec-order).
 

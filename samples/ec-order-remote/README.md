@@ -1,6 +1,6 @@
 # EC order remote sample (ec-order-remote)
 
-*[日本語](README.ja.md) | English*
+*English | [日本語](README.ja.md)*
 
 A minimal sample that runs a three-tier setup (client → HTTP + JSON → server → SQLite) using only the code
 QuickER generated from an ER diagram with "remote service generation" (`GenerateRemoteServices`).
