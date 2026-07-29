@@ -8,6 +8,8 @@
     <!-- プロジェクト名は QuickER.Gui（QuickER.Cli と対称）だが、実行ファイル名と namespace は QuickER ブランドを維持する -->
     <AssemblyName>QuickER</AssemblyName>
     <RootNamespace>QuickER</RootNamespace>
+    <!-- アプリアイコン（正本は assets/ 直下。exe 埋め込み＝タイトルバー・タスクバー・エクスプローラーに反映） -->
+    <ApplicationIcon>..\..\assets\QuickER.ico</ApplicationIcon>
     <!-- 中立（既定）リソースのカルチャ＝英語。日本語は Strings.ja.resx サテライトで賦与する -->
     <NeutralResourcesLanguage>en</NeutralResourcesLanguage>
     <!--

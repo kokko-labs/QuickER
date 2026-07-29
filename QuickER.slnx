@@ -14,6 +14,10 @@
     <File Path="SECURITY.md" />
     <File Path="SECURITY.ja.md" />
   </Folder>
+  <Folder Name="/assets/">
+    <File Path="assets/QuickER.ico" />
+    <File Path="assets/quicker-icon.png" />
+  </Folder>
   <Folder Name="/docs/">
     <File Path="docs/ai-chat.ja.md" />
     <File Path="docs/ai-chat.md" />

@@ -76,14 +76,14 @@ jobs:
         run: vpk download github --repoUrl https://github.com/${{ github.repository }} --channel win-full --outputDir ${{ runner.temp }}/releases-full
 
       - name: win-full を vpk pack（Setup.exe + Portable zip）
-        run: vpk pack --packId QuickER --packVersion ${{ steps.version.outputs.version }} --packDir ${{ runner.temp }}/publish-full --mainExe QuickER.exe --channel win-full --outputDir ${{ runner.temp }}/releases-full
+        run: vpk pack --packId QuickER --packVersion ${{ steps.version.outputs.version }} --packDir ${{ runner.temp }}/publish-full --mainExe QuickER.exe --icon assets/QuickER.ico --channel win-full --outputDir ${{ runner.temp }}/releases-full
 
       - name: 既存リリースを取得（win-lite・差分更新用）
         continue-on-error: true
         run: vpk download github --repoUrl https://github.com/${{ github.repository }} --channel win-lite --outputDir ${{ runner.temp }}/releases-lite
 
       - name: win-lite を vpk pack（Setup.exe + Portable zip）
-        run: vpk pack --packId QuickER --packVersion ${{ steps.version.outputs.version }} --packDir ${{ runner.temp }}/publish-lite --mainExe QuickER.exe --channel win-lite --outputDir ${{ runner.temp }}/releases-lite
+        run: vpk pack --packId QuickER --packVersion ${{ steps.version.outputs.version }} --packDir ${{ runner.temp }}/publish-lite --mainExe QuickER.exe --icon assets/QuickER.ico --channel win-lite --outputDir ${{ runner.temp }}/releases-lite
 
       - name: 成果物をワークフロー成果物としてアップロード（dry_run 検証用・win-full）
         uses: actions/upload-artifact@v7
