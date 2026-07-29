@@ -255,6 +255,89 @@ public class CodeReverseCommandServiceTests
         }
     }
 
+    /// <summary>ホストに未保存変更があるときの置換確認は、警告水準（ConfirmWarning）で表示される</summary>
+    [Fact(DisplayName = "ダーティ時の置換確認は警告水準（Warning）になる")]
+    public void Run_DirtyHost_UsesWarningConfirmation()
+    {
+        var current = new ErDiagram
+        {
+            TargetDbms = "sqlserver",
+            Entities =
+            {
+                new Entity
+                {
+                    TableName = "existing",
+                    Columns =
+                    {
+                        new Column
+                        {
+                            Name = "id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                    },
+                },
+            },
+        };
+
+        // 取込元コードは別テーブル＝構造差分ありで確認ダイアログを誘発する
+        var codeDiagram = new ErDiagram
+        {
+            Entities =
+            {
+                new Entity
+                {
+                    TableName = "imported",
+                    Columns =
+                    {
+                        new Column
+                        {
+                            Name = "id",
+                            DataType = "int",
+                            IsPrimaryKey = true,
+                            IsNullable = false,
+                        },
+                    },
+                },
+            },
+        };
+        var (picked, root) = WriteGeneratedSource(codeDiagram);
+
+        try
+        {
+            // ホストは未保存変更あり（IsDirty=true）＝置換で編集内容が失われる状態
+            var host = new StubErDiagramHost
+            {
+                DiagramToReturn = current,
+                ProvidersToReturn = SqlServerRegistry(),
+                TargetDbmsToReturn = "sqlserver",
+                IsDirtyToReturn = true,
+            };
+            var dialogs = new StubDialogService { ConfirmResult = false };
+            var files = new StubFileDialogService { OpenResult = picked };
+            var service = new CodeReverseCommandService(host, dialogs, files);
+
+            service.Run();
+
+            // 未保存変更が失われる置換のため、警告水準の確認になる（通常確認は使わない）
+            dialogs
+                .WarningConfirmMessages.Should()
+                .ContainSingle()
+                .Which.Should()
+                .Be(CodeGenStrings.Reverse_ReplaceConfirm);
+            dialogs.ConfirmMessages.Should().BeEmpty();
+            host.LastReplacedDiagram.Should().BeNull();
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
     /// <summary>解析対象クラスが無いファイルは、案内メッセージのエラーダイアログで提示され差し替えない</summary>
     [Fact(DisplayName = "対象クラス 0 件は案内メッセージのエラーダイアログ")]
     public void Run_NoTargetClasses_ShowsError()

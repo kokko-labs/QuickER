@@ -145,7 +145,8 @@ public sealed class CodeReverseCommandService
                     )
                 : Strings.Reverse_ReplaceConfirm;
 
-        return _dialogs.Confirm(fullMessage, Strings.Common_Confirm);
+        // 未保存変更があるときは置換で編集内容が失われるため警告水準（Warning）で確認する
+        return _dialogs.ConfirmDiscard(_host.IsDirty, fullMessage, Strings.Common_Confirm);
     }
 
     /// <summary>壊れクエリの名前を 1 行 1 件で列挙した文字列へ整形する</summary>

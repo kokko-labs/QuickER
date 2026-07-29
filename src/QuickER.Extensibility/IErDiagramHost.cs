@@ -23,6 +23,9 @@ public interface IErDiagramHost
     /// <summary>ダイアグラムにエンティティが 1 つも無いかどうか（ターン開始時の空判定に使用）</summary>
     bool IsEmpty { get; }
 
+    /// <summary>図に未保存の変更があるかどうか（図の内容を失う操作の確認で警告水準の選択に使用）</summary>
+    bool IsDirty { get; }
+
     /// <summary>現在の ER 図を意味モデル（<see cref="ErDiagram"/>・視覚情報なし）として取得する</summary>
     ErDiagram GetDiagram();
 

@@ -599,7 +599,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         if (
             Entities.Count > 0
-            && !_dialogs.Confirm(Strings.Confirm_ClearDiagram, Strings.Common_Confirm)
+            && !_dialogs.ConfirmDiscard(
+                IsDirty,
+                Strings.Confirm_ClearDiagram,
+                Strings.Common_Confirm
+            )
         )
         {
             return;

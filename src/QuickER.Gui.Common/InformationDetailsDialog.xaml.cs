@@ -17,7 +17,7 @@ public partial class InformationDetailsDialog : Window
     /// <param name="message">上部に表示する要約メッセージ</param>
     /// <param name="details">読み取り専用領域に表示する複数行の詳細（一覧本文）</param>
     /// <param name="title">ウィンドウタイトル</param>
-    /// <param name="isError">エラー表示なら true（警告アイコン＋警告色）。情報なら false（情報アイコン）</param>
+    /// <param name="isError">エラー表示なら true（エラーアイコン＋エラー色）。情報なら false（情報アイコン）</param>
     public InformationDetailsDialog(string message, string details, string title, bool isError)
     {
         InitializeComponent();
@@ -29,7 +29,8 @@ public partial class InformationDetailsDialog : Window
         // 情報／エラーで軽量に見分ける（記号と色のみ・凝った装飾はしない）
         if (isError)
         {
-            HeaderIcon.Text = "⚠"; // ⚠
+            // すでに発生した失敗の報告＝Error 意味論（続行前の注意を表す警告 ⚠ とは使い分ける）
+            HeaderIcon.Text = "✖"; // ✖
             HeaderIcon.Foreground = System.Windows.Media.Brushes.IndianRed;
         }
         else

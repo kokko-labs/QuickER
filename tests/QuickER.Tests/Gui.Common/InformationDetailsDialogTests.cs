@@ -29,6 +29,10 @@ public class InformationDetailsDialogTests
             );
 
             dialog.Title.Should().Be("情報タイトル");
+            // 情報は Information 意味論のグリフ（完了・案内）
+            ((TextBlock)dialog.FindName("HeaderIcon"))
+                .Text.Should()
+                .Be("ℹ");
             ((TextBlock)dialog.FindName("MessageText")).Text.Should().Be("要約メッセージ");
             ((TextBox)dialog.FindName("DetailsText"))
                 .Text.Should()
@@ -59,6 +63,10 @@ public class InformationDetailsDialogTests
             );
 
             dialog.Title.Should().Be("エラー");
+            // エラーはすでに発生した失敗の報告＝Error 意味論のグリフ（続行前の注意を表す警告 ⚠ にしない）
+            ((TextBlock)dialog.FindName("HeaderIcon"))
+                .Text.Should()
+                .Be("✖");
             ((TextBlock)dialog.FindName("MessageText")).Text.Should().Be("失敗しました。");
             ((TextBox)dialog.FindName("DetailsText")).Text.Should().Be("[Error] 詳細");
         });

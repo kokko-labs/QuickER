@@ -43,6 +43,9 @@ public sealed class MainViewModelErDiagramHost : IErDiagramHost
     public bool IsEmpty => _viewModel.Entities.Count == 0;
 
     /// <inheritdoc />
+    public bool IsDirty => _viewModel.IsDirty;
+
+    /// <inheritdoc />
     public ErDiagram GetDiagram() => _viewModel.ToDiagramModel();
 
     /// <inheritdoc />
