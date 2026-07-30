@@ -47,6 +47,13 @@ public static class ErDesignRules
 
     /// <summary>ツール駆動チャット（Codex / OpenAI 共通）の指示文を組み立てる</summary>
     /// <param name="toolMechanismLabel">ツール呼び出し機構の呼称（プロンプト内での表現を切り替える）</param>
+    /// <remarks>
+    /// 応答言語のルールは「UI 言語を既定・ユーザーのメッセージが明らかに別言語のときのみ切替」を
+    /// resx（＝UI 言語）で解決し、指示文の最後尾へ付加する。「ユーザーの直近のメッセージと同じ言語で」
+    /// という鏡映し指示は、CLI エージェント接続（Claude Code / Codex）でユーザー環境のメモリファイルが
+    /// ユーザーの声として文脈に混入すると「ユーザーの言語」の推論が引きずられ不安定だったため廃止
+    /// （実 CLI での A/B 検証に基づく。既定言語の明示は 3/3 で安定）。
+    /// </remarks>
     private static string BuildChatToolInstructions(string toolMechanismLabel) =>
         string.Format(
             Strings.ErDesign_ChatInstructionsTemplate,
@@ -54,5 +61,7 @@ public static class ErDesignRules
             CommonDesignPrinciples,
             SinglePrimaryKeyRule,
             SingleColumnForeignKeyRule
-        );
+        )
+        + "\n\n"
+        + Strings.ErDesign_ResponseLanguageRule;
 }

@@ -20,7 +20,11 @@ public static class MockFolderDesignPrompts
     /// ツール呼び出し機構の呼称だけを差し替える。
     /// </remarks>
     private static string BuildInstructions(string toolMechanismLabel) =>
-        string.Format(Strings.Mock_FolderDesignInstructionsTemplate, toolMechanismLabel);
+        // 応答言語ルールは最後尾へ付加する（ErDesignRules と同方式。鏡映し指示は CLI 接続の
+        // ユーザー環境メモリに引きずられ不安定なため、UI 言語既定＋明示切替の決定的な文言を使う）
+        string.Format(Strings.Mock_FolderDesignInstructionsTemplate, toolMechanismLabel)
+        + "\n\n"
+        + Strings.Mock_ResponseLanguageRule;
 
     /// <summary>API キー接続チャット（Function/Tool 呼び出し）用の system プロンプトを組み立てる</summary>
     public static string BuildSystemPrompt() => BuildInstructions(Strings.Mock_FunctionToolLabel);

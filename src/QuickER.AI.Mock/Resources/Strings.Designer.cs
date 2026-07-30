@@ -689,6 +689,12 @@ namespace QuickER.AI.Mock.Resources {
             }
         }
 
+        public static string Mock_ResponseLanguageRule {
+            get {
+                return ResourceManager.GetString("Mock_ResponseLanguageRule", resourceCulture);
+            }
+        }
+
         public static string Mock_FolderInitialPromptTemplate {
             get {
                 return ResourceManager.GetString("Mock_FolderInitialPromptTemplate", resourceCulture);

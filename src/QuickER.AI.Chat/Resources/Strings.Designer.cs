@@ -317,6 +317,12 @@ namespace QuickER.AI.Chat.Resources {
             }
         }
 
+        public static string ErDesign_ResponseLanguageRule {
+            get {
+                return ResourceManager.GetString("ErDesign_ResponseLanguageRule", resourceCulture);
+            }
+        }
+
         public static string ErDesign_NamingSnakeCase {
             get {
                 return ResourceManager.GetString("ErDesign_NamingSnakeCase", resourceCulture);

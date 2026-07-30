@@ -89,16 +89,18 @@ public class ErDesignRulesTests
         }
     }
 
-    /// <summary>ツール指示テンプレートが「ユーザーと同じ言語で応答する」指示を含むことを検証する（両言語）</summary>
-    [Fact(DisplayName = "ツール指示はユーザー言語での応答指示を含む")]
-    public void ChatInstructionsTemplate_ContainsRespondInUserLanguageInstruction()
+    /// <summary>
+    /// 鏡映し（ユーザーと同じ言語で応答）の言語指示がテンプレートに残っていないことを検証する。
+    /// CLI 接続でユーザー環境のメモリが「ユーザーの声」として混入すると言語推論が不安定になるため、
+    /// 言語指示は ResponseLanguageRule（UI 言語既定＋明示切替）へ一本化した
+    /// </summary>
+    [Fact(DisplayName = "ツール指示テンプレートに鏡映しの言語指示が残っていない")]
+    public void ChatInstructionsTemplate_DoesNotContainMirrorLanguageInstruction()
     {
         En("ErDesign_ChatInstructionsTemplate")
             .Should()
-            .Contain("Respond in the same language as the user's most recent message");
-        Ja("ErDesign_ChatInstructionsTemplate")
-            .Should()
-            .Contain("応答は必ずユーザーの直近のメッセージと同じ言語で");
+            .NotContain("same language as the user's most recent message");
+        Ja("ErDesign_ChatInstructionsTemplate").Should().NotContain("直近のメッセージと同じ言語");
     }
 
     /// <summary>Codex 用 developerInstructions が命名既定（新規はパスカルケース単数形）を含むことを検証する（両言語テンプレート）</summary>
@@ -138,5 +140,32 @@ public class ErDesignRulesTests
             .BuildTableNameNumberInstruction(AiTableNameNumberStyle.Singular)
             .Should()
             .Be(Strings.ErDesign_TableNameSingular);
+    }
+
+    /// <summary>
+    /// チャット指示文（API キー / Codex / Claude Code 共通）が最優先の言語ルールで終わることを検証する。
+    /// CLI エージェント接続ではユーザー環境のメモリファイル等に応答言語が引きずられることがあるため、
+    /// 直近位置（最後尾）への付加を構造として固定する
+    /// </summary>
+    [Fact(DisplayName = "チャット指示文は最優先の言語ルールで終わる")]
+    public void ChatInstructions_EndWithResponseLanguageRule()
+    {
+        ErDesignRules
+            .BuildChatSystemPrompt()
+            .Should()
+            .EndWith(Strings.ErDesign_ResponseLanguageRule);
+        ErDesignRules
+            .BuildCodexDeveloperInstructions()
+            .Should()
+            .EndWith(Strings.ErDesign_ResponseLanguageRule);
+
+        Ja("ErDesign_ResponseLanguageRule")
+            .Should()
+            .Contain("既定で日本語")
+            .And.Contain("明らかに別の言語で書かれている場合のみ");
+        En("ErDesign_ResponseLanguageRule")
+            .Should()
+            .Contain("Default to English")
+            .And.Contain("clearly written in a different language");
     }
 }

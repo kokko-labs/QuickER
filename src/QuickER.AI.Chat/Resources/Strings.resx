@@ -198,7 +198,6 @@
   <data name="ErDesign_ChatInstructionsTemplate" xml:space="preserve">
     <value>You are a DB design assistant embedded in an ER diagram designer app.
 Always create and modify ER diagrams with the provided tools ({0}). Do not use files or the shell.
-Respond in the same language as the user's most recent message.
 
 # Design principles
 {1}
@@ -218,6 +217,10 @@ Respond in the same language as the user's most recent message.
 # Naming
 - If the existing ER diagram already has tables, follow their naming convention (PascalCase/snake_case) and singular/plural policy.
 - For a new ER diagram, default to PascalCase and singular (e.g. Customer, OrderItem).</value>
+  </data>
+  <data name="ErDesign_ResponseLanguageRule" xml:space="preserve">
+    <value># Response language
+Default to English for all responses (the language of the app UI). Switch only if the user's latest chat message is clearly written in a different language - then use that language.</value>
   </data>
   <data name="ErDesign_NamingSnakeCase" xml:space="preserve">
     <value>- Table and column names must be snake_case (e.g. customer_order, customer_id).</value>

@@ -80,4 +80,21 @@ public class MockFolderDesignPromptsTests
         codex.Should().Contain("save_screen");
         codex.Should().NotContain("{0}");
     }
+
+    /// <summary>
+    /// チャット指示が応答言語ルール（UI 言語既定＋明示切替）で終わることを検証する。
+    /// 鏡映し（ユーザーと同じ言語で）の指示は CLI 接続のユーザー環境メモリに引きずられ
+    /// 不安定なため廃止し、ErDesignRules と同方式の決定的な文言へ一本化した
+    /// </summary>
+    [Fact(DisplayName = "モックチャット指示は応答言語ルールで終わる")]
+    public void Instructions_EndWithResponseLanguageRule()
+    {
+        var en = WithCulture("en", MockFolderDesignPrompts.BuildSystemPrompt);
+        en.Should().Contain("# Response language").And.Contain("Default to English");
+        en.Should().NotContain("same language as the user's most recent message");
+
+        var ja = WithCulture("ja", MockFolderDesignPrompts.BuildSystemPrompt);
+        ja.Should().Contain("# 応答言語").And.Contain("既定で日本語");
+        ja.Should().NotContain("直近のメッセージと同じ言語");
+    }
 }
