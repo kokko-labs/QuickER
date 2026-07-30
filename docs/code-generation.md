@@ -485,6 +485,19 @@ When enabled, one `.g.md` with the same base name as the `.g.cs` is output (e.g.
 
 `.g.md` / `.ja.g.md` are auto-generated files. They are overwritten on regeneration, so do not edit them directly.
 
+## Coexisting with an existing codebase
+
+A running system already has entity and data-access assets, hand-written or scaffolded. After you get a diagram via DB import, there are stages of pairing those assets with the generated code — and **stopping at any stage is a valid setup**.
+
+- **Coexistence without generation** — use the diagram only for review, definition-document output, and diff sync, and never touch the code. Your existing data layer stays as it is. The value of a single source of truth for the schema (documents that follow the diagram, diff detection against the DB) is available at this stage alone
+- **Coexistence with basic generation only** — generate just Entity / EditModel / Mapper with DB access "None" and use them around your screens. Data access remains your existing asset; the generated code takes no part in reads or writes
+- **Gradual adoption starting from new features** — use the generated repositories (or the EF Core implementation) only for newly built features, and migrate existing code when you touch it. The generated code is plain ADO / EF Core access to the same schema, so it shares the database with your existing data layer without issues. If your system is EF Core code-first, the generated `QuickErDbContext` connects to the existing schema only (it takes no part in migrations), so it can live alongside your existing DbContext — the common pattern of multiple contexts over one database
+
+Two practical notes for coexistence:
+
+- **Separate by namespace** — keep `RootNamespace` (and, if needed, the output project) apart from your existing code, and same-named classes will not collide
+- **The entrance for existing assets into the diagram is DB import** — the GUI's "Import Code" (C# reverse) only accepts a `.g.cs` that QuickER generated with `IncludeDataAnnotations` ON; hand-written POCOs are not eligible. Bring the structure of existing assets in from the live database, not from the code (see [Database round-tripping](database.md))
+
 ## License note
 
 The code-generation engine (`QuickER.CodeGen.CSharp` / `CodeGen.UI` / `Cli`) is covered by [PolyForm Noncommercial 1.0.0](../LICENSE-NC.md). **It is currently free for everyone, including commercial use.** For the future provisioning policy (the possibility of charging only for commercial use of DB-access generation—Repository / EF Core / multi-target; permanently free for personal / non-commercial use; the basic generation—Entity / EditModel / Mapper—permanently free; advance notice and a transition period if it becomes paid), see [the "License" section of the README](../README.md#license). **The generated code and the runtime packages (MIT) are on your side of the deliverable**, with no license restrictions.

@@ -39,6 +39,8 @@ Connection settings can be saved under a name and recalled later from "Saved Con
 
 The import result replaces the whole diagram. A replacement confirmation appears only when the current diagram differs structurally (re-importing into an empty diagram, or one with an identical structure, continues without asking). Auto-arrange is applied after the import.
 
+For how to pair your existing entity assets with the generated code after importing, see ["Coexisting with an existing codebase" in Using the generated code](code-generation.md#coexisting-with-an-existing-codebase).
+
 ## Diff sync (diagram → DB)
 
 The "DB Sync" button on the toolbar opens the "DB Schema Sync (Apply Diff)" dialog. It compares the current state of the database with the contents of the diagram, shows the list of differences and a preview of the generated SQL, and executes only the items you select.
