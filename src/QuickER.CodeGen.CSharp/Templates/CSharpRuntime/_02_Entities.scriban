@@ -45,8 +45,8 @@ public abstract partial class EntityBase
         }
     }
 
-    /// <summary>Default display name. Defaults to the runtime class name; entities that carry a table description override this in the derived class.</summary>
-    protected virtual string DefaultDisplayName => GetType().Name;
+    /// <summary>Default display name. Resolved from the runtime class name through GeneratedDisplayNames.Resolve (no description); entities that carry a table description override this in the derived class.</summary>
+    protected virtual string DefaultDisplayName => GeneratedDisplayNames.Resolve(GetType().Name, null);
 
     /// <summary>Extension point for substituting the display name (override in a derived class; when not overridden the default display name is used).</summary>
     protected virtual void CustomizeDisplayName(ref string displayName) { }
@@ -193,6 +193,14 @@ public abstract partial class EntityBase
         return (EntityBase)JsonSerializer.Deserialize(json, type, _jsonOptions)!;
     }
 }
+
+/// <summary>Resolves default display names for generated members (entities, edit model properties, and value objects). Replacing the resolver at app startup applies to every generated display name.</summary>
+public static class GeneratedDisplayNames
+{
+    /// <summary>Resolves a display name from the member name and the column/table description (null when unset). The default prefers the description and falls back to the member name. Replace with (name, _) =&gt; name to ignore descriptions.</summary>
+    public static Func<string, string?, string> Resolve { get; set; } =
+        static (memberName, description) => description ?? memberName;
+}
 {{ end }}
 {{~ if render_entities ~}}
 {{~ for item in entity_classes ~}}
@@ -218,9 +226,9 @@ public abstract partial class EntityBase
 {{ if include_json_ignore_on_parent_navigation && navigation.is_parent_reference }}    [JsonIgnore]
 {{ end }}    [NavigationReference("{{ navigation.principal_table_name }}", "{{ navigation.principal_column_name }}", "{{ navigation.dependent_table_name }}", "{{ navigation.dependent_column_name }}", {{ navigation.is_collection }}, {{ navigation.cascade }}, {{ navigation.is_parent_reference }})]
     public {{ navigation.display_type_name }} {{ navigation.property_name }} { get; set; }{{ navigation.initializer }}
-{{ end }}{{ if !item.has_display_name_collision && item.display_name != item.class_name }}
-    /// <summary>Default display name of this entity (derived from the table description). When unspecified the base class name is used.</summary>
-    protected override string DefaultDisplayName => "{{ item.display_name }}";
+{{ end }}{{ if !item.has_display_name_collision && item.display_name_description }}
+    /// <summary>Default display name of this entity (resolved from the class name and the table description through GeneratedDisplayNames.Resolve).</summary>
+    protected override string DefaultDisplayName => GeneratedDisplayNames.Resolve("{{ item.class_name }}", "{{ item.display_name_description }}");
 {{ end }}}
 {{~ end ~}}
 {{~ end ~}}

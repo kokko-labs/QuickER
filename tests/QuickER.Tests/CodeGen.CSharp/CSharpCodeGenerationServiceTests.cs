@@ -320,9 +320,13 @@ public class CSharpCodeGenerationServiceTests
             .Contain("editModel.Orders = new OrderMapper().CreateEditModels(entity.Orders);");
         content.Should().Contain("editModel.RowState = entity.RowState;");
         // EditModel.Validate（必須チェック＋ユーザー定義フック＋子への連鎖検証）
+        // 必須メッセージの既定は全 EditModel 共通の静的プロバイダ、個別調整は具象クラスの partial
+        content.Should().Contain("public static class EditModelMessages");
         content
             .Should()
-            .Contain("protected virtual string BuildRequiredErrorMessage(string propertyName)");
+            .Contain(
+                "private string ResolveRequiredErrorMessage(string propertyName, string displayName)"
+            );
         // 呼び出し口（Validate）は Base 側で定義し、固有処理は具象クラスの override に分離する
         content.Should().Contain("public bool Validate(bool includeChildren = true)");
         content.Should().Contain("protected virtual void ValidateSelf()");
@@ -330,7 +334,7 @@ public class CSharpCodeGenerationServiceTests
         content
             .Should()
             .Contain(
-                "SetError(nameof(BindingCustomerId), BuildRequiredErrorMessage(GetDisplayName(nameof(CustomerId), \"CustomerId\")));"
+                "SetError(nameof(BindingCustomerId), ResolveRequiredErrorMessage(nameof(CustomerId), GetDisplayName(nameof(CustomerId), null)));"
             );
         content.Should().Contain("partial void OnValidate();");
         content.Should().Contain("if (includeChildren)");
@@ -746,20 +750,33 @@ public class CSharpCodeGenerationServiceTests
         // TryParse 検証
         content.Should().Contain("int.TryParse(normalized, out var parsed)");
         content.Should().Contain("decimal.TryParse(normalized, out var parsed)");
-        // エラーメッセージは ResolveParseErrorMessage 経由で生成され、表示名（Description 無指定はプロパティ名）を渡す
+        // エラーメッセージは ResolveParseErrorMessage 経由で生成され、安定キー（nameof）と表示名を渡す
+        // （Description 無指定は null を渡し、ヘルパ側でプロパティ名へフォールバックする）
         content
             .Should()
             .Contain(
-                "ResolveParseErrorMessage(GetDisplayName(nameof(OrderId), \"OrderId\"), normalized, \"int\")"
+                "ResolveParseErrorMessage(nameof(OrderId), GetDisplayName(nameof(OrderId), null), normalized, \"int\")"
             );
         content
             .Should()
             .Contain(
-                "ResolveParseErrorMessage(GetDisplayName(nameof(Amount), \"Amount\"), normalized, \"decimal\")"
+                "ResolveParseErrorMessage(nameof(Amount), GetDisplayName(nameof(Amount), null), normalized, \"decimal\")"
             );
-        // EditModelBase に BuildParseErrorMessage / CustomizeParseErrorMessage が存在する
-        content.Should().Contain("protected virtual string BuildParseErrorMessage(");
+        // 既定文言は全 EditModel 共通の静的プロバイダ、個別調整は具象クラスの Resolve*／Customize* が担う
+        content
+            .Should()
+            .Contain(
+                "public static Func<string, string, string, string> ParseFailed { get; set; }"
+            );
+        content
+            .Should()
+            .Contain(
+                "var message = EditModelMessages.ParseFailed(displayName, inputValue, typeName);"
+            );
         content.Should().Contain("partial void CustomizeParseErrorMessage(");
+        // 廃止した EditModelBase の virtual ビルダーは残っていない
+        content.Should().NotContain("BuildParseErrorMessage");
+        content.Should().NotContain("BuildRequiredErrorMessage");
         // RevertInput は Base 側に集約し、書き戻し本体は具象クラスの RevertCore で override する
         content.Should().Contain("public void RevertInput() => ExecuteRevert(RevertCore);");
         content.Should().Contain("protected virtual void RevertCore()");
@@ -2406,6 +2423,14 @@ public class CSharpCodeGenerationServiceTests
         content
             .Should()
             .Contain("ValueObjectValidationMessages.PrecisionExceeded(precision - scale)");
+        // null 値（必須）のメッセージも同じ 2 段チェーン（共通既定＋VO ごとの partial）に載る
+        content.Should().Contain("var message = ValueObjectValidationMessages.ValueRequired();");
+        content.Should().Contain("CustomizeValueRequiredErrorMessage(ref message);");
+        content
+            .Should()
+            .Contain("static partial void CustomizeValueRequiredErrorMessage(ref string message);");
+        // 表示名の既定値は全生成メンバー共通の静的リゾルバ経由（一括差し替え点）
+        content.Should().Contain("public static class GeneratedDisplayNames");
         // 自動ルールのエラーメッセージはさらに VO ごとの partial で個別調整も可能（ref string message フック）
         content.Should().Contain("CustomizeMaxLengthErrorMessage(value, 50, ref message);");
         content.Should().Contain("static partial void CustomizeMaxLengthErrorMessage(");

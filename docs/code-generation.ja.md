@@ -53,7 +53,17 @@ if (NameValue.TryCreate(input, out var vo, out var errors))   // 例外なしで
 
 ### partial 拡張点
 
-生成される値オブジェクトは partial クラスで、自前コードから検証・表示を拡張できます:
+生成されるクラスはメッセージ・表示名の差し替えに 2 つの方法を持ち、静的クラス・生成モード（インライン／パッケージ参照）を問わず共通の規則です:
+
+- **一括** — 固定 infra の static settable な `Func` をアプリ起動時に差し替える。全インスタンスに効く
+- **個別** — 生成側の具象クラスに `Customize*`（ref 引数）の partial を実装する。その型・列だけに効く
+
+```csharp
+// 一括（起動時）: メッセージの日本語化、表示名から Description を使わない切替
+ValueObjectValidationMessages.ValueRequired = static () => "値を入力してください。";
+EditModelMessages.Required = static name => $"{name}は必須です。";
+GeneratedDisplayNames.Resolve = static (name, _) => name;   // Description を無視しメンバー名を使う
+```
 
 ```csharp
 public sealed partial class NameValue
@@ -70,9 +80,23 @@ public sealed partial class NameValue
     // 検証メッセージ等で使う表示名の差し替え（既定は列の説明・無指定はプロパティ名）
     static partial void CustomizeDisplayName(ref string displayName) => displayName = "氏名";
 }
+
+public partial class CustomerEditModel
+{
+    // プロパティ単位の文言差し替え（propertyName で対象列を分岐できる）
+    partial void CustomizeParseErrorMessage(string propertyName, string inputValue, string typeName, ref string message)
+    {
+        if (propertyName == nameof(Age))
+        {
+            message = $"'{inputValue}' は年齢として正しくありません。";
+        }
+    }
+}
 ```
 
-このほか、最大長・桁数エラーの文言を型ごとに差し替える `Customize*ErrorMessage` の partial や、画面表示用文字列 `DisplayValue`（virtual）の override も使えます。既定文言を全値オブジェクトへ一括で差し替えるには、アプリ起動時に `ValueObjectValidationMessages` の static プロパティを設定します。
+static クラス: `ValueObjectValidationMessages`（`MaxLengthExceeded` / `ScaleExceeded` / `PrecisionExceeded` / `ValueRequired`）、`EditModelMessages`（`Required` / `ParseFailed` / `JoinValueObjectErrors`）、`GeneratedDisplayNames`（`Resolve`＝Entity・EditModel プロパティ・値オブジェクトすべての表示名解決に使われる）。パッケージ参照モードでは、この 3 つは `QuickER.Runtime` Core パッケージに収載されます。
+
+個別 partial: 値オブジェクト側は `CustomizeDisplayName` / `CustomizeMaxLengthErrorMessage` / `CustomizeScaleErrorMessage` / `CustomizePrecisionErrorMessage` / `CustomizeValueRequiredErrorMessage`（string / byte[] のみ）/ `OnValidate`、EditModel 側は `CustomizeRequiredErrorMessage` / `CustomizeParseErrorMessage` / `CustomizePropertyDisplayName`、Entity 側は `CustomizeDisplayName`（従来どおり partial でなく override 方式）。値オブジェクトの画面表示用文字列 `DisplayValue`（virtual）の override も引き続き使えます。
 
 ### 各機能との統合（透過対応）
 

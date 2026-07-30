@@ -253,8 +253,8 @@ public abstract partial class EntityBase
         }
     }
 
-    /// <summary>Default display name. Defaults to the runtime class name; entities that carry a table description override this in the derived class.</summary>
-    protected virtual string DefaultDisplayName => GetType().Name;
+    /// <summary>Default display name. Resolved from the runtime class name through GeneratedDisplayNames.Resolve (no description); entities that carry a table description override this in the derived class.</summary>
+    protected virtual string DefaultDisplayName => GeneratedDisplayNames.Resolve(GetType().Name, null);
 
     /// <summary>Extension point for substituting the display name (override in a derived class; when not overridden the default display name is used).</summary>
     protected virtual void CustomizeDisplayName(ref string displayName) { }
@@ -396,6 +396,14 @@ public abstract partial class EntityBase
     }
 }
 
+/// <summary>Resolves default display names for generated members (entities, edit model properties, and value objects). Replacing the resolver at app startup applies to every generated display name.</summary>
+public static class GeneratedDisplayNames
+{
+    /// <summary>Resolves a display name from the member name and the column/table description (null when unset). The default prefers the description and falls back to the member name. Replace with (name, _) =&gt; name to ignore descriptions.</summary>
+    public static Func<string, string?, string> Resolve { get; set; } =
+        static (memberName, description) => description ?? memberName;
+}
+
 /// <summary>Customers. Master data of the purchasers who place orders</summary>
 [Table("customers")]
 [DbTableMeta(Description = "Customers. Master data of the purchasers who place orders")]
@@ -424,8 +432,8 @@ public partial class CustomerEntity : EntityBase
     [NavigationReference("customers", "customer_id", "orders", "customer_id", true, true, false)]
     public ICollection<OrderEntity> Orders { get; set; } = new List<OrderEntity>();
 
-    /// <summary>Default display name of this entity (derived from the table description). When unspecified the base class name is used.</summary>
-    protected override string DefaultDisplayName => "Customers. Master data of the purchasers who place orders";
+    /// <summary>Default display name of this entity (resolved from the class name and the table description through GeneratedDisplayNames.Resolve).</summary>
+    protected override string DefaultDisplayName => GeneratedDisplayNames.Resolve("CustomerEntity", "Customers. Master data of the purchasers who place orders");
 }
 
 /// <summary>Product master. Defines the products available for sale</summary>
@@ -455,8 +463,8 @@ public partial class ProductEntity : EntityBase
     [NavigationReference("products", "product_id", "order_lines", "product_id", true, true, false)]
     public ICollection<OrderLineEntity> OrderLines { get; set; } = new List<OrderLineEntity>();
 
-    /// <summary>Default display name of this entity (derived from the table description). When unspecified the base class name is used.</summary>
-    protected override string DefaultDisplayName => "Product master. Defines the products available for sale";
+    /// <summary>Default display name of this entity (resolved from the class name and the table description through GeneratedDisplayNames.Resolve).</summary>
+    protected override string DefaultDisplayName => GeneratedDisplayNames.Resolve("ProductEntity", "Product master. Defines the products available for sale");
 }
 
 /// <summary>Order header. Represents a single order placed by one customer</summary>
@@ -495,8 +503,8 @@ public partial class OrderEntity : EntityBase
     [NavigationReference("orders", "order_id", "order_lines", "order_id", true, true, false)]
     public ICollection<OrderLineEntity> OrderLines { get; set; } = new List<OrderLineEntity>();
 
-    /// <summary>Default display name of this entity (derived from the table description). When unspecified the base class name is used.</summary>
-    protected override string DefaultDisplayName => "Order header. Represents a single order placed by one customer";
+    /// <summary>Default display name of this entity (resolved from the class name and the table description through GeneratedDisplayNames.Resolve).</summary>
+    protected override string DefaultDisplayName => GeneratedDisplayNames.Resolve("OrderEntity", "Order header. Represents a single order placed by one customer");
 }
 
 /// <summary>Order lines. Detail rows linking orders and products many-to-many</summary>
@@ -540,8 +548,8 @@ public partial class OrderLineEntity : EntityBase
     [NavigationReference("products", "product_id", "order_lines", "product_id", false, false, true)]
     public ProductEntity Product { get; set; } = null!;
 
-    /// <summary>Default display name of this entity (derived from the table description). When unspecified the base class name is used.</summary>
-    protected override string DefaultDisplayName => "Order lines. Detail rows linking orders and products many-to-many";
+    /// <summary>Default display name of this entity (resolved from the class name and the table description through GeneratedDisplayNames.Resolve).</summary>
+    protected override string DefaultDisplayName => GeneratedDisplayNames.Resolve("OrderLineEntity", "Order lines. Detail rows linking orders and products many-to-many");
 }
 
 /// <summary>Base class providing change notification, error management, and helper processing common to edit models.</summary>
@@ -1142,38 +1150,24 @@ public abstract partial class EditModelBase
 
     /// <summary>Core logic of CancelEdit (concrete classes implement restoring from the snapshot).</summary>
     protected virtual void CancelEditCore() { }
+}
 
-    /// <summary>Builds the error message for a missing required field (the argument is the display name; override in a derived class to change the policy).</summary>
+/// <summary>Automatic messages for edit models (defaults shared by all edit models). Replacing them at app startup applies to every edit model.</summary>
+public static class EditModelMessages
+{
+    /// <summary>Message for a missing required field (argument: display name).</summary>
     /// <remarks>The display name is quoted with single quotes, matching the conversion error style ('input value') and the .NET identifier-quoting convention.</remarks>
-    protected virtual string BuildRequiredErrorMessage(string propertyName) =>
-        $"'{propertyName}' is required.";
+    public static Func<string, string> Required { get; set; } =
+        static propertyName => $"'{propertyName}' is required.";
 
-    /// <summary>Builds the conversion error message for a binding value (the first argument is the display name; override in a derived class to change the policy).</summary>
-    protected virtual string BuildParseErrorMessage(
-        string propertyName,
-        string inputValue,
-        string typeName
-    ) => $"'{inputValue}' cannot be converted to {typeName}.";
+    /// <summary>Message for a binding value that cannot be converted (arguments: display name, input value, target type name). The default does not include the display name, matching the historical format.</summary>
+    public static Func<string, string, string, string> ParseFailed { get; set; } =
+        static (propertyName, inputValue, typeName) =>
+            $"'{inputValue}' cannot be converted to {typeName}.";
 
-    /// <summary>Resolves the conversion error message (BuildParseErrorMessage first, then fine-tuned by CustomizeParseErrorMessage).</summary>
-    protected string ResolveParseErrorMessage(
-        string propertyName,
-        string inputValue,
-        string typeName
-    )
-    {
-        var message = BuildParseErrorMessage(propertyName, inputValue, typeName);
-        CustomizeParseErrorMessage(propertyName, inputValue, typeName, ref message);
-        return message;
-    }
-
-    /// <summary>Partial method for fine-tuning error messages per property (replace via a partial implementation in another file).</summary>
-    partial void CustomizeParseErrorMessage(
-        string propertyName,
-        string inputValue,
-        string typeName,
-        ref string message
-    );
+    /// <summary>Combines value object validation errors into a single edit model error message.</summary>
+    public static Func<IReadOnlyList<string>, string> JoinValueObjectErrors { get; set; } =
+        static errors => string.Join(" / ", errors);
 }
 
 /// <summary>A single validation error in an edit model graph.</summary>
@@ -1512,6 +1506,7 @@ public partial class CustomerEditModel : EditModelBase
     //   Extra validation        : partial void OnValidate();
     //   Extra children          : protected override void RegisterExtraChildren();  // register via AddChild/AddChildren inside
     //   Conversion msg tweak    : partial void CustomizeParseErrorMessage(string propertyName, string inputValue, string typeName, ref string message);
+    //   Required msg tweak      : partial void CustomizeRequiredErrorMessage(string propertyName, ref string message);
     //   Input normalization     : protected override void CustomizeInputNormalization(string propertyName, string rawValue, ref string normalizedValue);
     //   Display name tweak      : partial void CustomizePropertyDisplayName(string propertyName, ref string displayName);  // override display names in validation messages
     //   Row editing             : partial void OnBeginEdit();  partial void OnEndEdit();  partial void OnCancelEdit();
@@ -1603,7 +1598,7 @@ public partial class CustomerEditModel : EditModelBase
                 {
                     SetError(
                         nameof(BindingCustomerId),
-                        ResolveParseErrorMessage(GetDisplayName(nameof(CustomerId), "Customer ID (primary key; assigned by the application)"), normalized, "int")
+                        ResolveParseErrorMessage(nameof(CustomerId), GetDisplayName(nameof(CustomerId), "Customer ID (primary key; assigned by the application)"), normalized, "int")
                     );
                 }
             }
@@ -1830,11 +1825,11 @@ public partial class CustomerEditModel : EditModelBase
     {
         if (CustomerId is null)
         {
-            SetError(nameof(BindingCustomerId), BuildRequiredErrorMessage(GetDisplayName(nameof(CustomerId), "Customer ID (primary key; assigned by the application)")));
+            SetError(nameof(BindingCustomerId), ResolveRequiredErrorMessage(nameof(CustomerId), GetDisplayName(nameof(CustomerId), "Customer ID (primary key; assigned by the application)")));
         }
         if (Name is null)
         {
-            SetError(nameof(BindingName), BuildRequiredErrorMessage(GetDisplayName(nameof(Name), "Customer name")));
+            SetError(nameof(BindingName), ResolveRequiredErrorMessage(nameof(Name), GetDisplayName(nameof(Name), "Customer name")));
         }
         OnValidate();
     }
@@ -1842,10 +1837,42 @@ public partial class CustomerEditModel : EditModelBase
     /// <summary>Hook for implementing additional validation rules (register errors via SetError in a partial implementation).</summary>
     partial void OnValidate();
 
-    /// <summary>Resolves the display name of a property (default = the column description, or the property name if unspecified; can be overridden via CustomizePropertyDisplayName). Used in validation messages.</summary>
-    private static string GetDisplayName(string propertyName, string defaultDisplayName)
+    /// <summary>Resolves the required-field error message (EditModelMessages.Required first, then fine-tuned by CustomizeRequiredErrorMessage).</summary>
+    private string ResolveRequiredErrorMessage(string propertyName, string displayName)
     {
-        var displayName = defaultDisplayName;
+        var message = EditModelMessages.Required(displayName);
+        CustomizeRequiredErrorMessage(propertyName, ref message);
+        return message;
+    }
+
+    /// <summary>Partial method for fine-tuning the required-field error message per property (replace via a partial implementation in another file).</summary>
+    partial void CustomizeRequiredErrorMessage(string propertyName, ref string message);
+
+    /// <summary>Resolves the conversion error message (EditModelMessages.ParseFailed first, then fine-tuned by CustomizeParseErrorMessage).</summary>
+    private string ResolveParseErrorMessage(
+        string propertyName,
+        string displayName,
+        string inputValue,
+        string typeName
+    )
+    {
+        var message = EditModelMessages.ParseFailed(displayName, inputValue, typeName);
+        CustomizeParseErrorMessage(propertyName, inputValue, typeName, ref message);
+        return message;
+    }
+
+    /// <summary>Partial method for fine-tuning conversion error messages per property (replace via a partial implementation in another file).</summary>
+    partial void CustomizeParseErrorMessage(
+        string propertyName,
+        string inputValue,
+        string typeName,
+        ref string message
+    );
+
+    /// <summary>Resolves the display name of a property (default = the column description, or the property name if unspecified; can be replaced through GeneratedDisplayNames.Resolve or CustomizePropertyDisplayName). Used in validation messages.</summary>
+    private static string GetDisplayName(string propertyName, string? description)
+    {
+        var displayName = GeneratedDisplayNames.Resolve(propertyName, description);
         CustomizePropertyDisplayName(propertyName, ref displayName);
         return displayName;
     }
@@ -1930,6 +1957,7 @@ public partial class ProductEditModel : EditModelBase
     //   Extra validation        : partial void OnValidate();
     //   Extra children          : protected override void RegisterExtraChildren();  // register via AddChild/AddChildren inside
     //   Conversion msg tweak    : partial void CustomizeParseErrorMessage(string propertyName, string inputValue, string typeName, ref string message);
+    //   Required msg tweak      : partial void CustomizeRequiredErrorMessage(string propertyName, ref string message);
     //   Input normalization     : protected override void CustomizeInputNormalization(string propertyName, string rawValue, ref string normalizedValue);
     //   Display name tweak      : partial void CustomizePropertyDisplayName(string propertyName, ref string displayName);  // override display names in validation messages
     //   Row editing             : partial void OnBeginEdit();  partial void OnEndEdit();  partial void OnCancelEdit();
@@ -2021,7 +2049,7 @@ public partial class ProductEditModel : EditModelBase
                 {
                     SetError(
                         nameof(BindingProductId),
-                        ResolveParseErrorMessage(GetDisplayName(nameof(ProductId), "Product ID (primary key; assigned by the application)"), normalized, "int")
+                        ResolveParseErrorMessage(nameof(ProductId), GetDisplayName(nameof(ProductId), "Product ID (primary key; assigned by the application)"), normalized, "int")
                     );
                 }
             }
@@ -2201,7 +2229,7 @@ public partial class ProductEditModel : EditModelBase
                 {
                     SetError(
                         nameof(BindingUnitPrice),
-                        ResolveParseErrorMessage(GetDisplayName(nameof(UnitPrice), "Unit sales price in the product master"), normalized, "decimal")
+                        ResolveParseErrorMessage(nameof(UnitPrice), GetDisplayName(nameof(UnitPrice), "Unit sales price in the product master"), normalized, "decimal")
                     );
                 }
             }
@@ -2250,15 +2278,15 @@ public partial class ProductEditModel : EditModelBase
     {
         if (ProductId is null)
         {
-            SetError(nameof(BindingProductId), BuildRequiredErrorMessage(GetDisplayName(nameof(ProductId), "Product ID (primary key; assigned by the application)")));
+            SetError(nameof(BindingProductId), ResolveRequiredErrorMessage(nameof(ProductId), GetDisplayName(nameof(ProductId), "Product ID (primary key; assigned by the application)")));
         }
         if (Name is null)
         {
-            SetError(nameof(BindingName), BuildRequiredErrorMessage(GetDisplayName(nameof(Name), "Product name")));
+            SetError(nameof(BindingName), ResolveRequiredErrorMessage(nameof(Name), GetDisplayName(nameof(Name), "Product name")));
         }
         if (UnitPrice is null)
         {
-            SetError(nameof(BindingUnitPrice), BuildRequiredErrorMessage(GetDisplayName(nameof(UnitPrice), "Unit sales price in the product master")));
+            SetError(nameof(BindingUnitPrice), ResolveRequiredErrorMessage(nameof(UnitPrice), GetDisplayName(nameof(UnitPrice), "Unit sales price in the product master")));
         }
         OnValidate();
     }
@@ -2266,10 +2294,42 @@ public partial class ProductEditModel : EditModelBase
     /// <summary>Hook for implementing additional validation rules (register errors via SetError in a partial implementation).</summary>
     partial void OnValidate();
 
-    /// <summary>Resolves the display name of a property (default = the column description, or the property name if unspecified; can be overridden via CustomizePropertyDisplayName). Used in validation messages.</summary>
-    private static string GetDisplayName(string propertyName, string defaultDisplayName)
+    /// <summary>Resolves the required-field error message (EditModelMessages.Required first, then fine-tuned by CustomizeRequiredErrorMessage).</summary>
+    private string ResolveRequiredErrorMessage(string propertyName, string displayName)
     {
-        var displayName = defaultDisplayName;
+        var message = EditModelMessages.Required(displayName);
+        CustomizeRequiredErrorMessage(propertyName, ref message);
+        return message;
+    }
+
+    /// <summary>Partial method for fine-tuning the required-field error message per property (replace via a partial implementation in another file).</summary>
+    partial void CustomizeRequiredErrorMessage(string propertyName, ref string message);
+
+    /// <summary>Resolves the conversion error message (EditModelMessages.ParseFailed first, then fine-tuned by CustomizeParseErrorMessage).</summary>
+    private string ResolveParseErrorMessage(
+        string propertyName,
+        string displayName,
+        string inputValue,
+        string typeName
+    )
+    {
+        var message = EditModelMessages.ParseFailed(displayName, inputValue, typeName);
+        CustomizeParseErrorMessage(propertyName, inputValue, typeName, ref message);
+        return message;
+    }
+
+    /// <summary>Partial method for fine-tuning conversion error messages per property (replace via a partial implementation in another file).</summary>
+    partial void CustomizeParseErrorMessage(
+        string propertyName,
+        string inputValue,
+        string typeName,
+        ref string message
+    );
+
+    /// <summary>Resolves the display name of a property (default = the column description, or the property name if unspecified; can be replaced through GeneratedDisplayNames.Resolve or CustomizePropertyDisplayName). Used in validation messages.</summary>
+    private static string GetDisplayName(string propertyName, string? description)
+    {
+        var displayName = GeneratedDisplayNames.Resolve(propertyName, description);
         CustomizePropertyDisplayName(propertyName, ref displayName);
         return displayName;
     }
@@ -2354,6 +2414,7 @@ public partial class OrderEditModel : EditModelBase
     //   Extra validation        : partial void OnValidate();
     //   Extra children          : protected override void RegisterExtraChildren();  // register via AddChild/AddChildren inside
     //   Conversion msg tweak    : partial void CustomizeParseErrorMessage(string propertyName, string inputValue, string typeName, ref string message);
+    //   Required msg tweak      : partial void CustomizeRequiredErrorMessage(string propertyName, ref string message);
     //   Input normalization     : protected override void CustomizeInputNormalization(string propertyName, string rawValue, ref string normalizedValue);
     //   Display name tweak      : partial void CustomizePropertyDisplayName(string propertyName, ref string displayName);  // override display names in validation messages
     //   Row editing             : partial void OnBeginEdit();  partial void OnEndEdit();  partial void OnCancelEdit();
@@ -2445,7 +2506,7 @@ public partial class OrderEditModel : EditModelBase
                 {
                     SetError(
                         nameof(BindingOrderId),
-                        ResolveParseErrorMessage(GetDisplayName(nameof(OrderId), "Order ID (primary key; assigned by the application)"), normalized, "int")
+                        ResolveParseErrorMessage(nameof(OrderId), GetDisplayName(nameof(OrderId), "Order ID (primary key; assigned by the application)"), normalized, "int")
                     );
                 }
             }
@@ -2536,7 +2597,7 @@ public partial class OrderEditModel : EditModelBase
                 {
                     SetError(
                         nameof(BindingCustomerId),
-                        ResolveParseErrorMessage(GetDisplayName(nameof(CustomerId), "ID of the ordering customer (foreign key to customers)"), normalized, "int")
+                        ResolveParseErrorMessage(nameof(CustomerId), GetDisplayName(nameof(CustomerId), "ID of the ordering customer (foreign key to customers)"), normalized, "int")
                     );
                 }
             }
@@ -2627,7 +2688,7 @@ public partial class OrderEditModel : EditModelBase
                 {
                     SetError(
                         nameof(BindingOrderedAt),
-                        ResolveParseErrorMessage(GetDisplayName(nameof(OrderedAt), "Date and time the order was placed"), normalized, "DateTime")
+                        ResolveParseErrorMessage(nameof(OrderedAt), GetDisplayName(nameof(OrderedAt), "Date and time the order was placed"), normalized, "DateTime")
                     );
                 }
             }
@@ -2770,15 +2831,15 @@ public partial class OrderEditModel : EditModelBase
     {
         if (OrderId is null)
         {
-            SetError(nameof(BindingOrderId), BuildRequiredErrorMessage(GetDisplayName(nameof(OrderId), "Order ID (primary key; assigned by the application)")));
+            SetError(nameof(BindingOrderId), ResolveRequiredErrorMessage(nameof(OrderId), GetDisplayName(nameof(OrderId), "Order ID (primary key; assigned by the application)")));
         }
         if (CustomerId is null)
         {
-            SetError(nameof(BindingCustomerId), BuildRequiredErrorMessage(GetDisplayName(nameof(CustomerId), "ID of the ordering customer (foreign key to customers)")));
+            SetError(nameof(BindingCustomerId), ResolveRequiredErrorMessage(nameof(CustomerId), GetDisplayName(nameof(CustomerId), "ID of the ordering customer (foreign key to customers)")));
         }
         if (OrderedAt is null)
         {
-            SetError(nameof(BindingOrderedAt), BuildRequiredErrorMessage(GetDisplayName(nameof(OrderedAt), "Date and time the order was placed")));
+            SetError(nameof(BindingOrderedAt), ResolveRequiredErrorMessage(nameof(OrderedAt), GetDisplayName(nameof(OrderedAt), "Date and time the order was placed")));
         }
         OnValidate();
     }
@@ -2786,10 +2847,42 @@ public partial class OrderEditModel : EditModelBase
     /// <summary>Hook for implementing additional validation rules (register errors via SetError in a partial implementation).</summary>
     partial void OnValidate();
 
-    /// <summary>Resolves the display name of a property (default = the column description, or the property name if unspecified; can be overridden via CustomizePropertyDisplayName). Used in validation messages.</summary>
-    private static string GetDisplayName(string propertyName, string defaultDisplayName)
+    /// <summary>Resolves the required-field error message (EditModelMessages.Required first, then fine-tuned by CustomizeRequiredErrorMessage).</summary>
+    private string ResolveRequiredErrorMessage(string propertyName, string displayName)
     {
-        var displayName = defaultDisplayName;
+        var message = EditModelMessages.Required(displayName);
+        CustomizeRequiredErrorMessage(propertyName, ref message);
+        return message;
+    }
+
+    /// <summary>Partial method for fine-tuning the required-field error message per property (replace via a partial implementation in another file).</summary>
+    partial void CustomizeRequiredErrorMessage(string propertyName, ref string message);
+
+    /// <summary>Resolves the conversion error message (EditModelMessages.ParseFailed first, then fine-tuned by CustomizeParseErrorMessage).</summary>
+    private string ResolveParseErrorMessage(
+        string propertyName,
+        string displayName,
+        string inputValue,
+        string typeName
+    )
+    {
+        var message = EditModelMessages.ParseFailed(displayName, inputValue, typeName);
+        CustomizeParseErrorMessage(propertyName, inputValue, typeName, ref message);
+        return message;
+    }
+
+    /// <summary>Partial method for fine-tuning conversion error messages per property (replace via a partial implementation in another file).</summary>
+    partial void CustomizeParseErrorMessage(
+        string propertyName,
+        string inputValue,
+        string typeName,
+        ref string message
+    );
+
+    /// <summary>Resolves the display name of a property (default = the column description, or the property name if unspecified; can be replaced through GeneratedDisplayNames.Resolve or CustomizePropertyDisplayName). Used in validation messages.</summary>
+    private static string GetDisplayName(string propertyName, string? description)
+    {
+        var displayName = GeneratedDisplayNames.Resolve(propertyName, description);
         CustomizePropertyDisplayName(propertyName, ref displayName);
         return displayName;
     }
@@ -2883,6 +2976,7 @@ public partial class OrderLineEditModel : EditModelBase
     //   Extra validation        : partial void OnValidate();
     //   Extra children          : protected override void RegisterExtraChildren();  // register via AddChild/AddChildren inside
     //   Conversion msg tweak    : partial void CustomizeParseErrorMessage(string propertyName, string inputValue, string typeName, ref string message);
+    //   Required msg tweak      : partial void CustomizeRequiredErrorMessage(string propertyName, ref string message);
     //   Input normalization     : protected override void CustomizeInputNormalization(string propertyName, string rawValue, ref string normalizedValue);
     //   Display name tweak      : partial void CustomizePropertyDisplayName(string propertyName, ref string displayName);  // override display names in validation messages
     //   Row editing             : partial void OnBeginEdit();  partial void OnEndEdit();  partial void OnCancelEdit();
@@ -2974,7 +3068,7 @@ public partial class OrderLineEditModel : EditModelBase
                 {
                     SetError(
                         nameof(BindingOrderLineId),
-                        ResolveParseErrorMessage(GetDisplayName(nameof(OrderLineId), "Order line ID (primary key; assigned by the application)"), normalized, "int")
+                        ResolveParseErrorMessage(nameof(OrderLineId), GetDisplayName(nameof(OrderLineId), "Order line ID (primary key; assigned by the application)"), normalized, "int")
                     );
                 }
             }
@@ -3065,7 +3159,7 @@ public partial class OrderLineEditModel : EditModelBase
                 {
                     SetError(
                         nameof(BindingOrderId),
-                        ResolveParseErrorMessage(GetDisplayName(nameof(OrderId), "ID of the parent order (foreign key to orders)"), normalized, "int")
+                        ResolveParseErrorMessage(nameof(OrderId), GetDisplayName(nameof(OrderId), "ID of the parent order (foreign key to orders)"), normalized, "int")
                     );
                 }
             }
@@ -3156,7 +3250,7 @@ public partial class OrderLineEditModel : EditModelBase
                 {
                     SetError(
                         nameof(BindingProductId),
-                        ResolveParseErrorMessage(GetDisplayName(nameof(ProductId), "ID of the target product (foreign key to products)"), normalized, "int")
+                        ResolveParseErrorMessage(nameof(ProductId), GetDisplayName(nameof(ProductId), "ID of the target product (foreign key to products)"), normalized, "int")
                     );
                 }
             }
@@ -3247,7 +3341,7 @@ public partial class OrderLineEditModel : EditModelBase
                 {
                     SetError(
                         nameof(BindingQuantity),
-                        ResolveParseErrorMessage(GetDisplayName(nameof(Quantity), "Order quantity"), normalized, "int")
+                        ResolveParseErrorMessage(nameof(Quantity), GetDisplayName(nameof(Quantity), "Order quantity"), normalized, "int")
                     );
                 }
             }
@@ -3338,7 +3432,7 @@ public partial class OrderLineEditModel : EditModelBase
                 {
                     SetError(
                         nameof(BindingUnitPrice),
-                        ResolveParseErrorMessage(GetDisplayName(nameof(UnitPrice), "Unit price at order time (kept on the order line so product-master price revisions do not affect it)"), normalized, "decimal")
+                        ResolveParseErrorMessage(nameof(UnitPrice), GetDisplayName(nameof(UnitPrice), "Unit price at order time (kept on the order line so product-master price revisions do not affect it)"), normalized, "decimal")
                     );
                 }
             }
@@ -3372,23 +3466,23 @@ public partial class OrderLineEditModel : EditModelBase
     {
         if (OrderLineId is null)
         {
-            SetError(nameof(BindingOrderLineId), BuildRequiredErrorMessage(GetDisplayName(nameof(OrderLineId), "Order line ID (primary key; assigned by the application)")));
+            SetError(nameof(BindingOrderLineId), ResolveRequiredErrorMessage(nameof(OrderLineId), GetDisplayName(nameof(OrderLineId), "Order line ID (primary key; assigned by the application)")));
         }
         if (OrderId is null)
         {
-            SetError(nameof(BindingOrderId), BuildRequiredErrorMessage(GetDisplayName(nameof(OrderId), "ID of the parent order (foreign key to orders)")));
+            SetError(nameof(BindingOrderId), ResolveRequiredErrorMessage(nameof(OrderId), GetDisplayName(nameof(OrderId), "ID of the parent order (foreign key to orders)")));
         }
         if (ProductId is null)
         {
-            SetError(nameof(BindingProductId), BuildRequiredErrorMessage(GetDisplayName(nameof(ProductId), "ID of the target product (foreign key to products)")));
+            SetError(nameof(BindingProductId), ResolveRequiredErrorMessage(nameof(ProductId), GetDisplayName(nameof(ProductId), "ID of the target product (foreign key to products)")));
         }
         if (Quantity is null)
         {
-            SetError(nameof(BindingQuantity), BuildRequiredErrorMessage(GetDisplayName(nameof(Quantity), "Order quantity")));
+            SetError(nameof(BindingQuantity), ResolveRequiredErrorMessage(nameof(Quantity), GetDisplayName(nameof(Quantity), "Order quantity")));
         }
         if (UnitPrice is null)
         {
-            SetError(nameof(BindingUnitPrice), BuildRequiredErrorMessage(GetDisplayName(nameof(UnitPrice), "Unit price at order time (kept on the order line so product-master price revisions do not affect it)")));
+            SetError(nameof(BindingUnitPrice), ResolveRequiredErrorMessage(nameof(UnitPrice), GetDisplayName(nameof(UnitPrice), "Unit price at order time (kept on the order line so product-master price revisions do not affect it)")));
         }
         OnValidate();
     }
@@ -3396,10 +3490,42 @@ public partial class OrderLineEditModel : EditModelBase
     /// <summary>Hook for implementing additional validation rules (register errors via SetError in a partial implementation).</summary>
     partial void OnValidate();
 
-    /// <summary>Resolves the display name of a property (default = the column description, or the property name if unspecified; can be overridden via CustomizePropertyDisplayName). Used in validation messages.</summary>
-    private static string GetDisplayName(string propertyName, string defaultDisplayName)
+    /// <summary>Resolves the required-field error message (EditModelMessages.Required first, then fine-tuned by CustomizeRequiredErrorMessage).</summary>
+    private string ResolveRequiredErrorMessage(string propertyName, string displayName)
     {
-        var displayName = defaultDisplayName;
+        var message = EditModelMessages.Required(displayName);
+        CustomizeRequiredErrorMessage(propertyName, ref message);
+        return message;
+    }
+
+    /// <summary>Partial method for fine-tuning the required-field error message per property (replace via a partial implementation in another file).</summary>
+    partial void CustomizeRequiredErrorMessage(string propertyName, ref string message);
+
+    /// <summary>Resolves the conversion error message (EditModelMessages.ParseFailed first, then fine-tuned by CustomizeParseErrorMessage).</summary>
+    private string ResolveParseErrorMessage(
+        string propertyName,
+        string displayName,
+        string inputValue,
+        string typeName
+    )
+    {
+        var message = EditModelMessages.ParseFailed(displayName, inputValue, typeName);
+        CustomizeParseErrorMessage(propertyName, inputValue, typeName, ref message);
+        return message;
+    }
+
+    /// <summary>Partial method for fine-tuning conversion error messages per property (replace via a partial implementation in another file).</summary>
+    partial void CustomizeParseErrorMessage(
+        string propertyName,
+        string inputValue,
+        string typeName,
+        ref string message
+    );
+
+    /// <summary>Resolves the display name of a property (default = the column description, or the property name if unspecified; can be replaced through GeneratedDisplayNames.Resolve or CustomizePropertyDisplayName). Used in validation messages.</summary>
+    private static string GetDisplayName(string propertyName, string? description)
+    {
+        var displayName = GeneratedDisplayNames.Resolve(propertyName, description);
         CustomizePropertyDisplayName(propertyName, ref displayName);
         return displayName;
     }

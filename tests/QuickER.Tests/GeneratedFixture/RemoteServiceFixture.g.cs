@@ -606,12 +606,12 @@ public sealed partial class AmountValue
     /// <summary>User-defined additional validation (partial; zero cost when not implemented).</summary>
     static partial void OnValidate(decimal value, ICollection<string> errors);
 
-    /// <summary>Gets the display name of this value object (used in error messages and similar). Defaults to the column description, or the property name when unset. Can be overridden via CustomizeDisplayName.</summary>
+    /// <summary>Gets the display name of this value object (used in error messages and similar). Defaults to the column description, or the property name when unset. Can be replaced through GeneratedDisplayNames.Resolve (all display names at once) or CustomizeDisplayName (this value object only).</summary>
     public static string DisplayName
     {
         get
         {
-            var displayName = "Amount";
+            var displayName = GeneratedDisplayNames.Resolve("Amount", null);
             CustomizeDisplayName(ref displayName);
             return displayName;
         }
@@ -711,12 +711,12 @@ public sealed partial class BalanceValue
     /// <summary>User-defined additional validation (partial; zero cost when not implemented).</summary>
     static partial void OnValidate(decimal value, ICollection<string> errors);
 
-    /// <summary>Gets the display name of this value object (used in error messages and similar). Defaults to the column description, or the property name when unset. Can be overridden via CustomizeDisplayName.</summary>
+    /// <summary>Gets the display name of this value object (used in error messages and similar). Defaults to the column description, or the property name when unset. Can be replaced through GeneratedDisplayNames.Resolve (all display names at once) or CustomizeDisplayName (this value object only).</summary>
     public static string DisplayName
     {
         get
         {
-            var displayName = "Balance";
+            var displayName = GeneratedDisplayNames.Resolve("Balance", null);
             CustomizeDisplayName(ref displayName);
             return displayName;
         }
@@ -815,12 +815,12 @@ public sealed partial class CustomerIdValue
     /// <summary>User-defined additional validation (partial; zero cost when not implemented).</summary>
     static partial void OnValidate(int value, ICollection<string> errors);
 
-    /// <summary>Gets the display name of this value object (used in error messages and similar). Defaults to the column description, or the property name when unset. Can be overridden via CustomizeDisplayName.</summary>
+    /// <summary>Gets the display name of this value object (used in error messages and similar). Defaults to the column description, or the property name when unset. Can be replaced through GeneratedDisplayNames.Resolve (all display names at once) or CustomizeDisplayName (this value object only).</summary>
     public static string DisplayName
     {
         get
         {
-            var displayName = "CustomerId";
+            var displayName = GeneratedDisplayNames.Resolve("CustomerId", null);
             CustomizeDisplayName(ref displayName);
             return displayName;
         }
@@ -877,7 +877,9 @@ public sealed partial class MemoValue
         // so a null input is reported as a validation error instead of throwing from the checks below.
         if (value is null)
         {
-            errors.Add(ValueObjectValidationMessages.ValueRequired());
+            var message = ValueObjectValidationMessages.ValueRequired();
+            CustomizeValueRequiredErrorMessage(ref message);
+            errors.Add(message);
             return;
         }
 
@@ -893,12 +895,12 @@ public sealed partial class MemoValue
     /// <summary>User-defined additional validation (partial; zero cost when not implemented).</summary>
     static partial void OnValidate(string value, ICollection<string> errors);
 
-    /// <summary>Gets the display name of this value object (used in error messages and similar). Defaults to the column description, or the property name when unset. Can be overridden via CustomizeDisplayName.</summary>
+    /// <summary>Gets the display name of this value object (used in error messages and similar). Defaults to the column description, or the property name when unset. Can be replaced through GeneratedDisplayNames.Resolve (all display names at once) or CustomizeDisplayName (this value object only).</summary>
     public static string DisplayName
     {
         get
         {
-            var displayName = "Memo";
+            var displayName = GeneratedDisplayNames.Resolve("Memo", null);
             CustomizeDisplayName(ref displayName);
             return displayName;
         }
@@ -906,6 +908,9 @@ public sealed partial class MemoValue
 
     /// <summary>Extension point for replacing the display name (partial; the default display name applies when not implemented).</summary>
     static partial void CustomizeDisplayName(ref string displayName);
+
+    /// <summary>Replaces the required-value error message (partial; the default message applies when not implemented).</summary>
+    static partial void CustomizeValueRequiredErrorMessage(ref string message);
 
     /// <summary>Replaces the maximum-length error message (partial; the default message applies when not implemented).</summary>
     static partial void CustomizeMaxLengthErrorMessage(
@@ -962,7 +967,9 @@ public sealed partial class NameValue
         // so a null input is reported as a validation error instead of throwing from the checks below.
         if (value is null)
         {
-            errors.Add(ValueObjectValidationMessages.ValueRequired());
+            var message = ValueObjectValidationMessages.ValueRequired();
+            CustomizeValueRequiredErrorMessage(ref message);
+            errors.Add(message);
             return;
         }
 
@@ -978,12 +985,12 @@ public sealed partial class NameValue
     /// <summary>User-defined additional validation (partial; zero cost when not implemented).</summary>
     static partial void OnValidate(string value, ICollection<string> errors);
 
-    /// <summary>Gets the display name of this value object (used in error messages and similar). Defaults to the column description, or the property name when unset. Can be overridden via CustomizeDisplayName.</summary>
+    /// <summary>Gets the display name of this value object (used in error messages and similar). Defaults to the column description, or the property name when unset. Can be replaced through GeneratedDisplayNames.Resolve (all display names at once) or CustomizeDisplayName (this value object only).</summary>
     public static string DisplayName
     {
         get
         {
-            var displayName = "Name";
+            var displayName = GeneratedDisplayNames.Resolve("Name", null);
             CustomizeDisplayName(ref displayName);
             return displayName;
         }
@@ -991,6 +998,9 @@ public sealed partial class NameValue
 
     /// <summary>Extension point for replacing the display name (partial; the default display name applies when not implemented).</summary>
     static partial void CustomizeDisplayName(ref string displayName);
+
+    /// <summary>Replaces the required-value error message (partial; the default message applies when not implemented).</summary>
+    static partial void CustomizeValueRequiredErrorMessage(ref string message);
 
     /// <summary>Replaces the maximum-length error message (partial; the default message applies when not implemented).</summary>
     static partial void CustomizeMaxLengthErrorMessage(
@@ -1049,12 +1059,12 @@ public sealed partial class OrderIdValue
     /// <summary>User-defined additional validation (partial; zero cost when not implemented).</summary>
     static partial void OnValidate(int value, ICollection<string> errors);
 
-    /// <summary>Gets the display name of this value object (used in error messages and similar). Defaults to the column description, or the property name when unset. Can be overridden via CustomizeDisplayName.</summary>
+    /// <summary>Gets the display name of this value object (used in error messages and similar). Defaults to the column description, or the property name when unset. Can be replaced through GeneratedDisplayNames.Resolve (all display names at once) or CustomizeDisplayName (this value object only).</summary>
     public static string DisplayName
     {
         get
         {
-            var displayName = "OrderId";
+            var displayName = GeneratedDisplayNames.Resolve("OrderId", null);
             CustomizeDisplayName(ref displayName);
             return displayName;
         }
@@ -1109,8 +1119,8 @@ public abstract partial class EntityBase
         }
     }
 
-    /// <summary>Default display name. Defaults to the runtime class name; entities that carry a table description override this in the derived class.</summary>
-    protected virtual string DefaultDisplayName => GetType().Name;
+    /// <summary>Default display name. Resolved from the runtime class name through GeneratedDisplayNames.Resolve (no description); entities that carry a table description override this in the derived class.</summary>
+    protected virtual string DefaultDisplayName => GeneratedDisplayNames.Resolve(GetType().Name, null);
 
     /// <summary>Extension point for substituting the display name (override in a derived class; when not overridden the default display name is used).</summary>
     protected virtual void CustomizeDisplayName(ref string displayName) { }
@@ -1252,6 +1262,14 @@ public abstract partial class EntityBase
         var json = JsonSerializer.Serialize(this, type, _jsonOptions);
         return (EntityBase)JsonSerializer.Deserialize(json, type, _jsonOptions)!;
     }
+}
+
+/// <summary>Resolves default display names for generated members (entities, edit model properties, and value objects). Replacing the resolver at app startup applies to every generated display name.</summary>
+public static class GeneratedDisplayNames
+{
+    /// <summary>Resolves a display name from the member name and the column/table description (null when unset). The default prefers the description and falls back to the member name. Replace with (name, _) =&gt; name to ignore descriptions.</summary>
+    public static Func<string, string?, string> Resolve { get; set; } =
+        static (memberName, description) => description ?? memberName;
 }
 
 /// <summary>Entity for the customers table</summary>
@@ -1913,38 +1931,24 @@ public abstract partial class EditModelBase
 
     /// <summary>Core logic of CancelEdit (concrete classes implement restoring from the snapshot).</summary>
     protected virtual void CancelEditCore() { }
+}
 
-    /// <summary>Builds the error message for a missing required field (the argument is the display name; override in a derived class to change the policy).</summary>
+/// <summary>Automatic messages for edit models (defaults shared by all edit models). Replacing them at app startup applies to every edit model.</summary>
+public static class EditModelMessages
+{
+    /// <summary>Message for a missing required field (argument: display name).</summary>
     /// <remarks>The display name is quoted with single quotes, matching the conversion error style ('input value') and the .NET identifier-quoting convention.</remarks>
-    protected virtual string BuildRequiredErrorMessage(string propertyName) =>
-        $"'{propertyName}' is required.";
+    public static Func<string, string> Required { get; set; } =
+        static propertyName => $"'{propertyName}' is required.";
 
-    /// <summary>Builds the conversion error message for a binding value (the first argument is the display name; override in a derived class to change the policy).</summary>
-    protected virtual string BuildParseErrorMessage(
-        string propertyName,
-        string inputValue,
-        string typeName
-    ) => $"'{inputValue}' cannot be converted to {typeName}.";
+    /// <summary>Message for a binding value that cannot be converted (arguments: display name, input value, target type name). The default does not include the display name, matching the historical format.</summary>
+    public static Func<string, string, string, string> ParseFailed { get; set; } =
+        static (propertyName, inputValue, typeName) =>
+            $"'{inputValue}' cannot be converted to {typeName}.";
 
-    /// <summary>Resolves the conversion error message (BuildParseErrorMessage first, then fine-tuned by CustomizeParseErrorMessage).</summary>
-    protected string ResolveParseErrorMessage(
-        string propertyName,
-        string inputValue,
-        string typeName
-    )
-    {
-        var message = BuildParseErrorMessage(propertyName, inputValue, typeName);
-        CustomizeParseErrorMessage(propertyName, inputValue, typeName, ref message);
-        return message;
-    }
-
-    /// <summary>Partial method for fine-tuning error messages per property (replace via a partial implementation in another file).</summary>
-    partial void CustomizeParseErrorMessage(
-        string propertyName,
-        string inputValue,
-        string typeName,
-        ref string message
-    );
+    /// <summary>Combines value object validation errors into a single edit model error message.</summary>
+    public static Func<IReadOnlyList<string>, string> JoinValueObjectErrors { get; set; } =
+        static errors => string.Join(" / ", errors);
 }
 
 /// <summary>A single validation error in an edit model graph.</summary>
@@ -2283,6 +2287,7 @@ public partial class CustomerEditModel : EditModelBase
     //   Extra validation        : partial void OnValidate();
     //   Extra children          : protected override void RegisterExtraChildren();  // register via AddChild/AddChildren inside
     //   Conversion msg tweak    : partial void CustomizeParseErrorMessage(string propertyName, string inputValue, string typeName, ref string message);
+    //   Required msg tweak      : partial void CustomizeRequiredErrorMessage(string propertyName, ref string message);
     //   Input normalization     : protected override void CustomizeInputNormalization(string propertyName, string rawValue, ref string normalizedValue);
     //   Row editing             : partial void OnBeginEdit();  partial void OnEndEdit();  partial void OnCancelEdit();
     //   Value change hooks      : partial void On{Property}Changing(value) / Changed(value) / Changing(old,new) / Changed(old,new);  // provided per property
@@ -2378,14 +2383,14 @@ public partial class CustomerEditModel : EditModelBase
                     }
                     else
                     {
-                        SetError(nameof(BindingCustomerId), string.Join(" / ", voErrors));
+                        SetError(nameof(BindingCustomerId), EditModelMessages.JoinValueObjectErrors(voErrors));
                     }
                 }
                 else
                 {
                     SetError(
                         nameof(BindingCustomerId),
-                        ResolveParseErrorMessage(CustomerIdValue.DisplayName, normalized, "int")
+                        ResolveParseErrorMessage(nameof(CustomerId), CustomerIdValue.DisplayName, normalized, "int")
                     );
                 }
             }
@@ -2479,7 +2484,7 @@ public partial class CustomerEditModel : EditModelBase
                 }
                 else
                 {
-                    SetError(nameof(BindingName), string.Join(" / ", voErrors));
+                    SetError(nameof(BindingName), EditModelMessages.JoinValueObjectErrors(voErrors));
                 }
             }
         }
@@ -2574,14 +2579,14 @@ public partial class CustomerEditModel : EditModelBase
                     }
                     else
                     {
-                        SetError(nameof(BindingBalance), string.Join(" / ", voErrors));
+                        SetError(nameof(BindingBalance), EditModelMessages.JoinValueObjectErrors(voErrors));
                     }
                 }
                 else
                 {
                     SetError(
                         nameof(BindingBalance),
-                        ResolveParseErrorMessage(BalanceValue.DisplayName, normalized, "decimal")
+                        ResolveParseErrorMessage(nameof(Balance), BalanceValue.DisplayName, normalized, "decimal")
                     );
                 }
             }
@@ -2630,17 +2635,49 @@ public partial class CustomerEditModel : EditModelBase
     {
         if (CustomerId is null)
         {
-            SetError(nameof(BindingCustomerId), BuildRequiredErrorMessage(CustomerIdValue.DisplayName));
+            SetError(nameof(BindingCustomerId), ResolveRequiredErrorMessage(nameof(CustomerId), CustomerIdValue.DisplayName));
         }
         if (Name is null)
         {
-            SetError(nameof(BindingName), BuildRequiredErrorMessage(NameValue.DisplayName));
+            SetError(nameof(BindingName), ResolveRequiredErrorMessage(nameof(Name), NameValue.DisplayName));
         }
         OnValidate();
     }
 
     /// <summary>Hook for implementing additional validation rules (register errors via SetError in a partial implementation).</summary>
     partial void OnValidate();
+
+    /// <summary>Resolves the required-field error message (EditModelMessages.Required first, then fine-tuned by CustomizeRequiredErrorMessage).</summary>
+    private string ResolveRequiredErrorMessage(string propertyName, string displayName)
+    {
+        var message = EditModelMessages.Required(displayName);
+        CustomizeRequiredErrorMessage(propertyName, ref message);
+        return message;
+    }
+
+    /// <summary>Partial method for fine-tuning the required-field error message per property (replace via a partial implementation in another file).</summary>
+    partial void CustomizeRequiredErrorMessage(string propertyName, ref string message);
+
+    /// <summary>Resolves the conversion error message (EditModelMessages.ParseFailed first, then fine-tuned by CustomizeParseErrorMessage).</summary>
+    private string ResolveParseErrorMessage(
+        string propertyName,
+        string displayName,
+        string inputValue,
+        string typeName
+    )
+    {
+        var message = EditModelMessages.ParseFailed(displayName, inputValue, typeName);
+        CustomizeParseErrorMessage(propertyName, inputValue, typeName, ref message);
+        return message;
+    }
+
+    /// <summary>Partial method for fine-tuning conversion error messages per property (replace via a partial implementation in another file).</summary>
+    partial void CustomizeParseErrorMessage(
+        string propertyName,
+        string inputValue,
+        string typeName,
+        ref string message
+    );
 
     /// <summary>Registers the known cascade children into the registry (they participate in validation, error collection, accepting changes, and dirty checks; children added via partial classes are registered in RegisterExtraChildren).</summary>
     protected override void RegisterChildren()
@@ -2719,6 +2756,7 @@ public partial class OrderEditModel : EditModelBase
     //   Extra validation        : partial void OnValidate();
     //   Extra children          : protected override void RegisterExtraChildren();  // register via AddChild/AddChildren inside
     //   Conversion msg tweak    : partial void CustomizeParseErrorMessage(string propertyName, string inputValue, string typeName, ref string message);
+    //   Required msg tweak      : partial void CustomizeRequiredErrorMessage(string propertyName, ref string message);
     //   Input normalization     : protected override void CustomizeInputNormalization(string propertyName, string rawValue, ref string normalizedValue);
     //   Row editing             : partial void OnBeginEdit();  partial void OnEndEdit();  partial void OnCancelEdit();
     //   Value change hooks      : partial void On{Property}Changing(value) / Changed(value) / Changing(old,new) / Changed(old,new);  // provided per property
@@ -2814,14 +2852,14 @@ public partial class OrderEditModel : EditModelBase
                     }
                     else
                     {
-                        SetError(nameof(BindingOrderId), string.Join(" / ", voErrors));
+                        SetError(nameof(BindingOrderId), EditModelMessages.JoinValueObjectErrors(voErrors));
                     }
                 }
                 else
                 {
                     SetError(
                         nameof(BindingOrderId),
-                        ResolveParseErrorMessage(OrderIdValue.DisplayName, normalized, "int")
+                        ResolveParseErrorMessage(nameof(OrderId), OrderIdValue.DisplayName, normalized, "int")
                     );
                 }
             }
@@ -2917,14 +2955,14 @@ public partial class OrderEditModel : EditModelBase
                     }
                     else
                     {
-                        SetError(nameof(BindingCustomerId), string.Join(" / ", voErrors));
+                        SetError(nameof(BindingCustomerId), EditModelMessages.JoinValueObjectErrors(voErrors));
                     }
                 }
                 else
                 {
                     SetError(
                         nameof(BindingCustomerId),
-                        ResolveParseErrorMessage(CustomerIdValue.DisplayName, normalized, "int")
+                        ResolveParseErrorMessage(nameof(CustomerId), CustomerIdValue.DisplayName, normalized, "int")
                     );
                 }
             }
@@ -3018,7 +3056,7 @@ public partial class OrderEditModel : EditModelBase
                 }
                 else
                 {
-                    SetError(nameof(BindingMemo), string.Join(" / ", voErrors));
+                    SetError(nameof(BindingMemo), EditModelMessages.JoinValueObjectErrors(voErrors));
                 }
             }
         }
@@ -3113,14 +3151,14 @@ public partial class OrderEditModel : EditModelBase
                     }
                     else
                     {
-                        SetError(nameof(BindingAmount), string.Join(" / ", voErrors));
+                        SetError(nameof(BindingAmount), EditModelMessages.JoinValueObjectErrors(voErrors));
                     }
                 }
                 else
                 {
                     SetError(
                         nameof(BindingAmount),
-                        ResolveParseErrorMessage(AmountValue.DisplayName, normalized, "decimal")
+                        ResolveParseErrorMessage(nameof(Amount), AmountValue.DisplayName, normalized, "decimal")
                     );
                 }
             }
@@ -3149,21 +3187,53 @@ public partial class OrderEditModel : EditModelBase
     {
         if (OrderId is null)
         {
-            SetError(nameof(BindingOrderId), BuildRequiredErrorMessage(OrderIdValue.DisplayName));
+            SetError(nameof(BindingOrderId), ResolveRequiredErrorMessage(nameof(OrderId), OrderIdValue.DisplayName));
         }
         if (CustomerId is null)
         {
-            SetError(nameof(BindingCustomerId), BuildRequiredErrorMessage(CustomerIdValue.DisplayName));
+            SetError(nameof(BindingCustomerId), ResolveRequiredErrorMessage(nameof(CustomerId), CustomerIdValue.DisplayName));
         }
         if (Amount is null)
         {
-            SetError(nameof(BindingAmount), BuildRequiredErrorMessage(AmountValue.DisplayName));
+            SetError(nameof(BindingAmount), ResolveRequiredErrorMessage(nameof(Amount), AmountValue.DisplayName));
         }
         OnValidate();
     }
 
     /// <summary>Hook for implementing additional validation rules (register errors via SetError in a partial implementation).</summary>
     partial void OnValidate();
+
+    /// <summary>Resolves the required-field error message (EditModelMessages.Required first, then fine-tuned by CustomizeRequiredErrorMessage).</summary>
+    private string ResolveRequiredErrorMessage(string propertyName, string displayName)
+    {
+        var message = EditModelMessages.Required(displayName);
+        CustomizeRequiredErrorMessage(propertyName, ref message);
+        return message;
+    }
+
+    /// <summary>Partial method for fine-tuning the required-field error message per property (replace via a partial implementation in another file).</summary>
+    partial void CustomizeRequiredErrorMessage(string propertyName, ref string message);
+
+    /// <summary>Resolves the conversion error message (EditModelMessages.ParseFailed first, then fine-tuned by CustomizeParseErrorMessage).</summary>
+    private string ResolveParseErrorMessage(
+        string propertyName,
+        string displayName,
+        string inputValue,
+        string typeName
+    )
+    {
+        var message = EditModelMessages.ParseFailed(displayName, inputValue, typeName);
+        CustomizeParseErrorMessage(propertyName, inputValue, typeName, ref message);
+        return message;
+    }
+
+    /// <summary>Partial method for fine-tuning conversion error messages per property (replace via a partial implementation in another file).</summary>
+    partial void CustomizeParseErrorMessage(
+        string propertyName,
+        string inputValue,
+        string typeName,
+        ref string message
+    );
 
     // ---- Snapshots for row editing (IEditableObject) ----
     /// <summary>Pre-edit snapshot of OrderId.</summary>

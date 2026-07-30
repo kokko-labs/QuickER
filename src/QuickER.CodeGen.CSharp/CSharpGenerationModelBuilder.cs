@@ -124,9 +124,9 @@ internal sealed partial class CSharpGenerationModelBuilder
             // [DbTableMeta(Description = "...")] へ C# リテラルとして埋め込むためエスケープする（未エスケープだと " や \ でコンパイル不能になる）
             Description = EscapeForCSharpString(entity.Description),
             DescriptionXmlDoc = EscapeForXmlDocSummary(entity.Description),
-            // 既定表示名: Description があればそれ、無ければクラス名。C# リテラルへエスケープして埋め込む
-            DisplayName = string.IsNullOrWhiteSpace(entity.Description)
-                ? className
+            // 表示名解決へ渡すテーブルの説明。無指定は null（override を出さず基底のクラス名フォールバックへ委ねる）
+            DisplayNameDescription = string.IsNullOrWhiteSpace(entity.Description)
+                ? null
                 : EscapeForCSharpString(entity.Description),
             HasDisplayNameCollision = hasDisplayNameCollision,
             Properties = properties,
@@ -214,7 +214,7 @@ internal sealed partial class CSharpGenerationModelBuilder
     /// <summary>
     /// EditModel プロパティの検証メッセージへ渡す表示名の C# 式を解決する。
     /// VO 有効時は VO の静的 <c>DisplayName</c> を参照（VO 側の Customize 上書きが自動反映）、
-    /// VO 無効時は EditModel 内蔵の既定表示名＋<c>CustomizePropertyDisplayName</c> フック経由（<c>GetDisplayName</c> ヘルパ）。
+    /// VO 無効時は列の説明を渡す <c>GetDisplayName</c> ヘルパ経由（<c>GeneratedDisplayNames.Resolve</c>＋<c>CustomizePropertyDisplayName</c> フック）。
     /// 表示名衝突（<paramref name="hasCollision"/>）のときは従来どおり <c>nameof(Prop)</c> を返す（後方互換）。
     /// </summary>
     private string ResolveEditModelDisplayNameExpression(
@@ -234,8 +234,11 @@ internal sealed partial class CSharpGenerationModelBuilder
             return $"nameof({property.PropertyName})";
         }
 
-        // 既定表示名: Description があればそれ、無ければプロパティ名（メッセージの後方互換）
-        return $"GetDisplayName(nameof({property.PropertyName}), \"{property.DisplayName}\")";
+        // 既定表示名の解決はヘルパ（GeneratedDisplayNames.Resolve）へ委ね、説明の有無だけを渡す
+        var description = property.DisplayNameDescription is null
+            ? "null"
+            : $"\"{property.DisplayNameDescription}\"";
+        return $"GetDisplayName(nameof({property.PropertyName}), {description})";
     }
 
     /// <summary>型付き ParentModel を生成できる場合の親 EditModel 型名を解決する（親候補型がちょうど 1 つのときのみ）</summary>
@@ -600,9 +603,9 @@ internal sealed partial class CSharpGenerationModelBuilder
         return new CSharpEditModelPropertyModel
         {
             PropertyName = propertyName,
-            // 既定表示名: Description があればそれ、無ければプロパティ名（メッセージの後方互換）
-            DisplayName = string.IsNullOrWhiteSpace(column.Description)
-                ? propertyName
+            // 表示名解決へ渡す列の説明。無指定は null（ヘルパ側でプロパティ名へフォールバックする）
+            DisplayNameDescription = string.IsNullOrWhiteSpace(column.Description)
+                ? null
                 : EscapeForCSharpString(column.Description),
             DescriptionXmlDoc = EscapeForXmlDocSummary(column.Description),
             TypeName = typeName,
