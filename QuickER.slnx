@@ -26,12 +26,17 @@
     <File Path="docs/code-generation.ja.md" />
     <File Path="docs/code-generation.md" />
     <File Path="docs/database.ja.md" />
+    <File Path="docs/database.md" />
     <File Path="docs/er-editor.ja.md" />
+    <File Path="docs/er-editor.md" />
     <File Path="docs/getting-started.ja.md" />
+    <File Path="docs/getting-started.md" />
     <File Path="docs/import-export.ja.md" />
+    <File Path="docs/import-export.md" />
     <File Path="docs/mcp.ja.md" />
     <File Path="docs/mcp.md" />
     <File Path="docs/overview.ja.md" />
+    <File Path="docs/overview.md" />
   </Folder>
   <Folder Name="/docs/images/">
     <File Path="docs/images/sample-ec-order.png" />

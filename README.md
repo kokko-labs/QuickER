@@ -62,7 +62,7 @@ What's in the sample:
 - [EcOrder.g.cs](samples/ec-order/EcOrderSample/Generated/EcOrder.g.cs) — the generated C# code
 - [Program.cs](samples/ec-order/EcOrderSample/Program.cs) — runnable examples of CRUD, graph save, Include, editing through the EditModel / Mapper, raw SQL, and delete cascade
 
-See [the EC order sample](samples/ec-order/README.md) for details. To walk through the loop from editing the diagram to generating code with your own hands, continue to the [tutorial](docs/getting-started.ja.md) *(Japanese)*.
+See [the EC order sample](samples/ec-order/README.md) for details. To walk through the loop from editing the diagram to generating code with your own hands, continue to the [tutorial](docs/getting-started.md).
 
 ## Design ER models visually
 
@@ -78,7 +78,7 @@ Design tables, columns, primary keys, foreign keys, and relationships visually i
 - Multi-select with bulk operations
 - A compact view showing PK / FK columns only
 
-See [ER diagram editing](docs/er-editor.ja.md) *(Japanese)* for details.
+See [ER diagram editing](docs/er-editor.md) for details.
 
 <!-- TODO(GIF): add an editing GIF here (add an entity → draw a relationship → undo) -->
 
@@ -97,7 +97,7 @@ You can also detect the differences between the ER model and the database and ge
 
 Each diagram keeps its target DBMS, and you can switch to another SQL dialect at any time. Types are converted automatically where possible, and types that cannot be converted are flagged with a warning.
 
-See [Database round-tripping](docs/database.ja.md) *(Japanese)* for details.
+See [Database round-tripping](docs/database.md) for details.
 
 <!-- TODO(image): add a screenshot of the diff-sync dialog here -->
 
@@ -265,7 +265,7 @@ See [Configuring AI chat](docs/ai-chat.md) for how to set it up.
 
 Fix the ER model and re-export the definition documents, and design and documentation never drift apart.
 
-See [Import and export](docs/import-export.ja.md) *(Japanese)* for what each format covers.
+See [Import and export](docs/import-export.md) for what each format covers.
 
 ## A save format you can manage with git
 
@@ -341,17 +341,15 @@ See the [CLI reference](docs/cli.md) for details.
 ## Design philosophy
 
 QuickER treats the ER model as the single source of truth for the database, the code, and the documents.
-For the background, how this differs from code-first, and the division of labor between AI and humans, see [the design philosophy of QuickER](docs/overview.ja.md) *(Japanese)*.
+For the background, how this differs from code-first, and the division of labor between AI and humans, see [the design philosophy of QuickER](docs/overview.md).
 
 ## Documentation
 
-> Pages marked *(Japanese)* are currently available in Japanese only; English versions are planned.
-
-- [The design philosophy of QuickER](docs/overview.ja.md) *(Japanese)*
-- [Tutorial (from design to running code)](docs/getting-started.ja.md) *(Japanese)*
-- [ER diagram editing](docs/er-editor.ja.md) *(Japanese)*
-- [Database round-tripping](docs/database.ja.md) *(Japanese)*
-- [Import and export](docs/import-export.ja.md) *(Japanese)*
+- [The design philosophy of QuickER](docs/overview.md)
+- [Tutorial (from design to running code)](docs/getting-started.md)
+- [ER diagram editing](docs/er-editor.md)
+- [Database round-tripping](docs/database.md)
+- [Import and export](docs/import-export.md)
 - [CLI reference](docs/cli.md)
 - [Using the generated code](docs/code-generation.md)
 - [Configuring AI chat](docs/ai-chat.md)
