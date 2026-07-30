@@ -6,16 +6,16 @@
 
 ## Design once. Generate the rest.
 
-**ER モデルを、データベース・C# コード・設計ドキュメントの single source of truth に。**
+**ER モデルを、データベース・ソースコード・設計ドキュメントの single source of truth に。**
 
-QuickER は、ER モデルの設計、実データベースとの取込・差分同期、DDL と C# コードの生成を一つにつなぐ、Windows 用の ER デザイナです。
+QuickER は、ER モデルの設計から、実データベースとの取込・差分同期、DDL・ソースコード・設計ドキュメントの生成までを一つにつなぐ、Windows 用の開発支援ツールです。
 
 同じスキーマ定義を DDL、エンティティ、画面用モデル、設計書へ何度も書き写す必要はありません。ER モデルを一度定義すれば、それ以降は QuickER が生成します。
 
 ![QuickER メイン画面（EC 注文サンプルの ER モデル）](docs/images/sample-ec-order.ja.png)
 
 - SQL Server / PostgreSQL / MySQL / Oracle / SQLite に対応
-- Entity / EditModel / Mapper / Repository / EF Core コードを生成
+- C# コードを生成（Entity / EditModel / Mapper / ValueObject / Repository）
 - 実データベースからのスキーマ取込と差分同期
 - AI チャットによる ER モデルの生成・編集
 - MCP サーバによる AI エージェント（Claude Code・Codex 等）連携
@@ -27,16 +27,24 @@ QuickER は、ER モデルの設計、実データベースとの取込・差分
 
 ## クイックスタート
 
-リポジトリには、ER モデルの設計からコード生成、データベース作成、アプリケーション実行までを一巡したサンプルが含まれています。
-SQLite のファイルデータベースを使用するため、外部データベースの準備は必要ありません。
+### 1. QuickER を起動して図を開く
+
+[GitHub Releases](https://github.com/kokko-labs/QuickER/releases) から Setup.exe または Portable zip を入手して起動します（詳細は[インストール](#インストール)。ソースコードから起動する場合は `dotnet run --project src/QuickER.Gui`）。
+
+リポジトリをクローンし、同梱サンプルの ER モデル `samples/ec-order/EcOrder.json` を開いてみてください（冒頭のスクリーンショットの図です）。
 
 ```powershell
 git clone https://github.com/kokko-labs/QuickER.git
 cd QuickER
-dotnet run --project samples/ec-order/EcOrderSample
 ```
 
-.NET 10 SDK があれば、クローン直後にそのまま実行できます。
+### 2. 生成コードを動かす
+
+この図から生成した DDL と C# コードはチェックイン済みで、外部データベースなしでそのまま実行できます（.NET 10 SDK が必要です）。
+
+```powershell
+dotnet run --project samples/ec-order/EcOrderSample
+```
 
 ```text
 [Setup] Created the SQLite file DB (ec-order.db) from the EcOrder.sql DDL.
