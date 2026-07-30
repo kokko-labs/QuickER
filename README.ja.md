@@ -19,7 +19,7 @@ QuickER は、ER モデルの設計から、実データベースとの取込・
 - SQL Server / PostgreSQL / MySQL / Oracle / SQLite に対応
 - C# コードを生成（Entity / EditModel / Mapper / ValueObject / Repository）
 - 実データベースからのスキーマ取込と差分同期
-- AI チャットによる ER モデルの生成・編集
+- AI チャットによる ER モデルの生成・編集と画面モック生成
 - MCP サーバによる AI エージェント（Claude Code・Codex 等）連携
 - DBML / Mermaid / Excel 定義書との入出力
 - git で差分を管理できる JSON 保存形式
@@ -239,11 +239,22 @@ EC サイトの受注管理に必要なテーブルを設計して
 - Codex
 - Claude Code
 
-ER モデルから Web 画面のモックアップを HTML として生成することもできます。
-
 ![AI チャットで受注管理のテーブル一式を生成した例（Claude Code 接続）](docs/images/ai-chat.ja.png)
 
 設定方法は [AI チャットの設定](docs/ai-chat.ja.md) を参照してください。
+
+## AI モック生成
+
+ER モデルを読ませて、業務画面の Web モック（HTML）を対話で作成できます。
+生成された画面は「モックフォルダ」（mock.json + 画面ごとの HTML + 共有 style.css）へライブ保存され、ダイアログ内のプレビューで画面間の遷移も確かめられます。
+
+![AI モック生成で受注管理の 7 画面を生成した例（ダッシュボードのプレビュー）](docs/images/ai-mock.ja.png)
+
+- 会話は「画面構成の提案 → 合意 → 生成」と進み、修正指示で作り込めます
+- 関係者への共有用に、全画面を 1 ファイルへまとめた単一 HTML と、画面一覧・遷移図・CRUD 表付きの設計書を出力できます
+- 生成したモックを土台に、WPF / Blazor のモックプロジェクト（動くアプリの雛形）を生成する第 2 ステップもあります
+
+接続方式は AI チャットと共通です。
 
 ## インポートとエクスポート
 

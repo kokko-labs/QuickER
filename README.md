@@ -19,7 +19,7 @@ There is no need to copy the same schema definition into the DDL, entities, scre
 - Supports SQL Server / PostgreSQL / MySQL / Oracle / SQLite
 - Generates C# code (Entity / EditModel / Mapper / ValueObject / Repository)
 - Schema import and diff sync from live databases
-- Creates and edits ER models through AI chat
+- Creates and edits ER models through AI chat, plus AI mock-screen generation
 - Integrates with AI agents (Claude Code, Codex, etc.) via an MCP server
 - Import/export with DBML / Mermaid / Excel definition documents
 - A git-friendly JSON save format
@@ -237,11 +237,22 @@ Supported connection methods:
 - Codex
 - Claude Code
 
-It can also generate web mockup screens (HTML) from the ER model.
-
 ![Generating a full set of order-management tables through AI chat (Claude Code connection)](docs/images/ai-chat.png)
 
 See [Configuring AI chat](docs/ai-chat.md) for how to set it up.
+
+## AI mock generation
+
+Feed the ER model to an AI and create web screen mockups (HTML) for your business in conversation.
+The generated screens are saved live to a "mock folder" (mock.json + one HTML per screen + a shared style.css), and the in-dialog preview lets you follow the transitions between screens.
+
+![Generating 7 order-management screens with AI mock generation (previewing the dashboard)](docs/images/ai-mock.png)
+
+- The conversation proceeds as "propose the screen structure → agree → generate," and you refine the screens with follow-up instructions
+- For sharing with stakeholders, export a single HTML that bundles every screen, and a design document with the screen list, a transition diagram, and a CRUD matrix
+- As a second step, you can generate a mock project (a runnable WPF / Blazor application skeleton) on top of the generated mock
+
+The connection methods are shared with the AI chat.
 
 ## Import and export
 
