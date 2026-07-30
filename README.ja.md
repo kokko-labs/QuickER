@@ -290,7 +290,6 @@ GitHub Releases では、次の形式を提供します。
 | **Full**（推奨） | `QuickER-win-full-Setup.exe` | `QuickER-win-full-Portable.zip` | 不要                                           |
 | **Lite**     | `QuickER-win-lite-Setup.exe` | `QuickER-win-lite-Portable.zip` | .NET 10 Desktop Runtime、ASP.NET Core Runtime |
 
-Setup 版はインストール後の自動更新に対応します。
 Portable 版は ZIP を展開し、`QuickER.exe` を実行してください。
 
 ソースコードから起動する場合:

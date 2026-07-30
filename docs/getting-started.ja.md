@@ -11,7 +11,7 @@
 
 ## 1. QuickER をインストールする
 
-[GitHub Releases](https://github.com/kokko-labs/QuickER/releases) から Setup.exe（インストーラー・自動更新対応）または Portable zip（展開して `QuickER.exe` を実行）を入手します。チャンネルの違いは [README のインストール節](../README.ja.md#インストール)を参照してください。
+[GitHub Releases](https://github.com/kokko-labs/QuickER/releases) から Setup.exe（インストーラー）または Portable zip（展開して `QuickER.exe` を実行）を入手します。チャンネルの違いは [README のインストール節](../README.ja.md#インストール)を参照してください。
 
 ソースコードから起動する場合は次のとおりです。
 

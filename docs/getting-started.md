@@ -11,7 +11,7 @@ Using the bundled EC order sample, this tutorial walks once around the loop: edi
 
 ## 1. Install QuickER
 
-Get the Setup.exe (installer with automatic updates) or the Portable zip (extract and run `QuickER.exe`) from [GitHub Releases](https://github.com/kokko-labs/QuickER/releases). For the difference between the channels, see [the Install section of the README](../README.md#install).
+Get the Setup.exe (installer) or the Portable zip (extract and run `QuickER.exe`) from [GitHub Releases](https://github.com/kokko-labs/QuickER/releases). For the difference between the channels, see [the Install section of the README](../README.md#install).
 
 To run from source:
 

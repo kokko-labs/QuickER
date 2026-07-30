@@ -288,7 +288,6 @@ GitHub Releases provides the following packages.
 | **Full** (recommended) | `QuickER-win-full-Setup.exe` | `QuickER-win-full-Portable.zip` | none |
 | **Lite**     | `QuickER-win-lite-Setup.exe` | `QuickER-win-lite-Portable.zip` | .NET 10 Desktop Runtime and ASP.NET Core Runtime |
 
-The Setup edition supports automatic updates after installation.
 For the Portable edition, extract the ZIP and run `QuickER.exe`.
 
 To run from source:
