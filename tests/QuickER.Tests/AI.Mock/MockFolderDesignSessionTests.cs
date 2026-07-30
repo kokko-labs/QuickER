@@ -163,8 +163,10 @@ public class MockFolderDesignSessionTests : IDisposable
         var prompt = engine.SentPrompts[0];
         prompt.Should().Contain("OrderList.html");
         prompt.Should().Contain("Orders");
-        // 旧スキーマ != 現在スキーマなので差異注記が入る
-        prompt.Should().Contain("スキーマが変更されています");
+        // 旧スキーマ != 現在スキーマなので差異注記が入る（文言は UI 言語追従のため resx 参照で照合＝実行環境のカルチャに依存しない）
+        prompt
+            .Should()
+            .Contain(QuickER.AI.Mock.Resources.Strings.Mock_ResumePromptSchemaChangedNote);
 
         // 送信前にスナップショットが現在スキーマへ更新される
         var reopened = MockFolderStore.Open(_folder);

@@ -76,7 +76,7 @@ public class MainViewModelErDiagramHostTests
         vm.Entities[0].Y.Should().Be(40);
     }
 
-    /// <summary>引数 JSON が壊れているとき、固定のエラー文言と失敗を返すことを検証する</summary>
+    /// <summary>引数 JSON が壊れているとき、リソース由来のエラー文言と失敗を返すことを検証する</summary>
     [Fact(DisplayName = "ExecuteTool は不正 JSON でエラー文言を返す")]
     public void ExecuteTool_InvalidJson_ReturnsError()
     {
@@ -86,7 +86,11 @@ public class MainViewModelErDiagramHostTests
         var (result, success) = host.ExecuteTool("add_entity", "{ not json");
 
         success.Should().BeFalse();
-        result.Should().Be("ツール 'add_entity' の引数 JSON を解釈できませんでした。");
+
+        // 文言は UI 言語追従のため resx 参照で照合（実行環境のカルチャに依存しない）
+        result
+            .Should()
+            .Be(string.Format(QuickER.Resources.Strings.Tool_InvalidArgumentsJson, "add_entity"));
     }
 
     /// <summary>正常な引数では ErDiagramDynamicTools 経由でツールが実行されることを検証する</summary>
