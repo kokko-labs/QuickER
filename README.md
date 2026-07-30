@@ -2,7 +2,9 @@
 
 *English | [日本語](README.ja.md)*
 
-<!-- TODO(badges): add CI / Release / License badges here at publication time (.github/workflows/ci.yml already exists, so a CI badge can be added immediately) -->
+[![CI](https://github.com/kokko-labs/QuickER/actions/workflows/ci.yml/badge.svg)](https://github.com/kokko-labs/QuickER/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/kokko-labs/QuickER)](https://github.com/kokko-labs/QuickER/releases)
+[![License](https://img.shields.io/badge/license-MIT%20%2B%20PolyForm%20NC-blue)](#license)
 
 ## Design once. Generate the rest.
 
@@ -80,7 +82,7 @@ Design tables, columns, primary keys, foreign keys, and relationships visually i
 
 See [ER diagram editing](docs/er-editor.md) for details.
 
-<!-- TODO(GIF): add an editing GIF here (add an entity → draw a relationship → undo) -->
+![Editing demo (add entities → move → one-to-many relationship → undo / redo)](docs/images/er-editing.gif)
 
 ## Round-trip with live databases
 
@@ -99,7 +101,7 @@ Each diagram keeps its target DBMS, and you can switch to another SQL dialect at
 
 See [Database round-tripping](docs/database.md) for details.
 
-<!-- TODO(image): add a screenshot of the diff-sync dialog here -->
+![The diff-sync dialog (diff list and generated SQL preview; destructive changes are unselected by default)](docs/images/db-sync.png)
 
 ## Generate C# code
 
@@ -237,7 +239,7 @@ Supported connection methods:
 
 It can also generate web mockup screens (HTML) from the ER model.
 
-<!-- TODO(image): add a screenshot of the AI chat dialog here -->
+![Generating a full set of order-management tables through AI chat (Claude Code connection)](docs/images/ai-chat.png)
 
 See [Configuring AI chat](docs/ai-chat.md) for how to set it up.
 

@@ -2,7 +2,9 @@
 
 *[English](README.md) | 日本語*
 
-<!-- TODO(バッジ): 公開時に CI / Release / License バッジをここへ追加する（.github/workflows/ci.yml が存在するため CI バッジは即設置可能） -->
+[![CI](https://github.com/kokko-labs/QuickER/actions/workflows/ci.yml/badge.svg)](https://github.com/kokko-labs/QuickER/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/kokko-labs/QuickER)](https://github.com/kokko-labs/QuickER/releases)
+[![License](https://img.shields.io/badge/license-MIT%20%2B%20PolyForm%20NC-blue)](#ライセンス)
 
 ## Design once. Generate the rest.
 
@@ -82,7 +84,7 @@ crow's foot 記法を使用して、テーブル、列、主キー、外部キ�
 
 詳しくは [ER 図の編集](docs/er-editor.ja.md) を参照してください。
 
-<!-- TODO(GIF): エンティティ追加 → 関連線を引く → Undo の編集操作 GIF をここへ追加する -->
+![編集操作のデモ（エンティティ追加 → 移動 → 1 対多の関連線 → Undo / Redo）](docs/images/er-editing.gif)
 
 ## 実データベースと往復する
 
@@ -101,7 +103,7 @@ ER モデルとデータベースの差分を検出し、同期用 SQL を生成
 
 詳しくは [データベース連携](docs/database.ja.md) を参照してください。
 
-<!-- TODO(画像): 差分同期ダイアログのスクリーンショットをここへ追加する -->
+![差分同期ダイアログ（差分一覧と生成 SQL プレビュー。破壊的変更は既定で未選択）](docs/images/db-sync.ja.png)
 
 ## C# コードを生成する
 
@@ -239,7 +241,7 @@ EC サイトの受注管理に必要なテーブルを設計して
 
 ER モデルから Web 画面のモックアップを HTML として生成することもできます。
 
-<!-- TODO(画像): AI チャットダイアログのスクリーンショットをここへ追加する -->
+![AI チャットで受注管理のテーブル一式を生成した例（Claude Code 接続）](docs/images/ai-chat.ja.png)
 
 設定方法は [AI チャットの設定](docs/ai-chat.ja.md) を参照してください。
 
