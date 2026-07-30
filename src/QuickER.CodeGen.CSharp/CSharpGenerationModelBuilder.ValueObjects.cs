@@ -113,9 +113,10 @@ internal sealed partial class CSharpGenerationModelBuilder
             IsGuidKey = isGuidKey,
             ColumnName = authoritative.Column.Name,
             DescriptionXmlDoc = EscapeForXmlDocSummary(authoritative.Column.Description),
-            // 既定表示名: 代表列の Description があればそれ、無ければプロパティ名（例 "Name"。メッセージの後方互換）
-            DisplayName = string.IsNullOrWhiteSpace(authoritative.Column.Description)
-                ? _nameConverter.ToPropertyName(authoritative.Column.Name)
+            // 表示名解決へ渡すメンバー名（例 "Name"）と代表列の説明。説明が無指定なら null（メンバー名へフォールバックする）
+            DisplayNameMemberName = _nameConverter.ToPropertyName(authoritative.Column.Name),
+            DisplayNameDescription = string.IsNullOrWhiteSpace(authoritative.Column.Description)
+                ? null
                 : EscapeForCSharpString(authoritative.Column.Description),
             MaxLength = maxLength,
             Precision = precision,
@@ -146,9 +147,9 @@ internal sealed partial class CSharpGenerationModelBuilder
         return new CSharpEditModelPropertyModel
         {
             PropertyName = propertyName,
-            // VO 有効プロパティの表示名は VO の静的 DisplayName を参照するため既定値は使われないが、必須フィールドを満たす
-            DisplayName = string.IsNullOrWhiteSpace(column.Description)
-                ? propertyName
+            // VO 有効プロパティの表示名は VO の静的 DisplayName を参照するため、この説明は使われない（整合のため転記のみ）
+            DisplayNameDescription = string.IsNullOrWhiteSpace(column.Description)
+                ? null
                 : EscapeForCSharpString(column.Description),
             DescriptionXmlDoc = EscapeForXmlDocSummary(column.Description),
             TypeName = valueObject.ClassName + "?", // 確定値は常に NULL 許容

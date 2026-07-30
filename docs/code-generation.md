@@ -53,7 +53,17 @@ The base class is chosen according to the value type. In addition to value-based
 
 ### partial extension points
 
-A generated value object is a partial class, so you can extend validation and display from your own code:
+Every generated class offers two ways to customize messages and display names — the rule is the same across every static class and every generation mode (inline / package-reference):
+
+- **Bulk** — replace a static settable `Func` on the fixed infra at app startup; applies everywhere.
+- **Per-type** — implement a `Customize*` (`ref`) partial on the generated concrete class; applies to that type/property only.
+
+```csharp
+// Bulk, at startup: localize messages, and stop using descriptions for display names
+ValueObjectValidationMessages.ValueRequired = static () => "値を入力してください。";
+EditModelMessages.Required = static name => $"{name}は必須です。";
+GeneratedDisplayNames.Resolve = static (name, _) => name;   // ignore descriptions; use the member name
+```
 
 ```csharp
 public sealed partial class NameValue
@@ -70,9 +80,23 @@ public sealed partial class NameValue
     // Replace the display name used in validation messages, etc. (default is the column description; if unspecified, the property name)
     static partial void CustomizeDisplayName(ref string displayName) => displayName = "Full name";
 }
+
+public partial class CustomerEditModel
+{
+    // Per-property message tweak (propertyName lets you branch by column)
+    partial void CustomizeParseErrorMessage(string propertyName, string inputValue, string typeName, ref string message)
+    {
+        if (propertyName == nameof(Age))
+        {
+            message = $"'{inputValue}' is not a valid age.";
+        }
+    }
+}
 ```
 
-Beyond this, there are `Customize*ErrorMessage` partials for overriding the max-length / precision error text per type, and you can override the display string `DisplayValue` (virtual). To replace the default text across all value objects at once, set the static properties of `ValueObjectValidationMessages` at application startup.
+Static classes: `ValueObjectValidationMessages` (`MaxLengthExceeded` / `ScaleExceeded` / `PrecisionExceeded` / `ValueRequired`), `EditModelMessages` (`Required` / `ParseFailed` / `JoinValueObjectErrors`), `GeneratedDisplayNames` (`Resolve` — used to resolve the display name of entities, edit-model properties, and value objects alike). In package-reference mode, all three ship inside the `QuickER.Runtime` Core package.
+
+Per-type partials: value object — `CustomizeDisplayName` / `CustomizeMaxLengthErrorMessage` / `CustomizeScaleErrorMessage` / `CustomizePrecisionErrorMessage` / `CustomizeValueRequiredErrorMessage` (string / byte[] only) / `OnValidate`; edit model — `CustomizeRequiredErrorMessage` / `CustomizeParseErrorMessage` / `CustomizePropertyDisplayName`; entity — `CustomizeDisplayName` (an `override`, not a partial, as before). A value object's display string `DisplayValue` (virtual) can also be overridden.
 
 ### Integration with each feature (transparent support)
 

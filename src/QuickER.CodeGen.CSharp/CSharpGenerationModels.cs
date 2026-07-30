@@ -150,10 +150,16 @@ internal sealed class CSharpValueObjectModel
     public required string DescriptionXmlDoc { get; init; }
 
     /// <summary>
-    /// 静的 <c>DisplayName</c> プロパティの既定値（C# 文字列リテラルへエスケープ済み）。
-    /// 列の Description が非空ならそれ、空ならプロパティ名（例 "Name"）にフォールバックする（メッセージの後方互換）。
+    /// 静的 <c>DisplayName</c> の解決へ渡すメンバー名（代表列由来のプロパティ名。例 "Name"）。
+    /// 説明が無いときのフォールバック先になる（メッセージの後方互換）。
     /// </summary>
-    public required string DisplayName { get; init; }
+    public required string DisplayNameMemberName { get; init; }
+
+    /// <summary>
+    /// 静的 <c>DisplayName</c> の解決へ渡す代表列の説明（C# 文字列リテラルへエスケープ済み）。
+    /// 説明が空・空白のみなら <c>null</c>（テンプレートは <c>null</c> リテラルを出す）。
+    /// </summary>
+    public string? DisplayNameDescription { get; init; }
 
     /// <summary>string の最大長（自動 MaxLength 検証用）。無指定は null</summary>
     public int? MaxLength { get; init; }
@@ -181,10 +187,10 @@ internal sealed class CSharpClassModel
     public required string DescriptionXmlDoc { get; init; }
 
     /// <summary>
-    /// 静的 <c>DisplayName</c> プロパティの既定値（C# 文字列リテラルへエスケープ済み）。
-    /// テーブルの Description が非空ならそれ、空ならクラス名にフォールバックする。
+    /// <c>DefaultDisplayName</c> の override へ渡すテーブルの説明（C# 文字列リテラルへエスケープ済み）。
+    /// 説明が空・空白のみなら <c>null</c>＝override を生成せず、基底のクラス名フォールバックに任せる。
     /// </summary>
-    public required string DisplayName { get; init; }
+    public string? DisplayNameDescription { get; init; }
 
     /// <summary>
     /// 列由来プロパティ名が <c>DisplayName</c> / <c>CustomizeDisplayName</c> と衝突するため、
@@ -537,10 +543,10 @@ internal sealed record CSharpEditModelPropertyModel
     public required string PropertyName { get; init; }
 
     /// <summary>
-    /// 表示名機構（VO 無効時の <c>GetDisplayName</c> ヘルパ）へ渡す既定表示名（C# 文字列リテラルへエスケープ済み）。
-    /// 列の Description が非空ならそれ、空ならプロパティ名（メッセージの後方互換）。
+    /// 表示名機構（VO 無効時の <c>GetDisplayName</c> ヘルパ）へ渡す列の説明（C# 文字列リテラルへエスケープ済み）。
+    /// 説明が空・空白のみなら <c>null</c>（ヘルパ呼び出しには <c>null</c> リテラルを渡し、プロパティ名へフォールバックさせる）。
     /// </summary>
-    public required string DisplayName { get; init; }
+    public string? DisplayNameDescription { get; init; }
 
     /// <summary>XML doc summary へ埋め込む列の説明（XML エスケープ・改行畳み込み済み）。空なら定型文へフォールバックする。フィールド・公開バインディングプロパティ両方のコメントで共用する</summary>
     public required string DescriptionXmlDoc { get; init; }
@@ -586,7 +592,7 @@ internal sealed record CSharpEditModelPropertyModel
 
     /// <summary>
     /// 検証メッセージ（必須・入力変換）へ渡す表示名の C# 式。
-    /// VO 有効時は <c>{VoClass}.DisplayName</c>、VO 無効時は <c>GetDisplayName(nameof(Prop), "既定表示名")</c>。
+    /// VO 有効時は <c>{VoClass}.DisplayName</c>、VO 無効時は <c>GetDisplayName(nameof(Prop), "説明")</c>（説明なしは <c>null</c>）。
     /// EditModel が表示名衝突（<see cref="CSharpEditModelClassModel.HasDisplayNameCollision"/>）のときは従来どおり <c>nameof(Prop)</c>。
     /// クラス構築時（<c>with</c>）に確定するため既定は空文字列。
     /// </summary>

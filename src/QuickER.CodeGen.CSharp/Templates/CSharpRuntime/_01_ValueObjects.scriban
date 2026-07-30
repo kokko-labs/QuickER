@@ -429,7 +429,9 @@ public sealed partial class {{ vo.class_name }}
         // so a null input is reported as a validation error instead of throwing from the checks below.
         if (value is null)
         {
-            errors.Add(ValueObjectValidationMessages.ValueRequired());
+            var message = ValueObjectValidationMessages.ValueRequired();
+            CustomizeValueRequiredErrorMessage(ref message);
+            errors.Add(message);
             return;
         }
 
@@ -451,12 +453,12 @@ public sealed partial class {{ vo.class_name }}
     /// <summary>User-defined additional validation (partial; zero cost when not implemented).</summary>
     static partial void OnValidate({{ vo.value_type_name }} value, ICollection<string> errors);
 
-    /// <summary>Gets the display name of this value object (used in error messages and similar). Defaults to the column description, or the property name when unset. Can be overridden via CustomizeDisplayName.</summary>
+    /// <summary>Gets the display name of this value object (used in error messages and similar). Defaults to the column description, or the property name when unset. Can be replaced through GeneratedDisplayNames.Resolve (all display names at once) or CustomizeDisplayName (this value object only).</summary>
     public static string DisplayName
     {
         get
         {
-            var displayName = "{{ vo.display_name }}";
+            var displayName = GeneratedDisplayNames.Resolve("{{ vo.display_name_member_name }}", {{ if vo.display_name_description }}"{{ vo.display_name_description }}"{{ else }}null{{ end }});
             CustomizeDisplayName(ref displayName);
             return displayName;
         }
@@ -464,6 +466,11 @@ public sealed partial class {{ vo.class_name }}
 
     /// <summary>Extension point for replacing the display name (partial; the default display name applies when not implemented).</summary>
     static partial void CustomizeDisplayName(ref string displayName);
+    {{~ if vo.value_type_name == "string" || vo.value_type_name == "byte[]" ~}}
+
+    /// <summary>Replaces the required-value error message (partial; the default message applies when not implemented).</summary>
+    static partial void CustomizeValueRequiredErrorMessage(ref string message);
+    {{~ end ~}}
     {{~ if vo.max_length ~}}
 
     /// <summary>Replaces the maximum-length error message (partial; the default message applies when not implemented).</summary>

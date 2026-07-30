@@ -10,7 +10,7 @@ namespace QuickER.Tests.CodeGen.CSharp;
 /// 表示名（DisplayName）機能の生成内容を検証するテストクラス。
 /// </summary>
 /// <remarks>
-/// VO / Entity の静的 <c>DisplayName</c> 既定値、VO 無効時の <c>GetDisplayName</c> ヘルパ配線、
+/// VO / Entity の静的 <c>DisplayName</c> 既定値（共通の <c>GeneratedDisplayNames.Resolve</c> 経由）、VO 無効時の <c>GetDisplayName</c> ヘルパ配線、
 /// 列名衝突時の省略＋警告診断、C# リテラルエスケープ（<c>[DbColumnMeta]</c> / <c>[DbTableMeta]</c> 含む）を確認する。
 /// フック上書きがエラーメッセージへ反映されることは固定フィクスチャの partial 拡張で別途検証する
 /// （<see cref="QuickER.Tests.GeneratedFixture.DisplayNameCustomizeHookTests"/>）。
@@ -78,10 +78,16 @@ public class DisplayNameGenerationTests
         result.HasErrors.Should().BeFalse();
         var content = result.Files[0].Content;
 
-        // Description あり: DisplayName 既定値は Description
-        content.Should().Contain("var displayName = \"顧客名\";");
-        // Description なし: DisplayName 既定値はプロパティ名（クラス名 CustomerIdValue ではなく CustomerId）
-        content.Should().Contain("var displayName = \"CustomerId\";");
+        // 既定値の解決は共通の GeneratedDisplayNames.Resolve（一括差し替え点）へ通す
+        content.Should().Contain("public static class GeneratedDisplayNames");
+        // Description あり: 解決へ Description を渡す（既定ポリシーでは Description が採用される）
+        content
+            .Should()
+            .Contain("var displayName = GeneratedDisplayNames.Resolve(\"Name\", \"顧客名\");");
+        // Description なし: 説明は null を渡し、プロパティ名（クラス名 CustomerIdValue ではなく CustomerId）へフォールバックする
+        content
+            .Should()
+            .Contain("var displayName = GeneratedDisplayNames.Resolve(\"CustomerId\", null);");
         // 全 VO に上書きフックが出る
         content
             .Should()
@@ -106,10 +112,12 @@ public class DisplayNameGenerationTests
             .Files[0]
             .Content;
 
-        // Description あり: Entity.DisplayName 既定値（DefaultDisplayName の override）は Description
+        // Description あり: Entity.DisplayName 既定値（DefaultDisplayName の override）は Description を解決へ渡す
         withDescription
             .Should()
-            .Contain("protected override string DefaultDisplayName => \"顧客マスタ\";");
+            .Contain(
+                "protected override string DefaultDisplayName => GeneratedDisplayNames.Resolve(\"CustomerEntity\", \"顧客マスタ\");"
+            );
 
         var withoutDescription = new CSharpCodeGenerationService()
             .Generate(
@@ -126,7 +134,9 @@ public class DisplayNameGenerationTests
         // Description なし: Entity.DisplayName 既定値は基底のクラス名（GetType().Name）。派生側に override は出ない
         withoutDescription
             .Should()
-            .Contain("protected virtual string DefaultDisplayName => GetType().Name;");
+            .Contain(
+                "protected virtual string DefaultDisplayName => GeneratedDisplayNames.Resolve(GetType().Name, null);"
+            );
         withoutDescription.Should().NotContain("protected override string DefaultDisplayName");
         // 表示名の上書き拡張点は基底の virtual メソッドとして提供される
         withoutDescription
@@ -152,27 +162,32 @@ public class DisplayNameGenerationTests
             .Files[0]
             .Content;
 
-        // ヘルパとフックが 1 回ずつ出る
+        // ヘルパとフックが 1 回ずつ出る（ヘルパは説明を受け取り GeneratedDisplayNames.Resolve へ委ねる）
         content
             .Should()
             .Contain(
-                "private static string GetDisplayName(string propertyName, string defaultDisplayName)"
+                "private static string GetDisplayName(string propertyName, string? description)"
             );
+        content
+            .Should()
+            .Contain("var displayName = GeneratedDisplayNames.Resolve(propertyName, description);");
         content
             .Should()
             .Contain(
                 "static partial void CustomizePropertyDisplayName(string propertyName, ref string displayName);"
             );
 
-        // 必須メッセージ: Description ありの列は表示名（顧客名）、無い列はプロパティ名にフォールバック
-        content
-            .Should()
-            .Contain("BuildRequiredErrorMessage(GetDisplayName(nameof(Name), \"顧客名\"))");
-        // 入力変換メッセージ: PK（int）は GetDisplayName を第 1 引数に渡す（Description 無指定はプロパティ名）
+        // 必須メッセージ: Description ありの列は説明（顧客名）を渡す。安定キーとして nameof も併せて渡す
         content
             .Should()
             .Contain(
-                "ResolveParseErrorMessage(GetDisplayName(nameof(CustomerId), \"CustomerId\"), normalized, \"int\")"
+                "ResolveRequiredErrorMessage(nameof(Name), GetDisplayName(nameof(Name), \"顧客名\"))"
+            );
+        // 入力変換メッセージ: PK（int）は安定キー＋表示名を渡す（Description 無指定は null＝プロパティ名フォールバック）
+        content
+            .Should()
+            .Contain(
+                "ResolveParseErrorMessage(nameof(CustomerId), GetDisplayName(nameof(CustomerId), null), normalized, \"int\")"
             );
     }
 
@@ -249,12 +264,14 @@ public class DisplayNameGenerationTests
 
         // 衝突エンティティは列プロパティ DisplayName を持ち、基底の DisplayName を new で隠す（表示名フックは出さない）
         content.Should().Contain("public new string DisplayName { get; set; }");
-        content
-            .Should()
-            .NotContain("protected override string DefaultDisplayName => \"LabelEntity\";");
+        content.Should().NotContain("protected override string DefaultDisplayName");
 
         // 表示名の既定・拡張点は基底が提供し、衝突しない別エンティティ（customers）はそれをそのまま継承する
-        content.Should().Contain("protected virtual string DefaultDisplayName => GetType().Name;");
+        content
+            .Should()
+            .Contain(
+                "protected virtual string DefaultDisplayName => GeneratedDisplayNames.Resolve(GetType().Name, null);"
+            );
         // 基底を隠す new DisplayName は衝突エンティティ 1 つだけ（customers は継承のみ）
         System
             .Text.RegularExpressions.Regex.Matches(content, "public new string DisplayName")
@@ -305,10 +322,14 @@ public class DisplayNameGenerationTests
         content
             .Should()
             .Contain(
-                "protected override string DefaultDisplayName => \"行1 \\\"引用\\\"\\\\パス\";"
+                "protected override string DefaultDisplayName => GeneratedDisplayNames.Resolve(\"CustomerEntity\", \"行1 \\\"引用\\\"\\\\パス\");"
             );
         // VO.DisplayName 既定値（列 Description）も同様にエスケープされる
-        content.Should().Contain("var displayName = \"列\\\"名\\\"\\\\end\";");
+        content
+            .Should()
+            .Contain(
+                "var displayName = GeneratedDisplayNames.Resolve(\"Name\", \"列\\\"名\\\"\\\\end\");"
+            );
 
         // [DbTableMeta] / [DbColumnMeta] の Description も同じヘルパでエスケープされる（前タスクの潜在バグ修正）
         content.Should().Contain("[DbTableMeta(Description = \"行1 \\\"引用\\\"\\\\パス\")]");

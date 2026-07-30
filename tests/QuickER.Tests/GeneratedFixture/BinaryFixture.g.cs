@@ -291,8 +291,8 @@ public abstract partial class EntityBase
         }
     }
 
-    /// <summary>Default display name. Defaults to the runtime class name; entities that carry a table description override this in the derived class.</summary>
-    protected virtual string DefaultDisplayName => GetType().Name;
+    /// <summary>Default display name. Resolved from the runtime class name through GeneratedDisplayNames.Resolve (no description); entities that carry a table description override this in the derived class.</summary>
+    protected virtual string DefaultDisplayName => GeneratedDisplayNames.Resolve(GetType().Name, null);
 
     /// <summary>Extension point for substituting the display name (override in a derived class; when not overridden the default display name is used).</summary>
     protected virtual void CustomizeDisplayName(ref string displayName) { }
@@ -432,6 +432,14 @@ public abstract partial class EntityBase
         var json = JsonSerializer.Serialize(this, type, _jsonOptions);
         return (EntityBase)JsonSerializer.Deserialize(json, type, _jsonOptions)!;
     }
+}
+
+/// <summary>Resolves default display names for generated members (entities, edit model properties, and value objects). Replacing the resolver at app startup applies to every generated display name.</summary>
+public static class GeneratedDisplayNames
+{
+    /// <summary>Resolves a display name from the member name and the column/table description (null when unset). The default prefers the description and falls back to the member name. Replace with (name, _) =&gt; name to ignore descriptions.</summary>
+    public static Func<string, string?, string> Resolve { get; set; } =
+        static (memberName, description) => description ?? memberName;
 }
 
 /// <summary>Entity for the documents table</summary>
@@ -1110,38 +1118,24 @@ public abstract partial class EditModelBase
 
     /// <summary>Core logic of CancelEdit (concrete classes implement restoring from the snapshot).</summary>
     protected virtual void CancelEditCore() { }
+}
 
-    /// <summary>Builds the error message for a missing required field (the argument is the display name; override in a derived class to change the policy).</summary>
+/// <summary>Automatic messages for edit models (defaults shared by all edit models). Replacing them at app startup applies to every edit model.</summary>
+public static class EditModelMessages
+{
+    /// <summary>Message for a missing required field (argument: display name).</summary>
     /// <remarks>The display name is quoted with single quotes, matching the conversion error style ('input value') and the .NET identifier-quoting convention.</remarks>
-    protected virtual string BuildRequiredErrorMessage(string propertyName) =>
-        $"'{propertyName}' is required.";
+    public static Func<string, string> Required { get; set; } =
+        static propertyName => $"'{propertyName}' is required.";
 
-    /// <summary>Builds the conversion error message for a binding value (the first argument is the display name; override in a derived class to change the policy).</summary>
-    protected virtual string BuildParseErrorMessage(
-        string propertyName,
-        string inputValue,
-        string typeName
-    ) => $"'{inputValue}' cannot be converted to {typeName}.";
+    /// <summary>Message for a binding value that cannot be converted (arguments: display name, input value, target type name). The default does not include the display name, matching the historical format.</summary>
+    public static Func<string, string, string, string> ParseFailed { get; set; } =
+        static (propertyName, inputValue, typeName) =>
+            $"'{inputValue}' cannot be converted to {typeName}.";
 
-    /// <summary>Resolves the conversion error message (BuildParseErrorMessage first, then fine-tuned by CustomizeParseErrorMessage).</summary>
-    protected string ResolveParseErrorMessage(
-        string propertyName,
-        string inputValue,
-        string typeName
-    )
-    {
-        var message = BuildParseErrorMessage(propertyName, inputValue, typeName);
-        CustomizeParseErrorMessage(propertyName, inputValue, typeName, ref message);
-        return message;
-    }
-
-    /// <summary>Partial method for fine-tuning error messages per property (replace via a partial implementation in another file).</summary>
-    partial void CustomizeParseErrorMessage(
-        string propertyName,
-        string inputValue,
-        string typeName,
-        ref string message
-    );
+    /// <summary>Combines value object validation errors into a single edit model error message.</summary>
+    public static Func<IReadOnlyList<string>, string> JoinValueObjectErrors { get; set; } =
+        static errors => string.Join(" / ", errors);
 }
 
 /// <summary>A single validation error in an edit model graph.</summary>
@@ -1480,6 +1474,7 @@ public partial class DocumentEditModel : EditModelBase
     //   Extra validation        : partial void OnValidate();
     //   Extra children          : protected override void RegisterExtraChildren();  // register via AddChild/AddChildren inside
     //   Conversion msg tweak    : partial void CustomizeParseErrorMessage(string propertyName, string inputValue, string typeName, ref string message);
+    //   Required msg tweak      : partial void CustomizeRequiredErrorMessage(string propertyName, ref string message);
     //   Input normalization     : protected override void CustomizeInputNormalization(string propertyName, string rawValue, ref string normalizedValue);
     //   Display name tweak      : partial void CustomizePropertyDisplayName(string propertyName, ref string displayName);  // override display names in validation messages
     //   Row editing             : partial void OnBeginEdit();  partial void OnEndEdit();  partial void OnCancelEdit();
@@ -1571,7 +1566,7 @@ public partial class DocumentEditModel : EditModelBase
                 {
                     SetError(
                         nameof(BindingDocumentId),
-                        ResolveParseErrorMessage(GetDisplayName(nameof(DocumentId), "DocumentId"), normalized, "int")
+                        ResolveParseErrorMessage(nameof(DocumentId), GetDisplayName(nameof(DocumentId), null), normalized, "int")
                     );
                 }
             }
@@ -1751,7 +1746,7 @@ public partial class DocumentEditModel : EditModelBase
                 {
                     SetError(
                         nameof(BindingIsPublished),
-                        ResolveParseErrorMessage(GetDisplayName(nameof(IsPublished), "IsPublished"), normalized, "bool")
+                        ResolveParseErrorMessage(nameof(IsPublished), GetDisplayName(nameof(IsPublished), null), normalized, "bool")
                     );
                 }
             }
@@ -1849,7 +1844,7 @@ public partial class DocumentEditModel : EditModelBase
                     {
                         SetError(
                             nameof(BindingPayload),
-                            ResolveParseErrorMessage(GetDisplayName(nameof(Payload), "Payload"), normalized, "byte[]")
+                            ResolveParseErrorMessage(nameof(Payload), GetDisplayName(nameof(Payload), null), normalized, "byte[]")
                         );
                     }
                 }
@@ -1948,7 +1943,7 @@ public partial class DocumentEditModel : EditModelBase
                     {
                         SetError(
                             nameof(BindingThumb),
-                            ResolveParseErrorMessage(GetDisplayName(nameof(Thumb), "Thumb"), normalized, "byte[]")
+                            ResolveParseErrorMessage(nameof(Thumb), GetDisplayName(nameof(Thumb), null), normalized, "byte[]")
                         );
                     }
                 }
@@ -2047,7 +2042,7 @@ public partial class DocumentEditModel : EditModelBase
                     {
                         SetError(
                             nameof(BindingChecksum),
-                            ResolveParseErrorMessage(GetDisplayName(nameof(Checksum), "Checksum"), normalized, "byte[]")
+                            ResolveParseErrorMessage(nameof(Checksum), GetDisplayName(nameof(Checksum), null), normalized, "byte[]")
                         );
                     }
                 }
@@ -2146,7 +2141,7 @@ public partial class DocumentEditModel : EditModelBase
                     {
                         SetError(
                             nameof(BindingRowVer),
-                            ResolveParseErrorMessage(GetDisplayName(nameof(RowVer), "RowVer"), normalized, "byte[]")
+                            ResolveParseErrorMessage(nameof(RowVer), GetDisplayName(nameof(RowVer), null), normalized, "byte[]")
                         );
                     }
                 }
@@ -2204,19 +2199,19 @@ public partial class DocumentEditModel : EditModelBase
     {
         if (DocumentId is null)
         {
-            SetError(nameof(BindingDocumentId), BuildRequiredErrorMessage(GetDisplayName(nameof(DocumentId), "DocumentId")));
+            SetError(nameof(BindingDocumentId), ResolveRequiredErrorMessage(nameof(DocumentId), GetDisplayName(nameof(DocumentId), null)));
         }
         if (Title is null)
         {
-            SetError(nameof(BindingTitle), BuildRequiredErrorMessage(GetDisplayName(nameof(Title), "Title")));
+            SetError(nameof(BindingTitle), ResolveRequiredErrorMessage(nameof(Title), GetDisplayName(nameof(Title), null)));
         }
         if (IsPublished is null)
         {
-            SetError(nameof(BindingIsPublished), BuildRequiredErrorMessage(GetDisplayName(nameof(IsPublished), "IsPublished")));
+            SetError(nameof(BindingIsPublished), ResolveRequiredErrorMessage(nameof(IsPublished), GetDisplayName(nameof(IsPublished), null)));
         }
         if (Thumb is null)
         {
-            SetError(nameof(BindingThumb), BuildRequiredErrorMessage(GetDisplayName(nameof(Thumb), "Thumb")));
+            SetError(nameof(BindingThumb), ResolveRequiredErrorMessage(nameof(Thumb), GetDisplayName(nameof(Thumb), null)));
         }
         OnValidate();
     }
@@ -2224,10 +2219,42 @@ public partial class DocumentEditModel : EditModelBase
     /// <summary>Hook for implementing additional validation rules (register errors via SetError in a partial implementation).</summary>
     partial void OnValidate();
 
-    /// <summary>Resolves the display name of a property (default = the column description, or the property name if unspecified; can be overridden via CustomizePropertyDisplayName). Used in validation messages.</summary>
-    private static string GetDisplayName(string propertyName, string defaultDisplayName)
+    /// <summary>Resolves the required-field error message (EditModelMessages.Required first, then fine-tuned by CustomizeRequiredErrorMessage).</summary>
+    private string ResolveRequiredErrorMessage(string propertyName, string displayName)
     {
-        var displayName = defaultDisplayName;
+        var message = EditModelMessages.Required(displayName);
+        CustomizeRequiredErrorMessage(propertyName, ref message);
+        return message;
+    }
+
+    /// <summary>Partial method for fine-tuning the required-field error message per property (replace via a partial implementation in another file).</summary>
+    partial void CustomizeRequiredErrorMessage(string propertyName, ref string message);
+
+    /// <summary>Resolves the conversion error message (EditModelMessages.ParseFailed first, then fine-tuned by CustomizeParseErrorMessage).</summary>
+    private string ResolveParseErrorMessage(
+        string propertyName,
+        string displayName,
+        string inputValue,
+        string typeName
+    )
+    {
+        var message = EditModelMessages.ParseFailed(displayName, inputValue, typeName);
+        CustomizeParseErrorMessage(propertyName, inputValue, typeName, ref message);
+        return message;
+    }
+
+    /// <summary>Partial method for fine-tuning conversion error messages per property (replace via a partial implementation in another file).</summary>
+    partial void CustomizeParseErrorMessage(
+        string propertyName,
+        string inputValue,
+        string typeName,
+        ref string message
+    );
+
+    /// <summary>Resolves the display name of a property (default = the column description, or the property name if unspecified; can be replaced through GeneratedDisplayNames.Resolve or CustomizePropertyDisplayName). Used in validation messages.</summary>
+    private static string GetDisplayName(string propertyName, string? description)
+    {
+        var displayName = GeneratedDisplayNames.Resolve(propertyName, description);
         CustomizePropertyDisplayName(propertyName, ref displayName);
         return displayName;
     }
@@ -2332,6 +2359,7 @@ public partial class DocumentNoteEditModel : EditModelBase
     //   Extra validation        : partial void OnValidate();
     //   Extra children          : protected override void RegisterExtraChildren();  // register via AddChild/AddChildren inside
     //   Conversion msg tweak    : partial void CustomizeParseErrorMessage(string propertyName, string inputValue, string typeName, ref string message);
+    //   Required msg tweak      : partial void CustomizeRequiredErrorMessage(string propertyName, ref string message);
     //   Input normalization     : protected override void CustomizeInputNormalization(string propertyName, string rawValue, ref string normalizedValue);
     //   Display name tweak      : partial void CustomizePropertyDisplayName(string propertyName, ref string displayName);  // override display names in validation messages
     //   Row editing             : partial void OnBeginEdit();  partial void OnEndEdit();  partial void OnCancelEdit();
@@ -2423,7 +2451,7 @@ public partial class DocumentNoteEditModel : EditModelBase
                 {
                     SetError(
                         nameof(BindingNoteId),
-                        ResolveParseErrorMessage(GetDisplayName(nameof(NoteId), "NoteId"), normalized, "int")
+                        ResolveParseErrorMessage(nameof(NoteId), GetDisplayName(nameof(NoteId), null), normalized, "int")
                     );
                 }
             }
@@ -2514,7 +2542,7 @@ public partial class DocumentNoteEditModel : EditModelBase
                 {
                     SetError(
                         nameof(BindingDocumentId),
-                        ResolveParseErrorMessage(GetDisplayName(nameof(DocumentId), "DocumentId"), normalized, "int")
+                        ResolveParseErrorMessage(nameof(DocumentId), GetDisplayName(nameof(DocumentId), null), normalized, "int")
                     );
                 }
             }
@@ -2630,15 +2658,15 @@ public partial class DocumentNoteEditModel : EditModelBase
     {
         if (NoteId is null)
         {
-            SetError(nameof(BindingNoteId), BuildRequiredErrorMessage(GetDisplayName(nameof(NoteId), "NoteId")));
+            SetError(nameof(BindingNoteId), ResolveRequiredErrorMessage(nameof(NoteId), GetDisplayName(nameof(NoteId), null)));
         }
         if (DocumentId is null)
         {
-            SetError(nameof(BindingDocumentId), BuildRequiredErrorMessage(GetDisplayName(nameof(DocumentId), "DocumentId")));
+            SetError(nameof(BindingDocumentId), ResolveRequiredErrorMessage(nameof(DocumentId), GetDisplayName(nameof(DocumentId), null)));
         }
         if (Note is null)
         {
-            SetError(nameof(BindingNote), BuildRequiredErrorMessage(GetDisplayName(nameof(Note), "Note")));
+            SetError(nameof(BindingNote), ResolveRequiredErrorMessage(nameof(Note), GetDisplayName(nameof(Note), null)));
         }
         OnValidate();
     }
@@ -2646,10 +2674,42 @@ public partial class DocumentNoteEditModel : EditModelBase
     /// <summary>Hook for implementing additional validation rules (register errors via SetError in a partial implementation).</summary>
     partial void OnValidate();
 
-    /// <summary>Resolves the display name of a property (default = the column description, or the property name if unspecified; can be overridden via CustomizePropertyDisplayName). Used in validation messages.</summary>
-    private static string GetDisplayName(string propertyName, string defaultDisplayName)
+    /// <summary>Resolves the required-field error message (EditModelMessages.Required first, then fine-tuned by CustomizeRequiredErrorMessage).</summary>
+    private string ResolveRequiredErrorMessage(string propertyName, string displayName)
     {
-        var displayName = defaultDisplayName;
+        var message = EditModelMessages.Required(displayName);
+        CustomizeRequiredErrorMessage(propertyName, ref message);
+        return message;
+    }
+
+    /// <summary>Partial method for fine-tuning the required-field error message per property (replace via a partial implementation in another file).</summary>
+    partial void CustomizeRequiredErrorMessage(string propertyName, ref string message);
+
+    /// <summary>Resolves the conversion error message (EditModelMessages.ParseFailed first, then fine-tuned by CustomizeParseErrorMessage).</summary>
+    private string ResolveParseErrorMessage(
+        string propertyName,
+        string displayName,
+        string inputValue,
+        string typeName
+    )
+    {
+        var message = EditModelMessages.ParseFailed(displayName, inputValue, typeName);
+        CustomizeParseErrorMessage(propertyName, inputValue, typeName, ref message);
+        return message;
+    }
+
+    /// <summary>Partial method for fine-tuning conversion error messages per property (replace via a partial implementation in another file).</summary>
+    partial void CustomizeParseErrorMessage(
+        string propertyName,
+        string inputValue,
+        string typeName,
+        ref string message
+    );
+
+    /// <summary>Resolves the display name of a property (default = the column description, or the property name if unspecified; can be replaced through GeneratedDisplayNames.Resolve or CustomizePropertyDisplayName). Used in validation messages.</summary>
+    private static string GetDisplayName(string propertyName, string? description)
+    {
+        var displayName = GeneratedDisplayNames.Resolve(propertyName, description);
         CustomizePropertyDisplayName(propertyName, ref displayName);
         return displayName;
     }
