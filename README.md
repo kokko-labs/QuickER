@@ -2,201 +2,402 @@
 
 *English | [日本語](README.ja.md)*
 
-*License: [MIT](LICENSE) (core) + [PolyForm NC](LICENSE-NC.md) (AI features and code generation — currently free for everyone, including commercial use). See [License](#license) for details.*
+<!-- TODO(badges): add CI / Release / License badges here at publication time (.github/workflows/ci.yml already exists, so a CI badge can be added immediately) -->
 
-**A Windows ER diagram designer that connects AI-assisted visual ER design × multi-DB round-tripping (import, sync, DDL) × C# code generation (Repository / EF Core) end to end.**
+## Design once. Generate the rest.
 
-Draw an ER diagram → create a database → generate C# data-access code and run it — all in a single tool, round-tripping between each step. It also imports from and diff-syncs with existing databases, and you can generate and edit diagrams through AI chat.
+**Your ER model as the single source of truth for the database, source code, and design documents.**
 
-![QuickER main screen (the EC order sample ER diagram)](docs/images/sample-ec-order.png)
+QuickER is a development-support tool for Windows that connects everything from ER model design, through import and diff sync with live databases, to generating the DDL, source code, and design documents.
 
-## Features
+There is no need to copy the same schema definition into the DDL, entities, screen models, and design documents over and over. Define the ER model once, and QuickER generates the rest.
 
-- **Visual ER design** — crow's foot notation, one-to-one / one-to-many / many-to-many, composite primary keys, FK referential actions (Cascade / SetNull / NoAction), and comprehensive undo/redo. Zoom, pan, entity search (Ctrl+F), minimap, relationship highlighting, multi-select with bulk operations, and compact view (PK/FK only) keep large diagrams manageable
-- **Multi-DB** — schema import, diff sync, and DDL generation across five dialects: SQL Server / PostgreSQL / MySQL / Oracle / SQLite. Each diagram keeps its target DB, and you can switch dialects at any time (types convert automatically; types that cannot be converted are flagged with a warning and can be undone)
-- **C# code generation** — in addition to Entity / EditModel / Mapper, choose a data-access layer to generate:
-  - **Repository (QuickER)** — a lightweight, minimal-dependency Repository (expression-tree queries, Include, graph save, optimistic concurrency, and a raw-SQL escape hatch)
-  - **EF Core** — a DbContext that hosts your existing entities as-is, plus an EF Core implementation of the same interfaces. Swap it with Repository (QuickER) **by changing a single line of DI registration**
-  - **Value objects (GenerateValueObjects)** — an option that generates a value-object type per column (`CustomerIdValue`, etc.). Primary and foreign keys share the same type, so mixed-up IDs become compile-time errors, and validation code (max length, decimal precision) is generated from the column definitions. Repository, EF Core, and JSON transport handle value objects transparently, with partial-class extension points for custom validation and display names
-  - **Named queries** — store search-method definitions (condition, ordering, paging, projection) in the diagram and generate them as typed Repository methods (e.g. `GetByCustomerAsync(int customerId, ...)`) for every implementation (Repository (QuickER) / EF Core). Conditions are written in a simple DSL (`CustomerId = @customerId AND Memo LIKE @keyword`, etc.) with live validation in the GUI editor
-  - **Remote-capable interfaces (--generate-remote-contracts)** — an option that additionally generates `I{Entity}RemoteRepository` with only the operations that can be served over a web service (CRUD, save, and named queries). `I{Entity}Repository` keeps all methods and inherits it, so existing code is unaffected; keep your application code dependent only on the remote surface and a switch to a remote implementation stays compile-time safe
-  - **Three-tier support (--generate-remote-services)** — generates an HTTP + JSON client (`Http{Entity}RemoteRepository`, depending only on the BCL `HttpClient`) and an ASP.NET Core Minimal API server (`MapGeneratedRemoteEndpoints`) for the remote surface. Switch between direct DB access and going through a web service by swapping a single DI registration line; exceptions such as `SaveConflictException` are restored with their original type (the same catch works as with a direct connection)
-- **AI chat** — generate and edit ER diagrams through conversation (supports OpenAI / Anthropic API keys, local LLMs such as Ollama, Codex, and Claude Code). It can also generate web mockup screens (HTML) from an ER diagram
-- **Rich import/export** — import: DBML / Mermaid / Excel definition sheets / live DBs (5 dialects) / C# code (a file generated with IncludeDataAnnotations ON). Export: PNG / SVG / SQL DDL / Mermaid / DBML / Excel definition sheets / HTML definition documents / Schema JSON (layout-free, re-importable) / vector printing (scale-to-one-page and actual-size PDF)
-- **git-friendly save format** — a single JSON file that separates the semantic model (table definitions) from the visual information (coordinates and colors)
-- **CLI (dotnet tool)** — generate code without the GUI. `quicker generate` (ER diagram JSON → code) / `quicker scaffold` (direct DB → code) / `quicker reverse` (generated C# → ER diagram JSON)
-- **MCP server (for AI agents)** — `quicker mcp` runs a stdio MCP server so an external AI agent (Claude Code, Codex, and so on) can create and edit ER diagrams and generate code as part of its own workflow. See [docs/mcp.md](docs/mcp.md)
+![QuickER main screen (the EC order sample ER model)](docs/images/sample-ec-order.png)
 
-## Supported DBMS
+- Supports SQL Server / PostgreSQL / MySQL / Oracle / SQLite
+- Generates C# code (Entity / EditModel / Mapper / ValueObject / Repository)
+- Schema import and diff sync from live databases
+- Creates and edits ER models through AI chat
+- Integrates with AI agents (Claude Code, Codex, etc.) via an MCP server
+- Import/export with DBML / Mermaid / Excel definition documents
+- A git-friendly JSON save format
+- Available from both the GUI and the CLI
 
-| DBMS | Schema import | Diff sync | DDL generation | Dialect switch (type conversion) | Notes |
-|---|:-:|:-:|:-:|:-:|---|
-| SQL Server | ✅ | ✅ | ✅ | ✅ | Descriptions sync with extended properties (MS_Description) |
-| PostgreSQL | ✅ | ✅ | ✅ | ✅ | 13 and later |
-| MySQL | ✅ | ✅ | ✅ | ✅ | 8.0 and later (MariaDB is not supported) |
-| Oracle | ✅ | ✅ | ✅ | ✅ | 19c and later |
-| SQLite | ✅ | ✅ | ✅ | ✅ | File DB. Used by the sample |
+> **No more stale diagrams. No more duplicated definitions.**
 
-Import and sync against live databases are continuously verified by real-DB integration tests (SQL Server / PostgreSQL / MySQL / Oracle use real Testcontainers containers; SQLite uses a real file DB).
+## Quick start
 
-## Quick start — a working sample (no external DB required)
+### 1. Launch QuickER and open a diagram
 
-The repository includes a finished sample ([samples/ec-order](samples/ec-order)) that has been round-tripped once through "design → save → generate → build → run." Because it uses a SQLite file DB, **it runs as-is right after cloning, as long as you have the .NET 10 SDK**.
+Get the Setup.exe or the Portable zip from [GitHub Releases](https://github.com/kokko-labs/QuickER/releases) and launch it (see [Install](#install) for details; to run from source, use `dotnet run --project src/QuickER.Gui`).
+
+Clone the repository and open the bundled sample ER model `samples/ec-order/EcOrder.json` — the exact diagram in the screenshot above.
 
 ```powershell
 git clone https://github.com/kokko-labs/QuickER.git
 cd QuickER
+```
+
+### 2. Run the generated code
+
+The DDL and C# code generated from this diagram are checked in, and they run as-is with no external database (the .NET 10 SDK is required).
+
+```powershell
 dotnet run --project samples/ec-order/EcOrderSample
 ```
 
 ```text
 [Setup] Created the SQLite file DB (ec-order.db) from the EcOrder.sql DDL.
-
 [1] Registered 2 customers and 2 products.
-
 [2] Graph-saved 1 order + 2 order lines (records saved: 3).
-
 [3] Fetched the order with a Where expression tree + Include:
-    OrderId=1000 CustomerId=1 Memo=First order
-    LineId=5000 Product=Coffee beans 200g Qty=2 UnitPrice=980
-    LineId=5001 Product=Mug Qty=1 UnitPrice=1500
 ...
 All scenarios succeeded.
 ```
 
 What's in the sample:
 
-- [EcOrder.json](samples/ec-order/EcOrder.json) — the ER diagram you can open in the GUI (the exact diagram in the screenshot above)
-- [EcOrder.sql](samples/ec-order/EcOrder.sql) — the SQLite DDL generated from the diagram
-- [EcOrder.g.cs](samples/ec-order/EcOrderSample/Generated/EcOrder.g.cs) — the C# code generated from the diagram (Entity / EditModel / Mapper / Repository)
-- [Program.cs](samples/ec-order/EcOrderSample/Program.cs) — demonstrates CRUD, graph save, Include, editing through the EditModel / Mapper, raw-SQL aggregation, and delete cascade with the generated code
+- [EcOrder.json](samples/ec-order/EcOrder.json) — the ER model you can edit in the GUI
+- [EcOrder.sql](samples/ec-order/EcOrder.sql) — the SQLite DDL generated from the ER model
+- [EcOrder.g.cs](samples/ec-order/EcOrderSample/Generated/EcOrder.g.cs) — the generated C# code
+- [Program.cs](samples/ec-order/EcOrderSample/Program.cs) — runnable examples of CRUD, graph save, Include, editing through the EditModel / Mapper, raw SQL, and delete cascade
 
-### Round-trip it yourself
+See [the EC order sample](samples/ec-order/README.md) for details. To walk through the loop from editing the diagram to generating code with your own hands, continue to the [tutorial](docs/getting-started.ja.md) *(Japanese)*.
 
-1. **Design** — open the sample diagram (`samples/ec-order/EcOrder.json`) in the GUI, edit it, and save (e.g., add a column to `products`)
-2. **Generate** — replace the code with the CLI:
+## Design ER models visually
 
-   ```powershell
-   dotnet run --project src/QuickER.Cli -- generate `
-     --schema samples/ec-order/EcOrder.json `
-     --out samples/ec-order/EcOrderSample/Generated `
-     --provider sqlite `
-     --config samples/ec-order/quicker.json
-   ```
+Design tables, columns, primary keys, foreign keys, and relationships visually in crow's foot notation.
 
-3. **DDL** — export the DDL from the GUI's "Export" and update `EcOrder.sql`
-4. **Run** — run it with `dotnet run --project samples/ec-order/EcOrderSample`
+- One-to-one / one-to-many / many-to-many
+- Composite primary keys
+- Cascade / SetNull / NoAction
+- Undo / Redo
+- Zoom, pan, and minimap
+- Entity search
+- Relationship highlighting
+- Multi-select with bulk operations
+- A compact view showing PK / FK columns only
 
-See [samples/ec-order/README.md](samples/ec-order/README.md) for details.
+See [ER diagram editing](docs/er-editor.ja.md) *(Japanese)* for details.
 
-## Install / Get it
+<!-- TODO(GIF): add an editing GIF here (add an entity → draw a relationship → undo) -->
 
-### GUI (QuickER itself)
+## Round-trip with live databases
 
-- **GitHub Releases** — two channels, each with a Setup.exe (installer, auto-updating) and a Portable zip (extract and run `QuickER.exe`):
+Import the schema from an existing database and edit it as an ER model.
+You can also detect the differences between the ER model and the database and generate a sync SQL script.
 
-  | Channel                | Setup.exe                    | Portable zip                    | Runtime                                                                                                             |
-  | ---------------------- | ---------------------------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-  | **Full** (recommended) | `QuickER-win-full-Setup.exe` | `QuickER-win-full-Portable.zip` | none — bundled                                                                                                       |
-  | **Lite**               | `QuickER-win-lite-Setup.exe` | `QuickER-win-lite-Portable.zip` | requires the [.NET 10 Desktop Runtime and ASP.NET Core Runtime](https://dotnet.microsoft.com/download/dotnet/10.0) |
+| DBMS       | Schema import | Diff sync | DDL generation | Dialect switch |
+| ---------- | :-: | :-: | :-: | :-: |
+| SQL Server | ✅ | ✅ | ✅ | ✅ |
+| PostgreSQL | ✅ | ✅ | ✅ | ✅ |
+| MySQL      | ✅ | ✅ | ✅ | ✅ |
+| Oracle     | ✅ | ✅ | ✅ | ✅ |
+| SQLite     | ✅ | ✅ | ✅ | ✅ |
 
-- **From source** — with the `.NET 10 SDK` you can launch it with:
+Each diagram keeps its target DBMS, and you can switch to another SQL dialect at any time. Types are converted automatically where possible, and types that cannot be converted are flagged with a warning.
 
-  ```powershell
-  dotnet run --project src/QuickER.Gui
-  ```
+See [Database round-tripping](docs/database.ja.md) *(Japanese)* for details.
 
-### CLI (the quicker command)
+<!-- TODO(image): add a screenshot of the diff-sync dialog here -->
 
-Once published to NuGet, you can install it as a dotnet tool:
+## Generate C# code
 
-```powershell
-dotnet tool install --global QuickER.Cli
-quicker generate --schema diagram.json --out ./Generated --provider sqlserver
-```
+From the ER model, generate the C# code your application development needs.
 
-Until it is published, run it from source (`dotnet run --project src/QuickER.Cli -- generate ...`).
+Always generated:
 
-### Runtime packages (optional)
+- Entity
+- EditModel
+- The Mapper between Entity and EditModel
+- DataAnnotations and DB definition metadata attributes (dialect-neutral type tokens and descriptions)
 
-Generated code is self-contained by default (the runtime is inlined into the output). In `--use-runtime-packages` mode, which switches the fixed code to NuGet package references, it references `QuickER.Runtime` / `QuickER.Runtime.SqlServer` / `QuickER.Runtime.Sqlite` / `QuickER.Runtime.EntityFrameworkCore`. See [docs/code-generation.md](docs/code-generation.md) for details.
+Optionally generated:
 
-## Choosing a DB-access generation mode
+- Repository
+- An EF Core DbContext and Repository implementations
+- Per-column value objects
+- Named queries
+- Remote Repository interfaces
+- An HTTP + JSON client
+- An ASP.NET Core Minimal API server
 
-The generation dialog (GUI) offers three data-access choices:
+The generated code does not depend on any particular UI framework; use it from any .NET application — WPF, Blazor, ASP.NET Core, and so on.
+You can see the EditModel and Mapper in action by running the bundled sample's [Program.cs](samples/ec-order/EcOrderSample/Program.cs).
 
-| Option | Target DB | Characteristics / when to use |
+See [Using the generated code](docs/code-generation.md) for details.
+
+## Data access options
+
+The generation dialog lets you choose the data-access layer from three options.
+
+| Option | Target DB | Use |
 |---|---|---|
-| **None** (default) | — | Entity / EditModel / Mapper only. You write data access yourself |
-| **Repository (QuickER)** | SQL Server / SQLite | A lightweight, minimal-dependency Repository (ADO only). Ships expression-tree queries, `Include`/`ThenInclude`, graph save, bulk, optimistic concurrency (SQL Server rowversion), and raw-SQL execution. Projection / GroupBy / Join are not supported in the expression tree (work around them with raw SQL or EF Core) |
-| **EF Core** | 5 dialects | A dialect-neutral `QuickErDbContext` plus an EF Core implementation of the same Repository interfaces. Migrations are out of scope (schema is the responsibility of DDL generation); it is for connecting to an existing schema only |
+| **None** | — | Generate Entity / EditModel / Mapper only, and implement data access yourself |
+| **QuickER Repository** | SQL Server / SQLite | Use a lightweight ADO-based Repository |
+| **EF Core** | The 5 supported DBMS | Use a DbContext and LINQ |
 
-Because Repository (QuickER) and EF Core implement **the same interfaces**, you can swap them by changing a single line of DI registration:
+The QuickER Repository ships with:
+
+- Expression-tree queries
+- `Include` / `ThenInclude`
+- Graph save
+- Bulk operations
+- Optimistic concurrency
+- Raw SQL execution
+
+The QuickER Repository and the EF Core implementation implement the same Repository interfaces. Keep your application code dependent on the interfaces, and you can switch implementations by changing the DI registration.
 
 ```csharp
-// Repository (QuickER — the SQLite implementation; the DI method name is engine-specific)
+// QuickER Repository
 services.AddGeneratedSqliteRepositories(connectionString);
 
-// EF Core implementation (resolves the same ICustomerRepository, etc.)
-services.AddGeneratedEfCoreRepositories(options => options.UseSqlite(connectionString));
+// EF Core Repository
+services.AddGeneratedEfCoreRepositories(
+    options => options.UseSqlite(connectionString));
 ```
 
-There is also multi-target generation (keyed DI) that supports SQL Server and SQLite simultaneously. See [docs/code-generation.md](docs/code-generation.md) for details.
+## Value objects
+
+Enable value-object generation and a dedicated type is generated per column.
+For example, a customer ID and a product ID are both integers in the database, but they become distinct types in C#.
+
+```csharp
+CustomerIdValue customerId;
+ProductIdValue productId;
+```
+
+Passing the wrong kind of ID by mistake becomes a compile-time error.
+
+Validation code that can be derived from the column definitions — maximum lengths, `decimal` precision, and so on — is generated as well. Add custom validation and display names through partial classes.
+
+## Named queries
+
+Store search conditions, ordering, paging, and projections in the ER model, and generate them as typed Repository methods.
+
+```text
+CustomerId = @customerId AND Memo LIKE @keyword
+```
+
+From this definition, a method like the following is generated.
+
+```csharp
+GetByCustomerAsync(
+    int customerId,
+    string keyword,
+    CancellationToken cancellationToken = default);
+```
+
+The same named query is generated for both the QuickER Repository and the EF Core implementation.
+
+## Three-tier architecture
+
+Enable the option and, in addition to the direct-database configuration, QuickER generates a configuration that goes through a web service.
+
+```text
+Client
+  │
+  │ HTTP + JSON
+  ▼
+ASP.NET Core Minimal API
+  │
+  ▼
+Database
+```
+
+The following code is generated:
+
+- Remote Repository interfaces
+- An `HttpClient`-based client
+- ASP.NET Core Minimal API endpoints (delegating to the DI-registered repositories)
+- Conversion and restoration of exception information
+
+As long as your application code depends on the remote interfaces, you can switch between direct DB access and going through the web service by changing the DI registration.
+
+See [the three-tier sample](samples/ec-order-remote/README.md) for a working example.
 
 ## AI chat
 
-From "AI Chat" on the toolbar, you can generate and edit ER diagrams through conversation (e.g., "Design the tables for order management on an e-commerce site"). Connection methods:
+Create and edit ER models in conversation with an AI.
+For example, you can say:
 
-- **API key** — OpenAI / Anthropic (Claude) / a local LLM with an OpenAI-compatible API (Ollama, LM Studio, vLLM, etc.; no key required)
-- **Codex / Claude Code** — use each CLI's account authentication
+```text
+Design the tables needed for order management on an e-commerce site
+```
 
-See [docs/ai-chat.md](docs/ai-chat.md) for how to configure it.
+The generated ER model can be reviewed and refined with the normal editing operations.
 
-## Development
+Supported connection methods:
 
-Windows and the .NET 10 SDK are required (because the GUI and tests depend on WPF, build and test are Windows-only).
+- OpenAI API
+- Anthropic API
+- Local LLMs (OpenAI-compatible APIs: Ollama, LM Studio, vLLM, etc.)
+- Codex
+- Claude Code
+
+It can also generate web mockup screens (HTML) from the ER model.
+
+<!-- TODO(image): add a screenshot of the AI chat dialog here -->
+
+See [Configuring AI chat](docs/ai-chat.md) for how to set it up.
+
+## Import and export
+
+### Import
+
+- Live databases
+- DBML
+- Mermaid
+- Excel table definition documents
+- C# code (a main `.g.cs` generated with `IncludeDataAnnotations` ON)
+
+### Export
+
+- SQL DDL
+- DBML
+- Mermaid
+- Excel table definition documents
+- HTML table definition documents
+- Schema JSON (layout-free, re-importable)
+- PNG
+- SVG
+- Print / PDF
+
+Fix the ER model and re-export the definition documents, and design and documentation never drift apart.
+
+See [Import and export](docs/import-export.ja.md) *(Japanese)* for what each format covers.
+
+## A save format you can manage with git
+
+A QuickER ER model is saved as a single JSON file.
+Inside the JSON, the semantic model (tables and columns) is separated from the visual information (coordinates and colors).
+
+This lets you keep ER models in the same repository as your source code and review changes through commit history and pull requests.
+Via DBML and Mermaid, it also combines with text-centric workflows.
+
+## Install
+
+### GUI
+
+GitHub Releases provides the following packages.
+
+| Channel | Setup | Portable | Required runtime |
+| ------------ | ---------------------------- | ------------------------------- | -------------------------------------------- |
+| **Full** (recommended) | `QuickER-win-full-Setup.exe` | `QuickER-win-full-Portable.zip` | none |
+| **Lite**     | `QuickER-win-lite-Setup.exe` | `QuickER-win-lite-Portable.zip` | .NET 10 Desktop Runtime and ASP.NET Core Runtime |
+
+The Setup edition supports automatic updates after installation.
+For the Portable edition, extract the ZIP and run `QuickER.exe`.
+
+To run from source:
 
 ```powershell
-dotnet build QuickER.slnx        # build
-dotnet test QuickER.slnx         # all tests (real-DB integration tests also run if Docker is available; otherwise they are auto-skipped)
+dotnet run --project src/QuickER.Gui
 ```
+
+### CLI
+
+Once published to NuGet, you can install it as a dotnet tool.
+
+```powershell
+dotnet tool install --global QuickER.Cli
+```
+
+Generating code from an ER model:
+
+```powershell
+quicker generate `
+  --schema diagram.json `
+  --out ./Generated `
+  --provider sqlserver
+```
+
+Generating code directly from a live database:
+
+```powershell
+quicker scaffold `
+  --provider sqlserver `
+  --connection "..." `
+  --out ./Generated
+```
+
+Recovering an ER diagram JSON (schema only, no layout key) from generated C# code:
+
+```powershell
+quicker reverse `
+  --source ./Generated/Model.g.cs `
+  --out diagram.json `
+  --provider sqlserver
+```
+
+Until it is published, run it from source.
+
+```powershell
+dotnet run --project src/QuickER.Cli -- generate ...
+```
+
+See the [CLI reference](docs/cli.md) for details.
+
+## Design philosophy
+
+QuickER treats the ER model as the single source of truth for the database, the code, and the documents.
+For the background, how this differs from code-first, and the division of labor between AI and humans, see [the design philosophy of QuickER](docs/overview.ja.md) *(Japanese)*.
 
 ## Documentation
 
-> The docs/ pages below are currently written in Japanese.
+> Pages marked *(Japanese)* are currently available in Japanese only; English versions are planned.
 
-- [CLI reference (generate / scaffold, quicker.json)](docs/cli.md)
-- [Using the generated code (Repository API, EF Core, runtime packages)](docs/code-generation.md)
+- [The design philosophy of QuickER](docs/overview.ja.md) *(Japanese)*
+- [Tutorial (from design to running code)](docs/getting-started.ja.md) *(Japanese)*
+- [ER diagram editing](docs/er-editor.ja.md) *(Japanese)*
+- [Database round-tripping](docs/database.ja.md) *(Japanese)*
+- [Import and export](docs/import-export.ja.md) *(Japanese)*
+- [CLI reference](docs/cli.md)
+- [Using the generated code](docs/code-generation.md)
 - [Configuring AI chat](docs/ai-chat.md)
-- [MCP server for AI agents (quicker mcp)](docs/mcp.md)
-- [The working sample (EC order domain)](samples/ec-order/README.md)
-- [The working sample (3-tier — client → HTTP+JSON → server → SQLite)](samples/ec-order-remote/README.md)
+- [MCP server (quicker mcp)](docs/mcp.md)
+- [The EC order sample](samples/ec-order/README.md)
+- [The three-tier sample](samples/ec-order-remote/README.md)
+- [Changelog](CHANGELOG.md)
+
+## Development
+
+Building and testing QuickER itself requires Windows and the .NET 10 SDK.
+
+```powershell
+dotnet build QuickER.slnx
+dotnet test QuickER.slnx
+```
+
+The integration tests for SQL Server, PostgreSQL, MySQL, and Oracle use Docker. In environments where Docker is not available, those tests are skipped automatically.
+The SQLite tests use a real file database.
 
 ## Support & contributing
 
-As a solo project, support is **best-effort** (no promised response times) and covers **the latest version only**. Please file bug reports and feature requests as Issues (Japanese or English are both welcome). For pull requests, please discuss in an Issue first — see [CONTRIBUTING.md](CONTRIBUTING.md) for details, and [SECURITY.md](SECURITY.md) for reporting vulnerabilities.
+QuickER is developed by a single person.
+Support is best-effort and, as a rule, covers the latest version only.
 
-The change history is in [CHANGELOG.md](CHANGELOG.md).
+Please file bug reports and feature requests as GitHub Issues; both Japanese and English are welcome.
+Before opening a pull request, please discuss the change in an Issue first.
+
+- [Contributing guide](CONTRIBUTING.md)
+- [Security policy](SECURITY.md)
 
 ## License
 
-**Code that QuickER generates (including the inlined runtime portion) is your work product**, and you may use, modify, and distribute it freely with no license restrictions.
+Code that QuickER generates — including the inlined runtime portion — is your work product. Generated code is not restricted by QuickER's own licenses, and you may use, modify, and distribute it freely.
 
-The repository itself uses two licenses, split per project:
+QuickER itself applies the following licenses per project.
 
 | Scope | License |
-|---|---|
-| Core (ER diagram editor, import/export, DDL generation, schema import/diff-sync, the 4 runtime packages, etc.) | [MIT License](LICENSE) — permanently free |
-| AI features and code generation (the 7 projects `QuickER.AI` / `AI.UI` / `AI.Chat` / `AI.Mock` / `CodeGen.CSharp` / `CodeGen.UI` / `Cli`) | [PolyForm Noncommercial 1.0.0](LICENSE-NC.md) — see the provisioning policy below |
+| ---------------------------------------- | --------------------------------------------------- |
+| The ER designer, import/export, DDL generation, DB import/sync, the runtime packages, and so on | [MIT License](LICENSE) |
+| The AI features and the code-generation projects | [PolyForm Noncommercial 1.0.0](LICENSE-NC.md) + additional grants |
 
-### Provisioning policy for AI features and code generation (notice about possible future paid licensing)
+Today, the AI features and code generation are free for everyone, including commercial use.
 
-- **All features are currently free for everyone, including commercial use**
-- In the future, **AI features and DB-access code generation (Repository (QuickER) / EF Core / multi-target) may become paid-licensed for commercial use only**
-- Even then, we promise the following:
-  - **Personal and non-commercial use remains permanently free**
-  - **Basic code generation (Entity / EditModel / Mapper) remains permanently free, including commercial use**
-  - **If we introduce paid licensing, we will announce it in advance and provide a transition period for existing users**
-- The source code of the PolyForm NC portion remains available for use, modification, and redistribution for non-commercial purposes
+In the future, the AI features and part of the DB-access code generation may become paid-licensed for commercial use only. Even then, personal and non-commercial use, and the basic generation of Entity / EditModel / Mapper, will remain free. If paid licensing is introduced, it will be announced in advance, with a transition period for existing users.
 
-The promises above are codified as the "Additional Grants" section of [LICENSE-NC.md](LICENSE-NC.md) — the license file itself grants them, so commercial use today rests on the license text, not on this README alone.
+These promises are codified as the "Additional Grants" section of [LICENSE-NC.md](LICENSE-NC.md), and commercial use today rests on the grants in the license file itself.
+
+For the formal terms, always refer to the license files.
