@@ -107,3 +107,7 @@ stdio トランスポートに対応した MCP クライアントであれば利
 
 - [CLI リファレンス（generate / scaffold / reverse・quicker.json）](cli.ja.md) — コード生成ツールが再利用する `quicker generate` の経路
 - [AI チャットの設定](ai-chat.ja.md) — アプリ内蔵の AI チャット。現在開いている図を GUI 内で編集する（stdio でエージェントが駆動するこの外部 MCP サーバとは対照的）
+
+## ライセンス注記
+
+外部 MCP サーバは CLI（`QuickER.Cli`）の一部として提供され、ファイルベースのツール実行ホスト（`QuickER.Mcp.Tools`）にも同じく [PolyForm Noncommercial 1.0.0](../LICENSE-NC.md) が適用されます。**現在は商用利用を含め全員無料**です。ツール定義カタログ（`QuickER.Mcp`）は MIT です。提供方針は[ライセンスガイド](../LICENSING.ja.md)を参照してください。

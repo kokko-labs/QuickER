@@ -40,7 +40,7 @@ The architecture and the invariants that break silently (not caught by the build
 
 ## License and rights handling for contributions
 
-- This repository uses **MIT** and **PolyForm Noncommercial 1.0.0** on a per-project basis (see [LICENSE-NC.md](LICENSE-NC.md) for the covered projects, and the "License" section of the README for the provisioning policy)
+- This repository uses **MIT** and **PolyForm Noncommercial 1.0.0** on a per-project basis (see [LICENSE-NC.md](LICENSE-NC.md) for the covered projects, and [LICENSING.md](LICENSING.md) for the provisioning policy)
 - By submitting code, you agree that it will be published under the current license of the project it is merged into
 - For contributions to the PolyForm NC projects, you additionally grant the author (the repository owner) the right to offer commercial licenses for software containing your code, and to change its license in the future (including making it free of charge) — this arrangement keeps external contributions from blocking future changes to the provisioning policy
 

@@ -52,4 +52,4 @@ As an optional second step, you can generate a runnable **mock project** from th
 
 ## License note
 
-The AI feature set (chat and mock generation = `QuickER.AI` / `AI.UI` / `AI.Chat` / `AI.Mock`) is licensed under [PolyForm Noncommercial 1.0.0](../LICENSE-NC.md). **It is currently free for everyone, including commercial use.** For the future provisioning policy (the possibility of paid licensing for commercial use only, permanently free personal/non-commercial use, and advance notice and a transition period if paid licensing is introduced), see the ["License" section of the README](../README.md#license).
+The AI feature set (chat and mock generation = `QuickER.AI` / `AI.UI` / `AI.Chat` / `AI.Mock`) is licensed under [PolyForm Noncommercial 1.0.0](../LICENSE-NC.md). **It is currently free for everyone, including commercial use.** For the provisioning policy and future plans, see the [licensing guide](../LICENSING.md).

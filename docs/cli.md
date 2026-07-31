@@ -119,4 +119,4 @@ With `--generate-api-docs`, an API reference Markdown named `EcOrder.g.md` (Engl
 
 ## License note
 
-The CLI (`QuickER.Cli`) and the code generation engine are licensed under [PolyForm Noncommercial 1.0.0](../LICENSE-NC.md). **It is currently free for everyone, including commercial use.** For the future provisioning policy (the possibility that only commercial use becomes paid-licensed, that personal/non-commercial use remains permanently free, that basic generation remains permanently free, and that any move to paid licensing will come with advance notice and a transition period), see the [License section of the README](../README.md#license). **Code that is generated is your work product**, with no license restrictions.
+The CLI (`QuickER.Cli`) and the code generation engine are licensed under [PolyForm Noncommercial 1.0.0](../LICENSE-NC.md). **It is currently free for everyone, including commercial use.** For the provisioning policy (the permanent free grants and possible future paid licensing), see the [licensing guide](../LICENSING.md). **Code that is generated is your work product**, with no license restrictions.

@@ -107,3 +107,7 @@ Call `get_diagram_summary` at any point to read back the current tables and rela
 
 - [CLI reference (generate / scaffold / reverse, quicker.json)](cli.md) — the `quicker generate` pipeline that the code generation tools reuse
 - [Configuring AI chat](ai-chat.md) — the in-app AI chat, which edits the currently open diagram inside the GUI (in contrast to this external MCP server, which agents drive over stdio)
+
+## License note
+
+The external MCP server ships as part of the CLI (`QuickER.Cli`), and its file-based tool-execution host (`QuickER.Mcp.Tools`) is likewise covered by [PolyForm Noncommercial 1.0.0](../LICENSE-NC.md). **It is currently free for everyone, including commercial use.** The tool-definition catalog (`QuickER.Mcp`) is MIT. For the provisioning policy, see the [licensing guide](../LICENSING.md).

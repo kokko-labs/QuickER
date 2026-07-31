@@ -43,6 +43,6 @@ https://github.com/kokko-labs/QuickER
 
 ## License
 
-PolyForm Noncommercial 1.0.0 (the LICENSE-NC.md bundled with the package). **It is currently free for everyone, including commercial use.** In the future, commercial use only may become paid-licensed (personal and non-commercial use remains permanently free / basic generation—Entity / EditModel / Mapper—remains permanently free including commercial use / if we introduce paid licensing, we will announce it in advance and provide a transition period for existing users).
+PolyForm Noncommercial 1.0.0 (the LICENSE-NC.md bundled with the package). **It is currently free for everyone, including commercial use.** Future versions may introduce paid licensing for some features (basic generation—Entity / EditModel / Mapper—remains permanently free including commercial use / personal and non-commercial use of the existing features remains free / rights granted for a released version are never withdrawn retroactively / any move to paid licensing will be announced in advance, with a transition period for existing users). For details, see LICENSING.md in the repository.
 
 **Code that the CLI generates (including the inlined runtime portion) is your work product**, and you may use, modify, and distribute it freely with no license restrictions.

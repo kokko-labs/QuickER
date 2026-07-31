@@ -1,5 +1,7 @@
 # LICENSE-NC — Scope of the PolyForm Noncommercial License 1.0.0
 
+QuickER-specific terms version 1.0 (2026-07-31). This file is self-contained: the covered scope, the definitions, and the additional grants below are the complete QuickER-specific terms, followed by the unmodified license text.
+
 The license in this file (the PolyForm Noncommercial License 1.0.0) applies **only to the following projects (directories)** in this repository. All other parts are covered by [LICENSE](LICENSE) (the MIT License).
 
 - `src/QuickER.AI`
@@ -9,17 +11,30 @@ The license in this file (the PolyForm Noncommercial License 1.0.0) applies **on
 - `src/QuickER.CodeGen.CSharp`
 - `src/QuickER.CodeGen.UI`
 - `src/QuickER.Cli`
+- `src/QuickER.Mcp.Tools`
 
-Code that QuickER generates (including the inlined runtime portion) is your work product and is not subject to this license. For the policy on providing the official distributions (GUI / CLI) free of charge and the notice about possible future paid licensing, see the "License" section of the README.
+## Definitions (QuickER-specific)
+
+- **Covered Projects** — the eight projects listed above, as source code and in compiled form (the corresponding assemblies and packages in Official Distributions).
+- **Official Distribution** — a GUI installer or portable archive, the CLI package, or any other artifact of the software that the licensor publishes through GitHub Releases, an official package registry (such as NuGet), or an official website of the project.
+- **Released Version** — a version of the software that the licensor has made generally available under a version number as an Official Distribution.
+- **Generated Output** — everything the software produces from your inputs: generated source code (including the inlined runtime portions and any template-derived text embedded in it), DDL scripts, documents, and configuration files.
+- **Basic Code Generation** — the generation of Entity / EditModel / Mapper code.
+
+## Generated Output
+
+Generated Output is your work product. The licensor grants everyone a perpetual, irrevocable, royalty-free license to use, copy, modify, distribute, sublicense, and sell Generated Output for any purpose, including commercial purposes. Nothing in this file restricts Generated Output. This grant covers the output the software produces; it does not extend to the software itself.
 
 ## Additional Grants
 
-In addition to the PolyForm Noncommercial License 1.0.0 below, the licensor grants the following additional permissions for the projects listed above. Each grant applies per released version: once a version has been made available with a grant in effect, that grant remains in force for that version permanently and is never withdrawn retroactively.
+In addition to the PolyForm Noncommercial License 1.0.0 below, the licensor grants the following additional permissions for the Covered Projects. Each grant applies per Released Version: once a Released Version has been made available with a grant in effect, that grant remains in force for that version permanently and is never withdrawn retroactively. While a grant is in effect, it also applies to the source repository as made available by the licensor.
 
-1. **Basic code generation — permanent.** Everyone is granted, permanently and for commercial purposes as well, a license to use the basic code generation features (generation of Entity / EditModel / Mapper code).
-2. **All other features — interim.** Everyone is currently granted a license to use the software for commercial purposes as well, including the AI features and the DB-access code generation (Repository (QuickER) / EF Core / multi-target). This interim grant may be withdrawn **only for future versions**, with advance public notice and a transition period, as described in the "License" section of the README.
+1. **Basic Code Generation — permanent.** Everyone is granted, permanently and for commercial purposes as well, a license to use Basic Code Generation.
+2. **All other features — interim.** Everyone is currently granted a license to use the software for commercial purposes as well, including the AI features and the DB-access code generation (Repository (QuickER) / EF Core / multi-target). This interim grant may be withdrawn **only for future versions**; any such change will be announced publicly in advance, and existing users will be given a transition period.
 
 These additional grants cover **use** of the software. Distribution of, and changes and new works based on, the software beyond noncommercial purposes remain governed by the PolyForm Noncommercial License 1.0.0 below.
+
+For a plain-language explanation of this structure, see [LICENSING.md](LICENSING.md). If that explanation and this file conflict, this file controls.
 
 The following is the original license text (English, authoritative).
 

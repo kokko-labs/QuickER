@@ -15,4 +15,4 @@ QuickER の利用者に影響する変更を記録します。形式は [Keep a 
   - AI チャットによる図の生成・編集（OpenAI / Anthropic / Ollama / Codex / Claude Code）、ER 図からのモック生成
   - 入出力（DBML / Mermaid / Excel 定義書 / PNG / SVG / ベクタ印刷）と CLI（`quicker generate` / `quicker scaffold`）
   - 動くサンプル `samples/ec-order`（SQLite・外部 DB 不要）
-  - ライセンス構成: コア＝MIT、AI 機能群・コード生成系（7 プロジェクト）＝PolyForm Noncommercial 1.0.0＋追加許諾（現在は商用利用を含め全員無料。基本コード生成の商用利用は恒久許諾。LICENSE-NC.md の「Additional Grants」節として条文化。提供方針と将来の有償化に関する予告は README の「ライセンス」節を参照）
+  - ライセンス構成: コア＝MIT、AI 機能群・コード生成系・MCP ツール実行ホスト（8 プロジェクト）＝PolyForm Noncommercial 1.0.0＋追加許諾（現在は商用利用を含め全員無料。基本コード生成の商用利用は恒久許諾。LICENSE-NC.md の「Additional Grants」節として条文化。平易な解説は LICENSING.ja.md）

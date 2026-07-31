@@ -52,4 +52,4 @@
 
 ## ライセンス注記
 
-AI 機能群（チャット・モック生成＝`QuickER.AI` / `AI.UI` / `AI.Chat` / `AI.Mock`）には [PolyForm Noncommercial 1.0.0](../LICENSE-NC.md) が適用されます。**現在は商用利用を含め全員無料**です。将来の提供方針（商用利用のみ有償化の可能性・個人/非商用は永続無料・有償化時は事前告知と移行期間）は [README の「ライセンス」節](../README.md#ライセンス)を参照してください。
+AI 機能群（チャット・モック生成＝`QuickER.AI` / `AI.UI` / `AI.Chat` / `AI.Mock`）には [PolyForm Noncommercial 1.0.0](../LICENSE-NC.md) が適用されます。**現在は商用利用を含め全員無料**です。提供方針と将来の予定は[ライセンスガイド](../LICENSING.ja.md)を参照してください。
