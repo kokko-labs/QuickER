@@ -353,11 +353,11 @@ See the [CLI reference](docs/cli.md) for details.
 ## Design philosophy
 
 QuickER treats the ER model as the single source of truth for the database, the code, and the documents.
-For the background, how this differs from code-first, and the division of labor between AI and humans, see [the design philosophy of QuickER](docs/overview.md).
+For the background, how this differs from code-first, and the division of labor between AI and humans, see [Why QuickER uses the ER model as the source of truth](docs/overview.md).
 
 ## Documentation
 
-- [The design philosophy of QuickER](docs/overview.md)
+- [Why QuickER uses the ER model as the source of truth](docs/overview.md)
 - [Tutorial (from design to running code)](docs/getting-started.md)
 - [ER diagram editing](docs/er-editor.md)
 - [Database round-tripping](docs/database.md)

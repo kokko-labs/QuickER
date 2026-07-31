@@ -78,4 +78,4 @@ With the schema and the code now including the new column, the same scenarios su
 - [Database round-tripping](database.md) — importing from an existing DB and diff sync
 - [Import and export](import-export.md) — interop with DBML / Mermaid / definition documents
 - [Configuring AI chat](ai-chat.md) — generating diagrams in conversation
-- [The design philosophy of QuickER](overview.md) — the background of this workflow
+- [Why QuickER uses the ER model as the source of truth](overview.md) — the background of this workflow

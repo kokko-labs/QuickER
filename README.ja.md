@@ -355,11 +355,11 @@ dotnet run --project src/QuickER.Cli -- generate ...
 ## 設計思想
 
 QuickER は、ER モデルをデータベース、コード、ドキュメントの single source of truth として扱います。
-その背景や、コードファーストとの違い、AI と人間の役割分担については、[QuickER の設計思想](docs/overview.ja.md) を参照してください。
+その背景や、コードファーストとの違い、AI と人間の役割分担については、[QuickER が ER モデルを正本にする理由](docs/overview.ja.md) を参照してください。
 
 ## ドキュメント
 
-- [QuickER の設計思想](docs/overview.ja.md)
+- [QuickER が ER モデルを正本にする理由](docs/overview.ja.md)
 - [チュートリアル（設計から実行まで）](docs/getting-started.ja.md)
 - [ER 図の編集](docs/er-editor.ja.md)
 - [データベース連携](docs/database.ja.md)

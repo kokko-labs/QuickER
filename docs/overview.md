@@ -1,71 +1,69 @@
-# The Design Philosophy of QuickER
+# Why QuickER Uses the ER Model as the Source of Truth
 
 *English | [日本語](overview.ja.md)*
 
-The codebase of a business application repeats the same knowledge over and over. Define one "customer," and the knowledge of its columns, keys, and relationships shows up in the DDL, in an entity class, in the model bound to the screen, and in the design documents. The same knowledge is copied four times, in four different shapes. This repetition is the same whether your team starts from an ER diagram or starts code-first. Even when migrations take the DDL off your hands, the binding models and the documents remain. And copied knowledge drifts: not every change reaches every copy, so the copies slowly diverge.
+QuickER is a Windows tool for teams that build data-centric business applications on .NET. You review one ER model; from that model, QuickER regenerates the DDL and database diffs, C# data-access code, remote APIs, design documents, and screen mockups.
 
-The question is where to put the single source of truth. Code-first answered: the code. That settles synchronization with the database — change an entity and a migration follows. But what about reviewing the schema? Design mistakes such as broken normalization or a missing relationship are hard to spot by reading lines of class definitions. Humans have long had a representation for surveying a schema at a glance: the ER diagram. Tables are boxes, relationships are lines, and the keys are visible at once.
+Why gather everything around an ER model? Because a business application repeats the same schema knowledge: define one "customer," and its columns, keys, and relationships appear in the DDL, in an entity class, in the model bound to the screen, and in the design documents. Each copy is written by hand, and hand-written copies diverge, because not every change reaches every copy.
 
-That does not mean "just make the diagram the source of truth." Development centered on diagrams has been attempted many times, and it has failed the same way every time: the diagram gets left behind by reality and decays into a picture nobody trusts.
+Code-first development answers by making the code the source of truth, which keeps the database in sync but leaves schema review hard: normalization mistakes and missing relationships are difficult to spot in class definitions. The representation humans use to survey a schema at a glance has long existed — the ER diagram, with tables as boxes, relationships as lines, and the keys visible at once.
 
-QuickER puts the ER model back in place as the single source of truth by creating the conditions under which that decay does not happen. There are two conditions. The diagram must move both ways between text and the database. And the code, the DDL, and the definition documents downstream of the diagram must all come out automatically (where there is no copying, there is no drift). The aim is to build business applications faster, at lower cost, with the least hand-written code.
+Declaring the diagram the source of truth is not enough by itself, though. The failure mode is well known: without a way to pull implementation-side changes back in, the diagram falls behind reality and stops being trusted. QuickER addresses that failure mode with two conditions. The model must round-trip with text and with the database, and everything downstream of the model must be generated rather than copied by hand. What is generated can always be reproduced from the model instead of being edited into divergence, and changes that still happen outside the model can be surfaced by running diff detection.
 
-## Round-tripping between the diagram, text, and the database
+## Round-tripping between the model, text, and the database
 
-Say "the diagram is the source of truth" and many developers will answer: "I want my schema definitions in text, managed in git." A fair demand — and QuickER does not stand in its way.
+QuickER stores and versions a semantic ER model: a single JSON file that keeps the table definitions (meaning) separate from coordinates and colors (appearance). The diff is readable in git, the model can be reviewed in pull requests like source code, and import and export with DBML and Mermaid are built in for those who prefer writing text.
 
-A QuickER diagram is a single JSON file that keeps the table definitions (meaning) separate from the coordinates and colors (appearance). The diff is readable in git, so diagrams can be versioned and reviewed in pull requests just like source code. Import and export with DBML and Mermaid are built in, so those who prefer text can write DBML, import it, and verify it as a diagram.
+Schemas round-trip with live databases, too. You can import the schema of a running database (five dialects: SQL Server / PostgreSQL / MySQL / Oracle / SQLite), and you can detect the differences between the model and the database and generate a sync script. A code-first system yields its initial model by import, and later divergence shows up as a diff instead of going unnoticed.
 
-The database round-trips the same way. You can import the schema of a live database (five dialects: SQL Server / PostgreSQL / MySQL / Oracle / SQLite) into a diagram, and you can detect the differences between the diagram and the database and generate a sync script. If you have a system grown code-first, point QuickER at the running database and the first diagram is in your hands right away — no need to redraw anything from a blank canvas. And when the diagram and reality drift apart, diff detection brings the drift into view. If the diagram is ever left behind, it is left behind where you can see it.
+Documents round-trip as well: build a model from an Excel definition document, output the document from the model, or export a single self-contained HTML document for non-developer stakeholders. Because the documents are regenerated from the model, updating stale documentation shrinks from hunting through prose to re-exporting.
 
-Documents are part of the round trip, too. In teams that hand designs around as Excel definition documents, you can both build a diagram from the document at hand and output the document from the diagram. For non-developer stakeholders, export a single HTML definition document. Fix the diagram and the documents follow — the state where "only the documentation is stale" simply stops existing.
+## What comes out of a reviewed model
 
-Fix the diagram and push it to the database. Pull database-side changes back into the diagram. Take a design received as DBML, verify it as a diagram, and return DDL and definition documents. Start anywhere, move in any direction — and at the center of that loop sits the diagram.
+For its deterministic code generation, QuickER draws the line here: what is mechanically determined by the schema is generated, and what is application-specific is not.
+
+- **Schema definitions**: entity classes, optional per-column value objects (a customer ID and a product ID become distinct types, so a mixed-up ID fails to compile), and validation code derived from the column definitions
+- **Data operations**: a Repository in two styles behind the same interfaces — the lightweight QuickER Repository (currently SQL Server and SQLite) or an EF Core implementation — so for code that depends on the interfaces, swapping is one line of DI registration. Named queries saved in the model become typed methods in either style. Repository generation assumes single-column, application-assigned primary keys
+- **UI binding models**: an EditModel you can bind straight to screens, plus the Mapper that converts to and from the entities
+
+DDL comes out in the five dialects as well; the model's target DB can be switched, with types converted automatically where possible and warnings for the rest. The four copies from the opening now all have a source, and what developers write by hand is the production screens and the business logic.
 
 ## The division of labor with AI
 
-What about a brand-new project, with no database and no code yet? Raising dozens of tables on a blank canvas is real work in itself.
+A brand-new project has no database to import, and raising dozens of tables on a blank canvas is real work in itself. That is what the AI chat takes on: ask it to "design the tables for order management on an e-commerce site" and it drafts a model you refine in conversation (for the available connections, from API keys to local LLMs, Codex, and Claude Code, see [the AI chat guide](ai-chat.md)).
 
-That is what the AI takes on. Tell the AI chat "design the tables for order management on an e-commerce site" and it drafts a diagram you can refine in conversation. Connections include OpenAI / Anthropic API keys, locally hosted LLMs (OpenAI-compatible APIs such as Ollama and LM Studio), and the account authentication of Codex and Claude Code. There is also a feature that raises web screen mockups from the ER diagram. They are saved live as a "mock folder" — per-screen HTML plus a shared stylesheet — so you can build up multiple screens in conversation, follow the transitions in a preview, and bundle everything into a single HTML file to share with stakeholders. You align on the screens, too, at the earliest stage of design.
+The AI also generates web screen mockups from the ER model, saved live as a mock folder — per-screen HTML plus a shared stylesheet — in which each screen declares its transitions and which entities it reads and writes. You follow the transitions in a preview, bundle everything into a single HTML file to share with stakeholders, and QuickER derives a design document (a screen list, a transition diagram, and a screen-by-entity CRUD table) from the folder without any AI involved.
 
-This division of labor is structurally different from having an AI write the whole application. When an AI writes from scratch, probabilistic output spreads across every layer of the codebase, and human verification chases after it in the form of code review. In QuickER's flow, the probabilistic step ends at the draft of the diagram. Humans look at the diagram and verify the schema at the level of boxes and lines. Downstream of a reviewed diagram, a deterministic generator emits the same code every time. The generator itself is continuously verified with Roslyn compilation checks and integration tests against real databases ([tests/QuickER.Tests](../tests/QuickER.Tests)), so as long as the diagram is right, the layers below it do not crumble from day to day. Start from natural language, focus human eyes on a single diagram, and hand everything after it to the machine. The point is not to give the AI less to do — it is to gather the AI's output in a place where humans can verify it.
+As an optional second step, QuickER generates a Blazor Web App or WPF mock project from the folder. The data layer is scaffolded deterministically from the model, the AI implements the screen UI, and QuickER checks the outcome itself by running `dotnet build` — the build is verified, not assumed (agent backends iterate on build failures; the API-key mode applies at most one fix, so a failing build can remain).
 
-## What the generated code takes on
+The probabilistic work, then, does not end at the model — the mockups and the mock UI are AI output as well. What the flow controls is where each output lands: every AI step deposits its result into an artifact you can inspect and keep, and humans review the model itself as a diagram, at the level of boxes and lines. Downstream of that review, deterministic generators reproduce the data layer, the DDL, and the documents from the same input every time.
 
-So what comes out of a reviewed diagram? QuickER draws the line like this: everything mechanically determined by the schema is generated, and nothing application-specific is.
+| Step | Mainly done by | What you check |
+| --- | --- | --- |
+| Drafting the ER model | AI, or you | Tables, columns, keys, relationships |
+| Finalizing the ER model | You | The schema, against the requirements |
+| DDL, entities, Repository, documents | Deterministic generators | Diffs, build, tests |
+| Screen mockups, Blazor / WPF UI | AI | Screens, transitions, CRUD declarations |
+| Mock-project data layer, final build | Deterministic scaffold and `dotnet build` | The build result |
 
-Three layers fall on the generated side:
-
-- **Schema definitions**: entity classes, plus per-column value objects (optional). With value objects, a customer ID and a product ID become distinct types, and a mixed-up ID fails to compile. Validation code derived from the column definitions — maximum lengths, decimal precision — is generated as well
-- **Data operations**: choose between two repository styles. The lightweight, minimal-dependency QuickER Repository (expression-tree queries, Include, graph save, optimistic concurrency, and a raw-SQL escape hatch), or the EF Core implementation (developers who know EF Core keep their usual DbContext and LINQ). Both implement the same interfaces, so swapping is a single line of DI registration. Search conditions saved in the diagram (named queries) are generated as typed methods for both
-- **UI binding models**: an EditModel you can bind straight to screens, plus the Mapper that converts to and from the entities
-
-DDL comes out in the five dialects as well. The diagram's target DB can be switched at any time, with types converted automatically.
-
-The four copies from the opening now all have somewhere to go. Code generation takes the DDL, the entities, and the binding models — three of the four — and the definition-document export takes the fourth. Nothing is left to copy by hand. What developers write is the screens and the business logic.
+The generators are continuously verified with Roslyn compilation checks and integration tests against real databases ([tests/QuickER.Tests](../tests/QuickER.Tests)). That makes the generated layers reproducible from a reviewed model and catches generator regressions; it does not replace your review of whether the generated behavior meets the requirements.
 
 ## The independence of the generated code
 
-Code generation tools come with a well-worn worry: the generated code is shaped by the generator's convenience, and the moment you step off the path you hit a dead end.
-
-QuickER's generated code answers that worry with the following design.
+Code generation tools come with a well-worn worry: the generated code is shaped by the generator's convenience, and customizing it gets expensive. QuickER's generated code has these properties:
 
 - **UI-framework independent**: no dependency on any particular UI library; usable in desktop and web applications alike
-- **Cross-platform**: QuickER itself is a Windows tool, but the generated code runs on .NET on Windows, Mac, and Linux. The application you build is not tied to the tool's environment
-- **Self-contained**: by default the required runtime is inlined into the code, and the build succeeds with no additional packages (a NuGet package-reference mode is also available)
-- **Extension through partial classes**: add validation or change display names without touching the generated files
-- **Extension to three tiers**: remote interfaces and an HTTP + JSON client/server can be generated additionally, and switching away from direct DB access is, again, one line of DI
+- **Cross-platform**: QuickER itself is a Windows tool, but the generated code runs on .NET on Windows, Mac, and Linux
+- **Self-contained**: by default QuickER's runtime is inlined into the generated code instead of being pulled from packages (a NuGet package-reference mode is also available)
+- **Extensible through partial classes**: add validation or change display names without touching the generated files
+- **Extensible to three tiers**: remote interfaces and an HTTP + JSON client/server can be generated additionally, and code that depends on the remote interfaces switches away from direct DB access with one line of DI
 
-And the generated code is, by license as well, your work product: use, modify, and redistribute it without restriction. Where a dead end might have been, the raw-SQL escape hatch and the partial-class extension points are always open.
+The generated code is also, by license, your work product: use, modify, and redistribute it without restriction. For anything the generated methods do not cover, raw SQL and the partial-class extension points remain available.
 
-## Scope, and what comes next
+## Scope, and how to try it
 
-QuickER is developed as a Windows tool for .NET, and the current target of code generation is C#.
+QuickER is developed as a Windows tool for .NET, and the current target of code generation is C#. Even without code generation it works as an ER diagramming tool, and the five-dialect DDL generation and the full round trip come with that usage as well.
 
-That said, even without code generation it earns its keep as an ER diagramming tool. Draw, output the DDL and the definition documents, export images — that usage alone still comes with DDL generation for five dialects and the full round trip with databases and text formats.
+The model itself is language-independent — tables, columns, and relationships — so supporting another language means adding that language's generation rules and verification, not rebuilding the model.
 
-What the diagram holds is a language-independent semantic model (tables, columns, relationships). The conversion to C# is just one generator sitting on top of it, so support for other languages remains a matter of adding generators. That is where we want to take future development.
-
-Return to the "customer" from the opening. From now on, that knowledge is written once, in the diagram. The DDL, the entities, the binding models, the definition documents — they all come out of it. Changes work the same way: fix the diagram and everything follows. The time once spent hunting down drifted copies goes back to the screens and the business logic — the actual body of your application.
-
-The repository includes a working sample ([samples/ec-order](../samples/ec-order)) that goes once around from design through generation to running code. It uses a SQLite file DB, so with the .NET 10 SDK it runs right after cloning. Start there, and try development where you write it once.
+The repository includes a working sample ([samples/ec-order](../samples/ec-order)) that walks from design through generation to running code; it uses a SQLite file DB, so with the .NET 10 SDK it runs right after cloning. The "customer" from the opening is written there exactly once — in the model.
