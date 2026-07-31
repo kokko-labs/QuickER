@@ -395,19 +395,24 @@ Before opening a pull request, please discuss the change in an Issue first.
 
 ## License
 
-Code that QuickER generates — including the inlined runtime portion — is your work product. Generated code is not restricted by QuickER's own licenses, and you may use, modify, and distribute it freely.
+Code that QuickER generates — including the inlined runtime portion — is your work product. Generated code is not restricted by QuickER's own licenses, and you may use, modify, and distribute it freely, commercially or otherwise (codified as an explicit grant in [LICENSE-NC.md](LICENSE-NC.md)).
 
-QuickER itself applies the following licenses per project.
+QuickER itself is a mixed-license repository — the licenses apply per project, so the single license label GitHub displays does not tell the whole story.
 
 | Scope | License |
 | ---------------------------------------- | --------------------------------------------------- |
 | The ER designer, import/export, DDL generation, DB import/sync, the runtime packages, and so on | [MIT License](LICENSE) |
-| The AI features and the code-generation projects | [PolyForm Noncommercial 1.0.0](LICENSE-NC.md) + additional grants |
+| The AI features, the code-generation projects, and the MCP tool-execution host | [PolyForm Noncommercial 1.0.0](LICENSE-NC.md) + additional grants |
 
-Today, the AI features and code generation are free for everyone, including commercial use.
+The current releases are free for everyone, including commercial use of the official GUI and CLI. Note that the additional grants cover **using** QuickER: modifying the covered source code or redistributing modified versions for commercial purposes is not included.
 
-In the future, the AI features and part of the DB-access code generation may become paid-licensed for commercial use only. Even then, personal and non-commercial use, and the basic generation of Entity / EditModel / Mapper, will remain free. If paid licensing is introduced, it will be announced in advance, with a transition period for existing users.
+Future versions may introduce paid licensing for some features (for example, separately licensed Pro features). Whatever changes, the following commitments stand:
 
-These promises are codified as the "Additional Grants" section of [LICENSE-NC.md](LICENSE-NC.md), and commercial use today rests on the grants in the license file itself.
+- The basic generation of Entity / EditModel / Mapper remains free permanently, including commercial use.
+- Personal and non-commercial use of the existing features remains free.
+- Rights granted for a released version are never withdrawn retroactively.
+- Any move to paid licensing will be announced in advance, with a transition period for existing users.
 
-For the formal terms, always refer to the license files.
+These commitments are codified as the "Additional Grants" section of [LICENSE-NC.md](LICENSE-NC.md), and commercial use today rests on the grants in the license file itself.
+
+For a plain-language guide — which license applies to which download, and what you can and cannot do — see [LICENSING.md](LICENSING.md). For the formal terms, always refer to [LICENSE](LICENSE) and [LICENSE-NC.md](LICENSE-NC.md).

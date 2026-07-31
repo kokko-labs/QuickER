@@ -96,9 +96,9 @@ try {
             throw "publish に失敗しました（exit $LASTEXITCODE）"
         }
 
-        # --- 2. ライセンス文書を同梱（PolyForm NC の Notices 条項＝条文をコピーの受領者へ渡す義務） ---
+        # --- 2. ライセンス文書を同梱（PolyForm NC の Notices 条項＝条文をコピーの受領者へ渡す義務。解説ガイド英日も同梱） ---
         Write-Host "[$target 2/3] ライセンス文書を同梱しています..." -ForegroundColor Cyan
-        Copy-Item LICENSE, LICENSE-NC.md -Destination $publishDir
+        Copy-Item LICENSE, LICENSE-NC.md, LICENSING.md, LICENSING.ja.md -Destination $publishDir
 
         # --- 3. vpk pack（Setup.exe / Portable zip / 更新パッケージ・メタを生成する） ---
         Write-Host "[$target 3/3] vpk pack しています（channel=win-$target / version=$Version）..." -ForegroundColor Cyan
