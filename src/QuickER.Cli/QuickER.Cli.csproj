@@ -12,7 +12,8 @@
 
     <!-- NuGet パッケージメタデータ。バージョンは Directory.Build.props の VersionPrefix に一元化 -->
     <PackageId>QuickER.Cli</PackageId>
-    <Description>QuickER の CLI（dotnet tool）。ER 図 JSON からの C# コード生成（generate）と、データベース直結のスキャフォールド（scaffold）を提供する。</Description>
+    <Description>The QuickER CLI as a dotnet tool: C# code generation from an ER diagram JSON (generate), database-direct diagram scaffolding (scaffold), C# reverse import (reverse), and a stdio MCP server for AI agents (mcp). QuickER is an ER diagram designer that turns a single reviewed model into DDL, C# data access, and documentation.</Description>
+    <PackageTags>quicker;er-diagram;entity-relationship;code-generation;scaffolding;ddl;database;sql-server;postgresql;mysql;oracle;sqlite;mcp;dotnet-tool</PackageTags>
     <RepositoryUrl>https://github.com/kokko-labs/QuickER</RepositoryUrl>
     <!-- PolyForm Noncommercial は OSI/FSF 承認外のため license expression が使えず、ライセンスファイル同梱方式にする -->
     <PackageLicenseFile>LICENSE-NC.md</PackageLicenseFile>
