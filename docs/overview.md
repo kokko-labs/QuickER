@@ -45,7 +45,7 @@ In the other direction, it can detect differences between the model and the data
 For an application developed code-first, the initial model can be imported from the existing database.
 
 The same mechanism applies to table definition documents.
-QuickER can build a model from an Excel definition document and output the document from the model.
+QuickER can export an Excel definition document from the model and import any manual edits back into the model.
 For read-only distribution, it can also export a self-contained HTML definition document in a single file.
 Because the documents can always be regenerated from the model, there is no need to hunt through them for stale sections and update those sections by hand.
 
