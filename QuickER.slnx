@@ -42,8 +42,15 @@
     <File Path="docs/overview.md" />
   </Folder>
   <Folder Name="/docs/images/">
-    <File Path="docs/images/sample-ec-order.png" />
+    <File Path="docs/images/ai-chat.ja.png" />
+    <File Path="docs/images/ai-chat.png" />
+    <File Path="docs/images/ai-mock.ja.png" />
+    <File Path="docs/images/ai-mock.png" />
+    <File Path="docs/images/db-sync.ja.png" />
+    <File Path="docs/images/db-sync.png" />
+    <File Path="docs/images/er-editing.gif" />
     <File Path="docs/images/sample-ec-order.ja.png" />
+    <File Path="docs/images/sample-ec-order.png" />
   </Folder>
   <Folder Name="/samples/" />
   <Folder Name="/samples/ec-order/">
