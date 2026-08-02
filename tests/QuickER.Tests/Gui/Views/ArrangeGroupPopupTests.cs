@@ -2,7 +2,7 @@ using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
-using FluentAssertions;
+using AwesomeAssertions;
 using QuickER.Tests.TestSupport;
 using QuickER.ViewModels;
 using Xunit;

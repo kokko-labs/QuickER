@@ -1,6 +1,6 @@
 ﻿using System.Collections.Generic;
 using System.Collections.ObjectModel;
-using FluentAssertions;
+using AwesomeAssertions;
 using QuickER.Documents;
 using QuickER.Model;
 using QuickER.UndoRedo;

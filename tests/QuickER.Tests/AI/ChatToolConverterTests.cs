@@ -1,6 +1,6 @@
 using System.Text.Json;
 using Anthropic.Models.Messages;
-using FluentAssertions;
+using AwesomeAssertions;
 using QuickER.AI;
 using QuickER.Mcp;
 

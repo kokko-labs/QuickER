@@ -6,7 +6,7 @@ using System.Linq;
 using System.Reflection;
 using System.Resources;
 using System.Xml.Linq;
-using FluentAssertions;
+using AwesomeAssertions;
 using QuickER.Resources;
 using Xunit;
 

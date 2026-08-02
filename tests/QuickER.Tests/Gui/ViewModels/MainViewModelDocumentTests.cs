@@ -1,6 +1,6 @@
 using System.IO;
 using System.Security.Cryptography;
-using FluentAssertions;
+using AwesomeAssertions;
 using QuickER.Gui.Abstractions;
 using QuickER.Model;
 using QuickER.Services;

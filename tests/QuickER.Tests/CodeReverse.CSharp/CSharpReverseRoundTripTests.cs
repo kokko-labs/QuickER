@@ -1,4 +1,4 @@
-using FluentAssertions;
+using AwesomeAssertions;
 using QuickER.CodeGen.CSharp;
 using QuickER.CodeReverse.CSharp;
 using QuickER.Model;

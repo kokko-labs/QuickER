@@ -1,6 +1,6 @@
 ﻿using System.IO;
 using System.Linq;
-using FluentAssertions;
+using AwesomeAssertions;
 using QuickER.Db.UI;
 using QuickER.Provider;
 

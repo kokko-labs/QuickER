@@ -1,4 +1,4 @@
-using FluentAssertions;
+using AwesomeAssertions;
 using QuickER.AI.Mock;
 using QuickER.Model;
 using QuickER.Provider;

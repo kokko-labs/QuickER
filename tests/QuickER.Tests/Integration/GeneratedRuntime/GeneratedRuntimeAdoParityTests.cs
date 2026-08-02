@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq.Expressions;
 using System.Threading.Tasks;
-using FluentAssertions;
+using AwesomeAssertions;
 using QuickER.Tests.GeneratedFixture;
 using QuickER.Tests.Integration;
 

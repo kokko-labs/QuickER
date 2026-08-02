@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
-using FluentAssertions;
+using AwesomeAssertions;
 using QuickER.Mcp.Tools;
 using QuickER.Model;
 

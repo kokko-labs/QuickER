@@ -1,5 +1,5 @@
 using System.Linq;
-using FluentAssertions;
+using AwesomeAssertions;
 using QuickER.CodeGen.CSharp.Queries;
 
 namespace QuickER.Tests.CodeGen.CSharp;

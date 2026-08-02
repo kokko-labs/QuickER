@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using FluentAssertions;
+using AwesomeAssertions;
 using QuickER.Mcp.Tools;
 using QuickER.Model;
 using Xunit;

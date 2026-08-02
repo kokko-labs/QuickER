@@ -1,6 +1,6 @@
 using System.Globalization;
 using System.Windows.Media;
-using FluentAssertions;
+using AwesomeAssertions;
 using QuickER.AI;
 using QuickER.AI.UI;
 

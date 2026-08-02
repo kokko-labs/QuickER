@@ -1,6 +1,6 @@
 using System.Threading;
 using System.Threading.Tasks;
-using FluentAssertions;
+using AwesomeAssertions;
 using QuickER.SqlServer;
 using QuickER.Tests.GeneratedFixture;
 using QuickER.Tests.Integration;

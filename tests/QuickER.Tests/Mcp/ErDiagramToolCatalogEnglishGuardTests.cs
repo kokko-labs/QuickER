@@ -1,6 +1,6 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using FluentAssertions;
+using AwesomeAssertions;
 using QuickER.Mcp;
 
 namespace QuickER.Tests.Mcp;

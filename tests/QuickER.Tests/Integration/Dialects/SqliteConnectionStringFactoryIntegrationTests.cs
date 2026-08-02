@@ -1,7 +1,7 @@
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
-using FluentAssertions;
+using AwesomeAssertions;
 using Microsoft.Data.Sqlite;
 using QuickER.Model;
 using QuickER.Provider;

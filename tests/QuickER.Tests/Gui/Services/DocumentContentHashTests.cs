@@ -1,7 +1,7 @@
 using System.IO;
 using System.Security.Cryptography;
 using System.Threading.Tasks;
-using FluentAssertions;
+using AwesomeAssertions;
 using QuickER.Services;
 
 namespace QuickER.Tests.Gui.Services;

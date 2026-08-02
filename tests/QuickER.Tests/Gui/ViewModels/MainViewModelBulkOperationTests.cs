@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Windows;
-using FluentAssertions;
+using AwesomeAssertions;
 using QuickER.Documents;
 using QuickER.Model;
 using QuickER.Resources;

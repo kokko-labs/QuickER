@@ -1,7 +1,7 @@
 using System.Globalization;
 using System.IO;
 using System.Text.RegularExpressions;
-using FluentAssertions;
+using AwesomeAssertions;
 using QuickER.Model;
 using QuickER.Services;
 using GuiStrings = QuickER.Resources.Strings;

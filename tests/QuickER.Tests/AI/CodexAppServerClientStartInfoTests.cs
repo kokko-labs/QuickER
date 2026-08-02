@@ -1,4 +1,4 @@
-using FluentAssertions;
+using AwesomeAssertions;
 using QuickER.AI;
 using AiStrings = QuickER.AI.Resources.Strings;
 

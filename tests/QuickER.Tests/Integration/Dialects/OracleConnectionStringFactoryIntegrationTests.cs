@@ -1,6 +1,6 @@
 using System.Threading;
 using System.Threading.Tasks;
-using FluentAssertions;
+using AwesomeAssertions;
 using Oracle.ManagedDataAccess.Client;
 using QuickER.Oracle;
 using QuickER.Tests.Integration;

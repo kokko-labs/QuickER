@@ -1,7 +1,7 @@
 using System;
 using System.IO;
 using System.Linq;
-using FluentAssertions;
+using AwesomeAssertions;
 using QuickER.Model;
 using QuickER.Services;
 using QuickER.ViewModels;

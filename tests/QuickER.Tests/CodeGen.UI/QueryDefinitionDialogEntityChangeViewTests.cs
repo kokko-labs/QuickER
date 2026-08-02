@@ -1,6 +1,6 @@
 using System.Linq;
 using System.Windows.Threading;
-using FluentAssertions;
+using AwesomeAssertions;
 using QuickER.CodeGen.UI;
 using QuickER.Model;
 using QuickER.Tests.TestSupport;

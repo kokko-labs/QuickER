@@ -1,6 +1,6 @@
 using System.Linq;
 using System.Text.Json;
-using FluentAssertions;
+using AwesomeAssertions;
 using QuickER.AI;
 
 namespace QuickER.Tests.AI;

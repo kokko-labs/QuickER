@@ -1,4 +1,4 @@
-using FluentAssertions;
+using AwesomeAssertions;
 using QuickER.Services;
 
 namespace QuickER.Tests.Gui.Services;

@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 using System.Threading.Tasks;
-using FluentAssertions;
+using AwesomeAssertions;
 using Moq;
 using QuickER.Services;
 using QuickER.Tests.TestDoubles;

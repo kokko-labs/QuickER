@@ -1,6 +1,6 @@
 using System.Globalization;
 using System.IO;
-using FluentAssertions;
+using AwesomeAssertions;
 using QuickER.AI.Mock;
 using QuickER.AI.Mock.Resources;
 

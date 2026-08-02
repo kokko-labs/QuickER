@@ -1,7 +1,7 @@
 using System;
 using System.ComponentModel;
 using System.Windows.Input;
-using FluentAssertions;
+using AwesomeAssertions;
 using QuickER.Extensibility;
 
 namespace QuickER.Tests.Extensibility;

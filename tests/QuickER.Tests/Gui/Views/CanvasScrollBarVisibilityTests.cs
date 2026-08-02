@@ -2,7 +2,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Media;
-using FluentAssertions;
+using AwesomeAssertions;
 using QuickER.ViewModels;
 using static QuickER.Tests.TestSupport.WpfApplicationTestSupport;
 

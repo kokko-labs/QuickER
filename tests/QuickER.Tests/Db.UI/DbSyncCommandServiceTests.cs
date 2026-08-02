@@ -1,4 +1,4 @@
-using FluentAssertions;
+using AwesomeAssertions;
 using QuickER.Db.UI;
 using QuickER.Model;
 using QuickER.Provider;

@@ -1,5 +1,5 @@
 ﻿using System.IO;
-using FluentAssertions;
+using AwesomeAssertions;
 using QuickER.AI.UI;
 
 namespace QuickER.Tests.AI.UI;

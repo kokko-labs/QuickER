@@ -1,4 +1,4 @@
-using FluentAssertions;
+using AwesomeAssertions;
 using QuickER.Tests.TestSupport;
 using QuickER.Views;
 

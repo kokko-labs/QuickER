@@ -1,5 +1,5 @@
 using System.Linq;
-using FluentAssertions;
+using AwesomeAssertions;
 using QuickER.Model;
 using QuickER.Provider;
 using Xunit;

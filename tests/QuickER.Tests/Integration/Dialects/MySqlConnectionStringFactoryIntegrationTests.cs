@@ -1,6 +1,6 @@
 using System.Threading;
 using System.Threading.Tasks;
-using FluentAssertions;
+using AwesomeAssertions;
 using MySqlConnector;
 using QuickER.MySql;
 using QuickER.Tests.Integration;

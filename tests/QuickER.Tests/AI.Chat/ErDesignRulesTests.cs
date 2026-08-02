@@ -1,5 +1,5 @@
 using System.Globalization;
-using FluentAssertions;
+using AwesomeAssertions;
 using QuickER.AI;
 using QuickER.AI.Chat;
 using QuickER.AI.Chat.Resources;

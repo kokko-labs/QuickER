@@ -1,7 +1,7 @@
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using FluentAssertions;
+using AwesomeAssertions;
 using QuickER.Model;
 using QuickER.PostgreSql;
 using QuickER.Tests.Integration;

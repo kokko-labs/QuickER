@@ -1,6 +1,6 @@
 using System.IO;
 using System.Threading;
-using FluentAssertions;
+using AwesomeAssertions;
 using QuickER.AI;
 using QuickER.AI.Mock;
 using QuickER.Model;

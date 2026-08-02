@@ -1,4 +1,4 @@
-using FluentAssertions;
+using AwesomeAssertions;
 using QuickER.PostgreSql;
 
 namespace QuickER.Tests.PostgreSql;

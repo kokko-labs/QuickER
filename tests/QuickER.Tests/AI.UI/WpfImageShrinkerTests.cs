@@ -1,7 +1,7 @@
 using System.IO;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
-using FluentAssertions;
+using AwesomeAssertions;
 using QuickER.AI.UI;
 using static QuickER.Tests.TestSupport.WpfApplicationTestSupport;
 

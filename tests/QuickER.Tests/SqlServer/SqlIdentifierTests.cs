@@ -1,4 +1,4 @@
-using FluentAssertions;
+using AwesomeAssertions;
 using QuickER.SqlServer;
 
 namespace QuickER.Tests.SqlServer;

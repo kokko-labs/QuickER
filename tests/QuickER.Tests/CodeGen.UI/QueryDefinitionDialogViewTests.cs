@@ -1,7 +1,7 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
-using FluentAssertions;
+using AwesomeAssertions;
 using QuickER.CodeGen.UI;
 using QuickER.Model;
 using QuickER.Tests.TestSupport;

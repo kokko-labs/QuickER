@@ -1,4 +1,4 @@
-using FluentAssertions;
+using AwesomeAssertions;
 using QuickER.Sqlite;
 
 namespace QuickER.Tests.Sqlite;

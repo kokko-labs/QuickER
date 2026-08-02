@@ -1,6 +1,6 @@
 using System.Net.Http;
 using System.Text.Json;
-using FluentAssertions;
+using AwesomeAssertions;
 using QuickER.AI;
 using QuickER.AI.Resources;
 using QuickER.Services;

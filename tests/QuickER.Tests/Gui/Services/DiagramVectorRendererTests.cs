@@ -1,6 +1,6 @@
 using System.Windows;
 using System.Windows.Media;
-using FluentAssertions;
+using AwesomeAssertions;
 using QuickER.Documents;
 using QuickER.Model;
 using QuickER.Services;

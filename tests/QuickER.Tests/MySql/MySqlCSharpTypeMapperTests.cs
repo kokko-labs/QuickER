@@ -1,4 +1,4 @@
-using FluentAssertions;
+using AwesomeAssertions;
 using QuickER.MySql;
 
 namespace QuickER.Tests.MySql;

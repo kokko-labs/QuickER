@@ -1,4 +1,4 @@
-using FluentAssertions;
+using AwesomeAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using QuickER.CodeGen.UI;
 using QuickER.Extensibility;

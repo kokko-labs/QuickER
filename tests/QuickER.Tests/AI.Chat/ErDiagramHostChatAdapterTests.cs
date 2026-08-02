@@ -1,4 +1,4 @@
-using FluentAssertions;
+using AwesomeAssertions;
 using QuickER.AI.Chat;
 using QuickER.Tests.TestDoubles;
 

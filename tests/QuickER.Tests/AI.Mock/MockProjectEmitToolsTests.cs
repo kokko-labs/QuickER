@@ -1,5 +1,5 @@
 using System.Text.Json;
-using FluentAssertions;
+using AwesomeAssertions;
 using QuickER.AI.Mock;
 using QuickER.Mcp;
 

@@ -1,5 +1,5 @@
 using System.ComponentModel;
-using FluentAssertions;
+using AwesomeAssertions;
 using QuickER.Documents;
 using QuickER.Model;
 using QuickER.ViewModels;

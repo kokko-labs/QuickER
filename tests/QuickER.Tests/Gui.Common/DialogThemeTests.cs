@@ -3,7 +3,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Media;
-using FluentAssertions;
+using AwesomeAssertions;
 using QuickER.Tests.TestSupport;
 
 namespace QuickER.Tests.Gui.Common;

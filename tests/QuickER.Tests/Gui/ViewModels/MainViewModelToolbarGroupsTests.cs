@@ -1,5 +1,5 @@
+using AwesomeAssertions;
 using CommunityToolkit.Mvvm.Input;
-using FluentAssertions;
 using QuickER.Extensibility;
 using QuickER.ViewModels;
 

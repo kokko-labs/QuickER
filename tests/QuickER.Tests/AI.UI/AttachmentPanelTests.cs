@@ -2,7 +2,7 @@ using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
-using FluentAssertions;
+using AwesomeAssertions;
 using QuickER.AI.UI;
 using QuickER.Tests.TestSupport;
 using AiUiStrings = QuickER.AI.UI.Resources.Strings;

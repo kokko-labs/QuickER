@@ -1,5 +1,5 @@
 using System.Text.RegularExpressions;
-using FluentAssertions;
+using AwesomeAssertions;
 using QuickER.CodeGen.CSharp;
 using QuickER.Model;
 using QuickER.Provider;

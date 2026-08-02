@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 using System.ComponentModel;
-using FluentAssertions;
+using AwesomeAssertions;
 using QuickER.CodeGen.UI;
 
 namespace QuickER.Tests.CodeGen.UI;

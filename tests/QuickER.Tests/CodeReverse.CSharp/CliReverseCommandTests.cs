@@ -1,5 +1,5 @@
 using System.IO;
-using FluentAssertions;
+using AwesomeAssertions;
 using QuickER.Cli;
 using QuickER.CodeGen.CSharp;
 using QuickER.Documents;

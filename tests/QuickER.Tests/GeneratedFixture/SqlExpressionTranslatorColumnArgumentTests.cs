@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq.Expressions;
-using FluentAssertions;
+using AwesomeAssertions;
 using Xunit;
 using SqliteParam = QuickER.Tests.GeneratedSqliteFixture.SqlQueryParameter;
 using SqliteTranslator = QuickER.Tests.GeneratedSqliteFixture.SqlExpressionTranslator;

@@ -1,5 +1,5 @@
 using System.IO;
-using FluentAssertions;
+using AwesomeAssertions;
 using QuickER.AI;
 using QuickER.AI.Mock;
 using MockStrings = QuickER.AI.Mock.Resources.Strings;

@@ -1,4 +1,4 @@
-﻿using FluentAssertions;
+﻿using AwesomeAssertions;
 using QuickER.Services;
 using QuickER.SqlServer;
 

@@ -1,5 +1,5 @@
 using System.Collections.Generic;
-using FluentAssertions;
+using AwesomeAssertions;
 using QuickER.Extensibility;
 using QuickER.Model;
 using QuickER.PostgreSql;

@@ -1,6 +1,6 @@
 using System.ComponentModel;
 using System.IO;
-using FluentAssertions;
+using AwesomeAssertions;
 using QuickER.AI;
 using QuickER.AI.Chat;
 using QuickER.AI.UI;

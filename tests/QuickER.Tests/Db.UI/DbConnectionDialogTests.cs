@@ -1,7 +1,7 @@
 using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
-using FluentAssertions;
+using AwesomeAssertions;
 using QuickER.Db.UI;
 using QuickER.Provider;
 using QuickER.SqlServer;

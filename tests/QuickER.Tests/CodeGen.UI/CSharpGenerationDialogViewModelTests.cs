@@ -1,6 +1,6 @@
 using System.IO;
 using System.Linq;
-using FluentAssertions;
+using AwesomeAssertions;
 using QuickER.CodeGen.UI;
 using QuickER.Gui.Abstractions;
 using QuickER.Tests.TestDoubles;

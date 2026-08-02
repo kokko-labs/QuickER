@@ -1,5 +1,5 @@
 using System.IO;
-using FluentAssertions;
+using AwesomeAssertions;
 using QuickER.Db.UI;
 using QuickER.Db.UI.Resources;
 using QuickER.Gui.Abstractions;

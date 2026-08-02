@@ -1,4 +1,4 @@
-using FluentAssertions;
+using AwesomeAssertions;
 using QuickER.CodeGen.UI;
 
 namespace QuickER.Tests.CodeGen.UI;

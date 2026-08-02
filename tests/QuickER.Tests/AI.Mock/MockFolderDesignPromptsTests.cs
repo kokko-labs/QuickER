@@ -1,5 +1,5 @@
 using System.Globalization;
-using FluentAssertions;
+using AwesomeAssertions;
 using QuickER.AI.Mock;
 
 namespace QuickER.Tests.AI.Mock;

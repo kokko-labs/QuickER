@@ -4,7 +4,7 @@ using System.Linq;
 using System.Reflection;
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using FluentAssertions;
+using AwesomeAssertions;
 using QuickER.Cli;
 using QuickER.CodeGen.CSharp;
 

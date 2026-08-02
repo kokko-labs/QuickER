@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 using System.Text.RegularExpressions;
-using FluentAssertions;
+using AwesomeAssertions;
 using QuickER.Model;
 using QuickER.MySql;
 using QuickER.Oracle;

@@ -1,4 +1,4 @@
-﻿using FluentAssertions;
+﻿using AwesomeAssertions;
 using OpenAI.Chat;
 using QuickER.AI;
 

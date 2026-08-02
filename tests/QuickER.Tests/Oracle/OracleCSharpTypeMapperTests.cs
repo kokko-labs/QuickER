@@ -1,4 +1,4 @@
-using FluentAssertions;
+using AwesomeAssertions;
 using QuickER.Oracle;
 
 namespace QuickER.Tests.Oracle;

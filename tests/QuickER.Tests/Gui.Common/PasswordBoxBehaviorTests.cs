@@ -1,7 +1,7 @@
 using System.ComponentModel;
 using System.Windows.Controls;
 using System.Windows.Data;
-using FluentAssertions;
+using AwesomeAssertions;
 using QuickER.Gui.Common;
 using static QuickER.Tests.TestSupport.WpfApplicationTestSupport;
 

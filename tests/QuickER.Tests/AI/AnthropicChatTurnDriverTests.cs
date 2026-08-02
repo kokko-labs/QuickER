@@ -1,5 +1,5 @@
 ﻿using Anthropic.Models.Messages;
-using FluentAssertions;
+using AwesomeAssertions;
 using QuickER.AI;
 
 namespace QuickER.Tests.AI;
