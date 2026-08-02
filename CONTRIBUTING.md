@@ -22,7 +22,7 @@ QuickER is a solo-developed OSS project. Issues and pull requests are welcome, b
 - Comments and commit messages are written in Japanese
 - Run `csharpier format .` after code changes (global tool)
 - Make sure `dotnet test QuickER.slnx` is green
-- If you change the generation templates (`Templates/CSharpRuntime/*.scriban`), the checked-in fixtures etc. must be regenerated. The following script performs regenerate → verify → show diff:
+- If you change the generation templates (`src/QuickER.CodeGen.CSharp/Templates/**/*.scriban`), the checked-in fixtures etc. must be regenerated. The following script performs regenerate → verify → show diff:
 
   ```powershell
   ./scripts/regen-fixtures.ps1
@@ -34,15 +34,15 @@ QuickER is a solo-developed OSS project. Issues and pull requests are welcome, b
   $env:QUICKER_REGEN_FIXTURES=1; dotnet test tests/QuickER.Tests/QuickER.Tests.csproj --filter "FullyQualifiedName~Drift"; $env:QUICKER_REGEN_FIXTURES=$null
   ```
 
-- For changes that affect users, add a one-line entry to the Unreleased section of the changelog — **both** [CHANGELOG.md](CHANGELOG.md) (English) and [CHANGELOG.ja.md](CHANGELOG.ja.md) (Japanese). Not needed for internal refactoring or test-only changes
+- For changes that affect users, add an entry to the Unreleased section of the changelog — **both** [CHANGELOG.md](CHANGELOG.md) (English) and [CHANGELOG.ja.md](CHANGELOG.ja.md) (Japanese). Write one entry per user-visible change (roughly one feature branch) under the matching heading (`### Added` / `### Changed` / `### Fixed` / `### Removed`), adding the heading if it is not there yet. Internal refactoring and test-only changes need no entry, so the section is often empty — that is expected
 
 The architecture and the invariants that break silently (not caught by the build or the type checker) are documented in [CLAUDE.md](CLAUDE.md).
 
 ## License and rights handling for contributions
 
-- This repository uses **MIT** and **PolyForm Noncommercial 1.0.0** on a per-project basis (see [LICENSE-NC.md](LICENSE-NC.md) for the covered projects, and [LICENSING.md](LICENSING.md) for the provisioning policy)
+- This repository uses **MIT** and **PolyForm Noncommercial 1.0.0 with Additional Grants** on a per-project basis: most of it is MIT, while the AI features, the code generation, the CLI, and the MCP tool-execution host (8 projects) are PolyForm NC plus the additional grants (see [LICENSE-NC.md](LICENSE-NC.md) for the covered projects and the formal terms, and [LICENSING.md](LICENSING.md) / [LICENSING.ja.md](LICENSING.ja.md) for a plain-language guide)
 - By submitting code, you agree that it will be published under the current license of the project it is merged into
-- For contributions to the PolyForm NC projects, you additionally grant the author (the repository owner) the right to offer commercial licenses for software containing your code, and to change its license in the future (including making it free of charge) — this arrangement keeps external contributions from blocking future changes to the provisioning policy
+- For contributions to the PolyForm NC projects, you additionally grant the author (the repository owner) the right to offer commercial licenses for software containing your code, and to change its license in the future (including making it free of charge) — this arrangement keeps external contributions from blocking future changes to the licensing and distribution policy
 
 ## Versioning
 
@@ -56,8 +56,8 @@ The architecture and the invariants that break silently (not caught by the build
 
 Releases always ship **all distributables together** (the 5 NuGet packages, the GUI distributables (Velopack: full / lite × Setup.exe / Portable zip), and the git tag `v{version}`). Timing is discretionary; no cadence is promised.
 
-1. Review the Unreleased section of the changelog, decide the version number (minor / patch per the rules above), and finalize the entry with a date — in **both [CHANGELOG.md](CHANGELOG.md) and [CHANGELOG.ja.md](CHANGELOG.ja.md)**
+1. Review the Unreleased section of the changelog and decide the version number (minor / patch per the rules above). Rename that section to the version with a release date (`## [0.2.0] - 2026-09-01`) and open a fresh empty `## [Unreleased]` above it — in **both [CHANGELOG.md](CHANGELOG.md) and [CHANGELOG.ja.md](CHANGELOG.ja.md)**
 2. Update `VersionPrefix` in `Directory.Build.props` and commit it together with the changelog finalization as a single commit
 3. Run publish.yml (the 5 NuGet packages) via workflow_dispatch (confirm with dry_run first, then run for real)
-4. Run release.yml (publishes the GUI distributables and creates the git tag) via workflow_dispatch
-5. Copy the changelog content for the version into the GitHub Release notes
+4. Run release.yml (publishes the GUI distributables and creates the git tag) via workflow_dispatch. Its `dry_run` input also defaults to true, so check the artifacts of the dry run first, then run it for real with `dry_run=false`
+5. Copy the changelog content for the version into the GitHub Release notes (release.yml creates the release with an empty body on purpose, so the curated changelog stays the single source for what shipped)

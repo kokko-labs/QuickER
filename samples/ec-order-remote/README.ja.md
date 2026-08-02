@@ -30,8 +30,9 @@ QuickER の「リモートサービス生成（GenerateRemoteServices）」で E
 
 サーバー生成物は ASP.NET Core を要するため、CLI が同じ出力先へ書き出す 2 ファイルのうち本体生成物のみを
 Shared でリンクし、サーバー生成物は Web SDK を使う Server プロジェクトでリンクしています
-（利用者のプロジェクトで 2 ファイルを配置する際の参考になる構成です）。各プロジェクトは QuickER 本体を参照せず、
-NuGet パッケージと ASP.NET Core の FrameworkReference（サーバーのみ）だけを参照します。
+（利用者のプロジェクトで 2 ファイルを配置する際の参考になる構成です）。各プロジェクトは QuickER のソースプロジェクトを参照せず、
+NuGet パッケージと ASP.NET Core の FrameworkReference（サーバーのみ）、および共有プロジェクト
+`EcOrderRemote.Shared` への参照（クライアント／サーバー）だけで構成されます。
 
 ## 実行する
 
@@ -53,7 +54,7 @@ dotnet run --project samples/ec-order-remote/EcOrderRemote.Client
 ```
 
 クライアントは各シナリオの結果を英語で表示し、すべて成功すると終了コード 0 で終わります。期待値と異なる場合は
-例外で終了（終了コード非 0）します。サーバーの起動待ちは自動でリトライします。
+例外で終了（終了コード非 0）します。サーバーの起動待ちは約 15 秒までリトライします。
 
 ポートを変える場合は、サーバーとクライアントの両方に第 1 引数として同じベース URL を渡します
 （例 `http://127.0.0.1:5299`）。
@@ -79,4 +80,4 @@ dotnet run --project src/QuickER.Cli -- generate `
 ## 詳細ドキュメント
 
 リモートサービス生成の仕様は [`docs/code-generation.ja.md`](../../docs/code-generation.ja.md) の
-「リモートサービス生成」節を参照してください。
+「リモートサービス（--generate-remote-services）— 3 階層構成」節を参照してください。

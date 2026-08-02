@@ -23,13 +23,20 @@ dotnet run --project src/QuickER.Gui
 
 ## 2. まずサンプルをそのまま動かす
 
+サンプルはリポジトリに含まれるため、まず clone します（インストーラー版を使う場合も必要です）。
+
+```powershell
+git clone https://github.com/kokko-labs/QuickER.git
+cd QuickER
+```
+
 リポジトリには、図（`EcOrder.json`）から生成した DDL と C# コードがチェックイン済みで含まれています。何も変更せずに動かしてみます。
 
 ```powershell
 dotnet run --project samples/ec-order/EcOrderSample
 ```
 
-起動時に DDL から SQLite ファイル DB が作り直され、登録・グラフ保存・検索などのシナリオが順に実行されます。最後に「すべてのシナリオが成功しました。」と表示されれば成功です。
+起動時に DDL から SQLite ファイル DB が作り直され、登録・グラフ保存・検索などのシナリオが順に実行されます。最後に「All scenarios succeeded.」と表示されれば成功です（サンプルの出力は英語です）。
 
 ## 3. 図を開く
 
@@ -78,4 +85,4 @@ dotnet run --project samples/ec-order/EcOrderSample
 - [データベース連携](database.ja.md) — 既存 DB からの取込と差分同期
 - [インポートとエクスポート](import-export.ja.md) — DBML / Mermaid / 定義書との相互運用
 - [AI チャットの設定](ai-chat.ja.md) — 対話による図の生成
-- [QuickER の設計思想](overview.ja.md) — このワークフローの背景
+- [QuickER が ER モデルを正本にする理由](overview.ja.md) — このワークフローの背景

@@ -10,9 +10,9 @@
 
 **Your ER model as the single source of truth for the database, source code, and design documents.**
 
-QuickER is a development-support tool for Windows that connects everything from ER model design, through import and diff sync with live databases, to generating the DDL, source code, and design documents.
+QuickER is a Windows tool that supports .NET development of business applications. It provides a GUI designer for ER diagrams, bidirectional synchronization with live databases, and AI integration, all centered on the ER model.
 
-There is no need to copy the same schema definition into the DDL, entities, screen models, and design documents over and over. Define the ER model once, and QuickER generates the rest.
+From a reviewed ER model, QuickER generates the DDL, database diff scripts, C# code, remote APIs, screen mockups, and table definition documents. There is no need to copy the same schema definition into the DDL, entities, screen models, and design documents over and over.
 
 ![QuickER main screen (the EC order sample ER model)](docs/images/sample-ec-order.png)
 
@@ -112,17 +112,20 @@ Always generated:
 - Entity
 - EditModel
 - The Mapper between Entity and EditModel
-- DataAnnotations and DB definition metadata attributes (dialect-neutral type tokens and descriptions)
+
+DataAnnotations and DB definition metadata attributes (dialect-neutral type tokens and descriptions) are added by default; they are required whenever a Repository is generated, since the runtime reads them by reflection.
 
 Optionally generated:
 
-- Repository
-- An EF Core DbContext and Repository implementations
+- The QuickER Repository (a lightweight, ADO-based implementation)
+- An EF Core DbContext and the EF Core Repository implementation
 - Per-column value objects
 - Named queries
 - Remote Repository interfaces
 - An HTTP + JSON client
 - An ASP.NET Core Minimal API server
+
+The EditModel accepts screen input as strings, keeps values that pass validation as confirmed values, and holds error information for those that fail. The Mapper applies only the confirmed values and change state to the entity, preventing invalid input from entering the entity.
 
 The generated code does not depend on any particular UI framework; use it from any .NET application — WPF, Blazor, ASP.NET Core, and so on.
 You can see the EditModel and Mapper in action by running the bundled sample's [Program.cs](samples/ec-order/EcOrderSample/Program.cs).
@@ -137,7 +140,9 @@ The generation dialog lets you choose the data-access layer from three options.
 |---|---|---|
 | **None** | — | Generate Entity / EditModel / Mapper only, and implement data access yourself |
 | **QuickER Repository** | SQL Server / SQLite | Use a lightweight ADO-based Repository |
-| **EF Core** | The 5 supported DBMS | Use a DbContext and LINQ |
+| **EF Core Repository** | The 5 supported DBMS | Use a DbContext and LINQ |
+
+> **Prerequisite**: Repository generation targets tables whose primary key is a single, application-assigned column. Tables with a composite primary key or DB auto-numbering can use the Entity / EditModel only.
 
 The QuickER Repository ships with:
 
@@ -145,10 +150,10 @@ The QuickER Repository ships with:
 - `Include` / `ThenInclude`
 - Graph save
 - Bulk operations
-- Optimistic concurrency
+- Conflict detection on graph save (when the target row no longer exists; concurrency control by `rowversion` comparison is out of scope)
 - Raw SQL execution
 
-The QuickER Repository and the EF Core implementation implement the same Repository interfaces. Keep your application code dependent on the interfaces, and you can switch implementations by changing the DI registration.
+The QuickER Repository and the EF Core Repository implement the same interfaces. Keep your application code dependent on the interfaces, and you can switch implementations by changing the DI registration (the GUI generates one of the two; generating both at once is available through the CLI or a config file).
 
 ```csharp
 // QuickER Repository
@@ -170,6 +175,7 @@ ProductIdValue productId;
 ```
 
 Passing the wrong kind of ID by mistake becomes a compile-time error.
+For a value object representing a string primary key, enabling `UseGuidKeyForStringPrimaryKey` mints new keys as GUIDs, which satisfies the application-assigned key prerequisite without any numbering logic of your own.
 
 Validation code that can be derived from the column definitions — maximum lengths, `decimal` precision, and so on — is generated as well. Add custom validation and display names through partial classes.
 
@@ -190,7 +196,7 @@ GetByCustomerAsync(
     CancellationToken cancellationToken = default);
 ```
 
-The same named query is generated for both the QuickER Repository and the EF Core implementation.
+The same named query is generated for both the QuickER Repository and the EF Core Repository.
 
 ## Three-tier architecture
 
@@ -211,7 +217,7 @@ The following code is generated:
 
 - Remote Repository interfaces
 - An `HttpClient`-based client
-- ASP.NET Core Minimal API endpoints (delegating to the DI-registered repositories)
+- ASP.NET Core Minimal API endpoints (delegating to the DI-registered Repository)
 - Conversion and restoration of exception information
 
 As long as your application code depends on the remote interfaces, you can switch between direct DB access and going through the web service by changing the DI registration.
@@ -243,14 +249,14 @@ See [Configuring AI chat](docs/ai-chat.md) for how to set it up.
 
 ## AI mock generation
 
-Feed the ER model to an AI and create web screen mockups (HTML) for your business in conversation.
-The generated screens are saved live to a "mock folder" (mock.json + one HTML per screen + a shared style.css), and the in-dialog preview lets you follow the transitions between screens.
+Use AI to generate HTML mockups of business screens from the ER model through conversation.
+The generated files are written to a "mock folder" (mock.json + one HTML per screen + a shared style.css) as the conversation proceeds, and the in-dialog preview lets you follow the transitions between screens.
 
 ![Generating 7 order-management screens with AI mock generation (previewing the dashboard)](docs/images/ai-mock.png)
 
 - The conversation proceeds as "propose the screen structure → agree → generate," and you refine the screens with follow-up instructions
 - For sharing with stakeholders, export a single HTML that bundles every screen, and a design document with the screen list, a transition diagram, and a CRUD matrix
-- As a second step, you can generate a mock project (a runnable WPF / Blazor application skeleton) on top of the generated mock
+- As a second step, you can generate a WPF / Blazor mock project from the mock folder: QuickER scaffolds the data layer from the ER model, the AI implements the screen UI, and QuickER checks the result by running `dotnet build`. This step is an aid for PoCs and prototyping — build errors may remain, depending on the AI model and the connection mode
 
 The connection methods are shared with the AI chat.
 
@@ -276,7 +282,7 @@ The connection methods are shared with the AI chat.
 - SVG
 - Print / PDF
 
-Fix the ER model and re-export the definition documents, and design and documentation never drift apart.
+Update the ER model and re-export the definition documents to keep the design and the documentation from drifting apart.
 
 See [Import and export](docs/import-export.md) for what each format covers.
 
@@ -350,14 +356,14 @@ dotnet run --project src/QuickER.Cli -- generate ...
 
 See the [CLI reference](docs/cli.md) for details.
 
-## Design philosophy
+## Why the ER model is the source of truth
 
 QuickER treats the ER model as the single source of truth for the database, the code, and the documents.
-For the background, how this differs from code-first, and the division of labor between AI and humans, see [the design philosophy of QuickER](docs/overview.md).
+For the background, how this differs from code-first, and the division of labor between AI and humans, see [Why QuickER uses the ER model as the source of truth](docs/overview.md).
 
 ## Documentation
 
-- [The design philosophy of QuickER](docs/overview.md)
+- [Why QuickER uses the ER model as the source of truth](docs/overview.md)
 - [Tutorial (from design to running code)](docs/getting-started.md)
 - [ER diagram editing](docs/er-editor.md)
 - [Database round-tripping](docs/database.md)

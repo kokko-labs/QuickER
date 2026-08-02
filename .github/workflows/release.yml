@@ -106,4 +106,7 @@ jobs:
           # 読むため、vpk が出力したファイルは（Setup.exe / Portable zip / nupkg / メタとも）
           # すべて添付する
           $assets = Get-ChildItem -Path "${{ runner.temp }}/releases-full", "${{ runner.temp }}/releases-lite" -File | Select-Object -ExpandProperty FullName
-          gh release create "v${{ steps.version.outputs.version }}" $assets --title "QuickER v${{ steps.version.outputs.version }}" --generate-notes
+          # ノートは自動生成しない（--generate-notes を付けない）。コミット単位の羅列は利用者向けの
+          # 粒度と合わないため、リリースノートは CHANGELOG の該当版を手で転記する運用とする
+          # （CONTRIBUTING のリリース手順 5）
+          gh release create "v${{ steps.version.outputs.version }}" $assets --title "QuickER v${{ steps.version.outputs.version }}" --notes ""

@@ -2,19 +2,19 @@
 
 *English | [日本語](database.ja.md)*
 
-QuickER imports the schema of a live database into a diagram, detects the differences between the diagram and the database and applies a sync script, and generates DDL from the diagram. Because the diagram and the database round-trip in both directions, the diagram does not get left behind by reality.
+QuickER imports the schema of a live database into a diagram, detects the differences between the diagram and the database and applies a sync script, and generates DDL from the diagram. Because the diagram and the database round-trip in both directions, running an import and a diff sync lets you see how far the diagram and the live database have drifted apart, and close the gap.
 
 ## Supported DBMS
 
 | DBMS | Schema import | Diff sync | DDL generation | Dialect switch | Notes |
 |---|:-:|:-:|:-:|:-:|---|
 | SQL Server | ✅ | ✅ | ✅ | ✅ | Descriptions sync with extended properties (MS_Description) |
-| PostgreSQL | ✅ | ✅ | ✅ | ✅ | 13 and later |
-| MySQL | ✅ | ✅ | ✅ | ✅ | 8.0 and later (MariaDB is not supported) |
-| Oracle | ✅ | ✅ | ✅ | ✅ | 19c and later |
-| SQLite | ✅ | ✅ | ✅ | ✅ | File DB. Diff sync uses table rebuilds |
+| PostgreSQL | ✅ | ✅ | ✅ | ✅ | 13 and later. Descriptions sync with `COMMENT ON` |
+| MySQL | ✅ | ✅ | ✅ | ✅ | 8.0 and later (MariaDB is not supported). Descriptions sync with `COMMENT` clauses |
+| Oracle | ✅ | ✅ | ✅ | ✅ | 19c and later. Descriptions sync with `COMMENT ON` |
+| SQLite | ✅ | ✅ | ✅ | ✅ | File DB. Diff sync that involves column changes, drops, or FK changes uses table rebuilds. No description mechanism |
 
-Import and sync against live databases are continuously verified by real-DB integration tests (SQL Server / PostgreSQL / MySQL / Oracle use real Testcontainers containers; SQLite uses a real file DB).
+Import and sync against live databases have real-DB integration tests (SQL Server / PostgreSQL / MySQL / Oracle use Testcontainers containers; SQLite uses a real file DB). The container-based tests run only in environments where Docker is available and are skipped automatically on CI, and each DBMS is verified against one representative version rather than across the whole supported range in the table.
 
 ## Schema import (DB → diagram)
 
@@ -22,22 +22,22 @@ The "DB Import" button on the toolbar opens the "Import from Database" connectio
 
 ### Specifying the connection
 
-- **Server-type DBMS** — specify the target DB, host, port (empty for the dialect's default), database name, user name, and password. For SQL Server you can also choose the authentication mode (Windows / SQL Server) and "Trust the server certificate (TrustServerCertificate)". Oracle has a service-name field
+- **Server-type DBMS** — specify the target DB, host, port (leave empty for the dialect's default), database name, user name, and password. For SQL Server you can also choose the authentication mode (Windows / SQL Server) and "Trust the server certificate (TrustServerCertificate)". Oracle has a service-name field
 - **SQLite** — specify the file path via "Browse" (import works on existing files only)
-- **Test Connection** — actually attempts to fetch the schema and reports the number of tables detected
+- **Test Connection** — runs a real schema fetch and reports the number of tables detected
 
 ### Connection profiles
 
-Connection settings can be saved under a name and recalled later from "Saved Connections". Profiles are stored in `%AppData%\QuickER\connections.json`, and passwords are stored in separate files, **encrypted with Windows DPAPI (CurrentUser scope)** — only when the "Save" checkbox is on, and never in plain text. The last-used connection is remembered automatically and restored on the next launch.
+Connection settings can be saved under a name and recalled later from "Saved Connections". Profiles are stored in `%AppData%\QuickER\connections.json`, and passwords are stored in separate files, **encrypted with Windows DPAPI (CurrentUser scope)** — only when the "Save" checkbox is on, and never in plain text under the shipped configuration. The last-used connection is remembered automatically and restored on the next launch.
 
 ### What gets imported
 
 - Tables (views are excluded) and columns (type, length, precision, nullability)
 - Primary keys (preserving the column order of composite keys)
-- Foreign keys (including the constraint name and the ON DELETE / ON UPDATE referential actions). When the referenced columns match a primary key or a unique constraint, the relationship is classified as one-to-one
-- Table and column descriptions (SQL Server's MS_Description extended properties)
+- Foreign keys (including the constraint name and the ON DELETE / ON UPDATE referential actions). When the FK columns on the referencing side themselves form that table's primary key or a unique constraint, the relationship is classified as one-to-one. A foreign key made up of multiple columns is imported as a relationship, but the column-to-column mapping is not restored (one relationship carries a single column pair). SQLite does not persist FK constraint names, so a constraint name is synthesized on import
+- Table and column descriptions (SQL Server's MS_Description extended properties, PostgreSQL's `obj_description` / `col_description`, MySQL's `TABLE_COMMENT` / `COLUMN_COMMENT`, and Oracle's `user_tab_comments` / `user_col_comments`). SQLite has no description mechanism and is out of scope
 
-The import result replaces the whole diagram. A replacement confirmation appears only when the current diagram differs structurally (re-importing into an empty diagram, or one with an identical structure, continues without asking). Auto-arrange is applied after the import.
+The import result is merged into the current diagram. Tables and columns are matched by name, and matching elements take over the identity of the current diagram's elements, so their layout, width, color, and notes — along with the named queries that reference them — are preserved. Only newly imported tables are placed in free space; the whole diagram is auto-arranged only when nothing in the current diagram matches (a completely new import). A confirmation appears when the current diagram differs structurally, and also when the import would break named queries — in which case the queries to be removed are listed by name.
 
 For how to pair your existing entity assets with the generated code after importing, see ["Coexisting with an existing codebase" in Using the generated code](code-generation.md#coexisting-with-an-existing-codebase).
 
@@ -50,7 +50,7 @@ The "DB Sync" button on the toolbar opens the "DB Schema Sync (Apply Diff)" dial
 - Adding and dropping tables
 - Adding, altering (type, nullability), and dropping columns
 - Adding and dropping foreign keys
-- Setting, updating, and removing table and column descriptions
+- Setting, updating, and removing table and column descriptions (SQLite is out of scope)
 - Changes to the column order (syncable on SQLite / MySQL)
 
 Elements with the same name are treated as the same element, so a rename is detected as "drop + add."
@@ -62,13 +62,13 @@ Column order is compared as the relative order of the columns common to both sid
 - **Destructive differences (drops and type changes) are unselected by default**, and executing them shows a confirmation stating that destructive changes are included
 - The generated script is ordered by dependency (add tables → add columns → alter columns → drop FKs → drop columns → drop tables → add FKs → descriptions), with a heading comment per section
 - A foreign-key addition whose FK column cannot be resolved is emitted as a skip comment instead of invalid DDL, and the diff list says so as well
-- On SQL Server and SQLite the script runs in a transaction and rolls back on failure. On MySQL / Oracle, DDL is implicitly committed by design, so a warning explains that a mid-script failure can leave changes partially applied
+- On SQL Server, PostgreSQL, and SQLite the script runs in a transaction and rolls back on failure. On MySQL / Oracle, DDL is implicitly committed by design, so a warning explains that a mid-script failure can leave changes partially applied
 - A SQLite run that involves rebuilds shows a dedicated confirmation listing the tables to be rebuilt
-- When there are no differences at all, the dialog says so and closes automatically
+- When the initial diff detection finds no differences at all, the dialog reports that and stays open; once a sync has been applied, it re-reads the diff and closes automatically if no differences remain
 
-### Description sync (SQL Server)
+### Description sync
 
-Table and column descriptions sync as MS_Description extended properties. The script checks for existing properties to choose between add and update, and clearing a description in the diagram removes it — an idempotent design.
+Table and column descriptions sync on the four dialects that have a description mechanism: SQL Server uses MS_Description extended properties, PostgreSQL and Oracle use `COMMENT ON`, and MySQL uses `COMMENT` clauses. Checking for an existing description to choose between add and update applies to SQL Server's extended properties only; PostgreSQL and Oracle simply re-run `COMMENT ON`, and MySQL re-runs the `COMMENT` clause (both idempotent in themselves). Clearing a description in the diagram removes it. SQLite has no description mechanism, so descriptions are neither diffed nor synced there.
 
 ### SQLite diff sync (table rebuilds)
 
@@ -80,7 +80,7 @@ The sync-target SQLite file can also be created fresh with the "Create new" butt
 
 The "Target DB:" combo on the right of the toolbar switches the diagram's target DBMS at any time.
 
-- Every column type is converted automatically along the path "source dialect → neutral canonical type → new dialect"
+- Each column type is converted automatically along the path "source dialect → neutral canonical type → new dialect" where a mapping exists
 - Columns that could not be converted keep their original types and are listed in a warning dialog
 - The switch and the type conversions are undone together with a single Undo
 

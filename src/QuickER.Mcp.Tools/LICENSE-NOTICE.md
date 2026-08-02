@@ -1,6 +1,6 @@
 # License notice
 
-This project is covered by [LICENSE-NC.md](../../LICENSE-NC.md) (**PolyForm Noncommercial License 1.0.0**) at the repository root. Its license differs from the rest of the repository (the MIT License). For the provisioning policy and the notice about possible future paid licensing, see [LICENSING.md](../../LICENSING.md) at the repository root.
+This project is covered by [LICENSE-NC.md](../../LICENSE-NC.md) (**PolyForm Noncommercial License 1.0.0**) at the repository root. Its license differs from the rest of the repository (the MIT License). For the licensing and distribution policy and the notice about possible future paid licensing, see [LICENSING.md](../../LICENSING.md) at the repository root.
 
 ---
 
