@@ -6,7 +6,7 @@
     release.yml（GitHub Actions）と同じ手順をローカルで実行する:
 
       1. publish  : QuickER.Gui を win-x64 で publish する（full=ランタイム同梱 / lite=フレームワーク依存）
-      2. 同梱     : ライセンス文書 2 種を publish ディレクトリへコピーする（PolyForm NC の Notices 条項）
+      2. 同梱     : ライセンス文書一式を publish ディレクトリへコピーする（PolyForm NC の Notices 条項＋サードパーティ帰属）
       3. vpk pack : チャンネル別（win-full / win-lite）に Setup.exe・Portable zip・更新パッケージを生成する
 
     出力先（既定 artifacts/velopack/releases-{full|lite}）は .gitignore 済み（artifacts/）。
@@ -96,9 +96,10 @@ try {
             throw "publish に失敗しました（exit $LASTEXITCODE）"
         }
 
-        # --- 2. ライセンス文書を同梱（PolyForm NC の Notices 条項＝条文をコピーの受領者へ渡す義務。解説ガイド英日も同梱） ---
+        # --- 2. ライセンス文書を同梱（PolyForm NC の Notices 条項＝条文をコピーの受領者へ渡す義務。解説ガイド英日も同梱。
+        #        THIRD-PARTY-NOTICES.md は Oracle Free Distribution Terms がライセンス全文の同梱を配布条件とするため必須） ---
         Write-Host "[$target 2/3] ライセンス文書を同梱しています..." -ForegroundColor Cyan
-        Copy-Item LICENSE, LICENSE-NC.md, LICENSING.md, LICENSING.ja.md -Destination $publishDir
+        Copy-Item LICENSE, LICENSE-NC.md, LICENSING.md, LICENSING.ja.md, THIRD-PARTY-NOTICES.md -Destination $publishDir
 
         # --- 3. vpk pack（Setup.exe / Portable zip / 更新パッケージ・メタを生成する） ---
         Write-Host "[$target 3/3] vpk pack しています（channel=win-$target / version=$Version）..." -ForegroundColor Cyan

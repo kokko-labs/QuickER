@@ -35,6 +35,8 @@ GitHub のライセンスラベルは 1 つしか表示できないため「MIT�
 | ランタイム NuGet パッケージ（`QuickER.Runtime` / `.SqlServer` / `.Sqlite` / `.EntityFrameworkCore`） | MIT |
 | QuickER が生成したコード・DDL・ドキュメント | 利用者のもの——QuickER のライセンスは一切適用されません |
 
+GUI と CLI の配布物にはサードパーティのコンポーネント（データベースドライバ・テンプレートエンジンなど）も同梱されています。その帰属表示とライセンス全文は [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) にまとめており、これらの配布物にも同梱されます。
+
 ## できること・できないこと
 
 | したいこと | 可否 | 根拠 |

@@ -22,6 +22,8 @@
 
   <ItemGroup>
     <None Include="..\..\LICENSE-NC.md" Pack="true" PackagePath="LICENSE-NC.md" Visible="false" />
+    <!-- サードパーティ帰属。ツールパッケージは依存 DLL（Oracle 等）を同梱するため、Oracle 条項（ライセンス全文の同梱が配布条件）に対応して必ずパックする -->
+    <None Include="..\..\THIRD-PARTY-NOTICES.md" Pack="true" PackagePath="THIRD-PARTY-NOTICES.md" Visible="false" />
     <None Include="README.md" Pack="true" PackagePath="README.md" />
   </ItemGroup>
 

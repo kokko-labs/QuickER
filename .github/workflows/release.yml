@@ -59,12 +59,13 @@ jobs:
       - name: GUI を publish（フレームワーク依存・win-lite 用）
         run: dotnet publish src/QuickER.Gui/QuickER.Gui.csproj -c Release -r win-x64 --self-contained false -o ${{ runner.temp }}/publish-lite
 
-      # PolyForm NC の Notices 条項（条文をコピーの受領者へ渡す義務）に対応するため、
-      # ライセンス文書（条文 2 種＋解説ガイド英日）を両チャンネルの publish ディレクトリへ必ず同梱する
+      # PolyForm NC の Notices 条項（条文をコピーの受領者へ渡す義務）と Oracle Free Distribution Terms
+      # （ライセンス全文の同梱が配布条件）に対応するため、ライセンス文書（条文 2 種＋解説ガイド英日＋
+      # サードパーティ帰属）を両チャンネルの publish ディレクトリへ必ず同梱する
       - name: ライセンス文書を同梱
         run: |
-          Copy-Item LICENSE, LICENSE-NC.md, LICENSING.md, LICENSING.ja.md -Destination ${{ runner.temp }}/publish-full
-          Copy-Item LICENSE, LICENSE-NC.md, LICENSING.md, LICENSING.ja.md -Destination ${{ runner.temp }}/publish-lite
+          Copy-Item LICENSE, LICENSE-NC.md, LICENSING.md, LICENSING.ja.md, THIRD-PARTY-NOTICES.md -Destination ${{ runner.temp }}/publish-full
+          Copy-Item LICENSE, LICENSE-NC.md, LICENSING.md, LICENSING.ja.md, THIRD-PARTY-NOTICES.md -Destination ${{ runner.temp }}/publish-lite
 
       - name: Velopack CLI (vpk) をインストール
         run: dotnet tool install --global vpk
