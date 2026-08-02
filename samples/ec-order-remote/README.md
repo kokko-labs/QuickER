@@ -28,14 +28,15 @@ the points where going over HTTP actually matters:
 | `Generated/EcOrderRemote.g.cs` | The main generated code (entities, repositories, remote contracts, HTTP client, DI extensions; checked in) |
 | `Generated/EcOrderRemote.RemoteServer.g.cs` | The server generated code (`MapGeneratedRemoteEndpoints`, Minimal API; checked in) |
 | `EcOrderRemote.Shared/` | A shared class library that links only the main generated code (the base for both client and server) |
-| `EcOrderRemote.Server/` | A web app (`Microsoft.NET.Sdk.Web`) that links the server generated code and listens over SQLite |
+| `EcOrderRemote.Server/` | A web app (`Microsoft.NET.Sdk.Web`) that links the server generated code and serves requests backed by SQLite |
 | `EcOrderRemote.Client/` | A console app that verifies the remote-specific scenarios using only the HTTP client implementations |
 
-Because the server generated code requires ASP.NET Core, of the two files the CLI writes to the same output
-directory only the main generated code is linked in Shared, while the server generated code is linked in the
-Server project (which uses the Web SDK) — a useful reference for placing the two files in your own projects.
-None of the projects reference the QuickER main projects; they reference only NuGet packages and the ASP.NET Core
-FrameworkReference (server only).
+The CLI writes two files to the same output directory. Because the server generated code requires ASP.NET Core,
+only the main generated code is linked in Shared, while the server generated code is linked in the Server project
+(which uses the Web SDK) — a useful reference for how to place the two files in your own projects.
+None of the projects reference the QuickER source projects: they are made up of NuGet package references, the
+ASP.NET Core FrameworkReference (server only), and a project reference to the shared `EcOrderRemote.Shared`
+project (from the client and the server).
 
 ## Run it
 
@@ -57,8 +58,8 @@ dotnet run --project samples/ec-order-remote/EcOrderRemote.Client
 ```
 
 The client prints the result of each scenario and exits with code 0 when they all succeed. If a value
-differs from what is expected, it exits with an exception (a non-zero exit code). It retries automatically while
-waiting for the server to start.
+differs from what is expected, it exits with an exception (a non-zero exit code). It retries for about
+15 seconds while waiting for the server to start.
 
 To change the port, pass the same base URL as the first argument to both the server and the client
 (e.g. `http://127.0.0.1:5299`).
@@ -84,5 +85,5 @@ regeneration mode is shared with [ec-order](../ec-order/README.md).
 
 ## Further documentation
 
-For the specification of remote service generation, see the remote services section of
-[`docs/code-generation.md`](../../docs/code-generation.md).
+For the specification of remote service generation, see the "Remote services (--generate-remote-services) —
+three-tier layout" section of [`docs/code-generation.md`](../../docs/code-generation.md).

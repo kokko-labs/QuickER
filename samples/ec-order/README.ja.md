@@ -22,7 +22,7 @@ QuickER 版 Repository（SQLite 方言）による CRUD・グラフ保存・Incl
 | `EcOrderSample/Generated/EcOrder.g.md` | 生成 API のリファレンス Markdown（`--generate-api-docs` の同梱出力・チェックイン済み） |
 | `EcOrderSample/Program.cs` | DDL で DB を作成し CRUD を実演するコンソールアプリ |
 
-コンソールアプリは QuickER 本体プロジェクトには一切参照せず、利用者のプロジェクトと同じく
+コンソールアプリは QuickER 本体のプロジェクトを参照せず、利用者のプロジェクトと同じく
 NuGet パッケージ（`Microsoft.Data.Sqlite` など）のみを参照します。
 
 ## 実行する

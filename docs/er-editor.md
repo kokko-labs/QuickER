@@ -22,7 +22,7 @@ Select an entity and the properties panel lets you edit the following.
 | Description | The table description. On SQL Server it syncs with the extended property (MS_Description) |
 | Title Background | The card's title color (Blue / Green / Yellow / Purple / Pink / Gray) |
 | Columns | The column list (next section) |
-| Notes | A free-form field kept only in the diagram |
+| Notes | A free-form field that goes neither to the database nor to the generated code. It is written out to the Excel and HTML definition documents, and re-importing an Excel definition document restores it |
 
 ### Editing columns
 
@@ -39,9 +39,9 @@ Express a composite primary key by checking PK on multiple columns.
 
 ### Creating
 
-Press "One-to-One," "One-to-Many," or "Many-to-Many" in the toolbox to enter creation mode, then click two entities in order to confirm. Clicking the same entity twice creates a self-referencing relationship. On creation, the source PK column and the target FK column are matched automatically, and the constraint name is generated in the form `FK_<target>_<source>`.
+Press "One-to-One," "One-to-Many," or "Many-to-Many" in the toolbox to enter creation mode, then click the two entities in turn to commit it. Clicking the same entity twice creates a self-referencing relationship. On creation, the source PK column and the target FK column are matched automatically, and the constraint name is generated in the form `FK_<target>_<source>`.
 
-If a relationship already exists between the same two entities, the new one is rejected as a duplicate — select and edit the existing relationship instead.
+If a relationship with the same start and end points already exists, the new one is rejected as a duplicate — select and edit the existing relationship instead. Only the direction that matches is treated as a duplicate, so B → A can still be created when A → B exists.
 
 ### Editing properties
 
@@ -67,11 +67,11 @@ Two supplementary notes:
 - **Search** — Ctrl+F searches table and column names by partial match (case-insensitive). Enter moves to the next match, clicking a candidate jumps to it, and Esc closes the search
 - **Relationship highlighting** — selecting an entity or relationship emphasizes the connected elements and dims the unrelated ones
 - **Display toggles** — "Compact" on the toolbar (collapses column rows other than PK / FK), "Descriptions," and "Nullability." All three states are restored on the next launch
-- **Auto-arrange** — the toolbar's "Grid," "Tree," and "Free" (roughly places entities by their relationship connections, then snaps to a grid), plus "Auto Width" (adjusts widths so column names and types do not overlap)
+- **Auto-arrange** — the toolbar's "Grid," "Tree," and "Free" (places entities with a force-directed model, arranging them so that relationship lines come close to horizontal or vertical), plus "Auto Width" (adjusts widths so column names and types do not overlap)
 
 ## Multi-select and bulk operations
 
-Ctrl+click toggles selection, dragging on the canvas makes a rubber-band selection (elements intersecting the rectangle), Ctrl+A selects everything, and Esc clears the selection. With two or more elements selected, the properties panel switches to a bulk-operations card.
+Ctrl+click toggles selection, dragging on the canvas makes a rubber-band selection (elements intersecting the rectangle), Ctrl+A selects all entities (any relationship selection is cleared), and Esc clears the entity selection (a relationship selection, and a relationship creation still in progress, are kept). With two or more elements selected, the properties panel switches to a bulk-operations card.
 
 - Bulk change of the title background color
 - Delete everything selected
@@ -81,7 +81,7 @@ Each of these is undone with a single Undo.
 
 ## Undo / Redo
 
-Ctrl+Z / Ctrl+Y ("Undo" and "Redo" on the toolbar) cover every operation on the diagram's contents: adding, deleting, and changing entities, columns, and relationships; moving; duplicating; color changes; and switching the target DB. Edits made by the AI chat go into the same history, so they can always be undone.
+Ctrl+Z / Ctrl+Y ("Undo" and "Redo" on the toolbar) cover the individual editing operations on the diagram's contents: adding, deleting, and changing entities, columns, and relationships; moving; duplicating; color changes; and switching the target DB. The AI chat's individual editing tools go into the same history. Operations that swap out the whole diagram, however — importing a file, importing from a database, and having the AI generate an entire diagram — clear the history, so they cannot be reverted with Undo.
 
 Operations that only change how things look — selection state, zoom and pan, minimap visibility — do not enter the history.
 
@@ -93,9 +93,9 @@ The "Target DB:" combo on the right of the toolbar switches the diagram's target
 
 New (Ctrl+N), open (Ctrl+O), save (Ctrl+S). The save format is a single JSON file that keeps the semantic model (table definitions) separate from the visual information (coordinates and colors), which makes it well suited to diff review in git.
 
-Closing the window auto-saves the work in progress, and the next launch restores it. Forgetting to save explicitly does not lose your work.
+When the window is closed normally, the work in progress is auto-saved and the next launch restores it. That does not cover a forced termination or a failed write, so saving explicitly at each milestone is still recommended.
 
-When the file of the open diagram is modified externally (by the MCP server or another program), the GUI detects it and follows. With no unsaved changes it reloads automatically (keeping the zoom and scroll position) and shows an unobtrusive status-bar notification. Only when there are unsaved changes does it ask whether to reload (discarding the changes) or keep going.
+When the file of the open diagram is modified externally (by the MCP server or another program), the GUI detects the change and picks it up. With no unsaved changes it reloads automatically (keeping the zoom and scroll position) and shows an unobtrusive status-bar notification. Only when there are unsaved changes does it ask whether to reload (discarding the changes) or keep going.
 
 ## Keyboard shortcuts
 
@@ -107,7 +107,7 @@ When the file of the open diagram is modified externally (by the MCP server or a
 | Ctrl+D | Duplicate the entity |
 | Ctrl+A | Select all entities |
 | Delete | Delete the selection |
-| Esc | Clear the selection / close the search |
+| Esc | Clear the entity selection / close the search |
 | Ctrl+F | Search |
 | Ctrl+P | Print |
 | Ctrl+0 / Ctrl+Shift+0 | Zoom 100% / fit to window |

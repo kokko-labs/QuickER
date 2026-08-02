@@ -10,6 +10,6 @@
 
 **公開 Issue には書かないでください**（修正前に攻撃者へ情報を提供してしまうため）。
 
-本リポジトリの **Security タブ →「Report a vulnerability」**（GitHub Private Vulnerability Reporting）から非公開で報告してください。個人開発のため対応はベストエフォートですが、報告には可能な限り速やかに返信します。
+本リポジトリの **Security タブ →「Report a vulnerability」**（GitHub Private Vulnerability Reporting）から非公開で報告してください。個人開発のため対応はベストエフォートで、応答期限の約束はありませんが、脆弱性の報告は通常の Issue より優先して確認します。
 
 QuickER は DB 接続文字列や AI の API キーを扱うアプリケーションです。報告の再現情報に、実際の接続文字列・API キー等の秘密情報を含めないでください。

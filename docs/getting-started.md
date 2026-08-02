@@ -2,7 +2,7 @@
 
 *English | [日本語](getting-started.ja.md)*
 
-Using the bundled EC order sample, this tutorial walks once around the loop: edit the diagram → output the DDL → generate the code → run the application. It uses a SQLite file database, so no external database is required.
+Using the bundled EC order sample, this tutorial walks through one full loop: edit the diagram → output the DDL → generate the code → run the application. It uses a SQLite file database, so no external database is required.
 
 ## Prerequisites
 
@@ -22,6 +22,13 @@ dotnet run --project src/QuickER.Gui
 ```
 
 ## 2. Run the sample as-is first
+
+The sample lives in the repository, so clone it first (you need this even if you installed with the installer).
+
+```powershell
+git clone https://github.com/kokko-labs/QuickER.git
+cd QuickER
+```
 
 The repository contains the DDL and the C# code generated from the diagram (`EcOrder.json`), already checked in. Run it without changing anything.
 

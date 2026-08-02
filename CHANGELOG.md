@@ -6,13 +6,21 @@ This file records changes that affect QuickER users. The format follows [Keep a 
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-08-02
+
+Initial public release.
+
 ### Added
 
-- Initial public release
-  - Visual ER design (crow's foot notation, one-to-one / one-to-many / many-to-many, composite primary keys, FK referential actions, comprehensive undo/redo, and a large-diagram canvas UX with zoom / pan / search / minimap)
-  - Multi-DB support (schema import, diff sync, DDL generation, and automatic type conversion on dialect switch across the five dialects: SQL Server / PostgreSQL / MySQL / Oracle / SQLite)
-  - C# code generation (Entity / EditModel / Mapper plus a 3-way data-access choice: none / Repository (QuickER) / EF Core — same interfaces, swappable with a single DI registration line; optional runtime NuGet package reference mode)
-  - AI chat for generating and editing diagrams (OpenAI / Anthropic / Ollama / Codex / Claude Code), and mockup generation from ER diagrams
-  - Import/export (DBML / Mermaid / Excel definition sheets / PNG / SVG / vector printing) and the CLI (`quicker generate` / `quicker scaffold`)
-  - A working sample `samples/ec-order` (SQLite, no external DB required)
-  - License structure: core = MIT; the AI features, code generation, and the MCP tool-execution host (8 projects) = PolyForm Noncommercial 1.0.0 with Additional Grants (currently free for everyone including commercial use; commercial use of the basic code generation is granted permanently; codified as the "Additional Grants" section of LICENSE-NC.md; plain-language guide in LICENSING.md)
+- **Visual ER design** — crow's foot notation, one-to-one / one-to-many / many-to-many, composite primary keys, FK referential actions, comprehensive undo/redo, and a large-diagram canvas UX (zoom / pan / search / minimap)
+- **Multi-DB support** — schema import, diff sync, DDL generation, and automatic type conversion on dialect switch, across five dialects (SQL Server / PostgreSQL / MySQL / Oracle / SQLite)
+- **C# code generation** — Entity / EditModel / Mapper, plus a 3-way data-access choice: none / the QuickER Repository / the EF Core Repository (the same interfaces, swappable with a single DI registration line). Value objects, named queries, remote contracts and HTTP + JSON services, and a runtime NuGet package reference mode are optional
+- **AI chat and mock generation** — create and edit diagrams in conversation (OpenAI API / Anthropic API / an OpenAI-compatible local LLM / Codex / Claude Code), generate web screen mockups from the ER model, and optionally scaffold a runnable Blazor or WPF mock project
+- **MCP server** — `quicker mcp` exposes diagram editing and code generation to external AI agents over stdio
+- **Import/export** — DBML / Mermaid / Excel definition documents / HTML definition documents / schema JSON / PNG / SVG / vector printing
+- **CLI** — `quicker generate` / `quicker scaffold` / `quicker reverse` / `quicker mcp`
+- **Working samples** — `samples/ec-order` (SQLite, no external database required) and `samples/ec-order-remote` (three-tier over HTTP + JSON)
+
+Distributed as a GUI (Setup.exe and Portable zip, in a full self-contained channel and a lite framework-dependent one) and as NuGet packages (`QuickER.Cli` as a dotnet tool, plus the runtime packages `QuickER.Runtime` / `.SqlServer` / `.Sqlite` / `.EntityFrameworkCore`).
+
+The repository is mixed-license: the core is MIT, while the AI features, the code generation, the CLI, and the MCP tool-execution host (8 projects) are PolyForm Noncommercial 1.0.0 plus additional grants — currently free for everyone including commercial use, with commercial use of the basic code generation granted permanently. The terms are in [LICENSE-NC.md](LICENSE-NC.md); [LICENSING.md](LICENSING.md) explains them in plain language.

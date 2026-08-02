@@ -2,7 +2,7 @@
 
 *English | [日本語](code-generation.ja.md)*
 
-This document describes the structure of the C# code QuickER generates and how to use its data-access layer (QuickER Repository / EF Core). For how to run generation, see the [CLI reference](cli.md); for a working example, see [samples/ec-order](../samples/ec-order).
+This document describes the structure of the C# code QuickER generates and how to use its data-access layer (QuickER Repository / EF Core Repository). For how to run generation, see the [CLI reference](cli.md); for a working example, see [samples/ec-order](../samples/ec-order).
 
 ## What gets generated
 
@@ -12,18 +12,18 @@ This document describes the structure of the C# code QuickER generates and how t
 | EditModel | A model for screen editing, plus conversion to and from the Entity. |
 | Mapper | A converter for Entity ⇄ EditModel. |
 | Value objects (optional) | A per-column value-object type (e.g. `CustomerIdValue`). Emitted only when `GenerateValueObjects` is enabled (see [Value objects](#value-objects-generatevalueobjects)). |
-| Repository shared contracts | `IRepository<TEntity, TKey>` and a per-entity interface (e.g. `ICustomerRepository`). Both the QuickER Repository and the EF Core repository implement the same contracts. |
+| Repository shared contracts | `IRepository<TEntity, TKey>` and a per-entity interface (e.g. `ICustomerRepository`). Both the QuickER Repository and the EF Core Repository implement the same contracts. |
 | QuickER Repository implementation | Lightweight per-dialect implementations (SQL Server / SQLite) plus DI-registration extensions. |
-| EF Core repository | `QuickErDbContext` (including the Fluent configuration) plus the EF Core repository plus DI-registration extensions. |
+| EF Core Repository | `QuickErDbContext` (including the Fluent configuration) plus the EF Core Repository plus DI-registration extensions. |
 | Runtime | The fixed code the above relies on (inlined into the output by default; a package-reference mode is also available). |
 
-By default, an Entity is decorated with DataAnnotations and **DB-definition metadata attributes** (`[DbTableMeta]` / `[DbColumnMeta]`) that record a dialect-neutral type token (`string(50)` / `decimal(10,2)`, etc.) and a description. The generated code therefore doubles as a self-describing document of the DB definition.
+By default, an Entity is decorated with DataAnnotations and **DB-definition metadata attributes** (`[DbTableMeta]` / `[DbColumnMeta]`) that record a dialect-neutral type token (`string(50)` / `decimal(10,2)`, etc.) and a description. The generated code therefore doubles as a self-describing document of the DB definition. This is controlled by `IncludeDataAnnotations` (default ON), but it cannot be turned off in a configuration that generates the QuickER Repository, EF Core Repository, or in-memory Repository contracts (a diagnostic error), because the runtime reads `[Table]` / `[Key]` / `[Column]` through reflection.
 
 > **Prerequisite**: Repository generation targets a single primary key with application-assigned keys (tables with a composite key or DB auto-numbering can only use the Entity / EditModel).
 
 ## Value objects (GenerateValueObjects)
 
-This option generates columns as a **per-column value-object type** (`CustomerIdValue` / `NameValue`, etc.) instead of a raw type (`int` / `string`, etc.) (default OFF; `GenerateValueObjects` in quicker.json / the "Turn all columns into value objects" checkbox in the "Value Objects" row of the GUI. There is no dedicated CLI flag—specify it with `--config`). It can be chosen regardless of the DB-access selection (None / QuickER Repository / EF Core), and it combines with multi-target, in-memory, and remote.
+This option generates columns as a **per-column value-object type** (`CustomerIdValue` / `NameValue`, etc.) instead of a raw type (`int` / `string`, etc.) (default OFF; CLI `--generate-value-objects` / `GenerateValueObjects` in quicker.json / the "Turn all columns into value objects" checkbox in the "Value Objects" row of the GUI). It can be chosen regardless of the DB-access selection (None / QuickER Repository / EF Core Repository), and it combines with multi-target, in-memory, and remote.
 
 When ON, the columns of every table are grouped globally **by column name**, and one value-object type is generated per column name. A foreign-key column that shares a name with a primary key **shares the same type**, so mixing up IDs becomes a compile error. Entity properties and repository key types also become value objects:
 
@@ -94,13 +94,13 @@ public partial class CustomerEditModel
 }
 ```
 
-Static classes: `ValueObjectValidationMessages` (`MaxLengthExceeded` / `ScaleExceeded` / `PrecisionExceeded` / `ValueRequired`), `EditModelMessages` (`Required` / `ParseFailed` / `JoinValueObjectErrors`), `GeneratedDisplayNames` (`Resolve` — used to resolve the display name of entities, edit-model properties, and value objects alike). In package-reference mode, all three ship inside the `QuickER.Runtime` Core package.
+Static classes: `ValueObjectValidationMessages` (`MaxLengthExceeded` / `ScaleExceeded` / `PrecisionExceeded` / `ValueRequired`), `EditModelMessages` (`Required` / `ParseFailed` / `JoinValueObjectErrors`), `GeneratedDisplayNames` (`Resolve` — used to resolve the display name of entities, edit-model properties, and value objects alike). In package-reference mode, all three ship inside the `QuickER.Runtime` package.
 
 Per-type partials: value object — `CustomizeDisplayName` / `CustomizeMaxLengthErrorMessage` / `CustomizeScaleErrorMessage` / `CustomizePrecisionErrorMessage` / `CustomizeValueRequiredErrorMessage` (string / byte[] only) / `OnValidate`; edit model — `CustomizeRequiredErrorMessage` / `CustomizeParseErrorMessage` / `CustomizePropertyDisplayName`; entity — `CustomizeDisplayName` (an `override`, not a partial, as before). A value object's display string `DisplayValue` (virtual) can also be overridden.
 
 ### Integration with each feature (transparent support)
 
-Value objects can be handled transparently throughout the generated code. You never need to unwrap them to the raw value by hand:
+Value objects can be handled transparently throughout the generated code. You rarely need to unwrap them to the raw value by hand:
 
 | Feature | Behavior |
 |---|---|
@@ -115,14 +115,14 @@ Value objects can be handled transparently throughout the generated code. You ne
 
 ### GUID keys for string primary keys (UseGuidKeyForStringPrimaryKey)
 
-Turning on `UseGuidKeyForStringPrimaryKey` (the GUI's "Use GuidKey for string primary keys") together with `GenerateValueObjects` makes the value object of a string primary key derive from a GUID-numbering base (`ValueObjectGuidKeyBase`), so a parameterless `Create()` mints a new key:
+Turning on `UseGuidKeyForStringPrimaryKey` (CLI `--use-guid-key-for-string-primary-key` / the GUI's "Use GuidKey for string primary keys") together with `GenerateValueObjects` makes the value object of a string primary key derive from a GUID-generating base class (`ValueObjectGuidKeyBase`), so a parameterless `Create()` mints a new key:
 
 ```csharp
 // When document_id is a string primary key
 var id = DocumentIdValue.Create();   // A new key wrapping Guid.NewGuid() as a string
 ```
 
-This lets you satisfy the "primary keys are application-assigned" prerequisite of repository generation (above) without writing any numbering logic.
+This lets you satisfy the "primary keys are application-assigned" prerequisite of repository generation (above) without writing any key-generation logic.
 
 ## QuickER Repository
 
@@ -220,7 +220,7 @@ public sealed class DocumentSaveHook : ISaveHook<DocumentEntity>
 services.AddSingleton<ISaveHook<DocumentEntity>, DocumentSaveHook>();
 ```
 
-You can register multiple hooks for the same entity type. **Before runs in registration order** and **short-circuits the moment one returns `false`** (the remaining Before hooks are not called, and that row is skipped). **After also runs in registration order.** An exception thrown by Before / After propagates as-is and rolls back the entire save.
+You can register multiple hooks for the same entity type. **Before runs in registration order** and **short-circuits the moment one returns `false`** (the remaining Before hooks are not called, and that row is skipped). **After also runs in registration order.** An exception thrown by Before / After propagates as-is and, on an implementation target that has a real transaction, rolls back the entire save (for in-memory, see the table below).
 
 **Only `SaveAsync` (both the single and the multiple form) is targeted.** Direct calls to the low-level APIs `InsertAsync` / `UpdateAsync` / `DeleteAsync`, and `BulkInsertAsync`, **bypass** the hooks (they do not fire).
 
@@ -228,11 +228,11 @@ You can register multiple hooks for the same entity type. **Before runs in regis
 
 `false` skips **only that entity's single operation** (other rows proceed). A skipped row does not get an After call, and its `RowState` is left unchanged (it is excluded from `AcceptChanges`).
 
-Because a skip is isolated, consistency is the hook author's responsibility. In particular, **deletes run children-first**, so **if you return `false` for only the root (parent) in a subtree delete, the children are deleted and only the root remains**. To stop the parent, the children's hooks must also return `false`. An inconsistent skip (for example, skipping a new parent while saving a new child) falls to the safe side via an FK constraint violation → exception → **full rollback**.
+Because a skip is isolated, consistency is the hook author's responsibility. In particular, **deletes run children-first**, so **if you return `false` for only the root (parent) in a subtree delete, the children are deleted and only the root remains**. To stop the parent, the children's hooks must also return `false`. An inconsistent skip (for example, skipping a new parent while saving a new child) falls to the safe side via an FK constraint violation → exception → **full rollback**, provided the FK constraint is actually defined in the DB.
 
 #### After and the context
 
-After receives, **just after the operation and before commit**, an `ISaveHookContext` that joins the in-flight transaction. Calling the repository's ordinary APIs from within the hook would contend for locks on a separate connection, so use the operations exposed through `context`. Because throwing from After rolls back the whole save, the half-finished state of "the row exists but the file is not registered" is structurally impossible.
+After receives, **just after the operation and before commit**, an `ISaveHookContext` that joins the in-flight transaction. Calling the repository's ordinary APIs from within the hook would contend for locks on a separate connection, so use the operations exposed through `context`. Because throwing from After rolls back the whole save, the half-finished state of "the row exists but the file is not registered" is structurally impossible in the QuickER Repository (SQL Server / SQLite) (for in-memory, see the table below).
 
 Operations the context provides (it does not expose raw handles):
 
@@ -246,13 +246,13 @@ Operations the context provides (it does not expose raw handles):
 | Target | Hook firing | Context support |
 |---|---|---|
 | QuickER Repository (SQL Server / SQLite) | Full support (After fires right after each operation) | Both `WriteBinaryColumnAsync` and `ExecuteSqlAsync` are supported |
-| EF Core (`GenerateEfCore`) | Supported (After fires in a batch after `SaveChanges`) | `ExecuteSqlAsync` supported; `WriteBinaryColumnAsync` throws `NotSupportedException` |
+| EF Core Repository (`GenerateEfCore`) | Supported (After fires in a batch after `SaveChanges`) | `ExecuteSqlAsync` supported; `WriteBinaryColumnAsync` throws `NotSupportedException` |
 | In-memory (`GenerateInMemoryRepositories`) | Supported (pseudo transaction) | `WriteBinaryColumnAsync` writes to the store; `ExecuteSqlAsync` throws `NotSupportedException`. Because there is no real transaction, **store changes remain even if After throws** (best effort) |
 | Remote (`--generate-remote-services`) | **A hook registered in the server-side DI fires** | Follows the server-side real implementation. **Known limitation**: even for a row the server skipped in Before, the client-side `RowState` does not reflect the skip and is committed to `Unchanged` |
 
 ### Raw SQL escape hatch
 
-A query that cannot be expressed with an expression tree can always drop down to raw SQL (parameters are an anonymous object).
+When a query cannot be expressed with an expression tree, you can always drop down to raw SQL (parameters are an anonymous object).
 
 ```csharp
 // Strict full-column mapping (restore into the Entity)
@@ -270,7 +270,7 @@ var affected = await customers.ExecuteSqlAsync("UPDATE customers SET balance = 0
 
 ### Store-generated columns (rowversion / timestamp)
 
-A column whose value the DB generates (SQL Server's `rowversion` / `timestamp`, etc.) gets the marker attribute `[StoreGeneratedColumn]` on its generated Entity property and is **automatically excluded from INSERT / BulkInsert / UPDATE** in the QuickER Repository (the attribute is applied regardless of generation options, always, whenever the DB generates the column's value).
+A column whose value the DB generates (SQL Server's `rowversion` / `timestamp`, etc.) gets the marker attribute `[StoreGeneratedColumn]` on its generated Entity property and is **automatically excluded from INSERT / BulkInsert / UPDATE** in the QuickER Repository (the attribute is applied to any column the type mapper recognizes as a row-version column — SQL Server's `rowversion` / `timestamp` — regardless of the generation options).
 
 - **Never written**: the DB assigns these columns' values, so the repository writes no explicit value. Attempting an explicit insert makes SQL Server return `Cannot insert an explicit value into a timestamp column.`, but the exclusion avoids this runtime error.
 - **Read on SELECT**: they are included in the results of `GetByIdAsync` / `GetAllAsync` / `Query()`, and you can read their values (they can be referenced as a concurrency token).
@@ -279,7 +279,7 @@ A column whose value the DB generates (SQL Server's `rowversion` / `timestamp`, 
 
 ### Excluding unbounded binary columns (ExcludeUnboundedBinaryColumns)
 
-This option avoids round-tripping a huge BLOB on every list fetch or update (it protects memory) (default OFF; CLI `--exclude-unbounded-binary-columns` / the "Do not fetch unbounded binary columns (varbinary(max) / BLOB)" checkbox in the GUI / `ExcludeUnboundedBinaryColumns` in quicker.json). When ON, the marker attribute `[UnboundedBinaryColumn]` is applied to the Entity property of a **binary column with no size limit**, and that column is excluded from SELECT / UPDATE in the QuickER Repository. At generation time, the list of excluded columns is reported through an Info diagnostic (CLI output / the GUI's generation-result dialog).
+This option avoids round-tripping a huge BLOB on every list fetch or update (it protects memory) (default OFF; CLI `--exclude-unbounded-binary-columns` / the "Do not fetch unbounded binary columns (varbinary(max) / BLOB)" checkbox in the GUI (shown only when the DB-access selection is QuickER Repository) / `ExcludeUnboundedBinaryColumns` in quicker.json). When ON, the marker attribute `[UnboundedBinaryColumn]` is applied to the Entity property of a **binary column with no size limit**, and that column is excluded from SELECT / UPDATE in the QuickER Repository. At generation time, the list of excluded columns is reported through an Info diagnostic (CLI output / the GUI's generation-result dialog).
 
 The decision is made from the column's declared type (types with a declared length, such as `rowversion`, `binary(n)`, or `varbinary(n)`, are not targeted):
 
@@ -293,7 +293,7 @@ The decision is made from the column's declared type (types with a declared leng
 
 Key behaviors:
 
-- **Excluded from SELECT**: in the results of `GetByIdAsync` / `GetAllAsync` / `Query()`, an excluded column is always `null` (not read from the DB).
+- **Excluded from SELECT**: in the results of `GetByIdAsync` / `GetAllAsync` / `Query()`, an excluded column is `null` (it is not read from the DB) unless you opt in with `WithUnboundedBinary()` (described below).
 - **Excluded from UPDATE**: an excluded column is not in the SET clause of the update SQL. Running `UpdateAsync` / `SaveAsync` while an excluded column still holds a value throws a **runtime exception** (it does not silently drop data).
 - **INSERT / BulkInsert keep all columns**: the first write can pass values as usual.
 - **A named-query projection** that references an excluded column does fetch it (a projection is an explicit column selection).
@@ -329,14 +329,14 @@ var doc = await documents
 
 Constraints and behavior:
 
-- **Cannot be combined with `Include`** (`InvalidOperationException` when the terminal method runs). If you need the unbounded binary column, fetch it with a separate query that has no `Include`. This is because SQL Server's `Include` path goes through FOR JSON = Base64, which inflates memory for a huge BLOB (5–6× peak), so it always guarantees the correct memory profile for the "handle a huge BLOB" purpose (on SQL Server it fetches with a **plain SELECT** rather than FOR JSON).
+- **Cannot be combined with `Include`** (`InvalidOperationException` when the terminal method runs). If you need the unbounded binary column, fetch it with a separate query that has no `Include`. This is because SQL Server's `Include` path goes through FOR JSON = Base64, which inflates memory for a huge BLOB (5–6× peak), so this restriction keeps the memory profile predictable for the "handle a huge BLOB" purpose (on SQL Server it fetches with a **plain SELECT** rather than FOR JSON).
 - The effect applies only to `ToListAsync` / `FirstOrDefaultAsync` (it does not affect count, existence check, or the projection `ToProjectionListAsync`).
 - The fetched entity is a legitimate entity, but the fact that the excluded column is out of scope for UPDATE does not change. Calling `UpdateAsync` on it as-is throws from the existing guard (update an excluded column with the raw SQL `ExecuteSqlAsync` above).
 - In EF Core mode it is a no-op because EF Core reads all columns to begin with (only the `Include`-combination error is thrown identically for parity).
 
 #### Stream accessors: `Read/Write{Column}Async`
 
-When you enable the exclusion option (and generate the QuickER Repository), **streaming** read/write methods are additionally generated per excluded column (where they are placed depends on whether remote contracts exist; see below). They transfer between the DB and a stream (or file) **in O(chunks)—without loading the entire blob into memory**, avoiding a bulk `byte[]` read. This is the only means with a correct memory profile for handling GB-scale binaries.
+When you enable the exclusion option (and generate the QuickER Repository), **streaming** read/write methods are additionally generated per excluded column (where they are placed depends on whether remote contracts exist; see below). They transfer between the DB and a stream (or file) **in O(chunks)—without loading the entire blob into memory**, avoiding a bulk `byte[]` read. Among the generated APIs, this is the option that keeps memory bounded for GB-scale binaries.
 
 ```csharp
 // Example generated for documents.payload (an excluded column)
@@ -362,7 +362,7 @@ Choosing between it and `WithUnboundedBinary()`:
 | | `WithUnboundedBinary()` | Stream accessor |
 |---|---|---|
 | Unit | Entity shape (multiple columns, multiple rows, no Include) | Read/write of a single column |
-| Memory | Moderate (bulk `byte[]`) | Unbounded (O(chunks)) |
+| Memory | Moderate (bulk `byte[]`) | **Bounded** — constant regardless of blob size (O(chunks)) |
 | Use case | You temporarily want an entity including the excluded columns | Transfer a huge blob between the DB and a file/stream |
 | Write | Not possible (fetch only; update with raw SQL) | Can write per column with `Write{Column}Async` |
 
@@ -380,7 +380,7 @@ services.AddGeneratedEfCoreRepositories(options => options.UseSqlServer(connecti
 - An optimistic-concurrency conflict converts EF Core's exception to `SaveConflictException` (unifying the contract).
 - The raw-SQL APIs are at full parity.
 
-**Combined generation with the QuickER Repository** (both ON) is for parity verification and can only be specified via the CLI / config file; the GUI is an exclusive choice. Also, EF Core and multi-target repositories (below) cannot be combined (a diagnostic error).
+**Combined generation with the QuickER Repository** (both ON) is for parity verification and can only be specified via the CLI / config file; the GUI is an exclusive choice. Also, the EF Core Repository and multi-target QuickER Repositories (below) cannot be combined (a diagnostic error).
 
 ## Multi-target repositories (sqlserver + sqlite)
 
@@ -397,14 +397,14 @@ var local   = provider.GetRequiredKeyedService<ICustomerRepository>("local");
 
 ## Remote-capable interfaces (--generate-remote-contracts)
 
-`I{Entity}Repository` is a full-featured interface that, in addition to CRUD, save, and named queries, has every method including `Query()` (expression-tree query), raw SQL, and bulk insert. Specifying `--generate-remote-contracts` (`GenerateRemoteContracts` in quicker.json, the "Remote" checkbox in the GUI) **additionally generates** an interface for remote operations.
+`I{Entity}Repository` is a full-featured interface that, in addition to CRUD, save, and named queries, has every method including `Query()` (expression-tree query), raw SQL, and bulk insert. Specifying `--generate-remote-contracts` (`GenerateRemoteContracts` in quicker.json, the "Generate Repository interfaces for remote operations" checkbox in the GUI's "Remote" row) **additionally generates** an interface for remote operations.
 
 | Surface | Interface | Operations included |
 |---|---|---|
 | Remote surface (additionally generated) | `I{Entity}RemoteRepository` | CRUD (GetById / GetAll / Insert / Update / Delete), graph save (Save), named queries |
 | Full-featured surface (as before) | `I{Entity}Repository` (inherits the remote surface) | The above plus `Query()` (expression tree), the three raw-SQL variants, bulk insert |
 
-Every method of the remote surface has arguments and return values composed purely of data (entities, primary keys, counts), so it can in principle cross a network boundary. If you keep the application body dependent only on the remote surface, safety is guaranteed at compile time even when you later swap the repository's implementation for a web-service-backed remote one. Processing that needs an expression tree or raw SQL just uses `I{Entity}Repository` as before, so "this part needs a direct DB connection" is readable from the type.
+Every method of the remote surface has arguments and return values composed purely of data (entities, primary keys, counts), so it can in principle cross a network boundary. If you keep the application body dependent only on the remote surface, the compiler catches any use of an operation that cannot cross the boundary even when you later swap the repository's implementation for a web-service-backed remote one. Processing that needs an expression tree or raw SQL just uses `I{Entity}Repository` as before, so "this part needs a direct DB connection" is readable from the type.
 
 ```csharp
 // The application body depends only on the remote surface (the part that can later be swapped for a remote implementation)
@@ -426,7 +426,7 @@ This option is purely additive. Turning it ON leaves `I{Entity}Repository`, the 
 
 ## Remote services (--generate-remote-services) — three-tier layout
 
-Specifying `--generate-remote-services` (`GenerateRemoteServices` in quicker.json, the second "Remote" checkbox in the GUI) generates a client and server implementation that provides the remote surface over the network using **HTTP + JSON** (the remote surface `--generate-remote-contracts` is enabled automatically).
+Specifying `--generate-remote-services` (`GenerateRemoteServices` in quicker.json, the "Generate HTTP client / server implementations" checkbox in the GUI's "Remote" row) generates a client and server implementation that provides the remote surface over the network using **HTTP + JSON** (the remote surface `--generate-remote-contracts` is enabled automatically).
 
 | Output | Location | Contents |
 |---|---|---|
@@ -438,7 +438,7 @@ The recommended project layout is: a **shared class library** (the main output�
 ```csharp
 // ---- Server (ASP.NET Core, Microsoft.NET.Sdk.Web) ----
 var builder = WebApplication.CreateBuilder(args);
-builder.Services.AddGeneratedSqliteRepositories(connectionString);   // The real implementation can be the QuickER Repository or EF Core
+builder.Services.AddGeneratedSqliteRepositories(connectionString);   // The real implementation can be the QuickER Repository or the EF Core Repository
 
 var app = builder.Build();
 app.MapGeneratedRemoteEndpoints();          // To add authorization, chain .RequireAuthorization()
@@ -479,7 +479,7 @@ A working example is in the repository at [samples/ec-order-remote](../samples/e
 
 ## In-memory repositories for tests (GenerateInMemoryRepositories)
 
-You can additionally generate an in-memory implementation for unit testing without a DB. It implements the same contract, and unsupported operations throw `NotSupportedException` with guidance to switch to the real-DB repository.
+You can additionally generate an in-memory implementation for unit testing without a DB. It implements the same contract, and unsupported operations throw `NotSupportedException` with guidance to switch to the real-DB repository. Note that `GenerateInMemoryRepositories` cannot be combined with `UseRuntimePackages` (a diagnostic error), because the in-memory engine is emitted as fixed infra on the generation side and does not exist in the packages.
 
 ## Runtime package reference mode (--use-runtime-packages)
 
@@ -492,20 +492,20 @@ By default, the generated code is self-contained inline output that includes the
 | `QuickER.Runtime.Sqlite` | QuickER's SQLite dialect engine | Microsoft.Data.Sqlite |
 | `QuickER.Runtime.EntityFrameworkCore` | EF Core shared parts | Microsoft.EntityFrameworkCore.Relational |
 
-The package version and the tool version are published in lockstep (the same version) and are compatible within the same major. Schema-dependent items such as the DI-registration extensions, `QuickErDbContext`, and per-entity implementations are always emitted on the generation side even in this mode.
+The package version and the tool version are published in lockstep (the same version), so use the same version for both. While the project is on 0.x, compatibility between minor versions is not promised (see the versioning policy in [CONTRIBUTING](../CONTRIBUTING.md)). Schema-dependent items such as the DI-registration extensions, `QuickErDbContext`, and per-entity implementations are always emitted on the generation side even in this mode.
 
 ## API reference (.g.md)
 
-You can additionally output an API-reference Markdown that shares the base name of the generated code. Enable it with the "Output an API reference (.g.md)" checkbox in the GUI's generation dialog, or the CLI's `--generate-api-docs` flag (**default OFF**). It can always be chosen independently of the DB-access selection (None / QuickER Repository / EF Core).
+You can additionally output an API-reference Markdown that shares the base name of the generated code. Enable it with the "Output an API reference (.g.md)" checkbox in the GUI's generation dialog, or the CLI's `--generate-api-docs` flag (**default OFF**). It can always be chosen independently of the DB-access selection (None / QuickER Repository / EF Core Repository).
 
 When enabled, one `.g.md` with the same base name as the `.g.cs` is output (e.g. `EcOrder.g.cs` → `EcOrder.g.md`). In per-category split mode it becomes the fixed name `ApiDocs.g.md` (the Japanese version is `ApiDocs.ja.g.md`), in the same style as the fixed names such as `Entities.g.cs`. The contents are as follows.
 
 - A list of entities and, for each entity, a property table (including the DB type token, such as `string(50)` / `decimal(10,2)`).
-- The repository contracts (`IRepository<TEntity, TKey>` and the per-entity interfaces).
-- Usage examples of DI registration, CRUD, and queries.
+- The repository contracts (`IRepository<TEntity, TKey>` and the per-entity interfaces) — included only in a configuration that generates the Repository contracts.
+- Usage examples of DI registration, CRUD, and queries — likewise included only in a configuration that generates the Repository contracts (these sections are omitted when DB access is "None").
 - A generated-file layout table.
 
-**English is the canonical version.** If you also want a Japanese version, enable the GUI's sub-checkbox "Also output a Japanese API reference (.ja.g.md)", or the CLI's `--api-docs-ja` flag (config key `IncludeJapaneseApiDocs`) (**default OFF**; requires `--generate-api-docs`). When enabled, a `.ja.g.md` is produced alongside the canonical English `.g.md` (e.g. `EcOrder.g.cs` → `EcOrder.ja.g.md`).
+**English is the canonical version.** If you also want a Japanese version, enable the GUI's sub-checkbox "Also output a Japanese version", or the CLI's `--api-docs-ja` flag (config key `IncludeJapaneseApiDocs`) (**default OFF**; requires `--generate-api-docs`). When enabled, a `.ja.g.md` is produced alongside the canonical English `.g.md` (e.g. `EcOrder.g.cs` → `EcOrder.ja.g.md`).
 
 `.g.md` / `.ja.g.md` are auto-generated files. They are overwritten on regeneration, so do not edit them directly.
 
@@ -513,15 +513,15 @@ When enabled, one `.g.md` with the same base name as the `.g.cs` is output (e.g.
 
 A running system already has entity and data-access assets, hand-written or scaffolded. After you get a diagram via DB import, there are stages of pairing those assets with the generated code — and **stopping at any stage is a valid setup**.
 
-- **Coexistence without generation** — use the diagram only for review, definition-document output, and diff sync, and never touch the code. Your existing data layer stays as it is. The value of a single source of truth for the schema (documents that follow the diagram, diff detection against the DB) is available at this stage alone
+- **Coexistence without generation** — use the diagram only for review, definition-document output, and diff sync, and never touch the code. Your existing data layer stays as it is. The value of a single source of truth for the schema (definition documents you can regenerate from the diagram whenever it changes, diff detection against the DB) is already available even at this stage
 - **Coexistence with basic generation only** — generate just Entity / EditModel / Mapper with DB access "None" and use them around your screens. Data access remains your existing asset; the generated code takes no part in reads or writes
-- **Gradual adoption starting from new features** — use the generated repositories (or the EF Core implementation) only for newly built features, and migrate existing code when you touch it. The generated code is plain ADO / EF Core access to the same schema, so it shares the database with your existing data layer without issues. If your system is EF Core code-first, the generated `QuickErDbContext` connects to the existing schema only (it takes no part in migrations), so it can live alongside your existing DbContext — the common pattern of multiple contexts over one database
+- **Gradual adoption starting from new features** — use the generated QuickER Repository (or the EF Core Repository) only for newly built features, and migrate existing code when you touch it. The generated code is plain ADO / EF Core access to the same schema, so it can share the database with your existing data layer; designing the transaction boundaries and connection management across the two remains your responsibility. If your system is EF Core code-first, the generated `QuickErDbContext` connects to the existing schema only (it takes no part in migrations), so it can live alongside your existing DbContext — the common pattern of multiple contexts over one database
 
 Two practical notes for coexistence:
 
-- **Separate by namespace** — keep `RootNamespace` (and, if needed, the output project) apart from your existing code, and same-named classes will not collide
-- **The entrance for existing assets into the diagram is DB import** — the GUI's "Import Code" (C# reverse) only accepts a `.g.cs` that QuickER generated with `IncludeDataAnnotations` ON; hand-written POCOs are not eligible. Bring the structure of existing assets in from the live database, not from the code (see [Database round-tripping](database.md))
+- **Separate by namespace** — keep `RootNamespace` (and, if needed, the output project) apart from your existing code, and same-named classes can coexist (where you use both, distinguish them with a namespace qualification or a `using` alias)
+- **The way to bring existing assets into a diagram is DB import** — the GUI's "Import Code" (C# reverse) only accepts a `.g.cs` that QuickER generated with `IncludeDataAnnotations` ON; hand-written POCOs are not eligible. Bring the structure of existing assets in from the live database, not from the code (see [Database round-tripping](database.md))
 
 ## License note
 
-The code-generation engine (`QuickER.CodeGen.CSharp` / `CodeGen.UI` / `Cli`) is covered by [PolyForm Noncommercial 1.0.0](../LICENSE-NC.md). **It is currently free for everyone, including commercial use.** For the provisioning policy (the permanent free grants — including the basic generation of Entity / EditModel / Mapper — and possible future paid licensing), see the [licensing guide](../LICENSING.md). **The generated code and the runtime packages (MIT) are on your side of the deliverable**, with no license restrictions.
+The code-generation engine (`QuickER.CodeGen.CSharp` / `CodeGen.UI` / `Cli`) is covered by [PolyForm Noncommercial 1.0.0](../LICENSE-NC.md) **plus additional grants**; thanks to those grants, **the current releases are free for everyone, including commercial use**. For the licensing and distribution policy (the permanent free grants — including the basic generation of Entity / EditModel / Mapper — and possible future paid licensing), see the [licensing guide](../LICENSING.md). **The generated code and the runtime packages (MIT) belong to you as part of your deliverable**: [LICENSE-NC.md](../LICENSE-NC.md) grants everyone a perpetual, irrevocable license to use, modify, distribute, and sell generated output for any purpose, with no attribution required.

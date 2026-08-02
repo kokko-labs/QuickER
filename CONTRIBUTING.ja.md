@@ -22,7 +22,7 @@ QuickER は個人開発の OSS です。Issue・Pull Request を歓迎します�
 - コメント・コミットメッセージは日本語で書きます
 - コード修正後は `csharpier format .` を実行してください（グローバルツール）
 - `dotnet test QuickER.slnx` が緑であることを確認してください
-- 生成テンプレート（`Templates/CSharpRuntime/*.scriban`）を変更した場合は、固定フィクスチャ等の再生成が必要です。再生成 → 検証 → 差分表示までを次のスクリプトが行います:
+- 生成テンプレート（`src/QuickER.CodeGen.CSharp/Templates/**/*.scriban`）を変更した場合は、固定フィクスチャ等の再生成が必要です。再生成 → 検証 → 差分表示までを次のスクリプトが行います:
 
   ```powershell
   ./scripts/regen-fixtures.ps1
@@ -34,13 +34,13 @@ QuickER は個人開発の OSS です。Issue・Pull Request を歓迎します�
   $env:QUICKER_REGEN_FIXTURES=1; dotnet test tests/QuickER.Tests/QuickER.Tests.csproj --filter "FullyQualifiedName~Drift"; $env:QUICKER_REGEN_FIXTURES=$null
   ```
 
-- 利用者に影響する変更は CHANGELOG の Unreleased 欄へ 1 行追記してください——[CHANGELOG.md](CHANGELOG.md)（英語）と [CHANGELOG.ja.md](CHANGELOG.ja.md)（日本語）の**両方**（内部リファクタリング・テストのみの変更は不要）
+- 利用者に影響する変更は CHANGELOG の Unreleased 欄へ追記してください——[CHANGELOG.md](CHANGELOG.md)（英語）と [CHANGELOG.ja.md](CHANGELOG.ja.md)（日本語）の**両方**。粒度は「利用者から見た 1 変更」（おおむね機能ブランチ 1 本）で 1 エントリとし、該当する見出し（`### Added` / `### Changed` / `### Fixed` / `### Removed`）の下へ置きます（見出しが無ければ作成）。内部リファクタリング・テストのみの変更は不要なため、この欄が空のままになることもあります（想定内です）
 
 アーキテクチャと「壊すと静かに回帰する不変条件」は [CLAUDE.md](CLAUDE.md) にまとまっています。
 
 ## ライセンスと貢献時の権利処理
 
-- 本リポジトリはプロジェクトごとに **MIT** と **PolyForm Noncommercial 1.0.0** を使い分けています（対象一覧は [LICENSE-NC.md](LICENSE-NC.md)、提供方針は [LICENSING.ja.md](LICENSING.ja.md) を参照）
+- 本リポジトリはプロジェクトごとに **MIT** と **PolyForm Noncommercial 1.0.0＋追加許諾** を使い分けています。大半は MIT で、AI 機能群・コード生成系・CLI・MCP ツール実行ホストの 8 プロジェクトが PolyForm NC＋追加許諾です（対象一覧と正式な条件は [LICENSE-NC.md](LICENSE-NC.md)、平易な解説は [LICENSING.md](LICENSING.md) / [LICENSING.ja.md](LICENSING.ja.md) を参照）
 - 提出されたコードは、**取り込み先プロジェクトの現行ライセンスで公開されること**に同意したものとみなします
 - PolyForm NC 対象プロジェクトへの貢献では、あわせて**作者（リポジトリオーナー）が当該コードを含むソフトウェアに商用ライセンスを提供し、または将来ライセンスを変更（無料開放を含む）する権利**を許諾したものとみなします（将来の提供方針の変更を外部貢献が阻害しないための取り決めです）
 
@@ -56,8 +56,8 @@ QuickER は個人開発の OSS です。Issue・Pull Request を歓迎します�
 
 リリースは**常に全配布物同時**（NuGet 5 パッケージ＋GUI 配布物（Velopack: full / lite × Setup.exe / Portable zip）＋git タグ `v{版}`）。時期は任意で、頻度は約束しません。
 
-1. CHANGELOG の Unreleased 欄を確認し、版番号（上記ルールで minor / patch を判断）と日付を付けて確定する——**[CHANGELOG.md](CHANGELOG.md) と [CHANGELOG.ja.md](CHANGELOG.ja.md) の両方**
+1. CHANGELOG の Unreleased 欄を確認し、版番号（上記ルールで minor / patch を判断）を決める。欄の見出しを版番号＋リリース日（`## [0.2.0] - 2026-09-01`）へ書き換え、その上に空の `## [Unreleased]` を新設する——**[CHANGELOG.md](CHANGELOG.md) と [CHANGELOG.ja.md](CHANGELOG.ja.md) の両方**
 2. `Directory.Build.props` の `VersionPrefix` を更新し、CHANGELOG の確定と合わせて 1 コミットにする
 3. publish.yml（NuGet 5 パッケージ）を workflow_dispatch で実行する（まず dry_run で確認してから本番実行）
-4. release.yml（GUI 配布物の発行と git タグ作成）を workflow_dispatch で実行する
-5. GitHub Release のノートへ CHANGELOG の該当版の内容を転記する
+4. release.yml（GUI 配布物の発行と git タグ作成）を workflow_dispatch で実行する（`dry_run` の既定は true。まず dry_run で成果物を確認してから `dry_run=false` で本番実行する）
+5. GitHub Release のノートへ CHANGELOG の該当版の内容を転記する（release.yml は意図的に本文を空で作成する。何がリリースされたかの正本は、整理された CHANGELOG に一本化するため）

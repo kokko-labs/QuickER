@@ -10,9 +10,9 @@
 
 **ER モデルを、データベース・ソースコード・設計ドキュメントの single source of truth に。**
 
-QuickER は、ER モデルの設計から、実データベースとの取込・差分同期、DDL・ソースコード・設計ドキュメントの生成までを一つにつなぐ、Windows 用の開発支援ツールです。
+QuickER は、業務アプリケーションの .NET 開発を支援する Windows 用ツールです。ER 図の GUI デザイナー、実データベースとの相互反映、AI 連携を備え、ER モデルを中心に据えた開発ができます。
 
-同じスキーマ定義を DDL、エンティティ、画面用モデル、設計書へ何度も書き写す必要はありません。ER モデルを一度定義すれば、それ以降は QuickER が生成します。
+レビューした ER モデルから、DDL、DB 差分スクリプト、C# コード、リモート API、画面モック、テーブル定義書を生成できます。同じスキーマ定義を DDL、エンティティ、画面用モデル、設計書へ何度も書き写す必要はありません。
 
 ![QuickER メイン画面（EC 注文サンプルの ER モデル）](docs/images/sample-ec-order.ja.png)
 
@@ -114,17 +114,20 @@ ER モデルから、アプリケーション開発に必要な C# コードを�
 - Entity
 - EditModel
 - Entity と EditModel の Mapper
-- DataAnnotations と DB 定義メタ属性（方言中立の型トークンと説明を属性として付与）
+
+DataAnnotations と DB 定義メタ属性（方言中立の型トークンと説明）は既定で付与されます。ランタイムがリフレクションで参照するため、Repository を生成する構成では必須です。
 
 オプション生成:
 
-- Repository
-- EF Core の DbContext と Repository 実装
+- QuickER 版 Repository（ADO ベースの軽量実装）
+- EF Core の DbContext と EF Core 版 Repository
 - 列ごとの値オブジェクト
 - 名前付きクエリ
-- リモート Repository インターフェイス
+- リモート用 Repository インターフェイス
 - HTTP + JSON クライアント
 - ASP.NET Core Minimal API サーバー
+
+EditModel は画面からの入力値を文字列として受け取り、検証に成功した値だけを確定値として保持し、失敗した場合はエラー情報を保持します。Mapper はその確定値と変更状態だけをエンティティへ反映するため、不正な入力値がエンティティに入り込みません。
 
 生成コードは特定の UI フレームワークに依存しません。WPF、Blazor、ASP.NET Core など、任意の .NET アプリケーションから利用できます。
 EditModel と Mapper の動きは、同梱サンプルの [Program.cs](samples/ec-order/EcOrderSample/Program.cs) を実行して確認できます。
@@ -139,7 +142,9 @@ EditModel と Mapper の動きは、同梱サンプルの [Program.cs](samples/e
 | ------------------------ | ------------------- | -------------------------------------------------- |
 | **なし**                   | —                   | Entity / EditModel / Mapper のみを生成し、データアクセスは独自に実装する |
 | **QuickER 版 Repository** | SQL Server / SQLite | ADO ベースの軽量な Repository を使用する                       |
-| **EF Core**              | 対応する 5 DBMS         | DbContext と LINQ を使用する                             |
+| **EF Core 版 Repository** | 対応する 5 DBMS         | DbContext と LINQ を使用する                             |
+
+> **前提**: Repository 生成は、主キーが単一列かつアプリケーション側で採番するテーブルが対象です。複合主キーや DB 自動採番のテーブルでは、Entity / EditModel のみを利用できます。
 
 QuickER 版 Repository は、次の機能を備えています。
 
@@ -147,10 +152,10 @@ QuickER 版 Repository は、次の機能を備えています。
 - `Include` / `ThenInclude`
 - グラフ保存
 - 一括操作
-- 楽観的排他制御
+- グラフ保存時の競合検出（更新対象の行が存在しない場合。`rowversion` 比較による排他制御は対象外）
 - 生 SQL の実行
 
-QuickER 版と EF Core 版は、同じ Repository インターフェイスを実装します。アプリケーション側をインターフェイスに依存させることで、DI 登録を変更して実装を切り替えられます。
+QuickER 版 Repository と EF Core 版 Repository は、同じインターフェイスを実装します。アプリケーション側をインターフェイスに依存させることで、DI 登録を変更して実装を切り替えられます（GUI ではどちらか一方を生成します。両方を同時に生成するには CLI または設定ファイルを使用します）。
 
 ```csharp
 // QuickER 版 Repository
@@ -172,6 +177,7 @@ ProductIdValue productId;
 ```
 
 異なる種類の ID を誤って渡した場合は、コンパイルエラーになります。
+文字列型の主キーを表す値オブジェクトでは、`UseGuidKeyForStringPrimaryKey` を有効にするとキーを GUID で採番できます。採番ロジックを書かずに、Repository 生成の前提（アプリケーション側での採番）を満たせます。
 
 最大文字数や `decimal` の桁数など、列定義から判断できる検証コードも生成されます。追加の検証や表示名は partial クラスで拡張できます。
 
@@ -192,7 +198,7 @@ GetByCustomerAsync(
     CancellationToken cancellationToken = default);
 ```
 
-同じ名前付きクエリが、QuickER 版 Repository と EF Core 版の両方へ生成されます。
+同じ名前付きクエリが、QuickER 版 Repository と EF Core 版 Repository の両方へ生成されます。
 
 ## 3 階層構成
 
@@ -252,7 +258,7 @@ ER モデルを読ませて、業務画面の Web モック（HTML）を対話�
 
 - 会話は「画面構成の提案 → 合意 → 生成」と進み、修正指示で作り込めます
 - 関係者への共有用に、全画面を 1 ファイルへまとめた単一 HTML と、画面一覧・遷移図・CRUD 表付きの設計書を出力できます
-- 生成したモックを土台に、WPF / Blazor のモックプロジェクト（動くアプリの雛形）を生成する第 2 ステップもあります
+- 生成したモックを土台に、WPF / Blazor のモックプロジェクトを生成する第 2 ステップもあります。データ層は ER モデルから機械的に生成し、画面の UI は AI が実装し、最後に QuickER が `dotnet build` で結果を確認します。この工程は PoC やプロトタイピングの補助という位置付けで、AI のモデルと接続方式によってはエラーが残ることがあります
 
 接続方式は AI チャットと共通です。
 
@@ -352,7 +358,7 @@ dotnet run --project src/QuickER.Cli -- generate ...
 
 詳しくは [CLI リファレンス](docs/cli.ja.md) を参照してください。
 
-## 設計思想
+## なぜ ER モデルを正本にするのか
 
 QuickER は、ER モデルをデータベース、コード、ドキュメントの single source of truth として扱います。
 その背景や、コードファーストとの違い、AI と人間の役割分担については、[QuickER が ER モデルを正本にする理由](docs/overview.ja.md) を参照してください。

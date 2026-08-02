@@ -8,7 +8,7 @@ CRUD, graph save, Include, raw-SQL aggregation, and delete cascade against a SQL
 Repository (SQLite dialect), plus a screen-editing round trip through the EditModel and Mapper (input-string
 conversion-error detection, confirmed-value change tracking, and applying back to the entity).
 
-This sample owns the demonstrations of the generated code's core features; only the scenarios specific to the
+This sample covers the core features of the generated code; only the scenarios specific to the
 three-tier (HTTP + JSON) setup are covered separately by [ec-order-remote](../ec-order-remote/README.md).
 
 ## Structure
@@ -22,7 +22,7 @@ three-tier (HTTP + JSON) setup are covered separately by [ec-order-remote](../ec
 | `EcOrderSample/Generated/EcOrder.g.md` | The generated API reference Markdown (the bundled output of `--generate-api-docs`, checked in) |
 | `EcOrderSample/Program.cs` | A console app that creates the DB from the DDL and demonstrates CRUD |
 
-The console app references none of the QuickER main projects at all; like a user's own project, it references
+The console app does not reference any QuickER project; like a user's own project, it references
 only NuGet packages (`Microsoft.Data.Sqlite`, etc.).
 
 ## Run it

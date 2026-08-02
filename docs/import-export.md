@@ -19,11 +19,11 @@ Diagram input and output run from the "Import" and "Export" buttons on the toolb
 
 ## Import
 
-Choosing a file from the "Import" button replaces the current diagram with the imported contents (with a confirmation before it runs). Auto-arrange is applied after the import.
+Choosing a file from the "Import" button brings the contents into the diagram. DBML and Mermaid replace the whole diagram and auto-arrange it afterwards; **Excel definition documents are merge-imported** — matching tables and columns take over the identity of the current diagram's elements, so the named-query definitions and hand-placed layout are preserved and no auto-arrange runs. The confirmation before a replacement is not unconditional: when the current diagram is empty, or its structure is identical to what is being imported, the import continues without asking.
 
 ### DBML (.dbml)
 
-Imports DBML consisting of `Table` blocks and `Ref:` lines. The supported range is the subset that round-trips with QuickER's DBML export.
+Imports DBML consisting of `Table` blocks and `Ref:` lines. The supported syntax is the subset that QuickER's DBML export writes: the syntax round-trips, but the column mapping of relationships is not guaranteed to (see the export section below).
 
 - Column settings: `pk` / `ref` / `null` / `not null` / `note: '...'`
 - Relationships: `-` (one-to-one), `<` (one-to-many), and `<>` (many-to-many) on `Ref:` lines. `>` (many-to-one) is not supported
@@ -41,9 +41,9 @@ Definition documents exported by QuickER can be re-imported. Sheet roles are ide
 
 ### C# code (.cs)
 
-From the "Import Code" button on the code-generation toolbar, choose a main `.g.cs` that QuickER generated **with `IncludeDataAnnotations` ON**; the diagram is recovered using Roslyn syntax analysis only (no compilation, no assembly loading) and merge-imported into the current diagram. Only classes carrying the `[Table]` / `[Column]` / `[Key]` / `[Required]` / `[DbColumnMeta]` / `[DbTableMeta]` / `[NavigationReference]` attributes are considered; infrastructure classes such as repositories and hand-written POCOs are ignored (when no eligible class is found, an error suggests choosing the main generated `.g.cs`).
+From the "Import Code" button on the code-generation toolbar, choose a main `.g.cs` that QuickER generated **with `IncludeDataAnnotations` ON**; the diagram is recovered using Roslyn syntax analysis only (no compilation, no assembly loading) and merge-imported into the current diagram. Only classes that carry `[Table]` **and** have at least one column property carrying `[DbColumnMeta]` are considered; infrastructure classes such as Repository and hand-written POCOs are ignored (when no eligible class is found, an error suggests choosing the main generated `.g.cs`). The table name comes from `[Table]` and the column name from `[Column]`, the column type and description from `[DbColumnMeta]`, the table description from `[DbTableMeta]`, the primary key from `[Key]`, the nullability from whether the property type is `?` (`[Required]` is not used at all), and the relationships from `[NavigationReference]`. A column property without `[DbColumnMeta]` is skipped with a warning.
 
-Column types are expanded from the dialect-neutral tokens into the current diagram's native types (tokens that cannot be expanded are adopted as-is with a warning). **Because the code is dialect-neutral, the diagram's target DB stays as it was before the import.** Many-to-many relationships, `ON DELETE` / `ON UPDATE`, and FK constraint names do not exist in code, so a merge import into an existing diagram preserves, from the current diagram, the referential actions and constraint names of relationships whose endpoints (table and column names on both ends) match, as well as many-to-many relationships whose both ends survive (ordinary relationships that disappeared from the code disappear from the diagram too). As with the other imports, a replacement confirmation appears when there are structural differences or named queries that would break.
+Column types are expanded from the dialect-neutral tokens into the current diagram's native types (tokens that cannot be expanded are adopted as-is with a warning). **Because the code is dialect-neutral, the diagram's target DB stays as it was before the import.** Many-to-many relationships, `ON DELETE` / `ON UPDATE`, and FK constraint names do not exist in code, so a merge import into an existing diagram preserves, from the current diagram, the referential actions and constraint names of relationships whose endpoints (table and column names on both ends) match, as well as many-to-many relationships whose two endpoints both survive (ordinary relationships that disappeared from the code disappear from the diagram too). As with the other imports, a replacement confirmation appears when there are structural differences or named queries that would break.
 
 The CLI's `quicker reverse` writes a fresh, merge-free diagram (schema-only JSON) using the same analysis (see the [CLI reference](cli.md)).
 
@@ -57,7 +57,7 @@ Outputs the full set of CREATE statements in the diagram's target dialect.
 
 ### DBML / Mermaid
 
-Writes out the text formats. The DBML output is the same subset as the import above (`Table` blocks + `Ref:` lines), and the written file re-imports as-is. Useful for working with DBML tools such as dbdiagram.org, and with GitHub and documentation tools that render Mermaid.
+Writes out the text formats. The DBML output is the same subset as the import above (`Table` blocks + `Ref:` lines), and the written file can be re-imported — though what round-trips is the syntax, not necessarily the relationships' column mapping: the importer does not use the column names on a `Ref:` line to restore the endpoints but re-infers them, so the columns a relationship connects can come back different (for instance when the same pair of tables has several foreign keys). Useful for working with DBML tools such as dbdiagram.org, and with GitHub and documentation tools that render Mermaid.
 
 ### Excel definition documents (.xlsx)
 
@@ -67,15 +67,15 @@ Outputs a definition document consisting of a table list, a relationship list, a
 
 Outputs a self-contained single HTML file with no external references and no JavaScript. It consists of a sidebar navigation, an overview (target DBMS, table count, relationship count), a table list, a relationship list (including ON DELETE / ON UPDATE), and per-table details. It can be viewed with nothing but a browser, which makes it a good handout for non-developer stakeholders.
 
-Fix the diagram and re-export the documents, and they are up to date again — avoiding the state where "only the documentation is stale."
+Fix the diagram and re-export the documents, and they are up to date again — build the re-export into your workflow and the state where "only the documentation is stale" becomes much easier to avoid.
 
 ### Schema JSON (.json)
 
-Outputs a JSON (`{ version, schema }`) containing only the schema definition and the named-query definitions — the save format (see [ER diagram editing](er-editor.md)) minus the layout information (coordinates, colors, and so on). With no layout, the diff stays stable, which suits reviewing and versioning the table definitions themselves. The file can be loaded with "Open" in QuickER; having no layout, the whole diagram is auto-arranged (so the format is reversible). Use it, separately from a normal save (a `.json` with layout), when you want to share just the schema without layout churn.
+Outputs a JSON (`{ "Version": 1, "Schema": { ... } }` — the keys start with an uppercase letter and are case-sensitive) containing only the schema definition and the named-query definitions — the save format (see [ER diagram editing](er-editor.md)) minus the layout information (coordinates, colors, and so on). With no layout, the diff stays stable, which suits reviewing and versioning the table definitions themselves. The file can be loaded with "Open" in QuickER; having no layout, the whole diagram is auto-arranged (the schema and the named-query definitions round-trip, but the coordinates and colors are not restored). Use it, separately from a normal save (a `.json` with layout), when you want to share just the schema without layout churn.
 
 ### PNG / SVG (images)
 
-Outputs the whole diagram as an image, unaffected by the on-screen zoom state or selection display.
+Outputs the whole diagram as an image. Neither format is affected by the on-screen zoom level. SVG is drawn directly from the diagram's model, so it contains no selection frames or grid background; PNG rasterizes the canvas as it is drawn, so the selection state (selection frames and the dimming from relationship highlighting) and the grid background are captured as well. Clearing the selection before exporting a PNG is recommended.
 
 ### Print / PDF
 
