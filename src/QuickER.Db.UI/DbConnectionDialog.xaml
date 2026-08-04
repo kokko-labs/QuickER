@@ -322,11 +322,12 @@
       HorizontalAlignment="Right"
       Margin="0,8,0,0"
     >
+      <!-- 接続テストは入力検証の補助アクション。強調（PrimaryButton）は主アクションの OK だけに与える -->
       <Button
         Content="{x:Static resources:Strings.DbConnection_TestConnection}"
         MinWidth="100"
         Margin="0,0,8,0"
-        Style="{StaticResource PrimaryButton}"
+        Style="{StaticResource SecondaryButton}"
         Command="{Binding TestConnectionCommand}"
       />
       <Button
