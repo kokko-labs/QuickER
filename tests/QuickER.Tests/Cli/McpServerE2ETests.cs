@@ -260,9 +260,31 @@ public class McpServerE2ETests
         {
             await client.DisposeAsync();
 
-            if (Directory.Exists(workDir))
+            // サーバープロセス（WorkingDirectory=workDir を掴んでいる）の終了と OS のハンドル解放は
+            // 非同期のため、直後の一括削除は稀に競合で負ける（CI の遅いランナーで顕在化・2026-08-02 の CI 失敗）。
+            // 短いリトライで解放を待ち、それでも消せなければ放置する（一時フォルダはランナー側で回収される。
+            // 検証本体が通ったテストを後始末の失敗で赤にしない）
+
+            for (var attempt = 0; attempt < 5; attempt++)
             {
-                Directory.Delete(workDir, recursive: true);
+                try
+                {
+                    if (Directory.Exists(workDir))
+                    {
+                        Directory.Delete(workDir, recursive: true);
+                    }
+
+                    break;
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    if (attempt == 4)
+                    {
+                        break;
+                    }
+
+                    await Task.Delay(200);
+                }
             }
         }
     }
