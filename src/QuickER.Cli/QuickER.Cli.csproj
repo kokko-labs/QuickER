@@ -47,6 +47,13 @@
     </Compile>
   </ItemGroup>
 
+  <!-- ツールパッケージへ .pdb を同梱しない（配布サイズ削減。参照プロジェクト分を含む全 .pdb を publish 収集から除外する） -->
+  <Target Name="ExcludePdbsFromToolPackage" AfterTargets="ComputeFilesToPublish">
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)" Condition="'%(ResolvedFileToPublish.Extension)' == '.pdb'" />
+    </ItemGroup>
+  </Target>
+
   <ItemGroup>
     <ProjectReference Include="..\QuickER.Document\QuickER.Document.csproj" />
     <ProjectReference Include="..\QuickER.CodeGen.CSharp\QuickER.CodeGen.CSharp.csproj" />

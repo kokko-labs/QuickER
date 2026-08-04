@@ -47,13 +47,15 @@ jobs:
       - name: パッケージ生成（ランタイム4種+CLI）
         # 上の「ビルド」ステップは Debug 構成だが、dotnet pack は .NET 8 以降の SDK 既定で
         # Release を対象にするため --no-build だと Release バイナリ不在で失敗する（NU5026）。
-        # ここでは pack に事前ビルドをさせる（-c Release 明示・ci.yml の同名ステップと同じ規約）
+        # ここでは pack に事前ビルドをさせる（-c Release 明示・ci.yml の同名ステップと同じ規約）。
+        # ContinuousIntegrationBuild=true はソースパスを /_/ へ正規化し、配布バイナリに
+        # ビルドマシンのパス情報を一切残さないための決定的ビルド指定
         run: |
-          dotnet pack src/QuickER.Runtime/QuickER.Runtime.csproj -c Release --output ${{ runner.temp }}/nupkg
-          dotnet pack src/QuickER.Runtime.SqlServer/QuickER.Runtime.SqlServer.csproj -c Release --output ${{ runner.temp }}/nupkg
-          dotnet pack src/QuickER.Runtime.Sqlite/QuickER.Runtime.Sqlite.csproj -c Release --output ${{ runner.temp }}/nupkg
-          dotnet pack src/QuickER.Runtime.EntityFrameworkCore/QuickER.Runtime.EntityFrameworkCore.csproj -c Release --output ${{ runner.temp }}/nupkg
-          dotnet pack src/QuickER.Cli/QuickER.Cli.csproj -c Release --output ${{ runner.temp }}/nupkg
+          dotnet pack src/QuickER.Runtime/QuickER.Runtime.csproj -c Release -p:ContinuousIntegrationBuild=true --output ${{ runner.temp }}/nupkg
+          dotnet pack src/QuickER.Runtime.SqlServer/QuickER.Runtime.SqlServer.csproj -c Release -p:ContinuousIntegrationBuild=true --output ${{ runner.temp }}/nupkg
+          dotnet pack src/QuickER.Runtime.Sqlite/QuickER.Runtime.Sqlite.csproj -c Release -p:ContinuousIntegrationBuild=true --output ${{ runner.temp }}/nupkg
+          dotnet pack src/QuickER.Runtime.EntityFrameworkCore/QuickER.Runtime.EntityFrameworkCore.csproj -c Release -p:ContinuousIntegrationBuild=true --output ${{ runner.temp }}/nupkg
+          dotnet pack src/QuickER.Cli/QuickER.Cli.csproj -c Release -p:ContinuousIntegrationBuild=true --output ${{ runner.temp }}/nupkg
 
       - name: 生成物一覧を表示
         run: Get-ChildItem "${{ runner.temp }}/nupkg" -Recurse

@@ -90,7 +90,8 @@ try {
             Remove-Item $publishDir -Recurse -Force
         }
 
-        dotnet publish src/QuickER.Gui/QuickER.Gui.csproj -c Release -r win-x64 --self-contained $selfContained -o $publishDir
+        # ContinuousIntegrationBuild=true は release.yml と同じ決定的ビルド指定（ソースパスを /_/ へ正規化＝ビルドマシンのパスを配布物に残さない）
+        dotnet publish src/QuickER.Gui/QuickER.Gui.csproj -c Release -r win-x64 --self-contained $selfContained -p:ContinuousIntegrationBuild=true -o $publishDir
 
         if ($LASTEXITCODE -ne 0) {
             throw "publish に失敗しました（exit $LASTEXITCODE）"

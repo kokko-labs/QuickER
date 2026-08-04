@@ -53,11 +53,13 @@ jobs:
           "version=$version" >> $env:GITHUB_OUTPUT
           Write-Host "Version: $version"
 
+      # ContinuousIntegrationBuild=true はソースパスを /_/ へ正規化し、
+      # 配布バイナリにビルドマシンのパス情報を一切残さないための決定的ビルド指定
       - name: GUI を publish（self-contained・win-full 用）
-        run: dotnet publish src/QuickER.Gui/QuickER.Gui.csproj -c Release -r win-x64 --self-contained true -o ${{ runner.temp }}/publish-full
+        run: dotnet publish src/QuickER.Gui/QuickER.Gui.csproj -c Release -r win-x64 --self-contained true -p:ContinuousIntegrationBuild=true -o ${{ runner.temp }}/publish-full
 
       - name: GUI を publish（フレームワーク依存・win-lite 用）
-        run: dotnet publish src/QuickER.Gui/QuickER.Gui.csproj -c Release -r win-x64 --self-contained false -o ${{ runner.temp }}/publish-lite
+        run: dotnet publish src/QuickER.Gui/QuickER.Gui.csproj -c Release -r win-x64 --self-contained false -p:ContinuousIntegrationBuild=true -o ${{ runner.temp }}/publish-lite
 
       # PolyForm NC の Notices 条項（条文をコピーの受領者へ渡す義務）と Oracle Free Distribution Terms
       # （ライセンス全文の同梱が配布条件）に対応するため、ライセンス文書（条文 2 種＋解説ガイド英日＋
