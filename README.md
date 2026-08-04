@@ -8,24 +8,26 @@
 
 ## Design once. Generate the rest.
 
-**Your ER model as the single source of truth for the database, source code, and design documents.**
+**Make the ER model the single source of truth for your database, source code, and design documents**
 
-QuickER is a Windows tool that supports .NET development of business applications. It provides a GUI designer for ER diagrams, bidirectional synchronization with live databases, and AI integration, all centered on the ER model.
+QuickER is a Windows tool for building .NET business applications around an ER model.
+QuickER lets you create and edit ER models through its GUI or AI chat, and bidirectionally synchronize schema changes with live databases.
 
-From a reviewed ER model, QuickER generates the DDL, database diff scripts, C# code, remote APIs, screen mockups, and table definition documents. There is no need to copy the same schema definition into the DDL, entities, screen models, and design documents over and over.
+QuickER generates DDL, C# code, screen mockups, and table definition documents from the ER model.
+This reduces the work of copying the same schema into entity classes, UI models, and design documents, helping keep diagrams and implementation in sync.
+
+**No more stale diagrams. No more duplicated definitions.**
 
 ![QuickER main screen (the EC order sample ER model)](docs/images/sample-ec-order.png)
 
+- Schema import and diff sync from live databases
 - Supports SQL Server / PostgreSQL / MySQL / Oracle / SQLite
 - Generates C# code (Entity / EditModel / Mapper / ValueObject / Repository)
-- Schema import and diff sync from live databases
 - Creates and edits ER models through AI chat, plus AI mock-screen generation
-- Integrates with AI agents (Claude Code, Codex, etc.) via an MCP server
+- Integrates with AI agents via an MCP server (Claude Code, Codex, etc.) 
 - Import/export with DBML / Mermaid / Excel definition documents
 - A git-friendly JSON save format
 - Available from both the GUI and the CLI
-
-> **No more stale diagrams. No more duplicated definitions.**
 
 ## Quick start
 

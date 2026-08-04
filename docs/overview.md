@@ -4,7 +4,7 @@
 
 QuickER is a Windows tool that supports .NET development of business applications.
 It provides a GUI designer for ER diagrams, bidirectional synchronization with databases, and AI integration, all centered on the ER model.
-From that model, QuickER can generate DDL, database diff scripts, C# code, remote APIs, screen mockups, table definition documents, and more.
+From that model, QuickER can generate DDL, C# code, screen mockups, table definition documents, and more.
 
 Why make the ER model, rather than the code or the database, the source of truth?
 

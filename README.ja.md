@@ -8,24 +8,26 @@
 
 ## Design once. Generate the rest.
 
-**ER モデルを、データベース・ソースコード・設計ドキュメントの single source of truth に。**
+**ER モデルを、データベース、ソースコード、設計ドキュメントの正本（*Single Source of Truth*）に**
 
-QuickER は、業務アプリケーションの .NET 開発を支援する Windows 用ツールです。ER 図の GUI デザイナー、実データベースとの相互反映、AI 連携を備え、ER モデルを中心に据えた開発ができます。
+QuickER は、ER モデルを軸に .NET で業務アプリケーションを開発するための Windows 用 ツールです。
+GUI や AI チャットで ER モデルを作成・編集し、データベースとの間でスキーマの変更を相互に反映できます。
 
-レビューした ER モデルから、DDL、DB 差分スクリプト、C# コード、リモート API、画面モック、テーブル定義書を生成できます。同じスキーマ定義を DDL、エンティティ、画面用モデル、設計書へ何度も書き写す必要はありません。
+作成した ER モデルから DDL、C# コード、画面モック、テーブル定義書などを生成します。
+同じスキーマをエンティティクラス、UI 用モデル、設計書へ書き写す作業が減り、図と実装のずれも抑えやすくなります。
+
+**ER 図の更新漏れも、スキーマ定義の重複も、もうなくしましょう。**
 
 ![QuickER メイン画面（EC 注文サンプルの ER モデル）](docs/images/sample-ec-order.ja.png)
 
+- 実データベースからのスキーマ取込と差分同期
 - SQL Server / PostgreSQL / MySQL / Oracle / SQLite に対応
 - C# コードを生成（Entity / EditModel / Mapper / ValueObject / Repository）
-- 実データベースからのスキーマ取込と差分同期
 - AI チャットによる ER モデルの生成・編集と画面モック生成
-- MCP サーバによる AI エージェント（Claude Code・Codex 等）連携
+- MCP サーバによる AI エージェント連携（Claude Code・Codex 等）
 - DBML / Mermaid / Excel 定義書との入出力
 - git で差分を管理できる JSON 保存形式
 - GUI と CLI の両方から利用可能
-
-> **No more stale diagrams. No more duplicated definitions.**
 
 ## クイックスタート
 
@@ -56,8 +58,6 @@ dotnet run --project samples/ec-order/EcOrderSample
 ...
 All scenarios succeeded.
 ```
-
-サンプルのコード・コメント・出力は英語です（生成コードの固定文が英語のため、それに合わせています）。
 
 サンプルには、次のファイルが含まれています。
 
