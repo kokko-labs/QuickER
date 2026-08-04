@@ -1,6 +1,6 @@
 # QuickER.Cli
 
-The command-line tool for QuickER (a Windows ER diagram designer that connects AI-assisted visual ER design × multi-DB round-tripping × C# code generation end to end). Without the GUI, it can generate C# code from an ER diagram JSON (`generate`), scaffold directly from a database (`scaffold`), and reverse a generated C# file back into an ER diagram JSON (`reverse`).
+The command-line tool for QuickER (a Windows ER diagram designer that connects AI-assisted visual ER design × multi-DB round-tripping × C# code generation end to end). Without the GUI, it can generate C# code from an ER diagram JSON (`generate`), scaffold directly from a database (`scaffold`), reverse a generated C# file back into an ER diagram JSON (`reverse`), and host a stdio MCP server that exposes ER diagram editing and code generation to AI agents (`mcp`).
 
 ## Install
 
@@ -19,9 +19,12 @@ quicker scaffold --connection "Server=.;Database=Shop;Integrated Security=true;T
 
 # A C# file generated with IncludeDataAnnotations ON → a schema-only ER diagram JSON (no layout key)
 quicker reverse --source ./Generated/Model.g.cs --out diagram.json --provider sqlserver
+
+# Stdio MCP server for AI agents (Claude Code, Codex, ...) — diagram editing / named queries / code generation
+quicker mcp
 ```
 
-`reverse` parses a main `.g.cs` generated with `IncludeDataAnnotations` ON with Roslyn (syntax only; no compilation) and restores the ER diagram from the `[Table]` / `[Column]` / `[Key]` / `[Required]` / `[DbColumnMeta]` / `[DbTableMeta]` / `[NavigationReference]` attributes. Column types are expanded from the dialect-neutral type token into the `--provider` dialect's native type. Many-to-many relationships, `ON DELETE` / `ON UPDATE` actions, and FK constraint names are not present in the code, so a fresh diagram uses the defaults (import into an existing diagram in the GUI preserves them).
+`reverse` parses a main `.g.cs` generated with `IncludeDataAnnotations` ON with Roslyn (syntax only; no compilation) and restores the ER diagram from the `[Table]` / `[Column]` / `[Key]` / `[DbColumnMeta]` / `[DbTableMeta]` / `[NavigationReference]` attributes. Column types are expanded from the dialect-neutral type token into the `--provider` dialect's native type. Many-to-many relationships, `ON DELETE` / `ON UPDATE` actions, and FK constraint names are not present in the code, so a fresh diagram uses the defaults (import into an existing diagram in the GUI preserves them).
 
 Main options:
 
@@ -35,7 +38,7 @@ Main options:
 | `--generate-api-docs` | Additionally output an API reference Markdown (`{base name}.g.md`, English canonical) |
 | `--api-docs-ja` | Also output the Japanese API reference Markdown (`{base name}.ja.g.md`; requires `--generate-api-docs`) |
 
-Every settings-file key is also available as a same-named kebab-case flag that overrides the settings file (priority: CLI flag &gt; settings file &gt; default; bool flags are three-valued: `--flag` / `--flag false`).
+Every settings-file key is also available as a same-named kebab-case flag that overrides the settings file (priority: CLI flag > settings file > default). Bool flags take three states: `--flag` (true), `--flag false`, and omitted (the settings file or the default applies).
 
 For the detailed CLI reference, how to use the generated code, and a working sample, see the repository documentation:
 
@@ -43,6 +46,13 @@ https://github.com/kokko-labs/QuickER
 
 ## License
 
-PolyForm Noncommercial 1.0.0 (the LICENSE-NC.md bundled with the package). **It is currently free for everyone, including commercial use.** Future versions may introduce paid licensing for some features (basic generation—Entity / EditModel / Mapper—remains permanently free including commercial use / personal and non-commercial use of the existing features remains free / rights granted for a released version are never withdrawn retroactively / any move to paid licensing will be announced in advance, with a transition period for existing users). For details, see LICENSING.md in the repository.
+PolyForm Noncommercial 1.0.0 **plus additional grants** (the LICENSE-NC.md bundled with the package). Thanks to those grants, **current releases are free for everyone, including commercial use.** Future versions may introduce paid licensing for some features; four standing commitments limit what can change:
+
+- Basic generation (Entity / EditModel / Mapper) remains free permanently, including commercial use.
+- Personal and non-commercial use of the existing features remains free.
+- Rights granted for a released version are never withdrawn retroactively.
+- Any move to paid licensing will be announced in advance, with a transition period for existing users.
+
+For details, see LICENSING.md in the repository.
 
 **Code that the CLI generates (including the inlined runtime portion) is your work product**, and you may use, modify, and distribute it freely with no license restrictions.

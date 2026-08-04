@@ -10,10 +10,10 @@ Use it together with a dialect engine (`QuickER.Runtime.SqlServer` / `QuickER.Ru
 
 ## Version compatibility
 
-The package version is published in lockstep with the QuickER tool version (identical version) and is compatible within the same major version.
+The package version is published in lockstep with the QuickER tool version (identical version) — reference the same version as the tool that generated your code. During 0.x, minor version bumps may include breaking changes (see the versioning policy in the repository's CONTRIBUTING.md).
 
 ## License
 
-MIT License. Together with the code that QuickER generates, you may use, modify, and distribute it with no restrictions.
+MIT License (the package itself). The code that QuickER generates for you is your own work product, with no license obligations at all.
 
 Details: https://github.com/kokko-labs/QuickER

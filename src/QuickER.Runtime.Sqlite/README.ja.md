@@ -2,7 +2,7 @@
 
 *[English](README.md) | 日本語*
 
-QuickER（ER 図デザイナ）が生成する C# コードのランタイムのうち、QuickER 版 Repository の **SQLite 方言エンジン**です。`QuickER.Runtime` の方言中立契約を SQLite（マルチクエリの IncludeLoader・`LIMIT/OFFSET`・`strftime` など）で実装します。依存は `Microsoft.Data.Sqlite`（と脆弱性修正版 SQLitePCLRaw のピン）のみです。
+QuickER（ER 図デザイナ）が生成する C# コードのランタイムのうち、QuickER 版 Repository の **SQLite 方言エンジン**です。`QuickER.Runtime` の方言中立契約を SQLite（マルチクエリの IncludeLoader・`LIMIT/OFFSET`・`strftime` など）で実装します。依存は `Microsoft.Data.Sqlite`（とピン留めした SQLitePCLRaw）のみです。
 
 ## 使いどき
 
@@ -12,10 +12,10 @@ DI 登録拡張（`AddGeneratedSqliteRepositories` など）はスキーマ依�
 
 ## バージョン互換
 
-パッケージ版は QuickER ツール版とロックステップ（同一バージョン）で公開され、同一メジャー内で互換です。
+パッケージ版は QuickER ツール版とロックステップ（同一バージョン）で公開されます。コードを生成したツールと同一バージョンを参照してください。0.x の間は minor 更新にも破壊的変更が含まれることがあります（リポジトリの CONTRIBUTING.ja.md のバージョニング方針を参照）。
 
 ## ライセンス
 
-MIT License。QuickER が生成したコードとあわせて、制限なく利用・改変・配布できます。
+MIT License（パッケージ自体に適用）。QuickER が生成したコードはあなたの成果物であり、ライセンス上の義務は一切ありません。
 
 詳細: https://github.com/kokko-labs/QuickER
